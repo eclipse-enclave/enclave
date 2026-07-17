@@ -1,0 +1,4 @@
+schemaVersion: "1"
+kind: mixin
+name: demo-mixin
+description: Minimal spec.yaml mixin fixture for LoadFeatureExtension tests.

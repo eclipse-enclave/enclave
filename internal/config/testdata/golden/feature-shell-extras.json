@@ -1,0 +1,10 @@
+{
+  "type": "mixin",
+  "name": "shell-extras",
+  "description": "Enhanced shell experience (zsh, oh-my-zsh)",
+  "apt_packages": [
+    "zsh",
+    "bash-completion"
+  ],
+  "priority": 90
+}

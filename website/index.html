@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<!--
+  Copyright (C) 2026 EclipseSource GmbH and others.
+
+  This program and the accompanying materials are made available under the
+  terms of the MIT License, which is available in the project root.
+
+  SPDX-License-Identifier: MIT
+-->
+
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Eclipse Enclave: secure sandboxing for AI coding agents</title>
+<meta name="description" content="Eclipse Enclave runs AI coding agents inside isolated containers with a network policy you control. Full autonomy, safely contained.">
+<link rel="icon" type="image/png" href="assets/appicon.png">
+<meta property="og:title" content="Eclipse Enclave: secure sandboxing for AI coding agents">
+<meta property="og:description" content="Run AI coding agents at full autonomy inside isolated containers with network allowlists.">
+<meta property="og:type" content="website">
+<meta property="og:image" content="assets/appicon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+
+<!-- Nav. Internal links are relative so the site survives the domain change.
+     The external GitHub link points at the current repo and moves with it. -->
+<nav class="nav">
+  <div class="nav-inner">
+    <a class="nav-brand" href="./">
+      <img src="assets/appicon.png" alt="">
+      Eclipse Enclave
+    </a>
+    <div class="nav-links">
+      <a href="#solution" class="hide-sm">Solution</a>
+      <a href="#how" class="hide-sm">How it works</a>
+      <a href="#features" class="hide-sm">Features</a>
+      <a href="docs/">Docs</a>
+      <a href="https://github.com/eclipse-enclave/enclave">GitHub</a>
+    </div>
+  </div>
+</nav>
+
+<!-- Hero -->
+<header class="hero">
+  <img class="logo" src="assets/appicon.png" alt="Eclipse Enclave logo">
+  <h1>Full agent autonomy,<br><span class="grad">safely contained.</span></h1>
+  <p class="tagline">Eclipse Enclave runs AI coding agents inside isolated containers.
+    Each session works on the checkout you point it at, with a network policy you control.</p>
+  <div class="hero-actions">
+    <a class="btn btn-primary" href="docs/getting-started/">Get started</a>
+    <a class="btn btn-ghost" href="https://github.com/eclipse-enclave/enclave">View on GitHub</a>
+  </div>
+  <div class="badges">
+    <span class="badge open-source">Open source</span>
+    <span class="badge">MIT license</span>
+    <span class="badge">Docker-based</span>
+    <span class="badge">CLI</span>
+  </div>
+</header>
+
+<main>
+
+  <!-- Problem -->
+  <section id="problem">
+    <div class="container">
+      <h2>The <span class="highlight">problem</span></h2>
+      <p class="section-lead">Agents do their best work when they can act without asking. The
+        same permissions that make that possible are what make an agent dangerous on your
+        machine.</p>
+      <div class="grid-2">
+        <div class="card">
+          <h3>Agents want broad system access</h3>
+          <p>A coding agent is far more useful when it can run commands, install packages, and
+            edit files on its own, without a confirmation prompt at every step.</p>
+        </div>
+        <div class="card">
+          <h3>Broad access on your host is risky</h3>
+          <p>An agent with that much freedom can delete the wrong files, leak a secret, act on a
+            prompt injection, or trip over another agent running next to it.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Solution -->
+  <section id="solution" class="section-alt">
+    <div class="container">
+      <h2>The <span class="highlight">solution</span></h2>
+      <p class="section-lead">Eclipse Enclave puts each agent session in its own Docker container,
+        behind a gateway that only lets through traffic you allow.</p>
+      <div class="grid-2">
+        <div class="card">
+          <span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21 8-9-5-9 5v8l9 5 9-5V8Z"/><path d="m3 8 9 5 9-5"/><path d="M12 13v8"/></svg></span>
+          <h3>Isolated by the OS</h3>
+          <p>Each session runs in its own container with a separate filesystem and network stack.
+            Only what you mount in — typically the project worktree — is shared with the host.</p>
+        </div>
+        <div class="card">
+          <span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2.6"/><circle cx="6" cy="18" r="2.6"/><circle cx="18" cy="8" r="2.6"/><path d="M6 8.6v6.8"/><path d="M18 10.6c0 3.2-3.4 4.4-6 4.4"/></svg></span>
+          <h3>Separate worktrees</h3>
+          <p>Run each parallel agent in its own git worktree — plain git, no extra setup — so
+            their changes never collide. You review and merge on your own terms.</p>
+        </div>
+        <div class="card">
+          <span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 5 6v5c0 4.4 3 7.4 7 9 4-1.6 7-4.6 7-9V6l-7-3Z"/></svg></span>
+          <h3>Network you control</h3>
+          <p>With the default Docker backend, a sidecar gateway filters DNS and proxies outbound
+            traffic, so an agent only reaches the domains on your allowlist. Everything else is
+            blocked and logged.</p>
+        </div>
+        <div class="card">
+          <span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 4v5h-5"/></svg></span>
+          <h3>Sessions that persist</h3>
+          <p>Start, pause, resume, and inspect a session whenever you want. Its auth, config, and
+            history stay put across restarts.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- How it works -->
+  <section id="how" class="diagram-section">
+    <div class="container">
+      <h2>How it works</h2>
+      <div class="diagram-wrap">
+        <svg viewBox="0 0 720 256" xmlns="http://www.w3.org/2000/svg" font-family="Inter, system-ui, sans-serif" role="img" aria-label="Eclipse Enclave overview: the developer starts a session in an isolated Docker container whose traffic passes through a filtering gateway">
+          <defs>
+            <marker id="a" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><polygon points="0 0, 7 3, 0 6" fill="#9aa2b1"/></marker>
+            <marker id="a-ac" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><polygon points="0 0, 7 3, 0 6" fill="#4f46e5"/></marker>
+            <marker id="a-am" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><polygon points="0 0, 7 3, 0 6" fill="#b45309"/></marker>
+          </defs>
+
+          <!-- Developer -->
+          <rect x="14" y="98" width="112" height="56" rx="12" fill="#eef1fe" stroke="#c7d0fc" stroke-width="1.5"/>
+          <text x="70" y="122" text-anchor="middle" font-size="12.5" font-weight="700" fill="#3730a3">Developer</text>
+          <text x="70" y="139" text-anchor="middle" font-size="9.5" fill="#7a8291">CLI</text>
+          <line x1="126" y1="126" x2="192" y2="126" stroke="#4f46e5" stroke-width="1.6" marker-end="url(#a-ac)"/>
+          <text x="159" y="118" text-anchor="middle" font-size="9" fill="#7a8291">manage</text>
+
+          <!-- Container -->
+          <rect x="196" y="30" width="250" height="196" rx="14" fill="#ffffff" stroke="#4f46e5" stroke-width="1.8"/>
+          <text x="321" y="52" text-anchor="middle" font-size="11.5" font-weight="800" letter-spacing="0.06em" fill="#4f46e5">CONTAINER</text>
+          <rect x="216" y="66" width="210" height="52" rx="10" fill="#eef1fe" stroke="#c7d0fc"/>
+          <text x="321" y="88" text-anchor="middle" font-size="12" font-weight="700" fill="#14181f">AI coding agent</text>
+          <text x="321" y="105" text-anchor="middle" font-size="9.5" fill="#5b6472">Claude · Codex · Gemini · …</text>
+          <rect x="216" y="128" width="210" height="34" rx="8" fill="#f7f8fa" stroke="#e6e8ec"/>
+          <text x="321" y="150" text-anchor="middle" font-size="10.5" fill="#14181f">Mounted git worktree</text>
+          <text x="321" y="184" text-anchor="middle" font-size="9.5" fill="#7a8291">Default Docker backend</text>
+          <text x="321" y="200" text-anchor="middle" font-size="9.5" fill="#7a8291">Isolated filesystem and network</text>
+
+          <!-- to gateway -->
+          <line x1="446" y1="98" x2="512" y2="98" stroke="#b45309" stroke-width="1.6" marker-end="url(#a-am)"/>
+          <text x="479" y="90" text-anchor="middle" font-size="9" fill="#7a8291">all traffic</text>
+
+          <!-- Gateway -->
+          <rect x="512" y="30" width="192" height="128" rx="14" fill="#ffffff" stroke="#b45309" stroke-width="1.8"/>
+          <text x="608" y="52" text-anchor="middle" font-size="11.5" font-weight="800" letter-spacing="0.06em" fill="#b45309">GATEWAY</text>
+          <rect x="528" y="64" width="160" height="34" rx="8" fill="#fef6e7" stroke="#f3d79a"/>
+          <text x="608" y="86" text-anchor="middle" font-size="10.5" fill="#7a5b16">DNS allowlist</text>
+          <rect x="528" y="108" width="160" height="34" rx="8" fill="#fef6e7" stroke="#f3d79a"/>
+          <text x="608" y="130" text-anchor="middle" font-size="10.5" fill="#7a5b16">Transparent proxy</text>
+
+          <!-- outputs -->
+          <line x1="570" y1="158" x2="570" y2="190" stroke="#059669" stroke-width="1.5" marker-end="url(#a)"/>
+          <line x1="646" y1="158" x2="646" y2="190" stroke="#dc2626" stroke-width="1.5" marker-end="url(#a)"/>
+          <rect x="512" y="192" width="94" height="40" rx="20" fill="#ecfdf5" stroke="#a7f3d0"/>
+          <text x="559" y="216" text-anchor="middle" font-size="10.5" font-weight="600" fill="#059669">Allowed</text>
+          <rect x="610" y="192" width="94" height="40" rx="20" fill="#fef2f2" stroke="#fecaca"/>
+          <text x="657" y="216" text-anchor="middle" font-size="10.5" font-weight="600" fill="#dc2626">Blocked</text>
+        </svg>
+      </div>
+      <p class="diagram-caption">In the default Docker setup, each session runs in its own
+        container behind a gateway that filters and logs its network traffic. The experimental
+        QEMU microVM backend runs without the gateway and is unrestricted.</p>
+    </div>
+  </section>
+
+  <!-- Quickstart -->
+  <section id="quickstart" class="section-alt">
+    <div class="container">
+      <h2>Up and running in <span class="highlight">seconds</span></h2>
+      <p class="section-lead">Point Enclave at a project. It builds the environment and starts
+        your agent in a container on your current checkout.</p>
+      <div class="cli-block">
+<span class="comment"># Start the default agent in an isolated container</span><br>
+<span class="cmd">enclave</span><br><br>
+<span class="comment"># Pick a specific agent</span><br>
+<span class="cmd">enclave</span> <span class="flag">--tool</span> codex<br><br>
+<span class="comment"># Resume a previous session</span><br>
+<span class="cmd">enclave</span> continue<br><br>
+<span class="comment"># List active sessions</span><br>
+<span class="cmd">enclave</span> ps
+      </div>
+      <div class="hero-actions" style="justify-content:flex-start;margin-top:26px;margin-bottom:0;">
+        <a class="btn btn-primary" href="docs/getting-started/">Read the getting started guide</a>
+      </div>
+    </div>
+  </section>
+
+
+  <!-- Features -->
+  <section id="features" class="section-alt">
+    <div class="container">
+      <h2>Features</h2>
+      <div class="features-grid">
+        <div class="feature-col">
+          <h3>Supported agents</h3>
+          <ul>
+            <li>Claude Code (Anthropic)</li>
+            <li>Codex CLI (OpenAI)</li>
+            <li>Gemini CLI (Google)</li>
+            <li>Theia AI, OpenCode, and more</li>
+          </ul>
+        </div>
+        <div class="feature-col">
+          <h3>Command line</h3>
+          <ul>
+            <li><code>enclave</code> starts the default agent</li>
+            <li><code>enclave --tool codex</code> picks an agent</li>
+            <li><code>enclave continue</code> resumes a session</li>
+            <li><code>enclave ps</code> lists active sessions</li>
+          </ul>
+        </div>
+        <div class="feature-col">
+          <h3>Configuration</h3>
+          <ul>
+            <li>Custom skills and agent templates</li>
+            <li>Mount extra directories such as docs or related projects</li>
+            <li>Devcontainer support for existing setups</li>
+            <li>Per-tool and per-project overrides</li>
+          </ul>
+        </div>
+        <div class="feature-col">
+          <h3>Networking</h3>
+          <ul>
+            <li>Domain allowlists</li>
+            <li>Per-tool and per-project policies</li>
+            <li>Bridge host services into containers</li>
+            <li>DNS and request logging</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Compliance -->
+  <section id="compliance">
+    <div class="container">
+      <h2>Compliance and audit readiness</h2>
+      <div class="compliance-card">
+        <h3>A foundation you can audit</h3>
+        <p>Container isolation, network allowlists, and gateway logs already limit what a
+          misaligned or injected agent can do, and they leave an evidence trail you can inspect:
+          in restricted Docker sessions, DNS queries and proxied requests are logged, and
+          access outside the allowlist is blocked. That same foundation can grow toward
+          requirements like the EU Cyber
+          Resilience Act (SBOM evidence and vulnerability reporting) and the EU AI Act
+          (Article 12 record-keeping and Article 15 robustness against unauthorised use),
+          with goals such as:</p>
+        <ul>
+          <li>Log every outbound network request</li>
+          <li>Track downloaded dependencies and packages</li>
+          <li>Monitor git pull and push operations</li>
+          <li>Keep a complete audit trail of agent activity</li>
+          <li>Provide evidence for SBOM and supply-chain reviews</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- CTA band -->
+  <section class="cta-band section-alt">
+    <div class="container">
+      <h2>Ready to let your agents off the leash?</h2>
+      <p>Install Eclipse Enclave and start your first sandboxed session.</p>
+      <div class="cta-actions">
+        <a class="btn btn-primary" href="docs/getting-started/">Get started</a>
+        <a class="btn btn-ghost" href="docs/">Browse the docs</a>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer class="site-footer">
+  <p>Eclipse Enclave is open source under the MIT license. &nbsp;
+    <a href="https://projects.eclipse.org/projects/ecd.enclave">Eclipse Project</a> &nbsp;·&nbsp;
+    <a href="https://github.com/eclipse-enclave/enclave">GitHub</a> &nbsp;·&nbsp;
+    <a href="docs/">Documentation</a> &nbsp;·&nbsp;
+    <a href="https://www.eclipse.org/legal/terms-of-use/">Terms of Use</a> &nbsp;·&nbsp;
+    <a href="https://www.eclipse.org/legal/privacy/">Privacy</a> &nbsp;·&nbsp;
+    <a href="https://www.eclipse.org/org/documents/community-code-of-conduct/">Code of Conduct</a> &nbsp;·&nbsp;
+    <a href="https://www.eclipse.org/org/documents/communication-channel-guidelines/">Communication Guidelines</a></p>
+</footer>
+
+</body>
+</html>

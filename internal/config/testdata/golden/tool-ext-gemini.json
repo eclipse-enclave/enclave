@@ -1,0 +1,22 @@
+{
+  "type": "sandbox",
+  "name": "gemini",
+  "description": "Google Gemini CLI",
+  "default_included": true,
+  "priority": 100,
+  "secrets": {
+    "gemini-api-key": {
+      "env_vars": [
+        "GEMINI_API_KEY"
+      ],
+      "release": {
+        "http": {
+          "hosts": [
+            "generativelanguage.googleapis.com"
+          ],
+          "header": "x-goog-api-key"
+        }
+      }
+    }
+  }
+}

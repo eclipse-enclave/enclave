@@ -1,0 +1,38 @@
+# Copyright (C) 2026 EclipseSource GmbH and others.
+#
+# This program and the accompanying materials are made available under the
+# terms of the MIT License, which is available in the project root.
+#
+# SPDX-License-Identifier: MIT
+
+# Disable update checks (phones home to check for updates)
+check_for_update_on_startup = false
+
+# Suppress the personality text injected into model instructions. The
+# personality feature flag must stay enabled: codex only strips the built-in
+# "# Personality" section while the feature is on.
+personality = "none"
+
+# Disable analytics/telemetry
+[analytics]
+enabled = false
+
+# Disable feedback collection
+[feedback]
+enabled = false
+
+# Disable OTEL (OpenTelemetry) telemetry/tracing. The metrics exporter
+# defaults to Statsig (ab.chatgpt.com); analytics = false already forces it
+# off, but pin it in case upstream decouples the two.
+[otel]
+exporter = "none"
+trace_exporter = "none"
+metrics_exporter = "none"
+log_user_prompt = false
+
+[features]
+# Fast mode became default-on upstream (stable, default_enabled=true). With no
+# service_tier configured it silently adopts the model's default tier — "Fast"
+# on enterprise/business/team plans: fastest inference with increased plan
+# usage. Opt out by default; users can still opt in via config patches.
+fast_mode = false

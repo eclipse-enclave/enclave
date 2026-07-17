@@ -1,0 +1,16 @@
+# Single source of truth for gateway proxy build inputs.
+# Makefile and debian/rules read this file directly, and the Go runtime embeds it.
+go.mod
+go.sum
+cmd/enclave-gateway-proxy
+internal/config
+internal/domainpattern
+internal/gateway/bundle
+internal/gateway/mitm
+internal/gateway/tlsstore
+internal/git
+internal/logx
+internal/model
+internal/network
+internal/secretfile
+internal/util

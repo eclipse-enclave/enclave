@@ -1,0 +1,27 @@
+# Copyright (C) 2026 EclipseSource GmbH and others.
+#
+# This program and the accompanying materials are made available under the
+# terms of the MIT License, which is available in the project root.
+#
+# SPDX-License-Identifier: MIT
+
+schemaVersion: "1"
+kind: sandbox
+name: mistral-vibe
+displayName: Mistral Vibe
+description: Mistral Vibe CLI coding assistant
+defaultIncluded: false
+
+sandbox:
+  entrypoint: { run: [vibe] }
+  configDir: .vibe
+  skillsDir: .vibe/skills
+  settingsFile: mistral-vibe-config.toml
+  settingsTarget: .vibe/config.toml
+  yoloFlag: "--agent auto-approve"
+  yoloEnabled: true
+  continueArgs: [--continue]
+  passthroughPaths: [config.toml, agents/, prompts/, skills/]
+
+providers:
+  - name: mistral

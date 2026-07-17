@@ -1,0 +1,50 @@
+# Copyright (C) 2026 EclipseSource GmbH and others.
+#
+# This program and the accompanying materials are made available under the
+# terms of the MIT License, which is available in the project root.
+#
+# SPDX-License-Identifier: MIT
+
+# Repository metadata and tooling
+.git
+.gitignore
+.github
+.devcontainer
+.vscode
+
+# Local agent state and working files (never part of a build context)
+.claude
+.codex
+.pi
+.agents
+.prompts
+.issues
+.prs
+.plans
+.reviews
+CLAUDE.md
+
+# Build output and caches
+bin
+dist
+vendor
+completions
+reports
+node_modules
+coverage.out
+enclave
+enclave-gateway-proxy
+.tmp
+.gocache
+.gomodcache
+debian
+
+# Local machine state
+**/.DS_Store
+**/*.orig
+**/*.env
+
+# Repo-only content not copied into images
+website
+README.md
+AGENTS.md

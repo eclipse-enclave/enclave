@@ -1,0 +1,59 @@
+{
+  "name": "gemini",
+  "command": "gemini",
+  "continue_args": [
+    "--resume",
+    "latest"
+  ],
+  "yolo_flag": "--approval-mode=yolo",
+  "yolo_enabled": true,
+  "config_dir": ".gemini",
+  "skills_dir": ".gemini/skills",
+  "memory_files": [
+    ".gemini/GEMINI.md"
+  ],
+  "settings_file": "gemini-settings.json",
+  "settings_target": ".gemini/settings.json",
+  "passthrough_paths": [
+    "settings.json",
+    "skills/"
+  ],
+  "providers": [
+    {
+      "name": "gemini",
+      "credential_secrets": [
+        "gemini-api-key"
+      ],
+      "auth_files": [
+        "credentials.json"
+      ],
+      "auth_session": {
+        "mode": "any",
+        "checks": [
+          {
+            "file": "credentials.json",
+            "type": "file_exists"
+          }
+        ]
+      }
+    }
+  ],
+  "secrets": {
+    "gemini-api-key": {
+      "env_vars": [
+        "GEMINI_API_KEY"
+      ],
+      "release": {
+        "http": {
+          "hosts": [
+            "generativelanguage.googleapis.com"
+          ],
+          "header": "x-goog-api-key"
+        }
+      }
+    }
+  },
+  "host_config_dir": "",
+  "host_credentials_file": "",
+  "host_oauth_json": ""
+}

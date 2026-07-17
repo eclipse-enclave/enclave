@@ -1,0 +1,52 @@
+# Copyright (C) 2026 EclipseSource GmbH and others.
+#
+# This program and the accompanying materials are made available under the
+# terms of the MIT License, which is available in the project root.
+#
+# SPDX-License-Identifier: MIT
+
+schemaVersion: "1"
+kind: sandbox
+name: claude
+displayName: Claude Code
+description: Claude Code AI assistant
+
+sandbox:
+  entrypoint: { run: [claude] }
+  configDir: .claude
+  qemuMinMemoryMiB: 4096
+  skillsDir: .claude/skills
+  memoryDir: .claude/memory
+  settingsFile: claude-settings.json
+  settingsTarget: .claude/settings.json
+  yoloFlag: --dangerously-skip-permissions
+  yoloEnabled: true
+  continueArgs: [--continue]
+  resumeArgs: [--resume]
+  passthroughPaths: [agents/, commands/, settings.json, skills/]
+  hostConfigDir: .claude
+  hostCredentialsFile: .credentials.json
+  hostOauthJson: .claude.json
+
+credentials:
+  sources:
+    anthropic-api-key: { env: [ANTHROPIC_API_KEY] }
+    claude-code-oauth-token: { env: [CLAUDE_CODE_OAUTH_TOKEN], apiKey: false }
+
+network:
+  serviceDomains:
+    api.anthropic.com: anthropic-api-key
+    "*.anthropic.com": anthropic-api-key
+  serviceAuth:
+    anthropic-api-key: { headerName: x-api-key }
+
+providers:
+  - name: anthropic
+    credentials: [anthropic-api-key, claude-code-oauth-token]
+    authFiles: [config.json, .credentials.json]
+    securestorageDirEnv: CLAUDE_SECURESTORAGE_CONFIG_DIR
+    authSession:
+      mode: any
+      checks:
+        - { file: config.json, type: file_exists }
+        - { file: .credentials.json, type: file_exists }

@@ -1,0 +1,64 @@
+# Copyright (C) 2026 EclipseSource GmbH and others.
+#
+# This program and the accompanying materials are made available under the
+# terms of the MIT License, which is available in the project root.
+#
+# SPDX-License-Identifier: MIT
+
+schemaVersion: "1"
+kind: sandbox
+name: pi
+displayName: Anthropic Claude Pi
+description: Anthropic Claude Pi
+
+sandbox:
+  entrypoint: { run: [pi] }
+  configDir: .pi
+  skillsDir: .pi/agent/skills
+  settingsFile: pi-settings.json
+  settingsTarget: .pi/agent/settings.json
+  yoloFlag: --approve
+  yoloEnabled: true
+  continueArgs: [--continue]
+  resumeArgs: [--resume]
+  passthroughPaths:
+    - agent/AGENTS.md
+    - agent/extensions/
+    - agent/keybindings.json
+    - agent/models.json
+    - agent/prompts/
+    - agent/settings.json
+    - agent/skills/
+    - agent/themes/
+
+credentials:
+  sources:
+    openai-api-key: { env: [OPENAI_API_KEY] }
+    anthropic-api-key: { env: [ANTHROPIC_API_KEY] }
+    gemini-api-key: { env: [GEMINI_API_KEY] }
+
+network:
+  serviceDomains:
+    api.openai.com: openai-api-key
+    "*.openai.com": openai-api-key
+    api.anthropic.com: anthropic-api-key
+    "*.anthropic.com": anthropic-api-key
+    generativelanguage.googleapis.com: gemini-api-key
+  serviceAuth:
+    openai-api-key: { headerName: authorization, valueFormat: "Bearer %s" }
+    anthropic-api-key: { headerName: x-api-key }
+    gemini-api-key: { headerName: x-goog-api-key }
+
+providers:
+  - name: openai-codex
+    credentials: [openai-api-key]
+    authFiles: [agent/auth.json]
+    authSession:
+      mode: any
+      checks:
+        - { file: agent/auth.json, type: json_pointer_non_null, pointer: /openai-codex }
+    oauthPorts: [{ port: "1455" }]
+  - name: anthropic
+    credentials: [anthropic-api-key]
+  - name: gemini
+    credentials: [gemini-api-key]

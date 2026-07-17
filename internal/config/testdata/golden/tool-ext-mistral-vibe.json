@@ -1,0 +1,6 @@
+{
+  "type": "sandbox",
+  "name": "mistral-vibe",
+  "description": "Mistral Vibe CLI coding assistant",
+  "priority": 100
+}

@@ -1,0 +1,68 @@
+{
+  "name": "codex",
+  "command": "codex",
+  "continue_args": [
+    "resume",
+    "--last"
+  ],
+  "resume_args": [
+    "resume"
+  ],
+  "yolo_flag": "--dangerously-bypass-approvals-and-sandbox",
+  "yolo_enabled": true,
+  "config_dir": ".codex",
+  "skills_dir": ".codex/skills",
+  "settings_file": "codex-config.toml",
+  "settings_target": ".codex/config.toml",
+  "passthrough_paths": [
+    "config.toml",
+    "skills/"
+  ],
+  "qemu_min_memory_mib": 4096,
+  "qemu_store_cache_mmap": true,
+  "providers": [
+    {
+      "name": "openai-codex",
+      "credential_secrets": [
+        "openai-api-key"
+      ],
+      "auth_files": [
+        "auth.json"
+      ],
+      "auth_session": {
+        "mode": "any",
+        "checks": [
+          {
+            "file": "auth.json",
+            "type": "file_exists"
+          }
+        ]
+      },
+      "oauth_ports": [
+        {
+          "port": "1455"
+        }
+      ]
+    }
+  ],
+  "secrets": {
+    "openai-api-key": {
+      "env_vars": [
+        "OPENAI_API_KEY"
+      ],
+      "release": {
+        "http": {
+          "hosts": [
+            "*.openai.com",
+            "api.openai.com"
+          ],
+          "header": "authorization",
+          "format": "Bearer %s"
+        }
+      }
+    }
+  },
+  "host_config_dir": "",
+  "host_credentials_file": "",
+  "host_oauth_json": ""
+}

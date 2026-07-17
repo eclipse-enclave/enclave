@@ -1,0 +1,79 @@
+# Copyright (C) 2026 EclipseSource GmbH and others.
+#
+# This program and the accompanying materials are made available under the
+# terms of the MIT License, which is available in the project root.
+#
+# SPDX-License-Identifier: MIT
+
+schemaVersion: "1"
+kind: sandbox
+name: opencode
+displayName: OpenCode
+description: OpenCode terminal IDE
+
+sandbox:
+  entrypoint: { run: [opencode] }
+  configDir: .config/opencode
+  skillsDir: .config/opencode/skills
+  settingsFile: opencode-settings.json
+  settingsTarget: .config/opencode/opencode.json
+  yoloEnabled: true
+  continueArgs: [--continue]
+  passthroughPaths:
+    - AGENTS.md
+    - agent/
+    - agents/
+    - command/
+    - commands/
+    - config.json
+    - mode/
+    - modes/
+    - opencode.json
+    - opencode.jsonc
+    - plugin/
+    - plugins/
+    - skill/
+    - skills/
+    - tui.json
+    - tui.jsonc
+
+credentials:
+  sources:
+    openai-api-key: { env: [OPENAI_API_KEY] }
+    anthropic-api-key: { env: [ANTHROPIC_API_KEY] }
+    gemini-api-key: { env: [GEMINI_API_KEY] }
+
+network:
+  serviceDomains:
+    api.openai.com: openai-api-key
+    "*.openai.com": openai-api-key
+    api.anthropic.com: anthropic-api-key
+    "*.anthropic.com": anthropic-api-key
+    generativelanguage.googleapis.com: gemini-api-key
+  serviceAuth:
+    openai-api-key: { headerName: authorization, valueFormat: "Bearer %s" }
+    anthropic-api-key: { headerName: x-api-key }
+    gemini-api-key: { headerName: x-goog-api-key }
+
+providers:
+  - name: openai
+    credentials: [openai-api-key]
+    authFiles: [auth.json]
+    authSession:
+      checks:
+        - { file: auth.json, type: json_pointer_non_null, pointer: /openai }
+    oauthPorts: [{ port: "1455" }]
+  - name: anthropic
+    credentials: [anthropic-api-key]
+  - name: gemini
+    credentials: [gemini-api-key]
+  - name: github-copilot
+    authFiles: [auth.json]
+    authSession:
+      checks:
+        - { file: auth.json, type: json_pointer_non_null, pointer: /github-copilot }
+  - name: github-copilot-enterprise
+    authFiles: [auth.json]
+    authSession:
+      checks:
+        - { file: auth.json, type: json_pointer_non_null, pointer: /github-copilot-enterprise }

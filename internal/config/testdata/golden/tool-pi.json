@@ -1,0 +1,111 @@
+{
+  "name": "pi",
+  "command": "pi",
+  "continue_args": [
+    "--continue"
+  ],
+  "resume_args": [
+    "--resume"
+  ],
+  "yolo_flag": "--approve",
+  "yolo_enabled": true,
+  "config_dir": ".pi",
+  "skills_dir": ".pi/agent/skills",
+  "settings_file": "pi-settings.json",
+  "settings_target": ".pi/agent/settings.json",
+  "passthrough_paths": [
+    "agent/AGENTS.md",
+    "agent/extensions/",
+    "agent/keybindings.json",
+    "agent/models.json",
+    "agent/prompts/",
+    "agent/settings.json",
+    "agent/skills/",
+    "agent/themes/"
+  ],
+  "providers": [
+    {
+      "name": "openai-codex",
+      "credential_secrets": [
+        "openai-api-key"
+      ],
+      "auth_files": [
+        "agent/auth.json"
+      ],
+      "auth_session": {
+        "mode": "any",
+        "checks": [
+          {
+            "file": "agent/auth.json",
+            "type": "json_pointer_non_null",
+            "pointer": "/openai-codex"
+          }
+        ]
+      },
+      "oauth_ports": [
+        {
+          "port": "1455"
+        }
+      ]
+    },
+    {
+      "name": "anthropic",
+      "credential_secrets": [
+        "anthropic-api-key"
+      ]
+    },
+    {
+      "name": "gemini",
+      "credential_secrets": [
+        "gemini-api-key"
+      ]
+    }
+  ],
+  "secrets": {
+    "anthropic-api-key": {
+      "env_vars": [
+        "ANTHROPIC_API_KEY"
+      ],
+      "release": {
+        "http": {
+          "hosts": [
+            "*.anthropic.com",
+            "api.anthropic.com"
+          ],
+          "header": "x-api-key"
+        }
+      }
+    },
+    "gemini-api-key": {
+      "env_vars": [
+        "GEMINI_API_KEY"
+      ],
+      "release": {
+        "http": {
+          "hosts": [
+            "generativelanguage.googleapis.com"
+          ],
+          "header": "x-goog-api-key"
+        }
+      }
+    },
+    "openai-api-key": {
+      "env_vars": [
+        "OPENAI_API_KEY"
+      ],
+      "release": {
+        "http": {
+          "hosts": [
+            "*.openai.com",
+            "api.openai.com"
+          ],
+          "header": "authorization",
+          "format": "Bearer %s"
+        }
+      }
+    }
+  },
+  "host_config_dir": "",
+  "host_credentials_file": "",
+  "host_oauth_json": ""
+}

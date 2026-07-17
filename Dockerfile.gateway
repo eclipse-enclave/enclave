@@ -1,0 +1,44 @@
+# Copyright (C) 2026 EclipseSource GmbH and others.
+#
+# This program and the accompanying materials are made available under the
+# terms of the MIT License, which is available in the project root.
+#
+# SPDX-License-Identifier: MIT
+
+FROM golang:1.24.4-alpine3.22 AS proxy-build
+WORKDIR /src
+COPY . .
+RUN CGO_ENABLED=0 go build -o /out/enclave-gateway-proxy ./cmd/enclave-gateway-proxy
+
+# Enclave gateway container (DNS + transparent proxy)
+FROM alpine:3.23@sha256:25109184c71bdad752c8312a8623239686a9a2071e8825f20acb8f2198c3f659
+
+RUN apk add --no-cache dnsmasq ipset iptables libcap socat su-exec ca-certificates && \
+    dnsmasq_path="$(command -v dnsmasq)" && \
+    setcap cap_net_admin,cap_net_bind_service=+ep "$dnsmasq_path" && \
+    if ! id -u dnsmasq >/dev/null 2>&1; then \
+        adduser -S -D -H -s /sbin/nologin dnsmasq; \
+    fi && \
+    if ! grep -q '^gateway:' /etc/group; then \
+        addgroup -S gateway; \
+    fi && \
+    if ! id -u gateway >/dev/null 2>&1; then \
+        adduser -S -D -H -s /sbin/nologin -G gateway gateway; \
+    fi
+
+ARG GATEWAY_ALLOWLIST_FILENAME=runtime-assets/gateway-allowlists/base.conf
+COPY ${GATEWAY_ALLOWLIST_FILENAME} /etc/dnsmasq.d/allowlist.conf
+COPY runtime-assets/gateway-allowlists/ /etc/dnsmasq.allowlists/
+COPY --from=proxy-build /out/enclave-gateway-proxy /usr/local/bin/enclave-gateway-proxy
+COPY runtime-assets/net.sh /usr/local/share/enclave/net.sh
+COPY gateway-entrypoint.sh /usr/local/bin/gateway-entrypoint.sh
+RUN chmod a+rx /usr/local/bin/gateway-entrypoint.sh /usr/local/share/enclave/net.sh && \
+    test -x /usr/local/bin/enclave-gateway-proxy && \
+    chmod -R a+rX /etc/dnsmasq.d/ /etc/dnsmasq.allowlists/
+
+EXPOSE 53/udp 53/tcp 80/tcp 443/tcp
+
+HEALTHCHECK --interval=1s --timeout=1s --start-period=2s --retries=10 \
+  CMD ["/bin/sh", "-ec", "nslookup localhost 127.0.0.1 > /dev/null 2>&1"]
+
+ENTRYPOINT ["/usr/local/bin/gateway-entrypoint.sh"]

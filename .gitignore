@@ -1,0 +1,62 @@
+# Copyright (C) 2026 EclipseSource GmbH and others.
+#
+# This program and the accompanying materials are made available under the
+# terms of the MIT License, which is available in the project root.
+#
+# SPDX-License-Identifier: MIT
+
+# Go build artifacts
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# Build output
+/bin/
+/vendor/
+/dist/
+/completions/
+/enclave
+/enclave-gateway-proxy
+/enclave.exe
+.gocache/
+.gomodcache/
+
+# Coverage
+coverage.out
+
+# OS files
+.DS_Store
+
+# Merge/conflict backup files
+*.orig
+
+# Tool state
+.claude/
+
+# Local agent working files (never committed)
+.issues/*.md
+.prs/*.md
+.plans/
+.reviews/*
+
+# Static analysis reports (generated)
+reports/*.txt
+reports/*.json
+/.tmp/
+
+# Debian packaging build artifacts
+debian/.debhelper/
+debian/enclave/
+debian/enclave-dbgsym/
+debian/*.debhelper
+debian/*.debhelper.log
+debian/debhelper-build-stamp
+debian/files
+debian/*.substvars
+
+# Theia IDE
+.prompts/task-contexts/

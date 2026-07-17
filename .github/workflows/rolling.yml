@@ -1,0 +1,111 @@
+# Copyright (C) 2026 EclipseSource GmbH and others.
+#
+# This program and the accompanying materials are made available under the
+# terms of the MIT License, which is available in the project root.
+#
+# SPDX-License-Identifier: MIT
+
+name: Rolling Release
+
+# Manual-only until the public repository's release policy, permissions, and
+# destinations have been reviewed and explicitly enabled. A dispatch without
+# publish=true only builds artifacts; it cannot touch releases or tags.
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Delete and recreate the rolling release"
+        type: boolean
+        default: false
+
+concurrency:
+  group: rolling-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            output: enclave-linux-amd64-cli
+            cgo: 0
+
+    runs-on: ${{ matrix.runner }}
+
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: go.mod
+
+      - name: Build (CLI only)
+        run: CGO_ENABLED=${{ matrix.cgo }} go build -o ${{ matrix.output }} ./cmd/enclave
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ${{ matrix.output }}
+          path: ${{ matrix.output }}
+          retention-days: 1
+
+  build-deb:
+    uses: ./.github/workflows/reusable-deb-build.yml
+    with:
+      runner: ubuntu-24.04
+      artifact_name: deb
+      artifact_retention_days: 1
+      set_package_version: true
+
+  release:
+    needs: [build, build-deb]
+    if: ${{ inputs.publish }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Generate checksums
+        run: |
+          cd artifacts
+          sha256sum * > checksums.txt
+
+      - name: Create rolling release
+        run: |
+          gh release delete rolling --yes --cleanup-tag || true
+          gh release create rolling \
+            --prerelease \
+            --title "Rolling Release" \
+            --notes "$(cat <<EOF
+          **Rolling release from \`main\`**
+
+          Commit: [\`${GITHUB_SHA::8}\`](${{ github.server_url }}/${{ github.repository }}/commit/${GITHUB_SHA})
+          Date: $(date -u +%Y-%m-%d)
+
+          | File | Platform | Notes |
+          |------|----------|-------|
+          | \`enclave_*_amd64.deb\` | Ubuntu 24.04 | Includes all assets |
+          | \`enclave-linux-amd64-cli\` | Linux x86_64 | CLI only, no system deps |
+
+          \`\`\`sh
+          # Ubuntu 24.04 (resolves dependencies automatically)
+          sudo apt install ./enclave_*_amd64.deb
+
+          # Other Linux
+          chmod +x enclave-*
+          \`\`\`
+          EOF
+          )" \
+            artifacts/*

@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# Copyright (C) 2026 EclipseSource GmbH and others.
+#
+# This program and the accompanying materials are made available under the
+# terms of the MIT License, which is available in the project root.
+#
+# SPDX-License-Identifier: MIT
+
+set -euo pipefail
+
+if [ "$#" -lt 2 ] || [ "$#" -gt 3 ]; then
+    echo "usage: enclave-install-npm-tool <package> <binary> [label]" >&2
+    exit 2
+fi
+
+package="$1"
+binary="$2"
+label="${3:-$binary}"
+
+enclave-agent-npm-install "$package"
+
+if ! command -v "$binary" >/dev/null 2>&1; then
+    echo "$label install failed: $binary binary not found" >&2
+    exit 1
+fi
+
+printf '%s installed at: %s\n' "$label" "$(command -v "$binary")"

@@ -1,0 +1,51 @@
+{
+  "type": "sandbox",
+  "name": "pi",
+  "description": "Anthropic Claude Pi",
+  "default_included": true,
+  "priority": 100,
+  "secrets": {
+    "anthropic-api-key": {
+      "env_vars": [
+        "ANTHROPIC_API_KEY"
+      ],
+      "release": {
+        "http": {
+          "hosts": [
+            "*.anthropic.com",
+            "api.anthropic.com"
+          ],
+          "header": "x-api-key"
+        }
+      }
+    },
+    "gemini-api-key": {
+      "env_vars": [
+        "GEMINI_API_KEY"
+      ],
+      "release": {
+        "http": {
+          "hosts": [
+            "generativelanguage.googleapis.com"
+          ],
+          "header": "x-goog-api-key"
+        }
+      }
+    },
+    "openai-api-key": {
+      "env_vars": [
+        "OPENAI_API_KEY"
+      ],
+      "release": {
+        "http": {
+          "hosts": [
+            "*.openai.com",
+            "api.openai.com"
+          ],
+          "header": "authorization",
+          "format": "Bearer %s"
+        }
+      }
+    }
+  }
+}

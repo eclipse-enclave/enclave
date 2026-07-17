@@ -1,0 +1,27 @@
+# Copyright (C) 2026 EclipseSource GmbH and others.
+#
+# This program and the accompanying materials are made available under the
+# terms of the MIT License, which is available in the project root.
+#
+# SPDX-License-Identifier: MIT
+
+Source: enclave
+Section: devel
+Priority: optional
+Maintainer: Olaf Lessenich <olessenich@eclipsesource.com>
+Build-Depends: debhelper-compat (= 13), golang-go (>= 2:1.24~)
+Standards-Version: 4.6.2
+Homepage: https://github.com/eclipse-enclave/enclave
+Rules-Requires-Root: no
+
+Package: enclave
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, docker.io | docker-ce,
+ docker-buildx | docker-buildx-plugin
+Recommends: git
+Description: Container-based development environment manager
+ Enclave provides isolated container environments for AI coding assistants
+ and development tools. It manages Docker containers with network isolation,
+ authentication injection, and tool-specific configurations.
+ .
+ Supported tools include Claude, Codex, Gemini, OpenCode, and more.

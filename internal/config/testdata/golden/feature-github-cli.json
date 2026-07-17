@@ -1,0 +1,48 @@
+{
+  "type": "mixin",
+  "name": "github-cli",
+  "description": "GitHub CLI (gh)",
+  "needs_root": true,
+  "default_enabled": true,
+  "priority": 50,
+  "config_dir": ".config/gh",
+  "auth_files": [
+    "hosts.yml",
+    "config.yml"
+  ],
+  "secrets": {
+    "github-enterprise-token": {
+      "env_vars": [
+        "GH_ENTERPRISE_TOKEN",
+        "GITHUB_ENTERPRISE_TOKEN"
+      ],
+      "release": {
+        "http": {
+          "hosts": [
+            "*.ghe.com",
+            "ghe.com"
+          ],
+          "header": "authorization",
+          "format": "Bearer %s"
+        }
+      }
+    },
+    "github-token": {
+      "env_vars": [
+        "GH_TOKEN",
+        "GITHUB_TOKEN"
+      ],
+      "release": {
+        "http": {
+          "hosts": [
+            "*.github.com",
+            "*.githubusercontent.com",
+            "api.github.com"
+          ],
+          "header": "authorization",
+          "format": "Bearer %s"
+        }
+      }
+    }
+  }
+}

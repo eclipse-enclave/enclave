@@ -1,0 +1,38 @@
+#!/bin/sh
+# Copyright (C) 2026 EclipseSource GmbH and others.
+#
+# This program and the accompanying materials are made available under the
+# terms of the MIT License, which is available in the project root.
+#
+# SPDX-License-Identifier: MIT
+
+set -eu
+
+export PATH=/sbin:/bin:/usr/sbin:/usr/bin
+
+mkdir -p /dev /proc /sys /run /tmp
+mount -t devtmpfs devtmpfs /dev
+mkdir -p /dev/pts
+mount -t devpts devpts /dev/pts
+mount -t proc proc /proc
+mount -t sysfs sysfs /sys
+mount -t tmpfs tmpfs /run
+mount -t tmpfs tmpfs /tmp
+
+# Reattach stdio to the real console so guest userspace output is visible
+# even when the pre-devtmpfs /dev/console was missing or not a device.
+if [ -c /dev/console ]; then
+    exec </dev/console >/dev/console 2>&1
+fi
+
+if [ ! -x /etc/enclave/run.sh ]; then
+    echo "enclave qemu backend: missing /etc/enclave/run.sh" >&2
+    poweroff -f || reboot -f || halt -f
+    exit 127
+fi
+
+/bin/sh /etc/enclave/run.sh
+code=$?
+
+echo "enclave qemu backend: run script returned $code without powering off" >&2
+poweroff -f || reboot -f || halt -f || exit "$code"

@@ -1,0 +1,39 @@
+{
+  "name": "theia-next",
+  "command": "sleep infinity",
+  "yolo_flag": "",
+  "yolo_enabled": null,
+  "config_dir": ".theia",
+  "settings_file": "",
+  "settings_target": "",
+  "providers": [
+    {
+      "name": "anthropic",
+      "credential_secrets": [
+        "anthropic-api-key"
+      ]
+    }
+  ],
+  "secrets": {
+    "anthropic-api-key": {
+      "env_vars": [
+        "ANTHROPIC_API_KEY"
+      ],
+      "release": {
+        "http": {
+          "hosts": [
+            "*.anthropic.com",
+            "api.anthropic.com"
+          ],
+          "header": "x-api-key"
+        }
+      }
+    }
+  },
+  "host_config_dir": "",
+  "host_credentials_file": "",
+  "host_oauth_json": "",
+  "post_start": {
+    "open_ide": "theia-next"
+  }
+}

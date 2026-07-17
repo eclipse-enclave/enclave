@@ -1,0 +1,7 @@
+schemaVersion: "1"
+kind: sandbox
+name: not-badname
+description: Fixture whose spec name differs from its directory name (badname).
+sandbox:
+  entrypoint:
+    run: [badname]

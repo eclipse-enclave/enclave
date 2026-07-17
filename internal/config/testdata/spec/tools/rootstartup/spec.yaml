@@ -1,0 +1,7 @@
+schemaVersion: "1"
+kind: sandbox
+name: rootstartup
+sandbox: { entrypoint: { run: [rootstartup] } }
+commands:
+  startup:
+    - { command: "some-daemon", user: "0" }

@@ -1,0 +1,148 @@
+{
+  "name": "opencode",
+  "command": "opencode",
+  "continue_args": [
+    "--continue"
+  ],
+  "yolo_flag": "",
+  "yolo_enabled": true,
+  "config_dir": ".config/opencode",
+  "skills_dir": ".config/opencode/skills",
+  "settings_file": "opencode-settings.json",
+  "settings_target": ".config/opencode/opencode.json",
+  "passthrough_paths": [
+    "AGENTS.md",
+    "agent/",
+    "agents/",
+    "command/",
+    "commands/",
+    "config.json",
+    "mode/",
+    "modes/",
+    "opencode.json",
+    "opencode.jsonc",
+    "plugin/",
+    "plugins/",
+    "skill/",
+    "skills/",
+    "tui.json",
+    "tui.jsonc"
+  ],
+  "providers": [
+    {
+      "name": "openai",
+      "credential_secrets": [
+        "openai-api-key"
+      ],
+      "auth_files": [
+        "auth.json"
+      ],
+      "auth_session": {
+        "mode": "",
+        "checks": [
+          {
+            "file": "auth.json",
+            "type": "json_pointer_non_null",
+            "pointer": "/openai"
+          }
+        ]
+      },
+      "oauth_ports": [
+        {
+          "port": "1455"
+        }
+      ]
+    },
+    {
+      "name": "anthropic",
+      "credential_secrets": [
+        "anthropic-api-key"
+      ]
+    },
+    {
+      "name": "gemini",
+      "credential_secrets": [
+        "gemini-api-key"
+      ]
+    },
+    {
+      "name": "github-copilot",
+      "auth_files": [
+        "auth.json"
+      ],
+      "auth_session": {
+        "mode": "",
+        "checks": [
+          {
+            "file": "auth.json",
+            "type": "json_pointer_non_null",
+            "pointer": "/github-copilot"
+          }
+        ]
+      }
+    },
+    {
+      "name": "github-copilot-enterprise",
+      "auth_files": [
+        "auth.json"
+      ],
+      "auth_session": {
+        "mode": "",
+        "checks": [
+          {
+            "file": "auth.json",
+            "type": "json_pointer_non_null",
+            "pointer": "/github-copilot-enterprise"
+          }
+        ]
+      }
+    }
+  ],
+  "secrets": {
+    "anthropic-api-key": {
+      "env_vars": [
+        "ANTHROPIC_API_KEY"
+      ],
+      "release": {
+        "http": {
+          "hosts": [
+            "*.anthropic.com",
+            "api.anthropic.com"
+          ],
+          "header": "x-api-key"
+        }
+      }
+    },
+    "gemini-api-key": {
+      "env_vars": [
+        "GEMINI_API_KEY"
+      ],
+      "release": {
+        "http": {
+          "hosts": [
+            "generativelanguage.googleapis.com"
+          ],
+          "header": "x-goog-api-key"
+        }
+      }
+    },
+    "openai-api-key": {
+      "env_vars": [
+        "OPENAI_API_KEY"
+      ],
+      "release": {
+        "http": {
+          "hosts": [
+            "*.openai.com",
+            "api.openai.com"
+          ],
+          "header": "authorization",
+          "format": "Bearer %s"
+        }
+      }
+    }
+  },
+  "host_config_dir": "",
+  "host_credentials_file": "",
+  "host_oauth_json": ""
+}

@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+# Copyright (C) 2026 EclipseSource GmbH and others.
+#
+# This program and the accompanying materials are made available under the
+# terms of the MIT License, which is available in the project root.
+#
+# SPDX-License-Identifier: MIT
+
+set -euo pipefail
+
+# shellcheck source=runtime-assets/build-scripts/lib/common.sh
+source "${ENCLAVE_BUILD_SCRIPTS_DIR:-/opt/enclave/build-scripts}/lib/common.sh"
+
+tool="${1:-}"
+agent_tools="${2:-all}"
+force="${3:-}"
+extensions_root="$ENCLAVE_EXTENSIONS_ROOT"
+node_dir="$ENCLAVE_AGENT_NODE_DIR"
+installed_tools_file="$ENCLAVE_INSTALLED_TOOLS_FILE"
+
+if [ -z "$tool" ]; then
+    echo "usage: enclave-install-tool <tool> [agent_tools] [force]" >&2
+    exit 2
+fi
+
+spec="$(enclave_ext_spec "${extensions_root}/tools/${tool}")"
+
+enclave_require_command yq
+
+if ! enclave_tool_is_enabled "$spec" "$tool" "$agent_tools"; then
+    if [ "$agent_tools" = "all" ]; then
+        echo "Skipping $tool (opt-in)"
+    else
+        echo "Skipping $tool (not selected)"
+    fi
+    exit 0
+fi
+
+script="${extensions_root}/tools/${tool}/install.sh"
+if [ ! -x "$script" ]; then
+    echo "Skipping $tool (no install script)"
+    exit 0
+fi
+
+export ENCLAVE_AGENT_NODE_DIR="$node_dir"
+export ENCLAVE_AGENT_NODE_BIN="$ENCLAVE_AGENT_NODE_DIR/bin/node"
+export ENCLAVE_AGENT_NPM_BIN="$ENCLAVE_AGENT_NODE_DIR/bin/npm"
+export PATH="$ENCLAVE_AGENT_NODE_DIR/bin:$HOME/.local/bin:$PATH"
+export npm_config_prefix="${npm_config_prefix:-$HOME/.local}"
+
+if [ ! -x "$ENCLAVE_AGENT_NPM_BIN" ] || [ ! -x "$ENCLAVE_AGENT_NODE_BIN" ]; then
+    echo "private agent Node runtime is missing: expected $ENCLAVE_AGENT_NODE_BIN and $ENCLAVE_AGENT_NPM_BIN" >&2
+    exit 1
+fi
+
+# Prefer cached metadata first; retry online on failure in enclave-agent-npm-install.
+export npm_config_prefer_offline=true
+unset npm_config_prefer_online
+if [ "$force" = "force" ]; then
+    export npm_config_prefer_offline=false
+    export npm_config_prefer_online=true
+fi
+
+echo "Installing $tool..."
+if ! "$script"; then
+    echo "Failed to install selected tool: $tool" >&2
+    exit 1
+fi
+
+printf '%s\n' "$tool" >> "$installed_tools_file"

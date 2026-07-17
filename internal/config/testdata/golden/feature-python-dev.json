@@ -1,0 +1,7 @@
+{
+  "type": "mixin",
+  "name": "python-dev",
+  "description": "Python development tools (black, ruff, mypy, pytest, etc.)",
+  "default_enabled": true,
+  "priority": 70
+}

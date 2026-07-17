@@ -1,0 +1,54 @@
+{
+  "type": "mixin",
+  "name": "gitlab-cli",
+  "description": "GitLab CLI (glab)",
+  "needs_root": true,
+  "priority": 50,
+  "secrets": {
+    "gitlab-job-token": {
+      "env_vars": [
+        "JOB_TOKEN",
+        "CI_JOB_TOKEN"
+      ],
+      "release": {
+        "http": {
+          "hosts": [
+            "*.gitlab.com",
+            "gitlab.com"
+          ],
+          "header": "job-token"
+        }
+      }
+    },
+    "gitlab-oauth-token": {
+      "env_vars": [
+        "OAUTH_TOKEN"
+      ],
+      "release": {
+        "http": {
+          "hosts": [
+            "*.gitlab.com",
+            "gitlab.com"
+          ],
+          "header": "authorization",
+          "format": "Bearer %s"
+        }
+      }
+    },
+    "gitlab-token": {
+      "env_vars": [
+        "GITLAB_TOKEN",
+        "GITLAB_ACCESS_TOKEN"
+      ],
+      "release": {
+        "http": {
+          "hosts": [
+            "*.gitlab.com",
+            "gitlab.com"
+          ],
+          "header": "private-token"
+        }
+      }
+    }
+  }
+}

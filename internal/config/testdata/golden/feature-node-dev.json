@@ -1,0 +1,7 @@
+{
+  "type": "mixin",
+  "name": "node-dev",
+  "description": "Node.js development tools (typescript, eslint, prettier, etc.)",
+  "default_enabled": true,
+  "priority": 70
+}

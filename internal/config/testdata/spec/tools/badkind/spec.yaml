@@ -1,0 +1,4 @@
+schemaVersion: "1"
+kind: mixin
+name: badkind
+description: Fixture whose kind (mixin) mismatches the sandbox resolution root (tools/).

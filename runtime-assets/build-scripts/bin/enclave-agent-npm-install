@@ -1,0 +1,128 @@
+#!/usr/bin/env bash
+# Copyright (C) 2026 EclipseSource GmbH and others.
+#
+# This program and the accompanying materials are made available under the
+# terms of the MIT License, which is available in the project root.
+#
+# SPDX-License-Identifier: MIT
+
+set -euo pipefail
+
+if [ "$#" -eq 0 ]; then
+    echo "usage: enclave-agent-npm-install <package> [<package> ...]" >&2
+    exit 2
+fi
+
+if ! command -v jq >/dev/null 2>&1; then
+    echo "jq is required for enclave-agent-npm-install" >&2
+    exit 1
+fi
+
+node_dir="${ENCLAVE_AGENT_NODE_DIR:-/opt/enclave/node}"
+node_bin="${ENCLAVE_AGENT_NODE_BIN:-$node_dir/bin/node}"
+npm_bin="${ENCLAVE_AGENT_NPM_BIN:-$node_dir/bin/npm}"
+install_prefix="${npm_config_prefix:-$HOME/.local}"
+
+if [ ! -x "$node_bin" ]; then
+    echo "private agent node is missing at $node_bin" >&2
+    exit 1
+fi
+if [ ! -x "$npm_bin" ]; then
+    echo "private agent npm is missing at $npm_bin" >&2
+    exit 1
+fi
+node_dir="$(dirname "$node_bin")"
+export PATH="$node_dir:$PATH"
+
+normalize_package_name() {
+    local spec="$1"
+    if [[ "$spec" == @*/*@* ]]; then
+        printf '%s\n' "${spec%@*}"
+        return
+    fi
+    if [[ "$spec" != @* && "$spec" == *@* ]]; then
+        printf '%s\n' "${spec%@*}"
+        return
+    fi
+    printf '%s\n' "$spec"
+}
+
+rewrite_bin_shebang() {
+    local target="$1"
+    if [ -L "$target" ]; then
+        target="$(readlink -f "$target")"
+    fi
+    if [ ! -f "$target" ]; then
+        return
+    fi
+    local first_line
+    first_line="$(head -n 1 "$target" 2>/dev/null || true)"
+    if [ "$first_line" = "#!$node_bin" ]; then
+        return
+    fi
+    if [ "$first_line" != "#!/usr/bin/env node" ] && [ "$first_line" != "#!/usr/bin/node" ]; then
+        return
+    fi
+    local tmp
+    tmp="$(mktemp)"
+    printf '#!%s\n' "$node_bin" > "$tmp"
+    tail -n +2 "$target" >> "$tmp"
+    chmod --reference="$target" "$tmp"
+    mv "$tmp" "$target"
+}
+
+first_attempt_log="$(mktemp)"
+if "$npm_bin" install -g --no-audit --no-fund --progress=false "$@" 2>"$first_attempt_log"; then
+    rm -f "$first_attempt_log"
+elif [ "${npm_config_prefer_online:-}" = "true" ]; then
+    cat "$first_attempt_log" >&2
+    rm -f "$first_attempt_log"
+    exit 1
+else
+    echo "npm install failed in offline-preferred mode; retrying with online metadata..." >&2
+    if ! npm_config_prefer_online=true npm_config_prefer_offline=false \
+        "$npm_bin" install -g --no-audit --no-fund --progress=false "$@"; then
+        echo "Offline-preferred attempt stderr:" >&2
+        cat "$first_attempt_log" >&2
+        rm -f "$first_attempt_log"
+        exit 1
+    fi
+    rm -f "$first_attempt_log"
+fi
+
+for spec in "$@"; do
+    if [[ "$spec" == -* ]]; then
+        continue
+    fi
+    package_name="$(normalize_package_name "$spec")"
+    package_dir="$install_prefix/lib/node_modules/$package_name"
+    package_json="$package_dir/package.json"
+    if [ ! -f "$package_json" ]; then
+        echo "Warning: installed package metadata missing for $package_name" >&2
+        continue
+    fi
+
+    mapfile -t bin_entries < <(jq -r '
+        if (.bin | type) == "string" then
+            if (.name | type) == "string" and (.name | length) > 0 then
+                [ .name + ":" + .bin ]
+            else
+                []
+            end
+        elif (.bin | type) == "object" then
+            .bin | to_entries | map(.key + ":" + .value)
+        else
+            []
+        end | .[]
+    ' "$package_json")
+
+    for entry in "${bin_entries[@]}"; do
+        [ -n "$entry" ] || continue
+        bin_name="${entry%%:*}"
+        bin_path="${entry#*:}"
+        [ -n "$bin_name" ] || continue
+        [ -n "$bin_path" ] || continue
+        rewrite_bin_shebang "$package_dir/$bin_path"
+        rewrite_bin_shebang "$install_prefix/bin/$bin_name"
+    done
+done

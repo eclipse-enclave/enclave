@@ -1,0 +1,624 @@
+/********************************************************************************
+ * Copyright (C) 2026 EclipseSource GmbH and others.
+ *
+ * This program and the accompanying materials are made available under the
+ * terms of the MIT License, which is available in the project root.
+ *
+ * SPDX-License-Identifier: MIT
+ ********************************************************************************/
+
+/**
+ * Eclipse Enclave — documentation theme.
+ *
+ * Design direction: "The Enclave Perimeter."
+ * The palette is drawn straight from the product mark — a deep navy field, an
+ * electric beam-blue core, and a gateway amber. The page reads as a bounded,
+ * guarded interior lit from its core: one soft glow at the top, a short beam
+ * bar under the hero, and precision crop-mark corners framing the modules.
+ * Amber is reserved for gateway semantics so it stays meaningful, not decorative.
+ */
+
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;600;700&display=swap');
+
+/* ==========================================================================
+   Tokens
+   ========================================================================== */
+
+:root {
+  /* Beam blue — primary accent (contrast-safe on white) */
+  --ifm-color-primary: #1a5df0;
+  --ifm-color-primary-dark: #1551d6;
+  --ifm-color-primary-darker: #144dca;
+  --ifm-color-primary-darkest: #1040a7;
+  --ifm-color-primary-light: #3d78f3;
+  --ifm-color-primary-lighter: #4d82f4;
+  --ifm-color-primary-lightest: #7ba3f7;
+
+  /* Brand tokens */
+  --enclave-navy: #0b1c33;
+  --enclave-beam: #1a5df0;
+  --enclave-cyan: #5aa8ff;
+  --enclave-amber: #d9820a;
+  --enclave-glow: rgba(90, 168, 255, 0.16);
+
+  /* Surfaces & lines (cool slate, tinted toward navy — not neutral gray) */
+  --ifm-background-color: #ffffff;
+  --ifm-background-surface-color: #f5f8fc;
+  --enclave-frost: #eaf0f8;
+  --ifm-navbar-background-color: rgba(255, 255, 255, 0.72);
+  --ifm-footer-background-color: var(--enclave-navy);
+
+  /* Text */
+  --ifm-heading-color: #101d30;
+  --ifm-color-content: #43516b;
+  --ifm-color-content-secondary: #6b7791;
+  --ifm-toc-border-color: #e0e8f2;
+  --ifm-hr-border-color: #e0e8f2;
+  --ifm-menu-color: #55617a;
+  --ifm-menu-color-active: #101d30;
+  --ifm-menu-color-background-active: rgba(26, 93, 240, 0.08);
+  --ifm-menu-color-background-hover: rgba(26, 93, 240, 0.05);
+
+  /* Type */
+  --ifm-font-family-base: 'IBM Plex Sans', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  --ifm-heading-font-family: 'Space Grotesk', 'IBM Plex Sans', system-ui, sans-serif;
+  --ifm-font-family-monospace: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+  --ifm-heading-font-weight: 600;
+  --ifm-font-weight-bold: 600;
+  --ifm-code-font-size: 88%;
+  --ifm-line-height-base: 1.7;
+
+  /* Shape & motion */
+  --ifm-border-radius: 12px;
+  --ifm-button-border-radius: 999px;
+  --ifm-link-decoration: none;
+  --ifm-navbar-shadow: none;
+  --ifm-transition-fast: 160ms;
+  --docusaurus-highlighted-code-line-bg: rgba(26, 93, 240, 0.10);
+}
+
+/* Dark mode — the native enclave interior, tuned to the logo's navy. */
+[data-theme='dark'] {
+  --ifm-color-primary: #7bb0ff;
+  --ifm-color-primary-dark: #5c9cff;
+  --ifm-color-primary-darker: #4d93ff;
+  --ifm-color-primary-darkest: #1f74ff;
+  --ifm-color-primary-light: #9ac4ff;
+  --ifm-color-primary-lighter: #a9cdff;
+  --ifm-color-primary-lightest: #d6e7ff;
+
+  --enclave-beam: #7bb0ff;
+  --enclave-cyan: #8fd0ff;
+  --enclave-amber: #f0a63f;
+  --enclave-glow: rgba(90, 168, 255, 0.22);
+
+  --ifm-background-color: #081324;
+  --ifm-background-surface-color: #0e1f38;
+  --enclave-frost: #13294a;
+  --ifm-navbar-background-color: rgba(8, 19, 36, 0.72);
+  --ifm-footer-background-color: #050d1a;
+
+  --ifm-heading-color: #eaf2ff;
+  --ifm-color-content: #b0c1db;
+  --ifm-color-content-secondary: #7f92ad;
+  --ifm-toc-border-color: #1c3559;
+  --ifm-hr-border-color: #1c3559;
+  --ifm-menu-color: #9fb2ce;
+  --ifm-menu-color-active: #eaf2ff;
+  --ifm-menu-color-background-active: rgba(123, 176, 255, 0.12);
+  --ifm-menu-color-background-hover: rgba(123, 176, 255, 0.07);
+  --docusaurus-highlighted-code-line-bg: rgba(123, 176, 255, 0.16);
+}
+
+/* ==========================================================================
+   Ambient core-glow — the "light from above" that ties back to the mark.
+   Kept to one place; sits behind the translucent navbar and page top.
+   ========================================================================== */
+
+body {
+  background-color: var(--ifm-background-color);
+  background-image: radial-gradient(
+    1100px 460px at 50% -180px,
+    var(--enclave-glow),
+    transparent 68%
+  );
+  background-repeat: no-repeat;
+  background-attachment: fixed;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* ==========================================================================
+   Navbar — translucent so the glow reads through it, single hairline base.
+   ========================================================================== */
+
+.navbar {
+  backdrop-filter: saturate(150%) blur(14px);
+  -webkit-backdrop-filter: saturate(150%) blur(14px);
+  border-bottom: 1px solid var(--ifm-toc-border-color);
+}
+.navbar__title {
+  font-family: var(--ifm-heading-font-family);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.navbar__link {
+  font-weight: 500;
+}
+.navbar__link--active {
+  color: var(--ifm-heading-color);
+}
+
+/* External-link mark on the navbar item. */
+.navbar__item svg[class*='iconExternalLink'] {
+  opacity: 0.55;
+}
+
+/* ==========================================================================
+   Typography
+   ========================================================================== */
+
+.markdown h1,
+.markdown h2,
+.markdown h3 {
+  letter-spacing: -0.018em;
+}
+
+/* Hero: the first heading gets the beam bar drawn from the mark. */
+.markdown > h1:first-child {
+  font-size: clamp(2.3rem, 1.6rem + 2.6vw, 3.1rem);
+  font-weight: 600;
+  line-height: 1.08;
+  margin-bottom: 1.6rem;
+}
+.markdown > h1:first-child::after {
+  content: '';
+  display: block;
+  width: 60px;
+  height: 3px;
+  margin-top: 0.85rem;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--enclave-beam), var(--enclave-cyan));
+}
+
+/* Section headings: a hairline rule encodes the break between sections. */
+.markdown > h2 {
+  font-size: 1.6rem;
+  margin-top: 2.8rem;
+  padding-top: 1.6rem;
+  border-top: 1px solid var(--ifm-hr-border-color);
+}
+.markdown > h2:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+.markdown > h3 {
+  font-size: 1.22rem;
+  margin-top: 2rem;
+}
+
+/* Links: quiet by default, beam underline grows on hover. */
+.markdown a:not(.card):not(.button) {
+  text-decoration: none;
+  background-image: linear-gradient(var(--enclave-beam), var(--enclave-beam));
+  background-size: 0% 1.5px;
+  background-position: 0 100%;
+  background-repeat: no-repeat;
+  transition: background-size var(--ifm-transition-fast) ease;
+}
+.markdown a:not(.card):not(.button):hover {
+  background-size: 100% 1.5px;
+}
+
+/* ==========================================================================
+   Code
+   ========================================================================== */
+
+code {
+  background-color: var(--ifm-background-surface-color);
+  border: 1px solid var(--ifm-toc-border-color);
+  border-radius: 6px;
+  font-weight: 500;
+}
+.markdown a code {
+  color: var(--ifm-color-primary);
+}
+
+div[class^='codeBlockContainer'],
+.theme-code-block {
+  border-radius: var(--ifm-border-radius);
+  box-shadow: 0 1px 2px rgba(11, 28, 51, 0.06), 0 8px 24px -16px rgba(11, 28, 51, 0.4);
+}
+[data-theme='dark'] div[class^='codeBlockContainer'],
+[data-theme='dark'] .theme-code-block {
+  box-shadow: 0 0 0 1px var(--ifm-toc-border-color);
+}
+.theme-code-block pre code {
+  border: 0;
+  background: transparent;
+}
+
+/* ==========================================================================
+   Admonitions — left beam bar, tinted to the palette.
+   ========================================================================== */
+
+.theme-admonition {
+  border: 1px solid var(--ifm-toc-border-color);
+  border-left-width: 3px;
+  border-radius: 10px;
+  background: var(--ifm-background-surface-color);
+  box-shadow: none;
+}
+.theme-admonition-info {
+  border-left-color: var(--enclave-beam);
+}
+.theme-admonition-warning,
+.theme-admonition-caution {
+  border-left-color: var(--enclave-amber);
+}
+
+/* ==========================================================================
+   Sidebar & table of contents — active state carries a beam edge.
+   ========================================================================== */
+
+.menu {
+  font-size: 0.9rem;
+  padding: 0.75rem !important;
+}
+.menu__link {
+  border-radius: 8px;
+  font-weight: 500;
+  transition: background var(--ifm-transition-fast) ease, color var(--ifm-transition-fast) ease;
+}
+.menu__link--active:not(.menu__link--sublist) {
+  font-weight: 600;
+  box-shadow: inset 2px 0 0 var(--enclave-beam);
+}
+.menu__list-item-collapsible {
+  border-radius: 8px;
+}
+
+.table-of-contents {
+  font-size: 0.82rem;
+  border-left: 1px solid var(--ifm-toc-border-color);
+}
+.table-of-contents__link--active {
+  color: var(--ifm-heading-color);
+  font-weight: 600;
+}
+.table-of-contents__link:hover {
+  color: var(--ifm-color-primary);
+}
+
+/* ==========================================================================
+   Tables
+   ========================================================================== */
+
+.markdown table {
+  border: 1px solid var(--ifm-toc-border-color);
+  border-radius: 10px;
+  border-collapse: separate;
+  border-spacing: 0;
+  overflow: hidden;
+}
+.markdown table thead {
+  background: var(--ifm-background-surface-color);
+}
+.markdown table thead tr {
+  border-bottom: 1px solid var(--ifm-toc-border-color);
+}
+.markdown table th,
+.markdown table td {
+  border: 0;
+  border-bottom: 1px solid var(--ifm-toc-border-color);
+}
+.markdown table tbody tr:last-child td {
+  border-bottom: 0;
+}
+.markdown table tr:nth-child(2n) {
+  background: transparent;
+}
+
+/* ==========================================================================
+   Pagination (prev / next) — bounded modules that lift on hover.
+   ========================================================================== */
+
+.pagination-nav__link {
+  border: 1px solid var(--ifm-toc-border-color);
+  border-radius: 12px;
+  transition: border-color var(--ifm-transition-fast) ease, transform var(--ifm-transition-fast) ease;
+}
+.pagination-nav__link:hover {
+  border-color: var(--enclave-beam);
+  transform: translateY(-2px);
+}
+.pagination-nav__sublabel {
+  color: var(--ifm-color-content-secondary);
+}
+
+/* ==========================================================================
+   Buttons
+   ========================================================================== */
+
+.button {
+  font-weight: 600;
+  letter-spacing: -0.005em;
+}
+
+/* ==========================================================================
+   Footer — the deep-navy anchor, matched to the mark, with a top glow line.
+   ========================================================================== */
+
+.footer {
+  --ifm-footer-color: #b0c1db;
+  --ifm-footer-link-color: #b0c1db;
+  --ifm-footer-title-color: #eaf2ff;
+  border-top: 1px solid rgba(90, 168, 255, 0.18);
+  position: relative;
+}
+.footer::before {
+  content: '';
+  position: absolute;
+  inset: -1px 0 auto 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--enclave-cyan), transparent);
+  opacity: 0.5;
+}
+.footer__link-item:hover {
+  color: #ffffff;
+}
+.footer__copyright {
+  color: #6b7791;
+  font-size: 0.85rem;
+}
+
+/* ==========================================================================
+   Signature modules — problem / solution boxes as framed enclosures.
+   Precision crop-mark corners (top-left, bottom-right) evoke a bounded
+   container; the border lights to the beam on hover.
+   ========================================================================== */
+
+.enclave-cards {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 16px;
+  margin: 1.5rem 0 2rem;
+}
+.enclave-box {
+  position: relative;
+  background: var(--ifm-background-surface-color);
+  border: 1px solid var(--ifm-toc-border-color);
+  border-radius: 14px;
+  padding: 20px 22px;
+  transition: border-color var(--ifm-transition-fast) ease, transform var(--ifm-transition-fast) ease,
+    box-shadow var(--ifm-transition-fast) ease;
+}
+/* Crop-mark corners: the enclave perimeter. */
+.enclave-box::before,
+.enclave-box::after {
+  content: '';
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  border-color: var(--enclave-beam);
+  border-style: solid;
+  opacity: 0.45;
+  transition: opacity var(--ifm-transition-fast) ease;
+}
+.enclave-box::before {
+  top: 9px;
+  left: 9px;
+  border-width: 1.5px 0 0 1.5px;
+  border-top-left-radius: 4px;
+}
+.enclave-box::after {
+  bottom: 9px;
+  right: 9px;
+  border-width: 0 1.5px 1.5px 0;
+  border-bottom-right-radius: 4px;
+}
+.enclave-box:hover {
+  border-color: var(--enclave-beam);
+  transform: translateY(-2px);
+  box-shadow: 0 14px 30px -20px rgba(26, 93, 240, 0.55);
+}
+.enclave-box:hover::before,
+.enclave-box:hover::after {
+  opacity: 1;
+}
+.enclave-box .box-title {
+  font-family: var(--ifm-heading-font-family);
+  font-weight: 600;
+  font-size: 1.02rem;
+  color: var(--ifm-heading-color);
+  margin-bottom: 8px;
+  padding: 0 4px;
+}
+.enclave-box p {
+  margin: 0;
+  padding: 0 4px;
+  font-size: 0.9rem;
+  color: var(--ifm-color-content-secondary);
+  line-height: 1.6;
+}
+
+@media (max-width: 768px) {
+  .enclave-cards {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ==========================================================================
+   Support providers — stackable full-width cards for commercial support
+   listings. Reuses the crop-mark perimeter language from .enclave-box.
+   ========================================================================== */
+
+.enclave-providers {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 20px;
+  margin: 1.5rem 0 2rem;
+}
+
+.enclave-provider {
+  position: relative;
+  background: var(--ifm-background-surface-color);
+  border: 1px solid var(--ifm-toc-border-color);
+  border-radius: 14px;
+  padding: 24px 26px;
+  transition: border-color var(--ifm-transition-fast) ease, transform var(--ifm-transition-fast) ease,
+    box-shadow var(--ifm-transition-fast) ease;
+}
+.enclave-provider::before,
+.enclave-provider::after {
+  content: '';
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  border-color: var(--enclave-beam);
+  border-style: solid;
+  opacity: 0.45;
+  transition: opacity var(--ifm-transition-fast) ease;
+}
+.enclave-provider::before {
+  top: 9px;
+  left: 9px;
+  border-width: 1.5px 0 0 1.5px;
+  border-top-left-radius: 4px;
+}
+.enclave-provider::after {
+  bottom: 9px;
+  right: 9px;
+  border-width: 0 1.5px 1.5px 0;
+  border-bottom-right-radius: 4px;
+}
+.enclave-provider:hover {
+  border-color: var(--enclave-beam);
+  box-shadow: 0 14px 30px -20px rgba(26, 93, 240, 0.55);
+}
+.enclave-provider:hover::before,
+.enclave-provider:hover::after {
+  opacity: 1;
+}
+
+.enclave-provider-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 0.4rem;
+}
+.enclave-provider-logo {
+  display: inline-flex;
+  align-items: center;
+  line-height: 0;
+  background-image: none !important;
+}
+.enclave-provider-logo img {
+  height: 34px;
+  width: auto;
+  max-width: 100%;
+  display: block;
+}
+.enclave-provider-site {
+  font-family: var(--ifm-font-family-monospace);
+  font-size: 0.85rem;
+  color: var(--ifm-color-content-secondary);
+}
+
+.enclave-provider > p {
+  color: var(--ifm-color-content);
+  margin: 0.35rem 0 1rem;
+}
+
+.enclave-provider-services {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 1.1rem;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 8px 20px;
+}
+.enclave-provider-services li {
+  position: relative;
+  padding-left: 20px;
+  font-size: 0.92rem;
+  color: var(--ifm-color-content);
+  line-height: 1.5;
+}
+.enclave-provider-services li::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0.55rem;
+  width: 10px;
+  height: 2px;
+  background: var(--enclave-beam);
+  border-radius: 2px;
+  opacity: 0.8;
+}
+
+.enclave-provider-cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35em;
+  font-weight: 600;
+  color: var(--ifm-color-primary);
+  white-space: nowrap;
+}
+.enclave-provider-cta-arrow {
+  display: inline-block;
+  transition: transform var(--ifm-transition-fast) ease;
+  font-family: var(--ifm-font-family-base);
+}
+.enclave-provider-cta:hover .enclave-provider-cta-arrow {
+  transform: translateX(2px);
+}
+
+/* ==========================================================================
+   Architecture diagram wrapper.
+   ========================================================================== */
+
+.enclave-diagram {
+  background: var(--ifm-background-color);
+  border: 1px solid var(--ifm-toc-border-color);
+  border-radius: 16px;
+  padding: 26px 22px 16px;
+  box-shadow: 0 1px 2px rgba(11, 28, 51, 0.05), 0 20px 40px -30px rgba(11, 28, 51, 0.5);
+  margin: 1.75rem 0 0.5rem;
+}
+.enclave-diagram svg,
+.enclave-diagram img {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+.enclave-caption {
+  color: var(--ifm-color-content-secondary);
+  font-size: 0.88rem;
+  margin-top: 0.75rem;
+  text-align: center;
+}
+
+/* ==========================================================================
+   Motion & focus — quality floor.
+   ========================================================================== */
+
+.markdown a:focus-visible,
+.menu__link:focus-visible,
+.navbar__link:focus-visible,
+.pagination-nav__link:focus-visible {
+  outline: 2px solid var(--enclave-beam);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition: none !important;
+    scroll-behavior: auto !important;
+  }
+}

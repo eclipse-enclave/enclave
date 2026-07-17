@@ -1,0 +1,27 @@
+{
+  "name": "mistral-vibe",
+  "command": "vibe",
+  "continue_args": [
+    "--continue"
+  ],
+  "yolo_flag": "--agent auto-approve",
+  "yolo_enabled": true,
+  "config_dir": ".vibe",
+  "skills_dir": ".vibe/skills",
+  "settings_file": "mistral-vibe-config.toml",
+  "settings_target": ".vibe/config.toml",
+  "passthrough_paths": [
+    "config.toml",
+    "agents/",
+    "prompts/",
+    "skills/"
+  ],
+  "providers": [
+    {
+      "name": "mistral"
+    }
+  ],
+  "host_config_dir": "",
+  "host_credentials_file": "",
+  "host_oauth_json": ""
+}

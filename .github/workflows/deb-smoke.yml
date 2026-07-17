@@ -1,0 +1,27 @@
+# Copyright (C) 2026 EclipseSource GmbH and others.
+#
+# This program and the accompanying materials are made available under the
+# terms of the MIT License, which is available in the project root.
+#
+# SPDX-License-Identifier: MIT
+
+name: Debian Package Smoke Test
+
+on:
+  workflow_dispatch:
+  pull_request:
+
+concurrency:
+  group: deb-smoke-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build-deb:
+    uses: ./.github/workflows/reusable-deb-build.yml
+    with:
+      runner: ubuntu-24.04
+      artifact_name: deb
+      artifact_retention_days: 7

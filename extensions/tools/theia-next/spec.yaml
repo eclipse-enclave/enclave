@@ -1,0 +1,34 @@
+# Copyright (C) 2026 EclipseSource GmbH and others.
+#
+# This program and the accompanying materials are made available under the
+# terms of the MIT License, which is available in the project root.
+#
+# SPDX-License-Identifier: MIT
+
+schemaVersion: "1"
+kind: sandbox
+name: theia-next
+displayName: Theia IDE (Next)
+description: Theia Next (preview) desktop IDE attached to an enclave container
+
+sandbox:
+  entrypoint: { run: [sleep, infinity] }
+  configDir: .theia
+
+postStart:
+  openIDE: theia-next
+
+credentials:
+  sources:
+    anthropic-api-key: { env: [ANTHROPIC_API_KEY] }
+
+network:
+  serviceDomains:
+    api.anthropic.com: anthropic-api-key
+    "*.anthropic.com": anthropic-api-key
+  serviceAuth:
+    anthropic-api-key: { headerName: x-api-key }
+
+providers:
+  - name: anthropic
+    credentials: [anthropic-api-key]

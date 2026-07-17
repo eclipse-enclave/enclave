@@ -1,0 +1,13 @@
+{
+  "type": "mixin",
+  "name": "debug-tools",
+  "description": "Debugging tools (gdb, strace, ltrace, etc.)",
+  "apt_packages": [
+    "gdb",
+    "ltrace",
+    "strace",
+    "lsof",
+    "tcpdump"
+  ],
+  "priority": 80
+}

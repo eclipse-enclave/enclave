@@ -1,0 +1,88 @@
+# Copyright (C) 2026 EclipseSource GmbH and others.
+#
+# This program and the accompanying materials are made available under the
+# terms of the MIT License, which is available in the project root.
+#
+# SPDX-License-Identifier: MIT
+
+name: Reusable Debian Package Build
+
+on:
+  workflow_call:
+    inputs:
+      runner:
+        description: GitHub runner image for the Debian package build.
+        required: false
+        type: string
+        default: ubuntu-24.04
+      artifact_name:
+        description: Uploaded artifact name.
+        required: false
+        type: string
+        default: deb
+      artifact_retention_days:
+        description: Uploaded artifact retention in days.
+        required: false
+        type: number
+        default: 7
+      set_package_version:
+        description: Rewrite the Debian changelog entry for rolling builds.
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  build-deb:
+    runs-on: ${{ inputs.runner }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: go.mod
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y debhelper devscripts
+
+      - name: Set package version
+        if: inputs.set_package_version
+        env:
+          DEBEMAIL: rolling@build
+          DEBFULLNAME: Rolling Build
+        run: |
+          NEXT_VERSION=$(grep '^VERSION ?=' Makefile | cut -d'=' -f2 | tr -d ' ' | awk -F. 'BEGIN{OFS="."}{$NF=$NF+1; print}')
+          VERSION="${NEXT_VERSION}~git.$(date -u +%Y%m%d).${GITHUB_RUN_NUMBER}.${GITHUB_SHA::8}"
+          dch --newversion "${VERSION}-1" \
+              --distribution unstable \
+              "Rolling release, commit ${GITHUB_SHA::8}, $(date -u +%Y-%m-%d)"
+
+      - name: Build Debian package
+        run: make deb-quick
+
+      - name: Verify packaged runtime assets
+        run: |
+          pkg=$(ls dist/enclave_*.deb)
+          tmpdir=$(mktemp -d)
+          trap 'rm -rf "$tmpdir"' EXIT
+          dpkg-deb -x "$pkg" "$tmpdir"
+
+          root="$tmpdir/usr/share/enclave"
+          test -f "$root/.dockerignore"
+          test -f "$root/Dockerfile"
+          test -f "$root/Dockerfile.gateway"
+          test ! -e "$root/AGENTS.md"
+          test ! -e "$root/CLAUDE.md"
+          diff -qr docs "$root/docs"
+          test -f "$tmpdir/usr/share/doc/enclave/LICENSE.md"
+          test -f "$tmpdir/usr/share/doc/enclave/NOTICE.md"
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ${{ inputs.artifact_name }}
+          path: dist/*.deb
+          retention-days: ${{ inputs.artifact_retention_days }}

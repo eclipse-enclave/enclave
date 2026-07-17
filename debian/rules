@@ -1,0 +1,87 @@
+#!/usr/bin/make -f
+# Copyright (C) 2026 EclipseSource GmbH and others.
+#
+# This program and the accompanying materials are made available under the
+# terms of the MIT License, which is available in the project root.
+#
+# SPDX-License-Identifier: MIT
+
+export DH_VERBOSE = 1
+export GOCACHE = $(CURDIR)/.gocache
+export GOMODCACHE = $(CURDIR)/.gomodcache
+export GO111MODULE = on
+
+GATEWAY_PROXY_SOURCE_PATHS_FILE := $(CURDIR)/internal/gateway/gateway_proxy_build_inputs.txt
+
+%:
+	dh $@
+
+override_dh_auto_build:
+	go mod vendor -modcacherw
+	mkdir -p bin
+	go build -mod=vendor -o bin/enclave ./cmd/enclave
+	mkdir -p completions
+	bin/enclave completion bash > completions/enclave
+
+override_dh_auto_install:
+	# Install binary
+	install -D -m 0755 bin/enclave $(CURDIR)/debian/enclave/usr/share/enclave/enclave
+
+	# Create symlink in /usr/bin
+	mkdir -p $(CURDIR)/debian/enclave/usr/bin
+	ln -s ../share/enclave/enclave $(CURDIR)/debian/enclave/usr/bin/enclave
+
+	# Install container files and build context assets
+	install -D -m 0644 Dockerfile $(CURDIR)/debian/enclave/usr/share/enclave/Dockerfile
+	install -D -m 0644 Dockerfile.gateway $(CURDIR)/debian/enclave/usr/share/enclave/Dockerfile.gateway
+	install -D -m 0755 entrypoint.sh $(CURDIR)/debian/enclave/usr/share/enclave/entrypoint.sh
+	install -D -m 0755 gateway-entrypoint.sh $(CURDIR)/debian/enclave/usr/share/enclave/gateway-entrypoint.sh
+	install -D -m 0644 .dockerignore $(CURDIR)/debian/enclave/usr/share/enclave/.dockerignore
+	install -D -m 0644 LICENSE.md $(CURDIR)/debian/enclave/usr/share/doc/enclave/LICENSE.md
+	install -D -m 0644 NOTICE.md $(CURDIR)/debian/enclave/usr/share/doc/enclave/NOTICE.md
+	mkdir -p $(CURDIR)/debian/enclave/usr/share/enclave/docs
+	cp -a docs/. $(CURDIR)/debian/enclave/usr/share/enclave/docs/
+	chmod -R u+rwX,go+rX $(CURDIR)/debian/enclave/usr/share/enclave/docs
+
+	# Keep executable-asset rules below in sync with Dockerfile, Makefile,
+	# internal/app/build_permissions.go, and internal/app/dockerfile_gen.go.
+	# Install extensions
+	mkdir -p $(CURDIR)/debian/enclave/usr/share/enclave/extensions
+	cp -R extensions/tools $(CURDIR)/debian/enclave/usr/share/enclave/extensions/
+	cp -R extensions/features $(CURDIR)/debian/enclave/usr/share/enclave/extensions/
+	chmod -R u+rwX,go+rX $(CURDIR)/debian/enclave/usr/share/enclave/extensions
+	find $(CURDIR)/debian/enclave/usr/share/enclave/extensions -type f -name install.sh -exec chmod a+rx {} +
+
+	# Install runtime assets
+	mkdir -p $(CURDIR)/debian/enclave/usr/share/enclave/runtime-assets
+	cp -R runtime-assets/. $(CURDIR)/debian/enclave/usr/share/enclave/runtime-assets/
+	chmod -R u+rwX,go+rX $(CURDIR)/debian/enclave/usr/share/enclave/runtime-assets
+	find $(CURDIR)/debian/enclave/usr/share/enclave/runtime-assets/build-scripts -type f \( -name '*.sh' -o -path '*/bin/*' \) -exec chmod a+rx {} +
+
+	# Install gateway proxy Go sources required by Dockerfile.gateway build stage
+	# Clear previously staged Go sources first; cp -r never deletes, so files removed upstream would otherwise linger.
+	rm -rf $(CURDIR)/debian/enclave/usr/share/enclave/internal $(CURDIR)/debian/enclave/usr/share/enclave/cmd $(CURDIR)/debian/enclave/usr/share/enclave/go.mod $(CURDIR)/debian/enclave/usr/share/enclave/go.sum
+	while IFS= read -r path; do \
+		case "$$path" in ""|\#*) continue ;; esac; \
+		dest="$(CURDIR)/debian/enclave/usr/share/enclave/$$(dirname "$$path")"; \
+		mkdir -p "$$dest"; \
+		cp -r "$$path" "$$dest/"; \
+	done < $(GATEWAY_PROXY_SOURCE_PATHS_FILE)
+
+	# Install bash completions
+	install -D -m 0644 completions/enclave \
+		$(CURDIR)/debian/enclave/usr/share/bash-completion/completions/enclave
+
+	# Install documentation
+	install -D -m 0644 README.md $(CURDIR)/debian/enclave/usr/share/doc/enclave/README.md
+	install -D -m 0644 docs/ARCHITECTURE.md $(CURDIR)/debian/enclave/usr/share/doc/enclave/ARCHITECTURE.md
+	install -D -m 0644 docs/extensions/README.md $(CURDIR)/debian/enclave/usr/share/doc/enclave/EXTENSIONS.md
+
+override_dh_auto_test:
+	# No tests yet
+
+override_dh_auto_clean:
+	rm -rf bin completions vendor .gocache .gomodcache
+
+override_dh_dwz:
+	# Skip dwz - Go binaries use compressed debug info which dwz doesn't handle

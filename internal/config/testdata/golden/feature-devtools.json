@@ -1,0 +1,23 @@
+{
+  "type": "mixin",
+  "name": "devtools",
+  "description": "Core development tools (vim, htop, ripgrep, etc.)",
+  "apt_packages": [
+    "vim",
+    "nano",
+    "htop",
+    "tree",
+    "golang-go",
+    "shellcheck",
+    "yq",
+    "ripgrep",
+    "fd-find",
+    "netcat-openbsd",
+    "socat",
+    "dnsutils",
+    "iputils-ping",
+    "xxd"
+  ],
+  "default_enabled": true,
+  "priority": 40
+}

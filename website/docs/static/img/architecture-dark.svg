@@ -1,0 +1,67 @@
+<svg viewBox="0 0 760 322" width="760" height="322" xmlns="http://www.w3.org/2000/svg" font-family="'IBM Plex Sans', system-ui, sans-serif" role="img" aria-label="Eclipse Enclave architecture: the developer passes a git worktree, extra mounts, and secrets into an isolated Docker container whose outbound traffic passes through a filtering gateway">
+  <defs>
+    <marker id="a" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><polygon points="0 0, 7 3, 0 6" fill="#8b93a3"/></marker>
+    <marker id="a-ac" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><polygon points="0 0, 7 3, 0 6" fill="#7bb0ff"/></marker>
+    <marker id="a-am" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><polygon points="0 0, 7 3, 0 6" fill="#d0954a"/></marker>
+    <marker id="a-gn" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><polygon points="0 0, 7 3, 0 6" fill="#10b981"/></marker>
+    <marker id="a-rd" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><polygon points="0 0, 7 3, 0 6" fill="#ef4444"/></marker>
+  </defs>
+
+  <!-- Developer + what the developer passes in (each aligned to its container row) -->
+  <rect x="16" y="50" width="140" height="46" rx="12" fill="#12294a" stroke="#2f4d78" stroke-width="1.5"/>
+  <text x="86" y="72" text-anchor="middle" font-size="12.5" font-weight="700" fill="#bcd3ff">Developer</text>
+  <text x="86" y="87" text-anchor="middle" font-size="9.5" fill="#9aa2b1">CLI</text>
+
+  <rect x="16" y="104" width="140" height="30" rx="8" fill="#0f2036" stroke="#1c3559"/>
+  <text x="86" y="123" text-anchor="middle" font-size="10.5" fill="#e5e7eb">Git worktree</text>
+  <rect x="16" y="140" width="140" height="30" rx="8" fill="#0f2036" stroke="#1c3559"/>
+  <text x="86" y="159" text-anchor="middle" font-size="10.5" fill="#e5e7eb">Extra mounts</text>
+  <rect x="16" y="176" width="140" height="42" rx="8" fill="#0f2444" stroke="#2f4d78"/>
+  <text x="86" y="194" text-anchor="middle" font-size="10.5" fill="#e5e7eb">Secrets <tspan fill="#a9cdff" font-weight="700">••••••</tspan></text>
+  <text x="86" y="209" text-anchor="middle" font-size="8.5" fill="#9aa2b1">masked for HTTP release</text>
+
+  <!-- Horizontal feeds into the container -->
+  <line x1="156" y1="73" x2="252" y2="73" stroke="#7bb0ff" stroke-width="1.6" marker-end="url(#a-ac)"/>
+  <text x="204" y="66" text-anchor="middle" font-size="9" fill="#9aa2b1">manages</text>
+  <line x1="156" y1="119" x2="252" y2="119" stroke="#8b93a3" stroke-width="1.3" stroke-dasharray="4 3" marker-end="url(#a)"/>
+  <line x1="156" y1="155" x2="252" y2="155" stroke="#8b93a3" stroke-width="1.3" stroke-dasharray="4 3" marker-end="url(#a)"/>
+  <line x1="156" y1="197" x2="252" y2="197" stroke="#8b93a3" stroke-width="1.3" stroke-dasharray="4 3" marker-end="url(#a)"/>
+
+  <!-- Container -->
+  <rect x="252" y="16" width="276" height="298" rx="14" fill="#0c1f3a" stroke="#7bb0ff" stroke-width="1.8"/>
+  <text x="390" y="37" text-anchor="middle" font-size="11.5" font-weight="800" letter-spacing="0.06em" fill="#a9cdff">CONTAINER</text>
+  <rect x="270" y="50" width="240" height="46" rx="10" fill="#12294a" stroke="#2f4d78"/>
+  <text x="390" y="70" text-anchor="middle" font-size="12" font-weight="700" fill="#f3f4f6">AI coding agent</text>
+  <text x="390" y="85" text-anchor="middle" font-size="9" fill="#aab2c0">Claude · Codex · Gemini · …</text>
+  <rect x="270" y="104" width="240" height="30" rx="8" fill="#0f2036" stroke="#1c3559"/>
+  <text x="390" y="123" text-anchor="middle" font-size="10.5" fill="#e5e7eb">Mounted git worktree</text>
+  <rect x="270" y="140" width="240" height="30" rx="8" fill="#0f2036" stroke="#1c3559"/>
+  <text x="390" y="159" text-anchor="middle" font-size="10.5" fill="#e5e7eb">Extra mounts (docs, deps)</text>
+  <rect x="270" y="176" width="240" height="42" rx="8" fill="#0f2444" stroke="#2f4d78"/>
+  <text x="390" y="194" text-anchor="middle" font-size="9.5" font-family="'JetBrains Mono', monospace" fill="#aab2c0">ANTHROPIC_API_KEY=<tspan fill="#a9cdff" font-weight="700">••••••</tspan></text>
+  <text x="390" y="209" text-anchor="middle" font-size="8.5" fill="#9aa2b1">masked for HTTP release</text>
+  <text x="390" y="240" text-anchor="middle" font-size="9.5" fill="#9aa2b1">Default Docker backend</text>
+  <text x="390" y="256" text-anchor="middle" font-size="9.5" fill="#9aa2b1">Isolated filesystem and network</text>
+
+  <!-- Container to gateway -->
+  <line x1="528" y1="73" x2="584" y2="73" stroke="#d0954a" stroke-width="1.6" marker-end="url(#a-am)"/>
+  <text x="556" y="66" text-anchor="middle" font-size="9" fill="#9aa2b1">all traffic</text>
+
+  <!-- Gateway -->
+  <rect x="584" y="16" width="160" height="150" rx="14" fill="#0c1f3a" stroke="#d0954a" stroke-width="1.8"/>
+  <text x="664" y="37" text-anchor="middle" font-size="11.5" font-weight="800" letter-spacing="0.06em" fill="#e0a458">GATEWAY</text>
+  <rect x="598" y="50" width="132" height="30" rx="8" fill="#2a2416" stroke="#6b5320"/>
+  <text x="664" y="69" text-anchor="middle" font-size="10" fill="#e0c088">DNS allowlist</text>
+  <rect x="598" y="86" width="132" height="30" rx="8" fill="#2a2416" stroke="#6b5320"/>
+  <text x="664" y="105" text-anchor="middle" font-size="10" fill="#e0c088">Transparent proxy</text>
+  <rect x="598" y="122" width="132" height="30" rx="8" fill="#2a2416" stroke="#6b5320"/>
+  <text x="664" y="141" text-anchor="middle" font-size="10" fill="#e0c088">Request log</text>
+
+  <!-- Outputs -->
+  <line x1="622" y1="166" x2="622" y2="194" stroke="#10b981" stroke-width="1.5" marker-end="url(#a-gn)"/>
+  <line x1="706" y1="166" x2="706" y2="194" stroke="#ef4444" stroke-width="1.5" marker-end="url(#a-rd)"/>
+  <rect x="584" y="196" width="76" height="36" rx="18" fill="#0f2a20" stroke="#157f5f"/>
+  <text x="622" y="219" text-anchor="middle" font-size="10.5" font-weight="600" fill="#6ee7b7">Allowed</text>
+  <rect x="668" y="196" width="76" height="36" rx="18" fill="#2a1414" stroke="#7f2a2a"/>
+  <text x="706" y="219" text-anchor="middle" font-size="10.5" font-weight="600" fill="#fca5a5">Blocked</text>
+</svg>

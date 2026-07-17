@@ -1,0 +1,24 @@
+{
+  "type": "sandbox",
+  "name": "codex",
+  "description": "OpenAI Codex CLI",
+  "default_included": true,
+  "priority": 100,
+  "secrets": {
+    "openai-api-key": {
+      "env_vars": [
+        "OPENAI_API_KEY"
+      ],
+      "release": {
+        "http": {
+          "hosts": [
+            "*.openai.com",
+            "api.openai.com"
+          ],
+          "header": "authorization",
+          "format": "Bearer %s"
+        }
+      }
+    }
+  }
+}

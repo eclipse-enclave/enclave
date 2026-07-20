@@ -922,7 +922,7 @@ func OptionDefs() []OptionDef {
 			CLIFlags: []CLIFlagDef{
 				{
 					Name:                "-p",
-					Usage:               "Forward port to container",
+					Usage:               "Publish a container port to the host (e.g. 5391, 8080:80, or 0:5391 for an auto-assigned host port, Docker only)",
 					ValueKind:           CLIValueRequired,
 					MissingValueMessage: "-p requires a value",
 					Action: CLIAction{

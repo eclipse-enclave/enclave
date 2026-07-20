@@ -38,8 +38,15 @@ func SetLevel(value string) {
 	}
 }
 
+// isRawTTY is a variable so tests can stub the terminal state.
+var isRawTTY = writerIsRawTTY
+
 func logf(w io.Writer, label string, color Color, format string, args ...any) {
-	_, _ = fmt.Fprintf(w, "%s"+format+"\n", append([]any{colorPrefix(label, color)}, args...)...)
+	prefix, ending := "", "\n"
+	if isRawTTY(w) {
+		prefix, ending = "\r", "\r\n"
+	}
+	_, _ = fmt.Fprintf(w, prefix+"%s"+format+ending, append([]any{colorPrefix(label, color)}, args...)...)
 }
 
 func Infof(format string, args ...any) {

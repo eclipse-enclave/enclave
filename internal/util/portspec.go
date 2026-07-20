@@ -17,9 +17,16 @@ import (
 //
 //	"3000"                -> ("", "3000", "3000", true)
 //	"8080:80"             -> ("", "8080", "80",  true)
+//	"0:80"                -> ("", "0", "80", true)          // OS-assigned host port
 //	"127.0.0.1:8080:80"   -> ("127.0.0.1", "8080", "80", true)
+//	"127.0.0.1:0:80"      -> ("127.0.0.1", "0", "80", true) // OS-assigned host port
 //	"0.0.0.0:8080:80"     -> ("0.0.0.0", "8080", "80", true)
 //	"[::1]:8080:80"       -> ("[::1]", "8080", "80", true)
+//
+// A host port of "0" is Docker's sentinel for "assign a free host port at
+// runtime"; the actual port is discoverable afterwards via the container's
+// published-port bindings. "0" is only accepted in the host-port position: a
+// bare "0" or a "0" container port stays invalid.
 //
 // hostIP is empty when the spec omits it; callers decide the default (the run
 // path defaults to loopback). ok is false for malformed specs.
@@ -36,10 +43,17 @@ func ParsePortSpec(value string) (hostIP, hostPort, containerPort string, ok boo
 		return ip, rest, rest, true
 	}
 	parts := strings.Split(rest, ":")
-	if len(parts) != 2 || !IsPortNumber(parts[0]) || !IsPortNumber(parts[1]) {
+	if len(parts) != 2 || !isHostPort(parts[0]) || !IsPortNumber(parts[1]) {
 		return "", "", "", false
 	}
 	return ip, parts[0], parts[1], true
+}
+
+// isHostPort reports whether s is valid in the host-port position of a publish
+// spec. This is a real port number or Docker's "0" sentinel requesting an
+// OS-assigned host port.
+func isHostPort(s string) bool {
+	return s == "0" || IsPortNumber(s)
 }
 
 // SplitPortMapping returns the host and container ports of a publish spec,

@@ -52,6 +52,23 @@ func TestResolvePortsThreePartSpec(t *testing.T) {
 	}
 }
 
+// A host port of "0" requests an OS-assigned port; it must survive parsing
+// with the sentinel intact (and its host-IP default applied) so the backend
+// emits a Docker "--publish" that lets the daemon pick a free host port.
+func TestResolvePortsAutoAssignedHostPort(t *testing.T) {
+	cases := map[string]string{
+		"0:5391":           "127.0.0.1", // host-IP defaults to loopback
+		"127.0.0.1:0:5391": "127.0.0.1",
+		"0.0.0.0:0:5391":   "0.0.0.0", // explicit non-loopback opt-in
+	}
+	for spec, wantIP := range cases {
+		got := singleMapping(t, spec)
+		if got.HostIP != wantIP || got.HostPort != "0" || got.ContainerPort != "5391" {
+			t.Fatalf("ResolvePorts([%s]) = %+v, want %s:0->5391", spec, got, wantIP)
+		}
+	}
+}
+
 func TestResolvePortsIgnoresInvalidAndEmpty(t *testing.T) {
 	mappings := ResolvePorts([]string{"", "  ", "bogus", "1:2:3"})
 	if len(mappings) != 0 {

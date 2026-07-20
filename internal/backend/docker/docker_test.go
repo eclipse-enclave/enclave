@@ -371,6 +371,24 @@ func TestSessionPortMappingsSortsAndDropsUnbound(t *testing.T) {
 	}
 }
 
+// A host port of "0" is Docker's request for an OS-assigned port and must be
+// preserved as a binding (so `--publish` lets the daemon pick a free port),
+// while a genuinely empty host port stays dropped.
+func TestPortMapKeepsAutoAssignedHostPort(t *testing.T) {
+	bindings := portMap([]backend.PortMapping{
+		{HostIP: "127.0.0.1", HostPort: "0", ContainerPort: "5391", Protocol: "tcp"},
+		{HostIP: "127.0.0.1", HostPort: "", ContainerPort: "9229", Protocol: "tcp"},
+	})
+
+	auto := bindings["5391/tcp"]
+	if len(auto) != 1 || auto[0].HostIP != "127.0.0.1" || auto[0].HostPort != "0" {
+		t.Fatalf("auto-assigned binding = %+v, want one 127.0.0.1:0 binding", auto)
+	}
+	if _, ok := bindings["9229/tcp"]; ok {
+		t.Fatalf("empty host port should be dropped, got %+v", bindings["9229/tcp"])
+	}
+}
+
 func TestFillGatewayPortsReadsBindingFromGatewayContainer(t *testing.T) {
 	var inspected []string
 	containerInspectMany = func(_ context.Context, ids []string) ([]dockercmd.InspectResponse, error) {

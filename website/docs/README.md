@@ -1,8 +1,9 @@
 # Eclipse Enclave Documentation
 
 [Docusaurus](https://docusaurus.io/) site for the Eclipse Enclave docs. It is
-served under `/docs/` beneath the static marketing site in `../`. Automated
-deployment is not wired up yet; the docs are built and published manually for now.
+served under `/docs/` beneath the static marketing site in `../`. The combined
+site is built by `website/build.sh` and published to GitHub Pages by the
+workflows in `.github/workflows/website-*.yml`.
 
 ## Develop
 

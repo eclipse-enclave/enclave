@@ -1,0 +1,53 @@
+# Copyright (C) 2026 EclipseSource GmbH and others.
+#
+# This program and the accompanying materials are made available under the
+# terms of the MIT License, which is available in the project root.
+#
+# SPDX-License-Identifier: MIT
+
+name: Deploy website
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - "website/**"
+      - ".github/workflows/website-publish.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One production deploy at a time; never cancel an in-progress publish.
+concurrency:
+  group: "website-publish"
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Use Node.js 22.x
+        uses: actions/setup-node@6044e13b5dc448c55e2357c09f80417699197238 # v6.2.0
+        with:
+          node-version: "22.x"
+      - name: Build site
+        env:
+          DOCS_BASE_URL: /enclave/docs/
+        run: ./website/build.sh
+      - name: Publish to enclave-website (gh-pages)
+        uses: peaceiris/actions-gh-pages@4f9cc6602d3f66b9c108549d475ec49e8ef4d45e # v4.0.0
+        with:
+          personal_token: ${{ secrets.DEPLOY_TOKEN }}
+          external_repository: eclipse-enclave/enclave-website
+          publish_branch: gh-pages
+          publish_dir: ./public
+          user_name: "eclipse-enclave-bot"
+          user_email: "enclave-bot@eclipse.org"
+          commit_message: "deploy: ${{ github.sha }}"

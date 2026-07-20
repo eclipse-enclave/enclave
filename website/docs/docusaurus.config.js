@@ -21,7 +21,7 @@ import {themes as prismThemes} from 'prism-react-renderer';
 // so this is the ONE place to adjust the base path. Nothing else hardcodes it.
 //
 // If the whole site is served under a project subpath (e.g.
-// eclipsesource.github.io/enclave/), set DOCS_BASE_URL to
+// eclipse-enclave.github.io/enclave/), set DOCS_BASE_URL to
 // '/<project>/docs/' at build time (e.g. via env in a future deploy step).
 // Default assumes a root deployment (custom domain / eclipse.dev forward).
 // --------------------------------------------------------------------------

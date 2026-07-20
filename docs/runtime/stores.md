@@ -134,7 +134,7 @@ This means the tool writes to its normal config location, but the symlink
 redirects writes to the shared auth store.
 
 For Claude the primary path is different. enclave only redirects Claude's
-secure-storage directory: the `securestorage_dir_env`
+secure-storage directory: the `securestorageDirEnv`
 (`CLAUDE_SECURESTORAGE_CONFIG_DIR`) points at the shared auth store. Claude
 itself writes `.credentials.json` and `.oauth_refresh.lock` there and performs
 its native token-refresh coordination across concurrent sessions. The

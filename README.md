@@ -147,5 +147,3 @@ Project resources: [Eclipse project page](https://projects.eclipse.org/projects/
 [contributing guide](CONTRIBUTING.md), [security policy](SECURITY.md),
 [code of conduct](CODE_OF_CONDUCT.md), [license](LICENSE.md), and
 [notices](NOTICE.md).
-
-Network policy changes can be pushed to running gateways with `enclave network apply`. Persisted unrestricted mode still requires a session restart.

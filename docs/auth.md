@@ -103,7 +103,7 @@ cross-session coordination).
 Provider credentials follow the same layered resolution as other secrets (see
 below). Use `--no-api-key` to suppress provider credential secrets that are API
 keys. Provider credential secrets default to API keys; profiles can set
-`api_key: false` on OAuth/provider token secrets so those tokens continue to
+`apiKey: false` on OAuth/provider token secrets so those tokens continue to
 resolve normally. Feature-declared secrets that are not provider credentials also
 continue to resolve normally. In `--ephemeral` mode, `--pass-api-key` controls
 only API key secrets.

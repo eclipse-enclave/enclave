@@ -41,6 +41,8 @@ type RunOptionSources struct {
 	ProjectMount     OptionSource
 	SessionMonitor   OptionSource
 	SessionName      OptionSource
+	TheiaAPIPort     OptionSource
+	TheiaAPIToken    OptionSource
 	Tool             OptionSource
 	WorktreeMetadata OptionSource
 	Yolo             OptionSource
@@ -103,6 +105,8 @@ func DefaultOptionSources() OptionSources {
 			ProjectMount:     SourceDefault,
 			SessionMonitor:   SourceDefault,
 			SessionName:      SourceDefault,
+			TheiaAPIPort:     SourceDefault,
+			TheiaAPIToken:    SourceDefault,
 			Tool:             SourceDefault,
 			WorktreeMetadata: SourceDefault,
 			Yolo:             SourceDefault,
@@ -264,6 +268,12 @@ func MergeOptionSources(base OptionSources, override OptionSources) OptionSource
 	}
 	if override.Slim != SourceUnset {
 		base.Slim = override.Slim
+	}
+	if override.TheiaAPIPort != SourceUnset {
+		base.TheiaAPIPort = override.TheiaAPIPort
+	}
+	if override.TheiaAPIToken != SourceUnset {
+		base.TheiaAPIToken = override.TheiaAPIToken
 	}
 	if override.Tool != SourceUnset {
 		base.Tool = override.Tool

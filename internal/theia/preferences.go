@@ -14,6 +14,8 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
+	"strings"
 
 	"enclave/internal/config"
 )
@@ -36,6 +38,37 @@ var DefaultPreferences = map[string]any{
 			},
 		},
 	},
+}
+
+// MergeExternalAPI overlays Theia's separate-port external-API preferences for
+// apiPort onto prefs (allocating prefs if nil) and returns it. An empty or
+// non-numeric apiPort is a no-op. The externalApi.token preference is only set
+// when apiToken is non-empty; otherwise it is left unset. These are functional
+// preferences (they enable an API surface), not the yolo "always allow" trust
+// preferences, so they are injected regardless of yolo mode when the caller
+// passes a port — the matching host port must be published separately (see
+// --theia-api-port). externalApi.hostname stays 0.0.0.0 so the service binds
+// all in-container interfaces and is reachable through the published (loopback)
+// host port.
+func MergeExternalAPI(prefs map[string]any, apiPort, apiToken string) map[string]any {
+	apiPort = strings.TrimSpace(apiPort)
+	if apiPort == "" {
+		return prefs
+	}
+	port, err := strconv.Atoi(apiPort)
+	if err != nil {
+		return prefs // defensive; CLI validation prevents this
+	}
+	if prefs == nil {
+		prefs = make(map[string]any)
+	}
+	prefs["externalApi.delivery"] = "separatePort"
+	prefs["externalApi.port"] = port
+	prefs["externalApi.hostname"] = "0.0.0.0"
+	if apiToken != "" {
+		prefs["externalApi.token"] = apiToken
+	}
+	return prefs
 }
 
 // LoadPreferences returns the preferences to pass on launch. When yoloEnabled

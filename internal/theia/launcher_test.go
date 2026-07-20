@@ -116,3 +116,23 @@ func TestLaunch_UnsupportedVariant(t *testing.T) {
 		t.Fatalf("Launch: got %v, want unsupported variant error", err)
 	}
 }
+
+func TestRedactArgs_MasksTokenLeavesInputUntouched(t *testing.T) {
+	in := []string{
+		"--attach-container", "enclave-theia-abc",
+		"--session-preference", "externalApi.port=3333",
+		"--session-preference", `externalApi.token="s3cret"`,
+	}
+	got := redactArgs(in)
+	want := []string{
+		"--attach-container", "enclave-theia-abc",
+		"--session-preference", "externalApi.port=3333",
+		"--session-preference", "externalApi.token=<redacted>",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("redactArgs: got %v, want %v", got, want)
+	}
+	if in[5] != `externalApi.token="s3cret"` {
+		t.Fatalf("redactArgs mutated its input: %v", in)
+	}
+}

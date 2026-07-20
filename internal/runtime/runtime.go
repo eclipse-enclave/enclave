@@ -27,6 +27,7 @@ import (
 	"enclave/internal/mounts"
 	"enclave/internal/network"
 	"enclave/internal/policy"
+	"enclave/internal/theia"
 	"enclave/internal/util"
 )
 
@@ -229,6 +230,7 @@ func (r *Runtime) prepareExecution() (*ExecutionContext, error) {
 	r.applyPortHints(&runCtx)
 	r.applyDevcontainerPorts()
 	r.applyProfilePorts()
+	r.applyTheiaAPIPort()
 	runCtx.Run = r.run
 	if err := r.handler.ValidateRun(runCtx); err != nil {
 		return nil, err
@@ -586,6 +588,33 @@ func (r *Runtime) applyProfilePorts() {
 		port := strconv.Itoa(p.Container)
 		r.addUniquePort(port, "Publishing declared port %s for %s", port, p.Label)
 	}
+}
+
+// applyTheiaAPIPort publishes the port requested via --theia-api-port. The bare
+// port flows through the same resolution as applyProfilePorts (loopback-by-default
+// on the host, gateway-vs-tool-container isolation seam), and addUniquePort skips
+// it when the user already mapped the port explicitly with -p.
+//
+// The external API is served by the in-container Theia backend, so publishing the
+// port only makes sense for a Theia profile. For any other tool nothing would
+// listen on it, so we skip the publish and warn instead of leaving a dangling
+// host binding.
+func (r *Runtime) applyTheiaAPIPort() {
+	if r.run.TheiaAPIPort == "" {
+		return
+	}
+	if !r.profileLaunchesTheia() {
+		logx.Warnf("ignoring --theia-api-port %s: tool %q does not serve the Theia external API", r.run.TheiaAPIPort, r.profile.Name)
+		return
+	}
+	r.addUniquePort(r.run.TheiaAPIPort, "Publishing Theia external API port %s (host loopback)", r.run.TheiaAPIPort)
+}
+
+// profileLaunchesTheia reports whether the resolved profile runs a Theia IDE,
+// identified by a post_start.open_ide naming a valid Theia variant. This is the
+// same signal runPostStart uses to auto-launch the host IDE.
+func (r *Runtime) profileLaunchesTheia() bool {
+	return r.profile.PostStart != nil && theia.Variant(r.profile.PostStart.OpenIDE).Valid()
 }
 
 // logPublishedPortURLs prints the resolved localhost URL for each declared,

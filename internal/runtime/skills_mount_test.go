@@ -157,6 +157,50 @@ func TestAddSkillMountsMergesBuiltinUserExtGlobalAndProjectSkills(t *testing.T) 
 	assertSkillBody(t, filepath.Join(source, "shared-all"), "project-shared-all")
 }
 
+func TestAddSkillMountsIncludesEnabledFeatureSkillsOnly(t *testing.T) {
+	t.Parallel()
+
+	home := t.TempDir()
+	featuresDir := t.TempDir()
+	projectHash := "projhash"
+
+	// An enabled feature ships skills; a present-but-not-enabled feature must
+	// not contribute (off-by-default gating).
+	writeSkill(t, filepath.Join(featuresDir, "example", "skills", "example-skill"), "feature-skill")
+	writeSkill(t, filepath.Join(featuresDir, "other-feature", "skills", "other-skill"), "should-not-appear")
+	// A feature skill name also present as a project skill: project wins.
+	writeSkill(t, filepath.Join(featuresDir, "example", "skills", "shared"), "feature-shared")
+	projectSkillsDir := config.HostProjectSkillsDir(home, projectHash)
+	writeSkill(t, filepath.Join(projectSkillsDir, "shared"), "project-shared")
+
+	r := &Runtime{
+		host:          model.Host{Home: home},
+		project:       model.Project{Hash: projectHash},
+		profile:       model.Profile{Name: "claude", SkillsDir: ".claude/skills"},
+		paths:         model.Paths{FeaturesDir: featuresDir},
+		features:      []model.Extension{{Name: "example"}}, // enabled set
+		containerHome: "/home/agent",
+	}
+
+	acc := newMountAccumulator(nil, nil)
+	if err := r.addSkillMounts(acc); err != nil {
+		t.Fatalf("addSkillMounts returned error: %v", err)
+	}
+
+	source, ok := lookupMountSource(acc.Mounts(), "/home/agent/.claude/skills")
+	if !ok {
+		t.Fatalf("expected skills mount")
+	}
+
+	assertSkillBody(t, filepath.Join(source, "example-skill"), "feature-skill")
+	// Project skill overrides a same-named feature skill.
+	assertSkillBody(t, filepath.Join(source, "shared"), "project-shared")
+	// A feature that is not enabled contributes nothing.
+	if _, err := os.Stat(filepath.Join(source, "other-skill")); !os.IsNotExist(err) {
+		t.Fatalf("skill from a non-enabled feature must be absent, err=%v", err)
+	}
+}
+
 func TestAddSkillMountsCreatesManagedDirectories(t *testing.T) {
 	t.Parallel()
 

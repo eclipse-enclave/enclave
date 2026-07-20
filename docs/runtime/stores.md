@@ -50,7 +50,8 @@ skills with tool-specific skills from the canonical config override trees:
 - Shared project: `~/.config/enclave/projects/<hash>/skills/<skill>/`
 - Tool-specific project: `~/.config/enclave/projects/<hash>/<tool>/config/<relative-skills-path>/<skill>/`
 
-Extension skills and allow-listed host passthrough precede those sources. A
+Extension skills, skills shipped by enabled features, and allow-listed host
+passthrough precede those sources. A
 same-named skill at a higher-precedence layer replaces the complete lower layer;
 project shared skills override global tool-specific skills, and project
 tool-specific skills have highest precedence.

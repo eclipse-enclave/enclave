@@ -212,6 +212,7 @@ func (r *Runtime) applyBuiltInSkillsLayer(targetDir string) error {
 	}
 
 	sourceDirs := r.extensionSkillSourceDirs()
+	sourceDirs = append(sourceDirs, r.featureSkillSourceDirs()...)
 	if len(sourceDirs) == 0 {
 		return nil
 	}

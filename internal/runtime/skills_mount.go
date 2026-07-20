@@ -54,8 +54,13 @@ func (r *Runtime) addSkillMounts(mounts *mountAccumulator) error {
 		return fmt.Errorf("create generated skills directory %q: %w", generatedSkillsDir, err)
 	}
 
+	// Overlay order (later wins): built-in tool, user-extension, enabled
+	// features, global shared, project shared.
 	sources := make([]skillSource, 0, 4)
 	for _, sourceDir := range r.extensionSkillSourceDirs() {
+		sources = append(sources, skillSource{dir: sourceDir})
+	}
+	for _, sourceDir := range r.featureSkillSourceDirs() {
 		sources = append(sources, skillSource{dir: sourceDir})
 	}
 	sources = append(sources,
@@ -87,6 +92,28 @@ func (r *Runtime) extensionSkillSourceDirs() []string {
 		}
 	}
 	return sourceDirs
+}
+
+// featureSkillSourceDirs returns skill directories shipped by enabled features
+// (built-in and user extension trees). Only enabled features contribute, so a
+// feature's skills are absent from the mounted skills directory unless the
+// session opted into the feature (e.g. `--features playwright`). Composing here
+// (rather than writing at container start) is required because the tool skills
+// directory is mounted read-only.
+func (r *Runtime) featureSkillSourceDirs() []string {
+	var dirs []string
+	for _, feature := range r.features {
+		for _, root := range []string{r.paths.FeaturesDir, r.paths.UserFeaturesDir} {
+			if root == "" {
+				continue
+			}
+			skillsDir := filepath.Join(root, feature.Name, model.SkillsDirName)
+			if info, err := os.Stat(skillsDir); err == nil && info.IsDir() {
+				dirs = append(dirs, skillsDir)
+			}
+		}
+	}
+	return dirs
 }
 
 func (r *Runtime) withToolDataLock(projectToolDir string, prefix string, fn func() error) error {

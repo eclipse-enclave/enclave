@@ -333,15 +333,17 @@ native skills path in this order, from lowest to highest precedence:
 1. Built-in tool-extension skills: `extensions/tools/<tool>/skills/`
 2. User-global tool-extension skills:
    `~/.config/enclave/extensions/tools/<tool>/skills/`
-3. Allow-listed host config, when `host_config=passthrough`
-4. Global shared skills: `~/.config/enclave/skills/<skill>/`
-5. Global tool-specific skills:
+3. Feature-extension skills: `extensions/features/<feature>/skills/` (and the
+   user extension tree); only features enabled for the session contribute
+4. Allow-listed host config, when `host_config=passthrough`
+5. Global shared skills: `~/.config/enclave/skills/<skill>/`
+6. Global tool-specific skills:
    `~/.config/enclave/tools/<tool>/<relative-skills-path>/<skill>/`
-6. Project shared skills: `~/.config/enclave/projects/<hash>/skills/<skill>/`
-7. Project tool-specific skills:
+7. Project shared skills: `~/.config/enclave/projects/<hash>/skills/<skill>/`
+8. Project tool-specific skills:
    `~/.config/enclave/projects/<hash>/<tool>/config/<relative-skills-path>/<skill>/`
 
-Host passthrough (layer 3) delivers host skills for every built-in tool with
+Host passthrough (layer 4) delivers host skills for every built-in tool with
 skill support: each reviewed `passthroughPaths` allow-list includes the tool's
 skills path (`skills/` for most tools, `agent/skills/` for pi). Opt out for a
 specific tool under `tool_overrides.<tool>.host_config_paths`; for example:
@@ -358,7 +360,7 @@ specific tool under `tool_overrides.<tool>.host_config_paths`; for example:
 
 At session start the log lists exactly which allow-listed paths pass through.
 
-For tool-specific sources (layers 5 and 7), `<relative-skills-path>` mirrors
+For tool-specific sources (layers 6 and 8), `<relative-skills-path>` mirrors
 `sandbox.skillsDir` relative to `sandbox.configDir`. For example, a skill
 named `review` for Claude (`skillsDir: .claude/skills`) lives at
 `~/.config/enclave/tools/claude/skills/review/`, and for Pi
@@ -528,6 +530,7 @@ without help from the tool spec.
 |------|---------|
 | `install.sh` | Installation script (runs as root if `needsRoot: true`) |
 | `feature-entrypoint.d/*.sh` | Scripts sourced at startup for ALL tools |
+| `skills/` | Agent skills composed into the tool's skills directory when the feature is enabled |
 
 ### Feature Selection
 

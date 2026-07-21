@@ -385,12 +385,11 @@ func TestLoadProfileRejectsInvalidProviderSecurestorageDirEnv(t *testing.T) {
 	}
 }
 
-func TestLoadProfileParsesMemoryFields(t *testing.T) {
+func TestLoadProfileParsesMemoryDir(t *testing.T) {
 	paths := setupProfileTestPaths(t, `{
 		"name": "tool",
 		"command": "tool",
-		"memory_dir": ".tool/memory",
-		"memory_files": [".tool/MEMORY.md"]
+		"memory_dir": ".tool/memory"
 	}`)
 
 	profile, err := LoadProfile(paths, "tool")
@@ -399,9 +398,6 @@ func TestLoadProfileParsesMemoryFields(t *testing.T) {
 	}
 	if got, want := profile.MemoryDir, filepath.FromSlash(".tool/memory"); got != want {
 		t.Fatalf("MemoryDir = %q, want %q", got, want)
-	}
-	if got, want := strings.Join(profile.MemoryFiles, ","), filepath.FromSlash(".tool/MEMORY.md"); got != want {
-		t.Fatalf("MemoryFiles = %q, want %q", got, want)
 	}
 }
 
@@ -418,26 +414,12 @@ func TestLoadProfileRejectsAbsoluteMemoryDir(t *testing.T) {
 	}
 }
 
-func TestLoadProfileRejectsMemoryFileTraversal(t *testing.T) {
-	paths := setupProfileTestPaths(t, `{
-		"name": "tool",
-		"command": "tool",
-		"memory_files": ["../escape/MEMORY.md"]
-	}`)
-
-	_, err := LoadProfile(paths, "tool")
-	if err == nil || !strings.Contains(err.Error(), "memory_files") {
-		t.Fatalf("LoadProfile() error = %v, want memory_files validation error", err)
-	}
-}
-
 // profileFixture keeps validation test inputs concise and is projected onto a
 // spec.yaml document by setupProfileTestPaths.
 type profileFixture struct {
 	Name               string                   `json:"name"`
 	Command            string                   `json:"command"`
 	MemoryDir          string                   `json:"memory_dir"`
-	MemoryFiles        []string                 `json:"memory_files"`
 	QEMUMinMemoryMiB   int                      `json:"qemu_min_memory_mib"`
 	QEMUStoreCacheMmap bool                     `json:"qemu_store_cache_mmap"`
 	Providers          []providerFixture        `json:"providers"`
@@ -487,7 +469,6 @@ func setupProfileTestPaths(t *testing.T, profileJSON string) model.Paths {
 		Sandbox: &specSandbox{
 			Entrypoint:         &specEntrypoint{Run: []string{fixture.Command}},
 			MemoryDir:          fixture.MemoryDir,
-			MemoryFiles:        fixture.MemoryFiles,
 			QEMUMinMemoryMiB:   fixture.QEMUMinMemoryMiB,
 			QEMUStoreCacheMmap: fixture.QEMUStoreCacheMmap,
 		},

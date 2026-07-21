@@ -43,6 +43,9 @@ is_candidate() {
 tracked_candidates() {
     local path
     while IFS= read -r -d '' path; do
+        if [ ! -f "$path" ]; then
+            continue
+        fi
         if is_candidate "$path"; then
             printf '%s\0' "$path"
         fi

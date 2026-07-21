@@ -273,7 +273,6 @@ func specToProfile(doc specDocument) model.Profile {
 	p.ConfigDir = sb.ConfigDir
 	p.SkillsDir = sb.SkillsDir
 	p.MemoryDir = sb.MemoryDir
-	p.MemoryFiles = sb.MemoryFiles
 	p.SettingsFile = sb.SettingsFile
 	p.SettingsTarget = sb.SettingsTarget
 	p.PassthroughPaths = sb.PassthroughPaths

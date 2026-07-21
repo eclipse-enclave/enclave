@@ -70,29 +70,22 @@ func validateAndNormalizeProfile(profile *model.Profile) error {
 	if err := validateAndNormalizePorts(profile); err != nil {
 		return err
 	}
-	if err := validateAndNormalizeMemoryPaths(profile); err != nil {
+	if err := validateAndNormalizeMemoryDir(profile); err != nil {
 		return err
 	}
 	return validateAndNormalizeProviderSecurestorage(profile.Providers)
 }
 
-// validateAndNormalizeMemoryPaths checks the container-home-relative memory
-// mount targets. Paths must be relative, free of traversal, and resolve to a
-// concrete location (not "."). Cleaned values are written back to the profile.
-func validateAndNormalizeMemoryPaths(profile *model.Profile) error {
+// validateAndNormalizeMemoryDir checks the container-home-relative memory
+// mount target. The path must be relative, free of traversal, and resolve to a
+// concrete location (not "."). The cleaned value is written back to the profile.
+func validateAndNormalizeMemoryDir(profile *model.Profile) error {
 	if profile.MemoryDir != "" {
 		cleaned, err := cleanMemoryPath(profile.MemoryDir)
 		if err != nil {
 			return fmt.Errorf("memory_dir: %w", err)
 		}
 		profile.MemoryDir = cleaned
-	}
-	for i, entry := range profile.MemoryFiles {
-		cleaned, err := cleanMemoryPath(entry)
-		if err != nil {
-			return fmt.Errorf("memory_files[%d]: %w", i, err)
-		}
-		profile.MemoryFiles[i] = cleaned
 	}
 	return nil
 }

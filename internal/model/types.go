@@ -195,7 +195,6 @@ type Profile struct {
 	ConfigDir           string                  `json:"config_dir"`
 	SkillsDir           string                  `json:"skills_dir,omitempty"`
 	MemoryDir           string                  `json:"memory_dir,omitempty"`
-	MemoryFiles         []string                `json:"memory_files,omitempty"`
 	SettingsFile        string                  `json:"settings_file"`
 	SettingsTarget      string                  `json:"settings_target"`
 	PassthroughPaths    []string                `json:"passthrough_paths,omitempty"`

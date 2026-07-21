@@ -24,4 +24,4 @@ Description: Container-based development environment manager
  and development tools. It manages Docker containers with network isolation,
  authentication injection, and tool-specific configurations.
  .
- Supported tools include Claude, Codex, Gemini, OpenCode, and more.
+ Supported tools include Claude, Codex, OpenCode, and more.

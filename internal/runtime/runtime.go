@@ -1007,7 +1007,7 @@ func (r *Runtime) addMemoryMounts(mounts *mountAccumulator) {
 	if r.run.Ephemeral {
 		return
 	}
-	if r.profile.MemoryDir == "" && len(r.profile.MemoryFiles) == 0 {
+	if r.profile.MemoryDir == "" {
 		return
 	}
 	memDir := config.HostProjectMemoryDir(r.host.Home, r.project.Hash, r.profile.Name)
@@ -1015,16 +1015,8 @@ func (r *Runtime) addMemoryMounts(mounts *mountAccumulator) {
 		logx.Warnf("Failed to create memory directory %s: %v", memDir, err)
 		return
 	}
-	if r.profile.MemoryDir != "" {
-		containerMemDir := resolveContainerProfilePath(r.containerHome, r.profile.MemoryDir)
-		mounts.AddMount(bindMount(memDir, containerMemDir, false))
-	}
-	for _, entry := range r.profile.MemoryFiles {
-		hostPath := filepath.Join(memDir, filepath.Base(entry))
-		ensureHostPlaceholderFile(hostPath)
-		containerPath := resolveContainerProfilePath(r.containerHome, entry)
-		mounts.AddMount(bindMount(hostPath, containerPath, false))
-	}
+	containerMemDir := resolveContainerProfilePath(r.containerHome, r.profile.MemoryDir)
+	mounts.AddMount(bindMount(memDir, containerMemDir, false))
 }
 
 // ensureHostPlaceholderFile touches hostPath if it does not yet exist, so that

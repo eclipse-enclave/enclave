@@ -45,3 +45,5 @@ worktree_metadata | default=""/false global=""/false project=""/false toolOverri
 allow_domains | default=""/false global=""/false project=""/false toolOverride=""/false cli=""/false | source=0 effective=""
 playwright_mcp | default="false"/true global=""/false project=""/false toolOverride=""/false cli=""/false | source=0 effective="false"
 bridge_ports | default=""/false global=""/false project=""/false toolOverride=""/false cli=""/false | source=0 effective=""
+theia_api_port | default=""/false global=""/false project=""/false toolOverride=""/false cli=""/false | source=0 effective=""
+theia_api_token | default=""/false global=""/false project=""/false toolOverride=""/false cli=""/false | source=0 effective=""

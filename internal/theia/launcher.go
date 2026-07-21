@@ -115,7 +115,12 @@ func Launch(variant Variant, containerName string, preferences map[string]any, l
 	// #nosec G204 -- variant is a fixed enum and BuildArgs validates the container name.
 	cmd := exec.Command(bin, args...)
 	if logFile != nil {
-		_, _ = fmt.Fprintf(logFile, "%s %s\n\n", bin, formatArgs(args))
+		// Redact secret-bearing preferences (e.g. externalApi.token) before
+		// writing the argv: the log is 0600 but need not carry the token
+		// verbatim. Note the process still receives the real value as an argv
+		// element, so it remains visible via `ps` to other users on the host —
+		// acceptable for the loopback dev flow this targets.
+		_, _ = fmt.Fprintf(logFile, "%s %s\n\n", bin, formatArgs(redactArgs(args)))
 		cmd.Stdout = logFile
 		cmd.Stderr = logFile
 	}
@@ -135,6 +140,29 @@ func openLogFile(logPath string) (*os.File, error) {
 		return nil, fmt.Errorf("open log file %s: %w", logPath, err)
 	}
 	return f, nil
+}
+
+// sensitivePrefKeys are preference keys whose values must be masked in the
+// launch log. They still reach the IDE process unmodified via argv.
+var sensitivePrefKeys = map[string]bool{
+	"externalApi.token": true,
+}
+
+// redactArgs returns a copy of args with the values of any sensitive
+// `--session-preference key=value` pairs masked, leaving the input untouched.
+func redactArgs(args []string) []string {
+	out := make([]string, len(args))
+	copy(out, args)
+	for i := 0; i+1 < len(out); i++ {
+		if out[i] != "--session-preference" {
+			continue
+		}
+		key, _, found := strings.Cut(out[i+1], "=")
+		if found && sensitivePrefKeys[key] {
+			out[i+1] = key + "=<redacted>"
+		}
+	}
+	return out
 }
 
 func formatArgs(args []string) string {

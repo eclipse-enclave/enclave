@@ -86,6 +86,44 @@ func TestApplyProfilePortsSkipsUserMappedPort(t *testing.T) {
 	}
 }
 
+// theiaProfile is a minimal profile whose post_start launches Theia, matching
+// the gating in applyTheiaAPIPort.
+func theiaProfile() model.Profile {
+	return model.Profile{Name: "theia", PostStart: &model.PostStartActions{OpenIDE: "theia"}}
+}
+
+func TestApplyTheiaAPIPortInjectsBarePort(t *testing.T) {
+	r := &Runtime{run: model.RunOptions{TheiaAPIPort: "3333"}, profile: theiaProfile()}
+	r.applyTheiaAPIPort()
+	if !portListHas(r.run.Ports, "3333") {
+		t.Errorf("expected 3333 injected, got %v", r.run.Ports)
+	}
+}
+
+func TestApplyTheiaAPIPortNoopWhenUnset(t *testing.T) {
+	r := &Runtime{run: model.RunOptions{}, profile: theiaProfile()}
+	r.applyTheiaAPIPort()
+	if len(r.run.Ports) != 0 {
+		t.Errorf("expected no ports when unset, got %v", r.run.Ports)
+	}
+}
+
+func TestApplyTheiaAPIPortSkipsUserMappedPort(t *testing.T) {
+	r := &Runtime{run: model.RunOptions{Ports: []string{"0.0.0.0:3333:3333"}, TheiaAPIPort: "3333"}, profile: theiaProfile()}
+	r.applyTheiaAPIPort()
+	if len(r.run.Ports) != 1 {
+		t.Errorf("expected no duplicate for user-mapped 3333, got %v", r.run.Ports)
+	}
+}
+
+func TestApplyTheiaAPIPortSkipsNonTheiaTool(t *testing.T) {
+	r := &Runtime{run: model.RunOptions{TheiaAPIPort: "3333"}, profile: model.Profile{Name: "claude"}}
+	r.applyTheiaAPIPort()
+	if len(r.run.Ports) != 0 {
+		t.Errorf("expected no port published for non-Theia tool, got %v", r.run.Ports)
+	}
+}
+
 func TestApplyProfilePortsSkipsHostIPMappedPort(t *testing.T) {
 	r := &Runtime{
 		run: model.RunOptions{Ports: []string{"0.0.0.0:3000:3000"}},

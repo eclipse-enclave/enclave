@@ -86,6 +86,7 @@ func (r *Runtime) runPostStart(containerName string) {
 		logx.Warnf("load %s preferences: %v", variant, err)
 		return
 	}
+	prefs = theia.MergeExternalAPI(prefs, r.run.TheiaAPIPort, r.run.TheiaAPIToken)
 	logPath := theia.LogPath(r.host.Home, containerName)
 	if err := theia.Launch(variant, containerName, prefs, logPath); err != nil {
 		logx.Warnf("launch %s: %v (you can retry via `enclave %s %s`)", variant, err, variant, containerName)

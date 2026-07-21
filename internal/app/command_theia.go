@@ -64,6 +64,7 @@ func runTheia(variant theia.Variant, projectDir string, opts model.Options) int 
 		logx.Errorf("%v", err)
 		return 1
 	}
+	prefs = theia.MergeExternalAPI(prefs, opts.TheiaAPIPort, opts.TheiaAPIToken)
 
 	logPath := theia.LogPath(home, containerName)
 	if err := theia.Launch(variant, containerName, prefs, logPath); err != nil {

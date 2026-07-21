@@ -47,9 +47,11 @@ func (r *Runtime) ExecuteBackground() (string, error) {
 	return ctx.ContainerName, nil
 }
 
-// warnPostStartInteractive warns when a profile with a post_start IDE hook is
-// launched in the foreground (where the IDE hook is intentionally skipped
-// because the container's TTY is held by `sleep infinity`).
+// warnPostStartInteractive warns when a profile with a post_start IDE hook runs
+// a foreground session (e.g. an explicit `shell` or `exec`), where the IDE hook
+// is skipped. A plain `run` never reaches here: it is auto-backgrounded so the
+// IDE launches. The warning only points at the reattach command; suggesting
+// --background would be wrong for an interactive shell the user asked for.
 func (r *Runtime) warnPostStartInteractive() {
 	if r.run.Background {
 		return
@@ -57,14 +59,14 @@ func (r *Runtime) warnPostStartInteractive() {
 	if r.profile.PostStart == nil || r.profile.PostStart.OpenIDE == "" {
 		return
 	}
-	logx.Warnf("tool %q opens %q on start, but you're running in the foreground; pass --background, or attach the IDE later with `enclave %s <container>`",
+	logx.Warnf("tool %q normally opens the %q IDE on start; this foreground session skips it, so attach the IDE to the container with `enclave %s <container>`",
 		r.profile.Name, r.profile.PostStart.OpenIDE, r.profile.PostStart.OpenIDE)
 }
 
 // runPostStart performs profile-declared side effects after the container is
 // running. Failures here are logged but do not fail the session start: the
 // container is up either way and the user can retry the side effect manually
-// (e.g. via the GUI button or `enclave theia <name>`).
+// (e.g. via `enclave theia <name>`).
 func (r *Runtime) runPostStart(containerName string) {
 	if r.profile.PostStart == nil {
 		return

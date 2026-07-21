@@ -20,6 +20,7 @@ import (
 	"enclave/internal/model"
 	"enclave/internal/mounts"
 	"enclave/internal/runtime"
+	"enclave/internal/theia"
 	"enclave/internal/tools"
 )
 
@@ -63,6 +64,13 @@ func runExecutionCommand(input *CommandInput) int {
 	}
 	if len(sessionArgs) > 0 {
 		opts.CmdArgs = append(sessionArgs, opts.CmdArgs...)
+	}
+
+	if autoBackgroundForIDE(input.Action, opts, profile) {
+		logx.Infof("%s auto-launches the %s IDE; starting detached (reattach later with `%s %s <container>`)",
+			profile.Name, profile.PostStart.OpenIDE, model.AppName, profile.PostStart.OpenIDE)
+		opts.Background = true
+		input.Options.Background = true
 	}
 
 	yoloEnabled := resolveYoloEnabled(profile, opts)
@@ -138,6 +146,19 @@ func runExecutionCommand(input *CommandInput) int {
 		return 1
 	}
 	return dispatchRunner(input, runner)
+}
+
+// autoBackgroundForIDE reports whether a run should be forced detached because
+// the profile auto-launches a host IDE on start. Such profiles
+// (post_start.open_ide) run `sleep infinity` and only fire the IDE hook on the
+// detached path, so a foreground run would hang with no IDE ever opening.
+// Running detached lets a bare `enclave --tool theia` start the container and
+// open the IDE in one command. An explicit `shell` session is exempt: there the
+// user wants the container shell, not the IDE. A session the user already
+// requested as background needs no adjustment.
+func autoBackgroundForIDE(action string, opts model.Options, profile model.Profile) bool {
+	return action == "run" && !opts.Shell && !opts.Background &&
+		profile.PostStart != nil && theia.Variant(profile.PostStart.OpenIDE).Valid()
 }
 
 func executionRequiresDocker(action string, opts model.Options) bool {

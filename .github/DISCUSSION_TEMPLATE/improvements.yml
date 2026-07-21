@@ -1,0 +1,10 @@
+labels: []
+body:
+  - type: textarea
+    id: improvement
+    attributes:
+      label: Improvement Description
+      description: Describe the improvement you'd like to see in Eclipse Enclave.
+      placeholder: Describe the improvement here...
+    validations:
+      required: true

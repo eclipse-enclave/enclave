@@ -43,6 +43,7 @@ Read `README.md` before making user-facing changes.
   ```
 - Preserve existing copyright years and owners. New files use their initial creation year and the actual legal copyright holder; do not guess ownership.
 - Files created by splitting, refactoring, or generating existing content inherit the source header. Update generators so regenerated files retain the header.
+- YAML files under `.github/` do not require headers.
 - Headers are not required for Markdown, JSON, lock/sum files, test fixtures, rendered SVGs, images, PDFs, binaries, or imported third-party content.
 - Run `make check-license-headers` after adding or moving files.
 

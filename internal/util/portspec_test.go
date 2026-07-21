@@ -59,28 +59,6 @@ func TestSplitPortHostIP(t *testing.T) {
 	}
 }
 
-func TestIsUnspecifiedHostIP(t *testing.T) {
-	cases := []struct {
-		ip   string
-		want bool
-	}{
-		{"0.0.0.0", true},
-		{"*", true},
-		{"[::]", true},
-		{"[::0]", true},
-		{"[::ffff:0.0.0.0]", true},
-		{"127.0.0.1", false},
-		{"192.168.1.10", false},
-		{"[::1]", false},
-		{"", false},
-	}
-	for _, c := range cases {
-		if got := IsUnspecifiedHostIP(c.ip); got != c.want {
-			t.Errorf("IsUnspecifiedHostIP(%q) = %v, want %v", c.ip, got, c.want)
-		}
-	}
-}
-
 func TestSplitPortMapping(t *testing.T) {
 	cases := []struct {
 		in         string

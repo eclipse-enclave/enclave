@@ -7,10 +7,7 @@
 
 package util
 
-import (
-	"net"
-	"strings"
-)
+import "strings"
 
 // ParsePortSpec parses a Docker-style publish spec into its parts. The optional
 // "/proto" suffix is not handled here (callers assume tcp). Accepted forms:
@@ -94,28 +91,6 @@ func SplitPortHostIP(value string) (string, string, bool) {
 		return candidate, value[first+1:], true
 	}
 	return "", value, false
-}
-
-// IsUnspecifiedHostIP reports whether ip is a wildcard / "bind to all
-// interfaces" host IP. Accepts the bracketed IPv6 form ("[::]", "[::0]",
-// "[0:0:0:0:0:0:0:0]"), the IPv4 form ("0.0.0.0"), and Docker's "*" alias.
-// All non-zero IPv6 forms (e.g. "[::ffff:0.0.0.0]") that net.ParseIP reports
-// as unspecified are also rejected so that an attacker cannot smuggle a
-// non-loopback binding past the loopback clamp by using an alternate
-// canonicalization of "::".
-func IsUnspecifiedHostIP(ip string) bool {
-	if ip == "*" {
-		return true
-	}
-	candidate := ip
-	if strings.HasPrefix(candidate, "[") && strings.HasSuffix(candidate, "]") {
-		candidate = candidate[1 : len(candidate)-1]
-	}
-	parsed := net.ParseIP(candidate)
-	if parsed == nil {
-		return false
-	}
-	return parsed.IsUnspecified()
 }
 
 // looksLikeIPv4 reports whether s is a dotted-quad IPv4 literal. We don't need

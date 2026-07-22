@@ -73,6 +73,7 @@ jobs:
       - name: Generate checksums
         run: |
           cd artifacts
+          for f in *; do [ "$f" = "${f//\~/.}" ] || mv "$f" "${f//\~/.}"; done
           sha256sum * > checksums.txt
 
       - name: Create rolling release

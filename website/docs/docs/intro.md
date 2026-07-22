@@ -45,7 +45,7 @@ full autonomy without handing it your host.
   </div>
   <div className="enclave-box">
     <div className="box-title">Works with your agents</div>
-    <p>Run Claude Code, Codex, Gemini, Theia AI, OpenCode, and more from one CLI, each with the same isolation.</p>
+    <p>Run Claude Code, Codex, Theia AI, OpenCode, and more from one CLI, each with the same isolation.</p>
   </div>
   <div className="enclave-box">
     <div className="box-title">Audit-ready by design</div>

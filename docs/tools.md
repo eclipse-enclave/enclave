@@ -13,7 +13,6 @@ Built-in tool profiles:
 |------|-------------|
 | `claude` | [Claude Code](https://www.anthropic.com/claude-code) (Anthropic) — default |
 | `codex` | [Codex CLI](https://github.com/openai/codex) (OpenAI) |
-| `gemini` | [Gemini CLI](https://github.com/google-gemini/gemini-cli) (Google) |
 | `mistral-vibe` | [Mistral Vibe CLI](https://github.com/mistralai/mistral-vibe) (opt-in/experimental) |
 | `opencode` | [OpenCode](https://opencode.ai/) |
 | `pi` | [Pi](https://github.com/earendil-works/pi) |

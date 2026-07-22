@@ -137,7 +137,7 @@ func TestReadDefaults_InvalidToolOverrideEntriesIgnoredWithWarnings(t *testing.T
       "tool": "codex",
       "no_api_key": true
     },
-    "gemini": {
+    "opencode": {
       "tool_overrides": {
         "nested": {
           "no_api_key": true
@@ -170,8 +170,8 @@ func TestReadDefaults_InvalidToolOverrideEntriesIgnoredWithWarnings(t *testing.T
 	if !containsSubstring(warnings, "tool_overrides.pi") {
 		t.Fatalf("expected warning for pi override, warnings=%v", warnings)
 	}
-	if !containsSubstring(warnings, "tool_overrides.gemini") {
-		t.Fatalf("expected warning for gemini override, warnings=%v", warnings)
+	if !containsSubstring(warnings, "tool_overrides.opencode") {
+		t.Fatalf("expected warning for opencode override, warnings=%v", warnings)
 	}
 }
 

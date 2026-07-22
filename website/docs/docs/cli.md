@@ -61,7 +61,7 @@ and clean up with `git worktree remove ../myproject-agent`.
 ## Pick a specific agent
 
 Use `--tool` to choose which agent runs in the session. Enclave supports Claude
-Code, Codex, Gemini, Theia AI, OpenCode, and more.
+Code, Codex, Theia AI, OpenCode, and more.
 
 ```bash
 enclave --tool codex

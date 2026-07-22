@@ -179,8 +179,9 @@ type specOAuthPort struct {
 }
 
 type specPort struct {
-	Container int    `json:"container"`
-	Publish   bool   `json:"publish,omitempty"`
-	Label     string `json:"label,omitempty"`
-	OpenURL   string `json:"openUrl,omitempty"`
+	Container      int    `json:"container"`
+	HostAllocation string `json:"hostAllocation,omitempty"` // "fixed" (default) | "auto"
+	Publish        bool   `json:"publish,omitempty"`
+	Label          string `json:"label,omitempty"`
+	OpenURL        string `json:"openUrl,omitempty"`
 }

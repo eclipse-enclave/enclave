@@ -104,7 +104,7 @@ network: {...}
 environment: {...}
 credentials: {...}
 providers: [...]          # enclave-native, see "Tool Extensions" below
-ports: [...]              # enclave-native
+ports: [...]              # enclave-native; honored for tools and enabled features
 
 # mixin-only fields (kind: mixin)
 priority: <int, default 100>
@@ -578,6 +578,17 @@ other feature's apt packages are present first.
 - `ENCLAVE_FEATURE_INSTALL_STRICT=1`: all feature install failures are fatal.
 - Per-feature override: set `failOnInstallError: true` in `spec.yaml` to make that feature's install failure fatal even when strict mode is disabled.
 
+### Declared ports
+
+A feature can declare top-level `ports` exactly like a tool (see
+[Adding a tool, "declarative ports"](adding-a-tool.md#4-optional-declarative-ports)).
+Entries with `publish: true` are published only for sessions that enable the
+feature; user `-p` mappings and tool-declared ports win when they already map
+the same container port. `hostAllocation` selects the host port: `fixed` (the
+default) mirrors the container port, while `auto` publishes with an OS-assigned
+host port (the `-p 0:<port>` form) so concurrent sessions do not contend — the
+resolved port appears in the printed `openUrl` and in `enclave ps`.
+
 ### Available Features
 
 | Feature | Priority | Description |
@@ -603,6 +614,7 @@ other feature's apt packages are present first.
 | Selectable at runtime | Yes (`--tool`) | No (build-time only) |
 | `needsRoot` | N/A | Controls install user |
 | `aptPackages` | N/A | Auto-installed apt packages |
+| Declared `ports` | Published for every session of the tool | Published when the feature is enabled |
 
 ## How It Works
 

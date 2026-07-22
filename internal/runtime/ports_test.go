@@ -221,3 +221,108 @@ func TestAnnouncePublishedPortsAutoPortWithoutBindingFallsBack(t *testing.T) {
 		t.Fatalf("expected hint at enclave ps, got %q", output)
 	}
 }
+
+func TestApplyFeaturePortsPublishesEnabledFeatureDeclarations(t *testing.T) {
+	r := &Runtime{
+		profile: model.Profile{Name: "claude"},
+		features: []model.Extension{
+			{Name: "diffity", Ports: []model.PortConfig{
+				{Container: 5391, HostAllocation: model.HostAllocationAuto, Publish: true, Label: "Diffity"},
+			}},
+			{Name: "fixed", Ports: []model.PortConfig{
+				{Container: 8080, Publish: true, Label: "Fixed"},
+			}},
+			{Name: "quiet", Ports: []model.PortConfig{
+				{Container: 9999, Label: "Quiet"}, // publish omitted
+			}},
+		},
+	}
+	r.applyFeaturePorts()
+	if !portListHas(r.run.Ports, "0:5391") {
+		t.Errorf("expected auto-host spec 0:5391, got %v", r.run.Ports)
+	}
+	if !portListHas(r.run.Ports, "8080") {
+		t.Errorf("expected fixed port 8080, got %v", r.run.Ports)
+	}
+	if portListHas(r.run.Ports, "9999") || portListHas(r.run.Ports, "0:9999") {
+		t.Errorf("did not expect unpublished 9999, got %v", r.run.Ports)
+	}
+}
+
+func TestApplyFeaturePortsUserMappingWins(t *testing.T) {
+	r := &Runtime{
+		run:     model.RunOptions{Ports: []string{"127.0.0.1:6000:5391"}},
+		profile: model.Profile{Name: "claude"},
+		features: []model.Extension{
+			{Name: "diffity", Ports: []model.PortConfig{
+				{Container: 5391, HostAllocation: model.HostAllocationAuto, Publish: true, Label: "Diffity"},
+			}},
+		},
+	}
+	r.applyFeaturePorts()
+	if len(r.run.Ports) != 1 {
+		t.Errorf("expected user mapping to win over feature declaration, got %v", r.run.Ports)
+	}
+}
+
+func TestApplyFeaturePortsTwoAutoPortsDoNotCollide(t *testing.T) {
+	r := &Runtime{
+		profile: model.Profile{Name: "claude"},
+		features: []model.Extension{
+			{Name: "a", Ports: []model.PortConfig{
+				{Container: 5391, HostAllocation: model.HostAllocationAuto, Publish: true, Label: "A"},
+			}},
+			{Name: "b", Ports: []model.PortConfig{
+				{Container: 6006, HostAllocation: model.HostAllocationAuto, Publish: true, Label: "B"},
+			}},
+		},
+	}
+	r.applyFeaturePorts()
+	if !portListHas(r.run.Ports, "0:5391") || !portListHas(r.run.Ports, "0:6006") {
+		t.Errorf("expected both auto-host specs, got %v", r.run.Ports)
+	}
+}
+
+func TestDeclaredPortConfigsCombinesProfileAndFeatures(t *testing.T) {
+	r := &Runtime{
+		profile: model.Profile{
+			Name:  "theia",
+			Ports: []model.PortConfig{{Container: 3000, Publish: true, Label: "Theia IDE"}},
+		},
+		features: []model.Extension{
+			{Name: "diffity", Ports: []model.PortConfig{
+				{Container: 5391, HostAllocation: model.HostAllocationAuto, Publish: true, Label: "Diffity"},
+			}},
+		},
+	}
+	got := r.declaredPortConfigs()
+	if len(got) != 2 || got[0].Label != "Theia IDE" || got[1].Label != "Diffity" {
+		t.Fatalf("declaredPortConfigs = %+v", got)
+	}
+}
+
+func TestLogDeclaredPortAvailabilityAutoPortWithoutBackendFallsBack(t *testing.T) {
+	r := &Runtime{
+		profile: model.Profile{Name: "claude"},
+		features: []model.Extension{
+			{Name: "diffity", Ports: []model.PortConfig{{
+				Container:      5391,
+				HostAllocation: model.HostAllocationAuto,
+				Publish:        true,
+				Label:          "Diffity",
+				OpenURL:        "http://localhost:{host_port}",
+			}}},
+		},
+	}
+	r.applyFeaturePorts()
+
+	output := captureStdout(t, func() {
+		r.logDeclaredPortAvailability(nil)
+	})
+	if strings.Contains(output, "http://localhost:0") {
+		t.Fatalf("must not print the 0 sentinel as a URL, got %q", output)
+	}
+	if !strings.Contains(output, "auto-assigned") {
+		t.Fatalf("expected auto-assigned fallback hint, got %q", output)
+	}
+}

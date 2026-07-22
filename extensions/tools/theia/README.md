@@ -11,7 +11,7 @@ gateway, so the same secret-injection and allowlist rules apply.
 
 - **Command**: `sleep infinity`
 - **Config directory**: `~/.theia`
-- **post_start.open_ide**: `theia`. Triggers the host launcher once the
+- **postStart.openIDE**: `theia`. Triggers the host launcher once the
   container is running.
 
 ## API Keys

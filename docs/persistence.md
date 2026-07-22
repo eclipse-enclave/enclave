@@ -42,7 +42,7 @@ Per-project data is stored on the host and reused across sessions:
 |------|----------|
 | Package caches | `~/.cache/enclave/<tool>/<project-hash>/` |
 | Shell history | `~/.local/state/enclave/projects/<project-hash>/<tool>/history/` |
-| Agent memory | `~/.local/state/enclave/projects/<project-hash>/<tool>/memory/` (Claude, Gemini) |
+| Agent memory | `~/.local/state/enclave/projects/<project-hash>/<tool>/memory/` (Claude) |
 | Config/env/auth stores | Host directories under `~/.local/state/enclave/` (bind-mounted; no Docker volumes) |
 
 The paths above use the Linux (XDG) layout. On macOS the same data lives under

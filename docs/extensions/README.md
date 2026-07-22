@@ -6,12 +6,12 @@ This document describes Enclave's modular extension system.
 
 Enclave uses a unified extension architecture that supports two types of extensions:
 
-1. **Tool Extensions** - Runnable AI coding agents (Claude, Codex, Gemini, etc.)
+1. **Tool Extensions** - Runnable AI coding agents (Claude, Codex, OpenCode, etc.)
 2. **Feature Extensions** - Development tools and capabilities (GitHub CLI, Python dev tools, etc.)
 
 Extensions are organized into two directories:
 
-- `extensions/tools/` - AI coding agents (Claude, Codex, Gemini, etc.)
+- `extensions/tools/` - AI coding agents (Claude, Codex, OpenCode, etc.)
 - `extensions/features/` - Development tools (GitHub CLI, Python tools, etc.)
 
 This separation makes it immediately clear what type each extension is.
@@ -298,7 +298,7 @@ providers:
         - { file: .credentials.json, type: file_exists }
 ```
 
-`sandbox.*` fields (`configDir`, `skillsDir`, `memoryDir`, `memoryFiles`,
+`sandbox.*` fields (`configDir`, `skillsDir`, `memoryDir`,
 `settingsFile`, `settingsTarget`, `yoloFlag`, `yoloEnabled`, `continueArgs`, `resumeArgs`,
 `passthroughPaths`, `qemuMinMemoryMiB`, `qemuStoreCacheMmap`,
 `hostConfigDir`, `hostCredentialsFile`, and `hostOauthJson`) are enclave-native

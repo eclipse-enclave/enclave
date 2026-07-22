@@ -19,22 +19,41 @@ Contributions are received under the terms of that license.
 
 ## Contributing Code
 
-Before starting substantial work, open or identify a GitHub issue and discuss
-the intended change with the project team. Submit changes as GitHub pull
-requests against `main`.
+<a name="discuss-first"></a>
 
-Keep changes focused and follow the repository guidance in `AGENTS.md`. Format
-modified Go files and run the required checks before submitting a pull request:
+- [1.](#discuss-first) Before starting substantial work, open or identify a
+  GitHub issue and discuss the intended change with the project team.
 
-```sh
-make build
-make test
-make lint
-```
+<a name="pull-requests"></a>
 
-Contributions created with generative AI must be reviewed by a human and
-disclosed in accordance with the [Eclipse Foundation AI
-guidelines](https://www.eclipse.org/projects/handbook/#ai).
+- [2.](#pull-requests) Submit changes as GitHub pull requests against `main`.
+
+<a name="focused-changes"></a>
+
+- [3.](#focused-changes) Keep changes focused and follow the repository guidance
+  in `AGENTS.md`.
+
+<a name="required-checks"></a>
+
+- [4.](#required-checks) Format modified Go files and run the required checks
+  before submitting a pull request:
+
+  ```sh
+  make build
+  make test
+  make lint
+  ```
+
+<a name="human-in-the-loop"></a>
+
+- [5.](#human-in-the-loop) Contributors can use whatever tools they would like
+  to craft their contributions, but there must be a human in the loop.
+  Contributors must read and review all LLM-generated code or text before they
+  ask other project members to review it. The contributor is always the author
+  and is fully accountable for their contributions. Contributors should be
+  sufficiently confident that the contribution is high enough quality that
+  asking for a review is a good use of scarce maintainer time, and they should
+  be able to answer questions about their work themselves during review.
 
 ## Eclipse Foundation Development Process
 

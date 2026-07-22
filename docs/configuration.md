@@ -229,7 +229,6 @@ Common settings paths:
 |------|--------------------|
 | claude | `settings.json` |
 | codex | `config.toml` |
-| gemini | `settings.json` |
 | mistral-vibe | `config.toml` |
 | opencode | `opencode.json` |
 | pi | `agent/settings.json` |

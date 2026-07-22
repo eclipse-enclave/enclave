@@ -19,7 +19,7 @@ current CLI and will get more detail over time.
   backend exists but currently runs without network restrictions.
 - Git. Enclave runs from inside a git repository, and works with git worktrees when
   you want to isolate parallel sessions.
-- Credentials for a supported agent, such as Claude Code, Codex, or Gemini.
+- Credentials for a supported agent, such as Claude Code, Codex, or OpenCode.
 
 ## Install
 

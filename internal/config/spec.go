@@ -67,7 +67,6 @@ type specSandbox struct {
 	ConfigDir          string   `json:"configDir,omitempty"`
 	SkillsDir          string   `json:"skillsDir,omitempty"`
 	MemoryDir          string   `json:"memoryDir,omitempty"`
-	MemoryFiles        []string `json:"memoryFiles,omitempty"`
 	SettingsFile       string   `json:"settingsFile,omitempty"`
 	SettingsTarget     string   `json:"settingsTarget,omitempty"`
 	YoloFlag           string   `json:"yoloFlag,omitempty"`

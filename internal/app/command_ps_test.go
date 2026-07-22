@@ -56,8 +56,8 @@ func TestBuildPSRowsFromSessions(t *testing.T) {
 			CreatedAt:   now.Add(-30 * time.Second),
 		},
 		{
-			Ref:         backend.SessionRef{Name: "enclave-gemini-aaa111aaa111"},
-			Tool:        "gemini",
+			Ref:         backend.SessionRef{Name: "enclave-opencode-aaa111aaa111"},
+			Tool:        "opencode",
 			ProjectHash: "aaa111aaa111",
 			Status:      "exited",
 			CreatedAt:   now.Add(-90 * time.Minute),
@@ -72,10 +72,10 @@ func TestBuildPSRowsFromSessions(t *testing.T) {
 	if len(rows) != 3 {
 		t.Fatalf("expected 3 rows, got %d", len(rows))
 	}
-	// The exited gemini row sorts last (by name) and shows a dash instead of a
+	// The exited opencode row sorts last (by name) and shows a dash instead of a
 	// growing age-based uptime.
-	if rows[2].Name != "enclave-gemini-aaa111aaa111" {
-		t.Fatalf("expected sorted gemini row last, got %q", rows[2].Name)
+	if rows[2].Name != "enclave-opencode-aaa111aaa111" {
+		t.Fatalf("expected sorted opencode row last, got %q", rows[2].Name)
 	}
 	if rows[2].Uptime != "-" {
 		t.Fatalf("expected dash uptime for exited container, got %q", rows[2].Uptime)

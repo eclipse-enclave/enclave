@@ -9,7 +9,6 @@ package runtime
 
 import (
 	"os"
-	"path/filepath"
 	"testing"
 
 	"enclave/internal/config"
@@ -69,44 +68,6 @@ func TestAddMemoryMountsBindsDirectory(t *testing.T) {
 	}
 }
 
-func TestAddMemoryMountsBindsFiles(t *testing.T) {
-	t.Parallel()
-
-	home := t.TempDir()
-	projectHash := "projhash"
-	r := &Runtime{
-		host:          model.Host{Home: home},
-		project:       model.Project{Hash: projectHash},
-		profile:       model.Profile{Name: "gemini", MemoryFiles: []string{".gemini/GEMINI.md"}},
-		containerHome: "/home/agent",
-	}
-
-	acc := newMountAccumulator(nil, nil)
-	r.addMemoryMounts(acc)
-
-	target := "/home/agent/.gemini/GEMINI.md"
-	source, ok := lookupMountSource(acc.Mounts(), target)
-	if !ok {
-		t.Fatalf("expected memory file mount at %s", target)
-	}
-	want := filepath.Join(config.HostProjectMemoryDir(home, projectHash, "gemini"), "GEMINI.md")
-	if source != want {
-		t.Fatalf("memory file mount source = %q, want %q", source, want)
-	}
-	for _, m := range acc.Mounts() {
-		if m.ContainerPath == target && m.ReadOnly {
-			t.Fatalf("expected memory file mount to be writable")
-		}
-	}
-	info, err := os.Stat(source)
-	if err != nil {
-		t.Fatalf("expected host memory file to exist: %v", err)
-	}
-	if info.IsDir() {
-		t.Fatalf("expected %s to be a file, not a directory", source)
-	}
-}
-
 func TestAddMemoryMountsRespectsNoMemory(t *testing.T) {
 	t.Parallel()
 
@@ -131,7 +92,7 @@ func TestAddMemoryMountsRespectsEphemeral(t *testing.T) {
 	r := &Runtime{
 		host:          model.Host{Home: t.TempDir()},
 		project:       model.Project{Hash: "projhash"},
-		profile:       model.Profile{Name: "claude", MemoryDir: ".claude/memory", MemoryFiles: []string{".gemini/GEMINI.md"}},
+		profile:       model.Profile{Name: "claude", MemoryDir: ".claude/memory"},
 		containerHome: "/home/agent",
 		run:           model.RunOptions{Ephemeral: true},
 	}

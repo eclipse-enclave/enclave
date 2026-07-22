@@ -4,7 +4,7 @@
 
 <h1 align="center">Enclave</h1>
 
-A Docker-based sandbox for running agentic coding tools — Claude, Codex, Gemini, and others — in an isolated container while keeping your project files on the host. Network access is restricted to allowlisted domains by default, auth and history persist across sessions, and YOLO mode is on so agents can act without confirmation prompts.
+A Docker-based sandbox for running agentic coding tools — Claude, Codex, OpenCode, and others — in an isolated container while keeping your project files on the host. Network access is restricted to allowlisted domains by default, auth and history persist across sessions, and YOLO mode is on so agents can act without confirmation prompts.
 
 ## Requirements
 
@@ -147,5 +147,3 @@ Project resources: [Eclipse project page](https://projects.eclipse.org/projects/
 [contributing guide](CONTRIBUTING.md), [security policy](SECURITY.md),
 [code of conduct](CODE_OF_CONDUCT.md), [license](LICENSE.md), and
 [notices](NOTICE.md).
-
-Network policy changes can be pushed to running gateways with `enclave network apply`. Persisted unrestricted mode still requires a session restart.

@@ -38,7 +38,7 @@ enclave network apply                      # Apply policy to running gateways
 
 Network mutations are currently global-only. `--project` scope is planned but not yet supported.
 
-Mutating commands (`add-domain`, `remove-domain`, `set-mode`) apply the updated policy to running gateways automatically. Pass `--no-apply` to persist the change without applying it, or `--all-running` to target every running gateway on the host instead of just the current project/tool. Run `enclave network apply` (optionally with `--all-running`) to push the persisted policy to running gateways on demand.
+Mutating commands (`add-domain`, `remove-domain`, `set-mode`) apply the updated policy to running gateways automatically. Pass `--no-apply` to persist the change without applying it, or `--all-running` to target every running gateway on the host instead of just the current project/tool. Run `enclave network apply` (optionally with `--all-running`) to push the persisted policy to running gateways on demand. Persisted unrestricted mode still requires a session restart.
 
 ## Adding Custom Domains
 

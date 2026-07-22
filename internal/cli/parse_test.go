@@ -119,15 +119,15 @@ func TestParseCleanupFlags(t *testing.T) {
 
 func TestParseUpdateCommand(t *testing.T) {
 	defaults := config.DefaultOptions()
-	res, err := Parse([]string{"update", "codex", "gemini"}, defaults)
+	res, err := Parse([]string{"update", "codex", "claude"}, defaults)
 	if err != nil {
 		t.Fatalf("parse failed: %v", err)
 	}
 	if res.Action != "update" {
 		t.Fatalf("expected action update, got %s", res.Action)
 	}
-	if got := res.Options.UpdateTools; len(got) != 2 || got[0] != "codex" || got[1] != "gemini" {
-		t.Fatalf("expected update tools [codex gemini], got %v", got)
+	if got := res.Options.UpdateTools; len(got) != 2 || got[0] != "codex" || got[1] != "claude" {
+		t.Fatalf("expected update tools [codex claude], got %v", got)
 	}
 }
 

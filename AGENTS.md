@@ -43,6 +43,7 @@ Read `README.md` before making user-facing changes.
   ```
 - Preserve existing copyright years and owners. New files use their initial creation year and the actual legal copyright holder; do not guess ownership.
 - Files created by splitting, refactoring, or generating existing content inherit the source header. Update generators so regenerated files retain the header.
+- YAML files under `.github/` do not require headers.
 - Headers are not required for Markdown, JSON, lock/sum files, test fixtures, rendered SVGs, images, PDFs, binaries, or imported third-party content.
 - Run `make check-license-headers` after adding or moving files.
 
@@ -85,7 +86,7 @@ Enclave follows platform-standard roots: the XDG base directories on Linux and o
 - State: `~/.local/state/enclave/` (`$XDG_STATE_HOME`)
 - Cache: `~/.cache/enclave/` (`$XDG_CACHE_HOME`)
 - Installed assets: `~/.local/share/enclave/` (`$XDG_DATA_HOME`)
-- Per-project agent memory: `~/.local/state/enclave/projects/<hash>/<tool>/memory/` (Claude and Gemini only; agent-writable, never shared between projects or agents)
+- Per-project agent memory: `~/.local/state/enclave/projects/<hash>/<tool>/memory/` (Claude only; agent-writable, never shared between projects or agents)
 - User-defined subcommands: `~/.config/enclave/commands/{host,session}/` (executable files become `enclave <name>` verbs)
 
 Per-project config/state is keyed by project hash and kept outside the worktree. See `docs/configuration.md` and `docs/runtime/stores.md` for details.

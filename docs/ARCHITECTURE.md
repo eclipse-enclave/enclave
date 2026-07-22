@@ -197,7 +197,7 @@ Other host-side data:
   - `yarn/` - Yarn cache
   - `bun/` - Bun cache
 - **History**: `~/.local/state/enclave/projects/<hash>/<tool>/history/` for shell history.
-- **Agent memory**: `~/.local/state/enclave/projects/<hash>/<tool>/memory/` for per-project, agent-writable memory (Claude and Gemini only). Bind-mounted into each harness's native memory path (writable), never shared between projects or agents, disabled with `--no-memory`, and skipped for ephemeral (`--ephemeral`) sessions.
+- **Agent memory**: `~/.local/state/enclave/projects/<hash>/<tool>/memory/` for per-project, agent-writable memory (Claude only). Bind-mounted into the harness's native memory path (writable), never shared between projects or agents, disabled with `--no-memory`, and skipped for ephemeral (`--ephemeral`) sessions.
 - **Home config files**: `~/.local/state/enclave/projects/<hash>/<tool>/home-config/` for host-home files created in the container:
   - `npmrc` → `~/.npmrc`
   - `yarnrc` → `~/.yarnrc`

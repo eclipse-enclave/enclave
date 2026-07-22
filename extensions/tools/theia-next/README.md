@@ -11,7 +11,7 @@ enclave gateway, so the same secret-injection and allowlist rules apply.
 
 - **Command**: `sleep infinity`
 - **Config directory**: `~/.theia`
-- **post_start.open_ide**: `theia-next`. Triggers the host launcher once the
+- **postStart.openIDE**: `theia-next`. Triggers the host launcher once the
   container is running.
 
 ## API Keys

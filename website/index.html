@@ -35,10 +35,10 @@
       Eclipse Enclave
     </a>
     <div class="nav-links">
-      <a href="#solution" class="hide-sm">Solution</a>
       <a href="#how" class="hide-sm">How it works</a>
       <a href="#features" class="hide-sm">Features</a>
       <a href="docs/">Docs</a>
+      <a href="docs/support/">Support</a>
       <a href="https://github.com/eclipse-enclave/enclave">GitHub</a>
     </div>
   </div>
@@ -47,18 +47,25 @@
 <!-- Hero -->
 <header class="hero">
   <img class="logo" src="assets/appicon.png" alt="Eclipse Enclave logo">
+  <p class="hero-eyebrow">Open-source sandbox for AI coding agents</p>
   <h1>Full agent autonomy,<br><span class="grad">safely contained.</span></h1>
-  <p class="tagline">Eclipse Enclave runs AI coding agents inside isolated containers.
-    Each session works on the checkout you point it at, with a network policy you control.</p>
+  <p class="tagline">Run Claude, Codex, OpenCode, and other coding agents at full autonomy.
+    Each one runs in its own isolated container, with your files and network access under
+    your control.</p>
+  <div class="hero-cmd">
+    <span><span class="prompt">$</span> <span class="cmd">enclave</span></span>
+    <span class="note">starts an isolated container and drops you into your agent</span>
+  </div>
   <div class="hero-actions">
     <a class="btn btn-primary" href="docs/getting-started/">Get started</a>
     <a class="btn btn-ghost" href="https://github.com/eclipse-enclave/enclave">View on GitHub</a>
   </div>
   <div class="badges">
     <span class="badge open-source">Open source</span>
-    <span class="badge">MIT license</span>
+    <span class="badge">MIT licensed</span>
     <span class="badge">Docker-based</span>
-    <span class="badge">CLI</span>
+    <span class="badge">Claude · Codex · OpenCode</span>
+    <span class="badge coming-soon">GUI · coming soon</span>
   </div>
 </header>
 
@@ -67,20 +74,21 @@
   <!-- Problem -->
   <section id="problem">
     <div class="container">
-      <h2>The <span class="highlight">problem</span></h2>
-      <p class="section-lead">Agents do their best work when they can act without asking. The
-        same permissions that make that possible are what make an agent dangerous on your
-        machine.</p>
+      <p class="eyebrow">The problem</p>
+      <h2>The freedom that makes agents useful makes them dangerous</h2>
+      <p class="section-lead">An agent is most productive when it can act without asking. But the
+        same freedom that makes it useful is what makes it dangerous.</p>
       <div class="grid-2">
         <div class="card">
-          <h3>Agents want broad system access</h3>
-          <p>A coding agent is far more useful when it can run commands, install packages, and
-            edit files on its own, without a confirmation prompt at every step.</p>
+          <h3>Agents need broad access to be useful</h3>
+          <p>To get things done end-to-end, an agent runs commands, installs packages, and edits
+            files on its own. Gate every step behind a confirmation prompt and you lose most of
+            the benefit.</p>
         </div>
         <div class="card">
-          <h3>Broad access on your host is risky</h3>
-          <p>An agent with that much freedom can delete the wrong files, leak a secret, act on a
-            prompt injection, or trip over another agent running next to it.</p>
+          <h3>Broad access on your host is dangerous</h3>
+          <p>That same agent can delete the wrong files, leak a secret, be hijacked by a
+            prompt injection, or collide with another agent sharing your machine.</p>
         </div>
       </div>
     </div>
@@ -89,34 +97,35 @@
   <!-- Solution -->
   <section id="solution" class="section-alt">
     <div class="container">
-      <h2>The <span class="highlight">solution</span></h2>
-      <p class="section-lead">Eclipse Enclave puts each agent session in its own Docker container,
-        behind a gateway that only lets through traffic you allow.</p>
+      <p class="eyebrow">The approach</p>
+      <h2>Isolation that stays out of the agent's way</h2>
+      <p class="section-lead">Enclave gives each session its own container, an isolated view of
+        the filesystem, and its own network gateway. The agent keeps full autonomy inside; the
+        damage it can do stays boxed in.</p>
       <div class="grid-2">
         <div class="card">
           <span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21 8-9-5-9 5v8l9 5 9-5V8Z"/><path d="m3 8 9 5 9-5"/><path d="M12 13v8"/></svg></span>
           <h3>Isolated by the OS</h3>
           <p>Each session runs in its own container with a separate filesystem and network stack.
-            Only what you mount in — typically the project worktree — is shared with the host.</p>
+            Only the paths you mount, usually the project worktree, are visible to the agent.</p>
         </div>
         <div class="card">
           <span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2.6"/><circle cx="6" cy="18" r="2.6"/><circle cx="18" cy="8" r="2.6"/><path d="M6 8.6v6.8"/><path d="M18 10.6c0 3.2-3.4 4.4-6 4.4"/></svg></span>
           <h3>Separate worktrees</h3>
-          <p>Run each parallel agent in its own git worktree — plain git, no extra setup — so
-            their changes never collide. You review and merge on your own terms.</p>
+          <p>Give each parallel agent its own git worktree, using plain git with no extra setup,
+            so their changes never collide. You review and merge on your own terms.</p>
         </div>
         <div class="card">
           <span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 5 6v5c0 4.4 3 7.4 7 9 4-1.6 7-4.6 7-9V6l-7-3Z"/></svg></span>
           <h3>Network you control</h3>
-          <p>With the default Docker backend, a sidecar gateway filters DNS and proxies outbound
-            traffic, so an agent only reaches the domains on your allowlist. Everything else is
-            blocked and logged.</p>
+          <p>A sidecar gateway filters DNS and proxies outbound traffic. Agents reach only the
+            domains on your allowlist; everything else is blocked and logged.</p>
         </div>
         <div class="card">
           <span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 4v5h-5"/></svg></span>
           <h3>Sessions that persist</h3>
-          <p>Start, pause, resume, and inspect a session whenever you want. Its auth, config, and
-            history stay put across restarts.</p>
+          <p>Start, pause, resume, and inspect a session whenever you want. Auth, history, and
+            config persist across restarts, including custom skills and MCP servers.</p>
         </div>
       </div>
     </div>
@@ -125,6 +134,7 @@
   <!-- How it works -->
   <section id="how" class="diagram-section">
     <div class="container">
+      <p class="eyebrow">Under the hood</p>
       <h2>How it works</h2>
       <div class="diagram-wrap">
         <svg viewBox="0 0 720 256" xmlns="http://www.w3.org/2000/svg" font-family="Inter, system-ui, sans-serif" role="img" aria-label="Eclipse Enclave overview: the developer starts a session in an isolated Docker container whose traffic passes through a filtering gateway">
@@ -174,16 +184,16 @@
         </svg>
       </div>
       <p class="diagram-caption">In the default Docker setup, each session runs in its own
-        container behind a gateway that filters and logs its network traffic. The experimental
-        QEMU microVM backend runs without the gateway and is unrestricted.</p>
+        container behind a gateway that filters and logs its network traffic.</p>
     </div>
   </section>
 
   <!-- Quickstart -->
   <section id="quickstart" class="section-alt">
     <div class="container">
-      <h2>Up and running in <span class="highlight">seconds</span></h2>
-      <p class="section-lead">Point Enclave at a project. It builds the environment and starts
+      <p class="eyebrow">Quickstart</p>
+      <h2>One command to a sandboxed agent</h2>
+      <p class="section-lead">Point Enclave at any project. It builds the environment and starts
         your agent in a container on your current checkout.</p>
       <div class="cli-block">
 <span class="comment"># Start the default agent in an isolated container</span><br>
@@ -202,10 +212,29 @@
   </section>
 
 
+  <!-- UI preview (coming soon) -->
+  <section id="ui">
+    <div class="container">
+      <p class="eyebrow">Coming soon</p>
+      <h2>Meet HomeShell</h2>
+      <p class="section-lead">Today Enclave is a CLI. HomeShell is a graphical companion on the
+        way: group your work into projects, split each into workstreams, and run agent sessions
+        across them. Start, watch, and switch between sandboxed sessions with a live overview of
+        every agent's status.</p>
+      <div class="ui-preview">
+        <span class="sticker">Coming soon</span>
+        <div class="ui-frame">
+          <img src="assets/homeshell.png" alt="HomeShell: a graphical dashboard listing Enclave projects, workstreams, and running agent sessions">
+        </div>
+      </div>
+    </div>
+  </section>
+
   <!-- Features -->
   <section id="features" class="section-alt">
     <div class="container">
-      <h2>Features</h2>
+      <p class="eyebrow">Capabilities</p>
+      <h2>Everything in the box</h2>
       <div class="features-grid">
         <div class="feature-col">
           <h3>Supported agents</h3>
@@ -215,6 +244,7 @@
             <li>OpenCode</li>
             <li>Theia AI, Pi, and more</li>
           </ul>
+          <a class="more" href="docs/getting-started/#pick-a-specific-agent">More <span aria-hidden="true">→</span></a>
         </div>
         <div class="feature-col">
           <h3>Command line</h3>
@@ -224,6 +254,7 @@
             <li><code>enclave continue</code> resumes a session</li>
             <li><code>enclave ps</code> lists active sessions</li>
           </ul>
+          <a class="more" href="docs/cli/">More <span aria-hidden="true">→</span></a>
         </div>
         <div class="feature-col">
           <h3>Configuration</h3>
@@ -250,6 +281,7 @@
   <!-- Compliance -->
   <section id="compliance">
     <div class="container">
+      <p class="eyebrow">Governance</p>
       <h2>Compliance and audit readiness</h2>
       <div class="compliance-card">
         <h3>A foundation you can audit</h3>
@@ -259,7 +291,7 @@
           access outside the allowlist is blocked. That same foundation can grow toward
           requirements like the EU Cyber
           Resilience Act (SBOM evidence and vulnerability reporting) and the EU AI Act
-          (Article 12 record-keeping and Article 15 robustness against unauthorised use),
+          (Article 12 record-keeping and Article 15 robustness against unauthorized use),
           with goals such as:</p>
         <ul>
           <li>Log every outbound network request</li>
@@ -267,6 +299,7 @@
           <li>Monitor git pull and push operations</li>
           <li>Keep a complete audit trail of agent activity</li>
           <li>Provide evidence for SBOM and supply-chain reviews</li>
+          <li>Govern the skills, MCP servers, and plugins available per session</li>
         </ul>
       </div>
     </div>
@@ -275,7 +308,7 @@
   <!-- CTA band -->
   <section class="cta-band section-alt">
     <div class="container">
-      <h2>Ready to let your agents off the leash?</h2>
+      <h2>Give your agents room to work, but safely.</h2>
       <p>Install Eclipse Enclave and start your first sandboxed session.</p>
       <div class="cta-actions">
         <a class="btn btn-primary" href="docs/getting-started/">Get started</a>
@@ -288,13 +321,12 @@
 
 <footer class="site-footer">
   <p>Eclipse Enclave is open source under the MIT license. &nbsp;
-    <a href="https://projects.eclipse.org/projects/ecd.enclave">Eclipse Project</a> &nbsp;·&nbsp;
     <a href="https://github.com/eclipse-enclave/enclave">GitHub</a> &nbsp;·&nbsp;
     <a href="docs/">Documentation</a> &nbsp;·&nbsp;
     <a href="https://www.eclipse.org/legal/terms-of-use/">Terms of Use</a> &nbsp;·&nbsp;
     <a href="https://www.eclipse.org/legal/privacy/">Privacy</a> &nbsp;·&nbsp;
     <a href="https://www.eclipse.org/org/documents/community-code-of-conduct/">Code of Conduct</a> &nbsp;·&nbsp;
-    <a href="https://www.eclipse.org/org/documents/communication-channel-guidelines/">Communication Guidelines</a></p>
+    <a href="https://projects.eclipse.org/projects/ecd.enclave">Eclipse Project</a></p>
 </footer>
 
 </body>

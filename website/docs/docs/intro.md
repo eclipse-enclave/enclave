@@ -9,26 +9,34 @@ import ThemedImage from '@theme/ThemedImage';
 
 # Eclipse Enclave
 
-Eclipse Enclave gives AI coding agents full autonomy inside isolated containers.
-Each session gets its own filesystem and, with the default Docker backend, a
-network gateway that only lets through the domains you allow. The current
-working directory where you invoked `enclave` is mounted into the container;
-set up a dedicated git worktree per parallel session and their changes stay off
-each other.
+Eclipse Enclave runs Claude, Codex, OpenCode, and other AI coding agents at full
+autonomy. Each one runs in its own isolated container, with your files and
+network access under your control.
 
-## Autonomy on your host is risky
+You get an agent that acts without asking for permission at every step, without
+handing it the run of your host. Run it from any git repository:
 
-AI coding agents are most productive with full autonomy: running commands and
-ad-hoc scripts, editing files, all without asking permission at every step. That
-same freedom lets an unrestricted agent on your host break system files, leak
-secrets, act on a prompt injection, or let parallel sessions interfere with each
-other.
+```bash
+enclave
+```
 
-## Eclipse Enclave: a sandbox for every session
+Enclave builds the sandbox, mounts your current checkout, and starts the agent
+against the branch you have checked out. See [Getting Started](/getting-started)
+to install and dig in.
 
-Eclipse Enclave puts each agent session in its own container — behind a
-filtering gateway with the default Docker backend — so you can hand an agent
-full autonomy without handing it your host.
+## The freedom that makes agents useful makes them dangerous
+
+An agent is most productive when it can act without asking: running commands and
+ad-hoc scripts, editing files, all without a confirmation prompt at every step.
+But that same freedom lets an unrestricted agent on your host delete the wrong
+files, leak secrets, be hijacked by a prompt injection, or let parallel sessions
+interfere with each other.
+
+## Isolation that stays out of the agent's way
+
+Eclipse Enclave puts each agent session in its own container, behind a filtering
+gateway with the default Docker backend, so you can hand an agent full autonomy
+without handing it your host.
 
 <div className="enclave-cards">
   <div className="enclave-box">
@@ -74,6 +82,21 @@ network restrictions.
       dark: useBaseUrl('/img/architecture-dark.svg'),
     }}
   />
+</figure>
+
+## Coming soon: HomeShell
+
+Today Enclave is a CLI. HomeShell is a graphical companion on the way: group
+your work into projects, split each into workstreams, and run agent sessions
+across them. Start, watch, and switch between sandboxed sessions with a live
+overview of every agent's status.
+
+<figure className="enclave-diagram">
+  <img
+    src={useBaseUrl('/img/homeshell.png')}
+    alt="HomeShell: a graphical dashboard listing Enclave projects, workstreams, and running agent sessions"
+  />
+  <figcaption className="enclave-caption">HomeShell is in active development and not yet released.</figcaption>
 </figure>
 
 ## Next steps

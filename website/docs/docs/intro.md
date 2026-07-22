@@ -9,7 +9,7 @@ import ThemedImage from '@theme/ThemedImage';
 
 # Eclipse Enclave
 
-Eclipse Enclave runs Claude, Codex, Gemini, and other AI coding agents at full
+Eclipse Enclave runs Claude, Codex, OpenCode, and other AI coding agents at full
 autonomy. Each one runs in its own isolated container, with your files and
 network access under your control.
 
@@ -53,7 +53,7 @@ without handing it your host.
   </div>
   <div className="enclave-box">
     <div className="box-title">Works with your agents</div>
-    <p>Run Claude Code, Codex, Gemini, Theia AI, OpenCode, and more from one CLI, each with the same isolation.</p>
+    <p>Run Claude Code, Codex, OpenCode, Eclipse Theia AI, and more from one CLI, each with the same isolation.</p>
   </div>
   <div className="enclave-box">
     <div className="box-title">Audit-ready by design</div>

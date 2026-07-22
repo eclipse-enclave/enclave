@@ -1,9 +1,11 @@
 name: Rolling Release
 
-# Manual-only until the public repository's release policy, permissions, and
-# destinations have been reviewed and explicitly enabled. A dispatch without
-# publish=true only builds artifacts; it cannot touch releases or tags.
 on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - 'docs/**'
+      - '*.md'
   workflow_dispatch:
     inputs:
       publish:
@@ -56,7 +58,7 @@ jobs:
 
   release:
     needs: [build, build-deb]
-    if: ${{ inputs.publish }}
+    if: ${{ github.event_name == 'push' || inputs.publish }}
     runs-on: ubuntu-latest
     permissions:
       contents: write

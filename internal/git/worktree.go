@@ -30,16 +30,6 @@ func ListWorktrees(dir string) ([]WorktreeInfo, error) {
 	return ParseWorktreeList(out), nil
 }
 
-// ResolveMainWorktree returns the main worktree path for a git repository.
-// If dir is already the main worktree, or is not a git repo, dir is returned unchanged.
-func ResolveMainWorktree(dir string) string {
-	wts, err := ListWorktrees(dir)
-	if err != nil || len(wts) == 0 {
-		return dir
-	}
-	return wts[0].Path
-}
-
 // ListLocalBranches returns the names of all local branches in dir.
 func ListLocalBranches(dir string) ([]string, error) {
 	// #nosec G204 -- command and flags are fixed; dir is passed as a single argument.

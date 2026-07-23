@@ -38,9 +38,10 @@ func (r *Runtime) ExecuteBackground() (string, error) {
 		return "", err
 	}
 
-	// Announce only after the container is confirmed started, so a failed bind
-	// (e.g. a host-port conflict) never prints a URL that was never reachable.
-	r.logPublishedPortURLs()
+	// Announce only after the container is confirmed started: auto-assigned
+	// host ports do not exist until then, and a failed bind (e.g. a host-port
+	// conflict) never prints a forwarding or URL that did not happen.
+	r.announcePublishedPorts(ctx.ContainerName)
 
 	r.runPostStart(ctx.ContainerName)
 

@@ -18,9 +18,10 @@ import (
 // filtered the way the real Docker backend would, i.e. gateway sidecars
 // excluded); other methods are no-ops.
 type fakeBackend struct {
-	sessions []backend.Session
-	listErr  error
-	listFn   func(backend.SessionFilter) ([]backend.Session, error)
+	sessions  []backend.Session
+	listErr   error
+	listFn    func(backend.SessionFilter) ([]backend.Session, error)
+	inspectFn func(backend.SessionRef) (*backend.Session, error)
 
 	storage        backend.StoreManager
 	prepared       []backend.StorePrep
@@ -50,7 +51,10 @@ func (f *fakeBackend) List(_ context.Context, filter backend.SessionFilter) ([]b
 	}
 	return f.sessions, f.listErr
 }
-func (f *fakeBackend) Inspect(context.Context, backend.SessionRef) (*backend.Session, error) {
+func (f *fakeBackend) Inspect(_ context.Context, ref backend.SessionRef) (*backend.Session, error) {
+	if f.inspectFn != nil {
+		return f.inspectFn(ref)
+	}
 	return nil, nil
 }
 func (f *fakeBackend) Attach(context.Context, backend.SessionRef, backend.AttachIO) error { return nil }

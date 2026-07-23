@@ -357,14 +357,15 @@ func validateWorktreeMountPath(path string, validatedDirs *[]string, projectReal
 // ResolvePorts converts Docker-style publish specs into neutral port
 // mappings. Bindings that omit an explicit host-IP default to loopback
 // (127.0.0.1); binding to another interface is an explicit opt-in via the
-// "ip:host:container" form (e.g. "0.0.0.0:3000:3000").
+// "ip:host:container" form (e.g. "0.0.0.0:3000:3000"). A host port of "0"
+// (e.g. "0:3000") requests an OS-assigned host port at runtime.
 func ResolvePorts(ports []string) []backend.PortMapping {
 	var mappings []backend.PortMapping
 	for _, port := range ports {
 		hostIP, hostPort, containerPort, ok := util.ParsePortSpec(port)
 		if !ok {
 			if strings.TrimSpace(port) != "" {
-				logx.Warnf("Invalid port format: %s (use '3000', '3000:8080', or '127.0.0.1:3000:8080')", port)
+				logx.Warnf("Invalid port format: %s (use '3000', '3000:8080', '0:3000' for an auto-assigned host port, or '127.0.0.1:3000:8080')", port)
 			}
 			continue
 		}
@@ -372,7 +373,6 @@ func ResolvePorts(ports []string) []backend.PortMapping {
 			hostIP = "127.0.0.1"
 		}
 		mappings = append(mappings, backend.PortMapping{HostIP: hostIP, HostPort: hostPort, ContainerPort: containerPort, Protocol: "tcp"})
-		logx.Infof("Port forwarding: %s:%s -> %s", hostIP, hostPort, containerPort)
 	}
 	return mappings
 }

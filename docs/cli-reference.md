@@ -125,7 +125,7 @@ Mutation commands (`add-domain`, `remove-domain`, `set-mode`) apply the new poli
 | `--backend <backend>` | Isolation backend: `docker` (default) or experimental `qemu` |
 | `--name <name>` | Named persistent session |
 | `--background` | Detached background session |
-| `-p <port>` | Publish a container port to the host (container → host, e.g. `-p 3002`) |
+| `-p <port>` | Publish a container port to the host (container → host, e.g. `-p 3002`). A host port of `0` (e.g. `-p 0:3000`) lets the daemon pick a free host port (Docker only); read it back with `enclave ps --json`. |
 | `--bridge-port <port>` | Forward a host port into the container (host → container, repeatable, comma-separated) |
 | `--add-dir <path>` | Mount an additional host directory |
 | `--add-readonly-dir <path>` | Mount an additional host directory read-only |

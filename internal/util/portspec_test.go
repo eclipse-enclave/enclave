@@ -23,11 +23,18 @@ func TestParsePortSpec(t *testing.T) {
 		{"*:3000:3000", "*", "3000", "3000", true},
 		{"[::1]:8080:80", "[::1]", "8080", "80", true},
 		{"127.0.0.1:3000", "127.0.0.1", "3000", "3000", true},
+		// "0" host port -> Docker assigns a free host port at runtime.
+		{"0:80", "", "0", "80", true},
+		{"127.0.0.1:0:80", "127.0.0.1", "0", "80", true},
+		{"[::1]:0:80", "[::1]", "0", "80", true},
 		{"", "", "", "", false},
 		{"abc", "", "", "", false},
 		{"1:2:3", "", "", "", false},
 		{"3000:", "", "", "", false},
 		{"8080:notaport", "", "", "", false},
+		// "0" is only valid as a host port, never bare or as a container port.
+		{"0", "", "", "", false},
+		{"8080:0", "", "", "", false},
 	}
 	for _, c := range cases {
 		ip, host, cont, ok := ParsePortSpec(c.in)

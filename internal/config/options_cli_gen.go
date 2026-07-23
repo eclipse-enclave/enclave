@@ -274,7 +274,7 @@ func optionCLIFlags() map[string][]CLIFlag {
 			}),
 		},
 		"ports": {
-			valueFlag("-p", "Forward port to container", "-p requires a value", func(opts *model.Options, sources *model.OptionSources, value string) error {
+			valueFlag("-p", "Publish a container port to the host (e.g. 5391, 8080:80, or 0:5391 for an auto-assigned host port, Docker only)", "-p requires a value", func(opts *model.Options, sources *model.OptionSources, value string) error {
 				opts.Ports = append(opts.Ports, value)
 				sources.Ports = model.SourceCLI
 				return nil

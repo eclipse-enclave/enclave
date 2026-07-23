@@ -588,10 +588,59 @@ func (r *Runtime) applyProfilePorts() {
 	}
 }
 
-// logPublishedPortURLs prints the resolved localhost URL for each declared,
-// published port so the user can open it. The {host_port} placeholder is
-// resolved from the actual host binding when the user supplied one.
-func (r *Runtime) logPublishedPortURLs() {
+// announcePublishedPorts reports port information once the session is
+// started: one forwarding line per published port — with auto-assigned host
+// ports resolved from the live bindings — and the resolved URL for each
+// declared, published port. Announcing only after start keeps the lines
+// truthful: a failed bind never prints a forwarding that did not happen.
+func (r *Runtime) announcePublishedPorts(containerName string) {
+	var bindings []backend.PortMapping
+	if hasAutoAssignedPort(r.run.Ports) {
+		bindings = r.sessionPortBindings(containerName)
+	}
+	r.logPortForwardings(bindings)
+	r.logDeclaredPortAvailability(bindings)
+}
+
+func hasAutoAssignedPort(ports []string) bool {
+	for _, spec := range ports {
+		if hostPort, _, ok := util.SplitPortMapping(spec); ok && hostPort == "0" {
+			return true
+		}
+	}
+	return false
+}
+
+// logPortForwardings prints one forwarding line per published port. The
+// loopback default mirrors ResolvePorts, so the printed host-IP matches the
+// actual binding. Auto-assigned host ports show the daemon-picked value from
+// the live bindings, or "<auto>" when the binding cannot be read back.
+func (r *Runtime) logPortForwardings(bindings []backend.PortMapping) {
+	for _, spec := range r.run.Ports {
+		hostIP, hostPort, containerPort, ok := util.ParsePortSpec(spec)
+		if !ok {
+			continue
+		}
+		if hostIP == "" {
+			hostIP = "127.0.0.1"
+		}
+		if hostPort == "0" {
+			if binding := boundPortMapping(bindings, containerPort); binding != nil {
+				hostIP, hostPort = binding.HostIP, binding.HostPort
+			} else {
+				hostPort = "<auto>"
+			}
+		}
+		logx.Infof("Port forwarding: %s:%s -> %s", hostIP, hostPort, containerPort)
+	}
+}
+
+// logDeclaredPortAvailability tells the user where each declared, published
+// port with an openUrl is reachable. The {host_port} placeholder resolves
+// from the mapped host binding; auto-assigned host ports use the live
+// bindings of the started session, falling back to a hint at enclave ps when
+// the binding cannot be read back.
+func (r *Runtime) logDeclaredPortAvailability(bindings []backend.PortMapping) {
 	for _, p := range r.profile.Ports {
 		if !p.Publish || p.OpenURL == "" {
 			continue
@@ -601,9 +650,46 @@ func (r *Runtime) logPublishedPortURLs() {
 		if !ok {
 			continue
 		}
+		if hostPort == "0" {
+			hostPort = boundHostPort(bindings, containerPort)
+			if hostPort == "" {
+				logx.Infof("%s port %s has an auto-assigned host port; run '%s ps' to see it", p.Label, containerPort, model.AppName)
+				continue
+			}
+		}
 		url := strings.ReplaceAll(p.OpenURL, model.PortHostPlaceholder, hostPort)
 		logx.Successf("%s available at %s", p.Label, url)
 	}
+}
+
+// sessionPortBindings reads the live port bindings of a started session so
+// auto-assigned host ports can be reported with their real value.
+func (r *Runtime) sessionPortBindings(containerName string) []backend.PortMapping {
+	if r.backend == nil {
+		return nil
+	}
+	session, err := r.backend.Inspect(context.Background(), backend.SessionRef{Name: containerName})
+	if err != nil || session == nil {
+		return nil
+	}
+	return session.Ports
+}
+
+func boundPortMapping(bindings []backend.PortMapping, containerPort string) *backend.PortMapping {
+	for i := range bindings {
+		b := &bindings[i]
+		if b.ContainerPort == containerPort && b.HostPort != "" && b.HostPort != "0" {
+			return b
+		}
+	}
+	return nil
+}
+
+func boundHostPort(bindings []backend.PortMapping, containerPort string) string {
+	if b := boundPortMapping(bindings, containerPort); b != nil {
+		return b.HostPort
+	}
+	return ""
 }
 
 func (r *Runtime) runContainer(ctx *ExecutionContext) error {
@@ -611,7 +697,7 @@ func (r *Runtime) runContainer(ctx *ExecutionContext) error {
 	if be == nil {
 		return fmt.Errorf("runtime backend is not configured")
 	}
-	_, err := be.Run(context.Background(), r.backendRequest(ctx, false, true), backend.AttachIO{TTY: true, OnStarted: r.logPublishedPortURLs})
+	_, err := be.Run(context.Background(), r.backendRequest(ctx, false, true), backend.AttachIO{TTY: true, OnStarted: func() { r.announcePublishedPorts(ctx.ContainerName) }})
 	return err
 }
 

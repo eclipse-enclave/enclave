@@ -19,7 +19,8 @@ GATEWAY_PROXY_SOURCE_PATHS_FILE := $(CURDIR)/internal/gateway/gateway_proxy_buil
 override_dh_auto_build:
 	go mod vendor -modcacherw
 	mkdir -p bin
-	go build -mod=vendor -o bin/enclave ./cmd/enclave
+	# The package installs an executable-adjacent asset tree, so do not duplicate it in the binary.
+	go build -tags enclave_no_embed -mod=vendor -o bin/enclave ./cmd/enclave
 	mkdir -p completions
 	bin/enclave completion bash > completions/enclave
 
@@ -43,7 +44,7 @@ override_dh_auto_install:
 	cp -a docs/. $(CURDIR)/debian/enclave/usr/share/enclave/docs/
 	chmod -R u+rwX,go+rX $(CURDIR)/debian/enclave/usr/share/enclave/docs
 
-	# Keep executable-asset rules below in sync with Dockerfile, Makefile,
+	# Keep executable-asset rules below in sync with Dockerfile, internal/appassets,
 	# internal/app/build_permissions.go, and internal/app/dockerfile_gen.go.
 	# Install extensions
 	mkdir -p $(CURDIR)/debian/enclave/usr/share/enclave/extensions

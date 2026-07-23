@@ -41,13 +41,11 @@ func TestParseGatewayProxyBuildInputsRejectsInvalidEntries(t *testing.T) {
 }
 
 // TestGatewayProxyBuildInputsCoverInternalDeps guards against the manifest
-// drifting out of sync with the proxy's real dependency tree. `make install`
-// and debian/rules stage ONLY the packages listed here and then compile the
-// gateway proxy from that staged subset, so a transitive internal dependency
-// that is missing from the manifest builds fine from the repo but fails the
-// install-time gateway build (this is exactly how internal/secretfile slipped
-// through). Every enclave/internal/* package the proxy links must be covered
-// by some manifest entry.
+// drifting out of sync with the proxy's real dependency tree. debian/rules
+// stages only the packages listed here and then compiles the gateway proxy from
+// that subset. A missing transitive dependency therefore builds from the repo
+// but fails from packaged assets. Every enclave/internal/* package the proxy
+// links must be covered by some manifest entry.
 func TestGatewayProxyBuildInputsCoverInternalDeps(t *testing.T) {
 	_, filename, _, ok := runtime.Caller(0)
 	if !ok {

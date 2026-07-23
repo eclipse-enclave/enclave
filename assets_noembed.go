@@ -5,15 +5,14 @@
 //
 // SPDX-License-Identifier: MIT
 
-package main
+//go:build enclave_no_embed
 
-import (
-	"os"
+// Package assets omits the embedded runtime tree from package-managed builds.
+package assets
 
-	_ "enclave"
-	"enclave/internal/app"
-)
+import "io/fs"
 
-func main() {
-	os.Exit(app.Run(os.Args[1:]))
+// FS returns no embedded assets in package-managed builds.
+func FS() fs.FS {
+	return nil
 }

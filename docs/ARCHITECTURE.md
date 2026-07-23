@@ -84,8 +84,14 @@ The restricted network request flow has a separate
 ## Repository Layout
 
 ### Entry Points
-- [`cmd/enclave/main.go`](../cmd/enclave/main.go) is the binary entrypoint. It delegates to `app.Run`.
+- [`cmd/enclave/main.go`](../cmd/enclave/main.go) is the binary entrypoint. It loads the selected asset variant and delegates to `app.Run`.
 - [`cmd/enclave-gateway-proxy/main.go`](../cmd/enclave-gateway-proxy/main.go) is the gateway sidecar MITM proxy entrypoint used by `Dockerfile.gateway`.
+
+### Distribution assets
+- [`assets_embed.go`](../assets_embed.go) embeds the runtime build context, documentation, extensions, and gateway proxy build sources in standalone CLI binaries. Debian builds select [`assets_noembed.go`](../assets_noembed.go) with the `enclave_no_embed` build tag because the package installs the same tree next to the executable.
+- [`internal/appassets/`](../internal/appassets/) registers the embedded filesystem, computes its content key, and defines normalized extraction modes.
+- [`internal/config/embedded_assets.go`](../internal/config/embedded_assets.go) extracts assets atomically into a content-keyed platform cache directory when no checkout or package asset tree is adjacent to the executable.
+- [`internal/legacyassets/`](../internal/legacyassets/) removes only exact, known files from the asset tree used by older source installs. It preserves unknown files, never follows symlinks, and never recursively removes directories.
 
 ### Orchestration (`internal/app/`)
 - [`internal/app/app.go`](../internal/app/app.go) wires parsing, defaults merging, and command dispatch.
@@ -100,7 +106,7 @@ The restricted network request flow has a separate
 
 ### Configuration and Profiles
 - [`extensions/tools/`](../extensions/tools/) contains per-tool configuration (`spec.yaml`, templates, allowlists, install scripts, optional `check-update.sh` hooks).
-- [`internal/config/paths.go`](../internal/config/paths.go) discovers `Dockerfile`, `entrypoint.sh`, extensions, and runtime assets.
+- [`internal/config/paths.go`](../internal/config/paths.go) resolves `Dockerfile`, `entrypoint.sh`, extensions, and runtime assets from `ENCLAVE_HOME`, an executable-adjacent app root, or the embedded asset store.
 - [`internal/config/profile.go`](../internal/config/profile.go) loads and lists tool profiles from extension directories.
 - [`internal/domainpattern/pattern.go`](../internal/domainpattern/pattern.go) validates and normalizes strict domain patterns used by secret release host mappings.
 
@@ -147,11 +153,13 @@ The restricted network request flow has a separate
 - [`runtime-assets/net.sh`](../runtime-assets/net.sh) holds shared entrypoint network helpers (local resolver and loopback proxy setup).
 - [`runtime-assets/microvm/alpine/`](../runtime-assets/microvm/alpine/) holds the experimental QEMU Alpine bundle init and builder.
 - [`extensions/tools/<tool>/templates/`](../extensions/tools/) holds per-tool settings templates baked into the image during build.
+- [`docs/`](../docs/) is included in the runtime build context so the image can install agent-facing help under `/usr/share/doc/enclave/`.
 
 ## Key Concepts
 
 - **Profiles** (`extensions/tools/<tool>/spec.yaml`, `kind: sandbox`): define tool command, session continuation args (`continueArgs`, `resumeArgs`), config location, optional settings/skills metadata (`settingsFile`, `settingsTarget`, `skillsDir`), optional host passthrough allow-list (`passthroughPaths`), optional QEMU bundle minimum memory (`qemuMinMemoryMiB`) and config-store cache hint (`qemuStoreCacheMmap`), declared credential sources (`credentials.sources`) including API-key metadata, YOLO flag, and per-provider auth configuration (`providers`: credentials, auth files, auth session checks, OAuth ports).
 - **Runtime assets** (`runtime-assets/gateway-allowlists/`, `runtime-assets/build-scripts/`, `runtime-assets/auth-reconcile.sh`, `runtime-assets/net.sh`): DNS allowlists, Docker weaving scripts, and shared entrypoint helpers baked into the image. Tool templates live in `extensions/tools/<tool>/templates/` and are aggregated during build.
+- **Asset discovery**: `ENCLAVE_HOME` has explicit precedence, followed by a valid app root above the resolved executable path. This keeps deb installs on `/usr/share/enclave` and in-tree builds on live checkout files. Other binaries extract their embedded assets into an append-only `assets/<content-hash>/` directory under the platform cache root. The former unversioned data-root lookup is not used.
 - **Image selection**: images are per-tool. The default tag is `enclave-<tool>:latest` for the selected `--tool` (default `claude`); `--slim` uses `enclave-<tool>:slim`. When running from a git checkout on a non-default branch, the tag is prefixed with the branch name and hash (for example, `enclave-codex:branch-<name>-<hash>-latest`) to avoid overwriting main images. `--base-image` or devcontainer mode derives a separate tag (e.g., `enclave-codex:base-<hash>-latest`) unless `--image-name` is set.
 - **Agent Node isolation**: Node-based agent CLIs are installed with a private runtime at `/opt/enclave/node` and launcher shebangs are rewritten to that absolute node path. This keeps agent runtime Node independent from user/project `node` on PATH.
 - **Isolation backend**: `--backend` selects the session isolation backend. `docker` is the default and supports the full feature set. Experimental `qemu` supports foreground slim/no-feature unrestricted sessions in an Alpine microVM bundle. Both backends realize persistent stores from the shared host-directory layout (`internal/backend/hoststore`), so auth, tool config, and persisted env are shared between containers and microVMs.
@@ -184,6 +192,7 @@ Persistent stores are host directories under `~/.local/state/enclave/` (honoring
 
 Other host-side data:
 
+- **Embedded asset cache**: standalone binaries extract into `${XDG_CACHE_HOME:-~/.cache}/enclave/assets/<hash>/` on Linux or `~/Library/Caches/org.eclipse.enclave/assets/<hash>/` on macOS. Extraction uses a per-content lock, temporary sibling directory, and atomic rename so concurrent first runs share one complete entry. Missing or invalid entries are recreated from the binary.
 - **QEMU stores**: the experimental QEMU backend mounts the same host-directory stores as the Docker backend (resolved via `internal/backend/hoststore`) into the guest over 9p, so auth, config, and env state are shared across backends.
 - **QEMU bundles**: generated microVM bundles live under `${XDG_CACHE_HOME:-~/.cache}/enclave/microvm/<tool>/<hash>/` unless `--image-name` points at an explicit bundle directory.
 - **Caches**: `~/.cache/enclave/<tool>/<hash>/` for package managers and build tools:

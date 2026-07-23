@@ -10,7 +10,6 @@ package util
 import (
 	"os"
 	"path/filepath"
-	"syscall"
 )
 
 // WithFileLock runs fn while holding an exclusive lock on path.
@@ -27,12 +26,9 @@ func WithFileLock(path string, fn func() error) error {
 		return err
 	}
 	defer func() { _ = file.Close() }()
-	// #nosec G115 -- file descriptor from os.File.Fd() fits in int on all supported platforms.
-	if err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX); err != nil {
+	if err := lockFile(file); err != nil {
 		return err
 	}
-	defer func() {
-		_ = syscall.Flock(int(file.Fd()), syscall.LOCK_UN) // #nosec G115
-	}()
+	defer func() { _ = unlockFile(file) }()
 	return fn()
 }

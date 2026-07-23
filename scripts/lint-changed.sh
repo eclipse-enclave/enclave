@@ -55,12 +55,16 @@ sh_files=""
 for f in $changed; do
     case "$f" in
         *.go)
-            # Only include .go files under LINT_GO_DIRS
-            for dir in $LINT_GO_DIRS; do
-                case "$f" in
-                    "$dir"/*) go_files="$go_files $f"; break ;;
-                esac
-            done
+            # Root package files and Go files under LINT_GO_DIRS are linted.
+            if [[ "$f" != */* ]]; then
+                go_files="$go_files $f"
+            else
+                for dir in $LINT_GO_DIRS; do
+                    case "$f" in
+                        "$dir"/*) go_files="$go_files $f"; break ;;
+                    esac
+                done
+            fi
             ;;
         *.sh | runtime-assets/build-scripts/bin/*)
             [ -f "$f" ] && sh_files="$sh_files $f"
@@ -94,7 +98,9 @@ if [ -n "$go_pkgs" ]; then
 
     echo "Running golangci-lint..."
     for pkg in $go_pkgs; do
-        if ! golangci-lint run "$pkg/..."; then
+        target="$pkg/..."
+        [ "$pkg" = "./." ] && target="."
+        if ! golangci-lint run "$target"; then
             rc=1
         fi
     done

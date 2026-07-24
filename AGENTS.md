@@ -71,11 +71,11 @@ Do not push, publish releases, or modify remote issues/PRs unless the maintainer
 
 - See `docs/extensions/README.md` for the extension architecture and `docs/extensions/adding-a-tool.md` for the step-by-step guide; every tool or feature extension must include a `README.md`.
 - `extensions/tools/<tool>/spec.yaml` (`kind: sandbox`) defines tool runtime, auth, network, settings, and provider behavior.
-- `extensions/features/<feature>/spec.yaml` (`kind: mixin`) defines optional packages, runtime setup, auth, and network behavior.
+- `extensions/features/<feature>/spec.yaml` (`kind: mixin`) defines optional packages, runtime setup, auth, and network behavior; a feature may also ship a `skills/` directory that is composed into the tool's skills when the feature is enabled.
 - Tool settings templates live under `extensions/tools/<tool>/templates/` and are baked into the image.
 - Full host config overrides use `~/.config/enclave/tools/<tool>/` globally and `~/.config/enclave/projects/<hash>/<tool>/config/` per project.
 - JSON/TOML patches mirror native paths under `~/.config/enclave/patches/<tool>/` globally and `~/.config/enclave/projects/<hash>/patches/<tool>/` per project.
-- Shared skills use `~/.config/enclave/skills/<skill>/` globally and `~/.config/enclave/projects/<hash>/skills/<skill>/` per project; tool-specific skills use the canonical tool config roots at the native skills path.
+- Shared skills use `~/.config/enclave/skills/<skill>/` globally and `~/.config/enclave/projects/<hash>/skills/<skill>/` per project; tool-specific skills use the canonical tool config roots at the native skills path. Enabled features contribute their `skills/` between tool-extension skills and the shared sources; see `docs/configuration.md` for the full precedence order.
 
 ## Host Data
 

@@ -51,15 +51,16 @@ skills with tool-specific skills from the canonical config override trees:
 - Tool-specific project: `~/.config/enclave/projects/<hash>/<tool>/config/<relative-skills-path>/<skill>/`
 
 Extension skills, skills shipped by enabled features, and allow-listed host
-passthrough precede those sources. A
-same-named skill at a higher-precedence layer replaces the complete lower layer;
-project shared skills override global tool-specific skills, and project
-tool-specific skills have highest precedence.
+passthrough precede those sources. A same-named skill at a higher-precedence
+layer replaces the complete lower layer; project shared skills override global
+tool-specific skills, and project tool-specific skills have highest precedence.
 
 When the config-source path handles skills, sources are composed directly into
 the generated config tree. Otherwise the fallback materializes the effective
-directory at `~/.local/state/enclave/projects/<hash>/<tool>/skills-generated/`
-and mounts it read-only at `skillsDir` inside the container.
+directory at `~/.local/state/enclave/projects/<hash>/<tool>/skills-generated/<key>/`
+and mounts it read-only at `skillsDir` inside the container. The `<key>` matches
+the config-store suffix, so concurrent sessions with different feature selections
+compose into separate directories.
 
 Shared skills use strict portable frontmatter and are skipped with a warning
 when invalid. Tool-specific skills may use harness metadata. See

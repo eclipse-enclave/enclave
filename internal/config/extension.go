@@ -228,5 +228,8 @@ func validateAndNormalizeExtension(ext *model.Extension, manifestPath string) er
 		return fmt.Errorf("%s: %w", manifestPath, err)
 	}
 	ext.Secrets = normalizedSecrets
+	if err := normalizePortConfigs(ext.Ports, ext.Name); err != nil {
+		return fmt.Errorf("%s: %w", manifestPath, err)
+	}
 	return nil
 }

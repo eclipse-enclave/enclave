@@ -229,6 +229,7 @@ func (r *Runtime) prepareExecution() (*ExecutionContext, error) {
 	r.applyPortHints(&runCtx)
 	r.applyDevcontainerPorts()
 	r.applyProfilePorts()
+	r.applyFeaturePorts()
 	runCtx.Run = r.run
 	if err := r.handler.ValidateRun(runCtx); err != nil {
 		return nil, err
@@ -574,17 +575,16 @@ func (r *Runtime) applyDevcontainerPorts() {
 }
 
 // applyProfilePorts publishes the ports declared by the tool extension.
-// Each entry is injected into the run's port list as a bare container port, so
-// it flows through the same resolution (loopback-by-default) and isolation seam
-// (gateway vs tool container) as a user-supplied -p. addUniquePort skips ports
-// the user already mapped explicitly.
+// Each entry is injected into the run's port list, so it flows through the
+// same resolution (loopback-by-default) and isolation seam (gateway vs tool
+// container) as a user-supplied -p. Ports the user already mapped explicitly
+// are skipped.
 func (r *Runtime) applyProfilePorts() {
 	for _, p := range r.profile.Ports {
 		if !p.Publish {
 			continue
 		}
-		port := strconv.Itoa(p.Container)
-		r.addUniquePort(port, "Publishing declared port %s for %s", port, p.Label)
+		r.addDeclaredPort(p)
 	}
 }
 
@@ -635,13 +635,56 @@ func (r *Runtime) logPortForwardings(bindings []backend.PortMapping) {
 	}
 }
 
+// applyFeaturePorts publishes the ports declared by enabled feature mixins.
+// It runs after applyProfilePorts, so user -p mappings and tool-declared
+// ports win the dedup over feature declarations.
+func (r *Runtime) applyFeaturePorts() {
+	for _, feature := range r.features {
+		for _, p := range feature.Ports {
+			if !p.Publish {
+				continue
+			}
+			r.addDeclaredPort(p)
+		}
+	}
+}
+
+// addDeclaredPort injects a declared PortConfig into the run's port list
+// unless its container port is already mapped. "auto" entries use the "0"
+// host-port sentinel so the daemon assigns a free host port; they dedup on
+// the container port only, since their host port cannot conflict.
+func (r *Runtime) addDeclaredPort(p model.PortConfig) {
+	port := strconv.Itoa(p.Container)
+	if p.HostAllocation != model.HostAllocationAuto {
+		r.addUniquePort(port, "Publishing declared port %s for %s", port, p.Label)
+		return
+	}
+	_, hasContainer, _ := util.PortMappingState(r.run.Ports, port)
+	if hasContainer {
+		return
+	}
+	spec := "0:" + port
+	r.run.Ports = append(r.run.Ports, spec)
+	logx.Infof("Publishing declared port %s for %s (auto-assigned host port)", port, p.Label)
+}
+
+// declaredPortConfigs returns the tool's declared ports followed by those of
+// the enabled features.
+func (r *Runtime) declaredPortConfigs() []model.PortConfig {
+	ports := append([]model.PortConfig(nil), r.profile.Ports...)
+	for _, feature := range r.features {
+		ports = append(ports, feature.Ports...)
+	}
+	return ports
+}
+
 // logDeclaredPortAvailability tells the user where each declared, published
 // port with an openUrl is reachable. The {host_port} placeholder resolves
 // from the mapped host binding; auto-assigned host ports use the live
 // bindings of the started session, falling back to a hint at enclave ps when
 // the binding cannot be read back.
 func (r *Runtime) logDeclaredPortAvailability(bindings []backend.PortMapping) {
-	for _, p := range r.profile.Ports {
+	for _, p := range r.declaredPortConfigs() {
 		if !p.Publish || p.OpenURL == "" {
 			continue
 		}

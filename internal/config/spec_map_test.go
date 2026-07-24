@@ -265,6 +265,72 @@ network:
 	}
 }
 
+func TestSpecToExtensionMapsPorts(t *testing.T) {
+	doc := mustDoc(t, `
+schemaVersion: "1"
+kind: mixin
+name: port-feat
+ports:
+  - container: 5391
+    hostAllocation: auto
+    publish: true
+    label: Port Feature
+    openUrl: "http://localhost:{host_port}"
+  - container: 9999
+`)
+	ext, _ := specToExtension(doc)
+	if len(ext.Ports) != 2 {
+		t.Fatalf("ports not mapped: %+v", ext.Ports)
+	}
+	p := ext.Ports[0]
+	if p.Container != 5391 || p.HostAllocation != model.HostAllocationAuto || !p.Publish || p.Label != "Port Feature" || p.OpenURL != "http://localhost:{host_port}" {
+		t.Fatalf("port fields wrong: %+v", p)
+	}
+	if ext.Ports[1].Publish || ext.Ports[1].HostAllocation != "" {
+		t.Fatalf("omitted port flags should stay default: %+v", ext.Ports[1])
+	}
+}
+
+func TestValidateAndNormalizeExtensionPortDefaults(t *testing.T) {
+	ext := model.Extension{
+		Name:  "port-feat",
+		Ports: []model.PortConfig{{Container: 5391, Publish: true}},
+	}
+	if err := validateAndNormalizeExtension(&ext, "spec.yaml"); err != nil {
+		t.Fatalf("validateAndNormalizeExtension: %v", err)
+	}
+	p := ext.Ports[0]
+	if p.Label != "port-feat" || p.OpenURL != "http://localhost:"+model.PortHostPlaceholder {
+		t.Fatalf("port defaults not filled: %+v", p)
+	}
+
+	bad := model.Extension{
+		Name:  "port-feat",
+		Ports: []model.PortConfig{{Container: 0, Publish: true}},
+	}
+	if err := validateAndNormalizeExtension(&bad, "spec.yaml"); err == nil {
+		t.Fatalf("expected out-of-range container port error")
+	}
+
+	badAlloc := model.Extension{
+		Name:  "port-feat",
+		Ports: []model.PortConfig{{Container: 5391, Publish: true, HostAllocation: "atuo"}},
+	}
+	if err := validateAndNormalizeExtension(&badAlloc, "spec.yaml"); err == nil {
+		t.Fatalf("expected invalid hostAllocation error")
+	}
+
+	for _, alloc := range []string{"", model.HostAllocationFixed, model.HostAllocationAuto} {
+		ok := model.Extension{
+			Name:  "port-feat",
+			Ports: []model.PortConfig{{Container: 5391, Publish: true, HostAllocation: alloc}},
+		}
+		if err := validateAndNormalizeExtension(&ok, "spec.yaml"); err != nil {
+			t.Fatalf("hostAllocation %q rejected: %v", alloc, err)
+		}
+	}
+}
+
 func TestSpecToExtensionMapsInstallCommandUsers(t *testing.T) {
 	doc := mustDoc(t, `
 schemaVersion: "1"

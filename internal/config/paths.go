@@ -77,15 +77,19 @@ func resolveUserExtensionPaths(paths *model.Paths) {
 	paths.UserFeaturesDir = filepath.Join(userExtensionsDir, "features")
 }
 
-func ResolveProject() (model.Project, error) {
-	cwd, err := os.Getwd()
+func ResolveProjectFromDir(dir string) (model.Project, error) {
+	home, err := ResolveHostHome()
 	if err != nil {
-		return model.Project{}, fmt.Errorf("get working directory: %w", err)
+		return model.Project{}, fmt.Errorf("resolve host home: %w", err)
 	}
-	return ResolveProjectFromDir(cwd)
+	description, err := DescribeProjectFromDir(home, dir)
+	if err != nil {
+		return model.Project{}, err
+	}
+	return description.Project, nil
 }
 
-func ResolveProjectFromDir(dir string) (model.Project, error) {
+func resolveCanonicalProject(dir string) (model.Project, error) {
 	if dir == "" {
 		return model.Project{}, fmt.Errorf("project dir is empty")
 	}

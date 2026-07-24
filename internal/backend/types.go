@@ -18,6 +18,10 @@ import (
 const (
 	NameDocker = "docker"
 	NameQEMU   = "qemu"
+
+	// ConfigStoreLeaseMonitorCommand is the internal helper process used by a
+	// detached backend to retain a host-store lease after the CLI exits.
+	ConfigStoreLeaseMonitorCommand = "__config-store-lease-monitor"
 )
 
 type NetworkMode string
@@ -290,8 +294,8 @@ type UnfinalizedRemover interface {
 }
 
 // ConfigStoreConflictChecker reports whether a running session for the same
-// tool, project, and worktree already uses the given config-store key.
-// Sessions predating config-key tracking count as using the caller's stable
+// tool and effective project namespace already uses the given config-store
+// key. Sessions predating config-key tracking count as using the caller's stable
 // key, so callers must pass the stable key they would fall back to.
 type ConfigStoreConflictChecker interface {
 	ConfigStoreKeyInUse(ctx context.Context, meta SessionMeta, key string) (bool, error)

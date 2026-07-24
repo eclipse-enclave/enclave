@@ -32,6 +32,15 @@ type Result struct {
 	Sources      model.OptionSources
 	ConfigView   model.ConfigView
 	ReviewTarget string
+	ProjectTag   string
+	ProjectPath  string
+	ProjectJSON  bool
+	ProjectYes   bool
+	// ProjectTagNew and ProjectTagExisting pin the intent of `project tag set`
+	// for noninteractive use: --new refuses to assign an existing tag and
+	// --existing refuses to create a new one.
+	ProjectTagNew      bool
+	ProjectTagExisting bool
 	// UserCommand is set when Action == "user-command": a user-defined
 	// subcommand matched the first positional argument. UserCommandArgs holds
 	// every argument after the command name, verbatim.
@@ -97,6 +106,7 @@ directly: "enclave --tool codex" is equivalent to "enclave run --tool codex".`,
 		networkCommand(&res),
 		imgCommand(&res),
 		extensionCommand(&res),
+		projectCommand(&res),
 		completionCommand(&res),
 		reviewTargetCommand(&res),
 	)

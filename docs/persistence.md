@@ -36,7 +36,10 @@ enclave --add-readonly-dir ~/sdk # Mount an additional host directory read-only
 
 ## Data Persistence
 
-Per-project data is stored on the host and reused across sessions:
+Per-project data is stored on the host and reused across sessions. The project
+hash is derived from the canonical directory unless a host-owned project tag
+selects a shared namespace. Every exact member of a tag uses the same paths
+below.
 
 | Data | Location |
 |------|----------|
@@ -69,7 +72,9 @@ enclave --ephemeral     # No persistent stores at all (fresh isolated session)
 
 ## Cleanup
 
-Remove persistent stores and cached data for the current tool and project:
+Remove persistent stores and cached data for the current tool and effective
+project namespace. For a tag with multiple members, cleanup reports the members
+because the operation affects their shared scope.
 
 ```bash
 enclave cleanup

@@ -169,16 +169,11 @@ func discoverAppRoot() (string, error) {
 		return root, nil
 	}
 
-	// Tier 3: host data root (XDG ~/.local/share/enclave on Linux, Apple
-	// data root under ~/Library/Application Support on macOS)
-	if home, homeErr := os.UserHomeDir(); homeErr == nil && home != "" {
-		candidate := hostDataRoot(home)
-		if isAppRoot(candidate) {
-			return candidate, nil
-		}
+	root, err := extractRegisteredAppAssets()
+	if err != nil {
+		return "", fmt.Errorf("extract embedded %s assets: %w", model.AppName, err)
 	}
-
-	return "", fmt.Errorf("unable to locate %s assets; set %s to the repo root", model.AppName, model.EnvHome)
+	return root, nil
 }
 
 func findAppRootFromDir(start string) (string, bool) {

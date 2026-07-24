@@ -5,7 +5,7 @@
 #
 # SPDX-License-Identifier: MIT
 
-.PHONY: build cross-build install install-assets uninstall clean clean-lint-cache test deb lint lint-changed lint-report fmt vet generate lint-tools check-go completions check-license-headers
+.PHONY: build cross-build install install-binary clean-legacy-assets uninstall clean clean-lint-cache test deb lint lint-changed lint-report fmt vet generate lint-tools check-go completions check-license-headers
 
 BIN_DIR ?= ./bin
 BINARY ?= enclave
@@ -19,7 +19,6 @@ LINT_GO_DIRS := cmd internal extensions/tools
 LINT_TMP_DIR := ./.tmp
 LINT_GO_CACHE := $(LINT_TMP_DIR)/go-build
 LINT_GOLANGCI_CACHE := $(LINT_TMP_DIR)/golangci-lint-cache
-GATEWAY_PROXY_SOURCE_PATHS_FILE := $(CURDIR)/internal/gateway/gateway_proxy_build_inputs.txt
 BASE_REF ?=
 
 check-go:
@@ -38,64 +37,43 @@ completions:
 	mkdir -p $(COMPLETIONS_DIR)
 	$(BIN_DIR)/$(BINARY) completion bash > $(COMPLETIONS_DIR)/enclave
 
-# Install locations follow each platform's conventions. On macOS the asset dir
-# must match hostDataRoot() in internal/config/host_roots.go so the installed
-# binary's tier-3 asset discovery can find it.
+# make install now installs only the self-contained binary. This fixed path is
+# used solely for conservative cleanup of assets staged by older source
+# installs; unlike the former INSTALL_DIR, it is intentionally not overridable.
 ifeq ($(UNAME_S),Darwin)
-INSTALL_DIR ?= $(HOME)/Library/Application Support/org.eclipse.enclave/data
+override LEGACY_INSTALL_DIR := $(HOME)/Library/Application Support/org.eclipse.enclave/data
 INSTALL_BIN ?= /usr/local/bin
 else
-INSTALL_DIR ?= $(HOME)/.local/share/enclave
+override LEGACY_INSTALL_DIR := $(HOME)/.local/share/enclave
 INSTALL_BIN ?= $(HOME)/.local/bin
 endif
 
 install: build completions
-	$(MAKE) install-assets INSTALL_BINARY_LABEL="$(BINARY)"
+ifeq ($(filter Linux Darwin,$(UNAME_S)),)
+	$(error make install supports Linux and macOS hosts only; on Windows use WSL2)
+endif
+	$(MAKE) install-binary INSTALL_BINARY_LABEL="$(BINARY)"
 
 INSTALL_BINARY_LABEL ?= $(BINARY)
 
-install-assets:
+install-binary: clean-legacy-assets
 	mkdir -p "$(INSTALL_BIN)"
 	cp $(BIN_DIR)/$(BINARY) "$(INSTALL_BIN)/$(BINARY).new"
 	mv -f "$(INSTALL_BIN)/$(BINARY).new" "$(INSTALL_BIN)/$(BINARY)"
-	rm -rf "$(INSTALL_DIR)/extensions" "$(INSTALL_DIR)/runtime-assets"
-	# Remove root files staged by older installs that are no longer shipped.
-	rm -f "$(INSTALL_DIR)/CLAUDE.md" "$(INSTALL_DIR)/AGENTS.md"
-	mkdir -p "$(INSTALL_DIR)/extensions" "$(INSTALL_DIR)/runtime-assets"
-	cp Dockerfile Dockerfile.gateway entrypoint.sh gateway-entrypoint.sh .dockerignore "$(INSTALL_DIR)/"
-	cp LICENSE.md NOTICE.md "$(INSTALL_DIR)/"
-	chmod a+r "$(INSTALL_DIR)/Dockerfile" "$(INSTALL_DIR)/Dockerfile.gateway" "$(INSTALL_DIR)/.dockerignore" "$(INSTALL_DIR)/LICENSE.md" "$(INSTALL_DIR)/NOTICE.md"
-	chmod a+rx "$(INSTALL_DIR)/entrypoint.sh" "$(INSTALL_DIR)/gateway-entrypoint.sh"
-	cp -R extensions/tools extensions/features "$(INSTALL_DIR)/extensions/"
-	cp -R runtime-assets/. "$(INSTALL_DIR)/runtime-assets/"
-	chmod -R u+rwX,go+rX "$(INSTALL_DIR)/extensions" "$(INSTALL_DIR)/runtime-assets"
-	# Keep executable-asset rules here in sync with Dockerfile, debian/rules,
-	# internal/app/build_permissions.go, and internal/app/dockerfile_gen.go.
-	find "$(INSTALL_DIR)/extensions" -type f -name install.sh -exec chmod a+rx {} +
-	find "$(INSTALL_DIR)/runtime-assets/build-scripts" -type f \( -name '*.sh' -o -path '*/bin/*' \) -exec chmod a+rx {} +
-	@if [ -e "$(INSTALL_DIR)/docs" ]; then rm -rf -- "$(INSTALL_DIR)/docs"; fi
-	cp -R docs "$(INSTALL_DIR)/"
-	# Clear previously staged Go sources first; cp -r never deletes, so files removed upstream would otherwise linger and break the gateway build.
-	rm -rf "$(INSTALL_DIR)/internal" "$(INSTALL_DIR)/cmd" "$(INSTALL_DIR)/go.mod" "$(INSTALL_DIR)/go.sum"
-	while IFS= read -r path; do \
-		case "$$path" in ""|\#*) continue ;; esac; \
-		dest="$(INSTALL_DIR)/$$(dirname "$$path")"; \
-		mkdir -p "$$dest"; \
-		cp -r "$$path" "$$dest/"; \
-	done < $(GATEWAY_PROXY_SOURCE_PATHS_FILE)
 ifeq ($(UNAME_S),Linux)
 	# freedesktop shell completion (Linux only).
-	mkdir -p $(HOME)/.local/share/bash-completion/completions
-	cp $(COMPLETIONS_DIR)/enclave $(HOME)/.local/share/bash-completion/completions/enclave
+	mkdir -p "$(HOME)/.local/share/bash-completion/completions"
+	cp $(COMPLETIONS_DIR)/enclave "$(HOME)/.local/share/bash-completion/completions/enclave"
 endif
 	@echo "Installed $(INSTALL_BINARY_LABEL) to $(INSTALL_BIN)/$(BINARY)"
-	@echo "Assets installed to $(INSTALL_DIR)/"
+
+clean-legacy-assets:
+	go run ./cmd/enclave-clean-legacy-assets -root "$(LEGACY_INSTALL_DIR)"
 
 uninstall:
 	rm -f "$(INSTALL_BIN)/$(BINARY)"
-	rm -rf "$(INSTALL_DIR)"
 ifeq ($(UNAME_S),Linux)
-	rm -f $(HOME)/.local/share/bash-completion/completions/enclave
+	rm -f "$(HOME)/.local/share/bash-completion/completions/enclave"
 endif
 	@echo "Uninstalled $(BINARY)"
 
@@ -142,7 +120,14 @@ lint: lint-tools
 		go vet $$pkgs; \
 	fi
 	@echo "Running golangci-lint..."
-	@fail=0; for dir in $(LINT_GO_DIRS); do \
+	@fail=0; \
+	if find . -maxdepth 1 -type f -name '*.go' -print -quit | grep -q .; then \
+		echo "  -> ."; \
+		GOCACHE="$(CURDIR)/$(LINT_GO_CACHE)" \
+		GOLANGCI_LINT_CACHE="$(CURDIR)/$(LINT_GOLANGCI_CACHE)" \
+		golangci-lint run . || fail=1; \
+	fi; \
+	for dir in $(LINT_GO_DIRS); do \
 		if find "$$dir" -type f -name '*.go' -print -quit | grep -q .; then \
 			echo "  -> $$dir"; \
 			( \
@@ -189,6 +174,13 @@ lint-report: lint-tools
 	@mkdir -p $(LINT_GO_CACHE) $(LINT_GOLANGCI_CACHE)
 	@echo "Running golangci-lint..."
 	@{ \
+		if find . -maxdepth 1 -type f -name '*.go' -print -quit | grep -q .; then \
+			echo "== . =="; \
+			GOCACHE="$(CURDIR)/$(LINT_GO_CACHE)" \
+			GOLANGCI_LINT_CACHE="$(CURDIR)/$(LINT_GOLANGCI_CACHE)" \
+			golangci-lint run .; \
+			echo; \
+		fi; \
 		for dir in $(LINT_GO_DIRS); do \
 			if find "$$dir" -type f -name '*.go' | grep -q .; then \
 				echo "== $$dir =="; \
@@ -228,12 +220,11 @@ fmt:
 vet:
 	go vet ./...
 
-# Cross-compile every package for macOS (darwin/arm64) without cgo.
-# CI builds and tests the native Linux binary, but only the release workflow
-# ever compiles for macOS — this guards against platform-specific build breaks
-# (e.g. syscall fields that exist on Linux but not Darwin) reaching main.
+# Cross-compile every package for representative macOS and Windows targets
+# without cgo. Release artifacts remain scoped separately.
 cross-build: check-go
 	GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build ./...
+	GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build ./...
 
 generate:
 	go generate ./internal/config ./cmd/enclave

@@ -44,12 +44,23 @@ then install it with APT so runtime dependencies are resolved:
 sudo apt install ./enclave_*_amd64.deb
 ```
 
-The standalone binary attached to the release does not include the Dockerfiles,
-extensions, or other runtime assets and is not a complete installation.
+### Standalone binary
+
+The rolling release also provides a self-contained Linux x86-64 binary. Verify
+it with `checksums.txt`, make it executable, and place it on your `PATH`:
+
+```bash
+sha256sum --check --ignore-missing checksums.txt
+chmod +x enclave-linux-amd64
+sudo install enclave-linux-amd64 /usr/local/bin/enclave
+```
+
+The binary includes the Dockerfiles, extensions, documentation, and other
+runtime assets. It extracts its assets on first use.
 
 ### From source
 
-Clone the repository, then build and install the binary and runtime assets:
+Clone the repository, then build and install the self-contained binary:
 
 ```bash
 git clone https://github.com/eclipse-enclave/enclave.git
@@ -57,12 +68,10 @@ cd enclave
 make install
 ```
 
-On Linux this installs the binary to `~/.local/bin/` and assets to
-`~/.local/share/enclave/`. Make sure `~/.local/bin` is on your `PATH`. On macOS
-the binary goes to `/usr/local/bin/` (the copy may need `sudo` or a writable
-`/usr/local/bin`) and assets to
-`~/Library/Application Support/org.eclipse.enclave/data/`. Override with
-`make install INSTALL_BIN=... INSTALL_DIR=...`.
+On Linux this installs the binary to `~/.local/bin/`. Make sure that directory
+is on your `PATH`. On macOS the default is `/usr/local/bin/`; copying there may
+need `sudo` or a writable `/usr/local/bin`. Override the destination with
+`make install INSTALL_BIN=...`.
 
 ## Quick Start
 

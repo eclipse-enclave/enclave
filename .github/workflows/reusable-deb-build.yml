@@ -74,6 +74,19 @@ jobs:
           test -f "$tmpdir/usr/share/doc/enclave/LICENSE.md"
           test -f "$tmpdir/usr/share/doc/enclave/NOTICE.md"
 
+          mkdir -p "$tmpdir/home" "$tmpdir/isolated"
+          HOME="$tmpdir/home" XDG_CACHE_HOME="$tmpdir/cache" \
+            "$root/enclave" tools >/dev/null
+          test ! -e "$tmpdir/cache/enclave/assets"
+
+          cp "$root/enclave" "$tmpdir/isolated/enclave"
+          if HOME="$tmpdir/home" XDG_CACHE_HOME="$tmpdir/cache" \
+            "$tmpdir/isolated/enclave" tools >"$tmpdir/isolated/output" 2>&1; then
+            echo "deb binary unexpectedly carried embedded assets" >&2
+            exit 1
+          fi
+          grep -q "embedded assets are unavailable" "$tmpdir/isolated/output"
+
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: ${{ inputs.artifact_name }}

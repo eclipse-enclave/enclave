@@ -13,7 +13,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 
 	"enclave/internal/docker"
 	"enclave/internal/logx"
@@ -93,29 +92,6 @@ func realDockerRootFreeSpace(ctx context.Context) (string, uint64, error) {
 		return rootDir, 0, err
 	}
 	return rootDir, freeBytes, nil
-}
-
-func availableBytesAtPath(path string) (uint64, error) {
-	resolved, err := existingPathForStatfs(path)
-	if err != nil {
-		return 0, err
-	}
-
-	var stat syscall.Statfs_t
-	if err := syscall.Statfs(resolved, &stat); err != nil {
-		return 0, fmt.Errorf("stat filesystem for %s: %w", resolved, err)
-	}
-
-	// Statfs reports the available-block count (Bavail) in units of Bsize on
-	// both Linux and macOS. Bsize is the only block-size field common to every
-	// target platform (Linux's Statfs_t also has Frsize; Darwin's does not), but
-	// its type differs across platforms. Guard before the uint64 cast so a
-	// signed negative block size cannot wrap.
-	blockSize := stat.Bsize
-	if blockSize <= 0 {
-		return 0, fmt.Errorf("stat filesystem for %s: invalid block size", resolved)
-	}
-	return stat.Bavail * uint64(blockSize), nil
 }
 
 func existingPathForStatfs(path string) (string, error) {

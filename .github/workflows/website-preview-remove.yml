@@ -1,0 +1,44 @@
+# Copyright (C) 2026 EclipseSource GmbH and others.
+#
+# This program and the accompanying materials are made available under the
+# terms of the MIT License, which is available in the project root.
+#
+# SPDX-License-Identifier: MIT
+
+# SECURITY: uses pull_request_target (has secrets). Safe because it only triggers
+# on PR close, checks out the base branch only, and runs no PR-controlled code.
+# Do NOT add steps that execute repository scripts (npm install/run, etc.).
+
+name: Remove website preview
+
+on:
+  pull_request_target:
+    types: [closed]
+    paths:
+      - "website/**"
+
+permissions:
+  pull-requests: write
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  remove-preview:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          # Keep the deploy token as the only push credential for pr-preview-action.
+          persist-credentials: false
+      - name: Remove preview
+        id: deployment
+        uses: rossjrw/pr-preview-action@ffa7509e91a3ec8dfc2e5536c4d5c1acdf7a6de9 # v1.8.1
+        with:
+          preview-branch: previews
+          umbrella-dir: pr-previews
+          deploy-repository: eclipse-enclave/enclave-website-previews
+          token: ${{ secrets.DEPLOY_PREVIEW_TOKEN }}
+          action: remove

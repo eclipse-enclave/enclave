@@ -1,0 +1,52 @@
+# Copyright (C) 2026 EclipseSource GmbH and others.
+#
+# This program and the accompanying materials are made available under the
+# terms of the MIT License, which is available in the project root.
+#
+# SPDX-License-Identifier: MIT
+
+name: Build website preview
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - "website/**"
+      - ".github/workflows/website-preview-build.yml"
+
+# No secrets needed - this runs untrusted PR code safely.
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build-preview:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Use Node.js 22.x
+        uses: actions/setup-node@6044e13b5dc448c55e2357c09f80417699197238 # v6.2.0
+        with:
+          node-version: "22.x"
+      - name: Build site
+        env:
+          DOCS_BASE_URL: /enclave-website-previews/pr-previews/pr-${{ github.event.number }}/docs/
+        run: ./website/build.sh
+      - name: Save PR metadata
+        run: |
+          mkdir -p ./pr-metadata
+          echo "${{ github.event.number }}" > ./pr-metadata/pr-number
+      - name: Upload site artifact
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: site
+          path: ./public
+      - name: Upload PR metadata
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: pr-metadata
+          path: ./pr-metadata

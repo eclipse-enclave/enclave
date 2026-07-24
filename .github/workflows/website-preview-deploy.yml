@@ -1,0 +1,70 @@
+# Copyright (C) 2026 EclipseSource GmbH and others.
+#
+# This program and the accompanying materials are made available under the
+# terms of the MIT License, which is available in the project root.
+#
+# SPDX-License-Identifier: MIT
+
+name: Deploy website preview
+
+on:
+  workflow_run:
+    workflows: ["Build website preview"]
+    types: [completed]
+
+permissions:
+  pull-requests: write
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  deploy-preview:
+    if: >
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download PR metadata
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: pr-metadata
+          path: ./pr-metadata
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ github.event.workflow_run.id }}
+      - name: Read PR number
+        id: pr
+        run: |
+          PR_NUMBER=$(cat ./pr-metadata/pr-number)
+          echo "number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Download site artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: site
+          path: ./public
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ github.event.workflow_run.id }}
+      - name: Deploy preview
+        id: deployment
+        uses: rossjrw/pr-preview-action@ffa7509e91a3ec8dfc2e5536c4d5c1acdf7a6de9 # v1.8.1
+        with:
+          source-dir: ./public
+          preview-branch: previews
+          umbrella-dir: pr-previews
+          deploy-repository: eclipse-enclave/enclave-website-previews
+          token: ${{ secrets.DEPLOY_PREVIEW_TOKEN }}
+          pr-number: ${{ steps.pr.outputs.number }}
+          action: deploy
+          comment: false
+      - name: Comment preview URL on the PR
+        uses: marocchino/sticky-pull-request-comment@0ea0beb66eb9baf113663a64ec522f60e49231c0 # v3.0.4
+        with:
+          header: pr-preview
+          number: ${{ steps.pr.outputs.number }}
+          message: |
+            :rocket: Deployed preview to ${{ steps.deployment.outputs.deployment-url }}

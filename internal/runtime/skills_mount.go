@@ -42,7 +42,10 @@ func (r *Runtime) addSkillMounts(mounts *mountAccumulator) error {
 	globalSkillsDir := config.HostSkillsDir(r.host.Home)
 	projectSkillsDir := config.HostProjectSkillsDir(r.host.Home, r.project.Hash)
 	projectToolDir := config.HostProjectToolDir(r.host.Home, r.project.Hash, r.profile.Name)
-	generatedSkillsDir := filepath.Join(projectToolDir, model.GeneratedSkillsDirName)
+	// Key the generated directory per session (as the config-source path does),
+	// so concurrent sessions with different feature selections compose into
+	// separate directories instead of clobbering each other's read-only mount.
+	generatedSkillsDir := filepath.Join(projectToolDir, model.GeneratedSkillsDirName, r.sessionGeneratedKey())
 
 	if err := os.MkdirAll(globalSkillsDir, 0o700); err != nil {
 		return fmt.Errorf("create global shared skills directory %q: %w", globalSkillsDir, err)

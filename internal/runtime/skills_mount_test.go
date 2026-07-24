@@ -69,7 +69,7 @@ func TestAddSkillMountsMergesGlobalAndProjectSkills(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected skills mount at %s", target)
 	}
-	if !strings.HasSuffix(source, filepath.Join(projectHash, "codex", model.GeneratedSkillsDirName)) {
+	if !strings.HasSuffix(source, filepath.Join(projectHash, "codex", model.GeneratedSkillsDirName, defaultConfigKey)) {
 		t.Fatalf("unexpected skills source mount: %s", source)
 	}
 	if got, ok := lookupEnv(acc.Env(), model.EnvToolSkillsDir); !ok || got != target {
@@ -199,6 +199,55 @@ func TestAddSkillMountsIncludesEnabledFeatureSkillsOnly(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(source, "other-skill")); !os.IsNotExist(err) {
 		t.Fatalf("skill from a non-enabled feature must be absent, err=%v", err)
 	}
+}
+
+func TestAddSkillMountsIsolatesConcurrentFeatureSelections(t *testing.T) {
+	t.Parallel()
+
+	home := t.TempDir()
+	featuresDir := t.TempDir()
+	projectHash := "projhash"
+
+	// Two features ship a same-named skill with different content. Concurrent
+	// sessions selecting different features must not clobber each other's
+	// read-only mount, so their generated directories must be keyed apart.
+	writeSkill(t, filepath.Join(featuresDir, "alpha", "skills", "feature-skill"), "alpha-body")
+	writeSkill(t, filepath.Join(featuresDir, "beta", "skills", "feature-skill"), "beta-body")
+
+	runSession := func(feature string, configKey string) string {
+		r := &Runtime{
+			host:          model.Host{Home: home},
+			project:       model.Project{Hash: projectHash},
+			profile:       model.Profile{Name: "claude", SkillsDir: ".claude/skills"},
+			paths:         model.Paths{FeaturesDir: featuresDir},
+			features:      []model.Extension{{Name: feature}},
+			containerHome: "/home/agent",
+		}
+		r.configVolSuffix = configKey
+		r.configVolReady = true
+
+		acc := newMountAccumulator(nil, nil)
+		if err := r.addSkillMounts(acc); err != nil {
+			t.Fatalf("addSkillMounts returned error: %v", err)
+		}
+		source, ok := lookupMountSource(acc.Mounts(), "/home/agent/.claude/skills")
+		if !ok {
+			t.Fatalf("expected skills mount for feature %q", feature)
+		}
+		return source
+	}
+
+	// Session A composes first, then session B composes with a different feature
+	// selection under a distinct config key.
+	alphaSource := runSession("alpha", "session-a")
+	betaSource := runSession("beta", "session-b")
+
+	if alphaSource == betaSource {
+		t.Fatalf("sessions with different config keys shared a skills directory: %s", alphaSource)
+	}
+	// Session B must not have overwritten session A's already-mounted skills.
+	assertSkillBody(t, filepath.Join(alphaSource, "feature-skill"), "alpha-body")
+	assertSkillBody(t, filepath.Join(betaSource, "feature-skill"), "beta-body")
 }
 
 func TestAddSkillMountsCreatesManagedDirectories(t *testing.T) {
@@ -348,7 +397,7 @@ func TestAddSkillMountsConcurrentRuns(t *testing.T) {
 		}
 	}
 
-	generated := filepath.Join(config.HostProjectToolDir(home, projectHash, "codex"), model.GeneratedSkillsDirName)
+	generated := filepath.Join(config.HostProjectToolDir(home, projectHash, "codex"), model.GeneratedSkillsDirName, defaultConfigKey)
 	assertSkillBody(t, filepath.Join(generated, "global-only"), "global-only")
 	assertSkillBody(t, filepath.Join(generated, "project-only"), "project-only")
 	assertSkillBody(t, filepath.Join(generated, "shared"), "project")

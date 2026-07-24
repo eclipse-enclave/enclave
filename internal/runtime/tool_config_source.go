@@ -61,11 +61,7 @@ func (r *Runtime) prepareToolConfigSource() error {
 
 func (r *Runtime) generatedConfigSourceDir() string {
 	root := config.HostProjectGeneratedConfigDir(r.host.Home, r.project.Hash, r.profile.Name)
-	key := defaultConfigKey
-	if r.configVolReady && strings.TrimSpace(r.configVolSuffix) != "" {
-		key = strings.TrimSpace(r.configVolSuffix)
-	}
-	return filepath.Join(root, key)
+	return filepath.Join(root, r.sessionGeneratedKey())
 }
 
 // configSourcePreservePaths lists the store-relative paths that must survive

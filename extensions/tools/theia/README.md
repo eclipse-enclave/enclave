@@ -7,6 +7,19 @@ The IDE process lives on the host; the container provides the dev environment
 that Theia connects into. Theia's AI features call out through the enclave
 gateway, so the same secret-injection and allowlist rules apply.
 
+## Usage
+
+```bash
+enclave --tool theia        # start the container and open the IDE (one step)
+enclave theia <container>   # reattach the IDE to an already-running container
+```
+
+Because the container's entrypoint is `sleep infinity` and the IDE launches on
+the host, this profile has no interactive foreground mode: `enclave --tool
+theia` runs detached automatically, prints the container name, and opens the
+IDE. Use `enclave theia <container>` to reattach later (the name may be omitted
+when exactly one enclave container is running).
+
 ## Configuration
 
 - **Command**: `sleep infinity`

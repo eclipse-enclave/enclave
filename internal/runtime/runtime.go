@@ -414,6 +414,19 @@ func (r *Runtime) stableConfigKey() string {
 	return defaultConfigKey
 }
 
+// sessionGeneratedKey is the per-session subdirectory name that isolates
+// host-side generated content (the config source and the skills mount) between
+// concurrent sessions of the same project and tool. It mirrors the config-store
+// suffix, so sessions that differ only in their selection (for example enabled
+// features, which change the composed skills) never share a generated directory
+// and cannot clobber each other's read-only mounts.
+func (r *Runtime) sessionGeneratedKey() string {
+	if r.configVolReady && strings.TrimSpace(r.configVolSuffix) != "" {
+		return strings.TrimSpace(r.configVolSuffix)
+	}
+	return defaultConfigKey
+}
+
 // runningConfigKeyExists reports whether a running session for this tool,
 // project, and worktree already uses the given config-store key. How that is
 // tracked (a Docker label today) is a backend detail behind

@@ -269,6 +269,40 @@ func TestPrepareToolConfigSourceMergesBuiltinUserExtGlobalAndProjectSkills(t *te
 	assertSkillBody(t, filepath.Join(r.configSourceDir, "skills", "shared-all"), "project-tool-all")
 }
 
+func TestPrepareToolConfigSourceIncludesEnabledFeatureSkillsOnly(t *testing.T) {
+	t.Parallel()
+
+	home := t.TempDir()
+	featuresDir := t.TempDir()
+
+	r := newTemplateOverrideRuntime(home, model.Profile{
+		Name:      "claude",
+		ConfigDir: ".claude",
+		SkillsDir: ".claude/skills",
+	})
+	r.paths.FeaturesDir = featuresDir
+	r.features = []model.Extension{{Name: "example"}}
+	r.run = model.RunOptions{HostConfig: model.HostConfigPassthrough}
+
+	// An enabled feature ships skills; a present-but-not-enabled feature must
+	// not contribute (off-by-default gating).
+	writeSkill(t, filepath.Join(featuresDir, "example", "skills", "example-skill"), "feature-skill")
+	writeSkill(t, filepath.Join(featuresDir, "other-feature", "skills", "other-skill"), "should-not-appear")
+	// A feature skill name also present as a global shared skill: shared wins.
+	writeSkill(t, filepath.Join(featuresDir, "example", "skills", "shared"), "feature-shared")
+	writeSkill(t, filepath.Join(config.HostSkillsDir(home), "shared"), "global-shared")
+
+	if err := r.prepareToolConfigSource(); err != nil {
+		t.Fatalf("prepareToolConfigSource returned error: %v", err)
+	}
+
+	assertSkillBody(t, filepath.Join(r.configSourceDir, "skills", "example-skill"), "feature-skill")
+	assertSkillBody(t, filepath.Join(r.configSourceDir, "skills", "shared"), "global-shared")
+	if _, err := os.Stat(filepath.Join(r.configSourceDir, "skills", "other-skill")); !os.IsNotExist(err) {
+		t.Fatalf("skill from a non-enabled feature must be absent, err=%v", err)
+	}
+}
+
 func TestPrepareToolConfigSourceReplacesWholeSkillsAtEachLayer(t *testing.T) {
 	t.Parallel()
 

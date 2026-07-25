@@ -155,7 +155,7 @@ Each directory mirrors the tool's native config layout. For example, Claude over
 
 At startup, enclave assembles a generated config source from:
 
-1. Built-in settings, templates, and tool-extension skills
+1. Built-in settings, templates, tool-extension skills, and enabled-feature skills
 2. Allow-listed host config when `host_config=passthrough`
 3. Global shared skills, then global tool-specific overrides and patches
 4. Project shared skills, then project tool-specific overrides and patches
@@ -185,11 +185,12 @@ Skill precedence, lowest to highest, is:
 
 1. Built-in tool-extension skills
 2. User-global tool-extension skills
-3. Allow-listed native host config when passthrough is enabled
-4. Global shared skills
-5. Global tool-specific skills
-6. Project shared skills
-7. Project tool-specific skills
+3. Skills shipped by enabled features (only features selected for the session contribute; see [Extensions](extensions/README.md))
+4. Allow-listed native host config when passthrough is enabled
+5. Global shared skills
+6. Global tool-specific skills
+7. Project shared skills
+8. Project tool-specific skills
 
 A higher-precedence same-named skill replaces the complete lower-precedence skill directory; files from two versions are not merged. Project scope therefore wins over global specificity: a project shared skill overrides a global tool-specific skill, while a project tool-specific skill overrides both.
 
@@ -209,7 +210,7 @@ For pi, use `-agent/skills/`. At session start the log lists exactly which allow
 
 Shared skills must use the portable Agent Skills subset. `SKILL.md` must be a regular file with YAML frontmatter containing required `name` and `description` fields and only optional `license`, `compatibility`, and `metadata` fields. The name must match the directory and use lowercase letters, numbers, and hyphens. Harness-specific fields such as `allowed-tools` belong in a tool-specific skill. Enclave warns and skips an invalid shared skill rather than failing the session; tool-specific skills are left for the selected harness to validate. Symlinks inside shared skill sources are ignored.
 
-Built-in skills remain tool-specific so extensions can carry harness-specific metadata. Tools without `sandbox.skillsDir` ignore all shared skill sources.
+Built-in skills remain tool-specific so extensions can carry harness-specific metadata. Skills shipped by enabled features overlay as trusted extension content and skip the portable-skill validation applied to shared skills. Tools without `sandbox.skillsDir` ignore all shared skill sources.
 
 ## Tool Config Patches
 

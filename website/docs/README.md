@@ -1,8 +1,9 @@
 # Eclipse Enclave Documentation
 
 [Docusaurus](https://docusaurus.io/) site for the Eclipse Enclave docs. It is
-served under `/docs/` beneath the static marketing site in `../`. Automated
-deployment is not wired up yet; the docs are built and published manually for now.
+served under `/docs/` beneath the static marketing site in `../`. The combined
+site is built by `website/build.sh` and published to GitHub Pages by the
+workflows in `.github/workflows/website-*.yml`.
 
 ## Develop
 
@@ -24,6 +25,13 @@ The docs are served at `<site-root>/docs/`. The base path is controlled by the
 `DOCS_BASE_URL` environment variable (default `/docs/`), read in
 `docusaurus.config.js`. Set it at build time so the site works whether it is
 served at a domain root or a project subpath. No URLs are hardcoded.
+
+Production publishes with `/enclave/docs/`, matching the intended
+`eclipse.dev/enclave` path. A manual run of the *Deploy website* workflow can
+override this via its `docs_base_url` input, e.g. `/enclave-website/docs/` to
+verify a deployment on the raw `eclipse-enclave.github.io/enclave-website/` URL.
+
+Both website workflows push with the organization secret `DEPLOY_TOKEN`.
 
 ## Editing content
 

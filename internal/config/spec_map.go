@@ -220,10 +220,11 @@ func buildPorts(doc specDocument) []model.PortConfig {
 	out := make([]model.PortConfig, 0, len(doc.Ports))
 	for _, sp := range doc.Ports {
 		out = append(out, model.PortConfig{
-			Container: sp.Container,
-			Publish:   sp.Publish,
-			Label:     sp.Label,
-			OpenURL:   sp.OpenURL,
+			Container:      sp.Container,
+			HostAllocation: sp.HostAllocation,
+			Publish:        sp.Publish,
+			Label:          sp.Label,
+			OpenURL:        sp.OpenURL,
 		})
 	}
 	return out
@@ -299,6 +300,7 @@ func specToExtension(doc specDocument) (model.Extension, extensionManifestState)
 		ConfigDir:   doc.ConfigDir,
 		AuthFiles:   doc.AuthFiles,
 		Secrets:     buildSecrets(doc),
+		Ports:       buildPorts(doc),
 	}
 	if doc.Network != nil {
 		ext.AllowedDomains = doc.Network.AllowedDomains

@@ -105,9 +105,11 @@ as `host:port`). Notes:
   network namespace, so the binding is applied on the gateway container; off
   isolation it is applied on the tool container. Either way the port is
   reachable the same way, including for background/detached sessions.
-- **Host port.** The host port currently equals the container port, so two
-  concurrent sessions of the same tool contend for the same host port. Dynamic
-  host-port allocation is a planned follow-up.
+- **Host port.** By default (`hostAllocation: fixed`) the host port equals the
+  container port, so two concurrent sessions of the same tool contend for the
+  same host port. Set `hostAllocation: auto` on an entry to publish it as
+  `0:<container>` instead: the daemon assigns a free host port, and the
+  resolved value appears in the printed `openUrl` and in `enclave ps`.
 - `providers[].oauthPorts` is a separate mechanism for OAuth loopback callbacks
   and is unaffected.
 

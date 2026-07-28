@@ -141,13 +141,26 @@ func cleanMemoryPath(path string) (string, error) {
 // validateAndNormalizePorts checks declared port entries and fills in defaults
 // for the label and open-URL template so downstream code can rely on them.
 func validateAndNormalizePorts(profile *model.Profile) error {
-	for i := range profile.Ports {
-		p := &profile.Ports[i]
+	return normalizePortConfigs(profile.Ports, profile.Name)
+}
+
+// normalizePortConfigs checks declared port entries (tool or feature) and
+// fills in defaults for the label and open-URL template so downstream code
+// can rely on them.
+func normalizePortConfigs(ports []model.PortConfig, defaultLabel string) error {
+	for i := range ports {
+		p := &ports[i]
 		if p.Container < 1 || p.Container > 65535 {
 			return fmt.Errorf("ports[%d]: container port %d out of range (1-65535)", i, p.Container)
 		}
+		switch p.HostAllocation {
+		case "", model.HostAllocationFixed, model.HostAllocationAuto:
+		default:
+			return fmt.Errorf("ports[%d]: invalid hostAllocation %q (want %q or %q)",
+				i, p.HostAllocation, model.HostAllocationFixed, model.HostAllocationAuto)
+		}
 		if p.Label == "" {
-			p.Label = profile.Name
+			p.Label = defaultLabel
 		}
 		if p.OpenURL == "" {
 			p.OpenURL = "http://localhost:" + model.PortHostPlaceholder

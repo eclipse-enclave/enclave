@@ -27,10 +27,10 @@ import (
 )
 
 var (
-	psCheckDocker  = checkDocker
-	psSessionList  = listPSSessions
-	psNow          = time.Now
-	psProfilePorts = profilePublishedPorts
+	psCheckDocker   = checkDocker
+	psSessionList   = listPSSessions
+	psNow           = time.Now
+	psDeclaredPorts = declaredPublishedPorts
 )
 
 type psRow struct {
@@ -88,7 +88,7 @@ func runPS(opts model.Options) int {
 		return 0
 	}
 
-	rows := buildPSRowsFromSessions(sessions, psNow(), cachedProfilePorts())
+	rows := buildPSRowsFromSessions(sessions, psNow(), cachedDeclaredPorts())
 	if len(rows) == 0 {
 		if opts.PSAll {
 			fmt.Println("No enclave containers found")
@@ -171,34 +171,46 @@ func buildPSRowsFromSessions(sessions []backend.Session, now time.Time, portsFor
 	return rows
 }
 
-func cachedProfilePorts() func(string) []model.PortConfig {
+func cachedDeclaredPorts() func(string) []model.PortConfig {
 	cache := map[string][]model.PortConfig{}
 	return func(tool string) []model.PortConfig {
 		if ports, ok := cache[tool]; ok {
 			return ports
 		}
-		ports := psProfilePorts(tool)
+		ports := psDeclaredPorts(tool)
 		cache[tool] = ports
 		return ports
 	}
 }
 
-func profilePublishedPorts(tool string) []model.PortConfig {
+// declaredPublishedPorts collects the published port declarations of the
+// session's tool and of all feature extensions, used to label live bindings
+// with their open-URL. Features are included regardless of the session's
+// enabled set: a declaration only labels a binding that actually exists.
+func declaredPublishedPorts(tool string) []model.PortConfig {
 	paths, err := config.ResolvePaths()
 	if err != nil {
 		return nil
 	}
-	profile, err := config.LoadProfile(paths, tool)
-	if err != nil {
-		return nil
-	}
 	var ports []model.PortConfig
-	for _, p := range profile.Ports {
-		if p.Publish {
-			ports = append(ports, p)
+	if profile, err := config.LoadProfile(paths, tool); err == nil {
+		ports = appendPublishedPorts(ports, profile.Ports)
+	}
+	if features, err := config.ListFeatures(paths); err == nil {
+		for _, ext := range features {
+			ports = appendPublishedPorts(ports, ext.Ports)
 		}
 	}
 	return ports
+}
+
+func appendPublishedPorts(dst []model.PortConfig, ports []model.PortConfig) []model.PortConfig {
+	for _, p := range ports {
+		if p.Publish {
+			dst = append(dst, p)
+		}
+	}
+	return dst
 }
 
 func formatPSPorts(bindings []backend.PortMapping, declared []model.PortConfig) string {

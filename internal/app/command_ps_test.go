@@ -265,14 +265,14 @@ func TestRunPSPrintsTable(t *testing.T) {
 			Ports:       []backend.PortMapping{{HostIP: "127.0.0.1", HostPort: "3000", ContainerPort: "3000", Protocol: "tcp"}},
 		}}, nil
 	}
-	psProfilePorts = func(string) []model.PortConfig {
+	psDeclaredPorts = func(string) []model.PortConfig {
 		return []model.PortConfig{{Container: 3000, Publish: true, OpenURL: "http://localhost:{host_port}"}}
 	}
 	t.Cleanup(func() {
 		psCheckDocker = checkDocker
 		psSessionList = listPSSessions
 		psNow = time.Now
-		psProfilePorts = profilePublishedPorts
+		psDeclaredPorts = declaredPublishedPorts
 	})
 
 	out := captureStdout(t, func() {

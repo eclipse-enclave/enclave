@@ -34,7 +34,7 @@ func warnAppRootModeIssues(appRoot string) {
 		shown = shown[:maxAppRootModeIssues]
 		more = fmt.Sprintf("; and %d more", len(issues)-maxAppRootModeIssues)
 	}
-	logx.Warnf("Installed enclave assets have restrictive permissions that can break image builds: %s%s. Reinstall enclave assets (package reinstall or make install); for a source install, removing %s before reinstalling repairs stale modes.", strings.Join(shown, "; "), more, appRoot)
+	logx.Warnf("Enclave assets have restrictive permissions that can break image builds: %s%s. Reinstall the package or restore the source checkout's asset modes under %s.", strings.Join(shown, "; "), more, appRoot)
 }
 
 func collectAppRootModeIssues(appRoot string) ([]string, error) {
@@ -43,8 +43,10 @@ func collectAppRootModeIssues(appRoot string) ([]string, error) {
 	}
 
 	var issues []string
-	if err := checkAppRootFileMode(appRoot, "entrypoint.sh", true, &issues); err != nil {
-		return nil, err
+	for _, rel := range []string{"entrypoint.sh", "gateway-entrypoint.sh"} {
+		if err := checkAppRootFileMode(appRoot, rel, true, &issues); err != nil {
+			return nil, err
+		}
 	}
 	for _, rel := range []string{
 		filepath.ToSlash(filepath.Join("runtime-assets", "auth-reconcile.sh")),
@@ -52,6 +54,14 @@ func collectAppRootModeIssues(appRoot string) ([]string, error) {
 		filepath.ToSlash(filepath.Join("runtime-assets", "tmux-session.conf")),
 	} {
 		if err := checkAppRootFileMode(appRoot, rel, false, &issues); err != nil {
+			return nil, err
+		}
+	}
+	for _, rel := range []string{
+		filepath.ToSlash(filepath.Join("runtime-assets", "microvm", "alpine", "build-bundle.sh")),
+		filepath.ToSlash(filepath.Join("runtime-assets", "microvm", "alpine", "init")),
+	} {
+		if err := checkAppRootFileMode(appRoot, rel, true, &issues); err != nil {
 			return nil, err
 		}
 	}
@@ -132,7 +142,7 @@ func appendAppRootModeIssue(appRoot string, path string, info os.FileInfo, execu
 }
 
 // These predicates mirror the executable-asset normalization rules in
-// Dockerfile, Makefile, debian/rules, and internal/app/dockerfile_gen.go.
+// Dockerfile, debian/rules, internal/appassets, and dockerfile_gen.go.
 func buildScriptNeedsExecute(rel string) bool {
 	base := filepath.Base(filepath.FromSlash(rel))
 	return strings.HasSuffix(base, ".sh") || strings.Contains(rel, "/bin/")

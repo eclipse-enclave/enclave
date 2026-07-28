@@ -44,12 +44,16 @@ Per-project data is stored on the host and reused across sessions:
 | Shell history | `~/.local/state/enclave/projects/<project-hash>/<tool>/history/` |
 | Agent memory | `~/.local/state/enclave/projects/<project-hash>/<tool>/memory/` (Claude) |
 | Config/env/auth stores | Host directories under `~/.local/state/enclave/` (bind-mounted; no Docker volumes) |
+| Embedded runtime assets | `~/.cache/enclave/assets/<content-hash>/` |
+
+Extracted runtime asset entries are reproducible cache data. Deleting them is
+safe, and Enclave extracts the current entry again on the next run. Enclave does
+not garbage collect entries for older binaries yet.
 
 The paths above use the Linux (XDG) layout. On macOS the same data lives under
-the standard Apple locations, in a reverse-DNS application directory: config,
-state, and data under `~/Library/Application Support/org.eclipse.enclave/`
-(`config/`, `state/`, `data/`) and caches under
-`~/Library/Caches/org.eclipse.enclave/`.
+the standard Apple locations, in a reverse-DNS application directory: config
+and state under `~/Library/Application Support/org.eclipse.enclave/`
+(`config/`, `state/`) and caches under `~/Library/Caches/org.eclipse.enclave/`.
 
 Agent memory is skipped for `--ephemeral` sessions: memory written during them
 is discarded with the session's config store.

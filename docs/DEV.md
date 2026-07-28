@@ -6,6 +6,9 @@ Concise notes for contributors working on the enclave codebase.
 
 - Go 1.24.x (see `go.mod` toolchain)
 - Docker daemon running (for runtime testing)
+- Linux or macOS host. Native Windows is unsupported; use WSL2, where the
+  Linux instructions apply. `make cross-build` compiles Windows targets only
+  to guard code portability.
 
 ## Common Commands
 
@@ -42,19 +45,24 @@ make lint-changed BASE_REF=main      # all changes since main
 
 ## Running Changes from the Working Copy
 
-enclave reads its runtime assets from disk — `Dockerfile`, `entrypoint.sh`,
-`runtime-assets/`, and `extensions/tools/<tool>/templates/` are **not** embedded
-in the binary. It locates them by discovering an "app root", in this order
-(`internal/config/paths.go`, `discoverAppRoot`):
+enclave embeds its runtime assets, but a development binary uses checkout files
+first. It locates an "app root" in this order (`internal/config/paths.go`,
+`discoverAppRoot`):
 
-1. `ENCLAVE_HOME` — if set, it must contain the required assets or startup fails.
-2. Walk **up** from the binary's own directory until a valid app root is found.
-3. Data-root fallback (where `make install` puts assets): `~/.local/share/enclave`
-   on Linux, `~/Library/Application Support/org.eclipse.enclave/data` on macOS.
+1. `ENCLAVE_HOME`, which must contain the required assets when set.
+2. Walk up from the binary's directory until a valid app root is found.
+3. Extract the embedded assets into a content-hash-keyed directory under the
+   platform cache root.
 
-Because `bin/enclave` lives inside the checkout, tier 2 walks up to the repo
-root — so building and running the in-tree binary already uses the working
-copy's assets:
+On Linux the extraction store is
+`${XDG_CACHE_HOME:-~/.cache}/enclave/assets/<hash>/`. On macOS it is
+`~/Library/Caches/org.eclipse.enclave/assets/<hash>/`. Each distinct asset set
+uses its own atomically published directory and does not modify other entries. The tree
+is reproducible from the binary, so deleting it is safe; the next run extracts
+it again.
+
+Because `bin/enclave` lives inside the checkout, tier 2 finds the repository
+root. Running an in-tree binary therefore uses the working copy's assets:
 
 ```bash
 make build
@@ -82,10 +90,9 @@ automatic rebuild. To force it, pass `--rebuild`:
 
 Gotchas:
 
-- Invoke `./bin/enclave`, not an installed `enclave` on your `PATH` — an
-  installed binary resolves assets from the data root (`~/.local/share/enclave`
-  on Linux, `~/Library/Application Support/org.eclipse.enclave/data` on
-  macOS), not your checkout.
+- Invoke `./bin/enclave`, not an installed `enclave` on your `PATH`. An
+  installed binary uses the assets embedded when it was built, not your
+  checkout.
 - Canonical full config overrides under `~/.config/enclave/tools/<tool>/`
   and `~/.config/enclave/projects/<hash>/<tool>/config/`, plus JSON/TOML patches
   under the global/project `patches/<tool>/` directories, can shadow your

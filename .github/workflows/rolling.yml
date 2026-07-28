@@ -27,7 +27,7 @@ jobs:
       matrix:
         include:
           - runner: ubuntu-latest
-            output: enclave-linux-amd64-cli
+            output: enclave-linux-amd64
             cgo: 0
 
     runs-on: ${{ matrix.runner }}
@@ -39,8 +39,11 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Build (CLI only)
+      - name: Build standalone binary
         run: CGO_ENABLED=${{ matrix.cgo }} go build -o ${{ matrix.output }} ./cmd/enclave
+
+      - name: Smoke test embedded asset extraction
+        run: ./scripts/smoke-standalone-binary.sh "${{ matrix.output }}"
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
@@ -93,14 +96,15 @@ jobs:
           | File | Platform | Notes |
           |------|----------|-------|
           | \`enclave_*_amd64.deb\` | Ubuntu 24.04 | Includes all assets |
-          | \`enclave-linux-amd64-cli\` | Linux x86_64 | CLI only, no system deps |
+          | \`enclave-linux-amd64\` | Linux x86_64 | Self-contained binary with runtime assets |
 
           \`\`\`sh
           # Ubuntu 24.04 (resolves dependencies automatically)
           sudo apt install ./enclave_*_amd64.deb
 
-          # Other Linux
-          chmod +x enclave-*
+          # Other x86-64 Linux distributions
+          chmod +x enclave-linux-amd64
+          sudo install enclave-linux-amd64 /usr/local/bin/enclave
           \`\`\`
           EOF
           )" \

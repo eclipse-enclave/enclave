@@ -9,6 +9,13 @@ import ThemedImage from '@theme/ThemedImage';
 
 # Eclipse Enclave
 
+:::note Preview workflow test
+
+This note only exists to exercise the PR preview deployment. The pull request
+that adds it is a throwaway and must not be merged.
+
+:::
+
 Eclipse Enclave runs Claude, Codex, OpenCode, and other AI coding agents at full
 autonomy. Each one runs in its own isolated container, with your files and
 network access under your control.

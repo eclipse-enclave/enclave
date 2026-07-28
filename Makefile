@@ -5,7 +5,7 @@
 #
 # SPDX-License-Identifier: MIT
 
-.PHONY: build cross-build install install-binary clean-legacy-assets uninstall clean clean-lint-cache test deb lint lint-changed lint-report fmt vet generate lint-tools check-go completions check-license-headers
+.PHONY: build cross-build install install-binary clean-legacy-assets uninstall clean clean-lint-cache test deb deb-quick rpm lint lint-changed lint-report fmt vet generate lint-tools check-go completions check-license-headers
 
 BIN_DIR ?= ./bin
 BINARY ?= enclave
@@ -107,6 +107,29 @@ deb-quick:
 	mv "$$tmpdir"/*.deb "$(CURDIR)/dist/" && \
 	( find "$$tmpdir" -type d -exec chmod u+w {} + 2>/dev/null || true ) && \
 	rm -rf "$$tmpdir"
+	@echo "Package built: dist/"
+
+# Build an RPM package. --nodeps lets this run on Debian/Ubuntu hosts, where
+# apt-installed build tools are not represented in the RPM package database.
+rpm: check-go
+	@command -v rpmbuild >/dev/null 2>&1 || { echo "rpmbuild is not installed (on Debian/Ubuntu: sudo apt install rpm)"; exit 1; }
+	mkdir -p dist
+	@tmpdir=$$(mktemp -d) && \
+	trap 'rm -rf "$$tmpdir"' EXIT && \
+	mkdir -p "$$tmpdir/BUILD" "$$tmpdir/BUILDROOT" "$$tmpdir/RPMS" "$$tmpdir/SOURCES" "$$tmpdir/SRPMS" && \
+	tar --exclude-vcs --exclude-vcs-ignores \
+		--exclude='./bin' --exclude='./completions' --exclude='./dist' \
+		--exclude='./vendor' --exclude='./.gocache' --exclude='./.gomodcache' \
+		--exclude='./.tmp' \
+		--transform 's,^\.,enclave-$(VERSION),' \
+		-C "$(CURDIR)" -czf "$$tmpdir/SOURCES/enclave-$(VERSION).tar.gz" . && \
+	rpmbuild --nodeps -bb \
+		--define "_topdir $$tmpdir" \
+		--define "package_version $(VERSION)" \
+		"$(CURDIR)/packaging/rpm/enclave.spec" && \
+	rpm_path=$$(find "$$tmpdir/RPMS" -type f -name '*.rpm' -print -quit) && \
+	{ [ -n "$$rpm_path" ] || { echo "rpmbuild did not produce an RPM" >&2; exit 1; }; } && \
+	cp "$$rpm_path" "$(CURDIR)/dist/"
 	@echo "Package built: dist/"
 
 # Static analysis - run without saving (for CI)

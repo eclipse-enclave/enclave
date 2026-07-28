@@ -24,6 +24,20 @@ Install to your PATH:
 make install
 ```
 
+Build distribution packages:
+
+```bash
+make deb
+make rpm
+```
+
+The default Enclave image includes both packaging toolchains. On Ubuntu, install
+them with `sudo apt install debhelper devscripts rpm`. On Fedora, install the
+RPM build dependencies with `sudo dnf install git go make rpm-build`. Use
+`make deb-quick` when Go was installed outside APT and therefore does not
+satisfy dpkg's build dependency check; it builds the same binary package
+without that check.
+
 Run tests:
 
 ```bash

@@ -41,8 +41,8 @@ func TestParseGatewayProxyBuildInputsRejectsInvalidEntries(t *testing.T) {
 }
 
 // TestGatewayProxyBuildInputsCoverInternalDeps guards against the manifest
-// drifting out of sync with the proxy's real dependency tree. debian/rules
-// stages only the packages listed here and then compiles the gateway proxy from
+// drifting out of sync with the proxy's real dependency tree. Package builds
+// stage only the packages listed here and then compile the gateway proxy from
 // that subset. A missing transitive dependency therefore builds from the repo
 // but fails from packaged assets. Every enclave/internal/* package the proxy
 // links must be covered by some manifest entry.

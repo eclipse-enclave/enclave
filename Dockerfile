@@ -169,7 +169,8 @@ RUN mkdir -p /opt/enclave/node/bin /opt/enclave/node/lib
 COPY --from=agent-node-runtime /usr/local/bin/node /opt/enclave/node/bin/node
 COPY --from=agent-node-runtime /usr/local/lib/node_modules /opt/enclave/node/lib/node_modules
 # Keep executable-asset rules here in sync with debian/rules,
-# internal/appassets, internal/app/build_permissions.go, and internal/app/dockerfile_gen.go.
+# packaging/rpm/enclave.spec, internal/appassets,
+# internal/app/build_permissions.go, and internal/app/dockerfile_gen.go.
 COPY runtime-assets/build-scripts /opt/enclave/build-scripts
 RUN chmod -R a+rX /opt/enclave/build-scripts && \
     find /opt/enclave/build-scripts -type f \( -name '*.sh' -o -path '*/bin/*' \) -exec chmod a+rx {} +

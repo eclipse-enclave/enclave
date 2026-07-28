@@ -26,9 +26,23 @@ sudo apt-get install docker.io docker-buildx git
 sudo systemctl enable --now docker
 ```
 
-Access to the Docker socket is required. If you use the `docker` group, follow
-Docker's [Linux post-install instructions](https://docs.docker.com/engine/install/linux-postinstall/)
-and account for its root-equivalent privileges.
+On Fedora 44, install the runtime dependencies with:
+
+```bash
+sudo dnf install docker docker-buildx
+sudo systemctl enable --now docker
+```
+
+Access to the Docker socket is required. To use the `docker` group on either
+distribution, add your user and then sign out and back in, or run `newgrp docker`
+to apply the membership in the current terminal:
+
+```bash
+sudo gpasswd -a "$USER" docker
+```
+
+See Docker's [Linux post-install instructions](https://docs.docker.com/engine/install/linux-postinstall/)
+and account for the group's root-equivalent privileges.
 
 On macOS, install Docker Desktop and the source-build dependencies above.
 
@@ -42,6 +56,16 @@ then install it with APT so runtime dependencies are resolved:
 
 ```bash
 sudo apt install ./enclave_*_amd64.deb
+```
+
+### RPM package
+
+For Fedora Linux on x86-64, download the `.rpm` from the
+[rolling release](https://github.com/eclipse-enclave/enclave/releases/tag/rolling),
+then install it with DNF:
+
+```bash
+sudo dnf install ./enclave-*.x86_64.rpm
 ```
 
 ### Standalone binary

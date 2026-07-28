@@ -1,0 +1,20 @@
+name: RPM Package Smoke Test
+
+on:
+  workflow_dispatch:
+  pull_request:
+
+concurrency:
+  group: rpm-smoke-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build-rpm:
+    uses: ./.github/workflows/reusable-rpm-build.yml
+    with:
+      runner: ubuntu-24.04
+      artifact_name: rpm
+      artifact_retention_days: 7

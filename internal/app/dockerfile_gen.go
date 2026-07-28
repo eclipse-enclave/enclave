@@ -160,7 +160,8 @@ func dockerfileCopyInstruction(src string, dst string) string {
 }
 
 // Mirrors the extension install.sh execute rule in Dockerfile, debian/rules,
-// internal/appassets, and internal/app/build_permissions.go.
+// packaging/rpm/enclave.spec, internal/appassets, and
+// internal/app/build_permissions.go.
 func dockerfileNormalizeExtensionTree(target string) string {
 	quotedTarget := util.ShellQuote(target)
 	installScript := util.ShellQuote(target + "/" + model.InstallScriptFilename)

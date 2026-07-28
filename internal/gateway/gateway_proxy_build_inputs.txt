@@ -1,5 +1,5 @@
 # Single source of truth for gateway proxy build inputs.
-# debian/rules reads this file directly, and embedded-asset tests enforce it.
+# Package builds read this file directly, and embedded-asset tests enforce it.
 go.mod
 go.sum
 cmd/enclave-gateway-proxy

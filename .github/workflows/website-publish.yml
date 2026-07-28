@@ -14,6 +14,11 @@ on:
       - "website/**"
       - ".github/workflows/website-publish.yml"
   workflow_dispatch:
+    inputs:
+      docs_base_url:
+        description: "Docs base path (use /enclave-website/docs/ to test on the raw GitHub Pages URL)"
+        type: string
+        default: "/enclave/docs/"
 
 permissions:
   contents: read
@@ -39,7 +44,7 @@ jobs:
           node-version: "22.x"
       - name: Build site
         env:
-          DOCS_BASE_URL: /enclave/docs/
+          DOCS_BASE_URL: ${{ inputs.docs_base_url || '/enclave/docs/' }}
         run: ./website/build.sh
       - name: Publish to enclave-website (gh-pages)
         uses: peaceiris/actions-gh-pages@4f9cc6602d3f66b9c108549d475ec49e8ef4d45e # v4.0.0

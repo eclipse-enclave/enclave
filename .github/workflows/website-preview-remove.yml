@@ -18,6 +18,7 @@ on:
       - "website/**"
 
 permissions:
+  contents: read
   pull-requests: write
 
 defaults:
@@ -40,5 +41,5 @@ jobs:
           preview-branch: previews
           umbrella-dir: pr-previews
           deploy-repository: eclipse-enclave/enclave-website-previews
-          token: ${{ secrets.DEPLOY_PREVIEW_TOKEN }}
+          token: ${{ secrets.DEPLOY_TOKEN }}
           action: remove

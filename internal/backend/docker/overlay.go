@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"enclave/internal/config"
 )
@@ -130,9 +131,9 @@ func copyPath(src string, dst string) error {
 				return err
 			}
 		}
-		return nil
+		return os.Chtimes(dst, info.ModTime(), info.ModTime())
 	default:
-		return copyRegularFile(src, dst, info.Mode().Perm())
+		return copyRegularFile(src, dst, info.Mode().Perm(), info.ModTime())
 	}
 }
 
@@ -150,7 +151,7 @@ func copySymlink(src string, dst string) error {
 	return os.Symlink(target, dst)
 }
 
-func copyRegularFile(src string, dst string, mode fs.FileMode) error {
+func copyRegularFile(src string, dst string, mode fs.FileMode, modTime time.Time) error {
 	data, err := os.ReadFile(src) // #nosec G304 -- src is within the enclave config store being overlaid.
 	if err != nil {
 		return err
@@ -158,7 +159,10 @@ func copyRegularFile(src string, dst string, mode fs.FileMode) error {
 	if err := os.MkdirAll(filepath.Dir(dst), 0o700); err != nil {
 		return err
 	}
-	return os.WriteFile(dst, data, mode) // #nosec G703 -- dst is within the runtime-managed config store overlay.
+	if err := os.WriteFile(dst, data, mode); err != nil { // #nosec G703 -- dst is within the runtime-managed config store overlay.
+		return err
+	}
+	return os.Chtimes(dst, modTime, modTime)
 }
 
 // clearDirContents removes every entry inside dir while keeping dir itself.

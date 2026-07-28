@@ -51,6 +51,32 @@ func TestExecutionRequiresDocker(t *testing.T) {
 	}
 }
 
+func TestAutoBackgroundForIDE(t *testing.T) {
+	ideProfile := model.Profile{Name: "theia", PostStart: &model.PostStartActions{OpenIDE: "theia"}}
+
+	cases := []struct {
+		name    string
+		action  string
+		opts    model.Options
+		profile model.Profile
+		want    bool
+	}{
+		{"bare run of IDE profile is forced detached", "run", model.Options{}, ideProfile, true},
+		{"already background is left alone", "run", model.Options{RunOptions: model.RunOptions{Background: true}}, ideProfile, false},
+		{"explicit shell keeps the container shell", "shell", model.Options{RunOptions: model.RunOptions{Shell: true}}, ideProfile, false},
+		{"exec is never auto-backgrounded", "exec", model.Options{}, ideProfile, false},
+		{"non-IDE profile is untouched", "run", model.Options{}, model.Profile{Name: "claude"}, false},
+		{"unsupported open_ide value is untouched", "run", model.Options{}, model.Profile{Name: "x", PostStart: &model.PostStartActions{OpenIDE: "vscode"}}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := autoBackgroundForIDE(tc.action, tc.opts, tc.profile); got != tc.want {
+				t.Fatalf("autoBackgroundForIDE = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestEnsureExistingRuntimeImageWith(t *testing.T) {
 	t.Run("returns nil when image exists", func(t *testing.T) {
 		err := ensureExistingRuntimeImageWith("enclave:latest", func(context.Context, string) (bool, error) {

@@ -12,6 +12,7 @@ import (
 	"os"
 	"sort"
 
+	"enclave/internal/logx"
 	"enclave/internal/model"
 	"enclave/internal/secretfile"
 )
@@ -121,28 +122,29 @@ func resolveActiveSecretValue(secret activeSecret, hostHome string, layeredSecre
 }
 
 // resolveEnvAliasValue resolves a secret through its env-var aliases, walking
-// host env, then the layered .env secrets, then persisted env.
+// host env, then the layered .env secrets, then persisted env. The highest
+// layer wins; only aliases resolved from the same layer must agree. Cross-layer
+// drift is logged and heals through the persisted write-back.
 func resolveEnvAliasValue(secret activeSecret, layeredSecrets map[string]string, persistedEnv map[string]string) (string, string, bool, error) {
 	type aliasValue struct {
 		envVar   string
 		value    string
 		source   string
 		priority int
-		found    bool
 	}
 
 	values := make([]aliasValue, 0, len(secret.EnvVars))
 	for _, envVar := range secret.EnvVars {
 		if value := os.Getenv(envVar); value != "" {
-			values = append(values, aliasValue{envVar: envVar, value: value, source: "env", priority: 1, found: true})
+			values = append(values, aliasValue{envVar: envVar, value: value, source: "env", priority: 1})
 			continue
 		}
 		if value, ok := layeredSecrets[envVar]; ok && value != "" {
-			values = append(values, aliasValue{envVar: envVar, value: value, source: "secrets", priority: 2, found: true})
+			values = append(values, aliasValue{envVar: envVar, value: value, source: "secrets", priority: 2})
 			continue
 		}
 		if value, ok := persistedEnv[envVar]; ok && value != "" {
-			values = append(values, aliasValue{envVar: envVar, value: value, source: "persisted", priority: 3, found: true})
+			values = append(values, aliasValue{envVar: envVar, value: value, source: "persisted", priority: 3})
 		}
 	}
 
@@ -152,12 +154,19 @@ func resolveEnvAliasValue(secret activeSecret, layeredSecrets map[string]string,
 
 	chosen := values[0]
 	for _, value := range values[1:] {
-		if value.value != chosen.value {
-			return "", "", false, fmt.Errorf("secret %q has conflicting values across env aliases (%s vs %s)", secret.ID, chosen.envVar, value.envVar)
-		}
 		if value.priority < chosen.priority {
 			chosen = value
 		}
+	}
+
+	for _, value := range values {
+		if value.value == chosen.value {
+			continue
+		}
+		if value.priority == chosen.priority {
+			return "", "", false, fmt.Errorf("secret %q has conflicting values across env aliases (%s vs %s, both set in the %s layer)", secret.ID, chosen.envVar, value.envVar, chosen.source)
+		}
+		logx.Warnf("Secret %s: using %s from the %s layer; %s in the %s layer holds a different value and is ignored.", secret.ID, chosen.envVar, chosen.source, value.envVar, value.source)
 	}
 
 	return chosen.value, chosen.source, true, nil

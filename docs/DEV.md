@@ -196,6 +196,14 @@ to `CreateProcess` unchanged. Two layers check it:
    pwsh -File scripts/wsl-shim-verify.ps1
    ```
 
+   Without PowerShell 7, use Windows PowerShell. A script reached through
+   `\\wsl.localhost` counts as remote, so the execution policy refuses it unless
+   the run bypasses it:
+
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File .\scripts\wsl-shim-verify.ps1
+   ```
+
 ## Adding or Updating Options
 
 1) Add fields in `model.Options` (and related embedded struct).

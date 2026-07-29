@@ -824,9 +824,10 @@ func secretConfig(envVars []string, release *model.HTTPSecretReleaseConfig) mode
 	if release != nil {
 		cfg.Release = &model.SecretReleaseConfig{
 			HTTP: &model.HTTPSecretReleaseConfig{
-				Hosts:  append([]string{}, release.Hosts...),
-				Header: release.Header,
-				Format: release.Format,
+				Hosts:           append([]string{}, release.Hosts...),
+				Header:          release.Header,
+				Format:          release.Format,
+				HostsFromSecret: release.HostsFromSecret,
 			},
 		}
 	}

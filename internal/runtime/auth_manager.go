@@ -168,6 +168,9 @@ func (m authManager) injectDeclaredSecrets(hooks auth.Hooks, authCtx auth.Contex
 	for _, secret := range suppressedActiveSecrets {
 		logx.Debugf("Suppressed declared API key secret %s due to %s", secret.ID, suppressionReason)
 	}
+	// Must precede shouldUseSecretReleases: that call resolves and caches the
+	// effective policy, which unions the release hosts into the allow set.
+	m.releaseHostOverrides = resolveReleaseHostOverrides(eligibleSecrets, m.host.Home, layeredSecrets, persistedEnv)
 	secretReleaseEnabled := m.shouldUseSecretReleases(eligibleSecrets)
 	for _, secret := range eligibleSecrets {
 		secretValue, secretSource, found, err := resolveActiveSecretValue(secret, m.host.Home, layeredSecrets, persistedEnv)
@@ -190,7 +193,7 @@ func (m authManager) injectDeclaredSecrets(hooks auth.Hooks, authCtx auth.Contex
 					SecretID:    secret.ID,
 					Placeholder: placeholder,
 					Value:       secretValue,
-					Hosts:       append([]string{}, secret.ReleaseHTTP.Hosts...),
+					Hosts:       m.releaseHostsFor(secret),
 					Header:      secret.ReleaseHTTP.Header,
 					Format:      secret.ReleaseHTTP.Format,
 				})
@@ -412,6 +415,15 @@ func (m authManager) apiKeySecretSuppressionReason() string {
 		return "--ephemeral without --pass-api-key"
 	}
 	return ""
+}
+
+// releaseHostsFor returns the hosts a secret's release rule applies to, after
+// any serviceAuth.hostsFromCredential replacement.
+func (m authManager) releaseHostsFor(secret activeSecret) []string {
+	if hosts, ok := m.releaseHostOverrides[secret.ID]; ok {
+		return append([]string{}, hosts...)
+	}
+	return append([]string{}, secret.ReleaseHTTP.Hosts...)
 }
 
 func (m authManager) shouldUseSecretReleases(activeSecrets []activeSecret) bool {

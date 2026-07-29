@@ -129,6 +129,11 @@ type specServiceAuth struct {
 	// these hosts are unioned with any serviceDomains entries pointing at this
 	// service id.
 	Hosts []string `json:"hosts,omitempty"`
+	// HostsFromCredential names a credentials.sources id whose resolved value
+	// is a host. When that credential resolves at runtime, its value replaces
+	// Hosts for this service, so a self-hosted instance can be selected by
+	// setting one env var instead of editing the spec.
+	HostsFromCredential string `json:"hostsFromCredential,omitempty"`
 }
 
 type specEnvironment struct {

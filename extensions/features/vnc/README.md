@@ -17,11 +17,22 @@ snap, the install fails and the build stops with an error naming this feature.
 
 ## Connecting a VNC client
 
-The RFB port (container `5900`) is published with an OS-assigned host port on
-the loopback interface, so concurrent sessions get distinct ports. The session
-prints the resolved `vnc://localhost:<port>` at startup; `enclave ps --json`
-reports it too (look for container port `5900`). Read the per-session password
-out of the session and point your client at it:
+```bash
+enclave vnc-viewer
+```
+
+`enclave vnc-viewer` resolves the session's published port and password itself
+and launches a host-installed viewer: `xtigervncviewer` on Linux, the built-in
+Screen Sharing on macOS, or whatever `vnc_viewer` configures. See
+[VNC viewer](../../../docs/configuration.md#vnc-viewer) for the viewer setting
+and [the CLI reference](../../../docs/cli-reference.md#vnc) for the command.
+
+To attach a client by hand instead: the RFB port (container `5900`) is
+published with an OS-assigned host port on the loopback interface, so
+concurrent sessions get distinct ports. The session prints the resolved
+`vnc://localhost:<port>` at startup; `enclave ps --json` reports it too (look
+for container port `5900`). Read the per-session password out of the session
+and point your client at it:
 
 ```bash
 enclave exec --name <session> -- cat /tmp/enclave-vnc/vnc-password
@@ -87,6 +98,11 @@ contract; how a viewer reads it is up to the backend it drives. `enclave exec`
 always allocates a TTY, so it serves the interactive flow above but not a
 headless one — a non-interactive viewer needs a backend-level read (`docker
 exec` or `podman exec`) until the CLI grows a non-TTY exec.
+
+`enclave vnc-viewer` is that viewer: it reads the password through the
+backend's non-TTY exec and hands it to the client through the environment
+(`VNC_PASSWORD`, `ENCLAVE_VNC_PASSWORD`) rather than argv, which `/proc` would
+expose to every local user for the viewer's lifetime.
 
 ## Configuration
 

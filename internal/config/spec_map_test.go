@@ -57,6 +57,46 @@ network:
 		}
 	})
 
+	t.Run("unmatched hostsFromCredential fails", func(t *testing.T) {
+		doc := mustDoc(t, `
+schemaVersion: "1"
+kind: mixin
+name: gitlab-cli
+credentials:
+  sources:
+    gitlab-token: { env: [GITLAB_TOKEN] }
+    gitlab-host: { env: [GITLAB_HOST], apiKey: false }
+network:
+  serviceAuth:
+    gitlab-token: { headerName: private-token, hostsFromCredential: gitlab-hsot }
+`)
+		if err := validateServiceAuthMappings(doc, "gitlab-cli/spec.yaml"); err == nil {
+			t.Fatal("expected error for hostsFromCredential with no matching credentials.sources entry")
+		}
+	})
+
+	t.Run("matching hostsFromCredential passes", func(t *testing.T) {
+		doc := mustDoc(t, `
+schemaVersion: "1"
+kind: mixin
+name: gitlab-cli
+credentials:
+  sources:
+    gitlab-token: { env: [GITLAB_TOKEN] }
+    gitlab-host: { env: [GITLAB_HOST], apiKey: false }
+network:
+  serviceAuth:
+    gitlab-token: { headerName: private-token, hosts: [gitlab.com], hostsFromCredential: gitlab-host }
+`)
+		if err := validateServiceAuthMappings(doc, "gitlab-cli/spec.yaml"); err != nil {
+			t.Fatalf("validateServiceAuthMappings() error = %v, want nil", err)
+		}
+		secrets := buildSecrets(doc)
+		if got := secrets["gitlab-token"].Release.HTTP.HostsFromSecret; got != "gitlab-host" {
+			t.Fatalf("HostsFromSecret = %q, want %q", got, "gitlab-host")
+		}
+	})
+
 	t.Run("matching ids pass", func(t *testing.T) {
 		doc := mustDoc(t, `
 schemaVersion: "1"

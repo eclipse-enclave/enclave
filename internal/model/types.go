@@ -260,6 +260,10 @@ type HTTPSecretReleaseConfig struct {
 	Hosts  []string `json:"hosts"`
 	Header string   `json:"header"`
 	Format string   `json:"format,omitempty"`
+	// HostsFromSecret names another secret id whose resolved value is a host.
+	// When that secret resolves, its value replaces Hosts for this release
+	// rule; see spec.yaml network.serviceAuth.hostsFromCredential.
+	HostsFromSecret string `json:"hosts_from_secret,omitempty"`
 }
 
 // ReleaseHosts returns the sorted, deduplicated HTTP release hosts declared

@@ -46,7 +46,6 @@
 
 <!-- Hero -->
 <header class="hero">
-  <img class="logo" src="assets/appicon.png" alt="Eclipse Enclave logo">
   <p class="hero-eyebrow">Open-source sandbox for AI coding agents</p>
   <h1>Full agent autonomy,<br><span class="grad">safely contained.</span></h1>
   <p class="tagline">Run Claude, Codex, OpenCode, and other coding agents at full autonomy.
@@ -57,16 +56,15 @@
     <span class="note">starts an isolated container and drops you into your agent</span>
   </div>
   <div class="hero-actions">
-    <a class="btn btn-primary" href="docs/getting-started/">Get started</a>
+    <a class="btn btn-primary" href="docs/getting-started/">Install Enclave</a>
     <a class="btn btn-ghost" href="https://github.com/eclipse-enclave/enclave">View on GitHub</a>
   </div>
-  <div class="badges">
-    <span class="badge open-source">Open source</span>
-    <span class="badge">MIT licensed</span>
-    <span class="badge">Docker-based</span>
-    <span class="badge">Claude · Codex · OpenCode</span>
-    <span class="badge coming-soon">GUI · coming soon</span>
-  </div>
+  <ul class="hero-facts">
+    <li>Open source, MIT licensed</li>
+    <li>Docker-based</li>
+    <li>Claude, Codex &amp; OpenCode</li>
+    <li>GUI on the roadmap</li>
+  </ul>
 </header>
 
 <main>
@@ -136,20 +134,22 @@
     <div class="container">
       <p class="eyebrow">Under the hood</p>
       <h2>How it works</h2>
+      <!-- Wide and stacked layouts of the same diagram; CSS shows one per breakpoint. -->
       <div class="diagram-wrap">
-        <svg viewBox="0 0 720 256" xmlns="http://www.w3.org/2000/svg" font-family="Inter, system-ui, sans-serif" role="img" aria-label="Eclipse Enclave overview: the developer starts a session in an isolated Docker container whose traffic passes through a filtering gateway">
+        <svg class="diagram-wide" viewBox="0 0 720 256" xmlns="http://www.w3.org/2000/svg" font-family="Inter, system-ui, sans-serif" role="img" aria-label="Eclipse Enclave overview: the developer starts a session in an isolated Docker container whose traffic passes through a filtering gateway">
           <defs>
-            <marker id="a" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><polygon points="0 0, 7 3, 0 6" fill="#9aa2b1"/></marker>
             <marker id="a-ac" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><polygon points="0 0, 7 3, 0 6" fill="#4f46e5"/></marker>
             <marker id="a-am" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><polygon points="0 0, 7 3, 0 6" fill="#b45309"/></marker>
+            <marker id="a-ok" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><polygon points="0 0, 7 3, 0 6" fill="#047857"/></marker>
+            <marker id="a-no" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><polygon points="0 0, 7 3, 0 6" fill="#b91c1c"/></marker>
           </defs>
 
           <!-- Developer -->
           <rect x="14" y="98" width="112" height="56" rx="12" fill="#eef1fe" stroke="#c7d0fc" stroke-width="1.5"/>
           <text x="70" y="122" text-anchor="middle" font-size="12.5" font-weight="700" fill="#3730a3">Developer</text>
-          <text x="70" y="139" text-anchor="middle" font-size="9.5" fill="#7a8291">CLI</text>
+          <text x="70" y="139" text-anchor="middle" font-size="9.5" fill="#5b6472">CLI</text>
           <line x1="126" y1="126" x2="192" y2="126" stroke="#4f46e5" stroke-width="1.6" marker-end="url(#a-ac)"/>
-          <text x="159" y="118" text-anchor="middle" font-size="9" fill="#7a8291">manage</text>
+          <text x="159" y="118" text-anchor="middle" font-size="9.5" fill="#5b6472">manage</text>
 
           <!-- Container -->
           <rect x="196" y="30" width="250" height="196" rx="14" fill="#ffffff" stroke="#4f46e5" stroke-width="1.8"/>
@@ -159,12 +159,12 @@
           <text x="321" y="105" text-anchor="middle" font-size="9.5" fill="#5b6472">Claude · Codex · OpenCode · …</text>
           <rect x="216" y="128" width="210" height="34" rx="8" fill="#f7f8fa" stroke="#e6e8ec"/>
           <text x="321" y="150" text-anchor="middle" font-size="10.5" fill="#14181f">Mounted git worktree</text>
-          <text x="321" y="184" text-anchor="middle" font-size="9.5" fill="#7a8291">Default Docker backend</text>
-          <text x="321" y="200" text-anchor="middle" font-size="9.5" fill="#7a8291">Isolated filesystem and network</text>
+          <text x="321" y="184" text-anchor="middle" font-size="9.5" fill="#5b6472">Default Docker backend</text>
+          <text x="321" y="200" text-anchor="middle" font-size="9.5" fill="#5b6472">Isolated filesystem and network</text>
 
           <!-- to gateway -->
           <line x1="446" y1="98" x2="512" y2="98" stroke="#b45309" stroke-width="1.6" marker-end="url(#a-am)"/>
-          <text x="479" y="90" text-anchor="middle" font-size="9" fill="#7a8291">all traffic</text>
+          <text x="479" y="90" text-anchor="middle" font-size="9.5" fill="#5b6472">all traffic</text>
 
           <!-- Gateway -->
           <rect x="512" y="30" width="192" height="128" rx="14" fill="#ffffff" stroke="#b45309" stroke-width="1.8"/>
@@ -175,12 +175,59 @@
           <text x="608" y="130" text-anchor="middle" font-size="10.5" fill="#7a5b16">Transparent proxy</text>
 
           <!-- outputs -->
-          <line x1="570" y1="158" x2="570" y2="190" stroke="#059669" stroke-width="1.5" marker-end="url(#a)"/>
-          <line x1="646" y1="158" x2="646" y2="190" stroke="#dc2626" stroke-width="1.5" marker-end="url(#a)"/>
+          <line x1="570" y1="158" x2="570" y2="190" stroke="#047857" stroke-width="1.5" marker-end="url(#a-ok)"/>
+          <line x1="646" y1="158" x2="646" y2="190" stroke="#b91c1c" stroke-width="1.5" marker-end="url(#a-no)"/>
           <rect x="512" y="192" width="94" height="40" rx="20" fill="#ecfdf5" stroke="#a7f3d0"/>
-          <text x="559" y="216" text-anchor="middle" font-size="10.5" font-weight="600" fill="#059669">Allowed</text>
+          <text x="559" y="216" text-anchor="middle" font-size="10.5" font-weight="600" fill="#047857">Allowed</text>
           <rect x="610" y="192" width="94" height="40" rx="20" fill="#fef2f2" stroke="#fecaca"/>
-          <text x="657" y="216" text-anchor="middle" font-size="10.5" font-weight="600" fill="#dc2626">Blocked</text>
+          <text x="657" y="216" text-anchor="middle" font-size="10.5" font-weight="600" fill="#b91c1c">Blocked</text>
+        </svg>
+
+        <svg class="diagram-stacked" viewBox="0 0 340 510" xmlns="http://www.w3.org/2000/svg" font-family="Inter, system-ui, sans-serif" role="img" aria-label="Eclipse Enclave overview: the developer starts a session in an isolated Docker container whose traffic passes through a filtering gateway">
+          <defs>
+            <marker id="s-ac" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><polygon points="0 0, 7 3, 0 6" fill="#4f46e5"/></marker>
+            <marker id="s-am" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><polygon points="0 0, 7 3, 0 6" fill="#b45309"/></marker>
+            <marker id="s-ok" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><polygon points="0 0, 7 3, 0 6" fill="#047857"/></marker>
+            <marker id="s-no" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><polygon points="0 0, 7 3, 0 6" fill="#b91c1c"/></marker>
+          </defs>
+
+          <!-- Developer -->
+          <rect x="90" y="2" width="160" height="52" rx="12" fill="#eef1fe" stroke="#c7d0fc" stroke-width="1.5"/>
+          <text x="170" y="26" text-anchor="middle" font-size="13" font-weight="700" fill="#3730a3">Developer</text>
+          <text x="170" y="43" text-anchor="middle" font-size="10.5" fill="#5b6472">CLI</text>
+          <line x1="170" y1="54" x2="170" y2="84" stroke="#4f46e5" stroke-width="1.6" marker-end="url(#s-ac)"/>
+          <text x="181" y="74" font-size="10.5" fill="#5b6472">manage</text>
+
+          <!-- Container -->
+          <rect x="10" y="88" width="320" height="176" rx="14" fill="#ffffff" stroke="#4f46e5" stroke-width="1.8"/>
+          <text x="170" y="110" text-anchor="middle" font-size="11.5" font-weight="800" letter-spacing="0.06em" fill="#4f46e5">CONTAINER</text>
+          <rect x="28" y="122" width="284" height="56" rx="10" fill="#eef1fe" stroke="#c7d0fc"/>
+          <text x="170" y="145" text-anchor="middle" font-size="13" font-weight="700" fill="#14181f">AI coding agent</text>
+          <text x="170" y="164" text-anchor="middle" font-size="10.5" fill="#5b6472">Claude · Codex · OpenCode · …</text>
+          <rect x="28" y="188" width="284" height="36" rx="8" fill="#f7f8fa" stroke="#e6e8ec"/>
+          <text x="170" y="211" text-anchor="middle" font-size="11.5" fill="#14181f">Mounted git worktree</text>
+          <text x="170" y="240" text-anchor="middle" font-size="10.5" fill="#5b6472">Default Docker backend</text>
+          <text x="170" y="256" text-anchor="middle" font-size="10.5" fill="#5b6472">Isolated filesystem and network</text>
+
+          <!-- to gateway -->
+          <line x1="170" y1="264" x2="170" y2="294" stroke="#b45309" stroke-width="1.6" marker-end="url(#s-am)"/>
+          <text x="181" y="284" font-size="10.5" fill="#5b6472">all traffic</text>
+
+          <!-- Gateway -->
+          <rect x="10" y="298" width="320" height="134" rx="14" fill="#ffffff" stroke="#b45309" stroke-width="1.8"/>
+          <text x="170" y="320" text-anchor="middle" font-size="11.5" font-weight="800" letter-spacing="0.06em" fill="#b45309">GATEWAY</text>
+          <rect x="28" y="332" width="284" height="38" rx="8" fill="#fef6e7" stroke="#f3d79a"/>
+          <text x="170" y="356" text-anchor="middle" font-size="11.5" fill="#7a5b16">DNS allowlist</text>
+          <rect x="28" y="378" width="284" height="38" rx="8" fill="#fef6e7" stroke="#f3d79a"/>
+          <text x="170" y="402" text-anchor="middle" font-size="11.5" fill="#7a5b16">Transparent proxy</text>
+
+          <!-- outputs -->
+          <line x1="90" y1="432" x2="90" y2="462" stroke="#047857" stroke-width="1.5" marker-end="url(#s-ok)"/>
+          <line x1="250" y1="432" x2="250" y2="462" stroke="#b91c1c" stroke-width="1.5" marker-end="url(#s-no)"/>
+          <rect x="26" y="464" width="128" height="42" rx="21" fill="#ecfdf5" stroke="#a7f3d0"/>
+          <text x="90" y="490" text-anchor="middle" font-size="11.5" font-weight="600" fill="#047857">Allowed</text>
+          <rect x="186" y="464" width="128" height="42" rx="21" fill="#fef2f2" stroke="#fecaca"/>
+          <text x="250" y="490" text-anchor="middle" font-size="11.5" font-weight="600" fill="#b91c1c">Blocked</text>
         </svg>
       </div>
       <p class="diagram-caption">In the default Docker setup, each session runs in its own
@@ -212,17 +259,17 @@
   </section>
 
 
-  <!-- UI preview (coming soon) -->
+  <!-- UI preview (not released yet) -->
   <section id="ui">
     <div class="container">
-      <p class="eyebrow">Coming soon</p>
+      <p class="eyebrow">On the roadmap</p>
       <h2>Meet HomeShell</h2>
       <p class="section-lead">Today Enclave is a CLI. HomeShell is a graphical companion on the
         way: group your work into projects, split each into workstreams, and run agent sessions
         across them. Start, watch, and switch between sandboxed sessions with a live overview of
         every agent's status.</p>
       <div class="ui-preview">
-        <span class="sticker">Coming soon</span>
+        <span class="sticker">In development</span>
         <div class="ui-frame">
           <img src="assets/homeshell.png" alt="HomeShell: a graphical dashboard listing Enclave projects, workstreams, and running agent sessions">
         </div>
@@ -311,7 +358,7 @@
       <h2>Give your agents room to work, but safely.</h2>
       <p>Install Eclipse Enclave and start your first sandboxed session.</p>
       <div class="cta-actions">
-        <a class="btn btn-primary" href="docs/getting-started/">Get started</a>
+        <a class="btn btn-primary" href="docs/getting-started/">Install Enclave</a>
         <a class="btn btn-ghost" href="docs/">Browse the docs</a>
       </div>
     </div>

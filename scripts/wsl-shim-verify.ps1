@@ -37,13 +37,34 @@
 
 .EXAMPLE
     pwsh -File scripts/wsl-shim-verify.ps1 -Distro Ubuntu-24.04
+
+.EXAMPLE
+    Windows PowerShell 5.1, where a script on a \\wsl.localhost path counts as
+    remote and the execution policy refuses it:
+
+    powershell -ExecutionPolicy Bypass -File .\scripts\wsl-shim-verify.ps1
 #>
 
 [CmdletBinding()]
 param(
     [string]$Distro = '',
-    [string]$GoldenFile = (Join-Path $PSScriptRoot '..\internal\wslshim\testdata\wsl-quoting-golden.json')
+    [string]$GoldenFile = ''
 )
+
+# The golden file is located here rather than in a param default because
+# Windows PowerShell leaves $PSScriptRoot empty for some invocations, notably a
+# script run by relative path while the current location is a UNC path — which
+# is exactly how this script is reached from \\wsl.localhost. This runs before
+# Set-StrictMode so that an undefined $PSScriptRoot falls through to the
+# fallback instead of terminating.
+if (-not $GoldenFile) {
+    $scriptRoot = $PSScriptRoot
+    if (-not $scriptRoot) { $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path }
+    if (-not $scriptRoot) {
+        throw 'Could not determine the script directory. Pass -GoldenFile explicitly.'
+    }
+    $GoldenFile = Join-Path $scriptRoot '..\internal\wslshim\testdata\wsl-quoting-golden.json'
+}
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -55,9 +76,16 @@ if ($Distro -match '[\s"]') {
 # printf reuses its format for every remaining operand, so this writes each
 # argument followed by a NUL. /usr/bin/printf is used explicitly rather than a
 # shell builtin, because -e must not involve a shell at all.
+#
+# The sentinel keeps the arguments under test out of the first operand slot.
+# GNU printf in some coreutils versions reads a "--" there as an end-of-options
+# marker and drops it, which would report a launcher failure for something the
+# launcher passed correctly and wsl.exe delivered intact. printf stops looking
+# for options at the first non-option operand, so every later "--" survives.
+$sentinel = 'enclave-argv-sentinel'
 $prefix = @()
 if ($Distro) { $prefix += "-d $Distro" }
-$prefix += '-e /usr/bin/printf %s\0'
+$prefix += "-e /usr/bin/printf %s\0 $sentinel"
 $prefixArguments = $prefix -join ' '
 
 function Invoke-Wsl {
@@ -106,7 +134,7 @@ $probe = Invoke-Wsl "$prefixArguments probe"
 if ($probe.ExitCode -ne 0) {
     throw "wsl.exe could not run /usr/bin/printf (exit $($probe.ExitCode)): $($probe.Stderr)"
 }
-if ($probe.Stdout -ne "probe`0") {
+if ($probe.Stdout -ne "$sentinel`0probe`0") {
     throw "Unexpected probe output: $($probe.Stdout | ConvertTo-Json)"
 }
 
@@ -130,6 +158,20 @@ foreach ($case in $golden.cases) {
         $received = @($received[0..($received.Count - 2)])
     } else {
         # No NUL at all means printf produced nothing recognizable.
+        $received = @()
+    }
+
+    # A missing sentinel means printf never saw the operands the comparison is
+    # about, so the case would otherwise be scored against the wrong argv.
+    if ($received.Count -lt 1 -or $received[0] -ne $sentinel) {
+        Write-Host "FAIL $($case.name): $label"
+        Write-Host "     printf did not echo the sentinel; received $($received | ConvertTo-Json -Compress)"
+        $failures += $case.name
+        continue
+    }
+    if ($received.Count -gt 1) {
+        $received = @($received[1..($received.Count - 1)])
+    } else {
         $received = @()
     }
 

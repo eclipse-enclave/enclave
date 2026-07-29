@@ -241,9 +241,10 @@ func normalizeSecretRelease(secretID string, release *model.SecretReleaseConfig)
 
 	return &model.SecretReleaseConfig{
 		HTTP: &model.HTTPSecretReleaseConfig{
-			Hosts:  hosts,
-			Header: header,
-			Format: format,
+			Hosts:           hosts,
+			Header:          header,
+			Format:          format,
+			HostsFromSecret: strings.TrimSpace(release.HTTP.HostsFromSecret),
 		},
 	}, nil
 }

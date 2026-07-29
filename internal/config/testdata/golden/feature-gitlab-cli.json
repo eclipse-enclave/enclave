@@ -5,6 +5,12 @@
   "needs_root": true,
   "priority": 50,
   "secrets": {
+    "gitlab-host": {
+      "env_vars": [
+        "GITLAB_HOST"
+      ],
+      "api_key": false
+    },
     "gitlab-job-token": {
       "env_vars": [
         "JOB_TOKEN",
@@ -16,7 +22,8 @@
             "*.gitlab.com",
             "gitlab.com"
           ],
-          "header": "job-token"
+          "header": "job-token",
+          "hosts_from_secret": "gitlab-host"
         }
       }
     },
@@ -31,7 +38,8 @@
             "gitlab.com"
           ],
           "header": "authorization",
-          "format": "Bearer %s"
+          "format": "Bearer %s",
+          "hosts_from_secret": "gitlab-host"
         }
       }
     },
@@ -46,7 +54,8 @@
             "*.gitlab.com",
             "gitlab.com"
           ],
-          "header": "private-token"
+          "header": "private-token",
+          "hosts_from_secret": "gitlab-host"
         }
       }
     }

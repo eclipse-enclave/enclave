@@ -41,13 +41,14 @@ func Run(args []string) int {
 	signal.Ignore(os.Interrupt)
 
 	return shim{
-		getwd:     os.Getwd,
-		lookPath:  exec.LookPath,
-		environ:   os.Environ(),
-		driveType: systemDriveType,
-		spawn:     spawnCommand,
-		capture:   captureCommand,
-		stderr:    os.Stderr,
+		getwd:        os.Getwd,
+		lookPath:     exec.LookPath,
+		environ:      os.Environ(),
+		driveType:    systemDriveType,
+		resolveDrive: systemDriveResolver,
+		spawn:        spawnCommand,
+		capture:      captureCommand,
+		stderr:       os.Stderr,
 	}.execute(args)
 }
 
@@ -58,9 +59,12 @@ type shim struct {
 	lookPath  func(string) (string, error)
 	environ   []string
 	driveType driveTyper
-	spawn     func(exe, cmdLine string, env []string) error
-	capture   func(exe, cmdLine string, env []string) ([]byte, []byte, error)
-	stderr    io.Writer
+	// resolveDrive answers what a mapped network drive points at, which is how
+	// a WSL share reached through a drive letter stays usable.
+	resolveDrive driveResolver
+	spawn        func(exe, cmdLine string, env []string) error
+	capture      func(exe, cmdLine string, env []string) ([]byte, []byte, error)
+	stderr       io.Writer
 }
 
 func (s shim) execute(args []string) int {
@@ -70,7 +74,7 @@ func (s shim) execute(args []string) int {
 	}
 
 	// Named t rather than target so it does not shadow the type.
-	t, err := resolveTarget(cwd, lookupIn(s.environ), s.driveType)
+	t, err := resolveTarget(cwd, lookupIn(s.environ), s.driveType, s.resolveDrive)
 	if err != nil {
 		return s.fail("%v", err)
 	}

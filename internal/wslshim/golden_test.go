@@ -116,9 +116,16 @@ func TestQuotingGoldenFileMatchesImplementation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read golden file (regenerate with %s=1): %v", updateGoldenEnv, err)
 	}
-	if string(existing) != string(encoded) {
+	// Compare with line endings normalized: a Windows checkout with
+	// core.autocrlf=true rewrites the file's newlines, which says nothing about
+	// whether the content drifted.
+	if normalizeNewlines(string(existing)) != normalizeNewlines(string(encoded)) {
 		t.Errorf("%s is out of date. The manual wsl.exe verification in "+
 			"scripts/wsl-shim-verify.ps1 reads it, so regenerate and commit it: "+
 			"%s=1 go test ./internal/wslshim", goldenFile, updateGoldenEnv)
 	}
+}
+
+func normalizeNewlines(s string) string {
+	return strings.ReplaceAll(s, "\r\n", "\n")
 }

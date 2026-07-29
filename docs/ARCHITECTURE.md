@@ -140,7 +140,7 @@ The restricted network request flow has a separate
 - [`internal/devcontainer/`](../internal/devcontainer/) generates `devcontainer.json` configurations for devcontainer mode.
 
 ### Windows Launcher
-- [`internal/wslshim/`](../internal/wslshim/) implements the Windows launcher end to end: it classifies the Windows working directory into a distribution and a Linux path, resolves the Linux `enclave` binary through one preflight round trip, builds the Windows command line itself so free-form arguments survive `wsl.exe`'s re-parsing, constructs `WSLENV` for the variables it forwards, and propagates the child's exit code. It depends only on the standard library and `golang.org/x/sys/windows`, and everything except the `GetDriveType` call is host-independent so it is tested on Linux.
+- [`internal/wslshim/`](../internal/wslshim/) implements the Windows launcher end to end: it classifies the Windows working directory into a distribution and a Linux path, resolves the Linux `enclave` binary through one preflight round trip, builds the Windows command line itself so free-form arguments survive `wsl.exe`'s re-parsing, constructs `WSLENV` for the variables it forwards, and propagates the child's exit code. It depends only on the standard library and `golang.org/x/sys/windows` plus `mpr.dll`, and only the two drive-letter queries (`GetDriveType` and `WNetGetConnection`, both behind one-method seams) touch Win32, so the rest is host-independent and tested on Linux.
 
 ### Shared Types and Utilities
 - [`internal/model/types.go`](../internal/model/types.go) defines core types and constants used across packages.

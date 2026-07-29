@@ -112,7 +112,8 @@ still required. Alternatively, download `enclave-windows-amd64.zip` (or
 :::note
 Run `enclave` from a directory inside the distribution, for example
 `\\wsl.localhost\Ubuntu\home\you\project`, which PowerShell accepts as a working
-directory. A Windows drive path such as `C:\Users\you\project` is refused by
+directory. In `cmd.exe`, `pushd` on that path maps it to a drive letter, which
+works too. A Windows drive path such as `C:\Users\you\project` is refused by
 default: it would have to be reached through `/mnt/c`, where every file access
 crosses the WSL interop layer and is noticeably slower. Keep the project in the
 WSL filesystem, for example under `~/`.

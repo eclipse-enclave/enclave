@@ -323,8 +323,51 @@ func TestInjectDeclaredSecretsUsesPersistedFallbackForAliases(t *testing.T) {
 	}
 }
 
-func TestInjectDeclaredSecretsRejectsConflictingAliasValues(t *testing.T) {
+// A stale persisted alias must lose to the layered secrets files rather than
+// wedge the run, which is the drift that broke token rotation. Every alias then
+// carries the winning value, so the persisted store heals.
+func TestInjectDeclaredSecretsPrefersLayeredSecretsOverStalePersistedAlias(t *testing.T) {
+	// An ambient token in the caller's shell would win as the host env layer.
+	t.Setenv("GH_TOKEN", "")
+	t.Setenv("GITHUB_TOKEN", "")
+
+	r := runtimeWithProfile(t, model.Profile{
+		Name: "tool",
+		Secrets: map[string]model.SecretConfig{
+			"github-token": secretConfig([]string{"GH_TOKEN", "GITHUB_TOKEN"}, nil),
+		},
+	})
+	manager := newAuthManager(r)
+	activeSecrets := mustActiveSecrets(t, r)
+
+	env := []string{}
+	injection, err := manager.injectDeclaredSecrets(
+		stubHooks{},
+		authContextForRuntime(r),
+		&env,
+		map[string]string{"GH_TOKEN": "stale-token"},       // persisted
+		map[string]string{"GITHUB_TOKEN": "rotated-token"}, // layered secrets
+		nil,
+		activeSecrets,
+	)
+	if err != nil {
+		t.Fatalf("injectDeclaredSecrets() error = %v", err)
+	}
+	for _, envVar := range []string{"GH_TOKEN", "GITHUB_TOKEN"} {
+		if got := envValue(env, envVar); got != "rotated-token" {
+			t.Fatalf("%s = %q, want %q", envVar, got, "rotated-token")
+		}
+		if got := injection.SecretValues[envVar]; got != "rotated-token" {
+			t.Fatalf("SecretValues[%s] = %q, want %q", envVar, got, "rotated-token")
+		}
+	}
+}
+
+// Aliases that resolve within the same layer are the one case the user must
+// fix, so that stays fatal.
+func TestInjectDeclaredSecretsRejectsConflictingAliasValuesInSameLayer(t *testing.T) {
 	t.Setenv("FIRST_TOKEN", "first-token")
+	t.Setenv("SECOND_TOKEN", "second-token")
 
 	r := runtimeWithProfile(t, model.Profile{
 		Name: "tool",
@@ -339,7 +382,7 @@ func TestInjectDeclaredSecretsRejectsConflictingAliasValues(t *testing.T) {
 		stubHooks{},
 		authContextForRuntime(r),
 		&[]string{},
-		map[string]string{"SECOND_TOKEN": "second-token"},
+		map[string]string{},
 		map[string]string{},
 		nil,
 		activeSecrets,
@@ -349,6 +392,9 @@ func TestInjectDeclaredSecretsRejectsConflictingAliasValues(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "conflicting values across env aliases") {
 		t.Fatalf("injectDeclaredSecrets() error = %q, want alias conflict", err)
+	}
+	if !strings.Contains(err.Error(), "the env layer") {
+		t.Fatalf("injectDeclaredSecrets() error = %q, want the conflicting layer named", err)
 	}
 }
 

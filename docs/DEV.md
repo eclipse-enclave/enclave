@@ -6,11 +6,12 @@ Concise notes for contributors working on the enclave codebase.
 
 - Go 1.24.x (see `go.mod` toolchain)
 - Docker daemon running (for runtime testing)
-- Linux or macOS host. Native Windows is unsupported; use WSL2, where the
-  Linux instructions apply. `make cross-build` compiles the published
-  cross-targets (`darwin/arm64`, `darwin/amd64`, `linux/arm64`) plus
-  `windows/amd64`, which is built only to guard code portability and is not
-  released.
+- Linux or macOS host. Native Windows is unsupported; use WSL2, where the Linux
+  instructions apply. `make cross-build` compiles every published cross-target:
+  `darwin/arm64`, `darwin/amd64`, `linux/arm64`, `windows/amd64`, and
+  `windows/arm64`. It builds `./...` rather than just `./cmd/enclave`, so the
+  windows targets also keep the whole tree portable even though the published
+  windows binary is only the WSL launcher.
 
 ## Common Commands
 
@@ -152,7 +153,48 @@ Notes:
   - `internal/config/options_registry_gen.go`
   - `internal/config/options_cli_gen.go`
   - `internal/model/option_sources_gen.go`
-  - `cmd/enclave/tool_imports.go` (tool extension Go imports)
+  - `cmd/enclave/tool_imports.go` (tool extension Go imports, `//go:build !windows`)
+
+## Windows Launcher
+
+On Windows, `cmd/enclave` builds `main_windows.go`, a launcher that forwards to
+the Linux binary inside WSL2 (see [windows.md](windows.md) for the user-facing
+behavior). It links neither the embedded runtime assets nor the tool extensions,
+because it never builds an image — which is why `cmd/enclave/tool_imports.go` is
+generated with a `//go:build !windows` constraint. The result is around 3 MB
+against roughly 14 MB for the Linux binary.
+
+All the logic lives in `internal/wslshim`, and everything except one
+`GetDriveType` call is host-independent, so it builds and is tested on Linux:
+
+```bash
+go test ./internal/wslshim/...
+GOOS=windows go build ./... && GOOS=windows go vet ./...
+```
+
+Argument quoting is the risky part. Windows passes a single command-line string
+and `wsl.exe` re-parses it, so the launcher builds that string itself and hands it
+to `CreateProcess` unchanged. Two layers check it:
+
+1. A golden table in `internal/wslshim/quote_test.go` round-trips every argument
+   shape through a reimplementation of `CommandLineToArgvW`. This runs in CI on
+   every push. The same table is exported to
+   `internal/wslshim/testdata/wsl-quoting-golden.json`; regenerate it after
+   changing the escaping or the table, and commit it:
+
+   ```bash
+   ENCLAVE_UPDATE_GOLDEN=1 go test ./internal/wslshim
+   ```
+
+2. `scripts/wsl-shim-verify.ps1` feeds those same command lines to a real
+   `wsl.exe` and compares the NUL-separated argv the Linux side receives. This
+   **cannot** run in GitHub-hosted CI, because `windows-latest` runners have no
+   WSL2. Run it manually on a Windows host with WSL2 before publishing Windows
+   artifacts:
+
+   ```powershell
+   pwsh -File scripts/wsl-shim-verify.ps1
+   ```
 
 ## Adding or Updating Options
 

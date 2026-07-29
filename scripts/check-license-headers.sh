@@ -21,7 +21,7 @@ is_candidate() {
         */testdata/* | *.md | *.json | *.lock | *.sum | *.golden | *.svg | *.png | *.pdf | *.txt)
             return 1
             ;;
-        *.go | *.sh | *.yaml | *.yml | *.js | *.ts | *.css | *.html | *.vue | *.puml | *.toml | *.conf | *.spec)
+        *.go | *.sh | *.ps1 | *.yaml | *.yml | *.js | *.ts | *.css | *.html | *.vue | *.puml | *.toml | *.conf | *.spec)
             return 0
             ;;
         go.mod | Makefile | completions/enclave | .dockerignore | */.gitignore | .gitignore | */Dockerfile | Dockerfile | Dockerfile.* | debian/rules | debian/control)

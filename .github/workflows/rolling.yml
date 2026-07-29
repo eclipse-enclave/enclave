@@ -47,6 +47,18 @@ jobs:
             goarch: amd64
             output: enclave-darwin-amd64
             smoke: false
+          # The Windows binary is the WSL launcher, so it embeds no runtime
+          # assets and there is nothing for the extraction smoke test to check.
+          - runner: ubuntu-latest
+            goos: windows
+            goarch: amd64
+            output: enclave-windows-amd64.exe
+            smoke: false
+          - runner: ubuntu-latest
+            goos: windows
+            goarch: arm64
+            output: enclave-windows-arm64.exe
+            smoke: false
 
     runs-on: ${{ matrix.runner }}
 
@@ -68,6 +80,11 @@ jobs:
         if: ${{ !matrix.smoke }}
         run: |
           echo "::notice::Smoke test skipped for ${{ matrix.output }} (cross-compiled for ${{ matrix.goarch }} on ${{ matrix.runner }})"
+
+      - name: Note manual Windows verification gate
+        if: ${{ matrix.goos == 'windows' }}
+        run: |
+          echo "::notice::${{ matrix.output }} is the WSL launcher. GitHub-hosted windows runners have no WSL2, so the wsl.exe argument round trip is the manual gate in scripts/wsl-shim-verify.ps1."
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
@@ -102,15 +119,54 @@ jobs:
       GH_REPO: ${{ github.repository }}
 
     steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           path: artifacts
           merge-multiple: true
 
-      - name: Generate checksums
+      - name: Normalize artifact names
         run: |
           cd artifacts
           for f in *; do [ "$f" = "${f//\~/.}" ] || mv "$f" "${f//\~/.}"; done
+
+      # Windows expects an archive, and Scoop requires one. The launcher is
+      # named enclave.exe inside the archive so `bin` works for both
+      # architectures.
+      - name: Package Windows archives
+        run: |
+          cd artifacts
+          for exe in enclave-windows-*.exe; do
+            arch="${exe#enclave-windows-}"
+            arch="${arch%.exe}"
+            staging="$(mktemp -d)"
+            cp "$exe" "$staging/enclave.exe"
+            (cd "$staging" && zip -q -X "enclave-windows-$arch.zip" enclave.exe)
+            mv "$staging/enclave-windows-$arch.zip" .
+            rm -rf "$staging" "$exe"
+          done
+
+      - name: Generate Scoop manifest
+        run: |
+          base_url="${{ github.server_url }}/${{ github.repository }}/releases/download/rolling"
+          amd64_hash="$(sha256sum artifacts/enclave-windows-amd64.zip | cut -d' ' -f1)"
+          arm64_hash="$(sha256sum artifacts/enclave-windows-arm64.zip | cut -d' ' -f1)"
+          sed \
+            -e "s|@VERSION@|rolling-${GITHUB_SHA::8}|g" \
+            -e "s|@BASE_URL@|$base_url|g" \
+            -e "s|@AMD64_HASH@|$amd64_hash|g" \
+            -e "s|@ARM64_HASH@|$arm64_hash|g" \
+            packaging/scoop/enclave.template.json > artifacts/enclave.json
+          if grep -q '@' artifacts/enclave.json; then
+            echo "Unsubstituted placeholder left in the Scoop manifest:" >&2
+            grep '@' artifacts/enclave.json >&2
+            exit 1
+          fi
+
+      - name: Generate checksums
+        run: |
+          cd artifacts
           sha256sum * > checksums.txt
 
       - name: Create rolling release
@@ -133,6 +189,9 @@ jobs:
           | \`enclave-linux-arm64\` | Linux (arm64) | Self-contained binary with runtime assets |
           | \`enclave-darwin-arm64\` | macOS (Apple Silicon) | Self-contained binary, unsigned |
           | \`enclave-darwin-amd64\` | macOS (Intel) | Self-contained binary, unsigned |
+          | \`enclave-windows-amd64.zip\` | Windows (x86-64) | WSL2 launcher only; also install a Linux artifact inside the distribution |
+          | \`enclave-windows-arm64.zip\` | Windows (arm64) | WSL2 launcher only; also install a Linux artifact inside the distribution |
+          | \`enclave.json\` | Windows | Scoop manifest for the archives above |
 
           \`\`\`sh
           # Ubuntu 24.04 (resolves dependencies automatically)
@@ -152,9 +211,14 @@ jobs:
           sudo install enclave-darwin-arm64 /usr/local/bin/enclave
           \`\`\`
 
+          \`\`\`powershell
+          # Windows: install the launcher, then enclave itself inside WSL2
+          scoop install ${{ github.server_url }}/${{ github.repository }}/releases/download/rolling/enclave.json
+          \`\`\`
+
           The macOS binaries are unsigned and not notarized, so Gatekeeper quarantines browser downloads and \`install\` propagates the attribute; \`curl\` or \`gh release download\` avoids it entirely.
 
-          There is no native Windows build. On Windows, use WSL2 and install the Linux binary matching the host architecture inside the WSL distribution.
+          \`enclave.exe\` is a launcher, not a native port: it forwards every argument to the Linux enclave binary inside a WSL2 distribution, which you install separately using the Linux artifacts above. Run it from a directory inside the distribution. See [docs/windows.md](${{ github.server_url }}/${{ github.repository }}/blob/main/docs/windows.md).
           EOF
           )" \
             artifacts/*

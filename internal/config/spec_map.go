@@ -31,9 +31,17 @@ func validateServiceAuthMappings(doc specDocument, specPath string) error {
 			sources[id] = struct{}{}
 		}
 	}
-	for id := range doc.Network.ServiceAuth {
+	for id, auth := range doc.Network.ServiceAuth {
 		if _, ok := sources[id]; !ok {
 			return fmt.Errorf("%s: network.serviceAuth[%q] has no matching credentials.sources entry", specPath, id)
+		}
+		if auth.HostsFromCredential == "" {
+			continue
+		}
+		// Same typo class as the service ids above: an unmatched reference
+		// would silently leave the service pinned to its static hosts.
+		if _, ok := sources[auth.HostsFromCredential]; !ok {
+			return fmt.Errorf("%s: network.serviceAuth[%q].hostsFromCredential references credential %q with no matching credentials.sources entry", specPath, id, auth.HostsFromCredential)
 		}
 	}
 	for host, id := range doc.Network.ServiceDomains {
@@ -139,9 +147,10 @@ func buildSecrets(doc specDocument) map[string]model.SecretConfig {
 			if auth, ok := doc.Network.ServiceAuth[id]; ok {
 				sc.Release = &model.SecretReleaseConfig{
 					HTTP: &model.HTTPSecretReleaseConfig{
-						Hosts:  hostsByService[id],
-						Header: auth.HeaderName,
-						Format: auth.ValueFormat,
+						Hosts:           hostsByService[id],
+						Header:          auth.HeaderName,
+						Format:          auth.ValueFormat,
+						HostsFromSecret: auth.HostsFromCredential,
 					},
 				}
 			}

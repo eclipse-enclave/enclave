@@ -11,8 +11,10 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strings"
 
 	"enclave/internal/auth"
+	"enclave/internal/domainpattern"
 	"enclave/internal/logx"
 	"enclave/internal/model"
 	"enclave/internal/secretfile"
@@ -183,6 +185,79 @@ func resolveAlias(envVar string, secretsLayers []auth.SecretsLayer, persistedEnv
 		return aliasValue{envVar: envVar, value: value, source: "persisted", layer: "the host-side env store", rank: len(secretsLayers) + 1}, true
 	}
 	return aliasValue{}, false
+}
+
+// resolveReleaseHostOverrides resolves the credentials named by each release
+// rule's HostsFromSecret and returns secret-id -> replacement hosts. A service
+// whose host credential is unset or unusable keeps its declared hosts, so the
+// default (e.g. gitlab.com) still applies.
+//
+// The replacement is deliberately not additive: the referenced credential names
+// the one instance the token belongs to, and injecting an instance-specific
+// token into the default hosts as well would expose it to a service that cannot
+// accept it.
+func resolveReleaseHostOverrides(secrets []activeSecret, hostHome string, secretsLayers []auth.SecretsLayer, persistedEnv map[string]string) map[string][]string {
+	// Several services commonly share one host credential (gitlab's three
+	// tokens), so group by the reference and resolve each credential once.
+	byID := make(map[string]activeSecret, len(secrets))
+	referencedBy := map[string][]string{}
+	for _, secret := range secrets {
+		byID[secret.ID] = secret
+		if secret.ReleaseHTTP != nil && secret.ReleaseHTTP.HostsFromSecret != "" {
+			ref := secret.ReleaseHTTP.HostsFromSecret
+			referencedBy[ref] = append(referencedBy[ref], secret.ID)
+		}
+	}
+
+	overrides := map[string][]string{}
+	for ref, secretIDs := range referencedBy {
+		source, ok := byID[ref]
+		if !ok {
+			continue
+		}
+		value, _, found, err := resolveActiveSecretValue(source, hostHome, secretsLayers, persistedEnv)
+		if err != nil {
+			logx.Warnf("Cannot resolve host credential %s (%v); keeping declared hosts.", ref, err)
+			continue
+		}
+		if !found {
+			continue
+		}
+		host := normalizeReleaseHost(ref, value)
+		if host == "" {
+			continue
+		}
+		for _, id := range secretIDs {
+			overrides[id] = []string{host}
+		}
+	}
+	return overrides
+}
+
+// normalizeReleaseHost turns a credential value into an allowlist-comparable
+// host, tolerating the URL forms CLIs accept (glab reads GITLAB_HOST as either
+// a bare host or a full URL). An unusable value warns and is dropped rather
+// than failing the session, since the declared hosts remain valid.
+func normalizeReleaseHost(secretID string, value string) string {
+	trimmed := value
+	if index := strings.Index(trimmed, "://"); index >= 0 {
+		trimmed = trimmed[index+len("://"):]
+	}
+	if index := strings.IndexAny(trimmed, "/?#"); index >= 0 {
+		trimmed = trimmed[:index]
+	}
+	// NormalizeHost strips the port and IPv6 brackets but does not validate the
+	// labels, so the pattern validator runs after it to reject junk that would
+	// otherwise become a bogus allowlist entry.
+	host, err := domainpattern.NormalizeHost(trimmed)
+	if err == nil {
+		host, err = domainpattern.Normalize(host)
+	}
+	if err != nil {
+		logx.Warnf("Secret %s: value %q is not a usable host (%v); keeping declared hosts.", secretID, value, err)
+		return ""
+	}
+	return host
 }
 
 // resolveFileSecretValue reads the secret's file source, if any. A missing file

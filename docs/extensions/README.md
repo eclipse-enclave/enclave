@@ -409,6 +409,16 @@ Secrets are split across two `spec.yaml` sections:
   describe how the gateway injects that credential as an HTTP header when it
   proxies requests to those hosts. The service-id in `serviceAuth` and
   `serviceDomains` is the same key used under `credentials.sources`.
+- `network.serviceAuth.<service-id>.hostsFromCredential` names another
+  `credentials.sources` id whose resolved value is a host, for services that
+  can point at a self-hosted instance. When that credential resolves, its value
+  **replaces** the declared `hosts` for this service — it is not additive,
+  since an instance-specific token must not be released to the public default
+  host as well. The replacement host joins the allow set like a declared one,
+  so one env var is enough to make the tool reach the instance with token
+  injection working. An unset credential keeps the declared hosts; a value that
+  is not a usable host warns and is ignored. Values may be a bare host,
+  `host:port`, or a full URL — the scheme, port and path are stripped.
 
 The placeholder convention is Go `fmt`-style `%s`, not `{secret}`. An empty
 `valueFormat` means "inject the raw secret value" with no wrapping (see

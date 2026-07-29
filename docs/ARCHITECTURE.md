@@ -84,7 +84,8 @@ The restricted network request flow has a separate
 ## Repository Layout
 
 ### Entry Points
-- [`cmd/enclave/main.go`](../cmd/enclave/main.go) is the binary entrypoint. It loads the selected asset variant and delegates to `app.Run`.
+- [`cmd/enclave/main_unix.go`](../cmd/enclave/main_unix.go) is the binary entrypoint everywhere except Windows. It loads the selected asset variant and delegates to `app.Run`.
+- [`cmd/enclave/main_windows.go`](../cmd/enclave/main_windows.go) is the Windows entrypoint. It delegates to [`internal/wslshim/`](../internal/wslshim/), which forwards every argument to the Linux binary inside a WSL2 distribution. It links neither the embedded assets nor the tool extensions, because it never builds an image; that is why [`cmd/enclave/tool_imports.go`](../cmd/enclave/tool_imports.go) is generated with a `//go:build !windows` constraint. See [windows.md](windows.md).
 - [`cmd/enclave-gateway-proxy/main.go`](../cmd/enclave-gateway-proxy/main.go) is the gateway sidecar MITM proxy entrypoint used by `Dockerfile.gateway`.
 
 ### Distribution assets
@@ -92,6 +93,8 @@ The restricted network request flow has a separate
 - [`internal/appassets/`](../internal/appassets/) registers the embedded filesystem, computes its content key, and defines normalized extraction modes.
 - [`internal/config/embedded_assets.go`](../internal/config/embedded_assets.go) extracts assets atomically into a content-keyed platform cache directory when no checkout or package asset tree is adjacent to the executable.
 - [`internal/legacyassets/`](../internal/legacyassets/) removes only exact, known files from the asset tree used by older source installs. It preserves unknown files, never follows symlinks, and never recursively removes directories.
+- [`debian/`](../debian/) holds the Debian packaging, which installs the asset tree next to the executable instead of embedding it.
+- [`packaging/scoop/`](../packaging/scoop/) holds the Scoop manifest template for the Windows launcher archives; the rolling-release workflow substitutes the URLs and hashes into it.
 
 ### Orchestration (`internal/app/`)
 - [`internal/app/app.go`](../internal/app/app.go) wires parsing, defaults merging, and command dispatch.
@@ -135,6 +138,9 @@ The restricted network request flow has a separate
 
 ### DevContainer Support
 - [`internal/devcontainer/`](../internal/devcontainer/) generates `devcontainer.json` configurations for devcontainer mode.
+
+### Windows Launcher
+- [`internal/wslshim/`](../internal/wslshim/) implements the Windows launcher end to end: it classifies the Windows working directory into a distribution and a Linux path, resolves the Linux `enclave` binary through one preflight round trip, builds the Windows command line itself so free-form arguments survive `wsl.exe`'s re-parsing, constructs `WSLENV` for the variables it forwards, and propagates the child's exit code. It depends only on the standard library and `golang.org/x/sys/windows`, and everything except the `GetDriveType` call is host-independent so it is tested on Linux.
 
 ### Shared Types and Utilities
 - [`internal/model/types.go`](../internal/model/types.go) defines core types and constants used across packages.

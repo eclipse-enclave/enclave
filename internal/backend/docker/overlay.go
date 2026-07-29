@@ -57,7 +57,8 @@ func overlayConfigDir(targetDir string, sourceDir string, preservePaths []string
 // enumerated separately: checking ancestor matches instead of preserve staging
 // existence avoids treating an unrelated sibling as already handled.
 func stagePreservedPaths(targetDir string, preserveDir string, preservePaths []string) error {
-	return filepath.WalkDir(targetDir, func(p string, _ fs.DirEntry, err error) error {
+	stagedParents := make(map[string]struct{})
+	if err := filepath.WalkDir(targetDir, func(p string, _ fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -72,8 +73,54 @@ func stagePreservedPaths(targetDir string, preserveDir string, preservePaths []s
 		if !preserveMatch(rel, preservePaths) || preserveHasMatchingParent(rel, preservePaths) {
 			return nil
 		}
+		if err := stageParentDirs(targetDir, preserveDir, rel, stagedParents); err != nil {
+			return err
+		}
 		return copyPath(p, filepath.Join(preserveDir, filepath.FromSlash(rel)))
-	})
+	}); err != nil {
+		return err
+	}
+	return stampStagedParentTimes(targetDir, preserveDir, stagedParents)
+}
+
+// stageParentDirs creates rel's ancestor directories under preserveDir with the
+// permissions of their targetDir counterparts, recording each one in staged.
+// Without this, copyPath creates them on the way to a nested preserved node as
+// 0o700 directories stamped with the current time, and the restore step copies
+// those substitutes back over the store.
+func stageParentDirs(targetDir string, preserveDir string, rel string, staged map[string]struct{}) error {
+	var parents []string
+	for parent := parentPath(rel); parent != ""; parent = parentPath(parent) {
+		parents = append(parents, parent)
+	}
+	// Outermost first, so each MkdirAll applies its own source permissions.
+	for i := len(parents) - 1; i >= 0; i-- {
+		info, err := os.Lstat(filepath.Join(targetDir, filepath.FromSlash(parents[i])))
+		if err != nil {
+			return err
+		}
+		if err := os.MkdirAll(filepath.Join(preserveDir, filepath.FromSlash(parents[i])), info.Mode().Perm()); err != nil {
+			return err
+		}
+		staged[parents[i]] = struct{}{}
+	}
+	return nil
+}
+
+// stampStagedParentTimes applies the store modification times to the staged
+// ancestor directories. It runs after all staging copies so that populating a
+// directory does not bump the time again.
+func stampStagedParentTimes(targetDir string, preserveDir string, staged map[string]struct{}) error {
+	for parent := range staged {
+		info, err := os.Lstat(filepath.Join(targetDir, filepath.FromSlash(parent)))
+		if err != nil {
+			return err
+		}
+		if err := os.Chtimes(filepath.Join(preserveDir, filepath.FromSlash(parent)), info.ModTime(), info.ModTime()); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // preserveMatch reports whether rel matches any preserve pattern, using the
@@ -109,7 +156,8 @@ func parentPath(rel string) string {
 
 // copyPath copies src (file, directory tree, or symlink) to dst, replicating
 // `cp -a`: symlinks are recreated as symlinks (not dereferenced), directories
-// are merged into dst, and file permissions are carried over.
+// are merged into dst, and permissions and modification times are carried over
+// for files and directories. Symlinks keep the link itself, not its times.
 func copyPath(src string, dst string) error {
 	info, err := os.Lstat(src)
 	if err != nil {

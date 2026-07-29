@@ -258,6 +258,65 @@ func TestOverlayConfigDirPreservesModificationTimes(t *testing.T) {
 	}
 }
 
+func TestOverlayConfigDirPreservesModificationTimesOfNestedPreserveParents(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	sourceDir := filepath.Join(root, "source")
+	targetDir := filepath.Join(root, "target")
+	// agent/sessions/ is a nested preserve pattern, so agent/ exists in the
+	// store only as a directory on the way to the preserved node.
+	agentDir := filepath.Join(targetDir, "agent")
+	sessionDir := filepath.Join(agentDir, "sessions")
+	transcriptPath := filepath.Join(sessionDir, "resume.jsonl")
+	if err := os.MkdirAll(sourceDir, 0o755); err != nil {
+		t.Fatalf("mkdir source: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sourceDir, "settings.json"), []byte("new"), 0o600); err != nil {
+		t.Fatalf("write source settings: %v", err)
+	}
+	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
+		t.Fatalf("mkdir session dir: %v", err)
+	}
+	if err := os.WriteFile(transcriptPath, []byte(`{"id":"keep"}`), 0o600); err != nil {
+		t.Fatalf("write transcript: %v", err)
+	}
+
+	oldTime := time.Date(2025, time.January, 2, 3, 4, 5, 123456789, time.UTC)
+	for _, p := range []string{transcriptPath, sessionDir, agentDir} {
+		if err := os.Chtimes(p, oldTime, oldTime); err != nil {
+			t.Fatalf("set timestamps on %s: %v", p, err)
+		}
+	}
+	agentDirBefore, err := os.Stat(agentDir)
+	if err != nil {
+		t.Fatalf("stat agent directory before overlay: %v", err)
+	}
+
+	profile := model.Profile{Name: "pi"}
+	if err := overlayConfigDir(targetDir, sourceDir, yaruntime.ConfigSourcePreservePaths(profile)); err != nil {
+		t.Fatalf("overlay failed: %v", err)
+	}
+
+	transcript, err := os.ReadFile(transcriptPath)
+	if err != nil {
+		t.Fatalf("read preserved transcript: %v", err)
+	}
+	if string(transcript) != `{"id":"keep"}` {
+		t.Fatalf("preserved transcript = %q", transcript)
+	}
+	agentDirAfter, err := os.Stat(agentDir)
+	if err != nil {
+		t.Fatalf("stat agent directory after overlay: %v", err)
+	}
+	if !agentDirAfter.ModTime().Equal(agentDirBefore.ModTime()) {
+		t.Fatalf("agent directory mtime = %v, want %v", agentDirAfter.ModTime(), agentDirBefore.ModTime())
+	}
+	if agentDirAfter.Mode().Perm() != agentDirBefore.Mode().Perm() {
+		t.Fatalf("agent directory mode = %v, want %v", agentDirAfter.Mode().Perm(), agentDirBefore.Mode().Perm())
+	}
+}
+
 func TestOverlayConfigDirPreservesRuntimeState(t *testing.T) {
 	t.Parallel()
 

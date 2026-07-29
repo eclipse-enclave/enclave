@@ -52,14 +52,23 @@ filesystem, which is why nothing else could work.
 | Current directory | Result |
 |-------------------|--------|
 | `\\wsl.localhost\Ubuntu\home\you\project` (or `\\wsl$\…`) | Runs in `Ubuntu` at `/home/you/project`. This is the intended path. |
+| A drive letter mapping a WSL share, e.g. `Z:\` → `\\wsl.localhost\Ubuntu\home\you\project` | Resolved back to the share and treated as the row above. |
 | `C:\Users\you\project` | Refused. With `ENCLAVE_WSL_ALLOW_WINDOWS_PATH=1`: runs at `/mnt/c/Users/you/project` in `ENCLAVE_WSL_DISTRO` or the WSL default distribution. |
 | `\\server\share\…` | Refused. A network share has no path inside a distribution. |
-| `Z:\…` (mapped network drive) | Refused, including a drive mapped to a WSL share. |
+| A drive letter mapping anything else | Refused, and the error names what the drive points at. |
 
 PowerShell supports a `\\wsl.localhost\…` path as its current location, so the
-first row is reachable there directly. `cmd.exe` does not: `pushd` maps such a
-path to a drive letter, which the launcher refuses because it cannot tell where
-the drive points. Use PowerShell.
+first row is reachable there directly. `cmd.exe` cannot hold a UNC working
+directory, so `pushd \\wsl.localhost\Ubuntu\home\you\project` assigns a free
+drive letter instead. That is the second row: the launcher asks Windows what the
+letter maps to and, when the answer is a WSL share, carries on as if you had
+given it the share path. A letter mapping a real file server is still refused,
+because no path inside a distribution names those files and guessing one would
+bind-mount the wrong directory.
+
+If the letter is mapped below the distribution root, or the working directory
+sits deeper than the mapping, the remainder is appended — a `Z:` mapped to
+`/home/you/project` makes `Z:\src` mean `/home/you/project/src`.
 
 Windows drive paths are refused by default because every file access under
 `/mnt/c` crosses the WSL interop layer. That is slow enough to matter for a
@@ -145,8 +154,6 @@ arguments as positional parameters so they are never re-split.
 - The launcher installs nothing: not WSL2, not a distribution, not Docker, not
   the Linux `enclave` build.
 - No diagnostic command; failures are reported inline.
-- A drive letter mapped to a WSL share is refused rather than resolved back to
-  its UNC path.
 - Argument passing is verified against a reimplementation of Windows' own
   command-line parsing in CI, and against a real `wsl.exe` by a manual
   pre-release gate (see [DEV.md](DEV.md#windows-launcher)). GitHub-hosted Windows

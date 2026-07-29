@@ -67,14 +67,14 @@ func lookupIn(environ []string) lookupFunc {
 // resolveTarget decides the distribution and Linux path from the working
 // directory. The working directory decides, because that is where the code
 // lives: a distribution can only see its own filesystem.
-func resolveTarget(cwd string, env lookupFunc, driveType driveTyper) (target, error) {
+func resolveTarget(cwd string, env lookupFunc, driveType driveTyper, resolveDrive driveResolver) (target, error) {
 	path := stripLongPathPrefix(normalizeSeparators(cwd))
 
 	switch {
 	case isUNC(path):
 		return uncTarget(path, env)
 	case hasDriveLetter(path):
-		return driveTarget(path, env, driveType)
+		return driveTarget(path, env, driveType, resolveDrive)
 	default:
 		return target{}, fmt.Errorf("cannot map the current directory %q to a path inside WSL. "+
 			"Run enclave from a directory inside a WSL distribution, for example "+
@@ -86,7 +86,7 @@ func resolveTarget(cwd string, env lookupFunc, driveType driveTyper) (target, er
 // filesystem provider names its own distribution.
 func uncTarget(path string, env lookupFunc) (target, error) {
 	host, tail := splitFirst(strings.TrimPrefix(path, `\\`))
-	if !strings.EqualFold(host, uncHostWSLLocal) && !strings.EqualFold(host, uncHostWSLLegacy) {
+	if !isWSLHost(host) {
 		return target{}, fmt.Errorf("the current directory %q is on a network share, which has no "+
 			"meaningful path inside a WSL distribution. Run enclave from a directory inside the "+
 			"distribution instead", path)
@@ -98,26 +98,34 @@ func uncTarget(path string, env lookupFunc) (target, error) {
 			`Use a path of the form \\wsl.localhost\<Distro>\<path>`, path)
 	}
 
-	t := target{Distro: distro, LinuxPath: toLinuxPath(sub)}
-	if requested, ok := env(envDistro); ok && requested != "" && !strings.EqualFold(requested, distro) {
-		// The distribution the files live in wins: another distribution simply
-		// cannot see them.
-		t.Warnings = append(t.Warnings, fmt.Sprintf(
-			"%s is set to %q but the current directory is inside %q, which cannot be reached from %q. Using %q.",
-			envDistro, requested, distro, requested, distro))
-	}
-	return t, nil
+	return target{
+		Distro:    distro,
+		LinuxPath: toLinuxPath(sub),
+		Warnings:  distroConflictWarnings(distro, env),
+	}, nil
 }
 
-// driveTarget handles a Windows drive path. It is refused by default: /mnt/c is
-// reachable but crosses the interop layer on every file access, which is slow
-// enough to matter for a repository an agent is working in.
-func driveTarget(path string, env lookupFunc, driveType driveTyper) (target, error) {
+// distroConflictWarnings reports a configured distribution that the working
+// directory overrides. The distribution the files live in wins, because another
+// one simply cannot see them.
+func distroConflictWarnings(distro string, env lookupFunc) []string {
+	requested, ok := env(envDistro)
+	if !ok || requested == "" || strings.EqualFold(requested, distro) {
+		return nil
+	}
+	return []string{fmt.Sprintf(
+		"%s is set to %q but the current directory is inside %q, which cannot be reached from %q. Using %q.",
+		envDistro, requested, distro, requested, distro)}
+}
+
+// driveTarget handles a Windows drive path. A local drive is refused by default:
+// /mnt/c is reachable but crosses the interop layer on every file access, which
+// is slow enough to matter for a repository an agent is working in. A mapped
+// network drive is refused unless it turns out to be a WSL share.
+func driveTarget(path string, env lookupFunc, driveType driveTyper, resolveDrive driveResolver) (target, error) {
 	letter := strings.ToLower(path[:1])
 	if driveType(strings.ToUpper(path[:1])+`:\`) == driveRemote {
-		return target{}, fmt.Errorf("the current directory %q is on a mapped network drive, which has "+
-			"no meaningful path inside a WSL distribution. If it maps a WSL share, run enclave from the "+
-			`\\wsl.localhost\<Distro>\... path itself, which PowerShell supports as a working directory`, path)
+		return remoteDriveTarget(path, env, resolveDrive)
 	}
 
 	if !truthy(env(envAllowWindowsPath)) {
@@ -132,6 +140,52 @@ func driveTarget(path string, env lookupFunc, driveType driveTyper) (target, err
 		t.Distro = requested
 	}
 	return t, nil
+}
+
+// remoteDriveTarget handles a drive letter that maps a network share.
+//
+// cmd.exe cannot hold a UNC working directory, so `pushd \\wsl.localhost\...`
+// assigns a free drive letter instead. That letter is an alias for a path the
+// launcher already accepts, so it resolves the mapping and treats it as the UNC
+// path it is. Anything else is refused: a real file server has no path inside a
+// distribution, and guessing one would bind-mount the wrong directory into a
+// container that an agent can write to.
+func remoteDriveTarget(path string, env lookupFunc, resolveDrive driveResolver) (target, error) {
+	refuse := func(detail string) (target, error) {
+		return target{}, fmt.Errorf("the current directory %q is on a mapped network drive that %s, "+
+			"so it has no meaningful path inside a WSL distribution. Run enclave from a directory inside "+
+			"the distribution instead: PowerShell takes a "+`\\wsl.localhost\<Distro>\<path> `+
+			"path as its working directory directly, and in cmd.exe `pushd` on that path works", path, detail)
+	}
+
+	unc := normalizeSeparators(resolveDrive(strings.ToUpper(path[:1])))
+	if unc == "" {
+		return refuse("Windows could not resolve")
+	}
+	if !isUNC(unc) {
+		return refuse("points at " + unc)
+	}
+
+	host, tail := splitFirst(strings.TrimPrefix(unc, `\\`))
+	if !isWSLHost(host) {
+		return refuse("points at " + unc)
+	}
+
+	// The distribution must be named explicitly. Without this check a mapping to
+	// the provider root would silently promote the first path component to a
+	// distribution name.
+	distro, mapped := splitFirst(tail)
+	if distro == "" {
+		return refuse("points at " + unc + ", which names no distribution")
+	}
+
+	// The letter may be mapped below the distribution root, and the working
+	// directory may sit deeper still.
+	return target{
+		Distro:    distro,
+		LinuxPath: toLinuxPath(mapped + `\` + dropDrive(path)),
+		Warnings:  distroConflictWarnings(distro, env),
+	}, nil
 }
 
 // normalizeSeparators lets the classifier work on one separator. Windows
@@ -157,6 +211,12 @@ func stripLongPathPrefix(path string) string {
 
 func isUNC(path string) bool {
 	return strings.HasPrefix(path, `\\`)
+}
+
+// isWSLHost reports whether a UNC host is the WSL filesystem provider under
+// either of its names.
+func isWSLHost(host string) bool {
+	return strings.EqualFold(host, uncHostWSLLocal) || strings.EqualFold(host, uncHostWSLLegacy)
 }
 
 func hasDriveLetter(path string) bool {

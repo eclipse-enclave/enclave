@@ -9,8 +9,13 @@
 
 package wslshim
 
-// The launcher only runs on Windows. This stub exists so the rest of the package
-// compiles and is testable on Linux, where drive letters cannot occur anyway.
+// The launcher only runs on Windows. These stubs exist so the rest of the
+// package compiles and is testable on Linux, where drive letters cannot occur
+// anyway; the tests inject their own answers.
 func systemDriveType(string) driveKind {
 	return driveOther
+}
+
+func systemDriveResolver(string) string {
+	return ""
 }

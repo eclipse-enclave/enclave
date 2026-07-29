@@ -14,12 +14,20 @@ const (
 	// driveOther covers every type the launcher treats alike: fixed,
 	// removable, RAM disks, and drives Windows could not classify.
 	driveOther driveKind = iota
-	// driveRemote is a mapped network drive, which has no meaningful path
-	// inside a distribution.
+	// driveRemote is a mapped network drive. Whether it is usable depends on
+	// what it maps to, which driveResolver answers.
 	driveRemote
 )
 
-// driveTyper classifies a drive root such as `C:\`. It exists as a function
-// type so the classifier can be tested on any host: this is the one part of the
-// launcher that must call Win32.
-type driveTyper func(root string) driveKind
+// hostCalls are the two Win32 questions the launcher has to ask about a drive
+// letter. They are function types so the classifier can be tested on any host:
+// this is the only part of the launcher that must call Win32 at all.
+type (
+	// driveTyper classifies a drive root such as `C:\`.
+	driveTyper func(root string) driveKind
+
+	// driveResolver reports the UNC path a drive letter is mapped to, given a
+	// bare letter such as "Z". It returns the empty string when the letter is
+	// not a network mapping or Windows cannot say what it points at.
+	driveResolver func(letter string) string
+)

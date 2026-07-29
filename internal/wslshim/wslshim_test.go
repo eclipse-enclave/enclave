@@ -95,13 +95,14 @@ func (h *host) spawn(_, cmdLine string, env []string) error {
 
 func (h *host) shim(cwd string, environ []string) shim {
 	return shim{
-		getwd:     func() (string, error) { return cwd, nil },
-		lookPath:  h.lookPath,
-		environ:   environ,
-		driveType: fixedDriveTypes,
-		spawn:     h.spawn,
-		capture:   h.capture,
-		stderr:    &h.stderr,
+		getwd:        func() (string, error) { return cwd, nil },
+		lookPath:     h.lookPath,
+		environ:      environ,
+		driveType:    fixedDriveTypes,
+		resolveDrive: fixedDriveTargets,
+		spawn:        h.spawn,
+		capture:      h.capture,
+		stderr:       &h.stderr,
 	}
 }
 
@@ -162,6 +163,33 @@ func TestExecuteRefusesWhenWSLIsNotInstalled(t *testing.T) {
 	if !strings.Contains(h.stderr.String(), "wsl --install") {
 		t.Errorf("stderr does not say how to install WSL2: %q", h.stderr.String())
 	}
+}
+
+// What a cmd.exe user gets from `pushd \\wsl.localhost\Ubuntu\home\p\proj`: the
+// drive letter is an alias for a path the launcher accepts, so the session runs.
+func TestExecuteRunsThroughADriveLetterMappingAWSLShare(t *testing.T) {
+	h := &host{captures: []response{probeOK()}}
+
+	code := h.shim(`Z:\sub`, nil).execute([]string{"continue"})
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0; stderr: %s", code, h.stderr.String())
+	}
+
+	assertCommandLine(t, h.spawned, []string{
+		"-d", "Ubuntu", "--cd", "/home/p/proj/sub", "-e", fakeBinary, "continue",
+	})
+}
+
+func TestExecuteRefusesADriveLetterMappingAnOrdinaryShare(t *testing.T) {
+	h := &host{}
+
+	if got := h.shim(`W:\proj`, nil).execute(nil); got != exitLauncherFailure {
+		t.Errorf("exit code = %d, want %d", got, exitLauncherFailure)
+	}
+	if h.spawned != "" {
+		t.Error("nothing should have been spawned")
+	}
+	assertStderrHasPrefix(t, h.stderr.String())
 }
 
 func TestExecuteRefusesWindowsDriveWithoutOptIn(t *testing.T) {

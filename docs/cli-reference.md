@@ -56,6 +56,25 @@ exactly one running container, the name may be omitted. To start a new
 session container that auto-launches the IDE on top, use the corresponding
 tool profile instead (`enclave --tool theia`); see [Tools](tools.md).
 
+### VNC
+
+| Command | Description |
+|---------|-------------|
+| `enclave vnc-viewer [container]` | Open a VNC viewer on a session's contained display |
+
+Requires a session started with the [vnc feature](../extensions/features/vnc/README.md)
+(`enclave --features +vnc`). The command resolves the published RFB port and
+the per-session password itself, so nothing has to be copied by hand. It
+targets the current project's containers. With exactly one VNC-enabled
+container the name may be omitted. The viewer runs in the foreground, so its
+errors reach the terminal and Ctrl-C closes it. Background it with `&` to keep
+the shell.
+
+The viewer defaults to `xtigervncviewer` on Linux (Debian/Ubuntu:
+`apt install tigervnc-viewer`) and to macOS's built-in Screen Sharing via
+`open`. Configure a different one with the `vnc_viewer` config key. See
+[VNC viewer](configuration.md#vnc-viewer).
+
 ### Network
 
 | Command | Description |

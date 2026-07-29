@@ -13,11 +13,21 @@ enclave --features +vnc …
 
 ## Connecting a VNC client
 
-The RFB port (container `5900`) is published with an OS-assigned host port on
-the loopback interface, so concurrent sessions get distinct ports. Find the
-published port with `enclave ps --json` (look for the `5900` container port),
-then read the per-session password out of the container and point your client
-at it:
+```bash
+enclave vnc-viewer
+```
+
+`enclave vnc-viewer` resolves the session's published port and password itself
+and launches a host-installed viewer: `xtigervncviewer` on Linux, the built-in
+Screen Sharing on macOS, or whatever `vnc_viewer` configures. See
+[VNC viewer](../../../docs/configuration.md#vnc-viewer) for the viewer setting
+and [the CLI reference](../../../docs/cli-reference.md#vnc) for the command.
+
+To attach a client by hand instead: the RFB port (container `5900`) is
+published with an OS-assigned host port on the loopback interface, so
+concurrent sessions get distinct ports. Find the published port with
+`enclave ps --json` (look for the `5900` container port), then read the
+per-session password out of the container and point your client at it:
 
 ```bash
 docker exec <container> cat /tmp/enclave-vnc/vnc-password
@@ -77,6 +87,9 @@ The plaintext path is what a VNC client user reads (see
 [Connecting a VNC client](#connecting-a-vnc-client)), and it doubles as the
 **integration contract** for a trusted host-side viewer, which can pick the
 password up with `docker exec <container> cat /tmp/enclave-vnc/vnc-password`.
+This is what `enclave vnc-viewer` reads. It hands the value to the viewer through the
+environment (`VNC_PASSWORD`, `ENCLAVE_VNC_PASSWORD`) rather than argv, which
+`/proc` would expose to every local user for the viewer's lifetime.
 Because its reach stops at that one session's own display, the (untrusted)
 agent knowing it is harmless.
 

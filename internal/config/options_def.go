@@ -1110,5 +1110,19 @@ func OptionDefs() []OptionDef {
 				},
 			},
 		},
+		{
+			// Argv of the viewer `enclave vnc-viewer` launches, with {host}, {port},
+			// {password} and {container} placeholders. It configures a host
+			// command rather than a session, hence the global group and no CLI
+			// flag: a one-shot viewer override on the command line would just be
+			// the command the user could run directly.
+			Name:          "vnc_viewer",
+			Group:         OptionGroupGlobal,
+			Kind:          OptionKindStringSlice,
+			OptionField:   "VNCViewer",
+			SourceField:   "VNCViewer",
+			DefaultsField: "VNCViewer",
+			Apply:         ApplySliceIfEmpty,
+		},
 	}
 }

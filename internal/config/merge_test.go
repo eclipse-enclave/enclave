@@ -58,6 +58,7 @@ func TestMergeDefaultsCoversAllFields(t *testing.T) {
 		WorktreeMetadata: model.WorktreeMetadataReadonly,
 		AllowDomains:     []string{"api.test.com"},
 		BridgePorts:      []string{"9800"},
+		VNCViewer:        []string{"test-viewer", "{host}:{port}"},
 		PlaywrightMCP:    &trueVal,
 	}
 

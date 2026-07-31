@@ -4,7 +4,7 @@ on:
   workflow_call:
     inputs:
       runner:
-        description: GitHub runner image for the RPM package build.
+        description: GitHub runner image for the Ubuntu RPM compatibility build.
         required: false
         type: string
         default: ubuntu-24.04
@@ -28,7 +28,7 @@ permissions:
   contents: read
 
 jobs:
-  build-rpm:
+  build-rpm-ubuntu:
     runs-on: ${{ inputs.runner }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
@@ -62,6 +62,35 @@ jobs:
           (cd "$tmpdir" && rpm2cpio "$pkg" | cpio -idm --quiet)
           ./scripts/verify-package-assets.sh "$tmpdir"
 
+  build-rpm-fedora:
+    runs-on: ubuntu-24.04
+    container: fedora:44
+    steps:
+      - name: Install build dependencies
+        run: dnf install -y git golang make rpm-build cpio diffutils
+
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Set package version
+        if: inputs.set_package_version
+        run: echo "VERSION=$(./scripts/rolling-package-version.sh)" >> "$GITHUB_ENV"
+
+      - name: Build RPM package
+        run: make rpm
+
+      - name: Verify packaged runtime assets
+        run: |
+          pkg=$(find dist -maxdepth 1 -name 'enclave-*.rpm' -print -quit)
+          if [ -z "$pkg" ]; then
+            echo "RPM package was not produced" >&2
+            exit 1
+          fi
+          pkg=$(realpath "$pkg")
+          tmpdir=$(mktemp -d)
+          trap 'rm -rf "$tmpdir"' EXIT
+          (cd "$tmpdir" && rpm2cpio "$pkg" | cpio -idm --quiet)
+          ./scripts/verify-package-assets.sh "$tmpdir"
+
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: ${{ inputs.artifact_name }}
@@ -69,7 +98,7 @@ jobs:
           retention-days: ${{ inputs.artifact_retention_days }}
 
   test-fedora:
-    needs: build-rpm
+    needs: build-rpm-fedora
     runs-on: ubuntu-24.04
     container: fedora:44
     steps:

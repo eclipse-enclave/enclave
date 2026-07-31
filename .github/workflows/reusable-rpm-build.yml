@@ -73,7 +73,10 @@ jobs:
 
       - name: Set package version
         if: inputs.set_package_version
-        run: echo "VERSION=$(./scripts/rolling-package-version.sh)" >> "$GITHUB_ENV"
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          VERSION=$(./scripts/rolling-package-version.sh)
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
 
       - name: Build RPM package
         run: make rpm

@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"enclave/internal/backend"
 	"enclave/internal/config"
@@ -135,6 +136,45 @@ func TestStoreManagerSeedCopiesFilesAndDirsAndAppliesMode(t *testing.T) {
 	}
 	if string(nested) != "hi" {
 		t.Fatalf("seeded tree file = %q, want %q", nested, "hi")
+	}
+}
+
+func TestStoreManagerSeedPreservesModificationTimes(t *testing.T) {
+	store := newFSStore(t)
+	key := backend.StoreKey{Owner: "codex", ProjectHash: "abc123abc123"}
+
+	srcRoot := t.TempDir()
+	dirSrc := filepath.Join(srcRoot, "tree")
+	nestedSrc := filepath.Join(dirSrc, "nested")
+	fileSrc := filepath.Join(nestedSrc, "a.txt")
+	if err := os.MkdirAll(nestedSrc, 0o755); err != nil {
+		t.Fatalf("mkdir seed tree: %v", err)
+	}
+	if err := os.WriteFile(fileSrc, []byte("hi"), 0o600); err != nil {
+		t.Fatalf("write seed tree file: %v", err)
+	}
+	oldTime := time.Date(2025, time.January, 2, 3, 4, 5, 123456789, time.UTC)
+	for _, p := range []string{fileSrc, nestedSrc, dirSrc} {
+		if err := os.Chtimes(p, oldTime, oldTime); err != nil {
+			t.Fatalf("set timestamps on %s: %v", p, err)
+		}
+	}
+
+	if err := store.Seed(context.Background(), key, backend.StoreKindConfig, []backend.SeedItem{
+		{HostPath: dirSrc, StoreRel: "agent/tree"},
+	}); err != nil {
+		t.Fatalf("Seed() error = %v", err)
+	}
+
+	base := config.HostStoreConfigDir(store.host.Home, key.Owner, key.ProjectHash, "default")
+	for _, rel := range []string{"agent/tree", "agent/tree/nested", "agent/tree/nested/a.txt"} {
+		info, err := os.Stat(filepath.Join(base, filepath.FromSlash(rel)))
+		if err != nil {
+			t.Fatalf("stat seeded %s: %v", rel, err)
+		}
+		if !info.ModTime().Equal(oldTime) {
+			t.Fatalf("seeded %s mtime = %v, want %v", rel, info.ModTime(), oldTime)
+		}
 	}
 }
 

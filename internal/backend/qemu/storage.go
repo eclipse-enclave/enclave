@@ -295,9 +295,12 @@ func copyPath(src string, dst string, mode fs.FileMode) error {
 				return err
 			}
 		}
-		return nil
+		return os.Chtimes(dst, info.ModTime(), info.ModTime())
 	default:
-		return copyFile(src, dst, firstNonZeroMode(mode, info.Mode().Perm()))
+		if err := copyFile(src, dst, firstNonZeroMode(mode, info.Mode().Perm())); err != nil {
+			return err
+		}
+		return os.Chtimes(dst, info.ModTime(), info.ModTime())
 	}
 }
 

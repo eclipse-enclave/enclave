@@ -208,6 +208,8 @@ func seedStorePath(src string, target string, mode fs.FileMode) error {
 // destination node is not a pre-existing symlink before creating a directory or
 // writing a file at that path. Source symlinks are dereferenced (via os.Stat)
 // as before; only destination symlinks are the escape risk and are rejected.
+// Permissions and modification times are carried over, matching the qemu
+// backend's seed copy.
 func copyTreeNoFollow(src string, dst string) error {
 	if err := rejectExistingSymlink(dst); err != nil {
 		return err
@@ -229,13 +231,17 @@ func copyTreeNoFollow(src string, dst string) error {
 				return err
 			}
 		}
-		return nil
+		// After the children, so populating dst does not bump its time again.
+		return os.Chtimes(dst, info.ModTime(), info.ModTime())
 	}
 	data, err := os.ReadFile(src) // #nosec G304 -- src is a caller-provided seed source path.
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(dst, data, info.Mode().Perm()) // #nosec G703 -- dst is validated against destination symlinks before copying.
+	if err := os.WriteFile(dst, data, info.Mode().Perm()); err != nil { // #nosec G703 -- dst is validated against destination symlinks before copying.
+		return err
+	}
+	return os.Chtimes(dst, info.ModTime(), info.ModTime())
 }
 
 // rejectExistingSymlink returns an error when p already exists and is a

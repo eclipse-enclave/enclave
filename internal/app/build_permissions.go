@@ -142,7 +142,8 @@ func appendAppRootModeIssue(appRoot string, path string, info os.FileInfo, execu
 }
 
 // These predicates mirror the executable-asset normalization rules in
-// Dockerfile, debian/rules, internal/appassets, and dockerfile_gen.go.
+// Dockerfile, debian/rules, packaging/rpm/enclave.spec, internal/appassets,
+// and dockerfile_gen.go.
 func buildScriptNeedsExecute(rel string) bool {
 	base := filepath.Base(filepath.FromSlash(rel))
 	return strings.HasSuffix(base, ".sh") || strings.Contains(rel, "/bin/")

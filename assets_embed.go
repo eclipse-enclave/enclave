@@ -18,8 +18,9 @@ import (
 )
 
 // Keep this inventory aligned with the runtime assets installed by
-// debian/rules. The all prefix includes any dotfiles added below these trees in
-// future. The repository-root .dockerignore must be listed directly.
+// debian/rules and packaging/rpm/enclave.spec. The all prefix includes any
+// dotfiles added below these trees in future. The repository-root .dockerignore
+// must be listed directly.
 //
 //go:embed .dockerignore Dockerfile Dockerfile.gateway entrypoint.sh gateway-entrypoint.sh LICENSE.md NOTICE.md
 //go:embed all:docs all:extensions all:runtime-assets

@@ -44,7 +44,8 @@ override_dh_auto_install:
 	cp -a docs/. $(CURDIR)/debian/enclave/usr/share/enclave/docs/
 	chmod -R u+rwX,go+rX $(CURDIR)/debian/enclave/usr/share/enclave/docs
 
-	# Keep executable-asset rules below in sync with Dockerfile, internal/appassets,
+	# Keep executable-asset rules below in sync with Dockerfile,
+	# packaging/rpm/enclave.spec, internal/appassets,
 	# internal/app/build_permissions.go, and internal/app/dockerfile_gen.go.
 	# Install extensions
 	mkdir -p $(CURDIR)/debian/enclave/usr/share/enclave/extensions

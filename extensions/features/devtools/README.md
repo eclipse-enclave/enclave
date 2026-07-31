@@ -13,6 +13,7 @@ Core development tools and lint tooling. Enabled by default.
 | `htop` | Interactive process viewer |
 | `tree` | Directory listing |
 | `golang-go` | Go compiler |
+| `rpm` | RPM package build tools (`rpmbuild`) |
 | `shellcheck` | Shell script linter |
 | `yq` | YAML processor |
 | `ripgrep` | Fast grep (`rg`) |

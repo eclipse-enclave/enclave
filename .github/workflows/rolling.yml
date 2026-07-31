@@ -59,8 +59,16 @@ jobs:
       artifact_retention_days: 1
       set_package_version: true
 
+  build-rpm:
+    uses: ./.github/workflows/reusable-rpm-build.yml
+    with:
+      runner: ubuntu-24.04
+      artifact_name: rpm
+      artifact_retention_days: 1
+      set_package_version: true
+
   release:
-    needs: [build, build-deb]
+    needs: [build, build-deb, build-rpm]
     if: ${{ github.event_name == 'push' || inputs.publish }}
     runs-on: ubuntu-latest
     permissions:
@@ -96,11 +104,15 @@ jobs:
           | File | Platform | Notes |
           |------|----------|-------|
           | \`enclave_*_amd64.deb\` | Ubuntu 24.04 | Includes all assets |
+          | \`enclave-*.x86_64.rpm\` | Fedora Linux | Includes all assets |
           | \`enclave-linux-amd64\` | Linux x86_64 | Self-contained binary with runtime assets |
 
           \`\`\`sh
           # Ubuntu 24.04 (resolves dependencies automatically)
           sudo apt install ./enclave_*_amd64.deb
+
+          # Fedora Linux (resolves dependencies automatically)
+          sudo dnf install ./enclave-*.x86_64.rpm
 
           # Other x86-64 Linux distributions
           chmod +x enclave-linux-amd64

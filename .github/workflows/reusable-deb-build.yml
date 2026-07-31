@@ -48,8 +48,7 @@ jobs:
           DEBEMAIL: rolling@build
           DEBFULLNAME: Rolling Build
         run: |
-          NEXT_VERSION=$(grep '^VERSION ?=' Makefile | cut -d'=' -f2 | tr -d ' ' | awk -F. 'BEGIN{OFS="."}{$NF=$NF+1; print}')
-          VERSION="${NEXT_VERSION}~git.$(date -u +%Y%m%d).${GITHUB_RUN_NUMBER}.${GITHUB_SHA::8}"
+          VERSION=$(./scripts/rolling-package-version.sh)
           dch --newversion "${VERSION}-1" \
               --distribution unstable \
               "Rolling release, commit ${GITHUB_SHA::8}, $(date -u +%Y-%m-%d)"
@@ -63,29 +62,7 @@ jobs:
           tmpdir=$(mktemp -d)
           trap 'rm -rf "$tmpdir"' EXIT
           dpkg-deb -x "$pkg" "$tmpdir"
-
-          root="$tmpdir/usr/share/enclave"
-          test -f "$root/.dockerignore"
-          test -f "$root/Dockerfile"
-          test -f "$root/Dockerfile.gateway"
-          test ! -e "$root/AGENTS.md"
-          test ! -e "$root/CLAUDE.md"
-          diff -qr docs "$root/docs"
-          test -f "$tmpdir/usr/share/doc/enclave/LICENSE.md"
-          test -f "$tmpdir/usr/share/doc/enclave/NOTICE.md"
-
-          mkdir -p "$tmpdir/home" "$tmpdir/isolated"
-          HOME="$tmpdir/home" XDG_CACHE_HOME="$tmpdir/cache" \
-            "$root/enclave" tools >/dev/null
-          test ! -e "$tmpdir/cache/enclave/assets"
-
-          cp "$root/enclave" "$tmpdir/isolated/enclave"
-          if HOME="$tmpdir/home" XDG_CACHE_HOME="$tmpdir/cache" \
-            "$tmpdir/isolated/enclave" tools >"$tmpdir/isolated/output" 2>&1; then
-            echo "deb binary unexpectedly carried embedded assets" >&2
-            exit 1
-          fi
-          grep -q "embedded assets are unavailable" "$tmpdir/isolated/output"
+          ./scripts/verify-package-assets.sh "$tmpdir"
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:

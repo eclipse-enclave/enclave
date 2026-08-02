@@ -49,6 +49,12 @@ var isRootlessDocker = dockercmd.IsRootless
 // the outer view, which can write the read-only-for-the-sandbox system paths
 // (e.g. for package installs).
 func (b *Backend) applyRootlessSandbox(ctx context.Context, req backend.Request, spec runSpec) error {
+	// Rootless podman needs no nested sandbox: sessions run with
+	// --userns=keep-id, which maps the agent to the invoking user directly
+	// (see applyPodmanUserns).
+	if b.opts.Engine == dockercmd.EnginePodman {
+		return nil
+	}
 	rootless, err := isRootlessDocker(ctx)
 	if err != nil {
 		return fmt.Errorf("detect rootless docker: %w", err)
@@ -88,6 +94,9 @@ func (b *Backend) applyRootlessSandbox(ctx context.Context, req backend.Request,
 // place package installs work. The wrapper itself must start as (rootless)
 // root to be allowed to join the namespace.
 func (b *Backend) wrapSandboxExec(ctx context.Context, argv []string, user string) ([]string, string) {
+	if b.opts.Engine == dockercmd.EnginePodman {
+		return argv, user
+	}
 	if user == "root" || len(argv) == 0 {
 		return argv, user
 	}
@@ -124,7 +133,7 @@ func ensureRootlessSeccompProfile(home string) (string, error) {
 	if !filepath.IsAbs(path) {
 		return "", fmt.Errorf("host cache root did not resolve to an absolute path: %q", path)
 	}
-	if existing, err := os.ReadFile(path); err == nil && bytes.Equal(existing, rootlessSeccompProfile) {
+	if existing, err := os.ReadFile(path); err == nil && bytes.Equal(existing, rootlessSeccompProfile) { // #nosec G304 -- path derives from the host cache root, not user input.
 		return path, nil
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {

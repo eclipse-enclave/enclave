@@ -164,7 +164,7 @@ func TestEntrypointSandboxPassesStdinToSandbox(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open stdin stand-in: %v", err)
 	}
-	defer stdin.Close()
+	defer func() { _ = stdin.Close() }()
 
 	env := []string{
 		"PATH=" + sandboxStubDir(t, logDir) + string(os.PathListSeparator) + os.Getenv("PATH"),

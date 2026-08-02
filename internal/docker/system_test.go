@@ -11,7 +11,6 @@ import (
 	"context"
 	"os"
 	"path/filepath"
-	"sync"
 	"testing"
 )
 
@@ -49,12 +48,6 @@ exit 2
 		dockerBinary = origBinary
 		resetCachedInfo()
 	})
-}
-
-func resetCachedInfo() {
-	cachedInfoOnce = sync.Once{}
-	cachedInfo = SystemInfo{}
-	cachedInfoErr = nil
 }
 
 func TestIsRootlessDetectsRootlessDaemon(t *testing.T) {

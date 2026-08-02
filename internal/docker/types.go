@@ -8,6 +8,7 @@
 package docker
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 )
@@ -35,14 +36,42 @@ type Mount struct {
 	ReadOnly bool
 }
 
+// StrSlice is a []string that also decodes from a bare JSON string. Docker's
+// inspect schema renders Cmd/Entrypoint as arrays, but podman 4.x renders
+// Config.Entrypoint as a single string (the Docker API has the same tolerant
+// type for the same reason).
+type StrSlice []string
+
+func (s *StrSlice) UnmarshalJSON(data []byte) error {
+	trimmed := strings.TrimSpace(string(data))
+	if trimmed == "" || trimmed == "null" {
+		*s = nil
+		return nil
+	}
+	if trimmed[0] == '"' {
+		var value string
+		if err := json.Unmarshal(data, &value); err != nil {
+			return err
+		}
+		*s = StrSlice{value}
+		return nil
+	}
+	var values []string
+	if err := json.Unmarshal(data, &values); err != nil {
+		return err
+	}
+	*s = values
+	return nil
+}
+
 // ContainerConfig is the subset of container configuration we translate to
 // `docker run`/`docker create` flags. It is also the decode target for the
 // `.Config` object returned by `docker inspect`, so its JSON tags match the
 // Docker inspect schema.
 type ContainerConfig struct {
 	Image        string            `json:"Image,omitempty"`
-	Cmd          []string          `json:"Cmd,omitempty"`
-	Entrypoint   []string          `json:"Entrypoint,omitempty"`
+	Cmd          StrSlice          `json:"Cmd,omitempty"`
+	Entrypoint   StrSlice          `json:"Entrypoint,omitempty"`
 	Env          []string          `json:"Env,omitempty"`
 	WorkingDir   string            `json:"WorkingDir,omitempty"`
 	User         string            `json:"User,omitempty"`
@@ -66,6 +95,10 @@ type HostConfig struct {
 	CapAdd       []string
 	CapDrop      []string
 	Sysctls      map[string]string
+	// UsernsMode sets `--userns` (podman only; e.g. "keep-id" or
+	// "container:<name>"). Docker's daemon-level userns handling never
+	// needs it.
+	UsernsMode string
 }
 
 // NetworkMode is the container network mode (for example "" for the default

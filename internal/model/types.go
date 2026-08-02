@@ -484,7 +484,7 @@ const (
 	SessionMonitorTmuxSocket  = AppName
 	SessionMonitorTmuxSession = "main"
 	ImageName                 = AppName + ":latest"
-	AlpineImage               = "alpine@sha256:25109184c71bdad752c8312a8623239686a9a2071e8825f20acb8f2198c3f659"
+	AlpineImage               = "docker.io/library/alpine@sha256:25109184c71bdad752c8312a8623239686a9a2071e8825f20acb8f2198c3f659"
 	HashLength                = 12
 	DetachKeysDefault         = `ctrl-\`
 )

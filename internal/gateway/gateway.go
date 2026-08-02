@@ -334,6 +334,19 @@ type StartResult struct {
 	TempFiles     []string
 }
 
+// podmanRootless reports whether the selected engine is rootless podman,
+// which decides the user-namespace shape of the gateway container.
+func podmanRootless() (bool, error) {
+	if !docker.IsPodman() {
+		return false, nil
+	}
+	rootless, err := docker.IsRootless(context.Background())
+	if err != nil {
+		return false, fmt.Errorf("detect rootless podman: %w", err)
+	}
+	return rootless, nil
+}
+
 func Start(cfg StartConfig) (StartResult, error) {
 	var empty StartResult
 	if err := validateStartConfig(cfg); err != nil {
@@ -462,6 +475,17 @@ func Start(cfg StartConfig) (StartResult, error) {
 		Mounts:       remainingMounts,
 		PortBindings: cfg.PortBindings,
 		ExtraHosts:   extraHosts,
+	}
+	if rootlessPodman, err := podmanRootless(); err != nil {
+		return empty, err
+	} else if rootlessPodman {
+		// On rootless podman the gateway owns the session's user namespace:
+		// keep-id maps the invoking user to the same uid, and the tool
+		// container joins with --userns=container:<gateway> so the agent
+		// runs at the host uid. keep-id would otherwise default the user to
+		// the invoking uid, so pin root for iptables/dnsmasq setup.
+		hostConfig.UsernsMode = "keep-id"
+		config.User = "root"
 	}
 
 	startedAt := time.Now().UTC()
@@ -595,7 +619,7 @@ func ensureExistingGatewayImageWith(profile model.Profile, exists func(context.C
 func Stop(containerName string) {
 	container := gatewayContainerName(containerName)
 	timeout := 3 * time.Second
-	if err := docker.ContainerStop(context.Background(), container, &timeout); err != nil {
+	if err := docker.ContainerStop(context.Background(), container, &timeout); err != nil && !docker.IsNotFound(err) {
 		logx.Warnf("Failed to stop gateway container %s: %v", container, err)
 	}
 }

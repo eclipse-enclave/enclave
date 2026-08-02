@@ -16,6 +16,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"enclave/internal/logx"
 )
 
 // ContainerList returns container summaries matching opts. It lists IDs with
@@ -91,6 +93,9 @@ func decodeInspectResponses(out string) []InspectResponse {
 	for _, line := range lines {
 		var info InspectResponse
 		if err := json.Unmarshal([]byte(line), &info); err != nil {
+			// A schema mismatch silently hides containers; keep the drop but
+			// leave a trace for --verbose debugging.
+			logx.Debugf("Skipping undecodable container inspect entry: %v", err)
 			continue
 		}
 		results = append(results, info)

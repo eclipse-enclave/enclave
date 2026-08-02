@@ -155,10 +155,13 @@ func Tag(ctx context.Context, source string, target string) error {
 // buildx is unavailable or no cache options are set.
 func Build(ctx context.Context, req BuildRequest, out io.Writer) error {
 	if shouldUseBuildx(req) {
-		if BuildxAvailable(ctx) {
+		if IsPodman() {
+			logx.Warnf("buildx cache options are not supported with podman; building without buildx cache")
+		} else if BuildxAvailable(ctx) {
 			return buildWithBuildx(ctx, req, out)
+		} else {
+			logx.Warnf("docker buildx is unavailable; falling back to plain docker build without buildx cache export")
 		}
-		logx.Warnf("docker buildx is unavailable; falling back to plain docker build without buildx cache export")
 	}
 	return buildWithDockerCLI(ctx, req, out)
 }
@@ -197,8 +200,17 @@ func buildWithDockerCLI(ctx context.Context, req BuildRequest, out io.Writer) er
 	}
 	args = append(args, sortedMapFlags("--build-arg", req.BuildArgs)...)
 	args = append(args, sortedMapFlags("--label", req.Labels)...)
-	for _, image := range cleanBuildxSpecs(req.CacheFrom) {
-		args = append(args, "--cache-from", image)
+	if IsPodman() {
+		// podman's --cache-from wants untagged repositories for distributed
+		// caching and rejects image:tag values; buildah already reuses its
+		// local layer cache without any flag.
+		if len(cleanBuildxSpecs(req.CacheFrom)) > 0 {
+			logx.Debugf("Ignoring --cache-from images under podman; buildah uses its local layer cache")
+		}
+	} else {
+		for _, image := range cleanBuildxSpecs(req.CacheFrom) {
+			args = append(args, "--cache-from", image)
+		}
 	}
 	progress := normalizeBuildProgress(req.Progress)
 	switch {
@@ -216,7 +228,7 @@ func buildWithDockerCLI(ctx context.Context, req BuildRequest, out io.Writer) er
 	cmd.Stdout = out
 	cmd.Stderr = out
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("docker build failed: %w", err)
+		return fmt.Errorf("%s build failed: %w", engineName, err)
 	}
 	return nil
 }
@@ -376,6 +388,11 @@ func cleanBuildxSpecs(values []string) []string {
 
 // BuildkitEnabled reports whether BuildKit is enabled via DOCKER_BUILDKIT.
 func BuildkitEnabled() bool {
+	// Podman builds through buildah, not BuildKit: no `--progress` flag and
+	// no BUILDKIT_INLINE_CACHE support (RUN --mount works regardless).
+	if IsPodman() {
+		return false
+	}
 	raw := strings.TrimSpace(strings.ToLower(os.Getenv("DOCKER_BUILDKIT")))
 	if raw == "" {
 		return true

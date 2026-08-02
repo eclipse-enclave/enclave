@@ -18,7 +18,9 @@ sandbox built on bind mounts:
 Docker offers no per-container remapping (no idmapped bind mounts, no podman
 `--userns=keep-id` equivalent), and agents must not run with effective UID 0 —
 plenty of tooling special-cases root. Enclave therefore adds the missing
-mapping level itself.
+mapping level itself. (Podman does have `--userns=keep-id`, which is why
+rootless sessions under `--backend podman` need none of this machinery; see
+[Rootless Podman](#rootless-podman) below.)
 
 ## The nested-namespace sandbox
 
@@ -132,5 +134,42 @@ the host-side blast radius is strictly smaller.
   not supported with rootless; sessions fail with a clear error.
 - Publishing host ports below 1024 requires host configuration
   (`net.ipv4.ip_unprivileged_port_start`).
+
+## Rootless Podman
+
+**Status: supported** via `--backend podman`. Rootless Podman provides the
+per-container remapping Docker lacks, so none of the nested-sandbox machinery
+above applies: no launcher phase, no custom seccomp profile, no UID 0 alias in
+the image. Sessions keep the standard hardening (`no-new-privileges`, sudoers
+neutralized).
+
+- **Unrestricted sessions** run with `--userns=keep-id`: the agent's uid *is*
+  the invoking user's uid, bind-mounted worktrees keep host ownership in both
+  directions, and the build identity is the host uid/gid (so podman and
+  rootless-Docker image hashes differ and switching engines rebuilds).
+- **Restricted sessions** hang the keep-id namespace on the gateway sidecar
+  (`--userns=keep-id`, pinned to user root for iptables/dnsmasq setup); the
+  tool container joins it with `--userns=container:<gateway>` alongside
+  `--network container:<gateway>`. The kernel only lets a container mount
+  sysfs when it shares the netns owner's user namespace, so the tool must
+  join both. DNS pinning is inherited: the gateway rewrites its own
+  `/etc/resolv.conf` to the local dnsmasq, and the joined tool container sees
+  the same file — the agent (nonzero uid) cannot modify it.
+- **Gateway host writes**: inside the keep-id namespace the gateway's root
+  maps to a subordinate host uid. The network log is pre-created by the host,
+  so appends preserve host ownership. Per-host TLS leaf cache files are
+  created by the proxy and land subordinate-owned on the host; the host can
+  still delete them (it owns the parent directory) and the gateway re-reads
+  them under the same mapping.
+- **`--admin`** runs as root inside the keep-id namespace: package installs
+  work (the image filesystem is root-owned in that view), but files an admin
+  shell creates under bind mounts land subordinate-owned on the host. Use the
+  normal session identity for worktree writes.
+- **Auth reconcile** helper containers also run under keep-id so chowns to
+  the host uid land on the invoking user.
+
+Rootful podman behaves like rootful Docker: the host user's uid/gid is used
+as the build and runtime identity, and the same host-hardening guidance
+applies.
 
 For rootful hardening options, see [Host hardening](host-hardening.md).

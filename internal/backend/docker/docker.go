@@ -36,6 +36,9 @@ type Options struct {
 	DevcontainerRunArgs []string
 	ProjectDir          string
 	ProjectMount        string
+	// Engine selects the container engine (docker or podman) this backend
+	// drives through the shared CLI wrapper. Empty means docker.
+	Engine dockercmd.EngineName
 }
 
 type Backend struct {
@@ -49,10 +52,18 @@ func New(opts Options) *Backend {
 	return b
 }
 
-func (b *Backend) Name() string { return backend.NameDocker }
+func (b *Backend) Name() string {
+	if b.opts.Engine == dockercmd.EnginePodman {
+		return backend.NamePodman
+	}
+	return backend.NameDocker
+}
 
 func (b *Backend) Check(ctx context.Context) error {
 	if err := dockercmd.Ping(ctx); err != nil {
+		if b.opts.Engine == dockercmd.EnginePodman {
+			return fmt.Errorf("podman is not usable: %w", err)
+		}
 		return fmt.Errorf("docker daemon is not running: %w", err)
 	}
 	return nil
@@ -237,18 +248,32 @@ func (b *Backend) prepareRun(ctx context.Context, req backend.Request) (runSpec,
 	if err := b.applyRootlessSandbox(ctx, req, spec); err != nil {
 		return runSpec{}, err
 	}
+	podmanRootless, err := b.podmanRootless(ctx)
+	if err != nil {
+		return runSpec{}, err
+	}
 	if req.Network.Mode == backend.NetworkModeRestricted {
 		gatewayName, cleanup, err := b.startGateway(ctx, req)
 		if err != nil {
 			return runSpec{}, err
 		}
 		spec.hostConfig.NetworkMode = dockercmd.NetworkMode("container:" + gatewayName)
+		if podmanRootless {
+			// The tool container must share the gateway's user namespace:
+			// rootless podman refuses to join a netns owned by another
+			// mapping (sysfs mount), and the gateway's keep-id namespace is
+			// what maps the agent to the invoking user.
+			spec.hostConfig.UsernsMode = "container:" + gatewayName
+		}
 		spec.cleanup = cleanup
 	} else {
 		spec.config.ExposedPorts = portSet(req.Ports)
 		spec.hostConfig.PortBindings = portMap(req.Ports)
 		if len(req.Network.IdeBridgePorts) > 0 {
 			spec.hostConfig.ExtraHosts = append(spec.hostConfig.ExtraHosts, "host.docker.internal:host-gateway")
+		}
+		if podmanRootless {
+			spec.hostConfig.UsernsMode = "keep-id"
 		}
 	}
 	applySELinuxMounts(spec.hostConfig, util.IsSELinuxEnforcing())
@@ -402,7 +427,7 @@ func sessionListFilterPairs(filter backend.SessionFilter) [][2]string {
 	exactName := strings.TrimSpace(filter.ExactName)
 	namePrefix := strings.TrimSpace(filter.NamePrefix)
 	if exactName != "" {
-		pairs = append(pairs, [2]string{"name", "^/" + exactName + "$"})
+		pairs = append(pairs, [2]string{"name", dockercmd.ExactNameFilter(exactName)})
 	} else if namePrefix != "" {
 		pairs = append(pairs, [2]string{"name", namePrefix})
 	} else {
@@ -670,13 +695,26 @@ func (b *Backend) ConfigStoreKeyInUse(ctx context.Context, meta backend.SessionM
 func (b *Backend) warnInsecureDockerConfig(ctx context.Context) {
 	info, err := dockercmd.CachedInfo(ctx)
 	if err != nil {
-		logx.Debugf("Failed to read Docker info: %v", err)
+		logx.Debugf("Failed to read %s info: %v", b.Name(), err)
 		return
 	}
 	if info.HasSecurityOption("rootless") || info.HasSecurityOption("userns") {
 		return
 	}
-	logx.Warnf("Docker is running without userns-remap or rootless mode; container root maps to host root. See docs/security/host-hardening.md.")
+	logx.Warnf("%s is running without userns-remap or rootless mode; container root maps to host root. See docs/security/host-hardening.md.", b.Name())
+}
+
+// podmanRootless reports whether sessions run on a rootless podman engine,
+// which replaces the docker rootless sandbox with --userns=keep-id.
+func (b *Backend) podmanRootless(ctx context.Context) (bool, error) {
+	if b.opts.Engine != dockercmd.EnginePodman {
+		return false, nil
+	}
+	rootless, err := isRootlessDocker(ctx)
+	if err != nil {
+		return false, fmt.Errorf("detect rootless podman: %w", err)
+	}
+	return rootless, nil
 }
 
 func exitStatus(err error) backend.ExitStatus {

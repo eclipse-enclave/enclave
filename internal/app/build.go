@@ -130,10 +130,13 @@ func checkDocker() error {
 	case err == nil:
 		return nil
 	case docker.IsCLIUnavailable(err):
-		return fmt.Errorf("docker CLI not found on PATH; install Docker and retry")
+		return fmt.Errorf("%s CLI not found on PATH; install %s and retry", docker.Engine(), docker.Engine())
 	case docker.IsSocketPermissionDenied(err):
 		return fmt.Errorf("cannot access the Docker socket: permission denied. Grant this user access to Docker (commonly by adding it to the docker group and logging in again; see https://docs.docker.com/engine/install/linux-postinstall/), then retry")
 	default:
+		if docker.IsPodman() {
+			return fmt.Errorf("podman is not usable: %w", err)
+		}
 		return fmt.Errorf("docker daemon is not reachable: %w", err)
 	}
 }
@@ -180,6 +183,10 @@ func resolveHost(backendName string) (model.Host, error) {
 // describes ownership as the daemon sees it, not the identity the agent runs
 // as — under rootless the session's nested sandbox maps container 0 back to a
 // normal uid (see internal/backend/docker/sandbox.go).
+//
+// Podman keeps the host identity in both modes: rootful behaves like rootful
+// Docker, and rootless sessions run with --userns=keep-id, which maps the
+// invoking user to the same ids in-container.
 func resolveContainerIdentity(backendName string, host model.Host) (uid string, gid string) {
 	if backendName != "" && backendName != backend.NameDocker {
 		return host.UID, host.GID

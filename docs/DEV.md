@@ -191,7 +191,7 @@ Quick rule of thumb:
 - User-facing runtime option: all of the above plus security notes when
   applicable.
 
-Backend option note: `--backend` is config-backed and defaults to `docker`; experimental `qemu` is available for foreground slim/no-feature unrestricted sessions.
+Backend option note: `--backend` is config-backed and defaults to `docker`; `podman` drives the same container backend through the podman CLI; experimental `qemu` is available for foreground slim/no-feature unrestricted sessions.
 
 Build option note: `--features` is available on CLI. In devcontainer mode,
 unset features default to none, so pass `--features` explicitly when needed.

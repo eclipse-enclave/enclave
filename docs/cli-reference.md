@@ -127,7 +127,7 @@ Mutation commands (`add-domain`, `remove-domain`, `set-mode`) apply the new poli
 | Flag | Description |
 |------|-------------|
 | `--tool <tool>` | Tool profile to use (`claude` by default; run `enclave tools` for the installed list) |
-| `--backend <backend>` | Isolation backend: `docker` (default) or experimental `qemu` |
+| `--backend <backend>` | Isolation backend: `docker` (default), `podman`, or experimental `qemu` |
 | `--name <name>` | Named persistent session |
 | `--background` | Detached background session |
 | `-p <port>` | Publish a container port to the host (container → host, e.g. `-p 3002`). A host port of `0` (e.g. `-p 0:3000`) lets the daemon pick a free host port (Docker only); read it back with `enclave ps --json`. |
@@ -210,6 +210,21 @@ Mutation commands (`add-domain`, `remove-domain`, `set-mode`) apply the new poli
 Persistent defaults can be set in `~/.config/enclave/config.json` (global) or `~/.config/enclave/projects/<hash>/config.json` (per-project). See [Configuration](configuration.md).
 
 ## Experimental QEMU backend
+
+`--backend podman` runs sessions through Podman instead of Docker, with the
+same feature set (including restricted networking, background sessions, and
+persistent stores; devcontainer mode still requires Docker). Rootless podman
+is the primary target: sessions run with `--userns=keep-id`, so the agent runs
+at the invoking user's uid and bind-mounted files keep host ownership without
+the nested sandbox rootless Docker needs (see
+[security/rootless.md](security/rootless.md)). Images are built with buildah
+through `podman build`; buildah reuses its local layer cache automatically,
+`--cache-from`/`cache_from` values are ignored (podman only accepts untagged
+repositories there), the buildx cache options (`--buildx-cache-*`) are not
+supported, and `cleanup --build-cache` is a no-op. Docker and Podman keep
+separate image stores, so switching backends rebuilds images, while persistent
+stores (auth, config, env) are shared host directories and follow you across
+backends.
 
 `--backend qemu` runs a foreground session in a minimal Alpine microVM bundle. It implies `--allow-all-network` and `--slim` automatically (and prints a notice that network isolation is unavailable), so you don't have to pass them; requesting something it can't honor — `--features`/`--playwright-mcp` or `--allow-domain` — is rejected. Detached sessions, `exec`, `attach`, restricted egress, HTTP secret release, devcontainers, and non-default feature stacks are not supported yet. The bundle builder uses Docker as a packaging helper; the session itself runs under QEMU. A prebuilt bundle can be used without Docker via `--no-rebuild --image-name /path/to/bundle`. Tool installers that assume Debian/glibc may fail until they get dedicated microVM support.
 

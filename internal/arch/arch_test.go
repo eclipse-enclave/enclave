@@ -35,6 +35,9 @@ var dockerImportAllowlist = []string{
 	"internal/app/cleanup.go",
 	"internal/devcontainer/devcontainer.go",
 	"internal/gateway/gateway.go",
+	// Backend selection points the shared CLI wrapper at the engine
+	// (docker or podman) before any command shells out.
+	"internal/app/backend.go",
 }
 
 func TestDockerImportsConfinedToBackendAndCarveOuts(t *testing.T) {

@@ -60,7 +60,8 @@ func checkRuntimeImageBuildPreflight(ctx context.Context) error {
 	// The runtime Dockerfile uses BuildKit-only syntax (RUN --mount), and on
 	// Docker >= 23 BuildKit builds require the buildx CLI plugin. Fail up
 	// front with guidance instead of surfacing a mid-build syntax error.
-	if !dockerBuildxAvailable(ctx) {
+	// Podman builds through buildah, which supports RUN --mount natively.
+	if !docker.IsPodman() && !dockerBuildxAvailable(ctx) {
 		return fmt.Errorf("docker buildx is unavailable, but building the sandbox image requires BuildKit. Install the Docker buildx plugin for your platform (packaged as docker-buildx or docker-buildx-plugin; included in Docker Desktop), then retry. See https://docs.docker.com/go/buildx/")
 	}
 

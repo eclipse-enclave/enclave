@@ -81,6 +81,7 @@ Run in any project directory:
 ```bash
 enclave                     # Start claude (default) in current project
 enclave --tool codex        # Use a different tool
+enclave --backend podman    # Use Podman instead of Docker (rootless supported)
 enclave --backend qemu --tool codex  # Experimental QEMU microVM run (implies --slim, all-network)
 enclave continue            # Continue latest session
 enclave ps                  # List running containers (--all for stopped, --json for scripts)

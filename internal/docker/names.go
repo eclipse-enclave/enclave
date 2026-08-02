@@ -52,3 +52,13 @@ func PrimaryContainerName(summary Summary) string {
 	}
 	return strings.TrimSpace(summary.ID)
 }
+
+// ExactNameFilter returns a `--filter name=` regex matching name exactly.
+// Docker anchors on the daemon's leading-slash name form; podman names carry
+// no slash.
+func ExactNameFilter(name string) string {
+	if IsPodman() {
+		return "^" + name + "$"
+	}
+	return "^/" + name + "$"
+}

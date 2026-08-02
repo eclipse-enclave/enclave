@@ -173,6 +173,14 @@ func (b *Backend) syncSharedAuthStores(ctx context.Context, helperImage string, 
 
 	cmd := sharedAuthSyncCommand("/auth-reconcile.sh", tool, validated, b.chownSpec(), "/config", "/auth")
 	hostConfig := sharedAuthSyncHostConfig(configDir, authDir, scriptPath, util.IsSELinuxEnforcing())
+	if rootlessPodman, err := b.podmanRootless(ctx); err != nil {
+		return err
+	} else if rootlessPodman {
+		// Root in the keep-id namespace maps the chown target to the invoking
+		// user on the host; the default rootless mapping would land reconciled
+		// files on a subordinate uid.
+		hostConfig.UsernsMode = "keep-id"
+	}
 
 	return hoststore.WithLock(b.opts.Host.Home, authDir, func() error {
 		return dockercmd.Run(ctx, &dockercmd.ContainerConfig{

@@ -39,7 +39,7 @@ func loadAuthCommandContext(input *CommandInput) (authCommandContext, int) {
 		logx.Errorf("--tool is required for auth commands")
 		return authCommandContext{}, 1
 	}
-	host, err := input.Ctx.Host(backend.NameDocker)
+	host, err := input.Ctx.Host(input.Options.Backend)
 	if err != nil {
 		logx.Errorf("%v", err)
 		return authCommandContext{}, 1

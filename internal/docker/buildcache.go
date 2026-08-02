@@ -13,8 +13,13 @@ import (
 )
 
 // BuildCachePrune removes build cache entries. When all is true, both
-// referenced and unreferenced entries are removed.
+// referenced and unreferenced entries are removed. Podman has no BuildKit
+// build cache, and its `builder prune` removes unused images instead — far
+// more destructive than what this promises — so podman is a no-op.
 func BuildCachePrune(ctx context.Context, all bool) (*BuildCachePruneReport, error) {
+	if IsPodman() {
+		return &BuildCachePruneReport{}, nil
+	}
 	args := []string{"builder", "prune", "--force"}
 	if all {
 		args = append(args, "--all")

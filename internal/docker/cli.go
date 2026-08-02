@@ -39,7 +39,7 @@ func (e *cliError) Error() string {
 	if msg == "" {
 		msg = "command failed"
 	}
-	return fmt.Sprintf("docker %s: %s", strings.Join(e.args, " "), msg)
+	return fmt.Sprintf("%s %s: %s", engineName, strings.Join(e.args, " "), msg)
 }
 
 func (e *cliError) Unwrap() error {
@@ -60,6 +60,8 @@ func IsNotFound(err error) bool {
 	// Match the daemon's not-found phrasings ("No such container/image/volume",
 	// generic inspect's "No such object") rather than a bare "not found", which
 	// also appears in unrelated failures like "executable file not found".
+	// Podman shares "no such container" but phrases images as "image not
+	// known" and networks as "network not found".
 	s := strings.ToLower(ce.stderr)
 	for _, phrase := range []string{
 		"no such container",
@@ -67,6 +69,8 @@ func IsNotFound(err error) bool {
 		"no such volume",
 		"no such network",
 		"no such object",
+		"image not known",
+		"network not found",
 	} {
 		if strings.Contains(s, phrase) {
 			return true
@@ -200,6 +204,9 @@ func buildRunArgs(config *ContainerConfig, hostConfig *HostConfig, name string, 
 		}
 		if !hostConfig.NetworkMode.IsEmpty() {
 			args = append(args, "--network", string(hostConfig.NetworkMode))
+		}
+		if hostConfig.UsernsMode != "" {
+			args = append(args, "--userns", hostConfig.UsernsMode)
 		}
 		for _, bind := range hostConfig.Binds {
 			args = append(args, "--volume", bind)

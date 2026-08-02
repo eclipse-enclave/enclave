@@ -89,6 +89,10 @@ func Run(args []string) int {
 		logx.SetLevel("debug")
 	}
 
+	// Select the container engine before the early per-action returns below;
+	// they shell out to the engine without going through backend selection.
+	configureEngine(opts.Backend)
+
 	if parsed.Action == "cleanup" {
 		return runCleanup(parsed.Options.RunOptions, parsed.Options.CleanupOptions)
 	}

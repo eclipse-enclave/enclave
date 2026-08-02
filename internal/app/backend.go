@@ -14,6 +14,7 @@ import (
 	"enclave/internal/backend"
 	backenddocker "enclave/internal/backend/docker"
 	backendqemu "enclave/internal/backend/qemu"
+	"enclave/internal/docker"
 	"enclave/internal/model"
 )
 
@@ -51,10 +52,27 @@ func selectBackend(opts model.Options, dockerOpts backenddocker.Options) (backen
 	}
 	switch name {
 	case backend.NameDocker:
+		docker.SetEngine(docker.EngineDocker)
+		return backenddocker.New(dockerOpts), nil
+	case backend.NamePodman:
+		docker.SetEngine(docker.EnginePodman)
+		dockerOpts.Engine = docker.EnginePodman
 		return backenddocker.New(dockerOpts), nil
 	case backend.NameQEMU:
 		return backendqemu.New(qemuBackendOptions(dockerOpts.Host, dockerOpts.Paths)), nil
 	default:
-		return nil, fmt.Errorf("unsupported backend %q (available: %s, %s)", name, backend.NameDocker, backend.NameQEMU)
+		return nil, fmt.Errorf("unsupported backend %q (available: %s, %s, %s)", name, backend.NameDocker, backend.NamePodman, backend.NameQEMU)
 	}
+}
+
+// configureEngine points the shared container-CLI wrapper at the engine the
+// selected backend drives. It must run before any code path that shells out
+// to the engine, including the early listing/cleanup commands that bypass
+// dispatch.
+func configureEngine(backendName string) {
+	if backendName == backend.NamePodman {
+		docker.SetEngine(docker.EnginePodman)
+		return
+	}
+	docker.SetEngine(docker.EngineDocker)
 }

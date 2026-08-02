@@ -30,7 +30,7 @@ Security guardrail: project config cannot elevate guarded options such as `allow
 | Key | Description |
 |-----|-------------|
 | `tool` | Default tool (e.g. `claude`, `codex`) |
-| `backend` | Isolation backend (`docker`, default; experimental `qemu`) |
+| `backend` | Isolation backend (`docker`, default; `podman`; experimental `qemu`) |
 | `host_config` | `none` (default) or `passthrough` |
 | `tool_overrides.<tool>.host_config_paths` | Per-tool passthrough path directives (`default`, `+path`, `-path`, or explicit list) |
 | `yolo` | Enable YOLO mode (default: `true`) |

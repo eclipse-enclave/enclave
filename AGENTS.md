@@ -5,7 +5,7 @@ Read `README.md` before making user-facing changes.
 ## Architecture
 
 - See `docs/ARCHITECTURE.md` for the architecture, repository layout, and container assets.
-- Flow: CLI args → profile loading → image/bundle build check → store/auth/network setup → selected backend (`docker` by default, experimental `qemu` for a narrow path).
+- Flow: CLI args → profile loading → image/bundle build check → store/auth/network setup → selected backend (`docker` by default, `podman` via the same container backend, experimental `qemu` for a narrow path).
 - Key packages (all under `internal/`): `app` (orchestration), `runtime` (container execution, mounts, auth injection), `gateway` (network-isolation sidecar), `network` (policy loading and dnsmasq config generation), `config` (profile and path resolution), `model` (shared types).
 - Keep packages under `internal/` focused and avoid unnecessary coupling.
 

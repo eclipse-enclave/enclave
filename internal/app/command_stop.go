@@ -22,7 +22,7 @@ func runStop(run model.RunOptions) int {
 		return code
 	}
 
-	host, hostErr := resolveHost()
+	host, hostErr := resolveHost(run.Backend)
 	if hostErr != nil {
 		logx.Warnf("Failed to resolve host for auth finalization: %v", hostErr)
 	}

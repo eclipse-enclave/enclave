@@ -1,12 +1,11 @@
 # Host hardening (rootful Docker)
 
-Enclave requires a rootful Docker daemon. By default, container UID 0 maps to
-host UID 0; enabling Docker user namespace remapping reduces the impact of a
+This page covers rootful daemons, where container UID 0 maps to host UID 0 by
+default; enabling Docker user namespace remapping reduces the impact of a
 container escape or accidental privileged host-file access.
 
-Rootless Docker is not currently supported because the restricted-network
-gateway requires netfilter, ipset, sysctl, `NET_ADMIN`, and `NET_RAW`. See
-[Rootless Docker compatibility](rootless.md).
+A [rootless daemon](rootless.md) achieves the same goal without this setup,
+because every container is already confined to the invoking user's privileges.
 
 ## Enable userns-remap
 

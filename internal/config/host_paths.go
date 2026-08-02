@@ -252,6 +252,14 @@ func HostTLSDir(home string) string {
 	return filepath.Join(hostStateRoot(home), "tls")
 }
 
+// HostSeccompProfilePath is where the docker backend materializes the embedded
+// rootless-sandbox seccomp profile so `docker run --security-opt seccomp=...`
+// can read it. Cache-rooted: the file is regenerated whenever its content
+// drifts from the embedded copy.
+func HostSeccompProfilePath(home string) string {
+	return filepath.Join(hostCacheRoot(home), "seccomp", "rootless-default.json")
+}
+
 func HostTLSHostsDir(home string) string {
 	return filepath.Join(HostTLSDir(home), "hosts")
 }

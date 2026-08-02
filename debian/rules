@@ -36,6 +36,7 @@ override_dh_auto_install:
 	install -D -m 0644 Dockerfile $(CURDIR)/debian/enclave/usr/share/enclave/Dockerfile
 	install -D -m 0644 Dockerfile.gateway $(CURDIR)/debian/enclave/usr/share/enclave/Dockerfile.gateway
 	install -D -m 0755 entrypoint.sh $(CURDIR)/debian/enclave/usr/share/enclave/entrypoint.sh
+	install -D -m 0755 sandbox-exec.sh $(CURDIR)/debian/enclave/usr/share/enclave/sandbox-exec.sh
 	install -D -m 0755 gateway-entrypoint.sh $(CURDIR)/debian/enclave/usr/share/enclave/gateway-entrypoint.sh
 	install -D -m 0644 .dockerignore $(CURDIR)/debian/enclave/usr/share/enclave/.dockerignore
 	install -D -m 0644 LICENSE.md $(CURDIR)/debian/enclave/usr/share/doc/enclave/LICENSE.md

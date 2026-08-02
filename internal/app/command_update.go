@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"enclave/internal/backend"
 	"enclave/internal/config"
 	"enclave/internal/logx"
 	"enclave/internal/model"
@@ -45,7 +46,7 @@ func runUpdate(input *CommandInput) int {
 		logx.Errorf("%v", err)
 		return 1
 	}
-	host, err := input.Ctx.Host()
+	host, err := input.Ctx.Host(backend.NameDocker)
 	if err != nil {
 		logx.Errorf("%v", err)
 		return 1

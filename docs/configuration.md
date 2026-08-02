@@ -260,7 +260,9 @@ Merge semantics:
 
 Buildx cache and canonical build UID/GID controls are CLI-only. Use
 `--buildx-cache-dir`, `--build-uid`, `--build-gid`, and `--runtime-uid-remap`
-for event/offline runs.
+for event/offline runs. Without them the image is baked with the container-side
+identity of the invoking host user: the host UID/GID on a rootful daemon and
+`0:0` on a [rootless](security/rootless.md) one.
 
 The experimental `qemu` backend only runs unrestricted, slim/no-feature bundles, so selecting it implies `allow_all_network=true` and `slim=true` automatically (with a per-run notice). Requesting features or an allowlist (`--allow-domain`) is rejected because the backend cannot honor them.
 

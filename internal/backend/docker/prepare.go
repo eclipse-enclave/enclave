@@ -24,7 +24,8 @@ import (
 // recreate the config store, lay out expected directories, apply reset intent,
 // and overlay the generated config source. The directories are created as the
 // invoking host user, so no ownership fix-up is needed (containers already run
-// with Host.UID/GID). Individual preparation failures are logged and tolerated
+// with the host user's container-side identity, see Host.ContainerIdentity).
+// Individual preparation failures are logged and tolerated
 // (a session can usually still run); only a failed config overlay aborts,
 // because running against a half-populated config store would misconfigure the
 // tool.
@@ -101,11 +102,14 @@ func (b *Backend) ensureStoreDir(kind backend.StoreKind, key backend.StoreKey, l
 	}
 }
 
-// chownSpec returns the invoking host user's "uid:gid" ownership spec, used by
-// the auth-reconcile helper container to keep reconciled files owned by the
-// host user.
+// chownSpec returns the container-side "uid:gid" ownership spec for the
+// invoking host user, used by the auth-reconcile helper container to keep
+// reconciled files owned by the host user. It must be the container-side
+// identity: under rootless Docker chowning to the host uid inside a container
+// would map the file to an unrelated subordinate uid on the host.
 func (b *Backend) chownSpec() string {
-	return util.ChownSpec(b.opts.Host.UID, b.opts.Host.GID)
+	uid, gid := b.opts.Host.ContainerIdentity()
+	return util.ChownSpec(uid, gid)
 }
 
 func (b *Backend) envFileExists(key backend.StoreKey) bool {

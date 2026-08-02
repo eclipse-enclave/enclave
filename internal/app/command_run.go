@@ -81,7 +81,7 @@ func runExecutionCommand(input *CommandInput) int {
 		}
 	}
 
-	host, err := input.Ctx.Host()
+	host, err := input.Ctx.Host(opts.Backend)
 	if err != nil {
 		logx.Errorf("%v", err)
 		return 1

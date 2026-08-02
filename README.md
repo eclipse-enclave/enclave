@@ -10,8 +10,9 @@ A Docker-based sandbox for running agentic coding tools — Claude, Codex, OpenC
 
 Runtime dependencies:
 
-- Rootful Docker (CLI on `PATH`, daemon running) with the buildx plugin; the
-  sandbox image build requires BuildKit. Rootless Docker is not supported.
+- Docker (CLI on `PATH`, daemon running) with the buildx plugin; the sandbox
+  image build requires BuildKit. Rootful and
+  [rootless](docs/security/rootless.md) daemons are both supported.
 - Optional: `qemu-system-x86_64` and `cpio` for the experimental `qemu` backend.
 
 Building from source additionally requires Git, Make, and Go 1.24 or newer. Use

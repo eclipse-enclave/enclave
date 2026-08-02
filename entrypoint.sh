@@ -79,12 +79,170 @@ if { [ -n "${ENCLAVE_RUNTIME_UID:-}" ] || [ -n "${ENCLAVE_RUNTIME_GID:-}" ]; } &
     exec sudo -E -u "$target_user" -- "$0" "$@"
 fi
 
-if [ "${ENCLAVE_DNS_GATEWAY:-}" = "1" ] && command -v enclave_ensure_local_resolver >/dev/null 2>&1; then
+# Rootless-Docker sandbox launcher. The daemon's user namespace maps the
+# invoking host user to container UID 0, so only UID 0 can own bind-mounted
+# host paths. To keep the agent at a normal identity, the container starts as
+# (rootless) root and this block forks a child user namespace that maps outer
+# UID/GID 0 to the sandbox UID/GID; host mounts then appear agent-owned inside
+# and files the agent creates land on the host owned by the invoking user.
+# Phases: "" (outer root: prepare, fork, supervise) -> inner (uid mapped, holds
+# capabilities in the child namespace: make system paths read-only, drop
+# everything) -> agent (no capabilities, no_new_privs: normal entrypoint flow).
+if [ "${ENCLAVE_ROOTLESS_SANDBOX:-}" = "1" ] && [ "${ENCLAVE_SANDBOX_PHASE:-}" = "" ]; then
+    if [ -n "${ENCLAVE_RUNTIME_UID:-}" ]; then
+        echo "Rootless sandbox and runtime UID remap are mutually exclusive" >&2
+        exit 1
+    fi
+    if [ "$(id -u)" != "0" ]; then
+        echo "Rootless sandbox launcher must start as container root" >&2
+        exit 1
+    fi
+    case "${ENCLAVE_SANDBOX_UID:-}" in
+        *[!0-9]* | "" | 0) echo "Rootless sandbox requires a nonzero numeric ENCLAVE_SANDBOX_UID" >&2; exit 1 ;;
+    esac
+    case "${ENCLAVE_SANDBOX_GID:-}" in
+        *[!0-9]* | "" | 0) echo "Rootless sandbox requires a nonzero numeric ENCLAVE_SANDBOX_GID" >&2; exit 1 ;;
+    esac
+    for tool in unshare setpriv nsenter; do
+        if ! command -v "$tool" >/dev/null 2>&1; then
+            echo "Rootless sandbox requires $tool (util-linux) in the image; use a rootful daemon for this image" >&2
+            exit 1
+        fi
+    done
+
+    sandbox_user="${ENCLAVE_AGENT_USER:-agent}"
+    sandbox_home="/home/$sandbox_user"
+    # Test seams; production always uses the real locations.
+    sandbox_etc="${ENCLAVE_SANDBOX_ETC:-/etc}"
+    sandbox_run_dir="${ENCLAVE_SANDBOX_RUN_DIR:-/run/enclave}"
+    sandbox_resolv_conf="${ENCLAVE_SANDBOX_RESOLV_CONF:-/etc/resolv.conf}"
+    # The image bakes the agent as a UID 0 alias so its files are host-user
+    # owned under the rootless mapping. Rewrite the account to the sandbox
+    # identity so getpwuid()/getpwnam() agree with the mapped view (sed, not
+    # usermod: usermod -u would chown the home tree back to outer UID 0's
+    # unmapped alias and trigger a full overlay copy-up).
+    sed -i "s|^${sandbox_user}:x:[0-9]*:[0-9]*:|${sandbox_user}:x:${ENCLAVE_SANDBOX_UID}:${ENCLAVE_SANDBOX_GID}:|" "$sandbox_etc/passwd"
+    sed -i "s|^${sandbox_user}:x:[0-9]*:|${sandbox_user}:x:${ENCLAVE_SANDBOX_GID}:|" "$sandbox_etc/group"
+
+    # Outer UID/GID are unmapped inside the child namespace, so these become
+    # untouchable for the agent: "/" (blocks stray top-level creation the agent
+    # would otherwise be entitled to as the mapped owner) and the runtime dir
+    # holding the pid the exec wrapper joins.
+    chown "$ENCLAVE_SANDBOX_UID:$ENCLAVE_SANDBOX_GID" / 2>/dev/null || true
+    mkdir -p "$sandbox_run_dir"
+
+    export HOME="$sandbox_home"
+    export USER="$sandbox_user"
+    export LOGNAME="$sandbox_user"
+
+    # The sandbox seals /etc read-only, so every /etc mutation the session needs
+    # has to happen here, while it is still writable. Point the resolver at the
+    # gateway's dnsmasq before the agent can run: a silent failure would leave
+    # the daemon's resolver in place and bypass DNS-based domain enforcement.
+    if [ "${ENCLAVE_DNS_GATEWAY:-}" = "1" ]; then
+        if ! command -v enclave_ensure_local_resolver >/dev/null 2>&1; then
+            echo "Rootless sandbox: network helper unavailable; refusing to start a restricted session without DNS enforcement" >&2
+            exit 1
+        fi
+        enclave_ensure_local_resolver
+        if [ "$(cat "$sandbox_resolv_conf" 2>/dev/null)" != "nameserver 127.0.0.1" ]; then
+            echo "Rootless sandbox: failed to point $sandbox_resolv_conf at the gateway resolver; refusing to start with DNS enforcement bypassed" >&2
+            exit 1
+        fi
+    fi
+    if [ -n "${ENCLAVE_GATEWAY_CA_CERT_PATH:-}" ] && [ -f "$ENCLAVE_GATEWAY_CA_CERT_PATH" ] &&
+       command -v update-ca-certificates >/dev/null 2>&1; then
+        update-ca-certificates >/dev/null 2>&1 || true
+    fi
+
+    # The sandbox has to run as a background job so this process survives to own
+    # the namespace (admin execs and the exec wrapper both need it). A
+    # non-interactive shell has job control off, and the shell assigns
+    # /dev/null to an async command's stdin unless it is redirected explicitly:
+    # without `<&0` an interactive session reads EOF and exits immediately.
+    # Job control stays off deliberately, so the child shares this process
+    # group and therefore the TTY's foreground group.
+    ENCLAVE_SANDBOX_PHASE=inner unshare --user --mount --propagation private \
+        --map-user="$ENCLAVE_SANDBOX_UID" --map-group="$ENCLAVE_SANDBOX_GID" \
+        --keep-caps "$0" "$@" <&0 &
+    sandbox_child=$!
+    printf '%s\n' "$sandbox_child" > "$sandbox_run_dir/sandbox.pid"
+    chown "$ENCLAVE_SANDBOX_UID:$ENCLAVE_SANDBOX_GID" "$sandbox_run_dir" "$sandbox_run_dir/sandbox.pid" 2>/dev/null || true
+
+    # Forward lifecycle signals to the sandbox. SIGINT is intentionally not
+    # forwarded for TTY sessions: the line discipline already delivers it to
+    # the shared foreground process group and a duplicate would double-cancel
+    # interactive agents.
+    forward_signal() { kill -s "$1" "$sandbox_child" 2>/dev/null || true; }
+    trap 'forward_signal TERM' TERM
+    trap 'forward_signal HUP' HUP
+    trap 'forward_signal QUIT' QUIT
+    sandbox_status=0
+    while :; do
+        wait "$sandbox_child" && sandbox_status=0 || sandbox_status=$?
+        kill -0 "$sandbox_child" 2>/dev/null || break
+    done
+    exit "$sandbox_status"
+fi
+
+if [ "${ENCLAVE_SANDBOX_PHASE:-}" = "inner" ]; then
+    # Inside the child namespace with ambient capabilities: pin the system
+    # paths read-only (bind-to-self creates an unlocked mount the namespace
+    # owner may restrict), then shed every capability before the agent phase.
+    # The agent owns these trees in the mapped view, so mount-level read-only
+    # is the enforcement, not file permissions. Failing closed keeps a
+    # misassembled sandbox from running with a writable system.
+    sandbox_ro_roots=(/usr /etc /opt /var /srv /root /boot /media /mnt)
+    for sandbox_ro_path in "${sandbox_ro_roots[@]}"; do
+        [ -d "$sandbox_ro_path" ] || continue
+        if ! { mount --rbind "$sandbox_ro_path" "$sandbox_ro_path" &&
+               mount -o remount,bind,ro "$sandbox_ro_path"; }; then
+            echo "Rootless sandbox: failed to make $sandbox_ro_path read-only" >&2
+            exit 1
+        fi
+    done
+
+    # A bind remount only changes the mount it names, and the recursive -o rro
+    # form is silently ignored here, so pre-existing submounts under these roots
+    # stay writable: Docker bind-mounts /etc/resolv.conf, /etc/hosts, and
+    # /etc/hostname individually and enclave adds a /etc/sudoers.d tmpfs. Seal
+    # each one; a writable resolv.conf would let the agent repoint DNS and
+    # bypass the gateway's domain enforcement.
+    sandbox_unsealed=()
+    while read -r sandbox_mp; do
+        case "$sandbox_mp" in
+            /var/tmp | /var/tmp/*) continue ;;
+        esac
+        sandbox_nested=0
+        for sandbox_ro_path in "${sandbox_ro_roots[@]}"; do
+            case "$sandbox_mp" in
+                "$sandbox_ro_path"/*) sandbox_nested=1; break ;;
+            esac
+        done
+        [ "$sandbox_nested" = 1 ] || continue
+        mount -o remount,bind,ro "$sandbox_mp" 2>/dev/null ||
+            sandbox_unsealed+=("$sandbox_mp")
+    done < <(awk '{print $5}' "${ENCLAVE_SANDBOX_MOUNTINFO:-/proc/self/mountinfo}")
+    if [ "${#sandbox_unsealed[@]}" -gt 0 ]; then
+        echo "Rootless sandbox: failed to make these system submounts read-only: ${sandbox_unsealed[*]}" >&2
+        exit 1
+    fi
+
+    if [ -d /var/tmp ]; then
+        mount --bind /var/tmp /var/tmp && mount -o remount,bind,rw /var/tmp || true
+    fi
+    export ENCLAVE_SANDBOX_PHASE=agent
+    exec setpriv --ambient-caps -all --bounding-set -all --no-new-privs "$0" "$@"
+fi
+
+# Already done by the rootless sandbox launcher, before /etc was sealed.
+if [ "${ENCLAVE_DNS_GATEWAY:-}" = "1" ] && [ "${ENCLAVE_SANDBOX_PHASE:-}" != "agent" ] &&
+   command -v enclave_ensure_local_resolver >/dev/null 2>&1; then
     enclave_ensure_local_resolver
 fi
 
 if [ -n "${ENCLAVE_GATEWAY_CA_CERT_PATH:-}" ] && [ -f "$ENCLAVE_GATEWAY_CA_CERT_PATH" ]; then
-    if command -v update-ca-certificates >/dev/null 2>&1; then
+    if [ "${ENCLAVE_SANDBOX_PHASE:-}" != "agent" ] && command -v update-ca-certificates >/dev/null 2>&1; then
         update-ca-certificates >/dev/null 2>&1 || true
     fi
     system_ca_bundle="/etc/ssl/certs/ca-certificates.crt"

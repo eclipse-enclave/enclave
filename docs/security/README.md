@@ -1,9 +1,10 @@
 # Security boundaries
 
 Enclave reduces an agent's access to the host and network; it is not a hardened
-container escape boundary. The supported Docker backend uses a rootful daemon.
-Use [host hardening](host-hardening.md) where compatible with the required
-workflow. Rootless Docker is [not currently supported](rootless.md).
+container escape boundary. The Docker backend supports rootful and
+[rootless](rootless.md) daemons. On a rootful daemon, use
+[host hardening](host-hardening.md) where compatible with the required workflow;
+a rootless daemon already confines containers to the invoking user's privileges.
 
 ## Host filesystem
 

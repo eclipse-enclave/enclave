@@ -28,7 +28,7 @@ import (
 // gatewayManagerForInput selects the backend and returns its gateway-reload
 // surface. The second return is a non-zero exit code on failure.
 func gatewayManagerForInput(input *CommandInput) (backend.GatewayManager, int) {
-	host, err := resolveHost()
+	host, err := resolveHost(input.Options.Backend)
 	if err != nil {
 		logx.Warnf("Failed to resolve host for backend selection: %v", err)
 	}

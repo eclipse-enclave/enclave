@@ -8,6 +8,7 @@
 package docker
 
 import (
+	"context"
 	"os"
 	"testing"
 )
@@ -21,5 +22,8 @@ func TestMain(m *testing.M) {
 			panic(err)
 		}
 	}
+	// Pin the daemon flavor so tests behave the same on rootful and rootless
+	// developer machines; rootless-specific tests stub this per test.
+	isRootlessDocker = func(context.Context) (bool, error) { return false, nil }
 	os.Exit(m.Run())
 }

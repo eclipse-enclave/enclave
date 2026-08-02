@@ -16,14 +16,20 @@ import (
 	"enclave/internal/util"
 )
 
+// effectiveBuildIdentity returns the uid/gid the image bakes its agent user
+// with. It defaults to the container-side host identity so the image's agent
+// files are owned by the invoking host user: that is the host uid/gid on a
+// rootful daemon, and 0:0 under rootless Docker, where the session sandbox then
+// maps those ids to the agent's normal uid/gid.
 func effectiveBuildIdentity(host model.Host, opts model.BuildOptions) (uid string, gid string) {
+	containerUID, containerGID := host.ContainerIdentity()
 	uid = strings.TrimSpace(opts.BuildUID)
 	if uid == "" {
-		uid = host.UID
+		uid = containerUID
 	}
 	gid = strings.TrimSpace(opts.BuildGID)
 	if gid == "" {
-		gid = host.GID
+		gid = containerGID
 	}
 	return uid, gid
 }

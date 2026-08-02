@@ -11,6 +11,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
+	"sync"
 )
 
 // Ping verifies the Docker daemon is reachable.
@@ -34,4 +36,43 @@ func Info(ctx context.Context) (SystemInfo, error) {
 		return SystemInfo{}, fmt.Errorf("decode docker info: %w", err)
 	}
 	return info, nil
+}
+
+var (
+	cachedInfoOnce sync.Once
+	cachedInfo     SystemInfo
+	cachedInfoErr  error
+)
+
+// CachedInfo returns Info, querying the daemon at most once per process. Both
+// rootless detection and the hardening warning consult it on every run, and
+// `docker info` is a round trip to the daemon.
+func CachedInfo(ctx context.Context) (SystemInfo, error) {
+	cachedInfoOnce.Do(func() {
+		cachedInfo, cachedInfoErr = Info(ctx)
+	})
+	return cachedInfo, cachedInfoErr
+}
+
+// HasSecurityOption reports whether `docker info` advertised the named security
+// option, for example "rootless" or "userns".
+func (i SystemInfo) HasSecurityOption(name string) bool {
+	for _, option := range i.SecurityOptions {
+		if strings.Contains(option, "name="+name) {
+			return true
+		}
+	}
+	return false
+}
+
+// IsRootless reports whether the daemon runs in rootless mode. A rootless
+// daemon confines containers to a user namespace in which the invoking host
+// user is mapped to container UID 0, so host-owned bind mounts appear
+// root-owned inside containers.
+func IsRootless(ctx context.Context) (bool, error) {
+	info, err := CachedInfo(ctx)
+	if err != nil {
+		return false, err
+	}
+	return info.HasSecurityOption("rootless"), nil
 }

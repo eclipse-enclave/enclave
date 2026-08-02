@@ -37,6 +37,11 @@ The Go and Node package manifests and lockfiles identify those dependencies:
 
 These files identify dependencies; they are not a software bill of materials.
 
+`internal/backend/docker/seccomp/rootless-default.json` is derived from the
+Moby project's default seccomp profile (https://github.com/moby/profiles),
+licensed under the Apache License 2.0; see the accompanying README for
+provenance and the applied delta.
+
 ## Cryptography
 
 Content may contain encryption software. The country in which you are currently

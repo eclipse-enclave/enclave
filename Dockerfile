@@ -88,7 +88,19 @@ ARG USER_ID=1000
 ARG GROUP_ID=1000
 ARG USERNAME=agent
 
-RUN if id -u ${USER_ID} >/dev/null 2>&1; then \
+RUN if [ "${USER_ID}" = "0" ]; then \
+        # Rootless Docker maps the invoking host user to container UID 0, so the
+        # agent's files must carry UID 0 for the session's nested user namespace
+        # to hand them to the agent at its normal uid. Add the agent as an alias
+        # of UID 0 with its own home instead of renaming root, which the image
+        # and tooling still expect to exist.
+        if ! getent group ${USERNAME} >/dev/null 2>&1; then \
+            groupadd -o -g ${GROUP_ID} ${USERNAME}; \
+        fi; \
+        if ! getent passwd ${USERNAME} >/dev/null 2>&1; then \
+            useradd -o -u ${USER_ID} -g ${GROUP_ID} -m -d /home/${USERNAME} -s /bin/bash ${USERNAME}; \
+        fi; \
+    elif id -u ${USER_ID} >/dev/null 2>&1; then \
         # UID exists (e.g. Ubuntu's "ubuntu" at 1000) - rename to our username
         EXISTING_USER=$(id -nu ${USER_ID}); \
         EXISTING_HOME=$(getent passwd "$EXISTING_USER" | cut -d: -f6); \
@@ -137,6 +149,10 @@ WORKDIR /home/${USERNAME}
 
 # Ensure PATH for local installs
 ENV PATH="/home/${USERNAME}/.local/bin:$PATH"
+# Docker derives HOME from the first passwd entry for the user's UID, which is
+# root's when the agent shares UID 0 (rootless Docker). Pin the home the rest of
+# this Dockerfile already assumes.
+ENV HOME="/home/${USERNAME}"
 
 # Configure git
 RUN git config --global init.defaultBranch main && \
@@ -331,7 +347,9 @@ COPY runtime-assets/net.sh /usr/local/share/enclave/net.sh
 COPY runtime-assets/tmux-session.conf /usr/local/share/enclave/tmux-session.conf
 COPY runtime-assets/kit-init.sh /usr/local/share/enclave/kit-init.sh
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
+COPY sandbox-exec.sh /usr/local/bin/enclave-sandbox-exec
 RUN chmod a+rx /usr/local/bin/entrypoint.sh \
+        /usr/local/bin/enclave-sandbox-exec \
         /usr/local/share/enclave/auth-reconcile.sh \
         /usr/local/share/enclave/net.sh && \
     chmod a+r /usr/local/share/enclave/tmux-session.conf

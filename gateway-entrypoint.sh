@@ -481,13 +481,18 @@ prepare_proxy_runtime_data() {
         [ -f "${tls_root}/ca.crt" ] && cp "${tls_root}/ca.crt" "$proxy_tls/"
         [ -f "${tls_root}/ca.key" ] && cp "${tls_root}/ca.key" "$proxy_tls/"
         if [ -d "${tls_root}/hosts" ]; then
-            chown "$PROXY_USER:$PROXY_USER" "${tls_root}/hosts" 2>/dev/null || true
+            # Keep the bind-mounted hosts dir group root (container GID 0 is
+            # the invoking user's group under rootless Docker) so the host-side
+            # leaf-cache pruning keeps access after the proxy takes ownership.
+            chown "$PROXY_USER:0" "${tls_root}/hosts" 2>/dev/null || true
+            chmod 770 "${tls_root}/hosts" 2>/dev/null || true
             ln -sfn "${tls_root}/hosts" "$proxy_tls/hosts"
         else
             mkdir -p "$proxy_tls/hosts"
         fi
         chown "$PROXY_USER:$PROXY_USER" "$proxy_data" "$proxy_tls" 2>/dev/null || true
-        chown "$PROXY_USER:$PROXY_USER" "$proxy_tls/ca.crt" "$proxy_tls/ca.key" "$proxy_tls/hosts" 2>/dev/null || true
+        chown "$PROXY_USER:$PROXY_USER" "$proxy_tls/ca.crt" "$proxy_tls/ca.key" 2>/dev/null || true
+        chown -h "$PROXY_USER:0" "$proxy_tls/hosts" 2>/dev/null || true
         chmod 600 "$proxy_tls/ca.key" 2>/dev/null || true
         ENCLAVE_GATEWAY_TLS_ROOT="$proxy_tls"
         ENCLAVE_TLS_ROOT="$proxy_tls"

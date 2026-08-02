@@ -128,7 +128,7 @@ func writeHashField(w io.Writer, value []byte) error {
 // explicitly and all other files are read-only build inputs.
 func FileMode(name string) fs.FileMode {
 	name = path.Clean(strings.ReplaceAll(name, `\`, "/"))
-	if name == "entrypoint.sh" || name == "gateway-entrypoint.sh" {
+	if name == "entrypoint.sh" || name == "gateway-entrypoint.sh" || name == "sandbox-exec.sh" {
 		return 0o755
 	}
 	if name == "runtime-assets/microvm/alpine/build-bundle.sh" || name == "runtime-assets/microvm/alpine/init" {

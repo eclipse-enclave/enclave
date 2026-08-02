@@ -107,4 +107,4 @@ See [Authentication & Secrets](auth.md#ssh-keys) for SSH key setup. The SSH dire
 
 ## Host Hardening
 
-For host-level security hardening, including user namespace remapping, see [docs/security/host-hardening.md](security/host-hardening.md). Rootless Docker is not supported.
+For host-level security hardening, including user namespace remapping, see [docs/security/host-hardening.md](security/host-hardening.md). On a rootless daemon sessions run inside a nested user-namespace sandbox that keeps the agent at a nonzero UID while stores and the worktree stay owned by the invoking host user; see [docs/security/rootless.md](security/rootless.md).

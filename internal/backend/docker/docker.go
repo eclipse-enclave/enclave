@@ -191,7 +191,8 @@ func (b *Backend) RemoveWithoutFinalize(ctx context.Context, ref backend.Session
 var execInteractive = dockercmd.ExecInteractive
 
 func (b *Backend) Exec(ctx context.Context, ref backend.SessionRef, req backend.ExecRequest, attach backend.AttachIO) error {
-	execErr := execInteractive(ctx, sessionRefName(ref), req.Argv, req.User, req.TTY)
+	argv, user := b.wrapSandboxExec(ctx, req.Argv, req.User)
+	execErr := execInteractive(ctx, sessionRefName(ref), argv, user, req.TTY)
 	// Sync credentials from the session's config store on every exec outcome so
 	// they are durable immediately, not only at a later stop/remove.
 	b.syncAfterExec(sessionRefName(ref))
@@ -199,6 +200,7 @@ func (b *Backend) Exec(ctx context.Context, ref backend.SessionRef, req backend.
 }
 
 func (b *Backend) ExecOutput(ctx context.Context, ref backend.SessionRef, argv []string, user string) (string, error) {
+	argv, user = b.wrapSandboxExec(ctx, argv, user)
 	return dockercmd.ExecCapture(ctx, sessionRefName(ref), argv, user)
 }
 
@@ -230,6 +232,10 @@ func (b *Backend) prepareRun(ctx context.Context, req backend.Request) (runSpec,
 		}
 		b.applyDevcontainerRunArgs(spec.config, spec.hostConfig)
 		spec.config.Env = append(spec.config.Env, runtimeUIDRemapEnv...)
+	}
+	// After devcontainer runArgs so the launcher's root user and env win.
+	if err := b.applyRootlessSandbox(ctx, req, spec); err != nil {
+		return runSpec{}, err
 	}
 	if req.Network.Mode == backend.NetworkModeRestricted {
 		gatewayName, cleanup, err := b.startGateway(ctx, req)
@@ -662,18 +668,13 @@ func (b *Backend) ConfigStoreKeyInUse(ctx context.Context, meta backend.SessionM
 }
 
 func (b *Backend) warnInsecureDockerConfig(ctx context.Context) {
-	info, err := dockercmd.Info(ctx)
+	info, err := dockercmd.CachedInfo(ctx)
 	if err != nil {
 		logx.Debugf("Failed to read Docker info: %v", err)
 		return
 	}
-	for _, option := range info.SecurityOptions {
-		if strings.Contains(option, "name=rootless") {
-			return
-		}
-		if strings.Contains(option, "name=userns") {
-			return
-		}
+	if info.HasSecurityOption("rootless") || info.HasSecurityOption("userns") {
+		return
 	}
 	logx.Warnf("Docker is running without userns-remap or rootless mode; container root maps to host root. See docs/security/host-hardening.md.")
 }

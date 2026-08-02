@@ -26,11 +26,14 @@ func NewAppContext(paths model.Paths, projectDir string) *AppContext {
 	return &AppContext{Paths: paths, ProjectDir: projectDir}
 }
 
-func (c *AppContext) Host() (model.Host, error) {
+// Host resolves the invoking user's host identity. backendName selects how the
+// container-side identity is derived, because only the Docker backend can place
+// the host user in a rootless user namespace.
+func (c *AppContext) Host(backendName string) (model.Host, error) {
 	if c.hostResolved {
 		return c.host, nil
 	}
-	host, err := resolveHost()
+	host, err := resolveHost(backendName)
 	if err != nil {
 		return model.Host{}, err
 	}

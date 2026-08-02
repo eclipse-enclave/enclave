@@ -18,6 +18,7 @@ import (
 	"strings"
 	"time"
 
+	"enclave/internal/backend"
 	"enclave/internal/config"
 	"enclave/internal/devcontainer"
 	"enclave/internal/docker"
@@ -159,7 +160,7 @@ func resolveWritableHome() (string, error) {
 	return home, nil
 }
 
-func resolveHost() (model.Host, error) {
+func resolveHost(backendName string) (model.Host, error) {
 	home, err := resolveWritableHome()
 	if err != nil {
 		return model.Host{}, err
@@ -168,7 +169,30 @@ func resolveHost() (model.Host, error) {
 	if err != nil {
 		return model.Host{}, err
 	}
-	return model.Host{Home: home, UID: current.Uid, GID: current.Gid}, nil
+	host := model.Host{Home: home, UID: current.Uid, GID: current.Gid}
+	host.ContainerUID, host.ContainerGID = resolveContainerIdentity(backendName, host)
+	return host, nil
+}
+
+// resolveContainerIdentity determines which in-container ids the invoking host
+// user maps to: the host uid/gid on a rootful daemon, and 0:0 under rootless
+// Docker, whose user namespace maps the host user to container root. It
+// describes ownership as the daemon sees it, not the identity the agent runs
+// as — under rootless the session's nested sandbox maps container 0 back to a
+// normal uid (see internal/backend/docker/sandbox.go).
+func resolveContainerIdentity(backendName string, host model.Host) (uid string, gid string) {
+	if backendName != "" && backendName != backend.NameDocker {
+		return host.UID, host.GID
+	}
+	rootless, err := docker.IsRootless(context.Background())
+	if err != nil {
+		logx.Debugf("Failed to detect rootless Docker, assuming rootful: %v", err)
+		return host.UID, host.GID
+	}
+	if !rootless {
+		return host.UID, host.GID
+	}
+	return "0", "0"
 }
 
 func prepareBuildContext(paths model.Paths, selection runtimeImageSelection) (contextDir string, cleanup func(), err error) {

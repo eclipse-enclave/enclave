@@ -326,9 +326,13 @@ from config files, including `--rebuild`, `--no-rebuild`,
 the buildx cache flags.
 
 Runtime image hashes include the effective build UID/GID. Explicit
-`--build-uid` / `--build-gid` values are used when provided; otherwise the host
-UID/GID is included after host resolution. This prevents a loaded shared image
-from being accepted as current when it was built for a different numeric user.
+`--build-uid` / `--build-gid` values are used when provided; otherwise host
+resolution supplies the container-side identity of the invoking host user, which
+is the host UID/GID on a rootful daemon and `0:0` under rootless Docker (see
+[security/rootless.md](security/rootless.md)). This prevents a loaded shared
+image from being accepted as current when it was built for a different numeric
+user, and makes switching a machine between daemon modes rebuild rather than
+reuse a mismatched image.
 
 `features` can be set from config or CLI (`--features`). In devcontainer mode,
 the unset default is no enclave features; pass `--features` (or configure

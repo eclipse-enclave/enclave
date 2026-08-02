@@ -155,9 +155,9 @@ Mutation commands (`add-domain`, `remove-domain`, `set-mode`) apply the new poli
 | `--image-name <name>` | Override image name/tag |
 | `--features <list\|default\|all\|none>` | Enable selected feature extensions (comma-separated), or use `default`, `all`, or `none` |
 | `--cache-from <image>` | Reuse inline build cache from an image |
-| `--build-uid <uid>` | UID to bake into the runtime image instead of the host UID |
-| `--build-gid <gid>` | GID to bake into the runtime image instead of the host GID |
-| `--runtime-uid-remap` | Start as root and remap the container user to the host UID/GID before running |
+| `--build-uid <uid>` | UID to bake into the runtime image instead of the detected container-side host UID (host UID when rootful, `0` when rootless) |
+| `--build-gid <gid>` | GID to bake into the runtime image instead of the detected container-side host GID (host GID when rootful, `0` when rootless) |
+| `--runtime-uid-remap` | Start as root and remap the container user to the container-side host UID/GID before running |
 | `--buildx-cache-dir <path>` | Import/export a local buildx `mode=max` cache directory |
 | `--buildx-cache-from <spec>` | Raw buildx cache import spec (repeatable) |
 | `--buildx-cache-to <spec>` | Raw buildx cache export spec (repeatable) |

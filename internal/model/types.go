@@ -7,7 +7,10 @@
 
 package model
 
-import "sort"
+import (
+	"sort"
+	"strings"
+)
 
 type RunOptions struct {
 	Tool              string
@@ -415,6 +418,30 @@ type Host struct {
 	Home string
 	UID  string
 	GID  string
+
+	// ContainerUID and ContainerGID are the in-container ids that the invoking
+	// host user maps to. They match UID/GID on a rootful daemon but are 0:0
+	// under rootless Docker, whose user namespace maps the host user to
+	// container root. Anything that must own a bind-mounted host path from
+	// inside a container has to use these rather than UID/GID. They are not
+	// the identity the agent runs as: rootless sessions add a nested user
+	// namespace that maps these ids back to a normal uid/gid. Empty when the
+	// host was not resolved through the app layer; use ContainerIdentity.
+	ContainerUID string
+	ContainerGID string
+}
+
+// ContainerIdentity returns the in-container uid/gid that own host-created
+// files, falling back to the host ids when unresolved.
+func (h Host) ContainerIdentity() (uid string, gid string) {
+	uid, gid = strings.TrimSpace(h.ContainerUID), strings.TrimSpace(h.ContainerGID)
+	if uid == "" {
+		uid = h.UID
+	}
+	if gid == "" {
+		gid = h.GID
+	}
+	return uid, gid
 }
 
 type DevcontainerConfig struct {

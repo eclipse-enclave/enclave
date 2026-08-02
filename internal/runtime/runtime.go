@@ -340,7 +340,8 @@ func (r *Runtime) prepareVolumes(containerName string, baseContainerName string,
 
 	r.addConfigMount(mountArgs, stores.Config)
 	r.addAuthMount(mountArgs, stores.Auth)
-	r.addFeatureAuthMounts(mountArgs, stores.Features)
+	r.addFeatureAuthMounts(mountArgs, stores.FeatureAuth)
+	r.addFeatureStateMounts(mountArgs, stores.FeatureState)
 	r.addEnvStore(mountArgs, stores.Env)
 
 	authState, secretMapping, err := newAuthManager(r).Prepare(mountArgs.EnvPtr(), stores)
@@ -1460,6 +1461,27 @@ func (r *Runtime) addFeatureAuthMounts(mounts *mountAccumulator, featureStores m
 	}
 	if len(entries) > 0 {
 		mounts.AddEnv(model.EnvFeatureAuthMap, strings.Join(entries, "|"))
+	}
+}
+
+func (r *Runtime) addFeatureStateMounts(mounts *mountAccumulator, featureStores map[string]backend.StoreRef) {
+	if len(featureStores) == 0 {
+		return
+	}
+	mountRoot := r.containerHome + "/" + model.ContainerFeatureStateDir
+	mounted := false
+	for _, feat := range r.features {
+		store, ok := featureStores[feat.Name]
+		if !ok {
+			continue
+		}
+		mountPath := mountRoot + "/" + feat.Name
+		mounts.AddStore(backend.PersistentStore{Kind: store.Kind, Key: store.Key, ContainerPath: mountPath})
+		mounted = true
+		logx.Infof("%s feature state mounted", util.TitleCase(feat.Name))
+	}
+	if mounted {
+		mounts.AddEnv(model.EnvFeatureStateRoot, mountRoot)
 	}
 }
 

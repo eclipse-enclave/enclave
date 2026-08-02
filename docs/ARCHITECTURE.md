@@ -38,6 +38,7 @@ flowchart LR
         EnvStore["projects/&lt;hash&gt;/&lt;tool&gt;/env<br/>persisted env secrets, not mounted into the tool container"]
         SharedAuthStore["tools/&lt;tool&gt;/auth<br/>shared tool auth store, only with --auth-scope=shared"]
         FeatureAuthStore["features/&lt;feature&gt;/auth<br/>shared feature auth store, only with --auth-scope=shared"]
+        FeatureStateStore["projects/&lt;hash&gt;/features/&lt;feature&gt;/state<br/>project-scoped state shared across tools"]
     end
 
     subgraph Docker
@@ -54,6 +55,7 @@ flowchart LR
     EnvStore -.->|"host-side read/write env file"| Tool
     SharedAuthStore -->|"bind mount (~/.enclave-auth)"| Tool
     FeatureAuthStore -->|"bind mount (~/.enclave-feature-auth/&lt;feature&gt;)"| Tool
+    FeatureStateStore -->|"bind mount (~/.enclave-feature-state/&lt;feature&gt;)"| Tool
     Gateway --> DnsNet
     Tool --> DnsNet
     Tool -.->|"resolver/proxy"| Gateway
@@ -166,7 +168,7 @@ The restricted network request flow has a separate
 - **User-defined subcommands**: executables under `~/.config/enclave/commands/{host,session}/` become `enclave <name>` verbs. `cli.Parse` discovers them, registers name-only stub commands (Cobra group "User Commands") so they list in `--help` and shell completion, and intercepts a matching first positional *before* `normalizeArgs`/Cobra so the trailing line reaches the script verbatim (preserving the unknown-command rejection for everything else). enclave flags must precede the name: host commands accept only the global group, session commands accept the full session flag set. `host/` commands exec directly on the host (`os/exec`, exit code/stdin/stdout passthrough, `ENCLAVE_BIN`/`ENCLAVE_PROJECT_ROOT`/`ENCLAVE_CONFIG_DIR` injected). `session/` commands run through the normal run pipeline as a shell-style execution (`opts.Shell=true`, argv `bash -c 'exec "$@"' <name> <container-path> <args>` so the script's shebang is honored via execve).
 - **Session command isolation boundary**: session commands mount only the `session/` tree, read-only, at the fixed neutral container path `/opt/enclave/commands` (`model.UserCommandsContainerDir`) via a dedicated `model.UserCommandMount` — never through `mounts.AddAdditional` (which mirrors host paths and would leak the home layout). No mount/backend code path ever references the `host/` tree, and no enclave host-data directory is otherwise mounted, so host commands stay invisible in-container by construction. Session commands receive no `ENCLAVE_*` env injection.
 - **Detached sessions**: `--background` runs detached tool containers that can be reattached. There is no separate daemon run mode.
-- **Persistent stores**: per-tool/project stores hold tool configs; an optional env store persists env auth and `--pass-env` values when persistence is enabled (default unless `--ephemeral`). Stores are host directories under `~/.local/state/enclave/` bind-mounted into the container (no Docker volumes). See [`docs/runtime/stores.md`](runtime/stores.md) for detailed store lifecycle, auth symlinks, and scoping documentation.
+- **Persistent stores**: per-tool/project stores hold tool configs; an optional env store persists env auth and `--pass-env` values; opted-in mixins receive per-feature/project state shared across tools. Persistence is enabled by default unless `--ephemeral`. Stores are host directories under `~/.local/state/enclave/` bind-mounted into the container (no Docker volumes). See [`docs/runtime/stores.md`](runtime/stores.md) for detailed store lifecycle, auth symlinks, and scoping documentation.
 - **Caches/history**: host-side caches are stored under `~/.cache/enclave/` and shell history under `~/.local/state/enclave/projects/`.
 - **Network isolation**: by default, a gateway sidecar (dnsmasq + transparent proxy) restricts outbound domains. DNS blocks unknown domains, and the proxy is passthrough-by-default with MITM only for hosts that need secret release rewriting unless `network_log=requests` forces MITM for all allowlisted HTTPS.
 - **Declared secrets and HTTP release**: tool profiles and enabled feature manifests can declare `secrets`. Each secret lists env-var aliases and can optionally define `release.http` target hosts/header formatting. Declared secrets are resolved from host env, layered secrets files, or persisted env; when gateway release is enabled, matching secrets are replaced with `ENCLAVE_SECRET_*` placeholders inside the container. The flow is: extension `secrets` config → `PlaceholderResolver` generates placeholders → `SecretMapping` entries written to a JSON file → gateway proxy loads secret release rules and performs header rewriting on HTTPS requests. Plaintext HTTP requests carrying placeholders are denied. This protection is limited to env-var injection: credential files written by auth hooks can still contain the real secret in the config/auth store.
@@ -189,11 +191,12 @@ Persistent stores are host directories under `~/.local/state/enclave/` (honoring
 - **Env store**: `~/.local/state/enclave/projects/<hash>/<tool>/env/` stores persisted env auth data and additional `--pass-env` values when persistence is enabled (default unless `--ephemeral`).
 - **Shared auth store** (when `--auth-scope=shared`): `~/.local/state/enclave/tools/<tool>/auth/<identity>/` stores OAuth files shared across projects for the tool; `<identity>` is `default` or the `--auth-name` slug.
 - **Feature auth store** (when `--auth-scope=shared` and feature defines `authFiles`): `~/.local/state/enclave/features/<feature>/auth/` stores feature auth files shared across tools/projects (for example `github-cli`).
+- **Feature state store** (when an enabled mixin declares `state: true`): `~/.local/state/enclave/projects/<hash>/features/<feature>/state/` stores feature-owned project data shared across tools. It is not created for ephemeral sessions and is independent of auth scope.
 
 Other host-side data:
 
 - **Embedded asset cache**: standalone binaries extract into `${XDG_CACHE_HOME:-~/.cache}/enclave/assets/<hash>/` on Linux or `~/Library/Caches/org.eclipse.enclave/assets/<hash>/` on macOS. Extraction uses a per-content lock, temporary sibling directory, and atomic rename so concurrent first runs share one complete entry. Missing or invalid entries are recreated from the binary.
-- **QEMU stores**: the experimental QEMU backend mounts the same host-directory stores as the Docker backend (resolved via `internal/backend/hoststore`) into the guest over 9p, so auth, config, and env state are shared across backends.
+- **QEMU stores**: the experimental QEMU backend mounts the same host-directory stores as the Docker backend (resolved via `internal/backend/hoststore`) into the guest over 9p. The store layer supports feature state, but current QEMU bundles disable all mixins, so normal QEMU runs do not request it.
 - **QEMU bundles**: generated microVM bundles live under `${XDG_CACHE_HOME:-~/.cache}/enclave/microvm/<tool>/<hash>/` unless `--image-name` points at an explicit bundle directory.
 - **Caches**: `~/.cache/enclave/<tool>/<hash>/` for package managers and build tools:
   - `npm/` - npm package cache

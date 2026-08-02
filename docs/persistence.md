@@ -44,6 +44,7 @@ Per-project data is stored on the host and reused across sessions:
 | Shell history | `~/.local/state/enclave/projects/<project-hash>/<tool>/history/` |
 | Agent memory | `~/.local/state/enclave/projects/<project-hash>/<tool>/memory/` (Claude) |
 | Config/env/auth stores | Host directories under `~/.local/state/enclave/` (bind-mounted; no Docker volumes) |
+| Feature state | `~/.local/state/enclave/projects/<project-hash>/features/<feature>/state/` for enabled mixins that opt in with `state: true`; shared across tools |
 | Embedded runtime assets | `~/.cache/enclave/assets/<content-hash>/` |
 
 Extracted runtime asset entries are reproducible cache data. Deleting them is
@@ -55,8 +56,9 @@ the standard Apple locations, in a reverse-DNS application directory: config
 and state under `~/Library/Application Support/org.eclipse.enclave/`
 (`config/`, `state/`) and caches under `~/Library/Caches/org.eclipse.enclave/`.
 
-Agent memory is skipped for `--ephemeral` sessions: memory written during them
-is discarded with the session's config store.
+Agent memory and feature state are skipped for `--ephemeral` sessions. Feature
+state is independent of auth scope and is shared by all tools running the same
+enabled feature in a project.
 
 Disable specific persistence:
 
@@ -81,7 +83,7 @@ Options:
 |------|--------|
 | `--all` | Remove stores and caches for all projects and tools |
 | `--ephemeral` | Remove stopped containers and ephemeral session stores |
-| `--keep <kinds>` | Preserve the listed stores (comma-separated or repeated): `cache` (package caches), `history` (shell history), `memory` (per-project agent memory, removed by default; no selective effect with `--all`), `auth` (auth stores, with `--all`) |
+| `--keep <kinds>` | Preserve the listed stores (comma-separated or repeated): `cache` (package caches), `history` (shell history), `memory` (per-project agent memory, removed by default; no selective effect with `--all`), `auth` (auth stores, with `--all`), `feature-state` (project-scoped feature state) |
 | `--build-cache` | Prune Docker build cache (requires confirmation) |
 | `--dry-run` | Preview what would be removed |
 
@@ -91,6 +93,7 @@ Examples:
 enclave cleanup --dry-run
 enclave cleanup --keep cache
 enclave cleanup --keep cache,history
+enclave cleanup --keep feature-state
 enclave cleanup --ephemeral
 enclave cleanup --all
 ```

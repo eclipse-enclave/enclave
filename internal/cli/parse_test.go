@@ -99,7 +99,7 @@ func TestParseShellAdmin(t *testing.T) {
 
 func TestParseCleanupFlags(t *testing.T) {
 	defaults := config.DefaultOptions()
-	res, err := Parse([]string{"cleanup", "--all", "--keep", "memory", "--tool", "codex"}, defaults)
+	res, err := Parse([]string{"cleanup", "--all", "--keep", "memory,feature-state", "--tool", "codex"}, defaults)
 	if err != nil {
 		t.Fatalf("parse failed: %v", err)
 	}
@@ -111,6 +111,9 @@ func TestParseCleanupFlags(t *testing.T) {
 	}
 	if !res.Options.CleanupKeepMemory {
 		t.Fatal("expected cleanup keep-memory true")
+	}
+	if !res.Options.CleanupKeepFeatureState {
+		t.Fatal("expected cleanup keep-feature-state true")
 	}
 	if res.Options.Tool != "codex" {
 		t.Fatalf("expected tool codex, got %s", res.Options.Tool)

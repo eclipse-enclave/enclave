@@ -27,6 +27,21 @@ func newFSStore(t *testing.T) StoreManager {
 	return StoreManager{host: model.Host{Home: t.TempDir(), UID: "1000", GID: "1000"}}
 }
 
+func TestPrepareStoresCreatesFeatureStateStore(t *testing.T) {
+	home := t.TempDir()
+	b := New(Options{Host: model.Host{Home: home}})
+	key := backend.StoreKey{Owner: "state-probe", ProjectHash: "abc123def456"}
+
+	if _, err := b.PrepareStores(context.Background(), backend.StorePrep{
+		FeatureStores: []backend.StorePrepEntry{{Kind: backend.StoreKindFeatureState, Key: key}},
+	}); err != nil {
+		t.Fatalf("PrepareStores(feature state): %v", err)
+	}
+	if _, err := os.Stat(config.HostStoreFeatureStateDir(home, key.ProjectHash, key.Owner)); err != nil {
+		t.Fatalf("feature state store not created: %v", err)
+	}
+}
+
 func TestStoreManagerWriteReadRoundTripCreatesDirsAndAppliesMode(t *testing.T) {
 	store := newFSStore(t)
 	key := backend.StoreKey{Owner: "codex", ProjectHash: "abc123abc123"}

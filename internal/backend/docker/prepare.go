@@ -34,14 +34,15 @@ func (b *Backend) PrepareStores(ctx context.Context, prep backend.StorePrep) (ba
 		b.prepareConfigStore(*prep.Config)
 	}
 	if prep.Auth != nil {
-		b.ensureStoreDir(backend.StoreKindAuth, prep.Auth.Key, util.TitleCase(prep.Auth.Key.Owner)+" shared auth store")
+		b.ensureStoreDir(prep.Auth.Kind, prep.Auth.Key, util.TitleCase(prep.Auth.Key.Owner)+" shared auth store")
 	}
 	if prep.Env != nil {
 		b.ensureStoreDir(backend.StoreKindEnv, prep.Env.Key, "persistent "+model.AppName+" env store")
 		state.PersistedEnvAvailable = b.envFileExists(prep.Env.Key)
 	}
-	for _, feature := range prep.Features {
-		b.ensureStoreDir(backend.StoreKindFeatureAuth, feature.Key, util.TitleCase(feature.Key.Owner)+" feature auth store")
+	for _, store := range prep.FeatureStores {
+		label := util.TitleCase(store.Key.Owner) + " " + store.Kind.FeatureStoreLabel()
+		b.ensureStoreDir(store.Kind, store.Key, label)
 	}
 	if prep.Env != nil && prep.Env.Reset {
 		b.resetPersistedEnv(prep.Env.Key)

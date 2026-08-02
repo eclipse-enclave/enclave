@@ -34,6 +34,7 @@ func TestResolveCleanupDirs(t *testing.T) {
 		config.HostStoreConfigRootDir(home, run.Tool, project.Hash):                                          true,
 		config.HostStoreEnvDir(home, run.Tool, project.Hash):                                                 true,
 		config.HostProjectMemoryDir(home, project.Hash, run.Tool):                                            true,
+		config.HostStoreFeatureStateRootDir(home, project.Hash):                                              true,
 	}
 
 	if len(dirs) != len(expected) {
@@ -139,6 +140,68 @@ func TestCleanupDirGatingForMemory(t *testing.T) {
 	}
 }
 
+func TestCleanupDirGatingForFeatureState(t *testing.T) {
+	t.Parallel()
+
+	home := "/tmp/test-home"
+	project := model.Project{Hash: "projhash"}
+	run := model.RunOptions{Tool: "codex"}
+	stateRoot := config.HostStoreFeatureStateRootDir(home, project.Hash)
+
+	withoutKeep := cleanupDirsForRemoval(run, model.CleanupOptions{}, home, project)
+	withKeep := cleanupDirsForRemoval(run, model.CleanupOptions{CleanupKeepFeatureState: true}, home, project)
+	contains := func(dirs []cleanupDir, path string) bool {
+		for _, dir := range dirs {
+			if dir.Path == path {
+				return true
+			}
+		}
+		return false
+	}
+	if !contains(withoutKeep, stateRoot) {
+		t.Fatal("default cleanup should remove feature state")
+	}
+	if contains(withKeep, stateRoot) {
+		t.Fatal("--keep feature-state should preserve feature state")
+	}
+}
+
+func TestCleanupAllKeepsFeatureStateIndependently(t *testing.T) {
+	home := t.TempDir()
+	hash := "projhash1234"
+	toolDir := config.HostProjectToolDir(home, hash, "codex")
+	stateRoot := config.HostStoreFeatureStateRootDir(home, hash)
+	for _, dir := range []string{toolDir, config.HostStoreFeatureStateDir(home, hash, "state-probe")} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+	}
+
+	pathsByKind := func(dirs []cleanupDir) map[string][]string {
+		result := map[string][]string{}
+		for _, dir := range dirs {
+			result[dir.Kind] = append(result[dir.Kind], dir.Path)
+		}
+		return result
+	}
+
+	keepState := pathsByKind(cleanupDirsForRemoval(model.RunOptions{}, model.CleanupOptions{CleanupAll: true, CleanupKeepFeatureState: true}, home, model.Project{}))
+	if len(keepState["feature-state"]) != 0 {
+		t.Fatalf("--keep feature-state cleanup targets state: %v", keepState["feature-state"])
+	}
+	if len(keepState["history"]) == 0 || keepState["history"][0] != toolDir {
+		t.Fatalf("--keep feature-state should still remove tool project data, got %v", keepState["history"])
+	}
+
+	keepHistory := pathsByKind(cleanupDirsForRemoval(model.RunOptions{}, model.CleanupOptions{CleanupAll: true, CleanupKeepHist: true}, home, model.Project{}))
+	if len(keepHistory["history"]) != 0 {
+		t.Fatalf("--keep history cleanup targets tool data: %v", keepHistory["history"])
+	}
+	if len(keepHistory["feature-state"]) != 1 || keepHistory["feature-state"][0] != stateRoot {
+		t.Fatalf("--keep history should still remove feature state, got %v", keepHistory["feature-state"])
+	}
+}
+
 func TestResolveEphemeralStoreDirsSkipsDefaultKey(t *testing.T) {
 	home := t.TempDir()
 	project := model.Project{Hash: "projhash1234"}
@@ -166,6 +229,20 @@ func TestResolveEphemeralStoreDirsSkipsDefaultKey(t *testing.T) {
 		if !want[dir.Path] {
 			t.Fatalf("unexpected ephemeral store dir %q", dir.Path)
 		}
+	}
+}
+
+func TestResolveEphemeralStoreDirsSkipsFeatureStateNamespace(t *testing.T) {
+	home := t.TempDir()
+	project := model.Project{Hash: "projhash1234"}
+	stateDir := config.HostStoreFeatureStateDir(home, project.Hash, "config-store")
+	if err := os.MkdirAll(stateDir, 0o700); err != nil {
+		t.Fatalf("mkdir %q: %v", stateDir, err)
+	}
+
+	run := model.RunOptions{Tool: filepath.Base(config.HostStoreFeatureStateRootDir(home, project.Hash))}
+	if dirs := resolveEphemeralStoreDirs(run, model.CleanupOptions{}, home, project); len(dirs) != 0 {
+		t.Fatalf("resolveEphemeralStoreDirs() returned feature state paths: %v", dirs)
 	}
 }
 

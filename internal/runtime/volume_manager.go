@@ -22,10 +22,11 @@ import (
 // uses. It replaces the volume-name-carrying model.VolumeState: the runtime
 // only tracks store identity; the backend resolves names.
 type storeSet struct {
-	Config   *backend.StoreRef
-	Auth     *backend.StoreRef
-	Env      *backend.StoreRef
-	Features map[string]backend.StoreRef
+	Config       *backend.StoreRef
+	Auth         *backend.StoreRef
+	Env          *backend.StoreRef
+	FeatureAuth  map[string]backend.StoreRef
+	FeatureState map[string]backend.StoreRef
 
 	PersistedEnvAvailable bool
 }
@@ -75,7 +76,7 @@ func (m volumeManager) BuildPrep(volumeSuffix string) (backend.StorePrep, storeS
 	if m.shouldCreateSharedAuthVolume() {
 		// Suffix selects the named auth identity; an empty suffix selects default.
 		key := backend.StoreKey{Owner: m.profile.Name, Suffix: m.auth.AuthName}
-		prep.Auth = &backend.StorePrepEntry{Key: key}
+		prep.Auth = &backend.StorePrepEntry{Kind: backend.StoreKindAuth, Key: key}
 		stores.Auth = &backend.StoreRef{Kind: backend.StoreKindAuth, Key: key}
 	}
 
@@ -86,19 +87,25 @@ func (m volumeManager) BuildPrep(volumeSuffix string) (backend.StorePrep, storeS
 	}
 
 	for _, feat := range m.features {
-		if !m.shouldCreateFeatureAuthVolume(feat) {
-			continue
+		if m.shouldCreateFeatureAuthVolume(feat) {
+			authFiles, err := backend.ValidateAuthFilePaths(feat.AuthFiles)
+			if err == nil && len(authFiles) > 0 {
+				key := backend.StoreKey{Owner: feat.Name}
+				prep.FeatureStores = append(prep.FeatureStores, backend.StorePrepEntry{Kind: backend.StoreKindFeatureAuth, Key: key})
+				if stores.FeatureAuth == nil {
+					stores.FeatureAuth = map[string]backend.StoreRef{}
+				}
+				stores.FeatureAuth[feat.Name] = backend.StoreRef{Kind: backend.StoreKindFeatureAuth, Key: key}
+			}
 		}
-		authFiles, err := backend.ValidateAuthFilePaths(feat.AuthFiles)
-		if err != nil || len(authFiles) == 0 {
-			continue
+		if m.shouldCreateFeatureStateVolume(feat) {
+			key := backend.StoreKey{Owner: feat.Name, ProjectHash: m.project.Hash}
+			prep.FeatureStores = append(prep.FeatureStores, backend.StorePrepEntry{Kind: backend.StoreKindFeatureState, Key: key})
+			if stores.FeatureState == nil {
+				stores.FeatureState = map[string]backend.StoreRef{}
+			}
+			stores.FeatureState[feat.Name] = backend.StoreRef{Kind: backend.StoreKindFeatureState, Key: key}
 		}
-		key := backend.StoreKey{Owner: feat.Name}
-		prep.Features = append(prep.Features, backend.StorePrepEntry{Key: key})
-		if stores.Features == nil {
-			stores.Features = map[string]backend.StoreRef{}
-		}
-		stores.Features[feat.Name] = backend.StoreRef{Kind: backend.StoreKindFeatureAuth, Key: key}
 	}
 
 	if m.shouldResetAuthFiles() {
@@ -127,7 +134,7 @@ func (m volumeManager) authSyncSpec(stores storeSet) *backend.AuthSyncSpec {
 		}
 	}
 	for _, feat := range m.features {
-		if _, ok := stores.Features[feat.Name]; !ok {
+		if _, ok := stores.FeatureAuth[feat.Name]; !ok {
 			continue
 		}
 		authFiles, err := backend.ValidateAuthFilePaths(feat.AuthFiles)
@@ -195,6 +202,10 @@ func (m volumeManager) shouldCreateFeatureAuthVolume(ext model.Extension) bool {
 		return false
 	}
 	return true
+}
+
+func (m volumeManager) shouldCreateFeatureStateVolume(ext model.Extension) bool {
+	return ext.FeatureState && m.run.Persist
 }
 
 func (m volumeManager) shouldCreateEnvVolume() bool {

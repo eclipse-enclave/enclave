@@ -77,7 +77,8 @@ providers:
     authSession:
       checks:
         - { file: agent/auth.json, type: json_pointer_non_null, pointer: /anthropic }
-    oauthPorts: [{ port: "53692" }]
+    oauthPorts:
+      - { port: "53692", autoHintWhenNoSession: false, requireMappingWhenNoCredentials: false }
   - name: google
     credentials: [gemini-api-key]
     authFiles: [agent/auth.json]

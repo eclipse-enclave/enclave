@@ -24,9 +24,10 @@ supports multiple LLM providers (OpenAI, Anthropic, Google, Mistral).
 - `agent/auth.json`
 
 Enclave recognizes Pi's `openai`, `openai-codex`, `anthropic`, `google`, and
-`mistral` credentials in this file. For browser-based login, enclave auto-maps
-port 1455 for Codex OAuth and port 53692 for Anthropic OAuth when the corresponding entry
-is missing. Add an explicit mapping for the relevant port to re-login.
+`mistral` credentials in this file. For browser-based login, Enclave auto-maps
+port 1455 when the `openai-codex` entry is missing. Anthropic OAuth is opt-in;
+add `-p 53692` when logging in. Add `-p 1455` to re-login with Codex when an
+entry already exists.
 
 ## Network Access
 

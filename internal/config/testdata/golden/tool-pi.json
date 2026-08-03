@@ -84,7 +84,9 @@
       },
       "oauth_ports": [
         {
-          "port": "53692"
+          "port": "53692",
+          "auto_hint_when_no_session": false,
+          "require_mapping_when_no_credentials": false
         }
       ]
     },

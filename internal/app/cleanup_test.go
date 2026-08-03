@@ -232,17 +232,20 @@ func TestResolveEphemeralStoreDirsSkipsDefaultKey(t *testing.T) {
 	}
 }
 
-func TestResolveEphemeralStoreDirsSkipsFeatureStateNamespace(t *testing.T) {
+func TestResolveEphemeralStoreDirsAllSkipsFeatureStateNamespace(t *testing.T) {
 	home := t.TempDir()
 	project := model.Project{Hash: "projhash1234"}
 	stateDir := config.HostStoreFeatureStateDir(home, project.Hash, "config-store")
-	if err := os.MkdirAll(stateDir, 0o700); err != nil {
-		t.Fatalf("mkdir %q: %v", stateDir, err)
+	ephemeralDir := config.HostStoreConfigDir(home, "codex", project.Hash, "session-a")
+	for _, dir := range []string{stateDir, ephemeralDir} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatalf("mkdir %q: %v", dir, err)
+		}
 	}
 
-	run := model.RunOptions{Tool: filepath.Base(config.HostStoreFeatureStateRootDir(home, project.Hash))}
-	if dirs := resolveEphemeralStoreDirs(run, model.CleanupOptions{}, home, project); len(dirs) != 0 {
-		t.Fatalf("resolveEphemeralStoreDirs() returned feature state paths: %v", dirs)
+	dirs := resolveEphemeralStoreDirs(model.RunOptions{}, model.CleanupOptions{CleanupAll: true}, home, model.Project{})
+	if len(dirs) != 1 || dirs[0].Kind != "ephemeral" || dirs[0].Path != ephemeralDir {
+		t.Fatalf("resolveEphemeralStoreDirs() = %v, want only %q", dirs, ephemeralDir)
 	}
 }
 

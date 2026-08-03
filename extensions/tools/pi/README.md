@@ -31,8 +31,9 @@ entry already exists.
 
 ## Network Access
 
-Allowlisted domains include Pi's model catalog, OpenAI, Anthropic, Google,
-Mistral, GitHub, and common package registries (npm, PyPI, Go, CDNs, TLS/OCSP).
+Allowlisted domains include `pi.dev` for Pi's model catalog, OpenAI, Anthropic,
+Google, Mistral, GitHub, and common package registries (npm, PyPI, Go, CDNs,
+TLS/OCSP).
 
 ## Settings
 

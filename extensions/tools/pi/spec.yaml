@@ -51,7 +51,6 @@ network:
     "*.anthropic.com": anthropic-api-key
     generativelanguage.googleapis.com: gemini-api-key
     api.mistral.ai: mistral-api-key
-    codestral.mistral.ai: mistral-api-key
   serviceAuth:
     openai-api-key: { headerName: authorization, valueFormat: "Bearer %s" }
     anthropic-api-key: { headerName: x-api-key }

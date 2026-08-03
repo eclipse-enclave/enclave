@@ -164,8 +164,7 @@
       "release": {
         "http": {
           "hosts": [
-            "api.mistral.ai",
-            "codestral.mistral.ai"
+            "api.mistral.ai"
           ],
           "header": "authorization",
           "format": "Bearer %s"

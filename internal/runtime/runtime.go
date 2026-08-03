@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"enclave/internal/backend"
+	"enclave/internal/backend/hoststore"
 	"enclave/internal/config"
 	"enclave/internal/devcontainer"
 	"enclave/internal/gateway/tlsstore"
@@ -63,16 +64,21 @@ type Runtime struct {
 }
 
 type ExecutionContext struct {
-	ContainerName string
-	Mounts        []backend.Mount
-	Stores        []backend.PersistentStore
-	Env           []string
-	Network       backend.NetworkPolicy
-	Ports         []backend.PortMapping
-	Secrets       []backend.SecretRelease
-	AuthSync      *backend.AuthSyncSpec
-	Cleanup       func()
-	RunCtx        model.RunContext
+	ContainerName    string
+	Mounts           []backend.Mount
+	Stores           []backend.PersistentStore
+	Env              []string
+	Network          backend.NetworkPolicy
+	Ports            []backend.PortMapping
+	Secrets          []backend.SecretRelease
+	AuthSync         *backend.AuthSyncSpec
+	Cleanup          func()
+	RunCtx           model.RunContext
+	configStoreLease *hoststore.Lease
+}
+
+type detachedConfigStoreLeaseHolder interface {
+	HoldConfigStoreLease(context.Context, backend.SessionRef, *hoststore.Lease) error
 }
 
 type mountAccumulator struct {
@@ -91,7 +97,11 @@ type preparedVolumes struct {
 
 type noopRuntimeHandler struct{}
 
-const defaultConfigKey = "default"
+const (
+	defaultConfigKey          = "default"
+	configStoreLeaseAttempts  = 20
+	configStoreLeaseRetryWait = 25 * time.Millisecond
+)
 
 func newMountAccumulator(mounts []backend.Mount, env []string) *mountAccumulator {
 	return &mountAccumulator{mounts: mounts, env: env}
@@ -211,6 +221,16 @@ func (r *Runtime) prepareExecution() (*ExecutionContext, error) {
 		}
 	}
 	r.setConfigVolumeSuffix(containerName, baseContainerName)
+	configStoreLease, err := r.acquireConfigStoreLease()
+	if err != nil {
+		return nil, err
+	}
+	leaseTransferred := false
+	defer func() {
+		if !leaseTransferred {
+			releaseConfigStoreLease(configStoreLease)
+		}
+	}()
 	r.logContainerStart(containerName, baseContainerName)
 	r.warnPostStartInteractive()
 
@@ -244,17 +264,20 @@ func (r *Runtime) prepareExecution() (*ExecutionContext, error) {
 	env := append([]string{}, mountArgs.Env()...)
 	env = append(env, networkResult.Env...)
 	cleanup := mergeCleanup(prepared.Cleanup, networkResult.Cleanup)
+	cleanup = mergeCleanup(cleanup, configStoreLeaseCleanup(configStoreLease))
+	leaseTransferred = true
 	return &ExecutionContext{
-		ContainerName: containerName,
-		Mounts:        mountArgs.Mounts(),
-		Stores:        mountArgs.Stores(),
-		Env:           env,
-		Network:       networkResult.Network,
-		Ports:         networkResult.Ports,
-		Secrets:       secretReleases(prepared.SecretMapping),
-		AuthSync:      prepared.AuthSync,
-		Cleanup:       cleanup,
-		RunCtx:        runCtx,
+		ContainerName:    containerName,
+		Mounts:           mountArgs.Mounts(),
+		Stores:           mountArgs.Stores(),
+		Env:              env,
+		Network:          networkResult.Network,
+		Ports:            networkResult.Ports,
+		Secrets:          secretReleases(prepared.SecretMapping),
+		AuthSync:         prepared.AuthSync,
+		Cleanup:          cleanup,
+		RunCtx:           runCtx,
+		configStoreLease: configStoreLease,
 	}, nil
 }
 
@@ -377,6 +400,58 @@ func (r *Runtime) setConfigVolumeSuffix(containerName string, baseContainerName 
 	r.configVolReady = true
 }
 
+func (r *Runtime) acquireConfigStoreLease() (*hoststore.Lease, error) {
+	if r.run.Ephemeral {
+		return nil, nil
+	}
+	key := backend.StoreKey{
+		Owner:       r.profile.Name,
+		ProjectHash: r.project.Hash,
+		Suffix:      strings.TrimSpace(r.configVolSuffix),
+	}
+	dir, err := hoststore.DirFor(r.host.Home, key, backend.StoreKindConfig)
+	if err != nil {
+		return nil, fmt.Errorf("resolve config store lease: %w", err)
+	}
+	var lease *hoststore.Lease
+	var acquired bool
+	for attempt := range configStoreLeaseAttempts {
+		lease, acquired, err = hoststore.TryLease(r.host.Home, dir)
+		if err != nil {
+			return nil, fmt.Errorf("acquire config store lease: %w", err)
+		}
+		if acquired {
+			return lease, nil
+		}
+		if attempt < configStoreLeaseAttempts-1 {
+			time.Sleep(configStoreLeaseRetryWait)
+		}
+	}
+	storeKey := strings.TrimSpace(r.configVolSuffix)
+	if storeKey == "" {
+		storeKey = defaultConfigKey
+	}
+	return nil, fmt.Errorf("config store %q for %s/%s is already in use by another session; wait for a foreground session to exit, remove a detached session, or use --ephemeral", storeKey, r.profile.Name, r.project.Hash)
+}
+
+func configStoreLeaseCleanup(lease *hoststore.Lease) func() {
+	if lease == nil {
+		return nil
+	}
+	return func() {
+		releaseConfigStoreLease(lease)
+	}
+}
+
+func releaseConfigStoreLease(lease *hoststore.Lease) {
+	if lease == nil {
+		return
+	}
+	if err := lease.Release(); err != nil {
+		logx.Warnf("Failed to release config store lease: %v", err)
+	}
+}
+
 func (r *Runtime) currentConfigVolumeSuffix(containerName string, baseContainerName string) string {
 	if r.configVolReady {
 		return r.configVolSuffix
@@ -394,25 +469,17 @@ func (r *Runtime) deriveConfigVolumeSuffix(containerName string, baseContainerNa
 	if r.run.Background || r.run.SessionName != "" {
 		return r.resolvedSessionName()
 	}
-	stableSuffix := r.worktreeConfigVolumeSuffix()
 	if containerName == baseContainerName {
-		return stableSuffix
+		return ""
 	}
 	suffix := strings.TrimPrefix(containerName, baseContainerName+"-")
 	if suffix == containerName {
-		return stableSuffix
+		return ""
 	}
-	if r.runningConfigKeyExists(r.stableConfigKey()) {
+	if r.runningConfigKeyExists(defaultConfigKey) {
 		return suffix
 	}
-	return stableSuffix
-}
-
-func (r *Runtime) stableConfigKey() string {
-	if suffix := r.worktreeConfigVolumeSuffix(); suffix != "" {
-		return suffix
-	}
-	return defaultConfigKey
+	return ""
 }
 
 // sessionGeneratedKey is the per-session subdirectory name that isolates
@@ -428,10 +495,9 @@ func (r *Runtime) sessionGeneratedKey() string {
 	return defaultConfigKey
 }
 
-// runningConfigKeyExists reports whether a running session for this tool,
-// project, and worktree already uses the given config-store key. How that is
-// tracked (a Docker label today) is a backend detail behind
-// ConfigStoreConflictChecker.
+// runningConfigKeyExists reports whether a running session for this tool and
+// project already uses the given config-store key. How that is tracked (a
+// Docker label today) is a backend detail behind ConfigStoreConflictChecker.
 func (r *Runtime) runningConfigKeyExists(key string) bool {
 	if strings.TrimSpace(key) == "" || r.backend == nil {
 		return false
@@ -449,28 +515,6 @@ func (r *Runtime) runningConfigKeyExists(key string) bool {
 		return false
 	}
 	return inUse
-}
-
-func (r *Runtime) worktreeConfigVolumeSuffix() string {
-	if !r.shouldMountToolConfigSource() {
-		return ""
-	}
-	currentHash := projectPathHash(r.project)
-	if currentHash == "" || currentHash == r.project.Hash {
-		return ""
-	}
-	return currentHash
-}
-
-func projectPathHash(project model.Project) string {
-	path := strings.TrimSpace(project.RealDir)
-	if path == "" {
-		path = strings.TrimSpace(project.Dir)
-	}
-	if path == "" {
-		return ""
-	}
-	return model.ShortHash(util.HashString(path))
 }
 
 func (r *Runtime) prepareRunContext(authState model.AuthState) model.RunContext {

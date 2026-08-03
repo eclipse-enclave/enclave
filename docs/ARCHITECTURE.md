@@ -4,10 +4,13 @@ Enclave is a sandboxing CLI that bootstraps isolated agent tooling in Docker con
 
 ## High-Level Flow
 
-1. Parse CLI arguments and resolve the active tool profile.
-   If help is requested, render Cobra help output and exit without dispatch.
-2. Discover repository assets (Dockerfiles, runtime assets, profiles).
-3. Ensure the runtime image is up to date (default or derived); rebuild if needed.
+1. Parse CLI arguments. If help or completion is requested, exit without
+   resolving project state.
+2. Resolve the canonical project directory once. A host-owned exact project
+   tag may replace the path-derived namespace. Load project defaults from that
+   effective namespace and resolve the active tool profile.
+3. Discover repository assets (Dockerfiles, runtime assets, profiles).
+4. Ensure the runtime image is up to date (default or derived); rebuild if needed.
    Rebuild detection hashes the rendered Dockerfile and entrypoint plus build config
    (target, base image/devcontainer, features, agent tools). A side-effect-free
    agent update planner also runs before the rebuild gate. When the interval has
@@ -17,8 +20,8 @@ Enclave is a sandboxing CLI that bootstraps isolated agent tooling in Docker con
    stages scope cache invalidation to the updated tool. `--no-rebuild` skips
    runtime and gateway image builds entirely and uses existing local images or
    fails if they are missing (use it for offline/frozen inputs).
-4. Prepare mounts, persistent stores, auth, and network isolation.
-5. Run the tool or shell inside an ephemeral container.
+5. Prepare mounts, persistent stores, auth, and network isolation.
+6. Run the tool or shell inside an ephemeral container.
 
 ## Diagrams
 
@@ -106,7 +109,8 @@ The restricted network request flow has a separate
 
 ### Configuration and Profiles
 - [`extensions/tools/`](../extensions/tools/) contains per-tool configuration (`spec.yaml`, templates, allowlists, install scripts, optional `check-update.sh` hooks).
-- [`internal/config/paths.go`](../internal/config/paths.go) resolves `Dockerfile`, `entrypoint.sh`, extensions, and runtime assets from `ENCLAVE_HOME`, an executable-adjacent app root, or the embedded asset store.
+- [`internal/config/paths.go`](../internal/config/paths.go) resolves `Dockerfile`, `entrypoint.sh`, extensions, and runtime assets from `ENCLAVE_HOME`, an executable-adjacent app root, or the embedded asset store, and resolves canonical project directories.
+- [`internal/config/project_tags.go`](../internal/config/project_tags.go) reads the host-owned exact project tag registry and selects the effective namespace.
 - [`internal/config/profile.go`](../internal/config/profile.go) loads and lists tool profiles from extension directories.
 - [`internal/domainpattern/pattern.go`](../internal/domainpattern/pattern.go) validates and normalizes strict domain patterns used by secret release host mappings.
 
@@ -157,6 +161,7 @@ The restricted network request flow has a separate
 
 ## Key Concepts
 
+- **Project identity**: every canonical directory has a path-derived 12-character fallback namespace. Exact directories listed under one tag in the host-owned `project-tags.json` registry use the tag's existing namespace instead. Git metadata never selects a namespace, descendants do not inherit tags, and one resolved `model.Project` is reused for the invocation.
 - **Profiles** (`extensions/tools/<tool>/spec.yaml`, `kind: sandbox`): define tool command, session continuation args (`continueArgs`, `resumeArgs`), config location, optional settings/skills metadata (`settingsFile`, `settingsTarget`, `skillsDir`), optional host passthrough allow-list (`passthroughPaths`), optional QEMU bundle minimum memory (`qemuMinMemoryMiB`) and config-store cache hint (`qemuStoreCacheMmap`), declared credential sources (`credentials.sources`) including API-key metadata, YOLO flag, and per-provider auth configuration (`providers`: credentials, auth files, auth session checks, OAuth ports).
 - **Runtime assets** (`runtime-assets/gateway-allowlists/`, `runtime-assets/build-scripts/`, `runtime-assets/auth-reconcile.sh`, `runtime-assets/net.sh`): DNS allowlists, Docker weaving scripts, and shared entrypoint helpers baked into the image. Tool templates live in `extensions/tools/<tool>/templates/` and are aggregated during build.
 - **Asset discovery**: `ENCLAVE_HOME` has explicit precedence, followed by a valid app root above the resolved executable path. This keeps package-managed installs on `/usr/share/enclave` and in-tree builds on live checkout files. Other binaries extract their embedded assets into an append-only `assets/<content-hash>/` directory under the platform cache root. The former unversioned data-root lookup is not used.
@@ -183,7 +188,7 @@ The restricted network request flow has a separate
 
 ### Persistent stores
 
-Persistent stores are host directories under `~/.local/state/enclave/` (honoring `$XDG_STATE_HOME`), bind-mounted into the container. There are no Docker volumes; store paths are derived from tool + project hash:
+Persistent stores are host directories under `~/.local/state/enclave/` (honoring `$XDG_STATE_HOME`), bind-mounted into the container. There are no Docker volumes; store paths are derived from tool + effective project namespace:
 
 - **Tool config store**: `~/.local/state/enclave/projects/<hash>/<tool>/config-store/<key>/` stores the tool’s config directory (for example, `.claude` or `.codex`). `<key>` is `default` for the persistent store; `--ephemeral` uses a unique suffixed key and leaves the `default` store untouched.
 - **Env store**: `~/.local/state/enclave/projects/<hash>/<tool>/env/` stores persisted env auth data and additional `--pass-env` values when persistence is enabled (default unless `--ephemeral`).
@@ -213,7 +218,7 @@ Other host-side data:
   - `yarnrc.yml` → `~/.yarnrc.yml`
   - `bunfig.toml` → `~/.bunfig.toml`
   - `node_repl_history` → `~/.node_repl_history`
-- **Tool config overrides** (user-edited, config root, keyed by project hash and outside the worktree):
+- **Tool config overrides** (user-edited, config root, keyed by effective project namespace and outside the worktree):
   - Global overrides: `~/.config/enclave/tools/<tool>/`
   - Project overrides: `~/.config/enclave/projects/<hash>/<tool>/config/`
 - **Managed skills**:
@@ -224,7 +229,7 @@ Other host-side data:
   - Shared `SKILL.md` files are restricted to portable Agent Skills frontmatter; invalid shared skills warn and are skipped. Tools without `skillsDir` are unaffected.
   - When the config-source path handles skills, sources are composed into `config-generated/<key>/<relative skills dir>`; otherwise the fallback separate mount materializes `~/.local/state/enclave/projects/<hash>/<tool>/skills-generated/<key>/`. Both paths key the generated directory by `<key>` (the config-store suffix) so concurrent sessions with different feature selections never share a directory.
 - **Config patches**: global JSON/TOML patches mirror native config paths under `~/.config/enclave/patches/<tool>/`; project patches use `~/.config/enclave/projects/<hash>/patches/<tool>/`. Each patch merges an existing lower-precedence target in the generated config source.
-- **Generated config source**: `~/.local/state/enclave/projects/<hash>/<tool>/config-generated/<key>/`, where `<key>` is `default` or a session/worktree-specific suffix when the writable config store is isolated. Startup builds this tree from built-in settings/templates, optional allow-listed host config (`--host-config=passthrough` + resolved `host_config_paths`), managed skills, canonical global/project config overrides, and global/project config patches, then overlays it into the writable tool config store before auth symlinks and tool setup run.
+- **Generated config source**: `~/.local/state/enclave/projects/<hash>/<tool>/config-generated/<key>/`, where `<key>` is `default` or a session-specific suffix when the writable config store is isolated. Startup builds this tree from built-in settings/templates, optional allow-listed host config (`--host-config=passthrough` + resolved `host_config_paths`), managed skills, canonical global/project config overrides, and global/project config patches, then overlays it into the writable tool config store before auth symlinks and tool setup run.
 
 The cleanup command in [`internal/app/cleanup.go`](../internal/app/cleanup.go) can remove stores and host-side data for a single tool/project or across all projects.
 
@@ -244,33 +249,33 @@ The complete flow from CLI arguments to final options:
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                            app.Run(args)                                     │
 │                                                                             │
-│  1. config.LoadDefaults(projectDir)                                         │
-│     ├── Read ~/.config/enclave/config.json → globalDefaults               │
-│     └── Read <config-root>/projects/<hash>/config.json → projectDefaults    │
-│         (project guardrails can strip blocked elevations, e.g.              │
-│          allow_all_network=true)                                            │
-│                                                                             │
-│  2. cli.Parse(args, baseOpts)                                               │
-│     ├── Match commands: run, shell, exec, cleanup, config, etc.             │
+│  1. cli.Parse(args, baseOpts)                                               │
+│     ├── Match commands: run, shell, exec, cleanup, project, config, etc.    │
 │     ├── Match flags via CLIFlagIndex() registry (generated), including      │
 │     │   generated run options such as --backend, --host-config, --add-dir, │
 │     │   --add-readonly-dir, and --project-mount                            │
-│     └── Returns: Result{Options, Action, HelpShown, Sources, ConfigView}     │
+│     └── Return early for help, completion, and host project-tag commands    │
 │                                                                             │
-│  3. model.MergeOptionSources(baseSources, cliSources)                       │
+│  2. config.ResolveProjectFromDir(projectDir)                                │
+│     └── Canonical path hash, optionally replaced by an exact host tag       │
+│                                                                             │
+│  3. config.LoadDefaultsForProject(project)                                  │
+│     ├── Read ~/.config/enclave/config.json → globalDefaults               │
+│     └── Read <config-root>/projects/<effective-hash>/config.json            │
+│         → projectDefaults (with project guardrails)                         │
+│                                                                             │
+│  4. model.MergeOptionSources(baseSources, cliSources)                       │
 │     └── Merge source tracking (CLI wins if set)                             │
 │                                                                             │
-│  4. config.ApplyDefaultsWithSources(opts, globalDefaults, SourceGlobal)     │
+│  5. config.ApplyDefaultsWithSources(opts, globalDefaults, SourceGlobal)     │
 │     └── Apply global config where CLI didn't override                       │
 │                                                                             │
-│  5. config.ApplyDefaultsWithSources(opts, projectDefaults, SourceProject)   │
+│  6. config.ApplyDefaultsWithSources(opts, projectDefaults, SourceProject)   │
 │     └── Apply project config where global/CLI didn't override               │
 │                                                                             │
-│  6. Resolve tool override for selected tool                                 │
-│     ├── config.ResolveToolOverrideDefaults(global, project, opts.Tool)      │
-│     └── config.ApplyDefaultsWithSources(..., SourceToolOverride)            │
+│  7. Resolve and apply the selected tool override                            │
 │                                                                             │
-│  7. Final Options with Sources tracked                                      │
+│  8. Final Options with Sources tracked                                      │
 │     └── Each field knows: CLI, ToolOverride, Project, Global, or Default   │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -306,7 +311,7 @@ See [Configuration](configuration.md) for the user-facing option and source mode
 
 Config defaults can be set in `~/.config/enclave/config.json` (global) and
 `~/.config/enclave/projects/<hash>/config.json` (project; per-project
-overrides are keyed by project hash and live outside the worktree). Precedence
+overrides are keyed by the effective project namespace and live outside the worktree). Precedence
 is:
 
 1. CLI flags

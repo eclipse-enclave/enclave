@@ -74,7 +74,7 @@ func LogPath(home, containerName string) string {
 
 // Launch spawns the requested Theia variant attached to containerName.
 // preferences may be nil; callers normally merge defaults + config via
-// LoadPreferences before calling. The IDE's stdout/stderr are redirected to
+// LoadPreferencesForProject before calling. The IDE's stdout/stderr are redirected to
 // logPath (its directory is created); pass "" to inherit the parent's streams.
 func Launch(variant Variant, containerName string, preferences map[string]any, logPath string) error {
 	if !variant.Valid() {

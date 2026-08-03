@@ -29,6 +29,11 @@ type currentPolicyContext struct {
 	Resolved policy.ResolveResult
 }
 
+type gatewayApplyOutcome struct {
+	target backend.GatewayInfo
+	err    error
+}
+
 func resolveCurrentPolicyContext(input *CommandInput) (currentPolicyContext, error) {
 	home, err := config.ResolveHostHome()
 	if err != nil {
@@ -262,11 +267,29 @@ func runNetworkApply(input *CommandInput) int {
 		return 0
 	}
 
-	type applyOutcome struct {
-		target backend.GatewayInfo
-		err    error
+	outcomes, applied, failed := applyGatewayTargets(policyCtx, manager, targets)
+
+	fmt.Printf("\nTargets:\n")
+	for _, outcome := range outcomes {
+		target := outcome.target
+		label := fmt.Sprintf("%s (%s, tool=%s, project=%s)", target.Name, target.ShortID(), target.Tool, target.ProjectHash)
+		if outcome.err == nil {
+			fmt.Printf("  - APPLIED %s\n", label)
+			continue
+		}
+		fmt.Printf("  - FAILED  %s: %v\n", label, outcome.err)
 	}
-	outcomes := make([]applyOutcome, 0, len(targets))
+
+	fmt.Printf("\nApply summary: %d applied, %d failed\n", applied, failed)
+	if failed > 0 {
+		fmt.Printf("Some gateways were not updated; restart affected sessions or run 'enclave network apply' again after fixing errors.\n")
+		return 1
+	}
+	return 0
+}
+
+func applyGatewayTargets(policyCtx currentPolicyContext, manager backend.GatewayManager, targets []backend.GatewayInfo) ([]gatewayApplyOutcome, int, int) {
+	outcomes := make([]gatewayApplyOutcome, 0, len(targets))
 	applied := 0
 	failed := 0
 	for _, target := range targets {
@@ -306,26 +329,9 @@ func runNetworkApply(input *CommandInput) int {
 		} else {
 			failed++
 		}
-		outcomes = append(outcomes, applyOutcome{target: target, err: applyErr})
+		outcomes = append(outcomes, gatewayApplyOutcome{target: target, err: applyErr})
 	}
-
-	fmt.Printf("\nTargets:\n")
-	for _, outcome := range outcomes {
-		target := outcome.target
-		label := fmt.Sprintf("%s (%s, tool=%s, project=%s)", target.Name, target.ShortID(), target.Tool, target.ProjectHash)
-		if outcome.err == nil {
-			fmt.Printf("  - APPLIED %s\n", label)
-			continue
-		}
-		fmt.Printf("  - FAILED  %s: %v\n", label, outcome.err)
-	}
-
-	fmt.Printf("\nApply summary: %d applied, %d failed\n", applied, failed)
-	if failed > 0 {
-		fmt.Printf("Some gateways were not updated; restart affected sessions or run 'enclave network apply' again after fixing errors.\n")
-		return 1
-	}
-	return 0
+	return outcomes, applied, failed
 }
 
 func runNetworkAddDomain(input *CommandInput) int {

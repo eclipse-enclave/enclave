@@ -43,6 +43,76 @@ With no command, starts a new agent session (`run` is implicit).
 
 `enclave config` flags: `--view <mode>` selects the output view — `matrix` (default), `source` (where each value comes from), `diff` (values overridden by higher precedence), or `effective` (effective values only); `--json` emits JSON output.
 
+### Project tags
+
+| Command | Description |
+|---------|-------------|
+| `enclave project tag set <name>` | Assign the current canonical directory's tag; the first assignment creates the tag |
+| `enclave project tag unset [path]` | Remove the current directory or an exact registered path from its tag |
+| `enclave project tag list` | List all project tags with their namespaces and members |
+| `enclave project show` | Show the current directory's identity, tag, and members |
+
+`tag set` states whether it creates or assigns before anything changes. A new
+name is created with the current directory as its namespace origin. An
+existing name is a trust decision: the command lists the members whose
+complete project scope the directory will share, the namespace change, and any
+data under the current namespace that becomes dormant. Both outcomes ask for
+confirmation; `--yes` confirms noninteractively. In scripts, `--new` fails
+instead of assigning an existing tag and `--existing` fails instead of
+creating a new one, so a mistyped name cannot silently select the other
+operation. Shell completion offers known tag names.
+
+The first directory assigned to a tag keeps its existing path-derived
+namespace and becomes the tag's namespace origin. Assigning another directory
+to that tag makes it use the same namespace. Existing data under the joining
+directory's fallback namespace is left in place and becomes dormant. Enclave
+never copies, merges, or deletes namespace data during tagging.
+
+`tag unset` without arguments removes the current directory from its tag. With
+an explicit path it can affect a different tag than the current directory's,
+so it reports the matched tag and asks for confirmation (`--yes` skips); the
+path form is also the recovery route for stale members whose directory no
+longer exists. The namespace-origin member cannot be unset while other members
+remain. Its fallback would still be the shared namespace, so the operation
+would not isolate it. Unset the other members first, then the namespace-origin
+member.
+
+Tags share the complete project scope: project config, project secrets,
+project-scoped auth, persisted environment, generated tool config, skills and patches, history,
+memory, caches, network state, lifecycle behavior, and cleanup scope. Membership
+is exact. Child directories and new Git worktrees do not inherit a tag.
+
+Identity-changing tag operations affect future invocations only. Sessions that
+are already running retain the namespace, mounts, and labels they started with;
+restart them to use the new namespace. Until then, use `enclave ps` to find
+those sessions, `enclave status --all` or `enclave network apply --all-running`
+for widened scope, and explicit container names with `enclave attach` or
+`enclave stop`.
+
+`project show --json` emits:
+
+```json
+{
+  "projectDirectory": "/home/alice/src/enclave-feature",
+  "canonicalDirectory": "/home/alice/src/enclave-feature",
+  "fallbackNamespace": "1a2b3c4d5e6f",
+  "effectiveNamespace": "83d1497d2ca1",
+  "resolution": "tag",
+  "tag": {
+    "name": "enclave",
+    "namespace": "83d1497d2ca1",
+    "members": [
+      {"path": "/home/alice/src/enclave-main", "exists": true, "namespaceOrigin": true},
+      {"path": "/home/alice/src/enclave-feature", "exists": true, "namespaceOrigin": false}
+    ]
+  }
+}
+```
+
+`tag` is `null` and `resolution` is `path` for an untagged directory.
+`project tag list --json` emits `{"tags": [...]}` with the same tag objects.
+The JSON field names are an integration contract.
+
 ### IDE
 
 | Command | Description |
@@ -117,6 +187,9 @@ Mutation commands (`add-domain`, `remove-domain`, `set-mode`) apply the new poli
 | `enclave cleanup --dry-run` | Preview what would be removed |
 | `enclave cleanup --keep cache,history,auth,memory` | Preserve the listed stores (comma-separated or repeated `--keep`): `cache` (package caches), `history` (shell history), `auth` (auth stores, with `--all`), `memory` (per-project agent memory, no selective effect with `--all`) |
 | `enclave cleanup --build-cache` | Prune Docker build cache (requires confirmation) |
+
+For a tag with multiple members, cleanup operates on the shared effective
+namespace and reports every member before removing project data.
 
 ---
 

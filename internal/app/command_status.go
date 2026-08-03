@@ -20,7 +20,6 @@ import (
 	"time"
 
 	"enclave/internal/backend"
-	"enclave/internal/config"
 	"enclave/internal/logx"
 	"enclave/internal/model"
 )
@@ -56,13 +55,12 @@ const (
 )
 
 var (
-	statusCheckDocker    = checkDocker
-	statusBackend        = statusSelectBackend
-	statusResolveProject = config.ResolveProject
-	statusNow            = time.Now
+	statusCheckDocker = checkDocker
+	statusBackend     = statusSelectBackend
+	statusNow         = time.Now
 )
 
-func runStatus(opts model.Options) int {
+func runStatus(opts model.Options, project model.Project) int {
 	if err := statusCheckDocker(); err != nil {
 		logx.Errorf(err.Error())
 		return 1
@@ -72,11 +70,6 @@ func runStatus(opts model.Options) int {
 	// directory by default; --all widens it to every project on the host.
 	projectHash := ""
 	if !opts.StatusAll {
-		project, err := statusResolveProject()
-		if err != nil {
-			logx.Errorf("resolve project: %v", err)
-			return 1
-		}
 		projectHash = project.Hash
 	}
 

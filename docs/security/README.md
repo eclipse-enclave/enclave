@@ -16,9 +16,21 @@ workflow. Rootless Docker is [not currently supported](rootless.md).
   metadata, in-container Git writes such as `git add` fail.
 - Additional host directories are explicit CLI/config inputs. Mounting sensitive
   paths expands the sandbox's host access.
-- Per-project Enclave config is keyed by project hash under the host config root,
-  outside the worktree. Project-scoped config cannot enable guarded options such
-  as unrestricted networking or writable project mounts.
+- Per-project Enclave config is keyed by the effective project namespace under
+  the host config root, outside the worktree. Project-scoped config cannot
+  enable guarded options such as unrestricted networking or writable project
+  mounts.
+- Git metadata never selects a project namespace. Untagged directories use a
+  canonical path hash; only the host-owned `project-tags.json` registry can
+  override it.
+- A project tag is an explicit trust decision. Exact members share project
+  secrets, project-scoped auth, persisted environment, generated config,
+  history, memory, caches,
+  network state, and cleanup scope. Do not assign untrusted checkouts to a tag
+  that carries sensitive project state.
+- Tag membership declares trust in a host path. Recreating a directory at the
+  same path preserves membership, while renaming it stops the match. Child
+  directories do not inherit the tag.
 
 ## Project-controlled execution
 

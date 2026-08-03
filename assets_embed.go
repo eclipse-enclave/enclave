@@ -27,7 +27,7 @@ import (
 //go:embed go.mod go.sum all:cmd/enclave-gateway-proxy
 //go:embed all:internal/appassets all:internal/config all:internal/domainpattern
 //go:embed all:internal/gateway/bundle all:internal/gateway/mitm all:internal/gateway/tlsstore
-//go:embed all:internal/git all:internal/logx all:internal/model all:internal/network all:internal/secretfile all:internal/util
+//go:embed all:internal/logx all:internal/model all:internal/network all:internal/secretfile all:internal/util
 var files embed.FS
 
 func init() {

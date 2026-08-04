@@ -97,6 +97,24 @@ is on your `PATH`. On macOS the default is `/usr/local/bin/`; copying there may
 need `sudo` or a writable `/usr/local/bin`. Override the destination with
 `make install INSTALL_BIN=...`.
 
+On Linux it also installs shell completions: bash into
+`~/.local/share/bash-completion/completions/`, which is picked up automatically,
+and zsh into `~/.local/share/zsh/site-functions/`, which zsh only searches once
+you add it to `fpath` in `~/.zshrc`, before whatever runs `compinit`:
+
+```zsh
+fpath=(~/.local/share/zsh/site-functions $fpath)
+```
+
+Frameworks such as oh-my-zsh and prezto call `compinit` themselves, so put the
+line above their setup and leave the rest to them. On a plain zsh setup that
+does not call it anywhere, add `autoload -U compinit && compinit` after the
+`fpath` line. Both completion paths honor `XDG_DATA_HOME` if you set it.
+
+The `.deb` and `.rpm` packages install both completions into system directories
+that need no such setup. Any shell can also generate its own script on demand
+with `enclave completion <bash|zsh|fish>`.
+
 ## Quick Start
 
 Run in any project directory:

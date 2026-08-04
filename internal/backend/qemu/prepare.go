@@ -29,7 +29,7 @@ func (b *Backend) PrepareStores(ctx context.Context, prep backend.StorePrep) (ba
 		}
 	}
 	if prep.Auth != nil {
-		if err := b.storage.Ensure(ctx, prep.Auth.Key, prep.Auth.Kind, ""); err != nil {
+		if err := b.storage.Ensure(ctx, prep.Auth.Key, backend.StoreKindAuth, ""); err != nil {
 			logx.Warnf("Failed to prepare %s shared auth store: %v", util.TitleCase(prep.Auth.Key.Owner), err)
 		}
 	}

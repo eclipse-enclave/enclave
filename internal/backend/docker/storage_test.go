@@ -27,6 +27,21 @@ func newFSStore(t *testing.T) StoreManager {
 	return StoreManager{host: model.Host{Home: t.TempDir(), UID: "1000", GID: "1000"}}
 }
 
+func TestPrepareStoresUsesSharedAuthStoreKind(t *testing.T) {
+	home := t.TempDir()
+	b := New(Options{Host: model.Host{Home: home}})
+	key := backend.StoreKey{Owner: "claude"}
+
+	if _, err := b.PrepareStores(context.Background(), backend.StorePrep{
+		Auth: &backend.StorePrepEntry{Key: key},
+	}); err != nil {
+		t.Fatalf("PrepareStores(auth): %v", err)
+	}
+	if _, err := os.Stat(config.HostStoreAuthDir(home, key.Owner, "")); err != nil {
+		t.Fatalf("shared auth store not created: %v", err)
+	}
+}
+
 func TestPrepareStoresCreatesFeatureStateStore(t *testing.T) {
 	home := t.TempDir()
 	b := New(Options{Host: model.Host{Home: home}})

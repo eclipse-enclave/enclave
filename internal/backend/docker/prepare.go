@@ -34,7 +34,7 @@ func (b *Backend) PrepareStores(ctx context.Context, prep backend.StorePrep) (ba
 		b.prepareConfigStore(*prep.Config)
 	}
 	if prep.Auth != nil {
-		b.ensureStoreDir(prep.Auth.Kind, prep.Auth.Key, util.TitleCase(prep.Auth.Key.Owner)+" shared auth store")
+		b.ensureStoreDir(backend.StoreKindAuth, prep.Auth.Key, util.TitleCase(prep.Auth.Key.Owner)+" shared auth store")
 	}
 	if prep.Env != nil {
 		b.ensureStoreDir(backend.StoreKindEnv, prep.Env.Key, "persistent "+model.AppName+" env store")

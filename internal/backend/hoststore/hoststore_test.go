@@ -29,6 +29,7 @@ func TestDirMapsEachKindToItsHostDirectory(t *testing.T) {
 		{"config default", backend.StoreKey{Owner: "codex", ProjectHash: "abc123abc123"}, backend.StoreKindConfig, config.HostStoreConfigDir(home, "codex", "abc123abc123", "default")},
 		{"config suffix", backend.StoreKey{Owner: "codex", ProjectHash: "abc123abc123", Suffix: "wt2"}, backend.StoreKindConfig, config.HostStoreConfigDir(home, "codex", "abc123abc123", "wt2")},
 		{"env", backend.StoreKey{Owner: "codex", ProjectHash: "abc123abc123"}, backend.StoreKindEnv, config.HostStoreEnvDir(home, "codex", "abc123abc123")},
+		{"feature state", backend.StoreKey{Owner: "state-probe", ProjectHash: "abc123abc123"}, backend.StoreKindFeatureState, config.HostStoreFeatureStateDir(home, "abc123abc123", "state-probe")},
 		{"auth default identity", backend.StoreKey{Owner: "codex"}, backend.StoreKindAuth, config.HostStoreAuthDir(home, "codex", "")},
 		{"auth named identity (--auth-name)", backend.StoreKey{Owner: "codex", Suffix: "personal"}, backend.StoreKindAuth, config.HostStoreAuthDir(home, "codex", "personal")},
 		{"feature auth", backend.StoreKey{Owner: "playwright"}, backend.StoreKindFeatureAuth, config.HostStoreFeatureAuthDir(home, "playwright")},
@@ -50,6 +51,12 @@ func TestDirIncompleteKeyIsEmpty(t *testing.T) {
 	if got := Dir(home, backend.StoreKey{ProjectHash: "abc123abc123"}, backend.StoreKindConfig); got != "" {
 		t.Fatalf("Dir() with missing owner = %q, want empty", got)
 	}
+	if got := Dir(home, backend.StoreKey{Owner: "state-probe"}, backend.StoreKindFeatureState); got != "" {
+		t.Fatalf("Dir() feature state with missing project hash = %q, want empty", got)
+	}
+	if got := Dir(home, backend.StoreKey{Owner: "codex", ProjectHash: "abc123abc123"}, backend.StoreKind("unknown")); got != "" {
+		t.Fatalf("Dir() with unknown kind = %q, want empty", got)
+	}
 }
 
 func TestDirRejectsMaliciousKeySegments(t *testing.T) {
@@ -64,6 +71,7 @@ func TestDirRejectsMaliciousKeySegments(t *testing.T) {
 		{"hash traversal", backend.StoreKey{Owner: "codex", ProjectHash: ".."}, backend.StoreKindConfig},
 		{"suffix traversal", backend.StoreKey{Owner: "codex", ProjectHash: "abc123abc123", Suffix: "../evil"}, backend.StoreKindConfig},
 		{"auth owner traversal", backend.StoreKey{Owner: "../evil"}, backend.StoreKindAuth},
+		{"feature state hash traversal", backend.StoreKey{Owner: "state-probe", ProjectHash: ".."}, backend.StoreKindFeatureState},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

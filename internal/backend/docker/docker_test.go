@@ -36,6 +36,7 @@ func TestDockerConfigBindMountsStoresFromExactStoreDirs(t *testing.T) {
 			{Kind: backend.StoreKindAuth, Key: backend.StoreKey{Owner: "codex"}, ContainerPath: "/auth", ReadOnly: true},
 			{Kind: backend.StoreKindEnv, Key: backend.StoreKey{Owner: "codex", ProjectHash: hash}, ContainerPath: "/env"},
 			{Kind: backend.StoreKindFeatureAuth, Key: backend.StoreKey{Owner: "playwright"}, ContainerPath: "/feature"},
+			{Kind: backend.StoreKindFeatureState, Key: backend.StoreKey{Owner: "state-probe", ProjectHash: hash}, ContainerPath: "/feature-state"},
 		},
 	}
 
@@ -45,10 +46,11 @@ func TestDockerConfigBindMountsStoresFromExactStoreDirs(t *testing.T) {
 		source   string
 		readOnly bool
 	}{
-		"/config":  {config.HostStoreConfigDir(home, "codex", hash, "default"), false},
-		"/auth":    {config.HostStoreAuthDir(home, "codex", ""), true},
-		"/env":     {config.HostStoreEnvDir(home, "codex", hash), false},
-		"/feature": {config.HostStoreFeatureAuthDir(home, "playwright"), false},
+		"/config":        {config.HostStoreConfigDir(home, "codex", hash, "default"), false},
+		"/auth":          {config.HostStoreAuthDir(home, "codex", ""), true},
+		"/env":           {config.HostStoreEnvDir(home, "codex", hash), false},
+		"/feature":       {config.HostStoreFeatureAuthDir(home, "playwright"), false},
+		"/feature-state": {config.HostStoreFeatureStateDir(home, hash, "state-probe"), false},
 	}
 
 	got := map[string]dockercmd.Mount{}

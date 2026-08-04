@@ -296,9 +296,15 @@ fi
 # feature's install never ran, so its runtime entrypoint must not fire either.
 # enclave_feature_enabled fails open when the manifest is absent (or the
 # helper is unavailable), preserving the prior all-features behavior.
+enclave_feature_state_root="${ENCLAVE_FEATURE_STATE_ROOT:-}"
 for ext_dir in "$enclave_features_dir"/*/; do
+    feature_name="$(basename "${ext_dir%/}")"
     if command -v enclave_feature_enabled >/dev/null 2>&1; then
-        enclave_feature_enabled "$(basename "${ext_dir%/}")" || continue
+        enclave_feature_enabled "$feature_name" || continue
+    fi
+    unset ENCLAVE_FEATURE_STATE_DIR
+    if [ -n "$enclave_feature_state_root" ] && [ -d "$enclave_feature_state_root/$feature_name" ]; then
+        export ENCLAVE_FEATURE_STATE_DIR="$enclave_feature_state_root/$feature_name"
     fi
     if [ -d "${ext_dir}feature-entrypoint.d" ]; then
         for script in "${ext_dir}feature-entrypoint.d"/*.sh; do
@@ -306,7 +312,9 @@ for ext_dir in "$enclave_features_dir"/*/; do
             [ -f "$script" ] && . "$script"
         done
     fi
+    unset ENCLAVE_FEATURE_STATE_DIR
 done
+unset ENCLAVE_FEATURE_STATE_ROOT enclave_feature_state_root
 
 # Seed extension init files declared in spec.yaml commands.initFiles, copy any
 # files/workspace trees into the project (never clobbering host files), then run

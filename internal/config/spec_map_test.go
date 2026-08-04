@@ -243,6 +243,7 @@ needsRoot: true
 priority: 50
 configDir: .config/gh
 authFiles: [hosts.yml, config.yml]
+state: true
 credentials:
   sources:
     github-token: { env: [GH_TOKEN, GITHUB_TOKEN] }
@@ -254,7 +255,7 @@ network:
 	if ext.Type != model.ExtensionKindMixin || ext.Name != "github-cli" {
 		t.Fatalf("kind->type wrong: %+v", ext)
 	}
-	if !ext.NeedsRoot || ext.ConfigDir != ".config/gh" || len(ext.AuthFiles) != 2 {
+	if !ext.NeedsRoot || ext.ConfigDir != ".config/gh" || len(ext.AuthFiles) != 2 || !ext.FeatureState {
 		t.Fatalf("mixin fields wrong: %+v", ext)
 	}
 	if !state.PrioritySet || ext.Priority != 50 {

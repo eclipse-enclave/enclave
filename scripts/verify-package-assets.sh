@@ -29,6 +29,13 @@ diff -qr "$repo_root/docs" "$app_root/docs"
 [ -f "$package_root/usr/share/doc/enclave/LICENSE.md" ]
 [ -f "$package_root/usr/share/doc/enclave/NOTICE.md" ]
 
+# Completions are only found if they sit in a directory the shell searches by
+# default, and that directory differs per distro: Debian uses
+# zsh/vendor-completions, Fedora zsh/site-functions.
+[ -f "$package_root/usr/share/bash-completion/completions/enclave" ]
+[ -f "$package_root/usr/share/zsh/vendor-completions/_enclave" ] ||
+    [ -f "$package_root/usr/share/zsh/site-functions/_enclave" ]
+
 # Assets must reach the package byte-for-byte. Packaging toolchains rewrite
 # files they mistake for host executables -- Fedora's brp-mangle-shebangs
 # rewrites /bin/sh to /usr/bin/sh, which does not exist in the Alpine gateway

@@ -10,6 +10,12 @@ supports multiple LLM providers (OpenAI, Anthropic, Google, Mistral).
 - **Config directory**: `~/.pi`
 - **Settings file**: `~/.pi/agent/settings.json`
 
+## Environment
+
+Enclave sets `PI_TELEMETRY=0` and `PI_SKIP_VERSION_CHECK=1` to disable Pi's
+install/update telemetry and version check while leaving model catalog refresh
+enabled. See Pi's upstream [environment-variable reference](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/environment-variables.md).
+
 ## API Keys
 
 | Variable | Purpose |
@@ -40,8 +46,6 @@ TLS/OCSP).
 Pi settings are seeded from `templates/settings.json` on first run. The upstream
 Pi settings schema supports `defaultProjectTrust`, but the default template stays
 empty so host settings passthrough behaves the same inside and outside Enclave.
-Enclave disables Pi's install telemetry and version check while leaving model
-catalog refresh enabled.
 
 Enclave runs Pi with `--approve` by default, so project-local Pi resources
 are trusted inside the sandbox without showing Pi's project trust prompt. This

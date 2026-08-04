@@ -1,7 +1,7 @@
 {
   "type": "sandbox",
   "name": "pi",
-  "description": "Coding agent CLI with read, bash, edit, write tools and session management",
+  "description": "A minimal terminal coding harness",
   "default_included": true,
   "priority": 100,
   "secrets": {

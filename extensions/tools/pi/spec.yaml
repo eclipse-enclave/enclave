@@ -9,7 +9,7 @@ schemaVersion: "1"
 kind: sandbox
 name: pi
 displayName: Pi Coding Agent
-description: Coding agent CLI with read, bash, edit, write tools and session management
+description: A minimal terminal coding harness
 
 sandbox:
   entrypoint: { run: [pi] }

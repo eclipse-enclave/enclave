@@ -19,6 +19,9 @@ workflow. Rootless Docker is [not currently supported](rootless.md).
 - Per-project Enclave config is keyed by project hash under the host config root,
   outside the worktree. Project-scoped config cannot enable guarded options such
   as unrestricted networking or writable project mounts.
+- Feature state stores are writable by every session that enables the feature
+  in the same project and are shared across tools. Treat them as a cross-tool
+  trust channel: one agent can influence data consumed by another.
 
 ## Project-controlled execution
 

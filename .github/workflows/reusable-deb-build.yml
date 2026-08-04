@@ -62,7 +62,7 @@ jobs:
           tmpdir=$(mktemp -d)
           trap 'rm -rf "$tmpdir"' EXIT
           dpkg-deb -x "$pkg" "$tmpdir"
-          ./scripts/verify-package-assets.sh "$tmpdir"
+          ./scripts/verify-package-assets.sh "$tmpdir" usr/share/zsh/vendor-completions
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:

@@ -46,6 +46,7 @@ mkdir -p bin completions
 # cgo so RPMs built on Debian or Ubuntu do not acquire host glibc requirements.
 CGO_ENABLED=0 go build -tags enclave_no_embed -mod=vendor -o bin/enclave ./cmd/enclave
 bin/enclave completion bash > completions/enclave
+bin/enclave completion zsh > completions/_enclave
 
 %install
 app_root="%{buildroot}%{_datadir}/%{name}"
@@ -88,6 +89,8 @@ done < internal/gateway/gateway_proxy_build_inputs.txt
 
 install -D -m 0644 completions/enclave \
     "%{buildroot}%{_datadir}/bash-completion/completions/enclave"
+install -D -m 0644 completions/_enclave \
+    "%{buildroot}%{_datadir}/zsh/site-functions/_enclave"
 
 install -D -m 0644 README.md "$doc_root/README.md"
 install -D -m 0644 docs/ARCHITECTURE.md "$doc_root/ARCHITECTURE.md"
@@ -107,6 +110,7 @@ rm -rf "%{buildroot}"
 %{_bindir}/enclave
 %{_datadir}/%{name}
 %{_datadir}/bash-completion/completions/enclave
+%{_datadir}/zsh/site-functions/_enclave
 %dir %{_datadir}/doc/%{name}
 %doc %{_datadir}/doc/%{name}/README.md
 %doc %{_datadir}/doc/%{name}/ARCHITECTURE.md

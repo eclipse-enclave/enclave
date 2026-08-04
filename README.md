@@ -97,6 +97,20 @@ is on your `PATH`. On macOS the default is `/usr/local/bin/`; copying there may
 need `sudo` or a writable `/usr/local/bin`. Override the destination with
 `make install INSTALL_BIN=...`.
 
+On Linux it also installs shell completions: bash into
+`~/.local/share/bash-completion/completions/`, which is picked up automatically,
+and zsh into `~/.local/share/zsh/site-functions/`, which zsh only searches once
+you add it to `fpath` in `~/.zshrc`:
+
+```zsh
+fpath=(~/.local/share/zsh/site-functions $fpath)
+autoload -U compinit && compinit
+```
+
+The `.deb` and `.rpm` packages install both completions into system directories
+that need no such setup. Any shell can also generate its own script on demand
+with `enclave completion <bash|zsh|fish>`.
+
 ## Quick Start
 
 Run in any project directory:

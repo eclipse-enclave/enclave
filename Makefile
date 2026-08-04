@@ -36,6 +36,7 @@ build: check-go
 completions:
 	mkdir -p $(COMPLETIONS_DIR)
 	$(BIN_DIR)/$(BINARY) completion bash > $(COMPLETIONS_DIR)/enclave
+	$(BIN_DIR)/$(BINARY) completion zsh > $(COMPLETIONS_DIR)/_enclave
 
 # make install now installs only the self-contained binary. This fixed path is
 # used solely for conservative cleanup of assets staged by older source
@@ -64,6 +65,11 @@ ifeq ($(UNAME_S),Linux)
 	# freedesktop shell completion (Linux only).
 	mkdir -p "$(HOME)/.local/share/bash-completion/completions"
 	cp $(COMPLETIONS_DIR)/enclave "$(HOME)/.local/share/bash-completion/completions/enclave"
+	mkdir -p "$(HOME)/.local/share/zsh/site-functions"
+	cp $(COMPLETIONS_DIR)/_enclave "$(HOME)/.local/share/zsh/site-functions/_enclave"
+	@# zsh has no user-level directory on its default fpath, so a completion
+	@# installed under the home directory is only found once ~/.zshrc adds it.
+	@command -v zsh >/dev/null 2>&1 && echo 'zsh completion installed; it is only picked up if ~/.zshrc has "fpath=(~/.local/share/zsh/site-functions $$fpath)" before compinit' || true
 endif
 	@echo "Installed $(INSTALL_BINARY_LABEL) to $(INSTALL_BIN)/$(BINARY)"
 
@@ -74,6 +80,7 @@ uninstall:
 	rm -f "$(INSTALL_BIN)/$(BINARY)"
 ifeq ($(UNAME_S),Linux)
 	rm -f "$(HOME)/.local/share/bash-completion/completions/enclave"
+	rm -f "$(HOME)/.local/share/zsh/site-functions/_enclave"
 endif
 	@echo "Uninstalled $(BINARY)"
 

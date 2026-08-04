@@ -21,6 +21,11 @@ LINT_TMP_DIR := ./.tmp
 LINT_GO_CACHE := $(LINT_TMP_DIR)/go-build
 LINT_GOLANGCI_CACHE := $(LINT_TMP_DIR)/golangci-lint-cache
 BASE_REF ?=
+# Completion install roots follow the XDG base directory spec, like
+# scripts/clean-state.sh, so install and cleanup agree when XDG_DATA_HOME is set.
+DATA_HOME ?= $(or $(XDG_DATA_HOME),$(HOME)/.local/share)
+ZSH_COMPLETION_DIR := $(DATA_HOME)/zsh/site-functions
+BASH_COMPLETION_DIR := $(DATA_HOME)/bash-completion/completions
 
 build: check-go
 	mkdir -p $(BIN_DIR)
@@ -64,13 +69,13 @@ install-binary: clean-legacy-assets
 	mv -f "$(INSTALL_BIN)/$(BINARY).new" "$(INSTALL_BIN)/$(BINARY)"
 ifeq ($(UNAME_S),Linux)
 	# freedesktop shell completion (Linux only).
-	mkdir -p "$(HOME)/.local/share/bash-completion/completions"
-	cp $(COMPLETIONS_DIR)/enclave "$(HOME)/.local/share/bash-completion/completions/enclave"
-	mkdir -p "$(HOME)/.local/share/zsh/site-functions"
-	cp $(COMPLETIONS_DIR)/_enclave "$(HOME)/.local/share/zsh/site-functions/_enclave"
+	mkdir -p "$(BASH_COMPLETION_DIR)"
+	cp $(COMPLETIONS_DIR)/enclave "$(BASH_COMPLETION_DIR)/enclave"
+	mkdir -p "$(ZSH_COMPLETION_DIR)"
+	cp $(COMPLETIONS_DIR)/_enclave "$(ZSH_COMPLETION_DIR)/_enclave"
 	@# zsh has no user-level directory on its default fpath, so a completion
 	@# installed under the home directory is only found once ~/.zshrc adds it.
-	@command -v zsh >/dev/null 2>&1 && echo 'zsh completion installed; it is only picked up if ~/.zshrc has "fpath=(~/.local/share/zsh/site-functions $$fpath)" before compinit' || true
+	@command -v zsh >/dev/null 2>&1 && echo 'zsh completion installed; it is only picked up if ~/.zshrc has "fpath=($(ZSH_COMPLETION_DIR) $$fpath)" before whatever runs compinit' || true
 endif
 	@echo "Installed $(INSTALL_BINARY_LABEL) to $(INSTALL_BIN)/$(BINARY)"
 
@@ -80,8 +85,9 @@ clean-legacy-assets:
 uninstall:
 	rm -f "$(INSTALL_BIN)/$(BINARY)"
 ifeq ($(UNAME_S),Linux)
-	rm -f "$(HOME)/.local/share/bash-completion/completions/enclave"
-	rm -f "$(HOME)/.local/share/zsh/site-functions/_enclave"
+	rm -f "$(BASH_COMPLETION_DIR)/enclave"
+	rm -f "$(ZSH_COMPLETION_DIR)/_enclave"
+	@command -v zsh >/dev/null 2>&1 && echo 'zsh completion removed; the matching "fpath=($(ZSH_COMPLETION_DIR) ...)" line in ~/.zshrc is now unused' || true
 endif
 	@echo "Uninstalled $(BINARY)"
 

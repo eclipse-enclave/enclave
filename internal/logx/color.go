@@ -40,16 +40,25 @@ func colorPrefix(label string, color Color) string {
 	return Colorize(label+": ", color)
 }
 
-func resolveColorEnabled() bool {
+// ColorSuppressedByEnv reports whether the environment explicitly disables
+// colored output, regardless of whether a terminal is attached. Consumers that
+// paint something other than log text (see internal/termtint) honor the same
+// opt-out without inheriting the stderr-based auto-detection below.
+func ColorSuppressedByEnv() bool {
 	if os.Getenv("NO_COLOR") != "" {
+		return true
+	}
+	return strings.ToLower(strings.TrimSpace(os.Getenv(model.EnvColor))) == "never"
+}
+
+func resolveColorEnabled() bool {
+	if ColorSuppressedByEnv() {
 		return false
 	}
 
 	switch strings.ToLower(strings.TrimSpace(os.Getenv(model.EnvColor))) {
 	case "always":
 		return true
-	case "never":
-		return false
 	case "", "auto":
 		fallthrough
 	default:

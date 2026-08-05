@@ -43,6 +43,7 @@ func TestMergeOptionSourcesCoversAllFields(t *testing.T) {
 			AllowDomains:     SourceCLI,
 			BridgePorts:      SourceCLI,
 			SessionName:      SourceCLI,
+			SessionTint:      SourceCLI,
 			PlaywrightMCP:    SourceCLI,
 		},
 		AuthOptionSources: AuthOptionSources{

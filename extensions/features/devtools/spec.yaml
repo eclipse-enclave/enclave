@@ -18,6 +18,7 @@ aptPackages:
   - htop
   - tree
   - golang-go
+  - rpm
   - shellcheck
   - yq
   - ripgrep

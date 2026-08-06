@@ -1,34 +1,30 @@
 # Security Policy
 
-Eclipse Enclave adheres to the [Eclipse Foundation Vulnerability Reporting
-Policy](https://www.eclipse.org/security/policy/).
+This Eclipse Foundation Project adheres to the [Eclipse Foundation Vulnerability Reporting Policy](https://www.eclipse.org/security/policy/).
 
-## How to Report a Vulnerability
+## How To Report a Vulnerability
 
-If you believe you have found a vulnerability, report it through coordinated
-disclosure.
+If you think you have found a vulnerability in this repository, please report it to us through coordinated disclosure.
 
-**Do not report security vulnerabilities through public issues, discussions,
-or pull requests.**
+**Please do not report security vulnerabilities through public issues, discussions, or pull requests.**
 
-Instead, use one of these private channels:
+Instead, please create a [confidential issue](https://gitlab.eclipse.org/security/vulnerability-reports/-/issues/new?issuable_template=new_vulnerability) in the Eclipse Foundation Vulnerability Reporting Tracker.
 
-- Email the [Eclipse Foundation Security
-  Team](mailto:security@eclipse-foundation.org).
-- Create a [confidential issue in the Eclipse Foundation Vulnerability
-  Reporting
-  Tracker](https://gitlab.eclipse.org/security/vulnerability-reports/-/issues/new?issuable_template=new_vulnerability).
+You can find more information about reporting and disclosure at the [Eclipse Foundation Security page](https://www.eclipse.org/security/).
 
-See the [Eclipse Foundation Security page](https://www.eclipse.org/security/)
-for more information about reporting and disclosure.
+Please include as much of the information listed below as you can to help us better understand and resolve the issue:
 
-Include as much of the following information as possible:
+* The type of issue (e.g., buffer overflow, SQL injection, or cross-site scripting)
+* Affected version(s)
+* Impact of the issue, including how an attacker might exploit the issue
+* Step-by-step instructions to reproduce the issue
+* The location of the affected source code (tag/branch/commit or direct URL)
+* Full paths of source file(s) related to the manifestation of the issue
+* Configuration required to reproduce the issue
+* Log files that are related to this issue (if possible)
+* Proof-of-concept or exploit code (if possible)
 
-- The type and impact of the issue.
-- Affected versions, branches, or commits.
-- Steps and configuration required to reproduce it.
-- The relevant source file locations.
-- Related log files, proof-of-concept code, or exploit code when available.
+This information will help us triage your report more quickly.
 
 ## Supported Versions
 

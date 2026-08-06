@@ -24,10 +24,13 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Build (CLI only)
+      - name: Build CLI
         run: CGO_ENABLED=0 go build ./cmd/enclave
 
-      - name: Cross-compile (macOS arm64)
+      - name: Smoke test standalone binary
+        run: ./scripts/smoke-standalone-binary.sh ./enclave
+
+      - name: Cross-compile (macOS and Windows)
         run: make cross-build
 
       - name: Vet

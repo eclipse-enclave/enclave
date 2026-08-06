@@ -52,9 +52,14 @@ With no command, starts a new agent session (`run` is implicit).
 
 These are host-side attach commands, not tool selections: they launch the
 host-installed IDE against an already-running container of any tool. With
-exactly one running container, the name may be omitted. To start a new
-session container that auto-launches the IDE on top, use the corresponding
-tool profile instead (`enclave --tool theia`); see [Tools](tools.md).
+exactly one running container, the name may be omitted.
+
+To start a new session container that auto-launches the IDE on top, use the
+corresponding tool profile instead (`enclave --tool theia`); see
+[Tools](tools.md). The IDE tool profiles run detached automatically: a bare
+`enclave --tool theia` starts the container in the background and opens the IDE
+in one step, printing the container name so you can reattach later with
+`enclave theia <container>`.
 
 ### Network
 

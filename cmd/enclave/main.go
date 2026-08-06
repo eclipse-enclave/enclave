@@ -10,6 +10,7 @@ package main
 import (
 	"os"
 
+	_ "enclave"
 	"enclave/internal/app"
 )
 

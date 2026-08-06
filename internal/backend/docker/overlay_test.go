@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"enclave/internal/model"
 	yaruntime "enclave/internal/runtime"
@@ -182,6 +183,137 @@ func TestOverlayConfigDirPreservesDevcontainerStamps(t *testing.T) {
 	}
 	if string(freshSettings) != `{"source":"fresh"}` {
 		t.Fatalf("unexpected fresh settings content: %s", string(freshSettings))
+	}
+}
+
+func TestOverlayConfigDirPreservesModificationTimes(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	sourceDir := filepath.Join(root, "source")
+	targetDir := filepath.Join(root, "target")
+	sessionDir := filepath.Join(targetDir, "projects", "repo")
+	transcriptPath := filepath.Join(sessionDir, "session.jsonl")
+	if err := os.MkdirAll(sourceDir, 0o755); err != nil {
+		t.Fatalf("mkdir source: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sourceDir, "settings.json"), []byte("new"), 0o600); err != nil {
+		t.Fatalf("write source settings: %v", err)
+	}
+	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
+		t.Fatalf("mkdir session dir: %v", err)
+	}
+	if err := os.WriteFile(transcriptPath, []byte(`{"session":"keep"}`), 0o600); err != nil {
+		t.Fatalf("write transcript: %v", err)
+	}
+
+	oldTime := time.Date(2025, time.January, 2, 3, 4, 5, 123456789, time.UTC)
+	if err := os.Chtimes(transcriptPath, oldTime, oldTime); err != nil {
+		t.Fatalf("set transcript timestamps: %v", err)
+	}
+	if err := os.Chtimes(sessionDir, oldTime, oldTime); err != nil {
+		t.Fatalf("set session directory timestamps: %v", err)
+	}
+	transcriptBefore, err := os.Stat(transcriptPath)
+	if err != nil {
+		t.Fatalf("stat transcript before overlay: %v", err)
+	}
+	sessionDirBefore, err := os.Stat(sessionDir)
+	if err != nil {
+		t.Fatalf("stat session directory before overlay: %v", err)
+	}
+
+	profile := model.Profile{Name: "claude"}
+	if err := overlayConfigDir(targetDir, sourceDir, yaruntime.ConfigSourcePreservePaths(profile)); err != nil {
+		t.Fatalf("overlay failed: %v", err)
+	}
+
+	settings, err := os.ReadFile(filepath.Join(targetDir, "settings.json"))
+	if err != nil {
+		t.Fatalf("read overlaid settings: %v", err)
+	}
+	if string(settings) != "new" {
+		t.Fatalf("overlaid settings = %q, want new", settings)
+	}
+	transcript, err := os.ReadFile(transcriptPath)
+	if err != nil {
+		t.Fatalf("read preserved transcript: %v", err)
+	}
+	if string(transcript) != `{"session":"keep"}` {
+		t.Fatalf("preserved transcript = %q", transcript)
+	}
+	transcriptAfter, err := os.Stat(transcriptPath)
+	if err != nil {
+		t.Fatalf("stat transcript after overlay: %v", err)
+	}
+	if !transcriptAfter.ModTime().Equal(transcriptBefore.ModTime()) {
+		t.Fatalf("transcript mtime = %v, want %v", transcriptAfter.ModTime(), transcriptBefore.ModTime())
+	}
+	sessionDirAfter, err := os.Stat(sessionDir)
+	if err != nil {
+		t.Fatalf("stat session directory after overlay: %v", err)
+	}
+	if !sessionDirAfter.ModTime().Equal(sessionDirBefore.ModTime()) {
+		t.Fatalf("session directory mtime = %v, want %v", sessionDirAfter.ModTime(), sessionDirBefore.ModTime())
+	}
+}
+
+func TestOverlayConfigDirPreservesModificationTimesOfNestedPreserveParents(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	sourceDir := filepath.Join(root, "source")
+	targetDir := filepath.Join(root, "target")
+	// agent/sessions/ is a nested preserve pattern, so agent/ exists in the
+	// store only as a directory on the way to the preserved node.
+	agentDir := filepath.Join(targetDir, "agent")
+	sessionDir := filepath.Join(agentDir, "sessions")
+	transcriptPath := filepath.Join(sessionDir, "resume.jsonl")
+	if err := os.MkdirAll(sourceDir, 0o755); err != nil {
+		t.Fatalf("mkdir source: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sourceDir, "settings.json"), []byte("new"), 0o600); err != nil {
+		t.Fatalf("write source settings: %v", err)
+	}
+	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
+		t.Fatalf("mkdir session dir: %v", err)
+	}
+	if err := os.WriteFile(transcriptPath, []byte(`{"id":"keep"}`), 0o600); err != nil {
+		t.Fatalf("write transcript: %v", err)
+	}
+
+	oldTime := time.Date(2025, time.January, 2, 3, 4, 5, 123456789, time.UTC)
+	for _, p := range []string{transcriptPath, sessionDir, agentDir} {
+		if err := os.Chtimes(p, oldTime, oldTime); err != nil {
+			t.Fatalf("set timestamps on %s: %v", p, err)
+		}
+	}
+	agentDirBefore, err := os.Stat(agentDir)
+	if err != nil {
+		t.Fatalf("stat agent directory before overlay: %v", err)
+	}
+
+	profile := model.Profile{Name: "pi"}
+	if err := overlayConfigDir(targetDir, sourceDir, yaruntime.ConfigSourcePreservePaths(profile)); err != nil {
+		t.Fatalf("overlay failed: %v", err)
+	}
+
+	transcript, err := os.ReadFile(transcriptPath)
+	if err != nil {
+		t.Fatalf("read preserved transcript: %v", err)
+	}
+	if string(transcript) != `{"id":"keep"}` {
+		t.Fatalf("preserved transcript = %q", transcript)
+	}
+	agentDirAfter, err := os.Stat(agentDir)
+	if err != nil {
+		t.Fatalf("stat agent directory after overlay: %v", err)
+	}
+	if !agentDirAfter.ModTime().Equal(agentDirBefore.ModTime()) {
+		t.Fatalf("agent directory mtime = %v, want %v", agentDirAfter.ModTime(), agentDirBefore.ModTime())
+	}
+	if agentDirAfter.Mode().Perm() != agentDirBefore.Mode().Perm() {
+		t.Fatalf("agent directory mode = %v, want %v", agentDirAfter.Mode().Perm(), agentDirBefore.Mode().Perm())
 	}
 }
 

@@ -14,7 +14,7 @@
 # secrets — while removing everything else.
 #
 # This is intentionally self-contained (plain docker + rm; --everything may use
-# dpkg/sudo for Debian package removal) so it works from any branch, even one
+# dpkg, rpm, and sudo for package removal) so it works from any branch, even one
 # whose `enclave` binary is not built or behaves differently.
 # For everyday, in-app cleanup prefer `enclave cleanup` (see --help there).
 #
@@ -211,6 +211,7 @@ fi
 install_paths=()
 skipped_repo_install_paths=()
 debian_package=false
+rpm_package=false
 
 add_install_path() {
     local path="$1"
@@ -255,17 +256,25 @@ is_debian_package_installed() {
     [[ "$status" == ii* ]]
 }
 
+is_rpm_package_installed() {
+    command -v rpm >/dev/null 2>&1 || return 1
+    rpm --quiet --query "$APP" >/dev/null 2>&1
+}
+
 collect_install_paths() {
     local default_data_home bin_path
 
     if is_debian_package_installed; then
         debian_package=true
     fi
+    if is_rpm_package_installed; then
+        rpm_package=true
+    fi
 
     add_install_path "${home}/.local/bin/${APP}"
     if bin_path="$(type -P "$APP" 2>/dev/null)"; then
         # Also catch custom per-user installs such as ~/bin/enclave. System
-        # locations are handled explicitly below (or by dpkg for Debian installs)
+        # locations are handled explicitly below (or by the system package manager)
         # to avoid deleting unrelated package-manager store paths.
         if [[ "$bin_path" == "${home}/"* ]]; then
             add_install_path "$bin_path"
@@ -282,7 +291,7 @@ collect_install_paths() {
     add_data_install_paths "/usr/local/share"
     add_install_path "/usr/local/share/doc/${APP}"
 
-    if ! $debian_package; then
+    if ! $debian_package && ! $rpm_package; then
         add_install_path "/usr/bin/${APP}"
         add_data_install_paths "/usr/share"
         add_install_path "/usr/share/doc/${APP}"
@@ -324,6 +333,9 @@ if $everything; then
     if $debian_package; then
         print_list "Debian package to purge" "$APP"
     fi
+    if $rpm_package; then
+        print_list "RPM package to erase" "$APP"
+    fi
     print_list "installation paths to remove" "${install_paths[@]}"
     if ((${#skipped_repo_install_paths[@]})); then
         print_list "source checkout/repo paths KEPT" "${skipped_repo_install_paths[@]}"
@@ -346,6 +358,7 @@ nothing=true
 ((${#dirs[@]}))           && nothing=false
 ((${#install_paths[@]}))  && nothing=false
 $debian_package           && nothing=false
+$rpm_package              && nothing=false
 
 # Build-cache prune is worthwhile on its own (it reclaims enclave's orphaned
 # BuildKit layers), so only short-circuit when there is truly nothing to do.
@@ -401,6 +414,13 @@ purge_debian_package() {
     fi
 }
 
+erase_rpm_package() {
+    echo "Erasing RPM package..."
+    if ! run_privileged rpm --erase "$APP"; then
+        echo "warning: failed to erase RPM package '$APP' (try: sudo rpm --erase $APP)" >&2
+    fi
+}
+
 remove_install_path() {
     local path="$1"
 
@@ -417,6 +437,9 @@ remove_install_path() {
 if $everything; then
     if $debian_package; then
         purge_debian_package
+    fi
+    if $rpm_package; then
+        erase_rpm_package
     fi
     if ((${#install_paths[@]})); then
         echo "Removing installation paths..."

@@ -26,7 +26,6 @@ func TestXDGRootsFallBackUnderHome(t *testing.T) {
 		{"config", xdgConfigRoot(home), filepath.Join(home, ".config", "enclave")},
 		{"state", xdgStateRoot(home), filepath.Join(home, ".local", "state", "enclave")},
 		{"cache", xdgCacheRoot(home), filepath.Join(home, ".cache", "enclave")},
-		{"data", xdgDataRoot(home), filepath.Join(home, ".local", "share", "enclave")},
 	}
 	for _, tc := range cases {
 		if tc.got != tc.want {
@@ -40,7 +39,6 @@ func TestXDGRootsHonorAbsoluteEnvOverride(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", "/custom/config")
 	t.Setenv("XDG_STATE_HOME", "/custom/state")
 	t.Setenv("XDG_CACHE_HOME", "/custom/cache")
-	t.Setenv("XDG_DATA_HOME", "/custom/data")
 
 	cases := []struct {
 		name string
@@ -50,7 +48,6 @@ func TestXDGRootsHonorAbsoluteEnvOverride(t *testing.T) {
 		{"config", xdgConfigRoot(home), filepath.Join("/custom/config", "enclave")},
 		{"state", xdgStateRoot(home), filepath.Join("/custom/state", "enclave")},
 		{"cache", xdgCacheRoot(home), filepath.Join("/custom/cache", "enclave")},
-		{"data", xdgDataRoot(home), filepath.Join("/custom/data", "enclave")},
 	}
 	for _, tc := range cases {
 		if tc.got != tc.want {
@@ -81,7 +78,6 @@ func TestMacRootsUseAppleLayout(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", "/custom/config")
 	t.Setenv("XDG_STATE_HOME", "/custom/state")
 	t.Setenv("XDG_CACHE_HOME", "/custom/cache")
-	t.Setenv("XDG_DATA_HOME", "/custom/data")
 
 	home := "/Users/tester"
 	appSupport := filepath.Join(home, "Library", "Application Support", model.AppID)
@@ -92,7 +88,6 @@ func TestMacRootsUseAppleLayout(t *testing.T) {
 	}{
 		{"config", macConfigRoot(home), filepath.Join(appSupport, "config")},
 		{"state", macStateRoot(home), filepath.Join(appSupport, "state")},
-		{"data", macDataRoot(home), filepath.Join(appSupport, "data")},
 		{"cache", macCacheRoot(home), filepath.Join(home, "Library", "Caches", model.AppID)},
 	}
 	for _, tc := range cases {
@@ -132,7 +127,7 @@ func isUnder(path string, root string) bool {
 // environment does not leak into tests that assert the spec fallbacks.
 func unsetXDGEnv(t *testing.T) {
 	t.Helper()
-	for _, key := range []string{"XDG_CONFIG_HOME", "XDG_STATE_HOME", "XDG_CACHE_HOME", "XDG_DATA_HOME"} {
+	for _, key := range []string{"XDG_CONFIG_HOME", "XDG_STATE_HOME", "XDG_CACHE_HOME"} {
 		t.Setenv(key, "")
 	}
 }

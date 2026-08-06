@@ -9,8 +9,8 @@
 
 /* ==========================================================================
    Eclipse Enclave marketing site.
-   These tokens are the single source of truth for the look and feel; the
-   Docusaurus theme in website/docs/ mirrors the same values.
+   These tokens are the single source of truth for this page. The Docusaurus
+   theme in website/docs/ carries its own palette and is edited separately.
    ========================================================================== */
 
 :root {
@@ -24,7 +24,7 @@
   /* Text */
   --text: #4a5261;
   --heading: #14181f;
-  --muted: #7a8291;
+  --muted: #616a79;
 
   /* A restrained indigo/violet accent for the AI feel */
   --accent: #4f46e5;
@@ -36,9 +36,9 @@
   /* Signal colors */
   --amber: #b45309;
   --amber-soft: #fef6e7;
-  --green: #059669;
+  --green: #047857;
   --green-soft: #ecfdf5;
-  --red: #dc2626;
+  --red: #b91c1c;
 
   --radius: 16px;
   --radius-sm: 10px;
@@ -142,13 +142,12 @@ h2 + .section-lead { margin-top: 0; }
 /* ------- Hero ------- */
 .hero {
   text-align: center;
-  padding: 104px 24px 84px;
+  padding: 84px 24px 76px;
   background:
     radial-gradient(680px 340px at 50% -8%, rgba(124, 58, 237, 0.10), transparent 70%),
     radial-gradient(520px 300px at 82% 8%, rgba(79, 70, 229, 0.08), transparent 70%),
     var(--bg);
 }
-.hero img.logo { width: 76px; height: 76px; margin-bottom: 22px; }
 .hero h1 {
   font-size: clamp(2.3rem, 5.5vw, 3.4rem);
   font-weight: 850;
@@ -201,19 +200,25 @@ h2 + .section-lead { margin-top: 0; }
 }
 .hero-cmd .note::before { content: '# '; }
 .hero-actions { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; margin-bottom: 30px; }
-.badges { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
-.badge {
-  display: inline-block;
-  padding: 5px 14px;
-  border-radius: 20px;
-  font-size: 0.8rem;
-  font-weight: 600;
-  background: var(--bg-subtle);
-  border: 1px solid var(--border);
+.hero-facts {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px 22px;
+  font-size: 0.88rem;
   color: var(--muted);
 }
-.badge.open-source { color: var(--green); border-color: #a7f3d0; background: var(--green-soft); }
-.badge.coming-soon { color: #fff; border-color: transparent; background: var(--grad); }
+.hero-facts li { display: inline-flex; align-items: center; gap: 7px; }
+.hero-facts li::before {
+  content: '';
+  flex: none;
+  width: 13px;
+  height: 13px;
+  background: var(--accent);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='20 6 9 17 4 12'/%3E%3C/svg%3E") no-repeat center / contain;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='20 6 9 17 4 12'/%3E%3C/svg%3E") no-repeat center / contain;
+}
 
 /* ------- Card grids ------- */
 .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
@@ -223,9 +228,7 @@ h2 + .section-lead { margin-top: 0; }
   border-radius: var(--radius);
   padding: 26px 28px;
   box-shadow: var(--shadow-sm);
-  transition: transform 0.12s ease, box-shadow 0.15s ease, border-color 0.15s ease;
 }
-.card:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); border-color: #dcdbf7; }
 .card h3 { font-size: 1.05rem; font-weight: 700; color: var(--heading); margin-bottom: 8px; }
 .card p { font-size: 0.94rem; color: var(--text); line-height: 1.6; }
 .card .icon {
@@ -254,6 +257,8 @@ h2 + .section-lead { margin-top: 0; }
   box-shadow: var(--shadow-sm);
 }
 .diagram-wrap svg { width: 100%; height: auto; }
+/* Authored near 1:1, so cap the width rather than letting it scale up. */
+.diagram-stacked { display: none; max-width: 340px; margin: 0 auto; }
 .diagram-caption { font-size: 0.9rem; color: var(--muted); margin-top: 16px; }
 
 /* ------- UI preview (coming soon) ------- */
@@ -346,7 +351,7 @@ h2 + .section-lead { margin-top: 0; }
   box-shadow: var(--shadow-md);
 }
 .cli-block .cmd { color: #a5b4fc; }
-.cli-block .comment { color: #6b7280; }
+.cli-block .comment { color: #858e9c; }
 .cli-block .flag { color: #fcd34d; }
 
 /* ------- Compliance ------- */
@@ -394,5 +399,8 @@ footer.site-footer a { font-weight: 600; }
   .nav-links { gap: 16px; }
   .nav-links a.hide-sm { display: none; }
   section { padding: 54px 0; }
-  .hero { padding: 72px 20px 60px; }
+  .hero { padding: 56px 20px 56px; }
+  .diagram-wide { display: none; }
+  .diagram-stacked { display: block; }
+  .diagram-wrap { padding: 24px 16px 18px; }
 }

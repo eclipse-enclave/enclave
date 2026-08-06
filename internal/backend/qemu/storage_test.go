@@ -12,10 +12,12 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"enclave/internal/backend"
 	"enclave/internal/config"
 	"enclave/internal/model"
+	yaruntime "enclave/internal/runtime"
 )
 
 func TestStoreManagerReadWriteRemove(t *testing.T) {
@@ -154,6 +156,84 @@ func TestPrepareStoresConfigOverlayPreservesAuthFiles(t *testing.T) {
 	}
 	if string(settings) != "new" {
 		t.Fatalf("settings = %q, want new", settings)
+	}
+}
+
+func TestPrepareStoresConfigOverlayPreservesModificationTimes(t *testing.T) {
+	be := New(Options{Host: model.Host{Home: t.TempDir()}})
+	key := backend.StoreKey{Owner: "claude", ProjectHash: "abc123def456"}
+	ctx := context.Background()
+
+	root, err := be.storage.MountSource(key, backend.StoreKindConfig)
+	if err != nil {
+		t.Fatalf("mount source: %v", err)
+	}
+	sessionDir := filepath.Join(root, "projects", "repo")
+	transcriptPath := filepath.Join(sessionDir, "session.jsonl")
+	if err := os.MkdirAll(sessionDir, 0o700); err != nil {
+		t.Fatalf("mkdir session dir: %v", err)
+	}
+	if err := os.WriteFile(transcriptPath, []byte(`{"session":"keep"}`), 0o600); err != nil {
+		t.Fatalf("write transcript: %v", err)
+	}
+
+	oldTime := time.Date(2025, time.January, 2, 3, 4, 5, 123456789, time.UTC)
+	if err := os.Chtimes(transcriptPath, oldTime, oldTime); err != nil {
+		t.Fatalf("set transcript timestamps: %v", err)
+	}
+	if err := os.Chtimes(sessionDir, oldTime, oldTime); err != nil {
+		t.Fatalf("set session directory timestamps: %v", err)
+	}
+	transcriptBefore, err := os.Stat(transcriptPath)
+	if err != nil {
+		t.Fatalf("stat transcript before overlay: %v", err)
+	}
+	sessionDirBefore, err := os.Stat(sessionDir)
+	if err != nil {
+		t.Fatalf("stat session directory before overlay: %v", err)
+	}
+
+	source := t.TempDir()
+	if err := os.WriteFile(filepath.Join(source, "settings.json"), []byte("new"), 0o600); err != nil {
+		t.Fatalf("write source: %v", err)
+	}
+	if _, err := be.PrepareStores(ctx, backend.StorePrep{Config: &backend.ConfigStorePrep{
+		Key: key,
+		Overlay: &backend.ConfigOverlaySpec{
+			SourceDir:     source,
+			PreservePaths: yaruntime.ConfigSourcePreservePaths(model.Profile{Name: "claude"}),
+		},
+	}}); err != nil {
+		t.Fatalf("PrepareStores: %v", err)
+	}
+
+	settings, err := os.ReadFile(filepath.Join(root, "settings.json"))
+	if err != nil {
+		t.Fatalf("read overlaid settings: %v", err)
+	}
+	if string(settings) != "new" {
+		t.Fatalf("overlaid settings = %q, want new", settings)
+	}
+	transcript, err := os.ReadFile(transcriptPath)
+	if err != nil {
+		t.Fatalf("read preserved transcript: %v", err)
+	}
+	if string(transcript) != `{"session":"keep"}` {
+		t.Fatalf("preserved transcript = %q", transcript)
+	}
+	transcriptAfter, err := os.Stat(transcriptPath)
+	if err != nil {
+		t.Fatalf("stat transcript after overlay: %v", err)
+	}
+	if !transcriptAfter.ModTime().Equal(transcriptBefore.ModTime()) {
+		t.Fatalf("transcript mtime = %v, want %v", transcriptAfter.ModTime(), transcriptBefore.ModTime())
+	}
+	sessionDirAfter, err := os.Stat(sessionDir)
+	if err != nil {
+		t.Fatalf("stat session directory after overlay: %v", err)
+	}
+	if !sessionDirAfter.ModTime().Equal(sessionDirBefore.ModTime()) {
+		t.Fatalf("session directory mtime = %v, want %v", sessionDirAfter.ModTime(), sessionDirBefore.ModTime())
 	}
 }
 

@@ -51,7 +51,7 @@
   /* Text */
   --ifm-heading-color: #101d30;
   --ifm-color-content: #43516b;
-  --ifm-color-content-secondary: #6b7791;
+  --ifm-color-content-secondary: #5a6780;
   --ifm-toc-border-color: #e0e8f2;
   --ifm-hr-border-color: #e0e8f2;
   --ifm-menu-color: #55617a;
@@ -368,7 +368,7 @@ div[class^='codeBlockContainer'],
   color: #ffffff;
 }
 .footer__copyright {
-  color: #6b7791;
+  color: #8b97ae;
   font-size: 0.85rem;
 }
 

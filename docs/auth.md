@@ -118,6 +118,10 @@ are denied.
 
 Codex OAuth note: the OAuth callback redirects to `http://localhost:1455/auth/callback`. enclave auto-maps port 1455 when no session exists. If you need to re-login, add `-p 1455`. Gateway logs will show `Loopback proxy (socat) enabled on port 1455` when forwarding is active.
 
+Pi Anthropic OAuth note: Enclave does not auto-map the callback port. Add
+`-p 53692` when starting a Pi session in which you intend to log in with
+Anthropic OAuth.
+
 OpenCode ChatGPT subscription note: for `opencode`, complete OpenAI browser auth from the CLI inside the container rather than from `/connect` in the TUI. Use:
 
 ```bash

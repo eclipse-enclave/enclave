@@ -20,6 +20,7 @@ func TestCollectAppRootModeIssuesReportsRestrictiveAssets(t *testing.T) {
 	writeModeTestFile(t, filepath.Join(root, "runtime-assets", "build-scripts", "lib", "common.sh"), 0o640)
 	writeModeTestFile(t, filepath.Join(root, "runtime-assets", "build-scripts", "bin", "helper"), 0o644)
 	writeModeTestFile(t, filepath.Join(root, "runtime-assets", "auth-reconcile.sh"), 0o640)
+	writeModeTestFile(t, filepath.Join(root, "runtime-assets", "kit-init.sh"), 0o640)
 	writeModeTestFile(t, filepath.Join(root, "runtime-assets", "net.sh"), 0o644)
 	writeModeTestFile(t, filepath.Join(root, "runtime-assets", "tmux-session.conf"), 0o644)
 	writeModeTestFile(t, filepath.Join(root, "extensions", "tools", "claude", "spec.yaml"), 0o640)
@@ -35,6 +36,7 @@ func TestCollectAppRootModeIssuesReportsRestrictiveAssets(t *testing.T) {
 		"runtime-assets/build-scripts/lib/common.sh lacks world read/execute permission",
 		"runtime-assets/build-scripts/bin/helper lacks world execute permission",
 		"runtime-assets/auth-reconcile.sh lacks world read permission",
+		"runtime-assets/kit-init.sh lacks world read permission",
 		"extensions/tools/claude/spec.yaml lacks world read permission",
 		"extensions/tools/claude/install.sh lacks world execute permission",
 	} {

@@ -8,8 +8,8 @@
 schemaVersion: "1"
 kind: sandbox
 name: pi
-displayName: Anthropic Claude Pi
-description: Anthropic Claude Pi
+displayName: Pi Coding Agent
+description: A minimal terminal coding harness
 
 sandbox:
   entrypoint: { run: [pi] }
@@ -31,11 +31,17 @@ sandbox:
     - agent/skills/
     - agent/themes/
 
+environment:
+  variables:
+    PI_SKIP_VERSION_CHECK: "1"
+    PI_TELEMETRY: "0"
+
 credentials:
   sources:
     openai-api-key: { env: [OPENAI_API_KEY] }
     anthropic-api-key: { env: [ANTHROPIC_API_KEY] }
     gemini-api-key: { env: [GEMINI_API_KEY] }
+    mistral-api-key: { env: [MISTRAL_API_KEY] }
 
 network:
   serviceDomains:
@@ -44,21 +50,43 @@ network:
     api.anthropic.com: anthropic-api-key
     "*.anthropic.com": anthropic-api-key
     generativelanguage.googleapis.com: gemini-api-key
+    api.mistral.ai: mistral-api-key
   serviceAuth:
     openai-api-key: { headerName: authorization, valueFormat: "Bearer %s" }
     anthropic-api-key: { headerName: x-api-key }
     gemini-api-key: { headerName: x-goog-api-key }
+    mistral-api-key: { headerName: authorization, valueFormat: "Bearer %s" }
 
 providers:
-  - name: openai-codex
+  - name: openai
     credentials: [openai-api-key]
     authFiles: [agent/auth.json]
     authSession:
-      mode: any
+      checks:
+        - { file: agent/auth.json, type: json_pointer_non_null, pointer: /openai }
+  - name: openai-codex
+    authFiles: [agent/auth.json]
+    authSession:
       checks:
         - { file: agent/auth.json, type: json_pointer_non_null, pointer: /openai-codex }
     oauthPorts: [{ port: "1455" }]
   - name: anthropic
     credentials: [anthropic-api-key]
-  - name: gemini
+    authFiles: [agent/auth.json]
+    authSession:
+      checks:
+        - { file: agent/auth.json, type: json_pointer_non_null, pointer: /anthropic }
+    oauthPorts:
+      - { port: "53692", autoHintWhenNoSession: false, requireMappingWhenNoCredentials: false }
+  - name: google
     credentials: [gemini-api-key]
+    authFiles: [agent/auth.json]
+    authSession:
+      checks:
+        - { file: agent/auth.json, type: json_pointer_non_null, pointer: /google }
+  - name: mistral
+    credentials: [mistral-api-key]
+    authFiles: [agent/auth.json]
+    authSession:
+      checks:
+        - { file: agent/auth.json, type: json_pointer_non_null, pointer: /mistral }

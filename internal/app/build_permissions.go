@@ -50,6 +50,7 @@ func collectAppRootModeIssues(appRoot string) ([]string, error) {
 	}
 	for _, rel := range []string{
 		filepath.ToSlash(filepath.Join("runtime-assets", "auth-reconcile.sh")),
+		filepath.ToSlash(filepath.Join("runtime-assets", "kit-init.sh")),
 		filepath.ToSlash(filepath.Join("runtime-assets", "net.sh")),
 		filepath.ToSlash(filepath.Join("runtime-assets", "tmux-session.conf")),
 	} {

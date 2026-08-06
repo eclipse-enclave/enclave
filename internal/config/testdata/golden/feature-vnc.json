@@ -4,7 +4,6 @@
   "description": "Virtual X display with a contained Chromium browser, served over VNC (RFB). Opt-in. The raw RFB port is published so any VNC client can attach.",
   "apt_packages": [
     "tigervnc-standalone-server",
-    "chromium",
     "matchbox-window-manager",
     "xdg-utils",
     "fonts-liberation",

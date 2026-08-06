@@ -5,12 +5,10 @@
 #
 # SPDX-License-Identifier: MIT
 #
-# Default x-scheme-handler for http/https inside the session image, so
-# xdg-open (and tools built on it, like the npm "open" package) route URLs
-# into the VNC feature's Chromium instead of the apt-installed
-# chromium.desktop, whose plain `chromium %U` crashes without --no-sandbox
-# and silently drops the URL. Wired up via /etc/xdg/mimeapps.list in
-# install.sh.
+# Default x-scheme-handler for http/https inside the session image, routing
+# xdg-open flows into vnc-open (whose header explains why this registration
+# must beat the apt-installed chromium.desktop). Wired up via
+# /etc/xdg/mimeapps.list in install.sh.
 [Desktop Entry]
 Type=Application
 Name=Enclave VNC display

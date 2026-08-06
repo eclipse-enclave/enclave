@@ -11,6 +11,11 @@ Enable it:
 enclave --features +vnc …
 ```
 
+The feature needs a base image whose archive ships Chromium as a deb. The
+default Debian base does; on Ubuntu bases, which only ship Chromium as a
+snap, the feature's install fails (scoped to this feature, with a clear
+error).
+
 ## Connecting a VNC client
 
 The RFB port (container `5900`) is published with an OS-assigned host port on
@@ -33,8 +38,8 @@ gates that one session's display, so reading it out of the container is safe.
 as the sandbox user. It keeps three components alive with per-component restart
 loops, logging to `/tmp/enclave-vnc/log/`:
 
-1. **Xvnc**: virtual X display `:99`, RFB server on the published port
-   (default `5900`), VncAuth required. It listens on all container interfaces
+1. **Xvnc**: virtual X display `:99`, RFB server on the published container
+   port `5900`, VncAuth required. It listens on all container interfaces
    (no `-localhost`) so the host's loopback-published port reaches it.
 2. **matchbox-window-manager**: fullscreens every window (kiosk-style).
 3. **Chromium**: headful on the virtual display. It starts on a local
@@ -45,20 +50,22 @@ loops, logging to `/tmp/enclave-vnc/log/`:
    connection-refused error page whenever the target server starts later than
    the stack. Sessions can also drive the browser on demand via `vnc-open`,
    which is how a consuming feature opens a URL it only knows at runtime.
-   Chromium's own sandbox is disabled, because the default Docker seccomp
-   profile blocks the unprivileged user namespaces it needs, so the container
-   remains the isolation boundary.
+   Both the supervisor and `vnc-open` launch it through the shared
+   `/usr/local/bin/vnc-chromium` wrapper, which disables Chromium's own
+   sandbox (the default Docker seccomp profile blocks the unprivileged user
+   namespaces it needs, so the container remains the isolation boundary) and
+   its background networking (component updater, safe browsing, sync), which
+   would otherwise keep hitting gateway-denied domains.
 
 The feature entrypoint additionally exports `DISPLAY=:99` and
 `BROWSER=/usr/local/bin/vnc-open`, and `install.sh` registers `vnc-open` as
 the image-wide `x-scheme-handler` for http/https (desktop entry plus
 `/etc/xdg/mimeapps.list`), so X clients and "open in browser" flows land on
-the contained display. The handler registration matters because `xdg-open`
-resolves scheme handlers via `xdg-mime` *before* falling back to `$BROWSER`:
-without it, the apt-installed `chromium.desktop` wins, crashes sandbox-less,
-and silently drops the URL. `vnc-open <url>` reuses the supervisor's Chromium
-profile, waiting briefly for its singleton if the stack is still booting, so
-URLs open in the running browser instead of racing it.
+the contained display (`vnc-open`'s header explains why the scheme-handler
+registration, not just `$BROWSER`, is load-bearing). `vnc-open <url>` reuses
+the supervisor's Chromium profile, waiting briefly for its singleton if the
+stack is still booting, so URLs open in the running browser instead of racing
+it, and logs to `/tmp/enclave-vnc/log/vnc-open.log`.
 
 ## Access control
 
@@ -90,7 +97,9 @@ Environment variables read by the supervisor (set via a consuming feature's
 | `VNC_URL` | `about:blank` | Optional URL auto-forwarded into the browser once its port is reachable. Left unset (the default), the display stays on the waiting page and sessions open pages on demand via `vnc-open`. |
 | `VNC_GEOMETRY` | `1600x1000` | Initial display size (a resize-capable client can change it) |
 | `VNC_DISPLAY` | `:99` | X display number |
-| `VNC_RFB_PORT` | `5900` | RFB port (must match the spec's `ports:` declaration if changed) |
+
+The RFB port is not configurable: it must match the `ports:` declaration in
+`spec.yaml` (container port `5900`), so the supervisor hardcodes it.
 
 A consuming feature should leave `VNC_URL` unset whenever the page it wants is
 only determined at runtime, and call `vnc-open` with the full URL instead.
@@ -102,6 +111,11 @@ selected.
 
 - Holding the password is sufficient to drive the display, so keep it to
   trusted local viewers.
+- The host publish is loopback-only, but Xvnc listens on all interfaces
+  inside the container's network namespace. Under network isolation that
+  namespace belongs to the session's gateway container on a shared Docker
+  bridge, so other containers on that bridge (including other sessions'
+  gateways) can reach the RFB port directly, with VncAuth as the only gate.
 - A human can be phished by what the streamed page *shows*. A viewer cannot
   vouch for the session's content.
 - Clipboard crossing: Xvnc syncs the display's X selections with the RFB

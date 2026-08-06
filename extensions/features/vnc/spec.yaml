@@ -17,8 +17,11 @@ needsRoot: true
 failOnInstallError: true
 priority: 75
 aptPackages:
+  # Chromium itself is installed by install.sh, not listed here: it is only a
+  # real deb on Debian archives (Ubuntu ships a snap stub), and all selected
+  # features' aptPackages share one apt-get install, so one unavailable
+  # package would fail every feature's packages instead of just this one.
   - tigervnc-standalone-server
-  - chromium
   - matchbox-window-manager
   - xdg-utils
   - fonts-liberation

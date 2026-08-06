@@ -11,7 +11,8 @@
 # URL as a new (fullscreened) window instead of a second browser starting.
 #
 # Two paths route here so "open in browser" flows land on the contained
-# display instead of failing headless:
+# display instead of failing headless (canonical rationale; install.sh, the
+# desktop entry, and the README point back at this comment):
 #   - the feature entrypoint exports BROWSER=/usr/local/bin/vnc-open
 #   - install.sh registers this script as the x-scheme-handler for http/https,
 #     which xdg-open (and the npm "open" package) resolves *before* $BROWSER.
@@ -21,8 +22,8 @@
 # The stack may still be booting when the first open arrives, so the open runs
 # in a detached subshell that first does a bounded wait for the supervisor's
 # Chromium to hold the profile singleton. Launching earlier would make this
-# process the singleton owner, and the supervisor's restart loop would then
-# forward its start URL into it every 2 seconds forever.
+# process the singleton owner, and the supervisor would then park its own
+# browser until this one exits.
 set -u
 
 if [ "$#" -lt 1 ]; then
@@ -31,19 +32,24 @@ if [ "$#" -lt 1 ]; then
 fi
 
 export DISPLAY="${VNC_DISPLAY:-:99}"
-PROFILE=/tmp/enclave-vnc/chromium
+STATE_DIR=/tmp/enclave-vnc
+PROFILE="$STATE_DIR/chromium"
+LOG_DIR="$STATE_DIR/log"
 
-# --no-sandbox matches the supervisor: the container blocks the unprivileged
-# user namespaces Chromium's sandbox needs, and a sandbox failure here would
-# silently drop the URL before it reaches the running instance. After the
-# bounded wait the launch proceeds regardless, because with no live singleton,
-# becoming the instance is the best remaining way to show the URL.
+# The supervisor normally creates the log dir, but an open can arrive before
+# the stack is up, and a failed open must stay diagnosable.
+mkdir -p "$LOG_DIR" || exit 1
+
+# After the bounded wait the launch proceeds regardless: with no live
+# singleton, becoming the instance is the best remaining way to show the URL.
+# The launch goes through the shared vnc-chromium wrapper, so a fallback
+# instance behaves identically to a supervisor-started one.
 (
     (
         for _ in $(seq 1 100); do
             [ -e "$PROFILE/SingletonSocket" ] && break
             sleep 0.3
         done
-        exec chromium --no-sandbox --user-data-dir="$PROFILE" "$@"
-    ) >/dev/null 2>&1 &
+        exec /usr/local/bin/vnc-chromium "$@"
+    ) >> "$LOG_DIR/vnc-open.log" 2>&1 &
 )

@@ -1110,5 +1110,47 @@ func OptionDefs() []OptionDef {
 				},
 			},
 		},
+		{
+			Name:        "theia_api_port",
+			Group:       OptionGroupRun,
+			Kind:        OptionKindString,
+			OptionField: "TheiaAPIPort",
+			SourceField: "TheiaAPIPort",
+			Apply:       ApplyNone,
+			CLIFlags: []CLIFlagDef{
+				{
+					Name:                "--theia-api-port",
+					Usage:               "Publish a Theia external-API port on host loopback and enable Theia's separate-port external API",
+					ValueKind:           CLIValueRequired,
+					MissingValueMessage: "--theia-api-port requires a port number",
+					Action: CLIAction{
+						Kind:        CLIActionCall,
+						Call:        "applyTheiaAPIPort",
+						SourceField: "TheiaAPIPort",
+					},
+				},
+			},
+		},
+		{
+			Name:        "theia_api_token",
+			Group:       OptionGroupRun,
+			Kind:        OptionKindString,
+			OptionField: "TheiaAPIToken",
+			SourceField: "TheiaAPIToken",
+			Apply:       ApplyNone,
+			CLIFlags: []CLIFlagDef{
+				{
+					Name:                "--theia-api-token",
+					Usage:               "Token for the Theia external API (see --theia-api-port); no token preference is set if omitted",
+					ValueKind:           CLIValueRequired,
+					MissingValueMessage: "--theia-api-token requires a value",
+					Action: CLIAction{
+						Kind:        CLIActionSetString,
+						OptionField: "TheiaAPIToken",
+						SourceField: "TheiaAPIToken",
+					},
+				},
+			},
+		},
 	}
 }

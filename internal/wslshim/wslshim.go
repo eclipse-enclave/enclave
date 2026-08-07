@@ -10,8 +10,9 @@
 // parses no argv of its own. There is no native Windows implementation of
 // enclave, and this package is not a step towards one.
 //
-// Everything except the drive-type probe is host-independent, so the package
-// builds and is unit-tested on Linux even though it only runs on Windows.
+// Everything except the two drive-letter queries is host-independent, so the
+// package builds and is unit-tested on Linux even though it only runs on
+// Windows.
 package wslshim
 
 import (
@@ -73,19 +74,21 @@ func (s shim) execute(args []string) int {
 		return s.fail("cannot determine the current directory: %v", err)
 	}
 
-	// Named t rather than target so it does not shadow the type.
-	t, err := resolveTarget(cwd, lookupIn(s.environ), s.driveType, s.resolveDrive)
-	if err != nil {
-		return s.fail("%v", err)
-	}
-	s.warn(t.Warnings)
-
+	// Checked before the working directory is classified: with no WSL2 at all,
+	// advice about which directory to run from would be the wrong problem.
 	wslExe, err := s.lookPath("wsl.exe")
 	if err != nil {
 		return s.fail("wsl.exe was not found on PATH. Enclave on Windows runs " +
 			"inside WSL2; install it with `wsl --install` and set up a Linux " +
 			"distribution first.")
 	}
+
+	// Named t rather than target so it does not shadow the type.
+	t, err := resolveTarget(cwd, lookupIn(s.environ), s.driveType, s.resolveDrive)
+	if err != nil {
+		return s.fail("%v", err)
+	}
+	s.warn(t.Warnings)
 
 	env, warnings, err := forwardEnv(s.environ)
 	if err != nil {
@@ -130,9 +133,10 @@ func (s shim) resolveBinary(wslExe string, t target, env []string) (string, bool
 		code, isExit := exitCodeFromRunError(runErr)
 		switch {
 		case runErr == nil:
-			path := strings.TrimSpace(decodeWSLOutput(stdout))
-			if !strings.HasPrefix(path, "/") {
-				return "", false, fmt.Errorf("the enclave probe in %s returned %q instead of an absolute path", t.describe(), path)
+			path, ok := parseProbeOutput(stdout)
+			if !ok {
+				return "", false, fmt.Errorf("the enclave probe in %s returned %q instead of an absolute path",
+					t.describe(), collapseLines(strings.TrimSpace(decodeWSLOutput(stdout))))
 			}
 			return path, cdSupported, nil
 		case isExit && code == probeNotFoundCode:
@@ -152,6 +156,24 @@ func (s shim) resolveBinary(wslExe string, t target, env []string) (string, bool
 	}
 	// Unreachable: the loop either returns or exhausts both attempts above.
 	return "", false, fmt.Errorf("could not locate enclave in %s", t.describe())
+}
+
+// parseProbeOutput extracts the marked answer from the probe's stdout, ignoring
+// whatever the login shell printed before it. The last marker wins, so a profile
+// that happens to echo the marker itself cannot displace the real answer.
+func parseProbeOutput(stdout []byte) (string, bool) {
+	text := decodeWSLOutput(stdout)
+	start := strings.LastIndex(text, probeMarker)
+	if start < 0 {
+		return "", false
+	}
+
+	answer := text[start+len(probeMarker):]
+	if end := strings.IndexAny(answer, "\r\n"); end >= 0 {
+		answer = answer[:end]
+	}
+	answer = strings.TrimSpace(answer)
+	return answer, strings.HasPrefix(answer, "/")
 }
 
 // distroHint lists the installed distributions, which is the information a

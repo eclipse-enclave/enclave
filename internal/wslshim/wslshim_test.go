@@ -19,11 +19,14 @@ import (
 )
 
 const (
-	helperEnv     = "ENCLAVE_WSLSHIM_TEST_EXIT"
-	fakeWSL       = `C:\Windows\System32\wsl.exe`
-	fakeCWD       = `\\wsl.localhost\Ubuntu\home\p\proj`
-	fakeBinary    = "/home/p/.local/bin/enclave"
-	fakeBinaryOut = fakeBinary + "\n"
+	helperEnv  = "ENCLAVE_WSLSHIM_TEST_EXIT"
+	fakeWSL    = `C:\Windows\System32\wsl.exe`
+	fakeCWD    = `\\wsl.localhost\Ubuntu\home\p\proj`
+	fakeBinary = "/home/p/.local/bin/enclave"
+	// fakeBinaryOut is the probe's answer for fakeBinary. TestProbeScriptRoundTrip
+	// runs the real script and checks it produces something parseProbeOutput
+	// reads the same way, so this fixture cannot drift from it unnoticed.
+	fakeBinaryOut = "\n" + probeMarker + fakeBinary + "\n"
 )
 
 // TestExitCodeHelperProcess is re-executed as a child so the tests can obtain a
@@ -133,8 +136,11 @@ func TestExecuteForwardsArgumentsToTheResolvedBinary(t *testing.T) {
 	assertCommandLine(t, h.spawned, want)
 }
 
+// Every nonzero code has to come back unchanged. Zero is covered by the other
+// tests, which all assert a successful run returns it; scripting it here would
+// pass even with propagation removed, since exitError reports no error for 0.
 func TestExecutePropagatesChildExitCode(t *testing.T) {
-	for _, code := range []int{0, 1, 2, 42, 130} {
+	for _, code := range []int{1, 2, 42, 125, 130, 255} {
 		t.Run(strconv.Itoa(code), func(t *testing.T) {
 			h := &host{captures: []response{probeOK()}, spawnErr: exitError(t, code)}
 
@@ -142,6 +148,22 @@ func TestExecutePropagatesChildExitCode(t *testing.T) {
 				t.Errorf("exit code = %d, want %d; stderr: %s", got, code, h.stderr.String())
 			}
 		})
+	}
+}
+
+func TestExecuteReportsWhenNoDistributionsAreInstalled(t *testing.T) {
+	unusable := []byte("There is no distribution with the supplied name.")
+	h := &host{captures: []response{
+		{stderr: unusable, err: exitError(t, 1)},
+		{stderr: unusable, err: exitError(t, 1)},
+		{stdout: nil},
+	}}
+
+	if got := h.shim(fakeCWD, nil).execute(nil); got != exitLauncherFailure {
+		t.Errorf("exit code = %d, want %d", got, exitLauncherFailure)
+	}
+	if !strings.Contains(h.stderr.String(), "No WSL distributions are installed") {
+		t.Errorf("stderr does not report an empty distribution list: %q", h.stderr.String())
 	}
 }
 
@@ -276,6 +298,61 @@ func TestExecuteRejectsANonAbsoluteProbeResult(t *testing.T) {
 
 	if got := h.shim(fakeCWD, nil).execute(nil); got != exitLauncherFailure {
 		t.Errorf("exit code = %d, want %d", got, exitLauncherFailure)
+	}
+}
+
+// The probe runs a login shell, so anything /etc/profile.d or ~/.profile prints
+// arrives on stdout ahead of the answer. A version manager's banner must not be
+// mistaken for the binary's path.
+func TestExecuteIgnoresLoginShellChatterInTheProbeOutput(t *testing.T) {
+	noisy := "Welcome to Ubuntu 24.04 LTS\nnvm: using node v22.11.0\n" + fakeBinaryOut
+	h := &host{captures: []response{{stdout: []byte(noisy)}}}
+
+	code := h.shim(fakeCWD, nil).execute([]string{"continue"})
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0; stderr: %s", code, h.stderr.String())
+	}
+
+	assertCommandLine(t, h.spawned, []string{
+		"-d", "Ubuntu", "--cd", "/home/p/proj", "-e", fakeBinary, "continue",
+	})
+}
+
+// A profile that writes without a trailing newline runs into the marker on the
+// same line, which is why the marker is searched for rather than the last line
+// taken.
+func TestExecuteIgnoresProbeChatterWithoutATrailingNewline(t *testing.T) {
+	h := &host{captures: []response{{stdout: []byte("direnv: loading" + probeMarker + fakeBinary + "\n")}}}
+
+	if code := h.shim(fakeCWD, nil).execute(nil); code != 0 {
+		t.Fatalf("exit code = %d, want 0; stderr: %s", code, h.stderr.String())
+	}
+	assertCommandLineContains(t, h.spawned, []string{fakeBinary})
+}
+
+func TestParseProbeOutput(t *testing.T) {
+	cases := []struct {
+		name   string
+		stdout string
+		want   string
+		wantOK bool
+	}{
+		{"bare answer", "\n" + probeMarker + "/usr/bin/enclave\n", "/usr/bin/enclave", true},
+		{"no trailing newline", "\n" + probeMarker + "/usr/bin/enclave", "/usr/bin/enclave", true},
+		{"crlf", "\r\n" + probeMarker + "/usr/bin/enclave\r\n", "/usr/bin/enclave", true},
+		{"chatter before", "banner\n" + probeMarker + "/usr/bin/enclave\n", "/usr/bin/enclave", true},
+		{"marker echoed by the profile", probeMarker + "nonsense\n" + probeMarker + "/usr/bin/enclave\n", "/usr/bin/enclave", true},
+		{"no marker", "/usr/bin/enclave\n", "", false},
+		{"empty", "", "", false},
+		{"relative path", "\n" + probeMarker + "enclave\n", "enclave", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := parseProbeOutput([]byte(tc.stdout))
+			if got != tc.want || ok != tc.wantOK {
+				t.Errorf("parseProbeOutput(%q) = %q, %v; want %q, %v", tc.stdout, got, ok, tc.want, tc.wantOK)
+			}
+		})
 	}
 }
 

@@ -7,8 +7,10 @@ Concise notes for contributors working on the enclave codebase.
 - Go 1.24.x (see `go.mod` toolchain)
 - Docker daemon running (for runtime testing)
 - Linux or macOS host. Native Windows is unsupported; use WSL2, where the
-  Linux instructions apply. `make cross-build` compiles Windows targets only
-  to guard code portability.
+  Linux instructions apply. `make cross-build` compiles the published
+  cross-targets (`darwin/arm64`, `darwin/amd64`, `linux/arm64`) plus
+  `windows/amd64`, which is built only to guard code portability and is not
+  released.
 
 ## Common Commands
 

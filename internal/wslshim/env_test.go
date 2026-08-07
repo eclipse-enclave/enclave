@@ -157,6 +157,94 @@ func TestForwardEnvSkipsLauncherOwnControls(t *testing.T) {
 	}
 }
 
+// WSLENV is colon-separated, so an ENCLAVE_ variable whose name carries a
+// delimiter would splice a second entry into the list and forward a variable
+// nobody named — the one thing the allow-list exists to prevent.
+func TestForwardEnvSkipsAutomaticNamesThatWouldSpliceWSLENV(t *testing.T) {
+	environ := []string{
+		"ENCLAVE_X:GITHUB_TOKEN=1",
+		"ENCLAVE_Y/p=1",
+		"GITHUB_TOKEN=secret",
+		"ENCLAVE_LOG_LEVEL=debug",
+	}
+
+	got, _, err := forwardEnv(environ)
+	if err != nil {
+		t.Fatalf("forwardEnv: %v", err)
+	}
+
+	value := wslenvOf(t, got)
+	if value != "ENCLAVE_LOG_LEVEL" {
+		t.Errorf("WSLENV = %q, want only ENCLAVE_LOG_LEVEL", value)
+	}
+	if strings.Contains(value, "GITHUB_TOKEN") {
+		t.Errorf("WSLENV = %q forwards a variable that was never named", value)
+	}
+}
+
+// The launcher's own controls are excluded by prefix, so a control added later
+// cannot cross into the distribution because someone forgot to list it.
+func TestForwardEnvExcludesLauncherControlsByPrefix(t *testing.T) {
+	environ := []string{
+		"ENCLAVE_WSL_SOME_FUTURE_CONTROL=1",
+		"ENCLAVE_LOG_LEVEL=debug",
+	}
+
+	got, _, err := forwardEnv(environ)
+	if err != nil {
+		t.Fatalf("forwardEnv: %v", err)
+	}
+	if value := wslenvOf(t, got); value != "ENCLAVE_LOG_LEVEL" {
+		t.Errorf("WSLENV = %q, want only ENCLAVE_LOG_LEVEL", value)
+	}
+}
+
+// An ENCLAVE_ variable is forwarded automatically under its bare name, so
+// naming it with a flag has to win: /p on a variable holding a Windows path is
+// the whole reason to name it.
+func TestForwardEnvAppliesFlagsToAutomaticallyForwardedVariables(t *testing.T) {
+	environ := []string{
+		`ENCLAVE_SCRATCH=C:\tmp\scratch`,
+		"ENCLAVE_LOG_LEVEL=debug",
+		envForwardEnv + "=ENCLAVE_SCRATCH/p",
+	}
+
+	got, _, err := forwardEnv(environ)
+	if err != nil {
+		t.Fatalf("forwardEnv: %v", err)
+	}
+
+	value := wslenvOf(t, got)
+	if !strings.Contains(value, "ENCLAVE_SCRATCH/p") {
+		t.Errorf("WSLENV = %q, want ENCLAVE_SCRATCH to keep its /p flag", value)
+	}
+	if strings.Contains(value, "ENCLAVE_SCRATCH:") || strings.HasSuffix(value, "ENCLAVE_SCRATCH") {
+		t.Errorf("WSLENV = %q, want no unflagged duplicate of ENCLAVE_SCRATCH", value)
+	}
+	if !strings.Contains(value, "ENCLAVE_LOG_LEVEL") {
+		t.Errorf("WSLENV = %q, want the other ENCLAVE_ variable still forwarded", value)
+	}
+}
+
+// Windows environment variable names are case-insensitive, so the case a
+// variable was set with must not decide whether it is forwarded. ENCLAVE_HOME in
+// particular holds a Windows path the Linux binary cannot use.
+func TestForwardEnvClassifiesNamesCaseInsensitively(t *testing.T) {
+	environ := []string{
+		`ENCLAVE_Home=C:\src\enclave`,
+		"Enclave_Wsl_Distro=Ubuntu",
+		"enclave_log_level=debug",
+	}
+
+	got, _, err := forwardEnv(environ)
+	if err != nil {
+		t.Fatalf("forwardEnv: %v", err)
+	}
+	if value := wslenvOf(t, got); value != "enclave_log_level" {
+		t.Errorf("WSLENV = %q, want only enclave_log_level", value)
+	}
+}
+
 // The deny list is a default, not a prohibition: naming a variable explicitly is
 // an informed choice.
 func TestForwardEnvAllowListOverridesDenyList(t *testing.T) {

@@ -26,16 +26,35 @@ const wslenvFlags = "pluw"
 // this way is meant for enclave and only enclave reads it.
 const autoForwardPrefix = "ENCLAVE_"
 
-// neverAutoForward lists ENCLAVE_ variables the launcher keeps to itself.
-// The ENCLAVE_WSL_ controls are Windows-side settings that mean nothing inside
-// the distribution, and ENCLAVE_HOME holds a Windows path that would point the
-// Linux binary at an asset tree it cannot use. Naming any of them explicitly in
-// ENCLAVE_WSL_FORWARD_ENV still forwards it.
-var neverAutoForward = map[string]bool{
-	envDistro:           true,
-	envAllowWindowsPath: true,
-	envForwardEnv:       true,
-	"ENCLAVE_HOME":      true,
+// neverAutoForwardPrefix covers the launcher's own controls. They are
+// Windows-side settings that mean nothing inside the distribution, and matching
+// the prefix rather than each name keeps a control added later from crossing
+// because someone forgot to list it.
+const neverAutoForwardPrefix = "ENCLAVE_WSL_"
+
+// neverAutoForwardNames lists the remaining ENCLAVE_ variables the launcher
+// keeps to itself. ENCLAVE_HOME holds a Windows path that would point the Linux
+// binary at an asset tree it cannot use. Naming any excluded variable explicitly
+// in ENCLAVE_WSL_FORWARD_ENV still forwards it.
+var neverAutoForwardNames = map[string]bool{
+	"ENCLAVE_HOME": true,
+}
+
+func autoForwardable(name string) bool {
+	// Windows environment variable names are case-insensitive, so every question
+	// about one is asked in upper case.
+	upper := strings.ToUpper(name)
+	if !strings.HasPrefix(upper, autoForwardPrefix) {
+		return false
+	}
+	if strings.HasPrefix(upper, neverAutoForwardPrefix) || neverAutoForwardNames[upper] {
+		return false
+	}
+	// WSLENV is colon-separated and its entries are name/flags, so a name
+	// containing either delimiter would splice a second entry into the list and
+	// forward a variable nobody named. Windows allows such names even though
+	// nothing sane sets one.
+	return validateEnvName(name) == nil
 }
 
 // forwardEnv returns the environment for wsl.exe together with any warnings
@@ -61,16 +80,19 @@ func forwardEnv(environ []string) ([]string, []string, error) {
 	return replaceEnv(environ, wslenvVar, value), warnings, nil
 }
 
-// forwardedEntries collects the WSLENV entries to add, automatic ones first and
-// then the explicitly configured ones.
+// forwardedEntries collects the WSLENV entries to add. The explicitly
+// configured ones come first, because mergeWSLENV keeps the first entry for a
+// name: an ENCLAVE_ variable would otherwise be forwarded by the automatic rule
+// under its bare name, and the flag suffix the user asked for — the /p that
+// translates the path — would be dropped as a duplicate.
 func forwardedEntries(environ []string, lookup lookupFunc) ([]string, []string, error) {
 	var automatic []string
 	for _, entry := range environ {
-		name, _, found := strings.Cut(entry, "=")
-		if !found || !strings.HasPrefix(name, autoForwardPrefix) || neverAutoForward[name] {
-			continue
+		// The name is forwarded as the user spelled it, only the decision is
+		// case-insensitive.
+		if name, _, found := strings.Cut(entry, "="); found && autoForwardable(name) {
+			automatic = append(automatic, name)
 		}
-		automatic = append(automatic, name)
 	}
 	// os.Environ order is not specified, so sort for a stable WSLENV.
 	sort.Strings(automatic)
@@ -79,7 +101,7 @@ func forwardedEntries(environ []string, lookup lookupFunc) ([]string, []string, 
 	if err != nil {
 		return nil, nil, err
 	}
-	return append(automatic, configured...), warnings, nil
+	return append(configured, automatic...), warnings, nil
 }
 
 // parseForwardList reads ENCLAVE_WSL_FORWARD_ENV, a comma-separated allow-list
@@ -142,24 +164,27 @@ func validateWSLENVFlags(flags string) error {
 
 // mergeWSLENV appends entries to a WSLENV the user may already have set,
 // preserving their order and letting their flags win for a name listed twice.
+// Names are compared in upper case, as Windows compares them.
 func mergeWSLENV(existing string, entries []string) string {
 	var merged []string
 	seen := map[string]bool{}
-	for _, entry := range strings.Split(existing, ":") {
-		if entry == "" {
-			continue
-		}
+	add := func(entry string) {
 		name, _, _ := strings.Cut(entry, "/")
+		key := strings.ToUpper(name)
+		if seen[key] {
+			return
+		}
 		merged = append(merged, entry)
-		seen[name] = true
+		seen[key] = true
+	}
+
+	for _, entry := range strings.Split(existing, ":") {
+		if entry != "" {
+			add(entry)
+		}
 	}
 	for _, entry := range entries {
-		name, _, _ := strings.Cut(entry, "/")
-		if seen[name] {
-			continue
-		}
-		merged = append(merged, entry)
-		seen[name] = true
+		add(entry)
 	}
 	return strings.Join(merged, ":")
 }

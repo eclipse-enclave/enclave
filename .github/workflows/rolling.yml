@@ -26,9 +26,27 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - runner: ubuntu-latest
+          - runner: ubuntu-24.04
+            goos: linux
+            goarch: amd64
             output: enclave-linux-amd64
-            cgo: 0
+            smoke: true
+          - runner: ubuntu-24.04-arm
+            goos: linux
+            goarch: arm64
+            output: enclave-linux-arm64
+            smoke: true
+          - runner: macos-15
+            goos: darwin
+            goarch: arm64
+            output: enclave-darwin-arm64
+            smoke: true
+          # Cross-compiled on the arm64 macOS runner and therefore not smoke-tested.
+          - runner: macos-15
+            goos: darwin
+            goarch: amd64
+            output: enclave-darwin-amd64
+            smoke: false
 
     runs-on: ${{ matrix.runner }}
 
@@ -40,10 +58,16 @@ jobs:
           go-version-file: go.mod
 
       - name: Build standalone binary
-        run: CGO_ENABLED=${{ matrix.cgo }} go build -o ${{ matrix.output }} ./cmd/enclave
+        run: CGO_ENABLED=0 GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} go build -o ${{ matrix.output }} ./cmd/enclave
 
       - name: Smoke test embedded asset extraction
+        if: ${{ matrix.smoke }}
         run: ./scripts/smoke-standalone-binary.sh "${{ matrix.output }}"
+
+      - name: Note skipped smoke test
+        if: ${{ !matrix.smoke }}
+        run: |
+          echo "::notice::Smoke test skipped for ${{ matrix.output }} (cross-compiled for ${{ matrix.goarch }} on ${{ matrix.runner }})"
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
@@ -103,9 +127,12 @@ jobs:
 
           | File | Platform | Notes |
           |------|----------|-------|
-          | \`enclave_*_amd64.deb\` | Ubuntu 24.04 | Includes all assets |
-          | \`enclave-*.x86_64.rpm\` | Fedora Linux | Includes all assets |
-          | \`enclave-linux-amd64\` | Linux x86_64 | Self-contained binary with runtime assets |
+          | \`enclave_*_amd64.deb\` | Ubuntu 24.04 (x86-64) | Includes all assets |
+          | \`enclave-*.x86_64.rpm\` | Fedora Linux (x86-64) | Includes all assets |
+          | \`enclave-linux-amd64\` | Linux (x86-64) | Self-contained binary with runtime assets |
+          | \`enclave-linux-arm64\` | Linux (arm64) | Self-contained binary with runtime assets |
+          | \`enclave-darwin-arm64\` | macOS (Apple Silicon) | Self-contained binary, unsigned |
+          | \`enclave-darwin-amd64\` | macOS (Intel) | Self-contained binary, unsigned |
 
           \`\`\`sh
           # Ubuntu 24.04 (resolves dependencies automatically)
@@ -114,10 +141,20 @@ jobs:
           # Fedora Linux (resolves dependencies automatically)
           sudo dnf install ./enclave-*.x86_64.rpm
 
-          # Other x86-64 Linux distributions
-          chmod +x enclave-linux-amd64
+          # Other Linux distributions (use enclave-linux-arm64 on arm64 hosts)
+          sha256sum --check --ignore-missing checksums.txt
           sudo install enclave-linux-amd64 /usr/local/bin/enclave
+
+          # macOS (replace arm64 with amd64 on Intel)
+          shasum -a 256 --check --ignore-missing checksums.txt
+          xattr -d com.apple.quarantine ./enclave-darwin-arm64 2>/dev/null || true
+          sudo install -d /usr/local/bin
+          sudo install enclave-darwin-arm64 /usr/local/bin/enclave
           \`\`\`
+
+          The macOS binaries are unsigned and not notarized, so Gatekeeper quarantines browser downloads and \`install\` propagates the attribute; \`curl\` or \`gh release download\` avoids it entirely.
+
+          There is no native Windows build. On Windows, use WSL2 and install the Linux binary matching the host architecture inside the WSL distribution.
           EOF
           )" \
             artifacts/*

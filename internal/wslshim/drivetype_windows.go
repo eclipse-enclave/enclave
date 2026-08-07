@@ -38,7 +38,19 @@ func systemDriveType(root string) driveKind {
 // systemDriveResolver asks the multiple provider router what a drive letter is
 // mapped to. This is how a WSL share reached through a drive letter — what
 // `pushd \\wsl.localhost\...` produces in cmd.exe — becomes recognizable again.
+// maxRemoteName bounds the retry buffer. A UNC path is far shorter than this;
+// the bound is there so a provider that answers with a nonsense length cannot
+// turn a refusal into a huge allocation.
+const maxRemoteName = 64 * 1024
+
 func systemDriveResolver(letter string) string {
+	// LazyProc.Call panics when the export is missing, which on a Windows
+	// installation without mpr.dll would replace the refusal message with a
+	// stack trace.
+	if procWNetGetConnectionW.Find() != nil {
+		return ""
+	}
+
 	// WNetGetConnectionW expects the local name as a letter and colon, with no
 	// trailing separator.
 	local, err := windows.UTF16PtrFromString(letter + ":")
@@ -50,6 +62,9 @@ func systemDriveResolver(letter string) string {
 	// length is in characters and, on success, excludes the terminating NUL.
 	length := uint32(windows.MAX_PATH)
 	for attempt := 0; attempt < 2; attempt++ {
+		if length == 0 || length > maxRemoteName {
+			return ""
+		}
 		remote := make([]uint16, length)
 		// WNetGetConnectionW returns its error code directly rather than
 		// through GetLastError.

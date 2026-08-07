@@ -8,9 +8,10 @@ A Docker-based sandbox for running agentic coding tools — Claude, Codex, OpenC
 
 ## Requirements
 
-Linux and macOS (with Docker Desktop) are supported natively. On Windows, run
-Enclave inside WSL2; the Linux instructions apply within the WSL distribution
-and no native Windows build is provided.
+Linux and macOS (with Docker Desktop) are supported natively. On Windows,
+Enclave runs inside WSL2: the Linux instructions apply within the WSL
+distribution, and `enclave.exe` is a launcher that forwards to it rather than a
+native build. See [Windows](docs/windows.md).
 
 Runtime dependencies:
 
@@ -86,6 +87,8 @@ The rolling release also provides self-contained binaries:
 | `enclave-linux-arm64` | Linux arm64 |
 | `enclave-darwin-arm64` | macOS (Apple Silicon) |
 | `enclave-darwin-amd64` | macOS (Intel) |
+| `enclave-windows-amd64.zip` | Windows x86-64 (WSL2 launcher) |
+| `enclave-windows-arm64.zip` | Windows arm64 (WSL2 launcher) |
 
 Download the artifact for your platform together with `checksums.txt`, verify
 it, and place it on your `PATH`. On Linux:
@@ -131,14 +134,28 @@ need `sudo` or a writable `/usr/local/bin`. Override the destination with
 ### Windows (WSL2)
 
 There is no native Windows build. Install WSL2 with an Ubuntu 24.04
-distribution and make Docker available inside it — either through Docker
-Desktop's WSL integration or by installing Docker Engine in the distribution.
-Then follow the Linux instructions above from inside WSL, using the `.deb` or
-the Linux binary matching the host architecture.
+distribution, make Docker available inside it — either through Docker Desktop's
+WSL integration or by installing Docker Engine in the distribution — and follow
+the Linux instructions above from inside WSL, using the `.deb` or the Linux
+binary matching the host architecture.
 
-Keep the project working directory inside the WSL filesystem rather than under
-`/mnt/c`. Bind-mounting a Windows drive path through the WSL interop layer
-works, but file access is markedly slower.
+That is enough to use Enclave from a WSL shell. To use it from PowerShell as
+well, install the launcher on Windows too:
+
+```powershell
+scoop install https://github.com/eclipse-enclave/enclave/releases/download/rolling/enclave.json
+```
+
+`enclave.exe` forwards every argument to the Linux binary inside the
+distribution and returns its exit code; it is not a native build. Run it from a
+directory inside the distribution, for example
+`\\wsl.localhost\Ubuntu\home\you\project`. A Windows drive path such as
+`C:\Users\you\project` is refused by default: it would have to be reached
+through `/mnt/c`, where every file access crosses the WSL interop layer and is
+markedly slower.
+
+See [Windows](docs/windows.md) for the working-directory rules, environment
+forwarding, and exit codes.
 
 ## Quick Start
 
@@ -215,6 +232,7 @@ in both `host/` and `session/`, the host command wins.
 | Tool Profiles & Images | [docs/tools.md](docs/tools.md) |
 | Sessions & Persistence | [docs/persistence.md](docs/persistence.md) |
 | Configuration | [docs/configuration.md](docs/configuration.md) |
+| Windows (WSL2) | [docs/windows.md](docs/windows.md) |
 | Architecture | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) |
 | Extensions | [docs/extensions/README.md](docs/extensions/README.md) |
 | Security | [docs/security/README.md](docs/security/README.md) |

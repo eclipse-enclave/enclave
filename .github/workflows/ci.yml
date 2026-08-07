@@ -54,6 +54,36 @@ jobs:
       - name: Smoke test standalone binary
         run: ./scripts/smoke-standalone-binary.sh ./enclave-darwin-arm64
 
+  # The Windows binary is the WSL launcher. GitHub-hosted windows runners have no
+  # WSL2, so this job covers everything that does not need it; the empirical
+  # wsl.exe round trip is the manual gate in scripts/wsl-shim-verify.ps1.
+  build-and-test-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: go.mod
+
+      - name: Build launcher
+        run: go build ./cmd/enclave
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test launcher
+        run: go test ./internal/wslshim/...
+
+      - name: Parse verification script
+        shell: pwsh
+        run: |
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            "$PWD/scripts/wsl-shim-verify.ps1", [ref]$null, [ref]$errors) | Out-Null
+          if ($errors) { $errors; exit 1 }
+          Write-Host 'scripts/wsl-shim-verify.ps1 parsed cleanly.'
+
   lint:
     runs-on: ubuntu-latest
     steps:

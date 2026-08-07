@@ -9,5 +9,10 @@
 # Point the session at the VNC feature's virtual display so X clients and
 # "open in browser" flows (xdg-open, $BROWSER consumers) land on the contained
 # Chromium. The stack itself is started by commands.startup in spec.yaml.
-export DISPLAY="${VNC_DISPLAY:-:99}"
+#
+# DISPLAY is process-wide for every tool in the session, which also flips the
+# behavior of anything that treats a set DISPLAY as "a GUI is available"
+# (pinentry, SSH_ASKPASS, GIT_ASKPASS): those prompts render on the contained
+# display instead of the terminal. The feature README documents this.
+export DISPLAY="${ENCLAVE_VNC_DISPLAY:-:99}"
 export BROWSER=/usr/local/bin/vnc-open

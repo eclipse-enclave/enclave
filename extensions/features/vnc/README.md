@@ -12,25 +12,21 @@ enclave --features +vnc …
 ```
 
 The feature needs a base image whose archive ships Chromium as a deb. The
-default Debian base does; on Ubuntu bases, which only ship Chromium as a
-snap, the feature's install fails (scoped to this feature, with a clear
-error).
+default Debian base does; on an Ubuntu base, which only ships Chromium as a
+snap, the install fails and the build stops with an error naming this feature.
 
 ## Connecting a VNC client
 
 The RFB port (container `5900`) is published with an OS-assigned host port on
-the loopback interface, so concurrent sessions get distinct ports. Find the
-published port with `enclave ps --json` (look for the `5900` container port),
-then read the per-session password out of the container and point your client
-at it:
+the loopback interface, so concurrent sessions get distinct ports. The session
+prints the resolved `vnc://localhost:<port>` at startup; `enclave ps --json`
+reports it too (look for container port `5900`). Read the per-session password
+out of the session and point your client at it:
 
 ```bash
-docker exec <container> cat /tmp/enclave-vnc/vnc-password
+enclave exec --name <session> -- cat /tmp/enclave-vnc/vnc-password
 vncviewer 127.0.0.1:<published-host-port>
 ```
-
-The password is required (see [Access control](#access-control)). It only ever
-gates that one session's display, so reading it out of the container is safe.
 
 ## What runs in the container
 
@@ -43,19 +39,17 @@ loops, logging to `/tmp/enclave-vnc/log/`:
    (no `-localhost`) so the host's loopback-published port reaches it.
 2. **matchbox-window-manager**: fullscreens every window (kiosk-style).
 3. **Chromium**: headful on the virtual display. It starts on a local
-   waiting page and stays there until a page is opened. When `$VNC_URL` is set
-   (default `about:blank`, meaning no target), a one-shot watcher probes it and
-   forwards it into the running browser once its TCP port accepts connections.
-   Loading the URL directly would instead park the display on a
-   connection-refused error page whenever the target server starts later than
-   the stack. Sessions can also drive the browser on demand via `vnc-open`,
-   which is how a consuming feature opens a URL it only knows at runtime.
-   Both the supervisor and `vnc-open` launch it through the shared
-   `/usr/local/bin/vnc-chromium` wrapper, which disables Chromium's own
-   sandbox (the default Docker seccomp profile blocks the unprivileged user
-   namespaces it needs, so the container remains the isolation boundary) and
-   its background networking (component updater, safe browsing, sync), which
-   would otherwise keep hitting gateway-denied domains.
+   waiting page and stays there until a page is opened. When
+   `$ENCLAVE_VNC_URL` is set, a one-shot watcher probes it and forwards it
+   into the running browser once its TCP port accepts connections. Loading the
+   URL directly would instead park the display on a connection-refused error
+   page whenever the target server starts later than the stack. Sessions can
+   also drive the browser on demand via `vnc-open`, which is how a consuming
+   feature opens a URL it only knows at runtime.
+
+Both the supervisor and `vnc-open` launch Chromium through the shared
+`/usr/local/bin/vnc-chromium` wrapper, so the browser behaves the same however
+it was started; that script's header documents the switches it sets and why.
 
 The feature entrypoint additionally exports `DISPLAY=:99` and
 `BROWSER=/usr/local/bin/vnc-open`, and `install.sh` registers `vnc-open` as
@@ -67,6 +61,11 @@ the supervisor's Chromium profile, waiting briefly for its singleton if the
 stack is still booting, so URLs open in the running browser instead of racing
 it, and logs to `/tmp/enclave-vnc/log/vnc-open.log`.
 
+A set `DISPLAY` is also how many tools decide a GUI is available, so with this
+feature enabled `gpg` pinentry, `SSH_ASKPASS`, and `GIT_ASKPASS` prompts render
+on the contained display rather than in the terminal. Check the VNC client if
+an interactive command appears to hang.
+
 ## Access control
 
 The supervisor generates a random password on first start and enforces it at
@@ -76,16 +75,18 @@ copies:
 - obfuscated auth file: `/tmp/enclave-vnc/rfb-passwd` (Xvnc)
 - plaintext: `/tmp/enclave-vnc/vnc-password` (mode 0600)
 
-That password is what shapes the boundary. Holding it is what grants control
-of the display, and nothing else does. It is generated per session, so it
-grants control of exactly one session's display and no other.
+Holding that password is what grants control of the display, and nothing else
+does. It is generated per session, so it reaches exactly one session's display
+and no other — which is why the (untrusted) agent knowing it is harmless, and
+why reading it out of the session is safe.
 
-The plaintext path is what a VNC client user reads (see
-[Connecting a VNC client](#connecting-a-vnc-client)), and it doubles as the
-**integration contract** for a trusted host-side viewer, which can pick the
-password up with `docker exec <container> cat /tmp/enclave-vnc/vnc-password`.
-Because its reach stops at that one session's own display, the (untrusted)
-agent knowing it is harmless.
+The plaintext path is the **integration contract** for a trusted host-side
+viewer: `/tmp/enclave-vnc/vnc-password` inside the session, alongside the
+container port `5900` binding that `enclave ps --json` reports. The path is the
+contract; how a viewer reads it is up to the backend it drives. `enclave exec`
+always allocates a TTY, so it serves the interactive flow above but not a
+headless one — a non-interactive viewer needs a backend-level read (for Docker,
+`docker exec`) until the CLI grows a non-TTY exec.
 
 ## Configuration
 
@@ -94,20 +95,32 @@ Environment variables read by the supervisor (set via a consuming feature's
 
 | Variable | Default | Meaning |
 |----------|---------|---------|
-| `VNC_URL` | `about:blank` | Optional URL auto-forwarded into the browser once its port is reachable. Left unset (the default), the display stays on the waiting page and sessions open pages on demand via `vnc-open`. |
-| `VNC_GEOMETRY` | `1600x1000` | Initial display size (a resize-capable client can change it) |
-| `VNC_DISPLAY` | `:99` | X display number |
+| `ENCLAVE_VNC_URL` | unset | Optional URL auto-forwarded into the browser once its port is reachable. Left unset, the display stays on the waiting page and sessions open pages on demand via `vnc-open`. |
+| `ENCLAVE_VNC_URL_WAIT_SECONDS` | `300` | How long that forward waits for the URL's port before giving up and logging. |
+| `ENCLAVE_VNC_GEOMETRY` | `1600x1000` | Initial display size (a resize-capable client can change it) |
+| `ENCLAVE_VNC_DISPLAY` | `:99` | X display number |
 
 The RFB port is not configurable: it must match the `ports:` declaration in
 `spec.yaml` (container port `5900`), so the supervisor hardcodes it.
 
-A consuming feature should leave `VNC_URL` unset whenever the page it wants is
-only determined at runtime, and call `vnc-open` with the full URL instead.
-Auto-forwarding a bare server root in that situation lands the display on a
-default view, which can clobber whatever state the intended URL would have
+A consuming feature should leave `ENCLAVE_VNC_URL` unset whenever the page it
+wants is only determined at runtime, and call `vnc-open` with the full URL
+instead. Auto-forwarding a bare server root in that situation lands the display
+on a default view, which can clobber whatever state the intended URL would have
 selected.
 
+## Troubleshooting
+
+The entrypoint starts the supervisor with its stdout and stderr discarded, so
+the files under `/tmp/enclave-vnc/log/` are the only record. Start with
+`supervisor.log` (startup, auth-file generation, URL forwarding), then
+`xvnc.log`, `wm.log`, `browser.log`, and `vnc-open.log` for the individual
+components.
+
 ## Residual risks
+
+[Security boundaries](../../../docs/security/README.md#published-ports-and-contained-displays)
+covers how a published display fits the overall threat model. Feature-specific:
 
 - Holding the password is sufficient to drive the display, so keep it to
   trusted local viewers.

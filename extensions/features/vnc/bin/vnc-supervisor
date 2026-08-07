@@ -11,39 +11,61 @@
 #   Xvnc (virtual X display + VNC server, RFB served on all container
 #     interfaces so the published host port reaches it)
 #     -> matchbox-window-manager (fullscreens every window)
-#     -> Chromium on a waiting page, forwarded to $VNC_URL once it is set
-#        and reachable (all browsing stays on the container's
+#     -> Chromium on a waiting page, forwarded to $ENCLAVE_VNC_URL once it is
+#        set and reachable (all browsing stays on the container's
 #        gateway-restricted network)
 #
 # Each component runs in its own restart loop so a crash never takes the
-# session down. Logs go to $STATE_DIR/log/. Everything runs as the sandbox
-# user and dies with the container.
+# session down. Everything runs as the sandbox user and dies with the
+# container.
 #
-# Access to the display is gated by a per-session random VNC password
-# (RFB VncAuth). The plaintext copy at $STATE_DIR/vnc-password is what a
-# native VNC client needs (fetch it with `docker exec <container> cat
-# $STATE_DIR/vnc-password`) and is also the integration contract a trusted
-# host-side viewer reads the same way. That password is what shapes the
-# boundary: holding it is what grants control of the display, and because it is
-# generated per session it reaches exactly one session's display.
+# The entrypoint starts this as a background startup command with stdout and
+# stderr discarded (see enclave_run_startup_command in kit-init.sh), so a
+# diagnostic that only reaches stderr is lost. Every message therefore also
+# goes to $LOG_DIR/supervisor.log, which is the first place to look when a
+# session comes up without a display.
+#
+# Access control (the password, where it lives, and what it does and does not
+# gate) is documented once in the feature README; this script only generates
+# and enforces it.
 set -u
 
-DISPLAY_NUM="${VNC_DISPLAY:-:99}"
-GEOMETRY="${VNC_GEOMETRY:-1600x1000}"
+DISPLAY_NUM="${ENCLAVE_VNC_DISPLAY:-:99}"
+GEOMETRY="${ENCLAVE_VNC_GEOMETRY:-1600x1000}"
 # Fixed, not a knob: the published container port in spec.yaml's `ports:` is
 # 5900, so any other value would only make the display unreachable.
 RFB_PORT=5900
-START_URL="${VNC_URL:-about:blank}"
+START_URL="${ENCLAVE_VNC_URL:-about:blank}"
+# How long the one-shot forward waits for $ENCLAVE_VNC_URL's port before giving
+# up. Bounded so a typo'd or never-started target reports instead of probing
+# silently for the life of the session.
+URL_WAIT_SECONDS="${ENCLAVE_VNC_URL_WAIT_SECONDS:-300}"
 STATE_DIR="/tmp/enclave-vnc"
 LOG_DIR="$STATE_DIR/log"
+WAITING_PAGE=/usr/local/share/enclave/vnc/waiting.html
 
 mkdir -p "$STATE_DIR" "$LOG_DIR" || exit 1
 chmod 700 "$STATE_DIR"
 
+log() {
+    printf 'vnc: %s\n' "$*" | tee -a "$LOG_DIR/supervisor.log" >&2
+}
+
 # Refuse to double-start (the entrypoint runs startup commands exactly once,
-# but a manual invocation must not spawn a second stack).
-if [ -f "$STATE_DIR/supervisor.pid" ] && kill -0 "$(cat "$STATE_DIR/supervisor.pid")" 2>/dev/null; then
-    echo "vnc: supervisor already running" >&2
+# but a manual invocation must not spawn a second stack). $STATE_DIR survives a
+# container restart while PIDs are recycled, so a live PID alone is not proof:
+# confirm it is really a supervisor before standing down.
+supervisor_running() {
+    [ -f "$STATE_DIR/supervisor.pid" ] || return 1
+    _pid="$(cat "$STATE_DIR/supervisor.pid" 2>/dev/null)" || return 1
+    case "$_pid" in
+    '' | *[!0-9]*) return 1 ;;
+    esac
+    kill -0 "$_pid" 2>/dev/null || return 1
+    grep -qsa vnc-supervisor "/proc/$_pid/cmdline"
+}
+if supervisor_running; then
+    log "supervisor already running (pid $_pid); nothing to do"
     exit 0
 fi
 echo $$ > "$STATE_DIR/supervisor.pid"
@@ -55,18 +77,21 @@ if [ ! -s "$STATE_DIR/vnc-password" ]; then
     tr -dc 'a-zA-Z0-9' < /dev/urandom | head -c 20 > "$STATE_DIR/vnc-password"
 fi
 
-# Write the RFB VncAuth file the Xvnc `-rfbauth` flag consumes. Prefer a
-# vncpasswd binary when the base ships one. TigerVNC 1.15 (Debian 13) dropped
-# it, so fall back to generating the file ourselves. The format is the password
+# Write the RFB VncAuth file the Xvnc `-rfbauth` flag consumes. Use a vncpasswd
+# binary when the base ships one; some TigerVNC builds no longer do, so fall
+# back to generating the file here. The format is the password
 # (truncated/NUL-padded to 8 bytes) DES-ECB encrypted under VNC's fixed key with
-# each key byte bit-reversed. Single DES is TripleDES with an 8-byte key.
+# each key byte bit-reversed. Single DES is TripleDES with an 8-byte key. The
+# log line records which path ran, so it stays visible whether the python3
+# fallback (and its aptPackages entries) is load-bearing on this base.
 if VNCPASSWD="$(command -v tigervncpasswd || command -v vncpasswd)"; then
-    "$VNCPASSWD" -f < "$STATE_DIR/vnc-password" > "$STATE_DIR/rfb-passwd" || {
-        echo "vnc: failed to write VNC auth file" >&2
+    if ! "$VNCPASSWD" -f < "$STATE_DIR/vnc-password" > "$STATE_DIR/rfb-passwd"; then
+        log "failed to write VNC auth file with $VNCPASSWD"
         exit 1
-    }
+    fi
+    log "generated VNC auth file with $VNCPASSWD"
 elif command -v python3 >/dev/null 2>&1; then
-    python3 - "$STATE_DIR/vnc-password" "$STATE_DIR/rfb-passwd" <<'PY' || {
+    if ! python3 - "$STATE_DIR/vnc-password" "$STATE_DIR/rfb-passwd" <<'PY'
 import os
 import sys
 
@@ -86,11 +111,13 @@ fd = os.open(dst, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
 with os.fdopen(fd, "wb") as f:
     f.write(obfuscated)
 PY
-        echo "vnc: failed to write VNC auth file" >&2
+    then
+        log "failed to write VNC auth file with the python3 fallback"
         exit 1
-    }
+    fi
+    log "generated VNC auth file with the python3 fallback"
 else
-    echo "vnc: no vncpasswd binary and no python3 to generate VNC auth file" >&2
+    log "no vncpasswd binary and no python3 to generate VNC auth file"
     exit 1
 fi
 
@@ -123,18 +150,20 @@ for _ in $(seq 1 50); do
     [ -S "$_socket" ] && break
     sleep 0.2
 done
+if [ ! -S "$_socket" ]; then
+    log "X socket $_socket did not appear; see $LOG_DIR/xvnc.log"
+fi
 
 export DISPLAY="$DISPLAY_NUM"
 
 run_forever wm matchbox-window-manager -use_titlebar no
 
-# Chromium starts on a static waiting page, never on $VNC_URL directly: a
-# server the session starts later would otherwise park the display on a
+# Chromium starts on a static waiting page, never on $ENCLAVE_VNC_URL directly:
+# a server the session starts later would otherwise park the display on a
 # connection-refused error page that nothing ever reloads. The waiting page is
-# also the neutral idle state when no $VNC_URL is set, where sessions drive the
+# also the neutral idle state when no URL is set, where sessions drive the
 # browser on demand via vnc-open, so the one-shot forward below only runs when
-# a $VNC_URL is given.
-WAITING_PAGE=/usr/local/share/enclave-vnc/waiting.html
+# a URL is given.
 BROWSER_START="about:blank"
 if [ -f "$WAITING_PAGE" ]; then
     BROWSER_START="file://$WAITING_PAGE"
@@ -165,34 +194,73 @@ singleton_live() {
     done
 ) &
 
-# Forward $VNC_URL once its TCP port accepts connections. vnc-open
-# waits for the browser singleton, so ordering against the Chromium start
-# above does not matter. Probing only covers http(s), so other schemes open
-# immediately and take their chances.
+# split_authority <url>: set _host and _port from a URL's authority, tolerating
+# userinfo (user:pass@host) and bracketed IPv6 literals. _host is empty when the
+# URL has no authority to speak of.
+split_authority() {
+    _rest="${1#*://}"
+    _rest="${_rest%%\#*}"
+    _rest="${_rest%%\?*}"
+    _auth="${_rest%%/*}"
+    case "$_auth" in
+    *@*) _auth="${_auth##*@}" ;;
+    esac
+    case "$_auth" in
+    \[*\]*)
+        _host="${_auth%%\]*}"
+        _host="${_host#\[}"
+        _port="${_auth##*\]}"
+        _port="${_port#:}"
+        ;;
+    *:*)
+        _host="${_auth%%:*}"
+        _port="${_auth##*:}"
+        ;;
+    *)
+        _host="$_auth"
+        _port=""
+        ;;
+    esac
+}
+
+# Forward $ENCLAVE_VNC_URL once its TCP port accepts connections. vnc-open waits
+# for the browser singleton, so ordering against the Chromium start above does
+# not matter. Probing only covers http(s); other schemes, and http(s) URLs whose
+# authority cannot be parsed, open immediately and take their chances.
 if [ "$START_URL" != "about:blank" ]; then
+    _host=""
+    _port=""
     case "$START_URL" in
     http://* | https://*)
-        _hostport="${START_URL#*://}"
-        _hostport="${_hostport%%/*}"
-        _host="${_hostport%%:*}"
-        _port="${_hostport##*:}"
-        if [ "$_port" = "$_hostport" ]; then
+        split_authority "$START_URL"
+        if [ -z "$_port" ]; then
             case "$START_URL" in
             https://*) _port=443 ;;
             *) _port=80 ;;
             esac
         fi
-        (
-            until (exec 3<> "/dev/tcp/$_host/$_port") 2>/dev/null; do
-                sleep 1
-            done
-            /usr/local/bin/vnc-open "$START_URL"
-        ) >> "$LOG_DIR/url-watch.log" 2>&1 &
-        ;;
-    *)
-        /usr/local/bin/vnc-open "$START_URL" >> "$LOG_DIR/url-watch.log" 2>&1 &
         ;;
     esac
+    if [ -n "$_host" ]; then
+        (
+            _waited=0
+            until (exec 3<> "/dev/tcp/$_host/$_port") 2>/dev/null; do
+                if [ "$_waited" -ge "$URL_WAIT_SECONDS" ]; then
+                    log "gave up after ${URL_WAIT_SECONDS}s waiting for $_host:$_port; not opening $START_URL"
+                    exit 0
+                fi
+                sleep 1
+                _waited=$((_waited + 1))
+            done
+            log "$_host:$_port accepted a connection; opening $START_URL"
+            /usr/local/bin/vnc-open "$START_URL"
+        ) >> "$LOG_DIR/url-watch.log" 2>&1 &
+    else
+        log "cannot probe $START_URL for readiness; opening it immediately"
+        /usr/local/bin/vnc-open "$START_URL" >> "$LOG_DIR/url-watch.log" 2>&1 &
+    fi
 fi
+
+log "stack started (display $DISPLAY_NUM, RFB port $RFB_PORT)"
 
 wait

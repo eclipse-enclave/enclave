@@ -164,7 +164,7 @@ lint: lint-tools
 	@echo "Running gosec..."
 	GOCACHE="$(CURDIR)/$(LINT_GO_CACHE)" gosec -quiet -exclude-dir=vendor ./...
 	@echo "Running shellcheck..."
-	@scripts="$$(find . -type f \( -name '*.sh' -o -path '*/build-scripts/bin/*' -o -path '*/extensions/features/vnc/vnc-*' \) -not -path './vendor/*' | sort)"; \
+	@scripts="$$(find . -type f \( -name '*.sh' -o -path '*/build-scripts/bin/*' -o -path './extensions/*/bin/*' \) -not -path './vendor/*' | sort)"; \
 	if [ -z "$$scripts" ]; then \
 		echo "No shell scripts found"; \
 	else \
@@ -222,7 +222,7 @@ lint-report: lint-tools
 	@GOCACHE="$(CURDIR)/$(LINT_GO_CACHE)" gosec -exclude-dir=vendor ./... > $(REPORTS_DIR)/gosec.txt 2>&1 || true
 	@echo "  -> $(REPORTS_DIR)/gosec.txt"
 	@echo "Running shellcheck..."
-	@scripts="$$(find . -type f \( -name '*.sh' -o -path '*/build-scripts/bin/*' -o -path '*/extensions/features/vnc/vnc-*' \) -not -path './vendor/*' | sort)"; \
+	@scripts="$$(find . -type f \( -name '*.sh' -o -path '*/build-scripts/bin/*' -o -path './extensions/*/bin/*' \) -not -path './vendor/*' | sort)"; \
 	if [ -z "$$scripts" ]; then \
 		echo "No shell scripts found" > $(REPORTS_DIR)/shellcheck.txt; \
 	else \

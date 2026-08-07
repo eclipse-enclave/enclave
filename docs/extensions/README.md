@@ -64,15 +64,20 @@ extensions/
     │   ├── install.sh
     │   └── feature-entrypoint.d/
     │       └── setup.sh           # Runs for ALL tools
-    └── devtools/
+    ├── devtools/
+    │   ├── spec.yaml
+    │   └── install.sh
+    └── vnc/
         ├── spec.yaml
-        └── install.sh
+        ├── install.sh
+        └── bin/                    # Extension-less scripts installed onto PATH
+            └── vnc-supervisor
 ```
 
 `spec.yaml` is the extension manifest. `install.sh`,
 `gateway-allowlist.conf`, `entrypoint.d/`, `feature-entrypoint.d/`,
-`templates/`, and `skills/` remain sibling files rather than fields in the
-manifest. The in-container build shell scripts under
+`templates/`, `bin/`, and `skills/` remain sibling files rather than fields in
+the manifest. The in-container build shell scripts under
 `runtime-assets/build-scripts/` read the metadata they need (feature/tool
 enablement, `priority`, `needsRoot`, `aptPackages`, `failOnInstallError`)
 straight from `spec.yaml` (falling back to `spec.json`) with `yq`.
@@ -530,7 +535,14 @@ without help from the tool spec.
 |------|---------|
 | `install.sh` | Installation script (runs as root if `needsRoot: true`) |
 | `feature-entrypoint.d/*.sh` | Scripts sourced at startup for ALL tools |
+| `bin/` | Extension-less runtime scripts the feature installs into the image; covered by `make lint`'s shellcheck pass and by `make lint-changed` |
 | `skills/` | Agent skills composed into the tool's skills directory when the feature is enabled |
+
+`bin/` holds scripts destined for a `PATH` directory in the image, where a
+`.sh` suffix would be wrong. `install.sh` must place them with an explicit mode
+(`install -D -m 755 …`): source modes do not survive the embedded-asset
+extraction that package installs use, so only `install.sh` itself is
+mode-normalized by the build.
 
 ### Feature Selection
 

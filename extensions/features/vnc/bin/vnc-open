@@ -31,7 +31,7 @@ if [ "$#" -lt 1 ]; then
     exit 2
 fi
 
-export DISPLAY="${VNC_DISPLAY:-:99}"
+export DISPLAY="${ENCLAVE_VNC_DISPLAY:-:99}"
 STATE_DIR=/tmp/enclave-vnc
 PROFILE="$STATE_DIR/chromium"
 LOG_DIR="$STATE_DIR/log"

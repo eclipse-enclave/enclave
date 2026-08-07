@@ -18,16 +18,16 @@ failOnInstallError: true
 priority: 75
 aptPackages:
   # Chromium itself is installed by install.sh, not listed here: it is only a
-  # real deb on Debian archives (Ubuntu ships a snap stub), and all selected
-  # features' aptPackages share one apt-get install, so one unavailable
-  # package would fail every feature's packages instead of just this one.
+  # real deb on Debian archives (Ubuntu ships a snap stub), and install.sh can
+  # name this feature in the error where the shared apt step cannot.
   - tigervnc-standalone-server
   - matchbox-window-manager
   - xdg-utils
   - fonts-liberation
   - fonts-dejavu-core
-  # Generates the RFB VncAuth file: TigerVNC 1.15 (Debian 13) no longer ships a
-  # vncpasswd binary, so the supervisor derives it via python3-cryptography.
+  # Fallback for generating the RFB VncAuth file on bases whose TigerVNC build
+  # ships no vncpasswd binary. The supervisor logs which path it used, so these
+  # can be dropped once a base is confirmed to always provide the binary.
   - python3
   - python3-cryptography
 commands:

@@ -15,6 +15,11 @@
 # background-networking/component-update/sync switches keep Chromium's own
 # phone-home traffic (component updater, safe browsing, optimization guide)
 # from hammering gateway-denied domains and filling the network log.
+#
+# Arguments are passed after `--` so a caller-supplied string that happens to
+# start with a dash lands as a URL rather than as a Chromium switch: vnc-open,
+# the only caller, is reachable as $BROWSER and as the http/https scheme
+# handler, so its argument is not always under this feature's control.
 set -u
 
 exec chromium \
@@ -30,4 +35,4 @@ exec chromium \
     --password-store=basic \
     --start-maximized \
     --user-data-dir=/tmp/enclave-vnc/chromium \
-    "$@"
+    -- "$@"

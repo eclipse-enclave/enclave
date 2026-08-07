@@ -66,7 +66,7 @@ for f in $changed; do
                 done
             fi
             ;;
-        *.sh | runtime-assets/build-scripts/bin/* | extensions/features/vnc/vnc-*)
+        *.sh | runtime-assets/build-scripts/bin/* | extensions/*/bin/*)
             [ -f "$f" ] && sh_files="$sh_files $f"
             ;;
     esac

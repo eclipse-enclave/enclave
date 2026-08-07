@@ -137,6 +137,7 @@ func TestResolveTargetAllowsWindowsDriveWhenOptedIn(t *testing.T) {
 		{`C:\`, "/mnt/c"},
 		{`C:\my dir\proj`, "/mnt/c/my dir/proj"},
 		{`\\?\C:\Users\p`, "/mnt/c/Users/p"},
+		{`\\.\C:\Users\p`, "/mnt/c/Users/p"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.cwd, func(t *testing.T) {
@@ -275,6 +276,53 @@ func TestResolveTargetRefusesMalformedDriveMappings(t *testing.T) {
 				t.Errorf("expected a mapping to %q to be refused", mapped)
 			}
 		})
+	}
+}
+
+// A ".." component is refused rather than resolved: resolving one can name a
+// directory in a different distribution than the one the target was derived
+// from, which would bind-mount the wrong directory into the container.
+func TestResolveTargetRefusesDotDotComponents(t *testing.T) {
+	cases := []struct {
+		name    string
+		cwd     string
+		environ []string
+	}{
+		{"above the distribution root", `\\wsl.localhost\Ubuntu\..\Debian\home\p`, nil},
+		{"inside the project path", `\\wsl.localhost\Ubuntu\home\p\..\..\etc`, nil},
+		{"in place of the distribution", `\\wsl.localhost\..\home\p`, nil},
+		{"dot in place of the distribution", `\\wsl.localhost\.\Ubuntu\home\p`, nil},
+		{"on a windows drive", `C:\Users\p\..\..\Windows`, []string{envAllowWindowsPath + "=1"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := resolve(t, tc.cwd, tc.environ...)
+			if err == nil {
+				t.Fatalf("resolveTarget(%q) = distro %q at %q, want a refusal", tc.cwd, got.Distro, got.LinuxPath)
+			}
+		})
+	}
+}
+
+// The mapping comes from Windows rather than from Getwd, so it has not been
+// canonicalized and is the one place a ".." can realistically arrive.
+func TestResolveTargetRefusesDotDotInADriveMapping(t *testing.T) {
+	resolver := func(string) string { return `\\wsl.localhost\Ubuntu\..\Debian\home` }
+
+	if got, err := resolveTarget(`Z:\proj`, env(), fixedDriveTypes, resolver); err == nil {
+		t.Fatalf("resolveTarget = distro %q at %q, want a refusal", got.Distro, got.LinuxPath)
+	}
+}
+
+// "." components are still dropped: they name the same directory, so there is
+// nothing ambiguous about them.
+func TestResolveTargetStillDropsSingleDotComponents(t *testing.T) {
+	got, err := resolve(t, `\\wsl.localhost\Ubuntu\home\.\p\.`)
+	if err != nil {
+		t.Fatalf("resolveTarget: %v", err)
+	}
+	if got.LinuxPath != "/home/p" {
+		t.Errorf("linux path = %q, want /home/p", got.LinuxPath)
 	}
 }
 

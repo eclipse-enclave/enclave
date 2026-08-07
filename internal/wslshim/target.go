@@ -8,6 +8,7 @@
 package wslshim
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 )
@@ -93,16 +94,28 @@ func uncTarget(path string, env lookupFunc) (target, error) {
 	}
 
 	distro, sub := splitFirst(tail)
-	if distro == "" {
+	if distro == "" || isDotComponent(distro) {
 		return target{}, fmt.Errorf("the current directory %q names no distribution. "+
 			`Use a path of the form \\wsl.localhost\<Distro>\<path>`, path)
 	}
 
+	linuxPath, err := toLinuxPath(sub)
+	if err != nil {
+		return target{}, refuseDotDot(path, err)
+	}
+
 	return target{
 		Distro:    distro,
-		LinuxPath: toLinuxPath(sub),
+		LinuxPath: linuxPath,
 		Warnings:  distroConflictWarnings(distro, env),
 	}, nil
+}
+
+// refuseDotDot phrases the one error toLinuxPath produces, so every caller
+// reports it the same way.
+func refuseDotDot(path string, err error) error {
+	return fmt.Errorf("the current directory %q %w. Run enclave from the directory itself "+
+		"rather than through a path that points above it", path, err)
 }
 
 // distroConflictWarnings reports a configured distribution that the working
@@ -135,7 +148,12 @@ func driveTarget(path string, env lookupFunc, driveType driveTyper, resolveDrive
 			"and run enclave from there, or set %s=1 to accept the slowdown", path, letter, envAllowWindowsPath)
 	}
 
-	t := target{LinuxPath: "/mnt/" + letter + trimEmpty(toLinuxPath(dropDrive(path)))}
+	linuxPath, err := toLinuxPath(dropDrive(path))
+	if err != nil {
+		return target{}, refuseDotDot(path, err)
+	}
+
+	t := target{LinuxPath: "/mnt/" + letter + trimEmpty(linuxPath)}
 	if requested, ok := env(envDistro); ok && requested != "" {
 		t.Distro = requested
 	}
@@ -175,15 +193,21 @@ func remoteDriveTarget(path string, env lookupFunc, resolveDrive driveResolver) 
 	// the provider root would silently promote the first path component to a
 	// distribution name.
 	distro, mapped := splitFirst(tail)
-	if distro == "" {
+	if distro == "" || isDotComponent(distro) {
 		return refuse("points at " + unc + ", which names no distribution")
 	}
 
 	// The letter may be mapped below the distribution root, and the working
-	// directory may sit deeper still.
+	// directory may sit deeper still. Unlike the working directory, the mapping
+	// is whatever Windows recorded and has not been canonicalized by Getwd.
+	linuxPath, err := toLinuxPath(mapped + `\` + dropDrive(path))
+	if err != nil {
+		return refuse("points at " + unc + ", which does not unambiguously name a directory")
+	}
+
 	return target{
 		Distro:    distro,
-		LinuxPath: toLinuxPath(mapped + `\` + dropDrive(path)),
+		LinuxPath: linuxPath,
 		Warnings:  distroConflictWarnings(distro, env),
 	}, nil
 }
@@ -202,8 +226,10 @@ func stripLongPathPrefix(path string) string {
 	switch {
 	case strings.HasPrefix(path, extendedUNCPrefix):
 		return `\\` + path[len(extendedUNCPrefix):]
-	case strings.HasPrefix(path, extendedPrefix), strings.HasPrefix(path, deviceExtendedPrefix):
+	case strings.HasPrefix(path, extendedPrefix):
 		return path[len(extendedPrefix):]
+	case strings.HasPrefix(path, deviceExtendedPrefix):
+		return path[len(deviceExtendedPrefix):]
 	default:
 		return path
 	}
@@ -239,19 +265,35 @@ func splitFirst(path string) (string, string) {
 	return head, tail
 }
 
+// errDotDot refuses a path the classifier will not resolve. Getwd returns a
+// canonicalized path, so it should not produce one — but a drive mapping read
+// back from Windows is not Getwd output, and resolving ".." here could name a
+// directory in a different distribution than the one the target was derived
+// from. Silently bind-mounting the wrong directory into a container an agent can
+// write to is worse than refusing.
+var errDotDot = errors.New(`contains a ".." component, which enclave does not resolve`)
+
 // toLinuxPath rewrites a Windows path tail as an absolute Linux path, dropping
-// empty and "." components. Other components pass through verbatim: Getwd
-// returns a resolved path, so there is nothing further to normalize, and
-// rewriting a component could change which file is meant.
-func toLinuxPath(tail string) string {
+// empty and "." components. Other components pass through verbatim: rewriting
+// one could change which file is meant.
+func toLinuxPath(tail string) (string, error) {
 	var parts []string
 	for _, part := range strings.Split(tail, `\`) {
-		if part == "" || part == "." {
+		switch part {
+		case "", ".":
 			continue
+		case "..":
+			return "", errDotDot
 		}
 		parts = append(parts, part)
 	}
-	return "/" + strings.Join(parts, "/")
+	return "/" + strings.Join(parts, "/"), nil
+}
+
+// isDotComponent reports a component that names a directory relative to another
+// one. It can never be a distribution name.
+func isDotComponent(part string) bool {
+	return part == "." || part == ".."
 }
 
 // trimEmpty turns the root path into the empty string so it can be appended to

@@ -56,6 +56,7 @@ filesystem, which is why nothing else could work.
 | `C:\Users\you\project` | Refused. With `ENCLAVE_WSL_ALLOW_WINDOWS_PATH=1`: runs at `/mnt/c/Users/you/project` in `ENCLAVE_WSL_DISTRO` or the WSL default distribution. |
 | `\\server\share\…` | Refused. A network share has no path inside a distribution. |
 | A drive letter mapping anything else | Refused, and the error names what the drive points at. |
+| Any of the above reached through a `..` component | Refused. A `..` above a distribution root names a directory in a different distribution, so it is not resolved. |
 
 PowerShell supports a `\\wsl.localhost\…` path as its current location, so the
 first row is reachable there directly. `cmd.exe` cannot hold a UNC working
@@ -127,9 +128,11 @@ inside the container on the first run, or use
 - The child's exit code is propagated unchanged.
 - A launcher-level failure — no WSL2, an unusable working directory, no `enclave`
   in the distribution — exits **125**, following Docker's convention for "the
-  launcher failed, not the program". Every such message is prefixed
-  `enclave (windows launcher):`, so it is never mistaken for enclave's own
-  output.
+  launcher failed, not the program". Messages the launcher produces itself are
+  prefixed `enclave (windows launcher):`, so they are never mistaken for
+  enclave's own output. The one exception is the `--cd` fallback below, where the
+  shell inside the distribution reports an unreachable directory in its own words
+  and exits 125.
 
 ## How it finds the Linux binary
 
@@ -137,9 +140,12 @@ inside the container on the first run, or use
 `~/.profile`, and a non-login shell does not read that file. So the launcher
 resolves the path first and then executes it:
 
-1. `wsl.exe [-d <distro>] -e /bin/sh -lc '<fixed probe>'`, a login shell that
-   tries `command -v enclave` and then `~/.local/bin/enclave`,
+1. `wsl.exe [-d <distro>] --cd / -e /bin/sh -lc '<fixed probe>'`, a login shell
+   that tries `command -v enclave` and then `~/.local/bin/enclave`,
    `/usr/local/bin/enclave`, `/usr/bin/enclave`. The probe interpolates nothing.
+   It prints its answer behind an `enclave-bin=` marker, so a shell profile that
+   writes to standard output is not mistaken for the path. Passing `--cd` here
+   is also how support for it is detected, at no extra cost.
 2. `wsl.exe [-d <distro>] --cd <path> -e <absolute path> <your arguments…>`,
    which runs the binary directly with no shell to re-parse anything.
 
@@ -148,9 +154,29 @@ result is not cached. On a `wsl.exe` old enough to lack `--cd`, the launcher
 retries and changes directory through a shell instead, still passing your
 arguments as positional parameters so they are never re-split.
 
+## The session does not run under a login shell
+
+`-e` runs the binary directly, which is what keeps a shell from re-parsing your
+arguments, but it also means the distribution's `/etc/profile`,
+`/etc/profile.d/*`, `~/.profile`, and `~/.bashrc` do not run. Enclave gets WSL's
+default environment instead of the one an interactive WSL session has.
+
+That is invisible for a normal setup, where `docker` is on the default `PATH`.
+It is not invisible if your shell profile is what makes Docker reachable —
+rootless Docker's install instructions, for example, put
+`export DOCKER_HOST=unix:///run/user/$UID/docker.sock` in `~/.bashrc`. Enclave
+would then report that it cannot reach the Docker daemon, from a distribution
+where running `enclave` in a terminal works.
+
+Configure such variables so they apply outside an interactive shell —
+`/etc/environment`, or a systemd user environment — rather than in a shell
+profile. Anything set on the Windows side can be carried across with
+`ENCLAVE_WSL_FORWARD_ENV`.
+
 ## Limitations
 
 - No native Windows support.
+- The session does not inherit the distribution's shell profile; see above.
 - The launcher installs nothing: not WSL2, not a distribution, not Docker, not
   the Linux `enclave` build.
 - No diagnostic command; failures are reported inline.

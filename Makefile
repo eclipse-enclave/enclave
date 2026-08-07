@@ -163,6 +163,9 @@ lint: lint-tools
 	done; exit $$fail
 	@echo "Running gosec..."
 	GOCACHE="$(CURDIR)/$(LINT_GO_CACHE)" gosec -quiet -exclude-dir=vendor ./...
+	@echo "Running go vet and gosec for GOOS=windows..."
+	GOOS=windows go vet ./...
+	GOOS=windows GOCACHE="$(CURDIR)/$(LINT_GO_CACHE)" gosec -quiet -exclude-dir=vendor ./...
 	@echo "Running shellcheck..."
 	@scripts="$$(find . -type f \( -name '*.sh' -o -path '*/build-scripts/bin/*' \) -not -path './vendor/*' | sort)"; \
 	if [ -z "$$scripts" ]; then \

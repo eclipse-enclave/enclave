@@ -164,13 +164,25 @@ because it never builds an image — which is why `cmd/enclave/tool_imports.go` 
 generated with a `//go:build !windows` constraint. The result is around 3 MB
 against roughly 14 MB for the Linux binary.
 
-All the logic lives in `internal/wslshim`, and everything except one
-`GetDriveType` call is host-independent, so it builds and is tested on Linux:
+All the logic lives in `internal/wslshim`, and everything except the two
+drive-letter queries (`GetDriveType` and `WNetGetConnection`) is
+host-independent, so it builds and is tested on Linux:
 
 ```bash
 go test ./internal/wslshim/...
 GOOS=windows go build ./... && GOOS=windows go vet ./...
 ```
+
+`make lint` runs `go vet` and `gosec` a second time with `GOOS=windows`, because
+neither one looks at a file its build constraints exclude — without that pass the
+`unsafe.Pointer` code in `drivetype_windows.go` and its `#nosec` annotations are
+checked by nothing. `golangci-lint` is not repeated that way, so the
+Windows-only files remain outside it.
+
+The two shell scripts the launcher sends into the distribution are Go constants,
+so `internal/wslshim/script_exec_test.go` executes them against the host's `sh`
+on non-Windows platforms. That is what keeps `probeScript` and the marker
+`parseProbeOutput` looks for from drifting apart.
 
 Argument quoting is the risky part. Windows passes a single command-line string
 and `wsl.exe` re-parses it, so the launcher builds that string itself and hands it

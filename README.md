@@ -8,11 +8,19 @@ A Docker-based sandbox for running agentic coding tools — Claude, Codex, OpenC
 
 ## Requirements
 
+Linux and macOS (with Docker Desktop) are supported natively. On Windows, run
+Enclave inside WSL2; the Linux instructions apply within the WSL distribution
+and no native Windows build is provided.
+
 Runtime dependencies:
 
 - Rootful Docker (CLI on `PATH`, daemon running) with the buildx plugin; the
   sandbox image build requires BuildKit. Rootless Docker is not supported.
-- Optional: `qemu-system-x86_64` and `cpio` for the experimental `qemu` backend.
+- Optional: `qemu-system-x86_64` and `cpio` for the experimental `qemu` backend,
+  which builds an x86-64 guest and is practical only on x86-64 Linux hosts,
+  where KVM can accelerate it. On arm64 hosts and on macOS it falls back to
+  full emulation. The default `docker` backend is unaffected and runs natively
+  on every supported platform.
 
 Building from source additionally requires Git, Make, and Go 1.24 or newer. Use
 the official [Go installation instructions](https://go.dev/doc/install) if your
@@ -70,14 +78,37 @@ sudo dnf install ./enclave-*.x86_64.rpm
 
 ### Standalone binary
 
-The rolling release also provides a self-contained Linux x86-64 binary. Verify
-it with `checksums.txt`, make it executable, and place it on your `PATH`:
+The rolling release also provides self-contained binaries:
+
+| Artifact | Platform |
+|----------|----------|
+| `enclave-linux-amd64` | Linux x86-64 |
+| `enclave-linux-arm64` | Linux arm64 |
+| `enclave-darwin-arm64` | macOS (Apple Silicon) |
+| `enclave-darwin-amd64` | macOS (Intel) |
+
+Download the artifact for your platform together with `checksums.txt`, verify
+it, and place it on your `PATH`. On Linux:
 
 ```bash
 sha256sum --check --ignore-missing checksums.txt
-chmod +x enclave-linux-amd64
 sudo install enclave-linux-amd64 /usr/local/bin/enclave
 ```
+
+On macOS, substituting `enclave-darwin-amd64` on Intel:
+
+```bash
+shasum -a 256 --check --ignore-missing checksums.txt
+xattr -d com.apple.quarantine ./enclave-darwin-arm64 2>/dev/null || true
+sudo install -d /usr/local/bin
+sudo install enclave-darwin-arm64 /usr/local/bin/enclave
+```
+
+The macOS binaries are unsigned and not notarized, so a binary downloaded
+through a browser carries a quarantine attribute that makes Gatekeeper refuse to
+run it; `install` propagates the attribute, so remove it first. Fetching the
+artifact with `curl` or `gh release download` avoids it entirely, which is why
+the command above tolerates its absence.
 
 The binary includes the Dockerfiles, extensions, documentation, and other
 runtime assets. It extracts its assets on first use.
@@ -96,6 +127,18 @@ On Linux this installs the binary to `~/.local/bin/`. Make sure that directory
 is on your `PATH`. On macOS the default is `/usr/local/bin/`; copying there may
 need `sudo` or a writable `/usr/local/bin`. Override the destination with
 `make install INSTALL_BIN=...`.
+
+### Windows (WSL2)
+
+There is no native Windows build. Install WSL2 with an Ubuntu 24.04
+distribution and make Docker available inside it — either through Docker
+Desktop's WSL integration or by installing Docker Engine in the distribution.
+Then follow the Linux instructions above from inside WSL, using the `.deb` or
+the Linux binary matching the host architecture.
+
+Keep the project working directory inside the WSL filesystem rather than under
+`/mnt/c`. Bind-mounting a Windows drive path through the WSL interop layer
+works, but file access is markedly slower.
 
 ## Quick Start
 

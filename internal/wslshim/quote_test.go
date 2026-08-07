@@ -167,6 +167,10 @@ func assertRoundTrip(t *testing.T, exe string, args []string) {
 // arguments a run of 2n backslashes before a quote yields n backslashes and a
 // quote that toggles the quoted state, while 2n+1 yields n backslashes and a
 // literal quote.
+//
+// The one rule left out is the doubled quote inside a quoted argument, where the
+// real parser yields a literal quote and stays quoted. escapeArg only ever emits
+// the \" form, so no command line this package produces can reach it.
 func parseWindowsCommandLine(cmdLine string) []string {
 	var argv []string
 	i := 0

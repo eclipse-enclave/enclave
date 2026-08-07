@@ -11,6 +11,12 @@ package wslshim
 // the distribution. It matches the shell's "command not found" convention.
 const probeNotFoundCode = 127
 
+// probeMarker prefixes the probe's answer. The probe runs a login shell, so
+// /etc/profile, /etc/profile.d/*, and ~/.profile all run before it and anything
+// they write to stdout — a version manager's init, a banner — arrives ahead of
+// the path. The marker is what tells the two apart.
+const probeMarker = "enclave-bin="
+
 // probeScript locates the Linux enclave binary. `make install` puts it in
 // ~/.local/bin, which is only on PATH via ~/.profile, so the probe runs a login
 // shell first and falls back to the known install locations.
@@ -18,9 +24,9 @@ const probeNotFoundCode = 127
 // The script is a fixed literal that interpolates no user input, which is what
 // makes this round trip safe to hand to a shell at all.
 const probeScript = `p=$(command -v enclave 2>/dev/null) || p=""
-case "$p" in /*) printf %s "$p"; exit 0 ;; esac
+case "$p" in /*) printf "\nenclave-bin=%s\n" "$p"; exit 0 ;; esac
 for c in "$HOME/.local/bin/enclave" /usr/local/bin/enclave /usr/bin/enclave; do
-  if [ -x "$c" ]; then printf %s "$c"; exit 0; fi
+  if [ -x "$c" ]; then printf "\nenclave-bin=%s\n" "$c"; exit 0; fi
 done
 exit 127`
 

@@ -108,4 +108,9 @@ func TestProbeScriptIsSelfContained(t *testing.T) {
 			t.Errorf("the probe script does not look for %q", want)
 		}
 	}
+	// The script and the parser have to agree, or every answer looks like
+	// login-shell chatter.
+	if !strings.Contains(probeScript, probeMarker) {
+		t.Errorf("the probe script does not emit the %q marker parseProbeOutput looks for", probeMarker)
+	}
 }

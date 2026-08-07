@@ -49,6 +49,13 @@ var multiArgGoldenCases = []struct {
 	{"adjacent quoted arguments", []string{"a b", "c d"}},
 	{"windows path argument", []string{"--mount", `C:\Users\p\data\`}},
 	{"long argument", []string{strings.Repeat("a", 4096)}},
+	// The launcher cannot avoid sending these two, and the probe carries a
+	// backslash immediately before a quote on every single run, so they belong in
+	// the set a real wsl.exe is checked against.
+	{"probe script", []string{"-e", "/bin/sh", "-lc", probeScript}},
+	{"cd fallback script", []string{
+		"-e", "/bin/sh", "-c", cdScript, "enclave-wsl-launcher", "/home/p/my proj", "/usr/bin/enclave",
+	}},
 }
 
 func buildGoldenTable(t *testing.T) goldenTable {

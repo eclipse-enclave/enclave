@@ -147,6 +147,12 @@ func resolveBundleMemoryMiB(root string) (int, error) {
 }
 
 func (b *Backend) prepareGuestRuntime(bundle bundle, req backend.Request) (guestRuntime, error) {
+	// Before anything inspects the sources: prepareFileMounts stats every bind
+	// source and rejects a missing one, so a later creation pass would never run
+	// for the case CreateSourceDir exists for.
+	if err := createDisposableMountSources(req.Mounts); err != nil {
+		return guestRuntime{}, err
+	}
 	tempDir, err := os.MkdirTemp("", "enclave-qemu-*")
 	if err != nil {
 		return guestRuntime{}, fmt.Errorf("qemu backend: create runtime directory: %w", err)
@@ -201,6 +207,25 @@ func (b *Backend) prepareGuestRuntime(bundle bundle, req backend.Request) (guest
 		Mounts:           mounts,
 		FileMounts:       fileMounts,
 	}, nil
+}
+
+// createDisposableMountSources honors the backend.Mount.CreateSourceDir
+// contract: a disposable source that no longer exists is recreated as an empty
+// directory instead of failing the session. Non-bind mounts have no host
+// directory to create.
+func createDisposableMountSources(mounts []backend.Mount) error {
+	for _, mount := range mounts {
+		if !mount.CreateSourceDir {
+			continue
+		}
+		if mount.Type != "" && mount.Type != backend.MountTypeBind {
+			continue
+		}
+		if err := os.MkdirAll(mount.Source, 0o700); err != nil {
+			return fmt.Errorf("qemu backend: create disposable mount source %q: %w", mount.Source, err)
+		}
+	}
+	return nil
 }
 
 func (b *Backend) buildRuntimeMounts(req backend.Request, controlDir string, fileStageSource string) ([]runtimeMount, error) {

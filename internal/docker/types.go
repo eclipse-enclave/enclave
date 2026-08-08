@@ -33,6 +33,9 @@ type Mount struct {
 	Source   string
 	Target   string
 	ReadOnly bool
+	// CreateSourceDir requests the source-creating `--volume` rendering for a
+	// disposable directory bind mount; see mountFlags.
+	CreateSourceDir bool
 }
 
 // ContainerConfig is the subset of container configuration we translate to

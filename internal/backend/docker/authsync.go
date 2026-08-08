@@ -150,7 +150,12 @@ func (b *Backend) syncSharedAuthStores(ctx context.Context, helperImage string, 
 	if scriptPath == "" {
 		return fmt.Errorf("auth reconcile script path is empty")
 	}
-	if _, err := os.Stat(scriptPath); err != nil {
+	// Read the trusted script host-side and inline it into the helper command
+	// instead of bind-mounting it: the script lives in the extracted asset
+	// cache, and Docker Desktop can reject runtime bind sources from a freshly
+	// recreated cache tree whose daemon-side view lags the host.
+	script, err := os.ReadFile(scriptPath) // #nosec G304 -- scriptPath is the app-configured extracted asset, not user input.
+	if err != nil {
 		return fmt.Errorf("auth reconcile script %s: %w", scriptPath, err)
 	}
 
@@ -171,8 +176,8 @@ func (b *Backend) syncSharedAuthStores(ctx context.Context, helperImage string, 
 		return err
 	}
 
-	cmd := sharedAuthSyncCommand("/auth-reconcile.sh", tool, validated, b.chownSpec(), "/config", "/auth")
-	hostConfig := sharedAuthSyncHostConfig(configDir, authDir, scriptPath, util.IsSELinuxEnforcing())
+	cmd := sharedAuthSyncCommand(string(script), tool, validated, b.chownSpec(), "/config", "/auth")
+	hostConfig := sharedAuthSyncHostConfig(configDir, authDir, util.IsSELinuxEnforcing())
 
 	return hoststore.WithLock(b.opts.Host.Home, authDir, func() error {
 		return dockercmd.Run(ctx, &dockercmd.ContainerConfig{
@@ -185,12 +190,12 @@ func (b *Backend) syncSharedAuthStores(ctx context.Context, helperImage string, 
 }
 
 // sharedAuthSyncHostConfig builds the reconcile helper's host config: the
-// config store read-only, the shared auth store writable, and the reconcile
-// script itself. Bind mounts are relabeled the same way session-container
-// mounts are when SELinux is enforcing; without the relabel the helper cannot
-// even source the script ("cannot open /auth-reconcile.sh: Permission
-// denied").
-func sharedAuthSyncHostConfig(configDir string, authDir string, scriptPath string, selinuxEnforcing bool) *dockercmd.HostConfig {
+// config store read-only and the shared auth store writable. The reconcile
+// script is deliberately not mounted; its content travels in the helper
+// command. Bind mounts are relabeled the same way session-container mounts are
+// when SELinux is enforcing; without the relabel the helper cannot read the
+// stores ("Permission denied").
+func sharedAuthSyncHostConfig(configDir string, authDir string, selinuxEnforcing bool) *dockercmd.HostConfig {
 	hostConfig := &dockercmd.HostConfig{
 		AutoRemove: true,
 		Mounts: []dockercmd.Mount{
@@ -205,23 +210,20 @@ func sharedAuthSyncHostConfig(configDir string, authDir string, scriptPath strin
 				Source: authDir,
 				Target: "/auth",
 			},
-			{
-				Type:     dockercmd.MountTypeBind,
-				Source:   scriptPath,
-				Target:   "/auth-reconcile.sh",
-				ReadOnly: true,
-			},
 		},
 	}
 	applySELinuxMounts(hostConfig, selinuxEnforcing)
 	return hostConfig
 }
 
-func sharedAuthSyncCommand(scriptPath string, tool string, authFiles []string, chown string, configRoot string, authRoot string) string {
+// sharedAuthSyncCommand assembles the helper container's shell command: the
+// inlined reconcile script (a POSIX function library) followed by the
+// enclave_sync_shared_auth invocation.
+func sharedAuthSyncCommand(script string, tool string, authFiles []string, chown string, configRoot string, authRoot string) string {
 	var cmd strings.Builder
 	cmd.WriteString("set -e\n")
-	fmt.Fprintf(&cmd, ". %s\n", util.ShellQuote(scriptPath))
-	cmd.WriteString("enclave_sync_shared_auth")
+	cmd.WriteString(script)
+	cmd.WriteString("\nenclave_sync_shared_auth")
 	for _, arg := range append([]string{tool, configRoot, authRoot, chown, "0"}, authFiles...) {
 		fmt.Fprintf(&cmd, " %s", util.ShellQuote(arg))
 	}

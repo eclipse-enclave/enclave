@@ -156,7 +156,9 @@ Environment variables consumed by the entrypoint:
 After the container exits, the host-side Go code reconciles auth files from the
 config store to the shared auth store. The reconcile runs `auth-reconcile.sh`
 inside a short-lived helper container (sharing semantics with the entrypoint),
-with the config and auth store **directories bind-mounted**. Most tools remain
+with the config and auth store **directories bind-mounted**. The script itself
+is read host-side and inlined into the helper command rather than bind-mounted,
+so reconciliation never depends on the extracted asset cache. Most tools remain
 **additive only**: files are copied when the shared auth destination is missing.
 Claude `.credentials.json` uses `claudeAiOauth.expiresAt` so a token refresh
 stranded as a real config-store file can replace stale shared auth.

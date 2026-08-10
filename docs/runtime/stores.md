@@ -157,11 +157,12 @@ After the container exits, the host-side Go code reconciles auth files from the
 config store to the shared auth store. The reconcile runs `auth-reconcile.sh`
 inside a short-lived helper container (sharing semantics with the entrypoint),
 with the config and auth store **directories bind-mounted**. The script itself
-is read host-side and inlined into the helper command rather than bind-mounted,
-so reconciliation never depends on the extracted asset cache. Most tools remain
-**additive only**: files are copied when the shared auth destination is missing.
-Claude `.credentials.json` uses `claudeAiOauth.expiresAt` so a token refresh
-stranded as a real config-store file can replace stale shared auth.
+is read and retained when the backend is initialized, then inlined into the
+helper command rather than bind-mounted. Reconciliation therefore remains
+independent of the extracted asset cache for the lifetime of the process. Most
+tools remain **additive only**: files are copied when the shared auth destination
+is missing. Claude `.credentials.json` uses `claudeAiOauth.expiresAt` so a token
+refresh stranded as a real config-store file can replace stale shared auth.
 
 This makes new credentials (e.g. a fresh OAuth token obtained during the
 session) available to other projects on the next run. Background and GUI sessions

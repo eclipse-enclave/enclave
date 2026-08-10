@@ -24,6 +24,39 @@ import (
 
 const claudeCredentialsFile = ".credentials.json"
 
+func TestNewSnapshotsAuthReconcileScript(t *testing.T) {
+	root := t.TempDir()
+	home := filepath.Join(root, "home")
+	if err := os.MkdirAll(home, 0o700); err != nil {
+		t.Fatalf("create home: %v", err)
+	}
+	scriptPath := filepath.Join(root, "assets", "runtime-assets", "auth-reconcile.sh")
+	if err := os.MkdirAll(filepath.Dir(scriptPath), 0o700); err != nil {
+		t.Fatalf("create asset directory: %v", err)
+	}
+	const script = "enclave_sync_shared_auth() { :; }\n"
+	if err := os.WriteFile(scriptPath, []byte(script), 0o600); err != nil {
+		t.Fatalf("write reconcile script: %v", err)
+	}
+
+	b := New(Options{Host: model.Host{Home: home}, ReconcileScriptPath: scriptPath})
+	if err := os.RemoveAll(filepath.Join(root, "assets")); err != nil {
+		t.Fatalf("remove asset cache: %v", err)
+	}
+	if b.reconcileScriptErr != nil {
+		t.Fatalf("snapshot reconcile script: %v", b.reconcileScriptErr)
+	}
+	if b.reconcileScript != script {
+		t.Fatalf("reconcile script = %q, want %q", b.reconcileScript, script)
+	}
+
+	installFakeDocker(t)
+	configDir, authDir := authSyncTempDirs(t)
+	if err := b.syncSharedAuthStores(context.Background(), "enclave-test:latest", "codex", []string{"auth.json"}, configDir, authDir); err != nil {
+		t.Fatalf("sync after deleting asset cache: %v", err)
+	}
+}
+
 func TestMountedSourceDirResolvesBindMountSource(t *testing.T) {
 	info := dockercmd.InspectResponse{
 		Mounts: []dockercmd.MountPoint{

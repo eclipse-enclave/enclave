@@ -146,17 +146,11 @@ func (b *Backend) syncSharedAuthStores(ctx context.Context, helperImage string, 
 	if len(validated) == 0 {
 		return nil
 	}
-	scriptPath := strings.TrimSpace(b.opts.ReconcileScriptPath)
-	if scriptPath == "" {
-		return fmt.Errorf("auth reconcile script path is empty")
+	if b.reconcileScriptErr != nil {
+		return b.reconcileScriptErr
 	}
-	// Read the trusted script host-side and inline it into the helper command
-	// instead of bind-mounting it: the script lives in the extracted asset
-	// cache, and Docker Desktop can reject runtime bind sources from a freshly
-	// recreated cache tree whose daemon-side view lags the host.
-	script, err := os.ReadFile(scriptPath) // #nosec G304 -- scriptPath is the app-configured extracted asset, not user input.
-	if err != nil {
-		return fmt.Errorf("auth reconcile script %s: %w", scriptPath, err)
+	if strings.TrimSpace(b.reconcileScript) == "" {
+		return fmt.Errorf("auth reconcile script is empty")
 	}
 
 	image := model.AlpineImage
@@ -176,7 +170,7 @@ func (b *Backend) syncSharedAuthStores(ctx context.Context, helperImage string, 
 		return err
 	}
 
-	cmd := sharedAuthSyncCommand(string(script), tool, validated, b.chownSpec(), "/config", "/auth")
+	cmd := sharedAuthSyncCommand(b.reconcileScript, tool, validated, b.chownSpec(), "/config", "/auth")
 	hostConfig := sharedAuthSyncHostConfig(configDir, authDir, util.IsSELinuxEnforcing())
 
 	return hoststore.WithLock(b.opts.Host.Home, authDir, func() error {

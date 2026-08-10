@@ -393,11 +393,8 @@ Secrets are split across two `spec.yaml` sections:
 - `credentials.sources.<id>` declares the credential itself: `env` (one or
   more env-var aliases for the same credential) and the enclave-native
   `apiKey` bool (`false` for OAuth/session tokens; omitted/`true` means it's
-  an API key).
-- Env aliases name one value. Precedence: host env, layered secrets files,
-  persisted store; the winner is injected into *every* alias, so a stale
-  persisted value heals after one run. Aliases set in the *same* layer with
-  different values are an error; across layers it is a warning.
+  an API key). See [Authentication](../auth.md#env-aliases) for how multiple
+  aliases are resolved against each other.
 - `credentials.sources.<id>.file` optionally sources the secret from a host
   file: `path` (supports `~`) plus a `parser` — empty for the trimmed raw file
   contents, or `json:<dot.path>` (e.g. `json:auth.token`) to extract a scalar

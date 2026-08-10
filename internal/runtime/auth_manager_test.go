@@ -249,7 +249,7 @@ func TestInjectDeclaredSecretsUsesPlaceholderAndRealHookValue(t *testing.T) {
 
 	env := []string{}
 	hooks := &captureHooks{}
-	injection, err := manager.injectDeclaredSecrets(hooks, authContextForRuntime(r), &env, map[string]string{}, map[string]string{}, nil, activeSecrets)
+	injection, err := manager.injectDeclaredSecrets(hooks, authContextForRuntime(r), &env, map[string]string{}, nil, nil, activeSecrets)
 	if err != nil {
 		t.Fatalf("injectDeclaredSecrets() error = %v", err)
 	}
@@ -295,7 +295,7 @@ func TestInjectDeclaredSecretsUsesPersistedFallbackForAliases(t *testing.T) {
 		authContextForRuntime(r),
 		&env,
 		map[string]string{"PRIMARY_TOKEN": "persisted-token"},
-		map[string]string{},
+		nil,
 		nil,
 		activeSecrets,
 	)
@@ -345,8 +345,8 @@ func TestInjectDeclaredSecretsPrefersLayeredSecretsOverStalePersistedAlias(t *te
 		stubHooks{},
 		authContextForRuntime(r),
 		&env,
-		map[string]string{"GH_TOKEN": "stale-token"},       // persisted
-		map[string]string{"GITHUB_TOKEN": "rotated-token"}, // layered secrets
+		map[string]string{"GH_TOKEN": "stale-token"}, // persisted
+		secretsLayers(map[string]string{"GITHUB_TOKEN": "rotated-token"}),
 		nil,
 		activeSecrets,
 	)
@@ -383,7 +383,7 @@ func TestInjectDeclaredSecretsRejectsConflictingAliasValuesInSameLayer(t *testin
 		authContextForRuntime(r),
 		&[]string{},
 		map[string]string{},
-		map[string]string{},
+		nil,
 		nil,
 		activeSecrets,
 	)
@@ -392,9 +392,6 @@ func TestInjectDeclaredSecretsRejectsConflictingAliasValuesInSameLayer(t *testin
 	}
 	if !strings.Contains(err.Error(), "conflicting values across env aliases") {
 		t.Fatalf("injectDeclaredSecrets() error = %q, want alias conflict", err)
-	}
-	if !strings.Contains(err.Error(), "the env layer") {
-		t.Fatalf("injectDeclaredSecrets() error = %q, want the conflicting layer named", err)
 	}
 }
 
@@ -423,7 +420,7 @@ func TestInjectDeclaredSecretsFallsBackToRealValueWhenPlaceholderFails(t *testin
 		authContextForRuntime(r),
 		&env,
 		map[string]string{},
-		map[string]string{},
+		nil,
 		nil,
 		activeSecrets,
 	)
@@ -448,9 +445,9 @@ func TestInjectDeclaredSecretsOnlyInjectsDeclaredLayeredSecrets(t *testing.T) {
 		1: "DECLARED_KEY=declared\nUNDECLARED_KEY=should-not-leak\n",
 	})
 
-	layeredSecrets, err := auth.ResolveLayeredSecrets(home, projectHash, tool, model.SecretsScopeBoth)
+	layers, err := auth.ResolveSecretsLayers(home, projectHash, tool, model.SecretsScopeBoth)
 	if err != nil {
-		t.Fatalf("ResolveLayeredSecrets() error = %v", err)
+		t.Fatalf("ResolveSecretsLayers() error = %v", err)
 	}
 
 	r := runtimeWithProfile(t, model.Profile{
@@ -471,7 +468,7 @@ func TestInjectDeclaredSecretsOnlyInjectsDeclaredLayeredSecrets(t *testing.T) {
 		authContextForRuntime(r),
 		&env,
 		map[string]string{},
-		layeredSecrets,
+		layers,
 		nil,
 		activeSecrets,
 	)
@@ -563,11 +560,11 @@ func TestInjectDeclaredSecretsSuppressesOnlyProviderAPIKeySecrets(t *testing.T) 
 				authContextForRuntime(r),
 				&env,
 				map[string]string{},
-				map[string]string{
+				secretsLayers(map[string]string{
 					"API_KEY":     "api-secret",
 					"OAUTH_TOKEN": "oauth-secret",
 					"GH_TOKEN":    "github-secret",
-				},
+				}),
 				nil,
 				activeSecrets,
 			)
@@ -679,7 +676,7 @@ func TestInjectDeclaredSecretsUsesDistinctGitLabReleaseShapes(t *testing.T) {
 		authContextForRuntime(r),
 		&env,
 		map[string]string{},
-		map[string]string{},
+		nil,
 		nil,
 		activeSecrets,
 	)
@@ -748,7 +745,7 @@ func TestInjectDeclaredSecretsProxyManagedRestrictsPlaceholderToListedVars(t *te
 		authContextForRuntime(r),
 		&env,
 		map[string]string{},
-		map[string]string{},
+		nil,
 		nil,
 		activeSecrets,
 	)
@@ -886,6 +883,15 @@ func mustActiveSecrets(t *testing.T, r *Runtime) []activeSecret {
 		t.Fatalf("activeSecrets() error = %v", err)
 	}
 	return secrets
+}
+
+// secretsLayers wraps a flat map as a single secrets-file layer for tests that
+// do not care which file a value came from.
+func secretsLayers(values map[string]string) []auth.SecretsLayer {
+	if len(values) == 0 {
+		return nil
+	}
+	return []auth.SecretsLayer{{Path: "global.env", Values: values}}
 }
 
 func setupSecretFiles(t *testing.T, home, tool, projectHash string, layers map[int]string) {

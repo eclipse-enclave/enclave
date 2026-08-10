@@ -69,17 +69,17 @@ func (m authManager) Prepare(env *[]string, stores storeSet) (model.AuthState, S
 		logx.Warnf("Auth ready hook failed: %v", err)
 	}
 
-	layeredSecrets, err := auth.ResolveLayeredSecrets(m.host.Home, m.project.Hash, m.profile.Name, m.auth.SecretsScope)
+	secretsLayers, err := auth.ResolveSecretsLayers(m.host.Home, m.project.Hash, m.profile.Name, m.auth.SecretsScope)
 	if err != nil {
 		logx.Warnf("Failed to read layered secrets: %v", err)
-		layeredSecrets = map[string]string{}
+		secretsLayers = nil
 	}
 
 	activeSecrets, err := m.activeSecrets()
 	if err != nil {
 		return model.AuthState{}, SecretMapping{}, fmt.Errorf("resolve active secrets: %w", err)
 	}
-	injection, err := m.injectDeclaredSecrets(hooks, authCtx, env, persistedEnv, layeredSecrets, authStorage, activeSecrets)
+	injection, err := m.injectDeclaredSecrets(hooks, authCtx, env, persistedEnv, secretsLayers, authStorage, activeSecrets)
 	if err != nil {
 		return model.AuthState{}, SecretMapping{}, err
 	}
@@ -152,7 +152,7 @@ func (m authManager) checkProviderSession(authStorage *backend.StoreRef, provide
 	return m.checkSessionFromAuthFiles(authStorage, provider.AuthFiles)
 }
 
-func (m authManager) injectDeclaredSecrets(hooks auth.Hooks, authCtx auth.Context, env *[]string, persistedEnv map[string]string, layeredSecrets map[string]string, authStorage *backend.StoreRef, activeSecrets []activeSecret) (apiKeyInjectionResult, error) {
+func (m authManager) injectDeclaredSecrets(hooks auth.Hooks, authCtx auth.Context, env *[]string, persistedEnv map[string]string, secretsLayers []auth.SecretsLayer, authStorage *backend.StoreRef, activeSecrets []activeSecret) (apiKeyInjectionResult, error) {
 	result := apiKeyInjectionResult{
 		ProviderHasEnvCredential: map[string]bool{},
 		ResolvedSecretIDs:        map[string]bool{},
@@ -170,7 +170,7 @@ func (m authManager) injectDeclaredSecrets(hooks auth.Hooks, authCtx auth.Contex
 	}
 	secretReleaseEnabled := m.shouldUseSecretReleases(eligibleSecrets)
 	for _, secret := range eligibleSecrets {
-		secretValue, secretSource, found, err := resolveActiveSecretValue(secret, m.host.Home, layeredSecrets, persistedEnv)
+		secretValue, secretSource, found, err := resolveActiveSecretValue(secret, m.host.Home, secretsLayers, persistedEnv)
 		if err != nil {
 			return result, fmt.Errorf("resolve secret %q: %w", secret.ID, err)
 		}

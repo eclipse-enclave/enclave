@@ -57,7 +57,7 @@ func ensureQEMUBundle(input *CommandInput, opts model.Options, buildCfg buildCon
 		}
 		return buildCfg, 0
 	}
-	plan, err := resolveRuntimeImageBuildPlan(input.Ctx.Paths, buildCfg, opts.BuildOptions, opts.Tool, host.Home, false, time.Now().UTC())
+	plan, err := resolveRuntimeImageBuildPlan(input.Ctx.Paths, buildCfg, opts.BuildOptions, opts.Tool, host.Home, opts.ForceRebuild, time.Now().UTC())
 	if err != nil {
 		logx.Errorf("%v", err)
 		return buildConfig{}, 1

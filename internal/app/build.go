@@ -816,7 +816,7 @@ func devcontainerFeatureSelectionMessage(features string) string {
 }
 
 // planAgentUpdatesForTools decides, per tool, whether the agent CLI install
-// must be refreshed. With forceAll set (the `update` command), every tool is
+// must be refreshed. With forceAll set (`update` or `--rebuild`), every tool is
 // force-updated; otherwise each tool is refreshed only when its update interval
 // has elapsed and an online probe reports a changed upstream fingerprint.
 func planAgentUpdatesForTools(forceAll bool, tools []string, home string, now time.Time, resolveAutomatic automaticToolUpdateResolver) (agentUpdatePlan, error) {

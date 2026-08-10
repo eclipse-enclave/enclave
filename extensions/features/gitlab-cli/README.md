@@ -24,12 +24,14 @@ Set `GITLAB_HOST` to point `glab` at a self-hosted instance:
 GITLAB_HOST=gitlab.example.com enclave --features +gitlab-cli
 ```
 
-That single env var selects the instance for `glab`, retargets token injection,
-and joins the network allowlist — no spec edit or `allow_domains` entry. See
-`serviceAuth.hostsFromCredential` in `docs/extensions/README.md` for the
-accepted value forms and why the host replaces the `gitlab.com` defaults instead
-of adding to them.
+That single env var selects the instance for `glab`, retargets token injection
+at it, and joins the network allowlist — no spec edit or `allow_domains` entry.
+The tokens then go only to that instance, while `gitlab.com` stays reachable.
+See `serviceAuth.hostsFromCredential` in `docs/extensions/README.md` for the
+accepted value forms.
 
-To set it persistently, put it in a secrets file rather than the shell — global
-in `~/.local/state/enclave/secrets/global.env`, or per project under
-`~/.local/state/enclave/projects/<hash>/`.
+`GITLAB_HOST` applies to the run that sets it and is not written to the
+persisted env store. To make it permanent, put it in a secrets file — globally
+in `~/.local/state/enclave/secrets/global.env`, or per project in
+`~/.local/state/enclave/secrets/projects/<hash>/<tool>.env`, which is keyed by
+the agent tool (e.g. `claude.env`), not by this feature.

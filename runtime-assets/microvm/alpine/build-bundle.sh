@@ -114,6 +114,7 @@ cp /src/runtime-assets/auth-reconcile.sh "$root/usr/local/share/enclave/auth-rec
 cp /src/runtime-assets/net.sh "$root/usr/local/share/enclave/net.sh"
 cp /src/runtime-assets/kit-init.sh "$root/usr/local/share/enclave/kit-init.sh"
 chmod 0755 "$root/usr/local/bin/entrypoint.sh" "$root/usr/local/share/enclave/auth-reconcile.sh" "$root/usr/local/share/enclave/net.sh"
+chmod 0644 "$root/usr/local/share/enclave/kit-init.sh"
 
 if [ -d /src/docs ]; then cp -a /src/docs "$root/usr/share/doc/enclave/docs"; fi
 

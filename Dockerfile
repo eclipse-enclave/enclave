@@ -335,7 +335,8 @@ COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod a+rx /usr/local/bin/entrypoint.sh \
         /usr/local/share/enclave/auth-reconcile.sh \
         /usr/local/share/enclave/net.sh && \
-    chmod a+r /usr/local/share/enclave/tmux-session.conf
+    chmod a+r /usr/local/share/enclave/tmux-session.conf \
+        /usr/local/share/enclave/kit-init.sh
 USER ${USERNAME}
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 CMD ["/bin/bash"]

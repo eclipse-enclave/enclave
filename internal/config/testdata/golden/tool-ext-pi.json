@@ -1,7 +1,7 @@
 {
   "type": "sandbox",
   "name": "pi",
-  "description": "Anthropic Claude Pi",
+  "description": "A minimal terminal coding harness",
   "default_included": true,
   "priority": 100,
   "secrets": {
@@ -32,6 +32,20 @@
         }
       }
     },
+    "mistral-api-key": {
+      "env_vars": [
+        "MISTRAL_API_KEY"
+      ],
+      "release": {
+        "http": {
+          "hosts": [
+            "api.mistral.ai"
+          ],
+          "header": "authorization",
+          "format": "Bearer %s"
+        }
+      }
+    },
     "openai-api-key": {
       "env_vars": [
         "OPENAI_API_KEY"
@@ -47,5 +61,9 @@
         }
       }
     }
+  },
+  "environment": {
+    "PI_SKIP_VERSION_CHECK": "1",
+    "PI_TELEMETRY": "0"
   }
 }

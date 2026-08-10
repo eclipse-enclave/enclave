@@ -9,7 +9,9 @@ package runtime
 
 import (
 	"fmt"
+	"maps"
 	"os"
+	"slices"
 	"sort"
 	"strings"
 
@@ -17,6 +19,7 @@ import (
 	"enclave/internal/logx"
 	"enclave/internal/model"
 	"enclave/internal/secretfile"
+	"enclave/internal/util"
 )
 
 type activeSecret struct {
@@ -166,30 +169,40 @@ func resolveEnvAliasValue(secret activeSecret, layeredSecrets map[string]string,
 	return chosen.value, chosen.source, true, nil
 }
 
+// hostCredentialRefs maps a host-selector credential id to the secret ids whose
+// release hosts it overrides. Several services commonly share one host
+// credential (gitlab's three tokens), so the reference is resolved once.
+func hostCredentialRefs(secrets []activeSecret) map[string][]string {
+	refs := map[string][]string{}
+	for _, secret := range secrets {
+		if secret.ReleaseHTTP != nil && secret.ReleaseHTTP.HostsFromSecret != "" {
+			ref := secret.ReleaseHTTP.HostsFromSecret
+			refs[ref] = append(refs[ref], secret.ID)
+		}
+	}
+	return refs
+}
+
 // resolveReleaseHostOverrides resolves the credentials named by each release
-// rule's HostsFromSecret and returns secret-id -> replacement hosts. A service
-// whose host credential is unset or unusable keeps its declared hosts, so the
-// default (e.g. gitlab.com) still applies.
+// rule's HostsFromSecret and returns secret-id -> replacement release hosts. A
+// service whose host credential is unset or unusable keeps its declared hosts,
+// so the default (e.g. gitlab.com) still applies.
 //
 // The replacement is deliberately not additive: the referenced credential names
 // the one instance the token belongs to, and injecting an instance-specific
 // token into the default hosts as well would expose it to a service that cannot
-// accept it.
+// accept it. It narrows token release only — the declared hosts stay in the
+// network allow set, see Runtime.releaseHosts.
 func resolveReleaseHostOverrides(secrets []activeSecret, hostHome string, layeredSecrets map[string]string, persistedEnv map[string]string) map[string][]string {
-	// Several services commonly share one host credential (gitlab's three
-	// tokens), so group by the reference and resolve each credential once.
 	byID := make(map[string]activeSecret, len(secrets))
-	referencedBy := map[string][]string{}
 	for _, secret := range secrets {
 		byID[secret.ID] = secret
-		if secret.ReleaseHTTP != nil && secret.ReleaseHTTP.HostsFromSecret != "" {
-			ref := secret.ReleaseHTTP.HostsFromSecret
-			referencedBy[ref] = append(referencedBy[ref], secret.ID)
-		}
 	}
 
 	overrides := map[string][]string{}
-	for ref, secretIDs := range referencedBy {
+	refs := hostCredentialRefs(secrets)
+	for _, ref := range slices.Sorted(maps.Keys(refs)) {
+		secretIDs := refs[ref]
 		source, ok := byID[ref]
 		if !ok {
 			continue
@@ -206,6 +219,7 @@ func resolveReleaseHostOverrides(secrets []activeSecret, hostHome string, layere
 		if host == "" {
 			continue
 		}
+		logx.Infof("Host credential %s selects %s for %s", ref, host, strings.Join(secretIDs, ", "))
 		for _, id := range secretIDs {
 			overrides[id] = []string{host}
 		}
@@ -216,7 +230,9 @@ func resolveReleaseHostOverrides(secrets []activeSecret, hostHome string, layere
 // normalizeReleaseHost turns a credential value into an allowlist-comparable
 // host, tolerating the URL forms CLIs accept (glab reads GITLAB_HOST as either
 // a bare host or a full URL). An unusable value warns and is dropped rather
-// than failing the session, since the declared hosts remain valid.
+// than failing the session, since the declared hosts remain valid. The value is
+// redacted in the warning: the credential is declared like any other, so a
+// misconfigured spec could point this at a token.
 func normalizeReleaseHost(secretID string, value string) string {
 	trimmed := value
 	if index := strings.Index(trimmed, "://"); index >= 0 {
@@ -224,6 +240,13 @@ func normalizeReleaseHost(secretID string, value string) string {
 	}
 	if index := strings.IndexAny(trimmed, "/?#"); index >= 0 {
 		trimmed = trimmed[:index]
+	}
+	// A wildcard would release the token to every host under a suffix, which
+	// defeats naming the one instance it belongs to. Normalize accepts them, so
+	// reject before it runs.
+	if strings.Contains(trimmed, "*") {
+		logx.Warnf("Secret %s: value %s is a wildcard pattern, not a host; keeping declared hosts.", secretID, util.RedactSecret(value))
+		return ""
 	}
 	// NormalizeHost strips the port and IPv6 brackets but does not validate the
 	// labels, so the pattern validator runs after it to reject junk that would
@@ -233,7 +256,7 @@ func normalizeReleaseHost(secretID string, value string) string {
 		host, err = domainpattern.Normalize(host)
 	}
 	if err != nil {
-		logx.Warnf("Secret %s: value %q is not a usable host (%v); keeping declared hosts.", secretID, value, err)
+		logx.Warnf("Secret %s: value %s is not a usable host (%v); keeping declared hosts.", secretID, util.RedactSecret(value), err)
 		return ""
 	}
 	return host

@@ -8,6 +8,7 @@
 package runtime
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -63,6 +64,8 @@ func TestNormalizeReleaseHost(t *testing.T) {
 		"gitlab.example.com:8443":          "gitlab.example.com",
 		"  GitLab.Example.com  ":           "gitlab.example.com",
 		"not a host":                       "",
+		// A wildcard would release the token to every host under the suffix.
+		"*.example.com": "",
 	}
 	for value, want := range cases {
 		t.Run(value, func(t *testing.T) {
@@ -84,9 +87,10 @@ func TestResolveReleaseHostOverridesKeepsDeclaredHostsWhenUnset(t *testing.T) {
 	}
 }
 
-// The replacement host must reach the allow set, or the release rule would name
-// a host the sandbox cannot resolve, and it must not leak into the loaded spec,
-// which is shared across the session.
+// The selected host must reach the allow set, or the release rule would name a
+// host the sandbox cannot resolve. The declared hosts stay reachable — only
+// token release is narrowed — and the loaded spec, shared across the session,
+// must not be mutated.
 func TestSpecNetworkDomainsIncludesOverriddenReleaseHost(t *testing.T) {
 	r := runtimeWithProfile(t, gitlabLikeProfile())
 	r.releaseHostOverrides = map[string][]string{
@@ -95,15 +99,83 @@ func TestSpecNetworkDomainsIncludesOverriddenReleaseHost(t *testing.T) {
 	}
 
 	allowed, _ := r.specNetworkDomains()
-	joined := strings.Join(allowed, ",")
 
-	if !strings.Contains(joined, "gitlab.example.com") {
-		t.Fatalf("allowed = %v, want the overridden host included", allowed)
-	}
-	if strings.Contains(joined, "gitlab.com,") || strings.Contains(joined, ",gitlab.com") {
-		t.Fatalf("allowed = %v, want the replaced default host dropped", allowed)
+	for _, want := range []string{"gitlab.example.com", "gitlab.com", "*.gitlab.com"} {
+		if !slices.Contains(allowed, want) {
+			t.Fatalf("allowed = %v, want %q included", allowed, want)
+		}
 	}
 	if hosts := r.profile.Secrets["gitlab-token"].Release.HTTP.Hosts; strings.Join(hosts, ",") != "gitlab.com,*.gitlab.com" {
 		t.Fatalf("profile hosts = %v, want the declared hosts unchanged", hosts)
+	}
+}
+
+// The token itself must still go only to the selected instance.
+func TestReleaseHostsForUsesOnlyTheOverride(t *testing.T) {
+	r := runtimeWithProfile(t, gitlabLikeProfile())
+	r.releaseHostOverrides = map[string][]string{"gitlab-token": {"gitlab.example.com"}}
+	manager := newAuthManager(r)
+
+	secrets := mustActiveSecrets(t, r)
+	for _, secret := range secrets {
+		if secret.ID != "gitlab-token" {
+			continue
+		}
+		if hosts := manager.releaseHostsFor(secret); strings.Join(hosts, ",") != "gitlab.example.com" {
+			t.Fatalf("releaseHostsFor(gitlab-token) = %v, want only the selected host", hosts)
+		}
+	}
+}
+
+// The effective policy is memoized and unions the release hosts into the allow
+// set, so an override arriving after a policy lookup must invalidate it instead
+// of leaving the selected host unresolvable.
+func TestSetReleaseHostOverridesInvalidatesResolvedPolicy(t *testing.T) {
+	r := runtimeWithProfile(t, gitlabLikeProfile())
+	r.policyResolved = true
+
+	r.setReleaseHostOverrides(nil)
+	if !r.policyResolved {
+		t.Fatalf("policyResolved = false, want the memo kept when there is no override")
+	}
+
+	r.setReleaseHostOverrides(map[string][]string{"gitlab-token": {"gitlab.example.com"}})
+	if r.policyResolved {
+		t.Fatalf("policyResolved = true, want the memo dropped so the selected host reaches the allow set")
+	}
+}
+
+// The host selector is a choice, not a credential: persisting it would pin
+// every later run to the instance one run happened to name.
+func TestInjectDeclaredSecretsDoesNotPersistHostSelector(t *testing.T) {
+	t.Setenv("GITLAB_HOST", "gitlab.example.com")
+	t.Setenv("GITLAB_TOKEN", "gitlab-token-value")
+	t.Setenv("JOB_TOKEN", "")
+
+	r := runtimeWithProfile(t, gitlabLikeProfile())
+	manager := newAuthManager(r)
+
+	env := []string{}
+	injection, err := manager.injectDeclaredSecrets(
+		stubHooks{},
+		authContextForRuntime(r),
+		&env,
+		map[string]string{},
+		map[string]string{},
+		nil,
+		mustActiveSecrets(t, r),
+	)
+	if err != nil {
+		t.Fatalf("injectDeclaredSecrets() error = %v", err)
+	}
+
+	if got := envValue(env, "GITLAB_HOST"); got != "gitlab.example.com" {
+		t.Fatalf("GITLAB_HOST = %q, want it injected into the container", got)
+	}
+	if _, ok := injection.SecretValues["GITLAB_HOST"]; ok {
+		t.Fatalf("SecretValues = %v, want the host selector left out of the persisted set", injection.SecretValues)
+	}
+	if got := injection.SecretValues["GITLAB_TOKEN"]; got != "gitlab-token-value" {
+		t.Fatalf("SecretValues[GITLAB_TOKEN] = %q, want the token still persisted", got)
 	}
 }

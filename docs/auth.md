@@ -177,10 +177,26 @@ This can also be set persistently in `config.json` via the `pass_env` key. See [
 
 ## SSH Keys
 
-Initialize isolated SSH keys for use inside containers:
+Giving an agent an SSH key is not recommended. The key lets the agent write to systems outside the sandbox, and Enclave cannot restrict how it is used. Let the agent commit in the container, review the diff, and push from the host instead.
+
+Use `ssh-init` only for sessions that must push without host intervention:
 
 ```bash
 enclave ssh-init
 ```
 
-Keys are generated at `~/.cache/enclave/ssh/` and mounted into the container read-only.
+`ssh-init` stores keys in Enclave's host cache: `~/.cache/enclave/ssh/` by default on Linux, `$XDG_CACHE_HOME/enclave/ssh/` when set, and `~/Library/Caches/org.eclipse.enclave/ssh/` on macOS.
+
+Docker mounts this directory read-only into every session, across all projects and tools. There is no per-session opt-out. Read-only access stops the agent from changing the key files, but it can still use the key for any operation allowed by the Git provider, including force pushes and branch deletion.
+
+The generated key has no passphrase and is usable as soon as it is mounted.
+
+Scope the key before you register it:
+
+- Prefer a deploy key limited to one repository. On GitHub, use repository Settings > Deploy keys; on GitLab, use repository Settings > Repository > Deploy keys. Enable write access only if needed.
+- For access to several repositories, use a dedicated machine account with minimal membership instead of a personal account.
+- To revoke access, delete the key at the provider, then delete the host cache directory listed above.
+
+You can replace the generated keys in the same directory. Do not use a key with broader access than the session needs.
+
+Commit and tag signing are disabled inside the container (see [Persistence](persistence.md#git)), so you cannot distinguish an agent's pushes from your own by their signatures.

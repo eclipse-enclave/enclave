@@ -265,9 +265,10 @@ func ensureRuntimeImage(input *CommandInput, opts model.Options, buildCfg *build
 		}
 		return resolved, 0
 	}
-	// Normal runs never force an agent update; the `update` command is the
-	// explicit path. Automatic interval-based refresh still applies below.
-	buildPlan, err := resolveRuntimeImageBuildPlan(input.Ctx.Paths, resolved, opts.BuildOptions, opts.Tool, host.Home, false, time.Now().UTC())
+	// A forced image rebuild must also invalidate the selected tool install
+	// layers; otherwise BuildKit can reproduce a known-bad image entirely from
+	// cache. Automatic interval-based refresh still applies to normal runs.
+	buildPlan, err := resolveRuntimeImageBuildPlan(input.Ctx.Paths, resolved, opts.BuildOptions, opts.Tool, host.Home, opts.ForceRebuild, time.Now().UTC())
 	if err != nil {
 		logx.Errorf("%v", err)
 		return buildConfig{}, 1

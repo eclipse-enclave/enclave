@@ -23,6 +23,7 @@ override_dh_auto_build:
 	go build -tags enclave_no_embed -mod=vendor -o bin/enclave ./cmd/enclave
 	mkdir -p completions
 	bin/enclave completion bash > completions/enclave
+	bin/enclave completion zsh > completions/_enclave
 
 override_dh_auto_install:
 	# Install binary
@@ -70,9 +71,12 @@ override_dh_auto_install:
 		cp -r "$$path" "$$dest/"; \
 	done < $(GATEWAY_PROXY_SOURCE_PATHS_FILE)
 
-	# Install bash completions
+	# Install shell completions. Debian searches zsh/vendor-completions for
+	# distro-packaged functions; zsh/site-functions under /usr is not on fpath.
 	install -D -m 0644 completions/enclave \
 		$(CURDIR)/debian/enclave/usr/share/bash-completion/completions/enclave
+	install -D -m 0644 completions/_enclave \
+		$(CURDIR)/debian/enclave/usr/share/zsh/vendor-completions/_enclave
 
 	# Install documentation
 	install -D -m 0644 README.md $(CURDIR)/debian/enclave/usr/share/doc/enclave/README.md

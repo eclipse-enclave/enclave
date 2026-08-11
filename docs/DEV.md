@@ -12,7 +12,7 @@ Concise notes for contributors working on the enclave codebase.
 
 ## Common Commands
 
-Build the CLI:
+Build the CLI (plain `make` is equivalent to `make build`):
 
 ```bash
 make build

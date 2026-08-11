@@ -6,6 +6,7 @@
 # SPDX-License-Identifier: MIT
 
 .PHONY: build cross-build install install-binary clean-legacy-assets uninstall clean clean-lint-cache test deb deb-quick rpm lint lint-changed lint-report fmt vet generate lint-tools check-go completions check-license-headers
+.DEFAULT_GOAL := build
 
 BIN_DIR ?= ./bin
 BINARY ?= enclave
@@ -21,6 +22,10 @@ LINT_GO_CACHE := $(LINT_TMP_DIR)/go-build
 LINT_GOLANGCI_CACHE := $(LINT_TMP_DIR)/golangci-lint-cache
 BASE_REF ?=
 
+build: check-go
+	mkdir -p $(BIN_DIR)
+	go build -o $(BIN_DIR)/$(BINARY) $(CMD_DIR)
+
 check-go:
 	@command -v go >/dev/null 2>&1 || { echo "Go is not installed. Install Go 1.24+ from https://go.dev/dl/"; exit 1; }
 	@GO_VER=$$(go version | awk '{split($$3, a, "."); print a[2]}'); \
@@ -28,10 +33,6 @@ check-go:
 		echo "Go 1.24+ is required (found $$(go version))"; \
 		exit 1; \
 	fi
-
-build: check-go
-	mkdir -p $(BIN_DIR)
-	go build -o $(BIN_DIR)/$(BINARY) $(CMD_DIR)
 
 completions:
 	mkdir -p $(COMPLETIONS_DIR)

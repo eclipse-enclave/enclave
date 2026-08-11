@@ -103,7 +103,7 @@ Git commit and tag signing (`commit.gpgsign`, `tag.gpgsign`) are unconditionally
 
 ## SSH Keys
 
-See [Authentication & Secrets](auth.md#ssh-keys) for SSH key setup. The SSH directory is always mounted read-only.
+Giving an agent an SSH key is not recommended; see [Authentication & Secrets](auth.md#ssh-keys) for what the key grants and how to scope it. The SSH directory is always mounted read-only. That stops the agent from changing the key files; it does not limit what the key can do at your Git provider.
 
 ## Host Hardening
 

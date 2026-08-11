@@ -58,5 +58,9 @@ released by the gateway only for matching HTTPS hosts. This protects those
 environment values from direct exfiltration, but credential files and secrets
 without HTTP release can contain real values inside the tool config/auth store.
 
-See [Authentication and secrets](../auth.md) and the
-[restricted network request flow](../runtime/network-request-flow.md).
+Once configured, the SSH key is available to every Docker session, regardless
+of project or tool. SSH on port 22 bypasses the HTTP/TLS proxy, so a push does
+not appear in `network.log`, even with `--network-log=requests`. See
+[SSH keys](../auth.md#ssh-keys) for its access and how to scope or revoke it.
+
+See the [restricted network request flow](../runtime/network-request-flow.md).

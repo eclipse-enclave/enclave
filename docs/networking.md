@@ -4,7 +4,7 @@
 
 By default, network access is restricted via a gateway sidecar (dnsmasq + transparent proxy). DNS only resolves allowlisted domains and the proxy enforces Host/SNI against the same allowlist. This prevents agents from making arbitrary outbound requests.
 
-Coarse pass/deny audit events are logged to `~/.local/state/enclave/projects/<project-hash>/<tool>/logs/network.log`.
+Coarse pass/deny audit events are logged to `~/.local/state/enclave/projects/<project-hash>/<tool>/logs/network.log`. Read them with [`enclave network log`](#reading-the-network-log).
 
 For request-level logging, enable:
 
@@ -21,6 +21,55 @@ enclave --allow-all-network
 ```
 
 The experimental `qemu` backend currently has no restricted-egress implementation, so it always runs with all outbound network allowed. Selecting it implies `--allow-all-network` automatically and prints a notice; passing `--allow-domain` (which would require restricted egress) is rejected.
+
+## Reading the Network Log
+
+```bash
+enclave network log                        # Events of the current project and tool
+enclave network log --follow               # Stream new events as they arrive
+enclave network log --summary              # Per-domain aggregate
+enclave network log --verdict deny         # Only what was blocked
+enclave network log --domain '*.github.com' --since 10m
+enclave network log --json | jq            # The integration contract
+```
+
+The log is read from disk, so events of a session that has already exited are
+still available. `--session <container>` reads one running session's log and
+`--all-running` merges every running gateway's log in timestamp order; both need
+Docker, the default scope does not.
+
+`--since` takes a duration (`10m`), an RFC3339 timestamp, or `session`, which
+resolves to the start of the most recent session in scope and therefore needs a
+scope covering exactly one session.
+
+Output adapts to the destination: a terminal gets the aligned, coloured form and
+a pipe or redirect gets tab-separated columns in a fixed order (timestamp,
+verdict, type, method, domain, path, status, req_bytes, resp_bytes, rule,
+session, with `-` for absent values). `--plain` forces the machine form in a
+terminal, and `NO_COLOR` or `ENCLAVE_COLOR=never` does the same.
+
+### What is recorded
+
+| Type | Written by | Notes |
+|------|-----------|-------|
+| `http` | MITM proxy | Method, path, status and byte counts. Query strings are never logged: only the URL path is recorded |
+| `tcp` | MITM proxy | Pass/deny of a TLS dispatch, with the matched rule |
+| `dns` | DNS audit translator | One event per denied or failed lookup, with `rule` naming the condition (`nxdomain` for a domain blackholed by policy, `upstream-servfail`, `upstream-refused` or `upstream-nxdomain` for an upstream failure) |
+| `session` | Host, at gateway start | A boundary marker naming the session. Not an audit event: excluded from `--summary` and never matched by `--verdict`, `--domain` or `--type` |
+
+A blocked lookup usually produces two `dns` events, one for the A query and one
+for the AAAA query, because the resolver asks for both. `NODATA` answers are not
+recorded: dnsmasq returns `NODATA-IPv6` for every allowlisted host without an
+IPv6 record, so recording it would report allowed domains as denied.
+
+### Rotation
+
+At session start, a log larger than `network_log_max_size` (default `32MB`) is
+renamed to `network.log.1`, replacing any previous generation, and a fresh log
+is started. The reader reads `.1` first, so the boundary is invisible. Nothing
+rotates mid-session, so a single long-running session can grow past the cap, and
+worst-case disk use is roughly twice the cap per project and tool. Set
+`network_log_max_size` to `0` or `off` in global config to disable rotation.
 
 ## Managing the Network Policy
 

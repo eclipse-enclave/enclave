@@ -16,6 +16,7 @@ import (
 	"enclave/internal/backend"
 	"enclave/internal/config"
 	"enclave/internal/model"
+	"enclave/internal/netlog"
 )
 
 type ValidationContext struct {
@@ -80,6 +81,10 @@ func ValidateOptions(opts model.Options, sources model.OptionSources, ctx Valida
 	case model.NetworkLogCoarse, model.NetworkLogRequests:
 	default:
 		return opts, sources, warnings, fmt.Errorf("--network-log must be %s or %s", model.NetworkLogCoarse, model.NetworkLogRequests)
+	}
+	// Fail loudly on a typo rather than silently leaving the log unrotated.
+	if _, err := netlog.ParseSize(opts.NetworkLogMaxSize); err != nil {
+		return opts, sources, warnings, fmt.Errorf("network_log_max_size: %w", err)
 	}
 	switch opts.ProjectMount {
 	case model.ProjectMountWritable, model.ProjectMountReadonly:

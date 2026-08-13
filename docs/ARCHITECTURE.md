@@ -102,6 +102,7 @@ The restricted network request flow has a separate
 - [`internal/app/ssh.go`](../internal/app/ssh.go) implements `enclave ssh-init`.
 - [`internal/app/tools.go`](../internal/app/tools.go) lists available tool profiles.
 - [`internal/app/network_cmd.go`](../internal/app/network_cmd.go) implements `enclave network` subcommands (status, print, diff, apply, add-domain, remove-domain, set-mode).
+- [`internal/app/network_log_cmd.go`](../internal/app/network_log_cmd.go) implements `enclave network log`: it resolves the logs in scope, filters the event stream, and feeds rows, follow, or summary output.
 - [`internal/cli/network_command.go`](../internal/cli/network_command.go) defines Cobra command structure and flag parsing for the `network` subcommand tree.
 
 ### Configuration and Profiles
@@ -120,7 +121,8 @@ The restricted network request flow has a separate
 - [`internal/auth/secret_injection.go`](../internal/auth/secret_injection.go) provides `PlaceholderResolver`, which generates cryptographically random `ENCLAVE_SECRET_*` placeholders for declared env secrets that use gateway-side HTTP release.
 - [`internal/gateway/gateway.go`](../internal/gateway/gateway.go) manages the gateway sidecar container and network.
 - [`internal/gateway/bundle/bundle.go`](../internal/gateway/bundle/bundle.go) writes host-managed gateway bundles (`dnsmasq.conf`, `domains.txt`, `meta.json`) used for runtime apply/reload.
-- [`internal/gateway/mitm/`](../internal/gateway/mitm/) implements TLS MITM request forwarding, allowlist checks, and secret placeholder header rewriting/blocking.
+- [`internal/gateway/mitm/`](../internal/gateway/mitm/) implements TLS MITM request forwarding, allowlist checks, and secret placeholder header rewriting/blocking. It writes audit events through `internal/netlog` so writer and reader cannot drift apart.
+- [`internal/gateway/dnsaudit/`](../internal/gateway/dnsaudit/) tails dnsmasq's log and translates denied or failed lookups into `dns` audit events. It runs as its own process (`enclave-gateway-proxy -dns-audit <log>`) so DNS denials are recorded even when the proxy is disabled.
 - [`internal/gateway/tlsstore/`](../internal/gateway/tlsstore/) manages CA generation and per-host leaf certificate cache files for gateway TLS interception.
 - [`internal/docker/`](../internal/docker/) wraps the Docker CLI for Docker-specific backend/build/cleanup implementation details.
 
@@ -129,6 +131,7 @@ The restricted network request flow has a separate
 - [`extensions/tools/<tool>/go/handler.go`](../extensions/tools/) registers per-tool behavior (ports and validation hooks).
 
 ### Network Policy
+- [`internal/netlog/`](../internal/netlog/) owns the network audit log format: the `Event` type both gateway writers use, plus the reader side (scan, follow, filter, aggregate, render, rotation, size parsing). It knows nothing about Docker, policy, or the CLI.
 - [`internal/network/`](../internal/network/) implements network policy loading and merging for the `network.jsonc` configuration format. Handles dnsmasq config generation, JSONC parsing, and policy merge logic.
 - [`internal/policy/effective_resolver.go`](../internal/policy/effective_resolver.go) centralizes effective-policy resolution for startup, network status, and runtime apply.
 - [`internal/app/network_helpers.go`](../internal/app/network_helpers.go) discovers running gateways, verifies bundle mounts, hashes desired/running bundles, and confirms reload outcomes.
@@ -155,6 +158,9 @@ The restricted network request flow has a separate
 - [`extensions/tools/<tool>/templates/`](../extensions/tools/) holds per-tool settings templates baked into the image during build.
 - [`docs/`](../docs/) is included in the runtime build context so the image can install agent-facing help under `/usr/share/doc/enclave/`.
 
+### Repo-only directories
+- [`website/`](../website/) holds the project website sources. It is listed in [`.dockerignore`](../.dockerignore) so it never reaches a build context.
+
 ## Key Concepts
 
 - **Profiles** (`extensions/tools/<tool>/spec.yaml`, `kind: sandbox`): define tool command, session continuation args (`continueArgs`, `resumeArgs`), config location, optional settings/skills metadata (`settingsFile`, `settingsTarget`, `skillsDir`), optional host passthrough allow-list (`passthroughPaths`), optional QEMU bundle minimum memory (`qemuMinMemoryMiB`) and config-store cache hint (`qemuStoreCacheMmap`), declared credential sources (`credentials.sources`) including API-key metadata, YOLO flag, and per-provider auth configuration (`providers`: credentials, auth files, auth session checks, OAuth ports).
@@ -170,7 +176,7 @@ The restricted network request flow has a separate
 - **Caches/history**: host-side caches are stored under `~/.cache/enclave/` and shell history under `~/.local/state/enclave/projects/`.
 - **Network isolation**: by default, a gateway sidecar (dnsmasq + transparent proxy) restricts outbound domains. DNS blocks unknown domains, and the proxy is passthrough-by-default with MITM only for hosts that need secret release rewriting unless `network_log=requests` forces MITM for all allowlisted HTTPS.
 - **Declared secrets and HTTP release**: tool profiles and enabled feature manifests can declare `secrets`. Each secret lists env-var aliases and can optionally define `release.http` target hosts/header formatting. Declared secrets are resolved from host env, layered secrets files, or persisted env; when gateway release is enabled, matching secrets are replaced with `ENCLAVE_SECRET_*` placeholders inside the container. The flow is: extension `secrets` config → `PlaceholderResolver` generates placeholders → `SecretMapping` entries written to a JSON file → gateway proxy loads secret release rules and performs header rewriting on HTTPS requests. Plaintext HTTP requests carrying placeholders are denied. This protection is limited to env-var injection: credential files written by auth hooks can still contain the real secret in the config/auth store.
-- **Gateway audit events**: the MITM proxy emits JSONL network events to the host-mounted network log path (`~/.local/state/enclave/projects/<hash>/<tool>/logs/network.log`). Default `network_log=coarse` records pass/deny decisions for HTTP and TLS dispatch; `network_log=requests` adds request-level HTTP/HTTPS audit events by forcing allowlisted HTTPS through MITM.
+- **Gateway audit events**: the gateway emits JSONL network events to the host-mounted network log path (`~/.local/state/enclave/projects/<hash>/<tool>/logs/network.log`), all through the shared `netlog.Event` contract. Default `network_log=coarse` records pass/deny decisions for HTTP and TLS dispatch; `network_log=requests` adds request-level HTTP/HTTPS audit events by forcing allowlisted HTTPS through MITM. Two more writers share the file: the DNS audit translator appends `dns` denials, and the host appends a `session` marker at each gateway start. Every event carries the session name, because sessions of the same project and tool share one file. The host rotates the log to `network.log.1` at session start when it exceeds `network_log_max_size`. `enclave network log` reads it back; logged HTTP paths never include query strings.
 - **Gateway container labels**: gateway containers are tagged with Docker labels (`enclave.gateway`, `enclave.agent`, `enclave.gateway.project_hash`, etc.) for runtime discovery by `network status` and `network apply`.
 - **Live policy reload**: the `enclave network apply` command writes an updated config bundle to the host, signals the gateway with SIGHUP, and polls logs for reload confirmation. The gateway supervisor validates the new bundle before swapping, with fail-closed semantics on error.
 

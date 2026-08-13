@@ -35,6 +35,7 @@ type RunOptions struct {
 	NoMemory          bool
 	NoCache           bool
 	NetworkLog        string
+	NetworkLogMaxSize string
 	Verbose           bool
 	Background        bool
 	SessionName       string
@@ -176,6 +177,23 @@ type RunContext struct {
 	AuthState  AuthState
 	Build      BuildOptions
 	RunSources RunOptionSources
+}
+
+// NetworkLogView holds the flags of `enclave network log`. Scope flags that
+// already exist on Options (--tool, --all-running) are not duplicated here.
+type NetworkLogView struct {
+	Follow  bool
+	Summary bool
+	JSON    bool
+	// Plain forces machine form even on a terminal.
+	Plain bool
+	// Since is a duration ("10m"), an RFC3339 timestamp, or "session".
+	Since   string
+	Verdict string
+	Domain  string
+	Type    string
+	// Session limits output to one gateway, named by its container.
+	Session string
 }
 
 type ConfigView struct {
@@ -529,10 +547,11 @@ const (
 )
 
 const (
-	NetworkModeRestricted   = "restricted"
-	NetworkModeUnrestricted = "unrestricted"
-	NetworkLogCoarse        = "coarse"
-	NetworkLogRequests      = "requests"
+	NetworkModeRestricted    = "restricted"
+	NetworkModeUnrestricted  = "unrestricted"
+	NetworkLogCoarse         = "coarse"
+	NetworkLogRequests       = "requests"
+	NetworkLogMaxSizeDefault = "32MB"
 )
 
 const (

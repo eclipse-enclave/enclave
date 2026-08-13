@@ -166,6 +166,11 @@ For CLI-only options (not configurable via config files), omit `DefaultsField`
 and use `Apply: ApplyNone` in `options_def.go` (for example:
 `--force-base-image` and `--no-rebuild`).
 
+For config-only options, omit `CLIFlags` instead (for example: `host_config_paths`
+and `network_log_max_size`). If a project config must not be able to relax the
+option, add it to `applyProjectDefaultsGuardrails` in `internal/config/config.go`
+alongside the existing guarded keys.
+
 ### Practical Checklist
 
 Use this when adding a new option so you do not stop after `options_def.go`:

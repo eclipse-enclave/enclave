@@ -28,7 +28,11 @@ import (
 
 	"enclave/internal/domainpattern"
 	"enclave/internal/model"
+	"enclave/internal/netlog"
 )
+
+// testSession stands in for the gateway container name the runtime injects.
+const testSession = "enclave-test-claude"
 
 func TestRewriteHeadersAuthorizedHost(t *testing.T) {
 	headers := http.Header{}
@@ -322,13 +326,13 @@ func TestProxyAuditLogWritesPassEvent(t *testing.T) {
 	}
 
 	logPath := filepath.Join(t.TempDir(), "network.log")
-	audit, err := newAuditLogger(logPath)
+	audit, err := netlog.NewAppender(logPath)
 	if err != nil {
-		t.Fatalf("newAuditLogger() error = %v", err)
+		t.Fatalf("netlog.NewAppender() error = %v", err)
 	}
 	defer func() { _ = audit.Close() }()
 
-	p := newProxy([]string{host}, nil, nil, false, audit)
+	p := newProxy([]string{host}, nil, nil, false, audit, testSession)
 	req := httptest.NewRequest(http.MethodPost, upstream.URL+"/v1/messages?token=secret", strings.NewReader("body"))
 	req.Host = upstreamURL.Host
 	recorder := httptest.NewRecorder()
@@ -367,17 +371,40 @@ func TestProxyAuditLogWritesPassEvent(t *testing.T) {
 	if event.ResponseSize == 0 {
 		t.Fatalf("event response size = 0, want > 0")
 	}
+	if event.Session != testSession {
+		t.Fatalf("event session = %q, want %q", event.Session, testSession)
+	}
+}
+
+func TestProxyStampsSessionOnTCPEvents(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "network.log")
+	audit, err := netlog.NewAppender(logPath)
+	if err != nil {
+		t.Fatalf("netlog.NewAppender() error = %v", err)
+	}
+	defer func() { _ = audit.Close() }()
+
+	p := newProxy(nil, nil, nil, false, audit, testSession)
+	p.logEvent(newTCPAuditEvent("blocked.example", netlog.VerdictDeny, "allowlist"))
+
+	events := readAuditEvents(t, logPath)
+	if len(events) != 1 {
+		t.Fatalf("audit events = %d, want 1", len(events))
+	}
+	if events[0].Session != testSession || events[0].Type != netlog.TypeTCP {
+		t.Fatalf("event = %+v", events[0])
+	}
 }
 
 func TestProxyAuditLogWritesDenyEvent(t *testing.T) {
 	logPath := filepath.Join(t.TempDir(), "network.log")
-	audit, err := newAuditLogger(logPath)
+	audit, err := netlog.NewAppender(logPath)
 	if err != nil {
-		t.Fatalf("newAuditLogger() error = %v", err)
+		t.Fatalf("netlog.NewAppender() error = %v", err)
 	}
 	defer func() { _ = audit.Close() }()
 
-	p := newProxy([]string{"api.example.com"}, nil, nil, false, audit)
+	p := newProxy([]string{"api.example.com"}, nil, nil, false, audit, testSession)
 	req := httptest.NewRequest(http.MethodGet, "http://evil.example.com/blocked?foo=bar", nil)
 	req.Host = "evil.example.com"
 	recorder := httptest.NewRecorder()
@@ -407,7 +434,7 @@ func TestProxyAuditLogWritesDenyEvent(t *testing.T) {
 }
 
 func TestProxyDenyWhenAllowlistEmpty(t *testing.T) {
-	p := newProxy(nil, nil, nil, false, nil)
+	p := newProxy(nil, nil, nil, false, nil, testSession)
 	req := httptest.NewRequest(http.MethodGet, "http://api.example.com/", nil)
 	req.Host = "api.example.com"
 	recorder := httptest.NewRecorder()
@@ -423,7 +450,7 @@ func TestProxyDenyWinsOverSubdomainOfAllowedParent(t *testing.T) {
 	// subdomain of an allowed parent, so suffix-matching the allow set alone
 	// would pass it. The deny-first check must reject it while a different
 	// subdomain of the same parent still passes.
-	p := newProxy([]string{"example.com"}, []string{"tracking.example.com"}, nil, false, nil)
+	p := newProxy([]string{"example.com"}, []string{"tracking.example.com"}, nil, false, nil, testSession)
 	if p.hostPermitted("tracking.example.com") {
 		t.Fatal("expected denied subdomain to be rejected")
 	}
@@ -437,13 +464,13 @@ func TestProxyDenyWinsOverSubdomainOfAllowedParent(t *testing.T) {
 
 func TestProxyAuditLogWritesUpstreamErrorRule(t *testing.T) {
 	logPath := filepath.Join(t.TempDir(), "network.log")
-	audit, err := newAuditLogger(logPath)
+	audit, err := netlog.NewAppender(logPath)
 	if err != nil {
-		t.Fatalf("newAuditLogger() error = %v", err)
+		t.Fatalf("netlog.NewAppender() error = %v", err)
 	}
 	defer func() { _ = audit.Close() }()
 
-	p := newProxy([]string{"api.example.com"}, nil, nil, false, audit)
+	p := newProxy([]string{"api.example.com"}, nil, nil, false, audit, testSession)
 	p.transport = &http.Transport{
 		Proxy: nil,
 		DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
@@ -482,7 +509,7 @@ func TestProxyHandlerReturnsGenericBodyForSecretInjectionDeny(t *testing.T) {
 		Value:       "real-secret",
 		Hosts:       []string{"api.example.com"},
 		Header:      "authorization",
-	}}, false, nil)
+	}}, false, nil, testSession)
 	req := httptest.NewRequest(http.MethodGet, "https://evil.example.com/", nil)
 	req.Host = "evil.example.com"
 	req.Header.Set("Authorization", "Bearer ENCLAVE_SECRET_abc")
@@ -503,7 +530,7 @@ func TestProxyHandlerDeniesPlaintextSecretRelease(t *testing.T) {
 		Value:       "real-secret",
 		Hosts:       []string{"api.example.com"},
 		Header:      "authorization",
-	}}, false, nil)
+	}}, false, nil, testSession)
 	req := httptest.NewRequest(http.MethodGet, "http://api.example.com/", nil)
 	req.Host = "api.example.com"
 	req.Header.Set("Authorization", "Bearer ENCLAVE_SECRET_abc")
@@ -536,13 +563,13 @@ func TestRewriteHeadersEmptyHostsBlocked(t *testing.T) {
 
 func TestProxyAuditLogWritesSNIHostMismatchEvent(t *testing.T) {
 	logPath := filepath.Join(t.TempDir(), "network.log")
-	audit, err := newAuditLogger(logPath)
+	audit, err := netlog.NewAppender(logPath)
 	if err != nil {
-		t.Fatalf("newAuditLogger() error = %v", err)
+		t.Fatalf("netlog.NewAppender() error = %v", err)
 	}
 	defer func() { _ = audit.Close() }()
 
-	p := newProxy([]string{"api.example.com"}, nil, nil, false, audit)
+	p := newProxy([]string{"api.example.com"}, nil, nil, false, audit, testSession)
 	req := httptest.NewRequest(http.MethodGet, "https://api.example.com/v1/messages", nil)
 	req.Host = "api.example.com"
 	req.TLS = &tls.ConnectionState{ServerName: "different.example.com"}
@@ -566,7 +593,7 @@ func TestProxyAuditLogWritesSNIHostMismatchEvent(t *testing.T) {
 	}
 }
 
-func readAuditEvents(t *testing.T, path string) []auditEvent {
+func readAuditEvents(t *testing.T, path string) []netlog.Event {
 	t.Helper()
 
 	raw, err := os.ReadFile(path)
@@ -574,12 +601,12 @@ func readAuditEvents(t *testing.T, path string) []auditEvent {
 		t.Fatalf("ReadFile(%q) error = %v", path, err)
 	}
 	lines := strings.Split(strings.TrimSpace(string(raw)), "\n")
-	events := make([]auditEvent, 0, len(lines))
+	events := make([]netlog.Event, 0, len(lines))
 	for _, line := range lines {
 		if strings.TrimSpace(line) == "" {
 			continue
 		}
-		var event auditEvent
+		var event netlog.Event
 		if err := json.Unmarshal([]byte(line), &event); err != nil {
 			t.Fatalf("Unmarshal(%q) error = %v", line, err)
 		}

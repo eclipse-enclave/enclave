@@ -335,6 +335,16 @@ func OptionSpecs() []OptionSpec {
 			},
 		},
 		{
+			Name:  "network_log_max_size",
+			Group: OptionGroupRun,
+			ApplyDefaultsWithSource: func(opts *model.Options, defaults Defaults, source model.OptionSource, sources *model.OptionSources) {
+				if canOverride(sources.NetworkLogMaxSize, source) && strings.TrimSpace(defaults.NetworkLogMaxSize) != "" {
+					opts.NetworkLogMaxSize = strings.TrimSpace(defaults.NetworkLogMaxSize)
+					sources.NetworkLogMaxSize = source
+				}
+			},
+		},
+		{
 			Name:  "verbose",
 			Group: OptionGroupGlobal,
 			ApplyDefaultsWithSource: func(opts *model.Options, defaults Defaults, source model.OptionSource, sources *model.OptionSources) {

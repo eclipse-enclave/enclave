@@ -57,6 +57,7 @@ Security guardrail: project config cannot elevate guarded options such as `allow
 | `features` | Feature extensions to enable |
 | `use_remote_user` | Honor devcontainer `remoteUser` for agent sessions |
 | `network_log` | Network audit mode: `coarse` (default) or `requests` |
+| `network_log_max_size` | Rotate the network log above this size: `32MB` (default), `512KB`, `1GB`, or `0`/`off` to disable. Config only, no CLI flag |
 | `verbose` | Verbose logging |
 | `ports` | Publish container ports to the host (container → host) |
 | `add_dirs` | Additional directories to mount |
@@ -70,6 +71,10 @@ Project config may set `project_mount` to `readonly`, but `project_mount="writab
 is ignored at project scope so it cannot weaken a stricter global default. In
 readonly mode, writable `add_dirs` entries inside the project subtree are
 mounted read-only.
+
+`network_log_max_size` may be lowered at project scope but not raised: a value
+above the inherited cap (global config, otherwise the built-in `32MB`) is
+ignored with a warning. Rotation is checked at session start only.
 
 `worktree_metadata` controls the gitdir/commondir mounts that enclave
 resolves from a linked worktree's `.git` file. `follow` ties them to the

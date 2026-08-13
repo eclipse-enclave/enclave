@@ -41,6 +41,13 @@ func colorPrefix(label string, color Color) string {
 }
 
 func resolveColorEnabled() bool {
+	return ColorEnabledFor(os.Stderr)
+}
+
+// ColorEnabledFor applies the same NO_COLOR and ENCLAVE_COLOR rules the logger
+// uses, against a caller-chosen stream. Commands that colour stdout use it so
+// the decision lives in one place.
+func ColorEnabledFor(file *os.File) bool {
 	if os.Getenv("NO_COLOR") != "" {
 		return false
 	}
@@ -53,6 +60,9 @@ func resolveColorEnabled() bool {
 	case "", "auto":
 		fallthrough
 	default:
-		return term.IsTerminal(int(os.Stderr.Fd())) // #nosec G115 -- file descriptor from Fd() fits in int on all supported platforms.
+		if file == nil {
+			return false
+		}
+		return term.IsTerminal(int(file.Fd())) // #nosec G115 -- file descriptor from Fd() fits in int on all supported platforms.
 	}
 }

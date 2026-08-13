@@ -1069,3 +1069,52 @@ func containsSubstring(items []string, needle string) bool {
 	}
 	return false
 }
+
+func TestProjectOverrideGuardrails_NetworkLogMaxSizeCannotBeRaised(t *testing.T) {
+	global := Defaults{
+		NetworkLogMaxSize: "64MB",
+		ToolOverrides: map[string]Defaults{
+			"codex": {NetworkLogMaxSize: "8MB"},
+		},
+	}
+	project := Defaults{
+		NetworkLogMaxSize: "1GB",
+		ToolOverrides: map[string]Defaults{
+			"codex": {NetworkLogMaxSize: "16MB"},
+			"pi":    {NetworkLogMaxSize: "4MB"},
+		},
+	}
+
+	warnings := applyProjectOverrideGuardrailsAgainst("/tmp/project/.enclave/config.json", "/tmp/project", global, &project)
+	if len(warnings) != 2 {
+		t.Fatalf("expected two guardrail warnings, got %d: %v", len(warnings), warnings)
+	}
+	if project.NetworkLogMaxSize != "" {
+		t.Fatalf("expected 1GB over an inherited 64MB to be cleared, got %q", project.NetworkLogMaxSize)
+	}
+	if got := project.ToolOverrides["codex"].NetworkLogMaxSize; got != "" {
+		t.Fatalf("expected 16MB over an inherited 8MB to be cleared, got %q", got)
+	}
+	if got := project.ToolOverrides["pi"].NetworkLogMaxSize; got != "4MB" {
+		t.Fatalf("expected a lower cap to survive, got %q", got)
+	}
+	if !containsSubstring(warnings, "cannot raise the network log size cap") {
+		t.Fatalf("expected a cap warning, got %v", warnings)
+	}
+}
+
+func TestProjectOverrideGuardrails_NetworkLogMaxSizeAgainstBuiltInDefault(t *testing.T) {
+	project := Defaults{NetworkLogMaxSize: "0"}
+	warnings := applyProjectOverrideGuardrails("/tmp/project/.enclave/config.json", "/tmp/project", &project)
+	if len(warnings) != 1 {
+		t.Fatalf("expected one guardrail warning, got %d: %v", len(warnings), warnings)
+	}
+	if project.NetworkLogMaxSize != "" {
+		t.Fatalf("expected disabling rotation to be cleared against the built-in cap, got %q", project.NetworkLogMaxSize)
+	}
+
+	lower := Defaults{NetworkLogMaxSize: "1MB"}
+	if warnings := applyProjectOverrideGuardrails("/tmp/project/.enclave/config.json", "/tmp/project", &lower); len(warnings) != 0 {
+		t.Fatalf("expected a lower cap to pass, got %v", warnings)
+	}
+}

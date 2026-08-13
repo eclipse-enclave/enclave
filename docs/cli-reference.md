@@ -76,8 +76,27 @@ in one step, printing the container name so you can reattach later with
 | `enclave network remove-domain <domain> --global` | Remove a domain |
 | `enclave network set-mode restricted\|unrestricted --global` | Set network mode |
 | `enclave network apply` | Apply policy to running gateways |
+| `enclave network log` | Show gateway network audit events |
 
 Network mutation commands are global-only today. `--project` scope is planned but not yet supported.
+
+`network log` reads the gateway audit log of the current project and tool, including sessions that have already exited:
+
+| Flag | Description |
+|------|-------------|
+| `-f`, `--follow` | Stream new events as they arrive |
+| `--summary` | Show a per-domain aggregate instead of rows |
+| `--json` | Emit the raw JSONL event stream (the integration contract) |
+| `--plain` | Force machine-readable output in a terminal |
+| `--since <dur\|ts>` | Only events since a duration (`10m`), an RFC3339 timestamp, or `session` |
+| `--verdict <pass\|deny>` | Filter by verdict |
+| `--domain <glob>` | Filter by domain pattern (`example.com` or `*.example.com`) |
+| `--type <dns\|http\|tcp>` | Filter by event type |
+| `--tool <tool>` | Read another tool's log |
+| `--session <name>` | Read one running session's log, named by its container |
+| `--all-running` | Merge the logs of all running gateways on the host |
+
+`--follow` and `--summary` are mutually exclusive, `--json` overrides `--plain`, and `--since session` needs a scope covering exactly one session, so it cannot be combined with `--all-running`. See [Networking](networking.md#reading-the-network-log) for the output format.
 
 Mutation commands (`add-domain`, `remove-domain`, `set-mode`) apply the new policy to running gateways by default. Use `--no-apply` to persist only, or `--all-running` to target every running gateway on the host (rather than just the current project/tool). By default the runtime apply targets the selected tool's gateway; pass `--tool <tool>` to target a different tool. `network apply` accepts `--tool` and `--all-running`.
 

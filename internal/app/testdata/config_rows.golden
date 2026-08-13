@@ -35,6 +35,7 @@ buildx_cache_from | default=""/false global=""/false project=""/false toolOverri
 buildx_cache_to | default=""/false global=""/false project=""/false toolOverride=""/false cli=""/false | source=0 effective=""
 progress | default=""/true global=""/false project=""/false toolOverride=""/false cli=""/false | source=0 effective=""
 network_log | default=""/true global=""/false project=""/false toolOverride=""/false cli=""/false | source=0 effective=""
+network_log_max_size | default=""/true global=""/false project=""/false toolOverride=""/false cli=""/false | source=0 effective=""
 verbose | default="false"/true global=""/false project=""/false toolOverride=""/false cli=""/false | source=0 effective="false"
 ports | default=""/false global=""/false project=""/false toolOverride=""/false cli=""/false | source=0 effective=""
 session_name | default=""/false global=""/false project=""/false toolOverride=""/false cli=""/false | source=0 effective=""

@@ -30,6 +30,7 @@ import (
 	"enclave/internal/domainpattern"
 	"enclave/internal/gateway/tlsstore"
 	"enclave/internal/model"
+	"enclave/internal/netlog"
 	"enclave/internal/util"
 )
 
@@ -40,6 +41,10 @@ type Options struct {
 	DeniedDomains  []string
 	SecretRules    []model.SecretReleaseEntry
 	AuditLogPath   string
+	// Session names the gateway that produced an event. Sessions of the same
+	// project and tool share one log file, so without it concurrent sessions
+	// cannot be told apart.
+	Session        string
 	ForceHTTPSMITM bool
 	TLSStore       *tlsstore.Store
 	OnReady        func()
@@ -48,64 +53,6 @@ type Options struct {
 const serverShutdownTimeout = 1 * time.Second
 
 const maxTLSRecordsBeforeClientHelloLength = 16
-
-type auditEvent struct {
-	Timestamp    string `json:"ts"`
-	Type         string `json:"type"`
-	Method       string `json:"method,omitempty"`
-	Domain       string `json:"domain,omitempty"`
-	Path         string `json:"path,omitempty"`
-	Port         int    `json:"port,omitempty"`
-	Status       int    `json:"status,omitempty"`
-	RequestSize  int64  `json:"req_bytes,omitempty"`
-	ResponseSize int64  `json:"resp_bytes,omitempty"`
-	ContentType  string `json:"content_type,omitempty"`
-	Verdict      string `json:"verdict"`
-	Rule         string `json:"rule,omitempty"`
-}
-
-type auditLogger struct {
-	mu   sync.Mutex
-	file *os.File
-}
-
-func newAuditLogger(path string) (*auditLogger, error) {
-	trimmed := strings.TrimSpace(path)
-	if trimmed == "" {
-		return &auditLogger{}, nil
-	}
-	file, err := os.OpenFile(trimmed, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600) // #nosec G304 -- path comes from trusted runtime wiring.
-	if err != nil {
-		return nil, err
-	}
-	return &auditLogger{file: file}, nil
-}
-
-func (l *auditLogger) Close() error {
-	if l == nil || l.file == nil {
-		return nil
-	}
-	return l.file.Close()
-}
-
-func (l *auditLogger) Log(event auditEvent) {
-	if l == nil || l.file == nil {
-		return
-	}
-	if strings.TrimSpace(event.Timestamp) == "" {
-		event.Timestamp = time.Now().UTC().Format(time.RFC3339Nano)
-	}
-
-	payload, err := json.Marshal(event)
-	if err != nil {
-		return
-	}
-	payload = append(payload, '\n')
-
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	_, _ = l.file.Write(payload)
-}
 
 func LoadRules(path string) ([]model.SecretReleaseEntry, error) {
 	if strings.TrimSpace(path) == "" {
@@ -143,13 +90,13 @@ func Run(ctx context.Context, opts Options) error {
 		httpsAddr = ":8443"
 	}
 
-	audit, err := newAuditLogger(opts.AuditLogPath)
+	audit, err := netlog.NewAppender(opts.AuditLogPath)
 	if err != nil {
 		return fmt.Errorf("open proxy audit log: %w", err)
 	}
 	defer func() { _ = audit.Close() }()
 
-	proxy := newProxy(opts.AllowedDomains, opts.DeniedDomains, opts.SecretRules, opts.ForceHTTPSMITM, audit)
+	proxy := newProxy(opts.AllowedDomains, opts.DeniedDomains, opts.SecretRules, opts.ForceHTTPSMITM, audit, opts.Session)
 	httpServer := &http.Server{
 		Addr:              httpAddr,
 		Handler:           proxy.handler("http"),
@@ -206,7 +153,8 @@ type proxy struct {
 	deniedDomains  []string
 	secretRules    []model.SecretReleaseEntry
 	forceHTTPSMITM bool
-	audit          *auditLogger
+	audit          *netlog.Appender
+	session        string
 	transport      *http.Transport
 }
 
@@ -222,13 +170,14 @@ func normalizeHostPatterns(patterns []string) []string {
 	return out
 }
 
-func newProxy(allowedDomains []string, deniedDomains []string, secretRules []model.SecretReleaseEntry, forceHTTPSMITM bool, audit *auditLogger) *proxy {
+func newProxy(allowedDomains []string, deniedDomains []string, secretRules []model.SecretReleaseEntry, forceHTTPSMITM bool, audit *netlog.Appender, session string) *proxy {
 	return &proxy{
 		allowedDomains: normalizeHostPatterns(allowedDomains),
 		deniedDomains:  normalizeHostPatterns(deniedDomains),
 		secretRules:    secretRules,
 		forceHTTPSMITM: forceHTTPSMITM,
 		audit:          audit,
+		session:        session,
 		transport: &http.Transport{
 			Proxy:                 nil,
 			ForceAttemptHTTP2:     false,
@@ -237,6 +186,13 @@ func newProxy(allowedDomains []string, deniedDomains []string, secretRules []mod
 			TLSHandshakeTimeout:   10 * time.Second,
 		},
 	}
+}
+
+// logEvent stamps the gateway session on every event, so a log shared by
+// concurrent sessions of the same project and tool can be split again.
+func (p *proxy) logEvent(event netlog.Event) {
+	event.Session = p.session
+	p.audit.Append(event)
 }
 
 func (p *proxy) handler(scheme string) http.HandlerFunc {
@@ -249,14 +205,14 @@ func (p *proxy) handler(scheme string) http.HandlerFunc {
 				mismatchEvent.Domain = host
 				mismatchEvent.Verdict = "pass"
 				mismatchEvent.Rule = "sni-host-mismatch"
-				p.audit.Log(mismatchEvent)
+				p.logEvent(mismatchEvent)
 			}
 		}
 		if host == "" {
 			event.Status = http.StatusBadRequest
 			event.Verdict = "deny"
 			event.Rule = "invalid-host"
-			p.audit.Log(event)
+			p.logEvent(event)
 			http.Error(w, "Missing target host", http.StatusBadRequest)
 			return
 		}
@@ -264,7 +220,7 @@ func (p *proxy) handler(scheme string) http.HandlerFunc {
 			event.Status = http.StatusForbidden
 			event.Verdict = "deny"
 			event.Rule = "allowlist"
-			p.audit.Log(event)
+			p.logEvent(event)
 			http.Error(w, "Domain not in allowlist", http.StatusForbidden)
 			return
 		}
@@ -272,7 +228,7 @@ func (p *proxy) handler(scheme string) http.HandlerFunc {
 			event.Status = http.StatusForbidden
 			event.Verdict = "deny"
 			event.Rule = "secret-injection"
-			p.audit.Log(event)
+			p.logEvent(event)
 			http.Error(w, "request denied", http.StatusForbidden)
 			return
 		}
@@ -281,7 +237,7 @@ func (p *proxy) handler(scheme string) http.HandlerFunc {
 			event.Status = http.StatusBadGateway
 			event.Verdict = "pass"
 			event.Rule = "upstream-error"
-			p.audit.Log(event)
+			p.logEvent(event)
 			http.Error(w, "Upstream request failed", http.StatusBadGateway)
 			return
 		}
@@ -290,7 +246,7 @@ func (p *proxy) handler(scheme string) http.HandlerFunc {
 		event.ContentType = result.ContentType
 		event.Verdict = "pass"
 		event.Rule = "allowlist"
-		p.audit.Log(event)
+		p.logEvent(event)
 	}
 }
 
@@ -440,21 +396,21 @@ func (s *httpsDispatchServer) serveConn(conn net.Conn) {
 
 	host, preface, err := readClientHello(conn)
 	if err != nil {
-		s.proxy.audit.Log(newTCPAuditEvent("", "deny", "tls-clienthello"))
+		s.proxy.logEvent(newTCPAuditEvent("", "deny", "tls-clienthello"))
 		_ = conn.Close()
 		return
 	}
 	if !s.proxy.hostPermitted(host) {
-		s.proxy.audit.Log(newTCPAuditEvent(host, "deny", "allowlist"))
+		s.proxy.logEvent(newTCPAuditEvent(host, "deny", "allowlist"))
 		_ = conn.Close()
 		return
 	}
 	if shouldMITM(host, s.proxy.secretRules, s.proxy.forceHTTPSMITM) {
-		s.proxy.audit.Log(newTCPAuditEvent(host, "pass", "mitm-dispatch"))
+		s.proxy.logEvent(newTCPAuditEvent(host, "pass", "mitm-dispatch"))
 		tunnelToAddress(conn, preface, s.mitmAddr)
 		return
 	}
-	s.proxy.audit.Log(newTCPAuditEvent(host, "pass", "allowlist"))
+	s.proxy.logEvent(newTCPAuditEvent(host, "pass", "allowlist"))
 	tunnelTLS(conn, preface, host)
 }
 
@@ -772,10 +728,10 @@ func (p *proxy) hostPermitted(host string) bool {
 	return hostAllowed(host, p.allowedDomains)
 }
 
-func newHTTPAuditEvent(req *http.Request, host string, scheme string) auditEvent {
-	event := auditEvent{
-		Timestamp: time.Now().UTC().Format(time.RFC3339Nano),
-		Type:      "http",
+func newHTTPAuditEvent(req *http.Request, host string, scheme string) netlog.Event {
+	event := netlog.Event{
+		Timestamp: time.Now().UTC().Format(netlog.TimeFormat),
+		Type:      netlog.TypeHTTP,
 		Method:    strings.ToUpper(strings.TrimSpace(reqMethod(req))),
 		Domain:    host,
 		Path:      requestPath(req),
@@ -843,10 +799,10 @@ func parsePortFromHost(rawHost string) int {
 	return 0
 }
 
-func newTCPAuditEvent(domain string, verdict string, rule string) auditEvent {
-	return auditEvent{
-		Timestamp: time.Now().UTC().Format(time.RFC3339Nano),
-		Type:      "tcp",
+func newTCPAuditEvent(domain string, verdict string, rule string) netlog.Event {
+	return netlog.Event{
+		Timestamp: time.Now().UTC().Format(netlog.TimeFormat),
+		Type:      netlog.TypeTCP,
 		Domain:    strings.TrimSpace(domain),
 		Port:      443,
 		Verdict:   strings.TrimSpace(verdict),

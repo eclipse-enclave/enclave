@@ -29,6 +29,7 @@ type CommandInput struct {
 	ToolDefaults    config.Defaults
 	HasToolDefaults bool
 	ConfigView      model.ConfigView
+	NetworkLogView  model.NetworkLogView
 	// UserCommandMount, when set, exposes the host session command tree read-only
 	// inside the container. Populated only for `enclave <name>` session
 	// commands dispatched through the run pipeline.
@@ -66,6 +67,8 @@ func dispatchCommand(input *CommandInput) int {
 		return runDevcontainerGenerate(input)
 	case "network-status":
 		return runNetworkStatus(input)
+	case "network-log":
+		return runNetworkLog(input)
 	case "network-print":
 		return runNetworkPrint(input)
 	case "network-diff":

@@ -9,7 +9,7 @@
 # Base image: debian:trixie-slim (pinned) or ubuntu:24.04
 ARG BASE_IMAGE=debian:trixie-slim@sha256:f6e2cfac5cf956ea044b4bd75e6397b4372ad88fe00908045e9a0d21712ae3ba
 ARG DEVCONTAINER_BASE_IMAGE=0
-ARG AGENT_NODE_IMAGE=node:24-trixie-slim@sha256:036dfa7e82a1e867b09248440a2b6635b3f8de557f69e60bac923a10c6e696a8
+ARG AGENT_NODE_IMAGE=node:24-trixie-slim@sha256:0711b541c1c33a8a530ac4f0d391baa9a15b3d804695b1b24a47daa5fb60e74d
 FROM ${BASE_IMAGE} AS system
 ARG DEVCONTAINER_BASE_IMAGE
 USER root

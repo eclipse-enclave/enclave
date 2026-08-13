@@ -157,6 +157,7 @@ func Run(args []string) int {
 		ToolDefaults:     toolDefaults,
 		HasToolDefaults:  hasToolDefaults,
 		ConfigView:       parsed.ConfigView,
+		NetworkLogView:   parsed.NetworkLogView,
 		UserCommandMount: userCommandMount,
 		ExtRequest:       parsed.ExtRequest,
 	}

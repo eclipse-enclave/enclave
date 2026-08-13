@@ -29,6 +29,7 @@ func dockerBackendOptions(host model.Host, paths model.Paths, build model.BuildO
 		ForceRebuild:        build.ForceRebuild,
 		NoRebuild:           build.NoRebuild,
 		NetworkLogMode:      run.NetworkLog,
+		NetworkLogMaxSize:   run.NetworkLogMaxSize,
 		ProjectMount:        run.ProjectMount,
 	}
 }

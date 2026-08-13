@@ -21,11 +21,13 @@ GATEWAY_CONFIG_DOMAINS="$GATEWAY_CONFIG_DIR/domains.txt"
 GATEWAY_CONFIG_META="$GATEWAY_CONFIG_DIR/meta.json"
 DNSMASQ_LOG_FILE=""
 PROXY_LOG_FILE="/var/log/enclave/proxy.log"
+DNS_AUDIT_LOG_FILE="/var/log/enclave/dns-audit.log"
 PROXY_READY_FILE="/var/lib/enclave/proxy/proxy.ready"
 
 DNSMASQ_PID=""
 PROXY_PID=""
-DNSMASQ_TAIL_PID=""
+DNS_AUDIT_PID=""
+DNS_AUDIT_RESTARTS="0"
 RELOAD_PENDING="0"
 
 UNIQUE_RESOLVERS=""
@@ -122,6 +124,7 @@ init_log_files() {
 
     : > "$PROXY_LOG_FILE"
     chown "$PROXY_USER:$PROXY_USER" "$PROXY_LOG_FILE" 2>/dev/null || true
+    : > "$DNS_AUDIT_LOG_FILE"
 }
 
 host_bundle_complete() {
@@ -520,19 +523,17 @@ start_dnsmasq() {
     DNSMASQ_PID="$!"
 }
 
-start_dnsmasq_log_tail() {
+# The translator writes JSONL audit events, so the network log stays valid
+# JSONL and DNS denials are machine readable. It runs whether or not the proxy
+# is enabled, because DNS denials must be recorded either way.
+start_dns_audit() {
     if [ -z "$DNSMASQ_LOG_FILE" ]; then
         return
     fi
 
-    tail -n 0 -F "$DNSMASQ_LOG_FILE" | while IFS= read -r line; do
-        case "$line" in
-            *NXDOMAIN*|*NODATA*|*SERVFAIL*|*REFUSED*)
-                printf '%s\n' "$line" >> "$NETWORK_LOG_FILE"
-                ;;
-        esac
-    done &
-    DNSMASQ_TAIL_PID="$!"
+    log "Starting DNS audit translator"
+    enclave-gateway-proxy -dns-audit "$DNSMASQ_LOG_FILE" >>"$DNS_AUDIT_LOG_FILE" 2>&1 &
+    DNS_AUDIT_PID="$!"
 }
 
 reload_children() {
@@ -631,9 +632,8 @@ shutdown_gateway() {
         enforce_fail_closed_lockdown
     fi
 
-    if is_pid_running "$DNSMASQ_TAIL_PID"; then
-        kill "$DNSMASQ_TAIL_PID" >/dev/null 2>&1 || true
-        wait "$DNSMASQ_TAIL_PID" 2>/dev/null || true
+    if is_pid_running "$DNS_AUDIT_PID"; then
+        stop_child_pid "$DNS_AUDIT_PID" "dns-audit"
     fi
 
     if is_pid_running "$PROXY_PID"; then
@@ -670,6 +670,20 @@ monitor_loop() {
 
         if [ "$PROXY_ENABLED" = "true" ] && ! is_pid_running "$PROXY_PID"; then
             shutdown_gateway 1 "proxy exited unexpectedly"
+        fi
+
+        # Auditing is not an enforcement path, so a dead translator must not
+        # take egress down with it. Restart it a bounded number of times, then
+        # say plainly that DNS events are no longer recorded.
+        if [ -n "$DNS_AUDIT_PID" ] && ! is_pid_running "$DNS_AUDIT_PID"; then
+            if [ "$DNS_AUDIT_RESTARTS" -lt 3 ]; then
+                DNS_AUDIT_RESTARTS=$((DNS_AUDIT_RESTARTS + 1))
+                log "DNS audit translator exited; restarting (attempt $DNS_AUDIT_RESTARTS)"
+                start_dns_audit
+            else
+                log "DNS audit translator keeps exiting; DNS denials are no longer recorded (see $DNS_AUDIT_LOG_FILE)"
+                DNS_AUDIT_PID=""
+            fi
         fi
 
         sleep 0.1
@@ -710,7 +724,7 @@ main() {
         exit 1
     fi
     start_dnsmasq
-    start_dnsmasq_log_tail
+    start_dns_audit
 
     log "Gateway ready"
     monitor_loop

@@ -33,6 +33,7 @@ type Options struct {
 	ForceRebuild        bool
 	NoRebuild           bool
 	NetworkLogMode      string
+	NetworkLogMaxSize   string
 	DevcontainerRunArgs []string
 	ProjectDir          string
 	ProjectMount        string

@@ -48,7 +48,7 @@ mkdir -p bin completions
 # Package-managed builds install the asset tree beside the executable. Disable
 # cgo so RPMs built on Debian or Ubuntu do not acquire host glibc requirements.
 CGO_ENABLED=0 go build -tags enclave_no_embed -mod=vendor \
-    -ldflags "-X enclave/internal/buildinfo.Version=%{build_version} -X enclave/internal/buildinfo.Commit=%{build_commit} -X enclave/internal/buildinfo.Date=%{build_date}" \
+    -ldflags "-X enclave/internal/buildinfo.version=%{build_version} -X enclave/internal/buildinfo.commit=%{build_commit} -X enclave/internal/buildinfo.date=%{build_date}" \
     -o bin/enclave ./cmd/enclave
 bin/enclave completion bash > completions/enclave
 

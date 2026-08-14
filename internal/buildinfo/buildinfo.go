@@ -18,9 +18,9 @@ const unknown = "unknown"
 
 // These values are populated with -ldflags by release and package builds.
 var (
-	Version string
-	Commit  string
-	Date    string
+	version string
+	commit  string
+	date    string
 )
 
 type Info struct {
@@ -30,11 +30,8 @@ type Info struct {
 }
 
 func Read() Info {
-	goInfo, ok := debug.ReadBuildInfo()
-	if !ok {
-		goInfo = nil
-	}
-	return resolve(Info{Version: Version, Commit: Commit, Date: Date}, goInfo)
+	goInfo, _ := debug.ReadBuildInfo()
+	return resolve(Info{Version: version, Commit: commit, Date: date}, goInfo)
 }
 
 func (i Info) String() string {
@@ -42,6 +39,8 @@ func (i Info) String() string {
 }
 
 func resolve(info Info, goInfo *debug.BuildInfo) Info {
+	// Explicit stamps describe the source being packaged, even when packaging
+	// modifies the checkout. Only fallback VCS metadata reflects checkout state.
 	commitFromBuildInfo := isUnknown(info.Commit)
 	modified := false
 	if goInfo != nil {

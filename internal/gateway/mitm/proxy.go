@@ -204,14 +204,14 @@ func (p *proxy) handler(scheme string) http.HandlerFunc {
 			if sni := normalizedTLSHost(req); sni != "" && host != "" && sni != host {
 				mismatchEvent := event
 				mismatchEvent.Domain = host
-				mismatchEvent.Verdict = "pass"
+				mismatchEvent.Verdict = netlog.VerdictPass
 				mismatchEvent.Rule = "sni-host-mismatch"
 				p.logEvent(mismatchEvent)
 			}
 		}
 		if host == "" {
 			event.Status = http.StatusBadRequest
-			event.Verdict = "deny"
+			event.Verdict = netlog.VerdictDeny
 			event.Rule = "invalid-host"
 			p.logEvent(event)
 			http.Error(w, "Missing target host", http.StatusBadRequest)
@@ -219,7 +219,7 @@ func (p *proxy) handler(scheme string) http.HandlerFunc {
 		}
 		if !p.hostPermitted(host) {
 			event.Status = http.StatusForbidden
-			event.Verdict = "deny"
+			event.Verdict = netlog.VerdictDeny
 			event.Rule = "allowlist"
 			p.logEvent(event)
 			http.Error(w, "Domain not in allowlist", http.StatusForbidden)
@@ -227,7 +227,7 @@ func (p *proxy) handler(scheme string) http.HandlerFunc {
 		}
 		if err := rewriteHeaders(scheme, host, req.Header, p.secretRules); err != nil {
 			event.Status = http.StatusForbidden
-			event.Verdict = "deny"
+			event.Verdict = netlog.VerdictDeny
 			event.Rule = "secret-injection"
 			p.logEvent(event)
 			http.Error(w, "request denied", http.StatusForbidden)
@@ -236,7 +236,7 @@ func (p *proxy) handler(scheme string) http.HandlerFunc {
 		result, err := p.forward(w, req, scheme)
 		if err != nil {
 			event.Status = http.StatusBadGateway
-			event.Verdict = "pass"
+			event.Verdict = netlog.VerdictPass
 			event.Rule = "upstream-error"
 			p.logEvent(event)
 			http.Error(w, "Upstream request failed", http.StatusBadGateway)
@@ -245,7 +245,7 @@ func (p *proxy) handler(scheme string) http.HandlerFunc {
 		event.Status = result.StatusCode
 		event.ResponseSize = result.ResponseBytes
 		event.ContentType = result.ContentType
-		event.Verdict = "pass"
+		event.Verdict = netlog.VerdictPass
 		event.Rule = "allowlist"
 		p.logEvent(event)
 	}
@@ -397,21 +397,21 @@ func (s *httpsDispatchServer) serveConn(conn net.Conn) {
 
 	host, preface, err := readClientHello(conn)
 	if err != nil {
-		s.proxy.logEvent(newTCPAuditEvent("", "deny", "tls-clienthello"))
+		s.proxy.logEvent(newTCPAuditEvent("", netlog.VerdictDeny, "tls-clienthello"))
 		_ = conn.Close()
 		return
 	}
 	if !s.proxy.hostPermitted(host) {
-		s.proxy.logEvent(newTCPAuditEvent(host, "deny", "allowlist"))
+		s.proxy.logEvent(newTCPAuditEvent(host, netlog.VerdictDeny, "allowlist"))
 		_ = conn.Close()
 		return
 	}
 	if shouldMITM(host, s.proxy.secretRules, s.proxy.forceHTTPSMITM) {
-		s.proxy.logEvent(newTCPAuditEvent(host, "pass", "mitm-dispatch"))
+		s.proxy.logEvent(newTCPAuditEvent(host, netlog.VerdictPass, "mitm-dispatch"))
 		tunnelToAddress(conn, preface, s.mitmAddr)
 		return
 	}
-	s.proxy.logEvent(newTCPAuditEvent(host, "pass", "allowlist"))
+	s.proxy.logEvent(newTCPAuditEvent(host, netlog.VerdictPass, "allowlist"))
 	tunnelTLS(conn, preface, host)
 }
 

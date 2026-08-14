@@ -472,15 +472,17 @@ func Start(cfg StartConfig) (StartResult, error) {
 
 // prepareNetworkLog rotates the audit log when it has outgrown the configured
 // cap, makes sure the file the gateway binds exists, and records the session
-// boundary. Rotation happens here, at session start, so nothing rotates
-// mid-session: a single long-running session can grow past the cap.
+// boundary. Rotation happens here, at session start, so a session never rotates
+// its own log: a single long-running session can grow past the cap. Rotation
+// truncates in place rather than renaming, so a session already running keeps
+// appending to the file it bind-mounted.
 func prepareNetworkLog(cfg StartConfig) error {
 	logDir := filepath.Dir(cfg.NetworkLogPath)
 	if err := os.MkdirAll(logDir, 0o750); err != nil {
 		return fmt.Errorf("failed to create network log dir: %w", err)
 	}
 
-	maxBytes, err := netlog.ParseSize(cfg.NetworkLogMaxSize)
+	maxBytes, err := util.ParseSize(cfg.NetworkLogMaxSize)
 	if err != nil {
 		return fmt.Errorf("invalid network log max size: %w", err)
 	}
@@ -492,22 +494,10 @@ func prepareNetworkLog(cfg StartConfig) error {
 		logx.Debugf("Rotated network log to %s", netlog.RotatedPath(cfg.NetworkLogPath))
 	}
 
-	if _, err := os.Stat(cfg.NetworkLogPath); err != nil {
-		if !os.IsNotExist(err) {
-			return fmt.Errorf("failed to stat network log path: %w", err)
-		}
-		file, err := os.OpenFile(cfg.NetworkLogPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
-		if err != nil {
-			return fmt.Errorf("failed to create network log file: %w", err)
-		}
-		if err := file.Close(); err != nil {
-			return fmt.Errorf("failed to close network log file: %w", err)
-		}
-	}
-
 	// The marker is written host side so it is recorded even when the proxy is
 	// disabled, and it gives the reader session boundaries plus the anchor
-	// `--since session` resolves against.
+	// `--since session` resolves against. It also creates the file the gateway
+	// bind-mounts, which is why nothing here has to touch it first.
 	marker := netlog.SessionStartEvent(cfg.ContainerName, time.Now())
 	if err := netlog.AppendEvent(cfg.NetworkLogPath, marker); err != nil {
 		return fmt.Errorf("failed to record network log session marker: %w", err)
@@ -523,7 +513,7 @@ func validateStartConfig(cfg StartConfig) error {
 		return fmt.Errorf("invalid network log mode: %s", cfg.NetworkLogMode)
 	}
 
-	if _, err := netlog.ParseSize(cfg.NetworkLogMaxSize); err != nil {
+	if _, err := util.ParseSize(cfg.NetworkLogMaxSize); err != nil {
 		return fmt.Errorf("invalid network log max size: %w", err)
 	}
 

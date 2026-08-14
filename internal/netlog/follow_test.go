@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -112,6 +113,49 @@ func TestFollowerSkipsHistoryByDefault(t *testing.T) {
 	got := sink.waitFor(t, 1)
 	if got[0] != "after.example" {
 		t.Fatalf("events = %v, want only what arrived after the follow started", got)
+	}
+}
+
+func TestFollowerStartsAtTheGivenOffset(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "network.log")
+	appendLine(t, path, "backlog.example")
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat %s: %v", path, err)
+	}
+	// A caller that printed the backlog itself continues from where its read
+	// stopped, so an event appended in between is neither lost nor duplicated.
+	appendLine(t, path, "between.example")
+
+	sink := startFollower(t, []string{path}, FollowOptions{StartOffsets: map[string]int64{path: info.Size()}})
+	appendLine(t, path, "after.example")
+
+	got := sink.waitFor(t, 2)
+	if got[0] != "between.example" || got[1] != "after.example" {
+		t.Fatalf("events = %v, want everything after the given offset", got)
+	}
+}
+
+func TestFollowerDropsAnUnterminatedOversizedLine(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "network.log")
+	sink := startFollower(t, []string{path}, FollowOptions{})
+
+	file, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatalf("open %s: %v", path, err)
+	}
+	// A torn write with no newline in sight must not be buffered indefinitely.
+	if _, err := file.WriteString(strings.Repeat("x", maxLineBytes+1024) + "\n"); err != nil {
+		t.Fatalf("write torn line: %v", err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatalf("close %s: %v", path, err)
+	}
+	appendLine(t, path, "after.example")
+
+	got := sink.waitFor(t, 1)
+	if len(got) != 1 || got[0] != "after.example" {
+		t.Fatalf("events = %v, want only the line after the dropped one", got)
 	}
 }
 

@@ -5,7 +5,7 @@
 //
 // SPDX-License-Identifier: MIT
 
-package netlog
+package util
 
 import "testing"
 

@@ -34,13 +34,22 @@ enclave network log --json | jq            # The integration contract
 ```
 
 The log is read from disk, so events of a session that has already exited are
-still available. `--session <container>` reads one running session's log and
+still available. `--session <container>` reads one running session's events and
 `--all-running` merges every running gateway's log in timestamp order; both need
-Docker, the default scope does not.
+Docker, the default scope does not. Concurrent sessions of the same project and
+tool append to one file, so `--session` also filters on the `session` field:
+events written before session stamping existed carry none and are not shown.
 
 `--since` takes a duration (`10m`), an RFC3339 timestamp, or `session`, which
 resolves to the start of the most recent session in scope and therefore needs a
-scope covering exactly one session.
+scope covering exactly one session. Because it anchors on a session boundary it
+also limits the output to that session's events, so a concurrent session sharing
+the file does not bleed in. Combined with `--session` it resolves to that
+session's own start.
+
+`--json` and `--summary` are mutually exclusive: `--json` is the event stream
+contract and a summary is not an event stream. Use `--summary --plain` for a
+machine-readable aggregate.
 
 Output adapts to the destination: a terminal gets the aligned, coloured form and
 a pipe or redirect gets tab-separated columns in a fixed order (timestamp,
@@ -65,10 +74,14 @@ IPv6 record, so recording it would report allowed domains as denied.
 ### Rotation
 
 At session start, a log larger than `network_log_max_size` (default `32MB`) is
-renamed to `network.log.1`, replacing any previous generation, and a fresh log
-is started. The reader reads `.1` first, so the boundary is invisible. Nothing
-rotates mid-session, so a single long-running session can grow past the cap, and
-worst-case disk use is roughly twice the cap per project and tool. Set
+copied to `network.log.1`, replacing any previous generation, and then truncated
+in place. The reader reads `.1` first, so the boundary is invisible. Truncating
+rather than renaming keeps the file a running gateway has bind-mounted, so a
+session that is already going on keeps writing where readers can see it. A
+session never rotates its own log, so a single long-running session can grow past
+the cap, and worst-case disk use is roughly twice the cap per project and tool.
+Concurrent session starts serialize on a `network.log.lock` file next to the log,
+so two of them cannot discard the generation the other just wrote. Set
 `network_log_max_size` to `0` or `off` in global config to disable rotation.
 
 ## Managing the Network Policy

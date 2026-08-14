@@ -18,6 +18,12 @@ trap 'rm -rf "$sandbox"' EXIT
 mkdir -p "$sandbox/home" "$sandbox/run" "$sandbox/cwd"
 cp "$binary" "$sandbox/run/enclave"
 
+version=$("$sandbox/run/enclave" version)
+if [[ "$version" == *unknown* ]]; then
+    printf 'standalone binary has incomplete build metadata: %s\n' "$version" >&2
+    exit 1
+fi
+
 # macOS ignores the XDG_* overrides and puts regenerable caches under the Apple
 # layout keyed by the reverse-DNS application id.
 if [ "$(uname -s)" = "Darwin" ]; then

@@ -20,7 +20,7 @@ GIT_DIRTY := $(shell if [ -n "$$(git status --porcelain 2>/dev/null)" ]; then pr
 BUILD_VERSION ?= $(VERSION)
 BUILD_COMMIT ?= $(if $(strip $(GIT_COMMIT)),$(GIT_COMMIT)$(GIT_DIRTY),unknown)
 BUILD_DATE ?= $(if $(strip $(GIT_COMMIT_DATE)),$(GIT_COMMIT_DATE),unknown)
-BUILD_LDFLAGS := -X enclave/internal/buildinfo.Version=$(BUILD_VERSION) -X enclave/internal/buildinfo.Commit=$(BUILD_COMMIT) -X enclave/internal/buildinfo.Date=$(BUILD_DATE)
+BUILD_LDFLAGS := -X enclave/internal/buildinfo.version=$(BUILD_VERSION) -X enclave/internal/buildinfo.commit=$(BUILD_COMMIT) -X enclave/internal/buildinfo.date=$(BUILD_DATE)
 REPORTS_DIR := ./reports
 REQUIRED_LINT_TOOLS := golangci-lint gosec shellcheck
 LINT_GO_DIRS := cmd internal extensions/tools

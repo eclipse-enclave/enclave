@@ -15,7 +15,7 @@ GATEWAY_PROXY_SOURCE_PATHS_FILE := $(CURDIR)/internal/gateway/gateway_proxy_buil
 BUILD_VERSION ?= $(shell dpkg-parsechangelog --show-field Version | sed 's/-[^-]*$$//')
 BUILD_COMMIT ?= unknown
 BUILD_DATE ?= unknown
-BUILD_LDFLAGS := -X enclave/internal/buildinfo.Version=$(BUILD_VERSION) -X enclave/internal/buildinfo.Commit=$(BUILD_COMMIT) -X enclave/internal/buildinfo.Date=$(BUILD_DATE)
+BUILD_LDFLAGS := -X enclave/internal/buildinfo.version=$(BUILD_VERSION) -X enclave/internal/buildinfo.commit=$(BUILD_COMMIT) -X enclave/internal/buildinfo.date=$(BUILD_DATE)
 
 %:
 	dh $@

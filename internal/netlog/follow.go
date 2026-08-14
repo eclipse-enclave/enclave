@@ -136,10 +136,7 @@ type tail struct {
 	// applied: later opens are rotations and always start at zero.
 	startOffset int64
 	splitter    lineSplitter
-	// buffer is reused across polls: a follower polls for the lifetime of a
-	// session and is otherwise idle, so allocating per poll would be all of its
-	// garbage.
-	buffer []byte
+	buffer      []byte
 }
 
 func (t *tail) read(emit func(line []byte), drop func()) error {

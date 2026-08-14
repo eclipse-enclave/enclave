@@ -20,6 +20,10 @@ import (
 // RotatedSuffix marks the single retained previous generation of a log.
 const RotatedSuffix = ".1"
 
+// MaxLogBytes is the size above which a log is rotated at session start. Two
+// generations of it is the disk a project's network log may occupy.
+const MaxLogBytes = 32 * 1024 * 1024
+
 // RotatedPath is the previous generation of the given log path.
 func RotatedPath(path string) string {
 	return path + RotatedSuffix

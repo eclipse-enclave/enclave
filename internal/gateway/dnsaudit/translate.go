@@ -11,7 +11,6 @@
 package dnsaudit
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"strings"
@@ -52,11 +51,6 @@ func Run(ctx context.Context, opts Options) error {
 		FromStart: opts.FromStart,
 	})
 	return follower.RunLines(ctx, func(line []byte) {
-		// Queries, forwards and replies are most of the log and none of them can
-		// match, so they are rejected before the line is even copied to a string.
-		if !bytes.Contains(line, answerSeparatorBytes) {
-			return
-		}
 		// The dnsmasq line carries a local timestamp with no year or zone, so
 		// the event is stamped when it is read instead. The translator tails
 		// the log live, which keeps the two within milliseconds.
@@ -71,8 +65,6 @@ func Run(ctx context.Context, opts Options) error {
 // answerSeparator is what every answer line dnsmasq logs has in common:
 // "<source> <domain> is <status>".
 const answerSeparator = " is "
-
-var answerSeparatorBytes = []byte(answerSeparator)
 
 // rules maps a dnsmasq answer status to the rule recorded on the event. Only
 // answers that denied or failed a lookup are listed; anything else is normal
@@ -100,13 +92,6 @@ var rules = map[string]string{
 // policy denial. "reply" and "cached" mean upstream failed the lookup, which
 // the rule records separately.
 func ParseLine(line string, at time.Time, session string) (netlog.Event, bool) {
-	// Queries, forwards, replies and ipset updates are the bulk of the log and
-	// none of them can match. Rejecting them on a substring search keeps the
-	// per-line cost at zero allocations.
-	if !strings.Contains(line, answerSeparator) {
-		return netlog.Event{}, false
-	}
-
 	message := strings.TrimSpace(line)
 	if index := strings.Index(message, "]: "); index >= 0 {
 		message = strings.TrimSpace(message[index+len("]: "):])

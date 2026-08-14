@@ -9,46 +9,6 @@ package util
 
 import "testing"
 
-func TestParseSizeAcceptedForms(t *testing.T) {
-	cases := map[string]int64{
-		"":       0,
-		"0":      0,
-		"off":    0,
-		"OFF":    0,
-		"none":   0,
-		"512":    512,
-		"512B":   512,
-		"512KB":  512 * 1024,
-		"512kb":  512 * 1024,
-		"512 KB": 512 * 1024,
-		"32MB":   32 * 1024 * 1024,
-		"32M":    32 * 1024 * 1024,
-		"1GB":    1024 * 1024 * 1024,
-		"1g":     1024 * 1024 * 1024,
-	}
-	for input, want := range cases {
-		t.Run(input, func(t *testing.T) {
-			got, err := ParseSize(input)
-			if err != nil {
-				t.Fatalf("ParseSize(%q) error = %v", input, err)
-			}
-			if got != want {
-				t.Fatalf("ParseSize(%q) = %d, want %d", input, got, want)
-			}
-		})
-	}
-}
-
-func TestParseSizeRejectsMalformedValues(t *testing.T) {
-	for _, input := range []string{"MB", "-1", "-1MB", "1.5MB", "12TB", "twelve", "1 2 MB", "1KBB"} {
-		t.Run(input, func(t *testing.T) {
-			if got, err := ParseSize(input); err == nil {
-				t.Fatalf("ParseSize(%q) = %d, want an error", input, got)
-			}
-		})
-	}
-}
-
 func TestFormatBytesUsesTheSameBinaryBase(t *testing.T) {
 	cases := map[int64]string{
 		0:       "0 B",

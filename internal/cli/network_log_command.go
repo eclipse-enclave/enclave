@@ -32,15 +32,6 @@ read, including sessions that have already exited.`,
 			if view.Follow && view.Summary {
 				return fmt.Errorf("--follow and --summary are mutually exclusive")
 			}
-			if view.JSON && view.Summary {
-				// --json is the event stream contract; a summary is not an event
-				// stream. --summary --plain is the machine-readable aggregate.
-				return fmt.Errorf("--json and --summary are mutually exclusive; use --summary --plain for machine-readable output")
-			}
-			if view.JSON {
-				// --json is the integration contract and already machine form.
-				view.Plain = false
-			}
 			if strings.EqualFold(strings.TrimSpace(view.Since), netlog.SinceSession) && allRunning {
 				return fmt.Errorf("--since session needs a single session in scope; drop --all-running or pass --session <name>")
 			}
@@ -55,8 +46,7 @@ read, including sessions that have already exited.`,
 
 	cmd.Flags().BoolVarP(&view.Follow, "follow", "f", false, "Stream new events as they arrive")
 	cmd.Flags().BoolVar(&view.Summary, "summary", false, "Show a per-domain aggregate instead of rows")
-	cmd.Flags().BoolVar(&view.JSON, "json", false, "Emit the raw JSONL event stream")
-	cmd.Flags().BoolVar(&view.Plain, "plain", false, "Force machine-readable output in a terminal")
+	cmd.Flags().BoolVar(&view.JSON, "json", false, "Emit JSON: the raw JSONL event stream, or one object with --summary")
 	cmd.Flags().StringVar(&view.Since, "since", "", "Only events since a duration (10m), an RFC3339 timestamp, or \"session\"")
 	cmd.Flags().StringVar(&view.Verdict, "verdict", "", "Filter by verdict: pass|deny")
 	cmd.Flags().StringVar(&view.Domain, "domain", "", "Filter by domain pattern (example.com or *.example.com)")

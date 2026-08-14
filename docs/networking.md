@@ -47,15 +47,10 @@ also limits the output to that session's events, so a concurrent session sharing
 the file does not bleed in. Combined with `--session` it resolves to that
 session's own start.
 
-`--json` and `--summary` are mutually exclusive: `--json` is the event stream
-contract and a summary is not an event stream. Use `--summary --plain` for a
-machine-readable aggregate.
-
-Output adapts to the destination: a terminal gets the aligned, coloured form and
-a pipe or redirect gets tab-separated columns in a fixed order (timestamp,
-verdict, type, method, domain, path, status, req_bytes, resp_bytes, rule,
-session, with `-` for absent values). `--plain` forces the machine form in a
-terminal, and `NO_COLOR` or `ENCLAVE_COLOR=never` does the same.
+Output is the aligned human form. `--json` is the machine contract: on its own
+it emits the raw JSONL event stream verbatim, and with `--summary` it emits the
+aggregate as a single JSON object. Colour follows `NO_COLOR` and
+`ENCLAVE_COLOR`, and is off when stdout is not a terminal.
 
 ### What is recorded
 
@@ -100,16 +95,15 @@ on port 22 bypasses the HTTP/TLS proxy and is never recorded.
 
 ### Rotation
 
-At session start, a log larger than `network_log_max_size` (default `32MB`) is
-copied to `network.log.1`, replacing any previous generation, and then truncated
-in place. The reader reads `.1` first, so the boundary is invisible. Truncating
+At session start, a log larger than 32 MB is copied to `network.log.1`,
+replacing any previous generation, and then truncated in place. The reader reads
+`.1` first, so the boundary is invisible. Truncating
 rather than renaming keeps the file a running gateway has bind-mounted, so a
 session that is already going on keeps writing where readers can see it. A
 session never rotates its own log, so a single long-running session can grow past
 the cap, and worst-case disk use is roughly twice the cap per project and tool.
 Concurrent session starts serialize on a `network.log.lock` file next to the log,
-so two of them cannot discard the generation the other just wrote. Set
-`network_log_max_size` to `0` or `off` in global config to disable rotation.
+so two of them cannot discard the generation the other just wrote.
 
 ## Managing the Network Policy
 

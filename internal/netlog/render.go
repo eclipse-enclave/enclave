@@ -19,23 +19,14 @@ import (
 	"enclave/internal/util"
 )
 
-// Style selects the output form. Human form is for a terminal; machine form is
-// tab separated so `cut -f` and `awk` work on a pipe or a redirect.
-type Style string
-
-const (
-	StyleHuman   Style = "human"
-	StyleMachine Style = "machine"
-)
-
 // Glyphs are single width so columns stay aligned in any terminal font.
 const (
 	glyphPass = "✓"
 	glyphDeny = "✗"
 )
 
-// Human column widths. Values longer than their column push the rest of the
-// row right rather than being truncated, so nothing is silently lost.
+// Column widths. Values longer than their column push the rest of the row right
+// rather than being truncated, so nothing is silently lost.
 const (
 	widthTime   = 8
 	widthMethod = 5
@@ -44,20 +35,11 @@ const (
 	widthStatus = 3
 )
 
-// machineColumns is the fixed column order of the machine form. Consumers rely
-// on the positions, so append rather than reorder.
-var machineColumns = []string{
-	"timestamp", "verdict", "type", "method", "domain",
-	"path", "status", "req_bytes", "resp_bytes", "rule", "session",
-}
-
-// RenderOptions controls how events are turned into text.
+// RenderOptions controls how events are turned into text. This is the terminal
+// form; machine consumers read the JSON the reader emits verbatim.
 type RenderOptions struct {
-	Style Style
-	// Color adds SGR sequences to human output. It is always false in machine
-	// form so escapes never reach a file.
 	Color bool
-	// Location renders human timestamps in the caller's zone. Nil means local.
+	// Location renders timestamps in the caller's zone. Nil means local.
 	Location *time.Location
 }
 
@@ -68,33 +50,19 @@ func (o RenderOptions) location() *time.Location {
 	return o.Location
 }
 
-func (o RenderOptions) machine() bool {
-	return o.Style != StyleHuman
-}
-
 // colorize keeps rendering pure: the caller decides whether colour is allowed,
 // so the same events render identically in a test with no terminal.
 func (o RenderOptions) colorize(text string, color logx.Color) string {
-	if !o.Color || o.machine() || color == "" {
+	if !o.Color || color == "" {
 		return text
 	}
 	return string(color) + text + string(logx.ColorReset)
 }
 
-// renderEvents renders a full event stream into a string. Production paths use
-// WriteEvents so a large log does not have to be assembled in memory.
-func renderEvents(events []Event, opts RenderOptions) string {
-	var out strings.Builder
-	// A strings.Builder never fails.
-	_ = WriteEvents(&out, events, opts)
-	return out.String()
-}
-
 // WriteEvents renders a full event stream into out, one row at a time, so a
 // large log streams through the caller's buffer instead of being assembled in
-// memory first. In human form a session marker becomes a boundary header
-// carrying that session's verdict counts; in machine form it is a row like any
-// other.
+// memory first. A session marker becomes a boundary header carrying that
+// session's verdict counts.
 func WriteEvents(out io.StringWriter, events []Event, opts RenderOptions) error {
 	write := func(parts ...string) error {
 		for _, part := range parts {
@@ -105,7 +73,7 @@ func WriteEvents(out io.StringWriter, events []Event, opts RenderOptions) error 
 		return nil
 	}
 	for index, event := range events {
-		if !opts.machine() && event.IsSessionMarker() {
+		if event.IsSessionMarker() {
 			separator := ""
 			if index > 0 {
 				separator = "\n"
@@ -139,9 +107,6 @@ func countUntilNextMarker(events []Event) (pass int, deny int) {
 
 // RenderEvent renders one event as a single line without its newline.
 func RenderEvent(event Event, opts RenderOptions) string {
-	if opts.machine() {
-		return renderMachineRow(event)
-	}
 	if event.IsSessionMarker() {
 		return renderSessionHeader(event, 0, 0, opts)
 	}
@@ -151,9 +116,6 @@ func RenderEvent(event Event, opts RenderOptions) string {
 // renderSessionHeader renders a session boundary. Counts of zero are omitted so
 // a live follow, which cannot know them yet, still prints a clean boundary.
 func renderSessionHeader(event Event, pass int, deny int, opts RenderOptions) string {
-	if opts.machine() {
-		return renderMachineRow(event)
-	}
 	session := strings.TrimSpace(event.Session)
 	if session == "" {
 		session = "unknown session"
@@ -214,7 +176,7 @@ func renderHumanRow(event Event, opts RenderOptions) string {
 }
 
 // humanKind collapses type and method into one column: the ambiguity between a
-// method and an event type does not matter to a reader, and machine form keeps
+// method and an event type does not matter to a reader, and the JSON form keeps
 // them separate for tools that care.
 func humanKind(event Event) string {
 	if method := strings.TrimSpace(event.Method); method != "" {
@@ -249,54 +211,8 @@ func humanDetail(event Event) string {
 	return event.Rule
 }
 
-func renderMachineRow(event Event) string {
-	fields := []string{
-		dash(event.Timestamp),
-		dash(strings.ToUpper(event.Verdict)),
-		dash(event.Type),
-		dash(event.Method),
-		dash(event.Domain),
-		dash(event.Path),
-		numberCell(int64(event.Status), event.Status > 0),
-		numberCell(event.RequestSize, hasPayload(event)),
-		numberCell(event.ResponseSize, hasPayload(event)),
-		dash(event.Rule),
-		dash(event.Session),
-	}
-	return strings.Join(fields, "\t")
-}
-
-// hasPayload reports whether byte counts are meaningful for the event type. DNS
-// and session events have none, so their byte columns stay "-" rather than
-// claiming a transfer of zero.
-func hasPayload(event Event) bool {
-	switch event.Type {
-	case TypeHTTP, TypeTCP:
-		return true
-	default:
-		return false
-	}
-}
-
 // RenderSummary renders a per-domain aggregate.
 func RenderSummary(summary Summary, opts RenderOptions) string {
-	if opts.machine() {
-		var out strings.Builder
-		for _, entry := range summary.Domains {
-			out.WriteString(strings.Join([]string{
-				entry.Domain,
-				strconv.Itoa(entry.Pass),
-				strconv.Itoa(entry.Deny),
-				strconv.FormatInt(entry.Sent, 10),
-				strconv.FormatInt(entry.Received, 10),
-				timestampCell(entry.FirstSeen),
-				timestampCell(entry.LastSeen),
-			}, "\t"))
-			out.WriteString("\n")
-		}
-		return out.String()
-	}
-
 	domainWidth := len("DOMAIN")
 	for _, entry := range summary.Domains {
 		if len(entry.Domain) > domainWidth {
@@ -343,28 +259,6 @@ func byteCell(bytes int64) string {
 		return "-"
 	}
 	return util.FormatBytes(bytes)
-}
-
-func timestampCell(at time.Time) string {
-	if at.IsZero() {
-		return "-"
-	}
-	return at.UTC().Format(TimeFormat)
-}
-
-func numberCell(value int64, present bool) string {
-	if !present {
-		return "-"
-	}
-	return strconv.FormatInt(value, 10)
-}
-
-func dash(value string) string {
-	trimmed := strings.TrimSpace(value)
-	if trimmed == "" {
-		return "-"
-	}
-	return trimmed
 }
 
 func pad(value string, width int) string {

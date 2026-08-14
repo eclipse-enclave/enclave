@@ -23,47 +23,15 @@ func renderFixture() []Event {
 	}
 }
 
-func machineOptions() RenderOptions {
-	return RenderOptions{Style: StyleMachine, Color: true, Location: time.UTC}
-}
-
 func humanOptions() RenderOptions {
-	return RenderOptions{Style: StyleHuman, Location: time.UTC}
+	return RenderOptions{Location: time.UTC}
 }
 
-func TestRenderMachineFormIsTabSeparatedWithStableColumns(t *testing.T) {
-	out := renderEvents(renderFixture(), machineOptions())
-	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
-	if len(lines) != 5 {
-		t.Fatalf("rendered %d lines, want 5 (markers are rows in machine form)", len(lines))
-	}
-
-	want := []string{
-		"2026-08-13T12:04:30.000Z\tINFO\tsession\t-\t-\t-\t-\t-\t-\tstart\tenclave-demo-claude",
-		"2026-08-13T12:04:31.412Z\tPASS\thttp\tGET\tapi.anthropic.com\t/v1/messages\t200\t0\t4300\tallowlist\tenclave-demo-claude",
-		"2026-08-13T12:04:33.100Z\tPASS\ttcp\t-\tgithub.com\t-\t-\t0\t0\tallowlist\tenclave-demo-claude",
-		"2026-08-13T12:04:35.882Z\tDENY\tdns\t-\ttelemetry.example.com\t-\t-\t-\t-\tnxdomain\tenclave-demo-claude",
-		"2026-08-13T12:04:36.200Z\tDENY\thttp\tGET\tevil.test\t/x\t403\t0\t0\tsecret-injection\tenclave-demo-claude",
-	}
-	for i, line := range lines {
-		if line != want[i] {
-			t.Fatalf("line %d =\n%q\nwant\n%q", i, line, want[i])
-		}
-		if fields := strings.Split(line, "\t"); len(fields) != len(machineColumns) {
-			t.Fatalf("line %d has %d columns, want %d", i, len(fields), len(machineColumns))
-		}
-	}
-}
-
-func TestRenderMachineFormNeverEmitsEscapes(t *testing.T) {
-	out := renderEvents(renderFixture(), machineOptions())
-	if strings.Contains(out, "\x1b") {
-		t.Fatal("machine output contains an escape sequence")
-	}
-	summary := RenderSummary(Aggregate(renderFixture()), machineOptions())
-	if strings.Contains(summary, "\x1b") {
-		t.Fatal("machine summary contains an escape sequence")
-	}
+func renderEvents(events []Event, opts RenderOptions) string {
+	var out strings.Builder
+	// A strings.Builder never fails.
+	_ = WriteEvents(&out, events, opts)
+	return out.String()
 }
 
 func TestRenderHumanFormAlignsColumns(t *testing.T) {
@@ -108,7 +76,7 @@ func TestRenderHumanFormAlignsColumns(t *testing.T) {
 }
 
 func TestRenderHumanFormKeepsVerdictGreppable(t *testing.T) {
-	out := renderEvents(renderFixture(), RenderOptions{Style: StyleHuman, Color: true, Location: time.UTC})
+	out := renderEvents(renderFixture(), RenderOptions{Color: true, Location: time.UTC})
 	if strings.Count(out, glyphDeny) != 2 {
 		t.Fatalf("expected two deny glyphs in\n%s", out)
 	}
@@ -163,17 +131,5 @@ func TestRenderSummaryHuman(t *testing.T) {
 	totals := strings.Fields(lines[len(lines)-1])
 	if len(totals) != 2 || totals[0] != "2" || totals[1] != "2" {
 		t.Fatalf("totals row = %v, want [2 2]", totals)
-	}
-}
-
-func TestRenderSummaryMachine(t *testing.T) {
-	out := RenderSummary(Aggregate(renderFixture()), machineOptions())
-	for _, line := range strings.Split(strings.TrimRight(out, "\n"), "\n") {
-		if fields := strings.Split(line, "\t"); len(fields) != 7 {
-			t.Fatalf("summary line %q has %d columns, want 7", line, len(fields))
-		}
-	}
-	if strings.Contains(out, "DOMAIN") {
-		t.Fatal("machine summary must not print a header")
 	}
 }

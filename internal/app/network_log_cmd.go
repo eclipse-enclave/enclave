@@ -77,16 +77,12 @@ func runNetworkLog(input *CommandInput) int {
 		return 1
 	}
 
-	render := netlog.RenderOptions{Style: netlog.StyleMachine}
-	if !view.Plain && !view.JSON && logx.ColorEnabledFor(os.Stdout) {
-		render.Style = netlog.StyleHuman
-		render.Color = true
-	}
+	render := netlog.RenderOptions{Color: logx.ColorEnabledFor(os.Stdout)}
 
 	out := bufio.NewWriter(os.Stdout)
 	matched := filter.Apply(read.events)
 	if view.Summary {
-		if _, err := out.WriteString(netlog.RenderSummary(netlog.Aggregate(matched), render)); err != nil {
+		if err := writeNetworkLogSummary(out, netlog.Aggregate(matched), view.JSON, render); err != nil {
 			logx.Errorf("Failed to write output: %v", err)
 			return 1
 		}
@@ -98,7 +94,7 @@ func runNetworkLog(input *CommandInput) int {
 		return 1
 	}
 	if !view.Follow {
-		if len(matched) == 0 && render.Style == netlog.StyleHuman {
+		if len(matched) == 0 && !view.JSON {
 			logx.Infof("No network events recorded for %s", scope.label)
 		}
 		return flushNetworkLog(out)
@@ -239,10 +235,8 @@ func readNetworkLogEvents(livePaths []string) (networkLogRead, error) {
 	return read, nil
 }
 
-// mergeByTime orders events from several logs by timestamp. Timestamps are
-// decoded once up front rather than in the comparison: a merge can cover a whole
-// capped log, and RFC3339Nano parsing is the expensive part. An event whose
-// timestamp does not parse sorts last — ordering it "equal to everything" instead
+// mergeByTime orders events from several logs by timestamp. An event whose
+// timestamp does not parse sorts last: ordering it "equal to everything" instead
 // would make the comparison intransitive and scramble the whole merge.
 func mergeByTime(events []netlog.Event) []netlog.Event {
 	type timed struct {
@@ -269,10 +263,8 @@ func mergeByTime(events []netlog.Event) []netlog.Event {
 }
 
 // applyNetworkLogSince turns the flag into a lower bound on the filter.
-// "session" resolves to the most recent session marker in scope, which is why it
-// requires a scope covering exactly one session: an already scoped read anchors
-// on that session's own marker, and an unscoped one adopts the session it
-// anchored on. Anchoring without adopting would still show a concurrent session's
+// "session" resolves to the most recent session marker in scope and adopts that
+// session. Anchoring without adopting would still show a concurrent session's
 // events, because one log file holds every session of a project and tool.
 func applyNetworkLogSince(filter netlog.Filter, value string, events []netlog.Event) (netlog.Filter, error) {
 	trimmed := strings.TrimSpace(value)
@@ -312,6 +304,21 @@ func applyNetworkLogSince(filter netlog.Filter, value string, events []netlog.Ev
 	}
 	filter.Since = at
 	return filter, nil
+}
+
+func writeNetworkLogSummary(out *bufio.Writer, summary netlog.Summary, asJSON bool, render netlog.RenderOptions) error {
+	if asJSON {
+		payload, err := json.Marshal(summary)
+		if err != nil {
+			return err
+		}
+		if _, err := out.Write(payload); err != nil {
+			return err
+		}
+		return out.WriteByte('\n')
+	}
+	_, err := out.WriteString(netlog.RenderSummary(summary, render))
+	return err
 }
 
 func writeNetworkLogEvents(out *bufio.Writer, events []netlog.Event, asJSON bool, render netlog.RenderOptions) error {

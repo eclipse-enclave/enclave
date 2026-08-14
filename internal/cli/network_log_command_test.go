@@ -51,20 +51,9 @@ func TestParseNetworkLogAllRunning(t *testing.T) {
 	}
 }
 
-func TestParseNetworkLogJSONOverridesPlain(t *testing.T) {
-	res, err := Parse([]string{"network", "log", "--json", "--plain"}, config.DefaultOptions())
-	if err != nil {
-		t.Fatalf("parse failed: %v", err)
-	}
-	if res.NetworkLogView.Plain {
-		t.Fatal("--json should override --plain")
-	}
-}
-
 func TestParseNetworkLogRejectsConflicts(t *testing.T) {
 	cases := map[string][]string{
 		"follow with summary":       {"network", "log", "--follow", "--summary"},
-		"json with summary":         {"network", "log", "--json", "--summary"},
 		"since session all-running": {"network", "log", "--since", "session", "--all-running"},
 		"session with all-running":  {"network", "log", "--session", "x", "--all-running"},
 	}

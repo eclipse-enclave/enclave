@@ -16,6 +16,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 
+	"enclave/internal/buildinfo"
 	"enclave/internal/config"
 	"enclave/internal/model"
 	"enclave/internal/usercmd"
@@ -31,6 +32,8 @@ type Result struct {
 	HelpShown    bool
 	Sources      model.OptionSources
 	ConfigView   model.ConfigView
+	VersionJSON  bool
+	VersionShown bool
 	ReviewTarget string
 	// UserCommand is set when Action == "user-command": a user-defined
 	// subcommand matched the first positional argument. UserCommandArgs holds
@@ -63,7 +66,9 @@ Running enclave with no subcommand defaults to "run", so run's flags apply
 directly: "enclave --tool codex" is equivalent to "enclave run --tool codex".`,
 		SilenceUsage:  true,
 		SilenceErrors: true,
+		Version:       buildinfo.Read().String(),
 	}
+	rootCmd.SetVersionTemplate(model.AppName + ": {{.Version}}\n")
 	defaultHelp := rootCmd.HelpFunc()
 	rootCmd.SetHelpFunc(func(cmd *cobra.Command, args []string) {
 		res.HelpShown = true
@@ -84,7 +89,7 @@ directly: "enclave --tool codex" is equivalent to "enclave run --tool codex".`,
 		shellCommand(&res),
 		authCommand(&res),
 		infoCommand(&res),
-		simpleCommand("version", "Show binary version and source commit", &res),
+		versionCommand(&res),
 		hiddenSimpleCommand("validate-extensions", "Validate extension metadata", &res),
 		hiddenSimpleCommand("ssh-init", "Initialize SSH directory", &res),
 		simpleCommandWithTool("tools", "List available tool profiles", &res),
@@ -127,9 +132,15 @@ directly: "enclave --tool codex" is equivalent to "enclave run --tool codex".`,
 		}
 	}
 
-	normalized, err := normalizeArgs(args, cmdTree, flagIndex)
-	if err != nil {
-		return res, err
+	var normalized []string
+	var err error
+	if hasVersionFlag(args) {
+		normalized = args
+	} else {
+		normalized, err = normalizeArgs(args, cmdTree, flagIndex)
+		if err != nil {
+			return res, err
+		}
 	}
 	rootCmd.SetArgs(normalized)
 
@@ -142,6 +153,9 @@ directly: "enclave --tool codex" is equivalent to "enclave run --tool codex".`,
 
 	if err := rootCmd.Execute(); err != nil {
 		return res, err
+	}
+	if flag := rootCmd.Flags().Lookup("version"); flag != nil && flag.Changed {
+		res.VersionShown = true
 	}
 
 	return res, nil
@@ -644,6 +658,18 @@ func containsFlag(args []string) bool {
 	return false
 }
 
+func hasVersionFlag(args []string) bool {
+	for _, arg := range args {
+		if arg == "--" {
+			return false
+		}
+		if arg == "-v" || arg == "--version" || arg == "--version=true" {
+			return true
+		}
+	}
+	return false
+}
+
 func configCommand(res *Result) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "config",
@@ -817,6 +843,12 @@ func featuresCommand(res *Result) *cobra.Command {
 	// runFeatures previews which features a run would enable; that depends on
 	// --slim and --features.
 	addOptionFlagsByName(cmd.Flags(), &res.Options, &res.Sources, "slim", "features")
+	return cmd
+}
+
+func versionCommand(res *Result) *cobra.Command {
+	cmd := simpleCommand("version", "Show binary version and source commit", res)
+	cmd.Flags().BoolVar(&res.VersionJSON, "json", false, "Emit JSON output")
 	return cmd
 }
 

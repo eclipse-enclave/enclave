@@ -14,13 +14,13 @@ UNAME_S := $(shell uname -s)
 CMD_DIR := ./cmd/enclave
 COMPLETIONS_DIR ?= ./completions
 VERSION ?= 0.1.0
-GIT_COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null)
-GIT_COMMIT_DATE := $(shell git show -s --format=%cs HEAD 2>/dev/null)
-GIT_DIRTY := $(shell if [ -n "$$(git status --porcelain 2>/dev/null)" ]; then printf '%s' '-dirty'; fi)
+GIT_COMMIT = $(shell git rev-parse --short HEAD 2>/dev/null)
+GIT_COMMIT_DATE = $(shell git show -s --format=%cs HEAD 2>/dev/null)
+GIT_DIRTY = $(shell if [ -n "$$(git status --porcelain 2>/dev/null)" ]; then printf '%s' '-dirty'; fi)
 BUILD_VERSION ?= $(VERSION)
 BUILD_COMMIT ?= $(if $(strip $(GIT_COMMIT)),$(GIT_COMMIT)$(GIT_DIRTY),unknown)
 BUILD_DATE ?= $(if $(strip $(GIT_COMMIT_DATE)),$(GIT_COMMIT_DATE),unknown)
-BUILD_LDFLAGS := -X enclave/internal/buildinfo.version=$(BUILD_VERSION) -X enclave/internal/buildinfo.commit=$(BUILD_COMMIT) -X enclave/internal/buildinfo.date=$(BUILD_DATE)
+BUILD_LDFLAGS = -X enclave/internal/buildinfo.version=$(BUILD_VERSION) -X enclave/internal/buildinfo.commit=$(BUILD_COMMIT) -X enclave/internal/buildinfo.date=$(BUILD_DATE)
 REPORTS_DIR := ./reports
 REQUIRED_LINT_TOOLS := golangci-lint gosec shellcheck
 LINT_GO_DIRS := cmd internal extensions/tools

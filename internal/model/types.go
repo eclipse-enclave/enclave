@@ -35,7 +35,6 @@ type RunOptions struct {
 	NoMemory          bool
 	NoCache           bool
 	NetworkLog        string
-	NetworkLogMaxSize string
 	Verbose           bool
 	Background        bool
 	SessionName       string
@@ -185,8 +184,6 @@ type NetworkLogView struct {
 	Follow  bool
 	Summary bool
 	JSON    bool
-	// Plain forces machine form even on a terminal.
-	Plain bool
 	// Since is a duration ("10m"), an RFC3339 timestamp, or "session".
 	Since   string
 	Verdict string
@@ -547,11 +544,10 @@ const (
 )
 
 const (
-	NetworkModeRestricted    = "restricted"
-	NetworkModeUnrestricted  = "unrestricted"
-	NetworkLogCoarse         = "coarse"
-	NetworkLogRequests       = "requests"
-	NetworkLogMaxSizeDefault = "32MB"
+	NetworkModeRestricted   = "restricted"
+	NetworkModeUnrestricted = "unrestricted"
+	NetworkLogCoarse        = "coarse"
+	NetworkLogRequests      = "requests"
 )
 
 const (

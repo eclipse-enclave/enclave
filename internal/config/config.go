@@ -21,45 +21,44 @@ import (
 )
 
 type Defaults struct {
-	Tool              string              `json:"tool"`
-	ToolOverrides     map[string]Defaults `json:"tool_overrides"`
-	Backend           string              `json:"backend"`
-	HostConfig        string              `json:"host_config"`
-	HostConfigPaths   []string            `json:"host_config_paths"`
-	Yolo              *bool               `json:"yolo"`
-	Ephemeral         *bool               `json:"ephemeral"`
-	AuthScope         string              `json:"auth_scope"`
-	AuthName          string              `json:"auth_name"`
-	SecretsScope      string              `json:"secrets_scope"`
-	ResetAuth         *bool               `json:"reset_auth"`
-	NoAPIKey          *bool               `json:"no_api_key"`
-	PassAPIKey        *bool               `json:"pass_api_key"`
-	PassEnv           []string            `json:"pass_env"`
-	AllowAllNetwork   *bool               `json:"allow_all_network"`
-	NoCache           *bool               `json:"no_cache"`
-	NoHistory         *bool               `json:"no_history"`
-	NoMemory          *bool               `json:"no_memory"`
-	SessionMonitor    *bool               `json:"session_monitor"`
-	ImageInbox        *bool               `json:"image_inbox"`
-	BaseImage         string              `json:"base_image"`
-	Devcontainer      *bool               `json:"devcontainer"`
-	Slim              *bool               `json:"slim"`
-	ImageName         string              `json:"image_name"`
-	Features          []string            `json:"features"`
-	UseRemoteUser     *bool               `json:"use_remote_user"`
-	CacheFrom         []string            `json:"cache_from"`
-	Progress          string              `json:"progress"`
-	NetworkLog        string              `json:"network_log"`
-	NetworkLogMaxSize string              `json:"network_log_max_size"`
-	Verbose           *bool               `json:"verbose"`
-	Ports             []string            `json:"ports"`
-	AddDirs           []string            `json:"add_dirs"`
-	AddReadonlyDirs   []string            `json:"add_readonly_dirs"`
-	ProjectMount      string              `json:"project_mount"`
-	WorktreeMetadata  string              `json:"worktree_metadata"`
-	AllowDomains      []string            `json:"allow_domains"`
-	BridgePorts       []string            `json:"bridge_ports"`
-	PlaywrightMCP     *bool               `json:"playwright_mcp"`
+	Tool             string              `json:"tool"`
+	ToolOverrides    map[string]Defaults `json:"tool_overrides"`
+	Backend          string              `json:"backend"`
+	HostConfig       string              `json:"host_config"`
+	HostConfigPaths  []string            `json:"host_config_paths"`
+	Yolo             *bool               `json:"yolo"`
+	Ephemeral        *bool               `json:"ephemeral"`
+	AuthScope        string              `json:"auth_scope"`
+	AuthName         string              `json:"auth_name"`
+	SecretsScope     string              `json:"secrets_scope"`
+	ResetAuth        *bool               `json:"reset_auth"`
+	NoAPIKey         *bool               `json:"no_api_key"`
+	PassAPIKey       *bool               `json:"pass_api_key"`
+	PassEnv          []string            `json:"pass_env"`
+	AllowAllNetwork  *bool               `json:"allow_all_network"`
+	NoCache          *bool               `json:"no_cache"`
+	NoHistory        *bool               `json:"no_history"`
+	NoMemory         *bool               `json:"no_memory"`
+	SessionMonitor   *bool               `json:"session_monitor"`
+	ImageInbox       *bool               `json:"image_inbox"`
+	BaseImage        string              `json:"base_image"`
+	Devcontainer     *bool               `json:"devcontainer"`
+	Slim             *bool               `json:"slim"`
+	ImageName        string              `json:"image_name"`
+	Features         []string            `json:"features"`
+	UseRemoteUser    *bool               `json:"use_remote_user"`
+	CacheFrom        []string            `json:"cache_from"`
+	Progress         string              `json:"progress"`
+	NetworkLog       string              `json:"network_log"`
+	Verbose          *bool               `json:"verbose"`
+	Ports            []string            `json:"ports"`
+	AddDirs          []string            `json:"add_dirs"`
+	AddReadonlyDirs  []string            `json:"add_readonly_dirs"`
+	ProjectMount     string              `json:"project_mount"`
+	WorktreeMetadata string              `json:"worktree_metadata"`
+	AllowDomains     []string            `json:"allow_domains"`
+	BridgePorts      []string            `json:"bridge_ports"`
+	PlaywrightMCP    *bool               `json:"playwright_mcp"`
 }
 
 func LoadDefaults(projectDir string) (global Defaults, project Defaults, warnings []string, err error) {
@@ -402,11 +401,7 @@ func applyProjectOverrideGuardrailsAgainst(path string, projectDir string, globa
 	}
 
 	projectRoot := resolveProjectRoot(projectDir)
-	inherited := inheritedProjectLimits{
-		WorktreeMetadata:  global.WorktreeMetadata,
-		NetworkLogMaxSize: global.NetworkLogMaxSize,
-	}
-	warnings := applyProjectDefaultsGuardrails(path, "", projectRoot, projectDir, inherited, defaults, nil)
+	warnings := applyProjectDefaultsGuardrails(path, "", projectRoot, projectDir, global.WorktreeMetadata, defaults, nil)
 
 	if defaults.Tool != "" {
 		warnings = append(warnings, fmt.Sprintf("Ignoring tool=%q in %s: project configs cannot change the active tool; pass --tool or set it in global config instead", defaults.Tool, path))
@@ -426,36 +421,21 @@ func applyProjectOverrideGuardrailsAgainst(path string, projectDir string, globa
 	for _, name := range toolNames {
 		override := defaults.ToolOverrides[name]
 		prefix := "tool_overrides." + name
-		overrideInherited := inherited
+		inheritedWorktreeMetadata := global.WorktreeMetadata
 		if defaults.WorktreeMetadata != "" {
-			overrideInherited.WorktreeMetadata = defaults.WorktreeMetadata
+			inheritedWorktreeMetadata = defaults.WorktreeMetadata
 		}
-		if defaults.NetworkLogMaxSize != "" {
-			overrideInherited.NetworkLogMaxSize = defaults.NetworkLogMaxSize
+		if globalOverride, ok := global.ToolOverrides[name]; ok && globalOverride.WorktreeMetadata != "" {
+			inheritedWorktreeMetadata = globalOverride.WorktreeMetadata
 		}
-		if globalOverride, ok := global.ToolOverrides[name]; ok {
-			if globalOverride.WorktreeMetadata != "" {
-				overrideInherited.WorktreeMetadata = globalOverride.WorktreeMetadata
-			}
-			if globalOverride.NetworkLogMaxSize != "" {
-				overrideInherited.NetworkLogMaxSize = globalOverride.NetworkLogMaxSize
-			}
-		}
-		warnings = applyProjectDefaultsGuardrails(path, prefix, projectRoot, projectDir, overrideInherited, &override, warnings)
+		warnings = applyProjectDefaultsGuardrails(path, prefix, projectRoot, projectDir, inheritedWorktreeMetadata, &override, warnings)
 		defaults.ToolOverrides[name] = override
 	}
 
 	return warnings
 }
 
-// inheritedProjectLimits carries the values a project config may tighten but
-// not relax, resolved from global config and the built-in defaults.
-type inheritedProjectLimits struct {
-	WorktreeMetadata  string
-	NetworkLogMaxSize string
-}
-
-func applyProjectDefaultsGuardrails(path string, prefix string, projectRoot string, projectDir string, inherited inheritedProjectLimits, defaults *Defaults, warnings []string) []string {
+func applyProjectDefaultsGuardrails(path string, prefix string, projectRoot string, projectDir string, inheritedWorktreeMetadata string, defaults *Defaults, warnings []string) []string {
 	if defaults.AllowAllNetwork != nil && *defaults.AllowAllNetwork {
 		field := projectGuardrailField(prefix, "allow_all_network")
 		valueLabel := field + "=true"
@@ -517,46 +497,14 @@ func applyProjectDefaultsGuardrails(path string, prefix string, projectRoot stri
 		defaults.ProjectMount = ""
 	}
 
-	if defaults.NetworkLogMaxSize != "" && networkLogMaxSizeRaises(defaults.NetworkLogMaxSize, inherited.NetworkLogMaxSize) {
-		field := projectGuardrailField(prefix, "network_log_max_size")
-		warnings = append(warnings, fmt.Sprintf("Ignoring %s=%q in %s: project configs cannot raise the network log size cap; set it in global config instead", field, defaults.NetworkLogMaxSize, path))
-		defaults.NetworkLogMaxSize = ""
-	}
-
 	worktreeMetadata := strings.ToLower(strings.TrimSpace(defaults.WorktreeMetadata))
-	if worktreeMetadata != "" && (worktreeMetadata == model.WorktreeMetadataFollow || worktreeMetadataStrength(worktreeMetadata) < worktreeMetadataStrength(inherited.WorktreeMetadata)) {
+	if worktreeMetadata != "" && (worktreeMetadata == model.WorktreeMetadataFollow || worktreeMetadataStrength(worktreeMetadata) < worktreeMetadataStrength(inheritedWorktreeMetadata)) {
 		field := projectGuardrailField(prefix, "worktree_metadata")
-		warnings = append(warnings, fmt.Sprintf("Ignoring %s=%q in %s: project configs cannot relax inherited worktree_metadata=%q; set it in global config or CLI instead", field, defaults.WorktreeMetadata, path, model.WorktreeMetadataMode(inherited.WorktreeMetadata)))
+		warnings = append(warnings, fmt.Sprintf("Ignoring %s=%q in %s: project configs cannot relax inherited worktree_metadata=%q; set it in global config or CLI instead", field, defaults.WorktreeMetadata, path, model.WorktreeMetadataMode(inheritedWorktreeMetadata)))
 		defaults.WorktreeMetadata = ""
 	}
 
 	return warnings
-}
-
-// networkLogMaxSizeRaises reports whether a project value would allow a larger
-// log than the inherited cap. An unparseable project value is left to startup
-// validation, which fails loudly rather than silently ignoring a typo. An
-// unparseable inherited value falls back to the built-in default: accepting the
-// project value instead would let a typo in global config lift the cap and hide
-// itself, because the project value then wins resolution and is the only one
-// validation ever sees.
-func networkLogMaxSizeRaises(value string, inheritedValue string) bool {
-	proposed, err := util.ParseSize(value)
-	if err != nil {
-		return false
-	}
-	// The built-in default is a constant this package owns, so it always parses.
-	inherited, _ := util.ParseSize(model.NetworkLogMaxSizeDefault)
-	if trimmed := strings.TrimSpace(inheritedValue); trimmed != "" {
-		if parsed, parseErr := util.ParseSize(trimmed); parseErr == nil {
-			inherited = parsed
-		}
-	}
-	// Zero disables rotation, so it is the largest possible cap.
-	if inherited == 0 {
-		return false
-	}
-	return proposed == 0 || proposed > inherited
 }
 
 func worktreeMetadataStrength(value string) int {

@@ -33,9 +33,7 @@ type lineSplitter struct {
 // lines alias the chunk or the splitter's own buffer, so they are only valid
 // until the next call.
 func (s *lineSplitter) feed(chunk []byte, emit func(line []byte), drop func()) {
-	// Only a line that spans the chunk boundary has to be assembled. Splitting
-	// the common case straight out of the caller's chunk keeps the poll loop of a
-	// session-long follower free of per-read copies.
+	// Only a line that spans the chunk boundary has to be assembled.
 	buffer := chunk
 	if len(s.partial) > 0 {
 		s.partial = append(s.partial, chunk...)
@@ -75,8 +73,7 @@ func (s *lineSplitter) feed(chunk []byte, emit func(line []byte), drop func()) {
 		reportDrop(drop)
 		buffer = nil
 	}
-	// Retain the unterminated remainder. Copying into the existing buffer is what
-	// keeps it allocated once rather than once per read.
+	// Retain the unterminated remainder.
 	s.partial = append(s.partial[:0], buffer...)
 }
 

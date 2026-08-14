@@ -307,7 +307,6 @@ type StartConfig struct {
 	NoRebuild         bool
 	NetworkLogMode    string
 	NetworkLogPath    string
-	NetworkLogMaxSize string
 	GatewayConfigDir  string
 	PortBindings      docker.PortMap
 	ExposedPorts      docker.PortSet
@@ -470,8 +469,8 @@ func Start(cfg StartConfig) (StartResult, error) {
 	}, nil
 }
 
-// prepareNetworkLog rotates the audit log when it has outgrown the configured
-// cap, makes sure the file the gateway binds exists, and records the session
+// prepareNetworkLog rotates the audit log when it has outgrown netlog.MaxLogBytes,
+// makes sure the file the gateway binds exists, and records the session
 // boundary. Rotation happens here, at session start, so a session never rotates
 // its own log: a single long-running session can grow past the cap. Rotation
 // truncates in place rather than renaming, so a session already running keeps
@@ -482,11 +481,7 @@ func prepareNetworkLog(cfg StartConfig) error {
 		return fmt.Errorf("failed to create network log dir: %w", err)
 	}
 
-	maxBytes, err := util.ParseSize(cfg.NetworkLogMaxSize)
-	if err != nil {
-		return fmt.Errorf("invalid network log max size: %w", err)
-	}
-	rotated, err := netlog.RotateIfLarger(cfg.NetworkLogPath, maxBytes)
+	rotated, err := netlog.RotateIfLarger(cfg.NetworkLogPath, netlog.MaxLogBytes)
 	if err != nil {
 		return fmt.Errorf("failed to rotate network log: %w", err)
 	}
@@ -511,10 +506,6 @@ func validateStartConfig(cfg StartConfig) error {
 	}
 	if mode := strings.TrimSpace(cfg.NetworkLogMode); mode != "" && mode != model.NetworkLogCoarse && mode != model.NetworkLogRequests {
 		return fmt.Errorf("invalid network log mode: %s", cfg.NetworkLogMode)
-	}
-
-	if _, err := util.ParseSize(cfg.NetworkLogMaxSize); err != nil {
-		return fmt.Errorf("invalid network log max size: %w", err)
 	}
 
 	if cfg.NetworkLogPath != "" {

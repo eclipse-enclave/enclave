@@ -31,7 +31,7 @@ func readEvents(t *testing.T, path string) []netlog.Event {
 
 func TestPrepareNetworkLogRecordsSessionMarker(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "logs", "network.log")
-	cfg := StartConfig{ContainerName: "enclave-demo-claude", NetworkLogPath: path, NetworkLogMaxSize: "32MB"}
+	cfg := StartConfig{ContainerName: "enclave-demo-claude", NetworkLogPath: path}
 
 	if err := prepareNetworkLog(cfg); err != nil {
 		t.Fatalf("prepareNetworkLog() error = %v", err)
@@ -55,11 +55,16 @@ func TestPrepareNetworkLogRecordsSessionMarker(t *testing.T) {
 func TestPrepareNetworkLogRotatesOverTheCap(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "network.log")
 	old := `{"ts":"2026-08-13T11:00:00Z","type":"tcp","verdict":"pass","domain":"old.example"}` + "\n"
-	if err := os.WriteFile(path, []byte(strings.Repeat(old, 40)), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte(old), 0o600); err != nil {
 		t.Fatalf("write log: %v", err)
 	}
+	// Grow the log past the cap without writing the bytes: only its size decides
+	// whether it rotates.
+	if err := os.Truncate(path, netlog.MaxLogBytes+1); err != nil {
+		t.Fatalf("grow log: %v", err)
+	}
 
-	cfg := StartConfig{ContainerName: "enclave-demo-claude", NetworkLogPath: path, NetworkLogMaxSize: "1KB"}
+	cfg := StartConfig{ContainerName: "enclave-demo-claude", NetworkLogPath: path}
 	if err := prepareNetworkLog(cfg); err != nil {
 		t.Fatalf("prepareNetworkLog() error = %v", err)
 	}
@@ -67,8 +72,12 @@ func TestPrepareNetworkLogRotatesOverTheCap(t *testing.T) {
 	if events := readEvents(t, path); len(events) != 1 || !events[0].IsSessionMarker() {
 		t.Fatalf("live log = %+v, want only the new session marker", events)
 	}
-	if events := readEvents(t, netlog.RotatedPath(path)); len(events) != 40 {
-		t.Fatalf("rotated log has %d events, want the previous 40", len(events))
+	rotated, err := os.Stat(netlog.RotatedPath(path))
+	if err != nil {
+		t.Fatalf("stat rotated log: %v", err)
+	}
+	if rotated.Size() != netlog.MaxLogBytes+1 {
+		t.Fatalf("rotated log is %d bytes, want the previous generation whole", rotated.Size())
 	}
 }
 
@@ -78,7 +87,7 @@ func TestPrepareNetworkLogKeepsHistoryBelowTheCap(t *testing.T) {
 		t.Fatalf("write log: %v", err)
 	}
 
-	cfg := StartConfig{ContainerName: "enclave-demo-claude", NetworkLogPath: path, NetworkLogMaxSize: "32MB"}
+	cfg := StartConfig{ContainerName: "enclave-demo-claude", NetworkLogPath: path}
 	if err := prepareNetworkLog(cfg); err != nil {
 		t.Fatalf("prepareNetworkLog() error = %v", err)
 	}
@@ -87,13 +96,5 @@ func TestPrepareNetworkLogKeepsHistoryBelowTheCap(t *testing.T) {
 	}
 	if _, err := os.Stat(netlog.RotatedPath(path)); !os.IsNotExist(err) {
 		t.Fatal("rotated a log that was below the cap")
-	}
-}
-
-func TestPrepareNetworkLogRejectsAMalformedCap(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "network.log")
-	err := prepareNetworkLog(StartConfig{ContainerName: "enclave-demo-claude", NetworkLogPath: path, NetworkLogMaxSize: "32 gigs"})
-	if err == nil {
-		t.Fatal("prepareNetworkLog() accepted a malformed size")
 	}
 }

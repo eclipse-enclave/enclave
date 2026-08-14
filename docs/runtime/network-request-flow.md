@@ -32,7 +32,7 @@ sequenceDiagram
     Entry->>FW: OUTPUT DROP + local DNS allow<br/>NAT redirect 80/443 to 8080/8443
     Entry->>Proxy: Start transparent proxy
     Entry->>Audit: Start DNS audit translator on the dnsmasq log
-    Host->>Log: Rotate above network_log_max_size<br/>and append session start marker
+    Host->>Log: Rotate above the size cap<br/>and append session start marker
 
     Note over Host,API: HTTPS request
     Tool->>DNS: Resolve api.example.com

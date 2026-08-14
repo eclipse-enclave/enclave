@@ -890,19 +890,6 @@ func OptionDefs() []OptionDef {
 			},
 		},
 		{
-			// Config only: rotation is a host-side housekeeping setting, not
-			// something a single run needs to override.
-			Name:           "network_log_max_size",
-			Group:          OptionGroupRun,
-			Kind:           OptionKindString,
-			OptionField:    "NetworkLogMaxSize",
-			SourceField:    "NetworkLogMaxSize",
-			DefaultsField:  "NetworkLogMaxSize",
-			DefaultRequire: true,
-			Apply:          ApplyString,
-			TrimOnApply:    true,
-		},
-		{
 			Name:          "verbose",
 			Group:         OptionGroupGlobal,
 			Kind:          OptionKindBool,

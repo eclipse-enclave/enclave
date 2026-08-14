@@ -86,8 +86,7 @@ Network mutation commands are global-only today. `--project` scope is planned bu
 |------|-------------|
 | `-f`, `--follow` | Stream new events as they arrive |
 | `--summary` | Show a per-domain aggregate instead of rows |
-| `--json` | Emit the raw JSONL event stream (the integration contract) |
-| `--plain` | Force machine-readable output in a terminal |
+| `--json` | Emit JSON: the raw JSONL event stream, or a single aggregate object with `--summary` (the integration contract) |
 | `--since <dur\|ts>` | Only events since a duration (`10m`), an RFC3339 timestamp, or `session` (which also scopes the output to that session) |
 | `--verdict <pass\|deny>` | Filter by verdict |
 | `--domain <glob>` | Filter by domain pattern (`example.com` or `*.example.com`) |
@@ -96,7 +95,7 @@ Network mutation commands are global-only today. `--project` scope is planned bu
 | `--session <name>` | Read one running session's events, named by its container |
 | `--all-running` | Merge the logs of all running gateways on the host |
 
-`--follow` and `--summary` are mutually exclusive, as are `--json` and `--summary` (use `--summary --plain` for a machine-readable aggregate). `--json` overrides `--plain`, and `--since session` needs a scope covering exactly one session, so it cannot be combined with `--all-running`. See [Networking](networking.md#reading-the-network-log) for the output format and [Coverage and granularity](networking.md#coverage-and-granularity) for what the log does and does not record.
+`--follow` and `--summary` are mutually exclusive, and `--since session` needs a scope covering exactly one session, so it cannot be combined with `--all-running`. See [Networking](networking.md#reading-the-network-log) for the output format and [Coverage and granularity](networking.md#coverage-and-granularity) for what the log does and does not record.
 
 Mutation commands (`add-domain`, `remove-domain`, `set-mode`) apply the new policy to running gateways by default. Use `--no-apply` to persist only, or `--all-running` to target every running gateway on the host (rather than just the current project/tool). By default the runtime apply targets the selected tool's gateway; pass `--tool <tool>` to target a different tool. `network apply` accepts `--tool` and `--all-running`.
 

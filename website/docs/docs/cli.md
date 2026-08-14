@@ -139,8 +139,8 @@ enclave network log --summary       # per-domain aggregate
 By default the log records one event per encrypted connection, not one per
 request, and only the DNS lookups that failed or were blocked. An agent
 streaming from its model API holds one long-lived connection, so it appears once
-when that connection opens and stays quiet afterwards — a short log does not
-mean a quiet session. Start the session with `--network-log=requests` to record
+when that connection opens and stays quiet afterwards. A short log does not mean
+a quiet session. Start the session with `--network-log=requests` to record
 every individual HTTP and HTTPS request instead:
 
 ```bash

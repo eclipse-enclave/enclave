@@ -15,15 +15,16 @@ import (
 	"enclave/internal/domainpattern"
 )
 
-// DomainSummary aggregates every event seen for one domain.
+// DomainSummary aggregates every event seen for one domain. The JSON tags are a
+// consumer-facing contract (`network log --summary --json`); keep them stable.
 type DomainSummary struct {
-	Domain    string
-	Pass      int
-	Deny      int
-	Sent      int64
-	Received  int64
-	FirstSeen time.Time
-	LastSeen  time.Time
+	Domain    string    `json:"domain"`
+	Pass      int       `json:"pass"`
+	Deny      int       `json:"deny"`
+	Sent      int64     `json:"sent_bytes"`
+	Received  int64     `json:"received_bytes"`
+	FirstSeen time.Time `json:"first_seen"`
+	LastSeen  time.Time `json:"last_seen"`
 }
 
 // Total is the number of events counted for the domain.
@@ -33,9 +34,9 @@ func (d DomainSummary) Total() int {
 
 // Summary is the per-domain aggregate behind `network log --summary`.
 type Summary struct {
-	Domains   []DomainSummary
-	TotalPass int
-	TotalDeny int
+	Domains   []DomainSummary `json:"domains"`
+	TotalPass int             `json:"total_pass"`
+	TotalDeny int             `json:"total_deny"`
 }
 
 // Aggregate counts events per domain. Session markers are not audit events and

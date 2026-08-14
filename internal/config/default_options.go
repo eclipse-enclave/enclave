@@ -12,14 +12,13 @@ import "enclave/internal/model"
 func DefaultOptions() model.Options {
 	return model.Options{
 		RunOptions: model.RunOptions{
-			Tool:              "claude",
-			Backend:           "docker",
-			HostConfig:        model.HostConfigNone,
-			NetworkLog:        model.NetworkLogCoarse,
-			NetworkLogMaxSize: model.NetworkLogMaxSizeDefault,
-			ProjectMount:      model.ProjectMountWritable,
-			WorktreeMetadata:  model.WorktreeMetadataFollow,
-			Persist:           true,
+			Tool:             "claude",
+			Backend:          "docker",
+			HostConfig:       model.HostConfigNone,
+			NetworkLog:       model.NetworkLogCoarse,
+			ProjectMount:     model.ProjectMountWritable,
+			WorktreeMetadata: model.WorktreeMetadataFollow,
+			Persist:          true,
 		},
 		AuthOptions: model.AuthOptions{
 			AuthScope:    model.AuthScopeShared,

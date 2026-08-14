@@ -70,9 +70,7 @@ jobs:
           go-version-file: go.mod
 
       - name: Build standalone binary
-        run: |
-          VERSION=$(./scripts/rolling-package-version.sh)
-          CGO_ENABLED=0 GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} make build BIN_DIR=. BINARY=${{ matrix.output }} VERSION="$VERSION"
+        run: CGO_ENABLED=0 GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} make build BIN_DIR=. BINARY=${{ matrix.output }} VERSION=rolling
 
       - name: Smoke test embedded asset extraction
         if: ${{ matrix.smoke }}

@@ -55,9 +55,7 @@ jobs:
 
       - name: Build Debian package
         run: |
-          VERSION=$(dpkg-parsechangelog --show-field Version)
           make deb-quick \
-            VERSION="${VERSION%-*}" \
             BUILD_COMMIT="$(git rev-parse --short HEAD)" \
             BUILD_DATE="$(git show -s --format=%cs HEAD)"
 

@@ -82,7 +82,7 @@ sequenceDiagram
 4. TCP connections are gated by firewall rules and redirected to the proxy. The proxy checks host allowlist rules again using HTTP `Host` / TLS `SNI`.
 5. For hosts that match declared secret `release.http` rules, or for all allowlisted HTTPS when `network_log=requests`, the proxy uses TLS MITM before forwarding upstream.
 6. If a placeholder appears on plaintext HTTP or on a host outside that secret rule's `hosts`, the proxy blocks the request with HTTP 403.
-7. `network_log=coarse` writes pass/deny events to `~/.local/state/enclave/projects/<hash>/<tool>/logs/network.log`; `network_log=requests` adds request-level HTTP/HTTPS audit events. The log is JSONL throughout: the proxy appends HTTP and TCP events, a separate `enclave-gateway-proxy -dns-audit` process translates dnsmasq's own log into `dns` events (so DNS denials are recorded even when the proxy is disabled), and the host appends a session marker at gateway start. Read it with `enclave network log`.
+7. `network_log=coarse` writes pass/deny events to `~/.local/state/enclave/projects/<hash>/<tool>/logs/network.log`: one `tcp` event per TLS connection at the ClientHello, and an `http` event per request for plaintext HTTP and for the MITM'd hosts of step 5. `network_log=requests` adds request-level HTTP/HTTPS audit events for every allowlisted host. The log is JSONL throughout: the proxy appends HTTP and TCP events, a separate `enclave-gateway-proxy -dns-audit` process translates dnsmasq's own log into `dns` events (so DNS denials are recorded even when the proxy is disabled), and the host appends a session marker at gateway start. Read it with `enclave network log`.
 
 ## Why This Works
 
@@ -96,6 +96,7 @@ sequenceDiagram
 
 - In unrestricted mode (`--allow-all-network` or policy mode `unrestricted`), the gateway is bypassed and HTTP secret release is disabled.
 - `--network-log=requests` enables request-level MITM logging in restricted mode.
+- The log records decisions, not traffic volume. In `coarse` mode a reused TLS connection produces a single `tcp` event no matter how many requests it carries, and successful DNS lookups are never recorded, so an absence of events is not evidence of an absence of traffic. See [Coverage and granularity](../networking.md#coverage-and-granularity).
 - Placeholder protection applies only to declared secrets with `release.http` in the selected tool profile or enabled feature manifests.
 - Real secrets are released only on HTTPS requests; plaintext HTTP requests carrying a placeholder are denied.
 - Current secret injection is header-based; file credential mediation is separate work.

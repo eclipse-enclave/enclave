@@ -71,10 +71,12 @@ jobs:
 
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
+      - name: Trust checkout
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
       - name: Set package version
         if: inputs.set_package_version
         run: |
-          git config --global --add safe.directory "$GITHUB_WORKSPACE"
           VERSION=$(./scripts/rolling-package-version.sh)
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
 

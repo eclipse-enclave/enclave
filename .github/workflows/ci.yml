@@ -25,7 +25,7 @@ jobs:
           go-version-file: go.mod
 
       - name: Build CLI
-        run: CGO_ENABLED=0 go build ./cmd/enclave
+        run: CGO_ENABLED=0 make build BIN_DIR=.
 
       - name: Smoke test standalone binary
         run: ./scripts/smoke-standalone-binary.sh ./enclave

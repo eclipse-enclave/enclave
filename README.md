@@ -170,6 +170,7 @@ enclave ps                  # List running containers (--all for stopped, --json
 enclave exec                # Attach to running container
 enclave shell               # Open interactive shell in container
 enclave info                # Show config and image details
+enclave version             # Show binary version and source commit
 ```
 
 **Authentication:** The simplest and recommended approach is to just log in from inside the container the first time you run — OAuth sessions are saved to a persistent auth store on the host and reused automatically on every subsequent run. No configuration needed.

@@ -14,6 +14,13 @@ UNAME_S := $(shell uname -s)
 CMD_DIR := ./cmd/enclave
 COMPLETIONS_DIR ?= ./completions
 VERSION ?= 0.1.0
+GIT_COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null)
+GIT_COMMIT_DATE := $(shell git show -s --format=%cs HEAD 2>/dev/null)
+GIT_DIRTY := $(shell if [ -n "$$(git status --porcelain 2>/dev/null)" ]; then printf '%s' '-dirty'; fi)
+BUILD_VERSION ?= $(VERSION)
+BUILD_COMMIT ?= $(if $(strip $(GIT_COMMIT)),$(GIT_COMMIT)$(GIT_DIRTY),unknown)
+BUILD_DATE ?= $(if $(strip $(GIT_COMMIT_DATE)),$(GIT_COMMIT_DATE),unknown)
+BUILD_LDFLAGS := -X enclave/internal/buildinfo.Version=$(BUILD_VERSION) -X enclave/internal/buildinfo.Commit=$(BUILD_COMMIT) -X enclave/internal/buildinfo.Date=$(BUILD_DATE)
 REPORTS_DIR := ./reports
 REQUIRED_LINT_TOOLS := golangci-lint gosec shellcheck
 LINT_GO_DIRS := cmd internal extensions/tools
@@ -24,7 +31,7 @@ BASE_REF ?=
 
 build: check-go
 	mkdir -p $(BIN_DIR)
-	go build -o $(BIN_DIR)/$(BINARY) $(CMD_DIR)
+	go build -ldflags "$(BUILD_LDFLAGS)" -o $(BIN_DIR)/$(BINARY) $(CMD_DIR)
 
 check-go:
 	@command -v go >/dev/null 2>&1 || { echo "Go is not installed. Install Go 1.24+ from https://go.dev/dl/"; exit 1; }
@@ -93,7 +100,9 @@ deb:
 	mkdir -p dist
 	@tmpdir=$$(mktemp -d) && \
 	cp -r . "$$tmpdir/enclave" && \
-	cd "$$tmpdir/enclave" && dpkg-buildpackage -us -uc -b && \
+	cd "$$tmpdir/enclave" && \
+	BUILD_VERSION='$(BUILD_VERSION)' BUILD_COMMIT='$(BUILD_COMMIT)' BUILD_DATE='$(BUILD_DATE)' \
+		dpkg-buildpackage -us -uc -b && \
 	mv "$$tmpdir"/*.deb "$(CURDIR)/dist/" && \
 	( find "$$tmpdir" -type d -exec chmod u+w {} + 2>/dev/null || true ) && \
 	rm -rf "$$tmpdir"
@@ -104,7 +113,9 @@ deb-quick:
 	mkdir -p dist
 	@tmpdir=$$(mktemp -d) && \
 	cp -r . "$$tmpdir/enclave" && \
-	cd "$$tmpdir/enclave" && dpkg-buildpackage -us -uc -b -d && \
+	cd "$$tmpdir/enclave" && \
+	BUILD_VERSION='$(BUILD_VERSION)' BUILD_COMMIT='$(BUILD_COMMIT)' BUILD_DATE='$(BUILD_DATE)' \
+		dpkg-buildpackage -us -uc -b -d && \
 	mv "$$tmpdir"/*.deb "$(CURDIR)/dist/" && \
 	( find "$$tmpdir" -type d -exec chmod u+w {} + 2>/dev/null || true ) && \
 	rm -rf "$$tmpdir"
@@ -127,6 +138,9 @@ rpm: check-go
 	rpmbuild --nodeps -bb \
 		--define "_topdir $$tmpdir" \
 		--define "package_version $(VERSION)" \
+		--define "build_version $(BUILD_VERSION)" \
+		--define "build_commit $(BUILD_COMMIT)" \
+		--define "build_date $(BUILD_DATE)" \
 		"$(CURDIR)/packaging/rpm/enclave.spec" && \
 	rpm_path=$$(find "$$tmpdir/RPMS" -type f -name '*.rpm' -print -quit) && \
 	{ [ -n "$$rpm_path" ] || { echo "rpmbuild did not produce an RPM" >&2; exit 1; }; } && \

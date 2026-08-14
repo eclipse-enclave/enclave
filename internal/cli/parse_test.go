@@ -117,6 +117,17 @@ func TestParseCleanupFlags(t *testing.T) {
 	}
 }
 
+func TestParseVersionCommand(t *testing.T) {
+	defaults := config.DefaultOptions()
+	res, err := Parse([]string{"version"}, defaults)
+	if err != nil {
+		t.Fatalf("parse failed: %v", err)
+	}
+	if res.Action != "version" {
+		t.Fatalf("expected action version, got %s", res.Action)
+	}
+}
+
 func TestParseUpdateCommand(t *testing.T) {
 	defaults := config.DefaultOptions()
 	res, err := Parse([]string{"update", "codex", "claude"}, defaults)

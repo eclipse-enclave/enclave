@@ -8,9 +8,11 @@
 package app
 
 import (
+	"fmt"
 	"os"
 	"strings"
 
+	"enclave/internal/buildinfo"
 	"enclave/internal/cli"
 	"enclave/internal/config"
 	"enclave/internal/logx"
@@ -20,21 +22,6 @@ import (
 )
 
 func Run(args []string) int {
-	projectDir, err := resolveProjectDir()
-	if err != nil {
-		logx.Errorf("%v", err)
-		return 1
-	}
-
-	globalDefaults, projectDefaults, warnings, err := config.LoadDefaults(projectDir)
-	if err != nil {
-		logx.Errorf("%v", err)
-		return 1
-	}
-	for _, warning := range warnings {
-		logx.Warnf(warning)
-	}
-
 	userCmds := discoverUserCommands()
 
 	baseOpts := config.DefaultOptions()
@@ -51,6 +38,25 @@ func Run(args []string) int {
 	}
 	if parsed.Action == "completion" {
 		return 0
+	}
+	if parsed.Action == "version" {
+		fmt.Printf("Enclave: %s\n", buildinfo.Read())
+		return 0
+	}
+
+	projectDir, err := resolveProjectDir()
+	if err != nil {
+		logx.Errorf("%v", err)
+		return 1
+	}
+
+	globalDefaults, projectDefaults, warnings, err := config.LoadDefaults(projectDir)
+	if err != nil {
+		logx.Errorf("%v", err)
+		return 1
+	}
+	for _, warning := range warnings {
+		logx.Warnf(warning)
 	}
 
 	var userCommandMount *model.UserCommandMount

@@ -56,7 +56,7 @@ Security guardrail: project config cannot elevate guarded options such as `allow
 | `image_name` | Override default image name/tag |
 | `features` | Feature extensions to enable |
 | `use_remote_user` | Honor devcontainer `remoteUser` for agent sessions |
-| `network_log` | Network audit mode: `coarse` (default) or `requests` |
+| `network_log` | Network audit mode: `coarse` (default, one event per TLS connection) or `requests` (one event per HTTP/HTTPS request, forcing MITM). See [Coverage and granularity](networking.md#coverage-and-granularity) |
 | `network_log_max_size` | Rotate the network log above this size: `32MB` (default), `512KB`, `1GB`, or `0`/`off` to disable. Config only, no CLI flag |
 | `verbose` | Verbose logging |
 | `ports` | Publish container ports to the host (container → host) |

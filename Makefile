@@ -101,7 +101,7 @@ deb:
 	@tmpdir=$$(mktemp -d) && \
 	cp -r . "$$tmpdir/enclave" && \
 	cd "$$tmpdir/enclave" && \
-	BUILD_VERSION='$(BUILD_VERSION)' BUILD_COMMIT='$(BUILD_COMMIT)' BUILD_DATE='$(BUILD_DATE)' \
+	BUILD_COMMIT='$(BUILD_COMMIT)' BUILD_DATE='$(BUILD_DATE)' \
 		dpkg-buildpackage -us -uc -b && \
 	mv "$$tmpdir"/*.deb "$(CURDIR)/dist/" && \
 	( find "$$tmpdir" -type d -exec chmod u+w {} + 2>/dev/null || true ) && \
@@ -114,7 +114,7 @@ deb-quick:
 	@tmpdir=$$(mktemp -d) && \
 	cp -r . "$$tmpdir/enclave" && \
 	cd "$$tmpdir/enclave" && \
-	BUILD_VERSION='$(BUILD_VERSION)' BUILD_COMMIT='$(BUILD_COMMIT)' BUILD_DATE='$(BUILD_DATE)' \
+	BUILD_COMMIT='$(BUILD_COMMIT)' BUILD_DATE='$(BUILD_DATE)' \
 		dpkg-buildpackage -us -uc -b -d && \
 	mv "$$tmpdir"/*.deb "$(CURDIR)/dist/" && \
 	( find "$$tmpdir" -type d -exec chmod u+w {} + 2>/dev/null || true ) && \

@@ -15,7 +15,9 @@ current CLI and will get more detail over time.
 
 ## Prerequisites
 
-- A supported host: Linux, macOS, or Windows through WSL2.
+- A supported host: Linux, macOS, or Windows through WSL2. On Windows,
+  `enclave.exe` is a launcher that forwards to the Linux build inside a WSL2
+  distribution.
 - A container backend. Enclave uses Docker; an experimental QEMU microVM
   backend exists but currently runs without network restrictions, is x86-64
   only, and is practical only on x86-64 Linux hosts, where KVM can accelerate
@@ -94,9 +96,31 @@ There is no native Windows build. The supported path is WSL2:
    itself.
 3. Follow the Linux instructions above from inside the distribution.
 
-Keep the project in the WSL filesystem (for example under `~/`) rather than on a
-Windows drive under `/mnt/c`. Paths on `/mnt/c` cross the interop layer and are
-noticeably slower.
+That is all you need to run Enclave from a WSL shell. To run it from PowerShell
+too, install the Windows launcher as well:
+
+```powershell
+scoop install https://github.com/eclipse-enclave/enclave/releases/download/rolling/enclave.json
+```
+
+`enclave.exe` forwards every argument to the Linux binary inside the distribution
+and returns its exit code. It is a launcher, not a native build, so step 3 is
+still required. Alternatively, download `enclave-windows-amd64.zip` (or
+`enclave-windows-arm64.zip`) from the rolling release and put the extracted
+`enclave.exe` on your `PATH`.
+
+:::note
+Run `enclave` from a directory inside the distribution, for example
+`\\wsl.localhost\Ubuntu\home\you\project`, which PowerShell accepts as a working
+directory. In `cmd.exe`, `pushd` on that path maps it to a drive letter, which
+works too. A Windows drive path such as `C:\Users\you\project` is refused by
+default: it would have to be reached through `/mnt/c`, where every file access
+crosses the WSL interop layer and is noticeably slower. Keep the project in the
+WSL filesystem, for example under `~/`.
+:::
+
+For the full working-directory rules, environment forwarding, and exit codes, see
+the [Windows reference](https://github.com/eclipse-enclave/enclave/blob/main/docs/windows.md).
 
 ### Build from source
 

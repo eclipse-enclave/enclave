@@ -6,6 +6,10 @@ enclave [FLAGS] [COMMAND]
 
 With no command, starts a new agent session (`run` is implicit).
 
+On Windows, `enclave.exe` forwards every argument to the Linux binary inside a
+WSL2 distribution and parses none of them itself, so everything below applies
+unchanged. See [windows.md](windows.md).
+
 ## Commands
 
 ### Session

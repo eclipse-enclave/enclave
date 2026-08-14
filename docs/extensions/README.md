@@ -244,6 +244,7 @@ additional files beyond `spec.yaml`.
 | File | Purpose |
 |------|---------|
 | `templates/` | Settings templates copied to `/usr/local/share/enclave/templates/` |
+| `config-base/` | Seed files for the tool's config store, overlaid into the generated config source before the host and per-project layers |
 | `check-update.sh` | Optional prebuild hook that returns a stable upstream fingerprint for automatic update probes |
 | `entrypoint.d/*.sh` | Scripts sourced at container startup (only for matching tool) |
 | `go/` | Go code for custom hooks/handlers (compiled into binary) |
@@ -306,9 +307,15 @@ tool metadata. `sandbox.entrypoint.run` is the shared sbx-style command to
 launch the tool.
 
 When using `templates/`, set `sandbox.configDir`, `sandbox.settingsFile`
-(aggregated name like `<tool>-settings.json`), and `sandbox.settingsTarget`
-(path under `configDir`). Runtime composes the built-in template into the
-generated tool config source before container startup.
+(aggregated name like `<tool>-settings.json`: the `<tool>-` prefix followed by
+the template's bare filename, path separators are rejected), and `sandbox.settingsTarget`
+(path under `configDir`). Runtime composes the template into the generated tool
+config source before container startup. The template and the optional
+`config-base/` directory are resolved from the built-in tree and from
+`~/.config/enclave/extensions/tools/<tool>/`, with the user extension tree
+winning per file, the same precedence the image build context applies. A
+user-global tool extension can therefore use `templates/` without being
+upstreamed.
 
 If a tool supports host config passthrough, declare a narrow reviewed
 `sandbox.passthroughPaths` allow-list. Host passthrough is fail closed: only

@@ -121,7 +121,7 @@ func (r *Runtime) shouldMountToolConfigSource() bool {
 	if strings.EqualFold(strings.TrimSpace(r.run.HostConfig), model.HostConfigPassthrough) {
 		return true
 	}
-	if util.PathExists(filepath.Join(r.paths.ToolsDir, r.profile.Name, "config-base")) {
+	if len(r.extensionConfigBaseDirs()) > 0 {
 		return true
 	}
 	if util.DirHasFiles(config.HostToolConfigDir(r.host.Home, r.profile.Name)) {
@@ -144,7 +144,7 @@ func (r *Runtime) composeGeneratedConfigDir(targetDir string, globalConfigDir st
 	if err := clearDirectory(targetDir); err != nil {
 		return fmt.Errorf("clear generated config directory %q: %w", targetDir, err)
 	}
-	if err := r.applyBuiltInConfigLayer(targetDir); err != nil {
+	if err := r.applyExtensionConfigLayer(targetDir); err != nil {
 		return err
 	}
 	if err := r.applyHostConfigLayer(targetDir); err != nil {
@@ -162,11 +162,10 @@ func (r *Runtime) composeGeneratedConfigDir(targetDir string, globalConfigDir st
 	return r.applyConfigOverrideScope(targetDir, projectConfigDir, true)
 }
 
-func (r *Runtime) applyBuiltInConfigLayer(targetDir string) error {
-	baseDir := filepath.Join(r.paths.ToolsDir, r.profile.Name, "config-base")
-	if util.PathExists(baseDir) {
+func (r *Runtime) applyExtensionConfigLayer(targetDir string) error {
+	for _, baseDir := range r.extensionConfigBaseDirs() {
 		if err := overlayConfigSource(targetDir, baseDir, nil, nil, nil); err != nil {
-			return fmt.Errorf("overlay built-in config base from %q: %w", baseDir, err)
+			return fmt.Errorf("overlay extension config base from %q: %w", baseDir, err)
 		}
 	}
 
@@ -175,34 +174,38 @@ func (r *Runtime) applyBuiltInConfigLayer(targetDir string) error {
 		return fmt.Errorf("resolve settings target: %w", err)
 	}
 	if relativeSettingsPath != "" {
-		sourcePath, err := r.builtInSettingsTemplatePath()
+		sourcePath, err := config.ResolveToolSettingsTemplate(r.paths, r.profile.Name, r.profile.SettingsFile)
 		if err != nil {
 			return err
 		}
 		if err := copyConfigFile(sourcePath, filepath.Join(targetDir, relativeSettingsPath)); err != nil {
-			return fmt.Errorf("copy built-in settings template to %q: %w", relativeSettingsPath, err)
+			return fmt.Errorf("copy settings template to %q: %w", relativeSettingsPath, err)
 		}
 	}
-	if err := r.applyBuiltInSkillsLayer(targetDir); err != nil {
+	if err := r.applyExtensionSkillsLayer(targetDir); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (r *Runtime) builtInSettingsTemplatePath() (string, error) {
-	prefix := r.profile.Name + "-"
-	if !strings.HasPrefix(r.profile.SettingsFile, prefix) {
-		return "", fmt.Errorf("settings_file %q must start with %q", r.profile.SettingsFile, prefix)
+// extensionConfigBaseDirs returns the existing config-base directories of the
+// tool extension, built-in tree first so the user extension tree overlays it.
+func (r *Runtime) extensionConfigBaseDirs() []string {
+	dirs := make([]string, 0, 2)
+	builtinDir, userDir := config.ResolveToolDirs(r.paths, r.profile.Name)
+	for _, toolDir := range []string{builtinDir, userDir} {
+		if toolDir == "" {
+			continue
+		}
+		baseDir := filepath.Join(toolDir, "config-base")
+		if util.IsDir(baseDir) {
+			dirs = append(dirs, baseDir)
+		}
 	}
-	templateName := strings.TrimPrefix(r.profile.SettingsFile, prefix)
-	hostTemplatePath := filepath.Join(r.paths.ToolsDir, r.profile.Name, model.TemplatesDir, templateName)
-	if !util.PathExists(hostTemplatePath) {
-		return "", fmt.Errorf("built-in settings template missing at %s", hostTemplatePath)
-	}
-	return hostTemplatePath, nil
+	return dirs
 }
 
-func (r *Runtime) applyBuiltInSkillsLayer(targetDir string) error {
+func (r *Runtime) applyExtensionSkillsLayer(targetDir string) error {
 	if strings.TrimSpace(r.profile.SkillsDir) == "" {
 		return nil
 	}

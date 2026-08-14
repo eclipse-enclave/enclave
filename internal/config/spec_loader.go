@@ -15,6 +15,7 @@ import (
 	"sigs.k8s.io/yaml"
 
 	"enclave/internal/model"
+	"enclave/internal/util"
 )
 
 // LoadSpec resolves and parses the spec.yaml (or spec.json) document for the
@@ -75,7 +76,7 @@ func LoadSpec(paths model.Paths, name string, kind string) (specDocument, error)
 // anything else is an unknown files/ subdir or a stray file and is flagged so a
 // misplaced payload is not silently ignored.
 func warnUnknownFilesEntries(filesDir string, name string, warn func(string)) {
-	if !isDir(filesDir) {
+	if !util.IsDir(filesDir) {
 		return
 	}
 	entries, err := os.ReadDir(filesDir)

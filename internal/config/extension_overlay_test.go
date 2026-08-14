@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"enclave/internal/model"
@@ -57,6 +58,51 @@ func TestResolveToolFileMissing(t *testing.T) {
 	}
 	if _, ok := ResolveToolFile(paths, "missing", SpecFilename); ok {
 		t.Fatal("expected missing file")
+	}
+}
+
+// A user-global tool extension keeps its settings template in
+// ~/.config/enclave/extensions/tools/<tool>/templates/, outside the built-in
+// assets tree the runtime used to search alone.
+func TestResolveToolSettingsTemplateFindsUserExtension(t *testing.T) {
+	tmp := t.TempDir()
+	paths := model.Paths{
+		ToolsDir:     filepath.Join(tmp, "extensions", "tools"),
+		UserToolsDir: filepath.Join(tmp, ".enclave", "extensions", "tools"),
+	}
+	templatePath := filepath.Join(paths.UserToolsDir, "usertool", model.TemplatesDir, "settings.json")
+	writeTestFile(t, templatePath, `{}`)
+
+	resolved, err := ResolveToolSettingsTemplate(paths, "usertool", "usertool-settings.json")
+	if err != nil {
+		t.Fatalf("ResolveToolSettingsTemplate returned error: %v", err)
+	}
+	if resolved != templatePath {
+		t.Fatalf("expected %s, got %s", templatePath, resolved)
+	}
+}
+
+func TestResolveToolSettingsTemplateRejectsInvalidSettingsFile(t *testing.T) {
+	tmp := t.TempDir()
+	paths := model.Paths{
+		ToolsDir:     filepath.Join(tmp, "extensions", "tools"),
+		UserToolsDir: filepath.Join(tmp, ".enclave", "extensions", "tools"),
+	}
+	writeTestFile(t, filepath.Join(tmp, "host-secret.txt"), "TOP SECRET")
+
+	cases := map[string]string{
+		"settings.json":                     "must start with",
+		"usertool-":                         "missing a template name",
+		"usertool-../../../host-secret.txt": "path separator",
+	}
+	for settingsFile, wantError := range cases {
+		_, err := ResolveToolSettingsTemplate(paths, "usertool", settingsFile)
+		if err == nil {
+			t.Fatalf("expected settings_file %q to be rejected", settingsFile)
+		}
+		if !strings.Contains(err.Error(), wantError) {
+			t.Fatalf("settings_file %q: expected error containing %q, got %v", settingsFile, wantError, err)
+		}
 	}
 }
 

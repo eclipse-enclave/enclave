@@ -110,7 +110,7 @@ func validateUserToolExtensions(paths model.Paths, result *ExtensionValidation) 
 		builtinDir, _ := ResolveToolDirs(paths, name)
 		hasBuiltin := builtinDir != ""
 
-		if isDir(filepath.Join(userDir, "go")) {
+		if util.IsDir(filepath.Join(userDir, "go")) {
 			result.Warnings = append(result.Warnings, fmt.Sprintf("tool %q: user go/ handlers are ignored (requires recompilation)", name))
 		}
 
@@ -182,18 +182,8 @@ func validateProfileSettings(paths model.Paths, toolName string, profile model.P
 		result.Errors = append(result.Errors, fmt.Sprintf("tool %q: settings_file set without settings_target", toolName))
 		return
 	}
-	prefix := toolName + "-"
-	if !strings.HasPrefix(settingsFile, prefix) {
-		result.Errors = append(result.Errors, fmt.Sprintf("tool %q: settings_file must start with %q", toolName, prefix))
-		return
-	}
-	templateName := strings.TrimPrefix(settingsFile, prefix)
-	if templateName == "" {
-		result.Errors = append(result.Errors, fmt.Sprintf("tool %q: settings_file missing template suffix", toolName))
-		return
-	}
-	if _, ok := ResolveToolFile(paths, toolName, filepath.Join(model.TemplatesDir, templateName)); !ok {
-		result.Errors = append(result.Errors, fmt.Sprintf("tool %q: missing template %q (checked merged templates)", toolName, templateName))
+	if _, err := ResolveToolSettingsTemplate(paths, toolName, settingsFile); err != nil {
+		result.Errors = append(result.Errors, fmt.Sprintf("tool %q: %v", toolName, err))
 	}
 }
 
@@ -253,7 +243,7 @@ func validateUserFeatureExtensions(paths model.Paths, result *ExtensionValidatio
 		builtinDir, _ := ResolveFeatureDirs(paths, name)
 		hasBuiltin := builtinDir != ""
 
-		if isDir(filepath.Join(userDir, "go")) {
+		if util.IsDir(filepath.Join(userDir, "go")) {
 			result.Warnings = append(result.Warnings, fmt.Sprintf("feature %q: user go/ handlers are ignored (requires recompilation)", name))
 		}
 

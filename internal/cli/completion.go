@@ -18,6 +18,7 @@ import (
 
 	"enclave/internal/config"
 	"enclave/internal/model"
+	"enclave/internal/netlog"
 )
 
 const shellCompletionLicenseHeader = `# Copyright (C) 2026 EclipseSource GmbH and others.
@@ -145,6 +146,8 @@ func registerCompletions(rootCmd *cobra.Command) error {
 		}
 	})
 
+	var errs []error
+
 	// ValidArgsFunction on "network set-mode" subcommand.
 	setModeCmd := findSubCommand(rootCmd, "network", "set-mode")
 	if setModeCmd != nil {
@@ -165,10 +168,31 @@ func registerCompletions(rootCmd *cobra.Command) error {
 		_ = configCmd.RegisterFlagCompletionFunc("view", staticValuesCompleter("matrix", "effective", "diff", "source"))
 	}
 
+	// `network log` filter flags accept fixed value sets. They are registered on
+	// the leaf command instead of via the completers map above: those keys match
+	// by flag name anywhere in the tree, which would also hook an unrelated
+	// --type or --session on another command.
+	if logCmd := findSubCommand(rootCmd, "network", "log"); logCmd != nil {
+		logCompleters := map[string]flagCompletionFunc{
+			"verdict": staticValuesCompleter(netlog.VerdictPass, netlog.VerdictDeny),
+			"type":    staticValuesCompleter(netlog.TypeDNS, netlog.TypeHTTP, netlog.TypeTCP),
+			"since":   staticValuesCompleter(netlog.SinceSession, "10m", "1h", "24h"),
+			// --domain and --session take free-form values. Without a completer
+			// the shell falls back to filename completion, which never suggests
+			// anything useful for a domain pattern or a container name.
+			"domain":  noValuesCompleter,
+			"session": noValuesCompleter,
+		}
+		for name, fn := range logCompleters {
+			if err := logCmd.RegisterFlagCompletionFunc(name, fn); err != nil {
+				errs = append(errs, fmt.Errorf("network log completion for --%s: %w", name, err))
+			}
+		}
+	}
+
 	// Surface any completer that matched no flag anywhere in the tree, so a
 	// stale registration (e.g. for a removed flag) fails the build via
 	// TestRegisterCompletionsTargetRealFlags rather than silently doing nothing.
-	var errs []error
 	for name := range completers {
 		if !matched[name] {
 			errs = append(errs, fmt.Errorf("completion registered for unknown flag --%s", name))
@@ -181,6 +205,12 @@ func staticValuesCompleter(values ...string) flagCompletionFunc {
 	return func(_ *cobra.Command, _ []string, _ string) ([]string, cobra.ShellCompDirective) {
 		return values, cobra.ShellCompDirectiveNoFileComp
 	}
+}
+
+// noValuesCompleter suppresses the shell's filename fallback for a flag whose
+// values cannot be enumerated.
+func noValuesCompleter(_ *cobra.Command, _ []string, _ string) ([]string, cobra.ShellCompDirective) {
+	return nil, cobra.ShellCompDirectiveNoFileComp
 }
 
 func walkCommands(cmd *cobra.Command, fn func(*cobra.Command)) {

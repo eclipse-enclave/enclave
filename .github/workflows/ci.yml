@@ -30,7 +30,7 @@ jobs:
       - name: Smoke test standalone binary
         run: ./scripts/smoke-standalone-binary.sh ./enclave
 
-      - name: Cross-compile (macOS and Windows)
+      - name: Cross-compile (macOS, Linux arm64, and Windows)
         run: make cross-build
 
       - name: Vet
@@ -38,6 +38,21 @@ jobs:
 
       - name: Test
         run: go test ./...
+
+  smoke-macos:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: go.mod
+
+      - name: Build CLI
+        run: CGO_ENABLED=0 go build -o enclave-darwin-arm64 ./cmd/enclave
+
+      - name: Smoke test standalone binary
+        run: ./scripts/smoke-standalone-binary.sh ./enclave-darwin-arm64
 
   lint:
     runs-on: ubuntu-latest

@@ -8,15 +8,12 @@
 package netlog
 
 import (
-	"bufio"
+	"bytes"
 	"encoding/json"
+	"errors"
 	"io"
 	"strings"
 )
-
-// maxLineBytes bounds a single log line. Paths are the only unbounded field and
-// a URL path cannot reach this size in practice.
-const maxLineBytes = 1024 * 1024
 
 // ScanResult holds the events read from a stream plus the number of lines that
 // could not be parsed. Older logs contain raw dnsmasq text appended by the
@@ -24,39 +21,61 @@ const maxLineBytes = 1024 * 1024
 type ScanResult struct {
 	Events  []Event
 	Skipped int
+	// Offset is how far into the stream the scan got, excluding a final line that
+	// no newline terminated: a writer mid-append leaves one, and a caller that
+	// goes on to follow the same file has to start before it to read it whole.
+	// Pass it as a FollowOptions.StartOffset to continue exactly here.
+	Offset int64
 }
 
 // Scan reads JSONL events until EOF. Blank lines are ignored; every other
-// unparseable line increments Skipped.
+// unparseable line increments Skipped, including a line above maxLineBytes.
+// Several processes append to the log concurrently, so a torn line must not make
+// the rest of the history unreadable.
 func Scan(reader io.Reader) (ScanResult, error) {
 	var result ScanResult
-	scanner := bufio.NewScanner(reader)
-	scanner.Buffer(make([]byte, 0, 64*1024), maxLineBytes)
-	for scanner.Scan() {
-		event, ok := ParseLine(scanner.Bytes())
-		if !ok {
-			if strings.TrimSpace(scanner.Text()) != "" {
-				result.Skipped++
-			}
-			continue
+	var splitter lineSplitter
+
+	consume := func(line []byte) {
+		if event, ok := ParseLine(line); ok {
+			result.Events = append(result.Events, event)
+			return
 		}
-		result.Events = append(result.Events, event)
+		if len(bytes.TrimSpace(line)) > 0 {
+			result.Skipped++
+		}
 	}
-	if err := scanner.Err(); err != nil {
-		return result, err
+	drop := func() { result.Skipped++ }
+
+	buffer := make([]byte, readChunkBytes)
+	for {
+		read, err := reader.Read(buffer)
+		if read > 0 {
+			result.Offset += int64(read)
+			splitter.feed(buffer[:read], consume, drop)
+		}
+		if err != nil {
+			splitter.flush(func(line []byte) {
+				result.Offset -= int64(len(line))
+				consume(line)
+			})
+			if errors.Is(err, io.EOF) {
+				return result, nil
+			}
+			return result, err
+		}
 	}
-	return result, nil
 }
 
 // ParseLine decodes one JSONL line. The second return is false when the line is
 // not a well-formed event.
 func ParseLine(line []byte) (Event, bool) {
-	trimmed := strings.TrimSpace(string(line))
-	if trimmed == "" || !strings.HasPrefix(trimmed, "{") {
+	trimmed := bytes.TrimSpace(line)
+	if len(trimmed) == 0 || trimmed[0] != '{' {
 		return Event{}, false
 	}
 	var event Event
-	if err := json.Unmarshal([]byte(trimmed), &event); err != nil {
+	if err := json.Unmarshal(trimmed, &event); err != nil {
 		return Event{}, false
 	}
 	if strings.TrimSpace(event.Type) == "" || strings.TrimSpace(event.Timestamp) == "" {

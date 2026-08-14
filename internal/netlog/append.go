@@ -51,6 +51,10 @@ func (a *Appender) Append(event Event) {
 	if err != nil {
 		return
 	}
+	// One Write for the whole line, which is what keeps concurrent appends whole.
+	// Marshalling per event rather than through a retained json.Encoder is
+	// deliberate: an Encoder latches its first write error and would silently stop
+	// auditing for the rest of the process.
 	payload = append(payload, '\n')
 
 	a.mu.Lock()

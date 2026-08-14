@@ -76,6 +76,35 @@ func TestFilterMatrix(t *testing.T) {
 	}
 }
 
+// Concurrent sessions of one project and tool share a log file, so the session
+// bound is the only thing that tells them apart.
+func TestFilterBySession(t *testing.T) {
+	events := []Event{
+		{Timestamp: "2026-08-13T12:00:00Z", Type: TypeSession, Verdict: VerdictInfo, Rule: RuleSessionStart, Session: "s1"},
+		{Timestamp: "2026-08-13T12:01:00Z", Type: TypeHTTP, Domain: "a.example", Verdict: VerdictPass, Session: "s1"},
+		{Timestamp: "2026-08-13T12:02:00Z", Type: TypeSession, Verdict: VerdictInfo, Rule: RuleSessionStart, Session: "s2"},
+		{Timestamp: "2026-08-13T12:03:00Z", Type: TypeHTTP, Domain: "b.example", Verdict: VerdictPass, Session: "s2"},
+		{Timestamp: "2026-08-13T12:04:00Z", Type: TypeHTTP, Domain: "unattributed.example", Verdict: VerdictPass},
+	}
+
+	matched := Filter{Session: "s2"}.Apply(events)
+	want := []string{"<session>", "b.example"}
+	got := domainsOf(matched)
+	if len(got) != len(want) {
+		t.Fatalf("matched %v, want %v", got, want)
+	}
+	for i, domain := range got {
+		if domain != want[i] {
+			t.Fatalf("matched %v, want %v", got, want)
+		}
+	}
+
+	unknown := Filter{Session: "s3"}.Apply(events)
+	if len(unknown) != 0 {
+		t.Fatalf("matched %v for an unknown session", domainsOf(unknown))
+	}
+}
+
 func TestFilterDropsEventsWithUnparseableTimestampUnderSince(t *testing.T) {
 	filter := Filter{Since: time.Date(2026, 8, 13, 0, 0, 0, 0, time.UTC)}
 	if filter.Match(Event{Timestamp: "not-a-time", Type: TypeHTTP, Verdict: VerdictPass}) {

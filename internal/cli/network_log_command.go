@@ -12,6 +12,8 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+
+	"enclave/internal/netlog"
 )
 
 func networkLogCommand(res *Result) *cobra.Command {
@@ -30,11 +32,16 @@ read, including sessions that have already exited.`,
 			if view.Follow && view.Summary {
 				return fmt.Errorf("--follow and --summary are mutually exclusive")
 			}
+			if view.JSON && view.Summary {
+				// --json is the event stream contract; a summary is not an event
+				// stream. --summary --plain is the machine-readable aggregate.
+				return fmt.Errorf("--json and --summary are mutually exclusive; use --summary --plain for machine-readable output")
+			}
 			if view.JSON {
 				// --json is the integration contract and already machine form.
 				view.Plain = false
 			}
-			if strings.EqualFold(strings.TrimSpace(view.Since), "session") && allRunning {
+			if strings.EqualFold(strings.TrimSpace(view.Since), netlog.SinceSession) && allRunning {
 				return fmt.Errorf("--since session needs a single session in scope; drop --all-running or pass --session <name>")
 			}
 			if strings.TrimSpace(view.Session) != "" && allRunning {

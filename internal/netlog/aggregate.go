@@ -11,6 +11,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"enclave/internal/domainpattern"
 )
 
 // DomainSummary aggregates every event seen for one domain.
@@ -46,8 +48,10 @@ func Aggregate(events []Event) Summary {
 		if event.IsSessionMarker() {
 			continue
 		}
-		domain := strings.ToLower(strings.TrimSpace(event.Domain))
-		if domain == "" {
+		// The same normalization the --domain filter applies, so the two views of
+		// one log cannot disagree about what counts as the same host.
+		domain, err := domainpattern.NormalizeHost(event.Domain)
+		if err != nil {
 			continue
 		}
 		entry, ok := byDomain[domain]

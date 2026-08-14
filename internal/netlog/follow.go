@@ -25,7 +25,13 @@ type FollowOptions struct {
 	Interval time.Duration
 	// FromStart replays the existing contents before waiting for new events.
 	FromStart bool
-	// OnSkipped reports lines that could not be parsed, once per line.
+	// StartOffsets overrides where following begins, keyed by path, and takes
+	// precedence over FromStart. A caller that already printed the backlog
+	// passes the offset its own read stopped at, so nothing is printed twice and
+	// nothing appended in between is lost.
+	StartOffsets map[string]int64
+	// OnSkipped reports lines that could not be parsed or were too long to hold,
+	// once per line.
 	OnSkipped func()
 }
 
@@ -33,7 +39,6 @@ type FollowOptions struct {
 // exist yet are picked up when they appear, and a rotation (truncation or a new
 // inode at the same path) reopens the file from the start.
 type Follower struct {
-	paths    []string
 	interval time.Duration
 	onSkip   func()
 	tails    []*tail
@@ -46,17 +51,18 @@ func NewFollower(paths []string, opts FollowOptions) *Follower {
 		interval = DefaultPollInterval
 	}
 	follower := &Follower{
-		paths:    append([]string(nil), paths...),
 		interval: interval,
 		onSkip:   opts.OnSkipped,
 	}
-	for _, path := range follower.paths {
+	for _, path := range paths {
 		// Without FromStart, history is skipped by remembering how large the
 		// log was when the follow began. Recording it here rather than at the
 		// first read keeps events appended in between from being lost, and lets
 		// a log that only appears later be read from its start.
 		var startOffset int64
-		if !opts.FromStart {
+		if offset, ok := opts.StartOffsets[path]; ok {
+			startOffset = offset
+		} else if !opts.FromStart {
 			if info, err := os.Stat(path); err == nil && !info.IsDir() {
 				startOffset = info.Size()
 			}
@@ -82,7 +88,8 @@ func (f *Follower) Run(ctx context.Context, emit func(Event)) error {
 }
 
 // RunLines is Run without the JSONL contract: it hands every appended line to
-// the caller. The gateway's DNS translator follows a dnsmasq log this way.
+// the caller. The gateway's DNS translator follows a dnsmasq log this way. The
+// line is only valid for the duration of the call: emit must copy what it keeps.
 func (f *Follower) RunLines(ctx context.Context, emit func(line []byte)) error {
 	ticker := time.NewTicker(f.interval)
 	defer ticker.Stop()
@@ -105,7 +112,7 @@ func (f *Follower) RunLines(ctx context.Context, emit func(line []byte)) error {
 
 func (f *Follower) poll(emit func(line []byte)) error {
 	for _, t := range f.tails {
-		if err := t.read(emit); err != nil {
+		if err := t.read(emit, f.onSkip); err != nil {
 			return err
 		}
 	}
@@ -125,14 +132,17 @@ type tail struct {
 	file   *os.File
 	offset int64
 	info   os.FileInfo
-	// startOffset is where the first open begins reading. Later opens are
-	// rotations and always start at zero.
-	startOffset  int64
-	startApplied bool
-	partial      []byte
+	// startOffset is where the first open begins reading, and is cleared once
+	// applied: later opens are rotations and always start at zero.
+	startOffset int64
+	splitter    lineSplitter
+	// buffer is reused across polls: a follower polls for the lifetime of a
+	// session and is otherwise idle, so allocating per poll would be all of its
+	// garbage.
+	buffer []byte
 }
 
-func (t *tail) read(emit func(line []byte)) error {
+func (t *tail) read(emit func(line []byte), drop func()) error {
 	info, err := os.Stat(t.path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -156,24 +166,29 @@ func (t *tail) read(emit func(line []byte)) error {
 		}
 		t.file = file
 		t.info = info
-		t.partial = nil
-		t.offset = 0
-		if !t.startApplied {
-			t.startApplied = true
-			if t.startOffset > 0 && t.startOffset <= info.Size() {
+		if t.startOffset > 0 {
+			if t.startOffset <= info.Size() {
 				if _, err := file.Seek(t.startOffset, io.SeekStart); err == nil {
 					t.offset = t.startOffset
 				}
 			}
+			t.startOffset = 0
 		}
 	}
+	if info.Size() == t.offset {
+		// Nothing appended since the last poll, and a held-back partial line
+		// cannot be completed without new bytes.
+		return nil
+	}
 
+	if t.buffer == nil {
+		t.buffer = make([]byte, readChunkBytes)
+	}
 	for {
-		buffer := make([]byte, 32*1024)
-		read, err := t.file.Read(buffer)
+		read, err := t.file.Read(t.buffer)
 		if read > 0 {
 			t.offset += int64(read)
-			t.consume(buffer[:read], emit)
+			t.splitter.feed(t.buffer[:read], emit, drop)
 		}
 		if err == io.EOF || read == 0 {
 			return nil
@@ -184,27 +199,11 @@ func (t *tail) read(emit func(line []byte)) error {
 	}
 }
 
-// consume splits the chunk into lines, holding back a trailing partial line
-// until the writer finishes it.
-func (t *tail) consume(chunk []byte, emit func(line []byte)) {
-	t.partial = append(t.partial, chunk...)
-	for {
-		index := bytes.IndexByte(t.partial, '\n')
-		if index < 0 {
-			return
-		}
-		line := make([]byte, index)
-		copy(line, t.partial[:index])
-		t.partial = t.partial[index+1:]
-		emit(line)
-	}
-}
-
 func (t *tail) closeFile() {
 	if t.file != nil {
 		_ = t.file.Close()
 		t.file = nil
 	}
-	t.partial = nil
+	t.splitter.reset()
 	t.offset = 0
 }

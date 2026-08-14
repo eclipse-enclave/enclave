@@ -1103,6 +1103,22 @@ func TestProjectOverrideGuardrails_NetworkLogMaxSizeCannotBeRaised(t *testing.T)
 	}
 }
 
+// A typo in the global cap must not hand the project a free hand: the project
+// value wins resolution, so it would also be the only value startup validation
+// ever sees, and the typo would never be reported.
+func TestProjectOverrideGuardrails_NetworkLogMaxSizeWithUnparseableInherited(t *testing.T) {
+	global := Defaults{NetworkLogMaxSize: "64MBB"}
+	project := Defaults{NetworkLogMaxSize: "1GB"}
+
+	warnings := applyProjectOverrideGuardrailsAgainst("/tmp/project/.enclave/config.json", "/tmp/project", global, &project)
+	if project.NetworkLogMaxSize != "" {
+		t.Fatalf("expected 1GB to be cleared against the built-in cap, got %q", project.NetworkLogMaxSize)
+	}
+	if !containsSubstring(warnings, "cannot raise the network log size cap") {
+		t.Fatalf("expected a cap warning, got %v", warnings)
+	}
+}
+
 func TestProjectOverrideGuardrails_NetworkLogMaxSizeAgainstBuiltInDefault(t *testing.T) {
 	project := Defaults{NetworkLogMaxSize: "0"}
 	warnings := applyProjectOverrideGuardrails("/tmp/project/.enclave/config.json", "/tmp/project", &project)

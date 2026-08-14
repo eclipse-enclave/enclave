@@ -32,7 +32,7 @@ func humanOptions() RenderOptions {
 }
 
 func TestRenderMachineFormIsTabSeparatedWithStableColumns(t *testing.T) {
-	out := RenderEvents(renderFixture(), machineOptions())
+	out := renderEvents(renderFixture(), machineOptions())
 	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
 	if len(lines) != 5 {
 		t.Fatalf("rendered %d lines, want 5 (markers are rows in machine form)", len(lines))
@@ -49,14 +49,14 @@ func TestRenderMachineFormIsTabSeparatedWithStableColumns(t *testing.T) {
 		if line != want[i] {
 			t.Fatalf("line %d =\n%q\nwant\n%q", i, line, want[i])
 		}
-		if fields := strings.Split(line, "\t"); len(fields) != len(MachineColumns()) {
-			t.Fatalf("line %d has %d columns, want %d", i, len(fields), len(MachineColumns()))
+		if fields := strings.Split(line, "\t"); len(fields) != len(machineColumns) {
+			t.Fatalf("line %d has %d columns, want %d", i, len(fields), len(machineColumns))
 		}
 	}
 }
 
 func TestRenderMachineFormNeverEmitsEscapes(t *testing.T) {
-	out := RenderEvents(renderFixture(), machineOptions())
+	out := renderEvents(renderFixture(), machineOptions())
 	if strings.Contains(out, "\x1b") {
 		t.Fatal("machine output contains an escape sequence")
 	}
@@ -67,7 +67,7 @@ func TestRenderMachineFormNeverEmitsEscapes(t *testing.T) {
 }
 
 func TestRenderHumanFormAlignsColumns(t *testing.T) {
-	out := RenderEvents(renderFixture(), humanOptions())
+	out := renderEvents(renderFixture(), humanOptions())
 	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
 	// header, blank, then one line per event
 	if len(lines) != 6 {
@@ -108,14 +108,14 @@ func TestRenderHumanFormAlignsColumns(t *testing.T) {
 }
 
 func TestRenderHumanFormKeepsVerdictGreppable(t *testing.T) {
-	out := RenderEvents(renderFixture(), RenderOptions{Style: StyleHuman, Color: true, Location: time.UTC})
+	out := renderEvents(renderFixture(), RenderOptions{Style: StyleHuman, Color: true, Location: time.UTC})
 	if strings.Count(out, glyphDeny) != 2 {
 		t.Fatalf("expected two deny glyphs in\n%s", out)
 	}
 	if !strings.Contains(out, "\x1b[31m") {
 		t.Fatal("colour was requested but no red escape was emitted")
 	}
-	plain := RenderEvents(renderFixture(), humanOptions())
+	plain := renderEvents(renderFixture(), humanOptions())
 	if strings.Contains(plain, "\x1b") {
 		t.Fatal("colour was not requested but escapes were emitted")
 	}
@@ -131,7 +131,7 @@ func TestRenderSeparatesSessions(t *testing.T) {
 		Port: 443, Verdict: VerdictPass, Rule: "allowlist", Session: "enclave-demo-codex",
 	})
 
-	out := RenderEvents(events, humanOptions())
+	out := renderEvents(events, humanOptions())
 	if strings.Count(out, "SESSION") != 2 {
 		t.Fatalf("expected a boundary per session in\n%s", out)
 	}
@@ -145,7 +145,7 @@ func TestRenderSeparatesSessions(t *testing.T) {
 
 func TestRenderSessionHeaderWithoutCounts(t *testing.T) {
 	marker := Event{Timestamp: "2026-08-13T12:04:30.000Z", Type: TypeSession, Verdict: VerdictInfo, Rule: RuleSessionStart, Session: "enclave-demo-claude"}
-	line := RenderSessionHeader(marker, 0, 0, humanOptions())
+	line := renderSessionHeader(marker, 0, 0, humanOptions())
 	if strings.Contains(line, "pass") || strings.Contains(line, "deny") {
 		t.Fatalf("a follow boundary must not claim counts it does not have: %q", line)
 	}

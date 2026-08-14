@@ -5,7 +5,7 @@
 //
 // SPDX-License-Identifier: MIT
 
-package netlog
+package util
 
 import (
 	"fmt"
@@ -14,7 +14,7 @@ import (
 )
 
 // Binary size units. KB, MB and GB are multiples of 1024, matching what
-// `docker --memory` accepts, and the same base the renderer formats bytes in.
+// `docker --memory` accepts, and the same base FormatBytes renders.
 const (
 	unitKB = 1024
 	unitMB = 1024 * unitKB
@@ -35,25 +35,19 @@ func ParseSize(value string) (int64, error) {
 
 	normalized := strings.ToUpper(raw)
 	multiplier := int64(1)
+	// Longest suffix first, so "MB" is not read as a bare "B".
 	for _, unit := range []struct {
-		suffixes []string
-		factor   int64
+		suffix string
+		factor int64
 	}{
-		{[]string{"GB", "G"}, unitGB},
-		{[]string{"MB", "M"}, unitMB},
-		{[]string{"KB", "K"}, unitKB},
-		{[]string{"B"}, 1},
+		{"GB", unitGB}, {"G", unitGB},
+		{"MB", unitMB}, {"M", unitMB},
+		{"KB", unitKB}, {"K", unitKB},
+		{"B", 1},
 	} {
-		matched := false
-		for _, suffix := range unit.suffixes {
-			if strings.HasSuffix(normalized, suffix) {
-				normalized = strings.TrimSuffix(normalized, suffix)
-				multiplier = unit.factor
-				matched = true
-				break
-			}
-		}
-		if matched {
+		if strings.HasSuffix(normalized, unit.suffix) {
+			normalized = strings.TrimSuffix(normalized, unit.suffix)
+			multiplier = unit.factor
 			break
 		}
 	}

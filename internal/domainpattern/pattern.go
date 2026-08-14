@@ -74,8 +74,13 @@ func NormalizeHost(value string) (string, error) {
 	if host == "" {
 		return "", fmt.Errorf("host is required")
 	}
-	if parsedHost, _, err := net.SplitHostPort(host); err == nil {
-		host = parsedHost
+	// A host without a colon cannot carry a port, and SplitHostPort allocates an
+	// error for every one of them. This runs per request in the gateway and per
+	// event in the log reader, so the check is worth it.
+	if strings.ContainsRune(host, ':') {
+		if parsedHost, _, err := net.SplitHostPort(host); err == nil {
+			host = parsedHost
+		}
 	}
 	host = strings.Trim(host, "[]")
 	host = strings.TrimLeft(host, ".")

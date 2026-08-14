@@ -64,6 +64,7 @@ func TestParseNetworkLogJSONOverridesPlain(t *testing.T) {
 func TestParseNetworkLogRejectsConflicts(t *testing.T) {
 	cases := map[string][]string{
 		"follow with summary":       {"network", "log", "--follow", "--summary"},
+		"json with summary":         {"network", "log", "--json", "--summary"},
 		"since session all-running": {"network", "log", "--since", "session", "--all-running"},
 		"session with all-running":  {"network", "log", "--session", "x", "--all-running"},
 	}

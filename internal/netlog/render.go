@@ -9,11 +9,14 @@ package netlog
 
 import (
 	"fmt"
+	"io"
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"enclave/internal/logx"
+	"enclave/internal/util"
 )
 
 // Style selects the output form. Human form is for a terminal; machine form is
@@ -48,11 +51,6 @@ var machineColumns = []string{
 	"path", "status", "req_bytes", "resp_bytes", "rule", "session",
 }
 
-// MachineColumns returns the machine-form column names in order.
-func MachineColumns() []string {
-	return append([]string(nil), machineColumns...)
-}
-
 // RenderOptions controls how events are turned into text.
 type RenderOptions struct {
 	Style Style
@@ -83,33 +81,46 @@ func (o RenderOptions) colorize(text string, color logx.Color) string {
 	return string(color) + text + string(logx.ColorReset)
 }
 
-// RenderEvents renders a full event stream. In human form a session marker
-// becomes a boundary header carrying that session's verdict counts; in machine
-// form it is a row like any other.
-func RenderEvents(events []Event, opts RenderOptions) string {
+// renderEvents renders a full event stream into a string. Production paths use
+// WriteEvents so a large log does not have to be assembled in memory.
+func renderEvents(events []Event, opts RenderOptions) string {
 	var out strings.Builder
-	if opts.machine() {
-		for _, event := range events {
-			out.WriteString(RenderEvent(event, opts))
-			out.WriteString("\n")
-		}
-		return out.String()
-	}
+	// A strings.Builder never fails.
+	_ = WriteEvents(&out, events, opts)
+	return out.String()
+}
 
+// WriteEvents renders a full event stream into out, one row at a time, so a
+// large log streams through the caller's buffer instead of being assembled in
+// memory first. In human form a session marker becomes a boundary header
+// carrying that session's verdict counts; in machine form it is a row like any
+// other.
+func WriteEvents(out io.StringWriter, events []Event, opts RenderOptions) error {
+	write := func(parts ...string) error {
+		for _, part := range parts {
+			if _, err := out.WriteString(part); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
 	for index, event := range events {
-		if event.IsSessionMarker() {
+		if !opts.machine() && event.IsSessionMarker() {
+			separator := ""
 			if index > 0 {
-				out.WriteString("\n")
+				separator = "\n"
 			}
 			pass, deny := countUntilNextMarker(events[index+1:])
-			out.WriteString(RenderSessionHeader(event, pass, deny, opts))
-			out.WriteString("\n\n")
+			if err := write(separator, renderSessionHeader(event, pass, deny, opts), "\n\n"); err != nil {
+				return err
+			}
 			continue
 		}
-		out.WriteString(RenderEvent(event, opts))
-		out.WriteString("\n")
+		if err := write(RenderEvent(event, opts), "\n"); err != nil {
+			return err
+		}
 	}
-	return out.String()
+	return nil
 }
 
 func countUntilNextMarker(events []Event) (pass int, deny int) {
@@ -132,14 +143,14 @@ func RenderEvent(event Event, opts RenderOptions) string {
 		return renderMachineRow(event)
 	}
 	if event.IsSessionMarker() {
-		return RenderSessionHeader(event, 0, 0, opts)
+		return renderSessionHeader(event, 0, 0, opts)
 	}
 	return renderHumanRow(event, opts)
 }
 
-// RenderSessionHeader renders a session boundary. Counts of zero are omitted so
+// renderSessionHeader renders a session boundary. Counts of zero are omitted so
 // a live follow, which cannot know them yet, still prints a clean boundary.
-func RenderSessionHeader(event Event, pass int, deny int, opts RenderOptions) string {
+func renderSessionHeader(event Event, pass int, deny int, opts RenderOptions) string {
 	if opts.machine() {
 		return renderMachineRow(event)
 	}
@@ -182,6 +193,9 @@ func renderHumanRow(event Event, opts RenderOptions) string {
 	}
 
 	var line strings.Builder
+	// Enough for a typical row with colour escapes, so the builder does not have
+	// to grow four times per event.
+	line.Grow(160)
 	line.WriteString(" ")
 	line.WriteString(opts.colorize(pad(timestamp, widthTime), logx.ColorDim))
 	line.WriteString("  ")
@@ -227,10 +241,10 @@ func humanDetail(event Event) string {
 		return event.Rule
 	}
 	if event.ResponseSize > 0 {
-		return FormatBytes(event.ResponseSize)
+		return util.FormatBytes(event.ResponseSize)
 	}
 	if event.RequestSize > 0 {
-		return FormatBytes(event.RequestSize)
+		return util.FormatBytes(event.RequestSize)
 	}
 	return event.Rule
 }
@@ -243,9 +257,9 @@ func renderMachineRow(event Event) string {
 		dash(event.Method),
 		dash(event.Domain),
 		dash(event.Path),
-		numberCell(event.Status, event.Status > 0),
-		numberCell64(event.RequestSize, hasPayload(event)),
-		numberCell64(event.ResponseSize, hasPayload(event)),
+		numberCell(int64(event.Status), event.Status > 0),
+		numberCell(event.RequestSize, hasPayload(event)),
+		numberCell(event.ResponseSize, hasPayload(event)),
 		dash(event.Rule),
 		dash(event.Session),
 	}
@@ -328,7 +342,7 @@ func byteCell(bytes int64) string {
 	if bytes <= 0 {
 		return "-"
 	}
-	return FormatBytes(bytes)
+	return util.FormatBytes(bytes)
 }
 
 func timestampCell(at time.Time) string {
@@ -338,14 +352,7 @@ func timestampCell(at time.Time) string {
 	return at.UTC().Format(TimeFormat)
 }
 
-func numberCell(value int, present bool) string {
-	if !present {
-		return "-"
-	}
-	return strconv.Itoa(value)
-}
-
-func numberCell64(value int64, present bool) string {
+func numberCell(value int64, present bool) string {
 	if !present {
 		return "-"
 	}
@@ -361,15 +368,17 @@ func dash(value string) string {
 }
 
 func pad(value string, width int) string {
-	if len([]rune(value)) >= width {
+	missing := width - utf8.RuneCountInString(value)
+	if missing <= 0 {
 		return value
 	}
-	return value + strings.Repeat(" ", width-len([]rune(value)))
+	return value + strings.Repeat(" ", missing)
 }
 
 func padLeft(value string, width int) string {
-	if len([]rune(value)) >= width {
+	missing := width - utf8.RuneCountInString(value)
+	if missing <= 0 {
 		return value
 	}
-	return strings.Repeat(" ", width-len([]rune(value))) + value
+	return strings.Repeat(" ", missing) + value
 }

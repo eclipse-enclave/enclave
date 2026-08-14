@@ -15,6 +15,11 @@ import (
 	"enclave/internal/domainpattern"
 )
 
+// SinceSession is the --since value that resolves to a session boundary instead
+// of a clock value. It is shared so the CLI's flag validation and the reader
+// cannot disagree about the keyword.
+const SinceSession = "session"
+
 // Filter selects events for display. The zero value matches everything.
 type Filter struct {
 	// Since drops events older than this instant. The zero value disables the
@@ -25,6 +30,12 @@ type Filter struct {
 	Verdict string
 	Domain  string
 	Type    string
+	// Session restricts events to the named session, matched exactly against
+	// the event's session field. Concurrent sessions of the same project and
+	// tool share one log file, so scoping the file is not enough to tell them
+	// apart. Events written before session stamping existed carry no session and
+	// are dropped by this filter.
+	Session string
 }
 
 // selective reports whether any event-shaped filter is set. Session markers are
@@ -42,6 +53,12 @@ func (f Filter) Match(event Event) bool {
 		if !ok || at.Before(f.Since) {
 			return false
 		}
+	}
+	// The session bound is applied before the marker exemption: a marker only
+	// belongs in a session-scoped read if it is that session's own marker, which
+	// is also what `--since session` anchors on.
+	if session := strings.TrimSpace(f.Session); session != "" && event.Session != session {
+		return false
 	}
 	if event.IsSessionMarker() {
 		return !f.selective()
@@ -63,9 +80,11 @@ func (f Filter) Match(event Event) bool {
 
 // Normalize validates the user-supplied fields and returns a filter Match can
 // use directly. Callers run it once so a bad pattern fails before any log is
-// read, and so each event match stays a string comparison.
+// read, and because Domain matching requires a normalized pattern; the other
+// fields Match tolerates unnormalized.
 func (f Filter) Normalize() (Filter, error) {
 	normalized := f
+	normalized.Session = strings.TrimSpace(f.Session)
 	normalized.Verdict = strings.ToLower(strings.TrimSpace(f.Verdict))
 	switch normalized.Verdict {
 	case "", VerdictPass, VerdictDeny:

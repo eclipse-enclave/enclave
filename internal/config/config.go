@@ -17,7 +17,6 @@ import (
 	"strings"
 
 	"enclave/internal/model"
-	"enclave/internal/netlog"
 	"enclave/internal/util"
 )
 
@@ -535,23 +534,22 @@ func applyProjectDefaultsGuardrails(path string, prefix string, projectRoot stri
 }
 
 // networkLogMaxSizeRaises reports whether a project value would allow a larger
-// log than the inherited cap. An unparseable value is left to startup
-// validation, which fails loudly rather than silently ignoring a typo.
+// log than the inherited cap. An unparseable project value is left to startup
+// validation, which fails loudly rather than silently ignoring a typo. An
+// unparseable inherited value falls back to the built-in default: accepting the
+// project value instead would let a typo in global config lift the cap and hide
+// itself, because the project value then wins resolution and is the only one
+// validation ever sees.
 func networkLogMaxSizeRaises(value string, inheritedValue string) bool {
-	proposed, err := netlog.ParseSize(value)
+	proposed, err := util.ParseSize(value)
 	if err != nil {
 		return false
 	}
-	inherited := int64(0)
-	if strings.TrimSpace(inheritedValue) != "" {
-		inherited, err = netlog.ParseSize(inheritedValue)
-		if err != nil {
-			return false
-		}
-	} else {
-		inherited, err = netlog.ParseSize(model.NetworkLogMaxSizeDefault)
-		if err != nil {
-			return false
+	// The built-in default is a constant this package owns, so it always parses.
+	inherited, _ := util.ParseSize(model.NetworkLogMaxSizeDefault)
+	if trimmed := strings.TrimSpace(inheritedValue); trimmed != "" {
+		if parsed, parseErr := util.ParseSize(trimmed); parseErr == nil {
+			inherited = parsed
 		}
 	}
 	// Zero disables rotation, so it is the largest possible cap.

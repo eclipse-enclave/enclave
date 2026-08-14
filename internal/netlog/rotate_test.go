@@ -48,8 +48,12 @@ func TestRotateIfLargerAboveCap(t *testing.T) {
 	if !rotated {
 		t.Fatal("did not rotate a log above the cap")
 	}
-	if _, err := os.Stat(path); !os.IsNotExist(err) {
-		t.Fatal("the live log survived rotation; it should be recreated by the writer")
+	live, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat live log: %v", err)
+	}
+	if live.Size() != 0 {
+		t.Fatalf("live log size = %d, want it truncated in place", live.Size())
 	}
 	info, err := os.Stat(RotatedPath(path))
 	if err != nil {
@@ -57,6 +61,35 @@ func TestRotateIfLargerAboveCap(t *testing.T) {
 	}
 	if info.Size() != 2048 {
 		t.Fatalf("rotated log size = %d, want 2048", info.Size())
+	}
+}
+
+func TestRotateIfLargerKeepsTheInodeOpenWritersHold(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "network.log")
+	writeSized(t, path, 2048)
+
+	// A gateway of an already running session bind-mounts this file, so a
+	// rotation that swapped the inode would leave it appending to the rotated
+	// generation, out of reach of every reader.
+	writer, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatalf("open writer: %v", err)
+	}
+	defer func() { _ = writer.Close() }()
+
+	if _, err := RotateIfLarger(path, 1024); err != nil {
+		t.Fatalf("RotateIfLarger() error = %v", err)
+	}
+	if _, err := writer.WriteString("after\n"); err != nil {
+		t.Fatalf("append after rotation: %v", err)
+	}
+
+	live, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read live log: %v", err)
+	}
+	if string(live) != "after\n" {
+		t.Fatalf("live log = %q, want the post-rotation append", string(live))
 	}
 }
 
@@ -75,6 +108,34 @@ func TestRotateIfLargerReplacesExistingGeneration(t *testing.T) {
 	}
 	if info.Size() != 2048 {
 		t.Fatalf("rotated log size = %d, want the newer generation to replace the older", info.Size())
+	}
+}
+
+// Two sessions of one project and tool can start at once. The second must not
+// replace the generation the first just wrote with the file the first emptied.
+func TestRotateIfLargerConcurrentRotationsKeepTheGeneration(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "network.log")
+	writeSized(t, path, 4096)
+
+	results := make(chan error, 4)
+	for i := 0; i < 4; i++ {
+		go func() {
+			_, err := RotateIfLarger(path, 1024)
+			results <- err
+		}()
+	}
+	for i := 0; i < 4; i++ {
+		if err := <-results; err != nil {
+			t.Fatalf("RotateIfLarger() error = %v", err)
+		}
+	}
+
+	info, err := os.Stat(RotatedPath(path))
+	if err != nil {
+		t.Fatalf("stat rotated log: %v", err)
+	}
+	if info.Size() != 4096 {
+		t.Fatalf("rotated log size = %d, want the full 4096 bytes of history", info.Size())
 	}
 }
 

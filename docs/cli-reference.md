@@ -92,7 +92,7 @@ Network mutation commands are global-only today. `--project` scope is planned bu
 | `--session <name>` | Read one running session's events, named by its container |
 | `--all-running` | Merge the logs of all running gateways on the host |
 
-`--follow` and `--summary` are mutually exclusive, as are `--json` and `--summary` (use `--summary --plain` for a machine-readable aggregate). `--json` overrides `--plain`, and `--since session` needs a scope covering exactly one session, so it cannot be combined with `--all-running`. See [Networking](networking.md#reading-the-network-log) for the output format.
+`--follow` and `--summary` are mutually exclusive, as are `--json` and `--summary` (use `--summary --plain` for a machine-readable aggregate). `--json` overrides `--plain`, and `--since session` needs a scope covering exactly one session, so it cannot be combined with `--all-running`. See [Networking](networking.md#reading-the-network-log) for the output format and [Coverage and granularity](networking.md#coverage-and-granularity) for what the log does and does not record.
 
 Mutation commands (`add-domain`, `remove-domain`, `set-mode`) apply the new policy to running gateways by default. Use `--no-apply` to persist only, or `--all-running` to target every running gateway on the host (rather than just the current project/tool). By default the runtime apply targets the selected tool's gateway; pass `--tool <tool>` to target a different tool. `network apply` accepts `--tool` and `--all-running`.
 
@@ -203,7 +203,7 @@ Mutation commands (`add-domain`, `remove-domain`, `set-mode`) apply the new poli
 |------|-------------|
 | `--allow-all-network` | Disable network restrictions |
 | `--allow-domain <domain>` | Add a domain to the gateway allowlist for this run only (repeatable, no persistence) |
-| `--network-log <coarse\|requests>` | Network audit mode. `coarse` (default) logs pass/deny events; `requests` forces HTTPS MITM for allowlisted hosts and emits request-level HTTP/HTTPS audit events |
+| `--network-log <coarse\|requests>` | Network audit mode. `coarse` (default) logs one pass/deny event per TLS connection, plus per-request events for plaintext HTTP and for hosts the gateway already MITMs for secret release; `requests` forces HTTPS MITM for all allowlisted hosts and emits an audit event per HTTP/HTTPS request. See [Coverage and granularity](networking.md#coverage-and-granularity) |
 
 ### Persistence
 

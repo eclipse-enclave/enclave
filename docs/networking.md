@@ -4,7 +4,7 @@
 
 By default, network access is restricted via a gateway sidecar (dnsmasq + transparent proxy). DNS only resolves allowlisted domains and the proxy enforces Host/SNI against the same allowlist. This prevents agents from making arbitrary outbound requests.
 
-Coarse pass/deny audit events are logged to `~/.local/state/enclave/projects/<project-hash>/<tool>/logs/network.log`. Read them with [`enclave network log`](#reading-the-network-log).
+Pass/deny audit events are logged to `~/.local/state/enclave/projects/<project-hash>/<tool>/logs/network.log`. Read them with [`enclave network log`](#reading-the-network-log). The default `coarse` mode records one event per TLS connection rather than one per request, so read [Coverage and granularity](#coverage-and-granularity) before drawing conclusions from what the log does or does not contain.
 
 For request-level logging, enable:
 
@@ -12,7 +12,7 @@ For request-level logging, enable:
 enclave --network-log=requests
 ```
 
-This forces allowlisted HTTPS traffic through the gateway MITM proxy so the gateway can emit HTTP-style request audit events for both HTTP and HTTPS. Some clients that pin certificates or use custom trust stores may fail in this mode.
+This forces allowlisted HTTPS traffic through the gateway MITM proxy so the gateway can emit HTTP-style request audit events for both HTTP and HTTPS, instead of one event per TLS connection. Some clients that pin certificates or use custom trust stores may fail in this mode.
 
 To disable all restrictions:
 
@@ -61,8 +61,8 @@ terminal, and `NO_COLOR` or `ENCLAVE_COLOR=never` does the same.
 
 | Type | Written by | Notes |
 |------|-----------|-------|
-| `http` | MITM proxy | Method, path, status and byte counts. Query strings are never logged: only the URL path is recorded |
-| `tcp` | MITM proxy | Pass/deny of a TLS dispatch, with the matched rule |
+| `http` | MITM proxy | One event per request, with method, path, status and byte counts. Query strings are never logged: only the URL path is recorded. Written for every plaintext HTTP request, and for HTTPS only where the proxy terminates TLS |
+| `tcp` | MITM proxy | One event per TLS connection, written at the ClientHello with the SNI host, the verdict and the matched rule. The requests carried inside the connection are not visible |
 | `dns` | DNS audit translator | One event per denied or failed lookup, with `rule` naming the condition (`nxdomain` for a domain blackholed by policy, `upstream-servfail`, `upstream-refused` or `upstream-nxdomain` for an upstream failure) |
 | `session` | Host, at gateway start | A boundary marker naming the session. Not an audit event: excluded from `--summary` and never matched by `--verdict`, `--domain` or `--type` |
 
@@ -70,6 +70,33 @@ A blocked lookup usually produces two `dns` events, one for the A query and one
 for the AAAA query, because the resolver asks for both. `NODATA` answers are not
 recorded: dnsmasq returns `NODATA-IPv6` for every allowlisted host without an
 IPv6 record, so recording it would report allowed domains as denied.
+
+### Coverage and granularity
+
+The log records policy decisions and connections, not traffic volume. Three
+limits matter before a quiet log is read as a quiet session:
+
+- **Successful DNS lookups are never recorded.** Only denied and failed lookups
+  produce a `dns` event, and dnsmasq answers repeat lookups from its cache
+  without going upstream at all.
+- **In `coarse` mode an HTTPS connection is one `tcp` event, not one per
+  request.** The proxy reads the ClientHello, records the SNI host, and tunnels
+  the rest through without decrypting it. A client holding a long-lived HTTP/2
+  connection — an agent talking to its model API, for example — produces a
+  single event when the connection is opened and nothing for the hundreds of
+  requests that follow. Short-lived connections (a `git fetch`, a CLI call, a
+  poller reconnecting) produce one event each, so they dominate a coarse log
+  even when they carry far less traffic.
+- **`http` events for HTTPS require the proxy to terminate TLS.** In `coarse`
+  mode that happens only for hosts covered by a declared secret's HTTP release
+  rules, where the gateway has to rewrite a header anyway, and only when that
+  secret was actually resolved for the session. A tool authenticated with an
+  OAuth token rather than an API key therefore has no release rule for its API
+  host and produces no request-level events for it.
+
+Run the session with `--network-log=requests` to force MITM for every
+allowlisted HTTPS host and get an `http` event per request. In either mode, SSH
+on port 22 bypasses the HTTP/TLS proxy and is never recorded.
 
 ### Rotation
 

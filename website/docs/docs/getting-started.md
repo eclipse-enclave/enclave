@@ -82,8 +82,9 @@ enclave ps
 2. It starts a container with that working directory mounted read/write, along
    with your tool config and package caches.
 3. With the default Docker backend, a gateway sidecar filters outbound traffic
-   against your network allowlist and logs DNS queries and proxied requests so
-   you can audit them later.
+   against your network allowlist and logs the connections it proxies and the
+   lookups it blocks, so you can audit them later with
+   [`enclave network log`](/cli#audit-outbound-network-access).
 
 ## Next steps
 

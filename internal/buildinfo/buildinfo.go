@@ -24,9 +24,9 @@ var (
 )
 
 type Info struct {
-	Version string
-	Commit  string
-	Date    string
+	Version string `json:"version"`
+	Commit  string `json:"commit"`
+	Date    string `json:"date"`
 }
 
 func Read() Info {

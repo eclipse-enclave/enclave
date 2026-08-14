@@ -67,6 +67,9 @@ func validateAndNormalizeProfile(profile *model.Profile) error {
 	if err := validateProfileSkillsPath(profile); err != nil {
 		return err
 	}
+	if err := validateAndNormalizeSettingsFile(profile); err != nil {
+		return err
+	}
 	if err := validateAndNormalizePorts(profile); err != nil {
 		return err
 	}
@@ -88,6 +91,20 @@ func validateAndNormalizeMemoryDir(profile *model.Profile) error {
 		profile.MemoryDir = cleaned
 	}
 	return nil
+}
+
+// validateAndNormalizeSettingsFile enforces the settings_file naming contract
+// at load, so every consumer can join the raw value onto a templates directory:
+// the config-source composition on the host and the container-side template
+// path handed to the entrypoint.
+func validateAndNormalizeSettingsFile(profile *model.Profile) error {
+	settingsFile := strings.TrimSpace(profile.SettingsFile)
+	profile.SettingsFile = settingsFile
+	if settingsFile == "" {
+		return nil
+	}
+	_, err := toolSettingsTemplateName(profile.Name, settingsFile)
+	return err
 }
 
 func validateProfileQEMUMemory(profile *model.Profile) error {

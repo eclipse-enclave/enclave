@@ -84,6 +84,136 @@ func TestPrepareToolConfigSourceBuildsSettingsWhenConfigBaseExists(t *testing.T)
 	}
 }
 
+// A user-global tool extension keeps its settings template and config-base in
+// ~/.config/enclave/extensions/tools/<tool>/, which is never staged into the
+// content-hashed assets tree that ToolsDir points at. The built-in config layer
+// must therefore consult both trees, with the user tree winning per file, the
+// same precedence the image build context applies.
+func TestApplyExtensionConfigLayerUsesUserExtensionSettingsTemplate(t *testing.T) {
+	t.Parallel()
+
+	home := t.TempDir()
+	r := newTemplateOverrideRuntime(home, model.Profile{
+		Name:           "usertool",
+		ConfigDir:      ".usertool",
+		SettingsFile:   "usertool-settings.json",
+		SettingsTarget: ".usertool/usertool.json",
+	})
+	writeUserToolTemplate(t, r, `{"source":"user-extension"}`)
+
+	targetDir := filepath.Join(home, "generated")
+	if err := r.applyExtensionConfigLayer(targetDir); err != nil {
+		t.Fatalf("applyExtensionConfigLayer returned error: %v", err)
+	}
+
+	settingsBytes, err := os.ReadFile(filepath.Join(targetDir, "usertool.json"))
+	if err != nil {
+		t.Fatalf("read generated settings: %v", err)
+	}
+	if string(settingsBytes) != `{"source":"user-extension"}` {
+		t.Fatalf("unexpected settings content: %s", string(settingsBytes))
+	}
+}
+
+func TestApplyExtensionConfigLayerPrefersUserExtensionSettingsTemplate(t *testing.T) {
+	t.Parallel()
+
+	home := t.TempDir()
+	r := newTemplateOverrideRuntime(home, model.Profile{
+		Name:           "pi",
+		ConfigDir:      ".pi",
+		SettingsFile:   "pi-settings.json",
+		SettingsTarget: ".pi/agent/settings.json",
+	})
+	writeBuiltInToolTemplate(t, r, `{"source":"built-in"}`)
+	writeUserToolTemplate(t, r, `{"source":"user-extension"}`)
+
+	targetDir := filepath.Join(home, "generated")
+	if err := r.applyExtensionConfigLayer(targetDir); err != nil {
+		t.Fatalf("applyExtensionConfigLayer returned error: %v", err)
+	}
+
+	settingsBytes, err := os.ReadFile(filepath.Join(targetDir, "agent", "settings.json"))
+	if err != nil {
+		t.Fatalf("read generated settings: %v", err)
+	}
+	if string(settingsBytes) != `{"source":"user-extension"}` {
+		t.Fatalf("expected user extension template to win, got: %s", string(settingsBytes))
+	}
+}
+
+func TestApplyExtensionConfigLayerOverlaysConfigBaseFromBothTrees(t *testing.T) {
+	t.Parallel()
+
+	home := t.TempDir()
+	r := newTemplateOverrideRuntime(home, model.Profile{
+		Name:      "usertool",
+		ConfigDir: ".usertool",
+	})
+	writeRuntimeTestFile(t, filepath.Join(r.paths.ToolsDir, "usertool", "config-base", "builtin.json"), `{"from":"built-in"}`)
+	writeRuntimeTestFile(t, filepath.Join(r.paths.ToolsDir, "usertool", "config-base", "shared.json"), `{"from":"built-in"}`)
+	writeRuntimeTestFile(t, filepath.Join(r.paths.UserToolsDir, "usertool", "config-base", "user.json"), `{"from":"user-extension"}`)
+	writeRuntimeTestFile(t, filepath.Join(r.paths.UserToolsDir, "usertool", "config-base", "shared.json"), `{"from":"user-extension"}`)
+
+	targetDir := filepath.Join(home, "generated")
+	if err := r.applyExtensionConfigLayer(targetDir); err != nil {
+		t.Fatalf("applyExtensionConfigLayer returned error: %v", err)
+	}
+
+	for _, name := range []string{"builtin.json", "user.json"} {
+		if _, err := os.Stat(filepath.Join(targetDir, name)); err != nil {
+			t.Fatalf("expected %s in the composed config base: %v", name, err)
+		}
+	}
+	sharedBytes, err := os.ReadFile(filepath.Join(targetDir, "shared.json"))
+	if err != nil {
+		t.Fatalf("read shared.json: %v", err)
+	}
+	if string(sharedBytes) != `{"from":"user-extension"}` {
+		t.Fatalf("expected user extension config base to win, got: %s", string(sharedBytes))
+	}
+}
+
+// settings_file is spec data, and the template name is joined onto templates/.
+// A name carrying path separators must not escape the extension tree and copy an
+// arbitrary host file into the container's config source.
+func TestApplyExtensionConfigLayerRejectsTraversingSettingsFile(t *testing.T) {
+	t.Parallel()
+
+	home := t.TempDir()
+	writeRuntimeTestFile(t, filepath.Join(home, "host-secret.txt"), "TOP SECRET")
+
+	r := newTemplateOverrideRuntime(home, model.Profile{
+		Name:           "usertool",
+		ConfigDir:      ".usertool",
+		SettingsFile:   "usertool-../../../../host-secret.txt",
+		SettingsTarget: ".usertool/usertool.json",
+	})
+
+	targetDir := filepath.Join(home, "generated")
+	if err := r.applyExtensionConfigLayer(targetDir); err == nil {
+		t.Fatal("expected applyExtensionConfigLayer to fail rather than copy a host file")
+	}
+	if _, err := os.Stat(filepath.Join(targetDir, "usertool.json")); err == nil {
+		t.Fatal("expected no settings file to be written from a traversing settings_file")
+	}
+}
+
+func TestShouldMountToolConfigSourceDetectsUserExtensionConfigBase(t *testing.T) {
+	t.Parallel()
+
+	home := t.TempDir()
+	r := newTemplateOverrideRuntime(home, model.Profile{
+		Name:      "usertool",
+		ConfigDir: ".usertool",
+	})
+	writeRuntimeTestFile(t, filepath.Join(r.paths.UserToolsDir, "usertool", "config-base", "user.json"), `{}`)
+
+	if !r.shouldMountToolConfigSource() {
+		t.Fatal("expected a user extension config-base to require the config source mount")
+	}
+}
+
 func TestPrepareToolConfigSourceComposesLayers(t *testing.T) {
 	t.Parallel()
 

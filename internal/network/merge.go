@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strings"
 
+	"enclave/internal/config"
 	"enclave/internal/model"
 	"enclave/internal/util"
 )
@@ -219,17 +220,18 @@ func addToolDomains(toolDomains map[string][]string, tool string, domains []stri
 	}
 }
 
-// ResolveToolAllowlist returns the allowlist file for the given tool,
-// falling back to base.conf when the tool-specific allowlist is absent.
-func ResolveToolAllowlist(toolsDir string, allowlistsDir string, tool string) string {
+// ResolveToolAllowlist returns the allowlist file for the given tool, falling
+// back to base.conf when the tool declares none. The user extension tree is
+// searched ahead of the built-in one, so a user-global tool extension's
+// gateway-allowlist.conf applies instead of the broader base fallback.
+func ResolveToolAllowlist(paths model.Paths, tool string) string {
 	if tool == "" {
 		return ""
 	}
-	allowlist := filepath.Join(toolsDir, tool, model.GatewayAllowlistFilename)
-	if util.PathExists(allowlist) {
+	if allowlist, ok := config.ResolveToolFile(paths, tool, model.GatewayAllowlistFilename); ok {
 		return allowlist
 	}
-	fallback := filepath.Join(allowlistsDir, "base.conf")
+	fallback := filepath.Join(paths.AllowlistsDir, "base.conf")
 	if util.PathExists(fallback) {
 		return fallback
 	}

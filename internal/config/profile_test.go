@@ -93,6 +93,43 @@ func TestValidateAndNormalizeProfileValidatesSkillsPath(t *testing.T) {
 	}
 }
 
+// The settings_file contract is enforced at load so that every consumer can
+// join the raw value onto a templates directory, including the container-side
+// path the runtime hands to the entrypoint.
+func TestValidateAndNormalizeProfileValidatesSettingsFile(t *testing.T) {
+	tests := []struct {
+		name         string
+		settingsFile string
+		want         string
+		wantError    bool
+	}{
+		{name: "empty", settingsFile: "", want: ""},
+		{name: "trimmed", settingsFile: "  tool-settings.json  ", want: "tool-settings.json"},
+		{name: "missing prefix", settingsFile: "settings.json", wantError: true},
+		{name: "prefix only", settingsFile: "tool-", wantError: true},
+		{name: "slash traversal", settingsFile: "tool-../../etc/passwd", wantError: true},
+		{name: "backslash traversal", settingsFile: `tool-..\..\secrets`, wantError: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			profile := &model.Profile{Name: "tool", SettingsFile: tt.settingsFile}
+			err := validateAndNormalizeProfile(profile)
+			if tt.wantError {
+				if err == nil || !strings.Contains(err.Error(), "settings_file") {
+					t.Fatalf("expected settings_file validation error, got %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected validation error: %v", err)
+			}
+			if profile.SettingsFile != tt.want {
+				t.Fatalf("SettingsFile = %q, want %q", profile.SettingsFile, tt.want)
+			}
+		})
+	}
+}
+
 func TestLoadProfileReadsQEMUSettings(t *testing.T) {
 	paths := setupProfileTestPaths(t, `{
 		"name": "tool",

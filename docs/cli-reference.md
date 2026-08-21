@@ -40,10 +40,13 @@ unchanged. See [windows.md](windows.md).
 | Command | Description |
 |---------|-------------|
 | `enclave info` | Show configuration and image details |
+| `enclave version`, `enclave --version` | Show the binary version, source commit, and commit date |
 | `enclave config` | Show configuration values |
 | `enclave tools` | List available tool profiles |
 | `enclave features` | List available feature extensions |
 | `enclave completion <shell>` | Generate shell completion |
+
+`enclave version` prints one line suitable for bug reports; `--json` emits the version, commit, and date as an object. Builds from modified source append `-dirty` to the commit; unavailable values are reported as `unknown`.
 
 `enclave config` flags: `--view <mode>` selects the output view — `matrix` (default), `source` (where each value comes from), `diff` (values overridden by higher precedence), or `effective` (effective values only); `--json` emits JSON output.
 

@@ -12,6 +12,10 @@ export GOMODCACHE = $(CURDIR)/.gomodcache
 export GO111MODULE = on
 
 GATEWAY_PROXY_SOURCE_PATHS_FILE := $(CURDIR)/internal/gateway/gateway_proxy_build_inputs.txt
+BUILD_VERSION ?= $(shell dpkg-parsechangelog --show-field Version | sed 's/-[^-]*$$//')
+BUILD_COMMIT ?= unknown
+BUILD_DATE ?= unknown
+BUILD_LDFLAGS := -X enclave/internal/buildinfo.version=$(BUILD_VERSION) -X enclave/internal/buildinfo.commit=$(BUILD_COMMIT) -X enclave/internal/buildinfo.date=$(BUILD_DATE)
 
 %:
 	dh $@
@@ -20,7 +24,7 @@ override_dh_auto_build:
 	go mod vendor -modcacherw
 	mkdir -p bin
 	# The package installs an executable-adjacent asset tree, so do not duplicate it in the binary.
-	go build -tags enclave_no_embed -mod=vendor -o bin/enclave ./cmd/enclave
+	go build -tags enclave_no_embed -mod=vendor -ldflags "$(BUILD_LDFLAGS)" -o bin/enclave ./cmd/enclave
 	mkdir -p completions
 	bin/enclave completion bash > completions/enclave
 

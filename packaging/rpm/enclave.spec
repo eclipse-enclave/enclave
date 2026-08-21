@@ -6,6 +6,9 @@
 # SPDX-License-Identifier: MIT
 
 %{!?package_version:%global package_version 0.1.0}
+%{!?build_version:%global build_version %{package_version}}
+%{!?build_commit:%global build_commit unknown}
+%{!?build_date:%global build_date unknown}
 %global debug_package %{nil}
 %global _build_id_links none
 
@@ -44,7 +47,9 @@ go mod vendor -modcacherw
 mkdir -p bin completions
 # Package-managed builds install the asset tree beside the executable. Disable
 # cgo so RPMs built on Debian or Ubuntu do not acquire host glibc requirements.
-CGO_ENABLED=0 go build -tags enclave_no_embed -mod=vendor -o bin/enclave ./cmd/enclave
+CGO_ENABLED=0 go build -tags enclave_no_embed -mod=vendor \
+    -ldflags "-X enclave/internal/buildinfo.version=%{build_version} -X enclave/internal/buildinfo.commit=%{build_commit} -X enclave/internal/buildinfo.date=%{build_date}" \
+    -o bin/enclave ./cmd/enclave
 bin/enclave completion bash > completions/enclave
 
 %install

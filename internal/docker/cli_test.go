@@ -96,3 +96,26 @@ func TestBuildRunArgsDetachedInteractive(t *testing.T) {
 		t.Fatalf("buildRunArgs() = %v, want %v", got, wantPrefix)
 	}
 }
+
+// Regression for macOS cache deletion: disposable directory binds must use the
+// source-creating `--volume` form, while every other mount keeps the strict
+// `--mount` form so a missing required source stays an error.
+func TestMountFlagsSourceCreatingBinds(t *testing.T) {
+	got := mountFlags([]Mount{
+		{Type: MountTypeBind, Source: "/host/project", Target: "/work"},
+		{Type: MountTypeBind, Source: "/host/secret.json", Target: "/auth.json", ReadOnly: true},
+		{Type: MountTypeBind, Source: "/host/cache/npm", Target: "/home/agent/.npm", CreateSourceDir: true},
+		{Type: MountTypeBind, Source: "/host/cache/inbox", Target: "/mnt/host-images", ReadOnly: true, CreateSourceDir: true},
+		{Type: MountTypeVolume, Source: "vol", Target: "/data", CreateSourceDir: true},
+	})
+	want := []string{
+		"--mount", "type=bind,source=/host/project,target=/work",
+		"--mount", "type=bind,source=/host/secret.json,target=/auth.json,readonly",
+		"--volume", "/host/cache/npm:/home/agent/.npm",
+		"--volume", "/host/cache/inbox:/mnt/host-images:ro",
+		"--mount", "type=volume,source=vol,target=/data",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("mountFlags() = %v, want %v", got, want)
+	}
+}

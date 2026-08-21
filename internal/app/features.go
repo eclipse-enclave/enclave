@@ -41,7 +41,7 @@ func runFeatures(ctx *AppContext, opts model.Options, sources model.OptionSource
 	for _, feature := range features {
 		switch {
 		case opts.Slim:
-			src := formatSource(sources.Slim, ctx.ProjectDir)
+			src := formatSource(sources.Slim, ctx)
 			if src != "" {
 				fmt.Printf("✗ %s (disabled by --slim from %s)\n", feature.Name, src)
 			} else {
@@ -51,7 +51,7 @@ func runFeatures(ctx *AppContext, opts model.Options, sources model.OptionSource
 			if _, ok := available[feature.Name]; ok {
 				fmt.Printf("✓ %s\n", feature.Name)
 			} else {
-				src := formatSource(sources.Features, ctx.ProjectDir)
+				src := formatSource(sources.Features, ctx)
 				if src != "" {
 					fmt.Printf("✗ %s (disabled by features from %s)\n", feature.Name, src)
 				} else {

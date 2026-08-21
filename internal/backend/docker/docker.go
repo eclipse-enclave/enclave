@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"enclave/internal/backend"
+	"enclave/internal/backend/hoststore"
 	dockercmd "enclave/internal/docker"
 	"enclave/internal/gateway"
 	"enclave/internal/logx"
@@ -95,6 +96,69 @@ func (b *Backend) Start(ctx context.Context, req backend.Request) (backend.Sessi
 		return backend.SessionRef{}, err
 	}
 	return backend.SessionRef{Name: spec.name, ID: id}, nil
+}
+
+// HoldConfigStoreLease transfers a detached session's lease to a helper
+// process. The helper keeps the inherited lock descriptor open until Docker
+// removes the container, including the stopped interval used for auth
+// finalization.
+func (b *Backend) HoldConfigStoreLease(_ context.Context, ref backend.SessionRef, lease *hoststore.Lease) error {
+	if lease == nil {
+		return nil
+	}
+	container := strings.TrimSpace(ref.ID)
+	if container == "" {
+		container = strings.TrimSpace(ref.Name)
+	}
+	if container == "" {
+		return fmt.Errorf("hold config store lease: detached session reference is empty")
+	}
+	executable, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("resolve config store lease monitor executable: %w", err)
+	}
+	if err := lease.Handoff(executable, backend.ConfigStoreLeaseMonitorCommand, container); err != nil {
+		return fmt.Errorf("start config store lease monitor: %w", err)
+	}
+	return nil
+}
+
+const (
+	configStoreLeaseMonitorRetryDelay = time.Second
+	configStoreLeaseRemovalPollDelay  = 50 * time.Millisecond
+)
+
+// MonitorConfigStoreLease accepts a lease inherited from the parent process
+// and retains it until Docker removes the detached session container.
+func MonitorConfigStoreLease(container string) error {
+	container = strings.TrimSpace(container)
+	if container == "" {
+		return fmt.Errorf("config store lease monitor container is empty")
+	}
+	leaseFile, err := hoststore.AcceptInheritedLease()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = leaseFile.Close() }()
+
+	ctx := context.Background()
+	for {
+		err := dockercmd.ContainerWait(ctx, container)
+		if err == nil {
+			break
+		}
+		if dockercmd.IsNotFound(err) {
+			return nil
+		}
+		time.Sleep(configStoreLeaseMonitorRetryDelay)
+	}
+
+	for {
+		if _, err := dockercmd.ContainerInspect(ctx, container); dockercmd.IsNotFound(err) {
+			return nil
+		}
+		time.Sleep(configStoreLeaseRemovalPollDelay)
+	}
 }
 
 func (b *Backend) List(ctx context.Context, filter backend.SessionFilter) ([]backend.Session, error) {
@@ -629,9 +693,9 @@ func sessionRefName(ref backend.SessionRef) string {
 	return strings.TrimSpace(ref.ID)
 }
 
-// ConfigStoreKeyInUse reports whether a running session for the same tool,
-// project, and worktree already uses the given config-store key. The key is
-// tracked as a Docker label; sessions predating that label used the stable
+// ConfigStoreKeyInUse reports whether a running session for the same tool and
+// effective project namespace already uses the given config-store key. The key
+// is tracked as a Docker label; sessions predating that label used the stable
 // key, which is what callers pass, so an unset label counts as a match.
 func (b *Backend) ConfigStoreKeyInUse(ctx context.Context, meta backend.SessionMeta, key string) (bool, error) {
 	if strings.TrimSpace(key) == "" {
@@ -646,10 +710,6 @@ func (b *Backend) ConfigStoreKeyInUse(ctx context.Context, meta backend.SessionM
 		return false, err
 	}
 	for _, summary := range containers {
-		worktree := strings.TrimSpace(summary.Labels[model.LabelWorktree])
-		if worktree != strings.TrimSpace(meta.Worktree) {
-			continue
-		}
 		existingKey := strings.TrimSpace(summary.Labels[model.LabelConfigKey])
 		if existingKey == "" {
 			existingKey = key

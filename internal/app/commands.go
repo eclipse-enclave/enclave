@@ -41,7 +41,7 @@ func dispatchCommand(input *CommandInput) int {
 	case "info":
 		return runInfo(input.Ctx, input.Options)
 	case "config":
-		return runConfig(input.Ctx.Paths, input.Options, input.BaseOptions, input.GlobalDefaults, input.ProjectDefaults, input.ToolDefaults, input.HasToolDefaults, input.ConfigView, input.Ctx.ProjectDir)
+		return runConfig(input.Ctx.Paths, input.Options, input.BaseOptions, input.GlobalDefaults, input.ProjectDefaults, input.ToolDefaults, input.HasToolDefaults, input.ConfigView, input.Ctx.project)
 	case "auth-import":
 		return runAuthImport(input)
 	case "auth-export":

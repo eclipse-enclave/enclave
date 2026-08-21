@@ -119,6 +119,12 @@ func summaryFromInspect(info InspectResponse) Summary {
 	return summary
 }
 
+// ContainerWait waits until a container stops.
+func ContainerWait(ctx context.Context, containerID string) error {
+	_, err := capture(ctx, "wait", containerID)
+	return err
+}
+
 // ContainerStop stops a container, optionally overriding the kill timeout.
 func ContainerStop(ctx context.Context, containerID string, timeout *time.Duration) error {
 	args := []string{"stop"}

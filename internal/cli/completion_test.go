@@ -72,6 +72,27 @@ func TestRegisterCompletionsTargetRealFlags(t *testing.T) {
 	}
 }
 
+// TestRegisterCompletionsAttachProjectTagArgs guards the positional-argument
+// completers for `project tag set` and `project tag unset`: findSubCommand
+// silently skips a renamed command path, so assert the hooks really attach.
+func TestRegisterCompletionsAttachProjectTagArgs(t *testing.T) {
+	var res Result
+	rootCmd := &cobra.Command{Use: "enclave"}
+	rootCmd.AddCommand(projectCommand(&res))
+	// The flag completers match nothing on this reduced tree; only the
+	// positional hooks are under test here.
+	_ = registerCompletions(rootCmd)
+	for _, path := range [][]string{{"project", "tag", "set"}, {"project", "tag", "unset"}} {
+		cmd := findSubCommand(rootCmd, path...)
+		if cmd == nil {
+			t.Fatalf("command %v not found", path)
+		}
+		if cmd.ValidArgsFunction == nil {
+			t.Fatalf("command %v has no positional completion", path)
+		}
+	}
+}
+
 // TestRegisterCompletionsRejectsMissingFlag confirms the guard actually fails
 // when a completion targets a flag that does not exist.
 func TestRegisterCompletionsRejectsMissingFlag(t *testing.T) {

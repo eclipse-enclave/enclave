@@ -16,12 +16,15 @@ import (
 	"enclave/internal/model"
 )
 
-func formatSource(source model.OptionSource, projectDir string) string {
+func formatSource(source model.OptionSource, ctx *AppContext) string {
 	switch source {
 	case model.SourceCLI:
 		return "cli"
 	case model.SourceProject:
-		return config.ProjectConfigJSONPath(projectDir)
+		if home, err := config.ResolveHostHome(); err == nil {
+			return config.HostProjectConfigJSONPath(home, ctx.project.Hash)
+		}
+		return "project config"
 	case model.SourceToolOverride:
 		return "tool override"
 	case model.SourceGlobal:

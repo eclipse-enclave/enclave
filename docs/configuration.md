@@ -65,6 +65,7 @@ Security guardrail: project config cannot elevate guarded options such as `allow
 | `worktree_metadata` | Linked-worktree git metadata mounts: `follow` (default), `readonly`, or `none` |
 | `playwright_mcp` | Enable Playwright MCP server (Claude only) |
 | `bridge_ports` | Forward host ports into the container (host → container) |
+| `vnc_viewer` | Viewer command `enclave vnc-viewer` launches (see [VNC viewer](#vnc-viewer)) |
 
 Project config may set `project_mount` to `readonly`, but `project_mount="writable"`
 is ignored at project scope so it cannot weaken a stricter global default. In
@@ -248,6 +249,41 @@ A patch merges onto the complete lower-precedence result. A full file replaces t
 Merge semantics:
 - **JSON:** scalars replace, objects deep-merge, arrays replace, `null` deletes keys
 - **TOML:** scalars replace, tables deep-merge, arrays replace (key deletion not supported)
+
+## VNC Viewer
+
+`enclave vnc-viewer` opens a host-installed VNC viewer on the contained display
+of a session started with the [vnc feature](../extensions/features/vnc/README.md).
+The `vnc_viewer` config key holds the viewer's argv:
+
+```json
+{ "vnc_viewer": ["remmina", "-c", "vnc://:{password}@{host}:{port}"] }
+```
+
+Unset, the default is `xtigervncviewer` on Linux and `open vnc://…` (macOS
+Screen Sharing) on macOS. Like every config key it layers global → project →
+`tool_overrides.<tool>`, and a higher layer replaces the whole command rather
+than merging into it.
+
+Placeholders substituted into the command:
+
+| Placeholder | Value |
+|-------------|-------|
+| `{host}` | Host address of the published RFB port (loopback) |
+| `{port}` | Published host port |
+| `{password}` | Per-session VNC password |
+| `{container}` | Container name |
+
+A command that references neither `{host}` nor `{port}` gets `<host>:<port>`
+appended, so `{"vnc_viewer": ["vncviewer"]}` works. The password is also
+exported to the viewer as `VNC_PASSWORD` and `ENCLAVE_VNC_PASSWORD`, which is
+why the default Linux viewer needs no placeholder: TigerVNC reads
+`VNC_PASSWORD` from the environment. Prefer that over `{password}` where the
+viewer supports it: argv is world-readable via `/proc` for the viewer's
+lifetime, while the environment of a process is not.
+
+Unlike the session options, `vnc_viewer` has no CLI flag: a one-shot viewer
+override on the command line would just be the command you could run directly.
 
 ## Environment Variables
 

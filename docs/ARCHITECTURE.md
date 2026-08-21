@@ -106,6 +106,7 @@ The restricted network request flow has a separate
 - [`internal/app/tools.go`](../internal/app/tools.go) lists available tool profiles.
 - [`internal/app/network_cmd.go`](../internal/app/network_cmd.go) implements `enclave network` subcommands (status, print, diff, apply, add-domain, remove-domain, set-mode).
 - [`internal/cli/network_command.go`](../internal/cli/network_command.go) defines Cobra command structure and flag parsing for the `network` subcommand tree.
+- [`internal/app/command_vnc_viewer.go`](../internal/app/command_vnc_viewer.go) implements `enclave vnc-viewer`: it resolves the current project's VNC-enabled session, its published RFB binding, and its per-session password, then hands them to [`internal/vncviewer/`](../internal/vncviewer/), which launches the host viewer named by the `vnc_viewer` config key.
 
 ### Configuration and Profiles
 - [`extensions/tools/`](../extensions/tools/) contains per-tool configuration (`spec.yaml`, templates, allowlists, install scripts, optional `check-update.sh` hooks).

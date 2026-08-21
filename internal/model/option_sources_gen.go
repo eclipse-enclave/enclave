@@ -18,7 +18,8 @@ type OptionSources struct {
 }
 
 type GlobalOptionSources struct {
-	Verbose OptionSource
+	VNCViewer OptionSource
+	Verbose   OptionSource
 }
 
 type RunOptionSources struct {
@@ -81,7 +82,8 @@ func (s OptionSources) RunSources() RunOptionSources { return s.RunOptionSources
 func DefaultOptionSources() OptionSources {
 	return OptionSources{
 		GlobalOptionSources: GlobalOptionSources{
-			Verbose: SourceDefault,
+			VNCViewer: SourceDefault,
+			Verbose:   SourceDefault,
 		},
 		RunOptionSources: RunOptionSources{
 			AddDirs:          SourceDefault,
@@ -270,6 +272,9 @@ func MergeOptionSources(base OptionSources, override OptionSources) OptionSource
 	}
 	if override.UseRemoteUser != SourceUnset {
 		base.UseRemoteUser = override.UseRemoteUser
+	}
+	if override.VNCViewer != SourceUnset {
+		base.VNCViewer = override.VNCViewer
 	}
 	if override.Verbose != SourceUnset {
 		base.Verbose = override.Verbose

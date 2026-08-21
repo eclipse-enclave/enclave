@@ -1,0 +1,49 @@
+#!/bin/bash
+# Copyright (C) 2026 EclipseSource GmbH and others.
+#
+# This program and the accompanying materials are made available under the
+# terms of the MIT License, which is available in the project root.
+#
+# SPDX-License-Identifier: MIT
+
+# vnc-open <url> opens a URL in the session's contained (VNC) browser. It
+# shares the supervisor's Chromium profile, so a running instance adopts the
+# URL as a new (fullscreened) window instead of a second browser starting.
+#
+# Two paths route here so "open in browser" flows land on the contained
+# display instead of failing headless:
+#   - the feature entrypoint exports BROWSER=/usr/local/bin/vnc-open
+#   - install.sh registers this script as the x-scheme-handler for http/https,
+#     which xdg-open (and the npm "open" package) resolves *before* $BROWSER.
+#     The apt-installed chromium.desktop would otherwise win and crash
+#     sandbox-less, silently dropping the URL.
+#
+# The stack may still be booting when the first open arrives, so the open runs
+# in a detached subshell that first does a bounded wait for the supervisor's
+# Chromium to hold the profile singleton. Launching earlier would make this
+# process the singleton owner, and the supervisor's restart loop would then
+# forward its start URL into it every 2 seconds forever.
+set -u
+
+if [ "$#" -lt 1 ]; then
+    echo "usage: vnc-open <url>" >&2
+    exit 2
+fi
+
+export DISPLAY="${VNC_DISPLAY:-:99}"
+PROFILE=/tmp/enclave-vnc/chromium
+
+# --no-sandbox matches the supervisor: the container blocks the unprivileged
+# user namespaces Chromium's sandbox needs, and a sandbox failure here would
+# silently drop the URL before it reaches the running instance. After the
+# bounded wait the launch proceeds regardless, because with no live singleton,
+# becoming the instance is the best remaining way to show the URL.
+(
+    (
+        for _ in $(seq 1 100); do
+            [ -e "$PROFILE/SingletonSocket" ] && break
+            sleep 0.3
+        done
+        exec chromium --no-sandbox --user-data-dir="$PROFILE" "$@"
+    ) >/dev/null 2>&1 &
+)

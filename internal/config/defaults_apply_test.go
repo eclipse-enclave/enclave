@@ -122,3 +122,29 @@ func TestApplyDefaultsWithSources_HostConfigPathsAdditiveAgainstExplicitEmpty(t 
 		t.Fatalf("host_config_paths additive merge against explicit empty: got %v want %v", opts.HostConfigPaths, want)
 	}
 }
+
+// vnc_viewer is an argv, so a higher layer replaces the whole command rather
+// than merging into it, and a project may override the global viewer.
+func TestApplyDefaultsWithSources_VNCViewerReplacedPerLayer(t *testing.T) {
+	opts := DefaultOptions()
+	sources := model.DefaultOptionSources()
+
+	global := Defaults{VNCViewer: []string{"xtigervncviewer", "{host}:{port}"}}
+	project := Defaults{VNCViewer: []string{"remmina", "-c", "vnc://:{password}@{host}:{port}"}}
+
+	opts = ApplyDefaultsWithSources(opts, global, model.SourceGlobal, &sources)
+	if want := global.VNCViewer; !reflect.DeepEqual(opts.VNCViewer, want) {
+		t.Fatalf("global vnc_viewer mismatch: got %v want %v", opts.VNCViewer, want)
+	}
+	if sources.VNCViewer != model.SourceGlobal {
+		t.Fatalf("global vnc_viewer source mismatch: got %v want %v", sources.VNCViewer, model.SourceGlobal)
+	}
+
+	opts = ApplyDefaultsWithSources(opts, project, model.SourceProject, &sources)
+	if want := project.VNCViewer; !reflect.DeepEqual(opts.VNCViewer, want) {
+		t.Fatalf("project vnc_viewer mismatch: got %v want %v", opts.VNCViewer, want)
+	}
+	if sources.VNCViewer != model.SourceProject {
+		t.Fatalf("project vnc_viewer source mismatch: got %v want %v", sources.VNCViewer, model.SourceProject)
+	}
+}

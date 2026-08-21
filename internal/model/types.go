@@ -76,14 +76,15 @@ type BuildOptions struct {
 }
 
 type CleanupOptions struct {
-	CleanupAll        bool
-	CleanupEphemeral  bool
-	CleanupKeepCache  bool
-	CleanupKeepHist   bool
-	CleanupKeepMemory bool
-	CleanupKeepAuth   bool
-	CleanupBuildCache bool
-	CleanupDryRun     bool
+	CleanupAll              bool
+	CleanupEphemeral        bool
+	CleanupKeepCache        bool
+	CleanupKeepHist         bool
+	CleanupKeepMemory       bool
+	CleanupKeepAuth         bool
+	CleanupKeepFeatureState bool
+	CleanupBuildCache       bool
+	CleanupDryRun           bool
 }
 
 // ImgOptions carries arguments for the host-side `img import` command.
@@ -368,6 +369,7 @@ type Extension struct {
 	Priority            int                     `json:"priority,omitempty"`
 	ConfigDir           string                  `json:"config_dir,omitempty"`
 	AuthFiles           []string                `json:"auth_files,omitempty"`
+	FeatureState        bool                    `json:"feature_state,omitempty"`
 	Secrets             map[string]SecretConfig `json:"secrets,omitempty"`
 	// AllowedDomains/DeniedDomains/EnvVariables/ProxyManaged mirror the
 	// same-named Profile fields for mixins: populated from a mixin spec.yaml's
@@ -435,13 +437,14 @@ const (
 	// AppID is the reverse-DNS application identifier. It names the app-specific
 	// host directories on platforms that follow that convention (macOS
 	// Library/Application Support and Library/Caches).
-	AppID                   = "org.eclipse." + AppName
-	Version                 = "1.0.0"
-	HostnamePrefix          = AppName + "-"
-	ContainerUser           = "agent"
-	ContainerHome           = "/home/" + ContainerUser
-	ContainerAuthDir        = "." + AppName + "-auth"
-	ContainerFeatureAuthDir = "." + AppName + "-feature-auth"
+	AppID                    = "org.eclipse." + AppName
+	Version                  = "1.0.0"
+	HostnamePrefix           = AppName + "-"
+	ContainerUser            = "agent"
+	ContainerHome            = "/home/" + ContainerUser
+	ContainerAuthDir         = "." + AppName + "-auth"
+	ContainerFeatureAuthDir  = "." + AppName + "-feature-auth"
+	ContainerFeatureStateDir = "." + AppName + "-feature-state"
 	// UserCommandsContainerDir is the fixed, home-layout-neutral path where the
 	// host session command tree is mounted read-only inside the container.
 	UserCommandsContainerDir = "/opt/" + AppName + "/commands"

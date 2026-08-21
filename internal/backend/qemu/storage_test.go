@@ -45,7 +45,7 @@ func TestStoreManagerReadWriteRemove(t *testing.T) {
 
 // TestMountSourceResolvesSharedStoreDirs pins qemu store mounts to the shared
 // host-store layout, so qemu guests keep reading and writing the exact same
-// auth/config/env directories as Docker sessions of the same tool/project.
+// auth/config/env/feature-state directories as Docker sessions.
 func TestMountSourceResolvesSharedStoreDirs(t *testing.T) {
 	home := t.TempDir()
 	store := newStoreManager(model.Host{Home: home})
@@ -65,17 +65,61 @@ func TestMountSourceResolvesSharedStoreDirs(t *testing.T) {
 	if want := config.HostStoreConfigDir(home, "claude", "abc123def456", "default"); configDir != want {
 		t.Fatalf("config mount source = %q, want shared store dir %q", configDir, want)
 	}
+
+	stateDir, err := store.MountSource(backend.StoreKey{Owner: "state-probe", ProjectHash: "abc123def456"}, backend.StoreKindFeatureState)
+	if err != nil {
+		t.Fatalf("MountSource(feature state): %v", err)
+	}
+	if want := config.HostStoreFeatureStateDir(home, "abc123def456", "state-probe"); stateDir != want {
+		t.Fatalf("feature-state mount source = %q, want shared store dir %q", stateDir, want)
+	}
+}
+
+func TestPrepareStoresUsesSharedAuthStoreKind(t *testing.T) {
+	home := t.TempDir()
+	b := New(Options{Host: model.Host{Home: home}})
+	key := backend.StoreKey{Owner: "claude"}
+
+	if _, err := b.PrepareStores(context.Background(), backend.StorePrep{
+		Auth: &backend.StorePrepEntry{Key: key},
+	}); err != nil {
+		t.Fatalf("PrepareStores(auth): %v", err)
+	}
+	if _, err := os.Stat(config.HostStoreAuthDir(home, key.Owner, "")); err != nil {
+		t.Fatalf("shared auth store not created: %v", err)
+	}
+}
+
+func TestPrepareStoresCreatesFeatureStateStore(t *testing.T) {
+	home := t.TempDir()
+	b := New(Options{Host: model.Host{Home: home}})
+	key := backend.StoreKey{Owner: "state-probe", ProjectHash: "abc123def456"}
+
+	if _, err := b.PrepareStores(context.Background(), backend.StorePrep{
+		FeatureStores: []backend.StorePrepEntry{{Kind: backend.StoreKindFeatureState, Key: key}},
+	}); err != nil {
+		t.Fatalf("PrepareStores(feature state): %v", err)
+	}
+	if _, err := os.Stat(config.HostStoreFeatureStateDir(home, key.ProjectHash, key.Owner)); err != nil {
+		t.Fatalf("feature state store not created: %v", err)
+	}
 }
 
 func TestWithStoreLockUsesSharedPerStoreLockFiles(t *testing.T) {
 	home := t.TempDir()
 	store := newStoreManager(model.Host{Home: home})
-	key := backend.StoreKey{Owner: "tool"}
 	ctx := context.Background()
-
-	for _, kind := range []backend.StoreKind{backend.StoreKindAuth, backend.StoreKindFeatureAuth} {
-		if err := store.WithStoreLock(ctx, key, kind, func() error { return nil }); err != nil {
-			t.Fatalf("WithStoreLock(%s): %v", kind, err)
+	stores := []struct {
+		kind backend.StoreKind
+		key  backend.StoreKey
+	}{
+		{kind: backend.StoreKindAuth, key: backend.StoreKey{Owner: "tool"}},
+		{kind: backend.StoreKindFeatureAuth, key: backend.StoreKey{Owner: "feature"}},
+		{kind: backend.StoreKindFeatureState, key: backend.StoreKey{Owner: "feature", ProjectHash: "abc123def456"}},
+	}
+	for _, storeRef := range stores {
+		if err := store.WithStoreLock(ctx, storeRef.key, storeRef.kind, func() error { return nil }); err != nil {
+			t.Fatalf("WithStoreLock(%s): %v", storeRef.kind, err)
 		}
 	}
 
@@ -86,7 +130,7 @@ func TestWithStoreLockUsesSharedPerStoreLockFiles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read locks dir: %v", err)
 	}
-	if len(entries) != 2 {
+	if len(entries) != len(stores) {
 		t.Fatalf("locks dir entries = %d, want one per store kind", len(entries))
 	}
 }

@@ -78,6 +78,9 @@ func TestHostPaths(t *testing.T) {
 	if got, want := HostStoreEnvDir(home, tool, projectHash), filepath.Join(stateRoot, "projects", projectHash, tool, "env"); got != want {
 		t.Fatalf("HostStoreEnvDir() = %q, want %q", got, want)
 	}
+	if got, want := HostStoreFeatureStateDir(home, projectHash, "myfeature"), filepath.Join(stateRoot, "projects", projectHash, "features", "myfeature", "state"); got != want {
+		t.Fatalf("HostStoreFeatureStateDir() = %q, want %q", got, want)
+	}
 	if got, want := HostStoreAuthDir(home, tool, ""), filepath.Join(stateRoot, "tools", tool, "auth", "default"); got != want {
 		t.Fatalf("HostStoreAuthDir() = %q, want %q", got, want)
 	}

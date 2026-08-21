@@ -27,6 +27,7 @@ covers the core commands available today; it will grow as the surface stabilizes
 | `enclave ps` | List the sessions that are currently running. |
 | `enclave --background` | Start a session detached from your terminal. |
 | `enclave attach <container>` | Attach to a running session (default detach key: `Ctrl-\`). |
+| `enclave network log` | Show what the session's gateway allowed and blocked. |
 
 ## Start a session
 
@@ -121,6 +122,33 @@ enclave attach my-task --detach-keys "ctrl-p,ctrl-q"
 
 Pressing `Ctrl-C` inside the session sends an interrupt to the agent instead of
 detaching, so use the detach key when you want to leave the container running.
+
+## Audit outbound network access
+
+With the default Docker backend, every outbound connection passes through the
+session's gateway, which records what it allowed and what it blocked. Read that
+log at any time, including for sessions that have already exited:
+
+```bash
+enclave network log                 # everything this project's sessions reached
+enclave network log --follow        # stream events as they happen
+enclave network log --verdict deny  # only what the gateway blocked
+enclave network log --summary       # per-domain aggregate
+```
+
+By default the log records one event per encrypted connection, not one per
+request, and only the DNS lookups that failed or were blocked. An agent
+streaming from its model API holds one long-lived connection, so it appears once
+when that connection opens and stays quiet afterwards. A short log does not mean
+a quiet session. Start the session with `--network-log=requests` to record
+every individual HTTP and HTTPS request instead:
+
+```bash
+enclave --network-log=requests
+```
+
+This makes the gateway decrypt allowlisted HTTPS traffic, so clients that pin
+certificates may fail in this mode.
 
 ## Next steps
 

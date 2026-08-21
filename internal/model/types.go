@@ -178,6 +178,21 @@ type RunContext struct {
 	RunSources RunOptionSources
 }
 
+// NetworkLogView holds the flags of `enclave network log`. Scope flags that
+// already exist on Options (--tool, --all-running) are not duplicated here.
+type NetworkLogView struct {
+	Follow  bool
+	Summary bool
+	JSON    bool
+	// Since is a duration ("10m"), an RFC3339 timestamp, or "session".
+	Since   string
+	Verdict string
+	Domain  string
+	Type    string
+	// Session limits output to one gateway, named by its container.
+	Session string
+}
+
 type ConfigView struct {
 	// Mode selects the config output view: "matrix" (default), "effective",
 	// "diff", or "source".

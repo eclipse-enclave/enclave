@@ -319,7 +319,7 @@
             <li>Domain allowlists</li>
             <li>Per-tool and per-project policies</li>
             <li>Bridge host services into containers</li>
-            <li>DNS and request logging</li>
+            <li>Connection and request audit logging</li>
           </ul>
         </div>
       </div>
@@ -335,8 +335,8 @@
         <h3>A foundation you can audit</h3>
         <p>Container isolation, network allowlists, and gateway logs already limit what a
           misaligned or injected agent can do, and they leave an evidence trail you can inspect:
-          in restricted Docker sessions, DNS queries and proxied requests are logged, and
-          access outside the allowlist is blocked. That same foundation can grow toward
+          in restricted Docker sessions, the connections the gateway proxies and the lookups
+          it blocks are logged, and access outside the allowlist is blocked. That same foundation can grow toward
           requirements like the EU Cyber
           Resilience Act (SBOM evidence and vulnerability reporting) and the EU AI Act
           (Article 12 record-keeping and Article 15 robustness against unauthorized use),

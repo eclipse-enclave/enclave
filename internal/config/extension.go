@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"enclave/internal/model"
 	"enclave/internal/util"
@@ -19,17 +20,54 @@ import (
 
 // ResolveToolFile resolves a tool extension file path with user override support.
 func ResolveToolFile(paths model.Paths, toolName string, fileName string) (string, bool) {
-	if paths.UserToolsDir != "" {
-		candidate := filepath.Join(paths.UserToolsDir, toolName, fileName)
+	for _, candidate := range ToolFileCandidates(paths, toolName, fileName) {
 		if util.FileExists(candidate) {
 			return candidate, true
 		}
 	}
-	candidate := filepath.Join(paths.ToolsDir, toolName, fileName)
-	if util.FileExists(candidate) {
-		return candidate, true
-	}
 	return "", false
+}
+
+// ToolFileCandidates lists the paths ResolveToolFile searches, in its
+// precedence order: the user extension tree ahead of the built-in one.
+func ToolFileCandidates(paths model.Paths, toolName string, fileName string) []string {
+	candidates := make([]string, 0, 2)
+	for _, toolsRoot := range []string{paths.UserToolsDir, paths.ToolsDir} {
+		if strings.TrimSpace(toolsRoot) == "" {
+			continue
+		}
+		candidates = append(candidates, filepath.Join(toolsRoot, toolName, fileName))
+	}
+	return candidates
+}
+
+// ResolveToolSettingsTemplate resolves the settings template named by a tool's
+// settings_file. The template lives under templates/ in the extension tree, and
+// a user-global extension is not staged into the built-in assets tree, so both
+// trees are searched. Runtime and `validate-extensions` share this so a spec
+// cannot validate but then fail at session start.
+func ResolveToolSettingsTemplate(paths model.Paths, toolName string, settingsFile string) (string, error) {
+	prefix := toolName + "-"
+	if !strings.HasPrefix(settingsFile, prefix) {
+		return "", fmt.Errorf("settings_file %q must start with %q", settingsFile, prefix)
+	}
+	templateName := strings.TrimPrefix(settingsFile, prefix)
+	if templateName == "" {
+		return "", fmt.Errorf("settings_file %q is missing a template name after %q", settingsFile, prefix)
+	}
+	// The template name is a bare filename joined onto templates/. Rejecting
+	// separators keeps a spec from escaping the extension tree and copying an
+	// arbitrary host file into the container's config source.
+	if strings.ContainsAny(templateName, `/\`) {
+		return "", fmt.Errorf("settings_file %q must not contain a path separator", settingsFile)
+	}
+	relativePath := filepath.Join(model.TemplatesDir, templateName)
+	templatePath, ok := ResolveToolFile(paths, toolName, relativePath)
+	if !ok {
+		return "", fmt.Errorf("missing template %q, searched: %s",
+			templateName, strings.Join(ToolFileCandidates(paths, toolName, relativePath), ", "))
+	}
+	return templatePath, nil
 }
 
 // ResolveFeatureFile resolves a feature extension file path with user override support.
@@ -50,12 +88,12 @@ func ResolveFeatureFile(paths model.Paths, featureName string, fileName string) 
 // ResolveToolDirs returns the built-in and user tool extension directories.
 func ResolveToolDirs(paths model.Paths, toolName string) (builtinDir string, userDir string) {
 	builtin := filepath.Join(paths.ToolsDir, toolName)
-	if isDir(builtin) {
+	if util.IsDir(builtin) {
 		builtinDir = builtin
 	}
 	if paths.UserToolsDir != "" {
 		candidate := filepath.Join(paths.UserToolsDir, toolName)
-		if isDir(candidate) {
+		if util.IsDir(candidate) {
 			userDir = candidate
 		}
 	}
@@ -65,12 +103,12 @@ func ResolveToolDirs(paths model.Paths, toolName string) (builtinDir string, use
 // ResolveFeatureDirs returns the built-in and user feature extension directories.
 func ResolveFeatureDirs(paths model.Paths, featureName string) (builtinDir string, userDir string) {
 	builtin := filepath.Join(paths.FeaturesDir, featureName)
-	if isDir(builtin) {
+	if util.IsDir(builtin) {
 		builtinDir = builtin
 	}
 	if paths.UserFeaturesDir != "" {
 		candidate := filepath.Join(paths.UserFeaturesDir, featureName)
-		if isDir(candidate) {
+		if util.IsDir(candidate) {
 			userDir = candidate
 		}
 	}
@@ -170,11 +208,6 @@ func appendExtensionNames(dir string, names map[string]struct{}) error {
 		names[entry.Name()] = struct{}{}
 	}
 	return nil
-}
-
-func isDir(path string) bool {
-	info, err := os.Stat(path)
-	return err == nil && info.IsDir()
 }
 
 // extensionManifestState records which optional extension-level fields were

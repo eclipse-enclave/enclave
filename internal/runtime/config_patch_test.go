@@ -431,7 +431,10 @@ func writeRuntimeTestFile(t *testing.T, path string, content string) {
 
 func newTemplateOverrideRuntime(home string, profile model.Profile) *Runtime {
 	return &Runtime{
-		paths:         model.Paths{ToolsDir: filepath.Join(home, "extensions", "tools")},
+		paths: model.Paths{
+			ToolsDir:     filepath.Join(home, "extensions", "tools"),
+			UserToolsDir: filepath.Join(home, "user-extensions", "tools"),
+		},
 		host:          model.Host{Home: home},
 		project:       model.Project{Hash: "projhash"},
 		profile:       profile,
@@ -441,9 +444,22 @@ func newTemplateOverrideRuntime(home string, profile model.Profile) *Runtime {
 
 func writeBuiltInToolTemplate(t *testing.T, r *Runtime, content string) {
 	t.Helper()
+	writeToolTemplateIn(t, r, r.paths.ToolsDir, content)
+}
+
+// writeUserToolTemplate writes the settings template into the user extension
+// tree (~/.config/enclave/extensions/tools/<tool>/templates/), which is where a
+// user-global tool extension keeps it.
+func writeUserToolTemplate(t *testing.T, r *Runtime, content string) {
+	t.Helper()
+	writeToolTemplateIn(t, r, r.paths.UserToolsDir, content)
+}
+
+func writeToolTemplateIn(t *testing.T, r *Runtime, toolsRoot string, content string) {
+	t.Helper()
 	prefix := r.profile.Name + "-"
 	templateName := strings.TrimPrefix(r.profile.SettingsFile, prefix)
-	path := filepath.Join(r.paths.ToolsDir, r.profile.Name, "templates", templateName)
+	path := filepath.Join(toolsRoot, r.profile.Name, "templates", templateName)
 	writeRuntimeTestFile(t, path, content)
 }
 

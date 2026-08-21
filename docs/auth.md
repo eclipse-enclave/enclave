@@ -163,6 +163,21 @@ echo 'ANTHROPIC_API_KEY=sk-ant-readonly...' > ~/.local/state/enclave/secrets/glo
 echo 'ANTHROPIC_API_KEY=sk-ant-project...' > ~/.local/state/enclave/secrets/projects/<hash>/claude.env
 ```
 
+### Env Aliases
+
+A declared secret may list several env-var aliases for one credential, for
+example `GH_TOKEN` and `GITHUB_TOKEN`. Each alias is looked up on its own — host
+environment first, then the layered secrets files from layer 3 down to layer 1,
+then the host-side env store — and the alias found in the highest layer wins.
+Its value is injected into *every* alias of that secret and written back to the
+env store, so rotating a token in one alias is enough and a stale value in the
+env store heals after one run.
+
+If two aliases resolve from that same winning layer with different values, the
+run fails and the error names the layer — enclave cannot pick between them.
+Aliases that disagree from a lower layer are only logged, since the winning
+value overrides them anyway.
+
 ## Passing Host Environment Variables
 
 Host environment variables do **not** leak into the container unless explicitly opted in.

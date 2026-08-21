@@ -12,6 +12,8 @@ import (
 	"os"
 	"sort"
 
+	"enclave/internal/auth"
+	"enclave/internal/logx"
 	"enclave/internal/model"
 	"enclave/internal/secretfile"
 )
@@ -95,7 +97,7 @@ func (r *Runtime) activeSecrets() ([]activeSecret, error) {
 	return secrets, nil
 }
 
-func resolveActiveSecretValue(secret activeSecret, hostHome string, layeredSecrets map[string]string, persistedEnv map[string]string) (string, string, bool, error) {
+func resolveActiveSecretValue(secret activeSecret, hostHome string, secretsLayers []auth.SecretsLayer, persistedEnv map[string]string) (string, string, bool, error) {
 	// priority orders the env aliases against the file source. file-first
 	// consults the file before the env aliases; env-first (the default) does
 	// the reverse. A malformed file parser fails loudly regardless of order.
@@ -107,10 +109,10 @@ func resolveActiveSecretValue(secret activeSecret, hostHome string, layeredSecre
 		if found {
 			return value, source, true, nil
 		}
-		return resolveEnvAliasValue(secret, layeredSecrets, persistedEnv)
+		return resolveEnvAliasValue(secret, secretsLayers, persistedEnv)
 	}
 
-	value, source, found, err := resolveEnvAliasValue(secret, layeredSecrets, persistedEnv)
+	value, source, found, err := resolveEnvAliasValue(secret, secretsLayers, persistedEnv)
 	if err != nil {
 		return "", "", false, err
 	}
@@ -120,29 +122,27 @@ func resolveActiveSecretValue(secret activeSecret, hostHome string, layeredSecre
 	return resolveFileSecretValue(secret, hostHome)
 }
 
-// resolveEnvAliasValue resolves a secret through its env-var aliases, walking
-// host env, then the layered .env secrets, then persisted env.
-func resolveEnvAliasValue(secret activeSecret, layeredSecrets map[string]string, persistedEnv map[string]string) (string, string, bool, error) {
-	type aliasValue struct {
-		envVar   string
-		value    string
-		source   string
-		priority int
-		found    bool
-	}
+// aliasValue is one env alias resolved from one layer. rank orders the layers,
+// lowest first: host env, then the secrets files from the highest layer down,
+// then the persisted env store.
+type aliasValue struct {
+	envVar string
+	value  string
+	source string
+	layer  string
+	rank   int
+}
 
+// resolveEnvAliasValue resolves a secret through its env-var aliases, walking
+// the host environment, then the layered secrets files (highest layer first),
+// then the persisted env store. The highest layer wins; only aliases resolved
+// from the same layer must agree. Drift between layers is logged and heals
+// through the persisted write-back.
+func resolveEnvAliasValue(secret activeSecret, secretsLayers []auth.SecretsLayer, persistedEnv map[string]string) (string, string, bool, error) {
 	values := make([]aliasValue, 0, len(secret.EnvVars))
 	for _, envVar := range secret.EnvVars {
-		if value := os.Getenv(envVar); value != "" {
-			values = append(values, aliasValue{envVar: envVar, value: value, source: "env", priority: 1, found: true})
-			continue
-		}
-		if value, ok := layeredSecrets[envVar]; ok && value != "" {
-			values = append(values, aliasValue{envVar: envVar, value: value, source: "secrets", priority: 2, found: true})
-			continue
-		}
-		if value, ok := persistedEnv[envVar]; ok && value != "" {
-			values = append(values, aliasValue{envVar: envVar, value: value, source: "persisted", priority: 3, found: true})
+		if resolved, ok := resolveAlias(envVar, secretsLayers, persistedEnv); ok {
+			values = append(values, resolved)
 		}
 	}
 
@@ -152,15 +152,37 @@ func resolveEnvAliasValue(secret activeSecret, layeredSecrets map[string]string,
 
 	chosen := values[0]
 	for _, value := range values[1:] {
-		if value.value != chosen.value {
-			return "", "", false, fmt.Errorf("secret %q has conflicting values across env aliases (%s vs %s)", secret.ID, chosen.envVar, value.envVar)
-		}
-		if value.priority < chosen.priority {
+		if value.rank < chosen.rank {
 			chosen = value
 		}
 	}
 
+	for _, value := range values {
+		if value.value == chosen.value {
+			continue
+		}
+		if value.rank == chosen.rank {
+			return "", "", false, fmt.Errorf("secret %q has conflicting values across env aliases (%s vs %s, both set in %s)", secret.ID, chosen.envVar, value.envVar, chosen.layer)
+		}
+		logx.Warnf("Secret %s: using %s from %s; %s in %s holds a different value and is ignored.", secret.ID, chosen.envVar, chosen.layer, value.envVar, value.layer)
+	}
+
 	return chosen.value, chosen.source, true, nil
+}
+
+func resolveAlias(envVar string, secretsLayers []auth.SecretsLayer, persistedEnv map[string]string) (aliasValue, bool) {
+	if value := os.Getenv(envVar); value != "" {
+		return aliasValue{envVar: envVar, value: value, source: "env", layer: "the host environment", rank: 0}, true
+	}
+	for i := len(secretsLayers) - 1; i >= 0; i-- {
+		if value := secretsLayers[i].Values[envVar]; value != "" {
+			return aliasValue{envVar: envVar, value: value, source: "secrets", layer: secretsLayers[i].Path, rank: len(secretsLayers) - i}, true
+		}
+	}
+	if value := persistedEnv[envVar]; value != "" {
+		return aliasValue{envVar: envVar, value: value, source: "persisted", layer: "the host-side env store", rank: len(secretsLayers) + 1}, true
+	}
+	return aliasValue{}, false
 }
 
 // resolveFileSecretValue reads the secret's file source, if any. A missing file

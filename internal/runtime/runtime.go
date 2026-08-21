@@ -10,6 +10,7 @@ package runtime
 import (
 	"context"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -59,7 +60,12 @@ type Runtime struct {
 	policyResolved        bool
 	policyResult          policy.ResolveResult
 	policyErr             error
-	backend               backend.Backend
+	// releaseHostOverrides maps a secret id to the hosts that replace its
+	// declared release hosts, resolved from serviceAuth.hostsFromCredential.
+	// Populated during auth setup, before the effective policy is resolved and
+	// cached, so the replacement host reaches the allow set too.
+	releaseHostOverrides map[string][]string
+	backend              backend.Backend
 }
 
 type ExecutionContext struct {
@@ -982,13 +988,54 @@ func (r *Runtime) specProxyManaged() []string {
 func (r *Runtime) specNetworkDomains() (allowed []string, denied []string) {
 	allowed = append([]string(nil), r.profile.AllowedDomains...)
 	denied = append([]string(nil), r.profile.DeniedDomains...)
-	allowed = append(allowed, model.ReleaseHosts(r.profile.Secrets)...)
+	allowed = append(allowed, r.releaseHosts(r.profile.Secrets)...)
 	for _, feature := range r.features {
 		allowed = append(allowed, feature.AllowedDomains...)
 		denied = append(denied, feature.DeniedDomains...)
-		allowed = append(allowed, model.ReleaseHosts(feature.Secrets)...)
+		allowed = append(allowed, r.releaseHosts(feature.Secrets)...)
 	}
 	return allowed, denied
+}
+
+// releaseHosts is model.ReleaseHosts plus any host selected at runtime through
+// serviceAuth.hostsFromCredential, so that host becomes resolvable exactly like
+// a declared one. The override narrows where the token is released, not what
+// the session can reach: dropping the declared hosts here would make e.g.
+// gitlab.com unresolvable for tools whose allowlist has no other source for it.
+// The loaded spec is left untouched.
+func (r *Runtime) releaseHosts(secrets map[string]model.SecretConfig) []string {
+	if len(r.releaseHostOverrides) == 0 {
+		return model.ReleaseHosts(secrets)
+	}
+	effective := maps.Clone(secrets)
+	for id, hosts := range r.releaseHostOverrides {
+		sc, ok := effective[id]
+		if !ok || sc.Release == nil || sc.Release.HTTP == nil {
+			continue
+		}
+		release := *sc.Release
+		http := *release.HTTP
+		http.Hosts = append(append([]string{}, http.Hosts...), hosts...)
+		release.HTTP = &http
+		sc.Release = &release
+		effective[id] = sc
+	}
+	return model.ReleaseHosts(effective)
+}
+
+// setReleaseHostOverrides records the release hosts selected at runtime. The
+// effective policy unions release hosts into the allow set and is memoized, so
+// a policy resolved before this point would miss the selected host; drop the
+// memo instead of relying on call order.
+func (r *Runtime) setReleaseHostOverrides(overrides map[string][]string) {
+	r.releaseHostOverrides = overrides
+	if len(overrides) == 0 || !r.policyResolved {
+		return
+	}
+	logx.Debugf("Effective network policy was resolved before the release host overrides; recomputing it.")
+	r.policyResolved = false
+	r.policyResult = policy.ResolveResult{}
+	r.policyErr = nil
 }
 
 // addWorktreeMetadataMounts mounts the linked-worktree gitdir/commondir

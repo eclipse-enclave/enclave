@@ -348,6 +348,15 @@ func applyBridgePort(opts *model.Options, value string) error {
 	return nil
 }
 
+func applyTheiaAPIPort(opts *model.Options, value string) error {
+	value = strings.TrimSpace(value)
+	if !util.IsPortNumber(value) {
+		return fmt.Errorf("invalid --theia-api-port value: %s (must be 1-65535)", value)
+	}
+	opts.TheiaAPIPort = value
+	return nil
+}
+
 func isValidEnvKey(value string) bool {
 	if value == "" {
 		return false

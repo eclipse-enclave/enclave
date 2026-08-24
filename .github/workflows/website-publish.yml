@@ -18,7 +18,7 @@ on:
       docs_base_url:
         description: "Docs base path (use /enclave-website/docs/ to test on the raw GitHub Pages URL)"
         type: string
-        default: "/enclave/docs/"
+        default: "/docs/"
 
 permissions:
   contents: read
@@ -44,7 +44,7 @@ jobs:
           node-version: "22.x"
       - name: Build site
         env:
-          DOCS_BASE_URL: ${{ inputs.docs_base_url || '/enclave/docs/' }}
+          DOCS_BASE_URL: ${{ inputs.docs_base_url || '/docs/' }}
         run: ./website/build.sh
       - name: Publish to enclave-website (gh-pages)
         uses: peaceiris/actions-gh-pages@4f9cc6602d3f66b9c108549d475ec49e8ef4d45e # v4.0.0
@@ -53,6 +53,9 @@ jobs:
           external_repository: eclipse-enclave/enclave-website
           publish_branch: gh-pages
           publish_dir: ./public
+          # The action replaces the published tree, so the custom domain's CNAME
+          # file has to be re-created on every deploy or the domain is unset.
+          cname: enclave.eclipse.dev
           user_name: "eclipse-enclave-bot"
           user_email: "enclave-bot@eclipse.org"
           commit_message: "deploy: ${{ github.sha }}"

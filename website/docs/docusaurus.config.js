@@ -16,14 +16,14 @@ import {themes as prismThemes} from 'prism-react-renderer';
 // --------------------------------------------------------------------------
 // Deployment base path.
 //
-// The docs are served under `<site-root>/docs/`. The site root itself moves
-// with the project (GitHub Pages URL today, eclipse.dev/eclipse-enclave later),
-// so this is the ONE place to adjust the base path. Nothing else hardcodes it.
+// The docs are served under `<site-root>/docs/`. Production serves the site at
+// the root of https://enclave.eclipse.dev, so the default '/docs/' is what
+// ships. This is the ONE place to adjust the base path; nothing else hardcodes
+// it.
 //
-// If the whole site is served under a project subpath (e.g.
-// eclipse-enclave.github.io/enclave/), set DOCS_BASE_URL to
-// '/<project>/docs/' at build time (e.g. via env in a future deploy step).
-// Default assumes a root deployment (custom domain / eclipse.dev forward).
+// If the whole site is served under a subpath (e.g. the PR previews under
+// eclipse-enclave.github.io/enclave-website-previews/pr-previews/pr-42/), set
+// DOCS_BASE_URL to '<subpath>/docs/' at build time.
 // --------------------------------------------------------------------------
 const baseUrl = process.env.DOCS_BASE_URL || '/docs/';
 
@@ -39,7 +39,7 @@ const config = {
 
   // `url` is only used for absolute-URL generation (sitemap, canonical tags).
   // It is not hardcoded into navigation. Update alongside the real domain.
-  url: 'https://eclipse.dev',
+  url: 'https://enclave.eclipse.dev',
   baseUrl,
 
   // 'warn' (not 'throw') because the docs live at /docs/ under a larger site and

@@ -26,10 +26,15 @@ The docs are served at `<site-root>/docs/`. The base path is controlled by the
 `docusaurus.config.js`. Set it at build time so the site works whether it is
 served at a domain root or a project subpath. No URLs are hardcoded.
 
-Production publishes with `/enclave/docs/`, matching the intended
-`eclipse.dev/enclave` path. A manual run of the *Deploy website* workflow can
-override this via its `docs_base_url` input, e.g. `/enclave-website/docs/` to
-verify a deployment on the raw `eclipse-enclave.github.io/enclave-website/` URL.
+Production serves the site at the root of https://enclave.eclipse.dev, so it
+publishes with the default `/docs/`. A manual run of the *Deploy website*
+workflow can override this via its `docs_base_url` input, e.g.
+`/enclave-website/docs/` to verify a deployment on the raw
+`eclipse-enclave.github.io/enclave-website/` URL.
+
+The custom domain lives in a `CNAME` file at the root of the published branch.
+The publish workflow re-creates it on every deploy (`cname:` input), because the
+deploy action replaces the published tree.
 
 Both website workflows push with the organization secret `DEPLOY_TOKEN`.
 

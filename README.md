@@ -2,13 +2,11 @@
   <img src="docs/assets/appicon.png" alt="Enclave" width="128" height="128">
 </p>
 
-<h1 align="center">Enclave</h1>
-
-<p align="center">
-  <a href="https://enclave.eclipse.dev">enclave.eclipse.dev</a>
-</p>
+<h1 align="center">Eclipse Enclave</h1>
 
 A Docker-based sandbox for running agentic coding tools — Claude, Codex, OpenCode, and others — in an isolated container while keeping your project files on the host. Network access is restricted to allowlisted domains by default, auth and history persist across sessions, and YOLO mode is on so agents can act without confirmation prompts.
+
+<a href="https://enclave.eclipse.dev">Website</a> · <a href="https://enclave.eclipse.dev/docs/getting-started">Getting Started</a> · <a href="https://enclave.eclipse.dev/docs">Docs</a>
 
 ## Requirements
 

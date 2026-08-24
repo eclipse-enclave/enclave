@@ -32,6 +32,16 @@ workflow can override this via its `docs_base_url` input, e.g.
 `/enclave-website/docs/` to verify a deployment on the raw
 `eclipse-enclave.github.io/enclave-website/` URL.
 
+## Linking out of the docs app
+
+The docs are a single-page app that only owns the routes under its base path.
+Links to the marketing site (the "Home" entries in the navbar and footer) must
+be prefixed with `pathname://` and set `autoAddBaseUrl: false`, so Docusaurus
+emits a plain `<a>` and the browser performs a real page load. A bare path or a
+relative `../` is handled client-side, matches no docs route, and renders the
+docs 404 page instead. `onBrokenLinks` is set to `throw` to catch this at build
+time.
+
 The custom domain lives in a `CNAME` file at the root of the published branch.
 The publish workflow re-creates it on every deploy (`cname:` input), because the
 deploy action replaces the published tree.

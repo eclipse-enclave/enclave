@@ -372,6 +372,13 @@ div[class^='codeBlockContainer'],
   font-size: 0.85rem;
 }
 
+/* The "Home" links use `pathname://` so they leave the docs app with a real
+   page load. Docusaurus reads that as an external link and appends its
+   external-link icon, but the marketing home is part of the same site. */
+.enclave-home-link svg {
+  display: none;
+}
+
 /* ==========================================================================
    Signature modules — problem / solution boxes as framed enclosures.
    Precision crop-mark corners (top-left, bottom-right) evoke a bounded

@@ -27,6 +27,16 @@ import {themes as prismThemes} from 'prism-react-renderer';
 // --------------------------------------------------------------------------
 const baseUrl = process.env.DOCS_BASE_URL || '/docs/';
 
+// The static marketing site lives one level above the docs base path.
+//
+// The `pathname://` prefix marks the link as "not part of this app", so
+// Docusaurus emits a plain <a> instead of a React Router link. Without it the
+// click is handled client-side, the site root does not match any docs route,
+// and the docs 404 page renders over the marketing home. `autoAddBaseUrl`
+// must be off or Docusaurus prepends the docs base path back onto the path.
+const siteRootHref = `pathname://${baseUrl.replace(/[^/]+\/$/, '')}`;
+const homeLinkProps = {autoAddBaseUrl: false, target: '_self', className: 'enclave-home-link'};
+
 /** @type {import('@docusaurus/types').Config} */
 const config = {
   title: 'Eclipse Enclave',
@@ -42,10 +52,9 @@ const config = {
   url: 'https://enclave.eclipse.dev',
   baseUrl,
 
-  // 'warn' (not 'throw') because the docs live at /docs/ under a larger site and
-  // intentionally link "up" to the marketing home via a relative `../` link,
-  // which sits outside Docusaurus's owned route tree.
-  onBrokenLinks: 'warn',
+  // Links that leave the docs route tree must use `pathname://` (see
+  // siteRootHref); anything else Docusaurus reports here is a genuine break.
+  onBrokenLinks: 'throw',
   markdown: {
     hooks: {
       onBrokenMarkdownLinks: 'warn',
@@ -100,11 +109,10 @@ const config = {
             label: 'Docs',
           },
           {
-            // Relative link back to the marketing site (one level above /docs/).
-            href: '../',
+            href: siteRootHref,
             label: 'Home',
             position: 'right',
-            target: '_self',
+            ...homeLinkProps,
           },
           {
             href: 'https://github.com/eclipse-enclave/enclave',
@@ -127,7 +135,7 @@ const config = {
           {
             title: 'Project',
             items: [
-              {label: 'Home', href: '../'},
+              {label: 'Home', href: siteRootHref, ...homeLinkProps},
               {label: 'Eclipse Project', href: 'https://projects.eclipse.org/projects/ecd.enclave'},
               {label: 'GitHub', href: 'https://github.com/eclipse-enclave/enclave'},
             ],

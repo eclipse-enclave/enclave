@@ -11,7 +11,7 @@
 #   - Docusaurus docs under /docs (absolute baseUrl injected via DOCS_BASE_URL)
 #
 # DOCS_BASE_URL sets the docs base path, e.g.
-#   /enclave/docs/                                     (production)
+#   /docs/                                             (production, root domain)
 #   /enclave-website-previews/pr-previews/pr-42/docs/  (preview)
 set -euo pipefail
 

@@ -18,37 +18,48 @@ import (
 	"enclave/internal/model"
 )
 
+// containerIDMinPrefix is the shortest container-ID prefix accepted in place of
+// a name. Anything shorter is treated as a session name only, so that short
+// hex-looking session names keep working.
+const containerIDMinPrefix = 8
+
 // sessionTargetQuery describes how a positional container/session argument is
 // resolved to exactly one managed session.
 type sessionTargetQuery struct {
-	// Requested is the user-provided name: either a full container name or a
-	// session name as passed to `--name`. Empty means "auto-select".
+	// Requested is the user-provided name: a container name, a container ID, or
+	// a session name as passed to `--name`. Empty means "auto-select".
 	Requested string
-	// Tool restricts candidates to one tool. Only set it when the tool was
-	// chosen explicitly on the command line; the resolved default would
-	// otherwise hide sessions of other tools.
+	// Tool restricts session-name matches and auto-selection to one tool. Only
+	// set it when the tool was chosen explicitly on the command line; the
+	// resolved default would otherwise hide sessions of other tools.
 	Tool string
 	// Project is the project resolved from the working directory. Its sessions
-	// win over sessions of other projects that carry the same session name. A
-	// zero value disables the preference.
+	// win over sessions of other projects that carry the same session name, and
+	// auto-selection never leaves it. A zero value disables both.
 	Project model.Project
 	// IncludeStopped also considers stopped sessions (used by `stop`, which
 	// removes leftovers).
 	IncludeStopped bool
+	// BackgroundOnly restricts auto-selection to detached sessions, so that a
+	// bare `attach` cannot grab the TTY of a foreground session that a second
+	// terminal is already driving.
+	BackgroundOnly bool
 }
 
 // resolveSessionTarget resolves a positional container/session argument to one
-// running (or, with IncludeStopped, existing) session. A full container name
-// matches verbatim; anything else is treated as a session name and matched
-// against the sanitized session names of the candidates, preferring the
-// current project. Ambiguity is reported rather than guessed.
+// running (or, with IncludeStopped, existing) session. A container name or ID
+// matches verbatim; anything else is matched against the session names of the
+// candidates in sanitized form, preferring the current project. Ambiguity is
+// reported rather than guessed.
 func resolveSessionTarget(ctx context.Context, be backend.Backend, q sessionTargetQuery) (backend.Session, error) {
-	filter := backend.SessionFilter{Tool: strings.TrimSpace(q.Tool)}
+	filter := backend.SessionFilter{}
 	if q.IncludeStopped {
 		filter.All = true
 	} else {
 		filter.RunningOnly = true
 	}
+	// The tool is applied to the candidates below rather than to the listing:
+	// a container named or identified verbatim is resolved whatever its tool.
 	sessions, err := be.List(ctx, filter)
 	if err != nil {
 		return backend.Session{}, fmt.Errorf("list containers: %w", err)
@@ -56,7 +67,7 @@ func resolveSessionTarget(ctx context.Context, be backend.Backend, q sessionTarg
 
 	requested := strings.TrimSpace(q.Requested)
 	if requested == "" {
-		return selectSingleSession(scopeSessions(sessions, q.Project), sessions, "")
+		return autoSelectSession(sessions, q)
 	}
 
 	for _, session := range sessions {
@@ -70,19 +81,62 @@ func resolveSessionTarget(ctx context.Context, be backend.Backend, q sessionTarg
 		return backend.Session{}, fmt.Errorf("invalid session name %q", requested)
 	}
 	var matches []backend.Session
-	for _, session := range sessions {
+	for _, session := range sessionsForTool(sessions, q.Tool) {
 		if model.SanitizeSessionName(session.Name) == wanted {
 			matches = append(matches, session)
 		}
 	}
-	return selectSingleSession(scopeSessions(matches, q.Project), matches, requested)
+	if len(matches) == 0 {
+		if session, ok := sessionByContainerID(sessions, requested); ok {
+			return session, nil
+		}
+		return backend.Session{}, fmt.Errorf("no enclave session named %q (use `%s ps` to list sessions)", requested, model.AppName)
+	}
+	scoped, _ := projectSessions(matches, q.Project)
+	return selectSingleSession(scoped, requested)
 }
 
-// scopeSessions narrows candidates to the current project: sessions started
-// from the very same worktree first, then any session of the project. It
-// returns the input unchanged when nothing matches, so that a name pointing at
-// another project still resolves when it is unambiguous.
-func scopeSessions(sessions []backend.Session, project model.Project) []backend.Session {
+// autoSelectSession resolves the no-argument form. Unlike an explicit name it
+// never leaves the current project: picking up another project's agent because
+// this one has no session would be a surprising place to land.
+func autoSelectSession(sessions []backend.Session, q sessionTargetQuery) (backend.Session, error) {
+	candidates := sessionsForTool(sessions, q.Tool)
+	if q.BackgroundOnly {
+		var background []backend.Session
+		for _, session := range candidates {
+			if session.Background {
+				background = append(background, session)
+			}
+		}
+		candidates = background
+	}
+	if strings.TrimSpace(q.Project.Hash) != "" {
+		scoped, ok := projectSessions(candidates, q.Project)
+		if !ok {
+			scoped = nil
+		}
+		candidates = scoped
+	}
+	switch len(candidates) {
+	case 1:
+		return candidates[0], nil
+	case 0:
+		if q.BackgroundOnly {
+			return backend.Session{}, fmt.Errorf("no running background session for this project; name one explicitly (`%s ps`) or enter a foreground session with `%s exec`",
+				model.AppName, model.AppName)
+		}
+		return backend.Session{}, fmt.Errorf("no running enclave containers for this project (start one first)")
+	default:
+		return backend.Session{}, fmt.Errorf("multiple running enclave containers; pass one of these container names explicitly:\n  %s",
+			strings.Join(describeSessions(candidates), "\n  "))
+	}
+}
+
+// projectSessions narrows candidates to the current project: sessions started
+// from the very same worktree first, then any session of the project. ok
+// reports whether the project matched anything, so that callers can decide
+// between falling back to all candidates and reporting nothing.
+func projectSessions(sessions []backend.Session, project model.Project) (scoped []backend.Session, ok bool) {
 	worktree := strings.TrimSpace(project.Dir)
 	realDir := strings.TrimSpace(project.RealDir)
 	if worktree != "" || realDir != "" {
@@ -97,7 +151,7 @@ func scopeSessions(sessions []backend.Session, project model.Project) []backend.
 			}
 		}
 		if len(sameWorktree) > 0 {
-			return sameWorktree
+			return sameWorktree, true
 		}
 	}
 	if hash := strings.TrimSpace(project.Hash); hash != "" {
@@ -108,31 +162,65 @@ func scopeSessions(sessions []backend.Session, project model.Project) []backend.
 			}
 		}
 		if len(sameProject) > 0 {
-			return sameProject
+			return sameProject, true
 		}
 	}
-	return sessions
+	return sessions, false
 }
 
-// selectSingleSession picks the only candidate, or explains what to pass
-// instead. all is the unscoped candidate set, used to point at the sessions of
-// other projects that the scoping ruled out.
-func selectSingleSession(scoped []backend.Session, all []backend.Session, requested string) (backend.Session, error) {
-	switch len(scoped) {
-	case 1:
-		return scoped[0], nil
-	case 0:
-		if requested == "" {
-			return backend.Session{}, fmt.Errorf("no running enclave containers (start one first)")
+func sessionsForTool(sessions []backend.Session, tool string) []backend.Session {
+	tool = strings.TrimSpace(tool)
+	if tool == "" {
+		return sessions
+	}
+	var matches []backend.Session
+	for _, session := range sessions {
+		if strings.EqualFold(strings.TrimSpace(session.Tool), tool) {
+			matches = append(matches, session)
 		}
+	}
+	return matches
+}
+
+// sessionByContainerID resolves a container ID (or a prefix of one, as printed
+// by `docker ps`), which `attach` and `stop` accepted before names were
+// resolved. Session names win, so this only runs when none matched.
+func sessionByContainerID(sessions []backend.Session, requested string) (backend.Session, bool) {
+	if len(requested) < containerIDMinPrefix || !isHexString(requested) {
+		return backend.Session{}, false
+	}
+	for _, session := range sessions {
+		id := strings.TrimSpace(session.Ref.ID)
+		if id == "" {
+			continue
+		}
+		// Session IDs are truncated, so a full ID pasted from docker is a
+		// superstring of the one recorded here.
+		if strings.HasPrefix(id, requested) || strings.HasPrefix(requested, id) {
+			return session, true
+		}
+	}
+	return backend.Session{}, false
+}
+
+func isHexString(value string) bool {
+	for _, r := range value {
+		if (r < '0' || r > '9') && (r < 'a' || r > 'f') && (r < 'A' || r > 'F') {
+			return false
+		}
+	}
+	return value != ""
+}
+
+func selectSingleSession(matches []backend.Session, requested string) (backend.Session, error) {
+	switch len(matches) {
+	case 1:
+		return matches[0], nil
+	case 0:
 		return backend.Session{}, fmt.Errorf("no enclave session named %q (use `%s ps` to list sessions)", requested, model.AppName)
 	default:
-		subject := "multiple running enclave containers"
-		if requested != "" {
-			subject = fmt.Sprintf("session name %q matches multiple containers", requested)
-		}
-		return backend.Session{}, fmt.Errorf("%s; pass one of these container names explicitly:\n  %s",
-			subject, strings.Join(describeSessions(scoped), "\n  "))
+		return backend.Session{}, fmt.Errorf("session name %q matches multiple containers; pass one of these container names explicitly:\n  %s",
+			requested, strings.Join(describeSessions(matches), "\n  "))
 	}
 }
 
@@ -144,6 +232,24 @@ func describeSessions(sessions []backend.Session) []string {
 	}
 	sort.Strings(described)
 	return described
+}
+
+// sessionsMatchingName filters sessions by a user-provided `--name` value.
+// Both sides are sanitized, so `--name "My Task"` and `--name my-task` select
+// the same sessions regardless of the form recorded in the session label. A
+// name that sanitizes to nothing matches nothing, never everything.
+func sessionsMatchingName(sessions []backend.Session, requested string) []backend.Session {
+	wanted := model.SanitizeSessionName(requested)
+	if wanted == "" {
+		return nil
+	}
+	matches := make([]backend.Session, 0, len(sessions))
+	for _, session := range sessions {
+		if model.SanitizeSessionName(session.Name) == wanted {
+			matches = append(matches, session)
+		}
+	}
+	return matches
 }
 
 // sessionTargetTool returns the tool filter for session resolution: the tool

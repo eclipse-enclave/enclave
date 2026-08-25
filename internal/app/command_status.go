@@ -95,12 +95,14 @@ func runStatus(opts model.Options) int {
 	sessions, err := be.List(ctx, backend.SessionFilter{
 		RunningOnly: true,
 		Tool:        psToolFilter(opts),
-		SessionName: psSessionFilter(opts),
 		ProjectHash: projectHash,
 	})
 	if err != nil {
 		logx.Errorf("list sessions: %v", err)
 		return 1
+	}
+	if name := psSessionFilter(opts); name != "" {
+		sessions = sessionsMatchingName(sessions, name)
 	}
 
 	snapshots := collectSnapshots(ctx, execer, sessions, model.DefaultStatusLines, statusNow)

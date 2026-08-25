@@ -9,6 +9,7 @@ package app
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"enclave/internal/backend"
@@ -55,10 +56,15 @@ func runStop(opts model.Options, projectDir string) int {
 	}
 
 	background := true
-	sessions, err := be.List(context.Background(), backend.SessionFilter{All: true, Background: &background, Tool: run.Tool, SessionName: model.SanitizeSessionName(run.SessionName)})
+	sessions, err := be.List(context.Background(), backend.SessionFilter{All: true, Background: &background, Tool: run.Tool})
 	if err != nil {
 		logx.Errorf("Failed to list background sessions: %v", err)
 		return 1
+	}
+	// Sanitized matching happens here rather than as a label filter, so that a
+	// name which sanitizes to nothing stops nothing instead of everything.
+	if name := strings.TrimSpace(run.SessionName); name != "" {
+		sessions = sessionsMatchingName(sessions, name)
 	}
 
 	if len(sessions) == 0 {

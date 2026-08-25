@@ -279,7 +279,7 @@ func (r *Runtime) logContainerStart(containerName string, baseContainerName stri
 		logx.Warnf("Container name %s is already in use; starting new session as %s", baseContainerName, containerName)
 	}
 	if r.run.Background {
-		logx.Successf("Starting background session %q for: %s", r.resolvedSessionName(), r.project.Name)
+		logx.Successf("Starting background session %q for: %s", r.friendlySessionName(), r.project.Name)
 		return
 	}
 	if r.run.Admin {
@@ -814,12 +814,12 @@ func (r *Runtime) containerEnv(ctx *ExecutionContext, interactive bool) []string
 	return env
 }
 
-// sessionDisplayName returns the session name recorded in the session label.
-// It is the sanitized form, so the label, the trailing container-name segment,
-// and the name users pass to `attach`/`stop` always agree.
+// sessionDisplayName returns the session name recorded in the session label:
+// the value the user supplied, so that consumers of the label keep seeing what
+// was typed. Lookups sanitize both sides instead of relying on the stored form.
 func (r *Runtime) sessionDisplayName(containerName string, background bool) string {
 	if background || r.run.SessionName != "" || containerName != r.baseContainerName() {
-		return r.resolvedSessionName()
+		return r.friendlySessionName()
 	}
 	return ""
 }
@@ -830,6 +830,15 @@ func (r *Runtime) baseContainerName() string {
 
 func (r *Runtime) containerName() string {
 	return r.baseContainerName() + "-" + r.resolvedSessionName()
+}
+
+// friendlySessionName returns the user-facing session name: the original
+// user-supplied value when set, otherwise the auto-generated name.
+func (r *Runtime) friendlySessionName() string {
+	if r.run.SessionName != "" {
+		return r.run.SessionName
+	}
+	return r.resolvedSessionName()
 }
 
 // resolvedSessionName returns the session name to use, computing and caching it

@@ -29,22 +29,30 @@ unchanged. See [windows.md](windows.md).
 | `enclave shell --admin` | Shell with limited sudo |
 | `enclave stop [name]` | Stop background containers, or one session by name |
 
-`enclave ps` prints one row per container with its `NAME` (container name) and `SESSION` (the `--name` session name, `-` for the project's default container); either can be passed to `attach`, `stop`, and `theia`. Flags: `--all` (include stopped containers, not just running ones), `--json` (emit a JSON array instead of the table). The flags compose (`ps --all --json`). Each JSON object has the fields `name`, `tool`, `projectDir` (absolute, resolved project path), `projectHash`, `worktree`, `status`, `createdAt` (RFC 3339, empty if unknown), `sessionName`, `background`, and `ports` (array of `{containerPort, hostPort, hostIP, protocol}` bindings).
+`enclave ps` prints one row per container with its `NAME` (container name) and `SESSION` (the `--name` session name, or the auto-assigned `1`, `2`, … for extra sessions; `-` for the project's default container); either can be passed to `attach`, `stop`, and `theia`. Flags: `--all` (include stopped containers, not just running ones), `--json` (emit a JSON array instead of the table). The flags compose (`ps --all --json`). Each JSON object has the fields `name`, `tool`, `projectDir` (absolute, resolved project path), `projectHash`, `worktree`, `status`, `createdAt` (RFC 3339, empty if unknown), `sessionName`, `background`, and `ports` (array of `{containerPort, hostPort, hostIP, protocol}` bindings).
 
 `status` reports sessions of the current project (like `exec`); `--all` widens it to every project. Flags: `--tool` and `--name` filter sessions; `--json` emits one machine-readable snapshot object per session (screen text and OSC title for external state detection). Each snapshot captures the trailing 24 screen rows. See [Session status snapshots](session-status.md).
 
-`enclave attach` flags: `--detach-keys <sequence>` overrides the key sequence for detaching from the session (default `ctrl-\`).
+`enclave attach` flags: `--detach-keys <sequence>` overrides the key sequence for detaching from the session (default `ctrl-\`); `--tool` disambiguates a session name used by more than one tool.
 
-`attach`, `stop <name>`, and `theia`/`theia-next` take either the container name
-from `enclave ps` or the session name passed to `--name` (`enclave --background
---name my-task` → `enclave attach my-task`). Session names are matched in their
-sanitized form (lowercased, non-alphanumerics collapsed to `-`, truncated to 32
-characters), so `--name "My Task"` is addressable as `my-task`. Names are
-resolved against the current project first, then against the whole host;
-`--tool` narrows the candidates. Session names are not required to be unique
-across projects — when one matches several containers, the candidates are listed
-and a container name must be passed instead. With no argument, `attach` and
-`theia` select the single running session of the current project.
+`attach`, `stop <name>`, and `theia`/`theia-next` accept the container name from
+`enclave ps`, a container ID, or the session name passed to `--name`
+(`enclave --background --name my-task` → `enclave attach my-task`). Session
+names are matched in sanitized form on both sides (lowercased,
+non-alphanumerics collapsed to `-`, truncated to 32 characters), so a session
+started as `--name "My Task"` is reachable as either `my-task` or `"My Task"`.
+The same holds for the `--name` filter of `ps`, `status`, and `stop`.
+
+Session names are resolved against the current project first (same worktree,
+then same project), then across all projects; they are not required to be
+unique, so when one matches several containers the candidates are listed and a
+container name must be passed instead. `--tool` narrows the candidates. Passing
+a container name or ID always resolves verbatim, independently of the working
+directory and `--tool`.
+
+With no argument, `attach` picks the single detached session of the current
+project (a foreground session is entered with `exec` instead), and `theia` picks
+its single running container.
 
 ### Inspect
 

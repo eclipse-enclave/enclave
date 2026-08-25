@@ -110,14 +110,22 @@ func listPSSessions(ctx context.Context, opts model.Options) ([]backend.Session,
 	if err != nil {
 		return nil, err
 	}
-	return be.List(ctx, psSessionFilterFor(opts))
+	sessions, err := be.List(ctx, psSessionFilterFor(opts))
+	if err != nil {
+		return nil, err
+	}
+	if name := psSessionFilter(opts); name != "" {
+		sessions = sessionsMatchingName(sessions, name)
+	}
+	return sessions, nil
 }
 
 // psSessionFilterFor builds the backend listing filter from the parsed ps
 // options. By default only running containers are listed; --all includes
-// stopped ones as well.
+// stopped ones as well. The session name is not part of it: names are matched
+// in sanitized form, which the backend cannot express as a label filter.
 func psSessionFilterFor(opts model.Options) backend.SessionFilter {
-	filter := backend.SessionFilter{Tool: psToolFilter(opts), SessionName: psSessionFilter(opts)}
+	filter := backend.SessionFilter{Tool: psToolFilter(opts)}
 	if opts.PSAll {
 		filter.All = true
 	} else {
@@ -133,12 +141,11 @@ func psToolFilter(opts model.Options) string {
 	return ""
 }
 
-// psSessionFilter returns the session-name filter in its canonical form: the
-// session label carries the sanitized name, so `--name "My Task"` and `--name
-// my-task` must select the same sessions.
+// psSessionFilter returns the raw `--name` value, if any. Matching sanitizes
+// it together with the recorded session names, so it is passed through here.
 func psSessionFilter(opts model.Options) string {
 	if opts.Sources.SessionName == model.SourceCLI {
-		return model.SanitizeSessionName(opts.SessionName)
+		return strings.TrimSpace(opts.SessionName)
 	}
 	return ""
 }

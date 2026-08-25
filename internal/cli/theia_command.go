@@ -14,7 +14,7 @@ import (
 )
 
 func theiaCommand(res *Result, variant string) *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   variant + " [container-or-session-name]",
 		Short: fmt.Sprintf("Open %s attached to a running enclave container", variant),
 		Long: fmt.Sprintf(`Launch the %s desktop IDE attached to a running enclave container.
@@ -38,4 +38,7 @@ Roots honor $XDG_CONFIG_HOME on Linux (ignored on macOS).`, variant),
 			return nil
 		},
 	}
+	// --tool disambiguates a session name used by more than one tool.
+	addOptionFlagsByName(cmd.Flags(), &res.Options, &res.Sources, "tool")
+	return cmd
 }

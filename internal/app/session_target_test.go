@@ -152,6 +152,159 @@ func TestResolveSessionTargetAutoSelectsWithinProject(t *testing.T) {
 	}
 }
 
+func TestResolveSessionTargetAutoSelectStaysInProject(t *testing.T) {
+	be := &stopTestBackend{sessions: []backend.Session{
+		session("enclave-claude-aaaaaaaaaaaa-my-task", "my-task", "aaaaaaaaaaaa", "/repo/a"),
+	}}
+
+	_, err := resolveSessionTarget(context.Background(), be, sessionTargetQuery{
+		Project: model.Project{Hash: "bbbbbbbbbbbb", Dir: "/repo/b", RealDir: "/repo/b"},
+	})
+	if err == nil {
+		t.Fatal("auto-selection must not leave the current project")
+	}
+}
+
+func TestResolveSessionTargetAutoSelectSkipsForegroundSessions(t *testing.T) {
+	foreground := session("enclave-claude-aaaaaaaaaaaa", "", "aaaaaaaaaaaa", "/repo/a")
+	detached := session("enclave-claude-aaaaaaaaaaaa-my-task", "my-task", "aaaaaaaaaaaa", "/repo/a")
+	detached.Background = true
+	be := &stopTestBackend{sessions: []backend.Session{foreground, detached}}
+	project := model.Project{Hash: "aaaaaaaaaaaa", Dir: "/repo/a", RealDir: "/repo/a"}
+
+	got, err := resolveSessionTarget(context.Background(), be, sessionTargetQuery{
+		Project:        project,
+		BackgroundOnly: true,
+	})
+	if err != nil {
+		t.Fatalf("resolveSessionTarget() error = %v", err)
+	}
+	if got.Ref.Name != detached.Ref.Name {
+		t.Fatalf("resolved %q, want the detached session", got.Ref.Name)
+	}
+
+	be.sessions = []backend.Session{foreground}
+	if _, err := resolveSessionTarget(context.Background(), be, sessionTargetQuery{
+		Project:        project,
+		BackgroundOnly: true,
+	}); err == nil {
+		t.Fatal("a foreground session must not be auto-selected")
+	}
+}
+
+func TestResolveSessionTargetResolvesContainerID(t *testing.T) {
+	target := session("enclave-claude-aaaaaaaaaaaa-my-task", "my-task", "aaaaaaaaaaaa", "/repo/a")
+	target.Ref.ID = "3f2b1c0d4e5f"
+	be := &stopTestBackend{sessions: []backend.Session{target}}
+
+	for _, requested := range []string{"3f2b1c0d4e5f", "3f2b1c0d", "3f2b1c0d4e5f6a7b8c9d"} {
+		got, err := resolveSessionTarget(context.Background(), be, sessionTargetQuery{Requested: requested})
+		if err != nil {
+			t.Fatalf("resolveSessionTarget(%q) error = %v", requested, err)
+		}
+		if got.Ref.Name != target.Ref.Name {
+			t.Fatalf("resolveSessionTarget(%q) = %q, want the container with that ID", requested, got.Ref.Name)
+		}
+	}
+}
+
+func TestResolveSessionTargetPrefersSessionNameOverContainerID(t *testing.T) {
+	named := session("enclave-claude-aaaaaaaaaaaa-deadbeef", "deadbeef", "aaaaaaaaaaaa", "/repo/a")
+	other := session("enclave-claude-bbbbbbbbbbbb-other", "other", "bbbbbbbbbbbb", "/repo/b")
+	other.Ref.ID = "deadbeef1234"
+	be := &stopTestBackend{sessions: []backend.Session{named, other}}
+
+	got, err := resolveSessionTarget(context.Background(), be, sessionTargetQuery{Requested: "deadbeef"})
+	if err != nil {
+		t.Fatalf("resolveSessionTarget() error = %v", err)
+	}
+	if got.Ref.Name != named.Ref.Name {
+		t.Fatalf("resolved %q, want the session name to win over a container ID", got.Ref.Name)
+	}
+}
+
+func TestResolveSessionTargetToolFilterKeepsExactContainerName(t *testing.T) {
+	be := &stopTestBackend{sessions: []backend.Session{
+		session("enclave-codex-aaaaaaaaaaaa-my-task", "my-task", "aaaaaaaaaaaa", "/repo/a"),
+	}}
+
+	got, err := resolveSessionTarget(context.Background(), be, sessionTargetQuery{
+		Requested: "enclave-codex-aaaaaaaaaaaa-my-task",
+		Tool:      "claude",
+	})
+	if err != nil {
+		t.Fatalf("resolveSessionTarget() error = %v", err)
+	}
+	if got.Ref.Name != "enclave-codex-aaaaaaaaaaaa-my-task" {
+		t.Fatalf("resolved %q, want an exact container name to ignore the tool filter", got.Ref.Name)
+	}
+	if be.listFilter.Tool != "" {
+		t.Fatalf("listFilter.Tool = %q, want the tool applied to candidates, not the listing", be.listFilter.Tool)
+	}
+}
+
+func TestResolveSessionTargetToolNarrowsAmbiguousSessionName(t *testing.T) {
+	be := &stopTestBackend{sessions: []backend.Session{
+		session("enclave-claude-aaaaaaaaaaaa-my-task", "my-task", "aaaaaaaaaaaa", "/repo/a"),
+		{
+			Ref:         backend.SessionRef{Name: "enclave-codex-aaaaaaaaaaaa-my-task"},
+			Tool:        "codex",
+			ProjectHash: "aaaaaaaaaaaa",
+			Worktree:    "/repo/a",
+			ProjectDir:  "/repo/a",
+			Name:        "my-task",
+			Status:      "running",
+		},
+	}}
+	project := model.Project{Hash: "aaaaaaaaaaaa", Dir: "/repo/a", RealDir: "/repo/a"}
+
+	if _, err := resolveSessionTarget(context.Background(), be, sessionTargetQuery{
+		Requested: "my-task",
+		Project:   project,
+	}); err == nil {
+		t.Fatal("one name used by two tools in a project must be reported as ambiguous")
+	}
+
+	got, err := resolveSessionTarget(context.Background(), be, sessionTargetQuery{
+		Requested: "my-task",
+		Tool:      "codex",
+		Project:   project,
+	})
+	if err != nil {
+		t.Fatalf("resolveSessionTarget() error = %v", err)
+	}
+	if got.Ref.Name != "enclave-codex-aaaaaaaaaaaa-my-task" {
+		t.Fatalf("resolved %q, want --tool to pick the codex session", got.Ref.Name)
+	}
+}
+
+func TestSessionsMatchingNameSanitizesBothSides(t *testing.T) {
+	sessions := []backend.Session{
+		session("enclave-claude-aaaaaaaaaaaa-my-task", "My Task", "aaaaaaaaaaaa", "/repo/a"),
+		session("enclave-claude-aaaaaaaaaaaa-other", "other", "aaaaaaaaaaaa", "/repo/a"),
+	}
+
+	for _, requested := range []string{"My Task", "my-task"} {
+		matches := sessionsMatchingName(sessions, requested)
+		if len(matches) != 1 || matches[0].Name != "My Task" {
+			t.Fatalf("sessionsMatchingName(%q) = %v, want the session labeled with the raw name", requested, matches)
+		}
+	}
+}
+
+func TestSessionsMatchingNameIgnoresUnsanitizableName(t *testing.T) {
+	sessions := []backend.Session{
+		session("enclave-claude-aaaaaaaaaaaa-my-task", "my-task", "aaaaaaaaaaaa", "/repo/a"),
+		session("enclave-claude-aaaaaaaaaaaa", "", "aaaaaaaaaaaa", "/repo/a"),
+	}
+
+	// A name that sanitizes to nothing must match nothing: `stop --name "???"`
+	// must not turn into "stop everything".
+	if matches := sessionsMatchingName(sessions, "???"); len(matches) != 0 {
+		t.Fatalf("sessionsMatchingName(\"???\") = %v, want no matches", matches)
+	}
+}
+
 func TestResolveSessionTargetListsOnlyRunningByDefault(t *testing.T) {
 	be := &stopTestBackend{}
 

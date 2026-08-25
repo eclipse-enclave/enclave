@@ -30,5 +30,7 @@ func attachCommand(res *Result) *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&detachKeys, "detach-keys", model.DetachKeysDefault, "Override the key sequence for detaching")
+	// --tool disambiguates a session name used by more than one tool.
+	addOptionFlagsByName(cmd.Flags(), &res.Options, &res.Sources, "tool")
 	return cmd
 }

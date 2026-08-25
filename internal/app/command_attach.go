@@ -9,6 +9,7 @@ package app
 
 import (
 	"context"
+	"strings"
 
 	"enclave/internal/backend"
 	"enclave/internal/logx"
@@ -40,6 +41,9 @@ func runAttach(opts model.Options, projectDir string) int {
 		Requested: requested,
 		Tool:      sessionTargetTool(opts),
 		Project:   sessionTargetProject(projectDir),
+		// Without a name, only detached sessions are picked: sharing the TTY of
+		// a foreground session means two terminals fighting over its stdin.
+		BackgroundOnly: strings.TrimSpace(requested) == "",
 	})
 	if err != nil {
 		logx.Errorf("%v", err)

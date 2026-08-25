@@ -197,7 +197,7 @@ func (r *Runtime) prepareExecution() (*ExecutionContext, error) {
 		sessionContainerName := r.containerName()
 		if r.containerExists(sessionContainerName) {
 			if r.containerIsRunning(sessionContainerName) {
-				return nil, fmt.Errorf("session %s already running; stop it first with: %s stop %s", sessionContainerName, model.AppName, sessionContainerName)
+				return nil, fmt.Errorf("session %s already running; stop it first with: %s stop %s", sessionContainerName, model.AppName, r.resolvedSessionName())
 			}
 			logx.Infof("Removing stopped container: %s", sessionContainerName)
 			r.removeStoppedSession(sessionContainerName)
@@ -279,7 +279,7 @@ func (r *Runtime) logContainerStart(containerName string, baseContainerName stri
 		logx.Warnf("Container name %s is already in use; starting new session as %s", baseContainerName, containerName)
 	}
 	if r.run.Background {
-		logx.Successf("Starting background session %q for: %s", r.friendlySessionName(), r.project.Name)
+		logx.Successf("Starting background session %q for: %s", r.resolvedSessionName(), r.project.Name)
 		return
 	}
 	if r.run.Admin {
@@ -814,9 +814,12 @@ func (r *Runtime) containerEnv(ctx *ExecutionContext, interactive bool) []string
 	return env
 }
 
+// sessionDisplayName returns the session name recorded in the session label.
+// It is the sanitized form, so the label, the trailing container-name segment,
+// and the name users pass to `attach`/`stop` always agree.
 func (r *Runtime) sessionDisplayName(containerName string, background bool) string {
 	if background || r.run.SessionName != "" || containerName != r.baseContainerName() {
-		return r.friendlySessionName()
+		return r.resolvedSessionName()
 	}
 	return ""
 }
@@ -836,20 +839,11 @@ func (r *Runtime) resolvedSessionName() string {
 		return r.sessionName
 	}
 	if r.run.SessionName != "" {
-		r.sessionName = sanitizeSessionName(r.run.SessionName)
+		r.sessionName = model.SanitizeSessionName(r.run.SessionName)
 	} else {
 		r.sessionName = r.nextSessionName()
 	}
 	return r.sessionName
-}
-
-// friendlySessionName returns the user-facing session name: the original
-// user-supplied value when set, otherwise the auto-generated name.
-func (r *Runtime) friendlySessionName() string {
-	if r.run.SessionName != "" {
-		return r.run.SessionName
-	}
-	return r.resolvedSessionName()
 }
 
 func hostPortForContainerPort(ports []string, target string) (string, bool) {

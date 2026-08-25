@@ -7,12 +7,14 @@ By default, each `enclave` invocation starts or resumes a session for the curren
 ```bash
 enclave --name my-task           # Named persistent session
 enclave --background             # Detached background session
-enclave attach <container>       # Attach to a background session
+enclave attach my-task           # Attach by session name (or container name)
 enclave continue                 # Continue the latest session
 enclave resume                   # Session picker (falls back to continue)
 ```
 
 If a container name is already in use, a new session starts with a unique name. Use `exec` to attach to the default container name.
+
+Containers are named `enclave-<tool>-<project-hash>-<session>`, so the same session name can be used in several projects. `attach`, `stop <name>`, and `theia` resolve a session name within the current project first; when a name matches containers in more than one project, the candidates are listed and a full container name must be passed.
 
 ## Managing Running Containers
 
@@ -22,6 +24,7 @@ enclave exec --admin             # Attach with limited sudo (apt/dpkg)
 enclave shell                    # Interactive shell in container
 enclave shell --admin            # Shell with limited sudo
 enclave stop                     # Stop background containers
+enclave stop my-task             # Stop one session by name
 ```
 
 Sudo is disabled by default. The `--admin` flag grants limited package-management sudo (apt/dpkg only). Security settings are fixed at container start — `exec` attaches to the existing container as-is.

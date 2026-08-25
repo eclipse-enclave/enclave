@@ -40,6 +40,8 @@ type stopTestBackend struct {
 	stopOpts           backend.StopOptions
 	forceRemoveCalled  bool
 	strictRemoveCalled bool
+	sessions           []backend.Session
+	listFilter         backend.SessionFilter
 }
 
 func (b *stopTestBackend) Name() string { return "test" }
@@ -61,8 +63,9 @@ func (b *stopTestBackend) Run(context.Context, backend.Request, backend.AttachIO
 func (b *stopTestBackend) Start(context.Context, backend.Request) (backend.SessionRef, error) {
 	return backend.SessionRef{}, nil
 }
-func (b *stopTestBackend) List(context.Context, backend.SessionFilter) ([]backend.Session, error) {
-	return nil, nil
+func (b *stopTestBackend) List(_ context.Context, filter backend.SessionFilter) ([]backend.Session, error) {
+	b.listFilter = filter
+	return b.sessions, nil
 }
 func (b *stopTestBackend) Inspect(context.Context, backend.SessionRef) (*backend.Session, error) {
 	return nil, nil

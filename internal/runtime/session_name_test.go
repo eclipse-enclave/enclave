@@ -14,6 +14,33 @@ import (
 	"enclave/internal/model"
 )
 
+func TestSessionDisplayNameMatchesContainerNameSuffix(t *testing.T) {
+	r := &Runtime{
+		profile: model.Profile{Name: "claude"},
+		project: model.Project{Hash: "abc123abc123"},
+		run:     model.RunOptions{Background: true, SessionName: "My Task"},
+	}
+
+	containerName := r.containerName()
+	if containerName != "enclave-claude-abc123abc123-my-task" {
+		t.Fatalf("containerName() = %q", containerName)
+	}
+	if got := r.sessionDisplayName(containerName, true); got != "my-task" {
+		t.Fatalf("sessionDisplayName() = %q, want the sanitized name recorded in the session label", got)
+	}
+}
+
+func TestSessionDisplayNameEmptyForDefaultForegroundContainer(t *testing.T) {
+	r := &Runtime{
+		profile: model.Profile{Name: "claude"},
+		project: model.Project{Hash: "abc123abc123"},
+	}
+
+	if got := r.sessionDisplayName(r.baseContainerName(), false); got != "" {
+		t.Fatalf("sessionDisplayName() = %q, want no session label", got)
+	}
+}
+
 func TestNextSessionNameStartsAtOneWhenDefaultContainerExists(t *testing.T) {
 	r := &Runtime{
 		profile: model.Profile{Name: "claude"},

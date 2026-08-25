@@ -15,12 +15,13 @@ import (
 
 func theiaCommand(res *Result, variant string) *cobra.Command {
 	return &cobra.Command{
-		Use:   variant + " [container-name]",
+		Use:   variant + " [container-or-session-name]",
 		Short: fmt.Sprintf("Open %s attached to a running enclave container", variant),
 		Long: fmt.Sprintf(`Launch the %s desktop IDE attached to a running enclave container.
 
-If [container-name] is omitted, the single running enclave container is used.
-If multiple are running, names are listed and one must be passed explicitly.
+The argument is a container name from `+"`enclave ps`"+` or a session name passed
+to --name. If it is omitted, the single running container of the current project
+is used. If several match, names are listed and one must be passed explicitly.
 
 Preferences are merged from (highest wins):
   - ~/.config/enclave/projects/<hash>/config.json under {"theia":{"preferences":{...}}}

@@ -15,23 +15,37 @@ import (
 	"enclave/internal/model"
 )
 
-func runAttach(run model.RunOptions) int {
+func runAttach(opts model.Options, projectDir string) int {
 	if code := requireDocker(); code != 0 {
 		return code
 	}
 
-	containerName := run.CmdArgs[0]
+	run := opts.RunOptions
+	requested := ""
+	if len(run.CmdArgs) > 0 {
+		requested = run.CmdArgs[0]
+	}
 	detachKeys := model.DetachKeysDefault
 	if len(run.CmdArgs) > 1 && run.CmdArgs[1] != "" {
 		detachKeys = run.CmdArgs[1]
 	}
 
-	be, err := selectBackend(model.Options{RunOptions: run}, dockerBackendOptions(model.Host{}, model.Paths{}, model.BuildOptions{}, run))
+	be, err := selectBackend(opts, dockerBackendOptions(model.Host{}, model.Paths{}, model.BuildOptions{}, run))
 	if err != nil {
 		logx.Errorf("%v", err)
 		return 1
 	}
-	if err := be.Attach(context.Background(), backend.SessionRef{Name: containerName}, backend.AttachIO{DetachKeys: detachKeys}); err != nil {
+	ctx := context.Background()
+	session, err := resolveSessionTarget(ctx, be, sessionTargetQuery{
+		Requested: requested,
+		Tool:      sessionTargetTool(opts),
+		Project:   sessionTargetProject(projectDir),
+	})
+	if err != nil {
+		logx.Errorf("%v", err)
+		return 1
+	}
+	if err := be.Attach(ctx, session.Ref, backend.AttachIO{DetachKeys: detachKeys}); err != nil {
 		logx.Errorf("attach: %v", err)
 		return 1
 	}

@@ -17,10 +17,12 @@ import (
 	"enclave/internal/model"
 )
 
-func runStop(run model.RunOptions) int {
+func runStop(opts model.Options, projectDir string) int {
 	if code := requireDocker(); code != 0 {
 		return code
 	}
+
+	run := opts.RunOptions
 
 	host, hostErr := resolveHost()
 	if hostErr != nil {
@@ -31,19 +33,29 @@ func runStop(run model.RunOptions) int {
 		logx.Warnf("Failed to resolve auth finalization assets: %v", pathsErr)
 	}
 
-	be, err := selectBackend(model.Options{RunOptions: run}, dockerBackendOptions(host, paths, model.BuildOptions{}, run))
+	be, err := selectBackend(opts, dockerBackendOptions(host, paths, model.BuildOptions{}, run))
 	if err != nil {
 		logx.Errorf("%v", err)
 		return 1
 	}
 
 	if len(run.CmdArgs) > 0 && run.CmdArgs[0] != "" {
-		stopContainer(be, run.CmdArgs[0])
+		session, err := resolveSessionTarget(context.Background(), be, sessionTargetQuery{
+			Requested:      run.CmdArgs[0],
+			Tool:           sessionTargetTool(opts),
+			Project:        sessionTargetProject(projectDir),
+			IncludeStopped: true,
+		})
+		if err != nil {
+			logx.Errorf("%v", err)
+			return 1
+		}
+		stopContainer(be, session.Ref.Name)
 		return 0
 	}
 
 	background := true
-	sessions, err := be.List(context.Background(), backend.SessionFilter{All: true, Background: &background, Tool: run.Tool, SessionName: run.SessionName})
+	sessions, err := be.List(context.Background(), backend.SessionFilter{All: true, Background: &background, Tool: run.Tool, SessionName: model.SanitizeSessionName(run.SessionName)})
 	if err != nil {
 		logx.Errorf("Failed to list background sessions: %v", err)
 		return 1

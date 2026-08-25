@@ -102,11 +102,11 @@ func Run(args []string) int {
 	}
 
 	if parsed.Action == "stop" {
-		return runStop(parsed.Options.RunOptions)
+		return runStop(parsed.Options, projectDir)
 	}
 
 	if parsed.Action == "attach" {
-		return runAttach(parsed.Options.RunOptions)
+		return runAttach(parsed.Options, projectDir)
 	}
 
 	if parsed.Action == "review-target" {

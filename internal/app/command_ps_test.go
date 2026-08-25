@@ -299,8 +299,41 @@ func TestRunPSPrintsTable(t *testing.T) {
 	if !strings.Contains(out, "http://localhost:3000") {
 		t.Fatalf("expected rendered open_url in output, got:\n%s", out)
 	}
-	if strings.Contains(out, "SESSION") {
-		t.Fatalf("did not expect session header in output, got:\n%s", out)
+	if !strings.Contains(out, "SESSION") {
+		t.Fatalf("expected session header in output, got:\n%s", out)
+	}
+}
+
+func TestRunPSShowsDashForSessionlessContainer(t *testing.T) {
+	psCheckDocker = func() error { return nil }
+	psNow = func() time.Time {
+		return time.Date(2026, 3, 19, 12, 0, 0, 0, time.UTC)
+	}
+	psSessionList = func(context.Context, model.Options) ([]backend.Session, error) {
+		return []backend.Session{{
+			Ref:         backend.SessionRef{Name: "enclave-codex-abc123abc123"},
+			Tool:        "codex",
+			ProjectHash: "abc123abc123",
+			Worktree:    "/tmp/project-alpha",
+			Status:      "running",
+		}}, nil
+	}
+	psDeclaredPorts = func(string) []model.PortConfig { return nil }
+	t.Cleanup(func() {
+		psCheckDocker = checkDocker
+		psSessionList = listPSSessions
+		psNow = time.Now
+		psDeclaredPorts = declaredPublishedPorts
+	})
+
+	out := captureStdout(t, func() {
+		if code := runPS(model.Options{}); code != 0 {
+			t.Fatalf("runPS() returned %d", code)
+		}
+	})
+
+	if !strings.Contains(out, "enclave-codex-abc123abc123  -") {
+		t.Fatalf("expected a dash in the session column, got:\n%s", out)
 	}
 }
 

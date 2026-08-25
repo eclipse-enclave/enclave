@@ -11,8 +11,8 @@ import "github.com/spf13/cobra"
 
 func stopCommand(res *Result) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "stop [container-name]",
-		Short: "Stop background containers",
+		Use:   "stop [container-or-session-name]",
+		Short: "Stop background containers, or one session by name",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(_ *cobra.Command, cmdArgs []string) error {
 			res.Action = "stop"

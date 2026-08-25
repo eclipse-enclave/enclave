@@ -9,28 +9,12 @@ package runtime
 
 import (
 	"context"
-	"regexp"
 	"strconv"
 	"strings"
 
 	"enclave/internal/backend"
 	"enclave/internal/model"
 )
-
-var nonAlphanumeric = regexp.MustCompile(`[^a-z0-9]+`)
-
-// sanitizeSessionName normalises a user-provided session name to a value safe
-// for use in Docker container names.
-func sanitizeSessionName(name string) string {
-	name = strings.ToLower(strings.TrimSpace(name))
-	name = nonAlphanumeric.ReplaceAllString(name, "-")
-	name = strings.Trim(name, "-")
-	if len(name) > 32 {
-		name = name[:32]
-		name = strings.TrimRight(name, "-")
-	}
-	return name
-}
 
 func isGatewaySidecar(name string) bool {
 	return strings.HasSuffix(name, model.GatewayContainerSuffix)

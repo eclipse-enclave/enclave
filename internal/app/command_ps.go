@@ -133,9 +133,12 @@ func psToolFilter(opts model.Options) string {
 	return ""
 }
 
+// psSessionFilter returns the session-name filter in its canonical form: the
+// session label carries the sanitized name, so `--name "My Task"` and `--name
+// my-task` must select the same sessions.
 func psSessionFilter(opts model.Options) string {
 	if opts.Sources.SessionName == model.SourceCLI {
-		return strings.TrimSpace(opts.SessionName)
+		return model.SanitizeSessionName(opts.SessionName)
 	}
 	return ""
 }
@@ -302,6 +305,16 @@ func renderPSJSON(w io.Writer, sessions []backend.Session) error {
 	return enc.Encode(entries)
 }
 
+// sessionNameDisplay renders the SESSION column: the name accepted by
+// `attach`/`stop`/`theia`, or a dash for the project's default container, which
+// has no session name and is reached with `exec` instead.
+func sessionNameDisplay(sessionName string) string {
+	if trimmed := strings.TrimSpace(sessionName); trimmed != "" {
+		return trimmed
+	}
+	return "-"
+}
+
 func directoryDisplayName(worktreePath string, projectHash string) string {
 	if worktreePath != "" {
 		clean := filepath.Clean(worktreePath)
@@ -345,12 +358,13 @@ func formatPSUptime(createdAt time.Time, now time.Time) string {
 
 func renderPSTable(w io.Writer, rows []psRow) error {
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	if _, err := fmt.Fprintln(tw, "NAME\tTOOL\tDIR\tSTATUS\tUPTIME\tPORTS"); err != nil {
+	if _, err := fmt.Fprintln(tw, "NAME\tSESSION\tTOOL\tDIR\tSTATUS\tUPTIME\tPORTS"); err != nil {
 		return err
 	}
 	for _, row := range rows {
-		if _, err := fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n",
+		if _, err := fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 			row.Name,
+			sessionNameDisplay(row.SessionName),
 			row.Tool,
 			row.Directory,
 			row.Status,

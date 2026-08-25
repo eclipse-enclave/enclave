@@ -85,7 +85,8 @@ choose one to inspect or resume.
 enclave ps
 ```
 
-The `NAME` column in the output is what you pass to `enclave attach`.
+Both the `NAME` (container) and `SESSION` (from `--name`) columns can be passed
+to `enclave attach`.
 
 ## Run in the background and reattach
 
@@ -99,13 +100,19 @@ enclave ps                      # find the running session's container name
 enclave attach <container>      # reattach to its TTY
 ```
 
-Combine `--background` with `--name` when you want a stable, memorable container
-name to reattach to:
+With a single running session in the project, plain `enclave attach` picks it.
+
+Combine `--background` with `--name` when you want a stable, memorable name to
+reattach to:
 
 ```bash
 enclave --background --name my-task
 enclave attach my-task
 ```
+
+Names are resolved within the current project first, so the same `--name` can be
+used in several projects. If a name matches sessions in more than one project,
+Enclave lists the candidate container names instead of guessing.
 
 ### Detach without stopping the session
 

@@ -16,12 +16,16 @@ import (
 func attachCommand(res *Result) *cobra.Command {
 	var detachKeys string
 	cmd := &cobra.Command{
-		Use:   "attach <container-name>",
-		Short: "Attach to a running container",
-		Args:  cobra.ExactArgs(1),
+		Use:   "attach [container-or-session-name]",
+		Short: "Attach to a running session by container name or --name session name",
+		Args:  cobra.MaximumNArgs(1),
 		RunE: func(_ *cobra.Command, cmdArgs []string) error {
 			res.Action = "attach"
-			res.Options.CmdArgs = append(res.Options.CmdArgs, cmdArgs[0], detachKeys)
+			target := ""
+			if len(cmdArgs) > 0 {
+				target = cmdArgs[0]
+			}
+			res.Options.CmdArgs = append(res.Options.CmdArgs, target, detachKeys)
 			return nil
 		},
 	}

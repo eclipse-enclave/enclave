@@ -57,6 +57,27 @@ network:
 		}
 	})
 
+	t.Run("serviceDomains id without serviceAuth fails", func(t *testing.T) {
+		doc := mustDoc(t, `
+schemaVersion: "1"
+kind: mixin
+name: github-cli
+credentials:
+  sources:
+    github-token: { env: [GH_TOKEN] }
+    github-enterprise-token: { env: [GH_ENTERPRISE_TOKEN] }
+network:
+  serviceDomains: { api.github.com: github-token, ghe.com: github-enterprise-token }
+  serviceAuth: { github-token: { headerName: authorization, valueFormat: "Bearer %s" } }
+`)
+		// Without the serviceAuth entry the enterprise token gets no release
+		// rule: ghe.com drops out of the release hosts unioned into the
+		// allowlist and the token is injected raw instead of proxy-swapped.
+		if err := validateServiceAuthMappings(doc, "github-cli/spec.yaml"); err == nil {
+			t.Fatal("expected error for serviceDomains id with no matching network.serviceAuth entry")
+		}
+	})
+
 	t.Run("matching ids pass", func(t *testing.T) {
 		doc := mustDoc(t, `
 schemaVersion: "1"

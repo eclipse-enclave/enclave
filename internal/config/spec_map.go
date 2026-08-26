@@ -17,10 +17,13 @@ import (
 
 // validateServiceAuthMappings fails loudly when a network.serviceAuth or
 // network.serviceDomains service id does not map to a declared
-// credentials.sources id. buildSecrets only walks credentials.sources, so an
-// unmatched id (e.g. a typo) is otherwise silently dropped: the secret ends up
-// with no HTTP release rule and its token is injected as a raw env value
-// instead of a proxy-swapped placeholder — a secret-leak risk.
+// credentials.sources id, or when a serviceDomains id has no serviceAuth entry.
+// buildSecrets only builds an HTTP release rule for ids present in both
+// credentials.sources and network.serviceAuth, so either mismatch (a typo, or a
+// dropped serviceAuth line) is otherwise silently inert: the token is injected
+// as a raw env value instead of a proxy-swapped placeholder — a secret-leak
+// risk — and the serviceDomains hosts drop out of the release hosts unioned
+// into the effective allowlist.
 func validateServiceAuthMappings(doc specDocument, specPath string) error {
 	if doc.Network == nil {
 		return nil
@@ -39,6 +42,9 @@ func validateServiceAuthMappings(doc specDocument, specPath string) error {
 	for host, id := range doc.Network.ServiceDomains {
 		if _, ok := sources[id]; !ok {
 			return fmt.Errorf("%s: network.serviceDomains[%q] references service %q with no matching credentials.sources entry", specPath, host, id)
+		}
+		if _, ok := doc.Network.ServiceAuth[id]; !ok {
+			return fmt.Errorf("%s: network.serviceDomains[%q] references service %q with no matching network.serviceAuth entry (add one, or list the hosts under network.allowedDomains instead)", specPath, host, id)
 		}
 	}
 	return nil

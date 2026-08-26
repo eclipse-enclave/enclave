@@ -8,6 +8,7 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -118,7 +119,12 @@ func ListFeatures(paths model.Paths) ([]model.Extension, error) {
 	for _, name := range names {
 		ext, err := LoadFeatureExtension(paths, name)
 		if err != nil {
-			continue // Skip invalid extensions
+			// A feature dropped here is silently missing from the built image,
+			// so surface why. A directory without a spec is not an error.
+			if !errors.Is(err, os.ErrNotExist) {
+				specWarn(fmt.Sprintf("feature %q: %v; skipping", name, err))
+			}
+			continue
 		}
 		features = append(features, ext)
 	}

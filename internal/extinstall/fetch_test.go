@@ -98,6 +98,54 @@ func TestGitFetcherResolveRefDefaultHead(t *testing.T) {
 	}
 }
 
+// TestParseSymrefHeadIgnoresRemoteTrackingHead covers a local clone as a
+// source. Such a repository advertises refs/remotes/origin/HEAD next to its
+// own HEAD, and only the latter says which branch to follow: pinning to
+// refs/remotes/origin/<branch> records a ref no later fetch can resolve, and
+// tracks a stale copy rather than the branch that moves.
+func TestParseSymrefHeadIgnoresRemoteTrackingHead(t *testing.T) {
+	out := strings.Join([]string{
+		"ref: refs/heads/main\tHEAD",
+		"69dd41f035711f42971f17f29d4b59986700ec2a\tHEAD",
+		"ref: refs/remotes/origin/main\trefs/remotes/origin/HEAD",
+		"8f0bbc7b0db8fe144e01f5af23e331bc7adbb922\trefs/remotes/origin/HEAD",
+	}, "\n")
+
+	got, err := parseSymrefHead(out, "/tmp/clone")
+	if err != nil {
+		t.Fatalf("parseSymrefHead: %v", err)
+	}
+	if got.Ref != "main" {
+		t.Errorf("ref = %q, want the branch the repository's own HEAD names", got.Ref)
+	}
+	if got.Commit != "69dd41f035711f42971f17f29d4b59986700ec2a" {
+		t.Errorf("commit = %q, want HEAD's commit, not the tracking ref's", got.Commit)
+	}
+}
+
+// TestGitFetcherResolveRefFromLocalClone is the end-to-end counterpart: a
+// clone of a clone still resolves to the branch it is actually on.
+func TestGitFetcherResolveRefFromLocalClone(t *testing.T) {
+	origin := fixtureRepo(t, true, map[string]string{"README.md": "hi\n"})
+	fetcher, err := NewGitFetcher()
+	if err != nil {
+		t.Skipf("git fetcher unavailable: %v", err)
+	}
+	clone := filepath.Join(t.TempDir(), "clone")
+	runGitFixture(t, "", "clone", "--quiet", origin, clone)
+
+	got, err := fetcher.ResolveRef(context.Background(), clone, "")
+	if err != nil {
+		t.Fatalf("ResolveRef: %v", err)
+	}
+	if got.Ref != "main" {
+		t.Fatalf("ref = %q, want main", got.Ref)
+	}
+	if got.RefType != RefTypeBranch {
+		t.Fatalf("refType = %q, want branch", got.RefType)
+	}
+}
+
 func TestGitFetcherResolveRefTagAndCommit(t *testing.T) {
 	repo := fixtureRepo(t, true, map[string]string{"README.md": "hi\n"})
 	runGitFixture(t, repo, "tag", "v1.0.0")

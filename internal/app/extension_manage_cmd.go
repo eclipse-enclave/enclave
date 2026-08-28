@@ -34,8 +34,18 @@ func newExtinstallEnv(ctx *AppContext, req extinstall.Request) (extinstall.Env, 
 		Fetcher:   fetcher,
 		Stdin:     os.Stdin,
 		Narration: narrationWriter(req),
+		Style:     extinstall.TerminalStyle(narrationFile(req)),
 		Version:   "enclave " + model.Version,
 	}, nil
+}
+
+// narrationFile is the terminal narration is styled for, or nil under --json,
+// where there is no narration to style.
+func narrationFile(req extinstall.Request) *os.File {
+	if req.JSON {
+		return nil
+	}
+	return os.Stdout
 }
 
 // narrationWriter discards narration under --json, where the result envelope on

@@ -189,8 +189,10 @@ func TestUpdateShowsChangedFileList(t *testing.T) {
 	if len(results) != 1 || results[0].Action != ActionUpdated {
 		t.Fatalf("results = %s", fmtResults(results))
 	}
+	// The status is padded into a column, so the assertions match on the
+	// status and its path rather than on the run of spaces between them.
 	rendered := out.String()
-	for _, want := range []string{"file(s) changed", "modified install.sh", "added new.txt", "removed old.txt"} {
+	for _, want := range []string{"file(s) changed", "modified install.sh", "added    new.txt", "removed  old.txt"} {
 		if !strings.Contains(rendered, want) {
 			t.Errorf("changed-file list missing %q:\n%s", want, rendered)
 		}

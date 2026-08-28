@@ -30,8 +30,11 @@ type Env struct {
 	// which is what a caller whose whole report is the result envelope wants.
 	// It is separate from that envelope, which the caller writes itself.
 	Narration io.Writer
-	Now       func() time.Time
-	Version   string
+	// Style decorates that narration. The zero value is plain text at a
+	// default width, which is what a pipe and a test buffer want.
+	Style   Style
+	Now     func() time.Time
+	Version string
 }
 
 func (e Env) now() time.Time {
@@ -49,12 +52,17 @@ func (e Env) narrate() io.Writer {
 	return e.Narration
 }
 
-// confirm asks the user a yes/no question on the narration stream.
+// confirm asks the user a yes/no question on the narration stream. The answer
+// is followed by a blank line so what happens next starts on a line of its
+// own: a piped stdin echoes nothing, and without this the outcome would be
+// appended to the prompt.
 func (e Env) confirm(question string) (bool, error) {
 	if e.Narration == nil {
 		return false, fmt.Errorf("cannot ask for confirmation without an output stream; pass --yes")
 	}
-	return prompt.Confirm(question, e.Stdin, e.Narration)
+	answer, err := prompt.Confirm(question, e.Stdin, e.Narration)
+	_, _ = fmt.Fprintln(e.Narration)
+	return answer, err
 }
 
 // kindDir is the user extension directory this run installs into.

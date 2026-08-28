@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"enclave/internal/config"
+	"enclave/internal/logx"
 	"enclave/internal/model"
 )
 
@@ -73,7 +74,7 @@ func Add(ctx context.Context, env Env, req Request) ([]ActionResult, error) {
 
 	match, other, skipped := selectKind(classify(repo.Dir(), candidates), req.Kind)
 	for _, entry := range skipped {
-		_, _ = fmt.Fprintf(env.narrate(), "skipping %s: %s\n", displayDir(entry.Dir), entry.Skip)
+		env.outcome(env.Style, markWarn, logx.ColorYellow, "skipping %s: %s", displayDir(entry.Dir), entry.Skip)
 	}
 	if len(match) == 0 {
 		if len(other) > 0 {
@@ -115,6 +116,7 @@ func Add(ctx context.Context, env Env, req Request) ([]ActionResult, error) {
 		}
 		results = append(results, result)
 	}
+	env.summarize(env.Style, req.Kind.Label(), results, req.DryRun)
 	return results, nil
 }
 
@@ -199,14 +201,14 @@ func selectExtensions(env Env, req Request, match []classified) ([]classified, e
 		return match, nil
 	}
 
-	_, _ = fmt.Fprintf(env.narrate(), "found %d %s extensions:\n", len(match), req.Kind.Label())
+	_, _ = fmt.Fprintf(env.narrate(), "\nFound %d %s extensions:\n\n", len(match), req.Kind.Label())
 	for _, entry := range match {
-		_, _ = fmt.Fprintf(env.narrate(), "  %s\n", entry.Name)
+		_, _ = fmt.Fprintf(env.narrate(), "%s%s %s\n", bodyIndent, env.Style.paint(markInfo, logx.ColorDim), entry.Name)
 	}
 	if !req.Interactive {
 		return nil, fmt.Errorf("several %s extensions found; pass --name or --all", req.Kind.Label())
 	}
-	confirmed, err := env.confirm("install all?")
+	confirmed, err := env.confirm(fmt.Sprintf("\n%sInstall all?", bodyIndent))
 	if err != nil {
 		return nil, err
 	}
@@ -298,12 +300,21 @@ func applyPlan(env Env, req Request, plan installPlan, stage *staging) (ActionRe
 	}
 	defer stage.discard(plan.Name)
 
+	// The section opens before any validation so that everything this
+	// extension has to say, warnings and failures included, lands inside its
+	// own block rather than between the previous extension's block and this
+	// one's.
+	env.section(env.Style, plan.Name, fmt.Sprintf("%s @ %s", req.Kind.Label(), ShortCommit(plan.Commit)))
+
 	warnings, err := validateStaged(env, stage, plan.Name)
 	if err != nil {
 		return ActionResult{}, err
 	}
 	for _, warning := range warnings {
-		_, _ = fmt.Fprintf(env.narrate(), "warn: %s\n", warning)
+		env.outcome(env.Style, markWarn, logx.ColorYellow, "%s", warning)
+	}
+	if len(warnings) > 0 {
+		_, _ = fmt.Fprintln(env.narrate())
 	}
 
 	caps, err := inspect(staged, req.Kind)
@@ -313,7 +324,6 @@ func applyPlan(env Env, req Request, plan installPlan, stage *staging) (ActionRe
 	caps.ShadowsBuiltin = builtinExists(env, req.Kind, plan.Name)
 
 	target := stage.finalPath(plan.Name)
-	header := fmt.Sprintf("%s → %s %q @ %s", plan.Source.Display(), req.Kind.Label(), plan.Name, ShortCommit(plan.Commit))
 	var stagedHash string
 	// contentChanged decides what to promise about the image. Both tree hashes
 	// exclude the provenance sidecar, so comparing them answers it exactly; an
@@ -324,18 +334,18 @@ func applyPlan(env Env, req Request, plan installPlan, stage *staging) (ActionRe
 		changes, stagedTree := treeChanges(plan.BeforeTree, staged)
 		stagedHash = stagedTree.Hash
 		contentChanged = plan.BeforeTree == nil || plan.BeforeTree.Hash != stagedHash
-		renderUpdate(env, header, changes, *plan.Before, caps)
+		renderUpdate(env, changes, *plan.Before, caps)
 	} else {
-		caps.render(env.narrate(), header)
+		caps.render(env.narrate(), env.Style, plan.Source.Display())
 	}
 
 	if req.DryRun {
-		_, _ = fmt.Fprintf(env.narrate(), "\ndry run: %s would be written to %s\n", plan.Name, target)
+		env.outcome(env.Style, markInfo, logx.ColorCyan, "dry run: would be written to %s", target)
 		return ActionResult{Name: plan.Name, Action: ActionSkipped, Commit: plan.Commit, Path: target}, nil
 	}
 	if req.Interactive {
 		stage.touch(env)
-		question := fmt.Sprintf("\n%s %s?", verbFor(plan.Action), target)
+		question := fmt.Sprintf("%s%s %s?", bodyIndent, verbFor(plan.Action), target)
 		confirmed, confirmErr := env.confirm(question)
 		if confirmErr != nil {
 			return ActionResult{}, confirmErr
@@ -374,7 +384,7 @@ func applyPlan(env Env, req Request, plan installPlan, stage *staging) (ActionRe
 		return ActionResult{}, err
 	}
 
-	_, _ = fmt.Fprintf(env.narrate(), "%s %s %q at %s\n", plan.Action, req.Kind.Label(), plan.Name, installedPath)
+	env.outcome(env.Style, markOK, logx.ColorGreen, "%s at %s", plan.Action, installedPath)
 	printPostInstallHints(env, req.Kind, plan.Name, caps, contentChanged)
 	return ActionResult{Name: plan.Name, Action: plan.Action, Commit: plan.Commit, Path: installedPath, Warnings: warnings}, nil
 }
@@ -387,18 +397,18 @@ func verbFor(action string) string {
 }
 
 // renderUpdate shows an update's trust summary: the changed-file list
-// followed by the capability diff.
-func renderUpdate(env Env, header string, changedFiles []changedFile, before capabilities, after capabilities) {
-	_, _ = fmt.Fprintf(env.narrate(), "%s\n\n", header)
+// followed by the capability diff. The caller has already opened the section.
+func renderUpdate(env Env, changedFiles []changedFile, before capabilities, after capabilities) {
 	printChangedFiles(env.narrate(), changedFiles)
 	changes := diffCapabilities(before, after)
 	if len(changes) == 0 {
-		_, _ = fmt.Fprintf(env.narrate(), "  no capability changes\n")
+		_, _ = fmt.Fprintf(env.narrate(), "%s%s\n\n", bodyIndent, env.Style.paint("no capability changes", logx.ColorDim))
 		return
 	}
 	for _, change := range changes {
-		_, _ = fmt.Fprintf(env.narrate(), "  %s\n", change)
+		_, _ = fmt.Fprintf(env.narrate(), "%s%s\n", bodyIndent, change)
 	}
+	_, _ = fmt.Fprintln(env.narrate())
 }
 
 // printPostInstallHints tells the user what to do next: the image rebuilds on
@@ -408,13 +418,13 @@ func renderUpdate(env Env, header string, changedFiles []changedFile, before cap
 // content rebuilds nothing and must not say otherwise.
 func printPostInstallHints(env Env, kind model.ExtensionKind, name string, caps capabilities, contentChanged bool) {
 	if contentChanged {
-		_, _ = fmt.Fprintf(env.narrate(), "the next run rebuilds the image\n")
+		env.note(env.Style, "the next run rebuilds the image")
 	}
 	if kind != model.KindFeature {
 		return
 	}
 	if caps.Spec.DefaultEnabled != nil && !*caps.Spec.DefaultEnabled {
-		_, _ = fmt.Fprintf(env.narrate(), "enable it with: enclave --features +%s\n", name)
+		env.note(env.Style, "enable it with: enclave --features +%s", name)
 	}
 }
 

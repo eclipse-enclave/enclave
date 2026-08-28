@@ -198,7 +198,12 @@ func parseSymrefHead(out string, remote string) (RemoteRef, error) {
 		if len(fields) < 2 {
 			continue
 		}
-		if fields[0] == "ref:" && strings.HasSuffix(fields[len(fields)-1], "HEAD") {
+		// The symref target has to be HEAD itself, not merely end in it. A
+		// local clone advertises refs/remotes/origin/HEAD alongside its own
+		// HEAD, and matching on the suffix pinned the install to
+		// refs/remotes/origin/<branch>: a ref name no later fetch resolves,
+		// and a stale tracking ref rather than the branch that moves.
+		if fields[0] == "ref:" && fields[len(fields)-1] == "HEAD" {
 			result.Ref = strings.TrimPrefix(fields[1], "refs/heads/")
 			continue
 		}

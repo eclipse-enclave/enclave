@@ -1,6 +1,7 @@
 {
   "type": "sandbox",
   "name": "mistral-vibe",
+  "display_name": "Mistral Vibe",
   "description": "Mistral Vibe CLI coding assistant",
   "priority": 100
 }

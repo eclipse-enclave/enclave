@@ -157,6 +157,29 @@ func TestResolveToolAndFeatureDirs(t *testing.T) {
 	}
 }
 
+// TestSourceLabel covers the builtin/user/override classification of a
+// resolved extension directory pair.
+func TestSourceLabel(t *testing.T) {
+	cases := []struct {
+		name       string
+		builtinDir string
+		userDir    string
+		want       string
+	}{
+		{"builtin only", "/builtin/foo", "", SourceBuiltin},
+		{"user only", "", "/user/foo", SourceUser},
+		{"both", "/builtin/foo", "/user/foo", SourceOverride},
+		{"neither", "", "", SourceBuiltin},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := SourceLabel(tc.builtinDir, tc.userDir); got != tc.want {
+				t.Errorf("SourceLabel(%q, %q) = %q, want %q", tc.builtinDir, tc.userDir, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestListToolsMergesAndDeduplicates(t *testing.T) {
 	tmp := t.TempDir()
 	builtinTools := filepath.Join(tmp, "extensions", "tools")
@@ -200,6 +223,23 @@ func TestListFeaturesMergesAndDeduplicates(t *testing.T) {
 	want := []string{"shared", "python-dev", "github-cli"}
 	if !reflect.DeepEqual(names, want) {
 		t.Fatalf("ListFeatures names=%v want=%v", names, want)
+	}
+}
+
+func TestListFeaturesSkipsDotDirectories(t *testing.T) {
+	tmp := t.TempDir()
+	builtinFeatures := filepath.Join(tmp, "extensions", "features")
+	userFeatures := filepath.Join(tmp, ".enclave", "extensions", "features")
+	writeTestFile(t, filepath.Join(userFeatures, "foo", SpecFilename), `{"schemaVersion":"1","kind":"mixin","name":"foo"}`)
+	writeTestFile(t, filepath.Join(userFeatures, ".incoming-1234", "foo", SpecFilename), `{"schemaVersion":"1","kind":"mixin","name":"foo"}`)
+
+	paths := model.Paths{FeaturesDir: builtinFeatures, UserFeaturesDir: userFeatures}
+	features, err := ListFeatures(paths)
+	if err != nil {
+		t.Fatalf("ListFeatures: %v", err)
+	}
+	if len(features) != 1 || features[0].Name != "foo" {
+		t.Fatalf("features = %+v, want only foo", features)
 	}
 }
 

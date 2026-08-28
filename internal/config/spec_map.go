@@ -92,6 +92,15 @@ func validateEntrypointArgv(doc specDocument, specPath string) error {
 	return check("args", doc.Sandbox.Entrypoint.Args)
 }
 
+// entrypointCommand renders an entrypoint as a single command string. Args are
+// folded after run because the result is split back into fields by the runtime
+// command builder, so trailing flags in entrypoint.args flow through as
+// additional argv tokens.
+func entrypointCommand(entrypoint *specEntrypoint) string {
+	argv := append(append([]string(nil), entrypoint.Run...), entrypoint.Args...)
+	return strings.Join(argv, " ")
+}
+
 // normalizeInstallUser applies sbx's commands.install default: an omitted or
 // blank user means root ("0").
 func normalizeInstallUser(user string) string {
@@ -101,29 +110,46 @@ func normalizeInstallUser(user string) string {
 	return user
 }
 
+// IsRootInstallUser reports whether a commands.install entry runs as root,
+// applying the omitted-means-root default.
+func IsRootInstallUser(user string) bool {
+	switch normalizeInstallUser(user) {
+	case "0", "root":
+		return true
+	default:
+		return false
+	}
+}
+
+// serviceHostsByID unions network.serviceDomains (host -> id, inverted) with
+// each serviceAuth entry's own Hosts (enclave-native), deduped and sorted per
+// service id. serviceAuth.Hosts covers the multi-service-same-host case (e.g.
+// gitlab's three tokens on the same hosts) that the host->single-service
+// serviceDomains map cannot express.
+func serviceHostsByID(doc specDocument) map[string][]string {
+	hostsByService := map[string][]string{}
+	if doc.Network == nil {
+		return hostsByService
+	}
+	for host, id := range doc.Network.ServiceDomains {
+		hostsByService[id] = append(hostsByService[id], host)
+	}
+	for id, auth := range doc.Network.ServiceAuth {
+		hostsByService[id] = append(hostsByService[id], auth.Hosts...)
+	}
+	for id := range hostsByService {
+		hostsByService[id] = sortDedupeStrings(hostsByService[id])
+	}
+	return hostsByService
+}
+
 // buildSecrets reconstructs model.SecretConfig entries from the split
 // credentials.sources + network.serviceDomains/serviceAuth representation.
 func buildSecrets(doc specDocument) map[string]model.SecretConfig {
 	if doc.Credentials == nil || len(doc.Credentials.Sources) == 0 {
 		return nil
 	}
-	// service-id -> hosts, unioned from serviceDomains (host -> id inversion)
-	// and each serviceAuth entry's own Hosts (enclave-native), then deduped
-	// and sorted. serviceAuth.Hosts covers the multi-service-same-host case
-	// (e.g. gitlab's three tokens on the same hosts) that the host->single-
-	// service serviceDomains map cannot express.
-	hostsByService := map[string][]string{}
-	if doc.Network != nil {
-		for host, id := range doc.Network.ServiceDomains {
-			hostsByService[id] = append(hostsByService[id], host)
-		}
-		for id, auth := range doc.Network.ServiceAuth {
-			hostsByService[id] = append(hostsByService[id], auth.Hosts...)
-		}
-		for id := range hostsByService {
-			hostsByService[id] = sortDedupeStrings(hostsByService[id])
-		}
-	}
+	hostsByService := serviceHostsByID(doc)
 	out := make(map[string]model.SecretConfig, len(doc.Credentials.Sources))
 	for id, src := range doc.Credentials.Sources {
 		sc := model.SecretConfig{EnvVars: append([]string(nil), src.Env...)}
@@ -258,11 +284,7 @@ func specToProfile(doc specDocument) model.Profile {
 	}
 
 	if sb.Entrypoint != nil && len(sb.Entrypoint.Run) > 0 {
-		// Args are folded after Run: Command is later split back into fields by
-		// the runtime command builder, so trailing flags in entrypoint.args flow
-		// through as additional argv tokens rather than being silently dropped.
-		argv := append(append([]string(nil), sb.Entrypoint.Run...), sb.Entrypoint.Args...)
-		p.Command = strings.Join(argv, " ")
+		p.Command = entrypointCommand(sb.Entrypoint)
 	} else {
 		p.Command = doc.Name
 	}
@@ -294,6 +316,7 @@ func specToProfile(doc specDocument) model.Profile {
 func specToExtension(doc specDocument) (model.Extension, extensionManifestState) {
 	ext := model.Extension{
 		Name:        doc.Name,
+		DisplayName: doc.DisplayName,
 		Description: doc.Description,
 		AptPackages: doc.AptPackages,
 		NeedsRoot:   doc.NeedsRoot,

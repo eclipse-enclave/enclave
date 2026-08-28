@@ -40,20 +40,34 @@ func ValidateExtensions(paths model.Paths) (ExtensionValidation, error) {
 	if err := validateBuiltinFeatureExtensions(paths, &result); err != nil {
 		return result, err
 	}
-	if err := validateUserToolExtensions(paths, &result); err != nil {
+	if err := validateUserExtensions(paths, model.KindTool, &result); err != nil {
 		return result, err
 	}
-	if err := validateUserFeatureExtensions(paths, &result); err != nil {
+	if err := validateUserExtensions(paths, model.KindFeature, &result); err != nil {
 		return result, err
 	}
 
 	return result, nil
 }
 
+// ValidateExtensionDir validates the single user extension directory dir as an
+// extension of kind. dir's parent stands in for the kind's user extension root,
+// so built-ins still resolve from paths while nothing else is scanned: that is
+// what lets the extension installer check a staged copy, before the swap,
+// exactly as it would be checked once installed. No built-in pass runs beside
+// it, so spec content is validated even when dir shadows a built-in.
+func ValidateExtensionDir(dir string, kind model.ExtensionKind, paths model.Paths) ExtensionValidation {
+	result := ExtensionValidation{}
+	scoped := withUserExtensionRoot(paths, kind, filepath.Dir(dir))
+	validateUserExtension(scoped, kind, filepath.Base(dir), true, &result)
+	return result
+}
+
 // hasOwnSpecFile reports whether extDir itself (no user-override resolution)
 // contains a spec.yaml or spec.json.
 func hasOwnSpecFile(extDir string) bool {
-	return util.PathExists(filepath.Join(extDir, SpecFilename)) || util.PathExists(filepath.Join(extDir, SpecFilenameJSON))
+	_, ok := ownSpecFile(extDir)
+	return ok
 }
 
 func validateBuiltinToolExtensions(paths model.Paths, result *ExtensionValidation) error {
@@ -63,7 +77,7 @@ func validateBuiltinToolExtensions(paths model.Paths, result *ExtensionValidatio
 	}
 
 	for _, entry := range entries {
-		if !entry.IsDir() {
+		if !isExtensionDir(entry) {
 			continue
 		}
 		name := entry.Name()
@@ -89,11 +103,14 @@ func validateBuiltinToolExtensions(paths model.Paths, result *ExtensionValidatio
 	return nil
 }
 
-func validateUserToolExtensions(paths model.Paths, result *ExtensionValidation) error {
-	if strings.TrimSpace(paths.UserToolsDir) == "" {
+// validateUserExtensions validates every extension in the user extension root
+// of kind, one directory at a time.
+func validateUserExtensions(paths model.Paths, kind model.ExtensionKind, result *ExtensionValidation) error {
+	_, userRoot := ExtensionRoots(paths, kind)
+	if strings.TrimSpace(userRoot) == "" {
 		return nil
 	}
-	entries, err := os.ReadDir(paths.UserToolsDir)
+	entries, err := os.ReadDir(userRoot)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil
@@ -102,48 +119,74 @@ func validateUserToolExtensions(paths model.Paths, result *ExtensionValidation) 
 	}
 
 	for _, entry := range entries {
-		if !entry.IsDir() {
+		if !isExtensionDir(entry) {
 			continue
 		}
-		name := entry.Name()
-		userDir := filepath.Join(paths.UserToolsDir, name)
-		builtinDir, _ := ResolveToolDirs(paths, name)
-		hasBuiltin := builtinDir != ""
+		validateUserExtension(paths, kind, entry.Name(), false, result)
+	}
 
-		if util.IsDir(filepath.Join(userDir, "go")) {
-			result.Warnings = append(result.Warnings, fmt.Sprintf("tool %q: user go/ handlers are ignored (requires recompilation)", name))
-		}
+	return nil
+}
 
-		hasUserSpec := hasOwnSpecFile(userDir)
-		if !hasBuiltin && !hasUserSpec {
-			result.Warnings = append(result.Warnings, fmt.Sprintf("tool %q: missing %s in user extension (skipping)", name, SpecFilename))
-			continue
-		}
+// validateUserExtension validates one user extension of kind. When a built-in
+// of the same name exists, its spec content is validated only if
+// validateOverrideContent is set: the full-tree pass leaves it off because its
+// built-in pass already checked the same merged spec.
+func validateUserExtension(paths model.Paths, kind model.ExtensionKind, name string, validateOverrideContent bool, result *ExtensionValidation) {
+	_, userRoot := ExtensionRoots(paths, kind)
+	userDir := filepath.Join(userRoot, name)
+	builtinDir, _ := ResolveExtensionDirs(paths, kind, name)
+	hasBuiltin := builtinDir != ""
 
-		if !hasBuiltin {
-			// User-only tool: its spec.yaml must be fully self-contained, so
-			// validate identity/profile/settings content directly here (the
-			// builtin pass below never sees this name).
-			validateToolSpecContent(paths, name, result)
-			if !util.PathExists(filepath.Join(userDir, model.InstallScriptFilename)) {
-				result.Warnings = append(result.Warnings, fmt.Sprintf("tool %q: missing %s in user extension", name, model.InstallScriptFilename))
-			}
-			if !util.PathExists(filepath.Join(userDir, model.AllowlistFilename)) {
-				result.Warnings = append(result.Warnings, fmt.Sprintf("tool %q: missing %s in user extension", name, model.AllowlistFilename))
-			}
-		}
-		// When hasBuiltin is true, the builtin pass already validated the
-		// effective (override-resolved) spec content for this name, so a
-		// user override's content is not re-validated here to avoid
-		// reporting the same problem twice.
+	if util.IsDir(filepath.Join(userDir, "go")) {
+		result.Warnings = append(result.Warnings, fmt.Sprintf("%s %q: user go/ handlers are ignored (requires recompilation)", kind.Label(), name))
+	}
 
+	if !hasBuiltin && !hasOwnSpecFile(userDir) {
+		result.Warnings = append(result.Warnings, fmt.Sprintf("%s %q: missing %s in user extension (skipping)", kind.Label(), name, SpecFilename))
+		return
+	}
+	switch {
+	case !hasBuiltin:
+		validateUserOnlyExtension(paths, kind, name, userDir, result)
+	case validateOverrideContent:
+		validateSpecContent(paths, kind, name, result)
+	}
+
+	if kind == model.KindTool {
 		userAllowlistPath := filepath.Join(userDir, model.AllowlistFilename)
 		if util.PathExists(userAllowlistPath) {
 			validateUserAllowlistIncludes(paths, name, userAllowlistPath, result)
 		}
 	}
+}
 
-	return nil
+// validateUserOnlyExtension validates a user extension that shadows no
+// built-in: nothing else ever looks at its spec document, and a tool
+// additionally has to carry the files the build expects to find beside it.
+func validateUserOnlyExtension(paths model.Paths, kind model.ExtensionKind, name string, userDir string, result *ExtensionValidation) {
+	validateSpecContent(paths, kind, name, result)
+	if kind != model.KindTool {
+		return
+	}
+	for _, required := range []string{model.InstallScriptFilename, model.AllowlistFilename} {
+		if !util.PathExists(filepath.Join(userDir, required)) {
+			result.Warnings = append(result.Warnings, fmt.Sprintf("tool %q: missing %s in user extension", name, required))
+		}
+	}
+}
+
+// validateSpecContent validates the effective (override-resolved) spec document
+// for name.
+func validateSpecContent(paths model.Paths, kind model.ExtensionKind, name string, result *ExtensionValidation) {
+	switch kind {
+	case model.KindTool:
+		validateToolSpecContent(paths, name, result)
+	default:
+		if _, err := LoadExtension(paths, kind, name); err != nil {
+			result.Errors = append(result.Errors, fmt.Sprintf("%s %q: invalid %s: %v", kind.Label(), name, SpecFilename, err))
+		}
+	}
 }
 
 // validateToolSpecContent loads the effective (override-resolved) spec.yaml
@@ -194,7 +237,7 @@ func validateBuiltinFeatureExtensions(paths model.Paths, result *ExtensionValida
 	}
 
 	for _, entry := range entries {
-		if !entry.IsDir() {
+		if !isExtensionDir(entry) {
 			continue
 		}
 		name := entry.Name()
@@ -217,51 +260,6 @@ func validateBuiltinFeatureExtensions(paths model.Paths, result *ExtensionValida
 				}
 			}
 		}
-	}
-
-	return nil
-}
-
-func validateUserFeatureExtensions(paths model.Paths, result *ExtensionValidation) error {
-	if strings.TrimSpace(paths.UserFeaturesDir) == "" {
-		return nil
-	}
-	entries, err := os.ReadDir(paths.UserFeaturesDir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		return err
-	}
-
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-		name := entry.Name()
-		userDir := filepath.Join(paths.UserFeaturesDir, name)
-		builtinDir, _ := ResolveFeatureDirs(paths, name)
-		hasBuiltin := builtinDir != ""
-
-		if util.IsDir(filepath.Join(userDir, "go")) {
-			result.Warnings = append(result.Warnings, fmt.Sprintf("feature %q: user go/ handlers are ignored (requires recompilation)", name))
-		}
-
-		hasUserSpec := hasOwnSpecFile(userDir)
-		if !hasBuiltin && !hasUserSpec {
-			result.Warnings = append(result.Warnings, fmt.Sprintf("feature %q: missing %s in user extension (skipping)", name, SpecFilename))
-			continue
-		}
-
-		if !hasBuiltin {
-			// User-only feature: validate its self-contained spec content
-			// (the builtin pass above never sees this name).
-			if _, err := LoadFeatureExtension(paths, name); err != nil {
-				result.Errors = append(result.Errors, fmt.Sprintf("feature %q: invalid %s: %v", name, SpecFilename, err))
-			}
-		}
-		// When hasBuiltin is true, the builtin pass already validated the
-		// effective (override-resolved) spec content for this name.
 	}
 
 	return nil

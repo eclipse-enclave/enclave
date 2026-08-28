@@ -41,11 +41,24 @@ unchanged. See [windows.md](windows.md).
 |---------|-------------|
 | `enclave info` | Show configuration and image details |
 | `enclave config` | Show configuration values |
-| `enclave tools` | List available tool profiles |
-| `enclave features` | List available feature extensions |
+| `enclave tools` | List available tool profiles (`list\|add\|remove\|update` manage installed tool extensions; see below) |
+| `enclave features` | List available feature extensions (`list\|add\|remove\|update` manage installed feature extensions; see below) |
 | `enclave completion <shell>` | Generate shell completion |
 
 `enclave config` flags: `--view <mode>` selects the output view — `matrix` (default), `source` (where each value comes from), `diff` (values overridden by higher precedence), or `effective` (effective values only); `--json` emits JSON output.
+
+### Extensions
+
+`enclave tools` and `enclave features` (bare) are aliases for their `list` subcommand. Every verb below exists for both `enclave tools <verb>` and `enclave features <verb>`; see [Installing Extensions](extensions/installing.md) for the full behavior.
+
+| Command | Flags |
+|---------|-------|
+| `list` | `--json` (machine-readable output) |
+| `add <source>` | `--path <dir>`, `--ref <ref>`, `--name <name>` (repeatable), `--all`, `--yes`/`-y`, `--force`, `--dry-run`, `--json` (requires `--yes`) |
+| `update [<name>...]` | `--ref <ref>` (single extension only), `--yes`/`-y`, `--force`, `--dry-run`, `--json` (requires `--yes`) |
+| `remove <name>...` | `--yes`/`-y`, `--force`, `--json` (requires `--yes`) |
+
+`enclave features update`/`enclave tools update` refresh installed extension **sources**; they are unrelated to the top-level `enclave update`, which rebuilds container **images**.
 
 ### IDE
 

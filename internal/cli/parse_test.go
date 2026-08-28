@@ -15,6 +15,7 @@ import (
 	"testing"
 
 	"enclave/internal/config"
+	"enclave/internal/extinstall"
 	"enclave/internal/model"
 	"enclave/internal/usercmd"
 )
@@ -1450,5 +1451,49 @@ func TestParseValueFlagBeforeNestedCommand(t *testing.T) {
 	}
 	if res.Options.Tool != "codex" {
 		t.Fatalf("expected tool codex, got %s", res.Options.Tool)
+	}
+}
+
+func TestParseFeaturesAdd(t *testing.T) {
+	res, err := Parse([]string{"features", "add", "acme/kits", "--ref", "v1.2.0", "--name", "foo", "--yes"}, model.Options{})
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if res.Action != ActionExtensionManage {
+		t.Fatalf("action = %q", res.Action)
+	}
+	if res.ExtRequest == nil {
+		t.Fatal("ExtRequest is nil")
+	}
+	if res.ExtRequest.Kind != model.KindFeature || res.ExtRequest.Op != extinstall.OpAdd {
+		t.Fatalf("request = %+v", *res.ExtRequest)
+	}
+	if res.ExtRequest.Source != "acme/kits" || res.ExtRequest.Ref != "v1.2.0" {
+		t.Fatalf("request = %+v", *res.ExtRequest)
+	}
+	if len(res.ExtRequest.Names) != 1 || res.ExtRequest.Names[0] != "foo" || !res.ExtRequest.Yes {
+		t.Fatalf("request = %+v", *res.ExtRequest)
+	}
+}
+
+func TestParseToolsAddRequiresSource(t *testing.T) {
+	if _, err := Parse([]string{"tools", "add"}, model.Options{}); err == nil {
+		t.Fatal("tools add without a source was accepted")
+	}
+}
+
+func TestParseFeaturesUnknownSubcommand(t *testing.T) {
+	if _, err := Parse([]string{"features", "bogus"}, model.Options{}); err == nil {
+		t.Fatal("unknown subcommand was accepted")
+	}
+}
+
+func TestParseFeaturesBareStillLists(t *testing.T) {
+	res, err := Parse([]string{"features"}, model.Options{})
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if res.Action != "features" || res.ExtRequest != nil {
+		t.Fatalf("action = %q, request = %+v", res.Action, res.ExtRequest)
 	}
 }

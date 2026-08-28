@@ -40,6 +40,10 @@ func Run(args []string) int {
 	baseOpts := config.DefaultOptions()
 	parsed, err := cli.Parse(args, baseOpts, userCmds...)
 	if err != nil {
+		// Under --json a rejected request still owes stdout one result envelope.
+		if parsed.Action == cli.ActionExtensionManage && parsed.ExtRequest != nil {
+			return reportExtensionResults(*parsed.ExtRequest, nil, err)
+		}
 		logx.Errorf("%v", err)
 		return 1
 	}
@@ -139,6 +143,7 @@ func Run(args []string) int {
 		HasToolDefaults:  hasToolDefaults,
 		ConfigView:       parsed.ConfigView,
 		UserCommandMount: userCommandMount,
+		ExtRequest:       parsed.ExtRequest,
 	}
 	return dispatchCommand(&command)
 }

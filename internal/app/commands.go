@@ -8,7 +8,9 @@
 package app
 
 import (
+	"enclave/internal/cli"
 	"enclave/internal/config"
+	"enclave/internal/extinstall"
 	"enclave/internal/logx"
 	"enclave/internal/model"
 )
@@ -18,6 +20,9 @@ type CommandInput struct {
 	Action  string
 	Options model.Options
 	Sources model.OptionSources
+	// ExtRequest is the parsed extension-management request; nil for the verbs
+	// that have none.
+	ExtRequest *extinstall.Request
 	// CLIOptions/CLISources hold the parsed CLI state before global/project/
 	// tool-override defaults are layered on. The `update` command re-resolves
 	// these per target tool so each image matches a `--tool <tool>` run.
@@ -55,11 +60,13 @@ func dispatchCommand(input *CommandInput) int {
 	case "validate-extensions":
 		return runValidateExtensions(input.Ctx)
 	case "tools":
-		return runTools(input.Ctx, input.Options, input.Sources)
+		return runTools(input.Ctx, input.ExtRequest, input.Options, input.Sources)
 	case "features":
-		return runFeatures(input.Ctx, input.Options, input.Sources)
+		return runFeatures(input.Ctx, input.ExtRequest, input.Options, input.Sources)
 	case "extension-list":
 		return runExtensionList(input.Ctx)
+	case cli.ActionExtensionManage:
+		return runExtensionManage(input.Ctx, input.ExtRequest)
 	case "update":
 		return runUpdate(input)
 	case "devcontainer-generate":

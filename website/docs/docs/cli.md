@@ -27,6 +27,9 @@ covers the core commands available today; it will grow as the surface stabilizes
 | `enclave ps` | List the sessions that are currently running. |
 | `enclave --background` | Start a session detached from your terminal. |
 | `enclave attach <container>` | Attach to a running session (default detach key: `Ctrl-\`). |
+| `enclave tools list` | List the available agents, built-in and installed. |
+| `enclave features list` | List the optional features you can enable. |
+| `enclave tools add <source>` | Install an agent from a git repository (same for `features`). |
 
 ## Start a session
 
@@ -66,6 +69,45 @@ Code, Codex, Theia AI, OpenCode, and more.
 ```bash
 enclave --tool codex
 ```
+
+## Add your own agents and features
+
+Agents and optional features ship as extensions: a directory with a `spec.yaml`
+that describes how the software is installed, how it authenticates, and which
+domains it may reach. List what you have, including anything you added yourself:
+
+```bash
+enclave tools list
+enclave features list
+```
+
+Install one from any git repository, by `owner/repo` shorthand, a full clone URL,
+or a local path:
+
+```bash
+enclave tools add acme/kits
+enclave features add ./my-kits
+```
+
+Enclave scans the repository for matching extensions and installs the one it
+finds. When there are several, it asks which one you meant, or you select with
+`--name` and take all of them with `--all`.
+
+An extension runs code when the container is built and started, so Enclave shows
+what it can do before writing anything: whether it needs root, runs an install or
+startup script, widens the network allowlist, declares credentials, or seeds
+files into your project. `--yes` skips the confirmation, never the summary.
+
+Refresh installed extensions from the source they came from, or remove them
+again:
+
+```bash
+enclave tools update            # all of them, or name the ones you want
+enclave tools remove my-agent
+```
+
+`update` refreshes the extension on your host. The image is rebuilt the next time
+you start a session that uses it.
 
 ## Resume a previous session
 

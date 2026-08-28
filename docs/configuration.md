@@ -10,6 +10,12 @@ Project overrides live outside the worktree so a project cannot alter its own
 isolation policy. Extension files are discovered from built-in `extensions/`
 plus user-global `~/.config/enclave/extensions/`.
 
+Extensions installed with `enclave tools|features add` carry a
+`.enclave-source.json` provenance sidecar in their user-global directory.
+Editing an installed extension's files by hand blocks
+`enclave tools|features update` for that extension until `--force`. See
+[Installing Extensions](extensions/installing.md).
+
 The `~/.config/enclave/` paths shown throughout this document are the Linux
 (XDG) config root. On macOS the config root is
 `~/Library/Application Support/org.eclipse.enclave/config/` instead;

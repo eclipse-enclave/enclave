@@ -13,10 +13,13 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
+	"strings"
 
 	"github.com/spf13/cobra"
 
 	"enclave/internal/config"
+	"enclave/internal/extinstall"
 	"enclave/internal/model"
 )
 
@@ -158,6 +161,22 @@ func registerCompletions(rootCmd *cobra.Command) error {
 		updateCmd.ValidArgsFunction = toolCompleter
 	}
 
+	// add --name names an extension in the source, not on this host; installed
+	// names are only a hint for re-adding one.
+	for _, kind := range []model.ExtensionKind{model.KindFeature, model.KindTool} {
+		completer := installedExtensionCompleter(kind)
+		for _, sub := range []string{"remove", "update"} {
+			if cmd := findSubCommand(rootCmd, kind.Verb(), sub); cmd != nil {
+				cmd.ValidArgsFunction = completer
+			}
+		}
+		if cmd := findSubCommand(rootCmd, kind.Verb(), "add"); cmd != nil {
+			if err := cmd.RegisterFlagCompletionFunc("name", completer); err != nil {
+				return err
+			}
+		}
+	}
+
 	// `config --view` accepts a fixed set of render modes. The flag lives on the
 	// `config` leaf command, not in the shared option set, so register it here
 	// rather than via the completers map above.
@@ -175,6 +194,34 @@ func registerCompletions(rootCmd *cobra.Command) error {
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// installedExtensionCompleter completes the user-installed extension names of
+// kind.
+func installedExtensionCompleter(kind model.ExtensionKind) flagCompletionFunc {
+	return func(_ *cobra.Command, _ []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		paths, err := config.ResolvePaths()
+		if err != nil {
+			return nil, cobra.ShellCompDirectiveNoFileComp
+		}
+		// Completion runs on every keystroke: names and source labels only, no
+		// provenance sidecar and no hashing of installed content.
+		inventory, err := extinstall.Inventory(paths, kind, nil, extinstall.InventoryNames)
+		if err != nil {
+			return nil, cobra.ShellCompDirectiveNoFileComp
+		}
+		names := make([]string, 0, len(inventory))
+		for name, entry := range inventory {
+			if entry.Source == config.SourceBuiltin {
+				continue
+			}
+			if strings.HasPrefix(name, toComplete) {
+				names = append(names, name)
+			}
+		}
+		sort.Strings(names)
+		return names, cobra.ShellCompDirectiveNoFileComp
+	}
 }
 
 func staticValuesCompleter(values ...string) flagCompletionFunc {

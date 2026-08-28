@@ -14,6 +14,8 @@ import (
 	"sort"
 	"strings"
 
+	"enclave/internal/config"
+	"enclave/internal/logx"
 	"enclave/internal/model"
 	"enclave/internal/util"
 )
@@ -106,6 +108,13 @@ func generateFeatureInstallBlock(features []featureInstall) string {
 		if name == "" {
 			continue
 		}
+		if err := config.ValidateExtensionName(name); err != nil {
+			// The name is interpolated into a COPY path and a shell-form RUN,
+			// neither of which can quote its way out of a newline. Installed
+			// extensions are checked on the way in; a hand-placed directory is not.
+			logx.Warnf("skipping feature: %v", err)
+			continue
+		}
 		fmt.Fprintf(&b, "# feature: %s (priority %d)\n", name, feature.Priority)
 		b.WriteString("USER root\n")
 		featureSource := "extensions/features/" + name
@@ -115,11 +124,11 @@ func generateFeatureInstallBlock(features []featureInstall) string {
 		if feature.HasApt {
 			b.WriteString("RUN --mount=type=cache,id=enclave-apt-cache,target=/var/cache/apt,sharing=locked \\\n")
 			b.WriteString("    --mount=type=cache,id=enclave-apt-lib,target=/var/lib/apt,sharing=locked \\\n")
-			fmt.Fprintf(&b, "    FEATURES=%q /opt/enclave/build-scripts/install-feature-apt-packages.sh\n", name)
+			fmt.Fprintf(&b, "    FEATURES=%s /opt/enclave/build-scripts/install-feature-apt-packages.sh\n", util.ShellQuote(name))
 		}
 		if feature.HasScript {
 			if feature.NeedsRoot {
-				fmt.Fprintf(&b, "RUN FEATURES=%q \\\n", name)
+				fmt.Fprintf(&b, "RUN FEATURES=%s \\\n", util.ShellQuote(name))
 				b.WriteString("    ENCLAVE_FEATURE_PHASE=root \\\n")
 				b.WriteString("    /opt/enclave/build-scripts/run-feature-installs.sh\n")
 			} else {
@@ -127,7 +136,7 @@ func generateFeatureInstallBlock(features []featureInstall) string {
 				b.WriteString("RUN --mount=type=cache,id=enclave-npm-${USER_ID},target=/home/${USERNAME}/.npm,uid=${USER_ID},gid=${GROUP_ID} \\\n")
 				b.WriteString("    --mount=type=cache,id=enclave-gomod-${USER_ID},target=/home/${USERNAME}/go/pkg/mod,uid=${USER_ID},gid=${GROUP_ID} \\\n")
 				b.WriteString("    --mount=type=cache,id=enclave-uv-${USER_ID},target=/home/${USERNAME}/.cache/uv,uid=${USER_ID},gid=${GROUP_ID} \\\n")
-				fmt.Fprintf(&b, "    FEATURES=%q \\\n", name)
+				fmt.Fprintf(&b, "    FEATURES=%s \\\n", util.ShellQuote(name))
 				b.WriteString("    ENCLAVE_FEATURE_PHASE=user \\\n")
 				b.WriteString("    /opt/enclave/build-scripts/run-feature-installs.sh\n")
 			}
@@ -135,7 +144,7 @@ func generateFeatureInstallBlock(features []featureInstall) string {
 		if feature.HasInstallCommands {
 			if feature.InstallCommandsNeedRoot {
 				b.WriteString("USER root\n")
-				fmt.Fprintf(&b, "RUN FEATURES=%q \\\n", name)
+				fmt.Fprintf(&b, "RUN FEATURES=%s \\\n", util.ShellQuote(name))
 				b.WriteString("    ENCLAVE_AGENT_USER=${USERNAME} \\\n")
 				b.WriteString("    /opt/enclave/build-scripts/install-extension-commands.sh\n")
 			} else {
@@ -143,7 +152,7 @@ func generateFeatureInstallBlock(features []featureInstall) string {
 				b.WriteString("RUN --mount=type=cache,id=enclave-npm-${USER_ID},target=/home/${USERNAME}/.npm,uid=${USER_ID},gid=${GROUP_ID} \\\n")
 				b.WriteString("    --mount=type=cache,id=enclave-gomod-${USER_ID},target=/home/${USERNAME}/go/pkg/mod,uid=${USER_ID},gid=${GROUP_ID} \\\n")
 				b.WriteString("    --mount=type=cache,id=enclave-uv-${USER_ID},target=/home/${USERNAME}/.cache/uv,uid=${USER_ID},gid=${GROUP_ID} \\\n")
-				fmt.Fprintf(&b, "    FEATURES=%q \\\n", name)
+				fmt.Fprintf(&b, "    FEATURES=%s \\\n", util.ShellQuote(name))
 				b.WriteString("    /opt/enclave/build-scripts/install-extension-commands.sh\n")
 			}
 		}
@@ -196,6 +205,11 @@ func generateToolInstallBlock(tools []string, stamps map[string]string, forceToo
 		}
 		if seen[name] {
 			return "", fmt.Errorf("duplicate tool: %s", name)
+		}
+		if err := config.ValidateExtensionName(name); err != nil {
+			// A tool name becomes a build stage name and an unquoted operand of
+			// enclave-install-tool.
+			return "", err
 		}
 		seen[name] = true
 		stamp := stamps[name]

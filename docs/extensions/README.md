@@ -24,8 +24,10 @@ Extension definitions are loaded from:
 2. User-global overrides under `~/.config/enclave/extensions/`
 
 Project-local extension definitions (for example,
-`/path/to/project/.enclave/extensions/`) are not loaded. Install custom
-definitions in the user-global root. Select a custom tool for a project with
+`/path/to/project/.enclave/extensions/`) are not loaded. Install extensions
+into the user-global root from a git repository with `enclave features add`
+/ `enclave tools add`; see [Installing Extensions](installing.md). Select a
+custom tool for a project with
 `enclave --tool <tool>`; project config cannot set the active tool, although
 global config can set a host-wide default. For a project-specific feature,
 declare it with `defaultEnabled: false` (to avoid the project-specific

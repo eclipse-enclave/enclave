@@ -119,7 +119,9 @@ func TestAnyRootInstallUser(t *testing.T) {
 		want  bool
 	}{
 		{nil, false},
-		{[]string{""}, false},
+		// An empty user is root, matching install-extension-commands.sh's
+		// `.user // "0"`.
+		{[]string{""}, true},
 		{[]string{"agent", "1000"}, false},
 		{[]string{"", "root"}, true},
 		{[]string{"0"}, true},

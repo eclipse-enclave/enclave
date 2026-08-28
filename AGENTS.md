@@ -18,7 +18,7 @@ Read `README.md` before making user-facing changes.
 
 ## External Integrations
 
-- Treat CLI JSON schemas, background-run output, lifecycle commands, container naming, and managed tmux behavior as integration contracts for external consumers; coordinate breaking changes.
+- Treat CLI JSON schemas, background-run output, lifecycle commands, container naming, and managed tmux behavior as integration contracts for external consumers; coordinate breaking changes. This includes `enclave tools|features list --json` and the shared `add`/`update`/`remove` result envelope (both `schemaVersion: "1"`; see `docs/extensions/installing.md`).
 - Prefer structured CLI output over Docker labels or human-readable output for integration contracts.
 
 ## Build and Test
@@ -77,6 +77,7 @@ Do not push, publish releases, or modify remote issues/PRs unless the maintainer
 - Full host config overrides use `~/.config/enclave/tools/<tool>/` globally and `~/.config/enclave/projects/<hash>/<tool>/config/` per project.
 - JSON/TOML patches mirror native paths under `~/.config/enclave/patches/<tool>/` globally and `~/.config/enclave/projects/<hash>/patches/<tool>/` per project.
 - Shared skills use `~/.config/enclave/skills/<skill>/` globally and `~/.config/enclave/projects/<hash>/skills/<skill>/` per project; tool-specific skills use the canonical tool config roots at the native skills path. Enabled features contribute their `skills/` between tool-extension skills and the shared sources; see `docs/configuration.md` for the full precedence order.
+- Extensions can be installed from a git repository with `enclave features|tools add`; provenance lives in `.enclave-source.json` in the installed extension directory and is excluded from the build context and image hash. See `docs/extensions/installing.md`.
 
 ## Host Data
 

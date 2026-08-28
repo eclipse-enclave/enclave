@@ -17,9 +17,7 @@ import (
 )
 
 func TestValidateExtensionsUserAllowlistInvalidIncludeErrors(t *testing.T) {
-	tmp := t.TempDir()
-	paths := testValidationPaths(tmp)
-	ensureValidationDirs(t, paths)
+	paths := newValidationPaths(t)
 	createValidToolExtension(t, paths.ToolsDir, "claude")
 	writeValidationFile(t, filepath.Join(paths.UserToolsDir, "claude", model.AllowlistFilename), "conf-file=/tmp/not-allowed.conf\n")
 
@@ -33,9 +31,7 @@ func TestValidateExtensionsUserAllowlistInvalidIncludeErrors(t *testing.T) {
 }
 
 func TestValidateExtensionsUserAllowlistBuiltInIncludeAccepted(t *testing.T) {
-	tmp := t.TempDir()
-	paths := testValidationPaths(tmp)
-	ensureValidationDirs(t, paths)
+	paths := newValidationPaths(t)
 	createValidToolExtension(t, paths.ToolsDir, "claude")
 	writeValidationFile(t, filepath.Join(paths.AllowlistsDir, "fragments", "base.conf"), "server=/example.com/8.8.8.8\n")
 	writeValidationFile(t, filepath.Join(paths.UserToolsDir, "claude", model.AllowlistFilename), "conf-file=/etc/dnsmasq.allowlists/fragments/base.conf\n")
@@ -50,9 +46,7 @@ func TestValidateExtensionsUserAllowlistBuiltInIncludeAccepted(t *testing.T) {
 }
 
 func TestValidateExtensionsUserGoDirWarnsAndPartialOverrideNeedsNoManifest(t *testing.T) {
-	tmp := t.TempDir()
-	paths := testValidationPaths(tmp)
-	ensureValidationDirs(t, paths)
+	paths := newValidationPaths(t)
 	createValidToolExtension(t, paths.ToolsDir, "claude")
 	writeValidationFile(t, filepath.Join(paths.UserToolsDir, "claude", "go", "README.md"), "ignored\n")
 	writeValidationFile(t, filepath.Join(paths.UserToolsDir, "claude", "templates", "custom.json"), "{}\n")
@@ -73,9 +67,7 @@ func TestValidateExtensionsUserGoDirWarnsAndPartialOverrideNeedsNoManifest(t *te
 }
 
 func TestValidateExtensionsUserOnlyToolMissingSpecWarnsAndSkips(t *testing.T) {
-	tmp := t.TempDir()
-	paths := testValidationPaths(tmp)
-	ensureValidationDirs(t, paths)
+	paths := newValidationPaths(t)
 	// A user-only tool directory that exists but never got a spec.yaml (for
 	// example, a leftover README from a partial/abandoned override) should be
 	// skipped with a warning rather than validated.
@@ -94,9 +86,7 @@ func TestValidateExtensionsUserOnlyToolMissingSpecWarnsAndSkips(t *testing.T) {
 }
 
 func TestValidateExtensionsBuiltinToolMissingSpecErrors(t *testing.T) {
-	tmp := t.TempDir()
-	paths := testValidationPaths(tmp)
-	ensureValidationDirs(t, paths)
+	paths := newValidationPaths(t)
 	// A builtin tool directory with supporting files but no spec.yaml at all.
 	writeValidationFile(t, filepath.Join(paths.ToolsDir, "broken", model.InstallScriptFilename), "#!/usr/bin/env bash\n")
 	writeValidationFile(t, filepath.Join(paths.ToolsDir, "broken", model.AllowlistFilename), "server=/example.com/8.8.8.8\n")
@@ -111,9 +101,7 @@ func TestValidateExtensionsBuiltinToolMissingSpecErrors(t *testing.T) {
 }
 
 func TestValidateExtensionsBuiltinToolBadIdentityErrors(t *testing.T) {
-	tmp := t.TempDir()
-	paths := testValidationPaths(tmp)
-	ensureValidationDirs(t, paths)
+	paths := newValidationPaths(t)
 	// spec.yaml's name field does not match its directory name.
 	writeValidationFile(t, filepath.Join(paths.ToolsDir, "claude", SpecFilename), toolSpecYAML("wrong-name"))
 	writeValidationFile(t, filepath.Join(paths.ToolsDir, "claude", model.InstallScriptFilename), "#!/usr/bin/env bash\n")
@@ -129,9 +117,7 @@ func TestValidateExtensionsBuiltinToolBadIdentityErrors(t *testing.T) {
 }
 
 func TestValidateExtensionsBuiltinToolBadIdentityReportedOnce(t *testing.T) {
-	tmp := t.TempDir()
-	paths := testValidationPaths(tmp)
-	ensureValidationDirs(t, paths)
+	paths := newValidationPaths(t)
 	// A tool whose spec.yaml name mismatches its directory fails to load as both
 	// a model.Extension and a model.Profile — both call LoadSpec, which surfaces
 	// the same identity error. It must be reported exactly once, not per load.
@@ -155,9 +141,7 @@ func TestValidateExtensionsBuiltinToolBadIdentityReportedOnce(t *testing.T) {
 }
 
 func TestValidateExtensionsBuiltinToolBadSettingsErrors(t *testing.T) {
-	tmp := t.TempDir()
-	paths := testValidationPaths(tmp)
-	ensureValidationDirs(t, paths)
+	paths := newValidationPaths(t)
 	writeValidationFile(t, filepath.Join(paths.ToolsDir, "claude", SpecFilename), `
 schemaVersion: "1"
 kind: sandbox
@@ -180,9 +164,7 @@ sandbox:
 }
 
 func TestValidateExtensionsBuiltinToolMissingSettingsTemplateErrors(t *testing.T) {
-	tmp := t.TempDir()
-	paths := testValidationPaths(tmp)
-	ensureValidationDirs(t, paths)
+	paths := newValidationPaths(t)
 	writeValidationFile(t, filepath.Join(paths.ToolsDir, "claude", SpecFilename), `
 schemaVersion: "1"
 kind: sandbox
@@ -205,9 +187,7 @@ sandbox:
 }
 
 func TestValidateExtensionsBuiltinFeatureMissingSpecErrors(t *testing.T) {
-	tmp := t.TempDir()
-	paths := testValidationPaths(tmp)
-	ensureValidationDirs(t, paths)
+	paths := newValidationPaths(t)
 	writeValidationFile(t, filepath.Join(paths.FeaturesDir, "broken-feature", model.InstallScriptFilename), "#!/usr/bin/env bash\n")
 
 	validation, err := ValidateExtensions(paths)
@@ -220,9 +200,7 @@ func TestValidateExtensionsBuiltinFeatureMissingSpecErrors(t *testing.T) {
 }
 
 func TestValidateExtensionsBuiltinFeatureBadIdentityErrors(t *testing.T) {
-	tmp := t.TempDir()
-	paths := testValidationPaths(tmp)
-	ensureValidationDirs(t, paths)
+	paths := newValidationPaths(t)
 	writeValidationFile(t, filepath.Join(paths.FeaturesDir, "devtools", SpecFilename), `
 schemaVersion: "1"
 kind: mixin
@@ -238,6 +216,52 @@ name: wrong-name
 	}
 }
 
+func TestValidateExtensionsSkipsDotDirectories(t *testing.T) {
+	paths := newValidationPaths(t)
+	writeValidationFile(t, filepath.Join(paths.UserFeaturesDir, ".incoming-99", "foo", SpecFilename), `{"schemaVersion":"1","kind":"mixin","name":"foo"}`)
+
+	result, err := ValidateExtensions(paths)
+	if err != nil {
+		t.Fatalf("ValidateExtensions: %v", err)
+	}
+	if len(result.Errors) != 0 || len(result.Warnings) != 0 {
+		t.Fatalf("expected no findings for a dot directory, got %+v", result)
+	}
+}
+
+// TestValidateExtensionDirReportsOnlyThatDirectory covers what the extension
+// installer needs: the staged copy it just wrote is validated, and nothing
+// beside it is — not a built-in, and not another directory in the same root.
+func TestValidateExtensionDirReportsOnlyThatDirectory(t *testing.T) {
+	paths := newValidationPaths(t)
+	writeValidationFile(t, filepath.Join(paths.UserFeaturesDir, "broken", SpecFilename), "schemaVersion: \"1\"\nkind: mixin\nname: mismatched\n")
+	writeValidationFile(t, filepath.Join(paths.UserFeaturesDir, "sound", SpecFilename), "schemaVersion: \"1\"\nkind: mixin\nname: sound\n")
+
+	result := ValidateExtensionDir(filepath.Join(paths.UserFeaturesDir, "broken"), model.KindFeature, paths)
+	if len(result.Errors) != 1 || !containsText(result.Errors, "feature \"broken\"") {
+		t.Fatalf("expected exactly one error for the named directory, got %+v", result)
+	}
+
+	result = ValidateExtensionDir(filepath.Join(paths.UserFeaturesDir, "sound"), model.KindFeature, paths)
+	if len(result.Errors) != 0 || len(result.Warnings) != 0 {
+		t.Fatalf("expected no findings for a valid directory, got %+v", result)
+	}
+}
+
+// TestValidateExtensionDirValidatesShadowingOverride covers a staged install
+// that shadows a built-in: no built-in pass runs beside it, so an invalid spec
+// has to be caught here.
+func TestValidateExtensionDirValidatesShadowingOverride(t *testing.T) {
+	paths := newValidationPaths(t)
+	createValidToolExtension(t, paths.ToolsDir, "claude")
+	writeValidationFile(t, filepath.Join(paths.UserToolsDir, "claude", SpecFilename), toolSpecYAML("wrong-name"))
+
+	result := ValidateExtensionDir(filepath.Join(paths.UserToolsDir, "claude"), model.KindTool, paths)
+	if !containsText(result.Errors, "tool \"claude\": invalid spec.yaml") {
+		t.Fatalf("expected the shadowing override's spec to be validated, got %+v", result)
+	}
+}
+
 // TestValidateExtensionsRealTreeHasZeroErrors ensures every built-in tool and
 // feature manifest validates cleanly.
 func TestValidateExtensionsRealTreeHasZeroErrors(t *testing.T) {
@@ -250,6 +274,14 @@ func TestValidateExtensionsRealTreeHasZeroErrors(t *testing.T) {
 	if len(validation.Errors) != 0 {
 		t.Fatalf("expected zero errors validating the real extensions/ tree, got: %v", validation.Errors)
 	}
+}
+
+func newValidationPaths(t *testing.T) model.Paths {
+	t.Helper()
+	tmp := t.TempDir()
+	paths := testValidationPaths(tmp)
+	ensureValidationDirs(t, paths)
+	return paths
 }
 
 func testValidationPaths(root string) model.Paths {

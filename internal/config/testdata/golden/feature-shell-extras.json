@@ -1,6 +1,7 @@
 {
   "type": "mixin",
   "name": "shell-extras",
+  "display_name": "Shell Extras",
   "description": "Enhanced shell experience (zsh, oh-my-zsh)",
   "apt_packages": [
     "zsh",

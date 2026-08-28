@@ -47,8 +47,8 @@ func ResolvePaths() (model.Paths, error) {
 		GatewayDockerfile: filepath.Join(root, appRootGatewayDockerfileRel),
 		GatewayEntrypoint: filepath.Join(root, appRootGatewayEntrypointRel),
 		ExtensionsDir:     extensionsDir,
-		ToolsDir:          filepath.Join(extensionsDir, "tools"),
-		FeaturesDir:       filepath.Join(extensionsDir, "features"),
+		ToolsDir:          filepath.Join(extensionsDir, model.KindTool.DirName()),
+		FeaturesDir:       filepath.Join(extensionsDir, model.KindFeature.DirName()),
 		AllowlistsDir:     filepath.Join(root, appRootRuntimeAssetsRel, GatewayAllowlistsDirName),
 		BuildScriptsDir:   filepath.Join(root, appRootRuntimeAssetsRel, appRootBuildScriptsRel),
 	}
@@ -61,6 +61,8 @@ func ResolvePaths() (model.Paths, error) {
 	return paths, nil
 }
 
+// resolveUserExtensionPaths records where user extensions live, whether or not
+// anything is there yet.
 func resolveUserExtensionPaths(paths *model.Paths) {
 	home, err := ResolveHostHome()
 	if err != nil || home == "" {
@@ -68,14 +70,16 @@ func resolveUserExtensionPaths(paths *model.Paths) {
 	}
 
 	userExtensionsDir := HostExtensionsDir(home)
-	info, err := os.Stat(userExtensionsDir)
-	if err != nil || !info.IsDir() {
-		return
-	}
-
 	paths.UserExtensionsDir = userExtensionsDir
-	paths.UserToolsDir = filepath.Join(userExtensionsDir, "tools")
-	paths.UserFeaturesDir = filepath.Join(userExtensionsDir, "features")
+	paths.UserToolsDir = filepath.Join(userExtensionsDir, model.KindTool.DirName())
+	paths.UserFeaturesDir = filepath.Join(userExtensionsDir, model.KindFeature.DirName())
+}
+
+// HasUserExtensions reports whether the user extension root exists on disk.
+// model.Paths always names the root, so this is the only way to tell it apart
+// from a host that has never installed an extension.
+func HasUserExtensions(paths model.Paths) bool {
+	return util.IsDir(paths.UserExtensionsDir)
 }
 
 func ResolveProject() (model.Project, error) {

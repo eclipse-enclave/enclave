@@ -132,7 +132,7 @@ func FindImageByLabel(ctx context.Context, label string, value string) (string, 
 	if err != nil {
 		return "", false, err
 	}
-	for _, tag := range splitLines(out) {
+	for _, tag := range util.NonEmptyLines(out) {
 		if tag == "" || tag == "<none>:<none>" || strings.HasPrefix(tag, "<none>:") {
 			continue
 		}

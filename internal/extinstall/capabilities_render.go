@@ -16,15 +16,12 @@ import (
 )
 
 // render writes the capability summary shown before an install is confirmed.
-// Lines with nothing to report are omitted.
-func (c capabilities) render(w io.Writer, header string) {
-	_, _ = fmt.Fprintf(w, "%s\n\n", header)
-	row := func(label string, value string) {
-		if value == "" {
-			return
-		}
-		_, _ = fmt.Fprintf(w, "  %-19s %s\n", label, value)
-	}
+// Lines with nothing to report are omitted. The caller has already opened the
+// section, so this renders the body alone.
+func (c capabilities) render(w io.Writer, style Style, source string) {
+	rows := &rowSet{}
+	row := rows.add
+	row("source", source)
 
 	install := ""
 	switch {
@@ -127,5 +124,9 @@ func (c capabilities) render(w io.Writer, header string) {
 	}
 	if c.Files > 0 {
 		row("content", fmt.Sprintf("%d files, %d bytes", c.Files, c.Bytes))
+	}
+	rows.render(w, style)
+	if !rows.empty() {
+		_, _ = fmt.Fprintln(w)
 	}
 }

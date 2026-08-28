@@ -185,7 +185,7 @@ func TestRenderIncludesEveryReportedCapability(t *testing.T) {
 		t.Fatalf("inspect: %v", err)
 	}
 	var out bytes.Buffer
-	caps.render(&out, "acme/kits → feature \"foo\" @ a1b2c3d")
+	caps.render(&out, Style{}, "acme/kits")
 	rendered := out.String()
 	for _, want := range []string{
 		"acme/kits", "install.sh", "needsRoot", "api.acme.com", "8080", "ACME_TOKEN", "go/",
@@ -208,7 +208,7 @@ func TestRenderOmitsEmptyLines(t *testing.T) {
 		t.Fatalf("inspect: %v", err)
 	}
 	var out bytes.Buffer
-	caps.render(&out, "bare")
+	caps.render(&out, Style{}, "")
 	for _, unwanted := range []string{
 		"allowlist domains", "allowlist directives", "credentials", "ports", "go/", "skills",
 		"entrypoint override", "environment vars", "provider", "passthrough paths",
@@ -340,7 +340,7 @@ func TestInspectYoloDefaultsToEnabled(t *testing.T) {
 		t.Errorf("YoloFlag/YoloEnabled = %q/%v, want the flag with default-true", caps.Spec.YoloFlag, caps.Spec.YoloEnabled)
 	}
 	var out bytes.Buffer
-	caps.render(&out, "footool")
+	caps.render(&out, Style{}, "")
 	if !strings.Contains(out.String(), "skips approval") || !strings.Contains(out.String(), "--dangerously-skip-permissions") {
 		t.Errorf("rendered summary should report the default-enabled yolo flag:\n%s", out.String())
 	}
@@ -355,7 +355,7 @@ func TestInspectYoloExplicitlyDisabledIsNotRendered(t *testing.T) {
 		t.Error("YoloEnabled = true, want false (explicit yoloEnabled: false)")
 	}
 	var out bytes.Buffer
-	caps.render(&out, "footool")
+	caps.render(&out, Style{}, "")
 	if strings.Contains(out.String(), "skips approval") {
 		t.Errorf("rendered summary should omit skips approval when yoloEnabled is explicitly false:\n%s", out.String())
 	}
@@ -394,7 +394,7 @@ commands:
 	}
 
 	var out bytes.Buffer
-	caps.render(&out, "helper")
+	caps.render(&out, Style{}, "")
 	if !strings.Contains(out.String(), "commands.install (3, 2 as root)") {
 		t.Errorf("rendered summary must disclose the root steps:\n%s", out.String())
 	}
@@ -486,7 +486,7 @@ func TestInspectReportsUpdateProbe(t *testing.T) {
 		t.Fatal("UpdateProbe = false, want true")
 	}
 	var out bytes.Buffer
-	caps.render(&out, "probe")
+	caps.render(&out, Style{}, "")
 	if !strings.Contains(out.String(), "update probe") || !strings.Contains(out.String(), "check-update.sh") {
 		t.Errorf("rendered summary must name the update probe:\n%s", out.String())
 	}
@@ -680,7 +680,7 @@ func TestCapabilitiesFieldsParticipateInRenderAndDiff(t *testing.T) {
 			tc.set(&after)
 
 			var buf bytes.Buffer
-			after.render(&buf, "header")
+			after.render(&buf, Style{}, "")
 			if !strings.Contains(buf.String(), tc.wantRender) {
 				t.Errorf("render output does not contain %q for field %s:\n%s", tc.wantRender, path, buf.String())
 			}

@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 
 	"enclave/internal/config"
+	"enclave/internal/logx"
 )
 
 // Remove deletes installed user extensions. Built-ins are never touched, and an
@@ -38,6 +39,7 @@ func Remove(_ context.Context, env Env, req Request) ([]ActionResult, error) {
 		}
 		results = append(results, result)
 	}
+	env.summarize(env.Style, req.Kind.Label(), results, req.DryRun)
 	return results, nil
 }
 
@@ -53,8 +55,9 @@ func removeOne(env Env, req Request, entry Managed) (ActionResult, error) {
 	}
 
 	target := filepath.Join(env.kindDir(req.Kind), entry.Name)
+	env.section(env.Style, entry.Name, req.Kind.Label())
 	if req.Interactive {
-		confirmed, err := env.confirm(fmt.Sprintf("Remove %s?", target))
+		confirmed, err := env.confirm(fmt.Sprintf("%sRemove %s?", bodyIndent, target))
 		if err != nil {
 			return ActionResult{}, err
 		}
@@ -66,11 +69,11 @@ func removeOne(env Env, req Request, entry Managed) (ActionResult, error) {
 		return ActionResult{}, err
 	}
 
-	_, _ = fmt.Fprintf(env.narrate(), "removed %s %q from %s\n", req.Kind.Label(), entry.Name, target)
+	env.outcome(env.Style, markOK, logx.ColorGreen, "removed from %s", target)
 	if entry.Source == config.SourceOverride {
-		_, _ = fmt.Fprintf(env.narrate(), "the built-in %s %q is active again\n", req.Kind.Label(), entry.Name)
+		env.note(env.Style, "the built-in %s is active again", req.Kind.Label())
 	}
 	// Host state may belong to a reinstall.
-	_, _ = fmt.Fprintf(env.narrate(), "host config and state for %q were left untouched\n", entry.Name)
+	env.note(env.Style, "host config and state were left untouched")
 	return ActionResult{Name: entry.Name, Action: ActionRemoved, Path: target}, nil
 }

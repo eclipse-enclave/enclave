@@ -65,6 +65,7 @@ func Update(ctx context.Context, env Env, req Request) ([]ActionResult, error) {
 		}
 		results = append(results, result)
 	}
+	env.summarize(env.Style, req.Kind.Label(), results, req.DryRun)
 	return results, nil
 }
 
@@ -121,7 +122,7 @@ func updateOne(ctx context.Context, env Env, req Request, stage *staging, fetche
 	// different ref or forces a reinstall.
 	if origin.RefType == RefTypeCommit && req.Ref == "" && !req.Force {
 		if !modified {
-			_, _ = fmt.Fprintf(env.narrate(), "%s: pinned to %s, up to date\n", entry.Name, ShortCommit(origin.Commit))
+			env.unchanged(entry.Name, "pinned to %s, up to date", ShortCommit(origin.Commit))
 			return ActionResult{Name: entry.Name, Action: ActionUnchanged, Commit: origin.Commit, Path: installed}, nil
 		}
 		return ActionResult{}, fmt.Errorf("pinned to %s and has local modifications; pass --force to reinstall it", ShortCommit(origin.Commit))
@@ -132,7 +133,7 @@ func updateOne(ctx context.Context, env Env, req Request, stage *staging, fetche
 		return ActionResult{}, err
 	}
 	if resolved.Commit == origin.Commit && !modified && !req.Force {
-		_, _ = fmt.Fprintf(env.narrate(), "%s: up to date at %s\n", entry.Name, ShortCommit(origin.Commit))
+		env.unchanged(entry.Name, "up to date at %s", ShortCommit(origin.Commit))
 		return ActionResult{Name: entry.Name, Action: ActionUnchanged, Commit: origin.Commit, Path: installed}, nil
 	}
 	if modified && !req.Force {

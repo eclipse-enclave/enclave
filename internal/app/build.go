@@ -68,6 +68,21 @@ func (p runtimeImageBuildPlan) NeedsRebuild() bool {
 	return p.StructuralRebuild || p.AgentUpdates.NeedsRebuild
 }
 
+func coordinateRuntimeImageBuild(home string, imageName string, forceRebuild bool, resolveBuildPlan func() (runtimeImageBuildPlan, error), executeBuildPlan func(runtimeImageBuildPlan) error) error {
+	lockName := "image-build-" + util.HashString(imageName) + ".lock"
+	lockPath := config.HostLockPath(home, lockName)
+	return util.WithFileLock(lockPath, func() error {
+		buildPlan, err := resolveBuildPlan()
+		if err != nil {
+			return err
+		}
+		if !forceRebuild && !buildPlan.NeedsRebuild() {
+			return nil
+		}
+		return executeBuildPlan(buildPlan)
+	})
+}
+
 var (
 	dockerBuildImage       = docker.Build
 	dockerImageExists      = docker.ImageExists

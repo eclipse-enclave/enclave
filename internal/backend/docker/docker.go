@@ -558,7 +558,7 @@ func runForeground(ctx context.Context, config *dockercmd.ContainerConfig, hostC
 		if attach.TTY {
 			return dockercmd.RunInteractiveWithStartHook(ctx, config, hostConfig, name, attach.OnStarted)
 		}
-		return dockercmd.Run(ctx, config, hostConfig, name)
+		return dockercmd.RunWithStartHook(ctx, config, hostConfig, name, attach.OnStarted)
 	}
 	in := attach.In
 	out := attach.Out
@@ -569,10 +569,7 @@ func runForeground(ctx context.Context, config *dockercmd.ContainerConfig, hostC
 	if errOut == nil {
 		errOut = io.Discard
 	}
-	if attach.TTY {
-		return dockercmd.RunWithIOAndTTY(ctx, config, hostConfig, name, in, out, errOut)
-	}
-	return dockercmd.RunWithIO(ctx, config, hostConfig, name, in, out, errOut)
+	return dockercmd.RunWithIOAndStartHook(ctx, config, hostConfig, name, in, out, errOut, attach.TTY, attach.OnStarted)
 }
 
 func applyContainerHardening(hostConfig *dockercmd.HostConfig) {

@@ -36,6 +36,12 @@ func classifyRunError(args []string, err error, stderr string) error {
 // Run runs a container to completion, discarding its output, and returns an
 // *ExitError when the container exits non-zero.
 func Run(ctx context.Context, config *ContainerConfig, hostConfig *HostConfig, name string) error {
+	return RunWithStartHook(ctx, config, hostConfig, name, nil)
+}
+
+// RunWithStartHook runs a container to completion, discarding its output, and
+// invokes onStarted after Docker reports the named container is running.
+func RunWithStartHook(ctx context.Context, config *ContainerConfig, hostConfig *HostConfig, name string, onStarted func()) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -44,22 +50,24 @@ func Run(ctx context.Context, config *ContainerConfig, hostConfig *HostConfig, n
 	cmd := exec.CommandContext(ctx, dockerBinary, args...) // #nosec G204 -- args built from caller config, passed without a shell.
 	cmd.Stdout = io.Discard
 	cmd.Stderr = &stderr
-	return classifyRunError(args, cmd.Run(), stderr.String())
+	return classifyRunError(args, runCommandWithStartHook(ctx, name, cmd, onStarted), stderr.String())
 }
 
 // RunWithIO runs a container wired to the supplied streams (no TTY) and returns
 // an *ExitError when the container exits non-zero.
 func RunWithIO(ctx context.Context, config *ContainerConfig, hostConfig *HostConfig, name string, in io.Reader, out io.Writer, errOut io.Writer) error {
-	return runWithIO(ctx, config, hostConfig, name, in, out, errOut, false)
+	return RunWithIOAndStartHook(ctx, config, hostConfig, name, in, out, errOut, false, nil)
 }
 
 // RunWithIOAndTTY runs a container wired to the supplied streams with a TTY
 // allocated and returns an *ExitError when the container exits non-zero.
 func RunWithIOAndTTY(ctx context.Context, config *ContainerConfig, hostConfig *HostConfig, name string, in io.Reader, out io.Writer, errOut io.Writer) error {
-	return runWithIO(ctx, config, hostConfig, name, in, out, errOut, true)
+	return RunWithIOAndStartHook(ctx, config, hostConfig, name, in, out, errOut, true, nil)
 }
 
-func runWithIO(ctx context.Context, config *ContainerConfig, hostConfig *HostConfig, name string, in io.Reader, out io.Writer, errOut io.Writer, tty bool) error {
+// RunWithIOAndStartHook runs a container wired to the supplied streams and
+// invokes onStarted after Docker reports the named container is running.
+func RunWithIOAndStartHook(ctx context.Context, config *ContainerConfig, hostConfig *HostConfig, name string, in io.Reader, out io.Writer, errOut io.Writer, tty bool, onStarted func()) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -69,7 +77,7 @@ func runWithIO(ctx context.Context, config *ContainerConfig, hostConfig *HostCon
 	cmd.Stdin = in
 	cmd.Stdout = out
 	cmd.Stderr = errOut
-	return classifyRunError(args, cmd.Run(), "")
+	return classifyRunError(args, runCommandWithStartHook(ctx, name, cmd, onStarted), "")
 }
 
 // RunCapture runs a container and returns its trimmed stdout, surfacing stderr
@@ -106,8 +114,12 @@ func RunInteractiveWithStartHook(ctx context.Context, config *ContainerConfig, h
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
+	return classifyRunError(args, runCommandWithStartHook(ctx, name, cmd, onStarted), "")
+}
+
+func runCommandWithStartHook(ctx context.Context, name string, cmd *exec.Cmd, onStarted func()) error {
 	if err := cmd.Start(); err != nil {
-		return classifyRunError(args, err, "")
+		return err
 	}
 	waitCh := make(chan error, 1)
 	go func() {
@@ -115,16 +127,16 @@ func RunInteractiveWithStartHook(ctx context.Context, config *ContainerConfig, h
 	}()
 	if onStarted != nil && strings.TrimSpace(name) != "" {
 		if err, done := waitForContainerRunning(ctx, name, waitCh); done {
-			return classifyRunError(args, err, "")
+			return err
 		}
 		select {
 		case err := <-waitCh:
-			return classifyRunError(args, err, "")
+			return err
 		default:
 		}
 		onStarted()
 	}
-	return classifyRunError(args, <-waitCh, "")
+	return <-waitCh
 }
 
 func waitForContainerRunning(ctx context.Context, name string, waitCh <-chan error) (error, bool) {

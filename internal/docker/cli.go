@@ -98,6 +98,11 @@ func IsNotFound(err error) bool {
 			return true
 		}
 	}
+	// Network inspect uses "network <name> not found" on some daemon
+	// versions instead of the "No such network" form used elsewhere.
+	if strings.Contains(s, "network ") && strings.HasSuffix(strings.TrimSpace(s), " not found") {
+		return true
+	}
 	return false
 }
 
@@ -118,6 +123,49 @@ func IsSocketPermissionDenied(err error) bool {
 		return false
 	}
 	return strings.Contains(strings.ToLower(ce.stderr), "permission denied while trying to connect")
+}
+
+// IsAlreadyExists reports whether Docker rejected object creation because an
+// object with the requested name was created concurrently or already exists.
+func IsAlreadyExists(err error) bool {
+	var ce *cliError
+	if !errors.As(err, &ce) {
+		return false
+	}
+	return strings.Contains(strings.ToLower(ce.stderr), "already exists")
+}
+
+// IsContainerNameConflict reports whether Docker rejected container creation
+// because another container already reserves the requested name.
+func IsContainerNameConflict(err error) bool {
+	var ce *cliError
+	if !errors.As(err, &ce) {
+		return false
+	}
+	message := strings.ToLower(ce.stderr)
+	return strings.Contains(message, "container name") && strings.Contains(message, "already in use")
+}
+
+// IsActiveEndpoints reports whether Docker refused to remove a network while
+// one or more containers were still attached.
+func IsActiveEndpoints(err error) bool {
+	var ce *cliError
+	if !errors.As(err, &ce) {
+		return false
+	}
+	return strings.Contains(strings.ToLower(ce.stderr), "active endpoints")
+}
+
+// IsAddressPoolExhausted reports Docker's stable address-pool exhaustion
+// phrasings so callers can add daemon-specific remediation guidance.
+func IsAddressPoolExhausted(err error) bool {
+	var ce *cliError
+	if !errors.As(err, &ce) {
+		return false
+	}
+	message := strings.ToLower(ce.stderr)
+	return strings.Contains(message, "could not find an available, non-overlapping ipv4 address pool") ||
+		strings.Contains(message, "all predefined address pools have been fully subnetted")
 }
 
 // commandExitCode returns the process exit code of a failed exec.Command and

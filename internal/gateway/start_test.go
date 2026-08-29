@@ -76,7 +76,7 @@ func TestStartGatewayContainerRemovesSidecarWhenInterruptedBeforeReady(t *testin
 	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
 	defer cancel()
 
-	err := startGatewayContainer(ctx, &docker.ContainerConfig{Image: "gateway"}, &docker.HostConfig{}, "session-gateway")
+	_, err := startGatewayContainer(ctx, &docker.ContainerConfig{Image: "gateway"}, &docker.HostConfig{}, "session-gateway")
 	if err == nil {
 		t.Fatal("expected an error when the context ends before the gateway is ready")
 	}
@@ -84,8 +84,8 @@ func TestStartGatewayContainerRemovesSidecarWhenInterruptedBeforeReady(t *testin
 	if len(calls) == 0 || !strings.HasPrefix(calls[0], "run ") {
 		t.Fatalf("expected the gateway to be started first, got %v", calls)
 	}
-	if !hasCall(calls, "rm --force --volumes session-gateway") {
-		t.Fatalf("expected the unready gateway to be removed, got %v", calls)
+	if !hasCall(calls, "rm --force --volumes gw123") {
+		t.Fatalf("expected the unready gateway to be removed by ID, got %v", calls)
 	}
 }
 
@@ -94,7 +94,7 @@ func TestStartGatewayContainerRemovesSidecarWhenStartFails(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	err := startGatewayContainer(ctx, &docker.ContainerConfig{Image: "gateway"}, &docker.HostConfig{}, "session-gateway")
+	_, err := startGatewayContainer(ctx, &docker.ContainerConfig{Image: "gateway"}, &docker.HostConfig{}, "session-gateway")
 	if err == nil || !strings.Contains(err.Error(), "failed to start gateway container") {
 		t.Fatalf("expected a start failure, got %v", err)
 	}

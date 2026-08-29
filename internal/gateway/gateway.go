@@ -201,6 +201,27 @@ func buildGatewayImage(paths model.Paths, profile model.Profile, allowlistPath s
 	return nil
 }
 
+func coordinateGatewayImageBuild(home string, image string, forceRebuild bool, resolveBuildPlan func() (bool, string, error), executeBuild func(string) error) error {
+	lockName := "image-build-" + util.HashString(image) + ".lock"
+	lockPath := config.HostLockPath(home, lockName)
+	release, _, err := util.AcquireFileLock(lockPath, func() {
+		logx.Infof("Waiting for another enclave process to finish building %s.", image)
+	})
+	if err != nil {
+		return err
+	}
+	defer release()
+
+	needs, buildHash, err := resolveBuildPlan()
+	if err != nil {
+		return err
+	}
+	if !forceRebuild && !needs {
+		return nil
+	}
+	return executeBuild(buildHash)
+}
+
 func prepareGatewayContext(paths model.Paths, allowlistPath string) (contextDir string, allowlistRel string, cleanup func(), err error) {
 	if rel, ok := relativePathWithin(paths.AppRoot, allowlistPath); ok {
 		return paths.AppRoot, rel, func() {}, nil
@@ -345,12 +366,18 @@ func Start(cfg StartConfig) (StartResult, error) {
 			return empty, err
 		}
 	} else {
-		needs, buildHash, err := needsRebuild(cfg.Paths, cfg.Profile, cfg.AllowlistPath)
+		needs, _, err := needsRebuild(cfg.Paths, cfg.Profile, cfg.AllowlistPath)
 		if err != nil {
 			return empty, err
 		}
 		if cfg.ForceRebuild || needs {
-			if err := buildGatewayImage(cfg.Paths, cfg.Profile, cfg.AllowlistPath, buildHash); err != nil {
+			resolveBuildPlan := func() (bool, string, error) {
+				return needsRebuild(cfg.Paths, cfg.Profile, cfg.AllowlistPath)
+			}
+			executeBuild := func(buildHash string) error {
+				return buildGatewayImage(cfg.Paths, cfg.Profile, cfg.AllowlistPath, buildHash)
+			}
+			if err := coordinateGatewayImageBuild(cfg.Home, imageName(cfg.Profile), cfg.ForceRebuild, resolveBuildPlan, executeBuild); err != nil {
 				return empty, err
 			}
 		}

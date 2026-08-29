@@ -68,22 +68,19 @@ func (p runtimeImageBuildPlan) NeedsRebuild() bool {
 	return p.StructuralRebuild || p.AgentUpdates.NeedsRebuild
 }
 
-func coordinateRuntimeImageBuild(home string, imageName string, forceRebuild bool, initialBuildPlan runtimeImageBuildPlan, resolveBuildPlan func() (runtimeImageBuildPlan, error), executeBuildPlan func(runtimeImageBuildPlan) error) error {
+func coordinateRuntimeImageBuild(home string, imageName string, forceRebuild bool, resolveBuildPlan func() (runtimeImageBuildPlan, error), executeBuildPlan func(runtimeImageBuildPlan) error) error {
 	lockName := "image-build-" + util.HashString(imageName) + ".lock"
 	lockPath := config.HostLockPath(home, lockName)
-	release, waited, err := util.AcquireFileLock(lockPath, func() {
+	release, _, err := util.AcquireFileLock(lockPath, func() {
 		logx.Infof("Waiting for another enclave process to finish building %s.", imageName)
 	})
 	if err != nil {
 		return err
 	}
 	defer release()
-	buildPlan := initialBuildPlan
-	if waited {
-		buildPlan, err = resolveBuildPlan()
-		if err != nil {
-			return err
-		}
+	buildPlan, err := resolveBuildPlan()
+	if err != nil {
+		return err
 	}
 	if !forceRebuild && !buildPlan.NeedsRebuild() {
 		return nil

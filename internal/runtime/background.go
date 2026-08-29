@@ -43,6 +43,7 @@ func (r *Runtime) ExecuteBackground() (string, error) {
 		}
 		return "", err
 	}
+	releaseStartLock()
 
 	// Announce only after the container is confirmed started: auto-assigned
 	// host ports do not exist until then, and a failed bind (e.g. a host-port

@@ -274,14 +274,14 @@ func ensureRuntimeImage(input *CommandInput, opts model.Options, buildCfg *build
 		return buildConfig{}, 1
 	}
 	if opts.ForceRebuild || buildPlan.NeedsRebuild() {
-		if code := buildOrReuseRuntimeImage(input, opts, host, resolved, buildPlan); code != 0 {
+		if code := buildOrReuseRuntimeImage(input, opts, host, resolved); code != 0 {
 			return buildConfig{}, code
 		}
 	}
 	return resolved, 0
 }
 
-func buildOrReuseRuntimeImage(input *CommandInput, opts model.Options, host model.Host, resolved buildConfig, initialBuildPlan runtimeImageBuildPlan) int {
+func buildOrReuseRuntimeImage(input *CommandInput, opts model.Options, host model.Host, resolved buildConfig) int {
 	resolveBuildPlan := func() (runtimeImageBuildPlan, error) {
 		return resolveRuntimeImageBuildPlan(input.Ctx.Paths, resolved, opts.BuildOptions, opts.Tool, host.Home, opts.ForceRebuild, time.Now().UTC())
 	}
@@ -306,7 +306,7 @@ func buildOrReuseRuntimeImage(input *CommandInput, opts model.Options, host mode
 		}
 		return buildImage(context.Background(), input.Ctx.Paths, host, buildPlan.CombinedHash, resolved, opts.BuildOptions, opts.Tool, buildPlan.AgentUpdates)
 	}
-	if err := coordinateRuntimeImageBuild(host.Home, resolved.ImageName, opts.ForceRebuild, initialBuildPlan, resolveBuildPlan, executeBuildPlan); err != nil {
+	if err := coordinateRuntimeImageBuild(host.Home, resolved.ImageName, opts.ForceRebuild, resolveBuildPlan, executeBuildPlan); err != nil {
 		logx.Errorf("%v", err)
 		return 1
 	}

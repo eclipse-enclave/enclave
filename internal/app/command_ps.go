@@ -46,16 +46,17 @@ type psRow struct {
 // psJSONEntry is the structured shape emitted by `ps --json`. Field names and
 // their JSON tags are a consumer-facing contract; keep them stable.
 type psJSONEntry struct {
-	Name        string       `json:"name"`
-	Tool        string       `json:"tool"`
-	ProjectDir  string       `json:"projectDir"`
-	ProjectHash string       `json:"projectHash"`
-	Worktree    string       `json:"worktree"`
-	Status      string       `json:"status"`
-	CreatedAt   string       `json:"createdAt"`
-	SessionName string       `json:"sessionName"`
-	Background  bool         `json:"background"`
-	Ports       []psJSONPort `json:"ports"`
+	Name        string         `json:"name"`
+	Tool        string         `json:"tool"`
+	ProjectDir  string         `json:"projectDir"`
+	ProjectHash string         `json:"projectHash"`
+	Worktree    string         `json:"worktree"`
+	Status      string         `json:"status"`
+	CreatedAt   string         `json:"createdAt"`
+	SessionName string         `json:"sessionName"`
+	Background  bool           `json:"background"`
+	Ports       []psJSONPort   `json:"ports"`
+	Network     *psJSONNetwork `json:"network"`
 }
 
 // psJSONPort is one published port binding in the ps --json output. Consumers
@@ -66,6 +67,13 @@ type psJSONPort struct {
 	HostPort      string `json:"hostPort"`
 	HostIP        string `json:"hostIP"`
 	Protocol      string `json:"protocol"`
+}
+
+// psJSONNetwork identifies the ephemeral Docker bridge that encloses one
+// session. It is null for legacy sessions and non-Docker backends.
+type psJSONNetwork struct {
+	Name   string `json:"name"`
+	Subnet string `json:"subnet"`
 }
 
 func runPS(opts model.Options) int {
@@ -277,10 +285,18 @@ func buildPSJSONEntries(sessions []backend.Session) []psJSONEntry {
 			SessionName: session.Name,
 			Background:  session.Background,
 			Ports:       buildPSJSONPorts(session.Ports),
+			Network:     buildPSJSONNetwork(session.Network),
 		})
 	}
 	sort.Slice(entries, func(i, j int) bool { return entries[i].Name < entries[j].Name })
 	return entries
+}
+
+func buildPSJSONNetwork(network *backend.SessionNetwork) *psJSONNetwork {
+	if network == nil {
+		return nil
+	}
+	return &psJSONNetwork{Name: network.Name, Subnet: network.Subnet}
 }
 
 func buildPSJSONPorts(bindings []backend.PortMapping) []psJSONPort {

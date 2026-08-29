@@ -25,7 +25,7 @@ import (
 	"enclave/internal/network"
 )
 
-func (b *Backend) startGateway(ctx context.Context, req backend.Request) (string, func(), error) {
+func (b *Backend) startGateway(ctx context.Context, req backend.Request, networkName string) (string, func(), error) {
 	gatewayConfigDir := config.HostProjectGatewayConfigDir(b.opts.Host.Home, req.Session.ProjectHash, req.Session.Tool)
 	policy := network.EffectivePolicy{
 		Mode:          model.NetworkModeRestricted,
@@ -57,6 +57,7 @@ func (b *Backend) startGateway(ctx context.Context, req backend.Request) (string
 		NetworkLogMode:    b.opts.NetworkLogMode,
 		NetworkLogPath:    config.HostProjectNetworkLogPath(b.opts.Host.Home, req.Session.ProjectHash, req.Session.Tool),
 		GatewayConfigDir:  gatewayConfigDir,
+		NetworkName:       networkName,
 		PortBindings:      portMap(req.Ports),
 		ExposedPorts:      portSet(req.Ports),
 		LoopbackPorts:     append([]string(nil), req.Network.LoopbackPorts...),
@@ -75,7 +76,11 @@ func (b *Backend) startGateway(ctx context.Context, req backend.Request) (string
 	}
 	tempFiles = append(tempFiles, result.TempFiles...)
 	cleanup := func() {
-		gateway.Stop(req.Session.Name)
+		gatewayRef := result.ContainerID
+		if strings.TrimSpace(gatewayRef) == "" {
+			gatewayRef = result.ContainerName
+		}
+		gateway.StopContainer(gatewayRef)
 		cleanupFiles(tempFiles)
 	}
 	return result.ContainerName, cleanup, nil

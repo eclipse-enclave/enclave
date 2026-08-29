@@ -185,6 +185,40 @@ type NetworkSettings struct {
 	Ports PortMap `json:"Ports"`
 }
 
+// NetworkCreateOptions is the subset of bridge-network configuration enclave
+// passes to `docker network create`.
+type NetworkCreateOptions struct {
+	Name       string
+	Driver     string
+	Subnet     string
+	EnableIPv6 *bool
+	Labels     map[string]string
+	Options    map[string]string
+}
+
+// NetworkInspectResponse is the subset of `docker network inspect` consumed by
+// the backend for ownership checks, lifecycle decisions, and structured status.
+type NetworkInspectResponse struct {
+	Name       string                     `json:"Name"`
+	ID         string                     `json:"Id"`
+	Created    string                     `json:"Created"`
+	Labels     map[string]string          `json:"Labels"`
+	IPAM       NetworkIPAM                `json:"IPAM"`
+	Containers map[string]NetworkEndpoint `json:"Containers"`
+}
+
+type NetworkIPAM struct {
+	Config []NetworkIPAMConfig `json:"Config"`
+}
+
+type NetworkIPAMConfig struct {
+	Subnet string `json:"Subnet"`
+}
+
+type NetworkEndpoint struct {
+	Name string `json:"Name"`
+}
+
 // ContainerState is the subset of a container's runtime state we consume.
 type ContainerState struct {
 	Status  string `json:"Status"`
@@ -212,9 +246,15 @@ type ImageConfig struct {
 
 // SystemInfo is the subset of `docker info` output we consume.
 type SystemInfo struct {
-	DockerRootDir   string   `json:"DockerRootDir"`
-	SecurityOptions []string `json:"SecurityOptions"`
+	DockerRootDir   string        `json:"DockerRootDir"`
+	SecurityOptions []string      `json:"SecurityOptions"`
+	ServerVersion   string        `json:"ServerVersion"`
+	OSType          string        `json:"OSType"`
+	FirewallBackend *FirewallInfo `json:"FirewallBackend"`
+	Warnings        []string      `json:"Warnings"`
 }
+
+type FirewallInfo struct{}
 
 // PruneReport is the result of an image prune.
 type PruneReport struct {

@@ -357,6 +357,7 @@ func TestBuildPSJSONEntries(t *testing.T) {
 			Name:        "main",
 			Background:  true,
 			Ports:       []backend.PortMapping{{HostIP: "127.0.0.1", HostPort: "3000", ContainerPort: "3000", Protocol: "tcp"}},
+			Network:     &backend.SessionNetwork{Name: "enclave-codex-abc123abc123-main-net", Subnet: "172.30.0.0/28"},
 		},
 		{
 			Ref:         backend.SessionRef{Name: "enclave-claude-def456def456"},
@@ -398,6 +399,12 @@ func TestBuildPSJSONEntries(t *testing.T) {
 	}
 	if len(codex.Ports) != 1 {
 		t.Fatalf("expected 1 port binding, got %d", len(codex.Ports))
+	}
+	if codex.Network == nil || codex.Network.Name != "enclave-codex-abc123abc123-main-net" || codex.Network.Subnet != "172.30.0.0/28" {
+		t.Fatalf("unexpected network in JSON: %+v", codex.Network)
+	}
+	if entries[0].Network != nil {
+		t.Fatalf("expected null network for legacy session, got %+v", entries[0].Network)
 	}
 	if got := codex.Ports[0]; got.ContainerPort != "3000" || got.HostPort != "3000" || got.HostIP != "127.0.0.1" || got.Protocol != "tcp" {
 		t.Fatalf("unexpected port binding: %+v", got)
@@ -443,6 +450,9 @@ func TestRunPSEmitsJSON(t *testing.T) {
 	}
 	if entries[0].ProjectDir != "/tmp/project-alpha" {
 		t.Fatalf("expected projectDir in JSON, got %q", entries[0].ProjectDir)
+	}
+	if entries[0].Network != nil || !strings.Contains(out, `"network": null`) {
+		t.Fatalf("expected explicit null network for a legacy session, got:\n%s", out)
 	}
 	if strings.Contains(out, "NAME") {
 		t.Fatalf("did not expect table header in JSON output, got:\n%s", out)

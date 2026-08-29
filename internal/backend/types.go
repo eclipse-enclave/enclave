@@ -403,7 +403,10 @@ type Session struct {
 	Name       string
 	Background bool
 	Ports      []PortMapping
-	Yolo       bool
+	// Network is the Docker-owned per-session bridge, when one is present.
+	// Other backends and legacy/stopped sessions may not have one.
+	Network *SessionNetwork
+	Yolo    bool
 	// SessionMonitor reports whether the agent runs under the managed tmux
 	// session, so a terminal snapshot can be captured via `status`.
 	SessionMonitor bool
@@ -411,6 +414,11 @@ type Session struct {
 	// `status` can capture as that user (empty for sessions without the
 	// monitor or containers labeled before this was recorded).
 	SessionMonitorUser string
+}
+
+type SessionNetwork struct {
+	Name   string
+	Subnet string
 }
 
 type ExecRequest struct {

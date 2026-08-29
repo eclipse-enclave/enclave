@@ -84,17 +84,7 @@ func (r *Runtime) addSkillMounts(mounts *mountAccumulator) error {
 }
 
 func (r *Runtime) extensionSkillSourceDirs() []string {
-	sourceDirs := make([]string, 0, 2)
-	for _, toolsRoot := range []string{r.paths.ToolsDir, r.paths.UserToolsDir} {
-		if toolsRoot == "" {
-			continue
-		}
-		skillsDir := filepath.Join(toolsRoot, r.profile.Name, model.SkillsDirName)
-		if info, err := os.Stat(skillsDir); err == nil && info.IsDir() {
-			sourceDirs = append(sourceDirs, skillsDir)
-		}
-	}
-	return sourceDirs
+	return config.ResolveToolSubdirs(r.paths, r.profile.Name, model.SkillsDirName)
 }
 
 // featureSkillSourceDirs returns skill directories shipped by enabled features
@@ -106,15 +96,7 @@ func (r *Runtime) extensionSkillSourceDirs() []string {
 func (r *Runtime) featureSkillSourceDirs() []string {
 	var dirs []string
 	for _, feature := range r.features {
-		for _, root := range []string{r.paths.FeaturesDir, r.paths.UserFeaturesDir} {
-			if root == "" {
-				continue
-			}
-			skillsDir := filepath.Join(root, feature.Name, model.SkillsDirName)
-			if info, err := os.Stat(skillsDir); err == nil && info.IsDir() {
-				dirs = append(dirs, skillsDir)
-			}
-		}
+		dirs = append(dirs, config.ResolveFeatureSubdirs(r.paths, feature.Name, model.SkillsDirName)...)
 	}
 	return dirs
 }

@@ -498,6 +498,7 @@ const (
 	TemplatesDir           = "templates"
 	HomeConfigDirName      = "home-config"
 	SkillsDirName          = "skills"
+	ConfigBaseDirName      = "config-base"
 	GeneratedSkillsDirName = "skills-generated"
 	GeneratedConfigDirName = "config-generated"
 )

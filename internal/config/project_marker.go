@@ -12,6 +12,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"enclave/internal/util"
 )
 
 const projectMarkerFilename = "project.json"
@@ -34,15 +36,10 @@ func WriteProjectMarkers(home string, projectHash string, realDir string) {
 	// The config-root overrides dir holds user-edited overrides. Writing the
 	// marker eagerly would leave an empty override dir for every project ever
 	// run, so only record it once the user has created overrides.
-	if overridesDir := HostProjectOverridesDir(home, projectHash); dirExists(overridesDir) {
+	if overridesDir := HostProjectOverridesDir(home, projectHash); util.IsDir(overridesDir) {
 		_ = writeProjectMarker(overridesDir, realDir)
 	}
 	_ = writeProjectMarker(HostProjectDir(home, projectHash), realDir)
-}
-
-func dirExists(dir string) bool {
-	info, err := os.Stat(dir)
-	return err == nil && info.IsDir()
 }
 
 func writeProjectMarker(dir string, realDir string) error {

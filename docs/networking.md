@@ -68,6 +68,8 @@ Project overrides take precedence over global. These files replace the built-in 
 
 The built-in allowlists live in `runtime-assets/gateway-allowlists/` in the repo and are baked into the container image at build time.
 
+Without an override, the tool's own `gateway-allowlist.conf` applies. It is resolved from `~/.config/enclave/extensions/tools/<tool>/` first and from the built-in extension tree second, so a user-installed tool extension enforces the allowlist it ships. A tool that declares none falls back to `base.conf`, which allows more domains than a tool-specific allowlist.
+
 ## Port Direction: `-p` vs `--bridge-port`
 
 These two flags handle opposite directions of port forwarding:

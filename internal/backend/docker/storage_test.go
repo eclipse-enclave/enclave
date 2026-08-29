@@ -401,6 +401,8 @@ func installFakeDocker(t *testing.T) string {
 	script := "#!/bin/sh\n" +
 		"for arg in \"$@\"; do printf '%s\\n' \"$arg\" >> " + util.ShellQuote(logPath) + "; done\n" +
 		"printf '%s\\n' -- >> " + util.ShellQuote(logPath) + "\n" +
+		"if [ \"$1\" = \"info\" ]; then printf '%s\\n' '{}'; fi\n" +
+		"if [ \"$1\" = \"network\" ] && [ \"$2\" = \"create\" ]; then printf '%s\\n' fake-network-id; fi\n" +
 		"if [ \"$1\" = \"run\" ]; then printf '%s\\n' fake-container-id; fi\n" +
 		"exit 0\n"
 	if err := os.WriteFile(fakeDocker, []byte(script), 0o755); err != nil {

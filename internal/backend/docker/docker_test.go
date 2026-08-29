@@ -197,6 +197,7 @@ func TestSessionFromSummaryProjectDir(t *testing.T) {
 }
 
 func TestPrepareRunAppliesRuntimeUIDRemapEnvAfterDevcontainerEnv(t *testing.T) {
+	installFakeDocker(t)
 	b := newDevcontainerBackend(t.TempDir(),
 		"--env", model.EnvRuntimeUID+"=9999",
 		"--env", model.EnvRuntimeGID+"=9999",
@@ -224,6 +225,9 @@ func TestPrepareRunAppliesRuntimeUIDRemapEnvAfterDevcontainerEnv(t *testing.T) {
 	if err != nil {
 		t.Fatalf("prepareRun() error = %v", err)
 	}
+	if got, want := spec.hostConfig.NetworkMode, dockercmd.NetworkMode(sessionNetworkName(req.Session.Name)); got != want {
+		t.Fatalf("NetworkMode = %q, want %q", got, want)
+	}
 
 	for key, want := range map[string]string{
 		model.EnvRuntimeUID: "2000",
@@ -238,6 +242,7 @@ func TestPrepareRunAppliesRuntimeUIDRemapEnvAfterDevcontainerEnv(t *testing.T) {
 }
 
 func TestPrepareRunSkipsDevcontainerRunArgsForDetachedRequests(t *testing.T) {
+	installFakeDocker(t)
 	b := newDevcontainerBackend(t.TempDir(), "--env", "DEVCONTAINER_ONLY=1", "--hostname", "devhost")
 	req := backend.Request{
 		Session: backend.SessionMeta{
@@ -262,6 +267,92 @@ func TestPrepareRunSkipsDevcontainerRunArgsForDetachedRequests(t *testing.T) {
 	if got := spec.config.Hostname; got == "devhost" {
 		t.Fatalf("detached run should not apply devcontainer hostname, got %q", got)
 	}
+}
+
+func TestPrepareRunReadsDockerInfoOnce(t *testing.T) {
+	logPath := installFakeDocker(t)
+	req := backend.Request{
+		Session: backend.SessionMeta{
+			Tool:        "codex",
+			ProjectHash: "abc123abc123",
+			Name:        "enclave-codex-abc123abc123-main",
+		},
+		Image:   "enclave-test:latest",
+		Network: backend.NetworkPolicy{Mode: backend.NetworkModeUnrestricted},
+	}
+	if _, err := New(Options{}).prepareRun(context.Background(), req); err != nil {
+		t.Fatalf("prepareRun() error = %v", err)
+	}
+	infoCalls := 0
+	for _, arg := range readFakeDockerArgs(t, logPath) {
+		if arg == "info" {
+			infoCalls++
+		}
+	}
+	if infoCalls != 1 {
+		t.Fatalf("docker info calls = %d, want 1", infoCalls)
+	}
+}
+
+func TestPrepareRunReportsDockerInfoError(t *testing.T) {
+	restoreNetworkGlobals(t)
+	previous := dockercmd.Binary()
+	dockercmd.SetBinary("podman")
+	t.Cleanup(func() { dockercmd.SetBinary(previous) })
+	dockerInfo = func(context.Context) (dockercmd.SystemInfo, error) {
+		return dockercmd.SystemInfo{}, errors.New("decode podman info: unexpected shape")
+	}
+
+	_, err := New(Options{}).prepareRun(context.Background(), backend.Request{
+		Session: backend.SessionMeta{Tool: "codex", ProjectHash: "abc123abc123", Name: "session"},
+		Image:   "enclave-test:latest",
+		Network: backend.NetworkPolicy{Mode: backend.NetworkModeUnrestricted},
+	})
+	if err == nil || !strings.Contains(err.Error(), "read podman info: decode podman info: unexpected shape") {
+		t.Fatalf("prepareRun() error = %v, want podman info failure", err)
+	}
+}
+
+func TestWarnInsecureDockerFirewall(t *testing.T) {
+	t.Run("surfaces relevant daemon warning", func(t *testing.T) {
+		out := captureStderr(t, func() {
+			warnInsecureDockerFirewall(dockercmd.SystemInfo{Warnings: []string{"WARNING: bridge-nf-call-iptables is disabled"}})
+		})
+		if !strings.Contains(out, "Docker daemon networking warning") || !strings.Contains(out, "bridge-nf-call-iptables") {
+			t.Fatalf("unexpected warning output: %q", out)
+		}
+	})
+
+	t.Run("surfaces IPv4 forwarding warning", func(t *testing.T) {
+		out := captureStderr(t, func() {
+			warnInsecureDockerFirewall(dockercmd.SystemInfo{Warnings: []string{"WARNING: IPv4 forwarding is disabled. Networking will not work."}})
+		})
+		if !strings.Contains(out, "IPv4 forwarding is disabled") {
+			t.Fatalf("unexpected warning output: %q", out)
+		}
+	})
+
+	t.Run("warns when new Linux daemon omits firewall backend", func(t *testing.T) {
+		out := captureStderr(t, func() {
+			warnInsecureDockerFirewall(dockercmd.SystemInfo{OSType: "linux", ServerVersion: "29.0.0"})
+		})
+		if !strings.Contains(out, "did not report an active firewall backend") {
+			t.Fatalf("unexpected warning output: %q", out)
+		}
+	})
+
+	t.Run("accepts reported firewall backend", func(t *testing.T) {
+		out := captureStderr(t, func() {
+			warnInsecureDockerFirewall(dockercmd.SystemInfo{
+				OSType:          "linux",
+				ServerVersion:   "29.0.0",
+				FirewallBackend: &dockercmd.FirewallInfo{},
+			})
+		})
+		if out != "" {
+			t.Fatalf("unexpected warning output: %q", out)
+		}
+	})
 }
 
 func TestStartRunsDetachedInteractiveContainer(t *testing.T) {
@@ -481,6 +572,53 @@ func TestRemoveReturnsFinalizeErrorBeforeRemovingContainer(t *testing.T) {
 	}
 	if strings.Contains(string(raw), "\nrm ") || strings.HasPrefix(string(raw), "rm ") {
 		t.Fatalf("docker rm should not run after finalize failure; log:\n%s", raw)
+	}
+}
+
+func TestRemoveTreatsMissingContainerAsIdempotentAndReapsNetwork(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		remove func(*Backend, context.Context, backend.SessionRef) error
+	}{
+		{name: "with finalize", remove: func(b *Backend, ctx context.Context, ref backend.SessionRef) error { return b.Remove(ctx, ref) }},
+		{name: "without finalize", remove: func(b *Backend, ctx context.Context, ref backend.SessionRef) error {
+			return b.RemoveWithoutFinalize(ctx, ref)
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			restoreNetworkGlobals(t)
+			dir := t.TempDir()
+			stub := filepath.Join(dir, "docker")
+			script := `#!/bin/sh
+printf '%s\n' 'Error response from daemon: No such container: session' >&2
+exit 1
+`
+			if err := os.WriteFile(stub, []byte(script), 0o700); err != nil {
+				t.Fatalf("write Docker stub: %v", err)
+			}
+			t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+			info := dockercmd.NetworkInspectResponse{
+				ID:   "network-id",
+				Name: sessionNetworkName("session"),
+				Labels: map[string]string{
+					model.NetworkLabelManaged:     "true",
+					model.NetworkLabelContainer:   "session",
+					model.NetworkLabelProjectHash: "project",
+				},
+			}
+			networkInspect = func(context.Context, string) (dockercmd.NetworkInspectResponse, error) { return info, nil }
+			sessionRuntimeExists = func(context.Context, string) (bool, error) { return false, nil }
+			removedNetwork := ""
+			networkRemove = func(_ context.Context, ref string) error { removedNetwork = ref; return nil }
+
+			if err := tc.remove(New(Options{}), context.Background(), backend.SessionRef{Name: "session"}); err != nil {
+				t.Fatalf("remove missing session error = %v", err)
+			}
+			if removedNetwork != "network-id" {
+				t.Fatalf("removed network = %q, want network-id", removedNetwork)
+			}
+		})
 	}
 }
 

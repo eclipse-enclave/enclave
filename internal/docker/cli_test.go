@@ -23,6 +23,7 @@ func TestIsNotFound(t *testing.T) {
 		{name: "no such container", stderr: "Error: No such container: abc123", want: true},
 		{name: "no such image", stderr: "Error: No such image: foo:latest", want: true},
 		{name: "no such volume", stderr: "Error: No such volume: myvol", want: true},
+		{name: "network not found", stderr: "Error response from daemon: network missing not found", want: true},
 		{name: "no such object", stderr: "Error: No such object: abc123", want: true},
 		// The reviewed footgun: a bare "not found" also appears in unrelated
 		// failures and must not be classified as a missing-object error.
@@ -73,6 +74,29 @@ func TestIsSocketPermissionDenied(t *testing.T) {
 	}
 	if IsSocketPermissionDenied(errors.New("permission denied while trying to connect")) {
 		t.Fatal("non-*cliError should not be classified as socket permission denied")
+	}
+}
+
+func TestNetworkErrorClassifiers(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		stderr string
+		check  func(error) bool
+	}{
+		{name: "already exists", stderr: "network with name session-net already exists", check: IsAlreadyExists},
+		{name: "container name conflict", stderr: `Conflict. The container name "/session-gateway" is already in use by container "abc".`, check: IsContainerNameConflict},
+		{name: "active endpoints", stderr: "network session-net has active endpoints", check: IsActiveEndpoints},
+		{name: "default pool exhausted", stderr: "could not find an available, non-overlapping IPv4 address pool among the defaults to assign to the network", check: IsAddressPoolExhausted},
+		{name: "predefined pools exhausted", stderr: "all predefined address pools have been fully subnetted", check: IsAddressPoolExhausted},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if !tc.check(&cliError{stderr: tc.stderr}) {
+				t.Fatalf("classifier rejected %q", tc.stderr)
+			}
+			if tc.check(errors.New(tc.stderr)) {
+				t.Fatal("classifier accepted a non-CLI error")
+			}
+		})
 	}
 }
 

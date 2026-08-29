@@ -11,7 +11,10 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"enclave/internal/backend"
 	"enclave/internal/model"
@@ -109,4 +112,88 @@ func TestEnsureExistingRuntimeImageWith(t *testing.T) {
 			t.Fatalf("expected wrapped inspect error %v, got %v", wantErr, err)
 		}
 	})
+}
+
+func TestCoordinateRuntimeImageBuildRechecksAfterWaiting(t *testing.T) {
+	home := t.TempDir()
+	var imageReady atomic.Bool
+	var builds atomic.Int32
+	var resolves atomic.Int32
+	firstBuildStarted := make(chan struct{})
+	releaseFirstBuild := make(chan struct{})
+	secondResolveStarted := make(chan struct{})
+
+	resolve := func() (runtimeImageBuildPlan, error) {
+		if resolves.Add(1) == 2 {
+			close(secondResolveStarted)
+		}
+		return runtimeImageBuildPlan{StructuralRebuild: !imageReady.Load()}, nil
+	}
+	execute := func(runtimeImageBuildPlan) error {
+		if builds.Add(1) == 1 {
+			close(firstBuildStarted)
+			<-releaseFirstBuild
+			imageReady.Store(true)
+		}
+		return nil
+	}
+
+	var wg sync.WaitGroup
+	errs := make(chan error, 2)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		errs <- coordinateRuntimeImageBuild(home, "enclave-codex:latest", false, resolve, execute)
+	}()
+	<-firstBuildStarted
+
+	secondStarted := make(chan struct{})
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		close(secondStarted)
+		errs <- coordinateRuntimeImageBuild(home, "enclave-codex:latest", false, resolve, execute)
+	}()
+	<-secondStarted
+	serialized := true
+	select {
+	case <-secondResolveStarted:
+		serialized = false
+	case <-time.After(20 * time.Millisecond):
+	}
+	close(releaseFirstBuild)
+	wg.Wait()
+	if !serialized {
+		t.Fatal("second caller resolved its build plan while the first build held the lock")
+	}
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("coordinateRuntimeImageBuild returned error: %v", err)
+		}
+	}
+	if got := builds.Load(); got != 1 {
+		t.Fatalf("build count = %d, want 1", got)
+	}
+}
+
+func TestCoordinateRuntimeImageBuildPreservesForceRebuild(t *testing.T) {
+	home := t.TempDir()
+	var builds atomic.Int32
+	resolve := func() (runtimeImageBuildPlan, error) {
+		return runtimeImageBuildPlan{}, nil
+	}
+	execute := func(runtimeImageBuildPlan) error {
+		builds.Add(1)
+		return nil
+	}
+
+	for range 2 {
+		if err := coordinateRuntimeImageBuild(home, "enclave-codex:latest", true, resolve, execute); err != nil {
+			t.Fatalf("coordinateRuntimeImageBuild returned error: %v", err)
+		}
+	}
+	if got := builds.Load(); got != 2 {
+		t.Fatalf("build count = %d, want 2", got)
+	}
 }

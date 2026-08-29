@@ -124,7 +124,7 @@ func TestCoordinateRuntimeImageBuildRechecksAfterWaiting(t *testing.T) {
 	secondResolveStarted := make(chan struct{})
 
 	resolve := func() (runtimeImageBuildPlan, error) {
-		if resolves.Add(1) == 2 {
+		if resolves.Add(1) == 1 {
 			close(secondResolveStarted)
 		}
 		return runtimeImageBuildPlan{StructuralRebuild: !imageReady.Load()}, nil
@@ -140,10 +140,11 @@ func TestCoordinateRuntimeImageBuildRechecksAfterWaiting(t *testing.T) {
 
 	var wg sync.WaitGroup
 	errs := make(chan error, 2)
+	initialPlan := runtimeImageBuildPlan{StructuralRebuild: true}
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		errs <- coordinateRuntimeImageBuild(home, "enclave-codex:latest", false, resolve, execute)
+		errs <- coordinateRuntimeImageBuild(home, "enclave-codex:latest", false, initialPlan, resolve, execute)
 	}()
 	<-firstBuildStarted
 
@@ -152,7 +153,7 @@ func TestCoordinateRuntimeImageBuildRechecksAfterWaiting(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		close(secondStarted)
-		errs <- coordinateRuntimeImageBuild(home, "enclave-codex:latest", false, resolve, execute)
+		errs <- coordinateRuntimeImageBuild(home, "enclave-codex:latest", false, initialPlan, resolve, execute)
 	}()
 	<-secondStarted
 	serialized := true
@@ -175,6 +176,9 @@ func TestCoordinateRuntimeImageBuildRechecksAfterWaiting(t *testing.T) {
 	if got := builds.Load(); got != 1 {
 		t.Fatalf("build count = %d, want 1", got)
 	}
+	if got := resolves.Load(); got != 1 {
+		t.Fatalf("in-lock build-plan resolution count = %d, want 1 for the contended caller", got)
+	}
 }
 
 func TestCoordinateRuntimeImageBuildPreservesForceRebuild(t *testing.T) {
@@ -189,7 +193,7 @@ func TestCoordinateRuntimeImageBuildPreservesForceRebuild(t *testing.T) {
 	}
 
 	for range 2 {
-		if err := coordinateRuntimeImageBuild(home, "enclave-codex:latest", true, resolve, execute); err != nil {
+		if err := coordinateRuntimeImageBuild(home, "enclave-codex:latest", true, runtimeImageBuildPlan{}, resolve, execute); err != nil {
 			t.Fatalf("coordinateRuntimeImageBuild returned error: %v", err)
 		}
 	}

@@ -110,11 +110,15 @@ func updateToolImage(ctx *AppContext, opts model.Options, host model.Host, proje
 		return err
 	}
 	buildCfg.HashSuffix = appendEffectiveBuildIdentityHashSuffix(buildCfg.HashSuffix, host, opts.BuildOptions)
+	buildPlan, err := resolveRuntimeImageBuildPlan(ctx.Paths, buildCfg, opts.BuildOptions, tool, host.Home, true, time.Now().UTC())
+	if err != nil {
+		return err
+	}
 	resolveBuildPlan := func() (runtimeImageBuildPlan, error) {
 		return resolveRuntimeImageBuildPlan(ctx.Paths, buildCfg, opts.BuildOptions, tool, host.Home, true, time.Now().UTC())
 	}
 	executeBuildPlan := func(buildPlan runtimeImageBuildPlan) error {
 		return buildImage(context.Background(), ctx.Paths, host, buildPlan.CombinedHash, buildCfg, opts.BuildOptions, tool, buildPlan.AgentUpdates)
 	}
-	return coordinateRuntimeImageBuild(host.Home, buildCfg.ImageName, true, resolveBuildPlan, executeBuildPlan)
+	return coordinateRuntimeImageBuild(host.Home, buildCfg.ImageName, true, buildPlan, resolveBuildPlan, executeBuildPlan)
 }

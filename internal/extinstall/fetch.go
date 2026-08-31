@@ -21,7 +21,9 @@ import (
 // ErrGitMissing reports that the host has no git binary.
 var ErrGitMissing = errors.New("git was not found on PATH; install git to add or update extensions")
 
-var fullSHAPattern = regexp.MustCompile(`^[0-9a-f]{40}$`)
+// fullSHAPattern matches a full object name in either hash: 40 hex digits for
+// SHA-1, 64 for a SHA-256 repository.
+var fullSHAPattern = regexp.MustCompile(`^([0-9a-f]{40}|[0-9a-f]{64})$`)
 
 // RemoteRef is a resolved remote reference.
 type RemoteRef struct {
@@ -115,20 +117,28 @@ func (c *fetchCache) close() {
 	c.repos = map[fetchKey]Repo{}
 }
 
-type gitFetcher struct{ git string }
+type gitFetcher struct {
+	git          string
+	allowPrompts bool
+}
 
-func NewGitFetcher() (Fetcher, error) {
+// NewGitFetcher returns a Fetcher backed by the host's git. Without prompts,
+// git may not ask for credentials on the terminal: a private remote then fails
+// with git's own message instead of blocking a run whose report is a JSON
+// envelope nobody is watching.
+func NewGitFetcher(allowPrompts bool) (Fetcher, error) {
 	path, err := exec.LookPath("git")
 	if err != nil {
 		return nil, ErrGitMissing
 	}
-	return &gitFetcher{git: path}, nil
+	return &gitFetcher{git: path, allowPrompts: allowPrompts}, nil
 }
 
 // ResolveRef resolves ref to a commit with one network round trip and no
 // repository data transferred. An empty ref resolves the remote HEAD and
 // reports the branch it points at, so an install records a branch to follow
-// rather than a moving HEAD. A full SHA needs no network at all.
+// rather than a moving HEAD; a HEAD that names no branch is pinned to its
+// commit instead (see parseSymrefHead). A full SHA needs no network at all.
 func (f *gitFetcher) ResolveRef(ctx context.Context, remote string, ref string) (RemoteRef, error) {
 	trimmed := strings.TrimSpace(ref)
 	if trimmed == "" {
@@ -215,9 +225,11 @@ func parseSymrefHead(out string, remote string) (RemoteRef, error) {
 		return RemoteRef{}, fmt.Errorf("%s has no HEAD", RedactRemote(remote))
 	}
 	if result.Ref == "" {
-		// A remote HEAD that is not symbolic (rare) still gives a usable commit.
-		result.Ref = "HEAD"
-		return result, nil
+		// A remote HEAD that is not symbolic names no branch to follow — a local
+		// clone with a detached HEAD, most often. Recording "HEAD" as the ref
+		// would leave update looking for a branch or tag of that name forever, so
+		// the install is pinned to the commit HEAD is at instead.
+		return RemoteRef{Commit: result.Commit, Ref: result.Commit, RefType: RefTypeCommit}, nil
 	}
 	// The branch name came from the remote's own advertisement and is about to
 	// be used as a bare git operand, so it is untrusted regardless of the
@@ -460,7 +472,7 @@ func (f *gitFetcher) runCombined(ctx context.Context, dir string, args ...string
 	var stdoutBuf, stderrBuf bytes.Buffer
 	cmd.Stdout = &stdoutBuf
 	cmd.Stderr = &stderrBuf
-	cmd.Env = append(os.Environ(), "GIT_ADVICE=0")
+	cmd.Env = f.env()
 	if runErr := cmd.Run(); runErr != nil {
 		detail := strings.TrimSpace(stderrBuf.String())
 		if detail == "" {
@@ -469,6 +481,20 @@ func (f *gitFetcher) runCombined(ctx context.Context, dir string, args ...string
 		return "", stderrBuf.String(), fmt.Errorf("git %s: %s", strings.Join(args, " "), RedactRemote(detail))
 	}
 	return stdoutBuf.String(), stderrBuf.String(), nil
+}
+
+// env is the environment for a git invocation. Silencing the credential
+// question takes both variables: git asks an askpass program first (a VS Code
+// terminal exports GIT_ASKPASS, which opens a dialog), and an empty
+// GIT_ASKPASS ends that search before core.askpass and SSH_ASKPASS are
+// consulted, leaving the terminal that GIT_TERMINAL_PROMPT closes. Credential
+// helpers still answer, and an ssh key passphrase is ssh's own prompt.
+func (f *gitFetcher) env() []string {
+	env := append(os.Environ(), "GIT_ADVICE=0")
+	if !f.allowPrompts {
+		env = append(env, "GIT_TERMINAL_PROMPT=0", "GIT_ASKPASS=")
+	}
+	return env
 }
 
 // filterIgnoredByServer reports whether git silently answered a

@@ -74,7 +74,7 @@ func Add(ctx context.Context, env Env, req Request) ([]ActionResult, error) {
 
 	match, other, skipped := selectKind(classify(repo.Dir(), candidates), req.Kind)
 	for _, entry := range skipped {
-		env.outcome(env.Style, markWarn, logx.ColorYellow, "skipping %s: %s", displayDir(entry.Dir), entry.Skip)
+		env.outcome(markWarn, logx.ColorYellow, "skipping %s: %s", displayDir(entry.Dir), entry.Skip)
 	}
 	if len(match) == 0 {
 		if len(other) > 0 {
@@ -84,7 +84,7 @@ func Add(ctx context.Context, env Env, req Request) ([]ActionResult, error) {
 		return nil, fmt.Errorf("%s contains no %s extension", src.Display(), req.Kind.Label())
 	}
 
-	if err := detectNameCollisions(req.Kind, match); err != nil {
+	if err := detectNameCollisions(req.Kind, match, req.Names); err != nil {
 		return nil, err
 	}
 
@@ -116,7 +116,7 @@ func Add(ctx context.Context, env Env, req Request) ([]ActionResult, error) {
 		}
 		results = append(results, result)
 	}
-	env.summarize(env.Style, req.Kind.Label(), results, req.DryRun)
+	env.summarize(req.Kind.Label(), results, req.DryRun)
 	return results, nil
 }
 
@@ -160,10 +160,15 @@ func displayDir(dir string) string {
 
 // detectNameCollisions rejects a discovered set where two or more candidates
 // of the matching kind share a base name, naming every colliding directory so
-// the user can disambiguate with --path.
-func detectNameCollisions(kind model.ExtensionKind, match []classified) error {
+// the user can disambiguate with --path. Only the names about to be installed
+// are checked: when --name picks one extension, a duplicate pair elsewhere in
+// the repository is none of that install's business.
+func detectNameCollisions(kind model.ExtensionKind, match []classified, wanted []string) error {
 	dirsByName := map[string][]string{}
 	for _, entry := range match {
+		if len(wanted) > 0 && !slices.Contains(wanted, entry.Name) {
+			continue
+		}
 		dirsByName[entry.Name] = append(dirsByName[entry.Name], displayDir(entry.Dir))
 	}
 	for _, name := range slices.Sorted(maps.Keys(dirsByName)) {
@@ -304,14 +309,14 @@ func applyPlan(env Env, req Request, plan installPlan, stage *staging) (ActionRe
 	// extension has to say, warnings and failures included, lands inside its
 	// own block rather than between the previous extension's block and this
 	// one's.
-	env.section(env.Style, plan.Name, fmt.Sprintf("%s @ %s", req.Kind.Label(), ShortCommit(plan.Commit)))
+	env.section(plan.Name, fmt.Sprintf("%s @ %s", req.Kind.Label(), ShortCommit(plan.Commit)))
 
 	warnings, err := validateStaged(env, stage, plan.Name)
 	if err != nil {
 		return ActionResult{}, err
 	}
 	for _, warning := range warnings {
-		env.outcome(env.Style, markWarn, logx.ColorYellow, "%s", warning)
+		env.outcome(markWarn, logx.ColorYellow, "%s", warning)
 	}
 	if len(warnings) > 0 {
 		_, _ = fmt.Fprintln(env.narrate())
@@ -340,7 +345,7 @@ func applyPlan(env Env, req Request, plan installPlan, stage *staging) (ActionRe
 	}
 
 	if req.DryRun {
-		env.outcome(env.Style, markInfo, logx.ColorCyan, "dry run: would be written to %s", target)
+		env.outcome(markInfo, logx.ColorCyan, "dry run: would be written to %s", target)
 		return ActionResult{Name: plan.Name, Action: ActionSkipped, Commit: plan.Commit, Path: target}, nil
 	}
 	if req.Interactive {
@@ -384,7 +389,7 @@ func applyPlan(env Env, req Request, plan installPlan, stage *staging) (ActionRe
 		return ActionResult{}, err
 	}
 
-	env.outcome(env.Style, markOK, logx.ColorGreen, "%s at %s", plan.Action, installedPath)
+	env.outcome(markOK, logx.ColorGreen, "%s at %s", plan.Action, installedPath)
 	printPostInstallHints(env, req.Kind, plan.Name, caps, contentChanged)
 	return ActionResult{Name: plan.Name, Action: plan.Action, Commit: plan.Commit, Path: installedPath, Warnings: warnings}, nil
 }
@@ -418,13 +423,13 @@ func renderUpdate(env Env, changedFiles []changedFile, before capabilities, afte
 // content rebuilds nothing and must not say otherwise.
 func printPostInstallHints(env Env, kind model.ExtensionKind, name string, caps capabilities, contentChanged bool) {
 	if contentChanged {
-		env.note(env.Style, "the next run rebuilds the image")
+		env.note("the next run rebuilds the image")
 	}
 	if kind != model.KindFeature {
 		return
 	}
 	if caps.Spec.DefaultEnabled != nil && !*caps.Spec.DefaultEnabled {
-		env.note(env.Style, "enable it with: enclave --features +%s", name)
+		env.note("enable it with: enclave --features +%s", name)
 	}
 }
 

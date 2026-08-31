@@ -68,19 +68,19 @@ func (c capabilities) render(w io.Writer, style Style, source string) {
 		envAliases += " (env alias)"
 	}
 	row("credentials", envAliases)
-	for _, source := range c.Spec.CredentialSources {
-		if source.ReleaseHeader == "" {
+	for _, cred := range c.Spec.CredentialSources {
+		if cred.ReleaseHeader == "" {
 			continue
 		}
-		row("credential → host", fmt.Sprintf("%s -> %s (header %s)", source.ID, strings.Join(source.ReleaseHosts, ", "), source.ReleaseHeader))
+		row("credential → host", fmt.Sprintf("%s -> %s (header %s)", cred.ID, strings.Join(cred.ReleaseHosts, ", "), cred.ReleaseHeader))
 	}
-	for _, source := range c.Spec.CredentialSources {
-		if source.FilePath == "" {
+	for _, cred := range c.Spec.CredentialSources {
+		if cred.FilePath == "" {
 			continue
 		}
-		note := fmt.Sprintf("%s: %s", source.ID, source.FilePath)
-		if source.FileParser != "" {
-			note += " (" + source.FileParser + ")"
+		note := fmt.Sprintf("%s: %s", cred.ID, cred.FilePath)
+		if cred.FileParser != "" {
+			note += " (" + cred.FileParser + ")"
 		}
 		row("credential file", note)
 	}

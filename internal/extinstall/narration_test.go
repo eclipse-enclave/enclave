@@ -23,10 +23,10 @@ func TestSectionSeparatesEveryExtension(t *testing.T) {
 	var out bytes.Buffer
 	env := Env{Narration: &out}
 
-	env.section(env.Style, "dsh", "tool @ 8f0bbc7")
-	env.outcome(env.Style, markOK, "", "installed at /somewhere/dsh")
-	env.section(env.Style, "openclaw", "tool @ 8f0bbc7")
-	env.outcome(env.Style, markOK, "", "installed at /somewhere/openclaw")
+	env.section("dsh", "tool @ 8f0bbc7")
+	env.outcome(markOK, "", "installed at /somewhere/dsh")
+	env.section("openclaw", "tool @ 8f0bbc7")
+	env.outcome(markOK, "", "installed at /somewhere/openclaw")
 
 	lines := strings.Split(out.String(), "\n")
 	rules := 0
@@ -89,7 +89,7 @@ func TestSectionMovesCaptionBelowWhenItCannotFit(t *testing.T) {
 	env := Env{Narration: &out, Style: Style{Width: minWidth}}
 	name := strings.Repeat("x", minWidth)
 
-	env.section(env.Style, name, "tool @ 8f0bbc7")
+	env.section(name, "tool @ 8f0bbc7")
 
 	if !strings.Contains(out.String(), name) {
 		t.Errorf("the name was dropped:\n%s", out.String())
@@ -105,11 +105,11 @@ func TestStyleZeroValueRendersPlainText(t *testing.T) {
 	var out bytes.Buffer
 	env := Env{Narration: &out}
 
-	env.section(env.Style, "dsh", "tool")
-	env.outcome(env.Style, markOK, "\x1b[32m", "installed")
-	env.note(env.Style, "the next run rebuilds the image")
+	env.section("dsh", "tool")
+	env.outcome(markOK, "\x1b[32m", "installed")
+	env.note("the next run rebuilds the image")
 	env.unchanged("openclaw", "up to date")
-	env.summarize(env.Style, "tool", []ActionResult{{Action: ActionInstalled}, {Action: ActionFailed}}, false)
+	env.summarize("tool", []ActionResult{{Action: ActionInstalled}, {Action: ActionFailed}}, false)
 
 	if strings.Contains(out.String(), "\x1b[") {
 		t.Errorf("the zero-value style emitted ANSI escapes:\n%q", out.String())
@@ -166,7 +166,7 @@ func TestSummarizeCountsOutcomes(t *testing.T) {
 		{Action: ActionInstalled}, {Action: ActionInstalled}, {Action: ActionFailed},
 	}
 
-	env.summarize(env.Style, "tool", results, false)
+	env.summarize("tool", results, false)
 
 	if want := "3 tools: 2 installed, 1 failed"; !strings.Contains(out.String(), want) {
 		t.Errorf("summary = %q, want it to contain %q", out.String(), want)
@@ -188,7 +188,7 @@ func TestSummarizeStaysQuietWhenItWouldMislead(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			var out bytes.Buffer
 			env := Env{Narration: &out}
-			env.summarize(env.Style, "tool", tc.results, tc.dryRun)
+			env.summarize("tool", tc.results, tc.dryRun)
 			if out.Len() != 0 {
 				t.Errorf("summary rendered anyway: %q", out.String())
 			}

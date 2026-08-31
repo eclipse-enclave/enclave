@@ -76,8 +76,9 @@ func (s Style) paint(text string, color logx.Color) string {
 // section opens a block for one extension: a rule carrying the name on the
 // left and a caption such as `tool @ 8f0bbc7` on the right. When the two do not
 // fit on one line the caption moves below the rule rather than being truncated.
-func (e Env) section(style Style, name string, caption string) {
+func (e Env) section(name string, caption string) {
 	w := e.narrate()
+	style := e.Style
 	width := style.width()
 	nameCells := ruleLeadIn + 1 + displayWidth(name) + 1 // "━━ name "
 	painted := style.paint(name, logx.ColorBold)
@@ -178,14 +179,14 @@ const (
 	markInfo = "·"
 )
 
-func (e Env) outcome(style Style, mark string, color logx.Color, format string, args ...any) {
-	_, _ = fmt.Fprintf(e.narrate(), "%s%s %s\n", bodyIndent, style.paint(mark, color), fmt.Sprintf(format, args...))
+func (e Env) outcome(mark string, color logx.Color, format string, args ...any) {
+	_, _ = fmt.Fprintf(e.narrate(), "%s%s %s\n", bodyIndent, e.Style.paint(mark, color), fmt.Sprintf(format, args...))
 }
 
 // note is a continuation under the outcome line it qualifies, indented past the
 // marker so the two read as one item.
-func (e Env) note(style Style, format string, args ...any) {
-	_, _ = fmt.Fprintf(e.narrate(), "%s  %s\n", bodyIndent, style.paint(fmt.Sprintf(format, args...), logx.ColorDim))
+func (e Env) note(format string, args ...any) {
+	_, _ = fmt.Fprintf(e.narrate(), "%s  %s\n", bodyIndent, e.Style.paint(fmt.Sprintf(format, args...), logx.ColorDim))
 }
 
 // unchanged reports a no-op on one line instead of opening a section for it.
@@ -204,7 +205,7 @@ func (e Env) unchanged(name string, format string, args ...any) {
 // scrolling back through the blocks. A dry run gets none: every result is
 // ActionSkipped there, and "2 skipped" describes the rehearsal rather than the
 // two installs it just walked through.
-func (e Env) summarize(style Style, kind string, results []ActionResult, dryRun bool) {
+func (e Env) summarize(kind string, results []ActionResult, dryRun bool) {
 	if len(results) < 2 || dryRun {
 		return
 	}
@@ -226,7 +227,7 @@ func (e Env) summarize(style Style, kind string, results []ActionResult, dryRun 
 	if counts[ActionFailed] > 0 {
 		color = logx.ColorYellow
 	}
-	_, _ = fmt.Fprintf(e.narrate(), "\n%s\n", style.paint(fmt.Sprintf("%d %ss: %s", len(results), kind, strings.Join(parts, ", ")), color))
+	_, _ = fmt.Fprintf(e.narrate(), "\n%s\n", e.Style.paint(fmt.Sprintf("%d %ss: %s", len(results), kind, strings.Join(parts, ", ")), color))
 }
 
 // displayWidth counts terminal cells. Every glyph this package prints is

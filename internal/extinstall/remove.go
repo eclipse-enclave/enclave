@@ -27,19 +27,23 @@ func Remove(_ context.Context, env Env, req Request) ([]ActionResult, error) {
 		return nil, err
 	}
 
-	results := make([]ActionResult, 0, len(req.Names))
+	// Every name is checked before anything is deleted, so an unknown one in a
+	// list cannot leave the run reporting a failure for extensions it did remove.
 	for _, name := range req.Names {
-		entry, ok := inventory[name]
-		if !ok {
+		if _, ok := inventory[name]; !ok {
 			return nil, fmt.Errorf("%s %q is not installed", req.Kind.Label(), name)
 		}
-		result, removeErr := removeOne(env, req, entry)
+	}
+
+	results := make([]ActionResult, 0, len(req.Names))
+	for _, name := range req.Names {
+		result, removeErr := removeOne(env, req, inventory[name])
 		if removeErr != nil {
 			result = ActionResult{Name: name, Action: ActionFailed, Error: removeErr.Error()}
 		}
 		results = append(results, result)
 	}
-	env.summarize(env.Style, req.Kind.Label(), results, req.DryRun)
+	env.summarize(req.Kind.Label(), results, req.DryRun)
 	return results, nil
 }
 
@@ -55,7 +59,7 @@ func removeOne(env Env, req Request, entry Managed) (ActionResult, error) {
 	}
 
 	target := filepath.Join(env.kindDir(req.Kind), entry.Name)
-	env.section(env.Style, entry.Name, req.Kind.Label())
+	env.section(entry.Name, req.Kind.Label())
 	if req.Interactive {
 		confirmed, err := env.confirm(fmt.Sprintf("%sRemove %s?", bodyIndent, target))
 		if err != nil {
@@ -69,11 +73,11 @@ func removeOne(env Env, req Request, entry Managed) (ActionResult, error) {
 		return ActionResult{}, err
 	}
 
-	env.outcome(env.Style, markOK, logx.ColorGreen, "removed from %s", target)
+	env.outcome(markOK, logx.ColorGreen, "removed from %s", target)
 	if entry.Source == config.SourceOverride {
-		env.note(env.Style, "the built-in %s is active again", req.Kind.Label())
+		env.note("the built-in %s is active again", req.Kind.Label())
 	}
 	// Host state may belong to a reinstall.
-	env.note(env.Style, "host config and state were left untouched")
+	env.note("host config and state were left untouched")
 	return ActionResult{Name: entry.Name, Action: ActionRemoved, Path: target}, nil
 }

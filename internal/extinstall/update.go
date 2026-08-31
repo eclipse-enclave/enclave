@@ -65,7 +65,7 @@ func Update(ctx context.Context, env Env, req Request) ([]ActionResult, error) {
 		}
 		results = append(results, result)
 	}
-	env.summarize(env.Style, req.Kind.Label(), results, req.DryRun)
+	env.summarize(req.Kind.Label(), results, req.DryRun)
 	return results, nil
 }
 

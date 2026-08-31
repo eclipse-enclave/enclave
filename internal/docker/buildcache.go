@@ -10,8 +10,6 @@ package docker
 import (
 	"context"
 	"encoding/json"
-
-	"enclave/internal/util"
 )
 
 // BuildCachePrune removes build cache entries. When all is true, both
@@ -35,7 +33,7 @@ func BuildCacheUsage(ctx context.Context) (totalBytes uint64, reclaimableBytes u
 	if err != nil {
 		return 0, 0, err
 	}
-	for _, line := range util.NonEmptyLines(out) {
+	for _, line := range splitLines(out) {
 		var row struct {
 			Type        string `json:"Type"`
 			Size        string `json:"Size"`

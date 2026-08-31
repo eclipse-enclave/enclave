@@ -32,7 +32,7 @@ func TestUpdateSharesOneCheckoutAgainstRealGit(t *testing.T) {
 		"extensions/features/beta/install.sh":  "#!/bin/sh\necho beta\n",
 		"website/large.txt":                    "not an extension\n",
 	})
-	fetcher, err := NewGitFetcher()
+	fetcher, err := NewGitFetcher(false)
 	if err != nil {
 		t.Skipf("git fetcher unavailable: %v", err)
 	}
@@ -90,7 +90,7 @@ func TestAddRootExtensionKeepsItsSubdirectoriesAgainstRealGit(t *testing.T) {
 		"skills/demo/SKILL.md":   "# demo\n",
 		"nested/other/spec.yaml": "schemaVersion: \"1\"\nkind: mixin\nname: other\ndescription: Other\n",
 	})
-	fetcher, err := NewGitFetcher()
+	fetcher, err := NewGitFetcher(false)
 	if err != nil {
 		t.Skipf("git fetcher unavailable: %v", err)
 	}
@@ -127,7 +127,7 @@ func TestAddUpdateRemoveAgainstRealGit(t *testing.T) {
 		"extensions/features/demo/install.sh": "#!/bin/sh\necho demo\n",
 		"website/large.txt":                   "not an extension\n",
 	})
-	fetcher, err := NewGitFetcher()
+	fetcher, err := NewGitFetcher(false)
 	if err != nil {
 		t.Skipf("git fetcher unavailable: %v", err)
 	}

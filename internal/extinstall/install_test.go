@@ -458,6 +458,30 @@ func TestAddRejectsNameCollisionAcrossDirectories(t *testing.T) {
 	}
 }
 
+// TestAddNamedExtensionIgnoresUnrelatedCollision keeps the collision check
+// where it matters: a duplicate pair the user is not installing says nothing
+// about the extension they asked for by name.
+func TestAddNamedExtensionIgnoresUnrelatedCollision(t *testing.T) {
+	files := map[string]string{
+		"a/foo/spec.yaml": fooFeatureSpec,
+		"b/foo/spec.yaml": fooFeatureSpec,
+		"c/bar/spec.yaml": "schemaVersion: \"1\"\nkind: mixin\nname: bar\n",
+	}
+	fetcher := newFakeFetcher(t, "a1b2c3d4", files)
+	env, _ := testEnv(t, fetcher, "")
+
+	results, err := Add(context.Background(), env, addRequest("bar"))
+	if err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	if len(results) != 1 || results[0].Action != ActionInstalled {
+		t.Fatalf("results = %s", fmtResults(results))
+	}
+	if _, statErr := os.Stat(filepath.Join(env.Paths.UserFeaturesDir, "bar", "spec.yaml")); statErr != nil {
+		t.Fatalf("bar was not installed: %v", statErr)
+	}
+}
+
 func TestRemoveInstalledDeletesManagedDirectory(t *testing.T) {
 	fetcher := newFakeFetcher(t, "a1b2c3d4", fooRepoFiles())
 	env, _ := testEnv(t, fetcher, "")

@@ -60,9 +60,33 @@ func boolString(value bool) string {
 	return "false"
 }
 
+// TestGitFetcherEnvGovernsTerminalPrompts covers the credential prompt: git
+// reads it from /dev/tty, so a run reporting into a JSON envelope would block
+// on a question nobody sees.
+func TestGitFetcherEnvGovernsTerminalPrompts(t *testing.T) {
+	// An inherited value would make both halves of this meaningless: exec keeps
+	// the last occurrence of a variable, so the assertions are about what env
+	// appends, not about what the developer's shell happens to export.
+	t.Setenv("GIT_TERMINAL_PROMPT", "1")
+	t.Setenv("GIT_ASKPASS", "/usr/bin/some-dialog")
+
+	quiet := &gitFetcher{git: "git"}
+	for _, want := range []string{"GIT_TERMINAL_PROMPT=0", "GIT_ASKPASS="} {
+		if !slices.Contains(quiet.env(), want) {
+			t.Errorf("%s missing: git may still ask for credentials in a run that cannot answer", want)
+		}
+	}
+	asking := &gitFetcher{git: "git", allowPrompts: true}
+	for _, unwanted := range []string{"GIT_TERMINAL_PROMPT=0", "GIT_ASKPASS="} {
+		if slices.Contains(asking.env(), unwanted) {
+			t.Errorf("%s set: a user cannot answer a question git never asks", unwanted)
+		}
+	}
+}
+
 func TestGitFetcherResolveRefBranch(t *testing.T) {
 	repo := fixtureRepo(t, true, map[string]string{"README.md": "hi\n"})
-	fetcher, err := NewGitFetcher()
+	fetcher, err := NewGitFetcher(false)
 	if err != nil {
 		t.Skipf("git fetcher unavailable: %v", err)
 	}
@@ -81,7 +105,7 @@ func TestGitFetcherResolveRefBranch(t *testing.T) {
 
 func TestGitFetcherResolveRefDefaultHead(t *testing.T) {
 	repo := fixtureRepo(t, true, map[string]string{"README.md": "hi\n"})
-	fetcher, err := NewGitFetcher()
+	fetcher, err := NewGitFetcher(false)
 	if err != nil {
 		t.Skipf("git fetcher unavailable: %v", err)
 	}
@@ -123,11 +147,41 @@ func TestParseSymrefHeadIgnoresRemoteTrackingHead(t *testing.T) {
 	}
 }
 
+// TestGitFetcherResolveRefFromDetachedClone covers a source whose HEAD names no
+// branch, which a local clone parked on a tag or a commit does. There is no
+// branch to follow, so the install pins the commit: recording a ref named
+// "HEAD" would leave every later update looking for a branch or tag of that
+// name, which no ls-remote can ever match.
+func TestGitFetcherResolveRefFromDetachedClone(t *testing.T) {
+	origin := fixtureRepo(t, true, map[string]string{"README.md": "hi\n"})
+	fetcher, err := NewGitFetcher(false)
+	if err != nil {
+		t.Skipf("git fetcher unavailable: %v", err)
+	}
+	clone := filepath.Join(t.TempDir(), "clone")
+	runGitFixture(t, "", "clone", "--quiet", origin, clone)
+	runGitFixture(t, clone, "checkout", "--quiet", "--detach", "HEAD")
+
+	got, err := fetcher.ResolveRef(context.Background(), clone, "")
+	if err != nil {
+		t.Fatalf("ResolveRef: %v", err)
+	}
+	if got.RefType != RefTypeCommit {
+		t.Fatalf("refType = %q, want commit", got.RefType)
+	}
+	if got.Ref != got.Commit {
+		t.Fatalf("ref = %q, want the commit %q", got.Ref, got.Commit)
+	}
+	if _, err := fetcher.ResolveRef(context.Background(), clone, got.Ref); err != nil {
+		t.Fatalf("the recorded ref does not resolve again: %v", err)
+	}
+}
+
 // TestGitFetcherResolveRefFromLocalClone is the end-to-end counterpart: a
 // clone of a clone still resolves to the branch it is actually on.
 func TestGitFetcherResolveRefFromLocalClone(t *testing.T) {
 	origin := fixtureRepo(t, true, map[string]string{"README.md": "hi\n"})
-	fetcher, err := NewGitFetcher()
+	fetcher, err := NewGitFetcher(false)
 	if err != nil {
 		t.Skipf("git fetcher unavailable: %v", err)
 	}
@@ -149,7 +203,7 @@ func TestGitFetcherResolveRefFromLocalClone(t *testing.T) {
 func TestGitFetcherResolveRefTagAndCommit(t *testing.T) {
 	repo := fixtureRepo(t, true, map[string]string{"README.md": "hi\n"})
 	runGitFixture(t, repo, "tag", "v1.0.0")
-	fetcher, err := NewGitFetcher()
+	fetcher, err := NewGitFetcher(false)
 	if err != nil {
 		t.Skipf("git fetcher unavailable: %v", err)
 	}
@@ -176,7 +230,7 @@ func TestGitFetcherOpenListsFilesWithoutMaterializing(t *testing.T) {
 		"extensions/features/foo/spec.yaml": "schemaVersion: \"1\"\nkind: mixin\nname: foo\n",
 		"website/big.txt":                   "unrelated\n",
 	})
-	fetcher, err := NewGitFetcher()
+	fetcher, err := NewGitFetcher(false)
 	if err != nil {
 		t.Skipf("git fetcher unavailable: %v", err)
 	}
@@ -203,7 +257,7 @@ func TestGitFetcherMaterializeSubset(t *testing.T) {
 		"extensions/features/foo/spec.yaml": "schemaVersion: \"1\"\nkind: mixin\nname: foo\n",
 		"website/big.txt":                   "unrelated\n",
 	})
-	fetcher, err := NewGitFetcher()
+	fetcher, err := NewGitFetcher(false)
 	if err != nil {
 		t.Skipf("git fetcher unavailable: %v", err)
 	}
@@ -237,7 +291,7 @@ func TestGitFetcherMaterializeHonorsContext(t *testing.T) {
 	repo := fixtureRepo(t, true, map[string]string{
 		"extensions/features/foo/spec.yaml": "schemaVersion: \"1\"\nkind: mixin\nname: foo\n",
 	})
-	fetcher, err := NewGitFetcher()
+	fetcher, err := NewGitFetcher(false)
 	if err != nil {
 		t.Skipf("git fetcher unavailable: %v", err)
 	}
@@ -260,7 +314,7 @@ func TestGitFetcherMaterializeHonorsContext(t *testing.T) {
 func TestGitFetcherListsQuotedPathsVerbatim(t *testing.T) {
 	const spec = "extensions/features/日本/spec.yaml"
 	repo := fixtureRepo(t, true, map[string]string{spec: "schemaVersion: \"1\"\nkind: mixin\nname: foo\n"})
-	fetcher, err := NewGitFetcher()
+	fetcher, err := NewGitFetcher(false)
 	if err != nil {
 		t.Skipf("git fetcher unavailable: %v", err)
 	}
@@ -280,7 +334,7 @@ func TestGitFetcherFallsBackWhenFilterUnsupported(t *testing.T) {
 		"extensions/features/foo/spec.yaml": "schemaVersion: \"1\"\nkind: mixin\nname: foo\n",
 		"website/big.txt":                   "unrelated\n",
 	})
-	fetcher, err := NewGitFetcher()
+	fetcher, err := NewGitFetcher(false)
 	if err != nil {
 		t.Skipf("git fetcher unavailable: %v", err)
 	}
@@ -318,7 +372,7 @@ func TestGitFetcherFallsBackWhenFilterUnsupported(t *testing.T) {
 
 func TestGitFetcherOpenUnknownRef(t *testing.T) {
 	repo := fixtureRepo(t, true, map[string]string{"README.md": "hi\n"})
-	fetcher, err := NewGitFetcher()
+	fetcher, err := NewGitFetcher(false)
 	if err != nil {
 		t.Skipf("git fetcher unavailable: %v", err)
 	}
@@ -351,7 +405,7 @@ func TestGitFetcherRejectsOptionLikeRemoteHead(t *testing.T) {
 	runGitFixture(t, repoDir, "add", "-A")
 	runGitFixture(t, repoDir, "commit", "-qm", "initial")
 
-	fetcher, err := NewGitFetcher()
+	fetcher, err := NewGitFetcher(false)
 	if err != nil {
 		t.Skipf("git fetcher unavailable: %v", err)
 	}
@@ -368,7 +422,7 @@ func TestGitFetcherRejectsOptionLikeRemoteHead(t *testing.T) {
 // untrusted ref reaches git as a bare operand: an explicit --ref value.
 func TestGitFetcherRejectsOptionLikeRequestedRef(t *testing.T) {
 	repo := fixtureRepo(t, true, map[string]string{"README.md": "hi\n"})
-	fetcher, err := NewGitFetcher()
+	fetcher, err := NewGitFetcher(false)
 	if err != nil {
 		t.Skipf("git fetcher unavailable: %v", err)
 	}
@@ -383,7 +437,7 @@ func TestGitFetcherMaterializeRejectsOptionLikePath(t *testing.T) {
 	repo := fixtureRepo(t, true, map[string]string{
 		"extensions/features/foo/spec.yaml": "schemaVersion: \"1\"\nkind: mixin\nname: foo\n",
 	})
-	fetcher, err := NewGitFetcher()
+	fetcher, err := NewGitFetcher(false)
 	if err != nil {
 		t.Skipf("git fetcher unavailable: %v", err)
 	}
@@ -410,7 +464,7 @@ func TestGitRepoFetchPinnedCommitFromDefaultBranch(t *testing.T) {
 	runGitFixture(t, src, "add", "-A")
 	runGitFixture(t, src, "commit", "-qm", "second")
 
-	fetcher, err := NewGitFetcher()
+	fetcher, err := NewGitFetcher(false)
 	if err != nil {
 		t.Skipf("git fetcher unavailable: %v", err)
 	}
@@ -452,7 +506,7 @@ func TestGitRepoFetchPinnedCommitFromDefaultBranch(t *testing.T) {
 // default branch.
 func TestGitRepoFetchPinnedCommitFromDefaultBranchMissing(t *testing.T) {
 	src := fixtureRepo(t, true, map[string]string{"README.md": "hi\n"})
-	fetcher, err := NewGitFetcher()
+	fetcher, err := NewGitFetcher(false)
 	if err != nil {
 		t.Skipf("git fetcher unavailable: %v", err)
 	}

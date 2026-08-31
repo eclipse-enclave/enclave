@@ -138,7 +138,7 @@ func validateUserExtension(paths model.Paths, kind model.ExtensionKind, name str
 	builtinDir, _ := ResolveExtensionDirs(paths, kind, name)
 	hasBuiltin := builtinDir != ""
 
-	if util.IsDir(filepath.Join(userDir, "go")) {
+	if util.IsDir(filepath.Join(userDir, model.ExtensionGoDir)) {
 		result.Warnings = append(result.Warnings, fmt.Sprintf("%s %q: user go/ handlers are ignored (requires recompilation)", kind.Label(), name))
 	}
 

@@ -245,7 +245,8 @@ func TestResolveSessionTargetResolvesContainerID(t *testing.T) {
 	target.Ref.ID = "3f2b1c0d4e5f"
 	be := &stopTestBackend{sessions: []backend.Session{target}}
 
-	for _, requested := range []string{"3f2b1c0d4e5f", "3f2b1c0d", "3f2b1c0d4e5f6a7b8c9d"} {
+	fullID := target.Ref.ID + strings.Repeat("a", containerIDFullLen-len(target.Ref.ID))
+	for _, requested := range []string{"3f2b1c0d4e5f", "3f2b1c0d", fullID} {
 		got, err := resolveSessionTarget(context.Background(), be, sessionTargetQuery{Args: []string{requested}})
 		if err != nil {
 			t.Fatalf("resolveSessionTarget(%q) error = %v", requested, err)
@@ -274,14 +275,17 @@ func TestResolveSessionTargetReportsAmbiguousContainerIDPrefix(t *testing.T) {
 	}
 }
 
-func TestResolveSessionTargetRejectsOverlongContainerID(t *testing.T) {
+func TestResolveSessionTargetRejectsPartialContainerIDExtension(t *testing.T) {
 	target := session("enclave-claude-aaaaaaaaaaaa-my-task", "my-task", "aaaaaaaaaaaa", "/repo/a")
 	target.Ref.ID = "3f2b1c0d4e5f"
 	be := &stopTestBackend{sessions: []backend.Session{target}}
 
-	requested := target.Ref.ID + strings.Repeat("a", containerIDMaxLen)
-	if _, err := resolveSessionTarget(context.Background(), be, sessionTargetQuery{Args: []string{requested}}); err == nil {
-		t.Fatal("a value longer than a container ID must not match on its prefix")
+	// Only a complete ID may extend the recorded (truncated) one; a value of
+	// some length in between cannot be verified against it.
+	for _, requested := range []string{target.Ref.ID + "aaaaaaaa", target.Ref.ID + strings.Repeat("a", containerIDFullLen)} {
+		if _, err := resolveSessionTarget(context.Background(), be, sessionTargetQuery{Args: []string{requested}}); err == nil {
+			t.Fatalf("resolveSessionTarget(%q) must not match on the recorded ID prefix", requested)
+		}
 	}
 }
 

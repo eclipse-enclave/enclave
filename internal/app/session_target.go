@@ -23,10 +23,10 @@ import (
 // hex-looking session names keep working.
 const containerIDMinPrefix = 8
 
-// containerIDMaxLen is the length of a full container ID. Recorded IDs are
-// truncated, so a longer value is matched on its leading characters — but only
-// up to the length a real ID can have.
-const containerIDMaxLen = 64
+// containerIDFullLen is the length of a full container ID. Recorded IDs are
+// truncated, so only a value of exactly this length may extend one; anything
+// between is a prefix or nothing at all.
+const containerIDFullLen = 64
 
 // sessionTargetQuery describes how a positional container/session argument is
 // resolved to exactly one managed session.
@@ -49,7 +49,8 @@ type sessionTargetQuery struct {
 	// ProjectScopedNames rejects a session name that only matches outside the
 	// current project. `stop` sets it: removal is destructive and the
 	// auto-assigned names `1`, `2`, … collide across projects by construction,
-	// so another project's session needs its container name or ID.
+	// so another project's session needs its container name or ID. It requires
+	// Project to be set; without it no name resolves.
 	ProjectScopedNames bool
 	// BackgroundOnly restricts auto-selection to detached sessions, so that a
 	// bare `attach` cannot grab the TTY of a foreground session that a second
@@ -188,18 +189,27 @@ func projectSessions(sessions []backend.Session, project model.Project) (scoped 
 			return sameWorktree, true
 		}
 	}
-	if hash := strings.TrimSpace(project.Hash); hash != "" {
-		var sameProject []backend.Session
-		for _, session := range sessions {
-			if strings.TrimSpace(session.ProjectHash) == hash {
-				sameProject = append(sameProject, session)
-			}
-		}
-		if len(sameProject) > 0 {
-			return sameProject, true
-		}
+	if sameProject := projectHashSessions(sessions, project.Hash); len(sameProject) > 0 {
+		return sameProject, true
 	}
 	return sessions, false
+}
+
+// projectHashSessions narrows sessions to one project. An unresolvable project
+// (empty hash) matches nothing, never everything, so that a name-filtered
+// command cannot silently widen to the whole host.
+func projectHashSessions(sessions []backend.Session, hash string) []backend.Session {
+	hash = strings.TrimSpace(hash)
+	if hash == "" {
+		return nil
+	}
+	var matches []backend.Session
+	for _, session := range sessions {
+		if strings.TrimSpace(session.ProjectHash) == hash {
+			matches = append(matches, session)
+		}
+	}
+	return matches
 }
 
 func sessionsForTool(sessions []backend.Session, tool string) []backend.Session {
@@ -222,9 +232,10 @@ func sessionsForTool(sessions []backend.Session, tool string) []backend.Session 
 // matched. All matches are returned so that an ambiguous prefix is reported
 // instead of resolved by listing order.
 func sessionsByContainerID(sessions []backend.Session, requested string) []backend.Session {
-	if len(requested) < containerIDMinPrefix || len(requested) > containerIDMaxLen || !isHexString(requested) {
+	if len(requested) < containerIDMinPrefix || len(requested) > containerIDFullLen || !isHexString(requested) {
 		return nil
 	}
+	full := len(requested) == containerIDFullLen
 	var matches []backend.Session
 	for _, session := range sessions {
 		id := strings.TrimSpace(session.Ref.ID)
@@ -233,7 +244,7 @@ func sessionsByContainerID(sessions []backend.Session, requested string) []backe
 		}
 		// Session IDs are truncated, so a full ID pasted from docker carries the
 		// one recorded here as its prefix.
-		if strings.HasPrefix(id, requested) || strings.HasPrefix(requested, id) {
+		if strings.HasPrefix(id, requested) || (full && strings.HasPrefix(requested, id)) {
 			matches = append(matches, session)
 		}
 	}

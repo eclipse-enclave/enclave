@@ -41,7 +41,9 @@ unchanged. See [windows.md](windows.md).
 names are matched in sanitized form on both sides (lowercased,
 non-alphanumerics collapsed to `-`, truncated to 32 characters), so a session
 started as `--name "My Task"` is reachable as either `my-task` or `"My Task"`.
-The same holds for the `--name` filter of `ps`, `status`, and `stop`.
+The same holds for the `--name` filter of `ps`, `status`, and `stop`; a `--name`
+that is blank or sanitizes to nothing matches no session rather than all of
+them.
 
 Session names are resolved against the current project first (same worktree,
 then same project); they are not required to be unique, so when one matches
@@ -51,16 +53,17 @@ resolves verbatim, independently of the working directory and `--tool`; an
 ambiguous container-ID prefix is reported like an ambiguous name.
 
 `attach` and `theia` widen the search to all projects when the current one has
-no match. `stop <name>` does not: removal is destructive and the auto-assigned
-names `1`, `2`, … collide across projects by construction, so another project's
-session has to be named by its container name or ID.
+no match. `stop` never does, neither for `stop <name>` nor for `stop --name`:
+removal is destructive and the auto-assigned names `1`, `2`, … collide across
+projects by construction, so another project's session has to be named by its
+container name or ID.
 
-`stop <name>` and `stop --name <name>` are different commands. The positional
-form removes the single session it resolves, whatever its tool and whether it is
-running or already stopped. `--name` filters the batch form instead: it removes
-every *background* session of the selected tool (`--tool`, default `claude`)
-whose session name matches. A `--name` that is blank or sanitizes to nothing
-matches no session rather than all of them.
+`stop <name>` and `stop --name <name>` still select differently. The positional
+form removes exactly the one session it resolves, of any tool unless `--tool` is
+passed. `--name` filters the batch form instead: it removes every *background*
+session of the current project whose name matches, for the single tool that the
+options resolve to (so a profile or config `tool` applies as well). Both include
+containers that have already exited.
 
 With no argument, `attach` picks the single detached session of the current
 project (a foreground session is entered with `exec` instead), and `theia` picks

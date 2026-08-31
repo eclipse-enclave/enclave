@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	"enclave/internal/backend"
+	"enclave/internal/config"
 	"enclave/internal/model"
 )
 
@@ -36,11 +37,16 @@ func TestStopContainerFinalizesThenForceRemovesOnFinalizeError(t *testing.T) {
 	}
 }
 
-func TestStopSessionsRequiresANameToStopSomething(t *testing.T) {
-	sessions := []backend.Session{
-		session("enclave-claude-aaaaaaaaaaaa-my-task", "my-task", "aaaaaaaaaaaa", "/repo/a"),
-		session("enclave-claude-aaaaaaaaaaaa-other", "other", "aaaaaaaaaaaa", "/repo/a"),
+func TestStopSessionsSelection(t *testing.T) {
+	projectDir := t.TempDir()
+	project, err := config.ResolveProjectFromDir(projectDir)
+	if err != nil {
+		t.Fatalf("ResolveProjectFromDir() error = %v", err)
 	}
+	mine := session("enclave-claude-"+project.Hash+"-my-task", "my-task", project.Hash, projectDir)
+	other := session("enclave-claude-"+project.Hash+"-other", "other", project.Hash, projectDir)
+	foreign := session("enclave-claude-bbbbbbbbbbbb-my-task", "my-task", "bbbbbbbbbbbb", "/repo/b")
+
 	tests := []struct {
 		name     string
 		opts     model.Options
@@ -49,35 +55,46 @@ func TestStopSessionsRequiresANameToStopSomething(t *testing.T) {
 		stopped  []string
 	}{
 		{
+			name:     "--name stops the matching session",
+			opts:     stopOptionsWithName("my-task"),
+			sessions: []backend.Session{mine, other},
+			stopped:  []string{mine.Ref.Name},
+		},
+		{
+			name:     "--name does not leave the project",
+			opts:     stopOptionsWithName("my-task"),
+			sessions: []backend.Session{foreign},
+		},
+		{
 			name:     "blank --name stops nothing",
 			opts:     stopOptionsWithName("   "),
-			sessions: sessions,
+			sessions: []backend.Session{mine, other},
 		},
 		{
 			name:     "unsanitizable --name stops nothing",
 			opts:     stopOptionsWithName("???"),
-			sessions: sessions,
+			sessions: []backend.Session{mine, other},
 		},
 		{
 			// The single session would be auto-selected if the blank argument were
 			// read as "no argument".
 			name:     "blank positional argument is rejected",
 			opts:     stopOptionsWithArg("   "),
-			sessions: sessions[:1],
+			sessions: []backend.Session{mine},
 			code:     1,
 		},
 		{
-			name:     "no filter stops every background session",
+			name:     "without --name every background session is stopped",
 			opts:     model.Options{Sources: model.DefaultOptionSources()},
-			sessions: sessions,
-			stopped:  []string{sessions[0].Ref.Name, sessions[1].Ref.Name},
+			sessions: []backend.Session{mine, foreign},
+			stopped:  []string{mine.Ref.Name, foreign.Ref.Name},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			be := &stopTestBackend{sessions: tt.sessions}
-			if code := stopSessions(context.Background(), be, tt.opts, ""); code != tt.code {
+			if code := stopSessions(context.Background(), be, tt.opts, projectDir); code != tt.code {
 				t.Fatalf("stopSessions() = %d, want %d", code, tt.code)
 			}
 			if !slices.Equal(be.stopped, tt.stopped) {

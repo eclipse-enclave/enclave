@@ -44,7 +44,8 @@ func runStop(opts model.Options, projectDir string) int {
 
 // stopSessions removes the containers a `stop` invocation selects: the single
 // session named by the positional argument, or every background session of the
-// tool, narrowed by `--name` when that flag was given.
+// tool, narrowed to the current project's matching sessions when `--name` was
+// given.
 func stopSessions(ctx context.Context, be backend.Backend, opts model.Options, projectDir string) int {
 	run := opts.RunOptions
 
@@ -71,9 +72,12 @@ func stopSessions(ctx context.Context, be backend.Backend, opts model.Options, p
 		return 1
 	}
 	// Sanitized matching happens here rather than as a label filter, so that a
-	// name which sanitizes to nothing stops nothing instead of everything.
+	// name which sanitizes to nothing stops nothing instead of everything. Like
+	// the positional form, `--name` stays inside the current project: session
+	// names are project-relative and collide across projects.
 	if name, given := sessionNameFilter(opts); given {
-		sessions = sessionsMatchingName(sessions, name)
+		project := sessionTargetProject(projectDir)
+		sessions = sessionsMatchingName(projectHashSessions(sessions, project.Hash), name)
 	}
 
 	if len(sessions) == 0 {

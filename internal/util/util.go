@@ -283,17 +283,6 @@ func RedactSecret(value string) string {
 	return "****"
 }
 
-// NonEmptyLines splits text into trimmed lines, dropping blank ones.
-func NonEmptyLines(text string) []string {
-	var lines []string
-	for _, line := range strings.Split(text, "\n") {
-		if trimmed := strings.TrimSpace(line); trimmed != "" {
-			lines = append(lines, trimmed)
-		}
-	}
-	return lines
-}
-
 func TitleCase(value string) string {
 	if value == "" {
 		return value

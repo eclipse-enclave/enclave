@@ -24,7 +24,7 @@ func newExtinstallEnv(ctx *AppContext, req extinstall.Request) (extinstall.Env, 
 	if err != nil {
 		return extinstall.Env{}, err
 	}
-	fetcher, err := extinstall.NewGitFetcher()
+	fetcher, err := extinstall.NewGitFetcher(!req.JSON)
 	if err != nil {
 		return extinstall.Env{}, err
 	}

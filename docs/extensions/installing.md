@@ -69,7 +69,10 @@ and a destination path.
 - Two matched candidates in different directories that declare the *same*
   name are a hard error naming both directories, even under `--all` — there
   is no way to install both into the same destination directory, so you
-  disambiguate with `--path` up front rather than have one silently win.
+  disambiguate with `--path` up front rather than have one silently win. Only
+  the names being installed are checked: `--name foo` still errors on two
+  `foo` directories, but a duplicate pair you did not ask for is not your
+  problem.
 - If the source has extensions of the *other* kind but none of the requested
   one, the error names the right verb (`enclave features add` when you ran
   `enclave tools add` against a features-only repo).
@@ -94,7 +97,17 @@ granted capability is visible before you accept it.
 
 `--yes` skips the confirmation prompt after the summary is shown; it never
 skips the summary itself. `--json` implies non-interactive and requires
-`--yes` (it has no way to prompt). `--force` overrides collision policy —
+`--yes` (it has no way to prompt).
+
+Under `--json`, git may not ask for credentials either, on the terminal or
+through an askpass program: a private HTTPS remote fails with git's own
+message rather than blocking on a question nobody sees. That covers a
+scripted `GIT_ASKPASS` too, since git offers no way to tell one from a
+dialog, so an unattended install wants a credential helper. Helpers keep
+working, and an ssh key passphrase is ssh's own prompt, which can still
+appear.
+
+`--force` overrides collision policy —
 replacing an already-installed extension, one that was hand-edited, one
 enclave did not install, or **one that would shadow a built-in extension of
 the same name** — but never overrides a validation error: a spec that fails
@@ -120,6 +133,11 @@ extension directory:
 | `commit` | The exact commit installed |
 | `installedAt`, `installedBy` | Install timestamp and the enclave version that performed it |
 | `treeHash` | A digest of the installed files, used to detect local edits |
+
+Without `--ref`, the install follows the branch the remote's HEAD names. A
+source whose HEAD names no branch — a local clone sitting on a detached HEAD —
+offers nothing to follow, so the install records a commit pin instead and
+`update` treats it as one.
 
 This sidecar is excluded from the Docker build context and from the image
 identity hash — re-pinning to a new commit with byte-identical content does

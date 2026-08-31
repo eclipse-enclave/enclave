@@ -16,8 +16,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"enclave/internal/util"
 )
 
 // ContainerList returns container summaries matching opts. It lists IDs with
@@ -34,7 +32,7 @@ func ContainerList(ctx context.Context, opts ListOptions) ([]Summary, error) {
 	if err != nil {
 		return nil, err
 	}
-	ids := util.NonEmptyLines(out)
+	ids := splitLines(out)
 	if len(ids) == 0 {
 		return nil, nil
 	}
@@ -88,7 +86,7 @@ func inspectContainers(ctx context.Context, ids []string) ([]InspectResponse, er
 }
 
 func decodeInspectResponses(out string) []InspectResponse {
-	lines := util.NonEmptyLines(out)
+	lines := splitLines(out)
 	results := make([]InspectResponse, 0, len(lines))
 	for _, line := range lines {
 		var info InspectResponse
@@ -182,4 +180,14 @@ func containerLogs(ctx context.Context, containerID string, extra ...string) (st
 		return buf.String(), &cliError{args: args, code: code, stderr: strings.TrimSpace(buf.String()), err: err}
 	}
 	return buf.String(), nil
+}
+
+func splitLines(out string) []string {
+	var lines []string
+	for _, line := range strings.Split(out, "\n") {
+		if trimmed := strings.TrimSpace(line); trimmed != "" {
+			lines = append(lines, trimmed)
+		}
+	}
+	return lines
 }

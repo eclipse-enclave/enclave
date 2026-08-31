@@ -202,6 +202,22 @@ func TestRemoveUnknownName(t *testing.T) {
 	}
 }
 
+// TestRemoveUnknownNameRemovesNothing keeps the result envelope honest: an
+// unknown name fails the run before anything is deleted, so a consumer never
+// reads a failure for a list that was in fact partly removed.
+func TestRemoveUnknownNameRemovesNothing(t *testing.T) {
+	fetcher := newFakeFetcher(t, "a1b2c3d4", fooRepoFiles())
+	env, _ := testEnv(t, fetcher, "")
+	installFoo(t, env)
+
+	if _, err := Remove(context.Background(), env, removeRequest("foo", "nope")); err == nil {
+		t.Fatal("Remove accepted a name that is not installed")
+	}
+	if _, statErr := os.Stat(filepath.Join(env.Paths.UserFeaturesDir, "foo")); statErr != nil {
+		t.Fatalf("a run that reported failure removed an extension anyway: %v", statErr)
+	}
+}
+
 func TestRemoveRequiresNames(t *testing.T) {
 	fetcher := newFakeFetcher(t, "a1b2c3d4", fooRepoFiles())
 	env, _ := testEnv(t, fetcher, "")

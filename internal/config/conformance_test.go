@@ -55,15 +55,22 @@ func TestExtensionSurfaceGolden(t *testing.T) {
 		assertGolden(t, "tool-ext-"+name, ext)
 	}
 
-	feats, err := ListFeatures(paths)
+	// Enumerate the feature spec names rather than going through ListFeatures:
+	// that helper warns and skips specs it cannot load, so a broken built-in
+	// feature spec would drop out of the snapshot set instead of failing here.
+	feats, err := listSpecNames(paths, KindMixin)
 	if err != nil {
-		t.Fatalf("ListFeatures: %v", err)
+		t.Fatalf("listSpecNames(features): %v", err)
 	}
 	if len(feats) == 0 {
-		t.Fatal("ListFeatures returned no features; expected the real extensions/features tree")
+		t.Fatal("found no feature specs; expected the real extensions/features tree")
 	}
-	for _, ext := range feats {
-		assertGolden(t, "feature-"+ext.Name, ext)
+	for _, name := range feats {
+		ext, err := LoadFeatureExtension(paths, name)
+		if err != nil {
+			t.Fatalf("LoadFeatureExtension(%s): %v", name, err)
+		}
+		assertGolden(t, "feature-"+name, ext)
 	}
 }
 

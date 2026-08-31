@@ -17,13 +17,18 @@ import (
 
 // validateServiceAuthMappings fails loudly when a network.serviceAuth or
 // network.serviceDomains service id does not map to a declared
-// credentials.sources id, or when a serviceDomains id has no serviceAuth entry.
+// credentials.sources id, and when the serviceDomains ↔ serviceAuth pairing is
+// incomplete in either direction.
+//
 // buildSecrets only builds an HTTP release rule for ids present in both
-// credentials.sources and network.serviceAuth, so either mismatch (a typo, or a
-// dropped serviceAuth line) is otherwise silently inert: the token is injected
-// as a raw env value instead of a proxy-swapped placeholder — a secret-leak
-// risk — and the serviceDomains hosts drop out of the release hosts unioned
-// into the effective allowlist.
+// credentials.sources and network.serviceAuth, so a serviceDomains id with no
+// serviceAuth entry (a typo, or a dropped serviceAuth line) is silently inert:
+// the token is injected as a raw env value instead of a proxy-swapped
+// placeholder — a secret-leak risk — and the serviceDomains hosts drop out of
+// the release hosts unioned into the effective allowlist. The reverse, a
+// serviceAuth entry with no hosts from either source, would otherwise be
+// rejected downstream by normalizeHosts, but with a message that never names
+// serviceDomains; catching it here points both directions at the same remedy.
 func validateServiceAuthMappings(doc specDocument, specPath string) error {
 	if doc.Network == nil {
 		return nil
@@ -34,20 +39,46 @@ func validateServiceAuthMappings(doc specDocument, specPath string) error {
 			sources[id] = struct{}{}
 		}
 	}
+	// Unknown ids come first: a typo'd id also breaks the pairing, and reporting
+	// the pairing gap would send the author to the wrong line.
 	for id := range doc.Network.ServiceAuth {
 		if _, ok := sources[id]; !ok {
 			return fmt.Errorf("%s: network.serviceAuth[%q] has no matching credentials.sources entry", specPath, id)
 		}
 	}
+	hostedServices := map[string]struct{}{}
 	for host, id := range doc.Network.ServiceDomains {
 		if _, ok := sources[id]; !ok {
 			return fmt.Errorf("%s: network.serviceDomains[%q] references service %q with no matching credentials.sources entry", specPath, host, id)
 		}
+		if strings.TrimSpace(host) != "" {
+			hostedServices[id] = struct{}{}
+		}
+	}
+
+	// Then the pairing, in both directions.
+	for id, auth := range doc.Network.ServiceAuth {
+		if _, ok := hostedServices[id]; !ok && !hasNonBlank(auth.Hosts) {
+			return fmt.Errorf("%s: network.serviceAuth[%q] has no hosts to release the credential to (add a hosts list, or map hosts to this service under network.serviceDomains)", specPath, id)
+		}
+	}
+	for host, id := range doc.Network.ServiceDomains {
 		if _, ok := doc.Network.ServiceAuth[id]; !ok {
 			return fmt.Errorf("%s: network.serviceDomains[%q] references service %q with no matching network.serviceAuth entry (add one, or list the hosts under network.allowedDomains instead)", specPath, host, id)
 		}
 	}
 	return nil
+}
+
+// hasNonBlank reports whether hosts holds at least one entry that survives the
+// blank-stripping normalizeHosts applies later.
+func hasNonBlank(hosts []string) bool {
+	for _, host := range hosts {
+		if strings.TrimSpace(host) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // validateProxyManaged fails loudly when an environment.proxyManaged entry

@@ -146,8 +146,9 @@ the mounted host project directory and installs happen at `docker build` time:
 - `files/workspace/**` is copied into the project at container **start** and
   **never clobbers** an existing host file (warns and skips).
 - `commands.startup` running as root is **rejected loudly at load**.
-- `network.serviceDomains` mapping a host to a service that has no
-  `network.serviceAuth` entry is **rejected loudly at load** (see below).
+- the `network.serviceDomains` ↔ `network.serviceAuth` pairing must be complete
+  in both directions; an incomplete mapping is **rejected loudly at load**
+  (see below).
 - `commands.install` (mixins only) is woven into the build; an `install.sh`
   sidecar wins if a feature ships both.
 
@@ -415,7 +416,9 @@ Secrets are split across two `spec.yaml` sections:
   one the mapping is inert — the hosts never reach the allowlist and the
   credential is injected as a raw env value — so the spec is rejected at load.
   To make hosts reachable without injecting a credential, list them under
-  `network.allowedDomains` instead.
+  `network.allowedDomains` instead. The pairing is required in both directions:
+  a `serviceAuth` entry also needs at least one host, either from
+  `serviceDomains` or from its own `hosts` list.
 
 The placeholder convention is Go `fmt`-style `%s`, not `{secret}`. An empty
 `valueFormat` means "inject the raw secret value" with no wrapping (see

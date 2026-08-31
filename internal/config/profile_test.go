@@ -318,7 +318,7 @@ func TestLoadProfileRejectsSecretReleaseWithEmptyHosts(t *testing.T) {
 	}`)
 
 	_, err := LoadProfile(paths, "tool")
-	if err == nil || !strings.Contains(err.Error(), "hosts must contain at least one domain pattern") {
+	if err == nil || !strings.Contains(err.Error(), "has no hosts to release the credential to") {
 		t.Fatalf("LoadProfile() error = %v, want empty-hosts validation error", err)
 	}
 }

@@ -8,7 +8,6 @@
 package config
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -92,25 +91,41 @@ func LoadFeatureExtension(paths model.Paths, name string) (model.Extension, erro
 
 // ListTools returns all tool extension names from both built-in and user extension roots.
 func ListTools(paths model.Paths) ([]string, error) {
-	names, err := listExtensionNames(paths.ToolsDir, paths.UserToolsDir)
+	return listSpecNames(paths, KindSandbox)
+}
+
+// listSpecNames returns the sorted names of the given kind's extensions, from
+// both the built-in and the user root, that carry a spec document. Unlike
+// ListFeatures it never loads those specs, so a name it returns may still fail
+// to load.
+func listSpecNames(paths model.Paths, kind string) ([]string, error) {
+	var builtinDir, userDir string
+	switch kind {
+	case KindSandbox:
+		builtinDir, userDir = paths.ToolsDir, paths.UserToolsDir
+	case KindMixin:
+		builtinDir, userDir = paths.FeaturesDir, paths.UserFeaturesDir
+	default:
+		return nil, fmt.Errorf("unknown extension kind %q", kind)
+	}
+
+	names, err := listExtensionNames(builtinDir, userDir)
 	if err != nil {
 		return nil, err
 	}
 
-	var tools []string
+	var withSpec []string
 	for _, name := range names {
-		if hasSpecFile(paths, name, KindSandbox) {
-			tools = append(tools, name)
+		if hasSpecFile(paths, name, kind) {
+			withSpec = append(withSpec, name)
 		}
 	}
-
-	sort.Strings(tools)
-	return tools, nil
+	return withSpec, nil
 }
 
 // ListFeatures returns all feature extensions from both built-in and user roots, sorted by priority.
 func ListFeatures(paths model.Paths) ([]model.Extension, error) {
-	names, err := listExtensionNames(paths.FeaturesDir, paths.UserFeaturesDir)
+	names, err := listSpecNames(paths, KindMixin)
 	if err != nil {
 		return nil, err
 	}
@@ -120,10 +135,8 @@ func ListFeatures(paths model.Paths) ([]model.Extension, error) {
 		ext, err := LoadFeatureExtension(paths, name)
 		if err != nil {
 			// A feature dropped here is silently missing from the built image,
-			// so surface why. A directory without a spec is not an error.
-			if !errors.Is(err, os.ErrNotExist) {
-				specWarn(fmt.Sprintf("feature %q: %v; skipping", name, err))
-			}
+			// so surface why. Spec-less directories are already filtered out.
+			specWarn(fmt.Sprintf("feature %q: %v; skipping", name, err))
 			continue
 		}
 		features = append(features, ext)

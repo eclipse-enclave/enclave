@@ -176,6 +176,28 @@ func TestParsePS(t *testing.T) {
 	}
 }
 
+func TestParseAttachKeepsSessionArgumentOptional(t *testing.T) {
+	defaults := config.DefaultOptions()
+	tests := []struct {
+		args []string
+		want []string
+	}{
+		{args: []string{"attach"}, want: []string{model.DetachKeysDefault}},
+		{args: []string{"attach", "my-task"}, want: []string{model.DetachKeysDefault, "my-task"}},
+		{args: []string{"attach", "--detach-keys", "ctrl-p,ctrl-q"}, want: []string{"ctrl-p,ctrl-q"}},
+	}
+
+	for _, tt := range tests {
+		res, err := Parse(tt.args, defaults)
+		if err != nil {
+			t.Fatalf("parse %v failed: %v", tt.args, err)
+		}
+		if !reflect.DeepEqual(res.Options.CmdArgs, tt.want) {
+			t.Fatalf("parse %v: CmdArgs = %v, want %v", tt.args, res.Options.CmdArgs, tt.want)
+		}
+	}
+}
+
 func TestParseConfigFlags(t *testing.T) {
 	defaults := config.DefaultOptions()
 	res, err := Parse([]string{

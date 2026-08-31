@@ -44,15 +44,29 @@ started as `--name "My Task"` is reachable as either `my-task` or `"My Task"`.
 The same holds for the `--name` filter of `ps`, `status`, and `stop`.
 
 Session names are resolved against the current project first (same worktree,
-then same project), then across all projects; they are not required to be
-unique, so when one matches several containers the candidates are listed and a
-container name must be passed instead. `--tool` narrows the candidates. Passing
-a container name or ID always resolves verbatim, independently of the working
-directory and `--tool`.
+then same project); they are not required to be unique, so when one matches
+several containers the candidates are listed and a container name must be passed
+instead. `--tool` narrows the candidates. Passing a container name or ID always
+resolves verbatim, independently of the working directory and `--tool`; an
+ambiguous container-ID prefix is reported like an ambiguous name.
+
+`attach` and `theia` widen the search to all projects when the current one has
+no match. `stop <name>` does not: removal is destructive and the auto-assigned
+names `1`, `2`, … collide across projects by construction, so another project's
+session has to be named by its container name or ID.
+
+`stop <name>` and `stop --name <name>` are different commands. The positional
+form removes the single session it resolves, whatever its tool and whether it is
+running or already stopped. `--name` filters the batch form instead: it removes
+every *background* session of the selected tool (`--tool`, default `claude`)
+whose session name matches. A `--name` that is blank or sanitizes to nothing
+matches no session rather than all of them.
 
 With no argument, `attach` picks the single detached session of the current
 project (a foreground session is entered with `exec` instead), and `theia` picks
-its single running container.
+the single running container of the current project. An argument that is present
+but blank (`enclave stop "$SESSION"` with an unset variable) is rejected instead
+of being treated as "no argument".
 
 ### Inspect
 

@@ -9,7 +9,6 @@ package app
 
 import (
 	"context"
-	"strings"
 
 	"enclave/internal/config"
 	"enclave/internal/logx"
@@ -39,15 +38,10 @@ func runTheia(variant theia.Variant, projectDir string, opts model.Options) int 
 		return 1
 	}
 
-	requested := ""
-	if len(opts.CmdArgs) > 0 {
-		requested = strings.TrimSpace(opts.CmdArgs[0])
-	}
-
 	session, err := resolveSessionTarget(ctx, be, sessionTargetQuery{
-		Requested: requested,
-		Tool:      sessionTargetTool(opts),
-		Project:   sessionTargetProject(projectDir),
+		Args:    opts.CmdArgs,
+		Tool:    sessionTargetTool(opts),
+		Project: sessionTargetProject(projectDir),
 	})
 	if err != nil {
 		logx.Errorf("%v", err)

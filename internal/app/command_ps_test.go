@@ -182,8 +182,8 @@ func TestPSToolAndSessionFiltersOnlyUseExplicitCLIState(t *testing.T) {
 	if got := psToolFilter(defaults); got != "" {
 		t.Fatalf("expected default tool not to filter, got %q", got)
 	}
-	if got := psSessionFilter(defaults); got != "" {
-		t.Fatalf("expected default session not to filter, got %q", got)
+	if name, given := sessionNameFilter(defaults); given || name != "" {
+		t.Fatalf("expected default session not to filter, got %q (given %v)", name, given)
 	}
 
 	explicit := model.Options{
@@ -196,8 +196,14 @@ func TestPSToolAndSessionFiltersOnlyUseExplicitCLIState(t *testing.T) {
 	if got := psToolFilter(explicit); got != "codex" {
 		t.Fatalf("expected explicit tool filter codex, got %q", got)
 	}
-	if got := psSessionFilter(explicit); got != "main" {
-		t.Fatalf("expected explicit session filter main, got %q", got)
+	if name, given := sessionNameFilter(explicit); !given || name != "main" {
+		t.Fatalf("expected explicit session filter main, got %q (given %v)", name, given)
+	}
+
+	blank := explicit
+	blank.SessionName = "  "
+	if name, given := sessionNameFilter(blank); !given || name != "" {
+		t.Fatalf("expected an explicitly blank --name to count as given, got %q (given %v)", name, given)
 	}
 }
 

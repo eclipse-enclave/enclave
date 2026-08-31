@@ -21,11 +21,9 @@ func attachCommand(res *Result) *cobra.Command {
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(_ *cobra.Command, cmdArgs []string) error {
 			res.Action = "attach"
-			target := ""
-			if len(cmdArgs) > 0 {
-				target = cmdArgs[0]
-			}
-			res.Options.CmdArgs = append(res.Options.CmdArgs, target, detachKeys)
+			// Detach keys first: an omitted session argument must stay
+			// distinguishable from an empty one, which is rejected.
+			res.Options.CmdArgs = append(append(res.Options.CmdArgs, detachKeys), cmdArgs...)
 			return nil
 		},
 	}

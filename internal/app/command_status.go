@@ -101,7 +101,7 @@ func runStatus(opts model.Options) int {
 		logx.Errorf("list sessions: %v", err)
 		return 1
 	}
-	if name := psSessionFilter(opts); name != "" {
+	if name, given := sessionNameFilter(opts); given {
 		sessions = sessionsMatchingName(sessions, name)
 	}
 

@@ -14,7 +14,7 @@ enclave resume                   # Session picker (falls back to continue)
 
 If a container name is already in use, a new session starts with a unique name. Use `exec` to attach to the default container name.
 
-Containers are named `enclave-<tool>-<project-hash>-<session>`, so the same session name can be used in several projects. `attach`, `stop <name>`, and `theia` resolve a session name within the current project first; when a name matches containers in more than one project, the candidates are listed and a full container name must be passed.
+Containers are named `enclave-<tool>-<project-hash>-<session>`, so the same session name can be used in several projects. `attach`, `stop <name>`, and `theia` resolve a session name within the current project first; when a name matches containers in more than one project, the candidates are listed and a full container name must be passed. `attach` and `theia` also accept a name that only exists in another project; `stop` does not, since removing a container is destructive — pass its container name instead.
 
 ## Managing Running Containers
 

@@ -114,7 +114,7 @@ func listPSSessions(ctx context.Context, opts model.Options) ([]backend.Session,
 	if err != nil {
 		return nil, err
 	}
-	if name := psSessionFilter(opts); name != "" {
+	if name, given := sessionNameFilter(opts); given {
 		sessions = sessionsMatchingName(sessions, name)
 	}
 	return sessions, nil
@@ -137,15 +137,6 @@ func psSessionFilterFor(opts model.Options) backend.SessionFilter {
 func psToolFilter(opts model.Options) string {
 	if opts.Sources.Tool == model.SourceCLI {
 		return strings.TrimSpace(opts.Tool)
-	}
-	return ""
-}
-
-// psSessionFilter returns the raw `--name` value, if any. Matching sanitizes
-// it together with the recorded session names, so it is passed through here.
-func psSessionFilter(opts model.Options) string {
-	if opts.Sources.SessionName == model.SourceCLI {
-		return strings.TrimSpace(opts.SessionName)
 	}
 	return ""
 }

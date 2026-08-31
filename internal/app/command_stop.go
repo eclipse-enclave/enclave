@@ -9,7 +9,6 @@ package app
 
 import (
 	"context"
-	"strings"
 	"time"
 
 	"enclave/internal/backend"
@@ -40,12 +39,22 @@ func runStop(opts model.Options, projectDir string) int {
 		return 1
 	}
 
-	if len(run.CmdArgs) > 0 && run.CmdArgs[0] != "" {
-		session, err := resolveSessionTarget(context.Background(), be, sessionTargetQuery{
-			Requested:      run.CmdArgs[0],
-			Tool:           sessionTargetTool(opts),
-			Project:        sessionTargetProject(projectDir),
-			IncludeStopped: true,
+	return stopSessions(context.Background(), be, opts, projectDir)
+}
+
+// stopSessions removes the containers a `stop` invocation selects: the single
+// session named by the positional argument, or every background session of the
+// tool, narrowed by `--name` when that flag was given.
+func stopSessions(ctx context.Context, be backend.Backend, opts model.Options, projectDir string) int {
+	run := opts.RunOptions
+
+	if len(run.CmdArgs) > 0 {
+		session, err := resolveSessionTarget(ctx, be, sessionTargetQuery{
+			Args:               run.CmdArgs,
+			Tool:               sessionTargetTool(opts),
+			Project:            sessionTargetProject(projectDir),
+			IncludeStopped:     true,
+			ProjectScopedNames: true,
 		})
 		if err != nil {
 			logx.Errorf("%v", err)
@@ -56,14 +65,14 @@ func runStop(opts model.Options, projectDir string) int {
 	}
 
 	background := true
-	sessions, err := be.List(context.Background(), backend.SessionFilter{All: true, Background: &background, Tool: run.Tool})
+	sessions, err := be.List(ctx, backend.SessionFilter{All: true, Background: &background, Tool: run.Tool})
 	if err != nil {
 		logx.Errorf("Failed to list background sessions: %v", err)
 		return 1
 	}
 	// Sanitized matching happens here rather than as a label filter, so that a
 	// name which sanitizes to nothing stops nothing instead of everything.
-	if name := strings.TrimSpace(run.SessionName); name != "" {
+	if name, given := sessionNameFilter(opts); given {
 		sessions = sessionsMatchingName(sessions, name)
 	}
 

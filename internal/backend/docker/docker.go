@@ -411,9 +411,6 @@ func sessionListFilterPairs(filter backend.SessionFilter) [][2]string {
 	if filter.ProjectHash != "" {
 		pairs = append(pairs, [2]string{"label", model.LabelHash + "=" + filter.ProjectHash})
 	}
-	if filter.SessionName != "" {
-		pairs = append(pairs, [2]string{"label", model.LabelSession + "=" + filter.SessionName})
-	}
 	if filter.Background != nil {
 		pairs = append(pairs, [2]string{"label", model.LabelBackground + "=" + strconv.FormatBool(*filter.Background)})
 	}

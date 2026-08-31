@@ -22,13 +22,15 @@ func runAttach(opts model.Options, projectDir string) int {
 	}
 
 	run := opts.RunOptions
-	requested := ""
-	if len(run.CmdArgs) > 0 {
-		requested = run.CmdArgs[0]
-	}
+	// The CLI puts the detach keys first, so that the optional session argument
+	// keeps its "not given" state.
 	detachKeys := model.DetachKeysDefault
-	if len(run.CmdArgs) > 1 && run.CmdArgs[1] != "" {
-		detachKeys = run.CmdArgs[1]
+	args := run.CmdArgs
+	if len(args) > 0 {
+		if keys := strings.TrimSpace(args[0]); keys != "" {
+			detachKeys = keys
+		}
+		args = args[1:]
 	}
 
 	be, err := selectBackend(opts, dockerBackendOptions(model.Host{}, model.Paths{}, model.BuildOptions{}, run))
@@ -38,12 +40,12 @@ func runAttach(opts model.Options, projectDir string) int {
 	}
 	ctx := context.Background()
 	session, err := resolveSessionTarget(ctx, be, sessionTargetQuery{
-		Requested: requested,
-		Tool:      sessionTargetTool(opts),
-		Project:   sessionTargetProject(projectDir),
+		Args:    args,
+		Tool:    sessionTargetTool(opts),
+		Project: sessionTargetProject(projectDir),
 		// Without a name, only detached sessions are picked: sharing the TTY of
 		// a foreground session means two terminals fighting over its stdin.
-		BackgroundOnly: strings.TrimSpace(requested) == "",
+		BackgroundOnly: len(args) == 0,
 	})
 	if err != nil {
 		logx.Errorf("%v", err)

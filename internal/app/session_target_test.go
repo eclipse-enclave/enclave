@@ -34,7 +34,7 @@ func TestResolveSessionTargetAcceptsFullContainerName(t *testing.T) {
 	}}
 
 	got, err := resolveSessionTarget(context.Background(), be, sessionTargetQuery{
-		Requested: "enclave-claude-aaaaaaaaaaaa-my-task",
+		Args: []string{"enclave-claude-aaaaaaaaaaaa-my-task"},
 	})
 	if err != nil {
 		t.Fatalf("resolveSessionTarget() error = %v", err)
@@ -49,7 +49,7 @@ func TestResolveSessionTargetResolvesSessionName(t *testing.T) {
 		session("enclave-claude-aaaaaaaaaaaa-my-task", "my-task", "aaaaaaaaaaaa", "/repo/a"),
 	}}
 
-	got, err := resolveSessionTarget(context.Background(), be, sessionTargetQuery{Requested: "my-task"})
+	got, err := resolveSessionTarget(context.Background(), be, sessionTargetQuery{Args: []string{"my-task"}})
 	if err != nil {
 		t.Fatalf("resolveSessionTarget() error = %v", err)
 	}
@@ -63,7 +63,7 @@ func TestResolveSessionTargetSanitizesRequestedName(t *testing.T) {
 		session("enclave-claude-aaaaaaaaaaaa-my-task", "my-task", "aaaaaaaaaaaa", "/repo/a"),
 	}}
 
-	got, err := resolveSessionTarget(context.Background(), be, sessionTargetQuery{Requested: "My Task"})
+	got, err := resolveSessionTarget(context.Background(), be, sessionTargetQuery{Args: []string{"My Task"}})
 	if err != nil {
 		t.Fatalf("resolveSessionTarget() error = %v", err)
 	}
@@ -79,8 +79,8 @@ func TestResolveSessionTargetPrefersCurrentProject(t *testing.T) {
 	}}
 
 	got, err := resolveSessionTarget(context.Background(), be, sessionTargetQuery{
-		Requested: "my-task",
-		Project:   model.Project{Hash: "bbbbbbbbbbbb", Dir: "/repo/b", RealDir: "/repo/b"},
+		Args:    []string{"my-task"},
+		Project: model.Project{Hash: "bbbbbbbbbbbb", Dir: "/repo/b", RealDir: "/repo/b"},
 	})
 	if err != nil {
 		t.Fatalf("resolveSessionTarget() error = %v", err)
@@ -96,8 +96,8 @@ func TestResolveSessionTargetResolvesAcrossProjectsWhenUnambiguous(t *testing.T)
 	}}
 
 	got, err := resolveSessionTarget(context.Background(), be, sessionTargetQuery{
-		Requested: "my-task",
-		Project:   model.Project{Hash: "bbbbbbbbbbbb", Dir: "/repo/b", RealDir: "/repo/b"},
+		Args:    []string{"my-task"},
+		Project: model.Project{Hash: "bbbbbbbbbbbb", Dir: "/repo/b", RealDir: "/repo/b"},
 	})
 	if err != nil {
 		t.Fatalf("resolveSessionTarget() error = %v", err)
@@ -113,7 +113,7 @@ func TestResolveSessionTargetReportsAmbiguousSessionName(t *testing.T) {
 		session("enclave-claude-bbbbbbbbbbbb-my-task", "my-task", "bbbbbbbbbbbb", "/repo/b"),
 	}}
 
-	_, err := resolveSessionTarget(context.Background(), be, sessionTargetQuery{Requested: "my-task"})
+	_, err := resolveSessionTarget(context.Background(), be, sessionTargetQuery{Args: []string{"my-task"}})
 	if err == nil {
 		t.Fatal("resolveSessionTarget() must not guess between projects")
 	}
@@ -129,9 +129,57 @@ func TestResolveSessionTargetReportsUnknownName(t *testing.T) {
 		session("enclave-claude-aaaaaaaaaaaa-my-task", "my-task", "aaaaaaaaaaaa", "/repo/a"),
 	}}
 
-	_, err := resolveSessionTarget(context.Background(), be, sessionTargetQuery{Requested: "other"})
+	_, err := resolveSessionTarget(context.Background(), be, sessionTargetQuery{Args: []string{"other"}})
 	if err == nil || !strings.Contains(err.Error(), `"other"`) {
 		t.Fatalf("error = %v, want it to name the unknown session", err)
+	}
+}
+
+func TestResolveSessionTargetRejectsBlankArgument(t *testing.T) {
+	be := &stopTestBackend{sessions: []backend.Session{
+		session("enclave-claude-aaaaaaaaaaaa-my-task", "my-task", "aaaaaaaaaaaa", "/repo/a"),
+	}}
+	project := model.Project{Hash: "aaaaaaaaaaaa", Dir: "/repo/a", RealDir: "/repo/a"}
+
+	// `enclave stop "$SESSION"` with an unset variable must not fall through to
+	// auto-selection and remove the project's only session.
+	for _, args := range [][]string{{""}, {"   "}} {
+		if _, err := resolveSessionTarget(context.Background(), be, sessionTargetQuery{
+			Args:    args,
+			Project: project,
+		}); err == nil {
+			t.Fatalf("resolveSessionTarget(%q) must reject a blank argument", args)
+		}
+	}
+}
+
+func TestResolveSessionTargetProjectScopedNamesStayInProject(t *testing.T) {
+	be := &stopTestBackend{sessions: []backend.Session{
+		session("enclave-claude-aaaaaaaaaaaa-1", "1", "aaaaaaaaaaaa", "/repo/a"),
+	}}
+
+	_, err := resolveSessionTarget(context.Background(), be, sessionTargetQuery{
+		Args:               []string{"1"},
+		Project:            model.Project{Hash: "bbbbbbbbbbbb", Dir: "/repo/b", RealDir: "/repo/b"},
+		ProjectScopedNames: true,
+	})
+	if err == nil {
+		t.Fatal("a project-scoped name must not resolve to another project's session")
+	}
+	if !strings.Contains(err.Error(), "another project") {
+		t.Fatalf("error %q does not point at the container-name escape hatch", err)
+	}
+
+	got, err := resolveSessionTarget(context.Background(), be, sessionTargetQuery{
+		Args:               []string{"1"},
+		Project:            model.Project{Hash: "aaaaaaaaaaaa", Dir: "/repo/a", RealDir: "/repo/a"},
+		ProjectScopedNames: true,
+	})
+	if err != nil {
+		t.Fatalf("resolveSessionTarget() error = %v", err)
+	}
+	if got.Ref.Name != "enclave-claude-aaaaaaaaaaaa-1" {
+		t.Fatalf("resolved %q, want the session of the current project", got.Ref.Name)
 	}
 }
 
@@ -198,7 +246,7 @@ func TestResolveSessionTargetResolvesContainerID(t *testing.T) {
 	be := &stopTestBackend{sessions: []backend.Session{target}}
 
 	for _, requested := range []string{"3f2b1c0d4e5f", "3f2b1c0d", "3f2b1c0d4e5f6a7b8c9d"} {
-		got, err := resolveSessionTarget(context.Background(), be, sessionTargetQuery{Requested: requested})
+		got, err := resolveSessionTarget(context.Background(), be, sessionTargetQuery{Args: []string{requested}})
 		if err != nil {
 			t.Fatalf("resolveSessionTarget(%q) error = %v", requested, err)
 		}
@@ -208,13 +256,42 @@ func TestResolveSessionTargetResolvesContainerID(t *testing.T) {
 	}
 }
 
+func TestResolveSessionTargetReportsAmbiguousContainerIDPrefix(t *testing.T) {
+	first := session("enclave-claude-aaaaaaaaaaaa-one", "one", "aaaaaaaaaaaa", "/repo/a")
+	first.Ref.ID = "3f2b1c0d4e5f"
+	second := session("enclave-claude-bbbbbbbbbbbb-two", "two", "bbbbbbbbbbbb", "/repo/b")
+	second.Ref.ID = "3f2b1c0daaaa"
+	be := &stopTestBackend{sessions: []backend.Session{first, second}}
+
+	_, err := resolveSessionTarget(context.Background(), be, sessionTargetQuery{Args: []string{"3f2b1c0d"}})
+	if err == nil {
+		t.Fatal("an ambiguous ID prefix must not be resolved by listing order")
+	}
+	for _, want := range []string{first.Ref.Name, second.Ref.Name} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error %q does not list candidate %q", err, want)
+		}
+	}
+}
+
+func TestResolveSessionTargetRejectsOverlongContainerID(t *testing.T) {
+	target := session("enclave-claude-aaaaaaaaaaaa-my-task", "my-task", "aaaaaaaaaaaa", "/repo/a")
+	target.Ref.ID = "3f2b1c0d4e5f"
+	be := &stopTestBackend{sessions: []backend.Session{target}}
+
+	requested := target.Ref.ID + strings.Repeat("a", containerIDMaxLen)
+	if _, err := resolveSessionTarget(context.Background(), be, sessionTargetQuery{Args: []string{requested}}); err == nil {
+		t.Fatal("a value longer than a container ID must not match on its prefix")
+	}
+}
+
 func TestResolveSessionTargetPrefersSessionNameOverContainerID(t *testing.T) {
 	named := session("enclave-claude-aaaaaaaaaaaa-deadbeef", "deadbeef", "aaaaaaaaaaaa", "/repo/a")
 	other := session("enclave-claude-bbbbbbbbbbbb-other", "other", "bbbbbbbbbbbb", "/repo/b")
 	other.Ref.ID = "deadbeef1234"
 	be := &stopTestBackend{sessions: []backend.Session{named, other}}
 
-	got, err := resolveSessionTarget(context.Background(), be, sessionTargetQuery{Requested: "deadbeef"})
+	got, err := resolveSessionTarget(context.Background(), be, sessionTargetQuery{Args: []string{"deadbeef"}})
 	if err != nil {
 		t.Fatalf("resolveSessionTarget() error = %v", err)
 	}
@@ -229,8 +306,8 @@ func TestResolveSessionTargetToolFilterKeepsExactContainerName(t *testing.T) {
 	}}
 
 	got, err := resolveSessionTarget(context.Background(), be, sessionTargetQuery{
-		Requested: "enclave-codex-aaaaaaaaaaaa-my-task",
-		Tool:      "claude",
+		Args: []string{"enclave-codex-aaaaaaaaaaaa-my-task"},
+		Tool: "claude",
 	})
 	if err != nil {
 		t.Fatalf("resolveSessionTarget() error = %v", err)
@@ -259,16 +336,16 @@ func TestResolveSessionTargetToolNarrowsAmbiguousSessionName(t *testing.T) {
 	project := model.Project{Hash: "aaaaaaaaaaaa", Dir: "/repo/a", RealDir: "/repo/a"}
 
 	if _, err := resolveSessionTarget(context.Background(), be, sessionTargetQuery{
-		Requested: "my-task",
-		Project:   project,
+		Args:    []string{"my-task"},
+		Project: project,
 	}); err == nil {
 		t.Fatal("one name used by two tools in a project must be reported as ambiguous")
 	}
 
 	got, err := resolveSessionTarget(context.Background(), be, sessionTargetQuery{
-		Requested: "my-task",
-		Tool:      "codex",
-		Project:   project,
+		Args:    []string{"my-task"},
+		Tool:    "codex",
+		Project: project,
 	})
 	if err != nil {
 		t.Fatalf("resolveSessionTarget() error = %v", err)
@@ -308,14 +385,14 @@ func TestSessionsMatchingNameIgnoresUnsanitizableName(t *testing.T) {
 func TestResolveSessionTargetListsOnlyRunningByDefault(t *testing.T) {
 	be := &stopTestBackend{}
 
-	if _, err := resolveSessionTarget(context.Background(), be, sessionTargetQuery{Requested: "my-task"}); err == nil {
+	if _, err := resolveSessionTarget(context.Background(), be, sessionTargetQuery{Args: []string{"my-task"}}); err == nil {
 		t.Fatal("expected an error for an empty session list")
 	}
 	if !be.listFilter.RunningOnly || be.listFilter.All {
 		t.Fatalf("filter = %+v, want running sessions only", be.listFilter)
 	}
 
-	if _, err := resolveSessionTarget(context.Background(), be, sessionTargetQuery{Requested: "my-task", IncludeStopped: true}); err == nil {
+	if _, err := resolveSessionTarget(context.Background(), be, sessionTargetQuery{Args: []string{"my-task"}, IncludeStopped: true}); err == nil {
 		t.Fatal("expected an error for an empty session list")
 	}
 	if !be.listFilter.All || be.listFilter.RunningOnly {

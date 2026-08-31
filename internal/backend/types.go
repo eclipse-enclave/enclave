@@ -352,7 +352,6 @@ type SessionFilter struct {
 	RunningOnly bool
 	Tool        string
 	ProjectHash string
-	SessionName string
 	Background  *bool
 	NamePrefix  string
 	ExactName   string

@@ -23,12 +23,18 @@ import (
 // hex-looking session names keep working.
 const containerIDMinPrefix = 8
 
+// containerIDMaxLen is the length of a full container ID. Recorded IDs are
+// truncated, so a longer value is matched on its leading characters — but only
+// up to the length a real ID can have.
+const containerIDMaxLen = 64
+
 // sessionTargetQuery describes how a positional container/session argument is
 // resolved to exactly one managed session.
 type sessionTargetQuery struct {
-	// Requested is the user-provided name: a container name, a container ID, or
-	// a session name as passed to `--name`. Empty means "auto-select".
-	Requested string
+	// Args are the command's positional arguments. The first one selects the
+	// session: a container name, a container ID, or a session name as passed to
+	// `--name`. No argument at all means "auto-select".
+	Args []string
 	// Tool restricts session-name matches and auto-selection to one tool. Only
 	// set it when the tool was chosen explicitly on the command line; the
 	// resolved default would otherwise hide sessions of other tools.
@@ -40,6 +46,11 @@ type sessionTargetQuery struct {
 	// IncludeStopped also considers stopped sessions (used by `stop`, which
 	// removes leftovers).
 	IncludeStopped bool
+	// ProjectScopedNames rejects a session name that only matches outside the
+	// current project. `stop` sets it: removal is destructive and the
+	// auto-assigned names `1`, `2`, … collide across projects by construction,
+	// so another project's session needs its container name or ID.
+	ProjectScopedNames bool
 	// BackgroundOnly restricts auto-selection to detached sessions, so that a
 	// bare `attach` cannot grab the TTY of a foreground session that a second
 	// terminal is already driving.
@@ -49,9 +60,14 @@ type sessionTargetQuery struct {
 // resolveSessionTarget resolves a positional container/session argument to one
 // running (or, with IncludeStopped, existing) session. A container name or ID
 // matches verbatim; anything else is matched against the session names of the
-// candidates in sanitized form, preferring the current project. Ambiguity is
-// reported rather than guessed.
+// candidates in sanitized form, preferring (and with ProjectScopedNames
+// requiring) the current project. Ambiguity is reported rather than guessed.
 func resolveSessionTarget(ctx context.Context, be backend.Backend, q sessionTargetQuery) (backend.Session, error) {
+	requested, err := requestedSession(q.Args)
+	if err != nil {
+		return backend.Session{}, err
+	}
+
 	filter := backend.SessionFilter{}
 	if q.IncludeStopped {
 		filter.All = true
@@ -65,7 +81,6 @@ func resolveSessionTarget(ctx context.Context, be backend.Backend, q sessionTarg
 		return backend.Session{}, fmt.Errorf("list containers: %w", err)
 	}
 
-	requested := strings.TrimSpace(q.Requested)
 	if requested == "" {
 		return autoSelectSession(sessions, q)
 	}
@@ -87,13 +102,32 @@ func resolveSessionTarget(ctx context.Context, be backend.Backend, q sessionTarg
 		}
 	}
 	if len(matches) == 0 {
-		if session, ok := sessionByContainerID(sessions, requested); ok {
-			return session, nil
+		if byID := sessionsByContainerID(sessions, requested); len(byID) > 0 {
+			return selectSingleSession(byID, "container ID", requested)
 		}
 		return backend.Session{}, fmt.Errorf("no enclave session named %q (use `%s ps` to list sessions)", requested, model.AppName)
 	}
-	scoped, _ := projectSessions(matches, q.Project)
-	return selectSingleSession(scoped, requested)
+	scoped, inProject := projectSessions(matches, q.Project)
+	if q.ProjectScopedNames && !inProject {
+		return backend.Session{}, fmt.Errorf("no enclave session named %q in this project; pass a container name or ID from `%s ps` to reach a session of another project",
+			requested, model.AppName)
+	}
+	return selectSingleSession(scoped, "session name", requested)
+}
+
+// requestedSession picks the session argument out of a command's positional
+// arguments. An argument that is present but blank is rejected rather than
+// treated as "auto-select", so an unset variable in `enclave stop "$SESSION"`
+// cannot remove a session nobody named.
+func requestedSession(args []string) (string, error) {
+	if len(args) == 0 {
+		return "", nil
+	}
+	requested := strings.TrimSpace(args[0])
+	if requested == "" {
+		return "", fmt.Errorf("empty session name; pass a session or container name from `%s ps`", model.AppName)
+	}
+	return requested, nil
 }
 
 // autoSelectSession resolves the no-argument form. Unlike an explicit name it
@@ -182,25 +216,28 @@ func sessionsForTool(sessions []backend.Session, tool string) []backend.Session 
 	return matches
 }
 
-// sessionByContainerID resolves a container ID (or a prefix of one, as printed
-// by `docker ps`), which `attach` and `stop` accepted before names were
-// resolved. Session names win, so this only runs when none matched.
-func sessionByContainerID(sessions []backend.Session, requested string) (backend.Session, bool) {
-	if len(requested) < containerIDMinPrefix || !isHexString(requested) {
-		return backend.Session{}, false
+// sessionsByContainerID collects the sessions matching a container ID (or a
+// prefix of one, as printed by `docker ps`), which `attach` and `stop` accepted
+// before names were resolved. Session names win, so this only runs when none
+// matched. All matches are returned so that an ambiguous prefix is reported
+// instead of resolved by listing order.
+func sessionsByContainerID(sessions []backend.Session, requested string) []backend.Session {
+	if len(requested) < containerIDMinPrefix || len(requested) > containerIDMaxLen || !isHexString(requested) {
+		return nil
 	}
+	var matches []backend.Session
 	for _, session := range sessions {
 		id := strings.TrimSpace(session.Ref.ID)
 		if id == "" {
 			continue
 		}
-		// Session IDs are truncated, so a full ID pasted from docker is a
-		// superstring of the one recorded here.
+		// Session IDs are truncated, so a full ID pasted from docker carries the
+		// one recorded here as its prefix.
 		if strings.HasPrefix(id, requested) || strings.HasPrefix(requested, id) {
-			return session, true
+			matches = append(matches, session)
 		}
 	}
-	return backend.Session{}, false
+	return matches
 }
 
 func isHexString(value string) bool {
@@ -212,15 +249,15 @@ func isHexString(value string) bool {
 	return value != ""
 }
 
-func selectSingleSession(matches []backend.Session, requested string) (backend.Session, error) {
+func selectSingleSession(matches []backend.Session, kind string, requested string) (backend.Session, error) {
 	switch len(matches) {
 	case 1:
 		return matches[0], nil
 	case 0:
 		return backend.Session{}, fmt.Errorf("no enclave session named %q (use `%s ps` to list sessions)", requested, model.AppName)
 	default:
-		return backend.Session{}, fmt.Errorf("session name %q matches multiple containers; pass one of these container names explicitly:\n  %s",
-			requested, strings.Join(describeSessions(matches), "\n  "))
+		return backend.Session{}, fmt.Errorf("%s %q matches multiple containers; pass one of these container names explicitly:\n  %s",
+			kind, requested, strings.Join(describeSessions(matches), "\n  "))
 	}
 }
 
@@ -250,6 +287,17 @@ func sessionsMatchingName(sessions []backend.Session, requested string) []backen
 		}
 	}
 	return matches
+}
+
+// sessionNameFilter returns the `--name` value of a listing or stop command.
+// given separates an omitted flag from an explicitly blank one: the latter has
+// to match nothing rather than everything. The value is passed through raw,
+// since matching sanitizes it together with the recorded session names.
+func sessionNameFilter(opts model.Options) (name string, given bool) {
+	if opts.Sources.SessionName != model.SourceCLI {
+		return "", false
+	}
+	return strings.TrimSpace(opts.SessionName), true
 }
 
 // sessionTargetTool returns the tool filter for session resolution: the tool

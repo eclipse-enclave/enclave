@@ -16,15 +16,16 @@ const (
 	unitGB = 1024 * unitMB
 )
 
-// FormatBytes renders a byte count for human output.
-func FormatBytes(bytes int64) string {
+// FormatBytes renders a byte count for human output, generic so that unsigned
+// callers need no lossy conversion.
+func FormatBytes[T int64 | uint64](bytes T) string {
 	switch {
 	case bytes >= unitGB:
-		return formatUnit(bytes, unitGB, "GB")
+		return formatUnit(float64(bytes), unitGB, "GB")
 	case bytes >= unitMB:
-		return formatUnit(bytes, unitMB, "MB")
+		return formatUnit(float64(bytes), unitMB, "MB")
 	case bytes >= unitKB:
-		return formatUnit(bytes, unitKB, "KB")
+		return formatUnit(float64(bytes), unitKB, "KB")
 	default:
 		return fmt.Sprintf("%d B", bytes)
 	}
@@ -32,8 +33,8 @@ func FormatBytes(bytes int64) string {
 
 // formatUnit keeps one decimal below ten units and drops it above, so columns
 // stay narrow without losing resolution on small values.
-func formatUnit(bytes int64, unit int64, suffix string) string {
-	value := float64(bytes) / float64(unit)
+func formatUnit(bytes float64, unit float64, suffix string) string {
+	value := bytes / unit
 	if value < 10 {
 		return fmt.Sprintf("%.1f %s", value, suffix)
 	}

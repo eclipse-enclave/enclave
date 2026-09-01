@@ -34,11 +34,14 @@ enclave network log --json | jq            # The integration contract
 ```
 
 The log is read from disk, so events of a session that has already exited are
-still available. `--session <container>` reads one running session's events and
-`--all-running` merges every running gateway's log in timestamp order; both need
-Docker, the default scope does not. Concurrent sessions of the same project and
-tool append to one file, so `--session` also filters on the `session` field:
-events written before session stamping existed carry none and are not shown.
+still available. `--session <container>` reads one session's events and
+`--all-running` merges every running gateway's log in timestamp order; only
+`--all-running` needs Docker. `--session` uses it when reachable, so a session of
+another project can be named, and otherwise reads this project's log. A name that
+appears on no event is an error rather than an empty result. Concurrent sessions
+of the same project and tool append to one file, so `--session` also filters on
+the `session` field: events written before session stamping existed carry none
+and are not shown.
 
 `--since` takes a duration (`10m`), an RFC3339 timestamp, or `session`, which
 resolves to the start of the most recent session in scope and therefore needs a
@@ -49,8 +52,11 @@ session's own start.
 
 Output is the aligned human form. `--json` is the machine contract: on its own
 it emits the raw JSONL event stream verbatim, and with `--summary` it emits the
-aggregate as a single JSON object. Colour follows `NO_COLOR` and
-`ENCLAVE_COLOR`, and is off when stdout is not a terminal.
+aggregate as a single JSON object. Events that never carried a host name, such as
+a TLS connection denied at the ClientHello, are grouped under `(no domain)` (an
+empty `domain` in JSON), so the summary totals match what `--verdict deny`
+prints. Colour follows `NO_COLOR` and `ENCLAVE_COLOR`, and is off when stdout is
+not a terminal.
 
 ### What is recorded
 

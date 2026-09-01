@@ -8,13 +8,18 @@
 package app
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"enclave/internal/backend"
+	"enclave/internal/config"
+	"enclave/internal/model"
 	"enclave/internal/netlog"
+	"enclave/internal/netlogview"
 )
 
 func writeNetworkLogFixture(t *testing.T, path string, lines ...string) {
@@ -170,14 +175,14 @@ func TestApplyNetworkLogSince(t *testing.T) {
 	}
 
 	t.Run("empty", func(t *testing.T) {
-		filter, err := applyNetworkLogSince(netlog.Filter{}, "", events)
+		filter, err := applyNetworkLogSince(netlogview.Filter{}, "", events)
 		if err != nil || !filter.Since.IsZero() {
 			t.Fatalf("got %v, %v; want the zero time", filter.Since, err)
 		}
 	})
 
 	t.Run("session resolves to the latest marker and scopes to it", func(t *testing.T) {
-		filter, err := applyNetworkLogSince(netlog.Filter{}, "session", events)
+		filter, err := applyNetworkLogSince(netlogview.Filter{}, "session", events)
 		if err != nil {
 			t.Fatalf("error = %v", err)
 		}
@@ -195,7 +200,7 @@ func TestApplyNetworkLogSince(t *testing.T) {
 	// An already scoped read anchors on its own session's marker, not on
 	// whichever session started last in the shared log.
 	t.Run("session anchors on the named session", func(t *testing.T) {
-		filter, err := applyNetworkLogSince(netlog.Filter{Session: "old"}, "session", events)
+		filter, err := applyNetworkLogSince(netlogview.Filter{Session: "old"}, "session", events)
 		if err != nil {
 			t.Fatalf("error = %v", err)
 		}
@@ -206,14 +211,14 @@ func TestApplyNetworkLogSince(t *testing.T) {
 	})
 
 	t.Run("session without a marker", func(t *testing.T) {
-		if _, err := applyNetworkLogSince(netlog.Filter{}, "session", events[1:2]); err == nil {
+		if _, err := applyNetworkLogSince(netlogview.Filter{}, "session", events[1:2]); err == nil {
 			t.Fatal("expected an error when the log predates session markers")
 		}
 	})
 
 	t.Run("duration", func(t *testing.T) {
 		before := time.Now().Add(-10 * time.Minute)
-		filter, err := applyNetworkLogSince(netlog.Filter{}, "10m", nil)
+		filter, err := applyNetworkLogSince(netlogview.Filter{}, "10m", nil)
 		if err != nil {
 			t.Fatalf("error = %v", err)
 		}
@@ -226,7 +231,7 @@ func TestApplyNetworkLogSince(t *testing.T) {
 	})
 
 	t.Run("rfc3339", func(t *testing.T) {
-		filter, err := applyNetworkLogSince(netlog.Filter{}, "2026-08-13T12:00:00Z", nil)
+		filter, err := applyNetworkLogSince(netlogview.Filter{}, "2026-08-13T12:00:00Z", nil)
 		if err != nil {
 			t.Fatalf("error = %v", err)
 		}
@@ -237,11 +242,61 @@ func TestApplyNetworkLogSince(t *testing.T) {
 
 	t.Run("invalid", func(t *testing.T) {
 		for _, value := range []string{"yesterday", "-5m", "10x"} {
-			if _, err := applyNetworkLogSince(netlog.Filter{}, value, nil); err == nil {
+			if _, err := applyNetworkLogSince(netlogview.Filter{}, value, nil); err == nil {
 				t.Fatalf("applyNetworkLogSince(%q) was accepted", value)
 			}
 		}
 	})
+}
+
+// With no Docker to ask, --session falls back to this project's log plus the
+// session stamp its events carry. Passing the gateway container name has to
+// resolve to the same stamp.
+func TestResolveNetworkLogScopeFallsBackWithoutDocker(t *testing.T) {
+	stubDockerPing(t, fmt.Errorf("docker is not running"))
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	home, err := config.ResolveHostHome()
+	if err != nil {
+		t.Fatalf("ResolveHostHome() error = %v", err)
+	}
+
+	for _, name := range []string{"enclave-demo-claude", "enclave-demo-claude-gateway"} {
+		input := &CommandInput{
+			Ctx:            &AppContext{project: model.Project{Hash: "abc"}, projectResolved: true},
+			Options:        model.Options{RunOptions: model.RunOptions{Tool: "claude"}},
+			NetworkLogView: model.NetworkLogView{Session: name},
+		}
+		scope, err := resolveNetworkLogScope(input)
+		if err != nil {
+			t.Fatalf("resolveNetworkLogScope(%q) error = %v", name, err)
+		}
+		want := config.HostProjectNetworkLogPath(home, "abc", "claude")
+		if len(scope.paths) != 1 || scope.paths[0] != want {
+			t.Fatalf("paths = %v, want [%s]", scope.paths, want)
+		}
+		if scope.session != "enclave-demo-claude" {
+			t.Fatalf("session = %q, want enclave-demo-claude", scope.session)
+		}
+		// The label names the log that was read, since a session of another tool
+		// is not in this file.
+		if !strings.Contains(scope.label, currentProjectToolLabel("abc", "claude")) {
+			t.Fatalf("label = %q, want it to name the log the session was looked for in", scope.label)
+		}
+	}
+}
+
+// A name no event carries is not a session of this log, and must not read as a
+// session that simply recorded nothing.
+func TestSessionRecorded(t *testing.T) {
+	events := []netlog.Event{
+		{Timestamp: "2026-08-13T12:00:00Z", Type: netlog.TypeSession, Verdict: netlog.VerdictInfo, Rule: netlog.RuleSessionStart, Session: "enclave-demo-claude"},
+	}
+	if !sessionRecorded(events, "enclave-demo-claude") {
+		t.Fatal("the session's own start marker was not recognised")
+	}
+	if sessionRecorded(events, "enclave-demo-codex") {
+		t.Fatal("an unknown session name matched")
+	}
 }
 
 func TestFilterGatewaysBySession(t *testing.T) {

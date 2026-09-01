@@ -5,7 +5,11 @@
 //
 // SPDX-License-Identifier: MIT
 
-package netlog
+// Package netlogview is the query side of the network audit log: filtering,
+// per-domain aggregation and terminal rendering. It is separate from netlog so
+// the gateway sidecar, which only appends to the log and tails it, neither
+// links nor ships this code.
+package netlogview
 
 import (
 	"fmt"
@@ -13,20 +17,16 @@ import (
 	"time"
 
 	"enclave/internal/domainpattern"
+	"enclave/internal/netlog"
 )
-
-// SinceSession is the --since value that resolves to a session boundary instead
-// of a clock value. It is shared so the CLI's flag validation and the reader
-// cannot disagree about the keyword.
-const SinceSession = "session"
 
 // Filter selects events for display. The zero value matches everything.
 type Filter struct {
 	// Since drops events older than this instant. The zero value disables the
 	// bound.
 	Since time.Time
-	// Verdict, Domain and Type are optional. Domain is an allowlist-style
-	// pattern ("api.github.com" or "*.github.com").
+	// Verdict, Domain and Type are optional. Domain is a host or a wildcard
+	// suffix ("api.github.com" or "*.github.com").
 	Verdict string
 	Domain  string
 	Type    string
@@ -47,7 +47,7 @@ func (f Filter) selective() bool {
 }
 
 // Match reports whether the event passes the filter.
-func (f Filter) Match(event Event) bool {
+func (f Filter) Match(event netlog.Event) bool {
 	if !f.Since.IsZero() {
 		at, ok := event.Time()
 		if !ok || at.Before(f.Since) {
@@ -87,20 +87,20 @@ func (f Filter) Normalize() (Filter, error) {
 	normalized.Session = strings.TrimSpace(f.Session)
 	normalized.Verdict = strings.ToLower(strings.TrimSpace(f.Verdict))
 	switch normalized.Verdict {
-	case "", VerdictPass, VerdictDeny:
+	case "", netlog.VerdictPass, netlog.VerdictDeny:
 	default:
-		return f, fmt.Errorf("invalid verdict %q (use %s or %s)", f.Verdict, VerdictPass, VerdictDeny)
+		return f, fmt.Errorf("invalid verdict %q (use %s or %s)", f.Verdict, netlog.VerdictPass, netlog.VerdictDeny)
 	}
 
 	normalized.Type = strings.ToLower(strings.TrimSpace(f.Type))
 	switch normalized.Type {
-	case "", TypeDNS, TypeHTTP, TypeTCP:
+	case "", netlog.TypeDNS, netlog.TypeHTTP, netlog.TypeTCP:
 	default:
-		return f, fmt.Errorf("invalid type %q (use %s, %s or %s)", f.Type, TypeDNS, TypeHTTP, TypeTCP)
+		return f, fmt.Errorf("invalid type %q (use %s, %s or %s)", f.Type, netlog.TypeDNS, netlog.TypeHTTP, netlog.TypeTCP)
 	}
 
 	if pattern := strings.TrimSpace(f.Domain); pattern != "" {
-		domain, err := domainpattern.Normalize(pattern)
+		domain, err := domainpattern.NormalizeQuery(pattern)
 		if err != nil {
 			return f, fmt.Errorf("invalid domain %q: %w", f.Domain, err)
 		}
@@ -112,8 +112,8 @@ func (f Filter) Normalize() (Filter, error) {
 }
 
 // Apply returns the events matching the filter.
-func (f Filter) Apply(events []Event) []Event {
-	matched := make([]Event, 0, len(events))
+func (f Filter) Apply(events []netlog.Event) []netlog.Event {
+	matched := make([]netlog.Event, 0, len(events))
 	for _, event := range events {
 		if f.Match(event) {
 			matched = append(matched, event)

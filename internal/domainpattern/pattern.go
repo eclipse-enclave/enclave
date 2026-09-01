@@ -17,8 +17,23 @@ import (
 var hostLabelPattern = regexp.MustCompile(`^[a-z0-9-]+$`)
 
 // Normalize validates and normalizes a domain pattern used in allowlist-style
-// config. Empty input returns an empty pattern without error.
+// config, where a pattern grants access: the query rules plus the requirement
+// that a wildcard covers at least two labels, so "*.com" cannot be allowlisted.
 func Normalize(value string) (string, error) {
+	pattern, err := NormalizeQuery(value)
+	if err != nil {
+		return "", err
+	}
+	if suffix, ok := strings.CutPrefix(pattern, "*."); ok && !strings.Contains(suffix, ".") {
+		return "", fmt.Errorf("wildcard suffix must include at least two labels")
+	}
+	return pattern, nil
+}
+
+// NormalizeQuery normalizes a pattern that only selects hosts to look at, such
+// as the network log's --domain filter. Empty input returns an empty pattern
+// without error.
+func NormalizeQuery(value string) (string, error) {
 	pattern := strings.ToLower(strings.TrimSpace(value))
 	if pattern == "" {
 		return "", nil
@@ -51,9 +66,6 @@ func Normalize(value string) (string, error) {
 		suffix := strings.TrimPrefix(pattern, "*.")
 		if suffix == "" {
 			return "", fmt.Errorf("wildcard domain suffix is required")
-		}
-		if strings.Count(suffix, ".") < 1 {
-			return "", fmt.Errorf("wildcard suffix must include at least two labels")
 		}
 		if err := validateHost(suffix); err != nil {
 			return "", err

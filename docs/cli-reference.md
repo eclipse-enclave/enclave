@@ -92,7 +92,7 @@ Network mutation commands are global-only today. `--project` scope is planned bu
 | `--domain <glob>` | Filter by domain pattern (`example.com` or `*.example.com`) |
 | `--type <dns\|http\|tcp>` | Filter by event type |
 | `--tool <tool>` | Read another tool's log |
-| `--session <name>` | Read one running session's events, named by its container |
+| `--session <name>` | Read one session's events, named by its container (an exited session too) |
 | `--all-running` | Merge the logs of all running gateways on the host |
 
 `--follow` and `--summary` are mutually exclusive, and `--since session` needs a scope covering exactly one session, so it cannot be combined with `--all-running`. See [Networking](networking.md#reading-the-network-log) for the output format and [Coverage and granularity](networking.md#coverage-and-granularity) for what the log does and does not record.

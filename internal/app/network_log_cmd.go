@@ -24,6 +24,7 @@ import (
 	"enclave/internal/logx"
 	"enclave/internal/model"
 	"enclave/internal/netlog"
+	"enclave/internal/netlogview"
 	"enclave/internal/util"
 )
 
@@ -40,7 +41,7 @@ type networkLogScope struct {
 func runNetworkLog(input *CommandInput) int {
 	view := input.NetworkLogView
 
-	filter, err := netlog.Filter{
+	filter, err := netlogview.Filter{
 		Verdict: view.Verdict,
 		Domain:  view.Domain,
 		Type:    view.Type,
@@ -70,6 +71,12 @@ func runNetworkLog(input *CommandInput) int {
 	if read.skipped > 0 {
 		logx.Warnf("Skipped %d unreadable line(s); older logs contain raw dnsmasq output", read.skipped)
 	}
+	// Every gateway start writes a marker stamped with its session, so a name
+	// that appears on no event at all is not a session of this log.
+	if scope.session != "" && !sessionRecorded(read.events, scope.session) {
+		logx.Errorf("No events for %s; check the session name", scope.label)
+		return 1
+	}
 
 	filter, err = applyNetworkLogSince(filter, view.Since, read.events)
 	if err != nil {
@@ -77,12 +84,12 @@ func runNetworkLog(input *CommandInput) int {
 		return 1
 	}
 
-	render := netlog.RenderOptions{Color: logx.ColorEnabledFor(os.Stdout)}
+	render := netlogview.RenderOptions{Color: logx.ColorEnabledFor(os.Stdout)}
 
 	out := bufio.NewWriter(os.Stdout)
 	matched := filter.Apply(read.events)
 	if view.Summary {
-		if err := writeNetworkLogSummary(out, netlog.Aggregate(matched), view.JSON, render); err != nil {
+		if err := writeNetworkLogSummary(out, netlogview.Aggregate(matched), view.JSON, render); err != nil {
 			logx.Errorf("Failed to write output: %v", err)
 			return 1
 		}
@@ -113,9 +120,10 @@ func flushNetworkLog(out *bufio.Writer) int {
 	return 0
 }
 
-// resolveNetworkLogScope scopes the read. The default case is a path
-// computation, so the log of a session that has already exited is still
-// readable; only --all-running and --session need Docker.
+// resolveNetworkLogScope scopes the read. Only --all-running needs Docker;
+// --session uses it when reachable to find a session of another project, and
+// every other case is a path computation, so the log of a session that has
+// already exited stays readable.
 func resolveNetworkLogScope(input *CommandInput) (networkLogScope, error) {
 	home, err := config.ResolveHostHome()
 	if err != nil {
@@ -123,20 +131,52 @@ func resolveNetworkLogScope(input *CommandInput) (networkLogScope, error) {
 	}
 
 	sessionName := strings.TrimSpace(input.NetworkLogView.Session)
-	if !input.Options.AllRunning && sessionName == "" {
-		project, err := input.Ctx.Project()
-		if err != nil {
-			return networkLogScope{}, fmt.Errorf("resolve project context: %w", err)
+	if input.Options.AllRunning {
+		if err := checkDocker(); err != nil {
+			return networkLogScope{}, err
 		}
-		return networkLogScope{
-			paths: []string{config.HostProjectNetworkLogPath(home, project.Hash, input.Options.Tool)},
-			label: currentProjectToolLabel(project.Hash, input.Options.Tool),
-		}, nil
+		return runningGatewayScope(input, home, "")
 	}
-
+	if sessionName == "" {
+		return projectNetworkLogScope(input, home, "")
+	}
+	// A running session may belong to another project, so its gateway is looked
+	// up first. An exited one left its events in this project's log, stamped with
+	// its own name.
 	if err := checkDocker(); err != nil {
-		return networkLogScope{}, err
+		logx.Debugf("Reading this project's log because Docker is unavailable: %v", err)
+	} else {
+		scope, err := runningGatewayScope(input, home, sessionName)
+		if err != nil {
+			return networkLogScope{}, err
+		}
+		if len(scope.paths) > 0 {
+			return scope, nil
+		}
 	}
+	return projectNetworkLogScope(input, home, sessionContainerName(sessionName))
+}
+
+func projectNetworkLogScope(input *CommandInput, home string, session string) (networkLogScope, error) {
+	project, err := input.Ctx.Project()
+	if err != nil {
+		return networkLogScope{}, fmt.Errorf("resolve project context: %w", err)
+	}
+	label := currentProjectToolLabel(project.Hash, input.Options.Tool)
+	if session != "" {
+		// A session of another tool is not in this file, so the label names the log.
+		label = fmt.Sprintf("session %s in %s", session, label)
+	}
+	return networkLogScope{
+		paths:   []string{config.HostProjectNetworkLogPath(home, project.Hash, input.Options.Tool)},
+		label:   label,
+		session: session,
+	}, nil
+}
+
+// runningGatewayScope is the logs of the running gateways in scope, and needs a
+// reachable Docker. An empty sessionName means every gateway it reports.
+func runningGatewayScope(input *CommandInput, home string, sessionName string) (networkLogScope, error) {
 	manager, code := gatewayManagerForInput(input)
 	if code != 0 {
 		return networkLogScope{}, fmt.Errorf("select backend for gateway discovery")
@@ -172,16 +212,29 @@ func networkLogPaths(home string, gateways []backend.GatewayInfo) []string {
 	return util.Dedupe(paths)
 }
 
-// filterGatewaysBySession accepts either the session container name or the
-// gateway container name, since both are visible to a user reading `ps`.
-func filterGatewaysBySession(gateways []backend.GatewayInfo, sessionName string) []backend.GatewayInfo {
-	gatewayName := sessionName
-	if !strings.HasSuffix(gatewayName, model.GatewayContainerSuffix) {
-		gatewayName += model.GatewayContainerSuffix
+func sessionRecorded(events []netlog.Event, session string) bool {
+	for _, event := range events {
+		if event.Session == session {
+			return true
+		}
 	}
+	return false
+}
+
+// sessionContainerName is the name events are stamped with: --session also
+// accepts the gateway container name, which adds a suffix to it.
+func sessionContainerName(sessionName string) string {
+	return strings.TrimSuffix(sessionName, model.GatewayContainerSuffix)
+}
+
+// filterGatewaysBySession accepts either the session container name or the
+// gateway container name, since both are visible to a user reading `ps`. The
+// session container label can be missing, so the gateway name is matched too.
+func filterGatewaysBySession(gateways []backend.GatewayInfo, sessionName string) []backend.GatewayInfo {
+	session := sessionContainerName(sessionName)
 	matched := make([]backend.GatewayInfo, 0, 1)
 	for _, gateway := range gateways {
-		if gateway.Name == gatewayName || gateway.SessionContainer == sessionName {
+		if gateway.Name == session+model.GatewayContainerSuffix || gateway.SessionContainer == session {
 			matched = append(matched, gateway)
 		}
 	}
@@ -266,7 +319,7 @@ func mergeByTime(events []netlog.Event) []netlog.Event {
 // "session" resolves to the most recent session marker in scope and adopts that
 // session. Anchoring without adopting would still show a concurrent session's
 // events, because one log file holds every session of a project and tool.
-func applyNetworkLogSince(filter netlog.Filter, value string, events []netlog.Event) (netlog.Filter, error) {
+func applyNetworkLogSince(filter netlogview.Filter, value string, events []netlog.Event) (netlogview.Filter, error) {
 	trimmed := strings.TrimSpace(value)
 	if trimmed == "" {
 		return filter, nil
@@ -306,7 +359,7 @@ func applyNetworkLogSince(filter netlog.Filter, value string, events []netlog.Ev
 	return filter, nil
 }
 
-func writeNetworkLogSummary(out *bufio.Writer, summary netlog.Summary, asJSON bool, render netlog.RenderOptions) error {
+func writeNetworkLogSummary(out *bufio.Writer, summary netlogview.Summary, asJSON bool, render netlogview.RenderOptions) error {
 	if asJSON {
 		payload, err := json.Marshal(summary)
 		if err != nil {
@@ -317,11 +370,11 @@ func writeNetworkLogSummary(out *bufio.Writer, summary netlog.Summary, asJSON bo
 		}
 		return out.WriteByte('\n')
 	}
-	_, err := out.WriteString(netlog.RenderSummary(summary, render))
+	_, err := out.WriteString(netlogview.RenderSummary(summary, render))
 	return err
 }
 
-func writeNetworkLogEvents(out *bufio.Writer, events []netlog.Event, asJSON bool, render netlog.RenderOptions) error {
+func writeNetworkLogEvents(out *bufio.Writer, events []netlog.Event, asJSON bool, render netlogview.RenderOptions) error {
 	if asJSON {
 		for _, event := range events {
 			if err := writeNetworkLogJSON(out, event); err != nil {
@@ -330,7 +383,7 @@ func writeNetworkLogEvents(out *bufio.Writer, events []netlog.Event, asJSON bool
 		}
 		return nil
 	}
-	return netlog.WriteEvents(out, events, render)
+	return netlogview.WriteEvents(out, events, render)
 }
 
 func writeNetworkLogJSON(out *bufio.Writer, event netlog.Event) error {
@@ -346,7 +399,7 @@ func writeNetworkLogJSON(out *bufio.Writer, event netlog.Event) error {
 
 // followNetworkLog streams events appended after the backlog was printed. Only
 // the live log is followed: the rotated generation never grows.
-func followNetworkLog(paths []string, offsets map[string]int64, filter netlog.Filter, asJSON bool, render netlog.RenderOptions, out *bufio.Writer) int {
+func followNetworkLog(paths []string, offsets map[string]int64, filter netlogview.Filter, asJSON bool, render netlogview.RenderOptions, out *bufio.Writer) int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -363,8 +416,8 @@ func followNetworkLog(paths []string, offsets map[string]int64, filter netlog.Fi
 		}
 		if asJSON {
 			writeErr = writeNetworkLogJSON(out, event)
-		} else if _, writeErr = out.WriteString(netlog.RenderEvent(event, render)); writeErr == nil {
-			writeErr = out.WriteByte('\n')
+		} else {
+			writeErr = netlogview.WriteEvent(out, event, render)
 		}
 		if writeErr == nil {
 			writeErr = out.Flush()

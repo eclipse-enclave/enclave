@@ -134,7 +134,8 @@ The restricted network request flow has a separate
 - [`extensions/tools/<tool>/go/handler.go`](../extensions/tools/) registers per-tool behavior (ports and validation hooks).
 
 ### Network Policy
-- [`internal/netlog/`](../internal/netlog/) owns the network audit log format: the `Event` type both gateway writers use, plus the reader side (scan, follow, filter, aggregate, render, rotation). It knows nothing about Docker, policy, or the CLI.
+- [`internal/netlog/`](../internal/netlog/) owns the network audit log format: the `Event` type both gateway writers use, plus the file handling around it (append, scan, follow, rotation). It knows nothing about Docker, policy, or the CLI.
+- [`internal/netlogview/`](../internal/netlogview/) is the query side of that log — filter, aggregate, render — kept out of `netlog` so the gateway sidecar, which only appends and tails, neither links nor ships it.
 - [`internal/network/`](../internal/network/) implements network policy loading and merging for the `network.jsonc` configuration format. Handles dnsmasq config generation, JSONC parsing, and policy merge logic.
 - [`internal/policy/effective_resolver.go`](../internal/policy/effective_resolver.go) centralizes effective-policy resolution for startup, network status, and runtime apply.
 - [`internal/app/network_helpers.go`](../internal/app/network_helpers.go) discovers running gateways, verifies bundle mounts, hashes desired/running bundles, and confirms reload outcomes.

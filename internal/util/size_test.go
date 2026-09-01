@@ -7,7 +7,10 @@
 
 package util
 
-import "testing"
+import (
+	"math"
+	"testing"
+)
 
 func TestFormatBytesUsesTheSameBinaryBase(t *testing.T) {
 	cases := map[int64]string{
@@ -22,5 +25,10 @@ func TestFormatBytesUsesTheSameBinaryBase(t *testing.T) {
 		if got := FormatBytes(input); got != want {
 			t.Fatalf("FormatBytes(%d) = %q, want %q", input, got, want)
 		}
+	}
+	// Docker and the filesystem report byte counts as uint64, which the generic
+	// form takes without the lossy conversion an int64-only signature forced.
+	if got := FormatBytes(uint64(math.MaxUint64)); got != "17179869184 GB" {
+		t.Fatalf("FormatBytes(math.MaxUint64) = %q, want %q", got, "17179869184 GB")
 	}
 }

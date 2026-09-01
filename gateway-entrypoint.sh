@@ -532,7 +532,9 @@ start_dns_audit() {
     fi
 
     log "Starting DNS audit translator"
-    enclave-gateway-proxy -dns-audit "$DNSMASQ_LOG_FILE" >>"$DNS_AUDIT_LOG_FILE" 2>&1 &
+    # Unprivileged like the other long-lived children: it only reads the dnsmasq
+    # log and appends to the world-writable network log.
+    su-exec "$PROXY_USER:$PROXY_USER" enclave-gateway-proxy -dns-audit "$DNSMASQ_LOG_FILE" >>"$DNS_AUDIT_LOG_FILE" 2>&1 &
     DNS_AUDIT_PID="$!"
 }
 

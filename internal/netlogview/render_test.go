@@ -5,21 +5,23 @@
 //
 // SPDX-License-Identifier: MIT
 
-package netlog
+package netlogview
 
 import (
 	"strings"
 	"testing"
 	"time"
+
+	"enclave/internal/netlog"
 )
 
-func renderFixture() []Event {
-	return []Event{
-		{Timestamp: "2026-08-13T12:04:30.000Z", Type: TypeSession, Verdict: VerdictInfo, Rule: RuleSessionStart, Session: "enclave-demo-claude"},
-		{Timestamp: "2026-08-13T12:04:31.412Z", Type: TypeHTTP, Method: "GET", Domain: "api.anthropic.com", Path: "/v1/messages", Port: 443, Status: 200, ResponseSize: 4300, Verdict: VerdictPass, Rule: "allowlist", Session: "enclave-demo-claude"},
-		{Timestamp: "2026-08-13T12:04:33.100Z", Type: TypeTCP, Domain: "github.com", Port: 443, Verdict: VerdictPass, Rule: "allowlist", Session: "enclave-demo-claude"},
-		{Timestamp: "2026-08-13T12:04:35.882Z", Type: TypeDNS, Domain: "telemetry.example.com", Verdict: VerdictDeny, Rule: "nxdomain", Session: "enclave-demo-claude"},
-		{Timestamp: "2026-08-13T12:04:36.200Z", Type: TypeHTTP, Method: "GET", Domain: "evil.test", Path: "/x", Port: 443, Status: 403, Verdict: VerdictDeny, Rule: "secret-injection", Session: "enclave-demo-claude"},
+func renderFixture() []netlog.Event {
+	return []netlog.Event{
+		{Timestamp: "2026-08-13T12:04:30.000Z", Type: netlog.TypeSession, Verdict: netlog.VerdictInfo, Rule: netlog.RuleSessionStart, Session: "enclave-demo-claude"},
+		{Timestamp: "2026-08-13T12:04:31.412Z", Type: netlog.TypeHTTP, Method: "GET", Domain: "api.anthropic.com", Path: "/v1/messages", Port: 443, Status: 200, ResponseSize: 4300, Verdict: netlog.VerdictPass, Rule: "allowlist", Session: "enclave-demo-claude"},
+		{Timestamp: "2026-08-13T12:04:33.100Z", Type: netlog.TypeTCP, Domain: "github.com", Port: 443, Verdict: netlog.VerdictPass, Rule: "allowlist", Session: "enclave-demo-claude"},
+		{Timestamp: "2026-08-13T12:04:35.882Z", Type: netlog.TypeDNS, Domain: "telemetry.example.com", Verdict: netlog.VerdictDeny, Rule: "nxdomain", Session: "enclave-demo-claude"},
+		{Timestamp: "2026-08-13T12:04:36.200Z", Type: netlog.TypeHTTP, Method: "GET", Domain: "evil.test", Path: "/x", Port: 443, Status: 403, Verdict: netlog.VerdictDeny, Rule: "secret-injection", Session: "enclave-demo-claude"},
 	}
 }
 
@@ -27,7 +29,7 @@ func humanOptions() RenderOptions {
 	return RenderOptions{Location: time.UTC}
 }
 
-func renderEvents(events []Event, opts RenderOptions) string {
+func renderEvents(events []netlog.Event, opts RenderOptions) string {
 	var out strings.Builder
 	// A strings.Builder never fails.
 	_ = WriteEvents(&out, events, opts)
@@ -91,12 +93,12 @@ func TestRenderHumanFormKeepsVerdictGreppable(t *testing.T) {
 
 func TestRenderSeparatesSessions(t *testing.T) {
 	events := renderFixture()
-	events = append(events, Event{
-		Timestamp: "2026-08-13T13:00:00.000Z", Type: TypeSession, Verdict: VerdictInfo,
-		Rule: RuleSessionStart, Session: "enclave-demo-codex",
-	}, Event{
-		Timestamp: "2026-08-13T13:00:05.000Z", Type: TypeTCP, Domain: "github.com",
-		Port: 443, Verdict: VerdictPass, Rule: "allowlist", Session: "enclave-demo-codex",
+	events = append(events, netlog.Event{
+		Timestamp: "2026-08-13T13:00:00.000Z", Type: netlog.TypeSession, Verdict: netlog.VerdictInfo,
+		Rule: netlog.RuleSessionStart, Session: "enclave-demo-codex",
+	}, netlog.Event{
+		Timestamp: "2026-08-13T13:00:05.000Z", Type: netlog.TypeTCP, Domain: "github.com",
+		Port: 443, Verdict: netlog.VerdictPass, Rule: "allowlist", Session: "enclave-demo-codex",
 	})
 
 	out := renderEvents(events, humanOptions())
@@ -111,11 +113,30 @@ func TestRenderSeparatesSessions(t *testing.T) {
 	}
 }
 
-func TestRenderSessionHeaderWithoutCounts(t *testing.T) {
-	marker := Event{Timestamp: "2026-08-13T12:04:30.000Z", Type: TypeSession, Verdict: VerdictInfo, Rule: RuleSessionStart, Session: "enclave-demo-claude"}
-	line := renderSessionHeader(marker, 0, 0, humanOptions())
-	if strings.Contains(line, "pass") || strings.Contains(line, "deny") {
-		t.Fatalf("a follow boundary must not claim counts it does not have: %q", line)
+// One output format: a row from the live stream is what the backlog would have
+// printed for it.
+func TestWriteEventRendersTheBacklogRow(t *testing.T) {
+	event := renderFixture()[2]
+	var out strings.Builder
+	if err := WriteEvent(&out, event, humanOptions()); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := out.String(), renderEvents([]netlog.Event{event}, humanOptions()); got != want {
+		t.Fatalf("live row = %q, backlog row = %q", got, want)
+	}
+}
+
+func TestWriteEventSeparatesSessionBoundary(t *testing.T) {
+	var out strings.Builder
+	if err := WriteEvent(&out, renderFixture()[0], humanOptions()); err != nil {
+		t.Fatal(err)
+	}
+	got := out.String()
+	if !strings.HasPrefix(got, "\n") || !strings.HasSuffix(got, "\n\n") {
+		t.Fatalf("a followed boundary needs the blank lines the backlog gives it: %q", got)
+	}
+	if strings.Contains(got, "pass") || strings.Contains(got, "deny") {
+		t.Fatalf("a followed boundary must not claim counts it does not have: %q", got)
 	}
 }
 
@@ -131,5 +152,24 @@ func TestRenderSummaryHuman(t *testing.T) {
 	totals := strings.Fields(lines[len(lines)-1])
 	if len(totals) != 2 || totals[0] != "2" || totals[1] != "2" {
 		t.Fatalf("totals row = %v, want [2 2]", totals)
+	}
+}
+
+// A denial that never learned a host name still gets a labelled row, and its
+// label widens the domain column like any other value would.
+func TestRenderSummaryLabelsTheDomainlessGroup(t *testing.T) {
+	out := RenderSummary(Aggregate([]netlog.Event{{
+		Timestamp: "2026-08-13T12:04:40.000Z", Type: netlog.TypeTCP,
+		Verdict: netlog.VerdictDeny, Rule: "tls-clienthello",
+	}}), humanOptions())
+	lines := strings.Split(out, "\n")
+	if !strings.HasPrefix(lines[1], " (no domain)  ") {
+		t.Fatalf("row = %q", lines[1])
+	}
+	// The right-aligned pass value ends under the header's PASS column, which
+	// only lines up if the label widened the domain column.
+	passColumn := strings.Index(lines[0], "PASS") + len("PASS")
+	if lines[1][passColumn-1] != '0' {
+		t.Fatalf("the label did not widen the domain column:\n%s\n%s", lines[0], lines[1])
 	}
 }

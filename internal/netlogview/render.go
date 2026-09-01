@@ -5,7 +5,7 @@
 //
 // SPDX-License-Identifier: MIT
 
-package netlog
+package netlogview
 
 import (
 	"fmt"
@@ -16,6 +16,7 @@ import (
 	"unicode/utf8"
 
 	"enclave/internal/logx"
+	"enclave/internal/netlog"
 	"enclave/internal/util"
 )
 
@@ -63,15 +64,7 @@ func (o RenderOptions) colorize(text string, color logx.Color) string {
 // large log streams through the caller's buffer instead of being assembled in
 // memory first. A session marker becomes a boundary header carrying that
 // session's verdict counts.
-func WriteEvents(out io.StringWriter, events []Event, opts RenderOptions) error {
-	write := func(parts ...string) error {
-		for _, part := range parts {
-			if _, err := out.WriteString(part); err != nil {
-				return err
-			}
-		}
-		return nil
-	}
+func WriteEvents(out io.StringWriter, events []netlog.Event, opts RenderOptions) error {
 	for index, event := range events {
 		if event.IsSessionMarker() {
 			separator := ""
@@ -79,24 +72,42 @@ func WriteEvents(out io.StringWriter, events []Event, opts RenderOptions) error 
 				separator = "\n"
 			}
 			pass, deny := countUntilNextMarker(events[index+1:])
-			if err := write(separator, renderSessionHeader(event, pass, deny, opts), "\n\n"); err != nil {
+			if err := writeParts(out, separator, renderSessionHeader(event, pass, deny, opts), "\n\n"); err != nil {
 				return err
 			}
 			continue
 		}
-		if err := write(RenderEvent(event, opts), "\n"); err != nil {
+		if err := writeParts(out, renderHumanRow(event, opts), "\n"); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func countUntilNextMarker(events []Event) (pass int, deny int) {
+// WriteEvent renders one event arriving after the backlog, for callers
+// following a live log, with the same session separation WriteEvents gives it.
+func WriteEvent(out io.StringWriter, event netlog.Event, opts RenderOptions) error {
+	if event.IsSessionMarker() {
+		return writeParts(out, "\n", renderSessionHeader(event, 0, 0, opts), "\n\n")
+	}
+	return writeParts(out, renderHumanRow(event, opts), "\n")
+}
+
+func writeParts(out io.StringWriter, parts ...string) error {
+	for _, part := range parts {
+		if _, err := out.WriteString(part); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func countUntilNextMarker(events []netlog.Event) (pass int, deny int) {
 	for _, event := range events {
 		if event.IsSessionMarker() {
 			return pass, deny
 		}
-		if strings.EqualFold(event.Verdict, VerdictDeny) {
+		if strings.EqualFold(event.Verdict, netlog.VerdictDeny) {
 			deny++
 			continue
 		}
@@ -105,17 +116,9 @@ func countUntilNextMarker(events []Event) (pass int, deny int) {
 	return pass, deny
 }
 
-// RenderEvent renders one event as a single line without its newline.
-func RenderEvent(event Event, opts RenderOptions) string {
-	if event.IsSessionMarker() {
-		return renderSessionHeader(event, 0, 0, opts)
-	}
-	return renderHumanRow(event, opts)
-}
-
 // renderSessionHeader renders a session boundary. Counts of zero are omitted so
 // a live follow, which cannot know them yet, still prints a clean boundary.
-func renderSessionHeader(event Event, pass int, deny int, opts RenderOptions) string {
+func renderSessionHeader(event netlog.Event, pass int, deny int, opts RenderOptions) string {
 	session := strings.TrimSpace(event.Session)
 	if session == "" {
 		session = "unknown session"
@@ -132,7 +135,7 @@ func renderSessionHeader(event Event, pass int, deny int, opts RenderOptions) st
 	return line
 }
 
-func renderHumanRow(event Event, opts RenderOptions) string {
+func renderHumanRow(event netlog.Event, opts RenderOptions) string {
 	timestamp := "--:--:--"
 	if at, ok := event.Time(); ok {
 		timestamp = at.In(opts.location()).Format("15:04:05")
@@ -140,7 +143,7 @@ func renderHumanRow(event Event, opts RenderOptions) string {
 
 	glyph := glyphPass
 	glyphColor := logx.ColorGreen
-	if strings.EqualFold(event.Verdict, VerdictDeny) {
+	if strings.EqualFold(event.Verdict, netlog.VerdictDeny) {
 		glyph = glyphDeny
 		glyphColor = logx.ColorRed
 	}
@@ -178,19 +181,19 @@ func renderHumanRow(event Event, opts RenderOptions) string {
 // humanKind collapses type and method into one column: the ambiguity between a
 // method and an event type does not matter to a reader, and the JSON form keeps
 // them separate for tools that care.
-func humanKind(event Event) string {
+func humanKind(event netlog.Event) string {
 	if method := strings.TrimSpace(event.Method); method != "" {
 		return method
 	}
 	return event.Type
 }
 
-func humanDomain(event Event) string {
+func humanDomain(event netlog.Event) string {
 	domain := strings.TrimSpace(event.Domain)
 	if domain == "" {
 		return ""
 	}
-	if event.Type == TypeTCP && event.Port > 0 {
+	if event.Type == netlog.TypeTCP && event.Port > 0 {
 		return domain + ":" + strconv.Itoa(event.Port)
 	}
 	return domain
@@ -198,8 +201,8 @@ func humanDomain(event Event) string {
 
 // humanDetail is the trailing column: the matched rule when the event was
 // denied or carried no payload, and the transferred size otherwise.
-func humanDetail(event Event) string {
-	if strings.EqualFold(event.Verdict, VerdictDeny) {
+func humanDetail(event netlog.Event) string {
+	if strings.EqualFold(event.Verdict, netlog.VerdictDeny) {
 		return event.Rule
 	}
 	if event.ResponseSize > 0 {
@@ -215,8 +218,8 @@ func humanDetail(event Event) string {
 func RenderSummary(summary Summary, opts RenderOptions) string {
 	domainWidth := len("DOMAIN")
 	for _, entry := range summary.Domains {
-		if len(entry.Domain) > domainWidth {
-			domainWidth = len(entry.Domain)
+		if cell := utf8.RuneCountInString(summaryDomainCell(entry.Domain)); cell > domainWidth {
+			domainWidth = cell
 		}
 	}
 
@@ -229,7 +232,7 @@ func RenderSummary(summary Summary, opts RenderOptions) string {
 		if !entry.LastSeen.IsZero() {
 			last = entry.LastSeen.In(opts.location()).Format("15:04:05")
 		}
-		line := " " + opts.colorize(pad(entry.Domain, domainWidth), logx.ColorCyan) + "  " +
+		line := " " + opts.colorize(pad(summaryDomainCell(entry.Domain), domainWidth), logx.ColorCyan) + "  " +
 			opts.colorize(padLeft(strconv.Itoa(entry.Pass), 5), logx.ColorGreen) + "  " +
 			opts.colorize(padLeft(strconv.Itoa(entry.Deny), 5), denyColor(entry.Deny)) + "  " +
 			padLeft(byteCell(entry.Sent), 9) + "  " +
@@ -245,6 +248,14 @@ func RenderSummary(summary Summary, opts RenderOptions) string {
 			padLeft(strconv.Itoa(summary.TotalDeny), 5) + "\n")
 	}
 	return out.String()
+}
+
+// summaryDomainCell labels the domainless group Aggregate produces.
+func summaryDomainCell(domain string) string {
+	if domain == "" {
+		return "(no domain)"
+	}
+	return domain
 }
 
 func denyColor(deny int) logx.Color {

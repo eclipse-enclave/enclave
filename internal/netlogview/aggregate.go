@@ -5,7 +5,7 @@
 //
 // SPDX-License-Identifier: MIT
 
-package netlog
+package netlogview
 
 import (
 	"sort"
@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"enclave/internal/domainpattern"
+	"enclave/internal/netlog"
 )
 
 // DomainSummary aggregates every event seen for one domain. The JSON tags are a
@@ -40,8 +41,10 @@ type Summary struct {
 }
 
 // Aggregate counts events per domain. Session markers are not audit events and
-// are skipped, as are events with no domain.
-func Aggregate(events []Event) Summary {
+// are skipped. Events with no domain are grouped under the empty domain: the
+// proxy denies a connection before it learns a host name, and those denials
+// have to reach the totals.
+func Aggregate(events []netlog.Event) Summary {
 	byDomain := map[string]*DomainSummary{}
 	var summary Summary
 
@@ -50,18 +53,16 @@ func Aggregate(events []Event) Summary {
 			continue
 		}
 		// The same normalization the --domain filter applies, so the two views of
-		// one log cannot disagree about what counts as the same host.
-		domain, err := domainpattern.NormalizeHost(event.Domain)
-		if err != nil {
-			continue
-		}
+		// one log cannot disagree about what counts as the same host. A host it
+		// cannot use is the domainless group.
+		domain, _ := domainpattern.NormalizeHost(event.Domain)
 		entry, ok := byDomain[domain]
 		if !ok {
 			entry = &DomainSummary{Domain: domain}
 			byDomain[domain] = entry
 		}
 		switch strings.ToLower(strings.TrimSpace(event.Verdict)) {
-		case VerdictDeny:
+		case netlog.VerdictDeny:
 			entry.Deny++
 			summary.TotalDeny++
 		default:
@@ -84,11 +85,16 @@ func Aggregate(events []Event) Summary {
 	for _, entry := range byDomain {
 		summary.Domains = append(summary.Domains, *entry)
 	}
-	// Busiest domains first, then alphabetical so equal counts stay stable.
+	// Busiest domains first, then alphabetical so equal counts stay stable. The
+	// domainless group is the least informative row, so it sinks below named
+	// domains it ties with.
 	sort.Slice(summary.Domains, func(i, j int) bool {
 		left, right := summary.Domains[i], summary.Domains[j]
 		if left.Total() != right.Total() {
 			return left.Total() > right.Total()
+		}
+		if left.Domain == "" || right.Domain == "" {
+			return right.Domain == ""
 		}
 		return left.Domain < right.Domain
 	})

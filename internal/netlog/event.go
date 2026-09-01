@@ -5,9 +5,10 @@
 //
 // SPDX-License-Identifier: MIT
 
-// Package netlog defines the gateway network audit log format and the reader
-// side that turns it back into events. The gateway writes it; `enclave network
-// log` reads it.
+// Package netlog defines the gateway network audit log format and the file
+// handling around it: appending, scanning, following and rotation. The gateway
+// writes the log; `enclave network log` reads it back and presents it through
+// internal/netlogview.
 package netlog
 
 import "time"
@@ -49,12 +50,16 @@ const (
 // RuleSessionStart marks the event a gateway writes when it starts.
 const RuleSessionStart = "start"
 
+// SinceSession is the --since value that anchors on a session boundary instead
+// of a clock value. It is shared so the CLI's flag validation and the reader
+// cannot disagree about the keyword.
+const SinceSession = "session"
+
 // TimeFormat is the timestamp layout every writer uses.
 const TimeFormat = time.RFC3339Nano
 
 // IsSessionMarker reports whether the event is a session boundary rather than
-// an audited request. Markers are excluded from aggregation and from verdict,
-// domain and type filtering.
+// an audited request.
 func (e Event) IsSessionMarker() bool {
 	return e.Type == TypeSession
 }

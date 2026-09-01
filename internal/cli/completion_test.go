@@ -9,6 +9,7 @@ package cli
 
 import (
 	"bytes"
+	"slices"
 	"strings"
 	"testing"
 
@@ -70,6 +71,63 @@ func TestRegisterCompletionsTargetRealFlags(t *testing.T) {
 	if err := registerCompletions(rootCmd); err != nil {
 		t.Fatalf("registerCompletions registered a completion for a missing flag: %v", err)
 	}
+}
+
+// TestNetworkLogFlagCompletions guards the value completions of the `network
+// log` filter flags: without them the shell falls back to filename completion,
+// which is never a useful suggestion for a verdict, an event type, or a domain.
+func TestNetworkLogFlagCompletions(t *testing.T) {
+	var res Result
+	rootCmd := &cobra.Command{Use: "enclave"}
+	// The option-set flags satisfy the completers map; only the network group is
+	// under test here.
+	addOptionFlags(rootCmd.PersistentFlags(), &res.Options, &res.Sources,
+		config.OptionGroupGlobal,
+		config.OptionGroupRun,
+		config.OptionGroupAuth,
+		config.OptionGroupBuild,
+	)
+	rootCmd.AddCommand(networkCommand(&res))
+	if err := registerCompletions(rootCmd); err != nil {
+		t.Fatalf("registerCompletions: %v", err)
+	}
+
+	logCmd := findSubCommand(rootCmd, "network", "log")
+	if logCmd == nil {
+		t.Fatal("network log command not found")
+	}
+
+	want := map[string][]string{
+		"verdict": {"pass", "deny"},
+		"type":    {"dns", "http", "tcp"},
+		"since":   {"session"},
+		"domain":  nil,
+		"session": nil,
+	}
+	for flag, values := range want {
+		t.Run(flag, func(t *testing.T) {
+			completions, directive := completeFlag(t, logCmd, flag)
+			if directive != cobra.ShellCompDirectiveNoFileComp {
+				t.Fatalf("--%s directive = %v, want NoFileComp so the shell does not offer files", flag, directive)
+			}
+			for _, value := range values {
+				if !slices.Contains(completions, value) {
+					t.Fatalf("--%s completions = %v, missing %q", flag, completions, value)
+				}
+			}
+		})
+	}
+}
+
+// completeFlag invokes the registered completion function of a flag the way
+// Cobra does when the shell asks for candidate values.
+func completeFlag(t *testing.T, cmd *cobra.Command, flag string) ([]string, cobra.ShellCompDirective) {
+	t.Helper()
+	fn, ok := cmd.GetFlagCompletionFunc(flag)
+	if !ok {
+		t.Fatalf("no completion registered for --%s on %q", flag, cmd.CommandPath())
+	}
+	return fn(cmd, nil, "")
 }
 
 // TestRegisterCompletionsRejectsMissingFlag confirms the guard actually fails

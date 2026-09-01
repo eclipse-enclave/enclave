@@ -56,6 +56,21 @@ func TestNormalizeRejectsBroadOrMalformedPatterns(t *testing.T) {
 	}
 }
 
+func TestNormalizeQueryAcceptsBroadWildcards(t *testing.T) {
+	got, err := NormalizeQuery("*.COM")
+	if err != nil {
+		t.Fatalf("NormalizeQuery(\"*.COM\") error = %v", err)
+	}
+	if got != "*.com" {
+		t.Fatalf("NormalizeQuery(\"*.COM\") = %q, want \"*.com\"", got)
+	}
+	for _, input := range []string{"*", "example.com:443", "https://example.com", "foo.*.example.com"} {
+		if _, err := NormalizeQuery(input); err == nil {
+			t.Fatalf("NormalizeQuery(%q) error = nil, want non-nil", input)
+		}
+	}
+}
+
 func TestNormalizeHostAcceptsRuntimeHostForms(t *testing.T) {
 	tests := []struct {
 		name  string

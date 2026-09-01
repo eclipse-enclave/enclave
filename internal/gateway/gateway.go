@@ -21,6 +21,7 @@ import (
 	"enclave/internal/docker"
 	"enclave/internal/logx"
 	"enclave/internal/model"
+	"enclave/internal/netlog"
 	"enclave/internal/network"
 	"enclave/internal/util"
 )
@@ -362,21 +363,8 @@ func Start(cfg StartConfig) (StartResult, error) {
 	}
 
 	if cfg.NetworkLogPath != "" {
-		logDir := filepath.Dir(cfg.NetworkLogPath)
-		if err := os.MkdirAll(logDir, 0o750); err != nil {
-			return empty, fmt.Errorf("failed to create network log dir: %w", err)
-		}
-		if _, err := os.Stat(cfg.NetworkLogPath); err != nil {
-			if !os.IsNotExist(err) {
-				return empty, fmt.Errorf("failed to stat network log path: %w", err)
-			}
-			file, err := os.OpenFile(cfg.NetworkLogPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
-			if err != nil {
-				return empty, fmt.Errorf("failed to create network log file: %w", err)
-			}
-			if err := file.Close(); err != nil {
-				return empty, fmt.Errorf("failed to close network log file: %w", err)
-			}
+		if err := prepareNetworkLog(cfg); err != nil {
+			return empty, err
 		}
 	}
 
@@ -421,6 +409,9 @@ func Start(cfg StartConfig) (StartResult, error) {
 	}
 	if strings.TrimSpace(cfg.NetworkLogMode) != "" {
 		env = append(env, model.EnvNetworkLogMode+"="+cfg.NetworkLogMode)
+	}
+	if session := strings.TrimSpace(cfg.ContainerName); session != "" {
+		env = append(env, model.EnvGatewaySession+"="+session)
 	}
 	if cfg.GatewayConfigDir != "" {
 		env = append(env, model.EnvGatewayConfigDir+"="+model.GatewayConfigDir)
@@ -476,6 +467,37 @@ func Start(cfg StartConfig) (StartResult, error) {
 	return StartResult{
 		ContainerName: gatewayContainer,
 	}, nil
+}
+
+// prepareNetworkLog rotates the audit log when it has outgrown netlog.MaxLogBytes,
+// makes sure the file the gateway binds exists, and records the session
+// boundary. Rotation happens here, at session start, so a session never rotates
+// its own log: a single long-running session can grow past the cap. Rotation
+// truncates in place rather than renaming, so a session already running keeps
+// appending to the file it bind-mounted.
+func prepareNetworkLog(cfg StartConfig) error {
+	logDir := filepath.Dir(cfg.NetworkLogPath)
+	if err := os.MkdirAll(logDir, 0o750); err != nil {
+		return fmt.Errorf("failed to create network log dir: %w", err)
+	}
+
+	rotated, err := netlog.RotateIfLarger(cfg.NetworkLogPath, netlog.MaxLogBytes)
+	if err != nil {
+		return fmt.Errorf("failed to rotate network log: %w", err)
+	}
+	if rotated {
+		logx.Debugf("Rotated network log to %s", netlog.RotatedPath(cfg.NetworkLogPath))
+	}
+
+	// The marker is written host side so it is recorded even when the proxy is
+	// disabled, and it gives the reader session boundaries plus the anchor
+	// `--since session` resolves against. It also creates the file the gateway
+	// bind-mounts, which is why nothing here has to touch it first.
+	marker := netlog.SessionStartEvent(cfg.ContainerName, time.Now())
+	if err := netlog.AppendEvent(cfg.NetworkLogPath, marker); err != nil {
+		return fmt.Errorf("failed to record network log session marker: %w", err)
+	}
+	return nil
 }
 
 func validateStartConfig(cfg StartConfig) error {

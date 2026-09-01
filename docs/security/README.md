@@ -46,6 +46,14 @@ can therefore return untrusted content or provide indirect access beyond what
 its hostname suggests. Treat every allowlisted service as part of the trust
 boundary.
 
+The network log is an audit trail of decisions, not a record of everything that
+crossed the boundary. In the default `coarse` mode a reused TLS connection
+yields one event however many requests it carries, successful DNS lookups are
+never recorded, and request-level detail exists only for plaintext HTTP and
+MITM'd hosts. `--network-log=requests` closes the HTTPS gap for allowlisted
+hosts, but no mode records SSH. Treat a missing event as no evidence either
+way; see [Coverage and granularity](../networking.md#coverage-and-granularity).
+
 The experimental QEMU backend has no restricted-egress implementation. It runs
 with unrestricted networking and without gateway-side HTTP secret release.
 

@@ -9,6 +9,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"log"
 	"os"
@@ -18,14 +19,32 @@ import (
 	"syscall"
 
 	"enclave/internal/gateway/bundle"
+	"enclave/internal/gateway/dnsaudit"
 	"enclave/internal/gateway/mitm"
 	"enclave/internal/gateway/tlsstore"
 	"enclave/internal/model"
 )
 
 func main() {
+	// The gateway runs this binary twice: once as the MITM proxy, and once as
+	// the DNS audit translator. The translator is a separate process because
+	// DNS denials must be recorded even when the proxy is disabled.
+	dnsAuditLog := flag.String("dns-audit", "", "Translate this dnsmasq log into network audit events instead of serving as a proxy")
+	flag.Parse()
+
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
+
+	if path := strings.TrimSpace(*dnsAuditLog); path != "" {
+		if err := dnsaudit.Run(ctx, dnsaudit.Options{
+			DNSMasqLogPath: path,
+			NetworkLogPath: strings.TrimSpace(os.Getenv(model.EnvNetworkLogFile)),
+			Session:        strings.TrimSpace(os.Getenv(model.EnvGatewaySession)),
+		}); err != nil {
+			log.Fatalf("gateway dns audit failed: %v", err)
+		}
+		return
+	}
 
 	tlsRoot := strings.TrimSpace(os.Getenv(model.EnvGatewayTLSRoot))
 	if tlsRoot == "" {
@@ -66,6 +85,7 @@ func main() {
 		DeniedDomains:  deniedDomains,
 		SecretRules:    rules,
 		AuditLogPath:   strings.TrimSpace(os.Getenv(model.EnvNetworkLogFile)),
+		Session:        strings.TrimSpace(os.Getenv(model.EnvGatewaySession)),
 		ForceHTTPSMITM: networkLogMode == model.NetworkLogRequests,
 		// The host runtime pre-provisions CA key material under tlsRoot.
 		TLSStore: tlsstore.New(tlsRoot),

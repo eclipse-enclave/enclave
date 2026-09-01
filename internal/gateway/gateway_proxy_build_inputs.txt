@@ -7,11 +7,13 @@ internal/appassets
 internal/config
 internal/domainpattern
 internal/gateway/bundle
+internal/gateway/dnsaudit
 internal/gateway/mitm
 internal/gateway/tlsstore
 internal/git
 internal/logx
 internal/model
+internal/netlog
 internal/network
 internal/secretfile
 internal/util

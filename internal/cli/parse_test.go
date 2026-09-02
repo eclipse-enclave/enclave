@@ -117,6 +117,39 @@ func TestParseCleanupFlags(t *testing.T) {
 	}
 }
 
+func TestParseVersionCommand(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		args     []string
+		wantJSON bool
+	}{
+		{name: "command", args: []string{"version"}},
+		{name: "JSON", args: []string{"version", "--json"}, wantJSON: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			res, err := Parse(tc.args, config.DefaultOptions())
+			if err != nil {
+				t.Fatalf("parse failed: %v", err)
+			}
+			if res.Action != "version" {
+				t.Fatalf("expected action version, got %s", res.Action)
+			}
+			if res.VersionJSON != tc.wantJSON {
+				t.Fatalf("expected JSON %v, got %v", tc.wantJSON, res.VersionJSON)
+			}
+		})
+	}
+}
+
+func TestParseVersionFlag(t *testing.T) {
+	for _, flag := range []string{"--version", "-v"} {
+		out := captureStdout(t, flag)
+		if !strings.HasPrefix(out, model.AppName+": ") || strings.Count(out, "\n") != 1 {
+			t.Fatalf("unexpected %s output %q", flag, out)
+		}
+	}
+}
+
 func TestParseUpdateCommand(t *testing.T) {
 	defaults := config.DefaultOptions()
 	res, err := Parse([]string{"update", "codex", "claude"}, defaults)

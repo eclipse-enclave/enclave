@@ -88,12 +88,23 @@ this is a capability summary, not a code audit), how many `commands.install`
 steps run as root (a step with no `user` field defaults to root, independently
 of the top-level `needsRoot`), whether it ships a `check-update.sh` that enclave
 runs in a container on each automatic update check, widens the network allowlist
-or denies domains, declares credentials and where they're released as HTTP
-headers, whether it flips on the approval-bypass flag (`sandbox.yoloFlag`,
-active by default once declared), ships skills, host config/credential
-passthrough, or seeds files into your project directory. An update shows the
-same information as a diff against what's currently installed, so a newly
-granted capability is visible before you accept it.
+or denies domains, publishes a container port on the host, declares credentials
+and where they're released as HTTP headers, whether it flips on the
+approval-bypass flag (`sandbox.yoloFlag`, active by default once declared) or
+appends its own argv to the agent for `--continue`/`--resume`
+(`sandbox.continueArgs`/`resumeArgs`, which can carry the same flag), launches
+an IDE on your host after start (`postStart.openIDE`), ships skills, host
+config/credential passthrough, or seeds files into your project directory. An
+update shows the same information as a diff against what's currently installed,
+so a newly granted capability is visible before you accept it.
+
+The diff goes one level below the summary wherever a spec can change what an
+extension does without changing the shape of the document: `commands.install`
+and `commands.startup` are compared by their command text (not by entry count,
+and not by the author's `description`), `environment.variables` by value as well
+as by name, and a `commands.initFiles` entry by its mode and a digest of the
+content it writes. Rewriting a step, flipping a variable, or replacing a seeded
+file's content is reported even when nothing about the structure moved.
 
 `--yes` skips the confirmation prompt after the summary is shown; it never
 skips the summary itself. `--json` implies non-interactive and requires

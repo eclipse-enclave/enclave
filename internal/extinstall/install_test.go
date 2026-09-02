@@ -778,6 +778,53 @@ func TestStagingCommitStampFailureRestoresPreviousState(t *testing.T) {
 	}
 }
 
+// TestStagingCommitStartsReplacedRecoveryWindowAtSwap covers the recovery copy's
+// age: os.Rename carries the installed directory's mtime over, and sweepStale
+// stats nothing else, so without a refresh the copy of an extension installed
+// longer ago than staleAge is stale the moment it is created and the next add
+// or update deletes it before the documented window has run.
+func TestStagingCommitStartsReplacedRecoveryWindowAtSwap(t *testing.T) {
+	env, _ := testEnv(t, nil, "")
+	stage, err := newStaging(env, model.KindFeature, false)
+	if err != nil {
+		t.Fatalf("newStaging: %v", err)
+	}
+	existing := filepath.Join(env.Paths.UserFeaturesDir, "foo")
+	writeFixture(t, filepath.Join(existing, "marker.txt"), "old\n", 0o644)
+	ancient := env.now().Add(-30 * 24 * time.Hour)
+	if err := os.Chtimes(existing, ancient, ancient); err != nil {
+		t.Fatalf("Chtimes: %v", err)
+	}
+	writeFixture(t, filepath.Join(stage.extDir("foo"), "marker.txt"), "new\n", 0o644)
+
+	swept := true
+	if _, err := stage.commit(env, "foo", func(string) error {
+		// The recovery copy only exists while the stamp runs; commit deletes it
+		// on success.
+		entries, readErr := os.ReadDir(stage.kindDir)
+		if readErr != nil {
+			return readErr
+		}
+		for _, entry := range entries {
+			if !strings.HasPrefix(entry.Name(), replacedPrefix) {
+				continue
+			}
+			info, infoErr := entry.Info()
+			if infoErr != nil {
+				return infoErr
+			}
+			swept = env.now().Sub(info.ModTime()) >= staleAge
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+	if swept {
+		t.Fatalf("the %s recovery copy is already older than the %s window the next sweep enforces",
+			replacedPrefix, staleAge)
+	}
+}
+
 // TestSweepStaleRespectsTouch: a staging directory whose mtime was refreshed
 // (as applyPlan does around the confirmation prompt and the swap) must survive
 // a sweep even though its original mtime was old enough to be swept.

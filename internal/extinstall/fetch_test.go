@@ -525,3 +525,55 @@ func TestGitRepoFetchPinnedCommitFromDefaultBranchMissing(t *testing.T) {
 		t.Fatal("fetchPinnedCommitFromDefaultBranch accepted a commit absent from the default branch")
 	}
 }
+
+// TestGitFetcherErrorRedactsRemoteInArgv covers the failing-command half of a
+// git error: the remote appears in the argv of ls-remote and `remote add`, not
+// only in git's stderr, and the error string ends up in the --json envelope.
+func TestGitFetcherErrorRedactsRemoteInArgv(t *testing.T) {
+	fetcher, err := NewGitFetcher(false)
+	if err != nil {
+		t.Skipf("git fetcher unavailable: %v", err)
+	}
+	// An unknown subcommand fails immediately and without a network round trip,
+	// while still carrying the remote through as an operand.
+	_, _, runErr := fetcher.(*gitFetcher).runCombined(context.Background(), t.TempDir(),
+		"definitely-not-a-git-subcommand", "https://user:s3cr3t@example.invalid/repo.git")
+	if runErr == nil {
+		t.Fatal("expected an error from an unknown git subcommand")
+	}
+	if strings.Contains(runErr.Error(), "s3cr3t") {
+		t.Fatalf("the error leaks the remote's credentials: %v", runErr)
+	}
+}
+
+// TestMaterializeAfterSparseSelectionRestoresFullTree covers the fetch cache
+// serving one repository to several extensions: a sparse cone set for the first
+// one must not truncate the checkout of a second that owns the whole tree.
+func TestMaterializeAfterSparseSelectionRestoresFullTree(t *testing.T) {
+	repo := fixtureRepo(t, true, map[string]string{
+		"spec.yaml":              "schemaVersion: \"1\"\nkind: mixin\nname: root\n",
+		"skills/review/SKILL.md": "root extension content\n",
+		"tools/alpha/spec.yaml":  "schemaVersion: \"1\"\nkind: sandbox\nname: alpha\n",
+	})
+	fetcher, err := NewGitFetcher(false)
+	if err != nil {
+		t.Skipf("git fetcher unavailable: %v", err)
+	}
+	opened, err := fetcher.Open(context.Background(), repo, "main")
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer opened.Close()
+
+	if err := opened.Materialize(context.Background(), []string{"tools/alpha"}); err != nil {
+		t.Fatalf("Materialize(subpath): %v", err)
+	}
+	// The repository root is an extension too, and no set of paths describes it,
+	// so it materializes with a full checkout.
+	if err := opened.Materialize(context.Background(), nil); err != nil {
+		t.Fatalf("Materialize(root): %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(opened.Dir(), "skills", "review", "SKILL.md")); err != nil {
+		t.Fatalf("the full checkout was reduced to the previous sparse cone: %v", err)
+	}
+}

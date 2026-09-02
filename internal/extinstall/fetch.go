@@ -334,12 +334,8 @@ func (r *gitRepo) init(ctx context.Context, remote string, resolved RemoteRef) e
 	// full fetch anyway and only warns on stderr. Both mean the filter did
 	// not apply, so both are detected before trusting r.blobless.
 	_, filterStderr, err := r.fetcher.runCombined(ctx, r.dir, "fetch", "--depth", "1", "--no-tags", "--filter=blob:none", "origin", fetchRef)
-	if err == nil && !filterIgnoredByServer(filterStderr) {
-		r.blobless = true
-		return r.verifyCommit(ctx, resolved)
-	}
 	if err == nil {
-		// The fetch already transferred full objects; nothing more to do.
+		r.blobless = !filterIgnoredByServer(filterStderr)
 		return r.verifyCommit(ctx, resolved)
 	}
 	// Server refuses object filters (uploadpack.allowFilter off): shallow fetch
@@ -429,10 +425,14 @@ func (r *gitRepo) Materialize(ctx context.Context, dirs []string) error {
 			r.sparse = true
 			return nil
 		}
-		// A half-applied sparse attempt leaves sparsity enabled with the default
-		// cone, which would reduce the full checkout below to the root files.
-		_, _ = r.fetcher.run(ctx, r.dir, "sparse-checkout", "disable")
 	}
+	// Sparsity may still be enabled here: from a half-applied attempt just
+	// above, or from an earlier Materialize on this repository, which the fetch
+	// cache shares across every extension from the same remote and ref. Either
+	// way its cone would silently reduce the full checkout below to a subset of
+	// the tree, so it is turned off before checking out.
+	_, _ = r.fetcher.run(ctx, r.dir, "sparse-checkout", "disable")
+	r.sparse = false
 	_, err := r.fetcher.run(ctx, r.dir, "checkout", "--detach", r.checkoutTarget)
 	return err
 }
@@ -478,7 +478,10 @@ func (f *gitFetcher) runCombined(ctx context.Context, dir string, args ...string
 		if detail == "" {
 			detail = runErr.Error()
 		}
-		return "", stderrBuf.String(), fmt.Errorf("git %s: %s", strings.Join(args, " "), RedactRemote(detail))
+		// Both halves are redacted: args carries the remote for ls-remote and
+		// `remote add origin`, so a token in the URL would otherwise reach the
+		// error string and the --json envelope with it.
+		return "", stderrBuf.String(), fmt.Errorf("git %s: %s", RedactRemote(strings.Join(args, " ")), RedactRemote(detail))
 	}
 	return stdoutBuf.String(), stderrBuf.String(), nil
 }

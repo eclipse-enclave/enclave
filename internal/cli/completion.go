@@ -166,11 +166,11 @@ func registerCompletions(rootCmd *cobra.Command) error {
 	for _, kind := range []model.ExtensionKind{model.KindFeature, model.KindTool} {
 		completer := installedExtensionCompleter(kind)
 		for _, sub := range []string{"remove", "update"} {
-			if cmd := findSubCommand(rootCmd, kind.Verb(), sub); cmd != nil {
+			if cmd := findSubCommand(rootCmd, kind.DirName(), sub); cmd != nil {
 				cmd.ValidArgsFunction = completer
 			}
 		}
-		if cmd := findSubCommand(rootCmd, kind.Verb(), "add"); cmd != nil {
+		if cmd := findSubCommand(rootCmd, kind.DirName(), "add"); cmd != nil {
 			if err := cmd.RegisterFlagCompletionFunc("name", completer); err != nil {
 				return err
 			}

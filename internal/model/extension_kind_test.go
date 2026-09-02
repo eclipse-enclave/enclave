@@ -16,9 +16,6 @@ func TestExtensionKindMappings(t *testing.T) {
 	if KindFeature.DirName() != "features" || KindTool.DirName() != "tools" {
 		t.Fatal("dir names wrong")
 	}
-	if KindFeature.Verb() != "features" || KindTool.Verb() != "tools" {
-		t.Fatal("verbs wrong")
-	}
 	if KindFeature.Label() != "feature" || KindTool.Label() != "tool" {
 		t.Fatal("labels wrong")
 	}

@@ -83,15 +83,6 @@ func (e Env) section(name string, caption string) {
 	nameCells := ruleLeadIn + 1 + displayWidth(name) + 1 // "━━ name "
 	painted := style.paint(name, logx.ColorBold)
 
-	if caption == "" {
-		fill := width - nameCells
-		_, _ = fmt.Fprintf(w, "\n%s %s %s\n\n",
-			style.paint(strings.Repeat(ruleGlyph, ruleLeadIn), logx.ColorDim),
-			painted,
-			style.paint(strings.Repeat(ruleGlyph, max(fill, minRuleGap)), logx.ColorDim))
-		return
-	}
-
 	captionCells := 1 + displayWidth(caption) + 1 + ruleTailIn // " caption ━━"
 	fill := width - nameCells - captionCells
 	if fill < minRuleGap {

@@ -11,6 +11,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"sort"
 
 	"enclave/internal/config"
@@ -161,19 +162,13 @@ func updateOne(ctx context.Context, env Env, req Request, stage *staging, fetche
 		}
 		return ActionResult{}, fmt.Errorf("%s: %s", src.Display(), reason)
 	}
-	var selected *classified
-	for i := range match {
-		if match[i].Name == entry.Name {
-			selected = &match[i]
-			break
-		}
-	}
-	if selected == nil {
+	selected := slices.IndexFunc(match, func(c classified) bool { return c.Name == entry.Name })
+	if selected < 0 {
 		return ActionResult{}, fmt.Errorf("%s no longer provides this %s", src.Display(), req.Kind.Label())
 	}
 
 	before, inspectErr := inspect(installed, req.Kind)
-	plan := planFromRepo(src, repo, *selected, ActionUpdated)
+	plan := planFromRepo(src, repo, match[selected], ActionUpdated)
 	if inspectErr == nil {
 		plan.Before = &before
 	}

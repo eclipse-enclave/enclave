@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
 	"enclave/internal/config"
@@ -51,16 +52,15 @@ func (c capabilities) yoloActive() bool {
 	return c.Spec.YoloFlag != "" && c.Spec.YoloEnabled
 }
 
-// entrypointDirs are the startup-script directories, by kind, in the order the
-// container runs them. The rule is entrypoint.sh's, not config's: it sources
-// entrypoint.d from the selected tool's directory alone, and
-// feature-entrypoint.d from each enabled feature's, so neither kind runs the
-// other's directory.
-func entrypointDirs(kind model.ExtensionKind) []string {
+// entrypointDir is the startup-script directory this kind's extensions ship.
+// The rule is entrypoint.sh's, not config's: it sources entrypoint.d from the
+// selected tool's directory alone, and feature-entrypoint.d from each enabled
+// feature's, so neither kind runs the other's directory.
+func entrypointDir(kind model.ExtensionKind) string {
 	if kind == model.KindTool {
-		return []string{model.ToolEntrypointDir}
+		return model.ToolEntrypointDir
 	}
-	return []string{model.FeatureEntrypointDir}
+	return model.FeatureEntrypointDir
 }
 
 // inspect summarizes a staged extension directory.
@@ -119,8 +119,7 @@ func scanExtensionTree(dir string, kind model.ExtensionKind) (extensionTree, err
 		homePrefix      = model.ExtensionFilesDir + "/" + model.ExtensionFilesHomeDir + "/"
 	)
 	tree := extensionTree{}
-	entrypoints := entrypointDirs(kind)
-	scripts := map[string][]string{}
+	entrypoint := entrypointDir(kind)
 
 	err := walkExtensionEntries(dir, func(rel string, _ string, entry fs.DirEntry) error {
 		if entry.IsDir() {
@@ -151,12 +150,10 @@ func scanExtensionTree(dir string, kind model.ExtensionKind) (extensionTree, err
 		if name, ok := immediateChild(rel, skillsPrefix); ok {
 			tree.Skills = append(tree.Skills, name)
 		}
-		for _, sub := range entrypoints {
-			// entrypoint.sh globs "*.sh", so anything else in the directory —
-			// a README, a helper data file — is never sourced.
-			if name, ok := immediateChild(rel, sub+"/"); ok && strings.HasSuffix(name, ".sh") {
-				scripts[sub] = append(scripts[sub], sub+"/"+name)
-			}
+		// entrypoint.sh globs "*.sh", so anything else in the directory — a
+		// README, a helper data file — is never sourced.
+		if name, ok := immediateChild(rel, entrypoint+"/"); ok && strings.HasSuffix(name, ".sh") {
+			tree.StartupScripts = append(tree.StartupScripts, entrypoint+"/"+name)
 		}
 		if name, ok := strings.CutPrefix(rel, workspacePrefix); ok {
 			tree.WorkspaceFiles = append(tree.WorkspaceFiles, name)
@@ -170,13 +167,9 @@ func scanExtensionTree(dir string, kind model.ExtensionKind) (extensionTree, err
 		return extensionTree{}, err
 	}
 
-	// Startup scripts stay grouped by entrypoint directory, in the order the
-	// kind runs them; everything else is a plain sorted listing.
-	for _, sub := range entrypoints {
-		group := scripts[sub]
-		sort.Strings(group)
-		tree.StartupScripts = append(tree.StartupScripts, group...)
-	}
+	// entrypoint.sh sources the scripts in glob order, so they are listed
+	// sorted like everything else.
+	sort.Strings(tree.StartupScripts)
 	sort.Strings(tree.Skills)
 	sort.Strings(tree.WorkspaceFiles)
 	sort.Strings(tree.HomeFiles)
@@ -261,22 +254,16 @@ func parseAllowlistFile(path string) (domains []string, directives []string, err
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
-		matched := false
-		for _, prefix := range []string{"server=/", "address=/"} {
-			if !strings.HasPrefix(line, prefix) {
-				continue
-			}
-			matched = true
-			rest := strings.TrimPrefix(line, prefix)
-			if idx := strings.Index(rest, "/"); idx >= 0 {
-				rest = rest[:idx]
-			}
-			if rest != "" {
-				domains = append(domains, rest)
-			}
+		rest, ok := strings.CutPrefix(line, "server=/")
+		if !ok {
+			rest, ok = strings.CutPrefix(line, "address=/")
 		}
-		if !matched {
+		if !ok {
 			directives = append(directives, line)
+			continue
+		}
+		if domain, _, _ := strings.Cut(rest, "/"); domain != "" {
+			domains = append(domains, domain)
 		}
 	}
 	return domains, directives, scanner.Err()
@@ -295,9 +282,18 @@ func dedupeSorted(values []string) []string {
 }
 
 // allPorts folds provider OAuth callback ports into the container ports
-// declared under `ports:`.
+// declared under `ports:`. A declared port is only bound on the host when it
+// sets publish, so that is carried into the rendering rather than left to the
+// port number, which says nothing about it.
 func (c capabilities) allPorts() []string {
-	ports := intsToStrings(c.Spec.Ports)
+	ports := make([]string, 0, len(c.Spec.Ports))
+	for _, port := range c.Spec.Ports {
+		text := strconv.Itoa(port.Container)
+		if port.Publish {
+			text += " (published on the host)"
+		}
+		ports = append(ports, text)
+	}
 	for _, provider := range c.Spec.Providers {
 		ports = append(ports, provider.OAuthPorts...)
 	}
@@ -347,11 +343,20 @@ func describeCredentialSource(c config.SpecCredentialSource) string {
 
 func describeInitFile(n config.SpecInitFileSummary) string {
 	parts := []string{n.Path}
+	if n.Mode != "" {
+		parts = append(parts, "mode="+n.Mode)
+	}
 	if n.OnlyIfMissing {
 		parts = append(parts, "onlyIfMissing")
 	}
 	if writesIntoProject(n.Path) {
 		parts = append(parts, "writesProject")
+	}
+	// The content is written on every start, so a rewrite behind an unchanged
+	// path is a change to what the extension does. The digest reports it
+	// without pulling an arbitrarily long file into the summary.
+	if n.ContentDigest != "" {
+		parts = append(parts, "content="+n.ContentDigest)
 	}
 	return strings.Join(parts, " ")
 }

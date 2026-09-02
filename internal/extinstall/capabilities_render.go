@@ -29,10 +29,10 @@ func (c capabilities) render(w io.Writer, style Style, source string) {
 		install = model.InstallScriptFilename + " (needsRoot: true)"
 	case c.InstallScript:
 		install = model.InstallScriptFilename
-	case c.Spec.InstallCommands > 0:
-		install = fmt.Sprintf("commands.install (%d)", c.Spec.InstallCommands)
+	case len(c.Spec.InstallCommands) > 0:
+		install = fmt.Sprintf("commands.install (%d)", len(c.Spec.InstallCommands))
 		if c.Spec.InstallCommandsAsRoot > 0 {
-			install = fmt.Sprintf("commands.install (%d, %d as root)", c.Spec.InstallCommands, c.Spec.InstallCommandsAsRoot)
+			install = fmt.Sprintf("commands.install (%d, %d as root)", len(c.Spec.InstallCommands), c.Spec.InstallCommandsAsRoot)
 		}
 		if c.Spec.NeedsRoot {
 			install += " (needsRoot: true)"
@@ -47,6 +47,11 @@ func (c capabilities) render(w io.Writer, style Style, source string) {
 	}
 	row("update probe", updateProbe)
 	row("entrypoint override", c.Spec.EntrypointOverride)
+	// Session args are appended to the agent's own argv, so they are reported
+	// next to the entrypoint rather than folded into "skips approval": what
+	// they grant depends on the flags they carry.
+	row("continue args", c.Spec.ContinueArgs)
+	row("resume args", c.Spec.ResumeArgs)
 	skipsApproval := ""
 	if c.yoloActive() {
 		skipsApproval = fmt.Sprintf("%s (agent executes actions on its own, without asking you to approve each one)", c.Spec.YoloFlag)
@@ -88,6 +93,11 @@ func (c capabilities) render(w io.Writer, style Style, source string) {
 	for _, provider := range c.Spec.Providers {
 		row("provider", describeProvider(provider))
 	}
+	postStart := ""
+	if c.Spec.PostStartOpenIDE != "" {
+		postStart = c.Spec.PostStartOpenIDE + " (launched on the host once the container is running; the session runs detached)"
+	}
+	row("post-start", postStart)
 	row("passthrough paths", strings.Join(c.Spec.HostExposure.PassthroughPaths, ", "))
 	row("host config dir", c.Spec.HostExposure.HostConfigDir)
 	row("host credentials file", c.Spec.HostExposure.HostCredentialsFile)
@@ -98,6 +108,9 @@ func (c capabilities) render(w io.Writer, style Style, source string) {
 	row("skills", strings.Join(c.Skills, ", "))
 	for _, file := range c.Spec.InitFiles {
 		note := file.Path
+		if file.Mode != "" {
+			note += " mode " + file.Mode
+		}
 		switch {
 		case writesIntoProject(file.Path) && !file.OnlyIfMissing:
 			note += " (overwrites in the project on every start)"

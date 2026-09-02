@@ -140,6 +140,12 @@ func (s *staging) commit(env Env, name string, stamp func(installedPath string) 
 			if renameErr := os.Rename(final, replaced); renameErr != nil {
 				return renameErr
 			}
+			// A rename carries the original directory's mtime over, and that is
+			// all sweepStale looks at. Without this the recovery copy of an
+			// extension installed more than staleAge ago is born stale and the
+			// next add or update deletes it before the window has run.
+			now := env.now()
+			_ = os.Chtimes(replaced, now, now)
 			hadExisting = true
 		}
 		if renameErr := os.Rename(staged, final); renameErr != nil {

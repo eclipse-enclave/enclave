@@ -7,6 +7,8 @@
 
 package extinstall
 
+import "slices"
+
 // Per-extension outcomes. These strings are an integration contract: they
 // appear verbatim in `--json` output.
 const (
@@ -33,10 +35,5 @@ type ActionResult struct {
 // HasFailure reports whether any extension failed, so a caller can pick a
 // non-zero exit code while still keeping the successes.
 func HasFailure(results []ActionResult) bool {
-	for _, result := range results {
-		if result.Action == ActionFailed {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(results, func(r ActionResult) bool { return r.Action == ActionFailed })
 }

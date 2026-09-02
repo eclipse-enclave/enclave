@@ -30,6 +30,9 @@ func TestHostPaths(t *testing.T) {
 	if got, want := HostConfigDir(home), filepath.Join(configRoot, "tools"); got != want {
 		t.Fatalf("HostConfigDir() = %q, want %q", got, want)
 	}
+	if got, want := HostProjectTagsPath(home), filepath.Join(configRoot, "project-tags.json"); got != want {
+		t.Fatalf("HostProjectTagsPath() = %q, want %q", got, want)
+	}
 	if got, want := HostToolConfigDir(home, tool), filepath.Join(configRoot, "tools", tool); got != want {
 		t.Fatalf("HostToolConfigDir() = %q, want %q", got, want)
 	}

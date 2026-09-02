@@ -3,8 +3,8 @@
 ## Config Files
 
 Global defaults live in `~/.config/enclave/config.json`. Project overrides live
-in `~/.config/enclave/projects/<hash>/config.json`, keyed by project hash and
-kept outside the worktree. CLI flags always take the highest precedence.
+in `~/.config/enclave/projects/<hash>/config.json`, keyed by the effective
+project namespace and kept outside the worktree. CLI flags always take the highest precedence.
 
 Project overrides live outside the worktree so a project cannot alter its own
 isolation policy. Extension files are discovered from built-in `extensions/`
@@ -24,6 +24,48 @@ substitute it for `~/.config/enclave/` in every path below.
 5. Built-in defaults
 
 Security guardrail: project config cannot elevate guarded options such as `allow_all_network=true` or `allow_domains`. Those values are ignored with a warning; use global config or CLI flags for explicit host opt-in.
+
+## Project identity and tags
+
+An untagged project's namespace is the 12-character hash of its canonical
+directory path. Git metadata never participates in namespace selection.
+
+A host-owned registry at `~/.config/enclave/project-tags.json` can assign exact
+canonical directories to a named tag. Directories with the same tag use one
+effective namespace and therefore the same project-scoped config and state.
+Use the CLI rather than editing the registry:
+
+```bash
+cd ~/src/project-main
+enclave project tag set project
+
+cd ~/src/project-feature
+enclave project tag set project
+enclave project show
+enclave project tag list
+```
+
+The first assignment creates the tag and preserves the creating directory's
+namespace; assigning an existing tag is confirmed as a trust decision after
+listing the members whose project scope will be shared. Adding a member does
+not move data from that member's fallback namespace. Enclave reports existing
+data before it becomes dormant. `enclave project tag unset` restores the
+current path-derived namespace without deleting shared or dormant data. The
+member whose path-derived namespace backs the tag cannot be unset while other
+members remain because it would still resolve to the shared namespace. Unset
+the other members first, then remove that member.
+Tag changes affect future invocations only; already-running sessions retain the
+namespace, mounts, and labels they started with and must be restarted to use the
+new namespace.
+
+Tag membership is exact and path-based. It does not apply to descendants, and
+renaming a directory requires tagging its new path. Deleting and recreating the
+same path preserves membership. Enclave does not inspect Git to discover or
+group worktrees.
+
+The registry is not mounted into containers. Enclave rejects malformed,
+symlinked, oversized, group-writable, or world-writable registry files rather
+than falling back to a different namespace.
 
 ## Config Keys
 

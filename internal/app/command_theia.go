@@ -20,7 +20,7 @@ import (
 // a running enclave container. The single positional CLI argument may be a
 // container name or a session name; if omitted, the command auto-selects when
 // exactly one managed container is running.
-func runTheia(variant theia.Variant, projectDir string, opts model.Options) int {
+func runTheia(variant theia.Variant, project model.Project, opts model.Options) int {
 	if !variant.Valid() {
 		logx.Errorf("unsupported theia variant: %q", variant)
 		return 1
@@ -55,7 +55,7 @@ func runTheia(variant theia.Variant, projectDir string, opts model.Options) int 
 		return 1
 	}
 
-	prefs, err := theia.LoadPreferences(home, projectDir, theia.ContainerYoloEnabled(ctx, be, containerName))
+	prefs, err := theia.LoadPreferencesForProject(home, project.Hash, theia.ContainerYoloEnabled(ctx, be, containerName))
 	if err != nil {
 		logx.Errorf("%v", err)
 		return 1

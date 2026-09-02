@@ -180,6 +180,31 @@ To use declared env credentials instead, place them in `~/.local/state/enclave/s
 
 For the full command and flag reference, see [docs/cli-reference.md](docs/cli-reference.md).
 
+## Sharing a project namespace
+
+Enclave normally isolates each canonical directory under its own project
+namespace. Assign the same host-owned tag to related checkouts when they should
+share project config, secrets, project-scoped auth, persisted environment,
+generated tool config, skills, history, memory, caches, network state, and
+cleanup scope:
+
+```bash
+cd ~/src/my-project-main
+enclave project tag set my-project
+
+cd ~/src/my-project-feature
+enclave project tag set my-project
+```
+
+Each `tag set` states whether it creates the tag or assigns an existing one —
+sharing a tag shares the complete project scope — and asks for confirmation.
+Tags apply to exact directories only. Enclave does not infer them from Git or
+automatically include nested or future worktrees. Inspect the current mapping
+with `enclave project show`, list all tags with `enclave project tag list`, and
+remove a directory from its tag with `enclave project tag unset`. Existing
+sessions are not migrated when a directory joins or leaves a tag; restart them
+to use the new namespace.
+
 ## Custom Commands
 
 Drop an executable file into `~/.config/enclave/commands/host/<name>` and it becomes a

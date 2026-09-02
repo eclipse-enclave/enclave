@@ -15,6 +15,126 @@ import (
 	"testing"
 )
 
+func TestResolveProjectFromDir_RejectsBrokenSymlink(t *testing.T) {
+	tmp := t.TempDir()
+	projectLink := filepath.Join(tmp, "project")
+	if err := os.Symlink(filepath.Join(tmp, "missing"), projectLink); err != nil {
+		t.Fatalf("create project symlink: %v", err)
+	}
+
+	if _, err := ResolveProjectFromDir(projectLink); err == nil {
+		t.Fatal("expected broken project symlink to fail")
+	}
+}
+
+func TestResolveProjectFromDir_RejectsNonDirectory(t *testing.T) {
+	projectFile := filepath.Join(t.TempDir(), "project")
+	if err := os.WriteFile(projectFile, []byte("not a directory\n"), 0o644); err != nil {
+		t.Fatalf("write project file: %v", err)
+	}
+
+	if _, err := ResolveProjectFromDir(projectFile); err == nil {
+		t.Fatal("expected non-directory project path to fail")
+	}
+}
+
+func TestResolveProjectFromDir_CanonicalizesSymlink(t *testing.T) {
+	tmp := t.TempDir()
+	projectDir := filepath.Join(tmp, "project")
+	projectLink := filepath.Join(tmp, "project-link")
+	if err := os.Mkdir(projectDir, 0o755); err != nil {
+		t.Fatalf("create project dir: %v", err)
+	}
+	if err := os.Symlink(projectDir, projectLink); err != nil {
+		t.Fatalf("create project symlink: %v", err)
+	}
+
+	project, err := ResolveProjectFromDir(projectLink)
+	if err != nil {
+		t.Fatalf("resolve symlinked project: %v", err)
+	}
+	canonicalDir := canonicalPathForTest(t, projectDir)
+	if project.Dir != projectLink {
+		t.Fatalf("expected supplied project dir %q, got %q", projectLink, project.Dir)
+	}
+	if project.RealDir != canonicalDir {
+		t.Fatalf("expected canonical project dir %q, got %q", canonicalDir, project.RealDir)
+	}
+	if project.Hash != ProjectHashForPath(canonicalDir) {
+		t.Fatalf("expected hash derived from canonical path %q, got %q", canonicalDir, project.Hash)
+	}
+}
+
+func TestResolveProjectFromDir_GitUnavailableIsNeutral(t *testing.T) {
+	tmp := t.TempDir()
+	projectDir := filepath.Join(tmp, "project")
+	if err := os.MkdirAll(filepath.Join(projectDir, ".git"), 0o755); err != nil {
+		t.Fatalf("create project metadata: %v", err)
+	}
+	t.Setenv("PATH", filepath.Join(tmp, "missing-bin"))
+
+	project, err := ResolveProjectFromDir(projectDir)
+	if err != nil {
+		t.Fatalf("resolve project without git: %v", err)
+	}
+	expectedHash := ProjectHashForPath(canonicalPathForTest(t, projectDir))
+	if project.Hash != expectedHash {
+		t.Fatalf("expected path-derived hash %q, got %q", expectedHash, project.Hash)
+	}
+}
+
+func TestResolveProjectFromDir_NonGitPathUsesCanonicalHash(t *testing.T) {
+	projectDir := filepath.Join(t.TempDir(), "project")
+	if err := os.Mkdir(projectDir, 0o755); err != nil {
+		t.Fatalf("create project dir: %v", err)
+	}
+
+	project, err := ResolveProjectFromDir(projectDir)
+	if err != nil {
+		t.Fatalf("resolve non-git project: %v", err)
+	}
+	expectedHash := ProjectHashForPath(canonicalPathForTest(t, projectDir))
+	if project.Hash != expectedHash {
+		t.Fatalf("expected path-derived hash %q, got %q", expectedHash, project.Hash)
+	}
+}
+
+func TestResolveProjectFromDir_BareRepositoryUsesCanonicalHash(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git is not installed")
+	}
+
+	projectDir := filepath.Join(t.TempDir(), "project.git")
+	runGitInDir(t, filepath.Dir(projectDir), "init", "--bare", projectDir)
+
+	project, err := ResolveProjectFromDir(projectDir)
+	if err != nil {
+		t.Fatalf("resolve bare repository: %v", err)
+	}
+	expectedHash := ProjectHashForPath(canonicalPathForTest(t, projectDir))
+	if project.Hash != expectedHash {
+		t.Fatalf("expected path-derived hash %q, got %q", expectedHash, project.Hash)
+	}
+}
+
+func TestResolveProjectFromDir_BenignMainCheckoutHashIsStable(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git is not installed")
+	}
+
+	projectDir := filepath.Join(t.TempDir(), "project")
+	runGitInDir(t, filepath.Dir(projectDir), "init", projectDir)
+
+	project, err := ResolveProjectFromDir(projectDir)
+	if err != nil {
+		t.Fatalf("resolve main checkout: %v", err)
+	}
+	expectedHash := ProjectHashForPath(canonicalPathForTest(t, projectDir))
+	if project.Hash != expectedHash {
+		t.Fatalf("expected existing path-derived hash %q, got %q", expectedHash, project.Hash)
+	}
+}
+
 func TestResolveProjectFromDir_LinkedWorktreeUsesOwnHash(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git is not installed")
@@ -65,6 +185,43 @@ func TestResolveProjectFromDir_LinkedWorktreeUsesOwnHash(t *testing.T) {
 	}
 	if linkedProject.RealDir == mainProject.RealDir {
 		t.Fatalf("expected linked real dir %q to differ from main real dir %q", linkedProject.RealDir, mainProject.RealDir)
+	}
+}
+
+func TestResolveProjectFromDir_GitCommonDirSpoofing(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git is not installed")
+	}
+
+	tmp := t.TempDir()
+	victimDir := filepath.Join(tmp, "victim")
+	attackerDir := filepath.Join(tmp, "attacker")
+	runGitInDir(t, tmp, "init", victimDir)
+
+	attackerGitDir := filepath.Join(attackerDir, ".git")
+	if err := os.MkdirAll(attackerGitDir, 0o755); err != nil {
+		t.Fatalf("create attacker git dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(attackerGitDir, "HEAD"), []byte("ref: refs/heads/main\n"), 0o644); err != nil {
+		t.Fatalf("write attacker HEAD: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(attackerGitDir, "commondir"), []byte(filepath.Join(victimDir, ".git")+"\n"), 0o644); err != nil {
+		t.Fatalf("write attacker commondir: %v", err)
+	}
+
+	victimProject, err := ResolveProjectFromDir(victimDir)
+	if err != nil {
+		t.Fatalf("resolve victim project: %v", err)
+	}
+	attackerProject, err := ResolveProjectFromDir(attackerDir)
+	if err != nil {
+		t.Fatalf("resolve attacker project: %v", err)
+	}
+	if attackerProject.Hash == victimProject.Hash {
+		t.Fatalf("attacker project must not inherit victim hash through commondir (%q)", victimProject.Hash)
+	}
+	if attackerProject.Hash != ProjectHashForPath(attackerProject.RealDir) {
+		t.Fatalf("expected attacker hash derived from canonical path, got %q", attackerProject.Hash)
 	}
 }
 
@@ -160,6 +317,19 @@ func TestResolveProjectFromDir_GitDirSymlinkSpoofing(t *testing.T) {
 	if attackerProject.Hash == victimProject.Hash {
 		t.Fatalf("attacker project must not inherit victim hash through .git symlink (%q)", victimProject.Hash)
 	}
+}
+
+func canonicalPathForTest(t *testing.T, path string) string {
+	t.Helper()
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		t.Fatalf("resolve absolute path: %v", err)
+	}
+	canonicalPath, err := filepath.EvalSymlinks(absPath)
+	if err != nil {
+		t.Fatalf("canonicalize path: %v", err)
+	}
+	return canonicalPath
 }
 
 func runGitInDir(t *testing.T, dir string, args ...string) {

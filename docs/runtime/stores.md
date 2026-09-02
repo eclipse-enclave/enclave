@@ -15,10 +15,12 @@ how auth files are synchronized, and how CLI flags affect store behavior.
 | Shared auth | `~/.local/state/enclave/tools/<tool>/auth/<identity>/` | Per-tool, all projects | OAuth/session files shared across projects; `<identity>` is `default` or the `--auth-name` slug |
 | Feature auth | `~/.local/state/enclave/features/<feature>/auth/` | Per-feature, all tools/projects | Feature-specific auth (e.g. `github-cli`) |
 
-The `<hash>` segment is a 12-character hex string derived from the project
-directory path, making per-project stores unique per project. The config store
-`<key>` is `default` for the persistent store or a session/worktree-specific
-suffix for isolated/ephemeral sessions.
+The `<hash>` segment is the effective 12-character project namespace. It is
+derived from the canonical directory path for an untagged project. Exact
+members of one host-owned project tag use the namespace preserved from the
+tag's first member. The config store `<key>` is `default` for the persistent
+store or a session-specific suffix for concurrent, named, or ephemeral
+sessions.
 
 ## Config Store
 
@@ -27,17 +29,21 @@ The config store holds the tool's configuration directory (the path defined by
 at `$HOME/<ConfigDir>` inside the container.
 
 **Persistent mode** (default): The default foreground session uses
-the `config-store/default` directory. Additional concurrent sessions that would
-otherwise clobber the same writable config instead get a suffixed store keyed by
-session or worktree identity, while shared auth remains in the tool-global auth
-store. Tool state such as conversation history, settings, and cached tokens
-persists between runs.
+the `config-store/default` directory. Additional concurrent sessions discovered
+by the backend get a suffixed store keyed by the session, while a backend-neutral
+lifetime lease prevents an undiscoverable concurrent session from touching the
+same writable store. Detached Docker sessions transfer the lease to a host
+monitor until the container is removed. QEMU cannot enumerate active VMs, so a
+second persistent invocation that would use the same config-store key fails
+before store preparation; wait for a foreground session to exit, remove a
+detached session, or use `--ephemeral`. Tool state such as conversation history,
+settings, and cached tokens persists between runs.
 
 **Ephemeral mode** (`--ephemeral`): A fresh store directory is created with a
 unique suffix key for each session and removed after the container exits. The
 `default` store, if one exists, is left untouched.
 
-Source: [`internal/runtime/volume_manager.go`](../../internal/runtime/volume_manager.go) `BuildPrep` (intent), [`internal/backend/docker/prepare.go`](../../internal/backend/docker/prepare.go) `prepareConfigStore` (mechanics)
+Source: [`internal/runtime/volume_manager.go`](../../internal/runtime/volume_manager.go) `BuildPrep` (intent), [`internal/runtime/runtime.go`](../../internal/runtime/runtime.go) `acquireConfigStoreLease` (lifetime coordination), [`internal/backend/docker/docker.go`](../../internal/backend/docker/docker.go) `HoldConfigStoreLease` (detached handoff), and each backend's `PrepareStores` implementation (mechanics)
 
 ## Managed Skills
 

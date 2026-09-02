@@ -89,7 +89,6 @@ enclave config --json            # the same data, machine-readable
 | `tool` | `--tool <name>` | Which agent runs. Defaults to `claude`; `enclave tools` lists what is installed. |
 | `yolo` | `--no-yolo` | Full autonomy, on by default. Turn it off to make the agent ask for confirmation again. |
 | `features` | `--features <list>` | Extra tooling baked into the image (see [Features](#features)). |
-| `session_monitor` | `--session-monitor` | Run the agent under a managed tmux session so `enclave status` can snapshot what it is doing. |
 | `ports` | `-p 3000` | Publish a container port to the host, so the agent's dev server is reachable from your browser. |
 | `bridge_ports` | `--bridge-port 9800` | The other direction: make a host service reachable at `localhost:9800` inside the container. |
 
@@ -125,6 +124,66 @@ See [Bridging host ports](https://github.com/eclipse-enclave/enclave/blob/main/d
 | `secrets_scope` | `--secrets-scope global` | Which layers of the secrets files are read. |
 
 The full key list, including build and persistence options, is in
+[docs/configuration.md](https://github.com/eclipse-enclave/enclave/blob/main/docs/configuration.md).
+
+## Features
+
+Features are optional tool stacks compiled into the image. `devtools`,
+`github-cli`, `node-dev`, and `python-dev` are on by default; `playwright`,
+`debug-tools`, `gitlab-cli`, and `shell-extras` are opt-in.
+
+Use `+` and `-` to adjust the inherited set instead of replacing it:
+
+```json
+{
+  "features": ["+playwright", "-python-dev"]
+}
+```
+
+A list without prefixes replaces the set entirely, and `[]` means none. Check the
+result before you build with `enclave features`, which marks every feature `✓`
+or `✗` and names the config file that switched it off:
+
+```bash
+enclave features
+```
+
+The same syntax works on the command line: `--features +playwright`, or the
+keywords `--features default|all|none`.
+
+## Reuse the agent config you already have
+
+By default the container starts from Enclave's own agent config, not your host
+one. Two ways to change that:
+
+**Pass reviewed paths through from the host.** `host_config: "passthrough"`
+copies a per-tool allow-list of files out of your host config directory. For
+Claude that is `agents/`, `commands/`, `settings.json`, and `skills/` under
+`~/.claude`. Auth files, OAuth JSON, and session/history state are blocked even
+if you add them to the list. Narrow or widen the list per tool, under the
+[per-tool override](#per-tool-overrides) for that agent:
+
+```json
+{
+  "host_config": "passthrough",
+  "tool_overrides": {
+    "claude": {
+      "host_config_paths": ["default", "-skills/"]
+    }
+  }
+}
+```
+
+**Or keep a separate, container-only config.** Files under
+`~/.config/enclave/tools/<tool>/` mirror the agent's native config layout and are
+overlaid at session start, so `~/.config/enclave/tools/claude/settings.json`
+becomes the container's `~/.claude/settings.json`. Per project, use
+`~/.config/enclave/projects/<hash>/<tool>/config/`. Shared skills go in
+`~/.config/enclave/skills/<skill>/` and reach every skill-capable agent.
+
+Both mechanisms compose, and JSON/TOML *patches* can merge into a file instead of
+replacing it. The precedence order, the patch merge semantics, and the full
+passthrough safety rules are documented in
 [docs/configuration.md](https://github.com/eclipse-enclave/enclave/blob/main/docs/configuration.md).
 
 ## What project config cannot do
@@ -164,65 +223,6 @@ project and global values:
 
 Overrides take the same keys as the surrounding file, except `tool` itself and a
 nested `tool_overrides`.
-
-## Features
-
-Features are optional tool stacks compiled into the image. `devtools`,
-`github-cli`, `node-dev`, and `python-dev` are on by default; `playwright`,
-`debug-tools`, `gitlab-cli`, and `shell-extras` are opt-in.
-
-Use `+` and `-` to adjust the inherited set instead of replacing it:
-
-```json
-{
-  "features": ["+playwright", "-python-dev"]
-}
-```
-
-A list without prefixes replaces the set entirely, and `[]` means none. Check the
-result before you build with `enclave features`, which marks every feature `✓`
-or `✗` and names the config file that switched it off:
-
-```bash
-enclave features
-```
-
-The same syntax works on the command line: `--features +playwright`, or the
-keywords `--features default|all|none`.
-
-## Reuse the agent config you already have
-
-By default the container starts from Enclave's own agent config, not your host
-one. Two ways to change that:
-
-**Pass reviewed paths through from the host.** `host_config: "passthrough"`
-copies a per-tool allow-list of files out of your host config directory. For
-Claude that is `agents/`, `commands/`, `settings.json`, and `skills/` under
-`~/.claude`. Auth files, OAuth JSON, and session/history state are blocked even
-if you add them to the list. Narrow or widen the list per tool:
-
-```json
-{
-  "host_config": "passthrough",
-  "tool_overrides": {
-    "claude": {
-      "host_config_paths": ["default", "-skills/"]
-    }
-  }
-}
-```
-
-**Or keep a separate, container-only config.** Files under
-`~/.config/enclave/tools/<tool>/` mirror the agent's native config layout and are
-overlaid at session start, so `~/.config/enclave/tools/claude/settings.json`
-becomes the container's `~/.claude/settings.json`. Per project, use
-`~/.config/enclave/projects/<hash>/<tool>/config/`. Shared skills go in
-`~/.config/enclave/skills/<skill>/` and reach every skill-capable agent.
-
-Both mechanisms compose, and JSON/TOML *patches* can merge into a file instead of
-replacing it. The precedence order, the patch merge semantics, and the full
-passthrough safety rules are documented in
-[docs/configuration.md](https://github.com/eclipse-enclave/enclave/blob/main/docs/configuration.md).
 
 ## Going further
 

@@ -172,6 +172,8 @@ Mutation commands (`add-domain`, `remove-domain`, `set-mode`) apply the new poli
 | `--background` | Detached background session |
 | `-p <port>` | Publish a container port to the host (container → host, e.g. `-p 3002`). A host port of `0` (e.g. `-p 0:3000`) lets the daemon pick a free host port (Docker only); read it back with `enclave ps --json`. |
 | `--bridge-port <port>` | Forward a host port into the container (host → container, repeatable, comma-separated) |
+| `--theia-api-port <port>` | Theia only: publish a port on host loopback and enable Theia's separate-port external API on it. Ignored (with a warning) for non-Theia tools, which have nothing serving the port. See [Theia](../extensions/tools/theia/README.md). |
+| `--theia-api-token <token>` | Theia only: token for the external API; only takes effect with `--theia-api-port`. If omitted, no token preference is set. The token is passed to the IDE process as an argument, so it is visible via `ps` to other users on the host (it is redacted from the launch log); intended for the loopback dev flow. |
 | `--add-dir <path>` | Mount an additional host directory |
 | `--add-readonly-dir <path>` | Mount an additional host directory read-only |
 | `--project-mount <writable\|readonly>` | Mount the project/worktree read-write (default) or read-only |

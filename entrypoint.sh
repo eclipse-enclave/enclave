@@ -418,6 +418,7 @@ normalize_devcontainer_paths() {
         COREPACK_ROOT
         VOLTA_HOME
         FNM_DIR
+        PNPM_CONFIG_STORE_DIR
         PNPM_STORE_DIR
         YARN_CACHE_FOLDER
         XDG_CACHE_HOME

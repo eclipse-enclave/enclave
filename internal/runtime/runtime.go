@@ -1120,6 +1120,7 @@ func (r *Runtime) addCacheMounts(mounts *mountAccumulator) {
 	mounts.AddMount(bindMount(filepath.Join(cacheDir, "cargo"), r.containerHome+"/.cargo", false))
 	// pnpm store
 	mounts.AddMount(bindMount(filepath.Join(cacheDir, "pnpm"), r.containerHome+"/.local/share/pnpm", false))
+	mounts.AddEnv("PNPM_CONFIG_STORE_DIR", r.containerHome+"/.local/share/pnpm/store")
 	// uv (Python) cache
 	mounts.AddMount(bindMount(filepath.Join(cacheDir, "uv"), r.containerHome+"/.cache/uv", false))
 	// Yarn cache

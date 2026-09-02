@@ -80,6 +80,37 @@ func TestBaseMountsIncludesMixinEnvVariables(t *testing.T) {
 	}
 }
 
+func TestAddCacheMountsConfiguresPnpmStore(t *testing.T) {
+	r := &Runtime{
+		host:          model.Host{Home: t.TempDir()},
+		project:       model.Project{Hash: "project-hash"},
+		profile:       model.Profile{Name: "demo"},
+		containerHome: "/home/agent",
+	}
+
+	mounts := newMountAccumulator(nil, nil)
+	r.addCacheMounts(mounts)
+
+	want := "/home/agent/.local/share/pnpm/store"
+	if !envSliceContainsKV(mounts.Env(), "PNPM_CONFIG_STORE_DIR", want) {
+		t.Fatalf("expected PNPM_CONFIG_STORE_DIR=%s, got %v", want, mounts.Env())
+	}
+}
+
+func TestAddCacheMountsOmitsPnpmStoreWithoutCache(t *testing.T) {
+	r := &Runtime{
+		run:           model.RunOptions{NoCache: true},
+		containerHome: "/home/agent",
+	}
+
+	mounts := newMountAccumulator(nil, nil)
+	r.addCacheMounts(mounts)
+
+	if envSliceHasKey(mounts.Env(), "PNPM_CONFIG_STORE_DIR") {
+		t.Fatalf("did not expect PNPM_CONFIG_STORE_DIR with cache disabled, got %v", mounts.Env())
+	}
+}
+
 // TestSpecProxyManagedUnionsMixins covers proxyManaged aliases declared by a
 // mixin surviving into placeholder selection.
 func TestSpecProxyManagedUnionsMixins(t *testing.T) {

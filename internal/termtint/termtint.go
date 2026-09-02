@@ -44,15 +44,13 @@ var (
 
 // Begin tints the terminal background and returns a function that restores it.
 // Callers should defer the returned function; it is safe to call more than
-// once. Begin is a no-op when color is empty, is not an #rrggbb value, when the
-// environment suppresses color, or when stdout is not a terminal.
+// once. Begin is a no-op when color is empty or not an #rrggbb value, when the
+// environment suppresses color, or when stdout is not a terminal. Config
+// loading reports invalid values against the file that sets them; the format
+// check here guards the escape sequence against anything that slips past.
 func Begin(color string) func() {
 	color = strings.TrimSpace(color)
-	if color == "" {
-		return func() {}
-	}
 	if !colorPattern.MatchString(color) {
-		logx.Warnf("Ignoring invalid session_tint %q: expected an #rrggbb color", color)
 		return func() {}
 	}
 	if logx.ColorSuppressedByEnv() || !isTerminal() {

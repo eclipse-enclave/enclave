@@ -348,6 +348,23 @@ func applyBridgePort(opts *model.Options, value string) error {
 	return nil
 }
 
+// isValidTintColor reports whether value is an #rrggbb color. termtint keeps its
+// own check as a guard before emitting the escape sequence; the format is
+// checked in both places because config must not depend on the terminal
+// packages (see internal/gateway/gateway_proxy_build_inputs.txt).
+func isValidTintColor(value string) bool {
+	if len(value) != 7 || value[0] != '#' {
+		return false
+	}
+	for _, r := range value[1:] {
+		if (r >= '0' && r <= '9') || (r >= 'a' && r <= 'f') || (r >= 'A' && r <= 'F') {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
 func isValidEnvKey(value string) bool {
 	if value == "" {
 		return false

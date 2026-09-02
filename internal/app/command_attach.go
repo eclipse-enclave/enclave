@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"enclave/internal/backend"
+	"enclave/internal/config"
 	"enclave/internal/logx"
 	"enclave/internal/model"
 	"enclave/internal/termtint"
@@ -52,11 +53,33 @@ func runAttach(opts model.Options, projectDir string) int {
 		logx.Errorf("%v", err)
 		return 1
 	}
-	restoreTint := termtint.Begin(run.SessionTint)
+	restoreTint := termtint.Begin(attachSessionTint(session, run.SessionTint))
 	defer restoreTint()
 	if err := be.Attach(ctx, session.Ref, backend.AttachIO{DetachKeys: detachKeys}); err != nil {
 		logx.Errorf("attach: %v", err)
 		return 1
 	}
 	return 0
+}
+
+// attachSessionTint resolves session_tint for the session being attached rather
+// than for the ambient tool and cwd project, so attaching a codex session from
+// a shell whose default tool is claude paints the codex color. Warnings from
+// re-reading the config layers stay at debug level because the run path already
+// reports them. The fallback covers containers labeled by an older enclave that
+// recorded no tool or project dir.
+func attachSessionTint(session backend.Session, fallback string) string {
+	if session.Tool == "" || session.ProjectDir == "" {
+		return fallback
+	}
+	global, project, warnings, err := config.LoadDefaults(session.ProjectDir)
+	if err != nil {
+		logx.Debugf("resolve session_tint for %s: %v", session.Ref.Name, err)
+		return fallback
+	}
+	for _, warning := range warnings {
+		logx.Debugf("%s", warning)
+	}
+	opts, _, _ := config.ResolveOptionsForTool(model.Options{}, model.OptionSources{}, global, project, session.Tool)
+	return opts.SessionTint
 }

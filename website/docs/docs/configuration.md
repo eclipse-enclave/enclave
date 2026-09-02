@@ -7,8 +7,8 @@ title: Configuration
 
 Enclave works without any configuration: `enclave` starts the `claude` agent at
 full autonomy, in a container, behind a restricted network. You configure it
-when you want something else — a different agent, one more allowed domain, an
-extra directory mounted in.
+when you want something else, such as a different agent, one more allowed
+domain, or an extra directory mounted in.
 
 A setting can come from three places:
 
@@ -29,7 +29,7 @@ CLI flag:
 }
 ```
 
-:::note macOS
+:::note[macOS]
 The config root is `~/Library/Application Support/org.eclipse.enclave/config/`
 instead of `~/.config/enclave/`. Substitute it in every path on this page.
 :::
@@ -47,13 +47,11 @@ enclave config
 ```text
 Global Config: /home/you/.config/enclave/config.json (missing)
 Project Config: /home/you/.config/enclave/projects/1a2b3c4d5e6f/config.json (missing)
-
-Config sources (highest wins): cli > tool_override > project > global > default
 ```
 
-Create either file yourself — `mkdir -p` its directory, start with `{}` — and
-Enclave picks it up on the next run. JSON comments are not supported, so keep
-the file strict JSON.
+Create either file yourself, with `mkdir -p` on its directory and `{}` as the
+starting content, and Enclave picks it up on the next run. JSON comments are not
+supported, so keep the file strict JSON.
 
 Two things follow from the layout:
 
@@ -82,7 +80,7 @@ enclave config --view diff       # only values that something overrode
 enclave config --json            # the same data, machine-readable
 ```
 
-## The options you will actually use
+## Most commonly used options
 
 ### Agent and session
 
@@ -92,7 +90,7 @@ enclave config --json            # the same data, machine-readable
 | `yolo` | `--no-yolo` | Full autonomy, on by default. Turn it off to make the agent ask for confirmation again. |
 | `features` | `--features <list>` | Extra tooling baked into the image (see [Features](#features)). |
 | `session_monitor` | `--session-monitor` | Run the agent under a managed tmux session so `enclave status` can snapshot what it is doing. |
-| `ports` | `-p 3000` | Publish a container port to the host — reach the agent's dev server from your browser. |
+| `ports` | `-p 3000` | Publish a container port to the host, so the agent's dev server is reachable from your browser. |
 | `bridge_ports` | `--bridge-port 9800` | The other direction: make a host service reachable at `localhost:9800` inside the container. |
 
 :::note
@@ -137,7 +135,7 @@ global config or pass them on the command line instead.
 
 | Ignored in project config | Why |
 | --- | --- |
-| `tool` | Choosing the agent stays a user decision — pass `--tool` or set it globally. |
+| `tool` | Choosing the agent stays a user decision. Pass `--tool` or set it globally. |
 | `yolo` | A repository cannot decide how much autonomy its agent gets. |
 | `allow_all_network`, `allow_domains` | A repository cannot widen its own network allowlist. |
 | `pass_env` | A repository cannot ask for your host environment variables. |
@@ -182,8 +180,8 @@ Use `+` and `-` to adjust the inherited set instead of replacing it:
 ```
 
 A list without prefixes replaces the set entirely, and `[]` means none. Check the
-result before you build — `enclave features` marks every feature `✓` or `✗` and
-names the config file that switched it off:
+result before you build with `enclave features`, which marks every feature `✓`
+or `✗` and names the config file that switched it off:
 
 ```bash
 enclave features
@@ -198,7 +196,7 @@ By default the container starts from Enclave's own agent config, not your host
 one. Two ways to change that:
 
 **Pass reviewed paths through from the host.** `host_config: "passthrough"`
-copies a per-tool allow-list of files out of your host config directory — for
+copies a per-tool allow-list of files out of your host config directory. For
 Claude that is `agents/`, `commands/`, `settings.json`, and `skills/` under
 `~/.claude`. Auth files, OAuth JSON, and session/history state are blocked even
 if you add them to the list. Narrow or widen the list per tool:
@@ -216,7 +214,7 @@ if you add them to the list. Narrow or widen the list per tool:
 
 **Or keep a separate, container-only config.** Files under
 `~/.config/enclave/tools/<tool>/` mirror the agent's native config layout and are
-overlaid at session start — `~/.config/enclave/tools/claude/settings.json`
+overlaid at session start, so `~/.config/enclave/tools/claude/settings.json`
 becomes the container's `~/.claude/settings.json`. Per project, use
 `~/.config/enclave/projects/<hash>/<tool>/config/`. Shared skills go in
 `~/.config/enclave/skills/<skill>/` and reach every skill-capable agent.
@@ -228,7 +226,7 @@ passthrough safety rules are documented in
 
 ## Going further
 
-- [Configuration reference](https://github.com/eclipse-enclave/enclave/blob/main/docs/configuration.md) — every key, patches, skills, precedence details
-- [CLI reference](https://github.com/eclipse-enclave/enclave/blob/main/docs/cli-reference.md) — every command and flag
-- [Networking](https://github.com/eclipse-enclave/enclave/blob/main/docs/networking.md) — allowlists, the gateway, port forwarding
-- [Authentication and secrets](https://github.com/eclipse-enclave/enclave/blob/main/docs/auth.md) — logins, secrets layers, API keys
+- [Configuration reference](https://github.com/eclipse-enclave/enclave/blob/main/docs/configuration.md): every key, patches, skills, precedence details
+- [CLI reference](https://github.com/eclipse-enclave/enclave/blob/main/docs/cli-reference.md): every command and flag
+- [Networking](https://github.com/eclipse-enclave/enclave/blob/main/docs/networking.md): allowlists, the gateway, port forwarding
+- [Authentication and secrets](https://github.com/eclipse-enclave/enclave/blob/main/docs/auth.md): logins, secrets layers, API keys

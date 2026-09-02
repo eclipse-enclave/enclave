@@ -15,6 +15,9 @@ their changes colliding, give each one its own git worktree (see
 :::info
 The CLI is still evolving, and more commands and flags are on the way. This page
 covers the core commands available today; it will grow as the surface stabilizes.
+For everything else, including session inspection, cleanup, the network and
+auth subcommands, and build flags, see the
+[CLI reference](https://github.com/eclipse-enclave/enclave/blob/main/docs/cli-reference.md).
 :::
 
 ## Overview
@@ -125,5 +128,7 @@ detaching, so use the detach key when you want to leave the container running.
 ## Next steps
 
 New to Enclave? Start with [Getting Started](/getting-started) to install it and
-run your first session. To make any of these flags stick — per project or
-globally — see [Configuration](/configuration).
+run your first session. To make any of these flags stick, per project or
+globally, see [Configuration](/configuration). For the complete command and
+flag list, see the
+[CLI reference](https://github.com/eclipse-enclave/enclave/blob/main/docs/cli-reference.md).

@@ -26,7 +26,7 @@ covers the core commands available today; it will grow as the surface stabilizes
 | `enclave continue` | Resume your previous session. |
 | `enclave ps` | List the sessions that are currently running. |
 | `enclave --background` | Start a session detached from your terminal. |
-| `enclave attach <container>` | Attach to a running session (default detach key: `Ctrl-\`). |
+| `enclave attach <name>` | Attach to a running session by session or container name (default detach key: `Ctrl-\`). |
 
 ## Start a session
 
@@ -85,7 +85,8 @@ choose one to inspect or resume.
 enclave ps
 ```
 
-The `NAME` column in the output is what you pass to `enclave attach`.
+Both the `NAME` (container) and `SESSION` (from `--name`) columns can be passed
+to `enclave attach`.
 
 ## Run in the background and reattach
 
@@ -99,13 +100,20 @@ enclave ps                      # find the running session's container name
 enclave attach <container>      # reattach to its TTY
 ```
 
-Combine `--background` with `--name` when you want a stable, memorable container
-name to reattach to:
+With a single detached session in the project, plain `enclave attach` picks it.
+
+Combine `--background` with `--name` when you want a stable, memorable name to
+reattach to:
 
 ```bash
 enclave --background --name my-task
 enclave attach my-task
 ```
+
+Names are resolved within the current project first, so the same `--name` can be
+used in several projects. If a name matches sessions in more than one project,
+Enclave lists the candidate container names instead of guessing; `--tool` also
+narrows them down.
 
 ### Detach without stopping the session
 

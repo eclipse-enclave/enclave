@@ -10,9 +10,12 @@ package app
 import (
 	"context"
 	"errors"
+	"slices"
 	"testing"
 
 	"enclave/internal/backend"
+	"enclave/internal/config"
+	"enclave/internal/model"
 )
 
 func TestStopContainerFinalizesThenForceRemovesOnFinalizeError(t *testing.T) {
@@ -34,12 +37,95 @@ func TestStopContainerFinalizesThenForceRemovesOnFinalizeError(t *testing.T) {
 	}
 }
 
+func TestStopSessionsSelection(t *testing.T) {
+	projectDir := t.TempDir()
+	project, err := config.ResolveProjectFromDir(projectDir)
+	if err != nil {
+		t.Fatalf("ResolveProjectFromDir() error = %v", err)
+	}
+	mine := session("enclave-claude-"+project.Hash+"-my-task", "my-task", project.Hash, projectDir)
+	other := session("enclave-claude-"+project.Hash+"-other", "other", project.Hash, projectDir)
+	foreign := session("enclave-claude-bbbbbbbbbbbb-my-task", "my-task", "bbbbbbbbbbbb", "/repo/b")
+
+	tests := []struct {
+		name     string
+		opts     model.Options
+		sessions []backend.Session
+		code     int
+		stopped  []string
+	}{
+		{
+			name:     "--name stops the matching session",
+			opts:     stopOptionsWithName("my-task"),
+			sessions: []backend.Session{mine, other},
+			stopped:  []string{mine.Ref.Name},
+		},
+		{
+			name:     "--name does not leave the project",
+			opts:     stopOptionsWithName("my-task"),
+			sessions: []backend.Session{foreign},
+		},
+		{
+			name:     "blank --name stops nothing",
+			opts:     stopOptionsWithName("   "),
+			sessions: []backend.Session{mine, other},
+		},
+		{
+			name:     "unsanitizable --name stops nothing",
+			opts:     stopOptionsWithName("???"),
+			sessions: []backend.Session{mine, other},
+		},
+		{
+			// The single session would be auto-selected if the blank argument were
+			// read as "no argument".
+			name:     "blank positional argument is rejected",
+			opts:     stopOptionsWithArg("   "),
+			sessions: []backend.Session{mine},
+			code:     1,
+		},
+		{
+			name:     "without --name every background session is stopped",
+			opts:     model.Options{Sources: model.DefaultOptionSources()},
+			sessions: []backend.Session{mine, foreign},
+			stopped:  []string{mine.Ref.Name, foreign.Ref.Name},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			be := &stopTestBackend{sessions: tt.sessions}
+			if code := stopSessions(context.Background(), be, tt.opts, projectDir); code != tt.code {
+				t.Fatalf("stopSessions() = %d, want %d", code, tt.code)
+			}
+			if !slices.Equal(be.stopped, tt.stopped) {
+				t.Fatalf("stopped %v, want %v", be.stopped, tt.stopped)
+			}
+		})
+	}
+}
+
+func stopOptionsWithName(sessionName string) model.Options {
+	opts := model.Options{Sources: model.DefaultOptionSources()}
+	opts.SessionName = sessionName
+	opts.Sources.SessionName = model.SourceCLI
+	return opts
+}
+
+func stopOptionsWithArg(arg string) model.Options {
+	opts := model.Options{Sources: model.DefaultOptionSources()}
+	opts.CmdArgs = []string{arg}
+	return opts
+}
+
 type stopTestBackend struct {
 	stopErr            error
 	stopCalled         bool
 	stopOpts           backend.StopOptions
+	stopped            []string
 	forceRemoveCalled  bool
 	strictRemoveCalled bool
+	sessions           []backend.Session
+	listFilter         backend.SessionFilter
 }
 
 func (b *stopTestBackend) Name() string { return "test" }
@@ -61,8 +147,9 @@ func (b *stopTestBackend) Run(context.Context, backend.Request, backend.AttachIO
 func (b *stopTestBackend) Start(context.Context, backend.Request) (backend.SessionRef, error) {
 	return backend.SessionRef{}, nil
 }
-func (b *stopTestBackend) List(context.Context, backend.SessionFilter) ([]backend.Session, error) {
-	return nil, nil
+func (b *stopTestBackend) List(_ context.Context, filter backend.SessionFilter) ([]backend.Session, error) {
+	b.listFilter = filter
+	return b.sessions, nil
 }
 func (b *stopTestBackend) Inspect(context.Context, backend.SessionRef) (*backend.Session, error) {
 	return nil, nil
@@ -70,9 +157,10 @@ func (b *stopTestBackend) Inspect(context.Context, backend.SessionRef) (*backend
 func (b *stopTestBackend) Attach(context.Context, backend.SessionRef, backend.AttachIO) error {
 	return nil
 }
-func (b *stopTestBackend) Stop(_ context.Context, _ backend.SessionRef, opts backend.StopOptions) error {
+func (b *stopTestBackend) Stop(_ context.Context, ref backend.SessionRef, opts backend.StopOptions) error {
 	b.stopCalled = true
 	b.stopOpts = opts
+	b.stopped = append(b.stopped, ref.Name)
 	return b.stopErr
 }
 func (b *stopTestBackend) Remove(context.Context, backend.SessionRef) error {

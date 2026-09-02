@@ -197,7 +197,7 @@ func (r *Runtime) prepareExecution() (*ExecutionContext, error) {
 		sessionContainerName := r.containerName()
 		if r.containerExists(sessionContainerName) {
 			if r.containerIsRunning(sessionContainerName) {
-				return nil, fmt.Errorf("session %s already running; stop it first with: %s stop %s", sessionContainerName, model.AppName, sessionContainerName)
+				return nil, fmt.Errorf("session %s already running; stop it first with: %s stop %s", sessionContainerName, model.AppName, r.resolvedSessionName())
 			}
 			logx.Infof("Removing stopped container: %s", sessionContainerName)
 			r.removeStoppedSession(sessionContainerName)
@@ -814,6 +814,9 @@ func (r *Runtime) containerEnv(ctx *ExecutionContext, interactive bool) []string
 	return env
 }
 
+// sessionDisplayName returns the session name recorded in the session label:
+// the value the user supplied, so that consumers of the label keep seeing what
+// was typed. Lookups sanitize both sides instead of relying on the stored form.
 func (r *Runtime) sessionDisplayName(containerName string, background bool) string {
 	if background || r.run.SessionName != "" || containerName != r.baseContainerName() {
 		return r.friendlySessionName()
@@ -829,20 +832,6 @@ func (r *Runtime) containerName() string {
 	return r.baseContainerName() + "-" + r.resolvedSessionName()
 }
 
-// resolvedSessionName returns the session name to use, computing and caching it
-// on first call so that all callers within a single execution see the same value.
-func (r *Runtime) resolvedSessionName() string {
-	if r.sessionName != "" {
-		return r.sessionName
-	}
-	if r.run.SessionName != "" {
-		r.sessionName = sanitizeSessionName(r.run.SessionName)
-	} else {
-		r.sessionName = r.nextSessionName()
-	}
-	return r.sessionName
-}
-
 // friendlySessionName returns the user-facing session name: the original
 // user-supplied value when set, otherwise the auto-generated name.
 func (r *Runtime) friendlySessionName() string {
@@ -850,6 +839,20 @@ func (r *Runtime) friendlySessionName() string {
 		return r.run.SessionName
 	}
 	return r.resolvedSessionName()
+}
+
+// resolvedSessionName returns the session name to use, computing and caching it
+// on first call so that all callers within a single execution see the same value.
+func (r *Runtime) resolvedSessionName() string {
+	if r.sessionName != "" {
+		return r.sessionName
+	}
+	if r.run.SessionName != "" {
+		r.sessionName = model.SanitizeSessionName(r.run.SessionName)
+	} else {
+		r.sessionName = r.nextSessionName()
+	}
+	return r.sessionName
 }
 
 func hostPortForContainerPort(ports []string, target string) (string, bool) {

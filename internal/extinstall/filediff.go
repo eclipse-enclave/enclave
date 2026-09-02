@@ -67,10 +67,7 @@ func printChangedFiles(w io.Writer, changes []changedFile) {
 		return
 	}
 	_, _ = fmt.Fprintf(w, "%s%d file(s) changed:\n", bodyIndent, len(changes))
-	shown := changes
-	if len(shown) > maxChangedFilesShown {
-		shown = shown[:maxChangedFilesShown]
-	}
+	shown := changes[:min(len(changes), maxChangedFilesShown)]
 	for _, change := range shown {
 		_, _ = fmt.Fprintf(w, "%s  %-8s %s\n", bodyIndent, change.Status, change.Path)
 	}

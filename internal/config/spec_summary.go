@@ -8,18 +8,34 @@
 package config
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"maps"
 	"os"
-	"sort"
+	"slices"
 	"strings"
 
 	"enclave/internal/model"
 )
 
-// SpecInitFileSummary describes one commands.initFiles entry.
+// SpecInitFileSummary describes one commands.initFiles entry. kit-init.sh
+// writes the entry's content at the entry's mode on every container start, so
+// both belong here: ContentDigest stands in for the content itself, which is
+// arbitrarily long and is a file to inspect rather than a capability to read.
 type SpecInitFileSummary struct {
 	Path          string
+	Mode          string
 	OnlyIfMissing bool
+	ContentDigest string
+}
+
+// SpecPortSummary describes one ports[] entry. Publish is carried separately
+// from the port number because it, not the number, decides whether the port is
+// bound on the host.
+type SpecPortSummary struct {
+	Container int
+	Publish   bool
 }
 
 // SpecCredentialSource describes one credentials.sources entry: which env
@@ -64,6 +80,12 @@ type SpecHostExposure struct {
 // exists so callers outside this package (the extension installer) can report
 // what an extension will be able to do without duplicating the on-disk schema,
 // which specDocument owns.
+//
+// The command-bearing fields carry the command text rather than a count, so a
+// caller diffing two summaries notices a step that was rewritten in place.
+// InstallCommands additionally prefixes "(root) " to a step that runs as root,
+// which makes a step changing user visible even when the root count does not
+// move.
 type SpecSummary struct {
 	Kind                  string
 	Name                  string
@@ -71,18 +93,21 @@ type SpecSummary struct {
 	Description           string
 	NeedsRoot             bool
 	AptPackages           []string
-	InstallCommands       int
+	InstallCommands       []string
 	InstallCommandsAsRoot int
 	StartupCommands       []string
 	InitFiles             []SpecInitFileSummary
 	AllowedDomains        []string
 	DeniedDomains         []string
-	Ports                 []int
+	Ports                 []SpecPortSummary
 	CredentialEnv         []string
 	CredentialSources     []SpecCredentialSource
 	ProxyManaged          []string
 	EnvironmentVars       []string
 	EntrypointOverride    string
+	ContinueArgs          string
+	ResumeArgs            string
+	PostStartOpenIDE      string
 	Providers             []SpecProviderSummary
 	HostExposure          SpecHostExposure
 	YoloFlag              string
@@ -120,19 +145,23 @@ func summarizeSpecDocument(doc specDocument) SpecSummary {
 		DefaultIncluded: doc.DefaultIncluded,
 	}
 	if doc.Commands != nil {
-		summary.InstallCommands = len(doc.Commands.Install)
 		for _, cmd := range doc.Commands.Install {
+			text := specCommandText(cmd)
 			if IsRootInstallUser(cmd.User) {
 				summary.InstallCommandsAsRoot++
+				text = "(root) " + text
 			}
+			summary.InstallCommands = append(summary.InstallCommands, text)
 		}
 		for _, cmd := range doc.Commands.Startup {
-			summary.StartupCommands = append(summary.StartupCommands, describeSpecCommand(cmd))
+			summary.StartupCommands = append(summary.StartupCommands, specCommandText(cmd))
 		}
 		for _, file := range doc.Commands.InitFiles {
 			summary.InitFiles = append(summary.InitFiles, SpecInitFileSummary{
 				Path:          strings.TrimSpace(file.Path),
+				Mode:          strings.TrimSpace(file.Mode),
 				OnlyIfMissing: file.OnlyIfMissing,
+				ContentDigest: shortContentDigest(file.Content),
 			})
 		}
 	}
@@ -142,20 +171,17 @@ func summarizeSpecDocument(doc specDocument) SpecSummary {
 	}
 	if doc.Environment != nil {
 		summary.ProxyManaged = doc.Environment.ProxyManaged
-		for name := range doc.Environment.Variables {
-			summary.EnvironmentVars = append(summary.EnvironmentVars, name)
+		// Reported as NAME=value: the value is the capability. Setting
+		// NODE_TLS_REJECT_UNAUTHORIZED to 0 is not the same grant as setting it
+		// to 1, and a summary keyed on names alone cannot tell them apart.
+		for _, name := range slices.Sorted(maps.Keys(doc.Environment.Variables)) {
+			summary.EnvironmentVars = append(summary.EnvironmentVars, name+"="+doc.Environment.Variables[name])
 		}
-		sort.Strings(summary.EnvironmentVars)
 	}
 	if doc.Credentials != nil {
 		hostsByService := serviceHostsByID(doc)
-		ids := make([]string, 0, len(doc.Credentials.Sources))
-		for id := range doc.Credentials.Sources {
-			ids = append(ids, id)
-		}
-		sort.Strings(ids)
 		var aliases []string
-		for _, id := range ids {
+		for _, id := range slices.Sorted(maps.Keys(doc.Credentials.Sources)) {
 			source := doc.Credentials.Sources[id]
 			cs := SpecCredentialSource{ID: id, Env: append([]string(nil), source.Env...)}
 			if source.File != nil {
@@ -174,7 +200,7 @@ func summarizeSpecDocument(doc specDocument) SpecSummary {
 		summary.CredentialEnv = sortDedupeStrings(aliases)
 	}
 	for _, port := range doc.Ports {
-		summary.Ports = append(summary.Ports, port.Container)
+		summary.Ports = append(summary.Ports, SpecPortSummary{Container: port.Container, Publish: port.Publish})
 	}
 	for _, p := range doc.Providers {
 		ps := SpecProviderSummary{
@@ -191,10 +217,18 @@ func summarizeSpecDocument(doc specDocument) SpecSummary {
 		}
 		summary.Providers = append(summary.Providers, ps)
 	}
+	if doc.PostStart != nil {
+		summary.PostStartOpenIDE = strings.TrimSpace(doc.PostStart.OpenIDE)
+	}
 	if doc.Sandbox != nil {
 		if doc.Sandbox.Entrypoint != nil {
 			summary.EntrypointOverride = entrypointCommand(doc.Sandbox.Entrypoint)
 		}
+		// continueArgs/resumeArgs are appended to the agent's argv for
+		// `--continue`/`--resume`, so they grant whatever those flags grant —
+		// including approval bypass — without going through sandbox.yoloFlag.
+		summary.ContinueArgs = strings.Join(doc.Sandbox.ContinueArgs, " ")
+		summary.ResumeArgs = strings.Join(doc.Sandbox.ResumeArgs, " ")
 		summary.HostExposure.PassthroughPaths = doc.Sandbox.PassthroughPaths
 		summary.HostExposure.HostConfigDir = doc.Sandbox.HostConfigDir
 		summary.HostExposure.HostCredentialsFile = doc.Sandbox.HostCredentials
@@ -207,12 +241,23 @@ func summarizeSpecDocument(doc specDocument) SpecSummary {
 	return summary
 }
 
-// describeSpecCommand renders a startup command for display. specCommand.Command
-// is string or []string depending on the sbx stage, so both shapes are handled.
-func describeSpecCommand(cmd specCommand) string {
-	if description := strings.TrimSpace(cmd.Description); description != "" {
-		return description
+// shortContentDigest identifies a body of text by a truncated SHA-256, so a
+// summary can report that it changed without carrying it. An empty body has no
+// digest: there is nothing to identify.
+func shortContentDigest(content string) string {
+	if content == "" {
+		return ""
 	}
+	sum := sha256.Sum256([]byte(content))
+	return hex.EncodeToString(sum[:])[:12]
+}
+
+// specCommandText renders a command's argv as one string. specCommand.Command
+// is string or []string depending on the sbx stage, so both shapes are handled.
+// The author's description is deliberately not used in its place: an update
+// diff has to react to the shell that actually runs, and a description can stay
+// identical while the command underneath it is rewritten.
+func specCommandText(cmd specCommand) string {
 	switch value := cmd.Command.(type) {
 	case string:
 		return value

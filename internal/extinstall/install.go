@@ -79,7 +79,7 @@ func Add(ctx context.Context, env Env, req Request) ([]ActionResult, error) {
 	if len(match) == 0 {
 		if len(other) > 0 {
 			return nil, fmt.Errorf("%s contains %d %s extension(s) but no %s; use `enclave %s add`",
-				src.Display(), len(other), req.Kind.Other().Label(), req.Kind.Label(), req.Kind.Other().Verb())
+				src.Display(), len(other), req.Kind.Other().Label(), req.Kind.Label(), req.Kind.Other().DirName())
 		}
 		return nil, fmt.Errorf("%s contains no %s extension", src.Display(), req.Kind.Label())
 	}

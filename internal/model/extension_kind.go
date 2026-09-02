@@ -39,16 +39,14 @@ func ExtensionKindFor(specKind string) (ExtensionKind, bool) {
 	}
 }
 
-// DirName is the subdirectory of an extension root holding this kind.
+// DirName is the plural name of this kind: the subdirectory of an extension
+// root holding it, and the CLI parent command that manages it.
 func (k ExtensionKind) DirName() string {
 	if k == KindTool {
 		return "tools"
 	}
 	return "features"
 }
-
-// Verb is the CLI parent command for this kind.
-func (k ExtensionKind) Verb() string { return k.DirName() }
 
 // Label is the singular noun used in messages.
 func (k ExtensionKind) Label() string { return string(k) }

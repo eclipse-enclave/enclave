@@ -9,6 +9,7 @@ package extinstall
 
 import (
 	"fmt"
+	"slices"
 
 	"enclave/internal/model"
 )
@@ -33,11 +34,14 @@ func diffCapabilities(before capabilities, after capabilities) []string {
 		"adds "+model.InstallScriptFilename, "drops "+model.InstallScriptFilename)...)
 	changes = append(changes, diffFlag(before.UpdateProbe, after.UpdateProbe,
 		"adds "+model.CheckUpdateScriptFilename, "drops "+model.CheckUpdateScriptFilename)...)
-	changes = append(changes, diffCount("install command", before.Spec.InstallCommands, after.Spec.InstallCommands)...)
+	changes = append(changes, diffList("install command", before.Spec.InstallCommands, after.Spec.InstallCommands)...)
 	changes = append(changes, diffCount("root install command", before.Spec.InstallCommandsAsRoot, after.Spec.InstallCommandsAsRoot)...)
 	changes = append(changes, diffFlag(before.IgnoredGoDir, after.IgnoredGoDir,
 		"adds ignored go/ handlers (require recompilation)", "drops go/ handlers")...)
 	changes = append(changes, diffScalar("entrypoint override", before.Spec.EntrypointOverride, after.Spec.EntrypointOverride)...)
+	changes = append(changes, diffScalar("continue args", before.Spec.ContinueArgs, after.Spec.ContinueArgs)...)
+	changes = append(changes, diffScalar("resume args", before.Spec.ResumeArgs, after.Spec.ResumeArgs)...)
+	changes = append(changes, diffScalar("post-start IDE launch", before.Spec.PostStartOpenIDE, after.Spec.PostStartOpenIDE)...)
 	changes = append(changes, diffList("startup script", before.StartupScripts, after.StartupScripts)...)
 	changes = append(changes, diffList("startup command", before.Spec.StartupCommands, after.Spec.StartupCommands)...)
 	changes = append(changes, diffList("environment var", before.Spec.EnvironmentVars, after.Spec.EnvironmentVars)...)
@@ -115,33 +119,16 @@ func diffCount(label string, before int, after int) []string {
 }
 
 func diffList(label string, before []string, after []string) []string {
-	beforeSet := map[string]struct{}{}
-	for _, value := range before {
-		beforeSet[value] = struct{}{}
-	}
-	afterSet := map[string]struct{}{}
-	for _, value := range after {
-		afterSet[value] = struct{}{}
-	}
-
 	var changes []string
 	for _, value := range dedupeSorted(after) {
-		if _, ok := beforeSet[value]; !ok {
+		if !slices.Contains(before, value) {
 			changes = append(changes, fmt.Sprintf("adds %s %s", label, value))
 		}
 	}
 	for _, value := range dedupeSorted(before) {
-		if _, ok := afterSet[value]; !ok {
+		if !slices.Contains(after, value) {
 			changes = append(changes, fmt.Sprintf("drops %s %s", label, value))
 		}
 	}
 	return changes
-}
-
-func intsToStrings(values []int) []string {
-	result := make([]string, 0, len(values))
-	for _, value := range values {
-		result = append(result, fmt.Sprint(value))
-	}
-	return result
 }

@@ -38,6 +38,10 @@ sandbox:
   hostCredentialsFile: .credentials.json
   hostOauthJson: .foo.json
   yoloFlag: --dangerously-skip-permissions
+  continueArgs: [resume, --last]
+  resumeArgs: [resume]
+postStart:
+  openIDE: theia
 commands:
   install:
     - command: apt-get install -y foo
@@ -48,6 +52,7 @@ commands:
   initFiles:
     - path: ${WORKDIR}/.foo.yaml
       content: "{}"
+      mode: "0600"
 network:
   allowedDomains:
     - api.acme.com
@@ -100,20 +105,27 @@ func TestSummarizeSpecDir(t *testing.T) {
 	if !summary.NeedsRoot {
 		t.Error("NeedsRoot = false, want true")
 	}
-	if summary.InstallCommands != 1 {
-		t.Errorf("InstallCommands = %d, want 1", summary.InstallCommands)
+	if len(summary.InstallCommands) != 1 || summary.InstallCommands[0] != "(root) apt-get install -y foo" {
+		t.Errorf("InstallCommands = %v, want the root-marked command text", summary.InstallCommands)
 	}
-	if len(summary.StartupCommands) != 1 {
-		t.Errorf("StartupCommands = %v, want one entry", summary.StartupCommands)
+	// The spec's startup entry carries a description; the summary projects the
+	// command itself so a rewrite under an unchanged description still diffs.
+	if len(summary.StartupCommands) != 1 || summary.StartupCommands[0] != "foo --serve" {
+		t.Errorf("StartupCommands = %v, want the command text", summary.StartupCommands)
 	}
 	if len(summary.InitFiles) != 1 || summary.InitFiles[0].OnlyIfMissing {
 		t.Errorf("InitFiles = %+v", summary.InitFiles)
 	}
+	// Mode and a stand-in for the content both decide what lands on disk at
+	// every start, so both have to reach the summary.
+	if summary.InitFiles[0].Mode != "0600" || summary.InitFiles[0].ContentDigest == "" {
+		t.Errorf("InitFiles[0] = %+v, want the mode and a content digest", summary.InitFiles[0])
+	}
 	if len(summary.AllowedDomains) != 1 || summary.AllowedDomains[0] != "api.acme.com" {
 		t.Errorf("AllowedDomains = %v", summary.AllowedDomains)
 	}
-	if len(summary.Ports) != 1 || summary.Ports[0] != 8080 {
-		t.Errorf("Ports = %v", summary.Ports)
+	if len(summary.Ports) != 1 || summary.Ports[0] != (SpecPortSummary{Container: 8080, Publish: true}) {
+		t.Errorf("Ports = %v, want the container port with publish carried alongside it", summary.Ports)
 	}
 	if len(summary.CredentialEnv) != 1 || summary.CredentialEnv[0] != "ACME_TOKEN" {
 		t.Errorf("CredentialEnv = %v", summary.CredentialEnv)
@@ -127,8 +139,17 @@ func TestSummarizeSpecDir(t *testing.T) {
 	if summary.EntrypointOverride != "foo --serve" {
 		t.Errorf("EntrypointOverride = %q, want %q", summary.EntrypointOverride, "foo --serve")
 	}
-	if len(summary.EnvironmentVars) != 1 || summary.EnvironmentVars[0] != "NODE_TLS_REJECT_UNAUTHORIZED" {
-		t.Errorf("EnvironmentVars = %v", summary.EnvironmentVars)
+	if summary.ContinueArgs != "resume --last" || summary.ResumeArgs != "resume" {
+		t.Errorf("session args = %q/%q, want the argv appended to the agent for --continue/--resume",
+			summary.ContinueArgs, summary.ResumeArgs)
+	}
+	if summary.PostStartOpenIDE != "theia" {
+		t.Errorf("PostStartOpenIDE = %q, want theia", summary.PostStartOpenIDE)
+	}
+	// The value is reported alongside the name: NODE_TLS_REJECT_UNAUTHORIZED=0
+	// and =1 are different grants.
+	if len(summary.EnvironmentVars) != 1 || summary.EnvironmentVars[0] != "NODE_TLS_REJECT_UNAUTHORIZED=0" {
+		t.Errorf("EnvironmentVars = %v, want the value carried alongside the name", summary.EnvironmentVars)
 	}
 	if len(summary.CredentialSources) != 1 {
 		t.Fatalf("CredentialSources = %v, want one entry", summary.CredentialSources)

@@ -43,7 +43,7 @@ func listSubcommand(res *Result, kind model.ExtensionKind, optionNames ...string
 		Short: "List " + kind.Label() + " extensions",
 		Args:  cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
-			res.Action = kind.Verb()
+			res.Action = kind.DirName()
 			res.ExtRequest = &extinstall.Request{Kind: kind, Op: extinstall.OpList, JSON: asJSON}
 			return nil
 		},

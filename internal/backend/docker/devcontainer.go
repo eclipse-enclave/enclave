@@ -234,7 +234,7 @@ func parseVolumeSpec(spec string, projectDir string, home string) (backend.Mount
 
 // dockerMount converts a neutral backend.Mount into the Docker CLI mount type.
 func dockerMount(m backend.Mount) dockercmd.Mount {
-	return dockercmd.Mount{Type: dockercmd.MountType(m.Type), Source: m.Source, Target: m.ContainerPath, ReadOnly: m.ReadOnly}
+	return dockercmd.Mount{Type: dockercmd.MountType(m.Type), Source: m.Source, Target: m.ContainerPath, ReadOnly: m.ReadOnly, CreateSourceDir: m.CreateSourceDir}
 }
 
 func splitTmpfs(value string) (string, string) {

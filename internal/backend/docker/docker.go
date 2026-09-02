@@ -39,13 +39,26 @@ type Options struct {
 }
 
 type Backend struct {
-	opts    Options
-	storage *StoreManager
+	opts               Options
+	storage            *StoreManager
+	reconcileScript    string
+	reconcileScriptErr error
 }
 
 func New(opts Options) *Backend {
 	b := &Backend{opts: opts}
 	b.storage = &StoreManager{host: opts.Host}
+	scriptPath := strings.TrimSpace(opts.ReconcileScriptPath)
+	if scriptPath == "" {
+		b.reconcileScriptErr = fmt.Errorf("auth reconcile script path is empty")
+	} else {
+		script, err := os.ReadFile(scriptPath) // #nosec G304 -- path is resolved from the trusted application root.
+		if err != nil {
+			b.reconcileScriptErr = fmt.Errorf("read auth reconcile script %s: %w", scriptPath, err)
+		} else {
+			b.reconcileScript = string(script)
+		}
+	}
 	return b
 }
 

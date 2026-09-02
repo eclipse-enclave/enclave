@@ -229,9 +229,26 @@ func buildRunArgs(config *ContainerConfig, hostConfig *HostConfig, name string, 
 }
 
 // mountFlags renders Mounts as `--mount type=...,source=...,target=...` args.
+//
+// Bind mounts marked CreateSourceDir are rendered as `--volume src:dst[:ro]`
+// instead: an absolute host path in `--volume` is still a bind mount, but it is
+// the only Docker syntax that creates a missing source directory in the
+// daemon's filesystem view rather than rejecting the mount. Strict `--mount`
+// fails on Docker Desktop for macOS when the daemon VM's view of a freshly
+// recreated host directory lags behind the host ("bind source path does not
+// exist" under /host_mnt), so disposable cache directories must not depend on
+// daemon-side existence.
 func mountFlags(mounts []Mount) []string {
 	out := make([]string, 0, len(mounts)*2)
 	for _, m := range mounts {
+		if m.Type == MountTypeBind && m.CreateSourceDir {
+			spec := m.Source + ":" + m.Target
+			if m.ReadOnly {
+				spec += ":ro"
+			}
+			out = append(out, "--volume", spec)
+			continue
+		}
 		var spec strings.Builder
 		fmt.Fprintf(&spec, "type=%s", m.Type)
 		if m.Source != "" {

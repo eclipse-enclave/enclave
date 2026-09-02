@@ -85,6 +85,12 @@ type Mount struct {
 	Source        string
 	ContainerPath string
 	ReadOnly      bool
+	// CreateSourceDir marks a disposable directory bind mount (package caches):
+	// cache data whose loss must never prevent a session from starting. Backends
+	// create a missing source as an empty directory instead of failing. Required
+	// project, config, auth, and file mounts must not set it, so their missing
+	// sources stay hard errors.
+	CreateSourceDir bool
 }
 
 type StoreKind string

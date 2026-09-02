@@ -13,7 +13,10 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"enclave/internal/config"
 	"enclave/internal/model"
@@ -52,6 +55,65 @@ func TestEnsureExistingGatewayImageWith(t *testing.T) {
 			t.Fatalf("expected wrapped inspect error %v, got %v", wantErr, err)
 		}
 	})
+}
+
+func TestCoordinateGatewayImageBuildRechecksAfterWaiting(t *testing.T) {
+	home := t.TempDir()
+	var imageReady atomic.Bool
+	var builds atomic.Int32
+	var resolves atomic.Int32
+	firstBuildStarted := make(chan struct{})
+	releaseFirstBuild := make(chan struct{})
+	secondResolveStarted := make(chan struct{})
+
+	resolve := func() (bool, string, error) {
+		if resolves.Add(1) == 2 {
+			close(secondResolveStarted)
+		}
+		return !imageReady.Load(), "build-hash", nil
+	}
+	execute := func(string) error {
+		if builds.Add(1) == 1 {
+			close(firstBuildStarted)
+			<-releaseFirstBuild
+			imageReady.Store(true)
+		}
+		return nil
+	}
+
+	var wg sync.WaitGroup
+	errs := make(chan error, 2)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		errs <- coordinateGatewayImageBuild(home, "enclave-gateway-codex:latest", false, resolve, execute)
+	}()
+	<-firstBuildStarted
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		errs <- coordinateGatewayImageBuild(home, "enclave-gateway-codex:latest", false, resolve, execute)
+	}()
+
+	select {
+	case <-secondResolveStarted:
+		t.Fatal("second caller resolved its build plan while the first build held the lock")
+	case <-time.After(20 * time.Millisecond):
+	}
+	close(releaseFirstBuild)
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("coordinateGatewayImageBuild returned error: %v", err)
+		}
+	}
+	if got := builds.Load(); got != 1 {
+		t.Fatalf("build count = %d, want 1", got)
+	}
+	if got := resolves.Load(); got != 2 {
+		t.Fatalf("in-lock build-plan resolution count = %d, want 2", got)
+	}
 }
 
 func TestGatewayLabelsHashWorkspaceIDBeforeProjectDir(t *testing.T) {

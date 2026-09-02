@@ -10,9 +10,22 @@
 package util
 
 import (
+	"errors"
 	"os"
 	"syscall"
 )
+
+func tryLockFile(file *os.File) (bool, error) {
+	// #nosec G115 -- file descriptor from os.File.Fd() fits in int on supported Unix platforms.
+	err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
+	if err == nil {
+		return true, nil
+	}
+	if errors.Is(err, syscall.EWOULDBLOCK) || errors.Is(err, syscall.EAGAIN) {
+		return false, nil
+	}
+	return false, err
+}
 
 func lockFile(file *os.File) error {
 	// #nosec G115 -- file descriptor from os.File.Fd() fits in int on supported Unix platforms.

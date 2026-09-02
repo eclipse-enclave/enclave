@@ -18,6 +18,12 @@ import (
 // ExecuteBackground starts a detached container that runs the tool command as
 // PID 1; it can be reattached later via `docker attach`.
 func (r *Runtime) ExecuteBackground() (string, error) {
+	releaseStartLock, err := r.acquireSessionStartLock()
+	if err != nil {
+		return "", err
+	}
+	defer releaseStartLock()
+
 	ctx, err := r.prepareExecution()
 	if err != nil {
 		return "", err
@@ -37,6 +43,7 @@ func (r *Runtime) ExecuteBackground() (string, error) {
 		}
 		return "", err
 	}
+	releaseStartLock()
 
 	// Announce only after the container is confirmed started: auto-assigned
 	// host ports do not exist until then, and a failed bind (e.g. a host-port

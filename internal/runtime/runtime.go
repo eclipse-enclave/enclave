@@ -27,6 +27,7 @@ import (
 	"enclave/internal/mounts"
 	"enclave/internal/network"
 	"enclave/internal/policy"
+	"enclave/internal/termtint"
 	"enclave/internal/util"
 )
 
@@ -753,6 +754,8 @@ func (r *Runtime) runContainer(ctx *ExecutionContext) error {
 	if be == nil {
 		return fmt.Errorf("runtime backend is not configured")
 	}
+	restoreTint := termtint.Begin(r.run.SessionTint)
+	defer restoreTint()
 	_, err := be.Run(context.Background(), r.backendRequest(ctx, false, true), backend.AttachIO{TTY: true, OnStarted: func() { r.announcePublishedPorts(ctx.ContainerName) }})
 	return err
 }

@@ -48,6 +48,7 @@ Security guardrail: project config cannot elevate guarded options such as `allow
 | `no_history` | Disable shell history |
 | `no_memory` | Disable per-project agent memory |
 | `session_monitor` | Run agents under the managed tmux session (enables `status` snapshots) |
+| `session_tint` | Terminal background color marking a session-owned terminal, as `#rrggbb` (unset: no tint) |
 | `base_image` | Docker base image override |
 | `devcontainer` | Derive base image from devcontainer.json |
 | `slim` | Build without features (tools only) |
@@ -82,6 +83,29 @@ on the host. Project config may strengthen the inherited mode from `follow` to
 the inherited mode are ignored. For a regular repository whose `.git`
 directory sits inside the project, the project mount mode governs and this
 option has no effect.
+
+`session_tint` marks the terminal that owns a session, so a sandboxed session
+is visually distinct from an ordinary shell. When set to an `#rrggbb` value,
+`run` (including `shell`, `continue`, and `resume`), `exec`, and `attach` set
+the terminal background on start and reset it on exit. Inside tmux 3.3 or later
+only the session's pane is tinted; elsewhere the whole window is. Because only
+the background changes, pick a color that keeps your foreground text readable —
+enclave does not adjust it. Invalid values are reported when the config file is
+read and ignored.
+
+The tint is skipped when stdout is not a terminal and when `NO_COLOR` or
+`ENCLAVE_COLOR=never` is set; `ENCLAVE_COLOR=always` does not enable it, as the
+config key is the only switch. Because per-tool and per-project config layers
+apply, `tool_overrides.<tool>.session_tint` gives each tool its own color and a
+project config gives each project one; `attach` resolves the color for the tool
+and project of the session it attaches to, not for the current directory.
+Agents that paint their own background can cover the tint.
+
+The reset restores the terminal's configured default background, not whatever
+background was in effect before the session, so a color set at runtime (theme
+switchers, base16-style scripts) is dropped when the session ends. If enclave is
+killed with `SIGKILL` the reset never runs; clear a leftover tint with
+`printf '\e]111\a'`.
 
 **Example:**
 

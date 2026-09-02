@@ -40,6 +40,7 @@ type Defaults struct {
 	NoHistory        *bool               `json:"no_history"`
 	NoMemory         *bool               `json:"no_memory"`
 	SessionMonitor   *bool               `json:"session_monitor"`
+	SessionTint      string              `json:"session_tint"`
 	ImageInbox       *bool               `json:"image_inbox"`
 	BaseImage        string              `json:"base_image"`
 	Devcontainer     *bool               `json:"devcontainer"`
@@ -199,6 +200,7 @@ func readDefaults(path string) (Defaults, []string, error) {
 	warnings := validateTopLevelDefaults(path, doc, &defaults)
 	warnings = append(warnings, validateToolOverrides(path, doc, &defaults)...)
 	warnings = append(warnings, validatePassEnvNames(path, &defaults)...)
+	warnings = append(warnings, validateSessionTint(path, &defaults)...)
 	return defaults, warnings, nil
 }
 
@@ -301,6 +303,44 @@ func filterPassEnv(path string, toolName string, values []string, warnings []str
 		return nil, warnings
 	}
 	return kept, warnings
+}
+
+// validateSessionTint clears session_tint values (top level and per tool
+// override) that aren't #rrggbb colors, so the warning names the config file
+// that sets them and appears before a session takes over the screen.
+func validateSessionTint(path string, defaults *Defaults) []string {
+	if defaults == nil {
+		return nil
+	}
+
+	warnings := make([]string, 0)
+	if tint := strings.TrimSpace(defaults.SessionTint); tint != "" && !isValidTintColor(tint) {
+		warnings = append(warnings, fmt.Sprintf("Ignoring session_tint %q in %s: expected an #rrggbb color", tint, path))
+		defaults.SessionTint = ""
+	}
+
+	if len(defaults.ToolOverrides) == 0 {
+		return warnings
+	}
+
+	toolNames := make([]string, 0, len(defaults.ToolOverrides))
+	for name := range defaults.ToolOverrides {
+		toolNames = append(toolNames, name)
+	}
+	sort.Strings(toolNames)
+
+	for _, name := range toolNames {
+		override := defaults.ToolOverrides[name]
+		tint := strings.TrimSpace(override.SessionTint)
+		if tint == "" || isValidTintColor(tint) {
+			continue
+		}
+		warnings = append(warnings, fmt.Sprintf("Ignoring tool_overrides.%s.session_tint %q in %s: expected an #rrggbb color", name, tint, path))
+		override.SessionTint = ""
+		defaults.ToolOverrides[name] = override
+	}
+
+	return warnings
 }
 
 func validateTopLevelDefaults(path string, doc map[string]json.RawMessage, defaults *Defaults) []string {

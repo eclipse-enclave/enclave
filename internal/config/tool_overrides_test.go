@@ -595,6 +595,48 @@ func TestReadDefaults_GlobalPassEnvDropsInvalidEntries(t *testing.T) {
 	}
 }
 
+func TestReadDefaults_SessionTintDropsInvalidValues(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+	payload := `{
+  "session_tint": "red",
+  "tool_overrides": {
+    "claude": {
+      "session_tint": "#2a0f12"
+    },
+    "codex": {
+      "session_tint": "#2a0"
+    }
+  }
+}`
+	if err := os.WriteFile(path, []byte(payload), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	defaults, warnings, err := readDefaults(path)
+	if err != nil {
+		t.Fatalf("readDefaults returned error: %v", err)
+	}
+	if defaults.SessionTint != "" {
+		t.Fatalf("expected invalid session_tint to be dropped, got %q", defaults.SessionTint)
+	}
+	if got := defaults.ToolOverrides["claude"].SessionTint; got != "#2a0f12" {
+		t.Fatalf("expected valid claude session_tint to remain, got %q", got)
+	}
+	if got := defaults.ToolOverrides["codex"].SessionTint; got != "" {
+		t.Fatalf("expected invalid codex session_tint to be dropped, got %q", got)
+	}
+	if !containsSubstring(warnings, "session_tint \"red\" in "+path) {
+		t.Fatalf("expected warning naming the config file, warnings=%v", warnings)
+	}
+	if !containsSubstring(warnings, "tool_overrides.codex.session_tint \"#2a0\"") {
+		t.Fatalf("expected tool override warning for codex, warnings=%v", warnings)
+	}
+	if containsSubstring(warnings, "claude") {
+		t.Fatalf("did not expect a warning for the valid claude value: %v", warnings)
+	}
+}
+
 func TestProjectOverrideGuardrails_StripsSensitiveFields(t *testing.T) {
 	cases := []struct {
 		name         string

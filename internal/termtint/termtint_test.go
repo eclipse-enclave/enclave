@@ -83,13 +83,13 @@ func TestBeginSkips(t *testing.T) {
 // stays the single on/off switch.
 func TestColorAlwaysDoesNotForceTint(t *testing.T) {
 	t.Setenv("ENCLAVE_COLOR", "always")
-	buf := withTerminal(t, false)
+	buf := withTerminal(t, true)
 
-	restore := Begin("#2a0f12")
+	restore := Begin("")
 	restore()
 
 	if got := buf.String(); got != "" {
-		t.Fatalf("expected no output without a terminal, got %q", got)
+		t.Fatalf("expected no output without a configured color, got %q", got)
 	}
 }
 

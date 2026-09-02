@@ -125,5 +125,5 @@ detaching, so use the detach key when you want to leave the container running.
 ## Next steps
 
 New to Enclave? Start with [Getting Started](/getting-started) to install it and
-run your first session. Deeper guides for custom skills, extra mounts, and
-per-project network allowlists are on the way.
+run your first session. To make any of these flags stick — per project or
+globally — see [Configuration](/configuration).

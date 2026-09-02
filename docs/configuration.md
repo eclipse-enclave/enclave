@@ -23,7 +23,14 @@ substitute it for `~/.config/enclave/` in every path below.
 4. Global config (`~/.config/enclave/config.json`)
 5. Built-in defaults
 
-Security guardrail: project config cannot elevate guarded options such as `allow_all_network=true` or `allow_domains`. Those values are ignored with a warning; use global config or CLI flags for explicit host opt-in.
+Security guardrail: project config cannot elevate guarded options. Each is
+ignored with a warning naming the file; use global config or CLI flags for
+explicit host opt-in. Guarded at project scope: `tool`, `yolo`,
+`allow_all_network=true`, `allow_domains`, `pass_env`, `host_config`,
+`host_config_paths` (including under `tool_overrides.<tool>`), `base_image`,
+`bridge_ports`, `add_dirs`/`add_readonly_dirs` entries outside the project
+subtree, `project_mount="writable"`, and any `worktree_metadata` value that
+relaxes the inherited mode.
 
 ## Config Keys
 

@@ -59,6 +59,7 @@ type Defaults struct {
 	AllowDomains     []string            `json:"allow_domains"`
 	BridgePorts      []string            `json:"bridge_ports"`
 	PlaywrightMCP    *bool               `json:"playwright_mcp"`
+	VNCViewer        []string            `json:"vnc_viewer"`
 }
 
 func LoadDefaults(projectDir string) (global Defaults, project Defaults, warnings []string, err error) {

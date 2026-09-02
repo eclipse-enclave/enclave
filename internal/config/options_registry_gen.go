@@ -428,6 +428,16 @@ func OptionSpecs() []OptionSpec {
 				}
 			},
 		},
+		{
+			Name:  "vnc_viewer",
+			Group: OptionGroupGlobal,
+			ApplyDefaultsWithSource: func(opts *model.Options, defaults Defaults, source model.OptionSource, sources *model.OptionSources) {
+				if canOverride(sources.VNCViewer, source) && len(defaults.VNCViewer) > 0 {
+					opts.VNCViewer = copyStringSlice(defaults.VNCViewer)
+					sources.VNCViewer = source
+				}
+			},
+		},
 	}
 	attachCLIFlags(specs)
 	return specs

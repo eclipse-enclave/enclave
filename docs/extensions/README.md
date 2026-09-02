@@ -557,9 +557,9 @@ Opt-in features require an explicit list; additive-only entries do not change th
 
 The next time you run `./enclave --rebuild`, only the specified features will be installed.
 
-**Available features:** `devtools`, `github-cli`, `gitlab-cli`, `node-dev`, `playwright`, `python-dev`, `debug-tools`, `shell-extras`
+**Available features:** `devtools`, `github-cli`, `gitlab-cli`, `node-dev`, `playwright`, `python-dev`, `debug-tools`, `shell-extras`, `vnc`
 
-**Opt-in features (not installed unless explicitly listed):** `debug-tools`, `gitlab-cli`, `playwright`, `shell-extras`
+**Opt-in features (not installed unless explicitly listed):** `debug-tools`, `gitlab-cli`, `playwright`, `shell-extras`, `vnc`
 
 ### Installation Order
 
@@ -610,6 +610,7 @@ resolved port appears in the printed `openUrl` and in `enclave ps`.
 | `node-dev` | 70 | Node.js dev tools: typescript, eslint, prettier |
 | `python-dev` | 70 | Python dev tools: black, ruff, mypy, pytest |
 | `playwright` | 75 | Playwright browsers and MCP server for UI testing (opt-in) |
+| `vnc` | 75 | Contained GUI (Xvnc + Chromium) served over VNC, reachable by attaching any VNC client to the published RFB port (opt-in) |
 | `debug-tools` | 80 | Debug tools: gdb, strace, ltrace, tcpdump (opt-in) |
 | `shell-extras` | 90 | Shell enhancements: zsh, oh-my-zsh, direnv (opt-in) |
 

@@ -117,6 +117,10 @@ func Run(args []string) int {
 		return runTheia(theia.Variant(parsed.Action), projectDir, parsed.Options)
 	}
 
+	if parsed.Action == "vnc-viewer" {
+		return runVNCViewer(projectDir, parsed.Options)
+	}
+
 	paths, err := config.ResolvePaths()
 	if err != nil {
 		logx.Errorf("%v", err)

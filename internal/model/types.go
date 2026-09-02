@@ -115,6 +115,16 @@ type PSOptions struct {
 	PSJSON bool
 }
 
+// VNCViewerOptions carries settings for the host-side `vnc-viewer` command.
+// They configure a command run on the host, so they never reach a session's
+// RuntimeConfig.
+type VNCViewerOptions struct {
+	// VNCViewer is the argv of the VNC viewer to launch, with {host}, {port},
+	// {password} and {container} placeholders. Empty selects the platform
+	// default.
+	VNCViewer []string
+}
+
 // UpdateOptions carries arguments for the build-only `update` command.
 type UpdateOptions struct {
 	// UpdateTools is the list of tools whose images should be rebuilt with a
@@ -131,6 +141,7 @@ type Options struct {
 	ImgOptions
 	StatusOptions
 	PSOptions
+	VNCViewerOptions
 	Sources OptionSources
 }
 

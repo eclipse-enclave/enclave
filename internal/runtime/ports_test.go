@@ -226,8 +226,8 @@ func TestApplyFeaturePortsPublishesEnabledFeatureDeclarations(t *testing.T) {
 	r := &Runtime{
 		profile: model.Profile{Name: "claude"},
 		features: []model.Extension{
-			{Name: "diffity", Ports: []model.PortConfig{
-				{Container: 5391, HostAllocation: model.HostAllocationAuto, Publish: true, Label: "Diffity"},
+			{Name: "preview", Ports: []model.PortConfig{
+				{Container: 5391, HostAllocation: model.HostAllocationAuto, Publish: true, Label: "Preview"},
 			}},
 			{Name: "fixed", Ports: []model.PortConfig{
 				{Container: 8080, Publish: true, Label: "Fixed"},
@@ -254,8 +254,8 @@ func TestApplyFeaturePortsUserMappingWins(t *testing.T) {
 		run:     model.RunOptions{Ports: []string{"127.0.0.1:6000:5391"}},
 		profile: model.Profile{Name: "claude"},
 		features: []model.Extension{
-			{Name: "diffity", Ports: []model.PortConfig{
-				{Container: 5391, HostAllocation: model.HostAllocationAuto, Publish: true, Label: "Diffity"},
+			{Name: "preview", Ports: []model.PortConfig{
+				{Container: 5391, HostAllocation: model.HostAllocationAuto, Publish: true, Label: "Preview"},
 			}},
 		},
 	}
@@ -290,13 +290,13 @@ func TestDeclaredPortConfigsCombinesProfileAndFeatures(t *testing.T) {
 			Ports: []model.PortConfig{{Container: 3000, Publish: true, Label: "Theia IDE"}},
 		},
 		features: []model.Extension{
-			{Name: "diffity", Ports: []model.PortConfig{
-				{Container: 5391, HostAllocation: model.HostAllocationAuto, Publish: true, Label: "Diffity"},
+			{Name: "preview", Ports: []model.PortConfig{
+				{Container: 5391, HostAllocation: model.HostAllocationAuto, Publish: true, Label: "Preview"},
 			}},
 		},
 	}
 	got := r.declaredPortConfigs()
-	if len(got) != 2 || got[0].Label != "Theia IDE" || got[1].Label != "Diffity" {
+	if len(got) != 2 || got[0].Label != "Theia IDE" || got[1].Label != "Preview" {
 		t.Fatalf("declaredPortConfigs = %+v", got)
 	}
 }
@@ -305,11 +305,11 @@ func TestLogDeclaredPortAvailabilityAutoPortWithoutBackendFallsBack(t *testing.T
 	r := &Runtime{
 		profile: model.Profile{Name: "claude"},
 		features: []model.Extension{
-			{Name: "diffity", Ports: []model.PortConfig{{
+			{Name: "preview", Ports: []model.PortConfig{{
 				Container:      5391,
 				HostAllocation: model.HostAllocationAuto,
 				Publish:        true,
-				Label:          "Diffity",
+				Label:          "Preview",
 				OpenURL:        "http://localhost:{host_port}",
 			}}},
 		},

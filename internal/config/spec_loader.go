@@ -50,6 +50,12 @@ func LoadSpec(paths model.Paths, name string, kind string) (specDocument, error)
 	if doc.Name != name {
 		return specDocument{}, fmt.Errorf("%s name must be %q", specPath, name)
 	}
+	if kind == KindSandbox && name == projectFeatureStateDirName {
+		return specDocument{}, fmt.Errorf("%s name %q is reserved for project-scoped feature state", specPath, name)
+	}
+	if kind == KindSandbox && doc.State {
+		return specDocument{}, fmt.Errorf("%s state is supported for mixin extensions only", specPath)
+	}
 	if err := validateStartupCommands(doc, specPath); err != nil {
 		return specDocument{}, err
 	}

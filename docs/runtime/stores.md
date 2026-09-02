@@ -14,6 +14,7 @@ how auth files are synchronized, and how CLI flags affect store behavior.
 | Env | `~/.local/state/enclave/projects/<hash>/<tool>/env/` | Per-tool, per-project | Persisted declared secret and `--pass-env` values |
 | Shared auth | `~/.local/state/enclave/tools/<tool>/auth/<identity>/` | Per-tool, all projects | OAuth/session files shared across projects; `<identity>` is `default` or the `--auth-name` slug |
 | Feature auth | `~/.local/state/enclave/features/<feature>/auth/` | Per-feature, all tools/projects | Feature-specific auth (e.g. `github-cli`) |
+| Feature state | `~/.local/state/enclave/projects/<hash>/features/<feature>/state/` | Per-feature, per-project, all tools | Feature-owned project data shared across tools |
 
 The `<hash>` segment is a 12-character hex string derived from the project
 directory path, making per-project stores unique per project. The config store
@@ -219,6 +220,40 @@ destination.
 Source: [`internal/runtime/volume_manager.go`](../../internal/runtime/volume_manager.go) `BuildPrep`/`authSyncSpec` (intent), [`internal/backend/docker/authsync.go`](../../internal/backend/docker/authsync.go) `syncFeatureAuthStore` (mechanics),
 [`entrypoint.sh`](../../entrypoint.sh)
 
+## Feature State Store
+
+A mixin opts into project-scoped persistent state with `state: true` in its
+`spec.yaml`. Enclave creates the store only while that feature is enabled in a
+persistent session. Features without the opt-in get no directory.
+
+The host directory
+`~/.local/state/enclave/projects/<hash>/features/<feature>/state/` is mounted at
+`~/.enclave-feature-state/<feature>/`. The key contains the feature name and
+project hash, but not the selected tool or config-store suffix, so Claude,
+Codex, and other tools in the same project see the same files. Auth scope does
+not affect this store. `--ephemeral` suppresses it rather than creating a
+throwaway copy.
+
+While `entrypoint.sh` sources that feature's `feature-entrypoint.d/*.sh`, it
+exports `ENCLAVE_FEATURE_STATE_DIR` with the feature's mount path. The variable
+is unset before the next feature and before the agent starts. A feature can use
+it to connect its native state path to the persistent store:
+
+```sh
+if [ -n "${ENCLAVE_FEATURE_STATE_DIR:-}" ] && [ ! -e "$HOME/.state-probe" ] && [ ! -L "$HOME/.state-probe" ]; then
+    ln -s "$ENCLAVE_FEATURE_STATE_DIR" "$HOME/.state-probe"
+fi
+```
+
+The directory is intentionally writable by concurrent sessions. Features that
+use databases or lock files must support access from multiple processes and
+containers. This is also a cross-tool trust channel: one agent can consume data
+written by another agent through the enabled feature.
+
+The QEMU store layer understands the feature-state kind, but QEMU sessions
+currently build tool-only bundles and disable all mixins, so normal QEMU runs do
+not mount feature state.
+
 ## Lifecycle
 
 ```
@@ -229,6 +264,7 @@ Source: [`internal/runtime/volume_manager.go`](../../internal/runtime/volume_man
    ├─ Env store: create or reuse
    ├─ Shared auth store: create or reuse
    ├─ Feature auth stores: create or reuse
+   ├─ Opted-in feature state stores: create or reuse
    │  (created as the invoking user; no chown needed)
    └─ Reset auth files if --reset-auth
                          │
@@ -243,9 +279,10 @@ Source: [`internal/runtime/volume_manager.go`](../../internal/runtime/volume_man
    └─ Write env back to env store (host filesystem write)
                          │
 4. Bind-mount stores     │
-   ├─ Config store   → $HOME/<ConfigDir>
-   ├─ Auth store     → $HOME/.enclave-auth/
-   └─ Feature stores → $HOME/.enclave-feature-auth/<feature>/
+   ├─ Config store       → $HOME/<ConfigDir>
+   ├─ Auth store         → $HOME/.enclave-auth/
+   ├─ Feature auth       → $HOME/.enclave-feature-auth/<feature>/
+   └─ Feature state      → $HOME/.enclave-feature-state/<feature>/
                          │
 5. Start container ──────┼──────────────────────────────────┐
                          │                                  │
@@ -254,6 +291,8 @@ Source: [`internal/runtime/volume_manager.go`](../../internal/runtime/volume_man
                          │                 │  (config path → auth path)
                          │                 ├─ Symlink feature auth files
                          │                 │  (config path → feature auth path)
+                         │                 ├─ Export state dir to each opted-in
+                         │                 │  feature entrypoint
                          │                 └─ Apply settings template
                          │                                  │
                          │              7. Tool executes     │
@@ -279,6 +318,7 @@ Source: [`internal/runtime/volume_manager.go`](../../internal/runtime/volume_man
   is `default` or the `--auth-name` slug — see
   [Named auth identities](../auth.md#named-auth-identities)).
 - Feature auth stores are created for qualifying features.
+- Enabled features with `state: true` receive project-scoped feature state.
 - Auth files are symlinked via the entrypoint.
 - Foreground exit, exec exit, background stop, and GUI stop/remove finalize provider credentials to shared auth stores.
 - Logging into a tool in one project makes the session available to all projects.
@@ -287,6 +327,8 @@ Source: [`internal/runtime/volume_manager.go`](../../internal/runtime/volume_man
 
 - **No** shared auth store is created.
 - **No** feature auth stores are created.
+- Enabled features with `state: true` still receive project-scoped feature
+  state; it is not authentication data.
 - Auth files live only in the per-project config store.
 - No cross-project credential sharing.
 - `--auth-name` has no effect here (there is no shared auth store to select) and
@@ -296,25 +338,28 @@ Source: [`internal/runtime/volume_manager.go`](../../internal/runtime/volume_man
 
 | Flag | Default | Effect on Stores |
 |------|---------|------------------|
-| `--ephemeral` | No | Config store gets a unique suffix key; removed on exit. Env and auth stores are not created. |
-| `--auth-scope=shared` | Yes (default) | Creates shared auth and feature auth stores; enables symlinks and post-exit sync. |
-| `--auth-scope=project` | No | No shared/feature auth stores; auth stays in the project config store only. |
+| `--ephemeral` | No | Config store gets a unique suffix key; removed on exit. Env, auth, and feature-state stores are not created. |
+| `--auth-scope=shared` | Yes (default) | Creates shared auth and feature auth stores; enables symlinks and post-exit sync. Feature state is unaffected. |
+| `--auth-scope=project` | No | No shared/feature auth stores; auth stays in the project config store only. Feature state is unaffected. |
 | `--reset-auth` | No | Deletes auth files from the shared auth and current config stores when scope is shared, or from the config store when scope is project. Also deletes persisted env. |
 
 ## Cleanup
 
 `enclave cleanup` removes persistent stores and other host-side data.
 `--ephemeral` cleanup removes ephemeral config-store directories (every
-`config-store/<key>` other than `default`).
+`config-store/<key>` other than `default`). Normal project cleanup removes all
+feature state for that project, independent of `--tool`; use
+`--keep feature-state` to preserve it. The keep selector also works with
+`cleanup --all`.
 
 ## Source Files
 
-- [`internal/config/host_paths.go`](../../internal/config/host_paths.go) — Store path helpers (`HostStoreConfigDir`, `HostStoreEnvDir`, `HostStoreAuthDir`, `HostStoreFeatureAuthDir`)
+- [`internal/config/host_paths.go`](../../internal/config/host_paths.go) — Store path helpers (`HostStoreConfigDir`, `HostStoreEnvDir`, `HostStoreAuthDir`, `HostStoreFeatureAuthDir`, `HostStoreFeatureStateDir`)
 - [`internal/backend/hoststore/hoststore.go`](../../internal/backend/hoststore/hoststore.go) — Neutral store-identity → host-directory mapping and cross-process store lock, shared by the Docker and QEMU backends (stores are backend-independent: sessions share auth/config/env state across backends)
 - [`internal/backend/docker/storage.go`](../../internal/backend/docker/storage.go) — Host-directory store manager (create, read/write, seed, remove, locking, path-traversal validation)
 - [`internal/runtime/volume_manager.go`](../../internal/runtime/volume_manager.go) — Store intent (which stores exist, reset flags, sync spec)
 - [`internal/backend/docker/prepare.go`](../../internal/backend/docker/prepare.go), [`internal/backend/docker/authsync.go`](../../internal/backend/docker/authsync.go) — Store mechanics: preparation, auth reset, overlay, post-exit sync, stop/remove finalize
 - [`internal/runtime/skills_mount.go`](../../internal/runtime/skills_mount.go) — Managed skill overlay and bind mount assembly
 - [`internal/runtime/auth_manager.go`](../../internal/runtime/auth_manager.go) — Declared secret injection, env persistence, session checks
-- [`internal/runtime/runtime.go`](../../internal/runtime/runtime.go) — Mount assembly (`addConfigMount`, `addAuthMount`, `addFeatureAuthMounts`), execution flow
+- [`internal/runtime/runtime.go`](../../internal/runtime/runtime.go) — Mount assembly (`addConfigMount`, `addAuthMount`, `addFeatureAuthMounts`, `addFeatureStateMounts`), execution flow
 - [`entrypoint.sh`](../../entrypoint.sh), [`runtime-assets/auth-reconcile.sh`](../../runtime-assets/auth-reconcile.sh) — In-container and helper-container symlink/reconcile logic for shared and feature auth

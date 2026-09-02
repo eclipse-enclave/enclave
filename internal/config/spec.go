@@ -53,9 +53,10 @@ type specDocument struct {
 	DefaultEnabled     *bool    `json:"defaultEnabled,omitempty"`  // mixin-only
 	DefaultIncluded    *bool    `json:"defaultIncluded,omitempty"` // tool-only
 
-	// mixin enclave-native auth (features that carry credentials, e.g. github-cli)
+	// Enclave-native mixin fields.
 	ConfigDir string   `json:"configDir,omitempty"`
 	AuthFiles []string `json:"authFiles,omitempty"`
+	State     bool     `json:"state,omitempty"`
 }
 
 type specSandbox struct {

@@ -237,6 +237,7 @@ in both `host/` and `session/`, the host command wins.
 | Windows (WSL2) | [docs/windows.md](docs/windows.md) |
 | Architecture | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) |
 | Extensions | [docs/extensions/README.md](docs/extensions/README.md) |
+| Installing Extensions from Git | [docs/extensions/installing.md](docs/extensions/installing.md) |
 | Security | [docs/security/README.md](docs/security/README.md) |
 
 Project resources: [website](https://enclave.eclipse.dev),

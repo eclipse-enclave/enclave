@@ -494,6 +494,49 @@ func TestBuildImageUsesExplicitBuildIdentityAndBuildxCache(t *testing.T) {
 	}
 }
 
+// A host that has never installed an extension must build straight from the app
+// root rather than stage a merged context.
+func TestPrepareBuildContextUsesAppRootWithoutUserExtensions(t *testing.T) {
+	tmp := t.TempDir()
+	appRoot := filepath.Join(tmp, "app")
+	userExtensions := filepath.Join(tmp, "home", ".config", "enclave", "extensions")
+
+	writeAppFile(t, filepath.Join(appRoot, "Dockerfile"), "FROM scratch\n", 0o644)
+	writeAppFile(t, filepath.Join(appRoot, "extensions", "tools", "claude", "spec.yaml"), "schemaVersion: \"1\"\nkind: sandbox\nname: claude\n", 0o644)
+
+	// ResolvePaths populates the user extension paths whether or not the
+	// directory exists.
+	paths := model.Paths{
+		AppRoot:           appRoot,
+		ExtensionsDir:     filepath.Join(appRoot, "extensions"),
+		ToolsDir:          filepath.Join(appRoot, "extensions", "tools"),
+		FeaturesDir:       filepath.Join(appRoot, "extensions", "features"),
+		UserExtensionsDir: userExtensions,
+		UserToolsDir:      filepath.Join(userExtensions, "tools"),
+		UserFeaturesDir:   filepath.Join(userExtensions, "features"),
+	}
+	assertPathMissing(t, userExtensions)
+
+	contextDir, cleanup, err := prepareBuildContext(paths, runtimeImageSelection{})
+	if err != nil {
+		t.Fatalf("prepareBuildContext: %v", err)
+	}
+	defer cleanup()
+	if contextDir != appRoot {
+		t.Fatalf("contextDir = %q, want the app root %q: an empty user extension root must not trigger staging", contextDir, appRoot)
+	}
+
+	writeAppFile(t, filepath.Join(userExtensions, "features", "demo", "spec.yaml"), "schemaVersion: \"1\"\nkind: mixin\nname: demo\n", 0o644)
+	stagedDir, stagedCleanup, err := prepareBuildContext(paths, runtimeImageSelection{})
+	if err != nil {
+		t.Fatalf("prepareBuildContext with user extensions: %v", err)
+	}
+	defer stagedCleanup()
+	if stagedDir == appRoot {
+		t.Fatal("expected a staged context once the user extension root exists")
+	}
+}
+
 func TestPrepareBuildContextMergesUserAndBuiltinExtensions(t *testing.T) {
 	tmp := t.TempDir()
 	appRoot := filepath.Join(tmp, "app")

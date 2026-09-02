@@ -104,6 +104,7 @@ The restricted network request flow has a separate
 - [`internal/app/cleanup.go`](../internal/app/cleanup.go) implements `enclave cleanup` (persistent stores, caches, history, and agent memory).
 - [`internal/app/ssh.go`](../internal/app/ssh.go) implements `enclave ssh-init`.
 - [`internal/app/tools.go`](../internal/app/tools.go) lists available tool profiles.
+- [`internal/extinstall/`](../internal/extinstall/) installs, updates, and removes tool/feature extensions from git repositories into the user-global extension root, backing `enclave tools|features add|update|remove`.
 - [`internal/app/network_cmd.go`](../internal/app/network_cmd.go) implements `enclave network` subcommands (status, print, diff, apply, add-domain, remove-domain, set-mode).
 - [`internal/cli/network_command.go`](../internal/cli/network_command.go) defines Cobra command structure and flag parsing for the `network` subcommand tree.
 

@@ -1,6 +1,7 @@
 {
   "type": "mixin",
   "name": "github-cli",
+  "display_name": "GitHub CLI",
   "description": "GitHub CLI (gh)",
   "needs_root": true,
   "default_enabled": true,

@@ -1,6 +1,7 @@
 {
   "type": "sandbox",
   "name": "theia-next",
+  "display_name": "Theia IDE (Next)",
   "description": "Theia Next (preview) desktop IDE attached to an enclave container",
   "default_included": true,
   "priority": 100,

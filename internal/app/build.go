@@ -172,7 +172,7 @@ func resolveHost() (model.Host, error) {
 }
 
 func prepareBuildContext(paths model.Paths, selection runtimeImageSelection) (contextDir string, cleanup func(), err error) {
-	if paths.UserExtensionsDir == "" && selection.Tools == nil && selection.Features == nil {
+	if !config.HasUserExtensions(paths) && selection.Tools == nil && selection.Features == nil {
 		return paths.AppRoot, func() {}, nil
 	}
 
@@ -343,6 +343,10 @@ func overlayFilesFromDir(files map[string]mergedExtensionFile, relPrefix string,
 		rel, err := filepath.Rel(rootDir, path)
 		if err != nil {
 			return err
+		}
+		if !d.IsDir() && rel == model.ExtensionSourceFilename {
+			// Installer provenance: never part of the image or its identity.
+			return nil
 		}
 		if skipTop != nil {
 			top := rel
@@ -745,7 +749,7 @@ func resolveFeatureInstalls(paths model.Paths, selected []string, warnConflicts 
 // which forces the feature's declarative install into the root build phase.
 func anyRootInstallUser(users []string) bool {
 	for _, u := range users {
-		if u == "0" || u == "root" {
+		if config.IsRootInstallUser(u) {
 			return true
 		}
 	}
@@ -957,7 +961,7 @@ func queueAgentUpdate(plan *agentUpdatePlan, tool string, stamp string, force bo
 }
 
 func resolveAutomaticToolUpdate(paths model.Paths, buildCfg buildConfig, home string, tool string, probe toolFingerprintProbe) automaticToolUpdateResult {
-	if _, found := config.ResolveToolFile(paths, tool, model.CheckUpdateScriptFilename); !found {
+	if _, found := config.ResolveUpdateProbe(paths, tool); !found {
 		return automaticToolUpdateResult{}
 	}
 	if probe == nil {
@@ -998,7 +1002,7 @@ func backfillMissingAgentUpdateFingerprints(plan *agentUpdatePlan, paths model.P
 		if _, ok := plan.PendingFingerprintWrites[tool]; ok {
 			continue
 		}
-		if _, found := config.ResolveToolFile(paths, tool, model.CheckUpdateScriptFilename); !found {
+		if _, found := config.ResolveUpdateProbe(paths, tool); !found {
 			continue
 		}
 		if _, ok, err := readAgentUpdateStateValue(agentUpdateFingerprintFile(stampDir, tool)); err != nil {

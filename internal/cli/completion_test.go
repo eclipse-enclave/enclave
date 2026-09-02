@@ -82,3 +82,42 @@ func TestRegisterCompletionsRejectsMissingFlag(t *testing.T) {
 		t.Fatal("expected error registering completion for a missing flag, got nil")
 	}
 }
+
+func TestRegisterCompletionsCoversExtensionSubcommands(t *testing.T) {
+	rootCmd := &cobra.Command{Use: "enclave"}
+	res := Result{}
+	addOptionFlags(rootCmd.PersistentFlags(), &res.Options, &res.Sources,
+		config.OptionGroupGlobal,
+		config.OptionGroupRun,
+		config.OptionGroupAuth,
+		config.OptionGroupBuild,
+	)
+	rootCmd.AddCommand(featuresCommand(&res), toolsCommand(&res))
+	if err := registerCompletions(rootCmd); err != nil {
+		t.Fatalf("registerCompletions: %v", err)
+	}
+
+	for _, path := range [][]string{
+		{"features", "remove"},
+		{"features", "update"},
+		{"tools", "remove"},
+		{"tools", "update"},
+	} {
+		cmd := findSubCommand(rootCmd, path...)
+		if cmd == nil {
+			t.Fatalf("%v not registered", path)
+		}
+		if cmd.ValidArgsFunction == nil {
+			t.Errorf("%v has no argument completion", path)
+		}
+	}
+	for _, path := range [][]string{{"features", "add"}, {"tools", "add"}} {
+		cmd := findSubCommand(rootCmd, path...)
+		if cmd == nil {
+			t.Fatalf("%v not registered", path)
+		}
+		if cmd.Flags().Lookup("name") == nil {
+			t.Errorf("%v has no --name flag to complete", path)
+		}
+	}
+}

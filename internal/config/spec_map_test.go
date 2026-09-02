@@ -238,6 +238,7 @@ func TestSpecToExtensionMixin(t *testing.T) {
 schemaVersion: "1"
 kind: mixin
 name: github-cli
+displayName: GitHub CLI
 description: GitHub CLI (gh)
 needsRoot: true
 priority: 50
@@ -253,6 +254,9 @@ network:
 	ext, state := specToExtension(doc)
 	if ext.Type != model.ExtensionKindMixin || ext.Name != "github-cli" {
 		t.Fatalf("kind->type wrong: %+v", ext)
+	}
+	if ext.DisplayName != "GitHub CLI" {
+		t.Fatalf("DisplayName = %q, want %q", ext.DisplayName, "GitHub CLI")
 	}
 	if !ext.NeedsRoot || ext.ConfigDir != ".config/gh" || len(ext.AuthFiles) != 2 {
 		t.Fatalf("mixin fields wrong: %+v", ext)

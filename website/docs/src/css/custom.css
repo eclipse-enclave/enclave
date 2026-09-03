@@ -11,8 +11,9 @@
  * Eclipse Enclave — documentation theme.
  *
  * Design direction: "The Enclave Perimeter."
- * The palette is drawn straight from the product mark — a deep navy field, an
- * electric beam-blue core, and a gateway amber. The page reads as a bounded,
+ * The palette predates the Eclipse Foundation brand logo and does not derive
+ * from it: a deep navy field, an electric beam-blue core, and a gateway amber.
+ * The logo's teal-to-violet gradient is left to the logo. The page reads as a bounded,
  * guarded interior lit from its core: one soft glow at the top, a short beam
  * bar under the hero, and precision crop-mark corners framing the modules.
  * Amber is reserved for gateway semantics so it stays meaningful, not decorative.
@@ -346,7 +347,8 @@ div[class^='codeBlockContainer'],
 }
 
 /* ==========================================================================
-   Footer — the deep-navy anchor, matched to the mark, with a top glow line.
+   Footer — the deep-navy anchor, with a top glow line and the dark-background
+   logo lockup.
    ========================================================================== */
 
 .footer {

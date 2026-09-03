@@ -89,7 +89,7 @@ const config = {
   themeConfig:
     /** @type {import('@docusaurus/preset-classic').ThemeConfig} */
     ({
-      image: 'img/logo.png',
+      image: 'img/social-card.png',
       colorMode: {
         // Match the light marketing site; the toggle is still available.
         defaultMode: 'light',
@@ -99,7 +99,8 @@ const config = {
         title: 'Eclipse Enclave',
         logo: {
           alt: 'Eclipse Enclave logo',
-          src: 'img/logo.png',
+          src: 'img/enclave-mark-lightbg.svg',
+          srcDark: 'img/enclave-mark-darkbg.svg',
         },
         items: [
           {
@@ -123,6 +124,15 @@ const config = {
       },
       footer: {
         style: 'dark',
+        // The footer is always dark, so it uses the dark-background lockup
+        // regardless of the active color mode. It stays unlinked: the footer
+        // logo cannot opt out of `autoAddBaseUrl`, so a `pathname://` href
+        // would be rewritten back under the docs base path.
+        logo: {
+          alt: 'Eclipse Enclave',
+          src: 'img/enclave-logo-horizontal-darkbg.svg',
+          width: 168,
+        },
         links: [
           {
             title: 'Docs',

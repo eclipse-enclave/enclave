@@ -27,10 +27,14 @@ Security guardrail: project config cannot elevate guarded options. Each is
 ignored with a warning naming the file; use global config or CLI flags for
 explicit host opt-in. Guarded at project scope: `tool`, `yolo`,
 `allow_all_network=true`, `allow_domains`, `pass_env`, `host_config`,
-`host_config_paths` (including under `tool_overrides.<tool>`), `base_image`,
-`bridge_ports`, `add_dirs`/`add_readonly_dirs` entries outside the project
-subtree, `project_mount="writable"`, and any `worktree_metadata` value that
-relaxes the inherited mode.
+`tool_overrides.<tool>.host_config_paths`, `base_image`, `bridge_ports`,
+`add_dirs`/`add_readonly_dirs` entries outside the project subtree,
+`project_mount="writable"`, and any `worktree_metadata` value that relaxes the
+inherited mode.
+
+Top-level `host_config_paths` is not part of that set: it is ignored with a
+warning in any config file, global included, because passthrough paths are only
+supported under `tool_overrides.<tool>`.
 
 ## Config Keys
 
@@ -40,7 +44,7 @@ relaxes the inherited mode.
 | `backend` | Isolation backend (`docker`, default; experimental `qemu`) |
 | `host_config` | `none` (default) or `passthrough` |
 | `tool_overrides.<tool>.host_config_paths` | Per-tool passthrough path directives (`default`, `+path`, `-path`, or explicit list) |
-| `yolo` | Enable YOLO mode (default: `true`) |
+| `yolo` | Enable YOLO mode (default: `true`). Only consulted when the selected tool's profile leaves `yoloEnabled` unset; every bundled CLI agent sets it, so use `--yolo`/`--no-yolo` for those |
 | `ephemeral` | Run without persistent auth/env stores |
 | `auth_scope` | `shared` or `project` (default: `shared`) |
 | `auth_name` | Named per-tool shared auth identity slug; unset uses the default store |
@@ -95,7 +99,7 @@ option has no effect.
 ```json
 {
   "tool": "codex",
-  "yolo": false,
+  "project_mount": "readonly",
   "secrets_scope": "project",
   "pass_env": ["GITHUB_TOKEN"],
   "allow_all_network": false

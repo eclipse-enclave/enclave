@@ -18,7 +18,7 @@ A setting can come from three places:
 | Project config | `~/.config/enclave/projects/<hash>/config.json` | one repository |
 | Global config | `~/.config/enclave/config.json` | your defaults everywhere |
 
-Both files are plain JSON. Every key is optional, and every key has a matching
+Both files are plain JSON. Every key is optional, and most keys have a matching
 CLI flag:
 
 ```json
@@ -87,7 +87,7 @@ enclave config --json            # the same data, machine-readable
 | Key | Flag | What it does |
 | --- | --- | --- |
 | `tool` | `--tool <name>` | Which agent runs. Defaults to `claude`; `enclave tools` lists what is installed. |
-| `yolo` | `--no-yolo` | Full autonomy, on by default. Turn it off to make the agent ask for confirmation again. |
+| `yolo` | `--no-yolo` | Full autonomy, on by default. Pass `--no-yolo` to make the agent ask for confirmation again. Every bundled CLI agent pins the mode in its own profile, so `"yolo": false` in a config file does not reach them; use the flag. |
 | `features` | `--features <list>` | Extra tooling baked into the image (see [Features](#features)). |
 | `ports` | `-p 3000` | Publish a container port to the host, so the agent's dev server is reachable from your browser. |
 | `bridge_ports` | `--bridge-port 9800` | The other direction: make a host service reachable at `localhost:9800` inside the container. |
@@ -202,6 +202,7 @@ global config or pass them on the command line instead.
 | `add_dirs`, `add_readonly_dirs` outside the project | Project scope can only mount subdirectories of the project itself. |
 | `base_image`, `bridge_ports` | Base image and host-port bridging stay host-side decisions. |
 | `project_mount: "writable"` | Project scope can tighten a stricter global default, never loosen it. |
+| `worktree_metadata` values that relax the inherited mode | Same rule for the linked-worktree git metadata mounts: tighten only. |
 
 ## Per-tool overrides
 

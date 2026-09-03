@@ -115,7 +115,6 @@ h2 + .section-lead { margin-top: 0; }
   gap: 20px;
 }
 .nav-brand { display: flex; align-items: center; gap: 10px; font-weight: 800; color: var(--heading); font-size: 1.05rem; }
-/* The mark is slightly taller than wide, so pin the height and let width follow. */
 .nav-brand img { height: 30px; width: auto; }
 .nav-links { margin-left: auto; display: flex; align-items: center; gap: 26px; }
 .nav-links a { color: var(--muted); font-weight: 600; font-size: 0.92rem; }

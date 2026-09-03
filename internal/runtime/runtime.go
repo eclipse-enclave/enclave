@@ -1096,6 +1096,11 @@ func (r *Runtime) addSessionMonitorEnv(mounts *mountAccumulator) {
 }
 
 func (r *Runtime) addCacheMounts(mounts *mountAccumulator) {
+	pnpmStoreDir := r.containerHome + "/.local/share/pnpm/store"
+	// pnpm 11 uses PNPM_CONFIG_*; pnpm 10 and older use npm_config_*.
+	mounts.AddEnv("PNPM_CONFIG_STORE_DIR", pnpmStoreDir)
+	mounts.AddEnv("npm_config_store_dir", pnpmStoreDir)
+
 	if r.run.NoCache {
 		return
 	}
@@ -1120,7 +1125,6 @@ func (r *Runtime) addCacheMounts(mounts *mountAccumulator) {
 	mounts.AddMount(bindMount(filepath.Join(cacheDir, "cargo"), r.containerHome+"/.cargo", false))
 	// pnpm store
 	mounts.AddMount(bindMount(filepath.Join(cacheDir, "pnpm"), r.containerHome+"/.local/share/pnpm", false))
-	mounts.AddEnv("PNPM_CONFIG_STORE_DIR", r.containerHome+"/.local/share/pnpm/store")
 	// uv (Python) cache
 	mounts.AddMount(bindMount(filepath.Join(cacheDir, "uv"), r.containerHome+"/.cache/uv", false))
 	// Yarn cache

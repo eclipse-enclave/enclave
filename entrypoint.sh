@@ -419,13 +419,13 @@ normalize_devcontainer_paths() {
         VOLTA_HOME
         FNM_DIR
         PNPM_CONFIG_STORE_DIR
-        PNPM_STORE_DIR
         YARN_CACHE_FOLDER
         XDG_CACHE_HOME
         XDG_CONFIG_HOME
         XDG_DATA_HOME
         npm_config_prefix
         npm_config_cache
+        npm_config_store_dir
         npm_config_userconfig
     )
     local -a extra_rewrite_vars=()

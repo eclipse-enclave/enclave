@@ -294,7 +294,12 @@ div[class^='codeBlockContainer'],
    Tables
    ========================================================================== */
 
+/* Infima sets `display: block` on tables, which makes the rows shrink to fit
+   their content while the table's own border box still spans the full width,
+   so header backgrounds and row rules stop short of the border. */
 .markdown table {
+  display: table;
+  width: 100%;
   border: 1px solid var(--ifm-toc-border-color);
   border-radius: 10px;
   border-collapse: separate;
@@ -307,10 +312,14 @@ div[class^='codeBlockContainer'],
 .markdown table thead tr {
   border-bottom: 1px solid var(--ifm-toc-border-color);
 }
+/* `overflow-wrap: anywhere` also lowers the cells' min-content width, so a
+   `display: table` table can always satisfy `width: 100%` and wraps on narrow
+   viewports instead of overflowing the rounded, clipped border box. */
 .markdown table th,
 .markdown table td {
   border: 0;
   border-bottom: 1px solid var(--ifm-toc-border-color);
+  overflow-wrap: anywhere;
 }
 .markdown table tbody tr:last-child td {
   border-bottom: 0;

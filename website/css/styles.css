@@ -115,7 +115,7 @@ h2 + .section-lead { margin-top: 0; }
   gap: 20px;
 }
 .nav-brand { display: flex; align-items: center; gap: 10px; font-weight: 800; color: var(--heading); font-size: 1.05rem; }
-.nav-brand img { width: 28px; height: 28px; }
+.nav-brand img { height: 30px; width: auto; }
 .nav-links { margin-left: auto; display: flex; align-items: center; gap: 26px; }
 .nav-links a { color: var(--muted); font-weight: 600; font-size: 0.92rem; }
 .nav-links a:hover { color: var(--heading); }
@@ -392,6 +392,7 @@ footer.site-footer {
   color: var(--muted);
 }
 footer.site-footer a { font-weight: 600; }
+.footer-logo { display: block; width: 168px; height: auto; margin: 0 auto 20px; }
 
 /* ------- Responsive ------- */
 @media (max-width: 720px) {

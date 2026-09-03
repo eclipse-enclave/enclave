@@ -159,7 +159,7 @@ The restricted network request flow has a separate
 - [`runtime-assets/net.sh`](../runtime-assets/net.sh) holds shared entrypoint network helpers (local resolver and loopback proxy setup).
 - [`runtime-assets/microvm/alpine/`](../runtime-assets/microvm/alpine/) holds the experimental QEMU Alpine bundle init and builder.
 - [`extensions/tools/<tool>/templates/`](../extensions/tools/) holds per-tool settings templates baked into the image during build.
-- [`docs/`](../docs/) is included in the runtime build context so the image can install agent-facing help under `/usr/share/doc/enclave/`.
+- [`docs/`](../docs/) is included in the runtime build context so the image can install agent-facing help under `/usr/share/doc/enclave/`. [`docs/assets/`](../docs/assets/) is excluded in [`.dockerignore`](../.dockerignore); it holds only `README.md` branding, and keeping it out spares users an image rebuild whenever the logo changes.
 
 ## Key Concepts
 

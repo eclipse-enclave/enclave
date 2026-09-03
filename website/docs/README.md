@@ -42,11 +42,37 @@ relative `../` is handled client-side, matches no docs route, and renders the
 docs 404 page instead. `onBrokenLinks` is set to `throw` to catch this at build
 time.
 
+The footer logo is the one exception: `themeConfig.footer.logo` rejects
+`autoAddBaseUrl`, so it cannot link home without being rewritten back under the
+docs base path. It stays unlinked; the footer's "Home" entry covers that.
+
 The custom domain lives in a `CNAME` file at the root of the published branch.
 The publish workflow re-creates it on every deploy (`cname:` input), because the
 deploy action replaces the published tree.
 
 Both website workflows push with the organization secret `DEPLOY_TOKEN`.
+
+## Brand assets
+
+The Eclipse Foundation logo comes in a horizontal lockup (mark plus wordmark)
+and an icon-only mark, each with a variant for light and for dark backgrounds.
+The `-darkbg` variants are the same artwork with the cube faces, inner disc, and
+wordmark in white; do not mix them up, or the wordmark disappears.
+
+| File | Used by |
+| --- | --- |
+| `static/img/enclave-mark-{lightbg,darkbg}.svg` | docs navbar (`logo.src` / `logo.srcDark`) |
+| `static/img/enclave-logo-horizontal-darkbg.svg` | docs footer, which is dark in both color modes |
+| `static/img/favicon.png` | docs favicon |
+| `static/img/social-card.png` | Open Graph / Twitter card |
+| `../assets/enclave-mark-lightbg.svg` | marketing site navbar |
+| `../assets/enclave-logo-horizontal-lightbg.svg` | marketing site footer |
+| `../assets/{favicon,social-card}.png` | marketing site favicon and social card |
+| `../../docs/assets/enclave-logo-horizontal-{lightbg,darkbg}.png` | repository `README.md` |
+
+The favicon and social card are rendered from the SVGs. The README uses PNG
+because these SVGs carry their fills in an embedded `<style>` block, and PNG
+sidesteps any question of how GitHub's markdown pipeline treats that.
 
 ## Editing content
 

@@ -21,6 +21,15 @@ func runEntrypointCommand(t *testing.T, extraEnv []string, args ...string) (stri
 	t.Helper()
 
 	home := t.TempDir()
+	output, err := runEntrypointCommandInHome(t, home, extraEnv, args...)
+	return home, output, err
+}
+
+// runEntrypointCommandInHome runs the entrypoint against a caller-owned home so
+// tests can seed files or invoke it repeatedly with the same state.
+func runEntrypointCommandInHome(t *testing.T, home string, extraEnv []string, args ...string) (string, error) {
+	t.Helper()
+
 	projectDir := filepath.Join(home, "project")
 	if err := os.MkdirAll(projectDir, 0o755); err != nil {
 		t.Fatalf("mkdir project dir: %v", err)
@@ -38,7 +47,7 @@ func runEntrypointCommand(t *testing.T, extraEnv []string, args ...string) (stri
 	cmd.Env = append(cmd.Env, extraEnv...)
 
 	output, err := cmd.CombinedOutput()
-	return home, string(output), err
+	return string(output), err
 }
 
 func claudeCreds(expiresAt int) string {

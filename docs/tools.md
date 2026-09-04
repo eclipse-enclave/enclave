@@ -97,11 +97,12 @@ The image rebuilds when the Dockerfile template, entrypoint, target, base image/
 and does not affect the Docker build cache. Package managers can still use
 container-local caches that are discarded with the container.
 
-Enclave explicitly points pnpm at `~/.local/share/pnpm/store` to prevent its
-mount-boundary detection from creating `.pnpm-store` in the project. The store
-is backed by Enclave's persistent cache unless `--no-cache` is set. This runtime
-setting takes precedence over a project `storeDir`; when the project and cache
-are on different filesystems, pnpm copies packages instead of hard-linking them.
+Enclave pins the pnpm store to `~/.local/share/pnpm/store`, backed by the
+persistent cache unless `--no-cache` is set, so pnpm's mount-boundary detection
+cannot create `.pnpm-store` in the project. The path is set via
+`PNPM_CONFIG_STORE_DIR` (pnpm 11 and later) and a `store-dir` entry in pnpm's
+global config file (pnpm 9 and 10), which project-level pnpm config overrides. Store and project
+are separate mounts, so pnpm copies packages instead of hard-linking them.
 
 By default, enclave builds with `docker build` and inline image cache.
 `--cache-from <image>` adds image cache sources, and the current tool image's

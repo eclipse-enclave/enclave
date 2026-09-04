@@ -92,10 +92,8 @@ func TestAddCacheMountsConfiguresPnpmStore(t *testing.T) {
 	r.addCacheMounts(mounts)
 
 	want := "/home/agent/.local/share/pnpm/store"
-	for _, key := range []string{"PNPM_CONFIG_STORE_DIR", "npm_config_store_dir"} {
-		if !envSliceContainsKV(mounts.Env(), key, want) {
-			t.Fatalf("expected %s=%s, got %v", key, want, mounts.Env())
-		}
+	if !envSliceContainsKV(mounts.Env(), "PNPM_CONFIG_STORE_DIR", want) {
+		t.Fatalf("expected PNPM_CONFIG_STORE_DIR=%s, got %v", want, mounts.Env())
 	}
 }
 
@@ -109,10 +107,8 @@ func TestAddCacheMountsUsesEphemeralPnpmStoreWithoutCache(t *testing.T) {
 	r.addCacheMounts(mounts)
 
 	want := "/home/agent/.local/share/pnpm/store"
-	for _, key := range []string{"PNPM_CONFIG_STORE_DIR", "npm_config_store_dir"} {
-		if !envSliceContainsKV(mounts.Env(), key, want) {
-			t.Fatalf("expected %s=%s, got %v", key, want, mounts.Env())
-		}
+	if !envSliceContainsKV(mounts.Env(), "PNPM_CONFIG_STORE_DIR", want) {
+		t.Fatalf("expected PNPM_CONFIG_STORE_DIR=%s, got %v", want, mounts.Env())
 	}
 	if len(mounts.Mounts()) != 0 {
 		t.Fatalf("did not expect cache mounts with cache disabled, got %v", mounts.Mounts())

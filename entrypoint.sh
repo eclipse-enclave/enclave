@@ -425,7 +425,6 @@ normalize_devcontainer_paths() {
         XDG_DATA_HOME
         npm_config_prefix
         npm_config_cache
-        npm_config_store_dir
         npm_config_userconfig
     )
     local -a extra_rewrite_vars=()
@@ -510,6 +509,29 @@ normalize_devcontainer_paths() {
     if [ "$changed" = "1" ]; then
         echo "Normalized devcontainer paths from $remote_home to $current_home"
     fi
+}
+
+setup_pnpm_store_shim() {
+    if [ -z "${PNPM_CONFIG_STORE_DIR:-}" ]; then
+        return
+    fi
+
+    local pnpm_bin=""
+    pnpm_bin="$(command -v pnpm || true)"
+    if [ -z "$pnpm_bin" ]; then
+        return
+    fi
+
+    local shim_dir="${TMPDIR:-/tmp}/enclave-pnpm-bin"
+    local shim="$shim_dir/pnpm"
+    mkdir -p "$shim_dir"
+    {
+        printf '%s\n' '#!/bin/sh'
+        # shellcheck disable=SC2016 # Expanded by the generated shim at runtime.
+        printf 'exec %q --store-dir="${PNPM_CONFIG_STORE_DIR:-}" "$@"\n' "$pnpm_bin"
+    } > "$shim"
+    chmod 755 "$shim"
+    export PATH="$shim_dir:$PATH"
 }
 
 cleanup_devcontainer_once_stamps() {
@@ -599,6 +621,11 @@ run_devcontainer_command() {
 
 if [ "${ENCLAVE_DEVCONTAINER:-}" = "1" ]; then
     normalize_devcontainer_paths
+fi
+
+setup_pnpm_store_shim
+
+if [ "${ENCLAVE_DEVCONTAINER:-}" = "1" ]; then
     run_devcontainer_command "post-create" "${ENCLAVE_DEVCONTAINER_POST_CREATE:-}" "1"
     run_devcontainer_command "post-start" "${ENCLAVE_DEVCONTAINER_POST_START:-}" ""
 fi

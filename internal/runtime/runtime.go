@@ -1099,6 +1099,9 @@ func (r *Runtime) addSessionMonitorEnv(mounts *mountAccumulator) {
 }
 
 func (r *Runtime) addCacheMounts(mounts *mountAccumulator) {
+	pnpmStoreDir := r.containerHome + "/.local/share/pnpm/store"
+	mounts.AddEnv("PNPM_CONFIG_STORE_DIR", pnpmStoreDir)
+
 	if r.run.NoCache {
 		return
 	}

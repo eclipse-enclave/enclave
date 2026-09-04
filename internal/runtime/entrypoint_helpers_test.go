@@ -17,6 +17,30 @@ import (
 
 const claudeCredentialsFile = ".credentials.json"
 
+func runEntrypointCommand(t *testing.T, extraEnv []string, args ...string) (string, string, error) {
+	t.Helper()
+
+	home := t.TempDir()
+	projectDir := filepath.Join(home, "project")
+	if err := os.MkdirAll(projectDir, 0o755); err != nil {
+		t.Fatalf("mkdir project dir: %v", err)
+	}
+
+	entrypointPath := filepath.Join("..", "..", "entrypoint.sh")
+	cmdArgs := append([]string{entrypointPath}, args...)
+	cmd := exec.Command("bash", cmdArgs...)
+	cmd.Env = []string{
+		"PATH=" + os.Getenv("PATH"),
+		"HOME=" + home,
+		"PROJECT_DIR=" + projectDir,
+		"TOOL=pi",
+	}
+	cmd.Env = append(cmd.Env, extraEnv...)
+
+	output, err := cmd.CombinedOutput()
+	return home, string(output), err
+}
+
 func claudeCreds(expiresAt int) string {
 	return `{"claudeAiOauth":{"expiresAt":` + strconv.Itoa(expiresAt) + `}}`
 }

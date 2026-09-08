@@ -186,6 +186,6 @@ enclave ps
 
 ## Next steps
 
-See the [CLI Commands](/cli) reference for the full set of commands you can run.
-From there, you can add custom skills, mount extra directories, and set network
-allowlists per tool and per project. Guides for each of those are on the way.
+See the [CLI Commands](/cli) reference for the full set of commands you can run,
+and [Configuration](/configuration) to pick a default agent, mount extra
+directories, or widen the network allowlist per project.

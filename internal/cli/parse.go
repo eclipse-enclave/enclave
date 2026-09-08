@@ -17,6 +17,7 @@ import (
 	"github.com/spf13/pflag"
 
 	"enclave/internal/config"
+	"enclave/internal/extinstall"
 	"enclave/internal/model"
 	"enclave/internal/usercmd"
 )
@@ -40,6 +41,9 @@ type Result struct {
 	// Warnings collects non-fatal messages produced during parsing (e.g. a user
 	// command shadowed by a built-in). Callers log these via their own facility.
 	Warnings []string
+	// ExtRequest is set for the extension-management subcommands (`tools`/
+	// `features` list/add/remove/update); nil otherwise.
+	ExtRequest *extinstall.Request
 }
 
 func Parse(args []string, defaults model.Options, userCmds ...usercmd.Command) (Result, error) {
@@ -86,7 +90,7 @@ directly: "enclave --tool codex" is equivalent to "enclave run --tool codex".`,
 		infoCommand(&res),
 		hiddenSimpleCommand("validate-extensions", "Validate extension metadata", &res),
 		hiddenSimpleCommand("ssh-init", "Initialize SSH directory", &res),
-		simpleCommandWithTool("tools", "List available tool profiles", &res),
+		toolsCommand(&res),
 		featuresCommand(&res),
 		updateCommand(&res),
 		stopCommand(&res),
@@ -816,6 +820,13 @@ func featuresCommand(res *Result) *cobra.Command {
 	// runFeatures previews which features a run would enable; that depends on
 	// --slim and --features.
 	addOptionFlagsByName(cmd.Flags(), &res.Options, &res.Sources, "slim", "features")
+	addExtensionSubcommands(cmd, res, model.KindFeature, "slim", "features")
+	return cmd
+}
+
+func toolsCommand(res *Result) *cobra.Command {
+	cmd := simpleCommandWithTool("tools", "List available tool profiles", res)
+	addExtensionSubcommands(cmd, res, model.KindTool, "tool")
 	return cmd
 }
 

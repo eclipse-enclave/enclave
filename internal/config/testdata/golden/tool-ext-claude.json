@@ -1,6 +1,7 @@
 {
   "type": "sandbox",
   "name": "claude",
+  "display_name": "Claude Code",
   "description": "Claude Code AI assistant",
   "default_included": true,
   "priority": 100,

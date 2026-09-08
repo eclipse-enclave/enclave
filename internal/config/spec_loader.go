@@ -9,6 +9,7 @@ package config
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 
@@ -27,23 +28,11 @@ func LoadSpec(paths model.Paths, name string, kind string) (specDocument, error)
 		return specDocument{}, os.ErrNotExist
 	}
 
-	// #nosec G304 -- specPath is resolved from trusted extension roots.
-	data, err := os.ReadFile(specPath)
+	doc, err := parseSpecDocument(specPath)
 	if err != nil {
 		return specDocument{}, err
 	}
 
-	// Strict parsing: unknown keys and duplicate keys are load errors, so a
-	// typo'd field (e.g. a misspelled network: or deniedDomains:) can never
-	// silently disable deny rules or credential-release validation.
-	var doc specDocument
-	if err := yaml.UnmarshalStrict(data, &doc); err != nil {
-		return specDocument{}, fmt.Errorf("parse %s: %w", specPath, err)
-	}
-
-	if doc.SchemaVersion != SpecSchemaVersion {
-		return specDocument{}, fmt.Errorf("%s schemaVersion must be %q (got %q)", specPath, SpecSchemaVersion, doc.SchemaVersion)
-	}
 	if doc.Kind != kind {
 		return specDocument{}, fmt.Errorf("%s kind must be %q", specPath, kind)
 	}
@@ -86,30 +75,98 @@ func warnUnknownFilesEntries(filesDir string, name string, warn func(string)) {
 	}
 	for _, entry := range entries {
 		switch entry.Name() {
-		case "home", "workspace":
+		case model.ExtensionFilesHomeDir, model.ExtensionFilesWorkspaceDir:
 			continue
 		default:
-			warn(fmt.Sprintf("extension %q: %s is not a recognized files/ entry (only home and workspace are honored); ignoring", name, filepath.Join(filesDir, entry.Name())))
+			warn(fmt.Sprintf("extension %q: %s is not a recognized files/ entry (only %s and %s are honored); ignoring",
+				name, filepath.Join(filesDir, entry.Name()), model.ExtensionFilesHomeDir, model.ExtensionFilesWorkspaceDir))
 		}
 	}
 }
 
+// maxSpecBytes bounds a spec document read from a source whose files have not
+// been sanitized yet. Real specs are a few kilobytes.
+const maxSpecBytes = 1 << 20
+
+// parseSpecDocument reads and strict-parses the spec document at specPath.
+// Unknown and duplicate keys are load errors, so a typo'd field (a misspelled
+// network: or deniedDomains:) cannot silently disable deny rules or
+// credential-release validation.
+func parseSpecDocument(specPath string) (specDocument, error) {
+	// #nosec G304 -- specPath names a spec file found inside an extension
+	// directory the caller has already resolved or contained.
+	data, err := os.ReadFile(specPath)
+	if err != nil {
+		return specDocument{}, err
+	}
+	return decodeSpecDocument(data, specPath)
+}
+
+// parseUntrustedSpecDocument is parseSpecDocument for a document that has not
+// been through the installer's symlink and size rules yet: the installer
+// classifies the candidates of a fetched repository before it copies anything,
+// and a spec committed there as a symlink would otherwise hand the parser a
+// FIFO, a device, or a file from the host.
+func parseUntrustedSpecDocument(specPath string) (specDocument, error) {
+	info, err := os.Lstat(specPath)
+	if err != nil {
+		return specDocument{}, err
+	}
+	if !info.Mode().IsRegular() {
+		return specDocument{}, fmt.Errorf("%s is not a regular file", specPath)
+	}
+	// #nosec G304 -- specPath names a spec file inside a directory the caller
+	// has contained, and was just confirmed to be a regular file.
+	file, err := os.Open(specPath)
+	if err != nil {
+		return specDocument{}, err
+	}
+	defer func() { _ = file.Close() }()
+
+	data, err := io.ReadAll(io.LimitReader(file, maxSpecBytes+1))
+	if err != nil {
+		return specDocument{}, err
+	}
+	if len(data) > maxSpecBytes {
+		return specDocument{}, fmt.Errorf("%s is larger than %d bytes", specPath, maxSpecBytes)
+	}
+	return decodeSpecDocument(data, specPath)
+}
+
+func decodeSpecDocument(data []byte, specPath string) (specDocument, error) {
+	var doc specDocument
+	if err := yaml.UnmarshalStrict(data, &doc); err != nil {
+		return specDocument{}, fmt.Errorf("parse %s: %w", specPath, err)
+	}
+	if doc.SchemaVersion != SpecSchemaVersion {
+		return specDocument{}, fmt.Errorf("%s schemaVersion must be %q (got %q)", specPath, SpecSchemaVersion, doc.SchemaVersion)
+	}
+	return doc, nil
+}
+
+// ownSpecFile finds dir's own spec.yaml, falling back to spec.json, without
+// user-override resolution.
+func ownSpecFile(dir string) (string, bool) {
+	for _, name := range []string{SpecFilename, SpecFilenameJSON} {
+		path := filepath.Join(dir, name)
+		if util.FileExists(path) {
+			return path, true
+		}
+	}
+	return "", false
+}
+
 // resolveSpecFile finds spec.yaml, falling back to spec.json, via the same
 // user-override-then-built-in resolution used for extension files.
-func resolveSpecFile(paths model.Paths, name string, kind string) (string, bool) {
-	var resolve func(model.Paths, string, string) (string, bool)
-	switch kind {
-	case KindSandbox:
-		resolve = ResolveToolFile
-	case KindMixin:
-		resolve = ResolveFeatureFile
-	default:
+func resolveSpecFile(paths model.Paths, name string, specKind string) (string, bool) {
+	kind, known := model.ExtensionKindFor(specKind)
+	if !known {
 		return "", false
 	}
-	if p, ok := resolve(paths, name, SpecFilename); ok {
+	if p, ok := ResolveExtensionFile(paths, kind, name, SpecFilename); ok {
 		return p, true
 	}
-	if p, ok := resolve(paths, name, SpecFilenameJSON); ok {
+	if p, ok := ResolveExtensionFile(paths, kind, name, SpecFilenameJSON); ok {
 		return p, true
 	}
 	return "", false
@@ -143,17 +200,17 @@ func specSourceLabel(name string) string {
 
 // loadSpecExtension loads a spec.yaml/spec.json document as name and maps it
 // onto a validated model.Extension.
-func loadSpecExtension(paths model.Paths, name string, kind string, expectedType string) (model.Extension, error) {
-	doc, err := LoadSpec(paths, name, kind)
+func loadSpecExtension(paths model.Paths, name string, specKind string) (model.Extension, error) {
+	doc, err := LoadSpec(paths, name, specKind)
 	if err != nil {
 		return model.Extension{}, err
 	}
 
 	ext, state := specToExtension(doc)
-	ext = applyExtensionDefaults(ext, name, expectedType, state)
+	ext = applyExtensionDefaults(ext, name, specKind, state)
 
 	label := specSourceLabel(name)
-	if err := validateExtensionIdentity(ext, name, expectedType, label); err != nil {
+	if err := validateExtensionIdentity(ext, name, specKind, label); err != nil {
 		return model.Extension{}, err
 	}
 	if err := validateAndNormalizeExtension(&ext, label); err != nil {

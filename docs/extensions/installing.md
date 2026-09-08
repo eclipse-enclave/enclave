@@ -145,6 +145,9 @@ extension directory:
 | `installedAt`, `installedBy` | Install timestamp and the enclave version that performed it |
 | `treeHash` | A digest of the installed files, used to detect local edits |
 
+`commit` is always a commit: an annotated tag records the commit it points at,
+never the tag object's own id.
+
 Without `--ref`, the install follows the branch the remote's HEAD names. A
 source whose HEAD names no branch — a local clone sitting on a detached HEAD —
 offers nothing to follow, so the install records a commit pin instead and

@@ -225,6 +225,89 @@ func TestGitFetcherResolveRefTagAndCommit(t *testing.T) {
 	}
 }
 
+// TestGitFetcherAnnotatedTagRecordsCommit covers an annotated tag as the
+// source ref. Its refs/tags/<name> line advertises the tag object, and
+// FETCH_HEAD lands on that object too, so nothing downstream would notice a
+// tag id being recorded as "the exact commit installed" — in the provenance
+// sidecar, in `list --json`, and in the result envelope.
+func TestGitFetcherAnnotatedTagRecordsCommit(t *testing.T) {
+	repo := fixtureRepo(t, true, map[string]string{"README.md": "hi\n"})
+	runGitFixture(t, repo, "tag", "-a", "v1.0.0", "-m", "release")
+	fetcher, err := NewGitFetcher(false)
+	if err != nil {
+		t.Skipf("git fetcher unavailable: %v", err)
+	}
+	tagObject := strings.TrimSpace(runGitFixture(t, repo, "rev-parse", "v1.0.0"))
+	commit := strings.TrimSpace(runGitFixture(t, repo, "rev-parse", "v1.0.0^{commit}"))
+	if tagObject == commit {
+		t.Fatal("fixture tag is not annotated")
+	}
+
+	resolved, err := fetcher.ResolveRef(context.Background(), repo, "v1.0.0")
+	if err != nil {
+		t.Fatalf("ResolveRef: %v", err)
+	}
+	if resolved.RefType != RefTypeTag {
+		t.Fatalf("refType = %q, want tag", resolved.RefType)
+	}
+	if resolved.Commit != commit {
+		t.Fatalf("resolved commit = %q, want the commit %q, not the tag object %q", resolved.Commit, commit, tagObject)
+	}
+
+	opened, err := fetcher.OpenAt(context.Background(), repo, resolved)
+	if err != nil {
+		t.Fatalf("OpenAt: %v", err)
+	}
+	defer opened.Close()
+	if opened.Commit() != commit {
+		t.Fatalf("fetched commit = %q, want %q", opened.Commit(), commit)
+	}
+
+	// A --ref naming the tag object by SHA is a pin like any other: it is
+	// honored, since that is the object fetched, and still records a commit.
+	pinned, err := fetcher.Open(context.Background(), repo, tagObject)
+	if err != nil {
+		t.Fatalf("Open(tag object sha): %v", err)
+	}
+	defer pinned.Close()
+	if pinned.Commit() != commit {
+		t.Fatalf("pinned commit = %q, want %q", pinned.Commit(), commit)
+	}
+}
+
+func TestParseLsRemotePrefersPeeledTagAndBranch(t *testing.T) {
+	const (
+		branch    = "1111111111111111111111111111111111111111"
+		tagObject = "2222222222222222222222222222222222222222"
+		tagCommit = "3333333333333333333333333333333333333333"
+	)
+	annotated := strings.Join([]string{
+		tagObject + "\trefs/tags/v1",
+		tagCommit + "\trefs/tags/v1^{}",
+	}, "\n")
+
+	got, ok := parseLsRemote(annotated, "v1")
+	if !ok || got.Commit != tagCommit || got.RefType != RefTypeTag {
+		t.Errorf("annotated tag = %+v (%v), want the peeled commit", got, ok)
+	}
+
+	// A branch outranks a same-named tag, and the tag's peeled line must not
+	// leak into the branch's commit.
+	got, ok = parseLsRemote(branch+"\trefs/heads/v1\n"+annotated, "v1")
+	if !ok || got.Commit != branch || got.RefType != RefTypeBranch {
+		t.Errorf("branch and tag = %+v (%v), want the branch", got, ok)
+	}
+
+	got, ok = parseLsRemote(tagCommit+"\trefs/tags/v1", "v1")
+	if !ok || got.Commit != tagCommit || got.RefType != RefTypeTag {
+		t.Errorf("lightweight tag = %+v (%v), want its own object id", got, ok)
+	}
+
+	if _, ok = parseLsRemote(branch+"\trefs/heads/other", "v1"); ok {
+		t.Error("parseLsRemote matched a ref it was not asked for")
+	}
+}
+
 func TestGitFetcherOpenListsFilesWithoutMaterializing(t *testing.T) {
 	repo := fixtureRepo(t, true, map[string]string{
 		"extensions/features/foo/spec.yaml": "schemaVersion: \"1\"\nkind: mixin\nname: foo\n",

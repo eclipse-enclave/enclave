@@ -156,7 +156,10 @@ func (f *gitFetcher) ResolveRef(ctx context.Context, remote string, ref string) 
 	if err := validateRefName(trimmed); err != nil {
 		return RemoteRef{}, fmt.Errorf("requested ref %q: %w", trimmed, err)
 	}
-	out, err := f.run(ctx, "", "ls-remote", remote, "refs/heads/"+trimmed, "refs/tags/"+trimmed)
+	// The peeled pattern is asked for explicitly: a filtered ls-remote does not
+	// advertise the "^{}" line on its own, and for an annotated tag that line
+	// carries the commit (see parseLsRemote).
+	out, err := f.run(ctx, "", "ls-remote", remote, "refs/heads/"+trimmed, "refs/tags/"+trimmed, "refs/tags/"+trimmed+"^{}")
 	if err != nil {
 		return RemoteRef{}, err
 	}
@@ -242,8 +245,7 @@ func parseSymrefHead(out string, remote string) (RemoteRef, error) {
 }
 
 func parseLsRemote(out string, ref string) (RemoteRef, bool) {
-	branch := RemoteRef{}
-	tag := RemoteRef{}
+	var branchCommit, tagObject, tagCommit string
 	for _, line := range strings.Split(out, "\n") {
 		fields := strings.Fields(line)
 		if len(fields) != 2 {
@@ -251,17 +253,26 @@ func parseLsRemote(out string, ref string) (RemoteRef, bool) {
 		}
 		switch fields[1] {
 		case "refs/heads/" + ref:
-			branch = RemoteRef{Commit: fields[0], Ref: ref, RefType: RefTypeBranch}
+			branchCommit = fields[0]
 		case "refs/tags/" + ref:
-			tag = RemoteRef{Commit: fields[0], Ref: ref, RefType: RefTypeTag}
+			tagObject = fields[0]
+		case "refs/tags/" + ref + "^{}":
+			tagCommit = fields[0]
 		}
 	}
 	// A branch wins over a same-named tag, matching git's own precedence.
-	if branch.Commit != "" {
-		return branch, true
+	if branchCommit != "" {
+		return RemoteRef{Commit: branchCommit, Ref: ref, RefType: RefTypeBranch}, true
 	}
-	if tag.Commit != "" {
-		return tag, true
+	// An annotated tag advertises its own object id under refs/tags/<ref> and
+	// the commit it points at on the peeled "^{}" line. What an install records
+	// is a commit, so the peeled line wins; a lightweight tag has no peeled
+	// line and its object id already is the commit.
+	if tagCommit == "" {
+		tagCommit = tagObject
+	}
+	if tagCommit != "" {
+		return RemoteRef{Commit: tagCommit, Ref: ref, RefType: RefTypeTag}, true
 	}
 	return RemoteRef{}, false
 }
@@ -370,25 +381,34 @@ func (r *gitRepo) fetchPinnedCommitFromDefaultBranch(ctx context.Context, resolv
 	return r.verifyCommit(ctx, resolved)
 }
 
-// verifyCommit adopts the commit the fetch landed on when a branch or tag moved
-// between ls-remote and fetch, and fails when an explicit commit pin was not
-// the commit fetched.
+// verifyCommit records the commit the fetch landed on, which also adopts a
+// branch or tag that moved between ls-remote and fetch, and fails when an
+// explicit object pin was not the object fetched. The two revisions differ for
+// an annotated tag, where the fetch lands on the tag object: the pin is checked
+// against the object, so a pin naming a tag object is still honored, while what
+// gets recorded is always the commit that object names.
 func (r *gitRepo) verifyCommit(ctx context.Context, resolved RemoteRef) error {
-	out, err := r.fetcher.run(ctx, r.dir, "rev-parse", r.checkoutTarget)
+	object, err := r.revParse(ctx, r.checkoutTarget)
 	if err != nil {
 		return err
 	}
-	fetched := strings.TrimSpace(out)
-	if resolved.Commit != "" && fetched != resolved.Commit {
-		if resolved.RefType == RefTypeCommit {
-			return fmt.Errorf("requested commit %s but fetched %s", ShortCommit(resolved.Commit), ShortCommit(fetched))
-		}
-		r.ref.Commit = fetched
+	if resolved.RefType == RefTypeCommit && object != resolved.Commit {
+		return fmt.Errorf("requested commit %s but fetched %s", ShortCommit(resolved.Commit), ShortCommit(object))
 	}
-	if r.ref.Commit == "" {
-		r.ref.Commit = fetched
+	commit, err := r.revParse(ctx, r.checkoutTarget+"^{commit}")
+	if err != nil {
+		return err
 	}
+	r.ref.Commit = commit
 	return nil
+}
+
+func (r *gitRepo) revParse(ctx context.Context, rev string) (string, error) {
+	out, err := r.fetcher.run(ctx, r.dir, "rev-parse", "--verify", rev)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(out), nil
 }
 
 func (r *gitRepo) Commit() string  { return r.ref.Commit }
@@ -464,9 +484,10 @@ func (f *gitFetcher) runCombined(ctx context.Context, dir string, args ...string
 	// #nosec G204 -- the binary is resolved via LookPath. Every other argument
 	// is a fixed git subcommand/flag, a commit SHA matched against
 	// fullSHAPattern, a ref name that passed validateRefName (rejecting a
-	// leading "-" and git's other unsafe ref characters), or a repository
-	// path that passed normalizeSubpath and a leading-"-" check in
-	// Materialize; no caller-controlled value reaches git unvalidated.
+	// leading "-" and git's other unsafe ref characters), one of those three
+	// under a fixed prefix or "^{...}" suffix, or a repository path that passed
+	// normalizeSubpath and a leading-"-" check in Materialize; no
+	// caller-controlled value reaches git unvalidated.
 	cmd := exec.CommandContext(ctx, f.git, full...)
 	cmd.Dir = dir
 	var stdoutBuf, stderrBuf bytes.Buffer

@@ -9,6 +9,7 @@ package config
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 
@@ -83,6 +84,10 @@ func warnUnknownFilesEntries(filesDir string, name string, warn func(string)) {
 	}
 }
 
+// maxSpecBytes bounds a spec document read from a source whose files have not
+// been sanitized yet. Real specs are a few kilobytes.
+const maxSpecBytes = 1 << 20
+
 // parseSpecDocument reads and strict-parses the spec document at specPath.
 // Unknown and duplicate keys are load errors, so a typo'd field (a misspelled
 // network: or deniedDomains:) cannot silently disable deny rules or
@@ -94,7 +99,41 @@ func parseSpecDocument(specPath string) (specDocument, error) {
 	if err != nil {
 		return specDocument{}, err
 	}
+	return decodeSpecDocument(data, specPath)
+}
 
+// parseUntrustedSpecDocument is parseSpecDocument for a document that has not
+// been through the installer's symlink and size rules yet: the installer
+// classifies the candidates of a fetched repository before it copies anything,
+// and a spec committed there as a symlink would otherwise hand the parser a
+// FIFO, a device, or a file from the host.
+func parseUntrustedSpecDocument(specPath string) (specDocument, error) {
+	info, err := os.Lstat(specPath)
+	if err != nil {
+		return specDocument{}, err
+	}
+	if !info.Mode().IsRegular() {
+		return specDocument{}, fmt.Errorf("%s is not a regular file", specPath)
+	}
+	// #nosec G304 -- specPath names a spec file inside a directory the caller
+	// has contained, and was just confirmed to be a regular file.
+	file, err := os.Open(specPath)
+	if err != nil {
+		return specDocument{}, err
+	}
+	defer func() { _ = file.Close() }()
+
+	data, err := io.ReadAll(io.LimitReader(file, maxSpecBytes+1))
+	if err != nil {
+		return specDocument{}, err
+	}
+	if len(data) > maxSpecBytes {
+		return specDocument{}, fmt.Errorf("%s is larger than %d bytes", specPath, maxSpecBytes)
+	}
+	return decodeSpecDocument(data, specPath)
+}
+
+func decodeSpecDocument(data []byte, specPath string) (specDocument, error) {
 	var doc specDocument
 	if err := yaml.UnmarshalStrict(data, &doc); err != nil {
 		return specDocument{}, fmt.Errorf("parse %s: %w", specPath, err)

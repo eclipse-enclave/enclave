@@ -239,6 +239,45 @@ func TestSummarizeSpecDirRejectsUnknownField(t *testing.T) {
 	}
 }
 
+// TestSummarizeSpecDirRejectsSymlinkedSpec covers the untrusted-source rules:
+// this is the first read of a fetched repository's content, before the
+// installer's sanitizer has seen any of it, so a spec committed as a symlink
+// must be refused rather than followed to a host file, a device, or a FIFO.
+func TestSummarizeSpecDirRejectsSymlinkedSpec(t *testing.T) {
+	dir := t.TempDir()
+	outside := filepath.Join(t.TempDir(), "elsewhere.yaml")
+	writeTestFile(t, outside, "schemaVersion: \"1\"\nkind: mixin\nname: foo\n")
+	if err := os.Symlink(outside, filepath.Join(dir, SpecFilename)); err != nil {
+		t.Skipf("symlink unsupported: %v", err)
+	}
+
+	if _, err := SummarizeSpecDir(dir); err == nil {
+		t.Fatal("SummarizeSpecDir followed a symlinked spec, want error")
+	}
+}
+
+func TestSummarizeSpecDirSizeCap(t *testing.T) {
+	spec := func(padding int) string {
+		body := "schemaVersion: \"1\"\nkind: mixin\nname: foo\ndescription: "
+		return body + strings.Repeat("x", padding-len(body))
+	}
+
+	dir := t.TempDir()
+	writeTestFile(t, filepath.Join(dir, SpecFilename), spec(maxSpecBytes))
+	if _, err := SummarizeSpecDir(dir); err != nil {
+		t.Fatalf("SummarizeSpecDir at the size cap: %v", err)
+	}
+
+	writeTestFile(t, filepath.Join(dir, SpecFilename), spec(maxSpecBytes+1))
+	_, err := SummarizeSpecDir(dir)
+	if err == nil {
+		t.Fatal("SummarizeSpecDir accepted a spec past the size cap, want error")
+	}
+	if !strings.Contains(err.Error(), "larger than") {
+		t.Fatalf("err = %v, want it to name the size cap", err)
+	}
+}
+
 func TestSummarizeSpecDirRejectsSchemaVersionMismatch(t *testing.T) {
 	dir := t.TempDir()
 	writeTestFile(t, filepath.Join(dir, SpecFilename), "schemaVersion: \"2\"\nkind: mixin\nname: foo\n")

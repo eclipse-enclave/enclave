@@ -339,7 +339,10 @@ independent of whether other extensions in the same invocation succeeded.
   never loaded (see [Extension Sources](README.md#extension-sources)).
 - An extension is capped at 1000 files and 10 MiB of content; symlinks and
   other non-regular files are rejected by name, as is any path that would
-  escape the destination directory.
+  escape the destination directory. A candidate's `spec.yaml` is the first
+  repository content read, before anything is copied, and is held to the same
+  rule plus a 1 MiB cap: a symlinked spec is reported as unusable rather than
+  followed out of the checkout.
 - A `go/` directory in an installed extension is copied but never compiled
   in: custom hooks/handlers still require rebuilding the `enclave` binary.
 - There is no extension registry or index — every install names a git

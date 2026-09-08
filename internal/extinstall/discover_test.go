@@ -8,6 +8,7 @@
 package extinstall
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -98,6 +99,30 @@ func TestCandidateDirsDepthBoundIncludesAtBound(t *testing.T) {
 	}
 	if len(got) != 1 || got[0].Dir != "a/b/c/d/e/f/g/h" {
 		t.Fatalf("candidates = %+v, want the spec at the depth boundary", got)
+	}
+}
+
+// TestClassifySkipsSymlinkedSpec covers discovery reading a fetched
+// repository's content before anything has been sanitized: a spec committed as
+// a symlink is reported as unusable, not followed out of the checkout.
+func TestClassifySkipsSymlinkedSpec(t *testing.T) {
+	repo := t.TempDir()
+	outside := filepath.Join(t.TempDir(), "elsewhere.yaml")
+	writeFixture(t, outside, "schemaVersion: \"1\"\nkind: mixin\nname: foo\n", 0o644)
+	dir := filepath.Join(repo, "features", "foo")
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.Symlink(outside, filepath.Join(dir, "spec.yaml")); err != nil {
+		t.Skipf("symlink unsupported: %v", err)
+	}
+
+	entries := classify(repo, []candidate{{Dir: "features/foo", Name: "foo"}})
+	if len(entries) != 1 {
+		t.Fatalf("entries = %+v, want one", entries)
+	}
+	if entries[0].Skip == "" {
+		t.Fatalf("entry = %+v, want a skip reason for the symlinked spec", entries[0])
 	}
 }
 

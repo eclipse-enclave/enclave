@@ -119,14 +119,17 @@ type SpecSummary struct {
 // SummarizeSpecDir reads dir's spec.yaml (falling back to spec.json) and
 // projects it onto a SpecSummary. It returns os.ErrNotExist when neither file
 // is present, and a parse error for a malformed, unknown-field, or
-// schemaVersion-mismatched document.
+// schemaVersion-mismatched document. dir may be extension content that nothing
+// has sanitized yet — the installer classifies a fetched repository's
+// candidates before it copies anything — so the document is read under the
+// untrusted-source rules.
 func SummarizeSpecDir(dir string) (SpecSummary, error) {
 	specPath, ok := ownSpecFile(dir)
 	if !ok {
 		return SpecSummary{}, fmt.Errorf("no %s in %s: %w", SpecFilename, dir, os.ErrNotExist)
 	}
 
-	doc, err := parseSpecDocument(specPath)
+	doc, err := parseUntrustedSpecDocument(specPath)
 	if err != nil {
 		return SpecSummary{}, err
 	}

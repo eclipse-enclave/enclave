@@ -110,19 +110,32 @@ func TestSpecNetworkDomainsIncludesOverriddenReleaseHost(t *testing.T) {
 	}
 }
 
-// The token itself must still go only to the selected instance.
-func TestReleaseHostsForUsesOnlyTheOverride(t *testing.T) {
+// The token itself must still go only to the selected instance, and only to
+// that host: a selected host names one instance, so the gateway must match it
+// by equality instead of covering its subdomains.
+func TestReleaseTargetsForUseOnlyTheOverrideAndAreExact(t *testing.T) {
 	r := runtimeWithProfile(t, gitlabLikeProfile())
 	r.releaseHostOverrides = map[string][]string{"gitlab-token": {"gitlab.example.com"}}
 	manager := newAuthManager(r)
 
 	secrets := mustActiveSecrets(t, r)
 	for _, secret := range secrets {
-		if secret.ID != "gitlab-token" {
+		if secret.ReleaseHTTP == nil {
 			continue
 		}
-		if hosts := manager.releaseHostsFor(secret); strings.Join(hosts, ",") != "gitlab.example.com" {
-			t.Fatalf("releaseHostsFor(gitlab-token) = %v, want only the selected host", hosts)
+		hosts, exact := manager.releaseTargetsFor(secret)
+		switch secret.ID {
+		case "gitlab-token":
+			if strings.Join(hosts, ",") != "gitlab.example.com" {
+				t.Fatalf("releaseTargetsFor(gitlab-token) = %v, want only the selected host", hosts)
+			}
+			if !exact {
+				t.Fatal("releaseTargetsFor(gitlab-token) exact = false, want the selected host matched exactly")
+			}
+		case "gitlab-job-token":
+			if exact {
+				t.Fatalf("releaseTargetsFor(gitlab-job-token) exact = true, want declared patterns to keep suffix matching")
+			}
 		}
 	}
 }
@@ -177,5 +190,46 @@ func TestInjectDeclaredSecretsDoesNotPersistHostSelector(t *testing.T) {
 	}
 	if got := injection.SecretValues["GITLAB_TOKEN"]; got != "gitlab-token-value" {
 		t.Fatalf("SecretValues[GITLAB_TOKEN] = %q, want the token still persisted", got)
+	}
+}
+
+// The gateway rule the runtime hands over must carry the selected host and the
+// exact-match flag, or the token would reach every host beneath the instance.
+func TestInjectDeclaredSecretsMarksSelectedHostExact(t *testing.T) {
+	t.Setenv("GITLAB_HOST", "gitlab.example.com")
+	t.Setenv("GITLAB_TOKEN", "gitlab-token-value")
+	t.Setenv("JOB_TOKEN", "")
+
+	r := runtimeWithProfile(t, gitlabLikeProfile())
+	manager := newAuthManager(r)
+
+	env := []string{}
+	injection, err := manager.injectDeclaredSecrets(
+		stubHooks{},
+		authContextForRuntime(r),
+		&env,
+		map[string]string{},
+		nil,
+		nil,
+		mustActiveSecrets(t, r),
+	)
+	if err != nil {
+		t.Fatalf("injectDeclaredSecrets() error = %v", err)
+	}
+
+	var entry model.SecretReleaseEntry
+	for _, candidate := range injection.SecretMapping.Entries {
+		if candidate.SecretID == "gitlab-token" {
+			entry = candidate
+		}
+	}
+	if entry.SecretID == "" {
+		t.Fatalf("SecretMapping.Entries = %v, want a release rule for gitlab-token", injection.SecretMapping.Entries)
+	}
+	if strings.Join(entry.Hosts, ",") != "gitlab.example.com" {
+		t.Fatalf("entry.Hosts = %v, want only the selected host", entry.Hosts)
+	}
+	if !entry.ExactHosts {
+		t.Fatal("entry.ExactHosts = false, want the selected host matched exactly")
 	}
 }

@@ -213,7 +213,8 @@ func hostCredentialRefs(secrets []activeSecret) map[string][]string {
 // the one instance the token belongs to, and injecting an instance-specific
 // token into the default hosts as well would expose it to a service that cannot
 // accept it. It narrows token release only — the declared hosts stay in the
-// network allow set, see Runtime.releaseHosts.
+// network allow set, see Runtime.releaseHosts. The selected host is released to
+// by equality rather than as a suffix, see model.SecretReleaseEntry.ExactHosts.
 func resolveReleaseHostOverrides(secrets []activeSecret, hostHome string, secretsLayers []auth.SecretsLayer, persistedEnv map[string]string) map[string][]string {
 	byID := make(map[string]activeSecret, len(secrets))
 	for _, secret := range secrets {

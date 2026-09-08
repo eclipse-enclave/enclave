@@ -428,13 +428,20 @@ Secrets are split across two `spec.yaml` sections:
   `serviceDomains` or from its own `hosts` list.
 - `network.serviceAuth.<service-id>.hostsFromCredential` names another
   `credentials.sources` id whose resolved value is a host, for services that
-  can point at a self-hosted instance. When that credential resolves, its value
+  can point at a self-hosted instance. It does not stand in for the hosts the
+  pairing above requires: the service still needs `hosts` or `serviceDomains`
+  entries, which remain the release targets whenever the credential is unset.
+  When that credential resolves, its value
   becomes the **only** host this service's token is released to, replacing the
   declared `hosts` and any `serviceDomains` entries pointing at the service —
   an instance-specific token must not be released to the public default host as
-  well. The network allow set is *not* narrowed: the selected host is added to
-  it, and the declared hosts stay reachable. So one env var is enough to make
-  the tool reach the instance with token injection working. An unset credential
+  well. Unlike a declared host, which the gateway also applies to everything
+  beneath it, the selected host is matched exactly: the token reaches
+  `gitlab.example.com` and not `runner.gitlab.example.com`. The network allow
+  set is *not* narrowed: the selected host is added to it (with the usual
+  subdomain reach, so the instance's other hosts stay resolvable), and the
+  declared hosts stay reachable. So one env var is enough to make the tool
+  reach the instance with token injection working. An unset credential
   keeps the declared hosts as the release targets, and the resolved value is not
   written to the persisted env store, so it never outlives the run that set it.
   A value that is not a usable host warns and is ignored; wildcards are

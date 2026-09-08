@@ -68,6 +68,35 @@ func TestWriteSecretReleaseConfig(t *testing.T) {
 	}
 }
 
+// The exact-host flag is what keeps a runtime-selected instance from releasing
+// the token to its subdomains, so it has to survive the host/gateway wire.
+func TestWriteSecretReleaseConfigKeepsExactHosts(t *testing.T) {
+	path, err := writeSecretReleaseConfig([]backend.SecretRelease{
+		{
+			SecretID:    "gitlab-token",
+			Placeholder: "ENCLAVE_SECRET_abc",
+			Value:       "real",
+			HTTP: &backend.HTTPReleaseRule{
+				Hosts:      []string{"gitlab.example.com"},
+				Header:     "private-token",
+				ExactHosts: true,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("writeSecretReleaseConfig() error = %v", err)
+	}
+	defer func() { _ = os.Remove(path) }()
+
+	loaded, err := mitm.LoadRules(path)
+	if err != nil {
+		t.Fatalf("LoadRules(%q) error = %v", path, err)
+	}
+	if len(loaded) != 1 || !loaded[0].ExactHosts {
+		t.Fatalf("LoadRules(%q) = %#v, want a single exact-host rule", path, loaded)
+	}
+}
+
 func TestWorkspaceIDFromSessionPrefersRealWorktree(t *testing.T) {
 	got := workspaceIDFromSession(backend.SessionMeta{
 		Worktree:     "/workspace/project",

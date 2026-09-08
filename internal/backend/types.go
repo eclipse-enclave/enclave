@@ -217,6 +217,9 @@ type HTTPReleaseRule struct {
 	Hosts  []string
 	Header string
 	Format string
+	// ExactHosts matches Hosts by equality rather than covering subdomains;
+	// see model.SecretReleaseEntry.
+	ExactHosts bool
 }
 
 type PortMapping struct {

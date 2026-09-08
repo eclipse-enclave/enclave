@@ -559,9 +559,10 @@ func secretReleases(mapping SecretMapping) []backend.SecretRelease {
 			Placeholder: entry.Placeholder,
 			Value:       entry.Value,
 			HTTP: &backend.HTTPReleaseRule{
-				Hosts:  append([]string(nil), entry.Hosts...),
-				Header: entry.Header,
-				Format: entry.Format,
+				Hosts:      append([]string(nil), entry.Hosts...),
+				Header:     entry.Header,
+				Format:     entry.Format,
+				ExactHosts: entry.ExactHosts,
 			},
 		})
 	}

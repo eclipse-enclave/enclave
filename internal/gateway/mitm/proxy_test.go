@@ -88,6 +88,68 @@ func TestRewriteHeadersUnauthorizedHostBlocked(t *testing.T) {
 	}
 }
 
+// A host selected at runtime names one instance, so the token must not reach
+// hosts beneath it the way a declared pattern would allow.
+func TestRewriteHeadersExactHostRejectsSubdomain(t *testing.T) {
+	rule := model.SecretReleaseEntry{
+		Placeholder: "ENCLAVE_SECRET_abc",
+		Value:       "real-secret",
+		Hosts:       []string{"gitlab.example.com"},
+		Header:      "private-token",
+		ExactHosts:  true,
+	}
+
+	headers := http.Header{}
+	headers.Set("Private-Token", "ENCLAVE_SECRET_abc")
+	if err := rewriteHeaders("https", "runner.gitlab.example.com", headers, []model.SecretReleaseEntry{rule}); err == nil {
+		t.Fatal("rewriteHeaders() error = nil, want the subdomain denied")
+	}
+	if got := headers.Get("Private-Token"); got != "ENCLAVE_SECRET_abc" {
+		t.Fatalf("header value = %q, want placeholder unchanged", got)
+	}
+
+	headers = http.Header{}
+	headers.Set("Private-Token", "ENCLAVE_SECRET_abc")
+	if err := rewriteHeaders("https", "gitlab.example.com", headers, []model.SecretReleaseEntry{rule}); err != nil {
+		t.Fatalf("rewriteHeaders() error = %v, want the selected host allowed", err)
+	}
+	if got := headers.Get("Private-Token"); got != "real-secret" {
+		t.Fatalf("header value = %q, want %q", got, "real-secret")
+	}
+}
+
+func TestRequiresMITMExactHostsIgnoresSubdomain(t *testing.T) {
+	rules := []model.SecretReleaseEntry{
+		{
+			Placeholder: "ENCLAVE_SECRET_abc",
+			Value:       "real-secret",
+			Hosts:       []string{"gitlab.example.com"},
+			Header:      "private-token",
+			ExactHosts:  true,
+		},
+	}
+	if !requiresMITM("gitlab.example.com", rules) {
+		t.Fatal("requiresMITM(gitlab.example.com) = false, want true")
+	}
+	if requiresMITM("runner.gitlab.example.com", rules) {
+		t.Fatal("requiresMITM(runner.gitlab.example.com) = true, want false")
+	}
+}
+
+func TestNormalizeRuleRejectsWildcardInExactHostRule(t *testing.T) {
+	_, err := normalizeRule(model.SecretReleaseEntry{
+		SecretID:    "gitlab-token",
+		Placeholder: "ENCLAVE_SECRET_abc",
+		Value:       "real-secret",
+		Hosts:       []string{"*.gitlab.example.com"},
+		Header:      "private-token",
+		ExactHosts:  true,
+	})
+	if err == nil {
+		t.Fatal("normalizeRule() error = nil, want a wildcard in an exact-host rule rejected")
+	}
+}
+
 func TestNormalizeHostStripsLeadingDot(t *testing.T) {
 	got, err := domainpattern.NormalizeHost(".API.EXAMPLE.COM.")
 	if err != nil {

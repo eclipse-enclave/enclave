@@ -108,6 +108,7 @@ func writeSecretReleaseConfig(secrets []backend.SecretRelease) (string, error) {
 			Hosts:       append([]string(nil), secret.HTTP.Hosts...),
 			Header:      secret.HTTP.Header,
 			Format:      secret.HTTP.Format,
+			ExactHosts:  secret.HTTP.ExactHosts,
 		})
 	}
 	if len(entries) == 0 {

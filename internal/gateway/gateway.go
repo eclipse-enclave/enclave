@@ -10,7 +10,6 @@ package gateway
 import (
 	"context"
 	"fmt"
-	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -187,11 +186,14 @@ func buildGatewayImage(paths model.Paths, profile model.Profile, allowlistPath s
 			model.GatewayLabelAgent: profile.Name,
 		},
 	}
-	if err := docker.Build(context.Background(), req, io.Discard); err != nil {
+	// Build output goes to the terminal like the runtime image build, so a
+	// gateway build failure is attributable instead of surfacing later as an
+	// unrelated container-start error.
+	if err := docker.Build(context.Background(), req, os.Stdout); err != nil {
 		// Some Docker BuildKit setups fail DNS resolution in the default build
 		// network for Alpine index fetches. Retry once with host build network.
 		req.NetworkMode = "host"
-		if retryErr := docker.Build(context.Background(), req, io.Discard); retryErr != nil {
+		if retryErr := docker.Build(context.Background(), req, os.Stdout); retryErr != nil {
 			return fmt.Errorf("failed to build gateway image: %w (retry with host build network failed: %v)", err, retryErr)
 		}
 		logx.Warnf("Gateway build failed on default build network; retry with host build network succeeded")

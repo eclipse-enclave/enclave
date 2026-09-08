@@ -53,6 +53,13 @@ Extracted runtime asset entries are reproducible cache data. Deleting them is
 safe, and Enclave extracts the current entry again on the next run. Enclave does
 not garbage collect entries for older binaries yet.
 
+Everything under the cache root is disposable: deleting it only costs
+performance. Package caches are recreated empty on the next session start, as
+ordinary host bind mounts that the container backend may create when the
+source is missing from its view (relevant on Docker Desktop for macOS, whose
+VM can briefly report a freshly recreated cache directory as nonexistent). No
+required runtime file is bind-mounted from the cache tree.
+
 The paths above use the Linux (XDG) layout. On macOS the same data lives under
 the standard Apple locations, in a reverse-DNS application directory: config
 and state under `~/Library/Application Support/org.eclipse.enclave/`

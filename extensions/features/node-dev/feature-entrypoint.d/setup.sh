@@ -113,16 +113,23 @@ fi
 # Seed cache mount with build-time default version.
 # Copies missing versions from the image snapshot into the persistent cache
 # so that image upgrades make the new default available immediately.
+# Best-effort: the versions cache is a disposable mount that may be
+# unwritable (e.g. recreated root-owned by the daemon); a session must still
+# start on the image snapshot, only without persisting Node installs.
 if [ -d "$HOME/.nvm/versions-default/node" ]; then
-    mkdir -p "$HOME/.nvm/versions/node"
-    for _enclave_ver in "$HOME/.nvm/versions-default/node"/*/; do
-        [ -d "$_enclave_ver" ] || continue
-        _enclave_base="$(basename "$_enclave_ver")"
-        if [ ! -d "$HOME/.nvm/versions/node/$_enclave_base" ]; then
-            cp -a "$_enclave_ver" "$HOME/.nvm/versions/node/$_enclave_base"
-        fi
-    done
-    unset _enclave_ver _enclave_base
+    if mkdir -p "$HOME/.nvm/versions/node" 2>/dev/null; then
+        for _enclave_ver in "$HOME/.nvm/versions-default/node"/*/; do
+            [ -d "$_enclave_ver" ] || continue
+            _enclave_base="$(basename "$_enclave_ver")"
+            if [ ! -d "$HOME/.nvm/versions/node/$_enclave_base" ]; then
+                cp -a "$_enclave_ver" "$HOME/.nvm/versions/node/$_enclave_base" 2>/dev/null || \
+                    echo "Warning: failed to seed Node.js $_enclave_base into the nvm version cache"
+            fi
+        done
+        unset _enclave_ver _enclave_base
+    else
+        echo "Warning: nvm version cache at $HOME/.nvm/versions is not writable; Node.js installs will not persist"
+    fi
 fi
 
 _enclave_node_target=""

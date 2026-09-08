@@ -210,6 +210,11 @@ func (b *Backend) buildRuntimeMounts(req backend.Request, controlDir string, fil
 		if mount.Type != "" && mount.Type != backend.MountTypeBind {
 			return nil, fmt.Errorf("qemu backend: unsupported mount type %q", mount.Type)
 		}
+		if mount.CreateSourceDir {
+			if err := os.MkdirAll(mount.Source, 0o700); err != nil {
+				return nil, fmt.Errorf("qemu backend: create disposable mount source %q: %w", mount.Source, err)
+			}
+		}
 		info, err := os.Stat(mount.Source)
 		if err != nil {
 			return nil, fmt.Errorf("qemu backend: inspect mount source %q: %w", mount.Source, err)

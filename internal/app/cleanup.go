@@ -176,6 +176,10 @@ func resolveEphemeralStoreDirs(run model.RunOptions, cleanup model.CleanupOption
 			tools = []string{run.Tool}
 		}
 		for _, tool := range tools {
+			// The project-level features namespace is not a tool config-store root.
+			if config.HostProjectToolDir(home, hash, tool) == config.HostStoreFeatureStateRootDir(home, hash) {
+				continue
+			}
 			storeRoot := config.HostStoreConfigRootDir(home, tool, hash)
 			for _, key := range listSubdirs(storeRoot) {
 				if key == persistentConfigStoreKey {
@@ -214,12 +218,15 @@ func resolveCleanupDirs(run model.RunOptions, cleanup model.CleanupOptions, home
 	if cleanup.CleanupAll {
 		dirs := []cleanupDir{
 			{Kind: "cache", Path: config.HostCacheDir(home)},
-			// The state projects tree holds every project's config/env stores
-			// and history, so a full cleanup removes them all at once.
-			{Kind: "history", Path: config.HostProjectsDir(home)},
 			// The image inbox is global (not project-scoped), so it is only
 			// removed by a full cleanup. Held images are user-imported content.
 			{Kind: "inbox", Path: config.HostImageInboxDir(home)},
+		}
+		if cleanup.CleanupKeepHist || cleanup.CleanupKeepFeatureState {
+			dirs = append(dirs, selectiveAllProjectCleanupDirs(home, cleanup)...)
+		} else {
+			// Without selective project-state retention, remove the whole tree.
+			dirs = append(dirs, cleanupDir{Kind: "history", Path: config.HostProjectsDir(home)})
 		}
 		// Shared tool/feature auth stores live outside the projects tree; they
 		// are removed on a full cleanup unless `--keep auth` is set.
@@ -236,7 +243,42 @@ func resolveCleanupDirs(run model.RunOptions, cleanup model.CleanupOptions, home
 		{Kind: "history", Path: config.HostStoreConfigRootDir(home, run.Tool, project.Hash)},
 		{Kind: "history", Path: config.HostStoreEnvDir(home, run.Tool, project.Hash)},
 		{Kind: "memory", Path: config.HostProjectMemoryDir(home, project.Hash, run.Tool)},
+		{Kind: "feature-state", Path: config.HostStoreFeatureStateRootDir(home, project.Hash)},
 	}
+}
+
+// selectiveAllProjectCleanupDirs expands the projects tree only when a keep
+// flag needs to retain one project-scoped namespace while deleting another.
+// Projects without matching retained data can still be removed as a whole.
+func selectiveAllProjectCleanupDirs(home string, cleanup model.CleanupOptions) []cleanupDir {
+	var dirs []cleanupDir
+	for _, hash := range listSubdirs(config.HostProjectsDir(home)) {
+		projectDir := config.HostProjectDir(home, hash)
+		featureStateRoot := config.HostStoreFeatureStateRootDir(home, hash)
+		children := listSubdirs(projectDir)
+		keepsChild := false
+		for _, child := range children {
+			path := filepath.Join(projectDir, child)
+			if path == featureStateRoot {
+				keepsChild = keepsChild || cleanup.CleanupKeepFeatureState
+			} else {
+				keepsChild = keepsChild || cleanup.CleanupKeepHist
+			}
+		}
+		if !keepsChild {
+			dirs = append(dirs, cleanupDir{Kind: "project", Path: projectDir})
+			continue
+		}
+		for _, child := range children {
+			path := filepath.Join(projectDir, child)
+			kind := "history"
+			if path == featureStateRoot {
+				kind = "feature-state"
+			}
+			dirs = append(dirs, cleanupDir{Kind: kind, Path: path})
+		}
+	}
+	return dirs
 }
 
 // authStoreCleanupDirs enumerates the shared tool and feature auth store
@@ -269,6 +311,9 @@ func cleanupDirsForRemoval(run model.RunOptions, cleanup model.CleanupOptions, h
 	}
 	if cleanup.CleanupKeepAuth {
 		dirs = filterDirs(dirs, "auth")
+	}
+	if cleanup.CleanupKeepFeatureState {
+		dirs = filterDirs(dirs, "feature-state")
 	}
 	return dirs
 }

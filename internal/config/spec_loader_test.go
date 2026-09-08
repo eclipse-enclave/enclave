@@ -91,6 +91,9 @@ func TestLoadFeatureExtensionFromSpec(t *testing.T) {
 	if !ext.DefaultEnabled {
 		t.Fatalf("expected default DefaultEnabled=true for mixin, got %+v", ext)
 	}
+	if !ext.FeatureState {
+		t.Fatalf("expected state opt-in to map onto feature, got %+v", ext)
+	}
 }
 
 func TestListToolsIncludesSpecOnlyTools(t *testing.T) {
@@ -153,9 +156,26 @@ func TestLoadSpecRejectsNameInDocument(t *testing.T) {
 	}
 }
 
-// TestLoadSpecMissingFileRoutesElsewhere confirms that resolving a spec of a
-// kind whose root does not contain the extension returns not-found (the
-// previous "kind mismatch" test only ever hit this path).
+func TestLoadSpecRejectsReservedFeatureStateToolName(t *testing.T) {
+	dir := t.TempDir()
+	writeTestFile(t, filepath.Join(dir, "tools", projectFeatureStateDirName, SpecFilename),
+		"schemaVersion: \"1\"\nkind: sandbox\nname: "+projectFeatureStateDirName+"\n")
+	paths := model.Paths{ToolsDir: filepath.Join(dir, "tools"), FeaturesDir: filepath.Join(dir, "features")}
+	if _, err := LoadSpec(paths, projectFeatureStateDirName, KindSandbox); err == nil || !strings.Contains(err.Error(), "reserved") {
+		t.Fatalf("expected reserved-name error, got %v", err)
+	}
+}
+
+func TestLoadSpecRejectsStateOnSandbox(t *testing.T) {
+	dir := t.TempDir()
+	writeTestFile(t, filepath.Join(dir, "tools", "demo", SpecFilename),
+		"schemaVersion: \"1\"\nkind: sandbox\nname: demo\nstate: true\n")
+	paths := model.Paths{ToolsDir: filepath.Join(dir, "tools"), FeaturesDir: filepath.Join(dir, "features")}
+	if _, err := LoadSpec(paths, "demo", KindSandbox); err == nil || !strings.Contains(err.Error(), "mixin") {
+		t.Fatalf("expected mixin-only state error, got %v", err)
+	}
+}
+
 func TestLoadSpecRejectsUnknownKeys(t *testing.T) {
 	dir := t.TempDir()
 	writeTestFile(t, filepath.Join(dir, "tools", "demo", SpecFilename),
@@ -242,6 +262,9 @@ func TestLoadSpecRejectsWhitespaceEntrypointArgv(t *testing.T) {
 	}
 }
 
+// TestLoadSpecMissingFileRoutesElsewhere confirms that resolving a spec of a
+// kind whose root does not contain the extension returns not-found (the
+// previous "kind mismatch" test only ever hit this path).
 func TestLoadSpecMissingFileRoutesElsewhere(t *testing.T) {
 	paths := testPathsWithExtensions(t, "testdata/spec")
 	// "demo" only exists under tools/; KindMixin resolves under features/.

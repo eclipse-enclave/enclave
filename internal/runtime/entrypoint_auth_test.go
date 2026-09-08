@@ -12,6 +12,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"testing"
+
+	"enclave/internal/model"
 )
 
 func TestEntrypointClaudeCredentialsNewerConfigUpdatesSharedAndLinks(t *testing.T) {
@@ -96,6 +98,43 @@ func runEntrypointAuth(t *testing.T, home string, configDir string, authDir stri
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("entrypoint failed: %v\noutput:\n%s", err, string(out))
 	}
+}
+
+func TestEntrypointScopesFeatureStateDirToOwningFeature(t *testing.T) {
+	t.Parallel()
+
+	home := t.TempDir()
+	projectDir := filepath.Join(home, "project")
+	featuresDir := filepath.Join(home, "features")
+	stateRoot := filepath.Join(home, model.ContainerFeatureStateDir)
+	stateDir := filepath.Join(stateRoot, "stateful")
+	for _, dir := range []string{projectDir, stateDir} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+	}
+	probe := `printf '%s' "${` + model.EnvFeatureStateDir + `:-unset}"`
+	writeFile(t, filepath.Join(featuresDir, "stateful", "feature-entrypoint.d", "setup.sh"), probe+` > "$HOME/stateful.out"`)
+	writeFile(t, filepath.Join(featuresDir, "stateless", "feature-entrypoint.d", "setup.sh"), probe+` > "$HOME/stateless.out"`)
+
+	entrypointPath := filepath.Join("..", "..", "entrypoint.sh")
+	cmd := exec.Command("bash", entrypointPath, "bash", "-c", probe+` > "$HOME/final.out"`)
+	cmd.Env = []string{
+		"PATH=" + os.Getenv("PATH"),
+		"HOME=" + home,
+		"PROJECT_DIR=" + projectDir,
+		"TOOL=claude",
+		"ENCLAVE_TOOLS_DIR=" + filepath.Join("..", "..", "extensions", "tools"),
+		"ENCLAVE_FEATURES_DIR=" + featuresDir,
+		"ENCLAVE_FEATURE_STATE_ROOT=" + stateRoot,
+	}
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("entrypoint failed: %v\noutput:\n%s", err, string(out))
+	}
+
+	assertFileContent(t, filepath.Join(home, "stateful.out"), stateDir)
+	assertFileContent(t, filepath.Join(home, "stateless.out"), "unset")
+	assertFileContent(t, filepath.Join(home, "final.out"), "unset")
 }
 
 func assertSymlinkTarget(t *testing.T, path string, want string) {

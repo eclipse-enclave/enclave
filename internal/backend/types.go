@@ -90,11 +90,24 @@ type Mount struct {
 type StoreKind string
 
 const (
-	StoreKindConfig      StoreKind = "config"
-	StoreKindAuth        StoreKind = "auth"
-	StoreKindFeatureAuth StoreKind = "feature-auth"
-	StoreKindEnv         StoreKind = "env"
+	StoreKindConfig       StoreKind = "config"
+	StoreKindAuth         StoreKind = "auth"
+	StoreKindFeatureAuth  StoreKind = "feature-auth"
+	StoreKindFeatureState StoreKind = "feature-state"
+	StoreKindEnv          StoreKind = "env"
 )
+
+// FeatureStoreLabel returns the user-facing label for a feature-owned store.
+func (kind StoreKind) FeatureStoreLabel() string {
+	switch kind {
+	case StoreKindFeatureAuth:
+		return "feature auth store"
+	case StoreKindFeatureState:
+		return "feature state store"
+	default:
+		return "feature store"
+	}
+}
 
 type StoreKey struct {
 	Owner       string
@@ -126,10 +139,10 @@ type StoreRef struct {
 // prepare them before the session starts. The caller decides policy (which
 // stores exist, reset flags, preserve lists); the backend owns the mechanics.
 type StorePrep struct {
-	Config   *ConfigStorePrep
-	Auth     *StorePrepEntry // shared tool auth store
-	Env      *EnvStorePrep
-	Features []StorePrepEntry // feature auth stores
+	Config        *ConfigStorePrep
+	Auth          *StorePrepEntry // shared tool auth store
+	Env           *EnvStorePrep
+	FeatureStores []StorePrepEntry
 
 	// ResetAuthFiles lists store-relative auth files to delete from the config
 	// store and (when present) the shared auth store before the session starts.
@@ -156,7 +169,8 @@ type ConfigOverlaySpec struct {
 }
 
 type StorePrepEntry struct {
-	Key StoreKey
+	Kind StoreKind
+	Key  StoreKey
 }
 
 type EnvStorePrep struct {

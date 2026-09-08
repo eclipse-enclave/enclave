@@ -175,6 +175,9 @@ func ListTools(paths model.Paths) ([]string, error) {
 
 	var tools []string
 	for _, name := range names {
+		if name == projectFeatureStateDirName {
+			continue
+		}
 		if hasSpecFile(paths, name, KindSandbox) {
 			tools = append(tools, name)
 		}

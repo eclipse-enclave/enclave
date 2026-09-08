@@ -15,10 +15,11 @@ import (
 )
 
 const (
-	enclaveDirName         = "." + model.AppName
-	configFilename         = "config.json"
-	networkPolicyFilename  = "network.jsonc"
-	recentProjectsFilename = "recent-projects.json"
+	enclaveDirName             = "." + model.AppName
+	configFilename             = "config.json"
+	networkPolicyFilename      = "network.jsonc"
+	recentProjectsFilename     = "recent-projects.json"
+	projectFeatureStateDirName = "features"
 )
 
 func HostLocksDir(home string) string {
@@ -173,6 +174,18 @@ func HostStoreConfigDir(home string, tool string, projectHash string, key string
 // for a project.
 func HostStoreEnvDir(home string, tool string, projectHash string) string {
 	return filepath.Join(HostProjectToolDir(home, projectHash, tool), "env")
+}
+
+// HostStoreFeatureStateRootDir is the project-scoped root for feature-owned
+// state shared by every tool running in that project.
+func HostStoreFeatureStateRootDir(home string, projectHash string) string {
+	return filepath.Join(HostProjectDir(home, projectHash), projectFeatureStateDirName)
+}
+
+// HostStoreFeatureStateDir is the host directory backing one feature's
+// project-scoped state store.
+func HostStoreFeatureStateDir(home string, projectHash string, feature string) string {
+	return filepath.Join(HostStoreFeatureStateRootDir(home, projectHash), feature, "state")
 }
 
 // HostStoreAuthRootDir is the host directory holding every tool's shared auth

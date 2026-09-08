@@ -81,3 +81,26 @@ func TestAddAuthMountOmitsSecurestorageDirEnvWhenUnset(t *testing.T) {
 		t.Fatalf("did not expect CLAUDE_SECURESTORAGE_CONFIG_DIR for codex")
 	}
 }
+
+func TestAddFeatureStateMountsUsesNeutralRoot(t *testing.T) {
+	t.Parallel()
+
+	r := &Runtime{
+		containerHome: "/home/agent",
+		features:      []model.Extension{{Name: "state-probe"}, {Name: "stateless"}},
+	}
+	store := backend.StoreRef{
+		Kind: backend.StoreKindFeatureState,
+		Key:  backend.StoreKey{Owner: "state-probe", ProjectHash: "abc123def456"},
+	}
+	acc := newMountAccumulator(nil, nil)
+	r.addFeatureStateMounts(acc, map[string]backend.StoreRef{"state-probe": store})
+
+	mountRoot := "/home/agent/" + model.ContainerFeatureStateDir
+	if !hasStore(acc.Stores(), backend.StoreKindFeatureState, "state-probe", mountRoot+"/state-probe") {
+		t.Fatalf("expected feature state mounted below %s", mountRoot)
+	}
+	if got, ok := lookupEnv(acc.Env(), model.EnvFeatureStateRoot); !ok || got != mountRoot {
+		t.Fatalf("%s = %q (present=%v), want %q", model.EnvFeatureStateRoot, got, ok, mountRoot)
+	}
+}

@@ -112,13 +112,15 @@ aptPackages: [<packages>]
 needsRoot: <bool>
 failOnInstallError: <bool>
 defaultEnabled: <bool>
+state: <bool, default false> # project-scoped persistent state shared across tools
 
 # tool-only field (kind: sandbox)
 defaultIncluded: <bool>
 ```
 
 `name` and `kind` are validated against the file's location and directory
-name at load time.
+name at load time. The sandbox name `features` is reserved for the
+project-scoped feature-state namespace.
 
 ### Reserved and deferred fields
 
@@ -532,6 +534,31 @@ every host the proxy injects credentials for is unioned into the session
 allow set so it resolves. A service mixin thus declares its own reachability
 without help from the tool spec.
 
+Set `state: true` only when a feature owns persistent project data that must be
+shared across tools. Enclave mounts the store at
+`~/.enclave-feature-state/<feature>/` and exports
+`ENCLAVE_FEATURE_STATE_DIR` while sourcing that feature's
+`feature-entrypoint.d/*.sh`. The variable is unset afterward. State is not
+created under `--ephemeral` and is independent of `--auth-scope`.
+
+```yaml
+schemaVersion: "1"
+kind: mixin
+name: state-probe
+state: true
+```
+
+A setup script can link the feature's native path to the neutral store:
+
+```sh
+if [ -n "${ENCLAVE_FEATURE_STATE_DIR:-}" ] && [ ! -e "$HOME/.state-probe" ] && [ ! -L "$HOME/.state-probe" ]; then
+    ln -s "$ENCLAVE_FEATURE_STATE_DIR" "$HOME/.state-probe"
+fi
+```
+
+The store may be mounted into multiple sessions concurrently. Stateful
+features must provide their own process-safe locking or database concurrency.
+
 ### Optional Files
 
 | File | Purpose |
@@ -626,6 +653,7 @@ resolved port appears in the printed `openUrl` and in `enclave ps`.
 | `needsRoot` | N/A | Controls install user |
 | `aptPackages` | N/A | Auto-installed apt packages |
 | Declared `ports` | Published for every session of the tool | Published when the feature is enabled |
+| `state: true` | Invalid | Opts into project-scoped state shared across tools |
 
 ## How It Works
 
@@ -673,7 +701,7 @@ CLI sets it to the single selected tool):
 
 1. Determines current tool from `$TOOL` env var
 2. Sources scripts from `extensions/tools/{tool}/entrypoint.d/*.sh` (tool-specific)
-3. Sources scripts from `extensions/*/feature-entrypoint.d/*.sh` (all features)
+3. Sources scripts from `extensions/*/feature-entrypoint.d/*.sh` (all enabled features), setting `ENCLAVE_FEATURE_STATE_DIR` only for a feature that declares `state: true`
 
 ### Go Registration (Tools Only)
 
@@ -733,6 +761,7 @@ Hooks run in a fixed order during runtime auth preparation:
 3. Optionally add:
    - `install.sh` for custom installation (set `needsRoot: true` if it needs root)
    - `feature-entrypoint.d/setup.sh` for runtime initialization
+   - `state: true` when the feature needs persistent project data shared across tools
 
 ### Feature Guidelines
 

@@ -9,6 +9,22 @@ package backend
 
 import "testing"
 
+func TestFeatureStoreLabel(t *testing.T) {
+	tests := []struct {
+		kind StoreKind
+		want string
+	}{
+		{kind: StoreKindFeatureAuth, want: "feature auth store"},
+		{kind: StoreKindFeatureState, want: "feature state store"},
+		{kind: StoreKindConfig, want: "feature store"},
+	}
+	for _, tt := range tests {
+		if got := tt.kind.FeatureStoreLabel(); got != tt.want {
+			t.Errorf("StoreKind(%q).FeatureStoreLabel() = %q, want %q", tt.kind, got, tt.want)
+		}
+	}
+}
+
 func TestValidateFailsClosedForRestrictedNetwork(t *testing.T) {
 	req := Request{Network: NetworkPolicy{Mode: NetworkModeRestricted}}
 	if err := Validate(req, Capabilities{}); err == nil {

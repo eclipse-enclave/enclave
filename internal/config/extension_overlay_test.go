@@ -178,6 +178,22 @@ func TestListToolsMergesAndDeduplicates(t *testing.T) {
 	}
 }
 
+func TestListToolsExcludesReservedFeatureStateName(t *testing.T) {
+	tmp := t.TempDir()
+	toolsDir := filepath.Join(tmp, "extensions", "tools")
+	writeTestFile(t, filepath.Join(toolsDir, "codex", SpecFilename), `{"schemaVersion":"1","kind":"sandbox","name":"codex"}`)
+	writeTestFile(t, filepath.Join(toolsDir, projectFeatureStateDirName, SpecFilename), `{"schemaVersion":"1","kind":"sandbox","name":"features"}`)
+
+	got, err := ListTools(model.Paths{ToolsDir: toolsDir})
+	if err != nil {
+		t.Fatalf("ListTools: %v", err)
+	}
+	want := []string{"codex"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("ListTools=%v want=%v", got, want)
+	}
+}
+
 func TestListFeaturesMergesAndDeduplicates(t *testing.T) {
 	tmp := t.TempDir()
 	builtinFeatures := filepath.Join(tmp, "extensions", "features")

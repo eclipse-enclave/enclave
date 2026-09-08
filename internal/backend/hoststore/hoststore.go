@@ -9,8 +9,8 @@
 // plus backend.StoreKind) to the host directories that back them, and provides
 // the cross-process lock shared by every store consumer. All isolation
 // backends (Docker bind mounts, QEMU 9p shares) realize stores from this
-// single layout, so auth, env, and config state stay shared between containers
-// and microVMs.
+// single layout, so auth, env, config, and feature state stay shared between
+// containers and microVMs.
 package hoststore
 
 import (
@@ -52,13 +52,19 @@ func DirFor(home string, key backend.StoreKey, kind backend.StoreKind) (string, 
 		return config.HostStoreAuthDir(home, owner, identity), nil
 	case backend.StoreKindFeatureAuth:
 		return config.HostStoreFeatureAuthDir(home, owner), nil
+	case backend.StoreKindFeatureState:
+		hash, err := validateStoreSegment(key.ProjectHash)
+		if err != nil {
+			return "", fmt.Errorf("store project hash: %w", err)
+		}
+		return config.HostStoreFeatureStateDir(home, hash, owner), nil
 	case backend.StoreKindEnv:
 		hash, err := validateStoreSegment(key.ProjectHash)
 		if err != nil {
 			return "", fmt.Errorf("store project hash: %w", err)
 		}
 		return config.HostStoreEnvDir(home, owner, hash), nil
-	default:
+	case backend.StoreKindConfig:
 		hash, err := validateStoreSegment(key.ProjectHash)
 		if err != nil {
 			return "", fmt.Errorf("store project hash: %w", err)
@@ -68,6 +74,8 @@ func DirFor(home string, key backend.StoreKey, kind backend.StoreKind) (string, 
 			return "", fmt.Errorf("store key: %w", err)
 		}
 		return config.HostStoreConfigDir(home, owner, hash, storeKey), nil
+	default:
+		return "", fmt.Errorf("unknown store kind %q", kind)
 	}
 }
 

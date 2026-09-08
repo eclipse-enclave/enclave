@@ -293,14 +293,15 @@ func specToProfile(doc specDocument) model.Profile {
 // kind-specific defaults via applyExtensionDefaults.
 func specToExtension(doc specDocument) (model.Extension, extensionManifestState) {
 	ext := model.Extension{
-		Name:        doc.Name,
-		Description: doc.Description,
-		AptPackages: doc.AptPackages,
-		NeedsRoot:   doc.NeedsRoot,
-		ConfigDir:   doc.ConfigDir,
-		AuthFiles:   doc.AuthFiles,
-		Secrets:     buildSecrets(doc),
-		Ports:       buildPorts(doc),
+		Name:         doc.Name,
+		Description:  doc.Description,
+		AptPackages:  doc.AptPackages,
+		NeedsRoot:    doc.NeedsRoot,
+		ConfigDir:    doc.ConfigDir,
+		AuthFiles:    doc.AuthFiles,
+		FeatureState: doc.State,
+		Secrets:      buildSecrets(doc),
+		Ports:        buildPorts(doc),
 	}
 	if doc.Network != nil {
 		ext.AllowedDomains = doc.Network.AllowedDomains

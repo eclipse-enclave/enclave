@@ -721,8 +721,10 @@ func cleanupCommand(res *Result) *cobra.Command {
 					res.Options.CleanupKeepAuth = true
 				case "memory":
 					res.Options.CleanupKeepMemory = true
+				case "feature-state":
+					res.Options.CleanupKeepFeatureState = true
 				default:
-					return fmt.Errorf("unknown --keep value %q (valid: cache,history,auth,memory)", token)
+					return fmt.Errorf("unknown --keep value %q (valid: cache,history,auth,memory,feature-state)", token)
 				}
 			}
 			return nil
@@ -731,7 +733,7 @@ func cleanupCommand(res *Result) *cobra.Command {
 	addOptionFlagsByName(cmd.Flags(), &res.Options, &res.Sources, "tool")
 	cmd.Flags().BoolVar(&res.Options.CleanupAll, "all", false, "Remove stores and caches for all projects")
 	cmd.Flags().BoolVar(&res.Options.CleanupEphemeral, "ephemeral", false, "Remove stopped containers and ephemeral session stores")
-	cmd.Flags().StringSlice("keep", nil, "Keep stores of the listed kinds: cache,history,auth,memory (memory has no selective effect with --all)")
+	cmd.Flags().StringSlice("keep", nil, "Keep stores of the listed kinds: cache,history,auth,memory,feature-state (memory has no selective effect with --all)")
 	cmd.Flags().BoolVar(&res.Options.CleanupBuildCache, "build-cache", false, "Prune Docker build cache (requires confirmation)")
 	cmd.Flags().BoolVar(&res.Options.CleanupDryRun, "dry-run", false, "Show what would be removed")
 	return cmd

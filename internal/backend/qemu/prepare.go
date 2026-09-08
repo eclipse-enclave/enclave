@@ -46,9 +46,9 @@ func (b *Backend) PrepareStores(ctx context.Context, prep backend.StorePrep) (ba
 			state.PersistedEnvAvailable = false
 		}
 	}
-	for _, feature := range prep.Features {
-		if err := b.storage.Ensure(ctx, feature.Key, backend.StoreKindFeatureAuth, ""); err != nil {
-			logx.Warnf("Failed to prepare %s feature auth store: %v", util.TitleCase(feature.Key.Owner), err)
+	for _, store := range prep.FeatureStores {
+		if err := b.storage.Ensure(ctx, store.Key, store.Kind, ""); err != nil {
+			logx.Warnf("Failed to prepare %s %s: %v", util.TitleCase(store.Key.Owner), store.Kind.FeatureStoreLabel(), err)
 		}
 	}
 	if prep.Config != nil && len(prep.ResetAuthFiles) > 0 {

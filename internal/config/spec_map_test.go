@@ -8,6 +8,7 @@
 package config
 
 import (
+	"strings"
 	"testing"
 
 	"sigs.k8s.io/yaml"
@@ -54,6 +55,89 @@ network:
 `)
 		if err := validateServiceAuthMappings(doc, "codex/spec.yaml"); err == nil {
 			t.Fatal("expected error for serviceDomains id with no matching credentials.sources entry")
+		}
+	})
+
+	t.Run("serviceDomains id without serviceAuth fails", func(t *testing.T) {
+		doc := mustDoc(t, `
+schemaVersion: "1"
+kind: mixin
+name: github-cli
+credentials:
+  sources:
+    github-token: { env: [GH_TOKEN] }
+    github-enterprise-token: { env: [GH_ENTERPRISE_TOKEN] }
+network:
+  serviceDomains: { api.github.com: github-token, ghe.com: github-enterprise-token }
+  serviceAuth: { github-token: { headerName: authorization, valueFormat: "Bearer %s" } }
+`)
+		// Without the serviceAuth entry the enterprise token gets no release
+		// rule: ghe.com drops out of the release hosts unioned into the
+		// allowlist and the token is injected raw instead of proxy-swapped.
+		if err := validateServiceAuthMappings(doc, "github-cli/spec.yaml"); err == nil {
+			t.Fatal("expected error for serviceDomains id with no matching network.serviceAuth entry")
+		}
+	})
+
+	t.Run("serviceAuth id without hosts fails", func(t *testing.T) {
+		doc := mustDoc(t, `
+schemaVersion: "1"
+kind: mixin
+name: github-cli
+credentials:
+  sources:
+    github-token: { env: [GH_TOKEN] }
+network:
+  serviceAuth: { github-token: { headerName: authorization } }
+`)
+		// The mirror image of the case above: with no hosts from either
+		// serviceDomains or serviceAuth.hosts, the release rule has nothing to
+		// release the credential to.
+		err := validateServiceAuthMappings(doc, "github-cli/spec.yaml")
+		if err == nil {
+			t.Fatal("expected error for serviceAuth id with no hosts")
+		}
+		if !strings.Contains(err.Error(), "network.serviceDomains") {
+			t.Fatalf("error = %v, want it to name network.serviceDomains as a remedy", err)
+		}
+	})
+
+	t.Run("unknown id is reported before the pairing gap", func(t *testing.T) {
+		doc := mustDoc(t, `
+schemaVersion: "1"
+kind: mixin
+name: github-cli
+credentials:
+  sources:
+    github-token: { env: [GH_TOKEN] }
+network:
+  serviceDomains: { api.github.com: github-tokn }
+  serviceAuth: { github-token: { headerName: authorization } }
+`)
+		// The typo leaves github-token hostless too, but pointing the author at
+		// the serviceAuth entry would hide the actual mistake.
+		err := validateServiceAuthMappings(doc, "github-cli/spec.yaml")
+		if err == nil {
+			t.Fatal("expected error for the typo'd serviceDomains id")
+		}
+		if !strings.Contains(err.Error(), "no matching credentials.sources entry") {
+			t.Fatalf("error = %v, want it to name the unknown credentials.sources id", err)
+		}
+	})
+
+	t.Run("serviceAuth hosts without serviceDomains pass", func(t *testing.T) {
+		doc := mustDoc(t, `
+schemaVersion: "1"
+kind: mixin
+name: gitlab-cli
+credentials:
+  sources:
+    gitlab-token: { env: [GITLAB_TOKEN] }
+network:
+  serviceAuth: { gitlab-token: { headerName: private-token, hosts: [gitlab.com] } }
+`)
+		if err := validateServiceAuthMappings(doc, "gitlab-cli/spec.yaml"); err != nil {
+			t.Fatalf("unexpected error for serviceAuth-declared hosts: %v", err)
 		}
 	})
 

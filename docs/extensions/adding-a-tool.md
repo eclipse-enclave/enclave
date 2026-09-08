@@ -74,6 +74,8 @@ Secrets are split across `credentials` and `network` (see the README's
 - `network.serviceDomains` (`host -> service-id`) + `network.serviceAuth.<id>`
   (`headerName`, optional `valueFormat` with a Go `fmt`-style `%s`): how the
   gateway injects the credential as an HTTP header when proxying to those hosts.
+  Every service-id in `serviceDomains` needs a `serviceAuth` entry; hosts that
+  only need to be reachable belong under `network.allowedDomains`.
 - `providers[]`: enclave-native auth provider — `name`, `credentials` (a list
   of `credentials.sources` keys), `authFiles` (relative to `sandbox.configDir`),
   `authSession` (`mode: any|all` + `checks`), `oauthPorts`, and

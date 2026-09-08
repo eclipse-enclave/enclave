@@ -43,7 +43,7 @@ func runConfig(
 	toolOverrideDefaults config.Defaults,
 	hasToolOverride bool,
 	view model.ConfigView,
-	projectDir string,
+	project model.Project,
 ) int {
 	opts, warnings := normalizeOptions(opts)
 	for _, warning := range warnings {
@@ -59,7 +59,10 @@ func runConfig(
 
 	rows := buildConfigRows(opts, base, globalDefaults, projectDefaults, toolOverrideDefaults, hasToolOverride, hostConfigDefaults)
 	globalPath, globalErr := config.GlobalConfigPath()
-	projectPath := config.ProjectConfigJSONPath(projectDir)
+	projectPath := ""
+	if home, err := config.ResolveHostHome(); err == nil {
+		projectPath = config.HostProjectConfigJSONPath(home, project.Hash)
+	}
 	globalExists := false
 	projectExists := false
 	if globalErr == nil && strings.TrimSpace(globalPath) != "" {

@@ -27,7 +27,7 @@ func runInfo(ctx *AppContext, opts model.Options) int {
 	}
 
 	globalConfig, globalErr := config.GlobalConfigPath()
-	projectConfig := config.ProjectConfigJSONPath(ctx.ProjectDir)
+	projectConfig := ""
 
 	// The info action bypasses ValidateOptions, so an auth_name set via
 	// config.json arrives unnormalized here; normalize it the same way a run
@@ -43,12 +43,17 @@ func runInfo(ctx *AppContext, opts model.Options) int {
 
 	var projectOverridesDir, projectStateDir string
 	var configStoreDir, envStoreDir, authStoreDir string
+	var projectTag *config.ProjectTag
 	if home, homeErr := config.ResolveHostHome(); homeErr == nil {
+		projectConfig = config.HostProjectConfigJSONPath(home, project.Hash)
 		projectOverridesDir = config.HostProjectOverridesDir(home, project.Hash)
 		projectStateDir = config.HostProjectDir(home, project.Hash)
 		configStoreDir = hoststore.Dir(home, backend.StoreKey{Owner: opts.Tool, ProjectHash: project.Hash}, backend.StoreKindConfig)
 		envStoreDir = hoststore.Dir(home, backend.StoreKey{Owner: opts.Tool, ProjectHash: project.Hash}, backend.StoreKindEnv)
 		authStoreDir = hoststore.Dir(home, backend.StoreKey{Owner: opts.Tool, Suffix: authName}, backend.StoreKindAuth)
+		if registry, err := config.LoadProjectTags(home); err == nil {
+			projectTag = config.ProjectTagByNamespace(registry, project.Hash)
+		}
 	}
 
 	imageName := opts.ImageName
@@ -72,6 +77,11 @@ func runInfo(ctx *AppContext, opts model.Options) int {
 	fmt.Printf("App Root: %s\n", ctx.Paths.AppRoot)
 	fmt.Printf("Project Directory: %s\n", project.Dir)
 	fmt.Printf("Project Hash: %s\n", project.Hash)
+	if projectTag == nil {
+		fmt.Printf("Project Tag: none\n")
+	} else {
+		fmt.Printf("Project Tag: %s (%d members)\n", projectTag.Name, len(projectTag.Members))
+	}
 	fmt.Printf("Tool: %s\n", opts.Tool)
 	fmt.Printf("Image Name: %s\n", imageName)
 	fmt.Printf("Persistent Store Directories (static):\n")

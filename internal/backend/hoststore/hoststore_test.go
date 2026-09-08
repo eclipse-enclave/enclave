@@ -10,7 +10,9 @@ package hoststore
 import (
 	"os"
 	"path/filepath"
+	goruntime "runtime"
 	"testing"
+	"time"
 
 	"enclave/internal/backend"
 	"enclave/internal/config"
@@ -92,6 +94,55 @@ func TestWithLockCreatesStoreLockFile(t *testing.T) {
 	if len(entries) != 1 {
 		t.Fatalf("locks dir entries = %d, want 1", len(entries))
 	}
+}
+
+func TestLeaseHandoffKeepsLockUntilChildExits(t *testing.T) {
+	if goruntime.GOOS == "windows" {
+		t.Skip("inherited file descriptors are not supported on Windows")
+	}
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	home := t.TempDir()
+	dir := Dir(home, backend.StoreKey{Owner: "codex", ProjectHash: "abc123abc123"}, backend.StoreKindConfig)
+	lease, acquired, err := TryLease(home, dir)
+	if err != nil || !acquired {
+		t.Fatalf("acquire lease = (%v, %v), want acquired", acquired, err)
+	}
+	defer func() { _ = lease.Release() }()
+
+	marker := filepath.Join(t.TempDir(), "release")
+	t.Cleanup(func() { _ = os.WriteFile(marker, nil, 0o600) })
+	script := filepath.Join(t.TempDir(), "lease-monitor")
+	content := "#!/bin/sh\nprintf '\\001' >&4\nwhile [ ! -e \"$1\" ]; do sleep 0.02; done\n"
+	if err := os.WriteFile(script, []byte(content), 0o700); err != nil {
+		t.Fatalf("write lease monitor: %v", err)
+	}
+	if err := lease.Handoff(script, marker); err != nil {
+		t.Fatalf("handoff lease: %v", err)
+	}
+
+	if conflicting, acquired, err := TryLease(home, dir); err != nil {
+		t.Fatalf("try conflicting lease: %v", err)
+	} else if acquired {
+		_ = conflicting.Release()
+		t.Fatal("lease became available while monitor was running")
+	}
+	if err := os.WriteFile(marker, nil, 0o600); err != nil {
+		t.Fatalf("release lease monitor: %v", err)
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		next, acquired, err := TryLease(home, dir)
+		if err != nil {
+			t.Fatalf("reacquire lease: %v", err)
+		}
+		if acquired {
+			_ = next.Release()
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatal("lease remained held after monitor exited")
 }
 
 func TestEnsureNoSymlinkChainRejectsSymlinkedComponent(t *testing.T) {

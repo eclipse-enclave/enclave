@@ -7,23 +7,23 @@
 
 package app
 
-import (
-	"enclave/internal/config"
-	"enclave/internal/model"
-)
+import "enclave/internal/model"
 
 type AppContext struct {
 	Paths      model.Paths
 	ProjectDir string
 
-	host            model.Host
-	project         model.Project
-	hostResolved    bool
-	projectResolved bool
+	host         model.Host
+	project      model.Project
+	hostResolved bool
 }
 
-func NewAppContext(paths model.Paths, projectDir string) *AppContext {
-	return &AppContext{Paths: paths, ProjectDir: projectDir}
+func NewAppContext(paths model.Paths, project model.Project) *AppContext {
+	return &AppContext{
+		Paths:      paths,
+		ProjectDir: project.Dir,
+		project:    project,
+	}
 }
 
 func (c *AppContext) Host() (model.Host, error) {
@@ -40,14 +40,5 @@ func (c *AppContext) Host() (model.Host, error) {
 }
 
 func (c *AppContext) Project() (model.Project, error) {
-	if c.projectResolved {
-		return c.project, nil
-	}
-	project, err := config.ResolveProjectFromDir(c.ProjectDir)
-	if err != nil {
-		return model.Project{}, err
-	}
-	c.project = project
-	c.projectResolved = true
-	return project, nil
+	return c.project, nil
 }

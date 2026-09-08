@@ -22,7 +22,6 @@ import (
 	"enclave/internal/logx"
 	"enclave/internal/model"
 	"enclave/internal/policy"
-	"enclave/internal/util"
 )
 
 // gatewayManagerForInput selects the backend and returns its gateway-reload
@@ -55,7 +54,6 @@ func discoverGatewayTargets(input *CommandInput, manager backend.GatewayManager,
 		}
 		filter.Tool = input.Options.Tool
 		filter.ProjectHash = project.Hash
-		filter.WorkspaceID = util.WorkspaceIdentityHash(project.RealDir, project.Dir)
 		scopeLabel = fmt.Sprintf("current project/tool (%s/%s)", project.Hash, input.Options.Tool)
 	}
 

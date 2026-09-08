@@ -20,9 +20,7 @@ import (
 )
 
 // runner runs an external command (git or gh) and returns its stdout. It is an
-// interface so tests can substitute canned output for git and gh. internal/git
-// also wraps git but has no such seam; if a shared runner ever grows there,
-// fold this one into it rather than letting the two drift.
+// interface so tests can substitute canned output for git and gh.
 type runner interface {
 	run(ctx context.Context, name string, args ...string) (string, error)
 }

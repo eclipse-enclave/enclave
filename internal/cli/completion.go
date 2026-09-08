@@ -158,6 +158,17 @@ func registerCompletions(rootCmd *cobra.Command) error {
 		updateCmd.ValidArgsFunction = toolCompleter
 	}
 
+	// `project tag set <name>` completes known tag names so an intended
+	// assignment to an existing tag is not mistyped into a new tag;
+	// `project tag unset [path]` completes registered member paths, including
+	// stale ones that file completion cannot offer.
+	if tagSetCmd := findSubCommand(rootCmd, "project", "tag", "set"); tagSetCmd != nil {
+		tagSetCmd.ValidArgsFunction = firstArgCompleter(projectTagNames)
+	}
+	if tagUnsetCmd := findSubCommand(rootCmd, "project", "tag", "unset"); tagUnsetCmd != nil {
+		tagUnsetCmd.ValidArgsFunction = firstArgCompleter(projectTagMembers)
+	}
+
 	// `config --view` accepts a fixed set of render modes. The flag lives on the
 	// `config` leaf command, not in the shared option set, so register it here
 	// rather than via the completers map above.
@@ -181,6 +192,49 @@ func staticValuesCompleter(values ...string) flagCompletionFunc {
 	return func(_ *cobra.Command, _ []string, _ string) ([]string, cobra.ShellCompDirective) {
 		return values, cobra.ShellCompDirectiveNoFileComp
 	}
+}
+
+// firstArgCompleter completes only the first positional argument with the
+// values produced by list; further positions get no suggestions.
+func firstArgCompleter(list func() []string) func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
+	return func(_ *cobra.Command, args []string, _ string) ([]string, cobra.ShellCompDirective) {
+		if len(args) > 0 {
+			return nil, cobra.ShellCompDirectiveNoFileComp
+		}
+		return list(), cobra.ShellCompDirectiveNoFileComp
+	}
+}
+
+func projectTagNames() []string {
+	registry, err := loadProjectTagRegistry()
+	if err != nil {
+		return nil
+	}
+	names := make([]string, 0, len(registry.Tags))
+	for _, tag := range registry.Tags {
+		names = append(names, tag.Name)
+	}
+	return names
+}
+
+func projectTagMembers() []string {
+	registry, err := loadProjectTagRegistry()
+	if err != nil {
+		return nil
+	}
+	var members []string
+	for _, tag := range registry.Tags {
+		members = append(members, tag.Members...)
+	}
+	return members
+}
+
+func loadProjectTagRegistry() (config.ProjectTags, error) {
+	home, err := config.ResolveHostHome()
+	if err != nil {
+		return config.ProjectTags{}, err
+	}
+	return config.LoadProjectTags(home)
 }
 
 func walkCommands(cmd *cobra.Command, fn func(*cobra.Command)) {

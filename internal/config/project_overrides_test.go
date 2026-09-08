@@ -14,8 +14,8 @@ import (
 	"testing"
 )
 
-// TestRepoLocalProjectConfigNotHonored drives the real LoadDefaults path to
-// prove that a config.json inside the repo-local .enclave directory is never
+// TestRepoLocalProjectConfigNotHonored drives the real LoadDefaultsForProject
+// path to prove that a config.json inside the repo-local .enclave directory is never
 // read: project defaults come only from the hash-keyed config-root path (which
 // is not present here).
 func TestRepoLocalProjectConfigNotHonored(t *testing.T) {
@@ -45,12 +45,16 @@ func TestRepoLocalProjectConfigNotHonored(t *testing.T) {
 		t.Fatalf("repo-local fixture must set slim=true when read directly, got %+v", repoLocalDefaults)
 	}
 
-	_, project, _, err := LoadDefaults(projectDir)
+	resolved, err := ResolveProjectFromDir(projectDir)
 	if err != nil {
-		t.Fatalf("LoadDefaults: %v", err)
+		t.Fatalf("ResolveProjectFromDir: %v", err)
+	}
+	_, project, _, err := LoadDefaultsForProject(resolved)
+	if err != nil {
+		t.Fatalf("LoadDefaultsForProject: %v", err)
 	}
 	if project.Slim != nil {
-		t.Fatalf("repo-local config must not be honored by LoadDefaults, got slim=%v", *project.Slim)
+		t.Fatalf("repo-local config must not be honored by LoadDefaultsForProject, got slim=%v", *project.Slim)
 	}
 }
 

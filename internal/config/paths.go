@@ -12,7 +12,6 @@ import (
 	"os"
 	"path/filepath"
 
-	gitutil "enclave/internal/git"
 	"enclave/internal/model"
 	"enclave/internal/util"
 )
@@ -78,70 +77,51 @@ func resolveUserExtensionPaths(paths *model.Paths) {
 	paths.UserFeaturesDir = filepath.Join(userExtensionsDir, "features")
 }
 
-func ResolveProject() (model.Project, error) {
-	cwd, err := os.Getwd()
+func ResolveProjectFromDir(dir string) (model.Project, error) {
+	home, err := ResolveHostHome()
 	if err != nil {
-		return model.Project{}, fmt.Errorf("get working directory: %w", err)
+		return model.Project{}, fmt.Errorf("resolve host home: %w", err)
 	}
-	return ResolveProjectFromDir(cwd)
+	description, err := DescribeProjectFromDir(home, dir)
+	if err != nil {
+		return model.Project{}, err
+	}
+	return description.Project, nil
 }
 
-func ResolveProjectFromDir(dir string) (model.Project, error) {
+func resolveCanonicalProject(dir string) (model.Project, error) {
 	if dir == "" {
 		return model.Project{}, fmt.Errorf("project dir is empty")
 	}
 
-	realPath, err := filepath.EvalSymlinks(dir)
+	absPath, err := filepath.Abs(dir)
 	if err != nil {
-		realPath = dir
+		return model.Project{}, fmt.Errorf("resolve project dir %s: %w", dir, err)
 	}
 
-	absPath, err := filepath.Abs(realPath)
+	realPath, err := filepath.EvalSymlinks(absPath)
 	if err != nil {
-		return model.Project{}, fmt.Errorf("resolve project dir %s: %w", realPath, err)
+		return model.Project{}, fmt.Errorf("resolve project dir %s: %w", dir, err)
 	}
 
-	hashPath := resolveProjectHashPath(absPath)
-	projectHash := ProjectHashForPath(hashPath)
+	info, err := os.Stat(realPath)
+	if err != nil {
+		return model.Project{}, fmt.Errorf("stat project dir %s: %w", realPath, err)
+	}
+	if !info.IsDir() {
+		return model.Project{}, fmt.Errorf("project dir %s is not a directory", realPath)
+	}
 
 	return model.Project{
 		Dir:     dir,
-		RealDir: absPath,
-		Hash:    projectHash,
+		RealDir: realPath,
+		Hash:    ProjectHashForPath(realPath),
 		Name:    filepath.Base(dir),
 	}, nil
 }
 
-// resolveProjectHashPath returns the canonical path used to derive the project
-// hash. For the main worktree (where `.git` is a directory) we fall back to
-// `git worktree list` so linked worktrees in the same repo share the main
-// worktree's hash. We refuse to consult that command when `.git` is a regular
-// file pointer, because the pointer is attacker-controlled in a fresh clone
-// and would otherwise let a malicious repo inherit another project's hash and
-// its persisted state (auth stores, generated config, skills overlays, ...).
 func ProjectHashForPath(path string) string {
 	return model.ShortHash(util.HashString(path))
-}
-
-func resolveProjectHashPath(absPath string) string {
-	gitFile := filepath.Join(absPath, ".git")
-	info, err := os.Lstat(gitFile)
-	if err != nil || info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
-		return absPath
-	}
-
-	mainPath := gitutil.ResolveMainWorktree(absPath)
-
-	realMainPath, err := filepath.EvalSymlinks(mainPath)
-	if err != nil {
-		realMainPath = mainPath
-	}
-
-	canonicalMainPath, err := filepath.Abs(realMainPath)
-	if err != nil {
-		return absPath
-	}
-	return canonicalMainPath
 }
 
 func discoverAppRoot() (string, error) {

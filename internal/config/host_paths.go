@@ -18,6 +18,7 @@ const (
 	enclaveDirName         = "." + model.AppName
 	configFilename         = "config.json"
 	networkPolicyFilename  = "network.jsonc"
+	projectTagsFilename    = "project-tags.json"
 	recentProjectsFilename = "recent-projects.json"
 )
 
@@ -272,6 +273,10 @@ func HostRecentProjectsPath(home string) string {
 	return filepath.Join(hostConfigRoot(home), recentProjectsFilename)
 }
 
+func HostProjectTagsPath(home string) string {
+	return filepath.Join(hostConfigRoot(home), projectTagsFilename)
+}
+
 // HostConfigRootDir returns the config root for enclave
 // (<XDG_CONFIG_HOME|~/.config>/enclave on Linux, ~/Library/Application
 // Support/org.eclipse.enclave/config on macOS). It is surfaced to user
@@ -293,21 +298,6 @@ func GlobalConfigPath() (string, error) {
 		return "", err
 	}
 	return filepath.Join(hostConfigRoot(home), configFilename), nil
-}
-
-// ProjectConfigJSONPath resolves the per-project override config path for a
-// project directory: <config-root>/projects/<hash>/config.json. Returns an
-// empty string when the host home or project hash cannot be resolved.
-func ProjectConfigJSONPath(projectDir string) string {
-	home, err := ResolveHostHome()
-	if err != nil {
-		return ""
-	}
-	project, err := ResolveProjectFromDir(projectDir)
-	if err != nil {
-		return ""
-	}
-	return HostProjectConfigJSONPath(home, project.Hash)
 }
 
 func HostProfilePath(home string, path string) string {

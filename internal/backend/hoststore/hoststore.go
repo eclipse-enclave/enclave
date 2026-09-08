@@ -16,9 +16,12 @@ package hoststore
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"enclave/internal/backend"
 	"enclave/internal/config"
@@ -114,6 +117,123 @@ func WithLock(hostHome string, dir string, fn func() error) error {
 		return fn()
 	}
 	return util.WithFileLock(lockPath, fn)
+}
+
+// Lease is a lifetime store lease that can be handed to a child process.
+type Lease struct {
+	*util.FileLease
+}
+
+const (
+	leaseHandoffTimeout = 5 * time.Second
+	inheritedLeaseFD    = 3
+	leaseReadyFD        = 4
+)
+
+// TryLease acquires a non-blocking lifetime lease for a store. Lease locks are
+// separate from the short-lived operation locks used by WithLock.
+func TryLease(hostHome string, dir string) (*Lease, bool, error) {
+	if hostHome == "" || dir == "" {
+		return nil, false, fmt.Errorf("store lease requires host home and directory")
+	}
+	lockPath := config.HostLockPath(hostHome, "store-lease-"+util.HashString(dir)+".lock")
+	if lockPath == "" {
+		return nil, false, fmt.Errorf("resolve store lease path")
+	}
+	lease, acquired, err := util.TryFileLease(lockPath)
+	if err != nil || !acquired {
+		return nil, acquired, err
+	}
+	return &Lease{FileLease: lease}, true, nil
+}
+
+// Handoff starts a child process with the lease descriptor inherited as fd 3.
+// The child confirms readiness through fd 4 before this process relinquishes
+// its descriptor, so the lock remains continuously held across the handoff.
+func (l *Lease) Handoff(command string, args ...string) error {
+	if l == nil || l.FileLease == nil || l.File() == nil {
+		return fmt.Errorf("store lease is not active")
+	}
+	if strings.TrimSpace(command) == "" {
+		return fmt.Errorf("store lease monitor command is empty")
+	}
+	readyReader, readyWriter, err := os.Pipe()
+	if err != nil {
+		return fmt.Errorf("create store lease monitor pipe: %w", err)
+	}
+	defer func() { _ = readyReader.Close() }()
+
+	cmd := exec.Command(command, args...) // #nosec G204 -- command and args are selected by internal callers.
+	cmd.ExtraFiles = []*os.File{l.File(), readyWriter}
+	if err := cmd.Start(); err != nil {
+		_ = readyWriter.Close()
+		return fmt.Errorf("start store lease monitor: %w", err)
+	}
+	_ = readyWriter.Close()
+
+	ready := make(chan error, 1)
+	go func() {
+		var signal [1]byte
+		_, readErr := io.ReadFull(readyReader, signal[:])
+		if readErr == nil && signal[0] != 1 {
+			readErr = fmt.Errorf("invalid readiness signal")
+		}
+		ready <- readErr
+	}()
+
+	var readyErr error
+	select {
+	case readyErr = <-ready:
+	case <-time.After(leaseHandoffTimeout):
+		readyErr = fmt.Errorf("timed out after %s", leaseHandoffTimeout)
+		_ = readyReader.Close()
+	}
+	if readyErr != nil {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+		return fmt.Errorf("initialize store lease monitor: %w", readyErr)
+	}
+	if err := cmd.Process.Release(); err != nil {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+		return fmt.Errorf("release store lease monitor process: %w", err)
+	}
+	if err := l.Relinquish(); err != nil {
+		return fmt.Errorf("relinquish store lease to monitor: %w", err)
+	}
+	return nil
+}
+
+// AcceptInheritedLease validates the inherited lease descriptor, acknowledges
+// the handoff through fd 4, and returns the descriptor for the monitor to keep
+// open until its work is complete.
+func AcceptInheritedLease() (*os.File, error) {
+	leaseFile := os.NewFile(inheritedLeaseFD, "config-store-lease")
+	readyFile := os.NewFile(leaseReadyFD, "config-store-lease-ready")
+	if leaseFile == nil || readyFile == nil {
+		if leaseFile != nil {
+			_ = leaseFile.Close()
+		}
+		if readyFile != nil {
+			_ = readyFile.Close()
+		}
+		return nil, fmt.Errorf("store lease monitor descriptors are unavailable")
+	}
+	if _, err := leaseFile.Stat(); err != nil {
+		_ = leaseFile.Close()
+		_ = readyFile.Close()
+		return nil, fmt.Errorf("inspect inherited store lease: %w", err)
+	}
+	if _, err := readyFile.Write([]byte{1}); err != nil {
+		_ = leaseFile.Close()
+		_ = readyFile.Close()
+		return nil, fmt.Errorf("acknowledge inherited store lease: %w", err)
+	}
+	if err := readyFile.Close(); err != nil {
+		_ = leaseFile.Close()
+		return nil, fmt.Errorf("close store lease readiness pipe: %w", err)
+	}
+	return leaseFile, nil
 }
 
 // EnsureNoSymlinkChain rejects a target whose path from root traverses a

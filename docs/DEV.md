@@ -228,7 +228,9 @@ to `CreateProcess` unchanged. Two layers check it:
 
 For CLI-only options (not configurable via config files), omit `DefaultsField`
 and use `Apply: ApplyNone` in `options_def.go` (for example:
-`--force-base-image` and `--no-rebuild`).
+`--force-base-image` and `--no-rebuild`). Command-specific arguments and flags
+that do not affect runtime options belong directly in `cli.Result`; the
+the `project tag` and `project show` parser fields follow this pattern.
 
 ### Practical Checklist
 
@@ -297,7 +299,7 @@ When a value exists in multiple layers, enclave resolves in this order:
 
 1. CLI flags
 2. Selected tool override (`tool_overrides.<tool>`)
-3. Project config (`~/.config/enclave/projects/<hash>/config.json`; per-project overrides live outside the worktree, keyed by project hash)
+3. Project config (`~/.config/enclave/projects/<hash>/config.json`; per-project overrides live outside the worktree, keyed by the effective project namespace)
 4. Global config (`~/.config/enclave/config.json`)
 5. Built-in defaults
 

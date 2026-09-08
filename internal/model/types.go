@@ -407,8 +407,10 @@ type Paths struct {
 type Project struct {
 	Dir     string
 	RealDir string
-	Hash    string
-	Name    string
+	// Hash is the effective project namespace. It is path-derived unless a
+	// host-owned project tag selects an existing namespace.
+	Hash string
+	Name string
 }
 
 type Host struct {

@@ -13,7 +13,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 
 	"enclave/internal/config"
 )
@@ -38,18 +37,11 @@ var DefaultPreferences = map[string]any{
 	},
 }
 
-// LoadPreferences returns the preferences to pass on launch. When yoloEnabled
-// is false it returns nothing (these preferences only make sense for a yolo
-// session). Otherwise it merges three sources, highest wins:
-//
-//  1. built-in DefaultPreferences
-//  2. global:  ~/.config/enclave/tools/theia/preferences.json  (flat map)
-//  3. project: ~/.config/enclave/projects/<hash>/config.json under {"theia":{"preferences":{...}}}
-//
-// Both roots honor $XDG_CONFIG_HOME on Linux (ignored on macOS).
-//
-// home or projectDir may be empty to skip that layer.
-func LoadPreferences(home, projectDir string, yoloEnabled bool) (map[string]any, error) {
+// LoadPreferencesForProject returns the preferences to pass on launch for an
+// already-resolved project namespace. When yoloEnabled is false it returns
+// nothing. Otherwise it merges built-in, global, and project preferences in
+// that order, with the project layer taking precedence.
+func LoadPreferencesForProject(home, projectHash string, yoloEnabled bool) (map[string]any, error) {
 	// These preferences exist to put the in-IDE AI agent into "always allow"
 	// mode, so when the session is not yolo we pass nothing at all: neither the
 	// built-in defaults nor any global/project overrides.
@@ -69,8 +61,8 @@ func LoadPreferences(home, projectDir string, yoloEnabled bool) (map[string]any,
 			merged[k] = v
 		}
 	}
-	if projectDir != "" {
-		project, err := loadProject(projectDir)
+	if home != "" && projectHash != "" {
+		project, err := loadProjectByHash(home, projectHash)
 		if err != nil {
 			return nil, fmt.Errorf("load project theia preferences: %w", err)
 		}
@@ -81,75 +73,6 @@ func LoadPreferences(home, projectDir string, yoloEnabled bool) (map[string]any,
 	return merged, nil
 }
 
-// PrefSource identifies where an effective preference value came from.
-type PrefSource string
-
-const (
-	SourceDefault PrefSource = "default"
-	SourceGlobal  PrefSource = "global"
-	SourceProject PrefSource = "project"
-)
-
-// EffectivePref is one resolved preference plus the layer that supplied it.
-type EffectivePref struct {
-	Key    string     `json:"key"`
-	Value  any        `json:"value"`
-	Source PrefSource `json:"source"`
-}
-
-// Effective returns the merged preference set (same precedence as
-// LoadPreferences) with each value tagged by its source layer, sorted by key.
-// This is the transparency view for the UI: it shows exactly what will be sent
-// to the IDE and why. Like LoadPreferences, a non-yolo session sends nothing,
-// so the effective set is empty regardless of any global/project overrides.
-func Effective(home, projectDir string, yoloEnabled bool) ([]EffectivePref, error) {
-	if !yoloEnabled {
-		return nil, nil
-	}
-	values := make(map[string]any)
-	source := make(map[string]PrefSource)
-	for k, v := range DefaultPreferences {
-		values[k] = v
-		source[k] = SourceDefault
-	}
-	if home != "" {
-		global, err := loadGlobal(home)
-		if err != nil {
-			return nil, fmt.Errorf("load global theia preferences: %w", err)
-		}
-		for k, v := range global {
-			values[k] = v
-			source[k] = SourceGlobal
-		}
-	}
-	if projectDir != "" {
-		project, err := loadProject(projectDir)
-		if err != nil {
-			return nil, fmt.Errorf("load project theia preferences: %w", err)
-		}
-		for k, v := range project {
-			values[k] = v
-			source[k] = SourceProject
-		}
-	}
-	keys := make([]string, 0, len(values))
-	for k := range values {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	out := make([]EffectivePref, 0, len(keys))
-	for _, k := range keys {
-		out = append(out, EffectivePref{Key: k, Value: values[k], Source: source[k]})
-	}
-	return out, nil
-}
-
-// GlobalPreferences returns the global override map (nil if unset).
-func GlobalPreferences(home string) (map[string]any, error) { return loadGlobal(home) }
-
-// ProjectPreferences returns the project override map (nil if unset).
-func ProjectPreferences(projectDir string) (map[string]any, error) { return loadProject(projectDir) }
-
 // GlobalPreferencesPath is the file global overrides are stored in.
 func GlobalPreferencesPath(home string) string {
 	return filepath.Join(config.HostToolConfigDir(home, "theia"), "preferences.json")
@@ -159,11 +82,8 @@ func loadGlobal(home string) (map[string]any, error) {
 	return readPrefsFile(GlobalPreferencesPath(home))
 }
 
-func loadProject(projectDir string) (map[string]any, error) {
-	path := config.ProjectConfigJSONPath(projectDir)
-	if path == "" {
-		return nil, nil
-	}
+func loadProjectByHash(home string, projectHash string) (map[string]any, error) {
+	path := config.HostProjectConfigJSONPath(home, projectHash)
 	raw, err := os.ReadFile(path) // #nosec G304 -- path is resolved by application config logic.
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil

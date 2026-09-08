@@ -27,7 +27,7 @@ import (
 // mirrors defaultStoreKey in internal/backend/docker.
 const persistentConfigStoreKey = "default"
 
-func runCleanup(run model.RunOptions, cleanup model.CleanupOptions) int {
+func runCleanup(run model.RunOptions, cleanup model.CleanupOptions, project model.Project) int {
 	home, err := config.ResolveHostHome()
 	if err != nil {
 		logx.Errorf("Failed to resolve home directory: %v", err)
@@ -38,14 +38,8 @@ func runCleanup(run model.RunOptions, cleanup model.CleanupOptions) int {
 		return 1
 	}
 
-	var project model.Project
 	if !cleanup.CleanupAll {
-		proj, err := config.ResolveProject()
-		if err != nil {
-			logx.Errorf("Failed to resolve project: %v", err)
-			return 1
-		}
-		project = proj
+		reportSharedProjectTag(home, project)
 	}
 
 	if cleanup.CleanupEphemeral {
@@ -54,8 +48,8 @@ func runCleanup(run model.RunOptions, cleanup model.CleanupOptions) int {
 			logx.Errorf("Failed to list containers: %v", containersErr)
 			return 1
 		}
-		// Ephemeral config stores are host directories keyed by a session or
-		// worktree suffix.
+		// Ephemeral config stores are host directories keyed by a session
+		// suffix. Legacy worktree-suffixed stores are enumerated the same way.
 		storeDirs := resolveEphemeralStoreDirs(run, cleanup, home, project)
 		if cleanup.CleanupDryRun {
 			printEphemeralCleanupPlan(containerNames, storeDirs)
@@ -82,6 +76,22 @@ func runCleanup(run model.RunOptions, cleanup model.CleanupOptions) int {
 
 	logx.Successf("Cleanup complete")
 	return 0
+}
+
+func reportSharedProjectTag(home string, project model.Project) {
+	registry, err := config.LoadProjectTags(home)
+	if err != nil {
+		logx.Warnf("Unable to inspect project tags for cleanup: %v", err)
+		return
+	}
+	tag := config.ProjectTagByNamespace(registry, project.Hash)
+	if tag == nil || len(tag.Members) < 2 {
+		return
+	}
+	logx.Warnf("Cleanup applies to tag %q and its shared namespace %s.", tag.Name, tag.Namespace)
+	for _, member := range tag.Members {
+		logx.Warnf("  tagged member: %s", member)
+	}
 }
 
 func resolveEphemeralContainers(run model.RunOptions, cleanup model.CleanupOptions, project model.Project) ([]string, error) {

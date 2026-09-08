@@ -61,7 +61,9 @@ type Defaults struct {
 	PlaywrightMCP    *bool               `json:"playwright_mcp"`
 }
 
-func LoadDefaults(projectDir string) (global Defaults, project Defaults, warnings []string, err error) {
+// LoadDefaultsForProject loads defaults for an already-resolved project so all
+// consumers in one invocation use the same effective namespace.
+func LoadDefaultsForProject(proj model.Project) (global Defaults, project Defaults, warnings []string, err error) {
 	globalPath, err := GlobalConfigPath()
 	if err != nil {
 		return Defaults{}, Defaults{}, nil, err
@@ -77,11 +79,6 @@ func LoadDefaults(projectDir string) (global Defaults, project Defaults, warning
 	if err != nil {
 		return Defaults{}, Defaults{}, nil, err
 	}
-	proj, err := ResolveProjectFromDir(projectDir)
-	if err != nil {
-		return Defaults{}, Defaults{}, nil, err
-	}
-
 	projectPath := HostProjectConfigJSONPath(home, proj.Hash)
 	projectDefaults, projectWarns, err := readDefaults(projectPath)
 	if err != nil {

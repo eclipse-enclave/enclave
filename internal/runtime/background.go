@@ -10,7 +10,9 @@ package runtime
 import (
 	"context"
 	"fmt"
+	"time"
 
+	"enclave/internal/backend"
 	"enclave/internal/logx"
 	"enclave/internal/theia"
 )
@@ -31,11 +33,29 @@ func (r *Runtime) ExecuteBackground() (string, error) {
 		}
 		return "", fmt.Errorf("runtime backend is not configured")
 	}
-	if _, err := be.Start(context.Background(), r.backendRequest(ctx, true, true)); err != nil {
+	ref, err := be.Start(context.Background(), r.backendRequest(ctx, true, true))
+	if err != nil {
 		if ctx.Cleanup != nil {
 			ctx.Cleanup()
 		}
 		return "", err
+	}
+	if ctx.configStoreLease != nil {
+		holder, ok := be.(detachedConfigStoreLeaseHolder)
+		if !ok {
+			cleanupFailedBackgroundStart(be, ref)
+			if ctx.Cleanup != nil {
+				ctx.Cleanup()
+			}
+			return "", fmt.Errorf("backend %s cannot hold a detached config store lease", be.Name())
+		}
+		if err := holder.HoldConfigStoreLease(context.Background(), ref, ctx.configStoreLease); err != nil {
+			cleanupFailedBackgroundStart(be, ref)
+			if ctx.Cleanup != nil {
+				ctx.Cleanup()
+			}
+			return "", err
+		}
 	}
 
 	// Announce only after the container is confirmed started: auto-assigned
@@ -46,6 +66,15 @@ func (r *Runtime) ExecuteBackground() (string, error) {
 	r.runPostStart(ctx.ContainerName)
 
 	return ctx.ContainerName, nil
+}
+
+func cleanupFailedBackgroundStart(be backend.Backend, ref backend.SessionRef) {
+	_ = be.Stop(context.Background(), ref, backend.StopOptions{Finalize: true, Timeout: 10 * time.Second})
+	if remover, ok := be.(backend.UnfinalizedRemover); ok {
+		_ = remover.RemoveWithoutFinalize(context.Background(), ref)
+		return
+	}
+	_ = be.Remove(context.Background(), ref)
 }
 
 // warnPostStartInteractive warns when a profile with a post_start IDE hook runs
@@ -84,7 +113,7 @@ func (r *Runtime) runPostStart(containerName string) {
 	// Use the resolved per-session yolo value (r.yoloEnabled), not the
 	// profile default, so toggling yolo off for this session also withholds
 	// the always_allow IDE preferences.
-	prefs, err := theia.LoadPreferences(r.host.Home, r.projectDir, r.yoloEnabled)
+	prefs, err := theia.LoadPreferencesForProject(r.host.Home, r.project.Hash, r.yoloEnabled)
 	if err != nil {
 		logx.Warnf("load %s preferences: %v", variant, err)
 		return

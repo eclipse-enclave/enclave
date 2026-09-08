@@ -11,6 +11,8 @@ import (
 	"os"
 	"strings"
 
+	"enclave/internal/backend"
+	backenddocker "enclave/internal/backend/docker"
 	"enclave/internal/cli"
 	"enclave/internal/config"
 	"enclave/internal/logx"
@@ -20,23 +22,14 @@ import (
 )
 
 func Run(args []string) int {
-	projectDir, err := resolveProjectDir()
-	if err != nil {
-		logx.Errorf("%v", err)
-		return 1
-	}
-
-	globalDefaults, projectDefaults, warnings, err := config.LoadDefaults(projectDir)
-	if err != nil {
-		logx.Errorf("%v", err)
-		return 1
-	}
-	for _, warning := range warnings {
-		logx.Warnf(warning)
+	if len(args) == 2 && args[0] == backend.ConfigStoreLeaseMonitorCommand {
+		if err := backenddocker.MonitorConfigStoreLease(args[1]); err != nil {
+			return 1
+		}
+		return 0
 	}
 
 	userCmds := discoverUserCommands()
-
 	baseOpts := config.DefaultOptions()
 	parsed, err := cli.Parse(args, baseOpts, userCmds...)
 	if err != nil {
@@ -46,11 +39,17 @@ func Run(args []string) int {
 	for _, warning := range parsed.Warnings {
 		logx.Warnf(warning)
 	}
-	if parsed.HelpShown {
+	if parsed.HelpShown || parsed.Action == "completion" {
 		return 0
 	}
-	if parsed.Action == "completion" {
-		return 0
+	if parsed.Options.Verbose {
+		logx.SetLevel("debug")
+	}
+
+	projectDir, err := resolveProjectDir()
+	if err != nil {
+		logx.Errorf("%v", err)
+		return 1
 	}
 
 	var userCommandMount *model.UserCommandMount
@@ -62,13 +61,8 @@ func Run(args []string) int {
 		}
 		switch parsed.UserCommand.Target {
 		case usercmd.TargetHost:
-			if parsed.Options.Verbose {
-				logx.SetLevel("debug")
-			}
 			return runUserHostCommand(*parsed.UserCommand, parsed.UserCommandArgs, projectDir, home)
 		case usercmd.TargetSession:
-			// Session commands run through the standard run pipeline as a
-			// shell-style execution; fall through with a rewritten action.
 			userCommandMount = prepareUserSessionCommand(&parsed, home)
 		default:
 			logx.Errorf("unknown user command target %q", parsed.UserCommand.Target)
@@ -76,45 +70,62 @@ func Run(args []string) int {
 		}
 	}
 
+	if strings.HasPrefix(parsed.Action, "project-") {
+		return runProjectCommand(projectCommandRequest{
+			Action:   parsed.Action,
+			Dir:      projectDir,
+			Tag:      parsed.ProjectTag,
+			Path:     parsed.ProjectPath,
+			JSON:     parsed.ProjectJSON,
+			Yes:      parsed.ProjectYes,
+			New:      parsed.ProjectTagNew,
+			Existing: parsed.ProjectTagExisting,
+		})
+	}
+
+	project, err := config.ResolveProjectFromDir(projectDir)
+	if err != nil {
+		logx.Errorf("%v", err)
+		return 1
+	}
+	globalDefaults, projectDefaults, warnings, err := config.LoadDefaultsForProject(project)
+	if err != nil {
+		logx.Errorf("%v", err)
+		return 1
+	}
+	for _, warning := range warnings {
+		logx.Warnf(warning)
+	}
+
 	cliOpts := parsed.Options
 	cliSources := parsed.Sources
 	opts, toolDefaults, hasToolDefaults := config.ResolveOptionsForTool(cliOpts, cliSources, globalDefaults, projectDefaults, "")
 	sources := opts.Sources
 	parsed.Options = opts
-
-	// Apply verbose here, before the per-action early returns below, so that
-	// --verbose is honored uniformly for every command (cleanup/ps/stop/attach
-	// bypass dispatchCommand via early return).
 	if opts.Verbose {
 		logx.SetLevel("debug")
 	}
 
 	if parsed.Action == "cleanup" {
-		return runCleanup(parsed.Options.RunOptions, parsed.Options.CleanupOptions)
+		return runCleanup(parsed.Options.RunOptions, parsed.Options.CleanupOptions, project)
 	}
-
 	if parsed.Action == "ps" {
 		return runPS(parsed.Options)
 	}
-
 	if parsed.Action == "status" {
-		return runStatus(parsed.Options)
+		return runStatus(parsed.Options, project)
 	}
-
 	if parsed.Action == "stop" {
 		return runStop(parsed.Options, projectDir)
 	}
-
 	if parsed.Action == "attach" {
 		return runAttach(parsed.Options, projectDir)
 	}
-
 	if parsed.Action == "review-target" {
 		return runReviewTarget(projectDir, parsed.ReviewTarget)
 	}
-
 	if parsed.Action == "theia" || parsed.Action == "theia-next" {
-		return runTheia(theia.Variant(parsed.Action), projectDir, parsed.Options)
+		return runTheia(theia.Variant(parsed.Action), project, parsed.Options)
 	}
 
 	paths, err := config.ResolvePaths()
@@ -123,7 +134,7 @@ func Run(args []string) int {
 		logx.Infof("Set %s to the directory containing Dockerfile and profiles.", model.EnvHome)
 		return 1
 	}
-	ctx := NewAppContext(paths, projectDir)
+	ctx := NewAppContext(paths, project)
 
 	command := CommandInput{
 		Ctx:              ctx,

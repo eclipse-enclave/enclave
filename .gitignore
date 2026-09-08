@@ -38,10 +38,10 @@ coverage.out
 .claude/
 
 # Local agent working files (never committed)
-.issues/*.md
-.prs/*.md
+.issues/
+.prs/
 .plans/
-.reviews/*
+.reviews/
 
 # Static analysis reports (generated)
 reports/*.txt

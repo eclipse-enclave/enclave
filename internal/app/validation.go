@@ -42,9 +42,9 @@ func ValidateOptions(opts model.Options, sources model.OptionSources, ctx Valida
 		return opts, sources, warnings, fmt.Errorf("devcontainer mode requires --backend %s", backend.NameDocker)
 	}
 	switch opts.Backend {
-	case backend.NameDocker, backend.NameQEMU:
+	case backend.NameDocker, backend.NamePodman, backend.NameQEMU:
 	default:
-		return opts, sources, warnings, fmt.Errorf("unsupported backend %q (available: %s, %s)", opts.Backend, backend.NameDocker, backend.NameQEMU)
+		return opts, sources, warnings, fmt.Errorf("unsupported backend %q (available: %s, %s, %s)", opts.Backend, backend.NameDocker, backend.NamePodman, backend.NameQEMU)
 	}
 	if opts.Backend == backend.NameQEMU && isRunAction(ctx.Action) {
 		var qemuWarnings []string

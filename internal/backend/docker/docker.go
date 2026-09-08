@@ -49,10 +49,24 @@ func New(opts Options) *Backend {
 	return b
 }
 
-func (b *Backend) Name() string { return backend.NameDocker }
+// UseCLI selects the container CLI executable ("docker" or "podman") behind
+// this backend and the image build/cleanup helpers that share its wrapper.
+func UseCLI(name string) {
+	dockercmd.SetBinary(name)
+}
+
+func (b *Backend) Name() string {
+	if dockercmd.IsPodman() {
+		return backend.NamePodman
+	}
+	return backend.NameDocker
+}
 
 func (b *Backend) Check(ctx context.Context) error {
 	if err := dockercmd.Ping(ctx); err != nil {
+		if dockercmd.IsPodman() {
+			return fmt.Errorf("podman is not usable: %w", err)
+		}
 		return fmt.Errorf("docker daemon is not running: %w", err)
 	}
 	return nil
@@ -172,7 +186,6 @@ func (b *Backend) Stop(ctx context.Context, ref backend.SessionRef, opts backend
 			stopErr = err
 		}
 	}
-	gateway.Stop(name)
 	return stopErr
 }
 
@@ -181,11 +194,22 @@ func (b *Backend) Remove(ctx context.Context, ref backend.SessionRef) error {
 	if err := b.finalizeManagedContainerAuth(ctx, name); err != nil {
 		return fmt.Errorf("finalize auth before removing container %s: %w", name, err)
 	}
-	return dockercmd.ContainerRemove(ctx, name, true, false)
+	return removeSessionContainer(ctx, name)
 }
 
 func (b *Backend) RemoveWithoutFinalize(ctx context.Context, ref backend.SessionRef) error {
-	return dockercmd.ContainerRemove(ctx, sessionRefName(ref), true, false)
+	return removeSessionContainer(ctx, sessionRefName(ref))
+}
+
+// removeSessionContainer removes the session container and then tears down
+// its gateway. The gateway must go second: podman refuses to remove a
+// container whose network namespace another container still joins, even an
+// exited one, so stopping the auto-removing gateway first would leave it
+// behind as an exited container.
+func removeSessionContainer(ctx context.Context, name string) error {
+	err := dockercmd.ContainerRemove(ctx, name, true, false)
+	gateway.Stop(name)
+	return err
 }
 
 var execInteractive = dockercmd.ExecInteractive
@@ -293,10 +317,22 @@ func (b *Backend) dockerConfig(req backend.Request) runSpec {
 		Mounts:     mounts,
 		Init:       &init,
 	}
+	applyHostUserNamespace(hostConfig)
 	if !req.Security.Admin {
 		applyContainerHardening(hostConfig)
 	}
 	return runSpec{config: config, hostConfig: hostConfig, name: req.Session.Name}
+}
+
+// applyHostUserNamespace keeps the host user's UID/GID identity inside the
+// container under rootless podman. Its default mapping puts container root on
+// the host user and every other UID on a subordinate range, so an image user
+// built with the host UID could not write the bind-mounted stores; keep-id
+// maps that UID onto itself like Docker does without user namespaces.
+func applyHostUserNamespace(hostConfig *dockercmd.HostConfig) {
+	if dockercmd.IsPodman() {
+		hostConfig.UserNS = "keep-id"
+	}
 }
 
 func labelsFromRequest(req backend.Request) map[string]string {
@@ -669,7 +705,7 @@ func (b *Backend) warnInsecureDockerConfig(ctx context.Context) {
 			return
 		}
 	}
-	logx.Warnf("Docker is running without userns-remap or rootless mode; container root maps to host root. See docs/security/host-hardening.md.")
+	logx.Warnf("%s is running without userns-remap or rootless mode; container root maps to host root. See docs/security/host-hardening.md.", util.TitleCase(dockercmd.Binary()))
 }
 
 func exitStatus(err error) backend.ExitStatus {

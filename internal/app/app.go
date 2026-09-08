@@ -100,6 +100,7 @@ func Run(args []string) int {
 	opts, toolDefaults, hasToolDefaults := config.ResolveOptionsForTool(cliOpts, cliSources, globalDefaults, projectDefaults, "")
 	sources := opts.Sources
 	parsed.Options = opts
+	selectContainerCLI(opts.Backend)
 
 	// Apply verbose here, before the per-action early returns below, so that
 	// --verbose is honored uniformly for every command (cleanup/ps/stop/attach

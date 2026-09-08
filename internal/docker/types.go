@@ -61,11 +61,15 @@ type HostConfig struct {
 	PortBindings PortMap
 	ExtraHosts   []string
 	Init         *bool
-	SecurityOpt  []string
-	Tmpfs        map[string]string
-	CapAdd       []string
-	CapDrop      []string
-	Sysctls      map[string]string
+	// UserNS is the user namespace mode passed as `--userns`; rootless podman
+	// uses "keep-id" so the container user keeps the host user's UID/GID on
+	// bind mounts.
+	UserNS      string
+	SecurityOpt []string
+	Tmpfs       map[string]string
+	CapAdd      []string
+	CapDrop     []string
+	Sysctls     map[string]string
 }
 
 // NetworkMode is the container network mode (for example "" for the default

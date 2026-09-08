@@ -21,7 +21,11 @@ steering through the gateway, not tool execution or persistence.
 
 Use rootful Docker for the supported backend. Docker user namespace remapping
 can reduce host UID exposure while retaining the gateway; see
-[Host hardening](host-hardening.md). The experimental QEMU backend is another
+[Host hardening](host-hardening.md). Rootless podman is different: with
+`--backend podman` the gateway keeps `NET_ADMIN`/`NET_RAW` inside its own user
+and network namespaces, so netfilter steering and DNS enforcement work there,
+and the tool container joins that namespace exactly as under Docker (see
+[Podman backend](../cli-reference.md#podman-backend)). The experimental QEMU backend is another
 option for foreground tool-only sessions, but it runs with unrestricted network
 access and does not provide gateway-side secret release.
 

@@ -10,6 +10,7 @@ package app
 import (
 	"fmt"
 	"path/filepath"
+	"strings"
 
 	"enclave/internal/backend"
 	backenddocker "enclave/internal/backend/docker"
@@ -50,11 +51,22 @@ func selectBackend(opts model.Options, dockerOpts backenddocker.Options) (backen
 		name = backend.NameDocker
 	}
 	switch name {
-	case backend.NameDocker:
+	case backend.NameDocker, backend.NamePodman:
 		return backenddocker.New(dockerOpts), nil
 	case backend.NameQEMU:
 		return backendqemu.New(qemuBackendOptions(dockerOpts.Host, dockerOpts.Paths)), nil
 	default:
-		return nil, fmt.Errorf("unsupported backend %q (available: %s, %s)", name, backend.NameDocker, backend.NameQEMU)
+		return nil, fmt.Errorf("unsupported backend %q (available: %s, %s, %s)", name, backend.NameDocker, backend.NamePodman, backend.NameQEMU)
+	}
+}
+
+// selectContainerCLI points the shared container CLI wrapper at podman when
+// that backend is selected. The podman backend is the Docker backend driven
+// through podman's Docker-compatible CLI, and image builds and engine checks
+// use the wrapper directly before any backend instance exists, so the switch
+// happens once, right after option resolution.
+func selectContainerCLI(backendName string) {
+	if strings.TrimSpace(backendName) == backend.NamePodman {
+		backenddocker.UseCLI(backend.NamePodman)
 	}
 }

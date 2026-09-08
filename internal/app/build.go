@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -136,6 +137,46 @@ func inspectImageInfo(imageName string) imageInfo {
 
 var dockerPing = docker.Ping
 
+// renderEngineDockerfile renders the Dockerfile for the selected tools and
+// features and adapts it to the container engine in use. Both the rebuild
+// hash and the build itself go through it so they see identical content.
+func renderEngineDockerfile(templatePath string, tools []string, features []featureInstall, stamps map[string]string, forceTools map[string]bool) (string, error) {
+	content, err := renderDockerfile(templatePath, tools, features, stamps, forceTools)
+	if err != nil {
+		return "", err
+	}
+	if docker.IsPodman() {
+		content = stripHomeCacheMounts(content)
+	}
+	return content, nil
+}
+
+// homeCacheMountPattern matches one `--mount=type=cache,...` RUN flag whose
+// target lies under the agent home.
+var homeCacheMountPattern = regexp.MustCompile(`--mount=type=cache,[^\s\\]*target=/home/[^\s\\]*`)
+
+// stripHomeCacheMounts removes cache mounts targeting the agent home from RUN
+// steps. buildah (podman build) commits the ancestors of such mount targets
+// as root-owned 0755 directories whenever the step modified them, which
+// leaves the agent unable to write its own home; the caches only speed up
+// rebuilds, and buildah's layer cache still applies. Continuation lines left
+// with nothing but a backslash are dropped.
+func stripHomeCacheMounts(dockerfile string) string {
+	if !strings.Contains(dockerfile, "target=/home/") {
+		return dockerfile
+	}
+	lines := strings.Split(dockerfile, "\n")
+	out := make([]string, 0, len(lines))
+	for _, line := range lines {
+		stripped := homeCacheMountPattern.ReplaceAllString(line, "")
+		if stripped != line && strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(stripped), "\\")) == "" {
+			continue
+		}
+		out = append(out, stripped)
+	}
+	return strings.Join(out, "\n")
+}
+
 // checkDocker distinguishes the common connectivity failures so users are not
 // sent chasing a stopped daemon when the CLI is missing or socket access is
 // denied.
@@ -145,9 +186,11 @@ func checkDocker() error {
 	case err == nil:
 		return nil
 	case docker.IsCLIUnavailable(err):
-		return fmt.Errorf("docker CLI not found on PATH; install Docker and retry")
+		return fmt.Errorf("%s CLI not found on PATH; install %s and retry", docker.Binary(), util.TitleCase(docker.Binary()))
 	case docker.IsSocketPermissionDenied(err):
 		return fmt.Errorf("cannot access the Docker socket: permission denied. Grant this user access to Docker (commonly by adding it to the docker group and logging in again; see https://docs.docker.com/engine/install/linux-postinstall/), then retry")
+	case docker.IsPodman():
+		return fmt.Errorf("podman is not usable: %w", err)
 	default:
 		return fmt.Errorf("docker daemon is not reachable: %w", err)
 	}
@@ -411,7 +454,7 @@ func needsRebuildForSelection(paths model.Paths, buildCfg buildConfig, selection
 	if err != nil {
 		return false, "", err
 	}
-	dockerfileContent, err := renderDockerfile(paths.Dockerfile, selection.Tools, featureInstalls, nil, nil)
+	dockerfileContent, err := renderEngineDockerfile(paths.Dockerfile, selection.Tools, featureInstalls, nil, nil)
 	if err != nil {
 		return false, "", err
 	}
@@ -503,7 +546,7 @@ func buildImage(ctx context.Context, paths model.Paths, host model.Host, combine
 	if err != nil {
 		return err
 	}
-	dockerfileContent, err := renderDockerfile(paths.Dockerfile, updates.Tools, featureInstalls, updates.Stamps, updates.ForceTools)
+	dockerfileContent, err := renderEngineDockerfile(paths.Dockerfile, updates.Tools, featureInstalls, updates.Stamps, updates.ForceTools)
 	if err != nil {
 		return err
 	}

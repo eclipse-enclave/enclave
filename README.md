@@ -20,6 +20,8 @@ Runtime dependencies:
 
 - Rootful Docker (CLI on `PATH`, daemon running) with the buildx plugin; the
   sandbox image build requires BuildKit. Rootless Docker is not supported.
+- Alternatively, Podman (`podman` on `PATH`, rootless works) with
+  `--backend podman`; see [Podman backend](docs/cli-reference.md#podman-backend).
 - Optional: `qemu-system-x86_64` and `cpio` for the experimental `qemu` backend,
   which builds an x86-64 guest and is practical only on x86-64 Linux hosts,
   where KVM can accelerate it. On arm64 hosts and on macOS it falls back to

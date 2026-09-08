@@ -17,6 +17,7 @@ import (
 
 const (
 	NameDocker = "docker"
+	NamePodman = "podman"
 	NameQEMU   = "qemu"
 )
 

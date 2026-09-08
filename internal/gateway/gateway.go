@@ -640,6 +640,10 @@ func Stop(containerName string) {
 	container := gatewayContainerName(containerName)
 	timeout := 3 * time.Second
 	if err := docker.ContainerStop(context.Background(), container, &timeout); err != nil {
+		if docker.IsNotFound(err) {
+			logx.Debugf("Gateway container %s is already gone", container)
+			return
+		}
 		logx.Warnf("Failed to stop gateway container %s: %v", container, err)
 	}
 }

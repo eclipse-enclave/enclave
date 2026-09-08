@@ -48,3 +48,7 @@ debian
 website
 README.md
 AGENTS.md
+# Branding for README.md only. docs/ otherwise feeds the image build context
+# and its hash, so leaving these in would rebuild the image for every user
+# whenever the logo changes.
+docs/assets

@@ -1,8 +1,9 @@
-<p align="center">
-  <img src="docs/assets/appicon.png" alt="Enclave" width="128" height="128">
-</p>
-
-<h1 align="center">Eclipse Enclave</h1>
+<h1 align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/enclave-logo-horizontal-darkbg.png">
+    <img src="docs/assets/enclave-logo-horizontal-lightbg.png" alt="Eclipse Enclave" width="400">
+  </picture>
+</h1>
 
 A Docker-based sandbox for running agentic coding tools — Claude, Codex, OpenCode, and others — in an isolated container while keeping your project files on the host. Network access is restricted to allowlisted domains by default, auth and history persist across sessions, and YOLO mode is on so agents can act without confirmation prompts.
 

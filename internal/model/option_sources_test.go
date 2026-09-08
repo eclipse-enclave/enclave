@@ -43,6 +43,8 @@ func TestMergeOptionSourcesCoversAllFields(t *testing.T) {
 			AllowDomains:     SourceCLI,
 			BridgePorts:      SourceCLI,
 			SessionName:      SourceCLI,
+			TheiaAPIPort:     SourceCLI,
+			TheiaAPIToken:    SourceCLI,
 			PlaywrightMCP:    SourceCLI,
 		},
 		AuthOptionSources: AuthOptionSources{

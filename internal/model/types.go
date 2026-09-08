@@ -38,6 +38,8 @@ type RunOptions struct {
 	Verbose           bool
 	Background        bool
 	SessionName       string
+	TheiaAPIPort      string
+	TheiaAPIToken     string
 	PlaywrightMCP     bool
 	AllRunning        bool
 	NoApply           bool

@@ -341,5 +341,21 @@ func optionCLIFlags() map[string][]CLIFlag {
 				return nil
 			}),
 		},
+		"theia_api_port": {
+			valueFlag("--theia-api-port", "Publish a Theia external-API port on host loopback and enable Theia's separate-port external API", "--theia-api-port requires a port number", func(opts *model.Options, sources *model.OptionSources, value string) error {
+				if err := applyTheiaAPIPort(opts, value); err != nil {
+					return err
+				}
+				sources.TheiaAPIPort = model.SourceCLI
+				return nil
+			}),
+		},
+		"theia_api_token": {
+			valueFlag("--theia-api-token", "Token for the Theia external API (see --theia-api-port); no token preference is set if omitted", "--theia-api-token requires a value", func(opts *model.Options, sources *model.OptionSources, value string) error {
+				opts.TheiaAPIToken = value
+				sources.TheiaAPIToken = model.SourceCLI
+				return nil
+			}),
+		},
 	}
 }

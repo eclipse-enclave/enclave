@@ -157,8 +157,7 @@ func runExecutionCommand(input *CommandInput) int {
 // user wants the container shell, not the IDE. A session the user already
 // requested as background needs no adjustment.
 func autoBackgroundForIDE(action string, opts model.Options, profile model.Profile) bool {
-	return action == "run" && !opts.Shell && !opts.Background &&
-		profile.PostStart != nil && theia.Variant(profile.PostStart.OpenIDE).Valid()
+	return action == "run" && !opts.Shell && !opts.Background && theia.OpensIDE(profile.PostStart)
 }
 
 func executionRequiresDocker(action string, opts model.Options) bool {

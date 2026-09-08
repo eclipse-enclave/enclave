@@ -428,6 +428,14 @@ func OptionSpecs() []OptionSpec {
 				}
 			},
 		},
+		{
+			Name:  "theia_api_port",
+			Group: OptionGroupRun,
+		},
+		{
+			Name:  "theia_api_token",
+			Group: OptionGroupRun,
+		},
 	}
 	attachCLIFlags(specs)
 	return specs

@@ -10,11 +10,45 @@ package config
 import (
 	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 
 	"enclave/internal/model"
 	"enclave/internal/util"
 )
+
+func TestApplyTheiaAPIPort(t *testing.T) {
+	cases := []struct {
+		value   string
+		wantErr bool
+	}{
+		{"8080", false},
+		{"1", false},
+		{"65535", false},
+		{" 3333 ", false},
+		{"0", true},
+		{"70000", true},
+		{"abc", true},
+		{"", true},
+	}
+	for _, tc := range cases {
+		var opts model.Options
+		err := applyTheiaAPIPort(&opts, tc.value)
+		if tc.wantErr {
+			if err == nil {
+				t.Errorf("applyTheiaAPIPort(%q): expected error, got nil", tc.value)
+			}
+			continue
+		}
+		if err != nil {
+			t.Errorf("applyTheiaAPIPort(%q): unexpected error: %v", tc.value, err)
+			continue
+		}
+		if opts.TheiaAPIPort != strings.TrimSpace(tc.value) {
+			t.Errorf("applyTheiaAPIPort(%q): TheiaAPIPort = %q", tc.value, opts.TheiaAPIPort)
+		}
+	}
+}
 
 func TestAppendCSVUnique(t *testing.T) {
 	// Dedup against the existing slice and within the input; blanks skipped.

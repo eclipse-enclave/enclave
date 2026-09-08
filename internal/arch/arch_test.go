@@ -14,6 +14,7 @@ import (
 	"go/parser"
 	"go/token"
 	"io/fs"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -50,6 +51,9 @@ func TestDockerImportsConfinedToBackendAndCarveOuts(t *testing.T) {
 		if d.IsDir() {
 			name := d.Name()
 			if name == ".git" || name == "node_modules" || name == "frontend" || name == "bin" {
+				return filepath.SkipDir
+			}
+			if path != root && isModuleRoot(path) {
 				return filepath.SkipDir
 			}
 			return nil
@@ -127,6 +131,14 @@ func isAllowedDockerImporter(rel string) bool {
 		}
 	}
 	return false
+}
+
+// isModuleRoot reports whether dir carries its own go.mod. Nested modules are
+// separate checkouts (agent worktrees, scratch clones) that the Go toolchain
+// excludes from ./..., so the boundary walk must exclude them too.
+func isModuleRoot(dir string) bool {
+	_, err := os.Stat(filepath.Join(dir, "go.mod"))
+	return err == nil
 }
 
 func repoRoot(t *testing.T) string {

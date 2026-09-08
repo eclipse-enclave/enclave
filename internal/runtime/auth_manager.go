@@ -168,6 +168,8 @@ func (m authManager) injectDeclaredSecrets(hooks auth.Hooks, authCtx auth.Contex
 	for _, secret := range suppressedActiveSecrets {
 		logx.Debugf("Suppressed declared API key secret %s due to %s", secret.ID, suppressionReason)
 	}
+	hostCredentials := hostCredentialRefs(eligibleSecrets)
+	m.setReleaseHostOverrides(resolveReleaseHostOverrides(eligibleSecrets, m.host.Home, secretsLayers, persistedEnv))
 	secretReleaseEnabled := m.shouldUseSecretReleases(eligibleSecrets)
 	for _, secret := range eligibleSecrets {
 		secretValue, secretSource, found, err := resolveActiveSecretValue(secret, m.host.Home, secretsLayers, persistedEnv)
@@ -186,22 +188,30 @@ func (m authManager) injectDeclaredSecrets(hooks auth.Hooks, authCtx auth.Contex
 			} else {
 				placeholder = resolved
 				placeholderVars = m.proxyManagedEnvVars(secret)
+				releaseHosts, exactHosts := m.releaseTargetsFor(secret)
 				result.SecretMapping.Entries = append(result.SecretMapping.Entries, model.SecretReleaseEntry{
 					SecretID:    secret.ID,
 					Placeholder: placeholder,
 					Value:       secretValue,
-					Hosts:       append([]string{}, secret.ReleaseHTTP.Hosts...),
+					Hosts:       releaseHosts,
 					Header:      secret.ReleaseHTTP.Header,
 					Format:      secret.ReleaseHTTP.Format,
+					ExactHosts:  exactHosts,
 				})
 			}
 		}
+		// A host selector is a choice, not a credential: persisting it would
+		// pin every later run to the instance one run happened to name, with no
+		// way to go back other than editing the env store.
+		_, isHostSelector := hostCredentials[secret.ID]
 		for _, envVar := range secret.EnvVars {
 			envValue := secretValue
 			if placeholder != "" && placeholderVars[envVar] {
 				envValue = placeholder
 			}
-			result.SecretValues[envVar] = secretValue
+			if !isHostSelector {
+				result.SecretValues[envVar] = secretValue
+			}
 			result.InjectedKeys[envVar] = envValue
 			hookInjectedKeys[envVar] = secretValue
 			*env = append(*env, envVar+"="+envValue)
@@ -412,6 +422,17 @@ func (m authManager) apiKeySecretSuppressionReason() string {
 		return "--ephemeral without --pass-api-key"
 	}
 	return ""
+}
+
+// releaseTargetsFor returns the hosts a secret's release rule applies to, after
+// any serviceAuth.hostsFromCredential replacement, and whether those hosts must
+// match exactly. A selected host names one instance, so the gateway must not
+// extend it to subdomains the way a declared pattern is extended.
+func (m authManager) releaseTargetsFor(secret activeSecret) (hosts []string, exact bool) {
+	if override, ok := m.releaseHostOverrides[secret.ID]; ok {
+		return append([]string{}, override...), true
+	}
+	return append([]string{}, secret.ReleaseHTTP.Hosts...), false
 }
 
 func (m authManager) shouldUseSecretReleases(activeSecrets []activeSecret) bool {

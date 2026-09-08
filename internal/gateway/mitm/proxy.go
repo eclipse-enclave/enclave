@@ -20,6 +20,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -487,11 +488,26 @@ func requiresMITM(host string, rules []model.SecretReleaseEntry) bool {
 		return false
 	}
 	for _, rule := range rules {
-		if hostAllowed(normalizedHost, rule.Hosts) {
+		if releaseHostMatch(normalizedHost, rule) {
 			return true
 		}
 	}
 	return false
+}
+
+// releaseHostMatch reports whether a normalized request host is a release
+// target of rule. Declared patterns keep the allowlist semantics, where a bare
+// host also covers its subdomains; a rule marked ExactHosts matches only the
+// hosts it names, because those were selected at runtime to name one instance.
+func releaseHostMatch(host string, rule model.SecretReleaseEntry) bool {
+	if rule.ExactHosts {
+		normalized, err := domainpattern.NormalizeHost(host)
+		if err != nil {
+			return false
+		}
+		return slices.Contains(rule.Hosts, normalized)
+	}
+	return hostAllowed(host, rule.Hosts)
 }
 
 func shouldMITM(host string, rules []model.SecretReleaseEntry, forceHTTPSMITM bool) bool {
@@ -692,6 +708,12 @@ func normalizeRule(rule model.SecretReleaseEntry) (model.SecretReleaseEntry, err
 		if value == "" {
 			continue
 		}
+		// A wildcard cannot be matched by equality, so an exact rule carrying
+		// one would silently release the secret nowhere. The host selector
+		// already rejects wildcards; fail loudly if one reaches the gateway.
+		if rule.ExactHosts && strings.Contains(value, "*") {
+			return model.SecretReleaseEntry{}, fmt.Errorf("secret release entry has wildcard host %q in exact-host rule for %q", value, rule.SecretID)
+		}
 		normalizedHosts = append(normalizedHosts, value)
 	}
 	hosts := util.Dedupe(normalizedHosts)
@@ -723,7 +745,7 @@ func rewriteHeaders(scheme string, host string, headers http.Header, rules []mod
 				if !secureTransport {
 					return fmt.Errorf("request denied")
 				}
-				if !hostAllowed(normalizedHost, rule.Hosts) {
+				if !releaseHostMatch(normalizedHost, rule) {
 					return fmt.Errorf("request denied")
 				}
 				replacement := rule.Value

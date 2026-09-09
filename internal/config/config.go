@@ -40,6 +40,7 @@ type Defaults struct {
 	NoHistory        *bool               `json:"no_history"`
 	NoMemory         *bool               `json:"no_memory"`
 	SessionMonitor   *bool               `json:"session_monitor"`
+	SessionTint      string              `json:"session_tint"`
 	ImageInbox       *bool               `json:"image_inbox"`
 	BaseImage        string              `json:"base_image"`
 	Devcontainer     *bool               `json:"devcontainer"`

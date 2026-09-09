@@ -34,14 +34,11 @@ var colorEnabled = ColorEnabledFor(os.Stderr)
 // callers that render to a stream other than the log stream. NO_COLOR wins
 // outright, then ENCLAVE_COLOR, and otherwise f has to be a terminal.
 func ColorEnabledFor(f *os.File) bool {
-	if os.Getenv("NO_COLOR") != "" {
+	if ColorSuppressedByEnv() {
 		return false
 	}
-	switch strings.ToLower(strings.TrimSpace(os.Getenv(model.EnvColor))) {
-	case "always":
+	if strings.EqualFold(strings.TrimSpace(os.Getenv(model.EnvColor)), "always") {
 		return true
-	case "never":
-		return false
 	}
 	if f == nil {
 		return false
@@ -58,4 +55,15 @@ func Colorize(text string, color Color) string {
 
 func colorPrefix(label string, color Color) string {
 	return Colorize(label+": ", color)
+}
+
+// ColorSuppressedByEnv reports whether the environment explicitly disables
+// colored output, regardless of whether a terminal is attached. Consumers that
+// paint something other than log text (see internal/termtint) honor the same
+// opt-out without inheriting the terminal auto-detection of ColorEnabledFor.
+func ColorSuppressedByEnv() bool {
+	if os.Getenv("NO_COLOR") != "" {
+		return true
+	}
+	return strings.EqualFold(strings.TrimSpace(os.Getenv(model.EnvColor)), "never")
 }

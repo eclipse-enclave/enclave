@@ -14,6 +14,7 @@ import (
 	"enclave/internal/backend"
 	"enclave/internal/logx"
 	"enclave/internal/model"
+	"enclave/internal/termtint"
 )
 
 func runAttach(opts model.Options, projectDir string) int {
@@ -51,6 +52,8 @@ func runAttach(opts model.Options, projectDir string) int {
 		logx.Errorf("%v", err)
 		return 1
 	}
+	restoreTint := termtint.Begin(run.SessionTint)
+	defer restoreTint()
 	if err := be.Attach(ctx, session.Ref, backend.AttachIO{DetachKeys: detachKeys}); err != nil {
 		logx.Errorf("attach: %v", err)
 		return 1

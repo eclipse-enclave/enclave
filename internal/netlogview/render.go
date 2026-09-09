@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"enclave/internal/logx"
@@ -71,7 +72,7 @@ func WriteEvents(out io.StringWriter, events []netlog.Event, opts RenderOptions)
 			if index > 0 {
 				separator = "\n"
 			}
-			pass, deny := countUntilNextMarker(events[index+1:])
+			pass, deny := countSessionEvents(events[index+1:], event.Session)
 			if err := writeParts(out, separator, renderSessionHeader(event, pass, deny, opts), "\n\n"); err != nil {
 				return err
 			}
@@ -102,10 +103,21 @@ func writeParts(out io.StringWriter, parts ...string) error {
 	return nil
 }
 
-func countUntilNextMarker(events []netlog.Event) (pass int, deny int) {
+// countSessionEvents counts the verdicts one session recorded after its marker.
+// Concurrent sessions of a project and tool share a log file and --all-running
+// merges several logs by time, so ownership comes from the event's session
+// field rather than from position. The next marker of the same session ends the
+// count, because session names recur across runs.
+func countSessionEvents(events []netlog.Event, session string) (pass int, deny int) {
 	for _, event := range events {
 		if event.IsSessionMarker() {
-			return pass, deny
+			if event.Session == session {
+				return pass, deny
+			}
+			continue
+		}
+		if event.Session != session {
+			continue
 		}
 		if strings.EqualFold(event.Verdict, netlog.VerdictDeny) {
 			deny++
@@ -119,7 +131,7 @@ func countUntilNextMarker(events []netlog.Event) (pass int, deny int) {
 // renderSessionHeader renders a session boundary. Counts of zero are omitted so
 // a live follow, which cannot know them yet, still prints a clean boundary.
 func renderSessionHeader(event netlog.Event, pass int, deny int, opts RenderOptions) string {
-	session := strings.TrimSpace(event.Session)
+	session := strings.TrimSpace(displaySafe(event.Session))
 	if session == "" {
 		session = "unknown session"
 	}
@@ -136,6 +148,8 @@ func renderSessionHeader(event netlog.Event, pass int, deny int, opts RenderOpti
 }
 
 func renderHumanRow(event netlog.Event, opts RenderOptions) string {
+	event = displaySafeEvent(event)
+
 	timestamp := "--:--:--"
 	if at, ok := event.Time(); ok {
 		timestamp = at.In(opts.location()).Format("15:04:05")
@@ -255,7 +269,30 @@ func summaryDomainCell(domain string) string {
 	if domain == "" {
 		return "(no domain)"
 	}
-	return domain
+	return displaySafe(domain)
+}
+
+// displaySafeEvent neutralizes the fields the terminal form prints. A denied
+// request records the host and path the sandboxed process asked for, so an
+// event can carry escape sequences that would otherwise drive the terminal of
+// whoever reads the log. Replacing them by runes also keeps column widths
+// honest, since padding counts runes.
+func displaySafeEvent(event netlog.Event) netlog.Event {
+	event.Type = displaySafe(event.Type)
+	event.Method = displaySafe(event.Method)
+	event.Domain = displaySafe(event.Domain)
+	event.Path = displaySafe(event.Path)
+	event.Rule = displaySafe(event.Rule)
+	return event
+}
+
+func displaySafe(value string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.IsPrint(r) {
+			return r
+		}
+		return '?'
+	}, value)
 }
 
 func denyColor(deny int) logx.Color {

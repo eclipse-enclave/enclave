@@ -113,6 +113,55 @@ func TestRenderSeparatesSessions(t *testing.T) {
 	}
 }
 
+// Interleaved sessions: a header counts its own session's events, not whatever
+// was appended before the next session started.
+func TestRenderCountsInterleavedSessionsSeparately(t *testing.T) {
+	events := []netlog.Event{
+		{Timestamp: "2026-08-13T12:00:00.000Z", Type: netlog.TypeSession, Verdict: netlog.VerdictInfo, Rule: netlog.RuleSessionStart, Session: "session-a"},
+		{Timestamp: "2026-08-13T12:00:01.000Z", Type: netlog.TypeSession, Verdict: netlog.VerdictInfo, Rule: netlog.RuleSessionStart, Session: "session-b"},
+		{Timestamp: "2026-08-13T12:00:02.000Z", Type: netlog.TypeDNS, Domain: "blocked.test", Verdict: netlog.VerdictDeny, Rule: "nxdomain", Session: "session-a"},
+		{Timestamp: "2026-08-13T12:00:03.000Z", Type: netlog.TypeTCP, Domain: "github.com", Port: 443, Verdict: netlog.VerdictPass, Rule: "allowlist", Session: "session-b"},
+	}
+
+	out := renderEvents(events, humanOptions())
+	lines := strings.Split(out, "\n")
+	if !strings.Contains(lines[0], "session-a") || !strings.Contains(lines[0], "0 pass") || !strings.Contains(lines[0], "1 deny") {
+		t.Fatalf("session-a header = %q", lines[0])
+	}
+	headerB := ""
+	for _, line := range lines {
+		if strings.Contains(line, "session-b") {
+			headerB = line
+		}
+	}
+	if !strings.Contains(headerB, "1 pass") || !strings.Contains(headerB, "0 deny") {
+		t.Fatalf("session-b header = %q", headerB)
+	}
+}
+
+// Event fields come from the sandboxed process, so a crafted host must not
+// reach the terminal as control sequences.
+func TestRenderEscapesControlSequencesInEventFields(t *testing.T) {
+	event := netlog.Event{
+		Timestamp: "2026-08-13T12:04:31.000Z", Type: netlog.TypeTCP,
+		Domain: "evil\x1b]0;controlled\a.test", Path: "/a\x1b[2Jb", Port: 443,
+		Verdict: netlog.VerdictDeny, Rule: "tls-clienthello", Session: "sess\x1b[31mion",
+	}
+
+	out := renderEvents([]netlog.Event{event, {
+		Timestamp: "2026-08-13T12:04:32.000Z", Type: netlog.TypeSession,
+		Verdict: netlog.VerdictInfo, Rule: netlog.RuleSessionStart, Session: event.Session,
+	}}, humanOptions())
+	if strings.ContainsAny(out, "\x1b\a") {
+		t.Fatalf("terminal controls survived rendering: %q", out)
+	}
+
+	summary := RenderSummary(Aggregate([]netlog.Event{event}), humanOptions())
+	if strings.ContainsAny(summary, "\x1b\a") {
+		t.Fatalf("terminal controls survived the summary: %q", summary)
+	}
+}
+
 // One output format: a row from the live stream is what the backlog would have
 // printed for it.
 func TestWriteEventRendersTheBacklogRow(t *testing.T) {

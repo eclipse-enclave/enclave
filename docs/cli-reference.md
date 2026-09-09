@@ -201,7 +201,7 @@ Mutation commands (`add-domain`, `remove-domain`, `set-mode`) apply the new poli
 | Flag | Description |
 |------|-------------|
 | `--tool <tool>` | Tool profile to use (`claude` by default; run `enclave tools` for the installed list) |
-| `--backend <backend>` | Isolation backend: `docker` (default), `podman`, or experimental `qemu` |
+| `--backend <backend>` | Isolation backend: `auto` (default: docker or podman, whichever is installed), `docker`, `podman`, or experimental `qemu` |
 | `--name <name>` | Named persistent session |
 | `--background` | Detached background session |
 | `-p <port>` | Publish a container port to the host (container → host, e.g. `-p 3002`). A host port of `0` (e.g. `-p 0:3000`) lets the daemon pick a free host port (Docker only); read it back with `enclave ps --json`. |
@@ -283,11 +283,15 @@ Mutation commands (`add-domain`, `remove-domain`, `set-mode`) apply the new poli
 
 Persistent defaults can be set in `~/.config/enclave/config.json` (global) or `~/.config/enclave/projects/<hash>/config.json` (per-project). See [Configuration](configuration.md).
 
+## Backend detection
+
+The default backend is `auto`: enclave uses docker when its CLI is on `PATH`, otherwise podman. A `docker` command that is really the `podman-docker` shim counts as podman. When both engines are installed and enclave runs in a terminal, it asks once which one to use and saves the answer as `"backend"` in `~/.config/enclave/config.json`; without a terminal (scripts, `--json` consumers) it uses docker and prints a notice pointing at that key. When neither engine is found, the engine check reports it. An explicit `--backend` or a configured `backend` disables detection.
+
 ## Podman backend
 
 `--backend podman` drives the Docker backend through podman's Docker-compatible CLI (`podman` on `PATH`; rootless is the tested configuration). Everything the Docker backend does applies unchanged — image builds via buildah, the gateway sidecar with restricted egress, detached sessions, `exec`/`attach`, persistent stores — with a few engine-specific adjustments: session and auth-reconcile containers run with `--userns=keep-id` so the container user keeps the host user's UID/GID on bind-mounted stores under rootless podman's user namespace; image builds rely on podman's local layer cache instead of Docker's `--cache-from`/inline-cache flags; and the rendered Dockerfile drops the npm/Go/uv build caches mounted under the agent home, because buildah commits the parent directories of such cache mounts as root-owned, which would leave the agent unable to write its home (apt caches and layer caching still apply, so only cold rebuilds of feature and tool installs are slower). Devcontainer mode is only verified with Docker and stays rejected for `podman`. Images carry the same tags as under Docker (podman stores them as `localhost/enclave-<tool>:...`). Hosts that enforce short-name resolution need registry aliases for the base images (`debian`, `node`, `golang`, `alpine`); Fedora ships them.
 
-`--backend` is a session flag; commands without it (`ps`, `stop`, `attach`, `status`, `cleanup`, `network`) read the backend from the `backend` key in `config.json`, so set `"backend": "podman"` there to manage podman sessions. `cleanup --build-cache` reports nothing to reclaim under podman, which keeps no separate build cache.
+`--backend` is a session flag; commands without it (`ps`, `stop`, `attach`, `status`, `cleanup`, `network`) resolve the backend the same way, from the `backend` key in `config.json` or by detection, so a saved or detected `podman` applies to them too. `cleanup --build-cache` reports nothing to reclaim under podman, which keeps no separate build cache.
 
 ## Experimental QEMU backend
 

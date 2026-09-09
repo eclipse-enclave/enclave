@@ -55,6 +55,12 @@ func UseCLI(name string) {
 	dockercmd.SetBinary(name)
 }
 
+// DetectCLIs reports which supported container CLIs the host has on PATH,
+// docker first; the podman-docker shim counts as podman.
+func DetectCLIs() []string {
+	return dockercmd.DetectCLIs()
+}
+
 func (b *Backend) Name() string {
 	if dockercmd.IsPodman() {
 		return backend.NamePodman

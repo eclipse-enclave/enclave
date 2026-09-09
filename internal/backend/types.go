@@ -16,6 +16,9 @@ import (
 )
 
 const (
+	// NameAuto is the default backend value: it resolves to docker or podman
+	// depending on which CLI the host has (see app backend resolution).
+	NameAuto   = "auto"
 	NameDocker = "docker"
 	NamePodman = "podman"
 	NameQEMU   = "qemu"

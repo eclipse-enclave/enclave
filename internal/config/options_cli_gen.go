@@ -22,7 +22,7 @@ func optionCLIFlags() map[string][]CLIFlag {
 			}),
 		},
 		"backend": {
-			valueFlag("--backend", "Isolation backend: docker|podman|qemu (default: docker)", "--backend requires a value (docker|podman|qemu)", func(opts *model.Options, sources *model.OptionSources, value string) error {
+			valueFlag("--backend", "Isolation backend: auto|docker|podman|qemu (default: auto, detects docker or podman)", "--backend requires a value (auto|docker|podman|qemu)", func(opts *model.Options, sources *model.OptionSources, value string) error {
 				opts.Backend = value
 				sources.Backend = model.SourceCLI
 				return nil

@@ -185,8 +185,10 @@ func checkDocker() error {
 	switch {
 	case err == nil:
 		return nil
+	case docker.IsCLIUnavailable(err) && docker.IsPodman():
+		return fmt.Errorf("podman CLI not found on PATH; install Podman and retry")
 	case docker.IsCLIUnavailable(err):
-		return fmt.Errorf("%s CLI not found on PATH; install %s and retry", docker.Binary(), util.TitleCase(docker.Binary()))
+		return fmt.Errorf("docker CLI not found on PATH; install Docker or Podman and retry")
 	case docker.IsSocketPermissionDenied(err):
 		return fmt.Errorf("cannot access the Docker socket: permission denied. Grant this user access to Docker (commonly by adding it to the docker group and logging in again; see https://docs.docker.com/engine/install/linux-postinstall/), then retry")
 	case docker.IsPodman():

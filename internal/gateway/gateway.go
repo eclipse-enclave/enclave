@@ -202,16 +202,11 @@ func buildGatewayImage(paths model.Paths, profile model.Profile, allowlistPath s
 }
 
 func coordinateGatewayImageBuild(home string, image string, forceRebuild bool, resolveBuildPlan func() (bool, string, error), executeBuild func(string) error) error {
-	lockName := "image-build-" + util.HashString(image) + ".lock"
-	lockPath := config.HostLockPath(home, lockName)
-	release, _, err := util.AcquireFileLock(lockPath, func() {
-		logx.Infof("Waiting for another enclave process to finish building %s.", image)
-	})
+	release, err := config.AcquireImageBuildLock(home, image)
 	if err != nil {
 		return err
 	}
 	defer release()
-
 	needs, buildHash, err := resolveBuildPlan()
 	if err != nil {
 		return err

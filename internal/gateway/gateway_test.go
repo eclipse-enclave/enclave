@@ -89,19 +89,26 @@ func TestCoordinateGatewayImageBuildRechecksAfterWaiting(t *testing.T) {
 		errs <- coordinateGatewayImageBuild(home, "enclave-gateway-codex:latest", false, resolve, execute)
 	}()
 	<-firstBuildStarted
+
+	secondStarted := make(chan struct{})
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
+		close(secondStarted)
 		errs <- coordinateGatewayImageBuild(home, "enclave-gateway-codex:latest", false, resolve, execute)
 	}()
-
+	<-secondStarted
+	serialized := true
 	select {
 	case <-secondResolveStarted:
-		t.Fatal("second caller resolved its build plan while the first build held the lock")
+		serialized = false
 	case <-time.After(20 * time.Millisecond):
 	}
 	close(releaseFirstBuild)
 	wg.Wait()
+	if !serialized {
+		t.Fatal("second caller resolved its build plan while the first build held the lock")
+	}
 	close(errs)
 	for err := range errs {
 		if err != nil {

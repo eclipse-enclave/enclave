@@ -268,22 +268,24 @@ func ensureRuntimeImage(input *CommandInput, opts model.Options, buildCfg *build
 	// A forced image rebuild must also invalidate the selected tool install
 	// layers; otherwise BuildKit can reproduce a known-bad image entirely from
 	// cache. Automatic interval-based refresh still applies to normal runs.
-	buildPlan, err := resolveRuntimeImageBuildPlan(input.Ctx.Paths, resolved, opts.BuildOptions, opts.Tool, host.Home, opts.ForceRebuild, time.Now().UTC())
+	// One memoized probe serves both this resolve and the in-lock recheck.
+	probe := memoizeToolFingerprintProbe(probeToolUpdateFingerprint)
+	buildPlan, err := resolveRuntimeImageBuildPlan(input.Ctx.Paths, resolved, opts.BuildOptions, opts.Tool, host.Home, opts.ForceRebuild, time.Now().UTC(), probe)
 	if err != nil {
 		logx.Errorf("%v", err)
 		return buildConfig{}, 1
 	}
 	if opts.ForceRebuild || buildPlan.NeedsRebuild() {
-		if code := buildOrReuseRuntimeImage(input, opts, host, resolved); code != 0 {
+		if code := buildOrReuseRuntimeImage(input, opts, host, resolved, probe); code != 0 {
 			return buildConfig{}, code
 		}
 	}
 	return resolved, 0
 }
 
-func buildOrReuseRuntimeImage(input *CommandInput, opts model.Options, host model.Host, resolved buildConfig) int {
+func buildOrReuseRuntimeImage(input *CommandInput, opts model.Options, host model.Host, resolved buildConfig, probe toolFingerprintProbe) int {
 	resolveBuildPlan := func() (runtimeImageBuildPlan, error) {
-		return resolveRuntimeImageBuildPlan(input.Ctx.Paths, resolved, opts.BuildOptions, opts.Tool, host.Home, opts.ForceRebuild, time.Now().UTC())
+		return resolveRuntimeImageBuildPlan(input.Ctx.Paths, resolved, opts.BuildOptions, opts.Tool, host.Home, opts.ForceRebuild, time.Now().UTC(), probe)
 	}
 	executeBuildPlan := func(buildPlan runtimeImageBuildPlan) error {
 		reused := false

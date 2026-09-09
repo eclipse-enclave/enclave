@@ -1178,3 +1178,59 @@ func stubBuildxAvailable(t *testing.T, available bool) {
 		dockerBuildxAvailable = orig
 	})
 }
+
+func TestMemoizeToolFingerprintProbeProbesEachToolOnce(t *testing.T) {
+	calls := map[string]int{}
+	probe := memoizeToolFingerprintProbe(func(_ model.Paths, _ buildConfig, tool string) (string, bool, error) {
+		calls[tool]++
+		if tool == "broken" {
+			return "", false, errors.New("probe failed")
+		}
+		return tool + "-1.0.0", true, nil
+	})
+
+	for range 2 {
+		fingerprint, known, err := probe(model.Paths{}, buildConfig{}, "codex")
+		if err != nil || !known || fingerprint != "codex-1.0.0" {
+			t.Fatalf("probe(codex) = (%q, %v, %v), want (%q, true, nil)", fingerprint, known, err, "codex-1.0.0")
+		}
+		if _, known, err := probe(model.Paths{}, buildConfig{}, "broken"); err == nil || known {
+			t.Fatalf("probe(broken) = (known %v, error %v), want the memoized failure", known, err)
+		}
+	}
+	if calls["codex"] != 1 || calls["broken"] != 1 {
+		t.Fatalf("underlying probe calls = %v, want exactly one per tool", calls)
+	}
+}
+
+func TestPlanAgentUpdatesForToolsReusesMemoizedProbeAcrossResolves(t *testing.T) {
+	t.Setenv(model.EnvAgentUpdateIntervalHours, "24")
+	paths := writeTestCodexToolPaths(t, true)
+	home := t.TempDir()
+	writeTestAgentUpdateFingerprint(t, home, "codex", "1.2.3")
+	probeCalls := 0
+	probe := memoizeToolFingerprintProbe(func(model.Paths, buildConfig, string) (string, bool, error) {
+		probeCalls++
+		return "2.0.0", true, nil
+	})
+	resolver := func(tool string) automaticToolUpdateResult {
+		return resolveAutomaticToolUpdate(paths, buildConfig{ImageName: "enclave:test"}, home, tool, probe)
+	}
+	now := time.Date(2026, time.March, 20, 12, 0, 0, 0, time.UTC)
+
+	// The build decision resolves the plan before the image-build lock and
+	// again inside it; the stamp is only written after the build, so both
+	// resolves see the update as due.
+	for range 2 {
+		plan, err := planAgentUpdatesForTools(false, []string{"codex"}, home, now, resolver)
+		if err != nil {
+			t.Fatalf("planAgentUpdatesForTools returned error: %v", err)
+		}
+		if !plan.NeedsRebuild || plan.PendingFingerprintWrites["codex"] != "2.0.0" {
+			t.Fatalf("plan = %+v, want a queued agent update with fingerprint 2.0.0", plan)
+		}
+	}
+	if probeCalls != 1 {
+		t.Fatalf("probe calls across two resolves = %d, want 1", probeCalls)
+	}
+}

@@ -203,15 +203,21 @@ func (r *Runtime) Execute() error {
 }
 
 func (r *Runtime) acquireSessionStartLock() (func(), error) {
-	lockName := "session-start-" + util.HashString(r.baseContainerName()) + ".lock"
-	lockPath := config.HostLockPath(r.host.Home, lockName)
-	release, _, err := util.AcquireFileLock(lockPath, func() {
+	lockPath := config.HostLockPath(r.host.Home, r.sessionStartLockName())
+	release, err := util.AcquireFileLock(lockPath, func() {
 		logx.Infof("Waiting for another enclave session to finish starting.")
 	})
 	if err != nil {
 		return nil, fmt.Errorf("acquire session start lock: %w", err)
 	}
 	return release, nil
+}
+
+// Named sessions also share the project/tool gateway config bundle, and
+// explicit numeric names can collide with automatic allocation. Keep all
+// starts in that scope serialized until the container is running.
+func (r *Runtime) sessionStartLockName() string {
+	return "session-start-" + util.HashString(r.baseContainerName()) + ".lock"
 }
 
 func (r *Runtime) prepareExecution() (*ExecutionContext, error) {

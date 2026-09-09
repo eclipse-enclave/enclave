@@ -243,7 +243,7 @@ type AttachIO struct {
 	// confirms the session is running. The runtime releases the session-start
 	// lock here (and announces published ports); a foreground Run that never
 	// calls it holds that lock until the session exits, blocking every other
-	// session start for the same tool and project.
+	// session start for the same tool and project, including named sessions.
 	OnStarted func()
 }
 

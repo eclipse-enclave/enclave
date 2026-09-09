@@ -69,11 +69,7 @@ func (p runtimeImageBuildPlan) NeedsRebuild() bool {
 }
 
 func coordinateRuntimeImageBuild(home string, imageName string, forceRebuild bool, resolveBuildPlan func() (runtimeImageBuildPlan, error), executeBuildPlan func(runtimeImageBuildPlan) error) error {
-	lockName := "image-build-" + util.HashString(imageName) + ".lock"
-	lockPath := config.HostLockPath(home, lockName)
-	release, _, err := util.AcquireFileLock(lockPath, func() {
-		logx.Infof("Waiting for another enclave process to finish building %s.", imageName)
-	})
+	release, err := config.AcquireImageBuildLock(home, imageName)
 	if err != nil {
 		return err
 	}
@@ -452,7 +448,7 @@ func needsRebuildForSelection(paths model.Paths, buildCfg buildConfig, selection
 	return false, combinedHash, nil
 }
 
-func resolveRuntimeImageBuildPlan(paths model.Paths, buildCfg buildConfig, opts model.BuildOptions, tool string, home string, forceAll bool, now time.Time) (runtimeImageBuildPlan, error) {
+func resolveRuntimeImageBuildPlan(paths model.Paths, buildCfg buildConfig, opts model.BuildOptions, tool string, home string, forceAll bool, now time.Time, probe toolFingerprintProbe) (runtimeImageBuildPlan, error) {
 	selection, err := resolveRuntimeImageSelection(paths, opts, tool)
 	if err != nil {
 		return runtimeImageBuildPlan{}, err
@@ -462,7 +458,7 @@ func resolveRuntimeImageBuildPlan(paths model.Paths, buildCfg buildConfig, opts 
 		return runtimeImageBuildPlan{}, err
 	}
 	resolver := func(tool string) automaticToolUpdateResult {
-		return resolveAutomaticToolUpdate(paths, buildCfg, home, tool, nil)
+		return resolveAutomaticToolUpdate(paths, buildCfg, home, tool, probe)
 	}
 	agentUpdates, err := planAgentUpdatesForTools(forceAll, selection.Tools, home, now, resolver)
 	if err != nil {
@@ -1041,6 +1037,29 @@ func backfillMissingAgentUpdateFingerprints(plan *agentUpdatePlan, paths model.P
 		plan.PendingFingerprintWrites[tool] = fingerprint
 	}
 	return nil
+}
+
+// memoizeToolFingerprintProbe caches probe results per tool so that one build
+// decision probes each tool at most once. The plan is resolved before the
+// image-build lock and again inside it; without the cache the in-lock resolve
+// would run the check-update container (and its network fetch) a second time,
+// and a transient failure there would silently drop an update the first
+// resolve had already found.
+func memoizeToolFingerprintProbe(probe toolFingerprintProbe) toolFingerprintProbe {
+	type probeResult struct {
+		fingerprint string
+		known       bool
+		err         error
+	}
+	results := map[string]probeResult{}
+	return func(paths model.Paths, buildCfg buildConfig, tool string) (string, bool, error) {
+		if cached, ok := results[tool]; ok {
+			return cached.fingerprint, cached.known, cached.err
+		}
+		fingerprint, known, err := probe(paths, buildCfg, tool)
+		results[tool] = probeResult{fingerprint: fingerprint, known: known, err: err}
+		return fingerprint, known, err
+	}
 }
 
 func probeToolUpdateFingerprint(paths model.Paths, buildCfg buildConfig, tool string) (string, bool, error) {

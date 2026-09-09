@@ -15,26 +15,24 @@ import (
 
 func TestAcquireFileLockReportsContention(t *testing.T) {
 	lockPath := filepath.Join(t.TempDir(), "test.lock")
-	releaseFirst, waited, err := AcquireFileLock(lockPath, nil)
+	releaseFirst, err := AcquireFileLock(lockPath, func() {
+		t.Error("first lock acquisition unexpectedly reported contention")
+	})
 	if err != nil {
 		t.Fatalf("acquire first lock: %v", err)
 	}
 	defer releaseFirst()
-	if waited {
-		t.Fatal("first lock acquisition unexpectedly waited")
-	}
 
 	waiting := make(chan struct{})
 	acquired := make(chan struct{})
 	go func() {
-		releaseSecond, didWait, lockErr := AcquireFileLock(lockPath, func() { close(waiting) })
-		if lockErr == nil {
-			defer releaseSecond()
+		defer close(acquired)
+		releaseSecond, lockErr := AcquireFileLock(lockPath, func() { close(waiting) })
+		if lockErr != nil {
+			t.Errorf("second lock acquisition failed: %v", lockErr)
+			return
 		}
-		if !didWait || lockErr != nil {
-			t.Errorf("second lock acquisition = (waited %v, error %v), want (true, nil)", didWait, lockErr)
-		}
-		close(acquired)
+		releaseSecond()
 	}()
 
 	select {

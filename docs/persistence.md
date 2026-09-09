@@ -12,7 +12,9 @@ enclave continue                 # Continue the latest session
 enclave resume                   # Session picker (falls back to continue)
 ```
 
-If a container name is already in use, a new session starts with a unique name. Use `exec` to attach to the default container name.
+If the default container name is already in use, an unnamed invocation starts a new session with a unique name. An explicit `--name` that is already running is rejected. Use `exec` to attach to the default container name.
+
+Concurrent starts for the same tool and project, including `--name` and `--background`, wait for each other until the container is running. This coordinates name and config-store allocation and protects the shared gateway configuration during startup. Once started, sessions run concurrently.
 
 Containers are named `enclave-<tool>-<project-hash>-<session>`, so the same session name can be used in several projects. `attach`, `stop <name>`, and `theia` resolve a session name within the current project first; when a name matches containers in more than one project, the candidates are listed and a full container name must be passed. `attach` and `theia` also accept a name that only exists in another project; `stop` does not — neither by argument nor by `--name` — since removing a container is destructive: pass its container name instead.
 

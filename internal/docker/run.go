@@ -53,18 +53,6 @@ func RunWithStartHook(ctx context.Context, config *ContainerConfig, hostConfig *
 	return classifyRunError(args, runCommandWithStartHook(ctx, name, cmd, onStarted), stderr.String())
 }
 
-// RunWithIO runs a container wired to the supplied streams (no TTY) and returns
-// an *ExitError when the container exits non-zero.
-func RunWithIO(ctx context.Context, config *ContainerConfig, hostConfig *HostConfig, name string, in io.Reader, out io.Writer, errOut io.Writer) error {
-	return RunWithIOAndStartHook(ctx, config, hostConfig, name, in, out, errOut, false, nil)
-}
-
-// RunWithIOAndTTY runs a container wired to the supplied streams with a TTY
-// allocated and returns an *ExitError when the container exits non-zero.
-func RunWithIOAndTTY(ctx context.Context, config *ContainerConfig, hostConfig *HostConfig, name string, in io.Reader, out io.Writer, errOut io.Writer) error {
-	return RunWithIOAndStartHook(ctx, config, hostConfig, name, in, out, errOut, true, nil)
-}
-
 // RunWithIOAndStartHook runs a container wired to the supplied streams and
 // invokes onStarted after Docker reports the named container is running.
 func RunWithIOAndStartHook(ctx context.Context, config *ContainerConfig, hostConfig *HostConfig, name string, in io.Reader, out io.Writer, errOut io.Writer, tty bool, onStarted func()) error {

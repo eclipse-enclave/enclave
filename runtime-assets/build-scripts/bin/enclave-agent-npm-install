@@ -71,8 +71,27 @@ rewrite_bin_shebang() {
     mv "$tmp" "$target"
 }
 
+# Split flags from package specs so npm gets `--` between them: a spec can then
+# never be parsed as an option, whatever the caller passes.
+npm_flags=()
+packages=()
+for arg in "$@"; do
+    if [ "$arg" = "--" ]; then
+        continue
+    fi
+    if [[ "$arg" == -* ]] && [ "${#packages[@]}" -eq 0 ]; then
+        npm_flags+=("$arg")
+    else
+        packages+=("$arg")
+    fi
+done
+if [ "${#packages[@]}" -eq 0 ]; then
+    echo "enclave-agent-npm-install: no package given" >&2
+    exit 2
+fi
+
 first_attempt_log="$(mktemp)"
-if "$npm_bin" install -g --no-audit --no-fund --progress=false "$@" 2>"$first_attempt_log"; then
+if "$npm_bin" install -g --no-audit --no-fund --progress=false "${npm_flags[@]}" -- "${packages[@]}" 2>"$first_attempt_log"; then
     rm -f "$first_attempt_log"
 elif [ "${npm_config_prefer_online:-}" = "true" ]; then
     cat "$first_attempt_log" >&2
@@ -81,7 +100,7 @@ elif [ "${npm_config_prefer_online:-}" = "true" ]; then
 else
     echo "npm install failed in offline-preferred mode; retrying with online metadata..." >&2
     if ! npm_config_prefer_online=true npm_config_prefer_offline=false \
-        "$npm_bin" install -g --no-audit --no-fund --progress=false "$@"; then
+        "$npm_bin" install -g --no-audit --no-fund --progress=false "${npm_flags[@]}" -- "${packages[@]}"; then
         echo "Offline-preferred attempt stderr:" >&2
         cat "$first_attempt_log" >&2
         rm -f "$first_attempt_log"
@@ -90,10 +109,7 @@ else
     rm -f "$first_attempt_log"
 fi
 
-for spec in "$@"; do
-    if [[ "$spec" == -* ]]; then
-        continue
-    fi
+for spec in "${packages[@]}"; do
     package_name="$(normalize_package_name "$spec")"
     package_dir="$install_prefix/lib/node_modules/$package_name"
     package_json="$package_dir/package.json"

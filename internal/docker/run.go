@@ -13,7 +13,9 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -50,7 +52,7 @@ func RunWithStartHook(ctx context.Context, config *ContainerConfig, hostConfig *
 	cmd := exec.CommandContext(ctx, dockerBinary, args...) // #nosec G204 -- args built from caller config, passed without a shell.
 	cmd.Stdout = io.Discard
 	cmd.Stderr = &stderr
-	return classifyRunError(args, runCommandWithStartHook(ctx, name, cmd, onStarted), stderr.String())
+	return classifyRunError(args, runCommandWithStartHook(ctx, name, cmd, onStarted, nil), stderr.String())
 }
 
 // RunWithIOAndStartHook runs a container wired to the supplied streams and
@@ -65,7 +67,7 @@ func RunWithIOAndStartHook(ctx context.Context, config *ContainerConfig, hostCon
 	cmd.Stdin = in
 	cmd.Stdout = out
 	cmd.Stderr = errOut
-	return classifyRunError(args, runCommandWithStartHook(ctx, name, cmd, onStarted), "")
+	return classifyRunError(args, runCommandWithStartHook(ctx, name, cmd, onStarted, nil), "")
 }
 
 // RunCapture runs a container and returns its trimmed stdout, surfacing stderr
@@ -92,7 +94,8 @@ func RunInteractive(ctx context.Context, config *ContainerConfig, hostConfig *Ho
 }
 
 // RunInteractiveWithStartHook runs an interactive container and invokes
-// onStarted after Docker reports the named container is running.
+// onStarted after Docker reports the named container is running. SIGINT and
+// SIGTERM sent to this process while the child runs are forwarded to it.
 func RunInteractiveWithStartHook(ctx context.Context, config *ContainerConfig, hostConfig *HostConfig, name string, onStarted func()) error {
 	if ctx == nil {
 		ctx = context.Background()
@@ -102,12 +105,21 @@ func RunInteractiveWithStartHook(ctx context.Context, config *ContainerConfig, h
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	return classifyRunError(args, runCommandWithStartHook(ctx, name, cmd, onStarted), "")
+	child := make(chan *os.Process, 1)
+	stopRelay := relayInterrupts(child)
+	defer stopRelay()
+	return classifyRunError(args, runCommandWithStartHook(ctx, name, cmd, onStarted, child), "")
 }
 
-func runCommandWithStartHook(ctx context.Context, name string, cmd *exec.Cmd, onStarted func()) error {
+// runCommandWithStartHook starts cmd and invokes onStarted once the named
+// container is running. A non-nil child receives the started process, which is
+// how the interactive path gets signals relayed to the engine.
+func runCommandWithStartHook(ctx context.Context, name string, cmd *exec.Cmd, onStarted func(), child chan<- *os.Process) error {
 	if err := cmd.Start(); err != nil {
 		return err
+	}
+	if child != nil {
+		child <- cmd.Process
 	}
 	waitCh := make(chan error, 1)
 	go func() {
@@ -125,6 +137,40 @@ func runCommandWithStartHook(ctx context.Context, name string, cmd *exec.Cmd, on
 		onStarted()
 	}
 	return <-waitCh
+}
+
+// relayInterrupts forwards SIGINT and SIGTERM aimed at this process to the
+// engine child once it is known. Terminal Ctrl-C needs no help: the engine
+// keeps the TTY in raw mode and proxies it into the container. A signal sent to
+// this process directly, by a supervisor or kill, would otherwise be absorbed
+// by the caller's interrupt handling and leave the session running. The
+// signals are registered before the child starts so none is lost in between;
+// one that arrives early is delivered as soon as the child exists. The
+// returned function stops relaying.
+func relayInterrupts(child <-chan *os.Process) func() {
+	signals := make(chan os.Signal, 1)
+	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
+	done := make(chan struct{})
+	go func() {
+		var proc *os.Process
+		select {
+		case proc = <-child:
+		case <-done:
+			return
+		}
+		for {
+			select {
+			case sig := <-signals:
+				_ = proc.Signal(sig)
+			case <-done:
+				return
+			}
+		}
+	}()
+	return func() {
+		signal.Stop(signals)
+		close(done)
+	}
 }
 
 func waitForContainerRunning(ctx context.Context, name string, waitCh <-chan error) (error, bool) {

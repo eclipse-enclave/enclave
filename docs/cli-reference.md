@@ -71,7 +71,7 @@ the single running container of the current project. An argument that is present
 but blank (`enclave stop "$SESSION"` with an unset variable) is rejected instead
 of being treated as "no argument".
 
-Ctrl-C or SIGTERM while a session is still starting aborts the start with exit code 130 and removes what it created, including the gateway sidecar. A sidecar that an interrupted start nevertheless left behind (for example after a `kill -9`) is removed automatically the next time a session of the same name starts. Once the session is attached, Ctrl-C goes to the tool.
+Ctrl-C or SIGTERM while a session is still starting aborts the start with exit code 130 and removes what it created, including the gateway sidecar. A sidecar that an interrupted start nevertheless left behind (for example after a `kill -9`) is removed automatically the next time a session of the same name starts. Once the session is attached, Ctrl-C goes to the tool. SIGINT or SIGTERM sent to the enclave process itself (for example by a supervisor) is forwarded to the engine, which delivers it to the tool; the session then exits with the tool's status and the usual cleanup runs.
 
 ### Inspect
 

@@ -119,3 +119,23 @@ func TestWaitForGatewayReadyStopsOnCancelledContext(t *testing.T) {
 		t.Fatalf("expected an interruption error, got %v", err)
 	}
 }
+
+func TestGatewayUserNSKeepsHostIDsUnderPodman(t *testing.T) {
+	previous := docker.Binary()
+	t.Cleanup(func() { docker.SetBinary(previous) })
+
+	docker.SetBinary("docker")
+	if got := gatewayUserNS(); got != "" {
+		t.Fatalf("docker gateway must not set --userns, got %q", got)
+	}
+	if got := gatewayUser(); got != "" {
+		t.Fatalf("docker gateway must keep the image user, got %q", got)
+	}
+	docker.SetBinary("podman")
+	if got := gatewayUserNS(); got != "keep-id" {
+		t.Fatalf("podman gateway must run with --userns keep-id, got %q", got)
+	}
+	if got := gatewayUser(); got != "0:0" {
+		t.Fatalf("podman gateway must run as root inside keep-id, got %q", got)
+	}
+}

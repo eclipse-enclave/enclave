@@ -307,7 +307,7 @@ func (b *Backend) prepareRun(ctx context.Context, req backend.Request) (runSpec,
 		if err != nil {
 			return runSpec{}, err
 		}
-		spec.hostConfig.NetworkMode = dockercmd.NetworkMode("container:" + gatewayName)
+		joinGatewayNamespaces(spec.hostConfig, gatewayName)
 		spec.cleanup = cleanup
 	} else {
 		spec.config.ExposedPorts = portSet(req.Ports)
@@ -369,6 +369,18 @@ func (b *Backend) dockerConfig(req backend.Request) runSpec {
 		applyContainerHardening(hostConfig)
 	}
 	return runSpec{config: config, hostConfig: hostConfig, name: req.Session.Name}
+}
+
+// joinGatewayNamespaces attaches the session to the gateway's network stack.
+// Under rootless podman the session also joins the gateway's user namespace:
+// the gateway already runs with the keep-id mapping (see gateway.gatewayUserNS),
+// and a separate keep-id namespace could not mount sysfs in a network namespace
+// it does not own, which fails container creation under runc.
+func joinGatewayNamespaces(hostConfig *dockercmd.HostConfig, gatewayName string) {
+	hostConfig.NetworkMode = dockercmd.NetworkMode("container:" + gatewayName)
+	if hostConfig.UserNS != "" {
+		hostConfig.UserNS = "container:" + gatewayName
+	}
 }
 
 // applyHostUserNamespace keeps the host user's UID/GID identity inside the

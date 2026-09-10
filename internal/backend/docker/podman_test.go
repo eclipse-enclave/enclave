@@ -61,3 +61,22 @@ func TestAuthSyncHelperRunsAsRootUnderDocker(t *testing.T) {
 		t.Fatalf("auth reconcile helper user = %q, want root", got)
 	}
 }
+
+func TestPodmanSessionsJoinGatewayUserNamespace(t *testing.T) {
+	hostConfig := &dockercmd.HostConfig{}
+	joinGatewayNamespaces(hostConfig, "enclave-codex-abc-gateway")
+	if hostConfig.NetworkMode != "container:enclave-codex-abc-gateway" {
+		t.Fatalf("session must join the gateway network namespace, got %q", hostConfig.NetworkMode)
+	}
+	if hostConfig.UserNS != "" {
+		t.Fatalf("docker sessions must not set --userns, got %q", hostConfig.UserNS)
+	}
+
+	usePodmanCLI(t)
+	hostConfig = &dockercmd.HostConfig{}
+	applyHostUserNamespace(hostConfig)
+	joinGatewayNamespaces(hostConfig, "enclave-codex-abc-gateway")
+	if hostConfig.UserNS != "container:enclave-codex-abc-gateway" {
+		t.Fatalf("podman sessions must share the gateway user namespace, got %q", hostConfig.UserNS)
+	}
+}

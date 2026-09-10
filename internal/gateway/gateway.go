@@ -460,6 +460,7 @@ func Start(ctx context.Context, cfg StartConfig) (StartResult, error) {
 	}
 	config := &docker.ContainerConfig{
 		Image:        imageName(cfg.Profile),
+		User:         gatewayUser(),
 		Env:          env,
 		ExposedPorts: cfg.ExposedPorts,
 		Labels:       gatewayLabels(cfg),
@@ -483,6 +484,7 @@ func Start(ctx context.Context, cfg StartConfig) (StartResult, error) {
 		Mounts:       remainingMounts,
 		PortBindings: cfg.PortBindings,
 		ExtraHosts:   extraHosts,
+		UserNS:       gatewayUserNS(),
 	}
 
 	if err := startGatewayContainer(ctx, config, hostConfig, gatewayContainer); err != nil {
@@ -523,6 +525,30 @@ func prepareNetworkLog(cfg StartConfig) error {
 		return fmt.Errorf("failed to record network log session marker: %w", err)
 	}
 	return nil
+}
+
+// gatewayUserNS puts the gateway into the same keep-id user namespace the
+// session container uses under rootless podman. The session joins the gateway's
+// network namespace, and a container may only mount sysfs in a network
+// namespace owned by its own user namespace: with the gateway in podman's
+// default rootless mapping and the session in keep-id, runc fails the session's
+// /sys mount with EPERM (crun masks this by bind-mounting the host /sys). The
+// session therefore joins this user namespace as well; see the docker backend.
+func gatewayUserNS() string {
+	if docker.IsPodman() {
+		return "keep-id"
+	}
+	return ""
+}
+
+// gatewayUser pins the entrypoint to root where keep-id would otherwise make
+// podman start it as the host user; it needs root to set up its runtime
+// directories and firewall before it drops to the dnsmasq and proxy users.
+func gatewayUser() string {
+	if gatewayUserNS() != "" {
+		return "0:0"
+	}
+	return ""
 }
 
 // startGatewayContainer runs the gateway and waits until it reports readiness.

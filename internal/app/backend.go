@@ -72,6 +72,7 @@ func selectBackend(opts model.Options, dockerOpts backenddocker.Options) (backen
 // Seams for backend resolution, replaced in tests.
 var (
 	detectContainerCLIs = docker.DetectCLIs
+	dockerIsPodmanShim  = docker.DockerIsPodmanShim
 	backendPromptUsable = func() bool {
 		// Redirected stdout means a consumer captures the output even while
 		// stdin and stderr are terminals; result=$(enclave ps) must not block
@@ -114,11 +115,19 @@ func backendPromptAllowed(parsed cli.Result) bool {
 // resolveBackend replaces the "auto" backend with the container engine this
 // host has and points the shared CLI wrapper at it. It runs once, right after
 // option resolution, because image builds and engine checks use the wrapper
-// before any backend instance exists. Explicit backends are left untouched.
-// interactive permits the one-time engine question when both are installed.
+// before any backend instance exists. An explicit docker that turns out to be
+// the podman-docker shim is driven as podman. interactive permits the one-time
+// engine question when both engines are installed.
 func resolveBackend(opts *model.Options, interactive bool) {
-	if strings.TrimSpace(opts.Backend) == backend.NameAuto {
+	switch {
+	case strings.TrimSpace(opts.Backend) == backend.NameAuto:
 		opts.Backend = detectBackend(interactive)
+	case opts.Backend == backend.NameDocker && dockerIsPodmanShim():
+		// Detection maps the shim to podman; an explicit or configured docker
+		// gets the same treatment, since driving the shim as Docker would skip
+		// the user-namespace handling rootless podman needs.
+		logx.Infof("docker on this host is the podman-docker shim; using podman")
+		opts.Backend = backend.NamePodman
 	}
 	switch opts.Backend {
 	case backend.NameDocker, backend.NamePodman:

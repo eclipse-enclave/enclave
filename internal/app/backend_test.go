@@ -24,13 +24,14 @@ import (
 func stubBackendResolution(t *testing.T, clis []string, interactive bool) *[]string {
 	t.Helper()
 	previousBinary := docker.Binary()
-	previousDetect, previousPrompt, previousSave := detectContainerCLIs, backendPromptUsable, saveBackendChoice
+	previousDetect, previousShim, previousPrompt, previousSave := detectContainerCLIs, dockerIsPodmanShim, backendPromptUsable, saveBackendChoice
 	t.Cleanup(func() {
 		docker.SetBinary(previousBinary)
-		detectContainerCLIs, backendPromptUsable, saveBackendChoice = previousDetect, previousPrompt, previousSave
+		detectContainerCLIs, dockerIsPodmanShim, backendPromptUsable, saveBackendChoice = previousDetect, previousShim, previousPrompt, previousSave
 	})
 	saved := &[]string{}
 	detectContainerCLIs = func() []string { return clis }
+	dockerIsPodmanShim = func() bool { return false }
 	backendPromptUsable = func() bool { return interactive }
 	saveBackendChoice = func(key string, value string) (string, error) {
 		*saved = append(*saved, key+"="+value)
@@ -175,5 +176,24 @@ func TestActionUsesBackend(t *testing.T) {
 		if !actionUsesBackend(action) {
 			t.Fatalf("%s uses an engine and must resolve the backend", action)
 		}
+	}
+}
+
+// A host with the podman-docker shim has users who type --backend docker or
+// wrote backend: docker before podman was a backend; the shim is podman and
+// must be driven as such.
+func TestResolveBackendExplicitDockerOnShimHostUsesPodman(t *testing.T) {
+	saved := stubBackendResolution(t, []string{backend.NamePodman}, true)
+	dockerIsPodmanShim = func() bool { return true }
+	opts := model.Options{RunOptions: model.RunOptions{Backend: backend.NameDocker}}
+	resolveBackend(&opts, true)
+	if opts.Backend != backend.NamePodman {
+		t.Fatalf("Backend = %q, want podman behind the docker shim", opts.Backend)
+	}
+	if got := docker.Binary(); got != backend.NamePodman {
+		t.Fatalf("container CLI = %q, want podman", got)
+	}
+	if len(*saved) != 0 {
+		t.Fatalf("the shim switch must not write config, got %v", *saved)
 	}
 }

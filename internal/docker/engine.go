@@ -46,3 +46,11 @@ func isPodmanShim(path string) bool {
 	}
 	return strings.Contains(strings.ToLower(string(out)), podmanBinary)
 }
+
+// DockerIsPodmanShim reports whether the docker executable on PATH is the
+// podman-docker shim, so an explicitly requested docker backend can still be
+// driven as podman.
+func DockerIsPodmanShim() bool {
+	path, err := exec.LookPath("docker")
+	return err == nil && isPodmanShim(path)
+}

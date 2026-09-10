@@ -52,3 +52,26 @@ func TestDetectCLIs(t *testing.T) {
 		})
 	}
 }
+
+func TestDockerIsPodmanShim(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		docker string
+		want   bool
+	}{
+		{name: "no docker", want: false},
+		{name: "real docker", docker: "Docker version 27.1.1, build 6312585", want: false},
+		{name: "podman-docker shim", docker: "podman version 5.8.1", want: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			t.Setenv("PATH", dir)
+			if tc.docker != "" {
+				stubCLI(t, dir, "docker", tc.docker)
+			}
+			if got := DockerIsPodmanShim(); got != tc.want {
+				t.Fatalf("DockerIsPodmanShim() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}

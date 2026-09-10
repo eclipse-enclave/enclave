@@ -13,12 +13,10 @@ usage() {
     exit 2
 }
 
+# Flags must be self-contained (`--flag` or `--flag=value`); a flag that takes a
+# separate value would consume the package argument.
 npm_flags=()
 while [ "$#" -gt 0 ] && [[ "$1" == -* ]]; do
-    if [ "$1" = "--" ]; then
-        shift
-        break
-    fi
     npm_flags+=("$1")
     shift
 done

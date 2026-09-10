@@ -47,8 +47,11 @@ binary landed on `PATH`:
 enclave-install-npm-tool [npm-flag ...] <package> <binary> [label]
 ```
 
-Leading `-`-prefixed arguments are forwarded to `npm install`. Pass
-`--ignore-scripts` unless the package needs its lifecycle scripts, so
+Leading `-`-prefixed arguments are forwarded to `npm install`, and must be
+self-contained — `--flag` or `--flag=value`. A flag that takes a separate value
+(`--omit dev`) would consume the package argument.
+
+Pass `--ignore-scripts` unless the package needs its lifecycle scripts, so
 dependency-authored code does not run at image build time. Check upstream
 first: some packages resolve a platform binary in a `postinstall` and break
 without it.

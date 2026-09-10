@@ -328,8 +328,10 @@ listed paths are eligible for copy, and a hard-coded deny backstop still
 blocks auth/history/session/runtime-state paths.
 
 Generated QEMU microVM bundles use max(default 4096 MiB,
-`sandbox.qemuMinMemoryMiB`). Use it for tools that need more memory than the
-default to start reliably. Set `sandbox.qemuStoreCacheMmap` when the tool's
+`sandbox.qemuMinMemoryMiB`, what the built initramfs needs). Use it for tools
+that need more memory than the default to start reliably; it never has to
+account for the bundle's own size, because the guest rootfs is the unpacked
+initramfs and the builder already sizes memory to it. Set `sandbox.qemuStoreCacheMmap` when the tool's
 config store needs 9p `cache=mmap` (for example SQLite WAL shared-memory files).
 
 `check-update.sh` runs in a controlled containerized probe environment, never directly on the host. Contract:

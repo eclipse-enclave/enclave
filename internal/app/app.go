@@ -8,9 +8,12 @@
 package app
 
 import (
+	"encoding/json"
+	"fmt"
 	"os"
 	"strings"
 
+	"enclave/internal/buildinfo"
 	"enclave/internal/cli"
 	"enclave/internal/config"
 	"enclave/internal/logx"
@@ -20,21 +23,6 @@ import (
 )
 
 func Run(args []string) int {
-	projectDir, err := resolveProjectDir()
-	if err != nil {
-		logx.Errorf("%v", err)
-		return 1
-	}
-
-	globalDefaults, projectDefaults, warnings, err := config.LoadDefaults(projectDir)
-	if err != nil {
-		logx.Errorf("%v", err)
-		return 1
-	}
-	for _, warning := range warnings {
-		logx.Warnf(warning)
-	}
-
 	userCmds := discoverUserCommands()
 
 	baseOpts := config.DefaultOptions()
@@ -50,11 +38,38 @@ func Run(args []string) int {
 	for _, warning := range parsed.Warnings {
 		logx.Warnf(warning)
 	}
-	if parsed.HelpShown {
+	if parsed.HelpShown || parsed.VersionShown {
 		return 0
 	}
 	if parsed.Action == "completion" {
 		return 0
+	}
+	if parsed.Action == "version" {
+		info := buildinfo.Read()
+		if parsed.VersionJSON {
+			if err := json.NewEncoder(os.Stdout).Encode(info); err != nil {
+				logx.Errorf("write version: %v", err)
+				return 1
+			}
+		} else {
+			fmt.Printf("%s: %s\n", model.AppName, info)
+		}
+		return 0
+	}
+
+	projectDir, err := resolveProjectDir()
+	if err != nil {
+		logx.Errorf("%v", err)
+		return 1
+	}
+
+	globalDefaults, projectDefaults, warnings, err := config.LoadDefaults(projectDir)
+	if err != nil {
+		logx.Errorf("%v", err)
+		return 1
+	}
+	for _, warning := range warnings {
+		logx.Warnf(warning)
 	}
 
 	var userCommandMount *model.UserCommandMount

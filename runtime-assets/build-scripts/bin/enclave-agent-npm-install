@@ -132,13 +132,36 @@ for spec in "${packages[@]}"; do
         end | .[]
     ' "$package_json")
 
+    # rewrite_bin_shebang follows symlinks and writes the resolved file, and
+    # both paths below come from the package's own package.json. Never write
+    # outside the package directory, whatever it declares.
+    package_root="$(realpath -m -- "$package_dir")"
+    resolves_within_package() {
+        case "$(realpath -m -- "$1")" in
+            "$package_root"/*) return 0 ;;
+            *) return 1 ;;
+        esac
+    }
+
     for entry in "${bin_entries[@]}"; do
         [ -n "$entry" ] || continue
         bin_name="${entry%%:*}"
         bin_path="${entry#*:}"
         [ -n "$bin_name" ] || continue
         [ -n "$bin_path" ] || continue
-        rewrite_bin_shebang "$package_dir/$bin_path"
-        rewrite_bin_shebang "$install_prefix/bin/$bin_name"
+
+        target="$package_dir/$bin_path"
+        if ! resolves_within_package "$target"; then
+            echo "$package_name declares bin $bin_name outside its package directory: $bin_path" >&2
+            exit 1
+        fi
+        rewrite_bin_shebang "$target"
+
+        link="$install_prefix/bin/$bin_name"
+        if [ -e "$link" ] && ! resolves_within_package "$link"; then
+            echo "Warning: $link does not resolve into $package_name; leaving it untouched" >&2
+            continue
+        fi
+        rewrite_bin_shebang "$link"
     done
 done

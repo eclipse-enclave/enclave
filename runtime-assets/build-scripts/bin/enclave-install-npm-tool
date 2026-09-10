@@ -29,7 +29,8 @@ package="$1"
 binary="$2"
 label="${3:-$binary}"
 
-enclave-agent-npm-install "${npm_flags[@]}" "$package"
+# `--` ends npm option parsing so the package spec can never be read as a flag.
+enclave-agent-npm-install "${npm_flags[@]}" -- "$package"
 
 if ! command -v "$binary" >/dev/null 2>&1; then
     echo "$label install failed: $binary binary not found" >&2

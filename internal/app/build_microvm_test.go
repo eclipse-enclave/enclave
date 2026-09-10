@@ -102,9 +102,9 @@ func TestWriteQEMUBundleConfig(t *testing.T) {
 	}
 }
 
-func TestQEMUBundleCurrentRequiresExpectedConfig(t *testing.T) {
+func TestQEMUBundleCurrentRequiresReadableConfig(t *testing.T) {
 	dir := t.TempDir()
-	for _, name := range []string{"vmlinuz", "initramfs.cpio"} {
+	for _, name := range []string{"vmlinuz", backendqemu.InitramfsFile} {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte("x"), 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -114,23 +114,63 @@ func TestQEMUBundleCurrentRequiresExpectedConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cfg := backendqemu.BundleConfig{MemoryMiB: backendqemu.DefaultMemoryMiB}
-	current, err := qemuBundleCurrent(dir, "codex", "h", cfg)
+	current, err := qemuBundleCurrent(dir, "codex", "h")
 	if err != nil {
 		t.Fatalf("qemuBundleCurrent without config: %v", err)
 	}
 	if current {
-		t.Fatal("bundle without expected config should not be current")
+		t.Fatal("bundle without config should not be current")
 	}
-	if err := writeQEMUBundleConfig(dir, cfg); err != nil {
+	if err := writeQEMUBundleConfig(dir, backendqemu.BundleConfig{MemoryMiB: backendqemu.DefaultMemoryMiB}); err != nil {
 		t.Fatal(err)
 	}
-	current, err = qemuBundleCurrent(dir, "codex", "h", cfg)
+	current, err = qemuBundleCurrent(dir, "codex", "h")
 	if err != nil {
 		t.Fatalf("qemuBundleCurrent with config: %v", err)
 	}
 	if !current {
-		t.Fatal("bundle with matching stamp and config should be current")
+		t.Fatal("bundle with matching stamp and readable config should be current")
+	}
+}
+
+func TestQEMUBundleMemoryMiBRaisesFloorForLargeInitramfs(t *testing.T) {
+	dir := t.TempDir()
+	meta := []byte(`{"uncompressedBytes":3221225472,"compressedBytes":1073741824,"compression":"zstd"}`)
+	if err := os.WriteFile(filepath.Join(dir, backendqemu.InitramfsMetaFile), meta, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := qemuBundleMemoryMiB(dir, backendqemu.DefaultMemoryMiB)
+	if err != nil {
+		t.Fatalf("qemuBundleMemoryMiB: %v", err)
+	}
+	// 3072 MiB rootfs + 2048 MiB workload headroom, rounded up to 512 MiB.
+	if got != 5120 {
+		t.Fatalf("memoryMiB = %d, want 5120", got)
+	}
+}
+
+func TestQEMUBundleMemoryMiBKeepsFloorForSmallInitramfs(t *testing.T) {
+	dir := t.TempDir()
+	meta := []byte(`{"uncompressedBytes":545259520,"compressedBytes":209715200,"compression":"zstd"}`)
+	if err := os.WriteFile(filepath.Join(dir, backendqemu.InitramfsMetaFile), meta, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := qemuBundleMemoryMiB(dir, backendqemu.DefaultMemoryMiB)
+	if err != nil {
+		t.Fatalf("qemuBundleMemoryMiB: %v", err)
+	}
+	if got != backendqemu.DefaultMemoryMiB {
+		t.Fatalf("memoryMiB = %d, want %d", got, backendqemu.DefaultMemoryMiB)
+	}
+}
+
+func TestQEMUBundleMemoryMiBWithoutMetadata(t *testing.T) {
+	got, err := qemuBundleMemoryMiB(t.TempDir(), backendqemu.DefaultMemoryMiB)
+	if err != nil {
+		t.Fatalf("qemuBundleMemoryMiB: %v", err)
+	}
+	if got != backendqemu.DefaultMemoryMiB {
+		t.Fatalf("memoryMiB = %d, want %d", got, backendqemu.DefaultMemoryMiB)
 	}
 }
 

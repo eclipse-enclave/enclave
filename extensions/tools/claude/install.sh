@@ -24,26 +24,12 @@ claude --version
 enclave-agent-npm-install --ignore-scripts @anthropic-ai/sandbox-runtime
 
 # Nothing else in the tree references sandbox-runtime, so an incomplete install
-# would only surface at runtime as degraded sandbox support. Assert the package
-# landed and that every bin it declares exists, which is what would break if
-# upstream started placing those in a postinstall.
+# would only surface at runtime as degraded sandbox support. enclave-agent-npm-install
+# already fails on a declared bin that did not land; assert the package itself
+# did, which it only warns about.
 sandbox_runtime_dir="${npm_config_prefix:-$HOME/.local}/lib/node_modules/@anthropic-ai/sandbox-runtime"
 if [ ! -f "$sandbox_runtime_dir/package.json" ]; then
     echo "sandbox-runtime install failed: $sandbox_runtime_dir/package.json not found" >&2
-    exit 1
-fi
-
-missing_bins=0
-while IFS= read -r bin_path; do
-    [ -n "$bin_path" ] || continue
-    if [ ! -e "$sandbox_runtime_dir/$bin_path" ]; then
-        echo "sandbox-runtime install incomplete: declared bin $bin_path is missing" >&2
-        missing_bins=1
-    fi
-done < <(jq -r '(.bin // empty) | if type == "string" then . else .[] end' "$sandbox_runtime_dir/package.json")
-
-if [ "$missing_bins" -ne 0 ]; then
-    echo "sandbox-runtime may require lifecycle scripts; re-check the --ignore-scripts above" >&2
     exit 1
 fi
 

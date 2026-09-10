@@ -155,6 +155,14 @@ for spec in "${packages[@]}"; do
             echo "$package_name declares bin $bin_name outside its package directory: $bin_path" >&2
             exit 1
         fi
+        # A declared bin that is absent after install means the package expected
+        # a lifecycle script to place it; fail the build instead of degrading at
+        # runtime.
+        if [ ! -e "$target" ]; then
+            echo "$package_name declares bin $bin_name but $target is missing" >&2
+            echo "the package may require lifecycle scripts; re-check any --ignore-scripts for it" >&2
+            exit 1
+        fi
         rewrite_bin_shebang "$target"
 
         link="$install_prefix/bin/$bin_name"

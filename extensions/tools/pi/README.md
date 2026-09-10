@@ -57,7 +57,7 @@ it.
 | File | Purpose |
 |------|---------|
 | `spec.yaml` | Extension manifest (metadata, sandbox behavior, network, credentials) |
-| `install.sh` | Installs Pi via private agent npm (`enclave-agent-npm-install @earendil-works/pi-coding-agent`) |
+| `install.sh` | Installs Pi via private agent npm (`enclave-install-npm-tool --ignore-scripts @earendil-works/pi-coding-agent`) |
 | `check-update.sh` | Returns the latest npm version for automatic update probes |
 | `gateway-allowlist.conf` | DNS allowlist for network isolation |
 | `templates/settings.json` | Default settings template |

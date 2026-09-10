@@ -61,7 +61,7 @@ status_line = ["git-branch", "context-remaining", "five-hour-limit", "weekly-lim
 | File | Purpose |
 |------|---------|
 | `spec.yaml` | Extension manifest (metadata, sandbox behavior, network, credentials) |
-| `install.sh` | Installs Codex via private agent npm (`enclave-agent-npm-install @openai/codex`) |
+| `install.sh` | Installs Codex via private agent npm (`enclave-install-npm-tool --ignore-scripts @openai/codex`) |
 | `check-update.sh` | Returns the latest npm version for automatic update probes |
 | `gateway-allowlist.conf` | DNS allowlist for network isolation |
 | `templates/config.toml` | Default settings template |

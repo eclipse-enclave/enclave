@@ -54,7 +54,7 @@ The default settings template disables sharing and OpenTelemetry.
 | File | Purpose |
 |------|---------|
 | `spec.yaml` | Extension manifest (metadata, sandbox behavior, network, credentials) |
-| `install.sh` | Installs OpenCode via private agent npm (`enclave-agent-npm-install opencode-ai`) |
+| `install.sh` | Installs OpenCode via private agent npm (`enclave-install-npm-tool opencode-ai`; keeps lifecycle scripts, its `postinstall` places the platform binary) |
 | `check-update.sh` | Returns the latest npm version for automatic update probes |
 | `gateway-allowlist.conf` | DNS allowlist for network isolation |
 | `templates/settings.json` | Default settings template |

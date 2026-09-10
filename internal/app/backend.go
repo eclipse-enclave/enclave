@@ -20,6 +20,7 @@ import (
 	backendqemu "enclave/internal/backend/qemu"
 	"enclave/internal/cli"
 	"enclave/internal/config"
+	"enclave/internal/docker"
 	"enclave/internal/logx"
 	"enclave/internal/model"
 	"enclave/internal/prompt"
@@ -59,6 +60,7 @@ func selectBackend(opts model.Options, dockerOpts backenddocker.Options) (backen
 	}
 	switch name {
 	case backend.NameDocker, backend.NamePodman:
+		dockerOpts.Engine = name
 		return backenddocker.New(dockerOpts), nil
 	case backend.NameQEMU:
 		return backendqemu.New(qemuBackendOptions(dockerOpts.Host, dockerOpts.Paths)), nil
@@ -69,7 +71,7 @@ func selectBackend(opts model.Options, dockerOpts backenddocker.Options) (backen
 
 // Seams for backend resolution, replaced in tests.
 var (
-	detectContainerCLIs = backenddocker.DetectCLIs
+	detectContainerCLIs = docker.DetectCLIs
 	backendPromptUsable = func() bool {
 		// Redirected stdout means a consumer captures the output even while
 		// stdin and stderr are terminals; result=$(enclave ps) must not block
@@ -120,7 +122,7 @@ func resolveBackend(opts *model.Options, interactive bool) {
 	}
 	switch opts.Backend {
 	case backend.NameDocker, backend.NamePodman:
-		backenddocker.UseCLI(opts.Backend)
+		docker.SetBinary(opts.Backend)
 	}
 }
 

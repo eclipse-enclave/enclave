@@ -27,6 +27,10 @@ import (
 )
 
 type Options struct {
+	// Engine names the container CLI this backend drives, backend.NameDocker
+	// or backend.NamePodman; empty means docker. The shared CLI wrapper is
+	// switched separately by the caller before any backend exists.
+	Engine              string
 	Host                model.Host
 	Paths               model.Paths
 	ReconcileScriptPath string
@@ -49,20 +53,8 @@ func New(opts Options) *Backend {
 	return b
 }
 
-// UseCLI selects the container CLI executable ("docker" or "podman") behind
-// this backend and the image build/cleanup helpers that share its wrapper.
-func UseCLI(name string) {
-	dockercmd.SetBinary(name)
-}
-
-// DetectCLIs reports which supported container CLIs the host has on PATH,
-// docker first; the podman-docker shim counts as podman.
-func DetectCLIs() []string {
-	return dockercmd.DetectCLIs()
-}
-
 func (b *Backend) Name() string {
-	if dockercmd.IsPodman() {
+	if b.opts.Engine == backend.NamePodman {
 		return backend.NamePodman
 	}
 	return backend.NameDocker

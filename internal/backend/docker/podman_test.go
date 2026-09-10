@@ -36,13 +36,13 @@ func TestPodmanSessionsKeepHostUserNamespace(t *testing.T) {
 	if got := b.Name(); got != backend.NameDocker {
 		t.Fatalf("Name() = %q, want %q", got, backend.NameDocker)
 	}
+	if got := New(Options{Engine: backend.NamePodman}).Name(); got != backend.NamePodman {
+		t.Fatalf("Name() = %q, want %q for the podman engine", got, backend.NamePodman)
+	}
 
 	usePodmanCLI(t)
 	if spec := b.dockerConfig(req); spec.hostConfig.UserNS != "keep-id" {
 		t.Fatalf("podman sessions must run with --userns keep-id, got %q", spec.hostConfig.UserNS)
-	}
-	if got := b.Name(); got != backend.NamePodman {
-		t.Fatalf("Name() = %q, want %q", got, backend.NamePodman)
 	}
 
 	helper := sharedAuthSyncHostConfig("/config", "/auth", "/script.sh", false)

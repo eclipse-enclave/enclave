@@ -62,7 +62,7 @@ left at the Claude Code defaults.
 | File | Purpose |
 |------|---------|
 | `spec.yaml` | Extension manifest (metadata, sandbox behavior, network, credentials) |
-| `install.sh` | Installs Claude Code via `claude.ai/install.sh` |
+| `install.sh` | Installs Claude Code via `claude.ai/install.sh`, plus `@anthropic-ai/sandbox-runtime` from npm with `--ignore-scripts` |
 | `check-update.sh` | Returns the latest GitHub release tag for automatic update probes |
 | `gateway-allowlist.conf` | DNS allowlist for network isolation |
 | `templates/settings.json` | Default settings template |

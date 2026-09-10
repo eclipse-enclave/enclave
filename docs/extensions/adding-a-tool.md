@@ -37,6 +37,22 @@ sandbox:
   settingsTarget: .<tool>/settings.json
 ```
 
+### Installing from npm
+
+For a tool that is a plain npm package, `install.sh` can delegate to the shared
+helper, which installs through the private agent Node runtime and verifies the
+binary landed on `PATH`:
+
+```sh
+enclave-install-npm-tool [npm-flag ...] <package> <binary> [label]
+```
+
+Leading `-`-prefixed arguments are forwarded to `npm install`. Pass
+`--ignore-scripts` unless the package needs its lifecycle scripts, so
+dependency-authored code does not run at image build time. Check upstream
+first: some packages resolve a platform binary in a `postinstall` and break
+without it.
+
 ## 2) Fill in the `sandbox` block
 
 `sandbox.*` is enclave-native tool metadata. Common fields (see the README for

@@ -9,7 +9,7 @@
 set -euo pipefail
 
 if [ "$#" -eq 0 ]; then
-    echo "usage: enclave-agent-npm-install <package> [<package> ...]" >&2
+    echo "usage: enclave-agent-npm-install [npm-flag ...] <package> [<package> ...]" >&2
     exit 2
 fi
 

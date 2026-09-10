@@ -8,4 +8,6 @@
 
 set -e
 
-enclave-install-npm-tool @earendil-works/pi-coding-agent@latest pi Pi
+# Upstream ships prebuilt native modules and needs no lifecycle scripts; their
+# own installer and `pi update --self` pass --ignore-scripts too.
+enclave-install-npm-tool --ignore-scripts @earendil-works/pi-coding-agent@latest pi Pi

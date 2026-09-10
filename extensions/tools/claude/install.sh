@@ -19,5 +19,6 @@ fi
 echo "Claude installed at: $(which claude)"
 claude --version
 
-# Install sandbox runtime for Claude Code sandbox support
-enclave-agent-npm-install @anthropic-ai/sandbox-runtime
+# Install sandbox runtime for Claude Code sandbox support.
+# It ships its vendored artifacts prebuilt and declares no lifecycle scripts.
+enclave-agent-npm-install --ignore-scripts @anthropic-ai/sandbox-runtime

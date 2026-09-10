@@ -195,6 +195,16 @@ mkdir -p "$root"
 tar -C "$root" -xf -
 rm -f "$root/.dockerenv"
 
+# Docker bind-mounts /etc/hosts into the provisioning container, so the export
+# carries an empty placeholder and the guest ends up with no loopback entry at
+# all: resolving "localhost" falls through to musl built-ins, which answer ::1
+# first. /etc/resolv.conf is a placeholder for the same reason but udhcpc
+# rewrites it during startup.
+cat > "$root/etc/hosts" <<HOSTS
+127.0.0.1	localhost localhost.localdomain
+::1	localhost ip6-localhost ip6-loopback
+HOSTS
+
 # docker export leaves runtime placeholders in /dev (a regular-file console
 # would swallow all guest output) and node/npm scratch in /tmp (init mounts a
 # tmpfs over it, so the content is pure initramfs bloat). Rebuild both fresh.

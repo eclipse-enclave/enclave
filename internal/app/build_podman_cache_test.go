@@ -8,6 +8,7 @@
 package app
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -55,3 +56,14 @@ func TestResolveBuildxCacheDropsSpecsUnderPodman(t *testing.T) {
 	}
 }
 
+func TestCheckRuntimeImageBuildPreflightSkipsBuildxCheckUnderPodman(t *testing.T) {
+	stubBuildxAvailable(t, false)
+	stubDockerRootFreeSpace(t, func(context.Context) (string, uint64, error) {
+		return "/home/user/.local/share/containers/storage", 20 * 1024 * 1024 * 1024, nil
+	})
+	withContainerCLI(t, backend.NamePodman)
+
+	if err := checkRuntimeImageBuildPreflight(context.Background()); err != nil {
+		t.Fatalf("podman builds with buildah and must not require buildx, got %v", err)
+	}
+}

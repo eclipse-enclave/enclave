@@ -25,6 +25,7 @@ type Defaults struct {
 	ToolOverrides    map[string]Defaults `json:"tool_overrides"`
 	Backend          string              `json:"backend"`
 	HostConfig       string              `json:"host_config"`
+	SkillsValidation string              `json:"skills_validation"`
 	HostConfigPaths  []string            `json:"host_config_paths"`
 	Yolo             *bool               `json:"yolo"`
 	Ephemeral        *bool               `json:"ephemeral"`

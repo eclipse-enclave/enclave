@@ -385,13 +385,12 @@ at `sandbox.skillsDir`. The same layout and precedence are documented with
 host paths in [Configuration](../configuration.md#managed-skills) and
 [persistent stores](../runtime/stores.md#managed-skills).
 
-Shared skills must use portable Agent Skills frontmatter: required `name` and
-`description`, with optional `license`, `compatibility`, and `metadata` only.
-The name must match the skill directory. Invalid shared skills warn and are
-skipped, so one bad source does not prevent a tool session from starting.
-Harness-specific metadata belongs in a tool-specific skill and is validated by
-the selected harness. Built-in duplicated skills remain per-tool so they can
-carry harness-specific metadata. Tools without `sandbox.skillsDir` ignore all
+Shared skills use strict portable Agent Skills frontmatter by default. Set
+`skills_validation` to `agent` to leave metadata interpretation to the selected
+agent. Invalid shared skills warn and are skipped, so one bad source does not
+prevent a tool session from starting. Tool-specific skills are validated by the
+selected harness. Built-in duplicated skills remain per-tool so they can carry
+harness-specific metadata. Tools without `sandbox.skillsDir` ignore all
 shared sources.
 
 Canonical host-side tool config overrides live under `~/.config/enclave/tools/<tool>/` (global) and `~/.config/enclave/projects/<hash>/<tool>/config/` (project).

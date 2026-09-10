@@ -17,6 +17,43 @@ import (
 	"enclave/internal/model"
 )
 
+func TestSkillsValidationConfigPrecedence(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(configPath, []byte(`{"skills_validation":"agent","tool_overrides":{"codex":{"skills_validation":"strict"}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	global, warnings, err := readDefaults(configPath)
+	if err != nil || len(warnings) != 0 {
+		t.Fatalf("read defaults: %v, %v", err, warnings)
+	}
+	project := Defaults{SkillsValidation: model.SkillsValidationStrict}
+	project, warnings = applyProjectGuardrailsForTest(project)
+	if len(warnings) != 0 || project.SkillsValidation != model.SkillsValidationStrict {
+		t.Fatalf("project validation option was filtered: %+v, %v", project, warnings)
+	}
+	for _, tc := range []struct {
+		name    string
+		global  Defaults
+		project Defaults
+		tool    string
+		want    string
+		source  model.OptionSource
+	}{
+		{"default", Defaults{}, Defaults{}, "claude", model.SkillsValidationStrict, model.SourceDefault},
+		{"global", global, Defaults{}, "claude", model.SkillsValidationAgent, model.SourceGlobal},
+		{"project", global, project, "claude", model.SkillsValidationStrict, model.SourceProject},
+		{"tool", global, Defaults{SkillsValidation: model.SkillsValidationAgent}, "codex", model.SkillsValidationStrict, model.SourceToolOverride},
+		{"project tool", global, Defaults{ToolOverrides: map[string]Defaults{"codex": {SkillsValidation: model.SkillsValidationAgent}}}, "codex", model.SkillsValidationAgent, model.SourceToolOverride},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			opts, _, _ := ResolveOptionsForTool(DefaultOptions(), model.DefaultOptionSources(), tc.global, tc.project, tc.tool)
+			if opts.SkillsValidation != tc.want || opts.Sources.SkillsValidation != tc.source {
+				t.Fatalf("validation mode/source = %q/%v, want %q/%v", opts.SkillsValidation, opts.Sources.SkillsValidation, tc.want, tc.source)
+			}
+		})
+	}
+}
+
 func TestToolOverride_SingleToolApplied(t *testing.T) {
 	sources := model.DefaultOptionSources()
 	opts := DefaultOptions()

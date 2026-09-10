@@ -15,6 +15,7 @@ func DefaultOptions() model.Options {
 			Tool:             "claude",
 			Backend:          "auto",
 			HostConfig:       model.HostConfigNone,
+			SkillsValidation: model.SkillsValidationStrict,
 			NetworkLog:       model.NetworkLogCoarse,
 			ProjectMount:     model.ProjectMountWritable,
 			WorktreeMetadata: model.WorktreeMetadataFollow,

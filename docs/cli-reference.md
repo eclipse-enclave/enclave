@@ -215,6 +215,7 @@ Mutation commands (`add-domain`, `remove-domain`, `set-mode`) apply the new poli
 | `--yolo` | Enable YOLO mode explicitly |
 | `--no-yolo` | Disable YOLO mode (agents will prompt for confirmation) |
 | `--host-config <none\|passthrough>` | Reuse reviewed paths from the host tool config |
+| `--skills-validation <strict\|agent>` | Validate shared skill frontmatter strictly (default) or leave metadata interpretation to the agent; values are case-insensitive |
 | `--session-monitor` | Run the agent under the managed tmux session (enables `status` snapshots) |
 | `--verbose` | Verbose logging |
 | `--playwright-mcp` | Enable Playwright MCP server for browser automation (Claude only) |

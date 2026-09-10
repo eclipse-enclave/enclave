@@ -37,6 +37,15 @@ func optionCLIFlags() map[string][]CLIFlag {
 				return nil
 			}),
 		},
+		"skills_validation": {
+			valueFlag("--skills-validation", "Shared skill validation: strict|agent (default: strict)", "--skills-validation requires a value (strict|agent)", func(opts *model.Options, sources *model.OptionSources, value string) error {
+				if err := applySkillsValidation(opts, value); err != nil {
+					return err
+				}
+				sources.SkillsValidation = model.SourceCLI
+				return nil
+			}),
+		},
 		"yolo": {
 			boolFlag("--yolo", "Enable YOLO mode", func(opts *model.Options, sources *model.OptionSources) {
 				val := true

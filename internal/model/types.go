@@ -13,6 +13,7 @@ type RunOptions struct {
 	Tool              string
 	Backend           string
 	HostConfig        string
+	SkillsValidation  string
 	HostConfigPaths   []string
 	YoloOverride      *bool
 	ConfigDefaultYolo *bool
@@ -544,6 +545,11 @@ const (
 const (
 	HostConfigNone        = "none"
 	HostConfigPassthrough = "passthrough"
+)
+
+const (
+	SkillsValidationStrict = "strict"
+	SkillsValidationAgent  = "agent"
 )
 
 const (

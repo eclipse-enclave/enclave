@@ -49,6 +49,7 @@ supported under `tool_overrides.<tool>`.
 | `tool` | Default tool (e.g. `claude`, `codex`) |
 | `backend` | Isolation backend: `auto` (default) uses docker or podman, whichever is installed, and asks once when both are; or `docker`, `podman`, experimental `qemu` |
 | `host_config` | `none` (default) or `passthrough` |
+| `skills_validation` | Shared skill validation: `strict` (default) or `agent`; supports tool overrides |
 | `tool_overrides.<tool>.host_config_paths` | Per-tool passthrough path directives (`default`, `+path`, `-path`, or explicit list) |
 | `yolo` | Enable YOLO mode (default: `true`). Only consulted when the selected tool's profile leaves `yoloEnabled` unset; every bundled CLI agent sets it, so use `--yolo`/`--no-yolo` for those |
 | `ephemeral` | Run without persistent auth/env stores |
@@ -247,11 +248,22 @@ With `host_config=passthrough`, every built-in skill-capable tool passes its nat
 }
 ```
 
-For pi, use `-agent/skills/`. At session start the log lists exactly which allow-listed paths pass through.
+For pi, use `-agent/skills/`. At session start the log lists exactly which allow-listed paths pass through. Shared skills do not require host passthrough; the directives above exclude host skills while retaining passthrough for other settings.
 
-Shared skills must use the portable Agent Skills subset. `SKILL.md` must be a regular file with YAML frontmatter containing required `name` and `description` fields and only optional `license`, `compatibility`, and `metadata` fields. The name must match the directory and use lowercase letters, numbers, and hyphens. Harness-specific fields such as `allowed-tools` belong in a tool-specific skill. Enclave warns and skips an invalid shared skill rather than failing the session; tool-specific skills are left for the selected harness to validate. Symlinks inside shared skill sources are ignored.
+`skills_validation` controls validation of global and project shared skills:
 
-Built-in skills remain tool-specific so extensions can carry harness-specific metadata. Skills shipped by enabled features overlay as trusted extension content and skip the portable-skill validation applied to shared skills. Tools without `sandbox.skillsDir` ignore all shared skill sources.
+- `strict` (default): `SKILL.md` must be a regular, readable file with YAML frontmatter containing required `name` and `description` fields and optional `license`, `compatibility`, and `metadata` fields. The name must match the directory and use lowercase letters, numbers, and hyphens. Other fields, including `allowed-tools` and `disable-model-invocation`, cause the skill to be skipped.
+- `agent`: require a regular, readable `SKILL.md`, then copy its bytes and supporting files unchanged. Enclave does not parse the frontmatter, enforce name matching, strip fields, or translate metadata between agents. The selected agent validates and interprets the skill; metadata accepted by one agent may be ignored or rejected by another.
+
+In both modes, overrides are keyed by directory name. In `agent` mode, different directories can declare the same frontmatter `name` and both reach the agent; Enclave does not deduplicate them.
+
+Enclave warns and skips invalid shared skills rather than failing the session. A skipped higher-precedence skill leaves the lower-precedence skill intact. Tool-specific overrides, host passthrough, and extension skills are unaffected by this option.
+
+Set `"skills_validation": "agent"` in global or project `config.json`, or under `tool_overrides.<tool>`. The mode applies to all shared skills in the session. Values are case-insensitive and surrounding whitespace is ignored. The normal option precedence applies; `--skills-validation strict|agent` takes priority over config files. Project configuration may select `agent` because it is stored in Enclave's host-managed configuration root and does not expose additional host paths.
+
+In both modes, symlinked skill directories and symlinks inside skills are ignored; `SKILL.md` itself must be a regular file.
+
+Built-in skills remain tool-specific so extensions can carry harness-specific metadata. Skills shipped by enabled features overlay as trusted extension content and skip shared-skill validation. Tools without `sandbox.skillsDir` ignore all shared skill sources.
 
 ## Tool Config Patches
 

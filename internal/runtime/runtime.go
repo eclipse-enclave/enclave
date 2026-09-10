@@ -802,7 +802,10 @@ func (r *Runtime) runContainer(runCtx context.Context, ctx *ExecutionContext, re
 	if be == nil {
 		return fmt.Errorf("runtime backend is not configured")
 	}
-	restoreTint := termtint.Begin(r.run.SessionTint)
+	// runCtx turns SIGINT and SIGTERM into a cancelled start that returns through
+	// the deferred restore; termtint must not re-raise them and kill the process
+	// while the gateway is still being removed.
+	restoreTint := termtint.Begin(r.run.SessionTint, termtint.CallerHandles(interruptSignals...))
 	defer restoreTint()
 	// The session-start lock must be released via OnStarted, not after Run
 	// returns: Run blocks for the whole foreground session, and holding the

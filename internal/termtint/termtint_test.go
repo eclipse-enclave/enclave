@@ -9,6 +9,8 @@ package termtint
 
 import (
 	"bytes"
+	"os"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -101,5 +103,25 @@ func TestBeginAcceptsUppercaseHex(t *testing.T) {
 
 	if !strings.Contains(buf.String(), "#2A0F12") {
 		t.Fatalf("expected uppercase color to be emitted, got %q", buf.String())
+	}
+}
+
+func TestInterceptedSignalsSkipCallerHandled(t *testing.T) {
+	all := interruptSignals()
+	if len(all) == 0 {
+		t.Skip("no interrupt signals on this platform")
+	}
+	handled := all[:1]
+
+	got := interceptedSignals(handled)
+	if slices.ContainsFunc(got, func(sig os.Signal) bool { return slices.Contains(handled, sig) }) {
+		t.Fatalf("caller-handled signal is still intercepted: %v", got)
+	}
+	if len(got) != len(all)-1 {
+		t.Fatalf("expected %d intercepted signals, got %v", len(all)-1, got)
+	}
+
+	if got := interceptedSignals(all); len(got) != 0 {
+		t.Fatalf("expected nothing intercepted when the caller handles every signal, got %v", got)
 	}
 }

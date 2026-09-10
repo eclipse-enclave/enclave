@@ -14,11 +14,15 @@ import (
 	"syscall"
 )
 
+// interruptSignals cancel a start in progress. The foreground run also hands
+// them to termtint, so the tint does not intercept a signal the run survives.
+var interruptSignals = []os.Signal{os.Interrupt, syscall.SIGTERM}
+
 // interruptContext returns a context that SIGINT or SIGTERM cancels. A start
 // still in progress observes the cancellation and tears down what it created.
 // Registering the signals also keeps this process alive through them: once the
 // session is attached, the engine child owns the terminal and receives Ctrl-C
 // itself, and the post-session cleanup then runs to completion.
 func interruptContext() (context.Context, context.CancelFunc) {
-	return signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	return signal.NotifyContext(context.Background(), interruptSignals...)
 }

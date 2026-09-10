@@ -30,7 +30,7 @@
 
 - [security/README.md](security/README.md) — Current security boundaries and residual risks
 - [security/host-hardening.md](security/host-hardening.md) — Rootful Docker host hardening
-- [security/rootless.md](security/rootless.md) — Rootless Docker compatibility status
+- [security/rootless.md](security/rootless.md) — Rootless engines: podman supported, rootless Docker not
 
 ## Diagrams
 

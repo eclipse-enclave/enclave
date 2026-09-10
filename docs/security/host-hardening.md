@@ -6,7 +6,7 @@ container escape or accidental privileged host-file access.
 
 Rootless Docker is not currently supported because the restricted-network
 gateway requires netfilter, ipset, sysctl, `NET_ADMIN`, and `NET_RAW`. See
-[Rootless Docker compatibility](rootless.md).
+[Rootless container engines](rootless.md), which also covers the supported rootless podman backend.
 
 ## Enable userns-remap
 

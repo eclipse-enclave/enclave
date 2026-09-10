@@ -169,6 +169,9 @@ func captureCmd(ctx context.Context, trim bool, args ...string) (string, error) 
 
 // runMode selects the foreground/detached and TTY behaviour for `docker run`.
 type runMode struct {
+	// Create builds a `docker create` (container created, never started)
+	// instead of `docker run`.
+	Create      bool
 	Detach      bool
 	Interactive bool
 	TTY         bool
@@ -178,6 +181,9 @@ type runMode struct {
 // list for `docker run`. Flags come first, then the image, then the command.
 func buildRunArgs(config *ContainerConfig, hostConfig *HostConfig, name string, mode runMode) []string {
 	args := []string{"run"}
+	if mode.Create {
+		args[0] = "create"
+	}
 	if mode.Detach {
 		args = append(args, "--detach")
 	}

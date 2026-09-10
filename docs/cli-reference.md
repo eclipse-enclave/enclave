@@ -71,6 +71,8 @@ the single running container of the current project. An argument that is present
 but blank (`enclave stop "$SESSION"` with an unset variable) is rejected instead
 of being treated as "no argument".
 
+Ctrl-C or SIGTERM while a session is still starting aborts the start with exit code 130 and removes what it created, including the gateway sidecar. A sidecar that an interrupted start nevertheless left behind (for example after a `kill -9`) is removed automatically the next time a session of the same name starts. Once the session is attached, Ctrl-C goes to the tool.
+
 ### Inspect
 
 | Command | Description |
@@ -290,6 +292,8 @@ The default backend is `auto`: enclave uses docker when its CLI is on `PATH`, ot
 ## Podman backend
 
 `--backend podman` drives the Docker backend through podman's Docker-compatible CLI (`podman` on `PATH`; rootless is the tested configuration). Everything the Docker backend does applies unchanged — image builds via buildah, the gateway sidecar with restricted egress, detached sessions, `exec`/`attach`, persistent stores — with a few engine-specific adjustments: session and auth-reconcile containers run with `--userns=keep-id` so the container user keeps the host user's UID/GID on bind-mounted stores under rootless podman's user namespace; image builds rely on podman's local layer cache instead of Docker's `--cache-from`/inline-cache flags; and the rendered Dockerfile drops the npm/Go/uv build caches mounted under the agent home, because buildah commits the parent directories of such cache mounts as root-owned, which would leave the agent unable to write its home (apt caches and layer caching still apply, so only cold rebuilds of feature and tool installs are slower). Devcontainer mode is only verified with Docker and stays rejected for `podman`. Images carry the same tags as under Docker (podman stores them as `localhost/enclave-<tool>:...`). Hosts that enforce short-name resolution need registry aliases for the base images (`debian`, `node`, `golang`, `alpine`); Fedora ships them.
+
+Rootless podman without idmapped-mount support has to copy an image into a layer for the keep-id mapping the first time that image starts, and again after every image rebuild. enclave triggers this copy before the gateway starts and prints a notice when it takes longer than two seconds; for multi-gigabyte tool images it takes minutes, during which podman blocks every other podman command, including `enclave ps`.
 
 `--backend` is a session flag; commands without it (`ps`, `stop`, `attach`, `status`, `cleanup`, `network`) resolve the backend the same way, from the `backend` key in `config.json` or by detection, so a saved or detected `podman` applies to them too. `cleanup --build-cache` reports nothing to reclaim under podman, which keeps no separate build cache.
 

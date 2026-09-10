@@ -9,6 +9,7 @@ package backend
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -298,6 +299,14 @@ type UnfinalizedRemover interface {
 	RemoveWithoutFinalize(ctx context.Context, ref SessionRef) error
 }
 
+// StaleGatewayRemover removes a gateway sidecar that outlived an interrupted
+// start of the named session. Left running, the sidecar keeps the session's
+// published ports bound and a fresh start of that name fails its host-port
+// checks before it reaches gateway startup.
+type StaleGatewayRemover interface {
+	RemoveStaleGateway(ctx context.Context, name string) error
+}
+
 // ConfigStoreConflictChecker reports whether a running session for the same
 // tool, project, and worktree already uses the given config-store key.
 // Sessions predating config-key tracking count as using the caller's stable
@@ -441,6 +450,11 @@ type SeedItem struct {
 	StoreRel string
 	Mode     fs.FileMode
 }
+
+// ErrInterrupted reports a session start aborted by SIGINT or SIGTERM before
+// the session container was running. The backend has already torn down what
+// it started.
+var ErrInterrupted = errors.New("interrupted before the session started")
 
 // ExitError reports a session process that exited with a non-zero status.
 type ExitError struct {

@@ -84,37 +84,75 @@ func (b *Backend) Capabilities() backend.Capabilities {
 
 func (b *Backend) Storage() backend.StoreManager { return b.storage }
 
+// Run prepares and attaches a foreground session. Cancelling ctx (the caller
+// wires it to SIGINT/SIGTERM) aborts a start still in progress and tears down
+// what it created; once the session is attached the engine child owns the
+// terminal and is deliberately detached from ctx.
 func (b *Backend) Run(ctx context.Context, req backend.Request, attach backend.AttachIO) (backend.ExitStatus, error) {
 	// Post-run credential sync runs on every foreground outcome (success,
 	// tool failure, even setup failure), matching the previous runtime
-	// behavior. Registered first so it runs after the gateway teardown.
+	// behavior. Registered first so it runs after the gateway teardown. An
+	// interrupted start is the exception: nothing ran that could have changed
+	// credentials, and the sync would make the user wait for another container.
+	interrupted := false
 	if req.AuthSync != nil {
-		defer b.runRequestAuthSync(req)
+		defer func() {
+			if !interrupted {
+				b.runRequestAuthSync(req)
+			}
+		}()
 	}
 	spec, err := b.prepareRun(ctx, req)
 	if err != nil {
+		if ctx.Err() != nil {
+			interrupted = true
+			return backend.ExitStatus{}, interruptedStart()
+		}
 		return backend.ExitStatus{}, err
 	}
 	if spec.cleanup != nil {
 		defer spec.cleanup()
 	}
-	err = runForeground(ctx, spec.config, spec.hostConfig, spec.name, attach)
+	if ctx.Err() != nil {
+		interrupted = true
+		return backend.ExitStatus{}, interruptedStart()
+	}
+	// Ctrl-C now reaches the tool through the TTY or the engine's signal
+	// proxying; cancelling ctx must not kill the attached child and strand a
+	// running session.
+	err = runForeground(context.WithoutCancel(ctx), spec.config, spec.hostConfig, spec.name, attach)
 	return exitStatus(err), neutralizeExitError(err)
 }
 
 func (b *Backend) Start(ctx context.Context, req backend.Request) (backend.SessionRef, error) {
 	spec, err := b.prepareRun(ctx, req)
 	if err != nil {
+		if ctx.Err() != nil {
+			return backend.SessionRef{}, interruptedStart()
+		}
 		return backend.SessionRef{}, err
 	}
 	id, err := dockercmd.RunDetachedInteractive(ctx, spec.config, spec.hostConfig, spec.name)
 	if err != nil {
+		if ctx.Err() != nil {
+			// The interrupt may have landed after the engine created the
+			// container; it has to go before the gateway it joins.
+			if rmErr := dockercmd.ContainerRemove(context.WithoutCancel(ctx), spec.name, true, false); rmErr != nil && !dockercmd.IsNotFound(rmErr) {
+				logx.Warnf("Failed to remove container %s after an interrupted start: %v", spec.name, rmErr)
+			}
+			err = interruptedStart()
+		}
 		if spec.cleanup != nil {
 			spec.cleanup()
 		}
 		return backend.SessionRef{}, err
 	}
 	return backend.SessionRef{Name: spec.name, ID: id}, nil
+}
+
+func interruptedStart() error {
+	logx.Warnf("Interrupted before the session started; cleaning up.")
+	return backend.ErrInterrupted
 }
 
 func (b *Backend) List(ctx context.Context, filter backend.SessionFilter) ([]backend.Session, error) {
@@ -260,6 +298,9 @@ func (b *Backend) prepareRun(ctx context.Context, req backend.Request) (runSpec,
 		}
 		b.applyDevcontainerRunArgs(spec.config, spec.hostConfig)
 		spec.config.Env = append(spec.config.Env, runtimeUIDRemapEnv...)
+	}
+	if err := b.prepareImageUserNamespace(ctx, req.Image); err != nil {
+		return runSpec{}, err
 	}
 	if req.Network.Mode == backend.NetworkModeRestricted {
 		gatewayName, cleanup, err := b.startGateway(ctx, req)

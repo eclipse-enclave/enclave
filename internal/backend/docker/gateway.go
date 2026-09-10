@@ -17,13 +17,15 @@ import (
 
 	"enclave/internal/backend"
 	"enclave/internal/config"
+	dockercmd "enclave/internal/docker"
 	"enclave/internal/gateway"
 	"enclave/internal/gateway/bundle"
+	"enclave/internal/logx"
 	"enclave/internal/model"
 	"enclave/internal/network"
 )
 
-func (b *Backend) startGateway(_ context.Context, req backend.Request) (string, func(), error) {
+func (b *Backend) startGateway(ctx context.Context, req backend.Request) (string, func(), error) {
 	gatewayConfigDir := config.HostProjectGatewayConfigDir(b.opts.Host.Home, req.Session.ProjectHash, req.Session.Tool)
 	policy := network.EffectivePolicy{
 		Mode:          model.NetworkModeRestricted,
@@ -71,7 +73,7 @@ func (b *Backend) startGateway(_ context.Context, req backend.Request) (string, 
 		SecretReleaseFile: secretReleaseFile,
 		TLSRootDir:        config.HostTLSDir(b.opts.Host.Home),
 	}
-	result, err := gateway.Start(startConfig)
+	result, err := gateway.Start(ctx, startConfig)
 	if err != nil {
 		cleanupFiles(tempFiles)
 		return "", nil, fmt.Errorf("failed to start DNS gateway: %w", err)
@@ -82,6 +84,35 @@ func (b *Backend) startGateway(_ context.Context, req backend.Request) (string, 
 		cleanupFiles(tempFiles)
 	}
 	return result.ContainerName, cleanup, nil
+}
+
+// RemoveStaleGateway removes the gateway sidecar of a session whose container
+// does not exist. A start interrupted between gateway readiness and container
+// creation leaves the sidecar running with the session's ports published,
+// which would fail the next start's host-port checks; gateway.Start would
+// replace the sidecar anyway, so removing it early loses nothing.
+func (b *Backend) RemoveStaleGateway(ctx context.Context, name string) error {
+	gatewayName := gateway.ContainerName(name)
+	if _, err := dockercmd.ContainerInspect(ctx, name); err == nil {
+		return nil
+	} else if !dockercmd.IsNotFound(err) {
+		return err
+	}
+	inspect, err := dockercmd.ContainerInspect(ctx, gatewayName)
+	if err != nil {
+		if dockercmd.IsNotFound(err) {
+			return nil
+		}
+		return err
+	}
+	if inspect.Config == nil || inspect.Config.Labels[model.GatewayLabelManaged] != "true" {
+		return nil
+	}
+	logx.Warnf("Removing stale gateway container %s left behind by an interrupted start", gatewayName)
+	if err := dockercmd.ContainerRemove(ctx, gatewayName, true, true); err != nil && !dockercmd.IsNotFound(err) {
+		return err
+	}
+	return nil
 }
 
 func workspaceIDFromSession(session backend.SessionMeta, projectDir string) string {

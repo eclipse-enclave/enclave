@@ -163,3 +163,9 @@ func RunDetachedInteractive(ctx context.Context, config *ContainerConfig, hostCo
 	}
 	return id, nil
 }
+
+// ContainerCreate creates a container without starting it and returns its ID.
+func ContainerCreate(ctx context.Context, config *ContainerConfig, hostConfig *HostConfig, name string) (string, error) {
+	args := buildRunArgs(config, hostConfig, name, runMode{Create: true})
+	return capture(ctx, args...)
+}

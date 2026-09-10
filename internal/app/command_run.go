@@ -177,8 +177,7 @@ func dispatchRunner(input *CommandInput, runner *runtime.Runtime) int {
 	if input.Options.Background {
 		containerName, err := runner.ExecuteBackground()
 		if err != nil {
-			logx.Errorf("%v", err)
-			return 1
+			return runErrorExitCode(err)
 		}
 		fmt.Println(containerName)
 		return 0
@@ -190,14 +189,26 @@ func dispatchRunner(input *CommandInput, runner *runtime.Runtime) int {
 		err = runner.Execute()
 	}
 	if err != nil {
-		var exitErr *backend.ExitError
-		if errors.As(err, &exitErr) {
-			return exitErr.Code
-		}
-		logx.Errorf("%v", err)
-		return 1
+		return runErrorExitCode(err)
 	}
 	return 0
+}
+
+// exitCodeInterrupted is the shell convention for a process ended by SIGINT.
+const exitCodeInterrupted = 130
+
+// runErrorExitCode maps a session error to the process exit code. Tool exits
+// and interrupted starts were already reported, so only other failures log.
+func runErrorExitCode(err error) int {
+	var exitErr *backend.ExitError
+	if errors.As(err, &exitErr) {
+		return exitErr.Code
+	}
+	if errors.Is(err, backend.ErrInterrupted) {
+		return exitCodeInterrupted
+	}
+	logx.Errorf("%v", err)
+	return 1
 }
 
 func resolveEnabledFeatures(paths model.Paths, build model.BuildOptions) []model.Extension {

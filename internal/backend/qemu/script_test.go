@@ -27,7 +27,7 @@ func TestReadOnlyFileMountDoesNotOverwriteHostFile(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	script, err := be.renderRunScript(backend.Request{Argv: []string{"true"}}, nil, []runtimeFileMount{{GuestSource: source, Target: target, ReadOnly: true}})
+	script, err := be.renderRunScript(backend.Request{Argv: []string{"true"}}, nil, []runtimeFileMount{{GuestSource: source, Target: target, ReadOnly: true}}, defaultConsoleSize)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,7 +66,7 @@ func TestRenderPayloadCommandSetsAgentHomeAndUser(t *testing.T) {
 func TestRenderRunScriptMountsWithMmapCacheWhenRequested(t *testing.T) {
 	be := New(Options{})
 
-	script, err := be.renderRunScript(backend.Request{Argv: []string{"true"}}, []runtimeMount{{Tag: "tag-0", Target: "/home/agent/.codex", CacheMmap: true}}, nil)
+	script, err := be.renderRunScript(backend.Request{Argv: []string{"true"}}, []runtimeMount{{Tag: "tag-0", Target: "/home/agent/.codex", CacheMmap: true}}, nil, defaultConsoleSize)
 	if err != nil {
 		t.Fatalf("renderRunScript: %v", err)
 	}
@@ -77,12 +77,40 @@ func TestRenderRunScriptMountsWithMmapCacheWhenRequested(t *testing.T) {
 func TestRenderRunScriptDoesNotMountWithMmapCacheByDefault(t *testing.T) {
 	be := New(Options{})
 
-	script, err := be.renderRunScript(backend.Request{Argv: []string{"true"}}, []runtimeMount{{Tag: "tag-0", Target: "/home/agent/.claude"}}, nil)
+	script, err := be.renderRunScript(backend.Request{Argv: []string{"true"}}, []runtimeMount{{Tag: "tag-0", Target: "/home/agent/.claude"}}, nil, defaultConsoleSize)
 	if err != nil {
 		t.Fatalf("renderRunScript: %v", err)
 	}
 
 	assertNotContains(t, script, "cache=mmap")
+}
+
+// The serial console starts out 0x0, which leaves terminal UIs unrenderable.
+func TestRenderRunScriptSeedsConsoleSize(t *testing.T) {
+	be := New(Options{})
+
+	script, err := be.renderRunScript(backend.Request{Argv: []string{"true"}}, nil, nil, consoleSize{Rows: 47, Cols: 173})
+	if err != nil {
+		t.Fatalf("renderRunScript: %v", err)
+	}
+
+	assertContains(t, script, "stty rows 47 cols 173")
+}
+
+func TestResolveConsoleSizeFallsBackToDefault(t *testing.T) {
+	read, write, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		_ = read.Close()
+		_ = write.Close()
+	}()
+
+	got := resolveConsoleSize(backend.AttachIO{In: read, Out: write, Err: write})
+	if got != defaultConsoleSize {
+		t.Fatalf("consoleSize = %+v, want %+v", got, defaultConsoleSize)
+	}
 }
 
 func TestRenderPayloadCommandPreservesExplicitHomeAndUser(t *testing.T) {

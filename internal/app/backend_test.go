@@ -13,7 +13,9 @@ import (
 
 	"enclave/internal/backend"
 	backenddocker "enclave/internal/backend/docker"
+	"enclave/internal/cli"
 	"enclave/internal/docker"
+	"enclave/internal/extinstall"
 	"enclave/internal/model"
 )
 
@@ -49,7 +51,7 @@ func TestResolveBackendUsesTheOnlyInstalledEngine(t *testing.T) {
 	} {
 		saved := stubBackendResolution(t, tc.clis, true)
 		opts := model.Options{RunOptions: model.RunOptions{Backend: backend.NameAuto}}
-		resolveBackend(&opts)
+		resolveBackend(&opts, true)
 		if opts.Backend != tc.want {
 			t.Fatalf("clis %v: Backend = %q, want %q", tc.clis, opts.Backend, tc.want)
 		}
@@ -65,7 +67,7 @@ func TestResolveBackendUsesTheOnlyInstalledEngine(t *testing.T) {
 func TestResolveBackendWithBothEnginesNonInteractiveUsesDocker(t *testing.T) {
 	saved := stubBackendResolution(t, []string{backend.NameDocker, backend.NamePodman}, false)
 	opts := model.Options{RunOptions: model.RunOptions{Backend: backend.NameAuto}}
-	resolveBackend(&opts)
+	resolveBackend(&opts, true)
 	if opts.Backend != backend.NameDocker {
 		t.Fatalf("Backend = %q, want docker without a terminal", opts.Backend)
 	}
@@ -78,7 +80,7 @@ func TestResolveBackendLeavesExplicitChoiceAlone(t *testing.T) {
 	stubBackendResolution(t, []string{backend.NameDocker, backend.NamePodman}, true)
 	for _, name := range []string{backend.NameDocker, backend.NamePodman, backend.NameQEMU} {
 		opts := model.Options{RunOptions: model.RunOptions{Backend: name}}
-		resolveBackend(&opts)
+		resolveBackend(&opts, true)
 		if opts.Backend != name {
 			t.Fatalf("explicit backend %q was changed to %q", name, opts.Backend)
 		}
@@ -91,7 +93,7 @@ func TestResolveBackendLeavesExplicitChoiceAlone(t *testing.T) {
 func TestSelectBackendPodmanUsesDockerBackend(t *testing.T) {
 	stubBackendResolution(t, []string{backend.NamePodman}, false)
 	opts := model.Options{RunOptions: model.RunOptions{Backend: backend.NamePodman}}
-	resolveBackend(&opts)
+	resolveBackend(&opts, true)
 	be, err := selectBackend(opts, backenddocker.Options{})
 	if err != nil {
 		t.Fatalf("selectBackend: %v", err)
@@ -123,5 +125,55 @@ func TestValidateOptionsAcceptsPodmanBackend(t *testing.T) {
 	opts.Devcontainer = true
 	if _, _, _, err := ValidateOptions(opts, model.DefaultOptionSources(), ValidationContext{Action: "run"}); err == nil {
 		t.Fatal("devcontainer mode is only verified with docker and must be rejected for podman")
+	}
+}
+
+// A --json or --yes invocation must never block on the engine question, even
+// when stdin and stderr are terminals.
+func TestResolveBackendNonInteractiveInvocationSkipsPrompt(t *testing.T) {
+	saved := stubBackendResolution(t, []string{backend.NameDocker, backend.NamePodman}, true)
+	opts := model.Options{RunOptions: model.RunOptions{Backend: backend.NameAuto}}
+	resolveBackend(&opts, false)
+	if opts.Backend != backend.NameDocker {
+		t.Fatalf("Backend = %q, want docker for a non-interactive invocation", opts.Backend)
+	}
+	if len(*saved) != 0 {
+		t.Fatalf("non-interactive resolution must not write config, got %v", *saved)
+	}
+}
+
+func TestBackendPromptAllowed(t *testing.T) {
+	cases := []struct {
+		name   string
+		parsed cli.Result
+		want   bool
+	}{
+		{name: "plain run", parsed: cli.Result{Action: "run"}, want: true},
+		{name: "ps --json", parsed: cli.Result{Action: "ps", Options: model.Options{PSOptions: model.PSOptions{PSJSON: true}}}, want: false},
+		{name: "status --json", parsed: cli.Result{Action: "status", Options: model.Options{StatusOptions: model.StatusOptions{StatusJSON: true}}}, want: false},
+		{name: "config view --json", parsed: cli.Result{Action: "config", ConfigView: model.ConfigView{JSON: true}}, want: false},
+		{name: "tools add --json --yes", parsed: cli.Result{Action: cli.ActionExtensionManage, ExtRequest: &extinstall.Request{JSON: true, Yes: true}}, want: false},
+		{name: "tools add --yes", parsed: cli.Result{Action: cli.ActionExtensionManage, ExtRequest: &extinstall.Request{Yes: true}}, want: false},
+		{name: "tools add interactive", parsed: cli.Result{Action: cli.ActionExtensionManage, ExtRequest: &extinstall.Request{Interactive: true}}, want: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := backendPromptAllowed(tc.parsed); got != tc.want {
+				t.Fatalf("backendPromptAllowed = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestActionUsesBackend(t *testing.T) {
+	for _, action := range []string{"tools", "features", "extension-list", cli.ActionExtensionManage, "config", "review-target"} {
+		if actionUsesBackend(action) {
+			t.Fatalf("%s never touches an engine and must not resolve the backend", action)
+		}
+	}
+	for _, action := range []string{"run", "shell", "exec", "update", "info", "ps", "status", "stop", "attach", "cleanup", "theia", "img-import", "network-apply", "devcontainer-generate"} {
+		if !actionUsesBackend(action) {
+			t.Fatalf("%s uses an engine and must resolve the backend", action)
+		}
 	}
 }

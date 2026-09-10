@@ -287,7 +287,7 @@ Persistent defaults can be set in `~/.config/enclave/config.json` (global) or `~
 
 ## Backend detection
 
-The default backend is `auto`: enclave uses docker when its CLI is on `PATH`, otherwise podman. A `docker` command that is really the `podman-docker` shim counts as podman. When both engines are installed and enclave runs in a terminal, it asks once which one to use and saves the answer as `"backend"` in `~/.config/enclave/config.json`; without a terminal (scripts, `--json` consumers) it uses docker and prints a notice pointing at that key. When neither engine is found, the engine check reports it. An explicit `--backend` or a configured `backend` disables detection.
+The default backend is `auto`: enclave uses docker when its CLI is on `PATH`, otherwise podman. A `docker` command that is really the `podman-docker` shim counts as podman. When both engines are installed, a command that uses an engine asks once which one to use and saves the answer as `"backend"` in `~/.config/enclave/config.json`. The question is only asked when stdin, stdout, and stderr are terminals and no `--json` or `--yes` was given; otherwise (scripts, captured output, JSON consumers) docker is used and a notice points at that key. Commands that never touch an engine (`tools`, `features`, `config`, `review-target`) neither detect nor ask. When neither engine is found, the engine check reports it. An explicit `--backend` or a configured `backend` disables detection.
 
 ## Podman backend
 

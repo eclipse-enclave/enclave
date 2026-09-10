@@ -98,7 +98,9 @@ func Run(args []string) int {
 	cliOpts := parsed.Options
 	cliSources := parsed.Sources
 	opts, toolDefaults, hasToolDefaults := config.ResolveOptionsForTool(cliOpts, cliSources, globalDefaults, projectDefaults, "")
-	resolveBackend(&opts)
+	if actionUsesBackend(parsed.Action) {
+		resolveBackend(&opts, backendPromptAllowed(parsed))
+	}
 	sources := opts.Sources
 	parsed.Options = opts
 

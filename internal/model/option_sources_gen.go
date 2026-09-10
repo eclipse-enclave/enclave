@@ -41,6 +41,7 @@ type RunOptionSources struct {
 	ProjectMount     OptionSource
 	SessionMonitor   OptionSource
 	SessionName      OptionSource
+	SessionTint      OptionSource
 	Tool             OptionSource
 	WorktreeMetadata OptionSource
 	Yolo             OptionSource
@@ -103,6 +104,7 @@ func DefaultOptionSources() OptionSources {
 			ProjectMount:     SourceDefault,
 			SessionMonitor:   SourceDefault,
 			SessionName:      SourceDefault,
+			SessionTint:      SourceDefault,
 			Tool:             SourceDefault,
 			WorktreeMetadata: SourceDefault,
 			Yolo:             SourceDefault,
@@ -261,6 +263,9 @@ func MergeOptionSources(base OptionSources, override OptionSources) OptionSource
 	}
 	if override.SessionName != SourceUnset {
 		base.SessionName = override.SessionName
+	}
+	if override.SessionTint != SourceUnset {
+		base.SessionTint = override.SessionTint
 	}
 	if override.Slim != SourceUnset {
 		base.Slim = override.Slim

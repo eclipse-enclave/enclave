@@ -439,6 +439,16 @@ func OptionDefs() []OptionDef {
 			},
 		},
 		{
+			Name:          "session_tint",
+			Group:         OptionGroupRun,
+			Kind:          OptionKindString,
+			OptionField:   "SessionTint",
+			SourceField:   "SessionTint",
+			DefaultsField: "SessionTint",
+			Apply:         ApplyString,
+			TrimOnApply:   true,
+		},
+		{
 			Name:          "no_history",
 			Group:         OptionGroupRun,
 			Kind:          OptionKindBool,

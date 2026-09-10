@@ -179,6 +179,16 @@ func OptionSpecs() []OptionSpec {
 			},
 		},
 		{
+			Name:  "session_tint",
+			Group: OptionGroupRun,
+			ApplyDefaultsWithSource: func(opts *model.Options, defaults Defaults, source model.OptionSource, sources *model.OptionSources) {
+				if canOverride(sources.SessionTint, source) && strings.TrimSpace(defaults.SessionTint) != "" {
+					opts.SessionTint = strings.TrimSpace(defaults.SessionTint)
+					sources.SessionTint = source
+				}
+			},
+		},
+		{
 			Name:  "no_history",
 			Group: OptionGroupRun,
 			ApplyDefaultsWithSource: func(opts *model.Options, defaults Defaults, source model.OptionSource, sources *model.OptionSources) {

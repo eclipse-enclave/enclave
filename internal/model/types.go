@@ -30,6 +30,7 @@ type RunOptions struct {
 	Admin             bool
 	ImageInbox        bool
 	SessionMonitor    bool
+	SessionTint       string
 	CmdArgs           []string
 	NoHistory         bool
 	NoMemory          bool

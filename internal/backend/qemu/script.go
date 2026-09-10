@@ -129,7 +129,7 @@ func rejectQEMUOptionComma(label string, value string) error {
 	return nil
 }
 
-func (b *Backend) renderRunScript(req backend.Request, mounts []runtimeMount, files []runtimeFileMount) (string, error) {
+func (b *Backend) renderRunScript(req backend.Request, mounts []runtimeMount, files []runtimeFileMount, console consoleSize) (string, error) {
 	if len(req.Argv) == 0 {
 		return "", fmt.Errorf("qemu backend: command argv is empty")
 	}
@@ -140,6 +140,11 @@ func (b *Backend) renderRunScript(req backend.Request, mounts []runtimeMount, fi
 	out.WriteString("#!/bin/sh\n")
 	out.WriteString("set -eu\n")
 	out.WriteString("export PATH=/home/" + model.ContainerUser + "/.local/bin:/opt/enclave/node/bin:/sbin:/bin:/usr/sbin:/usr/bin\n")
+	// The console inherited from init reports 0x0 until it is told otherwise,
+	// which leaves terminal UIs either one column wide or stuck on their 80x24
+	// fallback. stty works on the inherited descriptor even though the agent
+	// user cannot open /dev/console itself.
+	fmt.Fprintf(&out, "stty rows %d cols %d 2>/dev/null || true\n", console.Rows, console.Cols)
 	out.WriteString("modprobe 9p 2>/dev/null || true\n")
 	out.WriteString("modprobe 9pnet 2>/dev/null || true\n")
 	out.WriteString("modprobe 9pnet_virtio 2>/dev/null || true\n")

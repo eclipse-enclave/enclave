@@ -284,7 +284,7 @@ func resolveBundleMemoryMiB(root string) (int, error) {
 	return cfg.MemoryMiB, nil
 }
 
-func (b *Backend) prepareGuestRuntime(bundle bundle, req backend.Request) (guestRuntime, error) {
+func (b *Backend) prepareGuestRuntime(bundle bundle, req backend.Request, console consoleSize) (guestRuntime, error) {
 	tempDir, err := os.MkdirTemp("", "enclave-qemu-*")
 	if err != nil {
 		return guestRuntime{}, fmt.Errorf("qemu backend: create runtime directory: %w", err)
@@ -313,7 +313,7 @@ func (b *Backend) prepareGuestRuntime(bundle bundle, req backend.Request) (guest
 		cleanupOnErr()
 		return guestRuntime{}, fmt.Errorf("qemu backend: create overlay directory: %w", err)
 	}
-	content, err := b.renderRunScript(req, mounts, fileMounts)
+	content, err := b.renderRunScript(req, mounts, fileMounts, console)
 	if err != nil {
 		cleanupOnErr()
 		return guestRuntime{}, err

@@ -606,7 +606,7 @@ func fillGatewayPorts(ctx context.Context, sessions []backend.Session) {
 		if len(sessions[i].Ports) > 0 || sessions[i].Status != "running" {
 			continue
 		}
-		name := sessions[i].Ref.Name + model.GatewayContainerSuffix
+		name := gateway.ContainerName(sessions[i].Ref.Name)
 		names = append(names, name)
 		gatewayIndex[name] = i
 	}

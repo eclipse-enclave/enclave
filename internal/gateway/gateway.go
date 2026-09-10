@@ -310,13 +310,9 @@ func relativePathWithin(base string, target string) (string, bool) {
 	return filepath.ToSlash(filepath.Clean(rel)), true
 }
 
-func gatewayContainerName(containerName string) string {
-	return containerName + model.GatewayContainerSuffix
-}
-
 // ContainerName returns the name of the gateway sidecar for a session container.
-func ContainerName(sessionContainer string) string {
-	return gatewayContainerName(sessionContainer)
+func ContainerName(containerName string) string {
+	return containerName + model.GatewayContainerSuffix
 }
 
 type StartConfig struct {
@@ -387,7 +383,7 @@ func Start(ctx context.Context, cfg StartConfig) (StartResult, error) {
 		}
 	}
 
-	gatewayContainer := gatewayContainerName(cfg.ContainerName)
+	gatewayContainer := ContainerName(cfg.ContainerName)
 	if err := docker.ContainerRemove(ctx, gatewayContainer, true, true); err != nil && !docker.IsNotFound(err) {
 		logx.Warnf("Failed to remove existing gateway container %s: %v", gatewayContainer, err)
 	}
@@ -698,7 +694,7 @@ func ensureExistingGatewayImageWith(profile model.Profile, exists func(context.C
 }
 
 func Stop(containerName string) {
-	container := gatewayContainerName(containerName)
+	container := ContainerName(containerName)
 	timeout := 3 * time.Second
 	if err := docker.ContainerStop(context.Background(), container, &timeout); err != nil {
 		if docker.IsNotFound(err) {

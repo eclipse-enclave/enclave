@@ -167,12 +167,12 @@ func TestBackendPromptAllowed(t *testing.T) {
 }
 
 func TestActionUsesBackend(t *testing.T) {
-	for _, action := range []string{"tools", "features", "extension-list", cli.ActionExtensionManage, "config", "review-target"} {
+	for _, action := range []string{"tools", "features", "extension-list", cli.ActionExtensionManage, "config", "review-target", "network-print", "network-diff", "devcontainer-generate", "ssh-init", "validate-extensions"} {
 		if actionUsesBackend(action) {
 			t.Fatalf("%s never touches an engine and must not resolve the backend", action)
 		}
 	}
-	for _, action := range []string{"run", "shell", "exec", "update", "info", "ps", "status", "stop", "attach", "cleanup", "theia", "img-import", "network-apply", "devcontainer-generate"} {
+	for _, action := range []string{"run", "shell", "exec", "update", "info", "ps", "status", "stop", "attach", "cleanup", "theia", "img-import", "network-status", "network-apply", "network-set-mode", "auth-import", "auth-export"} {
 		if !actionUsesBackend(action) {
 			t.Fatalf("%s uses an engine and must resolve the backend", action)
 		}

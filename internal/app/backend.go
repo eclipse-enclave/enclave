@@ -82,23 +82,6 @@ var (
 	saveBackendChoice = config.WriteGlobalDefault
 )
 
-// backendFreeActions never touch a container engine, so the "auto" backend is
-// left unresolved for them: detection would be wasted work, and a command that
-// lists extensions or prints configuration must not ask which engine to use.
-// Validation of the backend name only runs for the run-like commands.
-var backendFreeActions = map[string]bool{
-	"config":                  true,
-	"review-target":           true,
-	"tools":                   true,
-	"features":                true,
-	"extension-list":          true,
-	cli.ActionExtensionManage: true,
-}
-
-func actionUsesBackend(action string) bool {
-	return !backendFreeActions[action]
-}
-
 // backendPromptAllowed reports whether resolving the "auto" backend may ask the
 // user. Structured output and --yes promise not to prompt, whatever the
 // terminal looks like.

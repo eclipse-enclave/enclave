@@ -134,7 +134,7 @@ func TestPrepareGuestRuntimeCreatesMissingDisposableSource(t *testing.T) {
 		}},
 	}
 
-	runtime, err := be.prepareGuestRuntime(bundle{}, req)
+	runtime, err := be.prepareGuestRuntime(bundle{}, req, defaultConsoleSize)
 	if runtime.TempDir != "" {
 		t.Cleanup(func() { _ = os.RemoveAll(runtime.TempDir) })
 	}

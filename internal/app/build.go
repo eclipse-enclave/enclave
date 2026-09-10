@@ -596,7 +596,7 @@ func buildImage(ctx context.Context, paths model.Paths, host model.Host, combine
 		model.LabelBuilt:   buildTimestamp,
 	}
 
-	buildxCacheTo, err := resolveBuildxCacheTo(opts)
+	buildxCacheFrom, buildxCacheTo, err := resolveBuildxCache(opts)
 	if err != nil {
 		return fmt.Errorf("prepare buildx cache directory: %w", err)
 	}
@@ -610,7 +610,7 @@ func buildImage(ctx context.Context, paths model.Paths, host model.Host, combine
 		BuildArgs:         buildArgs,
 		Labels:            labels,
 		CacheFrom:         cacheFrom,
-		BuildxCacheFrom:   resolveBuildxCacheFrom(opts),
+		BuildxCacheFrom:   buildxCacheFrom,
 		BuildxCacheTo:     buildxCacheTo,
 		Progress:          opts.Progress,
 	}
@@ -1225,4 +1225,24 @@ func writeAgentUpdateStateValue(stateDir string, stateFile string, value string)
 		return err
 	}
 	return nil
+}
+
+// resolveBuildxCache returns the buildx cache import and export specs for the
+// build. podman has no buildx cache import or export (its --cache-from and
+// --cache-to take remote repositories), so under podman the specs are dropped
+// with a warning instead of failing the build; podman's local layer cache
+// still applies.
+func resolveBuildxCache(opts model.BuildOptions) ([]string, []string, error) {
+	if docker.IsPodman() {
+		if len(cleanBuildxCacheSpecs(opts.BuildxCacheFrom)) > 0 || len(cleanBuildxCacheSpecs(opts.BuildxCacheTo)) > 0 || strings.TrimSpace(opts.BuildxCacheDir) != "" {
+			logx.Warnf("podman has no buildx cache import or export; ignoring --buildx-cache-dir, --buildx-cache-from, and --buildx-cache-to")
+		}
+		return nil, nil, nil
+	}
+	from := resolveBuildxCacheFrom(opts)
+	to, err := resolveBuildxCacheTo(opts)
+	if err != nil {
+		return nil, nil, err
+	}
+	return from, to, nil
 }

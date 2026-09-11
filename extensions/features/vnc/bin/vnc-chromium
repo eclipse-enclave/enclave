@@ -1,0 +1,38 @@
+#!/bin/bash
+# Copyright (C) 2026 EclipseSource GmbH and others.
+#
+# This program and the accompanying materials are made available under the
+# terms of the MIT License, which is available in the project root.
+#
+# SPDX-License-Identifier: MIT
+
+# vnc-chromium is the single Chromium invocation shared by vnc-supervisor and
+# vnc-open, so the browser behaves the same no matter which path started it.
+#
+# The container is the sandbox: Chromium's own sandbox needs unprivileged user
+# namespaces, which the default Docker seccomp profile blocks, so it runs with
+# --no-sandbox and everything it loads egresses via the session gateway. The
+# background-networking/component-update/sync switches keep Chromium's own
+# phone-home traffic (component updater, safe browsing, optimization guide)
+# from hammering gateway-denied domains and filling the network log.
+#
+# Arguments are passed after `--` so a caller-supplied string that happens to
+# start with a dash lands as a URL rather than as a Chromium switch: vnc-open,
+# the only caller, is reachable as $BROWSER and as the http/https scheme
+# handler, so its argument is not always under this feature's control.
+set -u
+
+exec chromium \
+    --no-sandbox \
+    --disable-gpu \
+    --disable-dev-shm-usage \
+    --disable-background-networking \
+    --disable-component-update \
+    --disable-sync \
+    --no-first-run \
+    --no-default-browser-check \
+    --hide-crash-restore-bubble \
+    --password-store=basic \
+    --start-maximized \
+    --user-data-dir=/tmp/enclave-vnc/chromium \
+    -- "$@"

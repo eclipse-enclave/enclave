@@ -49,6 +49,27 @@ boundary.
 The experimental QEMU backend has no restricted-egress implementation. It runs
 with unrestricted networking and without gateway-side HTTP secret release.
 
+## Published ports and contained displays
+
+The allowlist governs egress only. Ports published by `-p`, by a tool profile,
+or by an enabled feature open an inbound path into the session and are outside
+that policy. Published ports bind the host loopback by default, but under
+network isolation they are bound on the session's gateway container, which sits
+on a shared Docker bridge: a service listening on all interfaces inside the
+namespace is also reachable from other containers on that bridge, including
+other sessions' gateways. Whatever the service itself enforces is the only gate
+at that layer.
+
+A published port that carries an interactive display rather than data widens
+this further. The `vnc` feature serves the session's X display over RFB, so a
+client that reaches the port and passes VncAuth drives a real browser running as
+the sandbox user, with the session's filesystem reachable through it and the X
+clipboard bridged in both directions. Treat the per-session VNC password as the
+whole boundary and keep it to trusted local viewers. A viewer also cannot vouch
+for what the streamed page shows; the content is agent-influenced. See the
+[vnc feature README](../../extensions/features/vnc/README.md) for the
+feature-specific residual risks.
+
 ## Secrets
 
 Host environment variables are not passed unless declared by an enabled

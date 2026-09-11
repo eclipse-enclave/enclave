@@ -326,9 +326,13 @@ setup_ide_bridge() {
         return
     fi
 
-    ide_host_ip=$(getent hosts host.docker.internal 2>/dev/null | awk '{print $1}')
+    # Only IPv4: these rules go into iptables (not ip6tables), and on Docker
+    # Desktop `getent hosts` returns the IPv6 entry for host.docker.internal,
+    # which iptables rejects as a bad address. Take the first address only --
+    # getent prints one line per address.
+    ide_host_ip=$(getent ahostsv4 host.docker.internal 2>/dev/null | awk '{print $1; exit}')
     if [ -z "$ide_host_ip" ]; then
-        ide_host_ip=$(awk '/host\.docker\.internal/ {print $1; exit}' /etc/hosts)
+        ide_host_ip=$(awk '$1 ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/ && /host\.docker\.internal/ {print $1; exit}' /etc/hosts)
     fi
     if [ -z "$ide_host_ip" ]; then
         log "IDE bridge: cannot resolve host.docker.internal; disabled"

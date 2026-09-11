@@ -8,9 +8,9 @@
 package gateway
 
 import (
+	"bytes"
 	"context"
 	"fmt"
-	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -162,6 +162,28 @@ func needsRebuild(paths model.Paths, profile model.Profile, allowlistPath string
 	return storedHash != buildHash, buildHash, nil
 }
 
+// gatewayBuildErrorLines is how many trailing lines of engine output a failed
+// gateway build reports; the build otherwise runs silently.
+const gatewayBuildErrorLines = 20
+
+// buildOutputTail renders the last n non-empty lines of build output as an
+// indented block for an error message, or nothing when there is no output.
+func buildOutputTail(output string, n int) string {
+	var lines []string
+	for _, line := range strings.Split(output, "\n") {
+		if strings.TrimSpace(line) != "" {
+			lines = append(lines, line)
+		}
+	}
+	if len(lines) == 0 {
+		return ""
+	}
+	if len(lines) > n {
+		lines = lines[len(lines)-n:]
+	}
+	return "\nbuild output:\n  " + strings.Join(lines, "\n  ")
+}
+
 func buildGatewayImage(ctx context.Context, paths model.Paths, profile model.Profile, allowlistPath string, buildHash string) error {
 	logx.Infof("Building gateway image for %s.", profile.Name)
 
@@ -188,12 +210,15 @@ func buildGatewayImage(ctx context.Context, paths model.Paths, profile model.Pro
 			model.GatewayLabelAgent: profile.Name,
 		},
 	}
-	if err := docker.Build(ctx, req, io.Discard); err != nil {
+	var output bytes.Buffer
+	if err := docker.Build(ctx, req, &output); err != nil {
 		// Some Docker BuildKit setups fail DNS resolution in the default build
 		// network for Alpine index fetches. Retry once with host build network.
 		req.NetworkMode = "host"
-		if retryErr := docker.Build(ctx, req, io.Discard); retryErr != nil {
-			return fmt.Errorf("failed to build gateway image: %w (retry with host build network failed: %v)", err, retryErr)
+		var retryOutput bytes.Buffer
+		if retryErr := docker.Build(ctx, req, &retryOutput); retryErr != nil {
+			return fmt.Errorf("failed to build gateway image: %w (retry with host build network failed: %v)%s",
+				err, retryErr, buildOutputTail(retryOutput.String(), gatewayBuildErrorLines))
 		}
 		logx.Warnf("Gateway build failed on default build network; retry with host build network succeeded")
 	}

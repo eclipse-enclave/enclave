@@ -405,3 +405,14 @@ func TestNeedsRebuildHashChangesWhenGatewayProxySourceChanges(t *testing.T) {
 		t.Fatalf("build hash did not change after gateway proxy source update: %q", firstHash)
 	}
 }
+
+func TestBuildOutputTailKeepsLastLines(t *testing.T) {
+	if got := buildOutputTail("  \n\n", 3); got != "" {
+		t.Fatalf("blank output must render nothing, got %q", got)
+	}
+	got := buildOutputTail("one\ntwo\n\nthree\nfour\n", 2)
+	want := "\nbuild output:\n  three\n  four"
+	if got != want {
+		t.Fatalf("buildOutputTail = %q, want %q", got, want)
+	}
+}

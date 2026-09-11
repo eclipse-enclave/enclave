@@ -1,0 +1,43 @@
+Aug 13 12:57:13 dnsmasq[455]: started, version 2.91 cachesize 150
+Aug 13 12:57:13 dnsmasq[455]: read /etc/hosts - 9 names
+Aug 13 12:57:14 dnsmasq[455]: query[A] api.anthropic.com from 127.0.0.1
+Aug 13 12:57:14 dnsmasq[455]: forwarded api.anthropic.com to 8.8.8.8
+Aug 13 12:57:14 dnsmasq[455]: query[A] api.anthropic.com from 127.0.0.1
+Aug 13 12:57:14 dnsmasq[455]: ipset add enclave_allowed 160.79.104.10 api.anthropic.com
+Aug 13 12:57:14 dnsmasq[455]: reply api.anthropic.com is 160.79.104.10
+Aug 13 12:57:14 dnsmasq[455]: query[AAAA] api.anthropic.com from 127.0.0.1
+Aug 13 12:57:14 dnsmasq[455]: forwarded api.anthropic.com to 8.8.8.8
+Aug 13 12:57:14 dnsmasq[455]: query[A] api.anthropic.com from 127.0.0.1
+Aug 13 12:57:14 dnsmasq[455]: cached api.anthropic.com is 160.79.104.10
+Aug 13 12:57:14 dnsmasq[455]: ipset add enclave_allowed 2607:6bc0::10 api.anthropic.com
+Aug 13 12:57:14 dnsmasq[455]: reply api.anthropic.com is 2607:6bc0::10
+Aug 13 12:57:14 dnsmasq[455]: query[A] api.anthropic.com from 127.0.0.1
+Aug 13 12:57:14 dnsmasq[455]: cached api.anthropic.com is 160.79.104.10
+Aug 13 12:57:14 dnsmasq[455]: query[A] github.com from 127.0.0.1
+Aug 13 12:57:14 dnsmasq[455]: forwarded github.com to 8.8.8.8
+Aug 13 12:57:14 dnsmasq[455]: query[AAAA] github.com from 127.0.0.1
+Aug 13 12:57:14 dnsmasq[455]: forwarded github.com to 8.8.8.8
+Aug 13 12:57:14 dnsmasq[455]: query[AAAA] api.anthropic.com from 127.0.0.1
+Aug 13 12:57:14 dnsmasq[455]: cached api.anthropic.com is 2607:6bc0::10
+Aug 13 12:57:14 dnsmasq[455]: query[A] api.anthropic.com from 127.0.0.1
+Aug 13 12:57:14 dnsmasq[455]: cached api.anthropic.com is 160.79.104.10
+Aug 13 12:57:14 dnsmasq[455]: reply github.com is NODATA-IPv6
+Aug 13 12:57:15 dnsmasq[455]: ipset add enclave_allowed 140.82.121.3 github.com
+Aug 13 12:57:15 dnsmasq[455]: reply github.com is 140.82.121.3
+Aug 13 12:57:15 dnsmasq[455]: query[AAAA] api.github.com from 127.0.0.1
+Aug 13 12:57:30 dnsmasq[455]: /etc/hosts localhost is ::1
+Aug 13 12:57:31 dnsmasq[455]: query[A] localhost from 127.0.0.1
+Aug 13 12:57:31 dnsmasq[455]: /etc/hosts localhost is 127.0.0.1
+Aug 13 12:57:31 dnsmasq[455]: query[AAAA] localhost from 127.0.0.1
+Aug 13 12:57:31 dnsmasq[455]: /etc/hosts localhost is ::1
+Aug 13 12:57:32 dnsmasq[455]: query[A] telemetry.example.com from 127.0.0.1
+Aug 13 12:57:32 dnsmasq[455]: config telemetry.example.com is NXDOMAIN
+Aug 13 12:57:32 dnsmasq[455]: query[AAAA] telemetry.example.com from 127.0.0.1
+Aug 13 12:57:32 dnsmasq[455]: config telemetry.example.com is NXDOMAIN
+Aug 13 12:57:32 dnsmasq[455]: query[A] does-not-exist.invalid from 127.0.0.1
+Aug 13 12:57:32 dnsmasq[455]: config does-not-exist.invalid is NXDOMAIN
+Aug 13 12:57:32 dnsmasq[455]: query[AAAA] does-not-exist.invalid from 127.0.0.1
+Aug 13 12:57:32 dnsmasq[455]: config does-not-exist.invalid is NXDOMAIN
+Aug 13 12:57:32 dnsmasq[455]: query[AAAA] api.anthropic.com from 127.0.0.1
+Aug 13 12:57:32 dnsmasq[455]: cached api.anthropic.com is 2607:6bc0::10
+Aug 13 12:57:32 dnsmasq[455]: query[A] api.anthropic.com from 127.0.0.1

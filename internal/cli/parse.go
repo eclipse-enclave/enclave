@@ -28,14 +28,15 @@ import (
 const userCommandGroupID = "user-commands"
 
 type Result struct {
-	Options      model.Options
-	Action       string
-	HelpShown    bool
-	Sources      model.OptionSources
-	ConfigView   model.ConfigView
-	VersionJSON  bool
-	VersionShown bool
-	ReviewTarget string
+	Options        model.Options
+	Action         string
+	HelpShown      bool
+	Sources        model.OptionSources
+	ConfigView     model.ConfigView
+	NetworkLogView model.NetworkLogView
+	VersionJSON    bool
+	VersionShown   bool
+	ReviewTarget   string
 	// UserCommand is set when Action == "user-command": a user-defined
 	// subcommand matched the first positional argument. UserCommandArgs holds
 	// every argument after the command name, verbatim.

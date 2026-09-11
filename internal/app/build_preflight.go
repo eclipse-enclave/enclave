@@ -17,6 +17,7 @@ import (
 	"enclave/internal/docker"
 	"enclave/internal/logx"
 	"enclave/internal/model"
+	"enclave/internal/util"
 )
 
 var dockerRootFreeSpace = realDockerRootFreeSpace
@@ -70,10 +71,10 @@ func checkRuntimeImageBuildPreflight(ctx context.Context) error {
 		return nil
 	}
 	if freeBytes < runtimeImageDockerStorageFailBytes {
-		return fmt.Errorf("docker storage is critically low: only %s free under %s; aborting before image build. Free space or prune Docker storage, then retry", formatBytes(freeBytes), rootDir)
+		return fmt.Errorf("docker storage is critically low: only %s free under %s; aborting before image build. Free space or prune Docker storage, then retry", util.FormatBytes(freeBytes), rootDir)
 	}
 	if freeBytes < runtimeImageDockerStorageWarnBytes {
-		logx.Warnf("Docker storage looks low: %s free under %s; the image build may fail if Docker needs to pull or expand additional layers", formatBytes(freeBytes), rootDir)
+		logx.Warnf("Docker storage looks low: %s free under %s; the image build may fail if Docker needs to pull or expand additional layers", util.FormatBytes(freeBytes), rootDir)
 	}
 	return nil
 }

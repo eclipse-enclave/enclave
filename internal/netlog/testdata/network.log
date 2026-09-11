@@ -1,0 +1,10 @@
+{"ts":"2026-08-13T12:04:30.000Z","type":"session","verdict":"info","rule":"start","session":"enclave-demo-claude"}
+{"ts":"2026-08-13T12:04:31.412Z","type":"http","method":"GET","domain":"api.anthropic.com","path":"/v1/messages","port":443,"status":200,"resp_bytes":4312,"verdict":"pass","rule":"allowlist","session":"enclave-demo-claude"}
+Aug 13 12:04:32 dnsmasq[14]: query[A] github.com from 172.18.0.3
+{"ts":"2026-08-13T12:04:33.100Z","type":"tcp","domain":"github.com","port":443,"verdict":"pass","rule":"allowlist","session":"enclave-demo-claude"}
+{"ts":"2026-08-13T12:04:35.882Z","type":"dns","domain":"telemetry.example.com","verdict":"deny","rule":"nxdomain","session":"enclave-demo-claude"}
+Aug 13 12:04:35 dnsmasq[14]: config telemetry.example.com is NXDOMAIN
+{"ts":"2026-08-13T12:04:36.200Z","type":"http","method":"GET","domain":"evil.test","path":"/x","port":443,"status":403,"verdict":"deny","rule":"secret-injection","session":"enclave-demo-claude"}
+truncated
+{"ts":"2026-08-13T12:04:41.000Z","type":"http","method":"POST","domain":"api.github.com","path":"/graphql","port":443,"status":200,"req_bytes":812,"resp_bytes":18432,"verdict":"pass","rule":"allowlist","session":"enclave-demo-claude"}
+{"ts":"2026-08-13T12:04:42.000Z","type":"http","method":

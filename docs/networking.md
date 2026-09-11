@@ -4,7 +4,7 @@
 
 By default, network access is restricted via a gateway sidecar (dnsmasq + transparent proxy). DNS only resolves allowlisted domains and the proxy enforces Host/SNI against the same allowlist. This prevents agents from making arbitrary outbound requests.
 
-Coarse pass/deny audit events are logged to `~/.local/state/enclave/projects/<project-hash>/<tool>/logs/network.log`.
+Pass/deny audit events are logged to `~/.local/state/enclave/projects/<project-hash>/<tool>/logs/network.log`. Read them with [`enclave network log`](#reading-the-network-log). The default `coarse` mode records one event per TLS connection rather than one per request, so read [Coverage and granularity](#coverage-and-granularity) before drawing conclusions from what the log does or does not contain.
 
 For request-level logging, enable:
 
@@ -12,7 +12,7 @@ For request-level logging, enable:
 enclave --network-log=requests
 ```
 
-This forces allowlisted HTTPS traffic through the gateway MITM proxy so the gateway can emit HTTP-style request audit events for both HTTP and HTTPS. Some clients that pin certificates or use custom trust stores may fail in this mode.
+This forces allowlisted HTTPS traffic through the gateway MITM proxy so the gateway can emit HTTP-style request audit events for both HTTP and HTTPS, instead of one event per TLS connection. Some clients that pin certificates or use custom trust stores may fail in this mode.
 
 To disable all restrictions:
 
@@ -21,6 +21,95 @@ enclave --allow-all-network
 ```
 
 The experimental `qemu` backend currently has no restricted-egress implementation, so it always runs with all outbound network allowed. Selecting it implies `--allow-all-network` automatically and prints a notice; passing `--allow-domain` (which would require restricted egress) is rejected.
+
+## Reading the Network Log
+
+```bash
+enclave network log                        # Events of the current project and tool
+enclave network log --follow               # Stream new events as they arrive
+enclave network log --summary              # Per-domain aggregate
+enclave network log --verdict deny         # Only what was blocked
+enclave network log --domain '*.github.com' --since 10m
+enclave network log --json | jq            # The integration contract
+```
+
+The log is read from disk, so events of a session that has already exited are
+still available. `--session <container>` reads one session's events and
+`--all-running` merges every running gateway's log in timestamp order; only
+`--all-running` needs Docker. `--session` uses it when reachable, so a session of
+another project can be named, and otherwise reads this project's log. A name that
+appears on no event is an error rather than an empty result. Concurrent sessions
+of the same project and tool append to one file, so `--session` also filters on
+the `session` field: events written before session stamping existed carry none
+and are not shown.
+
+`--since` takes a duration (`10m`), an RFC3339 timestamp, or `session`, which
+resolves to the start of the most recent session in scope and therefore needs a
+scope covering exactly one session. Because it anchors on a session boundary it
+also limits the output to that session's events, so a concurrent session sharing
+the file does not bleed in. Combined with `--session` it resolves to that
+session's own start.
+
+Output is the aligned human form. `--json` is the machine contract: on its own
+it emits the raw JSONL event stream verbatim, and with `--summary` it emits the
+aggregate as a single JSON object. Events that never carried a host name, such as
+a TLS connection denied at the ClientHello, are grouped under `(no domain)` (an
+empty `domain` in JSON), so the summary totals match what `--verdict deny`
+prints. Colour follows `NO_COLOR` and `ENCLAVE_COLOR`, and is off when stdout is
+not a terminal.
+
+### What is recorded
+
+| Type | Written by | Notes |
+|------|-----------|-------|
+| `http` | MITM proxy | One event per request, with method, path, status and byte counts. Query strings are never logged: only the URL path is recorded. Written for every plaintext HTTP request, and for HTTPS only where the proxy terminates TLS |
+| `tcp` | MITM proxy | One event per TLS connection, written at the ClientHello with the SNI host, the verdict and the matched rule. The requests carried inside the connection are not visible |
+| `dns` | DNS audit translator | One event per denied or failed lookup, with `rule` naming the condition (`nxdomain` for a domain blackholed by policy, `upstream-servfail`, `upstream-refused` or `upstream-nxdomain` for an upstream failure) |
+| `session` | Host, at gateway start | A boundary marker naming the session. Not an audit event: excluded from `--summary` and never matched by `--verdict`, `--domain` or `--type` |
+
+A blocked lookup usually produces two `dns` events, one for the A query and one
+for the AAAA query, because the resolver asks for both. `NODATA` answers are not
+recorded: dnsmasq returns `NODATA-IPv6` for every allowlisted host without an
+IPv6 record, so recording it would report allowed domains as denied.
+
+### Coverage and granularity
+
+The log records policy decisions and connections, not traffic volume. Three
+limits matter before a quiet log is read as a quiet session:
+
+- **Successful DNS lookups are never recorded.** Only denied and failed lookups
+  produce a `dns` event, and dnsmasq answers repeat lookups from its cache
+  without going upstream at all.
+- **In `coarse` mode an HTTPS connection is one `tcp` event, not one per
+  request.** The proxy reads the ClientHello, records the SNI host, and tunnels
+  the rest through without decrypting it. A client holding a long-lived HTTP/2
+  connection — an agent talking to its model API, for example — produces a
+  single event when the connection is opened and nothing for the hundreds of
+  requests that follow. Short-lived connections (a `git fetch`, a CLI call, a
+  poller reconnecting) produce one event each, so they dominate a coarse log
+  even when they carry far less traffic.
+- **`http` events for HTTPS require the proxy to terminate TLS.** In `coarse`
+  mode that happens only for hosts covered by a declared secret's HTTP release
+  rules, where the gateway has to rewrite a header anyway, and only when that
+  secret was actually resolved for the session. A tool authenticated with an
+  OAuth token rather than an API key therefore has no release rule for its API
+  host and produces no request-level events for it.
+
+Run the session with `--network-log=requests` to force MITM for every
+allowlisted HTTPS host and get an `http` event per request. In either mode, SSH
+on port 22 bypasses the HTTP/TLS proxy and is never recorded.
+
+### Rotation
+
+At session start, a log larger than 32 MB is copied to `network.log.1`,
+replacing any previous generation, and then truncated in place. The reader reads
+`.1` first, so the boundary is invisible. Truncating
+rather than renaming keeps the file a running gateway has bind-mounted, so a
+session that is already going on keeps writing where readers can see it. A
+session never rotates its own log, so a single long-running session can grow past
+the cap, and worst-case disk use is roughly twice the cap per project and tool.
+Concurrent session starts serialize on a `network.log.lock` file next to the log,
+so two of them cannot discard the generation the other just wrote.
 
 ## Managing the Network Policy
 

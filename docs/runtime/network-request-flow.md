@@ -18,6 +18,7 @@ sequenceDiagram
         participant DNS as dnsmasq
         participant FW as iptables + ipset
         participant Proxy as enclave-gateway-proxy
+        participant Audit as enclave-gateway-proxy<br/>-dns-audit
         participant Log as network.log<br/>(JSONL)
     end
     box External
@@ -30,6 +31,8 @@ sequenceDiagram
     Entry->>DNS: Start with rendered allowlist config
     Entry->>FW: OUTPUT DROP + local DNS allow<br/>NAT redirect 80/443 to 8080/8443
     Entry->>Proxy: Start transparent proxy
+    Entry->>Audit: Start DNS audit translator on the dnsmasq log
+    Host->>Log: Rotate above the size cap<br/>and append session start marker
 
     Note over Host,API: HTTPS request
     Tool->>DNS: Resolve api.example.com
@@ -63,8 +66,9 @@ sequenceDiagram
             end
         end
     else Domain not in allowlist
-        DNS-->>Tool: Blocked response
-        Tool->>Log: DNS failure logged
+        DNS-->>Tool: NXDOMAIN from the blackhole
+        DNS->>Audit: dnsmasq log line
+        Audit->>Log: DNS deny (nxdomain)
     end
 
     Note over Tool,Proxy: When secret injection is active, the container sees placeholders only.<br/>Real secrets are released only in-flight for matching host rules.
@@ -78,19 +82,21 @@ sequenceDiagram
 4. TCP connections are gated by firewall rules and redirected to the proxy. The proxy checks host allowlist rules again using HTTP `Host` / TLS `SNI`.
 5. For hosts that match declared secret `release.http` rules, or for all allowlisted HTTPS when `network_log=requests`, the proxy uses TLS MITM before forwarding upstream.
 6. If a placeholder appears on plaintext HTTP or on a host outside that secret rule's `hosts`, the proxy blocks the request with HTTP 403.
-7. `network_log=coarse` writes pass/deny events to `~/.local/state/enclave/projects/<hash>/<tool>/logs/network.log`; `network_log=requests` adds request-level HTTP/HTTPS audit events.
+7. `network_log=coarse` writes pass/deny events to `~/.local/state/enclave/projects/<hash>/<tool>/logs/network.log`: one `tcp` event per TLS connection at the ClientHello, and an `http` event per request for plaintext HTTP and for the MITM'd hosts of step 5. `network_log=requests` adds request-level HTTP/HTTPS audit events for every allowlisted host. The log is JSONL throughout: the proxy appends HTTP and TCP events, a separate `enclave-gateway-proxy -dns-audit` process translates dnsmasq's own log into `dns` events (so DNS denials are recorded even when the proxy is disabled), and the host appends a session marker at gateway start. Read it with `enclave network log`.
 
 ## Why This Works
 
 - Real API key values for mapped secrets are never exposed inside the tool container environment.
 - Egress checks happen at multiple layers (DNS allowlist, firewall/IP set, proxy host checks).
 - Gateway reload/startup failures fail closed rather than silently allowing unrestricted egress.
-- Host-side network logs preserve an auditable record of pass/deny decisions.
+- Host-side network logs preserve an auditable record of pass/deny decisions, tagged with the session that produced them and rotated at session start rather than truncated.
+- Logged HTTP paths never include the query string, so credentials passed as query parameters cannot leak into the log.
 
 ## Scope and Limits
 
 - In unrestricted mode (`--allow-all-network` or policy mode `unrestricted`), the gateway is bypassed and HTTP secret release is disabled.
 - `--network-log=requests` enables request-level MITM logging in restricted mode.
+- The log records decisions, not traffic volume. In `coarse` mode a reused TLS connection produces a single `tcp` event no matter how many requests it carries, and successful DNS lookups are never recorded, so an absence of events is not evidence of an absence of traffic. See [Coverage and granularity](../networking.md#coverage-and-granularity).
 - Placeholder protection applies only to declared secrets with `release.http` in the selected tool profile or enabled feature manifests.
 - Real secrets are released only on HTTPS requests; plaintext HTTP requests carrying a placeholder are denied.
 - Current secret injection is header-based; file credential mediation is separate work.

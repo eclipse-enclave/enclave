@@ -24,6 +24,7 @@ func networkCommand(res *Result) *cobra.Command {
 
 	cmd.AddCommand(
 		networkStatusCommand(res),
+		networkLogCommand(res),
 		networkPrintCommand(res),
 		networkDiffCommand(res),
 		networkApplyCommand(res),

@@ -19,7 +19,8 @@ func TestMergeOptionSourcesCoversAllFields(t *testing.T) {
 	// Create an override with every field set to SourceCLI (non-default value)
 	override := OptionSources{
 		GlobalOptionSources: GlobalOptionSources{
-			Verbose: SourceCLI,
+			VNCViewer: SourceCLI,
+			Verbose:   SourceCLI,
 		},
 		RunOptionSources: RunOptionSources{
 			Tool:             SourceCLI,

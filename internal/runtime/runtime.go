@@ -184,6 +184,12 @@ func resolveHandler(handler model.RuntimeHandler) model.RuntimeHandler {
 }
 
 func (r *Runtime) Execute() error {
+	releaseStartLock, err := r.acquireSessionStartLock()
+	if err != nil {
+		return err
+	}
+	defer releaseStartLock()
+
 	ctx, err := r.prepareExecution()
 	if err != nil {
 		return err
@@ -193,7 +199,25 @@ func (r *Runtime) Execute() error {
 	}
 	// The backend syncs auth files from the config store to the shared auth
 	// store after the container exits, per the request's AuthSync intent.
-	return r.runContainer(ctx)
+	return r.runContainer(ctx, releaseStartLock)
+}
+
+func (r *Runtime) acquireSessionStartLock() (func(), error) {
+	lockPath := config.HostLockPath(r.host.Home, r.sessionStartLockName())
+	release, err := util.AcquireFileLock(lockPath, func() {
+		logx.Infof("Waiting for another enclave session to finish starting.")
+	})
+	if err != nil {
+		return nil, fmt.Errorf("acquire session start lock: %w", err)
+	}
+	return release, nil
+}
+
+// Named sessions also share the project/tool gateway config bundle, and
+// explicit numeric names can collide with automatic allocation. Keep all
+// starts in that scope serialized until the container is running.
+func (r *Runtime) sessionStartLockName() string {
+	return "session-start-" + util.HashString(r.baseContainerName()) + ".lock"
 }
 
 func (r *Runtime) prepareExecution() (*ExecutionContext, error) {
@@ -756,14 +780,21 @@ func boundHostPort(bindings []backend.PortMapping, containerPort string) string 
 	return ""
 }
 
-func (r *Runtime) runContainer(ctx *ExecutionContext) error {
+func (r *Runtime) runContainer(ctx *ExecutionContext, releaseStartLock func()) error {
 	be := r.backend
 	if be == nil {
 		return fmt.Errorf("runtime backend is not configured")
 	}
 	restoreTint := termtint.Begin(r.run.SessionTint)
 	defer restoreTint()
-	_, err := be.Run(context.Background(), r.backendRequest(ctx, false, true), backend.AttachIO{TTY: true, OnStarted: func() { r.announcePublishedPorts(ctx.ContainerName) }})
+	// The session-start lock must be released via OnStarted, not after Run
+	// returns: Run blocks for the whole foreground session, and holding the
+	// lock that long would stall every other session start for this tool and
+	// project. The deferred release in Execute only backstops error paths.
+	_, err := be.Run(context.Background(), r.backendRequest(ctx, false, true), backend.AttachIO{TTY: true, OnStarted: func() {
+		releaseStartLock()
+		r.announcePublishedPorts(ctx.ContainerName)
+	}})
 	return err
 }
 

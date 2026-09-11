@@ -99,3 +99,59 @@ func TestNextSessionNameUsesNamePrefixForLegacyContainers(t *testing.T) {
 		t.Fatalf("legacy scan should not require labels, got filter %+v", gotFilter)
 	}
 }
+
+func TestSessionStartLockNameCoordinatesSharedStartupState(t *testing.T) {
+	r := Runtime{
+		profile: model.Profile{Name: "claude"},
+		project: model.Project{Hash: "abc123abc123"},
+	}
+	named := r
+	named.run.SessionName = "task-a"
+	sharedLock := named.sessionStartLockName()
+	for _, tc := range []struct {
+		name string
+		run  model.RunOptions
+	}{
+		{name: "unnamed"},
+		{name: "background", run: model.RunOptions{Background: true}},
+		{name: "same name", run: model.RunOptions{SessionName: "Task A"}},
+		{name: "different name shares gateway config", run: model.RunOptions{SessionName: "task-b"}},
+		{name: "named background", run: model.RunOptions{Background: true, SessionName: "task-b"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			other := r
+			other.run = tc.run
+			if got := other.sessionStartLockName(); got != sharedLock {
+				t.Fatalf("start lock = %q, want the shared project/tool lock %q", got, sharedLock)
+			}
+		})
+	}
+
+	otherTool := r
+	otherTool.profile.Name = "codex"
+	if otherTool.sessionStartLockName() == sharedLock {
+		t.Fatal("different tools must not share a start lock")
+	}
+	otherProject := r
+	otherProject.project.Hash = "def456def456"
+	if otherProject.sessionStartLockName() == sharedLock {
+		t.Fatal("different projects must not share a start lock")
+	}
+}
+
+func TestSessionStartLockNameCoversExplicitNumericCollision(t *testing.T) {
+	auto := Runtime{
+		profile: model.Profile{Name: "claude"},
+		project: model.Project{Hash: "abc123abc123"},
+		run:     model.RunOptions{Background: true},
+		backend: &fakeBackend{},
+	}
+	named := auto
+	named.run.SessionName = "1"
+	if auto.containerName() != named.containerName() {
+		t.Fatal("expected automatic and explicit names to select the same container")
+	}
+	if auto.sessionStartLockName() != named.sessionStartLockName() {
+		t.Fatal("starts targeting the same container must share a start lock")
+	}
+}

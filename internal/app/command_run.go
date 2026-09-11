@@ -268,39 +268,47 @@ func ensureRuntimeImage(input *CommandInput, opts model.Options, buildCfg *build
 	// A forced image rebuild must also invalidate the selected tool install
 	// layers; otherwise BuildKit can reproduce a known-bad image entirely from
 	// cache. Automatic interval-based refresh still applies to normal runs.
-	buildPlan, err := resolveRuntimeImageBuildPlan(input.Ctx.Paths, resolved, opts.BuildOptions, opts.Tool, host.Home, opts.ForceRebuild, time.Now().UTC())
+	// One memoized probe serves both this resolve and the in-lock recheck.
+	probe := memoizeToolFingerprintProbe(probeToolUpdateFingerprint)
+	buildPlan, err := resolveRuntimeImageBuildPlan(input.Ctx.Paths, resolved, opts.BuildOptions, opts.Tool, host.Home, opts.ForceRebuild, time.Now().UTC(), probe)
 	if err != nil {
 		logx.Errorf("%v", err)
 		return buildConfig{}, 1
 	}
 	if opts.ForceRebuild || buildPlan.NeedsRebuild() {
-		if code := buildOrReuseRuntimeImage(input, opts, host, resolved, buildPlan); code != 0 {
+		if code := buildOrReuseRuntimeImage(input, opts, host, resolved, probe); code != 0 {
 			return buildConfig{}, code
 		}
 	}
 	return resolved, 0
 }
 
-func buildOrReuseRuntimeImage(input *CommandInput, opts model.Options, host model.Host, resolved buildConfig, buildPlan runtimeImageBuildPlan) int {
-	reused := false
-	if !opts.ForceRebuild && buildPlan.StructuralRebuild && !buildPlan.AgentUpdates.NeedsRebuild {
-		ok, reuseErr := reuseRuntimeImageByContentHash(context.Background(), resolved.ImageName, buildPlan.CombinedHash)
-		if reuseErr != nil {
-			logx.Debugf("content-cache lookup failed: %v", reuseErr)
+func buildOrReuseRuntimeImage(input *CommandInput, opts model.Options, host model.Host, resolved buildConfig, probe toolFingerprintProbe) int {
+	resolveBuildPlan := func() (runtimeImageBuildPlan, error) {
+		return resolveRuntimeImageBuildPlan(input.Ctx.Paths, resolved, opts.BuildOptions, opts.Tool, host.Home, opts.ForceRebuild, time.Now().UTC(), probe)
+	}
+	executeBuildPlan := func(buildPlan runtimeImageBuildPlan) error {
+		reused := false
+		if !opts.ForceRebuild && buildPlan.StructuralRebuild && !buildPlan.AgentUpdates.NeedsRebuild {
+			ok, reuseErr := reuseRuntimeImageByContentHash(context.Background(), resolved.ImageName, buildPlan.CombinedHash)
+			if reuseErr != nil {
+				logx.Debugf("content-cache lookup failed: %v", reuseErr)
+			}
+			reused = ok
 		}
-		reused = ok
-	}
-	if reused {
-		return 0
-	}
-	if !opts.ForceRebuild {
-		if buildPlan.StructuralRebuild {
-			logx.Infof("Build inputs changed, rebuilding automatically.")
-		} else {
-			logx.Infof("Agent update interval elapsed, rebuilding automatically.")
+		if reused {
+			return nil
 		}
+		if !opts.ForceRebuild {
+			if buildPlan.StructuralRebuild {
+				logx.Infof("Build inputs changed, rebuilding automatically.")
+			} else {
+				logx.Infof("Agent update interval elapsed, rebuilding automatically.")
+			}
+		}
+		return buildImage(context.Background(), input.Ctx.Paths, host, buildPlan.CombinedHash, resolved, opts.BuildOptions, opts.Tool, buildPlan.AgentUpdates)
 	}
-	if err := buildImage(context.Background(), input.Ctx.Paths, host, buildPlan.CombinedHash, resolved, opts.BuildOptions, opts.Tool, buildPlan.AgentUpdates); err != nil {
+	if err := coordinateRuntimeImageBuild(host.Home, resolved.ImageName, opts.ForceRebuild, resolveBuildPlan, executeBuildPlan); err != nil {
 		logx.Errorf("%v", err)
 		return 1
 	}

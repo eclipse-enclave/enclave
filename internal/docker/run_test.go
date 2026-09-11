@@ -9,6 +9,7 @@ package docker
 
 import (
 	"context"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -60,6 +61,46 @@ func TestRunInteractiveWithStartHookSkipsHookWhenRunFailsBeforeStart(t *testing.
 	}
 	if called {
 		t.Fatal("did not expect start hook to be called")
+	}
+}
+
+func TestRunWithStartHookWaitsForRunningContainer(t *testing.T) {
+	withRunStartHookStub(t)
+	t.Setenv("STUB_RUN_TOUCH", "1")
+	t.Setenv("STUB_RUN_SLEEP", "0.3")
+	t.Setenv("STUB_RUN_EXIT", "0")
+
+	called := false
+	err := RunWithStartHook(context.Background(), &ContainerConfig{Image: "example:test"}, nil, "session", func() {
+		called = true
+	})
+	if err != nil {
+		t.Fatalf("RunWithStartHook returned error: %v", err)
+	}
+	if !called {
+		t.Fatal("expected start hook to be called")
+	}
+}
+
+func TestRunWithIOAndStartHookWaitsForRunningContainer(t *testing.T) {
+	for _, tty := range []bool{false, true} {
+		t.Run(map[bool]string{false: "without TTY", true: "with TTY"}[tty], func(t *testing.T) {
+			withRunStartHookStub(t)
+			t.Setenv("STUB_RUN_TOUCH", "1")
+			t.Setenv("STUB_RUN_SLEEP", "0.3")
+			t.Setenv("STUB_RUN_EXIT", "0")
+
+			called := false
+			err := RunWithIOAndStartHook(context.Background(), &ContainerConfig{Image: "example:test"}, nil, "session", nil, io.Discard, io.Discard, tty, func() {
+				called = true
+			})
+			if err != nil {
+				t.Fatalf("RunWithIOAndStartHook returned error: %v", err)
+			}
+			if !called {
+				t.Fatal("expected start hook to be called")
+			}
+		})
 	}
 }
 

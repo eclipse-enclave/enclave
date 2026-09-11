@@ -8,6 +8,7 @@
 package config
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -86,5 +87,32 @@ func TestHostPaths(t *testing.T) {
 	}
 	if got, want := HostStoreFeatureAuthDir(home, "myfeature"), filepath.Join(stateRoot, "features", "myfeature", "auth"); got != want {
 		t.Fatalf("HostStoreFeatureAuthDir() = %q, want %q", got, want)
+	}
+}
+
+func TestHostImageBuildLockPathKeysByImage(t *testing.T) {
+	home := "/tmp/test-home"
+	lockPath := HostImageBuildLockPath(home, "enclave-codex:latest")
+	if filepath.Dir(lockPath) != HostLocksDir(home) {
+		t.Fatalf("HostImageBuildLockPath() = %q, want a file under %q", lockPath, HostLocksDir(home))
+	}
+	if got := HostImageBuildLockPath(home, "enclave-codex:latest"); got != lockPath {
+		t.Fatalf("HostImageBuildLockPath() = %q for the same image, want %q", got, lockPath)
+	}
+	if got := HostImageBuildLockPath(home, "enclave-gateway-codex:latest"); got == lockPath {
+		t.Fatalf("HostImageBuildLockPath() = %q for a different image, want a distinct lock", got)
+	}
+}
+
+func TestAcquireImageBuildLockCreatesLockFile(t *testing.T) {
+	unsetXDGEnv(t)
+	home := t.TempDir()
+	release, err := AcquireImageBuildLock(home, "enclave-codex:latest")
+	if err != nil {
+		t.Fatalf("AcquireImageBuildLock returned error: %v", err)
+	}
+	defer release()
+	if _, err := os.Stat(HostImageBuildLockPath(home, "enclave-codex:latest")); err != nil {
+		t.Fatalf("expected lock file to exist: %v", err)
 	}
 }

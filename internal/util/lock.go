@@ -10,25 +10,54 @@ package util
 import (
 	"os"
 	"path/filepath"
+	"sync"
 )
 
-// WithFileLock runs fn while holding an exclusive lock on path.
-func WithFileLock(path string, fn func() error) error {
+// AcquireFileLock acquires an exclusive lock on path and returns an idempotent
+// release function. onWait is called when another process currently holds the
+// lock, immediately before blocking for it.
+func AcquireFileLock(path string, onWait func()) (release func(), err error) {
 	if path == "" {
-		return fn()
+		return func() {}, nil
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return err
+		return nil, err
 	}
 	// #nosec G304 -- lock path is controlled by internal callers.
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
+		return nil, err
+	}
+	locked, err := tryLockFile(file)
+	if err != nil {
+		_ = file.Close()
+		return nil, err
+	}
+	if !locked {
+		if onWait != nil {
+			onWait()
+		}
+		if err := lockFile(file); err != nil {
+			_ = file.Close()
+			return nil, err
+		}
+	}
+	var once sync.Once
+	release = func() {
+		once.Do(func() {
+			_ = unlockFile(file)
+			_ = file.Close()
+		})
+	}
+	return release, nil
+}
+
+// WithFileLock runs fn while holding an exclusive lock on path.
+func WithFileLock(path string, fn func() error) error {
+	release, err := AcquireFileLock(path, nil)
+	if err != nil {
 		return err
 	}
-	defer func() { _ = file.Close() }()
-	if err := lockFile(file); err != nil {
-		return err
-	}
-	defer func() { _ = unlockFile(file) }()
+	defer release()
 	return fn()
 }

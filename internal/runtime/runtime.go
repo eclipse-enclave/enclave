@@ -360,7 +360,9 @@ func (r *Runtime) prepareMounts() (*mountAccumulator, hostGitIdentity, error) {
 	r.addSSHMount(mountArgs)
 	r.addImageInboxMount(mountArgs)
 	r.addSessionMonitorEnv(mountArgs)
-	r.addCacheMounts(mountArgs)
+	if err := r.addCacheMounts(mountArgs); err != nil {
+		return nil, hostGitIdentity{}, err
+	}
 	r.addHistoryMounts(mountArgs)
 	r.addMemoryMounts(mountArgs)
 	r.addToolConfigMounts(mountArgs)
@@ -1167,7 +1169,7 @@ func (r *Runtime) addGitConfigMount(mounts *mountAccumulator) (hostGitIdentity, 
 func (r *Runtime) addSSHMount(mounts *mountAccumulator) {
 	sshDir := config.HostSSHDir(r.host.Home)
 	if util.PathExists(sshDir) {
-		mounts.AddMount(bindMount(sshDir, r.containerHome+"/.ssh", true))
+		mounts.AddMount(bindMount(sshDir, r.containerHome+"/"+model.ContainerSSHDir, true))
 		logx.Infof("SSH directory mounted read-only")
 		return
 	}
@@ -1224,68 +1226,15 @@ func (r *Runtime) addSessionMonitorEnv(mounts *mountAccumulator) {
 	mounts.AddEnv(model.EnvSessionMonitorUser, r.containerUser)
 }
 
-// packageCache maps a package-cache directory under the per-project cache root
-// to its mount point inside the container.
-type packageCache struct {
-	cacheName     string // directory name under the project cache root
-	containerPath string // full path in container
-}
-
-// packageCacheDirs lists the package caches mounted for a session.
-func packageCacheDirs(containerHome string) []packageCache {
-	return []packageCache{
-		{"npm", containerHome + "/.npm"},
-		{"pip", containerHome + "/.cache/pip"},
-		// Go caches
-		{"go", containerHome + "/go/pkg/mod"},
-		{"go-build", containerHome + "/.cache/go-build"},
-		// Rust/Cargo cache
-		{"cargo", containerHome + "/.cargo"},
-		// pnpm store
-		{"pnpm", containerHome + "/.local/share/pnpm"},
-		// uv (Python) cache
-		{"uv", containerHome + "/.cache/uv"},
-		// Yarn cache
-		{"yarn", containerHome + "/.cache/yarn"},
-		// Bun cache
-		{"bun", containerHome + "/.bun"},
-		// nvm installed Node.js versions
-		{"nvm", containerHome + "/.nvm/versions"},
-	}
-}
-
-// addCacheMounts mounts the per-project package caches. The sources live under
-// the platform cache root, so they may vanish at any time; each is created
-// host-side before use and mounted as a disposable directory the backend may
-// recreate, keeping cache deletion a performance cost rather than a failure.
-// A cache that cannot be created is skipped for the same reason: losing cache
-// data must never block a session start.
-func (r *Runtime) addCacheMounts(mounts *mountAccumulator) {
-	pnpmStoreDir := r.containerHome + "/.local/share/pnpm/store"
-	mounts.AddEnv("PNPM_CONFIG_STORE_DIR", pnpmStoreDir)
-
-	if r.run.NoCache {
-		return
-	}
-	cacheDir := config.HostCacheToolProjectDir(r.host.Home, r.profile.Name, r.project.Hash)
-	for _, entry := range packageCacheDirs(r.containerHome) {
-		source := filepath.Join(cacheDir, entry.cacheName)
-		if err := os.MkdirAll(source, 0o700); err != nil {
-			logx.Warnf("Failed to create package cache directory %s: %v", source, err)
-			continue
-		}
-		mounts.AddMount(disposableDirMount(source, entry.containerPath, false))
-	}
-}
-
 func (r *Runtime) addHistoryMounts(mounts *mountAccumulator) {
 	if r.run.NoHistory {
 		return
 	}
 	projectDataDir := config.HostProjectHistoryDir(r.host.Home, r.project.Hash, r.profile.Name)
 	_ = os.MkdirAll(projectDataDir, 0o700)
-	mounts.AddMount(bindMount(projectDataDir, r.containerHome+"/.shell_history", false))
-	mounts.AddEnv("HISTFILE", r.containerHome+"/.shell_history/bash_history")
+	historyDir := r.containerHome + "/" + model.ContainerHistoryDir
+	mounts.AddMount(bindMount(projectDataDir, historyDir, false))
+	mounts.AddEnv("HISTFILE", historyDir+"/bash_history")
 }
 
 func (r *Runtime) addMemoryMounts(mounts *mountAccumulator) {
@@ -1326,24 +1275,13 @@ func (r *Runtime) addToolConfigMounts(mounts *mountAccumulator) {
 	}
 	// Config files created in container that should persist across sessions.
 	// Each file is touched (if not exists) to ensure Docker mounts a file, not a directory.
-	configFiles := []struct {
-		hostName      string // filename in the config directory
-		containerPath string // full path in container
-	}{
-		{"npmrc", r.containerHome + "/.npmrc"},
-		{"yarnrc", r.containerHome + "/.yarnrc"},
-		{"yarnrc.yml", r.containerHome + "/.yarnrc.yml"},
-		{"bunfig.toml", r.containerHome + "/.bunfig.toml"},
-		{"node_repl_history", r.containerHome + "/.node_repl_history"},
-	}
-
 	configDir := config.HostProjectHomeConfigDir(r.host.Home, r.project.Hash, r.profile.Name)
 	_ = os.MkdirAll(configDir, 0o700)
 
-	for _, cf := range configFiles {
-		hostPath := filepath.Join(configDir, cf.hostName)
+	for _, name := range model.ContainerHomeConfigFiles {
+		hostPath := filepath.Join(configDir, strings.TrimPrefix(name, "."))
 		ensureHostPlaceholderFile(hostPath)
-		mounts.AddMount(bindMount(hostPath, cf.containerPath, false))
+		mounts.AddMount(bindMount(hostPath, r.containerHome+"/"+name, false))
 	}
 }
 

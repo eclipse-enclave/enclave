@@ -439,19 +439,15 @@ func Start(ctx context.Context, cfg StartConfig) (StartResult, error) {
 		mounts = appendReadOnlyMount(mounts, cfg.SecretReleaseFile, model.GatewaySecretReleasePath)
 	}
 	if cfg.TLSRootDir != "" {
+		// Only the CA is shared with the host. Leaf certificates are minted
+		// per gateway inside the container: a host-side leaf cache had to be
+		// chowned to the proxy user, and that UID differs between docker
+		// (host UID) and rootless podman (subuid), so a host that runs both
+		// engines left the cache unreadable for the other one.
 		caCertPath := filepath.Join(cfg.TLSRootDir, "ca.crt")
 		caKeyPath := filepath.Join(cfg.TLSRootDir, "ca.key")
-		hostsPath := filepath.Join(cfg.TLSRootDir, "hosts")
-		if err := os.MkdirAll(hostsPath, 0o700); err != nil {
-			return empty, fmt.Errorf("failed to create gateway TLS hosts dir: %w", err)
-		}
 		mounts = appendReadOnlyMount(mounts, caCertPath, model.GatewayTLSCACertPath)
 		mounts = appendReadOnlyMount(mounts, caKeyPath, model.GatewayTLSCAKeyPath)
-		mounts = append(mounts, docker.Mount{
-			Type:   docker.MountTypeBind,
-			Source: hostsPath,
-			Target: model.GatewayTLSHostsPath,
-		})
 	}
 
 	env := []string{}

@@ -670,6 +670,5 @@ const (
 	GatewayTLSRootPath           = "/tls"
 	GatewayTLSCACertPath         = GatewayTLSRootPath + "/ca.crt"
 	GatewayTLSCAKeyPath          = GatewayTLSRootPath + "/ca.key"
-	GatewayTLSHostsPath          = GatewayTLSRootPath + "/hosts"
 	AgentGatewayCACertPath       = "/usr/local/share/ca-certificates/enclave-gateway.crt"
 )

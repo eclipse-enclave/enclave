@@ -32,6 +32,7 @@ The default `config.toml` template configures:
 - Update checks disabled
 - Model personality prompt disabled
 - Fast mode (fast service tier with increased plan usage) opted out
+- Memories enabled
 
 Model selection and reasoning effort are left at the Codex defaults; override
 them via config patches if needed.
@@ -55,6 +56,36 @@ To show branch and usage limits in Codex's TUI status line, add a TOML patch:
 [tui]
 status_line = ["git-branch", "context-remaining", "five-hour-limit", "weekly-limit"]
 ```
+
+## Memory
+
+Enclave's default template enables [Codex memories](https://developers.openai.com/codex/memories)
+with `features.memories = true`. This lets Codex use eligible conversation content
+for memory generation and consumes additional model quota. A full override such
+as `~/.config/enclave/tools/codex/config.toml` replaces the template, so those
+users get the feature setting from their own config (Codex defaults to off).
+
+Enclave isolates memory by config-store key. See [Agent Memory](../../../docs/runtime/stores.md#agent-memory)
+for session reuse, `--no-memory`, ephemeral runs, and cleanup semantics.
+
+To disable memories by default, add a Codex config patch:
+
+```toml
+[features]
+memories = false
+```
+
+For finer control while the feature is enabled, the
+[configuration reference](https://developers.openai.com/codex/config-reference)
+documents `[memories]` settings including `generate_memories` (allow new chats
+as generation inputs), `use_memories` (inject existing memories),
+`disable_on_external_context`, and `max_unused_days`.
+
+Codex consolidates eligible idle conversations in the background. Enclave
+containers exit with the tool, terminating in-flight consolidation; memories
+from one session typically appear during a later session using the same
+store. Use `/memories` inside Codex to control memory use and generation for the
+current conversation.
 
 ## Files
 

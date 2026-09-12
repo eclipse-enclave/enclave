@@ -338,8 +338,9 @@ func resolveSessionActionArgs(action string, profile model.Profile) ([]string, s
 		return nil, "", false, nil
 	}
 
-	continueArgs := compactProfileArgs(profile.ContinueArgs)
-	resumeArgs := compactProfileArgs(profile.ResumeArgs)
+	// Profile arg lists are trimmed and compacted at load.
+	continueArgs := profile.ContinueArgs
+	resumeArgs := profile.ResumeArgs
 
 	switch action {
 	case actionContinue:
@@ -363,22 +364,4 @@ func resolveSessionActionArgs(action string, profile model.Profile) ([]string, s
 		action,
 		profile.Name,
 	)
-}
-
-func compactProfileArgs(args []string) []string {
-	if len(args) == 0 {
-		return nil
-	}
-	result := make([]string, 0, len(args))
-	for _, arg := range args {
-		trimmed := strings.TrimSpace(arg)
-		if trimmed == "" {
-			continue
-		}
-		result = append(result, trimmed)
-	}
-	if len(result) == 0 {
-		return nil
-	}
-	return result
 }

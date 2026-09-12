@@ -45,7 +45,7 @@ Per-project data is stored on the host and reused across sessions:
 |------|----------|
 | Package caches | `~/.cache/enclave/<tool>/<project-hash>/` |
 | Shell history | `~/.local/state/enclave/projects/<project-hash>/<tool>/history/` |
-| Agent memory | `~/.local/state/enclave/projects/<project-hash>/<tool>/memory/` (Claude) |
+| Agent memory | `~/.local/state/enclave/projects/<project-hash>/<tool>/memory/` (Claude); `memory/<key>/` (Codex, matching the config-store key) |
 | Config/env/auth stores | Host directories under `~/.local/state/enclave/` (bind-mounted; no Docker volumes) |
 | Embedded runtime assets | `~/.cache/enclave/assets/<content-hash>/` |
 
@@ -58,8 +58,8 @@ the standard Apple locations, in a reverse-DNS application directory: config
 and state under `~/Library/Application Support/org.eclipse.enclave/`
 (`config/`, `state/`) and caches under `~/Library/Caches/org.eclipse.enclave/`.
 
-Agent memory is skipped for `--ephemeral` sessions: memory written during them
-is discarded with the session's config store.
+See [Agent Memory](runtime/stores.md#agent-memory) for memory isolation,
+`--no-memory`, ephemeral runs, and cleanup retention rules.
 
 Disable specific persistence:
 

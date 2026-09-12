@@ -52,6 +52,7 @@ func (c capabilities) render(w io.Writer, style Style, source string) {
 	// they grant depends on the flags they carry.
 	row("continue args", c.Spec.ContinueArgs)
 	row("resume args", c.Spec.ResumeArgs)
+	row("no-memory args", c.Spec.NoMemoryArgs)
 	skipsApproval := ""
 	if c.yoloActive() {
 		skipsApproval = fmt.Sprintf("%s (agent executes actions on its own, without asking you to approve each one)", c.Spec.YoloFlag)
@@ -98,6 +99,10 @@ func (c capabilities) render(w io.Writer, style Style, source string) {
 		postStart = c.Spec.PostStartOpenIDE + " (launched on the host once the container is running; the session runs detached)"
 	}
 	row("post-start", postStart)
+	// Reported with the host-exposure rows: both name host state the extension
+	// keeps between sessions rather than anything it runs.
+	row("agent memory", describeMemory(c.Spec))
+	row("preserved state", strings.Join(c.Spec.StatePaths, ", "))
 	row("passthrough paths", strings.Join(c.Spec.HostExposure.PassthroughPaths, ", "))
 	row("host config dir", c.Spec.HostExposure.HostConfigDir)
 	row("host credentials file", c.Spec.HostExposure.HostCredentialsFile)

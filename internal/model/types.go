@@ -7,7 +7,10 @@
 
 package model
 
-import "sort"
+import (
+	"sort"
+	"strings"
+)
 
 type RunOptions struct {
 	Tool              string
@@ -43,6 +46,14 @@ type RunOptions struct {
 	AllRunning        bool
 	NoApply           bool
 	Force             bool
+}
+
+// MemoryDisabled reports whether this run must not use or generate agent
+// memory: an explicit --no-memory, or an ephemeral session, whose writes would
+// otherwise land in the discarded per-session config store. The memory mount
+// and the tool's noMemoryArgs both follow this single predicate.
+func (r RunOptions) MemoryDisabled() bool {
+	return r.NoMemory || r.Ephemeral
 }
 
 type AuthOptions struct {
@@ -201,6 +212,21 @@ type ConfigView struct {
 	JSON bool
 }
 
+const (
+	MemoryScopeProject = "project"
+	MemoryScopeSession = "session"
+)
+
+// ResolveMemoryScope maps an undeclared memory scope onto the default, so no
+// consumer has to re-derive what an empty value means. Profiles are normalized
+// at load; this also serves the readers that see the raw spec document.
+func ResolveMemoryScope(scope string) string {
+	if strings.TrimSpace(scope) == "" {
+		return MemoryScopeProject
+	}
+	return scope
+}
+
 type Profile struct {
 	Name                string                  `json:"name"`
 	Command             string                  `json:"command"`
@@ -211,6 +237,9 @@ type Profile struct {
 	ConfigDir           string                  `json:"config_dir"`
 	SkillsDir           string                  `json:"skills_dir,omitempty"`
 	MemoryDir           string                  `json:"memory_dir,omitempty"`
+	MemoryScope         string                  `json:"memory_scope,omitempty"`
+	NoMemoryArgs        []string                `json:"no_memory_args,omitempty"`
+	StatePaths          []string                `json:"state_paths,omitempty"`
 	SettingsFile        string                  `json:"settings_file"`
 	SettingsTarget      string                  `json:"settings_target"`
 	PassthroughPaths    []string                `json:"passthrough_paths,omitempty"`

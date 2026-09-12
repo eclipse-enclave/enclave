@@ -17,6 +17,18 @@ sandbox:
   qemuMinMemoryMiB: 4096
   qemuStoreCacheMmap: true
   skillsDir: .codex/skills
+  memoryDir: .codex/memories
+  memoryScope: session
+  noMemoryArgs: [-c, features.memories=false]
+  statePaths:
+    # Memory files, their SQLite index, and codex-managed writer locks.
+    - memories/
+    - memories_*.sqlite*
+    - thread-writer-locks/
+    # Thread/session databases: rebuildable from the preserved sessions/
+    # rollouts, pinned to skip the re-backfill and keep non-rollout state.
+    - state_*.sqlite*
+    - thread_history_*.sqlite*
   settingsFile: codex-config.toml
   settingsTarget: .codex/config.toml
   yoloFlag: --dangerously-bypass-approvals-and-sandbox

@@ -31,13 +31,79 @@ the `config-store/default` directory. Additional concurrent sessions that would
 otherwise clobber the same writable config instead get a suffixed store keyed by
 session or worktree identity, while shared auth remains in the tool-global auth
 store. Tool state such as conversation history, settings, and cached tokens
-persists between runs.
+persists between runs. A tool's `sandbox.statePaths` declares config-relative
+runtime state that must survive config-source overlays and stay out of host
+config passthrough. Codex pins the database indexing its memories there, along
+with its `state_*.sqlite*` and `thread_history_*.sqlite*` thread databases. The
+thread databases are rebuildable projections of the preserved `sessions/`
+rollouts, pinned to avoid re-deriving them on every overlaid run.
 
 **Ephemeral mode** (`--ephemeral`): A fresh store directory is created with a
 unique suffix key for each session and removed after the container exits. The
 `default` store, if one exists, is left untouched.
 
 Source: [`internal/runtime/volume_manager.go`](../../internal/runtime/volume_manager.go) `BuildPrep` (intent), [`internal/backend/docker/prepare.go`](../../internal/backend/docker/prepare.go) `prepareConfigStore` (mechanics)
+
+## Agent Memory
+
+Tools declare their native memory directory with `sandbox.memoryDir`. Host memory
+lives under `~/.local/state/enclave/projects/<hash>/<tool>/memory/`:
+
+| Scope | Host layout | Bundled tool |
+|-------|-------------|--------------|
+| `project` (default) | `memory/` | Claude (`~/.claude/memory`) |
+| `session` | `memory/<config-store-key>/` | Codex (`~/.codex/memories`) |
+
+Session scope keeps each memory repository with the config-store database that
+coordinates its writers. Reusing a named session reuses its memory; changing the
+name starts with a separate store. Worktrees and concurrent-session suffixes
+also have separate stores. This deliberately favors writer isolation over
+sharing learned context. An ad-hoc concurrent store may never be reused and
+remains until cleanup.
+
+Because the key is the config-store key, memory follows the config store
+wherever it goes. In a linked worktree that means the key is `default` until the
+project has a config override or patch, and the worktree's own key afterwards:
+adding the first override moves the worktree's memory (and its conversation
+history) to a fresh store, so the agent starts over. Nothing is deleted. The
+previous store stays until cleanup.
+
+Enabling `memoryScope` on a tool that already ran without one does not migrate
+anything. Memory the tool previously wrote inside its config store stays there,
+shadowed by the new mount at the same path; remove it by hand, or run
+`enclave cleanup` for the project, if the split state is a problem.
+
+`--no-memory` omits the memory mount and applies the tool's `sandbox.noMemoryArgs`
+at launch. Codex declares `-c features.memories=false` and Claude
+`--settings '{"autoMemoryEnabled": false}'`, disabling memory use and generation
+without changing saved settings or deleting existing memories. `--ephemeral`
+applies the same launch arguments and discards the config store. Tools without
+`noMemoryArgs`, or tools started manually from a shell, retain their native
+behavior: without the mount their writes land in the config store, which
+persists unless the session is ephemeral.
+
+For session-scoped memory, project cleanup treats memory and the entire config
+store as a unit: `--keep memory` also retains the config store (including
+conversation history), and `--keep history` also retains memory. Default cleanup
+removes both. With `cleanup --all`, the existing whole-project-tree behavior
+applies: `--keep memory` has no selective effect.
+
+`cleanup --ephemeral` removes memory alongside each selected non-default config
+store, which includes the store of a named session even though its container is
+left alone. The same pairing applies: `--keep memory` retains each session store
+that holds memory, together with that memory. Stores with no memory to keep are
+removed either way: every store of a project-scoped tool, and the throwaway
+stores of `--ephemeral` runs, which never get a memory mount. The other
+`--keep` kinds have no effect on an ephemeral cleanup.
+
+Selective cleanup reads the scope from the tool spec. A tool with no spec,
+meaning state left behind by an extension that has since been removed, cleans up
+under the default scope rather than failing. A spec that exists but does not load
+aborts cleanup before anything is deleted, but only for the flag combinations
+that couple memory to the config store (`--keep memory`, `--keep history`, and
+`--ephemeral`). Every other plan warns and proceeds under the default scope,
+which is the plan a working spec would have produced anyway, so a broken
+extension never blocks the removal of its own state.
 
 ## Managed Skills
 

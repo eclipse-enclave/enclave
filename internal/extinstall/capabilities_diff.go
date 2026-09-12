@@ -41,6 +41,7 @@ func diffCapabilities(before capabilities, after capabilities) []string {
 	changes = append(changes, diffScalar("entrypoint override", before.Spec.EntrypointOverride, after.Spec.EntrypointOverride)...)
 	changes = append(changes, diffScalar("continue args", before.Spec.ContinueArgs, after.Spec.ContinueArgs)...)
 	changes = append(changes, diffScalar("resume args", before.Spec.ResumeArgs, after.Spec.ResumeArgs)...)
+	changes = append(changes, diffScalar("no-memory args", before.Spec.NoMemoryArgs, after.Spec.NoMemoryArgs)...)
 	changes = append(changes, diffScalar("post-start IDE launch", before.Spec.PostStartOpenIDE, after.Spec.PostStartOpenIDE)...)
 	changes = append(changes, diffList("startup script", before.StartupScripts, after.StartupScripts)...)
 	changes = append(changes, diffList("startup command", before.Spec.StartupCommands, after.Spec.StartupCommands)...)
@@ -57,6 +58,8 @@ func diffCapabilities(before capabilities, after capabilities) []string {
 	changes = append(changes, diffList("provider",
 		mapDescribe(before.Spec.Providers, describeProvider),
 		mapDescribe(after.Spec.Providers, describeProvider))...)
+	changes = append(changes, diffScalar("agent memory", describeMemory(before.Spec), describeMemory(after.Spec))...)
+	changes = append(changes, diffList("preserved state path", before.Spec.StatePaths, after.Spec.StatePaths)...)
 	beforeHosts, afterHosts := before.Spec.HostExposure, after.Spec.HostExposure
 	changes = append(changes, diffList("passthrough path", beforeHosts.PassthroughPaths, afterHosts.PassthroughPaths)...)
 	changes = append(changes, diffScalar("host config dir", beforeHosts.HostConfigDir, afterHosts.HostConfigDir)...)

@@ -9,9 +9,11 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -27,6 +29,70 @@ import (
 // store; every other key denotes an ephemeral session/worktree store. It
 // mirrors defaultStoreKey in internal/backend/docker.
 const persistentConfigStoreKey = "default"
+
+// Cleanup dir kinds. Each maps to a --keep flag, except configStoreKind, which
+// is a sub-kind of history: it is kept by --keep history like the rest, but
+// session-scoped memory couples to it alone rather than to every history dir.
+const (
+	cacheKind       = "cache"
+	historyKind     = "history"
+	configStoreKind = "config-store"
+	memoryKind      = "memory"
+	authKind        = "auth"
+	ephemeralKind   = "ephemeral"
+)
+
+// memoryScopeResolver answers each tool's declared memory scope for one cleanup
+// run, caching the result so a full sweep over every project does not re-read
+// the same specs once per project. A path-resolution failure is carried into
+// every lookup, so it surfaces exactly where a plan consults the scope.
+type memoryScopeResolver struct {
+	paths    model.Paths
+	pathsErr error
+	scopes   map[string]string
+}
+
+func newMemoryScopeResolver(paths model.Paths, pathsErr error) *memoryScopeResolver {
+	return &memoryScopeResolver{paths: paths, pathsErr: pathsErr, scopes: map[string]string{}}
+}
+
+// scopeFor returns tool's memory scope, never the empty string: a spec that
+// declares none resolves to the default exactly like a tool with no installed
+// spec at all. A missing spec is not an error because the host state tree keeps
+// a directory per tool that ever ran in a project, including tools since removed
+// from the extension tree, and cleanup must still be able to delete those. A
+// spec that exists but does not load is reported; whether that aborts the run is
+// the caller's decision, since only some plans can act on the answer.
+func (r *memoryScopeResolver) scopeFor(tool string) (string, error) {
+	if r.pathsErr != nil {
+		return "", fmt.Errorf("resolve extension paths: %w", r.pathsErr)
+	}
+	if scope, ok := r.scopes[tool]; ok {
+		return scope, nil
+	}
+	scope := model.MemoryScopeProject
+	profile, err := config.LoadProfile(r.paths, tool)
+	switch {
+	case err == nil:
+		// Load-time normalization only resolves the scope of tools that
+		// declare memory; for the rest the undeclared scope is the default.
+		scope = model.ResolveMemoryScope(profile.MemoryScope)
+	case !errors.Is(err, os.ErrNotExist):
+		return "", fmt.Errorf("load %s: %w", tool, err)
+	}
+	r.scopes[tool] = scope
+	return scope, nil
+}
+
+// memoryScopeAffectsPlan reports whether a tool's memory scope can change what
+// the given cleanup removes. Only the flag combinations that couple memory to
+// the config store depend on it; a full-tree cleanup removes both regardless.
+func memoryScopeAffectsPlan(cleanup model.CleanupOptions) bool {
+	if cleanup.CleanupEphemeral {
+		return true
+	}
+	return !cleanup.CleanupAll && (cleanup.CleanupKeepHist || cleanup.CleanupKeepMemory)
+}
 
 func runCleanup(run model.RunOptions, cleanup model.CleanupOptions) int {
 	home, err := config.ResolveHostHome()
@@ -48,6 +114,14 @@ func runCleanup(run model.RunOptions, cleanup model.CleanupOptions) int {
 		}
 		project = proj
 	}
+	// Session-scoped memory is removed together with its config store, so the
+	// plan depends on each tool's declared scope. A path or spec problem is
+	// carried by the resolver and handled where a plan consults the scope:
+	// aborting before anything is deleted when the scope can change the plan,
+	// and proceeding under the default otherwise. Cleanup is what a user
+	// reaches for when the extension tree is broken or gone.
+	paths, pathsErr := config.ResolvePaths()
+	scopes := newMemoryScopeResolver(paths, pathsErr)
 
 	if cleanup.CleanupEphemeral {
 		containerNames, containersErr := resolveEphemeralContainers(run, cleanup, project)
@@ -57,7 +131,11 @@ func runCleanup(run model.RunOptions, cleanup model.CleanupOptions) int {
 		}
 		// Ephemeral config stores are host directories keyed by a session or
 		// worktree suffix.
-		storeDirs := resolveEphemeralStoreDirs(run, cleanup, home, project)
+		storeDirs, err := resolveEphemeralStoreDirs(run, cleanup, home, project, scopes)
+		if err != nil {
+			logx.Errorf("Failed to resolve memory cleanup policy: %v", err)
+			return 1
+		}
 		if cleanup.CleanupDryRun {
 			printEphemeralCleanupPlan(containerNames, storeDirs)
 			cleanupBuildCache(cleanup)
@@ -70,7 +148,19 @@ func runCleanup(run model.RunOptions, cleanup model.CleanupOptions) int {
 		return 0
 	}
 
-	dirPaths := cleanupDirsForRemoval(run, cleanup, home, project)
+	memoryScope, err := scopes.scopeFor(run.Tool)
+	if err != nil {
+		if memoryScopeAffectsPlan(cleanup) {
+			logx.Errorf("Failed to resolve memory cleanup policy: %v", err)
+			return 1
+		}
+		// No --keep flag couples memory to the config store here, so the
+		// unreadable scope cannot change what is removed. Refusing would strand
+		// the state of exactly the broken extension the user is cleaning up.
+		logx.Warnf("Ignoring unreadable memory cleanup policy: %v", err)
+		memoryScope = model.MemoryScopeProject
+	}
+	dirPaths := cleanupDirsForRemoval(run, cleanup, home, project, memoryScope)
 
 	if cleanup.CleanupDryRun {
 		printCleanupPlan(dirPaths)
@@ -157,13 +247,13 @@ func resolveEphemeralContainers(run model.RunOptions, cleanup model.CleanupOptio
 // resolveEphemeralStoreDirs enumerates the host directories backing ephemeral
 // config stores (every config-store key other than the persistent "default"
 // key).
-func resolveEphemeralStoreDirs(run model.RunOptions, cleanup model.CleanupOptions, home string, project model.Project) []cleanupDir {
+func resolveEphemeralStoreDirs(run model.RunOptions, cleanup model.CleanupOptions, home string, project model.Project, scopes *memoryScopeResolver) ([]cleanupDir, error) {
 	var hashes []string
 	if cleanup.CleanupAll {
 		hashes = listSubdirs(config.HostProjectsDir(home))
 	} else {
 		if project.Hash == "" {
-			return nil
+			return nil, nil
 		}
 		hashes = []string{project.Hash}
 	}
@@ -178,16 +268,41 @@ func resolveEphemeralStoreDirs(run model.RunOptions, cleanup model.CleanupOption
 		}
 		for _, tool := range tools {
 			storeRoot := config.HostStoreConfigRootDir(home, tool, hash)
-			for _, key := range listSubdirs(storeRoot) {
+			keys := listSubdirs(storeRoot)
+			if len(keys) == 0 {
+				continue
+			}
+			scope, err := scopes.scopeFor(tool)
+			if err != nil {
+				return nil, err
+			}
+			for _, key := range keys {
 				if key == persistentConfigStoreKey {
 					continue
 				}
-				dirs = append(dirs, cleanupDir{Kind: "ephemeral", Path: filepath.Join(storeRoot, key)})
+				memoryDir := ""
+				if scope == model.MemoryScopeSession {
+					if dir := config.HostProjectMemorySessionDir(home, hash, tool, key); util.PathExists(dir) {
+						memoryDir = dir
+					}
+				}
+				// Session memory and its config store are one unit here too, so
+				// --keep memory retains the pair. Keys with nothing to keep are
+				// still removed: every store of a tool without session memory,
+				// and the timestamp-keyed stores of --ephemeral runs, which
+				// never get a memory mount.
+				if memoryDir != "" && cleanup.CleanupKeepMemory {
+					continue
+				}
+				dirs = append(dirs, cleanupDir{Kind: ephemeralKind, Path: filepath.Join(storeRoot, key)})
+				if memoryDir != "" {
+					dirs = append(dirs, cleanupDir{Kind: memoryKind, Path: memoryDir})
+				}
 			}
 		}
 	}
 	sort.Slice(dirs, func(i, j int) bool { return dirs[i].Path < dirs[j].Path })
-	return dirs
+	return dirs, nil
 }
 
 // listSubdirs returns the immediate subdirectory names of dir, or nil when dir
@@ -214,10 +329,10 @@ type cleanupDir struct {
 func resolveCleanupDirs(run model.RunOptions, cleanup model.CleanupOptions, home string, project model.Project) []cleanupDir {
 	if cleanup.CleanupAll {
 		dirs := []cleanupDir{
-			{Kind: "cache", Path: config.HostCacheDir(home)},
+			{Kind: cacheKind, Path: config.HostCacheDir(home)},
 			// The state projects tree holds every project's config/env stores
 			// and history, so a full cleanup removes them all at once.
-			{Kind: "history", Path: config.HostProjectsDir(home)},
+			{Kind: historyKind, Path: config.HostProjectsDir(home)},
 			// The image inbox is global (not project-scoped), so it is only
 			// removed by a full cleanup. Held images are user-imported content.
 			{Kind: "inbox", Path: config.HostImageInboxDir(home)},
@@ -229,14 +344,14 @@ func resolveCleanupDirs(run model.RunOptions, cleanup model.CleanupOptions, home
 
 	projectDataDir := config.HostProjectToolDir(home, project.Hash, run.Tool)
 	return []cleanupDir{
-		{Kind: "cache", Path: config.HostCacheToolProjectDir(home, run.Tool, project.Hash)},
-		{Kind: "history", Path: filepath.Join(projectDataDir, "history")},
-		{Kind: "history", Path: config.HostProjectHomeConfigDir(home, project.Hash, run.Tool)},
-		{Kind: "history", Path: config.HostProjectGeneratedConfigDir(home, project.Hash, run.Tool)},
-		{Kind: "history", Path: filepath.Join(projectDataDir, model.GeneratedSkillsDirName)},
-		{Kind: "history", Path: config.HostStoreConfigRootDir(home, run.Tool, project.Hash)},
-		{Kind: "history", Path: config.HostStoreEnvDir(home, run.Tool, project.Hash)},
-		{Kind: "memory", Path: config.HostProjectMemoryDir(home, project.Hash, run.Tool)},
+		{Kind: cacheKind, Path: config.HostCacheToolProjectDir(home, run.Tool, project.Hash)},
+		{Kind: historyKind, Path: filepath.Join(projectDataDir, "history")},
+		{Kind: historyKind, Path: config.HostProjectHomeConfigDir(home, project.Hash, run.Tool)},
+		{Kind: historyKind, Path: config.HostProjectGeneratedConfigDir(home, project.Hash, run.Tool)},
+		{Kind: historyKind, Path: filepath.Join(projectDataDir, model.GeneratedSkillsDirName)},
+		{Kind: configStoreKind, Path: config.HostStoreConfigRootDir(home, run.Tool, project.Hash)},
+		{Kind: historyKind, Path: config.HostStoreEnvDir(home, run.Tool, project.Hash)},
+		{Kind: memoryKind, Path: config.HostProjectMemoryDir(home, project.Hash, run.Tool)},
 	}
 }
 
@@ -246,38 +361,49 @@ func resolveCleanupDirs(run model.RunOptions, cleanup model.CleanupOptions, home
 func authStoreCleanupDirs(home string) []cleanupDir {
 	var dirs []cleanupDir
 	for _, tool := range listSubdirs(config.HostStoreAuthRootDir(home)) {
-		dirs = append(dirs, cleanupDir{Kind: "auth", Path: config.HostStoreAuthTreeDir(home, tool)})
+		dirs = append(dirs, cleanupDir{Kind: authKind, Path: config.HostStoreAuthTreeDir(home, tool)})
 	}
 	for _, feature := range listSubdirs(config.HostStoreFeatureAuthRootDir(home)) {
-		dirs = append(dirs, cleanupDir{Kind: "auth", Path: config.HostStoreFeatureAuthDir(home, feature)})
+		dirs = append(dirs, cleanupDir{Kind: authKind, Path: config.HostStoreFeatureAuthDir(home, feature)})
 	}
 	return dirs
 }
 
 // cleanupDirsForRemoval resolves the host directories to remove for the given
-// cleanup options, applying the keep-* gating. Each host-dir kind is preserved
-// when its matching --keep-* flag is set.
-func cleanupDirsForRemoval(run model.RunOptions, cleanup model.CleanupOptions, home string, project model.Project) []cleanupDir {
+// cleanup options, applying keep-* flags and session memory/config coupling.
+func cleanupDirsForRemoval(run model.RunOptions, cleanup model.CleanupOptions, home string, project model.Project, memoryScope string) []cleanupDir {
 	dirs := resolveCleanupDirs(run, cleanup, home, project)
 	if cleanup.CleanupKeepCache {
-		dirs = filterDirs(dirs, "cache")
+		dirs = filterDirs(dirs, cacheKind)
 	}
 	if cleanup.CleanupKeepHist {
-		dirs = filterDirs(dirs, "history")
+		dirs = filterDirs(dirs, historyKind, configStoreKind)
 	}
 	if cleanup.CleanupKeepMemory {
-		dirs = filterDirs(dirs, "memory")
+		dirs = filterDirs(dirs, memoryKind)
 	}
 	if cleanup.CleanupKeepAuth {
-		dirs = filterDirs(dirs, "auth")
+		dirs = filterDirs(dirs, authKind)
+	}
+	if !cleanup.CleanupAll && memoryScope == model.MemoryScopeSession {
+		// Session memory and the config store holding the database that indexes
+		// it form one cleanup unit: keeping either keeps both. The remaining
+		// history dirs (shell history, env store, generated config) are not
+		// coupled and stay subject to --keep history alone.
+		if cleanup.CleanupKeepHist {
+			dirs = filterDirs(dirs, memoryKind)
+		}
+		if cleanup.CleanupKeepMemory {
+			dirs = filterDirs(dirs, configStoreKind)
+		}
 	}
 	return dirs
 }
 
-func filterDirs(dirs []cleanupDir, kind string) []cleanupDir {
+func filterDirs(dirs []cleanupDir, kinds ...string) []cleanupDir {
 	var filtered []cleanupDir
 	for _, dir := range dirs {
-		if dir.Kind == kind {
+		if slices.Contains(kinds, dir.Kind) {
 			continue
 		}
 		filtered = append(filtered, dir)

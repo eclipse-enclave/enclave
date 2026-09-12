@@ -63,7 +63,7 @@ supported under `tool_overrides.<tool>`.
 | `allow_domains` | Extra domains added to the gateway allowlist (bare DNS names; ignored when `allow_all_network=true`) |
 | `no_cache` | Disable package caches |
 | `no_history` | Disable shell history |
-| `no_memory` | Disable per-project agent memory |
+| `no_memory` | Disable per-project agent memory; see [memory controls](runtime/stores.md#agent-memory) |
 | `session_monitor` | Run agents under the managed tmux session (enables `status` snapshots) |
 | `session_tint` | Terminal background color marking a session-owned terminal, as `#rrggbb` (unset: no tint) |
 | `base_image` | Docker base image override |

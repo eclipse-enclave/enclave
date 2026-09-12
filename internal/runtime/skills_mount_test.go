@@ -305,7 +305,7 @@ func TestAddSkillMountsSkipsNonPortableSharedSkills(t *testing.T) {
 	if err := os.MkdirAll(invalidDir, 0o755); err != nil {
 		t.Fatalf("mkdir invalid shared skill: %v", err)
 	}
-	invalid := "---\nname: harness-specific\ndescription: Invalid shared skill\nallowed-tools: Read\n---\ninvalid"
+	invalid := "---\nname: harness-specific\ndescription: Invalid shared skill\ndisable-model-invocation: true\n---\ninvalid"
 	if err := os.WriteFile(filepath.Join(invalidDir, "SKILL.md"), []byte(invalid), 0o644); err != nil {
 		t.Fatalf("write invalid shared skill: %v", err)
 	}
@@ -329,6 +329,163 @@ func TestAddSkillMountsSkipsNonPortableSharedSkills(t *testing.T) {
 	assertPathMissing(t, filepath.Join(source, "portable", "external.txt"))
 	assertPathMissing(t, filepath.Join(source, "harness-specific"))
 	assertPathMissing(t, filepath.Join(source, "claude"))
+}
+
+func TestSharedSkillsValidation(t *testing.T) {
+	t.Parallel()
+	for _, route := range []string{"mount", "config"} {
+		for _, mode := range []string{"", model.SkillsValidationStrict, model.SkillsValidationAgent, " AGENT ", "unknown"} {
+			t.Run(route+"/"+mode, func(t *testing.T) {
+				t.Parallel()
+				r := newTemplateOverrideRuntime(t.TempDir(), model.Profile{
+					Name: "claude", ConfigDir: ".claude", SkillsDir: ".claude/skills",
+				})
+				r.run.SkillsValidation = mode
+				global := config.HostSkillsDir(r.host.Home)
+				project := config.HostProjectSkillsDir(r.host.Home, r.project.Hash)
+				writeSkill(t, filepath.Join(global, "shared"), "global")
+				writeRuntimeTestFile(t, filepath.Join(global, "shared", "old.txt"), "must not survive replacement")
+				writeSkill(t, filepath.Join(project, "shared"), "project")
+				writeSkill(t, filepath.Join(global, "portable"), "portable")
+				writeRuntimeTestFile(t, filepath.Join(global, "portable", "SKILL.md"), "---\nname: portable\ndescription: Test skill\nlicense: MIT\ncompatibility: Requires git\nmetadata:\n  version: \"1.0\"\n---\nportable")
+				bodies := map[string]string{
+					"agent-specific": "---\nname: agent-specific\ndescription: Test skill\ndisable-model-invocation: true\nallowed-tools: Read\nargument-hint: task\n---\nAgent skill\n",
+					"alias":          "---\nname: portable\ndescription: Test skill\n---\nDifferent name\n",
+					"plain":          "Instructions without frontmatter\n",
+					"malformed":      "---\nname: [\n---\nLeave parsing to the agent\n",
+				}
+				for name, body := range bodies {
+					writeRuntimeTestFile(t, filepath.Join(global, name, "SKILL.md"), body)
+				}
+				policy := "policy:\n  allow_implicit_invocation: false\n"
+				writeRuntimeTestFile(t, filepath.Join(global, "agent-specific", "agents", "openai.yaml"), policy)
+				writeRuntimeTestFile(t, filepath.Join(global, "agent-specific", "scripts", "run.sh"), "#!/bin/sh\nexit 0\n")
+				if err := os.Chmod(filepath.Join(global, "agent-specific", "scripts", "run.sh"), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				writeRuntimeTestFile(t, filepath.Join(project, "missing", "README.md"), "no SKILL.md")
+				// Invalid higher layers must not erase a valid lower skill.
+				writeRuntimeTestFile(t, filepath.Join(project, "portable", "README.md"), "no SKILL.md")
+				var target string
+				if route == "config" {
+					toolSkills := filepath.Join(config.HostToolConfigDir(r.host.Home, "claude"), "skills")
+					writeSkill(t, filepath.Join(toolSkills, "shared"), "global tool")
+					writeSkill(t, filepath.Join(project, "tool-wins"), "project shared")
+					writeSkill(t, filepath.Join(config.HostProjectConfigDir(r.host.Home, r.project.Hash, "claude"), "skills", "tool-wins"), "project tool")
+					if err := r.prepareToolConfigSource(); err != nil {
+						t.Fatal(err)
+					}
+					target = filepath.Join(r.configSourceDir, "skills")
+					assertSkillBody(t, filepath.Join(target, "tool-wins"), "project tool")
+				} else {
+					mounts := newMountAccumulator(nil, nil)
+					if err := r.addSkillMounts(mounts); err != nil {
+						t.Fatal(err)
+					}
+					var ok bool
+					target, ok = lookupMountSource(mounts.Mounts(), "/home/agent/.claude/skills")
+					if !ok {
+						t.Fatal("missing skills mount")
+					}
+				}
+				assertSkillBody(t, filepath.Join(target, "shared"), "project")
+				assertSkillBody(t, filepath.Join(target, "portable"), "portable")
+				assertPathMissing(t, filepath.Join(target, "shared", "old.txt"))
+				assertPathMissing(t, filepath.Join(target, "missing"))
+				for name, body := range bodies {
+					if strings.ToLower(strings.TrimSpace(mode)) != model.SkillsValidationAgent {
+						assertPathMissing(t, filepath.Join(target, name))
+						continue
+					}
+					got, err := os.ReadFile(filepath.Join(target, name, "SKILL.md"))
+					if err != nil || string(got) != body {
+						t.Fatalf("skill %s was not preserved: %q, %v", name, got, err)
+					}
+				}
+				if strings.ToLower(strings.TrimSpace(mode)) == model.SkillsValidationAgent {
+					got, err := os.ReadFile(filepath.Join(target, "agent-specific", "agents", "openai.yaml"))
+					if err != nil || string(got) != policy {
+						t.Fatalf("agent policy was not preserved: %q, %v", got, err)
+					}
+					info, err := os.Stat(filepath.Join(target, "agent-specific", "scripts", "run.sh"))
+					if err != nil || info.Mode().Perm() != 0o755 {
+						t.Fatalf("executable resource was not preserved: %v, %v", info, err)
+					}
+				}
+				if err := os.RemoveAll(global); err != nil {
+					t.Fatal(err)
+				}
+				assertSkillBody(t, filepath.Join(target, "portable"), "portable")
+			})
+		}
+	}
+}
+
+func TestStrictSharedSkillValidationDiagnostics(t *testing.T) {
+	t.Parallel()
+	tests := map[string]struct {
+		content   string
+		want      string
+		wantAgent bool
+	}{
+		"agent-specific field": {
+			content:   "---\nname: example\ndescription: Test skill\nallowed-tools: Read\n---\n",
+			want:      "use only name, description, license, compatibility, metadata",
+			wantAgent: true,
+		},
+		"name mismatch": {
+			content: "---\nname: different\ndescription: Test skill\n---\n",
+			want:    "must match directory",
+		},
+		"missing description": {
+			content: "---\nname: example\n---\n",
+			want:    "description is required",
+		},
+		"missing description with agent-specific field": {
+			content: "---\nname: example\nallowed-tools: Read\n---\n",
+			want:    "description is required",
+		},
+		"duplicate field": {
+			content: "---\nname: example\nname: example\ndescription: Test skill\n---\n",
+			want:    "invalid portable skill frontmatter",
+		},
+		"invalid field type": {
+			content: "---\nname: example\ndescription: [invalid]\n---\n",
+			want:    "invalid portable skill frontmatter",
+		},
+		"malformed frontmatter": {
+			content: "---\nname: [\n---\n",
+			want:    "invalid portable skill frontmatter",
+		},
+	}
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			skillDir := filepath.Join(t.TempDir(), "example")
+			writeRuntimeTestFile(t, filepath.Join(skillDir, "SKILL.md"), test.content)
+			err := sharedSkillValidator(model.SkillsValidationStrict)(skillDir, "example")
+			if err == nil {
+				t.Fatal("strict validation unexpectedly succeeded")
+			}
+			if !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("validation error = %q, want %q", err, test.want)
+			}
+			if got := strings.Contains(err.Error(), "skills_validation=agent"); got != test.wantAgent {
+				t.Fatalf("agent hint = %v, want %v: %q", got, test.wantAgent, err)
+			}
+		})
+	}
+}
+
+func TestSharedSkillValidationDoesNotSuggestAgentForMissingFile(t *testing.T) {
+	t.Parallel()
+	err := sharedSkillValidator(model.SkillsValidationStrict)(t.TempDir(), "missing")
+	if err == nil {
+		t.Fatal("validation unexpectedly succeeded")
+	}
+	if strings.Contains(err.Error(), "skills_validation=agent") {
+		t.Fatalf("validation error suggests agent mode for a missing SKILL.md: %q", err)
+	}
 }
 
 func writeSkill(t *testing.T, skillDir string, body string) {

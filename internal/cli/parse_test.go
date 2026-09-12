@@ -20,6 +20,32 @@ import (
 	"enclave/internal/usercmd"
 )
 
+func TestParseSkillsValidation(t *testing.T) {
+	for _, mode := range []string{model.SkillsValidationStrict, model.SkillsValidationAgent, " STRICT ", " AGENT "} {
+		t.Run(mode, func(t *testing.T) {
+			res, err := Parse([]string{"--skills-validation", mode}, config.DefaultOptions())
+			if err != nil {
+				t.Fatal(err)
+			}
+			mode = strings.ToLower(strings.TrimSpace(mode))
+			if res.Options.SkillsValidation != mode || res.Sources.SkillsValidation != model.SourceCLI {
+				t.Fatalf("validation mode/source = %q/%v", res.Options.SkillsValidation, res.Sources.SkillsValidation)
+			}
+			global := config.Defaults{SkillsValidation: model.SkillsValidationAgent}
+			project := config.Defaults{SkillsValidation: model.SkillsValidationStrict}
+			opts, _, _ := config.ResolveOptionsForTool(res.Options, res.Sources, global, project, "")
+			if opts.SkillsValidation != mode || opts.Sources.SkillsValidation != model.SourceCLI {
+				t.Fatalf("config overrode CLI mode: %q/%v", opts.SkillsValidation, opts.Sources.SkillsValidation)
+			}
+		})
+	}
+	for _, args := range [][]string{{"--skills-validation"}, {"--skills-validation", "experimental"}, {"--skills-validation", "native"}, {"--skills-validation="}} {
+		if _, err := Parse(args, config.DefaultOptions()); err == nil {
+			t.Errorf("expected invalid option error for %v", args)
+		}
+	}
+}
+
 func TestParseRunArgsDelimiter(t *testing.T) {
 	defaults := config.DefaultOptions()
 	res, err := Parse([]string{"--tool", "codex", "--", "--flag", "value"}, defaults)

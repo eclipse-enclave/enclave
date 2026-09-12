@@ -368,7 +368,7 @@ func (r *Runtime) applySharedSkillsLayer(targetDir string, projectScope bool) er
 	if err := os.MkdirAll(skillsTargetDir, 0o700); err != nil {
 		return fmt.Errorf("create generated skills directory %q: %w", skillsTargetDir, err)
 	}
-	if err := overlayPortableSkillSource(skillsTargetDir, sourceDir); err != nil {
+	if err := overlaySharedSkillSource(skillsTargetDir, sourceDir, r.run.SkillsValidation); err != nil {
 		scope := "global"
 		if projectScope {
 			scope = "project"

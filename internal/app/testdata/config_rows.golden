@@ -2,6 +2,7 @@ tool | default="claude"/true global=""/false project=""/false toolOverride=""/fa
 backend | default=""/true global=""/false project=""/false toolOverride=""/false cli=""/false | source=0 effective=""
 host_config | default=""/false global=""/false project=""/false toolOverride=""/false cli=""/false | source=0 effective=""
 host_config_paths | default="[/x,/y]"/true global=""/false project=""/false toolOverride=""/false cli=""/false | source=0 effective="[/a,/b]"
+skills_validation | default=""/false global=""/false project=""/false toolOverride=""/false cli=""/false | source=0 effective=""
 yolo | default="tool-default"/true global=""/false project=""/false toolOverride=""/false cli="true"/true | source=5 effective="true"
 ephemeral | default="false"/true global=""/false project=""/false toolOverride="true"/true cli="true"/true | source=5 effective="true"
 auth_scope | default="shared"/true global=""/false project="project"/true toolOverride="shared"/true cli=""/false | source=3 effective="project"

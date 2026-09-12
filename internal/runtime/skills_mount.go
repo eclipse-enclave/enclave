@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"unicode/utf8"
 
@@ -28,8 +29,8 @@ import (
 var portableSkillNamePattern = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
 
 type skillSource struct {
-	dir      string
-	portable bool
+	dir    string
+	shared bool
 }
 
 func (r *Runtime) addSkillMounts(mounts *mountAccumulator) error {
@@ -67,12 +68,12 @@ func (r *Runtime) addSkillMounts(mounts *mountAccumulator) error {
 		sources = append(sources, skillSource{dir: sourceDir})
 	}
 	sources = append(sources,
-		skillSource{dir: globalSkillsDir, portable: true},
-		skillSource{dir: projectSkillsDir, portable: true},
+		skillSource{dir: globalSkillsDir, shared: true},
+		skillSource{dir: projectSkillsDir, shared: true},
 	)
 
 	if err := r.withToolDataLock(projectToolDir, "skills", func() error {
-		return mergeSkillSources(generatedSkillsDir, sources)
+		return mergeSkillSources(generatedSkillsDir, sources, r.run.SkillsValidation)
 	}); err != nil {
 		return fmt.Errorf("prepare skills mount for %s: %w", r.profile.Name, err)
 	}
@@ -107,16 +108,18 @@ func (r *Runtime) withToolDataLock(projectToolDir string, prefix string, fn func
 	return util.WithFileLock(lockPath, fn)
 }
 
-func mergeSkillSources(targetDir string, sources []skillSource) error {
+func mergeSkillSources(targetDir string, sources []skillSource, validation string) error {
 	if err := clearDirectory(targetDir); err != nil {
 		return fmt.Errorf("clear generated skills directory %q: %w", targetDir, err)
 	}
 	for _, source := range sources {
-		overlay := overlaySkillSource
-		if source.portable {
-			overlay = overlayPortableSkillSource
+		var err error
+		if source.shared {
+			err = overlaySharedSkillSource(targetDir, source.dir, validation)
+		} else {
+			err = overlaySkillSource(targetDir, source.dir)
 		}
-		if err := overlay(targetDir, source.dir); err != nil {
+		if err != nil {
 			return fmt.Errorf("overlay skills from %q: %w", source.dir, err)
 		}
 	}
@@ -141,8 +144,22 @@ func overlaySkillSource(targetDir string, sourceDir string) error {
 	return overlayValidatedSkillSource(targetDir, sourceDir, nil)
 }
 
-func overlayPortableSkillSource(targetDir string, sourceDir string) error {
-	return overlayValidatedSkillSource(targetDir, sourceDir, validatePortableSkill)
+func overlaySharedSkillSource(targetDir string, sourceDir string, validation string) error {
+	return overlayValidatedSkillSource(targetDir, sourceDir, sharedSkillValidator(validation))
+}
+
+func sharedSkillValidator(validation string) func(string, string) error {
+	validation = model.SkillsValidationMode(validation)
+	return func(skillDir string, directoryName string) error {
+		content, err := readSkillFile(skillDir)
+		if err != nil {
+			return err
+		}
+		if validation == model.SkillsValidationAgent {
+			return nil
+		}
+		return validatePortableSkillContent(content, directoryName)
+	}
 }
 
 func overlayValidatedSkillSource(targetDir string, sourceDir string, validate func(string, string) error) error {
@@ -157,7 +174,7 @@ func overlayValidatedSkillSource(targetDir string, sourceDir string, validate fu
 		sourcePath := filepath.Join(sourceDir, entry.Name())
 		if validate != nil {
 			if err := validate(sourcePath, entry.Name()); err != nil {
-				logx.Warnf("Skipping shared skill %q from %s: %v", entry.Name(), sourceDir, err)
+				logx.Warnf("Skipping shared skill %q: %v", filepath.Join(sourceDir, entry.Name()), err)
 				continue
 			}
 		}
@@ -180,30 +197,38 @@ type portableSkillMetadata struct {
 	Metadata      map[string]any `json:"metadata,omitempty"`
 }
 
-func validatePortableSkill(skillDir string, directoryName string) error {
+func readSkillFile(skillDir string) ([]byte, error) {
 	skillPath := filepath.Join(skillDir, "SKILL.md")
 	info, err := os.Lstat(skillPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return fmt.Errorf("missing SKILL.md")
+			return nil, fmt.Errorf("missing SKILL.md")
 		}
-		return fmt.Errorf("inspect SKILL.md: %w", err)
+		return nil, fmt.Errorf("inspect SKILL.md: %w", err)
 	}
 	if !info.Mode().IsRegular() {
-		return fmt.Errorf("SKILL.md must be a regular file")
+		return nil, fmt.Errorf("SKILL.md must be a regular file")
 	}
 	// #nosec G304 -- skillPath is rooted in a user-managed shared skill directory.
 	content, err := os.ReadFile(skillPath)
 	if err != nil {
-		return fmt.Errorf("read SKILL.md: %w", err)
+		return nil, fmt.Errorf("read SKILL.md: %w", err)
 	}
+	return content, nil
+}
+
+func validatePortableSkillContent(content []byte, directoryName string) error {
 	frontmatter, err := extractSkillFrontmatter(content)
 	if err != nil {
 		return err
 	}
+	var fields map[string]any
+	if err := yaml.UnmarshalStrict(frontmatter, &fields); err != nil {
+		return fmt.Errorf("invalid portable skill frontmatter: %w", err)
+	}
 	var metadata portableSkillMetadata
-	if err := yaml.UnmarshalStrict(frontmatter, &metadata); err != nil {
-		return fmt.Errorf("frontmatter must use only portable fields (name, description, license, compatibility, metadata): %w", err)
+	if err := yaml.Unmarshal(frontmatter, &metadata); err != nil {
+		return fmt.Errorf("invalid portable skill frontmatter: %w", err)
 	}
 	metadata.Name = strings.TrimSpace(metadata.Name)
 	metadata.Description = strings.TrimSpace(metadata.Description)
@@ -224,6 +249,18 @@ func validatePortableSkill(skillDir string, directoryName string) error {
 	}
 	if utf8.RuneCountInString(metadata.Compatibility) > 500 {
 		return fmt.Errorf("frontmatter compatibility exceeds 500 characters")
+	}
+	var unsupported []string
+	for field := range fields {
+		switch field {
+		case "name", "description", "license", "compatibility", "metadata":
+		default:
+			unsupported = append(unsupported, field)
+		}
+	}
+	if len(unsupported) > 0 {
+		slices.Sort(unsupported)
+		return fmt.Errorf("frontmatter fields %q are not portable; use only name, description, license, compatibility, metadata; use skills_validation=agent to delegate metadata validation to the agent", strings.Join(unsupported, ", "))
 	}
 	return nil
 }

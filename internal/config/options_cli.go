@@ -177,6 +177,17 @@ func ValidateAuthName(raw string) (string, error) {
 	return name, nil
 }
 
+func applySkillsValidation(opts *model.Options, value string) error {
+	value = strings.ToLower(strings.TrimSpace(value))
+	switch value {
+	case model.SkillsValidationStrict, model.SkillsValidationAgent:
+		opts.SkillsValidation = value
+		return nil
+	default:
+		return fmt.Errorf("invalid --skills-validation: %s (use: strict|agent)", value)
+	}
+}
+
 func applyHostConfig(opts *model.Options, value string) error {
 	switch value {
 	case model.HostConfigNone, model.HostConfigPassthrough:

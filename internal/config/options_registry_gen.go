@@ -59,6 +59,16 @@ func OptionSpecs() []OptionSpec {
 			},
 		},
 		{
+			Name:  "skills_validation",
+			Group: OptionGroupRun,
+			ApplyDefaultsWithSource: func(opts *model.Options, defaults Defaults, source model.OptionSource, sources *model.OptionSources) {
+				if canOverride(sources.SkillsValidation, source) && strings.TrimSpace(defaults.SkillsValidation) != "" {
+					opts.SkillsValidation = strings.TrimSpace(defaults.SkillsValidation)
+					sources.SkillsValidation = source
+				}
+			},
+		},
+		{
 			Name:  "yolo",
 			Group: OptionGroupRun,
 			ApplyDefaultsWithSource: func(opts *model.Options, defaults Defaults, source model.OptionSource, sources *model.OptionSources) {

@@ -162,6 +162,29 @@ func OptionDefs() []OptionDef {
 			Apply:         ApplySliceMergeHost,
 		},
 		{
+			Name:          "skills_validation",
+			Group:         OptionGroupRun,
+			Kind:          OptionKindString,
+			OptionField:   "SkillsValidation",
+			SourceField:   "SkillsValidation",
+			DefaultsField: "SkillsValidation",
+			Apply:         ApplyString,
+			TrimOnApply:   true,
+			CLIFlags: []CLIFlagDef{
+				{
+					Name:                "--skills-validation",
+					Usage:               "Shared skill validation: strict|agent (default: strict)",
+					ValueKind:           CLIValueRequired,
+					MissingValueMessage: "--skills-validation requires a value (strict|agent)",
+					Action: CLIAction{
+						Kind:        CLIActionCall,
+						Call:        "applySkillsValidation",
+						SourceField: "SkillsValidation",
+					},
+				},
+			},
+		},
+		{
 			Name:          "yolo",
 			Group:         OptionGroupRun,
 			Kind:          OptionKindYolo,

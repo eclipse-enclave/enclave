@@ -42,6 +42,7 @@ type RunOptionSources struct {
 	SessionMonitor   OptionSource
 	SessionName      OptionSource
 	SessionTint      OptionSource
+	SkillsValidation OptionSource
 	Tool             OptionSource
 	WorktreeMetadata OptionSource
 	Yolo             OptionSource
@@ -105,6 +106,7 @@ func DefaultOptionSources() OptionSources {
 			SessionMonitor:   SourceDefault,
 			SessionName:      SourceDefault,
 			SessionTint:      SourceDefault,
+			SkillsValidation: SourceDefault,
 			Tool:             SourceDefault,
 			WorktreeMetadata: SourceDefault,
 			Yolo:             SourceDefault,
@@ -266,6 +268,9 @@ func MergeOptionSources(base OptionSources, override OptionSources) OptionSource
 	}
 	if override.SessionTint != SourceUnset {
 		base.SessionTint = override.SessionTint
+	}
+	if override.SkillsValidation != SourceUnset {
+		base.SkillsValidation = override.SkillsValidation
 	}
 	if override.Slim != SourceUnset {
 		base.Slim = override.Slim

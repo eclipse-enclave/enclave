@@ -25,6 +25,7 @@ func TestMergeOptionSourcesCoversAllFields(t *testing.T) {
 			Tool:             SourceCLI,
 			Backend:          SourceCLI,
 			HostConfig:       SourceCLI,
+			SkillsValidation: SourceCLI,
 			HostConfigPaths:  SourceCLI,
 			Yolo:             SourceCLI,
 			Ephemeral:        SourceCLI,

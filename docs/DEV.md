@@ -276,6 +276,14 @@ Quick rule of thumb:
 
 Backend option note: `--backend` is config-backed and defaults to `auto`, which `app.resolveBackend` turns into `docker` or `podman` from `backenddocker.DetectCLIs()` (prompting once via `prompt.Choose` and persisting with `config.WriteGlobalDefault` when both are installed and a terminal is present); `podman` reuses the Docker backend (`internal/backend/docker`) over the podman CLI by switching the binary in `internal/docker` once at startup (`docker.SetBinary`), with `docker.IsPodman()` gating the few engine differences (`--userns=keep-id`, `info` schema, build cache flags, and `renderEngineDockerfile` stripping home-directory cache mounts from the rendered Dockerfile); experimental `qemu` is available for foreground slim/no-feature unrestricted sessions.
 
+Shared skills note: `--skills-validation strict|agent` is config-backed,
+defaults to `strict`, and supports global, project, and selected tool overrides.
+Normalize casing and whitespace before validating; runtime callers resolve the
+mode through `model.SkillsValidationMode`, which falls back to strict for empty
+or unknown values. Apply the mode in both skill composition paths. It affects
+shared skills only; source precedence and whole-directory replacement remain
+unchanged.
+
 Build option note: `--features` is available on CLI. In devcontainer mode,
 unset features default to none, so pass `--features` explicitly when needed.
 `--features none` is the explicit "no features" selection.

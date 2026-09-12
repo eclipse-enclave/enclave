@@ -361,7 +361,7 @@ func TestPrepareToolConfigSourceMergesBuiltinUserExtGlobalAndProjectSkills(t *te
 	writeSkill(t, filepath.Join(globalSkillsDir, "shared-all"), "global-shared-all")
 	writeSkill(t, filepath.Join(globalSkillsDir, "scope-order"), "global-shared")
 	invalidSharedSkill := filepath.Join(globalSkillsDir, "harness-specific", "SKILL.md")
-	writeRuntimeTestFile(t, invalidSharedSkill, "---\nname: harness-specific\ndescription: Harness-specific skill\nallowed-tools: Read\n---\ninvalid-shared")
+	writeRuntimeTestFile(t, invalidSharedSkill, "---\nname: harness-specific\ndescription: Harness-specific skill\ndisable-model-invocation: true\n---\ninvalid-shared")
 
 	globalToolSkillsDir := filepath.Join(config.HostToolConfigDir(home, "claude"), "skills")
 	writeSkill(t, filepath.Join(globalToolSkillsDir, "global-tool-only"), "global-tool")

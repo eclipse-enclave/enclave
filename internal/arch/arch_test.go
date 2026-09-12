@@ -33,6 +33,9 @@ var dockerImportAllowlist = []string{
 	// and devcontainer support are Docker-specific.
 	"internal/app/build.go",
 	"internal/app/build_preflight.go",
+	// Engine selection switches the CLI wrapper to docker or podman before any
+	// backend instance exists.
+	"internal/app/backend.go",
 	"internal/app/cleanup.go",
 	"internal/devcontainer/devcontainer.go",
 	"internal/gateway/gateway.go",

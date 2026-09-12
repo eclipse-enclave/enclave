@@ -173,15 +173,27 @@ func (b *Backend) syncSharedAuthStores(ctx context.Context, helperImage string, 
 
 	cmd := sharedAuthSyncCommand("/auth-reconcile.sh", tool, validated, b.chownSpec(), "/config", "/auth")
 	hostConfig := sharedAuthSyncHostConfig(configDir, authDir, scriptPath, util.IsSELinuxEnforcing())
+	applyHostUserNamespace(hostConfig)
 
 	return hoststore.WithLock(b.opts.Host.Home, authDir, func() error {
 		return dockercmd.Run(ctx, &dockercmd.ContainerConfig{
 			Image:      image,
 			Entrypoint: []string{"sh", "-c"},
 			Cmd:        []string{cmd},
-			User:       "root",
+			User:       b.authSyncHelperUser(),
 		}, hostConfig, "")
 	})
+}
+
+// authSyncHelperUser is the user the reconcile helper runs as. Docker runs it
+// as root; under rootless podman with keep-id, container root maps to a
+// subordinate host UID, so anything it created would be undeletable for the
+// host user. There the helper runs as the host user, which owns both stores.
+func (b *Backend) authSyncHelperUser() string {
+	if dockercmd.IsPodman() {
+		return b.chownSpec()
+	}
+	return "root"
 }
 
 // sharedAuthSyncHostConfig builds the reconcile helper's host config: the

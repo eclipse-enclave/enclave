@@ -274,7 +274,7 @@ Quick rule of thumb:
 - User-facing runtime option: all of the above plus security notes when
   applicable.
 
-Backend option note: `--backend` is config-backed and defaults to `docker`; experimental `qemu` is available for foreground slim/no-feature unrestricted sessions.
+Backend option note: `--backend` is config-backed and defaults to `auto`, which `app.resolveBackend` turns into `docker` or `podman` from `backenddocker.DetectCLIs()` (prompting once via `prompt.Choose` and persisting with `config.WriteGlobalDefault` when both are installed and a terminal is present); `podman` reuses the Docker backend (`internal/backend/docker`) over the podman CLI by switching the binary in `internal/docker` once at startup (`docker.SetBinary`), with `docker.IsPodman()` gating the few engine differences (`--userns=keep-id`, `info` schema, build cache flags, and `renderEngineDockerfile` stripping home-directory cache mounts from the rendered Dockerfile); experimental `qemu` is available for foreground slim/no-feature unrestricted sessions.
 
 Build option note: `--features` is available on CLI. In devcontainer mode,
 unset features default to none, so pass `--features` explicitly when needed.

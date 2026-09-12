@@ -27,6 +27,10 @@ import (
 )
 
 type Options struct {
+	// Engine names the container CLI this backend drives, backend.NameDocker
+	// or backend.NamePodman; empty means docker. The shared CLI wrapper is
+	// switched separately by the caller before any backend exists.
+	Engine              string
 	Host                model.Host
 	Paths               model.Paths
 	ReconcileScriptPath string
@@ -49,10 +53,18 @@ func New(opts Options) *Backend {
 	return b
 }
 
-func (b *Backend) Name() string { return backend.NameDocker }
+func (b *Backend) Name() string {
+	if b.opts.Engine == backend.NamePodman {
+		return backend.NamePodman
+	}
+	return backend.NameDocker
+}
 
 func (b *Backend) Check(ctx context.Context) error {
 	if err := dockercmd.Ping(ctx); err != nil {
+		if dockercmd.IsPodman() {
+			return fmt.Errorf("podman is not usable: %w", err)
+		}
 		return fmt.Errorf("docker daemon is not running: %w", err)
 	}
 	return nil
@@ -64,37 +76,75 @@ func (b *Backend) Capabilities() backend.Capabilities {
 
 func (b *Backend) Storage() backend.StoreManager { return b.storage }
 
+// Run prepares and attaches a foreground session. Cancelling ctx (the caller
+// wires it to SIGINT/SIGTERM) aborts a start still in progress and tears down
+// what it created; once the session is attached the engine child owns the
+// terminal and is deliberately detached from ctx.
 func (b *Backend) Run(ctx context.Context, req backend.Request, attach backend.AttachIO) (backend.ExitStatus, error) {
 	// Post-run credential sync runs on every foreground outcome (success,
 	// tool failure, even setup failure), matching the previous runtime
-	// behavior. Registered first so it runs after the gateway teardown.
+	// behavior. Registered first so it runs after the gateway teardown. An
+	// interrupted start is the exception: nothing ran that could have changed
+	// credentials, and the sync would make the user wait for another container.
+	interrupted := false
 	if req.AuthSync != nil {
-		defer b.runRequestAuthSync(req)
+		defer func() {
+			if !interrupted {
+				b.runRequestAuthSync(req)
+			}
+		}()
 	}
 	spec, err := b.prepareRun(ctx, req)
 	if err != nil {
+		if ctx.Err() != nil {
+			interrupted = true
+			return backend.ExitStatus{}, interruptedStart()
+		}
 		return backend.ExitStatus{}, err
 	}
 	if spec.cleanup != nil {
 		defer spec.cleanup()
 	}
-	err = runForeground(ctx, spec.config, spec.hostConfig, spec.name, attach)
+	if ctx.Err() != nil {
+		interrupted = true
+		return backend.ExitStatus{}, interruptedStart()
+	}
+	// Ctrl-C now reaches the tool through the TTY or the engine's signal
+	// proxying; cancelling ctx must not kill the attached child and strand a
+	// running session.
+	err = runForeground(context.WithoutCancel(ctx), spec.config, spec.hostConfig, spec.name, attach)
 	return exitStatus(err), neutralizeExitError(err)
 }
 
 func (b *Backend) Start(ctx context.Context, req backend.Request) (backend.SessionRef, error) {
 	spec, err := b.prepareRun(ctx, req)
 	if err != nil {
+		if ctx.Err() != nil {
+			return backend.SessionRef{}, interruptedStart()
+		}
 		return backend.SessionRef{}, err
 	}
 	id, err := dockercmd.RunDetachedInteractive(ctx, spec.config, spec.hostConfig, spec.name)
 	if err != nil {
+		if ctx.Err() != nil {
+			// The interrupt may have landed after the engine created the
+			// container; it has to go before the gateway it joins.
+			if rmErr := dockercmd.ContainerRemove(context.WithoutCancel(ctx), spec.name, true, false); rmErr != nil && !dockercmd.IsNotFound(rmErr) {
+				logx.Warnf("Failed to remove container %s after an interrupted start: %v", spec.name, rmErr)
+			}
+			err = interruptedStart()
+		}
 		if spec.cleanup != nil {
 			spec.cleanup()
 		}
 		return backend.SessionRef{}, err
 	}
 	return backend.SessionRef{Name: spec.name, ID: id}, nil
+}
+
+func interruptedStart() error {
+	logx.Warnf("Interrupted before the session started; cleaning up.")
+	return backend.ErrInterrupted
 }
 
 func (b *Backend) List(ctx context.Context, filter backend.SessionFilter) ([]backend.Session, error) {
@@ -172,7 +222,6 @@ func (b *Backend) Stop(ctx context.Context, ref backend.SessionRef, opts backend
 			stopErr = err
 		}
 	}
-	gateway.Stop(name)
 	return stopErr
 }
 
@@ -181,11 +230,22 @@ func (b *Backend) Remove(ctx context.Context, ref backend.SessionRef) error {
 	if err := b.finalizeManagedContainerAuth(ctx, name); err != nil {
 		return fmt.Errorf("finalize auth before removing container %s: %w", name, err)
 	}
-	return dockercmd.ContainerRemove(ctx, name, true, false)
+	return removeSessionContainer(ctx, name)
 }
 
 func (b *Backend) RemoveWithoutFinalize(ctx context.Context, ref backend.SessionRef) error {
-	return dockercmd.ContainerRemove(ctx, sessionRefName(ref), true, false)
+	return removeSessionContainer(ctx, sessionRefName(ref))
+}
+
+// removeSessionContainer removes the session container and then tears down
+// its gateway. The gateway must go second: podman refuses to remove a
+// container whose network namespace another container still joins, even an
+// exited one, so stopping the auto-removing gateway first would leave it
+// behind as an exited container.
+func removeSessionContainer(ctx context.Context, name string) error {
+	err := dockercmd.ContainerRemove(ctx, name, true, false)
+	gateway.Stop(name)
+	return err
 }
 
 var execInteractive = dockercmd.ExecInteractive
@@ -231,12 +291,15 @@ func (b *Backend) prepareRun(ctx context.Context, req backend.Request) (runSpec,
 		b.applyDevcontainerRunArgs(spec.config, spec.hostConfig)
 		spec.config.Env = append(spec.config.Env, runtimeUIDRemapEnv...)
 	}
+	if err := b.prepareImageUserNamespace(ctx, req.Image); err != nil {
+		return runSpec{}, err
+	}
 	if req.Network.Mode == backend.NetworkModeRestricted {
 		gatewayName, cleanup, err := b.startGateway(ctx, req)
 		if err != nil {
 			return runSpec{}, err
 		}
-		spec.hostConfig.NetworkMode = dockercmd.NetworkMode("container:" + gatewayName)
+		joinGatewayNamespaces(spec.hostConfig, gatewayName)
 		spec.cleanup = cleanup
 	} else {
 		spec.config.ExposedPorts = portSet(req.Ports)
@@ -293,10 +356,34 @@ func (b *Backend) dockerConfig(req backend.Request) runSpec {
 		Mounts:     mounts,
 		Init:       &init,
 	}
+	applyHostUserNamespace(hostConfig)
 	if !req.Security.Admin {
 		applyContainerHardening(hostConfig)
 	}
 	return runSpec{config: config, hostConfig: hostConfig, name: req.Session.Name}
+}
+
+// joinGatewayNamespaces attaches the session to the gateway's network stack.
+// Under rootless podman the session also joins the gateway's user namespace:
+// the gateway already runs with the keep-id mapping (see gateway.gatewayUserNS),
+// and a separate keep-id namespace could not mount sysfs in a network namespace
+// it does not own, which fails container creation under runc.
+func joinGatewayNamespaces(hostConfig *dockercmd.HostConfig, gatewayName string) {
+	hostConfig.NetworkMode = dockercmd.NetworkMode("container:" + gatewayName)
+	if hostConfig.UserNS != "" {
+		hostConfig.UserNS = "container:" + gatewayName
+	}
+}
+
+// applyHostUserNamespace keeps the host user's UID/GID identity inside the
+// container under rootless podman. Its default mapping puts container root on
+// the host user and every other UID on a subordinate range, so an image user
+// built with the host UID could not write the bind-mounted stores; keep-id
+// maps that UID onto itself like Docker does without user namespaces.
+func applyHostUserNamespace(hostConfig *dockercmd.HostConfig) {
+	if dockercmd.IsPodman() {
+		hostConfig.UserNS = "keep-id"
+	}
 }
 
 func labelsFromRequest(req backend.Request) map[string]string {
@@ -519,7 +606,7 @@ func fillGatewayPorts(ctx context.Context, sessions []backend.Session) {
 		if len(sessions[i].Ports) > 0 || sessions[i].Status != "running" {
 			continue
 		}
-		name := sessions[i].Ref.Name + model.GatewayContainerSuffix
+		name := gateway.ContainerName(sessions[i].Ref.Name)
 		names = append(names, name)
 		gatewayIndex[name] = i
 	}
@@ -669,7 +756,7 @@ func (b *Backend) warnInsecureDockerConfig(ctx context.Context) {
 			return
 		}
 	}
-	logx.Warnf("Docker is running without userns-remap or rootless mode; container root maps to host root. See docs/security/host-hardening.md.")
+	logx.Warnf("%s is running without userns-remap or rootless mode; container root maps to host root. See docs/security/host-hardening.md.", util.TitleCase(dockercmd.Binary()))
 }
 
 func exitStatus(err error) backend.ExitStatus {

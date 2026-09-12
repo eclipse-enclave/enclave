@@ -47,7 +47,7 @@ supported under `tool_overrides.<tool>`.
 | Key | Description |
 |-----|-------------|
 | `tool` | Default tool (e.g. `claude`, `codex`) |
-| `backend` | Isolation backend (`docker`, default; experimental `qemu`) |
+| `backend` | Isolation backend: `auto` (default) uses docker or podman, whichever is installed, and asks once when both are; or `docker`, `podman`, experimental `qemu` |
 | `host_config` | `none` (default) or `passthrough` |
 | `tool_overrides.<tool>.host_config_paths` | Per-tool passthrough path directives (`default`, `+path`, `-path`, or explicit list) |
 | `yolo` | Enable YOLO mode (default: `true`). Only consulted when the selected tool's profile leaves `yoloEnabled` unset; every bundled CLI agent sets it, so use `--yolo`/`--no-yolo` for those |

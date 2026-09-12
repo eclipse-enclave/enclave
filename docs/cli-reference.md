@@ -71,6 +71,8 @@ the single running container of the current project. An argument that is present
 but blank (`enclave stop "$SESSION"` with an unset variable) is rejected instead
 of being treated as "no argument".
 
+Ctrl-C or SIGTERM while a session is still starting aborts the start with exit code 130 and removes what it created, including the gateway sidecar. A sidecar that an interrupted start nevertheless left behind (for example after a `kill -9`) is removed automatically the next time a session of the same name starts. Once the session is attached, Ctrl-C goes to the tool. SIGINT or SIGTERM sent to the enclave process itself (for example by a supervisor) is forwarded to the engine, which delivers it to the tool; the session then exits with the tool's status and the usual cleanup runs.
+
 ### Inspect
 
 | Command | Description |
@@ -201,7 +203,7 @@ Mutation commands (`add-domain`, `remove-domain`, `set-mode`) apply the new poli
 | Flag | Description |
 |------|-------------|
 | `--tool <tool>` | Tool profile to use (`claude` by default; run `enclave tools` for the installed list) |
-| `--backend <backend>` | Isolation backend: `docker` (default) or experimental `qemu` |
+| `--backend <backend>` | Isolation backend: `auto` (default: docker or podman, whichever is installed), `docker`, `podman`, or experimental `qemu` |
 | `--name <name>` | Named persistent session |
 | `--background` | Detached background session |
 | `-p <port>` | Publish a container port to the host (container → host, e.g. `-p 3002`). A host port of `0` (e.g. `-p 0:3000`) lets the daemon pick a free host port (Docker only); read it back with `enclave ps --json`. |
@@ -282,6 +284,18 @@ Mutation commands (`add-domain`, `remove-domain`, `set-mode`) apply the new poli
 | Secrets scope | `both` |
 
 Persistent defaults can be set in `~/.config/enclave/config.json` (global) or `~/.config/enclave/projects/<hash>/config.json` (per-project). See [Configuration](configuration.md).
+
+## Backend detection
+
+The default backend is `auto`: enclave uses docker when its CLI is on `PATH`, otherwise podman. A `docker` command that is really the `podman-docker` shim counts as podman, and an explicit `docker`, from `--backend` or the `backend` key, that turns out to be the shim is driven as podman as well, with a notice. When both engines are installed, a command that uses an engine asks once which one to use and saves the answer as `"backend"` in `~/.config/enclave/config.json`. The question is only asked when stdin, stdout, and stderr are terminals and no `--json` or `--yes` was given; otherwise (scripts, captured output, JSON consumers) docker is used and a notice points at that key. Commands that never touch an engine (`tools`, `features`, `config`, `review-target`, `network print`, `network diff`, `devcontainer generate`) neither detect nor ask. When neither engine is found, the engine check reports it. An explicit `--backend` or a configured `backend` disables detection.
+
+## Podman backend
+
+`--backend podman` drives the Docker backend through podman's Docker-compatible CLI (`podman` on `PATH`; rootless is the tested configuration). Everything the Docker backend does applies unchanged — image builds via buildah, the gateway sidecar with restricted egress, detached sessions, `exec`/`attach`, persistent stores — with a few engine-specific adjustments: the gateway sidecar runs as root inside a `--userns=keep-id` user namespace, auth-reconcile containers run with `--userns=keep-id`, and the session container joins the gateway's user namespace (`--userns=container:<gateway>`) alongside its network namespace, so the container user keeps the host user's UID/GID on bind-mounted stores under rootless podman while sharing one user namespace with the network stack it joins (a separate keep-id namespace cannot mount `/sys` in a network namespace it does not own, which fails container creation under runc; crun masks this by bind-mounting the host `/sys`); image builds rely on podman's local layer cache instead of Docker's `--cache-from`/inline-cache flags, and `--buildx-cache-dir`, `--buildx-cache-from`, and `--buildx-cache-to` are ignored with a warning because podman has no buildx cache import or export; and the rendered Dockerfile drops the npm/Go/uv build caches mounted under the agent home, because buildah commits the parent directories of such cache mounts as root-owned, which would leave the agent unable to write its home (apt caches and layer caching still apply, so only cold rebuilds of feature and tool installs are slower). Devcontainer mode is only verified with Docker and stays rejected for `podman`. Images carry the same tags as under Docker (podman stores them as `localhost/enclave-<tool>:...`). Container inspection accepts both podman 4.x output, which renders `Entrypoint` as one string, and the Docker-shaped arrays of podman 5. The gateway base images are fully qualified (`docker.io/library/...`) and digest-pinned, and the digest-pinned `debian` and `node` base images of the tool image bypass short-name resolution, so hosts without `unqualified-search-registries` or registry aliases in `registries.conf` build both images; a custom `--base-image` given as a bare short name still needs an alias or search registry there.
+
+Rootless podman without idmapped-mount support has to copy an image into a layer for the keep-id mapping the first time that image starts, and again after every image rebuild. enclave triggers this copy before the gateway starts and prints a notice when it takes longer than two seconds; for multi-gigabyte tool images it takes minutes, during which podman blocks every other podman command, including `enclave ps`.
+
+`--backend` is a session flag; commands without it (`ps`, `stop`, `attach`, `status`, `cleanup`, `network`) resolve the backend the same way, from the `backend` key in `config.json` or by detection, so a saved or detected `podman` applies to them too. `cleanup --build-cache` reports nothing to reclaim under podman, which keeps no separate build cache.
 
 ## Experimental QEMU backend
 

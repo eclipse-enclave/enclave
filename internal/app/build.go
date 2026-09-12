@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -136,6 +137,46 @@ func inspectImageInfo(imageName string) imageInfo {
 
 var dockerPing = docker.Ping
 
+// renderEngineDockerfile renders the Dockerfile for the selected tools and
+// features and adapts it to the container engine in use. Both the rebuild
+// hash and the build itself go through it so they see identical content.
+func renderEngineDockerfile(templatePath string, tools []string, features []featureInstall, stamps map[string]string, forceTools map[string]bool) (string, error) {
+	content, err := renderDockerfile(templatePath, tools, features, stamps, forceTools)
+	if err != nil {
+		return "", err
+	}
+	if docker.IsPodman() {
+		content = stripHomeCacheMounts(content)
+	}
+	return content, nil
+}
+
+// homeCacheMountPattern matches one `--mount=type=cache,...` RUN flag whose
+// target lies under the agent home.
+var homeCacheMountPattern = regexp.MustCompile(`--mount=type=cache,[^\s\\]*target=/home/[^\s\\]*`)
+
+// stripHomeCacheMounts removes cache mounts targeting the agent home from RUN
+// steps. buildah (podman build) commits the ancestors of such mount targets
+// as root-owned 0755 directories whenever the step modified them, which
+// leaves the agent unable to write its own home; the caches only speed up
+// rebuilds, and buildah's layer cache still applies. Continuation lines left
+// with nothing but a backslash are dropped.
+func stripHomeCacheMounts(dockerfile string) string {
+	if !strings.Contains(dockerfile, "target=/home/") {
+		return dockerfile
+	}
+	lines := strings.Split(dockerfile, "\n")
+	out := make([]string, 0, len(lines))
+	for _, line := range lines {
+		stripped := homeCacheMountPattern.ReplaceAllString(line, "")
+		if stripped != line && strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(stripped), "\\")) == "" {
+			continue
+		}
+		out = append(out, stripped)
+	}
+	return strings.Join(out, "\n")
+}
+
 // checkDocker distinguishes the common connectivity failures so users are not
 // sent chasing a stopped daemon when the CLI is missing or socket access is
 // denied.
@@ -144,10 +185,14 @@ func checkDocker() error {
 	switch {
 	case err == nil:
 		return nil
+	case docker.IsCLIUnavailable(err) && docker.IsPodman():
+		return fmt.Errorf("podman CLI not found on PATH; install Podman and retry")
 	case docker.IsCLIUnavailable(err):
-		return fmt.Errorf("docker CLI not found on PATH; install Docker and retry")
+		return fmt.Errorf("docker CLI not found on PATH; install Docker or Podman and retry")
 	case docker.IsSocketPermissionDenied(err):
 		return fmt.Errorf("cannot access the Docker socket: permission denied. Grant this user access to Docker (commonly by adding it to the docker group and logging in again; see https://docs.docker.com/engine/install/linux-postinstall/), then retry")
+	case docker.IsPodman():
+		return fmt.Errorf("podman is not usable: %w", err)
 	default:
 		return fmt.Errorf("docker daemon is not reachable: %w", err)
 	}
@@ -411,7 +456,7 @@ func needsRebuildForSelection(paths model.Paths, buildCfg buildConfig, selection
 	if err != nil {
 		return false, "", err
 	}
-	dockerfileContent, err := renderDockerfile(paths.Dockerfile, selection.Tools, featureInstalls, nil, nil)
+	dockerfileContent, err := renderEngineDockerfile(paths.Dockerfile, selection.Tools, featureInstalls, nil, nil)
 	if err != nil {
 		return false, "", err
 	}
@@ -503,7 +548,7 @@ func buildImage(ctx context.Context, paths model.Paths, host model.Host, combine
 	if err != nil {
 		return err
 	}
-	dockerfileContent, err := renderDockerfile(paths.Dockerfile, updates.Tools, featureInstalls, updates.Stamps, updates.ForceTools)
+	dockerfileContent, err := renderEngineDockerfile(paths.Dockerfile, updates.Tools, featureInstalls, updates.Stamps, updates.ForceTools)
 	if err != nil {
 		return err
 	}
@@ -551,7 +596,7 @@ func buildImage(ctx context.Context, paths model.Paths, host model.Host, combine
 		model.LabelBuilt:   buildTimestamp,
 	}
 
-	buildxCacheTo, err := resolveBuildxCacheTo(opts)
+	buildxCacheFrom, buildxCacheTo, err := resolveBuildxCache(opts)
 	if err != nil {
 		return fmt.Errorf("prepare buildx cache directory: %w", err)
 	}
@@ -565,7 +610,7 @@ func buildImage(ctx context.Context, paths model.Paths, host model.Host, combine
 		BuildArgs:         buildArgs,
 		Labels:            labels,
 		CacheFrom:         cacheFrom,
-		BuildxCacheFrom:   resolveBuildxCacheFrom(opts),
+		BuildxCacheFrom:   buildxCacheFrom,
 		BuildxCacheTo:     buildxCacheTo,
 		Progress:          opts.Progress,
 	}
@@ -1180,4 +1225,24 @@ func writeAgentUpdateStateValue(stateDir string, stateFile string, value string)
 		return err
 	}
 	return nil
+}
+
+// resolveBuildxCache returns the buildx cache import and export specs for the
+// build. podman has no buildx cache import or export (its --cache-from and
+// --cache-to take remote repositories), so under podman the specs are dropped
+// with a warning instead of failing the build; podman's local layer cache
+// still applies.
+func resolveBuildxCache(opts model.BuildOptions) ([]string, []string, error) {
+	if docker.IsPodman() {
+		if len(cleanBuildxCacheSpecs(opts.BuildxCacheFrom)) > 0 || len(cleanBuildxCacheSpecs(opts.BuildxCacheTo)) > 0 || strings.TrimSpace(opts.BuildxCacheDir) != "" {
+			logx.Warnf("podman has no buildx cache import or export; ignoring --buildx-cache-dir, --buildx-cache-from, and --buildx-cache-to")
+		}
+		return nil, nil, nil
+	}
+	from := resolveBuildxCacheFrom(opts)
+	to, err := resolveBuildxCacheTo(opts)
+	if err != nil {
+		return nil, nil, err
+	}
+	return from, to, nil
 }

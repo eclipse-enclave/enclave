@@ -8,7 +8,6 @@
 package runtime
 
 import (
-	"context"
 	"fmt"
 
 	"enclave/internal/logx"
@@ -37,7 +36,9 @@ func (r *Runtime) ExecuteBackground() (string, error) {
 		}
 		return "", fmt.Errorf("runtime backend is not configured")
 	}
-	if _, err := be.Start(context.Background(), r.backendRequest(ctx, true, true)); err != nil {
+	runCtx, stop := interruptContext()
+	defer stop()
+	if _, err := be.Start(runCtx, r.backendRequest(ctx, true, true)); err != nil {
 		if ctx.Cleanup != nil {
 			ctx.Cleanup()
 		}

@@ -13,14 +13,40 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
 )
 
-// dockerBinary is the docker CLI executable. It is a variable so tests can
-// point it at a stub.
+// dockerBinary is the container CLI executable, "docker" by default. It is a
+// variable so tests can point it at a stub and so SetBinary can switch the
+// whole package to the Docker-compatible podman CLI.
 var dockerBinary = "docker"
+
+// podmanBinary is the executable name that selects podman-specific behavior
+// (see IsPodman).
+const podmanBinary = "podman"
+
+// SetBinary selects the container CLI executable every command in this
+// package invokes. Call it once, before any other function in this package.
+func SetBinary(name string) {
+	if strings.TrimSpace(name) != "" {
+		dockerBinary = name
+	}
+}
+
+// Binary returns the container CLI executable in use.
+func Binary() string {
+	return dockerBinary
+}
+
+// IsPodman reports whether the package drives the podman CLI, whose
+// Docker-compatible surface differs in a few places (rootless user namespace
+// mapping, `info` schema, build cache flags).
+func IsPodman() bool {
+	return filepath.Base(dockerBinary) == podmanBinary
+}
 
 // cliError wraps a failed `docker` invocation, retaining stderr and the exit
 // code so callers can classify failures (see IsNotFound and the run helpers).
@@ -39,7 +65,7 @@ func (e *cliError) Error() string {
 	if msg == "" {
 		msg = "command failed"
 	}
-	return fmt.Sprintf("docker %s: %s", strings.Join(e.args, " "), msg)
+	return fmt.Sprintf("%s %s: %s", filepath.Base(dockerBinary), strings.Join(e.args, " "), msg)
 }
 
 func (e *cliError) Unwrap() error {
@@ -143,6 +169,9 @@ func captureCmd(ctx context.Context, trim bool, args ...string) (string, error) 
 
 // runMode selects the foreground/detached and TTY behaviour for `docker run`.
 type runMode struct {
+	// Create builds a `docker create` (container created, never started)
+	// instead of `docker run`.
+	Create      bool
 	Detach      bool
 	Interactive bool
 	TTY         bool
@@ -152,6 +181,9 @@ type runMode struct {
 // list for `docker run`. Flags come first, then the image, then the command.
 func buildRunArgs(config *ContainerConfig, hostConfig *HostConfig, name string, mode runMode) []string {
 	args := []string{"run"}
+	if mode.Create {
+		args[0] = "create"
+	}
 	if mode.Detach {
 		args = append(args, "--detach")
 	}
@@ -197,6 +229,9 @@ func buildRunArgs(config *ContainerConfig, hostConfig *HostConfig, name string, 
 		}
 		if hostConfig.Init != nil && *hostConfig.Init {
 			args = append(args, "--init")
+		}
+		if hostConfig.UserNS != "" {
+			args = append(args, "--userns", hostConfig.UserNS)
 		}
 		if !hostConfig.NetworkMode.IsEmpty() {
 			args = append(args, "--network", string(hostConfig.NetworkMode))

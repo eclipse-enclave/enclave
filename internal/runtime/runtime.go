@@ -197,9 +197,11 @@ func (r *Runtime) Execute() error {
 	if ctx.Cleanup != nil {
 		defer ctx.Cleanup()
 	}
+	runCtx, stop := interruptContext()
+	defer stop()
 	// The backend syncs auth files from the config store to the shared auth
 	// store after the container exits, per the request's AuthSync intent.
-	return r.runContainer(ctx, releaseStartLock)
+	return r.runContainer(runCtx, ctx, releaseStartLock)
 }
 
 func (r *Runtime) acquireSessionStartLock() (func(), error) {
@@ -241,6 +243,7 @@ func (r *Runtime) prepareExecution() (*ExecutionContext, error) {
 			containerName = baseContainerName
 		}
 	}
+	r.removeStaleGateway(containerName)
 	r.setConfigVolumeSuffix(containerName, baseContainerName)
 	r.logContainerStart(containerName, baseContainerName)
 	r.warnPostStartInteractive()
@@ -303,6 +306,20 @@ func (r *Runtime) removeStoppedSession(name string) {
 		return
 	}
 	_ = r.backend.Remove(context.Background(), ref)
+}
+
+// removeStaleGateway drops a gateway sidecar left behind when an earlier start
+// of this session name was interrupted before its container existed. It must
+// run before the OAuth port check, which would otherwise fail on the ports the
+// sidecar still publishes.
+func (r *Runtime) removeStaleGateway(containerName string) {
+	remover, ok := r.backend.(backend.StaleGatewayRemover)
+	if !ok {
+		return
+	}
+	if err := remover.RemoveStaleGateway(context.Background(), containerName); err != nil {
+		logx.Warnf("Failed to check for a stale gateway of %s: %v", containerName, err)
+	}
 }
 
 func (r *Runtime) logContainerStart(containerName string, baseContainerName string) {
@@ -780,18 +797,21 @@ func boundHostPort(bindings []backend.PortMapping, containerPort string) string 
 	return ""
 }
 
-func (r *Runtime) runContainer(ctx *ExecutionContext, releaseStartLock func()) error {
+func (r *Runtime) runContainer(runCtx context.Context, ctx *ExecutionContext, releaseStartLock func()) error {
 	be := r.backend
 	if be == nil {
 		return fmt.Errorf("runtime backend is not configured")
 	}
-	restoreTint := termtint.Begin(r.run.SessionTint)
+	// runCtx turns SIGINT and SIGTERM into a cancelled start that returns through
+	// the deferred restore; termtint must not re-raise them and kill the process
+	// while the gateway is still being removed.
+	restoreTint := termtint.Begin(r.run.SessionTint, termtint.CallerHandles(interruptSignals...))
 	defer restoreTint()
 	// The session-start lock must be released via OnStarted, not after Run
 	// returns: Run blocks for the whole foreground session, and holding the
 	// lock that long would stall every other session start for this tool and
 	// project. The deferred release in Execute only backstops error paths.
-	_, err := be.Run(context.Background(), r.backendRequest(ctx, false, true), backend.AttachIO{TTY: true, OnStarted: func() {
+	_, err := be.Run(runCtx, r.backendRequest(ctx, false, true), backend.AttachIO{TTY: true, OnStarted: func() {
 		releaseStartLock()
 		r.announcePublishedPorts(ctx.ContainerName)
 	}})

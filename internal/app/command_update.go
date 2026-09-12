@@ -56,6 +56,9 @@ func runUpdate(input *CommandInput) int {
 		// matches what `enclave --tool <tool>` would produce, not the default
 		// tool's variant.
 		toolOpts, _, _ := config.ResolveOptionsForTool(input.CLIOptions, input.CLISources, input.GlobalDefaults, input.ProjectDefaults, tool)
+		// The backend is a host-level choice already resolved in Run; a
+		// per-tool re-resolution would otherwise see the unresolved "auto".
+		toolOpts.Backend = input.Options.Backend
 		toolOpts, _, warnings, validateErr := ValidateOptions(toolOpts, toolOpts.Sources, ValidationContext{
 			Paths:  input.Ctx.Paths,
 			Action: input.Action,

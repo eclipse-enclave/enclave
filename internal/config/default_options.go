@@ -13,7 +13,7 @@ func DefaultOptions() model.Options {
 	return model.Options{
 		RunOptions: model.RunOptions{
 			Tool:             "claude",
-			Backend:          "docker",
+			Backend:          "auto",
 			HostConfig:       model.HostConfigNone,
 			NetworkLog:       model.NetworkLogCoarse,
 			ProjectMount:     model.ProjectMountWritable,

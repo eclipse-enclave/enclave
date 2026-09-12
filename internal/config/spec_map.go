@@ -302,6 +302,18 @@ func buildPorts(doc specDocument) []model.PortConfig {
 	return out
 }
 
+// buildCaches maps specCache entries onto model.CacheConfig.
+func buildCaches(doc specDocument) []model.CacheConfig {
+	if len(doc.Caches) == 0 {
+		return nil
+	}
+	out := make([]model.CacheConfig, 0, len(doc.Caches))
+	for _, c := range doc.Caches {
+		out = append(out, model.CacheConfig{Name: c.Name, Target: c.Target})
+	}
+	return out
+}
+
 // specToProfile projects a sandbox (kind: sandbox) specDocument onto the
 // runtime model.Profile used by the existing run path.
 func specToProfile(doc specDocument) model.Profile {
@@ -310,6 +322,7 @@ func specToProfile(doc specDocument) model.Profile {
 		Providers: buildProviders(doc),
 		Secrets:   buildSecrets(doc),
 		Ports:     buildPorts(doc),
+		Caches:    buildCaches(doc),
 	}
 	if doc.Network != nil {
 		p.AllowedDomains = doc.Network.AllowedDomains
@@ -370,6 +383,7 @@ func specToExtension(doc specDocument) (model.Extension, extensionManifestState)
 		AuthFiles:   doc.AuthFiles,
 		Secrets:     buildSecrets(doc),
 		Ports:       buildPorts(doc),
+		Caches:      buildCaches(doc),
 	}
 	if doc.Network != nil {
 		ext.AllowedDomains = doc.Network.AllowedDomains

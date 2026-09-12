@@ -218,6 +218,7 @@ type Profile struct {
 	QEMUMinMemoryMiB    int                     `json:"qemu_min_memory_mib,omitempty"`
 	QEMUStoreCacheMmap  bool                    `json:"qemu_store_cache_mmap,omitempty"`
 	Ports               []PortConfig            `json:"ports,omitempty"`
+	Caches              []CacheConfig           `json:"caches,omitempty"`
 	Providers           []ProviderConfig        `json:"providers"`
 	Secrets             map[string]SecretConfig `json:"secrets,omitempty"`
 	HostConfigDir       string                  `json:"host_config_dir"`
@@ -240,6 +241,33 @@ type Profile struct {
 	// aliases listed here, only those aliases carry the placeholder; the rest
 	// receive the raw value. Internal-only, like AllowedDomains/EnvVariables.
 	ProxyManaged []string `json:"proxyManaged,omitempty"`
+}
+
+// CacheConfig declares one persistent per-project cache directory: Name is the
+// subdirectory under the enclave-managed host project cache dir, Target the
+// container path it is bind-mounted at, relative to the container home. The
+// host side is always enclave-managed — a spec names a cache subdirectory and
+// a container target, never a host path.
+type CacheConfig struct {
+	Name   string `json:"name"`
+	Target string `json:"target"`
+}
+
+// BuiltinProjectCaches are the package caches every session bind-mounts from
+// the enclave-managed host project cache dir into the container home (unless
+// --no-cache). Extension-declared caches may not collide with them by name or
+// target.
+var BuiltinProjectCaches = []CacheConfig{
+	{Name: "npm", Target: ".npm"},
+	{Name: "pip", Target: ".cache/pip"},
+	{Name: "go", Target: "go/pkg/mod"},
+	{Name: "go-build", Target: ".cache/go-build"},
+	{Name: "cargo", Target: ".cargo"},
+	{Name: "pnpm", Target: ".local/share/pnpm"},
+	{Name: "uv", Target: ".cache/uv"},
+	{Name: "yarn", Target: ".cache/yarn"},
+	{Name: "bun", Target: ".bun"},
+	{Name: "nvm", Target: ".nvm/versions"},
 }
 
 // PostStartActions describes side effects to perform once the container is
@@ -412,6 +440,9 @@ type Extension struct {
 	// true are bound for sessions that enable the feature, flowing through the
 	// same resolution as a user-supplied -p.
 	Ports []PortConfig `json:"ports,omitempty"`
+	// Caches mirrors Profile.Caches for mixins: declared per-project cache
+	// mounts join the built-in list for sessions that enable the feature.
+	Caches []CacheConfig `json:"caches,omitempty"`
 }
 
 func (e Extension) IsMixin() bool   { return e.Type == ExtensionKindMixin }
@@ -471,6 +502,9 @@ const (
 	ContainerHome           = "/home/" + ContainerUser
 	ContainerAuthDir        = "." + AppName + "-auth"
 	ContainerFeatureAuthDir = "." + AppName + "-feature-auth"
+	// ContainerHistoryDir is the home-relative mount point of the persistent
+	// shell-history store (see runtime.addHistoryMounts).
+	ContainerHistoryDir = ".shell_history"
 	// UserCommandsContainerDir is the fixed, home-layout-neutral path where the
 	// host session command tree is mounted read-only inside the container.
 	UserCommandsContainerDir = "/opt/" + AppName + "/commands"

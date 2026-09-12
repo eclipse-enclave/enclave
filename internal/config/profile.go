@@ -76,6 +76,11 @@ func validateAndNormalizeProfile(profile *model.Profile) error {
 	if err := validateAndNormalizeMemoryDir(profile); err != nil {
 		return err
 	}
+	caches, err := validateAndNormalizeCaches(profile.Caches)
+	if err != nil {
+		return err
+	}
+	profile.Caches = caches
 	return validateAndNormalizeProviderSecurestorage(profile.Providers)
 }
 
@@ -84,7 +89,7 @@ func validateAndNormalizeProfile(profile *model.Profile) error {
 // concrete location (not "."). The cleaned value is written back to the profile.
 func validateAndNormalizeMemoryDir(profile *model.Profile) error {
 	if profile.MemoryDir != "" {
-		cleaned, err := cleanMemoryPath(profile.MemoryDir)
+		cleaned, err := cleanHomeRelativePath(profile.MemoryDir)
 		if err != nil {
 			return fmt.Errorf("memory_dir: %w", err)
 		}
@@ -138,7 +143,10 @@ func containerProfilePath(value string) string {
 	return path.Join(model.ContainerHome, value)
 }
 
-func cleanMemoryPath(path string) (string, error) {
+// cleanHomeRelativePath validates a container path that must stay inside the
+// container home: relative, traversal-free, and resolving to a concrete
+// location (not "."). It returns the cleaned value.
+func cleanHomeRelativePath(path string) (string, error) {
 	if path == "" {
 		return "", fmt.Errorf("path is empty")
 	}

@@ -107,6 +107,7 @@ environment: {...}
 credentials: {...}
 providers: [...]          # enclave-native, see "Tool Extensions" below
 ports: [...]              # enclave-native; honored for tools and enabled features
+caches: [...]             # enclave-native; persistent per-project cache mounts, see below
 
 # mixin-only fields (kind: mixin)
 priority: <int, default 100>
@@ -183,6 +184,42 @@ Honored for both sandbox and mixin extensions:
   entry must match a declared `credentials.sources.<id>.env` alias; a typo is
   a load error. Entries are unioned across the tool spec and all enabled
   mixins.
+
+### Project caches (`caches`)
+
+Honored for both sandbox and mixin extensions (enclave-native, not part of the
+sbx format). Each entry asks the runtime to persist one directory of the
+container home across sessions of the same project — a `java-dev` feature can
+keep the Maven local repository, for example:
+
+```yaml
+caches:
+  - name: m2               # subdirectory under the enclave-managed project cache dir
+    target: .m2/repository # container path inside $HOME
+```
+
+At session start the declared entries join the built-in package caches (npm,
+pip, go, go-build, cargo, pnpm, uv, yarn, bun, nvm):
+`~/.cache/enclave/<tool>/<project-hash>/<name>` on the host is bind-mounted at
+`$HOME/<target>` in the container. `--no-cache` disables extension caches along
+with the built-in ones, and `enclave cleanup` removes the whole cache dir
+unless `--keep cache` is set.
+
+The host side is always enclave-managed: a spec names a cache subdirectory and
+a container target, never a host path. Load-time validation rejects a `name`
+outside the extension-name charset, a `target` that is absolute, contains
+traversal, or resolves outside the container home, and any collision with the
+built-in cache names/targets or the runtime's reserved mounts (auth stores,
+shell history). Across the tool spec and all enabled features, an identical
+`name` + `target` pair declared twice dedupes; the same name with a different
+target — or the same target under a different name — fails session start with
+an error naming both claimants.
+
+A cache mount starts empty and **shadows image-baked content** at its target:
+anything the image installed there is invisible until the cache is seeded.
+Seed it from a `feature-entrypoint.d/` script on first start, the way
+`node-dev` copies the image's default Node version into the persistent `nvm`
+cache.
 
 ### Examples
 
@@ -631,6 +668,12 @@ the same container port. `hostAllocation` selects the host port: `fixed` (the
 default) mirrors the container port, while `auto` publishes with an OS-assigned
 host port (the `-p 0:<port>` form) so concurrent sessions do not contend — the
 resolved port appears in the printed `openUrl` and in `enclave ps`.
+
+### Declared caches
+
+A feature can declare top-level `caches` exactly like a tool (see
+[Project caches](#project-caches-caches)). Entries apply only to sessions that
+enable the feature.
 
 ### Available Features
 

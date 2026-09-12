@@ -134,6 +134,10 @@ as `host:port`). Notes:
 - `providers[].oauthPorts` is a separate mechanism for OAuth loopback callbacks
   and is unaffected.
 
+A tool can also declare top-level `caches` to persist directories of the
+container home (package caches, model downloads, ...) per project; see
+[Project caches](README.md#project-caches-caches).
+
 ## 5) Add a settings template
 - Create `extensions/tools/<tool>/templates/<filename>`.
 - It is copied into the image as `/usr/local/share/enclave/templates/<tool>-<filename>`.

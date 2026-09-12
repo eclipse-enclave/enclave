@@ -348,7 +348,9 @@ func (r *Runtime) prepareMounts() (*mountAccumulator, error) {
 	r.addSSHMount(mountArgs)
 	r.addImageInboxMount(mountArgs)
 	r.addSessionMonitorEnv(mountArgs)
-	r.addCacheMounts(mountArgs)
+	if err := r.addCacheMounts(mountArgs); err != nil {
+		return nil, err
+	}
 	r.addHistoryMounts(mountArgs)
 	r.addMemoryMounts(mountArgs)
 	r.addToolConfigMounts(mountArgs)
@@ -1200,42 +1202,74 @@ func (r *Runtime) addSessionMonitorEnv(mounts *mountAccumulator) {
 	mounts.AddEnv(model.EnvSessionMonitorUser, r.containerUser)
 }
 
-func (r *Runtime) addCacheMounts(mounts *mountAccumulator) {
+func (r *Runtime) addCacheMounts(mounts *mountAccumulator) error {
 	pnpmStoreDir := r.containerHome + "/.local/share/pnpm/store"
 	mounts.AddEnv("PNPM_CONFIG_STORE_DIR", pnpmStoreDir)
 
 	if r.run.NoCache {
-		return
+		return nil
+	}
+	caches, err := r.projectCaches()
+	if err != nil {
+		return err
 	}
 	cacheDir := config.HostCacheToolProjectDir(r.host.Home, r.profile.Name, r.project.Hash)
-
-	// Create all cache directories
-	cacheDirs := []string{
-		"npm", "pip",
-		"go", "go-build", "cargo", "pnpm", "uv", "yarn", "bun",
-		"nvm",
+	for _, cache := range caches {
+		hostDir := filepath.Join(cacheDir, cache.Name)
+		_ = os.MkdirAll(hostDir, 0o700)
+		mounts.AddMount(bindMount(hostDir, r.containerHome+"/"+cache.Target, false))
 	}
-	for _, dir := range cacheDirs {
-		_ = os.MkdirAll(filepath.Join(cacheDir, dir), 0o700)
-	}
+	return nil
+}
 
-	mounts.AddMount(bindMount(filepath.Join(cacheDir, "npm"), r.containerHome+"/.npm", false))
-	mounts.AddMount(bindMount(filepath.Join(cacheDir, "pip"), r.containerHome+"/.cache/pip", false))
-	// Go caches
-	mounts.AddMount(bindMount(filepath.Join(cacheDir, "go"), r.containerHome+"/go/pkg/mod", false))
-	mounts.AddMount(bindMount(filepath.Join(cacheDir, "go-build"), r.containerHome+"/.cache/go-build", false))
-	// Rust/Cargo cache
-	mounts.AddMount(bindMount(filepath.Join(cacheDir, "cargo"), r.containerHome+"/.cargo", false))
-	// pnpm store
-	mounts.AddMount(bindMount(filepath.Join(cacheDir, "pnpm"), r.containerHome+"/.local/share/pnpm", false))
-	// uv (Python) cache
-	mounts.AddMount(bindMount(filepath.Join(cacheDir, "uv"), r.containerHome+"/.cache/uv", false))
-	// Yarn cache
-	mounts.AddMount(bindMount(filepath.Join(cacheDir, "yarn"), r.containerHome+"/.cache/yarn", false))
-	// Bun cache
-	mounts.AddMount(bindMount(filepath.Join(cacheDir, "bun"), r.containerHome+"/.bun", false))
-	// nvm installed Node.js versions
-	mounts.AddMount(bindMount(filepath.Join(cacheDir, "nvm"), r.containerHome+"/.nvm/versions", false))
+// projectCaches returns the built-in package caches followed by the caches the
+// tool spec and the enabled features declare. Spec loading already validates
+// each spec in isolation (name charset, target containment, reserved
+// collisions); the cross-extension rules can only be applied here, where the
+// profile and the features meet: the same name+target pair declared twice
+// dedupes, while a name or target re-declared with a different counterpart is
+// an error naming both claimants.
+func (r *Runtime) projectCaches() ([]model.CacheConfig, error) {
+	caches := append([]model.CacheConfig(nil), model.BuiltinProjectCaches...)
+	ownerByName := map[string]string{}
+	targetByName := map[string]string{}
+	ownerByTarget := map[string]string{}
+	claim := func(owner string, cache model.CacheConfig) error {
+		if seenTarget, ok := targetByName[cache.Name]; ok {
+			if seenTarget == cache.Target {
+				return nil
+			}
+			return fmt.Errorf("cache %q: %s declares target %q but %s declares target %q",
+				cache.Name, owner, cache.Target, ownerByName[cache.Name], seenTarget)
+		}
+		if seenOwner, ok := ownerByTarget[cache.Target]; ok {
+			return fmt.Errorf("cache target %q: declared by both %s (cache %q) and %s",
+				cache.Target, owner, cache.Name, seenOwner)
+		}
+		ownerByName[cache.Name] = owner
+		targetByName[cache.Name] = cache.Target
+		ownerByTarget[cache.Target] = owner
+		caches = append(caches, cache)
+		return nil
+	}
+	for _, cache := range model.BuiltinProjectCaches {
+		ownerByName[cache.Name] = "the built-in cache list"
+		targetByName[cache.Name] = cache.Target
+		ownerByTarget[cache.Target] = "the built-in cache list"
+	}
+	for _, cache := range r.profile.Caches {
+		if err := claim(fmt.Sprintf("tool %q", r.profile.Name), cache); err != nil {
+			return nil, err
+		}
+	}
+	for _, feature := range r.features {
+		for _, cache := range feature.Caches {
+			if err := claim(fmt.Sprintf("feature %q", feature.Name), cache); err != nil {
+				return nil, err
+			}
+		}
+	}
+	return caches, nil
 }
 
 func (r *Runtime) addHistoryMounts(mounts *mountAccumulator) {
@@ -1244,8 +1278,9 @@ func (r *Runtime) addHistoryMounts(mounts *mountAccumulator) {
 	}
 	projectDataDir := config.HostProjectHistoryDir(r.host.Home, r.project.Hash, r.profile.Name)
 	_ = os.MkdirAll(projectDataDir, 0o700)
-	mounts.AddMount(bindMount(projectDataDir, r.containerHome+"/.shell_history", false))
-	mounts.AddEnv("HISTFILE", r.containerHome+"/.shell_history/bash_history")
+	historyDir := r.containerHome + "/" + model.ContainerHistoryDir
+	mounts.AddMount(bindMount(projectDataDir, historyDir, false))
+	mounts.AddEnv("HISTFILE", historyDir+"/bash_history")
 }
 
 func (r *Runtime) addMemoryMounts(mounts *mountAccumulator) {

@@ -74,7 +74,7 @@ func (b *Backend) Run(ctx context.Context, req backend.Request, attach backend.A
 	if err != nil {
 		return backend.ExitStatus{}, err
 	}
-	runtime, err := b.prepareGuestRuntime(vmBundle, req)
+	runtime, err := b.prepareGuestRuntime(vmBundle, req, resolveConsoleSize(attach))
 	if err != nil {
 		return backend.ExitStatus{}, err
 	}

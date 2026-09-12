@@ -7,7 +7,10 @@
 
 package model
 
-import "sort"
+import (
+	"sort"
+	"strings"
+)
 
 type RunOptions struct {
 	Tool              string
@@ -218,6 +221,7 @@ type Profile struct {
 	QEMUMinMemoryMiB    int                     `json:"qemu_min_memory_mib,omitempty"`
 	QEMUStoreCacheMmap  bool                    `json:"qemu_store_cache_mmap,omitempty"`
 	Ports               []PortConfig            `json:"ports,omitempty"`
+	Caches              []CacheConfig           `json:"caches,omitempty"`
 	Providers           []ProviderConfig        `json:"providers"`
 	Secrets             map[string]SecretConfig `json:"secrets,omitempty"`
 	HostConfigDir       string                  `json:"host_config_dir"`
@@ -240,6 +244,45 @@ type Profile struct {
 	// aliases listed here, only those aliases carry the placeholder; the rest
 	// receive the raw value. Internal-only, like AllowedDomains/EnvVariables.
 	ProxyManaged []string `json:"proxyManaged,omitempty"`
+}
+
+// CacheConfig declares one persistent per-project cache directory: Name is the
+// subdirectory under the enclave-managed host project cache dir, Target the
+// container path it is bind-mounted at, relative to the container home. Specs
+// never name a host path.
+type CacheConfig struct {
+	Name   string `json:"name"`
+	Target string `json:"target"`
+}
+
+// CacheTargetsOverlap reports whether two home-relative mount targets collide:
+// equal or nested either way. Nested bind mounts depend on mount order and
+// silently shadow each other, so overlap counts as a collision.
+func CacheTargetsOverlap(a string, b string) bool {
+	return a == b || strings.HasPrefix(b, a+"/") || strings.HasPrefix(a, b+"/")
+}
+
+// BuiltinProjectCaches are the package caches every session mounts unless
+// --no-cache. Extension-declared caches must not collide with them by name or
+// target.
+var BuiltinProjectCaches = []CacheConfig{
+	{Name: "npm", Target: ".npm"},
+	{Name: "pip", Target: ".cache/pip"},
+	{Name: "go", Target: "go/pkg/mod"},
+	{Name: "go-build", Target: ".cache/go-build"},
+	{Name: "cargo", Target: ".cargo"},
+	{Name: "pnpm", Target: ".local/share/pnpm"},
+	{Name: "uv", Target: ".cache/uv"},
+	{Name: "yarn", Target: ".cache/yarn"},
+	{Name: "bun", Target: ".bun"},
+	{Name: "nvm", Target: ".nvm/versions"},
+}
+
+// ContainerHomeConfigFiles are the home-relative config files every session
+// bind-mounts from the per-project home-config store (the host filename is the
+// name without the leading dot; see runtime.addToolConfigMounts).
+var ContainerHomeConfigFiles = []string{
+	".npmrc", ".yarnrc", ".yarnrc.yml", ".bunfig.toml", ".node_repl_history",
 }
 
 // PostStartActions describes side effects to perform once the container is
@@ -412,6 +455,9 @@ type Extension struct {
 	// true are bound for sessions that enable the feature, flowing through the
 	// same resolution as a user-supplied -p.
 	Ports []PortConfig `json:"ports,omitempty"`
+	// Caches mirrors Profile.Caches for mixins: declared per-project cache
+	// mounts join the built-in list for sessions that enable the feature.
+	Caches []CacheConfig `json:"caches,omitempty"`
 }
 
 func (e Extension) IsMixin() bool   { return e.Type == ExtensionKindMixin }
@@ -471,6 +517,10 @@ const (
 	ContainerHome           = "/home/" + ContainerUser
 	ContainerAuthDir        = "." + AppName + "-auth"
 	ContainerFeatureAuthDir = "." + AppName + "-feature-auth"
+	// ContainerHistoryDir is the home-relative mount point of the shell-history store.
+	ContainerHistoryDir = ".shell_history"
+	// ContainerSSHDir is the home-relative mount point of the read-only host SSH mount.
+	ContainerSSHDir = ".ssh"
 	// UserCommandsContainerDir is the fixed, home-layout-neutral path where the
 	// host session command tree is mounted read-only inside the container.
 	UserCommandsContainerDir = "/opt/" + AppName + "/commands"

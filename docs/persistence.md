@@ -45,7 +45,7 @@ Per-project data is stored on the host and reused across sessions:
 
 | Data | Location |
 |------|----------|
-| Package caches | `~/.cache/enclave/<tool>/<project-hash>/` |
+| Package caches | `~/.cache/enclave/<tool>/<project-hash>/` (built-in plus [extension-declared](extensions/README.md#project-caches-caches) caches) |
 | Shell history | `~/.local/state/enclave/projects/<project-hash>/<tool>/history/` |
 | Agent memory | `~/.local/state/enclave/projects/<project-hash>/<tool>/memory/` (Claude) |
 | Config/env/auth stores | Host directories under `~/.local/state/enclave/` (bind-mounted; no Docker volumes) |

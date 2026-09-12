@@ -38,6 +38,13 @@ type SpecPortSummary struct {
 	Publish   bool
 }
 
+// SpecCacheSummary describes one caches[] entry: the enclave-managed host
+// cache subdirectory and the container-home-relative path it is mounted at.
+type SpecCacheSummary struct {
+	Name   string
+	Target string
+}
+
 // SpecCredentialSource describes one credentials.sources entry: which env
 // aliases it fills, which host file (if any) it can also be read from, and —
 // the most consequential grant in the schema — whether it is released as an
@@ -100,6 +107,7 @@ type SpecSummary struct {
 	AllowedDomains        []string
 	DeniedDomains         []string
 	Ports                 []SpecPortSummary
+	Caches                []SpecCacheSummary
 	CredentialEnv         []string
 	CredentialSources     []SpecCredentialSource
 	ProxyManaged          []string
@@ -204,6 +212,12 @@ func summarizeSpecDocument(doc specDocument) SpecSummary {
 	}
 	for _, port := range doc.Ports {
 		summary.Ports = append(summary.Ports, SpecPortSummary{Container: port.Container, Publish: port.Publish})
+	}
+	for _, cache := range doc.Caches {
+		summary.Caches = append(summary.Caches, SpecCacheSummary{
+			Name:   strings.TrimSpace(cache.Name),
+			Target: strings.TrimSpace(cache.Target),
+		})
 	}
 	for _, p := range doc.Providers {
 		ps := SpecProviderSummary{

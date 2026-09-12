@@ -42,6 +42,7 @@ type specDocument struct {
 	Credentials  *specCredentials `json:"credentials,omitempty"`
 	Providers    []specProvider   `json:"providers,omitempty"`
 	Ports        []specPort       `json:"ports,omitempty"`
+	Caches       []specCache      `json:"caches,omitempty"`
 
 	// Build-selection metadata. Priority/aptPackages/needsRoot/failOnInstallError
 	// and defaultEnabled are mixin-only (kind: mixin); defaultIncluded is
@@ -181,6 +182,13 @@ type specOAuthPort struct {
 	Port                            string `json:"port"`
 	AutoHintWhenNoSession           *bool  `json:"autoHintWhenNoSession,omitempty"`
 	RequireMappingWhenNoCredentials *bool  `json:"requireMappingWhenNoCredentials,omitempty"`
+}
+
+// specCache is enclave-native: one persistent per-project cache mount, see
+// model.CacheConfig.
+type specCache struct {
+	Name   string `json:"name"`
+	Target string `json:"target"`
 }
 
 type specPort struct {

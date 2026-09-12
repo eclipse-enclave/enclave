@@ -348,7 +348,9 @@ func (r *Runtime) prepareMounts() (*mountAccumulator, error) {
 	r.addSSHMount(mountArgs)
 	r.addImageInboxMount(mountArgs)
 	r.addSessionMonitorEnv(mountArgs)
-	r.addCacheMounts(mountArgs)
+	if err := r.addCacheMounts(mountArgs); err != nil {
+		return nil, err
+	}
 	r.addHistoryMounts(mountArgs)
 	r.addMemoryMounts(mountArgs)
 	r.addToolConfigMounts(mountArgs)
@@ -1145,7 +1147,7 @@ func (r *Runtime) addGitConfigMount(mounts *mountAccumulator) {
 func (r *Runtime) addSSHMount(mounts *mountAccumulator) {
 	sshDir := config.HostSSHDir(r.host.Home)
 	if util.PathExists(sshDir) {
-		mounts.AddMount(bindMount(sshDir, r.containerHome+"/.ssh", true))
+		mounts.AddMount(bindMount(sshDir, r.containerHome+"/"+model.ContainerSSHDir, true))
 		logx.Infof("SSH directory mounted read-only")
 		return
 	}
@@ -1200,52 +1202,15 @@ func (r *Runtime) addSessionMonitorEnv(mounts *mountAccumulator) {
 	mounts.AddEnv(model.EnvSessionMonitorUser, r.containerUser)
 }
 
-func (r *Runtime) addCacheMounts(mounts *mountAccumulator) {
-	pnpmStoreDir := r.containerHome + "/.local/share/pnpm/store"
-	mounts.AddEnv("PNPM_CONFIG_STORE_DIR", pnpmStoreDir)
-
-	if r.run.NoCache {
-		return
-	}
-	cacheDir := config.HostCacheToolProjectDir(r.host.Home, r.profile.Name, r.project.Hash)
-
-	// Create all cache directories
-	cacheDirs := []string{
-		"npm", "pip",
-		"go", "go-build", "cargo", "pnpm", "uv", "yarn", "bun",
-		"nvm",
-	}
-	for _, dir := range cacheDirs {
-		_ = os.MkdirAll(filepath.Join(cacheDir, dir), 0o700)
-	}
-
-	mounts.AddMount(bindMount(filepath.Join(cacheDir, "npm"), r.containerHome+"/.npm", false))
-	mounts.AddMount(bindMount(filepath.Join(cacheDir, "pip"), r.containerHome+"/.cache/pip", false))
-	// Go caches
-	mounts.AddMount(bindMount(filepath.Join(cacheDir, "go"), r.containerHome+"/go/pkg/mod", false))
-	mounts.AddMount(bindMount(filepath.Join(cacheDir, "go-build"), r.containerHome+"/.cache/go-build", false))
-	// Rust/Cargo cache
-	mounts.AddMount(bindMount(filepath.Join(cacheDir, "cargo"), r.containerHome+"/.cargo", false))
-	// pnpm store
-	mounts.AddMount(bindMount(filepath.Join(cacheDir, "pnpm"), r.containerHome+"/.local/share/pnpm", false))
-	// uv (Python) cache
-	mounts.AddMount(bindMount(filepath.Join(cacheDir, "uv"), r.containerHome+"/.cache/uv", false))
-	// Yarn cache
-	mounts.AddMount(bindMount(filepath.Join(cacheDir, "yarn"), r.containerHome+"/.cache/yarn", false))
-	// Bun cache
-	mounts.AddMount(bindMount(filepath.Join(cacheDir, "bun"), r.containerHome+"/.bun", false))
-	// nvm installed Node.js versions
-	mounts.AddMount(bindMount(filepath.Join(cacheDir, "nvm"), r.containerHome+"/.nvm/versions", false))
-}
-
 func (r *Runtime) addHistoryMounts(mounts *mountAccumulator) {
 	if r.run.NoHistory {
 		return
 	}
 	projectDataDir := config.HostProjectHistoryDir(r.host.Home, r.project.Hash, r.profile.Name)
 	_ = os.MkdirAll(projectDataDir, 0o700)
-	mounts.AddMount(bindMount(projectDataDir, r.containerHome+"/.shell_history", false))
-	mounts.AddEnv("HISTFILE", r.containerHome+"/.shell_history/bash_history")
+	historyDir := r.containerHome + "/" + model.ContainerHistoryDir
+	mounts.AddMount(bindMount(projectDataDir, historyDir, false))
+	mounts.AddEnv("HISTFILE", historyDir+"/bash_history")
 }
 
 func (r *Runtime) addMemoryMounts(mounts *mountAccumulator) {
@@ -1288,24 +1253,13 @@ func (r *Runtime) addToolConfigMounts(mounts *mountAccumulator) {
 	}
 	// Config files created in container that should persist across sessions.
 	// Each file is touched (if not exists) to ensure Docker mounts a file, not a directory.
-	configFiles := []struct {
-		hostName      string // filename in the config directory
-		containerPath string // full path in container
-	}{
-		{"npmrc", r.containerHome + "/.npmrc"},
-		{"yarnrc", r.containerHome + "/.yarnrc"},
-		{"yarnrc.yml", r.containerHome + "/.yarnrc.yml"},
-		{"bunfig.toml", r.containerHome + "/.bunfig.toml"},
-		{"node_repl_history", r.containerHome + "/.node_repl_history"},
-	}
-
 	configDir := config.HostProjectHomeConfigDir(r.host.Home, r.project.Hash, r.profile.Name)
 	_ = os.MkdirAll(configDir, 0o700)
 
-	for _, cf := range configFiles {
-		hostPath := filepath.Join(configDir, cf.hostName)
+	for _, name := range model.ContainerHomeConfigFiles {
+		hostPath := filepath.Join(configDir, strings.TrimPrefix(name, "."))
 		ensureHostPlaceholderFile(hostPath)
-		mounts.AddMount(bindMount(hostPath, cf.containerPath, false))
+		mounts.AddMount(bindMount(hostPath, r.containerHome+"/"+name, false))
 	}
 }
 

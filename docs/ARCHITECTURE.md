@@ -220,6 +220,8 @@ Other host-side data:
   - `uv/` - uv (Python) cache
   - `yarn/` - Yarn cache
   - `bun/` - Bun cache
+  - `nvm/` - nvm-installed Node.js versions
+  - `<name>/` - one directory per [extension-declared cache](extensions/README.md#project-caches-caches)
 - **History**: `~/.local/state/enclave/projects/<hash>/<tool>/history/` for shell history.
 - **Agent memory**: `~/.local/state/enclave/projects/<hash>/<tool>/memory/` for per-project, agent-writable memory (Claude only). Bind-mounted into the harness's native memory path (writable), never shared between projects or agents, disabled with `--no-memory`, and skipped for ephemeral (`--ephemeral`) sessions.
 - **Home config files**: `~/.local/state/enclave/projects/<hash>/<tool>/home-config/` for host-home files created in the container:

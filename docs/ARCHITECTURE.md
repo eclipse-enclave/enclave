@@ -157,7 +157,7 @@ The restricted network request flow has a separate
 - [`runtime-assets/gateway-allowlists/`](../runtime-assets/gateway-allowlists/) holds base DNS allowlists and domain fragments baked into the image.
 - [`runtime-assets/build-scripts/`](../runtime-assets/build-scripts/) holds Docker build composition scripts (feature selection/install, template aggregation, agent tool helper setup).
 - [`runtime-assets/auth-reconcile.sh`](../runtime-assets/auth-reconcile.sh) holds shared shell logic used by the entrypoint and helper containers to reconcile shared auth files.
-- [`runtime-assets/net.sh`](../runtime-assets/net.sh) holds shared entrypoint network helpers (local resolver and loopback proxy setup).
+- [`runtime-assets/net.sh`](../runtime-assets/net.sh) holds shared entrypoint network helpers (local resolver, Docker host gateway resolution, and loopback proxy setup).
 - [`runtime-assets/microvm/alpine/`](../runtime-assets/microvm/alpine/) holds the experimental QEMU Alpine bundle init and builder.
 - [`extensions/tools/<tool>/templates/`](../extensions/tools/) holds per-tool settings templates baked into the image during build.
 - [`docs/`](../docs/) is included in the runtime build context so the image can install agent-facing help under `/usr/share/doc/enclave/`. [`docs/assets/`](../docs/assets/) is excluded in [`.dockerignore`](../.dockerignore); it holds only `README.md` branding, and keeping it out spares users an image rebuild whenever the logo changes.

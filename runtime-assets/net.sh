@@ -42,6 +42,26 @@ enclave_resolve_bind_ip() {
     return 1
 }
 
+enclave_resolve_docker_host_ipv4() {
+    _enclave_hosts="${ENCLAVE_HOSTS_FILE:-/etc/hosts}"
+    _enclave_ip="$(awk '{ sub(/#.*/, "") }
+        $1 ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/ {
+            for (i = 2; i <= NF; i++) {
+                if ($i == "host.docker.internal") { print $1; exit }
+            }
+        }' "$_enclave_hosts" 2>/dev/null)"
+    if [ -n "$_enclave_ip" ]; then
+        printf '%s\n' "$_enclave_ip"
+        return 0
+    fi
+    _enclave_ip="$(getent ahostsv4 host.docker.internal 2>/dev/null | awk '{print $1; exit}')"
+    if [ -n "$_enclave_ip" ]; then
+        printf '%s\n' "$_enclave_ip"
+        return 0
+    fi
+    return 1
+}
+
 enclave_start_socat_loopback_proxy() {
     _enclave_port="$1"
     _enclave_bind_ip="$2"

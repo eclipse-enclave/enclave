@@ -326,15 +326,12 @@ setup_ide_bridge() {
         return
     fi
 
-    ide_host_ip=$(awk '{ sub(/#.*/, "") }
-        $1 ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/ {
-            for (i = 2; i <= NF; i++) {
-                if ($i == "host.docker.internal") { print $1; exit }
-            }
-        }' /etc/hosts)
-    if [ -z "$ide_host_ip" ]; then
-        ide_host_ip=$(getent ahostsv4 host.docker.internal 2>/dev/null | awk '{print $1; exit}')
+    if ! command -v enclave_resolve_docker_host_ipv4 >/dev/null 2>&1; then
+        log "IDE bridge: network helper unavailable; disabled"
+        return
     fi
+
+    ide_host_ip=$(enclave_resolve_docker_host_ipv4 || true)
     if [ -z "$ide_host_ip" ]; then
         log "IDE bridge: cannot resolve host.docker.internal; disabled"
         return

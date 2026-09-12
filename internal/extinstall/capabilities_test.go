@@ -658,6 +658,9 @@ func capabilityFieldCases() map[string]capabilityFieldCase {
 		"Spec.DeniedDomains":      {func(c *capabilities) { c.Spec.DeniedDomains = []string{"deny.example"} }, "deny.example", "denied domain deny.example"},
 		"Spec.Ports": {func(c *capabilities) { c.Spec.Ports = []config.SpecPortSummary{{Container: 12345, Publish: true}} },
 			"12345 (published on the host)", "port 12345 (published on the host)"},
+		"Spec.Caches": {func(c *capabilities) {
+			c.Spec.Caches = []config.SpecCacheSummary{{Name: "m2", Target: ".m2/repository"}}
+		}, "m2 -> $HOME/.m2/repository", "project cache m2 -> $HOME/.m2/repository"},
 		"Spec.ContinueArgs": {func(c *capabilities) { c.Spec.ContinueArgs = "resume --last" }, "resume --last", "continue args"},
 		"Spec.ResumeArgs":   {func(c *capabilities) { c.Spec.ResumeArgs = "resume" }, "resume", "resume args"},
 		"Spec.PostStartOpenIDE": {func(c *capabilities) { c.Spec.PostStartOpenIDE = "theia" },

@@ -348,7 +348,9 @@ func (r *Runtime) prepareMounts() (*mountAccumulator, error) {
 	r.addSSHMount(mountArgs)
 	r.addImageInboxMount(mountArgs)
 	r.addSessionMonitorEnv(mountArgs)
-	r.addCacheMounts(mountArgs)
+	if err := r.addCacheMounts(mountArgs); err != nil {
+		return nil, err
+	}
 	r.addHistoryMounts(mountArgs)
 	r.addMemoryMounts(mountArgs)
 	r.addToolConfigMounts(mountArgs)
@@ -1145,7 +1147,7 @@ func (r *Runtime) addGitConfigMount(mounts *mountAccumulator) {
 func (r *Runtime) addSSHMount(mounts *mountAccumulator) {
 	sshDir := config.HostSSHDir(r.host.Home)
 	if util.PathExists(sshDir) {
-		mounts.AddMount(bindMount(sshDir, r.containerHome+"/.ssh", true))
+		mounts.AddMount(bindMount(sshDir, r.containerHome+"/"+model.ContainerSSHDir, true))
 		logx.Infof("SSH directory mounted read-only")
 		return
 	}
@@ -1200,42 +1202,97 @@ func (r *Runtime) addSessionMonitorEnv(mounts *mountAccumulator) {
 	mounts.AddEnv(model.EnvSessionMonitorUser, r.containerUser)
 }
 
-func (r *Runtime) addCacheMounts(mounts *mountAccumulator) {
+func (r *Runtime) addCacheMounts(mounts *mountAccumulator) error {
 	pnpmStoreDir := r.containerHome + "/.local/share/pnpm/store"
 	mounts.AddEnv("PNPM_CONFIG_STORE_DIR", pnpmStoreDir)
 
 	if r.run.NoCache {
-		return
+		return nil
+	}
+	caches, err := r.projectCaches()
+	if err != nil {
+		return err
 	}
 	cacheDir := config.HostCacheToolProjectDir(r.host.Home, r.profile.Name, r.project.Hash)
-
-	// Create all cache directories
-	cacheDirs := []string{
-		"npm", "pip",
-		"go", "go-build", "cargo", "pnpm", "uv", "yarn", "bun",
-		"nvm",
+	for _, cache := range caches {
+		hostDir := filepath.Join(cacheDir, cache.Name)
+		_ = os.MkdirAll(hostDir, 0o700)
+		mounts.AddMount(bindMount(hostDir, r.containerHome+"/"+cache.Target, false))
 	}
-	for _, dir := range cacheDirs {
-		_ = os.MkdirAll(filepath.Join(cacheDir, dir), 0o700)
-	}
+	return nil
+}
 
-	mounts.AddMount(bindMount(filepath.Join(cacheDir, "npm"), r.containerHome+"/.npm", false))
-	mounts.AddMount(bindMount(filepath.Join(cacheDir, "pip"), r.containerHome+"/.cache/pip", false))
-	// Go caches
-	mounts.AddMount(bindMount(filepath.Join(cacheDir, "go"), r.containerHome+"/go/pkg/mod", false))
-	mounts.AddMount(bindMount(filepath.Join(cacheDir, "go-build"), r.containerHome+"/.cache/go-build", false))
-	// Rust/Cargo cache
-	mounts.AddMount(bindMount(filepath.Join(cacheDir, "cargo"), r.containerHome+"/.cargo", false))
-	// pnpm store
-	mounts.AddMount(bindMount(filepath.Join(cacheDir, "pnpm"), r.containerHome+"/.local/share/pnpm", false))
-	// uv (Python) cache
-	mounts.AddMount(bindMount(filepath.Join(cacheDir, "uv"), r.containerHome+"/.cache/uv", false))
-	// Yarn cache
-	mounts.AddMount(bindMount(filepath.Join(cacheDir, "yarn"), r.containerHome+"/.cache/yarn", false))
-	// Bun cache
-	mounts.AddMount(bindMount(filepath.Join(cacheDir, "bun"), r.containerHome+"/.bun", false))
-	// nvm installed Node.js versions
-	mounts.AddMount(bindMount(filepath.Join(cacheDir, "nvm"), r.containerHome+"/.nvm/versions", false))
+// cacheClaim records one home-relative target already taken, either by a cache
+// (name set) or by another session mount such as the tool config store.
+type cacheClaim struct {
+	owner  string
+	name   string
+	target string
+}
+
+// projectCaches returns the built-in package caches plus those the tool spec
+// and enabled features declare. Per-spec validation happens at load time; the
+// cross-extension rules apply here, where profile and features meet: an
+// identical name+target pair dedupes, while a name claimed with a different
+// target or a target overlapping any prior claim (including the tool's own
+// config and memory store mounts) is an error naming both claimants.
+func (r *Runtime) projectCaches() ([]model.CacheConfig, error) {
+	caches := append([]model.CacheConfig(nil), model.BuiltinProjectCaches...)
+	claims := r.profileMountClaims()
+	for _, cache := range model.BuiltinProjectCaches {
+		claims = append(claims, cacheClaim{owner: "the built-in cache list", name: cache.Name, target: cache.Target})
+	}
+	add := func(owner string, cache model.CacheConfig) error {
+		for _, c := range claims {
+			if c.name == cache.Name {
+				if c.target == cache.Target {
+					return nil
+				}
+				return fmt.Errorf("cache %q: %s declares target %q but %s declares target %q",
+					cache.Name, owner, cache.Target, c.owner, c.target)
+			}
+			if model.CacheTargetsOverlap(c.target, cache.Target) {
+				return fmt.Errorf("cache %q (%s): target %q overlaps %q, claimed by %s",
+					cache.Name, owner, cache.Target, c.target, c.owner)
+			}
+		}
+		claims = append(claims, cacheClaim{owner: owner, name: cache.Name, target: cache.Target})
+		caches = append(caches, cache)
+		return nil
+	}
+	for _, cache := range r.profile.Caches {
+		if err := add(fmt.Sprintf("tool %q", r.profile.Name), cache); err != nil {
+			return nil, err
+		}
+	}
+	for _, feature := range r.features {
+		for _, cache := range feature.Caches {
+			if err := add(fmt.Sprintf("feature %q", feature.Name), cache); err != nil {
+				return nil, err
+			}
+		}
+	}
+	return caches, nil
+}
+
+// profileMountClaims returns the home-relative targets of the tool's own
+// config and memory store mounts, so a cache colliding with them fails here
+// instead of at container start. Paths resolving outside the container home
+// cannot overlap a cache target and are skipped.
+func (r *Runtime) profileMountClaims() []cacheClaim {
+	var claims []cacheClaim
+	add := func(owner string, path string) {
+		if strings.TrimSpace(path) == "" {
+			return
+		}
+		resolved := resolveContainerProfilePath(r.containerHome, path)
+		if rel, ok := strings.CutPrefix(resolved, r.containerHome+"/"); ok && rel != "" {
+			claims = append(claims, cacheClaim{owner: owner, target: rel})
+		}
+	}
+	add("the tool config store mount", r.profile.ConfigDir)
+	add("the tool memory mount", r.profile.MemoryDir)
+	return claims
 }
 
 func (r *Runtime) addHistoryMounts(mounts *mountAccumulator) {
@@ -1244,8 +1301,9 @@ func (r *Runtime) addHistoryMounts(mounts *mountAccumulator) {
 	}
 	projectDataDir := config.HostProjectHistoryDir(r.host.Home, r.project.Hash, r.profile.Name)
 	_ = os.MkdirAll(projectDataDir, 0o700)
-	mounts.AddMount(bindMount(projectDataDir, r.containerHome+"/.shell_history", false))
-	mounts.AddEnv("HISTFILE", r.containerHome+"/.shell_history/bash_history")
+	historyDir := r.containerHome + "/" + model.ContainerHistoryDir
+	mounts.AddMount(bindMount(projectDataDir, historyDir, false))
+	mounts.AddEnv("HISTFILE", historyDir+"/bash_history")
 }
 
 func (r *Runtime) addMemoryMounts(mounts *mountAccumulator) {
@@ -1288,24 +1346,13 @@ func (r *Runtime) addToolConfigMounts(mounts *mountAccumulator) {
 	}
 	// Config files created in container that should persist across sessions.
 	// Each file is touched (if not exists) to ensure Docker mounts a file, not a directory.
-	configFiles := []struct {
-		hostName      string // filename in the config directory
-		containerPath string // full path in container
-	}{
-		{"npmrc", r.containerHome + "/.npmrc"},
-		{"yarnrc", r.containerHome + "/.yarnrc"},
-		{"yarnrc.yml", r.containerHome + "/.yarnrc.yml"},
-		{"bunfig.toml", r.containerHome + "/.bunfig.toml"},
-		{"node_repl_history", r.containerHome + "/.node_repl_history"},
-	}
-
 	configDir := config.HostProjectHomeConfigDir(r.host.Home, r.project.Hash, r.profile.Name)
 	_ = os.MkdirAll(configDir, 0o700)
 
-	for _, cf := range configFiles {
-		hostPath := filepath.Join(configDir, cf.hostName)
+	for _, name := range model.ContainerHomeConfigFiles {
+		hostPath := filepath.Join(configDir, strings.TrimPrefix(name, "."))
 		ensureHostPlaceholderFile(hostPath)
-		mounts.AddMount(bindMount(hostPath, cf.containerPath, false))
+		mounts.AddMount(bindMount(hostPath, r.containerHome+"/"+name, false))
 	}
 }
 

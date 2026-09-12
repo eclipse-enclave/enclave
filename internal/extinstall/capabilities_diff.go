@@ -49,6 +49,9 @@ func diffCapabilities(before capabilities, after capabilities) []string {
 	changes = append(changes, diffList("allowlist directive", before.AllowlistDirectives, after.AllowlistDirectives)...)
 	changes = append(changes, diffList("denied domain", before.Spec.DeniedDomains, after.Spec.DeniedDomains)...)
 	changes = append(changes, diffList("port", before.allPorts(), after.allPorts())...)
+	changes = append(changes, diffList("project cache",
+		mapDescribe(before.Spec.Caches, describeCache),
+		mapDescribe(after.Spec.Caches, describeCache))...)
 	changes = append(changes, diffList("credential", before.Spec.CredentialEnv, after.Spec.CredentialEnv)...)
 	changes = append(changes, diffList("credential grant",
 		mapDescribe(before.Spec.CredentialSources, describeCredentialSource),

@@ -68,6 +68,11 @@ func (c capabilities) render(w io.Writer, style Style, source string) {
 	row("allowlist directives", strings.Join(c.AllowlistDirectives, ", "))
 	row("denied domains", strings.Join(c.Spec.DeniedDomains, ", "))
 	row("ports", strings.Join(c.allPorts(), ", "))
+	caches := strings.Join(mapDescribe(c.Spec.Caches, describeCache), ", ")
+	if caches != "" {
+		caches += " (persisted per project on the host)"
+	}
+	row("project caches", caches)
 	envAliases := strings.Join(c.Spec.CredentialEnv, ", ")
 	if envAliases != "" {
 		envAliases += " (env alias)"

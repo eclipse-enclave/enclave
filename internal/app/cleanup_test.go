@@ -256,10 +256,7 @@ func TestResolveEphemeralStoreDirs(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			dirs, err := resolveEphemeralStoreDirs(run, tc.cleanup, home, project, newMemoryScopeResolver(paths, nil))
-			if err != nil {
-				t.Fatal(err)
-			}
+			dirs := resolveEphemeralStoreDirs(run, tc.cleanup, home, project, newMemoryScopeResolver(paths, nil))
 			if !reflect.DeepEqual(dirs, tc.want) {
 				t.Fatalf("ephemeral dirs = %+v, want %+v", dirs, tc.want)
 			}
@@ -282,10 +279,7 @@ func TestCleanupToleratesUninstalledTools(t *testing.T) {
 	}
 
 	scopes := newMemoryScopeResolver(model.Paths{UserToolsDir: t.TempDir()}, nil)
-	dirs, err := resolveEphemeralStoreDirs(run, model.CleanupOptions{}, home, project, scopes)
-	if err != nil {
-		t.Fatalf("resolveEphemeralStoreDirs() with no spec: %v", err)
-	}
+	dirs := resolveEphemeralStoreDirs(run, model.CleanupOptions{}, home, project, scopes)
 	want := []cleanupDir{{Kind: ephemeralKind, Path: filepath.Join(storeRoot, "session-a")}}
 	if !reflect.DeepEqual(dirs, want) {
 		t.Fatalf("ephemeral dirs = %+v, want %+v", dirs, want)
@@ -297,6 +291,49 @@ func TestCleanupToleratesUninstalledTools(t *testing.T) {
 	}
 	if scope != model.MemoryScopeProject {
 		t.Fatalf("scope = %q, want %q", scope, model.MemoryScopeProject)
+	}
+}
+
+// TestEphemeralSweepToleratesUnloadableSpec pins the per-tool fallback for a
+// spec that exists but does not load: without --keep memory the tool's stores
+// are still removed and its session memory is left in place, and with
+// --keep memory the tool's stores are skipped, since the scope decides what
+// would have been kept.
+func TestEphemeralSweepToleratesUnloadableSpec(t *testing.T) {
+	t.Parallel()
+
+	home := t.TempDir()
+	project := model.Project{Hash: "projhash1234"}
+	run := model.RunOptions{Tool: "broken"}
+
+	storeRoot := config.HostStoreConfigRootDir(home, run.Tool, project.Hash)
+	memoryRoot := config.HostProjectMemoryDir(home, project.Hash, run.Tool)
+	for _, dir := range []string{filepath.Join(storeRoot, "session-a"), filepath.Join(memoryRoot, "session-a")} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, run.Tool), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	spec := `{"schemaVersion":"1","kind":"sandbox","name":"broken","sandbox":{
+		"configDir":".broken", "memoryScope":"global"}}`
+	if err := os.WriteFile(filepath.Join(root, run.Tool, config.SpecFilenameJSON), []byte(spec), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	paths := model.Paths{UserToolsDir: root}
+
+	dirs := resolveEphemeralStoreDirs(run, model.CleanupOptions{}, home, project, newMemoryScopeResolver(paths, nil))
+	want := []cleanupDir{{Kind: ephemeralKind, Path: filepath.Join(storeRoot, "session-a")}}
+	if !reflect.DeepEqual(dirs, want) {
+		t.Fatalf("fallback dirs = %+v, want %+v", dirs, want)
+	}
+
+	kept := resolveEphemeralStoreDirs(run, model.CleanupOptions{CleanupKeepMemory: true}, home, project, newMemoryScopeResolver(paths, nil))
+	if len(kept) != 0 {
+		t.Fatalf("--keep memory with an unloadable spec should skip the tool's stores, got %+v", kept)
 	}
 }
 
@@ -363,7 +400,6 @@ func TestUnloadableSpecOnlyBlocksScopeSensitivePlans(t *testing.T) {
 		{name: "keep cache", cleanup: model.CleanupOptions{CleanupKeepCache: true}},
 		{name: "keep memory", cleanup: model.CleanupOptions{CleanupKeepMemory: true}, wantAborts: true},
 		{name: "keep history", cleanup: model.CleanupOptions{CleanupKeepHist: true}, wantAborts: true},
-		{name: "ephemeral", cleanup: model.CleanupOptions{CleanupEphemeral: true}, wantAborts: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := memoryScopeAffectsPlan(tc.cleanup); got != tc.wantAborts {

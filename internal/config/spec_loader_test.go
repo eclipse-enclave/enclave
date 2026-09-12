@@ -100,6 +100,7 @@ func TestNormalizeMemoryPolicyAtLoad(t *testing.T) {
 func TestRejectInvalidMemoryPolicy(t *testing.T) {
 	for _, profile := range []model.Profile{
 		{MemoryScope: "global"},
+		{MemoryScope: model.MemoryScopeProject},
 		{MemoryScope: model.MemoryScopeSession},
 		{MemoryScope: model.MemoryScopeSession, MemoryDir: ".custom/memory"},
 		{StatePaths: []string{"memory/"}},

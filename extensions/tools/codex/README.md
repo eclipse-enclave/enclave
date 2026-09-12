@@ -68,7 +68,9 @@ users get the feature setting from their own config (Codex defaults to off).
 Enclave isolates memory by config-store key. See [Agent Memory](../../../docs/runtime/stores.md#agent-memory)
 for session reuse, `--no-memory`, ephemeral runs, and cleanup semantics.
 
-To disable memories by default, add a Codex config patch:
+To disable memories by default, set the `no_memory`
+[config option](../../../docs/configuration.md) in the enclave project or global
+config, the per-project equivalent of `--no-memory`, or add a Codex config patch:
 
 ```toml
 [features]

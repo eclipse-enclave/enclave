@@ -96,7 +96,11 @@ func validateAndNormalizeProfile(profile *model.Profile) error {
 // into the serialized profile.
 func validateAndNormalizeMemoryPolicy(profile *model.Profile) error {
 	switch profile.MemoryScope {
-	case "", model.MemoryScopeProject:
+	case "":
+	case model.MemoryScopeProject:
+		if profile.MemoryDir == "" {
+			return fmt.Errorf("memory_scope requires memory_dir")
+		}
 	case model.MemoryScopeSession:
 		if profile.MemoryDir == "" || profile.ConfigDir == "" {
 			return fmt.Errorf("memory_scope session requires memory_dir and config_dir")

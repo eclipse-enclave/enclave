@@ -99,11 +99,14 @@ stores of `--ephemeral` runs, which never get a memory mount. The other
 Selective cleanup reads the scope from the tool spec. A tool with no spec,
 meaning state left behind by an extension that has since been removed, cleans up
 under the default scope rather than failing. A spec that exists but does not load
-aborts cleanup before anything is deleted, but only for the flag combinations
-that couple memory to the config store (`--keep memory`, `--keep history`, and
-`--ephemeral`). Every other plan warns and proceeds under the default scope,
-which is the plan a working spec would have produced anyway, so a broken
-extension never blocks the removal of its own state.
+aborts a project cleanup before anything is deleted, but only when `--keep memory`
+or `--keep history` couples memory to the config store. The ephemeral sweep
+handles such a tool by itself instead of aborting for every other tool: with
+`--keep memory` the tool's stores are skipped, since the scope decides what would
+be kept; otherwise they are removed with a warning and its session memory stays
+behind until the spec loads again. Every other plan warns and proceeds under the
+default scope, which is the plan a working spec would have produced anyway, so a
+broken extension never blocks the removal of its own state.
 
 ## Managed Skills
 

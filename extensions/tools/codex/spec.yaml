@@ -21,7 +21,9 @@ sandbox:
   memoryScope: session
   noMemoryArgs: [-c, features.memories=false]
   statePaths:
-    # Memory files, their SQLite index, and codex-managed writer locks.
+    # Paths are config-relative (.codex/), unlike the home-relative memoryDir.
+    # Memory files, their SQLite index, and writer locks; codex reconciles
+    # stale locks itself, so surviving an overlay is safe.
     - memories/
     - memories_*.sqlite*
     - thread-writer-locks/

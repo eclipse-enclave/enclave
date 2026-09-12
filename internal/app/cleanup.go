@@ -85,12 +85,10 @@ func (r *memoryScopeResolver) scopeFor(tool string) (string, error) {
 }
 
 // memoryScopeAffectsPlan reports whether a tool's memory scope can change what
-// the given cleanup removes. Only the flag combinations that couple memory to
-// the config store depend on it; a full-tree cleanup removes both regardless.
+// a non-ephemeral cleanup removes. Only the flag combinations that couple
+// memory to the config store depend on it; a full-tree cleanup removes both
+// regardless, and the ephemeral sweep handles scope errors per tool itself.
 func memoryScopeAffectsPlan(cleanup model.CleanupOptions) bool {
-	if cleanup.CleanupEphemeral {
-		return true
-	}
 	return !cleanup.CleanupAll && (cleanup.CleanupKeepHist || cleanup.CleanupKeepMemory)
 }
 
@@ -131,11 +129,7 @@ func runCleanup(run model.RunOptions, cleanup model.CleanupOptions) int {
 		}
 		// Ephemeral config stores are host directories keyed by a session or
 		// worktree suffix.
-		storeDirs, err := resolveEphemeralStoreDirs(run, cleanup, home, project, scopes)
-		if err != nil {
-			logx.Errorf("Failed to resolve memory cleanup policy: %v", err)
-			return 1
-		}
+		storeDirs := resolveEphemeralStoreDirs(run, cleanup, home, project, scopes)
 		if cleanup.CleanupDryRun {
 			printEphemeralCleanupPlan(containerNames, storeDirs)
 			cleanupBuildCache(cleanup)
@@ -246,14 +240,15 @@ func resolveEphemeralContainers(run model.RunOptions, cleanup model.CleanupOptio
 
 // resolveEphemeralStoreDirs enumerates the host directories backing ephemeral
 // config stores (every config-store key other than the persistent "default"
-// key).
-func resolveEphemeralStoreDirs(run model.RunOptions, cleanup model.CleanupOptions, home string, project model.Project, scopes *memoryScopeResolver) ([]cleanupDir, error) {
+// key). Tools whose memory scope cannot be resolved are warned about and
+// handled conservatively instead of aborting the sweep.
+func resolveEphemeralStoreDirs(run model.RunOptions, cleanup model.CleanupOptions, home string, project model.Project, scopes *memoryScopeResolver) []cleanupDir {
 	var hashes []string
 	if cleanup.CleanupAll {
 		hashes = listSubdirs(config.HostProjectsDir(home))
 	} else {
 		if project.Hash == "" {
-			return nil, nil
+			return nil
 		}
 		hashes = []string{project.Hash}
 	}
@@ -274,7 +269,18 @@ func resolveEphemeralStoreDirs(run model.RunOptions, cleanup model.CleanupOption
 			}
 			scope, err := scopes.scopeFor(tool)
 			if err != nil {
-				return nil, err
+				// One broken spec must not abort the sweep for every other
+				// tool and project. Under --keep memory the scope decides
+				// which stores are kept, so the broken tool's stores are
+				// skipped rather than removed against the user's intent.
+				// Otherwise the default scope only under-deletes: stores go,
+				// session memory dirs are left behind until the spec loads.
+				if cleanup.CleanupKeepMemory {
+					logx.Warnf("Skipping %s stores, --keep memory needs its memory scope: %v", tool, err)
+					continue
+				}
+				logx.Warnf("Ignoring unreadable memory cleanup policy for %s, leaving its session memory in place: %v", tool, err)
+				scope = model.MemoryScopeProject
 			}
 			for _, key := range keys {
 				if key == persistentConfigStoreKey {
@@ -302,7 +308,7 @@ func resolveEphemeralStoreDirs(run model.RunOptions, cleanup model.CleanupOption
 		}
 	}
 	sort.Slice(dirs, func(i, j int) bool { return dirs[i].Path < dirs[j].Path })
-	return dirs, nil
+	return dirs
 }
 
 // listSubdirs returns the immediate subdirectory names of dir, or nil when dir

@@ -101,11 +101,3 @@ func TestResolveSessionActionArgs(t *testing.T) {
 		})
 	}
 }
-
-func TestCompactProfileArgsTrimsAndSkipsEmpty(t *testing.T) {
-	got := compactProfileArgs([]string{" --resume ", "", "  ", "--last"})
-	want := []string{"--resume", "--last"}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("expected %v, got %v", want, got)
-	}
-}

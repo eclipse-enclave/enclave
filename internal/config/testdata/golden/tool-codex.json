@@ -12,6 +12,19 @@
   "yolo_enabled": true,
   "config_dir": ".codex",
   "skills_dir": ".codex/skills",
+  "memory_dir": ".codex/memories",
+  "memory_scope": "session",
+  "no_memory_args": [
+    "-c",
+    "features.memories=false"
+  ],
+  "state_paths": [
+    "memories/",
+    "memories_*.sqlite*",
+    "thread-writer-locks/",
+    "state_*.sqlite*",
+    "thread_history_*.sqlite*"
+  ],
   "settings_file": "codex-config.toml",
   "settings_target": ".codex/config.toml",
   "passthrough_paths": [

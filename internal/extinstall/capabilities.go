@@ -9,6 +9,7 @@ package extinstall
 
 import (
 	"bufio"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -298,6 +299,18 @@ func (c capabilities) allPorts() []string {
 		ports = append(ports, provider.OAuthPorts...)
 	}
 	return dedupeSorted(ports)
+}
+
+// describeMemory renders the agent-memory grant: a writable host directory the
+// tool keeps between sessions. The scope is included because it decides how
+// widely that directory is shared: one per project, or one per config store.
+func describeMemory(spec config.SpecSummary) string {
+	if spec.MemoryDir == "" {
+		return ""
+	}
+	// The summary reports the spec document as written, so an undeclared scope
+	// still reaches here and is resolved for display.
+	return fmt.Sprintf("%s (scope %s)", spec.MemoryDir, model.ResolveMemoryScope(spec.MemoryScope))
 }
 
 func describeProvider(p config.SpecProviderSummary) string {

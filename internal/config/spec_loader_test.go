@@ -11,11 +11,111 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
 	"enclave/internal/model"
 )
+
+func TestLoadProfileMemoryPolicyFromThirdPartySpec(t *testing.T) {
+	root := t.TempDir()
+	toolDir := filepath.Join(root, "custom")
+	if err := os.MkdirAll(toolDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	spec := `{"schemaVersion":"1","kind":"sandbox","name":"custom","sandbox":{
+		"configDir":".custom", "memoryDir":".custom/memory", "memoryScope":"session",
+		"noMemoryArgs":["--config", "memory=false"],
+		"statePaths":["memory/", "memory_*.sqlite*"]}}`
+	if err := os.WriteFile(filepath.Join(toolDir, SpecFilenameJSON), []byte(spec), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	profile, err := LoadProfile(model.Paths{UserToolsDir: root}, "custom")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if profile.MemoryScope != model.MemoryScopeSession || profile.MemoryDir != ".custom/memory" {
+		t.Fatalf("memory policy = %+v", profile)
+	}
+	if !reflect.DeepEqual(profile.NoMemoryArgs, []string{"--config", "memory=false"}) {
+		t.Fatalf("no-memory args = %q", profile.NoMemoryArgs)
+	}
+	if !reflect.DeepEqual(profile.StatePaths, []string{"memory/", "memory_*.sqlite*"}) {
+		t.Fatalf("state paths = %q", profile.StatePaths)
+	}
+	profile.PassthroughPaths = []string{"config.toml", "memory/", "memory_1.sqlite-wal"}
+	if got := HostConfigPassthroughDefaults(profile); !reflect.DeepEqual(got, []string{"config.toml"}) {
+		t.Fatalf("passthrough = %v", got)
+	}
+}
+
+// TestNormalizeMemoryPolicyAtLoad pins the values a consumer would otherwise
+// have to sanitize itself: an undeclared scope resolves to the default, and a
+// ragged spec argv (noMemoryArgs/continueArgs/resumeArgs) cannot carry a blank
+// entry through to the agent's command line.
+func TestNormalizeMemoryPolicyAtLoad(t *testing.T) {
+	profile := model.Profile{
+		ConfigDir:    ".custom",
+		MemoryDir:    ".custom/memories",
+		NoMemoryArgs: []string{" -c ", "", "  ", "memories=false"},
+		ContinueArgs: []string{" resume ", "", "--last"},
+		ResumeArgs:   []string{"", " resume "},
+	}
+	if err := validateAndNormalizeProfile(&profile); err != nil {
+		t.Fatal(err)
+	}
+	if profile.MemoryScope != model.MemoryScopeProject {
+		t.Errorf("memory scope = %q, want %q", profile.MemoryScope, model.MemoryScopeProject)
+	}
+
+	// A tool without a memory dir keeps its scope undeclared, so the field
+	// stays out of its serialized profile.
+	memoryless := model.Profile{ConfigDir: ".custom"}
+	if err := validateAndNormalizeProfile(&memoryless); err != nil {
+		t.Fatal(err)
+	}
+	if memoryless.MemoryScope != "" {
+		t.Errorf("memory-less scope = %q, want empty", memoryless.MemoryScope)
+	}
+	if want := []string{"-c", "memories=false"}; !reflect.DeepEqual(profile.NoMemoryArgs, want) {
+		t.Errorf("no-memory args = %q, want %q", profile.NoMemoryArgs, want)
+	}
+	if want := []string{"resume", "--last"}; !reflect.DeepEqual(profile.ContinueArgs, want) {
+		t.Errorf("continue args = %q, want %q", profile.ContinueArgs, want)
+	}
+	if want := []string{"resume"}; !reflect.DeepEqual(profile.ResumeArgs, want) {
+		t.Errorf("resume args = %q, want %q", profile.ResumeArgs, want)
+	}
+
+	blank := model.Profile{ConfigDir: ".custom", NoMemoryArgs: []string{"", " "}}
+	if err := validateAndNormalizeProfile(&blank); err != nil {
+		t.Fatal(err)
+	}
+	if blank.NoMemoryArgs != nil {
+		t.Errorf("all-blank no-memory args = %q, want nil", blank.NoMemoryArgs)
+	}
+}
+
+func TestRejectInvalidMemoryPolicy(t *testing.T) {
+	for _, profile := range []model.Profile{
+		{MemoryScope: "global"},
+		{MemoryScope: model.MemoryScopeProject},
+		{MemoryScope: model.MemoryScopeSession},
+		{MemoryScope: model.MemoryScopeSession, MemoryDir: ".custom/memory"},
+		{StatePaths: []string{"memory/"}},
+		{ConfigDir: ".custom", StatePaths: []string{"../memory"}},
+		{ConfigDir: ".custom", StatePaths: []string{"/memory"}},
+		{ConfigDir: ".custom", StatePaths: []string{"."}},
+		{ConfigDir: ".custom", StatePaths: []string{""}},
+		{ConfigDir: ".custom", StatePaths: []string{"["}},
+		{ConfigDir: ".custom", StatePaths: []string{"+memory"}},
+	} {
+		if err := validateAndNormalizeProfile(&profile); err == nil {
+			t.Errorf("accepted invalid memory policy: %+v", profile)
+		}
+	}
+}
 
 // testPathsWithExtensions builds a model.Paths whose ToolsDir/FeaturesDir
 // point at internal/config/<fixtureDir>/{tools,features}, with no user

@@ -12,6 +12,11 @@
   "config_dir": ".claude",
   "skills_dir": ".claude/skills",
   "memory_dir": ".claude/memory",
+  "memory_scope": "project",
+  "no_memory_args": [
+    "--settings",
+    "{\"autoMemoryEnabled\": false}"
+  ],
   "settings_file": "claude-settings.json",
   "settings_target": ".claude/settings.json",
   "passthrough_paths": [

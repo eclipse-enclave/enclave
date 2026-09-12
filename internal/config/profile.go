@@ -73,22 +73,77 @@ func validateAndNormalizeProfile(profile *model.Profile) error {
 	if err := validateAndNormalizePorts(profile); err != nil {
 		return err
 	}
-	if err := validateAndNormalizeMemoryDir(profile); err != nil {
+	if err := validateAndNormalizeMemoryPolicy(profile); err != nil {
 		return err
 	}
+	if err := validateAndNormalizeStatePaths(profile); err != nil {
+		return err
+	}
+	profile.ContinueArgs = compactSpecArgs(profile.ContinueArgs)
+	profile.ResumeArgs = compactSpecArgs(profile.ResumeArgs)
 	return validateAndNormalizeProviderSecurestorage(profile.Providers)
 }
 
-// validateAndNormalizeMemoryDir checks the container-home-relative memory
-// mount target. The path must be relative, free of traversal, and resolve to a
-// concrete location (not "."). The cleaned value is written back to the profile.
-func validateAndNormalizeMemoryDir(profile *model.Profile) error {
+// validateAndNormalizeMemoryPolicy checks the memory scope, the disable
+// arguments, and the container-home-relative memory mount target they apply to.
+// Session scope keys memory by config-store key, so it needs both a memory dir
+// to mount and a config dir to derive the key from. The path must be relative,
+// free of traversal, and resolve to a concrete location (not "."). The cleaned
+// values are written back to the profile, including the resolved scope, so no
+// consumer has to treat an undeclared scope as the default itself. A tool
+// without a memory dir keeps its scope undeclared. Scope only decides how the
+// memory mount is keyed, so resolving it there would put a meaningless field
+// into the serialized profile.
+func validateAndNormalizeMemoryPolicy(profile *model.Profile) error {
+	switch profile.MemoryScope {
+	case "":
+	case model.MemoryScopeProject:
+		if profile.MemoryDir == "" {
+			return fmt.Errorf("memory_scope requires memory_dir")
+		}
+	case model.MemoryScopeSession:
+		if profile.MemoryDir == "" || profile.ConfigDir == "" {
+			return fmt.Errorf("memory_scope session requires memory_dir and config_dir")
+		}
+	default:
+		return fmt.Errorf("memory_scope must be project or session")
+	}
 	if profile.MemoryDir != "" {
-		cleaned, err := cleanMemoryPath(profile.MemoryDir)
+		profile.MemoryScope = model.ResolveMemoryScope(profile.MemoryScope)
+	}
+	profile.NoMemoryArgs = compactSpecArgs(profile.NoMemoryArgs)
+	if profile.MemoryDir != "" {
+		cleaned, err := cleanRelativeConfigPath(profile.MemoryDir)
 		if err != nil {
 			return fmt.Errorf("memory_dir: %w", err)
 		}
 		profile.MemoryDir = cleaned
+	}
+	return nil
+}
+
+// validateAndNormalizeStatePaths checks the config-relative runtime-state
+// patterns a tool pins against the config overlay and host config passthrough.
+// Both consumers match them with HostConfigPathMatches, so the accepted shapes
+// are that matcher's: an exact path, a directory prefix (trailing "/"), or a
+// glob. Selection directives are rejected because these are a fixed policy, not
+// a user-tunable allow-list that "+"/"-" could amend.
+func validateAndNormalizeStatePaths(profile *model.Profile) error {
+	if len(profile.StatePaths) > 0 && profile.ConfigDir == "" {
+		return fmt.Errorf("state_paths requires config_dir")
+	}
+	for i, raw := range profile.StatePaths {
+		value := strings.TrimSpace(filepathToSlash(raw))
+		if strings.HasPrefix(value, "+") || strings.HasPrefix(value, "-") {
+			return fmt.Errorf("state_paths[%d]: selection directives are not supported", i)
+		}
+		if _, err := cleanRelativeConfigPath(value); err != nil {
+			return fmt.Errorf("state_paths[%d]: %w", i, err)
+		}
+		if _, err := path.Match(value, ""); err != nil {
+			return fmt.Errorf("state_paths[%d]: invalid glob: %w", i, err)
+		}
+		profile.StatePaths[i] = normalizeHostConfigPath(value)
 	}
 	return nil
 }
@@ -138,11 +193,32 @@ func containerProfilePath(value string) string {
 	return path.Join(model.ContainerHome, value)
 }
 
-func cleanMemoryPath(path string) (string, error) {
+// compactSpecArgs trims a spec-declared argv and drops its blank entries, so a
+// stray list item cannot pass an empty argument through to the agent.
+func compactSpecArgs(args []string) []string {
+	if len(args) == 0 {
+		return nil
+	}
+	compacted := make([]string, 0, len(args))
+	for _, arg := range args {
+		if trimmed := strings.TrimSpace(arg); trimmed != "" {
+			compacted = append(compacted, trimmed)
+		}
+	}
+	if len(compacted) == 0 {
+		return nil
+	}
+	return compacted
+}
+
+// cleanRelativeConfigPath rejects a spec-declared path that does not name a
+// concrete location below the directory it is relative to, and returns the
+// cleaned form of one that does.
+func cleanRelativeConfigPath(path string) (string, error) {
 	if path == "" {
 		return "", fmt.Errorf("path is empty")
 	}
-	if filepath.IsAbs(path) {
+	if filepath.IsAbs(path) || strings.HasPrefix(path, "/") {
 		return "", fmt.Errorf("path must be relative: %s", path)
 	}
 	if util.HasPathTraversal(path) {

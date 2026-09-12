@@ -161,6 +161,14 @@ func HostProjectMemoryDir(home string, projectHash string, tool string) string {
 	return filepath.Join(HostProjectToolDir(home, projectHash, tool), "memory")
 }
 
+// HostProjectMemorySessionDir is the host directory backing a tool's
+// session-scoped agent memory for one config-store key. The layout mirrors
+// HostStoreConfigDir's keys, pairing each memory directory with the config
+// store that coordinates its writers.
+func HostProjectMemorySessionDir(home string, projectHash string, tool string, key string) string {
+	return filepath.Join(HostProjectMemoryDir(home, projectHash, tool), key)
+}
+
 func HostProjectHomeConfigDir(home string, projectHash string, tool string) string {
 	return filepath.Join(HostProjectToolDir(home, projectHash, tool), model.HomeConfigDirName)
 }

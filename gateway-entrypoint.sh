@@ -326,7 +326,12 @@ setup_ide_bridge() {
         return
     fi
 
-    ide_host_ip=$(awk '$1 ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/ && /host\.docker\.internal/ {print $1; exit}' /etc/hosts)
+    ide_host_ip=$(awk '{ sub(/#.*/, "") }
+        $1 ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/ {
+            for (i = 2; i <= NF; i++) {
+                if ($i == "host.docker.internal") { print $1; exit }
+            }
+        }' /etc/hosts)
     if [ -z "$ide_host_ip" ]; then
         ide_host_ip=$(getent ahostsv4 host.docker.internal 2>/dev/null | awk '{print $1; exit}')
     fi

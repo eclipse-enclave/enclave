@@ -270,10 +270,6 @@ func HostTLSDir(home string) string {
 	return filepath.Join(hostStateRoot(home), "tls")
 }
 
-func HostTLSHostsDir(home string) string {
-	return filepath.Join(HostTLSDir(home), "hosts")
-}
-
 func HostNetworkPolicyPath(home string) string {
 	return filepath.Join(hostConfigRoot(home), networkPolicyFilename)
 }

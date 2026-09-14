@@ -139,54 +139,18 @@ newer build is available. The rolling release moves with `main`, so check back
 regularly: `enclave version` prints the version, commit, and commit date of your
 build, which you can compare against the current
 [rolling release](https://github.com/eclipse-enclave/enclave/releases/tag/rolling).
-To update, download the current assets and re-run the install step you used.
+To update, download the current assets and re-run the install step for your
+platform above. On macOS the re-downloaded binary carries the quarantine
+attribute again, so `xattr -d` has to run before `install`. For the Windows
+launcher, the Scoop manifest pins the archive hashes, so uninstall and install
+it again from the release URL. From a source checkout, run `git pull` followed
+by `make install`.
 
 :::note
 This is about the Enclave binary itself. `enclave update` rebuilds tool images
 with the latest agent CLI, and agent CLIs inside a session refresh on their own
 schedule; neither replaces the Enclave binary on your host.
 :::
-
-Ubuntu:
-
-```bash
-sudo apt install ./enclave_*_amd64.deb
-```
-
-Fedora:
-
-```bash
-sudo dnf install ./enclave-*.x86_64.rpm
-```
-
-Other Linux:
-
-```bash
-sudo install enclave-linux-amd64 /usr/local/bin/enclave
-```
-
-macOS, where the re-downloaded binary carries the quarantine attribute again:
-
-```bash
-xattr -d com.apple.quarantine ./enclave-darwin-arm64 2>/dev/null || true
-sudo install enclave-darwin-arm64 /usr/local/bin/enclave
-```
-
-Windows launcher. The manifest pins the archive hashes, so a cached one fails
-verification against the new assets and has to be fetched again:
-
-```powershell
-scoop uninstall enclave
-scoop install https://github.com/eclipse-enclave/enclave/releases/download/rolling/enclave.json
-```
-
-Source checkout. `make build` only refreshes `./bin/enclave`, so use
-`make install` if you installed the binary onto your `PATH`:
-
-```bash
-git pull
-make install
-```
 
 ## Start your first session
 

@@ -209,6 +209,9 @@ func writeStageArgs(b *strings.Builder) {
 	for _, name := range networkBuildArgs {
 		fmt.Fprintf(b, "ARG %s\n", name)
 	}
+	for _, name := range mirrorBuildArgs {
+		fmt.Fprintf(b, "ARG %s\n", name)
+	}
 }
 
 // networkBuildArgs are the retry and timeout settings lib/common.sh reads for
@@ -223,6 +226,36 @@ var networkBuildArgs = []string{
 	"ENCLAVE_NET_ATTEMPT_TIMEOUT_SECONDS",
 	"ENCLAVE_NET_STALL_SPEED_BYTES",
 	"ENCLAVE_NET_PROGRESS_INTERVAL_SECONDS",
+}
+
+// mirrorBuildArgs point the package managers used during the build at a
+// mirror or caching proxy. Forwarded from the host environment when set and
+// declared in every stage that runs install scripts. Their values end up in
+// the image history like any build arg, so they must not carry credentials.
+var mirrorBuildArgs = []string{
+	"GOPROXY",
+	"npm_config_registry",
+	"UV_INDEX_URL",
+}
+
+// proxyBuildArgs are the HTTP proxy variables apt, curl, npm, go, and uv all
+// honour. Both BuildKit and buildah treat them as predefined build args and
+// keep them out of the image history, so they need no ARG declarations.
+var proxyBuildArgs = []string{
+	"HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY",
+	"http_proxy", "https_proxy", "no_proxy",
+}
+
+// forwardHostBuildEnv copies the network, mirror, and proxy settings that are
+// set in the host environment into the build args.
+func forwardHostBuildEnv(buildArgs map[string]string) {
+	for _, group := range [][]string{networkBuildArgs, mirrorBuildArgs, proxyBuildArgs} {
+		for _, name := range group {
+			if value := strings.TrimSpace(os.Getenv(name)); value != "" {
+				buildArgs[name] = value
+			}
+		}
+	}
 }
 
 func generateToolInstallBlock(tools []string, stamps map[string]string, forceTools map[string]bool) (string, error) {

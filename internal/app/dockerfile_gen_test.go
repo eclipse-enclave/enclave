@@ -304,3 +304,44 @@ func TestGenerateToolInstallBlockRejectsUnsafeName(t *testing.T) {
 		t.Fatal("expected an error for an unsafe tool name")
 	}
 }
+
+func TestForwardHostBuildEnvCopiesOnlySetValues(t *testing.T) {
+	t.Setenv("ENCLAVE_NET_RETRIES", "9")
+	t.Setenv("GOPROXY", "http://athens.local")
+	t.Setenv("HTTPS_PROXY", "http://proxy.local:3128")
+	t.Setenv("npm_config_registry", "")
+	t.Setenv("UV_INDEX_URL", "   ")
+
+	args := map[string]string{"FEATURES": "default"}
+	forwardHostBuildEnv(args)
+
+	want := map[string]string{
+		"FEATURES":            "default",
+		"ENCLAVE_NET_RETRIES": "9",
+		"GOPROXY":             "http://athens.local",
+		"HTTPS_PROXY":         "http://proxy.local:3128",
+	}
+	for k, v := range want {
+		if args[k] != v {
+			t.Fatalf("args[%q] = %q, want %q", k, args[k], v)
+		}
+	}
+	for _, unset := range []string{"npm_config_registry", "UV_INDEX_URL", "HTTP_PROXY"} {
+		if _, ok := args[unset]; ok {
+			t.Fatalf("%s must not be forwarded when unset or blank", unset)
+		}
+	}
+}
+
+func TestWriteStageArgsDeclaresNetworkAndMirrorArgs(t *testing.T) {
+	var b strings.Builder
+	writeStageArgs(&b)
+	for _, want := range []string{"ARG ENCLAVE_NET_RETRIES\n", "ARG GOPROXY\n", "ARG npm_config_registry\n", "ARG UV_INDEX_URL\n"} {
+		if !strings.Contains(b.String(), want) {
+			t.Fatalf("stage args lack %q:\n%s", want, b.String())
+		}
+	}
+	if strings.Contains(b.String(), "ARG HTTP_PROXY") {
+		t.Fatal("proxy variables are predefined build args and must not be declared")
+	}
+}

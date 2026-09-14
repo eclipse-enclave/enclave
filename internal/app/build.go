@@ -614,8 +614,7 @@ func buildImage(ctx context.Context, paths model.Paths, host model.Host, combine
 // extension install scripts, which must not be able to move the build onto
 // the host network by printing a resolver error.
 func runImageBuild(ctx context.Context, req docker.BuildRequest, out io.Writer) error {
-	log := docker.NewBuildLog(out)
-	err := dockerBuildImage(ctx, req, log)
+	log, err := runWatchedBuild(ctx, req, out)
 	if err == nil {
 		return nil
 	}
@@ -623,6 +622,32 @@ func runImageBuild(ctx context.Context, req docker.BuildRequest, out io.Writer) 
 		return fmt.Errorf("failed to build image: %s (%w)", docker.BuildNetworkDNSHint(), err)
 	}
 	return describeImageBuildFailure(err, log.Tail())
+}
+
+// buildStallWarnAfter is how long the engine may stay silent before the user
+// is told the build may be stuck. A stalled network transfer looks exactly
+// like a slow one from outside, and the engine prints nothing while waiting.
+const buildStallWarnAfter = 3 * time.Minute
+
+// runWatchedBuild runs the engine build, streaming output to out, keeping
+// its tail for classification, and warning while the output is silent.
+func runWatchedBuild(ctx context.Context, req docker.BuildRequest, out io.Writer) (*docker.BuildLog, error) {
+	log := docker.NewBuildLog(out)
+	if !docker.BuildProgressIsQuiet(req.Progress) {
+		// --quiet suppresses engine output for the whole build, so silence
+		// there is normal and the watcher would only cry wolf.
+		stop := log.WarnWhenStalled(buildStallWarnAfter, warnBuildStalled)
+		defer stop()
+	}
+	return log, dockerBuildImage(ctx, req, log)
+}
+
+func warnBuildStalled(idle time.Duration, lastLine string) {
+	if lastLine == "" {
+		logx.Warnf("No image build output for %s; the build may be stalled on a network transfer.", idle.Round(time.Second))
+		return
+	}
+	logx.Warnf("No image build output for %s; the build may be stalled on a network transfer. Last output: %s", idle.Round(time.Second), lastLine)
 }
 
 // describeImageBuildFailure names the likely cause found in the build output,

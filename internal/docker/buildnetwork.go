@@ -39,3 +39,9 @@ func BuildNetworkModeFromEnv() (string, error) {
 func BuildNetworkDNSHint() string {
 	return fmt.Sprintf("name resolution failed inside the build; if the host resolves names fine, the Docker build network may be the cause: rerun with %s=host", BuildNetworkEnv)
 }
+
+// BuildProgressIsQuiet reports whether the progress style suppresses engine
+// output, in which case a silent build is normal rather than a stall.
+func BuildProgressIsQuiet(value string) bool {
+	return normalizeBuildProgress(value) == buildProgressQuiet
+}

@@ -44,3 +44,14 @@ func TestBuildNetworkDNSHintNamesTheOverride(t *testing.T) {
 		t.Fatalf("hint must tell the user how to opt in, got %q", hint)
 	}
 }
+
+func TestBuildProgressIsQuiet(t *testing.T) {
+	if !BuildProgressIsQuiet(" Quiet ") {
+		t.Fatal("quiet must be recognised case-insensitively")
+	}
+	for _, value := range []string{"", "compact", "verbose"} {
+		if BuildProgressIsQuiet(value) {
+			t.Fatalf("%q must not count as quiet", value)
+		}
+	}
+}

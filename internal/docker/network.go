@@ -29,13 +29,46 @@ func NetworkCreate(ctx context.Context, opts NetworkCreateOptions) (string, erro
 	args = append(args, sortedMapFlags("--opt", opts.Options)...)
 	args = append(args, sortedMapFlags("--label", opts.Labels)...)
 	args = append(args, opts.Name)
-	return capture(ctx, args...)
+	out, err := capture(ctx, args...)
+	if err != nil {
+		return out, err
+	}
+	if !IsPodman() {
+		return out, nil
+	}
+	// podman echoes the network's name where Docker prints its ID. Callers
+	// identify a network by the ID they get back and compare it against
+	// inspect output, so the name has to be resolved here rather than silently
+	// standing in for an ID.
+	info, err := NetworkInspect(ctx, opts.Name)
+	if err != nil {
+		return "", fmt.Errorf("resolve ID of created network %q: %w", opts.Name, err)
+	}
+	if id := strings.TrimSpace(info.ID); id != "" {
+		return id, nil
+	}
+	return "", fmt.Errorf("created network %q reports no ID", opts.Name)
 }
 
 // NetworkRemove removes a Docker network.
 func NetworkRemove(ctx context.Context, name string) error {
 	_, err := capture(ctx, "network", "rm", name)
 	return err
+}
+
+// NetworkAttachedContainers returns the names of the containers the engine
+// considers attached to a network, stopped ones included. It replaces the
+// inspect response's endpoint map, which podman does not populate at all, and
+// counts the same containers podman's own in-use check does.
+func NetworkAttachedContainers(ctx context.Context, name string) ([]string, error) {
+	if strings.TrimSpace(name) == "" {
+		return nil, fmt.Errorf("cannot list attached containers without a network name")
+	}
+	out, err := capture(ctx, "ps", "--all", "--no-trunc", "--filter", "network="+name, "--format", "{{.Names}}")
+	if err != nil {
+		return nil, err
+	}
+	return splitLines(out), nil
 }
 
 // NetworkInspect returns the inspect view of a single Docker network.

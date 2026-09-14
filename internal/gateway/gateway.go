@@ -398,9 +398,16 @@ type StartResult struct {
 	TempFiles     []string
 }
 
-type gatewayReconcileResult struct {
-	Exists  bool
-	Owned   bool
+// StaleResult reports what ReconcileStale found for a session's gateway.
+type StaleResult struct {
+	// Exists is set when a container with the gateway name exists.
+	Exists bool
+	// Owned is set when that container carries this session's gateway labels.
+	Owned bool
+	// SessionExists is set when the session container itself exists; it is
+	// only checked for an owned, stale gateway.
+	SessionExists bool
+	// Removed is set when the gateway was removed.
 	Removed bool
 }
 
@@ -436,7 +443,7 @@ func Start(ctx context.Context, cfg StartConfig) (StartResult, error) {
 	}
 
 	gatewayContainer := ContainerName(cfg.ContainerName)
-	reconciled, err := reconcileGatewayContainerForStart(ctx, cfg, time.Now().UTC())
+	reconciled, err := ReconcileStale(ctx, cfg.ContainerName, cfg.ProjectHash, time.Now().UTC())
 	if err != nil {
 		return empty, fmt.Errorf("inspect existing gateway container %s: %w", gatewayContainer, err)
 	}
@@ -531,7 +538,7 @@ func Start(ctx context.Context, cfg StartConfig) (StartResult, error) {
 
 	containerID, err := startGatewayContainer(ctx, config, hostConfig, gatewayContainer)
 	if err != nil && docker.IsContainerNameConflict(err) {
-		reconciled, reconcileErr := reconcileGatewayContainerForStart(ctx, cfg, time.Now().UTC())
+		reconciled, reconcileErr := ReconcileStale(ctx, cfg.ContainerName, cfg.ProjectHash, time.Now().UTC())
 		if reconcileErr != nil {
 			return empty, fmt.Errorf("reconcile conflicting gateway container %s: %w", gatewayContainer, reconcileErr)
 		}
@@ -642,22 +649,30 @@ func removeFailedGateway(ctx context.Context, name string, containerID string) {
 	}
 }
 
-func reconcileGatewayContainerForStart(ctx context.Context, cfg StartConfig, now time.Time) (gatewayReconcileResult, error) {
-	name := ContainerName(cfg.ContainerName)
+// ReconcileStale is the one rule for removing a gateway sidecar that outlived
+// its session start: the gateway of containerName is removed when it carries
+// the session's own labels, is stale (exited or dead, or older than
+// OrphanGracePeriod), and the session container does not exist. A younger
+// running gateway is left in place because a concurrent start of the same name
+// may be about to create its session container. Removal is by immutable ID so
+// a gateway replaced in the meantime survives.
+func ReconcileStale(ctx context.Context, containerName string, projectHash string, now time.Time) (StaleResult, error) {
+	name := ContainerName(containerName)
 	info, err := startContainerInspect(ctx, name)
 	if err != nil {
 		if docker.IsNotFound(err) {
-			return gatewayReconcileResult{}, nil
+			return StaleResult{}, nil
 		}
-		return gatewayReconcileResult{}, err
+		return StaleResult{}, err
 	}
-	result := gatewayReconcileResult{Exists: true, Owned: gatewayContainerOwnedBy(info, cfg)}
+	result := StaleResult{Exists: true, Owned: gatewayContainerOwnedBy(info, containerName, projectHash)}
 	if !result.Owned || !gatewayContainerStale(info, now) {
 		return result, nil
 	}
 
-	_, err = startContainerInspect(ctx, cfg.ContainerName)
+	_, err = startContainerInspect(ctx, containerName)
 	if err == nil {
+		result.SessionExists = true
 		return result, nil
 	}
 	if !docker.IsNotFound(err) {
@@ -665,8 +680,9 @@ func reconcileGatewayContainerForStart(ctx context.Context, cfg StartConfig, now
 	}
 	// Recheck immediately before removal so a concurrently created session
 	// container wins the race.
-	_, err = startContainerInspect(ctx, cfg.ContainerName)
+	_, err = startContainerInspect(ctx, containerName)
 	if err == nil {
+		result.SessionExists = true
 		return result, nil
 	}
 	if !docker.IsNotFound(err) {
@@ -684,14 +700,14 @@ func reconcileGatewayContainerForStart(ctx context.Context, cfg StartConfig, now
 	return result, nil
 }
 
-func gatewayContainerOwnedBy(info docker.InspectResponse, cfg StartConfig) bool {
+func gatewayContainerOwnedBy(info docker.InspectResponse, containerName string, projectHash string) bool {
 	if info.Config == nil {
 		return false
 	}
 	labels := info.Config.Labels
 	return strings.EqualFold(strings.TrimSpace(labels[model.GatewayLabelManaged]), "true") &&
-		strings.TrimSpace(labels[model.GatewayLabelContainer]) == strings.TrimSpace(cfg.ContainerName) &&
-		strings.TrimSpace(labels[model.GatewayLabelProjectHash]) == strings.TrimSpace(cfg.ProjectHash)
+		strings.TrimSpace(labels[model.GatewayLabelContainer]) == strings.TrimSpace(containerName) &&
+		strings.TrimSpace(labels[model.GatewayLabelProjectHash]) == strings.TrimSpace(projectHash)
 }
 
 func gatewayContainerStale(info docker.InspectResponse, now time.Time) bool {

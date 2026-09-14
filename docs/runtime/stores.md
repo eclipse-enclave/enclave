@@ -395,7 +395,9 @@ Source: [`internal/runtime/volume_manager.go`](../../internal/runtime/volume_man
 
 `enclave cleanup` removes persistent stores and other host-side data.
 `--ephemeral` cleanup removes ephemeral config-store directories (every
-`config-store/<key>` other than `default`).
+`config-store/<key>` other than `default`), stopped ephemeral containers, and
+per-session networks whose session is gone (see
+[networking](../networking.md#per-session-docker-networks)).
 
 ## Source Files
 

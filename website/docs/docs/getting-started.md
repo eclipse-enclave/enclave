@@ -132,14 +132,61 @@ cd enclave
 make build
 ```
 
-### Updating
+### Updating Enclave
 
-Enclave does not update itself yet, and it does not tell you when a newer build
-is available. Since the rolling release moves with `main`, download the current
-assets every so often and re-run the same install step you used above: `sudo apt
-install ./enclave_*_amd64.deb`, `sudo dnf install ./enclave-*.x86_64.rpm`,
-`sudo install ...` over the binary, or `git pull && make build` for a source
-checkout.
+The Enclave binary does not update itself yet, and it does not tell you when a
+newer build is available. The rolling release moves with `main`, so check back
+regularly: `enclave version` prints the version, commit, and commit date of your
+build, which you can compare against the current
+[rolling release](https://github.com/eclipse-enclave/enclave/releases/tag/rolling).
+To update, download the current assets and re-run the install step you used.
+
+:::note
+This is about the Enclave binary itself. `enclave update` rebuilds tool images
+with the latest agent CLI, and agent CLIs inside a session refresh on their own
+schedule; neither replaces the Enclave binary on your host.
+:::
+
+Ubuntu:
+
+```bash
+sudo apt install ./enclave_*_amd64.deb
+```
+
+Fedora:
+
+```bash
+sudo dnf install ./enclave-*.x86_64.rpm
+```
+
+Other Linux:
+
+```bash
+sudo install enclave-linux-amd64 /usr/local/bin/enclave
+```
+
+macOS, where the re-downloaded binary carries the quarantine attribute again:
+
+```bash
+xattr -d com.apple.quarantine ./enclave-darwin-arm64 2>/dev/null || true
+sudo install enclave-darwin-arm64 /usr/local/bin/enclave
+```
+
+Windows launcher. The manifest pins the archive hashes, so a cached one fails
+verification against the new assets and has to be fetched again:
+
+```powershell
+scoop uninstall enclave
+scoop install https://github.com/eclipse-enclave/enclave/releases/download/rolling/enclave.json
+```
+
+Source checkout. `make build` only refreshes `./bin/enclave`, so use
+`make install` if you installed the binary onto your `PATH`:
+
+```bash
+git pull
+make install
+```
 
 ## Start your first session
 

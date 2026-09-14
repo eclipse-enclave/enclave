@@ -56,6 +56,14 @@ dependency-authored code does not run at image build time. Check upstream
 first: some packages resolve a platform binary in a `postinstall` and break
 without it.
 
+### Downloading from elsewhere
+
+For anything that is not an npm package, fetch with `enclave_curl` (a `curl`
+wrapper with timeouts and retries that the build exports into `install.sh`) and
+wrap other network-bound commands in `enclave_retry <label> -- <cmd...>`.
+Download an upstream installer to a file and run the file rather than piping
+into `bash`. See the [extensions README](README.md#network-access-from-installsh).
+
 ## 2) Fill in the `sandbox` block
 
 `sandbox.*` is enclave-native tool metadata. Common fields (see the README for

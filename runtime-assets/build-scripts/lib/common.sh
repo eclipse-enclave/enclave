@@ -245,3 +245,181 @@ enclave_list_feature_installers() {
         printf '%s\t%s\t%s\n' "$priority" "$name" "$script"
     done < <(enclave_list_enabled_features "$selection")
 }
+
+# ---------------------------------------------------------------------------
+# Network helpers for build-time downloads.
+#
+# Build-time fetches go through enclave_curl (one HTTP transfer with connect
+# and stall timeouts) or enclave_retry (any command whose stderr identifies a
+# transient network error). Both read their tunables from the environment so a
+# build on a poor connection can raise them; the CLI forwards ENCLAVE_NET_*
+# variables from the host environment as build args. The install runners
+# export the helpers into extension install.sh processes.
+
+: "${ENCLAVE_NET_RETRIES:=5}"
+: "${ENCLAVE_NET_RETRY_DELAY_SECONDS:=5}"
+: "${ENCLAVE_NET_CONNECT_TIMEOUT_SECONDS:=20}"
+: "${ENCLAVE_NET_STALL_TIMEOUT_SECONDS:=60}"
+: "${ENCLAVE_NET_ATTEMPT_TIMEOUT_SECONDS:=1800}"
+
+enclave_net_settings_valid() {
+    local name=""
+    for name in ENCLAVE_NET_RETRIES ENCLAVE_NET_RETRY_DELAY_SECONDS \
+        ENCLAVE_NET_CONNECT_TIMEOUT_SECONDS ENCLAVE_NET_STALL_TIMEOUT_SECONDS \
+        ENCLAVE_NET_ATTEMPT_TIMEOUT_SECONDS; do
+        case "${!name}" in
+            '' | *[!0-9]*)
+                echo "${name} must be a non-negative integer, got: ${!name}" >&2
+                return 1
+                ;;
+        esac
+    done
+    if [ "$ENCLAVE_NET_RETRIES" -lt 1 ]; then
+        echo "ENCLAVE_NET_RETRIES must be >= 1, got: ${ENCLAVE_NET_RETRIES}" >&2
+        return 1
+    fi
+}
+
+# enclave_is_transient_network_error <file> reports whether captured command
+# output looks like a network failure worth retrying: name resolution, connect
+# and read timeouts, resets, stalled transfers, and gateway-side 5xx responses.
+# A 404 or a checksum mismatch is not on the list, so wrong URLs fail fast.
+enclave_is_transient_network_error() {
+    grep -Eiq \
+        -e 'Temporary failure (resolving|in name resolution)' \
+        -e 'Could not resolve' \
+        -e 'no such host' \
+        -e 'Name or service not known' \
+        -e 'i/o timeout' \
+        -e 'TLS handshake timeout' \
+        -e 'timed out' \
+        -e 'network is unreachable' \
+        -e 'connection reset by peer' \
+        -e 'connection refused' \
+        -e 'proxyconnect tcp' \
+        -e 'dial tcp' \
+        -e 'unexpected EOF' \
+        -e 'context deadline exceeded' \
+        -e 'Failed to fetch' \
+        -e 'Could not connect to' \
+        -e 'Unable to connect to' \
+        -e 'transfer closed' \
+        -e '(Recv|Send) failure' \
+        -e 'Hash Sum mismatch' \
+        -e 'E(CONNRESET|TIMEDOUT|NOTFOUND|AI_AGAIN|CONNREFUSED|HOSTUNREACH|NETUNREACH)' \
+        -e 'curl: \(([67]|1[68]|2[38]|35|5[2567]|92)\)' \
+        -e 'returned error: (408|425|429|5[0-9][0-9])' \
+        "$1"
+}
+
+# enclave_retry <label> [--] <cmd> [args...]
+# Runs cmd, retrying with a growing delay while its stderr shows a transient
+# network error or the attempt hits ENCLAVE_NET_ATTEMPT_TIMEOUT_SECONDS (0
+# disables the per-attempt timeout). stdout streams through untouched; stderr
+# is captured per attempt and replayed on failure. Returns the last exit status.
+enclave_retry() {
+    local label="$1"
+    shift
+    if [ "${1:-}" = "--" ]; then
+        shift
+    fi
+    if [ "$#" -lt 1 ]; then
+        echo "enclave_retry: missing command for ${label}" >&2
+        return 2
+    fi
+    enclave_net_settings_valid || return 2
+
+    local attempt=1
+    local status=0
+    local delay=0
+    local errlog=""
+    errlog="$(mktemp)"
+
+    # timeout(1) only runs executables; shell functions and builtins run
+    # without the per-attempt deadline.
+    local -a runner=()
+    if [ "$ENCLAVE_NET_ATTEMPT_TIMEOUT_SECONDS" -gt 0 ] && [ "$(type -t "$1")" = "file" ] &&
+        command -v timeout >/dev/null 2>&1; then
+        runner=(timeout "$ENCLAVE_NET_ATTEMPT_TIMEOUT_SECONDS")
+    fi
+
+    while :; do
+        status=0
+        "${runner[@]}" "$@" 2>>"$errlog" || status=$?
+        if [ "$status" -eq 0 ]; then
+            cat "$errlog" >&2
+            rm -f "$errlog"
+            return 0
+        fi
+
+        cat "$errlog" >&2
+        if [ "$status" -eq 124 ]; then
+            echo "${label}: attempt ${attempt} timed out after ${ENCLAVE_NET_ATTEMPT_TIMEOUT_SECONDS}s" >&2
+        fi
+        if [ "$attempt" -ge "$ENCLAVE_NET_RETRIES" ]; then
+            echo "${label}: failed after ${attempt} attempt(s)" >&2
+            rm -f "$errlog"
+            return "$status"
+        fi
+        if [ "$status" -ne 124 ] && ! enclave_is_transient_network_error "$errlog"; then
+            echo "${label}: failed with a non-retryable error" >&2
+            rm -f "$errlog"
+            return "$status"
+        fi
+
+        delay=$((ENCLAVE_NET_RETRY_DELAY_SECONDS * attempt))
+        echo "${label}: transient network failure; retrying (attempt $((attempt + 1))/${ENCLAVE_NET_RETRIES}) in ${delay}s" >&2
+        sleep "$delay"
+        : >"$errlog"
+        attempt=$((attempt + 1))
+    done
+}
+
+# enclave_curl [curl args...]
+# curl with --fail, connect and stall timeouts, wrapped in enclave_retry. A
+# transfer delivering under 1 KB/s for ENCLAVE_NET_STALL_TIMEOUT_SECONDS is
+# aborted so a silent peer becomes a retryable failure instead of a hang.
+# Without -o/-O the body is buffered per attempt and written to stdout only on
+# success, so `$(enclave_curl url)` never sees a partial body from a failed try.
+enclave_curl() {
+    local label="curl"
+    local capture=1
+    local arg=""
+    for arg in "$@"; do
+        case "$arg" in
+            http://* | https://*) label="curl ${arg}" ;;
+            -o | --output | -O | --remote-name | -o* | --output=*) capture=0 ;;
+        esac
+    done
+
+    local -a curl_args=(
+        --fail --silent --show-error
+        --connect-timeout "$ENCLAVE_NET_CONNECT_TIMEOUT_SECONDS"
+        --speed-limit 1024 --speed-time "$ENCLAVE_NET_STALL_TIMEOUT_SECONDS"
+    )
+    if [ "$capture" -eq 0 ]; then
+        enclave_retry "$label" -- curl "${curl_args[@]}" "$@"
+        return
+    fi
+
+    local body=""
+    local status=0
+    body="$(mktemp)"
+    enclave_retry "$label" -- curl "${curl_args[@]}" -o "$body" "$@" || status=$?
+    if [ "$status" -eq 0 ]; then
+        cat "$body"
+    fi
+    rm -f "$body"
+    return "$status"
+}
+
+# enclave_export_net_helpers makes the network helpers and their settings
+# available to child bash processes, which is how extension install.sh scripts
+# get them from the install runners without sourcing this file.
+enclave_export_net_helpers() {
+    export ENCLAVE_NET_RETRIES ENCLAVE_NET_RETRY_DELAY_SECONDS \
+        ENCLAVE_NET_CONNECT_TIMEOUT_SECONDS ENCLAVE_NET_STALL_TIMEOUT_SECONDS \
+        ENCLAVE_NET_ATTEMPT_TIMEOUT_SECONDS
+    export -f enclave_net_settings_valid enclave_is_transient_network_error \
+        enclave_retry enclave_curl
+}

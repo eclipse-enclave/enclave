@@ -29,6 +29,34 @@ Build-time selectors:
 - `ENCLAVE_FEATURE_PHASE`: `root` or `user` (for `run-feature-installs.sh`).
 - `ENCLAVE_FEATURE_INSTALL_STRICT`: `1` to fail on feature installer errors, default `0` (warn and continue).
 
+Network settings (from `lib/common.sh`, forwarded by the CLI from the host environment as build args):
+
+- `ENCLAVE_NET_RETRIES` (default: `5`): attempts per download or retried command.
+- `ENCLAVE_NET_RETRY_DELAY_SECONDS` (default: `5`): base delay, multiplied by the attempt number.
+- `ENCLAVE_NET_CONNECT_TIMEOUT_SECONDS` (default: `20`): `curl --connect-timeout`.
+- `ENCLAVE_NET_STALL_TIMEOUT_SECONDS` (default: `60`): abort a transfer under 1 KB/s for this long.
+- `ENCLAVE_NET_ATTEMPT_TIMEOUT_SECONDS` (default: `1800`, `0` disables): `timeout(1)` around each attempt of a retried executable.
+
+## Network Helpers
+
+Every build-time download goes through one of two `lib/common.sh` functions so
+timeouts, stall detection, and retries are applied in one place:
+
+- `enclave_curl [curl args...]`: `curl --fail --silent --show-error` with connect and stall timeouts, wrapped in `enclave_retry`. Without `-o`/`-O` the body is buffered per attempt and written to stdout only on success, so `$(enclave_curl <url>)` never sees a partial body.
+- `enclave_retry <label> -- <cmd> [args...]`: runs the command, retrying with a growing delay while its stderr matches a transient network error (name resolution, timeouts, resets, stalled transfers, 5xx) or the attempt exceeds the per-attempt timeout. A 404 or a checksum mismatch fails immediately. stdout streams through; stderr is replayed after each attempt.
+- `enclave_is_transient_network_error <file>`: the classifier both use.
+
+`run-feature-installs.sh` and `enclave-install-tool` export these into the
+extension `install.sh` processes they start, so extension scripts call them
+directly. To run an extension script standalone (for example in CI), source
+`lib/common.sh` first; `ENCLAVE_BUILD_SCRIPTS_DIR` points at this directory
+when it is not at `/opt/enclave/build-scripts`.
+
+Download upstream installer scripts to a file with `enclave_curl -o` and run the
+file, rather than piping `curl` into `bash`: a retried download is safe, a
+retried half-run installer is not. The installer's own internal downloads are
+outside the helpers' reach.
+
 ## Scripts
 
 - `install-agent-node-runtime.sh`: validates private Node runtime and writes npm/npx wrappers.

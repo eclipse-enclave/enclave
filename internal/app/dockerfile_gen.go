@@ -184,6 +184,21 @@ func writeStageArgs(b *strings.Builder) {
 	b.WriteString("ARG GROUP_ID=1000\n")
 	b.WriteString("ARG USERNAME=agent\n")
 	b.WriteString("ARG AGENT_TOOLS=all\n")
+	for _, name := range networkBuildArgs {
+		fmt.Fprintf(b, "ARG %s\n", name)
+	}
+}
+
+// networkBuildArgs are the retry and timeout settings lib/common.sh reads for
+// build-time downloads. buildImage forwards them from the host environment
+// when set; every stage that runs install scripts declares them so the values
+// reach the RUN steps.
+var networkBuildArgs = []string{
+	"ENCLAVE_NET_RETRIES",
+	"ENCLAVE_NET_RETRY_DELAY_SECONDS",
+	"ENCLAVE_NET_CONNECT_TIMEOUT_SECONDS",
+	"ENCLAVE_NET_STALL_TIMEOUT_SECONDS",
+	"ENCLAVE_NET_ATTEMPT_TIMEOUT_SECONDS",
 }
 
 func generateToolInstallBlock(tools []string, stamps map[string]string, forceTools map[string]bool) (string, error) {

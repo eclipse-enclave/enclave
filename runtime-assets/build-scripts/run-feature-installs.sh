@@ -47,6 +47,10 @@ if [ "$phase" = "user" ]; then
     fi
 fi
 
+# Feature install.sh scripts fetch from the network; hand them the shared
+# retry and curl helpers so they do not each reinvent timeouts and retries.
+enclave_export_net_helpers
+
 mapfile -t installers < <(enclave_list_feature_installers "$selection" "$phase" | sort -n -k1,1 -k2,2)
 if [ "${#installers[@]}" -eq 0 ]; then
     echo "No feature install scripts for phase: ${phase}"

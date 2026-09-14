@@ -442,11 +442,15 @@ func TestPruneStaleSessionNetworks(t *testing.T) {
 	var removed []string
 	networkRemove = func(_ context.Context, ref string) error { removed = append(removed, ref); return nil }
 
-	names, err := PruneStaleSessionNetworks(context.Background(), now, true)
+	names, err := PruneStaleSessionNetworks(context.Background(), now, "", true)
 	if err != nil || !reflect.DeepEqual(names, []string{network.Name}) || len(removed) != 0 {
 		t.Fatalf("dry run = %v, %v (removed %v)", names, err, removed)
 	}
-	names, err = PruneStaleSessionNetworks(context.Background(), now, false)
+	names, err = PruneStaleSessionNetworks(context.Background(), now, "enclave-codex-otherproject-", false)
+	if err != nil || len(names) != 0 || len(removed) != 0 {
+		t.Fatalf("prune outside the owner scope = %v, %v (removed %v)", names, err, removed)
+	}
+	names, err = PruneStaleSessionNetworks(context.Background(), now, "go", false)
 	if err != nil || !reflect.DeepEqual(names, []string{network.Name}) || !reflect.DeepEqual(removed, []string{"gone-network-id"}) {
 		t.Fatalf("prune = %v, %v (removed %v)", names, err, removed)
 	}

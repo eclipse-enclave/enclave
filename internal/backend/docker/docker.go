@@ -245,31 +245,55 @@ func (b *Backend) Remove(ctx context.Context, ref backend.SessionRef) error {
 	if err := b.finalizeManagedContainerAuth(ctx, name); err != nil {
 		return fmt.Errorf("finalize auth before removing container %s: %w", name, err)
 	}
-	return b.removeSessionContainer(ctx, name)
+	return RemoveSessionContainer(ctx, name, false)
 }
 
 func (b *Backend) RemoveWithoutFinalize(ctx context.Context, ref backend.SessionRef) error {
-	return b.removeSessionContainer(ctx, sessionRefName(ref))
+	return RemoveSessionContainer(ctx, sessionRefName(ref), false)
 }
 
-// removeSessionContainer removes the session container and then tears down
-// its gateway and per-session network. The gateway must go second: podman
-// refuses to remove a container whose network namespace another container
-// still joins, even an exited one, so stopping the auto-removing gateway
-// first would leave it behind as an exited container. The network goes last
-// and is captured before the removal, because the container is what
-// identifies it.
-func (b *Backend) removeSessionContainer(ctx context.Context, name string) error {
+// RemoveSessionContainer removes the session container and then tears down
+// its gateway and per-session network. removeVolumes also removes anonymous
+// volumes declared by its image. A missing container counts as removed.
+// The gateway must go second: podman refuses to remove a container whose
+// network namespace another container still joins, even an exited one, so
+// stopping the auto-removing gateway first would leave it behind as an exited
+// container. Gateway and network are captured before the removal, the
+// gateway by immutable ID: once the container is gone, a concurrent start of
+// the same name may already have created a replacement gateway under the
+// name. A removal that fails for any other reason leaves gateway and network
+// alone: the session may still be running on them.
+func RemoveSessionContainer(ctx context.Context, name string, removeVolumes bool) error {
 	network, hasNetwork := captureSessionNetworkRef(ctx, name)
-	err := dockercmd.ContainerRemove(ctx, name, true, false)
-	if err != nil && dockercmd.IsNotFound(err) {
-		err = nil
+	gatewayID := captureOwnedGatewayID(ctx, name)
+	if err := dockercmd.ContainerRemove(ctx, name, true, removeVolumes); err != nil && !dockercmd.IsNotFound(err) {
+		return err
 	}
-	gateway.Stop(name)
+	gateway.StopContainer(gatewayID)
 	if hasNetwork {
-		b.cleanupSessionNetwork(network)
+		cleanupSessionNetwork(network)
 	}
-	return err
+	return nil
+}
+
+// captureOwnedGatewayID returns the immutable ID of the session's managed
+// gateway sidecar, or "" when there is none.
+func captureOwnedGatewayID(ctx context.Context, name string) string {
+	gatewayName := gateway.ContainerName(name)
+	info, err := dockercmd.ContainerInspect(ctx, gatewayName)
+	if err != nil {
+		if !dockercmd.IsNotFound(err) {
+			logx.Debugf("Failed to capture gateway container %s before teardown: %v", gatewayName, err)
+		}
+		return ""
+	}
+	if info.Config == nil || !strings.EqualFold(strings.TrimSpace(info.Config.Labels[model.GatewayLabelManaged]), "true") {
+		return ""
+	}
+	if owner := strings.TrimSpace(info.Config.Labels[model.GatewayLabelContainer]); owner != "" && owner != strings.TrimSpace(name) {
+		return ""
+	}
+	return strings.TrimSpace(info.ID)
 }
 
 var execInteractive = dockercmd.ExecInteractive
@@ -332,13 +356,13 @@ func (b *Backend) prepareRun(ctx context.Context, req backend.Request) (runSpec,
 	if req.Network.Mode == backend.NetworkModeRestricted {
 		gatewayName, cleanup, err := b.startGateway(ctx, req, sessionNetwork.Name)
 		if err != nil {
-			b.cleanupSessionNetwork(sessionNetwork)
+			cleanupSessionNetwork(sessionNetwork)
 			return runSpec{}, err
 		}
 		joinGatewayNamespaces(spec.hostConfig, gatewayName)
 		spec.cleanup = func() {
 			cleanup()
-			b.cleanupSessionNetwork(sessionNetwork)
+			cleanupSessionNetwork(sessionNetwork)
 		}
 	} else {
 		spec.hostConfig.NetworkMode = dockercmd.NetworkMode(sessionNetwork.Name)
@@ -348,7 +372,7 @@ func (b *Backend) prepareRun(ctx context.Context, req backend.Request) (runSpec,
 			spec.hostConfig.ExtraHosts = append(spec.hostConfig.ExtraHosts, "host.docker.internal:host-gateway")
 		}
 		spec.cleanup = func() {
-			b.cleanupSessionNetwork(sessionNetwork)
+			cleanupSessionNetwork(sessionNetwork)
 		}
 	}
 	applySELinuxMounts(spec.hostConfig, util.IsSELinuxEnforcing())

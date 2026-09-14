@@ -542,7 +542,9 @@ func Start(ctx context.Context, cfg StartConfig) (StartResult, error) {
 		if reconcileErr != nil {
 			return empty, fmt.Errorf("reconcile conflicting gateway container %s: %w", gatewayContainer, reconcileErr)
 		}
-		if reconciled.Removed {
+		if reconciled.Removed || !reconciled.Exists {
+			// Removed here, or gone on its own (an auto-removing gateway
+			// finishing its exit): the name is free, run once more.
 			containerID, err = startGatewayContainer(ctx, config, hostConfig, gatewayContainer)
 		} else if reconciled.Exists && reconciled.Owned {
 			return empty, fmt.Errorf("gateway container %q is already running or starting for session %s; run 'enclave stop %s' and retry: %w", gatewayContainer, cfg.ContainerName, cfg.ContainerName, err)
@@ -670,16 +672,6 @@ func ReconcileStale(ctx context.Context, containerName string, projectHash strin
 		return result, nil
 	}
 
-	_, err = startContainerInspect(ctx, containerName)
-	if err == nil {
-		result.SessionExists = true
-		return result, nil
-	}
-	if !docker.IsNotFound(err) {
-		return result, err
-	}
-	// Recheck immediately before removal so a concurrently created session
-	// container wins the race.
 	_, err = startContainerInspect(ctx, containerName)
 	if err == nil {
 		result.SessionExists = true
@@ -845,18 +837,10 @@ func ensureExistingGatewayImageWith(profile model.Profile, exists func(context.C
 	return fmt.Errorf("gateway image %q does not exist locally; rerun without --no-rebuild, pass --rebuild, or use --allow-all-network to bypass the gateway", image)
 }
 
-func Stop(containerName string) {
-	stopContainer(ContainerName(containerName))
-}
-
 // StopContainer stops the exact gateway container returned by Start. Using
 // its immutable ID prevents delayed error cleanup from stopping a newer
 // same-name gateway created by a concurrent session start.
 func StopContainer(container string) {
-	stopContainer(container)
-}
-
-func stopContainer(container string) {
 	if strings.TrimSpace(container) == "" {
 		return
 	}

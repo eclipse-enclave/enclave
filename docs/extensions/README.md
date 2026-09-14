@@ -648,7 +648,7 @@ resolved port appears in the printed `openUrl` and in `enclave ps`.
 
 | Feature | Priority | Description |
 |---------|----------|-------------|
-| `devtools` | 40 | Core tools + linters (vim, htop, ripgrep, golang-go, shellcheck, golangci-lint, gosec). |
+| `devtools` | 40 | Core tools + linters (vim, htop, ripgrep, golang-go, shellcheck, golangci-lint, gosec, govulncheck). Go and the linters are what `make lint` needs to develop Enclave inside a session. |
 | `github-cli` | 50 | GitHub CLI (gh) |
 | `gitlab-cli` | 50 | GitLab CLI (glab) (opt-in) |
 | `node-dev` | 70 | Node.js dev tools: typescript, eslint, prettier |

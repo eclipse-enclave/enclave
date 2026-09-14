@@ -79,7 +79,11 @@ RUN set -eux; \
         arm64) yq_arch=arm64 ;; \
         *) echo "unsupported architecture for yq: $arch" >&2; exit 1 ;; \
     esac; \
-    curl -fsSL "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_${yq_arch}" -o /usr/local/bin/yq; \
+    # Same timeouts and retries as enclave_curl in lib/common.sh, which is not
+    # in the image yet at this stage.
+    curl -fsSL --connect-timeout 20 --speed-limit 1024 --speed-time 60 \
+        --retry 4 --retry-delay 5 --retry-all-errors \
+        "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_${yq_arch}" -o /usr/local/bin/yq; \
     chmod 0755 /usr/local/bin/yq; \
     yq --version
 

@@ -9,7 +9,12 @@
 # Install Claude Code via native installer
 set -e
 
-curl -fsSL https://claude.ai/install.sh | bash
+# Download the installer completely before running it: a retried download is
+# safe, a retried half-run installer is not.
+claude_installer="$(mktemp)"
+enclave_curl -L -o "$claude_installer" https://claude.ai/install.sh
+bash "$claude_installer"
+rm -f "$claude_installer"
 
 if ! command -v claude >/dev/null 2>&1; then
     echo "Claude Code install failed: claude binary not found" >&2

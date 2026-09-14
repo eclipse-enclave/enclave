@@ -11,6 +11,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -211,7 +212,7 @@ func buildGatewayImage(ctx context.Context, paths model.Paths, profile model.Pro
 		},
 	}
 	var output bytes.Buffer
-	if err := docker.Build(ctx, req, &output); err != nil {
+	if err := buildGatewayWatched(ctx, req, &output); err != nil {
 		// Some Docker BuildKit setups cannot resolve names on the default build
 		// network, which surfaces here as failed Alpine index fetches. Retry
 		// with the host network only for that symptom and only on Docker;
@@ -222,7 +223,7 @@ func buildGatewayImage(ctx context.Context, paths model.Paths, profile model.Pro
 		logx.Warnf("Gateway build failed with DNS resolution errors on the default build network; retrying with host build network")
 		req.NetworkMode = "host"
 		var retryOutput bytes.Buffer
-		if retryErr := docker.Build(ctx, req, &retryOutput); retryErr != nil {
+		if retryErr := buildGatewayWatched(ctx, req, &retryOutput); retryErr != nil {
 			return describeGatewayBuildFailure(retryErr, retryOutput.String())
 		}
 		logx.Warnf("Gateway build succeeded with host build network")
@@ -230,6 +231,25 @@ func buildGatewayImage(ctx context.Context, paths model.Paths, profile model.Pro
 
 	logx.Successf("Gateway image built")
 	return nil
+}
+
+// gatewayBuildStallWarnAfter mirrors the runtime image build's stall warning.
+// The gateway build is short, so a silent stretch this long is worth a notice.
+const gatewayBuildStallWarnAfter = 3 * time.Minute
+
+// buildGatewayWatched runs one gateway build attempt into out (the gateway
+// build is not streamed to the terminal) and warns while it produces nothing.
+func buildGatewayWatched(ctx context.Context, req docker.BuildRequest, out io.Writer) error {
+	log := docker.NewBuildLog(out)
+	stop := log.WarnWhenStalled(gatewayBuildStallWarnAfter, func(idle time.Duration, lastLine string) {
+		if lastLine == "" {
+			logx.Warnf("No gateway build output for %s; the build may be stalled on a network transfer.", idle.Round(time.Second))
+			return
+		}
+		logx.Warnf("No gateway build output for %s; the build may be stalled on a network transfer. Last output: %s", idle.Round(time.Second), lastLine)
+	})
+	defer stop()
+	return docker.Build(ctx, req, log)
 }
 
 // describeGatewayBuildFailure names the likely cause found in the build

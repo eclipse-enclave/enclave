@@ -317,7 +317,7 @@ Merge semantics:
 | `ENCLAVE_NET_CONNECT_TIMEOUT_SECONDS` | `curl --connect-timeout` for build-time downloads (default `20`) |
 | `ENCLAVE_NET_STALL_TIMEOUT_SECONDS` | Abort a build-time download that stays below the stall speed floor for this long (default `60`) |
 | `ENCLAVE_NET_STALL_SPEED_BYTES` | Stall speed floor in bytes per second (default `1024`); lower it on links that are genuinely slower |
-| `ENCLAVE_NET_PROGRESS_INTERVAL_SECONDS` | How often a running download reports the bytes received so far (default `30`, `0` disables) |
+| `ENCLAVE_NET_PROGRESS_INTERVAL_SECONDS` | How often a running download reports bytes received, percentage, rate, and time left (default `30`, `0` disables) |
 | `ENCLAVE_NET_ATTEMPT_TIMEOUT_SECONDS` | Wall-clock limit per attempt for retried install commands such as `go install` and `apt-get` (default `1800`, `0` disables) |
 
 These are read by the Windows launcher on the Windows side only, and are not
@@ -333,9 +333,13 @@ The `ENCLAVE_NET_*` variables are read from the host environment when an image
 build starts and passed to the build scripts, which apply them to every
 download made through the shared `enclave_curl` and `enclave_retry` helpers
 (see [build-scripts/README.md](../runtime-assets/build-scripts/README.md)).
-Raise them on a slow or flaky connection; they do not affect the image hash.
-Retried downloads resume the partial file where the server supports range
-requests, so a large archive does not restart from zero after a hiccup.
+Raise them on a slow or flaky connection. They do not affect the image hash,
+so changing one does not trigger a rebuild by itself, but they do reach the
+build steps as build args: once a rebuild runs for another reason, a value
+that differs from the previous build rebuilds the install layers instead of
+reusing them. Retried downloads resume the partial file where the server
+supports range requests, so a large archive does not restart from zero after
+a hiccup.
 
 Proxy and mirror settings are forwarded the same way when set on the host:
 `HTTP_PROXY`, `HTTPS_PROXY`, and `NO_PROXY` (and their lowercase forms) reach

@@ -238,26 +238,6 @@ var mirrorBuildArgs = []string{
 	"UV_INDEX_URL",
 }
 
-// proxyBuildArgs are the HTTP proxy variables apt, curl, npm, go, and uv all
-// honour. Both BuildKit and buildah treat them as predefined build args and
-// keep them out of the image history, so they need no ARG declarations.
-var proxyBuildArgs = []string{
-	"HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY",
-	"http_proxy", "https_proxy", "no_proxy",
-}
-
-// forwardHostBuildEnv copies the network, mirror, and proxy settings that are
-// set in the host environment into the build args.
-func forwardHostBuildEnv(buildArgs map[string]string) {
-	for _, group := range [][]string{networkBuildArgs, mirrorBuildArgs, proxyBuildArgs} {
-		for _, name := range group {
-			if value := strings.TrimSpace(os.Getenv(name)); value != "" {
-				buildArgs[name] = value
-			}
-		}
-	}
-}
-
 func generateToolInstallBlock(tools []string, stamps map[string]string, forceTools map[string]bool) (string, error) {
 	ordered := append([]string(nil), tools...)
 	sort.Strings(ordered)

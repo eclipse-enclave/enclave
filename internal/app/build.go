@@ -603,6 +603,31 @@ func buildImage(ctx context.Context, paths model.Paths, host model.Host, combine
 	return nil
 }
 
+// proxyBuildArgs are the HTTP proxy variables apt, curl, npm, go, and uv all
+// honour. Both BuildKit and buildah treat them as predefined build args and
+// keep them out of the image history, so they need no ARG declarations.
+var proxyBuildArgs = []string{
+	"HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY",
+	"http_proxy", "https_proxy", "no_proxy",
+}
+
+// forwardHostBuildEnv copies the network, mirror, and proxy settings that are
+// set in the host environment into the build args. Nothing here is derived
+// from the run: every declared ARG with a value is part of the environment of
+// the RUN steps that follow it, so a value that changes between runs rebuilds
+// the install layers instead of reusing them. In particular the download
+// heartbeat interval is not derived from --progress, which is the flag a user
+// changes to watch a build that looks stuck.
+func forwardHostBuildEnv(buildArgs map[string]string) {
+	for _, group := range [][]string{networkBuildArgs, mirrorBuildArgs, proxyBuildArgs} {
+		for _, name := range group {
+			if value := strings.TrimSpace(os.Getenv(name)); value != "" {
+				buildArgs[name] = value
+			}
+		}
+	}
+}
+
 // runImageBuild runs the engine build through docker.RunBuild (streamed
 // output, stall warnings, rerun after a transient network failure) and names
 // the likely cause when it still fails. A DNS failure on Docker's default

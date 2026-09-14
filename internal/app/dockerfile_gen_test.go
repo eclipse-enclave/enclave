@@ -345,3 +345,24 @@ func TestWriteStageArgsDeclaresNetworkAndMirrorArgs(t *testing.T) {
 		t.Fatal("proxy variables are predefined build args and must not be declared")
 	}
 }
+
+// The heartbeat interval is a build arg, so a value that varies between runs
+// invalidates every install layer: it must come from the host environment
+// alone and never from the progress style or any other per-run state.
+func TestForwardHostBuildEnvTakesDownloadProgressOnlyFromHost(t *testing.T) {
+	const arg = "ENCLAVE_NET_PROGRESS_INTERVAL_SECONDS"
+	t.Setenv(arg, "")
+
+	args := map[string]string{}
+	forwardHostBuildEnv(args)
+	if _, set := args[arg]; set {
+		t.Fatalf("%s must keep the helper default when the host does not set it, got %q", arg, args[arg])
+	}
+
+	t.Setenv(arg, "15")
+	args = map[string]string{}
+	forwardHostBuildEnv(args)
+	if args[arg] != "15" {
+		t.Fatalf("args[%q] = %q, want %q", arg, args[arg], "15")
+	}
+}

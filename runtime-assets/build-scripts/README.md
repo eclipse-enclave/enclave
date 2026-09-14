@@ -36,7 +36,7 @@ Network settings (from `lib/common.sh`, forwarded by the CLI from the host envir
 - `ENCLAVE_NET_CONNECT_TIMEOUT_SECONDS` (default: `20`): `curl --connect-timeout`.
 - `ENCLAVE_NET_STALL_TIMEOUT_SECONDS` (default: `60`): abort a transfer below the speed floor for this long.
 - `ENCLAVE_NET_STALL_SPEED_BYTES` (default: `1024`): the speed floor in bytes per second.
-- `ENCLAVE_NET_PROGRESS_INTERVAL_SECONDS` (default: `30`, `0` disables): heartbeat interval for bytes received during a download.
+- `ENCLAVE_NET_PROGRESS_INTERVAL_SECONDS` (default: `30`, `0` disables): interval of the download heartbeat, which reports bytes received, percentage, rate, and time left as whole lines because RUN-step output is line-oriented.
 - `ENCLAVE_NET_ATTEMPT_TIMEOUT_SECONDS` (default: `1800`, `0` disables): `timeout(1)` around each attempt of a retried executable.
 
 ## Network Helpers
@@ -47,7 +47,7 @@ retries are applied in one place. The Dockerfile's own `system` stage runs
 before these scripts exist in the image and carries equivalent `curl` flags
 inline; its `apt-get` calls are not retried.
 
-- `enclave_curl [curl args...]`: `curl --fail --silent --show-error` with connect and stall timeouts on the transfer, wrapped in `enclave_retry`. Retries of a `-o` download resume the partial file with `--continue-at` and fall back to a fresh download when the server rejects ranges. A heartbeat on stderr reports the bytes received so far while a download runs. Without `-o`/`-O` the body is buffered per attempt and written to stdout only on success, so `$(enclave_curl <url>)` never sees a partial body.
+- `enclave_curl [curl args...]`: `curl --fail --silent --show-error` with connect and stall timeouts on the transfer, wrapped in `enclave_retry`. Retries of a `-o` download resume the partial file with `--continue-at` and fall back to a fresh download when the server rejects ranges. A heartbeat on stderr reports bytes received, percentage (from the response headers), rate, and time left while a download runs. Without `-o`/`-O` the body is buffered per attempt and written to stdout only on success, so `$(enclave_curl <url>)` never sees a partial body.
 - `enclave_retry <label> -- <cmd> [args...]`: runs the command, retrying with a growing delay while its stderr matches a transient network error (name resolution, timeouts, resets, stalled transfers, 5xx, apt `Hash Sum mismatch`) or the attempt exceeds the per-attempt wall-clock timeout, which is the only timeout it applies. Anything else, such as a 404 or a failed `sha256sum --check`, fails immediately. stdout streams through; stderr is replayed after each attempt.
 - `enclave_is_transient_network_error <file>`: the classifier both use.
 

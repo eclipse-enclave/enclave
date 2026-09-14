@@ -15,7 +15,6 @@ import (
 	"strings"
 
 	"enclave/internal/config"
-	"enclave/internal/docker"
 	"enclave/internal/logx"
 	"enclave/internal/model"
 	"enclave/internal/util"
@@ -237,50 +236,6 @@ var mirrorBuildArgs = []string{
 	"GOPROXY",
 	"npm_config_registry",
 	"UV_INDEX_URL",
-}
-
-// proxyBuildArgs are the HTTP proxy variables apt, curl, npm, go, and uv all
-// honour. Both BuildKit and buildah treat them as predefined build args and
-// keep them out of the image history, so they need no ARG declarations.
-var proxyBuildArgs = []string{
-	"HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY",
-	"http_proxy", "https_proxy", "no_proxy",
-}
-
-// forwardHostBuildEnv copies the network, mirror, and proxy settings that are
-// set in the host environment into the build args, then derives the download
-// heartbeat interval from the progress style unless the host set it.
-func forwardHostBuildEnv(buildArgs map[string]string, progress string) {
-	for _, group := range [][]string{networkBuildArgs, mirrorBuildArgs, proxyBuildArgs} {
-		for _, name := range group {
-			if value := strings.TrimSpace(os.Getenv(name)); value != "" {
-				buildArgs[name] = value
-			}
-		}
-	}
-	if _, set := buildArgs[downloadProgressIntervalArg]; set {
-		return
-	}
-	if interval, ok := downloadProgressInterval(progress); ok {
-		buildArgs[downloadProgressIntervalArg] = interval
-	}
-}
-
-const downloadProgressIntervalArg = "ENCLAVE_NET_PROGRESS_INTERVAL_SECONDS"
-
-// downloadProgressInterval maps the build progress style onto the download
-// heartbeat: verbose reports every few seconds with percentage and rate,
-// quiet reports nothing (the engine discards step output anyway), and
-// compact keeps the helper's default.
-func downloadProgressInterval(progress string) (string, bool) {
-	switch {
-	case docker.BuildProgressIsVerbose(progress):
-		return "5", true
-	case docker.BuildProgressIsQuiet(progress):
-		return "0", true
-	default:
-		return "", false
-	}
 }
 
 func generateToolInstallBlock(tools []string, stamps map[string]string, forceTools map[string]bool) (string, error) {

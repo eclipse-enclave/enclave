@@ -9,7 +9,10 @@
 # Install Mistral Vibe via recommended installer (installs uv + mistral-vibe)
 set -e
 
-curl -LsSf https://mistral.ai/vibe/install.sh | bash
+vibe_installer="$(mktemp)"
+enclave_curl -L -o "$vibe_installer" https://mistral.ai/vibe/install.sh
+bash "$vibe_installer"
+rm -f "$vibe_installer"
 
 # Ensure PATH includes uv tool bin
 export PATH="$HOME/.local/bin:$PATH"

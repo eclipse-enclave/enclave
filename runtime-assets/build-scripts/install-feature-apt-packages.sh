@@ -50,5 +50,5 @@ echo "Installing feature apt packages: ${packages[*]}"
 # The package index lives in a BuildKit cache mount that can be pruned or
 # GC'd independently of the cached apt-get update layers in earlier stages,
 # so refresh it here instead of assuming those layers' lists survived.
-apt-get update
-apt-get install -y --no-install-recommends "${packages[@]}"
+enclave_retry "apt-get update" -- apt-get update
+enclave_retry "apt-get install" -- apt-get install -y --no-install-recommends "${packages[@]}"

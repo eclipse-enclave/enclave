@@ -12,7 +12,10 @@ set -e
 # Install uv if not present
 if ! command -v uv >/dev/null 2>&1; then
     echo "Installing uv..."
-    curl -LsSf https://astral.sh/uv/install.sh | sh
+    uv_installer="$(mktemp)"
+    enclave_curl -L -o "$uv_installer" https://astral.sh/uv/install.sh
+    sh "$uv_installer"
+    rm -f "$uv_installer"
     export PATH="$HOME/.local/bin:$PATH"
 fi
 

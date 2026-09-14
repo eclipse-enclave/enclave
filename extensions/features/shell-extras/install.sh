@@ -11,7 +11,10 @@ set -e
 
 # Install oh-my-zsh if not present
 if [ ! -d "$HOME/.oh-my-zsh" ]; then
-    sh -c "$(wget -O- https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" "" --unattended
+    omz_installer="$(mktemp)"
+    enclave_curl -L -o "$omz_installer" https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh
+    sh "$omz_installer" --unattended
+    rm -f "$omz_installer"
 fi
 
 # Configure zshrc

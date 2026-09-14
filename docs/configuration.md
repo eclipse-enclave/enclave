@@ -337,6 +337,14 @@ Raise them on a slow or flaky connection; they do not affect the image hash.
 Retried downloads resume the partial file where the server supports range
 requests, so a large archive does not restart from zero after a hiccup.
 
+Proxy and mirror settings are forwarded the same way when set on the host:
+`HTTP_PROXY`, `HTTPS_PROXY`, and `NO_PROXY` (and their lowercase forms) reach
+apt, curl, npm, Go, uv, and the gateway image's apk; `GOPROXY`,
+`npm_config_registry`, and `UV_INDEX_URL` point those package managers at a
+mirror or caching proxy such as a local Verdaccio, Athens, or devpi. Mirror
+URLs are recorded in the image history like any build arg, so keep
+credentials out of them and use the proxy variables for authenticated access.
+
 Buildx cache and canonical build UID/GID controls are CLI-only. Use
 `--buildx-cache-dir`, `--build-uid`, `--build-gid`, and `--runtime-uid-remap`
 for event/offline runs.

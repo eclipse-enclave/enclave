@@ -202,9 +202,7 @@ func buildGatewayImage(ctx context.Context, paths model.Paths, profile model.Pro
 		ContextDir: contextDir,
 		Dockerfile: dockerfilePath,
 		Tags:       []string{imageName(profile)},
-		BuildArgs: map[string]string{
-			"GATEWAY_ALLOWLIST_FILENAME": allowlistRel,
-		},
+		BuildArgs:  gatewayBuildArgs(allowlistRel),
 		Labels: map[string]string{
 			model.GatewayLabelHash:  buildHash,
 			model.GatewayLabelAgent: profile.Name,
@@ -228,6 +226,19 @@ func buildGatewayImage(ctx context.Context, paths model.Paths, profile model.Pro
 
 	logx.Successf("Gateway image built")
 	return nil
+}
+
+// gatewayBuildArgs carries the allowlist file name plus any HTTP proxy
+// settings from the host environment, so the Alpine package fetches behind a
+// proxy or caching mirror work like the runtime image build's downloads.
+func gatewayBuildArgs(allowlistRel string) map[string]string {
+	args := map[string]string{"GATEWAY_ALLOWLIST_FILENAME": allowlistRel}
+	for _, name := range []string{"HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "no_proxy"} {
+		if value := strings.TrimSpace(os.Getenv(name)); value != "" {
+			args[name] = value
+		}
+	}
+	return args
 }
 
 // describeGatewayBuildFailure names the likely cause found in the build

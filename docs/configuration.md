@@ -310,6 +310,11 @@ Merge semantics:
 | `ENCLAVE_LOG_LEVEL` | Log level: `info` (default) or `debug` |
 | `ENCLAVE_AGENT_UPDATE_INTERVAL_HOURS` | Minimum hours after a tool's last successful automatic update before `check-update.sh` is eligible to probe again (`0` = always) |
 | `ENCLAVE_DEVCONTAINER_REWRITE_VARS` | Comma-separated extra env var names for devcontainer home-path normalization |
+| `ENCLAVE_NET_RETRIES` | Attempts per build-time download before the image build fails (default `5`); forwarded into the build as a build arg |
+| `ENCLAVE_NET_RETRY_DELAY_SECONDS` | Base delay between download attempts, multiplied by the attempt number (default `5`) |
+| `ENCLAVE_NET_CONNECT_TIMEOUT_SECONDS` | `curl --connect-timeout` for build-time downloads (default `20`) |
+| `ENCLAVE_NET_STALL_TIMEOUT_SECONDS` | Abort a build-time download that delivers under 1 KB/s for this long (default `60`) |
+| `ENCLAVE_NET_ATTEMPT_TIMEOUT_SECONDS` | Wall-clock limit per attempt for retried install commands such as `go install` and `apt-get` (default `900`, `0` disables) |
 
 These are read by the Windows launcher on the Windows side only, and are not
 forwarded into the WSL2 distribution. See [windows.md](windows.md).
@@ -319,6 +324,12 @@ forwarded into the WSL2 distribution. See [windows.md](windows.md).
 | `ENCLAVE_WSL_DISTRO` | Distribution to use for a Windows drive working directory; ignored with a warning when the working directory already names one |
 | `ENCLAVE_WSL_ALLOW_WINDOWS_PATH` | Set to `1` to accept a Windows drive working directory and reach it through `/mnt/<letter>` |
 | `ENCLAVE_WSL_FORWARD_ENV` | Comma-separated extra variables to forward into the distribution, each optionally with a `WSLENV` flag suffix (`/p`, `/l`, `/u`, `/w`) |
+
+The `ENCLAVE_NET_*` variables are read from the host environment when an image
+build starts and passed to the build scripts, which apply them to every
+download made through the shared `enclave_curl` and `enclave_retry` helpers
+(see [build-scripts/README.md](../runtime-assets/build-scripts/README.md)).
+Raise them on a slow or flaky connection; they do not affect the image hash.
 
 Buildx cache and canonical build UID/GID controls are CLI-only. Use
 `--buildx-cache-dir`, `--build-uid`, `--build-gid`, and `--runtime-uid-remap`

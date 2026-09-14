@@ -61,6 +61,8 @@ if [ "$force" = "force" ]; then
     export npm_config_prefer_online=true
 fi
 
+enclave_export_net_helpers
+
 echo "Installing $tool..."
 if ! "$script"; then
     echo "Failed to install selected tool: $tool" >&2

@@ -186,3 +186,72 @@ func TestTransientNetworkErrorPatterns(t *testing.T) {
 		}
 	}
 }
+
+// fakeCurlOutfile is a bash snippet defining outfile_of, which extracts the -o
+// argument a fake curl was given.
+const fakeCurlOutfile = `outfile_of() { local out="" prev=""; for a in "$@"; do [ "$prev" = "-o" ] && out="$a"; prev="$a"; done; echo "$out"; }
+export ENCLAVE_NET_PROGRESS_INTERVAL_SECONDS=0
+`
+
+func TestEnclaveCurlResumesPartialDownloadOnRetry(t *testing.T) {
+	out, count, err := runNetHelper(t, fakeCurlOutfile+`curl() {
+    bump
+    local out; out=$(outfile_of "$@")
+    if [ "$(<"$COUNTER")" -eq 1 ]; then printf 'first-half;' > "$out"; echo "curl: (18) transfer closed with outstanding read data remaining" >&2; return 18; fi
+    case " $* " in *" --continue-at - "*) printf 'second-half' >> "$out" ;; *) echo "NO_RESUME_FLAG" >&2; printf 'restarted' > "$out" ;; esac
+}
+f="$(mktemp)"
+enclave_curl -L -o "$f" https://example.invalid/big.tar.gz
+echo "file=[$(<"$f")]"`)
+	if err != nil {
+		t.Fatalf("expected success, got %v\n%s", err, out)
+	}
+	if count != "2" || !strings.Contains(out, "file=[first-half;second-half]") || !strings.Contains(out, "resuming download") {
+		t.Fatalf("expected the second attempt to resume and append, got attempts=%s:\n%s", count, out)
+	}
+}
+
+func TestEnclaveCurlRestartsWhenServerCannotResume(t *testing.T) {
+	out, count, err := runNetHelper(t, fakeCurlOutfile+`curl() {
+    bump
+    local out; out=$(outfile_of "$@")
+    case "$(<"$COUNTER")" in
+        1) printf 'partial' > "$out"; echo "curl: (56) Recv failure: Connection reset by peer" >&2; return 56 ;;
+        2) echo "curl: (33) HTTP server doesn't seem to support byte ranges. Cannot resume." >&2; return 33 ;;
+        *) case " $* " in *" --continue-at "*) echo UNEXPECTED_RESUME >&2; return 99 ;; esac; printf 'complete' > "$out" ;;
+    esac
+}
+f="$(mktemp)"
+enclave_curl -o "$f" https://example.invalid/x
+echo "file=[$(<"$f")]"`)
+	if err != nil {
+		t.Fatalf("expected success, got %v\n%s", err, out)
+	}
+	if count != "3" || !strings.Contains(out, "file=[complete]") || !strings.Contains(out, "restarting the download from zero") {
+		t.Fatalf("expected a from-zero restart inside the second attempt, got curl calls=%s:\n%s", count, out)
+	}
+}
+
+func TestEnclaveCurlReportsProgressWhileDownloading(t *testing.T) {
+	out, _, err := runNetHelper(t, `outfile_of() { local out="" prev=""; for a in "$@"; do [ "$prev" = "-o" ] && out="$a"; prev="$a"; done; echo "$out"; }
+curl() { local out; out=$(outfile_of "$@"); head -c 2048 /dev/zero > "$out"; sleep 2.3; head -c 1024 /dev/zero >> "$out"; }
+f="$(mktemp)"
+ENCLAVE_NET_PROGRESS_INTERVAL_SECONDS=1 enclave_curl -o "$f" https://example.invalid/slow`)
+	if err != nil {
+		t.Fatalf("expected success, got %v\n%s", err, out)
+	}
+	if strings.Count(out, "KB received so far") < 2 {
+		t.Fatalf("expected heartbeat lines while the download ran, got:\n%s", out)
+	}
+}
+
+func TestEnclaveCurlHonoursStallSpeedFloor(t *testing.T) {
+	out, _, err := runNetHelper(t, fakeCurlOutfile+`curl() { printf '%s\n' "$@"; }
+ENCLAVE_NET_STALL_SPEED_BYTES=256 enclave_curl -o /dev/null https://example.invalid/z`)
+	if err != nil {
+		t.Fatalf("expected success, got %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "--speed-limit\n256\n") {
+		t.Fatalf("expected the configured speed floor, got:\n%s", out)
+	}
+}

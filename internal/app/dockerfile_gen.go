@@ -221,6 +221,8 @@ var networkBuildArgs = []string{
 	"ENCLAVE_NET_CONNECT_TIMEOUT_SECONDS",
 	"ENCLAVE_NET_STALL_TIMEOUT_SECONDS",
 	"ENCLAVE_NET_ATTEMPT_TIMEOUT_SECONDS",
+	"ENCLAVE_NET_STALL_SPEED_BYTES",
+	"ENCLAVE_NET_PROGRESS_INTERVAL_SECONDS",
 }
 
 func generateToolInstallBlock(tools []string, stamps map[string]string, forceTools map[string]bool) (string, error) {

@@ -240,7 +240,7 @@ ENCLAVE_NET_PROGRESS_INTERVAL_SECONDS=1 enclave_curl -o "$f" https://example.inv
 	if err != nil {
 		t.Fatalf("expected success, got %v\n%s", err, out)
 	}
-	if strings.Count(out, "KB received so far") < 2 {
+	if strings.Count(out, "KB received, ") < 2 {
 		t.Fatalf("expected heartbeat lines while the download ran, got:\n%s", out)
 	}
 }

@@ -438,6 +438,9 @@ enclave_curl() {
         kill "$heartbeat_pid" 2>/dev/null || true
         wait "$heartbeat_pid" 2>/dev/null || true
     fi
+    if [ -n "$output" ]; then
+        rm -f "${output}.enclave-headers"
+    fi
     if [ "$capture" -eq 1 ]; then
         if [ "$status" -eq 0 ]; then
             cat "$body"
@@ -462,6 +465,10 @@ enclave_curl_attempt() {
         --speed-limit "$ENCLAVE_NET_STALL_SPEED_BYTES"
         --speed-time "$ENCLAVE_NET_STALL_TIMEOUT_SECONDS"
     )
+    if [ -n "$output" ]; then
+        # The response headers let the heartbeat report a percentage.
+        curl_args+=(--dump-header "${output}.enclave-headers")
+    fi
     # As in enclave_retry, timeout(1) only wraps an executable curl (tests
     # substitute a shell function).
     local -a runner=()
@@ -493,17 +500,74 @@ enclave_curl_attempt() {
 }
 
 # enclave_download_heartbeat <label> <file>
-# Reports the size of a growing download every ENCLAVE_NET_PROGRESS_INTERVAL_SECONDS
-# until killed. Runs in the background from enclave_curl.
+# Every ENCLAVE_NET_PROGRESS_INTERVAL_SECONDS, reports how much of a download
+# has arrived, the current rate, and (when the response headers in
+# <file>.enclave-headers carry a length) the percentage and time remaining.
+# Runs in the background from enclave_curl until killed. Prints whole lines
+# rather than a redrawing progress bar because RUN-step output inside an image
+# build is line-oriented and would garble carriage returns.
 enclave_download_heartbeat() {
     local label="$1"
     local file="$2"
     local size=0
+    local previous=0
+    local total=0
+    local rate=0
+    local remaining=""
     while :; do
         sleep "$ENCLAVE_NET_PROGRESS_INTERVAL_SECONDS"
         size="$(stat -c %s "$file" 2>/dev/null || echo 0)"
-        echo "${label}: $((size / 1024)) KB received so far" >&2
+        rate=$(((size - previous) / ENCLAVE_NET_PROGRESS_INTERVAL_SECONDS))
+        [ "$rate" -lt 0 ] && rate=0
+        previous="$size"
+        total="$(enclave_download_total "${file}.enclave-headers")"
+        if [ "$total" -gt 0 ] && [ "$size" -le "$total" ]; then
+            remaining=""
+            if [ "$rate" -gt 0 ]; then
+                remaining=", about $(enclave_format_duration $(((total - size) / rate))) left"
+            fi
+            echo "${label}: $(enclave_format_bytes "$size") of $(enclave_format_bytes "$total") ($((size * 100 / total))%), $(enclave_format_bytes "$rate")/s${remaining}" >&2
+        else
+            echo "${label}: $(enclave_format_bytes "$size") received, $(enclave_format_bytes "$rate")/s" >&2
+        fi
     done
+}
+
+# enclave_download_total <header-dump> echoes the expected final size of a
+# download from its response headers, or 0 when unknown. A Content-Range from
+# a resumed transfer carries the full size; otherwise the last Content-Length
+# (the final response after redirects) is used.
+enclave_download_total() {
+    local headers="$1"
+    local value=""
+    [ -r "$headers" ] || { echo 0; return; }
+    value="$(tr -d '\r' < "$headers" | grep -i '^content-range:' | tail -n 1 | sed -n 's|.*/\([0-9][0-9]*\)$|\1|p')"
+    if [ -z "$value" ]; then
+        value="$(tr -d '\r' < "$headers" | grep -i '^content-length:' | tail -n 1 | tr -dc '0-9')"
+    fi
+    echo "${value:-0}"
+}
+
+enclave_format_bytes() {
+    local bytes="$1"
+    if [ "$bytes" -ge 1048576 ]; then
+        echo "$((bytes / 1048576)).$(((bytes % 1048576) * 10 / 1048576)) MB"
+    elif [ "$bytes" -ge 1024 ]; then
+        echo "$((bytes / 1024)) KB"
+    else
+        echo "${bytes} B"
+    fi
+}
+
+enclave_format_duration() {
+    local seconds="$1"
+    if [ "$seconds" -ge 3600 ]; then
+        echo "$((seconds / 3600))h$(((seconds % 3600) / 60))m"
+    elif [ "$seconds" -ge 60 ]; then
+        echo "$((seconds / 60))m$((seconds % 60))s"
+    else
+        echo "${seconds}s"
+    fi
 }
 
 # enclave_export_net_helpers makes the network helpers and their settings
@@ -515,5 +579,6 @@ enclave_export_net_helpers() {
         ENCLAVE_NET_ATTEMPT_TIMEOUT_SECONDS ENCLAVE_NET_STALL_SPEED_BYTES \
         ENCLAVE_NET_PROGRESS_INTERVAL_SECONDS
     export -f enclave_net_settings_valid enclave_is_transient_network_error \
-        enclave_retry enclave_curl enclave_curl_attempt enclave_download_heartbeat
+        enclave_retry enclave_curl enclave_curl_attempt enclave_download_heartbeat \
+        enclave_download_total enclave_format_bytes enclave_format_duration
 }

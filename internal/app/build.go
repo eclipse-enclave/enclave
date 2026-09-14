@@ -559,7 +559,7 @@ func buildImage(ctx context.Context, paths model.Paths, host model.Host, combine
 	if buildCfg.Devcontainer != nil {
 		buildArgs["DEVCONTAINER_BASE_IMAGE"] = "1"
 	}
-	forwardHostBuildEnv(buildArgs)
+	forwardHostBuildEnv(buildArgs, opts.Progress)
 	labels := map[string]string{
 		model.LabelHash:    combinedHash,
 		model.LabelVersion: model.Version,

@@ -317,7 +317,7 @@ Merge semantics:
 | `ENCLAVE_NET_CONNECT_TIMEOUT_SECONDS` | `curl --connect-timeout` for build-time downloads (default `20`) |
 | `ENCLAVE_NET_STALL_TIMEOUT_SECONDS` | Abort a build-time download that stays below the stall speed floor for this long (default `60`) |
 | `ENCLAVE_NET_STALL_SPEED_BYTES` | Stall speed floor in bytes per second (default `1024`); lower it on links that are genuinely slower |
-| `ENCLAVE_NET_PROGRESS_INTERVAL_SECONDS` | How often a running download reports the bytes received so far (default `30`, `0` disables) |
+| `ENCLAVE_NET_PROGRESS_INTERVAL_SECONDS` | How often a running download reports bytes received, percentage, rate, and time left (default `30`; `--progress verbose` uses `5`, `quiet` uses `0`; an explicit value wins) |
 | `ENCLAVE_NET_ATTEMPT_TIMEOUT_SECONDS` | Wall-clock limit per attempt for retried install commands such as `go install` and `apt-get` (default `1800`, `0` disables) |
 
 These are read by the Windows launcher on the Windows side only, and are not

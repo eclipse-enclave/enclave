@@ -313,7 +313,7 @@ func TestForwardHostBuildEnvCopiesOnlySetValues(t *testing.T) {
 	t.Setenv("UV_INDEX_URL", "   ")
 
 	args := map[string]string{"FEATURES": "default"}
-	forwardHostBuildEnv(args)
+	forwardHostBuildEnv(args, "compact")
 
 	want := map[string]string{
 		"FEATURES":            "default",
@@ -343,5 +343,35 @@ func TestWriteStageArgsDeclaresNetworkAndMirrorArgs(t *testing.T) {
 	}
 	if strings.Contains(b.String(), "ARG HTTP_PROXY") {
 		t.Fatal("proxy variables are predefined build args and must not be declared")
+	}
+}
+
+func TestForwardHostBuildEnvDerivesDownloadProgressFromStyle(t *testing.T) {
+	t.Setenv(downloadProgressIntervalArg, "")
+
+	args := map[string]string{}
+	forwardHostBuildEnv(args, "verbose")
+	if args[downloadProgressIntervalArg] != "5" {
+		t.Fatalf("verbose must report download progress every 5s, got %q", args[downloadProgressIntervalArg])
+	}
+
+	args = map[string]string{}
+	forwardHostBuildEnv(args, "quiet")
+	if args[downloadProgressIntervalArg] != "0" {
+		t.Fatalf("quiet must disable the download heartbeat, got %q", args[downloadProgressIntervalArg])
+	}
+
+	args = map[string]string{}
+	forwardHostBuildEnv(args, "compact")
+	if _, set := args[downloadProgressIntervalArg]; set {
+		t.Fatal("compact must leave the helper default in place")
+	}
+
+	// An explicit host setting wins over the style.
+	t.Setenv(downloadProgressIntervalArg, "15")
+	args = map[string]string{}
+	forwardHostBuildEnv(args, "verbose")
+	if args[downloadProgressIntervalArg] != "15" {
+		t.Fatalf("host setting must win, got %q", args[downloadProgressIntervalArg])
 	}
 }

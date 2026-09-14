@@ -45,3 +45,9 @@ func BuildNetworkDNSHint() string {
 func BuildProgressIsQuiet(value string) bool {
 	return normalizeBuildProgress(value) == buildProgressQuiet
 }
+
+// BuildProgressIsVerbose reports whether the user asked for the detailed
+// progress style.
+func BuildProgressIsVerbose(value string) bool {
+	return normalizeBuildProgress(value) == buildProgressVerbose
+}

@@ -39,11 +39,14 @@ Network settings (from `lib/common.sh`, forwarded by the CLI from the host envir
 
 ## Network Helpers
 
-Every build-time download goes through one of two `lib/common.sh` functions so
-timeouts, stall detection, and retries are applied in one place:
+Downloads made by the build scripts and by extension `install.sh` files go
+through one of two `lib/common.sh` functions so timeouts, stall detection, and
+retries are applied in one place. The Dockerfile's own `system` stage runs
+before these scripts exist in the image and carries equivalent `curl` flags
+inline; its `apt-get` calls are not retried.
 
-- `enclave_curl [curl args...]`: `curl --fail --silent --show-error` with connect and stall timeouts, wrapped in `enclave_retry`. Without `-o`/`-O` the body is buffered per attempt and written to stdout only on success, so `$(enclave_curl <url>)` never sees a partial body.
-- `enclave_retry <label> -- <cmd> [args...]`: runs the command, retrying with a growing delay while its stderr matches a transient network error (name resolution, timeouts, resets, stalled transfers, 5xx) or the attempt exceeds the per-attempt timeout. A 404 or a checksum mismatch fails immediately. stdout streams through; stderr is replayed after each attempt.
+- `enclave_curl [curl args...]`: `curl --fail --silent --show-error` with connect and stall timeouts on the transfer, wrapped in `enclave_retry`. Without `-o`/`-O` the body is buffered per attempt and written to stdout only on success, so `$(enclave_curl <url>)` never sees a partial body.
+- `enclave_retry <label> -- <cmd> [args...]`: runs the command, retrying with a growing delay while its stderr matches a transient network error (name resolution, timeouts, resets, stalled transfers, 5xx, apt `Hash Sum mismatch`) or the attempt exceeds the per-attempt wall-clock timeout, which is the only timeout it applies. Anything else, such as a 404 or a failed `sha256sum --check`, fails immediately. stdout streams through; stderr is replayed after each attempt.
 - `enclave_is_transient_network_error <file>`: the classifier both use.
 
 `run-feature-installs.sh` and `enclave-install-tool` export these into the

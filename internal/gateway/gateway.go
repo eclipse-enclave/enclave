@@ -211,22 +211,20 @@ func buildGatewayImage(ctx context.Context, paths model.Paths, profile model.Pro
 			model.GatewayLabelAgent: profile.Name,
 		},
 	}
+	if req.NetworkMode, err = docker.BuildNetworkModeFromEnv(); err != nil {
+		return err
+	}
 	var output bytes.Buffer
 	if err := buildGatewayWatched(ctx, req, &output); err != nil {
 		// Some Docker BuildKit setups cannot resolve names on the default build
-		// network, which surfaces here as failed Alpine index fetches. Retry
-		// with the host network only for that symptom and only on Docker;
-		// buildah has no such quirk and a doomed retry just doubles the wait.
-		if docker.IsPodman() || !docker.IsBuildNetworkDNSFailure(output.String()) {
-			return describeGatewayBuildFailure(err, output.String())
+		// network, which surfaces here as failed Alpine index fetches. Point at
+		// the explicit remedy instead of retrying on the host network
+		// automatically; see docker.BuildNetworkEnv.
+		if !docker.IsPodman() && req.NetworkMode == "" && docker.IsBuildNetworkDNSFailure(output.String()) {
+			return fmt.Errorf("failed to build gateway image: %s (%w)%s",
+				docker.BuildNetworkDNSHint(), err, buildOutputTail(output.String(), gatewayBuildErrorLines))
 		}
-		logx.Warnf("Gateway build failed with DNS resolution errors on the default build network; retrying with host build network")
-		req.NetworkMode = "host"
-		var retryOutput bytes.Buffer
-		if retryErr := buildGatewayWatched(ctx, req, &retryOutput); retryErr != nil {
-			return describeGatewayBuildFailure(retryErr, retryOutput.String())
-		}
-		logx.Warnf("Gateway build succeeded with host build network")
+		return describeGatewayBuildFailure(err, output.String())
 	}
 
 	logx.Successf("Gateway image built")
@@ -237,8 +235,8 @@ func buildGatewayImage(ctx context.Context, paths model.Paths, profile model.Pro
 // The gateway build is short, so a silent stretch this long is worth a notice.
 const gatewayBuildStallWarnAfter = 3 * time.Minute
 
-// buildGatewayWatched runs one gateway build attempt into out (the gateway
-// build is not streamed to the terminal) and warns while it produces nothing.
+// buildGatewayWatched runs the gateway build into out (the gateway build is
+// not streamed to the terminal) and warns while it produces nothing.
 func buildGatewayWatched(ctx context.Context, req docker.BuildRequest, out io.Writer) error {
 	log := docker.NewBuildLog(out)
 	stop := log.WarnWhenStalled(gatewayBuildStallWarnAfter, func(idle time.Duration, lastLine string) {

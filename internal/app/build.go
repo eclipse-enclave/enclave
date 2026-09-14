@@ -588,6 +588,9 @@ func buildImage(ctx context.Context, paths model.Paths, host model.Host, combine
 		BuildxCacheTo:     buildxCacheTo,
 		Progress:          opts.Progress,
 	}
+	if req.NetworkMode, err = docker.BuildNetworkModeFromEnv(); err != nil {
+		return err
+	}
 	if err := runImageBuild(ctx, req, os.Stdout); err != nil {
 		return err
 	}
@@ -604,28 +607,21 @@ func buildImage(ctx context.Context, paths model.Paths, host model.Host, combine
 	return nil
 }
 
-// runImageBuild runs the engine build, streaming output to out. Some Docker
-// BuildKit setups cannot resolve names on the default build network; when the
-// output shows that, and only then, the build is retried once with the host
-// network. podman builds with buildah, which has no such quirk, so a podman
-// failure is reported directly instead of running a doomed second build.
+// runImageBuild runs the engine build, streaming output to out, and names the
+// likely cause when it fails. A DNS failure on Docker's default build network
+// is reported with the ENCLAVE_BUILD_NETWORK=host remedy rather than retried
+// automatically: the output that would trigger such a retry comes partly from
+// extension install scripts, which must not be able to move the build onto
+// the host network by printing a resolver error.
 func runImageBuild(ctx context.Context, req docker.BuildRequest, out io.Writer) error {
 	log, err := runWatchedBuild(ctx, req, out)
 	if err == nil {
 		return nil
 	}
-	if docker.IsPodman() || !docker.IsBuildNetworkDNSFailure(log.Tail()) {
-		return describeImageBuildFailure(err, log.Tail())
+	if !docker.IsPodman() && req.NetworkMode == "" && docker.IsBuildNetworkDNSFailure(log.Tail()) {
+		return fmt.Errorf("failed to build image: %s (%w)", docker.BuildNetworkDNSHint(), err)
 	}
-
-	logx.Warnf("Image build failed with DNS resolution errors on the default build network; retrying with host build network")
-	req.NetworkMode = "host"
-	retryLog, retryErr := runWatchedBuild(ctx, req, out)
-	if retryErr != nil {
-		return describeImageBuildFailure(retryErr, retryLog.Tail())
-	}
-	logx.Warnf("Image build succeeded with host build network")
-	return nil
+	return describeImageBuildFailure(err, log.Tail())
 }
 
 // buildStallWarnAfter is how long the engine may stay silent before the user
@@ -633,12 +629,16 @@ func runImageBuild(ctx context.Context, req docker.BuildRequest, out io.Writer) 
 // like a slow one from outside, and the engine prints nothing while waiting.
 const buildStallWarnAfter = 3 * time.Minute
 
-// runWatchedBuild runs one engine build attempt, streaming output to out,
-// keeping its tail for classification, and warning while the output is silent.
+// runWatchedBuild runs the engine build, streaming output to out, keeping
+// its tail for classification, and warning while the output is silent.
 func runWatchedBuild(ctx context.Context, req docker.BuildRequest, out io.Writer) (*docker.BuildLog, error) {
 	log := docker.NewBuildLog(out)
-	stop := log.WarnWhenStalled(buildStallWarnAfter, warnBuildStalled)
-	defer stop()
+	if !docker.BuildProgressIsQuiet(req.Progress) {
+		// --quiet suppresses engine output for the whole build, so silence
+		// there is normal and the watcher would only cry wolf.
+		stop := log.WarnWhenStalled(buildStallWarnAfter, warnBuildStalled)
+		defer stop()
+	}
 	return log, dockerBuildImage(ctx, req, log)
 }
 

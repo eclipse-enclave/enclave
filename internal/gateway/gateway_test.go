@@ -12,6 +12,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -19,6 +20,7 @@ import (
 	"time"
 
 	"enclave/internal/config"
+	"enclave/internal/docker"
 	"enclave/internal/model"
 	"enclave/internal/util"
 )
@@ -320,6 +322,29 @@ func TestValidateStartConfig(t *testing.T) {
 	err = validateStartConfig(StartConfig{NetworkLogMode: "invalid"})
 	if err == nil {
 		t.Fatal("expected invalid network log mode to fail validation")
+	}
+}
+
+func TestAppendTLSCAMountsKeepsLeafCacheContainerPrivate(t *testing.T) {
+	tlsRoot := t.TempDir()
+	want := []docker.Mount{
+		{
+			Type:     docker.MountTypeBind,
+			Source:   filepath.Join(tlsRoot, "ca.crt"),
+			Target:   model.GatewayTLSCACertPath,
+			ReadOnly: true,
+		},
+		{
+			Type:     docker.MountTypeBind,
+			Source:   filepath.Join(tlsRoot, "ca.key"),
+			Target:   model.GatewayTLSCAKeyPath,
+			ReadOnly: true,
+		},
+	}
+
+	mounts := appendTLSCAMounts(nil, tlsRoot)
+	if !reflect.DeepEqual(mounts, want) {
+		t.Fatalf("appendTLSCAMounts() = %#v, want %#v", mounts, want)
 	}
 }
 

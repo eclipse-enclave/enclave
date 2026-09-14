@@ -14,6 +14,14 @@ enclave --network-log=requests
 
 This forces allowlisted HTTPS traffic through the gateway MITM proxy so the gateway can emit HTTP-style request audit events for both HTTP and HTTPS, instead of one event per TLS connection. Some clients that pin certificates or use custom trust stores may fail in this mode.
 
+Only the gateway CA persists on the host; leaf certificates stay inside each
+gateway container. Upgrades may leave an unused legacy cache at
+`~/.local/state/enclave/tls/hosts`. On Linux, its old container-owned permissions
+can prevent normal removal; delete it with
+`sudo rm -rf ~/.local/state/enclave/tls/hosts`, or use
+`podman unshare rm -rf ~/.local/state/enclave/tls/hosts` when rootless podman
+last owned it.
+
 To disable all restrictions:
 
 ```bash

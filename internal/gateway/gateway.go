@@ -371,6 +371,16 @@ func appendReadOnlyMount(mounts []docker.Mount, hostPath string, containerPath s
 	})
 }
 
+// Only the CA is shared with the host. A host-side leaf cache cannot be shared
+// safely because container UIDs map differently under docker and rootless podman.
+func appendTLSCAMounts(mounts []docker.Mount, tlsRootDir string) []docker.Mount {
+	if tlsRootDir == "" {
+		return mounts
+	}
+	mounts = appendReadOnlyMount(mounts, filepath.Join(tlsRootDir, "ca.crt"), model.GatewayTLSCACertPath)
+	return appendReadOnlyMount(mounts, filepath.Join(tlsRootDir, "ca.key"), model.GatewayTLSCAKeyPath)
+}
+
 // StartResult holds the output of a successful gateway start.
 type StartResult struct {
 	ContainerName string
@@ -438,17 +448,7 @@ func Start(ctx context.Context, cfg StartConfig) (StartResult, error) {
 	if cfg.SecretReleaseFile != "" {
 		mounts = appendReadOnlyMount(mounts, cfg.SecretReleaseFile, model.GatewaySecretReleasePath)
 	}
-	if cfg.TLSRootDir != "" {
-		// Only the CA is shared with the host. Leaf certificates are minted
-		// per gateway inside the container: a host-side leaf cache had to be
-		// chowned to the proxy user, and that UID differs between docker
-		// (host UID) and rootless podman (subuid), so a host that runs both
-		// engines left the cache unreadable for the other one.
-		caCertPath := filepath.Join(cfg.TLSRootDir, "ca.crt")
-		caKeyPath := filepath.Join(cfg.TLSRootDir, "ca.key")
-		mounts = appendReadOnlyMount(mounts, caCertPath, model.GatewayTLSCACertPath)
-		mounts = appendReadOnlyMount(mounts, caKeyPath, model.GatewayTLSCAKeyPath)
-	}
+	mounts = appendTLSCAMounts(mounts, cfg.TLSRootDir)
 
 	env := []string{}
 	if cfg.NetworkLogPath != "" {

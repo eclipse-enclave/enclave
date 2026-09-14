@@ -10,6 +10,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/user"
 	"path/filepath"
@@ -619,14 +620,11 @@ func buildImage(ctx context.Context, paths model.Paths, host model.Host, combine
 		BuildxCacheTo:     buildxCacheTo,
 		Progress:          opts.Progress,
 	}
-	if err := dockerBuildImage(ctx, req, os.Stdout); err != nil {
-		// Some Docker BuildKit setups fail DNS resolution in the default build
-		// network during apt installs. Retry once with host build network.
-		req.NetworkMode = "host"
-		if retryErr := dockerBuildImage(ctx, req, os.Stdout); retryErr != nil {
-			return fmt.Errorf("failed to build image: %w (retry with host build network failed: %v)", err, retryErr)
-		}
-		logx.Warnf("Image build failed on default build network; retry with host build network succeeded")
+	if req.NetworkMode, err = docker.BuildNetworkModeFromEnv(); err != nil {
+		return err
+	}
+	if err := runImageBuild(ctx, req, os.Stdout); err != nil {
+		return err
 	}
 
 	if err := backfillMissingAgentUpdateFingerprints(&updates, paths, buildCfg, host.Home, nil); err != nil {
@@ -639,6 +637,34 @@ func buildImage(ctx context.Context, paths model.Paths, host model.Host, combine
 	logx.Successf("Image built successfully")
 	_, _ = dockerImagePrune(ctx, model.LabelVersion)
 	return nil
+}
+
+// runImageBuild runs the engine build, streaming output to out, and names the
+// likely cause when it fails. A DNS failure on Docker's default build network
+// is reported with the ENCLAVE_BUILD_NETWORK=host remedy rather than retried
+// automatically: the output that would trigger such a retry comes partly from
+// extension install scripts, which must not be able to move the build onto
+// the host network by printing a resolver error.
+func runImageBuild(ctx context.Context, req docker.BuildRequest, out io.Writer) error {
+	log := docker.NewBuildLog(out)
+	err := dockerBuildImage(ctx, req, log)
+	if err == nil {
+		return nil
+	}
+	if !docker.IsPodman() && req.NetworkMode == "" && docker.IsBuildNetworkDNSFailure(log.Tail()) {
+		return fmt.Errorf("failed to build image: %s (%w)", docker.BuildNetworkDNSHint(), err)
+	}
+	return describeImageBuildFailure(err, log.Tail())
+}
+
+// describeImageBuildFailure names the likely cause found in the build output,
+// so a dropped connection reads as a connectivity problem rather than as an
+// opaque engine error.
+func describeImageBuildFailure(err error, output string) error {
+	if hint := docker.BuildFailureHint(output); hint != "" {
+		return fmt.Errorf("failed to build image: %s (%w)", hint, err)
+	}
+	return fmt.Errorf("failed to build image: %w", err)
 }
 
 func validateDevcontainerImageModeBase(ctx context.Context, buildCfg buildConfig, opts model.BuildOptions) error {

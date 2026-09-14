@@ -132,6 +132,26 @@ cd enclave
 make build
 ```
 
+### Updating Enclave
+
+The Enclave binary does not update itself yet, and it does not tell you when a
+newer build is available. The rolling release moves with `main`, so check back
+regularly: `enclave version` prints the version, commit, and commit date of your
+build, which you can compare against the current
+[rolling release](https://github.com/eclipse-enclave/enclave/releases/tag/rolling).
+To update, download the current assets and re-run the install step for your
+platform above. On macOS the re-downloaded binary carries the quarantine
+attribute again, so `xattr -d` has to run before `install`. For the Windows
+launcher, the Scoop manifest pins the archive hashes, so uninstall and install
+it again from the release URL. From a source checkout, run `git pull` followed
+by `make install`.
+
+:::note
+This is about the Enclave binary itself. `enclave update` rebuilds tool images
+with the latest agent CLI, and agent CLIs inside a session refresh on their own
+schedule; neither replaces the Enclave binary on your host.
+:::
+
 ## Start your first session
 
 From inside a git repository, launch the default agent in an isolated container:

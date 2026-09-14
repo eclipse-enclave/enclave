@@ -16,8 +16,8 @@ rm -f "$keyring_download"
 chmod 644 /usr/share/keyrings/githubcli-archive-keyring.gpg
 echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
     > /etc/apt/sources.list.d/github-cli.list
-enclave_retry "apt-get update" -- apt-get update
-enclave_retry "apt-get install gh" -- apt-get install -y gh
+enclave_apt_get update
+enclave_apt_get install -y gh
 apt-get clean
 rm -rf /var/lib/apt/lists/*
 

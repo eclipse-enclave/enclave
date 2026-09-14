@@ -255,3 +255,55 @@ ENCLAVE_NET_STALL_SPEED_BYTES=256 enclave_curl -o /dev/null https://example.inva
 		t.Fatalf("expected the configured speed floor, got:\n%s", out)
 	}
 }
+
+func TestEnclaveAptGetReportsDownloadProgress(t *testing.T) {
+	out, _, err := runNetHelper(t, `apt-get() {
+    echo "args: $*"
+    for p in 5.0000 12.5000 48.7500 100.0000; do
+        echo "dlstatus:2:$p:Retrieving file 2 of 9" >&3
+        echo "pmstatus:golang-go:50.0:Unpacking golang-go" >&3
+        sleep 0.4
+    done
+}
+ENCLAVE_NET_PROGRESS_INTERVAL_SECONDS=1 enclave_apt_get install -y golang-go`)
+	if err != nil {
+		t.Fatalf("expected success, got %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "args: -o APT::Status-Fd=3 install -y golang-go") {
+		t.Fatalf("expected the status channel to be enabled, got:\n%s", out)
+	}
+	if !strings.Contains(out, "apt-get install: downloading 5% (Retrieving file 2 of 9)") {
+		t.Fatalf("expected a download progress line, got:\n%s", out)
+	}
+	if strings.Contains(out, "Unpacking") {
+		t.Fatalf("install-phase status must not be repeated, got:\n%s", out)
+	}
+	if n := strings.Count(out, "downloading "); n > 3 {
+		t.Fatalf("progress must be throttled to the interval, got %d lines:\n%s", n, out)
+	}
+}
+
+func TestEnclaveAptGetWithoutProgressRunsPlainAptGet(t *testing.T) {
+	out, _, err := runNetHelper(t, `apt-get() { echo "args: $*"; }
+ENCLAVE_NET_PROGRESS_INTERVAL_SECONDS=0 enclave_apt_get update`)
+	if err != nil {
+		t.Fatalf("expected success, got %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "args: update\n") || strings.Contains(out, "Status-Fd") {
+		t.Fatalf("expected a plain apt-get invocation, got:\n%s", out)
+	}
+}
+
+func TestEnclaveAptGetRetriesAndPropagatesStatus(t *testing.T) {
+	out, count, err := runNetHelper(t, `apt-get() { bump; echo "dlstatus:1:1.0000:Retrieving file 1 of 1" >&3; echo "E: Failed to fetch http://deb.debian.org/x  Connection timed out" >&2; return 100; }
+ENCLAVE_NET_PROGRESS_INTERVAL_SECONDS=1 enclave_apt_get install -y x`)
+	if err == nil {
+		t.Fatalf("expected failure, got success:\n%s", out)
+	}
+	if exitErr, ok := err.(*exec.ExitError); !ok || exitErr.ExitCode() != 100 {
+		t.Fatalf("expected apt-get's exit status 100, got %v\n%s", err, out)
+	}
+	if count != "3" {
+		t.Fatalf("expected ENCLAVE_NET_RETRIES=3 attempts, got %s\n%s", count, out)
+	}
+}

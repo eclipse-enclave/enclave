@@ -570,6 +570,53 @@ enclave_format_duration() {
     fi
 }
 
+# enclave_apt_get <apt-get args...>
+# apt-get under enclave_retry, with its download progress reported the way
+# enclave_curl reports its own. In a build step apt-get prints one line per
+# package as each download starts and nothing while a large one transfers, so
+# the machine-readable APT::Status-Fd channel is read instead and summarised
+# every ENCLAVE_NET_PROGRESS_INTERVAL_SECONDS as whole lines.
+enclave_apt_get() {
+    enclave_net_settings_valid || return 2
+    local label="apt-get ${1:-}"
+    local status=0
+    if [ "$ENCLAVE_NET_PROGRESS_INTERVAL_SECONDS" -le 0 ]; then
+        enclave_retry "$label" -- apt-get "$@"
+        return
+    fi
+
+    local fifo=""
+    fifo="$(mktemp -u)"
+    mkfifo "$fifo"
+    enclave_apt_progress_reporter "$label" < "$fifo" &
+    local reporter_pid=$!
+    enclave_retry "$label" -- apt-get -o APT::Status-Fd=3 "$@" 3>"$fifo" || status=$?
+    wait "$reporter_pid" 2>/dev/null || true
+    rm -f "$fifo"
+    return "$status"
+}
+
+# enclave_apt_progress_reporter <label>
+# Reads APT::Status-Fd lines (dlstatus:<file>:<percent>:<description>) on
+# stdin and prints the overall download percentage at most once per
+# ENCLAVE_NET_PROGRESS_INTERVAL_SECONDS. Package unpack and setup steps are
+# already visible in apt-get's regular output and are not repeated.
+enclave_apt_progress_reporter() {
+    local label="$1"
+    local kind="" percent="" description=""
+    local last=0
+    local now=0
+    while IFS=: read -r kind _ percent description; do
+        [ "$kind" = "dlstatus" ] || continue
+        now="$(date +%s)"
+        if [ $((now - last)) -lt "$ENCLAVE_NET_PROGRESS_INTERVAL_SECONDS" ]; then
+            continue
+        fi
+        last="$now"
+        echo "${label}: downloading ${percent%%.*}% (${description})" >&2
+    done
+}
+
 # enclave_export_net_helpers makes the network helpers and their settings
 # available to child bash processes, which is how extension install.sh scripts
 # get them from the install runners without sourcing this file.
@@ -580,5 +627,6 @@ enclave_export_net_helpers() {
         ENCLAVE_NET_PROGRESS_INTERVAL_SECONDS
     export -f enclave_net_settings_valid enclave_is_transient_network_error \
         enclave_retry enclave_curl enclave_curl_attempt enclave_download_heartbeat \
-        enclave_download_total enclave_format_bytes enclave_format_duration
+        enclave_download_total enclave_format_bytes enclave_format_duration \
+        enclave_apt_get enclave_apt_progress_reporter
 }

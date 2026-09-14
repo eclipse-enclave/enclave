@@ -301,8 +301,8 @@ func BuildImage(spec Spec) error {
 	if req.NetworkMode, err = docker.BuildNetworkModeFromEnv(); err != nil {
 		return err
 	}
-	log := docker.NewBuildLog(os.Stdout)
-	if err := dockerBuild(context.Background(), req, log); err != nil {
+	log, err := docker.RunBuild(context.Background(), "devcontainer base image", req, os.Stdout, dockerBuild)
+	if err != nil {
 		if !docker.IsPodman() && req.NetworkMode == "" && docker.IsBuildNetworkDNSFailure(log.Tail()) {
 			return fmt.Errorf("failed to build devcontainer base image: %s (%w)", docker.BuildNetworkDNSHint(), err)
 		}

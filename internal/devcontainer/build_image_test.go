@@ -58,6 +58,7 @@ func TestBuildImageRejectsInvalidBuildNetwork(t *testing.T) {
 
 func TestBuildImagePointsAtOverrideOnDockerDNSFailure(t *testing.T) {
 	t.Setenv(docker.BuildNetworkEnv, "")
+	t.Setenv(docker.BuildRetriesEnv, "0")
 	previous := docker.Binary()
 	docker.SetBinary("docker")
 	t.Cleanup(func() { docker.SetBinary(previous) })

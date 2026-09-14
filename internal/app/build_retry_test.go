@@ -18,6 +18,14 @@ import (
 	"enclave/internal/docker"
 )
 
+// shortBuildRetryDelay removes the pause before a rerun for the test.
+func shortBuildRetryDelay(t *testing.T) {
+	t.Helper()
+	orig := docker.BuildRetryDelay
+	docker.BuildRetryDelay = 0
+	t.Cleanup(func() { docker.BuildRetryDelay = orig })
+}
+
 // stubBuildOutcome replaces the engine build with one that writes output and
 // returns err, recording every request it receives.
 func stubBuildOutcome(t *testing.T, output string, err error) *[]docker.BuildRequest {
@@ -35,8 +43,11 @@ func stubBuildOutcome(t *testing.T, output string, err error) *[]docker.BuildReq
 
 func TestRunImageBuildNeverRetriesOnHostNetwork(t *testing.T) {
 	// Build output is partly written by extension install scripts, so a DNS
-	// error in it must not move the build onto the host network by itself.
+	// error in it must not move the build onto the host network by itself. The
+	// transient-failure rerun keeps the requested network mode.
 	withContainerCLI(t, backend.NameDocker)
+	t.Setenv(docker.BuildRetriesEnv, "1")
+	shortBuildRetryDelay(t)
 	requests := stubBuildOutcome(t, "Err:1 http://deb.debian.org/debian trixie InRelease\n  Temporary failure resolving 'deb.debian.org'\n", errors.New("exit status 100"))
 
 	var shown strings.Builder
@@ -44,8 +55,13 @@ func TestRunImageBuildNeverRetriesOnHostNetwork(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected the build failure to be reported")
 	}
-	if len(*requests) != 1 {
-		t.Fatalf("expected a single build attempt, got %d", len(*requests))
+	if len(*requests) != 2 {
+		t.Fatalf("expected the original attempt and one rerun, got %d", len(*requests))
+	}
+	for _, req := range *requests {
+		if req.NetworkMode != "" {
+			t.Fatalf("no attempt may switch to another network mode, got %q", req.NetworkMode)
+		}
 	}
 	if !strings.Contains(err.Error(), docker.BuildNetworkEnv+"=host") {
 		t.Fatalf("a Docker DNS failure must point at the explicit override, got %q", err.Error())
@@ -56,6 +72,7 @@ func TestRunImageBuildNeverRetriesOnHostNetwork(t *testing.T) {
 }
 
 func TestRunImageBuildDNSHintOnlyOnDockerDefaultNetwork(t *testing.T) {
+	t.Setenv(docker.BuildRetriesEnv, "0")
 	dnsFailure := "Temporary failure resolving 'deb.debian.org'\n"
 
 	withContainerCLI(t, backend.NamePodman)
@@ -77,6 +94,7 @@ func TestRunImageBuildDNSHintOnlyOnDockerDefaultNetwork(t *testing.T) {
 }
 
 func TestRunImageBuildWrapsGenericFailuresDirectly(t *testing.T) {
+	t.Setenv(docker.BuildRetriesEnv, "0")
 	withContainerCLI(t, backend.NameDocker)
 	stubBuildOutcome(t, "ERROR: process \"/bin/sh -c exit 1\" did not complete successfully: exit code: 1\n", errors.New("exit status 1"))
 
@@ -87,6 +105,7 @@ func TestRunImageBuildWrapsGenericFailuresDirectly(t *testing.T) {
 }
 
 func TestRunImageBuildNamesTransientNetworkFailures(t *testing.T) {
+	t.Setenv(docker.BuildRetriesEnv, "0")
 	withContainerCLI(t, backend.NameDocker)
 	stubBuildOutcome(t, "read tcp 10.0.2.100:44210->151.101.1.6:443: read: connection reset by peer\n", errors.New("exit status 1"))
 
@@ -97,6 +116,7 @@ func TestRunImageBuildNamesTransientNetworkFailures(t *testing.T) {
 }
 
 func TestRunImageBuildSucceedsQuietly(t *testing.T) {
+	t.Setenv(docker.BuildRetriesEnv, "0")
 	withContainerCLI(t, backend.NameDocker)
 	requests := stubBuildOutcome(t, "", nil)
 	if err := runImageBuild(context.Background(), docker.BuildRequest{Progress: "quiet"}, io.Discard); err != nil {

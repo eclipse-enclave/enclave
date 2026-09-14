@@ -22,7 +22,7 @@ fi
 echo "Installing glab version ${GLAB_VERSION} for ${ARCH}"
 enclave_curl -L -o /tmp/glab.deb \
     "https://gitlab.com/gitlab-org/cli/-/releases/v${GLAB_VERSION}/downloads/glab_${GLAB_VERSION}_linux_${ARCH}.deb"
-dpkg -i /tmp/glab.deb || enclave_retry "apt-get install -f" -- apt-get install -f -y
+dpkg -i /tmp/glab.deb || enclave_apt_get install -f -y
 rm /tmp/glab.deb
 
 echo "GitLab CLI installed: $(glab --version)"

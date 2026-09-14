@@ -255,3 +255,75 @@ ENCLAVE_NET_STALL_SPEED_BYTES=256 enclave_curl -o /dev/null https://example.inva
 		t.Fatalf("expected the configured speed floor, got:\n%s", out)
 	}
 }
+
+func TestEnclaveAptGetReportsDownloadProgress(t *testing.T) {
+	out, _, err := runNetHelper(t, `apt-get() {
+    echo "args: $* (attempt timeout $ENCLAVE_NET_ATTEMPT_TIMEOUT_SECONDS)"
+    { true >&3; } 2>/dev/null || return 0
+    for p in 5.0000 12.5000 48.7500 100.0000; do
+        echo "dlstatus:2:$p:Retrieving file 2 of 9" >&3
+        echo "pmstatus:golang-go:50.0:Unpacking golang-go" >&3
+        sleep 0.4
+    done
+}
+ENCLAVE_NET_ATTEMPT_TIMEOUT_SECONDS=1234 ENCLAVE_NET_PROGRESS_INTERVAL_SECONDS=1 enclave_apt_get install -y golang-go`)
+	if err != nil {
+		t.Fatalf("expected success, got %v\n%s", err, out)
+	}
+	// The download runs first, reported and under the attempt timeout; the
+	// unpack runs second, plain and unbounded, so dpkg is never interrupted.
+	download := "args: -o APT::Status-Fd=3 --download-only install -y golang-go (attempt timeout 1234)"
+	unpack := "args: install -y golang-go (attempt timeout 0)"
+	if !strings.Contains(out, download) || !strings.Contains(out, unpack) {
+		t.Fatalf("expected a reported download followed by a plain install, got:\n%s", out)
+	}
+	if strings.Index(out, download) > strings.Index(out, unpack) {
+		t.Fatalf("the download must run before the install, got:\n%s", out)
+	}
+	if !strings.Contains(out, "apt-get install: downloading 5% (Retrieving file 2 of 9)") {
+		t.Fatalf("expected a download progress line, got:\n%s", out)
+	}
+	if strings.Contains(out, "Unpacking") {
+		t.Fatalf("install-phase status must not be repeated, got:\n%s", out)
+	}
+	if n := strings.Count(out, "downloading "); n > 3 {
+		t.Fatalf("progress must be throttled to the interval, got %d lines:\n%s", n, out)
+	}
+}
+
+func TestEnclaveAptGetWithoutProgressRunsPlainAptGet(t *testing.T) {
+	out, _, err := runNetHelper(t, `apt-get() { echo "args: $*"; }
+ENCLAVE_NET_PROGRESS_INTERVAL_SECONDS=0 enclave_apt_get update`)
+	if err != nil {
+		t.Fatalf("expected success, got %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "args: -o APT::Update::Error-Mode=any update\n") || strings.Contains(out, "Status-Fd") {
+		t.Fatalf("expected a plain apt-get update that fails on any fetch error, got:\n%s", out)
+	}
+}
+
+// A failed download must not be followed by an install attempt.
+func TestEnclaveAptGetSkipsInstallWhenDownloadFails(t *testing.T) {
+	out, count, err := runNetHelper(t, `apt-get() { bump; echo "args: $*"; echo "E: Failed to fetch http://deb.debian.org/x  Connection timed out" >&2; return 100; }
+ENCLAVE_NET_PROGRESS_INTERVAL_SECONDS=0 enclave_apt_get install -y x`)
+	if err == nil {
+		t.Fatalf("expected failure, got success:\n%s", out)
+	}
+	if count != "3" || strings.Contains(out, "args: install -y x\n") {
+		t.Fatalf("expected three download attempts and no install, got %s attempts:\n%s", count, out)
+	}
+}
+
+func TestEnclaveAptGetRetriesAndPropagatesStatus(t *testing.T) {
+	out, count, err := runNetHelper(t, `apt-get() { bump; echo "dlstatus:1:1.0000:Retrieving file 1 of 1" >&3; echo "E: Failed to fetch http://deb.debian.org/x  Connection timed out" >&2; return 100; }
+ENCLAVE_NET_PROGRESS_INTERVAL_SECONDS=1 enclave_apt_get install -y x`)
+	if err == nil {
+		t.Fatalf("expected failure, got success:\n%s", out)
+	}
+	if exitErr, ok := err.(*exec.ExitError); !ok || exitErr.ExitCode() != 100 {
+		t.Fatalf("expected apt-get's exit status 100, got %v\n%s", err, out)
+	}
+	if count != "3" {
+		t.Fatalf("expected ENCLAVE_NET_RETRIES=3 attempts, got %s\n%s", count, out)
+	}
+}

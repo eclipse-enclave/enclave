@@ -238,7 +238,7 @@ Mutation commands (`add-domain`, `remove-domain`, `set-mode`) apply the new poli
 | `--buildx-cache-dir <path>` | Import/export a local buildx `mode=max` cache directory |
 | `--buildx-cache-from <spec>` | Raw buildx cache import spec (repeatable) |
 | `--buildx-cache-to <spec>` | Raw buildx cache export spec (repeatable) |
-| `--progress <quiet\|compact\|verbose>` | Build output style. `compact` and `verbose` show every running download, reporting percentage and rate every 30 seconds (`ENCLAVE_NET_PROGRESS_INTERVAL_SECONDS`), and warn with the last build step when the engine prints nothing for 3 minutes, which usually means a stalled download; `quiet` suppresses engine output and gets neither |
+| `--progress <quiet\|compact\|verbose>` | Build output style. `compact` and `verbose` show every running download, including apt package fetches, reporting percentage and rate every 30 seconds (`ENCLAVE_NET_PROGRESS_INTERVAL_SECONDS`), and warn with the last build step when the engine prints nothing for 3 minutes, which usually means a stalled download; `quiet` suppresses engine output and gets neither |
 | `--force-base-image` | Bypass devcontainer base image compatibility checks |
 
 ### Auth & Secrets

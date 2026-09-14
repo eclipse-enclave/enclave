@@ -619,8 +619,9 @@ other feature's apt packages are present first.
 
 The build runners export two helpers from `runtime-assets/build-scripts/lib/common.sh`
 into every extension `install.sh`: `enclave_curl` for HTTP downloads and
+`enclave_apt_get <args...>` for `apt-get update` and `install`, and
 `enclave_retry <label> -- <cmd...>` for other network-bound commands such as
-`go install` or `apt-get`. `enclave_curl` adds connect and stall timeouts to
+`go install`. `enclave_curl` adds connect and stall timeouts to
 the transfer; `enclave_retry` bounds each attempt with a wall-clock timeout.
 Both retry transient failures with the `ENCLAVE_NET_*` settings from
 [configuration.md](../configuration.md#environment-variables). Use them for

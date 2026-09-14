@@ -183,6 +183,15 @@ RUN chmod -R a+rX /opt/enclave/build-scripts && \
     find /opt/enclave/build-scripts -type f \( -name '*.sh' -o -path '*/bin/*' \) -exec chmod a+rx {} +
 RUN /opt/enclave/build-scripts/install-agent-node-runtime.sh
 
+# Build-time package caches (npm, Go modules, uv) mount here during feature and
+# tool installs, outside the agent home: buildah commits the ancestors of a
+# cache mount target as root-owned when a step writes to them, which under
+# /home/${USERNAME} left the agent unable to write its own home. Pre-created and
+# agent-owned so neither engine has to create the mount points. Keep in sync
+# with buildCacheRoot in internal/app/dockerfile_gen.go.
+RUN mkdir -p /var/cache/enclave/npm /var/cache/enclave/gomod /var/cache/enclave/uv && \
+    chown -R ${USER_ID}:${GROUP_ID} /var/cache/enclave
+
 USER ${USERNAME}
 
 # Global npm installs use a user-writable prefix via a COMMAND-SCOPED
@@ -192,8 +201,7 @@ USER ${USERNAME}
 # aborts `nvm use` with exit 11, which would break node-dev images at build and
 # at container startup.
 
-# Pre-create user-owned directories before cache mounts.
-# BuildKit may create parent mount paths as root, which breaks sibling writes.
+# Runtime cache directories the agent's own tools expect to exist.
 RUN mkdir -p "$HOME/go/pkg/mod" "$HOME/go/pkg/sumdb" "$HOME/.cache/uv" "$HOME/.cache/go-build"
 
 RUN mkdir -p "$HOME/.local/bin" "$HOME/.config" "$HOME/.cache" "$HOME/.local/share"
@@ -239,9 +247,10 @@ USER ${USERNAME}
 
 # Run feature install scripts that do not require root (needsRoot: false or not set)
 # These are sorted by priority (lower first)
-RUN --mount=type=cache,id=enclave-npm-${USER_ID},target=/home/${USERNAME}/.npm,uid=${USER_ID},gid=${GROUP_ID} \
-    --mount=type=cache,id=enclave-gomod-${USER_ID},target=/home/${USERNAME}/go/pkg/mod,uid=${USER_ID},gid=${GROUP_ID} \
-    --mount=type=cache,id=enclave-uv-${USER_ID},target=/home/${USERNAME}/.cache/uv,uid=${USER_ID},gid=${GROUP_ID} \
+RUN --mount=type=cache,id=enclave-npm-${USER_ID},target=/var/cache/enclave/npm,uid=${USER_ID},gid=${GROUP_ID} \
+    --mount=type=cache,id=enclave-gomod-${USER_ID},target=/var/cache/enclave/gomod,uid=${USER_ID},gid=${GROUP_ID} \
+    --mount=type=cache,id=enclave-uv-${USER_ID},target=/var/cache/enclave/uv,uid=${USER_ID},gid=${GROUP_ID} \
+    npm_config_cache=/var/cache/enclave/npm GOMODCACHE=/var/cache/enclave/gomod UV_CACHE_DIR=/var/cache/enclave/uv \
     FEATURES="${FEATURES}" \
     ENCLAVE_FEATURE_PHASE=user \
     /opt/enclave/build-scripts/run-feature-installs.sh

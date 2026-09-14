@@ -295,11 +295,27 @@ func BuildImage(spec Spec) error {
 		Tags:       []string{spec.BaseImage},
 		BuildArgs:  spec.BuildArgs,
 	}
-	if err := docker.Build(context.Background(), req, os.Stdout); err != nil {
+	// Same ENCLAVE_BUILD_NETWORK handling as the runtime image build: this
+	// base build runs first, so a DNS-broken Docker build network fails here.
+	var err error
+	if req.NetworkMode, err = docker.BuildNetworkModeFromEnv(); err != nil {
+		return err
+	}
+	log := docker.NewBuildLog(os.Stdout)
+	if err := dockerBuild(context.Background(), req, log); err != nil {
+		if !docker.IsPodman() && req.NetworkMode == "" && docker.IsBuildNetworkDNSFailure(log.Tail()) {
+			return fmt.Errorf("failed to build devcontainer base image: %s (%w)", docker.BuildNetworkDNSHint(), err)
+		}
+		if hint := docker.BuildFailureHint(log.Tail()); hint != "" {
+			return fmt.Errorf("failed to build devcontainer base image: %s (%w)", hint, err)
+		}
 		return fmt.Errorf("failed to build devcontainer base image: %w", err)
 	}
 	return nil
 }
+
+// dockerBuild is the engine build; tests replace it.
+var dockerBuild = docker.Build
 
 func resolveDockerfile(cfg config) string {
 	if cfg.Build != nil {

@@ -310,7 +310,7 @@ Merge semantics:
 | `ENCLAVE_LOG_LEVEL` | Log level: `info` (default) or `debug` |
 | `ENCLAVE_AGENT_UPDATE_INTERVAL_HOURS` | Minimum hours after a tool's last successful automatic update before `check-update.sh` is eligible to probe again (`0` = always) |
 | `ENCLAVE_DEVCONTAINER_REWRITE_VARS` | Comma-separated extra env var names for devcontainer home-path normalization |
-| `ENCLAVE_BUILD_NETWORK` | Set to `host` to run image builds on the host network. The remedy for Docker BuildKit setups whose default build network cannot resolve names; never applied automatically |
+| `ENCLAVE_BUILD_NETWORK` | Set to `host` to run image builds (runtime image, gateway image, and a devcontainer's base Dockerfile) on the host network. The remedy for Docker BuildKit setups whose default build network cannot resolve names; never applied automatically |
 | `ENCLAVE_NET_RETRIES` | Attempts per build-time download before the image build fails (default `5`); forwarded into the build as a build arg |
 | `ENCLAVE_NET_RETRY_DELAY_SECONDS` | Base delay between download attempts, multiplied by the attempt number (default `5`) |
 | `ENCLAVE_NET_CONNECT_TIMEOUT_SECONDS` | `curl --connect-timeout` for build-time downloads (default `20`) |

@@ -102,6 +102,8 @@ jobs:
         run: echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Install Go lint tools
+        env:
+          ENCLAVE_BUILD_SCRIPTS_DIR: runtime-assets/build-scripts
         run: ./extensions/features/devtools/install.sh
 
       - name: Cache lint caches

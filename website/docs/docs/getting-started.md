@@ -132,6 +132,15 @@ cd enclave
 make build
 ```
 
+### Updating
+
+Enclave does not update itself yet, and it does not tell you when a newer build
+is available. Since the rolling release moves with `main`, download the current
+assets every so often and re-run the same install step you used above: `sudo apt
+install ./enclave_*_amd64.deb`, `sudo dnf install ./enclave-*.x86_64.rpm`,
+`sudo install ...` over the binary, or `git pull && make build` for a source
+checkout.
+
 ## Start your first session
 
 From inside a git repository, launch the default agent in an isolated container:

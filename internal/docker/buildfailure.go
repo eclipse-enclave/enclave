@@ -22,6 +22,11 @@ var buildDNSFailurePattern = regexp.MustCompile(`(?i)(` +
 	`|server misbehaving` +
 	`|unable to resolve host` +
 	`|Name does not resolve` +
+	// npm and other Node tools report a failed lookup as a bare getaddrinfo
+	// errno. The tool installs run through npm, so without these a DNS-broken
+	// build network would miss the ENCLAVE_BUILD_NETWORK=host remedy on the
+	// step most likely to hit it.
+	`|getaddrinfo (ENOTFOUND|EAI_AGAIN)` +
 	`)`)
 
 // buildTransientNetworkPattern matches transfers that failed or timed out

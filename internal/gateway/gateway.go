@@ -11,7 +11,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -215,7 +214,7 @@ func buildGatewayImage(ctx context.Context, paths model.Paths, profile model.Pro
 		return err
 	}
 	var output bytes.Buffer
-	if err := buildGatewayWatched(ctx, req, &output); err != nil {
+	if _, err := docker.RunBuild(ctx, "gateway image", req, &output, docker.Build); err != nil {
 		// Some Docker BuildKit setups cannot resolve names on the default build
 		// network, which surfaces here as failed Alpine index fetches. Point at
 		// the explicit remedy instead of retrying on the host network
@@ -229,25 +228,6 @@ func buildGatewayImage(ctx context.Context, paths model.Paths, profile model.Pro
 
 	logx.Successf("Gateway image built")
 	return nil
-}
-
-// gatewayBuildStallWarnAfter mirrors the runtime image build's stall warning.
-// The gateway build is short, so a silent stretch this long is worth a notice.
-const gatewayBuildStallWarnAfter = 3 * time.Minute
-
-// buildGatewayWatched runs the gateway build into out (the gateway build is
-// not streamed to the terminal) and warns while it produces nothing.
-func buildGatewayWatched(ctx context.Context, req docker.BuildRequest, out io.Writer) error {
-	log := docker.NewBuildLog(out)
-	stop := log.WarnWhenStalled(gatewayBuildStallWarnAfter, func(idle time.Duration, lastLine string) {
-		if lastLine == "" {
-			logx.Warnf("No gateway build output for %s; the build may be stalled on a network transfer.", idle.Round(time.Second))
-			return
-		}
-		logx.Warnf("No gateway build output for %s; the build may be stalled on a network transfer. Last output: %s", idle.Round(time.Second), lastLine)
-	})
-	defer stop()
-	return docker.Build(ctx, req, log)
 }
 
 // describeGatewayBuildFailure names the likely cause found in the build

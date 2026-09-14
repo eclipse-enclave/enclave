@@ -16,7 +16,9 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"time"
 
+	backenddocker "enclave/internal/backend/docker"
 	"enclave/internal/config"
 	"enclave/internal/docker"
 	"enclave/internal/logx"
@@ -130,8 +132,14 @@ func runCleanup(run model.RunOptions, cleanup model.CleanupOptions) int {
 		// Ephemeral config stores are host directories keyed by a session or
 		// worktree suffix.
 		storeDirs := resolveEphemeralStoreDirs(run, cleanup, home, project, scopes)
+		// Per-session networks outlive a session only when its teardown was
+		// skipped; the same selection runs quietly at every session start.
+		networkNames, networksErr := backenddocker.PruneStaleSessionNetworks(context.Background(), time.Now().UTC(), cleanup.CleanupDryRun)
+		if networksErr != nil {
+			logx.Warnf("Failed to list stale per-session networks: %v", networksErr)
+		}
 		if cleanup.CleanupDryRun {
-			printEphemeralCleanupPlan(containerNames, storeDirs)
+			printEphemeralCleanupPlan(containerNames, networkNames, storeDirs)
 			cleanupBuildCache(cleanup)
 			return 0
 		}
@@ -451,13 +459,16 @@ func printCleanupPlan(dirs []cleanupDir) {
 	}
 }
 
-func printEphemeralCleanupPlan(containers []string, dirs []cleanupDir) {
-	if len(containers) == 0 && len(dirs) == 0 {
+func printEphemeralCleanupPlan(containers []string, networks []string, dirs []cleanupDir) {
+	if len(containers) == 0 && len(networks) == 0 && len(dirs) == 0 {
 		logx.Infof("Nothing to clean")
 		return
 	}
 	for _, container := range containers {
 		logx.Infof("Would remove container: %s", container)
+	}
+	for _, network := range networks {
+		logx.Infof("Would remove stale per-session network: %s", network)
 	}
 	for _, dir := range dirs {
 		logx.Infof("Would remove %s: %s", dir.Kind, dir.Path)

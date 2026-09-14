@@ -325,7 +325,7 @@ func (b *Backend) prepareRun(ctx context.Context, req backend.Request) (runSpec,
 	if err := b.prepareImageUserNamespace(ctx, req.Image); err != nil {
 		return runSpec{}, err
 	}
-	sessionNetwork, err := b.ensureSessionNetwork(ctx, req.Session, dockerSystemInfo.ServerVersion)
+	sessionNetwork, err := b.ensureSessionNetwork(ctx, req.Session, dockerSystemInfo)
 	if err != nil {
 		return runSpec{}, err
 	}
@@ -806,7 +806,13 @@ func (b *Backend) warnInsecureDockerConfig(ctx context.Context) (dockercmd.Syste
 	return info, nil
 }
 
+// warnInsecureDockerFirewall surfaces daemon warnings that undermine bridge
+// isolation and loopback publishing. podman is skipped: its info carries no
+// daemon warnings or firewall backend, and netavark manages its own rules.
 func warnInsecureDockerFirewall(info dockercmd.SystemInfo) {
+	if dockercmd.IsPodman() {
+		return
+	}
 	for _, warning := range info.Warnings {
 		lower := strings.ToLower(warning)
 		if strings.Contains(lower, "iptables") || strings.Contains(lower, "ip6tables") ||

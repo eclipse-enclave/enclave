@@ -22,6 +22,10 @@ func Ping(ctx context.Context) error {
 // Info returns the subset of `docker info` we consume. Under podman the
 // equivalent fields are read from its own `info` schema and mapped onto the
 // Docker names (storage root; rootless mode reported as a security option).
+// ServerVersion, OSType, Warnings, and FirewallBackend stay empty under
+// podman: they describe the Docker daemon, and callers that branch on the
+// Docker version or firewall backend must gate on IsPodman rather than rely on
+// the empty values.
 func Info(ctx context.Context) (SystemInfo, error) {
 	out, err := capture(ctx, "info", "--format", "{{json .}}")
 	if err != nil {
@@ -47,6 +51,11 @@ func decodePodmanInfo(data []byte) (SystemInfo, error) {
 			Security struct {
 				Rootless bool `json:"rootless"`
 			} `json:"security"`
+			NetworkBackend     string `json:"networkBackend"`
+			NetworkBackendInfo struct {
+				Backend string `json:"backend"`
+				Version string `json:"version"`
+			} `json:"networkBackendInfo"`
 		} `json:"host"`
 		Store struct {
 			GraphRoot string `json:"graphRoot"`
@@ -55,7 +64,14 @@ func decodePodmanInfo(data []byte) (SystemInfo, error) {
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return SystemInfo{}, fmt.Errorf("decode podman info: %w", err)
 	}
-	info := SystemInfo{DockerRootDir: raw.Store.GraphRoot}
+	info := SystemInfo{
+		DockerRootDir:         raw.Store.GraphRoot,
+		NetworkBackend:        raw.Host.NetworkBackend,
+		NetworkBackendVersion: raw.Host.NetworkBackendInfo.Version,
+	}
+	if info.NetworkBackend == "" {
+		info.NetworkBackend = raw.Host.NetworkBackendInfo.Backend
+	}
 	if raw.Host.Security.Rootless {
 		info.SecurityOptions = []string{"name=rootless"}
 	}

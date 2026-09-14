@@ -316,9 +316,10 @@ type UnfinalizedRemover interface {
 // StaleGatewayRemover removes a gateway sidecar that outlived an interrupted
 // start of the named session. Left running, the sidecar keeps the session's
 // published ports bound and a fresh start of that name fails its host-port
-// checks before it reaches gateway startup.
+// checks before it reaches gateway startup. The project hash confirms the
+// sidecar belongs to this session before it is touched.
 type StaleGatewayRemover interface {
-	RemoveStaleGateway(ctx context.Context, name string) error
+	RemoveStaleGateway(ctx context.Context, name string, projectHash string) error
 }
 
 // ConfigStoreConflictChecker reports whether a running session for the same

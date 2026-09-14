@@ -195,6 +195,16 @@ older daemons, Docker's default allocation applies and the stock address pools
 can limit the number of concurrent networks. If pool allocation is exhausted,
 upgrade the daemon or configure Docker's `default-address-pools`.
 
+Under `--backend podman` the same networks require netavark and are created with
+`isolate=strict`, since netavark isolates bridge networks from each other only
+on request before podman 6. Podman's default pool hands out a `/24` per network
+and is not subject to the Docker pool limit. Published ports still bind
+`127.0.0.1` explicitly on both engines.
+
+A network that outlives its session (for example after a `kill -9` of the
+enclave process) is removed at the next session start, or by
+`enclave cleanup --ephemeral`, once it is an hour old and has no endpoints.
+
 Container-to-container access is not a compatibility contract. As an advanced,
 unsupported integration, `docker network connect <network-name> <peer-container>`
 can deliberately attach a peer to the network named in the `enclave ps --json`

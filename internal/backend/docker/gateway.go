@@ -14,10 +14,10 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"enclave/internal/backend"
 	"enclave/internal/config"
-	dockercmd "enclave/internal/docker"
 	"enclave/internal/gateway"
 	"enclave/internal/gateway/bundle"
 	"enclave/internal/logx"
@@ -89,28 +89,21 @@ func (b *Backend) startGateway(ctx context.Context, req backend.Request, network
 // RemoveStaleGateway removes the gateway sidecar of a session whose container
 // does not exist. A start interrupted between gateway readiness and container
 // creation leaves the sidecar running with the session's ports published,
-// which would fail the next start's host-port checks; gateway.Start would
-// replace the sidecar anyway, so removing it early loses nothing.
-func (b *Backend) RemoveStaleGateway(ctx context.Context, name string) error {
-	gatewayName := gateway.ContainerName(name)
-	if _, err := dockercmd.ContainerInspect(ctx, name); err == nil {
-		return nil
-	} else if !dockercmd.IsNotFound(err) {
-		return err
-	}
-	inspect, err := dockercmd.ContainerInspect(ctx, gatewayName)
+// which would fail the next start's host-port checks. It applies
+// gateway.ReconcileStale, the same rule the gateway start uses: a sidecar
+// younger than gateway.OrphanGracePeriod may belong to a concurrent start and
+// is left in place with a hint.
+func (b *Backend) RemoveStaleGateway(ctx context.Context, name string, projectHash string) error {
+	result, err := gateway.ReconcileStale(ctx, name, projectHash, time.Now().UTC())
 	if err != nil {
-		if dockercmd.IsNotFound(err) {
-			return nil
-		}
 		return err
 	}
-	if inspect.Config == nil || inspect.Config.Labels[model.GatewayLabelManaged] != "true" {
-		return nil
-	}
-	logx.Warnf("Removing stale gateway container %s left behind by an interrupted start", gatewayName)
-	if err := dockercmd.ContainerRemove(ctx, gatewayName, true, true); err != nil && !dockercmd.IsNotFound(err) {
-		return err
+	gatewayName := gateway.ContainerName(name)
+	switch {
+	case result.Removed:
+		logx.Warnf("Removed stale gateway container %s left behind by an interrupted start", gatewayName)
+	case result.Exists && result.Owned && !result.SessionExists:
+		logx.Warnf("Gateway container %s from a start less than %s ago is still running; if that start is not in progress, run 'enclave stop %s' before retrying", gatewayName, gateway.OrphanGracePeriod, name)
 	}
 	return nil
 }

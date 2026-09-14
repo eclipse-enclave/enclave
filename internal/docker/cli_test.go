@@ -86,6 +86,9 @@ func TestNetworkErrorClassifiers(t *testing.T) {
 		{name: "already exists", stderr: "network with name session-net already exists", check: IsAlreadyExists},
 		{name: "container name conflict", stderr: `Conflict. The container name "/session-gateway" is already in use by container "abc".`, check: IsContainerNameConflict},
 		{name: "active endpoints", stderr: "network session-net has active endpoints", check: IsActiveEndpoints},
+		{name: "podman associated containers", stderr: `Error: "session-net" has associated containers with it. Use -f to forcibly delete containers and pods: network is being used`, check: IsActiveEndpoints},
+		{name: "podman isolate parse", stderr: `Error: strconv.ParseBool: parsing "strict": invalid syntax`, check: IsUnsupportedIsolateValue},
+		{name: "podman isolate unsupported", stderr: "Error: unsupported bridge network option isolate", check: IsUnsupportedIsolateValue},
 		{name: "default pool exhausted", stderr: "could not find an available, non-overlapping IPv4 address pool among the defaults to assign to the network", check: IsAddressPoolExhausted},
 		{name: "predefined pools exhausted", stderr: "all predefined address pools have been fully subnetted", check: IsAddressPoolExhausted},
 	} {

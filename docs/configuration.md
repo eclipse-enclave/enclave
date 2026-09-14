@@ -314,7 +314,9 @@ Merge semantics:
 | `ENCLAVE_NET_RETRIES` | Attempts per build-time download before the image build fails (default `5`); forwarded into the build as a build arg |
 | `ENCLAVE_NET_RETRY_DELAY_SECONDS` | Base delay between download attempts, multiplied by the attempt number (default `5`) |
 | `ENCLAVE_NET_CONNECT_TIMEOUT_SECONDS` | `curl --connect-timeout` for build-time downloads (default `20`) |
-| `ENCLAVE_NET_STALL_TIMEOUT_SECONDS` | Abort a build-time download that delivers under 1 KB/s for this long (default `60`) |
+| `ENCLAVE_NET_STALL_TIMEOUT_SECONDS` | Abort a build-time download that stays below the stall speed floor for this long (default `60`) |
+| `ENCLAVE_NET_STALL_SPEED_BYTES` | Stall speed floor in bytes per second (default `1024`); lower it on links that are genuinely slower |
+| `ENCLAVE_NET_PROGRESS_INTERVAL_SECONDS` | How often a running download reports the bytes received so far (default `30`, `0` disables) |
 | `ENCLAVE_NET_ATTEMPT_TIMEOUT_SECONDS` | Wall-clock limit per attempt for retried install commands such as `go install` and `apt-get` (default `1800`, `0` disables) |
 
 These are read by the Windows launcher on the Windows side only, and are not
@@ -331,6 +333,8 @@ build starts and passed to the build scripts, which apply them to every
 download made through the shared `enclave_curl` and `enclave_retry` helpers
 (see [build-scripts/README.md](../runtime-assets/build-scripts/README.md)).
 Raise them on a slow or flaky connection; they do not affect the image hash.
+Retried downloads resume the partial file where the server supports range
+requests, so a large archive does not restart from zero after a hiccup.
 
 Buildx cache and canonical build UID/GID controls are CLI-only. Use
 `--buildx-cache-dir`, `--build-uid`, `--build-gid`, and `--runtime-uid-remap`

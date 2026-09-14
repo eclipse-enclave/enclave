@@ -261,12 +261,15 @@ enclave_list_feature_installers() {
 : "${ENCLAVE_NET_CONNECT_TIMEOUT_SECONDS:=20}"
 : "${ENCLAVE_NET_STALL_TIMEOUT_SECONDS:=60}"
 : "${ENCLAVE_NET_ATTEMPT_TIMEOUT_SECONDS:=1800}"
+: "${ENCLAVE_NET_STALL_SPEED_BYTES:=1024}"
+: "${ENCLAVE_NET_PROGRESS_INTERVAL_SECONDS:=30}"
 
 enclave_net_settings_valid() {
     local name=""
     for name in ENCLAVE_NET_RETRIES ENCLAVE_NET_RETRY_DELAY_SECONDS \
         ENCLAVE_NET_CONNECT_TIMEOUT_SECONDS ENCLAVE_NET_STALL_TIMEOUT_SECONDS \
-        ENCLAVE_NET_ATTEMPT_TIMEOUT_SECONDS; do
+        ENCLAVE_NET_ATTEMPT_TIMEOUT_SECONDS ENCLAVE_NET_STALL_SPEED_BYTES \
+        ENCLAVE_NET_PROGRESS_INTERVAL_SECONDS; do
         case "${!name}" in
             '' | *[!0-9]*)
                 echo "${name} must be a non-negative integer, got: ${!name}" >&2
@@ -333,6 +336,9 @@ enclave_retry() {
     local status=0
     local delay=0
     local errlog=""
+    # Dynamically scoped: a wrapped shell function such as enclave_curl_attempt
+    # reads it to behave differently on retries.
+    local ENCLAVE_RETRY_ATTEMPT=1
     errlog="$(mktemp)"
 
     # timeout(1) only runs executables; shell functions and builtins run
@@ -345,6 +351,7 @@ enclave_retry() {
 
     while :; do
         status=0
+        ENCLAVE_RETRY_ATTEMPT="$attempt"
         "${runner[@]}" "$@" 2>>"$errlog" || status=$?
         if [ "$status" -eq 0 ]; then
             cat "$errlog" >&2
@@ -377,40 +384,126 @@ enclave_retry() {
 
 # enclave_curl [curl args...]
 # curl with --fail, connect and stall timeouts, wrapped in enclave_retry. A
-# transfer delivering under 1 KB/s for ENCLAVE_NET_STALL_TIMEOUT_SECONDS is
-# aborted so a silent peer becomes a retryable failure instead of a hang.
-# Without -o/-O the body is buffered per attempt and written to stdout only on
-# success, so `$(enclave_curl url)` never sees a partial body from a failed try.
+# transfer delivering under ENCLAVE_NET_STALL_SPEED_BYTES per second for
+# ENCLAVE_NET_STALL_TIMEOUT_SECONDS is aborted so a silent peer becomes a
+# retryable failure instead of a hang. Retries of a -o download resume the
+# partial file where the server allows it, and a heartbeat reports the bytes
+# received every ENCLAVE_NET_PROGRESS_INTERVAL_SECONDS while a download runs,
+# so a slow link can be told apart from a dead one. Without -o/-O the body is
+# buffered per attempt and written to stdout only on success, so
+# `$(enclave_curl url)` never sees a partial body from a failed try.
 enclave_curl() {
+    enclave_net_settings_valid || return 2
     local label="curl"
+    local output=""
     local capture=1
     local arg=""
+    local prev=""
     for arg in "$@"; do
         case "$arg" in
             http://* | https://*) label="curl ${arg}" ;;
-            -o | --output | -O | --remote-name | -o* | --output=*) capture=0 ;;
         esac
+        case "$prev" in
+            -o | --output) output="$arg" ;;
+        esac
+        case "$arg" in
+            -o | --output) capture=0 ;;
+            -O | --remote-name) capture=0 ;;
+            --output=*) output="${arg#--output=}"; capture=0 ;;
+            -o?*) output="${arg#-o}"; capture=0 ;;
+        esac
+        prev="$arg"
     done
-
-    local -a curl_args=(
-        --fail --silent --show-error
-        --connect-timeout "$ENCLAVE_NET_CONNECT_TIMEOUT_SECONDS"
-        --speed-limit 1024 --speed-time "$ENCLAVE_NET_STALL_TIMEOUT_SECONDS"
-    )
-    if [ "$capture" -eq 0 ]; then
-        enclave_retry "$label" -- curl "${curl_args[@]}" "$@"
-        return
-    fi
 
     local body=""
     local status=0
-    body="$(mktemp)"
-    enclave_retry "$label" -- curl "${curl_args[@]}" -o "$body" "$@" || status=$?
-    if [ "$status" -eq 0 ]; then
-        cat "$body"
+    if [ "$capture" -eq 1 ]; then
+        body="$(mktemp)"
+        output="$body"
     fi
-    rm -f "$body"
+
+    local heartbeat_pid=""
+    if [ -n "$output" ] && [ "$ENCLAVE_NET_PROGRESS_INTERVAL_SECONDS" -gt 0 ]; then
+        enclave_download_heartbeat "$label" "$output" &
+        heartbeat_pid=$!
+    fi
+
+    if [ "$capture" -eq 1 ]; then
+        enclave_retry "$label" -- enclave_curl_attempt "$output" -o "$output" "$@" || status=$?
+    else
+        enclave_retry "$label" -- enclave_curl_attempt "$output" "$@" || status=$?
+    fi
+
+    if [ -n "$heartbeat_pid" ]; then
+        kill "$heartbeat_pid" 2>/dev/null || true
+        wait "$heartbeat_pid" 2>/dev/null || true
+    fi
+    if [ "$capture" -eq 1 ]; then
+        if [ "$status" -eq 0 ]; then
+            cat "$body"
+        fi
+        rm -f "$body"
+    fi
     return "$status"
+}
+
+# enclave_curl_attempt <output-file-or-empty> [curl args...]
+# One curl run with the shared flags; enclave_curl wraps it in enclave_retry.
+# From the second attempt on, a non-empty output file is resumed with
+# --continue-at so a large archive does not restart from zero after a hiccup.
+# When the server cannot resume (curl exit 33, or HTTP 416 for a range it
+# rejects) the partial file is discarded and the attempt downloads from zero.
+enclave_curl_attempt() {
+    local output="$1"
+    shift
+    local -a curl_args=(
+        --fail --silent --show-error
+        --connect-timeout "$ENCLAVE_NET_CONNECT_TIMEOUT_SECONDS"
+        --speed-limit "$ENCLAVE_NET_STALL_SPEED_BYTES"
+        --speed-time "$ENCLAVE_NET_STALL_TIMEOUT_SECONDS"
+    )
+    # As in enclave_retry, timeout(1) only wraps an executable curl (tests
+    # substitute a shell function).
+    local -a runner=()
+    if [ "$ENCLAVE_NET_ATTEMPT_TIMEOUT_SECONDS" -gt 0 ] && [ "$(type -t curl)" = "file" ] &&
+        command -v timeout >/dev/null 2>&1; then
+        runner=(timeout "$ENCLAVE_NET_ATTEMPT_TIMEOUT_SECONDS")
+    fi
+
+    if [ -n "$output" ] && [ "${ENCLAVE_RETRY_ATTEMPT:-1}" -gt 1 ] && [ -s "$output" ]; then
+        local status=0
+        local errlog=""
+        errlog="$(mktemp)"
+        echo "resuming download at $(($(stat -c %s "$output" 2>/dev/null || echo 0) / 1024)) KB" >&2
+        "${runner[@]}" curl "${curl_args[@]}" --continue-at - "$@" 2>"$errlog" || status=$?
+        cat "$errlog" >&2
+        if [ "$status" -eq 0 ]; then
+            rm -f "$errlog"
+            return 0
+        fi
+        if [ "$status" -eq 33 ] || grep -q 'returned error: 416' "$errlog"; then
+            echo "server does not support resuming; restarting the download from zero" >&2
+            rm -f "$errlog" "$output"
+        else
+            rm -f "$errlog"
+            return "$status"
+        fi
+    fi
+    "${runner[@]}" curl "${curl_args[@]}" "$@"
+}
+
+# enclave_download_heartbeat <label> <file>
+# Reports the size of a growing download every ENCLAVE_NET_PROGRESS_INTERVAL_SECONDS
+# until killed. Runs in the background from enclave_curl.
+enclave_download_heartbeat() {
+    local label="$1"
+    local file="$2"
+    local size=0
+    while :; do
+        sleep "$ENCLAVE_NET_PROGRESS_INTERVAL_SECONDS"
+        size="$(stat -c %s "$file" 2>/dev/null || echo 0)"
+        echo "${label}: $((size / 1024)) KB received so far" >&2
+    done
 }
 
 # enclave_export_net_helpers makes the network helpers and their settings
@@ -419,7 +512,8 @@ enclave_curl() {
 enclave_export_net_helpers() {
     export ENCLAVE_NET_RETRIES ENCLAVE_NET_RETRY_DELAY_SECONDS \
         ENCLAVE_NET_CONNECT_TIMEOUT_SECONDS ENCLAVE_NET_STALL_TIMEOUT_SECONDS \
-        ENCLAVE_NET_ATTEMPT_TIMEOUT_SECONDS
+        ENCLAVE_NET_ATTEMPT_TIMEOUT_SECONDS ENCLAVE_NET_STALL_SPEED_BYTES \
+        ENCLAVE_NET_PROGRESS_INTERVAL_SECONDS
     export -f enclave_net_settings_valid enclave_is_transient_network_error \
-        enclave_retry enclave_curl
+        enclave_retry enclave_curl enclave_curl_attempt enclave_download_heartbeat
 }

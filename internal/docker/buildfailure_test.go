@@ -18,6 +18,11 @@ func TestIsBuildNetworkDNSFailure(t *testing.T) {
 		"curl: (6) Could not resolve host: github.com",
 		"go: module golang.org/x/vuln: Get \"https://proxy.golang.org/...\": dial tcp: lookup proxy.golang.org: no such host",
 		"fetch https://dl-cdn.alpinelinux.org/alpine/v3.20/main/x86_64/APKINDEX.tar.gz\nERROR: ... temporary error (try again later)\nunable to resolve host",
+		// The tool installs run through npm, so its errno spelling must count
+		// as a DNS failure or the step most likely to hit a DNS-broken build
+		// network is the one that misses the remedy.
+		"npm error network request to https://registry.npmjs.org/@anthropic-ai%2fsandbox-runtime failed, reason: getaddrinfo ENOTFOUND registry.npmjs.org",
+		"npm error network request failed, reason: getaddrinfo EAI_AGAIN registry.npmjs.org",
 	} {
 		if !IsBuildNetworkDNSFailure(output) {
 			t.Errorf("expected DNS failure for %q", output)

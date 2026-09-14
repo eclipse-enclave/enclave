@@ -146,14 +146,31 @@ func IsContainerNameConflict(err error) bool {
 	return strings.Contains(message, "container name") && strings.Contains(message, "already in use")
 }
 
-// IsActiveEndpoints reports whether Docker refused to remove a network while
-// one or more containers were still attached.
+// IsActiveEndpoints reports whether the engine refused to remove a network
+// while one or more containers were still attached. Docker says "has active
+// endpoints"; podman says the network "has associated containers" and "is
+// being used".
 func IsActiveEndpoints(err error) bool {
 	var ce *cliError
 	if !errors.As(err, &ce) {
 		return false
 	}
-	return strings.Contains(strings.ToLower(ce.stderr), "active endpoints")
+	message := strings.ToLower(ce.stderr)
+	return strings.Contains(message, "active endpoints") ||
+		strings.Contains(message, "has associated containers") ||
+		strings.Contains(message, "network is being used")
+}
+
+// IsUnsupportedIsolateValue reports whether podman rejected the bridge
+// "isolate" option value. netavark releases before "strict" existed fail the
+// boolean parse of that value at network creation.
+func IsUnsupportedIsolateValue(err error) bool {
+	var ce *cliError
+	if !errors.As(err, &ce) {
+		return false
+	}
+	message := strings.ToLower(ce.stderr)
+	return strings.Contains(message, "isolate") || strings.Contains(message, `"strict"`)
 }
 
 // IsAddressPoolExhausted reports Docker's stable address-pool exhaustion

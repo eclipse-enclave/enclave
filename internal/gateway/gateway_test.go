@@ -182,9 +182,9 @@ exit 2
 		startContainerRemove = origRemove
 	})
 
-	result, err := reconcileGatewayContainerForStart(context.Background(), StartConfig{ContainerName: "session", ProjectHash: "project"}, time.Now().UTC())
+	result, err := ReconcileStale(context.Background(), "session", "project", time.Now().UTC())
 	if err != nil {
-		t.Fatalf("reconcileGatewayContainerForStart() error = %v", err)
+		t.Fatalf("ReconcileStale() error = %v", err)
 	}
 	if !result.Exists || !result.Owned || !result.Removed || removed != "gateway-id" {
 		t.Fatalf("unexpected reconciliation: result=%+v removed=%q", result, removed)

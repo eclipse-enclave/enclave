@@ -12,7 +12,8 @@ gateway requires netfilter, ipset, sysctl, `NET_ADMIN`, and `NET_RAW`. See
 
 Enclave uses a dedicated user-defined bridge for each Docker session. The
 session boundary and host-loopback port publishing rely on the firewall rules
-managed by Docker. Do not disable the daemon's `iptables` or `ip6tables`
+managed by Docker (under `--backend podman`, netavark manages the equivalent
+rules inside the rootless network namespace and this section does not apply). Do not disable the daemon's `iptables` or `ip6tables`
 integration unless equivalent isolation and publishing rules are maintained
 separately. Configurations such as `"iptables": false` are outside Enclave's
 supported security posture.

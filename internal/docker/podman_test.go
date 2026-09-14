@@ -61,6 +61,30 @@ func TestDecodePodmanInfoMapsRootlessAndGraphRoot(t *testing.T) {
 	}
 }
 
+// The network backend version decides whether the per-session network may ask
+// for isolate=strict, so it has to survive the podman info decode.
+func TestDecodePodmanInfoMapsNetworkBackend(t *testing.T) {
+	info, err := decodePodmanInfo([]byte(`{"host":{"networkBackend":"netavark","networkBackendInfo":{"backend":"netavark","version":"netavark 1.4.0"}},"store":{"graphRoot":"/var/lib/containers/storage"}}`))
+	if err != nil {
+		t.Fatalf("decodePodmanInfo: %v", err)
+	}
+	if info.NetworkBackend != "netavark" {
+		t.Fatalf("NetworkBackend = %q, want netavark", info.NetworkBackend)
+	}
+	if info.NetworkBackendVersion != "netavark 1.4.0" {
+		t.Fatalf("NetworkBackendVersion = %q, want \"netavark 1.4.0\"", info.NetworkBackendVersion)
+	}
+
+	// Older podman reports the backend only under networkBackendInfo.
+	legacy, err := decodePodmanInfo([]byte(`{"host":{"networkBackendInfo":{"backend":"cni"}},"store":{"graphRoot":"/var/lib/containers/storage"}}`))
+	if err != nil {
+		t.Fatalf("decodePodmanInfo: %v", err)
+	}
+	if legacy.NetworkBackend != "cni" {
+		t.Fatalf("NetworkBackend = %q, want cni", legacy.NetworkBackend)
+	}
+}
+
 func TestBuildkitDisabledUnderPodman(t *testing.T) {
 	t.Setenv("DOCKER_BUILDKIT", "")
 	if !BuildkitEnabled() {

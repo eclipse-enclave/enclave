@@ -14,6 +14,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"enclave/internal/util"
 )
@@ -112,6 +113,27 @@ exit 2
 	}
 }
 
+func TestDecodeNetworkInspectResponsesAcceptsPodmanShape(t *testing.T) {
+	line := `{"name":"session-net","id":"0123abcd","driver":"bridge","created":"2026-09-14T10:00:00.123456789+02:00","subnets":[{"subnet":"10.89.3.0/24","gateway":"10.89.3.1"}],"labels":{"enclave.network":"true","enclave.network.container":"session"},"options":{"isolate":"strict"},"containers":{"c1":{"name":"session-gateway","interfaces":{"eth0":{}}}}}`
+	results := decodeNetworkInspectResponses(line)
+	if len(results) != 1 {
+		t.Fatalf("decoded %d networks, want 1", len(results))
+	}
+	info := results[0]
+	if info.Name != "session-net" || info.ID != "0123abcd" || info.Labels["enclave.network.container"] != "session" {
+		t.Fatalf("podman identity fields not decoded: %+v", info)
+	}
+	if _, err := time.Parse(time.RFC3339Nano, info.Created); err != nil {
+		t.Fatalf("podman created timestamp not decoded: %q", info.Created)
+	}
+	if subnets := info.SubnetConfigs(); len(subnets) != 1 || subnets[0].Subnet != "10.89.3.0/24" {
+		t.Fatalf("podman subnets not decoded: %+v", subnets)
+	}
+	if len(info.Containers) != 1 || info.Containers["c1"].Name != "session-gateway" {
+		t.Fatalf("podman endpoints not decoded: %+v", info.Containers)
+	}
+}
+
 func installNetworkDockerStub(t *testing.T, body string) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -151,4 +173,37 @@ func containsSequence(values []string, want []string) bool {
 		}
 	}
 	return false
+}
+
+// podman echoes the new network's name where Docker prints its ID. Handing that
+// name back as an ID makes every later comparison against inspect output fail,
+// which silently skips the network's removal and leaks it.
+func TestNetworkCreateResolvesPodmanNameToID(t *testing.T) {
+	dir := t.TempDir()
+	stub := filepath.Join(dir, "podman")
+	script := `#!/bin/sh
+if [ "$1" = "network" ] && [ "$2" = "create" ]; then
+  printf '%s\n' session-net
+  exit 0
+fi
+if [ "$1" = "network" ] && [ "$2" = "inspect" ]; then
+  printf '%s\n' '{"name":"session-net","id":"51cb64e853c090000e91","labels":{}}'
+  exit 0
+fi
+exit 2
+`
+	if err := os.WriteFile(stub, []byte(script), 0o700); err != nil {
+		t.Fatalf("write podman stub: %v", err)
+	}
+	orig := dockerBinary
+	dockerBinary = stub
+	t.Cleanup(func() { dockerBinary = orig })
+
+	id, err := NetworkCreate(context.Background(), NetworkCreateOptions{Name: "session-net", Driver: "bridge"})
+	if err != nil {
+		t.Fatalf("NetworkCreate() error = %v", err)
+	}
+	if id != "51cb64e853c090000e91" {
+		t.Fatalf("NetworkCreate() = %q, want the inspected network ID", id)
+	}
 }

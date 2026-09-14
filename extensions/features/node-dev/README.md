@@ -7,7 +7,9 @@ packages. Enabled by default.
 
 ## Installation
 
-1. Installs [nvm](https://github.com/nvm-sh/nvm) for Node.js version management
+1. Installs [nvm](https://github.com/nvm-sh/nvm) for Node.js version management.
+   The latest release is resolved from the GitHub API; set `NVM_VERSION` (for
+   example `v0.40.3`) to pin one. A failed lookup fails the install.
 2. If the base image already has `node` on `PATH`, skips `nvm install --lts`
    and keeps the base-image Node as the default (`nvm use system`)
 3. Otherwise, installs the latest LTS Node.js release via nvm and snapshots it

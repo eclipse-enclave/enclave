@@ -20,9 +20,20 @@ if [ -n "$base_node_bin" ]; then
 fi
 
 if [ ! -s "$NVM_DIR/nvm.sh" ]; then
-    echo "Installing nvm..."
-    NVM_VERSION=$(curl -s https://api.github.com/repos/nvm-sh/nvm/releases/latest | grep '"tag_name"' | sed -E 's/.*"([^"]+)".*/\1/')
-    curl -o- "https://raw.githubusercontent.com/nvm-sh/nvm/${NVM_VERSION}/install.sh" | bash
+    # Resolve the latest release unless pinned. A failed lookup used to yield an
+    # empty tag and a 404 body piped into bash, leaving an image without nvm.
+    if [ -z "${NVM_VERSION:-}" ]; then
+        NVM_VERSION=$(enclave_curl https://api.github.com/repos/nvm-sh/nvm/releases/latest | grep '"tag_name"' | sed -E 's/.*"([^"]+)".*/\1/')
+    fi
+    if [ -z "$NVM_VERSION" ]; then
+        echo "could not determine the latest nvm release; set NVM_VERSION to pin one" >&2
+        exit 1
+    fi
+    echo "Installing nvm ${NVM_VERSION}..."
+    nvm_installer="$(mktemp)"
+    enclave_curl -o "$nvm_installer" "https://raw.githubusercontent.com/nvm-sh/nvm/${NVM_VERSION}/install.sh"
+    bash "$nvm_installer"
+    rm -f "$nvm_installer"
 fi
 
 if [ -s "$NVM_DIR/nvm.sh" ]; then

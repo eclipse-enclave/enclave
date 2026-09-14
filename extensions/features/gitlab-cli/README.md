@@ -8,6 +8,8 @@ requests from the command line. Opt-in (disabled by default).
 ## Installation
 
 Downloads the latest `.deb` release from GitLab's release API. Requires root.
+Set `GLAB_VERSION` (for example `1.55.0`) to pin a release instead; a failed
+lookup fails the install.
 
 ## Auth
 

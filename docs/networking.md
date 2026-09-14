@@ -182,7 +182,8 @@ These two flags handle opposite directions of port forwarding:
 Each Docker session gets its own labeled bridge network, in restricted and
 unrestricted modes. Normally only one network namespace is attached: the
 gateway for a restricted session, or the tool container for an unrestricted
-session. The bridge and subnet exist only while the session runs. Inspect them
+session. The bridge and subnet exist while the session container exists; a
+stopped background session keeps its network until `enclave stop`. Inspect them
 through structured output:
 
 ```bash

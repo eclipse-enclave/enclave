@@ -189,7 +189,7 @@ Mutation commands (`add-domain`, `remove-domain`, `set-mode`) apply the new poli
 |---------|-------------|
 | `enclave cleanup` | Remove persistent stores and caches for current tool/project |
 | `enclave cleanup --all` | All projects and tools |
-| `enclave cleanup --ephemeral` | Remove stopped containers, stale per-session networks (no session, no endpoints, older than an hour), and ephemeral session stores |
+| `enclave cleanup --ephemeral` | Remove stopped containers together with their per-session networks, stale per-session networks of the same tool and project (no container, no endpoints, older than an hour), and ephemeral session stores |
 | `enclave cleanup --dry-run` | Preview what would be removed |
 | `enclave cleanup --keep cache,history,auth,memory` | Preserve the listed stores (comma-separated or repeated `--keep`): `cache` (package caches), `history` (shell history and the config store, including conversation history), `auth` (auth stores, with `--all`), `memory` (per-project agent memory, no selective effect with `--all`) |
 | `enclave cleanup --build-cache` | Prune Docker build cache (requires confirmation) |

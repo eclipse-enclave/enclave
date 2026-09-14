@@ -333,7 +333,7 @@ func attachedSessionNetworkError(containerName string, networkName string) error
 	return fmt.Errorf("session %s already running or requires stale-resource cleanup: Docker network %q has attached endpoints; run 'enclave stop %s' and retry", containerName, networkName, containerName)
 }
 
-func (b *Backend) cleanupSessionNetwork(ref sessionNetworkRef) {
+func cleanupSessionNetwork(ref sessionNetworkRef) {
 	if strings.TrimSpace(ref.Name) == "" || strings.TrimSpace(ref.ID) == "" || strings.TrimSpace(ref.Container) == "" {
 		return
 	}
@@ -462,14 +462,19 @@ func (b *Backend) gcSessionNetworks(ctx context.Context, now time.Time) {
 
 // PruneStaleSessionNetworks removes the per-session networks whose session
 // container is gone, has no endpoints, and is past the grace period, and
-// returns their names. With dryRun it only reports them.
-func PruneStaleSessionNetworks(ctx context.Context, now time.Time, dryRun bool) ([]string, error) {
+// returns their names. ownerPrefix limits it to networks whose owning
+// container name starts with the prefix (empty selects every project and
+// tool). With dryRun it only reports them.
+func PruneStaleSessionNetworks(ctx context.Context, now time.Time, ownerPrefix string, dryRun bool) ([]string, error) {
 	stale, err := staleSessionNetworks(ctx, now)
 	if err != nil {
 		return nil, err
 	}
 	names := make([]string, 0, len(stale))
 	for _, ref := range stale {
+		if !strings.HasPrefix(ref.Container, ownerPrefix) {
+			continue
+		}
 		names = append(names, ref.Name)
 		if dryRun {
 			continue

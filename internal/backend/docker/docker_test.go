@@ -673,6 +673,112 @@ exit 1
 	}
 }
 
+func TestRemoveStopsGatewayByCapturedID(t *testing.T) {
+	restoreNetworkGlobals(t)
+	logPath := stubCLI(t, "docker", `case "$1" in
+container)
+	case "$5" in
+	session-gateway)
+		printf '%s\n' '{"Id":"gateway-id","Config":{"Labels":{"enclave.gateway":"true","enclave.gateway.container":"session"}},"State":{"Status":"running","Running":true}}'
+		;;
+	*)
+		printf '%s\n' 'Error response from daemon: No such container: session' >&2
+		exit 1
+		;;
+	esac
+	;;
+esac
+exit 0
+`)
+	networkInspect = func(context.Context, string) (dockercmd.NetworkInspectResponse, error) {
+		return dockercmd.NetworkInspectResponse{}, errors.New("Error response from daemon: network session-net not found")
+	}
+
+	if err := New(Options{}).RemoveWithoutFinalize(context.Background(), backend.SessionRef{Name: "session"}); err != nil {
+		t.Fatalf("RemoveWithoutFinalize() error = %v", err)
+	}
+	calls := stubCalls(t, logPath)
+	if !hasCallWithPrefix(calls, "stop --time 3 gateway-id") {
+		t.Fatalf("gateway must be stopped by its captured ID, got %v", calls)
+	}
+	for _, call := range calls {
+		if strings.HasPrefix(call, "stop ") && strings.HasSuffix(call, "session-gateway") {
+			t.Fatalf("gateway stopped by mutable name: %s", call)
+		}
+	}
+}
+
+func TestRemoveSessionContainerControlsAnonymousVolumeRemoval(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		removeVolumes bool
+		wantCall      string
+	}{
+		{name: "keep volumes", wantCall: "rm --force session"},
+		{name: "remove volumes", removeVolumes: true, wantCall: "rm --force --volumes session"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			restoreNetworkGlobals(t)
+			logPath := stubCLI(t, "docker", `case "$1" in
+container)
+		printf '%s\n' 'Error response from daemon: No such container: session-gateway' >&2
+		exit 1
+		;;
+esac
+exit 0
+`)
+			networkInspect = func(context.Context, string) (dockercmd.NetworkInspectResponse, error) {
+				return dockercmd.NetworkInspectResponse{}, errors.New("Error response from daemon: network session-net not found")
+			}
+
+			if err := RemoveSessionContainer(context.Background(), "session", tc.removeVolumes); err != nil {
+				t.Fatalf("RemoveSessionContainer() error = %v", err)
+			}
+			if calls := stubCalls(t, logPath); !hasCallWithPrefix(calls, tc.wantCall) {
+				t.Fatalf("calls = %v, want %q", calls, tc.wantCall)
+			}
+		})
+	}
+}
+
+func TestRemoveFailureKeepsGatewayAndNetwork(t *testing.T) {
+	restoreNetworkGlobals(t)
+	logPath := stubCLI(t, "docker", `case "$1" in
+rm)
+	printf '%s\n' 'Error response from daemon: cannot remove container session: permission denied' >&2
+	exit 1
+	;;
+esac
+exit 0
+`)
+	networkInspect = func(context.Context, string) (dockercmd.NetworkInspectResponse, error) {
+		return dockercmd.NetworkInspectResponse{
+			ID:   "network-id",
+			Name: sessionNetworkName("session"),
+			Labels: map[string]string{
+				model.NetworkLabelManaged:     "true",
+				model.NetworkLabelContainer:   "session",
+				model.NetworkLabelProjectHash: "project",
+			},
+		}, nil
+	}
+	sessionRuntimeExists = func(context.Context, string) (bool, error) { return false, nil }
+	networkRemove = func(context.Context, string) error {
+		t.Fatal("network removed although the session container removal failed")
+		return nil
+	}
+
+	err := New(Options{}).RemoveWithoutFinalize(context.Background(), backend.SessionRef{Name: "session"})
+	if err == nil || !strings.Contains(err.Error(), "permission denied") {
+		t.Fatalf("expected the removal error to surface, got %v", err)
+	}
+	for _, call := range stubCalls(t, logPath) {
+		if strings.HasPrefix(call, "stop ") || (strings.HasPrefix(call, "rm ") && strings.Contains(call, "session-gateway")) {
+			t.Fatalf("gateway touched after a failed container removal: %s", call)
+		}
+	}
+}
+
 func filterPairsEqual(a [][2]string, b [][2]string) bool {
 	if len(a) != len(b) {
 		return false

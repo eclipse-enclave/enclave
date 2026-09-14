@@ -35,7 +35,7 @@ Network settings (from `lib/common.sh`, forwarded by the CLI from the host envir
 - `ENCLAVE_NET_RETRY_DELAY_SECONDS` (default: `5`): base delay, multiplied by the attempt number.
 - `ENCLAVE_NET_CONNECT_TIMEOUT_SECONDS` (default: `20`): `curl --connect-timeout`.
 - `ENCLAVE_NET_STALL_TIMEOUT_SECONDS` (default: `60`): abort a transfer under 1 KB/s for this long.
-- `ENCLAVE_NET_ATTEMPT_TIMEOUT_SECONDS` (default: `900`, `0` disables): `timeout(1)` around each attempt of a retried executable.
+- `ENCLAVE_NET_ATTEMPT_TIMEOUT_SECONDS` (default: `1800`, `0` disables): `timeout(1)` around each attempt of a retried executable.
 
 ## Network Helpers
 

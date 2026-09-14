@@ -314,7 +314,7 @@ Merge semantics:
 | `ENCLAVE_NET_RETRY_DELAY_SECONDS` | Base delay between download attempts, multiplied by the attempt number (default `5`) |
 | `ENCLAVE_NET_CONNECT_TIMEOUT_SECONDS` | `curl --connect-timeout` for build-time downloads (default `20`) |
 | `ENCLAVE_NET_STALL_TIMEOUT_SECONDS` | Abort a build-time download that delivers under 1 KB/s for this long (default `60`) |
-| `ENCLAVE_NET_ATTEMPT_TIMEOUT_SECONDS` | Wall-clock limit per attempt for retried install commands such as `go install` and `apt-get` (default `900`, `0` disables) |
+| `ENCLAVE_NET_ATTEMPT_TIMEOUT_SECONDS` | Wall-clock limit per attempt for retried install commands such as `go install` and `apt-get` (default `1800`, `0` disables) |
 
 These are read by the Windows launcher on the Windows side only, and are not
 forwarded into the WSL2 distribution. See [windows.md](windows.md).

@@ -260,7 +260,7 @@ enclave_list_feature_installers() {
 : "${ENCLAVE_NET_RETRY_DELAY_SECONDS:=5}"
 : "${ENCLAVE_NET_CONNECT_TIMEOUT_SECONDS:=20}"
 : "${ENCLAVE_NET_STALL_TIMEOUT_SECONDS:=60}"
-: "${ENCLAVE_NET_ATTEMPT_TIMEOUT_SECONDS:=900}"
+: "${ENCLAVE_NET_ATTEMPT_TIMEOUT_SECONDS:=1800}"
 
 enclave_net_settings_valid() {
     local name=""

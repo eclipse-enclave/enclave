@@ -17,47 +17,52 @@ import (
 	"enclave/internal/docker"
 )
 
-func TestStripHomeCacheMountsKeepsRunStepsIntact(t *testing.T) {
+// The build-time package caches must never mount under the agent home: buildah
+// commits the ancestors of a cache mount target as root-owned, which left the
+// agent unable to write its home on podman. Keeping them under
+// /var/cache/enclave lets one Dockerfile serve both engines.
+func TestRenderedDockerfileMountsPackageCachesOutsideHome(t *testing.T) {
 	repoDockerfile := filepath.Join("..", "..", "Dockerfile")
 	if _, err := os.Stat(repoDockerfile); err != nil {
 		t.Skipf("repo Dockerfile not available: %v", err)
 	}
 	rendered, err := renderDockerfile(repoDockerfile, []string{"claude"}, []featureInstall{
 		{Name: "devtools", Priority: 40, HasApt: true, HasScript: true},
+		{Name: "user-cmds", Priority: 50, HasInstallCommands: true},
 	}, nil, nil)
 	if err != nil {
 		t.Fatalf("renderDockerfile: %v", err)
 	}
-	if !strings.Contains(rendered, "target=/home/${USERNAME}/.npm") {
-		t.Fatal("test premise: rendered Dockerfile should mount the npm cache under the agent home")
-	}
 
-	got := stripHomeCacheMounts(rendered)
-	if strings.Contains(got, "target=/home/") {
-		t.Fatalf("home cache mounts survived:\n%s", got)
-	}
-	if !strings.Contains(got, "--mount=type=cache,id=enclave-apt-cache,target=/var/cache/apt") {
-		t.Fatal("apt cache mounts outside the home must be preserved")
+	for _, line := range strings.Split(rendered, "\n") {
+		if strings.Contains(line, "type=cache") && strings.Contains(line, "target=/home/") {
+			t.Fatalf("cache mount under the agent home:\n%s", line)
+		}
 	}
 	for _, want := range []string{
-		"ENCLAVE_FEATURE_PHASE=user",
-		"enclave-install-tool",
+		"--mount=type=cache,id=enclave-npm-${USER_ID},target=/var/cache/enclave/npm,uid=${USER_ID},gid=${GROUP_ID}",
+		"--mount=type=cache,id=enclave-gomod-${USER_ID},target=/var/cache/enclave/gomod,uid=${USER_ID},gid=${GROUP_ID}",
+		"--mount=type=cache,id=enclave-uv-${USER_ID},target=/var/cache/enclave/uv,uid=${USER_ID},gid=${GROUP_ID}",
+		"npm_config_cache=/var/cache/enclave/npm GOMODCACHE=/var/cache/enclave/gomod UV_CACHE_DIR=/var/cache/enclave/uv",
+		"--mount=type=cache,id=enclave-npm-${USER_ID}-claude,target=/var/cache/enclave/npm,",
+		"npm_config_cache=/var/cache/enclave/npm enclave-install-tool claude",
+		"mkdir -p /var/cache/enclave/npm /var/cache/enclave/gomod /var/cache/enclave/uv",
+		"--mount=type=cache,id=enclave-apt-cache,target=/var/cache/apt",
 	} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("stripped Dockerfile lost %q", want)
+		if !strings.Contains(rendered, want) {
+			t.Fatalf("rendered Dockerfile lacks %q:\n%s", want, rendered)
 		}
 	}
-	for i, line := range strings.Split(got, "\n") {
-		if strings.TrimSpace(line) == "\\" {
-			t.Fatalf("line %d holds only a continuation backslash", i+1)
+	// The cache paths must stay RUN-scoped: the mounts do not persist into the
+	// image, so an ENV pointing at them would break the tools at runtime.
+	for _, line := range strings.Split(rendered, "\n") {
+		if strings.HasPrefix(line, "ENV ") && strings.Contains(line, "/var/cache/enclave") {
+			t.Fatalf("cache path leaked into the image environment:\n%s", line)
 		}
-	}
-	if stripHomeCacheMounts("FROM x\nRUN true\n") != "FROM x\nRUN true\n" {
-		t.Fatal("Dockerfiles without home cache mounts must pass through unchanged")
 	}
 }
 
-func TestRenderEngineDockerfileStripsHomeCacheMountsOnlyForPodman(t *testing.T) {
+func TestRenderEngineDockerfileIsIdenticalForDockerAndPodman(t *testing.T) {
 	repoDockerfile := filepath.Join("..", "..", "Dockerfile")
 	if _, err := os.Stat(repoDockerfile); err != nil {
 		t.Skipf("repo Dockerfile not available: %v", err)
@@ -65,20 +70,20 @@ func TestRenderEngineDockerfileStripsHomeCacheMountsOnlyForPodman(t *testing.T) 
 	previous := docker.Binary()
 	t.Cleanup(func() { docker.SetBinary(previous) })
 
+	docker.SetBinary(backend.NameDocker)
 	forDocker, err := renderEngineDockerfile(repoDockerfile, []string{"claude"}, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("renderEngineDockerfile (docker): %v", err)
 	}
-	if !strings.Contains(forDocker, "target=/home/${USERNAME}/.npm") {
-		t.Fatal("docker builds must keep the home cache mounts")
-	}
-
 	docker.SetBinary(backend.NamePodman)
 	forPodman, err := renderEngineDockerfile(repoDockerfile, []string{"claude"}, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("renderEngineDockerfile (podman): %v", err)
 	}
-	if strings.Contains(forPodman, "target=/home/") {
-		t.Fatal("podman builds must not mount caches under the agent home")
+	if forDocker != forPodman {
+		t.Fatal("the rendered Dockerfile must not depend on the container engine")
+	}
+	if !strings.Contains(forPodman, "target=/var/cache/enclave/npm") {
+		t.Fatal("podman builds must keep the package cache mounts")
 	}
 }

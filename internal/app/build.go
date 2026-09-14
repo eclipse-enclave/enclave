@@ -14,7 +14,6 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -139,43 +138,12 @@ func inspectImageInfo(imageName string) imageInfo {
 var dockerPing = docker.Ping
 
 // renderEngineDockerfile renders the Dockerfile for the selected tools and
-// features and adapts it to the container engine in use. Both the rebuild
-// hash and the build itself go through it so they see identical content.
+// features. Both the rebuild hash and the build itself go through it so they
+// see identical content. The rendered file is engine-independent: build-time
+// package caches mount under /var/cache/enclave (see dockerfile_gen.go), which
+// both BuildKit and buildah handle without touching the agent home.
 func renderEngineDockerfile(templatePath string, tools []string, features []featureInstall, stamps map[string]string, forceTools map[string]bool) (string, error) {
-	content, err := renderDockerfile(templatePath, tools, features, stamps, forceTools)
-	if err != nil {
-		return "", err
-	}
-	if docker.IsPodman() {
-		content = stripHomeCacheMounts(content)
-	}
-	return content, nil
-}
-
-// homeCacheMountPattern matches one `--mount=type=cache,...` RUN flag whose
-// target lies under the agent home.
-var homeCacheMountPattern = regexp.MustCompile(`--mount=type=cache,[^\s\\]*target=/home/[^\s\\]*`)
-
-// stripHomeCacheMounts removes cache mounts targeting the agent home from RUN
-// steps. buildah (podman build) commits the ancestors of such mount targets
-// as root-owned 0755 directories whenever the step modified them, which
-// leaves the agent unable to write its own home; the caches only speed up
-// rebuilds, and buildah's layer cache still applies. Continuation lines left
-// with nothing but a backslash are dropped.
-func stripHomeCacheMounts(dockerfile string) string {
-	if !strings.Contains(dockerfile, "target=/home/") {
-		return dockerfile
-	}
-	lines := strings.Split(dockerfile, "\n")
-	out := make([]string, 0, len(lines))
-	for _, line := range lines {
-		stripped := homeCacheMountPattern.ReplaceAllString(line, "")
-		if stripped != line && strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(stripped), "\\")) == "" {
-			continue
-		}
-		out = append(out, stripped)
-	}
-	return strings.Join(out, "\n")
+	return renderDockerfile(templatePath, tools, features, stamps, forceTools)
 }
 
 // checkDocker distinguishes the common connectivity failures so users are not

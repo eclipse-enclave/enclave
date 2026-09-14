@@ -133,9 +133,7 @@ func generateFeatureInstallBlock(features []featureInstall) string {
 				b.WriteString("    /opt/enclave/build-scripts/run-feature-installs.sh\n")
 			} else {
 				b.WriteString("USER ${USERNAME}\n")
-				b.WriteString("RUN --mount=type=cache,id=enclave-npm-${USER_ID},target=/home/${USERNAME}/.npm,uid=${USER_ID},gid=${GROUP_ID} \\\n")
-				b.WriteString("    --mount=type=cache,id=enclave-gomod-${USER_ID},target=/home/${USERNAME}/go/pkg/mod,uid=${USER_ID},gid=${GROUP_ID} \\\n")
-				b.WriteString("    --mount=type=cache,id=enclave-uv-${USER_ID},target=/home/${USERNAME}/.cache/uv,uid=${USER_ID},gid=${GROUP_ID} \\\n")
+				writeUserPackageCacheMounts(&b)
 				fmt.Fprintf(&b, "    FEATURES=%s \\\n", util.ShellQuote(name))
 				b.WriteString("    ENCLAVE_FEATURE_PHASE=user \\\n")
 				b.WriteString("    /opt/enclave/build-scripts/run-feature-installs.sh\n")
@@ -149,9 +147,7 @@ func generateFeatureInstallBlock(features []featureInstall) string {
 				b.WriteString("    /opt/enclave/build-scripts/install-extension-commands.sh\n")
 			} else {
 				b.WriteString("USER ${USERNAME}\n")
-				b.WriteString("RUN --mount=type=cache,id=enclave-npm-${USER_ID},target=/home/${USERNAME}/.npm,uid=${USER_ID},gid=${GROUP_ID} \\\n")
-				b.WriteString("    --mount=type=cache,id=enclave-gomod-${USER_ID},target=/home/${USERNAME}/go/pkg/mod,uid=${USER_ID},gid=${GROUP_ID} \\\n")
-				b.WriteString("    --mount=type=cache,id=enclave-uv-${USER_ID},target=/home/${USERNAME}/.cache/uv,uid=${USER_ID},gid=${GROUP_ID} \\\n")
+				writeUserPackageCacheMounts(&b)
 				fmt.Fprintf(&b, "    FEATURES=%s \\\n", util.ShellQuote(name))
 				b.WriteString("    /opt/enclave/build-scripts/install-extension-commands.sh\n")
 			}
@@ -161,6 +157,32 @@ func generateFeatureInstallBlock(features []featureInstall) string {
 	// the aggregated fallback's end state.
 	b.WriteString("USER ${USERNAME}\n")
 	return b.String()
+}
+
+// Build-time package caches live under /var/cache/enclave, outside the agent
+// home. buildah commits the ancestors of a cache mount target as root-owned
+// 0755 directories when the step modifies them; a mount under /home/<agent>
+// therefore left the agent unable to write its own home on podman. Under
+// /var/cache/enclave the only ancestor is a root-owned directory the agent
+// never writes to. The directories are pre-created and chowned in the
+// Dockerfile's tool-base stage so neither engine has to create them.
+const (
+	buildCacheRoot     = "/var/cache/enclave"
+	npmBuildCacheDir   = buildCacheRoot + "/npm"
+	goModBuildCacheDir = buildCacheRoot + "/gomod"
+	uvBuildCacheDir    = buildCacheRoot + "/uv"
+)
+
+// writeUserPackageCacheMounts emits the RUN prefix that mounts the npm, Go
+// module, and uv caches for a user-phase step and points the package managers
+// at them. The env assignments are scoped to the RUN line on purpose: the
+// mounts do not persist into the image, so a baked ENV would point at paths
+// that do not exist at runtime.
+func writeUserPackageCacheMounts(b *strings.Builder) {
+	fmt.Fprintf(b, "RUN --mount=type=cache,id=enclave-npm-${USER_ID},target=%s,uid=${USER_ID},gid=${GROUP_ID} \\\n", npmBuildCacheDir)
+	fmt.Fprintf(b, "    --mount=type=cache,id=enclave-gomod-${USER_ID},target=%s,uid=${USER_ID},gid=${GROUP_ID} \\\n", goModBuildCacheDir)
+	fmt.Fprintf(b, "    --mount=type=cache,id=enclave-uv-${USER_ID},target=%s,uid=${USER_ID},gid=${GROUP_ID} \\\n", uvBuildCacheDir)
+	fmt.Fprintf(b, "    npm_config_cache=%s GOMODCACHE=%s UV_CACHE_DIR=%s \\\n", npmBuildCacheDir, goModBuildCacheDir, uvBuildCacheDir)
 }
 
 func dockerfileCopyInstruction(src string, dst string) string {
@@ -250,12 +272,12 @@ func generateToolInstallBlock(tools []string, stamps map[string]string, forceToo
 		b.WriteString("USER root\n")
 		b.WriteString(dockerfileNormalizeExtensionTree(toolTarget))
 		b.WriteString("USER ${USERNAME}\n")
-		fmt.Fprintf(&b, "RUN --mount=type=cache,id=enclave-npm-${USER_ID}-%s,target=/home/${USERNAME}/.npm,uid=${USER_ID},gid=${GROUP_ID},sharing=locked \\\n", tool.name)
+		fmt.Fprintf(&b, "RUN --mount=type=cache,id=enclave-npm-${USER_ID}-%s,target=%s,uid=${USER_ID},gid=${GROUP_ID},sharing=locked \\\n", tool.name, npmBuildCacheDir)
 		fmt.Fprintf(&b, "    echo %q && \\\n", "Agent update stamp: "+tool.stamp)
 		if forceTools[tool.name] {
-			fmt.Fprintf(&b, "    enclave-install-tool %s \"${AGENT_TOOLS}\" force\n\n", tool.name)
+			fmt.Fprintf(&b, "    npm_config_cache=%s enclave-install-tool %s \"${AGENT_TOOLS}\" force\n\n", npmBuildCacheDir, tool.name)
 		} else {
-			fmt.Fprintf(&b, "    enclave-install-tool %s \"${AGENT_TOOLS}\"\n\n", tool.name)
+			fmt.Fprintf(&b, "    npm_config_cache=%s enclave-install-tool %s \"${AGENT_TOOLS}\"\n\n", npmBuildCacheDir, tool.name)
 		}
 	}
 

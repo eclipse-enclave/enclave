@@ -10,6 +10,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/user"
 	"path/filepath"
@@ -619,14 +620,8 @@ func buildImage(ctx context.Context, paths model.Paths, host model.Host, combine
 		BuildxCacheTo:     buildxCacheTo,
 		Progress:          opts.Progress,
 	}
-	if err := dockerBuildImage(ctx, req, os.Stdout); err != nil {
-		// Some Docker BuildKit setups fail DNS resolution in the default build
-		// network during apt installs. Retry once with host build network.
-		req.NetworkMode = "host"
-		if retryErr := dockerBuildImage(ctx, req, os.Stdout); retryErr != nil {
-			return fmt.Errorf("failed to build image: %w (retry with host build network failed: %v)", err, retryErr)
-		}
-		logx.Warnf("Image build failed on default build network; retry with host build network succeeded")
+	if err := runImageBuild(ctx, req, os.Stdout); err != nil {
+		return err
 	}
 
 	if err := backfillMissingAgentUpdateFingerprints(&updates, paths, buildCfg, host.Home, nil); err != nil {
@@ -639,6 +634,41 @@ func buildImage(ctx context.Context, paths model.Paths, host model.Host, combine
 	logx.Successf("Image built successfully")
 	_, _ = dockerImagePrune(ctx, model.LabelVersion)
 	return nil
+}
+
+// runImageBuild runs the engine build, streaming output to out. Some Docker
+// BuildKit setups cannot resolve names on the default build network; when the
+// output shows that, and only then, the build is retried once with the host
+// network. podman builds with buildah, which has no such quirk, so a podman
+// failure is reported directly instead of running a doomed second build.
+func runImageBuild(ctx context.Context, req docker.BuildRequest, out io.Writer) error {
+	log := docker.NewBuildLog(out)
+	err := dockerBuildImage(ctx, req, log)
+	if err == nil {
+		return nil
+	}
+	if docker.IsPodman() || !docker.IsBuildNetworkDNSFailure(log.Tail()) {
+		return describeImageBuildFailure(err, log.Tail())
+	}
+
+	logx.Warnf("Image build failed with DNS resolution errors on the default build network; retrying with host build network")
+	req.NetworkMode = "host"
+	retryLog := docker.NewBuildLog(out)
+	if retryErr := dockerBuildImage(ctx, req, retryLog); retryErr != nil {
+		return describeImageBuildFailure(retryErr, retryLog.Tail())
+	}
+	logx.Warnf("Image build succeeded with host build network")
+	return nil
+}
+
+// describeImageBuildFailure names the likely cause found in the build output,
+// so a dropped connection reads as a connectivity problem rather than as an
+// opaque engine error.
+func describeImageBuildFailure(err error, output string) error {
+	if hint := docker.BuildFailureHint(output); hint != "" {
+		return fmt.Errorf("failed to build image: %s (%w)", hint, err)
+	}
+	return fmt.Errorf("failed to build image: %w", err)
 }
 
 func validateDevcontainerImageModeBase(ctx context.Context, buildCfg buildConfig, opts model.BuildOptions) error {

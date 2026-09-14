@@ -212,19 +212,34 @@ func buildGatewayImage(ctx context.Context, paths model.Paths, profile model.Pro
 	}
 	var output bytes.Buffer
 	if err := docker.Build(ctx, req, &output); err != nil {
-		// Some Docker BuildKit setups fail DNS resolution in the default build
-		// network for Alpine index fetches. Retry once with host build network.
+		// Some Docker BuildKit setups cannot resolve names on the default build
+		// network, which surfaces here as failed Alpine index fetches. Retry
+		// with the host network only for that symptom and only on Docker;
+		// buildah has no such quirk and a doomed retry just doubles the wait.
+		if docker.IsPodman() || !docker.IsBuildNetworkDNSFailure(output.String()) {
+			return describeGatewayBuildFailure(err, output.String())
+		}
+		logx.Warnf("Gateway build failed with DNS resolution errors on the default build network; retrying with host build network")
 		req.NetworkMode = "host"
 		var retryOutput bytes.Buffer
 		if retryErr := docker.Build(ctx, req, &retryOutput); retryErr != nil {
-			return fmt.Errorf("failed to build gateway image: %w (retry with host build network failed: %v)%s",
-				err, retryErr, buildOutputTail(retryOutput.String(), gatewayBuildErrorLines))
+			return describeGatewayBuildFailure(retryErr, retryOutput.String())
 		}
-		logx.Warnf("Gateway build failed on default build network; retry with host build network succeeded")
+		logx.Warnf("Gateway build succeeded with host build network")
 	}
 
 	logx.Successf("Gateway image built")
 	return nil
+}
+
+// describeGatewayBuildFailure names the likely cause found in the build
+// output and appends its tail, which the gateway build does not stream.
+func describeGatewayBuildFailure(err error, output string) error {
+	tail := buildOutputTail(output, gatewayBuildErrorLines)
+	if hint := docker.BuildFailureHint(output); hint != "" {
+		return fmt.Errorf("failed to build gateway image: %s (%w)%s", hint, err, tail)
+	}
+	return fmt.Errorf("failed to build gateway image: %w%s", err, tail)
 }
 
 func coordinateGatewayImageBuild(home string, image string, forceRebuild bool, resolveBuildPlan func() (bool, string, error), executeBuild func(string) error) error {

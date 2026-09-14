@@ -85,11 +85,14 @@ func TestEnsureLeafCreatesCertificateForHost(t *testing.T) {
 	if len(parsed.DNSNames) != 1 || parsed.DNSNames[0] != "api.example.com" {
 		t.Fatalf("DNSNames = %v, want [api.example.com]", parsed.DNSNames)
 	}
-	if parsed.PublicKeyAlgorithm != x509.RSA {
-		t.Fatalf("leaf PublicKeyAlgorithm = %v, want RSA", parsed.PublicKeyAlgorithm)
+	if parsed.PublicKeyAlgorithm != x509.ECDSA {
+		t.Fatalf("leaf PublicKeyAlgorithm = %v, want ECDSA", parsed.PublicKeyAlgorithm)
 	}
-	if parsed.KeyUsage&x509.KeyUsageKeyEncipherment == 0 {
-		t.Fatalf("leaf KeyUsage missing KeyEncipherment: %v", parsed.KeyUsage)
+	if parsed.KeyUsage&x509.KeyUsageDigitalSignature == 0 {
+		t.Fatalf("leaf KeyUsage missing DigitalSignature: %v", parsed.KeyUsage)
+	}
+	if parsed.KeyUsage&x509.KeyUsageKeyEncipherment != 0 {
+		t.Fatalf("leaf KeyUsage has KeyEncipherment, which is meaningless for ECDSA: %v", parsed.KeyUsage)
 	}
 }
 

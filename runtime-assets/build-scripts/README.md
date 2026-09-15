@@ -29,7 +29,7 @@ Build-time selectors:
 - `ENCLAVE_FEATURE_PHASE`: `root` or `user` (for `run-feature-installs.sh`).
 - `ENCLAVE_FEATURE_INSTALL_STRICT`: `1` to fail on feature installer errors, default `0` (warn and continue).
 
-Network settings (from `lib/common.sh`, forwarded by the CLI from the host environment as build args):
+Network settings (from `lib/fetch.sh`, forwarded by the CLI from the host environment as build args):
 
 - `ENCLAVE_NET_RETRIES` (default: `5`): attempts per download or retried command.
 - `ENCLAVE_NET_RETRY_DELAY_SECONDS` (default: `5`): base delay, multiplied by the attempt number.

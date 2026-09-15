@@ -42,6 +42,20 @@ bump() { local n; n=$(<"$COUNTER"); echo $((n + 1)) > "$COUNTER"; }
 	return string(out), strings.TrimSpace(string(count)), err
 }
 
+// The Dockerfile sources fetch.sh on its own, before common.sh is in the
+// image, so it must not depend on anything defined there.
+func TestFetchHelpersSourceWithoutCommon(t *testing.T) {
+	fetch := filepath.Join(filepath.Dir(commonShScript(t)), "fetch.sh")
+	cmd := exec.Command("bash", "-euo", "pipefail", "-c",
+		`. "$1" && enclave_net_settings_valid && type enclave_apt_get enclave_curl enclave_retry >/dev/null && echo sourced`,
+		"bash", fetch)
+	cmd.Env = []string{"PATH=" + os.Getenv("PATH")}
+	out, err := cmd.CombinedOutput()
+	if err != nil || strings.TrimSpace(string(out)) != "sourced" {
+		t.Fatalf("fetch.sh must source standalone, got %v\n%s", err, out)
+	}
+}
+
 func TestEnclaveRetryRetriesTransientNetworkErrors(t *testing.T) {
 	out, count, err := runNetHelper(t, `flaky() { bump; if [ "$(<"$COUNTER")" -lt 3 ]; then echo "curl: (56) Recv failure: Connection reset by peer" >&2; return 56; fi; echo payload; }
 enclave_retry flaky -- flaky`)

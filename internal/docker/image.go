@@ -39,6 +39,11 @@ type BuildRequest struct {
 	BuildxCacheTo     []string
 	Progress          string
 	NetworkMode       string
+	// OptionalBuildArgs names the ARGs the Dockerfile declares without a
+	// default on purpose, to be set only when the host environment provides a
+	// value. buildah warns about every declared ARG it is not given, which
+	// BuildKit does not, so those warnings are dropped from the output.
+	OptionalBuildArgs []string
 }
 
 // ImageInspect returns the inspect view of a local image.
@@ -170,6 +175,8 @@ func buildWithDockerCLI(ctx context.Context, req BuildRequest, out io.Writer) er
 	if out == nil {
 		out = io.Discard
 	}
+	out, flush := engineOutput(out, req)
+	defer flush()
 
 	args := []string{"build"}
 	for _, tag := range req.Tags {
@@ -278,6 +285,8 @@ func buildWithBuildx(ctx context.Context, req BuildRequest, out io.Writer) error
 	if out == nil {
 		out = io.Discard
 	}
+	out, flush := engineOutput(out, req)
+	defer flush()
 	normalized, err := normalizeBuildRequestPaths(req)
 	if err != nil {
 		return err

@@ -16,9 +16,9 @@ rm -f "$keyring_download"
 chmod 644 /usr/share/keyrings/githubcli-archive-keyring.gpg
 echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
     > /etc/apt/sources.list.d/github-cli.list
+# The package lists and archives live in the build's shared apt cache mounts,
+# not in this layer; cleaning them here would only throw away the cache.
 enclave_apt_get update
 enclave_apt_get install -y gh
-apt-get clean
-rm -rf /var/lib/apt/lists/*
 
 echo "GitHub CLI installed: $(gh --version | head -1)"

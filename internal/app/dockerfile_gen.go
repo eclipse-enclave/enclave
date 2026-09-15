@@ -122,13 +122,13 @@ func generateFeatureInstallBlock(features []featureInstall) string {
 		b.WriteString(dockerfileCopyInstruction(featureSource, featureTarget))
 		b.WriteString(dockerfileNormalizeExtensionTree(featureTarget))
 		if feature.HasApt {
-			b.WriteString("RUN --mount=type=cache,id=enclave-apt-cache,target=/var/cache/apt,sharing=locked \\\n")
-			b.WriteString("    --mount=type=cache,id=enclave-apt-lib,target=/var/lib/apt,sharing=locked \\\n")
+			writeRootAptCacheMounts(&b)
 			fmt.Fprintf(&b, "    FEATURES=%s /opt/enclave/build-scripts/install-feature-apt-packages.sh\n", util.ShellQuote(name))
 		}
 		if feature.HasScript {
 			if feature.NeedsRoot {
-				fmt.Fprintf(&b, "RUN FEATURES=%s \\\n", util.ShellQuote(name))
+				writeRootAptCacheMounts(&b)
+				fmt.Fprintf(&b, "    FEATURES=%s \\\n", util.ShellQuote(name))
 				b.WriteString("    ENCLAVE_FEATURE_PHASE=root \\\n")
 				b.WriteString("    /opt/enclave/build-scripts/run-feature-installs.sh\n")
 			} else {
@@ -142,7 +142,8 @@ func generateFeatureInstallBlock(features []featureInstall) string {
 		if feature.HasInstallCommands {
 			if feature.InstallCommandsNeedRoot {
 				b.WriteString("USER root\n")
-				fmt.Fprintf(&b, "RUN FEATURES=%s \\\n", util.ShellQuote(name))
+				writeRootAptCacheMounts(&b)
+				fmt.Fprintf(&b, "    FEATURES=%s \\\n", util.ShellQuote(name))
 				b.WriteString("    ENCLAVE_AGENT_USER=${USERNAME} \\\n")
 				b.WriteString("    /opt/enclave/build-scripts/install-extension-commands.sh\n")
 			} else {
@@ -172,6 +173,16 @@ const (
 	goModBuildCacheDir = buildCacheRoot + "/gomod"
 	uvBuildCacheDir    = buildCacheRoot + "/uv"
 )
+
+// writeRootAptCacheMounts emits the RUN prefix that mounts the apt caches for
+// a root-phase step. The system stage fetched the package index into the
+// enclave-apt-lib mount, so the image layers hold no lists: without the mount
+// a feature's apt-get update downloads every index again into a layer that is
+// thrown away, and its .debs bypass the archive cache.
+func writeRootAptCacheMounts(b *strings.Builder) {
+	b.WriteString("RUN --mount=type=cache,id=enclave-apt-cache,target=/var/cache/apt,sharing=locked \\\n")
+	b.WriteString("    --mount=type=cache,id=enclave-apt-lib,target=/var/lib/apt,sharing=locked \\\n")
+}
 
 // writeUserPackageCacheMounts emits the RUN prefix that mounts the npm, Go
 // module, and uv caches for a user-phase step and points the package managers

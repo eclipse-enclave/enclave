@@ -559,7 +559,7 @@ func buildImage(ctx context.Context, paths model.Paths, host model.Host, combine
 	if buildCfg.Devcontainer != nil {
 		buildArgs["DEVCONTAINER_BASE_IMAGE"] = "1"
 	}
-	forwardHostBuildEnv(buildArgs, opts.Progress)
+	forwardHostBuildEnv(buildArgs)
 	labels := map[string]string{
 		model.LabelHash:    combinedHash,
 		model.LabelVersion: model.Version,
@@ -612,38 +612,19 @@ var proxyBuildArgs = []string{
 }
 
 // forwardHostBuildEnv copies the network, mirror, and proxy settings that are
-// set in the host environment into the build args, then derives the download
-// heartbeat interval from the progress style unless the host set it.
-func forwardHostBuildEnv(buildArgs map[string]string, progress string) {
+// set in the host environment into the build args. Nothing here is derived
+// from the run: every declared ARG with a value is part of the environment of
+// the RUN steps that follow it, so a value that changes between runs rebuilds
+// the install layers instead of reusing them. In particular the download
+// heartbeat interval is not derived from --progress, which is the flag a user
+// changes to watch a build that looks stuck.
+func forwardHostBuildEnv(buildArgs map[string]string) {
 	for _, group := range [][]string{networkBuildArgs, mirrorBuildArgs, proxyBuildArgs} {
 		for _, name := range group {
 			if value := strings.TrimSpace(os.Getenv(name)); value != "" {
 				buildArgs[name] = value
 			}
 		}
-	}
-	if _, set := buildArgs[downloadProgressIntervalArg]; set {
-		return
-	}
-	if interval, ok := downloadProgressInterval(progress); ok {
-		buildArgs[downloadProgressIntervalArg] = interval
-	}
-}
-
-const downloadProgressIntervalArg = "ENCLAVE_NET_PROGRESS_INTERVAL_SECONDS"
-
-// downloadProgressInterval maps the build progress style onto the download
-// heartbeat: verbose reports every few seconds with percentage and rate,
-// quiet reports nothing (the engine discards step output anyway), and
-// compact keeps the helper's default.
-func downloadProgressInterval(progress string) (string, bool) {
-	switch {
-	case docker.BuildProgressIsVerbose(progress):
-		return "5", true
-	case docker.BuildProgressIsQuiet(progress):
-		return "0", true
-	default:
-		return "", false
 	}
 }
 

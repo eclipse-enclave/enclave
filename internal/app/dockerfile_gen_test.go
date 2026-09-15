@@ -313,7 +313,7 @@ func TestForwardHostBuildEnvCopiesOnlySetValues(t *testing.T) {
 	t.Setenv("UV_INDEX_URL", "   ")
 
 	args := map[string]string{"FEATURES": "default"}
-	forwardHostBuildEnv(args, "compact")
+	forwardHostBuildEnv(args)
 
 	want := map[string]string{
 		"FEATURES":            "default",
@@ -346,32 +346,23 @@ func TestWriteStageArgsDeclaresNetworkAndMirrorArgs(t *testing.T) {
 	}
 }
 
-func TestForwardHostBuildEnvDerivesDownloadProgressFromStyle(t *testing.T) {
-	t.Setenv(downloadProgressIntervalArg, "")
+// The heartbeat interval is a build arg, so a value that varies between runs
+// invalidates every install layer: it must come from the host environment
+// alone and never from the progress style or any other per-run state.
+func TestForwardHostBuildEnvTakesDownloadProgressOnlyFromHost(t *testing.T) {
+	const arg = "ENCLAVE_NET_PROGRESS_INTERVAL_SECONDS"
+	t.Setenv(arg, "")
 
 	args := map[string]string{}
-	forwardHostBuildEnv(args, "verbose")
-	if args[downloadProgressIntervalArg] != "5" {
-		t.Fatalf("verbose must report download progress every 5s, got %q", args[downloadProgressIntervalArg])
+	forwardHostBuildEnv(args)
+	if _, set := args[arg]; set {
+		t.Fatalf("%s must keep the helper default when the host does not set it, got %q", arg, args[arg])
 	}
 
+	t.Setenv(arg, "15")
 	args = map[string]string{}
-	forwardHostBuildEnv(args, "quiet")
-	if args[downloadProgressIntervalArg] != "0" {
-		t.Fatalf("quiet must disable the download heartbeat, got %q", args[downloadProgressIntervalArg])
-	}
-
-	args = map[string]string{}
-	forwardHostBuildEnv(args, "compact")
-	if _, set := args[downloadProgressIntervalArg]; set {
-		t.Fatal("compact must leave the helper default in place")
-	}
-
-	// An explicit host setting wins over the style.
-	t.Setenv(downloadProgressIntervalArg, "15")
-	args = map[string]string{}
-	forwardHostBuildEnv(args, "verbose")
-	if args[downloadProgressIntervalArg] != "15" {
-		t.Fatalf("host setting must win, got %q", args[downloadProgressIntervalArg])
+	forwardHostBuildEnv(args)
+	if args[arg] != "15" {
+		t.Fatalf("args[%q] = %q, want %q", arg, args[arg], "15")
 	}
 }

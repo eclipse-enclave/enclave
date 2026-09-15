@@ -36,7 +36,7 @@ Network settings (from `lib/common.sh`, forwarded by the CLI from the host envir
 - `ENCLAVE_NET_CONNECT_TIMEOUT_SECONDS` (default: `20`): `curl --connect-timeout`.
 - `ENCLAVE_NET_STALL_TIMEOUT_SECONDS` (default: `60`): abort a transfer below the speed floor for this long.
 - `ENCLAVE_NET_STALL_SPEED_BYTES` (default: `1024`): the speed floor in bytes per second.
-- `ENCLAVE_NET_PROGRESS_INTERVAL_SECONDS` (default: `30`, `0` disables; the CLI passes `5` for `--progress verbose`): interval of the download heartbeat, which reports bytes received, percentage, rate, and time left as whole lines because RUN-step output is line-oriented.
+- `ENCLAVE_NET_PROGRESS_INTERVAL_SECONDS` (default: `30`, `0` disables): interval of the download heartbeat, which reports bytes received, percentage, rate, and time left as whole lines because RUN-step output is line-oriented.
 - `ENCLAVE_NET_ATTEMPT_TIMEOUT_SECONDS` (default: `1800`, `0` disables): `timeout(1)` around each attempt of a retried executable.
 
 ## Network Helpers

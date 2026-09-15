@@ -154,20 +154,6 @@ FROM system AS tool-base
 ARG USER_ID=1000
 ARG GROUP_ID=1000
 ARG USERNAME=agent
-# Network retry and timeout settings for build-time downloads; the CLI forwards
-# ENCLAVE_NET_* from the host environment, lib/common.sh supplies the defaults.
-# GOPROXY, npm_config_registry, and UV_INDEX_URL point the package managers at
-# a mirror; HTTP(S)_PROXY are predefined build args and need no declaration.
-ARG ENCLAVE_NET_RETRIES
-ARG ENCLAVE_NET_RETRY_DELAY_SECONDS
-ARG ENCLAVE_NET_CONNECT_TIMEOUT_SECONDS
-ARG ENCLAVE_NET_STALL_TIMEOUT_SECONDS
-ARG ENCLAVE_NET_ATTEMPT_TIMEOUT_SECONDS
-ARG ENCLAVE_NET_STALL_SPEED_BYTES
-ARG ENCLAVE_NET_PROGRESS_INTERVAL_SECONDS
-ARG GOPROXY
-ARG npm_config_registry
-ARG UV_INDEX_URL
 
 USER root
 

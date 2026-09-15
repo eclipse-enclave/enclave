@@ -617,7 +617,7 @@ other feature's apt packages are present first.
 
 ### Network access from `install.sh`
 
-The build runners export two helpers from `runtime-assets/build-scripts/lib/common.sh`
+The build runners export the network helpers from `runtime-assets/build-scripts/lib/fetch.sh`
 into every extension `install.sh`: `enclave_curl` for HTTP downloads and
 `enclave_apt_get <args...>` for `apt-get update` and `install`, and
 `enclave_retry <label> -- <cmd...>` for other network-bound commands such as

@@ -31,7 +31,7 @@ var buildDNSFailurePattern = regexp.MustCompile(`(?i)(` +
 
 // buildTransientNetworkPattern matches transfers that failed or timed out
 // during a build step. Mirrors the shell-side classifier in
-// runtime-assets/build-scripts/lib/common.sh.
+// runtime-assets/build-scripts/lib/fetch.sh.
 var buildTransientNetworkPattern = regexp.MustCompile(`(?i)(` +
 	`i/o timeout` +
 	`|TLS handshake timeout` +

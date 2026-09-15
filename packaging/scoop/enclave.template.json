@@ -1,0 +1,23 @@
+{
+  "version": "@VERSION@",
+  "description": "Docker-based sandbox for running agentic coding tools. On Windows a launcher that forwards to the Linux build inside WSL2.",
+  "homepage": "https://github.com/eclipse-enclave/enclave",
+  "license": "MIT",
+  "architecture": {
+    "64bit": {
+      "url": "@BASE_URL@/enclave-windows-amd64.zip",
+      "hash": "@AMD64_HASH@"
+    },
+    "arm64": {
+      "url": "@BASE_URL@/enclave-windows-arm64.zip",
+      "hash": "@ARM64_HASH@"
+    }
+  },
+  "bin": "enclave.exe",
+  "notes": [
+    "enclave.exe is a launcher, not a native port: it forwards every argument to the Linux enclave binary inside a WSL2 distribution.",
+    "Install WSL2 and a Linux distribution (wsl --install), make Docker available inside it, then install the Linux enclave build in that distribution.",
+    "Run enclave from a directory inside the distribution, for example \\\\wsl.localhost\\Ubuntu\\home\\you\\project.",
+    "See https://github.com/eclipse-enclave/enclave/blob/main/docs/windows.md for details."
+  ]
+}

@@ -110,14 +110,22 @@ func listPSSessions(ctx context.Context, opts model.Options) ([]backend.Session,
 	if err != nil {
 		return nil, err
 	}
-	return be.List(ctx, psSessionFilterFor(opts))
+	sessions, err := be.List(ctx, psSessionFilterFor(opts))
+	if err != nil {
+		return nil, err
+	}
+	if name, given := sessionNameFilter(opts); given {
+		sessions = sessionsMatchingName(sessions, name)
+	}
+	return sessions, nil
 }
 
 // psSessionFilterFor builds the backend listing filter from the parsed ps
 // options. By default only running containers are listed; --all includes
-// stopped ones as well.
+// stopped ones as well. The session name is not part of it: names are matched
+// in sanitized form, which the backend cannot express as a label filter.
 func psSessionFilterFor(opts model.Options) backend.SessionFilter {
-	filter := backend.SessionFilter{Tool: psToolFilter(opts), SessionName: psSessionFilter(opts)}
+	filter := backend.SessionFilter{Tool: psToolFilter(opts)}
 	if opts.PSAll {
 		filter.All = true
 	} else {
@@ -129,13 +137,6 @@ func psSessionFilterFor(opts model.Options) backend.SessionFilter {
 func psToolFilter(opts model.Options) string {
 	if opts.Sources.Tool == model.SourceCLI {
 		return strings.TrimSpace(opts.Tool)
-	}
-	return ""
-}
-
-func psSessionFilter(opts model.Options) string {
-	if opts.Sources.SessionName == model.SourceCLI {
-		return strings.TrimSpace(opts.SessionName)
 	}
 	return ""
 }
@@ -302,6 +303,16 @@ func renderPSJSON(w io.Writer, sessions []backend.Session) error {
 	return enc.Encode(entries)
 }
 
+// sessionNameDisplay renders the SESSION column: the name accepted by
+// `attach`/`stop`/`theia`, or a dash for the project's default container, which
+// has no session name and is reached with `exec` instead.
+func sessionNameDisplay(sessionName string) string {
+	if trimmed := strings.TrimSpace(sessionName); trimmed != "" {
+		return trimmed
+	}
+	return "-"
+}
+
 func directoryDisplayName(worktreePath string, projectHash string) string {
 	if worktreePath != "" {
 		clean := filepath.Clean(worktreePath)
@@ -345,12 +356,13 @@ func formatPSUptime(createdAt time.Time, now time.Time) string {
 
 func renderPSTable(w io.Writer, rows []psRow) error {
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	if _, err := fmt.Fprintln(tw, "NAME\tTOOL\tDIR\tSTATUS\tUPTIME\tPORTS"); err != nil {
+	if _, err := fmt.Fprintln(tw, "NAME\tSESSION\tTOOL\tDIR\tSTATUS\tUPTIME\tPORTS"); err != nil {
 		return err
 	}
 	for _, row := range rows {
-		if _, err := fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n",
+		if _, err := fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 			row.Name,
+			sessionNameDisplay(row.SessionName),
 			row.Tool,
 			row.Directory,
 			row.Status,

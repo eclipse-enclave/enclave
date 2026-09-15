@@ -16,15 +16,19 @@ import (
 func attachCommand(res *Result) *cobra.Command {
 	var detachKeys string
 	cmd := &cobra.Command{
-		Use:   "attach <container-name>",
-		Short: "Attach to a running container",
-		Args:  cobra.ExactArgs(1),
+		Use:   "attach [container-or-session-name]",
+		Short: "Attach to a running session by container name or --name session name",
+		Args:  cobra.MaximumNArgs(1),
 		RunE: func(_ *cobra.Command, cmdArgs []string) error {
 			res.Action = "attach"
-			res.Options.CmdArgs = append(res.Options.CmdArgs, cmdArgs[0], detachKeys)
+			// Detach keys first: an omitted session argument must stay
+			// distinguishable from an empty one, which is rejected.
+			res.Options.CmdArgs = append(append(res.Options.CmdArgs, detachKeys), cmdArgs...)
 			return nil
 		},
 	}
 	cmd.Flags().StringVar(&detachKeys, "detach-keys", model.DetachKeysDefault, "Override the key sequence for detaching")
+	// --tool disambiguates a session name used by more than one tool.
+	addOptionFlagsByName(cmd.Flags(), &res.Options, &res.Sources, "tool")
 	return cmd
 }

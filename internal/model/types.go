@@ -13,6 +13,7 @@ type RunOptions struct {
 	Tool              string
 	Backend           string
 	HostConfig        string
+	SkillsValidation  string
 	HostConfigPaths   []string
 	YoloOverride      *bool
 	ConfigDefaultYolo *bool
@@ -30,6 +31,7 @@ type RunOptions struct {
 	Admin             bool
 	ImageInbox        bool
 	SessionMonitor    bool
+	SessionTint       string
 	CmdArgs           []string
 	NoHistory         bool
 	NoMemory          bool
@@ -178,6 +180,21 @@ type RunContext struct {
 	RunSources RunOptionSources
 }
 
+// NetworkLogView holds the flags of `enclave network log`. Scope flags that
+// already exist on Options (--tool, --all-running) are not duplicated here.
+type NetworkLogView struct {
+	Follow  bool
+	Summary bool
+	JSON    bool
+	// Since is a duration ("10m"), an RFC3339 timestamp, or "session".
+	Since   string
+	Verdict string
+	Domain  string
+	Type    string
+	// Session limits output to one gateway, named by its container.
+	Session string
+}
+
 type ConfigView struct {
 	// Mode selects the config output view: "matrix" (default), "effective",
 	// "diff", or "source".
@@ -260,6 +277,10 @@ type HTTPSecretReleaseConfig struct {
 	Hosts  []string `json:"hosts"`
 	Header string   `json:"header"`
 	Format string   `json:"format,omitempty"`
+	// HostsFromSecret names another secret id whose resolved value is a host.
+	// When that secret resolves, its value replaces Hosts for this release
+	// rule; see spec.yaml network.serviceAuth.hostsFromCredential.
+	HostsFromSecret string `json:"hosts_from_secret,omitempty"`
 }
 
 // ReleaseHosts returns the sorted, deduplicated HTTP release hosts declared
@@ -346,16 +367,24 @@ const (
 // a PortConfig.OpenURL.
 const PortHostPlaceholder = "{host_port}"
 
-func (p Profile) YoloEnabledValue() bool {
-	if p.YoloEnabled == nil {
+// YoloEnabledValue resolves an optional yoloEnabled flag: unset defaults to
+// true, so a bare yoloFlag is enough to bypass the agent's per-action approval
+// step.
+func YoloEnabledValue(v *bool) bool {
+	if v == nil {
 		return true
 	}
-	return *p.YoloEnabled
+	return *v
+}
+
+func (p Profile) YoloEnabledValue() bool {
+	return YoloEnabledValue(p.YoloEnabled)
 }
 
 type Extension struct {
 	Type        string   `json:"type"`
 	Name        string   `json:"name"`
+	DisplayName string   `json:"display_name,omitempty"`
 	Description string   `json:"description,omitempty"`
 	AptPackages []string `json:"apt_packages,omitempty"`
 	NeedsRoot   bool     `json:"needs_root,omitempty"`
@@ -498,6 +527,7 @@ const (
 	TemplatesDir           = "templates"
 	HomeConfigDirName      = "home-config"
 	SkillsDirName          = "skills"
+	ConfigBaseDirName      = "config-base"
 	GeneratedSkillsDirName = "skills-generated"
 	GeneratedConfigDirName = "config-generated"
 )
@@ -515,6 +545,11 @@ const (
 const (
 	HostConfigNone        = "none"
 	HostConfigPassthrough = "passthrough"
+)
+
+const (
+	SkillsValidationStrict = "strict"
+	SkillsValidationAgent  = "agent"
 )
 
 const (
@@ -577,11 +612,44 @@ const (
 )
 
 const (
-	InstallScriptFilename     = "install.sh"
+	InstallScriptFilename = "install.sh"
+	// ExtensionSourceFilename is the provenance sidecar the extension
+	// installer writes into a managed user extension directory. It is
+	// deliberately excluded from the docker build context and from the image
+	// identity hash, so re-pinning to a new commit with identical content does
+	// not force a rebuild.
+	ExtensionSourceFilename   = ".enclave-source.json"
 	CheckUpdateScriptFilename = "check-update.sh"
 	AllowlistFilename         = "gateway-allowlist.conf"
 	DefaultExtensionPriority  = 100
 )
+
+// Directories an extension may carry. entrypoint.sh runs the entrypoint
+// scripts and stages the files/ payloads at container start, so these names are
+// a contract with the shell rather than a choice this package makes;
+// TestExtensionLayoutMatchesShell pins them.
+const (
+	ExtensionFilesDir          = "files"
+	ExtensionFilesHomeDir      = "home"
+	ExtensionFilesWorkspaceDir = "workspace"
+	ExtensionGoDir             = "go"
+	ToolEntrypointDir          = "entrypoint.d"
+	FeatureEntrypointDir       = "feature-entrypoint.d"
+)
+
+// The envsubst whitelist runtime-assets/kit-init.sh applies to an initFiles
+// path: WORKDIR is bound to the project directory, while HOME and USER come
+// from the container environment. A variable outside this set is left literal,
+// so it resolves like any other path segment.
+const (
+	KitInitWorkdirVar = "WORKDIR"
+	KitInitHomeVar    = "HOME"
+	KitInitUserVar    = "USER"
+)
+
+// KitInitSubstitutedVars is the whole whitelist, in the order kit-init.sh
+// passes it to envsubst.
+var KitInitSubstitutedVars = []string{KitInitWorkdirVar, KitInitHomeVar, KitInitUserVar}
 
 const (
 	GatewayImageTagLatest        = "latest"

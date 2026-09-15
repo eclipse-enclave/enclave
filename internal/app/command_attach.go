@@ -9,31 +9,77 @@ package app
 
 import (
 	"context"
+	"strings"
 
 	"enclave/internal/backend"
+	"enclave/internal/config"
 	"enclave/internal/logx"
 	"enclave/internal/model"
+	"enclave/internal/termtint"
 )
 
-func runAttach(run model.RunOptions) int {
+func runAttach(opts model.Options, projectDir string) int {
 	if code := requireDocker(); code != 0 {
 		return code
 	}
 
-	containerName := run.CmdArgs[0]
+	run := opts.RunOptions
+	// The CLI puts the detach keys first, so that the optional session argument
+	// keeps its "not given" state.
 	detachKeys := model.DetachKeysDefault
-	if len(run.CmdArgs) > 1 && run.CmdArgs[1] != "" {
-		detachKeys = run.CmdArgs[1]
+	args := run.CmdArgs
+	if len(args) > 0 {
+		if keys := strings.TrimSpace(args[0]); keys != "" {
+			detachKeys = keys
+		}
+		args = args[1:]
 	}
 
-	be, err := selectBackend(model.Options{RunOptions: run}, dockerBackendOptions(model.Host{}, model.Paths{}, model.BuildOptions{}, run))
+	be, err := selectBackend(opts, dockerBackendOptions(model.Host{}, model.Paths{}, model.BuildOptions{}, run))
 	if err != nil {
 		logx.Errorf("%v", err)
 		return 1
 	}
-	if err := be.Attach(context.Background(), backend.SessionRef{Name: containerName}, backend.AttachIO{DetachKeys: detachKeys}); err != nil {
+	ctx := context.Background()
+	session, err := resolveSessionTarget(ctx, be, sessionTargetQuery{
+		Args:    args,
+		Tool:    sessionTargetTool(opts),
+		Project: sessionTargetProject(projectDir),
+		// Without a name, only detached sessions are picked: sharing the TTY of
+		// a foreground session means two terminals fighting over its stdin.
+		BackgroundOnly: len(args) == 0,
+	})
+	if err != nil {
+		logx.Errorf("%v", err)
+		return 1
+	}
+	restoreTint := termtint.Begin(attachSessionTint(session, run.SessionTint))
+	defer restoreTint()
+	if err := be.Attach(ctx, session.Ref, backend.AttachIO{DetachKeys: detachKeys}); err != nil {
 		logx.Errorf("attach: %v", err)
 		return 1
 	}
 	return 0
+}
+
+// attachSessionTint resolves session_tint for the session being attached rather
+// than for the ambient tool and cwd project, so attaching a codex session from
+// a shell whose default tool is claude paints the codex color. Warnings from
+// re-reading the config layers stay at debug level because the run path already
+// reports them. The fallback covers containers labeled by an older enclave that
+// recorded no tool or project dir.
+func attachSessionTint(session backend.Session, fallback string) string {
+	if session.Tool == "" || session.ProjectDir == "" {
+		return fallback
+	}
+	global, project, warnings, err := config.LoadDefaults(session.ProjectDir)
+	if err != nil {
+		logx.Debugf("resolve session_tint for %s: %v", session.Ref.Name, err)
+		return fallback
+	}
+	for _, warning := range warnings {
+		logx.Debugf("%s", warning)
+	}
+	opts, _, _ := config.ResolveOptionsForTool(model.Options{}, model.OptionSources{}, global, project, session.Tool)
+	return opts.SessionTint
 }

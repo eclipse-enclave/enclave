@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"enclave/internal/model"
@@ -57,6 +58,51 @@ func TestResolveToolFileMissing(t *testing.T) {
 	}
 	if _, ok := ResolveToolFile(paths, "missing", SpecFilename); ok {
 		t.Fatal("expected missing file")
+	}
+}
+
+// A user-global tool extension keeps its settings template in
+// ~/.config/enclave/extensions/tools/<tool>/templates/, outside the built-in
+// assets tree the runtime used to search alone.
+func TestResolveToolSettingsTemplateFindsUserExtension(t *testing.T) {
+	tmp := t.TempDir()
+	paths := model.Paths{
+		ToolsDir:     filepath.Join(tmp, "extensions", "tools"),
+		UserToolsDir: filepath.Join(tmp, ".enclave", "extensions", "tools"),
+	}
+	templatePath := filepath.Join(paths.UserToolsDir, "usertool", model.TemplatesDir, "settings.json")
+	writeTestFile(t, templatePath, `{}`)
+
+	resolved, err := ResolveToolSettingsTemplate(paths, "usertool", "usertool-settings.json")
+	if err != nil {
+		t.Fatalf("ResolveToolSettingsTemplate returned error: %v", err)
+	}
+	if resolved != templatePath {
+		t.Fatalf("expected %s, got %s", templatePath, resolved)
+	}
+}
+
+func TestResolveToolSettingsTemplateRejectsInvalidSettingsFile(t *testing.T) {
+	tmp := t.TempDir()
+	paths := model.Paths{
+		ToolsDir:     filepath.Join(tmp, "extensions", "tools"),
+		UserToolsDir: filepath.Join(tmp, ".enclave", "extensions", "tools"),
+	}
+	writeTestFile(t, filepath.Join(tmp, "host-secret.txt"), "TOP SECRET")
+
+	cases := map[string]string{
+		"settings.json":                     "must start with",
+		"usertool-":                         "missing a template name",
+		"usertool-../../../host-secret.txt": "path separator",
+	}
+	for settingsFile, wantError := range cases {
+		_, err := ResolveToolSettingsTemplate(paths, "usertool", settingsFile)
+		if err == nil {
+			t.Fatalf("expected settings_file %q to be rejected", settingsFile)
+		}
+		if !strings.Contains(err.Error(), wantError) {
+			t.Fatalf("settings_file %q: expected error containing %q, got %v", settingsFile, wantError, err)
+		}
 	}
 }
 
@@ -111,6 +157,29 @@ func TestResolveToolAndFeatureDirs(t *testing.T) {
 	}
 }
 
+// TestSourceLabel covers the builtin/user/override classification of a
+// resolved extension directory pair.
+func TestSourceLabel(t *testing.T) {
+	cases := []struct {
+		name       string
+		builtinDir string
+		userDir    string
+		want       string
+	}{
+		{"builtin only", "/builtin/foo", "", SourceBuiltin},
+		{"user only", "", "/user/foo", SourceUser},
+		{"both", "/builtin/foo", "/user/foo", SourceOverride},
+		{"neither", "", "", SourceBuiltin},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := SourceLabel(tc.builtinDir, tc.userDir); got != tc.want {
+				t.Errorf("SourceLabel(%q, %q) = %q, want %q", tc.builtinDir, tc.userDir, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestListToolsMergesAndDeduplicates(t *testing.T) {
 	tmp := t.TempDir()
 	builtinTools := filepath.Join(tmp, "extensions", "tools")
@@ -154,6 +223,23 @@ func TestListFeaturesMergesAndDeduplicates(t *testing.T) {
 	want := []string{"shared", "python-dev", "github-cli"}
 	if !reflect.DeepEqual(names, want) {
 		t.Fatalf("ListFeatures names=%v want=%v", names, want)
+	}
+}
+
+func TestListFeaturesSkipsDotDirectories(t *testing.T) {
+	tmp := t.TempDir()
+	builtinFeatures := filepath.Join(tmp, "extensions", "features")
+	userFeatures := filepath.Join(tmp, ".enclave", "extensions", "features")
+	writeTestFile(t, filepath.Join(userFeatures, "foo", SpecFilename), `{"schemaVersion":"1","kind":"mixin","name":"foo"}`)
+	writeTestFile(t, filepath.Join(userFeatures, ".incoming-1234", "foo", SpecFilename), `{"schemaVersion":"1","kind":"mixin","name":"foo"}`)
+
+	paths := model.Paths{FeaturesDir: builtinFeatures, UserFeaturesDir: userFeatures}
+	features, err := ListFeatures(paths)
+	if err != nil {
+		t.Fatalf("ListFeatures: %v", err)
+	}
+	if len(features) != 1 || features[0].Name != "foo" {
+		t.Fatalf("features = %+v, want only foo", features)
 	}
 }
 

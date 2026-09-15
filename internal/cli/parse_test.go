@@ -15,9 +15,36 @@ import (
 	"testing"
 
 	"enclave/internal/config"
+	"enclave/internal/extinstall"
 	"enclave/internal/model"
 	"enclave/internal/usercmd"
 )
+
+func TestParseSkillsValidation(t *testing.T) {
+	for _, mode := range []string{model.SkillsValidationStrict, model.SkillsValidationAgent, " STRICT ", " AGENT "} {
+		t.Run(mode, func(t *testing.T) {
+			res, err := Parse([]string{"--skills-validation", mode}, config.DefaultOptions())
+			if err != nil {
+				t.Fatal(err)
+			}
+			mode = strings.ToLower(strings.TrimSpace(mode))
+			if res.Options.SkillsValidation != mode || res.Sources.SkillsValidation != model.SourceCLI {
+				t.Fatalf("validation mode/source = %q/%v", res.Options.SkillsValidation, res.Sources.SkillsValidation)
+			}
+			global := config.Defaults{SkillsValidation: model.SkillsValidationAgent}
+			project := config.Defaults{SkillsValidation: model.SkillsValidationStrict}
+			opts, _, _ := config.ResolveOptionsForTool(res.Options, res.Sources, global, project, "")
+			if opts.SkillsValidation != mode || opts.Sources.SkillsValidation != model.SourceCLI {
+				t.Fatalf("config overrode CLI mode: %q/%v", opts.SkillsValidation, opts.Sources.SkillsValidation)
+			}
+		})
+	}
+	for _, args := range [][]string{{"--skills-validation"}, {"--skills-validation", "experimental"}, {"--skills-validation", "native"}, {"--skills-validation="}} {
+		if _, err := Parse(args, config.DefaultOptions()); err == nil {
+			t.Errorf("expected invalid option error for %v", args)
+		}
+	}
+}
 
 func TestParseRunArgsDelimiter(t *testing.T) {
 	defaults := config.DefaultOptions()
@@ -117,6 +144,39 @@ func TestParseCleanupFlags(t *testing.T) {
 	}
 }
 
+func TestParseVersionCommand(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		args     []string
+		wantJSON bool
+	}{
+		{name: "command", args: []string{"version"}},
+		{name: "JSON", args: []string{"version", "--json"}, wantJSON: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			res, err := Parse(tc.args, config.DefaultOptions())
+			if err != nil {
+				t.Fatalf("parse failed: %v", err)
+			}
+			if res.Action != "version" {
+				t.Fatalf("expected action version, got %s", res.Action)
+			}
+			if res.VersionJSON != tc.wantJSON {
+				t.Fatalf("expected JSON %v, got %v", tc.wantJSON, res.VersionJSON)
+			}
+		})
+	}
+}
+
+func TestParseVersionFlag(t *testing.T) {
+	for _, flag := range []string{"--version", "-v"} {
+		out := captureStdout(t, flag)
+		if !strings.HasPrefix(out, model.AppName+": ") || strings.Count(out, "\n") != 1 {
+			t.Fatalf("unexpected %s output %q", flag, out)
+		}
+	}
+}
+
 func TestParseUpdateCommand(t *testing.T) {
 	defaults := config.DefaultOptions()
 	res, err := Parse([]string{"update", "codex", "claude"}, defaults)
@@ -173,6 +233,28 @@ func TestParsePS(t *testing.T) {
 	}
 	if res.Sources.SessionName != model.SourceCLI {
 		t.Fatalf("expected session source CLI, got %v", res.Sources.SessionName)
+	}
+}
+
+func TestParseAttachKeepsSessionArgumentOptional(t *testing.T) {
+	defaults := config.DefaultOptions()
+	tests := []struct {
+		args []string
+		want []string
+	}{
+		{args: []string{"attach"}, want: []string{model.DetachKeysDefault}},
+		{args: []string{"attach", "my-task"}, want: []string{model.DetachKeysDefault, "my-task"}},
+		{args: []string{"attach", "--detach-keys", "ctrl-p,ctrl-q"}, want: []string{"ctrl-p,ctrl-q"}},
+	}
+
+	for _, tt := range tests {
+		res, err := Parse(tt.args, defaults)
+		if err != nil {
+			t.Fatalf("parse %v failed: %v", tt.args, err)
+		}
+		if !reflect.DeepEqual(res.Options.CmdArgs, tt.want) {
+			t.Fatalf("parse %v: CmdArgs = %v, want %v", tt.args, res.Options.CmdArgs, tt.want)
+		}
 	}
 }
 
@@ -1450,5 +1532,49 @@ func TestParseValueFlagBeforeNestedCommand(t *testing.T) {
 	}
 	if res.Options.Tool != "codex" {
 		t.Fatalf("expected tool codex, got %s", res.Options.Tool)
+	}
+}
+
+func TestParseFeaturesAdd(t *testing.T) {
+	res, err := Parse([]string{"features", "add", "acme/kits", "--ref", "v1.2.0", "--name", "foo", "--yes"}, model.Options{})
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if res.Action != ActionExtensionManage {
+		t.Fatalf("action = %q", res.Action)
+	}
+	if res.ExtRequest == nil {
+		t.Fatal("ExtRequest is nil")
+	}
+	if res.ExtRequest.Kind != model.KindFeature || res.ExtRequest.Op != extinstall.OpAdd {
+		t.Fatalf("request = %+v", *res.ExtRequest)
+	}
+	if res.ExtRequest.Source != "acme/kits" || res.ExtRequest.Ref != "v1.2.0" {
+		t.Fatalf("request = %+v", *res.ExtRequest)
+	}
+	if len(res.ExtRequest.Names) != 1 || res.ExtRequest.Names[0] != "foo" || !res.ExtRequest.Yes {
+		t.Fatalf("request = %+v", *res.ExtRequest)
+	}
+}
+
+func TestParseToolsAddRequiresSource(t *testing.T) {
+	if _, err := Parse([]string{"tools", "add"}, model.Options{}); err == nil {
+		t.Fatal("tools add without a source was accepted")
+	}
+}
+
+func TestParseFeaturesUnknownSubcommand(t *testing.T) {
+	if _, err := Parse([]string{"features", "bogus"}, model.Options{}); err == nil {
+		t.Fatal("unknown subcommand was accepted")
+	}
+}
+
+func TestParseFeaturesBareStillLists(t *testing.T) {
+	res, err := Parse([]string{"features"}, model.Options{})
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if res.Action != "features" || res.ExtRequest != nil {
+		t.Fatalf("action = %q, request = %+v", res.Action, res.ExtRequest)
 	}
 }

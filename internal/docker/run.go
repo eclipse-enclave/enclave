@@ -13,7 +13,9 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -36,6 +38,12 @@ func classifyRunError(args []string, err error, stderr string) error {
 // Run runs a container to completion, discarding its output, and returns an
 // *ExitError when the container exits non-zero.
 func Run(ctx context.Context, config *ContainerConfig, hostConfig *HostConfig, name string) error {
+	return RunWithStartHook(ctx, config, hostConfig, name, nil)
+}
+
+// RunWithStartHook runs a container to completion, discarding its output, and
+// invokes onStarted after Docker reports the named container is running.
+func RunWithStartHook(ctx context.Context, config *ContainerConfig, hostConfig *HostConfig, name string, onStarted func()) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -44,22 +52,12 @@ func Run(ctx context.Context, config *ContainerConfig, hostConfig *HostConfig, n
 	cmd := exec.CommandContext(ctx, dockerBinary, args...) // #nosec G204 -- args built from caller config, passed without a shell.
 	cmd.Stdout = io.Discard
 	cmd.Stderr = &stderr
-	return classifyRunError(args, cmd.Run(), stderr.String())
+	return classifyRunError(args, runCommandWithStartHook(ctx, name, cmd, onStarted, nil), stderr.String())
 }
 
-// RunWithIO runs a container wired to the supplied streams (no TTY) and returns
-// an *ExitError when the container exits non-zero.
-func RunWithIO(ctx context.Context, config *ContainerConfig, hostConfig *HostConfig, name string, in io.Reader, out io.Writer, errOut io.Writer) error {
-	return runWithIO(ctx, config, hostConfig, name, in, out, errOut, false)
-}
-
-// RunWithIOAndTTY runs a container wired to the supplied streams with a TTY
-// allocated and returns an *ExitError when the container exits non-zero.
-func RunWithIOAndTTY(ctx context.Context, config *ContainerConfig, hostConfig *HostConfig, name string, in io.Reader, out io.Writer, errOut io.Writer) error {
-	return runWithIO(ctx, config, hostConfig, name, in, out, errOut, true)
-}
-
-func runWithIO(ctx context.Context, config *ContainerConfig, hostConfig *HostConfig, name string, in io.Reader, out io.Writer, errOut io.Writer, tty bool) error {
+// RunWithIOAndStartHook runs a container wired to the supplied streams and
+// invokes onStarted after Docker reports the named container is running.
+func RunWithIOAndStartHook(ctx context.Context, config *ContainerConfig, hostConfig *HostConfig, name string, in io.Reader, out io.Writer, errOut io.Writer, tty bool, onStarted func()) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -69,7 +67,7 @@ func runWithIO(ctx context.Context, config *ContainerConfig, hostConfig *HostCon
 	cmd.Stdin = in
 	cmd.Stdout = out
 	cmd.Stderr = errOut
-	return classifyRunError(args, cmd.Run(), "")
+	return classifyRunError(args, runCommandWithStartHook(ctx, name, cmd, onStarted, nil), "")
 }
 
 // RunCapture runs a container and returns its trimmed stdout, surfacing stderr
@@ -96,7 +94,8 @@ func RunInteractive(ctx context.Context, config *ContainerConfig, hostConfig *Ho
 }
 
 // RunInteractiveWithStartHook runs an interactive container and invokes
-// onStarted after Docker reports the named container is running.
+// onStarted after Docker reports the named container is running. SIGINT and
+// SIGTERM sent to this process while the child runs are forwarded to it.
 func RunInteractiveWithStartHook(ctx context.Context, config *ContainerConfig, hostConfig *HostConfig, name string, onStarted func()) error {
 	if ctx == nil {
 		ctx = context.Background()
@@ -106,8 +105,21 @@ func RunInteractiveWithStartHook(ctx context.Context, config *ContainerConfig, h
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
+	child := make(chan *os.Process, 1)
+	stopRelay := relayInterrupts(child)
+	defer stopRelay()
+	return classifyRunError(args, runCommandWithStartHook(ctx, name, cmd, onStarted, child), "")
+}
+
+// runCommandWithStartHook starts cmd and invokes onStarted once the named
+// container is running. A non-nil child receives the started process, which is
+// how the interactive path gets signals relayed to the engine.
+func runCommandWithStartHook(ctx context.Context, name string, cmd *exec.Cmd, onStarted func(), child chan<- *os.Process) error {
 	if err := cmd.Start(); err != nil {
-		return classifyRunError(args, err, "")
+		return err
+	}
+	if child != nil {
+		child <- cmd.Process
 	}
 	waitCh := make(chan error, 1)
 	go func() {
@@ -115,16 +127,50 @@ func RunInteractiveWithStartHook(ctx context.Context, config *ContainerConfig, h
 	}()
 	if onStarted != nil && strings.TrimSpace(name) != "" {
 		if err, done := waitForContainerRunning(ctx, name, waitCh); done {
-			return classifyRunError(args, err, "")
+			return err
 		}
 		select {
 		case err := <-waitCh:
-			return classifyRunError(args, err, "")
+			return err
 		default:
 		}
 		onStarted()
 	}
-	return classifyRunError(args, <-waitCh, "")
+	return <-waitCh
+}
+
+// relayInterrupts forwards SIGINT and SIGTERM aimed at this process to the
+// engine child once it is known. Terminal Ctrl-C needs no help: the engine
+// keeps the TTY in raw mode and proxies it into the container. A signal sent to
+// this process directly, by a supervisor or kill, would otherwise be absorbed
+// by the caller's interrupt handling and leave the session running. The
+// signals are registered before the child starts so none is lost in between;
+// one that arrives early is delivered as soon as the child exists. The
+// returned function stops relaying.
+func relayInterrupts(child <-chan *os.Process) func() {
+	signals := make(chan os.Signal, 1)
+	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
+	done := make(chan struct{})
+	go func() {
+		var proc *os.Process
+		select {
+		case proc = <-child:
+		case <-done:
+			return
+		}
+		for {
+			select {
+			case sig := <-signals:
+				_ = proc.Signal(sig)
+			case <-done:
+				return
+			}
+		}
+	}()
+	return func() {
+		signal.Stop(signals)
+		close(done)
+	}
 }
 
 func waitForContainerRunning(ctx context.Context, name string, waitCh <-chan error) (error, bool) {
@@ -162,4 +208,10 @@ func RunDetachedInteractive(ctx context.Context, config *ContainerConfig, hostCo
 		return "", err
 	}
 	return id, nil
+}
+
+// ContainerCreate creates a container without starting it and returns its ID.
+func ContainerCreate(ctx context.Context, config *ContainerConfig, hostConfig *HostConfig, name string) (string, error) {
+	args := buildRunArgs(config, hostConfig, name, runMode{Create: true})
+	return capture(ctx, args...)
 }

@@ -177,6 +177,17 @@ func ValidateAuthName(raw string) (string, error) {
 	return name, nil
 }
 
+func applySkillsValidation(opts *model.Options, value string) error {
+	value = strings.ToLower(strings.TrimSpace(value))
+	switch value {
+	case model.SkillsValidationStrict, model.SkillsValidationAgent:
+		opts.SkillsValidation = value
+		return nil
+	default:
+		return fmt.Errorf("invalid --skills-validation: %s (use: strict|agent)", value)
+	}
+}
+
 func applyHostConfig(opts *model.Options, value string) error {
 	switch value {
 	case model.HostConfigNone, model.HostConfigPassthrough:
@@ -346,6 +357,23 @@ func applyBridgePort(opts *model.Options, value string) error {
 		return errors.New("--bridge-port requires at least one port")
 	}
 	return nil
+}
+
+// isValidTintColor reports whether value is an #rrggbb color. termtint keeps its
+// own check as a guard before emitting the escape sequence; the format is
+// checked in both places because config must not depend on the terminal
+// packages (see internal/gateway/gateway_proxy_build_inputs.txt).
+func isValidTintColor(value string) bool {
+	if len(value) != 7 || value[0] != '#' {
+		return false
+	}
+	for _, r := range value[1:] {
+		if (r >= '0' && r <= '9') || (r >= 'a' && r <= 'f') || (r >= 'A' && r <= 'F') {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func isValidEnvKey(value string) bool {

@@ -10,6 +10,7 @@ package runtime
 import (
 	"context"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -27,6 +28,7 @@ import (
 	"enclave/internal/mounts"
 	"enclave/internal/network"
 	"enclave/internal/policy"
+	"enclave/internal/termtint"
 	"enclave/internal/util"
 )
 
@@ -59,7 +61,12 @@ type Runtime struct {
 	policyResolved        bool
 	policyResult          policy.ResolveResult
 	policyErr             error
-	backend               backend.Backend
+	// releaseHostOverrides maps a secret id to the hosts that replace its
+	// declared release hosts, resolved from serviceAuth.hostsFromCredential.
+	// Populated during auth setup, before the effective policy is resolved and
+	// cached, so the replacement host reaches the allow set too.
+	releaseHostOverrides map[string][]string
+	backend              backend.Backend
 }
 
 type ExecutionContext struct {
@@ -177,6 +184,12 @@ func resolveHandler(handler model.RuntimeHandler) model.RuntimeHandler {
 }
 
 func (r *Runtime) Execute() error {
+	releaseStartLock, err := r.acquireSessionStartLock()
+	if err != nil {
+		return err
+	}
+	defer releaseStartLock()
+
 	ctx, err := r.prepareExecution()
 	if err != nil {
 		return err
@@ -184,9 +197,29 @@ func (r *Runtime) Execute() error {
 	if ctx.Cleanup != nil {
 		defer ctx.Cleanup()
 	}
+	runCtx, stop := interruptContext()
+	defer stop()
 	// The backend syncs auth files from the config store to the shared auth
 	// store after the container exits, per the request's AuthSync intent.
-	return r.runContainer(ctx)
+	return r.runContainer(runCtx, ctx, releaseStartLock)
+}
+
+func (r *Runtime) acquireSessionStartLock() (func(), error) {
+	lockPath := config.HostLockPath(r.host.Home, r.sessionStartLockName())
+	release, err := util.AcquireFileLock(lockPath, func() {
+		logx.Infof("Waiting for another enclave session to finish starting.")
+	})
+	if err != nil {
+		return nil, fmt.Errorf("acquire session start lock: %w", err)
+	}
+	return release, nil
+}
+
+// Named sessions also share the project/tool gateway config bundle, and
+// explicit numeric names can collide with automatic allocation. Keep all
+// starts in that scope serialized until the container is running.
+func (r *Runtime) sessionStartLockName() string {
+	return "session-start-" + util.HashString(r.baseContainerName()) + ".lock"
 }
 
 func (r *Runtime) prepareExecution() (*ExecutionContext, error) {
@@ -197,7 +230,7 @@ func (r *Runtime) prepareExecution() (*ExecutionContext, error) {
 		sessionContainerName := r.containerName()
 		if r.containerExists(sessionContainerName) {
 			if r.containerIsRunning(sessionContainerName) {
-				return nil, fmt.Errorf("session %s already running; stop it first with: %s stop %s", sessionContainerName, model.AppName, sessionContainerName)
+				return nil, fmt.Errorf("session %s already running; stop it first with: %s stop %s", sessionContainerName, model.AppName, r.resolvedSessionName())
 			}
 			logx.Infof("Removing stopped container: %s", sessionContainerName)
 			r.removeStoppedSession(sessionContainerName)
@@ -210,6 +243,7 @@ func (r *Runtime) prepareExecution() (*ExecutionContext, error) {
 			containerName = baseContainerName
 		}
 	}
+	r.removeStaleGateway(containerName)
 	r.setConfigVolumeSuffix(containerName, baseContainerName)
 	r.logContainerStart(containerName, baseContainerName)
 	r.warnPostStartInteractive()
@@ -272,6 +306,20 @@ func (r *Runtime) removeStoppedSession(name string) {
 		return
 	}
 	_ = r.backend.Remove(context.Background(), ref)
+}
+
+// removeStaleGateway drops a gateway sidecar left behind when an earlier start
+// of this session name was interrupted before its container existed. It must
+// run before the OAuth port check, which would otherwise fail on the ports the
+// sidecar still publishes.
+func (r *Runtime) removeStaleGateway(containerName string) {
+	remover, ok := r.backend.(backend.StaleGatewayRemover)
+	if !ok {
+		return
+	}
+	if err := remover.RemoveStaleGateway(context.Background(), containerName); err != nil {
+		logx.Warnf("Failed to check for a stale gateway of %s: %v", containerName, err)
+	}
 }
 
 func (r *Runtime) logContainerStart(containerName string, baseContainerName string) {
@@ -553,9 +601,10 @@ func secretReleases(mapping SecretMapping) []backend.SecretRelease {
 			Placeholder: entry.Placeholder,
 			Value:       entry.Value,
 			HTTP: &backend.HTTPReleaseRule{
-				Hosts:  append([]string(nil), entry.Hosts...),
-				Header: entry.Header,
-				Format: entry.Format,
+				Hosts:      append([]string(nil), entry.Hosts...),
+				Header:     entry.Header,
+				Format:     entry.Format,
+				ExactHosts: entry.ExactHosts,
 			},
 		})
 	}
@@ -748,12 +797,24 @@ func boundHostPort(bindings []backend.PortMapping, containerPort string) string 
 	return ""
 }
 
-func (r *Runtime) runContainer(ctx *ExecutionContext) error {
+func (r *Runtime) runContainer(runCtx context.Context, ctx *ExecutionContext, releaseStartLock func()) error {
 	be := r.backend
 	if be == nil {
 		return fmt.Errorf("runtime backend is not configured")
 	}
-	_, err := be.Run(context.Background(), r.backendRequest(ctx, false, true), backend.AttachIO{TTY: true, OnStarted: func() { r.announcePublishedPorts(ctx.ContainerName) }})
+	// runCtx turns SIGINT and SIGTERM into a cancelled start that returns through
+	// the deferred restore; termtint must not re-raise them and kill the process
+	// while the gateway is still being removed.
+	restoreTint := termtint.Begin(r.run.SessionTint, termtint.CallerHandles(interruptSignals...))
+	defer restoreTint()
+	// The session-start lock must be released via OnStarted, not after Run
+	// returns: Run blocks for the whole foreground session, and holding the
+	// lock that long would stall every other session start for this tool and
+	// project. The deferred release in Execute only backstops error paths.
+	_, err := be.Run(runCtx, r.backendRequest(ctx, false, true), backend.AttachIO{TTY: true, OnStarted: func() {
+		releaseStartLock()
+		r.announcePublishedPorts(ctx.ContainerName)
+	}})
 	return err
 }
 
@@ -814,6 +875,9 @@ func (r *Runtime) containerEnv(ctx *ExecutionContext, interactive bool) []string
 	return env
 }
 
+// sessionDisplayName returns the session name recorded in the session label:
+// the value the user supplied, so that consumers of the label keep seeing what
+// was typed. Lookups sanitize both sides instead of relying on the stored form.
 func (r *Runtime) sessionDisplayName(containerName string, background bool) string {
 	if background || r.run.SessionName != "" || containerName != r.baseContainerName() {
 		return r.friendlySessionName()
@@ -829,20 +893,6 @@ func (r *Runtime) containerName() string {
 	return r.baseContainerName() + "-" + r.resolvedSessionName()
 }
 
-// resolvedSessionName returns the session name to use, computing and caching it
-// on first call so that all callers within a single execution see the same value.
-func (r *Runtime) resolvedSessionName() string {
-	if r.sessionName != "" {
-		return r.sessionName
-	}
-	if r.run.SessionName != "" {
-		r.sessionName = sanitizeSessionName(r.run.SessionName)
-	} else {
-		r.sessionName = r.nextSessionName()
-	}
-	return r.sessionName
-}
-
 // friendlySessionName returns the user-facing session name: the original
 // user-supplied value when set, otherwise the auto-generated name.
 func (r *Runtime) friendlySessionName() string {
@@ -850,6 +900,20 @@ func (r *Runtime) friendlySessionName() string {
 		return r.run.SessionName
 	}
 	return r.resolvedSessionName()
+}
+
+// resolvedSessionName returns the session name to use, computing and caching it
+// on first call so that all callers within a single execution see the same value.
+func (r *Runtime) resolvedSessionName() string {
+	if r.sessionName != "" {
+		return r.sessionName
+	}
+	if r.run.SessionName != "" {
+		r.sessionName = model.SanitizeSessionName(r.run.SessionName)
+	} else {
+		r.sessionName = r.nextSessionName()
+	}
+	return r.sessionName
 }
 
 func hostPortForContainerPort(ports []string, target string) (string, bool) {
@@ -982,13 +1046,54 @@ func (r *Runtime) specProxyManaged() []string {
 func (r *Runtime) specNetworkDomains() (allowed []string, denied []string) {
 	allowed = append([]string(nil), r.profile.AllowedDomains...)
 	denied = append([]string(nil), r.profile.DeniedDomains...)
-	allowed = append(allowed, model.ReleaseHosts(r.profile.Secrets)...)
+	allowed = append(allowed, r.releaseHosts(r.profile.Secrets)...)
 	for _, feature := range r.features {
 		allowed = append(allowed, feature.AllowedDomains...)
 		denied = append(denied, feature.DeniedDomains...)
-		allowed = append(allowed, model.ReleaseHosts(feature.Secrets)...)
+		allowed = append(allowed, r.releaseHosts(feature.Secrets)...)
 	}
 	return allowed, denied
+}
+
+// releaseHosts is model.ReleaseHosts plus any host selected at runtime through
+// serviceAuth.hostsFromCredential, so that host becomes resolvable exactly like
+// a declared one. The override narrows where the token is released, not what
+// the session can reach: dropping the declared hosts here would make e.g.
+// gitlab.com unresolvable for tools whose allowlist has no other source for it.
+// The loaded spec is left untouched.
+func (r *Runtime) releaseHosts(secrets map[string]model.SecretConfig) []string {
+	if len(r.releaseHostOverrides) == 0 {
+		return model.ReleaseHosts(secrets)
+	}
+	effective := maps.Clone(secrets)
+	for id, hosts := range r.releaseHostOverrides {
+		sc, ok := effective[id]
+		if !ok || sc.Release == nil || sc.Release.HTTP == nil {
+			continue
+		}
+		release := *sc.Release
+		http := *release.HTTP
+		http.Hosts = append(append([]string{}, http.Hosts...), hosts...)
+		release.HTTP = &http
+		sc.Release = &release
+		effective[id] = sc
+	}
+	return model.ReleaseHosts(effective)
+}
+
+// setReleaseHostOverrides records the release hosts selected at runtime. The
+// effective policy unions release hosts into the allow set and is memoized, so
+// a policy resolved before this point would miss the selected host; drop the
+// memo instead of relying on call order.
+func (r *Runtime) setReleaseHostOverrides(overrides map[string][]string) {
+	r.releaseHostOverrides = overrides
+	if len(overrides) == 0 || !r.policyResolved {
+		return
+	}
+	logx.Debugf("Effective network policy was resolved before the release host overrides; recomputing it.")
+	r.policyResolved = false
+	r.policyResult = policy.ResolveResult{}
+	r.policyErr = nil
 }
 
 // addWorktreeMetadataMounts mounts the linked-worktree gitdir/commondir
@@ -1096,6 +1201,9 @@ func (r *Runtime) addSessionMonitorEnv(mounts *mountAccumulator) {
 }
 
 func (r *Runtime) addCacheMounts(mounts *mountAccumulator) {
+	pnpmStoreDir := r.containerHome + "/.local/share/pnpm/store"
+	mounts.AddEnv("PNPM_CONFIG_STORE_DIR", pnpmStoreDir)
+
 	if r.run.NoCache {
 		return
 	}

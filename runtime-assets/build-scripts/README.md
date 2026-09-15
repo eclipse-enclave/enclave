@@ -36,8 +36,8 @@ Build-time selectors:
 - `run-feature-installs.sh`: runs enabled feature `install.sh` scripts by phase and priority.
 - `install-tool-templates.sh`: aggregates `extensions/tools/*/templates/*` into `/usr/local/share/enclave/templates/`.
 - `install-agent-helper-bins.sh`: installs helper binaries into the agent user's local bin.
-- `bin/enclave-agent-npm-install`: low-level npm install helper using the private agent Node runtime.
-- `bin/enclave-install-npm-tool`: shared npm-tool installer wrapper used by simple Node-based tool installers.
+- `bin/enclave-agent-npm-install`: low-level npm install helper using the private agent Node runtime. Leading `-`-prefixed arguments are forwarded to `npm install`, separated from the package specs by `--`. Fails if a package declares a bin that did not land, which is how a missing lifecycle script surfaces.
+- `bin/enclave-install-npm-tool`: shared npm-tool installer wrapper used by simple Node-based tool installers. Takes `[npm-flag ...] <package> <binary> [label]` and forwards the flags to `enclave-agent-npm-install`. Flags must be self-contained (`--flag` or `--flag=value`); one that takes a separate value would consume the package argument.
 - `bin/enclave-install-tool`: shared tool installer entrypoint used by generated Docker stages.
 
 ## Validation

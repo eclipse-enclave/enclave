@@ -494,6 +494,49 @@ func TestBuildImageUsesExplicitBuildIdentityAndBuildxCache(t *testing.T) {
 	}
 }
 
+// A host that has never installed an extension must build straight from the app
+// root rather than stage a merged context.
+func TestPrepareBuildContextUsesAppRootWithoutUserExtensions(t *testing.T) {
+	tmp := t.TempDir()
+	appRoot := filepath.Join(tmp, "app")
+	userExtensions := filepath.Join(tmp, "home", ".config", "enclave", "extensions")
+
+	writeAppFile(t, filepath.Join(appRoot, "Dockerfile"), "FROM scratch\n", 0o644)
+	writeAppFile(t, filepath.Join(appRoot, "extensions", "tools", "claude", "spec.yaml"), "schemaVersion: \"1\"\nkind: sandbox\nname: claude\n", 0o644)
+
+	// ResolvePaths populates the user extension paths whether or not the
+	// directory exists.
+	paths := model.Paths{
+		AppRoot:           appRoot,
+		ExtensionsDir:     filepath.Join(appRoot, "extensions"),
+		ToolsDir:          filepath.Join(appRoot, "extensions", "tools"),
+		FeaturesDir:       filepath.Join(appRoot, "extensions", "features"),
+		UserExtensionsDir: userExtensions,
+		UserToolsDir:      filepath.Join(userExtensions, "tools"),
+		UserFeaturesDir:   filepath.Join(userExtensions, "features"),
+	}
+	assertPathMissing(t, userExtensions)
+
+	contextDir, cleanup, err := prepareBuildContext(paths, runtimeImageSelection{})
+	if err != nil {
+		t.Fatalf("prepareBuildContext: %v", err)
+	}
+	defer cleanup()
+	if contextDir != appRoot {
+		t.Fatalf("contextDir = %q, want the app root %q: an empty user extension root must not trigger staging", contextDir, appRoot)
+	}
+
+	writeAppFile(t, filepath.Join(userExtensions, "features", "demo", "spec.yaml"), "schemaVersion: \"1\"\nkind: mixin\nname: demo\n", 0o644)
+	stagedDir, stagedCleanup, err := prepareBuildContext(paths, runtimeImageSelection{})
+	if err != nil {
+		t.Fatalf("prepareBuildContext with user extensions: %v", err)
+	}
+	defer stagedCleanup()
+	if stagedDir == appRoot {
+		t.Fatal("expected a staged context once the user extension root exists")
+	}
+}
+
 func TestPrepareBuildContextMergesUserAndBuiltinExtensions(t *testing.T) {
 	tmp := t.TempDir()
 	appRoot := filepath.Join(tmp, "app")
@@ -1134,4 +1177,60 @@ func stubBuildxAvailable(t *testing.T, available bool) {
 	t.Cleanup(func() {
 		dockerBuildxAvailable = orig
 	})
+}
+
+func TestMemoizeToolFingerprintProbeProbesEachToolOnce(t *testing.T) {
+	calls := map[string]int{}
+	probe := memoizeToolFingerprintProbe(func(_ model.Paths, _ buildConfig, tool string) (string, bool, error) {
+		calls[tool]++
+		if tool == "broken" {
+			return "", false, errors.New("probe failed")
+		}
+		return tool + "-1.0.0", true, nil
+	})
+
+	for range 2 {
+		fingerprint, known, err := probe(model.Paths{}, buildConfig{}, "codex")
+		if err != nil || !known || fingerprint != "codex-1.0.0" {
+			t.Fatalf("probe(codex) = (%q, %v, %v), want (%q, true, nil)", fingerprint, known, err, "codex-1.0.0")
+		}
+		if _, known, err := probe(model.Paths{}, buildConfig{}, "broken"); err == nil || known {
+			t.Fatalf("probe(broken) = (known %v, error %v), want the memoized failure", known, err)
+		}
+	}
+	if calls["codex"] != 1 || calls["broken"] != 1 {
+		t.Fatalf("underlying probe calls = %v, want exactly one per tool", calls)
+	}
+}
+
+func TestPlanAgentUpdatesForToolsReusesMemoizedProbeAcrossResolves(t *testing.T) {
+	t.Setenv(model.EnvAgentUpdateIntervalHours, "24")
+	paths := writeTestCodexToolPaths(t, true)
+	home := t.TempDir()
+	writeTestAgentUpdateFingerprint(t, home, "codex", "1.2.3")
+	probeCalls := 0
+	probe := memoizeToolFingerprintProbe(func(model.Paths, buildConfig, string) (string, bool, error) {
+		probeCalls++
+		return "2.0.0", true, nil
+	})
+	resolver := func(tool string) automaticToolUpdateResult {
+		return resolveAutomaticToolUpdate(paths, buildConfig{ImageName: "enclave:test"}, home, tool, probe)
+	}
+	now := time.Date(2026, time.March, 20, 12, 0, 0, 0, time.UTC)
+
+	// The build decision resolves the plan before the image-build lock and
+	// again inside it; the stamp is only written after the build, so both
+	// resolves see the update as due.
+	for range 2 {
+		plan, err := planAgentUpdatesForTools(false, []string{"codex"}, home, now, resolver)
+		if err != nil {
+			t.Fatalf("planAgentUpdatesForTools returned error: %v", err)
+		}
+		if !plan.NeedsRebuild || plan.PendingFingerprintWrites["codex"] != "2.0.0" {
+			t.Fatalf("plan = %+v, want a queued agent update with fingerprint 2.0.0", plan)
+		}
+	}
+	if probeCalls != 1 {
+		t.Fatalf("probe calls across two resolves = %d, want 1", probeCalls)
+	}
 }

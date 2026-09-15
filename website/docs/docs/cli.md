@@ -15,6 +15,9 @@ their changes colliding, give each one its own git worktree (see
 :::info
 The CLI is still evolving, and more commands and flags are on the way. This page
 covers the core commands available today; it will grow as the surface stabilizes.
+For everything else, including session inspection, cleanup, the network and
+auth subcommands, and build flags, see the
+[CLI reference](https://github.com/eclipse-enclave/enclave/blob/main/docs/cli-reference.md).
 :::
 
 ## Overview
@@ -26,7 +29,11 @@ covers the core commands available today; it will grow as the surface stabilizes
 | `enclave continue` | Resume your previous session. |
 | `enclave ps` | List the sessions that are currently running. |
 | `enclave --background` | Start a session detached from your terminal. |
-| `enclave attach <container>` | Attach to a running session (default detach key: `Ctrl-\`). |
+| `enclave attach <name>` | Attach to a running session by session or container name (default detach key: `Ctrl-\`). |
+| `enclave network log` | Show what the session's gateway allowed and blocked. |
+| `enclave tools list` | List the available agents, built-in and installed. |
+| `enclave features list` | List the optional features you can enable. |
+| `enclave tools add <source>` | Install an agent from a git repository (same for `features`). |
 
 ## Start a session
 
@@ -67,6 +74,45 @@ Code, Codex, Theia AI, OpenCode, and more.
 enclave --tool codex
 ```
 
+## Add your own agents and features
+
+Agents and optional features ship as extensions: a directory with a `spec.yaml`
+that describes how the software is installed, how it authenticates, and which
+domains it may reach. List what you have, including anything you added yourself:
+
+```bash
+enclave tools list
+enclave features list
+```
+
+Install one from any git repository, by `owner/repo` shorthand, a full clone URL,
+or a local path:
+
+```bash
+enclave tools add acme/kits
+enclave features add ./my-kits
+```
+
+Enclave scans the repository for matching extensions and installs the one it
+finds. When there are several, it asks which one you meant, or you select with
+`--name` and take all of them with `--all`.
+
+An extension runs code when the container is built and started, so Enclave shows
+what it can do before writing anything: whether it needs root, runs an install or
+startup script, widens the network allowlist, declares credentials, or seeds
+files into your project. `--yes` skips the confirmation, never the summary.
+
+Refresh installed extensions from the source they came from, or remove them
+again:
+
+```bash
+enclave tools update            # all of them, or name the ones you want
+enclave tools remove my-agent
+```
+
+`update` refreshes the extension on your host. The image is rebuilt the next time
+you start a session that uses it.
+
 ## Resume a previous session
 
 Pick up where you left off. Auth, config, and history persist across restarts, so
@@ -85,7 +131,8 @@ choose one to inspect or resume.
 enclave ps
 ```
 
-The `NAME` column in the output is what you pass to `enclave attach`.
+Both the `NAME` (container) and `SESSION` (from `--name`) columns can be passed
+to `enclave attach`.
 
 ## Run in the background and reattach
 
@@ -99,13 +146,20 @@ enclave ps                      # find the running session's container name
 enclave attach <container>      # reattach to its TTY
 ```
 
-Combine `--background` with `--name` when you want a stable, memorable container
-name to reattach to:
+With a single detached session in the project, plain `enclave attach` picks it.
+
+Combine `--background` with `--name` when you want a stable, memorable name to
+reattach to:
 
 ```bash
 enclave --background --name my-task
 enclave attach my-task
 ```
+
+Names are resolved within the current project first, so the same `--name` can be
+used in several projects. If a name matches sessions in more than one project,
+Enclave lists the candidate container names instead of guessing; `--tool` also
+narrows them down.
 
 ### Detach without stopping the session
 
@@ -122,8 +176,37 @@ enclave attach my-task --detach-keys "ctrl-p,ctrl-q"
 Pressing `Ctrl-C` inside the session sends an interrupt to the agent instead of
 detaching, so use the detach key when you want to leave the container running.
 
+## Audit outbound network access
+
+With the default Docker backend, every outbound connection passes through the
+session's gateway, which records what it allowed and what it blocked. Read that
+log at any time, including for sessions that have already exited:
+
+```bash
+enclave network log                 # everything this project's sessions reached
+enclave network log --follow        # stream events as they happen
+enclave network log --verdict deny  # only what the gateway blocked
+enclave network log --summary       # per-domain aggregate
+```
+
+By default the log records one event per encrypted connection, not one per
+request, and only the DNS lookups that failed or were blocked. An agent
+streaming from its model API holds one long-lived connection, so it appears once
+when that connection opens and stays quiet afterwards. A short log does not mean
+a quiet session. Start the session with `--network-log=requests` to record
+every individual HTTP and HTTPS request instead:
+
+```bash
+enclave --network-log=requests
+```
+
+This makes the gateway decrypt allowlisted HTTPS traffic, so clients that pin
+certificates may fail in this mode.
+
 ## Next steps
 
 New to Enclave? Start with [Getting Started](/getting-started) to install it and
-run your first session. Deeper guides for custom skills, extra mounts, and
-per-project network allowlists are on the way.
+run your first session. To make any of these flags stick, per project or
+globally, see [Configuration](/configuration). For the complete command and
+flag list, see the
+[CLI reference](https://github.com/eclipse-enclave/enclave/blob/main/docs/cli-reference.md).

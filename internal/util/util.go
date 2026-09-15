@@ -308,6 +308,11 @@ func FileExists(path string) bool {
 	return err == nil && !info.IsDir()
 }
 
+func IsDir(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir()
+}
+
 func Dedupe[T comparable](values []T) []T {
 	if len(values) == 0 {
 		return nil

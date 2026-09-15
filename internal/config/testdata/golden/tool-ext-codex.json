@@ -1,6 +1,7 @@
 {
   "type": "sandbox",
   "name": "codex",
+  "display_name": "OpenAI Codex CLI",
   "description": "OpenAI Codex CLI",
   "default_included": true,
   "priority": 100,

@@ -75,7 +75,10 @@ func inspectContainers(ctx context.Context, ids []string) ([]InspectResponse, er
 	}
 	args := append([]string{"container", "inspect", "--format", "{{json .}}"}, ids...)
 	out, err := capture(ctx, args...)
-	results := decodeInspectResponses(out)
+	results, decodeErr := decodeInspectResponses(out)
+	if decodeErr != nil {
+		return nil, decodeErr
+	}
 	if err != nil && IsNotFound(err) {
 		return results, nil
 	}
@@ -85,17 +88,21 @@ func inspectContainers(ctx context.Context, ids []string) ([]InspectResponse, er
 	return results, nil
 }
 
-func decodeInspectResponses(out string) []InspectResponse {
+// decodeInspectResponses decodes one inspect object per line. A line that
+// does not match the schema is an error rather than a skipped container: an
+// engine emitting an unexpected field shape would otherwise look like a
+// missing container to callers.
+func decodeInspectResponses(out string) ([]InspectResponse, error) {
 	lines := splitLines(out)
 	results := make([]InspectResponse, 0, len(lines))
 	for _, line := range lines {
 		var info InspectResponse
 		if err := json.Unmarshal([]byte(line), &info); err != nil {
-			continue
+			return nil, fmt.Errorf("decode container inspect output: %w", err)
 		}
 		results = append(results, info)
 	}
-	return results
+	return results, nil
 }
 
 func summaryFromInspect(info InspectResponse) Summary {

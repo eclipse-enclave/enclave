@@ -13,8 +13,9 @@ func DefaultOptions() model.Options {
 	return model.Options{
 		RunOptions: model.RunOptions{
 			Tool:             "claude",
-			Backend:          "docker",
+			Backend:          "auto",
 			HostConfig:       model.HostConfigNone,
+			SkillsValidation: model.SkillsValidationStrict,
 			NetworkLog:       model.NetworkLogCoarse,
 			ProjectMount:     model.ProjectMountWritable,
 			WorktreeMetadata: model.WorktreeMetadataFollow,

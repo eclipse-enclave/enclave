@@ -1,6 +1,7 @@
 {
   "type": "sandbox",
   "name": "opencode",
+  "display_name": "OpenCode",
   "description": "OpenCode terminal IDE",
   "default_included": true,
   "priority": 100,

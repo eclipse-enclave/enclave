@@ -11,6 +11,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"enclave/internal/model"
 )
 
 func TestMergeDefaults(t *testing.T) {
@@ -222,5 +224,67 @@ func TestMergeToolDomains(t *testing.T) {
 	})
 	if len(ep.ToolDomains["claude"]) != 2 {
 		t.Fatalf("expected 2 tool domains after dedup, got %d: %v", len(ep.ToolDomains["claude"]), ep.ToolDomains["claude"])
+	}
+}
+
+// A user-global tool extension keeps its gateway-allowlist.conf in
+// ~/.config/enclave/extensions/tools/<tool>/, outside the content-hashed assets
+// tree. Without the user tree in the search, resolution silently fell through to
+// base.conf, which is broader than what the extension declared.
+func TestResolveToolAllowlistFindsUserExtension(t *testing.T) {
+	home := t.TempDir()
+	paths := model.Paths{
+		ToolsDir:      filepath.Join(home, "assets", "extensions", "tools"),
+		UserToolsDir:  filepath.Join(home, "config", "extensions", "tools"),
+		AllowlistsDir: filepath.Join(home, "assets", "runtime-assets", "gateway-allowlists"),
+	}
+	writeAllowlistFixture(t, filepath.Join(paths.AllowlistsDir, "base.conf"), "# base")
+	userAllowlist := filepath.Join(paths.UserToolsDir, "usertool", model.GatewayAllowlistFilename)
+	writeAllowlistFixture(t, userAllowlist, "# usertool")
+
+	if got := ResolveToolAllowlist(paths, "usertool"); got != userAllowlist {
+		t.Fatalf("expected the user extension allowlist %q, got %q", userAllowlist, got)
+	}
+}
+
+func TestResolveToolAllowlistPrefersUserExtensionOverBuiltIn(t *testing.T) {
+	home := t.TempDir()
+	paths := model.Paths{
+		ToolsDir:      filepath.Join(home, "assets", "extensions", "tools"),
+		UserToolsDir:  filepath.Join(home, "config", "extensions", "tools"),
+		AllowlistsDir: filepath.Join(home, "assets", "runtime-assets", "gateway-allowlists"),
+	}
+	writeAllowlistFixture(t, filepath.Join(paths.AllowlistsDir, "base.conf"), "# base")
+	writeAllowlistFixture(t, filepath.Join(paths.ToolsDir, "pi", model.GatewayAllowlistFilename), "# built-in")
+	userAllowlist := filepath.Join(paths.UserToolsDir, "pi", model.GatewayAllowlistFilename)
+	writeAllowlistFixture(t, userAllowlist, "# user")
+
+	if got := ResolveToolAllowlist(paths, "pi"); got != userAllowlist {
+		t.Fatalf("expected the user extension allowlist to win, got %q", got)
+	}
+}
+
+func TestResolveToolAllowlistFallsBackToBase(t *testing.T) {
+	home := t.TempDir()
+	paths := model.Paths{
+		ToolsDir:      filepath.Join(home, "assets", "extensions", "tools"),
+		UserToolsDir:  filepath.Join(home, "config", "extensions", "tools"),
+		AllowlistsDir: filepath.Join(home, "assets", "runtime-assets", "gateway-allowlists"),
+	}
+	base := filepath.Join(paths.AllowlistsDir, "base.conf")
+	writeAllowlistFixture(t, base, "# base")
+
+	if got := ResolveToolAllowlist(paths, "nosuchtool"); got != base {
+		t.Fatalf("expected the base fallback %q, got %q", base, got)
+	}
+}
+
+func writeAllowlistFixture(t *testing.T, path string, content string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("create directory for %s: %v", path, err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write %s: %v", path, err)
 	}
 }

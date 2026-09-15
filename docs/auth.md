@@ -118,6 +118,10 @@ are denied.
 
 Codex OAuth note: the OAuth callback redirects to `http://localhost:1455/auth/callback`. enclave auto-maps port 1455 when no session exists. If you need to re-login, add `-p 1455`. Gateway logs will show `Loopback proxy (socat) enabled on port 1455` when forwarding is active.
 
+Pi Anthropic OAuth note: Enclave does not auto-map the callback port. Add
+`-p 53692` when starting a Pi session in which you intend to log in with
+Anthropic OAuth.
+
 OpenCode ChatGPT subscription note: for `opencode`, complete OpenAI browser auth from the CLI inside the container rather than from `/connect` in the TUI. Use:
 
 ```bash
@@ -159,6 +163,21 @@ echo 'ANTHROPIC_API_KEY=sk-ant-readonly...' > ~/.local/state/enclave/secrets/glo
 echo 'ANTHROPIC_API_KEY=sk-ant-project...' > ~/.local/state/enclave/secrets/projects/<hash>/claude.env
 ```
 
+### Env Aliases
+
+A declared secret may list several env-var aliases for one credential, for
+example `GH_TOKEN` and `GITHUB_TOKEN`. Each alias is looked up on its own — host
+environment first, then the layered secrets files from layer 3 down to layer 1,
+then the host-side env store — and the alias found in the highest layer wins.
+Its value is injected into *every* alias of that secret and written back to the
+env store, so rotating a token in one alias is enough and a stale value in the
+env store heals after one run.
+
+If two aliases resolve from that same winning layer with different values, the
+run fails and the error names the layer — enclave cannot pick between them.
+Aliases that disagree from a lower layer are only logged, since the winning
+value overrides them anyway.
+
 ## Passing Host Environment Variables
 
 Host environment variables do **not** leak into the container unless explicitly opted in.
@@ -173,10 +192,26 @@ This can also be set persistently in `config.json` via the `pass_env` key. See [
 
 ## SSH Keys
 
-Initialize isolated SSH keys for use inside containers:
+Giving an agent an SSH key is not recommended. The key lets the agent write to systems outside the sandbox, and Enclave cannot restrict how it is used. Let the agent commit in the container, review the diff, and push from the host instead.
+
+Use `ssh-init` only for sessions that must push without host intervention:
 
 ```bash
 enclave ssh-init
 ```
 
-Keys are generated at `~/.cache/enclave/ssh/` and mounted into the container read-only.
+`ssh-init` stores keys in Enclave's host cache: `~/.cache/enclave/ssh/` by default on Linux, `$XDG_CACHE_HOME/enclave/ssh/` when set, and `~/Library/Caches/org.eclipse.enclave/ssh/` on macOS.
+
+Docker mounts this directory read-only into every session, across all projects and tools. There is no per-session opt-out. Read-only access stops the agent from changing the key files, but it can still use the key for any operation allowed by the Git provider, including force pushes and branch deletion.
+
+The generated key has no passphrase and is usable as soon as it is mounted.
+
+Scope the key before you register it:
+
+- Prefer a deploy key limited to one repository. On GitHub, use repository Settings > Deploy keys; on GitLab, use repository Settings > Repository > Deploy keys. Enable write access only if needed.
+- For access to several repositories, use a dedicated machine account with minimal membership instead of a personal account.
+- To revoke access, delete the key at the provider, then delete the host cache directory listed above.
+
+You can replace the generated keys in the same directory. Do not use a key with broader access than the session needs.
+
+Commit and tag signing are disabled inside the container (see [Persistence](persistence.md#git)), so you cannot distinguish an agent's pushes from your own by their signatures.

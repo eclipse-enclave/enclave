@@ -37,6 +37,25 @@ sandbox:
   settingsTarget: .<tool>/settings.json
 ```
 
+### Installing from npm
+
+For a tool that is a plain npm package, `install.sh` can delegate to the shared
+helper, which installs through the private agent Node runtime and verifies the
+binary landed on `PATH`:
+
+```sh
+enclave-install-npm-tool [npm-flag ...] <package> <binary> [label]
+```
+
+Leading `-`-prefixed arguments are forwarded to `npm install`, and must be
+self-contained — `--flag` or `--flag=value`. A flag that takes a separate value
+(`--omit dev`) would consume the package argument.
+
+Pass `--ignore-scripts` unless the package needs its lifecycle scripts, so
+dependency-authored code does not run at image build time. Check upstream
+first: some packages resolve a platform binary in a `postinstall` and break
+without it.
+
 ## 2) Fill in the `sandbox` block
 
 `sandbox.*` is enclave-native tool metadata. Common fields (see the README for
@@ -74,6 +93,8 @@ Secrets are split across `credentials` and `network` (see the README's
 - `network.serviceDomains` (`host -> service-id`) + `network.serviceAuth.<id>`
   (`headerName`, optional `valueFormat` with a Go `fmt`-style `%s`): how the
   gateway injects the credential as an HTTP header when proxying to those hosts.
+  Every service-id in `serviceDomains` needs a `serviceAuth` entry; hosts that
+  only need to be reachable belong under `network.allowedDomains`.
 - `providers[]`: enclave-native auth provider — `name`, `credentials` (a list
   of `credentials.sources` keys), `authFiles` (relative to `sandbox.configDir`),
   `authSession` (`mode: any|all` + `checks`), `oauthPorts`, and

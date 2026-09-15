@@ -25,6 +25,12 @@ type SecretReleaseEntry struct {
 	Hosts       []string `json:"hosts"`
 	Header      string   `json:"header"`
 	Format      string   `json:"format,omitempty"`
+	// ExactHosts matches Hosts by equality instead of the allowlist rule where
+	// a bare pattern also covers its subdomains. Set for hosts selected at
+	// runtime through serviceAuth.hostsFromCredential: that value names one
+	// instance the token belongs to, so releasing it to every host beneath it
+	// would widen exactly what naming the instance is meant to narrow.
+	ExactHosts bool `json:"exact_hosts,omitempty"`
 }
 
 func (s AuthState) HasAnyEnvCredential() bool {

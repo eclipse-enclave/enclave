@@ -84,7 +84,7 @@ func (r EffectiveResolver) Resolve(input ResolveInput) (ResolveResult, error) {
 		}
 	}
 
-	allowlistPath := network.ResolveToolAllowlist(r.paths.ToolsDir, r.paths.AllowlistsDir, tool)
+	allowlistPath := network.ResolveToolAllowlist(r.paths, tool)
 	allowlistPath = config.ResolveAllowlistPath(tool, r.home, projectHash, allowlistPath)
 
 	// Load from the tool's spec when the caller left either nil (see

@@ -6,6 +6,10 @@ enclave [FLAGS] [COMMAND]
 
 With no command, starts a new agent session (`run` is implicit).
 
+On Windows, `enclave.exe` forwards every argument to the Linux binary inside a
+WSL2 distribution and parses none of them itself, so everything below applies
+unchanged. See [windows.md](windows.md).
+
 ## Commands
 
 ### Session
@@ -18,30 +22,84 @@ With no command, starts a new agent session (`run` is implicit).
 | `enclave resume` | Session picker/list when supported (falls back to `continue`) |
 | `enclave ps` | List enclave containers (`--all` includes stopped, `--json` emits structured output) |
 | `enclave status` | Show terminal snapshots of running sessions |
-| `enclave attach <container>` | Attach to a named background session |
+| `enclave attach [name]` | Attach to a background session by session name or container name |
 | `enclave exec` | Attach to a running container |
 | `enclave exec --admin` | Attach with limited sudo (apt/dpkg) |
 | `enclave shell` | Open an interactive shell in the container |
 | `enclave shell --admin` | Shell with limited sudo |
-| `enclave stop` | Stop background containers |
+| `enclave stop [name]` | Stop background containers, or one session by name |
 
-`enclave ps` flags: `--all` (include stopped containers, not just running ones), `--json` (emit a JSON array instead of the table). The flags compose (`ps --all --json`). Each JSON object has the fields `name`, `tool`, `projectDir` (absolute, resolved project path), `projectHash`, `worktree`, `status`, `createdAt` (RFC 3339, empty if unknown), `sessionName`, `background`, and `ports` (array of `{containerPort, hostPort, hostIP, protocol}` bindings).
+`enclave ps` prints one row per container with its `NAME` (container name) and `SESSION` (the `--name` session name, or the auto-assigned `1`, `2`, … for extra sessions; `-` for the project's default container); either can be passed to `attach`, `stop`, and `theia`. Flags: `--all` (include stopped containers, not just running ones), `--json` (emit a JSON array instead of the table). The flags compose (`ps --all --json`). Each JSON object has the fields `name`, `tool`, `projectDir` (absolute, resolved project path), `projectHash`, `worktree`, `status`, `createdAt` (RFC 3339, empty if unknown), `sessionName`, `background`, and `ports` (array of `{containerPort, hostPort, hostIP, protocol}` bindings).
 
 `status` reports sessions of the current project (like `exec`); `--all` widens it to every project. Flags: `--tool` and `--name` filter sessions; `--json` emits one machine-readable snapshot object per session (screen text and OSC title for external state detection). Each snapshot captures the trailing 24 screen rows. See [Session status snapshots](session-status.md).
 
-`enclave attach` flags: `--detach-keys <sequence>` overrides the key sequence for detaching from the session (default `ctrl-\`).
+`enclave attach` flags: `--detach-keys <sequence>` overrides the key sequence for detaching from the session (default `ctrl-\`); `--tool` disambiguates a session name used by more than one tool.
+
+`attach`, `stop <name>`, and `theia`/`theia-next` accept the container name from
+`enclave ps`, a container ID, or the session name passed to `--name`
+(`enclave --background --name my-task` → `enclave attach my-task`). Session
+names are matched in sanitized form on both sides (lowercased,
+non-alphanumerics collapsed to `-`, truncated to 32 characters), so a session
+started as `--name "My Task"` is reachable as either `my-task` or `"My Task"`.
+The same holds for the `--name` filter of `ps`, `status`, and `stop`; a `--name`
+that is blank or sanitizes to nothing matches no session rather than all of
+them.
+
+Session names are resolved against the current project first (same worktree,
+then same project); they are not required to be unique, so when one matches
+several containers the candidates are listed and a container name must be passed
+instead. `--tool` narrows the candidates. Passing a container name or ID always
+resolves verbatim, independently of the working directory and `--tool`; an
+ambiguous container-ID prefix is reported like an ambiguous name.
+
+`attach` and `theia` widen the search to all projects when the current one has
+no match. `stop` never does, neither for `stop <name>` nor for `stop --name`:
+removal is destructive and the auto-assigned names `1`, `2`, … collide across
+projects by construction, so another project's session has to be named by its
+container name or ID.
+
+`stop <name>` and `stop --name <name>` still select differently. The positional
+form removes exactly the one session it resolves, of any tool unless `--tool` is
+passed. `--name` filters the batch form instead: it removes every *background*
+session of the current project whose name matches, for the single tool that the
+options resolve to (so a profile or config `tool` applies as well). Both include
+containers that have already exited.
+
+With no argument, `attach` picks the single detached session of the current
+project (a foreground session is entered with `exec` instead), and `theia` picks
+the single running container of the current project. An argument that is present
+but blank (`enclave stop "$SESSION"` with an unset variable) is rejected instead
+of being treated as "no argument".
+
+Ctrl-C or SIGTERM while a session is still starting aborts the start with exit code 130 and removes what it created, including the gateway sidecar. A sidecar that an interrupted start nevertheless left behind (for example after a `kill -9`) is removed automatically the next time a session of the same name starts. Once the session is attached, Ctrl-C goes to the tool. SIGINT or SIGTERM sent to the enclave process itself (for example by a supervisor) is forwarded to the engine, which delivers it to the tool; the session then exits with the tool's status and the usual cleanup runs.
 
 ### Inspect
 
 | Command | Description |
 |---------|-------------|
 | `enclave info` | Show configuration and image details |
+| `enclave version`, `enclave --version` | Show the binary version, source commit, and commit date |
 | `enclave config` | Show configuration values |
-| `enclave tools` | List available tool profiles |
-| `enclave features` | List available feature extensions |
+| `enclave tools` | List available tool profiles (`list\|add\|remove\|update` manage installed tool extensions; see below) |
+| `enclave features` | List available feature extensions (`list\|add\|remove\|update` manage installed feature extensions; see below) |
 | `enclave completion <shell>` | Generate shell completion |
 
+`enclave version` prints one line suitable for bug reports; `--json` emits the version, commit, and date as an object. Builds from modified source append `-dirty` to the commit; unavailable values are reported as `unknown`.
+
 `enclave config` flags: `--view <mode>` selects the output view — `matrix` (default), `source` (where each value comes from), `diff` (values overridden by higher precedence), or `effective` (effective values only); `--json` emits JSON output.
+
+### Extensions
+
+`enclave tools` and `enclave features` (bare) are aliases for their `list` subcommand. Every verb below exists for both `enclave tools <verb>` and `enclave features <verb>`; see [Installing Extensions](extensions/installing.md) for the full behavior.
+
+| Command | Flags |
+|---------|-------|
+| `list` | `--json` (machine-readable output) |
+| `add <source>` | `--path <dir>`, `--ref <ref>`, `--name <name>` (repeatable), `--all`, `--yes`/`-y`, `--force`, `--dry-run`, `--json` (requires `--yes`) |
+| `update [<name>...]` | `--ref <ref>` (single extension only), `--yes`/`-y`, `--force`, `--dry-run`, `--json` (requires `--yes`) |
+| `remove <name>...` | `--yes`/`-y`, `--force`, `--json` (requires `--yes`) |
+
+`enclave features update`/`enclave tools update` refresh installed extension **sources**; they are unrelated to the top-level `enclave update`, which rebuilds container **images**.
 
 ### IDE
 
@@ -72,8 +130,26 @@ in one step, printing the container name so you can reattach later with
 | `enclave network remove-domain <domain> --global` | Remove a domain |
 | `enclave network set-mode restricted\|unrestricted --global` | Set network mode |
 | `enclave network apply` | Apply policy to running gateways |
+| `enclave network log` | Show gateway network audit events |
 
 Network mutation commands are global-only today. `--project` scope is planned but not yet supported.
+
+`network log` reads the gateway audit log of the current project and tool, including sessions that have already exited:
+
+| Flag | Description |
+|------|-------------|
+| `-f`, `--follow` | Stream new events as they arrive |
+| `--summary` | Show a per-domain aggregate instead of rows |
+| `--json` | Emit JSON: the raw JSONL event stream, or a single aggregate object with `--summary` (the integration contract) |
+| `--since <dur\|ts>` | Only events since a duration (`10m`), an RFC3339 timestamp, or `session` (which also scopes the output to that session) |
+| `--verdict <pass\|deny>` | Filter by verdict |
+| `--domain <glob>` | Filter by domain pattern (`example.com` or `*.example.com`) |
+| `--type <dns\|http\|tcp>` | Filter by event type |
+| `--tool <tool>` | Read another tool's log |
+| `--session <name>` | Read one session's events, named by its container (an exited session too) |
+| `--all-running` | Merge the logs of all running gateways on the host |
+
+`--follow` and `--summary` are mutually exclusive, and `--since session` needs a scope covering exactly one session, so it cannot be combined with `--all-running`. See [Networking](networking.md#reading-the-network-log) for the output format and [Coverage and granularity](networking.md#coverage-and-granularity) for what the log does and does not record.
 
 Mutation commands (`add-domain`, `remove-domain`, `set-mode`) apply the new policy to running gateways by default. Use `--no-apply` to persist only, or `--all-running` to target every running gateway on the host (rather than just the current project/tool). By default the runtime apply targets the selected tool's gateway; pass `--tool <tool>` to target a different tool. `network apply` accepts `--tool` and `--all-running`.
 
@@ -83,7 +159,7 @@ Mutation commands (`add-domain`, `remove-domain`, `set-mode`) apply the new poli
 |---------|-------------|
 | `enclave auth import --tool <tool>` | Copy host auth files into the auth store |
 | `enclave auth export --tool <tool>` | Copy auth store files back to the host |
-| `enclave ssh-init` | Initialize isolated SSH keys at `~/.cache/enclave/ssh/` |
+| `enclave ssh-init` | Initialize isolated SSH keys at `~/.cache/enclave/ssh/`. Not recommended: the key lets the agent push to your Git provider. See [SSH keys](auth.md#ssh-keys) |
 
 ### Images
 
@@ -127,7 +203,7 @@ Mutation commands (`add-domain`, `remove-domain`, `set-mode`) apply the new poli
 | Flag | Description |
 |------|-------------|
 | `--tool <tool>` | Tool profile to use (`claude` by default; run `enclave tools` for the installed list) |
-| `--backend <backend>` | Isolation backend: `docker` (default) or experimental `qemu` |
+| `--backend <backend>` | Isolation backend: `auto` (default: docker or podman, whichever is installed), `docker`, `podman`, or experimental `qemu` |
 | `--name <name>` | Named persistent session |
 | `--background` | Detached background session |
 | `-p <port>` | Publish a container port to the host (container → host, e.g. `-p 3002`). A host port of `0` (e.g. `-p 0:3000`) lets the daemon pick a free host port (Docker only); read it back with `enclave ps --json`. |
@@ -139,6 +215,7 @@ Mutation commands (`add-domain`, `remove-domain`, `set-mode`) apply the new poli
 | `--yolo` | Enable YOLO mode explicitly |
 | `--no-yolo` | Disable YOLO mode (agents will prompt for confirmation) |
 | `--host-config <none\|passthrough>` | Reuse reviewed paths from the host tool config |
+| `--skills-validation <strict\|agent>` | Validate shared skill frontmatter strictly (default) or leave metadata interpretation to the agent; values are case-insensitive |
 | `--session-monitor` | Run the agent under the managed tmux session (enables `status` snapshots) |
 | `--verbose` | Verbose logging |
 | `--playwright-mcp` | Enable Playwright MCP server for browser automation (Claude only) |
@@ -184,7 +261,7 @@ Mutation commands (`add-domain`, `remove-domain`, `set-mode`) apply the new poli
 |------|-------------|
 | `--allow-all-network` | Disable network restrictions |
 | `--allow-domain <domain>` | Add a domain to the gateway allowlist for this run only (repeatable, no persistence) |
-| `--network-log <coarse\|requests>` | Network audit mode. `coarse` (default) logs pass/deny events; `requests` forces HTTPS MITM for allowlisted hosts and emits request-level HTTP/HTTPS audit events |
+| `--network-log <coarse\|requests>` | Network audit mode. `coarse` (default) logs one pass/deny event per TLS connection, plus per-request events for plaintext HTTP and for hosts the gateway already MITMs for secret release; `requests` forces HTTPS MITM for all allowlisted hosts and emits an audit event per HTTP/HTTPS request. See [Coverage and granularity](networking.md#coverage-and-granularity) |
 
 ### Persistence
 
@@ -209,8 +286,22 @@ Mutation commands (`add-domain`, `remove-domain`, `set-mode`) apply the new poli
 
 Persistent defaults can be set in `~/.config/enclave/config.json` (global) or `~/.config/enclave/projects/<hash>/config.json` (per-project). See [Configuration](configuration.md).
 
+## Backend detection
+
+The default backend is `auto`: enclave uses docker when its CLI is on `PATH`, otherwise podman. A `docker` command that is really the `podman-docker` shim counts as podman, and an explicit `docker`, from `--backend` or the `backend` key, that turns out to be the shim is driven as podman as well, with a notice. When both engines are installed, a command that uses an engine asks once which one to use and saves the answer as `"backend"` in `~/.config/enclave/config.json`. The question is only asked when stdin, stdout, and stderr are terminals and no `--json` or `--yes` was given; otherwise (scripts, captured output, JSON consumers) docker is used and a notice points at that key. Commands that never touch an engine (`tools`, `features`, `config`, `review-target`, `network print`, `network diff`, `devcontainer generate`) neither detect nor ask. When neither engine is found, the engine check reports it. An explicit `--backend` or a configured `backend` disables detection.
+
+## Podman backend
+
+`--backend podman` drives the Docker backend through podman's Docker-compatible CLI (`podman` on `PATH`; rootless is the tested configuration). Everything the Docker backend does applies unchanged — image builds via buildah, the gateway sidecar with restricted egress, detached sessions, `exec`/`attach`, persistent stores — with a few engine-specific adjustments: the gateway sidecar runs as root inside a `--userns=keep-id` user namespace, auth-reconcile containers run with `--userns=keep-id`, and the session container joins the gateway's user namespace (`--userns=container:<gateway>`) alongside its network namespace, so the container user keeps the host user's UID/GID on bind-mounted stores under rootless podman while sharing one user namespace with the network stack it joins (a separate keep-id namespace cannot mount `/sys` in a network namespace it does not own, which fails container creation under runc; crun masks this by bind-mounting the host `/sys`); image builds rely on podman's local layer cache instead of Docker's `--cache-from`/inline-cache flags, and `--buildx-cache-dir`, `--buildx-cache-from`, and `--buildx-cache-to` are ignored with a warning because podman has no buildx cache import or export; and the rendered Dockerfile drops the npm/Go/uv build caches mounted under the agent home, because buildah commits the parent directories of such cache mounts as root-owned, which would leave the agent unable to write its home (apt caches and layer caching still apply, so only cold rebuilds of feature and tool installs are slower). Devcontainer mode is only verified with Docker and stays rejected for `podman`. Images carry the same tags as under Docker (podman stores them as `localhost/enclave-<tool>:...`). Container inspection accepts both podman 4.x output, which renders `Entrypoint` as one string, and the Docker-shaped arrays of podman 5. The gateway base images are fully qualified (`docker.io/library/...`) and digest-pinned, and the digest-pinned `debian` and `node` base images of the tool image bypass short-name resolution, so hosts without `unqualified-search-registries` or registry aliases in `registries.conf` build both images; a custom `--base-image` given as a bare short name still needs an alias or search registry there.
+
+Rootless podman without idmapped-mount support has to copy an image into a layer for the keep-id mapping the first time that image starts, and again after every image rebuild. enclave triggers this copy before the gateway starts and prints a notice when it takes longer than two seconds; for multi-gigabyte tool images it takes minutes, during which podman blocks every other podman command, including `enclave ps`.
+
+`--backend` is a session flag; commands without it (`ps`, `stop`, `attach`, `status`, `cleanup`, `network`) resolve the backend the same way, from the `backend` key in `config.json` or by detection, so a saved or detected `podman` applies to them too. `cleanup --build-cache` reports nothing to reclaim under podman, which keeps no separate build cache.
+
 ## Experimental QEMU backend
 
 `--backend qemu` runs a foreground session in a minimal Alpine microVM bundle. It implies `--allow-all-network` and `--slim` automatically (and prints a notice that network isolation is unavailable), so you don't have to pass them; requesting something it can't honor — `--features`/`--playwright-mcp` or `--allow-domain` — is rejected. Detached sessions, `exec`, `attach`, restricted egress, HTTP secret release, devcontainers, and non-default feature stacks are not supported yet. The bundle builder uses Docker as a packaging helper; the session itself runs under QEMU. A prebuilt bundle can be used without Docker via `--no-rebuild --image-name /path/to/bundle`. Tool installers that assume Debian/glibc may fail until they get dedicated microVM support.
+
+The backend is x86-64 only: it requires `qemu-system-x86_64` on the host and the bundle builder produces an x86-64 Alpine rootfs (`--platform linux/amd64`, `apk --arch x86_64`) regardless of host architecture. QEMU is launched with `-machine microvm,accel=kvm:tcg`, so only x86-64 Linux hosts get KVM acceleration; on arm64 hosts and on macOS the guest runs under TCG emulation and is correspondingly slow. There is no arm64 guest bundle. Use the default `docker` backend on those hosts.
 
 QEMU sessions use the same persistent stores as Docker sessions (host directories under `~/.local/state/enclave/`): auth credentials, tool config, and persisted env are shared per tool/project, so you can switch between `--backend docker` and `--backend qemu` without re-authenticating.

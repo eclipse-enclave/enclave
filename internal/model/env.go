@@ -38,6 +38,7 @@ const (
 	EnvSecretReleaseFile        = EnvPrefix + "SECRET_RELEASE_FILE"
 	EnvGatewayTLSRoot           = EnvPrefix + "GATEWAY_TLS_ROOT"
 	EnvGatewayProxyReadyFile    = EnvPrefix + "GATEWAY_PROXY_READY_FILE"
+	EnvGatewaySession           = EnvPrefix + "GATEWAY_SESSION"
 	EnvGatewayCACertPath        = EnvPrefix + "GATEWAY_CA_CERT_PATH"
 	EnvImageInbox               = EnvPrefix + "IMAGE_INBOX"
 	EnvBin                      = EnvPrefix + "BIN"

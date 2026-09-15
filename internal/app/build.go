@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -68,6 +69,22 @@ func (p runtimeImageBuildPlan) NeedsRebuild() bool {
 	return p.StructuralRebuild || p.AgentUpdates.NeedsRebuild
 }
 
+func coordinateRuntimeImageBuild(home string, imageName string, forceRebuild bool, resolveBuildPlan func() (runtimeImageBuildPlan, error), executeBuildPlan func(runtimeImageBuildPlan) error) error {
+	release, err := config.AcquireImageBuildLock(home, imageName)
+	if err != nil {
+		return err
+	}
+	defer release()
+	buildPlan, err := resolveBuildPlan()
+	if err != nil {
+		return err
+	}
+	if !forceRebuild && !buildPlan.NeedsRebuild() {
+		return nil
+	}
+	return executeBuildPlan(buildPlan)
+}
+
 var (
 	dockerBuildImage       = docker.Build
 	dockerImageExists      = docker.ImageExists
@@ -120,6 +137,46 @@ func inspectImageInfo(imageName string) imageInfo {
 
 var dockerPing = docker.Ping
 
+// renderEngineDockerfile renders the Dockerfile for the selected tools and
+// features and adapts it to the container engine in use. Both the rebuild
+// hash and the build itself go through it so they see identical content.
+func renderEngineDockerfile(templatePath string, tools []string, features []featureInstall, stamps map[string]string, forceTools map[string]bool) (string, error) {
+	content, err := renderDockerfile(templatePath, tools, features, stamps, forceTools)
+	if err != nil {
+		return "", err
+	}
+	if docker.IsPodman() {
+		content = stripHomeCacheMounts(content)
+	}
+	return content, nil
+}
+
+// homeCacheMountPattern matches one `--mount=type=cache,...` RUN flag whose
+// target lies under the agent home.
+var homeCacheMountPattern = regexp.MustCompile(`--mount=type=cache,[^\s\\]*target=/home/[^\s\\]*`)
+
+// stripHomeCacheMounts removes cache mounts targeting the agent home from RUN
+// steps. buildah (podman build) commits the ancestors of such mount targets
+// as root-owned 0755 directories whenever the step modified them, which
+// leaves the agent unable to write its own home; the caches only speed up
+// rebuilds, and buildah's layer cache still applies. Continuation lines left
+// with nothing but a backslash are dropped.
+func stripHomeCacheMounts(dockerfile string) string {
+	if !strings.Contains(dockerfile, "target=/home/") {
+		return dockerfile
+	}
+	lines := strings.Split(dockerfile, "\n")
+	out := make([]string, 0, len(lines))
+	for _, line := range lines {
+		stripped := homeCacheMountPattern.ReplaceAllString(line, "")
+		if stripped != line && strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(stripped), "\\")) == "" {
+			continue
+		}
+		out = append(out, stripped)
+	}
+	return strings.Join(out, "\n")
+}
+
 // checkDocker distinguishes the common connectivity failures so users are not
 // sent chasing a stopped daemon when the CLI is missing or socket access is
 // denied.
@@ -128,10 +185,14 @@ func checkDocker() error {
 	switch {
 	case err == nil:
 		return nil
+	case docker.IsCLIUnavailable(err) && docker.IsPodman():
+		return fmt.Errorf("podman CLI not found on PATH; install Podman and retry")
 	case docker.IsCLIUnavailable(err):
-		return fmt.Errorf("docker CLI not found on PATH; install Docker and retry")
+		return fmt.Errorf("docker CLI not found on PATH; install Docker or Podman and retry")
 	case docker.IsSocketPermissionDenied(err):
 		return fmt.Errorf("cannot access the Docker socket: permission denied. Grant this user access to Docker (commonly by adding it to the docker group and logging in again; see https://docs.docker.com/engine/install/linux-postinstall/), then retry")
+	case docker.IsPodman():
+		return fmt.Errorf("podman is not usable: %w", err)
 	default:
 		return fmt.Errorf("docker daemon is not reachable: %w", err)
 	}
@@ -172,7 +233,7 @@ func resolveHost() (model.Host, error) {
 }
 
 func prepareBuildContext(paths model.Paths, selection runtimeImageSelection) (contextDir string, cleanup func(), err error) {
-	if paths.UserExtensionsDir == "" && selection.Tools == nil && selection.Features == nil {
+	if !config.HasUserExtensions(paths) && selection.Tools == nil && selection.Features == nil {
 		return paths.AppRoot, func() {}, nil
 	}
 
@@ -344,6 +405,10 @@ func overlayFilesFromDir(files map[string]mergedExtensionFile, relPrefix string,
 		if err != nil {
 			return err
 		}
+		if !d.IsDir() && rel == model.ExtensionSourceFilename {
+			// Installer provenance: never part of the image or its identity.
+			return nil
+		}
 		if skipTop != nil {
 			top := rel
 			if idx := strings.IndexRune(rel, filepath.Separator); idx >= 0 {
@@ -391,7 +456,7 @@ func needsRebuildForSelection(paths model.Paths, buildCfg buildConfig, selection
 	if err != nil {
 		return false, "", err
 	}
-	dockerfileContent, err := renderDockerfile(paths.Dockerfile, selection.Tools, featureInstalls, nil, nil)
+	dockerfileContent, err := renderEngineDockerfile(paths.Dockerfile, selection.Tools, featureInstalls, nil, nil)
 	if err != nil {
 		return false, "", err
 	}
@@ -428,7 +493,7 @@ func needsRebuildForSelection(paths model.Paths, buildCfg buildConfig, selection
 	return false, combinedHash, nil
 }
 
-func resolveRuntimeImageBuildPlan(paths model.Paths, buildCfg buildConfig, opts model.BuildOptions, tool string, home string, forceAll bool, now time.Time) (runtimeImageBuildPlan, error) {
+func resolveRuntimeImageBuildPlan(paths model.Paths, buildCfg buildConfig, opts model.BuildOptions, tool string, home string, forceAll bool, now time.Time, probe toolFingerprintProbe) (runtimeImageBuildPlan, error) {
 	selection, err := resolveRuntimeImageSelection(paths, opts, tool)
 	if err != nil {
 		return runtimeImageBuildPlan{}, err
@@ -438,7 +503,7 @@ func resolveRuntimeImageBuildPlan(paths model.Paths, buildCfg buildConfig, opts 
 		return runtimeImageBuildPlan{}, err
 	}
 	resolver := func(tool string) automaticToolUpdateResult {
-		return resolveAutomaticToolUpdate(paths, buildCfg, home, tool, nil)
+		return resolveAutomaticToolUpdate(paths, buildCfg, home, tool, probe)
 	}
 	agentUpdates, err := planAgentUpdatesForTools(forceAll, selection.Tools, home, now, resolver)
 	if err != nil {
@@ -483,7 +548,7 @@ func buildImage(ctx context.Context, paths model.Paths, host model.Host, combine
 	if err != nil {
 		return err
 	}
-	dockerfileContent, err := renderDockerfile(paths.Dockerfile, updates.Tools, featureInstalls, updates.Stamps, updates.ForceTools)
+	dockerfileContent, err := renderEngineDockerfile(paths.Dockerfile, updates.Tools, featureInstalls, updates.Stamps, updates.ForceTools)
 	if err != nil {
 		return err
 	}
@@ -531,7 +596,7 @@ func buildImage(ctx context.Context, paths model.Paths, host model.Host, combine
 		model.LabelBuilt:   buildTimestamp,
 	}
 
-	buildxCacheTo, err := resolveBuildxCacheTo(opts)
+	buildxCacheFrom, buildxCacheTo, err := resolveBuildxCache(opts)
 	if err != nil {
 		return fmt.Errorf("prepare buildx cache directory: %w", err)
 	}
@@ -545,7 +610,7 @@ func buildImage(ctx context.Context, paths model.Paths, host model.Host, combine
 		BuildArgs:         buildArgs,
 		Labels:            labels,
 		CacheFrom:         cacheFrom,
-		BuildxCacheFrom:   resolveBuildxCacheFrom(opts),
+		BuildxCacheFrom:   buildxCacheFrom,
 		BuildxCacheTo:     buildxCacheTo,
 		Progress:          opts.Progress,
 	}
@@ -745,7 +810,7 @@ func resolveFeatureInstalls(paths model.Paths, selected []string, warnConflicts 
 // which forces the feature's declarative install into the root build phase.
 func anyRootInstallUser(users []string) bool {
 	for _, u := range users {
-		if u == "0" || u == "root" {
+		if config.IsRootInstallUser(u) {
 			return true
 		}
 	}
@@ -816,7 +881,7 @@ func devcontainerFeatureSelectionMessage(features string) string {
 }
 
 // planAgentUpdatesForTools decides, per tool, whether the agent CLI install
-// must be refreshed. With forceAll set (the `update` command), every tool is
+// must be refreshed. With forceAll set (`update` or `--rebuild`), every tool is
 // force-updated; otherwise each tool is refreshed only when its update interval
 // has elapsed and an online probe reports a changed upstream fingerprint.
 func planAgentUpdatesForTools(forceAll bool, tools []string, home string, now time.Time, resolveAutomatic automaticToolUpdateResolver) (agentUpdatePlan, error) {
@@ -957,7 +1022,7 @@ func queueAgentUpdate(plan *agentUpdatePlan, tool string, stamp string, force bo
 }
 
 func resolveAutomaticToolUpdate(paths model.Paths, buildCfg buildConfig, home string, tool string, probe toolFingerprintProbe) automaticToolUpdateResult {
-	if _, found := config.ResolveToolFile(paths, tool, model.CheckUpdateScriptFilename); !found {
+	if _, found := config.ResolveUpdateProbe(paths, tool); !found {
 		return automaticToolUpdateResult{}
 	}
 	if probe == nil {
@@ -998,7 +1063,7 @@ func backfillMissingAgentUpdateFingerprints(plan *agentUpdatePlan, paths model.P
 		if _, ok := plan.PendingFingerprintWrites[tool]; ok {
 			continue
 		}
-		if _, found := config.ResolveToolFile(paths, tool, model.CheckUpdateScriptFilename); !found {
+		if _, found := config.ResolveUpdateProbe(paths, tool); !found {
 			continue
 		}
 		if _, ok, err := readAgentUpdateStateValue(agentUpdateFingerprintFile(stampDir, tool)); err != nil {
@@ -1017,6 +1082,29 @@ func backfillMissingAgentUpdateFingerprints(plan *agentUpdatePlan, paths model.P
 		plan.PendingFingerprintWrites[tool] = fingerprint
 	}
 	return nil
+}
+
+// memoizeToolFingerprintProbe caches probe results per tool so that one build
+// decision probes each tool at most once. The plan is resolved before the
+// image-build lock and again inside it; without the cache the in-lock resolve
+// would run the check-update container (and its network fetch) a second time,
+// and a transient failure there would silently drop an update the first
+// resolve had already found.
+func memoizeToolFingerprintProbe(probe toolFingerprintProbe) toolFingerprintProbe {
+	type probeResult struct {
+		fingerprint string
+		known       bool
+		err         error
+	}
+	results := map[string]probeResult{}
+	return func(paths model.Paths, buildCfg buildConfig, tool string) (string, bool, error) {
+		if cached, ok := results[tool]; ok {
+			return cached.fingerprint, cached.known, cached.err
+		}
+		fingerprint, known, err := probe(paths, buildCfg, tool)
+		results[tool] = probeResult{fingerprint: fingerprint, known: known, err: err}
+		return fingerprint, known, err
+	}
 }
 
 func probeToolUpdateFingerprint(paths model.Paths, buildCfg buildConfig, tool string) (string, bool, error) {
@@ -1137,4 +1225,24 @@ func writeAgentUpdateStateValue(stateDir string, stateFile string, value string)
 		return err
 	}
 	return nil
+}
+
+// resolveBuildxCache returns the buildx cache import and export specs for the
+// build. podman has no buildx cache import or export (its --cache-from and
+// --cache-to take remote repositories), so under podman the specs are dropped
+// with a warning instead of failing the build; podman's local layer cache
+// still applies.
+func resolveBuildxCache(opts model.BuildOptions) ([]string, []string, error) {
+	if docker.IsPodman() {
+		if len(cleanBuildxCacheSpecs(opts.BuildxCacheFrom)) > 0 || len(cleanBuildxCacheSpecs(opts.BuildxCacheTo)) > 0 || strings.TrimSpace(opts.BuildxCacheDir) != "" {
+			logx.Warnf("podman has no buildx cache import or export; ignoring --buildx-cache-dir, --buildx-cache-from, and --buildx-cache-to")
+		}
+		return nil, nil, nil
+	}
+	from := resolveBuildxCacheFrom(opts)
+	to, err := resolveBuildxCacheTo(opts)
+	if err != nil {
+		return nil, nil, err
+	}
+	return from, to, nil
 }

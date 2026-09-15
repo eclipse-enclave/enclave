@@ -1,18 +1,34 @@
-<p align="center">
-  <img src="docs/assets/appicon.png" alt="Enclave" width="128" height="128">
-</p>
-
-<h1 align="center">Enclave</h1>
+<h1 align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/enclave-logo-horizontal-darkbg.png">
+    <img src="docs/assets/enclave-logo-horizontal-lightbg.png" alt="Eclipse Enclave" width="400">
+  </picture>
+</h1>
 
 A Docker-based sandbox for running agentic coding tools — Claude, Codex, OpenCode, and others — in an isolated container while keeping your project files on the host. Network access is restricted to allowlisted domains by default, auth and history persist across sessions, and YOLO mode is on so agents can act without confirmation prompts.
 
+<a href="https://enclave.eclipse.dev">Website</a> · <a href="https://enclave.eclipse.dev/docs/getting-started">Getting Started</a> · <a href="https://enclave.eclipse.dev/docs">Docs</a>
+
 ## Requirements
+
+Linux and macOS (with Docker Desktop) are supported natively. On Windows,
+Enclave runs inside WSL2: the Linux instructions apply within the WSL
+distribution, and `enclave.exe` is a launcher that forwards to it rather than a
+native build. See [Windows](docs/windows.md).
 
 Runtime dependencies:
 
 - Rootful Docker (CLI on `PATH`, daemon running) with the buildx plugin; the
   sandbox image build requires BuildKit. Rootless Docker is not supported.
-- Optional: `qemu-system-x86_64` and `cpio` for the experimental `qemu` backend.
+- Alternatively, Podman (`podman` on `PATH`, rootless works). Enclave detects
+  whichever engine is installed and asks once when both are; see
+  [Backend detection](docs/cli-reference.md#backend-detection) and
+  [Podman backend](docs/cli-reference.md#podman-backend).
+- Optional: `qemu-system-x86_64` and `cpio` for the experimental `qemu` backend,
+  which builds an x86-64 guest and is practical only on x86-64 Linux hosts,
+  where KVM can accelerate it. On arm64 hosts and on macOS it falls back to
+  full emulation. The default `docker` backend is unaffected and runs natively
+  on every supported platform.
 
 Building from source additionally requires Git, Make, and Go 1.24 or newer. Use
 the official [Go installation instructions](https://go.dev/doc/install) if your
@@ -70,14 +86,39 @@ sudo dnf install ./enclave-*.x86_64.rpm
 
 ### Standalone binary
 
-The rolling release also provides a self-contained Linux x86-64 binary. Verify
-it with `checksums.txt`, make it executable, and place it on your `PATH`:
+The rolling release also provides self-contained binaries:
+
+| Artifact | Platform |
+|----------|----------|
+| `enclave-linux-amd64` | Linux x86-64 |
+| `enclave-linux-arm64` | Linux arm64 |
+| `enclave-darwin-arm64` | macOS (Apple Silicon) |
+| `enclave-darwin-amd64` | macOS (Intel) |
+| `enclave-windows-amd64.zip` | Windows x86-64 (WSL2 launcher) |
+| `enclave-windows-arm64.zip` | Windows arm64 (WSL2 launcher) |
+
+Download the artifact for your platform together with `checksums.txt`, verify
+it, and place it on your `PATH`. On Linux:
 
 ```bash
 sha256sum --check --ignore-missing checksums.txt
-chmod +x enclave-linux-amd64
 sudo install enclave-linux-amd64 /usr/local/bin/enclave
 ```
+
+On macOS, substituting `enclave-darwin-amd64` on Intel:
+
+```bash
+shasum -a 256 --check --ignore-missing checksums.txt
+xattr -d com.apple.quarantine ./enclave-darwin-arm64 2>/dev/null || true
+sudo install -d /usr/local/bin
+sudo install enclave-darwin-arm64 /usr/local/bin/enclave
+```
+
+The macOS binaries are unsigned and not notarized, so a binary downloaded
+through a browser carries a quarantine attribute that makes Gatekeeper refuse to
+run it; `install` propagates the attribute, so remove it first. Fetching the
+artifact with `curl` or `gh release download` avoids it entirely, which is why
+the command above tolerates its absence.
 
 The binary includes the Dockerfiles, extensions, documentation, and other
 runtime assets. It extracts its assets on first use.
@@ -97,6 +138,50 @@ is on your `PATH`. On macOS the default is `/usr/local/bin/`; copying there may
 need `sudo` or a writable `/usr/local/bin`. Override the destination with
 `make install INSTALL_BIN=...`.
 
+On Linux it also installs shell completions: bash into
+`~/.local/share/bash-completion/completions/`, which is picked up automatically,
+and zsh into `~/.local/share/zsh/site-functions/`, which zsh only searches once
+you add it to `fpath` in `~/.zshrc`, before whatever runs `compinit`:
+
+```zsh
+fpath=(~/.local/share/zsh/site-functions $fpath)
+```
+
+Frameworks such as oh-my-zsh and prezto call `compinit` themselves, so put the
+line above their setup and leave the rest to them. On a plain zsh setup that
+does not call it anywhere, add `autoload -U compinit && compinit` after the
+`fpath` line. Both completion paths honor `XDG_DATA_HOME` if you set it.
+
+The `.deb` and `.rpm` packages install both completions into system directories
+that need no such setup. Any shell can also generate its own script on demand
+with `enclave completion <bash|zsh|fish>`.
+
+### Windows (WSL2)
+
+There is no native Windows build. Install WSL2 with an Ubuntu 24.04
+distribution, make Docker available inside it — either through Docker Desktop's
+WSL integration or by installing Docker Engine in the distribution — and follow
+the Linux instructions above from inside WSL, using the `.deb` or the Linux
+binary matching the host architecture.
+
+That is enough to use Enclave from a WSL shell. To use it from PowerShell as
+well, install the launcher on Windows too:
+
+```powershell
+scoop install https://github.com/eclipse-enclave/enclave/releases/download/rolling/enclave.json
+```
+
+`enclave.exe` forwards every argument to the Linux binary inside the
+distribution and returns its exit code; it is not a native build. Run it from a
+directory inside the distribution, for example
+`\\wsl.localhost\Ubuntu\home\you\project`. A Windows drive path such as
+`C:\Users\you\project` is refused by default: it would have to be reached
+through `/mnt/c`, where every file access crosses the WSL interop layer and is
+markedly slower.
+
+See [Windows](docs/windows.md) for the working-directory rules, environment
+forwarding, and exit codes.
+
 ## Quick Start
 
 Run in any project directory:
@@ -110,6 +195,7 @@ enclave ps                  # List running containers (--all for stopped, --json
 enclave exec                # Attach to running container
 enclave shell               # Open interactive shell in container
 enclave info                # Show config and image details
+enclave version             # Show binary version and source commit (--json; alias: --version)
 ```
 
 **Authentication:** The simplest and recommended approach is to just log in from inside the container the first time you run — OAuth sessions are saved to a persistent auth store on the host and reused automatically on every subsequent run. No configuration needed.
@@ -172,11 +258,14 @@ in both `host/` and `session/`, the host command wins.
 | Tool Profiles & Images | [docs/tools.md](docs/tools.md) |
 | Sessions & Persistence | [docs/persistence.md](docs/persistence.md) |
 | Configuration | [docs/configuration.md](docs/configuration.md) |
+| Windows (WSL2) | [docs/windows.md](docs/windows.md) |
 | Architecture | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) |
 | Extensions | [docs/extensions/README.md](docs/extensions/README.md) |
+| Installing Extensions from Git | [docs/extensions/installing.md](docs/extensions/installing.md) |
 | Security | [docs/security/README.md](docs/security/README.md) |
 
-Project resources: [Eclipse project page](https://projects.eclipse.org/projects/ecd.enclave),
+Project resources: [website](https://enclave.eclipse.dev),
+[Eclipse project page](https://projects.eclipse.org/projects/ecd.enclave),
 [contributing guide](CONTRIBUTING.md), [security policy](SECURITY.md),
 [code of conduct](CODE_OF_CONDUCT.md), [license](LICENSE.md), and
 [notices](NOTICE.md).

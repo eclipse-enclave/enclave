@@ -3,7 +3,7 @@
 Enclave reduces an agent's access to the host and network; it is not a hardened
 container escape boundary. The supported Docker backend uses a rootful daemon.
 Use [host hardening](host-hardening.md) where compatible with the required
-workflow. Rootless Docker is [not currently supported](rootless.md).
+workflow. Rootless Docker is [not supported](rootless.md); rootless podman is, through `--backend podman`.
 
 ## Host filesystem
 
@@ -46,6 +46,14 @@ can therefore return untrusted content or provide indirect access beyond what
 its hostname suggests. Treat every allowlisted service as part of the trust
 boundary.
 
+The network log is an audit trail of decisions, not a record of everything that
+crossed the boundary. In the default `coarse` mode a reused TLS connection
+yields one event however many requests it carries, successful DNS lookups are
+never recorded, and request-level detail exists only for plaintext HTTP and
+MITM'd hosts. `--network-log=requests` closes the HTTPS gap for allowlisted
+hosts, but no mode records SSH. Treat a missing event as no evidence either
+way; see [Coverage and granularity](../networking.md#coverage-and-granularity).
+
 The experimental QEMU backend has no restricted-egress implementation. It runs
 with unrestricted networking and without gateway-side HTTP secret release.
 
@@ -79,5 +87,9 @@ released by the gateway only for matching HTTPS hosts. This protects those
 environment values from direct exfiltration, but credential files and secrets
 without HTTP release can contain real values inside the tool config/auth store.
 
-See [Authentication and secrets](../auth.md) and the
-[restricted network request flow](../runtime/network-request-flow.md).
+Once configured, the SSH key is available to every Docker session, regardless
+of project or tool. SSH on port 22 bypasses the HTTP/TLS proxy, so a push does
+not appear in `network.log`, even with `--network-log=requests`. See
+[SSH keys](../auth.md#ssh-keys) for its access and how to scope or revoke it.
+
+See the [restricted network request flow](../runtime/network-request-flow.md).

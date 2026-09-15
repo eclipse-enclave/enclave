@@ -8,16 +8,28 @@
 
 set -euo pipefail
 
-if [ "$#" -lt 2 ] || [ "$#" -gt 3 ]; then
-    echo "usage: enclave-install-npm-tool <package> <binary> [label]" >&2
+usage() {
+    echo "usage: enclave-install-npm-tool [npm-flag ...] <package> <binary> [label]" >&2
     exit 2
+}
+
+# Flags must be self-contained (`--flag` or `--flag=value`); a flag that takes a
+# separate value would consume the package argument.
+npm_flags=()
+while [ "$#" -gt 0 ] && [[ "$1" == -* ]]; do
+    npm_flags+=("$1")
+    shift
+done
+
+if [ "$#" -lt 2 ] || [ "$#" -gt 3 ]; then
+    usage
 fi
 
 package="$1"
 binary="$2"
 label="${3:-$binary}"
 
-enclave-agent-npm-install "$package"
+enclave-agent-npm-install "${npm_flags[@]}" "$package"
 
 if ! command -v "$binary" >/dev/null 2>&1; then
     echo "$label install failed: $binary binary not found" >&2

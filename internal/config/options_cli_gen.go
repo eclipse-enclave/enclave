@@ -22,7 +22,7 @@ func optionCLIFlags() map[string][]CLIFlag {
 			}),
 		},
 		"backend": {
-			valueFlag("--backend", "Isolation backend: docker|qemu (default: docker)", "--backend requires a value (docker|qemu)", func(opts *model.Options, sources *model.OptionSources, value string) error {
+			valueFlag("--backend", "Isolation backend: auto|docker|podman|qemu (default: auto, detects docker or podman)", "--backend requires a value (auto|docker|podman|qemu)", func(opts *model.Options, sources *model.OptionSources, value string) error {
 				opts.Backend = value
 				sources.Backend = model.SourceCLI
 				return nil
@@ -34,6 +34,15 @@ func optionCLIFlags() map[string][]CLIFlag {
 					return err
 				}
 				sources.HostConfig = model.SourceCLI
+				return nil
+			}),
+		},
+		"skills_validation": {
+			valueFlag("--skills-validation", "Shared skill validation: strict|agent (default: strict)", "--skills-validation requires a value (strict|agent)", func(opts *model.Options, sources *model.OptionSources, value string) error {
+				if err := applySkillsValidation(opts, value); err != nil {
+					return err
+				}
+				sources.SkillsValidation = model.SourceCLI
 				return nil
 			}),
 		},

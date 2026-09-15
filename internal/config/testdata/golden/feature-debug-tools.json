@@ -1,6 +1,7 @@
 {
   "type": "mixin",
   "name": "debug-tools",
+  "display_name": "Debug Tools",
   "description": "Debugging tools (gdb, strace, ltrace, etc.)",
   "apt_packages": [
     "gdb",

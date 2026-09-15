@@ -8,4 +8,6 @@
 
 set -e
 
-enclave-install-npm-tool @openai/codex@latest codex Codex
+# bin/codex.js resolves the vendored binary from the optional platform package
+# at runtime; nothing in the tree declares a lifecycle script.
+enclave-install-npm-tool --ignore-scripts @openai/codex@latest codex Codex

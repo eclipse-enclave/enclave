@@ -17,6 +17,7 @@ import (
 	"enclave/internal/docker"
 	"enclave/internal/logx"
 	"enclave/internal/model"
+	"enclave/internal/util"
 )
 
 var dockerRootFreeSpace = realDockerRootFreeSpace
@@ -60,7 +61,8 @@ func checkRuntimeImageBuildPreflight(ctx context.Context) error {
 	// The runtime Dockerfile uses BuildKit-only syntax (RUN --mount), and on
 	// Docker >= 23 BuildKit builds require the buildx CLI plugin. Fail up
 	// front with guidance instead of surfacing a mid-build syntax error.
-	if !dockerBuildxAvailable(ctx) {
+	// podman builds with buildah, which handles that syntax natively.
+	if !docker.IsPodman() && !dockerBuildxAvailable(ctx) {
 		return fmt.Errorf("docker buildx is unavailable, but building the sandbox image requires BuildKit. Install the Docker buildx plugin for your platform (packaged as docker-buildx or docker-buildx-plugin; included in Docker Desktop), then retry. See https://docs.docker.com/go/buildx/")
 	}
 
@@ -70,10 +72,10 @@ func checkRuntimeImageBuildPreflight(ctx context.Context) error {
 		return nil
 	}
 	if freeBytes < runtimeImageDockerStorageFailBytes {
-		return fmt.Errorf("docker storage is critically low: only %s free under %s; aborting before image build. Free space or prune Docker storage, then retry", formatBytes(freeBytes), rootDir)
+		return fmt.Errorf("docker storage is critically low: only %s free under %s; aborting before image build. Free space or prune Docker storage, then retry", util.FormatBytes(freeBytes), rootDir)
 	}
 	if freeBytes < runtimeImageDockerStorageWarnBytes {
-		logx.Warnf("Docker storage looks low: %s free under %s; the image build may fail if Docker needs to pull or expand additional layers", formatBytes(freeBytes), rootDir)
+		logx.Warnf("Docker storage looks low: %s free under %s; the image build may fail if Docker needs to pull or expand additional layers", util.FormatBytes(freeBytes), rootDir)
 	}
 	return nil
 }

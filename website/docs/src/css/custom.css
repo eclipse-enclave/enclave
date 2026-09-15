@@ -11,9 +11,10 @@
  * Eclipse Enclave — documentation theme.
  *
  * Design direction: "The Enclave Perimeter."
- * The palette is drawn straight from the product mark — a deep navy field, an
- * electric beam-blue core, and a gateway amber. The page reads as a bounded,
- * guarded interior lit from its core: one soft glow at the top, a short beam
+ * The palette predates the Eclipse Foundation brand logo and does not derive
+ * from it: a deep navy field, an electric beam-blue core, and a gateway amber.
+ * The logo's teal-to-violet gradient is left to the logo. The page reads as a
+ * bounded guarded interior lit from its core: one soft glow at the top, a beam
  * bar under the hero, and precision crop-mark corners framing the modules.
  * Amber is reserved for gateway semantics so it stays meaningful, not decorative.
  */
@@ -294,7 +295,12 @@ div[class^='codeBlockContainer'],
    Tables
    ========================================================================== */
 
+/* Infima sets `display: block` on tables, which makes the rows shrink to fit
+   their content while the table's own border box still spans the full width,
+   so header backgrounds and row rules stop short of the border. */
 .markdown table {
+  display: table;
+  width: 100%;
   border: 1px solid var(--ifm-toc-border-color);
   border-radius: 10px;
   border-collapse: separate;
@@ -307,10 +313,14 @@ div[class^='codeBlockContainer'],
 .markdown table thead tr {
   border-bottom: 1px solid var(--ifm-toc-border-color);
 }
+/* `overflow-wrap: anywhere` also lowers the cells' min-content width, so a
+   `display: table` table can always satisfy `width: 100%` and wraps on narrow
+   viewports instead of overflowing the rounded, clipped border box. */
 .markdown table th,
 .markdown table td {
   border: 0;
   border-bottom: 1px solid var(--ifm-toc-border-color);
+  overflow-wrap: anywhere;
 }
 .markdown table tbody tr:last-child td {
   border-bottom: 0;
@@ -346,7 +356,8 @@ div[class^='codeBlockContainer'],
 }
 
 /* ==========================================================================
-   Footer — the deep-navy anchor, matched to the mark, with a top glow line.
+   Footer — the deep-navy anchor, with a top glow line and the dark-background
+   logo lockup.
    ========================================================================== */
 
 .footer {
@@ -370,6 +381,13 @@ div[class^='codeBlockContainer'],
 .footer__copyright {
   color: #8b97ae;
   font-size: 0.85rem;
+}
+
+/* The "Home" links use `pathname://` so they leave the docs app with a real
+   page load. Docusaurus reads that as an external link and appends its
+   external-link icon, but the marketing home is part of the same site. */
+.enclave-home-link svg {
+  display: none;
 }
 
 /* ==========================================================================

@@ -62,8 +62,9 @@ and mounts it read-only at `skillsDir` inside the container. The `<key>` matches
 the config-store suffix, so concurrent sessions with different feature selections
 compose into separate directories.
 
-Shared skills use strict portable frontmatter and are skipped with a warning
-when invalid. Tool-specific skills may use harness metadata. See
+Shared skills use strict portable frontmatter by default; `skills_validation`
+can delegate metadata interpretation to the selected agent. Invalid skills are
+skipped with a warning. Tool-specific skills may use harness metadata. See
 [Configuration](../configuration.md#managed-skills) for the complete source
 and portability contract.
 

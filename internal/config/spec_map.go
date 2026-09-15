@@ -17,10 +17,18 @@ import (
 
 // validateServiceAuthMappings fails loudly when a network.serviceAuth or
 // network.serviceDomains service id does not map to a declared
-// credentials.sources id. buildSecrets only walks credentials.sources, so an
-// unmatched id (e.g. a typo) is otherwise silently dropped: the secret ends up
-// with no HTTP release rule and its token is injected as a raw env value
-// instead of a proxy-swapped placeholder — a secret-leak risk.
+// credentials.sources id, and when the serviceDomains ↔ serviceAuth pairing is
+// incomplete in either direction.
+//
+// buildSecrets only builds an HTTP release rule for ids present in both
+// credentials.sources and network.serviceAuth, so a serviceDomains id with no
+// serviceAuth entry (a typo, or a dropped serviceAuth line) is silently inert:
+// the token is injected as a raw env value instead of a proxy-swapped
+// placeholder — a secret-leak risk — and the serviceDomains hosts drop out of
+// the release hosts unioned into the effective allowlist. The reverse, a
+// serviceAuth entry with no hosts from either source, would otherwise be
+// rejected downstream by normalizeHosts, but with a message that never names
+// serviceDomains; catching it here points both directions at the same remedy.
 func validateServiceAuthMappings(doc specDocument, specPath string) error {
 	if doc.Network == nil {
 		return nil
@@ -31,17 +39,54 @@ func validateServiceAuthMappings(doc specDocument, specPath string) error {
 			sources[id] = struct{}{}
 		}
 	}
-	for id := range doc.Network.ServiceAuth {
+	// Unknown ids come first: a typo'd id also breaks the pairing, and reporting
+	// the pairing gap would send the author to the wrong line.
+	for id, auth := range doc.Network.ServiceAuth {
 		if _, ok := sources[id]; !ok {
 			return fmt.Errorf("%s: network.serviceAuth[%q] has no matching credentials.sources entry", specPath, id)
 		}
+		if auth.HostsFromCredential == "" {
+			continue
+		}
+		// Same typo class as the service ids above: an unmatched reference
+		// would silently leave the service pinned to its static hosts.
+		if _, ok := sources[auth.HostsFromCredential]; !ok {
+			return fmt.Errorf("%s: network.serviceAuth[%q].hostsFromCredential references credential %q with no matching credentials.sources entry", specPath, id, auth.HostsFromCredential)
+		}
 	}
+	hostedServices := map[string]struct{}{}
 	for host, id := range doc.Network.ServiceDomains {
 		if _, ok := sources[id]; !ok {
 			return fmt.Errorf("%s: network.serviceDomains[%q] references service %q with no matching credentials.sources entry", specPath, host, id)
 		}
+		if strings.TrimSpace(host) != "" {
+			hostedServices[id] = struct{}{}
+		}
+	}
+
+	// Then the pairing, in both directions.
+	for id, auth := range doc.Network.ServiceAuth {
+		if _, ok := hostedServices[id]; !ok && !hasNonBlank(auth.Hosts) {
+			return fmt.Errorf("%s: network.serviceAuth[%q] has no hosts to release the credential to (add a hosts list, or map hosts to this service under network.serviceDomains)", specPath, id)
+		}
+	}
+	for host, id := range doc.Network.ServiceDomains {
+		if _, ok := doc.Network.ServiceAuth[id]; !ok {
+			return fmt.Errorf("%s: network.serviceDomains[%q] references service %q with no matching network.serviceAuth entry (add one, or list the hosts under network.allowedDomains instead)", specPath, host, id)
+		}
 	}
 	return nil
+}
+
+// hasNonBlank reports whether hosts holds at least one entry that survives the
+// blank-stripping normalizeHosts applies later.
+func hasNonBlank(hosts []string) bool {
+	for _, host := range hosts {
+		if strings.TrimSpace(host) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // validateProxyManaged fails loudly when an environment.proxyManaged entry
@@ -92,6 +137,15 @@ func validateEntrypointArgv(doc specDocument, specPath string) error {
 	return check("args", doc.Sandbox.Entrypoint.Args)
 }
 
+// entrypointCommand renders an entrypoint as a single command string. Args are
+// folded after run because the result is split back into fields by the runtime
+// command builder, so trailing flags in entrypoint.args flow through as
+// additional argv tokens.
+func entrypointCommand(entrypoint *specEntrypoint) string {
+	argv := append(append([]string(nil), entrypoint.Run...), entrypoint.Args...)
+	return strings.Join(argv, " ")
+}
+
 // normalizeInstallUser applies sbx's commands.install default: an omitted or
 // blank user means root ("0").
 func normalizeInstallUser(user string) string {
@@ -101,29 +155,46 @@ func normalizeInstallUser(user string) string {
 	return user
 }
 
+// IsRootInstallUser reports whether a commands.install entry runs as root,
+// applying the omitted-means-root default.
+func IsRootInstallUser(user string) bool {
+	switch normalizeInstallUser(user) {
+	case "0", "root":
+		return true
+	default:
+		return false
+	}
+}
+
+// serviceHostsByID unions network.serviceDomains (host -> id, inverted) with
+// each serviceAuth entry's own Hosts (enclave-native), deduped and sorted per
+// service id. serviceAuth.Hosts covers the multi-service-same-host case (e.g.
+// gitlab's three tokens on the same hosts) that the host->single-service
+// serviceDomains map cannot express.
+func serviceHostsByID(doc specDocument) map[string][]string {
+	hostsByService := map[string][]string{}
+	if doc.Network == nil {
+		return hostsByService
+	}
+	for host, id := range doc.Network.ServiceDomains {
+		hostsByService[id] = append(hostsByService[id], host)
+	}
+	for id, auth := range doc.Network.ServiceAuth {
+		hostsByService[id] = append(hostsByService[id], auth.Hosts...)
+	}
+	for id := range hostsByService {
+		hostsByService[id] = sortDedupeStrings(hostsByService[id])
+	}
+	return hostsByService
+}
+
 // buildSecrets reconstructs model.SecretConfig entries from the split
 // credentials.sources + network.serviceDomains/serviceAuth representation.
 func buildSecrets(doc specDocument) map[string]model.SecretConfig {
 	if doc.Credentials == nil || len(doc.Credentials.Sources) == 0 {
 		return nil
 	}
-	// service-id -> hosts, unioned from serviceDomains (host -> id inversion)
-	// and each serviceAuth entry's own Hosts (enclave-native), then deduped
-	// and sorted. serviceAuth.Hosts covers the multi-service-same-host case
-	// (e.g. gitlab's three tokens on the same hosts) that the host->single-
-	// service serviceDomains map cannot express.
-	hostsByService := map[string][]string{}
-	if doc.Network != nil {
-		for host, id := range doc.Network.ServiceDomains {
-			hostsByService[id] = append(hostsByService[id], host)
-		}
-		for id, auth := range doc.Network.ServiceAuth {
-			hostsByService[id] = append(hostsByService[id], auth.Hosts...)
-		}
-		for id := range hostsByService {
-			hostsByService[id] = sortDedupeStrings(hostsByService[id])
-		}
-	}
+	hostsByService := serviceHostsByID(doc)
 	out := make(map[string]model.SecretConfig, len(doc.Credentials.Sources))
 	for id, src := range doc.Credentials.Sources {
 		sc := model.SecretConfig{EnvVars: append([]string(nil), src.Env...)}
@@ -139,9 +210,10 @@ func buildSecrets(doc specDocument) map[string]model.SecretConfig {
 			if auth, ok := doc.Network.ServiceAuth[id]; ok {
 				sc.Release = &model.SecretReleaseConfig{
 					HTTP: &model.HTTPSecretReleaseConfig{
-						Hosts:  hostsByService[id],
-						Header: auth.HeaderName,
-						Format: auth.ValueFormat,
+						Hosts:           hostsByService[id],
+						Header:          auth.HeaderName,
+						Format:          auth.ValueFormat,
+						HostsFromSecret: auth.HostsFromCredential,
 					},
 				}
 			}
@@ -258,11 +330,7 @@ func specToProfile(doc specDocument) model.Profile {
 	}
 
 	if sb.Entrypoint != nil && len(sb.Entrypoint.Run) > 0 {
-		// Args are folded after Run: Command is later split back into fields by
-		// the runtime command builder, so trailing flags in entrypoint.args flow
-		// through as additional argv tokens rather than being silently dropped.
-		argv := append(append([]string(nil), sb.Entrypoint.Run...), sb.Entrypoint.Args...)
-		p.Command = strings.Join(argv, " ")
+		p.Command = entrypointCommand(sb.Entrypoint)
 	} else {
 		p.Command = doc.Name
 	}
@@ -294,6 +362,7 @@ func specToProfile(doc specDocument) model.Profile {
 func specToExtension(doc specDocument) (model.Extension, extensionManifestState) {
 	ext := model.Extension{
 		Name:        doc.Name,
+		DisplayName: doc.DisplayName,
 		Description: doc.Description,
 		AptPackages: doc.AptPackages,
 		NeedsRoot:   doc.NeedsRoot,

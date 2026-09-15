@@ -8,9 +8,9 @@
 package gateway
 
 import (
+	"bytes"
 	"context"
 	"fmt"
-	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -21,6 +21,7 @@ import (
 	"enclave/internal/docker"
 	"enclave/internal/logx"
 	"enclave/internal/model"
+	"enclave/internal/netlog"
 	"enclave/internal/network"
 	"enclave/internal/util"
 )
@@ -161,7 +162,29 @@ func needsRebuild(paths model.Paths, profile model.Profile, allowlistPath string
 	return storedHash != buildHash, buildHash, nil
 }
 
-func buildGatewayImage(paths model.Paths, profile model.Profile, allowlistPath string, buildHash string) error {
+// gatewayBuildErrorLines is how many trailing lines of engine output a failed
+// gateway build reports; the build otherwise runs silently.
+const gatewayBuildErrorLines = 20
+
+// buildOutputTail renders the last n non-empty lines of build output as an
+// indented block for an error message, or nothing when there is no output.
+func buildOutputTail(output string, n int) string {
+	var lines []string
+	for _, line := range strings.Split(output, "\n") {
+		if strings.TrimSpace(line) != "" {
+			lines = append(lines, line)
+		}
+	}
+	if len(lines) == 0 {
+		return ""
+	}
+	if len(lines) > n {
+		lines = lines[len(lines)-n:]
+	}
+	return "\nbuild output:\n  " + strings.Join(lines, "\n  ")
+}
+
+func buildGatewayImage(ctx context.Context, paths model.Paths, profile model.Profile, allowlistPath string, buildHash string) error {
 	logx.Infof("Building gateway image for %s.", profile.Name)
 
 	contextDir, allowlistRel, cleanup, err := prepareGatewayContext(paths, allowlistPath)
@@ -187,18 +210,37 @@ func buildGatewayImage(paths model.Paths, profile model.Profile, allowlistPath s
 			model.GatewayLabelAgent: profile.Name,
 		},
 	}
-	if err := docker.Build(context.Background(), req, io.Discard); err != nil {
+	var output bytes.Buffer
+	if err := docker.Build(ctx, req, &output); err != nil {
 		// Some Docker BuildKit setups fail DNS resolution in the default build
 		// network for Alpine index fetches. Retry once with host build network.
 		req.NetworkMode = "host"
-		if retryErr := docker.Build(context.Background(), req, io.Discard); retryErr != nil {
-			return fmt.Errorf("failed to build gateway image: %w (retry with host build network failed: %v)", err, retryErr)
+		var retryOutput bytes.Buffer
+		if retryErr := docker.Build(ctx, req, &retryOutput); retryErr != nil {
+			return fmt.Errorf("failed to build gateway image: %w (retry with host build network failed: %v)%s",
+				err, retryErr, buildOutputTail(retryOutput.String(), gatewayBuildErrorLines))
 		}
 		logx.Warnf("Gateway build failed on default build network; retry with host build network succeeded")
 	}
 
 	logx.Successf("Gateway image built")
 	return nil
+}
+
+func coordinateGatewayImageBuild(home string, image string, forceRebuild bool, resolveBuildPlan func() (bool, string, error), executeBuild func(string) error) error {
+	release, err := config.AcquireImageBuildLock(home, image)
+	if err != nil {
+		return err
+	}
+	defer release()
+	needs, buildHash, err := resolveBuildPlan()
+	if err != nil {
+		return err
+	}
+	if !forceRebuild && !needs {
+		return nil
+	}
+	return executeBuild(buildHash)
 }
 
 func prepareGatewayContext(paths model.Paths, allowlistPath string) (contextDir string, allowlistRel string, cleanup func(), err error) {
@@ -293,7 +335,8 @@ func relativePathWithin(base string, target string) (string, bool) {
 	return filepath.ToSlash(filepath.Clean(rel)), true
 }
 
-func gatewayContainerName(containerName string) string {
+// ContainerName returns the name of the gateway sidecar for a session container.
+func ContainerName(containerName string) string {
 	return containerName + model.GatewayContainerSuffix
 }
 
@@ -334,7 +377,10 @@ type StartResult struct {
 	TempFiles     []string
 }
 
-func Start(cfg StartConfig) (StartResult, error) {
+// Start builds the gateway image if needed, then runs the gateway sidecar and
+// waits for it to report readiness. Cancelling ctx aborts the start and
+// removes a sidecar that was already created.
+func Start(ctx context.Context, cfg StartConfig) (StartResult, error) {
 	var empty StartResult
 	if err := validateStartConfig(cfg); err != nil {
 		return empty, err
@@ -345,38 +391,31 @@ func Start(cfg StartConfig) (StartResult, error) {
 			return empty, err
 		}
 	} else {
-		needs, buildHash, err := needsRebuild(cfg.Paths, cfg.Profile, cfg.AllowlistPath)
+		needs, _, err := needsRebuild(cfg.Paths, cfg.Profile, cfg.AllowlistPath)
 		if err != nil {
 			return empty, err
 		}
 		if cfg.ForceRebuild || needs {
-			if err := buildGatewayImage(cfg.Paths, cfg.Profile, cfg.AllowlistPath, buildHash); err != nil {
+			resolveBuildPlan := func() (bool, string, error) {
+				return needsRebuild(cfg.Paths, cfg.Profile, cfg.AllowlistPath)
+			}
+			executeBuild := func(buildHash string) error {
+				return buildGatewayImage(ctx, cfg.Paths, cfg.Profile, cfg.AllowlistPath, buildHash)
+			}
+			if err := coordinateGatewayImageBuild(cfg.Home, imageName(cfg.Profile), cfg.ForceRebuild, resolveBuildPlan, executeBuild); err != nil {
 				return empty, err
 			}
 		}
 	}
 
-	gatewayContainer := gatewayContainerName(cfg.ContainerName)
-	if err := docker.ContainerRemove(context.Background(), gatewayContainer, true, true); err != nil && !docker.IsNotFound(err) {
+	gatewayContainer := ContainerName(cfg.ContainerName)
+	if err := docker.ContainerRemove(ctx, gatewayContainer, true, true); err != nil && !docker.IsNotFound(err) {
 		logx.Warnf("Failed to remove existing gateway container %s: %v", gatewayContainer, err)
 	}
 
 	if cfg.NetworkLogPath != "" {
-		logDir := filepath.Dir(cfg.NetworkLogPath)
-		if err := os.MkdirAll(logDir, 0o750); err != nil {
-			return empty, fmt.Errorf("failed to create network log dir: %w", err)
-		}
-		if _, err := os.Stat(cfg.NetworkLogPath); err != nil {
-			if !os.IsNotExist(err) {
-				return empty, fmt.Errorf("failed to stat network log path: %w", err)
-			}
-			file, err := os.OpenFile(cfg.NetworkLogPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
-			if err != nil {
-				return empty, fmt.Errorf("failed to create network log file: %w", err)
-			}
-			if err := file.Close(); err != nil {
-				return empty, fmt.Errorf("failed to close network log file: %w", err)
-			}
+		if err := prepareNetworkLog(cfg); err != nil {
+			return empty, err
 		}
 	}
 
@@ -422,6 +461,9 @@ func Start(cfg StartConfig) (StartResult, error) {
 	if strings.TrimSpace(cfg.NetworkLogMode) != "" {
 		env = append(env, model.EnvNetworkLogMode+"="+cfg.NetworkLogMode)
 	}
+	if session := strings.TrimSpace(cfg.ContainerName); session != "" {
+		env = append(env, model.EnvGatewaySession+"="+session)
+	}
 	if cfg.GatewayConfigDir != "" {
 		env = append(env, model.EnvGatewayConfigDir+"="+model.GatewayConfigDir)
 	}
@@ -439,6 +481,7 @@ func Start(cfg StartConfig) (StartResult, error) {
 	}
 	config := &docker.ContainerConfig{
 		Image:        imageName(cfg.Profile),
+		User:         gatewayUser(),
 		Env:          env,
 		ExposedPorts: cfg.ExposedPorts,
 		Labels:       gatewayLabels(cfg),
@@ -462,20 +505,97 @@ func Start(cfg StartConfig) (StartResult, error) {
 		Mounts:       remainingMounts,
 		PortBindings: cfg.PortBindings,
 		ExtraHosts:   extraHosts,
+		UserNS:       gatewayUserNS(),
 	}
 
-	startedAt := time.Now().UTC()
-	if _, err := docker.RunDetached(context.Background(), config, hostConfig, gatewayContainer); err != nil {
-		return empty, fmt.Errorf("failed to start gateway container: %w", err)
-	}
-
-	if err := waitForGatewayReady(gatewayContainer, startedAt); err != nil {
+	if err := startGatewayContainer(ctx, config, hostConfig, gatewayContainer); err != nil {
 		return empty, err
 	}
 
 	return StartResult{
 		ContainerName: gatewayContainer,
 	}, nil
+}
+
+// prepareNetworkLog rotates the audit log when it has outgrown netlog.MaxLogBytes,
+// makes sure the file the gateway binds exists, and records the session
+// boundary. Rotation happens here, at session start, so a session never rotates
+// its own log: a single long-running session can grow past the cap. Rotation
+// truncates in place rather than renaming, so a session already running keeps
+// appending to the file it bind-mounted.
+func prepareNetworkLog(cfg StartConfig) error {
+	logDir := filepath.Dir(cfg.NetworkLogPath)
+	if err := os.MkdirAll(logDir, 0o750); err != nil {
+		return fmt.Errorf("failed to create network log dir: %w", err)
+	}
+
+	rotated, err := netlog.RotateIfLarger(cfg.NetworkLogPath, netlog.MaxLogBytes)
+	if err != nil {
+		return fmt.Errorf("failed to rotate network log: %w", err)
+	}
+	if rotated {
+		logx.Debugf("Rotated network log to %s", netlog.RotatedPath(cfg.NetworkLogPath))
+	}
+
+	// The marker is written host side so it is recorded even when the proxy is
+	// disabled, and it gives the reader session boundaries plus the anchor
+	// `--since session` resolves against. It also creates the file the gateway
+	// bind-mounts, which is why nothing here has to touch it first.
+	marker := netlog.SessionStartEvent(cfg.ContainerName, time.Now())
+	if err := netlog.AppendEvent(cfg.NetworkLogPath, marker); err != nil {
+		return fmt.Errorf("failed to record network log session marker: %w", err)
+	}
+	return nil
+}
+
+// gatewayUserNS puts the gateway into the same keep-id user namespace the
+// session container uses under rootless podman. The session joins the gateway's
+// network namespace, and a container may only mount sysfs in a network
+// namespace owned by its own user namespace: with the gateway in podman's
+// default rootless mapping and the session in keep-id, runc fails the session's
+// /sys mount with EPERM (crun masks this by bind-mounting the host /sys). The
+// session therefore joins this user namespace as well; see the docker backend.
+func gatewayUserNS() string {
+	if docker.IsPodman() {
+		return "keep-id"
+	}
+	return ""
+}
+
+// gatewayUser pins the entrypoint to root where keep-id would otherwise make
+// podman start it as the host user; it needs root to set up its runtime
+// directories and firewall before it drops to the dnsmasq and proxy users.
+func gatewayUser() string {
+	if gatewayUserNS() != "" {
+		return "0:0"
+	}
+	return ""
+}
+
+// startGatewayContainer runs the gateway and waits until it reports readiness.
+// A sidecar whose start does not complete is removed again: left running, it
+// keeps the session's published ports bound, and the next start of the same
+// session name fails its host-port checks before it reaches gateway startup.
+func startGatewayContainer(ctx context.Context, config *docker.ContainerConfig, hostConfig *docker.HostConfig, name string) error {
+	startedAt := time.Now().UTC()
+	if _, err := docker.RunDetached(ctx, config, hostConfig, name); err != nil {
+		removeFailedGateway(ctx, name)
+		return fmt.Errorf("failed to start gateway container: %w", err)
+	}
+	if err := waitForGatewayReady(ctx, name, startedAt); err != nil {
+		removeFailedGateway(ctx, name)
+		return err
+	}
+	return nil
+}
+
+// removeFailedGateway runs detached from ctx, which is already cancelled when
+// the start was interrupted.
+func removeFailedGateway(ctx context.Context, name string) {
+	err := docker.ContainerRemove(context.WithoutCancel(ctx), name, true, true)
+	if err != nil && !docker.IsNotFound(err) {
+		logx.Warnf("Failed to remove gateway container %s after its start failed: %v", name, err)
+	}
 }
 
 func validateStartConfig(cfg StartConfig) error {
@@ -511,10 +631,13 @@ func validateStartConfig(cfg StartConfig) error {
 	return nil
 }
 
-func waitForGatewayReady(containerID string, since time.Time) error {
+func waitForGatewayReady(ctx context.Context, containerID string, since time.Time) error {
 	deadline := time.Now().Add(gatewayReadyTimeout)
 	for time.Now().Before(deadline) {
-		logs, err := docker.ContainerLogsSince(context.Background(), containerID, since)
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("interrupted while waiting for gateway readiness: %w", err)
+		}
+		logs, err := docker.ContainerLogsSince(ctx, containerID, since)
 		if err == nil && HasLogLine(logs, gatewayReadyMarker) {
 			return nil
 		}
@@ -522,7 +645,7 @@ func waitForGatewayReady(containerID string, since time.Time) error {
 			return fmt.Errorf("read gateway startup logs: %w", err)
 		}
 
-		inspect, inspectErr := docker.ContainerInspect(context.Background(), containerID)
+		inspect, inspectErr := docker.ContainerInspect(ctx, containerID)
 		if inspectErr != nil {
 			if docker.IsNotFound(inspectErr) {
 				return fmt.Errorf("gateway exited during startup")
@@ -541,7 +664,10 @@ func waitForGatewayReady(containerID string, since time.Time) error {
 			return fmt.Errorf("gateway exited during startup (%s)", exitReason)
 		}
 
-		time.Sleep(gatewayReadyPollInterval)
+		select {
+		case <-ctx.Done():
+		case <-time.After(gatewayReadyPollInterval):
+		}
 	}
 	return fmt.Errorf("timed out waiting for gateway readiness")
 }
@@ -593,9 +719,13 @@ func ensureExistingGatewayImageWith(profile model.Profile, exists func(context.C
 }
 
 func Stop(containerName string) {
-	container := gatewayContainerName(containerName)
+	container := ContainerName(containerName)
 	timeout := 3 * time.Second
 	if err := docker.ContainerStop(context.Background(), container, &timeout); err != nil {
+		if docker.IsNotFound(err) {
+			logx.Debugf("Gateway container %s is already gone", container)
+			return
+		}
 		logx.Warnf("Failed to stop gateway container %s: %v", container, err)
 	}
 }

@@ -42,9 +42,9 @@ func ValidateOptions(opts model.Options, sources model.OptionSources, ctx Valida
 		return opts, sources, warnings, fmt.Errorf("devcontainer mode requires --backend %s", backend.NameDocker)
 	}
 	switch opts.Backend {
-	case backend.NameDocker, backend.NameQEMU:
+	case backend.NameDocker, backend.NamePodman, backend.NameQEMU:
 	default:
-		return opts, sources, warnings, fmt.Errorf("unsupported backend %q (available: %s, %s)", opts.Backend, backend.NameDocker, backend.NameQEMU)
+		return opts, sources, warnings, fmt.Errorf("unsupported backend %q (available: %s, %s, %s)", opts.Backend, backend.NameDocker, backend.NamePodman, backend.NameQEMU)
 	}
 	if opts.Backend == backend.NameQEMU && isRunAction(ctx.Action) {
 		var qemuWarnings []string
@@ -70,6 +70,11 @@ func ValidateOptions(opts model.Options, sources model.OptionSources, ctx Valida
 	}
 	if opts.Devcontainer && opts.BaseImage != "" {
 		return opts, sources, warnings, fmt.Errorf("devcontainer mode is mutually exclusive with --base-image")
+	}
+	switch opts.SkillsValidation {
+	case model.SkillsValidationStrict, model.SkillsValidationAgent:
+	default:
+		return opts, sources, warnings, fmt.Errorf("--skills-validation must be strict or agent")
 	}
 	switch opts.HostConfig {
 	case "", model.HostConfigNone, model.HostConfigPassthrough:
@@ -357,6 +362,10 @@ func validateRuntimeUIDRemapDevcontainer(opts model.Options, buildCfg buildConfi
 func normalizeOptions(opts model.Options) (model.Options, []string) {
 	warnings := []string{}
 	opts.Persist = !opts.Ephemeral
+	opts.SkillsValidation = strings.ToLower(strings.TrimSpace(opts.SkillsValidation))
+	if opts.SkillsValidation == "" {
+		opts.SkillsValidation = model.SkillsValidationStrict
+	}
 	if opts.PlaywrightMCP {
 		opts.Features = ensureFeature(opts.Features, "playwright")
 	}

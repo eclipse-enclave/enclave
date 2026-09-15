@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"enclave/internal/backend"
+	"enclave/internal/termtint"
 )
 
 func (r *Runtime) Exec() error {
@@ -42,6 +43,10 @@ func (r *Runtime) Exec() error {
 	if !ok {
 		return fmt.Errorf("backend %s does not support exec", be.Name())
 	}
+	// An exec occupies the terminal with an interactive TTY into the session, so
+	// it is marked like a session that owns the terminal from the start.
+	restoreTint := termtint.Begin(r.run.SessionTint)
+	defer restoreTint()
 	// The backend syncs session credentials after the exec completes, deriving
 	// the involved stores from the running container.
 	return execer.Exec(context.Background(), backend.SessionRef{Name: containerName}, backend.ExecRequest{Argv: cmdArgs, User: user, TTY: true}, backend.AttachIO{})

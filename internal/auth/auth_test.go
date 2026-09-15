@@ -115,7 +115,78 @@ func TestReadAllEnvFromFile(t *testing.T) {
 	})
 }
 
-func TestResolveLayeredSecrets(t *testing.T) {
+// resolveMergedSecrets flattens the layers the way callers that do not care
+// about the originating file see them: later layers override earlier ones.
+func resolveMergedSecrets(home string, projectHash string, tool string, scope string) (map[string]string, error) {
+	layers, err := ResolveSecretsLayers(home, projectHash, tool, scope)
+	if err != nil {
+		return nil, err
+	}
+	merged := map[string]string{}
+	for _, layer := range layers {
+		for key, value := range layer.Values {
+			merged[key] = value
+		}
+	}
+	return merged, nil
+}
+
+func TestResolveSecretsLayers(t *testing.T) {
+	t.Run("layers are ordered lowest precedence first", func(t *testing.T) {
+		home := t.TempDir()
+
+		for _, path := range []string{
+			config.HostSecretsGlobalSharedFile(home),
+			config.HostSecretsGlobalFile(home, "claude"),
+			config.HostSecretsProjectFile(home, "proj", "claude"),
+		} {
+			if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, []byte("GITHUB_TOKEN=token\n"), 0644); err != nil {
+				t.Fatal(err)
+			}
+		}
+
+		layers, err := ResolveSecretsLayers(home, "proj", "claude", model.SecretsScopeBoth)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := []string{
+			config.HostSecretsGlobalSharedFile(home),
+			config.HostSecretsGlobalFile(home, "claude"),
+			config.HostSecretsProjectFile(home, "proj", "claude"),
+		}
+		if len(layers) != len(want) {
+			t.Fatalf("got %d layers, want %d", len(layers), len(want))
+		}
+		for i, path := range want {
+			if layers[i].Path != path {
+				t.Errorf("layer %d path = %q, want %q", i, layers[i].Path, path)
+			}
+		}
+	})
+
+	t.Run("empty layers are omitted", func(t *testing.T) {
+		home := t.TempDir()
+
+		path := config.HostSecretsGlobalFile(home, "claude")
+		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("# only a comment\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		layers, err := ResolveSecretsLayers(home, "proj", "claude", model.SecretsScopeBoth)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(layers) != 0 {
+			t.Fatalf("got %d layers, want none", len(layers))
+		}
+	})
+
 	t.Run("two-layer merge", func(t *testing.T) {
 		home := t.TempDir()
 
@@ -137,7 +208,7 @@ func TestResolveLayeredSecrets(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		secrets, err := ResolveLayeredSecrets(home, "proj", "claude", model.SecretsScopeBoth)
+		secrets, err := resolveMergedSecrets(home, "proj", "claude", model.SecretsScopeBoth)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -171,7 +242,7 @@ func TestResolveLayeredSecrets(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		secrets, err := ResolveLayeredSecrets(home, "proj", "claude", model.SecretsScopeBoth)
+		secrets, err := resolveMergedSecrets(home, "proj", "claude", model.SecretsScopeBoth)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -183,7 +254,7 @@ func TestResolveLayeredSecrets(t *testing.T) {
 	t.Run("missing layers", func(t *testing.T) {
 		home := t.TempDir()
 
-		secrets, err := ResolveLayeredSecrets(home, "proj", "claude", model.SecretsScopeBoth)
+		secrets, err := resolveMergedSecrets(home, "proj", "claude", model.SecretsScopeBoth)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -203,7 +274,7 @@ func TestResolveLayeredSecrets(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		secrets, err := ResolveLayeredSecrets(home, "proj", "claude", model.SecretsScopeBoth)
+		secrets, err := resolveMergedSecrets(home, "proj", "claude", model.SecretsScopeBoth)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -223,7 +294,7 @@ func TestResolveLayeredSecrets(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		secrets, err := ResolveLayeredSecrets(home, "proj", "claude", model.SecretsScopeBoth)
+		secrets, err := resolveMergedSecrets(home, "proj", "claude", model.SecretsScopeBoth)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -262,7 +333,7 @@ func TestResolveLayeredSecrets(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		secrets, err := ResolveLayeredSecrets(home, "proj", "claude", model.SecretsScopeBoth)
+		secrets, err := resolveMergedSecrets(home, "proj", "claude", model.SecretsScopeBoth)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -292,7 +363,7 @@ func TestResolveLayeredSecrets(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		secrets, err := ResolveLayeredSecrets(home, "proj", "claude", model.SecretsScopeProject)
+		secrets, err := resolveMergedSecrets(home, "proj", "claude", model.SecretsScopeProject)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -325,7 +396,7 @@ func TestResolveLayeredSecrets(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		secrets, err := ResolveLayeredSecrets(home, "proj", "claude", model.SecretsScopeGlobal)
+		secrets, err := resolveMergedSecrets(home, "proj", "claude", model.SecretsScopeGlobal)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -420,9 +491,9 @@ func TestParseEnvLines(t *testing.T) {
 	})
 }
 
-func TestResolveLayeredSecrets_APIKeyInGlobalShared(t *testing.T) {
+func TestResolveSecretsLayers_APIKeyInGlobalShared(t *testing.T) {
 	// Regression test: API key vars stored in global.env must be found
-	// by ResolveLayeredSecrets. The old ResolveAPIKey function missed
+	// by ResolveSecretsLayers. The old ResolveAPIKey function missed
 	// this layer entirely.
 	home := t.TempDir()
 
@@ -434,7 +505,7 @@ func TestResolveLayeredSecrets_APIKeyInGlobalShared(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	secrets, err := ResolveLayeredSecrets(home, "proj", "claude", model.SecretsScopeBoth)
+	secrets, err := resolveMergedSecrets(home, "proj", "claude", model.SecretsScopeBoth)
 	if err != nil {
 		t.Fatal(err)
 	}

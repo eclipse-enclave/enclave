@@ -1,0 +1,7 @@
+Aug 13 12:57:40 dnsmasq[455]: query[A] broken.example.com from 127.0.0.1
+Aug 13 12:57:40 dnsmasq[455]: forwarded broken.example.com to 8.8.8.8
+Aug 13 12:57:40 dnsmasq[455]: reply broken.example.com is SERVFAIL
+Aug 13 12:57:41 dnsmasq[455]: query[A] blocked.example.com from 127.0.0.1
+Aug 13 12:57:41 dnsmasq[455]: reply blocked.example.com is REFUSED
+Aug 13 12:57:42 dnsmasq[455]: query[A] gone.example.com from 127.0.0.1
+Aug 13 12:57:42 dnsmasq[455]: cached gone.example.com is NXDOMAIN

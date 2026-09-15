@@ -10,6 +10,12 @@ Project overrides live outside the worktree so a project cannot alter its own
 isolation policy. Extension files are discovered from built-in `extensions/`
 plus user-global `~/.config/enclave/extensions/`.
 
+Extensions installed with `enclave tools|features add` carry a
+`.enclave-source.json` provenance sidecar in their user-global directory.
+Editing an installed extension's files by hand blocks
+`enclave tools|features update` for that extension until `--force`. See
+[Installing Extensions](extensions/installing.md).
+
 The `~/.config/enclave/` paths shown throughout this document are the Linux
 (XDG) config root. On macOS the config root is
 `~/Library/Application Support/org.eclipse.enclave/config/` instead;
@@ -23,17 +29,29 @@ substitute it for `~/.config/enclave/` in every path below.
 4. Global config (`~/.config/enclave/config.json`)
 5. Built-in defaults
 
-Security guardrail: project config cannot elevate guarded options such as `allow_all_network=true` or `allow_domains`. Those values are ignored with a warning; use global config or CLI flags for explicit host opt-in.
+Security guardrail: project config cannot elevate guarded options. Each is
+ignored with a warning naming the file; use global config or CLI flags for
+explicit host opt-in. Guarded at project scope: `tool`, `yolo`,
+`allow_all_network=true`, `allow_domains`, `pass_env`, `host_config`,
+`tool_overrides.<tool>.host_config_paths`, `base_image`, `bridge_ports`,
+`add_dirs`/`add_readonly_dirs` entries outside the project subtree,
+`project_mount="writable"`, and any `worktree_metadata` value that relaxes the
+inherited mode.
+
+Top-level `host_config_paths` is not part of that set: it is ignored with a
+warning in any config file, global included, because passthrough paths are only
+supported under `tool_overrides.<tool>`.
 
 ## Config Keys
 
 | Key | Description |
 |-----|-------------|
 | `tool` | Default tool (e.g. `claude`, `codex`) |
-| `backend` | Isolation backend (`docker`, default; experimental `qemu`) |
+| `backend` | Isolation backend: `auto` (default) uses docker or podman, whichever is installed, and asks once when both are; or `docker`, `podman`, experimental `qemu` |
 | `host_config` | `none` (default) or `passthrough` |
+| `skills_validation` | Shared skill validation: `strict` (default) or `agent`; supports tool overrides |
 | `tool_overrides.<tool>.host_config_paths` | Per-tool passthrough path directives (`default`, `+path`, `-path`, or explicit list) |
-| `yolo` | Enable YOLO mode (default: `true`) |
+| `yolo` | Enable YOLO mode (default: `true`). Only consulted when the selected tool's profile leaves `yoloEnabled` unset; every bundled CLI agent sets it, so use `--yolo`/`--no-yolo` for those |
 | `ephemeral` | Run without persistent auth/env stores |
 | `auth_scope` | `shared` or `project` (default: `shared`) |
 | `auth_name` | Named per-tool shared auth identity slug; unset uses the default store |
@@ -48,6 +66,7 @@ Security guardrail: project config cannot elevate guarded options such as `allow
 | `no_history` | Disable shell history |
 | `no_memory` | Disable per-project agent memory |
 | `session_monitor` | Run agents under the managed tmux session (enables `status` snapshots) |
+| `session_tint` | Terminal background color marking a session-owned terminal, as `#rrggbb` (unset: no tint) |
 | `base_image` | Docker base image override |
 | `devcontainer` | Derive base image from devcontainer.json |
 | `slim` | Build without features (tools only) |
@@ -56,7 +75,7 @@ Security guardrail: project config cannot elevate guarded options such as `allow
 | `image_name` | Override default image name/tag |
 | `features` | Feature extensions to enable |
 | `use_remote_user` | Honor devcontainer `remoteUser` for agent sessions |
-| `network_log` | Network audit mode: `coarse` (default) or `requests` |
+| `network_log` | Network audit mode: `coarse` (default, one event per TLS connection) or `requests` (one event per HTTP/HTTPS request, forcing MITM). See [Coverage and granularity](networking.md#coverage-and-granularity) |
 | `verbose` | Verbose logging |
 | `ports` | Publish container ports to the host (container → host) |
 | `add_dirs` | Additional directories to mount |
@@ -83,12 +102,35 @@ the inherited mode are ignored. For a regular repository whose `.git`
 directory sits inside the project, the project mount mode governs and this
 option has no effect.
 
+`session_tint` marks the terminal that owns a session, so a sandboxed session
+is visually distinct from an ordinary shell. When set to an `#rrggbb` value,
+`run` (including `shell`, `continue`, and `resume`), `exec`, and `attach` set
+the terminal background on start and reset it on exit. Inside tmux 3.3 or later
+only the session's pane is tinted; elsewhere the whole window is. Because only
+the background changes, pick a color that keeps your foreground text readable —
+enclave does not adjust it. Invalid values are reported when the config file is
+read and ignored.
+
+The tint is skipped when stdout is not a terminal and when `NO_COLOR` or
+`ENCLAVE_COLOR=never` is set; `ENCLAVE_COLOR=always` does not enable it, as the
+config key is the only switch. Because per-tool and per-project config layers
+apply, `tool_overrides.<tool>.session_tint` gives each tool its own color and a
+project config gives each project one; `attach` resolves the color for the tool
+and project of the session it attaches to, not for the current directory.
+Agents that paint their own background can cover the tint.
+
+The reset restores the terminal's configured default background, not whatever
+background was in effect before the session, so a color set at runtime (theme
+switchers, base16-style scripts) is dropped when the session ends. If enclave is
+killed with `SIGKILL` the reset never runs; clear a leftover tint with
+`printf '\e]111\a'`.
+
 **Example:**
 
 ```json
 {
   "tool": "codex",
-  "yolo": false,
+  "project_mount": "readonly",
   "secrets_scope": "project",
   "pass_env": ["GITHUB_TOKEN"],
   "allow_all_network": false
@@ -206,11 +248,22 @@ With `host_config=passthrough`, every built-in skill-capable tool passes its nat
 }
 ```
 
-For pi, use `-agent/skills/`. At session start the log lists exactly which allow-listed paths pass through.
+For pi, use `-agent/skills/`. At session start the log lists exactly which allow-listed paths pass through. Shared skills do not require host passthrough; the directives above exclude host skills while retaining passthrough for other settings.
 
-Shared skills must use the portable Agent Skills subset. `SKILL.md` must be a regular file with YAML frontmatter containing required `name` and `description` fields and only optional `license`, `compatibility`, and `metadata` fields. The name must match the directory and use lowercase letters, numbers, and hyphens. Harness-specific fields such as `allowed-tools` belong in a tool-specific skill. Enclave warns and skips an invalid shared skill rather than failing the session; tool-specific skills are left for the selected harness to validate. Symlinks inside shared skill sources are ignored.
+`skills_validation` controls validation of global and project shared skills:
 
-Built-in skills remain tool-specific so extensions can carry harness-specific metadata. Skills shipped by enabled features overlay as trusted extension content and skip the portable-skill validation applied to shared skills. Tools without `sandbox.skillsDir` ignore all shared skill sources.
+- `strict` (default): `SKILL.md` must be a regular, readable file with YAML frontmatter containing required `name` and `description` fields and optional `license`, `compatibility`, and `metadata` fields. The name must match the directory and use lowercase letters, numbers, and hyphens. Other fields, including `allowed-tools` and `disable-model-invocation`, cause the skill to be skipped.
+- `agent`: require a regular, readable `SKILL.md`, then copy its bytes and supporting files unchanged. Enclave does not parse the frontmatter, enforce name matching, strip fields, or translate metadata between agents. The selected agent validates and interprets the skill; metadata accepted by one agent may be ignored or rejected by another.
+
+In both modes, overrides are keyed by directory name. In `agent` mode, different directories can declare the same frontmatter `name` and both reach the agent; Enclave does not deduplicate them.
+
+Enclave warns and skips invalid shared skills rather than failing the session. A skipped higher-precedence skill leaves the lower-precedence skill intact. Tool-specific overrides, host passthrough, and extension skills are unaffected by this option.
+
+Set `"skills_validation": "agent"` in global or project `config.json`, or under `tool_overrides.<tool>`. The mode applies to all shared skills in the session. Values are case-insensitive and surrounding whitespace is ignored. The normal option precedence applies; `--skills-validation strict|agent` takes priority over config files. Project configuration may select `agent` because it is stored in Enclave's host-managed configuration root and does not expose additional host paths.
+
+In both modes, symlinked skill directories and symlinks inside skills are ignored; `SKILL.md` itself must be a regular file.
+
+Built-in skills remain tool-specific so extensions can carry harness-specific metadata. Skills shipped by enabled features overlay as trusted extension content and skip shared-skill validation. Tools without `sandbox.skillsDir` ignore all shared skill sources.
 
 ## Tool Config Patches
 
@@ -257,6 +310,15 @@ Merge semantics:
 | `ENCLAVE_LOG_LEVEL` | Log level: `info` (default) or `debug` |
 | `ENCLAVE_AGENT_UPDATE_INTERVAL_HOURS` | Minimum hours after a tool's last successful automatic update before `check-update.sh` is eligible to probe again (`0` = always) |
 | `ENCLAVE_DEVCONTAINER_REWRITE_VARS` | Comma-separated extra env var names for devcontainer home-path normalization |
+
+These are read by the Windows launcher on the Windows side only, and are not
+forwarded into the WSL2 distribution. See [windows.md](windows.md).
+
+| Variable | Description |
+|----------|-------------|
+| `ENCLAVE_WSL_DISTRO` | Distribution to use for a Windows drive working directory; ignored with a warning when the working directory already names one |
+| `ENCLAVE_WSL_ALLOW_WINDOWS_PATH` | Set to `1` to accept a Windows drive working directory and reach it through `/mnt/<letter>` |
+| `ENCLAVE_WSL_FORWARD_ENV` | Comma-separated extra variables to forward into the distribution, each optionally with a `WSLENV` flag suffix (`/p`, `/l`, `/u`, `/w`) |
 
 Buildx cache and canonical build UID/GID controls are CLI-only. Use
 `--buildx-cache-dir`, `--build-uid`, `--build-gid`, and `--runtime-uid-remap`

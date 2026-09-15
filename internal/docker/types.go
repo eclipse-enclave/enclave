@@ -8,6 +8,7 @@
 package docker
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 )
@@ -41,14 +42,42 @@ type Mount struct {
 // Docker inspect schema.
 type ContainerConfig struct {
 	Image        string            `json:"Image,omitempty"`
-	Cmd          []string          `json:"Cmd,omitempty"`
-	Entrypoint   []string          `json:"Entrypoint,omitempty"`
+	Cmd          StrSlice          `json:"Cmd,omitempty"`
+	Entrypoint   StrSlice          `json:"Entrypoint,omitempty"`
 	Env          []string          `json:"Env,omitempty"`
 	WorkingDir   string            `json:"WorkingDir,omitempty"`
 	User         string            `json:"User,omitempty"`
 	Hostname     string            `json:"Hostname,omitempty"`
 	Labels       map[string]string `json:"Labels,omitempty"`
 	ExposedPorts PortSet           `json:"ExposedPorts,omitempty"`
+}
+
+// StrSlice is a string slice that also decodes from a single JSON string.
+// Docker emits Cmd and Entrypoint as arrays, podman 4.x inspects Entrypoint as
+// one string (podman 5.0 aligned with Docker); either form decodes here.
+type StrSlice []string
+
+// UnmarshalJSON accepts a JSON array of strings, a single string, or null.
+func (s *StrSlice) UnmarshalJSON(data []byte) error {
+	if string(data) == "null" {
+		*s = nil
+		return nil
+	}
+	var single string
+	if err := json.Unmarshal(data, &single); err == nil {
+		if single == "" {
+			*s = nil
+		} else {
+			*s = StrSlice{single}
+		}
+		return nil
+	}
+	var many []string
+	if err := json.Unmarshal(data, &many); err != nil {
+		return err
+	}
+	*s = StrSlice(many)
+	return nil
 }
 
 // HostConfig is the subset of host configuration we translate to flags.
@@ -61,11 +90,15 @@ type HostConfig struct {
 	PortBindings PortMap
 	ExtraHosts   []string
 	Init         *bool
-	SecurityOpt  []string
-	Tmpfs        map[string]string
-	CapAdd       []string
-	CapDrop      []string
-	Sysctls      map[string]string
+	// UserNS is the user namespace mode passed as `--userns`; rootless podman
+	// uses "keep-id" so the container user keeps the host user's UID/GID on
+	// bind mounts.
+	UserNS      string
+	SecurityOpt []string
+	Tmpfs       map[string]string
+	CapAdd      []string
+	CapDrop     []string
+	Sysctls     map[string]string
 }
 
 // NetworkMode is the container network mode (for example "" for the default

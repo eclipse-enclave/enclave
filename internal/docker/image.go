@@ -197,8 +197,12 @@ func buildWithDockerCLI(ctx context.Context, req BuildRequest, out io.Writer) er
 	}
 	args = append(args, sortedMapFlags("--build-arg", req.BuildArgs)...)
 	args = append(args, sortedMapFlags("--label", req.Labels)...)
-	for _, image := range cleanBuildxSpecs(req.CacheFrom) {
-		args = append(args, "--cache-from", image)
+	// podman's --cache-from is a registry-only source that rejects tagged
+	// references; its local layer cache already covers the previous build.
+	if !IsPodman() {
+		for _, image := range cleanBuildxSpecs(req.CacheFrom) {
+			args = append(args, "--cache-from", image)
+		}
 	}
 	progress := normalizeBuildProgress(req.Progress)
 	switch {
@@ -340,8 +344,12 @@ func buildxCommandArgs(req BuildRequest) ([]string, *bytes.Reader) {
 	}
 	args = append(args, sortedMapFlags("--build-arg", req.BuildArgs)...)
 	args = append(args, sortedMapFlags("--label", req.Labels)...)
-	for _, image := range cleanBuildxSpecs(req.CacheFrom) {
-		args = append(args, "--cache-from", image)
+	// podman's --cache-from is a registry-only source that rejects tagged
+	// references; its local layer cache already covers the previous build.
+	if !IsPodman() {
+		for _, image := range cleanBuildxSpecs(req.CacheFrom) {
+			args = append(args, "--cache-from", image)
+		}
 	}
 	for _, spec := range cleanBuildxSpecs(req.BuildxCacheFrom) {
 		args = append(args, "--cache-from", spec)
@@ -376,6 +384,11 @@ func cleanBuildxSpecs(values []string) []string {
 
 // BuildkitEnabled reports whether BuildKit is enabled via DOCKER_BUILDKIT.
 func BuildkitEnabled() bool {
+	// podman builds with buildah, which honors the BuildKit Dockerfile syntax
+	// but takes neither BuildKit progress flags nor inline-cache build args.
+	if IsPodman() {
+		return false
+	}
 	raw := strings.TrimSpace(strings.ToLower(os.Getenv("DOCKER_BUILDKIT")))
 	if raw == "" {
 		return true

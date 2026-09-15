@@ -8,7 +8,6 @@
 package runtime
 
 import (
-	"context"
 	"fmt"
 
 	"enclave/internal/logx"
@@ -18,6 +17,12 @@ import (
 // ExecuteBackground starts a detached container that runs the tool command as
 // PID 1; it can be reattached later via `docker attach`.
 func (r *Runtime) ExecuteBackground() (string, error) {
+	releaseStartLock, err := r.acquireSessionStartLock()
+	if err != nil {
+		return "", err
+	}
+	defer releaseStartLock()
+
 	ctx, err := r.prepareExecution()
 	if err != nil {
 		return "", err
@@ -31,12 +36,15 @@ func (r *Runtime) ExecuteBackground() (string, error) {
 		}
 		return "", fmt.Errorf("runtime backend is not configured")
 	}
-	if _, err := be.Start(context.Background(), r.backendRequest(ctx, true, true)); err != nil {
+	runCtx, stop := interruptContext()
+	defer stop()
+	if _, err := be.Start(runCtx, r.backendRequest(ctx, true, true)); err != nil {
 		if ctx.Cleanup != nil {
 			ctx.Cleanup()
 		}
 		return "", err
 	}
+	releaseStartLock()
 
 	// Announce only after the container is confirmed started: auto-assigned
 	// host ports do not exist until then, and a failed bind (e.g. a host-port

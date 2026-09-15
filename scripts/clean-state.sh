@@ -241,6 +241,9 @@ add_data_install_paths() {
     [[ -n "$data_root" ]] || return 0
     add_install_path "${data_root}/${APP}"
     add_install_path "${data_root}/bash-completion/completions/${APP}"
+    # Fedora and source installs use site-functions, Debian vendor-completions.
+    add_install_path "${data_root}/zsh/site-functions/_${APP}"
+    add_install_path "${data_root}/zsh/vendor-completions/_${APP}"
     add_install_path "${data_root}/applications/${APP}.desktop"
     for size in "${ICON_SIZES[@]}"; do
         add_install_path "${data_root}/icons/hicolor/${size}x${size}/apps/${APP}.png"

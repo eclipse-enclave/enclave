@@ -33,7 +33,7 @@ func runExtensionList(ctx *AppContext) int {
 	} else {
 		for _, name := range tools {
 			builtinDir, userDir := config.ResolveToolDirs(ctx.Paths, name)
-			source := extensionSourceLabel(builtinDir, userDir)
+			source := config.SourceLabel(builtinDir, userDir)
 			description := ""
 			if ext, loadErr := config.LoadToolExtension(ctx.Paths, name); loadErr == nil {
 				description = strings.TrimSpace(ext.Description)
@@ -53,7 +53,7 @@ func runExtensionList(ctx *AppContext) int {
 	} else {
 		for _, ext := range features {
 			builtinDir, userDir := config.ResolveFeatureDirs(ctx.Paths, ext.Name)
-			source := extensionSourceLabel(builtinDir, userDir)
+			source := config.SourceLabel(builtinDir, userDir)
 			printExtensionLine(ext.Name, source, strings.TrimSpace(ext.Description))
 		}
 	}
@@ -71,17 +71,6 @@ func loadErrorSummary(err error) string {
 		msg = msg[:maxLen-1] + "…"
 	}
 	return msg
-}
-
-func extensionSourceLabel(builtinDir string, userDir string) string {
-	switch {
-	case builtinDir != "" && userDir != "":
-		return "override"
-	case userDir != "":
-		return "user"
-	default:
-		return "builtin"
-	}
 }
 
 func printExtensionLine(name string, source string, description string) {

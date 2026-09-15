@@ -56,6 +56,9 @@ func runUpdate(input *CommandInput) int {
 		// matches what `enclave --tool <tool>` would produce, not the default
 		// tool's variant.
 		toolOpts, _, _ := config.ResolveOptionsForTool(input.CLIOptions, input.CLISources, input.GlobalDefaults, input.ProjectDefaults, tool)
+		// The backend is a host-level choice already resolved in Run; a
+		// per-tool re-resolution would otherwise see the unresolved "auto".
+		toolOpts.Backend = input.Options.Backend
 		toolOpts, _, warnings, validateErr := ValidateOptions(toolOpts, toolOpts.Sources, ValidationContext{
 			Paths:  input.Ctx.Paths,
 			Action: input.Action,
@@ -110,9 +113,11 @@ func updateToolImage(ctx *AppContext, opts model.Options, host model.Host, proje
 		return err
 	}
 	buildCfg.HashSuffix = appendEffectiveBuildIdentityHashSuffix(buildCfg.HashSuffix, host, opts.BuildOptions)
-	buildPlan, err := resolveRuntimeImageBuildPlan(ctx.Paths, buildCfg, opts.BuildOptions, tool, host.Home, true, time.Now().UTC())
-	if err != nil {
-		return err
+	resolveBuildPlan := func() (runtimeImageBuildPlan, error) {
+		return resolveRuntimeImageBuildPlan(ctx.Paths, buildCfg, opts.BuildOptions, tool, host.Home, true, time.Now().UTC(), probeToolUpdateFingerprint)
 	}
-	return buildImage(context.Background(), ctx.Paths, host, buildPlan.CombinedHash, buildCfg, opts.BuildOptions, tool, buildPlan.AgentUpdates)
+	executeBuildPlan := func(buildPlan runtimeImageBuildPlan) error {
+		return buildImage(context.Background(), ctx.Paths, host, buildPlan.CombinedHash, buildCfg, opts.BuildOptions, tool, buildPlan.AgentUpdates)
+	}
+	return coordinateRuntimeImageBuild(host.Home, buildCfg.ImageName, true, resolveBuildPlan, executeBuildPlan)
 }

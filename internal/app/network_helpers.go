@@ -45,6 +45,12 @@ func gatewayManagerForInput(input *CommandInput) (backend.GatewayManager, int) {
 	return manager, 0
 }
 
+// currentProjectToolLabel names the default scope of the network commands. Both
+// gateway discovery and the log reader report it, so they share the wording.
+func currentProjectToolLabel(projectHash string, tool string) string {
+	return fmt.Sprintf("current project/tool (%s/%s)", projectHash, tool)
+}
+
 func discoverGatewayTargets(input *CommandInput, manager backend.GatewayManager, allRunning bool) ([]backend.GatewayInfo, string, error) {
 	filter := backend.GatewayFilter{}
 	scopeLabel := "all running gateways"
@@ -56,7 +62,7 @@ func discoverGatewayTargets(input *CommandInput, manager backend.GatewayManager,
 		filter.Tool = input.Options.Tool
 		filter.ProjectHash = project.Hash
 		filter.WorkspaceID = util.WorkspaceIdentityHash(project.RealDir, project.Dir)
-		scopeLabel = fmt.Sprintf("current project/tool (%s/%s)", project.Hash, input.Options.Tool)
+		scopeLabel = currentProjectToolLabel(project.Hash, input.Options.Tool)
 	}
 
 	targets, err := manager.ListGateways(context.Background(), filter)

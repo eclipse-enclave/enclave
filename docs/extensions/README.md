@@ -24,8 +24,10 @@ Extension definitions are loaded from:
 2. User-global overrides under `~/.config/enclave/extensions/`
 
 Project-local extension definitions (for example,
-`/path/to/project/.enclave/extensions/`) are not loaded. Install custom
-definitions in the user-global root. Select a custom tool for a project with
+`/path/to/project/.enclave/extensions/`) are not loaded. Install extensions
+into the user-global root from a git repository with `enclave features add`
+/ `enclave tools add`; see [Installing Extensions](installing.md). Select a
+custom tool for a project with
 `enclave --tool <tool>`; project config cannot set the active tool, although
 global config can set a host-wide default. For a project-specific feature,
 declare it with `defaultEnabled: false` (to avoid the project-specific
@@ -151,6 +153,9 @@ the mounted host project directory and installs happen at `docker build` time:
 - `files/workspace/**` is copied into the project at container **start** and
   **never clobbers** an existing host file (warns and skips).
 - `commands.startup` running as root is **rejected loudly at load**.
+- the `network.serviceDomains` ↔ `network.serviceAuth` pairing must be complete
+  in both directions; an incomplete mapping is **rejected loudly at load**
+  (see below).
 - `commands.install` (mixins only) is woven into the build; an `install.sh`
   sidecar wins if a feature ships both.
 
@@ -241,7 +246,7 @@ additional files beyond `spec.yaml`.
 | File | Purpose |
 |------|---------|
 | `spec.yaml` | Extension spec: `kind: sandbox`, `sandbox.*` metadata, `network`, `credentials`, `providers`, `ports` |
-| `gateway-allowlist.conf` | dnsmasq config for network isolation |
+| `gateway-allowlist.conf` | dnsmasq config for network isolation. Resolved from the user extension tree ahead of the built-in one; a tool that ships none falls back to the broader `base.conf` |
 | `install.sh` | Installation script run during Docker build |
 
 ### Optional Files
@@ -249,6 +254,7 @@ additional files beyond `spec.yaml`.
 | File | Purpose |
 |------|---------|
 | `templates/` | Settings templates copied to `/usr/local/share/enclave/templates/` |
+| `config-base/` | Seed files for the tool's config store, overlaid into the generated config source before the host and per-project layers |
 | `check-update.sh` | Optional prebuild hook that returns a stable upstream fingerprint for automatic update probes |
 | `entrypoint.d/*.sh` | Scripts sourced at container startup (only for matching tool) |
 | `go/` | Go code for custom hooks/handlers (compiled into binary) |
@@ -311,9 +317,15 @@ tool metadata. `sandbox.entrypoint.run` is the shared sbx-style command to
 launch the tool.
 
 When using `templates/`, set `sandbox.configDir`, `sandbox.settingsFile`
-(aggregated name like `<tool>-settings.json`), and `sandbox.settingsTarget`
-(path under `configDir`). Runtime composes the built-in template into the
-generated tool config source before container startup.
+(aggregated name like `<tool>-settings.json`: the `<tool>-` prefix followed by
+the template's bare filename, path separators are rejected), and `sandbox.settingsTarget`
+(path under `configDir`). Runtime composes the template into the generated tool
+config source before container startup. The template and the optional
+`config-base/` directory are resolved from the built-in tree and from
+`~/.config/enclave/extensions/tools/<tool>/`, with the user extension tree
+winning per file, the same precedence the image build context applies. A
+user-global tool extension can therefore use `templates/` without being
+upstreamed.
 
 If a tool supports host config passthrough, declare a narrow reviewed
 `sandbox.passthroughPaths` allow-list. Host passthrough is fail closed: only
@@ -378,13 +390,12 @@ at `sandbox.skillsDir`. The same layout and precedence are documented with
 host paths in [Configuration](../configuration.md#managed-skills) and
 [persistent stores](../runtime/stores.md#managed-skills).
 
-Shared skills must use portable Agent Skills frontmatter: required `name` and
-`description`, with optional `license`, `compatibility`, and `metadata` only.
-The name must match the skill directory. Invalid shared skills warn and are
-skipped, so one bad source does not prevent a tool session from starting.
-Harness-specific metadata belongs in a tool-specific skill and is validated by
-the selected harness. Built-in duplicated skills remain per-tool so they can
-carry harness-specific metadata. Tools without `sandbox.skillsDir` ignore all
+Shared skills use strict portable Agent Skills frontmatter by default. Set
+`skills_validation` to `agent` to leave metadata interpretation to the selected
+agent. Invalid shared skills warn and are skipped, so one bad source does not
+prevent a tool session from starting. Tool-specific skills are validated by the
+selected harness. Built-in duplicated skills remain per-tool so they can carry
+harness-specific metadata. Tools without `sandbox.skillsDir` ignore all
 shared sources.
 
 Canonical host-side tool config overrides live under `~/.config/enclave/tools/<tool>/` (global) and `~/.config/enclave/projects/<hash>/<tool>/config/` (project).
@@ -398,7 +409,8 @@ Secrets are split across two `spec.yaml` sections:
 - `credentials.sources.<id>` declares the credential itself: `env` (one or
   more env-var aliases for the same credential) and the enclave-native
   `apiKey` bool (`false` for OAuth/session tokens; omitted/`true` means it's
-  an API key).
+  an API key). See [Authentication](../auth.md#env-aliases) for how multiple
+  aliases are resolved against each other.
 - `credentials.sources.<id>.file` optionally sources the secret from a host
   file: `path` (supports `~`) plus a `parser` — empty for the trimmed raw file
   contents, or `json:<dot.path>` (e.g. `json:auth.token`) to extract a scalar
@@ -412,7 +424,35 @@ Secrets are split across two `spec.yaml` sections:
   `network.serviceAuth.<service-id>` (`headerName`, optional `valueFormat`)
   describe how the gateway injects that credential as an HTTP header when it
   proxies requests to those hosts. The service-id in `serviceAuth` and
-  `serviceDomains` is the same key used under `credentials.sources`.
+  `serviceDomains` is the same key used under `credentials.sources`. Every
+  service-id in `serviceDomains` must also have a `serviceAuth` entry; without
+  one the mapping is inert — the hosts never reach the allowlist and the
+  credential is injected as a raw env value — so the spec is rejected at load.
+  To make hosts reachable without injecting a credential, list them under
+  `network.allowedDomains` instead. The pairing is required in both directions:
+  a `serviceAuth` entry also needs at least one host, either from
+  `serviceDomains` or from its own `hosts` list.
+- `network.serviceAuth.<service-id>.hostsFromCredential` names another
+  `credentials.sources` id whose resolved value is a host, for services that
+  can point at a self-hosted instance. It does not stand in for the hosts the
+  pairing above requires: the service still needs `hosts` or `serviceDomains`
+  entries, which remain the release targets whenever the credential is unset.
+  When that credential resolves, its value
+  becomes the **only** host this service's token is released to, replacing the
+  declared `hosts` and any `serviceDomains` entries pointing at the service —
+  an instance-specific token must not be released to the public default host as
+  well. Unlike a declared host, which the gateway also applies to everything
+  beneath it, the selected host is matched exactly: the token reaches
+  `gitlab.example.com` and not `runner.gitlab.example.com`. The network allow
+  set is *not* narrowed: the selected host is added to it (with the usual
+  subdomain reach, so the instance's other hosts stay resolvable), and the
+  declared hosts stay reachable. So one env var is enough to make the tool
+  reach the instance with token injection working. An unset credential
+  keeps the declared hosts as the release targets, and the resolved value is not
+  written to the persisted env store, so it never outlives the run that set it.
+  A value that is not a usable host warns and is ignored; wildcards are
+  rejected, since the point is to name one instance. Values may be a bare host,
+  `host:port`, or a full URL — the scheme, port and path are stripped.
 
 The placeholder convention is Go `fmt`-style `%s`, not `{secret}`. An empty
 `valueFormat` means "inject the raw secret value" with no wrapping (see
@@ -698,7 +738,7 @@ Hooks run in a fixed order during runtime auth preparation:
 - `internal/model/types.go`: `Extension` struct with `IsMixin()` and `IsSandbox()` methods
 - `internal/config/extension.go`: Extension loading and filtering functions
 - `internal/config/profile.go`: `ListProfiles()` returns only tool extensions
-- `internal/runtime/network_manager.go`: Loads DNS allowlists from `extensions/tools/{tool}/gateway-allowlist.conf`
+- `internal/runtime/network_manager.go`: Loads DNS allowlists from `extensions/tools/{tool}/gateway-allowlist.conf`, resolved from the user extension tree ahead of the built-in one
 
 ## Adding a New Tool Extension
 

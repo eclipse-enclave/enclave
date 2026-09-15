@@ -9,6 +9,7 @@ package backend
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -16,7 +17,11 @@ import (
 )
 
 const (
+	// NameAuto is the default backend value: it resolves to docker or podman
+	// depending on which CLI the host has (see app backend resolution).
+	NameAuto   = "auto"
 	NameDocker = "docker"
+	NamePodman = "podman"
 	NameQEMU   = "qemu"
 )
 
@@ -217,6 +222,9 @@ type HTTPReleaseRule struct {
 	Hosts  []string
 	Header string
 	Format string
+	// ExactHosts matches Hosts by equality rather than covering subdomains;
+	// see model.SecretReleaseEntry.
+	ExactHosts bool
 }
 
 type PortMapping struct {
@@ -236,9 +244,11 @@ type AttachIO struct {
 	Err        io.Writer
 	TTY        bool
 	DetachKeys string
-	// OnStarted, if set, is invoked once the backend confirms the session is
-	// running (e.g. to announce published ports). Backends that cannot observe
-	// startup may skip it.
+	// OnStarted, if set, must be invoked exactly once as soon as the backend
+	// confirms the session is running. The runtime releases the session-start
+	// lock here (and announces published ports); a foreground Run that never
+	// calls it holds that lock until the session exits, blocking every other
+	// session start for the same tool and project, including named sessions.
 	OnStarted func()
 }
 
@@ -287,6 +297,14 @@ type LogReader interface {
 // Stop{Finalize:true} ran) or explicitly accept losing session credentials.
 type UnfinalizedRemover interface {
 	RemoveWithoutFinalize(ctx context.Context, ref SessionRef) error
+}
+
+// StaleGatewayRemover removes a gateway sidecar that outlived an interrupted
+// start of the named session. Left running, the sidecar keeps the session's
+// published ports bound and a fresh start of that name fails its host-port
+// checks before it reaches gateway startup.
+type StaleGatewayRemover interface {
+	RemoveStaleGateway(ctx context.Context, name string) error
 }
 
 // ConfigStoreConflictChecker reports whether a running session for the same
@@ -352,7 +370,6 @@ type SessionFilter struct {
 	RunningOnly bool
 	Tool        string
 	ProjectHash string
-	SessionName string
 	Background  *bool
 	NamePrefix  string
 	ExactName   string
@@ -433,6 +450,11 @@ type SeedItem struct {
 	StoreRel string
 	Mode     fs.FileMode
 }
+
+// ErrInterrupted reports a session start aborted by SIGINT or SIGTERM before
+// the session container was running. The backend has already torn down what
+// it started.
+var ErrInterrupted = errors.New("interrupted before the session started")
 
 // ExitError reports a session process that exited with a non-zero status.
 type ExitError struct {

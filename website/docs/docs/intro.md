@@ -57,7 +57,7 @@ without handing it your host.
   </div>
   <div className="enclave-box">
     <div className="box-title">Audit-ready by design</div>
-    <p>The gateway logs DNS queries and proxied requests, giving you an evidence trail for security and compliance reviews.</p>
+    <p>The gateway logs every connection it proxies and every lookup it blocks, giving you an evidence trail for security and compliance reviews.</p>
   </div>
   <div className="enclave-box">
     <div className="box-title">Session lifecycle management</div>

@@ -96,3 +96,11 @@ func TestBuildRunArgsDetachedInteractive(t *testing.T) {
 		t.Fatalf("buildRunArgs() = %v, want %v", got, wantPrefix)
 	}
 }
+
+func TestBuildRunArgsCreateMode(t *testing.T) {
+	got := buildRunArgs(&ContainerConfig{Image: "image", Entrypoint: []string{"true"}}, &HostConfig{UserNS: "keep-id"}, "warmup", runMode{Create: true})
+	want := []string{"create", "--name", "warmup", "--entrypoint", "true", "--userns", "keep-id", "image"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("buildRunArgs() = %v, want %v", got, want)
+	}
+}

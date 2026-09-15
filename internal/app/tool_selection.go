@@ -32,11 +32,3 @@ func listToolExtensions(paths model.Paths) ([]model.Extension, error) {
 	}
 	return tools, nil
 }
-
-func toolNameList(tools []model.Extension) []string {
-	names := make([]string, 0, len(tools))
-	for _, tool := range tools {
-		names = append(names, tool.Name)
-	}
-	return names
-}

@@ -1,6 +1,7 @@
 {
   "type": "mixin",
   "name": "devtools",
+  "display_name": "Development Tools",
   "description": "Core development tools (vim, htop, ripgrep, etc.)",
   "apt_packages": [
     "vim",

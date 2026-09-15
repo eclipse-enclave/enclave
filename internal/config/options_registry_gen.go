@@ -59,6 +59,16 @@ func OptionSpecs() []OptionSpec {
 			},
 		},
 		{
+			Name:  "skills_validation",
+			Group: OptionGroupRun,
+			ApplyDefaultsWithSource: func(opts *model.Options, defaults Defaults, source model.OptionSource, sources *model.OptionSources) {
+				if canOverride(sources.SkillsValidation, source) && strings.TrimSpace(defaults.SkillsValidation) != "" {
+					opts.SkillsValidation = strings.TrimSpace(defaults.SkillsValidation)
+					sources.SkillsValidation = source
+				}
+			},
+		},
+		{
 			Name:  "yolo",
 			Group: OptionGroupRun,
 			ApplyDefaultsWithSource: func(opts *model.Options, defaults Defaults, source model.OptionSource, sources *model.OptionSources) {
@@ -175,6 +185,16 @@ func OptionSpecs() []OptionSpec {
 				if canOverride(sources.SessionMonitor, source) && defaults.SessionMonitor != nil {
 					opts.SessionMonitor = *defaults.SessionMonitor
 					sources.SessionMonitor = source
+				}
+			},
+		},
+		{
+			Name:  "session_tint",
+			Group: OptionGroupRun,
+			ApplyDefaultsWithSource: func(opts *model.Options, defaults Defaults, source model.OptionSource, sources *model.OptionSources) {
+				if canOverride(sources.SessionTint, source) && strings.TrimSpace(defaults.SessionTint) != "" {
+					opts.SessionTint = strings.TrimSpace(defaults.SessionTint)
+					sources.SessionTint = source
 				}
 			},
 		},

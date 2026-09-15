@@ -9,14 +9,22 @@ package app
 
 import (
 	"fmt"
+	"os"
 
 	"enclave/internal/config"
+	"enclave/internal/extinstall"
 	"enclave/internal/logx"
 	"enclave/internal/model"
 )
 
-func runFeatures(ctx *AppContext, opts model.Options, sources model.OptionSources) int {
+func runFeatures(ctx *AppContext, req *extinstall.Request, opts model.Options, sources model.OptionSources) int {
 	features, err := config.ListFeatures(ctx.Paths)
+	if err != nil {
+		logx.Errorf("%v", err)
+		return 1
+	}
+
+	inventory, err := extensionInventory(ctx.Paths, model.KindFeature, features)
 	if err != nil {
 		logx.Errorf("%v", err)
 		return 1
@@ -38,31 +46,45 @@ func runFeatures(ctx *AppContext, opts model.Options, sources model.OptionSource
 		}
 	}
 
+	if req != nil && req.JSON {
+		isAvailable := func(name string) bool {
+			_, ok := available[name]
+			return ok
+		}
+		entries := extensionListJSONEntries(features, inventory, isAvailable)
+		if err := renderExtensionListJSON(os.Stdout, model.KindFeature, entries); err != nil {
+			logx.Errorf("%v", err)
+			return 1
+		}
+		return 0
+	}
+
 	for _, feature := range features {
+		suffix := provenanceSuffix(inventory[feature.Name])
 		switch {
 		case opts.Slim:
 			src := formatSource(sources.Slim, ctx.ProjectDir)
 			if src != "" {
-				fmt.Printf("✗ %s (disabled by --slim from %s)\n", feature.Name, src)
+				fmt.Printf("✗ %s%s (disabled by --slim from %s)\n", feature.Name, suffix, src)
 			} else {
-				fmt.Printf("✗ %s (disabled by --slim)\n", feature.Name)
+				fmt.Printf("✗ %s%s (disabled by --slim)\n", feature.Name, suffix)
 			}
 		case opts.Features != nil:
 			if _, ok := available[feature.Name]; ok {
-				fmt.Printf("✓ %s\n", feature.Name)
+				fmt.Printf("✓ %s%s\n", feature.Name, suffix)
 			} else {
 				src := formatSource(sources.Features, ctx.ProjectDir)
 				if src != "" {
-					fmt.Printf("✗ %s (disabled by features from %s)\n", feature.Name, src)
+					fmt.Printf("✗ %s%s (disabled by features from %s)\n", feature.Name, suffix, src)
 				} else {
-					fmt.Printf("✗ %s (disabled by features)\n", feature.Name)
+					fmt.Printf("✗ %s%s (disabled by features)\n", feature.Name, suffix)
 				}
 			}
 		default:
 			if _, ok := available[feature.Name]; ok {
-				fmt.Printf("✓ %s\n", feature.Name)
+				fmt.Printf("✓ %s%s\n", feature.Name, suffix)
 			} else {
-				fmt.Printf("✗ %s (opt-in)\n", feature.Name)
+				fmt.Printf("✗ %s%s (opt-in)\n", feature.Name, suffix)
 			}
 		}
 	}

@@ -37,40 +37,50 @@ func ReadAllEnvFromFile(path string) (map[string]string, error) {
 	return parseEnvLines(file)
 }
 
-// ResolveLayeredSecrets reads secrets files in layer order and merges them.
-// Layer 1: global.env (always read). Layer 2: global/<tool>.env (when scope
-// is "global" or "both"). Layer 3: projects/<hash>/<tool>.env (when scope is
-// "project" or "both"). Later layers override earlier ones.
-func ResolveLayeredSecrets(home string, projectHash string, tool string, scope string) (map[string]string, error) {
-	result := map[string]string{}
+// SecretsLayer is one secrets file together with the values it contributes.
+type SecretsLayer struct {
+	Path   string
+	Values map[string]string
+}
 
-	globalShared, err := ReadAllEnvFromFile(config.HostSecretsGlobalSharedFile(home))
-	if err != nil {
-		return nil, fmt.Errorf("read global secrets: %w", err)
-	}
-	for k, v := range globalShared {
-		result[k] = v
+// ResolveSecretsLayers reads the secrets files in layer order, lowest
+// precedence first. Layer 1: global.env (always read). Layer 2:
+// global/<tool>.env (when scope is "global" or "both"). Layer 3:
+// projects/<hash>/<tool>.env (when scope is "project" or "both"). Later layers
+// override earlier ones. Files that are missing or empty are omitted.
+func ResolveSecretsLayers(home string, projectHash string, tool string, scope string) ([]SecretsLayer, error) {
+	type candidate struct {
+		path   string
+		errMsg string
 	}
 
+	candidates := []candidate{{
+		path:   config.HostSecretsGlobalSharedFile(home),
+		errMsg: "read global secrets",
+	}}
 	if scope == model.SecretsScopeGlobal || scope == model.SecretsScopeBoth {
-		perTool, err := ReadAllEnvFromFile(config.HostSecretsGlobalFile(home, tool))
-		if err != nil {
-			return nil, fmt.Errorf("read global per-tool secrets: %w", err)
-		}
-		for k, v := range perTool {
-			result[k] = v
-		}
+		candidates = append(candidates, candidate{
+			path:   config.HostSecretsGlobalFile(home, tool),
+			errMsg: "read global per-tool secrets",
+		})
 	}
-
 	if scope == model.SecretsScopeProject || scope == model.SecretsScopeBoth {
-		projectTool, err := ReadAllEnvFromFile(config.HostSecretsProjectFile(home, projectHash, tool))
-		if err != nil {
-			return nil, fmt.Errorf("read project per-tool secrets: %w", err)
-		}
-		for k, v := range projectTool {
-			result[k] = v
-		}
+		candidates = append(candidates, candidate{
+			path:   config.HostSecretsProjectFile(home, projectHash, tool),
+			errMsg: "read project per-tool secrets",
+		})
 	}
 
-	return result, nil
+	layers := make([]SecretsLayer, 0, len(candidates))
+	for _, candidate := range candidates {
+		values, err := ReadAllEnvFromFile(candidate.path)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", candidate.errMsg, err)
+		}
+		if len(values) == 0 {
+			continue
+		}
+		layers = append(layers, SecretsLayer{Path: candidate.path, Values: values})
+	}
+	return layers, nil
 }

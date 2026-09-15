@@ -93,7 +93,16 @@ The image rebuilds when the Dockerfile template, entrypoint, target, base image/
 
 `--no-rebuild` bypasses all runtime and gateway image builds for the current invocation, including automatic update probes and rebuilds. It uses existing local images as-is and fails fast if a required image is missing.
 
-`--no-cache` disables the runtime package caches (host directories bind-mounted from `~/.cache/enclave/`) and does not affect the Docker build cache.
+`--no-cache` disables the runtime package cache mounts from `~/.cache/enclave/`
+and does not affect the Docker build cache. Package managers can still use
+container-local caches that are discarded with the container.
+
+Enclave pins the pnpm store to `~/.local/share/pnpm/store`, backed by the
+persistent cache unless `--no-cache` is set, so pnpm's mount-boundary detection
+cannot create `.pnpm-store` in the project. The path is set via
+`PNPM_CONFIG_STORE_DIR` (pnpm 11 and later) and a `store-dir` entry in pnpm's
+global config file (pnpm 9 and 10), which project-level pnpm config overrides. Store and project
+are separate mounts, so pnpm copies packages instead of hard-linking them.
 
 By default, enclave builds with `docker build` and inline image cache.
 `--cache-from <image>` adds image cache sources, and the current tool image's

@@ -10,6 +10,7 @@
 - [tools.md](tools.md) — Built-in tools, images, devcontainers, and updates
 - [session-status.md](session-status.md) — Terminal snapshots for external orchestrators
 - [host-image-inbox.md](host-image-inbox.md) — Explicit host image import
+- [windows.md](windows.md) — The WSL2 launcher: setup, working-directory rules, and environment forwarding
 
 ## Developer Documentation
 
@@ -29,7 +30,7 @@
 
 - [security/README.md](security/README.md) — Current security boundaries and residual risks
 - [security/host-hardening.md](security/host-hardening.md) — Rootful Docker host hardening
-- [security/rootless.md](security/rootless.md) — Rootless Docker compatibility status
+- [security/rootless.md](security/rootless.md) — Rootless engines: podman supported, rootless Docker not
 
 ## Diagrams
 

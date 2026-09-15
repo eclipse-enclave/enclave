@@ -11,7 +11,9 @@ import (
 	"path/filepath"
 	"strings"
 
+	"enclave/internal/logx"
 	"enclave/internal/model"
+	"enclave/internal/util"
 )
 
 const (
@@ -27,6 +29,22 @@ func HostLocksDir(home string) string {
 
 func HostLockPath(home string, name string) string {
 	return filepath.Join(HostLocksDir(home), name)
+}
+
+// HostImageBuildLockPath is the lock file that serializes builds of one
+// container image across enclave processes.
+func HostImageBuildLockPath(home string, image string) string {
+	return HostLockPath(home, "image-build-"+util.HashString(image)+".lock")
+}
+
+// AcquireImageBuildLock takes the build lock for image and returns its release
+// function. Runtime and gateway image builds share this protocol: the caller
+// resolves its build plan only after acquiring the lock, so a build another
+// process finished while it waited is detected and skipped.
+func AcquireImageBuildLock(home string, image string) (release func(), err error) {
+	return util.AcquireFileLock(HostImageBuildLockPath(home, image), func() {
+		logx.Infof("Waiting for another enclave process to finish building %s.", image)
+	})
 }
 
 func HostBuildDir(home string) string {

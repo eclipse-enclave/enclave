@@ -16,16 +16,26 @@ import {themes as prismThemes} from 'prism-react-renderer';
 // --------------------------------------------------------------------------
 // Deployment base path.
 //
-// The docs are served under `<site-root>/docs/`. The site root itself moves
-// with the project (GitHub Pages URL today, eclipse.dev/eclipse-enclave later),
-// so this is the ONE place to adjust the base path. Nothing else hardcodes it.
+// The docs are served under `<site-root>/docs/`. Production serves the site at
+// the root of https://enclave.eclipse.dev, so the default '/docs/' is what
+// ships. This is the ONE place to adjust the base path; nothing else hardcodes
+// it.
 //
-// If the whole site is served under a project subpath (e.g.
-// eclipse-enclave.github.io/enclave/), set DOCS_BASE_URL to
-// '/<project>/docs/' at build time (e.g. via env in a future deploy step).
-// Default assumes a root deployment (custom domain / eclipse.dev forward).
+// If the whole site is served under a subpath (e.g. the PR previews under
+// eclipse-enclave.github.io/enclave-website-previews/pr-previews/pr-42/), set
+// DOCS_BASE_URL to '<subpath>/docs/' at build time.
 // --------------------------------------------------------------------------
 const baseUrl = process.env.DOCS_BASE_URL || '/docs/';
+
+// The static marketing site lives one level above the docs base path.
+//
+// The `pathname://` prefix marks the link as "not part of this app", so
+// Docusaurus emits a plain <a> instead of a React Router link. Without it the
+// click is handled client-side, the site root does not match any docs route,
+// and the docs 404 page renders over the marketing home. `autoAddBaseUrl`
+// must be off or Docusaurus prepends the docs base path back onto the path.
+const siteRootHref = `pathname://${baseUrl.replace(/[^/]+\/$/, '')}`;
+const homeLinkProps = {autoAddBaseUrl: false, target: '_self', className: 'enclave-home-link'};
 
 /** @type {import('@docusaurus/types').Config} */
 const config = {
@@ -39,13 +49,12 @@ const config = {
 
   // `url` is only used for absolute-URL generation (sitemap, canonical tags).
   // It is not hardcoded into navigation. Update alongside the real domain.
-  url: 'https://eclipse.dev',
+  url: 'https://enclave.eclipse.dev',
   baseUrl,
 
-  // 'warn' (not 'throw') because the docs live at /docs/ under a larger site and
-  // intentionally link "up" to the marketing home via a relative `../` link,
-  // which sits outside Docusaurus's owned route tree.
-  onBrokenLinks: 'warn',
+  // Links that leave the docs route tree must use `pathname://` (see
+  // siteRootHref); anything else Docusaurus reports here is a genuine break.
+  onBrokenLinks: 'throw',
   markdown: {
     hooks: {
       onBrokenMarkdownLinks: 'warn',
@@ -80,7 +89,7 @@ const config = {
   themeConfig:
     /** @type {import('@docusaurus/preset-classic').ThemeConfig} */
     ({
-      image: 'img/logo.png',
+      image: 'img/social-card.png',
       colorMode: {
         // Match the light marketing site; the toggle is still available.
         defaultMode: 'light',
@@ -90,7 +99,8 @@ const config = {
         title: 'Eclipse Enclave',
         logo: {
           alt: 'Eclipse Enclave logo',
-          src: 'img/logo.png',
+          src: 'img/enclave-mark-lightbg.svg',
+          srcDark: 'img/enclave-mark-darkbg.svg',
         },
         items: [
           {
@@ -100,11 +110,10 @@ const config = {
             label: 'Docs',
           },
           {
-            // Relative link back to the marketing site (one level above /docs/).
-            href: '../',
+            href: siteRootHref,
             label: 'Home',
             position: 'right',
-            target: '_self',
+            ...homeLinkProps,
           },
           {
             href: 'https://github.com/eclipse-enclave/enclave',
@@ -115,6 +124,15 @@ const config = {
       },
       footer: {
         style: 'dark',
+        // The footer is always dark, so it uses the dark-background lockup
+        // regardless of the active color mode. It stays unlinked: the footer
+        // logo cannot opt out of `autoAddBaseUrl`, so a `pathname://` href
+        // would be rewritten back under the docs base path.
+        logo: {
+          alt: 'Eclipse Enclave',
+          src: 'img/enclave-logo-horizontal-darkbg.svg',
+          width: 168,
+        },
         links: [
           {
             title: 'Docs',
@@ -127,7 +145,7 @@ const config = {
           {
             title: 'Project',
             items: [
-              {label: 'Home', href: '../'},
+              {label: 'Home', href: siteRootHref, ...homeLinkProps},
               {label: 'Eclipse Project', href: 'https://projects.eclipse.org/projects/ecd.enclave'},
               {label: 'GitHub', href: 'https://github.com/eclipse-enclave/enclave'},
             ],

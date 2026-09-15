@@ -8,9 +8,12 @@
 package app
 
 import (
+	"encoding/json"
+	"fmt"
 	"os"
 	"strings"
 
+	"enclave/internal/buildinfo"
 	"enclave/internal/cli"
 	"enclave/internal/config"
 	"enclave/internal/logx"
@@ -20,6 +23,40 @@ import (
 )
 
 func Run(args []string) int {
+	userCmds := discoverUserCommands()
+
+	baseOpts := config.DefaultOptions()
+	parsed, err := cli.Parse(args, baseOpts, userCmds...)
+	if err != nil {
+		// Under --json a rejected request still owes stdout one result envelope.
+		if parsed.Action == cli.ActionExtensionManage && parsed.ExtRequest != nil {
+			return reportExtensionResults(*parsed.ExtRequest, nil, err)
+		}
+		logx.Errorf("%v", err)
+		return 1
+	}
+	for _, warning := range parsed.Warnings {
+		logx.Warnf(warning)
+	}
+	if parsed.HelpShown || parsed.VersionShown {
+		return 0
+	}
+	if parsed.Action == "completion" {
+		return 0
+	}
+	if parsed.Action == "version" {
+		info := buildinfo.Read()
+		if parsed.VersionJSON {
+			if err := json.NewEncoder(os.Stdout).Encode(info); err != nil {
+				logx.Errorf("write version: %v", err)
+				return 1
+			}
+		} else {
+			fmt.Printf("%s: %s\n", model.AppName, info)
+		}
+		return 0
+	}
+
 	projectDir, err := resolveProjectDir()
 	if err != nil {
 		logx.Errorf("%v", err)
@@ -33,24 +70,6 @@ func Run(args []string) int {
 	}
 	for _, warning := range warnings {
 		logx.Warnf(warning)
-	}
-
-	userCmds := discoverUserCommands()
-
-	baseOpts := config.DefaultOptions()
-	parsed, err := cli.Parse(args, baseOpts, userCmds...)
-	if err != nil {
-		logx.Errorf("%v", err)
-		return 1
-	}
-	for _, warning := range parsed.Warnings {
-		logx.Warnf(warning)
-	}
-	if parsed.HelpShown {
-		return 0
-	}
-	if parsed.Action == "completion" {
-		return 0
 	}
 
 	var userCommandMount *model.UserCommandMount
@@ -79,6 +98,9 @@ func Run(args []string) int {
 	cliOpts := parsed.Options
 	cliSources := parsed.Sources
 	opts, toolDefaults, hasToolDefaults := config.ResolveOptionsForTool(cliOpts, cliSources, globalDefaults, projectDefaults, "")
+	if actionUsesBackend(parsed.Action) {
+		resolveBackend(&opts, backendPromptAllowed(parsed))
+	}
 	sources := opts.Sources
 	parsed.Options = opts
 
@@ -102,11 +124,11 @@ func Run(args []string) int {
 	}
 
 	if parsed.Action == "stop" {
-		return runStop(parsed.Options.RunOptions)
+		return runStop(parsed.Options, projectDir)
 	}
 
 	if parsed.Action == "attach" {
-		return runAttach(parsed.Options.RunOptions)
+		return runAttach(parsed.Options, projectDir)
 	}
 
 	if parsed.Action == "review-target" {
@@ -138,7 +160,9 @@ func Run(args []string) int {
 		ToolDefaults:     toolDefaults,
 		HasToolDefaults:  hasToolDefaults,
 		ConfigView:       parsed.ConfigView,
+		NetworkLogView:   parsed.NetworkLogView,
 		UserCommandMount: userCommandMount,
+		ExtRequest:       parsed.ExtRequest,
 	}
 	return dispatchCommand(&command)
 }

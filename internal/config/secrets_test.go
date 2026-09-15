@@ -105,6 +105,28 @@ func TestValidateAndNormalizeSecretConfigsInvalidParser(t *testing.T) {
 	}
 }
 
+// TestValidateAndNormalizeSecretConfigsEmptyReleaseHosts covers the model-layer
+// guard directly. Spec loading now rejects a hostless serviceAuth entry earlier
+// and with a message that names serviceDomains, so this is the only path left
+// that exercises the normalizeHosts check.
+func TestValidateAndNormalizeSecretConfigsEmptyReleaseHosts(t *testing.T) {
+	in := map[string]model.SecretConfig{
+		"demo": {
+			EnvVars: []string{"DEMO_KEY"},
+			Release: &model.SecretReleaseConfig{
+				HTTP: &model.HTTPSecretReleaseConfig{Header: "authorization"},
+			},
+		},
+	}
+	_, err := validateAndNormalizeSecretConfigs(in)
+	if err == nil {
+		t.Fatalf("expected empty release hosts error, got nil")
+	}
+	if !strings.Contains(err.Error(), "hosts must contain at least one domain pattern") {
+		t.Fatalf("error = %v, want it to mention the empty hosts list", err)
+	}
+}
+
 func TestValidateAndNormalizeSecretConfigsEmptyFilePath(t *testing.T) {
 	in := map[string]model.SecretConfig{
 		"demo": {

@@ -418,7 +418,7 @@ normalize_devcontainer_paths() {
         COREPACK_ROOT
         VOLTA_HOME
         FNM_DIR
-        PNPM_STORE_DIR
+        PNPM_CONFIG_STORE_DIR
         YARN_CACHE_FOLDER
         XDG_CACHE_HOME
         XDG_CONFIG_HOME
@@ -511,6 +511,54 @@ normalize_devcontainer_paths() {
     fi
 }
 
+# Rewrites a config file in place with store-dir set to $2, preserving any other
+# entries. In place because ~/.npmrc is a bind-mounted file, where replacing the
+# inode via mktemp+mv fails.
+write_store_dir_config() {
+    local file="$1"
+    local store_dir="$2"
+    local existing=""
+
+    if [ -e "$file" ]; then
+        [ -w "$file" ] || return
+        # Drop a previously written entry so restarts cannot accumulate
+        # duplicates or keep a stale path from an earlier container home.
+        existing="$(grep -v '^[[:space:]]*store-dir[[:space:]]*=' "$file" || true)"
+    fi
+    {
+        if [ -n "$existing" ]; then
+            printf '%s\n' "$existing"
+        fi
+        if [ -n "$store_dir" ]; then
+            printf 'store-dir=%s\n' "$store_dir"
+        fi
+    } > "$file" 2>/dev/null || true
+}
+
+# pnpm 11 and later read PNPM_CONFIG_STORE_DIR from the environment, while pnpm 9
+# and 10 ignore it and take store-dir from pnpm's global config file (which 11 and
+# later in turn ignore). The file covers the older versions without depending on
+# PATH, so pnpm installed after startup via corepack, a global install, or an nvm
+# version switch is still pinned to the cache-backed store. It is pnpm's own file
+# rather than ~/.npmrc, where npm 11+ warns about store-dir as an unknown user
+# config on every npm invocation.
+configure_pnpm_store() {
+    local store_dir="${PNPM_CONFIG_STORE_DIR:-}"
+    if [ -z "$store_dir" ] || [ -z "${HOME:-}" ]; then
+        return
+    fi
+
+    # Earlier releases wrote the key to ~/.npmrc; strip it so the npm warning
+    # does not survive in the persisted file.
+    if [ -e "$HOME/.npmrc" ] && grep -q '^[[:space:]]*store-dir[[:space:]]*=' "$HOME/.npmrc" 2>/dev/null; then
+        write_store_dir_config "$HOME/.npmrc" ""
+    fi
+
+    local rc_dir="${XDG_CONFIG_HOME:-$HOME/.config}/pnpm"
+    mkdir -p "$rc_dir" 2>/dev/null || return
+    write_store_dir_config "$rc_dir/rc" "$store_dir"
+}
+
 cleanup_devcontainer_once_stamps() {
     local stamp_root="$1"
     local label="$2"
@@ -598,6 +646,11 @@ run_devcontainer_command() {
 
 if [ "${ENCLAVE_DEVCONTAINER:-}" = "1" ]; then
     normalize_devcontainer_paths
+fi
+
+configure_pnpm_store
+
+if [ "${ENCLAVE_DEVCONTAINER:-}" = "1" ]; then
     run_devcontainer_command "post-create" "${ENCLAVE_DEVCONTAINER_POST_CREATE:-}" "1"
     run_devcontainer_command "post-start" "${ENCLAVE_DEVCONTAINER_POST_START:-}" ""
 fi

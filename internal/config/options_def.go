@@ -118,9 +118,9 @@ func OptionDefs() []OptionDef {
 			CLIFlags: []CLIFlagDef{
 				{
 					Name:                "--backend",
-					Usage:               "Isolation backend: docker|qemu (default: docker)",
+					Usage:               "Isolation backend: auto|docker|podman|qemu (default: auto, detects docker or podman)",
 					ValueKind:           CLIValueRequired,
-					MissingValueMessage: "--backend requires a value (docker|qemu)",
+					MissingValueMessage: "--backend requires a value (auto|docker|podman|qemu)",
 					Action: CLIAction{
 						Kind:        CLIActionSetString,
 						OptionField: "Backend",
@@ -160,6 +160,29 @@ func OptionDefs() []OptionDef {
 			SourceField:   "HostConfigPaths",
 			DefaultsField: "HostConfigPaths",
 			Apply:         ApplySliceMergeHost,
+		},
+		{
+			Name:          "skills_validation",
+			Group:         OptionGroupRun,
+			Kind:          OptionKindString,
+			OptionField:   "SkillsValidation",
+			SourceField:   "SkillsValidation",
+			DefaultsField: "SkillsValidation",
+			Apply:         ApplyString,
+			TrimOnApply:   true,
+			CLIFlags: []CLIFlagDef{
+				{
+					Name:                "--skills-validation",
+					Usage:               "Shared skill validation: strict|agent (default: strict)",
+					ValueKind:           CLIValueRequired,
+					MissingValueMessage: "--skills-validation requires a value (strict|agent)",
+					Action: CLIAction{
+						Kind:        CLIActionCall,
+						Call:        "applySkillsValidation",
+						SourceField: "SkillsValidation",
+					},
+				},
+			},
 		},
 		{
 			Name:          "yolo",
@@ -437,6 +460,16 @@ func OptionDefs() []OptionDef {
 					},
 				},
 			},
+		},
+		{
+			Name:          "session_tint",
+			Group:         OptionGroupRun,
+			Kind:          OptionKindString,
+			OptionField:   "SessionTint",
+			SourceField:   "SessionTint",
+			DefaultsField: "SessionTint",
+			Apply:         ApplyString,
+			TrimOnApply:   true,
 		},
 		{
 			Name:          "no_history",

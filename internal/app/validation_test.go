@@ -252,6 +252,31 @@ func TestValidateOptions_BuildOptionConflicts(t *testing.T) {
 	}
 }
 
+func TestValidateOptions_SkillsValidation(t *testing.T) {
+	for _, mode := range []string{"", "  ", model.SkillsValidationStrict, model.SkillsValidationAgent, " STRICT ", " AGENT ", "experimental"} {
+		t.Run(mode, func(t *testing.T) {
+			opts := model.Options{
+				RunOptions:   model.RunOptions{SkillsValidation: mode},
+				BuildOptions: model.BuildOptions{ImageName: "enclave:latest"},
+			}
+			got, _, _, err := ValidateOptions(opts, model.DefaultOptionSources(), ValidationContext{Action: "run"})
+			if mode == "experimental" {
+				if err == nil || !strings.Contains(err.Error(), "--skills-validation") {
+					t.Fatalf("expected validation mode error, got %v", err)
+				}
+				return
+			}
+			mode = strings.ToLower(strings.TrimSpace(mode))
+			if mode == "" {
+				mode = model.SkillsValidationStrict
+			}
+			if err != nil || got.SkillsValidation != mode {
+				t.Fatalf("validation mode = %q, error = %v", got.SkillsValidation, err)
+			}
+		})
+	}
+}
+
 func TestValidateOptions_ProjectMount(t *testing.T) {
 	ctx := ValidationContext{Action: "run"}
 

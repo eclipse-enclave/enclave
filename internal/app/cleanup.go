@@ -20,6 +20,7 @@ import (
 	"enclave/internal/logx"
 	"enclave/internal/model"
 	"enclave/internal/prompt"
+	"enclave/internal/util"
 )
 
 // persistentConfigStoreKey is the config-store key for the persistent ("kept")
@@ -356,7 +357,7 @@ func cleanupBuildCache(cleanup model.CleanupOptions) {
 	}
 
 	if cleanup.CleanupDryRun {
-		logx.Infof("Build cache: %s total, %s reclaimable", formatBytes(total), formatBytes(reclaimable))
+		logx.Infof("Build cache: %s total, %s reclaimable", util.FormatBytes(total), util.FormatBytes(reclaimable))
 		return
 	}
 
@@ -365,7 +366,7 @@ func cleanupBuildCache(cleanup model.CleanupOptions) {
 		return
 	}
 
-	logx.Infof("Build cache: %s total, %s reclaimable", formatBytes(total), formatBytes(reclaimable))
+	logx.Infof("Build cache: %s total, %s reclaimable", util.FormatBytes(total), util.FormatBytes(reclaimable))
 	confirmed, promptErr := prompt.Confirm(
 		"Prune Docker build cache? This affects all Docker images, not just enclave.",
 		os.Stdin, os.Stdout,
@@ -384,23 +385,5 @@ func cleanupBuildCache(cleanup model.CleanupOptions) {
 		logx.Warnf("Failed to prune build cache: %v", pruneErr)
 		return
 	}
-	logx.Successf("Reclaimed %s of build cache", formatBytes(report.SpaceReclaimed))
-}
-
-func formatBytes(b uint64) string {
-	const (
-		kb = 1024
-		mb = 1024 * kb
-		gb = 1024 * mb
-	)
-	switch {
-	case b >= gb:
-		return fmt.Sprintf("%.1f GB", float64(b)/float64(gb))
-	case b >= mb:
-		return fmt.Sprintf("%.1f MB", float64(b)/float64(mb))
-	case b >= kb:
-		return fmt.Sprintf("%.1f KB", float64(b)/float64(kb))
-	default:
-		return fmt.Sprintf("%d B", b)
-	}
+	logx.Successf("Reclaimed %s of build cache", util.FormatBytes(report.SpaceReclaimed))
 }

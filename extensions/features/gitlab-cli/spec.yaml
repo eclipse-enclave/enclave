@@ -18,8 +18,11 @@ credentials:
     gitlab-token: { env: [GITLAB_TOKEN, GITLAB_ACCESS_TOKEN] }
     gitlab-oauth-token: { env: [OAUTH_TOKEN] }
     gitlab-job-token: { env: [JOB_TOKEN, CI_JOB_TOKEN] }
+    # Not a credential: glab reads GITLAB_HOST to pick the instance, and
+    # hostsFromCredential below retargets token injection at it.
+    gitlab-host: { env: [GITLAB_HOST], apiKey: false }
 network:
   serviceAuth:
-    gitlab-token: { headerName: private-token, hosts: [gitlab.com, "*.gitlab.com"] }
-    gitlab-oauth-token: { headerName: authorization, valueFormat: "Bearer %s", hosts: [gitlab.com, "*.gitlab.com"] }
-    gitlab-job-token: { headerName: job-token, hosts: [gitlab.com, "*.gitlab.com"] }
+    gitlab-token: { headerName: private-token, hosts: [gitlab.com, "*.gitlab.com"], hostsFromCredential: gitlab-host }
+    gitlab-oauth-token: { headerName: authorization, valueFormat: "Bearer %s", hosts: [gitlab.com, "*.gitlab.com"], hostsFromCredential: gitlab-host }
+    gitlab-job-token: { headerName: job-token, hosts: [gitlab.com, "*.gitlab.com"], hostsFromCredential: gitlab-host }

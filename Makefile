@@ -6,6 +6,7 @@
 # SPDX-License-Identifier: MIT
 
 .PHONY: build cross-build install install-binary clean-legacy-assets uninstall clean clean-lint-cache test deb deb-quick rpm lint lint-changed lint-report fmt vet generate lint-tools check-go completions check-license-headers
+.DEFAULT_GOAL := build
 
 BIN_DIR ?= ./bin
 BINARY ?= enclave
@@ -13,6 +14,13 @@ UNAME_S := $(shell uname -s)
 CMD_DIR := ./cmd/enclave
 COMPLETIONS_DIR ?= ./completions
 VERSION ?= 0.1.0
+GIT_COMMIT = $(shell git rev-parse --short HEAD 2>/dev/null)
+GIT_COMMIT_DATE = $(shell git show -s --format=%cs HEAD 2>/dev/null)
+GIT_DIRTY = $(shell if [ -n "$$(git status --porcelain 2>/dev/null)" ]; then printf '%s' '-dirty'; fi)
+BUILD_VERSION ?= $(VERSION)
+BUILD_COMMIT ?= $(if $(strip $(GIT_COMMIT)),$(GIT_COMMIT)$(GIT_DIRTY),unknown)
+BUILD_DATE ?= $(if $(strip $(GIT_COMMIT_DATE)),$(GIT_COMMIT_DATE),unknown)
+BUILD_LDFLAGS = -X enclave/internal/buildinfo.version=$(BUILD_VERSION) -X enclave/internal/buildinfo.commit=$(BUILD_COMMIT) -X enclave/internal/buildinfo.date=$(BUILD_DATE)
 REPORTS_DIR := ./reports
 REQUIRED_LINT_TOOLS := golangci-lint gosec shellcheck
 LINT_GO_DIRS := cmd internal extensions/tools
@@ -20,6 +28,15 @@ LINT_TMP_DIR := ./.tmp
 LINT_GO_CACHE := $(LINT_TMP_DIR)/go-build
 LINT_GOLANGCI_CACHE := $(LINT_TMP_DIR)/golangci-lint-cache
 BASE_REF ?=
+# Completion install roots follow the XDG base directory spec, like
+# scripts/clean-state.sh, so install and cleanup agree when XDG_DATA_HOME is set.
+DATA_HOME ?= $(or $(XDG_DATA_HOME),$(HOME)/.local/share)
+ZSH_COMPLETION_DIR := $(DATA_HOME)/zsh/site-functions
+BASH_COMPLETION_DIR := $(DATA_HOME)/bash-completion/completions
+
+build: check-go
+	mkdir -p $(BIN_DIR)
+	go build -ldflags "$(BUILD_LDFLAGS)" -o $(BIN_DIR)/$(BINARY) $(CMD_DIR)
 
 check-go:
 	@command -v go >/dev/null 2>&1 || { echo "Go is not installed. Install Go 1.24+ from https://go.dev/dl/"; exit 1; }
@@ -29,13 +46,10 @@ check-go:
 		exit 1; \
 	fi
 
-build: check-go
-	mkdir -p $(BIN_DIR)
-	go build -o $(BIN_DIR)/$(BINARY) $(CMD_DIR)
-
 completions:
 	mkdir -p $(COMPLETIONS_DIR)
 	$(BIN_DIR)/$(BINARY) completion bash > $(COMPLETIONS_DIR)/enclave
+	$(BIN_DIR)/$(BINARY) completion zsh > $(COMPLETIONS_DIR)/_enclave
 
 # make install now installs only the self-contained binary. This fixed path is
 # used solely for conservative cleanup of assets staged by older source
@@ -62,8 +76,13 @@ install-binary: clean-legacy-assets
 	mv -f "$(INSTALL_BIN)/$(BINARY).new" "$(INSTALL_BIN)/$(BINARY)"
 ifeq ($(UNAME_S),Linux)
 	# freedesktop shell completion (Linux only).
-	mkdir -p "$(HOME)/.local/share/bash-completion/completions"
-	cp $(COMPLETIONS_DIR)/enclave "$(HOME)/.local/share/bash-completion/completions/enclave"
+	mkdir -p "$(BASH_COMPLETION_DIR)"
+	cp $(COMPLETIONS_DIR)/enclave "$(BASH_COMPLETION_DIR)/enclave"
+	mkdir -p "$(ZSH_COMPLETION_DIR)"
+	cp $(COMPLETIONS_DIR)/_enclave "$(ZSH_COMPLETION_DIR)/_enclave"
+	@# zsh has no user-level directory on its default fpath, so a completion
+	@# installed under the home directory is only found once ~/.zshrc adds it.
+	@command -v zsh >/dev/null 2>&1 && echo 'zsh completion installed; it is only picked up if ~/.zshrc has "fpath=($(ZSH_COMPLETION_DIR) $$fpath)" before whatever runs compinit' || true
 endif
 	@echo "Installed $(INSTALL_BINARY_LABEL) to $(INSTALL_BIN)/$(BINARY)"
 
@@ -73,7 +92,9 @@ clean-legacy-assets:
 uninstall:
 	rm -f "$(INSTALL_BIN)/$(BINARY)"
 ifeq ($(UNAME_S),Linux)
-	rm -f "$(HOME)/.local/share/bash-completion/completions/enclave"
+	rm -f "$(BASH_COMPLETION_DIR)/enclave"
+	rm -f "$(ZSH_COMPLETION_DIR)/_enclave"
+	@command -v zsh >/dev/null 2>&1 && echo 'zsh completion removed; the matching "fpath=($(ZSH_COMPLETION_DIR) ...)" line in ~/.zshrc is now unused' || true
 endif
 	@echo "Uninstalled $(BINARY)"
 
@@ -92,7 +113,9 @@ deb:
 	mkdir -p dist
 	@tmpdir=$$(mktemp -d) && \
 	cp -r . "$$tmpdir/enclave" && \
-	cd "$$tmpdir/enclave" && dpkg-buildpackage -us -uc -b && \
+	cd "$$tmpdir/enclave" && \
+	BUILD_COMMIT='$(BUILD_COMMIT)' BUILD_DATE='$(BUILD_DATE)' \
+		dpkg-buildpackage -us -uc -b && \
 	mv "$$tmpdir"/*.deb "$(CURDIR)/dist/" && \
 	( find "$$tmpdir" -type d -exec chmod u+w {} + 2>/dev/null || true ) && \
 	rm -rf "$$tmpdir"
@@ -103,7 +126,9 @@ deb-quick:
 	mkdir -p dist
 	@tmpdir=$$(mktemp -d) && \
 	cp -r . "$$tmpdir/enclave" && \
-	cd "$$tmpdir/enclave" && dpkg-buildpackage -us -uc -b -d && \
+	cd "$$tmpdir/enclave" && \
+	BUILD_COMMIT='$(BUILD_COMMIT)' BUILD_DATE='$(BUILD_DATE)' \
+		dpkg-buildpackage -us -uc -b -d && \
 	mv "$$tmpdir"/*.deb "$(CURDIR)/dist/" && \
 	( find "$$tmpdir" -type d -exec chmod u+w {} + 2>/dev/null || true ) && \
 	rm -rf "$$tmpdir"
@@ -126,6 +151,9 @@ rpm: check-go
 	rpmbuild --nodeps -bb \
 		--define "_topdir $$tmpdir" \
 		--define "package_version $(VERSION)" \
+		--define "build_version $(BUILD_VERSION)" \
+		--define "build_commit $(BUILD_COMMIT)" \
+		--define "build_date $(BUILD_DATE)" \
 		"$(CURDIR)/packaging/rpm/enclave.spec" && \
 	rpm_path=$$(find "$$tmpdir/RPMS" -type f -name '*.rpm' -print -quit) && \
 	{ [ -n "$$rpm_path" ] || { echo "rpmbuild did not produce an RPM" >&2; exit 1; }; } && \
@@ -163,6 +191,9 @@ lint: lint-tools
 	done; exit $$fail
 	@echo "Running gosec..."
 	GOCACHE="$(CURDIR)/$(LINT_GO_CACHE)" gosec -quiet -exclude-dir=vendor ./...
+	@echo "Running go vet and gosec for GOOS=windows..."
+	GOOS=windows go vet ./...
+	GOOS=windows GOCACHE="$(CURDIR)/$(LINT_GO_CACHE)" gosec -quiet -exclude-dir=vendor ./...
 	@echo "Running shellcheck..."
 	@scripts="$$(find . -type f \( -name '*.sh' -o -path '*/build-scripts/bin/*' -o -path './extensions/*/bin/*' \) -not -path './vendor/*' | sort)"; \
 	if [ -z "$$scripts" ]; then \
@@ -243,11 +274,16 @@ fmt:
 vet:
 	go vet ./...
 
-# Cross-compile every package for representative macOS and Windows targets
-# without cgo. Release artifacts remain scoped separately.
+# Cross-compile every package for each published non-native target without cgo.
+# Building ./... rather than ./cmd/enclave keeps the windows targets a
+# portability guard for the whole tree, even though the published windows binary
+# is only the WSL launcher.
 cross-build: check-go
 	GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build ./...
+	GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 go build ./...
+	GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build ./...
 	GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build ./...
+	GOOS=windows GOARCH=arm64 CGO_ENABLED=0 go build ./...
 
 generate:
 	go generate ./internal/config ./cmd/enclave

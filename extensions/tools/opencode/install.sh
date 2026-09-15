@@ -8,5 +8,7 @@
 
 set -e
 
+# Do not add --ignore-scripts: opencode-ai's postinstall is what places the
+# platform binary, and its bin stub fails with an explicit error without it.
 enclave-install-npm-tool opencode-ai opencode OpenCode
 opencode --version

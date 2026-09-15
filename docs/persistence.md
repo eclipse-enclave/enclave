@@ -7,12 +7,16 @@ By default, each `enclave` invocation starts or resumes a session for the curren
 ```bash
 enclave --name my-task           # Named persistent session
 enclave --background             # Detached background session
-enclave attach <container>       # Attach to a background session
+enclave attach my-task           # Attach by session name (or container name)
 enclave continue                 # Continue the latest session
 enclave resume                   # Session picker (falls back to continue)
 ```
 
-If a container name is already in use, a new session starts with a unique name. Use `exec` to attach to the default container name.
+If the default container name is already in use, an unnamed invocation starts a new session with a unique name. An explicit `--name` that is already running is rejected. Use `exec` to attach to the default container name.
+
+Concurrent starts for the same tool and project, including `--name` and `--background`, wait for each other until the container is running. This coordinates name and config-store allocation and protects the shared gateway configuration during startup. Once started, sessions run concurrently.
+
+Containers are named `enclave-<tool>-<project-hash>-<session>`, so the same session name can be used in several projects. `attach`, `stop <name>`, and `theia` resolve a session name within the current project first; when a name matches containers in more than one project, the candidates are listed and a full container name must be passed. `attach` and `theia` also accept a name that only exists in another project; `stop` does not — neither by argument nor by `--name` — since removing a container is destructive: pass its container name instead.
 
 ## Managing Running Containers
 
@@ -22,6 +26,7 @@ enclave exec --admin             # Attach with limited sudo (apt/dpkg)
 enclave shell                    # Interactive shell in container
 enclave shell --admin            # Shell with limited sudo
 enclave stop                     # Stop background containers
+enclave stop my-task             # Stop one session by name
 ```
 
 Sudo is disabled by default. The `--admin` flag grants limited package-management sudo (apt/dpkg only). Security settings are fixed at container start — `exec` attaches to the existing container as-is.
@@ -103,7 +108,7 @@ Git commit and tag signing (`commit.gpgsign`, `tag.gpgsign`) are unconditionally
 
 ## SSH Keys
 
-See [Authentication & Secrets](auth.md#ssh-keys) for SSH key setup. The SSH directory is always mounted read-only.
+Giving an agent an SSH key is not recommended; see [Authentication & Secrets](auth.md#ssh-keys) for what the key grants and how to scope it. The SSH directory is always mounted read-only. That stops the agent from changing the key files; it does not limit what the key can do at your Git provider.
 
 ## Host Hardening
 

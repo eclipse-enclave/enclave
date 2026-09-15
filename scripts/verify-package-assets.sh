@@ -11,13 +11,14 @@ set -eu
 CDPATH=
 export CDPATH
 
-if [ "$#" -ne 1 ]; then
-    echo "usage: $0 <extracted-package-root>" >&2
+if [ "$#" -ne 2 ]; then
+    echo "usage: $0 <extracted-package-root> <expected-zsh-completion-dir>" >&2
     exit 2
 fi
 
 repo_root=$(cd -P "$(dirname "$0")/.." && pwd)
 package_root=$1
+zsh_completion_dir=$2
 app_root="$package_root/usr/share/enclave"
 
 [ -f "$app_root/.dockerignore" ]
@@ -28,6 +29,15 @@ app_root="$package_root/usr/share/enclave"
 diff -qr "$repo_root/docs" "$app_root/docs"
 [ -f "$package_root/usr/share/doc/enclave/LICENSE.md" ]
 [ -f "$package_root/usr/share/doc/enclave/NOTICE.md" ]
+
+# Completions are only found if they sit in a directory the shell searches by
+# default, and for zsh that directory differs per distro: Debian carries
+# zsh/vendor-completions on its default fpath and deliberately omits
+# zsh/site-functions, Fedora the other way round. The caller passes the layout
+# its packaging is expected to produce so the wrong one fails instead of
+# silently shipping a completion no shell ever loads.
+[ -f "$package_root/usr/share/bash-completion/completions/enclave" ]
+[ -f "$package_root/$zsh_completion_dir/_enclave" ]
 
 # Assets must reach the package byte-for-byte. Packaging toolchains rewrite
 # files they mistake for host executables -- Fedora's brp-mangle-shebangs

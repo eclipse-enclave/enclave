@@ -34,6 +34,18 @@ fi
 node_dir="$(dirname "$node_bin")"
 export PATH="$node_dir:$PATH"
 
+# npm's fetch-timeout caps the total time of one response body at 5 minutes,
+# so a tarball a slow link cannot deliver in that time fails on every npm
+# retry. Bound it by the enclave attempt timeout instead; 0 disables both.
+attempt_timeout="${ENCLAVE_NET_ATTEMPT_TIMEOUT_SECONDS:-1800}"
+case "$attempt_timeout" in
+    '' | *[!0-9]*)
+        echo "ENCLAVE_NET_ATTEMPT_TIMEOUT_SECONDS must be a non-negative integer, got: ${attempt_timeout}" >&2
+        exit 2
+        ;;
+esac
+export npm_config_fetch_timeout="${npm_config_fetch_timeout:-$((attempt_timeout * 1000))}"
+
 normalize_package_name() {
     local spec="$1"
     if [[ "$spec" == @*/*@* ]]; then

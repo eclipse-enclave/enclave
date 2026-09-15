@@ -73,7 +73,7 @@ outside the helpers' reach.
 - `run-feature-installs.sh`: runs enabled feature `install.sh` scripts by phase and priority.
 - `install-tool-templates.sh`: aggregates `extensions/tools/*/templates/*` into `/usr/local/share/enclave/templates/`.
 - `install-agent-helper-bins.sh`: installs helper binaries into the agent user's local bin.
-- `bin/enclave-agent-npm-install`: low-level npm install helper using the private agent Node runtime. Leading `-`-prefixed arguments are forwarded to `npm install`, separated from the package specs by `--`. Fails if a package declares a bin that did not land, which is how a missing lifecycle script surfaces.
+- `bin/enclave-agent-npm-install`: low-level npm install helper using the private agent Node runtime. Leading `-`-prefixed arguments are forwarded to `npm install`, separated from the package specs by `--`. Fails if a package declares a bin that did not land, which is how a missing lifecycle script surfaces. Sets npm's `fetch-timeout`, a cap on the total time of one tarball download that defaults to 5 minutes, from `ENCLAVE_NET_ATTEMPT_TIMEOUT_SECONDS` unless `npm_config_fetch_timeout` is already set.
 - `bin/enclave-install-npm-tool`: shared npm-tool installer wrapper used by simple Node-based tool installers. Takes `[npm-flag ...] <package> <binary> [label]` and forwards the flags to `enclave-agent-npm-install`. Flags must be self-contained (`--flag` or `--flag=value`); one that takes a separate value would consume the package argument.
 - `bin/enclave-install-tool`: shared tool installer entrypoint used by generated Docker stages.
 

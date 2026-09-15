@@ -85,6 +85,22 @@ func TestHostConfigPathMatchesGlobAgainstBasename(t *testing.T) {
 	}
 }
 
+func TestHostConfigPassthroughBlocksCodexMemoryState(t *testing.T) {
+	profile, err := LoadProfile(realRepoPaths(t), "codex")
+	if err != nil {
+		t.Fatal(err)
+	}
+	profile.PassthroughPaths = []string{
+		"config.toml", "memories/", "memories_1.sqlite", "memories_1.sqlite-wal",
+		"memories_1.sqlite-shm", "state_5.sqlite", "thread_history_1.sqlite",
+		"thread-writer-locks/",
+	}
+	got := HostConfigPassthroughDefaults(profile)
+	if want := []string{"config.toml"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("passthrough paths = %v, want %v", got, want)
+	}
+}
+
 func TestHostConfigPassthroughBlocksPiAgentSessions(t *testing.T) {
 	profile := model.Profile{
 		PassthroughPaths: []string{"agent/settings.json", "agent/sessions/"},

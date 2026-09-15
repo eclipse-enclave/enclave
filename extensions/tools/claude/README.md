@@ -42,9 +42,10 @@ Claude Code's auto memory is enabled by default (`autoMemoryEnabled`), pinned to
 `~/.claude/memory` inside the container. That directory is bind-mounted from the
 per-project host location `~/.local/state/enclave/projects/<hash>/claude/memory/`, so
 memory is scoped per project and stored outside the working directory (never
-committed). Pass `--no-memory` to disable the mount. Ephemeral
-(`--ephemeral`) sessions skip the host mount, so memory written during them
-is discarded with the session's config store.
+committed). Pass `--no-memory` to skip the mount and disable memory generation
+(`--settings '{"autoMemoryEnabled": false}'` is added to the launch arguments).
+Ephemeral (`--ephemeral`) sessions do the same, so no memory is written or
+carried over.
 
 ## Network Access
 

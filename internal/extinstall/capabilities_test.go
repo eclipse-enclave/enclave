@@ -33,6 +33,11 @@ sandbox:
     run: [foo, --serve]
   passthroughPaths:
     - agents/
+  memoryDir: .config/foo/memories
+  memoryScope: session
+  noMemoryArgs: [-c, memories=false]
+  statePaths:
+    - memories/
   hostConfigDir: .foo
   hostCredentialsFile: .credentials.json
   hostOauthJson: .foo.json
@@ -132,6 +137,15 @@ func TestInspectReportsCapabilities(t *testing.T) {
 	if caps.Spec.EntrypointOverride != "foo --serve" {
 		t.Errorf("EntrypointOverride = %q, want %q", caps.Spec.EntrypointOverride, "foo --serve")
 	}
+	if caps.Spec.NoMemoryArgs != "-c memories=false" {
+		t.Errorf("NoMemoryArgs = %q", caps.Spec.NoMemoryArgs)
+	}
+	if want := ".config/foo/memories (scope session)"; describeMemory(caps.Spec) != want {
+		t.Errorf("describeMemory() = %q, want %q", describeMemory(caps.Spec), want)
+	}
+	if len(caps.Spec.StatePaths) != 1 || caps.Spec.StatePaths[0] != "memories/" {
+		t.Errorf("StatePaths = %v", caps.Spec.StatePaths)
+	}
 	if len(caps.Spec.EnvironmentVars) != 1 || caps.Spec.EnvironmentVars[0] != "NODE_TLS_REJECT_UNAUTHORIZED=0" {
 		t.Errorf("EnvironmentVars = %v", caps.Spec.EnvironmentVars)
 	}
@@ -193,6 +207,7 @@ func TestRenderIncludesEveryReportedCapability(t *testing.T) {
 		"foo --serve", "NODE_TLS_REJECT_UNAUTHORIZED=0", "X-Acme-Token", "~/.acme/token", "json",
 		"ACME_SECURESTORAGE_DIR", "1455", "agents/", ".credentials.json", ".foo.json",
 		".config/foo", "hosts.yml", "README.md", ".gitconfig",
+		"-c memories=false", ".config/foo/memories (scope session)", "memories/",
 	} {
 		if !strings.Contains(rendered, want) {
 			t.Errorf("rendered summary is missing %q:\n%s", want, rendered)
@@ -215,6 +230,7 @@ func TestRenderOmitsEmptyLines(t *testing.T) {
 		"host config dir", "host credentials file", "host oauth json",
 		"mixin config dir", "mixin auth files", "workspace files", "home files",
 		"credential →", "credential file", "skips approval",
+		"no-memory args", "agent memory", "preserved state",
 	} {
 		if strings.Contains(out.String(), unwanted) {
 			t.Errorf("rendered summary should omit %q:\n%s", unwanted, out.String())
@@ -660,6 +676,17 @@ func capabilityFieldCases() map[string]capabilityFieldCase {
 			"12345 (published on the host)", "port 12345 (published on the host)"},
 		"Spec.ContinueArgs": {func(c *capabilities) { c.Spec.ContinueArgs = "resume --last" }, "resume --last", "continue args"},
 		"Spec.ResumeArgs":   {func(c *capabilities) { c.Spec.ResumeArgs = "resume" }, "resume", "resume args"},
+		"Spec.NoMemoryArgs": {func(c *capabilities) { c.Spec.NoMemoryArgs = "-c memories=false" }, "-c memories=false", "no-memory args"},
+		"Spec.MemoryDir": {func(c *capabilities) { c.Spec.MemoryDir = ".tool/memories" },
+			".tool/memories (scope project)", "agent memory"},
+		// A scope alone grants nothing, so the memory row is keyed on memoryDir
+		// and the setter sets both; the markers below are the scope's own.
+		"Spec.MemoryScope": {func(c *capabilities) {
+			c.Spec.MemoryDir = ".tool/memories"
+			c.Spec.MemoryScope = "session"
+		}, "scope session", "agent memory"},
+		"Spec.StatePaths": {func(c *capabilities) { c.Spec.StatePaths = []string{"memories/"} },
+			"memories/", "preserved state path memories/"},
 		"Spec.PostStartOpenIDE": {func(c *capabilities) { c.Spec.PostStartOpenIDE = "theia" },
 			"launched on the host", "post-start IDE launch"},
 		"Spec.CredentialEnv": {func(c *capabilities) { c.Spec.CredentialEnv = []string{"MY_TOKEN"} }, "MY_TOKEN", "credential MY_TOKEN"},

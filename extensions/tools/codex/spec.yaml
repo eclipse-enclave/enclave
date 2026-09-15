@@ -17,6 +17,20 @@ sandbox:
   qemuMinMemoryMiB: 4096
   qemuStoreCacheMmap: true
   skillsDir: .codex/skills
+  memoryDir: .codex/memories
+  memoryScope: session
+  noMemoryArgs: [-c, features.memories=false]
+  statePaths:
+    # Paths are config-relative (.codex/), unlike the home-relative memoryDir.
+    # Memory files, their SQLite index, and writer locks; codex reconciles
+    # stale locks itself, so surviving an overlay is safe.
+    - memories/
+    - memories_*.sqlite*
+    - thread-writer-locks/
+    # Thread/session databases: rebuildable from the preserved sessions/
+    # rollouts, pinned to skip the re-backfill and keep non-rollout state.
+    - state_*.sqlite*
+    - thread_history_*.sqlite*
   settingsFile: codex-config.toml
   settingsTarget: .codex/config.toml
   yoloFlag: --dangerously-bypass-approvals-and-sandbox

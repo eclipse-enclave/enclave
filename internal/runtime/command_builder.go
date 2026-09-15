@@ -41,6 +41,9 @@ func (b commandBuilder) Build() []string {
 	if b.yoloEnabled && b.profile.YoloFlag != "" {
 		agentArgs = append(agentArgs, strings.Fields(b.profile.YoloFlag)...)
 	}
+	if b.run.MemoryDisabled() {
+		agentArgs = append(agentArgs, b.profile.NoMemoryArgs...)
+	}
 	agentArgs = append(agentArgs, b.run.CmdArgs...)
 
 	// bash -c uses the next argument as $0; the rest become $1.. for exec "$@".

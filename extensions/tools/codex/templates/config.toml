@@ -31,6 +31,12 @@ metrics_exporter = "none"
 log_user_prompt = false
 
 [features]
+# Opted in, unlike fast_mode below. A container starts with no accumulated
+# context, so without memories every session relearns the project from scratch,
+# and no other setting recovers that. Background consolidation does use quota.
+# Opt out per run with enclave --no-memory or permanently with a config patch;
+# see this tool's README.
+memories = true
 # Fast mode became default-on upstream (stable, default_enabled=true). With no
 # service_tier configured it silently adopts the model's default tier — "Fast"
 # on enterprise/business/team plans: fastest inference with increased plan

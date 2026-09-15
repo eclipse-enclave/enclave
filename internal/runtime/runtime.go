@@ -1249,18 +1249,16 @@ func (r *Runtime) addHistoryMounts(mounts *mountAccumulator) {
 }
 
 func (r *Runtime) addMemoryMounts(mounts *mountAccumulator) {
-	if r.run.NoMemory {
-		return
-	}
-	// Ephemeral sessions must not persist memory: skip the host bind mount so
-	// the agent's writes land in the discarded per-session config store.
-	if r.run.Ephemeral {
+	if r.run.MemoryDisabled() {
 		return
 	}
 	if r.profile.MemoryDir == "" {
 		return
 	}
 	memDir := config.HostProjectMemoryDir(r.host.Home, r.project.Hash, r.profile.Name)
+	if r.profile.MemoryScope == model.MemoryScopeSession {
+		memDir = config.HostProjectMemorySessionDir(r.host.Home, r.project.Hash, r.profile.Name, r.sessionGeneratedKey())
+	}
 	if err := os.MkdirAll(memDir, 0o700); err != nil {
 		logx.Warnf("Failed to create memory directory %s: %v", memDir, err)
 		return

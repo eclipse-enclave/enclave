@@ -73,6 +73,7 @@ Do not push, publish releases, or modify remote issues/PRs unless the maintainer
 - See `docs/extensions/README.md` for the extension architecture and `docs/extensions/adding-a-tool.md` for the step-by-step guide; every tool or feature extension must include a `README.md`.
 - `extensions/tools/<tool>/spec.yaml` (`kind: sandbox`) defines tool runtime, auth, network, settings, and provider behavior.
 - `extensions/features/<feature>/spec.yaml` (`kind: mixin`) defines optional packages, runtime setup, auth, network, and published-port behavior; a feature may also ship a `skills/` directory that is composed into the tool's skills when the feature is enabled.
+- Memory scope, disable arguments, and preserved runtime state are declared with `sandbox.memoryScope`, `sandbox.noMemoryArgs`, and `sandbox.statePaths`; see [Agent Memory](docs/runtime/stores.md#agent-memory) for lifecycle and cleanup behavior.
 - Tool settings templates live under `extensions/tools/<tool>/templates/` and are baked into the image.
 - Full host config overrides use `~/.config/enclave/tools/<tool>/` globally and `~/.config/enclave/projects/<hash>/<tool>/config/` per project.
 - JSON/TOML patches mirror native paths under `~/.config/enclave/patches/<tool>/` globally and `~/.config/enclave/projects/<hash>/patches/<tool>/` per project.
@@ -87,7 +88,7 @@ Enclave follows platform-standard roots: the XDG base directories on Linux and o
 - State: `~/.local/state/enclave/` (`$XDG_STATE_HOME`)
 - Cache: `~/.cache/enclave/` (`$XDG_CACHE_HOME`)
 - Embedded runtime assets: `~/.cache/enclave/assets/<content-hash>/`
-- Per-project agent memory: `~/.local/state/enclave/projects/<hash>/<tool>/memory/` (Claude only; agent-writable, never shared between projects or agents)
+- Per-project agent memory: `~/.local/state/enclave/projects/<hash>/<tool>/memory/` (agent-writable; Claude uses this root, Codex uses `<key>/` matching its config-store key; never shared between projects or agents)
 - User-defined subcommands: `~/.config/enclave/commands/{host,session}/` (executable files become `enclave <name>` verbs)
 
 Per-project config/state is keyed by project hash and kept outside the worktree. See `docs/configuration.md` and `docs/runtime/stores.md` for details.

@@ -39,13 +39,20 @@ func HostConfigPassthroughDefaults(profile model.Profile) []string {
 	return subtractDeniedHostConfigPaths(profile, profile.PassthroughPaths)
 }
 
+// HostConfigPassthroughDeniedPaths lists the config-relative paths the host
+// config may never contribute: the tool's auth files, the non-configurable
+// backstop, and the tool's declared runtime state. State paths belong here
+// because they name what the container's own store owns. Passing the host's
+// copy in would overwrite live session state with a foreign one.
 func HostConfigPassthroughDeniedPaths(profile model.Profile) []string {
-	denied := make([]string, 0, len(profile.RuntimeAuthFiles())+len(hostConfigPassthroughBackstop)+1)
-	denied = append(denied, profile.RuntimeAuthFiles()...)
+	authFiles := profile.RuntimeAuthFiles()
+	denied := make([]string, 0, len(authFiles)+len(hostConfigPassthroughBackstop)+len(profile.StatePaths)+1)
+	denied = append(denied, authFiles...)
 	if credentials := normalizeHostConfigPath(profile.HostCredentialsFile); credentials != "" {
 		denied = append(denied, credentials)
 	}
 	denied = append(denied, hostConfigPassthroughBackstop...)
+	denied = append(denied, profile.StatePaths...)
 	return normalizeHostConfigPathList(denied)
 }
 

@@ -304,12 +304,29 @@ providers:
         - { file: .credentials.json, type: file_exists }
 ```
 
-`sandbox.*` fields (`configDir`, `skillsDir`, `memoryDir`,
-`settingsFile`, `settingsTarget`, `yoloFlag`, `yoloEnabled`, `continueArgs`, `resumeArgs`,
-`passthroughPaths`, `qemuMinMemoryMiB`, `qemuStoreCacheMmap`,
-`hostConfigDir`, `hostCredentialsFile`, and `hostOauthJson`) are enclave-native
-tool metadata. `sandbox.entrypoint.run` is the shared sbx-style command to
-launch the tool.
+`sandbox.*` fields (`configDir`, `skillsDir`, `memoryDir`, `memoryScope`,
+`noMemoryArgs`, `statePaths`, `settingsFile`, `settingsTarget`, `yoloFlag`,
+`yoloEnabled`, `continueArgs`, `resumeArgs`, `passthroughPaths`,
+`qemuMinMemoryMiB`, `qemuStoreCacheMmap`, `hostConfigDir`, `hostCredentialsFile`,
+and `hostOauthJson`) are enclave-native tool metadata. `sandbox.entrypoint.run`
+is the shared sbx-style command to launch the tool.
+
+Memory and runtime state policy is declared in the spec, including for installed
+third-party tools:
+
+- `memoryDir`: home-relative native memory directory.
+- `memoryScope`: `project` (default) shares memory within a project/tool;
+  `session` requires `memoryDir` and `configDir` and pairs memory with each config
+  store for writer isolation and cleanup.
+- `noMemoryArgs`: argv inserted before user arguments for `--no-memory` and
+  `--ephemeral`. Use native controls to disable memory use and generation.
+  Entries are trimmed and blank ones dropped, as for `continueArgs`/`resumeArgs`.
+- `statePaths`: config-relative runtime-state paths to preserve during overlays
+  and exclude from host config passthrough. Requires `configDir`. A trailing `/`
+  matches a directory tree; globs match paths or basenames. Absolute paths,
+  traversal, and selection directives are rejected.
+
+See [Agent Memory](../runtime/stores.md#agent-memory) for lifecycle semantics.
 
 When using `templates/`, set `sandbox.configDir`, `sandbox.settingsFile`
 (aggregated name like `<tool>-settings.json`: the `<tool>-` prefix followed by

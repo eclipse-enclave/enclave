@@ -91,10 +91,13 @@ runs in a container on each automatic update check, widens the network allowlist
 or denies domains, publishes a container port on the host, declares credentials
 and where they're released as HTTP headers, whether it flips on the
 approval-bypass flag (`sandbox.yoloFlag`, active by default once declared) or
-appends its own argv to the agent for `--continue`/`--resume`
-(`sandbox.continueArgs`/`resumeArgs`, which can carry the same flag), launches
-an IDE on your host after start (`postStart.openIDE`), ships skills, host
-config/credential passthrough, or seeds files into your project directory. An
+appends its own argv to the agent for `--continue`/`--resume`/`--no-memory`
+(`sandbox.continueArgs`/`resumeArgs`/`noMemoryArgs`, which can carry the same
+flag), keeps a writable agent-memory directory between sessions and at what
+scope (`sandbox.memoryDir`/`memoryScope`), pins store paths the config overlay
+may not replace (`sandbox.statePaths`), launches an IDE on your host after start
+(`postStart.openIDE`), ships skills, host config/credential passthrough, or
+seeds files into your project directory. An
 update shows the same information as a diff against what's currently installed,
 so a newly granted capability is visible before you accept it.
 

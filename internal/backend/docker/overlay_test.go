@@ -19,6 +19,60 @@ import (
 	yaruntime "enclave/internal/runtime"
 )
 
+// TestOverlayConfigDirPreservesDeclaredStatePaths runs the overlay against the
+// real preserve-path policy for a profile pinning both shapes a tool can
+// declare: directory trees (one of them nested and tool-managed, like a git
+// repository) and globs matching a database plus its sidecar files. The shapes
+// are Codex's, but the profile is local, so tuning that extension cannot
+// silently change what this asserts.
+func TestOverlayConfigDirPreservesDeclaredStatePaths(t *testing.T) {
+	t.Parallel()
+
+	targetDir, sourceDir := t.TempDir(), t.TempDir()
+	pinned := []string{
+		"memories/", "memories_*.sqlite*", "thread-writer-locks/",
+		"state_*.sqlite*", "thread_history_*.sqlite*",
+	}
+	profile := model.Profile{ConfigDir: ".tool", StatePaths: pinned}
+	statePaths := []string{
+		"memories_1.sqlite", "memories_1.sqlite-wal", "memories_1.sqlite-shm",
+		"memories_2.sqlite", "memories_2.sqlite-journal",
+		"state_5.sqlite", "state_5.sqlite-wal", "state_5.sqlite-shm",
+		"thread_history_1.sqlite", "thread_history_1.sqlite-wal", "thread_history_1.sqlite-shm",
+		"thread-writer-locks/thread.lock", "memories/.git/HEAD", "memories/memory_summary.md",
+	}
+	for _, rel := range statePaths {
+		for _, dir := range []string{targetDir, sourceDir} {
+			p := filepath.Join(dir, rel)
+			if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(p, []byte(dir), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	settings := []byte("[features]\nmemories = false\n")
+	if err := os.WriteFile(filepath.Join(sourceDir, "config.toml"), settings, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if err := overlayConfigDir(targetDir, sourceDir, yaruntime.ConfigSourcePreservePaths(profile)); err != nil {
+			t.Fatal(err)
+		}
+		for _, rel := range statePaths {
+			got, err := os.ReadFile(filepath.Join(targetDir, rel))
+			if err != nil || string(got) != targetDir {
+				t.Fatalf("preserved %s = %q, err %v", rel, got, err)
+			}
+		}
+		got, err := os.ReadFile(filepath.Join(targetDir, "config.toml"))
+		if err != nil || string(got) != string(settings) {
+			t.Fatalf("overlaid settings = %q, err %v", got, err)
+		}
+	}
+}
+
 func requireJQ(t *testing.T) {
 	t.Helper()
 	if _, err := exec.LookPath("jq"); err != nil {

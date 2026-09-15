@@ -85,8 +85,8 @@ viewer: `/tmp/enclave-vnc/vnc-password` inside the session, alongside the
 container port `5900` binding that `enclave ps --json` reports. The path is the
 contract; how a viewer reads it is up to the backend it drives. `enclave exec`
 always allocates a TTY, so it serves the interactive flow above but not a
-headless one — a non-interactive viewer needs a backend-level read (for Docker,
-`docker exec`) until the CLI grows a non-TTY exec.
+headless one — a non-interactive viewer needs a backend-level read (`docker
+exec` or `podman exec`) until the CLI grows a non-TTY exec.
 
 ## Configuration
 
@@ -126,8 +126,8 @@ covers how a published display fits the overall threat model. Feature-specific:
   trusted local viewers.
 - The host publish is loopback-only, but Xvnc listens on all interfaces
   inside the container's network namespace. Under network isolation that
-  namespace belongs to the session's gateway container on a shared Docker
-  bridge, so other containers on that bridge (including other sessions'
+  namespace belongs to the session's gateway container on a bridge shared with
+  other containers of the same engine, so those (including other sessions'
   gateways) can reach the RFB port directly, with VncAuth as the only gate.
 - A human can be phished by what the streamed page *shows*. A viewer cannot
   vouch for the session's content.

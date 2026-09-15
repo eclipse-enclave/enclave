@@ -10,7 +10,7 @@
 # vnc-open, so the browser behaves the same no matter which path started it.
 #
 # The container is the sandbox: Chromium's own sandbox needs unprivileged user
-# namespaces, which the default Docker seccomp profile blocks, so it runs with
+# namespaces, which the default container seccomp profile blocks, so it runs with
 # --no-sandbox and everything it loads egresses via the session gateway. The
 # background-networking/component-update/sync switches keep Chromium's own
 # phone-home traffic (component updater, safe browsing, optimization guide)

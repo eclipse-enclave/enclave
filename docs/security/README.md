@@ -63,8 +63,8 @@ The allowlist governs egress only. Ports published by `-p`, by a tool profile,
 or by an enabled feature open an inbound path into the session and are outside
 that policy. Published ports bind the host loopback by default, but under
 network isolation they are bound on the session's gateway container, which sits
-on a shared Docker bridge: a service listening on all interfaces inside the
-namespace is also reachable from other containers on that bridge, including
+on a bridge shared with other containers of the same engine: a service listening
+on all interfaces inside the namespace is also reachable from those, including
 other sessions' gateways. Whatever the service itself enforces is the only gate
 at that layer.
 

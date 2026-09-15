@@ -135,9 +135,10 @@ run_forever() {
     ) &
 }
 
-# No -localhost: the RFB port is published on the host loopback, and Docker
-# forwards that to the container's routable interface, so Xvnc must listen on
-# all interfaces to be reachable. VncAuth (above) is the access gate.
+# No -localhost: the RFB port is published on the host loopback, and the
+# container engine forwards that to the container's routable interface, so Xvnc
+# must listen on all interfaces to be reachable. VncAuth (above) is the access
+# gate.
 run_forever xvnc Xvnc "$DISPLAY_NUM" \
     -geometry "$GEOMETRY" -depth 24 \
     -rfbport "$RFB_PORT" \

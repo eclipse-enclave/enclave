@@ -130,7 +130,7 @@ The full key list, including build and persistence options, is in
 
 Features are optional tool stacks compiled into the image. `devtools`,
 `github-cli`, `node-dev`, and `python-dev` are on by default; `playwright`,
-`debug-tools`, `gitlab-cli`, and `shell-extras` are opt-in.
+`debug-tools`, `gitlab-cli`, `shell-extras`, and `vnc` are opt-in.
 
 Use `+` and `-` to adjust the inherited set instead of replacing it:
 

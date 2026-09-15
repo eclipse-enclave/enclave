@@ -32,15 +32,31 @@ RUN if ! command -v apt-get >/dev/null 2>&1; then \
         echo "/etc/apt/apt.conf.d is not writable; ensure the base image runs as root or override USER." >&2; \
         exit 1; \
     fi
+# The download helpers (retries, stall detection, progress reporting) come in
+# on their own ahead of the package installs; the rest of the build scripts
+# land later, since they change far more often and would invalidate the apt
+# layers below. The helpers read the ENCLAVE_NET_* settings, which the CLI
+# forwards from the host environment, and supply the defaults themselves.
+COPY runtime-assets/build-scripts/lib/fetch.sh /opt/enclave/build-scripts/lib/fetch.sh
+ARG ENCLAVE_NET_RETRIES
+ARG ENCLAVE_NET_RETRY_DELAY_SECONDS
+ARG ENCLAVE_NET_CONNECT_TIMEOUT_SECONDS
+ARG ENCLAVE_NET_STALL_TIMEOUT_SECONDS
+ARG ENCLAVE_NET_ATTEMPT_TIMEOUT_SECONDS
+ARG ENCLAVE_NET_STALL_SPEED_BYTES
+ARG ENCLAVE_NET_PROGRESS_INTERVAL_SECONDS
 # Explicit ids isolate these apt cache mounts from unrelated builds: anonymous
 # cache mounts are keyed by target path and shared builder-wide, so another
 # project's apt-get update could clobber our package lists (and vice versa).
+# apt-get runs through enclave_apt_get, which retries it and reports download
+# progress; the package list is passed as arguments so it stays readable here.
 RUN --mount=type=cache,id=enclave-apt-cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,id=enclave-apt-lib,target=/var/lib/apt,sharing=locked \
     rm -f /etc/apt/apt.conf.d/docker-clean && \
     echo 'Binary::apt::APT::Keep-Downloaded-Packages "true";' > /etc/apt/apt.conf.d/keep-cache && \
-    apt-get update && \
-    apt-get install -y --no-install-recommends \
+    bash -c '. /opt/enclave/build-scripts/lib/fetch.sh && \
+        enclave_apt_get update && \
+        enclave_apt_get install -y --no-install-recommends "$@"' apt-get \
         # Essentials
         ca-certificates curl wget gnupg lsb-release sudo \
         git git-lfs bash locales \
@@ -72,20 +88,17 @@ RUN --mount=type=cache,id=enclave-apt-cache,target=/var/cache/apt,sharing=locked
 # build (feature/tool enablement, priority, needsRoot, aptPackages). Pinned like
 # the other downloaded tools; jq above stays for agent-facing JSON handling.
 ARG YQ_VERSION=v4.44.6
-RUN set -eux; \
+RUN bash -euo pipefail -c '. /opt/enclave/build-scripts/lib/fetch.sh; \
     arch="$(dpkg --print-architecture)"; \
     case "$arch" in \
         amd64) yq_arch=amd64 ;; \
         arm64) yq_arch=arm64 ;; \
         *) echo "unsupported architecture for yq: $arch" >&2; exit 1 ;; \
     esac; \
-    # Same timeouts and retries as enclave_curl in lib/common.sh, which is not
-    # in the image yet at this stage.
-    curl -fsSL --connect-timeout 20 --speed-limit 1024 --speed-time 60 \
-        --retry 4 --retry-delay 5 --retry-all-errors \
-        "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_${yq_arch}" -o /usr/local/bin/yq; \
+    enclave_curl -L -o /usr/local/bin/yq \
+        "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_${yq_arch}"; \
     chmod 0755 /usr/local/bin/yq; \
-    yq --version
+    yq --version'
 
 # Create non-root user
 ARG USER_ID=1000
@@ -154,14 +167,23 @@ FROM system AS tool-base
 ARG USER_ID=1000
 ARG GROUP_ID=1000
 ARG USERNAME=agent
+# Read by the apt-get step below; see the system stage.
+ARG ENCLAVE_NET_RETRIES
+ARG ENCLAVE_NET_RETRY_DELAY_SECONDS
+ARG ENCLAVE_NET_CONNECT_TIMEOUT_SECONDS
+ARG ENCLAVE_NET_STALL_TIMEOUT_SECONDS
+ARG ENCLAVE_NET_ATTEMPT_TIMEOUT_SECONDS
+ARG ENCLAVE_NET_STALL_SPEED_BYTES
+ARG ENCLAVE_NET_PROGRESS_INTERVAL_SECONDS
 
 USER root
 
 # Install build deps needed for agent tools and features
 RUN --mount=type=cache,id=enclave-apt-cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,id=enclave-apt-lib,target=/var/lib/apt,sharing=locked \
-    apt-get update && \
-    apt-get install -y --no-install-recommends \
+    bash -c '. /opt/enclave/build-scripts/lib/fetch.sh && \
+        enclave_apt_get update && \
+        enclave_apt_get install -y --no-install-recommends "$@"' apt-get \
         build-essential gcc g++ make pkg-config \
         python3-dev libssl-dev libffi-dev \
         # Debian packaging tools

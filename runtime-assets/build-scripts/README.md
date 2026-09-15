@@ -42,10 +42,13 @@ Network settings (from `lib/fetch.sh`, forwarded by the CLI from the host enviro
 ## Network Helpers
 
 Downloads made by the build scripts and by extension `install.sh` files go
-through one of two `lib/common.sh` functions so timeouts, stall detection, and
-retries are applied in one place. The Dockerfile's own `system` stage runs
-before these scripts exist in the image and carries equivalent `curl` flags
-inline; its `apt-get` calls are not retried.
+through the `lib/fetch.sh` functions (sourced by `lib/common.sh`) so timeouts,
+stall detection, retries, and progress reporting are applied in one place. The
+Dockerfile copies `lib/fetch.sh` into the image on its own before the `system`
+and `tool-base` package installs, so their `apt-get` steps and the yq download
+use the same helpers; the rest of this directory lands after those layers
+because it changes more often and would invalidate them. Keep `fetch.sh` free
+of dependencies on `common.sh`, and keep changes to it rare.
 
 - `enclave_curl [curl args...]`: `curl --fail --silent --show-error` with connect and stall timeouts on the transfer, wrapped in `enclave_retry`. Retries of a `-o` download resume the partial file with `--continue-at` and fall back to a fresh download when the server rejects ranges. A heartbeat on stderr reports bytes received, percentage (from the response headers), rate, and time left while a download runs. Without `-o`/`-O` the body is buffered per attempt and written to stdout only on success, so `$(enclave_curl <url>)` never sees a partial body.
 - `enclave_retry <label> -- <cmd> [args...]`: runs the command, retrying with a growing delay while its stderr matches a transient network error (name resolution, timeouts, resets, stalled transfers, 5xx, apt `Hash Sum mismatch`) or the attempt exceeds the per-attempt wall-clock timeout, which is the only timeout it applies. Anything else, such as a 404 or a failed `sha256sum --check`, fails immediately. stdout streams through; stderr is replayed after each attempt.

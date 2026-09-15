@@ -331,13 +331,15 @@ forwarded into the WSL2 distribution. See [windows.md](windows.md).
 
 The `ENCLAVE_NET_*` variables are read from the host environment when an image
 build starts and passed to the build scripts, which apply them to every
-download made through the shared `enclave_curl` and `enclave_retry` helpers
+download made through the shared `enclave_curl` and `enclave_retry` helpers,
+including the base image's own `apt-get` steps and the yq download
 (see [build-scripts/README.md](../runtime-assets/build-scripts/README.md)).
 Raise them on a slow or flaky connection. They do not affect the image hash,
 so changing one does not trigger a rebuild by itself, but they do reach the
 build steps as build args: once a rebuild runs for another reason, a value
-that differs from the previous build rebuilds the install layers instead of
-reusing them. Retried downloads resume the partial file where the server
+that differs from the previous build rebuilds every layer from the base
+image's `apt-get` steps on instead of reusing them, so set them once rather
+than per run. Retried downloads resume the partial file where the server
 supports range requests, so a large archive does not restart from zero after
 a hiccup.
 

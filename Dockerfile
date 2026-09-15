@@ -61,8 +61,9 @@ RUN --mount=type=cache,id=enclave-apt-cache,target=/var/cache/apt,sharing=locked
         ca-certificates curl wget gnupg lsb-release sudo \
         git git-lfs bash locales \
         openssh-client \
-        # Archive tools
-        zip unzip tar gzip bzip2 xz-utils \
+        # Archive tools; zstd lets the Claude installer fetch its compressed
+        # payload (about a third of the size) instead of the raw binary
+        zip unzip tar gzip bzip2 xz-utils zstd \
         # JSON
         jq \
         # Templating (envsubst)

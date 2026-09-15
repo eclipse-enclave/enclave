@@ -201,17 +201,30 @@ func dockerfileNormalizeExtensionTree(target string) string {
 
 // generateToolInstallBlock creates per-tool stages and merges them into the final standard stage.
 // This keeps cache invalidation scoped to the tool that changed while avoiding full reinstalls.
+// writeStageArgs declares the identity args every generated stage uses.
 func writeStageArgs(b *strings.Builder) {
 	b.WriteString("ARG USER_ID=1000\n")
 	b.WriteString("ARG GROUP_ID=1000\n")
 	b.WriteString("ARG USERNAME=agent\n")
 	b.WriteString("ARG AGENT_TOOLS=all\n")
-	for _, name := range networkBuildArgs {
+}
+
+// writeInstallStageArgs declares the network and mirror settings for a stage
+// that runs install scripts. The standard stage only merges the tool stages'
+// results and leaves them out: they stay unset unless the host sets them, and
+// buildah warns about every declared ARG it is not given.
+func writeInstallStageArgs(b *strings.Builder) {
+	for _, name := range optionalBuildArgs() {
 		fmt.Fprintf(b, "ARG %s\n", name)
 	}
-	for _, name := range mirrorBuildArgs {
-		fmt.Fprintf(b, "ARG %s\n", name)
-	}
+}
+
+// optionalBuildArgs are the ARGs declared without a default: the network
+// settings and mirrors that forwardHostBuildEnv passes only when the host
+// environment sets them. A build normally leaves them unset, which buildah
+// warns about and BuildKit does not; the engine output drops those warnings.
+func optionalBuildArgs() []string {
+	return append(append([]string(nil), networkBuildArgs...), mirrorBuildArgs...)
 }
 
 // networkBuildArgs are the retry and timeout settings lib/fetch.sh reads for
@@ -280,6 +293,7 @@ func generateToolInstallBlock(tools []string, stamps map[string]string, forceToo
 	for _, tool := range stages {
 		fmt.Fprintf(&b, "FROM tool-base AS %s\n", tool.stage)
 		writeStageArgs(&b)
+		writeInstallStageArgs(&b)
 		b.WriteString("RUN : > /tmp/installed-tools.txt\n")
 		toolTarget := "/opt/enclave/extensions/tools/" + tool.name
 		fmt.Fprintf(&b, "COPY extensions/tools/%s %s\n", tool.name, toolTarget)

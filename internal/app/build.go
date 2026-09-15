@@ -583,6 +583,7 @@ func buildImage(ctx context.Context, paths model.Paths, host model.Host, combine
 		BuildxCacheFrom:   buildxCacheFrom,
 		BuildxCacheTo:     buildxCacheTo,
 		Progress:          opts.Progress,
+		OptionalBuildArgs: optionalBuildArgs(),
 	}
 	if req.NetworkMode, err = docker.BuildNetworkModeFromEnv(); err != nil {
 		return err

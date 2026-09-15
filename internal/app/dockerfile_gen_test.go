@@ -349,6 +349,34 @@ func TestGenerateFeatureInstallBlockQuotesName(t *testing.T) {
 	}
 }
 
+// The standard stage only merges the tool stages' results, so it declares
+// none of the optional ARGs (buildah warns about each one a build leaves
+// unset); the tool stages, which run the installers, declare them all.
+func TestGenerateToolInstallBlockKeepsOptionalArgsOutOfStandardStage(t *testing.T) {
+	block, err := generateToolInstallBlock([]string{"claude"}, nil, nil)
+	if err != nil {
+		t.Fatalf("generateToolInstallBlock: %v", err)
+	}
+	split := strings.Index(block, "FROM feature-base AS standard\n")
+	if split < 0 {
+		t.Fatalf("standard stage missing:\n%s", block)
+	}
+	toolStages, standard := block[:split], block[split:]
+	for _, name := range optionalBuildArgs() {
+		if !strings.Contains(toolStages, "ARG "+name+"\n") {
+			t.Fatalf("tool stage lacks ARG %s:\n%s", name, toolStages)
+		}
+		if strings.Contains(standard, "ARG "+name+"\n") {
+			t.Fatalf("standard stage declares unused ARG %s:\n%s", name, standard)
+		}
+	}
+	for _, want := range []string{"ARG USER_ID=1000\n", "ARG GROUP_ID=1000\n", "ARG USERNAME=agent\n"} {
+		if !strings.Contains(standard, want) {
+			t.Fatalf("standard stage lacks %q:\n%s", want, standard)
+		}
+	}
+}
+
 // An unsafe tool name must fail the generator rather than BuildKit.
 func TestGenerateToolInstallBlockRejectsUnsafeName(t *testing.T) {
 	if _, err := generateToolInstallBlock([]string{"claude$(id)"}, nil, nil); err == nil {
@@ -384,9 +412,10 @@ func TestForwardHostBuildEnvCopiesOnlySetValues(t *testing.T) {
 	}
 }
 
-func TestWriteStageArgsDeclaresNetworkAndMirrorArgs(t *testing.T) {
+func TestWriteInstallStageArgsDeclaresNetworkAndMirrorArgs(t *testing.T) {
 	var b strings.Builder
 	writeStageArgs(&b)
+	writeInstallStageArgs(&b)
 	for _, want := range []string{"ARG ENCLAVE_NET_RETRIES\n", "ARG GOPROXY\n", "ARG npm_config_registry\n", "ARG UV_INDEX_URL\n"} {
 		if !strings.Contains(b.String(), want) {
 			t.Fatalf("stage args lack %q:\n%s", want, b.String())

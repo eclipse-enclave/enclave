@@ -11,9 +11,9 @@
 #   Xvnc (virtual X display + VNC server, RFB served on all container
 #     interfaces so the published host port reaches it)
 #     -> matchbox-window-manager (fullscreens every window)
-#     -> Chromium on a waiting page, forwarded to $ENCLAVE_VNC_URL once it is
-#        set and reachable (all browsing stays on the container's
-#        gateway-restricted network)
+#     -> Chromium on a waiting page, forwarded to $VNC_URL once it is set and
+#        reachable (all browsing stays on the container's gateway-restricted
+#        network)
 #
 # Each component runs in its own restart loop so a crash never takes the
 # session down. Everything runs as the sandbox user and dies with the
@@ -30,16 +30,16 @@
 # and enforces it.
 set -u
 
-DISPLAY_NUM="${ENCLAVE_VNC_DISPLAY:-:99}"
-GEOMETRY="${ENCLAVE_VNC_GEOMETRY:-1600x1000}"
+DISPLAY_NUM="${VNC_DISPLAY:-:99}"
+GEOMETRY="${VNC_GEOMETRY:-1600x1000}"
 # Fixed, not a knob: the published container port in spec.yaml's `ports:` is
 # 5900, so any other value would only make the display unreachable.
 RFB_PORT=5900
-START_URL="${ENCLAVE_VNC_URL:-about:blank}"
-# How long the one-shot forward waits for $ENCLAVE_VNC_URL's port before giving
-# up. Bounded so a typo'd or never-started target reports instead of probing
+START_URL="${VNC_URL:-about:blank}"
+# How long the one-shot forward waits for $VNC_URL's port before giving up.
+# Bounded so a typo'd or never-started target reports instead of probing
 # silently for the life of the session.
-URL_WAIT_SECONDS="${ENCLAVE_VNC_URL_WAIT_SECONDS:-300}"
+URL_WAIT_SECONDS="${VNC_URL_WAIT_SECONDS:-300}"
 STATE_DIR="/tmp/enclave-vnc"
 LOG_DIR="$STATE_DIR/log"
 WAITING_PAGE=/usr/local/share/enclave/vnc/waiting.html
@@ -159,8 +159,8 @@ export DISPLAY="$DISPLAY_NUM"
 
 run_forever wm matchbox-window-manager -use_titlebar no
 
-# Chromium starts on a static waiting page, never on $ENCLAVE_VNC_URL directly:
-# a server the session starts later would otherwise park the display on a
+# Chromium starts on a static waiting page, never on $VNC_URL directly: a
+# server the session starts later would otherwise park the display on a
 # connection-refused error page that nothing ever reloads. The waiting page is
 # also the neutral idle state when no URL is set, where sessions drive the
 # browser on demand via vnc-open, so the one-shot forward below only runs when
@@ -224,9 +224,9 @@ split_authority() {
     esac
 }
 
-# Forward $ENCLAVE_VNC_URL once its TCP port accepts connections. vnc-open waits
-# for the browser singleton, so ordering against the Chromium start above does
-# not matter. Probing only covers http(s); other schemes, and http(s) URLs whose
+# Forward $VNC_URL once its TCP port accepts connections. vnc-open waits for
+# the browser singleton, so ordering against the Chromium start above does not
+# matter. Probing only covers http(s); other schemes, and http(s) URLs whose
 # authority cannot be parsed, open immediately and take their chances.
 if [ "$START_URL" != "about:blank" ]; then
     _host=""

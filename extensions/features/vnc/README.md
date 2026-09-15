@@ -39,11 +39,11 @@ loops, logging to `/tmp/enclave-vnc/log/`:
    (no `-localhost`) so the host's loopback-published port reaches it.
 2. **matchbox-window-manager**: fullscreens every window (kiosk-style).
 3. **Chromium**: headful on the virtual display. It starts on a local
-   waiting page and stays there until a page is opened. When
-   `$ENCLAVE_VNC_URL` is set, a one-shot watcher probes it and forwards it
-   into the running browser once its TCP port accepts connections. Loading the
-   URL directly would instead park the display on a connection-refused error
-   page whenever the target server starts later than the stack. Sessions can
+   waiting page and stays there until a page is opened. When `$VNC_URL` is set,
+   a one-shot watcher probes it and forwards it into the running browser once
+   its TCP port accepts connections. Loading the URL directly would instead park
+   the display on a connection-refused error page whenever the target server
+   starts later than the stack. Sessions can
    also drive the browser on demand via `vnc-open`, which is how a consuming
    feature opens a URL it only knows at runtime.
 
@@ -95,18 +95,18 @@ Environment variables read by the supervisor (set via a consuming feature's
 
 | Variable | Default | Meaning |
 |----------|---------|---------|
-| `ENCLAVE_VNC_URL` | unset | Optional URL auto-forwarded into the browser once its port is reachable. Left unset, the display stays on the waiting page and sessions open pages on demand via `vnc-open`. |
-| `ENCLAVE_VNC_URL_WAIT_SECONDS` | `300` | How long that forward waits for the URL's port before giving up and logging. |
-| `ENCLAVE_VNC_GEOMETRY` | `1600x1000` | Initial display size (a resize-capable client can change it) |
-| `ENCLAVE_VNC_DISPLAY` | `:99` | X display number |
+| `VNC_URL` | unset | Optional URL auto-forwarded into the browser once its port is reachable. Left unset, the display stays on the waiting page and sessions open pages on demand via `vnc-open`. |
+| `VNC_URL_WAIT_SECONDS` | `300` | How long that forward waits for the URL's port before giving up and logging. |
+| `VNC_GEOMETRY` | `1600x1000` | Initial display size (a resize-capable client can change it) |
+| `VNC_DISPLAY` | `:99` | X display number |
 
 The RFB port is not configurable: it must match the `ports:` declaration in
 `spec.yaml` (container port `5900`), so the supervisor hardcodes it.
 
-A consuming feature should leave `ENCLAVE_VNC_URL` unset whenever the page it
-wants is only determined at runtime, and call `vnc-open` with the full URL
-instead. Auto-forwarding a bare server root in that situation lands the display
-on a default view, which can clobber whatever state the intended URL would have
+A consuming feature should leave `VNC_URL` unset whenever the page it wants is
+only determined at runtime, and call `vnc-open` with the full URL instead.
+Auto-forwarding a bare server root in that situation lands the display on a
+default view, which can clobber whatever state the intended URL would have
 selected.
 
 ## Troubleshooting

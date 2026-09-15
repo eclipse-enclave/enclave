@@ -14,5 +14,5 @@
 # behavior of anything that treats a set DISPLAY as "a GUI is available"
 # (pinentry, SSH_ASKPASS, GIT_ASKPASS): those prompts render on the contained
 # display instead of the terminal. The feature README documents this.
-export DISPLAY="${ENCLAVE_VNC_DISPLAY:-:99}"
+export DISPLAY="${VNC_DISPLAY:-:99}"
 export BROWSER=/usr/local/bin/vnc-open

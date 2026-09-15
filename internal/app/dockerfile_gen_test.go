@@ -10,6 +10,7 @@ package app
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -245,6 +246,56 @@ func TestRenderRealDockerfileTemplate(t *testing.T) {
 	// Feature blocks must be woven before the tool stages that build on them.
 	if strings.Index(got, "# feature: devtools") > strings.Index(got, "FROM tool-base AS tool-claude") {
 		t.Fatal("feature install block must precede the woven tool stages")
+	}
+}
+
+// The Dockerfile's own apt-get steps and the yq download go through the
+// lib/fetch.sh helpers, so they are retried and report progress like every
+// other build-time download. The helpers must be in the image before the
+// first step that sources them, and the network settings they read must be
+// declared in both stages that run apt-get.
+func TestRenderRealDockerfileRoutesBaseFetchesThroughHelpers(t *testing.T) {
+	repoDockerfile := filepath.Join("..", "..", "Dockerfile")
+	if _, err := os.Stat(repoDockerfile); err != nil {
+		t.Skipf("repo Dockerfile not found: %v", err)
+	}
+	rendered, err := renderDockerfile(repoDockerfile, []string{"claude"}, []featureInstall{
+		{Name: "devtools", Priority: 40, HasApt: true, HasScript: true},
+	}, nil, nil)
+	if err != nil {
+		t.Fatalf("renderDockerfile: %v", err)
+	}
+
+	copyAt := strings.Index(rendered, "COPY runtime-assets/build-scripts/lib/fetch.sh /opt/enclave/build-scripts/lib/fetch.sh\n")
+	firstUse := strings.Index(rendered, ". /opt/enclave/build-scripts/lib/fetch.sh")
+	if copyAt < 0 || firstUse < 0 {
+		t.Fatalf("fetch.sh must be copied in and sourced by the base stages:\n%s", rendered)
+	}
+	if firstUse < copyAt {
+		t.Fatal("fetch.sh is sourced before it is copied into the image")
+	}
+	// A bare curl or apt-get command: enclave_curl and enclave_apt_get are
+	// preceded by an underscore, and the curl *package* in the apt list is
+	// followed by another package name rather than an option or URL.
+	rawFetch := regexp.MustCompile(`(^|[^_[:alnum:]])(curl\s+(-|https?://)|apt-get (update|install))`)
+	for _, line := range strings.Split(rendered, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "#") {
+			continue
+		}
+		if rawFetch.MatchString(line) {
+			t.Fatalf("downloads must run through the fetch.sh helpers:\n%s", line)
+		}
+	}
+	baseStages := rendered[:strings.Index(rendered, "FROM tool-base AS feature-base\n")]
+	for _, name := range networkBuildArgs {
+		if n := strings.Count(baseStages, "ARG "+name+"\n"); n != 2 {
+			t.Fatalf("ARG %s declared %d times in the system and tool-base stages, want 2", name, n)
+		}
+	}
+	for _, name := range mirrorBuildArgs {
+		if strings.Contains(baseStages, "ARG "+name+"\n") {
+			t.Fatalf("ARG %s is unused in the system and tool-base stages", name)
+		}
 	}
 }
 

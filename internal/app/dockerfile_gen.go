@@ -214,10 +214,11 @@ func writeStageArgs(b *strings.Builder) {
 	}
 }
 
-// networkBuildArgs are the retry and timeout settings lib/common.sh reads for
+// networkBuildArgs are the retry and timeout settings lib/fetch.sh reads for
 // build-time downloads. buildImage forwards them from the host environment
-// when set; every stage that runs install scripts declares them so the values
-// reach the RUN steps.
+// when set; the Dockerfile's system and tool-base stages and every generated
+// stage that runs install scripts declare them so the values reach the RUN
+// steps.
 var networkBuildArgs = []string{
 	"ENCLAVE_NET_RETRIES",
 	"ENCLAVE_NET_RETRY_DELAY_SECONDS",

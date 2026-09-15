@@ -318,7 +318,7 @@ Merge semantics:
 | `ENCLAVE_NET_STALL_TIMEOUT_SECONDS` | Abort a build-time download that stays below the stall speed floor for this long (default `60`) |
 | `ENCLAVE_NET_STALL_SPEED_BYTES` | Stall speed floor in bytes per second (default `1024`); lower it on links that are genuinely slower |
 | `ENCLAVE_NET_PROGRESS_INTERVAL_SECONDS` | How often a running download (curl, or apt's package fetches) reports bytes received, percentage, rate, and time left (default `30`, `0` disables) |
-| `ENCLAVE_NET_ATTEMPT_TIMEOUT_SECONDS` | Wall-clock limit per attempt for retried install commands such as `go install` and `apt-get` (default `1800`, `0` disables) |
+| `ENCLAVE_NET_ATTEMPT_TIMEOUT_SECONDS` | Wall-clock limit per attempt for retried install commands such as `go install` and the download phase of `apt-get install` (default `1800`, `0` disables) |
 
 These are read by the Windows launcher on the Windows side only, and are not
 forwarded into the WSL2 distribution. See [windows.md](windows.md).

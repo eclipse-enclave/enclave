@@ -341,9 +341,36 @@ enclave_format_duration() {
 # package as each download starts and nothing while a large one transfers, so
 # the machine-readable APT::Status-Fd channel is read instead and summarised
 # every ENCLAVE_NET_PROGRESS_INTERVAL_SECONDS as whole lines.
+#
+# `update` fails when any index could not be fetched: apt otherwise exits 0
+# with a warning and carries on with stale or no lists, so the retry would
+# never see the failure and the following install would fail for a reason
+# that is not retried. `install` downloads first and unpacks second, so the
+# retries and the per-attempt wall-clock timeout bound the download, which
+# resumes, and never interrupt dpkg.
 enclave_apt_get() {
     enclave_net_settings_valid || return 2
     local label="apt-get ${1:-}"
+    case "${1:-}" in
+        update)
+            enclave_apt_get_reported "$label" -o APT::Update::Error-Mode=any "$@"
+            ;;
+        install)
+            enclave_apt_get_reported "$label" --download-only "$@" || return
+            local ENCLAVE_NET_ATTEMPT_TIMEOUT_SECONDS=0
+            enclave_retry "$label" -- apt-get "$@"
+            ;;
+        *)
+            enclave_apt_get_reported "$label" "$@"
+            ;;
+    esac
+}
+
+# enclave_apt_get_reported <label> <apt-get args...>
+# One retried apt-get command with the progress reporter attached.
+enclave_apt_get_reported() {
+    local label="$1"
+    shift
     local status=0
     if [ "$ENCLAVE_NET_PROGRESS_INTERVAL_SECONDS" -le 0 ]; then
         enclave_retry "$label" -- apt-get "$@"
@@ -393,5 +420,5 @@ enclave_export_net_helpers() {
     export -f enclave_net_settings_valid enclave_is_transient_network_error \
         enclave_retry enclave_curl enclave_curl_attempt enclave_download_heartbeat \
         enclave_download_total enclave_format_bytes enclave_format_duration \
-        enclave_apt_get enclave_apt_progress_reporter
+        enclave_apt_get enclave_apt_get_reported enclave_apt_progress_reporter
 }

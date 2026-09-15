@@ -58,9 +58,12 @@ func TestGenerateFeatureInstallBlockScopesPerFeature(t *testing.T) {
 		t.Fatalf("expected devtools user-phase script with cache mounts, got:\n%s", block)
 	}
 
-	// github-cli: root-phase script, no apt install, no package cache mounts.
-	if !strings.Contains(block, `FEATURES='github-cli' \`) || !strings.Contains(block, "ENCLAVE_FEATURE_PHASE=root") {
-		t.Fatalf("expected github-cli root-phase script, got:\n%s", block)
+	// github-cli: root-phase script with the apt cache mounts (its apt-get
+	// update must refresh the shared index, not download every index into
+	// the layer), no apt install, no user package cache mounts.
+	rootScript := "--mount=type=cache,id=enclave-apt-lib,target=/var/lib/apt,sharing=locked \\\n    FEATURES='github-cli' \\\n    ENCLAVE_FEATURE_PHASE=root"
+	if !strings.Contains(block, rootScript) {
+		t.Fatalf("expected github-cli root-phase script with apt cache mounts, got:\n%s", block)
 	}
 	if strings.Contains(block, `FEATURES='github-cli' /opt/enclave/build-scripts/install-feature-apt-packages.sh`) {
 		t.Fatalf("github-cli has no apt packages and must not emit an apt install, got:\n%s", block)
@@ -96,6 +99,10 @@ func TestGenerateFeatureInstallBlockInstallCommandsRoot(t *testing.T) {
 	}
 	if !strings.Contains(block, "ENCLAVE_AGENT_USER=${USERNAME}") {
 		t.Fatalf("root phase must pass the agent user for privilege drops, got:\n%s", block)
+	}
+	// Root install commands may run apt-get; they get the apt cache mounts.
+	if !strings.Contains(block, "--mount=type=cache,id=enclave-apt-lib,target=/var/lib/apt,sharing=locked \\\n    FEATURES=") {
+		t.Fatalf("root phase must mount the apt caches, got:\n%s", block)
 	}
 	// A root-phase install-commands block must not use the user-phase package
 	// caches (they belong to the agent-owned home).

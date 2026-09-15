@@ -626,7 +626,10 @@ the transfer; `enclave_retry` bounds each attempt with a wall-clock timeout.
 Both retry transient failures with the `ENCLAVE_NET_*` settings from
 [configuration.md](../configuration.md#environment-variables). Use them for
 every fetch; download upstream installer scripts to a file and run the file
-instead of piping `curl` into `bash`. See the
+instead of piping `curl` into `bash`. Root-phase steps run with the build's
+shared apt cache mounts, so an `install.sh` must not `apt-get clean` or remove
+`/var/lib/apt/lists`: that discards the shared package index and archives
+rather than shrinking the image. See the
 [build-scripts README](../../runtime-assets/build-scripts/README.md#network-helpers).
 
 ### Feature install failure behavior

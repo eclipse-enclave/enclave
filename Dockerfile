@@ -262,8 +262,12 @@ RUN --mount=type=cache,id=enclave-apt-cache,target=/var/cache/apt,sharing=locked
     FEATURES="${FEATURES}" /opt/enclave/build-scripts/install-feature-apt-packages.sh
 
 # Run feature install scripts that require root (needsRoot: true)
-# These are sorted by priority (lower first)
-RUN FEATURES="${FEATURES}" \
+# These are sorted by priority (lower first). The apt caches are mounted so a
+# script's apt-get update refreshes the shared index instead of downloading
+# every index into this layer.
+RUN --mount=type=cache,id=enclave-apt-cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,id=enclave-apt-lib,target=/var/lib/apt,sharing=locked \
+    FEATURES="${FEATURES}" \
     ENCLAVE_FEATURE_PHASE=root \
     /opt/enclave/build-scripts/run-feature-installs.sh
 

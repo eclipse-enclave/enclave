@@ -9,6 +9,8 @@ package tlsstore
 
 import (
 	"bytes"
+	"crypto/ecdsa"
+	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
@@ -203,8 +205,10 @@ func (s *Store) pruneLeafCache() error {
 	return nil
 }
 
+// Leaves use ECDSA P-256 because they are minted under the store mutex during
+// the client's TLS handshake; RSA keygen there would serialize cold handshakes.
 func writeLeaf(certPath string, keyPath string, host string, caCert *x509.Certificate, caKey any) error {
-	priv, err := rsa.GenerateKey(rand.Reader, rsaKeyBits)
+	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		return fmt.Errorf("generate leaf key: %w", err)
 	}
@@ -218,7 +222,7 @@ func writeLeaf(certPath string, keyPath string, host string, caCert *x509.Certif
 		Subject:      pkix.Name{CommonName: host},
 		NotBefore:    now.Add(-1 * time.Hour),
 		NotAfter:     now.AddDate(0, 3, 0),
-		KeyUsage:     x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
+		KeyUsage:     x509.KeyUsageDigitalSignature,
 		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 	}
 	if ip := net.ParseIP(host); ip != nil {

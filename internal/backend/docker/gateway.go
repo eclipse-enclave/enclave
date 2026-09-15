@@ -46,11 +46,6 @@ func (b *Backend) startGateway(ctx context.Context, req backend.Request) (string
 		tempFiles = append(tempFiles, secretReleaseFile)
 	}
 
-	if err := os.MkdirAll(config.HostTLSHostsDir(b.opts.Host.Home), 0o700); err != nil {
-		cleanupFiles(tempFiles)
-		return "", nil, fmt.Errorf("failed to initialize gateway TLS hosts cache dir: %w", err)
-	}
-
 	workspaceID := workspaceIDFromSession(req.Session, b.opts.ProjectDir)
 	startConfig := gateway.StartConfig{
 		Paths:             b.opts.Paths,

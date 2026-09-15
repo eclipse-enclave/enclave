@@ -27,7 +27,7 @@ sequenceDiagram
 
     Note over Host,API: Session startup
     Host->>Entry: Start gateway with config bundle<br/>(dnsmasq.conf, domains.txt, meta.json)
-    Host->>Entry: Mount optional secret mapping JSON<br/>and TLS root (ca.crt/ca.key/hosts)
+    Host->>Entry: Mount optional secret mapping JSON<br/>and TLS root (ca.crt/ca.key)
     Entry->>DNS: Start with rendered allowlist config
     Entry->>FW: OUTPUT DROP + local DNS allow<br/>NAT redirect 80/443 to 8080/8443
     Entry->>Proxy: Start transparent proxy

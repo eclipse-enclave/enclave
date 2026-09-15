@@ -371,6 +371,16 @@ func appendReadOnlyMount(mounts []docker.Mount, hostPath string, containerPath s
 	})
 }
 
+// Only the CA is shared with the host. A host-side leaf cache cannot be shared
+// safely because container UIDs map differently under docker and rootless podman.
+func appendTLSCAMounts(mounts []docker.Mount, tlsRootDir string) []docker.Mount {
+	if tlsRootDir == "" {
+		return mounts
+	}
+	mounts = appendReadOnlyMount(mounts, filepath.Join(tlsRootDir, "ca.crt"), model.GatewayTLSCACertPath)
+	return appendReadOnlyMount(mounts, filepath.Join(tlsRootDir, "ca.key"), model.GatewayTLSCAKeyPath)
+}
+
 // StartResult holds the output of a successful gateway start.
 type StartResult struct {
 	ContainerName string
@@ -438,21 +448,7 @@ func Start(ctx context.Context, cfg StartConfig) (StartResult, error) {
 	if cfg.SecretReleaseFile != "" {
 		mounts = appendReadOnlyMount(mounts, cfg.SecretReleaseFile, model.GatewaySecretReleasePath)
 	}
-	if cfg.TLSRootDir != "" {
-		caCertPath := filepath.Join(cfg.TLSRootDir, "ca.crt")
-		caKeyPath := filepath.Join(cfg.TLSRootDir, "ca.key")
-		hostsPath := filepath.Join(cfg.TLSRootDir, "hosts")
-		if err := os.MkdirAll(hostsPath, 0o700); err != nil {
-			return empty, fmt.Errorf("failed to create gateway TLS hosts dir: %w", err)
-		}
-		mounts = appendReadOnlyMount(mounts, caCertPath, model.GatewayTLSCACertPath)
-		mounts = appendReadOnlyMount(mounts, caKeyPath, model.GatewayTLSCAKeyPath)
-		mounts = append(mounts, docker.Mount{
-			Type:   docker.MountTypeBind,
-			Source: hostsPath,
-			Target: model.GatewayTLSHostsPath,
-		})
-	}
+	mounts = appendTLSCAMounts(mounts, cfg.TLSRootDir)
 
 	env := []string{}
 	if cfg.NetworkLogPath != "" {

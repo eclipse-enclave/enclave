@@ -8,7 +8,6 @@
 package gateway
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"io/fs"
@@ -211,17 +210,20 @@ func buildGatewayImage(ctx context.Context, paths model.Paths, profile model.Pro
 	if req.NetworkMode, err = docker.BuildNetworkModeFromEnv(); err != nil {
 		return err
 	}
-	var output bytes.Buffer
-	if _, err := docker.RunBuild(ctx, "gateway image", req, &output, docker.Build); err != nil {
+	// The gateway build runs silently; the log keeps the final attempt's output
+	// so a rerun after a transient failure is not classified by the text of the
+	// attempt before it.
+	log, err := docker.RunBuild(ctx, "gateway image", req, nil, docker.Build)
+	if err != nil {
 		// Some Docker BuildKit setups cannot resolve names on the default build
 		// network, which surfaces here as failed Alpine index fetches. Point at
 		// the explicit remedy instead of retrying on the host network
 		// automatically; see docker.BuildNetworkEnv.
-		if !docker.IsPodman() && req.NetworkMode == "" && docker.IsBuildNetworkDNSFailure(output.String()) {
+		if !docker.IsPodman() && req.NetworkMode == "" && docker.IsBuildNetworkDNSFailure(log.Tail()) {
 			return fmt.Errorf("failed to build gateway image: %s (%w)%s",
-				docker.BuildNetworkDNSHint(), err, buildOutputTail(output.String(), gatewayBuildErrorLines))
+				docker.BuildNetworkDNSHint(), err, buildOutputTail(log.Tail(), gatewayBuildErrorLines))
 		}
-		return describeGatewayBuildFailure(err, output.String())
+		return describeGatewayBuildFailure(err, log.Tail())
 	}
 
 	logx.Successf("Gateway image built")

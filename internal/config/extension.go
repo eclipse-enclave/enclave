@@ -418,5 +418,10 @@ func validateAndNormalizeExtension(ext *model.Extension, manifestPath string) er
 	if err := normalizePortConfigs(ext.Ports, ext.Name); err != nil {
 		return fmt.Errorf("%s: %w", manifestPath, err)
 	}
+	caches, err := validateAndNormalizeCaches(ext.Caches)
+	if err != nil {
+		return fmt.Errorf("%s: %w", manifestPath, err)
+	}
+	ext.Caches = caches
 	return nil
 }

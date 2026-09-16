@@ -93,6 +93,8 @@ func capabilityFixture(t *testing.T) string {
 	writeFixture(t, filepath.Join(dir, "skills", "review", "SKILL.md"), "# review\n", 0o644)
 	writeFixture(t, filepath.Join(dir, "files", "workspace", "README.md"), "# project readme\n", 0o644)
 	writeFixture(t, filepath.Join(dir, "files", "home", ".gitconfig"), "[user]\n", 0o644)
+	writeFixture(t, filepath.Join(dir, "commands", "host", "vnc-viewer"), "#!/bin/sh\n", 0o755)
+	writeFixture(t, filepath.Join(dir, "commands", "host", "README.md"), "# not a command\n", 0o644)
 	return dir
 }
 
@@ -127,6 +129,9 @@ func TestInspectReportsCapabilities(t *testing.T) {
 	}
 	if len(caps.Spec.InitFiles) != 1 || !writesIntoProject(caps.Spec.InitFiles[0].Path) || caps.Spec.InitFiles[0].OnlyIfMissing {
 		t.Errorf("InitFiles = %+v", caps.Spec.InitFiles)
+	}
+	if len(caps.HostCommands) != 1 || caps.HostCommands[0] != "vnc-viewer" {
+		t.Errorf("HostCommands = %v, want only the executable entry (the README is not a verb)", caps.HostCommands)
 	}
 	if !caps.IgnoredGoDir {
 		t.Error("IgnoredGoDir = false, want true")
@@ -206,7 +211,7 @@ func TestRenderIncludesEveryReportedCapability(t *testing.T) {
 		"conf-file=/etc/dnsmasq.d/extra.conf", "review",
 		"foo --serve", "NODE_TLS_REJECT_UNAUTHORIZED=0", "X-Acme-Token", "~/.acme/token", "json",
 		"ACME_SECURESTORAGE_DIR", "1455", "agents/", ".credentials.json", ".foo.json",
-		".config/foo", "hosts.yml", "README.md", ".gitconfig",
+		".config/foo", "hosts.yml", "README.md", ".gitconfig", "vnc-viewer",
 		"-c memories=false", ".config/foo/memories (scope session)", "memories/",
 	} {
 		if !strings.Contains(rendered, want) {
@@ -229,12 +234,51 @@ func TestRenderOmitsEmptyLines(t *testing.T) {
 		"entrypoint override", "environment vars", "provider", "passthrough paths",
 		"host config dir", "host credentials file", "host oauth json",
 		"mixin config dir", "mixin auth files", "workspace files", "home files",
-		"credential →", "credential file", "skips approval",
+		"credential →", "credential file", "skips approval", "host commands",
 		"no-memory args", "agent memory", "preserved state",
 	} {
 		if strings.Contains(out.String(), unwanted) {
 			t.Errorf("rendered summary should omit %q:\n%s", unwanted, out.String())
 		}
+	}
+}
+
+// TestRenderHostCommandsNamesTheRisk pins the one thing the row exists to say.
+// Everything else an extension ships runs in a container, so a reader who takes
+// "host commands" for another in-image directory learns nothing from the label
+// alone. The comparison collapses whitespace because the value wraps into the
+// column at a width the test does not control.
+func TestRenderHostCommandsNamesTheRisk(t *testing.T) {
+	caps := capabilities{HostCommands: []string{"vnc-viewer"}}
+	var out bytes.Buffer
+	caps.render(&out, Style{}, "")
+	rendered := strings.Join(strings.Fields(out.String()), " ")
+
+	for _, want := range []string{
+		"host commands vnc-viewer",
+		"run on your host outside the sandbox",
+		"with your user's privileges",
+	} {
+		if !strings.Contains(rendered, want) {
+			t.Errorf("rendered summary is missing %q:\n%s", want, rendered)
+		}
+	}
+}
+
+// TestDiffHostCommandsRepeatsTheRisk covers an update, which renders the diff
+// alone and never the capability summary: a command gained that way has to
+// carry the warning itself or it is never shown one.
+func TestDiffHostCommandsRepeatsTheRisk(t *testing.T) {
+	changes := diffCapabilities(
+		capabilities{HostCommands: []string{"old-verb"}},
+		capabilities{HostCommands: []string{"vnc-viewer"}},
+	)
+	joined := strings.Join(changes, "\n")
+	if !strings.Contains(joined, "adds host command vnc-viewer (runs on your host outside the sandbox") {
+		t.Errorf("gained host command is not reported with its risk: %v", changes)
+	}
+	if !strings.Contains(joined, "drops host command old-verb") {
+		t.Errorf("lost host command is not reported: %v", changes)
 	}
 }
 
@@ -713,8 +757,13 @@ func capabilityFieldCases() map[string]capabilityFieldCase {
 		"Skills":           {func(c *capabilities) { c.Skills = []string{"review"} }, "review", "skill review"},
 		"WorkspaceFiles":   {func(c *capabilities) { c.WorkspaceFiles = []string{"README.md"} }, "README.md", "workspace file README.md"},
 		"HomeFiles":        {func(c *capabilities) { c.HomeFiles = []string{".gitconfig"} }, ".gitconfig", "home file .gitconfig"},
-		"IgnoredGoDir":     {func(c *capabilities) { c.IgnoredGoDir = true }, "go/ handlers", "adds ignored go/ handlers"},
-		"Files":            {func(c *capabilities) { c.Files = 3 }, "3 files", "staged content changes"},
+		// The markers are the command name alone because the row's risk note
+		// wraps at an unpredictable point. TestRenderHostCommandsNamesTheRisk
+		// asserts the wording itself.
+		"HostCommands": {func(c *capabilities) { c.HostCommands = []string{"vnc-viewer"} },
+			"vnc-viewer", "adds host command vnc-viewer"},
+		"IgnoredGoDir": {func(c *capabilities) { c.IgnoredGoDir = true }, "go/ handlers", "adds ignored go/ handlers"},
+		"Files":        {func(c *capabilities) { c.Files = 3 }, "3 files", "staged content changes"},
 		// Bytes only renders alongside Files>0 (the "content" row is guarded
 		// by c.Files > 0), so its setter also sets Files; the field under test
 		// is still Bytes (the markers below are Bytes' own value, not Files').

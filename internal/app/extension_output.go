@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"strings"
 
 	"enclave/internal/extinstall"
 	"enclave/internal/model"
@@ -30,13 +31,19 @@ type extensionListEnvelope struct {
 
 // extensionListJSONExt is the JSON shape of one extension in `list --json`.
 type extensionListJSONExt struct {
-	Name        string               `json:"name"`
-	DisplayName string               `json:"displayName,omitempty"`
-	Description string               `json:"description,omitempty"`
-	Source      string               `json:"source"`
-	Enabled     bool                 `json:"enabled"`
-	Managed     bool                 `json:"managed"`
-	Origin      *extensionListOrigin `json:"origin,omitempty"`
+	Name        string `json:"name"`
+	DisplayName string `json:"displayName,omitempty"`
+	Description string `json:"description,omitempty"`
+	Source      string `json:"source"`
+	Enabled     bool   `json:"enabled"`
+	Managed     bool   `json:"managed"`
+	// HostCommands are the enclave verbs this extension contributes, which run
+	// on the host outside the sandbox. They resolve whenever the extension is
+	// installed, enabled or not, so a caller auditing which installed
+	// extensions can execute host code reads this rather than Enabled.
+	// Additive to the v1 contract.
+	HostCommands []string             `json:"hostCommands,omitempty"`
+	Origin       *extensionListOrigin `json:"origin,omitempty"`
 	// OriginError carries extinstall.Managed.Problem: provenance for a managed
 	// directory could not be read (e.g. a corrupt sidecar). When it is set,
 	// Origin is nil and Managed is false. Additive to the v1 contract.
@@ -64,13 +71,14 @@ func extensionListJSONEntries(exts []model.Extension, inventory map[string]extin
 	for _, ext := range exts {
 		managed := inventory[ext.Name]
 		item := extensionListJSONExt{
-			Name:        ext.Name,
-			DisplayName: ext.DisplayName,
-			Description: ext.Description,
-			Source:      managed.Source,
-			Enabled:     enabled(ext.Name),
-			Managed:     managed.Origin != nil,
-			OriginError: managed.Problem,
+			Name:         ext.Name,
+			DisplayName:  ext.DisplayName,
+			Description:  ext.Description,
+			Source:       managed.Source,
+			Enabled:      enabled(ext.Name),
+			Managed:      managed.Origin != nil,
+			HostCommands: managed.HostCommands,
+			OriginError:  managed.Problem,
 		}
 		if managed.Origin != nil {
 			item.Origin = &extensionListOrigin{
@@ -125,6 +133,17 @@ func encodeIndentedJSON(w io.Writer, v any) error {
 	encoder := json.NewEncoder(w)
 	encoder.SetIndent("", "  ")
 	return encoder.Encode(v)
+}
+
+// listingSuffix renders everything appended to one extension's listing line:
+// its provenance, then the host commands it contributes. Both are the text
+// counterpart of a `list --json` field, so the two views stay in step.
+func listingSuffix(entry extinstall.Managed) string {
+	suffix := provenanceSuffix(entry)
+	if len(entry.HostCommands) > 0 {
+		suffix += fmt.Sprintf(" [host: %s]", strings.Join(entry.HostCommands, ", "))
+	}
+	return suffix
 }
 
 // provenanceSuffix renders the bracketed provenance appended to a listing line

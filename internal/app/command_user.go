@@ -29,9 +29,15 @@ func runUserHostCommand(cmd usercmd.Command, args []string, projectDir, home str
 		logx.Warnf("could not resolve enclave binary path; ENCLAVE_BIN will be empty: %v", err)
 	}
 
-	// #nosec G204 -- cmd.Path is a user-owned executable the user dropped into
-	// ~/.config/enclave/commands/host; running it is the same trust level as a
-	// shell alias. The OS resolves the interpreter via execve.
+	// #nosec G204 -- cmd.Path is an executable under the user's own config root:
+	// either one they dropped into ~/.config/enclave/commands/host, which is the
+	// same trust level as a shell alias, or one an extension they chose to
+	// install contributed from its commands/host/. The second case is third-party
+	// code, which is why `add` and `update` report host commands as their own
+	// capability before writing anything (internal/extinstall) and why an
+	// extension can never take a name the user already uses (internal/usercmd).
+	// Running it is the user's decision either way. The OS resolves the
+	// interpreter via execve.
 	c := exec.Command(cmd.Path, args...)
 	c.Stdin = os.Stdin
 	c.Stdout = os.Stdout

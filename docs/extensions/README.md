@@ -66,6 +66,11 @@ extensions/
     │   ├── install.sh
     │   └── feature-entrypoint.d/
     │       └── setup.sh           # Runs for ALL tools
+    ├── vnc/
+    │   ├── spec.yaml
+    │   └── commands/
+    │       └── host/
+    │           └── vnc-viewer     # Becomes `enclave vnc-viewer`, runs on the host
     └── devtools/
         ├── spec.yaml
         └── install.sh
@@ -73,8 +78,8 @@ extensions/
 
 `spec.yaml` is the extension manifest. `install.sh`,
 `gateway-allowlist.conf`, `entrypoint.d/`, `feature-entrypoint.d/`,
-`templates/`, and `skills/` remain sibling files rather than fields in the
-manifest. The in-container build shell scripts under
+`templates/`, `skills/`, and `commands/` remain sibling files rather than
+fields in the manifest. The in-container build shell scripts under
 `runtime-assets/build-scripts/` read the metadata they need (feature/tool
 enablement, `priority`, `needsRoot`, `aptPackages`, `failOnInstallError`)
 straight from `spec.yaml` (falling back to `spec.json`) with `yq`.
@@ -231,6 +236,58 @@ aptPackages: [gdb, strace, ltrace, tcpdump]
 priority: 80
 ```
 
+## Host commands
+
+Both kinds may ship `commands/host/<name>`. Every executable file there becomes
+an `enclave <name>` verb on any host where the extension is installed, with the
+same contract as a command the user drops into
+`~/.config/enclave/commands/host/`: the shebang picks the interpreter,
+arguments after the verb pass through verbatim, stdin/stdout/stderr and the exit
+code pass through untouched, and the environment carries `ENCLAVE_BIN`,
+`ENCLAVE_PROJECT_ROOT`, and `ENCLAVE_CONFIG_DIR`. `remove` takes the verbs away
+with the extension.
+
+```
+extensions/features/vnc/
+├── spec.yaml
+└── commands/
+    └── host/
+        └── vnc-viewer     # chmod +x, becomes `enclave vnc-viewer`
+```
+
+These run **on the host**, outside the sandbox, with the user's privileges.
+That is unlike everything else an extension ships, so `add` and `update` report
+them in the capability summary's first row, saying as much, before writing
+anything, and `list` reports them per extension in both its text and `--json`
+output. Ship one only when the job genuinely cannot be done inside a session:
+driving a host GUI, or talking to something the sandbox deliberately cannot
+reach.
+
+Rules worth knowing before you ship one:
+
+- The file needs its executable bit set in the repository. A non-executable
+  file next to the scripts (a `README`, a data file) is ignored silently: it is
+  never reported as a command and never warned about, since the file is yours
+  and the user cannot change it.
+- Only `commands/host/` is read. Anything else under `commands/` contributes
+  nothing in any direction, so it is reported as a validation warning rather
+  than left inert: a `commands/session/` or a misspelled `commands/hosts/`
+  shows up as `ignoring commands/<name>` on the next run.
+- Names resolve in a fixed order: built-in verbs, then the user's own
+  `commands/{host,session}/` trees, then extensions. Picking a name a built-in
+  or the user already owns means the command is skipped with a warning, so
+  prefer a name tied to the extension.
+- `commands/` never enters the build context or the image identity hash.
+  Editing a command forces no rebuild, and the script is not present inside the
+  image, so nothing in a session can run it.
+- Only the user's extension root (`~/.config/enclave/extensions/`) is scanned,
+  which is where `add` installs. A built-in extension shipped inside the binary
+  is unpacked into a content-addressed cache rather than a configuration
+  directory, so its own `commands/` is not read and a built-in that wants a verb
+  adds a real command instead. A directory the user creates under the extension
+  root by hand is read like any installed one, including one that overrides a
+  built-in.
+
 ## Tool Extensions
 
 Tool extensions are runnable AI coding agents (`kind: sandbox`). They require
@@ -253,6 +310,7 @@ additional files beyond `spec.yaml`.
 | `check-update.sh` | Optional prebuild hook that returns a stable upstream fingerprint for automatic update probes |
 | `entrypoint.d/*.sh` | Scripts sourced at container startup (only for matching tool) |
 | `go/` | Go code for custom hooks/handlers (compiled into binary) |
+| `commands/host/*` | Executables that become `enclave <name>` verbs, running on the **host**. See [Host commands](#host-commands) |
 
 ### Complete example — `extensions/tools/claude/spec.yaml`
 
@@ -588,6 +646,7 @@ without help from the tool spec.
 | `install.sh` | Installation script (runs as root if `needsRoot: true`) |
 | `feature-entrypoint.d/*.sh` | Scripts sourced at startup for ALL tools |
 | `skills/` | Agent skills composed into the tool's skills directory when the feature is enabled |
+| `commands/host/*` | Executables that become `enclave <name>` verbs, running on the **host**. See [Host commands](#host-commands) |
 
 ### Feature Selection
 

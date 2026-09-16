@@ -23,6 +23,15 @@ func (c capabilities) render(w io.Writer, style Style, source string) {
 	row := rows.add
 	row("source", source)
 
+	// First after the source: everything else an extension ships is bounded by
+	// the sandbox, and this is not. The row spells out where the verbs run
+	// instead of leaving the reader to infer it from the label.
+	hostCommands := strings.Join(c.HostCommands, ", ")
+	if hostCommands != "" {
+		hostCommands += fmt.Sprintf(" (added as `%s <name>`, run on your host outside the sandbox with your user's privileges)", model.AppName)
+	}
+	row("host commands", hostCommands)
+
 	install := ""
 	switch {
 	case c.InstallScript && c.Spec.NeedsRoot:

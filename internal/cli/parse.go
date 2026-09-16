@@ -198,7 +198,7 @@ func registerUserCommands(rootCmd *cobra.Command, userCmds []usercmd.Command, re
 		}
 		rootCmd.AddCommand(&cobra.Command{
 			Use:                uc.Name,
-			Short:              fmt.Sprintf("User command (%s)", uc.Path),
+			Short:              userCommandShort(uc),
 			GroupID:            userCommandGroupID,
 			DisableFlagParsing: true,
 			// The no-op Run makes IsAvailableCommand() true so the stub is
@@ -211,6 +211,17 @@ func registerUserCommands(rootCmd *cobra.Command, userCmds []usercmd.Command, re
 		kept = append(kept, uc)
 	}
 	return kept
+}
+
+// userCommandShort labels a stub in --help. A command the user dropped in
+// themselves is identified by its path alone, but one that arrived with an
+// extension names the extension too: that is what the user would uninstall to
+// get rid of it, and the path is only where it happens to live.
+func userCommandShort(uc usercmd.Command) string {
+	if uc.Extension != "" {
+		return fmt.Sprintf("Host command from the %s extension (%s)", uc.Extension, uc.Path)
+	}
+	return fmt.Sprintf("User command (%s)", uc.Path)
 }
 
 // findUserCommand returns the user command with the given name, or nil.

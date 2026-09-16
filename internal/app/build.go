@@ -362,13 +362,18 @@ func normalizeAndSortNames(values []string) []string {
 	return normalized
 }
 
+// extensionCommandsSkip keeps an extension's commands/ tree out of the build
+// context. Those are host verbs (internal/usercmd): the image never runs them,
+// and including them would make editing one force a rebuild.
+var extensionCommandsSkip = map[string]struct{}{model.CommandsDirName: {}}
+
 func overlayNamedExtensionDirs(files map[string]mergedExtensionFile, relRoot string, builtinRoot string, userRoot string, names []string) error {
 	for _, name := range names {
 		relPrefix := filepath.ToSlash(filepath.Join(relRoot, name))
-		if err := overlayFilesFromDir(files, relPrefix, filepath.Join(builtinRoot, name), nil); err != nil {
+		if err := overlayFilesFromDir(files, relPrefix, filepath.Join(builtinRoot, name), extensionCommandsSkip); err != nil {
 			return err
 		}
-		if err := overlayFilesFromDir(files, relPrefix, filepath.Join(userRoot, name), nil); err != nil {
+		if err := overlayFilesFromDir(files, relPrefix, filepath.Join(userRoot, name), extensionCommandsSkip); err != nil {
 			return err
 		}
 	}

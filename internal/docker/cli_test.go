@@ -24,7 +24,13 @@ func TestIsNotFound(t *testing.T) {
 		{name: "no such image", stderr: "Error: No such image: foo:latest", want: true},
 		{name: "no such volume", stderr: "Error: No such volume: myvol", want: true},
 		{name: "network not found", stderr: "Error response from daemon: network missing not found", want: true},
+		// Docker 29 appends its own "exit status 1" line after the daemon
+		// message, so the phrase is not at the end of the whole stderr.
+		{name: "network rm with trailing exit status", stderr: "Error response from daemon: network abc123 not found\nexit status 1", want: true},
 		{name: "no such object", stderr: "Error: No such object: abc123", want: true},
+		// "network " and the trailing "not found" must come from the same
+		// line; spread across lines they are two unrelated messages.
+		{name: "network and not-found on different lines", stderr: "Error: network sandbox join failed\nmanifest unknown: manifest not found", want: false},
 		// The reviewed footgun: a bare "not found" also appears in unrelated
 		// failures and must not be classified as a missing-object error.
 		{name: "executable not found", stderr: `OCI runtime create failed: exec: "foo": executable file not found in $PATH`, want: false},

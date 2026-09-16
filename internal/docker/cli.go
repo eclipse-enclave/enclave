@@ -98,10 +98,15 @@ func IsNotFound(err error) bool {
 			return true
 		}
 	}
-	// Network inspect uses "network <name> not found" on some daemon
-	// versions instead of the "No such network" form used elsewhere.
-	if strings.Contains(s, "network ") && strings.HasSuffix(strings.TrimSpace(s), " not found") {
-		return true
+	// Network inspect and removal use "network <name> not found" on some daemon
+	// versions instead of the "No such network" form used elsewhere. The match
+	// is per line: Docker 29 appends its own "exit status 1" line after the
+	// daemon message, so the phrase is not the end of the whole stderr.
+	for _, line := range strings.Split(s, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.Contains(line, "network ") && strings.HasSuffix(line, " not found") {
+			return true
+		}
 	}
 	return false
 }
@@ -163,7 +168,9 @@ func IsActiveEndpoints(err error) bool {
 
 // IsUnsupportedIsolateValue reports whether podman rejected the bridge
 // "isolate" option value. netavark releases before "strict" existed fail the
-// boolean parse of that value at network creation.
+// boolean parse of that value. Note that netavark parses the option when a
+// container attaches, so a create can still succeed with a value it will
+// later reject; the supported value is chosen by version, not by this check.
 func IsUnsupportedIsolateValue(err error) bool {
 	var ce *cliError
 	if !errors.As(err, &ce) {

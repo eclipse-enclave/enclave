@@ -93,6 +93,81 @@ exit 1
 	}
 }
 
+func TestNetworkInspectReportsMalformedOutput(t *testing.T) {
+	installNetworkDockerStub(t, `
+printf '%s\n' 'not json'
+exit 0
+`)
+	_, err := NetworkInspect(context.Background(), "session-net")
+	if err == nil || !strings.Contains(err.Error(), "decode network inspect output") {
+		t.Fatalf("NetworkInspect() error = %v, want decode failure", err)
+	}
+	if IsNotFound(err) {
+		t.Fatalf("NetworkInspect() classified malformed output as not-found: %v", err)
+	}
+}
+
+func TestNetworkListReportsMalformedOutput(t *testing.T) {
+	installNetworkDockerStub(t, `
+if [ "$1" = "network" ] && [ "$2" = "ls" ]; then
+  printf '%s\n' network-id
+  exit 0
+fi
+printf '%s\n' '{"Name":"session-net"'
+exit 0
+`)
+	_, err := NetworkList(context.Background(), NewFilters())
+	if err == nil || !strings.Contains(err.Error(), "decode network inspect output") {
+		t.Fatalf("NetworkList() error = %v, want decode failure", err)
+	}
+}
+
+func TestNetworkInspectReportsEmptySuccessfulOutput(t *testing.T) {
+	installNetworkDockerStub(t, `exit 0`)
+	_, err := NetworkInspect(context.Background(), "session-net")
+	if err == nil || !strings.Contains(err.Error(), "printed 0 objects for 1 networks") {
+		t.Fatalf("NetworkInspect() error = %v, want an empty-output failure", err)
+	}
+	if IsNotFound(err) {
+		t.Fatalf("NetworkInspect() classified empty output as not-found: %v", err)
+	}
+}
+
+func TestNetworkListReportsFailureDespitePartialOutput(t *testing.T) {
+	installNetworkDockerStub(t, `
+if [ "$1" = "network" ] && [ "$2" = "ls" ]; then
+  printf '%s\n' first-id second-id
+  exit 0
+fi
+printf '%s\n' '{"Name":"first-net","Id":"first-id"}'
+printf '%s\n' 'Error response from daemon: permission denied' >&2
+exit 1
+`)
+	networks, err := NetworkList(context.Background(), NewFilters())
+	if err == nil || !strings.Contains(err.Error(), "permission denied") {
+		t.Fatalf("NetworkList() = %+v, %v; want the engine failure, not partial results", networks, err)
+	}
+}
+
+func TestNetworkListKeepsNetworksInspectedBeforeMissingOne(t *testing.T) {
+	installNetworkDockerStub(t, `
+if [ "$1" = "network" ] && [ "$2" = "ls" ]; then
+  printf '%s\n' present-id gone-id
+  exit 0
+fi
+printf '%s\n' '{"Name":"present-net","Id":"present-id"}'
+printf '%s\n' 'Error response from daemon: network gone-id not found' >&2
+exit 1
+`)
+	networks, err := NetworkList(context.Background(), NewFilters())
+	if err != nil {
+		t.Fatalf("NetworkList() error = %v", err)
+	}
+	if len(networks) != 1 || networks[0].ID != "present-id" {
+		t.Fatalf("NetworkList() = %+v, want only the network still present", networks)
+	}
+}
+
 func TestInfoDecodesFirewallAndVersionFields(t *testing.T) {
 	installNetworkDockerStub(t, `
 if [ "$1" = "info" ]; then
@@ -115,7 +190,10 @@ exit 2
 
 func TestDecodeNetworkInspectResponsesAcceptsPodmanShape(t *testing.T) {
 	line := `{"name":"session-net","id":"0123abcd","driver":"bridge","created":"2026-09-14T10:00:00.123456789+02:00","subnets":[{"subnet":"10.89.3.0/24","gateway":"10.89.3.1"}],"labels":{"enclave.network":"true","enclave.network.container":"session"},"options":{"isolate":"strict"},"containers":{"c1":{"name":"session-gateway","interfaces":{"eth0":{}}}}}`
-	results := decodeNetworkInspectResponses(line)
+	results, err := decodeNetworkInspectResponses(line)
+	if err != nil {
+		t.Fatalf("decodeNetworkInspectResponses() error = %v", err)
+	}
 	if len(results) != 1 {
 		t.Fatalf("decoded %d networks, want 1", len(results))
 	}

@@ -403,6 +403,7 @@ func installFakeDocker(t *testing.T) string {
 		"printf '%s\\n' -- >> " + util.ShellQuote(logPath) + "\n" +
 		"if [ \"$1\" = \"info\" ]; then printf '%s\\n' '{}'; fi\n" +
 		"if [ \"$1\" = \"network\" ] && [ \"$2\" = \"create\" ]; then printf '%s\\n' fake-network-id; fi\n" +
+		"if [ \"$1\" = \"network\" ] && [ \"$2\" = \"inspect\" ]; then printf '%s\\n' 'Error response from daemon: network fake not found' >&2; exit 1; fi\n" +
 		"if [ \"$1\" = \"run\" ]; then printf '%s\\n' fake-container-id; fi\n" +
 		"exit 0\n"
 	if err := os.WriteFile(fakeDocker, []byte(script), 0o755); err != nil {

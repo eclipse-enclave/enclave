@@ -102,31 +102,45 @@ func NetworkList(ctx context.Context, filters Filters) ([]NetworkInspectResponse
 	return inspectNetworks(ctx, ids)
 }
 
+// inspectNetworks batch-inspects networks. The only tolerated failure is an
+// ID that vanished between listing and inspection: both engines then still
+// print the objects they found and report each missing one as not found, so
+// the partial output is complete for the networks that exist. Any other
+// failure is returned even when some output decoded, and a successful inspect
+// has to print exactly one object per requested network; an empty or short
+// response would otherwise pass as "not found".
 func inspectNetworks(ctx context.Context, ids []string) ([]NetworkInspectResponse, error) {
 	if len(ids) == 0 {
 		return nil, nil
 	}
 	args := append([]string{"network", "inspect", "--format", "{{json .}}"}, ids...)
 	out, err := capture(ctx, args...)
-	results := decodeNetworkInspectResponses(out)
-	if err != nil && IsNotFound(err) {
-		return results, nil
-	}
-	if len(results) == 0 && err != nil {
+	if err != nil && !IsNotFound(err) {
 		return nil, err
+	}
+	results, decodeErr := decodeNetworkInspectResponses(out)
+	if decodeErr != nil {
+		return nil, decodeErr
+	}
+	if err == nil && len(results) != len(ids) {
+		return nil, fmt.Errorf("network inspect printed %d objects for %d networks", len(results), len(ids))
 	}
 	return results, nil
 }
 
-func decodeNetworkInspectResponses(out string) []NetworkInspectResponse {
+// decodeNetworkInspectResponses decodes one inspect object per line. A line
+// that does not parse is an error rather than a skipped network: dropped
+// silently, an existing network would look missing, so its owner would try to
+// create it again and list callers would leave it out of cleanup and status.
+func decodeNetworkInspectResponses(out string) ([]NetworkInspectResponse, error) {
 	lines := splitLines(out)
 	results := make([]NetworkInspectResponse, 0, len(lines))
 	for _, line := range lines {
 		var info NetworkInspectResponse
 		if err := json.Unmarshal([]byte(line), &info); err != nil {
-			continue
+			return nil, fmt.Errorf("decode network inspect output: %w", err)
 		}
 		results = append(results, info)
 	}
-	return results
+	return results, nil
 }

@@ -15,7 +15,7 @@ import "enclave/internal/model"
 func optionCLIFlags() map[string][]CLIFlag {
 	return map[string][]CLIFlag{
 		"tool": {
-			valueFlag("--tool", "Tool profile (default: claude)", "--tool requires a value (see --help for available tools)", func(opts *model.Options, sources *model.OptionSources, value string) error {
+			valueFlag("--tool", "Tool profile (default: asked once on the first interactive run, then the saved choice)", "--tool requires a value (see --help for available tools)", func(opts *model.Options, sources *model.OptionSources, value string) error {
 				opts.Tool = value
 				sources.Tool = model.SourceCLI
 				return nil

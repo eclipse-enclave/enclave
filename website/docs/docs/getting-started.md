@@ -154,15 +154,17 @@ schedule; neither replaces the Enclave binary on your host.
 
 ## Start your first session
 
-From inside a git repository, launch the default agent in an isolated container:
+From inside a git repository, launch your coding agent in an isolated container:
 
 ```bash
 enclave
 ```
 
-Enclave builds the environment, mounts the current folder into a container, and
-starts your agent against the branch you have checked out. The agent runs at full
-autonomy with no confirmation prompts, and it stays contained.
+The first interactive run asks which agent to use and saves the answer, so this
+is the only time you are asked. Enclave then builds the environment, mounts the
+current folder into a container, and starts your agent against the branch you
+have checked out. The agent runs at full autonomy with no confirmation prompts,
+and it stays contained.
 
 To keep parallel sessions from stepping on each other, run each one in its own
 git worktree. This is plain git, no Enclave-specific setup required:
@@ -177,6 +179,8 @@ See [Run against an isolated worktree](/cli#run-against-an-isolated-worktree) fo
 more.
 
 ### Pick a specific agent
+
+To override the saved answer for a single run, or to change it later:
 
 ```bash
 enclave --tool codex

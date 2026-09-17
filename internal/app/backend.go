@@ -73,7 +73,8 @@ func selectBackend(opts model.Options, dockerOpts backenddocker.Options) (backen
 var (
 	detectContainerCLIs = docker.DetectCLIs
 	dockerIsPodmanShim  = docker.DockerIsPodmanShim
-	backendPromptUsable = func() bool {
+	// promptUsable gates every one-time setup question (backend and tool).
+	promptUsable = func() bool {
 		// Redirected stdout means a consumer captures the output even while
 		// stdin and stderr are terminals; result=$(enclave ps) must not block
 		// on a question.
@@ -82,10 +83,10 @@ var (
 	saveBackendChoice = config.WriteGlobalDefault
 )
 
-// backendPromptAllowed reports whether resolving the "auto" backend may ask the
-// user. Structured output and --yes promise not to prompt, whatever the
-// terminal looks like.
-func backendPromptAllowed(parsed cli.Result) bool {
+// promptAllowed reports whether resolving an unset option may ask the user.
+// Structured output and --yes promise not to prompt, whatever the terminal
+// looks like.
+func promptAllowed(parsed cli.Result) bool {
 	if parsed.Options.PSJSON || parsed.Options.StatusJSON || parsed.ConfigView.JSON {
 		return false
 	}
@@ -136,7 +137,7 @@ func detectBackend(interactive bool) string {
 	if err != nil {
 		configPath = "the global config.json"
 	}
-	if !interactive || !backendPromptUsable() {
+	if !interactive || !promptUsable() {
 		logx.Warnf("Both docker and podman are installed; using docker. Set \"backend\" in %s to choose.", configPath)
 		return backend.NameDocker
 	}

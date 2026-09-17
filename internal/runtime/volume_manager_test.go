@@ -73,6 +73,29 @@ func TestConfigVolumeRelativeDirsIncludesSkillsDirOutsideSettingsSubtree(t *test
 	}
 }
 
+func TestConfigVolumeRelativeDirsIncludesNestedMemoryDir(t *testing.T) {
+	t.Parallel()
+
+	m := volumeManager{
+		Runtime: &Runtime{
+			containerHome: model.ContainerHome,
+			profile: model.Profile{
+				Name:           "tool",
+				ConfigDir:      ".tool",
+				MemoryDir:      ".tool/state/memory",
+				SettingsFile:   "settings.json",
+				SettingsTarget: ".tool/settings.json",
+			},
+		},
+	}
+
+	got := m.configVolumeRelativeDirs()
+	want := []string{filepath.Join("state", "memory")}
+	if !slices.Equal(got, want) {
+		t.Fatalf("configVolumeRelativeDirs() = %v, want %v", got, want)
+	}
+}
+
 func TestConfigVolumeRelativeDirsMatchesClaudeProfile(t *testing.T) {
 	t.Parallel()
 
@@ -83,6 +106,7 @@ func TestConfigVolumeRelativeDirsMatchesClaudeProfile(t *testing.T) {
 				Name:           "claude",
 				ConfigDir:      ".claude",
 				SkillsDir:      ".claude/skills",
+				MemoryDir:      ".claude/memory",
 				SettingsFile:   "claude-settings.json",
 				SettingsTarget: ".claude/settings.json",
 				Providers: []model.ProviderConfig{
@@ -93,7 +117,7 @@ func TestConfigVolumeRelativeDirsMatchesClaudeProfile(t *testing.T) {
 	}
 
 	got := m.configVolumeRelativeDirs()
-	want := []string{"skills"}
+	want := []string{"memory", "skills"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("configVolumeRelativeDirs() = %v, want %v", got, want)
 	}

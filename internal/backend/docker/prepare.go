@@ -117,10 +117,16 @@ func (b *Backend) envFileExists(key backend.StoreKey) bool {
 	return err == nil
 }
 
+// prepareConfigStoreLayout creates the declared layout directories host-owned.
+// MkdirAll leaves existing directories alone, so a store that an earlier
+// container runtime already populated with root-owned mount-point parents
+// stays that way; those are reported with a cleanup hint because the host user
+// cannot remove them and enclave cannot reassign their ownership.
 func (b *Backend) prepareConfigStoreLayout(dir string, prep backend.ConfigStorePrep) {
 	if dir == "" || len(prep.LayoutDirs) == 0 {
 		return
 	}
+	reported := map[string]struct{}{}
 	for _, layoutDir := range prep.LayoutDirs {
 		target, err := storeFilePath(dir, layoutDir, true)
 		if err != nil {
@@ -129,8 +135,37 @@ func (b *Backend) prepareConfigStoreLayout(dir string, prep backend.ConfigStoreP
 		}
 		if err := os.MkdirAll(target, 0o700); err != nil {
 			logx.Warnf("Failed to prepare %s config store layout: %v", util.TitleCase(prep.Key.Owner), err)
+			continue
+		}
+		foreign := foreignOwnedStorePath(dir, target, b.opts.Host.UID)
+		if foreign == "" {
+			continue
+		}
+		if _, seen := reported[foreign]; seen {
+			continue
+		}
+		reported[foreign] = struct{}{}
+		logx.Warnf("%s config store directory %s is not owned by the host user; an earlier session's container runtime created it and the tool cannot write next to it. Remove it with elevated privileges (e.g. sudo rm -rf %s) and start a new session to recreate it.",
+			util.TitleCase(prep.Key.Owner), foreign, foreign)
+	}
+}
+
+// foreignOwnedStorePath returns the outermost path component strictly below
+// root on the way to target that is not owned by uid, or "" when every
+// component is (or ownership cannot be determined).
+func foreignOwnedStorePath(root string, target string, uid string) string {
+	rel, err := filepath.Rel(root, target)
+	if err != nil || rel == "." || strings.HasPrefix(rel, "..") {
+		return ""
+	}
+	current := root
+	for _, component := range strings.Split(rel, string(filepath.Separator)) {
+		current = filepath.Join(current, component)
+		if !util.PathOwnedBy(current, uid) {
+			return current
 		}
 	}
+	return ""
 }
 
 func (b *Backend) resetPersistedEnv(key backend.StoreKey) {

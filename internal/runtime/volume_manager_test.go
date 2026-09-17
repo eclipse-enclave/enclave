@@ -9,6 +9,7 @@ package runtime
 
 import (
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"enclave/internal/model"
@@ -72,7 +73,7 @@ func TestConfigVolumeRelativeDirsIncludesSkillsDirOutsideSettingsSubtree(t *test
 	}
 }
 
-func TestConfigVolumeRelativeDirsSkipsRootLevelFiles(t *testing.T) {
+func TestConfigVolumeRelativeDirsMatchesClaudeProfile(t *testing.T) {
 	t.Parallel()
 
 	m := volumeManager{
@@ -81,10 +82,36 @@ func TestConfigVolumeRelativeDirsSkipsRootLevelFiles(t *testing.T) {
 			profile: model.Profile{
 				Name:           "claude",
 				ConfigDir:      ".claude",
+				SkillsDir:      ".claude/skills",
 				SettingsFile:   "claude-settings.json",
 				SettingsTarget: ".claude/settings.json",
 				Providers: []model.ProviderConfig{
 					{Name: "anthropic", AuthFiles: []string{"config.json"}},
+				},
+			},
+		},
+	}
+
+	got := m.configVolumeRelativeDirs()
+	want := []string{"skills"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("configVolumeRelativeDirs() = %v, want %v", got, want)
+	}
+}
+
+func TestConfigVolumeRelativeDirsSkipsRootLevelFiles(t *testing.T) {
+	t.Parallel()
+
+	m := volumeManager{
+		Runtime: &Runtime{
+			containerHome: model.ContainerHome,
+			profile: model.Profile{
+				Name:           "tool",
+				ConfigDir:      ".tool",
+				SettingsFile:   "settings.json",
+				SettingsTarget: ".tool/settings.json",
+				Providers: []model.ProviderConfig{
+					{Name: "provider", AuthFiles: []string{"config.json"}},
 				},
 			},
 		},

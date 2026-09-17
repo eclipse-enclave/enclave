@@ -166,11 +166,12 @@ func (m volumeManager) configVolumeRelativeDirs() []string {
 	if settingsPath, err := m.settingsRelativePath(); err == nil {
 		addDirForFile(settingsPath)
 	}
-	// The skills directory is a read-only mount target inside the config store.
-	// Creating it here keeps it, and every parent it needs, owned by the host
-	// user: left to the container runtime, the mount point and its missing
-	// parents are created as root, and a tool that writes siblings of the
-	// skills directory can no longer do so.
+	// When the config source does not handle skills, the skills directory is
+	// a read-only mount target inside the config store. Creating it here keeps
+	// it, and every parent it needs, owned by the host user: left to the
+	// container runtime, the mount point and its missing parents are created as
+	// root, and a tool that writes siblings of the skills directory can no
+	// longer do so.
 	if skillsPath, err := m.relativePathWithinConfig(m.profile.SkillsDir); err == nil {
 		addDir(skillsPath)
 	}

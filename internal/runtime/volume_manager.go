@@ -156,11 +156,7 @@ func (m volumeManager) configVolumeRelativeDirs() []string {
 		dirs[relPath] = struct{}{}
 	}
 	addDirForFile := func(relPath string) {
-		relPath = filepath.Clean(strings.TrimSpace(relPath))
-		if relPath == "" || relPath == "." {
-			return
-		}
-		addDir(filepath.Dir(relPath))
+		addDir(filepath.Dir(filepath.Clean(strings.TrimSpace(relPath))))
 	}
 
 	if settingsPath, err := m.settingsRelativePath(); err == nil {

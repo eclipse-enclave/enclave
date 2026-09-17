@@ -63,13 +63,8 @@ func TestConfigVolumeRelativeDirsIncludesSkillsDirOutsideSettingsSubtree(t *test
 
 	got := m.configVolumeRelativeDirs()
 	want := []string{"antigravity-cli", filepath.Join("config", "skills")}
-	if len(got) != len(want) {
-		t.Fatalf("configVolumeRelativeDirs() len = %d, want %d (%v)", len(got), len(want), got)
-	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Fatalf("configVolumeRelativeDirs()[%d] = %q, want %q", i, got[i], want[i])
-		}
+	if !slices.Equal(got, want) {
+		t.Fatalf("configVolumeRelativeDirs() = %v, want %v", got, want)
 	}
 }
 

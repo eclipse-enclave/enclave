@@ -118,10 +118,7 @@ func (b *Backend) envFileExists(key backend.StoreKey) bool {
 }
 
 // prepareConfigStoreLayout creates the declared layout directories host-owned.
-// MkdirAll leaves existing directories alone, so a store that an earlier
-// container runtime already populated with root-owned mount-point parents
-// stays that way; those are reported with a cleanup hint because the host user
-// cannot remove them and enclave cannot reassign their ownership.
+// Existing directories owned by another user are reported, not repaired.
 func (b *Backend) prepareConfigStoreLayout(dir string, prep backend.ConfigStorePrep) {
 	if dir == "" || len(prep.LayoutDirs) == 0 {
 		return
@@ -145,8 +142,8 @@ func (b *Backend) prepareConfigStoreLayout(dir string, prep backend.ConfigStoreP
 			continue
 		}
 		reported[foreign] = struct{}{}
-		logx.Warnf("%s config store directory %s is not owned by the host user; an earlier session's container runtime created it and the tool cannot write next to it. Remove it with elevated privileges (e.g. sudo rm -rf %s) and start a new session to recreate it.",
-			util.TitleCase(prep.Key.Owner), foreign, foreign)
+		logx.Warnf("%s config store directory %s is not owned by the host user, so the tool may not be able to write next to it. Restore host ownership before starting a new session: sudo chown -R %s %s",
+			util.TitleCase(prep.Key.Owner), foreign, b.chownSpec(), util.ShellQuote(foreign))
 	}
 }
 
@@ -230,6 +227,7 @@ func (b *Backend) overlayConfigStore(prep backend.ConfigStorePrep) error {
 	if err := overlayConfigDir(dir, overlay.SourceDir, overlay.PreservePaths); err != nil {
 		return fmt.Errorf("populate config store from source: %w", err)
 	}
+	b.prepareConfigStoreLayout(dir, prep)
 	logx.Infof("%s config store populated from generated source", util.TitleCase(prep.Key.Owner))
 	return nil
 }

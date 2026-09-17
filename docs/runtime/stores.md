@@ -39,12 +39,10 @@ unique suffix key for each session and removed after the container exits. The
 
 **Layout**: Before the container starts, Enclave creates the parents of the
 settings target and auth files plus the `skillsDir` and `memoryDir` mount
-targets inside the store, all owned by the host user. Otherwise the container
-runtime would create missing mount-point parents as root and the tool could not
-write next to them. Existing directories are left as they are; if a store from
-an older release already contains a root-owned directory, Enclave warns at
-startup and it has to be removed with elevated privileges before a new session
-recreates it.
+targets inside the store as the host user. It recreates them after applying a
+generated config overlay, which may replace the store contents. Existing
+ownership is not changed; Enclave warns with a `chown` command when a layout
+component belongs to another user.
 
 Source: [`internal/runtime/volume_manager.go`](../../internal/runtime/volume_manager.go) `BuildPrep` (intent), [`internal/backend/docker/prepare.go`](../../internal/backend/docker/prepare.go) `prepareConfigStore` (mechanics)
 

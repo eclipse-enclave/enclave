@@ -10,10 +10,14 @@
 package docker
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strconv"
 	"testing"
+
+	"enclave/internal/backend"
+	"enclave/internal/model"
 )
 
 func TestForeignOwnedStorePathReportsOutermostMismatch(t *testing.T) {
@@ -37,5 +41,36 @@ func TestForeignOwnedStorePathReportsOutermostMismatch(t *testing.T) {
 	}
 	if got := foreignOwnedStorePath(root, root, other); got != "" {
 		t.Fatalf("foreignOwnedStorePath(root, root) = %q, want empty", got)
+	}
+}
+
+func TestPrepareStoresRecreatesLayoutAfterConfigOverlay(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	sourceDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(sourceDir, "settings.json"), []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	b := New(Options{Host: model.Host{
+		Home: t.TempDir(),
+		UID:  strconv.Itoa(os.Getuid()),
+		GID:  strconv.Itoa(os.Getgid()),
+	}})
+	key := backend.StoreKey{Owner: "claude", ProjectHash: "abc123abc123"}
+	prep := backend.StorePrep{Config: &backend.ConfigStorePrep{
+		Key:        key,
+		LayoutDirs: []string{filepath.Join("state", "memory")},
+		Overlay:    &backend.ConfigOverlaySpec{SourceDir: sourceDir},
+	}}
+
+	if _, err := b.PrepareStores(context.Background(), prep); err != nil {
+		t.Fatalf("PrepareStores() error = %v", err)
+	}
+	storeDir, err := b.storage.storeDir(key, backend.StoreKindConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info, err := os.Stat(filepath.Join(storeDir, "state", "memory")); err != nil || !info.IsDir() {
+		t.Fatalf("nested layout directory was not recreated after overlay: %v", err)
 	}
 }

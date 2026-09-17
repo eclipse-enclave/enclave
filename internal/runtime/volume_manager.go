@@ -148,20 +148,31 @@ func (m volumeManager) authSyncSpec(stores storeSet) *backend.AuthSyncSpec {
 
 func (m volumeManager) configVolumeRelativeDirs() []string {
 	dirs := map[string]struct{}{}
+	addDir := func(relPath string) {
+		relPath = filepath.Clean(strings.TrimSpace(relPath))
+		if relPath == "" || relPath == "." {
+			return
+		}
+		dirs[relPath] = struct{}{}
+	}
 	addDirForFile := func(relPath string) {
 		relPath = filepath.Clean(strings.TrimSpace(relPath))
 		if relPath == "" || relPath == "." {
 			return
 		}
-		dir := filepath.Clean(filepath.Dir(relPath))
-		if dir == "" || dir == "." {
-			return
-		}
-		dirs[dir] = struct{}{}
+		addDir(filepath.Dir(relPath))
 	}
 
 	if settingsPath, err := m.settingsRelativePath(); err == nil {
 		addDirForFile(settingsPath)
+	}
+	// The skills directory is a read-only mount target inside the config store.
+	// Creating it here keeps it, and every parent it needs, owned by the host
+	// user: left to the container runtime, the mount point and its missing
+	// parents are created as root, and a tool that writes siblings of the
+	// skills directory can no longer do so.
+	if skillsPath, err := m.relativePathWithinConfig(m.profile.SkillsDir); err == nil {
+		addDir(skillsPath)
 	}
 	if authFiles, err := backend.ValidateAuthFilePaths(m.profile.RuntimeAuthFiles()); err == nil {
 		for _, authFile := range authFiles {

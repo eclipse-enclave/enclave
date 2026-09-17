@@ -8,6 +8,7 @@
 package runtime
 
 import (
+	"path/filepath"
 	"testing"
 
 	"enclave/internal/model"
@@ -33,6 +34,34 @@ func TestConfigVolumeRelativeDirsIncludesSettingsAndAuthParents(t *testing.T) {
 
 	got := m.configVolumeRelativeDirs()
 	want := []string{"agent"}
+	if len(got) != len(want) {
+		t.Fatalf("configVolumeRelativeDirs() len = %d, want %d (%v)", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("configVolumeRelativeDirs()[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
+func TestConfigVolumeRelativeDirsIncludesSkillsDirOutsideSettingsSubtree(t *testing.T) {
+	t.Parallel()
+
+	m := volumeManager{
+		Runtime: &Runtime{
+			containerHome: model.ContainerHome,
+			profile: model.Profile{
+				Name:           "antigravity",
+				ConfigDir:      ".gemini",
+				SkillsDir:      ".gemini/config/skills",
+				SettingsFile:   "antigravity-settings.json",
+				SettingsTarget: ".gemini/antigravity-cli/settings.json",
+			},
+		},
+	}
+
+	got := m.configVolumeRelativeDirs()
+	want := []string{"antigravity-cli", filepath.Join("config", "skills")}
 	if len(got) != len(want) {
 		t.Fatalf("configVolumeRelativeDirs() len = %d, want %d (%v)", len(got), len(want), got)
 	}

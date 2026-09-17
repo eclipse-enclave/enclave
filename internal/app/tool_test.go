@@ -51,28 +51,41 @@ func stubToolResolution(t *testing.T, tools []string, interactive bool, answer s
 
 func TestResolveToolKeepsAnExplicitTool(t *testing.T) {
 	stub := stubToolResolution(t, []string{"claude", "codex"}, true, "codex")
-	if got := resolveTool("pi", true); got != "pi" {
-		t.Fatalf("resolveTool = %q, want pi", got)
+	got, err := resolveTool("pi", true)
+	if err != nil || got != "pi" {
+		t.Fatalf("resolveTool = %q, %v, want pi", got, err)
 	}
 	if len(stub.Offered) != 0 || len(stub.Saved) != 0 {
 		t.Fatalf("an explicit tool must neither ask nor save, asked %v saved %v", stub.Offered, stub.Saved)
 	}
 }
 
-// Scripts, CI, --json and --yes keep the historical default without a question.
-func TestResolveToolNonInteractiveUsesClaude(t *testing.T) {
+// Scripts, CI, --json and --yes cannot be asked, and an unset tool is an error
+// there rather than a guess. The message names the ways to configure one.
+func TestResolveToolFailsWhenItCannotAsk(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
 		allowed  bool
 		terminal bool
+		tools    []string
 	}{
-		{name: "prompt not allowed", allowed: false, terminal: true},
-		{name: "not a terminal", allowed: true, terminal: false},
+		{name: "prompt not allowed", allowed: false, terminal: true, tools: []string{"claude", "codex"}},
+		{name: "not a terminal", allowed: true, terminal: false, tools: []string{"claude", "codex"}},
+		{name: "no installed agents", allowed: true, terminal: true, tools: nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			stub := stubToolResolution(t, []string{"claude", "codex"}, tc.terminal, "codex")
-			if got := resolveTool(model.ToolAuto, tc.allowed); got != toolFallback {
-				t.Fatalf("resolveTool = %q, want %q", got, toolFallback)
+			stub := stubToolResolution(t, tc.tools, tc.terminal, "codex")
+			got, err := resolveTool(model.ToolAuto, tc.allowed)
+			if err == nil || got != "" {
+				t.Fatalf("resolveTool = %q, %v, want an error", got, err)
+			}
+			for _, hint := range []string{"--tool", `"tool"`} {
+				if !strings.Contains(err.Error(), hint) {
+					t.Errorf("error %q must mention %s", err, hint)
+				}
+			}
+			if len(tc.tools) > 0 && !strings.Contains(err.Error(), "claude, codex") {
+				t.Errorf("error %q must list the installed agents", err)
 			}
 			if len(stub.Offered) != 0 {
 				t.Fatalf("no question may be asked, got %v", stub.Offered)
@@ -84,25 +97,13 @@ func TestResolveToolNonInteractiveUsesClaude(t *testing.T) {
 	}
 }
 
-// A host with exactly one installed agent has no question to ask, so the
-// scripted path must reach the same tool the interactive one would rather than
-// a claude that may not be installed.
-func TestResolveToolNonInteractiveUsesTheOnlyInstalledAgent(t *testing.T) {
-	stub := stubToolResolution(t, []string{"codex"}, false, "")
-	if got := resolveTool(model.ToolAuto, false); got != "codex" {
-		t.Fatalf("resolveTool = %q, want codex", got)
-	}
-	if len(stub.Offered) != 0 || len(stub.Saved) != 0 {
-		t.Fatalf("a non-interactive run must neither ask nor save, asked %v saved %v", stub.Offered, stub.Saved)
-	}
-}
-
 // The first interactive run asks once and persists the answer, so the second
 // run reads it from the global config and never asks again.
 func TestResolveToolAsksOnceAndSavesTheAnswer(t *testing.T) {
 	stub := stubToolResolution(t, []string{"claude", "codex", "pi"}, true, "codex")
-	if got := resolveTool(model.ToolAuto, true); got != "codex" {
-		t.Fatalf("resolveTool = %q, want codex", got)
+	got, err := resolveTool(model.ToolAuto, true)
+	if err != nil || got != "codex" {
+		t.Fatalf("resolveTool = %q, %v, want codex", got, err)
 	}
 	if len(stub.Offered) != 1 || stub.Offered[0] != "claude,codex,pi" {
 		t.Fatalf("asked %v, want one question offering every installed agent", stub.Offered)
@@ -112,44 +113,22 @@ func TestResolveToolAsksOnceAndSavesTheAnswer(t *testing.T) {
 	}
 	// A saved choice reaches the next run as a configured value.
 	stub.Offered, stub.Saved = nil, nil
-	if got := resolveTool("codex", true); got != "codex" {
-		t.Fatalf("second run resolveTool = %q, want codex", got)
+	got, err = resolveTool("codex", true)
+	if err != nil || got != "codex" {
+		t.Fatalf("second run resolveTool = %q, %v, want codex", got, err)
 	}
 	if len(stub.Offered) != 0 {
 		t.Fatalf("second run must not ask, got %v", stub.Offered)
 	}
 }
 
-func TestResolveToolSkipsPointlessQuestions(t *testing.T) {
-	for _, tc := range []struct {
-		name  string
-		tools []string
-		want  string
-	}{
-		{name: "single tool", tools: []string{"codex"}, want: "codex"},
-		{name: "no tools", tools: nil, want: toolFallback},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			stub := stubToolResolution(t, tc.tools, true, "")
-			if got := resolveTool(model.ToolAuto, true); got != tc.want {
-				t.Fatalf("resolveTool = %q, want %q", got, tc.want)
-			}
-			if len(stub.Offered) != 0 {
-				t.Fatalf("nothing to choose between, got question %v", stub.Offered)
-			}
-			if len(stub.Saved) != 0 {
-				t.Fatalf("nothing may be saved, got %v", stub.Saved)
-			}
-		})
-	}
-}
-
-// An unanswered question (EOF, or answers the prompt cannot match) must not
-// block the run or persist anything.
-func TestResolveToolUnansweredFallsBackWithoutSaving(t *testing.T) {
+// An unanswered question (EOF, or answers the prompt cannot match) fails the
+// run and persists nothing.
+func TestResolveToolUnansweredFailsWithoutSaving(t *testing.T) {
 	stub := stubToolResolution(t, []string{"claude", "codex"}, true, "")
-	if got := resolveTool(model.ToolAuto, true); got != toolFallback {
-		t.Fatalf("resolveTool = %q, want %q", got, toolFallback)
+	got, err := resolveTool(model.ToolAuto, true)
+	if err == nil || got != "" {
+		t.Fatalf("resolveTool = %q, %v, want an error", got, err)
 	}
 	if len(stub.Offered) != 1 {
 		t.Fatalf("asked %v, want exactly one question", stub.Offered)
@@ -159,7 +138,7 @@ func TestResolveToolUnansweredFallsBackWithoutSaving(t *testing.T) {
 	}
 }
 
-func TestToolPromptAllowed(t *testing.T) {
+func TestActionNeedsTool(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
 		parsed cli.Result
@@ -173,20 +152,47 @@ func TestToolPromptAllowed(t *testing.T) {
 		// Explicit targets rebuild exactly those images; the default tool is
 		// never read, so asking for one would save an unrelated answer.
 		{name: "update with explicit targets", parsed: cli.Result{Action: "update", Options: model.Options{UpdateOptions: model.UpdateOptions{UpdateTools: []string{"codex"}}}}, want: false},
+		{name: "info", parsed: cli.Result{Action: "info"}, want: true},
+		{name: "auth-import", parsed: cli.Result{Action: "auth-import"}, want: true},
+		{name: "devcontainer-generate", parsed: cli.Result{Action: "devcontainer-generate"}, want: true},
+		{name: "network-print", parsed: cli.Result{Action: "network-print"}, want: true},
+		{name: "network-log", parsed: cli.Result{Action: "network-log"}, want: true},
+		// Background sessions of the default tool are stopped; a named
+		// session is found without it.
+		{name: "stop", parsed: cli.Result{Action: "stop"}, want: true},
+		{name: "stop named session", parsed: cli.Result{Action: "stop", Options: model.Options{RunOptions: model.RunOptions{CmdArgs: []string{"my-task"}}}}, want: false},
+		{name: "cleanup", parsed: cli.Result{Action: "cleanup"}, want: true},
+		{name: "cleanup --all", parsed: cli.Result{Action: "cleanup", Options: model.Options{CleanupOptions: model.CleanupOptions{CleanupAll: true}}}, want: false},
 		{name: "ps", parsed: cli.Result{Action: "ps"}, want: false},
 		{name: "status", parsed: cli.Result{Action: "status"}, want: false},
-		{name: "stop", parsed: cli.Result{Action: "stop"}, want: false},
+		{name: "attach", parsed: cli.Result{Action: "attach"}, want: false},
 		{name: "tools", parsed: cli.Result{Action: "tools"}, want: false},
 		{name: "features", parsed: cli.Result{Action: "features"}, want: false},
+		{name: "extension-manage", parsed: cli.Result{Action: cli.ActionExtensionManage}, want: false},
 		{name: "config", parsed: cli.Result{Action: "config"}, want: false},
 		{name: "review-target", parsed: cli.Result{Action: "review-target"}, want: false},
 		{name: "theia", parsed: cli.Result{Action: "theia"}, want: false},
-		{name: "run --json extension request", parsed: cli.Result{Action: "run", ExtRequest: &extinstall.Request{JSON: true}}, want: false},
-		{name: "run --yes", parsed: cli.Result{Action: "run", ExtRequest: &extinstall.Request{Yes: true}}, want: false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := toolPromptAllowed(tc.parsed); got != tc.want {
-				t.Fatalf("toolPromptAllowed(%s) = %v, want %v", tc.parsed.Action, got, tc.want)
+			if got := actionNeedsTool(tc.parsed); got != tc.want {
+				t.Fatalf("actionNeedsTool(%s) = %v, want %v", tc.parsed.Action, got, tc.want)
+			}
+		})
+	}
+}
+
+// --json and --yes runs cannot be asked; the unset tool then fails instead.
+func TestToolPromptNotAllowedForJSONAndYes(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		parsed cli.Result
+	}{
+		{name: "--json extension request", parsed: cli.Result{Action: "run", ExtRequest: &extinstall.Request{JSON: true}}},
+		{name: "--yes", parsed: cli.Result{Action: "run", ExtRequest: &extinstall.Request{Yes: true}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if promptAllowed(tc.parsed) {
+				t.Fatalf("promptAllowed(%s) = true, want false", tc.name)
 			}
 		})
 	}

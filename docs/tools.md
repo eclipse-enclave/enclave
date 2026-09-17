@@ -11,7 +11,7 @@ Built-in tool profiles:
 
 | Tool | Description |
 |------|-------------|
-| `claude` | [Claude Code](https://www.anthropic.com/claude-code) (Anthropic) — used when no tool is configured and none can be asked for |
+| `claude` | [Claude Code](https://www.anthropic.com/claude-code) (Anthropic) |
 | `codex` | [Codex CLI](https://github.com/openai/codex) (OpenAI) |
 | `mistral-vibe` | [Mistral Vibe CLI](https://github.com/mistralai/mistral-vibe) (opt-in/experimental) |
 | `opencode` | [OpenCode](https://opencode.ai/) |

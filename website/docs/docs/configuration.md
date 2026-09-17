@@ -8,8 +8,8 @@ title: Configuration
 Enclave works without any configuration: `enclave` starts an agent at full
 autonomy, in a container, behind a restricted network. The first interactive
 session asks which agent and remembers the answer (a non-terminal run is never
-asked and uses `claude`, or the sole installed agent on a host that has exactly
-one). You configure it when you want something else, such as a different agent,
+asked; until a tool is configured it fails and points at `--tool` and the `tool`
+key). You configure it when you want something else, such as a different agent,
 one more allowed domain, or an extra directory mounted in.
 
 A setting can come from three places:

@@ -198,7 +198,7 @@ enclave info                # Show config and image details
 enclave version             # Show binary version and source commit (--json; alias: --version)
 ```
 
-**Tool selection:** The first interactive session asks which coding agent to run and saves the answer as `"tool"` in `~/.config/enclave/config.json`; later runs start it without asking. Scripts and non-terminal runs are never asked: they use `claude`, or the sole installed agent on a host that has exactly one. See [Tool selection](docs/cli-reference.md#tool-selection).
+**Tool selection:** The first interactive session asks which coding agent to run and saves the answer as `"tool"` in `~/.config/enclave/config.json`; later runs start it without asking. Scripts and non-terminal runs are never asked: without a configured tool they fail with a message naming `--tool` and the `tool` key. See [Tool selection](docs/cli-reference.md#tool-selection).
 
 **Authentication:** The simplest and recommended approach is to just log in from inside the container the first time you run — OAuth sessions are saved to a persistent auth store on the host and reused automatically on every subsequent run. No configuration needed.
 

@@ -461,9 +461,9 @@ type DevcontainerConfig struct {
 
 const (
 	AppName = "enclave"
-	// ToolAuto is the unset tool value: the first interactive run that starts
-	// or builds a session asks which agent to use and saves the answer, while
-	// scripts and non-terminal runs keep the historical claude default.
+	// ToolAuto is the unset tool value: a command that needs a tool asks once
+	// which agent to use and saves the answer when it can, and fails naming
+	// --tool and the "tool" key when it cannot.
 	ToolAuto = "auto"
 	// AppID is the reverse-DNS application identifier. It names the app-specific
 	// host directories on platforms that follow that convention (macOS

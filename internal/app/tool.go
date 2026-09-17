@@ -8,21 +8,16 @@
 package app
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"strings"
 
-	"enclave/internal/cli"
 	"enclave/internal/config"
 	"enclave/internal/logx"
 	"enclave/internal/model"
 	"enclave/internal/prompt"
 )
-
-// toolFallback is the tool used whenever the question cannot be asked:
-// scripts, --json, --yes and non-terminal runs behave exactly as they did
-// before the first-run question existed.
-const toolFallback = "claude"
 
 // Seams for tool resolution, replaced in tests.
 var (
@@ -33,28 +28,6 @@ var (
 	}
 )
 
-// actionAsksForTool reports whether an invocation is worth interrupting with
-// the tool question. Only the verbs that start a session or build its image
-// commit to a tool; listing, status, policy and extension verbs read it at
-// most as a filter and must not block on an answer. `update` with explicit
-// targets rebuilds exactly those images and never reads the default tool, so
-// it must not ask for one either.
-func actionAsksForTool(parsed cli.Result) bool {
-	switch parsed.Action {
-	case "exec":
-		return true
-	case "update":
-		return len(parsed.Options.UpdateTools) == 0
-	default:
-		return isRunAction(parsed.Action)
-	}
-}
-
-// toolPromptAllowed reports whether resolving an unset tool may ask the user.
-func toolPromptAllowed(parsed cli.Result) bool {
-	return actionAsksForTool(parsed) && promptAllowed(parsed)
-}
-
 // toolUnset reports whether the tool still carries the "ask me" value.
 func toolUnset(name string) bool {
 	trimmed := strings.TrimSpace(name)
@@ -63,61 +36,46 @@ func toolUnset(name string) bool {
 
 // resolveTool turns the unset "auto" tool into a concrete profile name. A
 // configured value or an explicit --tool is returned unchanged. interactive
-// permits the one-time question; without it the historical claude default is
-// kept, so scripts, CI and JSON consumers are unaffected.
-func resolveTool(tool string, interactive bool) string {
+// permits the one-time question, whose answer is saved to the global config so
+// only the first run pays for it. Without a terminal, or when the question goes
+// unanswered, the run fails and names the ways to configure a tool instead of
+// guessing one.
+func resolveTool(tool string, interactive bool) (string, error) {
 	if !toolUnset(tool) {
-		return tool
-	}
-	if !interactive || !promptUsable() {
-		return toolWithoutAsking()
-	}
-	return askForTool()
-}
-
-// toolWithoutAsking picks a tool for the runs that must not stop for a
-// question: the historical claude default, except on a host that installed
-// exactly one agent, where an interactive run would not ask either and claude
-// may not even be installed.
-func toolWithoutAsking() string {
-	if tools := listAgentTools(); len(tools) == 1 {
-		logx.Debugf("no tool configured; using the only installed agent %s without asking", tools[0])
-		return tools[0]
-	}
-	logx.Debugf("no tool configured; using %s without asking", toolFallback)
-	return toolFallback
-}
-
-// askForTool asks once which agent to run and saves the answer to the global
-// config, so only the first run pays for the question. An unanswered question
-// falls back for this run without saving anything.
-func askForTool() string {
-	tools := listAgentTools()
-	switch len(tools) {
-	case 0:
-		return toolFallback
-	case 1:
-		return tools[0]
+		return tool, nil
 	}
 	configPath, err := config.GlobalConfigPath()
 	if err != nil {
 		configPath = "the global config"
 	}
+	tools := listAgentTools()
+	if len(tools) == 0 || !interactive || !promptUsable() {
+		return "", noToolConfigured(configPath, tools)
+	}
 	question := fmt.Sprintf("Which coding agent should enclave use? The answer is saved to %s; --tool overrides it for a single run.", configPath)
 	choice, err := chooseTool(question, tools)
 	if err != nil || choice == "" {
-		logx.Warnf("No tool chosen; using %s for this run.", toolFallback)
-		return toolFallback
+		return "", fmt.Errorf("no tool chosen; pass --tool <name> or set \"tool\" in %s", configPath)
 	}
 	if _, err := saveToolChoice("tool", choice); err != nil {
 		logx.Warnf("Using %s for this run, but the choice could not be saved: %v", choice, err)
 	}
-	return choice
+	return choice, nil
 }
 
-// hostAgentTools lists the installed agent profiles a first run may offer. Any
-// failure to enumerate them leaves the list empty and the caller falls back
-// without asking.
+// noToolConfigured is the error for a command that needs a tool, has none
+// configured, and cannot ask for one.
+func noToolConfigured(configPath string, installed []string) error {
+	msg := fmt.Sprintf("no tool configured; pass --tool <name> or set \"tool\" in %s", configPath)
+	if len(installed) > 0 {
+		msg += " (installed agents: " + strings.Join(installed, ", ") + ")"
+	}
+	return errors.New(msg)
+}
+
+// hostAgentTools lists the installed agent profiles the question may offer. Any
+// failure to enumerate them leaves the list empty and the caller fails as if
+// none were installed.
 func hostAgentTools() []string {
 	paths, err := config.ResolvePaths()
 	if err != nil {

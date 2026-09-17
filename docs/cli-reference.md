@@ -277,7 +277,7 @@ Mutation commands (`add-domain`, `remove-domain`, `set-mode`) apply the new poli
 
 | Setting | Default |
 |---------|---------|
-| Tool | Asked on the first interactive session, then the saved choice (`claude` without a terminal) |
+| Tool | Asked once on the first interactive session, then the saved choice; an error without a terminal until `--tool` or the `tool` key is set |
 | Network | Restricted (allowlisted domains only) |
 | Persistence | Enabled (auth, env, history host-directory stores) |
 | YOLO mode | Enabled |
@@ -288,7 +288,7 @@ Persistent defaults can be set in `~/.config/enclave/config.json` (global) or `~
 
 ## Tool selection
 
-The tool is unset by default. The first command that starts a session or builds its image (`run`, `shell`, `continue`, `resume`, `exec`, and `update` without explicit tool arguments) asks once which coding agent to use and saves the answer as `"tool"` in `~/.config/enclave/config.json`; later runs read it from there and never ask again. The question is only asked when stdin, stdout, and stderr are terminals and no `--json` or `--yes` was given; scripts, captured output, JSON consumers, and every other verb (`ps`, `status`, `stop`, `cleanup`, `tools`, `features`, `config`, `review-target`, …) fall back to `claude` silently, exactly as before — unless exactly one agent is installed, which is the tool an interactive run would use without asking too. An unanswered question falls back for that run without saving anything.
+The tool is unset by default. The first command that needs one asks once which coding agent to use and saves the answer as `"tool"` in `~/.config/enclave/config.json`; later runs read it from there and never ask again. A command needs a tool when it starts a session or builds its image (`run`, `shell`, `continue`, `resume`, `exec`, and `update` without explicit tool arguments) or scopes policy, stores, or containers by tool (`info`, `auth import`, `auth export`, `network …`, `cleanup` without `--all`, and `stop` without a session argument). The question is only asked when stdin, stdout, and stderr are terminals and no `--json` or `--yes` was given; without a terminal, or when the question goes unanswered, the command fails with a message naming `--tool` and the `tool` key instead of guessing an agent. Commands that never read the default tool (`ps`, `status`, `attach`, `tools`, `features`, `config`, `review-target`, `theia`, …) neither ask nor fail; they take `--tool` at most as an explicit filter.
 
 The menu lists every installed agent. The IDE profiles (`theia`, `theia-next`) are not offered: they attach a host IDE to a container rather than running an agent in the terminal. Pick them with `--tool theia` or the `tool` key.
 

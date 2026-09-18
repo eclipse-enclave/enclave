@@ -101,6 +101,22 @@ func TestHostConfigPassthroughBlocksCodexMemoryState(t *testing.T) {
 	}
 }
 
+func TestHostConfigPassthroughBlocksOpenCodeRuntimeState(t *testing.T) {
+	profile, err := LoadProfile(realRepoPaths(t), "opencode")
+	if err != nil {
+		t.Fatal(err)
+	}
+	profile.PassthroughPaths = []string{
+		"opencode.json", "storage/", "plans/", "snapshot/", "worktree/", "repos/",
+		"tool-output/", "log/", "mcp-auth.json", "opencode.db", "opencode.db-wal",
+		"opencode-preview.db-shm", "state/",
+	}
+	got := HostConfigPassthroughDefaults(profile)
+	if want := []string{"opencode.json"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("passthrough paths = %v, want %v", got, want)
+	}
+}
+
 func TestHostConfigPassthroughBlocksPiAgentSessions(t *testing.T) {
 	profile := model.Profile{
 		PassthroughPaths: []string{"agent/settings.json", "agent/sessions/"},

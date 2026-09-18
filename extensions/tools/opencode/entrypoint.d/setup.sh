@@ -9,32 +9,48 @@
 # OpenCode extension setup
 config_dir="$HOME/.config/opencode"
 data_dir="$HOME/.local/share/opencode"
+state_dir="$HOME/.local/state/opencode"
+state_store_dir="$config_dir/state"
 
-mkdir -p "$config_dir" "$HOME/.local/share"
+mkdir -p "$config_dir" "$state_store_dir" "$HOME/.local/share" "$HOME/.local/state"
 
-if [ -L "$data_dir" ] && [ "$(readlink "$data_dir")" != "$config_dir" ]; then
-    rm -f "$data_dir"
-fi
+# OpenCode creates its XDG data and state directories on every start, including
+# the `opencode --version` probe baked into the image build. Both therefore
+# exist as real directories before this script runs and must be migrated into
+# the config store, or the tool keeps writing to container-local storage that
+# is discarded with the container.
+opencode_link_into_store() {
+    local link=$1
+    local store=$2
+    local src rel dst
 
-if [ -d "$data_dir" ] && [ ! -L "$data_dir" ]; then
-    find "$data_dir" -mindepth 1 -print | while IFS= read -r src; do
-        rel=${src#"$data_dir"/}
-        dst="$config_dir/$rel"
-        if [ -d "$src" ]; then
-            mkdir -p "$dst"
-            continue
-        fi
-        if [ ! -e "$dst" ]; then
-            mkdir -p "$(dirname "$dst")"
-            cp -p "$src" "$dst"
-        fi
-    done
-    rm -rf "$data_dir"
-fi
+    if [ -L "$link" ] && [ "$(readlink "$link")" != "$store" ]; then
+        rm -f "$link"
+    fi
 
-if [ ! -e "$data_dir" ]; then
-    ln -s "$config_dir" "$data_dir"
-fi
+    if [ -d "$link" ] && [ ! -L "$link" ]; then
+        find "$link" -mindepth 1 -print | while IFS= read -r src; do
+            rel=${src#"$link"/}
+            dst="$store/$rel"
+            if [ -d "$src" ]; then
+                mkdir -p "$dst"
+                continue
+            fi
+            if [ ! -e "$dst" ]; then
+                mkdir -p "$(dirname "$dst")"
+                cp -p "$src" "$dst"
+            fi
+        done
+        rm -rf "$link"
+    fi
+
+    if [ ! -e "$link" ]; then
+        ln -s "$store" "$link"
+    fi
+}
+
+opencode_link_into_store "$data_dir" "$config_dir"
+opencode_link_into_store "$state_dir" "$state_store_dir"
 
 auth_file="$config_dir/auth.json"
 shared_auth_file="${ENCLAVE_AUTH_DIR:-}/auth.json"

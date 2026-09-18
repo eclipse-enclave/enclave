@@ -15,10 +15,12 @@ import (
 	"testing"
 )
 
-func TestEntrypointOpencodeMigratesShareDirAndSeedsAuth(t *testing.T) {
+func TestEntrypointOpencodePersistsDataAndStateAndSeedsAuth(t *testing.T) {
 	home := t.TempDir()
 	configDir := filepath.Join(home, ".config", "opencode")
 	dataDir := filepath.Join(home, ".local", "share", "opencode")
+	stateDir := filepath.Join(home, ".local", "state", "opencode")
+	stateStoreDir := filepath.Join(configDir, "state")
 	sharedAuthDir := filepath.Join(home, "shared-auth")
 
 	if err := os.MkdirAll(configDir, 0o755); err != nil {
@@ -27,12 +29,22 @@ func TestEntrypointOpencodeMigratesShareDirAndSeedsAuth(t *testing.T) {
 	if err := os.MkdirAll(dataDir, 0o755); err != nil {
 		t.Fatalf("mkdir data: %v", err)
 	}
+	// OpenCode creates both directories on every start, so the image build's
+	// `opencode --version` probe bakes them in as real directories. Reproduce
+	// that here: a guard that only symlinks when the path is absent would
+	// silently leave state in container-local storage.
+	if err := os.MkdirAll(stateDir, 0o755); err != nil {
+		t.Fatalf("mkdir state: %v", err)
+	}
 	if err := os.MkdirAll(sharedAuthDir, 0o755); err != nil {
 		t.Fatalf("mkdir shared auth: %v", err)
 	}
 
 	if err := os.WriteFile(filepath.Join(dataDir, "session.db"), []byte("persist me"), 0o600); err != nil {
 		t.Fatalf("write data file: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(stateDir, "model.json"), []byte("favorite model"), 0o600); err != nil {
+		t.Fatalf("write state file: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(sharedAuthDir, "auth.json"), []byte(`{"github-copilot":{"token":"abc"}}`), 0o600); err != nil {
 		t.Fatalf("write shared auth: %v", err)
@@ -49,19 +61,24 @@ func TestEntrypointOpencodeMigratesShareDirAndSeedsAuth(t *testing.T) {
 		t.Fatalf("setup.sh failed: %v\noutput:\n%s", err, string(out))
 	}
 
-	info, err := os.Lstat(dataDir)
-	if err != nil {
-		t.Fatalf("stat data dir: %v", err)
-	}
-	if info.Mode()&os.ModeSymlink == 0 {
-		t.Fatalf("%s is not a symlink", dataDir)
-	}
-	target, err := os.Readlink(dataDir)
-	if err != nil {
-		t.Fatalf("readlink: %v", err)
-	}
-	if target != configDir {
-		t.Fatalf("symlink target = %q, want %q", target, configDir)
+	for link, wantTarget := range map[string]string{
+		dataDir:  configDir,
+		stateDir: stateStoreDir,
+	} {
+		info, err := os.Lstat(link)
+		if err != nil {
+			t.Fatalf("stat %s: %v", link, err)
+		}
+		if info.Mode()&os.ModeSymlink == 0 {
+			t.Fatalf("%s is not a symlink", link)
+		}
+		target, err := os.Readlink(link)
+		if err != nil {
+			t.Fatalf("readlink %s: %v", link, err)
+		}
+		if target != wantTarget {
+			t.Fatalf("symlink target for %s = %q, want %q", link, target, wantTarget)
+		}
 	}
 
 	dataBytes, err := os.ReadFile(filepath.Join(configDir, "session.db"))
@@ -70,6 +87,25 @@ func TestEntrypointOpencodeMigratesShareDirAndSeedsAuth(t *testing.T) {
 	}
 	if string(dataBytes) != "persist me" {
 		t.Fatalf("migrated data = %q, want %q", string(dataBytes), "persist me")
+	}
+
+	stateBytes, err := os.ReadFile(filepath.Join(stateStoreDir, "model.json"))
+	if err != nil {
+		t.Fatalf("read migrated state: %v", err)
+	}
+	if string(stateBytes) != "favorite model" {
+		t.Fatalf("migrated state = %q, want %q", string(stateBytes), "favorite model")
+	}
+
+	if err := os.WriteFile(filepath.Join(stateDir, "tui.json"), []byte("recent models"), 0o600); err != nil {
+		t.Fatalf("write state through symlink: %v", err)
+	}
+	tuiBytes, err := os.ReadFile(filepath.Join(stateStoreDir, "tui.json"))
+	if err != nil {
+		t.Fatalf("read persisted state: %v", err)
+	}
+	if string(tuiBytes) != "recent models" {
+		t.Fatalf("persisted state = %q, want %q", string(tuiBytes), "recent models")
 	}
 
 	authBytes, err := os.ReadFile(filepath.Join(configDir, "auth.json"))

@@ -15,6 +15,17 @@ sandbox:
   entrypoint: { run: [opencode] }
   configDir: .config/opencode
   skillsDir: .config/opencode/skills
+  statePaths:
+    - storage/
+    - plans/
+    - snapshot/
+    - worktree/
+    - repos/
+    - tool-output/
+    - log/
+    - mcp-auth.json
+    - opencode*.db*
+    - state/
   settingsFile: opencode-settings.json
   settingsTarget: .config/opencode/opencode.json
   yoloEnabled: true

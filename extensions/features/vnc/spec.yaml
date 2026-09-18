@@ -1,0 +1,43 @@
+# Copyright (C) 2026 EclipseSource GmbH and others.
+#
+# This program and the accompanying materials are made available under the
+# terms of the MIT License, which is available in the project root.
+#
+# SPDX-License-Identifier: MIT
+
+schemaVersion: "1"
+kind: mixin
+name: vnc
+displayName: VNC
+description: >-
+  Virtual X display with a contained Chromium browser, served over VNC (RFB).
+  Opt-in. The raw RFB port is published so any VNC client can attach.
+defaultEnabled: false
+needsRoot: true
+failOnInstallError: true
+priority: 75
+aptPackages:
+  # Chromium itself is installed by install.sh, not listed here: it is only a
+  # real deb on Debian archives (Ubuntu ships a snap stub), and install.sh can
+  # name this feature in the error where the shared apt step cannot.
+  - tigervnc-standalone-server
+  - matchbox-window-manager
+  - xdg-utils
+  - fonts-liberation
+  - fonts-dejavu-core
+  # Fallback for generating the RFB VncAuth file on bases whose TigerVNC build
+  # ships no vncpasswd binary. The supervisor logs which path it used, so these
+  # can be dropped once a base is confirmed to always provide the binary.
+  - python3
+  - python3-cryptography
+commands:
+  startup:
+    - command: [/usr/local/bin/vnc-supervisor]
+      background: true
+      description: VNC stack (Xvnc, window manager, Chromium)
+ports:
+  - container: 5900
+    hostAllocation: auto
+    publish: true
+    label: VNC (RFB)
+    openUrl: "vnc://localhost:{host_port}"

@@ -74,6 +74,7 @@ func diffCapabilities(before capabilities, after capabilities) []string {
 		mapDescribe(after.Spec.InitFiles, describeInitFile))...)
 	changes = append(changes, diffList("workspace file", before.WorkspaceFiles, after.WorkspaceFiles)...)
 	changes = append(changes, diffList("home file", before.HomeFiles, after.HomeFiles)...)
+	changes = append(changes, diffHostCommands(before.HostCommands, after.HostCommands)...)
 	if before.Files != after.Files || before.Bytes != after.Bytes {
 		changes = append(changes, fmt.Sprintf("staged content changes from %d files/%d bytes to %d files/%d bytes",
 			before.Files, before.Bytes, after.Files, after.Bytes))
@@ -121,12 +122,35 @@ func diffCount(label string, before int, after int) []string {
 	}
 }
 
+// diffHostCommands reports gained and lost host commands. An update renders
+// this diff alone and never the full capability summary, so a gained command
+// repeats what the summary's row would have said about where it runs. A lost
+// one needs no such note.
+func diffHostCommands(before []string, after []string) []string {
+	return diffListWithGainNote("host command", before, after, func(name string) string {
+		return fmt.Sprintf(" (runs on your host outside the sandbox, as `%s %s`)", model.AppName, name)
+	})
+}
+
 func diffList(label string, before []string, after []string) []string {
+	return diffListWithGainNote(label, before, after, nil)
+}
+
+// diffListWithGainNote reports the values after adds to and drops from before.
+// gainNote, when set, appends a per-value explanation to the gains alone: a
+// capability the extension did not have before is the one a reader has to
+// decide about, while losing it needs no argument.
+func diffListWithGainNote(label string, before []string, after []string, gainNote func(value string) string) []string {
 	var changes []string
 	for _, value := range dedupeSorted(after) {
-		if !slices.Contains(before, value) {
-			changes = append(changes, fmt.Sprintf("adds %s %s", label, value))
+		if slices.Contains(before, value) {
+			continue
 		}
+		change := fmt.Sprintf("adds %s %s", label, value)
+		if gainNote != nil {
+			change += gainNote(value)
+		}
+		changes = append(changes, change)
 	}
 	for _, value := range dedupeSorted(before) {
 		if !slices.Contains(after, value) {

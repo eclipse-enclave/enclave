@@ -80,8 +80,24 @@ and a destination path.
 ## Trust
 
 An extension is unreviewed code and configuration that, once installed, can
-run at container build and start time. Before writing anything, `add` and
-`update` show a capability summary distilled from the staged content itself
+run at container build and start time, and, if it ships
+[host commands](README.md#host-commands), on your host as your user. That last
+one is the only capability that executes outside a container, so it is the
+summary's first row after the source, naming each verb and saying where it
+runs. An update that gains one repeats the warning on its diff. Treat that row
+as the decision point: everything else an extension does is bounded by the
+sandbox, and a host command is not.
+
+Because `--json` replaces the narrated summary with the result envelope, every
+verb also appears in that envelope's `hostCommands` field, on `add`, `update`,
+and `remove` alike. `enclave tools|features list` reports the same set per
+installed extension, as a `[host: ...]` suffix in its text output and as
+`hostCommands` under `--json`, so you can audit after the fact which
+extensions can execute host code. They resolve whenever an extension is
+installed, whether or not it is enabled.
+
+Before writing anything, `add` and `update` show a capability summary
+distilled from the staged content itself
 (never from claims elsewhere): whether it needs root to install, runs an
 install/startup script (by count and script name, never full command text —
 this is a capability summary, not a code audit), how many `commands.install`
@@ -96,8 +112,8 @@ appends its own argv to the agent for `--continue`/`--resume`/`--no-memory`
 flag), keeps a writable agent-memory directory between sessions and at what
 scope (`sandbox.memoryDir`/`memoryScope`), pins store paths the config overlay
 may not replace (`sandbox.statePaths`), launches an IDE on your host after start
-(`postStart.openIDE`), ships skills, host config/credential passthrough, or
-seeds files into your project directory. An
+(`postStart.openIDE`), contributes host commands, ships skills, host
+config/credential passthrough, or seeds files into your project directory. An
 update shows the same information as a diff against what's currently installed,
 so a newly granted capability is visible before you accept it.
 
@@ -239,6 +255,8 @@ recoverable from that directory — but only until the next sweep runs; after
   is deliberately left in place. It may belong to a future reinstall, and
   `remove` only ever removes the extension directory itself; the output
   names what was left untouched.
+- Host commands go with the directory, so the verbs they added stop resolving.
+  Nothing was copied into `~/.config/enclave/commands/` to clean up.
 
 ## Requirements
 

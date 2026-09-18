@@ -125,6 +125,84 @@ func TestRenderExtensionListJSONReportsOriginError(t *testing.T) {
 	}
 }
 
+// Host commands run outside the sandbox, and under --json the narrated
+// capability summary is discarded, so the listing is where a caller audits
+// which installed extensions can execute host code. An extension that is
+// installed but disabled still contributes its verbs, so the field has to be
+// independent of "enabled".
+func TestRenderExtensionListJSONReportsHostCommands(t *testing.T) {
+	entries := extensionListJSONEntries(
+		[]model.Extension{{Name: "vnc"}, {Name: "plain"}},
+		map[string]extinstall.Managed{
+			"vnc":   {Name: "vnc", Source: "user", HostCommands: []string{"vnc-viewer"}},
+			"plain": {Name: "plain", Source: "user"},
+		},
+		func(name string) bool { return name != "vnc" },
+	)
+
+	var out bytes.Buffer
+	if err := renderExtensionListJSON(&out, model.KindFeature, entries); err != nil {
+		t.Fatalf("renderExtensionListJSON: %v", err)
+	}
+	var decoded struct {
+		Extensions []struct {
+			Name         string   `json:"name"`
+			Enabled      bool     `json:"enabled"`
+			HostCommands []string `json:"hostCommands"`
+		} `json:"extensions"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &decoded); err != nil {
+		t.Fatalf("unmarshal: %v\n%s", err, out.String())
+	}
+	if len(decoded.Extensions) != 2 {
+		t.Fatalf("extensions = %+v", decoded.Extensions)
+	}
+	vnc := decoded.Extensions[0]
+	if vnc.Enabled {
+		t.Error("the fixture disables vnc, so the field must not depend on enablement")
+	}
+	if !reflect.DeepEqual(vnc.HostCommands, []string{"vnc-viewer"}) {
+		t.Errorf("hostCommands = %v, want [vnc-viewer]", vnc.HostCommands)
+	}
+	if decoded.Extensions[1].HostCommands != nil {
+		t.Errorf("hostCommands = %v, want absent for an extension contributing none", decoded.Extensions[1].HostCommands)
+	}
+}
+
+// The text listing is the counterpart of the JSON field, so an extension that
+// adds a verb says so there too.
+func TestListingSuffixReportsHostCommands(t *testing.T) {
+	cases := []struct {
+		name  string
+		entry extinstall.Managed
+		want  string
+	}{
+		{
+			name:  "host commands alone",
+			entry: extinstall.Managed{Name: "vnc", Source: "user", HostCommands: []string{"vnc-viewer", "vnc-stop"}},
+			want:  " [host: vnc-viewer, vnc-stop]",
+		},
+		{
+			name: "appended after provenance",
+			entry: extinstall.Managed{
+				Name:         "vnc",
+				Source:       "user",
+				Origin:       &extinstall.Origin{Source: "acme/kits", Commit: "a1b2c3d4e5f6"},
+				HostCommands: []string{"vnc-viewer"},
+			},
+			want: " [acme/kits@a1b2c3d] [host: vnc-viewer]",
+		},
+		{name: "none", entry: extinstall.Managed{Name: "builtin", Source: "builtin"}, want: ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := listingSuffix(tc.entry); got != tc.want {
+				t.Errorf("listingSuffix = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestProvenanceSuffix(t *testing.T) {
 	managed := extinstall.Managed{
 		Name:   "foo",

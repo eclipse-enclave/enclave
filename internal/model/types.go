@@ -670,6 +670,21 @@ const (
 	FeatureEntrypointDir       = "feature-entrypoint.d"
 )
 
+// The layout of a command tree, shared by the user's own
+// ~/.config/enclave/commands/ and the commands/ an installed extension ships,
+// so host/ and session/ mean the same thing wherever they appear.
+//
+// An extension's commands/ is host-side alone: it is kept out of the build
+// context and the image identity hash, so editing a command never forces a
+// rebuild and the script never lands in the image. Only host/ is read there,
+// because session commands are mounted into the container from one fixed host
+// directory (UserCommandsContainerDir).
+const (
+	CommandsDirName        = "commands"
+	CommandsHostDirName    = "host"
+	CommandsSessionDirName = "session"
+)
+
 // The envsubst whitelist runtime-assets/kit-init.sh applies to an initFiles
 // path: WORKDIR is bound to the project directory, while HOME and USER come
 // from the container environment. A variable outside this set is left literal,

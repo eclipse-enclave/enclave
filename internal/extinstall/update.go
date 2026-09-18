@@ -124,7 +124,8 @@ func updateOne(ctx context.Context, env Env, req Request, stage *staging, fetche
 	if origin.RefType == RefTypeCommit && req.Ref == "" && !req.Force {
 		if !modified {
 			env.unchanged(entry.Name, "pinned to %s, up to date", ShortCommit(origin.Commit))
-			return ActionResult{Name: entry.Name, Action: ActionUnchanged, Commit: origin.Commit, Path: installed}, nil
+			return ActionResult{Name: entry.Name, Action: ActionUnchanged, Commit: origin.Commit, Path: installed,
+				HostCommands: entry.HostCommands}, nil
 		}
 		return ActionResult{}, fmt.Errorf("pinned to %s and has local modifications; pass --force to reinstall it", ShortCommit(origin.Commit))
 	}
@@ -135,7 +136,8 @@ func updateOne(ctx context.Context, env Env, req Request, stage *staging, fetche
 	}
 	if resolved.Commit == origin.Commit && !modified && !req.Force {
 		env.unchanged(entry.Name, "up to date at %s", ShortCommit(origin.Commit))
-		return ActionResult{Name: entry.Name, Action: ActionUnchanged, Commit: origin.Commit, Path: installed}, nil
+		return ActionResult{Name: entry.Name, Action: ActionUnchanged, Commit: origin.Commit, Path: installed,
+			HostCommands: entry.HostCommands}, nil
 	}
 	if modified && !req.Force {
 		return ActionResult{}, fmt.Errorf("has local modifications; pass --force to discard them")

@@ -11,6 +11,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"strings"
 
 	"enclave/internal/config"
 	"enclave/internal/logx"
@@ -77,7 +78,14 @@ func removeOne(env Env, req Request, entry Managed) (ActionResult, error) {
 	if entry.Source == config.SourceOverride {
 		env.note("the built-in %s is active again", req.Kind.Label())
 	}
+	// The verbs went with the directory, and nothing was ever copied into the
+	// user's own commands/ tree, so there is nothing left to clean up. Say so:
+	// a verb that stops resolving is otherwise a silent change.
+	if len(entry.HostCommands) > 0 {
+		env.note("host command(s) no longer resolve: %s", strings.Join(entry.HostCommands, ", "))
+	}
 	// Host state may belong to a reinstall.
 	env.note("host config and state were left untouched")
-	return ActionResult{Name: entry.Name, Action: ActionRemoved, Path: target}, nil
+	return ActionResult{Name: entry.Name, Action: ActionRemoved, Path: target,
+		HostCommands: entry.HostCommands}, nil
 }

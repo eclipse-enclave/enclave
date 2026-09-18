@@ -1385,6 +1385,24 @@ func TestParseUserCommandHelpSection(t *testing.T) {
 	}
 }
 
+// --help is the only place a user sees where a verb came from, and an
+// extension's is the one they cannot find by looking in their own commands/
+// tree. The label has to name the extension, since that is what they would
+// uninstall to get rid of the verb.
+func TestParseUserCommandHelpNamesContributingExtension(t *testing.T) {
+	cmds := []usercmd.Command{
+		{Name: "deploy", Path: "/p/deploy", Target: usercmd.TargetHost},
+		{Name: "vnc-viewer", Path: "/x/vnc/commands/host/vnc-viewer", Target: usercmd.TargetHost, Extension: "vnc"},
+	}
+	help := captureStdoutCmds(t, cmds, "--help")
+	if !strings.Contains(help, "Host command from the vnc extension") {
+		t.Fatalf("expected the extension named for its verb, got:\n%s", help)
+	}
+	if !strings.Contains(help, "User command (/p/deploy)") {
+		t.Fatalf("expected the user's own verb labelled by path alone, got:\n%s", help)
+	}
+}
+
 // TestParseUserCommandCompletion pins that user command names autocomplete via
 // Cobra's __complete: the no-op Run on the stub makes IsAvailableCommand() true
 // so the name is offered.

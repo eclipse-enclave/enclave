@@ -40,10 +40,14 @@ type capabilities struct {
 	Skills              []string
 	WorkspaceFiles      []string
 	HomeFiles           []string
-	ShadowsBuiltin      bool
-	IgnoredGoDir        bool
-	Files               int
-	Bytes               int64
+	// HostCommands are the enclave verbs the extension contributes, which run
+	// on the host rather than in the sandbox. Nothing else an extension ships
+	// executes outside a container, so this is reported on its own.
+	HostCommands   []string
+	ShadowsBuiltin bool
+	IgnoredGoDir   bool
+	Files          int
+	Bytes          int64
 }
 
 // yoloActive reports whether the extension arranges for the agent's launch
@@ -80,6 +84,12 @@ func inspect(dir string, kind model.ExtensionKind) (capabilities, error) {
 	if err != nil {
 		return capabilities{}, err
 	}
+	// Read separately from the tree walk so this and the inventory answer
+	// "which verbs does this extension add" from the same code.
+	hostCommands, err := hostCommandNames(dir)
+	if err != nil {
+		return capabilities{}, err
+	}
 
 	return capabilities{
 		Spec:                summary,
@@ -91,6 +101,7 @@ func inspect(dir string, kind model.ExtensionKind) (capabilities, error) {
 		Skills:              tree.Skills,
 		WorkspaceFiles:      tree.WorkspaceFiles,
 		HomeFiles:           tree.HomeFiles,
+		HostCommands:        hostCommands,
 		IgnoredGoDir:        tree.GoDir,
 		Files:               tree.Files,
 		Bytes:               tree.Bytes,

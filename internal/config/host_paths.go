@@ -86,15 +86,15 @@ func HostExtensionsDir(home string) string {
 }
 
 func HostCommandsDir(home string) string {
-	return filepath.Join(hostConfigRoot(home), "commands")
+	return filepath.Join(hostConfigRoot(home), model.CommandsDirName)
 }
 
 func HostCommandsHostDir(home string) string {
-	return filepath.Join(HostCommandsDir(home), "host")
+	return filepath.Join(HostCommandsDir(home), model.CommandsHostDirName)
 }
 
 func HostCommandsSessionDir(home string) string {
-	return filepath.Join(HostCommandsDir(home), "session")
+	return filepath.Join(HostCommandsDir(home), model.CommandsSessionDirName)
 }
 
 func HostSkillsDir(home string) string {

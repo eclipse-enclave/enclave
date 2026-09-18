@@ -5,10 +5,12 @@ title: Configuration
 
 # Configuration
 
-Enclave works without any configuration: `enclave` starts the `claude` agent at
-full autonomy, in a container, behind a restricted network. You configure it
-when you want something else, such as a different agent, one more allowed
-domain, or an extra directory mounted in.
+Enclave works without any configuration: `enclave` starts an agent at full
+autonomy, in a container, behind a restricted network. The first interactive
+session asks which agent and remembers the answer (a non-terminal run is never
+asked; until a tool is configured it fails and points at `--tool` and the `tool`
+key). You configure it when you want something else, such as a different agent,
+one more allowed domain, or an extra directory mounted in.
 
 A setting can come from three places:
 
@@ -86,7 +88,7 @@ enclave config --json            # the same data, machine-readable
 
 | Key | Flag | What it does |
 | --- | --- | --- |
-| `tool` | `--tool <name>` | Which agent runs. Defaults to `claude`; `enclave tools` lists what is installed. |
+| `tool` | `--tool <name>` | Which agent runs. Asked once on the first interactive session and saved here; `enclave tools` lists what is installed. |
 | `yolo` | `--no-yolo` | Full autonomy, on by default. Pass `--no-yolo` to make the agent ask for confirmation again. Every bundled CLI agent pins the mode in its own profile, so `"yolo": false` in a config file does not reach them; use the flag. |
 | `features` | `--features <list>` | Extra tooling baked into the image (see [Features](#features)). |
 | `ports` | `-p 3000` | Publish a container port to the host, so the agent's dev server is reachable from your browser. |

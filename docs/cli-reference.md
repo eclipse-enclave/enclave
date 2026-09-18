@@ -16,7 +16,7 @@ unchanged. See [windows.md](windows.md).
 
 | Command | Description |
 |---------|-------------|
-| `enclave` | Start a new session (default tool: claude) |
+| `enclave` | Start a new session with the selected tool |
 | `enclave run` | Explicit alias for the above |
 | `enclave continue` | Continue the latest session for the selected tool |
 | `enclave resume` | Session picker/list when supported (falls back to `continue`) |
@@ -202,7 +202,7 @@ Mutation commands (`add-domain`, `remove-domain`, `set-mode`) apply the new poli
 
 | Flag | Description |
 |------|-------------|
-| `--tool <tool>` | Tool profile to use (`claude` by default; run `enclave tools` for the installed list) |
+| `--tool <tool>` | Tool profile to use (asked once on the first interactive session, then the saved choice; run `enclave tools` for the installed list) |
 | `--backend <backend>` | Isolation backend: `auto` (default: docker or podman, whichever is installed), `docker`, `podman`, or experimental `qemu` |
 | `--name <name>` | Named persistent session |
 | `--background` | Detached background session |
@@ -277,7 +277,7 @@ Mutation commands (`add-domain`, `remove-domain`, `set-mode`) apply the new poli
 
 | Setting | Default |
 |---------|---------|
-| Tool | `claude` |
+| Tool | Asked once on the first interactive session, then the saved choice; an error without a terminal until `--tool` or the `tool` key is set |
 | Network | Restricted (allowlisted domains only) |
 | Persistence | Enabled (auth, env, history host-directory stores) |
 | YOLO mode | Enabled |
@@ -285,6 +285,14 @@ Mutation commands (`add-domain`, `remove-domain`, `set-mode`) apply the new poli
 | Secrets scope | `both` |
 
 Persistent defaults can be set in `~/.config/enclave/config.json` (global) or `~/.config/enclave/projects/<hash>/config.json` (per-project). See [Configuration](configuration.md).
+
+## Tool selection
+
+The tool is unset by default. The first command that needs one asks once which coding agent to use and saves the answer as `"tool"` in `~/.config/enclave/config.json`; later runs read it from there and never ask again. A command needs a tool when it starts a session or builds its image (`run`, `shell`, `continue`, `resume`, `exec`, and `update` without explicit tool arguments) or scopes policy, stores, or containers by tool (`info`, `auth import`, `auth export`, `network …`, `cleanup` without `--all`, and `stop` without a session argument). The question is only asked when stdin, stdout, and stderr are terminals and no `--json` or `--yes` was given; without a terminal, or when the question goes unanswered, the command fails with a message naming `--tool` and the `tool` key instead of guessing an agent. Commands that never read the default tool (`ps`, `status`, `attach`, `tools`, `features`, `config`, `review-target`, `theia`, …) neither ask nor fail; they take `--tool` at most as an explicit filter.
+
+The menu lists every installed agent. The IDE profiles (`theia`, `theia-next`) are not offered: they attach a host IDE to a container rather than running an agent in the terminal. Pick them with `--tool theia` or the `tool` key.
+
+`--tool` overrides the saved choice for a single run, and a configured `tool` disables the question. Set `"tool": "auto"` to be asked again.
 
 ## Backend detection
 

@@ -98,8 +98,22 @@ func Run(args []string) int {
 	cliOpts := parsed.Options
 	cliSources := parsed.Sources
 	opts, toolDefaults, hasToolDefaults := config.ResolveOptionsForTool(cliOpts, cliSources, globalDefaults, projectDefaults, "")
+	// The tool is resolved before anything reads it: per-tool overrides,
+	// image identity and store paths all key on the concrete name, so the
+	// options are layered again once the unset "auto" has an answer. Verbs
+	// that never read the default tool leave it unresolved.
+	if actionNeedsTool(parsed) {
+		tool, err := resolveTool(opts.Tool, promptAllowed(parsed))
+		if err != nil {
+			logx.Errorf("%v", err)
+			return 1
+		}
+		if tool != opts.Tool {
+			opts, toolDefaults, hasToolDefaults = config.ResolveOptionsForTool(cliOpts, cliSources, globalDefaults, projectDefaults, tool)
+		}
+	}
 	if actionUsesBackend(parsed.Action) {
-		resolveBackend(&opts, backendPromptAllowed(parsed))
+		resolveBackend(&opts, promptAllowed(parsed))
 	}
 	sources := opts.Sources
 	parsed.Options = opts

@@ -24,15 +24,15 @@ import (
 func stubBackendResolution(t *testing.T, clis []string, interactive bool) *[]string {
 	t.Helper()
 	previousBinary := docker.Binary()
-	previousDetect, previousShim, previousPrompt, previousSave := detectContainerCLIs, dockerIsPodmanShim, backendPromptUsable, saveBackendChoice
+	previousDetect, previousShim, previousPrompt, previousSave := detectContainerCLIs, dockerIsPodmanShim, promptUsable, saveBackendChoice
 	t.Cleanup(func() {
 		docker.SetBinary(previousBinary)
-		detectContainerCLIs, dockerIsPodmanShim, backendPromptUsable, saveBackendChoice = previousDetect, previousShim, previousPrompt, previousSave
+		detectContainerCLIs, dockerIsPodmanShim, promptUsable, saveBackendChoice = previousDetect, previousShim, previousPrompt, previousSave
 	})
 	saved := &[]string{}
 	detectContainerCLIs = func() []string { return clis }
 	dockerIsPodmanShim = func() bool { return false }
-	backendPromptUsable = func() bool { return interactive }
+	promptUsable = func() bool { return interactive }
 	saveBackendChoice = func(key string, value string) (string, error) {
 		*saved = append(*saved, key+"="+value)
 		return "config.json", nil
@@ -143,7 +143,7 @@ func TestResolveBackendNonInteractiveInvocationSkipsPrompt(t *testing.T) {
 	}
 }
 
-func TestBackendPromptAllowed(t *testing.T) {
+func TestPromptAllowed(t *testing.T) {
 	cases := []struct {
 		name   string
 		parsed cli.Result
@@ -159,8 +159,8 @@ func TestBackendPromptAllowed(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := backendPromptAllowed(tc.parsed); got != tc.want {
-				t.Fatalf("backendPromptAllowed = %v, want %v", got, tc.want)
+			if got := promptAllowed(tc.parsed); got != tc.want {
+				t.Fatalf("promptAllowed = %v, want %v", got, tc.want)
 			}
 		})
 	}

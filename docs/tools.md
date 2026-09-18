@@ -11,7 +11,7 @@ Built-in tool profiles:
 
 | Tool | Description |
 |------|-------------|
-| `claude` | [Claude Code](https://www.anthropic.com/claude-code) (Anthropic) — default |
+| `claude` | [Claude Code](https://www.anthropic.com/claude-code) (Anthropic) |
 | `codex` | [Codex CLI](https://github.com/openai/codex) (OpenAI) |
 | `mistral-vibe` | [Mistral Vibe CLI](https://github.com/mistralai/mistral-vibe) (opt-in/experimental) |
 | `opencode` | [OpenCode](https://opencode.ai/) |
@@ -20,6 +20,8 @@ Built-in tool profiles:
 | `theia-next` | Preview [Theia Next](https://theia-ide.org/) desktop IDE attached to an Enclave container |
 
 Tool profiles live in `extensions/tools/<tool>/spec.yaml` (`kind: sandbox`) and declare the command, config directory, optional skills directory, QEMU microVM settings, and auth providers (API key vars, auth files, OAuth ports).
+
+Which one runs is asked once on the first interactive session and then read from the `tool` key; the IDE profiles are selected explicitly with `--tool theia`. See [Tool selection](cli-reference.md#tool-selection).
 
 ## Base Images
 
@@ -54,7 +56,7 @@ Unsupported fields (`dockerComposeFile`, `features`, `remoteEnv`, `initializeCom
 ## Image Variants
 
 Images are per-tool: each agent gets its own image, selected with `--tool`
-(default: `claude`).
+or the `tool` key.
 
 | Flag | Image tag | Description |
 |------|-----------|-------------|

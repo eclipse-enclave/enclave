@@ -37,3 +37,40 @@ var backendFreeActions = map[string]bool{
 func actionUsesBackend(action string) bool {
 	return !backendFreeActions[action]
 }
+
+// toolFreeActions never read the default tool: they list or manage sessions,
+// extensions, configuration, and host-side setup, and read --tool at most as
+// an explicit filter. The unset "auto" tool stays unresolved for them, so they
+// neither ask which agent to use nor fail for lack of an answer.
+var toolFreeActions = map[string]bool{
+	"attach":                  true,
+	"config":                  true,
+	"extension-list":          true,
+	"features":                true,
+	"img-import":              true,
+	"ps":                      true,
+	"review-target":           true,
+	"ssh-init":                true,
+	"status":                  true,
+	"theia":                   true,
+	"theia-next":              true,
+	"tools":                   true,
+	"validate-extensions":     true,
+	cli.ActionExtensionManage: true,
+}
+
+// actionNeedsTool reports whether an invocation commits to a concrete tool: it
+// starts a session, builds an image, or scopes policy, stores, or containers by
+// tool. `update` with explicit targets, `stop <session>` and `cleanup --all`
+// name their scope themselves and never read the default.
+func actionNeedsTool(parsed cli.Result) bool {
+	switch parsed.Action {
+	case "update":
+		return len(parsed.Options.UpdateTools) == 0
+	case "stop":
+		return len(parsed.Options.CmdArgs) == 0
+	case "cleanup":
+		return !parsed.Options.CleanupAll
+	}
+	return !toolFreeActions[parsed.Action]
+}

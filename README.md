@@ -187,8 +187,8 @@ forwarding, and exit codes.
 Run in any project directory:
 
 ```bash
-enclave                     # Start claude (default) in current project
-enclave --tool codex        # Use a different tool
+enclave                     # Start the current project's tool (asks which one on the first run)
+enclave --tool codex        # Use a different tool for one run
 enclave --backend qemu --tool codex  # Experimental QEMU microVM run (implies --slim, all-network)
 enclave continue            # Continue latest session
 enclave ps                  # List running containers (--all for stopped, --json for scripts)
@@ -197,6 +197,8 @@ enclave shell               # Open interactive shell in container
 enclave info                # Show config and image details
 enclave version             # Show binary version and source commit (--json; alias: --version)
 ```
+
+**Tool selection:** The first interactive session asks which coding agent to run and saves the answer as `"tool"` in `~/.config/enclave/config.json`; later runs start it without asking. Scripts and non-terminal runs are never asked: without a configured tool they fail with a message naming `--tool` and the `tool` key. See [Tool selection](docs/cli-reference.md#tool-selection).
 
 **Authentication:** The simplest and recommended approach is to just log in from inside the container the first time you run — OAuth sessions are saved to a persistent auth store on the host and reused automatically on every subsequent run. No configuration needed.
 

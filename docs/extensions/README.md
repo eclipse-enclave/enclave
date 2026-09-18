@@ -505,12 +505,12 @@ Session continuation arguments are declared under `sandbox`:
 ### Build Selection
 
 Runtime images are per-tool: the CLI builds and runs exactly one tool image per
-session, selected with `--tool <name>` (default: `claude`). Each tool gets its
+session, selected with `--tool <name>` or the `tool` key. Each tool gets its
 own image tagged `enclave-<tool>:...`, so rebuilding or updating one tool
 never invalidates another tool's image.
 
 ```bash
-enclave --rebuild                  # build/run the default tool (claude)
+enclave --rebuild                  # build/run the selected tool
 enclave --tool codex --rebuild     # build/run the codex image
 ```
 
@@ -797,11 +797,10 @@ go build ./cmd/enclave
 ### 2. Build and Run with enclave
 
 ```bash
-# Build and run with default tool (claude)
-# This builds the full image with all default-enabled features
-./enclave --rebuild
+# Build and run the claude image with all default-enabled features
+./enclave --tool claude --rebuild
 
-# Run with a specific tool
+# Run another tool
 ./enclave --tool codex
 ```
 
@@ -866,7 +865,7 @@ type direnv
 
 ```bash
 # Test agents-only image (no features)
-./enclave --slim --rebuild
+./enclave --tool claude --slim --rebuild
 
 # Inside container:
 claude --version   # Should work (tool installed)
@@ -923,7 +922,7 @@ docker build --progress=plain . 2>&1 | \
 For production builds with per-tool layer caching, use the CLI:
 
 ```bash
-enclave --rebuild
+enclave --tool <name> --rebuild
 ```
 
 ### Quick Verification Checklist
@@ -931,7 +930,7 @@ enclave --rebuild
 | Test | Command | Expected |
 |------|---------|----------|
 | Go builds | `go build ./cmd/enclave` | No errors |
-| Default run | `./enclave` | Starts claude in container |
+| Claude run | `./enclave --tool claude` | Starts claude in container |
 | Tool select | `./enclave --tool codex` | Starts codex |
 | gh installed | (in container) `gh --version` | Shows version |
 | glab installed (opt-in) | (in container) `glab --version` | Shows version when enabled |

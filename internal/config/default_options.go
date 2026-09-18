@@ -12,7 +12,7 @@ import "enclave/internal/model"
 func DefaultOptions() model.Options {
 	return model.Options{
 		RunOptions: model.RunOptions{
-			Tool:             "claude",
+			Tool:             model.ToolAuto,
 			Backend:          "auto",
 			HostConfig:       model.HostConfigNone,
 			SkillsValidation: model.SkillsValidationStrict,

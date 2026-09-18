@@ -46,7 +46,7 @@ supported under `tool_overrides.<tool>`.
 
 | Key | Description |
 |-----|-------------|
-| `tool` | Default tool (e.g. `claude`, `codex`) |
+| `tool` | Default tool (e.g. `claude`, `codex`); unset means the first interactive session asks once and writes the answer here (see [Tool selection](cli-reference.md#tool-selection)) |
 | `backend` | Isolation backend: `auto` (default) uses docker or podman, whichever is installed, and asks once when both are; or `docker`, `podman`, experimental `qemu` |
 | `host_config` | `none` (default) or `passthrough` |
 | `skills_validation` | Shared skill validation: `strict` (default) or `agent`; supports tool overrides |

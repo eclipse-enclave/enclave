@@ -94,7 +94,7 @@ func OptionDefs() []OptionDef {
 			CLIFlags: []CLIFlagDef{
 				{
 					Name:                "--tool",
-					Usage:               "Tool profile (default: claude)",
+					Usage:               "Tool profile (default: asked once on the first interactive run, then the saved choice)",
 					ValueKind:           CLIValueRequired,
 					MissingValueMessage: "--tool requires a value (see --help for available tools)",
 					Action: CLIAction{

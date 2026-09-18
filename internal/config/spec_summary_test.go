@@ -89,6 +89,9 @@ providers:
 ports:
   - container: 8080
     publish: true
+caches:
+  - name: m2
+    target: .m2/repository
 `
 
 func TestSummarizeSpecDir(t *testing.T) {
@@ -129,6 +132,9 @@ func TestSummarizeSpecDir(t *testing.T) {
 	}
 	if len(summary.CredentialEnv) != 1 || summary.CredentialEnv[0] != "ACME_TOKEN" {
 		t.Errorf("CredentialEnv = %v", summary.CredentialEnv)
+	}
+	if len(summary.Caches) != 1 || summary.Caches[0] != (SpecCacheSummary{Name: "m2", Target: ".m2/repository"}) {
+		t.Errorf("Caches = %v, want the enclave-managed name with its container target", summary.Caches)
 	}
 	if summary.DefaultEnabled == nil || *summary.DefaultEnabled {
 		t.Errorf("DefaultEnabled = %v, want explicit false", summary.DefaultEnabled)

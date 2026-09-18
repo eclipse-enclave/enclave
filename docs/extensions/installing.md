@@ -88,8 +88,9 @@ this is a capability summary, not a code audit), how many `commands.install`
 steps run as root (a step with no `user` field defaults to root, independently
 of the top-level `needsRoot`), whether it ships a `check-update.sh` that enclave
 runs in a container on each automatic update check, widens the network allowlist
-or denies domains, publishes a container port on the host, declares credentials
-and where they're released as HTTP headers, whether it flips on the
+or denies domains, publishes a container port on the host, declares
+per-project cache mounts in the container home, declares credentials and where
+they're released as HTTP headers, whether it flips on the
 approval-bypass flag (`sandbox.yoloFlag`, active by default once declared) or
 appends its own argv to the agent for `--continue`/`--resume`
 (`sandbox.continueArgs`/`resumeArgs`, which can carry the same flag), launches

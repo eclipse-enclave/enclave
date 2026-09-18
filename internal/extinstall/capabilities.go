@@ -321,6 +321,10 @@ func describeProvider(p config.SpecProviderSummary) string {
 	return strings.Join(parts, " ")
 }
 
+func describeCache(c config.SpecCacheSummary) string {
+	return c.Name + " -> $HOME/" + c.Target
+}
+
 func describeCredentialSource(c config.SpecCredentialSource) string {
 	parts := []string{c.ID}
 	if len(c.Env) > 0 {

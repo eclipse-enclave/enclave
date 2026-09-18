@@ -89,7 +89,9 @@ func TestAddCacheMountsConfiguresPnpmStore(t *testing.T) {
 	}
 
 	mounts := newMountAccumulator(nil, nil)
-	r.addCacheMounts(mounts)
+	if err := r.addCacheMounts(mounts); err != nil {
+		t.Fatalf("addCacheMounts: %v", err)
+	}
 
 	want := "/home/agent/.local/share/pnpm/store"
 	if !envSliceContainsKV(mounts.Env(), "PNPM_CONFIG_STORE_DIR", want) {
@@ -104,7 +106,9 @@ func TestAddCacheMountsUsesEphemeralPnpmStoreWithoutCache(t *testing.T) {
 	}
 
 	mounts := newMountAccumulator(nil, nil)
-	r.addCacheMounts(mounts)
+	if err := r.addCacheMounts(mounts); err != nil {
+		t.Fatalf("addCacheMounts: %v", err)
+	}
 
 	want := "/home/agent/.local/share/pnpm/store"
 	if !envSliceContainsKV(mounts.Env(), "PNPM_CONFIG_STORE_DIR", want) {

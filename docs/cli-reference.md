@@ -191,8 +191,14 @@ Mutation commands (`add-domain`, `remove-domain`, `set-mode`) apply the new poli
 | `enclave cleanup --all` | All projects and tools |
 | `enclave cleanup --ephemeral` | Remove stopped containers and ephemeral session stores |
 | `enclave cleanup --dry-run` | Preview what would be removed |
-| `enclave cleanup --keep cache,history,auth,memory` | Preserve the listed stores (comma-separated or repeated `--keep`): `cache` (package caches), `history` (shell history), `auth` (auth stores, with `--all`), `memory` (per-project agent memory, no selective effect with `--all`) |
+| `enclave cleanup --keep cache,history,auth,memory` | Preserve the listed stores (comma-separated or repeated `--keep`): `cache` (package caches), `history` (shell history and the config store, including conversation history), `auth` (auth stores, with `--all`), `memory` (per-project agent memory, no selective effect with `--all`) |
 | `enclave cleanup --build-cache` | Prune Docker build cache (requires confirmation) |
+
+For a tool with session-scoped memory (Codex), `history` and `memory` name one
+unit: `--keep memory` also preserves the config store and `--keep history` also
+preserves memory. With `--ephemeral`, `--keep memory` preserves each session
+store that holds memory; the other `--keep` kinds do not apply there. See
+[Agent Memory](runtime/stores.md#agent-memory).
 
 ---
 
@@ -269,7 +275,7 @@ Mutation commands (`add-domain`, `remove-domain`, `set-mode`) apply the new poli
 |------|-------------|
 | `--no-cache` | Disable package caches |
 | `--no-history` | Disable shell history |
-| `--no-memory` | Disable per-project agent memory |
+| `--no-memory` | Disable per-project agent memory; see [memory controls](runtime/stores.md#agent-memory) |
 
 ---
 

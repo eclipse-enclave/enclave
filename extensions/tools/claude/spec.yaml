@@ -17,6 +17,9 @@ sandbox:
   qemuMinMemoryMiB: 4096
   skillsDir: .claude/skills
   memoryDir: .claude/memory
+  # Command-line settings take precedence over the baked settings template,
+  # which opts auto-memory in, so this disables generation without the mount.
+  noMemoryArgs: [--settings, '{"autoMemoryEnabled": false}']
   settingsFile: claude-settings.json
   settingsTarget: .claude/settings.json
   yoloFlag: --dangerously-skip-permissions

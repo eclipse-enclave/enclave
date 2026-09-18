@@ -66,6 +66,12 @@ the complete set and semantics):
 - `skillsDir`: (optional) path below `configDir` where shared and tool-specific
   managed skills are composed. It may be home-relative or absolute, matching
   `configDir`.
+- `memoryDir` / `memoryScope` / `noMemoryArgs`: (optional) native memory path,
+  project or session scope, and native disable arguments. See
+  [Agent Memory](../runtime/stores.md#agent-memory) before enabling background
+  memory generation.
+- `statePaths`: (optional) config-relative runtime state preserved across config
+  overlays and excluded from host config passthrough (including database sidecars).
 - `settingsFile` / `settingsTarget`: aggregated template filename under
   `/usr/local/share/enclave/templates/` and its target below `configDir`.
 - `yoloFlag` / `yoloEnabled`: flag to skip approvals, and whether yolo mode is on

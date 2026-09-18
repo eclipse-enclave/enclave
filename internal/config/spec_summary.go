@@ -107,6 +107,10 @@ type SpecSummary struct {
 	EntrypointOverride    string
 	ContinueArgs          string
 	ResumeArgs            string
+	NoMemoryArgs          string
+	MemoryDir             string
+	MemoryScope           string
+	StatePaths            []string
 	PostStartOpenIDE      string
 	Providers             []SpecProviderSummary
 	HostExposure          SpecHostExposure
@@ -227,11 +231,19 @@ func summarizeSpecDocument(doc specDocument) SpecSummary {
 		if doc.Sandbox.Entrypoint != nil {
 			summary.EntrypointOverride = entrypointCommand(doc.Sandbox.Entrypoint)
 		}
-		// continueArgs/resumeArgs are appended to the agent's argv for
-		// `--continue`/`--resume`, so they grant whatever those flags grant —
-		// including approval bypass — without going through sandbox.yoloFlag.
+		// continueArgs/resumeArgs/noMemoryArgs are appended to the agent's argv
+		// for `--continue`/`--resume`/`--no-memory`, so they grant whatever
+		// those flags grant, including approval bypass, without going through
+		// sandbox.yoloFlag.
 		summary.ContinueArgs = strings.Join(doc.Sandbox.ContinueArgs, " ")
 		summary.ResumeArgs = strings.Join(doc.Sandbox.ResumeArgs, " ")
+		summary.NoMemoryArgs = strings.Join(doc.Sandbox.NoMemoryArgs, " ")
+		// memoryDir is a writable host bind mount the agent keeps between runs,
+		// and statePaths pins store content the config overlay may not replace,
+		// so both persist beyond a single session.
+		summary.MemoryDir = strings.TrimSpace(doc.Sandbox.MemoryDir)
+		summary.MemoryScope = strings.TrimSpace(doc.Sandbox.MemoryScope)
+		summary.StatePaths = doc.Sandbox.StatePaths
 		summary.HostExposure.PassthroughPaths = doc.Sandbox.PassthroughPaths
 		summary.HostExposure.HostConfigDir = doc.Sandbox.HostConfigDir
 		summary.HostExposure.HostCredentialsFile = doc.Sandbox.HostCredentials

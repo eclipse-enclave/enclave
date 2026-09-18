@@ -10,6 +10,7 @@ package qemu
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -26,9 +27,34 @@ const (
 	// BundleConfigFile is the metadata file next to vmlinuz/initramfs that
 	// declares host-side QEMU launch settings for a bundle.
 	BundleConfigFile = "enclave-vm-bundle.json"
+	// InitramfsFile is the guest initramfs of a generated bundle. It is a
+	// zstd-compressed newc cpio archive, padded to a 4-byte boundary so the
+	// per-run overlay archive can be appended to it.
+	InitramfsFile = "initramfs.cpio.zst"
+	// LegacyInitramfsFile is the uncompressed initramfs name, still accepted for
+	// hand-assembled bundles passed via --image-name.
+	LegacyInitramfsFile = "initramfs.cpio"
+	// InitramfsMetaFile records the built initramfs sizes. The host needs the
+	// unpacked size to size guest memory and cannot derive it from the
+	// compressed image.
+	InitramfsMetaFile = "enclave-vm-initramfs.json"
 	// DefaultMemoryMiB is the generated-bundle memory default and the fallback
 	// for minimal/prebuilt bundles without BundleConfigFile.
 	DefaultMemoryMiB = 4096
+
+	// Guest memory has to cover the unpacked initramfs for the whole session:
+	// it becomes the rootfs, a ramfs the guest can never reclaim. During boot
+	// the still-compressed image is resident on top of it, and the boot slack
+	// covers the kernel plus early allocations; once unpacking is done that
+	// memory is freed and the workload budget is what the agent tool gets.
+	initramfsBootSlackMiB = 256
+	initramfsWorkloadMiB  = 2048
+	memoryGranularityMiB  = 512
+
+	bytesPerMiB = 1 << 20
+	// initramfsSegmentAlignment is the boundary an appended plain cpio segment
+	// must start on for the kernel's unpack_to_rootfs() to recognize it.
+	initramfsSegmentAlignment = 4
 
 	guestControlPath       = "/run/enclave/control"
 	guestFilesPath         = "/run/enclave/files"
@@ -39,9 +65,18 @@ const (
 )
 
 // BundleConfig is the host-side metadata stored next to a generated or
-// prebuilt QEMU bundle.
+// prebuilt QEMU bundle. MemoryMiB is the effective launch size: the bundle
+// builder raises the profile minimum to whatever the built initramfs needs.
 type BundleConfig struct {
 	MemoryMiB int `json:"memoryMiB"`
+}
+
+// InitramfsMeta is the size metadata the bundle builder writes next to the
+// compressed initramfs.
+type InitramfsMeta struct {
+	UncompressedBytes int64  `json:"uncompressedBytes"`
+	CompressedBytes   int64  `json:"compressedBytes"`
+	Compression       string `json:"compression"`
 }
 
 type bundle struct {
@@ -94,13 +129,13 @@ func resolveBundle(image string) (bundle, error) {
 		return bundle{}, fmt.Errorf("qemu backend: inspect bundle path %q: %w", resolved, err)
 	}
 	if !info.IsDir() {
-		return bundle{}, fmt.Errorf("qemu backend: bundle path %q must be a directory containing vmlinuz and initramfs.cpio", resolved)
+		return bundle{}, fmt.Errorf("qemu backend: bundle path %q must be a directory containing vmlinuz and %s", resolved, InitramfsFile)
 	}
 	kernel, err := requireRegularFile(filepath.Join(resolved, "vmlinuz"), "kernel")
 	if err != nil {
 		return bundle{}, err
 	}
-	initramfs, err := requireRegularFile(filepath.Join(resolved, "initramfs.cpio"), "initramfs")
+	initramfs, err := InitramfsPath(resolved)
 	if err != nil {
 		return bundle{}, err
 	}
@@ -108,7 +143,97 @@ func resolveBundle(image string) (bundle, error) {
 	if err != nil {
 		return bundle{}, err
 	}
+	if err := checkBundleMemory(resolved, memoryMiB); err != nil {
+		return bundle{}, err
+	}
 	return bundle{Root: resolved, Kernel: kernel, Initramfs: initramfs, MemoryMiB: memoryMiB}, nil
+}
+
+// InitramfsPath resolves a bundle's initramfs, preferring the compressed image
+// over the uncompressed legacy name.
+func InitramfsPath(root string) (string, error) {
+	compressed := filepath.Join(root, InitramfsFile)
+	if info, err := os.Stat(compressed); err == nil {
+		if !info.Mode().IsRegular() {
+			return "", fmt.Errorf("qemu backend: initramfs %s is not a regular file", compressed)
+		}
+		return compressed, nil
+	} else if !os.IsNotExist(err) {
+		return "", fmt.Errorf("qemu backend: inspect initramfs %s: %w", compressed, err)
+	}
+	legacy := filepath.Join(root, LegacyInitramfsFile)
+	if _, err := os.Stat(legacy); err != nil && os.IsNotExist(err) {
+		return "", fmt.Errorf("qemu backend: missing initramfs %s", compressed)
+	}
+	return requireRegularFile(legacy, "initramfs")
+}
+
+// RequiredMemoryMiB is the guest memory a bundle with the given initramfs sizes
+// needs: enough to unpack the image at boot, and enough to keep the unpacked
+// rootfs resident next to the running agent tool afterwards.
+func RequiredMemoryMiB(uncompressedBytes int64, compressedBytes int64) int {
+	unpacked := bytesToMiB(uncompressedBytes)
+	boot := unpacked + bytesToMiB(compressedBytes) + initramfsBootSlackMiB
+	workload := unpacked + initramfsWorkloadMiB
+	required := boot
+	if workload > required {
+		required = workload
+	}
+	return roundUpMiB(required, memoryGranularityMiB)
+}
+
+func bytesToMiB(size int64) int {
+	if size <= 0 {
+		return 0
+	}
+	return int((size + bytesPerMiB - 1) / bytesPerMiB)
+}
+
+func roundUpMiB(value int, granularity int) int {
+	if value <= 0 {
+		return granularity
+	}
+	return ((value + granularity - 1) / granularity) * granularity
+}
+
+// ReadInitramfsMeta reads the size metadata the bundle builder wrote. It
+// reports os.ErrNotExist for bundles built without it.
+func ReadInitramfsMeta(root string) (InitramfsMeta, error) {
+	path := filepath.Join(root, InitramfsMetaFile)
+	data, err := os.ReadFile(path) // #nosec G304 -- path is inside a validated bundle directory.
+	if err != nil {
+		return InitramfsMeta{}, err
+	}
+	var meta InitramfsMeta
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&meta); err != nil {
+		return InitramfsMeta{}, fmt.Errorf("qemu backend: parse initramfs metadata %s: %w", path, err)
+	}
+	if meta.UncompressedBytes <= 0 {
+		return InitramfsMeta{}, fmt.Errorf("qemu backend: initramfs metadata %s has invalid uncompressedBytes %d", path, meta.UncompressedBytes)
+	}
+	return meta, nil
+}
+
+// checkBundleMemory rejects a bundle whose initramfs cannot be unpacked in the
+// memory its config declares. Without it the guest fails deep inside the kernel
+// ("Initramfs unpacking failed: write error", then a no-init panic), which says
+// nothing about the actual cause.
+func checkBundleMemory(root string, memoryMiB int) error {
+	meta, err := ReadInitramfsMeta(root)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
+	required := RequiredMemoryMiB(meta.UncompressedBytes, meta.CompressedBytes)
+	if memoryMiB >= required {
+		return nil
+	}
+	return fmt.Errorf("qemu backend: bundle %s needs at least %d MiB to unpack its %d MiB initramfs but %s declares %d MiB; rebuild the bundle with --rebuild",
+		root, required, bytesToMiB(meta.UncompressedBytes), BundleConfigFile, memoryMiB)
 }
 
 func requireRegularFile(path string, label string) (string, error) {
@@ -125,28 +250,41 @@ func requireRegularFile(path string, label string) (string, error) {
 	return path, nil
 }
 
-func resolveBundleMemoryMiB(root string) (int, error) {
+// ReadBundleConfig reads a bundle's host-side launch metadata. It reports
+// os.ErrNotExist for minimal or prebuilt bundles that ship without it.
+func ReadBundleConfig(root string) (BundleConfig, error) {
 	path := filepath.Join(root, BundleConfigFile)
 	data, err := os.ReadFile(path) // #nosec G304 -- path is inside a validated bundle directory.
 	if err != nil {
 		if os.IsNotExist(err) {
-			return DefaultMemoryMiB, nil
+			return BundleConfig{}, err
 		}
-		return 0, fmt.Errorf("qemu backend: read bundle config %s: %w", path, err)
+		return BundleConfig{}, fmt.Errorf("qemu backend: read bundle config %s: %w", path, err)
 	}
 	var cfg BundleConfig
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&cfg); err != nil {
-		return 0, fmt.Errorf("qemu backend: parse bundle config %s: %w", path, err)
+		return BundleConfig{}, fmt.Errorf("qemu backend: parse bundle config %s: %w", path, err)
 	}
 	if cfg.MemoryMiB <= 0 {
-		return 0, fmt.Errorf("qemu backend: bundle config %s has invalid memoryMiB %d", path, cfg.MemoryMiB)
+		return BundleConfig{}, fmt.Errorf("qemu backend: bundle config %s has invalid memoryMiB %d", path, cfg.MemoryMiB)
+	}
+	return cfg, nil
+}
+
+func resolveBundleMemoryMiB(root string) (int, error) {
+	cfg, err := ReadBundleConfig(root)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return DefaultMemoryMiB, nil
+		}
+		return 0, err
 	}
 	return cfg.MemoryMiB, nil
 }
 
-func (b *Backend) prepareGuestRuntime(bundle bundle, req backend.Request) (guestRuntime, error) {
+func (b *Backend) prepareGuestRuntime(bundle bundle, req backend.Request, console consoleSize) (guestRuntime, error) {
 	tempDir, err := os.MkdirTemp("", "enclave-qemu-*")
 	if err != nil {
 		return guestRuntime{}, fmt.Errorf("qemu backend: create runtime directory: %w", err)
@@ -175,7 +313,7 @@ func (b *Backend) prepareGuestRuntime(bundle bundle, req backend.Request) (guest
 		cleanupOnErr()
 		return guestRuntime{}, fmt.Errorf("qemu backend: create overlay directory: %w", err)
 	}
-	content, err := b.renderRunScript(req, mounts, fileMounts)
+	content, err := b.renderRunScript(req, mounts, fileMounts, console)
 	if err != nil {
 		cleanupOnErr()
 		return guestRuntime{}, err
@@ -189,7 +327,7 @@ func (b *Backend) prepareGuestRuntime(bundle bundle, req backend.Request) (guest
 		cleanupOnErr()
 		return guestRuntime{}, err
 	}
-	runtimeInitramfs := filepath.Join(tempDir, "initramfs.cpio")
+	runtimeInitramfs := filepath.Join(tempDir, "initramfs.img")
 	if err := concatenateFiles(runtimeInitramfs, bundle.Initramfs, overlayInitramfs); err != nil {
 		cleanupOnErr()
 		return guestRuntime{}, err
@@ -345,18 +483,32 @@ func createCPIOArchive(sourceDir string, output string) error {
 	return nil
 }
 
+// concatenateFiles builds the initrd the guest boots from: the bundle image
+// followed by the per-run overlay archive. Every segment starts on a 4-byte
+// boundary because the kernel's unpack_to_rootfs() only detects a plain cpio
+// segment there; it skips the padding bytes in between.
 func concatenateFiles(output string, inputs ...string) error {
 	out, err := os.Create(output) // #nosec G304 -- output is under a generated runtime directory.
 	if err != nil {
 		return fmt.Errorf("qemu backend: create runtime initramfs: %w", err)
 	}
 	defer func() { _ = out.Close() }()
+	written := int64(0)
 	for _, input := range inputs {
+		if pad := segmentPadding(written); pad > 0 {
+			padded, err := out.Write(make([]byte, pad))
+			if err != nil {
+				return fmt.Errorf("qemu backend: pad runtime initramfs: %w", err)
+			}
+			written += int64(padded)
+		}
 		file, err := os.Open(input) // #nosec G304 -- inputs are validated bundle/generated files.
 		if err != nil {
 			return fmt.Errorf("qemu backend: open initramfs part %s: %w", input, err)
 		}
-		if _, err := io.Copy(out, file); err != nil {
+		copied, err := io.Copy(out, file)
+		written += copied
+		if err != nil {
 			_ = file.Close()
 			return fmt.Errorf("qemu backend: append initramfs part %s: %w", input, err)
 		}
@@ -368,6 +520,14 @@ func concatenateFiles(output string, inputs ...string) error {
 		return fmt.Errorf("qemu backend: close runtime initramfs: %w", err)
 	}
 	return nil
+}
+
+func segmentPadding(offset int64) int {
+	remainder := offset % initramfsSegmentAlignment
+	if remainder == 0 {
+		return 0
+	}
+	return initramfsSegmentAlignment - int(remainder)
 }
 
 func persistFileMounts(files []runtimeFileMount) []error {

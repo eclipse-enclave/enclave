@@ -76,7 +76,8 @@ the complete set and semantics):
 - `passthroughPaths`: (optional) narrow, reviewed allow-list for
   `host_config=passthrough` — keep it config-only.
 - `qemuMinMemoryMiB`: (optional) minimum memory for generated QEMU microVM
-  bundles; the effective size is max(default 4096 MiB, this value).
+  bundles; the effective size is max(default 4096 MiB, this value, what the
+  built initramfs needs to unpack and stay resident).
 - `qemuStoreCacheMmap`: (optional) mount the tool's config store with 9p
   `cache=mmap`; required when the store holds SQLite databases in WAL mode.
 - `hostConfigDir` / `hostCredentialsFile` / `hostOauthJson`: (optional) host-side

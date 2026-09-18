@@ -42,6 +42,13 @@ rollouts, pinned to avoid re-deriving them on every overlaid run.
 unique suffix key for each session and removed after the container exits. The
 `default` store, if one exists, is left untouched.
 
+**Layout**: Before the container starts, Enclave creates the parents of the
+settings target and auth files plus the `skillsDir` and `memoryDir` mount
+targets inside the store as the host user. It recreates them after applying a
+generated config overlay, which may replace the store contents. Existing
+ownership is not changed; Enclave warns with a `chown` command when a layout
+component belongs to another user.
+
 Source: [`internal/runtime/volume_manager.go`](../../internal/runtime/volume_manager.go) `BuildPrep` (intent), [`internal/backend/docker/prepare.go`](../../internal/backend/docker/prepare.go) `prepareConfigStore` (mechanics)
 
 ## Agent Memory

@@ -8,6 +8,8 @@
 package runtime
 
 import (
+	"path/filepath"
+	"slices"
 	"testing"
 
 	"enclave/internal/model"
@@ -43,7 +45,53 @@ func TestConfigVolumeRelativeDirsIncludesSettingsAndAuthParents(t *testing.T) {
 	}
 }
 
-func TestConfigVolumeRelativeDirsSkipsRootLevelFiles(t *testing.T) {
+func TestConfigVolumeRelativeDirsIncludesSkillsDirOutsideSettingsSubtree(t *testing.T) {
+	t.Parallel()
+
+	m := volumeManager{
+		Runtime: &Runtime{
+			containerHome: model.ContainerHome,
+			profile: model.Profile{
+				Name:           "antigravity",
+				ConfigDir:      ".gemini",
+				SkillsDir:      ".gemini/config/skills",
+				SettingsFile:   "antigravity-settings.json",
+				SettingsTarget: ".gemini/antigravity-cli/settings.json",
+			},
+		},
+	}
+
+	got := m.configVolumeRelativeDirs()
+	want := []string{"antigravity-cli", filepath.Join("config", "skills")}
+	if !slices.Equal(got, want) {
+		t.Fatalf("configVolumeRelativeDirs() = %v, want %v", got, want)
+	}
+}
+
+func TestConfigVolumeRelativeDirsIncludesNestedMemoryDir(t *testing.T) {
+	t.Parallel()
+
+	m := volumeManager{
+		Runtime: &Runtime{
+			containerHome: model.ContainerHome,
+			profile: model.Profile{
+				Name:           "tool",
+				ConfigDir:      ".tool",
+				MemoryDir:      ".tool/state/memory",
+				SettingsFile:   "settings.json",
+				SettingsTarget: ".tool/settings.json",
+			},
+		},
+	}
+
+	got := m.configVolumeRelativeDirs()
+	want := []string{filepath.Join("state", "memory")}
+	if !slices.Equal(got, want) {
+		t.Fatalf("configVolumeRelativeDirs() = %v, want %v", got, want)
+	}
+}
+
+func TestConfigVolumeRelativeDirsMatchesClaudeProfile(t *testing.T) {
 	t.Parallel()
 
 	m := volumeManager{
@@ -52,10 +100,37 @@ func TestConfigVolumeRelativeDirsSkipsRootLevelFiles(t *testing.T) {
 			profile: model.Profile{
 				Name:           "claude",
 				ConfigDir:      ".claude",
+				SkillsDir:      ".claude/skills",
+				MemoryDir:      ".claude/memory",
 				SettingsFile:   "claude-settings.json",
 				SettingsTarget: ".claude/settings.json",
 				Providers: []model.ProviderConfig{
 					{Name: "anthropic", AuthFiles: []string{"config.json"}},
+				},
+			},
+		},
+	}
+
+	got := m.configVolumeRelativeDirs()
+	want := []string{"memory", "skills"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("configVolumeRelativeDirs() = %v, want %v", got, want)
+	}
+}
+
+func TestConfigVolumeRelativeDirsSkipsRootLevelFiles(t *testing.T) {
+	t.Parallel()
+
+	m := volumeManager{
+		Runtime: &Runtime{
+			containerHome: model.ContainerHome,
+			profile: model.Profile{
+				Name:           "tool",
+				ConfigDir:      ".tool",
+				SettingsFile:   "settings.json",
+				SettingsTarget: ".tool/settings.json",
+				Providers: []model.ProviderConfig{
+					{Name: "provider", AuthFiles: []string{"config.json"}},
 				},
 			},
 		},

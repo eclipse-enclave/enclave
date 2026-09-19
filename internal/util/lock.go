@@ -20,17 +20,8 @@ func AcquireFileLock(path string, onWait func()) (release func(), err error) {
 	if path == "" {
 		return func() {}, nil
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return nil, err
-	}
-	// #nosec G304 -- lock path is controlled by internal callers.
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
+	file, locked, err := openAndTryLock(path)
 	if err != nil {
-		return nil, err
-	}
-	locked, err := tryLockFile(file)
-	if err != nil {
-		_ = file.Close()
 		return nil, err
 	}
 	if !locked {
@@ -42,14 +33,47 @@ func AcquireFileLock(path string, onWait func()) (release func(), err error) {
 			return nil, err
 		}
 	}
+	return lockReleaser(file), nil
+}
+
+// TryAcquireFileLock is AcquireFileLock without waiting: ok is false, and
+// release nil, when another process holds the lock.
+func TryAcquireFileLock(path string) (release func(), ok bool, err error) {
+	file, locked, err := openAndTryLock(path)
+	if err != nil || !locked {
+		if file != nil {
+			_ = file.Close()
+		}
+		return nil, false, err
+	}
+	return lockReleaser(file), true, nil
+}
+
+func openAndTryLock(path string) (*os.File, bool, error) {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return nil, false, err
+	}
+	// #nosec G304 -- lock path is controlled by internal callers.
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return nil, false, err
+	}
+	locked, err := tryLockFile(file)
+	if err != nil {
+		_ = file.Close()
+		return nil, false, err
+	}
+	return file, locked, nil
+}
+
+func lockReleaser(file *os.File) func() {
 	var once sync.Once
-	release = func() {
+	return func() {
 		once.Do(func() {
 			_ = unlockFile(file)
 			_ = file.Close()
 		})
 	}
-	return release, nil
 }
 
 // WithFileLock runs fn while holding an exclusive lock on path.

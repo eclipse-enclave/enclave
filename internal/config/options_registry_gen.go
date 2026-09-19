@@ -19,6 +19,16 @@ import (
 func OptionSpecs() []OptionSpec {
 	specs := []OptionSpec{
 		{
+			Name:  "auto_update",
+			Group: OptionGroupGlobal,
+			ApplyDefaultsWithSource: func(opts *model.Options, defaults Defaults, source model.OptionSource, sources *model.OptionSources) {
+				if canOverride(sources.AutoUpdate, source) && defaults.AutoUpdate != nil {
+					opts.AutoUpdate = *defaults.AutoUpdate
+					sources.AutoUpdate = source
+				}
+			},
+		},
+		{
 			Name:  "tool",
 			Group: OptionGroupRun,
 			ApplyDefaultsWithSource: func(opts *model.Options, defaults Defaults, source model.OptionSource, sources *model.OptionSources) {

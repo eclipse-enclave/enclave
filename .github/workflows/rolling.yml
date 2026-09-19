@@ -173,6 +173,7 @@ jobs:
         run: |
           gh release delete rolling --yes --cleanup-tag || true
           gh release create rolling \
+            --target "$GITHUB_SHA" \
             --prerelease \
             --title "Rolling Release" \
             --notes "$(cat <<EOF

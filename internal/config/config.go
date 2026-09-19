@@ -24,6 +24,7 @@ type Defaults struct {
 	Tool             string              `json:"tool"`
 	ToolOverrides    map[string]Defaults `json:"tool_overrides"`
 	Backend          string              `json:"backend"`
+	AutoUpdate       *bool               `json:"auto_update"`
 	HostConfig       string              `json:"host_config"`
 	SkillsValidation string              `json:"skills_validation"`
 	HostConfigPaths  []string            `json:"host_config_paths"`
@@ -395,6 +396,10 @@ func validateToolOverrides(path string, doc map[string]json.RawMessage, defaults
 			continue
 		}
 		if parsed, ok := defaults.ToolOverrides[toolName]; ok {
+			if _, hasAutoUpdate := entry["auto_update"]; hasAutoUpdate {
+				parsed.AutoUpdate = nil
+				warnings = append(warnings, fmt.Sprintf("Ignoring tool_overrides.%s.auto_update in %s: automatic binary updates are configured globally", toolName, path))
+			}
 			warnings = append(warnings, validateToolOverrideHostConfigPaths(path, toolName, parsed.HostConfigPaths)...)
 			valid[toolName] = parsed
 		}
@@ -477,6 +482,12 @@ func applyProjectOverrideGuardrailsAgainst(path string, projectDir string, globa
 }
 
 func applyProjectDefaultsGuardrails(path string, prefix string, projectRoot string, projectDir string, inheritedWorktreeMetadata string, defaults *Defaults, warnings []string) []string {
+	if defaults.AutoUpdate != nil {
+		field := projectGuardrailField(prefix, "auto_update")
+		warnings = append(warnings, fmt.Sprintf("Ignoring %s=%v in %s: automatic binary updates are configured globally", field, *defaults.AutoUpdate, path))
+		defaults.AutoUpdate = nil
+	}
+
 	if defaults.AllowAllNetwork != nil && *defaults.AllowAllNetwork {
 		field := projectGuardrailField(prefix, "allow_all_network")
 		valueLabel := field + "=true"

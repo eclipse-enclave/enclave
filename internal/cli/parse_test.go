@@ -177,6 +177,16 @@ func TestParseVersionFlag(t *testing.T) {
 	}
 }
 
+func TestParseSelfUpdateCommand(t *testing.T) {
+	res, err := Parse([]string{"self-update"}, config.DefaultOptions())
+	if err != nil {
+		t.Fatalf("parse failed: %v", err)
+	}
+	if res.Action != "self-update" {
+		t.Fatalf("expected action self-update, got %s", res.Action)
+	}
+}
+
 func TestParseUpdateCommand(t *testing.T) {
 	defaults := config.DefaultOptions()
 	res, err := Parse([]string{"update", "codex", "claude"}, defaults)

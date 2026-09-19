@@ -71,6 +71,10 @@ func Run(args []string) int {
 	for _, warning := range warnings {
 		logx.Warnf(warning)
 	}
+	if parsed.Action == "self-update" {
+		return runSelfUpdate()
+	}
+	maybeAutomaticSelfUpdate(parsed, globalDefaults)
 
 	var userCommandMount *model.UserCommandMount
 	if parsed.Action == "user-command" {

@@ -294,6 +294,10 @@ func HostRecentProjectsPath(home string) string {
 	return filepath.Join(hostConfigRoot(home), recentProjectsFilename)
 }
 
+func HostSelfUpdateCheckPath(home string) string {
+	return filepath.Join(hostStateRoot(home), "self-update-check")
+}
+
 // HostConfigRootDir returns the config root for enclave
 // (<XDG_CONFIG_HOME|~/.config>/enclave on Linux, ~/Library/Application
 // Support/org.eclipse.enclave/config on macOS). It is surfaced to user

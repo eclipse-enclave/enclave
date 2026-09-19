@@ -134,17 +134,20 @@ make build
 
 ### Updating Enclave
 
-The Enclave binary does not update itself yet, and it does not tell you when a
-newer build is available. The rolling release moves with `main`, so check back
-regularly: `enclave version` prints the version, commit, and commit date of your
-build, which you can compare against the current
-[rolling release](https://github.com/eclipse-enclave/enclave/releases/tag/rolling).
-To update, download the current assets and re-run the install step for your
-platform above. On macOS the re-downloaded binary carries the quarantine
-attribute again, so `xattr -d` has to run before `install`. For the Windows
-launcher, the Scoop manifest pins the archive hashes, so uninstall and install
-it again from the release URL. From a source checkout, run `git pull` followed
-by `make install`.
+Enclave checks the
+[rolling release](https://github.com/eclipse-enclave/enclave/releases/tag/rolling)
+at most once every 24 hours and reports when its commit differs from the running
+binary. Run `enclave self-update` to download the binary for your platform,
+verify it against `checksums.txt`, and atomically replace the current executable.
+The updater never elevates privileges, so use the manual install procedure above
+when the executable's directory is not writable.
+
+Automatic replacement is opt-in. Add `"auto_update": true` to the global
+Enclave `config.json`; project and per-tool settings cannot enable it. Checks
+are skipped for shell completion and structured output. On Windows,
+`self-update` updates the Linux binary inside WSL2; update the Windows launcher
+itself by reinstalling its Scoop manifest. From a source checkout, continue to
+use `git pull` followed by `make install` when you want to retain a source build.
 
 :::note
 This is about the Enclave binary itself. `enclave update` rebuilds tool images

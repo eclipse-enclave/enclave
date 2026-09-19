@@ -18,7 +18,8 @@ type OptionSources struct {
 }
 
 type GlobalOptionSources struct {
-	Verbose OptionSource
+	AutoUpdate OptionSource
+	Verbose    OptionSource
 }
 
 type RunOptionSources struct {
@@ -83,7 +84,8 @@ func (s OptionSources) RunSources() RunOptionSources { return s.RunOptionSources
 func DefaultOptionSources() OptionSources {
 	return OptionSources{
 		GlobalOptionSources: GlobalOptionSources{
-			Verbose: SourceDefault,
+			AutoUpdate: SourceDefault,
+			Verbose:    SourceDefault,
 		},
 		RunOptionSources: RunOptionSources{
 			AddDirs:          SourceDefault,
@@ -160,6 +162,9 @@ func MergeOptionSources(base OptionSources, override OptionSources) OptionSource
 	}
 	if override.AuthScope != SourceUnset {
 		base.AuthScope = override.AuthScope
+	}
+	if override.AutoUpdate != SourceUnset {
+		base.AutoUpdate = override.AutoUpdate
 	}
 	if override.Backend != SourceUnset {
 		base.Backend = override.Backend

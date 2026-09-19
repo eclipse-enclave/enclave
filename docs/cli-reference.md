@@ -79,12 +79,21 @@ Ctrl-C or SIGTERM while a session is still starting aborts the start with exit c
 |---------|-------------|
 | `enclave info` | Show configuration and image details |
 | `enclave version`, `enclave --version` | Show the binary version, source commit, and commit date |
+| `enclave self-update` | Replace the host binary with the current GitHub rolling-release binary |
 | `enclave config` | Show configuration values |
 | `enclave tools` | List available tool profiles (`list\|add\|remove\|update` manage installed tool extensions; see below) |
 | `enclave features` | List available feature extensions (`list\|add\|remove\|update` manage installed feature extensions; see below) |
 | `enclave completion <shell>` | Generate shell completion |
 
 `enclave version` prints one line suitable for bug reports; `--json` emits the version, commit, and date as an object. Builds from modified source append `-dirty` to the commit; unavailable values are reported as `unknown`.
+
+`enclave self-update` downloads the `linux` or `darwin` binary matching the
+host architecture, verifies it against the rolling release's `checksums.txt`,
+and atomically replaces the running executable. It never elevates privileges;
+the executable's directory must be writable. Normal human-facing invocations
+check the rolling release at most once every 24 hours and notify when its commit
+differs. Set `"auto_update": true` in the global config to install it during
+that check. Checks are skipped for shell completion and structured output.
 
 `enclave config` flags: `--view <mode>` selects the output view — `matrix` (default), `source` (where each value comes from), `diff` (values overridden by higher precedence), or `effective` (effective values only); `--json` emits JSON output.
 

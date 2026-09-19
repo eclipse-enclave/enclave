@@ -38,6 +38,9 @@ explicit host opt-in. Guarded at project scope: `tool`, `yolo`,
 `project_mount="writable"`, and any `worktree_metadata` value that relaxes the
 inherited mode.
 
+`auto_update` is global-only rather than a project or per-tool option because
+it replaces the host executable. Project and tool-override values are ignored.
+
 Top-level `host_config_paths` is not part of that set: it is ignored with a
 warning in any config file, global included, because passthrough paths are only
 supported under `tool_overrides.<tool>`.
@@ -46,6 +49,7 @@ supported under `tool_overrides.<tool>`.
 
 | Key | Description |
 |-----|-------------|
+| `auto_update` | Automatically replace a stale Enclave binary from the GitHub rolling release during the daily update check (default: `false`; global config only) |
 | `tool` | Default tool (e.g. `claude`, `codex`); unset means the first interactive session asks once and writes the answer here (see [Tool selection](cli-reference.md#tool-selection)) |
 | `backend` | Isolation backend: `auto` (default) uses docker or podman, whichever is installed, and asks once when both are; or `docker`, `podman`, experimental `qemu` |
 | `host_config` | `none` (default) or `passthrough` |

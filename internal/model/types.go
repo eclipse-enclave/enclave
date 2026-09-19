@@ -15,6 +15,7 @@ import (
 type RunOptions struct {
 	Tool              string
 	Backend           string
+	AutoUpdate        bool
 	HostConfig        string
 	SkillsValidation  string
 	HostConfigPaths   []string

@@ -114,6 +114,13 @@ sudo install -d /usr/local/bin
 sudo install enclave-darwin-arm64 /usr/local/bin/enclave
 ```
 
+After installation, `enclave self-update` replaces the executable with the
+current checksum-verified rolling binary. Enclave checks for a different rolling
+commit at most once every 24 hours and reports it on human-facing commands. To
+install updates automatically, add `"auto_update": true` to the global
+`config.json`; the updater never elevates privileges, so the executable's
+directory must be writable.
+
 The macOS binaries are unsigned and not notarized, so a binary downloaded
 through a browser carries a quarantine attribute that makes Gatekeeper refuse to
 run it; `install` propagates the attribute, so remove it first. Fetching the

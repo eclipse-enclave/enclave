@@ -68,6 +68,8 @@ func dispatchCommand(input *CommandInput) int {
 		return runExtensionList(input.Ctx)
 	case cli.ActionExtensionManage:
 		return runExtensionManage(input.Ctx, input.ExtRequest)
+	case "self-update":
+		return runSelfUpdate()
 	case "update":
 		return runUpdate(input)
 	case "devcontainer-generate":

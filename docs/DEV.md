@@ -378,6 +378,26 @@ the `.git` pointer comes from the repository. Tests that touch the rule clear
 the directories from the environment, clear `XDG_*` as well, while `mounts`
 tests pass them explicitly.
 
+Self-update note: `auto_update` is config-only and global-only: project and
+`tool_overrides` values are stripped with a warning in
+`internal/config/config.go`. The policy in `internal/app/self_update.go` reads
+`globalDefaults.AutoUpdate` directly; the resolved option exists for `enclave
+config`. The periodic check runs in `app.Run` after `--verbose` is applied,
+holds a non-blocking host lock (`config.HostSelfUpdateLockPath`) so concurrent
+invocations skip instead of racing, and prints only to stderr (`logx.Noticef`,
+`logx.DebugNoticef`, and `logx.Warnf`; never `Infof` or `Debugf`). `enclave
+self-update` dispatches right after the root guard and waits for the same lock.
+`selfupdate.Service.Supported` refuses anything but a `VERSION=rolling` build
+that runs on its embedded assets (`config.ExternalAppRoot` finds neither
+`ENCLAVE_HOME` nor a tree beside it), so working-copy builds (`make build`
+stamps `0.1.0`) never check or replace themselves. Tests swap the release
+through `newSelfUpdater` in `internal/app` and an `httptest` server in
+`internal/selfupdate`; to try a real update, build with `make build
+VERSION=rolling BIN_DIR=/tmp/enclave-rolling` (outside the checkout, so it finds
+no asset tree) and run that binary with `ENCLAVE_HOME` unset. A killed install
+can leave an `.enclave-update-*` file beside the binary; the next install
+removes those older than an hour.
+
 Config additive note: feature additive directives (`+`/`-`) are applied against
 the implicit default-enabled feature set when `features` is unset. For example,
 `["-node-dev"]` removes that default feature from the implicit set.

@@ -70,6 +70,11 @@ func Run(args []string) int {
 		}
 		return reportStartupError(parsed, "", err)
 	}
+	// Updating the binary needs neither the project nor its config, so a broken
+	// one cannot keep a fix from being installed.
+	if parsed.Action == "self-update" {
+		return runSelfUpdate()
+	}
 
 	projectDir, err := resolveProjectDir()
 	if err != nil {
@@ -83,7 +88,6 @@ func Run(args []string) int {
 	for _, warning := range configWarnings {
 		logx.Warnf(warning.Message)
 	}
-
 	var userCommandMount *model.UserCommandMount
 	if parsed.Action == "user-command" {
 		home, err := config.ResolveHostHome()
@@ -139,6 +143,7 @@ func Run(args []string) int {
 	if opts.Verbose {
 		logx.SetLevel("debug")
 	}
+	maybeAutomaticSelfUpdate(parsed, globalDefaults)
 
 	if parsed.Action == "cleanup" {
 		return runCleanup(parsed.Options.RunOptions, parsed.Options.CleanupOptions)

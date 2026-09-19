@@ -90,12 +90,31 @@ Ctrl-C or SIGTERM while a session is still starting aborts the start with exit c
 |---------|-------------|
 | `enclave info` | Show configuration and image details |
 | `enclave version`, `enclave --version` | Show the binary version, source commit, and commit date |
+| `enclave self-update` | Replace the host binary with the current GitHub rolling-release binary |
 | `enclave config` | Show configuration values |
 | `enclave tools` | List available tool profiles (`list\|add\|remove\|update` manage installed tool extensions; see below) |
 | `enclave features` | List available feature extensions (`list\|add\|remove\|update` manage installed feature extensions; see below) |
 | `enclave completion <shell>` | Generate shell completion |
 
 `enclave version` prints one line suitable for bug reports; `--json` emits the version, commit, and date as an object. Builds from modified source append `-dirty` to the commit; unavailable values are reported as `unknown`.
+
+`enclave self-update` downloads the `linux` or `darwin` binary matching the
+host architecture, verifies it against the rolling release's `checksums.txt`,
+and atomically replaces the running executable. The checksums come from the same
+release as the binary, so they detect corrupted or truncated downloads, not a
+compromised release. It never elevates privileges; the executable's directory
+must be writable. Only standalone rolling binaries (`enclave version` reports
+`rolling`) update themselves: package installs, source builds, and binaries
+that run against a runtime asset tree beside them or in `ENCLAVE_HOME` are
+refused and never checked, because replacing the binary alone would leave their
+assets behind. Upgrade those with
+the package manager or by rebuilding.
+
+Other human-facing invocations check the rolling release at most once every 24
+hours, recorded in `~/.local/state/enclave/self-update-check`, and notify on
+stderr, debug diagnostics included, when its commit differs. Set `"auto_update": true` in the global config
+to install it during that check. Checks are skipped for shell completion,
+structured output, and user commands; a failed check waits for the next interval.
 
 `enclave config` flags: `--view <mode>` selects the output view — `matrix` (default), `source` (where each value comes from), `diff` (values overridden by higher precedence), or `effective` (effective values only); `--json` emits a versioned JSON envelope (`schemaVersion: "1"`, typed values, structured warnings, and validation status; see [Inspecting Resolved Config](configuration.md#inspecting-resolved-config)).
 

@@ -8,6 +8,8 @@ LLM providers (OpenAI, Anthropic, Google).
 - **Command**: `opencode`
 - **YOLO flag**: *(none — runs in autonomous mode by default)*
 - **Config directory**: `~/.config/opencode`
+- **Data directory**: `~/.local/share/opencode` (persisted through the config store)
+- **State directory**: `~/.local/state/opencode` (persisted under the config store's `xdg-state/` directory)
 - **Settings file**: `~/.config/opencode/opencode.json`
 - **OAuth store**: `~/.local/share/opencode/auth.json` (symlinked to `~/.config/opencode/auth.json` in Enclave)
 
@@ -58,4 +60,4 @@ The default settings template disables sharing and OpenTelemetry.
 | `check-update.sh` | Returns the latest npm version for automatic update probes |
 | `gateway-allowlist.conf` | DNS allowlist for network isolation |
 | `templates/settings.json` | Default settings template |
-| `entrypoint.d/setup.sh` | Runtime setup (normalizes XDG data dir, links shared `auth.json`) |
+| `entrypoint.d/setup.sh` | Runtime setup (normalizes XDG data/state dirs, links shared `auth.json`) |

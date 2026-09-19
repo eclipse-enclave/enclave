@@ -8,6 +8,17 @@
   "yolo_enabled": true,
   "config_dir": ".config/opencode",
   "skills_dir": ".config/opencode/skills",
+  "state_paths": [
+    "storage/",
+    "plans/",
+    "snapshot/",
+    "worktree/",
+    "repos/",
+    "opencode*.db*",
+    "tool-output/",
+    "mcp-auth.json",
+    "xdg-state/"
+  ],
   "settings_file": "opencode-settings.json",
   "settings_target": ".config/opencode/opencode.json",
   "passthrough_paths": [

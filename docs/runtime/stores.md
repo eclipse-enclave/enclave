@@ -36,7 +36,9 @@ runtime state that must survive config-source overlays and stay out of host
 config passthrough. Codex pins the database indexing its memories there, along
 with its `state_*.sqlite*` and `thread_history_*.sqlite*` thread databases. The
 thread databases are rebuildable projections of the preserved `sessions/`
-rollouts, pinned to avoid re-deriving them on every overlaid run.
+rollouts, pinned to avoid re-deriving them on every overlaid run. OpenCode pins
+its session database and runtime data there; its separate XDG state directory is
+redirected into the config store as `xdg-state/` so TUI state also survives.
 
 **Ephemeral mode** (`--ephemeral`): A fresh store directory is created with a
 unique suffix key for each session and removed after the container exits. The

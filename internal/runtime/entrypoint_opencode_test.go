@@ -20,7 +20,7 @@ func TestEntrypointOpencodePersistsDataAndStateAndSeedsAuth(t *testing.T) {
 	configDir := filepath.Join(home, ".config", "opencode")
 	dataDir := filepath.Join(home, ".local", "share", "opencode")
 	stateDir := filepath.Join(home, ".local", "state", "opencode")
-	stateStoreDir := filepath.Join(configDir, "state")
+	stateStoreDir := filepath.Join(configDir, "xdg-state")
 	sharedAuthDir := filepath.Join(home, "shared-auth")
 
 	if err := os.MkdirAll(configDir, 0o755); err != nil {

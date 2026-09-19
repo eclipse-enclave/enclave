@@ -10,7 +10,7 @@
 config_dir="$HOME/.config/opencode"
 data_dir="$HOME/.local/share/opencode"
 state_dir="$HOME/.local/state/opencode"
-state_store_dir="$config_dir/state"
+state_store_dir="$config_dir/xdg-state"
 
 mkdir -p "$config_dir" "$state_store_dir" "$HOME/.local/share" "$HOME/.local/state"
 

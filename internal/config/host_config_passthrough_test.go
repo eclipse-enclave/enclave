@@ -108,8 +108,8 @@ func TestHostConfigPassthroughBlocksOpenCodeRuntimeState(t *testing.T) {
 	}
 	profile.PassthroughPaths = []string{
 		"opencode.json", "storage/", "plans/", "snapshot/", "worktree/", "repos/",
-		"tool-output/", "log/", "mcp-auth.json", "opencode.db", "opencode.db-wal",
-		"opencode-preview.db-shm", "state/",
+		"tool-output/", "mcp-auth.json", "opencode.db", "opencode.db-wal",
+		"opencode-preview.db-shm", "xdg-state/",
 	}
 	got := HostConfigPassthroughDefaults(profile)
 	if want := []string{"opencode.json"}; !reflect.DeepEqual(got, want) {

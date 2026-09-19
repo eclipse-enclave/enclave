@@ -14,11 +14,10 @@
     "snapshot/",
     "worktree/",
     "repos/",
-    "tool-output/",
-    "log/",
-    "mcp-auth.json",
     "opencode*.db*",
-    "state/"
+    "tool-output/",
+    "mcp-auth.json",
+    "xdg-state/"
   ],
   "settings_file": "opencode-settings.json",
   "settings_target": ".config/opencode/opencode.json",

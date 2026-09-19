@@ -16,16 +16,20 @@ sandbox:
   configDir: .config/opencode
   skillsDir: .config/opencode/skills
   statePaths:
+    # OpenCode's XDG data root is linked to the config-store root, so these
+    # config-relative paths are the top-level runtime data it writes there.
     - storage/
     - plans/
     - snapshot/
     - worktree/
     - repos/
-    - tool-output/
-    - log/
-    - mcp-auth.json
     - opencode*.db*
-    - state/
+    # Full truncated tool output remains addressable from session history.
+    - tool-output/
+    # MCP OAuth remains project-scoped with the rest of the tool data.
+    - mcp-auth.json
+    # The separate XDG state root is redirected here by setup.sh.
+    - xdg-state/
   settingsFile: opencode-settings.json
   settingsTarget: .config/opencode/opencode.json
   yoloEnabled: true

@@ -9,10 +9,30 @@
 # OpenCode extension setup
 config_dir="$HOME/.config/opencode"
 data_dir="$HOME/.local/share/opencode"
-state_dir="$HOME/.local/state/opencode"
+state_base="${XDG_STATE_HOME:-$HOME/.local/state}"
+state_dir="$state_base/opencode"
 state_store_dir="$config_dir/xdg-state"
 
-mkdir -p "$config_dir" "$state_store_dir" "$HOME/.local/share" "$HOME/.local/state"
+opencode_prepare_state_base() {
+    local probe
+
+    mkdir -p "$state_base" 2>/dev/null || return 1
+    probe=$(mktemp "$state_base/.enclave-opencode-state.XXXXXX" 2>/dev/null) || return 1
+    rm -f "$probe"
+}
+
+# A custom XDG_STATE_HOME may be supplied by a base image or devcontainer and
+# may not be writable by the runtime user. Fall back to the normal home-local
+# root so a bad optional override does not prevent the container from starting.
+if ! opencode_prepare_state_base; then
+    echo "Warning: XDG_STATE_HOME is not writable; using $HOME/.local/state"
+    state_base="$HOME/.local/state"
+    state_dir="$state_base/opencode"
+    export XDG_STATE_HOME="$state_base"
+    mkdir -p "$state_base"
+fi
+
+mkdir -p "$config_dir" "$state_store_dir" "$HOME/.local/share"
 
 # OpenCode creates its XDG data and state directories on every start, including
 # the `opencode --version` probe baked into the image build. Both therefore

@@ -9,7 +9,7 @@ LLM providers (OpenAI, Anthropic, Google).
 - **YOLO flag**: *(none — runs in autonomous mode by default)*
 - **Config directory**: `~/.config/opencode`
 - **Data directory**: `~/.local/share/opencode` (persisted through the config store)
-- **State directory**: `~/.local/state/opencode` (persisted under the config store's `xdg-state/` directory)
+- **State directory**: `$XDG_STATE_HOME/opencode` (or `~/.local/state/opencode` when unset; persisted under the config store's `xdg-state/` directory)
 - **Settings file**: `~/.config/opencode/opencode.json`
 - **OAuth store**: `~/.local/share/opencode/auth.json` (symlinked to `~/.config/opencode/auth.json` in Enclave)
 

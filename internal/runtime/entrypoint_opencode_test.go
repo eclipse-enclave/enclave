@@ -19,7 +19,8 @@ func TestEntrypointOpencodePersistsDataAndStateAndSeedsAuth(t *testing.T) {
 	home := t.TempDir()
 	configDir := filepath.Join(home, ".config", "opencode")
 	dataDir := filepath.Join(home, ".local", "share", "opencode")
-	stateDir := filepath.Join(home, ".local", "state", "opencode")
+	stateBase := filepath.Join(home, ".local", "state")
+	stateDir := filepath.Join(stateBase, "opencode")
 	stateStoreDir := filepath.Join(configDir, "xdg-state")
 	sharedAuthDir := filepath.Join(home, "shared-auth")
 
@@ -121,5 +122,87 @@ func TestEntrypointOpencodePersistsDataAndStateAndSeedsAuth(t *testing.T) {
 	}
 	if _, ok := gotAuth["github-copilot"]; !ok {
 		t.Fatalf("seeded auth missing github-copilot key, got %s", string(authBytes))
+	}
+}
+
+func TestEntrypointOpencodeUsesXDGStateHome(t *testing.T) {
+	home := t.TempDir()
+	configDir := filepath.Join(home, ".config", "opencode")
+	stateBase := filepath.Join(home, "custom-state")
+	stateDir := filepath.Join(stateBase, "opencode")
+	stateStoreDir := filepath.Join(configDir, "xdg-state")
+
+	for _, dir := range []string{configDir, stateDir} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+	}
+
+	scriptPath := filepath.Join("..", "..", "extensions", "tools", "opencode", "entrypoint.d", "setup.sh")
+	cmd := exec.Command("bash", scriptPath)
+	cmd.Env = []string{
+		"PATH=" + os.Getenv("PATH"),
+		"HOME=" + home,
+		"XDG_STATE_HOME=" + stateBase,
+	}
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("setup.sh failed: %v\noutput:\n%s", err, string(out))
+	}
+
+	info, err := os.Lstat(stateDir)
+	if err != nil {
+		t.Fatalf("stat state dir: %v", err)
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("%s is not a symlink", stateDir)
+	}
+	target, err := os.Readlink(stateDir)
+	if err != nil {
+		t.Fatalf("readlink state dir: %v", err)
+	}
+	if target != stateStoreDir {
+		t.Fatalf("state symlink target = %q, want %q", target, stateStoreDir)
+	}
+}
+
+func TestEntrypointOpencodeFallsBackFromUnwritableXDGStateHome(t *testing.T) {
+	home := t.TempDir()
+	configDir := filepath.Join(home, ".config", "opencode")
+	blockedStateBase := filepath.Join(home, "blocked-state")
+	defaultStateBase := filepath.Join(home, ".local", "state")
+	stateDir := filepath.Join(defaultStateBase, "opencode")
+	stateStoreDir := filepath.Join(configDir, "xdg-state")
+
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatalf("mkdir config: %v", err)
+	}
+	if err := os.WriteFile(blockedStateBase, []byte("not a directory"), 0o600); err != nil {
+		t.Fatalf("write blocked state path: %v", err)
+	}
+
+	scriptPath := filepath.Join("..", "..", "extensions", "tools", "opencode", "entrypoint.d", "setup.sh")
+	cmd := exec.Command("bash", scriptPath)
+	cmd.Env = []string{
+		"PATH=" + os.Getenv("PATH"),
+		"HOME=" + home,
+		"XDG_STATE_HOME=" + blockedStateBase,
+	}
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("setup.sh failed: %v\noutput:\n%s", err, string(out))
+	}
+
+	info, err := os.Lstat(stateDir)
+	if err != nil {
+		t.Fatalf("stat fallback state dir: %v", err)
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("%s is not a symlink", stateDir)
+	}
+	target, err := os.Readlink(stateDir)
+	if err != nil {
+		t.Fatalf("readlink fallback state dir: %v", err)
+	}
+	if target != stateStoreDir {
+		t.Fatalf("fallback state symlink target = %q, want %q", target, stateStoreDir)
 	}
 }

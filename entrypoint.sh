@@ -269,6 +269,150 @@ if [ -d "$HOME/.ssh" ]; then
     echo "SSH directory permissions configured"
 fi
 
+# Normalize paths before sourcing extension setup scripts. Tool setup scripts
+# may resolve XDG roots immediately, so they must see the rewritten home.
+normalize_devcontainer_paths() {
+    local remote_user="$ENCLAVE_DEVCONTAINER_REMOTE_USER"
+    if [ -z "$remote_user" ]; then
+        echo "Skipping devcontainer path normalization: remoteUser is not applied"
+        return
+    fi
+    local remote_home
+    if [ "$remote_user" = "root" ]; then
+        remote_home="/root"
+    else
+        remote_home="/home/$remote_user"
+    fi
+    local current_home="$HOME"
+    if [ -z "$current_home" ] || [ "$current_home" = "$remote_home" ]; then
+        local current_user=""
+        local passwd_home=""
+        current_user="$(id -un 2>/dev/null || true)"
+        if [ -n "$current_user" ]; then
+            passwd_home="$(getent passwd "$current_user" 2>/dev/null | cut -d: -f6 || true)"
+        fi
+        if [ -n "$passwd_home" ]; then
+            current_home="$passwd_home"
+        elif [ -n "$current_user" ] && [ -d "/home/$current_user" ]; then
+            current_home="/home/$current_user"
+        elif [ "$current_user" = "root" ]; then
+            current_home="/root"
+        fi
+        if [ -n "$current_home" ]; then
+            export HOME="$current_home"
+        fi
+    fi
+    if [ -z "$current_home" ] || [ "$current_home" = "$remote_home" ]; then
+        return
+    fi
+    local changed=0
+    local -a default_home_vars=(
+        NPM_CONFIG_PREFIX
+        PNPM_HOME
+        NVM_DIR
+        BUN_INSTALL
+        COREPACK_HOME
+        COREPACK_ROOT
+        VOLTA_HOME
+        FNM_DIR
+        PNPM_CONFIG_STORE_DIR
+        YARN_CACHE_FOLDER
+        XDG_CACHE_HOME
+        XDG_CONFIG_HOME
+        XDG_DATA_HOME
+        XDG_STATE_HOME
+        npm_config_prefix
+        npm_config_cache
+        npm_config_userconfig
+    )
+    local -a extra_rewrite_vars=()
+    local extra_raw="${ENCLAVE_DEVCONTAINER_REWRITE_VARS:-}"
+    local extra=""
+    local var=""
+    rewrite_home_var() {
+        local var="$1"
+        local val="${!var}"
+        if [ -n "$val" ] && [[ "$val" == "$remote_home" || "$val" == "$remote_home/"* ]]; then
+            export "$var"="${current_home}${val#"$remote_home"}"
+            changed=1
+        fi
+    }
+    rewrite_path_list_var() {
+        local var="$1"
+        local val="${!var}"
+        if [ -z "$val" ]; then
+            return
+        fi
+        # Split manually instead of IFS/read to preserve empty components
+        # (leading/trailing or repeated colons) in PATH-like variables.
+        local rest="$val"
+        local piece=""
+        local rebuilt=""
+        local first=1
+        local has_more=0
+        local replaced=0
+        while true; do
+            if [[ "$rest" == *:* ]]; then
+                piece="${rest%%:*}"
+                rest="${rest#*:}"
+                has_more=1
+            else
+                piece="$rest"
+                rest=""
+                has_more=0
+            fi
+            if [[ "$piece" == "$remote_home" || "$piece" == "$remote_home/"* ]]; then
+                piece="${current_home}${piece#"$remote_home"}"
+                replaced=1
+            fi
+            if [ "$first" = "1" ]; then
+                rebuilt="$piece"
+                first=0
+            else
+                rebuilt="${rebuilt}:$piece"
+            fi
+            if [ "$has_more" != "1" ]; then
+                break
+            fi
+        done
+        if [ "$replaced" = "1" ] && [ "$rebuilt" != "$val" ]; then
+            export "$var"="$rebuilt"
+            changed=1
+        fi
+    }
+    if [ -n "$extra_raw" ]; then
+        read -r -a extra_rewrite_vars <<< "${extra_raw//,/ }"
+    fi
+    for var in "${default_home_vars[@]}"; do
+        rewrite_home_var "$var"
+    done
+    for extra in "${extra_rewrite_vars[@]}"; do
+        if [[ "$extra" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
+            rewrite_home_var "$extra"
+        fi
+    done
+    # PATH-like variables are component-delimited; only rewrite exact home path
+    # components to avoid substring collisions.
+    for var in PATH NODE_PATH; do
+        rewrite_path_list_var "$var"
+    done
+    # Intentionally double-pass extra vars:
+    # - rewrite_home_var handles scalar paths
+    # - rewrite_path_list_var handles colon-delimited path lists
+    for extra in "${extra_rewrite_vars[@]}"; do
+        if [[ "$extra" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
+            rewrite_path_list_var "$extra"
+        fi
+    done
+    if [ "$changed" = "1" ]; then
+        echo "Normalized devcontainer paths from $remote_home to $current_home"
+    fi
+}
+
+if [ "${ENCLAVE_DEVCONTAINER:-}" = "1" ]; then
+    normalize_devcontainer_paths
+fi
+
 # Source extension setup scripts for the current tool
 enclave_tools_dir="${ENCLAVE_TOOLS_DIR:-/opt/enclave/extensions/tools}"
 enclave_features_dir="${ENCLAVE_FEATURES_DIR:-/opt/enclave/extensions/features}"
@@ -373,143 +517,6 @@ fi
 # host are not available, so signed commits would always fail.
 git config --global commit.gpgsign false
 git config --global tag.gpgsign false
-
-normalize_devcontainer_paths() {
-    local remote_user="$ENCLAVE_DEVCONTAINER_REMOTE_USER"
-    if [ -z "$remote_user" ]; then
-        echo "Skipping devcontainer path normalization: remoteUser is not applied"
-        return
-    fi
-    local remote_home
-    if [ "$remote_user" = "root" ]; then
-        remote_home="/root"
-    else
-        remote_home="/home/$remote_user"
-    fi
-    local current_home="$HOME"
-    if [ -z "$current_home" ] || [ "$current_home" = "$remote_home" ]; then
-        local current_user=""
-        local passwd_home=""
-        current_user="$(id -un 2>/dev/null || true)"
-        if [ -n "$current_user" ]; then
-            passwd_home="$(getent passwd "$current_user" 2>/dev/null | cut -d: -f6 || true)"
-        fi
-        if [ -n "$passwd_home" ]; then
-            current_home="$passwd_home"
-        elif [ -n "$current_user" ] && [ -d "/home/$current_user" ]; then
-            current_home="/home/$current_user"
-        elif [ "$current_user" = "root" ]; then
-            current_home="/root"
-        fi
-        if [ -n "$current_home" ]; then
-            export HOME="$current_home"
-        fi
-    fi
-    if [ -z "$current_home" ] || [ "$current_home" = "$remote_home" ]; then
-        return
-    fi
-    local changed=0
-    local -a default_home_vars=(
-        NPM_CONFIG_PREFIX
-        PNPM_HOME
-        NVM_DIR
-        BUN_INSTALL
-        COREPACK_HOME
-        COREPACK_ROOT
-        VOLTA_HOME
-        FNM_DIR
-        PNPM_CONFIG_STORE_DIR
-        YARN_CACHE_FOLDER
-        XDG_CACHE_HOME
-        XDG_CONFIG_HOME
-        XDG_DATA_HOME
-        npm_config_prefix
-        npm_config_cache
-        npm_config_userconfig
-    )
-    local -a extra_rewrite_vars=()
-    local extra_raw="${ENCLAVE_DEVCONTAINER_REWRITE_VARS:-}"
-    local extra=""
-    local var=""
-    rewrite_home_var() {
-        local var="$1"
-        local val="${!var}"
-        if [ -n "$val" ] && [[ "$val" == "$remote_home" || "$val" == "$remote_home/"* ]]; then
-            export "$var"="${current_home}${val#"$remote_home"}"
-            changed=1
-        fi
-    }
-    rewrite_path_list_var() {
-        local var="$1"
-        local val="${!var}"
-        if [ -z "$val" ]; then
-            return
-        fi
-        # Split manually instead of IFS/read to preserve empty components
-        # (leading/trailing or repeated colons) in PATH-like variables.
-        local rest="$val"
-        local piece=""
-        local rebuilt=""
-        local first=1
-        local has_more=0
-        local replaced=0
-        while true; do
-            if [[ "$rest" == *:* ]]; then
-                piece="${rest%%:*}"
-                rest="${rest#*:}"
-                has_more=1
-            else
-                piece="$rest"
-                rest=""
-                has_more=0
-            fi
-            if [[ "$piece" == "$remote_home" || "$piece" == "$remote_home/"* ]]; then
-                piece="${current_home}${piece#"$remote_home"}"
-                replaced=1
-            fi
-            if [ "$first" = "1" ]; then
-                rebuilt="$piece"
-                first=0
-            else
-                rebuilt="${rebuilt}:$piece"
-            fi
-            if [ "$has_more" != "1" ]; then
-                break
-            fi
-        done
-        if [ "$replaced" = "1" ] && [ "$rebuilt" != "$val" ]; then
-            export "$var"="$rebuilt"
-            changed=1
-        fi
-    }
-    if [ -n "$extra_raw" ]; then
-        read -r -a extra_rewrite_vars <<< "${extra_raw//,/ }"
-    fi
-    for var in "${default_home_vars[@]}"; do
-        rewrite_home_var "$var"
-    done
-    for extra in "${extra_rewrite_vars[@]}"; do
-        if [[ "$extra" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
-            rewrite_home_var "$extra"
-        fi
-    done
-    # PATH-like variables are component-delimited; only rewrite exact home path
-    # components to avoid substring collisions.
-    for var in PATH NODE_PATH; do
-        rewrite_path_list_var "$var"
-    done
-    # Intentionally double-pass extra vars:
-    # - rewrite_home_var handles scalar paths
-    # - rewrite_path_list_var handles colon-delimited path lists
-    for extra in "${extra_rewrite_vars[@]}"; do
-        if [[ "$extra" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
-            rewrite_path_list_var "$extra"
-        fi
-    done
-    if [ "$changed" = "1" ]; then
-        echo "Normalized devcontainer paths from $remote_home to $current_home"
-    fi
-}
 
 # Rewrites a config file in place with store-dir set to $2, preserving any other
 # entries. In place because ~/.npmrc is a bind-mounted file, where replacing the
@@ -643,10 +650,6 @@ run_devcontainer_command() {
         touch "$stamp_file"
     fi
 }
-
-if [ "${ENCLAVE_DEVCONTAINER:-}" = "1" ]; then
-    normalize_devcontainer_paths
-fi
 
 configure_pnpm_store
 

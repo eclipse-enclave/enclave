@@ -39,6 +39,7 @@
     "tui.json",
     "tui.jsonc"
   ],
+  "qemu_store_cache_mmap": true,
   "providers": [
     {
       "name": "openai",

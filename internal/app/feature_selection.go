@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strings"
 
+	"enclave/internal/config"
 	"enclave/internal/model"
 )
 
@@ -55,7 +56,7 @@ func expandFeatureDirectives(normalized []string, allFeatures []model.Extension)
 	// instead: a literal name or a "default"/"all" selector states which
 	// features the selection starts from, so a configured list amended by
 	// higher-precedence directives must not pull the defaults back in.
-	if !hasBareFeatureEntry(normalized) {
+	if !config.HasBareSelectionEntry(normalized) {
 		for _, f := range allFeatures {
 			if f.DefaultEnabled {
 				selected[f.Name] = struct{}{}
@@ -136,21 +137,6 @@ func hasFeatureSelectors(values []string) bool {
 	for _, raw := range values {
 		switch strings.ToLower(strings.TrimSpace(raw)) {
 		case model.SelectionDefault, model.FeatureSelectionAll:
-			return true
-		}
-	}
-	return false
-}
-
-// hasBareFeatureEntry reports whether any entry is a literal feature name or a
-// selector keyword rather than a '+'/'-' directive.
-func hasBareFeatureEntry(values []string) bool {
-	for _, raw := range values {
-		value := strings.TrimSpace(raw)
-		if value == "" {
-			continue
-		}
-		if !strings.HasPrefix(value, "+") && !strings.HasPrefix(value, "-") {
 			return true
 		}
 	}

@@ -170,11 +170,14 @@ func TestMergeFeatureSlice(t *testing.T) {
 		want     []string
 	}{
 		{name: "nil base keeps directives", base: nil, override: []string{"+devtools"}, want: []string{"+devtools"}},
+		{name: "nil override keeps base", base: []string{"node-dev"}, override: nil, want: []string{"node-dev"}},
 		{name: "bare override replaces", base: []string{"+devtools"}, override: []string{"node-dev"}, want: []string{"node-dev"}},
 		{name: "selector override replaces", base: []string{"+devtools"}, override: []string{"all"}, want: []string{"all"}},
 		{name: "explicit empty override replaces", base: []string{"+devtools"}, override: []string{}, want: []string{}},
 		{name: "additive override amends", base: []string{"node-dev"}, override: []string{"+devtools"}, want: []string{"node-dev", "+devtools"}},
 		{name: "override wins conflict", base: []string{"-devtools", "+shell-extras"}, override: []string{"+devtools"}, want: []string{"+shell-extras", "+devtools"}},
+		{name: "conflicting bare base entry stays as anchor", base: []string{"node-dev"}, override: []string{"-node-dev"}, want: []string{"node-dev", "-node-dev"}},
+		{name: "re-added bare base entry stays as anchor", base: []string{"node-dev"}, override: []string{"+node-dev"}, want: []string{"node-dev", "+node-dev"}},
 		{name: "additive on explicit empty resolves", base: []string{}, override: []string{"+devtools", "-node-dev"}, want: []string{"devtools"}},
 	}
 

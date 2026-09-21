@@ -186,6 +186,25 @@ func TestFeatureSelectionFromCLIAndConfigLayers(t *testing.T) {
 			want:   []string{"node-dev", "playwright"},
 		},
 		{
+			name:   "flag removing the only configured literal leaves nothing",
+			args:   []string{"--features", "-node-dev"},
+			global: config.Defaults{Features: []string{"node-dev"}},
+			want:   []string{},
+		},
+		{
+			name:   "flag re-adding a configured literal keeps the list anchored",
+			args:   []string{"--features", "+node-dev"},
+			global: config.Defaults{Features: []string{"node-dev"}},
+			want:   []string{"node-dev"},
+		},
+		{
+			name:    "project removing the only global literal leaves nothing",
+			args:    nil,
+			global:  config.Defaults{Features: []string{"node-dev"}},
+			project: config.Defaults{Features: []string{"-node-dev"}},
+			want:    []string{},
+		},
+		{
 			name:   "additive flag on top of configured none adds only itself",
 			args:   []string{"--features", "+playwright"},
 			global: config.Defaults{Features: []string{}},

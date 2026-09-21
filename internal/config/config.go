@@ -142,7 +142,7 @@ func ResolveOptionsForTool(cliOpts model.Options, cliSources model.OptionSources
 	// config layers merge, and re-apply them last. A bare CLI list (including
 	// "none") keeps replacing the inherited selection outright.
 	var cliFeatures []string
-	deferCLIFeatures := sources.Features == model.SourceCLI && additiveFeatureDirectivesOnly(opts.Features)
+	deferCLIFeatures := sources.Features == model.SourceCLI && AdditiveDirectivesOnly(opts.Features)
 	if deferCLIFeatures {
 		cliFeatures = copyStringSlice(opts.Features)
 		opts.Features = nil
@@ -760,48 +760,71 @@ func mergeToolOverrides(base map[string]Defaults, override map[string]Defaults) 
 	return merged
 }
 
+// isSelectionDirective reports whether a selection entry carries the '+'/'-'
+// prefix that amends an inherited selection instead of anchoring a new one.
+func isSelectionDirective(value string) bool {
+	trimmed := strings.TrimSpace(value)
+	return strings.HasPrefix(trimmed, "+") || strings.HasPrefix(trimmed, "-")
+}
+
 // featureDirectiveName returns the feature a selection entry refers to, with
 // any '+' or '-' prefix stripped. Selector keywords ("default", "all") come
 // back unchanged.
 func featureDirectiveName(value string) string {
 	name := strings.TrimSpace(value)
-	if strings.HasPrefix(name, "+") || strings.HasPrefix(name, "-") {
+	if isSelectionDirective(name) {
 		name = strings.TrimSpace(name[1:])
 	}
 	return name
 }
 
-// additiveFeatureDirectivesOnly reports whether a non-empty selection consists
-// solely of '+'/'-' directives. Such a selection amends the inherited one; a
-// bare entry (a literal feature name or a "default"/"all" selector) replaces it.
-func additiveFeatureDirectivesOnly(values []string) bool {
-	additive := false
+// HasBareSelectionEntry reports whether a selection carries an entry that is a
+// literal name or a keyword selector rather than a '+'/'-' directive. Such an
+// entry anchors the selection: it states what the set starts from instead of
+// amending whatever was inherited.
+func HasBareSelectionEntry(values []string) bool {
 	for _, raw := range values {
-		value := strings.TrimSpace(raw)
-		if value == "" {
-			continue
+		if strings.TrimSpace(raw) != "" && !isSelectionDirective(raw) {
+			return true
 		}
-		if !strings.HasPrefix(value, "+") && !strings.HasPrefix(value, "-") {
-			return false
-		}
-		additive = true
 	}
-	return additive
+	return false
+}
+
+// AdditiveDirectivesOnly reports whether a non-empty selection consists solely
+// of '+'/'-' directives. Such a selection amends the inherited one; a bare
+// entry replaces it.
+func AdditiveDirectivesOnly(values []string) bool {
+	if HasBareSelectionEntry(values) {
+		return false
+	}
+	for _, raw := range values {
+		if strings.TrimSpace(raw) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // mergeFeatureSlice layers a feature selection on top of the inherited one.
 //
 // Rules:
+//   - a nil override leaves the inherited selection untouched
 //   - an override carrying any bare entry replaces the inherited selection
-//   - an additive-only override amends it, and a directive for a feature the
-//     inherited selection already mentions drops that entry so the
-//     higher-precedence layer wins the conflict
+//   - an additive-only override amends it, and a directive for a feature an
+//     inherited directive already mentions drops that inherited directive so
+//     the higher-precedence layer wins the conflict. Inherited bare entries
+//     stay: they anchor the list, and downstream expansion applies removals
+//     after additions, so the override still wins.
 //   - an additive override on top of an explicit empty selection ("none")
 //     resolves to the added names, since there is nothing to amend
 //   - when nothing is inherited the directives are preserved so downstream
 //     resolution can apply them against the implicit default-enabled set
 func mergeFeatureSlice(base, override []string) []string {
-	if !additiveFeatureDirectivesOnly(override) {
+	if override == nil {
+		return copyStringSlice(base)
+	}
+	if !AdditiveDirectivesOnly(override) {
 		return copyStringSlice(override)
 	}
 	if base == nil {
@@ -829,8 +852,10 @@ func mergeFeatureSlice(base, override []string) []string {
 
 	merged := make([]string, 0, len(base)+len(override))
 	for _, raw := range base {
-		if _, ok := overridden[featureDirectiveName(raw)]; ok {
-			continue
+		if isSelectionDirective(raw) {
+			if _, ok := overridden[featureDirectiveName(raw)]; ok {
+				continue
+			}
 		}
 		merged = append(merged, raw)
 	}
@@ -854,18 +879,7 @@ func mergeHostConfigSlice(base, override []string) []string {
 		return []string{}
 	}
 
-	additiveOnly := true
-	for _, raw := range override {
-		value := strings.TrimSpace(raw)
-		if value == "" {
-			continue
-		}
-		if !strings.HasPrefix(value, "+") && !strings.HasPrefix(value, "-") {
-			additiveOnly = false
-			break
-		}
-	}
-	if !additiveOnly {
+	if !AdditiveDirectivesOnly(override) {
 		return copyStringSlice(override)
 	}
 

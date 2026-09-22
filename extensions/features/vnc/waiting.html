@@ -1,0 +1,66 @@
+<!--
+  Copyright (C) 2026 EclipseSource GmbH and others.
+
+  This program and the accompanying materials are made available under the
+  terms of the MIT License, which is available in the project root.
+
+  SPDX-License-Identifier: MIT
+-->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Enclave contained display</title>
+<style>
+  html, body {
+    height: 100%;
+  }
+  body {
+    margin: 0;
+    background: #1b1e24;
+    color: #d6d9de;
+    font: 16px/1.5 system-ui, sans-serif;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  main {
+    max-width: 34em;
+    padding: 2em;
+    text-align: center;
+  }
+  h1 {
+    font-size: 1.15em;
+    font-weight: 600;
+    margin: 0 0 0.6em;
+  }
+  p {
+    color: #9aa0aa;
+    margin: 0;
+  }
+  /* The pulse is the only liveness cue a VNC viewer gets: a fully static frame
+     is pixel-identical to a frozen display or a crashed browser mid-restart.
+     Kept slow and tiny so the RFB updates it forces stay negligible. */
+  .dot {
+    display: inline-block;
+    width: 0.5em;
+    height: 0.5em;
+    margin-right: 0.6em;
+    border-radius: 50%;
+    background: #6f9ad6;
+    animation: pulse 2s ease-in-out infinite alternate;
+  }
+  @keyframes pulse {
+    from { opacity: 1; }
+    to { opacity: 0.2; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <h1><span class="dot"></span>Nothing open yet</h1>
+  <p>This is your enclave session&rsquo;s contained display. Pages the session
+  serves or opens appear here.</p>
+</main>
+</body>
+</html>

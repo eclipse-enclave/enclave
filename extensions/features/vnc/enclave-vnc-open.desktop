@@ -1,0 +1,18 @@
+# Copyright (C) 2026 EclipseSource GmbH and others.
+#
+# This program and the accompanying materials are made available under the
+# terms of the MIT License, which is available in the project root.
+#
+# SPDX-License-Identifier: MIT
+#
+# Default x-scheme-handler for http/https inside the session image, routing
+# xdg-open flows into vnc-open (whose header explains why this registration
+# must beat the apt-installed chromium.desktop). Wired up via
+# /etc/xdg/mimeapps.list in install.sh.
+[Desktop Entry]
+Type=Application
+Name=Enclave VNC display
+NoDisplay=true
+Terminal=false
+Exec=/usr/local/bin/vnc-open %U
+MimeType=x-scheme-handler/http;x-scheme-handler/https;

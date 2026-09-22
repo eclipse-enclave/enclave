@@ -100,4 +100,5 @@ var optionInitialisms = map[string]string{
 	"mcp": "MCP",
 	"ssh": "SSH",
 	"uid": "UID",
+	"vnc": "VNC",
 }

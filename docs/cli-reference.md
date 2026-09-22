@@ -29,7 +29,7 @@ unchanged. See [windows.md](windows.md).
 | `enclave shell --admin` | Shell with limited sudo |
 | `enclave stop [name]` | Stop background containers, or one session by name |
 
-`enclave ps` prints one row per container with its `NAME` (container name) and `SESSION` (the `--name` session name, or the auto-assigned `1`, `2`, … for extra sessions; `-` for the project's default container); either can be passed to `attach`, `stop`, and `theia`. Flags: `--all` (include stopped containers, not just running ones), `--json` (emit a JSON array instead of the table). The flags compose (`ps --all --json`). Each JSON object has the fields `name`, `tool`, `projectDir` (absolute, resolved project path), `projectHash`, `worktree`, `status`, `createdAt` (RFC 3339, empty if unknown), `sessionName`, `background`, and `ports` (array of `{containerPort, hostPort, hostIP, protocol}` bindings).
+`enclave ps` prints one row per container with its `NAME` (container name) and `SESSION` (the `--name` session name, or the auto-assigned `1`, `2`, … for extra sessions; `-` for the project's default container); either can be passed to `attach`, `stop`, `theia`, and `vnc-viewer`. Flags: `--all` (include stopped containers, not just running ones), `--json` (emit a JSON array instead of the table). The flags compose (`ps --all --json`). Each JSON object has the fields `name`, `tool`, `projectDir` (absolute, resolved project path), `projectHash`, `worktree`, `status`, `createdAt` (RFC 3339, empty if unknown), `sessionName`, `background`, and `ports` (array of `{containerPort, hostPort, hostIP, protocol}` bindings).
 
 `status` reports sessions of the current project (like `exec`); `--all` widens it to every project. Flags: `--tool` and `--name` filter sessions; `--json` emits one machine-readable snapshot object per session (screen text and OSC title for external state detection). Each snapshot captures the trailing 24 screen rows. See [Session status snapshots](session-status.md).
 
@@ -118,6 +118,28 @@ corresponding tool profile instead (`enclave --tool theia`); see
 `enclave --tool theia` starts the container in the background and opens the IDE
 in one step, printing the container name so you can reattach later with
 `enclave theia <container>`.
+
+### VNC
+
+| Command | Description |
+|---------|-------------|
+| `enclave vnc-viewer [name]` | Open a VNC viewer on a session's contained display |
+
+Requires a session started with the [vnc feature](../extensions/features/vnc/README.md)
+(`enclave --features +vnc`). The command resolves the published RFB port and
+the per-session password itself, so nothing has to be copied by hand. The
+argument is a container name from `enclave ps`, a container ID, or the session
+name passed to `--name`, resolved as it is for `attach`, `stop`, and `theia`;
+`--tool` disambiguates a session name used by more than one tool. Omitted, it
+selects the current project's single VNC-enabled container, so a session
+running without the feature is never the implied target. The viewer runs in the
+foreground, so its errors reach the terminal and Ctrl-C closes it. Background it
+with `&` to keep the shell.
+
+The viewer defaults to `xtigervncviewer` on Linux (Debian/Ubuntu:
+`apt install tigervnc-viewer`) and to macOS's built-in Screen Sharing via
+`open`. Configure a different one with the `vnc_viewer` config key. See
+[VNC viewer](configuration.md#vnc-viewer).
 
 ### Network
 

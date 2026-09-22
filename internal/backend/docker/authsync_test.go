@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 
 	"enclave/internal/backend"
@@ -22,6 +23,39 @@ import (
 )
 
 const claudeCredentialsFile = ".credentials.json"
+
+func TestNewSnapshotsAuthReconcileScript(t *testing.T) {
+	root := t.TempDir()
+	home := filepath.Join(root, "home")
+	if err := os.MkdirAll(home, 0o700); err != nil {
+		t.Fatalf("create home: %v", err)
+	}
+	scriptPath := filepath.Join(root, "assets", "runtime-assets", "auth-reconcile.sh")
+	if err := os.MkdirAll(filepath.Dir(scriptPath), 0o700); err != nil {
+		t.Fatalf("create asset directory: %v", err)
+	}
+	const script = "enclave_sync_shared_auth() { :; }\n"
+	if err := os.WriteFile(scriptPath, []byte(script), 0o600); err != nil {
+		t.Fatalf("write reconcile script: %v", err)
+	}
+
+	b := New(Options{Host: model.Host{Home: home}, ReconcileScriptPath: scriptPath})
+	if err := os.RemoveAll(filepath.Join(root, "assets")); err != nil {
+		t.Fatalf("remove asset cache: %v", err)
+	}
+	if b.reconcileScriptErr != nil {
+		t.Fatalf("snapshot reconcile script: %v", b.reconcileScriptErr)
+	}
+	if b.reconcileScript != script {
+		t.Fatalf("reconcile script = %q, want %q", b.reconcileScript, script)
+	}
+
+	installFakeDocker(t)
+	configDir, authDir := authSyncTempDirs(t)
+	if err := b.syncSharedAuthStores(context.Background(), "enclave-test:latest", "codex", []string{"auth.json"}, configDir, authDir); err != nil {
+		t.Fatalf("sync after deleting asset cache: %v", err)
+	}
+}
 
 func TestMountedSourceDirResolvesBindMountSource(t *testing.T) {
 	info := dockercmd.InspectResponse{
@@ -314,7 +348,11 @@ func runSharedAuthSyncCommand(t *testing.T, tool string, authFiles []string, con
 func runSharedAuthSyncCommandOutput(t *testing.T, tool string, authFiles []string, configDir string, authDir string) string {
 	t.Helper()
 	scriptPath := filepath.Join("..", "..", "..", "runtime-assets", "auth-reconcile.sh")
-	cmdText := sharedAuthSyncCommand(scriptPath, tool, authFiles, "", configDir, authDir)
+	script, err := os.ReadFile(scriptPath)
+	if err != nil {
+		t.Fatalf("read reconcile script: %v", err)
+	}
+	cmdText := sharedAuthSyncCommand(string(script), tool, authFiles, "", configDir, authDir)
 	cmd := exec.Command("sh", "-c", cmdText)
 	cmd.Env = append(os.Environ(), "PATH="+fakeJQDir(t)+string(os.PathListSeparator)+os.Getenv("PATH"))
 	out, err := cmd.CombinedOutput()
@@ -382,7 +420,7 @@ func assertFileContent(t *testing.T, path string, want string) {
 }
 
 func TestSharedAuthSyncHostConfigRelabelsForSELinux(t *testing.T) {
-	hostConfig := sharedAuthSyncHostConfig("/host/config", "/host/auth", "/host/reconcile.sh", true)
+	hostConfig := sharedAuthSyncHostConfig("/host/config", "/host/auth", true)
 
 	if len(hostConfig.Mounts) != 0 {
 		t.Fatalf("Mounts = %v, want none (binds should carry the relabel flag)", hostConfig.Mounts)
@@ -390,7 +428,6 @@ func TestSharedAuthSyncHostConfigRelabelsForSELinux(t *testing.T) {
 	want := []string{
 		"/host/config:/config:ro,z",
 		"/host/auth:/auth:z",
-		"/host/reconcile.sh:/auth-reconcile.sh:ro,z",
 	}
 	if len(hostConfig.Binds) != len(want) {
 		t.Fatalf("Binds = %v, want %v", hostConfig.Binds, want)
@@ -406,17 +443,34 @@ func TestSharedAuthSyncHostConfigRelabelsForSELinux(t *testing.T) {
 }
 
 func TestSharedAuthSyncHostConfigWithoutSELinux(t *testing.T) {
-	hostConfig := sharedAuthSyncHostConfig("/host/config", "/host/auth", "/host/reconcile.sh", false)
+	hostConfig := sharedAuthSyncHostConfig("/host/config", "/host/auth", false)
 
 	if len(hostConfig.Binds) != 0 {
 		t.Fatalf("Binds = %v, want none without SELinux", hostConfig.Binds)
 	}
-	if len(hostConfig.Mounts) != 3 {
-		t.Fatalf("Mounts = %v, want 3 bind mounts", hostConfig.Mounts)
+	if len(hostConfig.Mounts) != 2 {
+		t.Fatalf("Mounts = %v, want the config and auth store binds only", hostConfig.Mounts)
 	}
-	script := hostConfig.Mounts[2]
-	if script.Type != dockercmd.MountTypeBind || script.Source != "/host/reconcile.sh" ||
-		script.Target != "/auth-reconcile.sh" || !script.ReadOnly {
-		t.Errorf("script mount = %+v, want read-only bind /host/reconcile.sh -> /auth-reconcile.sh", script)
+	// Regression: the reconcile helper must not bind-mount the script from the
+	// extracted asset cache; a deleted cache root would break reconciliation.
+	for _, m := range hostConfig.Mounts {
+		if m.Target == "/auth-reconcile.sh" {
+			t.Errorf("unexpected reconcile script mount: %+v", m)
+		}
+	}
+}
+
+func TestSharedAuthSyncCommandInlinesScript(t *testing.T) {
+	script := "enclave_sync_shared_auth() { :; }\n"
+	cmdText := sharedAuthSyncCommand(script, "claude", []string{".credentials.json"}, "1000:1000", "/config", "/auth")
+
+	if !strings.Contains(cmdText, script) {
+		t.Errorf("command does not inline the script content:\n%s", cmdText)
+	}
+	if strings.Contains(cmdText, "/auth-reconcile.sh") {
+		t.Errorf("command still references the script mount path:\n%s", cmdText)
+	}
+	if !strings.Contains(cmdText, "enclave_sync_shared_auth 'claude' '/config' '/auth' '1000:1000' '0' '.credentials.json'") {
+		t.Errorf("command does not invoke the sync helper with expected args:\n%s", cmdText)
 	}
 }

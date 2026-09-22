@@ -1168,7 +1168,9 @@ func (r *Runtime) addImageInboxMount(mounts *mountAccumulator) {
 		logx.Warnf("Failed to create image inbox directory %s: %v", inboxDir, err)
 		return
 	}
-	mounts.AddMount(bindMount(inboxDir, model.ContainerImageInboxDir, true))
+	// The inbox lives under the disposable cache root; an empty recreated inbox
+	// must not block a session start.
+	mounts.AddMount(disposableDirMount(inboxDir, model.ContainerImageInboxDir, true))
 	mounts.AddEnv(model.EnvImageInbox, model.ContainerImageInboxDir)
 	logx.Infof("Host image inbox mounted read-only at %s", model.ContainerImageInboxDir)
 }
@@ -1200,6 +1202,42 @@ func (r *Runtime) addSessionMonitorEnv(mounts *mountAccumulator) {
 	mounts.AddEnv(model.EnvSessionMonitorUser, r.containerUser)
 }
 
+// packageCache maps a package-cache directory under the per-project cache root
+// to its mount point inside the container.
+type packageCache struct {
+	cacheName     string // directory name under the project cache root
+	containerPath string // full path in container
+}
+
+// packageCacheDirs lists the package caches mounted for a session.
+func packageCacheDirs(containerHome string) []packageCache {
+	return []packageCache{
+		{"npm", containerHome + "/.npm"},
+		{"pip", containerHome + "/.cache/pip"},
+		// Go caches
+		{"go", containerHome + "/go/pkg/mod"},
+		{"go-build", containerHome + "/.cache/go-build"},
+		// Rust/Cargo cache
+		{"cargo", containerHome + "/.cargo"},
+		// pnpm store
+		{"pnpm", containerHome + "/.local/share/pnpm"},
+		// uv (Python) cache
+		{"uv", containerHome + "/.cache/uv"},
+		// Yarn cache
+		{"yarn", containerHome + "/.cache/yarn"},
+		// Bun cache
+		{"bun", containerHome + "/.bun"},
+		// nvm installed Node.js versions
+		{"nvm", containerHome + "/.nvm/versions"},
+	}
+}
+
+// addCacheMounts mounts the per-project package caches. The sources live under
+// the platform cache root, so they may vanish at any time; each is created
+// host-side before use and mounted as a disposable directory the backend may
+// recreate, keeping cache deletion a performance cost rather than a failure.
+// A cache that cannot be created is skipped for the same reason: losing cache
+// data must never block a session start.
 func (r *Runtime) addCacheMounts(mounts *mountAccumulator) {
 	pnpmStoreDir := r.containerHome + "/.local/share/pnpm/store"
 	mounts.AddEnv("PNPM_CONFIG_STORE_DIR", pnpmStoreDir)
@@ -1208,34 +1246,14 @@ func (r *Runtime) addCacheMounts(mounts *mountAccumulator) {
 		return
 	}
 	cacheDir := config.HostCacheToolProjectDir(r.host.Home, r.profile.Name, r.project.Hash)
-
-	// Create all cache directories
-	cacheDirs := []string{
-		"npm", "pip",
-		"go", "go-build", "cargo", "pnpm", "uv", "yarn", "bun",
-		"nvm",
+	for _, entry := range packageCacheDirs(r.containerHome) {
+		source := filepath.Join(cacheDir, entry.cacheName)
+		if err := os.MkdirAll(source, 0o700); err != nil {
+			logx.Warnf("Failed to create package cache directory %s: %v", source, err)
+			continue
+		}
+		mounts.AddMount(disposableDirMount(source, entry.containerPath, false))
 	}
-	for _, dir := range cacheDirs {
-		_ = os.MkdirAll(filepath.Join(cacheDir, dir), 0o700)
-	}
-
-	mounts.AddMount(bindMount(filepath.Join(cacheDir, "npm"), r.containerHome+"/.npm", false))
-	mounts.AddMount(bindMount(filepath.Join(cacheDir, "pip"), r.containerHome+"/.cache/pip", false))
-	// Go caches
-	mounts.AddMount(bindMount(filepath.Join(cacheDir, "go"), r.containerHome+"/go/pkg/mod", false))
-	mounts.AddMount(bindMount(filepath.Join(cacheDir, "go-build"), r.containerHome+"/.cache/go-build", false))
-	// Rust/Cargo cache
-	mounts.AddMount(bindMount(filepath.Join(cacheDir, "cargo"), r.containerHome+"/.cargo", false))
-	// pnpm store
-	mounts.AddMount(bindMount(filepath.Join(cacheDir, "pnpm"), r.containerHome+"/.local/share/pnpm", false))
-	// uv (Python) cache
-	mounts.AddMount(bindMount(filepath.Join(cacheDir, "uv"), r.containerHome+"/.cache/uv", false))
-	// Yarn cache
-	mounts.AddMount(bindMount(filepath.Join(cacheDir, "yarn"), r.containerHome+"/.cache/yarn", false))
-	// Bun cache
-	mounts.AddMount(bindMount(filepath.Join(cacheDir, "bun"), r.containerHome+"/.bun", false))
-	// nvm installed Node.js versions
-	mounts.AddMount(bindMount(filepath.Join(cacheDir, "nvm"), r.containerHome+"/.nvm/versions", false))
 }
 
 func (r *Runtime) addHistoryMounts(mounts *mountAccumulator) {

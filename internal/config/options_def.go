@@ -712,7 +712,7 @@ func OptionDefs() []OptionDef {
 			CLIFlags: []CLIFlagDef{
 				{
 					Name:                "--features",
-					Usage:               "Enable features (comma-separated), or use default|all|none. In devcontainer mode, features default to none unless set",
+					Usage:               "Enable features (comma-separated), or use default|all|none; +name/-name amends the configured selection instead of replacing it. In devcontainer mode, features default to none unless set",
 					ValueKind:           CLIValueRequired,
 					MissingValueMessage: "--features requires a value",
 					Action: CLIAction{

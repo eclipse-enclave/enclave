@@ -157,6 +157,13 @@ Values without prefixes replace the parent set entirely.
 applied against the implicit default-enabled set, so `["-node-dev"]` removes
 that default feature and `[]` means "none".
 
+The same rule applies to `--features`, which is the last layer on top of global,
+project, and `tool_overrides.<tool>` config. `--features +playwright` adds that
+feature to whatever the config layers selected, while `--features playwright` or
+`--features none` replaces their selection. When two layers disagree about one
+feature, the higher-precedence layer wins: global `["-devtools"]` with
+`--features +devtools` enables it.
+
 `host_config_paths` is resolved per tool against that tool's reviewed
 `passthroughPaths` from its `spec.yaml`. Use:
 

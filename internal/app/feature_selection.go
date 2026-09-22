@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strings"
 
+	"enclave/internal/config"
 	"enclave/internal/model"
 )
 
@@ -19,6 +20,11 @@ func resolveConfiguredFeatures(requested []string, allFeatures []model.Extension
 		return nil
 	}
 	normalized := normalizeAndSortNames(requested)
+	if len(normalized) == 0 {
+		// An explicit empty selection means "none". Returning nil would make
+		// callers that key on `Features == nil` fall back to the defaults.
+		return []string{}
+	}
 	if len(normalized) == 1 {
 		switch strings.ToLower(strings.TrimSpace(normalized[0])) {
 		case model.SelectionDefault:
@@ -45,9 +51,12 @@ func resolveConfiguredFeatures(requested []string, allFeatures []model.Extension
 func expandFeatureDirectives(normalized []string, allFeatures []model.Extension) []string {
 	selected := make(map[string]struct{}, len(allFeatures))
 
-	// If the list contains only directives (+/-) with no selector keyword,
-	// seed from default-enabled features so the directives have a base.
-	if !hasFeatureSelectors(normalized) {
+	// If the list contains only directives (+/-), seed from default-enabled
+	// features so the directives have a base. Any bare entry anchors the set
+	// instead: a literal name or a "default"/"all" selector states which
+	// features the selection starts from, so a configured list amended by
+	// higher-precedence directives must not pull the defaults back in.
+	if !config.HasBareSelectionEntry(normalized) {
 		for _, f := range allFeatures {
 			if f.DefaultEnabled {
 				selected[f.Name] = struct{}{}

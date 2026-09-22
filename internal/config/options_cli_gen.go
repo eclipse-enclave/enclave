@@ -200,7 +200,7 @@ func optionCLIFlags() map[string][]CLIFlag {
 			}),
 		},
 		"features": {
-			valueFlag("--features", "Enable features (comma-separated), or use default|all|none. In devcontainer mode, features default to none unless set", "--features requires a value", func(opts *model.Options, sources *model.OptionSources, value string) error {
+			valueFlag("--features", "Enable features (comma-separated), or use default|all|none; +name/-name amends the configured selection instead of replacing it. In devcontainer mode, features default to none unless set", "--features requires a value", func(opts *model.Options, sources *model.OptionSources, value string) error {
 				if err := applyFeatures(opts, value); err != nil {
 					return err
 				}

@@ -301,6 +301,9 @@ func resolveEphemeralStoreDirs(run model.RunOptions, cleanup model.CleanupOption
 					continue
 				}
 				dirs = append(dirs, cleanupDir{Kind: ephemeralKind, Path: filepath.Join(storeRoot, key)})
+				if basePath := config.HostStoreConfigBasePath(home, tool, hash, key); util.PathExists(basePath) {
+					dirs = append(dirs, cleanupDir{Kind: ephemeralKind, Path: basePath})
+				}
 				if memoryDir != "" {
 					dirs = append(dirs, cleanupDir{Kind: memoryKind, Path: memoryDir})
 				}
@@ -356,6 +359,7 @@ func resolveCleanupDirs(run model.RunOptions, cleanup model.CleanupOptions, home
 		{Kind: historyKind, Path: config.HostProjectGeneratedConfigDir(home, project.Hash, run.Tool)},
 		{Kind: historyKind, Path: filepath.Join(projectDataDir, model.GeneratedSkillsDirName)},
 		{Kind: configStoreKind, Path: config.HostStoreConfigRootDir(home, run.Tool, project.Hash)},
+		{Kind: configStoreKind, Path: config.HostStoreConfigBaseRootDir(home, run.Tool, project.Hash)},
 		{Kind: historyKind, Path: config.HostStoreEnvDir(home, run.Tool, project.Hash)},
 		{Kind: memoryKind, Path: config.HostProjectMemoryDir(home, project.Hash, run.Tool)},
 	}

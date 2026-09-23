@@ -22,20 +22,29 @@ func ValidateAuthFilePaths(authFiles []string) ([]string, error) {
 	}
 	cleaned := make([]string, 0, len(authFiles))
 	for _, authFile := range authFiles {
-		if authFile == "" {
-			return nil, fmt.Errorf("auth file path is empty")
-		}
-		if filepath.IsAbs(authFile) {
-			return nil, fmt.Errorf("auth file path must be relative: %s", authFile)
-		}
-		if util.HasPathTraversal(authFile) {
-			return nil, fmt.Errorf("auth file path contains traversal: %s", authFile)
-		}
-		cleanedPath := filepath.Clean(authFile)
-		if cleanedPath == "." {
-			return nil, fmt.Errorf("auth file path resolves to current directory: %s", authFile)
+		cleanedPath, err := ValidateStoreRelativePath(authFile)
+		if err != nil {
+			return nil, fmt.Errorf("auth file path %q: %w", authFile, err)
 		}
 		cleaned = append(cleaned, cleanedPath)
+	}
+	return cleaned, nil
+}
+
+// ValidateStoreRelativePath cleans a path that must stay within a store.
+func ValidateStoreRelativePath(relative string) (string, error) {
+	if relative == "" {
+		return "", fmt.Errorf("path is empty")
+	}
+	if filepath.IsAbs(relative) {
+		return "", fmt.Errorf("path must be relative")
+	}
+	if util.HasPathTraversal(relative) {
+		return "", fmt.Errorf("path contains traversal")
+	}
+	cleaned := filepath.Clean(relative)
+	if cleaned == "." {
+		return "", fmt.Errorf("path resolves to current directory")
 	}
 	return cleaned, nil
 }

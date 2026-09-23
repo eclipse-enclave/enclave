@@ -51,7 +51,21 @@ generated config overlay, which may replace the store contents. Existing
 ownership is not changed; Enclave warns with a `chown` command when a layout
 component belongs to another user.
 
-Source: [`internal/runtime/volume_manager.go`](../../internal/runtime/volume_manager.go) `BuildPrep` (intent), [`internal/backend/docker/prepare.go`](../../internal/backend/docker/prepare.go) `prepareConfigStore` (mechanics)
+**Config-source overlay**: When a patch, override, or host-config passthrough
+activates the overlay, Enclave rebuilds the store from generated config on each
+launch. For `sandbox.settingsTarget`, it carries in-tool key edits forward by
+comparing the store file with a snapshot of the previous generated file and
+merging those edits into the current generated file. New patch or override
+edits win conflicts. Snapshots live outside the mounted store in
+`config-store-baselines/<key>`, follow the same per-project/worktree/session
+scope, and are cleaned up with their stores. Missing or malformed store files,
+or a missing snapshot, use the generated settings unchanged. Merging can drop
+comments and formatting from the tool's copy. A launch without an overlay
+invalidates any snapshot for that store key. The first overlay launch after
+upgrading from a version without snapshots also uses generated settings once;
+pre-upgrade in-tool edits cannot be distinguished from old generated values.
+
+Source: [`internal/runtime/volume_manager.go`](../../internal/runtime/volume_manager.go) `BuildPrep` (intent), [`internal/backend/hoststore/settings_carryover.go`](../../internal/backend/hoststore/settings_carryover.go) (snapshot and merge), [`internal/backend/docker/prepare.go`](../../internal/backend/docker/prepare.go) (Docker store preparation)
 
 ## Agent Memory
 
@@ -316,7 +330,8 @@ Source: [`internal/runtime/volume_manager.go`](../../internal/runtime/volume_man
                          │
 2. Config prepopulation  │
    └─ If config-source is active, host-side overlay replaces generated config
-      files in the config store while preserving runtime-state paths
+      files in the config store while preserving runtime-state paths and
+      carrying settingsTarget key edits forward from this store's snapshot
                          │
 3. Auth injection        │
    ├─ Read persisted env (host filesystem read)

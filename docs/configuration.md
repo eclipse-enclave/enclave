@@ -302,6 +302,17 @@ Merge semantics:
 - **JSON:** scalars replace, objects deep-merge, arrays replace, `null` deletes keys
 - **TOML:** scalars replace, tables deep-merge, arrays replace (key deletion not supported)
 
+When a config source is active, Enclave carries edits made by the tool to its
+declared settings file (`sandbox.settingsTarget`) into the next launch. It
+merges changed keys into the current generated settings. New patch or override
+values win conflicts; objects merge recursively, while arrays and scalars are
+atomic. Only that settings file is carried forward, independently for each
+project/worktree/session store; patch and override files are never changed.
+A launch without an overlay resets the carry-over baseline. Entrypoint writes
+to this file also carry over, including yolo-mode permission and trust keys,
+until changed by a patch, override, or the tool. See [Config Store](runtime/stores.md#config-store)
+for snapshot lifecycle, missing-file behavior, and upgrade limitations.
+
 ## Environment Variables
 
 | Variable | Description |

@@ -50,6 +50,7 @@ func TestPrepareToolConfigSourceSkipsForBuiltInSettingsOnly(t *testing.T) {
 	if r.configSourceDir != "" {
 		t.Fatalf("expected empty configSourceDir for built-in settings-only tool, got %q", r.configSourceDir)
 	}
+
 }
 
 func TestPrepareToolConfigSourceBuildsSettingsWhenConfigBaseExists(t *testing.T) {
@@ -81,6 +82,17 @@ func TestPrepareToolConfigSourceBuildsSettingsWhenConfigBaseExists(t *testing.T)
 	}
 	if string(settingsBytes) != `{"source":"built-in"}` {
 		t.Fatalf("unexpected settings content: %s", string(settingsBytes))
+	}
+
+	r.run.Persist = true
+	prep, _ := newVolumeManager(r).BuildPrep("")
+	if prep.Config.Overlay.SettingsPath != filepath.Join("agent", "settings.json") {
+		t.Fatalf("settings path = %q", prep.Config.Overlay.SettingsPath)
+	}
+	r.run.Persist = false
+	prep, _ = newVolumeManager(r).BuildPrep("ephemeral-key")
+	if prep.Config.Overlay.SettingsPath != "" {
+		t.Fatalf("ephemeral store has settings carry-over path %q", prep.Config.Overlay.SettingsPath)
 	}
 }
 

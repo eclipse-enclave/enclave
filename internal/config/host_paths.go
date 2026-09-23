@@ -195,6 +195,16 @@ func HostStoreConfigDir(home string, tool string, projectHash string, key string
 	return filepath.Join(HostStoreConfigRootDir(home, tool, projectHash), key)
 }
 
+// HostStoreConfigBasePath holds the last generated settings file for one
+// config-store key, outside the tool-writable store and generated source.
+func HostStoreConfigBasePath(home string, tool string, projectHash string, key string) string {
+	return filepath.Join(HostStoreConfigBaseRootDir(home, tool, projectHash), key)
+}
+
+func HostStoreConfigBaseRootDir(home string, tool string, projectHash string) string {
+	return filepath.Join(HostProjectToolDir(home, projectHash, tool), "config-store-baselines")
+}
+
 // HostStoreEnvDir is the host directory backing a tool's persistent env store
 // for a project.
 func HostStoreEnvDir(home string, tool string, projectHash string) string {

@@ -60,7 +60,8 @@ edits win conflicts. Snapshots live outside the mounted store in
 `config-store-baselines/<key>`, follow the same per-project/worktree/session
 scope, and are cleaned up with their stores. Missing or malformed store files,
 or a missing snapshot, use the generated settings unchanged. Merging can drop
-comments and formatting from the tool's copy.
+comments and formatting from the tool's copy. A launch without an overlay
+invalidates any snapshot for that store key.
 
 Source: [`internal/runtime/volume_manager.go`](../../internal/runtime/volume_manager.go) `BuildPrep` (intent), [`internal/backend/docker/prepare.go`](../../internal/backend/docker/prepare.go) `prepareConfigStore` (mechanics)
 

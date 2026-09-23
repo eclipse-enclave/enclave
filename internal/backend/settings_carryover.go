@@ -12,6 +12,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"math/big"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -144,8 +146,16 @@ func mergeSettingsFile(base []byte, store []byte, generated []byte, ext string) 
 		switch strings.ToLower(ext) {
 		case ".json":
 			var value any
-			err := json.Unmarshal(data, &value)
-			return value, err
+			decoder := json.NewDecoder(bytes.NewReader(data))
+			decoder.UseNumber()
+			if err := decoder.Decode(&value); err != nil {
+				return nil, err
+			}
+			var extra any
+			if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
+				return nil, fmt.Errorf("extra JSON content: %v", err)
+			}
+			return value, nil
 		case ".toml":
 			var value map[string]any
 			_, err := toml.Decode(string(data), &value)
@@ -166,20 +176,23 @@ func mergeSettingsFile(base []byte, store []byte, generated []byte, ext string) 
 	if err != nil {
 		return nil, fmt.Errorf("parse generated settings: %w", err)
 	}
-	if reflect.DeepEqual(baseValue, storeValue) {
+	if settingsEqual(baseValue, storeValue) {
 		return generated, nil
 	}
 	merged, _ := mergeSettingsValue(baseValue, true, storeValue, true, generatedValue, true)
-	if reflect.DeepEqual(merged, generatedValue) {
+	if settingsEqual(merged, generatedValue) {
 		return generated, nil
 	}
 	switch strings.ToLower(ext) {
 	case ".json":
-		data, err := json.MarshalIndent(merged, "", "  ")
-		if err != nil {
+		var buf bytes.Buffer
+		encoder := json.NewEncoder(&buf)
+		encoder.SetIndent("", "  ")
+		encoder.SetEscapeHTML(false)
+		if err := encoder.Encode(merged); err != nil {
 			return nil, err
 		}
-		return append(data, '\n'), nil
+		return buf.Bytes(), nil
 	case ".toml":
 		var buf bytes.Buffer
 		if err := toml.NewEncoder(&buf).Encode(merged); err != nil {
@@ -218,11 +231,53 @@ func mergeSettingsValue(base any, hasBase bool, store any, hasStore bool, genera
 		}
 		return merged, true
 	}
-	if hasGenerated != hasBase || (hasGenerated && !reflect.DeepEqual(generated, base)) {
+	if hasGenerated != hasBase || (hasGenerated && !settingsEqual(generated, base)) {
 		return generated, hasGenerated
 	}
-	if hasStore != hasBase || (hasStore && !reflect.DeepEqual(store, base)) {
+	if hasStore != hasBase || (hasStore && !settingsEqual(store, base)) {
 		return store, hasStore
 	}
 	return generated, hasGenerated
+}
+
+func settingsEqual(a any, b any) bool {
+	if aNumber, ok := a.(json.Number); ok {
+		bNumber, ok := b.(json.Number)
+		if !ok {
+			return false
+		}
+		if aNumber == bNumber {
+			return true
+		}
+		var aRat, bRat big.Rat
+		_, aOK := aRat.SetString(string(aNumber))
+		_, bOK := bRat.SetString(string(bNumber))
+		return aOK && bOK && aRat.Cmp(&bRat) == 0
+	}
+	if aMap, ok := a.(map[string]any); ok {
+		bMap, ok := b.(map[string]any)
+		if !ok || len(aMap) != len(bMap) {
+			return false
+		}
+		for key, value := range aMap {
+			other, exists := bMap[key]
+			if !exists || !settingsEqual(value, other) {
+				return false
+			}
+		}
+		return true
+	}
+	if aArray, ok := a.([]any); ok {
+		bArray, ok := b.([]any)
+		if !ok || len(aArray) != len(bArray) {
+			return false
+		}
+		for i := range aArray {
+			if !settingsEqual(aArray[i], bArray[i]) {
+				return false
+			}
+		}
+		return true
+	}
+	return reflect.DeepEqual(a, b)
 }

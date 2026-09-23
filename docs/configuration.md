@@ -313,7 +313,10 @@ files. A missing, malformed, or non-regular store settings file is regenerated.
 Without a previous generated snapshot, including after an interrupted overlay, the
 current generated file is used as-is. A merge may discard comments and
 formatting in the tool-written file; when no values changed, the generated file
-is copied byte for byte.
+is copied byte for byte. A launch without an overlay discards any old snapshot,
+so adding a patch later starts from the new generated settings. Entrypoint
+changes to this file also carry over, including yolo-mode permission and trust
+keys, until changed by a patch, override, or the tool.
 
 ## Environment Variables
 

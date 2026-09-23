@@ -119,12 +119,9 @@ func (b *Backend) overlayConfigStore(prep backend.ConfigStorePrep) error {
 	if err != nil {
 		return err
 	}
-	if err := backend.OverlayConfigSettings(root, *overlay, func() error {
+	return backend.OverlayConfigSettings(root, *overlay, func() error {
 		return b.overlayConfigStoreContents(root, *overlay, prep.Key.Owner)
-	}); err != nil {
-		return err
-	}
-	return nil
+	})
 }
 
 func (b *Backend) overlayConfigStoreContents(root string, overlay backend.ConfigOverlaySpec, owner string) error {

@@ -166,10 +166,9 @@ type ConfigStorePrep struct {
 type ConfigOverlaySpec struct {
 	SourceDir     string
 	PreservePaths []string
-	// SettingsPath is relative to the config store. BasePath is a host-only
-	// snapshot of the last generated settings file for this store key.
+	// SettingsPath is relative to the config store. The backend keeps the last
+	// generated settings file outside the tool-writable store for this key.
 	SettingsPath string
-	BasePath     string
 }
 
 type StorePrepEntry struct {

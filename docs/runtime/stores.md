@@ -61,9 +61,11 @@ edits win conflicts. Snapshots live outside the mounted store in
 scope, and are cleaned up with their stores. Missing or malformed store files,
 or a missing snapshot, use the generated settings unchanged. Merging can drop
 comments and formatting from the tool's copy. A launch without an overlay
-invalidates any snapshot for that store key.
+invalidates any snapshot for that store key. The first overlay launch after
+upgrading from a version without snapshots also uses generated settings once;
+pre-upgrade in-tool edits cannot be distinguished from old generated values.
 
-Source: [`internal/runtime/volume_manager.go`](../../internal/runtime/volume_manager.go) `BuildPrep` (intent), [`internal/backend/docker/prepare.go`](../../internal/backend/docker/prepare.go) `prepareConfigStore` (mechanics)
+Source: [`internal/runtime/volume_manager.go`](../../internal/runtime/volume_manager.go) `BuildPrep` (intent), [`internal/backend/hoststore/settings_carryover.go`](../../internal/backend/hoststore/settings_carryover.go) (snapshot and merge), [`internal/backend/docker/prepare.go`](../../internal/backend/docker/prepare.go) (Docker store preparation)
 
 ## Agent Memory
 

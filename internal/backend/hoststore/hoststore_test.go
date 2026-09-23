@@ -74,6 +74,45 @@ func TestDirRejectsMaliciousKeySegments(t *testing.T) {
 	}
 }
 
+func TestConfigBasePathUsesValidatedStoreKey(t *testing.T) {
+	home := t.TempDir()
+	key := backend.StoreKey{Owner: "codex", ProjectHash: "abc123abc123"}
+	path, err := ConfigBasePath(home, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := config.HostStoreConfigBasePath(home, key.Owner, key.ProjectHash, "default"); path != want {
+		t.Fatalf("default snapshot path = %q, want %q", path, want)
+	}
+	key.Suffix = "session-a"
+	path, err = ConfigBasePath(home, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := config.HostStoreConfigBasePath(home, key.Owner, key.ProjectHash, key.Suffix); path != want {
+		t.Fatalf("session snapshot path = %q, want %q", path, want)
+	}
+	key.Suffix = "../escape"
+	if _, err := ConfigBasePath(home, key); err == nil {
+		t.Fatal("accepted an escaping snapshot key")
+	}
+}
+
+func TestConfigBasePathRejectsSymlinkedSnapshotRoot(t *testing.T) {
+	home := t.TempDir()
+	key := backend.StoreKey{Owner: "codex", ProjectHash: "abc123abc123"}
+	root := config.HostStoreConfigBaseRootDir(home, key.Owner, key.ProjectHash)
+	if err := os.MkdirAll(filepath.Dir(root), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(t.TempDir(), root); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ConfigBasePath(home, key); err == nil {
+		t.Fatal("accepted a symlinked snapshot root")
+	}
+}
+
 func TestWithLockCreatesStoreLockFile(t *testing.T) {
 	home := t.TempDir()
 	dir := Dir(home, backend.StoreKey{Owner: "codex"}, backend.StoreKindAuth)

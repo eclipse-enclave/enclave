@@ -304,19 +304,14 @@ Merge semantics:
 
 When a config source is active, Enclave carries edits made by the tool to its
 declared settings file (`sandbox.settingsTarget`) into the next launch. It
-compares the store file with the generated settings from the previous launch
-and merges changed keys into the current generated settings. A key changed in
-both places takes the new patch or override value; objects merge recursively,
-while arrays and scalars are atomic. This applies independently to each
-project/worktree/session config-store key and does not modify patch or override
-files. A missing, malformed, or non-regular store settings file is regenerated.
-Without a previous generated snapshot, including after an interrupted overlay, the
-current generated file is used as-is. A merge may discard comments and
-formatting in the tool-written file; when no values changed, the generated file
-is copied byte for byte. A launch without an overlay discards any old snapshot,
-so adding a patch later starts from the new generated settings. Entrypoint
-changes to this file also carry over, including yolo-mode permission and trust
-keys, until changed by a patch, override, or the tool.
+merges changed keys into the current generated settings. New patch or override
+values win conflicts; objects merge recursively, while arrays and scalars are
+atomic. Only that settings file is carried forward, independently for each
+project/worktree/session store; patch and override files are never changed.
+A launch without an overlay resets the carry-over baseline. Entrypoint writes
+to this file also carry over, including yolo-mode permission and trust keys,
+until changed by a patch, override, or the tool. See [Config Store](runtime/stores.md#config-store)
+for snapshot lifecycle, missing-file behavior, and upgrade limitations.
 
 ## Environment Variables
 

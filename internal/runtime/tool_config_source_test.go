@@ -51,22 +51,6 @@ func TestPrepareToolConfigSourceSkipsForBuiltInSettingsOnly(t *testing.T) {
 		t.Fatalf("expected empty configSourceDir for built-in settings-only tool, got %q", r.configSourceDir)
 	}
 
-	// A later launch without an overlay must invalidate a snapshot left by an
-	// earlier patched launch, before the entrypoint can re-seed settings.
-	r.run.Persist = true
-	basePath := config.HostStoreConfigBasePath(home, "pi", r.project.Hash, "default")
-	if err := os.MkdirAll(filepath.Dir(basePath), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(basePath, []byte(`{"model":"old-patch"}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := r.prepareToolConfigSource(); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(basePath); !os.IsNotExist(err) {
-		t.Fatalf("snapshot after inactive overlay = %v, want not exist", err)
-	}
 }
 
 func TestPrepareToolConfigSourceBuildsSettingsWhenConfigBaseExists(t *testing.T) {
@@ -105,13 +89,10 @@ func TestPrepareToolConfigSourceBuildsSettingsWhenConfigBaseExists(t *testing.T)
 	if prep.Config.Overlay.SettingsPath != filepath.Join("agent", "settings.json") {
 		t.Fatalf("settings path = %q", prep.Config.Overlay.SettingsPath)
 	}
-	if want := config.HostStoreConfigBasePath(home, "pi", r.project.Hash, "default"); prep.Config.Overlay.BasePath != want {
-		t.Fatalf("snapshot path = %q, want %q", prep.Config.Overlay.BasePath, want)
-	}
 	r.run.Persist = false
 	prep, _ = newVolumeManager(r).BuildPrep("ephemeral-key")
-	if prep.Config.Overlay.BasePath != "" {
-		t.Fatalf("ephemeral store has snapshot path %q", prep.Config.Overlay.BasePath)
+	if prep.Config.Overlay.SettingsPath != "" {
+		t.Fatalf("ephemeral store has settings carry-over path %q", prep.Config.Overlay.SettingsPath)
 	}
 }
 

@@ -5,7 +5,7 @@
 //
 // SPDX-License-Identifier: MIT
 
-package backend
+package hoststore
 
 import (
 	"encoding/json"
@@ -16,6 +16,8 @@ import (
 	"testing"
 
 	"github.com/BurntSushi/toml"
+
+	"enclave/internal/backend"
 )
 
 func TestMergeSettingsFile(t *testing.T) {
@@ -108,9 +110,13 @@ func TestMergeSettingsFilePreservesLargeJSONNumbersAndReadableCommands(t *testin
 func TestOverlayConfigSettingsInvalidatesSnapshotOnFailure(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
+	key := backend.StoreKey{Owner: "pi", ProjectHash: "abc123abc123"}
 	storeDir := filepath.Join(root, "store")
 	sourceDir := filepath.Join(root, "source")
-	basePath := filepath.Join(root, "bases", "default")
+	basePath, err := ConfigBasePath(root, key)
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, dir := range []string{storeDir, sourceDir, filepath.Dir(basePath)} {
 		if err := os.MkdirAll(dir, 0o700); err != nil {
 			t.Fatal(err)
@@ -127,8 +133,8 @@ func TestOverlayConfigSettingsInvalidatesSnapshotOnFailure(t *testing.T) {
 	write(basePath, `{"x":0}`)
 	write(storePath, `{"x":0}`)
 	write(sourcePath, `{"x":1}`)
-	spec := ConfigOverlaySpec{SourceDir: sourceDir, SettingsPath: "settings.json", BasePath: basePath}
-	if err := OverlayConfigSettings(storeDir, spec, func() error { return errors.New("overlay failed") }); err == nil {
+	spec := backend.ConfigOverlaySpec{SourceDir: sourceDir, SettingsPath: "settings.json"}
+	if err := OverlayConfigSettings(root, key, storeDir, spec, func() error { return errors.New("overlay failed") }); err == nil {
 		t.Fatal("expected overlay failure")
 	}
 	if _, err := os.Stat(basePath); !errors.Is(err, os.ErrNotExist) {
@@ -137,7 +143,7 @@ func TestOverlayConfigSettingsInvalidatesSnapshotOnFailure(t *testing.T) {
 
 	// Simulate a snapshot write failure after the store received x=1.
 	write(basePath, `{"x":0}`)
-	if err := OverlayConfigSettings(storeDir, spec, func() error {
+	if err := OverlayConfigSettings(root, key, storeDir, spec, func() error {
 		write(storePath, `{"x":1}`)
 		if err := os.RemoveAll(filepath.Dir(basePath)); err != nil {
 			return err
@@ -150,7 +156,7 @@ func TestOverlayConfigSettingsInvalidatesSnapshotOnFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	write(sourcePath, `{"x":0}`)
-	if err := OverlayConfigSettings(storeDir, spec, func() error {
+	if err := OverlayConfigSettings(root, key, storeDir, spec, func() error {
 		return os.WriteFile(storePath, []byte(`{"x":0}`), 0o600)
 	}); err != nil {
 		t.Fatal(err)
@@ -174,9 +180,13 @@ func TestOverlayConfigSettingsRegeneratesWithoutUsableStoreFile(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			root := t.TempDir()
+			key := backend.StoreKey{Owner: "pi", ProjectHash: "abc123abc123"}
 			storeDir := filepath.Join(root, "store")
 			sourceDir := filepath.Join(root, "source")
-			basePath := filepath.Join(root, "bases", "default")
+			basePath, err := ConfigBasePath(root, key)
+			if err != nil {
+				t.Fatal(err)
+			}
 			for _, dir := range []string{storeDir, sourceDir, filepath.Dir(basePath)} {
 				if err := os.MkdirAll(dir, 0o700); err != nil {
 					t.Fatal(err)
@@ -196,8 +206,8 @@ func TestOverlayConfigSettingsRegeneratesWithoutUsableStoreFile(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			spec := ConfigOverlaySpec{SourceDir: sourceDir, SettingsPath: "settings.json", BasePath: basePath}
-			if err := OverlayConfigSettings(storeDir, spec, func() error {
+			spec := backend.ConfigOverlaySpec{SourceDir: sourceDir, SettingsPath: "settings.json"}
+			if err := OverlayConfigSettings(root, key, storeDir, spec, func() error {
 				return os.WriteFile(filepath.Join(storeDir, "settings.json"), []byte(generated), 0o600)
 			}); err != nil {
 				t.Fatal(err)
@@ -217,9 +227,13 @@ func TestOverlayConfigSettingsRegeneratesWithoutUsableStoreFile(t *testing.T) {
 func TestOverlayConfigSettingsDoesNotTouchStoreWhenSnapshotRemovalFails(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
+	key := backend.StoreKey{Owner: "pi", ProjectHash: "abc123abc123"}
 	storeDir := filepath.Join(root, "store")
 	sourceDir := filepath.Join(root, "source")
-	basePath := filepath.Join(root, "bases", "default")
+	basePath, err := ConfigBasePath(root, key)
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, dir := range []string{storeDir, sourceDir, basePath} {
 		if err := os.MkdirAll(dir, 0o700); err != nil {
 			t.Fatal(err)
@@ -232,8 +246,8 @@ func TestOverlayConfigSettingsDoesNotTouchStoreWhenSnapshotRemovalFails(t *testi
 		t.Fatal(err)
 	}
 	called := false
-	err := OverlayConfigSettings(storeDir, ConfigOverlaySpec{
-		SourceDir: sourceDir, SettingsPath: "settings.json", BasePath: basePath,
+	err = OverlayConfigSettings(root, key, storeDir, backend.ConfigOverlaySpec{
+		SourceDir: sourceDir, SettingsPath: "settings.json",
 	}, func() error {
 		called = true
 		return nil

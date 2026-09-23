@@ -32,10 +32,10 @@ func (r *Runtime) prepareToolConfigSource() error {
 				return fmt.Errorf("config patches in %q require config_dir for %s", patchDir, r.profile.Name)
 			}
 		}
-		return r.invalidateSettingsBaseWithoutOverlay()
+		return nil
 	}
 	if !r.shouldMountToolConfigSource() {
-		return r.invalidateSettingsBaseWithoutOverlay()
+		return nil
 	}
 
 	globalConfigDir := config.HostToolConfigDir(r.host.Home, r.profile.Name)
@@ -57,22 +57,6 @@ func (r *Runtime) prepareToolConfigSource() error {
 	r.configSourceDir = generatedConfigDir
 	logx.Infof("%s config source prepared", util.TitleCase(r.profile.Name))
 	return nil
-}
-
-// A launch without an overlay may seed or change settings without a generated
-// baseline. Its previous snapshot must not be reused if an overlay returns.
-func (r *Runtime) invalidateSettingsBaseWithoutOverlay() error {
-	if !r.run.Persist || r.project.Hash == "" {
-		return nil
-	}
-	projectToolDir := config.HostProjectToolDir(r.host.Home, r.project.Hash, r.profile.Name)
-	basePath := config.HostStoreConfigBasePath(r.host.Home, r.profile.Name, r.project.Hash, r.sessionGeneratedKey())
-	return r.withToolDataLock(projectToolDir, "config-source", func() error {
-		if err := os.Remove(basePath); err != nil && !os.IsNotExist(err) {
-			return fmt.Errorf("remove inactive config-source snapshot %q: %w", basePath, err)
-		}
-		return nil
-	})
 }
 
 func (r *Runtime) generatedConfigSourceDir() string {

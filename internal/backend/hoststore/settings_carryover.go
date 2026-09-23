@@ -5,7 +5,7 @@
 //
 // SPDX-License-Identifier: MIT
 
-package backend
+package hoststore
 
 import (
 	"bytes"
@@ -21,6 +21,7 @@ import (
 
 	"github.com/BurntSushi/toml"
 
+	"enclave/internal/backend"
 	"enclave/internal/logx"
 	"enclave/internal/util"
 )
@@ -28,9 +29,16 @@ import (
 // OverlayConfigSettings carries tool edits to the declared settings file over
 // an otherwise destructive config-store overlay. The snapshot always contains
 // the generated input, not the merged file that the tool receives.
-func OverlayConfigSettings(storeDir string, spec ConfigOverlaySpec, overlay func() error) error {
-	if spec.SettingsPath == "" || spec.BasePath == "" {
+func OverlayConfigSettings(home string, key backend.StoreKey, storeDir string, spec backend.ConfigOverlaySpec, overlay func() error) error {
+	if spec.SettingsPath == "" {
+		if err := InvalidateConfigSettingsBase(home, key); err != nil {
+			return err
+		}
 		return overlay()
+	}
+	basePath, err := ConfigBasePath(home, key)
+	if err != nil {
+		return err
 	}
 	storePath, err := settingsPath(storeDir, spec.SettingsPath)
 	if err != nil {
@@ -42,7 +50,7 @@ func OverlayConfigSettings(storeDir string, spec ConfigOverlaySpec, overlay func
 		return err
 	}
 	generated, generatedMode, generatedOK := readSettingsFile(generatedPath, "generated")
-	base, _, baseOK := readSettingsFile(spec.BasePath, "snapshot")
+	base, _, baseOK := readSettingsFile(basePath, "snapshot")
 	var store []byte
 	var storeOK bool
 	if storePath != "" {
@@ -59,8 +67,8 @@ func OverlayConfigSettings(storeDir string, spec ConfigOverlaySpec, overlay func
 	}
 	// Invalidate before touching the store. If a later step fails, the next
 	// launch has no base and cannot mistake generated state for a tool edit.
-	if err := os.Remove(spec.BasePath); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("remove settings snapshot %s: %w", spec.BasePath, err)
+	if err := removeSettingsBase(basePath); err != nil {
+		return err
 	}
 	if err := overlay(); err != nil {
 		return err
@@ -84,12 +92,29 @@ func OverlayConfigSettings(storeDir string, spec ConfigOverlaySpec, overlay func
 	if !generatedOK {
 		return nil
 	}
-	snapshotErr := os.MkdirAll(filepath.Dir(spec.BasePath), 0o700)
+	snapshotErr := os.MkdirAll(filepath.Dir(basePath), 0o700)
 	if snapshotErr == nil {
-		snapshotErr = util.WriteFileAtomic(spec.BasePath, generated, 0o600)
+		snapshotErr = util.WriteFileAtomic(basePath, generated, 0o600)
 	}
 	if snapshotErr != nil {
-		logx.Warnf("Cannot save settings snapshot %s: %v; in-tool edits may be lost on the next launch", spec.BasePath, snapshotErr)
+		logx.Warnf("Cannot save settings snapshot %s: %v; in-tool edits may be lost on the next launch", basePath, snapshotErr)
+	}
+	return nil
+}
+
+// InvalidateConfigSettingsBase prevents a launch without a usable overlay from
+// later treating its store settings as edits to an older generated source.
+func InvalidateConfigSettingsBase(home string, key backend.StoreKey) error {
+	basePath, err := ConfigBasePath(home, key)
+	if err != nil {
+		return err
+	}
+	return removeSettingsBase(basePath)
+}
+
+func removeSettingsBase(basePath string) error {
+	if err := os.Remove(basePath); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("remove settings snapshot %s: %w", basePath, err)
 	}
 	return nil
 }
@@ -97,31 +122,15 @@ func OverlayConfigSettings(storeDir string, spec ConfigOverlaySpec, overlay func
 // settingsPath rejects traversal and symlinked ancestors in either the old
 // tool-writable store or the freshly generated source.
 func settingsPath(root string, relative string) (string, error) {
-	if relative == "" || filepath.IsAbs(relative) || util.HasPathTraversal(relative) {
-		return "", fmt.Errorf("invalid settings path %q", relative)
+	cleaned, err := backend.ValidateStoreRelativePath(relative)
+	if err != nil {
+		return "", fmt.Errorf("invalid settings path %q: %w", relative, err)
 	}
-	cleaned := filepath.Clean(relative)
-	if cleaned == "." {
-		return "", fmt.Errorf("invalid settings path %q", relative)
+	path := filepath.Join(root, cleaned)
+	if err := EnsureNoSymlinkChain(root, path, false); err != nil {
+		return "", err
 	}
-	current := root
-	for _, part := range strings.Split(filepath.Dir(cleaned), string(filepath.Separator)) {
-		if part == "." {
-			continue
-		}
-		current = filepath.Join(current, part)
-		info, err := os.Lstat(current)
-		if errors.Is(err, os.ErrNotExist) {
-			break
-		}
-		if err != nil {
-			return "", err
-		}
-		if !info.IsDir() {
-			return "", fmt.Errorf("settings parent %s is not a directory", current)
-		}
-	}
-	return filepath.Join(root, cleaned), nil
+	return path, nil
 }
 
 func readSettingsFile(path string, label string) ([]byte, os.FileMode, bool) {

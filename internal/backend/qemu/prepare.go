@@ -16,6 +16,7 @@ import (
 	"strings"
 
 	"enclave/internal/backend"
+	"enclave/internal/backend/hoststore"
 	"enclave/internal/logx"
 	"enclave/internal/model"
 	"enclave/internal/util"
@@ -54,8 +55,12 @@ func (b *Backend) PrepareStores(ctx context.Context, prep backend.StorePrep) (ba
 	if prep.Config != nil && len(prep.ResetAuthFiles) > 0 {
 		b.resetAuthFiles(ctx, prep)
 	}
-	if prep.Config != nil && prep.Config.Overlay != nil {
-		if err := b.overlayConfigStore(*prep.Config); err != nil {
+	if prep.Config != nil {
+		if prep.Config.Overlay != nil && strings.TrimSpace(prep.Config.Overlay.SourceDir) != "" {
+			if err := b.overlayConfigStore(*prep.Config); err != nil {
+				return state, err
+			}
+		} else if err := hoststore.InvalidateConfigSettingsBase(b.opts.Host.Home, prep.Config.Key); err != nil {
 			return state, err
 		}
 	}
@@ -119,7 +124,7 @@ func (b *Backend) overlayConfigStore(prep backend.ConfigStorePrep) error {
 	if err != nil {
 		return err
 	}
-	return backend.OverlayConfigSettings(root, *overlay, func() error {
+	return hoststore.OverlayConfigSettings(b.opts.Host.Home, prep.Key, root, *overlay, func() error {
 		return b.overlayConfigStoreContents(root, *overlay, prep.Key.Owner)
 	})
 }

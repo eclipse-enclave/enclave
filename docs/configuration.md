@@ -302,6 +302,19 @@ Merge semantics:
 - **JSON:** scalars replace, objects deep-merge, arrays replace, `null` deletes keys
 - **TOML:** scalars replace, tables deep-merge, arrays replace (key deletion not supported)
 
+When a config source is active, Enclave carries edits made by the tool to its
+declared settings file (`sandbox.settingsTarget`) into the next launch. It
+compares the store file with the generated settings from the previous launch
+and merges changed keys into the current generated settings. A key changed in
+both places takes the new patch or override value; objects merge recursively,
+while arrays and scalars are atomic. This applies independently to each
+project/worktree/session config-store key and does not modify patch or override
+files. A missing, malformed, or non-regular store settings file is regenerated.
+Without a previous generated snapshot, including after an interrupted overlay, the
+current generated file is used as-is. A merge may discard comments and
+formatting in the tool-written file; when no values changed, the generated file
+is copied byte for byte.
+
 ## Environment Variables
 
 | Variable | Description |

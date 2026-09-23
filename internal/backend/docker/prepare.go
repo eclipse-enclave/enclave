@@ -224,7 +224,9 @@ func (b *Backend) overlayConfigStore(prep backend.ConfigStorePrep) error {
 	if err != nil {
 		return err
 	}
-	if err := overlayConfigDir(dir, overlay.SourceDir, overlay.PreservePaths); err != nil {
+	if err := backend.OverlayConfigSettings(dir, *overlay, func() error {
+		return overlayConfigDir(dir, overlay.SourceDir, overlay.PreservePaths)
+	}); err != nil {
 		return fmt.Errorf("populate config store from source: %w", err)
 	}
 	b.prepareConfigStoreLayout(dir, prep)

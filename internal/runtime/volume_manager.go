@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"enclave/internal/backend"
+	"enclave/internal/config"
 	"enclave/internal/logx"
 	"enclave/internal/model"
 	"enclave/internal/util"
@@ -68,6 +69,17 @@ func (m volumeManager) BuildPrep(volumeSuffix string) (backend.StorePrep, storeS
 		prep.Config.Overlay = &backend.ConfigOverlaySpec{
 			SourceDir:     m.configSourceDir,
 			PreservePaths: m.configSourcePreservePaths(),
+		}
+		if m.run.Persist {
+			settingsPath, err := m.settingsRelativePath()
+			if err == nil && settingsPath != "" {
+				key := configKey.Suffix
+				if key == "" {
+					key = defaultConfigKey
+				}
+				prep.Config.Overlay.SettingsPath = settingsPath
+				prep.Config.Overlay.BasePath = config.HostStoreConfigBasePath(m.host.Home, m.profile.Name, m.project.Hash, key)
+			}
 		}
 	}
 	stores.Config = &backend.StoreRef{Kind: backend.StoreKindConfig, Key: configKey}

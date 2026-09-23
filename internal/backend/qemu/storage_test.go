@@ -67,6 +67,55 @@ func TestMountSourceResolvesSharedStoreDirs(t *testing.T) {
 	}
 }
 
+func TestPrepareStoresCarriesToolSettingsAcrossThreeOverlays(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	home := t.TempDir()
+	be := New(Options{Host: model.Host{Home: home}})
+	key := backend.StoreKey{Owner: "pi", ProjectHash: "abc123abc123"}
+	sourceDir := t.TempDir()
+	settingsRel := filepath.Join("agent", "settings.json")
+	sourcePath := filepath.Join(sourceDir, settingsRel)
+	if err := os.MkdirAll(filepath.Dir(sourcePath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	write := func(path, value string) {
+		t.Helper()
+		if err := os.WriteFile(path, []byte(value), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	prep := backend.StorePrep{Config: &backend.ConfigStorePrep{Key: key, Overlay: &backend.ConfigOverlaySpec{
+		SourceDir: sourceDir, SettingsPath: settingsRel,
+		BasePath: config.HostStoreConfigBasePath(home, key.Owner, key.ProjectHash, "default"),
+	}}}
+	prepare := func() {
+		t.Helper()
+		if _, err := be.PrepareStores(context.Background(), prep); err != nil {
+			t.Fatal(err)
+		}
+	}
+	storeDir, err := be.storage.MountSource(key, backend.StoreKindConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	storePath := filepath.Join(storeDir, settingsRel)
+	write(sourcePath, `{"theme":"dark","model":"base"}`)
+	prepare()
+	write(storePath, `{"theme":"dark","model":"tool"}`)
+	prepare()
+	prepare()
+	got, err := os.ReadFile(storePath)
+	if err != nil || string(got) != "{\n  \"model\": \"tool\",\n  \"theme\": \"dark\"\n}\n" {
+		t.Fatalf("settings after three prepares = %s, err %v", got, err)
+	}
+	write(sourcePath, `{"theme":"dark","model":"patch"}`)
+	prepare()
+	got, err = os.ReadFile(storePath)
+	if err != nil || string(got) != `{"theme":"dark","model":"patch"}` {
+		t.Fatalf("patch conflict = %s, err %v", got, err)
+	}
+}
+
 func TestWithStoreLockUsesSharedPerStoreLockFiles(t *testing.T) {
 	home := t.TempDir()
 	store := newStoreManager(model.Host{Home: home})

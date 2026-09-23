@@ -119,6 +119,15 @@ func (b *Backend) overlayConfigStore(prep backend.ConfigStorePrep) error {
 	if err != nil {
 		return err
 	}
+	if err := backend.OverlayConfigSettings(root, *overlay, func() error {
+		return b.overlayConfigStoreContents(root, *overlay, prep.Key.Owner)
+	}); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (b *Backend) overlayConfigStoreContents(root string, overlay backend.ConfigOverlaySpec, owner string) error {
 	preserveDir, err := os.MkdirTemp("", "enclave-qemu-preserve-*")
 	if err != nil {
 		return fmt.Errorf("create config preserve dir: %w", err)
@@ -158,7 +167,7 @@ func (b *Backend) overlayConfigStore(prep backend.ConfigStorePrep) error {
 			return fmt.Errorf("restore config path %s: %w", cleaned, err)
 		}
 	}
-	logx.Infof("%s config store populated from generated source", util.TitleCase(prep.Key.Owner))
+	logx.Infof("%s config store populated from generated source", util.TitleCase(owner))
 	return nil
 }
 

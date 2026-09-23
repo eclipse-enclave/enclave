@@ -82,6 +82,20 @@ func TestPrepareToolConfigSourceBuildsSettingsWhenConfigBaseExists(t *testing.T)
 	if string(settingsBytes) != `{"source":"built-in"}` {
 		t.Fatalf("unexpected settings content: %s", string(settingsBytes))
 	}
+
+	r.run.Persist = true
+	prep, _ := newVolumeManager(r).BuildPrep("")
+	if prep.Config.Overlay.SettingsPath != filepath.Join("agent", "settings.json") {
+		t.Fatalf("settings path = %q", prep.Config.Overlay.SettingsPath)
+	}
+	if want := config.HostStoreConfigBasePath(home, "pi", r.project.Hash, "default"); prep.Config.Overlay.BasePath != want {
+		t.Fatalf("snapshot path = %q, want %q", prep.Config.Overlay.BasePath, want)
+	}
+	r.run.Persist = false
+	prep, _ = newVolumeManager(r).BuildPrep("ephemeral-key")
+	if prep.Config.Overlay.BasePath != "" {
+		t.Fatalf("ephemeral store has snapshot path %q", prep.Config.Overlay.BasePath)
+	}
 }
 
 // A user-global tool extension keeps its settings template and config-base in

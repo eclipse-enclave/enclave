@@ -258,6 +258,8 @@ func (r *Runtime) prepareExecution() (*ExecutionContext, error) {
 	if err := validateGitIdentity(gitIdentity, sessionEnv); err != nil {
 		return nil, err
 	}
+	r.logContainerStart(containerName, baseContainerName)
+	r.warnPostStartInteractive()
 	prepared, err := r.prepareVolumes(containerName, baseContainerName, mountArgs)
 	if err != nil {
 		return nil, err
@@ -265,8 +267,6 @@ func (r *Runtime) prepareExecution() (*ExecutionContext, error) {
 	if envFileLoaded {
 		r.logEnvFileLoaded()
 	}
-	r.logContainerStart(containerName, baseContainerName)
-	r.warnPostStartInteractive()
 	runCtx := r.prepareRunContext(prepared.AuthState)
 	r.applyPortHints(&runCtx)
 	r.applyDevcontainerPorts()
@@ -1153,7 +1153,7 @@ func (r *Runtime) addGitConfigMount(mounts *mountAccumulator) (hostGitIdentity, 
 	}
 	identity, err := resolveHostGitIdentity(r.host.Home, r.project.Dir)
 	if err != nil {
-		return hostGitIdentity{}, fmt.Errorf("read host Git identity: %w", err)
+		return hostGitIdentity{}, err
 	}
 	addHostGitIdentityEnv(mounts, identity)
 	return identity, nil

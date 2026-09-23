@@ -28,7 +28,7 @@ func TestEntrypointGitIdentity(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			home := t.TempDir()
-			env := append([]string{"USER=agent", "ENCLAVE_HOST_GITCONFIG_PATH=" + filepath.Join(home, "missing-gitconfig")}, tc.env...)
+			env := append([]string{"USER=agent"}, tc.env...)
 			output, err := runEntrypointCommandInHome(t, home, env, "true")
 			if err != nil {
 				t.Fatalf("entrypoint: %v\n%s", err, output)
@@ -112,7 +112,6 @@ func TestEntrypointGitIdentityUsesRepositoryConfigWithoutGlobalIdentity(t *testi
 	}
 	output, err := runEntrypointCommandInHome(t, home, []string{
 		"USER=agent",
-		"ENCLAVE_HOST_GITCONFIG_PATH=" + filepath.Join(home, "missing-gitconfig"),
 	}, "git", "-C", projectDir, "var", "GIT_COMMITTER_IDENT")
 	if err != nil {
 		t.Fatalf("entrypoint: %v\n%s", err, output)

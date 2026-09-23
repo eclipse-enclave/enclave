@@ -109,7 +109,9 @@ enclave cleanup --all
 
 ## Git
 
-Your host `~/.gitconfig` is copied into the container at startup so that user name, email, and other preferences carry over automatically.
+At session start, enclave reads the host's global `user.name` and `user.email` and writes the configured values to the container's Git config. Git reads `~/.gitconfig` and `$XDG_CONFIG_HOME/git/config` (default `~/.config/git/config`); when `$GIT_CONFIG_GLOBAL` is set, it uses that file instead. Included config files are resolved on the host, including `includeIf gitdir` rules for the project. The host `~/.gitconfig`, if present, is also copied for aliases and other preferences.
+
+Before starting a session, enclave requires a complete author and committer identity from the host configuration, the project's Git config, or session `GIT_AUTHOR_*` and `GIT_COMMITTER_*` variables. Supply session variables through the project's `.env`, devcontainer `containerEnv`, or tool/feature environment variables; exporting them in the host shell does not forward them. Devcontainer `runArgs` `--env`/`-e` and `--env-file` values are not considered by this preflight. Host system Git settings can supply missing global values. Repository-local and worktree settings still take precedence. If the identity is incomplete or host Git config cannot be read, startup fails with an error; enclave never invents a name or email. Inside the container, `user.useConfigOnly` prevents Git from guessing an identity if configuration changes later. Enclave does not write identity settings to the project's `.git/config`.
 
 Git commit and tag signing (`commit.gpgsign`, `tag.gpgsign`) are unconditionally disabled inside the container. Host signing keys (GPG or SSH) are not available in the container, so signed commits would always fail.
 

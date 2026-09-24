@@ -45,7 +45,7 @@ func TestPodmanSessionsKeepHostUserNamespace(t *testing.T) {
 		t.Fatalf("podman sessions must run with --userns keep-id, got %q", spec.hostConfig.UserNS)
 	}
 
-	helper := sharedAuthSyncHostConfig("/config", "/auth", "/script.sh", false)
+	helper := sharedAuthSyncHostConfig("/config", "/auth", false)
 	applyHostUserNamespace(helper)
 	if helper.UserNS != "keep-id" {
 		t.Fatalf("auth reconcile helper must run with --userns keep-id under podman, got %q", helper.UserNS)

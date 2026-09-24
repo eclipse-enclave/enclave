@@ -8,7 +8,9 @@
 package qemu
 
 import (
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"enclave/internal/backend"
@@ -70,6 +72,41 @@ func TestBuildRuntimeMountsPropagatesStoreCacheMmap(t *testing.T) {
 	}
 	if got := findRuntimeMount(t, mounts, guestControlPath).CacheMmap; got {
 		t.Fatal("control mount unexpectedly uses cache=mmap")
+	}
+}
+
+// Regression for the CreateSourceDir contract on the qemu backend: a missing
+// disposable source must be created rather than rejected. prepareFileMounts
+// stats every bind source before the runtime mounts are built, so the creation
+// pass has to run ahead of it. The bundle is empty, so the later initramfs
+// steps fail; only the source handling is under test here.
+func TestPrepareGuestRuntimeCreatesMissingDisposableSource(t *testing.T) {
+	be := New(Options{Host: model.Host{Home: t.TempDir()}})
+	source := filepath.Join(t.TempDir(), "cache", "npm")
+	req := backend.Request{
+		Session: backend.SessionMeta{Tool: "codex"},
+		Mounts: []backend.Mount{{
+			Type:            backend.MountTypeBind,
+			Source:          source,
+			ContainerPath:   "/home/agent/.npm",
+			CreateSourceDir: true,
+		}},
+	}
+
+	runtime, err := be.prepareGuestRuntime(bundle{}, req)
+	if runtime.TempDir != "" {
+		t.Cleanup(func() { _ = os.RemoveAll(runtime.TempDir) })
+	}
+	if err != nil && strings.Contains(err.Error(), source) {
+		t.Fatalf("disposable mount source was rejected instead of created: %v", err)
+	}
+
+	info, statErr := os.Stat(source)
+	if statErr != nil {
+		t.Fatalf("disposable mount source %s was not created: %v", source, statErr)
+	}
+	if !info.IsDir() {
+		t.Fatalf("disposable mount source %s is not a directory", source)
 	}
 }
 

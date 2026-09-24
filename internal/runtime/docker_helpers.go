@@ -22,6 +22,15 @@ func bindMount(source string, target string, readOnly bool) backend.Mount {
 	}
 }
 
+// disposableDirMount is a bind mount of a disposable cache directory: deleting
+// the source must only cost performance, never a session start, so the backend
+// may recreate a missing source as an empty directory (backend.Mount.CreateSourceDir).
+func disposableDirMount(source string, target string, readOnly bool) backend.Mount {
+	mount := bindMount(source, target, readOnly)
+	mount.CreateSourceDir = true
+	return mount
+}
+
 func lookupEnv(entries []string, key string) (string, bool) {
 	if key == "" {
 		return "", false

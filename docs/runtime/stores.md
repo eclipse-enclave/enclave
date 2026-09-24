@@ -36,7 +36,9 @@ runtime state that must survive config-source overlays and stay out of host
 config passthrough. Codex pins the database indexing its memories there, along
 with its `state_*.sqlite*` and `thread_history_*.sqlite*` thread databases. The
 thread databases are rebuildable projections of the preserved `sessions/`
-rollouts, pinned to avoid re-deriving them on every overlaid run.
+rollouts, pinned to avoid re-deriving them on every overlaid run. OpenCode pins
+its session database and runtime data there; its separate XDG state directory is
+redirected into the config store as `xdg-state/` so TUI state also survives.
 
 **Ephemeral mode** (`--ephemeral`): A fresh store directory is created with a
 unique suffix key for each session and removed after the container exits. The
@@ -233,10 +235,13 @@ Environment variables consumed by the entrypoint:
 After the container exits, the host-side Go code reconciles auth files from the
 config store to the shared auth store. The reconcile runs `auth-reconcile.sh`
 inside a short-lived helper container (sharing semantics with the entrypoint),
-with the config and auth store **directories bind-mounted**. Most tools remain
-**additive only**: files are copied when the shared auth destination is missing.
-Claude `.credentials.json` uses `claudeAiOauth.expiresAt` so a token refresh
-stranded as a real config-store file can replace stale shared auth.
+with the config and auth store **directories bind-mounted**. The script itself
+is read and retained when the backend is initialized, then inlined into the
+helper command rather than bind-mounted. Reconciliation therefore remains
+independent of the extracted asset cache for the lifetime of the process. Most
+tools remain **additive only**: files are copied when the shared auth destination
+is missing. Claude `.credentials.json` uses `claudeAiOauth.expiresAt` so a token
+refresh stranded as a real config-store file can replace stale shared auth.
 
 This makes new credentials (e.g. a fresh OAuth token obtained during the
 session) available to other projects on the next run. Background and GUI sessions

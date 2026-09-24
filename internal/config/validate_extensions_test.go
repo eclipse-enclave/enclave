@@ -66,6 +66,56 @@ func TestValidateExtensionsUserGoDirWarnsAndPartialOverrideNeedsNoManifest(t *te
 	}
 }
 
+// Only commands/host/ contributes verbs, and the whole tree is kept out of the
+// build context, so a misspelled or unsupported subdirectory ships nothing
+// anywhere. Warning is the only way the author or the user finds out, which
+// also covers an extension written against a newer enclave.
+func TestValidateExtensionsUnsupportedCommandsSubdirWarns(t *testing.T) {
+	paths := newValidationPaths(t)
+	createValidToolExtension(t, paths.ToolsDir, "claude")
+	writeValidationFile(t, filepath.Join(paths.UserToolsDir, "claude",
+		model.CommandsDirName, model.CommandsHostDirName, "vnc-viewer"), "#!/bin/sh\n")
+	writeValidationFile(t, filepath.Join(paths.UserToolsDir, "claude",
+		model.CommandsDirName, model.CommandsSessionDirName, "in-session"), "#!/bin/sh\n")
+	writeValidationFile(t, filepath.Join(paths.UserToolsDir, "claude",
+		model.CommandsDirName, "hosts", "typo"), "#!/bin/sh\n")
+
+	validation, err := ValidateExtensions(paths)
+	if err != nil {
+		t.Fatalf("ValidateExtensions: %v", err)
+	}
+	for _, want := range []string{"ignoring commands/session", "ignoring commands/hosts"} {
+		if !containsText(validation.Warnings, want) {
+			t.Fatalf("expected %q, got warnings=%v", want, validation.Warnings)
+		}
+	}
+	if containsText(validation.Warnings, "ignoring commands/host ") {
+		t.Fatalf("commands/host is the supported directory, warnings=%v", validation.Warnings)
+	}
+	if len(validation.Errors) != 0 {
+		t.Fatalf("unexpected errors: %v", validation.Errors)
+	}
+}
+
+// A tool extension with only commands/host/ is the supported layout and must
+// stay silent, so the warning above cannot become background noise.
+func TestValidateExtensionsHostCommandsOnlyIsQuiet(t *testing.T) {
+	paths := newValidationPaths(t)
+	createValidToolExtension(t, paths.ToolsDir, "claude")
+	writeValidationFile(t, filepath.Join(paths.UserToolsDir, "claude",
+		model.CommandsDirName, model.CommandsHostDirName, "vnc-viewer"), "#!/bin/sh\n")
+	writeValidationFile(t, filepath.Join(paths.UserToolsDir, "claude",
+		model.CommandsDirName, model.CommandsHostDirName, "README.md"), "# not a command\n")
+
+	validation, err := ValidateExtensions(paths)
+	if err != nil {
+		t.Fatalf("ValidateExtensions: %v", err)
+	}
+	if containsText(validation.Warnings, "ignoring commands/") {
+		t.Fatalf("supported layout should warn about nothing, warnings=%v", validation.Warnings)
+	}
+}
+
 func TestValidateExtensionsUserOnlyToolMissingSpecWarnsAndSkips(t *testing.T) {
 	paths := newValidationPaths(t)
 	// A user-only tool directory that exists but never got a spec.yaml (for

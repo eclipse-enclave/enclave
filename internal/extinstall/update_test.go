@@ -11,9 +11,11 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
+	"enclave/internal/config"
 	"enclave/internal/model"
 )
 
@@ -444,5 +446,145 @@ func TestUpdateUnknownName(t *testing.T) {
 	env, _ := testEnv(t, fetcher, "")
 	if _, err := Update(context.Background(), env, updateRequest("missing")); err == nil {
 		t.Fatal("Update accepted an unknown name")
+	}
+}
+
+// markExecutable makes a file in the fake remote executable. The fetcher writes
+// everything 0o644, and only an executable file becomes a host command.
+func markExecutable(t *testing.T, fetcher *fakeFetcher, rel string) {
+	t.Helper()
+	if err := os.Chmod(filepath.Join(fetcher.repo.dir, filepath.FromSlash(rel)), 0o755); err != nil {
+		t.Fatalf("chmod %s: %v", rel, err)
+	}
+}
+
+// TestUpdateAddingHostCommandWarnsWithoutPromisingRebuild: a host command is the
+// one thing an extension can gain that the image never sees. The capability
+// diff has to name it and say where it runs, because an update renders that
+// diff instead of the full summary, but nothing rebuilds.
+func TestUpdateAddingHostCommandWarnsWithoutPromisingRebuild(t *testing.T) {
+	env, _ := testEnv(t, newFakeFetcher(t, "a1b2c3d4", fooRepoFiles()), "")
+	installFoo(t, env)
+
+	const rel = "extensions/features/foo/commands/host/vnc-viewer"
+	next := fooRepoFiles()
+	next[rel] = "#!/bin/sh\necho viewer\n"
+	fetcher := newFakeFetcher(t, "b2c3d4e5", next)
+	markExecutable(t, fetcher, rel)
+	env.Fetcher = fetcher
+	out := &bytesBuffer{}
+	env.Narration = out
+
+	results, err := Update(context.Background(), env, updateRequest())
+	if err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	if len(results) != 1 || results[0].Action != ActionUpdated {
+		t.Fatalf("results = %s", fmtResults(results))
+	}
+	narration := out.String()
+	if !strings.Contains(narration, "adds host command vnc-viewer") {
+		t.Errorf("update did not report the gained host command:\n%s", narration)
+	}
+	if !strings.Contains(narration, "runs on your host outside the sandbox") {
+		t.Errorf("update reported the host command without saying where it runs:\n%s", narration)
+	}
+	if strings.Contains(narration, "rebuilds the image") {
+		t.Errorf("update promised a rebuild for a change the image never sees:\n%s", narration)
+	}
+	if !slices.Equal(results[0].HostCommands, []string{"vnc-viewer"}) {
+		t.Errorf("HostCommands = %v, want [vnc-viewer]", results[0].HostCommands)
+	}
+}
+
+// Under --json the narration above is discarded entirely, so the result
+// envelope is the only place a caller driving the installer learns that the
+// extension can now execute host code. Every action reports it, including the
+// unchanged one an update usually returns.
+func TestHostCommandsReportedOnEveryActionResult(t *testing.T) {
+	const rel = "extensions/features/foo/commands/host/vnc-viewer"
+	files := fooRepoFiles()
+	files[rel] = "#!/bin/sh\necho viewer\n"
+	fetcher := newFakeFetcher(t, "a1b2c3d4", files)
+	markExecutable(t, fetcher, rel)
+	env, _ := testEnv(t, fetcher, "")
+
+	installed, err := Add(context.Background(), env, addRequest())
+	if err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	if len(installed) != 1 || !slices.Equal(installed[0].HostCommands, []string{"vnc-viewer"}) {
+		t.Fatalf("install reported HostCommands %s", fmtResults(installed))
+	}
+
+	unchanged, err := Update(context.Background(), env, updateRequest())
+	if err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	if len(unchanged) != 1 || unchanged[0].Action != ActionUnchanged {
+		t.Fatalf("results = %s", fmtResults(unchanged))
+	}
+	if !slices.Equal(unchanged[0].HostCommands, []string{"vnc-viewer"}) {
+		t.Errorf("an up-to-date extension still contributes its verbs, got %v", unchanged[0].HostCommands)
+	}
+
+	removed, err := Remove(context.Background(), env, removeRequest("foo"))
+	if err != nil {
+		t.Fatalf("Remove: %v", err)
+	}
+	if len(removed) != 1 || removed[0].Action != ActionRemoved {
+		t.Fatalf("results = %s", fmtResults(removed))
+	}
+	if !slices.Equal(removed[0].HostCommands, []string{"vnc-viewer"}) {
+		t.Errorf("remove must name the verbs that stopped resolving, got %v", removed[0].HostCommands)
+	}
+}
+
+// A name a built-in or the user's own command already takes never becomes a
+// verb, so neither the install nor the remove narration may claim it does.
+func TestShadowedHostCommandsAreNotPromised(t *testing.T) {
+	const dir = "extensions/features/foo/commands/host/"
+	files := fooRepoFiles()
+	for _, name := range []string{"status", "mine", "vnc-viewer"} {
+		files[dir+name] = "#!/bin/sh\n"
+	}
+	fetcher := newFakeFetcher(t, "a1b2c3d4", files)
+	for _, name := range []string{"status", "mine", "vnc-viewer"} {
+		markExecutable(t, fetcher, dir+name)
+	}
+	env, out := testEnv(t, fetcher, "")
+	// Discover reads the platform roots under Home, so the installer has to
+	// write where it looks.
+	env.Paths.UserExtensionsDir = config.HostExtensionsDir(env.Home)
+	env.Paths.UserToolsDir = filepath.Join(env.Paths.UserExtensionsDir, model.KindTool.DirName())
+	env.Paths.UserFeaturesDir = filepath.Join(env.Paths.UserExtensionsDir, model.KindFeature.DirName())
+	own := filepath.Join(config.HostCommandsHostDir(env.Home), "mine")
+	if err := os.MkdirAll(filepath.Dir(own), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(own, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	installed, err := Add(context.Background(), env, addRequest())
+	if err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	if !slices.Equal(installed[0].HostCommands, []string{"mine", "status", "vnc-viewer"}) {
+		t.Errorf("HostCommands = %v, want every shipped executable", installed[0].HostCommands)
+	}
+	warnings := strings.Join(installed[0].Warnings, "\n")
+	for _, want := range []string{`"status" is not added`, "a built-in command", `"mine" is not added`, own} {
+		if !strings.Contains(warnings, want) {
+			t.Errorf("warnings missing %q:\n%s", want, warnings)
+		}
+	}
+
+	out.Reset()
+	if _, err := Remove(context.Background(), env, removeRequest("foo")); err != nil {
+		t.Fatalf("Remove: %v", err)
+	}
+	if note := out.String(); !strings.Contains(note, "no longer resolve: vnc-viewer\n") {
+		t.Errorf("remove should name vnc-viewer alone:\n%s", note)
 	}
 }

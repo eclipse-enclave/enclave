@@ -6,9 +6,11 @@
 // SPDX-License-Identifier: MIT
 
 // Package usercmd discovers user-defined subcommands dropped into
-// ~/.config/enclave/commands/{host,session}/. Discovery is intentionally
-// side-effect free: it returns warnings as plain strings so callers can log
-// them via their own logging facility, keeping this package dependency-light.
+// ~/.config/enclave/commands/{host,session}/, plus the host commands installed
+// extensions contribute from their own commands/host/ directory. Discovery is
+// intentionally side-effect free: it returns warnings as plain strings so
+// callers can log them via their own logging facility, keeping this package
+// dependency-light.
 package usercmd
 
 import (
@@ -23,6 +25,28 @@ import (
 	"enclave/internal/config"
 	"enclave/internal/model"
 )
+
+// source identifies who controls a command directory. It decides how the
+// directory's problems are reported: a file the user put in their own tree is
+// theirs to fix, while an extension's tree is replaced wholesale on the next
+// update.
+type source int
+
+const (
+	// sourceUser is a directory under ~/.config/enclave/commands/.
+	sourceUser source = iota
+	// sourceExtension is an installed extension's commands/host/.
+	sourceExtension
+)
+
+// noun names what a stray entry in the directory is, so a warning about an
+// extension's file does not call it a user command.
+func (s source) noun() string {
+	if s == sourceExtension {
+		return "extension command"
+	}
+	return "user command"
+}
 
 // Target identifies where a user command executes.
 type Target string
@@ -39,13 +63,21 @@ type Command struct {
 	Name   string
 	Path   string
 	Target Target
+	// Extension names the installed extension that contributed the command,
+	// and is empty for a command the user dropped into their own commands
+	// tree. Two extension commands differ by nothing else a user can see, so
+	// warnings and --help both need it to say which one they mean.
+	Extension string
 }
 
-// Discover scans ~/.config/enclave/commands/{host,session}/ and returns the
+// Discover scans ~/.config/enclave/commands/{host,session}/ and the
+// commands/host/ directory of every installed extension, and returns the
 // discovered commands together with human-readable warnings. Missing
 // directories are not an error. Regular files with any executable bit become
-// commands; non-executable regular files produce a warning; subdirectories and
-// other non-regular files are skipped silently. Symlinks are followed to their
+// commands. A non-executable regular file in the user's own tree produces a
+// warning, while one in an extension's tree is a data file shipped beside the
+// scripts and is ignored silently. Subdirectories and other non-regular files
+// are skipped silently. Symlinks are followed to their
 // target: a link to an executable regular file becomes a command, a link to a
 // non-executable file warns, a link to a directory is skipped silently, and a
 // broken link warns. Session symlinks are additionally required to be relative
@@ -54,15 +86,21 @@ type Command struct {
 // (model.UserCommandsContainerDir), so absolute link text does not survive the
 // mount and only relative, in-tree chains resolve inside the container; a
 // session symlink with an absolute hop, a hop that escapes the directory, or a
-// loop warns and is skipped. Host symlinks may point anywhere. When the same
-// name exists in both host/ and session/, the host command wins and a warning
-// is emitted. Results are returned in deterministic (name-sorted) order.
+// loop warns and is skipped. Host symlinks may point anywhere.
+//
+// Names are resolved in precedence order: the user's own host/ tree, then their
+// session/ tree, then installed extensions. Every loser is reported rather than
+// dropped silently, so installing an extension can never quietly take a name
+// the user is already using. Results are returned in deterministic
+// (name-sorted) order.
 func Discover(home string) ([]Command, []string) {
-	hostCmds, warnings := scanDir(config.HostCommandsHostDir(home), TargetHost)
-	sessionCmds, sessionWarnings := scanDir(config.HostCommandsSessionDir(home), TargetSession)
+	hostCmds, warnings := scanDir(config.HostCommandsHostDir(home), TargetHost, sourceUser)
+	sessionCmds, sessionWarnings := scanDir(config.HostCommandsSessionDir(home), TargetSession, sourceUser)
 	warnings = append(warnings, sessionWarnings...)
+	extensionCmds, extensionWarnings := scanExtensions(home)
+	warnings = append(warnings, extensionWarnings...)
 
-	byName := make(map[string]Command, len(hostCmds)+len(sessionCmds))
+	byName := make(map[string]Command, len(hostCmds)+len(sessionCmds)+len(extensionCmds))
 	for _, c := range hostCmds {
 		byName[c.Name] = c
 	}
@@ -71,6 +109,13 @@ func Discover(home string) ([]Command, []string) {
 			warnings = append(warnings, fmt.Sprintf(
 				"user command %q defined in both host (%s) and session (%s); using host, ignoring session",
 				c.Name, existing.Path, c.Path))
+			continue
+		}
+		byName[c.Name] = c
+	}
+	for _, c := range extensionCmds {
+		if existing, ok := byName[c.Name]; ok {
+			warnings = append(warnings, shadowedExtensionWarning(c, existing))
 			continue
 		}
 		byName[c.Name] = c
@@ -84,16 +129,109 @@ func Discover(home string) ([]Command, []string) {
 	return cmds, warnings
 }
 
-// scanDir reads a single command directory. Entries are returned by os.ReadDir
-// in sorted order, so warnings and commands are already deterministic.
-func scanDir(dir string, target Target) ([]Command, []string) {
+// scanExtensions reads the host command directory of every installed
+// extension, tools before features and alphabetically within each kind, so two
+// extensions claiming one name resolve the same way on every host.
+//
+// Only the user extension root is read, matching where the installer writes. A
+// built-in extension's own tree ships inside the binary and is unpacked into a
+// content-addressed cache, which is not a place a host-executed script should
+// be found, so a built-in that wants a verb adds a real command instead. A
+// directory the user creates there by hand is read like any other, including
+// one that overrides a built-in: it sits under the user's own config root, so
+// it carries the same trust as their commands/ tree.
+func scanExtensions(home string) ([]Command, []string) {
+	root := config.HostExtensionsDir(home)
+	var (
+		cmds     []Command
+		warnings []string
+	)
+	for _, kind := range []model.ExtensionKind{model.KindTool, model.KindFeature} {
+		kindDir := filepath.Join(root, kind.DirName())
+		entries, err := os.ReadDir(kindDir)
+		if err != nil {
+			if !errors.Is(err, fs.ErrNotExist) {
+				warnings = append(warnings, fmt.Sprintf(
+					"cannot read extension directory %q: %v", kindDir, err))
+			}
+			continue
+		}
+		for _, entry := range entries {
+			if !config.IsExtensionDir(entry) {
+				continue
+			}
+			dir := ExtensionHostDir(filepath.Join(kindDir, entry.Name()))
+			found, dirWarnings := scanDir(dir, TargetHost, sourceExtension)
+			warnings = append(warnings, dirWarnings...)
+			for _, c := range found {
+				c.Extension = entry.Name()
+				cmds = append(cmds, c)
+			}
+		}
+	}
+	return cmds, warnings
+}
+
+// shadowedExtensionWarning explains why an extension's command did not become a
+// verb: either the user defines that name themselves, or another extension
+// claimed it first.
+func shadowedExtensionWarning(dropped Command, kept Command) string {
+	if kept.Extension != "" {
+		return fmt.Sprintf(
+			"extensions %s and %s both define command %q, using %s and ignoring %s",
+			kept.Extension, dropped.Extension, dropped.Name, kept.Path, dropped.Path)
+	}
+	return fmt.Sprintf(
+		"command %q from extension %s is shadowed by your own user command (%s), ignoring %s",
+		dropped.Name, dropped.Extension, kept.Path, dropped.Path)
+}
+
+// ExtensionHostDir is the directory whose executables extDir contributes as
+// host commands.
+func ExtensionHostDir(extDir string) string {
+	return filepath.Join(extDir, model.CommandsDirName, model.CommandsHostDirName)
+}
+
+// ExtensionCommandNames lists the verbs extDir contributes, in sorted order,
+// using the same filter Discover applies. A missing commands/host/ yields
+// nothing. Whether a name actually registers also depends on what else claims
+// it, see Shadowed.
+func ExtensionCommandNames(extDir string) ([]string, error) {
+	cmds, _, err := readDir(ExtensionHostDir(extDir), TargetHost, sourceExtension)
+	if err != nil {
+		return nil, err
+	}
+	names := make([]string, 0, len(cmds))
+	for _, c := range cmds {
+		names = append(names, c.Name)
+	}
+	return names, nil
+}
+
+// scanDir reads a single command directory and reports an unreadable one as a
+// warning. src decides how the directory's problems are described and whether
+// a non-executable file is worth a warning at all.
+func scanDir(dir string, target Target, src source) ([]Command, []string) {
+	cmds, warnings, err := readDir(dir, target, src)
+	if err != nil {
+		return nil, []string{fmt.Sprintf(
+			"cannot read %s directory %q: %v", src.noun(), dir, err)}
+	}
+	return cmds, warnings
+}
+
+// readDir is scanDir with the directory read error returned rather than
+// folded into the warnings. A missing directory is not an error. Entries are
+// returned by os.ReadDir in sorted order, so warnings and commands are already
+// deterministic.
+func readDir(dir string, target Target, src source) ([]Command, []string, error) {
+	noun := src.noun()
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
-			return nil, nil
+			return nil, nil, nil
 		}
-		return nil, []string{fmt.Sprintf(
-			"cannot read user command directory %q: %v", dir, err)}
+		return nil, nil, err
 	}
 
 	var (
@@ -104,7 +242,7 @@ func scanDir(dir string, target Target) ([]Command, []string) {
 		path := filepath.Join(dir, entry.Name())
 		info, err := entry.Info()
 		if err != nil {
-			warnings = append(warnings, fmt.Sprintf("skipping user command %q: %v", path, err))
+			warnings = append(warnings, fmt.Sprintf("skipping %s %q: %v", noun, path, err))
 			continue
 		}
 		isSymlink := info.Mode()&fs.ModeSymlink != 0
@@ -114,7 +252,7 @@ func scanDir(dir string, target Target) ([]Command, []string) {
 			info, err = os.Stat(path)
 			if err != nil {
 				warnings = append(warnings, fmt.Sprintf(
-					"skipping user command %q: broken symlink: %v", path, err))
+					"skipping %s %q: broken symlink: %v", noun, path, err))
 				continue
 			}
 		}
@@ -122,8 +260,15 @@ func scanDir(dir string, target Target) ([]Command, []string) {
 			continue
 		}
 		if info.Mode().Perm()&0o111 == 0 {
-			warnings = append(warnings, fmt.Sprintf(
-				"user command %q is not executable; chmod +x or remove it", path))
+			// An extension ships its commands/host/ as it sees fit: a README or
+			// a data file beside the scripts is deliberate, the user cannot
+			// chmod it without the next update undoing that, and the installer
+			// already refused to report it as a command. Only the user's own
+			// tree is nagged about, where the file is theirs to fix.
+			if src == sourceUser {
+				warnings = append(warnings, fmt.Sprintf(
+					"%s %q is not executable; chmod +x or remove it", noun, path))
+			}
 			continue
 		}
 		// Session commands run inside a container where only the session
@@ -141,7 +286,7 @@ func scanDir(dir string, target Target) ([]Command, []string) {
 		}
 		cmds = append(cmds, Command{Name: entry.Name(), Path: path, Target: target})
 	}
-	return cmds, warnings
+	return cmds, warnings, nil
 }
 
 // maxSymlinkHops caps symlink chain traversal, mirroring the Linux ELOOP

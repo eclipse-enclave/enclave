@@ -77,7 +77,7 @@ func validateBuiltinToolExtensions(paths model.Paths, result *ExtensionValidatio
 	}
 
 	for _, entry := range entries {
-		if !isExtensionDir(entry) {
+		if !IsExtensionDir(entry) {
 			continue
 		}
 		name := entry.Name()
@@ -119,7 +119,7 @@ func validateUserExtensions(paths model.Paths, kind model.ExtensionKind, result 
 	}
 
 	for _, entry := range entries {
-		if !isExtensionDir(entry) {
+		if !IsExtensionDir(entry) {
 			continue
 		}
 		validateUserExtension(paths, kind, entry.Name(), false, result)
@@ -141,6 +141,7 @@ func validateUserExtension(paths model.Paths, kind model.ExtensionKind, name str
 	if util.IsDir(filepath.Join(userDir, model.ExtensionGoDir)) {
 		result.Warnings = append(result.Warnings, fmt.Sprintf("%s %q: user go/ handlers are ignored (requires recompilation)", kind.Label(), name))
 	}
+	validateCommandsDir(kind, name, userDir, result)
 
 	if !hasBuiltin && !hasOwnSpecFile(userDir) {
 		result.Warnings = append(result.Warnings, fmt.Sprintf("%s %q: missing %s in user extension (skipping)", kind.Label(), name, SpecFilename))
@@ -158,6 +159,32 @@ func validateUserExtension(paths model.Paths, kind model.ExtensionKind, name str
 		if util.PathExists(userAllowlistPath) {
 			validateUserAllowlistIncludes(paths, name, userAllowlistPath, result)
 		}
+	}
+}
+
+// validateCommandsDir warns about anything in an extension's commands/ that
+// contributes nothing. Only commands/host/ is read, and the whole tree is kept
+// out of the build context, so a misspelled or unsupported subdirectory is
+// otherwise inert in every direction: it ships no verb, reaches no image, and
+// would go unnoticed. The likely causes are a typo and an extension written
+// against a newer enclave than the one reading it, and the user can act on
+// either.
+func validateCommandsDir(kind model.ExtensionKind, name string, userDir string, result *ExtensionValidation) {
+	commandsDir := filepath.Join(userDir, model.CommandsDirName)
+	entries, err := os.ReadDir(commandsDir)
+	if err != nil {
+		// A missing commands/ is the normal case, and an unreadable one is
+		// reported by usercmd when it tries to read it too.
+		return
+	}
+	for _, entry := range entries {
+		if entry.IsDir() && entry.Name() == model.CommandsHostDirName {
+			continue
+		}
+		result.Warnings = append(result.Warnings, fmt.Sprintf(
+			"%s %q: ignoring %s/%s (only %s/%s/ is read)",
+			kind.Label(), name, model.CommandsDirName, entry.Name(),
+			model.CommandsDirName, model.CommandsHostDirName))
 	}
 }
 
@@ -237,7 +264,7 @@ func validateBuiltinFeatureExtensions(paths model.Paths, result *ExtensionValida
 	}
 
 	for _, entry := range entries {
-		if !isExtensionDir(entry) {
+		if !IsExtensionDir(entry) {
 			continue
 		}
 		name := entry.Name()

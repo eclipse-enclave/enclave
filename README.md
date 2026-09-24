@@ -24,13 +24,14 @@ Runtime dependencies:
   whichever engine is installed and asks once when both are; see
   [Backend detection](docs/cli-reference.md#backend-detection) and
   [Podman backend](docs/cli-reference.md#podman-backend).
+- Git 2.26 or newer is required to read the host identity at session start.
 - Optional: `qemu-system-x86_64` and `cpio` for the experimental `qemu` backend,
   which builds an x86-64 guest and is practical only on x86-64 Linux hosts,
   where KVM can accelerate it. On arm64 hosts and on macOS it falls back to
   full emulation. The default `docker` backend is unaffected and runs natively
   on every supported platform.
 
-Building from source additionally requires Git, Make, and Go 1.24 or newer. Use
+Building from source additionally requires Make and Go 1.24 or newer. Use
 the official [Go installation instructions](https://go.dev/doc/install) if your
 distribution does not provide a recent enough version.
 
@@ -197,6 +198,8 @@ enclave shell               # Open interactive shell in container
 enclave info                # Show config and image details
 enclave version             # Show binary version and source commit (--json; alias: --version)
 ```
+
+Sessions require a configured Git author and committer identity, even outside a Git repository. If either is incomplete, enclave exits before starting the container; see [Git identity](docs/persistence.md#git).
 
 **Tool selection:** The first interactive session asks which coding agent to run and saves the answer as `"tool"` in `~/.config/enclave/config.json`; later runs start it without asking. Scripts and non-terminal runs are never asked: without a configured tool they fail with a message naming `--tool` and the `tool` key. See [Tool selection](docs/cli-reference.md#tool-selection).
 

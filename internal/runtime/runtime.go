@@ -245,19 +245,27 @@ func (r *Runtime) prepareExecution() (*ExecutionContext, error) {
 	}
 	r.removeStaleGateway(containerName)
 	r.setConfigVolumeSuffix(containerName, baseContainerName)
-	r.logContainerStart(containerName, baseContainerName)
-	r.warnPostStartInteractive()
 
 	r.resolveContainerUser()
 	r.ideBridgePorts = discoverIdeBridgePorts(r.host.Home)
 	r.ideBridgePorts = mergeBridgePorts(r.ideBridgePorts, r.run.BridgePorts)
-	mountArgs, err := r.prepareMounts()
+	mountArgs, gitIdentity, err := r.prepareMounts()
 	if err != nil {
 		return nil, err
 	}
+	projectEnv, envFileLoaded := r.envFileValues()
+	sessionEnv := append(append([]string{}, mountArgs.Env()...), projectEnv...)
+	if err := validateGitIdentity(gitIdentity, sessionEnv); err != nil {
+		return nil, err
+	}
+	r.logContainerStart(containerName, baseContainerName)
+	r.warnPostStartInteractive()
 	prepared, err := r.prepareVolumes(containerName, baseContainerName, mountArgs)
 	if err != nil {
 		return nil, err
+	}
+	if envFileLoaded {
+		r.logEnvFileLoaded()
 	}
 	runCtx := r.prepareRunContext(prepared.AuthState)
 	r.applyPortHints(&runCtx)
@@ -277,6 +285,7 @@ func (r *Runtime) prepareExecution() (*ExecutionContext, error) {
 	}
 	env := append([]string{}, mountArgs.Env()...)
 	env = append(env, networkResult.Env...)
+	env = append(env, projectEnv...)
 	cleanup := mergeCleanup(prepared.Cleanup, networkResult.Cleanup)
 	return &ExecutionContext{
 		ContainerName: containerName,
@@ -337,14 +346,17 @@ func (r *Runtime) logContainerStart(containerName string, baseContainerName stri
 	logx.Successf("Starting container for: %s", r.project.Name)
 }
 
-func (r *Runtime) prepareMounts() (*mountAccumulator, error) {
+func (r *Runtime) prepareMounts() (*mountAccumulator, hostGitIdentity, error) {
 	baseMounts, baseEnv := r.baseMounts()
 	mountArgs := newMountAccumulator(baseMounts, baseEnv)
 	r.addDevcontainerMounts(mountArgs)
 	r.addAdditionalMounts(mountArgs)
 	r.addUserCommandMount(mountArgs)
 	r.addWorktreeMetadataMounts(mountArgs)
-	r.addGitConfigMount(mountArgs)
+	gitIdentity, err := r.addGitConfigMount(mountArgs)
+	if err != nil {
+		return nil, hostGitIdentity{}, err
+	}
 	r.addSSHMount(mountArgs)
 	r.addImageInboxMount(mountArgs)
 	r.addSessionMonitorEnv(mountArgs)
@@ -353,11 +365,11 @@ func (r *Runtime) prepareMounts() (*mountAccumulator, error) {
 	r.addMemoryMounts(mountArgs)
 	r.addToolConfigMounts(mountArgs)
 	if err := r.prepareToolConfigSource(); err != nil {
-		return nil, err
+		return nil, hostGitIdentity{}, err
 	}
 	if !r.toolConfigSourceHandlesSkills() {
 		if err := r.addSkillMounts(mountArgs); err != nil {
-			return nil, err
+			return nil, hostGitIdentity{}, err
 		}
 	}
 	r.addIdeBridgeMount(mountArgs)
@@ -366,7 +378,7 @@ func (r *Runtime) prepareMounts() (*mountAccumulator, error) {
 		mountArgs.AddEnv(model.EnvPlaywrightMCP, "1")
 		logx.Infof("Playwright MCP server enabled for Claude Code")
 	}
-	return mountArgs, nil
+	return mountArgs, gitIdentity, nil
 }
 
 func (r *Runtime) prepareVolumes(containerName string, baseContainerName string, mountArgs *mountAccumulator) (preparedVolumes, error) {
@@ -862,7 +874,6 @@ func (r *Runtime) backendRequest(ctx *ExecutionContext, detached bool, interacti
 
 func (r *Runtime) containerEnv(ctx *ExecutionContext, interactive bool) []string {
 	env := append([]string{}, ctx.Env...)
-	env = append(env, r.envFileValues()...)
 	if !interactive {
 		return env
 	}
@@ -1135,11 +1146,17 @@ func (r *Runtime) addAdditionalMounts(mountArgs *mountAccumulator) {
 	mounts.AddAdditional(mountArgs.MountsPtr(), readOnlyDirs, true)
 }
 
-func (r *Runtime) addGitConfigMount(mounts *mountAccumulator) {
+func (r *Runtime) addGitConfigMount(mounts *mountAccumulator) (hostGitIdentity, error) {
 	gitconfig := filepath.Join(r.host.Home, ".gitconfig")
 	if util.PathExists(gitconfig) {
 		mounts.AddMount(bindMount(gitconfig, "/tmp/host_gitconfig", true))
 	}
+	identity, err := resolveHostGitIdentity(r.host.Home, r.project.Dir)
+	if err != nil {
+		return hostGitIdentity{}, err
+	}
+	addHostGitIdentityEnv(mounts, identity)
+	return identity, nil
 }
 
 func (r *Runtime) addSSHMount(mounts *mountAccumulator) {
@@ -1705,22 +1722,26 @@ func (r *Runtime) addToolSettingsTemplate(mounts *mountAccumulator) {
 	}
 }
 
-func (r *Runtime) envFileValues() []string {
+func (r *Runtime) envFileValues() ([]string, bool) {
 	projectEnv := filepath.Join(r.project.Dir, ".env")
 	if util.PathExists(projectEnv) {
-		if keys, err := util.EnvKeysFromFile(projectEnv); err == nil && len(keys) > 0 {
-			logx.Warnf(".env file loaded into container (keys: %s)", strings.Join(keys, ", "))
-		} else {
-			logx.Warnf(".env file loaded into container")
-		}
 		values, err := util.ParseEnvFile(projectEnv)
 		if err != nil {
 			logx.Warnf("Failed to read .env file: %v", err)
-			return nil
+			return nil, false
 		}
-		return values
+		return values, true
 	}
-	return nil
+	return nil, false
+}
+
+func (r *Runtime) logEnvFileLoaded() {
+	projectEnv := filepath.Join(r.project.Dir, ".env")
+	if keys, err := util.EnvKeysFromFile(projectEnv); err == nil && len(keys) > 0 {
+		logx.Warnf(".env file loaded into container (keys: %s)", strings.Join(keys, ", "))
+	} else {
+		logx.Warnf(".env file loaded into container")
+	}
 }
 
 func formatEnvContent(values map[string]string) string {

@@ -46,6 +46,8 @@ const (
 	EnvProjectMount             = EnvPrefix + "PROJECT_MOUNT"
 	EnvConfigDir                = EnvPrefix + "CONFIG_DIR"
 	EnvSessionMonitor           = EnvPrefix + "SESSION_MONITOR"
+	EnvGitName                  = EnvPrefix + "GIT_NAME"
+	EnvGitEmail                 = EnvPrefix + "GIT_EMAIL"
 	// EnvSessionMonitorUser records the user that owns the managed tmux server
 	// so `status` can capture as that user (the agent runs remapped under
 	// --runtime-uid-remap, so the container's default exec user is not the

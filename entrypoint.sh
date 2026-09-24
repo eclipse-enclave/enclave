@@ -500,18 +500,22 @@ if [ -d "/tmp/host_direnv_allow" ] && [ -n "$PROJECT_DIR" ] && [ -f "$PROJECT_DI
 fi
 
 # Set up git config for commits inside container
-if [ -f "/tmp/host_gitconfig" ]; then
-    cp /tmp/host_gitconfig "$HOME/.gitconfig"
+host_gitconfig="${ENCLAVE_HOST_GITCONFIG_PATH:-/tmp/host_gitconfig}"
+if [ -f "$host_gitconfig" ]; then
+    cp "$host_gitconfig" "$HOME/.gitconfig"
 else
-    cat > "$HOME/.gitconfig" << EOF
-[user]
-    email = ${USER}@enclave
-    name = ${USER^} (enclave)
-[init]
-    defaultBranch = main
-EOF
-    echo "Using default git identity (${USER}@enclave). Configure ~/.gitconfig on host to customize."
+    git config --file "$HOME/.gitconfig" init.defaultBranch main
 fi
+unset ENCLAVE_HOST_GITCONFIG_PATH host_gitconfig
+
+if [ -n "${ENCLAVE_GIT_NAME:-}" ]; then
+    git config --file "$HOME/.gitconfig" --replace-all user.name "$ENCLAVE_GIT_NAME"
+fi
+if [ -n "${ENCLAVE_GIT_EMAIL:-}" ]; then
+    git config --file "$HOME/.gitconfig" --replace-all user.email "$ENCLAVE_GIT_EMAIL"
+fi
+git config --file "$HOME/.gitconfig" --replace-all user.useConfigOnly true
+unset ENCLAVE_GIT_NAME ENCLAVE_GIT_EMAIL
 
 # Disable commit/tag signing inside the container — signing keys from the
 # host are not available, so signed commits would always fail.

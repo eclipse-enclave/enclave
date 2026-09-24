@@ -43,6 +43,7 @@ func runEntrypointCommandInHome(t *testing.T, home string, extraEnv []string, ar
 		"HOME=" + home,
 		"PROJECT_DIR=" + projectDir,
 		"TOOL=pi",
+		"ENCLAVE_HOST_GITCONFIG_PATH=" + filepath.Join(home, "missing-host-gitconfig"),
 	}
 	cmd.Env = append(cmd.Env, extraEnv...)
 

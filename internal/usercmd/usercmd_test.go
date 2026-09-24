@@ -710,3 +710,48 @@ func TestDiscoverWithoutInstalledExtensionsIsQuiet(t *testing.T) {
 		t.Fatalf("expected nothing on a host with no extensions, got %v / %v", cmds, warnings)
 	}
 }
+
+// An interrupted update leaves the previous tree behind as .replaced-<name>-*
+// until the installer sweeps it. list and remove cannot see it, so it must not
+// keep contributing verbs either.
+func TestDiscoverIgnoresInstallerStagingDirs(t *testing.T) {
+	home := t.TempDir()
+	dir := extensionCommandDir(t, home, model.KindFeature, ".replaced-vnc-1234-1")
+	writeExec(t, filepath.Join(dir, "vnc-viewer"))
+
+	cmds, warnings := Discover(home)
+	if len(cmds) != 0 || len(warnings) != 0 {
+		t.Fatalf("expected a staging directory to be inert, got %v / %v", cmds, warnings)
+	}
+}
+
+func TestShadowedReportsBuiltinsAndUserCommands(t *testing.T) {
+	home := t.TempDir()
+	hostDir, _ := mkdirs(t, home)
+	writeExec(t, filepath.Join(hostDir, "mine"))
+
+	got := Shadowed(home, []string{"status", "mine", "vnc-viewer"})
+	if len(got) != 2 || got["status"] != "a built-in command" ||
+		!strings.Contains(got["mine"], filepath.Join(hostDir, "mine")) {
+		t.Fatalf("Shadowed = %v", got)
+	}
+}
+
+func TestResolvingSkipsShadowedNames(t *testing.T) {
+	home := t.TempDir()
+	hostDir, _ := mkdirs(t, home)
+	writeExec(t, filepath.Join(hostDir, "mine"))
+	dir := extensionCommandDir(t, home, model.KindFeature, "vnc")
+	for _, name := range []string{"status", "mine", "vnc-viewer"} {
+		writeExec(t, filepath.Join(dir, name))
+	}
+
+	extDir := filepath.Join(config.HostExtensionsDir(home), model.KindFeature.DirName(), "vnc")
+	if got := Resolving(home, extDir); len(got) != 1 || got[0] != "vnc-viewer" {
+		t.Fatalf("Resolving = %v, want [vnc-viewer]", got)
+	}
+	names, err := ExtensionCommandNames(extDir)
+	if err != nil || strings.Join(names, ",") != "mine,status,vnc-viewer" {
+		t.Fatalf("ExtensionCommandNames = %v, %v", names, err)
+	}
+}

@@ -19,6 +19,7 @@ import (
 
 	"enclave/internal/config"
 	"enclave/internal/model"
+	"enclave/internal/usercmd"
 	"enclave/internal/util"
 )
 
@@ -43,11 +44,39 @@ type capabilities struct {
 	// HostCommands are the enclave verbs the extension contributes, which run
 	// on the host rather than in the sandbox. Nothing else an extension ships
 	// executes outside a container, so this is reported on its own.
-	HostCommands   []string
-	ShadowsBuiltin bool
-	IgnoredGoDir   bool
-	Files          int
-	Bytes          int64
+	HostCommands []string
+	// ShadowedHostCommands maps each of HostCommands that will not become a
+	// verb to what takes the name instead, see usercmd.Shadowed. It depends on
+	// the host rather than the tree, so inspect leaves it to the caller.
+	ShadowedHostCommands map[string]string
+	ShadowsBuiltin       bool
+	IgnoredGoDir         bool
+	Files                int
+	Bytes                int64
+}
+
+// addedHostCommands are the HostCommands that become verbs.
+func (c capabilities) addedHostCommands() []string {
+	var added []string
+	for _, name := range c.HostCommands {
+		if _, shadowed := c.ShadowedHostCommands[name]; !shadowed {
+			added = append(added, name)
+		}
+	}
+	return added
+}
+
+// shadowedHostCommandWarnings explains each host command that will not become
+// a verb, in HostCommands order.
+func (c capabilities) shadowedHostCommandWarnings() []string {
+	var warnings []string
+	for _, name := range c.HostCommands {
+		if by, shadowed := c.ShadowedHostCommands[name]; shadowed {
+			warnings = append(warnings, fmt.Sprintf(
+				"host command %q is not added as `%s %s`: %s takes the name", name, model.AppName, name, by))
+		}
+	}
+	return warnings
 }
 
 // yoloActive reports whether the extension arranges for the agent's launch
@@ -86,7 +115,7 @@ func inspect(dir string, kind model.ExtensionKind) (capabilities, error) {
 	}
 	// Read separately from the tree walk so this and the inventory answer
 	// "which verbs does this extension add" from the same code.
-	hostCommands, err := hostCommandNames(dir)
+	hostCommands, err := usercmd.ExtensionCommandNames(dir)
 	if err != nil {
 		return capabilities{}, err
 	}

@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 	"reflect"
+	"sort"
 	"strings"
 	"testing"
 
@@ -1594,5 +1595,18 @@ func TestParseFeaturesBareStillLists(t *testing.T) {
 	}
 	if res.Action != "features" || res.ExtRequest != nil {
 		t.Fatalf("action = %q, request = %+v", res.Action, res.ExtRequest)
+	}
+}
+
+func TestBuiltinNamesMatchRootCommand(t *testing.T) {
+	var got []string
+	for name := range builtinCommandNames(newRootCommand(&Result{})) {
+		got = append(got, name)
+	}
+	sort.Strings(got)
+	want := append([]string{}, usercmd.BuiltinNames...)
+	sort.Strings(want)
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("usercmd.BuiltinNames = %v, root command registers %v", want, got)
 	}
 }

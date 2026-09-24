@@ -157,10 +157,10 @@ func scanExtensions(home string) ([]Command, []string) {
 			continue
 		}
 		for _, entry := range entries {
-			if !entry.IsDir() {
+			if !config.IsExtensionDir(entry) {
 				continue
 			}
-			dir := filepath.Join(kindDir, entry.Name(), model.CommandsDirName, model.CommandsHostDirName)
+			dir := ExtensionHostDir(filepath.Join(kindDir, entry.Name()))
 			found, dirWarnings := scanDir(dir, TargetHost, sourceExtension)
 			warnings = append(warnings, dirWarnings...)
 			for _, c := range found {
@@ -186,19 +186,52 @@ func shadowedExtensionWarning(dropped Command, kept Command) string {
 		dropped.Name, dropped.Extension, kept.Path, dropped.Path)
 }
 
-// scanDir reads a single command directory. Entries are returned by os.ReadDir
-// in sorted order, so warnings and commands are already deterministic. src
-// decides how the directory's problems are described and whether a
-// non-executable file is worth a warning at all.
+// ExtensionHostDir is the directory whose executables extDir contributes as
+// host commands.
+func ExtensionHostDir(extDir string) string {
+	return filepath.Join(extDir, model.CommandsDirName, model.CommandsHostDirName)
+}
+
+// ExtensionCommandNames lists the verbs extDir contributes, in sorted order,
+// using the same filter Discover applies. A missing commands/host/ yields
+// nothing. Whether a name actually registers also depends on what else claims
+// it, see Shadowed.
+func ExtensionCommandNames(extDir string) ([]string, error) {
+	cmds, _, err := readDir(ExtensionHostDir(extDir), TargetHost, sourceExtension)
+	if err != nil {
+		return nil, err
+	}
+	names := make([]string, 0, len(cmds))
+	for _, c := range cmds {
+		names = append(names, c.Name)
+	}
+	return names, nil
+}
+
+// scanDir reads a single command directory and reports an unreadable one as a
+// warning. src decides how the directory's problems are described and whether
+// a non-executable file is worth a warning at all.
 func scanDir(dir string, target Target, src source) ([]Command, []string) {
+	cmds, warnings, err := readDir(dir, target, src)
+	if err != nil {
+		return nil, []string{fmt.Sprintf(
+			"cannot read %s directory %q: %v", src.noun(), dir, err)}
+	}
+	return cmds, warnings
+}
+
+// readDir is scanDir with the directory read error returned rather than
+// folded into the warnings. A missing directory is not an error. Entries are
+// returned by os.ReadDir in sorted order, so warnings and commands are already
+// deterministic.
+func readDir(dir string, target Target, src source) ([]Command, []string, error) {
 	noun := src.noun()
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
-			return nil, nil
+			return nil, nil, nil
 		}
-		return nil, []string{fmt.Sprintf(
-			"cannot read %s directory %q: %v", noun, dir, err)}
+		return nil, nil, err
 	}
 
 	var (
@@ -253,7 +286,7 @@ func scanDir(dir string, target Target, src source) ([]Command, []string) {
 		}
 		cmds = append(cmds, Command{Name: entry.Name(), Path: path, Target: target})
 	}
-	return cmds, warnings
+	return cmds, warnings, nil
 }
 
 // maxSymlinkHops caps symlink chain traversal, mirroring the Linux ELOOP

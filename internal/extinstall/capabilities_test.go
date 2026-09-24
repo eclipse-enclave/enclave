@@ -265,6 +265,28 @@ func TestRenderHostCommandsNamesTheRisk(t *testing.T) {
 	}
 }
 
+// TestRenderAndDiffSkipShadowedHostCommands keeps a name that a built-in or
+// the user's own command takes from being promised as a verb.
+func TestRenderAndDiffSkipShadowedHostCommands(t *testing.T) {
+	caps := capabilities{
+		HostCommands:         []string{"status", "vnc-viewer"},
+		ShadowedHostCommands: map[string]string{"status": "a built-in command"},
+	}
+	var out bytes.Buffer
+	caps.render(&out, Style{}, "")
+	if !strings.Contains(out.String(), "vnc-viewer") || strings.Contains(out.String(), "status") {
+		t.Errorf("summary should list vnc-viewer alone:\n%s", out.String())
+	}
+	warnings := caps.shadowedHostCommandWarnings()
+	if len(warnings) != 1 || !strings.Contains(warnings[0], `"status"`) || !strings.Contains(warnings[0], "a built-in command") {
+		t.Errorf("warnings = %v, want one naming status and the built-in", warnings)
+	}
+	changes := diffCapabilities(capabilities{}, caps)
+	if joined := strings.Join(changes, "\n"); strings.Contains(joined, "status") {
+		t.Errorf("diff promises a shadowed verb: %v", changes)
+	}
+}
+
 // TestDiffHostCommandsRepeatsTheRisk covers an update, which renders the diff
 // alone and never the capability summary: a command gained that way has to
 // carry the warning itself or it is never shown one.
@@ -810,6 +832,8 @@ func TestCapabilitiesFieldsParticipateInRenderAndDiff(t *testing.T) {
 		"Spec.Name":        "extension identity, not a capability: render's header carries it",
 		"Spec.DisplayName": "extension identity, not a capability; reported by `list --json`",
 		"Spec.Description": "extension identity, not a capability; reported by `list --json`",
+		"ShadowedHostCommands": "filters HostCommands rather than adding a capability; covered by " +
+			"TestRenderAndDiffSkipShadowedHostCommands",
 		"ShadowsBuiltin": "set by the installer around inspect rather than derived from the tree; diffing it " +
 			"would read as 'newly shadowing' on every update of an extension that already shadows a built-in",
 	}

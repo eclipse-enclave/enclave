@@ -12,6 +12,7 @@ import (
 
 	"enclave/internal/config"
 	"enclave/internal/model"
+	"enclave/internal/usercmd"
 )
 
 // Managed describes one discovered extension: where its files come from, and
@@ -76,7 +77,7 @@ func Inventory(paths model.Paths, kind model.ExtensionKind, names []string, deta
 		if userDir != "" {
 			// An unreadable commands/host/ is not worth failing a listing over,
 			// and usercmd warns about it on the next invocation anyway.
-			entry.HostCommands, _ = hostCommandNames(userDir)
+			entry.HostCommands, _ = usercmd.ExtensionCommandNames(userDir)
 		}
 		if detail > InventoryNames && userDir != "" {
 			origin, readErr := readOrigin(userDir)

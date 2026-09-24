@@ -77,7 +77,7 @@ func validateBuiltinToolExtensions(paths model.Paths, result *ExtensionValidatio
 	}
 
 	for _, entry := range entries {
-		if !isExtensionDir(entry) {
+		if !IsExtensionDir(entry) {
 			continue
 		}
 		name := entry.Name()
@@ -119,7 +119,7 @@ func validateUserExtensions(paths model.Paths, kind model.ExtensionKind, result 
 	}
 
 	for _, entry := range entries {
-		if !isExtensionDir(entry) {
+		if !IsExtensionDir(entry) {
 			continue
 		}
 		validateUserExtension(paths, kind, entry.Name(), false, result)
@@ -264,7 +264,7 @@ func validateBuiltinFeatureExtensions(paths model.Paths, result *ExtensionValida
 	}
 
 	for _, entry := range entries {
-		if !isExtensionDir(entry) {
+		if !IsExtensionDir(entry) {
 			continue
 		}
 		name := entry.Name()

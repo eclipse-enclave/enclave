@@ -94,7 +94,9 @@ and `remove` alike. `enclave tools|features list` reports the same set per
 installed extension, as a `[host: ...]` suffix in its text output and as
 `hostCommands` under `--json`, so you can audit after the fact which
 extensions can execute host code. They resolve whenever an extension is
-installed, whether or not it is enabled.
+installed, whether or not it is enabled. `hostCommands` lists every executable
+the extension ships, including one whose name a built-in or your own command
+already takes. The summary leaves that one out and `add` warns about it.
 
 Before writing anything, `add` and `update` show a capability summary
 distilled from the staged content itself

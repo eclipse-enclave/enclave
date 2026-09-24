@@ -15,6 +15,7 @@ import (
 	"strings"
 	"testing"
 
+	"enclave/internal/config"
 	"enclave/internal/model"
 )
 
@@ -536,5 +537,54 @@ func TestHostCommandsReportedOnEveryActionResult(t *testing.T) {
 	}
 	if !slices.Equal(removed[0].HostCommands, []string{"vnc-viewer"}) {
 		t.Errorf("remove must name the verbs that stopped resolving, got %v", removed[0].HostCommands)
+	}
+}
+
+// A name a built-in or the user's own command already takes never becomes a
+// verb, so neither the install nor the remove narration may claim it does.
+func TestShadowedHostCommandsAreNotPromised(t *testing.T) {
+	const dir = "extensions/features/foo/commands/host/"
+	files := fooRepoFiles()
+	for _, name := range []string{"status", "mine", "vnc-viewer"} {
+		files[dir+name] = "#!/bin/sh\n"
+	}
+	fetcher := newFakeFetcher(t, "a1b2c3d4", files)
+	for _, name := range []string{"status", "mine", "vnc-viewer"} {
+		markExecutable(t, fetcher, dir+name)
+	}
+	env, out := testEnv(t, fetcher, "")
+	// Discover reads the platform roots under Home, so the installer has to
+	// write where it looks.
+	env.Paths.UserExtensionsDir = config.HostExtensionsDir(env.Home)
+	env.Paths.UserToolsDir = filepath.Join(env.Paths.UserExtensionsDir, model.KindTool.DirName())
+	env.Paths.UserFeaturesDir = filepath.Join(env.Paths.UserExtensionsDir, model.KindFeature.DirName())
+	own := filepath.Join(config.HostCommandsHostDir(env.Home), "mine")
+	if err := os.MkdirAll(filepath.Dir(own), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(own, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	installed, err := Add(context.Background(), env, addRequest())
+	if err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	if !slices.Equal(installed[0].HostCommands, []string{"mine", "status", "vnc-viewer"}) {
+		t.Errorf("HostCommands = %v, want every shipped executable", installed[0].HostCommands)
+	}
+	warnings := strings.Join(installed[0].Warnings, "\n")
+	for _, want := range []string{`"status" is not added`, "a built-in command", `"mine" is not added`, own} {
+		if !strings.Contains(warnings, want) {
+			t.Errorf("warnings missing %q:\n%s", want, warnings)
+		}
+	}
+
+	out.Reset()
+	if _, err := Remove(context.Background(), env, removeRequest("foo")); err != nil {
+		t.Fatalf("Remove: %v", err)
+	}
+	if note := out.String(); !strings.Contains(note, "no longer resolve: vnc-viewer\n") {
+		t.Errorf("remove should name vnc-viewer alone:\n%s", note)
 	}
 }

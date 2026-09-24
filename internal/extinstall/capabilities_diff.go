@@ -74,7 +74,7 @@ func diffCapabilities(before capabilities, after capabilities) []string {
 		mapDescribe(after.Spec.InitFiles, describeInitFile))...)
 	changes = append(changes, diffList("workspace file", before.WorkspaceFiles, after.WorkspaceFiles)...)
 	changes = append(changes, diffList("home file", before.HomeFiles, after.HomeFiles)...)
-	changes = append(changes, diffHostCommands(before.HostCommands, after.HostCommands)...)
+	changes = append(changes, diffHostCommands(before.addedHostCommands(), after.addedHostCommands())...)
 	if before.Files != after.Files || before.Bytes != after.Bytes {
 		changes = append(changes, fmt.Sprintf("staged content changes from %d files/%d bytes to %d files/%d bytes",
 			before.Files, before.Bytes, after.Files, after.Bytes))

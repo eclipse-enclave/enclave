@@ -23,6 +23,7 @@ import (
 	"enclave/internal/config"
 	"enclave/internal/logx"
 	"enclave/internal/model"
+	"enclave/internal/usercmd"
 )
 
 // installPlan is one extension's worth of work, shared by add and update.
@@ -315,18 +316,22 @@ func applyPlan(env Env, req Request, plan installPlan, stage *staging) (ActionRe
 	if err != nil {
 		return ActionResult{}, err
 	}
+	caps, err := inspect(staged, req.Kind)
+	if err != nil {
+		return ActionResult{}, err
+	}
+	caps.ShadowsBuiltin = builtinExists(env, req.Kind, plan.Name)
+	caps.ShadowedHostCommands = usercmd.Shadowed(env.Home, caps.HostCommands)
+	if plan.Before != nil {
+		plan.Before.ShadowedHostCommands = usercmd.Shadowed(env.Home, plan.Before.HostCommands)
+	}
+	warnings = append(warnings, caps.shadowedHostCommandWarnings()...)
 	for _, warning := range warnings {
 		env.outcome(markWarn, logx.ColorYellow, "%s", warning)
 	}
 	if len(warnings) > 0 {
 		_, _ = fmt.Fprintln(env.narrate())
 	}
-
-	caps, err := inspect(staged, req.Kind)
-	if err != nil {
-		return ActionResult{}, err
-	}
-	caps.ShadowsBuiltin = builtinExists(env, req.Kind, plan.Name)
 
 	target := stage.finalPath(plan.Name)
 	var stagedHash string

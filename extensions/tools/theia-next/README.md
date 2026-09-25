@@ -38,6 +38,7 @@ container only sees a placeholder.
 | Anthropic | `ANTHROPIC_API_KEY` | |
 | OpenAI | `OPENAI_API_KEY` | |
 | Google Gemini | `GEMINI_API_KEY` | |
+| Claude Code | `ANTHROPIC_API_KEY` | [`claude-agent-sdk`](../../features/claude-agent-sdk/README.md) feature (opt-in) |
 | GitHub Copilot | Sign-in in Theia | [`copilot-cli`](../../features/copilot-cli/README.md) feature (opt-in) |
 
 Theia's Google provider also reads `GEMINI_API_KEY`, although its preference

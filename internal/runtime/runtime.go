@@ -1583,6 +1583,13 @@ func (r *Runtime) addGatewayCAMount(mounts *mountAccumulator) error {
 	}
 	mounts.AddMount(bindMount(store.CACertPath, model.AgentGatewayCACertPath, true))
 	mounts.AddEnv(model.EnvGatewayCACertPath, model.AgentGatewayCACertPath)
+	// Set on the container rather than only exported by the entrypoint, so
+	// processes started with `docker exec` (IDE backends and what they spawn)
+	// trust the gateway too. The entrypoint writes the bundle before handing off.
+	mounts.AddEnv(model.EnvGatewayCABundlePath, model.AgentGatewayCABundlePath)
+	mounts.AddEnv("SSL_CERT_FILE", model.AgentGatewayCABundlePath)
+	mounts.AddEnv("REQUESTS_CA_BUNDLE", model.AgentGatewayCABundlePath)
+	mounts.AddEnv("NODE_EXTRA_CA_CERTS", model.AgentGatewayCACertPath)
 	return nil
 }
 

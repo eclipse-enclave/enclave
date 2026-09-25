@@ -112,3 +112,70 @@ func readEntrypointEnvFile(t *testing.T, path string) map[string]string {
 	}
 	return env
 }
+
+func TestEntrypointGatewayCAWritesBundleAtFixedPath(t *testing.T) {
+	t.Parallel()
+
+	systemBundle, err := os.ReadFile("/etc/ssl/certs/ca-certificates.crt")
+	if err != nil {
+		t.Skipf("system CA bundle unavailable: %v", err)
+	}
+
+	home := t.TempDir()
+	projectDir := filepath.Join(home, "project")
+	fakeBin := filepath.Join(home, "bin")
+	for _, dir := range []string{projectDir, fakeBin} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(fakeBin, "update-ca-certificates"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatalf("write update-ca-certificates shim: %v", err)
+	}
+
+	gatewayCA := filepath.Join(home, "gateway.crt")
+	gatewayCert := "-----BEGIN CERTIFICATE-----\nenclave-gateway-test\n-----END CERTIFICATE-----\n"
+	if err := os.WriteFile(gatewayCA, []byte(gatewayCert), 0o644); err != nil {
+		t.Fatalf("write gateway CA: %v", err)
+	}
+	// A stale bundle from an earlier start must be replaced, not appended to.
+	bundlePath := filepath.Join(home, "ca", "ca-certificates.crt")
+	if err := os.MkdirAll(filepath.Dir(bundlePath), 0o755); err != nil {
+		t.Fatalf("mkdir bundle dir: %v", err)
+	}
+	if err := os.WriteFile(bundlePath, []byte("stale\n"), 0o644); err != nil {
+		t.Fatalf("write stale bundle: %v", err)
+	}
+
+	captureEnv := `{
+printf 'SSL_CERT_FILE=%s\n' "${SSL_CERT_FILE:-}"
+printf 'REQUESTS_CA_BUNDLE=%s\n' "${REQUESTS_CA_BUNDLE:-}"
+} > "$HOME/gateway-ca-env.out"`
+	cmd := exec.Command("bash", filepath.Join("..", "..", "entrypoint.sh"), "bash", "-lc", captureEnv)
+	cmd.Env = []string{
+		"PATH=" + fakeBin + string(os.PathListSeparator) + os.Getenv("PATH"),
+		"HOME=" + home,
+		"PROJECT_DIR=" + projectDir,
+		"TOOL=pi",
+		"ENCLAVE_GATEWAY_CA_CERT_PATH=" + gatewayCA,
+		"ENCLAVE_GATEWAY_CA_BUNDLE_PATH=" + bundlePath,
+	}
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("entrypoint failed: %v\noutput:\n%s", err, string(out))
+	}
+
+	env := readEntrypointEnvFile(t, filepath.Join(home, "gateway-ca-env.out"))
+	if env["SSL_CERT_FILE"] != bundlePath {
+		t.Fatalf("SSL_CERT_FILE = %q, want %q", env["SSL_CERT_FILE"], bundlePath)
+	}
+	if env["REQUESTS_CA_BUNDLE"] != bundlePath {
+		t.Fatalf("REQUESTS_CA_BUNDLE = %q, want %q", env["REQUESTS_CA_BUNDLE"], bundlePath)
+	}
+	bundle, err := os.ReadFile(bundlePath)
+	if err != nil {
+		t.Fatalf("read bundle: %v", err)
+	}
+	if string(bundle) != string(systemBundle)+gatewayCert {
+		t.Fatal("bundle is not exactly the system bundle followed by the gateway CA")
+	}
+}

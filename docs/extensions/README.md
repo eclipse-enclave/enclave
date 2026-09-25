@@ -666,9 +666,9 @@ Opt-in features require an explicit list; additive-only entries do not change th
 
 The next time you run `./enclave --rebuild`, only the specified features will be installed.
 
-**Available features:** `devtools`, `github-cli`, `gitlab-cli`, `node-dev`, `playwright`, `python-dev`, `debug-tools`, `shell-extras`
+**Available features:** `devtools`, `github-cli`, `gitlab-cli`, `copilot-cli`, `node-dev`, `playwright`, `python-dev`, `debug-tools`, `shell-extras`
 
-**Opt-in features (not installed unless explicitly listed):** `debug-tools`, `gitlab-cli`, `playwright`, `shell-extras`
+**Opt-in features (not installed unless explicitly listed):** `copilot-cli`, `debug-tools`, `gitlab-cli`, `playwright`, `shell-extras`
 
 ### Installation Order
 
@@ -716,6 +716,7 @@ resolved port appears in the printed `openUrl` and in `enclave ps`.
 | `devtools` | 40 | Core tools + linters (vim, htop, ripgrep, golang-go, shellcheck, golangci-lint, gosec). |
 | `github-cli` | 50 | GitHub CLI (gh) |
 | `gitlab-cli` | 50 | GitLab CLI (glab) (opt-in) |
+| `copilot-cli` | 60 | GitHub Copilot CLI (copilot) (opt-in) |
 | `node-dev` | 70 | Node.js dev tools: typescript, eslint, prettier |
 | `python-dev` | 70 | Python dev tools: black, ruff, mypy, pytest |
 | `playwright` | 75 | Playwright browsers and MCP server for UI testing (opt-in) |

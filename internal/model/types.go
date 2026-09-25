@@ -754,4 +754,8 @@ const (
 	GatewayTLSCACertPath         = GatewayTLSRootPath + "/ca.crt"
 	GatewayTLSCAKeyPath          = GatewayTLSRootPath + "/ca.key"
 	AgentGatewayCACertPath       = "/usr/local/share/ca-certificates/enclave-gateway.crt"
+	// AgentGatewayCABundlePath is the system bundle plus the gateway CA, written
+	// by the entrypoint at a fixed path so the container-level SSL_CERT_FILE can
+	// name it for processes started with `docker exec`.
+	AgentGatewayCABundlePath = "/tmp/enclave-ca/ca-certificates.crt"
 )

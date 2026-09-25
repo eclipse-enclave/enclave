@@ -32,6 +32,12 @@ omitted when exactly one enclave container is running).
 | Variable | Purpose |
 |----------|---------|
 | `ANTHROPIC_API_KEY` | Anthropic API access for Theia AI features |
+| `OPENAI_API_KEY` | OpenAI API access for Theia AI features |
+| `GEMINI_API_KEY` | Google Gemini API access for Theia AI features |
+
+Theia's Google provider also reads `GEMINI_API_KEY`, although its preference
+description only mentions `GOOGLE_API_KEY`. Set `GEMINI_API_KEY` on the host;
+`GOOGLE_API_KEY` is not forwarded into the container.
 
 ## IDE Preferences
 

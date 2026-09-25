@@ -32,6 +32,36 @@ omitted when exactly one enclave container is running).
 | Variable | Purpose |
 |----------|---------|
 | `ANTHROPIC_API_KEY` | Anthropic API access for Theia AI features |
+| `OPENAI_API_KEY` | OpenAI API access for Theia AI features |
+| `GEMINI_API_KEY` | Google Gemini API access for Theia AI features |
+
+Theia's Google provider also reads `GEMINI_API_KEY`, although its preference
+description only mentions `GOOGLE_API_KEY`. Set `GEMINI_API_KEY` on the host;
+`GOOGLE_API_KEY` is not forwarded into the container.
+
+## Other AI Providers
+
+Configure providers in Theia as described in the
+[Theia AI documentation](https://theia-ide.org/docs/user_ai/). Enclave does not
+declare hosts or keys for the following providers, so they need extra setup:
+
+- **Custom OpenAI- and Anthropic-compatible endpoints**, for example
+  OpenRouter: allow the endpoint's host, per run with
+  `enclave --tool theia-next --allow-domain openrouter.ai` or permanently with
+  `allow_domains` in `~/.config/enclave/config.json` (project configs cannot
+  widen the allowlist), and set the key on the model entry. `"apiKey": true`
+  does not work: inside the container the global OpenAI and Anthropic keys are
+  placeholders that the gateway only releases to their own provider's hosts.
+- **Ollama** on the host: forward its port with `--bridge-port 11434`. On
+  Linux with Docker Engine, Ollama must listen on the Docker bridge IP (set with
+  `OLLAMA_HOST`) and the firewall must allow the port; see
+  [Linux: host service configuration](../../../docs/networking.md#linux-host-service-configuration).
+- **llamafile**: letting Theia start the llamafile inside the container is
+  recommended, since it needs no network setup. Put the file in the project
+  directory, which is mounted at the same path, and make it executable. A
+  llamafile running on the host would need its port bridged like Ollama.
+- **Hugging Face** (experimental): allow `huggingface.co`, then set the key in
+  Theia's settings or pass `HUGGINGFACE_API_KEY` with `--pass-env`.
 
 ## IDE Preferences
 

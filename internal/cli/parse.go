@@ -800,8 +800,8 @@ func execCommand(res *Result) *cobra.Command {
 			return nil
 		},
 	}
-	// exec attaches to an already-running container; --name picks which one
-	// when multiple sessions exist for the same tool.
+	// exec attaches to an already-running container; --name picks one by
+	// session name, container name or ID, resolved like attach's argument.
 	addOptionFlagsByName(cmd.Flags(), &res.Options, &res.Sources, "tool", "session_name")
 	cmd.Flags().BoolVar(&res.Options.Admin, "admin", false, "Enable package-management sudo")
 	return cmd

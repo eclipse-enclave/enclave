@@ -141,11 +141,19 @@ func runExecutionCommand(input *CommandInput) int {
 		return 1
 	}
 	runner.SetBackend(be)
+	var execTarget runtime.ExecTarget
+	if input.Action == "exec" {
+		execTarget, err = execSessionTarget(context.Background(), be, opts, project)
+		if err != nil {
+			logx.Errorf("%v", err)
+			return 1
+		}
+	}
 	if err := checkToolInstalled(opts.ImageName, opts.Tool, opts.Shell, opts.Admin); err != nil {
 		logx.Errorf("%v", err)
 		return 1
 	}
-	return dispatchRunner(input, runner)
+	return dispatchRunner(input, runner, execTarget)
 }
 
 // autoBackgroundForIDE reports whether a run should be forced detached because
@@ -173,7 +181,9 @@ func executionRequiresDocker(action string, opts model.Options) bool {
 	return false
 }
 
-func dispatchRunner(input *CommandInput, runner *runtime.Runtime) int {
+// dispatchRunner starts the session, or for exec enters execTarget (resolved
+// from `--name`; the zero value auto-selects).
+func dispatchRunner(input *CommandInput, runner *runtime.Runtime, execTarget runtime.ExecTarget) int {
 	if input.Options.Background {
 		containerName, err := runner.ExecuteBackground()
 		if err != nil {
@@ -184,7 +194,7 @@ func dispatchRunner(input *CommandInput, runner *runtime.Runtime) int {
 	}
 	var err error
 	if input.Action == "exec" {
-		err = runner.Exec()
+		err = runner.Exec(execTarget)
 	} else {
 		err = runner.Execute()
 	}

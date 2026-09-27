@@ -42,8 +42,9 @@ enclave status --all       # sessions from all projects on the host
 enclave status --tool claude --name main --json
 ```
 
-Like `exec`, `status` targets the project resolved from the working directory
-(worktree-aware); pass `--all` to report every running session on the host.
+Like `exec` without `--name`, `status` targets the project resolved from the
+working directory (worktree-aware); pass `--all` to report every running session
+on the host.
 The table shows one row per running session: name, tool, capture mode, OSC
 title, and the bottommost non-blank screen line.
 

@@ -663,8 +663,13 @@ if [ -n "$PROJECT_DIR" ] && { [ -f "$PROJECT_DIR/.mcp.json" ] || [ -f "$PROJECT_
     echo "MCP configuration detected. To enable MCP servers, see enclave documentation."
 fi
 
-# Set terminal for better experience
+# Set terminal for better experience. A host TERM without a terminfo entry in
+# the image (e.g. xterm-ghostty) makes tmux refuse to start.
 export TERM="${TERM:-xterm-256color}"
+if command -v infocmp >/dev/null 2>&1 && ! infocmp "$TERM" >/dev/null 2>&1; then
+    echo "Warning: no terminfo entry for TERM=$TERM; using xterm-256color" >&2
+    export TERM=xterm-256color
+fi
 # Default to truecolor for modern terminals/agents unless explicitly overridden.
 export COLORTERM="${COLORTERM:-truecolor}"
 

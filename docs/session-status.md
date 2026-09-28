@@ -93,6 +93,12 @@ diff snapshots per `session_id`.
   needs.
 - Inside the managed session `TERM` is `tmux-256color` (truecolor enabled)
   instead of `xterm-256color`.
+- The host `TERM` is forwarded into the container, and tmux refuses to start
+  when the image has no terminfo entry for it. If the entry is missing, the
+  entrypoint falls back to `xterm-256color` and logs a warning visible in
+  `docker logs`. Entries supplied through `TERMINFO`, `TERMINFO_DIRS`, or
+  `~/.terminfo` are honoured, so a mounted terminfo database keeps the
+  original `TERM`.
 - tmux's prefix key (`Ctrl-B`) is active in attached sessions; scrollback
   beyond the mouse wheel uses tmux copy-mode. Because tmux handles the mouse,
   text selection uses tmux's copy semantics — hold Shift while dragging for

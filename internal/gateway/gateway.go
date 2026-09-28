@@ -626,29 +626,64 @@ func startGatewayContainer(ctx context.Context, config *docker.ContainerConfig, 
 		// A name conflict means the engine created nothing; the container
 		// holding the name belongs to someone else and must survive.
 		if !docker.IsContainerNameConflict(err) {
-			removeFailedGateway(ctx, name, containerID)
+			removeFailedGateway(ctx, name, containerID, config)
 		}
 		return "", fmt.Errorf("failed to start gateway container: %w", err)
 	}
 	if err := waitForGatewayReady(ctx, name, startedAt); err != nil {
-		removeFailedGateway(ctx, name, containerID)
+		removeFailedGateway(ctx, name, containerID, config)
 		return "", err
 	}
 	return containerID, nil
 }
 
 // removeFailedGateway runs detached from ctx, which is already cancelled when
-// the start was interrupted. It removes by container ID when known so a newer
-// same-name gateway of a concurrent start survives.
-func removeFailedGateway(ctx context.Context, name string, containerID string) {
+// the start was interrupted. It removes by container ID when the engine
+// reported one so a newer same-name gateway of a concurrent start survives.
+// Without an ID (podman prints none on a failed start, and a killed CLI may
+// not have printed Docker's) the name is inspected first, and only a container
+// that carries this session's gateway labels and is not running is removed, by
+// its inspected ID. A running one belongs to a concurrent start of the same
+// session; ReconcileStale removes it once it is stale.
+func removeFailedGateway(ctx context.Context, name string, containerID string, config *docker.ContainerConfig) {
+	ctx = context.WithoutCancel(ctx)
 	removeRef := strings.TrimSpace(containerID)
 	if removeRef == "" {
-		removeRef = name
+		removeRef = failedGatewayRemoveRef(ctx, name, config)
+		if removeRef == "" {
+			return
+		}
 	}
-	err := docker.ContainerRemove(context.WithoutCancel(ctx), removeRef, true, true)
+	err := startContainerRemove(ctx, removeRef, true, true)
 	if err != nil && !docker.IsNotFound(err) {
 		logx.Warnf("Failed to remove gateway container %s after its start failed: %v", name, err)
 	}
+}
+
+// failedGatewayRemoveRef resolves the container holding name to the ID this
+// start may remove, or "" when nothing holds the name, the holder belongs to
+// another session, or it is running.
+func failedGatewayRemoveRef(ctx context.Context, name string, config *docker.ContainerConfig) string {
+	info, err := startContainerInspect(ctx, name)
+	if err != nil {
+		if !docker.IsNotFound(err) {
+			logx.Warnf("Failed to inspect gateway container %s after its start failed: %v", name, err)
+		}
+		return ""
+	}
+	var labels map[string]string
+	if config != nil {
+		labels = config.Labels
+	}
+	if !gatewayContainerOwnedBy(info, labels[model.GatewayLabelContainer], labels[model.GatewayLabelProjectHash]) {
+		logx.Debugf("Leaving gateway container %s in place after a failed start: it does not belong to this session", name)
+		return ""
+	}
+	if info.State != nil && info.State.Running {
+		logx.Debugf("Leaving running gateway container %s in place after a failed start: a concurrent start may own it", name)
+		return ""
+	}
+	return strings.TrimSpace(info.ID)
 }
 
 // ReconcileStale is the one rule for removing a gateway sidecar that outlived

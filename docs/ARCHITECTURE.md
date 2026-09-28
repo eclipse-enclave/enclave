@@ -98,6 +98,7 @@ The restricted network request flow has a separate
 
 ### Orchestration (`internal/app/`)
 - [`internal/app/app.go`](../internal/app/app.go) wires parsing, defaults merging, and command dispatch.
+- [`internal/app/root_guard.go`](../internal/app/root_guard.go) refuses to run as root before any state is written, unless `--allow-root` or `ENCLAVE_ALLOW_ROOT` opts in.
 - [`internal/app/commands.go`](../internal/app/commands.go) routes commands to handlers (run/continue/resume/exec/shell/cleanup/tools/etc).
 - [`internal/app/command_run.go`](../internal/app/command_run.go) drives the run/continue/resume/exec/shell flow and runtime creation.
 - [`internal/app/build.go`](../internal/app/build.go) manages Docker image build/rebuild detection plus prebuild agent update planning and post-build stamp commits.
@@ -346,12 +347,20 @@ must come from global config (`~/.config/enclave/config.json`) or explicit CLI f
 `--cache-from`). Some build controls are intentionally CLI-only and not read
 from config files, including `--rebuild`, `--no-rebuild`,
 `--force-base-image`, `--build-uid`, `--build-gid`, `--runtime-uid-remap`, and
-the buildx cache flags.
+the buildx cache flags. `--allow-root` is likewise never read from config; its
+only alternative is the `ENCLAVE_ALLOW_ROOT` environment variable.
 
 Runtime image hashes include the effective build UID/GID. Explicit
 `--build-uid` / `--build-gid` values are used when provided; otherwise the host
 UID/GID is included after host resolution. This prevents a loaded shared image
 from being accepted as current when it was built for a different numeric user.
+
+For UID 0 (a root host with `--allow-root`, or `--build-uid 0`), the Dockerfile
+adds `agent` as a second name for UID 0 instead of renaming `root`, which
+`usermod` refuses while the build runs as root; the QEMU bundle build does the
+same. Lookups by UID return root's passwd entry, which comes first, so the
+Dockerfile also replaces `/root` with a link to `/home/agent` for `RUN` steps,
+and the runtime sets `HOME` and `USER` for the agent in sessions.
 
 `features` can be set from config or CLI (`--features`). In devcontainer mode,
 the unset default is no enclave features; pass `--features` (or configure

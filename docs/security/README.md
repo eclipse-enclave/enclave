@@ -7,6 +7,11 @@ workflow. Rootless Docker is [not supported](rootless.md); rootless podman is, t
 
 ## Host filesystem
 
+- Enclave refuses to run as root: the agent would then run as UID 0, which is
+  host root on bind-mounted directories under rootful Docker, and files it
+  writes would become root-owned. `--allow-root` or `ENCLAVE_ALLOW_ROOT=1`
+  overrides this; no config file can. [userns-remap](host-hardening.md) limits
+  what container UID 0 maps to on the host.
 - The project is a host bind mount and is writable by default. Agent changes are
   real host changes.
 - `--project-mount readonly` makes the project/worktree read-only and clamps

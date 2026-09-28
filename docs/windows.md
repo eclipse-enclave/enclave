@@ -40,6 +40,12 @@ Linux container runtime and Linux path semantics; the launcher exists so the
 Steps 3 and 4 are both required. Installing only the launcher gives you a command
 that reports that enclave is not installed in the distribution.
 
+A distribution created with `wsl --import` logs in as root by default, and
+enclave [refuses to run as root](cli-reference.md#running-as-root). Create a
+regular user and make it the default (`[user] default=<name>` in the
+distribution's `/etc/wsl.conf`). `ENCLAVE_ALLOW_ROOT` set on Windows is forwarded
+into the distribution like any other `ENCLAVE_` variable.
+
 `winget` is not supported: it needs a pull request into `microsoft/winget-pkgs`
 per release, which does not fit a rolling release.
 

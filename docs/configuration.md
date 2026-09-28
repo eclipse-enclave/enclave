@@ -312,6 +312,7 @@ Merge semantics:
 | `ENCLAVE_LOG_LEVEL` | Log level: `info` (default) or `debug` |
 | `ENCLAVE_AGENT_UPDATE_INTERVAL_HOURS` | Minimum hours after a tool's last successful automatic update before `check-update.sh` is eligible to probe again (`0` = always) |
 | `ENCLAVE_DEVCONTAINER_REWRITE_VARS` | Comma-separated extra env var names for devcontainer home-path normalization |
+| `ENCLAVE_ALLOW_ROOT` | Set to `1` to run as root (same as `--allow-root`); see [Running as root](cli-reference.md#running-as-root) |
 
 These are read by the Windows launcher on the Windows side only, and are not
 forwarded into the WSL2 distribution. See [windows.md](windows.md).
@@ -325,6 +326,9 @@ forwarded into the WSL2 distribution. See [windows.md](windows.md).
 Buildx cache and canonical build UID/GID controls are CLI-only. Use
 `--buildx-cache-dir`, `--build-uid`, `--build-gid`, and `--runtime-uid-remap`
 for event/offline runs.
+
+`--allow-root` is CLI-only as well; `ENCLAVE_ALLOW_ROOT=1` is its only
+alternative, so no config file can let enclave run as root.
 
 The experimental `qemu` backend only runs unrestricted, slim/no-feature bundles, so selecting it implies `allow_all_network=true` and `slim=true` automatically (with a per-run notice). Requesting features or an allowlist (`--allow-domain`) is rejected because the backend cannot honor them.
 

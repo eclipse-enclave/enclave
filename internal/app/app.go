@@ -114,6 +114,10 @@ func Run(args []string) int {
 	}
 	if actionUsesBackend(parsed.Action) {
 		resolveBackend(&opts, promptAllowed(parsed))
+		if err := validateBackendName(opts.Backend); err != nil {
+			logx.Errorf("%v", err)
+			return 1
+		}
 	}
 	sources := opts.Sources
 	parsed.Options = opts

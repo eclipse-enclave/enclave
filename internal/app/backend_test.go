@@ -107,6 +107,15 @@ func TestSelectBackendPodmanUsesDockerBackend(t *testing.T) {
 	}
 }
 
+func TestExplicitEmptyBackendIsInvalid(t *testing.T) {
+	if err := validateBackendName(""); err == nil {
+		t.Fatal("an explicitly empty --backend must not silently select docker")
+	}
+	if _, err := selectBackend(model.Options{}, backenddocker.Options{}); err == nil {
+		t.Fatal("backend selection must also reject an empty name")
+	}
+}
+
 func TestValidateOptionsAcceptsPodmanBackend(t *testing.T) {
 	opts := model.Options{
 		RunOptions:   model.RunOptions{Backend: backend.NamePodman, Tool: "claude"},

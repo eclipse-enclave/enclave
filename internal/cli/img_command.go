@@ -33,5 +33,6 @@ func imgImportCommand(res *Result) *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&res.Options.ImgScreenshot, "screenshot", false, "Capture a region screenshot instead of reading the clipboard")
 	cmd.Flags().BoolVar(&res.Options.ImgNoCopy, "no-copy", false, "Do not copy the resulting container path to the host clipboard")
+	addOptionFlagsByName(cmd.Flags(), &res.Options, &res.Sources, "backend")
 	return cmd
 }

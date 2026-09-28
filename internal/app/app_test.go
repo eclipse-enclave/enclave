@@ -9,12 +9,52 @@ package app
 
 import (
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
 )
+
+func TestRunRejectsEmptyBackendBeforeDispatch(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, "config"))
+	t.Setenv("XDG_STATE_HOME", filepath.Join(home, "state"))
+	t.Setenv("XDG_CACHE_HOME", filepath.Join(home, "cache"))
+
+	previousDetect := detectContainerCLIs
+	detectContainerCLIs = func() []string {
+		t.Fatal("an explicit backend must not trigger engine detection")
+		return nil
+	}
+	t.Cleanup(func() { detectContainerCLIs = previousDetect })
+
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	previousStderr := os.Stderr
+	os.Stderr = writer
+	defer func() { os.Stderr = previousStderr }()
+
+	// cleanup --dry-run would otherwise succeed without selecting a backend.
+	code := Run([]string{"cleanup", "--all", "--dry-run", "--backend="})
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	output, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := reader.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if code != 1 || !strings.Contains(string(output), `unsupported backend ""`) {
+		t.Fatalf("Run returned %d with stderr %q", code, output)
+	}
+}
 
 func TestRunVersionWithoutWorkingDirectory(t *testing.T) {
 	if runtime.GOOS == "windows" {

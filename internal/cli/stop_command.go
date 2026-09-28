@@ -30,6 +30,6 @@ project.`,
 		},
 	}
 	// stop accepts --tool and --name to filter background containers.
-	addOptionFlagsByName(cmd.Flags(), &res.Options, &res.Sources, "tool", "session_name")
+	addOptionFlagsByName(cmd.Flags(), &res.Options, &res.Sources, "backend", "tool", "session_name")
 	return cmd
 }

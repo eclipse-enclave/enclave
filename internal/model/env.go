@@ -11,6 +11,7 @@ const (
 	EnvPrefix = "ENCLAVE_"
 
 	EnvHome                     = EnvPrefix + "HOME"
+	EnvAllowRoot                = EnvPrefix + "ALLOW_ROOT"
 	EnvLogLevel                 = EnvPrefix + "LOG_LEVEL"
 	EnvColor                    = EnvPrefix + "COLOR"
 	EnvAgentUpdateIntervalHours = EnvPrefix + "AGENT_UPDATE_INTERVAL_HOURS"

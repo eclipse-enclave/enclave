@@ -365,6 +365,10 @@ func OptionSpecs() []OptionSpec {
 			},
 		},
 		{
+			Name:  "allow_root",
+			Group: OptionGroupGlobal,
+		},
+		{
 			Name:  "ports",
 			Group: OptionGroupRun,
 			ApplyDefaultsWithSource: func(opts *model.Options, defaults Defaults, source model.OptionSource, sources *model.OptionSources) {

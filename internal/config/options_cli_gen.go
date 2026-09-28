@@ -282,6 +282,12 @@ func optionCLIFlags() map[string][]CLIFlag {
 				sources.Verbose = model.SourceCLI
 			}),
 		},
+		"allow_root": {
+			boolFlag("--allow-root", "Allow running enclave as root (unsafe)", func(opts *model.Options, sources *model.OptionSources) {
+				opts.AllowRoot = true
+				sources.AllowRoot = model.SourceCLI
+			}),
+		},
 		"ports": {
 			valueFlag("-p", "Publish a container port to the host (e.g. 5391, 8080:80, or 0:5391 for an auto-assigned host port, Docker only)", "-p requires a value", func(opts *model.Options, sources *model.OptionSources, value string) error {
 				opts.Ports = append(opts.Ports, value)

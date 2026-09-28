@@ -18,7 +18,8 @@ type OptionSources struct {
 }
 
 type GlobalOptionSources struct {
-	Verbose OptionSource
+	AllowRoot OptionSource
+	Verbose   OptionSource
 }
 
 type RunOptionSources struct {
@@ -83,7 +84,8 @@ func (s OptionSources) RunSources() RunOptionSources { return s.RunOptionSources
 func DefaultOptionSources() OptionSources {
 	return OptionSources{
 		GlobalOptionSources: GlobalOptionSources{
-			Verbose: SourceDefault,
+			AllowRoot: SourceDefault,
+			Verbose:   SourceDefault,
 		},
 		RunOptionSources: RunOptionSources{
 			AddDirs:          SourceDefault,
@@ -154,6 +156,9 @@ func MergeOptionSources(base OptionSources, override OptionSources) OptionSource
 	}
 	if override.AllowDomains != SourceUnset {
 		base.AllowDomains = override.AllowDomains
+	}
+	if override.AllowRoot != SourceUnset {
+		base.AllowRoot = override.AllowRoot
 	}
 	if override.AuthName != SourceUnset {
 		base.AuthName = override.AuthName

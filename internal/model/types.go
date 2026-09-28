@@ -41,6 +41,7 @@ type RunOptions struct {
 	NoCache           bool
 	NetworkLog        string
 	Verbose           bool
+	AllowRoot         bool
 	Background        bool
 	SessionName       string
 	PlaywrightMCP     bool

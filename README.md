@@ -60,6 +60,10 @@ sudo gpasswd -a "$USER" docker
 See Docker's [Linux post-install instructions](https://docs.docker.com/engine/install/linux-postinstall/)
 and account for the group's root-equivalent privileges.
 
+Run enclave as that regular user, not through `sudo`: enclave refuses to run as
+root unless you pass `--allow-root` or set `ENCLAVE_ALLOW_ROOT=1` (see
+[Running as root](docs/cli-reference.md#running-as-root)).
+
 On macOS, install Docker Desktop and the source-build dependencies above.
 
 ## Installation

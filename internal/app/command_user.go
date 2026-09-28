@@ -23,7 +23,7 @@ import (
 // arguments, and exit code through untouched. The inherited environment is
 // augmented with enclave context so scripts can re-invoke the binary and
 // locate the project and config directories.
-func runUserHostCommand(cmd usercmd.Command, args []string, projectDir, home string) int {
+func runUserHostCommand(cmd usercmd.Command, args []string, projectDir, home string, allowRoot bool) int {
 	bin, err := os.Executable()
 	if err != nil {
 		logx.Warnf("could not resolve enclave binary path; ENCLAVE_BIN will be empty: %v", err)
@@ -41,6 +41,11 @@ func runUserHostCommand(cmd usercmd.Command, args []string, projectDir, home str
 		model.EnvProjectRoot+"="+projectDir,
 		model.EnvConfigDir+"="+config.HostConfigRootDir(home),
 	)
+	// A script re-invoking $ENCLAVE_BIN inherits the root opt-in, which may
+	// have come from --allow-root rather than the environment.
+	if allowRoot {
+		c.Env = append(c.Env, model.EnvAllowRoot+"=1")
+	}
 
 	if err := c.Run(); err != nil {
 		var exitErr *exec.ExitError

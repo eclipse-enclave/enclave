@@ -71,6 +71,7 @@ func TestProtectGitConfigFiles(t *testing.T) {
 			writeFile(t, unexposed, "[alias]\n s = status\n")
 			git(project, "config", "--add", "include.path", unexposed)
 			writeFile(t, filepath.Join(project, ".gitconfig"), "[alias]\n s = status\n")
+			git(project, "config", "--add", "include.path", filepath.Join(project, ".gitconfig"))
 			r := &Runtime{host: model.Host{Home: home}, project: model.Project{Dir: project, RealDir: project}}
 			acc := newMountAccumulator([]backend.Mount{bindMount(project, project, false), bindMount(project, "/workspace", false)}, nil)
 			r.addWorktreeMetadataMounts(acc)
@@ -207,6 +208,27 @@ func TestProtectEmptyHostGitConfigFiles(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestUnreferencedProjectGitConfigRemainsWritable(t *testing.T) {
+	home, project := resolvedTempDir(t), resolvedTempDir(t)
+	cmd := exec.Command("git", "init", "-q", project)
+	cmd.Env = append(os.Environ(), "HOME="+home)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v: %s", err, out)
+	}
+	config := filepath.Join(project, ".gitconfig")
+	writeFile(t, config, "[alias]\n s = status\n")
+	r := &Runtime{host: model.Host{Home: home}, project: model.Project{Dir: project}}
+	acc := newMountAccumulator([]backend.Mount{bindMount(project, project, false)}, nil)
+	if err := r.protectGitConfigFiles(acc); err != nil {
+		t.Fatal(err)
+	}
+	for _, mount := range acc.Mounts() {
+		if mount.Source == config || (mount.ContainerPath == project && mount.ReadOnly) {
+			t.Fatalf("unreferenced project config was protected: %+v", mount)
+		}
 	}
 }
 

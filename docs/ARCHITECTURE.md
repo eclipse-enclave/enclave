@@ -196,15 +196,7 @@ The restricted network request flow has a separate
 - **Tool container**: the primary ephemeral container launched for the tool or shell. It mounts the project directory read-write by default, or read-only when `project_mount=readonly` / `--project-mount readonly` is set. Linked worktree git metadata mounts follow the same mode by default; `worktree_metadata=readonly|none` forces them read-only or skips them independently of the project mount. Devcontainer-derived project bind mounts are forced read-only in readonly mode, and writable `add_dirs` entries inside the project subtree are clamped to read-only. Additional directories outside the project, caches, and history are mounted according to their own options. The container is removed on exit (`--rm`).
 - **Gateway sidecar**: when network isolation is enabled, a per-project gateway container is started on a dedicated network. The tool container joins that network, uses the gateway as its resolver, and has outbound access enforced by the proxy (Host/SNI). Host policy resolution writes `~/.local/state/enclave/projects/<hash>/<tool>/gateway-config/`, and runtime apply sends `SIGHUP` so the gateway supervisor reloads dnsmasq/proxy with fail-closed semantics.
 
-Git config protection is applied after runtime mount composition. Existing config
-files for the current repository and discovered includes receive read-only file
-overlays at their exposed bind-mount paths; the surrounding project and Git
-metadata retain their configured modes. Writable parent-directory binds prevent
-rename-based replacement, and linked-worktree pointer files are read-only.
-Docker also protects aliases introduced by devcontainer `runArgs`. QEMU
-bind-mounts staged read-only files over their guest
-targets instead of copying onto targets that may live in writable host mounts.
-See [Git config protection](persistence.md#git).
+Git config protection is applied after runtime mount composition. Existing config files for the current repository and discovered includes receive read-only file overlays at their exposed bind-mount paths; the surrounding project and Git metadata retain their configured modes. Writable parent-directory binds prevent rename-based replacement, and linked-worktree pointer files are read-only. Docker also protects aliases introduced by devcontainer `runArgs`. QEMU bind-mounts staged read-only files over their guest targets instead of copying onto targets that may live in writable host mounts. See [Git config protection](persistence.md#git).
 
 ### Persistent stores
 

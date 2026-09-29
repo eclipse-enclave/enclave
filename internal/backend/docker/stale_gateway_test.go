@@ -13,7 +13,6 @@ import (
 	"testing"
 	"time"
 
-	"enclave/internal/gateway"
 	"enclave/internal/model"
 )
 
@@ -63,7 +62,7 @@ func newStaleGatewayBackend(t *testing.T, created time.Time) (*Backend, string) 
 }
 
 func TestRemoveStaleGatewayRemovesOrphanedSidecarByID(t *testing.T) {
-	b, logPath := newStaleGatewayBackend(t, time.Now().Add(-2*gateway.OrphanGracePeriod))
+	b, logPath := newStaleGatewayBackend(t, time.Now().Add(-2*time.Minute))
 
 	if err := b.RemoveStaleGateway(context.Background(), "enclave-pi-abc123abc123", "abc123abc123"); err != nil {
 		t.Fatalf("RemoveStaleGateway: %v", err)
@@ -74,24 +73,18 @@ func TestRemoveStaleGatewayRemovesOrphanedSidecarByID(t *testing.T) {
 	}
 }
 
-func TestRemoveStaleGatewayKeepsYoungSidecarWithHint(t *testing.T) {
+func TestRemoveStaleGatewayRemovesFreshOrphanImmediately(t *testing.T) {
 	b, logPath := newStaleGatewayBackend(t, time.Now())
-
-	out := captureStderr(t, func() {
-		if err := b.RemoveStaleGateway(context.Background(), "enclave-pi-abc123abc123", "abc123abc123"); err != nil {
-			t.Fatalf("RemoveStaleGateway: %v", err)
-		}
-	})
-	if calls := stubCalls(t, logPath); hasCallWithPrefix(calls, "rm ") {
-		t.Fatalf("a gateway of a possibly concurrent start must not be removed, got %v", calls)
+	if err := b.RemoveStaleGateway(context.Background(), "enclave-pi-abc123abc123", "abc123abc123"); err != nil {
+		t.Fatalf("RemoveStaleGateway: %v", err)
 	}
-	if !strings.Contains(out, "enclave stop enclave-pi-abc123abc123") {
-		t.Fatalf("expected a recovery hint, got %q", out)
+	if calls := stubCalls(t, logPath); !hasCallWithPrefix(calls, "rm --force --volumes gw") {
+		t.Fatalf("fresh orphan must be removed under the startup lock, got %v", calls)
 	}
 }
 
 func TestRemoveStaleGatewayKeepsSidecarOfExistingSession(t *testing.T) {
-	b, logPath := newStaleGatewayBackend(t, time.Now().Add(-2*gateway.OrphanGracePeriod))
+	b, logPath := newStaleGatewayBackend(t, time.Now().Add(-2*time.Minute))
 	t.Setenv("STUB_SESSION_EXISTS", "1")
 
 	out := captureStderr(t, func() {
@@ -118,7 +111,7 @@ func TestRemoveStaleGatewayIgnoresForeignAndMissingSidecars(t *testing.T) {
 		{name: "other project", projectHash: "other"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			b, logPath := newStaleGatewayBackend(t, time.Now().Add(-2*gateway.OrphanGracePeriod))
+			b, logPath := newStaleGatewayBackend(t, time.Now().Add(-2*time.Minute))
 			if tc.env != "" {
 				t.Setenv(tc.env, "1")
 			}

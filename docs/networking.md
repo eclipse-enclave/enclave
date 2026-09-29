@@ -212,6 +212,16 @@ can deliberately attach a peer to the network named in the `enclave ps --json`
 output. Enclave does not manage or authorize that peer, and the network cannot
 be removed until it disconnects.
 
+### Migrating from the default bridge
+
+- Podman hosts using CNI must switch to netavark before starting sessions.
+- On Linux Docker Engine, existing `docker0`-specific firewall rules for
+  `--bridge-port` and the IDE bridge no longer match. Replace them with rules
+  for each session's bridge and subnet; see [host service configuration](#linux-host-service-configuration).
+- Session startup now requires a successful `docker info` or `podman info`
+  query to select network options. Previously, failure of this query only
+  suppressed configuration warnings.
+
 ## Bridging Host Ports
 
 `--bridge-port` forwards host-side services into the container on `localhost`.

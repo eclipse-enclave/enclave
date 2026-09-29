@@ -14,7 +14,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"enclave/internal/backend"
 	"enclave/internal/config"
@@ -89,21 +88,16 @@ func (b *Backend) startGateway(ctx context.Context, req backend.Request, network
 // RemoveStaleGateway removes the gateway sidecar of a session whose container
 // does not exist. A start interrupted between gateway readiness and container
 // creation leaves the sidecar running with the session's ports published,
-// which would fail the next start's host-port checks. It applies
-// gateway.ReconcileStale, the same rule the gateway start uses: a sidecar
-// younger than gateway.OrphanGracePeriod may belong to a concurrent start and
-// is left in place with a hint.
+// which would fail the next start's host-port checks. The caller holds the
+// session-start lock, so an owned orphan can be removed without a grace period.
 func (b *Backend) RemoveStaleGateway(ctx context.Context, name string, projectHash string) error {
-	result, err := gateway.ReconcileStale(ctx, name, projectHash, time.Now().UTC())
+	result, err := gateway.ReconcileStale(ctx, name, projectHash)
 	if err != nil {
 		return err
 	}
 	gatewayName := gateway.ContainerName(name)
-	switch {
-	case result.Removed:
+	if result.Removed {
 		logx.Warnf("Removed stale gateway container %s left behind by an interrupted start", gatewayName)
-	case result.Exists && result.Owned && !result.SessionExists:
-		logx.Warnf("Gateway container %s from a start less than %s ago is still running; if that start is not in progress, run 'enclave stop %s' before retrying", gatewayName, gateway.OrphanGracePeriod, name)
 	}
 	return nil
 }

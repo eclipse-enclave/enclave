@@ -264,8 +264,9 @@ func (b *Backend) RemoveWithoutFinalize(ctx context.Context, ref backend.Session
 // name. A removal that fails for any other reason leaves gateway and network
 // alone: the session may still be running on them.
 func RemoveSessionContainer(ctx context.Context, name string, removeVolumes bool) error {
-	network, hasNetwork := captureSessionNetworkRef(ctx, name)
-	gatewayID := captureOwnedGatewayID(ctx, name)
+	projectHash := captureSessionProjectHash(ctx, name)
+	network, hasNetwork := captureSessionNetworkRef(ctx, name, projectHash)
+	gatewayID := captureOwnedGatewayID(ctx, name, projectHash)
 	if err := dockercmd.ContainerRemove(ctx, name, true, removeVolumes); err != nil && !dockercmd.IsNotFound(err) {
 		return err
 	}
@@ -276,9 +277,26 @@ func RemoveSessionContainer(ctx context.Context, name string, removeVolumes bool
 	return nil
 }
 
+// Use the session's metadata, not the resource being removed, to establish
+// ownership. The canonical name also identifies an already-removed session.
+func captureSessionProjectHash(ctx context.Context, name string) string {
+	info, err := dockercmd.ContainerInspect(ctx, name)
+	if err == nil && info.Config != nil {
+		return strings.TrimSpace(info.Config.Labels[model.LabelHash])
+	}
+	if !dockercmd.IsNotFound(err) {
+		return ""
+	}
+	_, hash, _, _ := dockercmd.ParseManagedName(name)
+	return hash
+}
+
 // captureOwnedGatewayID returns the immutable ID of the session's managed
 // gateway sidecar, or "" when there is none.
-func captureOwnedGatewayID(ctx context.Context, name string) string {
+func captureOwnedGatewayID(ctx context.Context, name string, projectHash string) string {
+	if projectHash == "" {
+		return ""
+	}
 	gatewayName := gateway.ContainerName(name)
 	info, err := dockercmd.ContainerInspect(ctx, gatewayName)
 	if err != nil {
@@ -287,10 +305,7 @@ func captureOwnedGatewayID(ctx context.Context, name string) string {
 		}
 		return ""
 	}
-	if info.Config == nil || !strings.EqualFold(strings.TrimSpace(info.Config.Labels[model.GatewayLabelManaged]), "true") {
-		return ""
-	}
-	if owner := strings.TrimSpace(info.Config.Labels[model.GatewayLabelContainer]); owner != "" && owner != strings.TrimSpace(name) {
+	if !gateway.ContainerOwnedBy(info, name, projectHash) {
 		return ""
 	}
 	return strings.TrimSpace(info.ID)
@@ -329,10 +344,11 @@ func (b *Backend) prepareRun(ctx context.Context, req backend.Request) (runSpec,
 	if err := backend.Validate(req, b.Capabilities()); err != nil {
 		return runSpec{}, err
 	}
-	dockerSystemInfo, err := b.warnInsecureDockerConfig(ctx)
+	dockerSystemInfo, err := dockerInfo(ctx)
 	if err != nil {
 		return runSpec{}, fmt.Errorf("read %s info: %w", dockercmd.Binary(), err)
 	}
+	warnInsecureDockerConfig(dockerSystemInfo)
 	b.gcSessionNetworks(ctx, time.Now().UTC())
 	spec := b.dockerConfig(req)
 	if !req.Detached && len(b.opts.DevcontainerRunArgs) > 0 {
@@ -806,11 +822,7 @@ func (b *Backend) ConfigStoreKeyInUse(ctx context.Context, meta backend.SessionM
 	return false, nil
 }
 
-func (b *Backend) warnInsecureDockerConfig(ctx context.Context) (dockercmd.SystemInfo, error) {
-	info, err := dockerInfo(ctx)
-	if err != nil {
-		return dockercmd.SystemInfo{}, err
-	}
+func warnInsecureDockerConfig(info dockercmd.SystemInfo) {
 	rootMapsToHost := true
 	for _, option := range info.SecurityOptions {
 		if strings.Contains(option, "name=rootless") {
@@ -824,7 +836,6 @@ func (b *Backend) warnInsecureDockerConfig(ctx context.Context) (dockercmd.Syste
 		logx.Warnf("%s is running without userns-remap or rootless mode; container root maps to host root. See docs/security/host-hardening.md.", util.TitleCase(dockercmd.Binary()))
 	}
 	warnInsecureDockerFirewall(info)
-	return info, nil
 }
 
 // warnInsecureDockerFirewall surfaces daemon warnings that undermine bridge

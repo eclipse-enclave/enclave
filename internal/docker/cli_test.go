@@ -94,7 +94,6 @@ func TestNetworkErrorClassifiers(t *testing.T) {
 		{name: "active endpoints", stderr: "network session-net has active endpoints", check: IsActiveEndpoints},
 		{name: "podman associated containers", stderr: `Error: "session-net" has associated containers with it. Use -f to forcibly delete containers and pods: network is being used`, check: IsActiveEndpoints},
 		{name: "podman isolate parse", stderr: `Error: strconv.ParseBool: parsing "strict": invalid syntax`, check: IsUnsupportedIsolateValue},
-		{name: "podman isolate unsupported", stderr: "Error: unsupported bridge network option isolate", check: IsUnsupportedIsolateValue},
 		{name: "default pool exhausted", stderr: "could not find an available, non-overlapping IPv4 address pool among the defaults to assign to the network", check: IsAddressPoolExhausted},
 		{name: "predefined pools exhausted", stderr: "all predefined address pools have been fully subnetted", check: IsAddressPoolExhausted},
 	} {
@@ -158,5 +157,18 @@ func TestMountFlagsSourceCreatingBinds(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("mountFlags() = %v, want %v", got, want)
+	}
+}
+
+func TestUnsupportedIsolateValueRejectsUnrelatedErrors(t *testing.T) {
+	for _, message := range []string{
+		"Error: unsupported bridge network option isolate",
+		"Error: cannot create network isolate: permission denied",
+		`Error: network "strict" has associated containers`,
+		`Error: strconv.ParseBool: parsing "other": invalid syntax`,
+	} {
+		if IsUnsupportedIsolateValue(&cliError{stderr: message}) {
+			t.Errorf("unrelated error triggered weaker isolation: %q", message)
+		}
 	}
 }

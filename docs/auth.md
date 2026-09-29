@@ -182,6 +182,8 @@ value overrides them anyway.
 
 Host environment variables do **not** leak into the container unless explicitly opted in.
 
+The exception is the time zone: `TZ` is set to the host zone (from `$TZ`, the `/etc/localtime` symlink, or `/etc/timezone`) so tool timestamps and git commits match the host. A `TZ` from the project `.env`, devcontainer `containerEnv`, or `--pass-env` takes precedence; set `TZ=UTC` there to keep UTC. The zone roughly reveals the host's location to anything the agent can reach.
+
 **`--pass-env KEY1,KEY2`** forwards specific host environment variables into the container. It takes priority over layered secrets for the same key and is the escape hatch for values that are not declared as extension secrets.
 
 ```bash

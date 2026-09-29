@@ -211,6 +211,18 @@ install_file_mount() {
   fi
   cp "$source_path" "$target_path"
 }
+install_readonly_file_mount() {
+  source_path="$1"
+  target_path="$2"
+  mkdir -p "$(dirname "$target_path")" || return $?
+  if [ ! -e "$target_path" ]; then
+    touch "$target_path" || return $?
+  fi
+  # A missing mountpoint is created above, possibly in a host directory.
+  # Bind the staged snapshot without overwriting existing host file contents.
+  mount --bind "$source_path" "$target_path" || return $?
+  mount -o remount,bind,ro "$target_path"
+}
 sync_file_mount() {
   target_path="$1"
   result_path="$2"
@@ -226,7 +238,11 @@ sync_file_mount() {
 install_file_mounts() {
 `)
 	for _, file := range files {
-		fmt.Fprintf(&out, "  install_file_mount %s %s || return $?\n", util.ShellQuote(file.GuestSource), util.ShellQuote(file.Target))
+		install := "install_file_mount"
+		if file.ReadOnly {
+			install = "install_readonly_file_mount"
+		}
+		fmt.Fprintf(&out, "  %s %s %s || return $?\n", install, util.ShellQuote(file.GuestSource), util.ShellQuote(file.Target))
 	}
 	out.WriteString("  return 0\n}\nsync_file_mounts() {\n")
 	for _, file := range files {

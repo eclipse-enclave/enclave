@@ -8,12 +8,50 @@
 package qemu
 
 import (
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"enclave/internal/backend"
 	"enclave/internal/model"
 )
+
+func TestReadOnlyFileMountDoesNotOverwriteHostFile(t *testing.T) {
+	be := New(Options{})
+	root := t.TempDir()
+	source, target := filepath.Join(root, "staged"), filepath.Join(root, "host-config")
+	for path, content := range map[string]string{source: "snapshot", target: "host-original"} {
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	script, err := be.renderRunScript(backend.Request{Argv: []string{"true"}}, nil, []runtimeFileMount{{GuestSource: source, Target: target, ReadOnly: true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertContains(t, script, "install_readonly_file_mount '"+source+"' '"+target+"'")
+	assertNotContains(t, script, "install_file_mount '"+source+"' '"+target+"'")
+	if out, err := exec.Command("unshare", "--user", "--map-root-user", "--mount", "true").CombinedOutput(); err != nil {
+		t.Skipf("mount namespaces unavailable: %v: %s", err, out)
+	}
+	start := strings.Index(script, "install_readonly_file_mount() {")
+	end := strings.Index(script[start:], "sync_file_mount() {")
+	check := script[start:start+end] + `
+install_readonly_file_mount "$1" "$2"
+test "$(cat "$2")" = snapshot
+if printf 'changed' > "$2"; then exit 1; fi
+if rm "$2"; then exit 1; fi
+`
+	if out, err := exec.Command("unshare", "--user", "--map-root-user", "--mount", "sh", "-eu", "-c", check, "qemu-file-test", source, target).CombinedOutput(); err != nil {
+		t.Fatalf("read-only file mount: %v\n%s", err, out)
+	}
+	data, err := os.ReadFile(target)
+	if err != nil || string(data) != "host-original" {
+		t.Fatalf("host file changed: %q, %v", data, err)
+	}
+}
 
 func TestRenderPayloadCommandSetsAgentHomeAndUser(t *testing.T) {
 	be := New(Options{Host: model.Host{UID: "1234", GID: "5678"}})

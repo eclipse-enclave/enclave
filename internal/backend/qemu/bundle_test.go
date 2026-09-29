@@ -15,6 +15,7 @@ import (
 
 	"enclave/internal/backend"
 	"enclave/internal/model"
+	"enclave/internal/mounts"
 )
 
 func TestResolveBundleMemoryMiBDefaultsTo4096(t *testing.T) {
@@ -27,6 +28,45 @@ func TestResolveBundleMemoryMiBDefaultsTo4096(t *testing.T) {
 	}
 	if got != DefaultMemoryMiB {
 		t.Fatalf("default memory = %d, want %d", got, DefaultMemoryMiB)
+	}
+}
+
+func TestBuildRuntimeMountsOrdersConfigAnchorsBeforeNestedMounts(t *testing.T) {
+	project := t.TempDir()
+	hooks := filepath.Join(project, ".git", "hooks")
+	if err := os.MkdirAll(hooks, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	config := filepath.Join(project, ".git", "config")
+	if err := os.WriteFile(config, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	protected, err := mounts.ProtectFiles([]backend.Mount{
+		{Type: backend.MountTypeBind, Source: project, ContainerPath: "/workspace"},
+		{Type: backend.MountTypeBind, Source: hooks, ContainerPath: "/workspace/.git/hooks", ReadOnly: true},
+	}, []string{config})
+	if err != nil {
+		t.Fatal(err)
+	}
+	be := New(Options{})
+	got, err := be.buildRuntimeMounts(backend.Request{Mounts: protected}, t.TempDir(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	anchor, child := -1, -1
+	for i, mount := range got {
+		switch mount.Target {
+		case "/workspace/.git":
+			anchor = i
+		case "/workspace/.git/hooks":
+			child = i
+			if !mount.ReadOnly {
+				t.Fatal("hooks mount lost read-only flag")
+			}
+		}
+	}
+	if anchor < 0 || child <= anchor {
+		t.Fatalf("anchor must precede nested read-only mount: %+v", got)
 	}
 }
 

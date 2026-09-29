@@ -11,11 +11,267 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 
+	"enclave/internal/backend"
 	"enclave/internal/model"
 )
+
+func resolvedTempDir(t *testing.T) string {
+	t.Helper()
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+func TestProtectGitConfigFiles(t *testing.T) {
+	for _, linked := range []bool{false, true} {
+		t.Run(map[bool]string{false: "regular", true: "linked worktree"}[linked], func(t *testing.T) {
+			home := resolvedTempDir(t)
+			main := filepath.Join(resolvedTempDir(t), "main")
+			git := func(dir string, args ...string) string {
+				t.Helper()
+				cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+				cmd.Env = append(os.Environ(), "HOME="+home)
+				out, err := cmd.CombinedOutput()
+				if err != nil {
+					t.Fatalf("git %v: %v\n%s", args, err, out)
+				}
+				return strings.TrimSuffix(string(out), "\n")
+			}
+			if err := os.MkdirAll(main, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			git(main, "init", "-q")
+			git(main, "config", "user.name", "Test User")
+			git(main, "config", "user.email", "test@example.org")
+			git(main, "commit", "-q", "--allow-empty", "-m", "initial")
+			project := main
+			if linked {
+				project = filepath.Join(resolvedTempDir(t), "linked")
+				git(main, "worktree", "add", "-q", "-b", "linked", project)
+			}
+			git(project, "config", "extensions.worktreeConfig", "true")
+			git(main, "config", "--worktree", "user.name", "Main User")
+			sibling := filepath.Join(resolvedTempDir(t), "sibling")
+			git(main, "worktree", "add", "-q", "-b", "sibling", sibling)
+			git(sibling, "config", "--worktree", "user.name", "Sibling User")
+			git(project, "config", "--worktree", "user.name", "Worktree User")
+			included := filepath.Join(project, "identity include")
+			writeFile(t, included, "[user]\n email = included@example.org\n")
+			git(project, "config", "--add", "include.path", included)
+			empty := filepath.Join(project, "empty include")
+			writeFile(t, empty, "")
+			git(project, "config", "--add", "include.path", empty)
+			unexposed := filepath.Join(home, "outside")
+			writeFile(t, unexposed, "[alias]\n s = status\n")
+			git(project, "config", "--add", "include.path", unexposed)
+			writeFile(t, filepath.Join(project, ".gitconfig"), "[alias]\n s = status\n")
+			r := &Runtime{host: model.Host{Home: home}, project: model.Project{Dir: project, RealDir: project}}
+			acc := newMountAccumulator([]backend.Mount{bindMount(project, project, false), bindMount(project, "/workspace", false)}, nil)
+			r.addWorktreeMetadataMounts(acc)
+			if err := r.protectGitConfigFiles(acc); err != nil {
+				t.Fatal(err)
+			}
+			for _, source := range []string{git(project, "rev-parse", "--git-path", "config"), git(project, "rev-parse", "--git-path", "config.worktree"), included, empty, filepath.Join(project, ".gitconfig")} {
+				if !filepath.IsAbs(source) {
+					source = filepath.Join(project, source)
+				}
+				found := false
+				for _, mount := range acc.Mounts() {
+					if mount.Source == source && mount.ContainerPath == source && mount.ReadOnly {
+						found = true
+					}
+				}
+				if !found {
+					t.Errorf("missing read-only config mount for %s: %+v", source, acc.Mounts())
+				}
+			}
+			for _, source := range []string{
+				filepath.Join(main, ".git", "config.worktree"),
+				filepath.Join(main, ".git", "worktrees", "sibling", "config.worktree"),
+				filepath.Join(main, ".git", "worktrees", "sibling", "commondir"),
+				filepath.Join(main, ".git", "worktrees", "sibling", "gitdir"),
+			} {
+				found := false
+				for _, mount := range acc.Mounts() {
+					found = found || (mount.Source == source && mount.ReadOnly)
+				}
+				if !found {
+					t.Errorf("missing protected sibling metadata %s", source)
+				}
+			}
+			for _, mount := range acc.Mounts() {
+				if mount.Source == unexposed {
+					t.Error("config protection exposed an unmounted host include")
+				}
+			}
+			if acc.Mounts()[0].ReadOnly {
+				t.Fatal("project must remain writable")
+			}
+			if linked {
+				withoutMetadata := newMountAccumulator([]backend.Mount{bindMount(project, project, false)}, nil)
+				if err := r.protectGitConfigFiles(withoutMetadata); err != nil {
+					t.Fatal(err)
+				}
+				for _, mount := range withoutMetadata.Mounts() {
+					if !strings.HasPrefix(mount.Source, project+string(filepath.Separator)) && mount.Source != project {
+						t.Errorf("protection exposed unmounted worktree metadata: %+v", mount)
+					}
+				}
+			}
+			t.Run("mount integration", func(t *testing.T) {
+				testReadOnlyGitConfigWrites(t, project, acc.Mounts())
+			})
+		})
+	}
+}
+
+func TestHostGitConfigPathsPreservesNewlines(t *testing.T) {
+	home, project := resolvedTempDir(t), resolvedTempDir(t)
+	gitDir := filepath.Join(resolvedTempDir(t), "metadata\nwith-newline")
+	cmd := exec.Command("git", "init", "-q", "--separate-git-dir", gitDir, project)
+	cmd.Env = append(os.Environ(), "HOME="+home)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v: %s", err, output)
+	}
+	paths, err := hostGitConfigPaths(home, project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"config", "config.worktree", "commondir", "gitdir"} {
+		want := filepath.Join(gitDir, name)
+		found := false
+		for _, path := range paths {
+			found = found || path == want
+		}
+		if !found {
+			t.Errorf("missing intact path %q in %q", want, paths)
+		}
+	}
+}
+
+func TestProtectEmptyHostGitConfigFiles(t *testing.T) {
+	for _, mode := range []string{"defaults", "overrides", "system disabled"} {
+		t.Run(mode, func(t *testing.T) {
+			root := resolvedTempDir(t)
+			home, project := filepath.Join(root, "home"), filepath.Join(root, "project")
+			xdg := filepath.Join(home, "custom-xdg")
+			for _, dir := range []string{home, project} {
+				if err := os.MkdirAll(dir, 0o755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			homeConfig := filepath.Join(home, ".gitconfig")
+			xdgConfig := filepath.Join(xdg, "git", "config")
+			globalOverride := filepath.Join(project, "global")
+			systemOverride := filepath.Join(project, "system")
+			for _, path := range []string{homeConfig, xdgConfig, globalOverride, systemOverride} {
+				writeFile(t, path, "")
+			}
+			t.Setenv("XDG_CONFIG_HOME", xdg)
+			t.Setenv("GIT_CONFIG_GLOBAL", "")
+			if err := os.Unsetenv("GIT_CONFIG_GLOBAL"); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("GIT_CONFIG_SYSTEM", "system")
+			t.Setenv("GIT_CONFIG_NOSYSTEM", "0")
+			want := map[string]bool{
+				homeConfig: true, xdgConfig: true,
+				globalOverride: false, systemOverride: true,
+			}
+			if mode == "overrides" {
+				t.Setenv("GIT_CONFIG_GLOBAL", "global")
+				want[homeConfig], want[xdgConfig], want[globalOverride] = false, false, true
+			}
+			if mode == "system disabled" {
+				t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+				want[systemOverride] = false
+			}
+			r := &Runtime{host: model.Host{Home: home}, project: model.Project{Dir: project}}
+			acc := newMountAccumulator([]backend.Mount{bindMount(root, root, false)}, nil)
+			if err := r.protectGitConfigFiles(acc); err != nil {
+				t.Fatal(err)
+			}
+			for path, protected := range want {
+				found := false
+				for _, mount := range acc.Mounts() {
+					found = found || (mount.Source == path && mount.ReadOnly)
+				}
+				if found != protected {
+					t.Errorf("protection for %s = %v, want %v", path, found, protected)
+				}
+			}
+		})
+	}
+}
+
+func TestProtectGitConfigOutsideRepositoryDoesNotCreateFiles(t *testing.T) {
+	project := t.TempDir()
+	r := &Runtime{host: model.Host{Home: t.TempDir()}, project: model.Project{Dir: project}}
+	acc := newMountAccumulator([]backend.Mount{bindMount(project, project, false)}, nil)
+	if err := r.protectGitConfigFiles(acc); err != nil {
+		t.Fatal(err)
+	}
+	if len(acc.Mounts()) != 1 || acc.Mounts()[0].ReadOnly {
+		t.Fatalf("unexpected mounts: %+v", acc.Mounts())
+	}
+	files, err := os.ReadDir(project)
+	if err != nil || len(files) != 0 {
+		t.Fatalf("protection created files: %v, %v", files, err)
+	}
+}
+
+func testReadOnlyGitConfigWrites(t *testing.T, project string, mounts []backend.Mount) {
+	t.Helper()
+	if out, err := exec.Command("unshare", "--user", "--map-root-user", "--mount", "true").CombinedOutput(); err != nil {
+		t.Skipf("mount integration check unavailable: %v: %s", err, out)
+	}
+	args := []string{"--user", "--map-root-user", "--mount", "sh", "-eu", "-c", `
+project=$1
+shift
+mount --bind "$project" "$project"
+for file do
+  mount --bind "$file" "$file"
+  if [ -f "$file" ]; then mount -o remount,bind,ro "$file"; fi
+done
+cd "$project"
+config=$(git rev-parse --git-path config)
+common=$(git rev-parse --git-common-dir)
+for file in "$common/config.worktree" "$common"/worktrees/*/config.worktree "$common"/worktrees/*/commondir "$common"/worktrees/*/gitdir; do
+  [ -f "$file" ] || continue
+  if printf 'modified' >> "$file"; then exit 1; fi
+done
+if git config --local core.hooksPath /untrusted; then exit 1; fi
+if git config --worktree user.email attacker@example.org; then exit 1; fi
+if printf 'modified' > "$config"; then exit 1; fi
+if rm "$config"; then exit 1; fi
+printf 'replacement' > "$config.replacement"
+if mv "$config.replacement" "$config"; then exit 1; fi
+if mv .git .git-moved; then exit 1; fi
+if printf 'modified' > .gitconfig; then exit 1; fi
+printf 'content' > tracked.txt
+git add tracked.txt
+git -c user.name=Tester -c user.email=test@example.org commit -q -m test
+`, "git-config-test", project}
+	// Match the parent-first ordering used by both backends.
+	mounts = append([]backend.Mount(nil), mounts...)
+	sort.SliceStable(mounts, func(i, j int) bool {
+		return strings.Count(mounts[i].ContainerPath, "/") < strings.Count(mounts[j].ContainerPath, "/")
+	})
+	for _, mount := range mounts {
+		if mount.Source == mount.ContainerPath && mount.Source != project {
+			args = append(args, mount.Source)
+		}
+	}
+	if out, err := exec.Command("unshare", args...).CombinedOutput(); err != nil {
+		t.Fatalf("read-only config integration: %v\n%s", err, out)
+	}
+}
 
 func TestAddGitConfigMountForwardsHostGlobalIdentity(t *testing.T) {
 	for _, tc := range []struct {
@@ -102,6 +358,12 @@ func TestAddGitConfigMountForwardsHostGlobalIdentity(t *testing.T) {
 			}
 			if len(mounts.Mounts()) != wantMounts {
 				t.Errorf("mount count = %d, want %d", len(mounts.Mounts()), wantMounts)
+			}
+			if wantMounts == 1 && len(mounts.Mounts()) == 1 {
+				mount := mounts.Mounts()[0]
+				if mount.Source != filepath.Join(home, ".gitconfig") || mount.ContainerPath != "/tmp/host_gitconfig" || !mount.ReadOnly {
+					t.Errorf("host Git config must be mounted read-only at the staging path: %+v", mount)
+				}
 			}
 		})
 	}

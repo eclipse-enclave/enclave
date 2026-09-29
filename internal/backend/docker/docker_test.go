@@ -22,6 +22,57 @@ import (
 	"enclave/internal/util"
 )
 
+func TestPrepareRunProtectsGitConfigFromRunArgAliases(t *testing.T) {
+	project := t.TempDir()
+	configPath := filepath.Join(project, ".gitconfig")
+	if err := os.WriteFile(configPath, []byte("[user]\n name = Test\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	b := newDevcontainerBackend(project, "--volume", project+":/alias", "--volume", configPath+":/direct")
+	spec, err := b.prepareRun(context.Background(), backend.Request{
+		Image:          "test",
+		ProtectedFiles: []string{configPath},
+		Network:        backend.NetworkPolicy{Mode: backend.NetworkModeUnrestricted},
+		Mounts:         []backend.Mount{{Type: backend.MountTypeBind, Source: configPath, ContainerPath: "/workspace/.gitconfig", ReadOnly: true}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, target := range []string{"/alias/.gitconfig", "/direct", "/workspace/.gitconfig"} {
+		found := false
+		for _, mount := range spec.hostConfig.Mounts {
+			if mount.Target == target && mount.ReadOnly && mount.Source == configPath {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("missing protected alias %s: %+v", target, spec.hostConfig.Mounts)
+		}
+	}
+}
+
+func TestPrepareRunDoesNotProtectUnrelatedReadOnlyFileAliases(t *testing.T) {
+	project := t.TempDir()
+	path := filepath.Join(project, "preferences")
+	if err := os.WriteFile(path, []byte("preferences"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	b := newDevcontainerBackend(project, "--volume", project+":/alias", "--volume", path+":/direct")
+	spec, err := b.prepareRun(context.Background(), backend.Request{
+		Image:   "test",
+		Network: backend.NetworkPolicy{Mode: backend.NetworkModeUnrestricted},
+		Mounts:  []backend.Mount{{Type: backend.MountTypeBind, Source: path, ContainerPath: "/preferences", ReadOnly: true}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, mount := range spec.hostConfig.Mounts {
+		if mount.Target == "/alias/preferences" || (mount.Target == "/direct" && mount.ReadOnly) {
+			t.Errorf("unrelated read-only file propagated to writable alias: %+v", mount)
+		}
+	}
+}
+
 func TestDockerConfigBindMountsStoresFromExactStoreDirs(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	home := t.TempDir()

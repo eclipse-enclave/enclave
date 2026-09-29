@@ -10,12 +10,64 @@ package mounts
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
 	"enclave/internal/backend"
 	"enclave/internal/model"
 )
+
+func TestProtectFilesMountAliases(t *testing.T) {
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	gitdir := filepath.Join(root, ".git")
+	if err := os.Mkdir(gitdir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	config := filepath.Join(gitdir, "config")
+	if err := os.WriteFile(config, []byte("[core]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(root, "config-link")
+	if err := os.Symlink(config, link); err != nil {
+		t.Fatal(err)
+	}
+	existing := []backend.Mount{
+		{Type: backend.MountTypeBind, Source: root, ContainerPath: "/workspace"},
+		{Type: backend.MountTypeBind, Source: gitdir, ContainerPath: "/metadata"},
+		{Type: backend.MountTypeBind, Source: config, ContainerPath: "/direct"},
+		{Type: backend.MountTypeBind, Source: root, ContainerPath: "/readonly", ReadOnly: true},
+		{Type: backend.MountTypeBind, Source: gitdir, ContainerPath: "/readonly/.git"},
+		{Type: backend.MountTypeBind, Source: root, ContainerPath: "/hidden"},
+		{Type: backend.MountTypeVolume, Source: "unrelated", ContainerPath: "/hidden/.git"},
+	}
+	got, err := ProtectFiles(existing, []string{config, link, config, filepath.Join(root, "missing"), filepath.Join(t.TempDir(), "unexposed")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]bool{"/workspace/.git/config": true, "/metadata/config": true, "/direct": true, "/readonly/.git/config": true}
+	for _, mount := range got {
+		if mount.Source == config {
+			if !want[mount.ContainerPath] || !mount.ReadOnly {
+				t.Fatalf("unexpected config mount: %+v", mount)
+			}
+			delete(want, mount.ContainerPath)
+		}
+	}
+	if len(want) != 0 {
+		t.Fatalf("missing protected aliases: %v", want)
+	}
+	if existing[2].ReadOnly {
+		t.Error("mutated caller's input mounts")
+	}
+	again, err := ProtectFiles(got, []string{config})
+	if err != nil || !reflect.DeepEqual(again, got) {
+		t.Fatalf("protection must be idempotent: %v\n%+v", err, again)
+	}
+}
 
 func TestValidateExtraDirsWithExistingSkipsDuplicate(t *testing.T) {
 	dir := t.TempDir()

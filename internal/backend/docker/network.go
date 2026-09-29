@@ -50,7 +50,7 @@ var (
 	networkList               = dockercmd.NetworkList
 	networkRemove             = dockercmd.NetworkRemove
 	networkAttachedContainers = dockercmd.NetworkAttachedContainers
-	sessionContainerExists    = dockerSessionContainerExists
+	sessionContainerList      = dockercmd.ContainerList
 	sessionRuntimeExists      = dockerSessionRuntimeExists
 )
 
@@ -122,11 +122,23 @@ func sessionNetworkLabels(meta backend.SessionMeta) map[string]string {
 	}
 }
 
+func sessionNetworkOwnedBy(info dockercmd.NetworkInspectResponse, container string, projectHash string) bool {
+	return strings.EqualFold(strings.TrimSpace(info.Labels[model.NetworkLabelManaged]), "true") &&
+		strings.TrimSpace(info.Labels[model.NetworkLabelContainer]) == strings.TrimSpace(container) &&
+		strings.TrimSpace(info.Labels[model.NetworkLabelProjectHash]) == strings.TrimSpace(projectHash)
+}
+
+// Discovery has no independently known owner; require complete labels and the
+// canonical network name before using them to select a cleanup candidate.
+func sessionNetworkOwner(info dockercmd.NetworkInspectResponse) (string, string, bool) {
+	owner := strings.TrimSpace(info.Labels[model.NetworkLabelContainer])
+	projectHash := strings.TrimSpace(info.Labels[model.NetworkLabelProjectHash])
+	return owner, projectHash, owner != "" && projectHash != "" &&
+		info.Name == sessionNetworkName(owner) && sessionNetworkOwnedBy(info, owner, projectHash)
+}
+
 func sessionNetworkActionFor(info dockercmd.NetworkInspectResponse, meta backend.SessionMeta, hasEndpoints bool) sessionNetworkAction {
-	labels := info.Labels
-	if !strings.EqualFold(strings.TrimSpace(labels[model.NetworkLabelManaged]), "true") ||
-		strings.TrimSpace(labels[model.NetworkLabelContainer]) != strings.TrimSpace(meta.Name) ||
-		strings.TrimSpace(labels[model.NetworkLabelProjectHash]) != strings.TrimSpace(meta.ProjectHash) {
+	if !sessionNetworkOwnedBy(info, meta.Name, meta.ProjectHash) {
 		return sessionNetworkConflict
 	}
 	if hasEndpoints {
@@ -185,9 +197,9 @@ func (b *Backend) ensureSessionNetwork(ctx context.Context, meta backend.Session
 
 // podmanIsolateValue picks the bridge isolation netavark actually accepts.
 // netavark parses the value when a container attaches, not when the network is
-// created, so an unsupported "strict" creates a network that every session on
-// it then fails to start on; the create-time fallback below never sees it.
-// "strict" therefore has to be gated on the version that introduced it.
+// created. Gate "strict" on its version to avoid attach-time failures. Older
+// Podman versions also validate the value during creation; the fallback below
+// handles those CLIs paired with a newer netavark.
 func podmanIsolateValue(info dockercmd.SystemInfo) (string, error) {
 	if !dockercmd.IsPodman() {
 		return "", nil
@@ -274,9 +286,9 @@ func createSessionNetwork(ctx context.Context, meta backend.SessionMeta, info do
 		return networkCreate(ctx, opts)
 	}
 	if podman && opts.Options[podmanIsolateOption] == podmanIsolateStrict && dockercmd.IsUnsupportedIsolateValue(err) {
-		// Backstop for a netavark that reports a new-enough version but still
-		// rejects the value at creation. isolate=true blocks traffic only
-		// between networks that also opt in, which every session network does;
+		// Older Podman CLIs parse isolate as a boolean at network creation,
+		// even when the installed netavark supports strict. isolate=true blocks
+		// traffic only between networks that also opt in, which every session does;
 		// containers on podman's default network keep a route into the session.
 		logx.Warnf("podman rejected isolate=strict for the per-session network; using isolate=true, which does not isolate the session from non-isolated podman networks: %v", err)
 		opts.Options = sessionNetworkDriverOptions(podman, podmanIsolateOptedInOnly)
@@ -353,9 +365,7 @@ func removeOwnedSessionNetwork(ctx context.Context, ref sessionNetworkRef, retri
 			return err
 		}
 		if strings.TrimSpace(info.ID) != strings.TrimSpace(ref.ID) ||
-			!strings.EqualFold(strings.TrimSpace(info.Labels[model.NetworkLabelManaged]), "true") ||
-			strings.TrimSpace(info.Labels[model.NetworkLabelContainer]) != strings.TrimSpace(ref.Container) ||
-			strings.TrimSpace(info.Labels[model.NetworkLabelProjectHash]) != strings.TrimSpace(ref.ProjectHash) {
+			!sessionNetworkOwnedBy(info, ref.Container, ref.ProjectHash) {
 			return nil
 		}
 		attached, err := sessionNetworkEndpoints(ctx, info)
@@ -410,18 +420,18 @@ func inspectedNetworkRemoveRef(info dockercmd.NetworkInspectResponse) (string, e
 
 func dockerSessionRuntimeExists(ctx context.Context, containerName string) (bool, error) {
 	for _, name := range []string{containerName, strings.TrimSpace(containerName) + model.GatewayContainerSuffix} {
-		_, err := dockercmd.ContainerInspect(ctx, name)
-		if err == nil {
-			return true, nil
-		}
-		if !dockercmd.IsNotFound(err) {
-			return false, err
+		exists, err := dockerSessionContainerExists(ctx, name)
+		if err != nil || exists {
+			return exists, err
 		}
 	}
 	return false, nil
 }
 
-func captureSessionNetworkRef(ctx context.Context, containerName string) (sessionNetworkRef, bool) {
+func captureSessionNetworkRef(ctx context.Context, containerName string, projectHash string) (sessionNetworkRef, bool) {
+	if strings.TrimSpace(projectHash) == "" {
+		return sessionNetworkRef{}, false
+	}
 	name := sessionNetworkName(containerName)
 	info, err := networkInspect(ctx, name)
 	if err != nil {
@@ -430,17 +440,15 @@ func captureSessionNetworkRef(ctx context.Context, containerName string) (sessio
 		}
 		return sessionNetworkRef{}, false
 	}
-	labels := info.Labels
 	if strings.TrimSpace(info.ID) == "" || info.Name != name ||
-		!strings.EqualFold(strings.TrimSpace(labels[model.NetworkLabelManaged]), "true") ||
-		strings.TrimSpace(labels[model.NetworkLabelContainer]) != strings.TrimSpace(containerName) {
+		!sessionNetworkOwnedBy(info, containerName, projectHash) {
 		return sessionNetworkRef{}, false
 	}
 	return sessionNetworkRef{
 		Name:        name,
 		ID:          strings.TrimSpace(info.ID),
 		Container:   strings.TrimSpace(containerName),
-		ProjectHash: strings.TrimSpace(labels[model.NetworkLabelProjectHash]),
+		ProjectHash: strings.TrimSpace(projectHash),
 	}, true
 }
 
@@ -493,14 +501,31 @@ func staleSessionNetworks(ctx context.Context, now time.Time) ([]sessionNetworkR
 	if err != nil {
 		return nil, err
 	}
-	var stale []sessionNetworkRef
+	var candidates []dockercmd.NetworkInspectResponse
 	for _, info := range networks {
-		owner, ok := staleSessionNetworkOwner(info, now)
-		if !ok || strings.TrimSpace(info.ID) == "" {
-			continue
+		if _, ok := staleSessionNetworkOwner(info, now); ok && strings.TrimSpace(info.ID) != "" {
+			candidates = append(candidates, info)
 		}
-		exists, err := sessionContainerExists(ctx, owner)
-		if err != nil || exists {
+	}
+	if len(candidates) == 0 {
+		return nil, nil
+	}
+	// Include stopped and unlabelled containers: any holder reserves the name.
+	// Removal rechecks existence after this snapshot before deleting anything.
+	containers, err := sessionContainerList(ctx, dockercmd.ListOptions{All: true})
+	if err != nil {
+		return nil, err
+	}
+	reserved := make(map[string]bool, len(containers))
+	for _, container := range containers {
+		for _, name := range container.Names {
+			reserved[strings.TrimPrefix(name, "/")] = true
+		}
+	}
+	var stale []sessionNetworkRef
+	for _, info := range candidates {
+		owner, projectHash, _ := sessionNetworkOwner(info)
+		if reserved[owner] || reserved[owner+model.GatewayContainerSuffix] {
 			continue
 		}
 		// The label and grace checks are cheap, so the engine is only asked
@@ -513,7 +538,7 @@ func staleSessionNetworks(ctx context.Context, now time.Time) ([]sessionNetworkR
 			Name:        info.Name,
 			ID:          info.ID,
 			Container:   owner,
-			ProjectHash: strings.TrimSpace(info.Labels[model.NetworkLabelProjectHash]),
+			ProjectHash: projectHash,
 		})
 	}
 	return stale, nil
@@ -531,11 +556,8 @@ func dockerSessionContainerExists(ctx context.Context, name string) (bool, error
 }
 
 func staleSessionNetworkOwner(info dockercmd.NetworkInspectResponse, now time.Time) (string, bool) {
-	if !strings.EqualFold(strings.TrimSpace(info.Labels[model.NetworkLabelManaged]), "true") || len(info.Containers) > 0 {
-		return "", false
-	}
-	owner := strings.TrimSpace(info.Labels[model.NetworkLabelContainer])
-	if owner == "" || info.Name != sessionNetworkName(owner) || strings.TrimSpace(info.Labels[model.NetworkLabelProjectHash]) == "" {
+	owner, _, ok := sessionNetworkOwner(info)
+	if !ok || len(info.Containers) > 0 {
 		return "", false
 	}
 	if !sessionNetworkPastGracePeriod(info, now) {
@@ -552,10 +574,7 @@ func fillSessionNetwork(ctx context.Context, session *backend.Session) {
 	if err != nil {
 		return
 	}
-	labels := info.Labels
-	if !strings.EqualFold(strings.TrimSpace(labels[model.NetworkLabelManaged]), "true") ||
-		strings.TrimSpace(labels[model.NetworkLabelContainer]) != strings.TrimSpace(session.Ref.Name) ||
-		strings.TrimSpace(labels[model.NetworkLabelProjectHash]) != strings.TrimSpace(session.ProjectHash) {
+	if !sessionNetworkOwnedBy(info, session.Ref.Name, session.ProjectHash) {
 		return
 	}
 	session.Network = sessionNetworkFromInspect(info)
@@ -573,9 +592,8 @@ func fillSessionNetworks(ctx context.Context, sessions []backend.Session) {
 	}
 	byOwner := make(map[string]dockercmd.NetworkInspectResponse, len(networks))
 	for _, info := range networks {
-		owner := strings.TrimSpace(info.Labels[model.NetworkLabelContainer])
-		if !strings.EqualFold(strings.TrimSpace(info.Labels[model.NetworkLabelManaged]), "true") ||
-			owner == "" || info.Name != sessionNetworkName(owner) {
+		owner, _, ok := sessionNetworkOwner(info)
+		if !ok {
 			continue
 		}
 		byOwner[owner] = info
@@ -585,7 +603,7 @@ func fillSessionNetworks(ctx context.Context, sessions []backend.Session) {
 		if !ok {
 			continue
 		}
-		if strings.TrimSpace(info.Labels[model.NetworkLabelProjectHash]) != strings.TrimSpace(sessions[i].ProjectHash) {
+		if !sessionNetworkOwnedBy(info, sessions[i].Ref.Name, sessions[i].ProjectHash) {
 			continue
 		}
 		sessions[i].Network = sessionNetworkFromInspect(info)

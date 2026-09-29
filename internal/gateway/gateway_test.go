@@ -125,28 +125,6 @@ func TestCoordinateGatewayImageBuildRechecksAfterWaiting(t *testing.T) {
 	}
 }
 
-func TestGatewayContainerStaleProtectsStartupWindow(t *testing.T) {
-	now := time.Now().UTC()
-	for _, tc := range []struct {
-		name    string
-		created time.Time
-		status  string
-		want    bool
-	}{
-		{name: "fresh running", created: now, status: "running"},
-		{name: "fresh created", created: now, status: "created"},
-		{name: "old running orphan", created: now.Add(-2 * OrphanGracePeriod), status: "running", want: true},
-		{name: "terminal", created: now, status: "exited", want: true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			info := docker.InspectResponse{Created: tc.created.Format(time.RFC3339Nano), State: &docker.ContainerState{Status: tc.status}}
-			if got := gatewayContainerStale(info, now); got != tc.want {
-				t.Fatalf("gatewayContainerStale() = %v, want %v", got, tc.want)
-			}
-		})
-	}
-}
-
 func TestReconcileGatewayContainerRemovesOwnedTerminalOrphanByID(t *testing.T) {
 	dir := t.TempDir()
 	stub := filepath.Join(dir, "docker")
@@ -182,7 +160,7 @@ exit 2
 		startContainerRemove = origRemove
 	})
 
-	result, err := ReconcileStale(context.Background(), "session", "project", time.Now().UTC())
+	result, err := ReconcileStale(context.Background(), "session", "project")
 	if err != nil {
 		t.Fatalf("ReconcileStale() error = %v", err)
 	}

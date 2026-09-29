@@ -36,9 +36,6 @@ const (
 	gatewayReadyMarker       = "Gateway ready"
 	gatewayReadyTimeout      = 15 * time.Second
 	gatewayReadyPollInterval = 100 * time.Millisecond
-	// OrphanGracePeriod protects a concurrent start while its gateway exists but
-	// its session container has not been created yet.
-	OrphanGracePeriod = time.Minute
 )
 
 var (
@@ -405,7 +402,7 @@ type StaleResult struct {
 	// Owned is set when that container carries this session's gateway labels.
 	Owned bool
 	// SessionExists is set when the session container itself exists; it is
-	// only checked for an owned, stale gateway.
+	// only checked for an owned gateway.
 	SessionExists bool
 	// Removed is set when the gateway was removed.
 	Removed bool
@@ -413,7 +410,8 @@ type StaleResult struct {
 
 // Start builds the gateway image if needed, then runs the gateway sidecar and
 // waits for it to report readiness. Cancelling ctx aborts the start and
-// removes a sidecar that was already created.
+// removes a sidecar that was already created. The caller holds the
+// session-start lock until the session container is running.
 func Start(ctx context.Context, cfg StartConfig) (StartResult, error) {
 	var empty StartResult
 	if err := validateStartConfig(cfg); err != nil {
@@ -443,7 +441,7 @@ func Start(ctx context.Context, cfg StartConfig) (StartResult, error) {
 	}
 
 	gatewayContainer := ContainerName(cfg.ContainerName)
-	reconciled, err := ReconcileStale(ctx, cfg.ContainerName, cfg.ProjectHash, time.Now().UTC())
+	reconciled, err := ReconcileStale(ctx, cfg.ContainerName, cfg.ProjectHash)
 	if err != nil {
 		return empty, fmt.Errorf("inspect existing gateway container %s: %w", gatewayContainer, err)
 	}
@@ -538,7 +536,7 @@ func Start(ctx context.Context, cfg StartConfig) (StartResult, error) {
 
 	containerID, err := startGatewayContainer(ctx, config, hostConfig, gatewayContainer)
 	if err != nil && docker.IsContainerNameConflict(err) {
-		reconciled, reconcileErr := ReconcileStale(ctx, cfg.ContainerName, cfg.ProjectHash, time.Now().UTC())
+		reconciled, reconcileErr := ReconcileStale(ctx, cfg.ContainerName, cfg.ProjectHash)
 		if reconcileErr != nil {
 			return empty, fmt.Errorf("reconcile conflicting gateway container %s: %w", gatewayContainer, reconcileErr)
 		}
@@ -643,8 +641,8 @@ func startGatewayContainer(ctx context.Context, config *docker.ContainerConfig, 
 // Without an ID (podman prints none on a failed start, and a killed CLI may
 // not have printed Docker's) the name is inspected first, and only a container
 // that carries this session's gateway labels and is not running is removed, by
-// its inspected ID. A running one belongs to a concurrent start of the same
-// session; ReconcileStale removes it once it is stale.
+// its inspected ID. A running container whose ID was not returned is left
+// for the next lock-protected startup to reconcile.
 func removeFailedGateway(ctx context.Context, name string, containerID string, config *docker.ContainerConfig) {
 	ctx = context.WithoutCancel(ctx)
 	removeRef := strings.TrimSpace(containerID)
@@ -675,25 +673,22 @@ func failedGatewayRemoveRef(ctx context.Context, name string, config *docker.Con
 	if config != nil {
 		labels = config.Labels
 	}
-	if !gatewayContainerOwnedBy(info, labels[model.GatewayLabelContainer], labels[model.GatewayLabelProjectHash]) {
+	if !ContainerOwnedBy(info, labels[model.GatewayLabelContainer], labels[model.GatewayLabelProjectHash]) {
 		logx.Debugf("Leaving gateway container %s in place after a failed start: it does not belong to this session", name)
 		return ""
 	}
 	if info.State != nil && info.State.Running {
-		logx.Debugf("Leaving running gateway container %s in place after a failed start: a concurrent start may own it", name)
+		logx.Debugf("Leaving running gateway container %s in place after a failed start without its ID; the next start will reconcile it", name)
 		return ""
 	}
 	return strings.TrimSpace(info.ID)
 }
 
-// ReconcileStale is the one rule for removing a gateway sidecar that outlived
-// its session start: the gateway of containerName is removed when it carries
-// the session's own labels, is stale (exited or dead, or older than
-// OrphanGracePeriod), and the session container does not exist. A younger
-// running gateway is left in place because a concurrent start of the same name
-// may be about to create its session container. Removal is by immutable ID so
-// a gateway replaced in the meantime survives.
-func ReconcileStale(ctx context.Context, containerName string, projectHash string, now time.Time) (StaleResult, error) {
+// ReconcileStale removes an owned gateway when its session container is absent.
+// The caller must hold the session-start lock: it makes even a newly created
+// orphan safe to remove after an interrupted start. Removal uses the immutable
+// ID so a replacement with the same name survives.
+func ReconcileStale(ctx context.Context, containerName string, projectHash string) (StaleResult, error) {
 	name := ContainerName(containerName)
 	info, err := startContainerInspect(ctx, name)
 	if err != nil {
@@ -702,8 +697,8 @@ func ReconcileStale(ctx context.Context, containerName string, projectHash strin
 		}
 		return StaleResult{}, err
 	}
-	result := StaleResult{Exists: true, Owned: gatewayContainerOwnedBy(info, containerName, projectHash)}
-	if !result.Owned || !gatewayContainerStale(info, now) {
+	result := StaleResult{Exists: true, Owned: ContainerOwnedBy(info, containerName, projectHash)}
+	if !result.Owned {
 		return result, nil
 	}
 
@@ -727,7 +722,8 @@ func ReconcileStale(ctx context.Context, containerName string, projectHash strin
 	return result, nil
 }
 
-func gatewayContainerOwnedBy(info docker.InspectResponse, containerName string, projectHash string) bool {
+// ContainerOwnedBy verifies the gateway labels against the expected session.
+func ContainerOwnedBy(info docker.InspectResponse, containerName string, projectHash string) bool {
 	if info.Config == nil {
 		return false
 	}
@@ -735,18 +731,6 @@ func gatewayContainerOwnedBy(info docker.InspectResponse, containerName string, 
 	return strings.EqualFold(strings.TrimSpace(labels[model.GatewayLabelManaged]), "true") &&
 		strings.TrimSpace(labels[model.GatewayLabelContainer]) == strings.TrimSpace(containerName) &&
 		strings.TrimSpace(labels[model.GatewayLabelProjectHash]) == strings.TrimSpace(projectHash)
-}
-
-func gatewayContainerStale(info docker.InspectResponse, now time.Time) bool {
-	status := ""
-	if info.State != nil {
-		status = strings.ToLower(strings.TrimSpace(info.State.Status))
-	}
-	if status == "exited" || status == "dead" {
-		return true
-	}
-	created, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(info.Created))
-	return err == nil && !created.After(now.Add(-OrphanGracePeriod))
 }
 
 func validateStartConfig(cfg StartConfig) error {

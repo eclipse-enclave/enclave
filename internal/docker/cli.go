@@ -166,18 +166,15 @@ func IsActiveEndpoints(err error) bool {
 		strings.Contains(message, "network is being used")
 }
 
-// IsUnsupportedIsolateValue reports whether podman rejected the bridge
-// "isolate" option value. netavark releases before "strict" existed fail the
-// boolean parse of that value. Note that netavark parses the option when a
-// container attaches, so a create can still succeed with a value it will
-// later reject; the supported value is chosen by version, not by this check.
+// IsUnsupportedIsolateValue recognizes older Podman CLIs rejecting strict as
+// a boolean during network creation, independently of the netavark version.
 func IsUnsupportedIsolateValue(err error) bool {
 	var ce *cliError
 	if !errors.As(err, &ce) {
 		return false
 	}
 	message := strings.ToLower(ce.stderr)
-	return strings.Contains(message, "isolate") || strings.Contains(message, `"strict"`)
+	return strings.Contains(message, `strconv.parsebool: parsing "strict": invalid syntax`)
 }
 
 // IsAddressPoolExhausted reports Docker's stable address-pool exhaustion

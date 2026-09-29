@@ -239,11 +239,18 @@ func TestGCSessionNetworksRequiresMissingOwnerContainer(t *testing.T) {
 			},
 		}
 	}
-	networks := []dockercmd.NetworkInspectResponse{makeNetwork("gone"), makeNetwork("exists")}
+	networks := []dockercmd.NetworkInspectResponse{makeNetwork("gone"), makeNetwork("exists"), makeNetwork("gateway-only")}
 	networkList = func(context.Context, dockercmd.Filters) ([]dockercmd.NetworkInspectResponse, error) {
 		return networks, nil
 	}
-	sessionContainerExists = func(_ context.Context, owner string) (bool, error) { return owner == "exists", nil }
+	listCalls := 0
+	sessionContainerList = func(_ context.Context, opts dockercmd.ListOptions) ([]dockercmd.Summary, error) {
+		listCalls++
+		if !opts.All {
+			t.Fatal("GC must include stopped containers")
+		}
+		return []dockercmd.Summary{{Names: []string{"/exists"}}, {Names: []string{"gateway-only-gateway"}}}, nil
+	}
 	sessionRuntimeExists = func(context.Context, string) (bool, error) { return false, nil }
 	networkInspect = func(_ context.Context, name string) (dockercmd.NetworkInspectResponse, error) {
 		for _, info := range networks {
@@ -257,6 +264,9 @@ func TestGCSessionNetworksRequiresMissingOwnerContainer(t *testing.T) {
 	networkRemove = func(_ context.Context, name string) error { removed = append(removed, name); return nil }
 
 	New(Options{}).gcSessionNetworks(context.Background(), now)
+	if listCalls != 1 {
+		t.Fatalf("GC listed containers %d times, want 1", listCalls)
+	}
 	if !reflect.DeepEqual(removed, []string{"gone-network-id"}) {
 		t.Fatalf("removed networks = %v", removed)
 	}
@@ -285,7 +295,7 @@ func TestGCSessionNetworksSkipsReplacementNetwork(t *testing.T) {
 	networkInspect = func(context.Context, string) (dockercmd.NetworkInspectResponse, error) {
 		return newNetwork, nil
 	}
-	sessionContainerExists = func(context.Context, string) (bool, error) { return false, nil }
+	sessionContainerList = func(context.Context, dockercmd.ListOptions) ([]dockercmd.Summary, error) { return nil, nil }
 	sessionRuntimeExists = func(context.Context, string) (bool, error) { return false, nil }
 	removed := false
 	networkRemove = func(context.Context, string) error { removed = true; return nil }
@@ -396,8 +406,8 @@ esac
 `)
 	networkCreate = dockercmd.NetworkCreate
 
-	// A netavark that reports strict support but still rejects it at creation
-	// must fall back rather than fail the session.
+	// An older Podman CLI with a newer netavark rejects strict at creation
+	// and must fall back rather than fail the session.
 	sysInfo := dockercmd.SystemInfo{NetworkBackend: "netavark", NetworkBackendVersion: "netavark 1.7.0"}
 	id, err := createSessionNetwork(context.Background(), backend.SessionMeta{Name: "session", ProjectHash: "project"}, sysInfo)
 	if err != nil || id != "network-id" {
@@ -437,7 +447,7 @@ func TestPruneStaleSessionNetworks(t *testing.T) {
 		return []dockercmd.NetworkInspectResponse{network}, nil
 	}
 	networkInspect = func(context.Context, string) (dockercmd.NetworkInspectResponse, error) { return network, nil }
-	sessionContainerExists = func(context.Context, string) (bool, error) { return false, nil }
+	sessionContainerList = func(context.Context, dockercmd.ListOptions) ([]dockercmd.Summary, error) { return nil, nil }
 	sessionRuntimeExists = func(context.Context, string) (bool, error) { return false, nil }
 	var removed []string
 	networkRemove = func(_ context.Context, ref string) error { removed = append(removed, ref); return nil }
@@ -462,14 +472,14 @@ func TestFillSessionNetworksExposesNameAndIPv4Subnet(t *testing.T) {
 	networkList = func(context.Context, dockercmd.Filters) ([]dockercmd.NetworkInspectResponse, error) {
 		return []dockercmd.NetworkInspectResponse{{
 			Name:   sessionNetworkName(owner),
-			Labels: map[string]string{model.NetworkLabelManaged: "true", model.NetworkLabelContainer: owner},
+			Labels: map[string]string{model.NetworkLabelManaged: "true", model.NetworkLabelContainer: owner, model.NetworkLabelProjectHash: "project"},
 			IPAM: dockercmd.NetworkIPAM{Config: []dockercmd.NetworkIPAMConfig{
 				{Subnet: "fd00::/64"},
 				{Subnet: "172.30.0.0/28"},
 			}},
 		}}, nil
 	}
-	sessions := []backend.Session{{Ref: backend.SessionRef{Name: owner}}}
+	sessions := []backend.Session{{Ref: backend.SessionRef{Name: owner}, ProjectHash: "project"}}
 	fillSessionNetworks(context.Background(), sessions)
 	if sessions[0].Network == nil || sessions[0].Network.Name != sessionNetworkName(owner) || sessions[0].Network.Subnet != "172.30.0.0/28" {
 		t.Fatalf("unexpected structured network: %+v", sessions[0].Network)
@@ -482,11 +492,11 @@ func TestFillSessionNetworksReadsPodmanSubnets(t *testing.T) {
 	networkList = func(context.Context, dockercmd.Filters) ([]dockercmd.NetworkInspectResponse, error) {
 		return []dockercmd.NetworkInspectResponse{{
 			Name:    sessionNetworkName(owner),
-			Labels:  map[string]string{model.NetworkLabelManaged: "true", model.NetworkLabelContainer: owner},
+			Labels:  map[string]string{model.NetworkLabelManaged: "true", model.NetworkLabelContainer: owner, model.NetworkLabelProjectHash: "project"},
 			Subnets: []dockercmd.NetworkIPAMConfig{{Subnet: "10.89.3.0/24"}},
 		}}, nil
 	}
-	sessions := []backend.Session{{Ref: backend.SessionRef{Name: owner}}}
+	sessions := []backend.Session{{Ref: backend.SessionRef{Name: owner}, ProjectHash: "project"}}
 	fillSessionNetworks(context.Background(), sessions)
 	if sessions[0].Network == nil || sessions[0].Network.Subnet != "10.89.3.0/24" {
 		t.Fatalf("podman subnet not exposed: %+v", sessions[0].Network)
@@ -758,7 +768,7 @@ func restoreNetworkGlobals(t *testing.T) {
 	origList := networkList
 	origRemove := networkRemove
 	origAttached := networkAttachedContainers
-	origContainerExists := sessionContainerExists
+	origContainerList := sessionContainerList
 	origRuntimeExists := sessionRuntimeExists
 	t.Cleanup(func() {
 		dockerInfo = origInfo
@@ -767,7 +777,7 @@ func restoreNetworkGlobals(t *testing.T) {
 		networkList = origList
 		networkRemove = origRemove
 		networkAttachedContainers = origAttached
-		sessionContainerExists = origContainerExists
+		sessionContainerList = origContainerList
 		sessionRuntimeExists = origRuntimeExists
 	})
 }
@@ -782,4 +792,23 @@ func copyNetwork(info dockercmd.NetworkInspectResponse, mutate func(*dockercmd.N
 	info.Labels = maps.Clone(info.Labels)
 	mutate(&info)
 	return info
+}
+
+func TestGCSessionNetworksPreservesResourcesOnListFailure(t *testing.T) {
+	restoreNetworkGlobals(t)
+	now := time.Now().UTC()
+	networkList = func(context.Context, dockercmd.Filters) ([]dockercmd.NetworkInspectResponse, error) {
+		return []dockercmd.NetworkInspectResponse{{
+			ID: "network-id", Name: "session-net", Created: now.Add(-2 * time.Hour).Format(time.RFC3339Nano),
+			Labels: sessionNetworkLabels(backend.SessionMeta{Name: "session", ProjectHash: "project"}),
+		}}, nil
+	}
+	sessionContainerList = func(context.Context, dockercmd.ListOptions) ([]dockercmd.Summary, error) {
+		return nil, errors.New("engine unavailable")
+	}
+	networkRemove = func(context.Context, string) error {
+		t.Fatal("GC removed a network after a failed container list")
+		return nil
+	}
+	New(Options{}).gcSessionNetworks(context.Background(), now)
 }

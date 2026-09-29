@@ -16,7 +16,6 @@ import (
 	"enclave/internal/backend"
 	"enclave/internal/config"
 	"enclave/internal/model"
-	"enclave/internal/runtime"
 )
 
 // containerIDMinPrefix is the shortest container-ID prefix accepted in place of
@@ -310,27 +309,6 @@ func sessionNameFilter(opts model.Options) (name string, given bool) {
 		return "", false
 	}
 	return strings.TrimSpace(opts.SessionName), true
-}
-
-// execSessionTarget resolves the `--name` of `exec` like the argument of
-// `attach`: a container name or ID from `enclave ps` matches verbatim from any
-// directory, anything else as a session name, current project first. The tint
-// follows the resolved session, as for attach. Without `--name` it returns the
-// zero target, leaving auto-selection to the runtime.
-func execSessionTarget(ctx context.Context, be backend.Backend, opts model.Options, project model.Project) (runtime.ExecTarget, error) {
-	name, given := sessionNameFilter(opts)
-	if !given {
-		return runtime.ExecTarget{}, nil
-	}
-	session, err := resolveSessionTarget(ctx, be, sessionTargetQuery{
-		Args:    []string{name},
-		Tool:    sessionTargetTool(opts),
-		Project: project,
-	})
-	if err != nil {
-		return runtime.ExecTarget{}, err
-	}
-	return runtime.ExecTarget{Name: session.Ref.Name, SessionTint: attachSessionTint(session, opts.SessionTint)}, nil
 }
 
 // sessionTargetTool returns the tool filter for session resolution: the tool

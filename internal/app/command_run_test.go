@@ -18,6 +18,7 @@ import (
 
 	"enclave/internal/backend"
 	"enclave/internal/model"
+	"enclave/internal/runtime"
 )
 
 func TestExecutionRequiresDocker(t *testing.T) {
@@ -198,5 +199,96 @@ func TestCoordinateRuntimeImageBuildPreservesForceRebuild(t *testing.T) {
 	}
 	if got := builds.Load(); got != 2 {
 		t.Fatalf("build count = %d, want 2", got)
+	}
+}
+
+// execOptions returns the options of `enclave exec --name <name>` with claude
+// as the configured default tool.
+func execOptions(name string) model.Options {
+	var opts model.Options
+	opts.Tool = "claude"
+	opts.SessionName = name
+	opts.Sources.SessionName = model.SourceCLI
+	return opts
+}
+
+func TestExecSessionTargetWithoutNameLeavesSelectionToRuntime(t *testing.T) {
+	be := &stopTestBackend{sessions: []backend.Session{
+		session("enclave-claude-aaaaaaaaaaaa-1", "1", "aaaaaaaaaaaa", "/repo/a"),
+	}}
+	var opts model.Options
+	opts.Tool = "claude"
+
+	got, err := execSessionTarget(context.Background(), be, opts, model.Project{Hash: "aaaaaaaaaaaa", Dir: "/repo/a"})
+	if err != nil {
+		t.Fatalf("execSessionTarget() error = %v", err)
+	}
+	if got != (runtime.ExecTarget{}) {
+		t.Fatalf("execSessionTarget() = %+v, want no target so exec auto-selects", got)
+	}
+}
+
+func TestExecSessionTargetRejectsBlankName(t *testing.T) {
+	for _, name := range []string{"", "  "} {
+		be := &stopTestBackend{sessions: []backend.Session{
+			session("enclave-claude-aaaaaaaaaaaa-1", "1", "aaaaaaaaaaaa", "/repo/a"),
+		}}
+		if _, err := execSessionTarget(context.Background(), be, execOptions(name), model.Project{Hash: "aaaaaaaaaaaa", Dir: "/repo/a"}); err == nil {
+			t.Fatalf("execSessionTarget(%q) succeeded, want an error instead of auto-selecting", name)
+		}
+	}
+}
+
+// The configured default tool is not a filter: a codex session is reachable
+// by name while claude is the default and --tool is not given.
+func TestExecSessionTargetDefaultToolIsNotAFilter(t *testing.T) {
+	codex := session("enclave-codex-bbbbbbbbbbbb-review", "review", "bbbbbbbbbbbb", "/repo/b")
+	codex.Tool = "codex"
+	be := &stopTestBackend{sessions: []backend.Session{codex}}
+
+	got, err := execSessionTarget(context.Background(), be, execOptions("review"), model.Project{Hash: "aaaaaaaaaaaa", Dir: "/repo/a"})
+	if err != nil {
+		t.Fatalf("execSessionTarget() error = %v", err)
+	}
+	if got.Name != codex.Ref.Name {
+		t.Fatalf("execSessionTarget() = %q, want the codex session", got.Name)
+	}
+}
+
+// Unlike a bare attach, exec may enter a foreground session; only running
+// sessions are candidates.
+func TestExecSessionTargetReachesForegroundRunningSessions(t *testing.T) {
+	foreground := session("enclave-claude-aaaaaaaaaaaa-work", "work", "aaaaaaaaaaaa", "/repo/a")
+	foreground.Background = false
+	be := &stopTestBackend{sessions: []backend.Session{foreground}}
+
+	got, err := execSessionTarget(context.Background(), be, execOptions("work"), model.Project{Hash: "aaaaaaaaaaaa", Dir: "/repo/a"})
+	if err != nil {
+		t.Fatalf("execSessionTarget() error = %v", err)
+	}
+	if got.Name != foreground.Ref.Name {
+		t.Fatalf("execSessionTarget() = %q, want the foreground session", got.Name)
+	}
+	if !be.listFilter.RunningOnly || be.listFilter.All {
+		t.Fatalf("filter = %+v, want running sessions only", be.listFilter)
+	}
+}
+
+// The ambient tool is claude, so exec into a codex session paints the codex
+// color, as attach does.
+func TestExecSessionTargetFollowsSessionTint(t *testing.T) {
+	writeGlobalToolTints(t)
+	codex := session("enclave-codex-bbbbbbbbbbbb-review", "review", "bbbbbbbbbbbb", t.TempDir())
+	codex.Tool = "codex"
+	be := &stopTestBackend{sessions: []backend.Session{codex}}
+	opts := execOptions("review")
+	opts.SessionTint = "#111111"
+
+	got, err := execSessionTarget(context.Background(), be, opts, model.Project{Hash: "cccccccccccc", Dir: "/home/user"})
+	if err != nil {
+		t.Fatalf("execSessionTarget() error = %v", err)
+	}
+	if got.SessionTint != "#222222" {
+		t.Fatalf("session tint = %q, want the codex tint", got.SessionTint)
 	}
 }

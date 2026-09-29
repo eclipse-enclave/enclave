@@ -30,7 +30,7 @@ Source0:        %{name}-%{version}.tar.gz
 BuildRequires:  golang >= 1.24
 Requires:       (docker-ce or moby-engine)
 Requires:       (docker-buildx-plugin or docker-buildx)
-Recommends:     git
+Requires:       git >= 2.26
 
 %description
 Enclave provides isolated container environments for AI coding assistants and

@@ -39,6 +39,8 @@ thread databases are rebuildable projections of the preserved `sessions/`
 rollouts, pinned to avoid re-deriving them on every overlaid run. OpenCode pins
 its session database and runtime data there; its separate XDG state directory is
 redirected into the config store as `xdg-state/` so TUI state also survives.
+Mistral Vibe pins its session logs, plans, worktrees, prompt history, trusted
+folders, cache, and project links.
 
 **Ephemeral mode** (`--ephemeral`): A fresh store directory is created with a
 unique suffix key for each session and removed after the container exits. The
@@ -207,6 +209,9 @@ store into the tool's config directory:
    - For Claude `.credentials.json`, if both config and auth files exist,
      compare `claudeAiOauth.expiresAt` and keep the fresher credential before
      linking.
+   - For Mistral Vibe `.env`, which Vibe rewrites by replacing the symlink with
+     a real file, a real config file newer (by mtime) than the auth file
+     replaces it before linking.
    - If the config path is a **stale symlink** and the auth path is empty,
      remove the stale link.
    - If the auth path has content, create a symlink: `config path → auth path`.
@@ -242,6 +247,8 @@ independent of the extracted asset cache for the lifetime of the process. Most
 tools remain **additive only**: files are copied when the shared auth destination
 is missing. Claude `.credentials.json` uses `claudeAiOauth.expiresAt` so a token
 refresh stranded as a real config-store file can replace stale shared auth.
+Mistral Vibe `.env` uses the file modification time, so a key or proxy setting
+re-entered during a session replaces the shared copy.
 
 This makes new credentials (e.g. a fresh OAuth token obtained during the
 session) available to other projects on the next run. Background and GUI sessions
@@ -347,7 +354,8 @@ Source: [`internal/runtime/volume_manager.go`](../../internal/runtime/volume_man
                          │
 9. Post-exit sync (auth-reconcile.sh helper container, stores bind-mounted)
    ├─ Sync shared auth: config store → auth store
-   │  (additive for most tools; Claude credentials use expiresAt)
+   │  (additive for most tools; Claude credentials use expiresAt,
+   │   Mistral Vibe .env uses mtime)
    └─ Sync feature auth: config store → feature auth stores
       (additive-only logic)
 ```

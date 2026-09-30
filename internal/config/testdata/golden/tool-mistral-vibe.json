@@ -4,10 +4,22 @@
   "continue_args": [
     "--continue"
   ],
-  "yolo_flag": "--agent auto-approve",
+  "resume_args": [
+    "--resume"
+  ],
+  "yolo_flag": "--agent auto-approve --trust",
   "yolo_enabled": true,
   "config_dir": ".vibe",
   "skills_dir": ".vibe/skills",
+  "state_paths": [
+    "logs/",
+    "plans/",
+    "worktrees/",
+    "vibehistory",
+    "trusted_folders.toml",
+    "cache.toml",
+    "projects.toml"
+  ],
   "settings_file": "mistral-vibe-config.toml",
   "settings_target": ".vibe/config.toml",
   "passthrough_paths": [
@@ -18,9 +30,33 @@
   ],
   "providers": [
     {
-      "name": "mistral"
+      "name": "mistral",
+      "credential_secrets": [
+        "mistral-api-key"
+      ],
+      "auth_files": [
+        ".env"
+      ]
     }
   ],
+  "secrets": {
+    "mistral-api-key": {
+      "env_vars": [
+        "MISTRAL_API_KEY"
+      ],
+      "release": {
+        "http": {
+          "hosts": [
+            "api.mistral.ai",
+            "chat.mistral.ai",
+            "console.mistral.ai"
+          ],
+          "header": "authorization",
+          "format": "Bearer %s"
+        }
+      }
+    }
+  },
   "host_config_dir": "",
   "host_credentials_file": "",
   "host_oauth_json": ""

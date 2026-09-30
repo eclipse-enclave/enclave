@@ -93,6 +93,20 @@ enclave_sync_additive_auth_file() {
     fi
 }
 
+# For files the tool rewrites in place (temp file + rename), which replaces the
+# symlink with a real file. Only a real file newer than the shared copy wins, so
+# a stale local copy never overwrites a key updated from another project.
+enclave_sync_newest_auth_file() {
+    src_file=$1
+    dst_file=$2
+    if [ -L "$src_file" ] || [ ! -s "$src_file" ]; then
+        return 0
+    fi
+    if [ ! -s "$dst_file" ] || [ -n "$(find "$src_file" -prune -newer "$dst_file" 2>/dev/null)" ]; then
+        enclave_copy_auth_file "$src_file" "$dst_file"
+    fi
+}
+
 enclave_sync_shared_auth() {
     tool=$1
     config_root=$2
@@ -112,6 +126,8 @@ enclave_sync_shared_auth() {
         config_path="$config_root/$auth_file"
         if [ "$tool" = "claude" ] && [ "$auth_file" = ".credentials.json" ]; then
             enclave_sync_claude_credentials "$config_path" "$auth_path"
+        elif [ "$tool" = "mistral-vibe" ] && [ "$auth_file" = ".env" ]; then
+            enclave_sync_newest_auth_file "$config_path" "$auth_path"
         else
             enclave_sync_additive_auth_file "$config_path" "$auth_path"
         fi

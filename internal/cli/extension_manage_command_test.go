@@ -98,3 +98,15 @@ func TestExtensionRequestZeroValueIsNonInteractive(t *testing.T) {
 		t.Error("a zero-value Request is interactive")
 	}
 }
+
+func TestFeatureListToolSelection(t *testing.T) {
+	for _, args := range [][]string{{"features", "--tool", "theia", "--slim"}, {"features", "list", "--tool", "theia", "--features", "none", "--json"}} {
+		result, err := Parse(args, model.Options{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if result.Options.Tool != "theia" {
+			t.Fatalf("tool selection: %q", result.Options.Tool)
+		}
+	}
+}

@@ -198,41 +198,22 @@ ARG USER_ID=1000
 ARG GROUP_ID=1000
 ARG USERNAME=agent
 ARG FEATURES=default
+ARG AGENT_TOOLS=all
 
 USER root
 
 # BEGIN ENCLAVE_FEATURE_INSTALLS
-# NOTE: This block is replaced at build time by app/dockerfile_gen.go with one
-# source-copy + install block per selected feature (priority ordered), so adding
-# or changing one feature does not re-run the others' copies, apt installs, or
-# scripts. The aggregated fallback below supports direct "docker build ." for
-# developer testing but without per-feature layer caching.
+# The CLI replaces this with one layer block per resolved feature. The fallback
+# resolves dependencies and installs each feature before its consumers.
 COPY extensions/features /opt/enclave/extensions/features
-RUN chmod -R a+rX /opt/enclave/extensions/features && \
-    find /opt/enclave/extensions/features -type f -name install.sh -exec chmod a+rx {} +
-
-# Dynamically install apt packages from feature extensions
-# Aggregates aptPackages from all enabled feature spec.yaml files
+COPY extensions/tools /opt/enclave/extensions/tools
+RUN chmod -R a+rX /opt/enclave/extensions && \
+    find /opt/enclave/extensions -type f -name install.sh -exec chmod a+rx {} +
 RUN --mount=type=cache,id=enclave-apt-cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,id=enclave-apt-lib,target=/var/lib/apt,sharing=locked \
-    FEATURES="${FEATURES}" /opt/enclave/build-scripts/install-feature-apt-packages.sh
-
-# Run feature install scripts that require root (needsRoot: true)
-# These are sorted by priority (lower first)
-RUN FEATURES="${FEATURES}" \
-    ENCLAVE_FEATURE_PHASE=root \
-    /opt/enclave/build-scripts/run-feature-installs.sh
-
+    FEATURES="${FEATURES}" AGENT_TOOLS="${AGENT_TOOLS}" USERNAME="${USERNAME}" \
+    /opt/enclave/build-scripts/install-selected-features.sh
 USER ${USERNAME}
-
-# Run feature install scripts that do not require root (needsRoot: false or not set)
-# These are sorted by priority (lower first)
-RUN --mount=type=cache,id=enclave-npm-${USER_ID},target=/home/${USERNAME}/.npm,uid=${USER_ID},gid=${GROUP_ID} \
-    --mount=type=cache,id=enclave-gomod-${USER_ID},target=/home/${USERNAME}/go/pkg/mod,uid=${USER_ID},gid=${GROUP_ID} \
-    --mount=type=cache,id=enclave-uv-${USER_ID},target=/home/${USERNAME}/.cache/uv,uid=${USER_ID},gid=${GROUP_ID} \
-    FEATURES="${FEATURES}" \
-    ENCLAVE_FEATURE_PHASE=user \
-    /opt/enclave/build-scripts/run-feature-installs.sh
 # END ENCLAVE_FEATURE_INSTALLS
 
 # Persist the resolved enabled-feature set so the entrypoint can gate per-feature

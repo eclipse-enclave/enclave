@@ -186,7 +186,7 @@ func optionCLIFlags() map[string][]CLIFlag {
 			}),
 		},
 		"slim": {
-			boolFlag("--slim", "Tools only, no features", func(opts *model.Options, sources *model.OptionSources) {
+			boolFlag("--slim", "Tools and their required features only", func(opts *model.Options, sources *model.OptionSources) {
 				opts.Slim = true
 				sources.Slim = model.SourceCLI
 			}),
@@ -200,7 +200,7 @@ func optionCLIFlags() map[string][]CLIFlag {
 			}),
 		},
 		"features": {
-			valueFlag("--features", "Enable features (comma-separated), or use default|all|none. In devcontainer mode, features default to none unless set", "--features requires a value", func(opts *model.Options, sources *model.OptionSources, value string) error {
+			valueFlag("--features", "Enable optional features (comma-separated), or use default|all|none. Required features are always enabled; devcontainers default to no optional features", "--features requires a value", func(opts *model.Options, sources *model.OptionSources, value string) error {
 				if err := applyFeatures(opts, value); err != nil {
 					return err
 				}

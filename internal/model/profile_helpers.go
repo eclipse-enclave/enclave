@@ -14,7 +14,7 @@ import (
 )
 
 func (p Profile) DeclaredSecretEnvVars() []string {
-	return collectSecretEnvVars(p.Secrets)
+	return dedupeStrings(append(collectSecretEnvVars(p.Secrets), collectSecretEnvVars(p.DependencySecrets)...))
 }
 
 func (e Extension) DeclaredSecretEnvVars() []string {
@@ -57,7 +57,11 @@ func (p Profile) ProviderAPIKeySecretIDs() map[string]bool {
 			if secretID == "" {
 				continue
 			}
-			if secret, ok := p.Secrets[secretID]; ok && !secret.IsAPIKey() {
+			secret, ok := p.Secrets[secretID]
+			if !ok {
+				secret, ok = p.DependencySecrets[secretID]
+			}
+			if ok && !secret.IsAPIKey() {
 				continue
 			}
 			secretIDs[secretID] = true

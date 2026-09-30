@@ -50,3 +50,8 @@ Preference overrides passed to Theia via `--session-preference` are merged from
 | `install.sh` | No-op (Theia installs at attach time) |
 | `gateway-allowlist.conf` | DNS allowlist for network isolation |
 | `entrypoint.d/setup.sh` | Runtime setup (creates config dir) |
+
+The required [`claude-core`](../../features/claude-core/README.md) feature installs
+Claude Code and declares Anthropic credentials and network access. Launch
+behavior, settings, and writable stores remain specific to this tool. Required
+features stay enabled under `--slim` and `--features none`.

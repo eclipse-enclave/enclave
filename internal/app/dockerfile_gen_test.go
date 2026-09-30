@@ -194,7 +194,7 @@ func TestRenderDockerfileWeavesFeatureAndToolBlocks(t *testing.T) {
 	if !strings.Contains(got, "# feature: apt-sample (priority 85)") {
 		t.Fatalf("expected generated feature block, got:\n%s", got)
 	}
-	if !strings.Contains(got, "FROM tool-base AS tool-claude") {
+	if !strings.Contains(got, "FROM feature-base AS tool-claude") {
 		t.Fatalf("expected woven tool stage, got:\n%s", got)
 	}
 	// Markers are preserved so a re-render is idempotent.
@@ -235,7 +235,7 @@ func TestRenderRealDockerfileTemplate(t *testing.T) {
 		`COPY ["extensions/features/devtools","/opt/enclave/extensions/features/devtools"]`,
 		"# feature: apt-sample (priority 85)",
 		`COPY ["extensions/features/apt-sample","/opt/enclave/extensions/features/apt-sample"]`,
-		"FROM tool-base AS tool-claude",
+		"FROM feature-base AS tool-claude",
 		"FROM feature-base AS standard",
 	} {
 		if !strings.Contains(got, want) {
@@ -243,7 +243,7 @@ func TestRenderRealDockerfileTemplate(t *testing.T) {
 		}
 	}
 	// Feature blocks must be woven before the tool stages that build on them.
-	if strings.Index(got, "# feature: devtools") > strings.Index(got, "FROM tool-base AS tool-claude") {
+	if strings.Index(got, "# feature: devtools") > strings.Index(got, "FROM feature-base AS tool-claude") {
 		t.Fatal("feature install block must precede the woven tool stages")
 	}
 }

@@ -69,3 +69,8 @@ left at the Claude Code defaults.
 | `templates/settings.json` | Default settings template |
 | `entrypoint.d/setup.sh` | Runtime setup (creates config dir, sets env vars) |
 | `go/` | Custom Go hooks |
+
+The required [`claude-core`](../../features/claude-core/README.md) feature installs
+Claude Code and declares Anthropic credentials and network access. Launch
+behavior, settings, and writable stores remain specific to this tool. Required
+features stay enabled under `--slim` and `--features none`.

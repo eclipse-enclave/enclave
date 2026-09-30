@@ -16,7 +16,7 @@
 
 - [ARCHITECTURE.md](ARCHITECTURE.md) — Architecture, repository layout, asset distribution, and option resolution
 - [DEV.md](DEV.md) — Build, package, test, generation, and contribution workflow
-- [extensions/README.md](extensions/README.md) — Tool and feature extension architecture
+- [extensions/README.md](extensions/README.md) — Tool and feature extension architecture, including required feature reuse
 - [extensions/adding-a-tool.md](extensions/adding-a-tool.md) — Adding a tool extension
 - [DEPENDENCIES.md](DEPENDENCIES.md) — Direct Go module dependencies
 

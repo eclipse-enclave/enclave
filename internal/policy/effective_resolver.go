@@ -135,10 +135,22 @@ func (r EffectiveResolver) loadSpecDomains(tool string) (allowed []string, denie
 	profile, err := config.LoadProfile(r.paths, tool)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return nil, nil, nil
+			if _, specErr := config.LoadSpec(r.paths, tool, config.KindSandbox); errors.Is(specErr, os.ErrNotExist) {
+				return nil, nil, nil
+			}
 		}
 		return nil, nil, fmt.Errorf("load spec domains for %q: %w", tool, err)
 	}
 	allowed = append(append([]string(nil), profile.AllowedDomains...), model.ReleaseHosts(profile.Secrets)...)
-	return allowed, profile.DeniedDomains, nil
+	denied = append([]string(nil), profile.DeniedDomains...)
+	features, err := config.ResolveRequiredFeatures(r.paths, profile.RequiredFeatures)
+	if err != nil {
+		return nil, nil, err
+	}
+	for _, feature := range features {
+		allowed = append(allowed, feature.AllowedDomains...)
+		allowed = append(allowed, model.ReleaseHosts(feature.Secrets)...)
+		denied = append(denied, feature.DeniedDomains...)
+	}
+	return allowed, denied, nil
 }

@@ -654,7 +654,8 @@ type capabilityFieldCase struct {
 // instead; reflection over the struct catches one that is in neither place.
 func capabilityFieldCases() map[string]capabilityFieldCase {
 	return map[string]capabilityFieldCase{
-		"InstallScript": {func(c *capabilities) { c.InstallScript = true }, "install.sh", "adds install.sh"},
+		"Spec.RequiredFeatures": {func(c *capabilities) { c.Spec.RequiredFeatures = []string{"claude-core"} }, "claude-core", "required feature claude-core"},
+		"InstallScript":         {func(c *capabilities) { c.InstallScript = true }, "install.sh", "adds install.sh"},
 		"Spec.InstallCommands": {func(c *capabilities) { c.Spec.InstallCommands = []string{"make install"} },
 			"commands.install", "install command make install"},
 		// Only renders alongside a non-empty InstallCommands, so the setter also

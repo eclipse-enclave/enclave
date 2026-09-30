@@ -212,43 +212,12 @@ func runErrorExitCode(err error) int {
 }
 
 func resolveEnabledFeatures(paths model.Paths, build model.BuildOptions) []model.Extension {
-	allFeatures, err := config.ListFeatures(paths)
+	selected, err := resolveSelectedFeatures(paths, build, "")
 	if err != nil {
-		logx.Debugf("Failed to list features: %v", err)
+		logx.Errorf("Failed to resolve enabled features: %v", err)
 		return nil
 	}
-	if len(allFeatures) == 0 {
-		return nil
-	}
-	if build.Slim {
-		return nil
-	}
-	if build.Devcontainer && build.Features == nil {
-		return nil
-	}
-	// If explicit features list is provided, filter to only those
-	if build.Features != nil {
-		selected := resolveConfiguredFeatures(build.Features, allFeatures)
-		requested := map[string]bool{}
-		for _, f := range selected {
-			requested[f] = true
-		}
-		var result []model.Extension
-		for _, feat := range allFeatures {
-			if requested[feat.Name] {
-				result = append(result, feat)
-			}
-		}
-		return result
-	}
-	// Otherwise, return all default-enabled features
-	var result []model.Extension
-	for _, feat := range allFeatures {
-		if feat.DefaultEnabled {
-			result = append(result, feat)
-		}
-	}
-	return result
+	return selected
 }
 
 func ensureRuntimeImage(input *CommandInput, opts model.Options, buildCfg *buildConfig, host model.Host, profile model.Profile) (buildConfig, int) {

@@ -22,6 +22,7 @@ func (c capabilities) render(w io.Writer, style Style, source string) {
 	rows := &rowSet{}
 	row := rows.add
 	row("source", source)
+	row("required features", strings.Join(c.Spec.RequiredFeatures, ", "))
 
 	install := ""
 	switch {

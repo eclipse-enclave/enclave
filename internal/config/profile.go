@@ -55,6 +55,9 @@ func validateAndNormalizeProfile(profile *model.Profile) error {
 	profile.Secrets = normalizedSecrets
 
 	secretIDs := map[string]struct{}{}
+	for id := range profile.DependencySecrets {
+		secretIDs[id] = struct{}{}
+	}
 	for id := range profile.Secrets {
 		secretIDs[id] = struct{}{}
 	}

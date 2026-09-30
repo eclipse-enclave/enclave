@@ -79,6 +79,44 @@ manifest. The in-container build shell scripts under
 enablement, `priority`, `needsRoot`, `aptPackages`, `failOnInstallError`)
 straight from `spec.yaml` (falling back to `spec.json`) with `yq`.
 
+## Required features
+
+A tool or feature can require installed features by name in its Enclave runtime
+capability:
+
+```yaml
+capabilities:
+  - type: org.eclipse.enclave/runtime@1
+    config:
+      name: my-tool
+      requiresFeatures: [claude-core]
+      # Tool launch, settings, and providers remain here.
+```
+
+Requirements are transitive. Each feature is included once, installed before its
+consumers, and contributes its normal credentials, network policy, runtime setup,
+ports, files, and skills. Priority orders features where dependency ordering does
+not intervene. Missing features, dependency cycles, and explicit exclusions such
+as `-claude-core` fail before building. Dependencies are local names, without
+versions, source URLs, or automatic fetching; install them separately first.
+
+`--features none`, `--slim`, and the devcontainer default disable optional
+features, while tool requirements remain enabled. Feature list output reflects
+the closure when a tool is configured or passed with `--tool`. QEMU's tool-only
+bundle path rejects tools with feature requirements.
+
+Put a shared credential declaration on its feature only. A tool's providers may
+reference credentials from its required feature closure; duplicate declarations
+still fail. Credential lookup uses the current tool's host credential layers.
+Writable authentication stores are shared only when the feature itself declares
+`configDir` and `authFiles`, under the existing feature auth-store rules.
+
+The built-in `claude-core` is opt-in outside its consumers. Claude, Theia, and
+Theia Next require it to share Claude Code installation, Anthropic credentials,
+and network declarations. Launch commands, provider behavior, settings, OAuth
+files, and writable stores stay on each tool. Tool update stamps also invalidate
+installation layers of their required features.
+
 ## Extension Spec (`spec.yaml`)
 
 Every extension has one `spec.yaml` (`spec.json` is also accepted) using the
@@ -100,7 +138,8 @@ capabilities fail loading. Unknown optional capabilities warn and are skipped.
 Exactly one required Enclave runtime capability is needed. Capability groups,
 kit sets, build recipes, args, and dependency declarations (`provides`,
 `requires`, `integrates`, `conflicts`) are rejected: installation uses sibling
-assets, and tools/features are selected explicitly.
+assets. Enclave feature-name dependencies use `requiresFeatures` inside its
+runtime capability, independently of the sbx top-level dependency fields.
 
 This is descriptor-format support with Enclave runtime semantics. Enclave does
 not implement the standard `com.docker.sandbox/*` capabilities, ingest or publish

@@ -548,6 +548,24 @@ func buildImage(ctx context.Context, paths model.Paths, host model.Host, combine
 	if err != nil {
 		return err
 	}
+	doc, err := config.LoadSpec(paths, tool, config.KindSandbox)
+	if err != nil {
+		return err
+	}
+	required, err := config.ResolveRequiredFeatures(paths, doc.RequiresFeatures)
+	if err != nil {
+		return err
+	}
+	requiredNames := map[string]bool{}
+	for _, feature := range required {
+		requiredNames[feature.Name] = true
+	}
+	for i := range featureInstalls {
+		if requiredNames[featureInstalls[i].Name] {
+			featureInstalls[i].UpdateStamp = updates.Stamps[tool]
+			featureInstalls[i].Required = true
+		}
+	}
 	dockerfileContent, err := renderEngineDockerfile(paths.Dockerfile, updates.Tools, featureInstalls, updates.Stamps, updates.ForceTools)
 	if err != nil {
 		return err
@@ -563,7 +581,7 @@ func buildImage(ctx context.Context, paths model.Paths, host model.Host, combine
 	buildTimestamp := time.Now().UTC().Format(time.RFC3339)
 
 	agentTools := resolveAgentToolsArg(tool)
-	features := resolveFeaturesArg(opts)
+	features := strings.Join(selection.Features, " ")
 	logDevcontainerFeatureSelection(opts, features)
 
 	cacheFrom := resolveCacheFrom(opts, buildCfg)
@@ -716,8 +734,11 @@ func resolveAgentToolsArg(tool string) string {
 }
 
 func resolveFeaturesArg(opts model.BuildOptions) string {
+	if opts.ResolvedFeatures != nil {
+		return strings.Join(opts.ResolvedFeatures, " ")
+	}
 	if opts.Slim {
-		return "" // --slim means no features
+		return "" // Unresolved slim options have no optional features.
 	}
 	if opts.Features != nil {
 		normalized := normalizeAndSortNames(opts.Features)
@@ -740,19 +761,11 @@ func resolveRuntimeImageSelection(paths model.Paths, opts model.BuildOptions, to
 		selection.Tools = []string{name}
 	}
 
-	if opts.Slim || (opts.Devcontainer && opts.Features == nil) {
-		return selection, nil
-	}
-
-	availableFeatures, err := config.ListFeatures(paths)
+	selected, err := resolveSelectedFeatures(paths, opts, tool)
 	if err != nil {
 		return runtimeImageSelection{}, err
 	}
-	if opts.Features != nil {
-		selection.Features = resolveConfiguredFeatures(opts.Features, availableFeatures)
-	} else {
-		selection.Features = defaultEnabledFeatureNames(availableFeatures)
-	}
+	selection.Features = featureNameList(selected)
 	return selection, nil
 }
 
@@ -795,6 +808,7 @@ func resolveFeatureInstalls(paths model.Paths, selected []string, warnConflicts 
 		}
 		installs = append(installs, featureInstall{
 			Name:                    name,
+			RequiredFeatures:        ext.RequiredFeatures,
 			Priority:                ext.Priority,
 			HasApt:                  len(ext.AptPackages) > 0,
 			HasScript:               hasScript,
@@ -803,6 +817,16 @@ func resolveFeatureInstalls(paths model.Paths, selected []string, warnConflicts 
 			InstallCommandsNeedRoot: anyRootInstallUser(ext.InstallCommandUsers),
 		})
 	}
+	requiredNames := map[string]bool{}
+	for _, feature := range installs {
+		for _, dependency := range feature.RequiredFeatures {
+			requiredNames[dependency] = true
+		}
+	}
+	for i := range installs {
+		installs[i].Required = requiredNames[installs[i].Name]
+	}
+
 	return installs, nil
 }
 

@@ -69,7 +69,7 @@ supported under `tool_overrides.<tool>`.
 | `session_tint` | Terminal background color marking a session-owned terminal, as `#rrggbb` (unset: no tint) |
 | `base_image` | Docker base image override |
 | `devcontainer` | Derive base image from devcontainer.json |
-| `slim` | Build without features (tools only) |
+| `slim` | Build with tools and their required features only |
 | `cache_from` | Docker build cache source |
 | `progress` | Docker build progress output style |
 | `image_name` | Override default image name/tag |
@@ -155,7 +155,9 @@ Values without prefixes replace the parent set entirely.
 
 `features` defaults to implicit `"default"` when unset. Additive entries are
 applied against the implicit default-enabled set, so `["-node-dev"]` removes
-that default feature and `[]` means "none".
+that default feature and `[]` means no optional features. Tool and feature
+`requiresFeatures` dependencies remain enabled. Excluding a required feature
+with `-feature` is an error; requirements are never silently removed.
 
 `host_config_paths` is resolved per tool against that tool's reviewed
 `passthroughPaths` from its `spec.yaml`. Use:
@@ -324,7 +326,7 @@ Buildx cache and canonical build UID/GID controls are CLI-only. Use
 `--buildx-cache-dir`, `--build-uid`, `--build-gid`, and `--runtime-uid-remap`
 for event/offline runs.
 
-The experimental `qemu` backend only runs unrestricted, slim/no-feature bundles, so selecting it implies `allow_all_network=true` and `slim=true` automatically (with a per-run notice). Requesting features or an allowlist (`--allow-domain`) is rejected because the backend cannot honor them.
+The experimental `qemu` backend only runs unrestricted, slim/no-feature bundles, so selecting it implies `allow_all_network=true` and `slim=true` automatically (with a per-run notice). Requesting features or an allowlist (`--allow-domain`) is rejected because the backend cannot honor them. Tools declaring `requiresFeatures` are rejected by QEMU; use Docker or Podman.
 
 ## Inspecting Resolved Config
 

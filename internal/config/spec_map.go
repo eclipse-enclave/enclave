@@ -306,10 +306,11 @@ func buildPorts(doc specDocument) []model.PortConfig {
 // runtime model.Profile used by the existing run path.
 func specToProfile(doc specDocument) model.Profile {
 	p := model.Profile{
-		Name:      doc.Name,
-		Providers: buildProviders(doc),
-		Secrets:   buildSecrets(doc),
-		Ports:     buildPorts(doc),
+		RequiredFeatures: doc.RequiresFeatures,
+		Name:             doc.Name,
+		Providers:        buildProviders(doc),
+		Secrets:          buildSecrets(doc),
+		Ports:            buildPorts(doc),
 	}
 	if doc.Network != nil {
 		p.AllowedDomains = doc.Network.AllowedDomains
@@ -364,15 +365,16 @@ func specToProfile(doc specDocument) model.Profile {
 // kind-specific defaults via applyExtensionDefaults.
 func specToExtension(doc specDocument) (model.Extension, extensionManifestState) {
 	ext := model.Extension{
-		Name:        doc.Name,
-		DisplayName: doc.DisplayName,
-		Description: doc.Description,
-		AptPackages: doc.AptPackages,
-		NeedsRoot:   doc.NeedsRoot,
-		ConfigDir:   doc.ConfigDir,
-		AuthFiles:   doc.AuthFiles,
-		Secrets:     buildSecrets(doc),
-		Ports:       buildPorts(doc),
+		RequiredFeatures: doc.RequiresFeatures,
+		Name:             doc.Name,
+		DisplayName:      doc.DisplayName,
+		Description:      doc.Description,
+		AptPackages:      doc.AptPackages,
+		NeedsRoot:        doc.NeedsRoot,
+		ConfigDir:        doc.ConfigDir,
+		AuthFiles:        doc.AuthFiles,
+		Secrets:          buildSecrets(doc),
+		Ports:            buildPorts(doc),
 	}
 	if doc.Network != nil {
 		ext.AllowedDomains = doc.Network.AllowedDomains

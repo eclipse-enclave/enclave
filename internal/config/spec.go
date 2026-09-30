@@ -36,7 +36,8 @@ type specDocument struct {
 // specRuntime is the strict config for org.eclipse.enclave/runtime@1.
 // Its semantics are Enclave-owned, including build and host state management.
 type specRuntime struct {
-	Name string `json:"name"`
+	Name             string   `json:"name"`
+	RequiresFeatures []string `json:"requiresFeatures,omitempty"`
 
 	Sandbox   *specSandbox   `json:"sandbox,omitempty"`
 	PostStart *specPostStart `json:"postStart,omitempty"`

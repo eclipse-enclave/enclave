@@ -68,24 +68,26 @@ type AuthOptions struct {
 }
 
 type BuildOptions struct {
-	ForceRebuild    bool
-	NoRebuild       bool
-	ForceBaseImage  bool
-	BaseImage       string
-	Devcontainer    bool
-	ImageName       string
-	ImageNameSet    bool
-	Slim            bool
-	Features        []string
-	UseRemoteUser   bool
-	CacheFrom       []string
-	BuildUID        string
-	BuildGID        string
-	RuntimeUIDRemap bool
-	BuildxCacheDir  string
-	BuildxCacheFrom []string
-	BuildxCacheTo   []string
-	Progress        string
+	// ResolvedFeatures is the complete build/runtime closure; Features preserves selectors and exclusions.
+	ResolvedFeatures []string
+	ForceRebuild     bool
+	NoRebuild        bool
+	ForceBaseImage   bool
+	BaseImage        string
+	Devcontainer     bool
+	ImageName        string
+	ImageNameSet     bool
+	Slim             bool
+	Features         []string
+	UseRemoteUser    bool
+	CacheFrom        []string
+	BuildUID         string
+	BuildGID         string
+	RuntimeUIDRemap  bool
+	BuildxCacheDir   string
+	BuildxCacheFrom  []string
+	BuildxCacheTo    []string
+	Progress         string
 }
 
 type CleanupOptions struct {
@@ -229,6 +231,9 @@ func ResolveMemoryScope(scope string) string {
 }
 
 type Profile struct {
+	RequiredFeatures []string `json:"required_features,omitempty"`
+	// DependencySecrets supplies provider metadata; enabled features own injection.
+	DependencySecrets   map[string]SecretConfig `json:"-"`
 	Name                string                  `json:"name"`
 	Command             string                  `json:"command"`
 	ContinueArgs        []string                `json:"continue_args,omitempty"`
@@ -411,12 +416,13 @@ func (p Profile) YoloEnabledValue() bool {
 }
 
 type Extension struct {
-	Type        string   `json:"type"`
-	Name        string   `json:"name"`
-	DisplayName string   `json:"display_name,omitempty"`
-	Description string   `json:"description,omitempty"`
-	AptPackages []string `json:"apt_packages,omitempty"`
-	NeedsRoot   bool     `json:"needs_root,omitempty"`
+	RequiredFeatures []string `json:"required_features,omitempty"`
+	Type             string   `json:"type"`
+	Name             string   `json:"name"`
+	DisplayName      string   `json:"display_name,omitempty"`
+	Description      string   `json:"description,omitempty"`
+	AptPackages      []string `json:"apt_packages,omitempty"`
+	NeedsRoot        bool     `json:"needs_root,omitempty"`
 	// InstallCommandUsers is the user field of each commands.install entry, in
 	// order. Its presence marks a mixin as using declarative install steps; a
 	// root entry forces the root build phase.

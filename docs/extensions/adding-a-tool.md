@@ -180,3 +180,10 @@ as `host:port`). Notes:
 - Confirm `enclave auth import --tool <tool>` copies required auth files
   (`providers[].authFiles`).
 - Sanity check the tool runs inside the container (`enclave --tool <tool>`).
+
+### Reusing a feature
+
+Declare `requiresFeatures: [claude-core]` beside `name` in the Enclave runtime
+capability to reuse an installed feature. Keep the tool's launch and writable
+stores in `sandbox`; reference shared credential IDs from its providers rather
+than redeclaring them. See [required features](README.md#required-features).

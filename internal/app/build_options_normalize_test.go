@@ -19,7 +19,7 @@ func TestNormalizeConfiguredBuildOptions_NoFeatures(t *testing.T) {
 	paths := testPathsWithFeatureDefaults(t)
 	opts := model.BuildOptions{}
 
-	got, err := normalizeConfiguredBuildOptions(paths, opts)
+	got, err := normalizeConfiguredBuildOptions(paths, opts, "")
 	if err != nil {
 		t.Fatalf("normalizeConfiguredBuildOptions: %v", err)
 	}
@@ -34,14 +34,14 @@ func TestNormalizeConfiguredBuildOptions_AdditiveAgainstImplicitDefaults(t *test
 		Features: []string{"-node-dev", "+shell-extras"},
 	}
 
-	got, err := normalizeConfiguredBuildOptions(paths, opts)
+	got, err := normalizeConfiguredBuildOptions(paths, opts, "")
 	if err != nil {
 		t.Fatalf("normalizeConfiguredBuildOptions: %v", err)
 	}
 
 	want := []string{"github-cli", "shell-extras"}
-	if !reflect.DeepEqual(got.Features, want) {
-		t.Fatalf("unexpected normalized features: got %v want %v", got.Features, want)
+	if !reflect.DeepEqual(got.ResolvedFeatures, want) {
+		t.Fatalf("unexpected normalized features: got %v want %v", got.ResolvedFeatures, want)
 	}
 }
 

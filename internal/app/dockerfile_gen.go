@@ -32,11 +32,14 @@ const (
 // adding or changing one feature only invalidates layers at or after its
 // (priority, name) position instead of re-running every feature's install.
 type featureInstall struct {
-	Name      string
-	Priority  int
-	HasApt    bool
-	HasScript bool
-	NeedsRoot bool
+	Required         bool
+	RequiredFeatures []string
+	UpdateStamp      string
+	Name             string
+	Priority         int
+	HasApt           bool
+	HasScript        bool
+	NeedsRoot        bool
 	// HasInstallCommands weaves the declarative commands.install synthesizer for
 	// a mixin that ships install steps instead of an install.sh sidecar. It is
 	// mutually exclusive with HasScript (install.sh wins). NeedRoot forces the
@@ -94,16 +97,23 @@ func replaceMarkerBlock(template string, startMarker string, endMarker string, b
 // appropriate user phase, so an apt-only feature added late (higher priority
 // value) does not re-run earlier features' copies or scripts.
 func generateFeatureInstallBlock(features []featureInstall) string {
-	ordered := append([]featureInstall(nil), features...)
-	sort.SliceStable(ordered, func(i, j int) bool {
-		if ordered[i].Priority != ordered[j].Priority {
-			return ordered[i].Priority < ordered[j].Priority
-		}
-		return ordered[i].Name < ordered[j].Name
-	})
+	metadata := make([]model.Extension, 0, len(features))
+	names := make([]string, 0, len(features))
+	byName := map[string]featureInstall{}
+	for _, feature := range features {
+		metadata = append(metadata, model.Extension{Name: feature.Name, Priority: feature.Priority, RequiredFeatures: feature.RequiredFeatures})
+		names = append(names, feature.Name)
+		byName[feature.Name] = feature
+	}
+	ordered, err := config.ResolveFeatureDependencies(metadata, names, nil)
+	if err != nil {
+		logx.Errorf("Cannot order feature installs: %v", err)
+		return "USER ${USERNAME}\n"
+	}
 
 	var b strings.Builder
-	for _, feature := range ordered {
+	for _, metadata := range ordered {
+		feature := byName[metadata.Name]
 		name := strings.TrimSpace(feature.Name)
 		if name == "" {
 			continue
@@ -121,14 +131,20 @@ func generateFeatureInstallBlock(features []featureInstall) string {
 		featureTarget := "/opt/enclave/extensions/features/" + name
 		b.WriteString(dockerfileCopyInstruction(featureSource, featureTarget))
 		b.WriteString(dockerfileNormalizeExtensionTree(featureTarget))
+		if feature.UpdateStamp != "" {
+			fmt.Fprintf(&b, "RUN echo %s\n", util.ShellQuote("Feature update stamp: "+feature.UpdateStamp))
+		}
 		if feature.HasApt {
 			b.WriteString("RUN --mount=type=cache,id=enclave-apt-cache,target=/var/cache/apt,sharing=locked \\\n")
 			b.WriteString("    --mount=type=cache,id=enclave-apt-lib,target=/var/lib/apt,sharing=locked \\\n")
-			fmt.Fprintf(&b, "    FEATURES=%s /opt/enclave/build-scripts/install-feature-apt-packages.sh\n", util.ShellQuote(name))
+			fmt.Fprintf(&b, "    ENCLAVE_FEATURES_RESOLVED=1 FEATURES=%s /opt/enclave/build-scripts/install-feature-apt-packages.sh\n", util.ShellQuote(name))
+		}
+		if feature.Required {
+			b.WriteString("ENV ENCLAVE_FEATURE_INSTALL_STRICT=1\n")
 		}
 		if feature.HasScript {
 			if feature.NeedsRoot {
-				fmt.Fprintf(&b, "RUN FEATURES=%s \\\n", util.ShellQuote(name))
+				fmt.Fprintf(&b, "RUN ENCLAVE_FEATURES_RESOLVED=1 FEATURES=%s \\\n", util.ShellQuote(name))
 				b.WriteString("    ENCLAVE_FEATURE_PHASE=root \\\n")
 				b.WriteString("    /opt/enclave/build-scripts/run-feature-installs.sh\n")
 			} else {
@@ -136,7 +152,7 @@ func generateFeatureInstallBlock(features []featureInstall) string {
 				b.WriteString("RUN --mount=type=cache,id=enclave-npm-${USER_ID},target=/home/${USERNAME}/.npm,uid=${USER_ID},gid=${GROUP_ID} \\\n")
 				b.WriteString("    --mount=type=cache,id=enclave-gomod-${USER_ID},target=/home/${USERNAME}/go/pkg/mod,uid=${USER_ID},gid=${GROUP_ID} \\\n")
 				b.WriteString("    --mount=type=cache,id=enclave-uv-${USER_ID},target=/home/${USERNAME}/.cache/uv,uid=${USER_ID},gid=${GROUP_ID} \\\n")
-				fmt.Fprintf(&b, "    FEATURES=%s \\\n", util.ShellQuote(name))
+				fmt.Fprintf(&b, "    ENCLAVE_FEATURES_RESOLVED=1 FEATURES=%s \\\n", util.ShellQuote(name))
 				b.WriteString("    ENCLAVE_FEATURE_PHASE=user \\\n")
 				b.WriteString("    /opt/enclave/build-scripts/run-feature-installs.sh\n")
 			}
@@ -144,7 +160,7 @@ func generateFeatureInstallBlock(features []featureInstall) string {
 		if feature.HasInstallCommands {
 			if feature.InstallCommandsNeedRoot {
 				b.WriteString("USER root\n")
-				fmt.Fprintf(&b, "RUN FEATURES=%s \\\n", util.ShellQuote(name))
+				fmt.Fprintf(&b, "RUN ENCLAVE_FEATURES_RESOLVED=1 FEATURES=%s \\\n", util.ShellQuote(name))
 				b.WriteString("    ENCLAVE_AGENT_USER=${USERNAME} \\\n")
 				b.WriteString("    /opt/enclave/build-scripts/install-extension-commands.sh\n")
 			} else {
@@ -152,9 +168,12 @@ func generateFeatureInstallBlock(features []featureInstall) string {
 				b.WriteString("RUN --mount=type=cache,id=enclave-npm-${USER_ID},target=/home/${USERNAME}/.npm,uid=${USER_ID},gid=${GROUP_ID} \\\n")
 				b.WriteString("    --mount=type=cache,id=enclave-gomod-${USER_ID},target=/home/${USERNAME}/go/pkg/mod,uid=${USER_ID},gid=${GROUP_ID} \\\n")
 				b.WriteString("    --mount=type=cache,id=enclave-uv-${USER_ID},target=/home/${USERNAME}/.cache/uv,uid=${USER_ID},gid=${GROUP_ID} \\\n")
-				fmt.Fprintf(&b, "    FEATURES=%s \\\n", util.ShellQuote(name))
+				fmt.Fprintf(&b, "    ENCLAVE_FEATURES_RESOLVED=1 FEATURES=%s \\\n", util.ShellQuote(name))
 				b.WriteString("    /opt/enclave/build-scripts/install-extension-commands.sh\n")
 			}
+		}
+		if feature.Required {
+			b.WriteString("ENV ENCLAVE_FEATURE_INSTALL_STRICT=0\n")
 		}
 	}
 	// Restore the unprivileged user for any downstream instructions and to match
@@ -225,7 +244,7 @@ func generateToolInstallBlock(tools []string, stamps map[string]string, forceToo
 
 	var b strings.Builder
 	for _, tool := range stages {
-		fmt.Fprintf(&b, "FROM tool-base AS %s\n", tool.stage)
+		fmt.Fprintf(&b, "FROM feature-base AS %s\n", tool.stage)
 		writeStageArgs(&b)
 		b.WriteString("RUN : > /tmp/installed-tools.txt\n")
 		toolTarget := "/opt/enclave/extensions/tools/" + tool.name

@@ -120,7 +120,7 @@ func ValidateOptions(opts model.Options, sources model.OptionSources, ctx Valida
 	default:
 		return opts, sources, warnings, fmt.Errorf("--progress must be %s, %s, or %s", model.BuildProgressQuiet, model.BuildProgressCompact, model.BuildProgressVerbose)
 	}
-	normalizedBuildOptions, normErr := normalizeConfiguredBuildOptions(ctx.Paths, opts.BuildOptions)
+	normalizedBuildOptions, normErr := normalizeConfiguredBuildOptions(ctx.Paths, opts.BuildOptions, opts.Tool)
 	if normErr != nil {
 		return opts, sources, warnings, normErr
 	}
@@ -147,6 +147,13 @@ func ValidateOptions(opts model.Options, sources model.OptionSources, ctx Valida
 // backend genuinely cannot satisfy — an allowlist or real features — stay
 // errors. A notice is emitted each run so the absent isolation is never silent.
 func coerceQEMURunOptions(opts model.Options, sources model.OptionSources, paths model.Paths) (model.Options, []string, error) {
+	if opts.Tool != "" {
+		doc, err := config.LoadSpec(paths, opts.Tool, config.KindSandbox)
+		if err == nil && len(doc.RequiresFeatures) > 0 {
+			return opts, nil, fmt.Errorf("qemu backend cannot install required features for tool %q (%s); use the docker backend", opts.Tool, strings.Join(doc.RequiresFeatures, ", "))
+		}
+	}
+
 	// An allowlist means "restrict egress", which the qemu backend cannot do;
 	// silently allowing everything would be a security downgrade, so error even
 	// when the allowlist came from config.

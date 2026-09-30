@@ -382,7 +382,7 @@ func TestValidatePlaywrightMCP_NonClaude(t *testing.T) {
 		},
 	}
 	sources := model.DefaultOptionSources()
-	ctx := ValidationContext{Action: "info"}
+	ctx := ValidationContext{Action: "info", Paths: model.Paths{ToolsDir: "../../extensions/tools", FeaturesDir: "../../extensions/features"}}
 
 	got, _, warnings, err := ValidateOptions(opts, sources, ctx)
 	if err != nil {
@@ -473,7 +473,7 @@ func TestValidatePlaywrightMCP_Claude(t *testing.T) {
 		},
 	}
 	sources := model.DefaultOptionSources()
-	ctx := ValidationContext{Action: "info"}
+	ctx := ValidationContext{Action: "info", Paths: model.Paths{ToolsDir: "../../extensions/tools", FeaturesDir: "../../extensions/features"}}
 
 	got, _, warnings, err := ValidateOptions(opts, sources, ctx)
 	if err != nil {

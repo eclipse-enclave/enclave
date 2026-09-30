@@ -19,6 +19,7 @@ import (
 // capabilities participates.
 func diffCapabilities(before capabilities, after capabilities) []string {
 	var changes []string
+	changes = append(changes, diffList("required feature", before.Spec.RequiredFeatures, after.Spec.RequiredFeatures)...)
 	beforeYolo, afterYolo := before.yoloActive(), after.yoloActive()
 	switch {
 	case afterYolo && !beforeYolo:

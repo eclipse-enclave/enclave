@@ -665,7 +665,7 @@ func OptionDefs() []OptionDef {
 			CLIFlags: []CLIFlagDef{
 				{
 					Name:      "--slim",
-					Usage:     "Tools only, no features",
+					Usage:     "Tools and their required features only",
 					ValueKind: CLIValueNone,
 					Action: CLIAction{
 						Kind:        CLIActionSetBool,
@@ -712,7 +712,7 @@ func OptionDefs() []OptionDef {
 			CLIFlags: []CLIFlagDef{
 				{
 					Name:                "--features",
-					Usage:               "Enable features (comma-separated), or use default|all|none. In devcontainer mode, features default to none unless set",
+					Usage:               "Enable optional features (comma-separated), or use default|all|none. Required features are always enabled; devcontainers default to no optional features",
 					ValueKind:           CLIValueRequired,
 					MissingValueMessage: "--features requires a value",
 					Action: CLIAction{

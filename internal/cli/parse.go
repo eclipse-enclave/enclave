@@ -847,8 +847,8 @@ func featuresCommand(res *Result) *cobra.Command {
 	}
 	// runFeatures previews which features a run would enable; that depends on
 	// --slim and --features.
-	addOptionFlagsByName(cmd.Flags(), &res.Options, &res.Sources, "slim", "features")
-	addExtensionSubcommands(cmd, res, model.KindFeature, "slim", "features")
+	addOptionFlagsByName(cmd.Flags(), &res.Options, &res.Sources, "tool", "slim", "features")
+	addExtensionSubcommands(cmd, res, model.KindFeature, "tool", "slim", "features")
 	return cmd
 }
 

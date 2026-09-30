@@ -56,6 +56,11 @@ func LoadSpec(paths model.Paths, name string, kind string) (specDocument, error)
 		return specDocument{}, err
 	}
 
+	for _, dependency := range doc.RequiresFeatures {
+		if err := ValidateExtensionName(dependency); err != nil {
+			return specDocument{}, fmt.Errorf("%s requiresFeatures: %w", specPath, err)
+		}
+	}
 	warnReservedFields(doc, name, specWarn)
 
 	warnUnknownFilesEntries(filepath.Join(filepath.Dir(specPath), "files"), name, specWarn)
@@ -242,6 +247,24 @@ func loadSpecProfile(paths model.Paths, name string) (model.Profile, error) {
 	}
 
 	profile := specToProfile(doc)
+	if len(profile.RequiredFeatures) > 0 {
+		features, err := ResolveRequiredFeatures(paths, profile.RequiredFeatures)
+		if err != nil {
+			return model.Profile{}, fmt.Errorf("tool %q: %w", name, err)
+		}
+		profile.DependencySecrets = map[string]model.SecretConfig{}
+		for _, feature := range features {
+			for id, secret := range feature.Secrets {
+				if _, exists := profile.Secrets[id]; exists {
+					return model.Profile{}, fmt.Errorf("secret %q declared by tool %q and feature %q", id, name, feature.Name)
+				}
+				if _, exists := profile.DependencySecrets[id]; exists {
+					return model.Profile{}, fmt.Errorf("secret %q declared by multiple required features", id)
+				}
+				profile.DependencySecrets[id] = secret
+			}
+		}
+	}
 	if err := validateAndNormalizeProfile(&profile); err != nil {
 		return model.Profile{}, fmt.Errorf("invalid profile %s: %w", specSourceLabel(name), err)
 	}

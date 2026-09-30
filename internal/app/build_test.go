@@ -864,7 +864,7 @@ func TestRenderDockerfileIncludesOnlySelectedTools(t *testing.T) {
 	if err != nil {
 		t.Fatalf("renderDockerfile returned error: %v", err)
 	}
-	if !strings.Contains(got, "FROM tool-base AS tool-codex") {
+	if !strings.Contains(got, "FROM feature-base AS tool-codex") {
 		t.Fatalf("expected selected tool stage in Dockerfile, got:\n%s", got)
 	}
 	if strings.Contains(got, "tool-claude") {
@@ -882,7 +882,7 @@ func TestRenderDockerfileEmptyToolsProducesValidStandardStage(t *testing.T) {
 	if !strings.Contains(got, "FROM feature-base AS standard") {
 		t.Fatalf("expected a standard stage even with no selected tools, got:\n%s", got)
 	}
-	if strings.Contains(got, "FROM tool-base AS tool-") {
+	if strings.Contains(got, "FROM feature-base AS tool-") {
 		t.Fatalf("did not expect any per-tool stage for an empty selection, got:\n%s", got)
 	}
 	// An empty selection must not emit a bare glob that fails (or warns) when

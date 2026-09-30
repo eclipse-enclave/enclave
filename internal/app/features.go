@@ -31,19 +31,13 @@ func runFeatures(ctx *AppContext, req *extinstall.Request, opts model.Options, s
 	}
 
 	available := map[string]struct{}{}
-	if opts.Slim {
-		// No features available in slim mode.
-	} else if opts.Features != nil {
-		selected := resolveConfiguredFeatures(opts.Features, features)
-		for _, f := range selected {
-			available[f] = struct{}{}
-		}
-	} else {
-		for _, f := range features {
-			if f.DefaultEnabled {
-				available[f.Name] = struct{}{}
-			}
-		}
+	selected, err := resolveSelectedFeatures(ctx.Paths, opts.BuildOptions, opts.Tool)
+	if err != nil {
+		logx.Errorf("%v", err)
+		return 1
+	}
+	for _, feature := range selected {
+		available[feature.Name] = struct{}{}
 	}
 
 	if req != nil && req.JSON {
@@ -61,7 +55,10 @@ func runFeatures(ctx *AppContext, req *extinstall.Request, opts model.Options, s
 
 	for _, feature := range features {
 		suffix := provenanceSuffix(inventory[feature.Name])
+		_, enabled := available[feature.Name]
 		switch {
+		case enabled:
+			fmt.Printf("✓ %s%s\n", feature.Name, suffix)
 		case opts.Slim:
 			src := formatSource(sources.Slim, ctx.ProjectDir)
 			if src != "" {
@@ -70,22 +67,14 @@ func runFeatures(ctx *AppContext, req *extinstall.Request, opts model.Options, s
 				fmt.Printf("✗ %s%s (disabled by --slim)\n", feature.Name, suffix)
 			}
 		case opts.Features != nil:
-			if _, ok := available[feature.Name]; ok {
-				fmt.Printf("✓ %s%s\n", feature.Name, suffix)
+			src := formatSource(sources.Features, ctx.ProjectDir)
+			if src != "" {
+				fmt.Printf("✗ %s%s (disabled by features from %s)\n", feature.Name, suffix, src)
 			} else {
-				src := formatSource(sources.Features, ctx.ProjectDir)
-				if src != "" {
-					fmt.Printf("✗ %s%s (disabled by features from %s)\n", feature.Name, suffix, src)
-				} else {
-					fmt.Printf("✗ %s%s (disabled by features)\n", feature.Name, suffix)
-				}
+				fmt.Printf("✗ %s%s (disabled by features)\n", feature.Name, suffix)
 			}
 		default:
-			if _, ok := available[feature.Name]; ok {
-				fmt.Printf("✓ %s%s\n", feature.Name, suffix)
-			} else {
-				fmt.Printf("✗ %s%s (opt-in)\n", feature.Name, suffix)
-			}
+			fmt.Printf("✗ %s%s (opt-in)\n", feature.Name, suffix)
 		}
 	}
 	return 0

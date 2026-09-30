@@ -1,4 +1,7 @@
 {
+  "required_features": [
+    "claude-core"
+  ],
   "name": "claude",
   "command": "claude",
   "continue_args": [
@@ -53,28 +56,6 @@
       "securestorage_dir_env": "CLAUDE_SECURESTORAGE_CONFIG_DIR"
     }
   ],
-  "secrets": {
-    "anthropic-api-key": {
-      "env_vars": [
-        "ANTHROPIC_API_KEY"
-      ],
-      "release": {
-        "http": {
-          "hosts": [
-            "*.anthropic.com",
-            "api.anthropic.com"
-          ],
-          "header": "x-api-key"
-        }
-      }
-    },
-    "claude-code-oauth-token": {
-      "env_vars": [
-        "CLAUDE_CODE_OAUTH_TOKEN"
-      ],
-      "api_key": false
-    }
-  },
   "host_config_dir": ".claude",
   "host_credentials_file": ".credentials.json",
   "host_oauth_json": ".claude.json"

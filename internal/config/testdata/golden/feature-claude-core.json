@@ -1,0 +1,36 @@
+{
+  "type": "mixin",
+  "name": "claude-core",
+  "display_name": "Claude Core",
+  "description": "Shared Claude installation, credentials, and network declarations",
+  "priority": 30,
+  "secrets": {
+    "anthropic-api-key": {
+      "env_vars": [
+        "ANTHROPIC_API_KEY"
+      ],
+      "release": {
+        "http": {
+          "hosts": [
+            "*.anthropic.com",
+            "api.anthropic.com"
+          ],
+          "header": "x-api-key"
+        }
+      }
+    },
+    "claude-code-oauth-token": {
+      "env_vars": [
+        "CLAUDE_CODE_OAUTH_TOKEN"
+      ],
+      "api_key": false
+    }
+  },
+  "allowedDomains": [
+    "anthropic.com",
+    "claude.ai",
+    "platform.claude.com",
+    "console.anthropic.com",
+    "platform.anthropic.com"
+  ]
+}

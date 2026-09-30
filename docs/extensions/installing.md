@@ -351,3 +351,11 @@ independent of whether other extensions in the same invocation succeeded.
 - There is no extension registry or index — every install names a git
   repository directly — and no signature verification of fetched content;
   trust is whatever you extend to the source you point at.
+
+## Feature requirements
+
+Install required features separately before installing a tool that references
+them. `requiresFeatures` names installed features; add/update never fetches them
+implicitly. The permission summary lists required feature names, and dependency
+changes appear in the update summary. Required features contribute their own
+installation, credentials, and network declarations when a consumer runs.

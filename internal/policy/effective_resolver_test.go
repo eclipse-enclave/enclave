@@ -315,3 +315,22 @@ func preparePolicyTestTool(t *testing.T) (string, string) {
 	}
 	return toolsDir, allowlistsDir
 }
+
+func TestRequiredFeatureNetworkDeclarations(t *testing.T) {
+	paths := model.Paths{ToolsDir: "../../extensions/tools", FeaturesDir: "../../extensions/features"}
+	resolver := NewEffectiveResolver(paths, t.TempDir())
+	for _, tool := range []string{"claude", "theia", "theia-next"} {
+		allowed, _, err := resolver.loadSpecDomains(tool)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !slices.Contains(allowed, "api.anthropic.com") || !slices.Contains(allowed, "*.anthropic.com") {
+			t.Fatalf("%s required-feature domains missing: %v", tool, allowed)
+		}
+	}
+	paths.FeaturesDir = t.TempDir()
+	resolver = NewEffectiveResolver(paths, t.TempDir())
+	if _, _, err := resolver.loadSpecDomains("claude"); err == nil {
+		t.Fatal("missing required feature must not be treated as missing tool")
+	}
+}

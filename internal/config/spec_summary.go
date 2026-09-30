@@ -87,6 +87,7 @@ type SpecHostExposure struct {
 // which makes a step changing user visible even when the root count does not
 // move.
 type SpecSummary struct {
+	RequiredFeatures      []string
 	Kind                  string
 	Name                  string
 	DisplayName           string
@@ -142,14 +143,15 @@ func SummarizeSpecDir(dir string) (SpecSummary, error) {
 
 func summarizeSpecDocument(doc specDocument) SpecSummary {
 	summary := SpecSummary{
-		Kind:            strings.TrimSpace(doc.Kind),
-		Name:            strings.TrimSpace(doc.Name),
-		DisplayName:     strings.TrimSpace(doc.DisplayName),
-		Description:     strings.TrimSpace(doc.Description),
-		NeedsRoot:       doc.NeedsRoot,
-		AptPackages:     doc.AptPackages,
-		DefaultEnabled:  doc.DefaultEnabled,
-		DefaultIncluded: doc.DefaultIncluded,
+		Kind:             strings.TrimSpace(doc.Kind),
+		Name:             strings.TrimSpace(doc.Name),
+		RequiredFeatures: doc.RequiresFeatures,
+		DisplayName:      strings.TrimSpace(doc.DisplayName),
+		Description:      strings.TrimSpace(doc.Description),
+		NeedsRoot:        doc.NeedsRoot,
+		AptPackages:      doc.AptPackages,
+		DefaultEnabled:   doc.DefaultEnabled,
+		DefaultIncluded:  doc.DefaultIncluded,
 	}
 	if doc.Commands != nil {
 		for _, cmd := range doc.Commands.Install {

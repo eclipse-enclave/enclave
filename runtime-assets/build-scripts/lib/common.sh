@@ -188,29 +188,70 @@ enclave_tool_is_enabled() {
     enclave_word_list_contains "$selection" "$tool_name"
 }
 
+# Local associative arrays in the caller scope are shared by recursive visits.
+enclave_visit_feature() {
+    local name="$1" spec dependency priority
+    if [[ ! "$name" =~ ^[a-z0-9][a-z0-9._-]*$ ]]; then echo "Invalid required feature name: $name" >&2; return 1; fi
+    case "${feature_states[$name]:-}" in
+        visiting) echo "Feature dependency cycle at: $name" >&2; return 1 ;;
+        done) return 0 ;;
+    esac
+    spec="$(enclave_ext_spec "$ENCLAVE_FEATURES_DIR/$name")"
+    if [ -z "$spec" ]; then
+        echo "Required feature is unavailable: $name" >&2
+        return 1
+    fi
+    feature_states[$name]=visiting
+    local dependencies
+    dependencies="$(enclave_spec_read "$spec" '.requiresFeatures[]' '')" || return
+    while IFS= read -r dependency; do
+        [ -n "$dependency" ] || continue
+        enclave_visit_feature "$dependency" || return
+    done <<< "$dependencies"
+    feature_states[$name]="done"
+    priority="$(enclave_spec_read "$spec" '.priority // 100')"
+    printf '%s\t%s\t%s\n' "$priority" "$name" "$ENCLAVE_FEATURES_DIR/$name"
+}
+
 enclave_list_enabled_features() {
-    local selection="${1-default}"
-    local ext=""
-    local spec=""
-    local name=""
-    local priority=""
-
+    local selection="${1-default}" ext spec name priority
+    local -A feature_states=()
+    local roots="" dependencies="" tool_dir
     enclave_require_command yq
-
     for ext in "$ENCLAVE_FEATURES_DIR"/*/; do
         [ -d "$ext" ] || continue
-        ext="${ext%/}"
-        spec="$(enclave_ext_spec "$ext")"
+        spec="$(enclave_ext_spec "${ext%/}")"
         [ -n "$spec" ] || continue
-
         name="$(basename "$ext")"
-        if ! enclave_feature_is_enabled "$spec" "$name" "$selection"; then
-            continue
-        fi
-
+        enclave_feature_is_enabled "$spec" "$name" "$selection" || continue
         priority="$(enclave_spec_read "$spec" '.priority // 100')"
-        printf '%s\t%s\t%s\n' "$priority" "$name" "$ext"
+        roots+="$priority"$'\t'"$name"$'\n'
     done
+    if [ "${ENCLAVE_FEATURES_RESOLVED:-0}" = 1 ]; then
+        while IFS=$'\t' read -r priority name; do
+            [ -n "$name" ] || continue
+            printf '%s\t%s\t%s\n' "$priority" "$name" "$ENCLAVE_FEATURES_DIR/$name"
+        done <<< "$roots"
+        return
+    fi
+    # Direct Docker builds resolve the selected tools' requirements here. The
+    # CLI supplies the already resolved feature set and stages only that closure.
+    for tool_dir in "$ENCLAVE_EXTENSIONS_ROOT"/tools/*/; do
+        [ -d "$tool_dir" ] || continue
+        spec="$(enclave_ext_spec "${tool_dir%/}")"
+        [ -n "$spec" ] || continue
+        name="$(basename "$tool_dir")"
+        enclave_tool_is_enabled "$spec" "$name" "${AGENT_TOOLS:-}" || continue
+        dependencies="$(enclave_spec_read "$spec" '.requiresFeatures[]' '')" || return
+        while IFS= read -r name; do
+            [ -n "$name" ] || continue
+            roots+="0"$'\t'"$name"$'\n'
+        done <<< "$dependencies"
+    done
+    while IFS=$'\t' read -r priority name; do
+        [ -n "$name" ] || continue
+        enclave_visit_feature "$name" || return
+    done < <(printf '%s' "$roots" | sort -n -k1,1 -k2,2)
 }
 
 enclave_list_feature_installers() {

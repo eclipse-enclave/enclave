@@ -171,6 +171,7 @@ The restricted network request flow has a separate
 
 ## Key Concepts
 
+- **Feature reuse**: tools and features declare `requiresFeatures` in the Enclave runtime capability. `internal/config/feature_dependencies.go` resolves the transitive closure once per selection, deduplicates shared dependencies, and rejects missing features, cycles, and explicit exclusions. Installation runs dependencies before consumers; priority orders other features. Tool install stages inherit `feature-base`. Profile provider validation reads required-feature credentials as metadata; runtime injects each declaration only from its owning feature. `extensions/features/claude-core/` shares installation, credentials, and network declarations between Claude, Theia, and Theia Next while each tool retains launch behavior and stores. QEMU tool-only bundles reject tools with feature requirements.
 - **Extension descriptors** use the sbx v3 grammar pinned to `sandbox-kit-spec/v3 v3.0.0-m.7`. Tools are workloads; features are mixins. Enclave runtime fields live in the required `org.eclipse.enclave/runtime@1` capability's config, strictly decoded into `specRuntime`. Paths below refer to that payload. Legacy v1 descriptors remain supported; normalized runtime kinds remain `sandbox`/`mixin`, and CLI JSON kinds remain `tool`/`feature`. This supports descriptor grammar, not OCI kits or sbx runtime interoperability.
 - **Profiles** (`extensions/tools/<tool>/spec.yaml`, `kind: workload`): define tool command, session continuation args (`continueArgs`, `resumeArgs`), config location, optional settings/skills metadata (`settingsFile`, `settingsTarget`, `skillsDir`), optional agent-memory policy (`memoryDir`, `memoryScope`, `noMemoryArgs`) and pinned runtime state (`statePaths`), optional host passthrough allow-list (`passthroughPaths`), optional QEMU bundle minimum memory (`qemuMinMemoryMiB`) and config-store cache hint (`qemuStoreCacheMmap`), declared credential sources (`credentials.sources`) including API-key metadata, YOLO flag, and per-provider auth configuration (`providers`: credentials, auth files, auth session checks, OAuth ports).
 - **Runtime assets** (`runtime-assets/gateway-allowlists/`, `runtime-assets/build-scripts/`, `runtime-assets/auth-reconcile.sh`, `runtime-assets/net.sh`): DNS allowlists, Docker weaving scripts, and shared entrypoint helpers baked into the image. Tool templates live in `extensions/tools/<tool>/templates/` and are aggregated during build.
@@ -355,7 +356,8 @@ from being accepted as current when it was built for a different numeric user.
 
 `features` can be set from config or CLI (`--features`). In devcontainer mode,
 the unset default is no enclave features; pass `--features` (or configure
-`features`) to opt in. `--features none` selects zero features explicitly.
+`features`) to opt in. `--features none` disables optional features; required
+features declared with `requiresFeatures` remain enabled, including under `--slim`.
 Config additive entries (`+`/`-`) are applied against the implicit
 default-enabled feature set when `features` is otherwise unset.
 

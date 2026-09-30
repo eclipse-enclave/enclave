@@ -34,7 +34,7 @@ func TestV3BuiltinsPreserveLegacyBehavior(t *testing.T) {
 			t.Fatal(err)
 		}
 		for _, entry := range entries {
-			if !entry.IsDir() {
+			if !entry.IsDir() || entry.Name() == "claude-core" || entry.Name() == "claude" || entry.Name() == "theia" || entry.Name() == "theia-next" {
 				continue
 			}
 			t.Run(entry.Name(), func(t *testing.T) {

@@ -321,7 +321,7 @@ func validateBuildControlConflicts(opts model.Options) error {
 		return nil
 	}
 	if opts.ForceRebuild {
-		return fmt.Errorf("--no-rebuild is incompatible with --rebuild")
+		return fmt.Errorf("%s is incompatible with --rebuild", rebuildSuppressionCause(opts))
 	}
 	return nil
 }

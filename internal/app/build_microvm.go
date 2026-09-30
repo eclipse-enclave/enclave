@@ -79,7 +79,7 @@ func ensureQEMUBundle(input *CommandInput, opts model.Options, buildCfg buildCon
 	logx.Debugf("qemu bundle hash: %s", bundleHash)
 	logx.Infof("Using qemu bundle: %s", bundleDir)
 	if opts.NoRebuild {
-		logx.Warnf("Skipping qemu bundle build due to --no-rebuild.")
+		logx.Warnf("Skipping qemu bundle build (--no-rebuild or %s=1).", model.EnvNoRebuild)
 		if err := ensureExistingQEMUBundle(bundleDir); err != nil {
 			logx.Errorf("%v", err)
 			return buildConfig{}, 1
@@ -146,7 +146,7 @@ func ensureExistingQEMUBundle(dir string) error {
 	info, err := os.Stat(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return fmt.Errorf("qemu bundle %q is missing vmlinuz; rerun without --no-rebuild or pass --rebuild", dir)
+			return fmt.Errorf("qemu bundle %q is missing vmlinuz and builds are disabled (--no-rebuild or %s); re-enable builds to create it", dir, model.EnvNoRebuild)
 		}
 		return err
 	}
@@ -154,7 +154,7 @@ func ensureExistingQEMUBundle(dir string) error {
 		return fmt.Errorf("qemu bundle %q has non-file vmlinuz", dir)
 	}
 	if _, err := backendqemu.InitramfsPath(dir); err != nil {
-		return fmt.Errorf("%w; rerun without --no-rebuild or pass --rebuild", err)
+		return fmt.Errorf("%w; builds are disabled (--no-rebuild or %s); re-enable builds to create it", err, model.EnvNoRebuild)
 	}
 	return nil
 }

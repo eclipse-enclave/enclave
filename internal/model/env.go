@@ -16,6 +16,7 @@ const (
 	EnvLogLevel                 = EnvPrefix + "LOG_LEVEL"
 	EnvColor                    = EnvPrefix + "COLOR"
 	EnvAgentUpdateIntervalHours = EnvPrefix + "AGENT_UPDATE_INTERVAL_HOURS"
+	EnvNoRebuild                = EnvPrefix + "NO_REBUILD"
 	EnvRuntimeUID               = EnvPrefix + "RUNTIME_UID"
 	EnvRuntimeGID               = EnvPrefix + "RUNTIME_GID"
 	EnvLoopbackPorts            = EnvPrefix + "LOOPBACK_PORTS"

@@ -1,0 +1,58 @@
+# Copyright (C) 2026 Dirk Fauth and others.
+#
+# This program and the accompanying materials are made available under the
+# terms of the MIT License, which is available in the project root.
+#
+# SPDX-License-Identifier: MIT
+
+schemaVersion: "1"
+kind: sandbox
+name: copilot
+displayName: Copilot CLI
+description: Copilot CLI
+
+sandbox:
+  entrypoint: { run: [copilot, --disable-builtin-mcps] }
+  configDir: .copilot
+  qemuMinMemoryMiB: 4096
+  skillsDir: .copilot/skills
+  settingsFile: copilot-settings.json
+  settingsTarget: .copilot/settings.json
+  yoloFlag: --yolo
+  yoloEnabled: true
+  continueArgs: [--continue]
+  resumeArgs: [--resume]
+  passthroughPaths: [
+    agents/, 
+    copilot-instructions.md, 
+    extensions/, 
+    hooks/, 
+    instructions/, 
+    lsp-config.json, 
+    mcp-config.json, 
+    providers.json, 
+    settings.json, 
+    skills/]
+
+credentials:
+  sources:
+    copilot-github-token: { env: [COPILOT_GITHUB_TOKEN] }
+
+network:
+  serviceDomains:
+    api.github.com: copilot-github-token
+    "*.githubcopilot.com": copilot-github-token
+    "*.individual.githubcopilot.com": copilot-github-token
+    "*.business.githubcopilot.com": copilot-github-token
+    "*.enterprise.githubcopilot.com": copilot-github-token
+  serviceAuth:
+    copilot-github-token: { headerName: Authorization, valueFormat: "Bearer %s" }
+
+providers:
+  - name: github
+    credentials: [copilot-github-token]
+    authFiles: [config.json]
+    authSession:
+      mode: any
+      checks:
+        - { file: config.json, type: file_exists }

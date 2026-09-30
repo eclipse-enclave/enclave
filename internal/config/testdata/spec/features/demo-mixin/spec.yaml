@@ -1,4 +1,8 @@
-schemaVersion: "1"
+schemaVersion: "3"
 kind: mixin
-name: demo-mixin
 description: Minimal spec.yaml mixin fixture for LoadFeatureExtension tests.
+
+capabilities:
+  - type: org.eclipse.enclave/runtime@1
+    config:
+      name: demo-mixin

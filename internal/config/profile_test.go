@@ -502,12 +502,14 @@ func setupProfileTestPaths(t *testing.T, profileJSON string) model.Paths {
 	doc := specDocument{
 		SchemaVersion: "1",
 		Kind:          KindSandbox,
-		Name:          fixture.Name,
-		Sandbox: &specSandbox{
-			Entrypoint:         &specEntrypoint{Run: []string{fixture.Command}},
-			MemoryDir:          fixture.MemoryDir,
-			QEMUMinMemoryMiB:   fixture.QEMUMinMemoryMiB,
-			QEMUStoreCacheMmap: fixture.QEMUStoreCacheMmap,
+		specRuntime: specRuntime{
+			Name: fixture.Name,
+			Sandbox: &specSandbox{
+				Entrypoint:         &specEntrypoint{Run: []string{fixture.Command}},
+				MemoryDir:          fixture.MemoryDir,
+				QEMUMinMemoryMiB:   fixture.QEMUMinMemoryMiB,
+				QEMUStoreCacheMmap: fixture.QEMUStoreCacheMmap,
+			},
 		},
 	}
 

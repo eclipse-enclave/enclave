@@ -1,0 +1,17 @@
+# Copyright (C) 2026 EclipseSource GmbH and others.
+#
+# This program and the accompanying materials are made available under the
+# terms of the MIT License, which is available in the project root.
+#
+# SPDX-License-Identifier: MIT
+
+schemaVersion: "1"
+kind: mixin
+name: shell-extras
+displayName: Shell Extras
+description: Enhanced shell experience (zsh, oh-my-zsh)
+defaultEnabled: false
+priority: 90
+aptPackages:
+  - zsh
+  - bash-completion

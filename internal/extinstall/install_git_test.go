@@ -9,6 +9,7 @@ package extinstall
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -23,7 +24,13 @@ import (
 // out of a working tree another extension already materialized from.
 func TestUpdateSharesOneCheckoutAgainstRealGit(t *testing.T) {
 	specFor := func(name string, description string) string {
-		return "schemaVersion: \"1\"\nkind: mixin\nname: " + name + "\ndescription: " + description + "\n"
+		return fmt.Sprintf(`schemaVersion: "3"
+kind: mixin
+description: %s
+capabilities:
+  - type: org.eclipse.enclave/runtime@1
+    config: {name: %s}
+`, description, name)
 	}
 	repo := fixtureRepo(t, true, map[string]string{
 		"extensions/features/alpha/spec.yaml":  specFor("alpha", "v1"),

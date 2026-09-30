@@ -1,17 +1,21 @@
-schemaVersion: "1"
-kind: sandbox
-name: filesecret
+schemaVersion: "3"
+kind: workload
 displayName: File Secret Tool
 description: Fixture exercising credentials.sources.<id>.file + priority survival through load-time normalization.
-sandbox:
-  entrypoint:
-    run: [filesecret]
-  configDir: .filesecret
-credentials:
-  sources:
-    demo-file-secret:
-      env: [DEMO_FILE_KEY]
-      file:
-        path: ~/.demo-creds.json
-        parser: "json:auth.token"
-      priority: file-first
+
+capabilities:
+  - type: org.eclipse.enclave/runtime@1
+    config:
+      name: filesecret
+      sandbox:
+        entrypoint:
+          run: [filesecret]
+        configDir: .filesecret
+      credentials:
+        sources:
+          demo-file-secret:
+            env: [DEMO_FILE_KEY]
+            file:
+              path: ~/.demo-creds.json
+              parser: "json:auth.token"
+            priority: file-first

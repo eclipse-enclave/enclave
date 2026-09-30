@@ -8,9 +8,11 @@
 package app
 
 import (
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sigs.k8s.io/yaml"
 	"strings"
 	"testing"
 )
@@ -121,16 +123,18 @@ func TestIsRootUserMatrix(t *testing.T) {
 // script end to end: a feature declaring commands.install (string-form and
 // seq-form) has both steps run at build time. Requires mikefarah/yq v4.
 func TestInstallExtensionCommandsSynthesizesSteps(t *testing.T) {
-	if !hasMikefarahYq(t) {
-		t.Skip("requires mikefarah/yq v4; host has kislyuk yq")
-	}
-	root := t.TempDir()
-	work := t.TempDir()
-	featuresDir := filepath.Join(root, "features")
-	markerStr := filepath.Join(work, "str.marker")
-	markerSeq := filepath.Join(work, "seq.marker")
+	for _, version := range []string{"1", "3"} {
+		t.Run(version, func(t *testing.T) {
+			if !hasMikefarahYq(t) {
+				t.Skip("requires mikefarah/yq v4; host has kislyuk yq")
+			}
+			root := t.TempDir()
+			work := t.TempDir()
+			featuresDir := filepath.Join(root, "features")
+			markerStr := filepath.Join(work, "str.marker")
+			markerSeq := filepath.Join(work, "seq.marker")
 
-	spec := `schemaVersion: "1"
+			spec := `schemaVersion: "1"
 kind: mixin
 name: cmd-feat
 commands:
@@ -138,61 +142,99 @@ commands:
     - command: "touch ` + markerStr + `"
     - command: [touch, ` + markerSeq + `]
 `
-	writeHomeFilesFixture(t, filepath.Join(featuresDir, "cmd-feat", "spec.yaml"), spec, 0o644)
+			if version == "3" {
+				spec = v3ShellFixture(t, spec)
+			}
+			writeHomeFilesFixture(t, filepath.Join(featuresDir, "cmd-feat", "spec.yaml"), spec, 0o644)
 
-	cmd := exec.Command("bash", installExtensionCommandsScript(t))
-	cmd.Env = []string{
-		"PATH=" + os.Getenv("PATH"),
-		"FEATURES=cmd-feat",
-		"ENCLAVE_FEATURES_DIR=" + featuresDir,
-		"ENCLAVE_SUDO=recorder-not-used",
-	}
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("install-extension-commands: %v\n%s", err, out)
+			cmd := exec.Command("bash", installExtensionCommandsScript(t))
+			cmd.Env = []string{
+				"PATH=" + os.Getenv("PATH"),
+				"FEATURES=cmd-feat",
+				"ENCLAVE_FEATURES_DIR=" + featuresDir,
+				"ENCLAVE_SUDO=recorder-not-used",
+			}
+			if out, err := cmd.CombinedOutput(); err != nil {
+				t.Fatalf("install-extension-commands: %v\n%s", err, out)
+			}
+
+			if _, err := os.Stat(markerStr); err != nil {
+				t.Fatalf("string-form install command did not run: %v", err)
+			}
+			if _, err := os.Stat(markerSeq); err != nil {
+				t.Fatalf("seq-form install command did not run: %v", err)
+			}
+		})
 	}
 
-	if _, err := os.Stat(markerStr); err != nil {
-		t.Fatalf("string-form install command did not run: %v", err)
-	}
-	if _, err := os.Stat(markerSeq); err != nil {
-		t.Fatalf("seq-form install command did not run: %v", err)
-	}
 }
 
 // TestInstallExtensionCommandsInstallScriptWins verifies install.sh is the
 // escape hatch: when a feature ships an executable install.sh, its
 // commands.install steps are skipped entirely.
 func TestInstallExtensionCommandsInstallScriptWins(t *testing.T) {
-	if !hasMikefarahYq(t) {
-		t.Skip("requires mikefarah/yq v4; host has kislyuk yq")
-	}
-	root := t.TempDir()
-	work := t.TempDir()
-	featuresDir := filepath.Join(root, "features")
-	marker := filepath.Join(work, "cmd.marker")
+	for _, version := range []string{"1", "3"} {
+		t.Run(version, func(t *testing.T) {
+			if !hasMikefarahYq(t) {
+				t.Skip("requires mikefarah/yq v4; host has kislyuk yq")
+			}
+			root := t.TempDir()
+			work := t.TempDir()
+			featuresDir := filepath.Join(root, "features")
+			marker := filepath.Join(work, "cmd.marker")
 
-	spec := `schemaVersion: "1"
+			spec := `schemaVersion: "1"
 kind: mixin
 name: both-feat
 commands:
   install:
     - command: "touch ` + marker + `"
 `
-	writeHomeFilesFixture(t, filepath.Join(featuresDir, "both-feat", "spec.yaml"), spec, 0o644)
-	writeHomeFilesFixture(t, filepath.Join(featuresDir, "both-feat", "install.sh"),
-		"#!/usr/bin/env bash\n", 0o755)
+			if version == "3" {
+				spec = v3ShellFixture(t, spec)
+			}
+			writeHomeFilesFixture(t, filepath.Join(featuresDir, "both-feat", "spec.yaml"), spec, 0o644)
+			writeHomeFilesFixture(t, filepath.Join(featuresDir, "both-feat", "install.sh"),
+				"#!/usr/bin/env bash\n", 0o755)
 
-	cmd := exec.Command("bash", installExtensionCommandsScript(t))
-	cmd.Env = []string{
-		"PATH=" + os.Getenv("PATH"),
-		"FEATURES=both-feat",
-		"ENCLAVE_FEATURES_DIR=" + featuresDir,
-	}
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("install-extension-commands: %v\n%s", err, out)
+			cmd := exec.Command("bash", installExtensionCommandsScript(t))
+			cmd.Env = []string{
+				"PATH=" + os.Getenv("PATH"),
+				"FEATURES=both-feat",
+				"ENCLAVE_FEATURES_DIR=" + featuresDir,
+			}
+			if out, err := cmd.CombinedOutput(); err != nil {
+				t.Fatalf("install-extension-commands: %v\n%s", err, out)
+			}
+
+			if _, err := os.Stat(marker); err == nil {
+				t.Fatalf("install.sh must win; commands.install marker must NOT be created")
+			}
+		})
 	}
 
-	if _, err := os.Stat(marker); err == nil {
-		t.Fatalf("install.sh must win; commands.install marker must NOT be created")
+}
+
+// v3ShellFixture wraps a legacy runtime declaration for the shell-reader tests.
+func v3ShellFixture(t *testing.T, source string) string {
+	t.Helper()
+	var payload map[string]any
+	if err := yaml.UnmarshalStrict([]byte(source), &payload); err != nil {
+		t.Fatal(err)
 	}
+	kind := payload["kind"]
+	if kind == "sandbox" {
+		kind = "workload"
+	}
+	delete(payload, "schemaVersion")
+	delete(payload, "kind")
+	descriptor := map[string]any{
+		"schemaVersion": "3", "kind": kind,
+		"capabilities": []any{map[string]any{"type": "org.eclipse.enclave/runtime@1", "config": payload}},
+	}
+	data, err := json.Marshal(descriptor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(data)
 }

@@ -1,4 +1,8 @@
-schemaVersion: "1"
+schemaVersion: "3"
 kind: mixin
-name: badkind
 description: Fixture whose kind (mixin) mismatches the sandbox resolution root (tools/).
+
+capabilities:
+  - type: org.eclipse.enclave/runtime@1
+    config:
+      name: badkind

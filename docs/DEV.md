@@ -4,7 +4,7 @@ Concise notes for contributors working on the enclave codebase.
 
 ## Requirements
 
-- Go 1.24.x (see `go.mod` toolchain)
+- Go 1.26.8 or newer (see `go.mod`; required by the pinned sbx v3 parser)
 - Docker daemon running (for runtime testing)
 - Linux or macOS host. Native Windows is unsupported; use WSL2, where the Linux
   instructions apply. `make cross-build` compiles every published cross-target:

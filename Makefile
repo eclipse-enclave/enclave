@@ -39,12 +39,8 @@ build: check-go
 	go build -ldflags "$(BUILD_LDFLAGS)" -o $(BIN_DIR)/$(BINARY) $(CMD_DIR)
 
 check-go:
-	@command -v go >/dev/null 2>&1 || { echo "Go is not installed. Install Go 1.24+ from https://go.dev/dl/"; exit 1; }
-	@GO_VER=$$(go version | awk '{split($$3, a, "."); print a[2]}'); \
-	if [ "$$GO_VER" -lt 24 ] 2>/dev/null; then \
-		echo "Go 1.24+ is required (found $$(go version))"; \
-		exit 1; \
-	fi
+	@command -v go >/dev/null 2>&1 || { echo "Go is not installed. Install Go 1.26.8+ from https://go.dev/dl/"; exit 1; }
+	@go version >/dev/null
 
 completions:
 	mkdir -p $(COMPLETIONS_DIR)

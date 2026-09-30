@@ -81,66 +81,85 @@ straight from `spec.yaml` (falling back to `spec.json`) with `yq`.
 
 ## Extension Spec (`spec.yaml`)
 
-Every extension has one `spec.yaml` (`spec.json` is also accepted — YAML is a
-JSON superset, and the loader reads both with `sigs.k8s.io/yaml`) describing
-its metadata, sandbox/mixin behavior, network policy, and credentials. Field
-names are camelCase. The schema is defined by `specDocument` in
-`internal/config/spec.go`; that struct is the authoritative on-disk shape.
+Every extension has one `spec.yaml` (`spec.json` is also accepted) using the
+strict sbx v3 descriptor grammar, pinned to
+[`sandbox-kit-spec v3.0.0-m.7`](https://github.com/docker/sandbox-kit-spec/tree/v3.0.0-m.7).
+Tools declare `kind: workload`; features declare `kind: mixin`.
 
-Enclave follows the naming and directory structure of Docker's experimental
-[sandbox kit format](https://docs.docker.com/ai/sandboxes/customize/kit-reference/),
-but implements an independent contract with both extensions and restrictions.
-This document is the Enclave reference; do not assume an arbitrary sbx kit has
-identical behavior. The differences are called out below.
+Enclave's runtime contract is the required `org.eclipse.enclave/runtime@1`
+capability. Its `config` contains Enclave's launch, build, auth, networking,
+settings, and persistence declarations. `config.name` must match the extension
+directory; descriptor metadata (`displayName`, `description`) stays at the top
+level. The payload schema is `specRuntime` in `internal/config/spec.go`.
+Unless stated otherwise, field paths in the rest of this document are relative
+to this capability's `config`.
+
+The upstream parser validates the descriptor; Enclave strictly decodes its own
+capability config and applies existing runtime validation. Unknown required
+capabilities fail loading. Unknown optional capabilities warn and are skipped.
+Exactly one required Enclave runtime capability is needed. Capability groups,
+kit sets, build recipes, args, and dependency declarations (`provides`,
+`requires`, `integrates`, `conflicts`) are rejected: installation uses sibling
+assets, and tools/features are selected explicitly.
+
+This is descriptor-format support with Enclave runtime semantics. Enclave does
+not implement the standard `com.docker.sandbox/*` capabilities, ingest or publish
+OCI kit artifacts, or claim sbx runtime interoperability or conformance.
+`workload` identifies the selected tool here; Enclave still builds its own image
+and launches the command declared in the runtime payload.
+
+Legacy Enclave `schemaVersion: "1"` descriptors remain accepted with the same
+strict decoding and runtime behavior. To migrate one, change the version to
+`"3"`, change a tool's `kind` from `sandbox` to `workload`, keep display metadata
+at the top, and move `name` and all runtime fields into the capability config.
+CLI list and install-result JSON envelopes retain `schemaVersion: "1"` and the
+existing `tool`/`feature` kind values; those are independent contracts.
 
 ```yaml
-schemaVersion: "1"        # enclave owns this version; sbx alignment is per-release
-kind: sandbox | mixin     # sandbox = tool (was "tool"), mixin = feature (was "feature")
-name: <kebab-case>        # must match the extension's directory name
+schemaVersion: "3"
+kind: workload | mixin     # workload = tool, mixin = feature
 displayName: <human name>
 description: <one line>
 
-sandbox: {...}            # kind: sandbox only, see "Tool Extensions" below
-commands: {...}           # install/startup/initFiles, see below
-network: {...}
-environment: {...}
-credentials: {...}
-providers: [...]          # enclave-native, see "Tool Extensions" below
-ports: [...]              # enclave-native; honored for tools and enabled features
+capabilities:
+  - type: org.eclipse.enclave/runtime@1
+    config:
+      name: <kebab-case>        # must match the extension's directory name
 
-# mixin-only fields (kind: mixin)
-priority: <int, default 100>
-aptPackages: [<packages>]
-needsRoot: <bool>
-failOnInstallError: <bool>
-defaultEnabled: <bool>
+      sandbox: {...}            # workload tools only, see "Tool Extensions" below
+      commands: {...}           # install/startup/initFiles, see below
+      network: {...}
+      environment: {...}
+      credentials: {...}
+      providers: [...]          # enclave-native, see "Tool Extensions" below
+      ports: [...]              # enclave-native; honored for tools and enabled features
 
-# tool-only field (kind: sandbox)
-defaultIncluded: <bool>
+      # mixin-only fields (kind: mixin)
+      priority: <int, default 100>
+      aptPackages: [<packages>]
+      needsRoot: <bool>
+      failOnInstallError: <bool>
+      defaultEnabled: <bool>
+
+      # tool-only field (kind: workload)
+      defaultIncluded: <bool>
 ```
 
-`name` and `kind` are validated against the file's location and directory
+`config.name` and descriptor `kind` are validated against the file's location and directory
 name at load time.
 
 ### Reserved and deferred fields
 
-The schema mirrors Docker's experimental [sandbox kit format](https://docs.docker.com/ai/sandboxes/customize/kit-reference/)
-so an sbx kit loads here, but a few sbx fields are accepted and then **warn and
-no-op** — a declared value is never a silent no-op:
+The Enclave payload retains three historical fields that warn and no-op:
 
-- `sandbox.image` — enclave keeps its own Debian base and never swaps it for a
-  spec-declared image.
-- `sandbox.aiFilename` and `agentContext` — no delivery path enclave can
-  guarantee reaches the agent (the project-root memory file is the mounted host
-  repo). Ship tool guidance via a skill or the tool's own config instead.
+- `sandbox.image` — Enclave keeps its own base image.
+- `sandbox.aiFilename` and `agentContext` — no guaranteed agent delivery path.
+  Ship guidance through skills or native tool config instead.
 
-Because enclave keeps its own base image and ignores `sandbox.image`, a
-pure-sbx **sandbox** (tool) kit that relies on the sbx base image for its
-tooling will load but cannot start a session ("tool not installed in image")
-unless it also ships an `install.sh` that installs the tool's entrypoint. A
-pure-sbx **mixin** kit that only layers packages/config works without one.
+Tools need an `install.sh` that provisions their entrypoint. A descriptor alone
+does not supply the workload filesystem of an OCI kit.
 
-A few honored fields also diverge from sbx on purpose, because the workspace is
+Enclave's existing file and command behavior is preserved; the workspace is
 the mounted host project directory and installs happen at `docker build` time:
 
 - `files/home/**` is baked into `$HOME` in the image at **build** time — kit
@@ -191,56 +210,72 @@ worked example under [Tool Extensions](#tool-extensions) below.
 
 **Opt-in tool (not included by default):**
 ```yaml
-schemaVersion: "1"
-kind: sandbox
-name: example-heavy-tool
+schemaVersion: "3"
+kind: workload
 description: Example heavy tool
-defaultIncluded: false
+
+capabilities:
+  - type: org.eclipse.enclave/runtime@1
+    config:
+      name: example-heavy-tool
+      defaultIncluded: false
 ```
 
 **Feature with root install (`extensions/features/github-cli/spec.yaml`):**
 ```yaml
-schemaVersion: "1"
+schemaVersion: "3"
 kind: mixin
-name: github-cli
 displayName: GitHub CLI
 description: GitHub CLI (gh)
-needsRoot: true
-priority: 50
+
+capabilities:
+  - type: org.eclipse.enclave/runtime@1
+    config:
+      name: github-cli
+      needsRoot: true
+      priority: 50
 ```
 
 **Feature with apt packages (`extensions/features/devtools/spec.yaml`):**
 ```yaml
-schemaVersion: "1"
+schemaVersion: "3"
 kind: mixin
-name: devtools
 displayName: Development Tools
 description: Core development tools
-priority: 40
-aptPackages: [vim, htop, tree, ripgrep]
+
+capabilities:
+  - type: org.eclipse.enclave/runtime@1
+    config:
+      name: devtools
+      priority: 40
+      aptPackages: [vim, htop, tree, ripgrep]
 ```
 
 **Opt-in feature (disabled by default):**
 ```yaml
-schemaVersion: "1"
+schemaVersion: "3"
 kind: mixin
-name: debug-tools
 description: Debugging tools (gdb, strace, ltrace, etc.)
-defaultEnabled: false
-aptPackages: [gdb, strace, ltrace, tcpdump]
-priority: 80
+
+capabilities:
+  - type: org.eclipse.enclave/runtime@1
+    config:
+      name: debug-tools
+      defaultEnabled: false
+      aptPackages: [gdb, strace, ltrace, tcpdump]
+      priority: 80
 ```
 
 ## Tool Extensions
 
-Tool extensions are runnable AI coding agents (`kind: sandbox`). They require
+Tool extensions are runnable AI coding agents (`kind: workload`). They require
 additional files beyond `spec.yaml`.
 
 ### Required Files
 
 | File | Purpose |
 |------|---------|
-| `spec.yaml` | Extension spec: `kind: sandbox`, `sandbox.*` metadata, `network`, `credentials`, `providers`, `ports` |
+| `spec.yaml` | Extension spec: `kind: workload`, `sandbox.*` metadata, `network`, `credentials`, `providers`, `ports` |
 | `gateway-allowlist.conf` | dnsmasq config for network isolation. Resolved from the user extension tree ahead of the built-in one; a tool that ships none falls back to the broader `base.conf` |
 | `install.sh` | Installation script run during Docker build |
 
@@ -257,51 +292,55 @@ additional files beyond `spec.yaml`.
 ### Complete example — `extensions/tools/claude/spec.yaml`
 
 ```yaml
-schemaVersion: "1"
-kind: sandbox
-name: claude
+schemaVersion: "3"
+kind: workload
 displayName: Claude Code
 description: Claude Code AI assistant
 
-sandbox:
-  entrypoint: { run: [claude] }
-  configDir: .claude
-  qemuMinMemoryMiB: 4096
-  skillsDir: .claude/skills
-  memoryDir: .claude/memory
-  settingsFile: claude-settings.json
-  settingsTarget: .claude/settings.json
-  yoloFlag: --dangerously-skip-permissions
-  yoloEnabled: true
-  continueArgs: [--continue]
-  resumeArgs: [--resume]
-  passthroughPaths: [agents/, commands/, settings.json, skills/]
-  hostConfigDir: .claude
-  hostCredentialsFile: .credentials.json
-  hostOauthJson: .claude.json
+capabilities:
+  - type: org.eclipse.enclave/runtime@1
+    config:
+      name: claude
 
-credentials:
-  sources:
-    anthropic-api-key: { env: [ANTHROPIC_API_KEY] }
-    claude-code-oauth-token: { env: [CLAUDE_CODE_OAUTH_TOKEN], apiKey: false }
+      sandbox:
+        entrypoint: { run: [claude] }
+        configDir: .claude
+        qemuMinMemoryMiB: 4096
+        skillsDir: .claude/skills
+        memoryDir: .claude/memory
+        settingsFile: claude-settings.json
+        settingsTarget: .claude/settings.json
+        yoloFlag: --dangerously-skip-permissions
+        yoloEnabled: true
+        continueArgs: [--continue]
+        resumeArgs: [--resume]
+        passthroughPaths: [agents/, commands/, settings.json, skills/]
+        hostConfigDir: .claude
+        hostCredentialsFile: .credentials.json
+        hostOauthJson: .claude.json
 
-network:
-  serviceDomains:
-    api.anthropic.com: anthropic-api-key
-    "*.anthropic.com": anthropic-api-key
-  serviceAuth:
-    anthropic-api-key: { headerName: x-api-key }
+      credentials:
+        sources:
+          anthropic-api-key: { env: [ANTHROPIC_API_KEY] }
+          claude-code-oauth-token: { env: [CLAUDE_CODE_OAUTH_TOKEN], apiKey: false }
 
-providers:
-  - name: anthropic
-    credentials: [anthropic-api-key, claude-code-oauth-token]
-    authFiles: [config.json, .credentials.json]
-    securestorageDirEnv: CLAUDE_SECURESTORAGE_CONFIG_DIR
-    authSession:
-      mode: any
-      checks:
-        - { file: config.json, type: file_exists }
-        - { file: .credentials.json, type: file_exists }
+      network:
+        serviceDomains:
+          api.anthropic.com: anthropic-api-key
+          "*.anthropic.com": anthropic-api-key
+        serviceAuth:
+          anthropic-api-key: { headerName: x-api-key }
+
+      providers:
+        - name: anthropic
+          credentials: [anthropic-api-key, claude-code-oauth-token]
+          authFiles: [config.json, .credentials.json]
+          securestorageDirEnv: CLAUDE_SECURESTORAGE_CONFIG_DIR
+          authSession:
+            mode: any
+            checks:
+              - { file: config.json, type: file_exists }
+              - { file: .credentials.json, type: file_exists }
 ```
 
 `sandbox.*` fields (`configDir`, `skillsDir`, `memoryDir`, `memoryScope`,
@@ -309,7 +348,7 @@ providers:
 `yoloEnabled`, `continueArgs`, `resumeArgs`, `passthroughPaths`,
 `qemuMinMemoryMiB`, `qemuStoreCacheMmap`, `hostConfigDir`, `hostCredentialsFile`,
 and `hostOauthJson`) are enclave-native tool metadata. `sandbox.entrypoint.run`
-is the shared sbx-style command to launch the tool.
+is Enclave's argv declaration for launching the tool.
 
 Memory and runtime state policy is declared in the spec, including for installed
 third-party tools:
@@ -416,7 +455,7 @@ Generic JSON/TOML patches mirror native config paths under `~/.config/enclave/pa
 
 ### Credentials, service auth, and providers
 
-Secrets are split across two `spec.yaml` sections:
+Secrets are split across two runtime capability config sections:
 
 - `credentials.sources.<id>` declares the credential itself: `env` (one or
   more env-var aliases for the same credential) and the enclave-native
@@ -473,7 +512,7 @@ a non-empty `valueFormat` must contain `%s` (see `"Bearer %s"` in the
 `github-cli` example below, or codex's `openai-api-key: { headerName:
 authorization, valueFormat: "Bearer %s" }`).
 
-`network.serviceAuth.<id>.hosts` is a **enclave-native superset** over sbx:
+`network.serviceAuth.<id>.hosts` lets Enclave declare hosts per service:
 it lets a service declare its own hosts directly, which `serviceDomains`
 (a single `host -> service-id` mapping) cannot express when multiple
 services share the same host. `gitlab-cli` uses this — three tokens
@@ -554,24 +593,28 @@ Feature extensions provide development tools and capabilities that work with all
 Mixin specs may also declare `configDir`, `authFiles`, and `credentials`/`network` for shared tooling such as `github-cli` or `gitlab-cli`:
 
 ```yaml
-schemaVersion: "1"
+schemaVersion: "3"
 kind: mixin
-name: github-cli
 displayName: GitHub CLI
 description: GitHub CLI (gh)
-needsRoot: true
-priority: 50
-configDir: .config/gh
-authFiles: [hosts.yml, config.yml]
-credentials:
-  sources:
-    github-token: { env: [GH_TOKEN, GITHUB_TOKEN] }
-network:
-  serviceDomains:
-    api.github.com: github-token
-    "*.github.com": github-token
-  serviceAuth:
-    github-token: { headerName: authorization, valueFormat: "Bearer %s" }
+
+capabilities:
+  - type: org.eclipse.enclave/runtime@1
+    config:
+      name: github-cli
+      needsRoot: true
+      priority: 50
+      configDir: .config/gh
+      authFiles: [hosts.yml, config.yml]
+      credentials:
+        sources:
+          github-token: { env: [GH_TOKEN, GITHUB_TOKEN] }
+      network:
+        serviceDomains:
+          api.github.com: github-token
+          "*.github.com": github-token
+        serviceAuth:
+          github-token: { headerName: authorization, valueFormat: "Bearer %s" }
 ```
 
 A mixin's `network` block is honored in full: its
@@ -640,7 +683,7 @@ other feature's apt packages are present first.
 
 ### Declared ports
 
-A feature can declare top-level `ports` exactly like a tool (see
+A feature can declare `ports` in the runtime capability config exactly like a tool (see
 [Adding a tool, "declarative ports"](adding-a-tool.md#4-optional-declarative-ports)).
 Entries with `publish: true` are published only for sessions that enable the
 feature; user `-p` mappings and tool-declared ports win when they already map
@@ -664,7 +707,7 @@ resolved port appears in the printed `openUrl` and in `enclave ps`.
 
 ## Key Differences: Tools vs Features
 
-| Aspect | Tool (`kind: sandbox`) | Feature (`kind: mixin`) |
+| Aspect | Tool (`kind: workload`) | Feature (`kind: mixin`) |
 |--------|------|---------|
 | `spec.yaml` `sandbox` block | Required | N/A |
 | `gateway-allowlist.conf` | Required | N/A (uses tool's network) |
@@ -749,12 +792,16 @@ Hooks run in a fixed order during runtime auth preparation:
 1. Create `extensions/tools/{tool}/` directory
 2. Add `spec.yaml`:
    ```yaml
-   schemaVersion: "1"
-   kind: sandbox
-   name: mytool
+   schemaVersion: "3"
+   kind: workload
    description: My AI tool
-   sandbox:
-     entrypoint: { run: [mytool] }
+
+   capabilities:
+     - type: org.eclipse.enclave/runtime@1
+       config:
+         name: mytool
+         sandbox:
+           entrypoint: { run: [mytool] }
    ```
 3. Add required files:
    - `sandbox`, `credentials`, `network`, `providers` fields in `spec.yaml` as needed (see the claude example above)
@@ -772,12 +819,16 @@ Hooks run in a fixed order during runtime auth preparation:
 1. Create `extensions/features/{feature}/` directory
 2. Add `spec.yaml`:
    ```yaml
-   schemaVersion: "1"
+   schemaVersion: "3"
    kind: mixin
-   name: myfeature
    description: My development tools
-   aptPackages: [tool1, tool2]
-   priority: 70
+
+   capabilities:
+     - type: org.eclipse.enclave/runtime@1
+       config:
+         name: myfeature
+         aptPackages: [tool1, tool2]
+         priority: 70
    ```
 3. Optionally add:
    - `install.sh` for custom installation (set `needsRoot: true` if it needs root)
@@ -901,7 +952,7 @@ gh --version       # Should fail (feature not installed)
 
 ### 7. Verify `spec.yaml` Is Required
 
-`spec.yaml` (or `spec.json`) is mandatory and its `kind`/`name` fields must
+`spec.yaml` (or `spec.json`) is mandatory and its descriptor `kind` and runtime `config.name` must
 match the extension's location.
 
 ```bash

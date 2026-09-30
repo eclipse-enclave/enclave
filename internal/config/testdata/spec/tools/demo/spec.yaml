@@ -1,9 +1,13 @@
-schemaVersion: "1"
-kind: sandbox
-name: demo
+schemaVersion: "3"
+kind: workload
 displayName: Demo Tool
 description: Minimal spec.yaml sandbox fixture for LoadProfile/LoadToolExtension tests.
-sandbox:
-  entrypoint:
-    run: [demo]
-  configDir: .demo
+
+capabilities:
+  - type: org.eclipse.enclave/runtime@1
+    config:
+      name: demo
+      sandbox:
+        entrypoint:
+          run: [demo]
+        configDir: .demo

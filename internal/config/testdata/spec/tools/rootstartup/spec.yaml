@@ -1,7 +1,11 @@
-schemaVersion: "1"
-kind: sandbox
-name: rootstartup
-sandbox: { entrypoint: { run: [rootstartup] } }
-commands:
-  startup:
-    - { command: "some-daemon", user: "0" }
+schemaVersion: "3"
+kind: workload
+
+capabilities:
+  - type: org.eclipse.enclave/runtime@1
+    config:
+      name: rootstartup
+      sandbox: { entrypoint: { run: [rootstartup] } }
+      commands:
+        startup:
+          - { command: "some-daemon", user: "0" }

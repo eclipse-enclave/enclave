@@ -1,7 +1,11 @@
-schemaVersion: "1"
-kind: sandbox
-name: not-badname
+schemaVersion: "3"
+kind: workload
 description: Fixture whose spec name differs from its directory name (badname).
-sandbox:
-  entrypoint:
-    run: [badname]
+
+capabilities:
+  - type: org.eclipse.enclave/runtime@1
+    config:
+      name: not-badname
+      sandbox:
+        entrypoint:
+          run: [badname]

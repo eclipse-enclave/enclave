@@ -1,28 +1,32 @@
 # Copyright (C) 2026 EclipseSource GmbH and others.
-#
-# This program and the accompanying materials are made available under the
-# terms of the MIT License, which is available in the project root.
-#
-# SPDX-License-Identifier: MIT
-
-schemaVersion: "1"
+schemaVersion: "3"
 kind: mixin
-name: gitlab-cli
 displayName: GitLab CLI
 description: GitLab CLI (glab)
-defaultEnabled: false
-needsRoot: true
-priority: 50
-credentials:
-  sources:
-    gitlab-token: { env: [GITLAB_TOKEN, GITLAB_ACCESS_TOKEN] }
-    gitlab-oauth-token: { env: [OAUTH_TOKEN] }
-    gitlab-job-token: { env: [JOB_TOKEN, CI_JOB_TOKEN] }
-    # Not a credential: glab reads GITLAB_HOST to pick the instance, and
-    # hostsFromCredential below retargets token injection at it.
-    gitlab-host: { env: [GITLAB_HOST], apiKey: false }
-network:
-  serviceAuth:
-    gitlab-token: { headerName: private-token, hosts: [gitlab.com, "*.gitlab.com"], hostsFromCredential: gitlab-host }
-    gitlab-oauth-token: { headerName: authorization, valueFormat: "Bearer %s", hosts: [gitlab.com, "*.gitlab.com"], hostsFromCredential: gitlab-host }
-    gitlab-job-token: { headerName: job-token, hosts: [gitlab.com, "*.gitlab.com"], hostsFromCredential: gitlab-host }
+
+capabilities:
+  - type: org.eclipse.enclave/runtime@1
+    config:
+      #
+      # This program and the accompanying materials are made available under the
+      # terms of the MIT License, which is available in the project root.
+      #
+      # SPDX-License-Identifier: MIT
+
+      name: gitlab-cli
+      defaultEnabled: false
+      needsRoot: true
+      priority: 50
+      credentials:
+        sources:
+          gitlab-token: { env: [GITLAB_TOKEN, GITLAB_ACCESS_TOKEN] }
+          gitlab-oauth-token: { env: [OAUTH_TOKEN] }
+          gitlab-job-token: { env: [JOB_TOKEN, CI_JOB_TOKEN] }
+          # Not a credential: glab reads GITLAB_HOST to pick the instance, and
+          # hostsFromCredential below retargets token injection at it.
+          gitlab-host: { env: [GITLAB_HOST], apiKey: false }
+      network:
+        serviceAuth:
+          gitlab-token: { headerName: private-token, hosts: [gitlab.com, "*.gitlab.com"], hostsFromCredential: gitlab-host }
+          gitlab-oauth-token: { headerName: authorization, valueFormat: "Bearer %s", hosts: [gitlab.com, "*.gitlab.com"], hostsFromCredential: gitlab-host }
+          gitlab-job-token: { headerName: job-token, hosts: [gitlab.com, "*.gitlab.com"], hostsFromCredential: gitlab-host }

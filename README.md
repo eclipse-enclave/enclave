@@ -31,7 +31,7 @@ Runtime dependencies:
   full emulation. The default `docker` backend is unaffected and runs natively
   on every supported platform.
 
-Building from source additionally requires Make and Go 1.24 or newer. Use
+Building from source additionally requires Make and Go 1.26.8 or newer. Use
 the official [Go installation instructions](https://go.dev/doc/install) if your
 distribution does not provide a recent enough version.
 

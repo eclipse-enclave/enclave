@@ -43,7 +43,7 @@ for name in $selection; do
     fi
 
     # mikefarah/yq v4: raw scalar output is the default (do NOT pass -r).
-    count="$(yq '.commands.install | length' "$spec" 2>/dev/null)"
+    count="$(enclave_spec_read "$spec" '.commands.install | length' 2>/dev/null)"
     case "$count" in
         '' | null | 0) continue ;;
     esac
@@ -55,16 +55,16 @@ for name in $selection; do
     while [ "$i" -lt "$count" ]; do
         # Omitted user defaults to "0" (root), matching the sbx kit format
         # and the Go phase-routing in spec_map.go's normalizeInstallUser.
-        user="$(yq ".commands.install[$i].user // \"0\"" "$spec")"
-        background="$(yq ".commands.install[$i].background // false" "$spec")"
+        user="$(enclave_spec_read "$spec" ".commands.install[$i].user // \"0\"")"
+        background="$(enclave_spec_read "$spec" ".commands.install[$i].background // false")"
         if [ "$background" = "true" ]; then
             echo "Warning: ${name} commands.install[$i] sets background; ignored at build time" >&2
         fi
-        tag="$(yq ".commands.install[$i].command | tag" "$spec")"
+        tag="$(enclave_spec_read "$spec" ".commands.install[$i].command | tag")"
         status=0
         case "$tag" in
             '!!str')
-                cmd="$(yq ".commands.install[$i].command" "$spec")"
+                cmd="$(enclave_spec_read "$spec" ".commands.install[$i].command")"
                 enclave_run_install_command "$user" bash -c "$cmd" || status=$?
                 ;;
             '!!seq')
@@ -72,7 +72,7 @@ for name in $selection; do
                 while IFS= read -r arg; do
                     set -- "$@" "$arg"
                 done <<EOF
-$(yq ".commands.install[$i].command[]" "$spec")
+$(enclave_spec_read "$spec" ".commands.install[$i].command[]")
 EOF
                 enclave_run_install_command "$user" "$@" || status=$?
                 ;;

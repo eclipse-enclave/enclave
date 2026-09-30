@@ -8,9 +8,11 @@
 package runtime
 
 import (
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sigs.k8s.io/yaml"
 	"strings"
 	"testing"
 )
@@ -241,14 +243,16 @@ func TestFeatureEnabledFailsOpenWithoutManifest(t *testing.T) {
 }
 
 func TestApplyInitFilesMaterializesEntry(t *testing.T) {
-	if !hasMikefarahYq(t) {
-		t.Skip("requires mikefarah/yq v4; host has kislyuk yq")
-	}
-	extDir := t.TempDir()
-	home := t.TempDir()
-	project := t.TempDir()
+	for _, version := range []string{"1", "3"} {
+		t.Run(version, func(t *testing.T) {
+			if !hasMikefarahYq(t) {
+				t.Skip("requires mikefarah/yq v4; host has kislyuk yq")
+			}
+			extDir := t.TempDir()
+			home := t.TempDir()
+			project := t.TempDir()
 
-	spec := `schemaVersion: "1"
+			spec := `schemaVersion: "1"
 kind: sandbox
 name: demo
 commands:
@@ -260,39 +264,69 @@ commands:
       mode: "0600"
       onlyIfMissing: true
 `
-	if err := os.WriteFile(filepath.Join(extDir, "spec.yaml"), []byte(spec), 0o644); err != nil {
-		t.Fatalf("write spec: %v", err)
+			if version == "3" {
+				spec = v3ShellFixture(t, spec)
+			}
+			if err := os.WriteFile(filepath.Join(extDir, "spec.yaml"), []byte(spec), 0o644); err != nil {
+				t.Fatalf("write spec: %v", err)
+			}
+
+			kit := kitInitScript(t)
+			script := `set -e; . "$KIT"; enclave_apply_init_files "$EXT"`
+			cmd := exec.Command("bash", "-c", script)
+			cmd.Env = []string{
+				"PATH=" + os.Getenv("PATH"),
+				"KIT=" + kit,
+				"EXT=" + extDir,
+				"HOME=" + home,
+				"USER=carol",
+				"PROJECT_DIR=" + project,
+			}
+			if out, err := cmd.CombinedOutput(); err != nil {
+				t.Fatalf("apply init files: %v\n%s", err, out)
+			}
+
+			resolved := filepath.Join(home, "gen", "carol.conf")
+			got, err := os.ReadFile(resolved)
+			if err != nil {
+				t.Fatalf("read resolved: %v", err)
+			}
+			want := "work=" + project + "\nkeep=${FOO}\n"
+			if string(got) != want {
+				t.Fatalf("content = %q, want %q", string(got), want)
+			}
+			info, err := os.Stat(resolved)
+			if err != nil {
+				t.Fatalf("stat: %v", err)
+			}
+			if perm := info.Mode().Perm(); perm != 0o600 {
+				t.Fatalf("perm = %o, want 0600", perm)
+			}
+		})
 	}
 
-	kit := kitInitScript(t)
-	script := `set -e; . "$KIT"; enclave_apply_init_files "$EXT"`
-	cmd := exec.Command("bash", "-c", script)
-	cmd.Env = []string{
-		"PATH=" + os.Getenv("PATH"),
-		"KIT=" + kit,
-		"EXT=" + extDir,
-		"HOME=" + home,
-		"USER=carol",
-		"PROJECT_DIR=" + project,
-	}
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("apply init files: %v\n%s", err, out)
-	}
+}
 
-	resolved := filepath.Join(home, "gen", "carol.conf")
-	got, err := os.ReadFile(resolved)
+// v3ShellFixture wraps a legacy runtime declaration for the shell-reader tests.
+func v3ShellFixture(t *testing.T, source string) string {
+	t.Helper()
+	var payload map[string]any
+	if err := yaml.UnmarshalStrict([]byte(source), &payload); err != nil {
+		t.Fatal(err)
+	}
+	kind := payload["kind"]
+	if kind == "sandbox" {
+		kind = "workload"
+	}
+	delete(payload, "schemaVersion")
+	delete(payload, "kind")
+	descriptor := map[string]any{
+		"schemaVersion": "3", "kind": kind,
+		"capabilities": []any{map[string]any{"type": "org.eclipse.enclave/runtime@1", "config": payload}},
+	}
+	data, err := json.Marshal(descriptor)
 	if err != nil {
-		t.Fatalf("read resolved: %v", err)
+		t.Fatal(err)
 	}
-	want := "work=" + project + "\nkeep=${FOO}\n"
-	if string(got) != want {
-		t.Fatalf("content = %q, want %q", string(got), want)
-	}
-	info, err := os.Stat(resolved)
-	if err != nil {
-		t.Fatalf("stat: %v", err)
-	}
-	if perm := info.Mode().Perm(); perm != 0o600 {
-		t.Fatalf("perm = %o, want 0600", perm)
-	}
+	return string(data)
 }

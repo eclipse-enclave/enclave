@@ -1,0 +1,30 @@
+# Copyright (C) 2026 EclipseSource GmbH and others.
+#
+# This program and the accompanying materials are made available under the
+# terms of the MIT License, which is available in the project root.
+#
+# SPDX-License-Identifier: MIT
+
+schemaVersion: "1"
+kind: mixin
+name: github-cli
+displayName: GitHub CLI
+description: GitHub CLI (gh)
+needsRoot: true
+priority: 50
+configDir: .config/gh
+authFiles: [hosts.yml, config.yml]
+credentials:
+  sources:
+    github-token: { env: [GH_TOKEN, GITHUB_TOKEN] }
+    github-enterprise-token: { env: [GH_ENTERPRISE_TOKEN, GITHUB_ENTERPRISE_TOKEN] }
+network:
+  serviceDomains:
+    api.github.com: github-token
+    "*.github.com": github-token
+    "*.githubusercontent.com": github-token
+    ghe.com: github-enterprise-token
+    "*.ghe.com": github-enterprise-token
+  serviceAuth:
+    github-token: { headerName: authorization, valueFormat: "Bearer %s" }
+    github-enterprise-token: { headerName: authorization, valueFormat: "Bearer %s" }

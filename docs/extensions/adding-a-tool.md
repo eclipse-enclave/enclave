@@ -2,18 +2,19 @@
 
 Use this checklist to add a new agent CLI end-to-end. Keep changes minimal and focused.
 
-A tool is a `kind: sandbox` extension. Its on-disk shape is a single
+A tool is a `kind: workload` extension. Its on-disk shape is a single
 `spec.yaml` (camelCase fields) plus a few sibling files. The authoritative,
 exhaustive field reference — with worked examples — lives in
 [`docs/extensions/README.md`](README.md#tool-extensions) (and the
-`specDocument` struct in `internal/config/spec.go`). This checklist covers the
+`specRuntime` struct in `internal/config/spec.go`). This checklist covers the
 *process*; consult the README for the full field list.
 
 ## 1) Create the tool extension directory
 - Create `extensions/tools/<tool>/`.
-- Add `spec.yaml` with `schemaVersion: "1"`, `kind: sandbox`, `name` (must match
-  the directory name), `displayName`, `description`, and a `sandbox` block.
-- Set `defaultIncluded: false` (top-level) for opt-in tools that should not ship
+- Add `spec.yaml` with `schemaVersion: "3"`, `kind: workload`, display metadata,
+  and a required `org.eclipse.enclave/runtime@1` capability. Its `config.name`
+  must match the directory; its `config.sandbox` declares launch and stores.
+- Set `defaultIncluded: false` in the capability config for opt-in tools that should not ship
   in the default image.
 - Add `install.sh` with the install steps (runs during image build).
 - Add `gateway-allowlist.conf` for the tool's network allowlist.
@@ -24,17 +25,21 @@ exhaustive field reference — with worked examples — lives in
 Minimal skeleton:
 
 ```yaml
-schemaVersion: "1"
-kind: sandbox
-name: <tool>
+schemaVersion: "3"
+kind: workload
 displayName: <Human Name>
 description: <one line>
 
-sandbox:
-  entrypoint: { run: [<binary>] }   # command to launch the tool
-  configDir: .<tool>                # config dir under $HOME, persisted in the config store
-  settingsFile: <tool>-settings.json
-  settingsTarget: .<tool>/settings.json
+capabilities:
+  - type: org.eclipse.enclave/runtime@1
+    config:
+      name: <tool>
+
+      sandbox:
+        entrypoint: { run: [<binary>] }   # command to launch the tool
+        configDir: .<tool>                # config dir under $HOME, persisted in the config store
+        settingsFile: <tool>-settings.json
+        settingsTarget: .<tool>/settings.json
 ```
 
 ### Installing from npm
@@ -56,12 +61,13 @@ dependency-authored code does not run at image build time. Check upstream
 first: some packages resolve a platform binary in a `postinstall` and break
 without it.
 
-## 2) Fill in the `sandbox` block
+## 2) Fill in the runtime capability's `sandbox` block
 
-`sandbox.*` is enclave-native tool metadata. Common fields (see the README for
+Field paths below are relative to the runtime capability's `config`.
+`sandbox.*` is Enclave tool metadata. Common fields (see the README for
 the complete set and semantics):
 
-- `entrypoint.run`: argv used to launch the tool (sbx-style command).
+- `entrypoint.run`: argv used to launch the tool (Enclave launch command).
 - `configDir`: config directory under `$HOME`, backed by the persistent config store.
 - `skillsDir`: (optional) path below `configDir` where shared and tool-specific
   managed skills are composed. It may be home-relative or absolute, matching
@@ -108,8 +114,7 @@ Secrets are split across `credentials` and `network` (see the README's
 
 ## 4) Optional: declarative ports
 
-A tool can publish a default port without any Go code by declaring top-level
-`ports`:
+A tool can publish a default port without any Go code by declaring `ports` in the runtime capability config:
 
 ```yaml
 ports:

@@ -71,8 +71,9 @@ Do not push, publish releases, or modify remote issues/PRs unless the maintainer
 ## Extensions
 
 - See `docs/extensions/README.md` for the extension architecture and `docs/extensions/adding-a-tool.md` for the step-by-step guide; every tool or feature extension must include a `README.md`.
-- `extensions/tools/<tool>/spec.yaml` (`kind: sandbox`) defines tool runtime, auth, network, settings, and provider behavior.
-- `extensions/features/<feature>/spec.yaml` (`kind: mixin`) defines optional packages, runtime setup, auth, network, and published-port behavior; a feature may also ship a `skills/` directory that is composed into the tool's skills when the feature is enabled.
+- `extensions/tools/<tool>/spec.yaml` (`schemaVersion: "3"`, `kind: workload`) defines tool runtime, auth, network, settings, and provider behavior.
+- `extensions/features/<feature>/spec.yaml` (`schemaVersion: "3"`, `kind: mixin`) defines optional packages, runtime setup, auth, network, and published-port behavior; a feature may also ship a `skills/` directory that is composed into the tool's skills when the feature is enabled.
+- Runtime fields live in the required `org.eclipse.enclave/runtime@1` capability's `config`; paths below are relative to that payload. Legacy Enclave v1 descriptors remain accepted. CLI JSON contracts retain version 1 and `tool`/`feature` kind values.
 - Memory scope, disable arguments, and preserved runtime state are declared with `sandbox.memoryScope`, `sandbox.noMemoryArgs`, and `sandbox.statePaths`; see [Agent Memory](docs/runtime/stores.md#agent-memory) for lifecycle and cleanup behavior.
 - Tool settings templates live under `extensions/tools/<tool>/templates/` and are baked into the image.
 - Full host config overrides use `~/.config/enclave/tools/<tool>/` globally and `~/.config/enclave/projects/<hash>/<tool>/config/` per project.

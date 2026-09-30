@@ -48,7 +48,7 @@ enclave_load_nvm_no_use() {
 # enclave_ext_spec echoes the path to an extension's spec manifest
 # (spec.yaml, falling back to spec.json) inside the given extension directory,
 # or nothing when neither exists. The build reads extension metadata straight
-# from the frozen spec.yaml grammar via yq.
+# from the Enclave runtime capability (or legacy v1) via yq.
 enclave_ext_spec() {
     local dir="$1"
     if [ -f "$dir/spec.yaml" ]; then
@@ -69,7 +69,7 @@ enclave_spec_read() {
         printf '%s' "$fallback"
         return 0
     fi
-    yq "$expr" "$spec"
+    yq '((. | select(.schemaVersion != "3")), (.capabilities[] | select(.type == "org.eclipse.enclave/runtime@1") | .config)) | '"$expr" "$spec"
 }
 
 # enclave_copy_home_files bakes an extension's files/home tree into $HOME,
@@ -160,7 +160,7 @@ enclave_feature_is_enabled() {
     # `!= false` treats an absent (null) key as enabled while honoring an
     # explicit `defaultEnabled: false`, matching the retired jq null-check.
     if [ "$selection" = "default" ] || enclave_word_list_contains "$selection" "default"; then
-        [ "$(yq '.defaultEnabled != false' "$spec")" = "true" ]
+        [ "$(enclave_spec_read "$spec" '.defaultEnabled != false')" = "true" ]
         return
     fi
 
@@ -181,7 +181,7 @@ enclave_tool_is_enabled() {
         if [ -z "$spec" ] || [ ! -f "$spec" ]; then
             return 0
         fi
-        [ "$(yq '.defaultIncluded != false' "$spec")" = "true" ]
+        [ "$(enclave_spec_read "$spec" '.defaultIncluded != false')" = "true" ]
         return
     fi
 
@@ -208,7 +208,7 @@ enclave_list_enabled_features() {
             continue
         fi
 
-        priority="$(yq '.priority // 100' "$spec")"
+        priority="$(enclave_spec_read "$spec" '.priority // 100')"
         printf '%s\t%s\t%s\n' "$priority" "$name" "$ext"
     done
 }

@@ -8,8 +8,8 @@
 package model
 
 // ExtensionKind distinguishes the two extension flavours as the CLI presents
-// them. The on-disk spec spells the same distinction `kind: sandbox|mixin`;
-// SpecKind maps a kind to that token.
+// them. The normalized runtime model retains `sandbox|mixin`; v3 descriptor
+// decoding maps workload to sandbox before these helpers are used.
 type ExtensionKind string
 
 const (
@@ -17,8 +17,7 @@ const (
 	KindFeature ExtensionKind = "feature"
 )
 
-// SpecKind is the `kind` token an extension of this kind declares in its spec
-// document, and the Extension.Type it loads as.
+// SpecKind is the normalized kind token and Extension.Type.
 func (k ExtensionKind) SpecKind() string {
 	if k == KindTool {
 		return ExtensionKindSandbox
@@ -26,7 +25,7 @@ func (k ExtensionKind) SpecKind() string {
 	return ExtensionKindMixin
 }
 
-// ExtensionKindFor maps an on-disk spec kind token back to the kind it names.
+// ExtensionKindFor maps a normalized spec kind token back to the kind it names.
 // An unrecognized token names no kind.
 func ExtensionKindFor(specKind string) (ExtensionKind, bool) {
 	switch specKind {

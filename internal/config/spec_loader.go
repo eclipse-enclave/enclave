@@ -34,7 +34,11 @@ func LoadSpec(paths model.Paths, name string, kind string) (specDocument, error)
 	}
 
 	if doc.Kind != kind {
-		return specDocument{}, fmt.Errorf("%s kind must be %q", specPath, kind)
+		expectedKind := kind
+		if doc.SchemaVersion == SpecSchemaVersion && kind == KindSandbox {
+			expectedKind = "workload"
+		}
+		return specDocument{}, fmt.Errorf("%s kind must be %q", specPath, expectedKind)
 	}
 	if doc.Name != name {
 		return specDocument{}, fmt.Errorf("%s name must be %q", specPath, name)
@@ -134,12 +138,21 @@ func parseUntrustedSpecDocument(specPath string) (specDocument, error) {
 }
 
 func decodeSpecDocument(data []byte, specPath string) (specDocument, error) {
+	var header struct {
+		SchemaVersion string `json:"schemaVersion"`
+	}
+	if err := yaml.Unmarshal(data, &header); err != nil {
+		return specDocument{}, fmt.Errorf("parse %s: %w", specPath, err)
+	}
+	if header.SchemaVersion == SpecSchemaVersion {
+		return decodeV3Spec(data, specPath)
+	}
+	if header.SchemaVersion != LegacySpecSchemaVersion {
+		return specDocument{}, fmt.Errorf("%s schemaVersion must be %q (or legacy %q; got %q)", specPath, SpecSchemaVersion, LegacySpecSchemaVersion, header.SchemaVersion)
+	}
 	var doc specDocument
 	if err := yaml.UnmarshalStrict(data, &doc); err != nil {
 		return specDocument{}, fmt.Errorf("parse %s: %w", specPath, err)
-	}
-	if doc.SchemaVersion != SpecSchemaVersion {
-		return specDocument{}, fmt.Errorf("%s schemaVersion must be %q (got %q)", specPath, SpecSchemaVersion, doc.SchemaVersion)
 	}
 	return doc, nil
 }
@@ -188,7 +201,7 @@ func hasSpecFile(paths model.Paths, name string, kind string) bool {
 // parses all of stdout as completion candidates — any warning printed to
 // stdout during spec loading would corrupt shell completion output.
 func specWarn(msg string) {
-	_, _ = fmt.Fprintf(os.Stderr, "warn: %s\n", msg)
+	_, _ = fmt.Fprintf(os.Stderr, "warn: %s\n", msg) // #nosec G705 -- Diagnostic text goes to terminal stderr, never HTML.
 }
 
 // specSourceLabel produces a human-readable identifier for a spec-sourced

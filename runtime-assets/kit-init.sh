@@ -19,6 +19,13 @@ _kit_log() {
     printf '%s\n' "$*" >&2
 }
 
+# Read Enclave runtime config from a v3 capability or a legacy v1 document.
+_kit_spec_read() {
+    _kit_read_spec="$1"
+    _kit_read_expr="$2"
+    yq '((. | select(.schemaVersion != "3")), (.capabilities[] | select(.type == "org.eclipse.enclave/runtime@1") | .config)) | '"$_kit_read_expr" "$_kit_read_spec"
+}
+
 # enclave_write_init_file <path> <mode> <only_if_missing>
 # Reads the file content from stdin. Portable: coreutils + envsubst only (no yq).
 enclave_write_init_file() {
@@ -98,22 +105,22 @@ enclave_apply_init_files() {
     # mikefarah/yq v4: raw scalar output is the default (do NOT pass -r). A yq
     # failure (malformed baked spec, version drift) must never abort container
     # start under the entrypoint's `set -e`, so every read is `|| true`-guarded.
-    _kit_count="$(yq '.commands.initFiles | length' "$_kit_spec" 2>/dev/null || true)"
+    _kit_count="$(_kit_spec_read "$_kit_spec" '.commands.initFiles | length' 2>/dev/null || true)"
     case "$_kit_count" in
         '' | null | 0) return 0 ;;
     esac
 
     _kit_i=0
     while [ "$_kit_i" -lt "$_kit_count" ]; do
-        _kit_ifpath="$(yq ".commands.initFiles[$_kit_i].path // \"\"" "$_kit_spec" 2>/dev/null || true)"
-        _kit_ifmode="$(yq ".commands.initFiles[$_kit_i].mode // \"\"" "$_kit_spec" 2>/dev/null || true)"
-        _kit_ifonly="$(yq ".commands.initFiles[$_kit_i].onlyIfMissing // false" "$_kit_spec" 2>/dev/null || true)"
+        _kit_ifpath="$(_kit_spec_read "$_kit_spec" ".commands.initFiles[$_kit_i].path // \"\"" 2>/dev/null || true)"
+        _kit_ifmode="$(_kit_spec_read "$_kit_spec" ".commands.initFiles[$_kit_i].mode // \"\"" 2>/dev/null || true)"
+        _kit_ifonly="$(_kit_spec_read "$_kit_spec" ".commands.initFiles[$_kit_i].onlyIfMissing // false" 2>/dev/null || true)"
         # yq terminates scalar output with its own newline, on top of the one a
         # `content: |` block scalar already carries — streaming it straight to the
         # writer leaves a spurious trailing blank line. Capturing drops all
         # trailing newlines; re-add exactly one so the file ends with a single
         # newline.
-        _kit_ifcontent="$(yq ".commands.initFiles[$_kit_i].content // \"\"" "$_kit_spec" 2>/dev/null || true)"
+        _kit_ifcontent="$(_kit_spec_read "$_kit_spec" ".commands.initFiles[$_kit_i].content // \"\"" 2>/dev/null || true)"
         printf '%s\n' "$_kit_ifcontent" |
             enclave_write_init_file "$_kit_ifpath" "$_kit_ifmode" "$_kit_ifonly"
         _kit_i=$((_kit_i + 1))
@@ -239,14 +246,14 @@ enclave_apply_startup_commands() {
 
     # A yq failure must never abort container start under the entrypoint's
     # `set -e`, so every read is `|| true`-guarded.
-    _kit_count="$(yq '.commands.startup | length' "$_kit_spec" 2>/dev/null || true)"
+    _kit_count="$(_kit_spec_read "$_kit_spec" '.commands.startup | length' 2>/dev/null || true)"
     case "$_kit_count" in
         '' | null | 0) return 0 ;;
     esac
 
     _kit_i=0
     while [ "$_kit_i" -lt "$_kit_count" ]; do
-        _kit_suser="$(yq ".commands.startup[$_kit_i].user // \"\"" "$_kit_spec" 2>/dev/null || true)"
+        _kit_suser="$(_kit_spec_read "$_kit_spec" ".commands.startup[$_kit_i].user // \"\"" 2>/dev/null || true)"
         case "$_kit_suser" in
             0 | root)
                 _kit_log "enclave: skipping root startup command (index $_kit_i)"
@@ -254,11 +261,11 @@ enclave_apply_startup_commands() {
                 continue
                 ;;
         esac
-        _kit_sbg="$(yq ".commands.startup[$_kit_i].background // false" "$_kit_spec" 2>/dev/null || true)"
-        _kit_stag="$(yq ".commands.startup[$_kit_i].command | tag" "$_kit_spec" 2>/dev/null || true)"
+        _kit_sbg="$(_kit_spec_read "$_kit_spec" ".commands.startup[$_kit_i].background // false" 2>/dev/null || true)"
+        _kit_stag="$(_kit_spec_read "$_kit_spec" ".commands.startup[$_kit_i].command | tag" 2>/dev/null || true)"
         case "$_kit_stag" in
             '!!str')
-                _kit_scmd="$(yq ".commands.startup[$_kit_i].command" "$_kit_spec" 2>/dev/null || true)"
+                _kit_scmd="$(_kit_spec_read "$_kit_spec" ".commands.startup[$_kit_i].command" 2>/dev/null || true)"
                 enclave_run_startup_command "$_kit_sbg" bash -c "$_kit_scmd"
                 ;;
             '!!seq')
@@ -266,7 +273,7 @@ enclave_apply_startup_commands() {
                 while IFS= read -r _kit_sarg; do
                     set -- "$@" "$_kit_sarg"
                 done <<EOF
-$(yq ".commands.startup[$_kit_i].command[]" "$_kit_spec" 2>/dev/null || true)
+$(_kit_spec_read "$_kit_spec" ".commands.startup[$_kit_i].command[]" 2>/dev/null || true)
 EOF
                 enclave_run_startup_command "$_kit_sbg" "$@"
                 ;;

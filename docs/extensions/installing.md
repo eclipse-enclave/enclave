@@ -47,7 +47,7 @@ it — the escape hatch for exactly this case.
 
 ## Discovery
 
-The verb fixes the kind: `enclave tools add` looks only for `kind: sandbox`
+The verb fixes the kind: `enclave tools add` looks only for v3 `kind: workload` (legacy v1 `kind: sandbox`)
 extensions, `enclave features add` only for `kind: mixin`. With no subpath in
 the source, the whole repository (up to 8 directories deep) is scanned for
 spec documents (`spec.yaml`/`spec.json`) whose `kind` matches and whose spec
@@ -86,7 +86,7 @@ run at container build and start time. Before writing anything, `add` and
 install/startup script (by count and script name, never full command text —
 this is a capability summary, not a code audit), how many `commands.install`
 steps run as root (a step with no `user` field defaults to root, independently
-of the top-level `needsRoot`), whether it ships a `check-update.sh` that enclave
+of the runtime payload's `needsRoot`), whether it ships a `check-update.sh` that enclave
 runs in a container on each automatic update check, widens the network allowlist
 or denies domains, publishes a container port on the host, declares credentials
 and where they're released as HTTP headers, whether it flips on the

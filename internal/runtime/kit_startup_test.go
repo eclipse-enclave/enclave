@@ -103,16 +103,18 @@ func TestRunStartupCommandNoArgsNoop(t *testing.T) {
 // TestApplyStartupCommandsRunsAndSkipsRoot exercises the mikefarah-yq-v4 glue.
 // Skips on hosts without mikefarah yq (e.g. kislyuk's jq wrapper).
 func TestApplyStartupCommandsRunsAndSkipsRoot(t *testing.T) {
-	if !hasMikefarahYq(t) {
-		t.Skip("requires mikefarah/yq v4; host has kislyuk yq")
-	}
-	extDir := t.TempDir()
-	work := t.TempDir()
-	fileA := filepath.Join(work, "a")
-	fileRoot := filepath.Join(work, "root")
-	fileC := filepath.Join(work, "c")
+	for _, version := range []string{"1", "3"} {
+		t.Run(version, func(t *testing.T) {
+			if !hasMikefarahYq(t) {
+				t.Skip("requires mikefarah/yq v4; host has kislyuk yq")
+			}
+			extDir := t.TempDir()
+			work := t.TempDir()
+			fileA := filepath.Join(work, "a")
+			fileRoot := filepath.Join(work, "root")
+			fileC := filepath.Join(work, "c")
 
-	spec := `schemaVersion: "1"
+			spec := `schemaVersion: "1"
 kind: sandbox
 name: demo
 commands:
@@ -122,24 +124,30 @@ commands:
       user: "0"
     - command: [touch, ` + fileC + `]
 `
-	if err := os.WriteFile(filepath.Join(extDir, "spec.yaml"), []byte(spec), 0o644); err != nil {
-		t.Fatalf("write spec: %v", err)
+			if version == "3" {
+				spec = v3ShellFixture(t, spec)
+			}
+			if err := os.WriteFile(filepath.Join(extDir, "spec.yaml"), []byte(spec), 0o644); err != nil {
+				t.Fatalf("write spec: %v", err)
+			}
+
+			script := `set -e; . "$KIT"; enclave_apply_startup_commands "$EXT"; wait`
+			cmd := exec.Command("bash", "-c", script)
+			cmd.Env = startupEnv(t, map[string]string{"EXT": extDir})
+			if out, err := cmd.CombinedOutput(); err != nil {
+				t.Fatalf("apply startup: %v\n%s", err, out)
+			}
+
+			if _, err := os.Stat(fileA); err != nil {
+				t.Fatalf("string-form command did not run: %v", err)
+			}
+			if _, err := os.Stat(fileC); err != nil {
+				t.Fatalf("seq-form command did not run: %v", err)
+			}
+			if _, err := os.Stat(fileRoot); err == nil {
+				t.Fatalf("root startup command must be skipped, but %s exists", fileRoot)
+			}
+		})
 	}
 
-	script := `set -e; . "$KIT"; enclave_apply_startup_commands "$EXT"; wait`
-	cmd := exec.Command("bash", "-c", script)
-	cmd.Env = startupEnv(t, map[string]string{"EXT": extDir})
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("apply startup: %v\n%s", err, out)
-	}
-
-	if _, err := os.Stat(fileA); err != nil {
-		t.Fatalf("string-form command did not run: %v", err)
-	}
-	if _, err := os.Stat(fileC); err != nil {
-		t.Fatalf("seq-form command did not run: %v", err)
-	}
-	if _, err := os.Stat(fileRoot); err == nil {
-		t.Fatalf("root startup command must be skipped, but %s exists", fileRoot)
-	}
 }

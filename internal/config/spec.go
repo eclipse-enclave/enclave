@@ -13,24 +13,30 @@ import "enclave/internal/model"
 // same values as the runtime Extension.Type discriminator (model is the
 // canonical source), so they are aliased rather than re-declared.
 const (
-	KindSandbox      = model.ExtensionKindSandbox
-	KindMixin        = model.ExtensionKindMixin
-	SpecFilename     = "spec.yaml"
-	SpecFilenameJSON = "spec.json"
-	// SpecSchemaVersion is the only schemaVersion this loader accepts. Bump it
-	// (and branch on doc.SchemaVersion) when the on-disk schema evolves.
-	SpecSchemaVersion = "1"
+	KindSandbox              = model.ExtensionKindSandbox
+	KindMixin                = model.ExtensionKindMixin
+	SpecFilename             = "spec.yaml"
+	SpecFilenameJSON         = "spec.json"
+	SpecSchemaVersion        = "3"
+	LegacySpecSchemaVersion  = "1"
+	EnclaveRuntimeCapability = "org.eclipse.enclave/runtime@1"
 )
 
-// specDocument is the full on-disk schema for an enclave extension.
-// It is the parse target only; specToProfile / specToExtension project it
-// onto the runtime model types. sigs.k8s.io/yaml uses json tags.
+// specDocument is the normalized extension declaration. Legacy v1 documents
+// decode directly; v3 descriptors supply metadata and a specRuntime capability.
+// Kind remains the normalized runtime discriminator (sandbox or mixin).
 type specDocument struct {
 	SchemaVersion string `json:"schemaVersion"`
 	Kind          string `json:"kind"`
-	Name          string `json:"name"`
 	DisplayName   string `json:"displayName,omitempty"`
 	Description   string `json:"description,omitempty"`
+	specRuntime
+}
+
+// specRuntime is the strict config for org.eclipse.enclave/runtime@1.
+// Its semantics are Enclave-owned, including build and host state management.
+type specRuntime struct {
+	Name string `json:"name"`
 
 	Sandbox   *specSandbox   `json:"sandbox,omitempty"`
 	PostStart *specPostStart `json:"postStart,omitempty"`

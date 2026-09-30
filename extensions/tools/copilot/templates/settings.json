@@ -1,0 +1,9 @@
+{
+  // Keep sessions local; this also disables remote control.
+  "remoteExport": false,
+  "autoUpdate": false,
+  "logLevel": "default",
+  "includeCoAuthoredBy": false,
+  "storeTokenPlaintext": false,
+  "model": "auto"
+}

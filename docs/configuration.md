@@ -326,6 +326,7 @@ for snapshot lifecycle, missing-file behavior, and upgrade limitations.
 | `ENCLAVE_HOME` | Override asset discovery to point at a specific repo checkout |
 | `ENCLAVE_LOG_LEVEL` | Log level: `info` (default) or `debug` |
 | `ENCLAVE_AGENT_UPDATE_INTERVAL_HOURS` | Minimum hours after a tool's last successful automatic update before `check-update.sh` is eligible to probe again (`0` = always) |
+| `ENCLAVE_NO_REBUILD` | Set to `1` to suppress session image/bundle builds and automatic agent update probes; see [Image & Build](cli-reference.md#image--build). |
 | `ENCLAVE_DEVCONTAINER_REWRITE_VARS` | Comma-separated extra env var names for devcontainer home-path normalization |
 | `ENCLAVE_ALLOW_ROOT` | Set to `1` to skip the root check (same as `--allow-root`); see [Running as root](cli-reference.md#running-as-root) |
 | `ENCLAVE_ALLOW_SENSITIVE_MOUNTS` | Set to `1` to mount sensitive host directories anyway (same as `--allow-sensitive-mounts`); see [Sensitive mounts](cli-reference.md#sensitive-mounts) |

@@ -27,6 +27,7 @@ func TestForwardEnvForwardsEnclaveVariables(t *testing.T) {
 		`Path=C:\Windows`,
 		"ENCLAVE_LOG_LEVEL=debug",
 		"ENCLAVE_AGENT_UPDATE_INTERVAL_HOURS=0",
+		"ENCLAVE_NO_REBUILD=1",
 		"ANTHROPIC_API_KEY=secret",
 	}
 
@@ -38,7 +39,7 @@ func TestForwardEnvForwardsEnclaveVariables(t *testing.T) {
 		t.Errorf("warnings = %q, want none", warnings)
 	}
 
-	want := "ENCLAVE_AGENT_UPDATE_INTERVAL_HOURS:ENCLAVE_LOG_LEVEL"
+	want := "ENCLAVE_AGENT_UPDATE_INTERVAL_HOURS:ENCLAVE_LOG_LEVEL:ENCLAVE_NO_REBUILD"
 	if got := wslenvOf(t, got); got != want {
 		t.Errorf("WSLENV = %q, want %q", got, want)
 	}

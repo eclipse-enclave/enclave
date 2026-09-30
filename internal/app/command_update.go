@@ -24,10 +24,10 @@ import (
 // refresh agents automatically once the update interval elapses; this command
 // is the explicit, build-only path to refresh now.
 func runUpdate(input *CommandInput) int {
-	// update always rebuilds, so --no-rebuild is a contradiction. It is
-	// CLI-only and tool-agnostic, so one check covers every target.
+	// update always rebuilds, so suppression is a contradiction. It is
+	// tool-agnostic, so one check covers every target.
 	if input.Options.NoRebuild {
-		logx.Errorf("--no-rebuild is incompatible with the update command")
+		logx.Errorf("%s is incompatible with the update command", rebuildSuppressionCause(input.Options))
 		return 1
 	}
 

@@ -226,9 +226,14 @@ to `CreateProcess` unchanged. Two layers check it:
 6) Update docs for user-visible flag behavior (`docs/cli-reference.md`,
    `docs/configuration.md`, `docs/ARCHITECTURE.md`, and related command docs).
 
-For CLI-only options (not configurable via config files), omit `DefaultsField`
+For options not configurable via config files, omit `DefaultsField`
 and use `Apply: ApplyNone` in `options_def.go` (for example:
 `--force-base-image` and `--no-rebuild`).
+
+`--no-rebuild` also has the terminal-scoped `ENCLAVE_NO_REBUILD=1` switch.
+`app.Run` applies it after rewriting user-defined session commands and before
+defaults resolution. It reuses the existing `NoRebuild` gates and conflict
+checks rather than adding a config key; see the [CLI reference](cli-reference.md#image--build).
 
 For config-only options, omit `CLIFlags` instead (for example:
 `host_config_paths`). If a project config must not be able to relax the

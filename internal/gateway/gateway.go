@@ -396,7 +396,7 @@ func Start(ctx context.Context, cfg StartConfig) (StartResult, error) {
 		return empty, err
 	}
 	if cfg.NoRebuild {
-		logx.Warnf("Skipping gateway image build due to --no-rebuild.")
+		logx.Warnf("Skipping gateway image build (--no-rebuild or %s=1).", model.EnvNoRebuild)
 		if err := ensureExistingGatewayImageWith(cfg.Profile, docker.ImageExists); err != nil {
 			return empty, err
 		}
@@ -711,7 +711,7 @@ func ensureExistingGatewayImageWith(profile model.Profile, exists func(context.C
 	if ok {
 		return nil
 	}
-	return fmt.Errorf("gateway image %q does not exist locally; rerun without --no-rebuild, pass --rebuild, or use --allow-all-network to bypass the gateway", image)
+	return fmt.Errorf("gateway image %q does not exist locally and builds are disabled (--no-rebuild or %s); re-enable builds to create it, or use --allow-all-network to bypass the gateway", image, model.EnvNoRebuild)
 }
 
 func Stop(containerName string) {

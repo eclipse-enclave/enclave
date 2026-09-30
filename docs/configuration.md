@@ -67,6 +67,7 @@ supported under `tool_overrides.<tool>`.
 | `no_memory` | Disable per-project agent memory; see [memory controls](runtime/stores.md#agent-memory) |
 | `session_monitor` | Run agents under the managed tmux session (enables `status` snapshots) |
 | `session_tint` | Terminal background color marking a session-owned terminal, as `#rrggbb` (unset: no tint) |
+| `timezone` | Container `TZ`, e.g. `UTC` or `Europe/Vienna` (unset: host time zone); a `TZ` from `.env`, devcontainer `containerEnv`, or `--pass-env` wins |
 | `base_image` | Docker base image override |
 | `devcontainer` | Derive base image from devcontainer.json |
 | `slim` | Build without features (tools only) |

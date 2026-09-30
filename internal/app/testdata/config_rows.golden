@@ -16,6 +16,7 @@ allow_all_network | default="false"/true global=""/false project=""/false toolOv
 no_cache | default="false"/true global="true"/true project=""/false toolOverride=""/false cli=""/false | source=2 effective="true"
 session_monitor | default="false"/true global=""/false project=""/false toolOverride=""/false cli=""/false | source=0 effective="false"
 session_tint | default=""/false global=""/false project=""/false toolOverride=""/false cli=""/false | source=0 effective=""
+timezone | default=""/false global=""/false project=""/false toolOverride=""/false cli=""/false | source=0 effective=""
 no_history | default="false"/true global=""/false project=""/false toolOverride=""/false cli=""/false | source=0 effective="false"
 no_memory | default="false"/true global=""/false project=""/false toolOverride=""/false cli=""/false | source=0 effective="false"
 image_inbox | default="false"/true global=""/false project=""/false toolOverride=""/false cli=""/false | source=0 effective="false"

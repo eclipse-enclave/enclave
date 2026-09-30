@@ -18,6 +18,15 @@ const (
 	hostTimezonePath  = "/etc/timezone"
 )
 
+// containerTimeZone returns the configured timezone option, or the host zone
+// when the option is unset.
+func (r *Runtime) containerTimeZone() string {
+	if r.run.Timezone != "" {
+		return r.run.Timezone
+	}
+	return hostTimeZone()
+}
+
 // hostTimeZone returns the host time zone as a value for the container's TZ,
 // or "" when it cannot be determined (the container then stays on UTC).
 func hostTimeZone() string {

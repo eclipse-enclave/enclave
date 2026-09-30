@@ -106,3 +106,14 @@ func TestContainerEnvKeepsExplicitTimeZone(t *testing.T) {
 		t.Fatalf("TZ entries = %v, want [TZ=UTC]", values)
 	}
 }
+
+func TestContainerEnvUsesTimezoneOption(t *testing.T) {
+	t.Setenv("TZ", "Europe/Vienna")
+	r := &Runtime{project: model.Project{Dir: t.TempDir()}, run: model.RunOptions{Timezone: "UTC"}}
+
+	env := r.containerEnv(&ExecutionContext{}, false)
+
+	if got, _ := lookupEnv(env, "TZ"); got != "UTC" {
+		t.Fatalf("TZ = %q, want UTC", got)
+	}
+}

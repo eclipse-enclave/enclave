@@ -70,7 +70,7 @@ mkdir -p "$root"
 apk --root "$root" --initdb --arch x86_64 --keys-dir /etc/apk/keys --repositories-file /etc/apk/repositories add --no-cache \
     alpine-base "$ENCLAVE_QEMU_KERNEL_PACKAGE" bash busybox-suid ca-certificates curl wget git git-lfs openssh-client sudo \
     jq yq-go gettext-envsubst nodejs npm python3 py3-pip coreutils findutils shadow util-linux setpriv kmod iproute2 iptables \
-    procps psmisc socat direnv vim zip unzip tar gzip bzip2 xz >/dev/null
+    procps psmisc socat direnv vim zip unzip tar gzip bzip2 xz tzdata >/dev/null
 
 mkdir -p "$root/dev" "$root/proc" "$root/sys" "$root/tmp"
 chmod 1777 "$root/tmp"

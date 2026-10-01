@@ -103,6 +103,10 @@ the inherited mode are ignored. For a regular repository whose `.git`
 directory sits inside the project, the project mount mode governs and this
 option has no effect.
 
+Regardless of these modes, existing config files for the current repository
+receive read-only file mounts; other Git metadata stays writable in writable
+mode. See [Git config protection](persistence.md#git) for scope and limitations.
+
 `session_tint` marks the terminal that owns a session, so a sandboxed session
 is visually distinct from an ordinary shell. When set to an `#rrggbb` value,
 `run` (including `shell`, `continue`, and `resume`), `exec`, and `attach` set

@@ -54,6 +54,9 @@ type Request struct {
 	Mounts []Mount
 	Stores []PersistentStore
 
+	// ProtectedFiles are host paths whose exposed bind aliases must stay read-only.
+	ProtectedFiles []string
+
 	Network NetworkPolicy
 	Ports   []PortMapping
 

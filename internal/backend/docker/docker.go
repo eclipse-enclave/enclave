@@ -303,6 +303,9 @@ func (b *Backend) prepareRun(ctx context.Context, req backend.Request) (runSpec,
 		}
 		b.applyDevcontainerRunArgs(spec.config, spec.hostConfig)
 		spec.config.Env = append(spec.config.Env, runtimeUIDRemapEnv...)
+		if err := protectFileAliases(spec.hostConfig, req.ProtectedFiles); err != nil {
+			return runSpec{}, err
+		}
 	}
 	if err := b.prepareImageUserNamespace(ctx, req.Image); err != nil {
 		return runSpec{}, err

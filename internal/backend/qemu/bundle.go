@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -279,6 +280,10 @@ func (b *Backend) buildRuntimeMounts(req backend.Request, controlDir string, fil
 		mounts = append(mounts, runtimeMount{ID: "files", Tag: "enclave-files", Source: fileStageSource, Target: guestFilesPath})
 	}
 	mounts = append(mounts, runtimeMount{ID: "control", Tag: "enclave-control", Source: controlDir, Target: guestControlPath})
+	// Parent mounts must precede children, including late-added config anchors.
+	sort.SliceStable(mounts, func(i, j int) bool {
+		return strings.Count(mounts[i].Target, "/") < strings.Count(mounts[j].Target, "/")
+	})
 	return mounts, nil
 }
 

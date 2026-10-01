@@ -10,6 +10,8 @@ package app
 import (
 	"os"
 	"testing"
+
+	"enclave/internal/model"
 )
 
 func TestMain(m *testing.M) {
@@ -20,6 +22,11 @@ func TestMain(m *testing.M) {
 		if err := os.Unsetenv(key); err != nil {
 			panic(err)
 		}
+	}
+	// A root opt-in in the developer's shell would otherwise flip root-guard
+	// and --build-uid 0 results.
+	if err := os.Unsetenv(model.EnvAllowRoot); err != nil {
+		panic(err)
 	}
 	os.Exit(m.Run())
 }

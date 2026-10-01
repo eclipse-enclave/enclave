@@ -1304,6 +1304,43 @@ func TestParseUserCommandGlobalFlagBeforeName(t *testing.T) {
 	}
 }
 
+// --allow-root is a global flag: every command, including host user commands,
+// must accept it on either side of the command name.
+func TestParseAllowRootIsGlobal(t *testing.T) {
+	cmds := []usercmd.Command{{Name: "deploy", Path: "/p/deploy", Target: usercmd.TargetHost}}
+	for _, tc := range []struct {
+		args   []string
+		action string
+	}{
+		{args: []string{"--allow-root", "ps"}, action: "ps"},
+		{args: []string{"ps", "--allow-root"}, action: "ps"},
+		{args: []string{"--allow-root", "--tool", "codex"}, action: "run"},
+		{args: []string{"tools", "list", "--allow-root"}, action: "tools"},
+		{args: []string{"--allow-root", "deploy", "x"}, action: "user-command"},
+		// Bool flags ignore their value (as --verbose does), so =false still opts in.
+		{args: []string{"--allow-root=false", "ps"}, action: "ps"},
+	} {
+		res, err := Parse(tc.args, config.DefaultOptions(), cmds...)
+		if err != nil {
+			t.Fatalf("Parse(%q) failed: %v", tc.args, err)
+		}
+		if res.Action != tc.action {
+			t.Errorf("Parse(%q): action %q, want %q", tc.args, res.Action, tc.action)
+		}
+		if !res.Options.AllowRoot || res.Sources.AllowRoot != model.SourceCLI {
+			t.Errorf("Parse(%q): AllowRoot=%v source=%v, want true from the CLI", tc.args, res.Options.AllowRoot, res.Sources.AllowRoot)
+		}
+	}
+
+	res, err := Parse([]string{"ps"}, config.DefaultOptions())
+	if err != nil {
+		t.Fatalf("parse failed: %v", err)
+	}
+	if res.Options.AllowRoot {
+		t.Error("AllowRoot must default to false")
+	}
+}
+
 func TestParseUserCommandHostRejectsSessionFlag(t *testing.T) {
 	defaults := config.DefaultOptions()
 	cmds := []usercmd.Command{{Name: "deploy", Path: "/p/deploy", Target: usercmd.TargetHost}}

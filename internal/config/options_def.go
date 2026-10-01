@@ -955,6 +955,27 @@ func OptionDefs() []OptionDef {
 			},
 		},
 		{
+			Name:        "allow_root",
+			Group:       OptionGroupGlobal,
+			Kind:        OptionKindBool,
+			OptionField: "AllowRoot",
+			SourceField: "AllowRoot",
+			Apply:       ApplyNone,
+			CLIFlags: []CLIFlagDef{
+				{
+					Name:      "--allow-root",
+					Usage:     "Allow running enclave as root (unsafe)",
+					ValueKind: CLIValueNone,
+					Action: CLIAction{
+						Kind:        CLIActionSetBool,
+						OptionField: "AllowRoot",
+						SourceField: "AllowRoot",
+						BoolValue:   true,
+					},
+				},
+			},
+		},
+		{
 			Name:          "ports",
 			Group:         OptionGroupRun,
 			Kind:          OptionKindStringSlice,

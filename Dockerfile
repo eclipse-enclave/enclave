@@ -94,7 +94,23 @@ ARG USER_ID=1000
 ARG GROUP_ID=1000
 ARG USERNAME=agent
 
-RUN if id -u ${USER_ID} >/dev/null 2>&1; then \
+RUN if [ "${USER_ID}" -eq 0 ]; then \
+        # UID 0 (root host with --allow-root, or --build-uid 0): usermod cannot
+        # rename root while the build runs as root, so add the agent as a
+        # second name for UID 0 instead.
+        if [ "${GROUP_ID}" -eq 0 ]; then \
+            groupadd -o -g 0 ${USERNAME}; \
+        elif getent group ${GROUP_ID} >/dev/null 2>&1; then \
+            groupmod -n ${USERNAME} $(getent group ${GROUP_ID} | cut -d: -f1); \
+        else \
+            groupadd -g ${GROUP_ID} ${USERNAME}; \
+        fi && \
+        useradd -o -m -u 0 -g ${GROUP_ID} -d /home/${USERNAME} -s /bin/bash ${USERNAME} && \
+        # RUN steps take HOME from the first passwd entry for their UID, which
+        # is root's, so /root must lead to the agent's home as well.
+        rm -rf /root && \
+        ln -s /home/${USERNAME} /root; \
+    elif id -u ${USER_ID} >/dev/null 2>&1; then \
         # UID exists (e.g. Ubuntu's "ubuntu" at 1000) - rename to our username
         EXISTING_USER=$(id -nu ${USER_ID}); \
         EXISTING_HOME=$(getent passwd "$EXISTING_USER" | cut -d: -f6); \

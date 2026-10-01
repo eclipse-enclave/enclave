@@ -31,9 +31,9 @@ func writeUserScript(t *testing.T, dir, name, body string) string {
 	return path
 }
 
-// runHostCommandCaptured swaps os.Stdout/os.Stderr around the executor so the
-// script output (and any logx error) can be asserted.
-func runHostCommandCaptured(t *testing.T, cmd usercmd.Command, args []string, projectDir, home string) (stdout, stderr string, code int) {
+// captureOutput swaps os.Stdout/os.Stderr around fn so its output (and any
+// logx message) can be asserted.
+func captureOutput(t *testing.T, fn func()) (stdout, stderr string) {
 	t.Helper()
 	origOut, origErr := os.Stdout, os.Stderr
 	outR, outW, err := os.Pipe()
@@ -45,7 +45,7 @@ func runHostCommandCaptured(t *testing.T, cmd usercmd.Command, args []string, pr
 		t.Fatalf("pipe: %v", err)
 	}
 	os.Stdout, os.Stderr = outW, errW
-	code = runUserHostCommand(cmd, args, projectDir, home)
+	fn()
 	_ = outW.Close()
 	_ = errW.Close()
 	os.Stdout, os.Stderr = origOut, origErr
@@ -58,7 +58,15 @@ func runHostCommandCaptured(t *testing.T, cmd usercmd.Command, args []string, pr
 	if err != nil {
 		t.Fatalf("read stderr: %v", err)
 	}
-	return string(outBytes), string(errBytes), code
+	return string(outBytes), string(errBytes)
+}
+
+func runHostCommandCaptured(t *testing.T, cmd usercmd.Command, args []string, projectDir, home string, allowRoot bool) (stdout, stderr string, code int) {
+	t.Helper()
+	stdout, stderr = captureOutput(t, func() {
+		code = runUserHostCommand(cmd, args, projectDir, home, allowRoot)
+	})
+	return stdout, stderr, code
 }
 
 func TestRunUserHostCommand(t *testing.T) {
@@ -75,7 +83,7 @@ func TestRunUserHostCommand(t *testing.T) {
 		"exit 7\n")
 	cmd := usercmd.Command{Name: "deploy", Path: script, Target: usercmd.TargetHost}
 
-	stdout, _, code := runHostCommandCaptured(t, cmd, []string{"--env", "prod"}, "/tmp/project", "/home/user")
+	stdout, _, code := runHostCommandCaptured(t, cmd, []string{"--env", "prod"}, "/tmp/project", "/home/user", false)
 
 	if code != 7 {
 		t.Fatalf("expected exit code 7, got %d", code)
@@ -96,13 +104,38 @@ func TestRunUserHostCommandStartFailure(t *testing.T) {
 	missing := filepath.Join(t.TempDir(), "does-not-exist")
 	cmd := usercmd.Command{Name: "ghost", Path: missing, Target: usercmd.TargetHost}
 
-	_, stderr, code := runHostCommandCaptured(t, cmd, nil, "/tmp/project", "/home/user")
+	_, stderr, code := runHostCommandCaptured(t, cmd, nil, "/tmp/project", "/home/user", false)
 
 	if code != 1 {
 		t.Fatalf("expected exit code 1 for start failure, got %d", code)
 	}
 	if !strings.Contains(stderr, missing) {
 		t.Fatalf("expected error to name the script path %q, got:\n%s", missing, stderr)
+	}
+}
+
+func TestRunUserHostCommandForwardsRootOptIn(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell script fixtures require a POSIX shell")
+	}
+	t.Setenv(model.EnvAllowRoot, "")
+	script := writeUserScript(t, t.TempDir(), "deploy", "#!/bin/sh\necho \"allow:$"+model.EnvAllowRoot+"\"\n")
+	cmd := usercmd.Command{Name: "deploy", Path: script, Target: usercmd.TargetHost}
+
+	for _, tc := range []struct {
+		allowRoot bool
+		want      string
+	}{
+		{allowRoot: true, want: "allow:1\n"},
+		{allowRoot: false, want: "allow:\n"},
+	} {
+		stdout, _, code := runHostCommandCaptured(t, cmd, nil, "/tmp/project", "/home/user", tc.allowRoot)
+		if code != 0 {
+			t.Fatalf("allowRoot=%v: expected exit code 0, got %d", tc.allowRoot, code)
+		}
+		if stdout != tc.want {
+			t.Fatalf("allowRoot=%v: expected %q, got %q", tc.allowRoot, tc.want, stdout)
+		}
 	}
 }
 

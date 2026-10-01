@@ -16,22 +16,10 @@ import (
 	"enclave/internal/util"
 )
 
-func effectiveBuildIdentity(host model.Host, opts model.BuildOptions) (uid string, gid string) {
-	uid = strings.TrimSpace(opts.BuildUID)
-	if uid == "" {
-		uid = host.UID
-	}
-	gid = strings.TrimSpace(opts.BuildGID)
-	if gid == "" {
-		gid = host.GID
-	}
-	return uid, gid
-}
-
 func appendEffectiveBuildIdentityHashSuffix(suffix string, host model.Host, opts model.BuildOptions) string {
 	// This runs after host resolution, so it captures the actual UID/GID baked
 	// into the image even when --build-uid/--build-gid were not explicit.
-	uid, gid := effectiveBuildIdentity(host, opts)
+	uid, gid := model.EffectiveBuildIdentity(host, opts)
 	if strings.TrimSpace(uid) != "" {
 		suffix += "-effective-build-uid-" + util.HashString(uid)
 	}

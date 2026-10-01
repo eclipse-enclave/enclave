@@ -57,6 +57,19 @@ func Run(args []string) int {
 		return 0
 	}
 
+	// The guard runs before anything writes state (the tool question, asset
+	// extraction, stores), so a refused root run leaves no root-owned files.
+	// Folding the env opt-in into the options lets validation and per-tool
+	// re-resolution see one value.
+	parsed.Options.AllowRoot = rootAllowed(parsed.Options.AllowRoot)
+	if err := checkRootGuard(parsed.Options.AllowRoot); err != nil {
+		if parsed.Action == cli.ActionExtensionManage && parsed.ExtRequest != nil {
+			return reportExtensionResults(*parsed.ExtRequest, nil, err)
+		}
+		logx.Errorf("%v", err)
+		return 1
+	}
+
 	projectDir, err := resolveProjectDir()
 	if err != nil {
 		logx.Errorf("%v", err)
@@ -84,7 +97,7 @@ func Run(args []string) int {
 			if parsed.Options.Verbose {
 				logx.SetLevel("debug")
 			}
-			return runUserHostCommand(*parsed.UserCommand, parsed.UserCommandArgs, projectDir, home)
+			return runUserHostCommand(*parsed.UserCommand, parsed.UserCommandArgs, projectDir, home, parsed.Options.AllowRoot)
 		case usercmd.TargetSession:
 			// Session commands run through the standard run pipeline as a
 			// shell-style execution; fall through with a rewritten action.

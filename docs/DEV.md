@@ -295,6 +295,18 @@ project scope so project defaults cannot weaken a stricter global setting.
 linked-worktree gitdir/commondir mounts: project config may strengthen the
 inherited mode (`follow < readonly < none`), but cannot weaken it.
 
+Root guard note: `--allow-root` is CLI-only and has no config key, so no config
+file can grant it; `ENCLAVE_ALLOW_ROOT=1` is its only alternative.
+`checkRootGuard` in `internal/app/root_guard.go` runs early in `app.Run`,
+before any state is written; tests pin the root check through the
+`runningAsRoot` seam. A root host builds the image for UID 0: the Dockerfile
+and the QEMU bundle build add `agent` as a second name for UID 0, and
+`applyUIDZeroAgentEnv` in `internal/runtime` sets `HOME` and `USER` for the
+agent, because lookups by UID return root's passwd entry. To test that path as
+a regular user, pass `--build-uid 0 --build-gid 0` with `XDG_CONFIG_HOME`,
+`XDG_STATE_HOME`, and `XDG_CACHE_HOME` pointing at a scratch directory: the UID 0
+agent leaves root-owned files behind.
+
 Config additive note: feature additive directives (`+`/`-`) are applied against
 the implicit default-enabled feature set when `features` is unset. For example,
 `["-node-dev"]` removes that default feature from the implicit set.

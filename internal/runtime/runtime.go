@@ -835,6 +835,7 @@ func (r *Runtime) backendRequest(ctx *ExecutionContext, detached bool, interacti
 	user := ""
 	r.applyDevcontainerUserIntent(&user, &env)
 	r.applyRuntimeUIDRemapIntent(&user, &env)
+	r.applyUIDZeroAgentEnv(user, &env)
 
 	req := backend.Request{
 		Session: backend.SessionMeta{
@@ -1454,6 +1455,20 @@ func (r *Runtime) applyRuntimeUIDRemapIntent(user *string, env *[]string) {
 		"HOME="+r.containerHome,
 		"USER="+r.containerUser,
 	)
+}
+
+// applyUIDZeroAgentEnv sets HOME and USER for the agent in an image built for
+// UID 0. There the agent is a second passwd entry for UID 0, and lookups by UID
+// return root's entry, which comes first. Admin sessions keep root's values.
+func (r *Runtime) applyUIDZeroAgentEnv(user string, env *[]string) {
+	if user != "" || r.run.Admin {
+		return
+	}
+	uid, _ := model.EffectiveBuildIdentity(r.host, r.build)
+	if n, err := strconv.Atoi(uid); err != nil || n != 0 {
+		return
+	}
+	r.appendUserHomeEnvEntries(env, r.containerUser, r.containerHome)
 }
 
 func (r *Runtime) envVarSet(key string) bool {

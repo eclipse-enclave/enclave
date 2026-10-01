@@ -55,9 +55,6 @@ func newListingBackend(opts model.Options) (backend.Backend, error) {
 
 func selectBackend(opts model.Options, dockerOpts backenddocker.Options) (backend.Backend, error) {
 	name := opts.Backend
-	if name == "" {
-		name = backend.NameDocker
-	}
 	switch name {
 	case backend.NameDocker, backend.NamePodman:
 		dockerOpts.Engine = name
@@ -65,7 +62,16 @@ func selectBackend(opts model.Options, dockerOpts backenddocker.Options) (backen
 	case backend.NameQEMU:
 		return backendqemu.New(qemuBackendOptions(dockerOpts.Host, dockerOpts.Paths)), nil
 	default:
-		return nil, fmt.Errorf("unsupported backend %q (available: %s, %s, %s)", name, backend.NameDocker, backend.NamePodman, backend.NameQEMU)
+		return nil, validateBackendName(name)
+	}
+}
+
+func validateBackendName(name string) error {
+	switch name {
+	case backend.NameDocker, backend.NamePodman, backend.NameQEMU:
+		return nil
+	default:
+		return fmt.Errorf("unsupported backend %q (available: %s, %s, %s)", name, backend.NameDocker, backend.NamePodman, backend.NameQEMU)
 	}
 }
 

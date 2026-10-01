@@ -21,9 +21,8 @@ func statusCommand(res *Result) *cobra.Command {
 			return nil
 		},
 	}
-	// status accepts --tool and --name to filter running containers, mirroring
-	// ps. Other Run-group flags don't apply (status doesn't start anything).
-	addOptionFlagsByName(cmd.Flags(), &res.Options, &res.Sources, "tool", "session_name")
+	// status filters by --tool and --name; --backend selects the engine to list.
+	addOptionFlagsByName(cmd.Flags(), &res.Options, &res.Sources, "backend", "tool", "session_name")
 	cmd.Flags().BoolVar(&res.Options.StatusJSON, "json", false, "Emit one JSON snapshot object per session")
 	cmd.Flags().BoolVar(&res.Options.StatusAll, "all", false, "Show sessions from all projects, not just the current one")
 	return cmd

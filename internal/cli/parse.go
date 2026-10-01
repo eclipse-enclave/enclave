@@ -760,7 +760,7 @@ func cleanupCommand(res *Result) *cobra.Command {
 			return nil
 		},
 	}
-	addOptionFlagsByName(cmd.Flags(), &res.Options, &res.Sources, "tool")
+	addOptionFlagsByName(cmd.Flags(), &res.Options, &res.Sources, "backend", "tool")
 	cmd.Flags().BoolVar(&res.Options.CleanupAll, "all", false, "Remove stores and caches for all projects")
 	cmd.Flags().BoolVar(&res.Options.CleanupEphemeral, "ephemeral", false, "Remove stopped containers and ephemeral session stores")
 	cmd.Flags().StringSlice("keep", nil, "Keep stores of the listed kinds: cache,history,auth,memory (memory has no selective effect with --all)")
@@ -782,10 +782,10 @@ func updateCommand(res *Result) *cobra.Command {
 	}
 	// update builds an image without starting it, so it needs the same
 	// build-affecting flags as run (e.g. --slim, --features, --base-image)
-	// to refresh the exact image variant a matching run would use. --tool
-	// selects the target when no positional tool arguments are given.
+	// to refresh the exact image variant a matching run would use. --backend
+	// selects the engine; --tool selects the target without positional arguments.
 	addOptionFlags(cmd.Flags(), &res.Options, &res.Sources, config.OptionGroupBuild)
-	addOptionFlagsByName(cmd.Flags(), &res.Options, &res.Sources, "tool")
+	addOptionFlagsByName(cmd.Flags(), &res.Options, &res.Sources, "backend", "tool")
 	return cmd
 }
 
@@ -802,7 +802,7 @@ func execCommand(res *Result) *cobra.Command {
 	}
 	// exec attaches to an already-running container; --name picks one by
 	// session name, container name or ID, resolved like attach's argument.
-	addOptionFlagsByName(cmd.Flags(), &res.Options, &res.Sources, "tool", "session_name")
+	addOptionFlagsByName(cmd.Flags(), &res.Options, &res.Sources, "backend", "tool", "session_name")
 	cmd.Flags().BoolVar(&res.Options.Admin, "admin", false, "Enable package-management sudo")
 	return cmd
 }
@@ -831,7 +831,7 @@ func infoCommand(res *Result) *cobra.Command {
 	cmd := simpleCommand("info", "Show configuration and image details", res)
 	addOptionFlags(cmd.Flags(), &res.Options, &res.Sources, config.OptionGroupBuild)
 	// auth_name lets `info` preview the named shared auth store for an identity.
-	addOptionFlagsByName(cmd.Flags(), &res.Options, &res.Sources, "tool", "auth_name")
+	addOptionFlagsByName(cmd.Flags(), &res.Options, &res.Sources, "backend", "tool", "auth_name")
 	return cmd
 }
 

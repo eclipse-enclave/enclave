@@ -31,6 +31,8 @@ unchanged. See [windows.md](windows.md).
 
 `enclave ps` prints one row per container with its `NAME` (container name) and `SESSION` (the `--name` session name, or the auto-assigned `1`, `2`, … for extra sessions; `-` for the project's default container); either can be passed to `attach`, `exec --name`, `stop`, and `theia`. Flags: `--all` (include stopped containers, not just running ones), `--json` (emit a JSON array instead of the table). The flags compose (`ps --all --json`). Each JSON object has the fields `name`, `tool`, `projectDir` (absolute, resolved project path), `projectHash`, `worktree`, `status`, `createdAt` (RFC 3339, empty if unknown), `sessionName`, `background`, and `ports` (array of `{containerPort, hostPort, hostIP, protocol}` bindings).
 
+`--backend` selects one engine for `ps`, `status`, `stop`, `attach`, and `exec` without changing the saved backend. For example, after `enclave run --backend podman`, use `enclave ps --backend podman` to find that session and `enclave attach --backend podman <name>` to attach. `ps` does not merge sessions from multiple engines.
+
 `status` reports sessions of the current project (like `exec` without `--name`); `--all` widens it to every project. Flags: `--tool` and `--name` filter sessions; `--json` emits one machine-readable snapshot object per session (screen text and OSC title for external state detection). Each snapshot captures the trailing 24 screen rows. See [Session status snapshots](session-status.md).
 
 `enclave attach` flags: `--detach-keys <sequence>` overrides the key sequence for detaching from the session (default `ctrl-\`); `--tool` disambiguates a session name used by more than one tool.
@@ -181,7 +183,7 @@ Mutation commands (`add-domain`, `remove-domain`, `set-mode`) apply the new poli
 
 | Command | Description |
 |---------|-------------|
-| `enclave update [tool...]` | Rebuild tool image(s) with the latest agent CLI, then exit (no session). Defaults to the selected tool; accepts the same build flags as a run. |
+| `enclave update [tool...]` | Rebuild tool image(s) with the latest agent CLI, then exit (no session). Defaults to the selected tool; accepts the same build flags as a run and `--backend` to select the engine for the image. |
 
 ### Cleanup
 
@@ -209,7 +211,7 @@ store that holds memory; the other `--keep` kinds do not apply there. See
 | Flag | Description |
 |------|-------------|
 | `--tool <tool>` | Tool profile to use (asked once on the first interactive session, then the saved choice; run `enclave tools` for the installed list) |
-| `--backend <backend>` | Isolation backend: `auto` (default: docker or podman, whichever is installed), `docker`, `podman`, or experimental `qemu` |
+| `--backend <backend>` | Isolation backend: `auto` (default: docker or podman, whichever is installed), `docker`, `podman`, or experimental `qemu`. Also accepted by engine-using management commands; affects only this invocation. |
 | `--name <name>` | Named persistent session |
 | `--background` | Detached background session |
 | `-p <port>` | Publish a container port to the host (container → host, e.g. `-p 3002`). A host port of `0` (e.g. `-p 0:3000`) lets the daemon pick a free host port (Docker only); read it back with `enclave ps --json`. |
@@ -310,7 +312,7 @@ The default backend is `auto`: enclave uses docker when its CLI is on `PATH`, ot
 
 Rootless podman without idmapped-mount support has to copy an image into a layer for the keep-id mapping the first time that image starts, and again after every image rebuild. enclave triggers this copy before the gateway starts and prints a notice when it takes longer than two seconds; for multi-gigabyte tool images it takes minutes, during which podman blocks every other podman command, including `enclave ps`.
 
-`--backend` is a session flag; commands without it (`ps`, `stop`, `attach`, `status`, `cleanup`, `network`) resolve the backend the same way, from the `backend` key in `config.json` or by detection, so a saved or detected `podman` applies to them too. `cleanup --build-cache` reports nothing to reclaim under podman, which keeps no separate build cache.
+Commands that use an engine accept `--backend`, including session management, `update`, `theia`/`theia-next`, `info`, `cleanup`, `auth import`/`export`, `img import`, and the engine-using `network` subcommands (`status`, `log`, `apply`, and policy mutations). Without the flag they use the configured backend or detection. Engine-independent commands such as `network print` and `network diff` do not accept it; `config` accepts it to preview option resolution. `cleanup --build-cache` reports nothing to reclaim under podman, which keeps no separate build cache.
 
 ## Experimental QEMU backend
 

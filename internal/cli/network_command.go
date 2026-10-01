@@ -50,7 +50,7 @@ func networkApplyCommand(res *Result) *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&allRunning, "all-running", false, "Target all running gateways on the host")
-	addOptionFlagsByName(cmd.Flags(), &res.Options, &res.Sources, "tool")
+	addOptionFlagsByName(cmd.Flags(), &res.Options, &res.Sources, "backend", "tool")
 	return cmd
 }
 
@@ -71,7 +71,9 @@ func networkQueryCommand(name string, short string, action string, res *Result) 
 }
 
 func networkStatusCommand(res *Result) *cobra.Command {
-	return networkQueryCommand("status", "Show effective network policy status", "network-status", res)
+	cmd := networkQueryCommand("status", "Show effective network policy status", "network-status", res)
+	addOptionFlagsByName(cmd.Flags(), &res.Options, &res.Sources, "backend")
+	return cmd
 }
 
 func networkPrintCommand(res *Result) *cobra.Command {
@@ -111,7 +113,7 @@ func networkScopedMutationCommand(name string, short string, action string, nArg
 		},
 	}
 	registerNetworkMutationFlags(cmd, &global, &project, &noApply, &allRunning)
-	addOptionFlagsByName(cmd.Flags(), &res.Options, &res.Sources, "tool")
+	addOptionFlagsByName(cmd.Flags(), &res.Options, &res.Sources, "backend", "tool")
 	return cmd
 }
 

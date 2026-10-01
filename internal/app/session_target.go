@@ -300,7 +300,7 @@ func sessionsMatchingName(sessions []backend.Session, requested string) []backen
 	return matches
 }
 
-// sessionNameFilter returns the `--name` value of a listing or stop command.
+// sessionNameFilter returns the `--name` value of a listing, stop or exec command.
 // given separates an omitted flag from an explicitly blank one: the latter has
 // to match nothing rather than everything. The value is passed through raw,
 // since matching sanitizes it together with the recorded session names.

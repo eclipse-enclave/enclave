@@ -116,8 +116,9 @@ The tint is skipped when stdout is not a terminal and when `NO_COLOR` or
 `ENCLAVE_COLOR=never` is set; `ENCLAVE_COLOR=always` does not enable it, as the
 config key is the only switch. Because per-tool and per-project config layers
 apply, `tool_overrides.<tool>.session_tint` gives each tool its own color and a
-project config gives each project one; `attach` resolves the color for the tool
-and project of the session it attaches to, not for the current directory.
+project config gives each project one; `attach` and `exec --name` resolve the
+color for the tool and project of the session they enter, not for the current
+directory.
 Agents that paint their own background can cover the tint.
 
 The reset restores the terminal's configured default background, not whatever

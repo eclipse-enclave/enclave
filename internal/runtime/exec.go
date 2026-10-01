@@ -16,10 +16,23 @@ import (
 	"enclave/internal/termtint"
 )
 
-func (r *Runtime) Exec() error {
-	containerName, err := r.resolveExecTarget()
-	if err != nil {
-		return err
+// ExecTarget is the session that `exec --name` resolved to, with the session
+// tint of its tool and project. The zero value selects the running session of
+// this tool and project.
+type ExecTarget struct {
+	Name        string
+	SessionTint string
+}
+
+func (r *Runtime) Exec(target ExecTarget) error {
+	containerName, sessionTint := target.Name, target.SessionTint
+	if containerName == "" {
+		var err error
+		containerName, err = r.resolveExecTarget()
+		if err != nil {
+			return err
+		}
+		sessionTint = r.run.SessionTint
 	}
 	if err := r.ensureRunning(containerName); err != nil {
 		return err
@@ -45,21 +58,16 @@ func (r *Runtime) Exec() error {
 	}
 	// An exec occupies the terminal with an interactive TTY into the session, so
 	// it is marked like a session that owns the terminal from the start.
-	restoreTint := termtint.Begin(r.run.SessionTint)
+	restoreTint := termtint.Begin(sessionTint)
 	defer restoreTint()
 	// The backend syncs session credentials after the exec completes, deriving
 	// the involved stores from the running container.
 	return execer.Exec(context.Background(), backend.SessionRef{Name: containerName}, backend.ExecRequest{Argv: cmdArgs, User: user, TTY: true}, backend.AttachIO{})
 }
 
-// resolveExecTarget determines which container to attach to.
-// If --name is set, construct the container name directly.
-// Otherwise, find running containers for this tool+project and auto-select
-// if exactly one exists.
+// resolveExecTarget finds the running containers for this tool and project
+// and auto-selects one if it is unambiguous.
 func (r *Runtime) resolveExecTarget() (string, error) {
-	if r.run.SessionName != "" {
-		return r.containerName(), nil
-	}
 	if r.backend == nil {
 		return "", fmt.Errorf("runtime backend is not configured")
 	}

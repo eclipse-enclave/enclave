@@ -8,6 +8,7 @@
 package runtime
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -106,5 +107,42 @@ func TestResolveExecTargetSkipsGatewaySidecars(t *testing.T) {
 	}
 	if want := "enclave-claude-abc123-2"; got != want {
 		t.Fatalf("resolveExecTarget() = %q, want %q", got, want)
+	}
+}
+
+// execRecordingBackend records the session an exec was sent to.
+type execRecordingBackend struct {
+	*fakeBackend
+	execRef  backend.SessionRef
+	execArgv []string
+}
+
+func (b *execRecordingBackend) Exec(_ context.Context, ref backend.SessionRef, req backend.ExecRequest, _ backend.AttachIO) error {
+	b.execRef = ref
+	b.execArgv = req.Argv
+	return nil
+}
+
+func TestExecUsesResolvedTargetVerbatim(t *testing.T) {
+	target := "enclave-codex-def456-review"
+	be := &execRecordingBackend{fakeBackend: &fakeBackend{sessions: []backend.Session{
+		{Ref: backend.SessionRef{Name: target}, Tool: "codex"},
+	}}}
+	r := &Runtime{
+		project: model.Project{Name: "home", Hash: "abc123"},
+		profile: model.Profile{Name: "claude"},
+		// SessionName holds the raw --name value; the resolved target wins.
+		run:     model.RunOptions{SessionName: "review", CmdArgs: []string{"true"}},
+		backend: be,
+	}
+
+	if err := r.Exec(ExecTarget{Name: target}); err != nil {
+		t.Fatalf("Exec() returned error: %v", err)
+	}
+	if be.execRef.Name != target {
+		t.Fatalf("exec sent to %q, want %q", be.execRef.Name, target)
+	}
+	if len(be.execArgv) != 1 || be.execArgv[0] != "true" {
+		t.Fatalf("exec argv = %v, want [true]", be.execArgv)
 	}
 }

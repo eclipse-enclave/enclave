@@ -9,6 +9,7 @@ package docker
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -197,6 +198,7 @@ func TestSessionFromSummaryProjectDir(t *testing.T) {
 }
 
 func TestPrepareRunAppliesRuntimeUIDRemapEnvAfterDevcontainerEnv(t *testing.T) {
+	installFakeDocker(t)
 	b := newDevcontainerBackend(t.TempDir(),
 		"--env", model.EnvRuntimeUID+"=9999",
 		"--env", model.EnvRuntimeGID+"=9999",
@@ -224,6 +226,9 @@ func TestPrepareRunAppliesRuntimeUIDRemapEnvAfterDevcontainerEnv(t *testing.T) {
 	if err != nil {
 		t.Fatalf("prepareRun() error = %v", err)
 	}
+	if got, want := spec.hostConfig.NetworkMode, dockercmd.NetworkMode(sessionNetworkName(req.Session.Name)); got != want {
+		t.Fatalf("NetworkMode = %q, want %q", got, want)
+	}
 
 	for key, want := range map[string]string{
 		model.EnvRuntimeUID: "2000",
@@ -238,6 +243,7 @@ func TestPrepareRunAppliesRuntimeUIDRemapEnvAfterDevcontainerEnv(t *testing.T) {
 }
 
 func TestPrepareRunSkipsDevcontainerRunArgsForDetachedRequests(t *testing.T) {
+	installFakeDocker(t)
 	b := newDevcontainerBackend(t.TempDir(), "--env", "DEVCONTAINER_ONLY=1", "--hostname", "devhost")
 	req := backend.Request{
 		Session: backend.SessionMeta{
@@ -262,6 +268,92 @@ func TestPrepareRunSkipsDevcontainerRunArgsForDetachedRequests(t *testing.T) {
 	if got := spec.config.Hostname; got == "devhost" {
 		t.Fatalf("detached run should not apply devcontainer hostname, got %q", got)
 	}
+}
+
+func TestPrepareRunReadsDockerInfoOnce(t *testing.T) {
+	logPath := installFakeDocker(t)
+	req := backend.Request{
+		Session: backend.SessionMeta{
+			Tool:        "codex",
+			ProjectHash: "abc123abc123",
+			Name:        "enclave-codex-abc123abc123-main",
+		},
+		Image:   "enclave-test:latest",
+		Network: backend.NetworkPolicy{Mode: backend.NetworkModeUnrestricted},
+	}
+	if _, err := New(Options{}).prepareRun(context.Background(), req); err != nil {
+		t.Fatalf("prepareRun() error = %v", err)
+	}
+	infoCalls := 0
+	for _, arg := range readFakeDockerArgs(t, logPath) {
+		if arg == "info" {
+			infoCalls++
+		}
+	}
+	if infoCalls != 1 {
+		t.Fatalf("docker info calls = %d, want 1", infoCalls)
+	}
+}
+
+func TestPrepareRunReportsDockerInfoError(t *testing.T) {
+	restoreNetworkGlobals(t)
+	previous := dockercmd.Binary()
+	dockercmd.SetBinary("podman")
+	t.Cleanup(func() { dockercmd.SetBinary(previous) })
+	dockerInfo = func(context.Context) (dockercmd.SystemInfo, error) {
+		return dockercmd.SystemInfo{}, errors.New("decode podman info: unexpected shape")
+	}
+
+	_, err := New(Options{}).prepareRun(context.Background(), backend.Request{
+		Session: backend.SessionMeta{Tool: "codex", ProjectHash: "abc123abc123", Name: "session"},
+		Image:   "enclave-test:latest",
+		Network: backend.NetworkPolicy{Mode: backend.NetworkModeUnrestricted},
+	})
+	if err == nil || !strings.Contains(err.Error(), "read podman info: decode podman info: unexpected shape") {
+		t.Fatalf("prepareRun() error = %v, want podman info failure", err)
+	}
+}
+
+func TestWarnInsecureDockerFirewall(t *testing.T) {
+	t.Run("surfaces relevant daemon warning", func(t *testing.T) {
+		out := captureStderr(t, func() {
+			warnInsecureDockerFirewall(dockercmd.SystemInfo{Warnings: []string{"WARNING: bridge-nf-call-iptables is disabled"}})
+		})
+		if !strings.Contains(out, "Docker daemon networking warning") || !strings.Contains(out, "bridge-nf-call-iptables") {
+			t.Fatalf("unexpected warning output: %q", out)
+		}
+	})
+
+	t.Run("surfaces IPv4 forwarding warning", func(t *testing.T) {
+		out := captureStderr(t, func() {
+			warnInsecureDockerFirewall(dockercmd.SystemInfo{Warnings: []string{"WARNING: IPv4 forwarding is disabled. Networking will not work."}})
+		})
+		if !strings.Contains(out, "IPv4 forwarding is disabled") {
+			t.Fatalf("unexpected warning output: %q", out)
+		}
+	})
+
+	t.Run("warns when new Linux daemon omits firewall backend", func(t *testing.T) {
+		out := captureStderr(t, func() {
+			warnInsecureDockerFirewall(dockercmd.SystemInfo{OSType: "linux", ServerVersion: "29.0.0"})
+		})
+		if !strings.Contains(out, "did not report an active firewall backend") {
+			t.Fatalf("unexpected warning output: %q", out)
+		}
+	})
+
+	t.Run("accepts reported firewall backend", func(t *testing.T) {
+		out := captureStderr(t, func() {
+			warnInsecureDockerFirewall(dockercmd.SystemInfo{
+				OSType:          "linux",
+				ServerVersion:   "29.0.0",
+				FirewallBackend: &dockercmd.FirewallInfo{},
+			})
+		})
+		if out != "" {
+			t.Fatalf("unexpected warning output: %q", out)
+		}
+	})
 }
 
 func TestStartRunsDetachedInteractiveContainer(t *testing.T) {
@@ -484,6 +576,165 @@ func TestRemoveReturnsFinalizeErrorBeforeRemovingContainer(t *testing.T) {
 	}
 }
 
+func TestRemoveTreatsMissingContainerAsIdempotentAndReapsNetwork(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		remove func(*Backend, context.Context, backend.SessionRef) error
+	}{
+		{name: "with finalize", remove: func(b *Backend, ctx context.Context, ref backend.SessionRef) error { return b.Remove(ctx, ref) }},
+		{name: "without finalize", remove: func(b *Backend, ctx context.Context, ref backend.SessionRef) error {
+			return b.RemoveWithoutFinalize(ctx, ref)
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			restoreNetworkGlobals(t)
+			dir := t.TempDir()
+			stub := filepath.Join(dir, "docker")
+			script := `#!/bin/sh
+printf '%s\n' 'Error response from daemon: No such container: session' >&2
+exit 1
+`
+			if err := os.WriteFile(stub, []byte(script), 0o700); err != nil {
+				t.Fatalf("write Docker stub: %v", err)
+			}
+			t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+			info := dockercmd.NetworkInspectResponse{
+				ID:   "network-id",
+				Name: sessionNetworkName("enclave-codex-abc123abc123-main"),
+				Labels: map[string]string{
+					model.NetworkLabelManaged:     "true",
+					model.NetworkLabelContainer:   "enclave-codex-abc123abc123-main",
+					model.NetworkLabelProjectHash: "abc123abc123",
+				},
+			}
+			networkInspect = func(context.Context, string) (dockercmd.NetworkInspectResponse, error) { return info, nil }
+			sessionRuntimeExists = func(context.Context, string) (bool, error) { return false, nil }
+			removedNetwork := ""
+			networkRemove = func(_ context.Context, ref string) error { removedNetwork = ref; return nil }
+
+			if err := tc.remove(New(Options{}), context.Background(), backend.SessionRef{Name: "enclave-codex-abc123abc123-main"}); err != nil {
+				t.Fatalf("remove missing session error = %v", err)
+			}
+			if removedNetwork != "network-id" {
+				t.Fatalf("removed network = %q, want network-id", removedNetwork)
+			}
+		})
+	}
+}
+
+func TestRemoveStopsGatewayByCapturedID(t *testing.T) {
+	restoreNetworkGlobals(t)
+	logPath := stubCLI(t, "docker", `case "$1" in
+container)
+	case "$5" in
+	enclave-codex-abc123abc123-main-gateway)
+		printf '%s\n' '{"Id":"gateway-id","Config":{"Labels":{"enclave.gateway":"true","enclave.gateway.container":"enclave-codex-abc123abc123-main","enclave.gateway.project_hash":"abc123abc123"}},"State":{"Status":"running","Running":true}}'
+		;;
+	*)
+		printf '%s\n' 'Error response from daemon: No such container: session' >&2
+		exit 1
+		;;
+	esac
+	;;
+esac
+exit 0
+`)
+	networkInspect = func(context.Context, string) (dockercmd.NetworkInspectResponse, error) {
+		return dockercmd.NetworkInspectResponse{}, errors.New("Error response from daemon: network enclave-codex-abc123abc123-main-net not found")
+	}
+
+	if err := New(Options{}).RemoveWithoutFinalize(context.Background(), backend.SessionRef{Name: "enclave-codex-abc123abc123-main"}); err != nil {
+		t.Fatalf("RemoveWithoutFinalize() error = %v", err)
+	}
+	calls := stubCalls(t, logPath)
+	if !hasCallWithPrefix(calls, "stop --time 3 gateway-id") {
+		t.Fatalf("gateway must be stopped by its captured ID, got %v", calls)
+	}
+	for _, call := range calls {
+		if strings.HasPrefix(call, "stop ") && strings.HasSuffix(call, "enclave-codex-abc123abc123-main-gateway") {
+			t.Fatalf("gateway stopped by mutable name: %s", call)
+		}
+	}
+}
+
+func TestRemoveSessionContainerControlsAnonymousVolumeRemoval(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		removeVolumes bool
+		wantCall      string
+	}{
+		{name: "keep volumes", wantCall: "rm --force session"},
+		{name: "remove volumes", removeVolumes: true, wantCall: "rm --force --volumes session"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			restoreNetworkGlobals(t)
+			logPath := stubCLI(t, "docker", `case "$1" in
+container)
+		printf '%s\n' 'Error response from daemon: No such container: session-gateway' >&2
+		exit 1
+		;;
+esac
+exit 0
+`)
+			networkInspect = func(context.Context, string) (dockercmd.NetworkInspectResponse, error) {
+				return dockercmd.NetworkInspectResponse{}, errors.New("Error response from daemon: network session-net not found")
+			}
+
+			if err := RemoveSessionContainer(context.Background(), "session", tc.removeVolumes); err != nil {
+				t.Fatalf("RemoveSessionContainer() error = %v", err)
+			}
+			if calls := stubCalls(t, logPath); !hasCallWithPrefix(calls, tc.wantCall) {
+				t.Fatalf("calls = %v, want %q", calls, tc.wantCall)
+			}
+		})
+	}
+}
+
+func TestRemoveFailureKeepsGatewayAndNetwork(t *testing.T) {
+	restoreNetworkGlobals(t)
+	logPath := stubCLI(t, "docker", `case "$1" in
+container)
+	case "$5" in
+	session) printf '%s\n' '{"Id":"session-id","Config":{"Labels":{"enclave.hash":"project"}}}' ;;
+	session-gateway) printf '%s\n' '{"Id":"gateway-id","Config":{"Labels":{"enclave.gateway":"true","enclave.gateway.container":"session","enclave.gateway.project_hash":"project"}}}' ;;
+	esac
+	;;
+rm)
+	printf '%s\n' 'Error response from daemon: cannot remove container session: permission denied' >&2
+	exit 1
+	;;
+esac
+exit 0
+`)
+	networkInspect = func(context.Context, string) (dockercmd.NetworkInspectResponse, error) {
+		return dockercmd.NetworkInspectResponse{
+			ID:   "network-id",
+			Name: sessionNetworkName("session"),
+			Labels: map[string]string{
+				model.NetworkLabelManaged:     "true",
+				model.NetworkLabelContainer:   "session",
+				model.NetworkLabelProjectHash: "project",
+			},
+		}, nil
+	}
+	sessionRuntimeExists = func(context.Context, string) (bool, error) { return false, nil }
+	networkRemove = func(context.Context, string) error {
+		t.Fatal("network removed although the session container removal failed")
+		return nil
+	}
+
+	err := New(Options{}).RemoveWithoutFinalize(context.Background(), backend.SessionRef{Name: "session"})
+	if err == nil || !strings.Contains(err.Error(), "permission denied") {
+		t.Fatalf("expected the removal error to surface, got %v", err)
+	}
+	for _, call := range stubCalls(t, logPath) {
+		if strings.HasPrefix(call, "stop ") || (strings.HasPrefix(call, "rm ") && strings.Contains(call, "session-gateway")) {
+			t.Fatalf("gateway touched after a failed container removal: %s", call)
+		}
+	}
+}
+
 func filterPairsEqual(a [][2]string, b [][2]string) bool {
 	if len(a) != len(b) {
 		return false
@@ -547,5 +798,64 @@ func TestExecPreservesExitStatus(t *testing.T) {
 	}
 	if exitErr.Code != 7 {
 		t.Fatalf("Exec exit code = %d, want 7", exitErr.Code)
+	}
+}
+
+func TestRemoveSessionContainerChecksResourceProjectAndOwner(t *testing.T) {
+	for _, tc := range []struct {
+		name, owner, hash string
+		wantCleanup       bool
+	}{
+		{name: "owned", owner: "session", hash: "project", wantCleanup: true},
+		{name: "foreign project", owner: "session", hash: "other"},
+		{name: "missing project", owner: "session"},
+		{name: "missing owner", hash: "project"},
+		{name: "foreign owner", owner: "other", hash: "project"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			restoreNetworkGlobals(t)
+			gatewayInfo := dockercmd.InspectResponse{
+				ID: "gateway-id",
+				Config: &dockercmd.ContainerConfig{Labels: map[string]string{
+					model.GatewayLabelManaged:     "true",
+					model.GatewayLabelContainer:   tc.owner,
+					model.GatewayLabelProjectHash: tc.hash,
+				}},
+			}
+			data, err := json.Marshal(gatewayInfo)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("STUB_GATEWAY_INSPECT", string(data))
+			logPath := stubCLI(t, "docker", `case "$1" in
+container)
+	case "$5" in
+	session-gateway) printf '%s\n' "$STUB_GATEWAY_INSPECT" ;;
+	session) printf '%s\n' '{"Id":"session-id","Config":{"Labels":{"enclave.hash":"project"}}}' ;;
+	esac
+	;;
+esac
+exit 0
+`)
+			info := dockercmd.NetworkInspectResponse{
+				ID: "network-id", Name: "session-net",
+				Labels: map[string]string{
+					model.NetworkLabelManaged:     "true",
+					model.NetworkLabelContainer:   tc.owner,
+					model.NetworkLabelProjectHash: tc.hash,
+				},
+			}
+			networkInspect = func(context.Context, string) (dockercmd.NetworkInspectResponse, error) { return info, nil }
+			sessionRuntimeExists = func(context.Context, string) (bool, error) { return false, nil }
+			removed := false
+			networkRemove = func(context.Context, string) error { removed = true; return nil }
+			if err := RemoveSessionContainer(context.Background(), "session", false); err != nil {
+				t.Fatal(err)
+			}
+			stopped := hasCallWithPrefix(stubCalls(t, logPath), "stop --time 3 gateway-id")
+			if removed != tc.wantCleanup || stopped != tc.wantCleanup {
+				t.Fatalf("network removed=%v, gateway stopped=%v; want %v", removed, stopped, tc.wantCleanup)
+			}
+		})
 	}
 }

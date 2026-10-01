@@ -39,6 +39,30 @@ an allowed IP is reachable on arbitrary ports and broad CDN allowlists increase
 tunneling surface. The privileged gateway has `NET_ADMIN`/`NET_RAW` and shares
 the tool's network namespace; a gateway vulnerability can weaken policy.
 
+Every Docker and podman session is enclosed in its own user-defined bridge
+network. In restricted mode the gateway is the network's attached endpoint and
+the tool shares its network namespace; in unrestricted mode the tool is
+attached directly. This prevents unrelated bridge networks and other Enclave
+sessions from routing directly to listeners in the session. Docker isolates
+user-defined bridges unconditionally; under podman netavark is required and the
+network is created with `isolate=strict`. A netavark too old for `strict` falls back to
+`isolate=true` with a warning, which leaves containers on non-isolated podman
+networks a route into the session. Published ports
+still have the reachability requested by their host binding. In particular,
+Docker Desktop's `host.docker.internal` route can let another container reach a
+port published on host loopback, so privileged services need their own
+per-session authentication. Enclave does not add authentication to arbitrary
+services published with `-p`.
+
+Bridge separation and loopback publishing depend on engine-managed firewall
+rules: Docker's on the host, netavark's inside the rootless network namespace
+under podman. A Docker daemon configured with `"iptables": false` or
+`"ip6tables": false` without equivalent replacement rules is outside the
+supported security posture; Docker documents that [disabling its firewall integration can expose
+bridge-container ports](https://docs.docker.com/engine/network/packet-filtering-firewalls/#prevent-docker-from-manipulating-firewall-rules).
+Enclave surfaces relevant `docker info` warnings when the daemon reports them.
+See [host hardening](host-hardening.md).
+
 The allowlist is destination policy, not content policy. It does not constrain
 URL paths, methods, request bodies, responses, or an upstream service's own
 proxy and relay features. An allowlisted API, package registry, or other service

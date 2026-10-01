@@ -125,6 +125,50 @@ func TestCoordinateGatewayImageBuildRechecksAfterWaiting(t *testing.T) {
 	}
 }
 
+func TestReconcileGatewayContainerRemovesOwnedTerminalOrphanByID(t *testing.T) {
+	dir := t.TempDir()
+	stub := filepath.Join(dir, "docker")
+	script := `#!/bin/sh
+if [ "$1" = "container" ] && [ "$2" = "inspect" ]; then
+  if [ "$5" = "session-gateway" ]; then
+    printf '%s\n' '{"Id":"gateway-id","Created":"2026-08-29T09:00:00Z","Config":{"Labels":{"enclave.gateway":"true","enclave.gateway.container":"session","enclave.gateway.project_hash":"project"}},"State":{"Status":"exited","Running":false}}'
+    exit 0
+  fi
+  printf '%s\n' 'Error response from daemon: No such container: session' >&2
+  exit 1
+fi
+exit 2
+`
+	if err := os.WriteFile(stub, []byte(script), 0o700); err != nil {
+		t.Fatalf("write Docker stub: %v", err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	origInspect := startContainerInspect
+	origRemove := startContainerRemove
+	startContainerInspect = docker.ContainerInspect
+	removed := ""
+	startContainerRemove = func(_ context.Context, ref string, force bool, volumes bool) error {
+		if !force || !volumes {
+			t.Fatalf("gateway removal force/volumes = %v/%v, want true/true", force, volumes)
+		}
+		removed = ref
+		return nil
+	}
+	t.Cleanup(func() {
+		startContainerInspect = origInspect
+		startContainerRemove = origRemove
+	})
+
+	result, err := ReconcileStale(context.Background(), "session", "project")
+	if err != nil {
+		t.Fatalf("ReconcileStale() error = %v", err)
+	}
+	if !result.Exists || !result.Owned || !result.Removed || removed != "gateway-id" {
+		t.Fatalf("unexpected reconciliation: result=%+v removed=%q", result, removed)
+	}
+}
+
 func TestGatewayLabelsHashWorkspaceIDBeforeProjectDir(t *testing.T) {
 	labels := gatewayLabels(StartConfig{
 		Profile:       model.Profile{Name: "codex"},
@@ -301,6 +345,7 @@ func TestValidateStartConfig(t *testing.T) {
 	if err := validateStartConfig(StartConfig{
 		GatewayConfigDir: gatewayDir,
 		TLSRootDir:       tlsRoot,
+		NetworkName:      "session-net",
 	}); err != nil {
 		t.Fatalf("validateStartConfig() error = %v", err)
 	}
@@ -308,20 +353,27 @@ func TestValidateStartConfig(t *testing.T) {
 		GatewayConfigDir: gatewayDir,
 		TLSRootDir:       tlsRoot,
 		NetworkLogMode:   model.NetworkLogRequests,
+		NetworkName:      "session-net",
 	}); err != nil {
 		t.Fatalf("validateStartConfig() with network log mode error = %v", err)
 	}
 
 	err := validateStartConfig(StartConfig{
 		GatewayConfigDir: filepath.Join(t.TempDir(), "missing"),
+		NetworkName:      "session-net",
 	})
 	if err == nil {
 		t.Fatal("expected missing gateway config dir to fail validation")
 	}
 
-	err = validateStartConfig(StartConfig{NetworkLogMode: "invalid"})
+	err = validateStartConfig(StartConfig{NetworkLogMode: "invalid", NetworkName: "session-net"})
 	if err == nil {
 		t.Fatal("expected invalid network log mode to fail validation")
+	}
+
+	err = validateStartConfig(StartConfig{})
+	if err == nil || !strings.Contains(err.Error(), "network name") {
+		t.Fatalf("expected missing network name error, got %v", err)
 	}
 }
 

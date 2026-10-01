@@ -38,6 +38,12 @@ const (
 	gatewayReadyPollInterval = 100 * time.Millisecond
 )
 
+var (
+	startContainerInspect = docker.ContainerInspect
+	startContainerRemove  = docker.ContainerRemove
+	startRunDetached      = docker.RunDetached
+)
+
 func calculateAllowlistHash(allowlistPath string, allowlistsDir string) (string, error) {
 	if _, err := os.Stat(allowlistPath); err != nil {
 		return "none", nil
@@ -350,6 +356,7 @@ type StartConfig struct {
 	NetworkLogMode    string
 	NetworkLogPath    string
 	GatewayConfigDir  string
+	NetworkName       string
 	PortBindings      docker.PortMap
 	ExposedPorts      docker.PortSet
 	LoopbackPorts     []string
@@ -384,12 +391,27 @@ func appendTLSCAMounts(mounts []docker.Mount, tlsRootDir string) []docker.Mount 
 // StartResult holds the output of a successful gateway start.
 type StartResult struct {
 	ContainerName string
+	ContainerID   string
 	TempFiles     []string
+}
+
+// StaleResult reports what ReconcileStale found for a session's gateway.
+type StaleResult struct {
+	// Exists is set when a container with the gateway name exists.
+	Exists bool
+	// Owned is set when that container carries this session's gateway labels.
+	Owned bool
+	// SessionExists is set when the session container itself exists; it is
+	// only checked for an owned gateway.
+	SessionExists bool
+	// Removed is set when the gateway was removed.
+	Removed bool
 }
 
 // Start builds the gateway image if needed, then runs the gateway sidecar and
 // waits for it to report readiness. Cancelling ctx aborts the start and
-// removes a sidecar that was already created.
+// removes a sidecar that was already created. The caller holds the
+// session-start lock until the session container is running.
 func Start(ctx context.Context, cfg StartConfig) (StartResult, error) {
 	var empty StartResult
 	if err := validateStartConfig(cfg); err != nil {
@@ -419,8 +441,15 @@ func Start(ctx context.Context, cfg StartConfig) (StartResult, error) {
 	}
 
 	gatewayContainer := ContainerName(cfg.ContainerName)
-	if err := docker.ContainerRemove(ctx, gatewayContainer, true, true); err != nil && !docker.IsNotFound(err) {
-		logx.Warnf("Failed to remove existing gateway container %s: %v", gatewayContainer, err)
+	reconciled, err := ReconcileStale(ctx, cfg.ContainerName, cfg.ProjectHash)
+	if err != nil {
+		return empty, fmt.Errorf("inspect existing gateway container %s: %w", gatewayContainer, err)
+	}
+	if reconciled.Exists && !reconciled.Removed {
+		if reconciled.Owned {
+			return empty, fmt.Errorf("gateway container %q is already running or starting for session %s; run 'enclave stop %s' and retry", gatewayContainer, cfg.ContainerName, cfg.ContainerName)
+		}
+		return empty, fmt.Errorf("gateway container %q already exists and is not owned by this enclave session", gatewayContainer)
 	}
 
 	if cfg.NetworkLogPath != "" {
@@ -495,6 +524,7 @@ func Start(ctx context.Context, cfg StartConfig) (StartResult, error) {
 	binds, remainingMounts := docker.SplitMountsForSELinux(mounts)
 	hostConfig := &docker.HostConfig{
 		AutoRemove:   true,
+		NetworkMode:  docker.NetworkMode(cfg.NetworkName),
 		CapAdd:       []string{"NET_ADMIN", "NET_RAW"},
 		Sysctls:      sysctls,
 		Binds:        binds,
@@ -504,12 +534,27 @@ func Start(ctx context.Context, cfg StartConfig) (StartResult, error) {
 		UserNS:       gatewayUserNS(),
 	}
 
-	if err := startGatewayContainer(ctx, config, hostConfig, gatewayContainer); err != nil {
+	containerID, err := startGatewayContainer(ctx, config, hostConfig, gatewayContainer)
+	if err != nil && docker.IsContainerNameConflict(err) {
+		reconciled, reconcileErr := ReconcileStale(ctx, cfg.ContainerName, cfg.ProjectHash)
+		if reconcileErr != nil {
+			return empty, fmt.Errorf("reconcile conflicting gateway container %s: %w", gatewayContainer, reconcileErr)
+		}
+		if reconciled.Removed || !reconciled.Exists {
+			// Removed here, or gone on its own (an auto-removing gateway
+			// finishing its exit): the name is free, run once more.
+			containerID, err = startGatewayContainer(ctx, config, hostConfig, gatewayContainer)
+		} else if reconciled.Exists && reconciled.Owned {
+			return empty, fmt.Errorf("gateway container %q is already running or starting for session %s; run 'enclave stop %s' and retry: %w", gatewayContainer, cfg.ContainerName, cfg.ContainerName, err)
+		}
+	}
+	if err != nil {
 		return empty, err
 	}
 
 	return StartResult{
 		ContainerName: gatewayContainer,
+		ContainerID:   containerID,
 	}, nil
 }
 
@@ -572,29 +617,126 @@ func gatewayUser() string {
 // A sidecar whose start does not complete is removed again: left running, it
 // keeps the session's published ports bound, and the next start of the same
 // session name fails its host-port checks before it reaches gateway startup.
-func startGatewayContainer(ctx context.Context, config *docker.ContainerConfig, hostConfig *docker.HostConfig, name string) error {
+func startGatewayContainer(ctx context.Context, config *docker.ContainerConfig, hostConfig *docker.HostConfig, name string) (string, error) {
 	startedAt := time.Now().UTC()
-	if _, err := docker.RunDetached(ctx, config, hostConfig, name); err != nil {
-		removeFailedGateway(ctx, name)
-		return fmt.Errorf("failed to start gateway container: %w", err)
+	containerID, err := startRunDetached(ctx, config, hostConfig, name)
+	if err != nil {
+		// A name conflict means the engine created nothing; the container
+		// holding the name belongs to someone else and must survive.
+		if !docker.IsContainerNameConflict(err) {
+			removeFailedGateway(ctx, name, containerID, config)
+		}
+		return "", fmt.Errorf("failed to start gateway container: %w", err)
 	}
 	if err := waitForGatewayReady(ctx, name, startedAt); err != nil {
-		removeFailedGateway(ctx, name)
-		return err
+		removeFailedGateway(ctx, name, containerID, config)
+		return "", err
 	}
-	return nil
+	return containerID, nil
 }
 
 // removeFailedGateway runs detached from ctx, which is already cancelled when
-// the start was interrupted.
-func removeFailedGateway(ctx context.Context, name string) {
-	err := docker.ContainerRemove(context.WithoutCancel(ctx), name, true, true)
+// the start was interrupted. It removes by container ID when the engine
+// reported one so a newer same-name gateway of a concurrent start survives.
+// Without an ID (podman prints none on a failed start, and a killed CLI may
+// not have printed Docker's) the name is inspected first, and only a container
+// that carries this session's gateway labels and is not running is removed, by
+// its inspected ID. A running container whose ID was not returned is left
+// for the next lock-protected startup to reconcile.
+func removeFailedGateway(ctx context.Context, name string, containerID string, config *docker.ContainerConfig) {
+	ctx = context.WithoutCancel(ctx)
+	removeRef := strings.TrimSpace(containerID)
+	if removeRef == "" {
+		removeRef = failedGatewayRemoveRef(ctx, name, config)
+		if removeRef == "" {
+			return
+		}
+	}
+	err := startContainerRemove(ctx, removeRef, true, true)
 	if err != nil && !docker.IsNotFound(err) {
 		logx.Warnf("Failed to remove gateway container %s after its start failed: %v", name, err)
 	}
 }
 
+// failedGatewayRemoveRef resolves the container holding name to the ID this
+// start may remove, or "" when nothing holds the name, the holder belongs to
+// another session, or it is running.
+func failedGatewayRemoveRef(ctx context.Context, name string, config *docker.ContainerConfig) string {
+	info, err := startContainerInspect(ctx, name)
+	if err != nil {
+		if !docker.IsNotFound(err) {
+			logx.Warnf("Failed to inspect gateway container %s after its start failed: %v", name, err)
+		}
+		return ""
+	}
+	var labels map[string]string
+	if config != nil {
+		labels = config.Labels
+	}
+	if !ContainerOwnedBy(info, labels[model.GatewayLabelContainer], labels[model.GatewayLabelProjectHash]) {
+		logx.Debugf("Leaving gateway container %s in place after a failed start: it does not belong to this session", name)
+		return ""
+	}
+	if info.State != nil && info.State.Running {
+		logx.Debugf("Leaving running gateway container %s in place after a failed start without its ID; the next start will reconcile it", name)
+		return ""
+	}
+	return strings.TrimSpace(info.ID)
+}
+
+// ReconcileStale removes an owned gateway when its session container is absent.
+// The caller must hold the session-start lock: it makes even a newly created
+// orphan safe to remove after an interrupted start. Removal uses the immutable
+// ID so a replacement with the same name survives.
+func ReconcileStale(ctx context.Context, containerName string, projectHash string) (StaleResult, error) {
+	name := ContainerName(containerName)
+	info, err := startContainerInspect(ctx, name)
+	if err != nil {
+		if docker.IsNotFound(err) {
+			return StaleResult{}, nil
+		}
+		return StaleResult{}, err
+	}
+	result := StaleResult{Exists: true, Owned: ContainerOwnedBy(info, containerName, projectHash)}
+	if !result.Owned {
+		return result, nil
+	}
+
+	_, err = startContainerInspect(ctx, containerName)
+	if err == nil {
+		result.SessionExists = true
+		return result, nil
+	}
+	if !docker.IsNotFound(err) {
+		return result, err
+	}
+
+	removeRef := strings.TrimSpace(info.ID)
+	if removeRef == "" {
+		return result, fmt.Errorf("gateway container %q has no inspect ID", name)
+	}
+	if err := startContainerRemove(ctx, removeRef, true, true); err != nil && !docker.IsNotFound(err) {
+		return result, err
+	}
+	result.Removed = true
+	return result, nil
+}
+
+// ContainerOwnedBy verifies the gateway labels against the expected session.
+func ContainerOwnedBy(info docker.InspectResponse, containerName string, projectHash string) bool {
+	if info.Config == nil {
+		return false
+	}
+	labels := info.Config.Labels
+	return strings.EqualFold(strings.TrimSpace(labels[model.GatewayLabelManaged]), "true") &&
+		strings.TrimSpace(labels[model.GatewayLabelContainer]) == strings.TrimSpace(containerName) &&
+		strings.TrimSpace(labels[model.GatewayLabelProjectHash]) == strings.TrimSpace(projectHash)
+}
+
 func validateStartConfig(cfg StartConfig) error {
+	if strings.TrimSpace(cfg.NetworkName) == "" {
+		return fmt.Errorf("gateway network name is empty")
+	}
 	if cfg.GatewayConfigDir != "" && !util.PathExists(cfg.GatewayConfigDir) {
 		return fmt.Errorf("gateway config dir does not exist: %s", cfg.GatewayConfigDir)
 	}
@@ -714,8 +856,13 @@ func ensureExistingGatewayImageWith(profile model.Profile, exists func(context.C
 	return fmt.Errorf("gateway image %q does not exist locally; rerun without --no-rebuild, pass --rebuild, or use --allow-all-network to bypass the gateway", image)
 }
 
-func Stop(containerName string) {
-	container := ContainerName(containerName)
+// StopContainer stops the exact gateway container returned by Start. Using
+// its immutable ID prevents delayed error cleanup from stopping a newer
+// same-name gateway created by a concurrent session start.
+func StopContainer(container string) {
+	if strings.TrimSpace(container) == "" {
+		return
+	}
 	timeout := 3 * time.Second
 	if err := docker.ContainerStop(context.Background(), container, &timeout); err != nil {
 		if docker.IsNotFound(err) {

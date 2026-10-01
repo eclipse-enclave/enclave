@@ -177,9 +177,59 @@ These two flags handle opposite directions of port forwarding:
 
 - **`--bridge-port <port>`** — Forwards a **host** port into the **container** (host → container). Use this when you have a service running on your host (e.g. an MCP server on port 9800) and the agent needs to reach it at `localhost:9800` from inside the container.
 
+## Per-session Docker networks
+
+Each Docker session gets its own labeled bridge network, in restricted and
+unrestricted modes. Normally only one network namespace is attached: the
+gateway for a restricted session, or the tool container for an unrestricted
+session. The bridge and subnet exist while the session container exists; a
+stopped background session keeps its network until `enclave stop`. Inspect them
+through structured output:
+
+```bash
+enclave ps --json
+# ... "network": {"name": "...", "subnet": "172.30.0.0/28"}
+```
+
+Docker 29 and newer allocate a small dynamic IPv4 prefix for each session. On
+older daemons, Docker's default allocation applies and the stock address pools
+can limit the number of concurrent networks. If pool allocation is exhausted,
+upgrade the daemon or configure Docker's `default-address-pools`.
+
+Under `--backend podman` the same networks require netavark and are created with
+`isolate=strict`, since netavark isolates bridge networks from each other only
+on request before podman 6. Podman's default pool hands out a `/24` per network
+and is not subject to the Docker pool limit. Published ports still bind
+`127.0.0.1` explicitly on both engines.
+
+A network that outlives its session (for example after a `kill -9` of the
+enclave process) is removed at the next session start, or by
+`enclave cleanup --ephemeral`, once it is an hour old and has no endpoints.
+
+Container-to-container access is not a compatibility contract. As an advanced,
+unsupported integration, `docker network connect <network-name> <peer-container>`
+can deliberately attach a peer to the network named in the `enclave ps --json`
+output. Enclave does not manage or authorize that peer, and the network cannot
+be removed until it disconnects.
+
+### Migrating from the default bridge
+
+- Podman hosts using CNI must switch to netavark before starting sessions.
+- On Linux Docker Engine, existing `docker0`-specific firewall rules for
+  `--bridge-port` and the IDE bridge no longer match. Replace them with rules
+  for each session's bridge and subnet; see [host service configuration](#linux-host-service-configuration).
+- Session startup now requires a successful `docker info` or `podman info`
+  query to select network options. Previously, failure of this query only
+  suppressed configuration warnings.
+
 ## Bridging Host Ports
 
-`--bridge-port` uses DNAT forwarding through the gateway sidecar to make host-side services accessible inside the container on `localhost`. This is the same mechanism used by the automatic IDE bridge, which discovers VS Code extension ports from `~/.claude/ide/*.lock` files.
+`--bridge-port` forwards host-side services into the container on `localhost`.
+Restricted sessions configure DNAT in the gateway sidecar, with a userspace
+proxy fallback when DNAT is unavailable. Unrestricted sessions run the
+userspace proxy in the tool container. The automatic IDE bridge follows the
+same placement and discovers VS Code extension ports from
+`~/.claude/ide/*.lock` files.
 
 ```bash
 enclave --bridge-port 9800                       # Single port
@@ -199,73 +249,55 @@ Explicit bridge ports are merged with any auto-discovered IDE ports and deduplic
 
 ### Linux: host service configuration
 
-On Linux with Docker Engine, bridged traffic reaches the host via the Docker bridge network (e.g. `docker0`), not the loopback interface. This has two implications:
+On Linux with Docker Engine, `host-gateway` resolves to the gateway address of
+Docker's default bridge (typically `172.17.0.1`), while traffic originates from
+the session's dedicated bridge interface and subnet. Consequently:
 
-1. **The host service must bind to the Docker bridge IP**, not `127.0.0.1`.
-2. **The host firewall must allow traffic** from the Docker bridge network.
+1. The host service must bind to the default-bridge gateway address, not
+   `127.0.0.1`.
+2. The host firewall must allow the session subnet on the session bridge
+   interface.
 
-This is not an issue on macOS or Windows where Docker Desktop routes `host.docker.internal` through its VM, transparently reaching host loopback services.
+Docker Desktop routes `host.docker.internal` through its VM and can reach host
+loopback services directly, so these Linux Engine steps do not apply there.
 
-#### Step 1: Find the Docker bridge IP
-
-```bash
-docker network inspect bridge --format '{{(index .IPAM.Config 0).Gateway}}'
-```
-
-This is typically `172.17.0.1`. Binding to this address keeps the service off external-facing interfaces while making it reachable from containers. Do **not** bind to `0.0.0.0` — that exposes the service on all network interfaces, including external ones.
-
-#### Step 2: Bind the host service
-
-Configure the host service to listen on the Docker bridge IP. For example, for an MCP server:
+Start the session first, then select its structured network entry. The network
+is ephemeral, so capture these values while the session is running:
 
 ```bash
-# Instead of binding to 127.0.0.1:
-my-mcp-server --host 127.0.0.1 --port 9800   # ✗ unreachable from container
-
-# Bind to the Docker bridge IP:
-my-mcp-server --host 172.17.0.1 --port 9800   # ✓ reachable from container
+SESSION_NAME=enclave-codex-abc123abc123-main
+SESSION_NETWORK=$(enclave ps --json | jq -r --arg name "$SESSION_NAME" '.[] | select(.name == $name) | .network.name')
+SESSION_SUBNET=$(enclave ps --json | jq -r --arg name "$SESSION_NAME" '.[] | select(.name == $name) | .network.subnet')
+NETWORK_ID=$(docker network inspect "$SESSION_NETWORK" --format '{{.Id}}')
+SESSION_INTERFACE="br-${NETWORK_ID:0:12}"
+HOST_GATEWAY=$(docker network inspect bridge --format '{{(index .IPAM.Config 0).Gateway}}')
 ```
 
-#### Step 3: Allow traffic through the firewall
-
-If the host runs a firewall (e.g. UFW), it will block traffic from containers by default. Container traffic arrives on the `docker0` interface, not `lo` (loopback), so the standard loopback-allow rule does not apply.
-
-**UFW** — open a specific port:
+Bind the service to `$HOST_GATEWAY`; do not use `0.0.0.0`, which also exposes
+it on external-facing interfaces:
 
 ```bash
-SUBNET=$(docker network inspect bridge --format '{{(index .IPAM.Config 0).Subnet}}')
-GW=$(docker network inspect bridge --format '{{(index .IPAM.Config 0).Gateway}}')
-
-# Allow container traffic to a specific port
-sudo ufw allow in on docker0 from "$SUBNET" to "$GW" port 9800 proto tcp
-
-# Remove the rule when no longer needed
-sudo ufw delete allow in on docker0 from "$SUBNET" to "$GW" port 9800 proto tcp
+my-mcp-server --host "$HOST_GATEWAY" --port 9800
 ```
 
-Rules take effect immediately — no restart required. To list current rules:
+If a host firewall blocks the traffic, allow only the session source and
+destination. For UFW:
 
 ```bash
-sudo ufw status numbered
+sudo ufw allow in on "$SESSION_INTERFACE" from "$SESSION_SUBNET" to "$HOST_GATEWAY" port 9800 proto tcp
+
+# Remove the rule when the bridge is no longer needed.
+sudo ufw delete allow in on "$SESSION_INTERFACE" from "$SESSION_SUBNET" to "$HOST_GATEWAY" port 9800 proto tcp
 ```
 
-**Other firewalls** — the equivalent rule allows TCP traffic on the `docker0` interface from the Docker bridge subnet (typically `172.17.0.0/16`) to the gateway IP (typically `172.17.0.1`) on the target port.
+Both the interface and subnet change with each session, so recreate this UFW
+rule after every start. A stable rule requires a broader policy: configure a
+known Docker `default-address-pools` range, then use iptables or nftables to
+match the `br-` interface prefix and that source range. Such a rule also
+admits non-Enclave Docker bridges allocated from the range; use the per-session
+rule when those containers are not equally trusted.
 
-#### Putting it all together
-
-```bash
-# 1. Determine the Docker bridge IP
-BRIDGE_IP=$(docker network inspect bridge --format '{{(index .IPAM.Config 0).Gateway}}')
-
-# 2. Start the host service on the bridge IP
-my-mcp-server --host "$BRIDGE_IP" --port 9800 &
-
-# 3. Open the firewall (UFW example)
-SUBNET=$(docker network inspect bridge --format '{{(index .IPAM.Config 0).Subnet}}')
-sudo ufw allow in on docker0 from "$SUBNET" to "$BRIDGE_IP" port 9800 proto tcp
-
-# 4. Start enclave with the bridge port
-enclave --bridge-port 9800
-
-# Inside the container, the service is reachable at localhost:9800
-```
+The equivalent rule for another firewall permits the session subnet on the
+session bridge interface to reach only the default-bridge gateway and required
+TCP port. Inside the session, the service remains available at
+`localhost:9800` through the DNAT bridge.

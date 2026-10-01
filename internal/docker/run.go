@@ -189,14 +189,34 @@ func waitForContainerRunning(ctx context.Context, name string, waitCh <-chan err
 	}
 }
 
-// RunDetached starts a container in the background and returns its ID.
+// RunDetached starts a container in the background and returns its ID. When
+// the run fails after the container was created, the ID the engine printed is
+// returned alongside the error so the caller can remove exactly that
+// container: Docker prints it before attempting the start, podman prints
+// nothing on failure.
 func RunDetached(ctx context.Context, config *ContainerConfig, hostConfig *HostConfig, name string) (string, error) {
 	args := buildRunArgs(config, hostConfig, name, runMode{Detach: true})
-	id, err := capture(ctx, args...)
+	out, err := capture(ctx, args...)
 	if err != nil {
-		return "", err
+		return containerIDFromRunOutput(out), err
 	}
-	return id, nil
+	return out, nil
+}
+
+// fullContainerIDLength is the length of the untruncated hexadecimal ID both
+// engines print for a created container.
+const fullContainerIDLength = 64
+
+// containerIDFromRunOutput returns the container ID a failed `docker run`
+// printed, or "" when its output is not one complete engine ID: partial or
+// unexpected output must not become a removal target.
+func containerIDFromRunOutput(out string) string {
+	line, _, _ := strings.Cut(strings.TrimSpace(out), "\n")
+	line = strings.TrimSpace(line)
+	if len(line) != fullContainerIDLength || strings.TrimLeft(line, "0123456789abcdef") != "" {
+		return ""
+	}
+	return line
 }
 
 // RunDetachedInteractive starts a detached container with stdin open and a TTY,

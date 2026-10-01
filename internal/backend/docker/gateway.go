@@ -17,7 +17,6 @@ import (
 
 	"enclave/internal/backend"
 	"enclave/internal/config"
-	dockercmd "enclave/internal/docker"
 	"enclave/internal/gateway"
 	"enclave/internal/gateway/bundle"
 	"enclave/internal/logx"
@@ -25,7 +24,7 @@ import (
 	"enclave/internal/network"
 )
 
-func (b *Backend) startGateway(ctx context.Context, req backend.Request) (string, func(), error) {
+func (b *Backend) startGateway(ctx context.Context, req backend.Request, networkName string) (string, func(), error) {
 	gatewayConfigDir := config.HostProjectGatewayConfigDir(b.opts.Host.Home, req.Session.ProjectHash, req.Session.Tool)
 	policy := network.EffectivePolicy{
 		Mode:          model.NetworkModeRestricted,
@@ -57,6 +56,7 @@ func (b *Backend) startGateway(ctx context.Context, req backend.Request) (string
 		NetworkLogMode:    b.opts.NetworkLogMode,
 		NetworkLogPath:    config.HostProjectNetworkLogPath(b.opts.Host.Home, req.Session.ProjectHash, req.Session.Tool),
 		GatewayConfigDir:  gatewayConfigDir,
+		NetworkName:       networkName,
 		PortBindings:      portMap(req.Ports),
 		ExposedPorts:      portSet(req.Ports),
 		LoopbackPorts:     append([]string(nil), req.Network.LoopbackPorts...),
@@ -75,7 +75,11 @@ func (b *Backend) startGateway(ctx context.Context, req backend.Request) (string
 	}
 	tempFiles = append(tempFiles, result.TempFiles...)
 	cleanup := func() {
-		gateway.Stop(req.Session.Name)
+		gatewayRef := result.ContainerID
+		if strings.TrimSpace(gatewayRef) == "" {
+			gatewayRef = result.ContainerName
+		}
+		gateway.StopContainer(gatewayRef)
 		cleanupFiles(tempFiles)
 	}
 	return result.ContainerName, cleanup, nil
@@ -84,28 +88,16 @@ func (b *Backend) startGateway(ctx context.Context, req backend.Request) (string
 // RemoveStaleGateway removes the gateway sidecar of a session whose container
 // does not exist. A start interrupted between gateway readiness and container
 // creation leaves the sidecar running with the session's ports published,
-// which would fail the next start's host-port checks; gateway.Start would
-// replace the sidecar anyway, so removing it early loses nothing.
-func (b *Backend) RemoveStaleGateway(ctx context.Context, name string) error {
-	gatewayName := gateway.ContainerName(name)
-	if _, err := dockercmd.ContainerInspect(ctx, name); err == nil {
-		return nil
-	} else if !dockercmd.IsNotFound(err) {
-		return err
-	}
-	inspect, err := dockercmd.ContainerInspect(ctx, gatewayName)
+// which would fail the next start's host-port checks. The caller holds the
+// session-start lock, so an owned orphan can be removed without a grace period.
+func (b *Backend) RemoveStaleGateway(ctx context.Context, name string, projectHash string) error {
+	result, err := gateway.ReconcileStale(ctx, name, projectHash)
 	if err != nil {
-		if dockercmd.IsNotFound(err) {
-			return nil
-		}
 		return err
 	}
-	if inspect.Config == nil || inspect.Config.Labels[model.GatewayLabelManaged] != "true" {
-		return nil
-	}
-	logx.Warnf("Removing stale gateway container %s left behind by an interrupted start", gatewayName)
-	if err := dockercmd.ContainerRemove(ctx, gatewayName, true, true); err != nil && !dockercmd.IsNotFound(err) {
-		return err
+	gatewayName := gateway.ContainerName(name)
+	if result.Removed {
+		logx.Warnf("Removed stale gateway container %s left behind by an interrupted start", gatewayName)
 	}
 	return nil
 }

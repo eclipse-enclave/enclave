@@ -177,6 +177,7 @@ func (b *Backend) List(ctx context.Context, filter backend.SessionFilter) ([]bac
 		}
 	}
 	fillGatewayPorts(ctx, sessions)
+	fillSessionNetworks(ctx, sessions)
 	return sessions, nil
 }
 
@@ -211,6 +212,7 @@ func (b *Backend) Inspect(ctx context.Context, ref backend.SessionRef) (*backend
 	}
 	sessions := []backend.Session{session}
 	fillGatewayPorts(ctx, sessions)
+	fillSessionNetwork(ctx, &sessions[0])
 	return &sessions[0], nil
 }
 
@@ -243,22 +245,70 @@ func (b *Backend) Remove(ctx context.Context, ref backend.SessionRef) error {
 	if err := b.finalizeManagedContainerAuth(ctx, name); err != nil {
 		return fmt.Errorf("finalize auth before removing container %s: %w", name, err)
 	}
-	return removeSessionContainer(ctx, name)
+	return RemoveSessionContainer(ctx, name, false)
 }
 
 func (b *Backend) RemoveWithoutFinalize(ctx context.Context, ref backend.SessionRef) error {
-	return removeSessionContainer(ctx, sessionRefName(ref))
+	return RemoveSessionContainer(ctx, sessionRefName(ref), false)
 }
 
-// removeSessionContainer removes the session container and then tears down
-// its gateway. The gateway must go second: podman refuses to remove a
-// container whose network namespace another container still joins, even an
-// exited one, so stopping the auto-removing gateway first would leave it
-// behind as an exited container.
-func removeSessionContainer(ctx context.Context, name string) error {
-	err := dockercmd.ContainerRemove(ctx, name, true, false)
-	gateway.Stop(name)
-	return err
+// RemoveSessionContainer removes the session container and then tears down
+// its gateway and per-session network. removeVolumes also removes anonymous
+// volumes declared by its image. A missing container counts as removed.
+// The gateway must go second: podman refuses to remove a container whose
+// network namespace another container still joins, even an exited one, so
+// stopping the auto-removing gateway first would leave it behind as an exited
+// container. Gateway and network are captured before the removal, the
+// gateway by immutable ID: once the container is gone, a concurrent start of
+// the same name may already have created a replacement gateway under the
+// name. A removal that fails for any other reason leaves gateway and network
+// alone: the session may still be running on them.
+func RemoveSessionContainer(ctx context.Context, name string, removeVolumes bool) error {
+	projectHash := captureSessionProjectHash(ctx, name)
+	network, hasNetwork := captureSessionNetworkRef(ctx, name, projectHash)
+	gatewayID := captureOwnedGatewayID(ctx, name, projectHash)
+	if err := dockercmd.ContainerRemove(ctx, name, true, removeVolumes); err != nil && !dockercmd.IsNotFound(err) {
+		return err
+	}
+	gateway.StopContainer(gatewayID)
+	if hasNetwork {
+		cleanupSessionNetwork(network)
+	}
+	return nil
+}
+
+// Use the session's metadata, not the resource being removed, to establish
+// ownership. The canonical name also identifies an already-removed session.
+func captureSessionProjectHash(ctx context.Context, name string) string {
+	info, err := dockercmd.ContainerInspect(ctx, name)
+	if err == nil && info.Config != nil {
+		return strings.TrimSpace(info.Config.Labels[model.LabelHash])
+	}
+	if !dockercmd.IsNotFound(err) {
+		return ""
+	}
+	_, hash, _, _ := dockercmd.ParseManagedName(name)
+	return hash
+}
+
+// captureOwnedGatewayID returns the immutable ID of the session's managed
+// gateway sidecar, or "" when there is none.
+func captureOwnedGatewayID(ctx context.Context, name string, projectHash string) string {
+	if projectHash == "" {
+		return ""
+	}
+	gatewayName := gateway.ContainerName(name)
+	info, err := dockercmd.ContainerInspect(ctx, gatewayName)
+	if err != nil {
+		if !dockercmd.IsNotFound(err) {
+			logx.Debugf("Failed to capture gateway container %s before teardown: %v", gatewayName, err)
+		}
+		return ""
+	}
+	if !gateway.ContainerOwnedBy(info, name, projectHash) {
+		return ""
+	}
+	return strings.TrimSpace(info.ID)
 }
 
 var execInteractive = dockercmd.ExecInteractive
@@ -294,7 +344,12 @@ func (b *Backend) prepareRun(ctx context.Context, req backend.Request) (runSpec,
 	if err := backend.Validate(req, b.Capabilities()); err != nil {
 		return runSpec{}, err
 	}
-	b.warnInsecureDockerConfig(ctx)
+	dockerSystemInfo, err := dockerInfo(ctx)
+	if err != nil {
+		return runSpec{}, fmt.Errorf("read %s info: %w", dockercmd.Binary(), err)
+	}
+	warnInsecureDockerConfig(dockerSystemInfo)
+	b.gcSessionNetworks(ctx, time.Now().UTC())
 	spec := b.dockerConfig(req)
 	if !req.Detached && len(b.opts.DevcontainerRunArgs) > 0 {
 		var runtimeUIDRemapEnv []string
@@ -307,18 +362,30 @@ func (b *Backend) prepareRun(ctx context.Context, req backend.Request) (runSpec,
 	if err := b.prepareImageUserNamespace(ctx, req.Image); err != nil {
 		return runSpec{}, err
 	}
+	sessionNetwork, err := b.ensureSessionNetwork(ctx, req.Session, dockerSystemInfo)
+	if err != nil {
+		return runSpec{}, err
+	}
 	if req.Network.Mode == backend.NetworkModeRestricted {
-		gatewayName, cleanup, err := b.startGateway(ctx, req)
+		gatewayName, cleanup, err := b.startGateway(ctx, req, sessionNetwork.Name)
 		if err != nil {
+			cleanupSessionNetwork(sessionNetwork)
 			return runSpec{}, err
 		}
 		joinGatewayNamespaces(spec.hostConfig, gatewayName)
-		spec.cleanup = cleanup
+		spec.cleanup = func() {
+			cleanup()
+			cleanupSessionNetwork(sessionNetwork)
+		}
 	} else {
+		spec.hostConfig.NetworkMode = dockercmd.NetworkMode(sessionNetwork.Name)
 		spec.config.ExposedPorts = portSet(req.Ports)
 		spec.hostConfig.PortBindings = portMap(req.Ports)
 		if len(req.Network.IdeBridgePorts) > 0 {
 			spec.hostConfig.ExtraHosts = append(spec.hostConfig.ExtraHosts, "host.docker.internal:host-gateway")
+		}
+		spec.cleanup = func() {
+			cleanupSessionNetwork(sessionNetwork)
 		}
 	}
 	applySELinuxMounts(spec.hostConfig, util.IsSELinuxEnforcing())
@@ -755,21 +822,40 @@ func (b *Backend) ConfigStoreKeyInUse(ctx context.Context, meta backend.SessionM
 	return false, nil
 }
 
-func (b *Backend) warnInsecureDockerConfig(ctx context.Context) {
-	info, err := dockercmd.Info(ctx)
-	if err != nil {
-		logx.Debugf("Failed to read Docker info: %v", err)
-		return
-	}
+func warnInsecureDockerConfig(info dockercmd.SystemInfo) {
+	rootMapsToHost := true
 	for _, option := range info.SecurityOptions {
 		if strings.Contains(option, "name=rootless") {
-			return
+			rootMapsToHost = false
 		}
 		if strings.Contains(option, "name=userns") {
-			return
+			rootMapsToHost = false
 		}
 	}
-	logx.Warnf("%s is running without userns-remap or rootless mode; container root maps to host root. See docs/security/host-hardening.md.", util.TitleCase(dockercmd.Binary()))
+	if rootMapsToHost {
+		logx.Warnf("%s is running without userns-remap or rootless mode; container root maps to host root. See docs/security/host-hardening.md.", util.TitleCase(dockercmd.Binary()))
+	}
+	warnInsecureDockerFirewall(info)
+}
+
+// warnInsecureDockerFirewall surfaces daemon warnings that undermine bridge
+// isolation and loopback publishing. podman is skipped: its info carries no
+// daemon warnings or firewall backend, and netavark manages its own rules.
+func warnInsecureDockerFirewall(info dockercmd.SystemInfo) {
+	if dockercmd.IsPodman() {
+		return
+	}
+	for _, warning := range info.Warnings {
+		lower := strings.ToLower(warning)
+		if strings.Contains(lower, "iptables") || strings.Contains(lower, "ip6tables") ||
+			strings.Contains(lower, "firewall") || strings.Contains(lower, "forwarding") {
+			logx.Warnf("Docker daemon networking warning: %s", strings.TrimSpace(warning))
+		}
+	}
+	if strings.EqualFold(strings.TrimSpace(info.OSType), "linux") &&
+		dockerVersionAtLeast(info.ServerVersion, 29, 0) && info.FirewallBackend == nil {
+		logx.Warnf("Docker did not report an active firewall backend; per-session bridge isolation requires Docker-managed firewall rules. See docs/security/host-hardening.md.")
+	}
 }
 
 func exitStatus(err error) backend.ExitStatus {

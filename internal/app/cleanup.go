@@ -16,7 +16,9 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"time"
 
+	backenddocker "enclave/internal/backend/docker"
 	"enclave/internal/config"
 	"enclave/internal/docker"
 	"enclave/internal/logx"
@@ -131,11 +133,15 @@ func runCleanup(run model.RunOptions, cleanup model.CleanupOptions) int {
 		// worktree suffix.
 		storeDirs := resolveEphemeralStoreDirs(run, cleanup, home, project, scopes)
 		if cleanup.CleanupDryRun {
-			printEphemeralCleanupPlan(containerNames, storeDirs)
+			networkNames := pruneStaleSessionNetworks(run, cleanup, project, true)
+			printEphemeralCleanupPlan(containerNames, networkNames, storeDirs)
 			cleanupBuildCache(cleanup)
 			return 0
 		}
+		// Container removal takes each container's own network with it; the
+		// prune afterwards catches networks whose container was already gone.
 		cleanupContainers(containerNames)
+		pruneStaleSessionNetworks(run, cleanup, project, false)
 		cleanupDirs(storeDirs)
 		cleanupBuildCache(cleanup)
 		logx.Successf("Cleanup complete")
@@ -221,7 +227,7 @@ func resolveEphemeralContainers(run model.RunOptions, cleanup model.CleanupOptio
 		return nil, fmt.Errorf("project hash is empty")
 	}
 
-	base := fmt.Sprintf("%s-%s-%s-", model.AppName, run.Tool, project.Hash)
+	base := ephemeralContainerPrefix(run, project)
 	for _, info := range infos {
 		if info.name == "" || info.hasSession {
 			continue
@@ -447,25 +453,50 @@ func printCleanupPlan(dirs []cleanupDir) {
 	}
 }
 
-func printEphemeralCleanupPlan(containers []string, dirs []cleanupDir) {
-	if len(containers) == 0 && len(dirs) == 0 {
+func printEphemeralCleanupPlan(containers []string, networks []string, dirs []cleanupDir) {
+	if len(containers) == 0 && len(networks) == 0 && len(dirs) == 0 {
 		logx.Infof("Nothing to clean")
 		return
 	}
 	for _, container := range containers {
 		logx.Infof("Would remove container: %s", container)
 	}
+	for _, network := range networks {
+		logx.Infof("Would remove stale per-session network: %s", network)
+	}
 	for _, dir := range dirs {
 		logx.Infof("Would remove %s: %s", dir.Kind, dir.Path)
 	}
 }
 
+// cleanupContainers removes stopped ephemeral containers through the
+// backend's session teardown so their gateway and per-session network go too.
 func cleanupContainers(containers []string) {
 	for _, container := range containers {
-		if err := docker.ContainerRemove(context.Background(), container, true, true); err != nil {
+		if err := backenddocker.RemoveSessionContainer(context.Background(), container, true); err != nil {
 			logx.Warnf("Failed to remove container %s: %v", container, err)
 		}
 	}
+}
+
+// pruneStaleSessionNetworks removes (or with dryRun lists) per-session
+// networks that outlived their container, scoped like the container cleanup:
+// the current tool and project unless --all. The same selection runs quietly
+// at every session start.
+func pruneStaleSessionNetworks(run model.RunOptions, cleanup model.CleanupOptions, project model.Project, dryRun bool) []string {
+	ownerPrefix := ""
+	if !cleanup.CleanupAll {
+		ownerPrefix = ephemeralContainerPrefix(run, project)
+	}
+	names, err := backenddocker.PruneStaleSessionNetworks(context.Background(), time.Now().UTC(), ownerPrefix, dryRun)
+	if err != nil {
+		logx.Warnf("Failed to list stale per-session networks: %v", err)
+	}
+	return names
+}
+
+func ephemeralContainerPrefix(run model.RunOptions, project model.Project) string {
+	return fmt.Sprintf("%s-%s-%s-", model.AppName, run.Tool, project.Hash)
 }
 
 func cleanupDirs(dirs []cleanupDir) {

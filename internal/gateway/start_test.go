@@ -9,6 +9,7 @@ package gateway
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,11 +17,14 @@ import (
 	"time"
 
 	"enclave/internal/docker"
+	"enclave/internal/model"
 )
 
 // withGatewayCLIStub installs a container CLI whose gateway never logs the
 // ready marker but always reports a running container, and records every
-// invocation in the returned log file.
+// invocation in the returned log file. Tests override what `run` prints and
+// exits with through STUB_RUN_OUTPUT and STUB_RUN_EXIT, and what inspect
+// reports through STUB_INSPECT_JSON.
 func withGatewayCLIStub(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -29,8 +33,8 @@ func withGatewayCLIStub(t *testing.T) string {
 	script := `#!/bin/sh
 printf '%s\n' "$*" >> "$STUB_CALL_LOG"
 case "$1" in
-run) echo gw123 ;;
-container) printf '%s\n' '{"Id":"gw123","Name":"/session-gateway","State":{"Status":"running","Running":true,"Error":""}}' ;;
+run) printf '%s\n' "${STUB_RUN_OUTPUT-gw123}"; exit "${STUB_RUN_EXIT:-0}" ;;
+container) printf '%s\n' "$STUB_INSPECT_JSON" ;;
 esac
 exit 0
 `
@@ -41,6 +45,7 @@ exit 0
 	docker.SetBinary(stub)
 	t.Cleanup(func() { docker.SetBinary(previous) })
 	t.Setenv("STUB_CALL_LOG", logPath)
+	t.Setenv("STUB_INSPECT_JSON", stubInspectJSON(t, "running", true, nil))
 	return logPath
 }
 
@@ -76,7 +81,7 @@ func TestStartGatewayContainerRemovesSidecarWhenInterruptedBeforeReady(t *testin
 	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
 	defer cancel()
 
-	err := startGatewayContainer(ctx, &docker.ContainerConfig{Image: "gateway"}, &docker.HostConfig{}, "session-gateway")
+	_, err := startGatewayContainer(ctx, &docker.ContainerConfig{Image: "gateway"}, &docker.HostConfig{}, "session-gateway")
 	if err == nil {
 		t.Fatal("expected an error when the context ends before the gateway is ready")
 	}
@@ -84,29 +89,110 @@ func TestStartGatewayContainerRemovesSidecarWhenInterruptedBeforeReady(t *testin
 	if len(calls) == 0 || !strings.HasPrefix(calls[0], "run ") {
 		t.Fatalf("expected the gateway to be started first, got %v", calls)
 	}
-	if !hasCall(calls, "rm --force --volumes session-gateway") {
-		t.Fatalf("expected the unready gateway to be removed, got %v", calls)
+	if !hasCall(calls, "rm --force --volumes gw123") {
+		t.Fatalf("expected the unready gateway to be removed by ID, got %v", calls)
+	}
+}
+
+// sessionGatewayConfig is the container config of the session whose gateway
+// the start tests create, carrying the labels ownership checks compare.
+func sessionGatewayConfig() *docker.ContainerConfig {
+	return &docker.ContainerConfig{Image: "gateway", Labels: map[string]string{
+		model.GatewayLabelManaged:     "true",
+		model.GatewayLabelContainer:   "session",
+		model.GatewayLabelProjectHash: "hash",
+	}}
+}
+
+// stubInspectJSON renders the inspect view of a gateway container named
+// session-gateway with ID gw123 in the given state and with the given labels.
+func stubInspectJSON(t *testing.T, status string, running bool, labels map[string]string) string {
+	t.Helper()
+	data, err := json.Marshal(docker.InspectResponse{
+		ID:     "gw123",
+		Name:   "/session-gateway",
+		Config: &docker.ContainerConfig{Labels: labels},
+		State:  &docker.ContainerState{Status: status, Running: running},
+	})
+	if err != nil {
+		t.Fatalf("marshal inspect stub: %v", err)
+	}
+	return string(data)
+}
+
+func assertNoCallWithPrefix(t *testing.T, calls []string, prefix string, why string) {
+	t.Helper()
+	for _, call := range calls {
+		if strings.HasPrefix(call, prefix) {
+			t.Fatalf("%s, got %v", why, calls)
+		}
 	}
 }
 
 func TestStartGatewayContainerRemovesSidecarWhenStartFails(t *testing.T) {
 	logPath := withGatewayCLIStub(t)
+	t.Setenv("STUB_INSPECT_JSON", stubInspectJSON(t, "created", false, sessionGatewayConfig().Labels))
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	err := startGatewayContainer(ctx, &docker.ContainerConfig{Image: "gateway"}, &docker.HostConfig{}, "session-gateway")
+	_, err := startGatewayContainer(ctx, sessionGatewayConfig(), &docker.HostConfig{}, "session-gateway")
 	if err == nil || !strings.Contains(err.Error(), "failed to start gateway container") {
 		t.Fatalf("expected a start failure, got %v", err)
 	}
 	calls := stubCalls(t, logPath)
-	if !hasCall(calls, "rm --force --volumes session-gateway") {
-		t.Fatalf("expected a possibly created gateway to be removed, got %v", calls)
+	if !hasCall(calls, "rm --force --volumes gw123") {
+		t.Fatalf("expected the created but unstarted gateway to be removed by its inspected ID, got %v", calls)
 	}
-	for _, call := range calls {
-		if strings.HasPrefix(call, "logs ") {
-			t.Fatalf("did not expect a readiness wait after a failed start, got %v", calls)
-		}
+	assertNoCallWithPrefix(t, calls, "logs ", "did not expect a readiness wait after a failed start")
+}
+
+func TestStartGatewayContainerRemovesSidecarByIDTheEnginePrinted(t *testing.T) {
+	logPath := withGatewayCLIStub(t)
+	printedID := strings.Repeat("ef", 32)
+	t.Setenv("STUB_RUN_OUTPUT", printedID)
+	t.Setenv("STUB_RUN_EXIT", "127")
+
+	_, err := startGatewayContainer(context.Background(), sessionGatewayConfig(), &docker.HostConfig{}, "session-gateway")
+	if err == nil || !strings.Contains(err.Error(), "failed to start gateway container") {
+		t.Fatalf("expected a start failure, got %v", err)
 	}
+	calls := stubCalls(t, logPath)
+	if !hasCall(calls, "rm --force --volumes "+printedID) {
+		t.Fatalf("expected the gateway to be removed by the ID the engine printed, got %v", calls)
+	}
+	assertNoCallWithPrefix(t, calls, "container inspect", "did not expect a by-name lookup when the engine reported the ID")
+}
+
+func TestStartGatewayContainerLeavesRunningSidecarWhenStartFailsWithoutID(t *testing.T) {
+	logPath := withGatewayCLIStub(t)
+	t.Setenv("STUB_RUN_OUTPUT", "")
+	t.Setenv("STUB_RUN_EXIT", "127")
+	t.Setenv("STUB_INSPECT_JSON", stubInspectJSON(t, "running", true, sessionGatewayConfig().Labels))
+
+	_, err := startGatewayContainer(context.Background(), sessionGatewayConfig(), &docker.HostConfig{}, "session-gateway")
+	if err == nil {
+		t.Fatal("expected a start failure")
+	}
+	calls := stubCalls(t, logPath)
+	assertNoCallWithPrefix(t, calls, "rm ", "expected a running same-name gateway of a concurrent start to survive")
+}
+
+func TestStartGatewayContainerLeavesForeignSidecarWhenStartFailsWithoutID(t *testing.T) {
+	logPath := withGatewayCLIStub(t)
+	t.Setenv("STUB_RUN_OUTPUT", "")
+	t.Setenv("STUB_RUN_EXIT", "127")
+	t.Setenv("STUB_INSPECT_JSON", stubInspectJSON(t, "exited", false, map[string]string{
+		model.GatewayLabelManaged:     "true",
+		model.GatewayLabelContainer:   "other-session",
+		model.GatewayLabelProjectHash: "hash",
+	}))
+
+	_, err := startGatewayContainer(context.Background(), sessionGatewayConfig(), &docker.HostConfig{}, "session-gateway")
+	if err == nil {
+		t.Fatal("expected a start failure")
+	}
+	calls := stubCalls(t, logPath)
+	assertNoCallWithPrefix(t, calls, "rm ", "expected another session's gateway holding the name to survive")
 }
 
 func TestWaitForGatewayReadyStopsOnCancelledContext(t *testing.T) {

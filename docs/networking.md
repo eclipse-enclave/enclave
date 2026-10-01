@@ -269,3 +269,10 @@ enclave --bridge-port 9800
 
 # Inside the container, the service is reachable at localhost:9800
 ```
+
+### Global policy inheritance
+
+A project policy can set `"inherit_global_policy": false` to exclude domain
+entries from both `domains.global` and `domains.tools` in the global policy.
+The project's own entries still apply. This switch does not change mode,
+resolver, built-in tool allowlist, or extension-domain precedence.

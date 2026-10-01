@@ -10,10 +10,65 @@ package network
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"enclave/internal/model"
 )
+
+func TestMergeGlobalDomainInheritanceScope(t *testing.T) {
+	yes, no := true, false
+	for _, tc := range []struct {
+		name    string
+		inherit *bool
+	}{
+		{"unset", nil},
+		{"enabled", &yes},
+		{"disabled", &no},
+	} {
+		for _, toolsOnly := range []bool{false, true} {
+			name := tc.name
+			if toolsOnly {
+				name += "/tools-only"
+			}
+			t.Run(name, func(t *testing.T) {
+				cfg := MergeConfig{
+					GlobalPolicy: Policy{Domains: PolicyDomains{
+						Tools: map[string][]string{"claude": {"global-tool.example"}},
+					}},
+					ProjectPolicy: Policy{InheritGlobalPolicy: tc.inherit, Domains: PolicyDomains{
+						Tools: map[string][]string{"claude": {"project-tool.example"}},
+					}},
+				}
+				var wantDomains []string
+				wantTools := []string{"project-tool.example"}
+				wantSources := []PolicySource{{Name: "project policy"}}
+				if tc.inherit == nil || *tc.inherit {
+					wantTools = append([]string{"global-tool.example"}, wantTools...)
+					wantSources = append([]PolicySource{{Name: "global policy"}}, wantSources...)
+					if !toolsOnly {
+						wantDomains = append(wantDomains, "global.example")
+					}
+				}
+				if !toolsOnly {
+					cfg.GlobalPolicy.Domains.Global = []string{"global.example"}
+					cfg.ProjectPolicy.Domains.Global = []string{"project.example"}
+					wantDomains = append(wantDomains, "project.example")
+				}
+				got := Merge(cfg)
+				if !slices.Equal(got.Domains, wantDomains) {
+					t.Errorf("domains = %v, want %v", got.Domains, wantDomains)
+				}
+				if !slices.Equal(got.ToolDomains["claude"], wantTools) {
+					t.Errorf("tool domains = %v, want %v", got.ToolDomains["claude"], wantTools)
+				}
+				if !slices.Equal(got.Sources, wantSources) {
+					t.Errorf("sources = %v, want %v", got.Sources, wantSources)
+				}
+			})
+		}
+	}
+}
 
 func TestMergeDefaults(t *testing.T) {
 	ep := Merge(MergeConfig{})

@@ -122,7 +122,8 @@ func (m networkManager) Prepare(_ string, authState model.AuthState, _ SecretMap
 
 func policyDomainSourcePaths(home string, projectDir string, projectHash string, tool string, globalPolicy network.Policy, projectPolicy network.Policy) []string {
 	paths := []string{}
-	if policyHasDomains(globalPolicy, tool) {
+	inheritGlobal := projectPolicy.InheritGlobalPolicy == nil || *projectPolicy.InheritGlobalPolicy
+	if inheritGlobal && policyHasDomains(globalPolicy, tool) {
 		paths = append(paths, config.HostNetworkPolicyPath(home))
 	}
 	if projectDir != "" && policyHasDomains(projectPolicy, tool) {

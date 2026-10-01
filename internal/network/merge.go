@@ -128,32 +128,26 @@ func (ep *EffectivePolicy) collectBuiltInDomains(cfg MergeConfig, addDomain func
 // policies. The project inherits global domains unless inherit_global_policy is
 // explicitly false.
 func (ep *EffectivePolicy) collectPolicyDomains(cfg MergeConfig, addDomain func(string)) {
-	// Global policy domains
-	for _, d := range cfg.GlobalPolicy.Domains.Global {
-		addDomain(d)
-	}
-	if len(cfg.GlobalPolicy.Domains.Global) > 0 {
-		ep.Sources = append(ep.Sources, PolicySource{Name: "global policy"})
-	}
-	for tool, domains := range cfg.GlobalPolicy.Domains.Tools {
-		addToolDomains(ep.ToolDomains, tool, domains)
-	}
-
-	// Project policy domains
-	inheritGlobal := true
-	if cfg.ProjectPolicy.InheritGlobalPolicy != nil {
-		inheritGlobal = *cfg.ProjectPolicy.InheritGlobalPolicy
-	}
+	inheritGlobal := cfg.ProjectPolicy.InheritGlobalPolicy == nil || *cfg.ProjectPolicy.InheritGlobalPolicy
 	if inheritGlobal {
-		for _, d := range cfg.ProjectPolicy.Domains.Global {
+		for _, d := range cfg.GlobalPolicy.Domains.Global {
 			addDomain(d)
 		}
+		for tool, domains := range cfg.GlobalPolicy.Domains.Tools {
+			addToolDomains(ep.ToolDomains, tool, domains)
+		}
+		if len(cfg.GlobalPolicy.Domains.Global) > 0 || len(cfg.GlobalPolicy.Domains.Tools) > 0 {
+			ep.Sources = append(ep.Sources, PolicySource{Name: "global policy"})
+		}
 	}
-	if len(cfg.ProjectPolicy.Domains.Global) > 0 {
-		ep.Sources = append(ep.Sources, PolicySource{Name: "project policy"})
+	for _, d := range cfg.ProjectPolicy.Domains.Global {
+		addDomain(d)
 	}
 	for tool, domains := range cfg.ProjectPolicy.Domains.Tools {
 		addToolDomains(ep.ToolDomains, tool, domains)
+	}
+	if len(cfg.ProjectPolicy.Domains.Global) > 0 || len(cfg.ProjectPolicy.Domains.Tools) > 0 {
+		ep.Sources = append(ep.Sources, PolicySource{Name: "project policy"})
 	}
 }
 

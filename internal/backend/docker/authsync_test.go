@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"enclave/internal/backend"
 	"enclave/internal/config"
@@ -303,6 +304,44 @@ func TestSharedAuthSyncCommandGenericRemainsAdditive(t *testing.T) {
 	assertFileContent(t, filepath.Join(authDir, "agent", "auth.json"), `{"token":"old"}`)
 }
 
+func TestSharedAuthSyncCommandVibeEnvNewerConfigWins(t *testing.T) {
+	t.Parallel()
+	configDir, authDir := authSyncTempDirs(t)
+	writeFileAt(t, filepath.Join(authDir, ".env"), "MISTRAL_API_KEY='old'\n", time.Unix(1000, 0))
+	writeFileAt(t, filepath.Join(configDir, ".env"), "MISTRAL_API_KEY='new'\n", time.Unix(2000, 0))
+
+	runSharedAuthSyncCommand(t, "mistral-vibe", []string{".env"}, configDir, authDir)
+
+	assertFileContent(t, filepath.Join(authDir, ".env"), "MISTRAL_API_KEY='new'\n")
+}
+
+func TestSharedAuthSyncCommandVibeEnvOlderConfigLoses(t *testing.T) {
+	t.Parallel()
+	configDir, authDir := authSyncTempDirs(t)
+	writeFileAt(t, filepath.Join(configDir, ".env"), "MISTRAL_API_KEY='old'\n", time.Unix(1000, 0))
+	writeFileAt(t, filepath.Join(authDir, ".env"), "MISTRAL_API_KEY='new'\n", time.Unix(2000, 0))
+
+	runSharedAuthSyncCommand(t, "mistral-vibe", []string{".env"}, configDir, authDir)
+
+	assertFileContent(t, filepath.Join(authDir, ".env"), "MISTRAL_API_KEY='new'\n")
+}
+
+func TestSharedAuthSyncCommandVibeEnvSymlinkConfigNoops(t *testing.T) {
+	t.Parallel()
+	configDir, authDir := authSyncTempDirs(t)
+	sharedPath := filepath.Join(authDir, ".env")
+	writeFileAt(t, sharedPath, "MISTRAL_API_KEY='shared'\n", time.Unix(1000, 0))
+	stalePath := filepath.Join(t.TempDir(), ".env")
+	writeFileAt(t, stalePath, "MISTRAL_API_KEY='stale'\n", time.Unix(2000, 0))
+	if err := os.Symlink(stalePath, filepath.Join(configDir, ".env")); err != nil {
+		t.Fatalf("symlink config .env: %v", err)
+	}
+
+	runSharedAuthSyncCommand(t, "mistral-vibe", []string{".env"}, configDir, authDir)
+
+	assertFileContent(t, sharedPath, "MISTRAL_API_KEY='shared'\n")
+}
+
 // A named auth identity (--auth-name) is just a different bind-mount source
 // directory; reconcile must resolve exactly the mounted identity dir.
 func TestMountedSourceDirResolvesNamedAuthIdentityMount(t *testing.T) {
@@ -405,6 +444,14 @@ func writeFile(t *testing.T, path string, content string) {
 	}
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatalf("write %s: %v", path, err)
+	}
+}
+
+func writeFileAt(t *testing.T, path string, content string, modTime time.Time) {
+	t.Helper()
+	writeFile(t, path, content)
+	if err := os.Chtimes(path, modTime, modTime); err != nil {
+		t.Fatalf("chtimes %s: %v", path, err)
 	}
 }
 

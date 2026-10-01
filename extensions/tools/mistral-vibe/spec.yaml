@@ -16,12 +16,40 @@ sandbox:
   entrypoint: { run: [vibe] }
   configDir: .vibe
   skillsDir: .vibe/skills
+  statePaths:
+    # Session logs back --continue/--resume; the rest is Vibe's own runtime state.
+    - logs/
+    - plans/
+    - worktrees/
+    - vibehistory
+    - trusted_folders.toml
+    - cache.toml
+    - projects.toml
   settingsFile: mistral-vibe-config.toml
   settingsTarget: .vibe/config.toml
-  yoloFlag: "--agent auto-approve"
+  # --trust trusts the workspace for this invocation only, skipping the trust
+  # prompt without persisting a decision to trusted_folders.toml.
+  yoloFlag: "--agent auto-approve --trust"
   yoloEnabled: true
   continueArgs: [--continue]
+  resumeArgs: [--resume]
   passthroughPaths: [config.toml, agents/, prompts/, skills/]
+
+credentials:
+  sources:
+    mistral-api-key: { env: [MISTRAL_API_KEY] }
+
+network:
+  serviceDomains:
+    api.mistral.ai: mistral-api-key
+    # Account lookup (/api/vibe/whoami) and organization-managed config.
+    console.mistral.ai: mistral-api-key
+    chat.mistral.ai: mistral-api-key
+  serviceAuth:
+    mistral-api-key: { headerName: authorization, valueFormat: "Bearer %s" }
 
 providers:
   - name: mistral
+    credentials: [mistral-api-key]
+    # Vibe saves a key entered during onboarding here when no keyring is available.
+    authFiles: [.env]

@@ -3,5 +3,23 @@
   "name": "mistral-vibe",
   "display_name": "Mistral Vibe",
   "description": "Mistral Vibe CLI coding assistant",
-  "priority": 100
+  "priority": 100,
+  "secrets": {
+    "mistral-api-key": {
+      "env_vars": [
+        "MISTRAL_API_KEY"
+      ],
+      "release": {
+        "http": {
+          "hosts": [
+            "api.mistral.ai",
+            "chat.mistral.ai",
+            "console.mistral.ai"
+          ],
+          "header": "authorization",
+          "format": "Bearer %s"
+        }
+      }
+    }
+  }
 }

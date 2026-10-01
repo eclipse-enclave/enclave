@@ -69,6 +69,12 @@ func (m volumeManager) BuildPrep(volumeSuffix string) (backend.StorePrep, storeS
 			SourceDir:     m.configSourceDir,
 			PreservePaths: m.configSourcePreservePaths(),
 		}
+		if m.run.Persist {
+			settingsPath, err := m.settingsRelativePath()
+			if err == nil && settingsPath != "" {
+				prep.Config.Overlay.SettingsPath = settingsPath
+			}
+		}
 	}
 	stores.Config = &backend.StoreRef{Kind: backend.StoreKindConfig, Key: configKey}
 

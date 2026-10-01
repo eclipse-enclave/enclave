@@ -19,6 +19,34 @@
           "header": "x-api-key"
         }
       }
+    },
+    "gemini-api-key": {
+      "env_vars": [
+        "GEMINI_API_KEY"
+      ],
+      "release": {
+        "http": {
+          "hosts": [
+            "generativelanguage.googleapis.com"
+          ],
+          "header": "x-goog-api-key"
+        }
+      }
+    },
+    "openai-api-key": {
+      "env_vars": [
+        "OPENAI_API_KEY"
+      ],
+      "release": {
+        "http": {
+          "hosts": [
+            "*.openai.com",
+            "api.openai.com"
+          ],
+          "header": "authorization",
+          "format": "Bearer %s"
+        }
+      }
     }
   }
 }

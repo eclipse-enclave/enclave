@@ -236,7 +236,7 @@ store that holds memory; the other `--keep` kinds do not apply there. See
 | `--use-remote-user` | Honor devcontainer `remoteUser` for agent sessions |
 | `--slim` | Build without features (tools only) |
 | `--image-name <name>` | Override image name/tag |
-| `--features <list\|default\|all\|none>` | Enable selected feature extensions (comma-separated), or use `default`, `all`, or `none` |
+| `--features <list\|default\|all\|none>` | Enable selected feature extensions (comma-separated), or use `default`, `all`, or `none`; `+name`/`-name` entries amend the configured selection instead of replacing it |
 | `--cache-from <image>` | Reuse inline build cache from an image |
 | `--build-uid <uid>` | UID to bake into the runtime image instead of the host UID |
 | `--build-gid <gid>` | GID to bake into the runtime image instead of the host GID |

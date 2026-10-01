@@ -43,6 +43,7 @@ type RunOptionSources struct {
 	SessionName      OptionSource
 	SessionTint      OptionSource
 	SkillsValidation OptionSource
+	Timezone         OptionSource
 	Tool             OptionSource
 	WorktreeMetadata OptionSource
 	Yolo             OptionSource
@@ -107,6 +108,7 @@ func DefaultOptionSources() OptionSources {
 			SessionName:      SourceDefault,
 			SessionTint:      SourceDefault,
 			SkillsValidation: SourceDefault,
+			Timezone:         SourceDefault,
 			Tool:             SourceDefault,
 			WorktreeMetadata: SourceDefault,
 			Yolo:             SourceDefault,
@@ -274,6 +276,9 @@ func MergeOptionSources(base OptionSources, override OptionSources) OptionSource
 	}
 	if override.Slim != SourceUnset {
 		base.Slim = override.Slim
+	}
+	if override.Timezone != SourceUnset {
+		base.Timezone = override.Timezone
 	}
 	if override.Tool != SourceUnset {
 		base.Tool = override.Tool

@@ -35,6 +35,7 @@ type RunOptions struct {
 	ImageInbox        bool
 	SessionMonitor    bool
 	SessionTint       string
+	Timezone          string
 	CmdArgs           []string
 	NoHistory         bool
 	NoMemory          bool

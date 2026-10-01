@@ -472,6 +472,16 @@ func OptionDefs() []OptionDef {
 			TrimOnApply:   true,
 		},
 		{
+			Name:          "timezone",
+			Group:         OptionGroupRun,
+			Kind:          OptionKindString,
+			OptionField:   "Timezone",
+			SourceField:   "Timezone",
+			DefaultsField: "Timezone",
+			Apply:         ApplyString,
+			TrimOnApply:   true,
+		},
+		{
 			Name:          "no_history",
 			Group:         OptionGroupRun,
 			Kind:          OptionKindBool,

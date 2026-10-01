@@ -874,6 +874,11 @@ func (r *Runtime) backendRequest(ctx *ExecutionContext, detached bool, interacti
 
 func (r *Runtime) containerEnv(ctx *ExecutionContext, interactive bool) []string {
 	env := append([]string{}, ctx.Env...)
+	if !envHasKey(env, "TZ") {
+		if tz := r.containerTimeZone(); tz != "" {
+			env = append(env, "TZ="+tz)
+		}
+	}
 	if !interactive {
 		return env
 	}

@@ -44,6 +44,8 @@ RUN --mount=type=cache,id=enclave-apt-cache,target=/var/cache/apt,sharing=locked
         # Essentials
         ca-certificates curl wget gnupg lsb-release sudo \
         git git-lfs bash locales \
+        # Zone database so the host TZ passed at runtime resolves
+        tzdata \
         openssh-client \
         # Archive tools
         zip unzip tar gzip bzip2 xz-utils \
@@ -64,6 +66,10 @@ RUN --mount=type=cache,id=enclave-apt-cache,target=/var/cache/apt,sharing=locked
         direnv \
         # Minimal editor
         vim-tiny && \
+    # Newer releases split legacy zone links (US/Pacific, ...) out of tzdata
+    if apt-cache show tzdata-legacy >/dev/null 2>&1; then \
+        apt-get install -y --no-install-recommends tzdata-legacy; \
+    fi && \
     # Setup locale
     echo "en_US.UTF-8 UTF-8" > /etc/locale.gen && \
     locale-gen

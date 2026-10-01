@@ -199,6 +199,16 @@ func OptionSpecs() []OptionSpec {
 			},
 		},
 		{
+			Name:  "timezone",
+			Group: OptionGroupRun,
+			ApplyDefaultsWithSource: func(opts *model.Options, defaults Defaults, source model.OptionSource, sources *model.OptionSources) {
+				if canOverride(sources.Timezone, source) && strings.TrimSpace(defaults.Timezone) != "" {
+					opts.Timezone = strings.TrimSpace(defaults.Timezone)
+					sources.Timezone = source
+				}
+			},
+		},
+		{
 			Name:  "no_history",
 			Group: OptionGroupRun,
 			ApplyDefaultsWithSource: func(opts *model.Options, defaults Defaults, source model.OptionSource, sources *model.OptionSources) {

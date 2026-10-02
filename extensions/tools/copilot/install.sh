@@ -9,4 +9,3 @@
 set -e
 
 enclave-install-npm-tool @github/copilot copilot Copilot
-copilot --version

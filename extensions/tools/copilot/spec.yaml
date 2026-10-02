@@ -23,15 +23,15 @@ sandbox:
   continueArgs: [--continue]
   resumeArgs: [--resume]
   passthroughPaths: [
-    agents/, 
-    copilot-instructions.md, 
-    extensions/, 
-    hooks/, 
-    instructions/, 
-    lsp-config.json, 
-    mcp-config.json, 
-    providers.json, 
-    settings.json, 
+    agents/,
+    copilot-instructions.md,
+    extensions/,
+    hooks/,
+    instructions/,
+    lsp-config.json,
+    mcp-config.json,
+    providers.json,
+    settings.json,
     skills/]
 
 credentials:
@@ -42,9 +42,6 @@ network:
   serviceDomains:
     api.github.com: copilot-github-token
     "*.githubcopilot.com": copilot-github-token
-    "*.individual.githubcopilot.com": copilot-github-token
-    "*.business.githubcopilot.com": copilot-github-token
-    "*.enterprise.githubcopilot.com": copilot-github-token
   serviceAuth:
     copilot-github-token: { headerName: Authorization, valueFormat: "Bearer %s" }
 

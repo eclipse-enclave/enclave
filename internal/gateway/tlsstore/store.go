@@ -61,21 +61,42 @@ func New(rootDir string) *Store {
 	}
 }
 
+func (s *Store) withLock(fn func() error) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return util.WithFileLock(filepath.Join(s.HostsDir, ".cache.lock"), fn)
+}
+
 func (s *Store) EnsureCA() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.ensureCA()
+	return s.withCALock()
 }
 
-func (s *Store) EnsureLeaf(host string) (string, string, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+// The CA never changes after it is loaded, so cache hits skip the file lock and
+// the RSA key parse that would otherwise run on every TLS handshake.
+func (s *Store) withCALock() error {
+	if s.caCert != nil && s.caKey != nil {
+		return nil
+	}
+	return util.WithFileLock(filepath.Join(s.RootDir, ".ca.lock"), s.ensureCA)
+}
 
+func (s *Store) EnsureLeaf(host string) (certPath, keyPath string, err error) {
+	err = s.withLock(func() error {
+		var inner error
+		certPath, keyPath, inner = s.ensureLeaf(host)
+		return inner
+	})
+	return
+}
+
+func (s *Store) ensureLeaf(host string) (string, string, error) {
 	normalizedHost, err := domainpattern.NormalizeHost(host)
 	if err != nil {
 		return "", "", err
 	}
-	if err := s.ensureCA(); err != nil {
+	if err := s.withCALock(); err != nil {
 		return "", "", err
 	}
 	if err := os.MkdirAll(s.HostsDir, 0o700); err != nil {
@@ -85,45 +106,75 @@ func (s *Store) EnsureLeaf(host string) (string, string, error) {
 	hostKey := hostCacheKey(normalizedHost)
 	certPath := filepath.Join(s.HostsDir, hostKey+".crt")
 	keyPath := filepath.Join(s.HostsDir, hostKey+".key")
-	if util.FileExists(certPath) && util.FileExists(keyPath) {
+	if s.caCert == nil || s.caKey == nil {
+		s.caCert, s.caKey, err = loadCA(s.CACertPath, s.CAKeyPath)
+		if err != nil {
+			return "", "", err
+		}
+	}
+	if s.validLeaf(certPath, keyPath, normalizedHost) {
 		now := time.Now()
 		_ = os.Chtimes(certPath, now, now)
 		_ = os.Chtimes(keyPath, now, now)
 		return certPath, keyPath, nil
 	}
 
-	if s.caCert == nil || s.caKey == nil {
-		caCert, caKey, err := loadCA(s.CACertPath, s.CAKeyPath)
-		if err != nil {
-			return "", "", err
-		}
-		s.caCert = caCert
-		s.caKey = caKey
-	}
 	if err := writeLeaf(certPath, keyPath, normalizedHost, s.caCert, s.caKey); err != nil {
 		return "", "", err
 	}
-	if err := s.pruneLeafCache(); err != nil {
+	if err := s.pruneLeafCache(hostKey); err != nil {
 		return "", "", err
 	}
 	return certPath, keyPath, nil
 }
 
-func (s *Store) Certificate(host string) (*tls.Certificate, error) {
-	certPath, keyPath, err := s.EnsureLeaf(host)
+func (s *Store) validLeaf(certPath, keyPath, host string) bool {
+	pair, err := tls.LoadX509KeyPair(certPath, keyPath)
 	if err != nil {
-		return nil, err
+		return false
 	}
-	cert, err := tls.LoadX509KeyPair(certPath, keyPath)
+	leaf, err := x509.ParseCertificate(pair.Certificate[0])
 	if err != nil {
-		return nil, fmt.Errorf("load host certificate: %w", err)
+		return false
 	}
-	return &cert, nil
+	roots := x509.NewCertPool()
+	roots.AddCert(s.caCert)
+	_, err = leaf.Verify(x509.VerifyOptions{DNSName: host, Roots: roots, CurrentTime: time.Now().Add(24 * time.Hour)})
+	return err == nil && !time.Now().Before(leaf.NotBefore)
+}
+
+func (s *Store) Certificate(host string) (cert *tls.Certificate, err error) {
+	err = s.withLock(func() error {
+		certPath, keyPath, err := s.ensureLeaf(host)
+		if err != nil {
+			return err
+		}
+		pair, err := tls.LoadX509KeyPair(certPath, keyPath)
+		if err != nil {
+			return fmt.Errorf("load host certificate: %w", err)
+		}
+		cert = &pair
+		return nil
+	})
+	return
 }
 
 func (s *Store) ensureCA() error {
 	if util.FileExists(s.CACertPath) && util.FileExists(s.CAKeyPath) {
-		return nil
+		pair, err := tls.LoadX509KeyPair(s.CACertPath, s.CAKeyPath)
+		if err != nil {
+			return fmt.Errorf("load trusted CA pair from %s: %w", s.RootDir, err)
+		}
+		s.caCert, err = x509.ParseCertificate(pair.Certificate[0])
+		s.caKey = pair.PrivateKey
+		return err
+	}
+	if util.FileExists(s.CACertPath) || util.FileExists(s.CAKeyPath) {
+		present, missing := s.CACertPath, s.CAKeyPath
+		if !util.FileExists(present) {
+			present, missing = missing, present
+		}
+		return fmt.Errorf("incomplete trusted CA pair: %s is missing; restore it or remove %s to generate a new CA", missing, present)
 	}
 	if err := os.MkdirAll(s.RootDir, 0o700); err != nil {
 		return fmt.Errorf("create tls dir: %w", err)
@@ -163,7 +214,7 @@ func (s *Store) ensureCA() error {
 	return nil
 }
 
-func (s *Store) pruneLeafCache() error {
+func (s *Store) pruneLeafCache(keepKey string) error {
 	limit := s.MaxLeafCert
 	if limit <= 0 {
 		limit = defaultLeafCacheSize
@@ -197,10 +248,18 @@ func (s *Store) pruneLeafCache() error {
 		return certs[i].modTime.Before(certs[j].modTime)
 	})
 	removeCount := len(certs) - limit
-	for i := 0; i < removeCount; i++ {
-		key := certs[i].key
+	for _, entry := range certs {
+		// Timestamps alone cannot guarantee the requested certificate is newest.
+		if entry.key == keepKey {
+			continue
+		}
+		key := entry.key
 		_ = os.Remove(filepath.Join(s.HostsDir, key+".crt"))
 		_ = os.Remove(filepath.Join(s.HostsDir, key+".key"))
+		removeCount--
+		if removeCount == 0 {
+			break
+		}
 	}
 	return nil
 }

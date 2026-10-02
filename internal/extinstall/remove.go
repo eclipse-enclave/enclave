@@ -11,9 +11,11 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"strings"
 
 	"enclave/internal/config"
 	"enclave/internal/logx"
+	"enclave/internal/usercmd"
 )
 
 // Remove deletes installed user extensions. Built-ins are never touched, and an
@@ -69,6 +71,9 @@ func removeOne(env Env, req Request, entry Managed) (ActionResult, error) {
 			return ActionResult{}, fmt.Errorf("aborted; nothing removed")
 		}
 	}
+	// Taken before the directory goes, so the note names only the verbs that
+	// were actually resolving rather than every file the extension shipped.
+	resolving := usercmd.Resolving(env.Home, target)
 	if err := removeInstalled(env, req.Kind, entry.Name); err != nil {
 		return ActionResult{}, err
 	}
@@ -77,7 +82,14 @@ func removeOne(env Env, req Request, entry Managed) (ActionResult, error) {
 	if entry.Source == config.SourceOverride {
 		env.note("the built-in %s is active again", req.Kind.Label())
 	}
+	// The verbs went with the directory, and nothing was ever copied into the
+	// user's own commands/ tree, so there is nothing left to clean up. Say so:
+	// a verb that stops resolving is otherwise a silent change.
+	if len(resolving) > 0 {
+		env.note("host command(s) no longer resolve: %s", strings.Join(resolving, ", "))
+	}
 	// Host state may belong to a reinstall.
 	env.note("host config and state were left untouched")
-	return ActionResult{Name: entry.Name, Action: ActionRemoved, Path: target}, nil
+	return ActionResult{Name: entry.Name, Action: ActionRemoved, Path: target,
+		HostCommands: entry.HostCommands}, nil
 }

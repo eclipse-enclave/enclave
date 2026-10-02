@@ -23,6 +23,7 @@ import (
 	"enclave/internal/config"
 	"enclave/internal/logx"
 	"enclave/internal/model"
+	"enclave/internal/usercmd"
 )
 
 // installPlan is one extension's worth of work, shared by add and update.
@@ -315,18 +316,22 @@ func applyPlan(env Env, req Request, plan installPlan, stage *staging) (ActionRe
 	if err != nil {
 		return ActionResult{}, err
 	}
+	caps, err := inspect(staged, req.Kind)
+	if err != nil {
+		return ActionResult{}, err
+	}
+	caps.ShadowsBuiltin = builtinExists(env, req.Kind, plan.Name)
+	caps.ShadowedHostCommands = usercmd.Shadowed(env.Home, caps.HostCommands)
+	if plan.Before != nil {
+		plan.Before.ShadowedHostCommands = usercmd.Shadowed(env.Home, plan.Before.HostCommands)
+	}
+	warnings = append(warnings, caps.shadowedHostCommandWarnings()...)
 	for _, warning := range warnings {
 		env.outcome(markWarn, logx.ColorYellow, "%s", warning)
 	}
 	if len(warnings) > 0 {
 		_, _ = fmt.Fprintln(env.narrate())
 	}
-
-	caps, err := inspect(staged, req.Kind)
-	if err != nil {
-		return ActionResult{}, err
-	}
-	caps.ShadowsBuiltin = builtinExists(env, req.Kind, plan.Name)
 
 	target := stage.finalPath(plan.Name)
 	var stagedHash string
@@ -339,6 +344,12 @@ func applyPlan(env Env, req Request, plan installPlan, stage *staging) (ActionRe
 		changes, stagedTree := treeChanges(plan.BeforeTree, staged)
 		stagedHash = stagedTree.Hash
 		contentChanged = plan.BeforeTree == nil || plan.BeforeTree.Hash != stagedHash
+		// The tree hash covers commands/ because a hand-edited host command is
+		// a local modification worth reporting, but the build context does not,
+		// so an update confined to that tree rebuilds nothing.
+		if contentChanged && len(changes) > 0 && !changesReachImage(changes) {
+			contentChanged = false
+		}
 		renderUpdate(env, changes, *plan.Before, caps)
 	} else {
 		caps.render(env.narrate(), env.Style, plan.Source.Display())
@@ -346,7 +357,8 @@ func applyPlan(env Env, req Request, plan installPlan, stage *staging) (ActionRe
 
 	if req.DryRun {
 		env.outcome(markInfo, logx.ColorCyan, "dry run: would be written to %s", target)
-		return ActionResult{Name: plan.Name, Action: ActionSkipped, Commit: plan.Commit, Path: target}, nil
+		return ActionResult{Name: plan.Name, Action: ActionSkipped, Commit: plan.Commit, Path: target,
+			HostCommands: caps.HostCommands}, nil
 	}
 	if req.Interactive {
 		stage.touch(env)
@@ -391,7 +403,8 @@ func applyPlan(env Env, req Request, plan installPlan, stage *staging) (ActionRe
 
 	env.outcome(markOK, logx.ColorGreen, "%s at %s", plan.Action, installedPath)
 	printPostInstallHints(env, req.Kind, plan.Name, caps, contentChanged)
-	return ActionResult{Name: plan.Name, Action: plan.Action, Commit: plan.Commit, Path: installedPath, Warnings: warnings}, nil
+	return ActionResult{Name: plan.Name, Action: plan.Action, Commit: plan.Commit, Path: installedPath,
+		HostCommands: caps.HostCommands, Warnings: warnings}, nil
 }
 
 func verbFor(action string) string {
@@ -414,6 +427,19 @@ func renderUpdate(env Env, changedFiles []changedFile, before capabilities, afte
 		_, _ = fmt.Fprintf(env.narrate(), "%s%s\n", bodyIndent, change)
 	}
 	_, _ = fmt.Fprintln(env.narrate())
+}
+
+// changesReachImage reports whether any changed file is part of the build
+// context. commands/ is the one tree an extension ships that the image never
+// sees, so a change confined to it must not promise a rebuild.
+func changesReachImage(changes []changedFile) bool {
+	prefix := model.CommandsDirName + "/"
+	for _, change := range changes {
+		if !strings.HasPrefix(filepath.ToSlash(change.Path), prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 // printPostInstallHints tells the user what to do next: the image rebuilds on

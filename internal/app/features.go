@@ -60,7 +60,7 @@ func runFeatures(ctx *AppContext, req *extinstall.Request, opts model.Options, s
 	}
 
 	for _, feature := range features {
-		suffix := provenanceSuffix(inventory[feature.Name])
+		suffix := listingSuffix(inventory[feature.Name])
 		switch {
 		case opts.Slim:
 			src := formatSource(sources.Slim, ctx.ProjectDir)

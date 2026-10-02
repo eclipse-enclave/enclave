@@ -60,62 +60,7 @@ func Parse(args []string, defaults model.Options, userCmds ...usercmd.Command) (
 	opts.Tool = tool
 
 	res := Result{Options: opts, Action: "run"}
-	sources := &res.Sources
-
-	rootCmd := &cobra.Command{
-		Use:   "enclave",
-		Short: "Docker environment for AI coding tools",
-		Long: `Docker environment for AI coding tools.
-
-Running enclave with no subcommand defaults to "run", so run's flags apply
-directly: "enclave --tool codex" is equivalent to "enclave run --tool codex".`,
-		SilenceUsage:  true,
-		SilenceErrors: true,
-		Version:       buildinfo.Read().String(),
-	}
-	rootCmd.SetVersionTemplate(model.AppName + ": {{.Version}}\n")
-	defaultHelp := rootCmd.HelpFunc()
-	rootCmd.SetHelpFunc(func(cmd *cobra.Command, args []string) {
-		res.HelpShown = true
-		defaultHelp(cmd, args)
-	})
-
-	addOptionFlags(rootCmd.PersistentFlags(), &res.Options, sources, config.OptionGroupGlobal)
-
-	rootCmd.AddCommand(
-		runCommand(&res),
-		psCommand(&res),
-		statusCommand(&res),
-		continueCommand(&res),
-		resumeCommand(&res),
-		configCommand(&res),
-		cleanupCommand(&res),
-		execCommand(&res),
-		shellCommand(&res),
-		authCommand(&res),
-		infoCommand(&res),
-		versionCommand(&res),
-		hiddenSimpleCommand("validate-extensions", "Validate extension metadata", &res),
-		hiddenSimpleCommand("ssh-init", "Initialize SSH directory", &res),
-		toolsCommand(&res),
-		featuresCommand(&res),
-		updateCommand(&res),
-		stopCommand(&res),
-		attachCommand(&res),
-		theiaCommand(&res, "theia"),
-		theiaCommand(&res, "theia-next"),
-		devcontainerCommand(&res),
-		networkCommand(&res),
-		imgCommand(&res),
-		extensionCommand(&res),
-		completionCommand(&res),
-		reviewTargetCommand(&res),
-	)
-
-	// Completion registration is best-effort at runtime; correctness (every
-	// registered completion targets a real flag) is enforced by
-	// TestRegisterCompletionsTargetRealFlags.
-	_ = registerCompletions(rootCmd)
+	rootCmd := newRootCommand(&res)
 
 	// Built-in command names are now known: drop colliding user commands and
 	// register name-only stubs for the survivors so they list in --help and
@@ -166,14 +111,72 @@ directly: "enclave --tool codex" is equivalent to "enclave run --tool codex".`,
 	return res, nil
 }
 
-// registerUserCommands drops user commands whose name collides with a built-in
-// (built-ins always win, with a warning) and registers a name-only stub for
-// each survivor so it appears in --help and shell completion. It returns the
-// surviving commands.
-func registerUserCommands(rootCmd *cobra.Command, userCmds []usercmd.Command, res *Result) []usercmd.Command {
-	if len(userCmds) == 0 {
-		return nil
+// newRootCommand builds the root command with every built-in subcommand
+// registered, writing parse results into res.
+func newRootCommand(res *Result) *cobra.Command {
+	sources := &res.Sources
+
+	rootCmd := &cobra.Command{
+		Use:   "enclave",
+		Short: "Docker environment for AI coding tools",
+		Long: `Docker environment for AI coding tools.
+
+Running enclave with no subcommand defaults to "run", so run's flags apply
+directly: "enclave --tool codex" is equivalent to "enclave run --tool codex".`,
+		SilenceUsage:  true,
+		SilenceErrors: true,
+		Version:       buildinfo.Read().String(),
 	}
+	rootCmd.SetVersionTemplate(model.AppName + ": {{.Version}}\n")
+	defaultHelp := rootCmd.HelpFunc()
+	rootCmd.SetHelpFunc(func(cmd *cobra.Command, args []string) {
+		res.HelpShown = true
+		defaultHelp(cmd, args)
+	})
+
+	addOptionFlags(rootCmd.PersistentFlags(), &res.Options, sources, config.OptionGroupGlobal)
+
+	rootCmd.AddCommand(
+		runCommand(res),
+		psCommand(res),
+		statusCommand(res),
+		continueCommand(res),
+		resumeCommand(res),
+		configCommand(res),
+		cleanupCommand(res),
+		execCommand(res),
+		shellCommand(res),
+		authCommand(res),
+		infoCommand(res),
+		versionCommand(res),
+		hiddenSimpleCommand("validate-extensions", "Validate extension metadata", res),
+		hiddenSimpleCommand("ssh-init", "Initialize SSH directory", res),
+		toolsCommand(res),
+		featuresCommand(res),
+		updateCommand(res),
+		stopCommand(res),
+		attachCommand(res),
+		theiaCommand(res, "theia"),
+		theiaCommand(res, "theia-next"),
+		devcontainerCommand(res),
+		networkCommand(res),
+		imgCommand(res),
+		extensionCommand(res),
+		completionCommand(res),
+		reviewTargetCommand(res),
+	)
+
+	// Completion registration is best-effort at runtime; correctness (every
+	// registered completion targets a real flag) is enforced by
+	// TestRegisterCompletionsTargetRealFlags.
+	_ = registerCompletions(rootCmd)
+
+	return rootCmd
+}
+
+// builtinCommandNames is every top-level name rootCmd answers to, including
+// the ones Cobra adds on its own during Execute.
+func builtinCommandNames(rootCmd *cobra.Command) map[string]struct{} {
 	builtins := map[string]struct{}{
 		"help":             {},
 		"completion":       {},
@@ -183,6 +186,18 @@ func registerUserCommands(rootCmd *cobra.Command, userCmds []usercmd.Command, re
 	for _, c := range rootCmd.Commands() {
 		builtins[c.Name()] = struct{}{}
 	}
+	return builtins
+}
+
+// registerUserCommands drops user commands whose name collides with a built-in
+// (built-ins always win, with a warning) and registers a name-only stub for
+// each survivor so it appears in --help and shell completion. It returns the
+// surviving commands.
+func registerUserCommands(rootCmd *cobra.Command, userCmds []usercmd.Command, res *Result) []usercmd.Command {
+	if len(userCmds) == 0 {
+		return nil
+	}
+	builtins := builtinCommandNames(rootCmd)
 
 	kept := make([]usercmd.Command, 0, len(userCmds))
 	groupAdded := false
@@ -198,7 +213,7 @@ func registerUserCommands(rootCmd *cobra.Command, userCmds []usercmd.Command, re
 		}
 		rootCmd.AddCommand(&cobra.Command{
 			Use:                uc.Name,
-			Short:              fmt.Sprintf("User command (%s)", uc.Path),
+			Short:              userCommandShort(uc),
 			GroupID:            userCommandGroupID,
 			DisableFlagParsing: true,
 			// The no-op Run makes IsAvailableCommand() true so the stub is
@@ -211,6 +226,17 @@ func registerUserCommands(rootCmd *cobra.Command, userCmds []usercmd.Command, re
 		kept = append(kept, uc)
 	}
 	return kept
+}
+
+// userCommandShort labels a stub in --help. A command the user dropped in
+// themselves is identified by its path alone, but one that arrived with an
+// extension names the extension too: that is what the user would uninstall to
+// get rid of it, and the path is only where it happens to live.
+func userCommandShort(uc usercmd.Command) string {
+	if uc.Extension != "" {
+		return fmt.Sprintf("Host command from the %s extension (%s)", uc.Extension, uc.Path)
+	}
+	return fmt.Sprintf("User command (%s)", uc.Path)
 }
 
 // findUserCommand returns the user command with the given name, or nil.

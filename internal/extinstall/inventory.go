@@ -12,6 +12,7 @@ import (
 
 	"enclave/internal/config"
 	"enclave/internal/model"
+	"enclave/internal/usercmd"
 )
 
 // Managed describes one discovered extension: where its files come from, and
@@ -20,6 +21,10 @@ type Managed struct {
 	Name   string
 	Source string
 	Origin *Origin
+	// HostCommands are the enclave verbs this extension contributes from its
+	// commands/host/, which run on the host outside the sandbox. Only a user
+	// directory can carry them, so a built-in reports none.
+	HostCommands []string
 	// Modified reports content edited by hand since the install. It is only
 	// filled in at InventoryModifications detail, since answering it costs a
 	// full read of the extension's content.
@@ -36,8 +41,10 @@ type Managed struct {
 type InventoryDetail int
 
 const (
-	// InventoryNames resolves each extension's built-in and user directories
-	// and classifies its Source. Nothing inside an extension is opened.
+	// InventoryNames resolves each extension's built-in and user directories,
+	// classifies its Source, and lists the host commands it contributes. No
+	// file inside an extension is opened: the commands are one directory
+	// listing, and every caller needs to know which extension owns a verb.
 	InventoryNames InventoryDetail = iota
 	// InventoryProvenance also reads each user extension's provenance sidecar
 	// into Origin: one small JSON document per extension, no content.
@@ -67,6 +74,11 @@ func Inventory(paths model.Paths, kind model.ExtensionKind, names []string, deta
 	for _, name := range names {
 		builtinDir, userDir := config.ResolveExtensionDirs(paths, kind, name)
 		entry := Managed{Name: name, Source: config.SourceLabel(builtinDir, userDir)}
+		if userDir != "" {
+			// An unreadable commands/host/ is not worth failing a listing over,
+			// and usercmd warns about it on the next invocation anyway.
+			entry.HostCommands, _ = usercmd.ExtensionCommandNames(userDir)
+		}
 		if detail > InventoryNames && userDir != "" {
 			origin, readErr := readOrigin(userDir)
 			switch {

@@ -85,7 +85,7 @@ func runTools(ctx *AppContext, req *extinstall.Request, opts model.Options, _ mo
 	// one that would run by default for this invocation.
 	active := strings.TrimSpace(opts.Tool)
 	for _, tool := range toolExts {
-		suffix := provenanceSuffix(inventory[tool.Name])
+		suffix := listingSuffix(inventory[tool.Name])
 		if tool.Name == active {
 			fmt.Printf("✓ %s%s (selected)\n", tool.Name, suffix)
 		} else {

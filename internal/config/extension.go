@@ -346,7 +346,7 @@ func appendExtensionNames(dir string, names map[string]struct{}) error {
 		return err
 	}
 	for _, entry := range entries {
-		if !isExtensionDir(entry) {
+		if !IsExtensionDir(entry) {
 			continue
 		}
 		names[entry.Name()] = struct{}{}
@@ -354,13 +354,13 @@ func appendExtensionNames(dir string, names map[string]struct{}) error {
 	return nil
 }
 
-// isExtensionDir reports whether a directory entry of an extension root is an
+// IsExtensionDir reports whether a directory entry of an extension root is an
 // extension. Dot-prefixed names never are: that is what keeps the extension
 // installer's own staging directories (.incoming-*, .replaced-*) and stray
-// dotfiles from being listed, loaded, or validated as extensions, and
-// extinstall.validExtensionName relies on it by refusing to install under a
-// dot-prefixed name.
-func isExtensionDir(entry fs.DirEntry) bool {
+// dotfiles from being listed, loaded, validated, or scanned for host commands
+// as extensions, and extinstall.validExtensionName relies on it by refusing to
+// install under a dot-prefixed name.
+func IsExtensionDir(entry fs.DirEntry) bool {
 	return entry.IsDir() && !strings.HasPrefix(entry.Name(), ".")
 }
 

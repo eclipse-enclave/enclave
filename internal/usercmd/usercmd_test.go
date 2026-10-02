@@ -15,6 +15,7 @@ import (
 	"testing"
 
 	"enclave/internal/config"
+	"enclave/internal/model"
 )
 
 func writeExec(t *testing.T, path string) {
@@ -581,5 +582,176 @@ func TestDiscoverDeterministicOrder(t *testing.T) {
 		if got[i] != want[i] {
 			t.Fatalf("expected order %v, got %v", want, got)
 		}
+	}
+}
+
+// extensionCommandDir creates the host command directory of an installed
+// extension and returns it, mirroring where `enclave tools|features add`
+// writes.
+func extensionCommandDir(t *testing.T, home string, kind model.ExtensionKind, name string) string {
+	t.Helper()
+	dir := filepath.Join(config.HostExtensionsDir(home), kind.DirName(), name,
+		model.CommandsDirName, model.CommandsHostDirName)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir extension commands: %v", err)
+	}
+	return dir
+}
+
+func TestDiscoverIncludesExtensionHostCommands(t *testing.T) {
+	home := t.TempDir()
+	dir := extensionCommandDir(t, home, model.KindFeature, "vnc")
+	writeExec(t, filepath.Join(dir, "vnc-viewer"))
+
+	cmds, warnings := Discover(home)
+
+	if len(warnings) != 0 {
+		t.Fatalf("expected no warnings, got %v", warnings)
+	}
+	if len(cmds) != 1 {
+		t.Fatalf("expected 1 command, got %d: %v", len(cmds), cmds)
+	}
+	if cmds[0].Name != "vnc-viewer" || cmds[0].Target != TargetHost || cmds[0].Extension != "vnc" {
+		t.Fatalf("unexpected command: %+v", cmds[0])
+	}
+}
+
+// An extension's commands/session/ is not read. Session commands are mounted
+// into the container from one fixed host directory, so a second source would
+// need a mount that does not exist. Discovery stays quiet about it because
+// config.validateCommandsDir is what reports the directory as inert.
+func TestDiscoverIgnoresExtensionSessionCommands(t *testing.T) {
+	home := t.TempDir()
+	dir := filepath.Join(config.HostExtensionsDir(home), model.KindFeature.DirName(), "vnc",
+		model.CommandsDirName, model.CommandsSessionDirName)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	writeExec(t, filepath.Join(dir, "in-session"))
+
+	cmds, warnings := Discover(home)
+	if len(cmds) != 0 {
+		t.Fatalf("expected no commands, got %v", cmds)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("expected no warnings, got %v", warnings)
+	}
+}
+
+// A data file an extension ships beside its scripts is not the user's to fix,
+// and the next update would undo a chmod, so it is ignored without a warning.
+// The user's own tree still gets one (TestDiscoverExecBitFiltering).
+func TestDiscoverIgnoresNonExecutableExtensionFilesQuietly(t *testing.T) {
+	home := t.TempDir()
+	dir := extensionCommandDir(t, home, model.KindFeature, "vnc")
+	writeExec(t, filepath.Join(dir, "vnc-viewer"))
+	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("# not a command\n"), 0o644); err != nil {
+		t.Fatalf("write README: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "hosts.yml"), []byte("{}\n"), 0o644); err != nil {
+		t.Fatalf("write data file: %v", err)
+	}
+
+	cmds, warnings := Discover(home)
+
+	if len(warnings) != 0 {
+		t.Fatalf("expected no warnings for an extension's data files, got %v", warnings)
+	}
+	if len(cmds) != 1 || cmds[0].Name != "vnc-viewer" {
+		t.Fatalf("expected only the executable to become a verb, got %+v", cmds)
+	}
+}
+
+// The user's own tree outranks an installed extension, so installing one can
+// never quietly take over a name the user is already using.
+func TestDiscoverUserCommandShadowsExtensionCommand(t *testing.T) {
+	home := t.TempDir()
+	hostDir, _ := mkdirs(t, home)
+	writeExec(t, filepath.Join(hostDir, "vnc-viewer"))
+	dir := extensionCommandDir(t, home, model.KindFeature, "vnc")
+	writeExec(t, filepath.Join(dir, "vnc-viewer"))
+
+	cmds, warnings := Discover(home)
+
+	if len(cmds) != 1 || cmds[0].Extension != "" || cmds[0].Path != filepath.Join(hostDir, "vnc-viewer") {
+		t.Fatalf("expected the user's own command to win, got %+v", cmds)
+	}
+	if len(warnings) != 1 || !strings.Contains(warnings[0], "shadowed by your own user command") ||
+		!strings.Contains(warnings[0], "vnc") {
+		t.Fatalf("expected a shadowing warning naming the extension, got %v", warnings)
+	}
+}
+
+// Two extensions claiming one name resolve the same way on every host: tools
+// are scanned before features, and alphabetically within a kind.
+func TestDiscoverExtensionCommandCollisionPrefersTools(t *testing.T) {
+	home := t.TempDir()
+	toolDir := extensionCommandDir(t, home, model.KindTool, "zeta")
+	writeExec(t, filepath.Join(toolDir, "viewer"))
+	featureDir := extensionCommandDir(t, home, model.KindFeature, "alpha")
+	writeExec(t, filepath.Join(featureDir, "viewer"))
+
+	cmds, warnings := Discover(home)
+
+	if len(cmds) != 1 || cmds[0].Extension != "zeta" {
+		t.Fatalf("expected the tool extension to win, got %+v", cmds)
+	}
+	if len(warnings) != 1 || !strings.Contains(warnings[0], "zeta") || !strings.Contains(warnings[0], "alpha") {
+		t.Fatalf("expected a collision warning naming both extensions, got %v", warnings)
+	}
+}
+
+func TestDiscoverWithoutInstalledExtensionsIsQuiet(t *testing.T) {
+	home := t.TempDir()
+	mkdirs(t, home)
+
+	cmds, warnings := Discover(home)
+	if len(cmds) != 0 || len(warnings) != 0 {
+		t.Fatalf("expected nothing on a host with no extensions, got %v / %v", cmds, warnings)
+	}
+}
+
+// An interrupted update leaves the previous tree behind as .replaced-<name>-*
+// until the installer sweeps it. list and remove cannot see it, so it must not
+// keep contributing verbs either.
+func TestDiscoverIgnoresInstallerStagingDirs(t *testing.T) {
+	home := t.TempDir()
+	dir := extensionCommandDir(t, home, model.KindFeature, ".replaced-vnc-1234-1")
+	writeExec(t, filepath.Join(dir, "vnc-viewer"))
+
+	cmds, warnings := Discover(home)
+	if len(cmds) != 0 || len(warnings) != 0 {
+		t.Fatalf("expected a staging directory to be inert, got %v / %v", cmds, warnings)
+	}
+}
+
+func TestShadowedReportsBuiltinsAndUserCommands(t *testing.T) {
+	home := t.TempDir()
+	hostDir, _ := mkdirs(t, home)
+	writeExec(t, filepath.Join(hostDir, "mine"))
+
+	got := Shadowed(home, []string{"status", "mine", "vnc-viewer"})
+	if len(got) != 2 || got["status"] != "a built-in command" ||
+		!strings.Contains(got["mine"], filepath.Join(hostDir, "mine")) {
+		t.Fatalf("Shadowed = %v", got)
+	}
+}
+
+func TestResolvingSkipsShadowedNames(t *testing.T) {
+	home := t.TempDir()
+	hostDir, _ := mkdirs(t, home)
+	writeExec(t, filepath.Join(hostDir, "mine"))
+	dir := extensionCommandDir(t, home, model.KindFeature, "vnc")
+	for _, name := range []string{"status", "mine", "vnc-viewer"} {
+		writeExec(t, filepath.Join(dir, name))
+	}
+
+	extDir := filepath.Join(config.HostExtensionsDir(home), model.KindFeature.DirName(), "vnc")
+	if got := Resolving(home, extDir); len(got) != 1 || got[0] != "vnc-viewer" {
+		t.Fatalf("Resolving = %v, want [vnc-viewer]", got)
+	}
+	names, err := ExtensionCommandNames(extDir)
+	if err != nil || strings.Join(names, ",") != "mine,status,vnc-viewer" {
+		t.Fatalf("ExtensionCommandNames = %v, %v", names, err)
 	}
 }

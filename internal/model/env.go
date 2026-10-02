@@ -40,6 +40,7 @@ const (
 	EnvGatewayProxyReadyFile    = EnvPrefix + "GATEWAY_PROXY_READY_FILE"
 	EnvGatewaySession           = EnvPrefix + "GATEWAY_SESSION"
 	EnvGatewayCACertPath        = EnvPrefix + "GATEWAY_CA_CERT_PATH"
+	EnvGatewayCABundlePath      = EnvPrefix + "GATEWAY_CA_BUNDLE_PATH"
 	EnvImageInbox               = EnvPrefix + "IMAGE_INBOX"
 	EnvBin                      = EnvPrefix + "BIN"
 	EnvProjectRoot              = EnvPrefix + "PROJECT_ROOT"

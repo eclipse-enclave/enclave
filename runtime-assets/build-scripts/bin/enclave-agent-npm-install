@@ -22,6 +22,9 @@ node_dir="${ENCLAVE_AGENT_NODE_DIR:-/opt/enclave/node}"
 node_bin="${ENCLAVE_AGENT_NODE_BIN:-$node_dir/bin/node}"
 npm_bin="${ENCLAVE_AGENT_NPM_BIN:-$node_dir/bin/npm}"
 install_prefix="${npm_config_prefix:-$HOME/.local}"
+# Feature install scripts call this directly, without enclave-install-tool
+# exporting the prefix; npm would otherwise target the root-owned runtime dir.
+export npm_config_prefix="$install_prefix"
 
 if [ ! -x "$node_bin" ]; then
     echo "private agent node is missing at $node_bin" >&2

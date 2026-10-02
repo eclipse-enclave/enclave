@@ -1,0 +1,20 @@
+# Copyright (C) 2026 EclipseSource GmbH and others.
+#
+# This program and the accompanying materials are made available under the
+# terms of the MIT License, which is available in the project root.
+#
+# SPDX-License-Identifier: MIT
+
+schemaVersion: "1"
+kind: mixin
+name: claude-agent-sdk
+displayName: Claude Agent SDK
+description: Claude Agent SDK (@anthropic-ai/claude-agent-sdk), used by Theia's Claude Code provider
+defaultEnabled: false
+priority: 60
+failOnInstallError: true
+environment:
+  variables:
+    # Theia reads this before falling back to `npm root -g`, which follows the
+    # nvm version and is absent without node-dev.
+    CLAUDE_AGENT_SDK_PATH: /home/agent/.local/lib/node_modules/@anthropic-ai/claude-agent-sdk

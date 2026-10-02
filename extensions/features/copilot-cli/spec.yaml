@@ -1,0 +1,15 @@
+# Copyright (C) 2026 EclipseSource GmbH and others.
+#
+# This program and the accompanying materials are made available under the
+# terms of the MIT License, which is available in the project root.
+#
+# SPDX-License-Identifier: MIT
+
+schemaVersion: "1"
+kind: mixin
+name: copilot-cli
+displayName: GitHub Copilot CLI
+description: GitHub Copilot CLI (copilot), also used by Theia's Copilot provider
+defaultEnabled: false
+priority: 60
+failOnInstallError: true

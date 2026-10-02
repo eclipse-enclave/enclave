@@ -27,13 +27,19 @@ when exactly one enclave container is running).
 - **postStart.openIDE**: `theia`. Triggers the host launcher once the
   container is running.
 
-## API Keys
+## AI Providers
 
-| Variable | Purpose |
-|----------|---------|
-| `ANTHROPIC_API_KEY` | Anthropic API access for Theia AI features |
-| `OPENAI_API_KEY` | OpenAI API access for Theia AI features |
-| `GEMINI_API_KEY` | Google Gemini API access for Theia AI features |
+Theia's AI providers run in the backend inside the container. For API keys, the
+gateway injects the credential on requests to the provider's API hosts; the
+container only sees a placeholder.
+
+| Provider | Credential | Requires |
+|----------|------------|----------|
+| Anthropic | `ANTHROPIC_API_KEY` | |
+| OpenAI | `OPENAI_API_KEY` | |
+| Google Gemini | `GEMINI_API_KEY` | |
+| Claude Code | `ANTHROPIC_API_KEY` | [`claude-agent-sdk`](../../features/claude-agent-sdk/README.md) feature (opt-in) |
+| GitHub Copilot | Sign-in in Theia | [`copilot-cli`](../../features/copilot-cli/README.md) feature (opt-in) |
 
 Theia's Google provider also reads `GEMINI_API_KEY`, although its preference
 description only mentions `GOOGLE_API_KEY`. Set `GEMINI_API_KEY` on the host;

@@ -1,7 +1,6 @@
 ---
 name: enclave-help
 description: Answer questions about Enclave by reading the bundled documentation
-allowed-tools: Read, Glob, Grep
 ---
 
 # Enclave Help

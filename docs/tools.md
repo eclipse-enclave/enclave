@@ -13,6 +13,7 @@ Built-in tool profiles:
 |------|-------------|
 | `claude` | [Claude Code](https://www.anthropic.com/claude-code) (Anthropic) |
 | `codex` | [Codex CLI](https://github.com/openai/codex) (OpenAI) |
+| `copilot` | [GitHub Copilot CLI](https://github.com/features/copilot/cli) (GitHub) |
 | `mistral-vibe` | [Mistral Vibe CLI](https://github.com/mistralai/mistral-vibe) (opt-in/experimental) |
 | `opencode` | [OpenCode](https://opencode.ai/) |
 | `pi` | [Pi](https://github.com/earendil-works/pi) |

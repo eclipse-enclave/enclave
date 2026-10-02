@@ -81,6 +81,11 @@ func validateAndNormalizeProfile(profile *model.Profile) error {
 	}
 	profile.ContinueArgs = compactSpecArgs(profile.ContinueArgs)
 	profile.ResumeArgs = compactSpecArgs(profile.ResumeArgs)
+	caches, err := validateAndNormalizeCaches(profile.Caches)
+	if err != nil {
+		return err
+	}
+	profile.Caches = caches
 	return validateAndNormalizeProviderSecurestorage(profile.Providers)
 }
 

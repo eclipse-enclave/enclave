@@ -35,9 +35,11 @@ func TestAddCacheMountsCreatesDisposableSources(t *testing.T) {
 	home := t.TempDir()
 	r := newCacheMountRuntime(home)
 	acc := newMountAccumulator(nil, nil)
-	r.addCacheMounts(acc)
+	if err := r.addCacheMounts(acc); err != nil {
+		t.Fatalf("addCacheMounts: %v", err)
+	}
 
-	wantCount := len(packageCacheDirs(r.containerHome))
+	wantCount := len(config.BuiltinProjectCaches)
 	if len(acc.Mounts()) != wantCount {
 		t.Fatalf("mounts = %d, want %d", len(acc.Mounts()), wantCount)
 	}
@@ -70,7 +72,9 @@ func TestAddCacheMountsRespectsNoCache(t *testing.T) {
 	r := newCacheMountRuntime(t.TempDir())
 	r.run = model.RunOptions{NoCache: true}
 	acc := newMountAccumulator(nil, nil)
-	r.addCacheMounts(acc)
+	if err := r.addCacheMounts(acc); err != nil {
+		t.Fatalf("addCacheMounts: %v", err)
+	}
 	if len(acc.Mounts()) != 0 {
 		t.Fatalf("expected no mounts with NoCache, got %d", len(acc.Mounts()))
 	}
@@ -93,12 +97,14 @@ func TestAddCacheMountsSkipsUncreatableCache(t *testing.T) {
 	}
 
 	acc := newMountAccumulator(nil, nil)
-	r.addCacheMounts(acc)
+	if err := r.addCacheMounts(acc); err != nil {
+		t.Fatalf("addCacheMounts: %v", err)
+	}
 
 	if _, ok := lookupMountSource(acc.Mounts(), "/home/agent/.npm"); ok {
 		t.Error("uncreatable npm cache was mounted")
 	}
-	if want := len(packageCacheDirs(r.containerHome)) - 1; len(acc.Mounts()) != want {
+	if want := len(config.BuiltinProjectCaches) - 1; len(acc.Mounts()) != want {
 		t.Fatalf("mounts = %d, want %d (every other cache still mounted)", len(acc.Mounts()), want)
 	}
 }
@@ -117,7 +123,9 @@ func TestOnlyDisposableMountsCreateSources(t *testing.T) {
 	r.addMemoryMounts(acc)
 	r.addHistoryMounts(acc)
 	r.addImageInboxMount(acc)
-	r.addCacheMounts(acc)
+	if err := r.addCacheMounts(acc); err != nil {
+		t.Fatalf("addCacheMounts: %v", err)
+	}
 
 	cacheRoot := config.HostCacheDir(home)
 	for _, m := range acc.Mounts() {

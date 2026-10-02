@@ -95,10 +95,12 @@ Enclave follows platform-standard roots: the XDG base directories on Linux and o
 
 - Config: `~/.config/enclave/` (`$XDG_CONFIG_HOME`)
 - State: `~/.local/state/enclave/` (`$XDG_STATE_HOME`)
+- Protected tool/feature identity metadata: `~/.local/state/enclave/locks/store-<store-path-hash>.identity.json`; host-only, outside workload auth mounts
 - Cache: `~/.cache/enclave/` (`$XDG_CACHE_HOME`)
 - Embedded runtime assets: `~/.cache/enclave/assets/<content-hash>/`
 - Per-project network log and full captures: `~/.local/state/enclave/projects/<hash>/<tool>/logs/network.log` and `logs/capture/<session>/` beside it (captures are removed by project cleanup unless `--keep history`)
 - Per-project agent memory: `~/.local/state/enclave/projects/<hash>/<tool>/memory/` (agent-writable; Claude uses this root, Codex uses `<key>/` matching its config-store key; never shared between projects or agents)
+- Protected OAuth session state: `~/.local/state/enclave/oauth-sessions/<incarnation>/{view,runtime}/` and `features/github-cli/{view,runtime}/` below that session root (workload-native handle views and gateway-private registries; real grants stay in the selected tool and shared feature auth identities, gateway-only). Host-only `session.json` records feature admission for lifecycle recovery.
 - User-defined subcommands: `~/.config/enclave/commands/{host,session}/` (executable files become `enclave <name>` verbs)
 
 Per-project config/state is keyed by project hash and kept outside the worktree. See `docs/configuration.md` and `docs/runtime/stores.md` for details.

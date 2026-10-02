@@ -12,6 +12,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -25,10 +26,12 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"enclave/internal/domainpattern"
+	"enclave/internal/gateway/tlsstore"
 	"enclave/internal/model"
 	"enclave/internal/netlog"
 )
@@ -969,4 +972,274 @@ func readAuditEvents(t *testing.T, path string) []netlog.Event {
 		events = append(events, event)
 	}
 	return events
+}
+
+func TestProxyStreamsBeforeEOFAndCancelsUpstream(t *testing.T) {
+	for _, scheme := range []string{"http", "https"} {
+		t.Run(scheme, func(t *testing.T) {
+			upstreamCanceled := make(chan struct{})
+			const event = "data: first-token\n\n"
+			client, target, _ := streamingTestProxy(t, scheme, http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+				w.Header().Set("Content-Type", "text/event-stream")
+				_, _ = io.WriteString(w, event)
+				if err := http.NewResponseController(w).Flush(); err != nil {
+					t.Errorf("flush upstream: %v", err)
+				}
+				<-req.Context().Done()
+				close(upstreamCanceled)
+			}))
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			resp, err := client.Do(req)
+			if err != nil {
+				t.Fatalf("receive stream headers before upstream EOF: %v", err)
+			}
+			defer func() { _ = resp.Body.Close() }()
+			buf := make([]byte, len(event))
+			if _, err := io.ReadFull(resp.Body, buf); err != nil {
+				t.Fatalf("receive first event before upstream EOF: %v", err)
+			}
+			if string(buf) != event {
+				t.Fatalf("first event = %q, want %q", buf, event)
+			}
+			cancel()
+			select {
+			case <-upstreamCanceled:
+			case <-time.After(5 * time.Second):
+				t.Fatal("downstream cancellation did not reach upstream")
+			}
+		})
+	}
+}
+
+func TestProxyAbortsAndAuditsTruncatedStreams(t *testing.T) {
+	for _, scheme := range []string{"http", "https"} {
+		t.Run(scheme, func(t *testing.T) {
+			client, target, logPath := streamingTestProxy(t, scheme, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "text/event-stream")
+				w.Header().Set("Content-Length", "100")
+				_, _ = io.WriteString(w, "data: partial\n\n")
+				_ = http.NewResponseController(w).Flush()
+			}))
+			resp, err := client.Get(target)
+			if err != nil {
+				t.Fatalf("receive initial stream headers: %v", err)
+			}
+			defer func() { _ = resp.Body.Close() }()
+			body, err := io.ReadAll(resp.Body)
+			if !errors.Is(err, io.ErrUnexpectedEOF) {
+				t.Fatalf("read truncated stream error = %v, want unexpected EOF", err)
+			}
+			if string(body) != "data: partial\n\n" {
+				t.Fatalf("partial response = %q, want upstream bytes without appended error body", body)
+			}
+			events := readAuditEvents(t, logPath)
+			var last netlog.Event
+			for _, event := range events {
+				if event.Type == netlog.TypeHTTP {
+					last = event
+				}
+			}
+			if last.Rule != "upstream-body-error" || last.ResponseSize != int64(len(body)) {
+				t.Fatalf("truncated stream audit = %+v", last)
+			}
+		})
+	}
+}
+
+func TestProxyStripsHopHeadersAndForwardsTrailers(t *testing.T) {
+	client, target, _ := streamingTestProxy(t, "http", http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		for _, name := range []string{"X-Request-Hop", "Proxy-Authorization"} {
+			if req.Header.Get(name) != "" {
+				t.Errorf("upstream received hop-by-hop header %s", name)
+			}
+		}
+		w.Header().Set("Connection", "X-Response-Hop")
+		w.Header().Set("X-Response-Hop", "must-not-forward")
+		w.Header().Set("Trailer", "X-Checksum")
+		_, _ = io.WriteString(w, "complete response")
+		w.Header().Set("X-Checksum", "verified")
+	}))
+	req, err := http.NewRequest(http.MethodGet, target, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Connection", "X-Request-Hop")
+	req.Header.Set("X-Request-Hop", "must-not-forward")
+	req.Header.Set("Proxy-Authorization", "must-not-forward")
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil || string(body) != "complete response" {
+		t.Fatalf("response = %q, error = %v", body, err)
+	}
+	if resp.Header.Get("X-Response-Hop") != "" {
+		t.Fatal("downstream received hop-by-hop response header")
+	}
+	if got := resp.Trailer.Get("X-Checksum"); got != "verified" {
+		t.Fatalf("trailer = %q, want verified", got)
+	}
+}
+
+func TestProxyRejectsUnsupportedProtocolUpgrade(t *testing.T) {
+	client, target, _ := streamingTestProxy(t, "http", http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Connection", "Upgrade")
+		w.Header().Set("Upgrade", "websocket")
+		w.WriteHeader(http.StatusSwitchingProtocols)
+	}))
+	resp, err := client.Get(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusBadGateway {
+		t.Fatalf("upgrade status = %d, want 502", resp.StatusCode)
+	}
+}
+
+func streamingTestProxy(t *testing.T, scheme string, handler http.Handler) (*http.Client, string, string) {
+	t.Helper()
+	upstream := httptest.NewUnstartedServer(handler)
+	if scheme == "https" {
+		upstream.StartTLS()
+	} else {
+		upstream.Start()
+	}
+	t.Cleanup(upstream.Close)
+	logPath := filepath.Join(t.TempDir(), "network.log")
+	audit, err := netlog.NewAppender(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = audit.Close() })
+	p := newProxy([]string{"stream.example"}, nil, nil, true, audit, testSession)
+	p.transport.DialContext = func(ctx context.Context, network, _ string) (net.Conn, error) {
+		return (&net.Dialer{}).DialContext(ctx, network, upstream.Listener.Addr().String())
+	}
+	t.Cleanup(p.transport.CloseIdleConnections)
+	var proxyAddr string
+	clientTransport := &http.Transport{}
+	if scheme == "https" {
+		upstreamRoots := x509.NewCertPool()
+		upstreamRoots.AddCert(upstream.Certificate())
+		p.transport.TLSClientConfig = &tls.Config{MinVersion: tls.VersionTLS12, RootCAs: upstreamRoots, ServerName: "127.0.0.1"}
+		store := tlsstore.New(t.TempDir())
+		if err := store.EnsureCA(); err != nil {
+			t.Fatal(err)
+		}
+		caPEM, err := os.ReadFile(store.CACertPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		clientRoots := x509.NewCertPool()
+		if !clientRoots.AppendCertsFromPEM(caPEM) {
+			t.Fatal("load proxy CA")
+		}
+		clientTransport.TLSClientConfig = &tls.Config{MinVersion: tls.VersionTLS12, RootCAs: clientRoots}
+		listener, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		dispatch, err := newHTTPSDispatchServer(p, store, listener)
+		if err != nil {
+			_ = listener.Close()
+			t.Fatal(err)
+		}
+		served := make(chan error, 1)
+		go func() { served <- dispatch.Serve() }()
+		t.Cleanup(func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := dispatch.Shutdown(ctx); err != nil {
+				t.Errorf("shutdown HTTPS proxy: %v", err)
+			}
+			if err := <-served; err != nil {
+				t.Errorf("serve HTTPS proxy: %v", err)
+			}
+		})
+		proxyAddr = listener.Addr().String()
+	} else {
+		server := httptest.NewServer(p.handler(scheme))
+		t.Cleanup(server.Close)
+		proxyAddr = server.Listener.Addr().String()
+	}
+	clientTransport.DialContext = func(ctx context.Context, network, _ string) (net.Conn, error) {
+		return (&net.Dialer{}).DialContext(ctx, network, proxyAddr)
+	}
+	t.Cleanup(clientTransport.CloseIdleConnections)
+	return &http.Client{Transport: clientTransport, Timeout: 10 * time.Second}, scheme + "://stream.example/stream", logPath
+}
+
+// A release host can reflect arbitrary request headers in error messages. The
+// declared authentication header is the only field allowed to receive a key.
+func TestProxyRejectsSecretInReflectableHeaders(t *testing.T) {
+	const placeholder = "ENCLAVE_SECRET_esr001"
+	const canary = "synthetic-provider-api-key"
+	for _, tc := range []struct {
+		name, header, format, value, extraHeader string
+		extraValues                              []string
+		deny                                     bool
+	}{
+		{name: "reflected-beta", header: "x-api-key", value: placeholder, extraHeader: "Anthropic-Beta", extraValues: []string{placeholder}, deny: true},
+		{name: "other-header", header: "x-api-key", value: placeholder, extraHeader: "X-Trace", extraValues: []string{"trace=" + placeholder}, deny: true},
+		{name: "duplicate-header", header: "x-api-key", value: placeholder, extraHeader: "Anthropic-Beta", extraValues: []string{"safe", placeholder}, deny: true},
+		{name: "similar-header", header: "x-api-key", value: placeholder, extraHeader: "X-Api-Key-Extra", extraValues: []string{placeholder}, deny: true},
+		{name: "declared-api-key", header: "x-api-key", value: placeholder},
+		{name: "bare-bearer", header: "authorization", format: "Bearer %s", value: placeholder},
+		{name: "existing-bearer", header: "authorization", format: "Bearer %s", value: "Bearer " + placeholder},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var calls atomic.Int32
+			upstream := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+				calls.Add(1)
+				want := canary
+				if tc.format != "" {
+					want = "Bearer " + canary
+				}
+				if req.Header.Get(tc.header) != want {
+					t.Error("declared authentication header did not receive expected credential")
+				}
+				_, _ = io.WriteString(w, "Unexpected value(s) "+req.Header.Get("Anthropic-Beta")+" for the anthropic-beta header")
+			}))
+			defer upstream.Close()
+			target, err := url.Parse(upstream.URL)
+			if err != nil {
+				t.Fatal(err)
+			}
+			p := newProxy([]string{target.Hostname()}, nil, []model.SecretReleaseEntry{{
+				SecretID: "anthropic-api-key", Placeholder: placeholder, Value: canary,
+				Hosts: []string{target.Hostname()}, Header: tc.header, Format: tc.format,
+			}}, false, nil, testSession)
+			p.transport = upstream.Client().Transport.(*http.Transport)
+			req := httptest.NewRequest(http.MethodPost, upstream.URL+"/v1/messages", strings.NewReader("{}"))
+			// Deliberately use a non-canonical casing: HTTP header matching is
+			// case-insensitive, but only the declared field may be substituted.
+			req.Header[tc.header] = []string{tc.value}
+			if tc.extraHeader != "" {
+				req.Header[tc.extraHeader] = tc.extraValues
+			}
+			w := httptest.NewRecorder()
+			p.handler("https")(w, req)
+			wantStatus, wantCalls := http.StatusOK, int32(1)
+			if tc.deny {
+				wantStatus, wantCalls = http.StatusForbidden, 0
+			}
+			if w.Code != wantStatus || calls.Load() != wantCalls {
+				t.Fatalf("status = %d, upstream calls = %d; want %d, %d", w.Code, calls.Load(), wantStatus, wantCalls)
+			}
+			if strings.Contains(w.Body.String(), canary) {
+				t.Fatal("real credential reflected to workload")
+			}
+			if tc.deny && req.Header[tc.header][0] != tc.value {
+				t.Fatal("denied request partially rewrote authentication header")
+			}
+		})
+	}
 }

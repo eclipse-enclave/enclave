@@ -60,6 +60,7 @@ type AuthOptionSources struct {
 	NoAPIKey     OptionSource
 	PassAPIKey   OptionSource
 	PassEnv      OptionSource
+	ProtectAuth  OptionSource
 	ResetAuth    OptionSource
 	SecretsScope OptionSource
 }
@@ -129,6 +130,7 @@ func DefaultOptionSources() OptionSources {
 			NoAPIKey:     SourceDefault,
 			PassAPIKey:   SourceDefault,
 			PassEnv:      SourceDefault,
+			ProtectAuth:  SourceDefault,
 			ResetAuth:    SourceDefault,
 			SecretsScope: SourceDefault,
 		},
@@ -274,6 +276,9 @@ func MergeOptionSources(base OptionSources, override OptionSources) OptionSource
 	}
 	if override.ProjectMount != SourceUnset {
 		base.ProjectMount = override.ProjectMount
+	}
+	if override.ProtectAuth != SourceUnset {
+		base.ProtectAuth = override.ProtectAuth
 	}
 	if override.ResetAuth != SourceUnset {
 		base.ResetAuth = override.ResetAuth

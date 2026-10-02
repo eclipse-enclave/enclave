@@ -31,6 +31,38 @@ import (
 // tool.
 func (b *Backend) PrepareStores(ctx context.Context, prep backend.StorePrep) (backend.StoreState, error) {
 	state := backend.StoreState{}
+	if prep.AuthSession != nil {
+		if err := b.validateAuthReservation(prep.AuthSession); err != nil {
+			return state, err
+		}
+		if prep.AuthSession.Protected {
+			if prep.Config == nil {
+				return state, fmt.Errorf("protected OAuth requires a native config view")
+			}
+			originalConfig, err := hoststore.ResolveDir(b.opts.Host.Home, prep.Config.Key, backend.StoreKindConfig)
+			if err != nil {
+				return state, err
+			}
+			if err := rejectNativeAuthSource(originalConfig); err != nil {
+				return state, err
+			}
+			prep.AuthSession.ConfigKey = prep.Config.Key
+			b.storage.authSession = prep.AuthSession
+			b.storage.viewDir = b.authViewDir(prep.AuthSession)
+			if prep.Config.Overlay != nil {
+				if err := rejectNativeAuthSource(prep.Config.Overlay.SourceDir); err != nil {
+					return state, err
+				}
+				prep.Config.Overlay.PreservePaths = nil
+			}
+			prep.ResetAuthFiles = nil
+		}
+	}
+	if prep.Auth != nil {
+		if _, err := b.storage.storeDir(prep.Auth.Key, backend.StoreKindAuth); err != nil {
+			return state, err
+		}
+	}
 	if prep.Config != nil {
 		b.prepareConfigStore(*prep.Config)
 	}
@@ -199,6 +231,11 @@ func (b *Backend) resetAuthFiles(ctx context.Context, prep backend.StorePrep) {
 	}
 
 	if err := b.storage.WithStoreLock(ctx, lockKey, lockKind, func() error {
+		if prep.Auth != nil {
+			if _, err := b.storage.storeDir(prep.Auth.Key, backend.StoreKindAuth); err != nil {
+				return err
+			}
+		}
 		logx.Infof("Resetting %s auth files in store", title)
 		for _, authFile := range authFiles {
 			if err := b.storage.RemovePath(ctx, prep.Config.Key, backend.StoreKindConfig, authFile); err != nil {

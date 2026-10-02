@@ -34,6 +34,7 @@ type Defaults struct {
 	Ephemeral              *bool               `json:"ephemeral"`
 	AuthScope              string              `json:"auth_scope"`
 	AuthName               string              `json:"auth_name"`
+	ProtectAuth            *bool               `json:"protect_auth"`
 	SecretsScope           string              `json:"secrets_scope"`
 	ResetAuth              *bool               `json:"reset_auth"`
 	NoAPIKey               *bool               `json:"no_api_key"`

@@ -603,12 +603,12 @@ network:
 
 When the gateway is enabled, credentials with a `serviceAuth` entry are
 replaced with random placeholders in the container environment; the gateway
-MITM proxy intercepts HTTPS requests to the declared hosts and substitutes the
-placeholder only in the configured `headerName`. Inspected requests whose
-placeholder-bearing headers do not satisfy the release rule are denied.
-Credentials without a `serviceAuth` entry are injected
-as normal env vars. Placeholder generation errors abort startup rather than
-falling back to the real credential.
+MITM proxy intercepts HTTPS requests to the declared hosts and rewrites the
+configured header with the real secret. A known placeholder in any other header
+(case-insensitive comparison), or on plaintext HTTP, denies the whole request.
+Credentials without a `serviceAuth` entry are injected as normal env vars.
+Placeholder generation errors abort startup rather than falling back to the
+real credential.
 
 #### Client-side credential format checks
 

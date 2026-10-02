@@ -18,6 +18,8 @@ func authCommand(res *Result) *cobra.Command {
 	cmd.AddCommand(
 		authSubcommand("import", "Import host auth files into volume", "auth-import", res),
 		authSubcommand("export", "Export auth files from volume to host", "auth-export", res),
+		authSubcommand("reset", "Clear an idle protected identity's saved OAuth grant", "auth-reset", res),
+		authSubcommand("downgrade", "Remove protection from an idle, empty identity", "auth-downgrade", res),
 	)
 	return cmd
 }
@@ -32,9 +34,12 @@ func authSubcommand(name string, description string, action string, res *Result)
 			return nil
 		},
 	}
-	// auth import/export only consume Backend, Tool, AuthScope, and AuthName. The other
+	// Auth lifecycle commands consume Backend, Tool, AuthScope, and AuthName. The other
 	// Auth flags (--reset-auth, --no-api-key, --pass-api-key, --pass-env,
 	// --secrets-scope) are runtime-only and have no effect here.
 	addOptionFlagsByName(cmd.Flags(), &res.Options, &res.Sources, "backend", "tool", "auth_scope", "auth_name")
+	if name == "reset" || name == "downgrade" {
+		cmd.Flags().StringVar(&res.AuthFeature, "feature", "", "Select a protected feature identity instead of a tool (github-cli)")
+	}
 	return cmd
 }

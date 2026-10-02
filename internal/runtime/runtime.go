@@ -68,6 +68,7 @@ type Runtime struct {
 	// cached, so the replacement host reaches the allow set too.
 	releaseHostOverrides map[string][]string
 	backend              backend.Backend
+	authSession          *backend.AuthSession
 }
 
 type ExecutionContext struct {
@@ -228,6 +229,9 @@ func (r *Runtime) sessionStartLockName() string {
 }
 
 func (r *Runtime) prepareExecution() (*ExecutionContext, error) {
+	if err := r.validateProtectedAuth(); err != nil {
+		return nil, err
+	}
 	config.WriteProjectMarkers(r.host.Home, r.project.Hash, r.project.RealDir)
 	baseContainerName := r.baseContainerName()
 	var containerName string
@@ -261,6 +265,11 @@ func (r *Runtime) prepareExecution() (*ExecutionContext, error) {
 	}
 	projectEnv, envFileLoaded := r.envFileValues()
 	sessionEnv := append(append([]string{}, mountArgs.Env()...), projectEnv...)
+	if r.auth.ProtectAuth {
+		if err := validateProtectedEnv(sessionEnv); err != nil {
+			return nil, err
+		}
+	}
 	if err := validateGitIdentity(gitIdentity, sessionEnv); err != nil {
 		return nil, err
 	}
@@ -280,6 +289,9 @@ func (r *Runtime) prepareExecution() (*ExecutionContext, error) {
 	r.applyFeaturePorts()
 	runCtx.Run = r.run
 	if err := r.handler.ValidateRun(runCtx); err != nil {
+		if prepared.Cleanup != nil {
+			prepared.Cleanup()
+		}
 		return nil, err
 	}
 	networkResult, err := newNetworkManager(r).Prepare(containerName, prepared.AuthState, prepared.SecretMapping)
@@ -293,6 +305,14 @@ func (r *Runtime) prepareExecution() (*ExecutionContext, error) {
 	env = append(env, networkResult.Env...)
 	env = append(env, projectEnv...)
 	cleanup := mergeCleanup(prepared.Cleanup, networkResult.Cleanup)
+	if r.auth.ProtectAuth {
+		if err := r.validateProtectedBindings(env); err != nil {
+			if cleanup != nil {
+				cleanup()
+			}
+			return nil, err
+		}
+	}
 	return &ExecutionContext{
 		ContainerName:  containerName,
 		Mounts:         mountArgs.Mounts(),
@@ -407,6 +427,63 @@ func (r *Runtime) prepareVolumes(containerName string, baseContainerName string,
 	vm := newVolumeManager(r)
 	prep, stores := vm.BuildPrep(volumeSuffix)
 	cleanup := r.ephemeralVolumeCleanup(stores)
+	manager, hasAdmission := r.backend.(backend.AuthSessionManager)
+	var admitted *backend.AuthSession
+	if hasAdmission {
+		cleanup = mergeCleanup(cleanup, func() {
+			if admitted != nil {
+				if err := manager.ReleaseAuthSession(context.Background(), admitted); err != nil {
+					logx.Warnf("Auth identity reservations retained: %v", err)
+				}
+			}
+		})
+	}
+	if r.auth.ProtectAuth && stores.Auth == nil {
+		return preparedVolumes{}, fmt.Errorf("protected auth requires a declared shared provider auth store")
+	}
+	if stores.Auth != nil {
+		if hasAdmission {
+			session, err := manager.PrepareAuthSession(context.Background(), stores.Auth.Key, containerName, r.auth.ProtectAuth, r.auth.ResetAuth)
+			admitted = session
+			if err != nil {
+				cleanup()
+				return preparedVolumes{}, err
+			}
+			if session == nil || session.Protected != r.auth.ProtectAuth || session.Key != stores.Auth.Key || session.Session != containerName {
+				cleanup()
+				return preparedVolumes{}, fmt.Errorf("backend returned inconsistent auth session admission")
+			}
+			r.authSession = session
+			prep.AuthSession = session
+		} else if r.auth.ProtectAuth {
+			return preparedVolumes{}, fmt.Errorf("backend does not support protected auth admission")
+		}
+	}
+	if len(stores.Features) != 0 {
+		if features, ok := r.backend.(backend.FeatureAuthSessionManager); ok && hasAdmission {
+			names := make([]string, 0, len(stores.Features))
+			for name := range stores.Features {
+				names = append(names, name)
+			}
+			session, err := features.PrepareFeatureAuthSessions(context.Background(), admitted, containerName, names, r.auth.ProtectAuth)
+			if session != nil {
+				admitted = session
+				r.authSession = session
+				prep.AuthSession = session
+			}
+			if err != nil {
+				if cleanup != nil {
+					cleanup()
+				}
+				return preparedVolumes{}, err
+			}
+		} else if r.auth.ProtectAuth {
+			if cleanup != nil {
+				cleanup()
+			}
+			return preparedVolumes{}, fmt.Errorf("backend does not support protected feature auth admission")
+		}
+	}
 	state, err := r.backend.PrepareStores(context.Background(), prep)
 	if err != nil {
 		if cleanup != nil {
@@ -862,8 +939,12 @@ func (r *Runtime) backendRequest(ctx *ExecutionContext, detached bool, interacti
 	user := ""
 	r.applyDevcontainerUserIntent(&user, &env)
 	r.applyRuntimeUIDRemapIntent(&user, &env)
+	if r.auth.ProtectAuth {
+		user = r.host.UID + ":" + r.host.GID
+	}
 
 	req := backend.Request{
+		AuthSession: r.authSession,
 		Session: backend.SessionMeta{
 			Tool:         r.profile.Name,
 			ProjectHash:  r.project.Hash,
@@ -895,7 +976,7 @@ func (r *Runtime) backendRequest(ctx *ExecutionContext, detached bool, interacti
 		// reconcile via Stop/Remove finalize while the container still exists.
 		req.AuthSync = ctx.AuthSync
 	}
-	if req.Network.Mode != backend.NetworkModeRestricted {
+	if !req.Network.UsesGateway() {
 		req.Hostname = model.HostnamePrefix + r.project.Name
 	}
 	return req
@@ -1459,6 +1540,14 @@ func (r *Runtime) addAuthMount(mounts *mountAccumulator, authStore *backend.Stor
 	if authStore == nil {
 		return
 	}
+	if r.auth.ProtectAuth {
+		view := resolveContainerProfilePath(r.containerHome, r.profile.ConfigDir)
+		mounts.AddEnv(model.EnvAuthDir, view)
+		mounts.AddEnv("CLAUDE_SECURESTORAGE_CONFIG_DIR", view)
+		mounts.AddEnv("ENCLAVE_PROTECTED_AUTH", "1")
+		mounts.AddEnv("DISABLE_AUTOUPDATER", "1")
+		return
+	}
 	authMountPath := r.containerHome + "/" + model.ContainerAuthDir
 	mounts.AddStore(backend.PersistentStore{Kind: authStore.Kind, Key: authStore.Key, ContainerPath: authMountPath})
 	mounts.AddEnv(model.EnvAuthDir, authMountPath)
@@ -1486,6 +1575,16 @@ func (r *Runtime) addFeatureAuthMounts(mounts *mountAccumulator, featureStores m
 	for _, feat := range r.features {
 		store, ok := featureStores[feat.Name]
 		if !ok {
+			continue
+		}
+		if r.auth.ProtectAuth {
+			mountPath := resolveContainerProfilePath(r.containerHome, feat.ConfigDir)
+			mounts.AddStore(backend.PersistentStore{Kind: store.Kind, Key: store.Key, ContainerPath: mountPath})
+			if feat.Name == "github-cli" {
+				mounts.AddEnv(model.EnvProtectedGitHub, "1")
+				mounts.AddEnv("GH_CONFIG_DIR", mountPath)
+				mounts.AddEnv("GH_HOST", "github.com")
+			}
 			continue
 		}
 		mountPath := r.containerHome + "/" + model.ContainerFeatureAuthDir + "/" + feat.Name
@@ -1544,6 +1643,9 @@ func (r *Runtime) addGatewayCAMount(mounts *mountAccumulator) error {
 }
 
 func (r *Runtime) shouldUseGateway() bool {
+	if r.auth.ProtectAuth {
+		return true
+	}
 	resolved, err := r.resolveEffectivePolicy()
 	if err != nil {
 		logx.Warnf("Failed to resolve effective network policy for gateway decision: %v", err)

@@ -52,6 +52,7 @@ type bundleMeta struct {
 	GeneratedAt string `json:"generated_at"`
 	Generation  string `json:"generation"`
 	Mode        string `json:"mode"`
+	ModeSource  string `json:"mode_source,omitempty"`
 	Tool        string `json:"tool"`
 	Resolver    string `json:"resolver"`
 	DomainCount int    `json:"domain_count"`
@@ -110,7 +111,7 @@ func renderConfigBundle(policy network.EffectivePolicy, tool string) (renderedBu
 		return empty, err
 	}
 
-	meta, err := renderBundleMeta(strings.TrimSpace(tool), files.resolver, files.domainCount, time.Now().UTC())
+	meta, err := renderBundleMeta(policy, strings.TrimSpace(tool), files.resolver, files.domainCount, time.Now().UTC())
 	if err != nil {
 		return empty, err
 	}
@@ -125,16 +126,23 @@ func renderConfigBundle(policy network.EffectivePolicy, tool string) (renderedBu
 
 func renderBundleFiles(policy network.EffectivePolicy, tool string) (renderedBundleFiles, error) {
 	var empty renderedBundleFiles
-	if policy.Mode == model.NetworkModeUnrestricted {
-		return empty, errors.New("live gateway apply does not support unrestricted mode")
+	mode, err := normalizeMode(policy.Mode)
+	if err != nil {
+		return empty, err
 	}
-
-	domains, denied, err := network.EffectiveRenderDomainsForTool(policy, tool)
+	policy.Mode = mode
+	var domains, denied []string
+	if mode == model.NetworkModeRestricted {
+		domains, denied, err = network.EffectiveRenderDomainsForTool(policy, tool)
+	}
 	if err != nil {
 		return empty, err
 	}
 	resolver := network.FirstIPv4Resolver(policy.Resolvers)
-	dnsmasq := network.RenderDNSMasqConfig(domains, denied, resolver)
+	dnsmasq, err := network.RenderDnsmasqConfigForTool(policy, tool, resolver)
+	if err != nil {
+		return empty, err
+	}
 	domainsTxt := joinLines(domains)
 	deniedTxt := joinLines(denied)
 
@@ -145,17 +153,22 @@ func renderBundleFiles(policy network.EffectivePolicy, tool string) (renderedBun
 		resolver:    resolver,
 		domainCount: len(domains),
 	}
-	if err := validateRenderedBundle(files.dnsmasq); err != nil {
+	if err := validateRenderedBundle(files.dnsmasq, mode); err != nil {
 		return empty, err
 	}
 	return files, nil
 }
 
-func renderBundleMeta(tool string, resolver string, domainCount int, generatedAt time.Time) ([]byte, error) {
+func renderBundleMeta(policy network.EffectivePolicy, tool string, resolver string, domainCount int, generatedAt time.Time) ([]byte, error) {
+	mode, err := normalizeMode(policy.Mode)
+	if err != nil {
+		return nil, err
+	}
 	metaValue := bundleMeta{
 		GeneratedAt: generatedAt.Format(time.RFC3339),
 		Generation:  generatedAt.Format(time.RFC3339Nano),
-		Mode:        model.NetworkModeRestricted,
+		Mode:        mode,
+		ModeSource:  policy.ModeSource,
 		Tool:        tool,
 		Resolver:    resolver,
 		DomainCount: domainCount,
@@ -168,9 +181,15 @@ func renderBundleMeta(tool string, resolver string, domainCount int, generatedAt
 	return metaJSON, nil
 }
 
-func validateRenderedBundle(dnsmasq []byte) error {
+func validateRenderedBundle(dnsmasq []byte, mode string) error {
 	content := string(dnsmasq)
-	if !strings.Contains(content, "no-resolv") || !strings.Contains(content, "address=/#/") {
+	complete := strings.Contains(content, "no-resolv") && strings.Contains(content, "no-poll")
+	if mode == model.NetworkModeUnrestricted {
+		complete = complete && strings.Contains(content, "\nserver=") && !strings.Contains(content, "address=")
+	} else {
+		complete = complete && strings.Contains(content, "address=/#/")
+	}
+	if !complete {
 		return errors.New("rendered dnsmasq bundle is incomplete")
 	}
 	return nil
@@ -238,4 +257,59 @@ func ReadAllowedDomains(path string) ([]string, error) {
 		domains = append(domains, domain)
 	}
 	return domains, nil
+}
+
+// PolicyState records the startup destination-policy choice and its source.
+// The allow-all-network source remains a session override during live reload.
+type PolicyState struct {
+	Mode       string `json:"mode"`
+	ModeSource string `json:"mode_source,omitempty"`
+}
+
+// ReadMode reads the destination-policy mode from trusted gateway metadata.
+// Missing or malformed metadata fails closed; an absent mode is not unrestricted.
+func ReadMode(path string) (string, error) {
+	state, err := ReadPolicyState(path)
+	return state.Mode, err
+}
+
+func ReadPolicyState(path string) (PolicyState, error) {
+	var empty PolicyState
+	// #nosec G304 -- path is resolved from the internal gateway bundle layout.
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return empty, fmt.Errorf("read gateway metadata: %w", err)
+	}
+	var meta bundleMeta
+	if err := json.Unmarshal(data, &meta); err != nil {
+		return empty, fmt.Errorf("parse gateway metadata: %w", err)
+	}
+	if meta.Mode == "" {
+		return empty, errors.New("gateway metadata mode is missing")
+	}
+	mode, err := normalizeMode(meta.Mode)
+	if err != nil {
+		return empty, err
+	}
+	switch meta.ModeSource {
+	case "", "default", "global", "project":
+	case "allow-all-network":
+		if mode != model.NetworkModeUnrestricted {
+			return empty, errors.New("allow-all-network metadata requires unrestricted mode")
+		}
+	default:
+		return empty, errors.New("invalid gateway destination policy source")
+	}
+	return PolicyState{Mode: mode, ModeSource: meta.ModeSource}, nil
+}
+
+func normalizeMode(mode string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "", model.NetworkModeRestricted:
+		return model.NetworkModeRestricted, nil
+	case model.NetworkModeUnrestricted:
+		return model.NetworkModeUnrestricted, nil
+	default:
+		return "", errors.New("invalid gateway destination policy mode")
+	}
 }

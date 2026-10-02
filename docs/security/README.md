@@ -119,14 +119,44 @@ with unrestricted networking and without gateway-side HTTP secret release.
 Host environment variables are not passed unless declared by an enabled
 extension or explicitly selected with `--pass-env`. Declared secrets configured
 for HTTP release are represented by placeholders in the tool environment and
-released by the gateway only in the configured header for matching HTTPS hosts.
-This protects those environment values from direct exfiltration, but credential
-files and secrets without HTTP release can contain real values inside the tool
-config/auth store.
+released by the gateway only in each rule's declared header at matching HTTPS
+hosts. A known placeholder in another header denies the whole request. This
+keeps raw values out of the tool environment, but approved providers receive
+them and ordinary responses are not masked if a provider reflects an auth
+header. Credential files and secrets without HTTP release can contain real
+values inside the tool config/auth store.
 
 Once configured, the SSH key is available to every Docker session, regardless
 of project or tool. SSH on port 22 bypasses the HTTP/TLS proxy, so a push does
 not appear in `network.log`, even with `--network-log=requests` or `full`. See
 [SSH keys](../auth.md#ssh-keys) for its access and how to scope or revoke it.
+
+### Experimental gateway-owned OAuth
+
+`--protect-auth` enables captured-token custody for a fresh named Claude
+subscription identity on Docker/Podman. The workload's auth file holds
+session-bound handles; the gateway owns the durable grant and substitutes it
+only in approved endpoint/credential fields. The built-in `github-cli` feature
+also keeps its real native credential files gateway-only and gives the workload
+a separate handle view. Existing unprotected login and other secret files are
+unchanged. Container and pinned-client verification are
+still pending; see the [test plan](../runtime/oauth-broker-verification.md).
+
+A live handle still authorizes the supported requests. This is not resource-level
+authorization, nor does it protect enrollment from a malicious client exporting
+codes, device codes and PKCE verifiers before capture. GitHub support is limited
+to the declared GitHub.com adapter, not PAT paste, Enterprise or arbitrary
+native-auth features. GitLab remains env-secret based. Other providers, MCP
+login, alternate credential sources and arbitrary secret files are outside the
+adapters.
+Approved upstream services remain trusted not to reflect their credentials;
+ordinary response streams are not scrubbed.
+
+Protection survives reset and omission of the flag. A protected identity cannot
+silently reopen through legacy mounts; downgrade requires an explicit host
+command while idle and empty. Refresh uncertainty requires reauthentication,
+never raw-token fallback. Native logout is local sign-out, not proof of upstream
+revocation or invalidation of copied live handles. Both unrestricted network
+selectors retain gateway mediation; only unprotected sessions may bypass it.
 
 See the [restricted network request flow](../runtime/network-request-flow.md).

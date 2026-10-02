@@ -201,6 +201,9 @@ Source: [`internal/runtime/volume_manager.go`](../../internal/runtime/volume_man
 
 ## Shared Auth Store
 
+The following describes ordinary auth, the default. `--protect-auth` uses the
+separate [protected identity layout](#protected-identity-layout) below.
+
 The shared auth store holds OAuth tokens and session files that should be
 available across all projects for a given tool. It is created when all of the
 following are true:
@@ -274,9 +277,65 @@ run the same finalization when stopped or removed.
 Source: [`internal/backend/docker/authsync.go`](../../internal/backend/docker/authsync.go) `syncSharedAuthStores`,
 [`runtime-assets/auth-reconcile.sh`](../../runtime-assets/auth-reconcile.sh), [`entrypoint.sh`](../../entrypoint.sh)
 
+### Protected identity layout
+
+Experimental `--protect-auth` uses this layout on Docker/Podman:
+
+| State | Trusted owner / location | Lifetime |
+|-------|--------------------------|----------|
+| Grant, provider metadata, generation and refresh recovery | Selected existing `tools/claude/auth/<identity>/` directory; gateway-only RW mount | Survives session removal |
+| Identity protection and admission | Host-only `locks/store-<store-path-hash>.identity.json`, outside the auth directory and all workload mounts | Persists across auth reset/removal; only explicit host-side downgrade clears protection |
+| Native auth view containing access/refresh handles | `oauth-sessions/<incarnation>/view/`, mounted at `~/.claude` | Rebuilt and removed per logical session |
+| Handle registration and session incarnation | `oauth-sessions/<incarnation>/runtime/`, gateway-only | Survives proxy-process reload, not session end |
+| GitHub feature's native credentials and saved grant | `features/github-cli/auth/`, gateway-only when protected | Shared across tools/projects; survives session removal |
+| GitHub feature handle/config view | `oauth-sessions/<incarnation>/features/github-cli/view/`, mounted at `~/.config/gh` | Rebuilt and removed per logical session |
+| GitHub feature handle registration | `oauth-sessions/<incarnation>/features/github-cli/runtime/`, gateway-only | Survives proxy-process reload, not session end |
+
+Do not mount the real identity or a parent containing it into a workload or
+auth-reconcile helper. Both inspected-mount and foreground request-driven
+finalization omits protected provider and feature auth. Workload-written expiry/metadata
+cannot update the trusted grant. `CLAUDE_CONFIG_DIR`, `ENCLAVE_AUTH_DIR` and
+`CLAUDE_SECURESTORAGE_CONFIG_DIR` name the session view; the pinned client uses
+`CLAUDE_CONFIG_DIR`. The view also holds session-scoped config/history. Agent
+memory is separately mounted. Gateway storage writes preserve the mounted
+directory owner; protected-only capabilities let its separate proxy UID write
+private host-owned storage. Container ownership/SELinux behavior still needs
+[engine verification](oauth-broker-verification.md).
+
+The initial admission rule is one active protected session per identity, also
+excluding legacy sessions using that identity across projects and engines.
+Detached CLI exit and proxy reload cannot release admission; verify that the
+logical session ended first. A host-wide mount-admission lock also serializes
+protected enrollment with final workload bind checks through confirmed startup.
+All Docker/Podman workloads reject protected grant/parent/alias binds and
+host-only lock/control directories, not just sessions using the protected flag.
+Checked canonical bind paths are passed to the engine; host filesystem setup
+and host administrators remain trusted. Identity protection persists independently of the
+grant, including across reset. Reset clears only the selected identity after
+ending its owner; `auth reset` preserves protection, and `auth downgrade`
+requires an idle, empty identity. Host start leases fence startup before a
+container exists; detached owners remain reserved until both workload and
+gateway are verified ended. Engine inspection errors retain the reservation.
+The host never trusts an in-tree protection marker written through a legacy
+auth/config mount. Cleanup retains protected or corrupt identities individually,
+reports them in dry-run output, and still processes unrelated identities and
+requested build-cache cleanup. Stray files and symlinks in a tool's auth tree
+are unlinked without following links, and empty auth trees are removed in the
+same cleanup run. Each auth entry's protection check and removal share the
+store lock with identity enrollment.
+
+A refresh attempt must be durable before upstream dispatch. If its outcome is
+uncertain, require reauthentication or a verified provider recovery mechanism;
+never replay the prior rotating refresh token blindly. A committed grant with
+a lost reply can be projected through the session's unchanged handles during
+the bounded post-commit retry window. Later near-expiry requests refresh again;
+a successful earlier rotation does not block proactive refresh. A proxy
+reload preserves those handles; unexpected proxy death ends the affected
+session, and recovery starts a new session with fresh handles.
+
 ## Feature Auth Store
 
-Feature auth stores follow the same pattern as shared auth stores but are
+Ordinary feature auth stores follow the same pattern as shared auth stores but are
 scoped per-feature instead of per-tool. They allow features that provide their
 own authentication (e.g. `github-cli` with `gh auth`) to share credentials
 across all tools and projects.
@@ -286,6 +345,35 @@ bind-mounted at `~/.enclave-feature-auth/<feature>/` inside the container.
 
 A feature auth store is created when the feature extension defines both
 `ConfigDir` and `AuthFiles`, persistence is enabled, and auth scope is `shared`.
+
+### Protected GitHub feature
+
+With `--protect-auth`, the built-in `github-cli` feature uses the protected
+layout above instead of the raw feature mount and reconciliation described
+below. The real `hosts.yml`/`config.yml` stay in the shared feature store; only
+the projected native view is mounted at `~/.config/gh`. Workload edits cannot
+replace trusted tokens. Existing compatible native files are read by the gateway,
+not copied into the workload.
+
+This is a single global feature identity, not one identity per Claude
+`--auth-name`. It admits one active session across all projects, tools and
+Docker/Podman engines. Enrollment refuses existing containers exposing its real
+files or trusted control state. Its host-only protection marker survives reset,
+auth-directory removal and omission of `--protect-auth`; ordinary access cannot
+silently reopen the files. Cleanup retains the protected or corrupt store.
+Verified session teardown removes its transient view/registry, not the grant.
+
+Use `enclave auth reset --feature github-cli` to clear the idle feature grant
+and native `hosts.yml`/`config.yml` inputs, including preferences, while retaining
+protection. Removing those inputs prevents reimport on the next launch. Use
+`enclave auth downgrade --feature github-cli`
+only when intentionally returning an empty, idle identity to ordinary handling.
+These operations are separate from the selected Claude identity. See
+[authentication](../auth.md#github-cli-in-protected-sessions) and the
+[pending verification matrix](oauth-broker-verification.md).
+
+Other native-auth features are not supported by this adapter. GitLab's declared
+env-secret flow is unchanged; it has no protected native-file store.
 
 ### ENCLAVE_FEATURE_AUTH_MAP
 
@@ -326,6 +414,10 @@ Source: [`internal/runtime/volume_manager.go`](../../internal/runtime/volume_man
 [`entrypoint.sh`](../../entrypoint.sh)
 
 ## Lifecycle
+
+This diagram describes ordinary auth. Protected tool/feature sessions use the
+gateway-only stores and projected native views described above, without native
+auth reconciliation.
 
 ```
                     Host (Go CLI)                          Container

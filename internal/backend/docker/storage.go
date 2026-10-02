@@ -15,15 +15,19 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"enclave/internal/backend"
 	"enclave/internal/backend/hoststore"
+	"enclave/internal/config"
 	"enclave/internal/model"
 )
 
 type StoreManager struct {
-	host model.Host
+	host        model.Host
+	authSession *backend.AuthSession
+	viewDir     string
 }
 
 // WithStoreLock serializes cross-process access to one store. The lock file is
@@ -152,7 +156,20 @@ func (s *StoreManager) Remove(_ context.Context, key backend.StoreKey, kind back
 }
 
 func (s *StoreManager) storeDir(key backend.StoreKey, kind backend.StoreKind) (string, error) {
-	return hoststore.ResolveDir(s.host.Home, key, kind)
+	if ref := s.authSession; ref != nil && ref.Protected && kind == backend.StoreKindFeatureAuth && slices.Contains(ref.Features, key.Owner) {
+		dir := filepath.Join(filepath.Dir(s.viewDir), "features", key.Owner, "view")
+		if err := hoststore.EnsureNoSymlinkChain(config.HostStateRootDir(s.host.Home), dir, true); err != nil {
+			return "", err
+		}
+		return dir, nil
+	}
+	if ref := s.authSession; ref != nil && ref.Protected && ((kind == backend.StoreKindConfig && key == ref.ConfigKey) || (kind == backend.StoreKindAuth && key == ref.Key)) {
+		if err := hoststore.EnsureNoSymlinkChain(config.HostStateRootDir(s.host.Home), s.viewDir, true); err != nil {
+			return "", err
+		}
+		return s.viewDir, nil
+	}
+	return hoststore.ResolveLegacyDir(s.host.Home, key, kind)
 }
 
 // atomicWriteFile writes data to target via a temp file in the same directory

@@ -24,6 +24,11 @@ import (
 
 func (b *Backend) PrepareStores(ctx context.Context, prep backend.StorePrep) (backend.StoreState, error) {
 	state := backend.StoreState{}
+	if prep.Auth != nil {
+		if _, err := b.storage.storePath(prep.Auth.Key, backend.StoreKindAuth); err != nil {
+			return state, err
+		}
+	}
 	if prep.Config != nil {
 		if err := b.prepareConfigStore(ctx, *prep.Config); err != nil {
 			return state, err

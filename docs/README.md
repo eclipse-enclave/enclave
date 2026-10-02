@@ -23,6 +23,7 @@
 - [runtime/stores.md](runtime/stores.md) — Persistent store lifecycle and auth reconciliation
 - [runtime/auth-sync.md](runtime/auth-sync.md) — Explicit auth import and export
 - [runtime/network-request-flow.md](runtime/network-request-flow.md) — Restricted-mode request flow
+- [runtime/oauth-broker-verification.md](runtime/oauth-broker-verification.md) — Experimental protected OAuth, pinned client evidence, and engine/human verification gates
 
 ## Security
 

@@ -220,9 +220,19 @@ Mutation commands (`add-domain`, `remove-domain`, `set-mode`) apply the new poli
 
 | Command | Description |
 |---------|-------------|
+| `enclave auth reset --tool claude --auth-name <slug>` | Clear an idle protected grant, retaining protection |
+| `enclave auth downgrade --tool claude --auth-name <slug>` | Remove protection from an idle, empty shared identity |
+| `enclave auth reset --feature github-cli` | Clear the idle protected GitHub feature grant, retaining protection |
+| `enclave auth downgrade --feature github-cli` | Remove protection from the idle, empty global GitHub feature identity |
 | `enclave auth import --tool <tool>` | Copy host auth files into the auth store |
 | `enclave auth export --tool <tool>` | Copy auth store files back to the host |
 | `enclave ssh-init` | Initialize isolated SSH keys at `~/.cache/enclave/ssh/`. Not recommended: the key lets the agent push to your Git provider. See [SSH keys](auth.md#ssh-keys) |
+
+`--feature github-cli` is available only on `auth reset` and `auth downgrade`.
+It selects the shared global feature identity, does not resolve a default tool,
+and cannot be combined with `--tool`, `--auth-name` or `--auth-scope`. Choose the
+engine with `--backend` when needed. The selector is command-only; it is not a
+persisted configuration option. There is no protected GitHub host-import command.
 
 ### Devcontainer
 
@@ -340,6 +350,7 @@ There is no config-file key.
 | `--pass-api-key` | Allow API key injection in `--ephemeral` mode |
 | `--pass-env <KEY1,KEY2>` | Forward specific host env vars into the container (repeatable, comma-separated); replaces `pass_env` from config, `+KEY` adds, and can forward a key `--no-api-key` withholds |
 | `--auth-scope <scope>` | `shared` (default) or `project` |
+| `--protect-auth` | Experimental gateway-owned OAuth for a fresh named shared Claude identity and the enabled built-in GitHub CLI feature on Docker/Podman; pins Claude 2.1.63 and `gh` 2.87.3; see [protected auth](auth.md#experimental-gateway-owned-claude-oauth) |
 | `--auth-name <slug>` | Select a named per-tool shared auth store; ignored under `--auth-scope=project` |
 | `--secrets-scope <scope>` | `both` (default), `global`, or `project` |
 
@@ -347,7 +358,7 @@ There is no config-file key.
 
 | Flag | Description |
 |------|-------------|
-| `--allow-all-network` | Disable network restrictions |
+| `--allow-all-network` | Disable destination restrictions; protected auth retains gateway mediation |
 | `--allow-domain <domain>` | Add a domain to the gateway allowlist for this run only (repeatable, comma-separated, no persistence); replaces `allow_domains` from config, `+domain` adds to it |
 | `--network-log <coarse\|requests\|full>` | Network audit mode. `coarse` (default) logs one pass/deny event per TLS connection, plus per-request events for plaintext HTTP and for hosts the gateway already MITMs for secret release; `requests` forces HTTPS MITM for all allowlisted hosts and emits an audit event per HTTP/HTTPS request; `full` does the same and stores the headers and bodies of every relayed request and response under `logs/capture/<session>/` (sensitive; see [Full capture](networking.md#full-capture)). See [Coverage and granularity](networking.md#coverage-and-granularity) |
 
@@ -376,7 +387,7 @@ Persistent defaults can be set in `~/.config/enclave/config.json` (global) or `~
 
 ## Tool selection
 
-The tool is unset by default. The first command that needs one asks once which coding agent to use and saves the answer as `"tool"` in `~/.config/enclave/config.json`; later runs read it from there and never ask again. A command needs a tool when it starts a session or builds its image (`run`, `shell`, `continue`, `resume`, `exec`, and `update` without explicit tool arguments) or scopes policy, stores, or containers by tool (`info`, `auth import`, `auth export`, `network …` except `add-domain`, `remove-domain`, and `set-mode`, `cleanup` without `--all`, and `stop` without a session argument). The question is only asked when stdin, stdout, and stderr are terminals and no `--json` or `--yes` was given; without a terminal, or when the question goes unanswered, the command fails with a message naming `--tool` and the `tool` key instead of guessing an agent. Commands that never read the default tool (`ps`, `status`, `attach`, `tools`, `features`, `config`, `review-target`, `theia`, …) neither ask nor fail; they take `--tool` at most as an explicit filter.
+The tool is unset by default. The first command that needs one asks once which coding agent to use and saves the answer as `"tool"` in `~/.config/enclave/config.json`; later runs read it from there and never ask again. A command needs a tool when it starts a session or builds its image (`run`, `shell`, `continue`, `resume`, `exec`, and `update` without explicit tool arguments) or scopes policy, stores, or containers by tool (`info`, `auth import`, `auth export`, `auth reset`, `auth downgrade`, `network …` except `add-domain`, `remove-domain`, and `set-mode`, `cleanup` without `--all`, and `stop` without a session argument). The question is only asked when stdin, stdout, and stderr are terminals and no `--json` or `--yes` was given; without a terminal, or when the question goes unanswered, the command fails with a message naming `--tool` and the `tool` key instead of guessing an agent. Commands that never read the default tool (`ps`, `status`, `attach`, `tools`, `features`, `config`, `review-target`, `theia`, …) neither ask nor fail; they take `--tool` at most as an explicit filter.
 
 The menu lists every installed agent. The IDE profiles (`theia`, `theia-next`) are not offered: they attach a host IDE to a container rather than running an agent in the terminal. Pick them with `--tool theia` or the `tool` key.
 

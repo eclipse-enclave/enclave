@@ -33,6 +33,7 @@ func TestMergeDefaultsCoversAllFields(t *testing.T) {
 		Ephemeral:              &trueVal,
 		AuthScope:              "test-auth-scope",
 		AuthName:               "test-auth-name",
+		ProtectAuth:            &trueVal,
 		SecretsScope:           "test-secrets-scope",
 		ResetAuth:              &trueVal,
 		NoAPIKey:               &trueVal,

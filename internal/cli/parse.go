@@ -37,6 +37,7 @@ type Result struct {
 	VersionJSON    bool
 	VersionShown   bool
 	ReviewTarget   string
+	AuthFeature    string
 	// UserCommand is set when Action == "user-command": a user-defined
 	// subcommand matched the first positional argument. UserCommandArgs holds
 	// every argument after the command name, verbatim.

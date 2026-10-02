@@ -82,6 +82,12 @@ func optionCLIFlags() map[string][]CLIFlag {
 				return nil
 			}),
 		},
+		"protect_auth": {
+			boolFlag("--protect-auth", "Experimental gateway-owned Claude OAuth (requires a fresh named shared identity)", func(opts *model.Options, sources *model.OptionSources) {
+				opts.ProtectAuth = true
+				sources.ProtectAuth = model.SourceCLI
+			}),
+		},
 		"reset_auth": {
 			boolFlag("--reset-auth", "Clear stored auth files and persisted API keys", func(opts *model.Options, sources *model.OptionSources, value bool) {
 				opts.ResetAuth = value

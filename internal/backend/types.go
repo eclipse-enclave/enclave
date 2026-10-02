@@ -68,7 +68,8 @@ type Request struct {
 	// AuthSync declares the credential reconciliation to run after a foreground
 	// session exits. It must be carried on the request because foreground
 	// sessions are removed on exit, leaving nothing to inspect afterwards.
-	AuthSync *AuthSyncSpec
+	AuthSync    *AuthSyncSpec
+	AuthSession *AuthSession
 
 	RuntimeUIDRemap bool
 	Detached        bool
@@ -148,10 +149,11 @@ type StoreRef struct {
 // prepare them before the session starts. The caller decides policy (which
 // stores exist, reset flags, preserve lists); the backend owns the mechanics.
 type StorePrep struct {
-	Config   *ConfigStorePrep
-	Auth     *StorePrepEntry // shared tool auth store
-	Env      *EnvStorePrep
-	Features []StorePrepEntry // feature auth stores
+	AuthSession *AuthSession
+	Config      *ConfigStorePrep
+	Auth        *StorePrepEntry // shared tool auth store
+	Env         *EnvStorePrep
+	Features    []StorePrepEntry // feature auth stores
 
 	// ResetAuthFiles lists store-relative auth files to delete from the config
 	// store and (when present) the shared auth store before the session starts.
@@ -195,6 +197,36 @@ type StoreState struct {
 	PersistedEnvAvailable bool
 }
 
+// AuthSession is a host-admitted logical session, retained across detached CLI
+// exit and gateway reload. Backends resolve its private directories.
+type AuthSession struct {
+	Key         StoreKey
+	ConfigKey   StoreKey
+	Session     string
+	Engine      string
+	Incarnation string
+	Protected   bool
+	Features    []string
+}
+
+type FeatureAuthSessionManager interface {
+	PrepareFeatureAuthSessions(ctx context.Context, parent *AuthSession, session string, names []string, protected bool) (*AuthSession, error)
+}
+
+type FeatureAuthIdentityManager interface {
+	ResetFeatureAuthIdentity(ctx context.Context, name string) error
+	DowngradeFeatureAuthIdentity(ctx context.Context, name string) error
+}
+
+// AuthSessionManager owns admission before store preparation and trusted
+// identity mutations. Release verifies that the workload and gateway ended.
+type AuthSessionManager interface {
+	PrepareAuthSession(ctx context.Context, key StoreKey, session string, protected, reset bool) (*AuthSession, error)
+	ReleaseAuthSession(ctx context.Context, session *AuthSession) error
+	ResetAuthIdentity(ctx context.Context, key StoreKey) error
+	DowngradeAuthIdentity(ctx context.Context, key StoreKey) error
+}
+
 // AuthSyncSpec is the post-session credential reconciliation intent: which
 // auth files flow from the config store to the shared auth store, and which
 // feature credentials are copied to feature auth stores.
@@ -212,10 +244,18 @@ type FeatureAuthSync struct {
 }
 
 type NetworkPolicy struct {
-	Mode           NetworkMode
+	Mode       NetworkMode
+	ModeSource string
+	// RequireGateway keeps credential mediation active even with unrestricted
+	// destinations. False preserves the historical unrestricted gateway bypass.
+	RequireGateway bool
 	Egress         EgressPolicy
 	LoopbackPorts  []string
 	IdeBridgePorts []string
+}
+
+func (p NetworkPolicy) UsesGateway() bool {
+	return p.Mode == NetworkModeRestricted || p.RequireGateway
 }
 
 type EgressPolicy struct {
@@ -375,6 +415,13 @@ func (g GatewayInfo) ShortID() string {
 	return g.ID[:12]
 }
 
+// GatewayNetworkState is the destination policy recorded inside a running
+// gateway, independent of newer policy files or another session's host bundle.
+type GatewayNetworkState struct {
+	Mode       NetworkMode
+	ModeSource string
+}
+
 // GatewayFilter scopes a gateway listing; the zero value matches all running
 // gateways. Empty fields are not filtered on.
 type GatewayFilter struct {
@@ -392,6 +439,7 @@ type GatewayManager interface {
 	// configuration from the expected host directory, so a bundle written
 	// there is what a reload will pick up.
 	VerifyGatewayConfigMount(ctx context.Context, id string, expectedSourceDir string) error
+	ReadGatewayNetworkState(ctx context.Context, id string) (GatewayNetworkState, error)
 	// ReloadGatewayNetwork tells the gateway to apply the current config
 	// bundle and waits until it confirms the given bundle generation.
 	ReloadGatewayNetwork(ctx context.Context, id string, generation string) error
@@ -512,10 +560,13 @@ func (e *ExitError) Error() string {
 }
 
 func Validate(req Request, caps Capabilities) error {
+	if req.Network.RequireGateway && !caps.SecretHTTPRelease {
+		return fmt.Errorf("backend cannot provide required gateway credential mediation")
+	}
 	if req.Network.Mode == NetworkModeRestricted && !caps.RestrictedNetwork {
 		return fmt.Errorf("backend cannot enforce restricted networking; rerun with --allow-all-network to proceed unrestricted")
 	}
-	if req.Network.Mode == NetworkModeRestricted && !caps.SecretHTTPRelease {
+	if req.Network.UsesGateway() && !caps.SecretHTTPRelease {
 		for _, secret := range req.Secrets {
 			if secret.HTTP != nil {
 				id := secret.SecretID

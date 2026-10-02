@@ -183,7 +183,9 @@ func TestCleanupKeepsSessionMemoryAndConfigTogether(t *testing.T) {
 				}
 			}
 			dirs := cleanupDirsForRemoval(run, tc.cleanup, home, project, tc.scope)
-			cleanupDirs(dirs)
+			if err := cleanupDirs(home, dirs); err != nil {
+				t.Fatalf("cleanup dirs: %v", err)
+			}
 			for root, want := range map[string]bool{memory: tc.wantMemory, store: tc.wantStore} {
 				_, err := os.Stat(root)
 				if (err == nil) != want {

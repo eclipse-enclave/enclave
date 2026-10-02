@@ -10,9 +10,11 @@ package docker
 import (
 	"context"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
+	"enclave/internal/backend"
 	dockercmd "enclave/internal/docker"
 	"enclave/internal/model"
 )
@@ -153,5 +155,26 @@ func TestWaitForGatewayReloadTimesOut(t *testing.T) {
 	}
 	if got := err.Error(); got != "timed out waiting for gateway reload confirmation (generation=gen-1)" {
 		t.Fatalf("waitForGatewayReload() error = %q, want timeout message", got)
+	}
+}
+
+func TestReadGatewayNetworkStateUsesActiveMetadata(t *testing.T) {
+	calls := stubCLI(t, "docker", `printf '%s\n' '{"mode":"unrestricted","mode_source":"allow-all-network"}'`+"\n")
+	b := New(Options{})
+	state, err := b.ReadGatewayNetworkState(context.Background(), "gateway-session")
+	if err != nil || state.Mode != backend.NetworkModeUnrestricted || state.ModeSource != "allow-all-network" {
+		t.Fatalf("active policy state = %+v, %v", state, err)
+	}
+	got := stubCalls(t, calls)
+	if len(got) != 1 || !strings.Contains(got[0], "gateway-session enclave-gateway-proxy -network-state /run/enclave-gateway/meta.json") {
+		t.Fatalf("read shared host bundle instead of gateway-private active metadata: %v", got)
+	}
+}
+
+func TestReadGatewayNetworkStateRejectsInvalidMode(t *testing.T) {
+	stubCLI(t, "docker", `printf '%s\n' '{"mode":"disabled"}'`+"\n")
+	b := New(Options{})
+	if _, err := b.ReadGatewayNetworkState(context.Background(), "gateway-session"); err == nil {
+		t.Fatal("accepted unknown active destination mode")
 	}
 }

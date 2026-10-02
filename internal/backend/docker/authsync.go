@@ -33,6 +33,9 @@ var authSyncMountPath = regexp.MustCompile(`(^|[[:space:]:'"])/(config|auth)/`)
 // (foreground sessions auto-remove), so nothing can be inspected; the store
 // identities come from the request instead.
 func (b *Backend) runRequestAuthSync(req backend.Request) {
+	if req.AuthSession != nil && req.AuthSession.Protected {
+		return
+	}
 	spec := req.AuthSync
 	if spec == nil {
 		return
@@ -87,6 +90,10 @@ func (b *Backend) syncAfterExec(containerName string) {
 	if err := b.finalizeManagedContainerAuth(ctx, containerName); err != nil {
 		logx.Warnf("Failed to sync shared auth files: %v", err)
 	}
+	info, err := dockercmd.ContainerInspect(ctx, containerName)
+	if err == nil && info.Config != nil && info.Config.Labels[authProtectedLabel] == "true" {
+		return
+	}
 	b.syncFeatureAuthFromContainer(ctx, containerName)
 }
 
@@ -109,6 +116,9 @@ func (b *Backend) finalizeManagedContainerAuth(ctx context.Context, containerNam
 		return err
 	}
 	if info.Config == nil || strings.TrimSpace(info.Config.Labels[model.LabelAgent]) == "" {
+		return nil
+	}
+	if info.Config.Labels[authProtectedLabel] == "true" {
 		return nil
 	}
 
@@ -181,6 +191,15 @@ func (b *Backend) syncSharedAuthStores(ctx context.Context, helperImage string, 
 	applyHostUserNamespace(hostConfig)
 
 	return hoststore.WithLock(b.opts.Host.Home, authDir, func() error {
+		// Both request-driven foreground sync and inspected-container
+		// finalization reach this guard. Re-resolving a protected StoreKey must
+		// never put its real grant in an auth-reconcile helper.
+		if err := hoststore.RequireUnprotectedAuth(b.opts.Host.Home, authDir); err != nil {
+			return err
+		}
+		if err := hoststore.RequireUnprotectedAuth(b.opts.Host.Home, configDir); err != nil {
+			return fmt.Errorf("auth reconcile config store %q: %w", configDir, err)
+		}
 		var stderr bytes.Buffer
 		_, err := dockercmd.RunWithIOAndStartHook(ctx, &dockercmd.ContainerConfig{
 			Image:      image,

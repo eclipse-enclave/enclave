@@ -13,6 +13,7 @@ import (
 	"slices"
 	"testing"
 
+	"enclave/internal/backend"
 	"enclave/internal/config"
 	"enclave/internal/model"
 	"enclave/internal/network"
@@ -152,5 +153,49 @@ func TestPartitionAdHocDomainsSeparatesDenied(t *testing.T) {
 	kept, denied := partitionAdHocDomains([]string{"ok.example.com", "Blocked.example.com", "api.tracker.example"}, []string{"blocked.example.com", "tracker.example"})
 	if !reflect.DeepEqual(kept, []string{"ok.example.com"}) || !reflect.DeepEqual(denied, []string{"Blocked.example.com", "api.tracker.example"}) {
 		t.Fatalf("kept = %v, denied = %v", kept, denied)
+	}
+}
+
+func TestNetworkPreparationSeparatesMediationFromDestinationPolicy(t *testing.T) {
+	for _, selector := range []string{"restricted", "flag", "policy"} {
+		for _, protected := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/protected=%t", selector, protected), func(t *testing.T) {
+				home := t.TempDir()
+				policy := network.Policy{Advanced: network.PolicyAdvanced{Resolvers: []string{"9.9.9.9"}}}
+				if selector == "policy" {
+					policy.Mode = model.NetworkModeUnrestricted
+				}
+				if err := network.SavePolicy(config.HostNetworkPolicyPath(home), policy); err != nil {
+					t.Fatal(err)
+				}
+				r := &Runtime{
+					host:    model.Host{Home: home},
+					handler: noopRuntimeHandler{},
+					run:     model.RunOptions{AllowAllNetwork: selector == "flag"},
+					auth:    model.AuthOptions{ProtectAuth: protected},
+				}
+				result, err := newNetworkManager(r).Prepare("session", model.AuthState{}, SecretMapping{})
+				if err != nil {
+					t.Fatal(err)
+				}
+				wantGateway := protected || selector == "restricted"
+				if result.Network.UsesGateway() != wantGateway || slices.Contains(result.Env, model.EnvDNSGateway+"=1") != wantGateway {
+					t.Fatalf("gateway mediation = %+v, env %v, want %t", result.Network, result.Env, wantGateway)
+				}
+				wantMode := backend.NetworkModeUnrestricted
+				if selector == "restricted" {
+					wantMode = backend.NetworkModeRestricted
+				}
+				if selector == "flag" && result.Network.ModeSource != "allow-all-network" {
+					t.Errorf("lost per-session unrestricted override source: %q", result.Network.ModeSource)
+				}
+				if result.Network.Mode != wantMode {
+					t.Errorf("mode = %s, want %s", result.Network.Mode, wantMode)
+				}
+				if wantGateway && !reflect.DeepEqual(result.Network.Egress.Resolvers, []string{"9.9.9.9"}) {
+					t.Errorf("lost custom DNS resolver: %v", result.Network.Egress.Resolvers)
+				}
+			})
+		}
 	}
 }

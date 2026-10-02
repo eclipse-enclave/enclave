@@ -32,7 +32,8 @@ import (
 func (b *Backend) startGateway(ctx context.Context, req backend.Request, networkName string) (string, func(), error) {
 	gatewayConfigDir := config.HostProjectGatewayConfigDir(b.opts.Host.Home, req.Session.ProjectHash, req.Session.Tool)
 	policy := network.EffectivePolicy{
-		Mode:          model.NetworkModeRestricted,
+		Mode:          string(req.Network.Mode),
+		ModeSource:    req.Network.ModeSource,
 		Domains:       append([]string(nil), req.Network.Egress.AllowedDomains...),
 		DeniedDomains: append([]string(nil), req.Network.Egress.DeniedDomains...),
 		Resolvers:     append([]string(nil), req.Network.Egress.Resolvers...),
@@ -50,12 +51,18 @@ func (b *Backend) startGateway(ctx context.Context, req backend.Request, network
 		tempFiles = append(tempFiles, secretReleaseFile)
 	}
 
+	oauth, err := b.protectedGatewayConfig(req.AuthSession)
+	if err != nil {
+		cleanupFiles(tempFiles)
+		return "", nil, err
+	}
 	workspaceID := workspaceIDFromSession(req.Session, b.opts.ProjectDir)
 	captureRoot := ""
 	if b.opts.NetworkLogMode == model.NetworkLogFull {
 		captureRoot = config.HostProjectNetworkCaptureDir(b.opts.Host.Home, req.Session.ProjectHash, req.Session.Tool)
 	}
 	startConfig := gateway.StartConfig{
+		OAuth:             oauth,
 		Paths:             b.opts.Paths,
 		Profile:           model.Profile{Name: req.Session.Tool},
 		AllowlistPath:     req.Network.Egress.AllowlistPath,

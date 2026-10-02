@@ -55,7 +55,8 @@ func (m networkManager) Prepare(_ string, authState model.AuthState, _ SecretMap
 	}
 	effectivePolicy := resolved.Effective
 
-	if effectivePolicy.Mode == model.NetworkModeUnrestricted {
+	unrestricted := effectivePolicy.Mode == model.NetworkModeUnrestricted
+	if unrestricted && !m.auth.ProtectAuth {
 		logx.Warnf("Network restrictions disabled - container has unrestricted internet access")
 		if m.run.NetworkLog == model.NetworkLogFull {
 			logx.Warnf("--network-log=full captures nothing: unrestricted sessions run without the gateway")
@@ -70,6 +71,7 @@ func (m networkManager) Prepare(_ string, authState model.AuthState, _ SecretMap
 		return NetworkResult{
 			Network: backend.NetworkPolicy{
 				Mode:           backend.NetworkModeUnrestricted,
+				ModeSource:     effectivePolicy.ModeSource,
 				LoopbackPorts:  append([]string(nil), loopbackPorts...),
 				IdeBridgePorts: append([]string(nil), m.ideBridgePorts...),
 			},
@@ -78,35 +80,38 @@ func (m networkManager) Prepare(_ string, authState model.AuthState, _ SecretMap
 		}, nil
 	}
 
-	// Render-ready domains: the allow set has exact and subdomain matches of
-	// denied domains filtered out, and the denied set is carried alongside so
-	// the startup gateway bundle blackholes them (deny-wins, same rendering
-	// `enclave network print` shows).
-	allowedDomains, deniedDomains, err := network.EffectiveRenderDomainsForTool(effectivePolicy, m.profile.Name)
-	if err != nil {
-		return NetworkResult{}, fmt.Errorf("failed to resolve effective network domains: %w", err)
+	var allowedDomains, deniedDomains []string
+	if unrestricted {
+		logx.Warnf("Network destinations unrestricted; gateway credential mediation remains enabled")
+	} else {
+		allowedDomains, deniedDomains, err = network.EffectiveRenderDomainsForTool(effectivePolicy, m.profile.Name)
+		if err != nil {
+			return NetworkResult{}, fmt.Errorf("failed to resolve effective network domains: %w", err)
+		}
+		logx.Infof("Network restricted to allowlisted domains via DNS gateway")
+		policySourcePaths := policyDomainSourcePaths(m.host.Home, m.project.Dir, m.project.Hash, m.profile.Name, resolved.GlobalPolicy, resolved.ProjectPolicy)
+		switch len(policySourcePaths) {
+		case 1:
+			logx.Infof("Merged policy domains from %s included", policySourcePaths[0])
+		case 2:
+			logx.Infof("Merged policy domains from %s and %s included", policySourcePaths[0], policySourcePaths[1])
+		}
 	}
 	logAdHocDomains(m.run.AllowDomains, deniedDomains)
 
 	env := []string{model.EnvDNSGateway + "=1"}
-	logx.Infof("Network restricted to allowlisted domains via DNS gateway")
-	policySourcePaths := policyDomainSourcePaths(m.host.Home, m.project.Dir, m.project.Hash, m.profile.Name, resolved.GlobalPolicy, resolved.ProjectPolicy)
-	switch len(policySourcePaths) {
-	case 1:
-		logx.Infof("Merged policy domains from %s included", policySourcePaths[0])
-	case 2:
-		logx.Infof("Merged policy domains from %s and %s included", policySourcePaths[0], policySourcePaths[1])
-	}
 	switch m.run.NetworkLog {
 	case model.NetworkLogRequests:
-		logx.Infof("Request-level network logging enabled; forcing HTTPS MITM for allowlisted hosts")
+		logx.Infof("Request-level network logging enabled; forcing HTTPS MITM for permitted hosts")
 	case model.NetworkLogFull:
-		logx.Warnf("Full network capture enabled: headers and bodies of allowlisted HTTP(S) requests are stored in %s", config.HostProjectNetworkCaptureDir(m.host.Home, m.project.Hash, m.profile.Name))
+		logx.Warnf("Full network capture enabled: headers and bodies of permitted HTTP(S) requests are stored in %s", config.HostProjectNetworkCaptureDir(m.host.Home, m.project.Hash, m.profile.Name))
 	}
 
 	return NetworkResult{
 		Network: backend.NetworkPolicy{
-			Mode: backend.NetworkModeRestricted,
+			Mode:           backend.NetworkMode(effectivePolicy.Mode),
+			ModeSource:     effectivePolicy.ModeSource,
+			RequireGateway: m.auth.ProtectAuth,
 			Egress: backend.EgressPolicy{
 				AllowedDomains: allowedDomains,
 				DeniedDomains:  deniedDomains,

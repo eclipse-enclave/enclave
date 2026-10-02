@@ -127,13 +127,16 @@ func (m volumeManager) authSyncSpec(stores storeSet) *backend.AuthSyncSpec {
 		return nil
 	}
 	spec := &backend.AuthSyncSpec{}
-	if m.shouldCreateSharedAuthVolume() && stores.Auth != nil {
+	if !m.auth.ProtectAuth && m.shouldCreateSharedAuthVolume() && stores.Auth != nil {
 		if authFiles, err := backend.ValidateAuthFilePaths(m.authFiles); err == nil {
 			spec.AuthFiles = authFiles
 		}
 	}
 	for _, feat := range m.features {
 		if _, ok := stores.Features[feat.Name]; !ok {
+			continue
+		}
+		if m.auth.ProtectAuth {
 			continue
 		}
 		authFiles, err := backend.ValidateAuthFilePaths(feat.AuthFiles)

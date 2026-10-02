@@ -19,6 +19,34 @@ fi
 echo "Claude installed at: $(which claude)"
 claude --version
 
+# Keep the capture adapter tied to an integrity-checked client, independently
+# of the ordinary native installation and its updater.
+protected_prefix="$HOME/.local/share/enclave/claude-2.1.63"
+protected_archive="$(mktemp --suffix=.tgz)"
+trap 'rm -f "$protected_archive"' EXIT
+curl -fsSL https://registry.npmjs.org/@anthropic-ai/claude-code/-/claude-code-2.1.63.tgz -o "$protected_archive"
+protected_digest="$(sha512sum "$protected_archive")"
+protected_digest="${protected_digest%% *}"
+if [ "$protected_digest" != "a63c4616d39673a496e2abff73617c85cf90149dfaf8e95ebd8b2752f055aabe01fb89898c7fbc8a7485f2c1f651ff5241df7d906e42c64907c66520dab6a4a3" ]; then
+    echo "Protected Claude client integrity check failed" >&2
+    exit 1
+fi
+agent_node="${ENCLAVE_AGENT_NODE_BIN:-/opt/enclave/node/bin/node}"
+agent_npm="${ENCLAVE_AGENT_NPM_BIN:-/opt/enclave/node/bin/npm}"
+npm_config_prefix="$protected_prefix" "$agent_npm" install -g --ignore-scripts --no-audit --no-fund -- "$protected_archive"
+protected_package="$protected_prefix/lib/node_modules/@anthropic-ai/claude-code"
+if [ "$(jq -r .version "$protected_package/package.json")" != "2.1.63" ] || [ ! -f "$protected_package/cli.js" ]; then
+    echo "Protected Claude client installation is incomplete" >&2
+    exit 1
+fi
+rm "$protected_prefix/bin/claude"
+printf '#!/bin/sh\nexec "%s" "%s/cli.js" --setting-sources user "$@"\n' \
+    "$agent_node" "$protected_package" > "$protected_prefix/bin/claude"
+chmod 755 "$protected_prefix/bin/claude"
+"$protected_prefix/bin/claude" --version
+rm -f "$protected_archive"
+trap - EXIT
+
 # Install sandbox runtime for Claude Code sandbox support.
 # It ships its vendored artifacts prebuilt and declares no lifecycle scripts.
 enclave-agent-npm-install --ignore-scripts @anthropic-ai/sandbox-runtime

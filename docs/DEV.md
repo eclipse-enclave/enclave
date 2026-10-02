@@ -698,3 +698,27 @@ Allowed types: `feat`, `fix`, `docs`, `refactor`, `test`, `chore`, `build`, `ci`
 ## Work Tracking
 
 Work is tracked via GitHub Issues.
+
+## Protected OAuth development
+
+`--protect-auth` is an experimental Docker/Podman path for Claude and the
+built-in GitHub CLI feature. Option
+changes are generated from `internal/config/options_def.go`; run `make generate`.
+The Claude installer retains the ordinary native client and installs an
+integrity-pinned npm 2.1.63 alongside it for protected launches. The GitHub
+feature keeps its ordinary apt client and a SHA-256-pinned `gh` 2.87.3 binary at
+`/opt/enclave/gh-2.87.3/bin/gh`; protected startup selects and checks that binary.
+Changing either pin,
+adapter schema or endpoints requires repeating the [engine and human verification
+plan](runtime/oauth-broker-verification.md), including both unrestricted network
+selectors. No engine or real-client result is implied by unit tests. Protected
+state lives in the selected tool/feature auth identities plus
+`oauth-sessions/<incarnation>/`;
+never copy a real grant into a workload or committed test fixture.
+
+`auth reset|downgrade --feature github-cli` selects the global feature identity
+instead of a tool identity. This local Cobra flag is not a generated/config-backed
+runtime option; it cannot be mixed with `--tool`, `--auth-name` or `--auth-scope`.
+Keep feature protection, admission, cleanup and reconciliation exclusion aligned
+with the tool path. GitLab remains env-secret based; do not infer support for its
+native files or for undeclared feature adapters.

@@ -1927,3 +1927,39 @@ func TestParseFeaturesNoneCannotCombineInEitherOrder(t *testing.T) {
 		}
 	}
 }
+
+func TestParseProtectedAuthLifecycle(t *testing.T) {
+	for _, name := range []string{"reset", "downgrade"} {
+		res, err := Parse([]string{"auth", name, "--backend", "podman", "--tool", "claude", "--auth-scope", "shared", "--auth-name", "test"}, config.DefaultOptions())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res.Action != "auth-"+name || res.Options.AuthName != "test" || res.Options.Backend != "podman" {
+			t.Fatalf("unexpected result: %+v", res)
+		}
+	}
+	res, err := Parse([]string{"--tool", "claude", "--protect-auth", "--auth-name", "test"}, config.DefaultOptions())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.Options.ProtectAuth || res.Sources.ProtectAuth != model.SourceCLI {
+		t.Fatal("protect-auth flag was not applied")
+	}
+}
+
+func TestParseProtectedFeatureAuthLifecycle(t *testing.T) {
+	for _, name := range []string{"reset", "downgrade"} {
+		res, err := Parse([]string{"auth", name, "--backend", "podman", "--feature", "github-cli"}, config.DefaultOptions())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res.Action != "auth-"+name || res.AuthFeature != "github-cli" || res.Options.Backend != "podman" {
+			t.Fatalf("unexpected feature auth selection: %+v", res)
+		}
+	}
+	for _, name := range []string{"import", "export"} {
+		if _, err := Parse([]string{"auth", name, "--feature", "github-cli"}, config.DefaultOptions()); err == nil {
+			t.Fatalf("unsupported feature auth %s accepted", name)
+		}
+	}
+}

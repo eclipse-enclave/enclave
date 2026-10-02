@@ -59,6 +59,14 @@ func runGatewayFirewall(t *testing.T, invocation string, env ...string) ([]firew
 		t.Fatal(err)
 	}
 	logPath := filepath.Join(dir, "firewall.log")
+	binDir := filepath.Join(dir, "bin")
+	if err := os.Mkdir(binDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	// setup_firewall reads the active destination mode through the proxy binary.
+	if err := os.WriteFile(filepath.Join(binDir, "enclave-gateway-proxy"), []byte("#!/bin/sh\nprintf 'restricted\\n'\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
 	cmd := exec.Command("sh", "-c", `. "$1"
 firewall_mock() {
     engine="$1"
@@ -75,7 +83,7 @@ id() { printf '105\n'; }
 UNIQUE_RESOLVERS=1.1.1.1
 `+invocation, "gateway-firewall-test", scriptPath)
 	cmd.Env = append([]string{
-		"PATH=" + os.Getenv("PATH"),
+		"PATH=" + binDir + string(os.PathListSeparator) + os.Getenv("PATH"),
 		"ENCLAVE_NET_LIB=" + filepath.Join(dir, "missing-net.sh"),
 		"FW_LOG=" + logPath,
 	}, env...)

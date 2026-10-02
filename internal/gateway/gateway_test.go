@@ -505,3 +505,61 @@ func TestBuildOutputTailKeepsLastLines(t *testing.T) {
 		t.Fatalf("buildOutputTail = %q, want %q", got, want)
 	}
 }
+
+func TestProtectedGatewayMountsSelectedIdentityAndSameLock(t *testing.T) {
+	for _, engine := range []string{"docker", "podman"} {
+		t.Run(engine, func(t *testing.T) {
+			t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+			root := t.TempDir()
+			argsFile := filepath.Join(root, "arguments")
+			binary := filepath.Join(root, engine)
+			script := "#!/bin/sh\ncase \"$1\" in\nimage) echo '{}' ;;\ncontainer) echo 'Error: no such container' >&2; exit 1 ;;\nrm) exit 0 ;;\nrun) printf '%s\\n' \"$@\" > \"$OAUTH_TEST_ARGS\"; echo gateway-id ;;\nlogs) echo '[enclave-gateway] Gateway ready' ;;\n*) exit 1 ;;\nesac\n"
+			if err := os.WriteFile(binary, []byte(script), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			previous := docker.Binary()
+			docker.SetBinary(binary)
+			t.Cleanup(func() { docker.SetBinary(previous) })
+			t.Setenv("OAUTH_TEST_ARGS", argsFile)
+			oauth := &OAuthConfig{StoreDir: filepath.Join(root, "selected-grant"), RuntimeDir: filepath.Join(root, "session-runtime"), ViewDir: filepath.Join(root, "session-view"), LockPath: filepath.Join(root, "identity.lock"), Identity: "selected", Incarnation: strings.Repeat("a", 64)}
+			feature := FeatureOAuthConfig{Name: "github-cli", StoreDir: filepath.Join(root, "github-grant"), RuntimeDir: filepath.Join(root, "github-runtime"), ViewDir: filepath.Join(root, "github-view"), LockPath: filepath.Join(root, "github.lock"), Identity: "github-selected"}
+			oauth.Features = []FeatureOAuthConfig{feature}
+			for _, dir := range []string{oauth.StoreDir, oauth.RuntimeDir, oauth.ViewDir, feature.StoreDir, feature.RuntimeDir, feature.ViewDir} {
+				if err := os.MkdirAll(dir, 0o700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := os.WriteFile(oauth.LockPath, nil, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(feature.LockPath, nil, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			tlsRoot := t.TempDir()
+			writeGatewayFile(t, filepath.Join(tlsRoot, "ca.crt"), "fixture cert", 0o644)
+			writeGatewayFile(t, filepath.Join(tlsRoot, "ca.key"), "fixture key", 0o600)
+			_, err := Start(context.Background(), StartConfig{Home: root, Profile: model.Profile{Name: "claude"}, ContainerName: "session", NetworkName: "session-net", NoRebuild: true, OAuth: oauth, TLSRootDir: tlsRoot})
+			if err != nil {
+				t.Fatal(err)
+			}
+			data, err := os.ReadFile(argsFile)
+			if err != nil {
+				t.Fatal(err)
+			}
+			args := string(data)
+			for source, target := range map[string]string{oauth.StoreDir: model.GatewayOAuthGrantPath, oauth.RuntimeDir: model.GatewayOAuthRuntimePath, oauth.ViewDir: model.GatewayOAuthViewPath, oauth.LockPath: model.GatewayOAuthLockPath, feature.StoreDir: model.GatewayOAuthGitHubGrantPath, feature.RuntimeDir: model.GatewayOAuthGitHubRuntimePath, feature.ViewDir: model.GatewayOAuthGitHubViewPath, feature.LockPath: model.GatewayOAuthGitHubLockPath} {
+				if !strings.Contains(args, "source="+source+",target="+target) && !strings.Contains(args, source+":"+target) {
+					t.Errorf("missing selected identity mount %s -> %s", source, target)
+				}
+			}
+			for _, want := range []string{model.EnvOAuthBroker + "=claude", model.EnvOAuthIdentity + "=selected", model.EnvOAuthIncarnation + "=" + oauth.Incarnation, model.EnvOAuthGitHub + "=1", model.EnvOAuthGitHubIdentity + "=github-selected", "--cap-add\nDAC_OVERRIDE", "--cap-add\nCHOWN"} {
+				if !strings.Contains(args, want) {
+					t.Errorf("missing protected gateway argument %q", want)
+				}
+			}
+			if strings.Contains(args, "source="+root+",") || strings.Contains(args, "\n"+root+":") {
+				t.Fatal("gateway received identity parent mount")
+			}
+		})
+	}
+}

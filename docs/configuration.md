@@ -545,3 +545,21 @@ Sessions started with `enclave devcontainer run|shell` cannot be compared.
 Devcontainer mode has no flag, so `config --json` resolves `devcontainer` and
 `features` without it; treat these sessions as unknown. A `devcontainer` key
 set in config is resolved by both sides.
+
+### Protected OAuth
+
+`"protect_auth": true` corresponds to `--protect-auth`. Set it only with
+`"tool": "claude"`, `"auth_scope": "shared"` and a fresh `"auth_name"`.
+The default built-in `github-cli` feature has a protected native-auth adapter;
+other native-auth features are rejected. The experimental Docker/Podman flow
+pins Claude 2.1.63 and uses a session-scoped
+native config/history view. Saved identity protection is independent of this
+configuration: removing the setting causes a refusal, not a raw-auth fallback.
+Provider env secrets, host config passthrough and credential-helper settings
+conflict with this mode. See [authentication](auth.md#experimental-gateway-owned-claude-oauth)
+for restrictions, reset/downgrade and pending verification.
+
+The GitHub feature identity is shared globally, not selected by `auth_name`.
+Its host lifecycle commands use `auth reset|downgrade --feature github-cli`;
+`--feature` is command-only and has no config key. Do not combine that selector
+with tool, auth-name or auth-scope flags.

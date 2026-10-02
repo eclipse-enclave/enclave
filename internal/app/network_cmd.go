@@ -214,7 +214,15 @@ func runNetworkStatus(input *CommandInput) int {
 			continue
 		}
 
-		desiredHash, err := desiredGatewayBundleHash(policyCtx.Resolver, target, targetProjectDir)
+		active, err := manager.ReadGatewayNetworkState(context.Background(), target.ID)
+		if err != nil {
+			state.status = "UNKNOWN"
+			state.detail = err.Error()
+			unknown++
+			outcomes = append(outcomes, state)
+			continue
+		}
+		desiredHash, err := desiredGatewayBundleHash(policyCtx.Resolver, target, targetProjectDir, active)
 		if err != nil {
 			state.status = "STALE"
 			state.detail = fmt.Sprintf("cannot render desired bundle: %v", err)
@@ -356,14 +364,20 @@ func applyPolicyToGateways(input *CommandInput, scope gatewayTargetScope) int {
 			})
 			if err != nil {
 				applyErr = err
-			} else if resolved.Effective.Mode == model.NetworkModeUnrestricted {
-				applyErr = fmt.Errorf("live apply does not support unrestricted mode; restart the session to switch mode safely")
 			} else {
-				applyErr = bundle.WriteConfigBundle(bundle.BundleWriteConfig{
-					Dir:    expectedBundleDir,
-					Policy: resolved.Effective,
-					Tool:   target.Tool,
-				})
+				var active backend.GatewayNetworkState
+				active, applyErr = manager.ReadGatewayNetworkState(context.Background(), target.ID)
+				if applyErr == nil {
+					var next network.EffectivePolicy
+					next, applyErr = gatewayPolicyForReload(resolved.Effective, active)
+					if applyErr == nil {
+						applyErr = bundle.WriteConfigBundle(bundle.BundleWriteConfig{
+							Dir:    expectedBundleDir,
+							Policy: next,
+							Tool:   target.Tool,
+						})
+					}
+				}
 			}
 		}
 		if applyErr == nil {
@@ -533,4 +547,21 @@ func runMutationRuntimeApply(input *CommandInput) int {
 		fmt.Printf("Persistence succeeded but runtime apply failed. Running sessions may still enforce the previous policy.\n")
 	}
 	return exitCode
+}
+
+func gatewayPolicyForReload(next network.EffectivePolicy, active backend.GatewayNetworkState) (network.EffectivePolicy, error) {
+	if active.Mode != backend.NetworkModeRestricted && active.Mode != backend.NetworkModeUnrestricted {
+		return network.EffectivePolicy{}, fmt.Errorf("gateway destination mode is unavailable; restart this session")
+	}
+	if active.ModeSource == "allow-all-network" {
+		if active.Mode != backend.NetworkModeUnrestricted {
+			return network.EffectivePolicy{}, fmt.Errorf("invalid gateway allow-all-network session override")
+		}
+		next.Mode = model.NetworkModeUnrestricted
+		next.ModeSource = "allow-all-network"
+	}
+	if string(active.Mode) != next.Mode {
+		return network.EffectivePolicy{}, fmt.Errorf("live apply cannot switch destination mode from %s to %s; restart the session", active.Mode, next.Mode)
+	}
+	return next, nil
 }

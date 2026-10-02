@@ -351,7 +351,29 @@ func ContainerName(containerName string) string {
 	return containerName + model.GatewayContainerSuffix
 }
 
+// OAuthConfig contains host-owned broker mounts. Only ViewDir is shared with
+// the workload; the other paths must never appear in its mount namespace.
+type OAuthConfig struct {
+	StoreDir    string
+	RuntimeDir  string
+	ViewDir     string
+	LockPath    string
+	Identity    string
+	Incarnation string
+	Features    []FeatureOAuthConfig
+}
+
+type FeatureOAuthConfig struct {
+	Name       string
+	StoreDir   string
+	RuntimeDir string
+	ViewDir    string
+	LockPath   string
+	Identity   string
+}
+
 type StartConfig struct {
+	OAuth             *OAuthConfig
 	Paths             model.Paths
 	Profile           model.Profile
 	AllowlistPath     string
@@ -494,8 +516,31 @@ func Start(ctx context.Context, cfg StartConfig) (StartResult, error) {
 		mounts = appendReadOnlyMount(mounts, cfg.SecretReleaseFile, model.GatewaySecretReleasePath)
 	}
 	mounts = appendTLSCAMounts(mounts, cfg.TLSRootDir)
+	if cfg.OAuth != nil {
+		mounts = append(mounts, []docker.Mount{
+			{Type: docker.MountTypeBind, Source: cfg.OAuth.StoreDir, Target: model.GatewayOAuthGrantPath},
+			{Type: docker.MountTypeBind, Source: cfg.OAuth.RuntimeDir, Target: model.GatewayOAuthRuntimePath},
+			{Type: docker.MountTypeBind, Source: cfg.OAuth.ViewDir, Target: model.GatewayOAuthViewPath},
+			{Type: docker.MountTypeBind, Source: cfg.OAuth.LockPath, Target: model.GatewayOAuthLockPath},
+		}...)
+		for _, feature := range cfg.OAuth.Features {
+			mounts = append(mounts, []docker.Mount{
+				{Type: docker.MountTypeBind, Source: feature.StoreDir, Target: model.GatewayOAuthGitHubGrantPath},
+				{Type: docker.MountTypeBind, Source: feature.RuntimeDir, Target: model.GatewayOAuthGitHubRuntimePath},
+				{Type: docker.MountTypeBind, Source: feature.ViewDir, Target: model.GatewayOAuthGitHubViewPath},
+				{Type: docker.MountTypeBind, Source: feature.LockPath, Target: model.GatewayOAuthGitHubLockPath},
+			}...)
+		}
+	}
 
 	env := []string{}
+	if cfg.OAuth != nil {
+		env = append(env, model.EnvOAuthBroker+"=claude", model.EnvOAuthIdentity+"="+cfg.OAuth.Identity, model.EnvOAuthIncarnation+"="+cfg.OAuth.Incarnation)
+		for _, feature := range cfg.OAuth.Features {
+			env = append(env, model.EnvOAuthGitHub+"=1", model.EnvOAuthGitHubIdentity+"="+feature.Identity)
+		}
+	}
+
 	if cfg.NetworkLogPath != "" {
 		env = append(env, model.EnvNetworkLogFile+"="+gatewayNetworkLogPath)
 	}
@@ -556,6 +601,9 @@ func Start(ctx context.Context, cfg StartConfig) (StartResult, error) {
 		UserNS:       gatewayUserNS(),
 	}
 
+	if cfg.OAuth != nil {
+		hostConfig.CapAdd = append(hostConfig.CapAdd, "DAC_OVERRIDE", "CHOWN")
+	}
 	containerID, err := startGatewayContainer(ctx, config, hostConfig, gatewayContainer)
 	if err != nil && docker.IsContainerNameConflict(err) {
 		reconciled, reconcileErr := ReconcileStale(ctx, cfg.ContainerName, cfg.ProjectHash)
@@ -806,6 +854,42 @@ func gatewayPublishedPorts(bindings docker.PortMap) string {
 func validateStartConfig(cfg StartConfig) error {
 	if strings.TrimSpace(cfg.NetworkName) == "" {
 		return fmt.Errorf("gateway network name is empty")
+	}
+	if cfg.OAuth != nil {
+		if cfg.Profile.Name != "claude" || cfg.OAuth.Identity == "" || cfg.OAuth.Incarnation == "" || cfg.ContainerName == "" || cfg.TLSRootDir == "" {
+			return fmt.Errorf("protected OAuth gateway requires a Claude identity, session, incarnation and TLS CA")
+		}
+		paths := []string{cfg.OAuth.StoreDir, cfg.OAuth.RuntimeDir, cfg.OAuth.ViewDir}
+		locks := []string{cfg.OAuth.LockPath}
+		if len(cfg.OAuth.Features) > 1 {
+			return errors.New("protected OAuth gateway supports one native feature")
+		}
+		for _, feature := range cfg.OAuth.Features {
+			if feature.Name != "github-cli" || feature.Identity == "" {
+				return errors.New("protected OAuth gateway supports github-cli native authentication only")
+			}
+			paths = append(paths, feature.StoreDir, feature.RuntimeDir, feature.ViewDir)
+			locks = append(locks, feature.LockPath)
+		}
+		for _, path := range paths {
+			info, err := os.Lstat(path)
+			if !filepath.IsAbs(path) || err != nil || !info.IsDir() || info.Mode().Perm()&0o077 != 0 {
+				return fmt.Errorf("protected OAuth gateway requires private real directories")
+			}
+		}
+		for i, a := range paths {
+			for j, b := range paths {
+				if i != j && (util.PathWithin(a, b) || util.PathWithin(b, a)) {
+					return fmt.Errorf("protected OAuth gateway directories must be disjoint")
+				}
+			}
+		}
+		for _, lock := range locks {
+			info, err := os.Lstat(lock)
+			if !filepath.IsAbs(lock) || err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0o077 != 0 {
+				return fmt.Errorf("protected OAuth gateway requires the existing private identity lock")
+			}
+		}
 	}
 	if cfg.GatewayConfigDir != "" && !util.PathExists(cfg.GatewayConfigDir) {
 		return fmt.Errorf("gateway config dir does not exist: %s", cfg.GatewayConfigDir)

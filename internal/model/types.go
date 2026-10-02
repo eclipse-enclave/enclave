@@ -74,6 +74,7 @@ func (r RunOptions) MemoryDisabled() bool {
 }
 
 type AuthOptions struct {
+	ProtectAuth  bool
 	ResetAuth    bool
 	NoAPIKey     bool
 	PassAPIKey   bool
@@ -712,35 +713,43 @@ const (
 var KitInitSubstitutedVars = []string{KitInitWorkdirVar, KitInitHomeVar, KitInitUserVar}
 
 const (
-	GatewayImageTagLatest        = "latest"
-	GatewayImagePrefix           = AppName + "-gateway-"
-	GatewayContainerSuffix       = "-gateway"
-	GatewayLabelManaged          = AppName + ".gateway"
-	GatewayLabelHash             = AppName + ".gateway.hash"
-	GatewayLabelAgent            = LabelAgent
-	GatewayLabelProjectHash      = AppName + ".gateway.project_hash"
-	GatewayLabelProjectDir       = AppName + ".gateway.project_dir"
-	GatewayLabelWorkspaceHash    = AppName + ".gateway.workspace_hash"
-	GatewayLabelContainer        = AppName + ".gateway.container"
-	SessionNetworkSuffix         = "-net"
-	NetworkLabelManaged          = AppName + ".network"
-	NetworkLabelContainer        = AppName + ".network.container"
-	NetworkLabelProjectHash      = AppName + ".network.project_hash"
-	GatewayAllowlistsDir         = "/etc/dnsmasq.allowlists"
-	DNSMasqConfigDir             = "/etc/dnsmasq.d"
-	GatewayDomainsConfigExt      = ".conf"
-	GatewayAllowlistFilename     = AllowlistFilename
-	GatewayAllowlistOverridePath = DNSMasqConfigDir + "/allowlist.conf"
-	GatewayConfigDir             = "/etc/enclave-gateway-config"
-	GatewayConfigDNSMasqPath     = GatewayConfigDir + "/dnsmasq.conf"
-	GatewayConfigDomainsPath     = GatewayConfigDir + "/domains.txt"
-	GatewayConfigDeniedPath      = GatewayConfigDir + "/denied.txt"
-	GatewayConfigMetaPath        = GatewayConfigDir + "/meta.json"
-	GatewaySecretReleasePath     = "/etc/enclave/secret-releases.json" // #nosec G101 -- configuration file path, not a credential.
-	GatewayTLSRootPath           = "/tls"
-	GatewayTLSCACertPath         = GatewayTLSRootPath + "/ca.crt"
-	GatewayTLSCAKeyPath          = GatewayTLSRootPath + "/ca.key"
-	AgentGatewayCACertPath       = "/usr/local/share/ca-certificates/enclave-gateway.crt"
+	GatewayImageTagLatest         = "latest"
+	GatewayImagePrefix            = AppName + "-gateway-"
+	GatewayContainerSuffix        = "-gateway"
+	GatewayLabelManaged           = AppName + ".gateway"
+	GatewayLabelHash              = AppName + ".gateway.hash"
+	GatewayLabelAgent             = LabelAgent
+	GatewayLabelProjectHash       = AppName + ".gateway.project_hash"
+	GatewayLabelProjectDir        = AppName + ".gateway.project_dir"
+	GatewayLabelWorkspaceHash     = AppName + ".gateway.workspace_hash"
+	GatewayLabelContainer         = AppName + ".gateway.container"
+	SessionNetworkSuffix          = "-net"
+	NetworkLabelManaged           = AppName + ".network"
+	NetworkLabelContainer         = AppName + ".network.container"
+	NetworkLabelProjectHash       = AppName + ".network.project_hash"
+	GatewayAllowlistsDir          = "/etc/dnsmasq.allowlists"
+	DNSMasqConfigDir              = "/etc/dnsmasq.d"
+	GatewayDomainsConfigExt       = ".conf"
+	GatewayAllowlistFilename      = AllowlistFilename
+	GatewayAllowlistOverridePath  = DNSMasqConfigDir + "/allowlist.conf"
+	GatewayConfigDir              = "/etc/enclave-gateway-config"
+	GatewayConfigDNSMasqPath      = GatewayConfigDir + "/dnsmasq.conf"
+	GatewayConfigDomainsPath      = GatewayConfigDir + "/domains.txt"
+	GatewayConfigDeniedPath       = GatewayConfigDir + "/denied.txt"
+	GatewayConfigMetaPath         = GatewayConfigDir + "/meta.json"
+	GatewaySecretReleasePath      = "/etc/enclave/secret-releases.json" // #nosec G101 -- configuration file path, not a credential.
+	GatewayTLSRootPath            = "/tls"
+	GatewayOAuthGrantPath         = "/oauth/grant"
+	GatewayOAuthRuntimePath       = "/oauth/runtime"
+	GatewayOAuthViewPath          = "/oauth/view"
+	GatewayOAuthLockPath          = "/oauth/identity.lock"
+	GatewayOAuthGitHubGrantPath   = "/oauth/features/github-cli/grant"
+	GatewayOAuthGitHubRuntimePath = "/oauth/features/github-cli/runtime"
+	GatewayOAuthGitHubViewPath    = "/oauth/features/github-cli/view"
+	GatewayOAuthGitHubLockPath    = "/oauth/features/github-cli/identity.lock"
+	GatewayTLSCACertPath          = GatewayTLSRootPath + "/ca.crt"
+	GatewayTLSCAKeyPath           = GatewayTLSRootPath + "/ca.key"
+	AgentGatewayCACertPath        = "/usr/local/share/ca-certificates/enclave-gateway.crt"
 	// AgentGatewayCABundlePath is the system bundle plus the gateway CA, written
 	// by the entrypoint at a fixed path so the container-level SSL_CERT_FILE can
 	// name it for processes started with `docker exec`.

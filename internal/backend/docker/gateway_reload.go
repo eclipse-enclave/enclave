@@ -9,6 +9,7 @@ package docker
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"sort"
@@ -18,6 +19,7 @@ import (
 	"enclave/internal/backend"
 	dockercmd "enclave/internal/docker"
 	"enclave/internal/gateway"
+	"enclave/internal/gateway/bundle"
 	"enclave/internal/model"
 )
 
@@ -173,4 +175,22 @@ func waitForGatewayReload(ctx context.Context, containerID string, generation st
 		return fmt.Errorf("gateway exited during reload")
 	}
 	return fmt.Errorf("timed out waiting for gateway reload confirmation (generation=%s)", generation)
+}
+
+// ReadGatewayNetworkState reads the active in-container metadata instead of the
+// shared host bundle, which another session may have rewritten since startup.
+func (b *Backend) ReadGatewayNetworkState(ctx context.Context, id string) (backend.GatewayNetworkState, error) {
+	var empty backend.GatewayNetworkState
+	output, err := dockercmd.ExecCapture(ctx, id, []string{"enclave-gateway-proxy", "-network-state", "/run/enclave-gateway/meta.json"}, "")
+	if err != nil {
+		return empty, fmt.Errorf("read active gateway policy; restart older sessions with the current gateway image: %w", err)
+	}
+	var state bundle.PolicyState
+	if err := json.Unmarshal([]byte(output), &state); err != nil {
+		return empty, fmt.Errorf("parse active gateway policy: %w", err)
+	}
+	if state.Mode != model.NetworkModeRestricted && state.Mode != model.NetworkModeUnrestricted {
+		return empty, fmt.Errorf("invalid active gateway destination mode")
+	}
+	return backend.GatewayNetworkState{Mode: backend.NetworkMode(state.Mode), ModeSource: state.ModeSource}, nil
 }

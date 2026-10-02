@@ -296,10 +296,19 @@ func TestNormalizePolicyDomain(t *testing.T) {
 	}
 }
 
-func TestRenderDnsmasqConfigForToolRejectsUnrestricted(t *testing.T) {
-	ep := EffectivePolicy{Mode: "unrestricted"}
-	if _, err := RenderDnsmasqConfigForTool(ep, "claude", "8.8.8.8"); err == nil {
-		t.Fatal("expected unrestricted mode error")
+func TestRenderDnsmasqConfigForToolUnrestrictedUsesUpstreamForEveryDomain(t *testing.T) {
+	ep := EffectivePolicy{Mode: "unrestricted", Domains: []string{"allowed.example"}, DeniedDomains: []string{"denied.example"}}
+	got, err := RenderDnsmasqConfigForTool(ep, "claude", "9.9.9.9")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got, "\nserver=9.9.9.9\n") || !strings.Contains(got, "no-resolv") {
+		t.Fatalf("missing unrestricted upstream resolver: %s", got)
+	}
+	for _, prohibited := range []string{"address=", "ipset=", "allowed.example", "denied.example"} {
+		if strings.Contains(got, prohibited) {
+			t.Errorf("unrestricted DNS retains destination restriction %q: %s", prohibited, got)
+		}
 	}
 }
 

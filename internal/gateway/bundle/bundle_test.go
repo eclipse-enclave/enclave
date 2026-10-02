@@ -17,10 +17,34 @@ import (
 	"enclave/internal/network"
 )
 
-func TestRenderConfigBundleRejectsUnrestricted(t *testing.T) {
-	_, err := renderConfigBundle(network.EffectivePolicy{Mode: "unrestricted"}, "codex")
-	if err == nil {
-		t.Fatal("expected unrestricted mode to be rejected")
+func TestRenderConfigBundleUnrestrictedSeparatesDestinationPolicy(t *testing.T) {
+	policy := network.EffectivePolicy{Mode: "unrestricted", Domains: []string{"allowed.example"}, DeniedDomains: []string{"denied.example"}, Resolvers: []string{"9.9.9.9"}}
+	dir := t.TempDir()
+	if err := WriteConfigBundle(BundleWriteConfig{Dir: dir, Policy: policy, Tool: "claude"}); err != nil {
+		t.Fatal(err)
+	}
+	mode, err := ReadMode(filepath.Join(dir, "meta.json"))
+	if err != nil || mode != "unrestricted" {
+		t.Fatalf("mode = %q, %v", mode, err)
+	}
+	for _, file := range []string{"domains.txt", "denied.txt"} {
+		data, err := os.ReadFile(filepath.Join(dir, file))
+		if err != nil || len(data) != 0 {
+			t.Errorf("%s retained destination restrictions: %q, %v", file, data, err)
+		}
+	}
+	dns, err := os.ReadFile(filepath.Join(dir, "dnsmasq.conf"))
+	if err != nil || !strings.Contains(string(dns), "\nserver=9.9.9.9\n") || strings.Contains(string(dns), "address=") {
+		t.Fatalf("unrestricted DNS = %q, %v", dns, err)
+	}
+	unrestrictedHash, err := ConfigBundleHash(BundleWriteConfig{Policy: policy, Tool: "claude"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	policy.Mode = "restricted"
+	restrictedHash, err := ConfigBundleHash(BundleWriteConfig{Policy: policy, Tool: "claude"})
+	if err != nil || unrestrictedHash == restrictedHash {
+		t.Fatalf("destination mode omitted from bundle hash: %q, %q, %v", unrestrictedHash, restrictedHash, err)
 	}
 }
 
@@ -152,5 +176,33 @@ func TestRenderConfigBundleUsesNetworkRenderer(t *testing.T) {
 	}
 	if !strings.Contains(preview, "ipset=/api.example.com/enclave_allowed") {
 		t.Fatalf("preview missing ipset lines:\n%s", preview)
+	}
+}
+
+func TestReadModeFailsClosed(t *testing.T) {
+	for _, content := range []string{"", "{", "{}", "null", `{"mode":null}`, `{"mode":"disabled"}`, `{"mode":true}`, `{"mode":"unrestricted","mode_source":"unknown"}`, `{"mode":"restricted","mode_source":"allow-all-network"}`} {
+		t.Run(content, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "meta.json")
+			if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if mode, err := ReadMode(path); err == nil {
+				t.Fatalf("invalid metadata enabled mode %q", mode)
+			}
+		})
+	}
+	if _, err := ReadMode(filepath.Join(t.TempDir(), "missing")); err == nil {
+		t.Fatal("missing metadata did not fail closed")
+	}
+}
+
+func TestBundlePreservesExplicitUnrestrictedSessionOverride(t *testing.T) {
+	dir := t.TempDir()
+	if err := WriteConfigBundle(BundleWriteConfig{Dir: dir, Policy: network.EffectivePolicy{Mode: "unrestricted", ModeSource: "allow-all-network"}, Tool: "claude"}); err != nil {
+		t.Fatal(err)
+	}
+	state, err := ReadPolicyState(filepath.Join(dir, "meta.json"))
+	if err != nil || state.Mode != "unrestricted" || state.ModeSource != "allow-all-network" {
+		t.Fatalf("lost recorded session mode override: %+v, %v", state, err)
 	}
 }

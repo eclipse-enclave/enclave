@@ -7,6 +7,20 @@
 
 # shellcheck shell=bash
 # Claude extension setup
+if [ "${ENCLAVE_PROTECTED_AUTH:-}" = "1" ]; then
+    _protected_bin="$HOME/.local/share/enclave/claude-2.1.63/bin"
+    if [ ! -x "$_protected_bin/claude" ]; then
+        echo "Protected Claude client is missing; rebuild the image" >&2
+        exit 1
+    fi
+    export PATH="$_protected_bin:$PATH"
+    export DISABLE_AUTOUPDATER=1
+    if ! _protected_version="$("$_protected_bin/claude" --version)" || [ "$_protected_version" != "2.1.63 (Claude Code)" ]; then
+        echo "Protected Claude client version mismatch; rebuild the image" >&2
+        exit 1
+    fi
+    unset _protected_bin _protected_version
+fi
 mkdir -p "$HOME/.claude"
 export DISABLE_TELEMETRY=1
 export DISABLE_ERROR_REPORTING=1

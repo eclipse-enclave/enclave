@@ -22,6 +22,7 @@ import (
 	"enclave/internal/backend"
 	"enclave/internal/config"
 	"enclave/internal/model"
+	"enclave/internal/network"
 )
 
 // networkPreviewTestInput selects a tool with a spec domain, a feature with
@@ -438,5 +439,41 @@ func TestReadGatewayBundleGeneration(t *testing.T) {
 	}
 	if got != generation {
 		t.Fatalf("unexpected generation: want %q, got %q", generation, got)
+	}
+}
+
+func TestGatewayPolicyForReloadPreservesSessionMode(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		active    backend.GatewayNetworkState
+		next      string
+		want      string
+		wantError bool
+	}{
+		{"restricted update", backend.GatewayNetworkState{Mode: backend.NetworkModeRestricted, ModeSource: "default"}, "restricted", "restricted", false},
+		{"unrestricted policy update", backend.GatewayNetworkState{Mode: backend.NetworkModeUnrestricted, ModeSource: "project"}, "unrestricted", "unrestricted", false},
+		{"flag overrides saved restricted policy", backend.GatewayNetworkState{Mode: backend.NetworkModeUnrestricted, ModeSource: "allow-all-network"}, "restricted", "unrestricted", false},
+		{"flag overrides saved unrestricted policy", backend.GatewayNetworkState{Mode: backend.NetworkModeUnrestricted, ModeSource: "allow-all-network"}, "unrestricted", "unrestricted", false},
+		{"policy switched to restricted", backend.GatewayNetworkState{Mode: backend.NetworkModeUnrestricted, ModeSource: "project"}, "restricted", "", true},
+		{"policy switched to unrestricted", backend.GatewayNetworkState{Mode: backend.NetworkModeRestricted}, "unrestricted", "", true},
+		{"missing active metadata", backend.GatewayNetworkState{}, "unrestricted", "", true},
+		{"invalid active override", backend.GatewayNetworkState{Mode: backend.NetworkModeRestricted, ModeSource: "allow-all-network"}, "restricted", "", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			next := network.EffectivePolicy{Mode: tc.next, ModeSource: "project", Domains: []string{"new.example"}, Resolvers: []string{"9.9.9.9"}}
+			got, err := gatewayPolicyForReload(next, tc.active)
+			if (err != nil) != tc.wantError {
+				t.Fatalf("reload policy error = %v, want error %t", err, tc.wantError)
+			}
+			if tc.wantError {
+				return
+			}
+			if got.Mode != tc.want || len(got.Domains) != 1 || got.Domains[0] != "new.example" || len(got.Resolvers) != 1 || got.Resolvers[0] != "9.9.9.9" {
+				t.Fatalf("reload changed destination mode or discarded policy update: %+v", got)
+			}
+			if tc.active.ModeSource == "allow-all-network" && got.ModeSource != "allow-all-network" {
+				t.Fatal("reload lost the session's explicit unrestricted override")
+			}
+		})
 	}
 }

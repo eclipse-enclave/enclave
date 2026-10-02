@@ -43,6 +43,33 @@ func ValidateOptions(opts model.Options, sources model.OptionSources, ctx Valida
 		// fixtures); Run rejects an explicitly empty --backend before this call.
 		opts.Backend = backend.NameDocker
 	}
+	if opts.ProtectAuth {
+		if opts.Tool != "claude" || (opts.Backend != backend.NameDocker && opts.Backend != backend.NamePodman) {
+			return opts, sources, warnings, fmt.Errorf("--protect-auth supports only Claude on Docker or Podman")
+		}
+		if opts.AuthScope != model.AuthScopeShared || strings.TrimSpace(opts.AuthName) == "" || opts.Ephemeral || !opts.Persist {
+			return opts, sources, warnings, fmt.Errorf("--protect-auth requires persistence, --auth-scope shared and a fresh --auth-name")
+		}
+		var conflict string
+		switch {
+		case opts.Devcontainer:
+			conflict = "devcontainers (--devcontainer)"
+		case opts.Admin:
+			conflict = "admin mode (--admin)"
+		case opts.RuntimeUIDRemap:
+			conflict = "runtime UID remapping (--runtime-uid-remap)"
+		case opts.HostConfig != "" && opts.HostConfig != model.HostConfigNone:
+			conflict = "host config passthrough; use --host-config=none"
+		case opts.PassAPIKey:
+			conflict = "API key injection (--pass-api-key)"
+		case opts.BaseImage != "":
+			conflict = "custom base images (--base-image)"
+		}
+		if conflict != "" {
+			return opts, sources, warnings, fmt.Errorf("--protect-auth does not support %s", conflict)
+		}
+		warnings = append(warnings, "Protected OAuth is experimental; Docker/Podman and pinned Claude compatibility require validation. The native config view is session-scoped.")
+	}
 	if err := validateBackendName(opts.Backend); err != nil {
 		return opts, sources, warnings, err
 	}

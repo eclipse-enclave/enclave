@@ -16,10 +16,11 @@ import (
 )
 
 type CommandInput struct {
-	Ctx     *AppContext
-	Action  string
-	Options model.Options
-	Sources model.OptionSources
+	Ctx         *AppContext
+	Action      string
+	Options     model.Options
+	Sources     model.OptionSources
+	AuthFeature string
 	// ExtRequest is the parsed extension-management request; nil for the verbs
 	// that have none.
 	ExtRequest *extinstall.Request
@@ -59,6 +60,8 @@ func dispatchCommand(input *CommandInput) int {
 		return runAuthImport(input)
 	case "auth-export":
 		return runAuthExport(input)
+	case "auth-reset", "auth-downgrade":
+		return runProtectedAuthAction(input)
 	case "ssh-init":
 		if err := setupSSH(); err != nil {
 			logx.Errorf("%v", err)

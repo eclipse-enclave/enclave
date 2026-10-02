@@ -28,6 +28,7 @@ type authCommandContext struct {
 	authFiles   []string
 	hostAuthDir string
 	storage     backend.StoreManager
+	backend     backend.Backend
 	authName    string
 }
 
@@ -90,7 +91,87 @@ func loadAuthCommandContext(input *CommandInput) (authCommandContext, int) {
 			authName = ""
 		}
 	}
-	return authCommandContext{host: host, project: project, profile: profile, authFiles: authFiles, hostAuthDir: hostAuthDir, storage: storage, authName: authName}, 0
+	return authCommandContext{host: host, project: project, profile: profile, authFiles: authFiles, hostAuthDir: hostAuthDir, storage: storage, backend: be, authName: authName}, 0
+}
+
+func runProtectedAuthAction(input *CommandInput) int {
+	if input.AuthFeature != "" {
+		return runProtectedFeatureAuthAction(input)
+	}
+	ctx, code := loadAuthCommandContext(input)
+	if code != 0 {
+		return code
+	}
+	if ctx.profile.Name != "claude" || input.Options.AuthScope != model.AuthScopeShared || ctx.authName == "" {
+		logx.Errorf("protected auth commands require --tool claude --auth-scope shared --auth-name <name>")
+		return 1
+	}
+	manager, ok := ctx.backend.(backend.AuthSessionManager)
+	if !ok {
+		logx.Errorf("backend does not support protected auth identities")
+		return 1
+	}
+	key := backend.StoreKey{Owner: ctx.profile.Name, Suffix: ctx.authName}
+	var err error
+	if input.Action == "auth-reset" {
+		err = manager.ResetAuthIdentity(context.Background(), key)
+	} else {
+		err = manager.DowngradeAuthIdentity(context.Background(), key)
+	}
+	if err != nil {
+		logx.Errorf("%v", err)
+		return 1
+	}
+	if input.Action == "auth-reset" {
+		logx.Successf("Cleared saved OAuth grant for %s; identity remains protected", ctx.authName)
+	} else {
+		logx.Successf("Removed protection from empty identity %s; future logins use ordinary auth files", ctx.authName)
+	}
+	return 0
+}
+
+func runProtectedFeatureAuthAction(input *CommandInput) int {
+	if input.AuthFeature != "github-cli" {
+		logx.Errorf("protected feature auth supports only --feature github-cli")
+		return 1
+	}
+	if input.Sources.Tool == model.SourceCLI || input.Sources.AuthName == model.SourceCLI || input.Sources.AuthScope == model.SourceCLI {
+		logx.Errorf("feature auth identities are shared globally; do not combine --feature with --tool, --auth-name or --auth-scope")
+		return 1
+	}
+	if code := requireDocker(); code != 0 {
+		return code
+	}
+	host, err := input.Ctx.Host()
+	if err != nil {
+		logx.Errorf("%v", err)
+		return 1
+	}
+	be, err := selectBackend(input.Options, dockerBackendOptions(host, input.Ctx.Paths, model.BuildOptions{}, input.Options.RunOptions))
+	if err != nil {
+		logx.Errorf("%v", err)
+		return 1
+	}
+	manager, ok := be.(backend.FeatureAuthIdentityManager)
+	if !ok {
+		logx.Errorf("backend does not support protected feature auth identities")
+		return 1
+	}
+	if input.Action == "auth-reset" {
+		err = manager.ResetFeatureAuthIdentity(context.Background(), input.AuthFeature)
+	} else {
+		err = manager.DowngradeFeatureAuthIdentity(context.Background(), input.AuthFeature)
+	}
+	if err != nil {
+		logx.Errorf("%v", err)
+		return 1
+	}
+	if input.Action == "auth-reset" {
+		logx.Successf("Cleared saved credentials for feature %s; identity remains protected", input.AuthFeature)
+	} else {
+		logx.Successf("Removed protection from empty feature identity %s", input.AuthFeature)
+	}
+	return 0
 }
 
 func runAuthImport(input *CommandInput) int {

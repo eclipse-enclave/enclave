@@ -108,7 +108,7 @@ func discoverGatewayTargets(input *CommandInput, manager backend.GatewayManager,
 	return targets, scopeLabel, nil
 }
 
-func desiredGatewayBundleHash(resolver policy.EffectiveResolver, target backend.GatewayInfo, targetProjectDir string) (string, error) {
+func desiredGatewayBundleHash(resolver policy.EffectiveResolver, target backend.GatewayInfo, targetProjectDir string, active backend.GatewayNetworkState) (string, error) {
 	if strings.TrimSpace(target.Tool) == "" {
 		return "", fmt.Errorf("missing tool label on gateway %s", target.ShortID())
 	}
@@ -124,8 +124,12 @@ func desiredGatewayBundleHash(resolver policy.EffectiveResolver, target backend.
 		return "", err
 	}
 
+	effective, err := gatewayPolicyForReload(resolved.Effective, active)
+	if err != nil {
+		return "", err
+	}
 	return bundle.ConfigBundleHash(bundle.BundleWriteConfig{
-		Policy: resolved.Effective,
+		Policy: effective,
 		Tool:   target.Tool,
 	})
 }

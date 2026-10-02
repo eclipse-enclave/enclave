@@ -9,6 +9,7 @@ internal/domainpattern
 internal/gateway/bundle
 internal/gateway/dnsaudit
 internal/gateway/mitm
+internal/gateway/oauthbroker
 internal/gateway/tlsstore
 internal/gateway/wsframe
 internal/git

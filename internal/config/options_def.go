@@ -339,6 +339,21 @@ func OptionDefs() []OptionDef {
 			},
 		},
 		{
+			Name:          "protect_auth",
+			Group:         OptionGroupAuth,
+			Kind:          OptionKindBool,
+			OptionField:   "ProtectAuth",
+			SourceField:   "ProtectAuth",
+			DefaultsField: "ProtectAuth",
+			Apply:         ApplyBoolPtr,
+			CLIFlags: []CLIFlagDef{{
+				Name:      "--protect-auth",
+				Usage:     "Experimental gateway-owned Claude OAuth (requires a fresh named shared identity)",
+				ValueKind: CLIValueNone,
+				Action:    CLIAction{Kind: CLIActionSetBool, OptionField: "ProtectAuth", SourceField: "ProtectAuth", BoolValue: true},
+			}},
+		},
+		{
 			Name:           "reset_auth",
 			Group:          OptionGroupAuth,
 			Kind:           OptionKindBool,

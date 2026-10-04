@@ -191,6 +191,13 @@ enclave ps --json
 # ... "network": {"name": "...", "subnet": "172.30.0.0/28"}
 ```
 
+Restricted gateways also drop unsolicited inbound IPv4 and IPv6 traffic, even
+if a peer can route to the session. Only loopback, established/related replies,
+and published container ports are admitted. OAuth callback forwarding remains
+available through its published port; DNS and proxy listeners are not exposed
+to peers unless explicitly published. Unrestricted sessions have no gateway
+inbound filter.
+
 Docker 29 and newer allocate a small dynamic IPv4 prefix for each session. On
 older daemons, Docker's default allocation applies and the stock address pools
 can limit the number of concurrent networks. If pool allocation is exhausted,
@@ -198,7 +205,10 @@ upgrade the daemon or configure Docker's `default-address-pools`.
 
 Under `--backend podman` the same networks require netavark and are created with
 `isolate=strict`, since netavark isolates bridge networks from each other only
-on request before podman 6. Podman's default pool hands out a `/24` per network
+on request before podman 6. Older netavark versions or Podman CLIs that reject
+`strict` fall back to `isolate=true` with a warning: non-isolated networks can
+still route to the session, but restricted gateways retain their inbound filter.
+Podman's default pool hands out a `/24` per network
 and is not subject to the Docker pool limit. Published ports still bind
 `127.0.0.1` explicitly on both engines.
 
@@ -210,7 +220,8 @@ Container-to-container access is not a compatibility contract. As an advanced,
 unsupported integration, `docker network connect <network-name> <peer-container>`
 can deliberately attach a peer to the network named in the `enclave ps --json`
 output. Enclave does not manage or authorize that peer, and the network cannot
-be removed until it disconnects.
+be removed until it disconnects. Restricted gateways still require a published
+port for the peer to reach a session listener.
 
 ### Migrating from the default bridge
 

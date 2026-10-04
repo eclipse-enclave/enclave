@@ -34,6 +34,7 @@ const (
 	EnvNetworkLogFile           = EnvPrefix + "NETWORK_LOG_FILE"
 	EnvNetworkLogMode           = EnvPrefix + "NETWORK_LOG_MODE"
 	EnvGatewayConfigDir         = EnvPrefix + "GATEWAY_CONFIG_DIR"
+	EnvGatewayPublishedPorts    = EnvPrefix + "GATEWAY_PUBLISHED_PORTS"
 	EnvFeatureAuthMap           = EnvPrefix + "FEATURE_AUTH_MAP"
 	EnvYolo                     = EnvPrefix + "YOLO"
 	EnvPlaywrightMCP            = EnvPrefix + "PLAYWRIGHT_MCP"

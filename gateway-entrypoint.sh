@@ -357,15 +357,43 @@ $ide_ports
 EOF_IDE
 }
 
-setup_firewall() {
-    iptables -F OUTPUT || true
-    iptables -F INPUT || true
-    iptables -P INPUT ACCEPT
-    iptables -P OUTPUT DROP
+setup_input_firewall() {
+    firewall="$1"
+    # Set the policy before flushing so reloads never admit new peer traffic.
+    "$firewall" -P INPUT DROP || return 1
+    "$firewall" -F INPUT || return 1
+    "$firewall" -A INPUT -i lo -j ACCEPT || return 1
+    "$firewall" -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT || return 1
 
-    iptables -A OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
-    iptables -A OUTPUT -o lo -j ACCEPT
-    iptables -A INPUT -i lo -j ACCEPT
+    published_ports=$(printf '%s' "${ENCLAVE_GATEWAY_PUBLISHED_PORTS:-}" | tr ',' '\n')
+    while IFS= read -r published; do
+        [ -z "$published" ] && continue
+        port=${published%/*}
+        protocol=${published##*/}
+        case "$protocol" in
+            tcp|udp) ;;
+            *) log "Invalid published port protocol: $published"; return 1 ;;
+        esac
+        case "$port" in
+            ''|*[!0-9]*) log "Invalid published port: $published"; return 1 ;;
+        esac
+        if ! [ "$port" -ge 1 ] || ! [ "$port" -le 65535 ]; then
+            log "Published port out of range: $published"
+            return 1
+        fi
+        "$firewall" -A INPUT -p "$protocol" --dport "$port" -j ACCEPT || return 1
+    done <<EOF_PUBLISHED
+$published_ports
+EOF_PUBLISHED
+}
+
+setup_firewall() {
+    setup_input_firewall iptables || return 1
+    iptables -P OUTPUT DROP || return 1
+    iptables -F OUTPUT || return 1
+
+    iptables -A OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT || return 1
+    iptables -A OUTPUT -o lo -j ACCEPT || return 1
 
     iptables -A OUTPUT -p udp --dport 53 -d 127.0.0.1 -j ACCEPT
     iptables -A OUTPUT -p tcp --dport 53 -d 127.0.0.1 -j ACCEPT
@@ -432,25 +460,27 @@ setup_kernel_network() {
         sysctl -w net.ipv6.conf.default.disable_ipv6=1 >/dev/null 2>&1 || true
     fi
     if command -v ip6tables >/dev/null 2>&1; then
-        ip6tables -F OUTPUT || true
-        ip6tables -F INPUT || true
-        ip6tables -P INPUT ACCEPT
-        ip6tables -P OUTPUT DROP
-        ip6tables -A OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
-        ip6tables -A OUTPUT -o lo -j ACCEPT
-        ip6tables -A INPUT -i lo -j ACCEPT
+        setup_input_firewall ip6tables || return 1
+        ip6tables -P OUTPUT DROP || return 1
+        ip6tables -F OUTPUT || return 1
+        ip6tables -A OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT || return 1
+        ip6tables -A OUTPUT -o lo -j ACCEPT || return 1
     fi
 }
 
 enforce_fail_closed_lockdown() {
     # Keep the shared network namespace fail-closed even if gateway processes
     # crash or reload validation fails before the main container exits.
-    iptables -F OUTPUT || true
+    iptables -P INPUT DROP || true
+    iptables -F INPUT || true
     iptables -P OUTPUT DROP || true
+    iptables -F OUTPUT || true
 
     if command -v ip6tables >/dev/null 2>&1; then
-        ip6tables -F OUTPUT || true
+        ip6tables -P INPUT DROP || true
+        ip6tables -F INPUT || true
         ip6tables -P OUTPUT DROP || true
+        ip6tables -F OUTPUT || true
     fi
 }
 

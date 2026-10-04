@@ -29,7 +29,7 @@ sequenceDiagram
     Host->>Entry: Start gateway with config bundle<br/>(dnsmasq.conf, domains.txt, meta.json)
     Host->>Entry: Mount optional secret mapping JSON<br/>and TLS root (ca.crt/ca.key)
     Entry->>DNS: Start with rendered allowlist config
-    Entry->>FW: OUTPUT DROP + local DNS allow<br/>NAT redirect 80/443 to 8080/8443
+    Entry->>FW: INPUT DROP + loopback, reply and published-port exceptions<br/>OUTPUT DROP + local DNS allow<br/>NAT redirect 80/443 to 8080/8443
     Entry->>Proxy: Start transparent proxy
     Entry->>Audit: Start DNS audit translator on the dnsmasq log
     Host->>Log: Rotate above the size cap<br/>and append session start marker
@@ -77,7 +77,7 @@ sequenceDiagram
 ## Flow Summary
 
 1. The host runtime writes a gateway config bundle (`dnsmasq.conf`, `domains.txt`, `meta.json`) and starts the sidecar.
-2. `gateway-entrypoint.sh` applies a fail-closed firewall (`OUTPUT DROP`), starts `dnsmasq`, and redirects outbound `tcp/80` and `tcp/443` to `enclave-gateway-proxy`.
+2. `gateway-entrypoint.sh` applies a fail-closed firewall (`INPUT DROP` and `OUTPUT DROP`), starts `dnsmasq`, and redirects outbound `tcp/80` and `tcp/443` to `enclave-gateway-proxy`. Inbound traffic is limited to loopback, established/related replies, and published container ports.
 3. DNS resolution goes through `dnsmasq`. Allowlisted domains resolve and populate the `enclave_allowed` `ipset`; non-allowlisted domains fail resolution.
 4. TCP connections are gated by firewall rules and redirected to the proxy. The proxy checks host allowlist rules again using HTTP `Host` / TLS `SNI`.
 5. For hosts that match declared secret `release.http` rules, or for all allowlisted HTTPS when `network_log=requests`, the proxy uses TLS MITM before forwarding upstream.

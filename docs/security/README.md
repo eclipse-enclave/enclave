@@ -49,15 +49,24 @@ an allowed IP is reachable on arbitrary ports and broad CDN allowlists increase
 tunneling surface. The privileged gateway has `NET_ADMIN`/`NET_RAW` and shares
 the tool's network namespace; a gateway vulnerability can weaken policy.
 
+Restricted gateways use default-drop inbound IPv4 and IPv6 policies. They admit
+only loopback, established/related replies, and published container ports,
+including published OAuth callbacks. Unpublished session, DNS, and proxy
+listeners remain blocked even if another container has a route into the session.
+Unrestricted sessions do not have this gateway filter.
+
 Every Docker and podman session is enclosed in its own user-defined bridge
 network. In restricted mode the gateway is the network's attached endpoint and
 the tool shares its network namespace; in unrestricted mode the tool is
 attached directly. This prevents unrelated bridge networks and other Enclave
 sessions from routing directly to listeners in the session. Docker isolates
 user-defined bridges unconditionally; under podman netavark is required and the
-network is created with `isolate=strict`. A netavark too old for `strict` falls back to
-`isolate=true` with a warning, which leaves containers on non-isolated podman
-networks a route into the session. Published ports
+network is created with `isolate=strict`. Older netavark versions or Podman CLIs
+that reject `strict` fall back to `isolate=true` with a warning, which leaves
+containers on non-isolated podman networks a route into the session. The native
+netavark `firewalld` driver also [does not support bridge isolation](https://github.com/containers/netavark/blob/main/docs/netavark-firewalld.7.md).
+The gateway inbound filter still applies to restricted sessions in these cases.
+Published ports
 still have the reachability requested by their host binding. In particular,
 Docker Desktop's `host.docker.internal` route can let another container reach a
 port published on host loopback, so privileged services need their own

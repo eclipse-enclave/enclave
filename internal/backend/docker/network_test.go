@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -150,6 +151,94 @@ func TestEnsureSessionNetworkReuseAndConflict(t *testing.T) {
 				t.Fatalf("removed references = %v, want immutable network ID", removedRefs)
 			}
 		})
+	}
+}
+
+func TestEnsureSessionNetworkIdentifiesAttachedContainers(t *testing.T) {
+	meta := backend.SessionMeta{Name: "session", ProjectHash: "project"}
+	for _, engine := range []string{"docker", "podman"} {
+		for _, tc := range []struct {
+			name     string
+			attached []string
+			wantStop bool
+			peers    string
+		}{
+			{name: "session endpoints", attached: []string{"session", "session-gateway"}, wantStop: true},
+			{name: "foreign peer", attached: []string{"peer"}, peers: "peer"},
+			{name: "mixed endpoints", attached: []string{"session", "peer-z", "session-gateway", "peer-a"}, peers: "peer-a, peer-z"},
+			{name: "unknown endpoint", attached: []string{" "}, peers: "<unknown>"},
+		} {
+			t.Run(engine+"/"+tc.name, func(t *testing.T) {
+				restoreNetworkGlobals(t)
+				info := dockercmd.NetworkInspectResponse{
+					Name: sessionNetworkName(meta.Name), ID: "network-id", Labels: sessionNetworkLabels(meta),
+				}
+				if engine == "podman" {
+					usePodmanCLI(t)
+					networkAttachedContainers = func(context.Context, string) ([]string, error) { return tc.attached, nil }
+				} else {
+					info.Containers = make(map[string]dockercmd.NetworkEndpoint, len(tc.attached))
+					for i, name := range tc.attached {
+						info.Containers[strconv.Itoa(i)] = dockercmd.NetworkEndpoint{Name: name}
+					}
+				}
+				networkInspect = func(context.Context, string) (dockercmd.NetworkInspectResponse, error) { return info, nil }
+				networkCreate = func(context.Context, dockercmd.NetworkCreateOptions) (string, error) {
+					t.Fatal("must not replace a network with attached containers")
+					return "", nil
+				}
+				_, err := New(Options{}).ensureSessionNetwork(context.Background(), meta, dockercmd.SystemInfo{})
+				if err == nil {
+					t.Fatal("expected attached-container error")
+				}
+				if got := strings.Contains(err.Error(), "enclave stop session"); got != tc.wantStop {
+					t.Fatalf("stop hint = %v, want %v in %v", got, tc.wantStop, err)
+				}
+				if tc.peers != "" && (!strings.Contains(err.Error(), tc.peers) || !strings.Contains(err.Error(), "disconnect")) {
+					t.Fatalf("error does not identify the peers to disconnect: %v", err)
+				}
+			})
+		}
+	}
+}
+
+func TestSessionNetworkReferencesNormalizeAndRequireIDs(t *testing.T) {
+	meta := backend.SessionMeta{Name: " session ", ProjectHash: " project "}
+	want := sessionNetworkRef{Name: "session-net", ID: "network-id", Container: "session", ProjectHash: "project"}
+	for _, path := range []string{"create", "reuse", "capture"} {
+		for _, id := range []string{" network-id \n", " \n"} {
+			t.Run(path+"/"+strings.TrimSpace(id), func(t *testing.T) {
+				restoreNetworkGlobals(t)
+				if path == "create" {
+					stubCLI(t, "docker", `printf '%s\n' 'Error response from daemon: network session-net not found' >&2
+exit 1`)
+					networkInspect = dockercmd.NetworkInspect
+				} else {
+					networkInspect = func(context.Context, string) (dockercmd.NetworkInspectResponse, error) {
+						return dockercmd.NetworkInspectResponse{Name: "session-net", ID: id, Labels: sessionNetworkLabels(meta)}, nil
+					}
+				}
+				networkCreate = func(context.Context, dockercmd.NetworkCreateOptions) (string, error) { return id, nil }
+				var ref sessionNetworkRef
+				var valid bool
+				var err error
+				if path == "capture" {
+					ref, valid = captureSessionNetworkRef(context.Background(), meta.Name, meta.ProjectHash)
+				} else {
+					ref, err = New(Options{}).ensureSessionNetwork(context.Background(), meta, dockercmd.SystemInfo{})
+					valid = err == nil
+				}
+				if valid != (strings.TrimSpace(id) != "") {
+					t.Fatalf("reference valid=%v for ID %q", valid, id)
+				}
+				if valid && ref != want {
+					t.Fatalf("reference = %+v, want %+v", ref, want)
+				}
+				if !valid && path != "capture" && !strings.Contains(err.Error(), "empty network ID") {
+					t.Fatalf("expected an empty-ID error, got %v", err)
+				}
+			})
+		}
 	}
 }
 
@@ -637,6 +726,7 @@ func TestSessionNetworkEndpointQueryFailurePropagates(t *testing.T) {
 // network on every ordinary foreground session.
 func TestRemoveOwnedSessionNetworkWaitsOutPodmanTeardown(t *testing.T) {
 	restoreNetworkGlobals(t)
+	sessionNetworkRemoveRetryWait = 0
 	usePodmanCLI(t)
 	ref := sessionNetworkRef{Name: "session-net", ID: "network-id", Container: "session"}
 	networkInspect = func(context.Context, string) (dockercmd.NetworkInspectResponse, error) {
@@ -667,6 +757,9 @@ func TestRemoveOwnedSessionNetworkWaitsOutPodmanTeardown(t *testing.T) {
 	}
 	if !removed {
 		t.Fatalf("network leaked after podman finished its teardown (polled %d times)", polls)
+	}
+	if polls != 4 {
+		t.Fatalf("polled %d times, want four endpoint checks before removal", polls)
 	}
 }
 
@@ -770,6 +863,7 @@ func restoreNetworkGlobals(t *testing.T) {
 	origAttached := networkAttachedContainers
 	origContainerList := sessionContainerList
 	origRuntimeExists := sessionRuntimeExists
+	origRetryWait := sessionNetworkRemoveRetryWait
 	t.Cleanup(func() {
 		dockerInfo = origInfo
 		networkCreate = origCreate
@@ -779,6 +873,7 @@ func restoreNetworkGlobals(t *testing.T) {
 		networkAttachedContainers = origAttached
 		sessionContainerList = origContainerList
 		sessionRuntimeExists = origRuntimeExists
+		sessionNetworkRemoveRetryWait = origRetryWait
 	})
 }
 

@@ -14,6 +14,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -401,9 +402,6 @@ type StaleResult struct {
 	Exists bool
 	// Owned is set when that container carries this session's gateway labels.
 	Owned bool
-	// SessionExists is set when the session container itself exists; it is
-	// only checked for an owned gateway.
-	SessionExists bool
 	// Removed is set when the gateway was removed.
 	Removed bool
 }
@@ -492,6 +490,7 @@ func Start(ctx context.Context, cfg StartConfig) (StartResult, error) {
 	if cfg.GatewayConfigDir != "" {
 		env = append(env, model.EnvGatewayConfigDir+"="+model.GatewayConfigDir)
 	}
+	env = append(env, model.EnvGatewayPublishedPorts+"="+gatewayPublishedPorts(cfg.PortBindings))
 	if len(cfg.LoopbackPorts) > 0 {
 		env = append(env, model.EnvLoopbackPorts+"="+strings.Join(cfg.LoopbackPorts, ","))
 	}
@@ -704,7 +703,6 @@ func ReconcileStale(ctx context.Context, containerName string, projectHash strin
 
 	_, err = startContainerInspect(ctx, containerName)
 	if err == nil {
-		result.SessionExists = true
 		return result, nil
 	}
 	if !docker.IsNotFound(err) {
@@ -731,6 +729,17 @@ func ContainerOwnedBy(info docker.InspectResponse, containerName string, project
 	return strings.EqualFold(strings.TrimSpace(labels[model.GatewayLabelManaged]), "true") &&
 		strings.TrimSpace(labels[model.GatewayLabelContainer]) == strings.TrimSpace(containerName) &&
 		strings.TrimSpace(labels[model.GatewayLabelProjectHash]) == strings.TrimSpace(projectHash)
+}
+
+func gatewayPublishedPorts(bindings docker.PortMap) string {
+	ports := make([]string, 0, len(bindings))
+	for port, hosts := range bindings {
+		if len(hosts) > 0 {
+			ports = append(ports, port.Num()+"/"+port.Proto())
+		}
+	}
+	sort.Strings(ports)
+	return strings.Join(ports, ",")
 }
 
 func validateStartConfig(cfg StartConfig) error {

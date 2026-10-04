@@ -10,6 +10,7 @@ package docker
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -28,9 +29,8 @@ const (
 	// gateway containers regularly outlive the CLI that returned. The budget
 	// covers that settling time with room for a loaded host; it is only ever
 	// spent while this session's own containers are still present.
-	sessionNetworkRemoveRetries   = 40
-	sessionNetworkRemoveRetryWait = 250 * time.Millisecond
-	hostBindingIPv4Option         = "com.docker.network.bridge.host_binding_ipv4"
+	sessionNetworkRemoveRetries = 40
+	hostBindingIPv4Option       = "com.docker.network.bridge.host_binding_ipv4"
 	// netavark isolates bridge networks from each other only when asked
 	// (netavark 2 / podman 6 made strict the default); Docker isolates
 	// user-defined bridges unconditionally and rejects the option.
@@ -44,14 +44,15 @@ const (
 )
 
 var (
-	dockerInfo                = dockercmd.Info
-	networkCreate             = dockercmd.NetworkCreate
-	networkInspect            = dockercmd.NetworkInspect
-	networkList               = dockercmd.NetworkList
-	networkRemove             = dockercmd.NetworkRemove
-	networkAttachedContainers = dockercmd.NetworkAttachedContainers
-	sessionContainerList      = dockercmd.ContainerList
-	sessionRuntimeExists      = dockerSessionRuntimeExists
+	sessionNetworkRemoveRetryWait = 250 * time.Millisecond
+	dockerInfo                    = dockercmd.Info
+	networkCreate                 = dockercmd.NetworkCreate
+	networkInspect                = dockercmd.NetworkInspect
+	networkList                   = dockercmd.NetworkList
+	networkRemove                 = dockercmd.NetworkRemove
+	networkAttachedContainers     = dockercmd.NetworkAttachedContainers
+	sessionContainerList          = dockercmd.ContainerList
+	sessionRuntimeExists          = dockerSessionRuntimeExists
 )
 
 type sessionNetworkRef struct {
@@ -156,22 +157,18 @@ func (b *Backend) ensureSessionNetwork(ctx context.Context, meta backend.Session
 	for attempt := 0; attempt < sessionNetworkEnsureAttempts; attempt++ {
 		info, err := networkInspect(ctx, name)
 		if err == nil {
-			hasEndpoints, endpointErr := sessionNetworkHasEndpoints(ctx, info)
+			attached, endpointErr := sessionNetworkEndpoints(ctx, info)
 			if endpointErr != nil {
 				return sessionNetworkRef{}, fmt.Errorf("list containers attached to per-session network %q: %w", name, endpointErr)
 			}
-			action := sessionNetworkActionFor(info, meta, hasEndpoints)
+			action := sessionNetworkActionFor(info, meta, len(attached) > 0)
 			switch action {
 			case sessionNetworkReuse:
-				ref, err := inspectedSessionNetworkRef(info, meta)
-				if err != nil {
-					return sessionNetworkRef{}, err
-				}
-				return ref, nil
+				return newSessionNetworkRef(name, info.ID, meta.Name, meta.ProjectHash)
 			case sessionNetworkConflict:
 				return sessionNetworkRef{}, fmt.Errorf("docker network %q already exists and is not owned by this enclave session", name)
 			case sessionNetworkAttached:
-				return sessionNetworkRef{}, attachedSessionNetworkError(meta.Name, name)
+				return sessionNetworkRef{}, attachedSessionNetworkError(meta.Name, name, attached)
 			}
 		} else if !dockercmd.IsNotFound(err) {
 			return sessionNetworkRef{}, fmt.Errorf("inspect per-session network %q: %w", name, err)
@@ -187,10 +184,7 @@ func (b *Backend) ensureSessionNetwork(ctx context.Context, meta backend.Session
 			}
 			return sessionNetworkRef{}, fmt.Errorf("create per-session network %q: %w", name, err)
 		}
-		if strings.TrimSpace(id) == "" {
-			return sessionNetworkRef{}, fmt.Errorf("create per-session network %q: Docker returned an empty network ID", name)
-		}
-		return sessionNetworkRef{Name: name, ID: id, Container: meta.Name, ProjectHash: meta.ProjectHash}, nil
+		return newSessionNetworkRef(name, id, meta.Name, meta.ProjectHash)
 	}
 	return sessionNetworkRef{}, fmt.Errorf("create per-session network %q: repeated concurrent changes prevented ownership verification", name)
 }
@@ -216,10 +210,11 @@ func podmanIsolateValue(info dockercmd.SystemInfo) (string, error) {
 	}
 	// isolate=true blocks traffic only between networks that also opt in, which
 	// every session network does; containers on podman's default network keep a
-	// route into the session. That is a weaker guarantee than the one this
+	// route into the session (restricted gateways still filter inbound traffic).
+	// That is a weaker guarantee than the one this
 	// feature advertises, so it is stated unconditionally rather than logged at
 	// debug level.
-	logx.Warnf("This podman installs %s, which has no isolate=strict; the session is isolated from other enclave sessions but reachable from containers on non-isolated podman networks. Upgrade netavark to %d.%d.0 or newer for full isolation.", netavarkVersionLabel(info.NetworkBackendVersion), netavarkStrictIsolateMajor, netavarkStrictIsolateMinor)
+	logx.Warnf("This podman installs %s, which has no isolate=strict; session networks are isolated from other enclave sessions but not from non-isolated podman networks. Upgrade netavark to %d.%d.0 or newer for full bridge isolation.", netavarkVersionLabel(info.NetworkBackendVersion), netavarkStrictIsolateMajor, netavarkStrictIsolateMinor)
 	return podmanIsolateOptedInOnly, nil
 }
 
@@ -328,21 +323,38 @@ func sessionNetworkPastGracePeriod(info dockercmd.NetworkInspectResponse, now ti
 	return err == nil && !created.After(now.Add(-sessionNetworkGCGracePeriod))
 }
 
-func inspectedSessionNetworkRef(info dockercmd.NetworkInspectResponse, meta backend.SessionMeta) (sessionNetworkRef, error) {
-	id := strings.TrimSpace(info.ID)
+func newSessionNetworkRef(name string, id string, container string, projectHash string) (sessionNetworkRef, error) {
+	name = strings.TrimSpace(name)
+	id = strings.TrimSpace(id)
 	if id == "" {
-		return sessionNetworkRef{}, fmt.Errorf("docker network %q has no inspect ID", info.Name)
+		return sessionNetworkRef{}, fmt.Errorf("per-session network %q has an empty network ID", name)
 	}
 	return sessionNetworkRef{
-		Name:        sessionNetworkName(meta.Name),
+		Name:        name,
 		ID:          id,
-		Container:   strings.TrimSpace(meta.Name),
-		ProjectHash: strings.TrimSpace(meta.ProjectHash),
+		Container:   strings.TrimSpace(container),
+		ProjectHash: strings.TrimSpace(projectHash),
 	}, nil
 }
 
-func attachedSessionNetworkError(containerName string, networkName string) error {
-	return fmt.Errorf("session %s already running or requires stale-resource cleanup: Docker network %q has attached endpoints; run 'enclave stop %s' and retry", containerName, networkName, containerName)
+func attachedSessionNetworkError(containerName string, networkName string, attached []string) error {
+	if sessionOwnsEndpoints(attached, containerName) {
+		return fmt.Errorf("session %s already running or requires stale-resource cleanup: Docker network %q has attached endpoints; run 'enclave stop %s' and retry", containerName, networkName, containerName)
+	}
+	containerName = strings.TrimSpace(containerName)
+	var peers []string
+	for _, name := range attached {
+		name = strings.TrimSpace(name)
+		if name == containerName || name == containerName+model.GatewayContainerSuffix {
+			continue
+		}
+		if name == "" {
+			name = "<unknown>"
+		}
+		peers = append(peers, name)
+	}
+	sort.Strings(peers)
+	return fmt.Errorf("per-session network %q has foreign attached containers: %s; disconnect them from this network and retry", networkName, strings.Join(peers, ", "))
 }
 
 func cleanupSessionNetwork(ref sessionNetworkRef) {
@@ -440,16 +452,12 @@ func captureSessionNetworkRef(ctx context.Context, containerName string, project
 		}
 		return sessionNetworkRef{}, false
 	}
-	if strings.TrimSpace(info.ID) == "" || info.Name != name ||
+	if info.Name != name ||
 		!sessionNetworkOwnedBy(info, containerName, projectHash) {
 		return sessionNetworkRef{}, false
 	}
-	return sessionNetworkRef{
-		Name:        name,
-		ID:          strings.TrimSpace(info.ID),
-		Container:   strings.TrimSpace(containerName),
-		ProjectHash: strings.TrimSpace(projectHash),
-	}, true
+	ref, err := newSessionNetworkRef(name, info.ID, containerName, projectHash)
+	return ref, err == nil
 }
 
 // gcSessionNetworks quietly removes leaked per-session networks at session
@@ -534,12 +542,10 @@ func staleSessionNetworks(ctx context.Context, now time.Time) ([]sessionNetworkR
 		if err != nil || hasEndpoints {
 			continue
 		}
-		stale = append(stale, sessionNetworkRef{
-			Name:        info.Name,
-			ID:          info.ID,
-			Container:   owner,
-			ProjectHash: projectHash,
-		})
+		ref, err := newSessionNetworkRef(info.Name, info.ID, owner, projectHash)
+		if err == nil {
+			stale = append(stale, ref)
+		}
 	}
 	return stale, nil
 }

@@ -212,9 +212,11 @@ enclave features update acme/kits/extensions/features   # only extensions under 
 A source matches when its remote equals the recorded one (credentials
 removed) and the recorded subpath lies at or below the source's subpath. The
 remote is compared as written, so `acme/kits` does not match an extension
-installed from `git@github.com:acme/kits`. A source that names a ref (a forge
-tree URL) is rejected; pass the ref with `--ref`, which still requires the
-arguments to select a single extension. Names and sources can be mixed, and a
+installed from `git@github.com:acme/kits`. Sources in scp-style or
+local-path form carry no subpath, so they select every extension installed
+from that repository. A source that names a ref (a forge tree URL) is
+rejected; pass the ref with `--ref`, which still requires the arguments to
+select a single extension. Names and sources can be mixed, and a
 source that matches nothing is an error. For each target:
 
 - **Commit pin, no `--ref`/`--force`**: nothing to check — a commit is

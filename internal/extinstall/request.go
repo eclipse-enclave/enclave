@@ -21,6 +21,7 @@ const (
 )
 
 // Request is the parsed CLI state for one extension-management invocation.
+// For OpUpdate, Names may also hold sources (see isSourceArg).
 type Request struct {
 	Kind        model.ExtensionKind
 	Op          Op

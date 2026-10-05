@@ -164,8 +164,7 @@ func TestRegisterCompletionsCoversExtensionSubcommands(t *testing.T) {
 		cmd := findSubCommand(rootCmd, path...)
 		if cmd == nil {
 			t.Fatalf("%v not registered", path)
-		}
-		if cmd.ValidArgsFunction == nil {
+		} else if cmd.ValidArgsFunction == nil {
 			t.Errorf("%v has no argument completion", path)
 		}
 	}

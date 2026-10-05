@@ -207,17 +207,20 @@ from it:
 ```sh
 enclave features update acme/kits
 enclave features update acme/kits/extensions/features   # only extensions under this path
+enclave features update https://gitlab.com/acme/kits/-/tree/main/extensions/features
 ```
 
 A source matches when its remote equals the recorded one (credentials
 removed) and the recorded subpath lies at or below the source's subpath. The
 remote is compared as written, so `acme/kits` does not match an extension
-installed from `git@github.com:acme/kits`. Sources in scp-style or
-local-path form carry no subpath, so they select every extension installed
-from that repository. A source that names a ref (a forge tree URL) is
-rejected; pass the ref with `--ref`, which still requires the arguments to
-select a single extension. Names and sources can be mixed, and a
-source that matches nothing is an error. For each target:
+installed from `git@github.com:acme/kits`. Only the `owner/repo/...`
+shorthand and forge tree URLs carry a subpath; any other URL, scp-style, or
+local-path source selects every extension installed from that repository. A
+tree URL also names a ref and matches only extensions recorded at that ref, so
+the string passed to `add` works unchanged. To move extensions to a different
+ref, pass `--ref`, which requires the arguments to select a single extension.
+Names and sources can be mixed, and a source that matches nothing is an
+error. For each target:
 
 - **Commit pin, no `--ref`/`--force`**: nothing to check — a commit is
   immutable, so an install pinned to one is already up to date with **no

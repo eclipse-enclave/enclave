@@ -109,26 +109,20 @@ func updateTargets(req Request, inventory map[string]Managed) ([]string, error) 
 	return util.Dedupe(targets), nil
 }
 
-// isSourceArg reports whether arg can only be a source: every form parseSource
-// accepts contains one of these characters, and no extension name does.
-func isSourceArg(arg string) bool {
-	return arg == "." || strings.ContainsAny(arg, "/:~")
-}
-
 // installedFrom returns the managed extensions whose recorded remote is the
-// given source and whose subpath lies within the source's subpath.
+// given source, whose subpath lies within the source's subpath, and, when the
+// source names a ref (a forge tree URL), whose recorded ref is that ref.
 func installedFrom(raw string, kind model.ExtensionKind, inventory map[string]Managed) ([]string, error) {
 	src, err := parseSource(raw)
 	if err != nil {
 		return nil, err
 	}
-	if src.Ref != "" {
-		return nil, fmt.Errorf("source %s names a ref; pass it with --ref instead", src.Display())
-	}
 	remote := RedactRemote(src.RemoteURL)
 	var names []string
 	for name, entry := range inventory {
-		if entry.Origin != nil && entry.Origin.Remote == remote && withinSubpath(entry.Origin.Subpath, src.Subpath) {
+		origin := entry.Origin
+		if origin != nil && origin.Remote == remote && withinSubpath(origin.Subpath, src.Subpath) &&
+			(src.Ref == "" || origin.Ref == src.Ref) {
 			names = append(names, name)
 		}
 	}

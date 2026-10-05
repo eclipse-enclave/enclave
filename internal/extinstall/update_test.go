@@ -368,7 +368,7 @@ func TestUpdateRefRejectedForMultipleTargets(t *testing.T) {
 	installFoo(t, env)
 	// Seed a second managed extension so the --ref check, not the
 	// unknown-name check, is what this test exercises.
-	seedManaged(t, env, "bar", "https://github.com/acme/bar", "")
+	seedManaged(t, env, "bar", "https://github.com/acme/bar")
 
 	req := updateRequest("foo", "bar")
 	req.Ref = "v2"
@@ -435,7 +435,7 @@ func TestUpdateUnknownName(t *testing.T) {
 }
 
 // seedManaged writes a managed feature recorded as installed from remote.
-func seedManaged(t *testing.T, env Env, name, remote, subpath string) {
+func seedManaged(t *testing.T, env Env, name, remote string) {
 	t.Helper()
 	dir := filepath.Join(env.Paths.UserFeaturesDir, name)
 	writeFixture(t, filepath.Join(dir, "spec.yaml"), "schemaVersion: \"1\"\nkind: mixin\nname: "+name+"\n", 0o644)
@@ -445,7 +445,6 @@ func seedManaged(t *testing.T, env Env, name, remote, subpath string) {
 		Name:          name,
 		Remote:        remote,
 		Source:        strings.TrimPrefix(remote, "https://github.com/"),
-		Subpath:       subpath,
 		Ref:           "main",
 		RefType:       RefTypeBranch,
 		Commit:        "c3d4e5f6",
@@ -461,11 +460,12 @@ func TestUpdateTargetsBySource(t *testing.T) {
 	t.Chdir(filepath.Dir(repo))
 	inventory := map[string]Managed{}
 	for name, origin := range map[string]Origin{
-		"alpha": {Remote: "https://github.com/acme/kits", Subpath: "extensions/features/alpha"},
-		"beta":  {Remote: "https://github.com/acme/kits", Subpath: "extensions/features/beta"},
-		"near":  {Remote: "https://github.com/acme/kits", Subpath: "extensions/features/alphabet"},
-		"root":  {Remote: "https://github.com/acme/kits"},
+		"alpha": {Remote: "https://github.com/acme/kits", Subpath: "extensions/features/alpha", Ref: "main"},
+		"beta":  {Remote: "https://github.com/acme/kits", Subpath: "extensions/features/beta", Ref: "main"},
+		"near":  {Remote: "https://github.com/acme/kits", Subpath: "extensions/features/alphabet", Ref: "dev"},
+		"root":  {Remote: "https://github.com/acme/kits", Ref: "main"},
 		"other": {Remote: "https://github.com/acme/other", Subpath: "extensions/features/other"},
+		"scp":   {Remote: "git@github.com:acme/kits"},
 		"local": {Remote: repo},
 	} {
 		inventory[name] = Managed{Name: name, Origin: &origin}
@@ -481,6 +481,9 @@ func TestUpdateTargetsBySource(t *testing.T) {
 		{[]string{"acme/kits/extensions/features/alpha"}, []string{"alpha"}},
 		{[]string{"acme/kits/extensions"}, []string{"alpha", "beta", "near"}},
 		{[]string{"beta", "acme/kits", "other"}, []string{"beta", "alpha", "near", "root", "other"}},
+		{[]string{"https://github.com/acme/kits/tree/main/extensions/features"}, []string{"alpha", "beta"}},
+		{[]string{"https://github.com/acme/kits/tree/main"}, []string{"alpha", "beta", "root"}},
+		{[]string{"git@github.com:acme/kits.git"}, []string{"scp"}},
 		{[]string{"./" + filepath.Base(repo)}, []string{"local"}},
 	}
 	for _, tc := range cases {
@@ -500,7 +503,7 @@ func TestUpdateTargetsRejections(t *testing.T) {
 	}
 	cases := map[string]string{
 		"https://user:secret@github.com/acme/unknown":      "no feature extensions are installed from https://github.com/acme/unknown",
-		"https://user:secret@github.com/acme/kits/tree/v2": "names a ref; pass it with --ref",
+		"https://user:secret@github.com/acme/kits/tree/v2": "no feature extensions are installed from https://github.com/acme/kits@v2",
 		"Alpha": `feature "Alpha" is not installed`,
 	}
 	for arg, want := range cases {
@@ -518,7 +521,7 @@ func TestUpdateBySourceLeavesOtherSourcesAlone(t *testing.T) {
 	fetcher := newFakeFetcher(t, "a1b2c3d4", fooRepoFiles())
 	env, _ := testEnv(t, fetcher, "")
 	installFoo(t, env)
-	seedManaged(t, env, "bar", "https://github.com/acme/bar", "")
+	seedManaged(t, env, "bar", "https://github.com/acme/bar")
 
 	results, err := Update(context.Background(), env, updateRequest("acme/kits"))
 	if err != nil {

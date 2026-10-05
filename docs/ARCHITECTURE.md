@@ -222,6 +222,8 @@ Other host-side data:
   - `uv/` - uv (Python) cache
   - `yarn/` - Yarn cache
   - `bun/` - Bun cache
+  - `nvm/` - nvm-installed Node.js versions
+  - `<name>/` - one directory per [extension-declared cache](extensions/README.md#project-caches-caches)
 - **History**: `~/.local/state/enclave/projects/<hash>/<tool>/history/` for shell history.
 - **Agent memory**: `~/.local/state/enclave/projects/<hash>/<tool>/memory/` for per-project, agent-writable memory, bind-mounted into the harness's native memory path (`sandbox.memoryDir`). Never shared between projects or agents, disabled with `--no-memory`, and skipped for ephemeral (`--ephemeral`) sessions. `sandbox.memoryScope: session` keys it by config-store key (`memory/<key>/`), and `sandbox.statePaths` protects tool runtime state during config overlays. See [Agent Memory](runtime/stores.md#agent-memory) for isolation and cleanup policy.
 - **Home config files**: `~/.local/state/enclave/projects/<hash>/<tool>/home-config/` for host-home files created in the container:

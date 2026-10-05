@@ -27,8 +27,9 @@ import (
 )
 
 // Completion runs before the root guard, so it must not extract the embedded
-// assets; it lists tools only once a regular command has extracted them. This
-// package is the only one whose tests run with the real assets registered.
+// assets: until a regular command has extracted them, it reads the built-in
+// names from the binary. This package is the only one whose tests run with the
+// real assets registered.
 func TestCompletionDoesNotExtractEmbeddedAssets(t *testing.T) {
 	if _, _, err := appassets.Embedded(); err != nil {
 		t.Fatalf("embedded assets: %v", err)
@@ -41,12 +42,27 @@ func TestCompletionDoesNotExtractEmbeddedAssets(t *testing.T) {
 	if paths, err := config.ResolvePathsReadOnly(); err == nil {
 		t.Skipf("the test binary sits in an app root, so there is nothing to extract: %s", paths.AppRoot)
 	}
-
-	before := pinTree(t, home)
-	if out := completeTool(t); strings.Contains(out, "claude") {
-		t.Errorf("completion listed tools before the assets were extracted: %q", out)
+	userTool := filepath.Join(config.HostExtensionsDir(home), model.KindTool.DirName(), "my-tool")
+	if err := os.MkdirAll(userTool, 0o755); err != nil {
+		t.Fatal(err)
 	}
-	assertTreeUnchanged(t, home, before)
+	if err := os.WriteFile(filepath.Join(userTool, config.SpecFilename), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	assertCompletions := func(stage string) {
+		t.Helper()
+		before := pinTree(t, home)
+		if out := complete(t, "run", "--tool", ""); !strings.Contains(out, "claude\n") || !strings.Contains(out, "my-tool\n") {
+			t.Errorf("%s: --tool did not list built-in and user tools: %q", stage, out)
+		}
+		if out := complete(t, "tools", "remove", ""); strings.Contains(out, "claude\n") || !strings.Contains(out, "my-tool\n") {
+			t.Errorf("%s: tools remove did not list only the user tool: %q", stage, out)
+		}
+		assertTreeUnchanged(t, home, before)
+	}
+
+	assertCompletions("before extraction")
 
 	paths, err := config.ResolvePaths()
 	if err != nil {
@@ -56,16 +72,12 @@ func TestCompletionDoesNotExtractEmbeddedAssets(t *testing.T) {
 		t.Fatalf("assets extracted outside HOME: %s", paths.AppRoot)
 	}
 
-	before = pinTree(t, home)
-	if out := completeTool(t); !strings.Contains(out, "claude") {
-		t.Errorf("completion did not list tools from the extracted assets: %q", out)
-	}
-	assertTreeUnchanged(t, home, before)
+	assertCompletions("after extraction")
 }
 
-// completeTool sends the shell's completion request for --tool and returns
-// the candidates.
-func completeTool(t *testing.T) string {
+// complete sends the shell's completion request for args and returns the
+// candidates.
+func complete(t *testing.T, args ...string) string {
 	t.Helper()
 	reader, writer, err := os.Pipe()
 	if err != nil {
@@ -73,7 +85,7 @@ func completeTool(t *testing.T) string {
 	}
 	stdout := os.Stdout
 	os.Stdout = writer
-	code := app.Run([]string{"__complete", "run", "--tool", ""})
+	code := app.Run(append([]string{"__complete"}, args...))
 	os.Stdout = stdout
 	if err := writer.Close(); err != nil {
 		t.Fatalf("close pipe: %v", err)

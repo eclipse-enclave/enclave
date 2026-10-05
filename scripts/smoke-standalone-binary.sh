@@ -42,7 +42,7 @@ touch "$legacy/.dockerignore" "$legacy/Dockerfile" \
     "$legacy/gateway-entrypoint.sh"
 
 # Shell completion runs before the root guard, so it must never extract the
-# assets; it lists tools only from an already extracted copy.
+# assets; until another command has, it lists tools from the binary.
 complete_tool() {
     (
         cd "$sandbox/cwd"
@@ -54,8 +54,8 @@ complete_tool() {
             "$sandbox/run/enclave" __complete run --tool ""
     )
 }
-if grep -qx claude <<<"$(complete_tool)"; then
-    echo "completion listed tools before the assets were extracted" >&2
+if ! grep -qx claude <<<"$(complete_tool)"; then
+    echo "completion did not list tools before the assets were extracted" >&2
     exit 1
 fi
 if [ -e "$assets" ]; then

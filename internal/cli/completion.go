@@ -13,13 +13,11 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"sort"
 	"strings"
 
 	"github.com/spf13/cobra"
 
 	"enclave/internal/config"
-	"enclave/internal/extinstall"
 	"enclave/internal/model"
 	"enclave/internal/netlog"
 )
@@ -99,24 +97,16 @@ type flagCompletionFunc func(*cobra.Command, []string, string) ([]string, cobra.
 // registration as best-effort at runtime; TestRegisterCompletionsTargetRealFlags
 // asserts the error is nil so stale registrations fail the build.
 //
-// Completion runs before the root guard, so the completers resolve paths
-// read-only and never extract the embedded assets.
+// Completion runs before the root guard, so the completers only read: they
+// never extract the embedded assets.
 func registerCompletions(rootCmd *cobra.Command) error {
-	toolCompleter := func(_ *cobra.Command, _ []string, _ string) ([]string, cobra.ShellCompDirective) {
+	toolCompleter := extensionNameCompleter(model.KindTool)
+	featuresCompleter := func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 		paths, err := config.ResolvePathsReadOnly()
 		if err != nil {
-			return nil, cobra.ShellCompDirectiveNoFileComp
-		}
-		tools, err := config.ListTools(paths)
-		if err != nil {
-			return nil, cobra.ShellCompDirectiveNoFileComp
-		}
-		return tools, cobra.ShellCompDirectiveNoFileComp
-	}
-	featuresCompleter := func(_ *cobra.Command, _ []string, _ string) ([]string, cobra.ShellCompDirective) {
-		paths, err := config.ResolvePathsReadOnly()
-		if err != nil {
-			return nil, cobra.ShellCompDirectiveNoFileComp
+			// Not extracted yet: the specs cannot be loaded from the binary, so
+			// complete names only.
+			return extensionNameCompleter(model.KindFeature)(cmd, args, toComplete)
 		}
 		exts, err := config.ListFeatures(paths)
 		if err != nil {
@@ -223,30 +213,32 @@ func registerCompletions(rootCmd *cobra.Command) error {
 	return errors.Join(errs...)
 }
 
+// extensionNameCompleter completes the built-in and user extension names of
+// kind.
+func extensionNameCompleter(kind model.ExtensionKind) flagCompletionFunc {
+	return func(_ *cobra.Command, _ []string, _ string) ([]string, cobra.ShellCompDirective) {
+		names, err := config.ListExtensionNamesReadOnly(kind)
+		if err != nil {
+			return nil, cobra.ShellCompDirectiveNoFileComp
+		}
+		return names, cobra.ShellCompDirectiveNoFileComp
+	}
+}
+
 // installedExtensionCompleter completes the user-installed extension names of
-// kind. Like the other completers it resolves paths read-only.
+// kind. It reads only the user root, so it needs no extracted assets.
 func installedExtensionCompleter(kind model.ExtensionKind) flagCompletionFunc {
 	return func(_ *cobra.Command, _ []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-		paths, err := config.ResolvePathsReadOnly()
+		installed, err := config.ListUserExtensionDirNamesReadOnly(kind)
 		if err != nil {
 			return nil, cobra.ShellCompDirectiveNoFileComp
 		}
-		// Completion runs on every keystroke: names and source labels only, no
-		// provenance sidecar and no hashing of installed content.
-		inventory, err := extinstall.Inventory(paths, kind, nil, extinstall.InventoryNames)
-		if err != nil {
-			return nil, cobra.ShellCompDirectiveNoFileComp
-		}
-		names := make([]string, 0, len(inventory))
-		for name, entry := range inventory {
-			if entry.Source == config.SourceBuiltin {
-				continue
-			}
+		names := make([]string, 0, len(installed))
+		for _, name := range installed {
 			if strings.HasPrefix(name, toComplete) {
 				names = append(names, name)
 			}
 		}
-		sort.Strings(names)
 		return names, cobra.ShellCompDirectiveNoFileComp
 	}
 }

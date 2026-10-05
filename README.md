@@ -127,8 +127,8 @@ the command above tolerates its absence.
 
 The binary includes the Dockerfiles, extensions, documentation, and other
 runtime assets. It extracts its assets on first use. Shell completion never
-extracts them, so after an install or upgrade, tool and feature names complete
-once any other command has run.
+extracts them; until another command has, it reads tool and feature names from
+the binary.
 
 ### From source
 

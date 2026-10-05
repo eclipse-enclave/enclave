@@ -96,7 +96,7 @@ Ctrl-C or SIGTERM while a session is still starting aborts the start with exit c
 |---------|-------|
 | `list` | `--json` (machine-readable output) |
 | `add <source>` | `--path <dir>`, `--ref <ref>`, `--name <name>` (repeatable), `--all`, `--yes`/`-y`, `--force`, `--dry-run`, `--json` (requires `--yes`) |
-| `update [<name>...]` | `--ref <ref>` (single extension only), `--yes`/`-y`, `--force`, `--dry-run`, `--json` (requires `--yes`) |
+| `update [<name\|source>...]` | `--ref <ref>` (single extension only), `--yes`/`-y`, `--force`, `--dry-run`, `--json` (requires `--yes`) |
 | `remove <name>...` | `--yes`/`-y`, `--force`, `--json` (requires `--yes`) |
 
 `enclave features update`/`enclave tools update` refresh installed extension **sources**; they are unrelated to the top-level `enclave update`, which rebuilds container **images**.

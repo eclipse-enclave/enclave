@@ -368,22 +368,7 @@ func TestUpdateRefRejectedForMultipleTargets(t *testing.T) {
 	installFoo(t, env)
 	// Seed a second managed extension so the --ref check, not the
 	// unknown-name check, is what this test exercises.
-	barDir := filepath.Join(env.Paths.UserFeaturesDir, "bar")
-	writeFixture(t, filepath.Join(barDir, "spec.yaml"), "schemaVersion: \"1\"\nkind: mixin\nname: bar\n", 0o644)
-	if err := WriteOrigin(barDir, Origin{
-		SchemaVersion: OriginSchemaVersion,
-		Kind:          string(model.KindFeature),
-		Name:          "bar",
-		Remote:        "https://github.com/acme/bar",
-		Source:        "acme/bar",
-		Ref:           "main",
-		RefType:       RefTypeBranch,
-		Commit:        "c3d4e5f6",
-		InstalledAt:   "2026-08-01T00:00:00Z",
-		InstalledBy:   "enclave test",
-	}); err != nil {
-		t.Fatalf("seed bar origin: %v", err)
-	}
+	seedManaged(t, env, "bar", "https://github.com/acme/bar", "")
 
 	req := updateRequest("foo", "bar")
 	req.Ref = "v2"
@@ -446,6 +431,101 @@ func TestUpdateUnknownName(t *testing.T) {
 	env, _ := testEnv(t, fetcher, "")
 	if _, err := Update(context.Background(), env, updateRequest("missing")); err == nil {
 		t.Fatal("Update accepted an unknown name")
+	}
+}
+
+// seedManaged writes a managed feature recorded as installed from remote.
+func seedManaged(t *testing.T, env Env, name, remote, subpath string) {
+	t.Helper()
+	dir := filepath.Join(env.Paths.UserFeaturesDir, name)
+	writeFixture(t, filepath.Join(dir, "spec.yaml"), "schemaVersion: \"1\"\nkind: mixin\nname: "+name+"\n", 0o644)
+	if err := WriteOrigin(dir, Origin{
+		SchemaVersion: OriginSchemaVersion,
+		Kind:          string(model.KindFeature),
+		Name:          name,
+		Remote:        remote,
+		Source:        strings.TrimPrefix(remote, "https://github.com/"),
+		Subpath:       subpath,
+		Ref:           "main",
+		RefType:       RefTypeBranch,
+		Commit:        "c3d4e5f6",
+		InstalledAt:   "2026-08-01T00:00:00Z",
+		InstalledBy:   "enclave test",
+	}); err != nil {
+		t.Fatalf("seed %s origin: %v", name, err)
+	}
+}
+
+func TestUpdateTargetsBySource(t *testing.T) {
+	repo := t.TempDir()
+	t.Chdir(filepath.Dir(repo))
+	inventory := map[string]Managed{}
+	for name, origin := range map[string]Origin{
+		"alpha": {Remote: "https://github.com/acme/kits", Subpath: "extensions/features/alpha"},
+		"beta":  {Remote: "https://github.com/acme/kits", Subpath: "extensions/features/beta"},
+		"near":  {Remote: "https://github.com/acme/kits", Subpath: "extensions/features/alphabet"},
+		"root":  {Remote: "https://github.com/acme/kits"},
+		"other": {Remote: "https://github.com/acme/other", Subpath: "extensions/features/other"},
+		"local": {Remote: repo},
+	} {
+		inventory[name] = Managed{Name: name, Origin: &origin}
+	}
+	inventory["handmade"] = Managed{Name: "handmade"}
+
+	cases := []struct {
+		args []string
+		want []string
+	}{
+		{[]string{"acme/kits"}, []string{"alpha", "beta", "near", "root"}},
+		{[]string{"https://user:secret@github.com/acme/kits.git"}, []string{"alpha", "beta", "near", "root"}},
+		{[]string{"acme/kits/extensions/features/alpha"}, []string{"alpha"}},
+		{[]string{"acme/kits/extensions"}, []string{"alpha", "beta", "near"}},
+		{[]string{"beta", "acme/kits", "other"}, []string{"beta", "alpha", "near", "root", "other"}},
+		{[]string{"./" + filepath.Base(repo)}, []string{"local"}},
+	}
+	for _, tc := range cases {
+		got, err := updateTargets(updateRequest(tc.args...), inventory)
+		if err != nil {
+			t.Fatalf("updateTargets(%v): %v", tc.args, err)
+		}
+		if !slices.Equal(got, tc.want) {
+			t.Errorf("updateTargets(%v) = %v, want %v", tc.args, got, tc.want)
+		}
+	}
+}
+
+func TestUpdateTargetsRejections(t *testing.T) {
+	inventory := map[string]Managed{
+		"alpha": {Name: "alpha", Origin: &Origin{Remote: "https://github.com/acme/kits"}},
+	}
+	cases := map[string]string{
+		"https://user:secret@github.com/acme/unknown":      "no feature extensions are installed from https://github.com/acme/unknown",
+		"https://user:secret@github.com/acme/kits/tree/v2": "names a ref; pass it with --ref",
+		"Alpha": `feature "Alpha" is not installed`,
+	}
+	for arg, want := range cases {
+		_, err := updateTargets(updateRequest(arg), inventory)
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("updateTargets(%q) error = %v, want it to contain %q", arg, err, want)
+		}
+		if err != nil && strings.Contains(err.Error(), "secret") {
+			t.Errorf("updateTargets(%q) error leaks credentials: %v", arg, err)
+		}
+	}
+}
+
+func TestUpdateBySourceLeavesOtherSourcesAlone(t *testing.T) {
+	fetcher := newFakeFetcher(t, "a1b2c3d4", fooRepoFiles())
+	env, _ := testEnv(t, fetcher, "")
+	installFoo(t, env)
+	seedManaged(t, env, "bar", "https://github.com/acme/bar", "")
+
+	results, err := Update(context.Background(), env, updateRequest("acme/kits"))
+	if err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	if len(results) != 1 || results[0].Name != "foo" {
+		t.Fatalf("results = %s, want only foo", fmtResults(results))
 	}
 }
 

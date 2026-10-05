@@ -115,11 +115,12 @@ func addSubcommand(res *Result, kind model.ExtensionKind) *cobra.Command {
 func updateSubcommand(res *Result, kind model.ExtensionKind) *cobra.Command {
 	request := extinstall.Request{Kind: kind, Op: extinstall.OpUpdate}
 	cmd := &cobra.Command{
-		Use:   "update [<name>...]",
+		Use:   "update [<name|source>...]",
 		Short: "Update installed " + kind.Label() + " extensions",
 		Long: "Update installed " + kind.Label() + " extensions to the newest commit of the ref\n" +
-			"they were installed from. With no names, every extension installed from a\n" +
-			"git source is updated. This does not rebuild images; see `enclave update`.",
+			"they were installed from. A source argument (as accepted by add) selects every\n" +
+			"extension installed from it. With no arguments, every extension installed from\n" +
+			"a git source is updated. This does not rebuild images; see `enclave update`.",
 		Args: cobra.ArbitraryArgs,
 		RunE: func(_ *cobra.Command, args []string) error {
 			request.Names = append(request.Names, args...)

@@ -11,7 +11,7 @@ from git repositories into the user-global extension root
 |---------|-------------|
 | `enclave features list` / `enclave tools list` | List extensions (built-in and installed), with source and provenance |
 | `enclave features add <source>` / `enclave tools add <source>` | Install an extension from a git repository |
-| `enclave features update [<name>...]` / `enclave tools update [<name>...]` | Refresh installed extensions from their recorded source |
+| `enclave features update [<name\|source>...]` / `enclave tools update [<name\|source>...]` | Refresh installed extensions from their recorded source |
 | `enclave features remove <name>...` / `enclave tools remove <name>...` | Remove installed extensions |
 
 `enclave features` and `enclave tools` with no subcommand are aliases for
@@ -198,9 +198,24 @@ you pass `--force`, which discards them.
 
 ## Update semantics
 
-With no names, `update` targets every extension of that kind installed from
-a git source (built-ins and unmanaged directories are skipped). For each
-target:
+With no arguments, `update` targets every extension of that kind installed
+from a git source (built-ins and unmanaged directories are skipped). An
+argument containing `/`, `:`, or `~` (or a lone `.`) is read as a source, in
+any form `add` accepts, and targets every extension of that kind installed
+from it:
+
+```sh
+enclave features update acme/kits
+enclave features update acme/kits/extensions/features   # only extensions under this path
+```
+
+A source matches when its remote equals the recorded one (credentials
+removed) and the recorded subpath lies at or below the source's subpath. The
+remote is compared as written, so `acme/kits` does not match an extension
+installed from `git@github.com:acme/kits`. A source that names a ref (a forge
+tree URL) is rejected; pass the ref with `--ref`, which still requires the
+arguments to select a single extension. Names and sources can be mixed, and a
+source that matches nothing is an error. For each target:
 
 - **Commit pin, no `--ref`/`--force`**: nothing to check — a commit is
   immutable, so an install pinned to one is already up to date with **no

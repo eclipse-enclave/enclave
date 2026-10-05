@@ -209,7 +209,7 @@ Persistent stores are host directories under `~/.local/state/enclave/` (honoring
 
 Other host-side data:
 
-- **Embedded asset cache**: standalone binaries extract into `${XDG_CACHE_HOME:-~/.cache}/enclave/assets/<hash>/` on Linux or `~/Library/Caches/org.eclipse.enclave/assets/<hash>/` on macOS. Extraction uses a per-content lock, temporary sibling directory, and atomic rename so concurrent first runs share one complete entry. Missing or invalid entries are recreated from the binary.
+- **Embedded asset cache**: standalone binaries extract into `${XDG_CACHE_HOME:-~/.cache}/enclave/assets/<hash>/` on Linux or `~/Library/Caches/org.eclipse.enclave/assets/<hash>/` on macOS. Extraction uses a per-content lock, temporary sibling directory, and atomic rename so concurrent first runs share one complete entry. Missing or invalid entries are recreated from the binary. Shell completion runs before the root guard, so it only uses an entry that is already published and never extracts.
 - **Locks**: `~/.local/state/enclave/locks/` holds the cross-process lock files (store, skills-mount, and extension-install locks included). `image-build-<hash>.lock` serializes builds of one runtime or gateway image: a process that finds it taken prints `Waiting for another enclave process to finish building <image>.`, then re-resolves its build plan and skips the build if the other process completed it. `session-start-<hash>.lock` serializes startup per tool and project until the backend reports the container running; waiters print `Waiting for another enclave session to finish starting.`. This covers unnamed, `--background`, and `--name` sessions: it coordinates container-name and config-store allocation, duplicate-name checks, and writes to the shared gateway config bundle. Named sessions still share that bundle, and explicit numeric names can overlap automatic allocation. Running sessions execute concurrently after the startup lock is released.
 - **QEMU stores**: the experimental QEMU backend mounts the same host-directory stores as the Docker backend (resolved via `internal/backend/hoststore`) into the guest over 9p, so auth, config, and env state are shared across backends.
 - **QEMU bundles**: generated microVM bundles live under `${XDG_CACHE_HOME:-~/.cache}/enclave/microvm/<tool>/<hash>/` unless `--image-name` points at an explicit bundle directory.
@@ -354,13 +354,6 @@ Runtime image hashes include the effective build UID/GID. Explicit
 `--build-uid` / `--build-gid` values are used when provided; otherwise the host
 UID/GID is included after host resolution. This prevents a loaded shared image
 from being accepted as current when it was built for a different numeric user.
-
-For UID 0 (a root host with `--allow-root`, or `--build-uid 0`), the Dockerfile
-adds `agent` as a second name for UID 0 instead of renaming `root`, which
-`usermod` refuses while the build runs as root; the QEMU bundle build does the
-same. Lookups by UID return root's passwd entry, which comes first, so the
-Dockerfile also replaces `/root` with a link to `/home/agent` for `RUN` steps,
-and the runtime sets `HOME` and `USER` for the agent in sessions.
 
 `features` can be set from config or CLI (`--features`). In devcontainer mode,
 the unset default is no enclave features; pass `--features` (or configure

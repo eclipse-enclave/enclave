@@ -299,13 +299,15 @@ Root guard note: `--allow-root` is CLI-only and has no config key, so no config
 file can grant it; `ENCLAVE_ALLOW_ROOT=1` is its only alternative.
 `checkRootGuard` in `internal/app/root_guard.go` runs early in `app.Run`,
 before any state is written; tests pin the root check through the
-`runningAsRoot` seam. A root host builds the image for UID 0: the Dockerfile
-and the QEMU bundle build add `agent` as a second name for UID 0, and
-`applyUIDZeroAgentEnv` in `internal/runtime` sets `HOME` and `USER` for the
-agent, because lookups by UID return root's passwd entry. To test that path as
-a regular user, pass `--build-uid 0 --build-gid 0` with `XDG_CONFIG_HOME`,
-`XDG_STATE_HOME`, and `XDG_CACHE_HOME` pointing at a scratch directory: the UID 0
-agent leaves root-owned files behind.
+`runningAsRoot` seam. The opt-in only skips the check: images cannot be built
+for UID 0 yet. Code that runs before the guard (user command discovery,
+parsing, help, version, and shell completion) must not write, not even a file
+it removes again: it uses `config.ResolveHostHomeReadOnly` and
+`config.ResolvePathsReadOnly`, which skip the home writability probe and never
+extract the embedded assets. The tests catch such writes by backdating the
+directory mtimes under a temporary HOME (`internal/app/root_guard_test.go`, and
+`cmd/enclave/main_test.go`, the only tests that run with the real embedded
+assets).
 
 Config additive note: feature additive directives (`+`/`-`) are applied against
 the implicit default-enabled feature set when `features` is unset. For example,

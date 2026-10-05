@@ -53,14 +53,17 @@ while IFS= read -r path; do
     diff -qr "$repo_root/$path" "$app_root/$path"
 done < "$repo_root/internal/gateway/gateway_proxy_build_inputs.txt"
 
+# Package builds can run as root (the Fedora job container does), so both
+# invocations pass --allow-root: the negative case below must get past the
+# root guard and fail on the missing embedded assets instead.
 mkdir -p "$package_root/home" "$package_root/isolated"
 HOME="$package_root/home" XDG_CACHE_HOME="$package_root/cache" \
-    "$app_root/enclave" tools >/dev/null
+    "$app_root/enclave" --allow-root tools >/dev/null
 [ ! -e "$package_root/cache/enclave/assets" ]
 
 cp "$app_root/enclave" "$package_root/isolated/enclave"
 if HOME="$package_root/home" XDG_CACHE_HOME="$package_root/cache" \
-    "$package_root/isolated/enclave" tools \
+    "$package_root/isolated/enclave" --allow-root tools \
     >"$package_root/isolated/output" 2>&1; then
     echo "package binary unexpectedly carried embedded assets" >&2
     exit 1

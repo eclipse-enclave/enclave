@@ -312,7 +312,7 @@ Merge semantics:
 | `ENCLAVE_LOG_LEVEL` | Log level: `info` (default) or `debug` |
 | `ENCLAVE_AGENT_UPDATE_INTERVAL_HOURS` | Minimum hours after a tool's last successful automatic update before `check-update.sh` is eligible to probe again (`0` = always) |
 | `ENCLAVE_DEVCONTAINER_REWRITE_VARS` | Comma-separated extra env var names for devcontainer home-path normalization |
-| `ENCLAVE_ALLOW_ROOT` | Set to `1` to run as root (same as `--allow-root`); see [Running as root](cli-reference.md#running-as-root) |
+| `ENCLAVE_ALLOW_ROOT` | Set to `1` to skip the root check (same as `--allow-root`); see [Running as root](cli-reference.md#running-as-root) |
 
 These are read by the Windows launcher on the Windows side only, and are not
 forwarded into the WSL2 distribution. See [windows.md](windows.md).

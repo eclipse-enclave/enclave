@@ -98,9 +98,12 @@ type flagCompletionFunc func(*cobra.Command, []string, string) ([]string, cobra.
 // --image-mode) surfaces instead of leaving a quiet dead hook. Callers treat
 // registration as best-effort at runtime; TestRegisterCompletionsTargetRealFlags
 // asserts the error is nil so stale registrations fail the build.
+//
+// Completion runs before the root guard, so the completers resolve paths
+// read-only and never extract the embedded assets.
 func registerCompletions(rootCmd *cobra.Command) error {
 	toolCompleter := func(_ *cobra.Command, _ []string, _ string) ([]string, cobra.ShellCompDirective) {
-		paths, err := config.ResolvePaths()
+		paths, err := config.ResolvePathsReadOnly()
 		if err != nil {
 			return nil, cobra.ShellCompDirectiveNoFileComp
 		}
@@ -111,7 +114,7 @@ func registerCompletions(rootCmd *cobra.Command) error {
 		return tools, cobra.ShellCompDirectiveNoFileComp
 	}
 	featuresCompleter := func(_ *cobra.Command, _ []string, _ string) ([]string, cobra.ShellCompDirective) {
-		paths, err := config.ResolvePaths()
+		paths, err := config.ResolvePathsReadOnly()
 		if err != nil {
 			return nil, cobra.ShellCompDirectiveNoFileComp
 		}
@@ -221,10 +224,10 @@ func registerCompletions(rootCmd *cobra.Command) error {
 }
 
 // installedExtensionCompleter completes the user-installed extension names of
-// kind.
+// kind. Like the other completers it resolves paths read-only.
 func installedExtensionCompleter(kind model.ExtensionKind) flagCompletionFunc {
 	return func(_ *cobra.Command, _ []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-		paths, err := config.ResolvePaths()
+		paths, err := config.ResolvePathsReadOnly()
 		if err != nil {
 			return nil, cobra.ShellCompDirectiveNoFileComp
 		}

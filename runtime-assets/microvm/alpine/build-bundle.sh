@@ -90,15 +90,7 @@ chroot "$root" /bin/sh -eu -c '
     fi
     group_name=$(getent group "$gid" | cut -d: -f1)
     if ! id -u agent >/dev/null 2>&1; then
-        if [ "$uid" -eq 0 ]; then
-            # busybox adduser refuses a UID in use: add the agent as a second name for root.
-            echo "agent:x:0:$gid::/home/agent:/bin/bash" >> /etc/passwd
-            echo "agent:!:::::::" >> /etc/shadow
-            mkdir -p /home/agent
-            chown "0:$gid" /home/agent
-        else
-            adduser -D -h /home/agent -s /bin/bash -u "$uid" -G "$group_name" agent
-        fi
+        adduser -D -h /home/agent -s /bin/bash -u "$uid" -G "$group_name" agent
     fi
     mkdir -p /etc/sudoers.d
     echo "agent ALL=(root) NOPASSWD:/sbin/apk,/usr/bin/apk" > /etc/sudoers.d/agent

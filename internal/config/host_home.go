@@ -12,11 +12,25 @@ import (
 	"os"
 	"os/user"
 	"strings"
+
+	"enclave/internal/util"
 )
 
 // ResolveHostHome returns the best-effort home directory for host paths.
 // It prefers the HOME-derived path if writable, otherwise falls back to the user database.
 func ResolveHostHome() (string, error) {
+	return resolveHostHome(false)
+}
+
+// ResolveHostHomeReadOnly is ResolveHostHome for code that must not write, such
+// as everything that runs before the root guard. It skips the writability
+// probe and takes the first candidate that is a directory, so a HOME that
+// exists but is not writable still wins.
+func ResolveHostHomeReadOnly() (string, error) {
+	return resolveHostHome(true)
+}
+
+func resolveHostHome(readOnly bool) (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", err
@@ -28,11 +42,18 @@ func ResolveHostHome() (string, error) {
 	primary := strings.TrimSpace(home)
 	fallback := strings.TrimSpace(current.HomeDir)
 
-	if primary != "" && IsWritableDir(primary) {
+	usable := IsWritableDir
+	if readOnly {
+		usable = util.IsDir
+	}
+	if primary != "" && usable(primary) {
 		return primary, nil
 	}
-	if fallback != "" && fallback != primary && IsWritableDir(fallback) {
+	if fallback != "" && fallback != primary && usable(fallback) {
 		return fallback, nil
+	}
+	if readOnly {
+		return "", fmt.Errorf("home directory not found: HOME=%q, user home=%q", primary, fallback)
 	}
 	return "", homeNotWritableError(primary, fallback)
 }

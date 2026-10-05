@@ -24,7 +24,7 @@ func TestMain(m *testing.M) {
 		}
 	}
 	// A root opt-in in the developer's shell would otherwise flip root-guard
-	// and --build-uid 0 results.
+	// results.
 	if err := os.Unsetenv(model.EnvAllowRoot); err != nil {
 		panic(err)
 	}

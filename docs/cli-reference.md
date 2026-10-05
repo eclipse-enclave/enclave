@@ -224,7 +224,7 @@ store that holds memory; the other `--keep` kinds do not apply there. See
 | `--skills-validation <strict\|agent>` | Validate shared skill frontmatter strictly (default) or leave metadata interpretation to the agent; values are case-insensitive |
 | `--session-monitor` | Run the agent under the managed tmux session (enables `status` snapshots) |
 | `--verbose` | Verbose logging |
-| `--allow-root` | Run as root anyway (accepted by every command; CLI-only). See [Running as root](#running-as-root) |
+| `--allow-root` | Skip the root check (accepted by every command; CLI-only). See [Running as root](#running-as-root) |
 | `--playwright-mcp` | Enable Playwright MCP server for browser automation (Claude only) |
 
 ### Image & Build
@@ -303,9 +303,9 @@ The menu lists every installed agent. The IDE profiles (`theia`, `theia-next`) a
 
 ## Running as root
 
-enclave refuses to run as root, including through `sudo`. The agent's container user takes the host UID, so as root the agent runs as UID 0 (named `agent`, a second name for root), which is host root on bind-mounted directories under rootful Docker. Files enclave and the agent write, both in the project and in the stores under the config, state, and cache roots, become root-owned, and later runs as the regular user fail on them (with `sudo -E`, those roots are in the regular user's home). Run enclave as a regular user with access to the Docker socket (see the [requirements](../README.md#requirements)), or use rootless podman with `--backend podman`.
+enclave refuses to run as root, including through `sudo`. The agent's container user takes the host UID, so as root the agent would run as UID 0, which is host root on bind-mounted directories under rootful Docker. Files enclave and the agent write, both in the project and in the stores under the config, state, and cache roots, would become root-owned, and later runs as the regular user fail on them (with `sudo -E`, those roots are in the regular user's home). Run enclave as a regular user with access to the Docker socket (see the [requirements](../README.md#requirements)), or use rootless podman with `--backend podman`.
 
-To run as root anyway, for example in a CI job container, pass `--allow-root` or set `ENCLAVE_ALLOW_ROOT=1`; each such run prints a warning; sessions then run with the agent as UID 0, or as the UID given with `--build-uid`. The opt-in has no config key, so neither global nor project config can grant it. Help and version output work without it.
+To skip this check, for example in a CI job container, pass `--allow-root` or set `ENCLAVE_ALLOW_ROOT=1`; each such run prints a warning. The opt-in only skips the check: running as root stays unsupported, and the runtime image cannot be built for UID 0 yet. The opt-in has no config key, so neither global nor project config can grant it. Help, version, and shell completion work without it and write nothing.
 
 ## Backend detection
 

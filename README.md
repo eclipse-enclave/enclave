@@ -126,7 +126,9 @@ artifact with `curl` or `gh release download` avoids it entirely, which is why
 the command above tolerates its absence.
 
 The binary includes the Dockerfiles, extensions, documentation, and other
-runtime assets. It extracts its assets on first use.
+runtime assets. It extracts its assets on first use. Shell completion never
+extracts them, so after an install or upgrade, tool and feature names complete
+once any other command has run.
 
 ### From source
 

@@ -29,16 +29,17 @@ func rootAllowed(flag bool) bool {
 	return flag || envTruthy(os.LookupEnv(model.EnvAllowRoot))
 }
 
-// checkRootGuard refuses to run as root unless allowed. As root the image is
-// built for UID 0 (the agent becomes a second name for root), so the agent is
-// host root on bind mounts under rootful Docker, and every file Enclave writes
-// becomes root-owned, which breaks later runs as the regular user.
+// checkRootGuard refuses to run as root unless allowed. As root the image would
+// be built for UID 0, so the agent would be host root on bind mounts under
+// rootful Docker, and every file Enclave writes becomes root-owned, which
+// breaks later runs as the regular user. The opt-in only skips this check; it
+// does not make root runs supported.
 func checkRootGuard(allowed bool) error {
 	if !runningAsRoot() {
 		return nil
 	}
 	if allowed {
-		logx.Warnf("running as root: the agent runs as UID 0 unless --build-uid picks another UID, which is host root on bind-mounted directories under rootful Docker, and files Enclave writes are owned by root")
+		logx.Warnf("running as root: the opt-in only skips the root check; root runs are unsupported (images cannot be built for UID 0 yet), and files Enclave writes are owned by root")
 		return nil
 	}
 	return rootRefusal()
@@ -53,7 +54,7 @@ func rootRefusal() error {
 	}
 	return fmt.Errorf("refusing to run as root: the agent would run as UID 0, which is host root on bind-mounted directories under rootful Docker, and files Enclave writes would be owned by root. %s "+
 		"To use Docker without sudo, add your user to the docker group and sign in again (see https://docs.docker.com/engine/install/linux-postinstall/), or use rootless podman with --backend podman. "+
-		"Pass --allow-root or set %s=1 to run as root anyway", who, model.EnvAllowRoot)
+		"Pass --allow-root or set %s=1 to skip this check", who, model.EnvAllowRoot)
 }
 
 func envTruthy(value string, set bool) bool {

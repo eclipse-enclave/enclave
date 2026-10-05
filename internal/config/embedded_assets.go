@@ -24,19 +24,26 @@ const (
 	embeddedAssetExtractionPrefix = ".extract-"
 )
 
-func extractRegisteredAppAssets() (string, error) {
+// registeredAppAssets returns the root of the assets embedded in the binary,
+// extracting them into the cache when needed. With readOnly it never writes:
+// only a copy that is already published counts.
+func registeredAppAssets(readOnly bool) (string, error) {
 	files, key, err := appassets.Embedded()
 	if err != nil {
 		return "", err
 	}
-	home, err := ResolveHostHome()
+	home, err := resolveHostHome(readOnly)
 	if err != nil {
 		return "", fmt.Errorf("resolve home directory: %w", err)
+	}
+	if readOnly {
+		return findAppAssets(files, key, hostCacheRoot(home))
 	}
 	return extractAppAssets(files, key, hostCacheRoot(home))
 }
 
-func extractAppAssets(files fs.FS, key string, cacheRoot string) (string, error) {
+// appAssetsRoot returns the cache entry that holds the assets for key.
+func appAssetsRoot(files fs.FS, key string, cacheRoot string) (string, error) {
 	if files == nil {
 		return "", fmt.Errorf("asset filesystem is nil")
 	}
@@ -51,9 +58,29 @@ func extractAppAssets(files fs.FS, key string, cacheRoot string) (string, error)
 	if !filepath.IsAbs(cacheRoot) {
 		return "", fmt.Errorf("asset cache root is not absolute: %s", cacheRoot)
 	}
+	return filepath.Join(cacheRoot, embeddedAssetStoreDir, key), nil
+}
 
-	assetsDir := filepath.Join(cacheRoot, embeddedAssetStoreDir)
-	root := filepath.Join(assetsDir, key)
+// findAppAssets returns the published cache entry for key without writing: a
+// missing or incomplete entry is an error, not something to repair.
+func findAppAssets(files fs.FS, key string, cacheRoot string) (string, error) {
+	root, err := appAssetsRoot(files, key, cacheRoot)
+	if err != nil {
+		return "", err
+	}
+	if err := validatePublishedAppRoot(root, files); err != nil {
+		return "", fmt.Errorf("embedded assets are not extracted at %s: %w", root, err)
+	}
+	return root, nil
+}
+
+func extractAppAssets(files fs.FS, key string, cacheRoot string) (string, error) {
+	root, err := appAssetsRoot(files, key, cacheRoot)
+	if err != nil {
+		return "", err
+	}
+
+	assetsDir := filepath.Dir(root)
 	if _, err := os.Lstat(root); err == nil {
 		if validationErr := validatePublishedAppRoot(root, files); validationErr == nil {
 			return root, nil

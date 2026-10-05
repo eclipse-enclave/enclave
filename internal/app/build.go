@@ -578,7 +578,7 @@ func buildImage(ctx context.Context, paths model.Paths, host model.Host, combine
 			username = ru
 		}
 	}
-	buildUID, buildGID := model.EffectiveBuildIdentity(host, opts)
+	buildUID, buildGID := effectiveBuildIdentity(host, opts)
 	buildArgs := map[string]string{
 		"USER_ID":     buildUID,
 		"GROUP_ID":    buildGID,

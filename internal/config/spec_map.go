@@ -30,6 +30,19 @@ import (
 // rejected downstream by normalizeHosts, but with a message that never names
 // serviceDomains; catching it here points both directions at the same remedy.
 func validateServiceAuthMappings(doc specDocument, specPath string) error {
+	if doc.Credentials != nil {
+		for id, source := range doc.Credentials.Sources {
+			if source.Placeholder == nil {
+				continue
+			}
+			if doc.Network != nil {
+				if _, ok := doc.Network.ServiceAuth[id]; ok {
+					continue
+				}
+			}
+			return fmt.Errorf("%s: credentials.sources[%q].placeholder requires a matching network.serviceAuth entry", specPath, id)
+		}
+	}
 	if doc.Network == nil {
 		return nil
 	}
@@ -206,7 +219,16 @@ func buildSecrets(doc specDocument) map[string]model.SecretConfig {
 			sc.File = &model.SecretFileSource{Path: src.File.Path, Parser: src.File.Parser}
 		}
 		sc.Priority = src.Priority
-		sc.Placeholder = src.Placeholder
+		if src.Placeholder != nil {
+			sc.Placeholder = &model.SecretPlaceholderConfig{
+				Prefix: src.Placeholder.Prefix,
+				Suffix: src.Placeholder.Suffix,
+				Random: model.SecretPlaceholderRandom{
+					Encoding: src.Placeholder.Random.Encoding,
+					Length:   src.Placeholder.Random.Length,
+				},
+			}
+		}
 		if doc.Network != nil {
 			if auth, ok := doc.Network.ServiceAuth[id]; ok {
 				sc.Release = &model.SecretReleaseConfig{

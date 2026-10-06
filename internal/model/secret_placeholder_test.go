@@ -34,7 +34,7 @@ func TestSecretPlaceholderValidation(t *testing.T) {
 			} else {
 				c.Prefix = tc.literal
 			}
-			_, err := c.Alphabet()
+			_, err := c.ValidatedAlphabet()
 			if (err == nil) != tc.valid {
 				t.Fatalf("%+v: error = %v", tc, err)
 			}

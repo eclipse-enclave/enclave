@@ -50,7 +50,7 @@ func (r *PlaceholderResolver) ResolvePlaceholder(secretID string, shape *model.S
 
 func newPlaceholder(shape *model.SecretPlaceholderConfig) (string, error) {
 	if shape != nil {
-		alphabet, err := shape.Alphabet()
+		alphabet, err := shape.ValidatedAlphabet()
 		if err != nil {
 			return "", err
 		}

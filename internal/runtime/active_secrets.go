@@ -24,13 +24,14 @@ import (
 )
 
 type activeSecret struct {
-	Placeholder *model.SecretPlaceholderConfig
 	ID          string
 	EnvVars     []string
 	ReleaseHTTP *model.HTTPSecretReleaseConfig
 	File        *model.SecretFileSource
 	Priority    string
 	source      string
+
+	Placeholder *model.SecretPlaceholderConfig
 }
 
 func (r *Runtime) activeSecrets() ([]activeSecret, error) {

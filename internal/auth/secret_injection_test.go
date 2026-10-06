@@ -8,9 +8,10 @@
 package auth
 
 import (
-	"enclave/internal/model"
 	"strings"
 	"testing"
+
+	"enclave/internal/model"
 )
 
 func TestResolvePlaceholder(t *testing.T) {
@@ -21,7 +22,7 @@ func TestResolvePlaceholder(t *testing.T) {
 			if encoding != "" {
 				shape = &model.SecretPlaceholderConfig{Prefix: "vendor_", Suffix: "_end", Random: model.SecretPlaceholderRandom{Encoding: encoding, Length: 48}}
 				prefix, suffix = shape.Prefix, shape.Suffix
-				alphabet, _ = shape.Alphabet()
+				alphabet, _ = shape.ValidatedAlphabet()
 			}
 			resolver := NewPlaceholderResolver()
 			first, err := resolver.ResolvePlaceholder("api-key", shape)

@@ -299,15 +299,16 @@ type PostStartActions struct {
 }
 
 type SecretConfig struct {
-	Placeholder *SecretPlaceholderConfig `json:"placeholder,omitempty"`
-	EnvVars     []string                 `json:"env_vars"`
-	Release     *SecretReleaseConfig     `json:"release,omitempty"`
-	APIKey      *bool                    `json:"api_key,omitempty"`
+	EnvVars []string             `json:"env_vars"`
+	Release *SecretReleaseConfig `json:"release,omitempty"`
+	APIKey  *bool                `json:"api_key,omitempty"`
 	// File names an optional host file the secret can be sourced from, in
 	// addition to EnvVars. Priority (env-first | file-first) orders the env
 	// aliases against the file; empty means env-first.
 	File     *SecretFileSource `json:"file,omitempty"`
 	Priority string            `json:"priority,omitempty"`
+
+	Placeholder *SecretPlaceholderConfig `json:"placeholder,omitempty"`
 }
 
 // SecretFileSource sources a secret from a host file rather than an env var.

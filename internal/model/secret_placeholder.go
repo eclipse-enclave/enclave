@@ -21,9 +21,9 @@ type SecretPlaceholderRandom struct {
 	Length   int    `json:"length"`
 }
 
-// Alphabet returns the generation alphabet after validating the shape. Lengths
+// ValidatedAlphabet returns the generation alphabet after validating the shape. Lengths
 // are character counts; each supported minimum provides at least 128 random bits.
-func (c SecretPlaceholderConfig) Alphabet() (string, error) {
+func (c SecretPlaceholderConfig) ValidatedAlphabet() (string, error) {
 	var alphabet string
 	var minimum int
 	switch c.Random.Encoding {

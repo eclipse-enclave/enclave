@@ -626,8 +626,10 @@ session and shared across a credential's proxy-managed env aliases, never derive
 from the real secret. The gateway replaces the entire registered value, with the
 same HTTPS and release-host restrictions as default placeholders.
 
-This setting only affects credentials managed by secret release; it does not
-turn raw env injection into proxying. It handles syntactic client checks, not
+A custom placeholder requires a matching `network.serviceAuth` entry; specs
+without one are rejected. The setting only affects credentials while secret
+release is active; it does not enable the gateway or turn raw env injection
+into proxying. It handles syntactic client checks, not
 cryptographic validation, token signing, or client-side secret transformations.
 
 `providers[]` is enclave-native and describes an auth *provider* (as

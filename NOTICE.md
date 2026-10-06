@@ -30,7 +30,15 @@ The project maintains its source code at:
 ## Third-party Content
 
 This project depends on third-party content distributed under its own licenses.
-The Go and Node package manifests and lockfiles identify those dependencies:
+The repository's [DEPENDENCIES](https://github.com/eclipse-enclave/enclave/blob/main/DEPENDENCIES)
+file records Eclipse Dash license checks for the Go modules and, in a separate
+section, the independently published website. It includes test and build
+dependencies, not just content shipped in the CLI. Dash statuses are preserved;
+inclusion does not imply approval. Website content and its third-party libraries
+are exempt from IP Team review under the [Eclipse Project Handbook IP FAQ](https://www.eclipse.org/projects/handbook/#ip-faq);
+their license obligations still apply.
+
+The source manifests and lockfiles are:
 
 - `go.mod` and `go.sum`
 - `website/docs/package.json` and `website/docs/package-lock.json`

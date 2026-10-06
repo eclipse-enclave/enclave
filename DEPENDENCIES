@@ -1,5 +1,7 @@
 # Eclipse Dash License Tool dependency inventory; generated 2026-10-06.
 # CSV columns: id, license, status, source. Comment lines label scope.
+# Release snapshot: refresh before each release using the commands below.
+# Lockfile changes between releases are not automatically reflected here.
 # Regenerate from the repository root with Java 11+ and Eclipse Dash 1.1.0:
 # Tool and download instructions: https://github.com/eclipse-dash/dash-licenses#readme
 #   java -jar /path/to/dash.jar go.sum -summary /tmp/enclave-go.csv

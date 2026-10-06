@@ -155,6 +155,95 @@ func ApplyProjectMountMode(mount *backend.Mount, projectMount string) {
 	mount.ReadOnly = true
 }
 
+// ProtectFiles overlays existing files read-only at every exposed bind-mount
+// alias. It never mounts an otherwise inaccessible host file or creates files.
+func ProtectFiles(existing []backend.Mount, paths []string) ([]backend.Mount, error) {
+	result := append([]backend.Mount(nil), existing...)
+	sources := make([]string, len(existing))
+	for i, mount := range existing {
+		if mount.Type == backend.MountTypeBind {
+			sources[i], _ = filepath.EvalSymlinks(mount.Source)
+		}
+	}
+	seen := make(map[string]bool)
+	anchored := make(map[string]bool)
+	for _, mount := range existing {
+		anchored[filepath.Clean(mount.ContainerPath)] = true
+	}
+	for _, path := range paths {
+		realPath, err := filepath.EvalSymlinks(path)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return nil, fmt.Errorf("protect config file %s: %w", path, err)
+		}
+		if seen[realPath] {
+			continue
+		}
+		seen[realPath] = true
+		exposed := false
+		for _, source := range sources {
+			exposed = exposed || (source != "" && util.PathWithin(source, realPath))
+		}
+		if !exposed {
+			continue
+		}
+		info, err := os.Stat(realPath)
+		if err != nil {
+			return nil, fmt.Errorf("protect config file %s: %w", path, err)
+		}
+		if !info.Mode().IsRegular() {
+			return nil, fmt.Errorf("protect config file %s: not a regular file", path)
+		}
+		for i, source := range sources {
+			if source == "" || !util.PathWithin(source, realPath) {
+				continue
+			}
+			rel, err := filepath.Rel(source, realPath)
+			if err != nil {
+				return nil, err
+			}
+			target := filepath.Join(existing[i].ContainerPath, rel)
+			// A more specific mount can hide this source. Do not expose a
+			// hidden file through the overlay or override an unrelated mount.
+			owner := i
+			for j, mount := range existing {
+				if util.PathWithin(mount.ContainerPath, target) && len(mount.ContainerPath) > len(existing[owner].ContainerPath) {
+					owner = j
+				}
+			}
+			if !existing[i].ReadOnly {
+				// A file mount alone can be bypassed by renaming its parent
+				// directory. Anchor each parent with a writable directory bind.
+				var parents []string
+				for parent := filepath.Dir(rel); parent != "."; parent = filepath.Dir(parent) {
+					parents = append(parents, parent)
+				}
+				for p := len(parents) - 1; p >= 0; p-- {
+					dirTarget := filepath.Join(existing[i].ContainerPath, parents[p])
+					if owner != i && util.PathWithin(existing[owner].ContainerPath, dirTarget) {
+						break
+					}
+					if !anchored[dirTarget] {
+						result = append(result, backend.Mount{Type: backend.MountTypeBind, Source: filepath.Join(source, parents[p]), ContainerPath: dirTarget})
+						anchored[dirTarget] = true
+					}
+				}
+			}
+			if owner != i {
+				continue
+			}
+			if rel == "." {
+				result[i].ReadOnly = true
+			} else if !existing[i].ReadOnly {
+				result = append(result, backend.Mount{Type: backend.MountTypeBind, Source: realPath, ContainerPath: target, ReadOnly: true})
+			}
+		}
+	}
+	return result, nil
+}
+
 func AddWorktree(mounts *[]backend.Mount, project model.Project, validatedDirs *[]string, readOnly bool) {
 	gitFile := filepath.Join(project.Dir, ".git")
 	data, err := readRegularFileInDir(project.Dir, ".git")

@@ -70,22 +70,24 @@ type Runtime struct {
 }
 
 type ExecutionContext struct {
-	ContainerName string
-	Mounts        []backend.Mount
-	Stores        []backend.PersistentStore
-	Env           []string
-	Network       backend.NetworkPolicy
-	Ports         []backend.PortMapping
-	Secrets       []backend.SecretRelease
-	AuthSync      *backend.AuthSyncSpec
-	Cleanup       func()
-	RunCtx        model.RunContext
+	ContainerName  string
+	Mounts         []backend.Mount
+	ProtectedFiles []string
+	Stores         []backend.PersistentStore
+	Env            []string
+	Network        backend.NetworkPolicy
+	Ports          []backend.PortMapping
+	Secrets        []backend.SecretRelease
+	AuthSync       *backend.AuthSyncSpec
+	Cleanup        func()
+	RunCtx         model.RunContext
 }
 
 type mountAccumulator struct {
-	mounts []backend.Mount
-	stores []backend.PersistentStore
-	env    []string
+	protectedFiles []string
+	mounts         []backend.Mount
+	stores         []backend.PersistentStore
+	env            []string
 }
 
 type preparedVolumes struct {
@@ -288,16 +290,17 @@ func (r *Runtime) prepareExecution() (*ExecutionContext, error) {
 	env = append(env, projectEnv...)
 	cleanup := mergeCleanup(prepared.Cleanup, networkResult.Cleanup)
 	return &ExecutionContext{
-		ContainerName: containerName,
-		Mounts:        mountArgs.Mounts(),
-		Stores:        mountArgs.Stores(),
-		Env:           env,
-		Network:       networkResult.Network,
-		Ports:         networkResult.Ports,
-		Secrets:       secretReleases(prepared.SecretMapping),
-		AuthSync:      prepared.AuthSync,
-		Cleanup:       cleanup,
-		RunCtx:        runCtx,
+		ContainerName:  containerName,
+		Mounts:         mountArgs.Mounts(),
+		ProtectedFiles: append([]string(nil), mountArgs.protectedFiles...),
+		Stores:         mountArgs.Stores(),
+		Env:            env,
+		Network:        networkResult.Network,
+		Ports:          networkResult.Ports,
+		Secrets:        secretReleases(prepared.SecretMapping),
+		AuthSync:       prepared.AuthSync,
+		Cleanup:        cleanup,
+		RunCtx:         runCtx,
 	}, nil
 }
 
@@ -379,6 +382,9 @@ func (r *Runtime) prepareMounts() (*mountAccumulator, hostGitIdentity, error) {
 	if r.run.PlaywrightMCP && r.profile.Name == "claude" {
 		mountArgs.AddEnv(model.EnvPlaywrightMCP, "1")
 		logx.Infof("Playwright MCP server enabled for Claude Code")
+	}
+	if err := r.protectGitConfigFiles(mountArgs); err != nil {
+		return nil, hostGitIdentity{}, err
 	}
 	return mountArgs, gitIdentity, nil
 }
@@ -855,6 +861,7 @@ func (r *Runtime) backendRequest(ctx *ExecutionContext, detached bool, interacti
 		WorkingDir:      r.projectDir,
 		User:            user,
 		Mounts:          append([]backend.Mount(nil), ctx.Mounts...),
+		ProtectedFiles:  append([]string(nil), ctx.ProtectedFiles...),
 		Stores:          append([]backend.PersistentStore(nil), ctx.Stores...),
 		Network:         ctx.Network,
 		Ports:           append([]backend.PortMapping(nil), ctx.Ports...),

@@ -47,12 +47,7 @@ func resolveHostGitIdentity(home, projectDir string) (hostGitIdentity, error) {
 }
 
 func resolveHostGitValue(home, projectDir, key string) (hostGitValue, error) {
-	cmd := exec.Command("git", "config", "--includes", "--show-scope", "-z", "--get-all", key) // #nosec G204 G702 -- executable and key are fixed; no shell is used.
-	cmd.Env = append(os.Environ(), "HOME="+home)
-	if projectDir != "" {
-		cmd.Dir = projectDir
-	}
-	output, err := cmd.Output()
+	output, err := hostGitOutput(home, projectDir, "config", "--includes", "--show-scope", "-z", "--get-all", key)
 	if err != nil {
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {
@@ -135,4 +130,11 @@ func addHostGitIdentityEnv(mounts *mountAccumulator, identity hostGitIdentity) {
 	if identity.forwardedEmail != "" {
 		mounts.AddEnv(model.EnvGitEmail, identity.forwardedEmail)
 	}
+}
+
+func hostGitOutput(home, projectDir string, args ...string) ([]byte, error) {
+	cmd := exec.Command("git", args...) // #nosec G204 G702 -- fixed executable and internal config-query arguments; no shell.
+	cmd.Dir = projectDir
+	cmd.Env = append(os.Environ(), "HOME="+home)
+	return cmd.Output()
 }

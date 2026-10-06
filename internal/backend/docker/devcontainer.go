@@ -237,6 +237,23 @@ func dockerMount(m backend.Mount) dockercmd.Mount {
 	return dockercmd.Mount{Type: dockercmd.MountType(m.Type), Source: m.Source, Target: m.ContainerPath, ReadOnly: m.ReadOnly, CreateSourceDir: m.CreateSourceDir}
 }
 
+// runArgs can add writable aliases after runtime config-file protection.
+func protectFileAliases(hostConfig *dockercmd.HostConfig, paths []string) error {
+	neutral := make([]backend.Mount, 0, len(hostConfig.Mounts))
+	for _, mount := range hostConfig.Mounts {
+		neutral = append(neutral, backend.Mount{Type: backend.MountType(mount.Type), Source: mount.Source, ContainerPath: mount.Target, ReadOnly: mount.ReadOnly, CreateSourceDir: mount.CreateSourceDir})
+	}
+	protected, err := mounts.ProtectFiles(neutral, paths)
+	if err != nil {
+		return err
+	}
+	hostConfig.Mounts = nil
+	for _, mount := range protected {
+		hostConfig.Mounts = append(hostConfig.Mounts, dockerMount(mount))
+	}
+	return nil
+}
+
 func splitTmpfs(value string) (string, string) {
 	parts := strings.SplitN(value, ":", 2)
 	if len(parts) == 0 {

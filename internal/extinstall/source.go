@@ -75,6 +75,12 @@ func parseSource(raw string) (source, error) {
 	}
 }
 
+// isSourceArg reports whether arg can only be a source: every form parseSource
+// accepts contains one of these characters, and no extension name does.
+func isSourceArg(arg string) bool {
+	return arg == "." || strings.ContainsAny(arg, "/:~")
+}
+
 func isLocalPath(raw string) bool {
 	return strings.HasPrefix(raw, "./") || strings.HasPrefix(raw, "../") ||
 		strings.HasPrefix(raw, "/") || raw == "." || strings.HasPrefix(raw, "~")

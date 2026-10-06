@@ -13,12 +13,16 @@ import (
 	"path/filepath"
 	"slices"
 	"sort"
+	"strings"
 
 	"enclave/internal/config"
+	"enclave/internal/model"
+	"enclave/internal/util"
 )
 
 // Update refreshes managed extensions of req.Kind. With no names it targets
-// every managed extension of that kind.
+// every managed extension of that kind; a source argument targets every
+// extension installed from it.
 func Update(ctx context.Context, env Env, req Request) ([]ActionResult, error) {
 	inventory, err := Inventory(env.Paths, req.Kind, nil, InventoryProvenance)
 	if err != nil {
@@ -30,7 +34,7 @@ func Update(ctx context.Context, env Env, req Request) ([]ActionResult, error) {
 		return nil, err
 	}
 	if req.Ref != "" && len(targets) > 1 {
-		return nil, fmt.Errorf("--ref applies to a single extension; name one")
+		return nil, fmt.Errorf("--ref applies to a single extension; select one")
 	}
 	if len(targets) == 0 {
 		return nil, fmt.Errorf("no %s extensions are installed from a git source", req.Kind.Label())
@@ -70,27 +74,67 @@ func Update(ctx context.Context, env Env, req Request) ([]ActionResult, error) {
 	return results, nil
 }
 
-// updateTargets resolves which extensions to consider: the named ones, or every
-// installed extension of this kind. Unmanaged names stay in the list so they can
-// be reported as skipped rather than vanishing.
+// updateTargets resolves which extensions to consider: the named ones, every
+// extension installed from a source argument, or every installed extension of
+// this kind. Unmanaged names stay in the list so they can be reported as
+// skipped rather than vanishing.
 func updateTargets(req Request, inventory map[string]Managed) ([]string, error) {
-	if len(req.Names) > 0 {
-		for _, name := range req.Names {
-			if _, ok := inventory[name]; !ok {
-				return nil, fmt.Errorf("%s %q is not installed", req.Kind.Label(), name)
+	if len(req.Names) == 0 {
+		names := make([]string, 0, len(inventory))
+		for name, entry := range inventory {
+			if entry.Source == config.SourceBuiltin {
+				continue
 			}
+			names = append(names, name)
 		}
-		return req.Names, nil
+		sort.Strings(names)
+		return names, nil
 	}
-	names := make([]string, 0, len(inventory))
-	for name, entry := range inventory {
-		if entry.Source == config.SourceBuiltin {
+
+	var targets []string
+	for _, arg := range req.Names {
+		if !isSourceArg(arg) {
+			if _, ok := inventory[arg]; !ok {
+				return nil, fmt.Errorf("%s %q is not installed", req.Kind.Label(), arg)
+			}
+			targets = append(targets, arg)
 			continue
 		}
-		names = append(names, name)
+		matched, err := installedFrom(arg, req.Kind, inventory)
+		if err != nil {
+			return nil, err
+		}
+		targets = append(targets, matched...)
+	}
+	return util.Dedupe(targets), nil
+}
+
+// installedFrom returns the managed extensions whose recorded remote is the
+// given source, whose subpath lies within the source's subpath, and, when the
+// source names a ref (a forge tree URL), whose recorded ref is that ref.
+func installedFrom(raw string, kind model.ExtensionKind, inventory map[string]Managed) ([]string, error) {
+	src, err := parseSource(raw)
+	if err != nil {
+		return nil, err
+	}
+	remote := RedactRemote(src.RemoteURL)
+	var names []string
+	for name, entry := range inventory {
+		origin := entry.Origin
+		if origin != nil && origin.Remote == remote && withinSubpath(origin.Subpath, src.Subpath) &&
+			(src.Ref == "" || origin.Ref == src.Ref) {
+			names = append(names, name)
+		}
+	}
+	if len(names) == 0 {
+		return nil, fmt.Errorf("no %s extensions are installed from %s", kind.Label(), src.Display())
 	}
 	sort.Strings(names)
 	return names, nil
+}
+
+func withinSubpath(subpath, parent string) bool {
+	return parent == "" || subpath == parent || strings.HasPrefix(subpath, parent+"/")
 }
 
 func updateOne(ctx context.Context, env Env, req Request, stage *staging, fetched *fetchCache, entry Managed) (ActionResult, error) {

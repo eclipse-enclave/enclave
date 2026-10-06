@@ -6,9 +6,11 @@ This Eclipse Foundation Project adheres to the [Eclipse Foundation Vulnerability
 
 If you think you have found a vulnerability in this repository, please report it to us through coordinated disclosure.
 
-**Please do not report security vulnerabilities through public issues, discussions, or pull requests.**
+**Please do not report security vulnerabilities through public issues, discussions, or change requests.**
 
-Instead, please create a [confidential issue](https://gitlab.eclipse.org/security/vulnerability-reports/-/issues/new?issuable_template=new_vulnerability) in the Eclipse Foundation Vulnerability Reporting Tracker.
+Instead, report it using one of the following ways:
+
+* Create a [confidential issue](https://gitlab.eclipse.org/security/vulnerability-reports/-/work_items/new?issue[confidential]=true) in the Eclipse Foundation Vulnerability Reporting Tracker
 
 You can find more information about reporting and disclosure at the [Eclipse Foundation Security page](https://www.eclipse.org/security/).
 

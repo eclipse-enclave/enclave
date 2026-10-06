@@ -58,7 +58,7 @@ H1=$(hash_for "$P1")
 [ -n "$H1" ] || fail "could not resolve project hash for $P1"
 STATE_ROOT="${XDG_STATE_HOME:-$HOME/.local/state}/enclave"
 ENV1="$STATE_ROOT/projects/${H1}/claude/env"
-AUTH="$STATE_ROOT/tools/claude/auth"
+AUTH="$STATE_ROOT/tools/claude/auth/default"
 GHAUTH="$STATE_ROOT/features/github-cli/auth"
 
 step_baseline() {

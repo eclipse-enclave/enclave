@@ -73,12 +73,21 @@ func validateAndNormalizeSecretConfigs(secrets map[string]model.SecretConfig) (m
 		if err != nil {
 			return nil, err
 		}
+		var placeholder *model.SecretPlaceholderConfig
+		if cfg.Placeholder != nil {
+			if _, err := cfg.Placeholder.Alphabet(); err != nil {
+				return nil, fmt.Errorf("secrets[%q]: %w", rawID, err)
+			}
+			copy := *cfg.Placeholder
+			placeholder = &copy
+		}
 		normalized[id] = model.SecretConfig{
-			EnvVars:  envVars,
-			Release:  release,
-			APIKey:   cloneBoolPtr(cfg.APIKey),
-			File:     file,
-			Priority: priority,
+			Placeholder: placeholder,
+			EnvVars:     envVars,
+			Release:     release,
+			APIKey:      cloneBoolPtr(cfg.APIKey),
+			File:        file,
+			Priority:    priority,
 		}
 	}
 

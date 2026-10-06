@@ -150,10 +150,11 @@ type specCredentials struct {
 }
 
 type specCredentialSource struct {
-	Env      []string            `json:"env,omitempty"`
-	File     *specCredentialFile `json:"file,omitempty"`     // host file source
-	Priority string              `json:"priority,omitempty"` // env-first | file-first
-	APIKey   *bool               `json:"apiKey,omitempty"`   // enclave-native
+	Placeholder *model.SecretPlaceholderConfig `json:"placeholder,omitempty"`
+	Env         []string                       `json:"env,omitempty"`
+	File        *specCredentialFile            `json:"file,omitempty"`     // host file source
+	Priority    string                         `json:"priority,omitempty"` // env-first | file-first
+	APIKey      *bool                          `json:"apiKey,omitempty"`   // enclave-native
 }
 
 type specCredentialFile struct {

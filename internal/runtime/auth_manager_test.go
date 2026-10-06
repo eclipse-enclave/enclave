@@ -47,7 +47,7 @@ func (c *captureHooks) FinalizeAuth(auth.Context, model.AuthState) error { retur
 
 type failingPlaceholderResolver struct{}
 
-func (failingPlaceholderResolver) ResolvePlaceholder(string) (string, error) {
+func (failingPlaceholderResolver) ResolvePlaceholder(string, *model.SecretPlaceholderConfig) (string, error) {
 	return "", fmt.Errorf("boom")
 }
 
@@ -275,6 +275,29 @@ func TestInjectDeclaredSecretsUsesPlaceholderAndRealHookValue(t *testing.T) {
 	}
 }
 
+func TestInjectDeclaredSecretsCustomPlaceholder(t *testing.T) {
+	t.Setenv("EXAMPLE_TOKEN", "real-secret")
+	cfg := secretConfig([]string{"EXAMPLE_TOKEN", "EXAMPLE_ALIAS"}, &model.HTTPSecretReleaseConfig{Hosts: []string{"api.example.com"}, Header: "authorization"})
+	cfg.Placeholder = &model.SecretPlaceholderConfig{Prefix: "vendor_", Random: model.SecretPlaceholderRandom{Encoding: "hex", Length: 32}}
+	r := runtimeWithProfile(t, model.Profile{Name: "example", Secrets: map[string]model.SecretConfig{"example-token": cfg}})
+	manager := newAuthManager(r)
+	var env []string
+	injection, err := manager.injectDeclaredSecrets(&captureHooks{}, authContextForRuntime(r), &env, nil, nil, nil, mustActiveSecrets(t, r))
+	if err != nil {
+		t.Fatal(err)
+	}
+	value := envValue(env, "EXAMPLE_TOKEN")
+	if !strings.HasPrefix(value, "vendor_") || len(value) != 39 {
+		t.Fatalf("wrong shape: %q", value)
+	}
+	if envValue(env, "EXAMPLE_ALIAS") != value {
+		t.Fatal("aliases differ")
+	}
+	if len(injection.SecretMapping.Entries) != 1 || injection.SecretMapping.Entries[0].Placeholder != value || injection.SecretMapping.Entries[0].Value != "real-secret" {
+		t.Fatalf("wrong mapping: %+v", injection.SecretMapping)
+	}
+}
+
 func TestInjectDeclaredSecretsUsesPersistedFallbackForAliases(t *testing.T) {
 	r := runtimeWithProfile(t, model.Profile{
 		Name: "tool",
@@ -395,7 +418,7 @@ func TestInjectDeclaredSecretsRejectsConflictingAliasValuesInSameLayer(t *testin
 	}
 }
 
-func TestInjectDeclaredSecretsFallsBackToRealValueWhenPlaceholderFails(t *testing.T) {
+func TestInjectDeclaredSecretsFailsClosedWhenPlaceholderFails(t *testing.T) {
 	origResolver := newPlaceholderResolver
 	newPlaceholderResolver = func() placeholderResolver { return failingPlaceholderResolver{} }
 	defer func() { newPlaceholderResolver = origResolver }()
@@ -424,12 +447,12 @@ func TestInjectDeclaredSecretsFallsBackToRealValueWhenPlaceholderFails(t *testin
 		nil,
 		activeSecrets,
 	)
-	if err != nil {
-		t.Fatalf("injectDeclaredSecrets() error = %v", err)
+	if err == nil {
+		t.Fatal("expected placeholder generation failure")
 	}
 
-	if got := envValue(env, "API_KEY"); got != "real-secret" {
-		t.Fatalf("API_KEY = %q, want %q", got, "real-secret")
+	if got := envValue(env, "API_KEY"); got != "" {
+		t.Fatalf("API_KEY = %q, want no credential injection", got)
 	}
 	if len(injection.SecretMapping.Entries) != 0 {
 		t.Fatalf("secret mapping entries = %+v, want none", injection.SecretMapping.Entries)

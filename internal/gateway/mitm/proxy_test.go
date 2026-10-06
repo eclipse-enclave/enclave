@@ -34,6 +34,35 @@ import (
 // testSession stands in for the gateway container name the runtime injects.
 const testSession = "enclave-test-claude"
 
+func TestRewriteHeadersCustomPlaceholder(t *testing.T) {
+	placeholder := "vendor_0123456789abcdef0123456789abcdef_end"
+	rules := []model.SecretReleaseEntry{{Placeholder: placeholder, Value: "real-secret", Hosts: []string{"api.example.com"}, Header: "authorization", Format: "Bearer %s"}}
+	for _, tc := range []struct {
+		scheme, host string
+		allowed      bool
+	}{
+		{"https", "api.example.com", true},
+		{"http", "api.example.com", false},
+		{"https", "other.example.com", false},
+	} {
+		for _, prefix := range []string{"", "Bearer "} {
+			headers := http.Header{}
+			headers.Set("Authorization", prefix+placeholder)
+			err := rewriteHeaders(tc.scheme, tc.host, headers, rules)
+			if (err == nil) != tc.allowed {
+				t.Fatalf("%+v: error = %v", tc, err)
+			}
+			want := prefix + placeholder
+			if tc.allowed {
+				want = "Bearer real-secret"
+			}
+			if got := headers.Get("Authorization"); got != want {
+				t.Fatalf("header = %q, want %q", got, want)
+			}
+		}
+	}
+}
+
 func TestRewriteHeadersAuthorizedHost(t *testing.T) {
 	headers := http.Header{}
 	headers.Set("X-Api-Key", "ENCLAVE_SECRET_abc")

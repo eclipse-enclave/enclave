@@ -114,7 +114,10 @@ skipped before resolution, so they are not persisted. For declared secrets with
 `release.http`, the running tool sees placeholders, while the gateway receives
 the real value from host-managed state. The gateway releases real values only on
 HTTPS requests to declared hosts; plaintext HTTP requests carrying placeholders
-are denied.
+are denied. If a client checks token syntax before sending requests, extensions
+can declare a [custom placeholder shape](extensions/README.md#client-side-credential-format-checks)
+without exposing the real credential. Placeholder generation failures abort
+startup instead of falling back to raw credentials.
 
 Codex OAuth note: the OAuth callback redirects to `http://localhost:1455/auth/callback`. enclave auto-maps port 1455 when no session exists. If you need to re-login, add `-p 1455`. Gateway logs will show `Loopback proxy (socat) enabled on port 1455` when forwarding is active.
 

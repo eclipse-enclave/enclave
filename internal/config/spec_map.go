@@ -206,6 +206,7 @@ func buildSecrets(doc specDocument) map[string]model.SecretConfig {
 			sc.File = &model.SecretFileSource{Path: src.File.Path, Parser: src.File.Parser}
 		}
 		sc.Priority = src.Priority
+		sc.Placeholder = src.Placeholder
 		if doc.Network != nil {
 			if auth, ok := doc.Network.ServiceAuth[id]; ok {
 				sc.Release = &model.SecretReleaseConfig{

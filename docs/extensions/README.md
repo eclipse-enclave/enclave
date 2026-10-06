@@ -590,7 +590,45 @@ replaced with random placeholders in the container environment; the gateway
 MITM proxy intercepts HTTPS requests to the declared hosts and rewrites the
 configured header with the real secret, denying plaintext HTTP requests that
 carry a placeholder. Credentials without a `serviceAuth` entry are injected
-as normal env vars.
+as normal env vars. Placeholder generation errors abort startup rather than
+falling back to the real credential.
+
+#### Client-side credential format checks
+
+Tools and features may declare `credentials.sources.<id>.placeholder` when a
+client rejects the default `ENCLAVE_SECRET_<48 hex characters>` shape before
+sending a request:
+
+```yaml
+credentials:
+  sources:
+    example-token:
+      env: [EXAMPLE_API_TOKEN]
+      placeholder:
+        prefix: "vendor_"
+        suffix: "_end" # optional
+        random: { encoding: hex, length: 48 }
+```
+
+`prefix` and `suffix` are optional literals (at most 256 bytes each, printable
+ASCII without whitespace). `random.encoding` and `random.length` are required:
+
+| Encoding | Random-body characters | Length range |
+|----------|------------------------|--------------|
+| `hex` | `0-9a-f` | 32–1024 |
+| `base64url` | `A-Za-z0-9-_` (no padding) | 22–1024 |
+| `alphanumeric` | `A-Za-z0-9` | 22–1024 |
+
+Length counts random-body characters, excluding the prefix and suffix. Characters
+are sampled uniformly and independently; these minimum lengths provide at least
+128 bits of entropy. Static placeholders are not supported. Values are fresh per
+session and shared across a credential's proxy-managed env aliases, never derived
+from the real secret. The gateway replaces the entire registered value, with the
+same HTTPS and release-host restrictions as default placeholders.
+
+This setting only affects credentials managed by secret release; it does not
+turn raw env injection into proxying. It handles syntactic client checks, not
+cryptographic validation, token signing, or client-side secret transformations.
 
 `providers[]` is enclave-native and describes an auth *provider* (as
 opposed to a raw credential): `name`, `credentials` (a list of

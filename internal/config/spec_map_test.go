@@ -25,6 +25,38 @@ func mustDoc(t *testing.T, src string) specDocument {
 	return d
 }
 
+func TestCredentialPlaceholderShape(t *testing.T) {
+	for _, kind := range []string{"sandbox", "mixin"} {
+		t.Run(kind, func(t *testing.T) {
+			doc := mustDoc(t, `
+schemaVersion: "1"
+kind: `+kind+`
+name: example
+credentials:
+  sources:
+    example-token:
+      env: [EXAMPLE_TOKEN]
+      placeholder:
+        prefix: vendor_
+        suffix: _end
+        random: {encoding: alphanumeric, length: 40}
+`)
+			secrets, err := validateAndNormalizeSecretConfigs(buildSecrets(doc))
+			if err != nil {
+				t.Fatal(err)
+			}
+			shape := secrets["example-token"].Placeholder
+			if shape == nil || shape.Prefix != "vendor_" || shape.Suffix != "_end" || shape.Random.Encoding != "alphanumeric" || shape.Random.Length != 40 {
+				t.Fatalf("lost shape: %+v", shape)
+			}
+			shape.Random.Length = 1
+			if _, err := validateAndNormalizeSecretConfigs(secrets); err == nil {
+				t.Fatal("accepted insufficient entropy")
+			}
+		})
+	}
+}
+
 func TestValidateServiceAuthMappings(t *testing.T) {
 	t.Run("unmatched serviceAuth id fails", func(t *testing.T) {
 		doc := mustDoc(t, `

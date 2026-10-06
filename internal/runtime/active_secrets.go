@@ -24,6 +24,7 @@ import (
 )
 
 type activeSecret struct {
+	Placeholder *model.SecretPlaceholderConfig
 	ID          string
 	EnvVars     []string
 	ReleaseHTTP *model.HTTPSecretReleaseConfig
@@ -80,6 +81,7 @@ func (r *Runtime) activeSecrets() ([]activeSecret, error) {
 				ReleaseHTTP: cfg.ReleaseHTTP(),
 				File:        cfg.File,
 				Priority:    cfg.Priority,
+				Placeholder: cfg.Placeholder,
 				source:      source.name,
 			}
 		}

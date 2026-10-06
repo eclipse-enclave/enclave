@@ -133,7 +133,7 @@ Then select `ChatGPT Pro/Plus (browser)`, copy the printed URL, and open it in y
 
 ## Secrets
 
-Layered secrets files are used as inputs for declared env secrets and `--pass-env`. They are not blindly copied into the container.
+Layered secrets files are used as inputs for declared env secrets and `--pass-env`. They are not copied as-is into the container.
 
 | Layer | File | Scope |
 |-------|------|-------|

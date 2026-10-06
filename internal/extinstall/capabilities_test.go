@@ -911,7 +911,7 @@ func TestWritesIntoProject(t *testing.T) {
 		{"${USER}/.foo.yaml", true},
 		{"", false},
 		{"   ", false},
-		// Not in the envsubst whitelist, so it stays literal and resolves like
+		// Not in the envsubst allowlist, so it stays literal and resolves like
 		// any other relative segment.
 		{"$PROJECT_DIR/.foo.yaml", true},
 		// envsubst reads the longest identifier, so these are their own

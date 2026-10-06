@@ -164,7 +164,7 @@ the mounted host project directory and installs happen at `docker build` time:
 
 `commands.initFiles` entries seed a file at container start. Fields per entry:
 `path`, `content`, `mode` (octal string), `onlyIfMissing`, `description`. Both
-`path` and `content` pass through `envsubst` with a whitelist of exactly
+`path` and `content` pass through `envsubst` with an allowlist of exactly
 `${WORKDIR}` (the project directory, `$PROJECT_DIR`), `${HOME}`, and `${USER}`;
 any other variable is left literal. Implemented in
 `runtime-assets/kit-init.sh` (`enclave_write_init_file`,

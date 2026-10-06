@@ -178,4 +178,4 @@ directories per project; see
   `apiKey: false` when `--no-api-key` should not suppress them.
 - Confirm `enclave auth import --tool <tool>` copies required auth files
   (`providers[].authFiles`).
-- Sanity check the tool runs inside the container (`enclave --tool <tool>`).
+- Verify the tool runs inside the container (`enclave --tool <tool>`).

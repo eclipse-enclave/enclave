@@ -54,19 +54,19 @@ func TestExtensionLayoutMatchesShell(t *testing.T) {
 	}
 }
 
-// TestKitInitSubstitutedVarsMatchesShell pins the envsubst whitelist to the one
+// TestKitInitSubstitutedVarsMatchesShell pins the envsubst allowlist to the one
 // kit-init.sh passes. writesIntoProject reasons about which variables expand, so
-// a whitelist change that is not mirrored here makes the capability summary
+// an allowlist change that is not mirrored here makes the capability summary
 // claim the wrong destination for an initFiles path.
 func TestKitInitSubstitutedVarsMatchesShell(t *testing.T) {
 	kitInit := readRepoFile(t, "runtime-assets/kit-init.sh")
 
-	// The single-quoted shell-format argument is the whitelist; kit-init.sh
+	// The single-quoted shell-format argument is the allowlist; kit-init.sh
 	// passes the same one at every call site.
 	pattern := regexp.MustCompile(`envsubst '([^']*)'`)
 	matches := pattern.FindAllStringSubmatch(kitInit, -1)
 	if len(matches) == 0 {
-		t.Fatal("no envsubst whitelist found in runtime-assets/kit-init.sh")
+		t.Fatal("no envsubst allowlist found in runtime-assets/kit-init.sh")
 	}
 
 	var want []string
@@ -77,7 +77,7 @@ func TestKitInitSubstitutedVarsMatchesShell(t *testing.T) {
 
 	for i, match := range matches {
 		if match[1] != expected {
-			t.Errorf("envsubst whitelist %d in kit-init.sh is %q, KitInitSubstitutedVars says %q",
+			t.Errorf("envsubst allowlist %d in kit-init.sh is %q, KitInitSubstitutedVars says %q",
 				i, match[1], expected)
 		}
 	}

@@ -53,7 +53,7 @@ func autoForwardable(name string) bool {
 	// WSLENV is colon-separated and its entries are name/flags, so a name
 	// containing either delimiter would splice a second entry into the list and
 	// forward a variable nobody named. Windows allows such names even though
-	// nothing sane sets one.
+	// nothing sets one in practice.
 	return validateEnvName(name) == nil
 }
 

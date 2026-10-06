@@ -5,7 +5,7 @@ its terminal, so external frontends and orchestrators can derive the session
 state (idle, working, blocked on user input) without attaching to it.
 
 enclave deliberately does **not** interpret the terminal content. It is a
-"dumb source": it captures raw detection inputs — the rendered screen text and
+"passive source": it captures raw detection inputs — the rendered screen text and
 the OSC window title — and the consumer owns the detection rules. This keeps
 one definition of state across sources (a local agent, an enclave container, a
 terminal embedded in another application).

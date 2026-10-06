@@ -36,7 +36,7 @@ func TestRepoLocalProjectConfigNotHonored(t *testing.T) {
 		t.Fatalf("write repo-local config: %v", err)
 	}
 
-	// Sanity-check the fixture: read directly it must be valid, honorable JSON
+	// Verify the fixture: read directly it must be valid, honorable JSON
 	// (slim=true). This guards against the test silently degrading into an
 	// invalid-JSON fixture that would pass for the wrong reason.
 	if repoLocalDefaults, _, rerr := readDefaults(repoLocalConfig); rerr != nil {

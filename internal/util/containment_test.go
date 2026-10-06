@@ -49,7 +49,7 @@ func TestRealPathWithinFailsClosed(t *testing.T) {
 		t.Fatalf("descend-into-file: got (within=%v, err=%v), want (false, error)", within, err)
 	}
 
-	// Sanity: a real child of a real root resolves and is within.
+	// Baseline: a real child of a real root resolves and is within.
 	child := filepath.Join(dir, "child")
 	if err := os.Mkdir(child, 0o755); err != nil {
 		t.Fatal(err)

@@ -47,7 +47,7 @@ func runWriteInitFile(t *testing.T, env map[string]string, path, mode, onlyIfMis
 	return string(out), err
 }
 
-func TestWriteInitFileSubstitutesWhitelist(t *testing.T) {
+func TestWriteInitFileSubstitutesAllowlist(t *testing.T) {
 	home := t.TempDir()
 	project := t.TempDir()
 	target := filepath.Join(home, "cfg", "${USER}.conf")

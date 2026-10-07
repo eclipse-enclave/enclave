@@ -20,6 +20,7 @@ import (
 	"strings"
 
 	"enclave/internal/backend"
+	"enclave/internal/backend/hoststore"
 	"enclave/internal/logx"
 	"enclave/internal/model"
 )
@@ -59,6 +60,14 @@ func (b *Backend) Capabilities() backend.Capabilities {
 func (b *Backend) Storage() backend.StoreManager { return b.storage }
 
 func (b *Backend) Run(ctx context.Context, req backend.Request, attach backend.AttachIO) (backend.ExitStatus, error) {
+	lease, err := hoststore.AcquireQEMULease(b.opts.Host.Home)
+	if err != nil {
+		return backend.ExitStatus{}, err
+	}
+	defer func() {
+		_ = lease.Close()
+		_ = os.Remove(lease.Name()) // #nosec G703 -- lease was created in the trusted host lock directory, not supplied by the guest.
+	}()
 	if req.AuthSync != nil {
 		defer b.runRequestAuthSync(req)
 	}
@@ -81,7 +90,7 @@ func (b *Backend) Run(ctx context.Context, req backend.Request, attach backend.A
 	}
 	defer func() { _ = os.RemoveAll(runtime.TempDir) }()
 	defer func() {
-		for _, err := range persistFileMounts(runtime.FileMounts) {
+		for _, err := range b.persistFileMounts(runtime.FileMounts) {
 			_, _ = fmt.Fprintf(stderrOrDefault(attach.Err), "%v\n", err)
 		}
 	}()
@@ -89,8 +98,10 @@ func (b *Backend) Run(ctx context.Context, req backend.Request, attach backend.A
 	if err != nil {
 		return backend.ExitStatus{}, err
 	}
+	args = append(args, "-add-fd", "fd=3,set=1,opaque=enclave-auth-admission")
 	logQEMURequest(vmBundle, runtime, req, args)
 	cmd := exec.CommandContext(ctx, qemuBinary, args...) // #nosec G204 -- args are generated from validated request fields.
+	cmd.ExtraFiles = []*os.File{lease}
 	cmd.Stdin = readerOrDefault(attach.In)
 	cmd.Stdout = writerOrDefault(attach.Out)
 	cmd.Env = attach.CommandEnv()

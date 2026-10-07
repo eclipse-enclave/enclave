@@ -316,6 +316,11 @@ func ReleaseIdentity(home, dir string, reservation IdentityReservation, verifyEn
 }
 
 func withIdleIdentity(home, dir string, verifyUnused func() (bool, error), mutate func(*identityState) error) error {
+	release, err := AcquireAuthMountAdmission(home)
+	if err != nil {
+		return err
+	}
+	defer release()
 	if verifyUnused == nil {
 		return errors.New("cross-engine session verification is required")
 	}

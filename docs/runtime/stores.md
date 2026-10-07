@@ -286,7 +286,7 @@ Experimental `--protect-auth` uses this layout on Docker/Podman:
 | Grant, provider metadata, generation and refresh recovery | Selected existing `tools/claude/auth/<identity>/` directory; gateway-only RW mount | Survives session removal |
 | Identity protection and admission | Host-only `locks/store-<store-path-hash>.identity.json`, outside the auth directory and all workload mounts | Persists across auth reset/removal; only explicit host-side downgrade clears protection |
 | Native auth view containing access/refresh handles | `oauth-sessions/<incarnation>/view/`, mounted at `~/.claude` | Rebuilt and removed per logical session |
-| Handle registration and session incarnation | `oauth-sessions/<incarnation>/runtime/`, gateway-only | Survives proxy-process reload, not session end |
+| Handle registration, session incarnation and broker readiness attestation | `oauth-sessions/<incarnation>/runtime/`, gateway-only | Survives proxy-process reload, not session end |
 | GitHub feature's native credentials and saved grant | `features/github-cli/auth/`, gateway-only when protected | Shared across tools/projects; survives session removal |
 | GitHub feature handle/config view | `oauth-sessions/<incarnation>/features/github-cli/view/`, mounted at `~/.config/gh` | Rebuilt and removed per logical session |
 | GitHub feature handle registration | `oauth-sessions/<incarnation>/features/github-cli/runtime/`, gateway-only | Survives proxy-process reload, not session end |
@@ -302,16 +302,26 @@ directory owner; protected-only capabilities let its separate proxy UID write
 private host-owned storage. Container ownership/SELinux behavior still needs
 [engine verification](oauth-broker-verification.md).
 
+Before workload startup, the host clears prior gateway readiness state and
+requires the broker's private `runtime/oauth-ready.json` attestation to match
+the requested identities, session and incarnation. The proxy publishes it only
+after both native views and MITM listeners are ready. A generic readiness banner
+from an older `--no-rebuild` image cannot enable protected startup.
+
 The initial admission rule is one active protected session per identity, also
 excluding legacy sessions using that identity across projects and engines.
 Detached CLI exit and proxy reload cannot release admission; verify that the
 logical session ended first. A host-wide mount-admission lock also serializes
 protected enrollment with final workload bind checks through confirmed startup.
-All Docker/Podman workloads reject protected grant/parent/alias binds and
-host-only lock/control directories, not just sessions using the protected flag.
-Checked canonical bind paths are passed to the engine; host filesystem setup
+All Docker/Podman workloads and QEMU guests reject protected grant/parent/alias
+mounts and host-only lock/control directories, including file staging and
+copy-back. QEMU inherits an individual host-only lifetime lease from preparation
+through finalization; protected admission, reset and downgrade refuse while any
+such lease or older QEMU process is live. Ordinary sessions remain concurrent.
+Checked canonical mount paths are passed to the engine; host filesystem setup
 and host administrators remain trusted. Identity protection persists independently of the
-grant, including across reset. Reset clears only the selected identity after
+grant, including across reset. Reset removes broker-owned `.oauth-*` interrupted-write
+copies without following symlinks and retains unrelated entries. It clears only the selected identity after
 ending its owner; `auth reset` preserves protection, and `auth downgrade`
 requires an idle, empty identity. Host start leases fence startup before a
 container exists; detached owners remain reserved until both workload and

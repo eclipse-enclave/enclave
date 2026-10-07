@@ -24,6 +24,16 @@ import (
 
 func (b *Backend) PrepareStores(ctx context.Context, prep backend.StorePrep) (backend.StoreState, error) {
 	state := backend.StoreState{}
+	release, err := hoststore.AcquireAuthMountAdmission(b.opts.Host.Home)
+	if err != nil {
+		return state, err
+	}
+	defer release()
+	for _, feature := range prep.Features {
+		if _, err := b.storage.storePath(feature.Key, backend.StoreKindFeatureAuth); err != nil {
+			return state, err
+		}
+	}
 	if prep.Auth != nil {
 		if _, err := b.storage.storePath(prep.Auth.Key, backend.StoreKindAuth); err != nil {
 			return state, err

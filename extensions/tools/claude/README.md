@@ -76,13 +76,14 @@ left at the Claude Code defaults.
 
 ## Experimental protected OAuth
 
-`--protect-auth --auth-scope shared --auth-name <fresh-name> --features=-github-cli` uses a separate,
+`--protect-auth --auth-scope shared --auth-name <fresh-name>` uses a separate,
 SHA-512-verified npm Claude 2.1.63 installation at
 `~/.local/share/enclave/claude-2.1.63/`. Ordinary runs retain the native installer
 and normal update behavior. Protected launches disable the updater and select
 only user settings; project/local settings and credential-source overrides are
-unsupported. Features with native auth files, such as `github-cli`, are rejected
-in this initial flow; env-only credentials are unaffected. The native config and handle file live in a disposable session view
+unsupported. The built-in `github-cli` feature uses its own protected adapter;
+other features with native auth files are rejected. Env-only credentials are
+unaffected. The native config and handle file live in a disposable session view
 at `~/.claude`, with agent memory mounted separately. The gateway keeps the real
 grant outside the workload. See [auth](../../../docs/auth.md#experimental-gateway-owned-claude-oauth)
 and the [pending verification plan](../../../docs/runtime/oauth-broker-verification.md).

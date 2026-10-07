@@ -9,12 +9,15 @@ package qemu
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"enclave/internal/backend"
+	"enclave/internal/backend/hoststore"
+	"enclave/internal/config"
 	"enclave/internal/model"
 	"enclave/internal/mounts"
 )
@@ -288,4 +291,80 @@ func findRuntimeMount(t *testing.T, mounts []runtimeMount, target string) runtim
 	}
 	t.Fatalf("runtime mount %s not found in %#v", target, mounts)
 	return runtimeMount{}
+}
+
+func TestQEMURejectsProtectedMountSourcesBeforeStaging(t *testing.T) {
+	for _, feature := range []bool{false, true} {
+		t.Run(fmt.Sprintf("feature=%t", feature), func(t *testing.T) {
+			be := New(Options{Host: model.Host{Home: t.TempDir()}})
+			key, kind := backend.StoreKey{Owner: "claude", Suffix: "protected"}, backend.StoreKindAuth
+			if feature {
+				key, kind = backend.StoreKey{Owner: "github-cli"}, backend.StoreKindFeatureAuth
+			}
+			dir, err := hoststore.ResolveDir(be.opts.Host.Home, key, kind)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := hoststore.ProtectIdentity(be.opts.Host.Home, dir, func() (bool, error) { return true, nil }); err != nil {
+				t.Fatal(err)
+			}
+			file := filepath.Join(dir, "oauth-grant.json")
+			if err := os.WriteFile(file, []byte("real-grant"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			alias := filepath.Join(t.TempDir(), "alias")
+			if err := os.Symlink(dir, alias); err != nil {
+				t.Fatal(err)
+			}
+			for name, source := range map[string]string{
+				"directory": dir, "parent": filepath.Dir(dir), "alias": alias, "file": file,
+				"file-alias": filepath.Join(alias, "oauth-grant.json"),
+				"control":    filepath.Dir(hoststore.LockPath(be.opts.Host.Home, dir)),
+				"session":    filepath.Join(config.HostStateRootDir(be.opts.Host.Home), "oauth-sessions", "new"),
+			} {
+				t.Run(name, func(t *testing.T) {
+					req := backend.Request{Mounts: []backend.Mount{{Type: backend.MountTypeBind, Source: source, ContainerPath: "/extra", CreateSourceDir: true}}}
+					if _, err := be.buildRuntimeMounts(req, t.TempDir(), ""); err == nil {
+						t.Fatal("protected source was accepted as a 9p share")
+					}
+					if _, err := be.prepareGuestRuntime(bundle{}, req, defaultConsoleSize); err == nil || (!strings.Contains(err.Error(), "protect") && !strings.Contains(err.Error(), "control state")) {
+						t.Fatalf("protected source reached runtime staging: %v", err)
+					}
+				})
+			}
+			if _, err := be.buildRuntimeMounts(backend.Request{Stores: []backend.PersistentStore{{Key: key, Kind: kind, ContainerPath: "/auth"}}}, t.TempDir(), ""); err == nil {
+				t.Fatal("protected declared store was accepted")
+			}
+		})
+	}
+}
+
+func TestQEMUCopyBackRejectsRetargetedProtectedPath(t *testing.T) {
+	be := New(Options{Host: model.Host{Home: t.TempDir()}})
+	dir, err := hoststore.ResolveDir(be.opts.Host.Home, backend.StoreKey{Owner: "claude", Suffix: "protected"}, backend.StoreKindAuth)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := hoststore.ProtectIdentity(be.opts.Host.Home, dir, func() (bool, error) { return true, nil }); err != nil {
+		t.Fatal(err)
+	}
+	grant := filepath.Join(dir, "oauth-grant.json")
+	if err := os.WriteFile(grant, []byte("keep-grant"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	source := filepath.Join(t.TempDir(), "ordinary-file")
+	if err := os.Symlink(grant, source); err != nil {
+		t.Fatal(err)
+	}
+	result := filepath.Join(t.TempDir(), "result")
+	if err := os.WriteFile(result, []byte("overwrite"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if errs := be.persistFileMounts([]runtimeFileMount{{Source: source, ResultPath: result, Target: "/file"}}); len(errs) == 0 {
+		t.Fatal("copy-back followed a symlink to a protected grant")
+	}
+	got, err := os.ReadFile(grant)
+	if err != nil || string(got) != "keep-grant" {
+		t.Fatalf("protected grant changed: %q, %v", got, err)
+	}
 }

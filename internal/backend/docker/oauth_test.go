@@ -11,6 +11,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -30,6 +31,11 @@ import (
 
 func oauthTestBackend(t *testing.T) (*Backend, backend.StoreKey, map[string][]dockercmd.InspectResponse) {
 	t.Helper()
+	processBin := t.TempDir()
+	if err := os.WriteFile(filepath.Join(processBin, "ps"), []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", processBin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	b := New(Options{Host: model.Host{Home: t.TempDir(), UID: strconv.Itoa(os.Getuid()), GID: strconv.Itoa(os.Getgid())}})
 	engines := map[string][]dockercmd.InspectResponse{}
@@ -614,4 +620,108 @@ esac
 
 func ownedGatewayInspect(session string, projectHash string) string {
 	return `{"Id":"gateway-id","Config":{"Labels":{"` + model.GatewayLabelManaged + `":"true","` + model.GatewayLabelContainer + `":"` + session + `","` + model.GatewayLabelProjectHash + `":"` + projectHash + `"}}}`
+}
+
+func TestProtectedResetRemovesInterruptedWritesWithoutFollowingLinks(t *testing.T) {
+	for _, feature := range []bool{false, true} {
+		for _, unrelated := range []bool{false, true} {
+			t.Run(fmt.Sprintf("feature=%t/unrelated=%t", feature, unrelated), func(t *testing.T) {
+				b, key, _ := oauthTestBackend(t)
+				ctx := context.Background()
+				ref, err := b.PrepareAuthSession(ctx, key, "reset-remnants", true, false)
+				if err != nil {
+					t.Fatal(err)
+				}
+				dir, err := hoststore.ResolveDir(b.opts.Host.Home, key, backend.StoreKindAuth)
+				if err != nil {
+					t.Fatal(err)
+				}
+				reset := func() error { return b.ResetAuthIdentity(ctx, key) }
+				downgrade := func() error { return b.DowngradeAuthIdentity(ctx, key) }
+				names := []string{"oauth-grant.json", ".oauth-crash-after-sync"}
+				if feature {
+					ref, err = b.PrepareFeatureAuthSessions(ctx, ref, ref.Session, []string{"github-cli"}, true)
+					if err != nil {
+						t.Fatal(err)
+					}
+					dir = config.HostStoreFeatureAuthDir(b.opts.Host.Home, "github-cli")
+					reset = func() error { return b.ResetFeatureAuthIdentity(ctx, "github-cli") }
+					downgrade = func() error { return b.DowngradeFeatureAuthIdentity(ctx, "github-cli") }
+					names = append(names[1:], "hosts.yml", "config.yml", "github-grant.json")
+				}
+				for _, name := range names {
+					writeFile(t, filepath.Join(dir, name), "credential-copy")
+				}
+				outside := filepath.Join(t.TempDir(), "keep")
+				writeFile(t, outside, "outside-secret")
+				if err := os.Symlink(outside, filepath.Join(dir, ".oauth-link")); err != nil {
+					t.Fatal(err)
+				}
+				if unrelated {
+					writeFile(t, filepath.Join(dir, "unrelated"), "retain")
+				}
+				if err := reset(); err == nil {
+					t.Fatal("reset accepted a live owner")
+				}
+				assertFileContent(t, filepath.Join(dir, ".oauth-crash-after-sync"), "credential-copy")
+				if err := b.ReleaseAuthSession(ctx, ref); err != nil {
+					t.Fatal(err)
+				}
+				if err := reset(); err != nil {
+					t.Fatal(err)
+				}
+				for _, name := range append(names, ".oauth-link") {
+					if _, err := os.Lstat(filepath.Join(dir, name)); !errors.Is(err, os.ErrNotExist) {
+						t.Fatalf("reset retained %s: %v", name, err)
+					}
+				}
+				assertFileContent(t, outside, "outside-secret")
+				if err := hoststore.RequireUnprotectedAuth(b.opts.Host.Home, dir); err == nil {
+					t.Fatal("reset downgraded protection")
+				}
+				if unrelated {
+					assertFileContent(t, filepath.Join(dir, "unrelated"), "retain")
+					if err := downgrade(); err == nil {
+						t.Fatal("downgrade ignored unrelated entry")
+					}
+				} else if err := downgrade(); err != nil {
+					t.Fatalf("reset did not permit downgrade: %v", err)
+				}
+			})
+		}
+	}
+}
+
+func TestQEMULifetimeBlocksProtectedAdmissionAndMutation(t *testing.T) {
+	b, key, _ := oauthTestBackend(t)
+	ctx := context.Background()
+	ref := protectedGitHubTestSession(t, b, key, "before-qemu")
+	if err := b.ReleaseAuthSession(ctx, ref); err != nil {
+		t.Fatal(err)
+	}
+	lease, err := hoststore.AcquireQEMULease(b.opts.Host.Home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = lease.Close() }()
+	for name, operation := range map[string]func() error{
+		"tool reset":        func() error { return b.ResetAuthIdentity(ctx, key) },
+		"tool downgrade":    func() error { return b.DowngradeAuthIdentity(ctx, key) },
+		"feature reset":     func() error { return b.ResetFeatureAuthIdentity(ctx, "github-cli") },
+		"feature downgrade": func() error { return b.DowngradeFeatureAuthIdentity(ctx, "github-cli") },
+		"new identity": func() error {
+			_, err := b.PrepareAuthSession(ctx, backend.StoreKey{Owner: "claude", Suffix: "new"}, "new", true, false)
+			return err
+		},
+	} {
+		if err := operation(); err == nil || !strings.Contains(err.Error(), "QEMU") {
+			t.Fatalf("%s did not refuse active QEMU lifetime: %v", name, err)
+		}
+	}
+	if err := lease.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.ResetAuthIdentity(ctx, key); err != nil {
+		t.Fatalf("ended QEMU lease blocked recovery: %v", err)
+	}
 }

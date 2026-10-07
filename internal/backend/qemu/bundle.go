@@ -16,11 +16,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
 
 	"enclave/internal/backend"
+	"enclave/internal/backend/hoststore"
 	"enclave/internal/model"
 )
 
@@ -274,6 +276,12 @@ func resolveBundleMemoryMiB(root string) (int, error) {
 }
 
 func (b *Backend) prepareGuestRuntime(bundle bundle, req backend.Request, console consoleSize) (guestRuntime, error) {
+	// Guard file sources before staging can copy credential bytes.
+	checked, err := b.validateAuthMounts(req.Mounts)
+	if err != nil {
+		return guestRuntime{}, err
+	}
+	req.Mounts = checked
 	// Before anything inspects the sources: prepareFileMounts stats every bind
 	// source and rejects a missing one, so a later creation pass would never run
 	// for the case CreateSourceDir exists for.
@@ -356,6 +364,11 @@ func createDisposableMountSources(mounts []backend.Mount) error {
 }
 
 func (b *Backend) buildRuntimeMounts(req backend.Request, controlDir string, fileStageSource string) ([]runtimeMount, error) {
+	checked, err := b.validateAuthMounts(req.Mounts)
+	if err != nil {
+		return nil, err
+	}
+	req.Mounts = checked
 	mounts := make([]runtimeMount, 0, len(req.Mounts)+len(req.Stores)+2)
 	idx := 0
 	for _, mount := range req.Mounts {
@@ -411,6 +424,22 @@ func (b *Backend) buildRuntimeMounts(req backend.Request, controlDir string, fil
 		return strings.Count(mounts[i].Target, "/") < strings.Count(mounts[j].Target, "/")
 	})
 	return mounts, nil
+}
+
+func (b *Backend) validateAuthMounts(mounts []backend.Mount) ([]backend.Mount, error) {
+	sources := make([]string, len(mounts))
+	for i, mount := range mounts {
+		sources[i] = mount.Source
+	}
+	checked, err := hoststore.ValidateAuthMounts(b.opts.Host.Home, sources, nil)
+	if err != nil {
+		return nil, err
+	}
+	result := slices.Clone(mounts)
+	for i := range result {
+		result[i].Source = checked[i]
+	}
+	return result, nil
 }
 
 func prepareFileMounts(tempDir string, mounts []backend.Mount) ([]runtimeFileMount, string, error) {
@@ -548,12 +577,18 @@ func segmentPadding(offset int64) int {
 	return initramfsSegmentAlignment - int(remainder)
 }
 
-func persistFileMounts(files []runtimeFileMount) []error {
+func (b *Backend) persistFileMounts(files []runtimeFileMount) []error {
 	var errs []error
 	for _, file := range files {
 		if file.ReadOnly {
 			continue
 		}
+		checked, err := hoststore.ValidateAuthMounts(b.opts.Host.Home, []string{file.Source}, nil)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("persist file mount %s: %w", file.Target, err))
+			continue
+		}
+		file.Source = checked[0]
 		data, err := os.ReadFile(file.ResultPath) // #nosec G304 -- result path is generated under the runtime directory.
 		if err != nil {
 			errs = append(errs, fmt.Errorf("persist file mount %s: %w", file.Target, err))

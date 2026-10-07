@@ -23,7 +23,10 @@ container still gets a writable bind mount at `~/.claude`, but its native
 `.credentials.json` contains handles, not the captured tokens. The real grant
 and handle registry are never workload-mounted. Protected runs use the
 integrity-pinned npm Claude **2.1.63**, independently of the normal client, with
-automatic updates disabled. This is an experimental implementation: Docker,
+automatic updates disabled. Startup also requires a private readiness attestation
+from the initialized Claude/GitHub brokers before launching the workload; an
+older gateway image is rejected even with `--no-rebuild`. Rebuild that image by
+rerunning without `--no-rebuild`. This is an experimental implementation: Docker,
 rootless Podman, SELinux and real login/refresh remain **unverified**. Follow the
 [engine and human test plan](runtime/oauth-broker-verification.md).
 
@@ -46,7 +49,12 @@ settings and Enclave's validated settings overlay apply. Do not expect
 
 Only one session may use a protected identity at a time, across projects and
 engines. All installed engines must be inspectable; an unavailable daemon
-causes a refusal rather than an assumption that the identity is unused. Detached CLI exit and proxy reload keep its reservation and handles;
+causes a refusal rather than an assumption that the identity is unused.
+Protected admission, reset and downgrade also require all of the invoking user's
+QEMU sessions to have ended, including preparation and host-side copy-back;
+QEMU has no reliable host-share inspection API. Process inspection must succeed
+so older guests without admission leases cannot be missed. Ordinary sessions
+can still run concurrently. Detached CLI exit and proxy reload keep its reservation and handles;
 a new logical session gets new handles. `--allow-all-network` and unrestricted
 policies still keep the gateway for credential mediation. Unknown token
 schemas and uncertain refresh outcomes fail closed, without returning tokens.
@@ -63,8 +71,8 @@ enclave auth reset --tool claude --auth-scope shared --auth-name protected-test
 
 `--protect-auth --reset-auth` also resets an idle selected identity before a new
 session. Import/export and ordinary cleanup cannot expose/delete a protected
-grant. Other Enclave containers cannot bind a protected grant, its parent or an
-aliased path. Host lock/control directories and other sessions' broker state
+grant. Other Enclave containers and QEMU guests cannot mount a protected grant, its
+parent or an aliased path, including staged file mounts. Host lock/control directories and other sessions' broker state
 are also excluded from workload mounts. Host administrators and host-side
 filesystem/configuration changes remain trusted. To return an idle identity to
 ordinary auth-file handling, first reset it,
@@ -75,8 +83,9 @@ enclave auth downgrade --tool claude --auth-scope shared --auth-name protected-t
 ```
 
 Native logout only deletes the local view; it does not revoke the durable grant
-or already copied live handles. Reset clears local custody, not provider-side
-revocation. This protects captured tokens in supported auth files, not arbitrary
+or already copied live handles. Reset removes the selected grant and broker-owned `.oauth-*` interrupted-write
+copies without following symlinks; unrelated entries are retained. It clears
+local custody, not provider-side revocation. This protects captured tokens in supported auth files, not arbitrary
 secret files, unsupported providers/MCP authentication, every operation those tokens
 authorize, or login codes/PKCE material exposed to an already-malicious client.
 
@@ -111,6 +120,10 @@ Raw GitHub credential env variables and overrides of `GH_HOST`/`GH_CONFIG_DIR`
 conflict with the protected feature. The store is global across tools/projects,
 not selected by Claude's `--auth-name`, and permits one active session across
 Docker/Podman. Saved protection blocks later ordinary feature-auth mounts too.
+If gateway startup rejects an incompatible native store, protection remains and
+the original files are retained. Back up wanted logins on the host, then correct
+unsupported hosts/schema in that private store before retrying. Reset is not a
+non-destructive rollback: it deletes those original logins and preferences.
 
 After stopping the owner, manage this separate identity with:
 

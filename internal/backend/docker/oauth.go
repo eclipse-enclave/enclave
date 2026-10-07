@@ -249,19 +249,32 @@ func (b *Backend) DowngradeAuthIdentity(ctx context.Context, key backend.StoreKe
 }
 
 func resetProtectedGrant(dir string) error {
-	path := filepath.Join(dir, "oauth-grant.json")
-	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return err
-	}
-	file, err := os.Open(dir) // #nosec G304 -- trusted identity path validated by hoststore before callback.
+	return resetProtectedFiles(dir, "oauth-grant.json")
+}
+
+// Interrupted durableJSON writes can leave credential-bearing .oauth-* files.
+// Remove only broker-owned names, without traversing symlinks or directories.
+// The caller holds the idle identity lock through this durable reset.
+func resetProtectedFiles(dir string, names ...string) error {
+	entries, err := os.ReadDir(dir)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
 	}
 	if err != nil {
 		return err
 	}
-	defer func() { _ = file.Close() }()
-	return file.Sync()
+	for _, entry := range entries {
+		if !slices.Contains(names, entry.Name()) && !strings.HasPrefix(entry.Name(), ".oauth-") {
+			continue
+		}
+		if entry.IsDir() {
+			return errors.New("protected grant file is a directory")
+		}
+		if err := os.Remove(filepath.Join(dir, entry.Name())); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+	}
+	return util.SyncDir(dir)
 }
 
 // engineContainers is independent of the process-wide selected engine: identity
@@ -356,6 +369,9 @@ func (b *Backend) reconcileAuthOwner(ctx context.Context, owner hoststore.Identi
 }
 
 func (b *Backend) identityUnused(ctx context.Context, dir string, extraPaths ...string) (bool, error) {
+	if err := hoststore.RequireNoQEMUSessions(ctx, b.opts.Host.Home); err != nil {
+		return false, err
+	}
 	paths := append([]string{dir, hoststore.LockPath(b.opts.Host.Home, dir), hoststore.IdentityStatePath(b.opts.Host.Home, dir)}, extraPaths...)
 	for i, path := range paths {
 		canonical, err := canonicalAuthPath(path)
@@ -489,33 +505,8 @@ func pathsOverlap(first, second string) bool {
 	return util.PathWithin(first, second) || util.PathWithin(second, first)
 }
 
-// The caller holds the cross-engine admission lock until container start, so
-// fresh enrollment cannot race this snapshot of saved protection and binds.
+// The caller holds the cross-engine admission lock until container start.
 func (b *Backend) validateWorkloadAuthMounts(req backend.Request, spec runSpec) error {
-	home := b.opts.Host.Home
-	if home == "" {
-		return nil
-	}
-	protected, err := hoststore.HasProtectedIdentities(home)
-	if err != nil {
-		return err
-	}
-	lockRoot, err := canonicalAuthPath(filepath.Dir(config.HostLockPath(home, "auth-mount-admission.lock")))
-	if err != nil {
-		return err
-	}
-	sessionRoot, err := canonicalAuthPath(filepath.Join(config.HostStateRootDir(home), "oauth-sessions"))
-	if err != nil {
-		return err
-	}
-	authRoot, err := canonicalAuthPath(config.HostStoreAuthRootDir(home))
-	if err != nil {
-		return err
-	}
-	featureRoot, err := canonicalAuthPath(config.HostStoreFeatureAuthRootDir(home))
-	if err != nil {
-		return err
-	}
 	var views []string
 	if req.AuthSession != nil && req.AuthSession.Protected {
 		if err := b.validateAuthReservation(req.AuthSession); err != nil {
@@ -534,66 +525,23 @@ func (b *Backend) validateWorkloadAuthMounts(req backend.Request, spec runSpec) 
 			views = append(views, view)
 		}
 	}
+
+	var sources []string
+	for _, mount := range spec.hostConfig.Mounts {
+		if mount.Type == dockercmd.MountTypeBind {
+			sources = append(sources, mount.Source)
+		}
+	}
+	checked, err := hoststore.ValidateAuthMounts(b.opts.Host.Home, sources, views)
+	if err != nil {
+		return err
+	}
+	next := 0
 	for i := range spec.hostConfig.Mounts {
-		mount := &spec.hostConfig.Mounts[i]
-		if mount.Type != dockercmd.MountTypeBind {
-			continue
+		if spec.hostConfig.Mounts[i].Type == dockercmd.MountTypeBind {
+			spec.hostConfig.Mounts[i].Source = checked[next]
+			next++
 		}
-		source, err := canonicalAuthPath(mount.Source)
-		if err != nil {
-			return fmt.Errorf("cannot verify workload auth mount %s: %w", mount.Source, err)
-		}
-		allowedView := slices.ContainsFunc(views, func(view string) bool { return util.PathWithin(view, source) })
-		if pathsOverlap(source, lockRoot) || (pathsOverlap(source, sessionRoot) && !allowedView) {
-			return errors.New("workload mount overlaps host-only authentication control state")
-		}
-		if protected && pathsOverlap(source, featureRoot) {
-			if util.PathWithin(source, featureRoot) {
-				return errors.New("workload mount contains protected feature identities")
-			}
-			rel, err := filepath.Rel(featureRoot, source)
-			if err != nil {
-				return err
-			}
-			parts := strings.Split(rel, string(filepath.Separator))
-			if len(parts) == 1 {
-				return errors.New("workload mount may contain protected feature identities")
-			}
-			if len(parts) >= 2 && parts[1] == "auth" {
-				dir, err := hoststore.ResolveDir(home, backend.StoreKey{Owner: parts[0]}, backend.StoreKindFeatureAuth)
-				if err != nil {
-					return err
-				}
-				if err := hoststore.RequireUnprotectedAuth(home, dir); err != nil {
-					return err
-				}
-			}
-		}
-		if protected && pathsOverlap(source, authRoot) {
-			if util.PathWithin(source, authRoot) {
-				return errors.New("workload mount contains protected authentication identities")
-			}
-			rel, err := filepath.Rel(authRoot, source)
-			if err != nil {
-				return err
-			}
-			parts := strings.Split(rel, string(filepath.Separator))
-			if len(parts) == 1 || (len(parts) == 2 && parts[1] == "auth") {
-				return errors.New("workload mount may contain protected authentication identities")
-			}
-			if len(parts) >= 3 && parts[1] == "auth" {
-				dir, err := hoststore.ResolveDir(home, backend.StoreKey{Owner: parts[0], Suffix: parts[2]}, backend.StoreKindAuth)
-				if err != nil {
-					return err
-				}
-				if err := hoststore.RequireUnprotectedAuth(home, dir); err != nil {
-					return err
-				}
-			}
-		}
-		// Pass the checked source to the engine, not an alias that could be
-		// retargeted between this check and container creation.
-		mount.Source = source
 	}
 	return nil
 }
@@ -613,27 +561,5 @@ func rejectNativeAuthSource(dir string) error {
 }
 
 func canonicalAuthPath(path string) (string, error) {
-	if !filepath.IsAbs(path) {
-		return "", errors.New("auth mount source is not an absolute host path")
-	}
-	var missing []string
-	current := filepath.Clean(path)
-	for {
-		resolved, err := filepath.EvalSymlinks(current)
-		if err == nil {
-			for i := len(missing) - 1; i >= 0; i-- {
-				resolved = filepath.Join(resolved, missing[i])
-			}
-			return resolved, nil
-		}
-		if !errors.Is(err, os.ErrNotExist) {
-			return "", err
-		}
-		parent := filepath.Dir(current)
-		if parent == current {
-			return "", err
-		}
-		missing = append(missing, filepath.Base(current))
-		current = parent
-	}
+	return hoststore.CanonicalAuthPath(path)
 }

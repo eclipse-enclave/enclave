@@ -135,8 +135,18 @@ func main() {
 		// The host runtime pre-provisions CA key material under tlsRoot.
 		TLSStore: tlsstore.New(tlsRoot),
 	}
-	if readyFile != "" {
+	if readyFile != "" || broker != nil {
 		opts.OnReady = func() {
+			if broker != nil {
+				if err := broker.MarkReady(); err != nil {
+					log.Print("protected OAuth readiness attestation failed")
+					cancel()
+					return
+				}
+			}
+			if readyFile == "" {
+				return
+			}
 			if err := markProxyReady(readyFile); err != nil {
 				log.Printf("failed to write proxy ready file %q: %q", readyFile, err.Error()) // #nosec G706 -- quoted values cannot inject log lines.
 			}

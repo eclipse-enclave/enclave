@@ -21,6 +21,7 @@ import (
 
 	"enclave/internal/config"
 	"enclave/internal/docker"
+	"enclave/internal/gateway/oauthbroker"
 	"enclave/internal/logx"
 	"enclave/internal/model"
 	"enclave/internal/netcapture"
@@ -604,14 +605,30 @@ func Start(ctx context.Context, cfg StartConfig) (StartResult, error) {
 	if cfg.OAuth != nil {
 		hostConfig.CapAdd = append(hostConfig.CapAdd, "DAC_OVERRIDE", "CHOWN")
 	}
-	containerID, err := startGatewayContainer(ctx, config, hostConfig, gatewayContainer)
+	var verifyReady func() error
+	if cfg.OAuth != nil {
+		if err := oauthbroker.ClearReadiness(cfg.OAuth.RuntimeDir); err != nil {
+			return empty, fmt.Errorf("clear prior protected OAuth readiness: %w", err)
+		}
+		expected := oauthbroker.Config{RuntimeDir: cfg.OAuth.RuntimeDir, Identity: cfg.OAuth.Identity, Session: cfg.ContainerName, Incarnation: cfg.OAuth.Incarnation}
+		if len(cfg.OAuth.Features) != 0 {
+			expected.GitHub = &oauthbroker.GitHubConfig{Identity: cfg.OAuth.Features[0].Identity}
+		}
+		verifyReady = func() error {
+			if err := oauthbroker.VerifyReadiness(expected); err != nil {
+				return errors.New("gateway did not attest the requested protected OAuth adapters; rebuild the gateway without --no-rebuild")
+			}
+			return nil
+		}
+	}
+	containerID, err := startGatewayContainer(ctx, config, hostConfig, gatewayContainer, verifyReady)
 	if err != nil && docker.IsContainerNameConflict(err) {
 		reconciled, reconcileErr := ReconcileStale(ctx, cfg.ContainerName, cfg.ProjectHash)
 		if reconcileErr != nil {
 			return empty, fmt.Errorf("reconcile conflicting gateway container %s: %w", gatewayContainer, reconcileErr)
 		}
 		if reconciled.Removed || !reconciled.Exists {
-			containerID, err = startGatewayContainer(ctx, config, hostConfig, gatewayContainer)
+			containerID, err = startGatewayContainer(ctx, config, hostConfig, gatewayContainer, verifyReady)
 		} else if reconciled.Exists && reconciled.Owned {
 			return empty, fmt.Errorf("gateway container %q is already running or starting for session %s; run 'enclave stop %s' and retry: %w", gatewayContainer, cfg.ContainerName, cfg.ContainerName, err)
 		}
@@ -701,9 +718,10 @@ func gatewayUser() string {
 	return ""
 }
 
+// startGatewayContainer runs the gateway and waits until it reports readiness.
 // Failed starts must release published ports before the next session's
 // host-port checks.
-func startGatewayContainer(ctx context.Context, config *docker.ContainerConfig, hostConfig *docker.HostConfig, name string) (string, error) {
+func startGatewayContainer(ctx context.Context, config *docker.ContainerConfig, hostConfig *docker.HostConfig, name string, verifyReady func() error) (string, error) {
 	startedAt := time.Now().UTC()
 	containerID, err := startRunDetached(ctx, config, hostConfig, name)
 	if err != nil {
@@ -715,7 +733,7 @@ func startGatewayContainer(ctx context.Context, config *docker.ContainerConfig, 
 		}
 		return "", fmt.Errorf("failed to start gateway container: %w", err)
 	}
-	if err := waitForGatewayReady(ctx, containerID, startedAt); err != nil {
+	if err := waitForGatewayReady(ctx, containerID, startedAt, verifyReady); err != nil {
 		err = gatewayStartupError(ctx, containerID, err)
 		removeFailedGateway(ctx, name, containerID, config)
 		return "", err
@@ -929,7 +947,7 @@ func validateStartConfig(cfg StartConfig) error {
 	return nil
 }
 
-func waitForGatewayReady(ctx context.Context, containerID string, since time.Time) error {
+func waitForGatewayReady(ctx context.Context, containerID string, since time.Time, verifyReady func() error) error {
 	deadline := time.Now().Add(gatewayReadyTimeout)
 	for time.Now().Before(deadline) {
 		if err := ctx.Err(); err != nil {
@@ -937,6 +955,9 @@ func waitForGatewayReady(ctx context.Context, containerID string, since time.Tim
 		}
 		logs, err := docker.ContainerLogsSince(ctx, containerID, since)
 		if err == nil && HasLogLine(logs, gatewayReadyMarker) {
+			if verifyReady != nil {
+				return verifyReady()
+			}
 			return nil
 		}
 		if err != nil && !docker.IsNotFound(err) {

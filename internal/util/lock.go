@@ -85,3 +85,18 @@ func WithFileLock(path string, fn func() error) error {
 	defer release()
 	return fn()
 }
+
+// AcquireFileLease returns an exclusively locked file that may be inherited by
+// a child process. Close it without an explicit unlock: the lease remains held
+// until the last inherited descriptor closes, including after parent death.
+func AcquireFileLease(path string) (*os.File, error) {
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600) // #nosec G304 -- trusted internally derived lease path.
+	if err != nil {
+		return nil, err
+	}
+	if err := lockFile(file); err != nil {
+		_ = file.Close()
+		return nil, err
+	}
+	return file, nil
+}

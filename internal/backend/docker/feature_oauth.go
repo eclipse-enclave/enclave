@@ -219,20 +219,7 @@ func (b *Backend) ResetFeatureAuthIdentity(ctx context.Context, name string) err
 		return err
 	}
 	return hoststore.WithIdleProtectedIdentity(b.opts.Host.Home, dir, func() (bool, error) { return b.identityUnused(ctx, dir) }, func() error {
-		for _, file := range []string{"hosts.yml", "config.yml", "github-grant.json"} {
-			if err := os.Remove(filepath.Join(dir, file)); err != nil && !errors.Is(err, os.ErrNotExist) {
-				return err
-			}
-		}
-		handle, err := os.Open(dir) // #nosec G304 -- trusted feature directory resolved and locked above.
-		if errors.Is(err, os.ErrNotExist) {
-			return nil
-		}
-		if err != nil {
-			return err
-		}
-		defer func() { _ = handle.Close() }()
-		return handle.Sync()
+		return resetProtectedFiles(dir, "hosts.yml", "config.yml", "github-grant.json")
 	})
 }
 

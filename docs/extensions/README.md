@@ -758,11 +758,11 @@ enable the feature.
 | Feature | Priority | Description |
 |---------|----------|-------------|
 | `devtools` | 40 | Core tools + linters (vim, htop, ripgrep, golang-go, shellcheck, golangci-lint, gosec). |
-| `native-build-deps` | 45 | Headers for native Node.js modules: libx11, libxkbfile, libsecret |
 | `github-cli` | 50 | GitHub CLI (gh) |
 | `gitlab-cli` | 50 | GitLab CLI (glab) (opt-in) |
 | `node-dev` | 70 | Node.js dev tools: typescript, eslint, prettier |
 | `python-dev` | 70 | Python dev tools: black, ruff, mypy, pytest |
+| `native-build-deps` | 75 | Headers for native Node.js modules: libx11, libxkbfile, libsecret |
 | `playwright` | 75 | Playwright browsers and MCP server for UI testing (opt-in) |
 | `debug-tools` | 80 | Debug tools: gdb, strace, ltrace, tcpdump (opt-in) |
 | `shell-extras` | 90 | Shell enhancements: zsh, oh-my-zsh, direnv (opt-in) |

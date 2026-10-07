@@ -6,7 +6,7 @@ The base image already ships the compiler toolchain (`build-essential`,
 for with `pkg-config`, for example `native-keymap` and `keytar` in Eclipse
 Theia and other Electron apps. Enabled by default.
 
-**Priority**: 45
+**Priority**: 75
 
 ## Packages
 

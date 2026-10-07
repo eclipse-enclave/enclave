@@ -9,5 +9,5 @@
     "libsecret-1-dev"
   ],
   "default_enabled": true,
-  "priority": 45
+  "priority": 75
 }

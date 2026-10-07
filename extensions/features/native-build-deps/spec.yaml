@@ -10,7 +10,7 @@ kind: mixin
 name: native-build-deps
 displayName: Native Build Dependencies
 description: Headers for building native Node.js modules (libx11, libxkbfile, libsecret)
-priority: 45
+priority: 75
 aptPackages:
   - libx11-dev
   - libxkbfile-dev

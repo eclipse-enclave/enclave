@@ -107,14 +107,10 @@ if [ -n "${ENCLAVE_GATEWAY_CA_CERT_PATH:-}" ] && [ -f "$ENCLAVE_GATEWAY_CA_CERT_
         if [ -s "$enclave_ca_bundle" ]; then
             export REQUESTS_CA_BUNDLE="$enclave_ca_bundle"
             export SSL_CERT_FILE="$enclave_ca_bundle"
-        fi
-    elif [ -r "$system_ca_bundle" ]; then
-        if enclave_ca_bundle_dir="$(mktemp -d "${TMPDIR:-/tmp}/enclave-ca.XXXXXX")"; then
-            enclave_ca_bundle="$enclave_ca_bundle_dir/ca-certificates.crt"
-            if cat "$system_ca_bundle" "$ENCLAVE_GATEWAY_CA_CERT_PATH" > "$enclave_ca_bundle"; then
-                export REQUESTS_CA_BUNDLE="$enclave_ca_bundle"
-                export SSL_CERT_FILE="$enclave_ca_bundle"
-            fi
+        else
+            # A missing bundle leaves Python requests without any trust store,
+            # whereas OpenSSL falls back to the system store when unset.
+            unset REQUESTS_CA_BUNDLE SSL_CERT_FILE
         fi
     fi
     export NODE_EXTRA_CA_CERTS="$ENCLAVE_GATEWAY_CA_CERT_PATH"

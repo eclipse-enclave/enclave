@@ -23,9 +23,10 @@ func ResolveHostHome() (string, error) {
 }
 
 // ResolveHostHomeReadOnly is ResolveHostHome for code that must not write, such
-// as everything that runs before the root guard. It skips the writability
-// probe and takes the first candidate that is a directory, so a HOME that
-// exists but is not writable still wins.
+// as everything that runs before the root guard. It judges writability from
+// permissions instead of creating a probe file, so it picks the same home as
+// ResolveHostHome unless creating a file fails for reasons access(2) does not
+// see, such as a full disk.
 func ResolveHostHomeReadOnly() (string, error) {
 	return resolveHostHome(true)
 }
@@ -44,7 +45,7 @@ func resolveHostHome(readOnly bool) (string, error) {
 
 	usable := IsWritableDir
 	if readOnly {
-		usable = util.IsDir
+		usable = looksWritableDir
 	}
 	if primary != "" && usable(primary) {
 		return primary, nil
@@ -52,10 +53,13 @@ func resolveHostHome(readOnly bool) (string, error) {
 	if fallback != "" && fallback != primary && usable(fallback) {
 		return fallback, nil
 	}
-	if readOnly {
-		return "", fmt.Errorf("home directory not found: HOME=%q, user home=%q", primary, fallback)
-	}
 	return "", homeNotWritableError(primary, fallback)
+}
+
+// looksWritableDir reports whether path is a directory the process may create
+// files in, judged from permissions alone so that nothing is written.
+func looksWritableDir(path string) bool {
+	return util.IsDir(path) && accessAllowsCreate(path)
 }
 
 // IsWritableDir reports whether the directory exists and is writable.

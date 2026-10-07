@@ -303,8 +303,9 @@ before any state is written; tests pin the root check through the
 for UID 0 yet. Code that runs before the guard (user command discovery,
 parsing, help, version, and shell completion) must not write, not even a file
 it removes again: it uses `config.ResolveHostHomeReadOnly` and
-`config.ResolvePathsReadOnly`, which skip the home writability probe and never
-extract the embedded assets. The tests catch such writes by backdating the
+`config.ResolvePathsReadOnly`, which check home writability with access(2)
+instead of a probe file, so they pick the same home, and never extract the
+embedded assets. The tests catch such writes by backdating the
 directory mtimes under a temporary HOME (`internal/app/root_guard_test.go`, and
 `cmd/enclave/main_test.go`, the only tests that run with the real embedded
 assets).

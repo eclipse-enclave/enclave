@@ -128,8 +128,7 @@ func (ep *EffectivePolicy) collectBuiltInDomains(cfg MergeConfig, addDomain func
 // policies. The project inherits global domains unless inherit_global_policy is
 // explicitly false.
 func (ep *EffectivePolicy) collectPolicyDomains(cfg MergeConfig, addDomain func(string)) {
-	inheritGlobal := cfg.ProjectPolicy.InheritGlobalPolicy == nil || *cfg.ProjectPolicy.InheritGlobalPolicy
-	if inheritGlobal {
+	if cfg.ProjectPolicy.InheritsGlobal() {
 		for _, d := range cfg.GlobalPolicy.Domains.Global {
 			addDomain(d)
 		}

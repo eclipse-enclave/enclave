@@ -19,54 +19,71 @@ import (
 func TestMergeGlobalDomainInheritanceScope(t *testing.T) {
 	yes, no := true, false
 	for _, tc := range []struct {
-		name    string
-		inherit *bool
+		name        string
+		inherit     *bool
+		toolsOnly   bool
+		wantDomains []string
+		wantTools   []string
+		wantSources []PolicySource
 	}{
-		{"unset", nil},
-		{"enabled", &yes},
-		{"disabled", &no},
+		{
+			name: "unset", inherit: nil,
+			wantDomains: []string{"global.example", "project.example"},
+			wantTools:   []string{"global-tool.example", "project-tool.example"},
+			wantSources: []PolicySource{{Name: "global policy"}, {Name: "project policy"}},
+		},
+		{
+			name: "unset/tools-only", inherit: nil, toolsOnly: true,
+			wantTools:   []string{"global-tool.example", "project-tool.example"},
+			wantSources: []PolicySource{{Name: "global policy"}, {Name: "project policy"}},
+		},
+		{
+			name: "enabled", inherit: &yes,
+			wantDomains: []string{"global.example", "project.example"},
+			wantTools:   []string{"global-tool.example", "project-tool.example"},
+			wantSources: []PolicySource{{Name: "global policy"}, {Name: "project policy"}},
+		},
+		{
+			name: "enabled/tools-only", inherit: &yes, toolsOnly: true,
+			wantTools:   []string{"global-tool.example", "project-tool.example"},
+			wantSources: []PolicySource{{Name: "global policy"}, {Name: "project policy"}},
+		},
+		{
+			name: "disabled", inherit: &no,
+			wantDomains: []string{"project.example"},
+			wantTools:   []string{"project-tool.example"},
+			wantSources: []PolicySource{{Name: "project policy"}},
+		},
+		{
+			name: "disabled/tools-only", inherit: &no, toolsOnly: true,
+			wantTools:   []string{"project-tool.example"},
+			wantSources: []PolicySource{{Name: "project policy"}},
+		},
 	} {
-		for _, toolsOnly := range []bool{false, true} {
-			name := tc.name
-			if toolsOnly {
-				name += "/tools-only"
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := MergeConfig{
+				GlobalPolicy: Policy{Domains: PolicyDomains{
+					Tools: map[string][]string{"claude": {"global-tool.example"}},
+				}},
+				ProjectPolicy: Policy{InheritGlobalPolicy: tc.inherit, Domains: PolicyDomains{
+					Tools: map[string][]string{"claude": {"project-tool.example"}},
+				}},
 			}
-			t.Run(name, func(t *testing.T) {
-				cfg := MergeConfig{
-					GlobalPolicy: Policy{Domains: PolicyDomains{
-						Tools: map[string][]string{"claude": {"global-tool.example"}},
-					}},
-					ProjectPolicy: Policy{InheritGlobalPolicy: tc.inherit, Domains: PolicyDomains{
-						Tools: map[string][]string{"claude": {"project-tool.example"}},
-					}},
-				}
-				var wantDomains []string
-				wantTools := []string{"project-tool.example"}
-				wantSources := []PolicySource{{Name: "project policy"}}
-				if tc.inherit == nil || *tc.inherit {
-					wantTools = append([]string{"global-tool.example"}, wantTools...)
-					wantSources = append([]PolicySource{{Name: "global policy"}}, wantSources...)
-					if !toolsOnly {
-						wantDomains = append(wantDomains, "global.example")
-					}
-				}
-				if !toolsOnly {
-					cfg.GlobalPolicy.Domains.Global = []string{"global.example"}
-					cfg.ProjectPolicy.Domains.Global = []string{"project.example"}
-					wantDomains = append(wantDomains, "project.example")
-				}
-				got := Merge(cfg)
-				if !slices.Equal(got.Domains, wantDomains) {
-					t.Errorf("domains = %v, want %v", got.Domains, wantDomains)
-				}
-				if !slices.Equal(got.ToolDomains["claude"], wantTools) {
-					t.Errorf("tool domains = %v, want %v", got.ToolDomains["claude"], wantTools)
-				}
-				if !slices.Equal(got.Sources, wantSources) {
-					t.Errorf("sources = %v, want %v", got.Sources, wantSources)
-				}
-			})
-		}
+			if !tc.toolsOnly {
+				cfg.GlobalPolicy.Domains.Global = []string{"global.example"}
+				cfg.ProjectPolicy.Domains.Global = []string{"project.example"}
+			}
+			got := Merge(cfg)
+			if !slices.Equal(got.Domains, tc.wantDomains) {
+				t.Errorf("domains = %v, want %v", got.Domains, tc.wantDomains)
+			}
+			if !slices.Equal(got.ToolDomains["claude"], tc.wantTools) {
+				t.Errorf("tool domains = %v, want %v", got.ToolDomains["claude"], tc.wantTools)
+			}
+			if !slices.Equal(got.Sources, tc.wantSources) {
+				t.Errorf("sources = %v, want %v", got.Sources, tc.wantSources)
+			}
+		})
 	}
 }
 

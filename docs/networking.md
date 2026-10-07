@@ -142,6 +142,14 @@ Mutating commands (`add-domain`, `remove-domain`, `set-mode`) apply the updated 
 Add custom domains through global `~/.config/enclave/network.jsonc`,
 `--allow-domain`, or the global `allow_domains` config key.
 
+### Global policy inheritance
+
+A project policy at `~/.config/enclave/projects/<hash>/network.jsonc` can set
+`"inherit_global_policy": false` to exclude domain entries from both
+`domains.global` and `domains.tools` in the global policy. The project's own
+entries still apply. This switch does not change mode, resolver, built-in tool
+allowlist, or extension-domain precedence.
+
 ### Per-run domains
 
 Use `--allow-domain <domain>` (repeatable) to add domains to the gateway allowlist for a single run only. The flag does **not** mutate `~/.config/enclave/network.jsonc` or any project file — it just augments the gateway's in-memory policy for the current container.
@@ -269,10 +277,3 @@ enclave --bridge-port 9800
 
 # Inside the container, the service is reachable at localhost:9800
 ```
-
-### Global policy inheritance
-
-A project policy can set `"inherit_global_policy": false` to exclude domain
-entries from both `domains.global` and `domains.tools` in the global policy.
-The project's own entries still apply. This switch does not change mode,
-resolver, built-in tool allowlist, or extension-domain precedence.

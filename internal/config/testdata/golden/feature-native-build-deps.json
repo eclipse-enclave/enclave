@@ -1,0 +1,13 @@
+{
+  "type": "mixin",
+  "name": "native-build-deps",
+  "display_name": "Native Build Dependencies",
+  "description": "Headers for building native Node.js modules (libx11, libxkbfile, libsecret)",
+  "apt_packages": [
+    "libx11-dev",
+    "libxkbfile-dev",
+    "libsecret-1-dev"
+  ],
+  "default_enabled": true,
+  "priority": 45
+}

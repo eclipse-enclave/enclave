@@ -716,6 +716,13 @@ state lives in the selected tool/feature auth identities plus
 `oauth-sessions/<incarnation>/`;
 never copy a real grant into a workload or committed test fixture.
 
+Concurrent protected sessions share grants and exact host identity locks, not
+registries or native views. Admission permits only attested sibling gateways'
+exact grant/lock binds; reset and downgrade still require every owner to end.
+Readiness schema 2 requires brokers to fence visible shared commits durably before
+credential release. Test separate broker instances and incarnations, rotating
+refresh, uncertain writes, sibling teardown, and old-gateway refusal together.
+
 `auth reset|downgrade --feature github-cli` selects the global feature identity
 instead of a tool identity. This local Cobra flag is not a generated/config-backed
 runtime option; it cannot be mixed with `--tool`, `--auth-name` or `--auth-scope`.

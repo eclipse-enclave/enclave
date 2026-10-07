@@ -173,6 +173,11 @@ func (b *githubBroker) readGrant() (*githubGrant, error) {
 			return nil, ErrState
 		}
 	}
+	// A sibling gateway may have lost the acknowledgement after rename.
+	// Readers must fence shared commits even without a proxy reload.
+	if err := util.SyncDir(b.config.StoreDir); err != nil {
+		return nil, ErrState
+	}
 	return &g, nil
 }
 

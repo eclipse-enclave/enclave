@@ -306,12 +306,18 @@ Before workload startup, the host clears prior gateway readiness state and
 requires the broker's private `runtime/oauth-ready.json` attestation to match
 the requested identities, session and incarnation. The proxy publishes it only
 after both native views and MITM listeners are ready. A generic readiness banner
-from an older `--no-rebuild` image cannot enable protected startup.
+from an older `--no-rebuild` image cannot enable protected startup. Readiness schema
+2 attests concurrent-capable brokers; older protected sessions must be stopped and
+restarted with rebuilt gateways before sharing their identities.
 
-The initial admission rule is one active protected session per identity, also
-excluding legacy sessions using that identity across projects and engines.
-Detached CLI exit and proxy reload cannot release admission; verify that the
-logical session ended first. A host-wide mount-admission lock also serializes
+Protected sessions may concurrently share an identity across projects and engines.
+Host metadata records each session/incarnation separately; only verified gateways
+for those reservations may share exact grant/lock binds. Legacy mounts and broader
+parent/control binds remain forbidden. Each gateway retains a private registry and
+native view; access reads the latest shared grant and refresh exchanges serialize
+under the common host identity lock. Readers durably fence shared commits after
+another gateway loses a persistence acknowledgement. Detached CLI exit and proxy
+reload cannot release admission; verify that the logical session ended first. A host-wide mount-admission lock also serializes
 protected enrollment with final workload bind checks through confirmed startup.
 All Docker/Podman workloads and QEMU guests reject protected grant/parent/alias
 mounts and host-only lock/control directories, including file staging and
@@ -322,7 +328,7 @@ Checked canonical mount paths are passed to the engine; host filesystem setup
 and host administrators remain trusted. Identity protection persists independently of the
 grant, including across reset. Reset removes broker-owned `.oauth-*` interrupted-write
 copies without following symlinks and retains unrelated entries. It clears only the selected identity after
-ending its owner; `auth reset` preserves protection, and `auth downgrade`
+ending all of its sessions; `auth reset` preserves protection, and `auth downgrade`
 requires an idle, empty identity. Host start leases fence startup before a
 container exists; detached owners remain reserved until both workload and
 gateway are verified ended. Engine inspection errors retain the reservation.
@@ -366,12 +372,14 @@ replace trusted tokens. Existing compatible native files are read by the gateway
 not copied into the workload.
 
 This is a single global feature identity, not one identity per Claude
-`--auth-name`. It admits one active session across all projects, tools and
-Docker/Podman engines. Enrollment refuses existing containers exposing its real
+`--auth-name`. Concurrent protected sessions across projects and Docker/Podman
+share its grant and identity lock, with separate per-session handles and views. Enrollment refuses existing containers exposing its real
 files or trusted control state. Its host-only protection marker survives reset,
 auth-directory removal and omission of `--protect-auth`; ordinary access cannot
 silently reopen the files. Cleanup retains the protected or corrupt store.
-Verified session teardown removes its transient view/registry, not the grant.
+Verified session teardown removes only that session's transient view/registry,
+not the grant or sibling views. Reset/downgrade require every session using this
+feature identity to have ended.
 
 Use `enclave auth reset --feature github-cli` to clear the idle feature grant
 and native `hosts.yml`/`config.yml` inputs, including preferences, while retaining

@@ -85,5 +85,8 @@ unsupported. The built-in `github-cli` feature uses its own protected adapter;
 other features with native auth files are rejected. Env-only credentials are
 unaffected. The native config and handle file live in a disposable session view
 at `~/.claude`, with agent memory mounted separately. The gateway keeps the real
-grant outside the workload. See [auth](../../../docs/auth.md#experimental-gateway-owned-claude-oauth)
+grant outside the workload. Multiple protected sessions can share the same named
+identity: gateways coordinate refresh through a common lock while retaining
+separate handles and views. Reset/downgrade require all its sessions to end.
+See [auth](../../../docs/auth.md#experimental-gateway-owned-claude-oauth)
 and the [pending verification plan](../../../docs/runtime/oauth-broker-verification.md).

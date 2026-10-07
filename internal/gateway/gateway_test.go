@@ -508,7 +508,7 @@ func TestBuildOutputTailKeepsLastLines(t *testing.T) {
 
 func TestProtectedGatewayMountsSelectedIdentityAndSameLock(t *testing.T) {
 	for _, engine := range []string{"docker", "podman"} {
-		for _, readyMode := range []string{"current", "legacy", "claude-only", "wrong-incarnation", "stale", "symlink", "clear-fails"} {
+		for _, readyMode := range []string{"current", "legacy", "single-owner", "claude-only", "wrong-incarnation", "stale", "symlink", "clear-fails"} {
 			t.Run(engine+"/"+readyMode, func(t *testing.T) {
 				t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 				root := t.TempDir()
@@ -558,8 +558,10 @@ esac
 				callsFile := filepath.Join(root, "calls")
 				t.Setenv("OAUTH_TEST_CALLS", callsFile)
 				readyPath := filepath.Join(oauth.RuntimeDir, "oauth-ready.json")
-				readyBody := `{"schema":1,"adapter":"claude","identity":"selected","session":"session","incarnation":"` + oauth.Incarnation + `","githubIdentity":"github-selected"}`
+				readyBody := `{"schema":2,"adapter":"claude","identity":"selected","session":"session","incarnation":"` + oauth.Incarnation + `","githubIdentity":"github-selected"}`
 				switch readyMode {
+				case "single-owner":
+					readyBody = strings.ReplaceAll(readyBody, `"schema":2`, `"schema":1`)
 				case "claude-only":
 					readyBody = strings.ReplaceAll(readyBody, `,"githubIdentity":"github-selected"`, "")
 				case "wrong-incarnation":

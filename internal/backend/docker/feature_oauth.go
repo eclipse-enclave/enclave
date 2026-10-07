@@ -82,7 +82,9 @@ func (b *Backend) PrepareFeatureAuthSessions(ctx context.Context, parent *backen
 			return ref, err
 		}
 		if err := hoststore.AdmitNativeIdentity(b.opts.Host.Home, dir, authReservation(ref),
-			func() (bool, error) { return b.identityUnused(ctx, dir, b.featureRuntimeDir(ref, name)) },
+			func(owners []hoststore.IdentityReservation) (bool, error) {
+				return b.identityAvailable(ctx, dir, owners, name, b.featureRuntimeDir(ref, name))
+			},
 			func(owner hoststore.IdentityReservation) (bool, error) { return b.reconcileAuthOwner(ctx, owner) }); err != nil {
 			return ref, fmt.Errorf("admit %s feature authentication: %w", name, err)
 		}

@@ -28,6 +28,7 @@ import (
 	"enclave/internal/config"
 	dockercmd "enclave/internal/docker"
 	"enclave/internal/gateway"
+	"enclave/internal/gateway/oauthbroker"
 	"enclave/internal/model"
 	"enclave/internal/util"
 )
@@ -87,7 +88,9 @@ func (b *Backend) PrepareAuthSession(ctx context.Context, key backend.StoreKey, 
 		}
 	}()
 	err = hoststore.AdmitIdentity(b.opts.Host.Home, dir, authReservation(ref), reset,
-		func() (bool, error) { return b.identityUnused(ctx, dir, b.authRuntimeDir(ref)) },
+		func(owners []hoststore.IdentityReservation) (bool, error) {
+			return b.identityAvailable(ctx, dir, owners, "", b.authRuntimeDir(ref))
+		},
 		func(owner hoststore.IdentityReservation) (bool, error) { return b.reconcileAuthOwner(ctx, owner) },
 		func() error { return resetProtectedGrant(dir) })
 	if err != nil {
@@ -369,6 +372,12 @@ func (b *Backend) reconcileAuthOwner(ctx context.Context, owner hoststore.Identi
 }
 
 func (b *Backend) identityUnused(ctx context.Context, dir string, extraPaths ...string) (bool, error) {
+	return b.identityAvailable(ctx, dir, nil, "", extraPaths...)
+}
+
+// Only admitted, current-version gateways may share exact grant/lock binds.
+// Raw workload binds, parents, and unreserved or older gateways still conflict.
+func (b *Backend) identityAvailable(ctx context.Context, dir string, owners []hoststore.IdentityReservation, feature string, extraPaths ...string) (bool, error) {
 	if err := hoststore.RequireNoQEMUSessions(ctx, b.opts.Host.Home); err != nil {
 		return false, err
 	}
@@ -389,6 +398,11 @@ func (b *Backend) identityUnused(ctx context.Context, dir string, extraPaths ...
 			return false, err
 		}
 		for _, info := range containers {
+			shared := b.registeredAuthGateway(info, engine, owners, dir, feature)
+			grantTarget, lockTarget := model.GatewayOAuthGrantPath, model.GatewayOAuthLockPath
+			if feature == "github-cli" {
+				grantTarget, lockTarget = model.GatewayOAuthGitHubGrantPath, model.GatewayOAuthGitHubLockPath
+			}
 			for _, mount := range info.Mounts {
 				if mount.Type != dockercmd.MountTypeBind {
 					continue
@@ -396,6 +410,9 @@ func (b *Backend) identityUnused(ctx context.Context, dir string, extraPaths ...
 				source, err := canonicalAuthPath(mount.Source)
 				if err != nil {
 					return false, err
+				}
+				if shared && ((source == paths[0] && mount.Destination == grantTarget) || (source == paths[1] && mount.Destination == lockTarget)) {
+					continue
 				}
 				for _, trusted := range paths {
 					if pathsOverlap(source, trusted) {
@@ -407,6 +424,67 @@ func (b *Backend) identityUnused(ctx context.Context, dir string, extraPaths ...
 		}
 	}
 	return true, nil
+}
+
+func (b *Backend) registeredAuthGateway(info dockercmd.InspectResponse, engine string, owners []hoststore.IdentityReservation, dir, feature string) bool {
+	if info.Config == nil {
+		return false
+	}
+	for _, owner := range owners {
+		if !owner.Protected || owner.Engine != engine || strings.TrimPrefix(info.Name, "/") != gateway.ContainerName(owner.Session) {
+			continue
+		}
+		env := map[string]string{}
+		for _, assignment := range info.Config.Env {
+			key, value, _ := strings.Cut(assignment, "=")
+			if _, duplicate := env[key]; duplicate {
+				return false
+			}
+			env[key] = value
+		}
+		if env[model.EnvOAuthBroker] != "claude" || env[model.EnvOAuthIncarnation] != owner.Incarnation {
+			return false
+		}
+		ref := &backend.AuthSession{Incarnation: owner.Incarnation}
+		runtime := b.authRuntimeDir(ref)
+		if err := hoststore.EnsureNoSymlinkChain(config.HostStateRootDir(b.opts.Host.Home), runtime, false); err != nil {
+			return false
+		}
+		expected := oauthbroker.Config{RuntimeDir: runtime, Identity: env[model.EnvOAuthIdentity], Session: owner.Session, Incarnation: owner.Incarnation}
+		if env[model.EnvOAuthGitHub] == "1" {
+			expected.GitHub = &oauthbroker.GitHubConfig{Identity: env[model.EnvOAuthGitHubIdentity]}
+		}
+		if feature == "" {
+			if expected.Identity != util.HashString(dir) {
+				return false
+			}
+		} else if feature != "github-cli" || expected.GitHub == nil || expected.GitHub.Identity != util.HashString(dir) || !hasAuthRuntimeMount(info, b.featureRuntimeDir(ref, feature), model.GatewayOAuthGitHubRuntimePath) {
+			return false
+		}
+		// Private readiness binds the inspected gateway to this incarnation and
+		// fences older brokers that do not support concurrent grant recovery.
+		return hasAuthRuntimeMount(info, runtime, model.GatewayOAuthRuntimePath) && oauthbroker.VerifyReadiness(expected) == nil
+	}
+	return false
+}
+
+func hasAuthRuntimeMount(info dockercmd.InspectResponse, source, target string) bool {
+	want, err := canonicalAuthPath(source)
+	if err != nil {
+		return false
+	}
+	matches := 0
+	for _, mount := range info.Mounts {
+		if mount.Destination != target {
+			continue
+		}
+		actual, err := canonicalAuthPath(mount.Source)
+		if err != nil || mount.Type != dockercmd.MountTypeBind || actual != want {
+			return false
+		}
+		matches++
+	}
+	return matches == 1
 }
 
 func authSessionFromInspect(info dockercmd.InspectResponse, engine string) *backend.AuthSession {

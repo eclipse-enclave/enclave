@@ -350,7 +350,7 @@ There is no config-file key.
 | `--pass-api-key` | Allow API key injection in `--ephemeral` mode |
 | `--pass-env <KEY1,KEY2>` | Forward specific host env vars into the container (repeatable, comma-separated); replaces `pass_env` from config, `+KEY` adds, and can forward a key `--no-api-key` withholds |
 | `--auth-scope <scope>` | `shared` (default) or `project` |
-| `--protect-auth` | Experimental gateway-owned OAuth for a fresh named shared Claude identity and the enabled built-in GitHub CLI feature on Docker/Podman; pins Claude 2.1.63 and `gh` 2.87.3; see [protected auth](auth.md#experimental-gateway-owned-claude-oauth) |
+| `--protect-auth` | Experimental gateway-owned OAuth for a fresh named shared Claude identity and the enabled built-in GitHub CLI feature on Docker/Podman; concurrent sessions share identities with separate handles; pins Claude 2.1.63 and `gh` 2.87.3; see [protected auth](auth.md#experimental-gateway-owned-claude-oauth) |
 | `--auth-name <slug>` | Select a named per-tool shared auth store; ignored under `--auth-scope=project` |
 | `--secrets-scope <scope>` | `both` (default), `global`, or `project` |
 

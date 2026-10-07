@@ -553,7 +553,10 @@ set in config is resolved by both sides.
 The default built-in `github-cli` feature has a protected native-auth adapter;
 other native-auth features are rejected. The experimental Docker/Podman flow
 pins Claude 2.1.63 and uses a session-scoped
-native config/history view. Saved identity protection is independent of this
+native config/history view. Concurrent sessions may reuse the same `auth_name`;
+Claude and GitHub grants are shared, but handles and views remain per-session.
+Reset/downgrade require all sessions using the selected identity to end.
+Saved identity protection is independent of this
 configuration: removing the setting causes a refusal, not a raw-auth fallback.
 Provider env secrets, host config passthrough and credential-helper settings
 conflict with this mode. See [authentication](auth.md#experimental-gateway-owned-claude-oauth)

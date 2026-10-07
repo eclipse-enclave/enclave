@@ -158,21 +158,23 @@ func HasProtectedIdentities(home string) (bool, error) {
 
 // AdmitIdentity combines stale-owner reconciliation, optional fresh enrollment
 // and reservation under the identity lock, before any workload store exposure.
-func AdmitIdentity(home, dir string, reservation IdentityReservation, reset bool, verifyUnused func() (bool, error), verifyEnded func(IdentityReservation) (bool, error), resetGrant func() error) error {
-	return admitIdentity(home, dir, reservation, reset, false, verifyUnused, verifyEnded, resetGrant)
+// verifyAccess must reject all credential/control mounts except exact gateway
+// binds belonging to the supplied live protected reservations.
+func AdmitIdentity(home, dir string, reservation IdentityReservation, reset bool, verifyAccess func([]IdentityReservation) (bool, error), verifyEnded func(IdentityReservation) (bool, error), resetGrant func() error) error {
+	return admitIdentity(home, dir, reservation, reset, false, verifyAccess, verifyEnded, resetGrant)
 }
 
 // AdmitNativeIdentity transfers an existing native feature store to gateway
 // custody. Only the gateway may subsequently parse or project its contents.
-func AdmitNativeIdentity(home, dir string, reservation IdentityReservation, verifyUnused func() (bool, error), verifyEnded func(IdentityReservation) (bool, error)) error {
-	return admitIdentity(home, dir, reservation, false, true, verifyUnused, verifyEnded, nil)
+func AdmitNativeIdentity(home, dir string, reservation IdentityReservation, verifyAccess func([]IdentityReservation) (bool, error), verifyEnded func(IdentityReservation) (bool, error)) error {
+	return admitIdentity(home, dir, reservation, false, true, verifyAccess, verifyEnded, nil)
 }
 
-func admitIdentity(home, dir string, reservation IdentityReservation, reset, native bool, verifyUnused func() (bool, error), verifyEnded func(IdentityReservation) (bool, error), resetGrant func() error) error {
+func admitIdentity(home, dir string, reservation IdentityReservation, reset, native bool, verifyAccess func([]IdentityReservation) (bool, error), verifyEnded func(IdentityReservation) (bool, error), resetGrant func() error) error {
 	if err := validateReservation(reservation); err != nil {
 		return err
 	}
-	if verifyUnused == nil || verifyEnded == nil {
+	if verifyAccess == nil || verifyEnded == nil {
 		return errors.New("cross-engine identity verification is required")
 	}
 	return mutateIdentity(home, dir, func(state *identityState) error {
@@ -183,15 +185,17 @@ func admitIdentity(home, dir string, reservation IdentityReservation, reset, nat
 			return errors.New("saved identity requires protected authentication")
 		}
 		if reservation.Protected {
-			if len(state.Reservations) != 0 {
-				return errors.New("protected auth identity already has an active session reservation")
+			if (!state.Protected || reset) && len(state.Reservations) != 0 {
+				return errors.New("stop all auth identity sessions before enrollment or reset")
 			}
-			unused, err := verifyUnused()
+			// Existing protected gateways may share the grant and its lock, but
+			// only for these host-owned reservations. Enrollment/reset stay idle-only.
+			safe, err := verifyAccess(slices.Clone(state.Reservations))
 			if err != nil {
 				return err
 			}
-			if !unused {
-				return errors.New("auth identity is in use by another container")
+			if !safe {
+				return errors.New("auth identity has conflicting container mounts; stop legacy sessions or restart older protected sessions with a rebuilt gateway")
 			}
 			if !state.Protected {
 				entries, err := os.ReadDir(dir)
@@ -215,10 +219,8 @@ func admitIdentity(home, dir string, reservation IdentityReservation, reset, nat
 				}
 			}
 		}
-		for _, existing := range state.Reservations {
-			if existing.Engine == reservation.Engine && existing.Session == reservation.Session {
-				return errors.New("auth identity already reserves this session name")
-			}
+		if reservationConflicts(state.Reservations, reservation) {
+			return errors.New("auth identity already reserves this session or incarnation")
 		}
 		state.Reservations = append(state.Reservations, reservation)
 		return nil
@@ -265,9 +267,9 @@ func RequireIdentityReservation(home, dir string, reservation IdentityReservatio
 }
 
 // ReserveIdentity atomically admits cooperating sessions across projects and
-// engines. Protected identities are single-owner; legacy reservations may be
-// concurrent. Activation must reserve legacy sessions too, before preparing or
-// exposing their stores. Merely checking RequireUnprotectedAuth is not admission.
+// engines in the same auth mode. Activation must reserve legacy sessions too,
+// before preparing or exposing their stores. Merely checking
+// RequireUnprotectedAuth is not admission.
 func ReserveIdentity(home, dir string, reservation IdentityReservation) error {
 	if err := validateReservation(reservation); err != nil {
 		return err
@@ -276,13 +278,8 @@ func ReserveIdentity(home, dir string, reservation IdentityReservation) error {
 		if reservation.Protected != state.Protected {
 			return errors.New("session auth mode does not match saved identity protection")
 		}
-		if state.Protected && len(state.Reservations) != 0 {
-			return errors.New("protected auth identity already has an active session reservation")
-		}
-		for _, existing := range state.Reservations {
-			if existing.Engine == reservation.Engine && existing.Session == reservation.Session {
-				return errors.New("auth identity already reserves this session name")
-			}
+		if reservationConflicts(state.Reservations, reservation) {
+			return errors.New("auth identity already reserves this session or incarnation")
 		}
 		state.Reservations = append(state.Reservations, reservation)
 		return nil
@@ -366,6 +363,9 @@ func mutateIdentity(home, dir string, mutate func(*identityState) error) error {
 		if err != nil {
 			return err
 		}
+		if len(data) > 65536 {
+			return errors.New("auth identity reservation metadata is full")
+		}
 		if err := util.WriteFileAtomic(file, data, 0o600); err != nil {
 			return err
 		}
@@ -442,7 +442,7 @@ func readIdentityStateFile(home, file string) (state identityState, err error) {
 
 func decodeReservations(data []byte, protected bool) ([]IdentityReservation, error) {
 	var rows []json.RawMessage
-	if err := json.Unmarshal(data, &rows); err != nil || rows == nil || (protected && len(rows) > 1) {
+	if err := json.Unmarshal(data, &rows); err != nil || rows == nil {
 		return nil, errors.New("invalid protected auth identity reservations")
 	}
 	var reservations []IdentityReservation
@@ -459,9 +459,18 @@ func decodeReservations(data []byte, protected bool) ([]IdentityReservation, err
 		if err := json.Unmarshal(raw, &reservation); err != nil || validateReservation(reservation) != nil || reservation.Protected != protected {
 			return nil, errors.New("invalid protected auth identity reservation")
 		}
+		if reservationConflicts(reservations, reservation) {
+			return nil, errors.New("duplicate auth identity reservation")
+		}
 		reservations = append(reservations, reservation)
 	}
 	return reservations, nil
+}
+
+func reservationConflicts(reservations []IdentityReservation, candidate IdentityReservation) bool {
+	return slices.ContainsFunc(reservations, func(existing IdentityReservation) bool {
+		return existing.Incarnation == candidate.Incarnation || (existing.Engine == candidate.Engine && existing.Session == candidate.Session)
+	})
 }
 
 func decodeIdentityFields(data []byte, allowed []string) (map[string]json.RawMessage, error) {

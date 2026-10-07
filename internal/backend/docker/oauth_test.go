@@ -58,8 +58,16 @@ func TestProtectedAdmissionCrossEngineAndPreparingOwner(t *testing.T) {
 		t.Fatal(err)
 	}
 	other := New(Options{Host: b.opts.Host, Engine: backend.NamePodman})
-	if _, err := other.PrepareAuthSession(ctx, key, "second", true, false); err == nil {
-		t.Fatal("second engine stole a still-preparing identity")
+	second, err := other.PrepareAuthSession(ctx, key, "second", true, false)
+	if err != nil {
+		t.Fatalf("concurrent preparing session: %v", err)
+	}
+	defer other.releaseAuthStart(second)
+	if err := b.validateAuthReservation(first); err != nil {
+		t.Fatalf("second admission displaced preparing sibling: %v", err)
+	}
+	if _, err := other.PrepareAuthSession(ctx, key, "reset", true, true); err == nil {
+		t.Fatal("reset admitted while siblings were preparing")
 	}
 	if _, err := other.PrepareAuthSession(ctx, key, "legacy", false, false); err == nil {
 		t.Fatal("omitted protection reopened identity")
@@ -67,11 +75,9 @@ func TestProtectedAdmissionCrossEngineAndPreparingOwner(t *testing.T) {
 	if err := b.ReleaseAuthSession(ctx, first); err != nil {
 		t.Fatal(err)
 	}
-	second, err := other.PrepareAuthSession(ctx, key, "second", true, false)
-	if err != nil {
-		t.Fatal(err)
+	if err := other.validateAuthReservation(second); err != nil {
+		t.Fatalf("sibling release removed preparing session: %v", err)
 	}
-	defer other.releaseAuthStart(second)
 	if second.Incarnation == first.Incarnation {
 		t.Fatal("new session reused incarnation")
 	}

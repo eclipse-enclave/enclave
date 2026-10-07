@@ -62,7 +62,7 @@ func TestProtectedFeatureEnrollsNativeStoreWithoutWorkloadCopy(t *testing.T) {
 	}
 }
 
-func TestProtectedFeatureSingleOwnerAcrossToolsAndEngines(t *testing.T) {
+func TestProtectedFeatureConcurrentOwnersAcrossIdentitiesAndEngines(t *testing.T) {
 	b, key, _ := oauthTestBackend(t)
 	first := protectedGitHubTestSession(t, b, key, "first")
 	other := New(Options{Host: b.opts.Host, Engine: backend.NamePodman})
@@ -72,8 +72,11 @@ func TestProtectedFeatureSingleOwnerAcrossToolsAndEngines(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = other.ReleaseAuthSession(context.Background(), second) }()
-	if _, err := other.PrepareFeatureAuthSessions(context.Background(), second, "second", []string{"github-cli"}, true); err == nil {
-		t.Fatal("different tool identity/engine shared an active GitHub identity")
+	if _, err := other.PrepareFeatureAuthSessions(context.Background(), second, "second", []string{"github-cli"}, true); err != nil {
+		t.Fatalf("concurrent GitHub admission: %v", err)
+	}
+	if b.featureViewDir(first, "github-cli") == other.featureViewDir(second, "github-cli") {
+		t.Fatal("concurrent feature sessions share a native view")
 	}
 	legacy, err := other.PrepareFeatureAuthSessions(context.Background(), nil, "ordinary-tool", []string{"github-cli"}, false)
 	if legacy != nil {
@@ -84,6 +87,12 @@ func TestProtectedFeatureSingleOwnerAcrossToolsAndEngines(t *testing.T) {
 	}
 	if err := b.validateAuthReservation(first); err != nil {
 		t.Fatalf("failed admission modified active owner: %v", err)
+	}
+	if err := b.ReleaseAuthSession(context.Background(), first); err != nil {
+		t.Fatal(err)
+	}
+	if err := other.validateAuthReservation(second); err != nil {
+		t.Fatalf("sibling release removed feature admission: %v", err)
 	}
 }
 

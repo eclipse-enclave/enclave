@@ -49,7 +49,7 @@ flowchart LR
 
     subgraph Docker
         DnsNet["Per-session Docker bridge<br/>gateway attachment"]
-        Gateway["Gateway sidecar<br/>dnsmasq + enclave-gateway-proxy"]
+        Gateway["Per-session gateway sidecar<br/>dnsmasq + enclave-gateway-proxy"]
         Tool["Tool container: agent CLI<br/>ephemeral (--rm on exit)"]
     end
 
@@ -61,8 +61,8 @@ flowchart LR
     EnvStore -.->|"host-side read/write env file"| Tool
     SharedAuthStore -->|"ordinary auth bind (~/.enclave-auth)"| Tool
     FeatureAuthStore -->|"ordinary feature bind"| Tool
-    SharedAuthStore -->|"protected Claude: gateway-only bind"| Gateway
-    FeatureAuthStore -->|"protected GitHub: gateway-only bind"| Gateway
+    SharedAuthStore -->|"protected Claude: shared grant + identity lock"| Gateway
+    FeatureAuthStore -->|"protected GitHub: shared grant + identity lock"| Gateway
     Gateway -->|"write native handle projection"| ProtectedViews
     Gateway -.->|"private broker readiness verified before launch"| Tool
     ProtectedViews -->|"protected native config binds"| Tool
@@ -231,9 +231,9 @@ Persistent stores are host directories under `~/.local/state/enclave/` (honoring
 - **Tool config store**: `~/.local/state/enclave/projects/<hash>/<tool>/config-store/<key>/` stores the tool’s config directory (for example, `.claude` or `.codex`). `<key>` is `default` for the persistent store; `--ephemeral` uses a unique suffixed key and leaves the `default` store untouched.
 - **Env store**: `~/.local/state/enclave/projects/<hash>/<tool>/env/` stores persisted env auth data and additional `--pass-env` values when persistence is enabled (default unless `--ephemeral`).
 - **Protected identity metadata** (`--protect-auth`): `~/.local/state/enclave/locks/store-<store-path-hash>.identity.json` holds protection/admission separately from the auth tree. It is host-only, never workload-mounted, and survives auth-directory removal.
-- **Protected OAuth sessions**: `~/.local/state/enclave/oauth-sessions/<incarnation>/{view,runtime}/` holds the workload-native handle/config view and separate gateway-private registry. Its `runtime/oauth-ready.json` attests initialized adapters and exact session identity after MITM listeners bind; the host clears stale attestations and verifies readiness before workload startup, including `--no-rebuild`. GitHub feature projections use `features/github-cli/{view,runtime}/` beneath the same incarnation. The gateway alone mounts the real tool/feature grants and their exact host identity locks. Verified session teardown removes transient state; reset preserves protection and explicit idle/empty downgrade clears it. Docker/Podman integration is experimental pending engine/client validation.
+- **Protected OAuth sessions**: `~/.local/state/enclave/oauth-sessions/<incarnation>/{view,runtime}/` holds the workload-native handle/config view and separate gateway-private registry. Its `runtime/oauth-ready.json` (schema 2) attests initialized concurrent-capable adapters and exact session identity after MITM listeners bind; the host clears stale attestations and verifies readiness before workload startup, including `--no-rebuild`. GitHub feature projections use `features/github-cli/{view,runtime}/` beneath the same incarnation. The gateway alone mounts the real tool/feature grants and their exact host identity locks. Multiple protected sessions share grants through exact identity locks while retaining separate reservations, registries and views; readers fence shared commits before release. Verified teardown removes only that session's transient state. Reset requires all selected-identity sessions to end and preserves protection; explicit idle/empty downgrade clears it. Docker/Podman integration is experimental pending engine/client validation.
 - **Shared auth store** (when `--auth-scope=shared`): `~/.local/state/enclave/tools/<tool>/auth/<identity>/` stores OAuth files shared across projects for the tool; `<identity>` is `default` or the `--auth-name` slug.
-- **Feature auth store** (when `--auth-scope=shared` and feature defines `authFiles`): `~/.local/state/enclave/features/<feature>/auth/` stores feature auth files shared across tools/projects (for example `github-cli`). Protected GitHub keeps this store gateway-only and mounts a session handle view at `~/.config/gh`; its global identity admits one owner independently of the Claude auth name.
+- **Feature auth store** (when `--auth-scope=shared` and feature defines `authFiles`): `~/.local/state/enclave/features/<feature>/auth/` stores feature auth files shared across tools/projects (for example `github-cli`). Protected GitHub keeps this store gateway-only and mounts a session handle view at `~/.config/gh`; its global identity admits concurrent protected sessions independently of the Claude auth name, with separate handle views and serialized grant updates.
 
 Other host-side data:
 

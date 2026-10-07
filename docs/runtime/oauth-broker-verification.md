@@ -19,9 +19,11 @@ restricted policy, `--allow-all-network`, and unrestricted policy files.
 The selected grant remains in `tools/claude/auth/<identity>/`. Host-only
 `locks/store-<store-path-hash>.identity.json` records protection/reservations.
 `oauth-sessions/<incarnation>/view/` is mounted at the native `~/.claude` location;
-its sibling `runtime/` and the exact host identity lock are gateway-only. Only
-one protected owner is admitted across Docker/Podman. Startup leases cover the
-interval before containers exist; detached exit/reload does not release the
+its sibling `runtime/` and the exact host identity lock are gateway-only.
+Concurrent protected sessions across Docker/Podman share grants and the identity
+lock, with independent reservations, handles and native views. Only registered,
+attested gateways may share exact grant/lock mounts. Startup leases cover the
+interval before containers exist; detached exit/reload does not release an
 owner. Unavailable engine inspection fails closed.
 
 The pinned npm Claude 2.1.63 is installed alongside the ordinary native client,
@@ -39,8 +41,8 @@ GitHub's existing `features/github-cli/auth/` store is gateway-only when enrolle
 compatible `hosts.yml`/`config.yml` are not copied into the workload. Its separate
 `oauth-sessions/<incarnation>/features/github-cli/{view,runtime}/` directories
 hold the projected `~/.config/gh` view and private handle registry respectively.
-The feature identity is shared across tools/projects and permits one protected
-owner across engines, independently of Claude's named identity. Neither startup
+The feature identity is shared across tools/projects and permits concurrent
+protected sessions across engines, independently of Claude's named identity. Neither startup
 nor finalization uses ordinary feature-file reconciliation. Saved protection
 blocks later ordinary feature mounts; transient state is removed only after
 verified session end.
@@ -266,19 +268,19 @@ and binds in the engine report.
 
 | Case | Assertion and evidence |
 |------|------------------------|
-| Gateway compatibility | With a current runtime but a legacy gateway image, protected `--no-rebuild` refuses startup and removes the sidecar before launching the workload. Generic gateway readiness, stale readiness files, mismatched sessions and missing requested GitHub adapters must not pass the private broker attestation gate. An ordinary gateway retains its existing readiness behavior. |
+| Gateway compatibility | With a current runtime but a legacy gateway image, protected `--no-rebuild` refuses startup and removes the sidecar before launching the workload. Generic gateway readiness, stale readiness files, mismatched sessions and missing requested GitHub adapters must not pass the private broker attestation gate. Schema-1 single-owner brokers cannot join concurrent identities; stop and rebuild older protected gateways. An ordinary gateway retains its existing readiness behavior. |
 | Fresh capture | CA trust and capture registration exist before login. Only access/refresh handles appear in every workload-visible response and auth file. Trusted grant is committed before the response is delivered. |
 | Scoped release | Provider receives the real token only at the exact HTTPS origin, port, method, path and declared field. Wrong endpoint, field, identity and session fail without releasing it. Test alternate Host/SNI, encoded paths, query strings and redirects. |
 | Bounded token responses | Truncation, duplicate JSON keys, unknown top-level/nested fields, oversized encoded/decoded bodies and unsupported encodings fail closed. Synthetic credentials in token-exchange errors, headers and trailers are not reflected. |
 | Streaming | An SSE event reaches the workload before upstream EOF. Workload cancellation reaches upstream. A truncated stream is not reported as a successful complete response. |
-| Rotating refresh | Concurrent requests send the consumed refresh token upstream at most once. Waiters receive the committed projection with stable handles. Exercise replacement and omission of the refresh token. |
+| Rotating refresh | Concurrent requests from separate sessions/gateways send the consumed refresh token upstream at most once. Each waiter receives its own stable handle projection of the committed grant. Exercise replacement and omission of the refresh token. |
 | Lost success response | Drop the reply after commit, then retry before and after proxy reload. The retry uses the committed grant, never the consumed token; returned lifetime is recomputed. |
-| Uncertain refresh | Interrupt dispatch, receipt and persistence before a durable result. Restart leaves an explicit uncertain/reauthentication state, never a silent retry of the old refresh token. |
-| Commit boundaries | Inject failures before write, file sync, rename and directory sync. Test initial grant/registry publication and refresh separately. No uncommitted grant is acknowledged. |
+| Uncertain refresh | Interrupt dispatch, receipt and persistence before a durable result. Every live sibling and restarted broker sees an explicit uncertain/reauthentication state, never a silent retry of the old refresh token. |
+| Commit boundaries | Inject failures before write, file sync, rename and directory sync. Test initial grant/registry publication and refresh separately. No uncommitted grant is acknowledged. Live sibling readers fence visible commits after a writer loses its directory-sync acknowledgement; recovery must not require restarting all siblings. |
 | Live reload | Apply the gateway bundle with the workload alive. The proxy PID changes but gateway/network namespace and handles remain valid. Do not substitute gateway replacement for process reload. |
 | Proxy death | Kill the proxy unexpectedly and demonstrate fail-closed egress. End the affected logical session; start a new one from durable state. |
 | Session reuse | Stop, start again with the same name, and verify fresh handles. Prior-session handles fail even when identity and container name are reused. |
-| Admission | Simultaneous starts across projects and engines admit one owner per protected identity. Legacy access conflicts too. Detached CLI exit and proxy reload do not release ownership. Verify ended-session detection before clearing a stale reservation. |
+| Admission | Simultaneous starts across projects and engines admit multiple protected sessions for the same identity with distinct handles/views. Legacy access still conflicts. Detached CLI exit and proxy reload do not release reservations. Stopping one session or reconciling its stale reservation must preserve sibling grants, handles, views and reservations. Reset, startup reset and downgrade refuse until all selected-identity sessions have ended. |
 | Persistent protection | Omitting opt-in cannot reopen an identity raw. Reset preserves protection. An explicit host-side downgrade is allowed only without an owner; no implicit downgrade on an error. |
 | Mount isolation | Inspect workload, gateway and every reconcile helper. The real store and its parents are absent from workload/helper mounts, including symlink aliases and config overrides. Attempt added-dir mounts from later ordinary sessions too, including concurrent enrollment/start. Preexisting workloads exposing selected grant or trusted control files prevent enrollment. Cover QEMU directory/file staging and copy-back; active/preparing/finalizing QEMU sessions, including older guests without leases, prevent protected admission/reset/downgrade. Kill the parent CLI while QEMU stays alive and verify the inherited lease remains effective. Only the selected identity is mounted into the gateway. |
 | Ownership | Created/replaced grants remain owned by the invoking host user with restrictive modes after capture, refresh and restart. Verify rootless UID mapping and SELinux relabels. Workload UID never gains the proxy firewall exemption. |
@@ -299,7 +301,7 @@ release cases for GitHub too. Add these feature-specific checks:
 | Device login | Run the pinned `gh` GitHub.com browser/device flow from an empty store. Token polling returns native-format handles only after durable capture. Exercise pending/denied/expired authorization, malformed and oversized token responses, uncertain outcomes and unsupported expiry/refresh variants. Verify same-session lost-reply recovery, rejection of prior-session device-code replay, and failure at the bounded history limit. No token-response passthrough on error. |
 | API and Git release | Exercise `gh` REST/GraphQL and HTTPS Git against a disposable repository. Verify each accepted authorization format and Git credential field at its declared endpoint. Wrong hosts, ports, paths, fields, account handles and sessions fail without release. |
 | Account/config view | Verify every supported imported account and account-switch behavior, plus preserved supported preferences. Unsupported native structures do not get copied verbatim into the workload. Rewriting the native view cannot update the trusted grant or widen release. |
-| Shared feature identity | Two different Claude auth names still contend for the same global GitHub identity. A live legacy feature bind prevents enrollment; saved protection prevents later ordinary sessions from exposing it. Failed multi-identity admission does not strand another identity. |
+| Shared feature identity | Concurrent sessions with the same or different Claude auth names share the global GitHub grant with separate handles/views. Concurrent device logins preserve both account updates; device-code replay cannot cross sessions. Replacing an account token is visible to sibling gateways without replacing their handles or local account selection. A live legacy feature bind prevents enrollment; saved protection prevents later ordinary sessions from exposing it. Failed multi-identity admission does not strand another identity. |
 | Lifecycle/reset | Foreground, `exec`, detached stop/remove and cleanup never reconcile projected feature files into real credentials. Feature reset clears trusted credentials without reimporting them on the next launch. Feature downgrade requires idle, empty state; neither command mutates the Claude identity. |
 
 Do not record device codes, access tokens, authorization headers, Git credential
@@ -388,8 +390,12 @@ unrelated controlled host is reachable without a domain rule and no protected
 credential reaches it. Do not mistake a successful unrelated request for proof
 that credential capture/refresh still works; repeat the authenticated lifecycle.
 
-While a session is live, a second launch/reset/downgrade with its identity must
-fail. After stopping it, verify omission of `--protect-auth` fails, then run:
+After first login, launch a second protected session with the same `--auth-name`
+and a different `--name`; both Claude and GitHub must work concurrently. Repeat
+across projects and engines, verify distinct handles and cross-session handle
+rejection, then stop one session and confirm the sibling still works. Reset,
+`--reset-auth` and downgrade must fail while any selected-identity session remains.
+After stopping all of them, verify omission of `--protect-auth` fails, then run:
 
 ```bash
 ./bin/enclave auth reset --backend docker --tool claude --auth-name broker-docker
@@ -397,7 +403,7 @@ fail. After stopping it, verify omission of `--protect-auth` fails, then run:
 ./bin/enclave auth downgrade --backend docker --tool claude --auth-name broker-docker
 ```
 
-The feature has a separate global identity. After its session has stopped:
+The feature has a separate global identity. After all sessions using it have stopped:
 
 ```bash
 ./bin/enclave auth reset --backend docker --feature github-cli

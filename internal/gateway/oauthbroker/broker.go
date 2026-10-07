@@ -309,6 +309,10 @@ func (b *Broker) commitToken(body []byte, pending *grant, refresh bool) (*http.R
 		if token.Organization == nil {
 			token.Organization = pending.Token.Organization
 		}
+	}
+	// Reauthentication of an uncertain grant must not silently switch the
+	// account behind handles already held by other sessions.
+	if refresh || pending.Generation != 0 {
 		if token.Account == nil || pending.Token.Account == nil || token.Organization == nil || pending.Token.Organization == nil || *token.Account != *pending.Token.Account || *token.Organization != *pending.Token.Organization {
 			return nil, ErrResponse
 		}

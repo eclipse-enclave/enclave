@@ -25,8 +25,9 @@ and handle registry are never workload-mounted. Protected runs use the
 integrity-pinned npm Claude **2.1.63**, independently of the normal client, with
 automatic updates disabled. Startup also requires a private readiness attestation
 from the initialized Claude/GitHub brokers before launching the workload; an
-older gateway image is rejected even with `--no-rebuild`. Rebuild that image by
-rerunning without `--no-rebuild`. This is an experimental implementation: Docker,
+older gateway image is rejected even with `--no-rebuild`. Stop existing protected
+sessions from older builds and rerun without `--no-rebuild` before sharing their
+identities with new sessions. This is an experimental implementation: Docker,
 rootless Podman, SELinux and real login/refresh remain **unverified**. Follow the
 [engine and human test plan](runtime/oauth-broker-verification.md).
 
@@ -47,9 +48,26 @@ Project/local Claude settings are not loaded by the pinned launcher; user
 settings and Enclave's validated settings overlay apply. Do not expect
 `continue`/`resume` to recover a previous protected session's conversation.
 
-Only one session may use a protected identity at a time, across projects and
-engines. All installed engines must be inspectable; an unavailable daemon
-causes a refusal rather than an assumption that the identity is unused.
+Multiple protected sessions can share the same Claude identity and GitHub feature
+identity across projects and Docker/Podman. Each session gets independent handles,
+native views and a gateway; the gateways serialize grant updates using the same
+host identity lock and read the latest committed tokens. Ending one session does
+not invalidate its siblings. Reset, `--reset-auth` and downgrade require **all**
+sessions using the selected identity to have ended. Ordinary/raw credential mounts
+remain forbidden.
+
+For a fresh identity, complete its first login before launching additional sessions
+so their native views start authenticated. Then reuse the same `--auth-name`, using
+`--name` to distinguish sessions within a project:
+
+```bash
+enclave --tool claude --protect-auth --auth-scope shared --auth-name protected-test --name worker-a
+# In another terminal, after the first login:
+enclave --tool claude --protect-auth --auth-scope shared --auth-name protected-test --name worker-b
+```
+
+All installed engines must be inspectable; an unavailable daemon causes a refusal
+rather than an assumption that the identity is unused.
 Protected admission, reset and downgrade also require all of the invoking user's
 QEMU sessions to have ended, including preparation and host-side copy-back;
 QEMU has no reliable host-share inspection API. Process inspection must succeed
@@ -58,12 +76,13 @@ can still run concurrently. Detached CLI exit and proxy reload keep its reservat
 a new logical session gets new handles. `--allow-all-network` and unrestricted
 policies still keep the gateway for credential mediation. Unknown token
 schemas and uncertain refresh outcomes fail closed, without returning tokens.
-After an uncertain exchange, use normal login again or stop and reset the
-identity. Unexpected proxy death requires ending the session and starting anew.
+After an uncertain exchange, use normal login again with the same Claude account
+or stop all its sessions and reset the identity; reauthentication cannot switch
+the account behind sibling handles. Unexpected proxy death requires ending the session and starting anew.
 
 Saved identities remain protected when the flag is omitted: the launch fails
 with instructions to opt in again. To clear a grant without removing protection,
-stop its session and run:
+stop all sessions using it and run:
 
 ```bash
 enclave auth reset --tool claude --auth-scope shared --auth-name protected-test
@@ -118,14 +137,15 @@ Compatible existing files in Enclave's shared GitHub feature store can be
 enrolled while idle. This does not import the host's `~/.config/gh` automatically.
 Raw GitHub credential env variables and overrides of `GH_HOST`/`GH_CONFIG_DIR`
 conflict with the protected feature. The store is global across tools/projects,
-not selected by Claude's `--auth-name`, and permits one active session across
-Docker/Podman. Saved protection blocks later ordinary feature-auth mounts too.
+not selected by Claude's `--auth-name`, and supports concurrent protected sessions
+across Docker/Podman. Each keeps its own handle/config view; account-token updates
+are shared without overwriting sibling views. Saved protection blocks later ordinary feature-auth mounts too.
 If gateway startup rejects an incompatible native store, protection remains and
 the original files are retained. Back up wanted logins on the host, then correct
 unsupported hosts/schema in that private store before retrying. Reset is not a
 non-destructive rollback: it deletes those original logins and preferences.
 
-After stopping the owner, manage this separate identity with:
+After stopping all sessions using GitHub, manage this separate identity with:
 
 ```bash
 enclave auth reset --feature github-cli

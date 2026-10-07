@@ -214,6 +214,11 @@ func (b *Broker) readGrant() (*grant, error) {
 	if g.Status == "ready" && (g.Generation == 0 || g.CommittedAt.Unix() <= 0 || g.ExpiresAt <= g.CommittedAt.Unix() || g.ExpiresAt-g.CommittedAt.Unix() != g.Token.Expires || validateToken(g.Token, true) != nil) {
 		return nil, ErrState
 	}
+	// Another live gateway may have renamed a grant but lost its directory
+	// fsync acknowledgement. Fence shared state before releasing any credential.
+	if err := util.SyncDir(b.config.StoreDir); err != nil {
+		return nil, ErrState
+	}
 	return &g, nil
 }
 

@@ -51,7 +51,6 @@ func TestProtectedIdentityConcurrentAdmissionAndVerifiedRelease(t *testing.T) {
 		t.Fatal(err)
 	}
 	var admitted atomic.Int32
-	var winner IdentityReservation
 	var wg sync.WaitGroup
 	for i := range 12 {
 		wg.Add(1)
@@ -62,19 +61,19 @@ func TestProtectedIdentityConcurrentAdmissionAndVerifiedRelease(t *testing.T) {
 				owner.Engine = backend.NamePodman
 			}
 			if err := ReserveIdentity(home, dir, owner); err == nil {
-				winner = owner
 				admitted.Add(1)
 			}
 		}()
 	}
 	wg.Wait()
-	if admitted.Load() != 1 {
-		t.Fatalf("admitted %d concurrent owners, want exactly one", admitted.Load())
+	if admitted.Load() != 12 {
+		t.Fatalf("admitted %d concurrent owners, want twelve", admitted.Load())
 	}
 	state, err := readIdentityState(home, dir)
-	if err != nil || len(state.Reservations) != 1 || state.Reservations[0] != winner {
-		t.Fatalf("durable reservation = %+v, %v", state, err)
+	if err != nil || len(state.Reservations) != 12 {
+		t.Fatalf("durable reservations = %+v, %v", state, err)
 	}
+	winner := state.Reservations[0]
 	// Opening the state again (as after detached CLI exit or proxy reload)
 	// leaves admission fenced. A different incarnation cannot release it.
 	wrong := winner
@@ -91,11 +90,22 @@ func TestProtectedIdentityConcurrentAdmissionAndVerifiedRelease(t *testing.T) {
 			t.Fatal("released owner without verified session end")
 		}
 	}
-	if err := ReserveIdentity(home, dir, testIdentityOwner(backend.NamePodman, "n", true)); err == nil {
-		t.Fatal("reservation was lost across failed verification")
+	if err := RequireIdentityReservation(home, dir, winner); err != nil {
+		t.Fatalf("reservation lost across failed verification: %v", err)
+	}
+	if err := ReserveIdentity(home, dir, winner); err == nil {
+		t.Fatal("duplicate session admitted")
 	}
 	if err := ReleaseIdentity(home, dir, winner, func(IdentityReservation) (bool, error) { return true, nil }); err != nil {
 		t.Fatal(err)
+	}
+	if err := RequireIdentityReservation(home, dir, winner); err == nil {
+		t.Fatal("ended reservation survived")
+	}
+	for _, sibling := range state.Reservations[1:] {
+		if err := RequireIdentityReservation(home, dir, sibling); err != nil {
+			t.Fatalf("sibling reservation lost: %v", err)
+		}
 	}
 	if err := ReserveIdentity(home, dir, testIdentityOwner(backend.NamePodman, "n", true)); err != nil {
 		t.Fatalf("new logical session: %v", err)

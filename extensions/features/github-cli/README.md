@@ -41,10 +41,11 @@ responses and unsupported native/token schemas are not supported. Existing
 compatible native feature credentials are consumed
 by the gateway without exposing them in the projected view.
 
-The shared feature identity permits one active session across tools, projects
-and Docker/Podman. New sessions receive fresh handles; proxy reload preserves
-current ones. Saved protection persists when the flag is omitted. After stopping
-the owner, `enclave auth reset --feature github-cli` clears its grant and native
+The shared feature identity supports concurrent protected sessions across projects
+and Docker/Podman, independently of Claude's auth name. Each has separate handles
+and a native view; gateway grant updates use a common identity lock. New sessions
+receive fresh handles; proxy reload preserves current ones. Saved protection
+persists when the flag is omitted. After stopping every session using the identity, `enclave auth reset --feature github-cli` clears its grant and native
 source files, including `config.yml` preferences, without removing protection;
 an explicit `enclave auth downgrade --feature github-cli`
 requires the identity to be idle and empty.

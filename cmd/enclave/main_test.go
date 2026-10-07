@@ -10,20 +10,17 @@
 package main
 
 import (
-	"fmt"
 	"io"
-	"io/fs"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"testing"
-	"time"
 
 	"enclave/internal/app"
 	"enclave/internal/appassets"
 	"enclave/internal/config"
 	"enclave/internal/model"
+	"enclave/internal/testutil"
 )
 
 // Completion runs before the root guard, so it must not extract the embedded
@@ -52,14 +49,14 @@ func TestCompletionDoesNotExtractEmbeddedAssets(t *testing.T) {
 
 	assertCompletions := func(stage string) {
 		t.Helper()
-		before := pinTree(t, home)
+		before := testutil.PinTree(t, home)
 		if out := complete(t, "run", "--tool", ""); !strings.Contains(out, "claude\n") || !strings.Contains(out, "my-tool\n") {
 			t.Errorf("%s: --tool did not list built-in and user tools: %q", stage, out)
 		}
 		if out := complete(t, "tools", "remove", ""); strings.Contains(out, "claude\n") || !strings.Contains(out, "my-tool\n") {
 			t.Errorf("%s: tools remove did not list only the user tool: %q", stage, out)
 		}
-		assertTreeUnchanged(t, home, before)
+		testutil.AssertTreeUnchanged(t, home, before)
 	}
 
 	assertCompletions("before extraction")
@@ -98,73 +95,4 @@ func complete(t *testing.T, args ...string) string {
 		t.Fatalf("completion returned %d: %s", code, out)
 	}
 	return string(out)
-}
-
-// pinTree backdates every entry under root and returns a snapshot of the tree.
-// Creating or removing an entry updates its directory's mtime, so a later
-// snapshot also exposes writes that were undone again, such as a writability
-// probe.
-func pinTree(t *testing.T, root string) map[string]string {
-	t.Helper()
-	pinned := time.Date(2001, time.January, 1, 0, 0, 0, 0, time.UTC)
-	err := filepath.WalkDir(root, func(path string, _ fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		return os.Chtimes(path, pinned, pinned)
-	})
-	if err != nil {
-		t.Fatalf("pin %s: %v", root, err)
-	}
-	return snapshotTree(t, root)
-}
-
-func snapshotTree(t *testing.T, root string) map[string]string {
-	t.Helper()
-	snapshot := map[string]string{}
-	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		info, err := entry.Info()
-		if err != nil {
-			return err
-		}
-		rel, err := filepath.Rel(root, path)
-		if err != nil {
-			return err
-		}
-		snapshot[rel] = fmt.Sprintf("%v %d %s", info.Mode(), info.Size(), info.ModTime().UTC().Format(time.RFC3339Nano))
-		return nil
-	})
-	if err != nil {
-		t.Fatalf("snapshot %s: %v", root, err)
-	}
-	return snapshot
-}
-
-func assertTreeUnchanged(t *testing.T, root string, before map[string]string) {
-	t.Helper()
-	after := snapshotTree(t, root)
-	var changes []string
-	for path, state := range after {
-		if was, ok := before[path]; !ok {
-			changes = append(changes, path+" was created")
-		} else if was != state {
-			changes = append(changes, fmt.Sprintf("%s changed: %s -> %s", path, was, state))
-		}
-	}
-	for path := range before {
-		if _, ok := after[path]; !ok {
-			changes = append(changes, path+" was removed")
-		}
-	}
-	if len(changes) == 0 {
-		return
-	}
-	sort.Strings(changes)
-	if len(changes) > 5 {
-		changes = append(changes[:5], fmt.Sprintf("and %d more", len(changes)-5))
-	}
-	t.Errorf("%s was written to:\n%s", root, strings.Join(changes, "\n"))
 }

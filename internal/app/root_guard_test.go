@@ -9,20 +9,17 @@ package app
 
 import (
 	"encoding/json"
-	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
 	"slices"
-	"sort"
 	"strings"
 	"testing"
-	"time"
 
 	"enclave/internal/config"
 	"enclave/internal/extinstall"
 	"enclave/internal/model"
+	"enclave/internal/testutil"
 )
 
 // setRunningAsRoot pins the root check. Tests using it must not run in
@@ -109,75 +106,6 @@ func TestRootAllowed(t *testing.T) {
 	}
 }
 
-// pinTree backdates every entry under root and returns a snapshot of the tree.
-// Creating or removing an entry updates its directory's mtime, so a later
-// snapshot also exposes writes that were undone again, such as a writability
-// probe.
-func pinTree(t *testing.T, root string) map[string]string {
-	t.Helper()
-	pinned := time.Date(2001, time.January, 1, 0, 0, 0, 0, time.UTC)
-	err := filepath.WalkDir(root, func(path string, _ fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		return os.Chtimes(path, pinned, pinned)
-	})
-	if err != nil {
-		t.Fatalf("pin %s: %v", root, err)
-	}
-	return snapshotTree(t, root)
-}
-
-func snapshotTree(t *testing.T, root string) map[string]string {
-	t.Helper()
-	snapshot := map[string]string{}
-	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		info, err := entry.Info()
-		if err != nil {
-			return err
-		}
-		rel, err := filepath.Rel(root, path)
-		if err != nil {
-			return err
-		}
-		snapshot[rel] = fmt.Sprintf("%v %d %s", info.Mode(), info.Size(), info.ModTime().UTC().Format(time.RFC3339Nano))
-		return nil
-	})
-	if err != nil {
-		t.Fatalf("snapshot %s: %v", root, err)
-	}
-	return snapshot
-}
-
-func assertTreeUnchanged(t *testing.T, root string, before map[string]string) {
-	t.Helper()
-	after := snapshotTree(t, root)
-	var changes []string
-	for path, state := range after {
-		if was, ok := before[path]; !ok {
-			changes = append(changes, path+" was created")
-		} else if was != state {
-			changes = append(changes, fmt.Sprintf("%s changed: %s -> %s", path, was, state))
-		}
-	}
-	for path := range before {
-		if _, ok := after[path]; !ok {
-			changes = append(changes, path+" was removed")
-		}
-	}
-	if len(changes) == 0 {
-		return
-	}
-	sort.Strings(changes)
-	if len(changes) > 5 {
-		changes = append(changes[:5], fmt.Sprintf("and %d more", len(changes)-5))
-	}
-	t.Errorf("%s was written to:\n%s", root, strings.Join(changes, "\n"))
-}
-
 func TestRunRefusesRootBeforeWritingState(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("HOME does not select the home directory on Windows")
@@ -193,7 +121,7 @@ func TestRunRefusesRootBeforeWritingState(t *testing.T) {
 	writeUserScript(t, commandsDir, "deploy", "#!/bin/sh\nexit 0\n")
 
 	for _, args := range [][]string{{"ps"}, {"deploy"}} {
-		before := pinTree(t, home)
+		before := testutil.PinTree(t, home)
 		var code int
 		stdout, stderr := captureOutput(t, func() { code = Run(args) })
 		if code != 1 {
@@ -205,7 +133,7 @@ func TestRunRefusesRootBeforeWritingState(t *testing.T) {
 		if !strings.Contains(stderr, "refusing to run as root") {
 			t.Errorf("Run(%q): expected the refusal on stderr, got %q", args, stderr)
 		}
-		assertTreeUnchanged(t, home, before)
+		testutil.AssertTreeUnchanged(t, home, before)
 	}
 }
 
@@ -240,7 +168,7 @@ func TestRunExemptPathsWriteNothingAsRoot(t *testing.T) {
 		{"__complete", "tools", "remove", ""},
 	} {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
-			before := pinTree(t, home)
+			before := testutil.PinTree(t, home)
 			var code int
 			stdout, _ := captureOutput(t, func() { code = Run(args) })
 			if code != 0 {
@@ -249,7 +177,7 @@ func TestRunExemptPathsWriteNothingAsRoot(t *testing.T) {
 			if slices.Contains(args, "--tool") && !strings.Contains(stdout, "claude") {
 				t.Errorf("tool completion did not list claude: %q", stdout)
 			}
-			assertTreeUnchanged(t, home, before)
+			testutil.AssertTreeUnchanged(t, home, before)
 		})
 	}
 }
@@ -261,14 +189,14 @@ func TestRunRootRefusalKeepsExtensionJSONEnvelope(t *testing.T) {
 	setRunningAsRoot(t, true)
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	before := pinTree(t, home)
+	before := testutil.PinTree(t, home)
 
 	var code int
 	stdout, _ := captureOutput(t, func() { code = Run([]string{"tools", "add", "owner/repo", "--yes", "--json"}) })
 	if code == 0 {
 		t.Fatal("expected a non-zero exit code")
 	}
-	assertTreeUnchanged(t, home, before)
+	testutil.AssertTreeUnchanged(t, home, before)
 	var envelope struct {
 		SchemaVersion string                    `json:"schemaVersion"`
 		Results       []extinstall.ActionResult `json:"results"`

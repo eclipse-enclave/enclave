@@ -153,6 +153,7 @@ The restricted network request flow has a separate
 - [`internal/util/util.go`](../internal/util/util.go) provides hashing, path checks, and string helpers.
 - [`internal/envflag/`](../internal/envflag/) parses on/off environment switches such as `ENCLAVE_ALLOW_ROOT`. The Windows launcher imports it too, so it depends on the standard library only.
 - [`internal/logx/logx.go`](../internal/logx/logx.go) provides structured logging with color output and a debug level.
+- [`internal/testutil/`](../internal/testutil/) holds test helpers shared across packages, such as the tree snapshots that catch writes to a temporary HOME.
 - [`internal/usercmd/usercmd.go`](../internal/usercmd/usercmd.go) discovers user-defined subcommands dropped into `~/.config/enclave/commands/{host,session}/`, plus the `commands/host/` directory of every installed extension (executable files become `enclave <name>` verbs). Discovered names are intercepted in `cli.Parse` before Cobra/`normalizeArgs` (see the User-defined subcommands concept below); built-ins always win.
 
 ### Container Assets

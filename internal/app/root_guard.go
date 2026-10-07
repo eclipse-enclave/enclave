@@ -12,6 +12,7 @@ import (
 	"os"
 	"strings"
 
+	"enclave/internal/envflag"
 	"enclave/internal/logx"
 	"enclave/internal/model"
 )
@@ -26,7 +27,7 @@ var runningAsRoot = func() bool {
 // --allow-root or ENCLAVE_ALLOW_ROOT. There is deliberately no config key, so
 // neither global nor project config can grant it.
 func rootAllowed(flag bool) bool {
-	return flag || envTruthy(os.LookupEnv(model.EnvAllowRoot))
+	return flag || envflag.Truthy(os.LookupEnv(model.EnvAllowRoot))
 }
 
 // checkRootGuard refuses to run as root unless allowed. As root the image would
@@ -55,16 +56,4 @@ func rootRefusal() error {
 	return fmt.Errorf("refusing to run as root: the agent would run as UID 0, which is host root on bind-mounted directories under rootful Docker, and files Enclave writes would be owned by root. %s "+
 		"To use Docker without sudo, add your user to the docker group and sign in again (see https://docs.docker.com/engine/install/linux-postinstall/), or use rootless podman with --backend podman. "+
 		"Pass --allow-root or set %s=1 to skip this check", who, model.EnvAllowRoot)
-}
-
-func envTruthy(value string, set bool) bool {
-	if !set {
-		return false
-	}
-	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "1", "true", "yes", "on":
-		return true
-	default:
-		return false
-	}
 }

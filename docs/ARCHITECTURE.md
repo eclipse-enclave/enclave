@@ -146,11 +146,12 @@ The restricted network request flow has a separate
 - [`internal/devcontainer/`](../internal/devcontainer/) generates `devcontainer.json` configurations for devcontainer mode.
 
 ### Windows Launcher
-- [`internal/wslshim/`](../internal/wslshim/) implements the Windows launcher end to end: it classifies the Windows working directory into a distribution and a Linux path, resolves the Linux `enclave` binary through one preflight round trip, builds the Windows command line itself so free-form arguments survive `wsl.exe`'s re-parsing, constructs `WSLENV` for the variables it forwards, and propagates the child's exit code. It depends only on the standard library and `golang.org/x/sys/windows` plus `mpr.dll`, and only the two drive-letter queries (`GetDriveType` and `WNetGetConnection`, both behind one-method seams) touch Win32, so the rest is host-independent and tested on Linux.
+- [`internal/wslshim/`](../internal/wslshim/) implements the Windows launcher end to end: it classifies the Windows working directory into a distribution and a Linux path, resolves the Linux `enclave` binary through one preflight round trip, builds the Windows command line itself so free-form arguments survive `wsl.exe`'s re-parsing, constructs `WSLENV` for the variables it forwards, and propagates the child's exit code. It depends only on the standard library, the standard-library-only [`internal/envflag/`](../internal/envflag/), and `golang.org/x/sys/windows` plus `mpr.dll`, and only the two drive-letter queries (`GetDriveType` and `WNetGetConnection`, both behind one-method seams) touch Win32, so the rest is host-independent and tested on Linux.
 
 ### Shared Types and Utilities
 - [`internal/model/types.go`](../internal/model/types.go) defines core types and constants used across packages.
 - [`internal/util/util.go`](../internal/util/util.go) provides hashing, path checks, and string helpers.
+- [`internal/envflag/`](../internal/envflag/) parses on/off environment switches such as `ENCLAVE_ALLOW_ROOT`. The Windows launcher imports it too, so it depends on the standard library only.
 - [`internal/logx/logx.go`](../internal/logx/logx.go) provides structured logging with color output and a debug level.
 - [`internal/usercmd/usercmd.go`](../internal/usercmd/usercmd.go) discovers user-defined subcommands dropped into `~/.config/enclave/commands/{host,session}/`, plus the `commands/host/` directory of every installed extension (executable files become `enclave <name>` verbs). Discovered names are intercepted in `cli.Parse` before Cobra/`normalizeArgs` (see the User-defined subcommands concept below); built-ins always win.
 

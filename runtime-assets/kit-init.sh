@@ -9,8 +9,8 @@
 # Shared init-file helpers for enclave entrypoints.
 #
 # Honors spec.yaml `commands.initFiles`: seed a config file at container start,
-# with a fixed ${WORKDIR}/${HOME}/${USER} substitution whitelist (WORKDIR maps
-# to $PROJECT_DIR). Variables outside the whitelist are left literal.
+# with a fixed ${WORKDIR}/${HOME}/${USER} substitution allowlist (WORKDIR maps
+# to $PROJECT_DIR). Variables outside the allowlist are left literal.
 #
 # Sourced by entrypoint.sh; kept POSIX-sh compatible. Locals are _kit_-prefixed
 # to avoid clobbering the sourcing shell.
@@ -26,9 +26,9 @@ enclave_write_init_file() {
     _kit_mode="$2"
     _kit_only_if_missing="$3"
 
-    # Resolve the whitelist in the path argument. The subshell reads the printf
+    # Resolve the allowlist in the path argument. The subshell reads the printf
     # pipe, not the function's stdin (which is reserved for the content).
-    # The single-quoted list is the envsubst whitelist; it must stay unexpanded.
+    # The single-quoted list is the envsubst allowlist; it must stay unexpanded.
     # shellcheck disable=SC2016
     _kit_resolved="$(printf '%s' "$_kit_path" | WORKDIR="${PROJECT_DIR:-}" envsubst '${WORKDIR} ${HOME} ${USER}')"
 
@@ -55,7 +55,7 @@ enclave_write_init_file() {
         return 0
     fi
 
-    # Substitute the whitelist into the content streamed on stdin.
+    # Substitute the allowlist into the content streamed on stdin.
     # shellcheck disable=SC2016
     if ! WORKDIR="${PROJECT_DIR:-}" envsubst '${WORKDIR} ${HOME} ${USER}' > "$_kit_resolved" 2>/dev/null; then
         _kit_log "enclave: failed to write init file $_kit_resolved; skipping"

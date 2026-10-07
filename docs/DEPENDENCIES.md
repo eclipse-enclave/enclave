@@ -3,6 +3,9 @@
 This document lists the **direct** Go module dependencies declared in `go.mod`.
 Indirect dependencies are pulled in transitively and are not listed here.
 
+For the Dash license-check inventory of Go and website dependencies, see the
+repository-root [DEPENDENCIES](../DEPENDENCIES).
+
 ## Direct Go Dependencies
 
 | Module | Version | Purpose |

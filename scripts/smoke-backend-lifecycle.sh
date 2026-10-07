@@ -58,13 +58,13 @@ H1=$(hash_for "$P1")
 [ -n "$H1" ] || fail "could not resolve project hash for $P1"
 STATE_ROOT="${XDG_STATE_HOME:-$HOME/.local/state}/enclave"
 ENV1="$STATE_ROOT/projects/${H1}/claude/env"
-AUTH="$STATE_ROOT/tools/claude/auth"
+AUTH="$STATE_ROOT/tools/claude/auth/default"
 GHAUTH="$STATE_ROOT/features/github-cli/auth"
 
-step_sanity() {
-  out=$(run_tty "$P1" shell --allow-all-network -- -c 'echo smoke-sanity-ok')
-  echo "$out" | grep -q smoke-sanity-ok || fail "sanity: shell run did not echo (output: $out)"
-  pass "sanity foreground shell run"
+step_baseline() {
+  out=$(run_tty "$P1" shell --allow-all-network -- -c 'echo smoke-baseline-ok')
+  echo "$out" | grep -q smoke-baseline-ok || fail "baseline: shell run did not echo (output: $out)"
+  pass "baseline foreground shell run"
 }
 
 step_fg_auth_sync() {
@@ -202,7 +202,7 @@ step_restricted_network() {
   pass "restricted networking enforced through the gateway"
 }
 
-ALL="sanity fg_auth_sync cross_project bg_stop_finalize exec_sync ps persisted_env reset_auth ephemeral restart_stopped network_status restricted_network"
+ALL="baseline fg_auth_sync cross_project bg_stop_finalize exec_sync ps persisted_env reset_auth ephemeral restart_stopped network_status restricted_network"
 steps=${*:-$ALL}
 for s in $steps; do
   echo "=== step: $s ==="

@@ -18,7 +18,7 @@
 - [DEV.md](DEV.md) — Build, package, test, generation, and contribution workflow
 - [extensions/README.md](extensions/README.md) — Tool and feature extension architecture
 - [extensions/adding-a-tool.md](extensions/adding-a-tool.md) — Adding a tool extension
-- [DEPENDENCIES.md](DEPENDENCIES.md) — Direct Go module dependencies
+- [DEPENDENCIES.md](DEPENDENCIES.md) — Direct Go module dependencies and their purpose; [Dash inventory](../DEPENDENCIES) — Go and website dependency license checks
 
 ## Runtime Internals
 

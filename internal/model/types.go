@@ -710,7 +710,7 @@ const (
 	CommandsSessionDirName = "session"
 )
 
-// The envsubst whitelist runtime-assets/kit-init.sh applies to an initFiles
+// The envsubst allowlist runtime-assets/kit-init.sh applies to an initFiles
 // path: WORKDIR is bound to the project directory, while HOME and USER come
 // from the container environment. A variable outside this set is left literal,
 // so it resolves like any other path segment.
@@ -720,7 +720,7 @@ const (
 	KitInitUserVar    = "USER"
 )
 
-// KitInitSubstitutedVars is the whole whitelist, in the order kit-init.sh
+// KitInitSubstitutedVars is the whole allowlist, in the order kit-init.sh
 // passes it to envsubst.
 var KitInitSubstitutedVars = []string{KitInitWorkdirVar, KitInitHomeVar, KitInitUserVar}
 

@@ -62,8 +62,7 @@ func TestOriginRoundTrip(t *testing.T) {
 	}
 	if got == nil {
 		t.Fatal("readOrigin returned nil for a written sidecar")
-	}
-	if *got != want {
+	} else if *got != want {
 		t.Fatalf("round trip mismatch:\n got %+v\nwant %+v", *got, want)
 	}
 }

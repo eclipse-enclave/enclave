@@ -11,6 +11,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	"enclave/internal/envflag"
 )
 
 // Environment variables the launcher itself interprets. They are Windows-side
@@ -141,7 +143,7 @@ func driveTarget(path string, env lookupFunc, driveType driveTyper, resolveDrive
 		return remoteDriveTarget(path, env, resolveDrive)
 	}
 
-	if !truthy(env(envAllowWindowsPath)) {
+	if !envflag.Truthy(env(envAllowWindowsPath)) {
 		return target{}, fmt.Errorf("the current directory %q is on a Windows drive. Enclave would have "+
 			"to mount it through /mnt/%s, where every file access crosses the WSL interop layer and is "+
 			"markedly slower. Move the project into the distribution's filesystem (for example under ~/) "+
@@ -303,16 +305,4 @@ func trimEmpty(path string) string {
 		return ""
 	}
 	return path
-}
-
-func truthy(value string, set bool) bool {
-	if !set {
-		return false
-	}
-	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "1", "true", "yes", "on":
-		return true
-	default:
-		return false
-	}
 }

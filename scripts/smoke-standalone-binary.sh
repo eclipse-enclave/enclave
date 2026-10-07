@@ -41,6 +41,28 @@ touch "$legacy/.dockerignore" "$legacy/Dockerfile" \
     "$legacy/Dockerfile.gateway" "$legacy/entrypoint.sh" \
     "$legacy/gateway-entrypoint.sh"
 
+# Shell completion runs before the root guard, so it must never extract the
+# assets; until another command has, it lists tools from the binary.
+complete_tool() {
+    (
+        cd "$sandbox/cwd"
+        HOME="$sandbox/home" \
+            XDG_CONFIG_HOME="$sandbox/config" \
+            XDG_STATE_HOME="$sandbox/state" \
+            XDG_CACHE_HOME="$sandbox/cache" \
+            XDG_DATA_HOME="$sandbox/data" \
+            "$sandbox/run/enclave" __complete run --tool ""
+    )
+}
+if ! grep -qx claude <<<"$(complete_tool)"; then
+    echo "completion did not list tools before the assets were extracted" >&2
+    exit 1
+fi
+if [ -e "$assets" ]; then
+    printf 'completion extracted the embedded assets to %s\n' "$assets" >&2
+    exit 1
+fi
+
 pids=()
 for _ in $(seq 1 8); do
     (
@@ -83,6 +105,11 @@ test -x "$root/gateway-entrypoint.sh"
 test -x "$root/runtime-assets/build-scripts/bin/enclave-install-tool"
 test ! -e "$root/AGENTS.md"
 test ! -e "$root/CLAUDE.md"
+
+if ! grep -qx claude <<<"$(complete_tool)"; then
+    echo "completion did not list tools from the extracted assets" >&2
+    exit 1
+fi
 
 rm "$root/docs/README.md"
 (

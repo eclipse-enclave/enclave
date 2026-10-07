@@ -37,9 +37,11 @@ func TestDiscoverAppRootDoesNotUseLegacyDataRoot(t *testing.T) {
 		t.Fatalf("test legacy root is invalid: %v", err)
 	}
 
-	root, err := discoverAppRoot()
-	if err == nil && root == legacyRoot {
-		t.Fatalf("discoverAppRoot returned legacy root %q", root)
+	for _, readOnly := range []bool{false, true} {
+		root, err := discoverAppRoot(readOnly)
+		if err == nil && root == legacyRoot {
+			t.Fatalf("discoverAppRoot(%v) returned legacy root %q", readOnly, root)
+		}
 	}
 }
 
@@ -293,6 +295,45 @@ func TestExtractAppAssetsRepairsPrunedCacheEntry(t *testing.T) {
 	}
 	if string(content) != "content" {
 		t.Fatalf("restored content = %q, want %q", content, "content")
+	}
+}
+
+func TestFindAppAssetsNeverWrites(t *testing.T) {
+	files := testAppAssets("content")
+	key, err := appassets.ContentHash(files)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cacheRoot := filepath.Join(t.TempDir(), "cache")
+
+	if _, err := findAppAssets(files, key, cacheRoot); err == nil {
+		t.Fatal("found assets in an empty cache")
+	}
+	if _, err := os.Lstat(cacheRoot); !os.IsNotExist(err) {
+		t.Fatalf("lookup created the cache root: %v", err)
+	}
+
+	root, err := extractAppAssets(files, key, cacheRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found, err := findAppAssets(files, key, cacheRoot)
+	if err != nil {
+		t.Fatalf("find extracted assets: %v", err)
+	}
+	if found != root {
+		t.Fatalf("found root = %q, want %q", found, root)
+	}
+
+	pruned := filepath.Join(root, "docs", "README.md")
+	if err := os.Remove(pruned); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := findAppAssets(files, key, cacheRoot); err == nil {
+		t.Fatal("accepted a pruned cache entry")
+	}
+	if _, err := os.Lstat(pruned); !os.IsNotExist(err) {
+		t.Fatalf("lookup repaired the pruned cache entry: %v", err)
 	}
 }
 

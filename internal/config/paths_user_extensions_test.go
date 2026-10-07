@@ -25,7 +25,7 @@ func TestResolveUserExtensionPathsIndependentOfDisk(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
 
 	var paths model.Paths
-	resolveUserExtensionPaths(&paths)
+	resolveUserExtensionPaths(&paths, home)
 
 	want := HostExtensionsDir(home)
 	if paths.UserExtensionsDir != want {

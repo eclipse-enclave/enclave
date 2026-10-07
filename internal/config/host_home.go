@@ -12,11 +12,26 @@ import (
 	"os"
 	"os/user"
 	"strings"
+
+	"enclave/internal/util"
 )
 
 // ResolveHostHome returns the best-effort home directory for host paths.
 // It prefers the HOME-derived path if writable, otherwise falls back to the user database.
 func ResolveHostHome() (string, error) {
+	return resolveHostHome(false)
+}
+
+// ResolveHostHomeReadOnly is ResolveHostHome for code that must not write, such
+// as everything that runs before the root guard. It judges writability from
+// permissions instead of creating a probe file, so it picks the same home as
+// ResolveHostHome unless creating a file fails for reasons access(2) does not
+// see, such as a full disk.
+func ResolveHostHomeReadOnly() (string, error) {
+	return resolveHostHome(true)
+}
+
+func resolveHostHome(readOnly bool) (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", err
@@ -28,13 +43,23 @@ func ResolveHostHome() (string, error) {
 	primary := strings.TrimSpace(home)
 	fallback := strings.TrimSpace(current.HomeDir)
 
-	if primary != "" && IsWritableDir(primary) {
+	usable := IsWritableDir
+	if readOnly {
+		usable = looksWritableDir
+	}
+	if primary != "" && usable(primary) {
 		return primary, nil
 	}
-	if fallback != "" && fallback != primary && IsWritableDir(fallback) {
+	if fallback != "" && fallback != primary && usable(fallback) {
 		return fallback, nil
 	}
 	return "", homeNotWritableError(primary, fallback)
+}
+
+// looksWritableDir reports whether path is a directory the process may create
+// files in, judged from permissions alone so that nothing is written.
+func looksWritableDir(path string) bool {
+	return util.IsDir(path) && accessAllowsCreate(path)
 }
 
 // IsWritableDir reports whether the directory exists and is writable.

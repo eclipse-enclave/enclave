@@ -118,7 +118,19 @@ jobs:
           rpm --query enclave
           docker --version
           docker buildx version
-          enclave tools >/dev/null
+          # The job container runs as root, which enclave refuses without an opt-in.
+          if output=$(env -u ENCLAVE_ALLOW_ROOT enclave tools 2>&1); then
+            echo "enclave ran as root without --allow-root" >&2
+            exit 1
+          fi
+          case "$output" in
+            *"refusing to run as root"*) ;;
+            *)
+              printf 'unexpected failure as root:\n%s\n' "$output" >&2
+              exit 1
+              ;;
+          esac
+          enclave --allow-root tools >/dev/null
           dnf remove -y enclave
           test ! -e /usr/bin/enclave
           test ! -e /usr/share/enclave

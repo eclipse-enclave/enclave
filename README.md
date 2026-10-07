@@ -61,6 +61,10 @@ sudo gpasswd -a "$USER" docker
 See Docker's [Linux post-install instructions](https://docs.docker.com/engine/install/linux-postinstall/)
 and account for the group's root-equivalent privileges.
 
+Run enclave as that regular user, not through `sudo`: enclave refuses to run as
+root unless you pass `--allow-root` or set `ENCLAVE_ALLOW_ROOT=1` (see
+[Running as root](docs/cli-reference.md#running-as-root)).
+
 On macOS, install Docker Desktop and the source-build dependencies above.
 
 ## Installation
@@ -122,7 +126,9 @@ artifact with `curl` or `gh release download` avoids it entirely, which is why
 the command above tolerates its absence.
 
 The binary includes the Dockerfiles, extensions, documentation, and other
-runtime assets. It extracts its assets on first use.
+runtime assets. It extracts its assets on first use. Shell completion never
+extracts them; until another command has, it reads tool and feature names from
+the binary.
 
 ### From source
 

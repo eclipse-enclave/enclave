@@ -57,6 +57,20 @@ func Run(args []string) int {
 		return 0
 	}
 
+	// Everything above (user command discovery, parsing, help, version, and
+	// completion) only reads. Anything that writes state (the tool question,
+	// asset extraction, stores) comes after the guard, so a refused root run
+	// leaves no root-owned files. Folding the env opt-in into the options
+	// gives host user commands one value to pass on.
+	parsed.Options.AllowRoot = rootAllowed(parsed.Options.AllowRoot)
+	if err := checkRootGuard(parsed.Options.AllowRoot); err != nil {
+		if parsed.Action == cli.ActionExtensionManage && parsed.ExtRequest != nil {
+			return reportExtensionResults(*parsed.ExtRequest, nil, err)
+		}
+		logx.Errorf("%v", err)
+		return 1
+	}
+
 	projectDir, err := resolveProjectDir()
 	if err != nil {
 		logx.Errorf("%v", err)
@@ -84,7 +98,7 @@ func Run(args []string) int {
 			if parsed.Options.Verbose {
 				logx.SetLevel("debug")
 			}
-			return runUserHostCommand(*parsed.UserCommand, parsed.UserCommandArgs, projectDir, home)
+			return runUserHostCommand(*parsed.UserCommand, parsed.UserCommandArgs, projectDir, home, parsed.Options.AllowRoot)
 		case usercmd.TargetSession:
 			// Session commands run through the standard run pipeline as a
 			// shell-style execution; fall through with a rewritten action.
@@ -183,9 +197,10 @@ func Run(args []string) int {
 
 // discoverUserCommands scans the host command directories best-effort. If home
 // cannot be resolved, discovery is skipped (commands that never needed home
-// keep working) and warnings from discovery are logged immediately.
+// keep working) and warnings from discovery are logged immediately. It runs
+// before the root guard, so it resolves home without the write probe.
 func discoverUserCommands() []usercmd.Command {
-	home, err := config.ResolveHostHome()
+	home, err := config.ResolveHostHomeReadOnly()
 	if err != nil {
 		logx.Debugf("skipping user command discovery: %v", err)
 		return nil

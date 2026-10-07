@@ -98,6 +98,7 @@ The restricted network request flow has a separate
 
 ### Orchestration (`internal/app/`)
 - [`internal/app/app.go`](../internal/app/app.go) wires parsing, defaults merging, and command dispatch.
+- [`internal/app/root_guard.go`](../internal/app/root_guard.go) refuses to run as root before any state is written, unless `--allow-root` or `ENCLAVE_ALLOW_ROOT` opts in.
 - [`internal/app/commands.go`](../internal/app/commands.go) routes commands to handlers (run/continue/resume/exec/shell/cleanup/tools/etc).
 - [`internal/app/command_run.go`](../internal/app/command_run.go) drives the run/continue/resume/exec/shell flow and runtime creation.
 - [`internal/app/build.go`](../internal/app/build.go) manages Docker image build/rebuild detection plus prebuild agent update planning and post-build stamp commits.
@@ -145,12 +146,14 @@ The restricted network request flow has a separate
 - [`internal/devcontainer/`](../internal/devcontainer/) generates `devcontainer.json` configurations for devcontainer mode.
 
 ### Windows Launcher
-- [`internal/wslshim/`](../internal/wslshim/) implements the Windows launcher end to end: it classifies the Windows working directory into a distribution and a Linux path, resolves the Linux `enclave` binary through one preflight round trip, builds the Windows command line itself so free-form arguments survive `wsl.exe`'s re-parsing, constructs `WSLENV` for the variables it forwards, and propagates the child's exit code. It depends only on the standard library and `golang.org/x/sys/windows` plus `mpr.dll`, and only the two drive-letter queries (`GetDriveType` and `WNetGetConnection`, both behind one-method seams) touch Win32, so the rest is host-independent and tested on Linux.
+- [`internal/wslshim/`](../internal/wslshim/) implements the Windows launcher end to end: it classifies the Windows working directory into a distribution and a Linux path, resolves the Linux `enclave` binary through one preflight round trip, builds the Windows command line itself so free-form arguments survive `wsl.exe`'s re-parsing, constructs `WSLENV` for the variables it forwards, and propagates the child's exit code. It depends only on the standard library, the standard-library-only [`internal/envflag/`](../internal/envflag/), and `golang.org/x/sys/windows` plus `mpr.dll`, and only the two drive-letter queries (`GetDriveType` and `WNetGetConnection`, both behind one-method seams) touch Win32, so the rest is host-independent and tested on Linux.
 
 ### Shared Types and Utilities
 - [`internal/model/types.go`](../internal/model/types.go) defines core types and constants used across packages.
 - [`internal/util/util.go`](../internal/util/util.go) provides hashing, path checks, and string helpers.
+- [`internal/envflag/`](../internal/envflag/) parses on/off environment switches such as `ENCLAVE_ALLOW_ROOT`. The Windows launcher imports it too, so it depends on the standard library only.
 - [`internal/logx/logx.go`](../internal/logx/logx.go) provides structured logging with color output and a debug level.
+- [`internal/testutil/`](../internal/testutil/) holds test helpers shared across packages, such as the tree snapshots that catch writes to a temporary HOME.
 - [`internal/usercmd/usercmd.go`](../internal/usercmd/usercmd.go) discovers user-defined subcommands dropped into `~/.config/enclave/commands/{host,session}/`, plus the `commands/host/` directory of every installed extension (executable files become `enclave <name>` verbs). Discovered names are intercepted in `cli.Parse` before Cobra/`normalizeArgs` (see the User-defined subcommands concept below); built-ins always win.
 
 ### Container Assets
@@ -210,7 +213,7 @@ Persistent stores are host directories under `~/.local/state/enclave/` (honoring
 
 Other host-side data:
 
-- **Embedded asset cache**: standalone binaries extract into `${XDG_CACHE_HOME:-~/.cache}/enclave/assets/<hash>/` on Linux or `~/Library/Caches/org.eclipse.enclave/assets/<hash>/` on macOS. Extraction uses a per-content lock, temporary sibling directory, and atomic rename so concurrent first runs share one complete entry. Missing or invalid entries are recreated from the binary.
+- **Embedded asset cache**: standalone binaries extract into `${XDG_CACHE_HOME:-~/.cache}/enclave/assets/<hash>/` on Linux or `~/Library/Caches/org.eclipse.enclave/assets/<hash>/` on macOS. Extraction uses a per-content lock, temporary sibling directory, and atomic rename so concurrent first runs share one complete entry. Missing or invalid entries are recreated from the binary. Shell completion runs before the root guard, so it never extracts: it uses an entry that is already published, or else reads the built-in extension names from the binary.
 - **Locks**: `~/.local/state/enclave/locks/` holds the cross-process lock files (store, skills-mount, and extension-install locks included). `image-build-<hash>.lock` serializes builds of one runtime or gateway image: a process that finds it taken prints `Waiting for another enclave process to finish building <image>.`, then re-resolves its build plan and skips the build if the other process completed it. `session-start-<hash>.lock` serializes startup per tool and project until the backend reports the container running; waiters print `Waiting for another enclave session to finish starting.`. This covers unnamed, `--background`, and `--name` sessions: it coordinates container-name and config-store allocation, duplicate-name checks, and writes to the shared gateway config bundle. Named sessions still share that bundle, and explicit numeric names can overlap automatic allocation. Running sessions execute concurrently after the startup lock is released.
 - **QEMU stores**: the experimental QEMU backend mounts the same host-directory stores as the Docker backend (resolved via `internal/backend/hoststore`) into the guest over 9p, so auth, config, and env state are shared across backends.
 - **QEMU bundles**: generated microVM bundles live under `${XDG_CACHE_HOME:-~/.cache}/enclave/microvm/<tool>/<hash>/` unless `--image-name` points at an explicit bundle directory.
@@ -350,7 +353,8 @@ must come from global config (`~/.config/enclave/config.json`) or explicit CLI f
 `--cache-from`). Some build controls are intentionally CLI-only and not read
 from config files, including `--rebuild`, `--no-rebuild`,
 `--force-base-image`, `--build-uid`, `--build-gid`, `--runtime-uid-remap`, and
-the buildx cache flags.
+the buildx cache flags. `--allow-root` is likewise never read from config; its
+only alternative is the `ENCLAVE_ALLOW_ROOT` environment variable.
 
 Runtime image hashes include the effective build UID/GID. Explicit
 `--build-uid` / `--build-gid` values are used when provided; otherwise the host

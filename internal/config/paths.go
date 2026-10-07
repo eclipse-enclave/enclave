@@ -34,7 +34,19 @@ type appRootRequiredEntry struct {
 }
 
 func ResolvePaths() (model.Paths, error) {
-	root, err := discoverAppRoot()
+	return resolvePaths(false)
+}
+
+// ResolvePathsReadOnly is ResolvePaths for code that must not write, such as
+// shell completion, which runs before the root guard. It never extracts the
+// embedded assets, so a self-contained binary resolves only once a regular
+// command has extracted them.
+func ResolvePathsReadOnly() (model.Paths, error) {
+	return resolvePaths(true)
+}
+
+func resolvePaths(readOnly bool) (model.Paths, error) {
+	root, err := discoverAppRoot(readOnly)
 	if err != nil {
 		return model.Paths{}, fmt.Errorf("discover app root: %w", err)
 	}
@@ -52,7 +64,9 @@ func ResolvePaths() (model.Paths, error) {
 		AllowlistsDir:     filepath.Join(root, appRootRuntimeAssetsRel, GatewayAllowlistsDirName),
 		BuildScriptsDir:   filepath.Join(root, appRootRuntimeAssetsRel, appRootBuildScriptsRel),
 	}
-	resolveUserExtensionPaths(&paths)
+	if home, err := resolveHostHome(readOnly); err == nil {
+		resolveUserExtensionPaths(&paths, home)
+	}
 
 	if err := validateAppRoot(root); err != nil {
 		return model.Paths{}, err
@@ -63,9 +77,8 @@ func ResolvePaths() (model.Paths, error) {
 
 // resolveUserExtensionPaths records where user extensions live, whether or not
 // anything is there yet.
-func resolveUserExtensionPaths(paths *model.Paths) {
-	home, err := ResolveHostHome()
-	if err != nil || home == "" {
+func resolveUserExtensionPaths(paths *model.Paths, home string) {
+	if home == "" {
 		return
 	}
 
@@ -148,7 +161,7 @@ func resolveProjectHashPath(absPath string) string {
 	return canonicalMainPath
 }
 
-func discoverAppRoot() (string, error) {
+func discoverAppRoot(readOnly bool) (string, error) {
 	if root := os.Getenv(model.EnvHome); root != "" {
 		abs, err := filepath.Abs(root)
 		if err != nil {
@@ -173,8 +186,11 @@ func discoverAppRoot() (string, error) {
 		return root, nil
 	}
 
-	root, err := extractRegisteredAppAssets()
+	root, err := registeredAppAssets(readOnly)
 	if err != nil {
+		if readOnly {
+			return "", fmt.Errorf("find extracted %s assets: %w", model.AppName, err)
+		}
 		return "", fmt.Errorf("extract embedded %s assets: %w", model.AppName, err)
 	}
 	return root, nil

@@ -295,6 +295,21 @@ project scope so project defaults cannot weaken a stricter global setting.
 linked-worktree gitdir/commondir mounts: project config may strengthen the
 inherited mode (`follow < readonly < none`), but cannot weaken it.
 
+Root guard note: `--allow-root` is CLI-only and has no config key, so no config
+file can grant it; `ENCLAVE_ALLOW_ROOT=1` is its only alternative.
+`checkRootGuard` in `internal/app/root_guard.go` runs early in `app.Run`,
+before any state is written; tests pin the root check through the
+`runningAsRoot` seam. The opt-in only skips the check: images cannot be built
+for UID 0 yet. Code that runs before the guard (user command discovery,
+parsing, help, version, and shell completion) must not write, not even a file
+it removes again: it uses `config.ResolveHostHomeReadOnly` and
+`config.ResolvePathsReadOnly`, which check home writability with access(2)
+instead of a probe file, so they pick the same home, and never extract the
+embedded assets. The tests catch such writes by backdating the
+directory mtimes under a temporary HOME (`internal/app/root_guard_test.go`, and
+`cmd/enclave/main_test.go`, the only tests that run with the real embedded
+assets).
+
 Config additive note: feature additive directives (`+`/`-`) are applied against
 the implicit default-enabled feature set when `features` is unset. For example,
 `["-node-dev"]` removes that default feature from the implicit set.

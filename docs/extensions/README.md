@@ -704,7 +704,7 @@ Opt-in features require an explicit list; additive-only entries do not change th
 
 The next time you run `./enclave --rebuild`, only the specified features will be installed.
 
-**Available features:** `devtools`, `github-cli`, `gitlab-cli`, `node-dev`, `playwright`, `python-dev`, `debug-tools`, `shell-extras`
+**Available features:** `devtools`, `native-build-deps`, `github-cli`, `gitlab-cli`, `node-dev`, `playwright`, `python-dev`, `debug-tools`, `shell-extras`
 
 **Opt-in features (not installed unless explicitly listed):** `debug-tools`, `gitlab-cli`, `playwright`, `shell-extras`
 
@@ -758,6 +758,7 @@ enable the feature.
 | Feature | Priority | Description |
 |---------|----------|-------------|
 | `devtools` | 40 | Core tools + linters (vim, htop, ripgrep, golang-go, shellcheck, golangci-lint, gosec). |
+| `native-build-deps` | 45 | Headers for native Node.js modules: libx11, libxkbfile, libsecret |
 | `github-cli` | 50 | GitHub CLI (gh) |
 | `gitlab-cli` | 50 | GitLab CLI (glab) (opt-in) |
 | `node-dev` | 70 | Node.js dev tools: typescript, eslint, prettier |
@@ -948,6 +949,9 @@ eslint --version
 # Dev tools (devtools feature)
 vim --version
 rg --version       # ripgrep
+
+# Native build headers (native-build-deps feature)
+pkg-config --modversion x11 xkbfile libsecret-1
 
 # Opt-in features (if enabled):
 # GitLab CLI (gitlab-cli feature)

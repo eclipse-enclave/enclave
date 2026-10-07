@@ -50,8 +50,8 @@ func TestValidateExtensionNameRejectsUnsafeNames(t *testing.T) {
 	// Every built-in extension name must remain acceptable.
 	accepted := []string{
 		"claude", "codex", "mistral-vibe", "opencode", "pi", "theia", "theia-next",
-		"debug-tools", "devtools", "github-cli", "gitlab-cli", "node-dev",
-		"playwright", "python-dev", "shell-extras",
+		"debug-tools", "devtools", "github-cli", "gitlab-cli", "native-build-deps",
+		"node-dev", "playwright", "python-dev", "shell-extras",
 		"foo", "foo_bar", "foo.bar", "a", "0", "tool2",
 	}
 	for _, name := range accepted {

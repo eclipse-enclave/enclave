@@ -33,6 +33,8 @@ type IdentityReservation struct {
 	Protected   bool   `json:"protected"`
 }
 
+const maxIdentityStateBytes = 65536
+
 type identityState struct {
 	SchemaVersion int                   `json:"schemaVersion"`
 	Protected     bool                  `json:"protected"`
@@ -157,7 +159,8 @@ func HasProtectedIdentities(home string) (bool, error) {
 }
 
 // AdmitIdentity combines stale-owner reconciliation, optional fresh enrollment
-// and reservation under the identity lock, before any workload store exposure.
+// and reservation before any workload store exposure. Callers hold mount admission
+// across verification and commit; engine inspection never holds the broker lock.
 // verifyAccess must reject all credential/control mounts except exact gateway
 // binds belonging to the supplied live protected reservations.
 func AdmitIdentity(home, dir string, reservation IdentityReservation, reset bool, verifyAccess func([]IdentityReservation) (bool, error), verifyEnded func(IdentityReservation) (bool, error), resetGrant func() error) error {
@@ -177,7 +180,7 @@ func admitIdentity(home, dir string, reservation IdentityReservation, reset, nat
 	if verifyAccess == nil || verifyEnded == nil {
 		return errors.New("cross-engine identity verification is required")
 	}
-	return mutateIdentity(home, dir, func(state *identityState) error {
+	return mutateVerifiedIdentity(home, dir, func(state *identityState) error {
 		if err := reconcileReservations(state, verifyEnded); err != nil {
 			return err
 		}
@@ -197,6 +200,10 @@ func admitIdentity(home, dir string, reservation IdentityReservation, reset, nat
 			if !safe {
 				return errors.New("auth identity has conflicting container mounts; stop legacy sessions or restart older protected sessions with a rebuilt gateway")
 			}
+		}
+		return nil
+	}, func(state *identityState) error {
+		if reservation.Protected {
 			if !state.Protected {
 				entries, err := os.ReadDir(dir)
 				if err != nil && !errors.Is(err, os.ErrNotExist) {
@@ -233,7 +240,12 @@ func ReconcileIdentityReservations(home, dir string, verifyEnded func(IdentityRe
 	if verifyEnded == nil {
 		return errors.New("session end verification is required")
 	}
-	return mutateIdentity(home, dir, func(state *identityState) error { return reconcileReservations(state, verifyEnded) })
+	release, err := AcquireAuthMountAdmission(home)
+	if err != nil {
+		return err
+	}
+	defer release()
+	return mutateVerifiedIdentity(home, dir, func(state *identityState) error { return reconcileReservations(state, verifyEnded) }, nil)
 }
 
 func reconcileReservations(state *identityState, verifyEnded func(IdentityReservation) (bool, error)) error {
@@ -288,12 +300,13 @@ func ReserveIdentity(home, dir string, reservation IdentityReservation) error {
 
 // ReleaseIdentity only removes the exact incarnation after a trusted engine
 // query verifies that session ended. CLI exit, elapsed time and proxy reload
-// never count as evidence. An inspection failure keeps the reservation.
+// never count as evidence. An inspection failure keeps the reservation. Callers
+// hold mount admission so a verified end cannot race a workload start.
 func ReleaseIdentity(home, dir string, reservation IdentityReservation, verifyEnded func(IdentityReservation) (bool, error)) error {
 	if verifyEnded == nil {
 		return errors.New("session end verification is required")
 	}
-	return mutateIdentity(home, dir, func(state *identityState) error {
+	return mutateVerifiedIdentity(home, dir, func(state *identityState) error {
 		for i, existing := range state.Reservations {
 			if existing != reservation {
 				continue
@@ -309,7 +322,7 @@ func ReleaseIdentity(home, dir string, reservation IdentityReservation, verifyEn
 			return nil
 		}
 		return nil
-	})
+	}, nil)
 }
 
 func withIdleIdentity(home, dir string, verifyUnused func() (bool, error), mutate func(*identityState) error) error {
@@ -321,7 +334,7 @@ func withIdleIdentity(home, dir string, verifyUnused func() (bool, error), mutat
 	if verifyUnused == nil {
 		return errors.New("cross-engine session verification is required")
 	}
-	return mutateIdentity(home, dir, func(state *identityState) error {
+	return mutateVerifiedIdentity(home, dir, func(state *identityState) error {
 		if len(state.Reservations) != 0 {
 			return errors.New("auth identity has active session reservations")
 		}
@@ -332,8 +345,42 @@ func withIdleIdentity(home, dir string, verifyUnused func() (bool, error), mutat
 		if !unused {
 			return errors.New("auth identity is in use")
 		}
-		return mutate(state)
-	})
+		return nil
+	}, mutate)
+}
+
+var errIdentityChanged = errors.New("auth identity changed during verification; retry the operation")
+
+// Engine verification can take seconds. Inspect an atomic metadata snapshot
+// without the broker lock, then compare it under that lock before committing.
+// Grant mutations still run under the exact lock mounted by every gateway.
+func mutateVerifiedIdentity(home, dir string, verify, mutate func(*identityState) error) error {
+	const maxAttempts = 3
+	for range maxAttempts {
+		before, err := readIdentityState(home, dir)
+		if err != nil {
+			return err
+		}
+		checked := before
+		checked.Reservations = slices.Clone(before.Reservations)
+		if err := verify(&checked); err != nil {
+			return err
+		}
+		err = mutateIdentity(home, dir, func(current *identityState) error {
+			if current.Protected != before.Protected || !slices.Equal(current.Reservations, before.Reservations) {
+				return errIdentityChanged
+			}
+			*current = checked
+			if mutate != nil {
+				return mutate(current)
+			}
+			return nil
+		})
+		if !errors.Is(err, errIdentityChanged) {
+			return err
+		}
+	}
+	return errIdentityChanged
 }
 
 func mutateIdentity(home, dir string, mutate func(*identityState) error) error {
@@ -363,7 +410,7 @@ func mutateIdentity(home, dir string, mutate func(*identityState) error) error {
 		if err != nil {
 			return err
 		}
-		if len(data) > 65536 {
+		if len(data) > maxIdentityStateBytes {
 			return errors.New("auth identity reservation metadata is full")
 		}
 		if err := util.WriteFileAtomic(file, data, 0o600); err != nil {
@@ -414,7 +461,7 @@ func readIdentityStateFile(home, file string) (state identityState, err error) {
 	if err != nil {
 		return state, err
 	}
-	if !info.Mode().IsRegular() || info.Mode().Perm()&0o077 != 0 || info.Size() > 65536 {
+	if !info.Mode().IsRegular() || info.Mode().Perm()&0o077 != 0 || info.Size() > maxIdentityStateBytes {
 		return state, errors.New("invalid protected auth identity metadata file")
 	}
 	data, err := os.ReadFile(file) // #nosec G304 -- fixed metadata path in the trusted, symlink-checked host locks directory.

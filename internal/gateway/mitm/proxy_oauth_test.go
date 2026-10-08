@@ -354,3 +354,29 @@ func TestBrokerProxyRejectsProtocolUpgrade(t *testing.T) {
 		t.Fatalf("upgrade status = %d, want 502", w.Code)
 	}
 }
+
+func TestOAuthLockFailureIsAuditedAsBrokerDenial(t *testing.T) {
+	var calls atomic.Int32
+	upstream := httptest.NewTLSServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { calls.Add(1) }))
+	defer upstream.Close()
+	p, logPath, cfg := oauthTestProxy(t, upstream)
+	if err := os.Remove(cfg.LockPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(cfg.LockPath, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	payload := `{"grant_type":"authorization_code","client_id":"9d1c250a-e61b-44d9-88ed-5944d1962f5e","code":"synthetic-code","code_verifier":"synthetic-verifier","redirect_uri":"https://platform.claude.com/oauth/code/callback"}`
+	req := httptest.NewRequest(http.MethodPost, "https://platform.claude.com/v1/oauth/token", strings.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	p.handler("https")(w, req)
+	if w.Code != http.StatusServiceUnavailable || calls.Load() != 0 {
+		t.Fatalf("lock failure status=%d, upstream calls=%d", w.Code, calls.Load())
+	}
+	events := readAuditEvents(t, logPath)
+	last := events[len(events)-1]
+	if last.Verdict != netlog.VerdictDeny || last.Rule != "oauth-broker-state" {
+		t.Fatalf("lock failure audit = %+v", last)
+	}
+}

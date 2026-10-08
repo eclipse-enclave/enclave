@@ -85,22 +85,30 @@ func TestConcurrentSessionsShareRefreshButNeverHandles(t *testing.T) {
 			return fixtureResponse(token), nil
 		})
 		var wg sync.WaitGroup
-		for _, b := range brokers {
+		responses := make([]*http.Response, len(brokers))
+		for i, b := range brokers {
+			req := refreshRequest(t, b)
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				response, err := fixtureRoundTrip(b, refreshRequest(t, b), transport)
+				response, err := fixtureRoundTrip(b, req, transport)
 				if err != nil {
 					t.Errorf("concurrent session refresh: %v", err)
 					return
 				}
-				token := responseToken(t, response)
-				if token.Access != b.registry.Access || token.Refresh != b.registry.Refresh {
-					t.Error("refresh projected another session's handles")
-				}
+				responses[i] = response
 			}()
 		}
 		wg.Wait()
+		for i, response := range responses {
+			if response == nil {
+				t.Fatal("concurrent refresh returned no response")
+			}
+			token := responseToken(t, response)
+			if token.Access != brokers[i].registry.Access || token.Refresh != brokers[i].registry.Refresh {
+				t.Error("refresh projected another session's handles")
+			}
+		}
 		if calls.Load() != int32(generation-1) {
 			t.Fatalf("provider calls = %d, want %d", calls.Load(), generation-1)
 		}
@@ -236,26 +244,30 @@ func TestGitHubConcurrentSessionsPreserveAccountsAndIsolateDeviceReplay(t *testi
 	}
 	var calls atomic.Int32
 	var wg sync.WaitGroup
+	users := []string{"carol", "dave"}
+	tokens := []string{githubRealAlice, githubRealBob}
+	responses := make([]*http.Response, 2)
 	for i, b := range []*Broker{first, second} {
+		req := githubRequest(t, githubTokenPath, users[i])
+		transport := githubSuccessTransport(t, b, &calls, users[i], tokens[i])
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			user, token := "carol", githubRealAlice
-			if i == 1 {
-				user, token = "dave", githubRealBob
-			}
-			response, err := fixtureRoundTrip(b, githubRequest(t, githubTokenPath, user), githubSuccessTransport(t, b, &calls, user, token))
+			response, err := fixtureRoundTrip(b, req, transport)
 			if err != nil {
 				t.Errorf("concurrent device login: %v", err)
 				return
 			}
-			body := githubSafeBody(t, response)
-			if !strings.Contains(body, b.github.registry.Handles[user]) {
-				t.Error("login did not return own session handle")
-			}
+			responses[i] = response
 		}()
 	}
 	wg.Wait()
+	for i, b := range []*Broker{first, second} {
+		body := githubSafeBody(t, responses[i])
+		if !strings.Contains(body, b.github.registry.Handles[users[i]]) {
+			t.Error("login did not return own session handle")
+		}
+	}
 	if calls.Load() != 4 {
 		t.Fatalf("device/profile dispatches = %d, want four", calls.Load())
 	}

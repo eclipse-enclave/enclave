@@ -148,8 +148,8 @@ allowlist or a verified server schema**:
 | Plaintext credential path | `(CLAUDE_CONFIG_DIR or ~/.claude)/.credentials.json` |
 
 Importantly, this package has no `CLAUDE_SECURESTORAGE_CONFIG_DIR` reference.
-The protected path therefore sets `CLAUDE_CONFIG_DIR` to the session view;
-verify actual file opens and mount placement. The installer now keeps a separate
+The protected path mounts the session view at the default `~/.claude` and leaves
+`CLAUDE_CONFIG_DIR` unset; verify actual file opens and mount placement. The installer now keeps a separate
 pinned npm artifact for protected sessions. Assert `claude --version` inside each
 tested session and verify automatic updates remain disabled. Record the npm/native
 distribution choice, architecture, image digest and client checksum. Changing
@@ -280,7 +280,7 @@ and binds in the engine report.
 | Live reload | Apply the gateway bundle with the workload alive. The proxy PID changes but gateway/network namespace and handles remain valid. Do not substitute gateway replacement for process reload. |
 | Proxy death | Kill the proxy unexpectedly and demonstrate fail-closed egress. End the affected logical session; start a new one from durable state. |
 | Session reuse | Stop, start again with the same name, and verify fresh handles. Prior-session handles fail even when identity and container name are reused. |
-| Admission | Simultaneous starts across projects and engines admit multiple protected sessions for the same identity with distinct handles/views. Legacy access still conflicts. Detached CLI exit and proxy reload do not release reservations. Stopping one session or reconciling its stale reservation must preserve sibling grants, handles, views and reservations. Reset, startup reset and downgrade refuse until all selected-identity sessions have ended. |
+| Admission | Simultaneous starts across projects and engines admit multiple protected sessions for the same identity with distinct handles/views. Legacy access still conflicts. Detached CLI exit and proxy reload do not release reservations. Stopping one session or reconciling its stale reservation must preserve sibling grants, handles, views and reservations. Reset, startup reset and downgrade refuse until all selected-identity sessions have ended. Stalled engine inspection must not block sibling credential access. Vanished-container races retry within a bound; unavailable engines and unresolved bind sources still fail closed. |
 | Persistent protection | Omitting opt-in cannot reopen an identity raw. Reset preserves protection. An explicit host-side downgrade is allowed only without an owner; no implicit downgrade on an error. |
 | Mount isolation | Inspect workload, gateway and every reconcile helper. The real store and its parents are absent from workload/helper mounts, including symlink aliases and config overrides. Attempt added-dir mounts from later ordinary sessions too, including concurrent enrollment/start. Preexisting workloads exposing selected grant or trusted control files prevent enrollment. Cover QEMU directory/file staging and copy-back; active/preparing/finalizing QEMU sessions, including older guests without leases, prevent protected admission/reset/downgrade. Kill the parent CLI while QEMU stays alive and verify the inherited lease remains effective. Only the selected identity is mounted into the gateway. |
 | Ownership | Created/replaced grants remain owned by the invoking host user with restrictive modes after capture, refresh and restart. Verify rootless UID mapping and SELinux relabels. Workload UID never gains the proxy firewall exemption. |
@@ -385,7 +385,7 @@ Enterprise login are not substitutes for this device-flow gate.
 Repeat using `--backend podman --auth-name broker-podman` on rootless Podman,
 including SELinux enforcing where available. Repeat each backend with
 `--allow-all-network`, then with that flag omitted and
-`enclave network set-mode unrestricted --tool claude --no-apply`. Confirm an
+`enclave network set-mode unrestricted --global --tool claude --no-apply`. Confirm an
 unrelated controlled host is reachable without a domain rule and no protected
 credential reaches it. Do not mistake a successful unrelated request for proof
 that credential capture/refresh still works; repeat the authenticated lifecycle.

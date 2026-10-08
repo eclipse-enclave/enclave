@@ -208,7 +208,13 @@ func (b *githubBroker) exchange(req *http.Request, transport http.RoundTripper) 
 		projected, err = b.tokenResponse(g, user)
 		return err
 	})
-	return projected, err
+	if err != nil {
+		if projected != nil && projected.Body != nil {
+			_ = projected.Body.Close()
+		}
+		return nil, err
+	}
+	return projected, nil
 }
 
 func (b *githubBroker) tokenResponse(g *githubGrant, user string) (*http.Response, error) {

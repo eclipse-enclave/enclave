@@ -616,7 +616,7 @@ func removeCleanupDir(home string, dir cleanupDir) error {
 		}
 	}
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		logx.Warnf("Failed to remove %s at %s: %v", dir.Kind, dir.Path, err)
+		return err
 	}
 	return nil
 }

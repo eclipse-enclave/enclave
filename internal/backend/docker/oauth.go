@@ -41,13 +41,11 @@ const (
 )
 
 func (b *Backend) PrepareAuthSession(ctx context.Context, key backend.StoreKey, session string, protected, reset bool) (*backend.AuthSession, error) {
-	if protected {
-		release, err := hoststore.AcquireAuthMountAdmission(b.opts.Host.Home)
-		if err != nil {
-			return nil, err
-		}
-		defer release()
+	releaseAdmission, err := hoststore.AcquireAuthMountAdmission(b.opts.Host.Home)
+	if err != nil {
+		return nil, err
 	}
+	defer releaseAdmission()
 	dir, err := hoststore.ResolveDir(b.opts.Host.Home, key, backend.StoreKindAuth)
 	if err != nil {
 		return nil, err
@@ -87,11 +85,12 @@ func (b *Backend) PrepareAuthSession(ctx context.Context, key backend.StoreKey, 
 			b.releaseAuthStart(ref)
 		}
 	}()
+	check := b.inspectAuth(ctx)
 	err = hoststore.AdmitIdentity(b.opts.Host.Home, dir, authReservation(ref), reset,
 		func(owners []hoststore.IdentityReservation) (bool, error) {
-			return b.identityAvailable(ctx, dir, owners, "", b.authRuntimeDir(ref))
+			return check.available(dir, owners, "", b.authRuntimeDir(ref))
 		},
-		func(owner hoststore.IdentityReservation) (bool, error) { return b.reconcileAuthOwner(ctx, owner) },
+		check.reconcileOwner,
 		func() error { return resetProtectedGrant(dir) })
 	if err != nil {
 		return nil, err
@@ -193,11 +192,17 @@ func (b *Backend) ReleaseAuthSession(ctx context.Context, ref *backend.AuthSessi
 	if err := validateAuthSession(ref); err != nil {
 		return err
 	}
+	releaseAdmission, err := hoststore.AcquireAuthMountAdmission(b.opts.Host.Home)
+	if err != nil {
+		return err
+	}
+	defer releaseAdmission()
 	b.releaseAuthStart(ref)
 	if err := b.recoverAuthSessionFeatures(ref); err != nil {
 		return err
 	}
-	ended, err := b.authOwnerEnded(ctx, authReservation(ref))
+	check := b.inspectAuth(ctx)
+	ended, err := check.ownerEnded(authReservation(ref))
 	if err != nil || !ended {
 		return err
 	}
@@ -206,7 +211,7 @@ func (b *Backend) ReleaseAuthSession(ctx context.Context, ref *backend.AuthSessi
 		if err != nil {
 			return err
 		}
-		if err := hoststore.ReleaseIdentity(b.opts.Host.Home, dir, authReservation(ref), func(owner hoststore.IdentityReservation) (bool, error) { return b.authOwnerEnded(ctx, owner) }); err != nil {
+		if err := hoststore.ReleaseIdentity(b.opts.Host.Home, dir, authReservation(ref), check.ownerEnded); err != nil {
 			return err
 		}
 	}
@@ -215,7 +220,7 @@ func (b *Backend) ReleaseAuthSession(ctx context.Context, ref *backend.AuthSessi
 		if err != nil {
 			return err
 		}
-		if err := hoststore.ReleaseIdentity(b.opts.Host.Home, dir, authReservation(ref), func(owner hoststore.IdentityReservation) (bool, error) { return b.authOwnerEnded(ctx, owner) }); err != nil {
+		if err := hoststore.ReleaseIdentity(b.opts.Host.Home, dir, authReservation(ref), check.ownerEnded); err != nil {
 			return err
 		}
 	}
@@ -234,7 +239,7 @@ func (b *Backend) ResetAuthIdentity(ctx context.Context, key backend.StoreKey) e
 	if err != nil {
 		return err
 	}
-	if err := hoststore.ReconcileIdentityReservations(b.opts.Host.Home, dir, func(owner hoststore.IdentityReservation) (bool, error) { return b.reconcileAuthOwner(ctx, owner) }); err != nil {
+	if err := hoststore.ReconcileIdentityReservations(b.opts.Host.Home, dir, b.inspectAuth(ctx).reconcileOwner); err != nil {
 		return err
 	}
 	return hoststore.WithIdleProtectedIdentity(b.opts.Host.Home, dir, func() (bool, error) { return b.identityUnused(ctx, dir) }, func() error { return resetProtectedGrant(dir) })
@@ -245,7 +250,7 @@ func (b *Backend) DowngradeAuthIdentity(ctx context.Context, key backend.StoreKe
 	if err != nil {
 		return err
 	}
-	if err := hoststore.ReconcileIdentityReservations(b.opts.Host.Home, dir, func(owner hoststore.IdentityReservation) (bool, error) { return b.reconcileAuthOwner(ctx, owner) }); err != nil {
+	if err := hoststore.ReconcileIdentityReservations(b.opts.Host.Home, dir, b.inspectAuth(ctx).reconcileOwner); err != nil {
 		return err
 	}
 	return hoststore.DowngradeIdentity(b.opts.Host.Home, dir, func() (bool, error) { return b.identityUnused(ctx, dir) })
@@ -284,6 +289,32 @@ func resetProtectedFiles(dir string, names ...string) error {
 // admission must inspect both engines without switching another operation's CLI.
 var engineContainers = inspectAuthEngineContainers
 
+// A snapshot is scoped to one mount-admission critical section. Workload starts
+// cannot race it; never retain it across releasing that lock.
+type authInspection struct {
+	backend *Backend
+	ctx     context.Context
+	engines map[string]authEngineResult
+}
+
+type authEngineResult struct {
+	containers []dockercmd.InspectResponse
+	err        error
+}
+
+func (b *Backend) inspectAuth(ctx context.Context) *authInspection {
+	return &authInspection{backend: b, ctx: ctx, engines: map[string]authEngineResult{}}
+}
+
+func (check *authInspection) containers(engine string) ([]dockercmd.InspectResponse, error) {
+	if result, ok := check.engines[engine]; ok {
+		return result.containers, result.err
+	}
+	containers, err := engineContainers(check.ctx, engine)
+	check.engines[engine] = authEngineResult{containers: containers, err: err}
+	return containers, err
+}
+
 func inspectAuthEngineContainers(ctx context.Context, engine string) ([]dockercmd.InspectResponse, error) {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
@@ -291,19 +322,43 @@ func inspectAuthEngineContainers(ctx context.Context, engine string) ([]dockercm
 	if err != nil {
 		return nil, err
 	}
-	output, err := exec.CommandContext(ctx, binary, "ps", "--all", "--quiet", "--no-trunc").Output() // #nosec G204 -- fixed supported engine and fixed flags.
+	list := func() ([]string, error) {
+		output, err := exec.CommandContext(ctx, binary, "ps", "--all", "--quiet", "--no-trunc").Output() // #nosec G204 -- fixed engine and flags.
+		if err != nil {
+			return nil, fmt.Errorf("cannot verify auth sessions on %s: %w", engine, err)
+		}
+		return strings.Fields(string(output)), nil
+	}
+	ids, err := list()
 	if err != nil {
-		return nil, fmt.Errorf("cannot verify auth sessions on %s: %w", engine, err)
+		return nil, err
 	}
-	ids := strings.Fields(string(output))
-	if len(ids) == 0 {
-		return nil, nil
+	const maxAttempts = 3
+	for range maxAttempts {
+		if len(ids) == 0 {
+			return nil, nil
+		}
+		args := append([]string{"container", "inspect"}, ids...)
+		output, err := exec.CommandContext(ctx, binary, args...).Output() // #nosec G204 -- engine-returned IDs, no shell.
+		if err == nil {
+			return decodeAuthEngineContainers(engine, ids, output)
+		}
+		// Bulk inspect fails when any auto-removed container disappears.
+		// Re-list to prove disappearance, not by matching an error string.
+		next, listErr := list()
+		if listErr != nil {
+			return nil, listErr
+		}
+		vanished := slices.ContainsFunc(ids, func(id string) bool { return !slices.Contains(next, id) })
+		if !vanished {
+			return nil, fmt.Errorf("cannot inspect auth sessions on %s: %w", engine, err)
+		}
+		ids = next
 	}
-	args := append([]string{"container", "inspect"}, ids...)
-	output, err = exec.CommandContext(ctx, binary, args...).Output() // #nosec G204 -- engine-returned container IDs, no shell.
-	if err != nil {
-		return nil, fmt.Errorf("cannot inspect auth sessions on %s: %w", engine, err)
-	}
+	return nil, fmt.Errorf("containers on %s kept disappearing during auth inspection; retry the operation", engine)
+}
+
+func decodeAuthEngineContainers(engine string, ids []string, output []byte) ([]dockercmd.InspectResponse, error) {
 	var containers []dockercmd.InspectResponse
 	decoder := json.NewDecoder(strings.NewReader(string(output)))
 	if err := decoder.Decode(&containers); err != nil {
@@ -316,15 +371,18 @@ func inspectAuthEngineContainers(ctx context.Context, engine string) ([]dockercm
 	if len(containers) != len(ids) {
 		return nil, errors.New("incomplete auth session inspection")
 	}
+	seen := map[string]bool{}
 	for _, info := range containers {
-		if info.ID == "" || info.Name == "" || info.Config == nil || info.State == nil || info.State.Status == "" {
+		if !slices.Contains(ids, info.ID) || seen[info.ID] || info.Name == "" || info.Config == nil || info.State == nil || info.State.Status == "" {
 			return nil, errors.New("incomplete auth session inspection")
 		}
+		seen[info.ID] = true
 	}
 	return containers, nil
 }
 
-func (b *Backend) authOwnerEnded(ctx context.Context, owner hoststore.IdentityReservation) (bool, error) {
+func (check *authInspection) ownerEnded(owner hoststore.IdentityReservation) (bool, error) {
+	b := check.backend
 	release, _, err := util.TryAcquireFileLock(b.authStartLock(owner.Incarnation))
 	if err != nil {
 		return false, err
@@ -333,9 +391,9 @@ func (b *Backend) authOwnerEnded(ctx context.Context, owner hoststore.IdentityRe
 		return false, nil
 	}
 	defer release()
-	containers, err := engineContainers(ctx, owner.Engine)
+	containers, err := check.containers(owner.Engine)
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("cannot verify %s auth session %q ended; restore engine access before retrying: %w", owner.Engine, owner.Session, err)
 	}
 	for _, info := range containers {
 		name := strings.TrimPrefix(info.Name, "/")
@@ -352,8 +410,9 @@ func (b *Backend) authOwnerEnded(ctx context.Context, owner hoststore.IdentityRe
 	return true, nil
 }
 
-func (b *Backend) reconcileAuthOwner(ctx context.Context, owner hoststore.IdentityReservation) (bool, error) {
-	ended, err := b.authOwnerEnded(ctx, owner)
+func (check *authInspection) reconcileOwner(owner hoststore.IdentityReservation) (bool, error) {
+	b := check.backend
+	ended, err := check.ownerEnded(owner)
 	if err != nil || !ended {
 		return ended, err
 	}
@@ -372,13 +431,14 @@ func (b *Backend) reconcileAuthOwner(ctx context.Context, owner hoststore.Identi
 }
 
 func (b *Backend) identityUnused(ctx context.Context, dir string, extraPaths ...string) (bool, error) {
-	return b.identityAvailable(ctx, dir, nil, "", extraPaths...)
+	return b.inspectAuth(ctx).available(dir, nil, "", extraPaths...)
 }
 
 // Only admitted, current-version gateways may share exact grant/lock binds.
 // Raw workload binds, parents, and unreserved or older gateways still conflict.
-func (b *Backend) identityAvailable(ctx context.Context, dir string, owners []hoststore.IdentityReservation, feature string, extraPaths ...string) (bool, error) {
-	if err := hoststore.RequireNoQEMUSessions(ctx, b.opts.Host.Home); err != nil {
+func (check *authInspection) available(dir string, owners []hoststore.IdentityReservation, feature string, extraPaths ...string) (bool, error) {
+	b := check.backend
+	if err := hoststore.RequireNoQEMUSessions(check.ctx, b.opts.Host.Home); err != nil {
 		return false, err
 	}
 	paths := append([]string{dir, hoststore.LockPath(b.opts.Host.Home, dir), hoststore.IdentityStatePath(b.opts.Host.Home, dir)}, extraPaths...)
@@ -390,7 +450,7 @@ func (b *Backend) identityAvailable(ctx context.Context, dir string, owners []ho
 		paths[i] = canonical
 	}
 	for _, engine := range []string{backend.NameDocker, backend.NamePodman} {
-		containers, err := engineContainers(ctx, engine)
+		containers, err := check.containers(engine)
 		if errors.Is(err, exec.ErrNotFound) && engine != b.Name() {
 			continue
 		}
@@ -409,7 +469,7 @@ func (b *Backend) identityAvailable(ctx context.Context, dir string, owners []ho
 				}
 				source, err := canonicalAuthPath(mount.Source)
 				if err != nil {
-					return false, err
+					return false, fmt.Errorf("cannot verify %s container %q bind source %q: %w", engine, info.Name, mount.Source, err)
 				}
 				if shared && ((source == paths[0] && mount.Destination == grantTarget) || (source == paths[1] && mount.Destination == lockTarget)) {
 					continue

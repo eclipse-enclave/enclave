@@ -9,6 +9,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -412,7 +413,7 @@ func TestCleanupKeepAuthPreservesStrayEntriesAndParent(t *testing.T) {
 	}
 }
 
-func TestCleanupSerializesWithIdentityProtection(t *testing.T) {
+func TestCleanupSerializesWithProtectedGrantMutation(t *testing.T) {
 	for _, entryOnly := range []bool{false, true} {
 		t.Run(fmt.Sprintf("entry-only=%t", entryOnly), func(t *testing.T) {
 			t.Setenv("XDG_STATE_HOME", t.TempDir())
@@ -438,6 +439,9 @@ func TestCleanupSerializesWithIdentityProtection(t *testing.T) {
 				}
 			}
 
+			if err := hoststore.ProtectIdentity(home, identity, func() (bool, error) { return true, nil }); err != nil {
+				t.Fatal(err)
+			}
 			writerLocked := make(chan struct{})
 			commitProtection := make(chan struct{})
 			t.Cleanup(func() {
@@ -449,10 +453,10 @@ func TestCleanupSerializesWithIdentityProtection(t *testing.T) {
 			})
 			protectionDone := make(chan error, 1)
 			go func() {
-				protectionDone <- hoststore.ProtectIdentity(home, identity, func() (bool, error) {
+				protectionDone <- hoststore.WithIdleProtectedIdentity(home, identity, func() (bool, error) { return true, nil }, func() error {
 					close(writerLocked)
 					<-commitProtection
-					return true, nil
+					return nil
 				})
 			}()
 			select {
@@ -475,7 +479,7 @@ func TestCleanupSerializesWithIdentityProtection(t *testing.T) {
 			select {
 			case cleanupErr = <-cleanupDone:
 				cleanupFinished = true
-				t.Errorf("cleanup bypassed identity lock while protection was uncommitted: %v", cleanupErr)
+				t.Errorf("cleanup bypassed identity lock during grant mutation: %v", cleanupErr)
 			case <-time.After(50 * time.Millisecond):
 			}
 			if _, err := os.Stat(identity); err != nil {
@@ -564,6 +568,39 @@ func TestProtectedAuthOptionValidation(t *testing.T) {
 			_, _, _, err := ValidateOptions(opts, model.DefaultOptionSources(), ValidationContext{Action: "run"})
 			if (err != nil) != tc.fail {
 				t.Fatalf("error=%v, want failure=%v", err, tc.fail)
+			}
+		})
+	}
+}
+
+func TestCleanupReturnsRemovalFailureAndContinues(t *testing.T) {
+	if os.Getuid() == 0 || runtime.GOOS == "windows" {
+		t.Skip("requires unprivileged Unix directory permissions")
+	}
+	for _, mode := range []cleanupRemovalMode{cleanupRecursive, cleanupEntryOnly} {
+		t.Run(fmt.Sprint(mode), func(t *testing.T) {
+			parent := t.TempDir()
+			victim := filepath.Join(parent, "victim")
+			if err := os.Mkdir(victim, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Chmod(parent, 0o500); err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = os.Chmod(parent, 0o700) }()
+			removable := t.TempDir()
+			err := cleanupDirs(t.TempDir(), []cleanupDir{
+				{Path: victim, Kind: cacheKind, Mode: mode},
+				{Path: removable, Kind: cacheKind, Mode: cleanupRecursive},
+			})
+			if !errors.Is(err, os.ErrPermission) || !strings.Contains(err.Error(), victim) {
+				t.Fatalf("cleanup did not report retained data: %v", err)
+			}
+			if _, err := os.Stat(victim); err != nil {
+				t.Fatal("failed removal lost the fixture")
+			}
+			if _, err := os.Stat(removable); !errors.Is(err, os.ErrNotExist) {
+				t.Fatal("cleanup stopped before processing remaining directories")
 			}
 		})
 	}

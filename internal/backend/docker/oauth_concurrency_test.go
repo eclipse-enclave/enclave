@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"enclave/internal/backend"
 	"enclave/internal/backend/hoststore"
@@ -21,6 +22,7 @@ import (
 	"enclave/internal/gateway"
 	"enclave/internal/gateway/oauthbroker"
 	"enclave/internal/model"
+	"enclave/internal/util"
 )
 
 // Use the real broker to attest the inspected mount fixture, not workload labels.
@@ -230,5 +232,203 @@ func TestProtectedSharingRejectsUnverifiedGatewayAndOverlappingMounts(t *testing
 				})
 			}
 		})
+	}
+}
+
+func TestProtectedAdmissionInspectionDoesNotStallSiblingBroker(t *testing.T) {
+	b, key, _ := oauthTestBackend(t)
+	first, err := b.PrepareAuthSession(context.Background(), key, "first", true, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir, err := hoststore.ResolveDir(b.opts.Host.Home, key, backend.StoreKindAuth)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entered := make(chan struct{}, 1)
+	unblock := make(chan struct{})
+	done := make(chan error, 1)
+	engineContainers = func(context.Context, string) ([]dockercmd.InspectResponse, error) {
+		select {
+		case entered <- struct{}{}:
+		default:
+		}
+		<-unblock
+		return nil, nil
+	}
+	go func() {
+		_, err := b.PrepareAuthSession(context.Background(), key, "second", true, false)
+		done <- err
+	}()
+	defer func() {
+		close(unblock)
+		if err := <-done; err != nil {
+			t.Error(err)
+		}
+	}()
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("inspection not reached")
+	}
+	release, err := util.TryAcquireFileLock(hoststore.LockPath(b.opts.Host.Home, dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if release == nil {
+		t.Fatal("engine inspection stalled sibling credential access")
+	}
+	release()
+	if err := b.validateAuthReservation(first); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestAuthInspectionReusesOnlyAdmissionScopedEngineSnapshots(t *testing.T) {
+	b, key, engines := oauthTestBackend(t)
+	ctx := context.Background()
+	for _, name := range []string{"first", "second"} {
+		ref, err := b.PrepareAuthSession(ctx, key, name, true, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		engines[b.Name()] = append(engines[b.Name()], runningProtectedGateway(t, b, ref))
+		b.releaseAuthStart(ref)
+	}
+	calls := map[string]int{}
+	engineContainers = func(_ context.Context, engine string) ([]dockercmd.InspectResponse, error) {
+		calls[engine]++
+		return engines[engine], nil
+	}
+	third, err := b.PrepareAuthSession(ctx, key, "third", true, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if calls[backend.NameDocker] != 1 || calls[backend.NamePodman] != 1 {
+		t.Fatalf("inspection repeated per owner: %v", calls)
+	}
+	clear(calls)
+	if err := b.ReleaseAuthSession(ctx, third); err != nil {
+		t.Fatal(err)
+	}
+	if calls[b.Name()] != 1 {
+		t.Fatalf("release reused an old snapshot or inspected twice: %v", calls)
+	}
+	// A new admission must see newly introduced conflicting mounts.
+	dir, err := hoststore.ResolveDir(b.opts.Host.Home, key, backend.StoreKindAuth)
+	if err != nil {
+		t.Fatal(err)
+	}
+	engines[b.Name()] = append(engines[b.Name()], dockercmd.InspectResponse{
+		Name:   "/foreign",
+		Mounts: []dockercmd.MountPoint{{Type: dockercmd.MountTypeBind, Source: dir}},
+	})
+	if _, err := b.PrepareAuthSession(ctx, key, "fourth", true, false); err == nil {
+		t.Fatal("cached prior admission hid a conflicting mount")
+	}
+}
+
+func TestAuthEngineInspectionHandlesVanishedContainers(t *testing.T) {
+	for _, mode := range []string{"vanished", "empty", "daemon-error", "churn", "duplicate", "incomplete", "malformed", "trailing"} {
+		t.Run(mode, func(t *testing.T) {
+			root := t.TempDir()
+			binary := filepath.Join(root, "engine")
+			t.Setenv("AUTH_ENGINE_COUNT", filepath.Join(root, "count"))
+			t.Setenv("AUTH_ENGINE_MODE", mode)
+			script := `#!/bin/sh
+count=0
+if [ -f "$AUTH_ENGINE_COUNT" ]; then read -r count < "$AUTH_ENGINE_COUNT"; fi
+case "$1" in
+ps)
+  count=$((count + 1))
+  printf '%s' "$count" > "$AUTH_ENGINE_COUNT"
+  case "$AUTH_ENGINE_MODE" in
+    churn) printf 'gone-%s\n' "$count";;
+    empty) if [ "$count" -eq 1 ]; then printf 'gone\n'; fi;;
+    vanished) printf 'survivor\n'; if [ "$count" -eq 1 ]; then printf 'gone\n'; fi;;
+    *) printf 'survivor\ngone\n';;
+  esac;;
+container)
+  case "$AUTH_ENGINE_MODE" in
+    vanished)
+      if [ "$count" -eq 1 ]; then printf 'Error: No such object: gone\n' >&2; exit 1; fi
+      printf '[{"Id":"survivor","Name":"/live","Config":{},"State":{"Status":"running"}}]';;
+    malformed) printf 'not-json';;
+    incomplete) printf '[]';;
+    duplicate) printf '[{"Id":"survivor","Name":"/live","Config":{},"State":{"Status":"running"}},{"Id":"survivor","Name":"/live","Config":{},"State":{"Status":"running"}}]';;
+    trailing) printf '[] {}';;
+    *) printf 'inspection failed\n' >&2; exit 1;;
+  esac;;
+*) exit 1;;
+esac
+`
+			if err := os.WriteFile(binary, []byte(script), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			containers, err := inspectAuthEngineContainers(context.Background(), binary)
+			if mode == "vanished" {
+				if err != nil || len(containers) != 1 || containers[0].ID != "survivor" {
+					t.Fatalf("vanished ID prevented complete survivor inspection: %+v, %v", containers, err)
+				}
+			} else if mode == "empty" {
+				if err != nil || len(containers) != 0 {
+					t.Fatalf("verified disappearance failed: %+v, %v", containers, err)
+				}
+			} else if err == nil {
+				t.Fatal("unsafe or unbounded inspection succeeded")
+			}
+			count, readErr := os.ReadFile(filepath.Join(root, "count"))
+			if readErr != nil {
+				t.Fatal(readErr)
+			}
+			if mode == "churn" && string(count) != "4" {
+				t.Fatalf("churn retries were not bounded: %s", count)
+			}
+			if mode == "daemon-error" && string(count) != "2" {
+				t.Fatalf("inspection retried without a verified vanished ID: %s", count)
+			}
+		})
+	}
+}
+
+func TestInaccessibleBindAliasStillFailsClosedWithContext(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("requires an unprivileged user")
+	}
+	b, key, engines := oauthTestBackend(t)
+	dir, err := hoststore.ResolveDir(b.opts.Host.Home, key, backend.StoreKindAuth)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	hidden := filepath.Join(t.TempDir(), "hidden")
+	if err := os.Mkdir(hidden, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	alias := filepath.Join(hidden, "alias")
+	if err := os.Symlink(dir, alias); err != nil {
+		t.Fatal(err)
+	}
+	if pathsOverlap(alias, dir) {
+		t.Fatal("fixture must appear lexically disjoint")
+	}
+	if err := os.Chmod(hidden, 0); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chmod(hidden, 0o700) }()
+	engines[b.Name()] = []dockercmd.InspectResponse{{
+		Name: "/foreign", Mounts: []dockercmd.MountPoint{{Type: dockercmd.MountTypeBind, Source: alias}},
+	}}
+	_, err = b.PrepareAuthSession(context.Background(), key, "session", true, false)
+	if !errors.Is(err, os.ErrPermission) || !strings.Contains(err.Error(), b.Name()) || !strings.Contains(err.Error(), "/foreign") || !strings.Contains(err.Error(), alias) {
+		t.Fatalf("unresolved alias accepted or missing diagnostic context: %v", err)
+	}
+	if err := os.Chmod(hidden, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if resolved, err := canonicalAuthPath(alias); err != nil || resolved != dir {
+		t.Fatalf("lexically disjoint alias must resolve into the protected identity: %q, %v", resolved, err)
 	}
 }

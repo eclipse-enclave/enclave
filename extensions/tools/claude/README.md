@@ -67,11 +67,11 @@ left at the Claude Code defaults.
 | File | Purpose |
 |------|---------|
 | `spec.yaml` | Extension manifest (metadata, sandbox behavior, network, credentials) |
-| `install.sh` | Installs Claude Code via `claude.ai/install.sh`, plus `@anthropic-ai/sandbox-runtime` from npm with `--ignore-scripts` (asserting the package landed) |
+| `install.sh` | Installs the ordinary Claude Code client via `claude.ai/install.sh`, a separate integrity-pinned npm client for protected OAuth, and `@anthropic-ai/sandbox-runtime` from npm with `--ignore-scripts` (asserting the package landed) |
 | `check-update.sh` | Returns the latest GitHub release tag for automatic update probes |
 | `gateway-allowlist.conf` | DNS allowlist for network isolation |
 | `templates/settings.json` | Default settings template |
-| `entrypoint.d/setup.sh` | Runtime setup (creates config dir, sets env vars) |
+| `entrypoint.d/setup.sh` | Runtime setup; protected mode selects/checks the pinned client and disables updates |
 | `go/` | Custom Go hooks |
 
 ## Experimental protected OAuth

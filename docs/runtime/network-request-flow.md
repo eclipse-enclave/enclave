@@ -81,8 +81,10 @@ sequenceDiagram
         end
     else Domain not in allowlist
         DNS-->>Tool: NXDOMAIN from the blackhole
-        DNS->>Audit: dnsmasq log line
-        Audit->>Log: DNS deny (nxdomain)
+        opt Unprotected session
+            DNS->>Audit: dnsmasq log line
+            Audit->>Log: DNS deny (nxdomain)
+        end
     end
 
     Note over Tool,Proxy: When secret injection is active, the container sees placeholders only.<br/>Real secrets are released only in-flight for matching host/header rules.
@@ -95,8 +97,8 @@ sequenceDiagram
 3. DNS resolution goes through `dnsmasq`. Allowlisted domains resolve and populate the `enclave_allowed` `ipset`; non-allowlisted domains fail resolution.
 4. TCP connections are gated by firewall rules and redirected to the proxy. The proxy checks host allowlist rules again using HTTP `Host` / TLS `SNI`.
 5. For hosts that match declared secret `release.http` rules, or for all allowlisted HTTPS when `network_log` is `requests` or `full`, the proxy uses TLS MITM before forwarding upstream.
-6. For inspected requests, a registered placeholder is substituted only in the rule's configured `header` on HTTPS requests to its declared `hosts`. Placeholder-bearing headers that do not satisfy the rule are rejected with HTTP 403.
-7. `network_log=coarse` writes pass/deny events to `~/.local/state/enclave/projects/<hash>/<tool>/logs/network.log`: one `tcp` event per TLS connection at the ClientHello, and an `http` event per request for plaintext HTTP and for the MITM'd hosts of step 5. `network_log=requests` adds request-level HTTP/HTTPS audit events for every allowlisted host. `network_log=full` also snapshots each relayed request before step 6 releases secrets into it and stores it, with the response, under `logs/capture/<session>/`; its `http` event carries the `capture_id`. The log is JSONL throughout: the proxy appends HTTP and TCP events, a separate `enclave-gateway-proxy -dns-audit` process translates dnsmasq's own log into `dns` events (so DNS denials are recorded even when the proxy is disabled), and the host appends a session marker at gateway start. Read it with `enclave network log`.
+6. If a known placeholder appears on plaintext HTTP, on a host outside that secret rule's `hosts`, or in a header other than that rule's declared header (matched case-insensitively), the proxy blocks the whole request with HTTP 403.
+7. `network_log=coarse` writes pass/deny events to `~/.local/state/enclave/projects/<hash>/<tool>/logs/network.log`: one `tcp` event per TLS connection at the ClientHello, and an `http` event per request for plaintext HTTP and for the MITM'd hosts of step 5. `network_log=requests` adds request-level HTTP/HTTPS audit events for every allowlisted host. `network_log=full` also snapshots each relayed request before step 6 releases secrets into it and stores it, with the response, under `logs/capture/<session>/`; its `http` event carries the `capture_id`. The log is JSONL throughout: the proxy appends HTTP and TCP events, and the host appends a session marker at gateway start. In unprotected sessions, a separate `enclave-gateway-proxy -dns-audit` process translates dnsmasq's log into `dns` events, even when the proxy is disabled. Protected sessions disable raw DNS logging and this translator. Read it with `enclave network log`.
 
 ## Why This Works
 

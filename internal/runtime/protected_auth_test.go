@@ -290,3 +290,44 @@ func TestProtectedAuthCannotLaunchWithoutDeclaredAuthStore(t *testing.T) {
 		t.Fatal("prepared legacy stores before rejecting missing broker admission")
 	}
 }
+
+func TestProtectedClientPinsStayConsistent(t *testing.T) {
+	for _, client := range []struct {
+		version string
+		files   map[string][]string
+	}{
+		{"2.1.63", map[string][]string{
+			"extensions/tools/claude/install.sh": {
+				"claude-%s", "claude-code-%s.tgz", `!= "%s"`,
+			},
+			"extensions/tools/claude/entrypoint.d/setup.sh": {
+				"claude-%s/bin", `!= "%s (Claude Code)"`,
+			},
+			"internal/runtime/command_builder.go": {"claude-%s/bin/claude"},
+		}},
+		{"2.87.3", map[string][]string{
+			"extensions/features/github-cli/install.sh": {"protected_version=%s"},
+			"extensions/features/github-cli/feature-entrypoint.d/setup.sh": {
+				"/opt/enclave/gh-%s/bin/gh", `"gh version %s "*`,
+			},
+			"internal/runtime/command_builder.go": {
+				"/opt/enclave/gh-%s/bin/gh", "'gh version %s '*",
+			},
+		}},
+	} {
+		for name, patterns := range client.files {
+			t.Run(name+"/"+client.version, func(t *testing.T) {
+				data, err := os.ReadFile(filepath.Join("..", "..", filepath.FromSlash(name)))
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, pattern := range patterns {
+					want := fmt.Sprintf(pattern, client.version)
+					if !strings.Contains(string(data), want) {
+						t.Errorf("protected installer/launcher pin mismatch: missing %q", want)
+					}
+				}
+			})
+		}
+	}
+}

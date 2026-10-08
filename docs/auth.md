@@ -36,8 +36,8 @@ select a clean config/session name if the project's existing config contains
 credentials. Protected mode
 rejects provider env credentials, host config passthrough, native auth/config
 sources and credential-helper settings. It supports neither project/ephemeral
-auth, QEMU, admin mode, runtime UID remapping nor devcontainers. The workload
-uses the non-root host UID/GID; differing build IDs and gateway service-UID
+auth, QEMU, admin mode, custom base images, runtime UID remapping nor devcontainers.
+The workload uses the non-root host UID/GID; differing build IDs and gateway service-UID
 collisions are rejected. The built-in `github-cli` feature, enabled by default,
 has its own protected native-auth adapter; see below. Other features with native
 auth files are rejected. Env-secret and non-auth features remain available.
@@ -67,7 +67,11 @@ enclave --tool claude --protect-auth --auth-scope shared --auth-name protected-t
 ```
 
 All installed engines must be inspectable; an unavailable daemon causes a refusal
-rather than an assumption that the identity is unused.
+rather than an assumption that the identity is unused. If a reserved session's
+engine CLI has been removed, restore that CLI and daemon access so Enclave can
+verify the session ended. Removing an executable does not prove its containers
+stopped; reset and downgrade do not bypass that check.
+
 Protected admission, reset and downgrade also require all of the invoking user's
 QEMU sessions to have ended, including preparation and host-side copy-back;
 QEMU has no reliable host-share inspection API. Process inspection must succeed
@@ -123,10 +127,13 @@ binary even with `--no-rebuild`; an old image without it must be rebuilt. The
 supported bootstrap is GitHub.com's device login:
 
 ```bash
-gh auth login --hostname github.com --git-protocol https --web
+gh auth login --hostname github.com --git-protocol https --web --insecure-storage
 ```
 
-The gateway captures its token response before it reaches `gh`. Pasting a PAT,
+The gateway captures its token response before it reaches `gh`.
+`--insecure-storage` selects native-file storage of **handles**, not provider tokens.
+Protected HTTPS Git remotes must use `https://github.com/<owner>/<repo>.git`;
+URLs without the `.git` suffix are not supported by this adapter. Pasting a PAT,
 GitHub Enterprise login, keyring-only credentials and unsupported native schemas
 are not protected login paths. Expiry/refresh-bearing GitHub token responses
 are unsupported; unknown token responses fail closed. As with
@@ -144,6 +151,12 @@ If gateway startup rejects an incompatible native store, protection remains and
 the original files are retained. Back up wanted logins on the host, then correct
 unsupported hosts/schema in that private store before retrying. Reset is not a
 non-destructive rollback: it deletes those original logins and preferences.
+
+The experimental replay history retains at most 64 completed or uncertain device
+exchanges per shared identity. At that limit, new logins fail even after restart;
+existing saved accounts remain usable. Automatic replay retirement is pending.
+Clearing this history currently requires stopping every session and resetting the
+feature identity, which also deletes its saved logins and preferences.
 
 After stopping all sessions using GitHub, manage this separate identity with:
 

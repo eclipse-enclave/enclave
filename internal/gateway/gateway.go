@@ -616,7 +616,11 @@ func Start(ctx context.Context, cfg StartConfig) (StartResult, error) {
 		}
 		verifyReady = func() error {
 			if err := oauthbroker.VerifyReadiness(expected); err != nil {
-				return errors.New("gateway did not attest the requested protected OAuth adapters; rebuild the gateway without --no-rebuild")
+				err = fmt.Errorf("gateway did not attest the requested protected OAuth adapters: %w", err)
+				if cfg.NoRebuild {
+					return fmt.Errorf("%w; rebuild the gateway without --no-rebuild if its adapters are outdated", err)
+				}
+				return err
 			}
 			return nil
 		}
@@ -1034,7 +1038,7 @@ func ensureExistingGatewayImageWith(profile model.Profile, exists func(context.C
 	if ok {
 		return nil
 	}
-	return fmt.Errorf("gateway image %q does not exist locally and builds are disabled (--no-rebuild or %s); re-enable builds to create it, or use --allow-all-network to bypass the gateway", image, model.EnvNoRebuild)
+	return fmt.Errorf("gateway image %q does not exist locally and builds are disabled (--no-rebuild or %s); re-enable builds to create it", image, model.EnvNoRebuild)
 }
 
 // StopContainer stops and removes the exact gateway returned by Start. Using

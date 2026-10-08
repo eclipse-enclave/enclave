@@ -1243,3 +1243,18 @@ func TestProxyRejectsSecretInReflectableHeaders(t *testing.T) {
 		})
 	}
 }
+
+func TestRunReturnsReadinessFailure(t *testing.T) {
+	want := errors.New("injected readiness failure")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	called := false
+	err := Run(ctx, Options{
+		HTTPAddr: "127.0.0.1:0", HTTPSAddr: "127.0.0.1:0",
+		TLSStore: tlsstore.New(t.TempDir()),
+		OnReady:  func() error { called = true; return want },
+	})
+	if !called || !errors.Is(err, want) {
+		t.Fatalf("readiness failure reported success: %v, called=%t", err, called)
+	}
+}

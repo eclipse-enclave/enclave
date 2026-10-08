@@ -136,20 +136,16 @@ func main() {
 		TLSStore: tlsstore.New(tlsRoot),
 	}
 	if readyFile != "" || broker != nil {
-		opts.OnReady = func() {
+		opts.OnReady = func() error {
 			if broker != nil {
 				if err := broker.MarkReady(); err != nil {
-					log.Print("protected OAuth readiness attestation failed")
-					cancel()
-					return
+					return fmt.Errorf("protected OAuth readiness attestation failed: %w", err)
 				}
 			}
-			if readyFile == "" {
-				return
+			if readyFile != "" {
+				return markProxyReady(readyFile)
 			}
-			if err := markProxyReady(readyFile); err != nil {
-				log.Printf("failed to write proxy ready file %q: %q", readyFile, err.Error()) // #nosec G706 -- quoted values cannot inject log lines.
-			}
+			return nil
 		}
 	}
 	if err := mitm.Run(ctx, opts); err != nil {

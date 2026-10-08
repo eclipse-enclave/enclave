@@ -57,7 +57,7 @@ type Options struct {
 	Session        string
 	ForceHTTPSMITM bool
 	TLSStore       *tlsstore.Store
-	OnReady        func()
+	OnReady        func() error
 }
 
 const serverShutdownTimeout = 1 * time.Second
@@ -144,6 +144,13 @@ func Run(ctx context.Context, opts Options) error {
 		_ = httpsListener.Close()
 		return fmt.Errorf("create HTTPS dispatch server: %w", err)
 	}
+	if opts.OnReady != nil {
+		if err := opts.OnReady(); err != nil {
+			_ = httpListener.Close()
+			_ = httpsListener.Close()
+			return fmt.Errorf("proxy readiness failed: %w", err)
+		}
+	}
 
 	errCh := make(chan error, 2)
 	go func() {
@@ -156,9 +163,6 @@ func Run(ctx context.Context, opts Options) error {
 			errCh <- fmt.Errorf("serve HTTPS proxy: %w", err)
 		}
 	}()
-	if opts.OnReady != nil {
-		opts.OnReady()
-	}
 
 	select {
 	case <-ctx.Done():

@@ -146,7 +146,12 @@ func (b *githubBroker) locked(fn func() error) error {
 	if b.failed {
 		return ErrState
 	}
-	return util.WithFileLock(b.config.LockPath, fn)
+	release, err := util.AcquireFileLock(b.config.LockPath, nil)
+	if err != nil {
+		return ErrState
+	}
+	defer release()
+	return fn()
 }
 
 func (b *githubBroker) readGrant() (*githubGrant, error) {

@@ -60,6 +60,7 @@ supported under `tool_overrides.<tool>`.
 | `ephemeral` | Run without persistent auth/env stores |
 | `auth_scope` | `shared` or `project` (default: `shared`) |
 | `auth_name` | Named per-tool shared auth identity slug; unset uses the default store |
+| `protect_auth` | Experimental gateway-owned Claude/GitHub authentication (default: `false`); see [Protected OAuth](#protected-oauth) |
 | `secrets_scope` | `both`, `global`, or `project` (default: `both`) |
 | `reset_auth` | Clear auth on start |
 | `no_api_key` | Disable API key injection |
@@ -93,6 +94,13 @@ supported under `tool_overrides.<tool>`.
 
 In readonly mode, writable `add_dirs` entries inside the project are mounted
 read-only.
+
+All sessions, including ordinary/unprotected ones, reject mounts overlapping
+Enclave's host lock and OAuth session-control roots or protected auth stores.
+Parent mounts (for example, your whole home directory) and symlink aliases count
+as overlap, even when read-only. Mount only the needed subdirectories outside
+those roots. An inaccessible bind source is refused when disjointness cannot be
+verified; it is not assumed safe.
 
 `worktree_metadata` controls the gitdir/commondir mounts that enclave
 resolves from a linked worktree's `.git` file. `follow` ties them to the

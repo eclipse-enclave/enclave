@@ -35,7 +35,9 @@ substitutes credentials only in the adapter's approved GitHub.com API and HTTPS
 Git authentication fields. Native view files are never reconciled into the
 trusted feature store.
 
-Use GitHub.com device login from inside the protected session. PAT paste,
+Use `gh auth login --hostname github.com --git-protocol https --web --insecure-storage`
+inside the protected session; native-file storage contains handles, not provider
+tokens. HTTPS Git remotes must include the `.git` suffix. PAT paste,
 Enterprise hosts, keyring-only credentials, expiry/refresh-bearing token
 responses and unsupported native/token schemas are not supported. Existing
 compatible native feature credentials are consumed

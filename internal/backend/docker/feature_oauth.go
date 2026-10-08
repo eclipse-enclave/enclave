@@ -76,6 +76,7 @@ func (b *Backend) PrepareFeatureAuthSessions(ctx context.Context, parent *backen
 	if err := b.writeAuthSessionRecord(ref); err != nil {
 		return ref, err
 	}
+	check := b.inspectAuth(ctx)
 	for _, name := range names {
 		dir, err := hoststore.ResolveDir(b.opts.Host.Home, backend.StoreKey{Owner: name}, backend.StoreKindFeatureAuth)
 		if err != nil {
@@ -83,9 +84,9 @@ func (b *Backend) PrepareFeatureAuthSessions(ctx context.Context, parent *backen
 		}
 		if err := hoststore.AdmitNativeIdentity(b.opts.Host.Home, dir, authReservation(ref),
 			func(owners []hoststore.IdentityReservation) (bool, error) {
-				return b.identityAvailable(ctx, dir, owners, name, b.featureRuntimeDir(ref, name))
+				return check.available(dir, owners, name, b.featureRuntimeDir(ref, name))
 			},
-			func(owner hoststore.IdentityReservation) (bool, error) { return b.reconcileAuthOwner(ctx, owner) }); err != nil {
+			check.reconcileOwner); err != nil {
 			return ref, fmt.Errorf("admit %s feature authentication: %w", name, err)
 		}
 		if protected {
@@ -241,7 +242,7 @@ func (b *Backend) idleFeatureIdentity(ctx context.Context, name string) (string,
 	if err != nil {
 		return "", err
 	}
-	if err := hoststore.ReconcileIdentityReservations(b.opts.Host.Home, dir, func(owner hoststore.IdentityReservation) (bool, error) { return b.reconcileAuthOwner(ctx, owner) }); err != nil {
+	if err := hoststore.ReconcileIdentityReservations(b.opts.Host.Home, dir, b.inspectAuth(ctx).reconcileOwner); err != nil {
 		return "", err
 	}
 	return dir, nil

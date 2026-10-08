@@ -280,10 +280,11 @@ func TestRefreshSerializesDuplicatesAndRecoversLostReplyAcrossReload(t *testing.
 				if i%2 != 0 {
 					owner = otherProcess
 				}
+				req := refreshRequest(t, owner)
 				wg.Add(1)
 				go func() {
 					defer wg.Done()
-					response, err := fixtureRoundTrip(owner, refreshRequest(t, owner), transport)
+					response, err := fixtureRoundTrip(owner, req, transport)
 					if err != nil {
 						t.Errorf("refresh: %v", err)
 						return
@@ -1140,5 +1141,34 @@ func TestPinnedSubscriptionScopeSetDoesNotPermitAPIKeyCreation(t *testing.T) {
 	}))
 	if response != nil || !errors.Is(err, ErrDenied) {
 		t.Fatalf("API key creation response=%v error=%v", response, err)
+	}
+}
+
+func TestBrokerLockFailuresUseStateSentinelAndPreserveCallbackErrors(t *testing.T) {
+	for _, github := range []bool{false, true} {
+		t.Run(strconv.FormatBool(github), func(t *testing.T) {
+			b := fixtureBroker(t)
+			lockPath, locked := b.config.LockPath, b.locked
+			if github {
+				b = fixtureGitHub(t, githubNativeFixture())
+				lockPath, locked = b.github.config.LockPath, b.github.locked
+			}
+			for _, want := range []error{nil, ErrDenied, ErrResponse, ErrUncertain} {
+				if err := locked(func() error { return want }); !errors.Is(err, want) {
+					t.Fatalf("callback error changed: %v, want %v", err, want)
+				}
+			}
+			if err := os.Remove(lockPath); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Mkdir(lockPath, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			called := false
+			err := locked(func() error { called = true; return nil })
+			if !errors.Is(err, ErrState) || called {
+				t.Fatalf("lock failure escaped state boundary: %v, called=%t", err, called)
+			}
+		})
 	}
 }

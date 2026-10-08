@@ -41,6 +41,7 @@ func (b *githubBroker) roundTrip(req *http.Request, transport, exchange http.Rou
 		return nil, false, nil
 	}
 	var handle, basicUser string
+	var basic bool
 	if len(values) == 1 {
 		for _, prefix := range []string{"token ", "Bearer ", "bearer "} {
 			if strings.HasPrefix(values[0], prefix) {
@@ -48,9 +49,7 @@ func (b *githubBroker) roundTrip(req *http.Request, transport, exchange http.Rou
 			}
 		}
 		if username, password, ok := req.BasicAuth(); ok {
-			if username == "" {
-				return nil, true, ErrDenied
-			}
+			basic = true
 			basicUser, handle = username, password
 		}
 	}
@@ -60,7 +59,7 @@ func (b *githubBroker) roundTrip(req *http.Request, transport, exchange http.Rou
 		}
 		return nil, false, nil
 	}
-	if !validHandle(handle, githubHandlePrefix) {
+	if !validHandle(handle, githubHandlePrefix) || (basic && basicUser == "") {
 		return nil, true, ErrDenied
 	}
 	if basicUser != "" {

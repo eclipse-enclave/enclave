@@ -107,26 +107,31 @@ func githubSuccessTransport(t *testing.T, b *Broker, count *atomic.Int32, user, 
 		count.Add(1)
 		if req.URL.Path == "/user" {
 			if req.URL.String() != "https://api.github.com/user" || req.Header.Get("Authorization") != "Bearer "+token {
-				t.Fatal("wrong trusted account lookup")
+				t.Error("wrong trusted account lookup")
+				return nil, ErrResponse
 			}
 			return fixtureResponse(map[string]any{"login": user, "id": 42, "irrelevant": "discarded"}), nil
 		}
 		if req.URL.Path != githubTokenPath {
-			t.Fatalf("unexpected upstream URL %s", req.URL)
+			t.Errorf("unexpected upstream URL %s", req.URL)
+			return nil, ErrResponse
 		}
 		g, err := b.github.readGrant()
 		if err != nil {
-			t.Fatal(err)
+			t.Error(err)
+			return nil, err
 		}
 		pending := false
 		for _, value := range g.Devices {
 			pending = pending || value.User == ""
 		}
 		if !pending {
-			t.Fatal("exchange dispatched before durable intent")
+			t.Error("exchange dispatched before durable intent")
+			return nil, ErrState
 		}
 		if req.GetBody != nil || req.Header.Get("Authorization") != "" || req.Header.Get("Cookie") != "" || req.Header.Get("Accept-Encoding") != "identity" {
-			t.Fatal("unsafe exchange headers or retry body")
+			t.Error("unsafe exchange headers or retry body")
+			return nil, ErrDenied
 		}
 		return fixtureResponse(map[string]string{"access_token": token, "token_type": "bearer", "scope": "repo,read:org,gist"}), nil
 	}
@@ -404,19 +409,24 @@ func TestGitHubConcurrentDevicePollsOnlyDispatchOnce(t *testing.T) {
 	var calls atomic.Int32
 	transport := githubSuccessTransport(t, b, &calls, "alice", githubRealAlice)
 	var wg sync.WaitGroup
-	for i := 0; i < 12; i++ {
+	responses := make([]*http.Response, 12)
+	for i := range responses {
+		req := githubRequest(t, githubTokenPath, "same-device")
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			response, err := fixtureRoundTrip(b, githubRequest(t, githubTokenPath, "same-device"), transport)
+			response, err := fixtureRoundTrip(b, req, transport)
 			if err != nil {
 				t.Error(err)
 				return
 			}
-			_ = githubSafeBody(t, response)
+			responses[i] = response
 		}()
 	}
 	wg.Wait()
+	for _, response := range responses {
+		_ = githubSafeBody(t, response)
+	}
 	if calls.Load() != 2 {
 		t.Fatalf("duplicate token/user dispatches: %d", calls.Load())
 	}
@@ -627,5 +637,76 @@ func TestGitHubDeviceReplayCannotCrossLogicalSession(t *testing.T) {
 	}))
 	if !errors.Is(err, ErrDenied) {
 		t.Fatalf("prior-session device replay returned a fresh handle: %v", err)
+	}
+}
+
+func TestGitHubBasicAuthDenialIsScoped(t *testing.T) {
+	b := fixtureGitHub(t, githubNativeFixture())
+	for _, tc := range []struct {
+		name, target, user, password string
+		allowed                      bool
+	}{
+		{"unrelated-empty-user", "https://unrelated.example/api", "", "synthetic-key", true},
+		{"unrelated-user", "https://unrelated.example/api", "user", "synthetic-key", true},
+		{"foreign-handle-empty-user", "https://unrelated.example/api", "", b.github.registry.Handles["alice"], false},
+		{"foreign-handle-user", "https://unrelated.example/api", "alice", b.github.registry.Handles["alice"], false},
+		{"foreign-claude-handle", "https://unrelated.example/api", "", b.registry.Access, false},
+		{"github-raw-key", "https://api.github.com/user", "", "synthetic-key", false},
+		{"github-handle-empty-user", "https://api.github.com/user", "", b.github.registry.Handles["alice"], false},
+		{"git-handle-empty-user", "https://github.com/alice/repo.git/info/refs?service=git-upload-pack", "", b.github.registry.Handles["alice"], false},
+		{"git-handle", "https://github.com/alice/repo.git/info/refs?service=git-upload-pack", "alice", b.github.registry.Handles["alice"], true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req, err := http.NewRequest(http.MethodGet, tc.target, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			req.SetBasicAuth(tc.user, tc.password)
+			calls := 0
+			response, err := fixtureRoundTrip(b, req, fixtureTransport(func(outgoing *http.Request) (*http.Response, error) {
+				calls++
+				if outgoing.URL.Hostname() == "unrelated.example" && outgoing.Header.Get("Authorization") != req.Header.Get("Authorization") {
+					t.Error("unrelated credentials changed")
+				}
+				return rawFixtureResponse(nil), nil
+			}))
+			if response != nil {
+				_ = response.Body.Close()
+			}
+			if tc.allowed {
+				if err != nil || calls != 1 {
+					t.Fatalf("unrelated or supported auth denied: %v, calls=%d", err, calls)
+				}
+			} else if !errors.Is(err, ErrDenied) || calls != 0 {
+				t.Fatalf("protected credential routing escaped: %v, calls=%d", err, calls)
+			}
+		})
+	}
+}
+
+func TestGitHubPendingCommitFailureReturnsNoResponse(t *testing.T) {
+	b := fixtureGitHub(t, githubNativeFixture())
+	b.github.write = func(path string, value any) error {
+		if g, ok := value.(*githubGrant); ok && len(g.Devices) == 0 {
+			return ErrState
+		}
+		return durableJSON(path, value)
+	}
+	calls := 0
+	transport := fixtureTransport(func(*http.Request) (*http.Response, error) {
+		calls++
+		return fixtureResponse(map[string]string{"error": "authorization_pending"}), nil
+	})
+	response, err := fixtureRoundTrip(b, githubRequest(t, githubTokenPath, "pending"), transport)
+	if response != nil || !errors.Is(err, ErrState) {
+		t.Fatalf("failed persistence returned a response: %v, %v", response, err)
+	}
+	reloaded, err := Open(b.config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, err = fixtureRoundTrip(reloaded, githubRequest(t, githubTokenPath, "pending"), transport)
+	if response != nil || !errors.Is(err, ErrUncertain) || calls != 1 {
+		t.Fatalf("failed persistence lost its replay fence: %v, calls=%d", err, calls)
 	}
 }

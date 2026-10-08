@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -473,14 +474,21 @@ func TestEngineInspectionFailureRetainsReservation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	engineContainers = func(context.Context, string) ([]dockercmd.InspectResponse, error) {
-		return nil, errors.New("engine unavailable")
-	}
-	if err := b.ReleaseAuthSession(ctx, ref); err == nil {
-		t.Fatal("inspection failure was accepted as session end")
-	}
-	if err := b.validateAuthReservation(ref); err != nil {
-		t.Fatalf("inspection failure lost reservation: %v", err)
+	for _, failure := range []error{errors.New("engine unavailable"), &exec.Error{Name: b.Name(), Err: exec.ErrNotFound}} {
+		engineContainers = func(context.Context, string) ([]dockercmd.InspectResponse, error) { return nil, failure }
+		for _, action := range []func() error{
+			func() error { return b.ReleaseAuthSession(ctx, ref) },
+			func() error { return b.ResetAuthIdentity(ctx, key) },
+			func() error { return b.DowngradeAuthIdentity(ctx, key) },
+		} {
+			err := action()
+			if !errors.Is(err, failure) || !strings.Contains(err.Error(), b.Name()) || !strings.Contains(err.Error(), ref.Session) || !strings.Contains(err.Error(), "restore engine access") {
+				t.Fatalf("inspection failure lost recovery context: %v", err)
+			}
+			if err := b.validateAuthReservation(ref); err != nil {
+				t.Fatalf("inspection failure lost reservation: %v", err)
+			}
+		}
 	}
 }
 

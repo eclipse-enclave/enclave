@@ -310,6 +310,24 @@ directory mtimes under a temporary HOME (`internal/app/root_guard_test.go`, and
 `cmd/enclave/main_test.go`, the only tests that run with the real embedded
 assets).
 
+Mount guard note: `--allow-sensitive-mounts` is CLI-only and has no config key;
+`ENCLAVE_ALLOW_SENSITIVE_MOUNTS=1` is its only alternative.
+`checkSensitiveMounts` in `internal/app/mount_guard.go` runs in
+`runExecutionCommand` for run actions only, after `--add-dir` validation and
+before the image build. The rule lives in `mounts.SensitivePaths`
+(`internal/mounts/sensitive.go`); callers pass `config.HostAppDataDirs`, the
+platform's per-user application data directories plus enclave's own roots, so
+`mounts` does not depend on `config`. A refusal names the flag or config file
+each additional directory came from. Devcontainer bind sources are not checked
+separately: they must resolve inside the project, and every subdirectory of a
+directory that is not sensitive is not sensitive either
+(`TestSensitivePathsSubdirsOfSafeDirsAreSafe`). External linked-worktree
+metadata is checked in `mounts.AddWorktree` regardless of the opt-in, because
+the `.git` pointer comes from the repository. Tests that touch the rule clear
+`SSH_AUTH_SOCK` in their `TestMain`; the `app` and `runtime` tests, which take
+the directories from the environment, clear `XDG_*` as well, while `mounts`
+tests pass them explicitly.
+
 Config additive note: feature additive directives (`+`/`-`) are applied against
 the implicit default-enabled feature set when `features` is unset. For example,
 `["-node-dev"]` removes that default feature from the implicit set.

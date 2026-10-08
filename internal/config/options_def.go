@@ -1063,6 +1063,27 @@ func OptionDefs() []OptionDef {
 			},
 		},
 		{
+			Name:        "allow_sensitive_mounts",
+			Group:       OptionGroupRun,
+			Kind:        OptionKindBool,
+			OptionField: "AllowSensitiveMounts",
+			SourceField: "AllowSensitiveMounts",
+			Apply:       ApplyNone,
+			CLIFlags: []CLIFlagDef{
+				{
+					Name:      "--allow-sensitive-mounts",
+					Usage:     "Allow mounting the home directory, dotfiles, or per-user app data (unsafe)",
+					ValueKind: CLIValueNone,
+					Action: CLIAction{
+						Kind:        CLIActionSetBool,
+						OptionField: "AllowSensitiveMounts",
+						SourceField: "AllowSensitiveMounts",
+						BoolValue:   true,
+					},
+				},
+			},
+		},
+		{
 			Name:          "project_mount",
 			Group:         OptionGroupRun,
 			Kind:          OptionKindString,

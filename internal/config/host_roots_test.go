@@ -8,7 +8,9 @@
 package config
 
 import (
+	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"enclave/internal/model"
@@ -115,6 +117,67 @@ func TestMacRootsStayDistinct(t *testing.T) {
 	}
 }
 
+func TestXDGAppDataDirs(t *testing.T) {
+	unsetXDGEnv(t)
+	home := "/tmp/xdg-home"
+	t.Setenv("XDG_CONFIG_HOME", "/custom/config")
+	t.Setenv("XDG_CACHE_HOME", "relative/cache")
+	t.Setenv("XDG_RUNTIME_DIR", "/run/user/1000")
+
+	want := []string{
+		"/custom/config",
+		filepath.Join(home, ".local", "share"),
+		filepath.Join(home, ".local", "state"),
+		filepath.Join(home, ".cache"),
+		"/run/user/1000",
+	}
+	if got := xdgAppDataDirs(home); !slices.Equal(got, want) {
+		t.Fatalf("xdgAppDataDirs = %q, want %q", got, want)
+	}
+
+	t.Setenv("XDG_RUNTIME_DIR", "relative/runtime")
+	if got := xdgAppDataDirs(home); slices.Contains(got, "relative/runtime") || len(got) != 4 {
+		t.Fatalf("relative XDG_RUNTIME_DIR must be ignored, got %q", got)
+	}
+}
+
+func TestMacAppDataDirsSkipUserFileFolders(t *testing.T) {
+	home := t.TempDir()
+	library := filepath.Join(home, "Library")
+	for _, name := range []string{"Application Support", "CloudStorage", "Keychains", "Mobile Documents"} {
+		if err := os.MkdirAll(filepath.Join(library, name), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	want := []string{filepath.Join(library, "Application Support"), filepath.Join(library, "Keychains")}
+	if got := macAppDataDirs(home); !slices.Equal(got, want) {
+		t.Fatalf("macAppDataDirs = %q, want %q", got, want)
+	}
+}
+
+func TestMacAppDataDirsFallBackToLibrary(t *testing.T) {
+	home := t.TempDir()
+	want := []string{filepath.Join(home, "Library")}
+	if got := macAppDataDirs(home); !slices.Equal(got, want) {
+		t.Fatalf("macAppDataDirs = %q, want %q", got, want)
+	}
+}
+
+func TestHostAppDataDirsListEnclaveRoots(t *testing.T) {
+	unsetXDGEnv(t)
+	home := t.TempDir()
+	// The config base directory is then home itself, so only the explicit
+	// root keeps enclave's config listed.
+	t.Setenv("XDG_CONFIG_HOME", home)
+
+	got := HostAppDataDirs(home)
+	for _, root := range []string{HostConfigRootDir(home), HostStateRootDir(home), HostCacheDir(home)} {
+		if !slices.Contains(got, root) {
+			t.Errorf("HostAppDataDirs = %q, missing enclave root %q", got, root)
+		}
+	}
+}
+
 // isUnder reports whether path equals root or is nested beneath it.
 func isUnder(path string, root string) bool {
 	if path == root {
@@ -127,7 +190,7 @@ func isUnder(path string, root string) bool {
 // environment does not leak into tests that assert the spec fallbacks.
 func unsetXDGEnv(t *testing.T) {
 	t.Helper()
-	for _, key := range []string{"XDG_CONFIG_HOME", "XDG_STATE_HOME", "XDG_CACHE_HOME"} {
+	for _, key := range []string{"XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "XDG_CACHE_HOME", "XDG_RUNTIME_DIR"} {
 		t.Setenv(key, "")
 	}
 }

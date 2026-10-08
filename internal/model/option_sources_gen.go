@@ -23,31 +23,32 @@ type GlobalOptionSources struct {
 }
 
 type RunOptionSources struct {
-	AddDirs          OptionSource
-	AddReadonlyDirs  OptionSource
-	AllowAllNetwork  OptionSource
-	AllowDomains     OptionSource
-	Backend          OptionSource
-	BridgePorts      OptionSource
-	Ephemeral        OptionSource
-	HostConfig       OptionSource
-	HostConfigPaths  OptionSource
-	ImageInbox       OptionSource
-	NetworkLog       OptionSource
-	NoCache          OptionSource
-	NoHistory        OptionSource
-	NoMemory         OptionSource
-	PlaywrightMCP    OptionSource
-	Ports            OptionSource
-	ProjectMount     OptionSource
-	SessionMonitor   OptionSource
-	SessionName      OptionSource
-	SessionTint      OptionSource
-	SkillsValidation OptionSource
-	Timezone         OptionSource
-	Tool             OptionSource
-	WorktreeMetadata OptionSource
-	Yolo             OptionSource
+	AddDirs              OptionSource
+	AddReadonlyDirs      OptionSource
+	AllowAllNetwork      OptionSource
+	AllowDomains         OptionSource
+	AllowSensitiveMounts OptionSource
+	Backend              OptionSource
+	BridgePorts          OptionSource
+	Ephemeral            OptionSource
+	HostConfig           OptionSource
+	HostConfigPaths      OptionSource
+	ImageInbox           OptionSource
+	NetworkLog           OptionSource
+	NoCache              OptionSource
+	NoHistory            OptionSource
+	NoMemory             OptionSource
+	PlaywrightMCP        OptionSource
+	Ports                OptionSource
+	ProjectMount         OptionSource
+	SessionMonitor       OptionSource
+	SessionName          OptionSource
+	SessionTint          OptionSource
+	SkillsValidation     OptionSource
+	Timezone             OptionSource
+	Tool                 OptionSource
+	WorktreeMetadata     OptionSource
+	Yolo                 OptionSource
 }
 
 type AuthOptionSources struct {
@@ -89,31 +90,32 @@ func DefaultOptionSources() OptionSources {
 			Verbose:   SourceDefault,
 		},
 		RunOptionSources: RunOptionSources{
-			AddDirs:          SourceDefault,
-			AddReadonlyDirs:  SourceDefault,
-			AllowAllNetwork:  SourceDefault,
-			AllowDomains:     SourceDefault,
-			Backend:          SourceDefault,
-			BridgePorts:      SourceDefault,
-			Ephemeral:        SourceDefault,
-			HostConfig:       SourceDefault,
-			HostConfigPaths:  SourceDefault,
-			ImageInbox:       SourceDefault,
-			NetworkLog:       SourceDefault,
-			NoCache:          SourceDefault,
-			NoHistory:        SourceDefault,
-			NoMemory:         SourceDefault,
-			PlaywrightMCP:    SourceDefault,
-			Ports:            SourceDefault,
-			ProjectMount:     SourceDefault,
-			SessionMonitor:   SourceDefault,
-			SessionName:      SourceDefault,
-			SessionTint:      SourceDefault,
-			SkillsValidation: SourceDefault,
-			Timezone:         SourceDefault,
-			Tool:             SourceDefault,
-			WorktreeMetadata: SourceDefault,
-			Yolo:             SourceDefault,
+			AddDirs:              SourceDefault,
+			AddReadonlyDirs:      SourceDefault,
+			AllowAllNetwork:      SourceDefault,
+			AllowDomains:         SourceDefault,
+			AllowSensitiveMounts: SourceDefault,
+			Backend:              SourceDefault,
+			BridgePorts:          SourceDefault,
+			Ephemeral:            SourceDefault,
+			HostConfig:           SourceDefault,
+			HostConfigPaths:      SourceDefault,
+			ImageInbox:           SourceDefault,
+			NetworkLog:           SourceDefault,
+			NoCache:              SourceDefault,
+			NoHistory:            SourceDefault,
+			NoMemory:             SourceDefault,
+			PlaywrightMCP:        SourceDefault,
+			Ports:                SourceDefault,
+			ProjectMount:         SourceDefault,
+			SessionMonitor:       SourceDefault,
+			SessionName:          SourceDefault,
+			SessionTint:          SourceDefault,
+			SkillsValidation:     SourceDefault,
+			Timezone:             SourceDefault,
+			Tool:                 SourceDefault,
+			WorktreeMetadata:     SourceDefault,
+			Yolo:                 SourceDefault,
 		},
 		AuthOptionSources: AuthOptionSources{
 			AuthName:     SourceDefault,
@@ -161,6 +163,9 @@ func MergeOptionSources(base OptionSources, override OptionSources) OptionSource
 	}
 	if override.AllowRoot != SourceUnset {
 		base.AllowRoot = override.AllowRoot
+	}
+	if override.AllowSensitiveMounts != SourceUnset {
+		base.AllowSensitiveMounts = override.AllowSensitiveMounts
 	}
 	if override.AuthName != SourceUnset {
 		base.AuthName = override.AuthName

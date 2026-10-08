@@ -97,6 +97,17 @@ func runExecutionCommand(input *CommandInput) int {
 		logx.Errorf(err.Error())
 		return 1
 	}
+	// exec enters an existing container, so it mounts nothing.
+	if isRunAction(input.Action) {
+		additional := []additionalDirs{
+			{dirs: validatedDirs, flag: "--add-dir", key: "add_dirs", source: opts.Sources.AddDirs},
+			{dirs: validatedReadonlyDirs, flag: "--add-readonly-dir", key: "add_readonly_dirs", source: opts.Sources.AddReadonlyDirs},
+		}
+		if err := checkSensitiveMounts(project, additional, host.Home, opts.AllowSensitiveMounts); err != nil {
+			logx.Errorf("%v", err)
+			return 1
+		}
+	}
 
 	resolvedBuildConfig, code := ensureRuntimeImage(input, opts, buildCfg, host, profile)
 	if code != 0 {

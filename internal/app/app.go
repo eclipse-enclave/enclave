@@ -109,6 +109,8 @@ func Run(args []string) int {
 		}
 	}
 
+	// Folded like --allow-root, so `enclave config` reports the env opt-in too.
+	parsed.Options.AllowSensitiveMounts = sensitiveMountsAllowed(parsed.Options.AllowSensitiveMounts)
 	cliOpts := parsed.Options
 	cliSources := parsed.Sources
 	opts, toolDefaults, hasToolDefaults := config.ResolveOptionsForTool(cliOpts, cliSources, globalDefaults, projectDefaults, "")

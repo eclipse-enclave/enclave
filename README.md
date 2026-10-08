@@ -63,7 +63,11 @@ and account for the group's root-equivalent privileges.
 
 Run enclave as that regular user, not through `sudo`: enclave refuses to run as
 root unless you pass `--allow-root` or set `ENCLAVE_ALLOW_ROOT=1` (see
-[Running as root](docs/cli-reference.md#running-as-root)).
+[Running as root](docs/cli-reference.md#running-as-root)). Run it from a project
+directory, too: it refuses to mount your home directory, hidden home entries
+such as `~/.ssh`, or other sensitive host data unless you pass
+`--allow-sensitive-mounts` (see
+[Sensitive mounts](docs/cli-reference.md#sensitive-mounts)).
 
 On macOS, install Docker Desktop and the source-build dependencies above.
 

@@ -93,3 +93,57 @@ func macStateRoot(home string) string {
 func macCacheRoot(home string) string {
 	return filepath.Join(home, "Library", "Caches", model.AppID)
 }
+
+// HostAppDataDirs returns the per-user directories where applications keep
+// their config, data, state, caches, and runtime files: the XDG base
+// directories on Linux and other Unixes, and the entries of ~/Library on macOS
+// except the folders that hold the user's own synced files. Enclave's own roots
+// are listed on their own: an XDG override such as XDG_CONFIG_HOME=$HOME makes
+// a base directory home itself, which cannot be protected without protecting
+// everything under it.
+func HostAppDataDirs(home string) []string {
+	var dirs []string
+	if runtime.GOOS == "darwin" {
+		dirs = macAppDataDirs(home)
+	} else {
+		dirs = xdgAppDataDirs(home)
+	}
+	return append(dirs, hostConfigRoot(home), hostStateRoot(home), hostCacheRoot(home))
+}
+
+func xdgAppDataDirs(home string) []string {
+	dirs := []string{
+		xdgBaseDir("XDG_CONFIG_HOME", home, ".config"),
+		xdgBaseDir("XDG_DATA_HOME", home, filepath.Join(".local", "share")),
+		xdgBaseDir("XDG_STATE_HOME", home, filepath.Join(".local", "state")),
+		xdgBaseDir("XDG_CACHE_HOME", home, ".cache"),
+	}
+	// XDG_RUNTIME_DIR has no fallback: when it is unset there is none.
+	if dir := os.Getenv("XDG_RUNTIME_DIR"); filepath.IsAbs(dir) {
+		dirs = append(dirs, dir)
+	}
+	return dirs
+}
+
+// macUserFileDirs are the ~/Library entries where File Provider clients
+// (Dropbox, OneDrive, Google Drive) and iCloud Drive keep the user's own
+// files, which may include projects.
+var macUserFileDirs = map[string]bool{
+	"CloudStorage":     true,
+	"Mobile Documents": true,
+}
+
+func macAppDataDirs(home string) []string {
+	library := filepath.Join(home, "Library")
+	entries, err := os.ReadDir(library)
+	if err != nil {
+		return []string{library}
+	}
+	var dirs []string
+	for _, entry := range entries {
+		if !macUserFileDirs[entry.Name()] {
+			dirs = append(dirs, filepath.Join(library, entry.Name()))
+		}
+	}
+	return dirs
+}

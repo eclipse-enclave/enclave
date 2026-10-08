@@ -117,6 +117,14 @@ func RealPathWithin(root string, path string) (bool, error) {
 	return PathWithin(resolvedRoot, resolvedPath), nil
 }
 
+// RealPath returns path made absolute with its symlinks resolved. A missing
+// tail is kept as is under its resolved existing parent, so a directory that
+// will be created later resolves to where it will live. Other resolution
+// errors, and an empty path, are returned.
+func RealPath(path string) (string, error) {
+	return realPathForContainment(path, true)
+}
+
 func realPathForContainment(path string, allowMissing bool) (string, error) {
 	if strings.TrimSpace(path) == "" {
 		return "", fs.ErrInvalid

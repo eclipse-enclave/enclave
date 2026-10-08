@@ -216,6 +216,7 @@ store that holds memory; the other `--keep` kinds do not apply there. See
 | `--bridge-port <port>` | Forward a host port into the container (host → container, repeatable, comma-separated) |
 | `--add-dir <path>` | Mount an additional host directory |
 | `--add-readonly-dir <path>` | Mount an additional host directory read-only |
+| `--allow-sensitive-mounts` | Mount the project or additional directories even when they expose sensitive host data (CLI-only). See [Sensitive mounts](#sensitive-mounts) |
 | `--project-mount <writable\|readonly>` | Mount the project/worktree read-write (default) or read-only |
 | `--worktree-metadata <follow\|readonly\|none>` | Linked-worktree git metadata mounts: follow the project mount (default), force read-only, or skip |
 | `--yolo` | Enable YOLO mode explicitly |
@@ -306,6 +307,22 @@ The menu lists every installed agent. The IDE profiles (`theia`, `theia-next`) a
 enclave refuses to run as root, including through `sudo`. The agent's container user takes the host UID, so as root the agent would run as UID 0, which is host root on bind-mounted directories under rootful Docker. Files enclave and the agent write, both in the project and in the stores under the config, state, and cache roots, would become root-owned, and later runs as the regular user fail on them (with `sudo -E`, those roots are in the regular user's home). Run enclave as a regular user with access to the Docker socket (see the [requirements](../README.md#requirements)), or use rootless podman with `--backend podman`.
 
 To skip this check, for example in a CI job container, pass `--allow-root` or set `ENCLAVE_ALLOW_ROOT=1`; each such run prints a warning. The opt-in only skips the check: running as root stays unsupported, and the runtime image cannot be built for UID 0 yet. The opt-in has no config key, so neither global nor project config can grant it. Help, version, and shell completion work without it and write nothing.
+
+## Sensitive mounts
+
+Commands that start a session (`run`, `shell`, `continue`, `resume`, the `devcontainer` variants, and session user commands) refuse to mount a project directory or an `--add-dir`/`--add-readonly-dir` entry, including `add_dirs` from config, that would expose sensitive host data. Such a directory is sensitive when it:
+
+- is your home directory or one of its parents, such as `/` or `/home`; running enclave from `~` is refused
+- is, lies inside, or contains a hidden entry of your home directory, such as `~/.ssh`, `~/.aws`, `~/.config`, or `~/.bashrc`; a hidden entry that is a symlink counts where it points, so a stow-managed dotfiles directory is sensitive too
+- is, lies inside, or contains a per-user application data directory: the XDG config, data, state, cache, and runtime directories on Linux (honoring `XDG_*` overrides), or the entries of `~/Library` on macOS except `CloudStorage` and `Mobile Documents`, which hold your own synced files
+- is, lies inside, or contains enclave's own config, state, or cache root
+- contains the SSH agent socket named by `SSH_AUTH_SOCK`
+
+Read-only mounts get no exemption: reading is enough to leak credentials. The check runs before any image build and on every session start, including `continue` and `resume`. `exec` and `attach` enter running containers and are not checked.
+
+To mount such a directory anyway, pass `--allow-sensitive-mounts` or set `ENCLAVE_ALLOW_SENSITIVE_MOUNTS=1`; each sensitive mount then prints a warning. The opt-in has no config key, so neither global nor project config can grant it. Mounts from the repository stay blocked even with the opt-in: devcontainer bind sources must lie inside the project, and linked-worktree git metadata outside the project is skipped with a warning when it is sensitive.
+
+The mounts enclave adds itself, such as `~/.gitconfig`, `~/.claude/ide` for the IDE bridge, direnv approvals, and the session stores, come from protected locations by design and are not checked.
 
 ## Backend detection
 

@@ -15,7 +15,9 @@ import (
 func TestMain(m *testing.M) {
 	// Keep host config overrides from redirecting tests that use t.TempDir()
 	// as their home into the real host's config and state directories.
-	for _, key := range []string{"XDG_CONFIG_HOME", "XDG_STATE_HOME", "XDG_CACHE_HOME", "XDG_DATA_HOME", "GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM", "GIT_CONFIG_COUNT"} {
+	// XDG_RUNTIME_DIR and SSH_AUTH_SOCK are protected from worktree mounts, so
+	// they would change which mounts tests get.
+	for _, key := range []string{"XDG_CONFIG_HOME", "XDG_STATE_HOME", "XDG_CACHE_HOME", "XDG_DATA_HOME", "XDG_RUNTIME_DIR", "SSH_AUTH_SOCK", "GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM", "GIT_CONFIG_COUNT"} {
 		if err := os.Unsetenv(key); err != nil {
 			panic(err)
 		}

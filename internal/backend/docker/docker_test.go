@@ -23,6 +23,27 @@ import (
 	"enclave/internal/util"
 )
 
+// prepareRunSession names the session and serves its per-session network from
+// a stub, so a mount-focused prepareRun test neither fails the name check nor
+// creates a real network.
+func prepareRunSession(t *testing.T) backend.SessionMeta {
+	t.Helper()
+	restoreNetworkGlobals(t)
+	meta := backend.SessionMeta{Name: "enclave-claude-abc123abc123-main", ProjectHash: "abc123abc123"}
+	networkInspect = func(context.Context, string) (dockercmd.NetworkInspectResponse, error) {
+		return dockercmd.NetworkInspectResponse{
+			Name:   sessionNetworkName(meta.Name),
+			ID:     "network-id",
+			Labels: sessionNetworkLabels(meta),
+		}, nil
+	}
+	networkCreate = func(context.Context, dockercmd.NetworkCreateOptions) (string, error) {
+		t.Fatal("prepareRun must reuse the stubbed session network")
+		return "", nil
+	}
+	return meta
+}
+
 func TestPrepareRunProtectsGitConfigFromRunArgAliases(t *testing.T) {
 	project := t.TempDir()
 	configPath := filepath.Join(project, ".gitconfig")
@@ -32,6 +53,7 @@ func TestPrepareRunProtectsGitConfigFromRunArgAliases(t *testing.T) {
 	b := newDevcontainerBackend(project, "--volume", project+":/alias", "--volume", configPath+":/direct")
 	spec, err := b.prepareRun(context.Background(), backend.Request{
 		Image:          "test",
+		Session:        prepareRunSession(t),
 		ProtectedFiles: []string{configPath},
 		Network:        backend.NetworkPolicy{Mode: backend.NetworkModeUnrestricted},
 		Mounts:         []backend.Mount{{Type: backend.MountTypeBind, Source: configPath, ContainerPath: "/workspace/.gitconfig", ReadOnly: true}},
@@ -61,6 +83,7 @@ func TestPrepareRunDoesNotProtectUnrelatedReadOnlyFileAliases(t *testing.T) {
 	b := newDevcontainerBackend(project, "--volume", project+":/alias", "--volume", path+":/direct")
 	spec, err := b.prepareRun(context.Background(), backend.Request{
 		Image:   "test",
+		Session: prepareRunSession(t),
 		Network: backend.NetworkPolicy{Mode: backend.NetworkModeUnrestricted},
 		Mounts:  []backend.Mount{{Type: backend.MountTypeBind, Source: path, ContainerPath: "/preferences", ReadOnly: true}},
 	})

@@ -172,7 +172,7 @@ func TestAddWorktree_RejectsGitdirOutsideProject_HomeSSH(t *testing.T) {
 	project := model.Project{Dir: projectDir, RealDir: projectDir, Name: "project"}
 	var mountArgs []backend.Mount
 	validated := []string{}
-	AddWorktree(&mountArgs, project, &validated, false)
+	AddWorktree(&mountArgs, project, &validated, false, "")
 
 	if len(mountArgs) != 0 {
 		t.Fatalf("expected no mounts for outside-project gitdir, got %v", mountArgs)
@@ -186,7 +186,7 @@ func TestAddWorktree_RejectsGitdirInSystemDir(t *testing.T) {
 	project, _ := makeProject(t, "gitdir: /etc\n")
 	var mountArgs []backend.Mount
 	validated := []string{}
-	AddWorktree(&mountArgs, project, &validated, false)
+	AddWorktree(&mountArgs, project, &validated, false, "")
 	if len(mountArgs) != 0 {
 		t.Fatalf("expected no mounts for /etc gitdir, got %v", mountArgs)
 	}
@@ -220,7 +220,7 @@ func TestAddWorktree_AllowsVerifiedExternalLinkedWorktree(t *testing.T) {
 	project := model.Project{Dir: projectDir, RealDir: projectDir, Name: "project"}
 	var mountArgs []backend.Mount
 	validated := []string{}
-	AddWorktree(&mountArgs, project, &validated, false)
+	AddWorktree(&mountArgs, project, &validated, false, resolvedRoot)
 
 	if len(mountArgs) != 2 {
 		t.Fatalf("expected gitdir + commondir mounts, got %d: %v", len(mountArgs), mountArgs)
@@ -235,6 +235,47 @@ func TestAddWorktree_AllowsVerifiedExternalLinkedWorktree(t *testing.T) {
 	}
 	if mountArgs[1].Source != commonDir {
 		t.Fatalf("commondir mount source: got %q want %q", mountArgs[1].Source, commonDir)
+	}
+}
+
+func TestAddWorktree_RejectsSensitiveExternalWorktree(t *testing.T) {
+	home, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatalf("resolve tempdir: %v", err)
+	}
+	projectDir := filepath.Join(home, "code", "dots")
+	commonDir := filepath.Join(home, ".dotfiles")
+	gitdir := filepath.Join(commonDir, "worktrees", "dots")
+	for _, dir := range []string{projectDir, gitdir} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("create %s: %v", dir, err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(projectDir, ".git"), []byte("gitdir: "+gitdir+"\n"), 0o644); err != nil {
+		t.Fatalf("write project .git: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(gitdir, "gitdir"), []byte(filepath.Join(projectDir, ".git")+"\n"), 0o644); err != nil {
+		t.Fatalf("write gitdir back pointer: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(gitdir, "commondir"), []byte("../..\n"), 0o644); err != nil {
+		t.Fatalf("write commondir: %v", err)
+	}
+
+	project := model.Project{Dir: projectDir, RealDir: projectDir, Name: "dots"}
+	// Without a home nothing is sensitive, so the fixture mounts both paths:
+	// the refusal below comes from the sensitive-path check.
+	var control []backend.Mount
+	AddWorktree(&control, project, &[]string{}, false, "")
+	if len(control) != 2 {
+		t.Fatalf("fixture is not a verified external worktree, got %v", control)
+	}
+
+	var mountArgs []backend.Mount
+	validated := []string{}
+	AddWorktree(&mountArgs, project, &validated, false, home)
+
+	if len(mountArgs) != 0 {
+		t.Fatalf("expected no mounts for a worktree whose repository is in ~/.dotfiles, got %v", mountArgs)
 	}
 }
 
@@ -273,7 +314,7 @@ func TestAddWorktree_RejectsForgedExternalWorktreeForDifferentProject(t *testing
 	project := model.Project{Dir: attackerDir, RealDir: attackerDir, Name: "attacker"}
 	var mountArgs []backend.Mount
 	validated := []string{}
-	AddWorktree(&mountArgs, project, &validated, false)
+	AddWorktree(&mountArgs, project, &validated, false, "")
 
 	if len(mountArgs) != 0 {
 		t.Fatalf("expected no mounts for forged external worktree pointer, got %v", mountArgs)
@@ -316,7 +357,7 @@ func TestAddWorktree_RejectsSymlinkedGitFile(t *testing.T) {
 	project := model.Project{Dir: attackerDir, RealDir: attackerDir, Name: "attacker"}
 	var mountArgs []backend.Mount
 	validated := []string{}
-	AddWorktree(&mountArgs, project, &validated, false)
+	AddWorktree(&mountArgs, project, &validated, false, "")
 
 	if len(mountArgs) != 0 {
 		t.Fatalf("expected no mounts for symlinked .git file, got %v", mountArgs)
@@ -352,7 +393,7 @@ func TestAddWorktree_AllowsLegitimateGitdirInsideProject(t *testing.T) {
 	project := model.Project{Dir: projectDir, RealDir: projectDir, Name: "project"}
 	var mountArgs []backend.Mount
 	validated := []string{}
-	AddWorktree(&mountArgs, project, &validated, false)
+	AddWorktree(&mountArgs, project, &validated, false, "")
 
 	if len(mountArgs) != 1 {
 		t.Fatalf("expected exactly one gitdir mount, got %d: %v", len(mountArgs), mountArgs)
@@ -383,7 +424,7 @@ func TestAddWorktree_ReadOnlyMountsMetadata(t *testing.T) {
 	project := model.Project{Dir: projectDir, RealDir: projectDir, Name: "project"}
 	var mountArgs []backend.Mount
 	validated := []string{}
-	AddWorktree(&mountArgs, project, &validated, true)
+	AddWorktree(&mountArgs, project, &validated, true, "")
 
 	if len(mountArgs) != 1 {
 		t.Fatalf("expected exactly one gitdir mount, got %d: %v", len(mountArgs), mountArgs)
@@ -418,7 +459,7 @@ func TestAddWorktree_RejectsCommondirOutsideProject(t *testing.T) {
 	project := model.Project{Dir: projectDir, RealDir: projectDir, Name: "project"}
 	var mountArgs []backend.Mount
 	validated := []string{}
-	AddWorktree(&mountArgs, project, &validated, false)
+	AddWorktree(&mountArgs, project, &validated, false, "")
 
 	// The benign in-project gitdir should still be mounted, but commondir must not.
 	if len(mountArgs) != 1 {
@@ -458,7 +499,7 @@ func TestAddWorktree_AllowsCommondirInsideProject(t *testing.T) {
 	project := model.Project{Dir: projectDir, RealDir: projectDir, Name: "project"}
 	var mountArgs []backend.Mount
 	validated := []string{}
-	AddWorktree(&mountArgs, project, &validated, false)
+	AddWorktree(&mountArgs, project, &validated, false, "")
 
 	if len(mountArgs) != 2 {
 		t.Fatalf("expected gitdir + commondir mounts, got %d: %v", len(mountArgs), mountArgs)

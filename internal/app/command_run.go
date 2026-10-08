@@ -11,6 +11,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -96,6 +97,13 @@ func runExecutionCommand(input *CommandInput) int {
 	if err != nil {
 		logx.Errorf(err.Error())
 		return 1
+	}
+	// exec enters an existing container, so it mounts nothing.
+	if isRunAction(input.Action) {
+		if err := checkSensitiveMounts(project.RealDir, slices.Concat(validatedDirs, validatedReadonlyDirs), host.Home, opts.AllowSensitiveMounts); err != nil {
+			logx.Errorf("%v", err)
+			return 1
+		}
 	}
 
 	resolvedBuildConfig, code := ensureRuntimeImage(input, opts, buildCfg, host, profile)

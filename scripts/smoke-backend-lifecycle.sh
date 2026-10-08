@@ -22,7 +22,9 @@ set -u
 
 REPO_ROOT=$(cd "$(dirname "$0")/.." && pwd)
 CLI_BIN=${CLI_BIN:-$REPO_ROOT/bin/enclave}
-SMOKE_ROOT=${SMOKE_ROOT:-$HOME/.enclave-smoke}
+# Outside home: enclave refuses to mount hidden home directories. Stable across
+# invocations, so steps run separately share their projects.
+SMOKE_ROOT=${SMOKE_ROOT:-${TMPDIR:-/tmp}/enclave-smoke-$(id -u)}
 P1=$SMOKE_ROOT/project1
 P2=$SMOKE_ROOT/project2
 

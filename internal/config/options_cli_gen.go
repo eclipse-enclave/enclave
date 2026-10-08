@@ -316,6 +316,12 @@ func optionCLIFlags() map[string][]CLIFlag {
 				return nil
 			}),
 		},
+		"allow_sensitive_mounts": {
+			boolFlag("--allow-sensitive-mounts", "Allow mounting the home directory, dotfiles, or per-user app data (unsafe)", func(opts *model.Options, sources *model.OptionSources) {
+				opts.AllowSensitiveMounts = true
+				sources.AllowSensitiveMounts = model.SourceCLI
+			}),
+		},
 		"project_mount": {
 			valueFlag("--project-mount", "Project mount mode: writable|readonly", "--project-mount requires a value (writable|readonly)", func(opts *model.Options, sources *model.OptionSources, value string) error {
 				if err := applyProjectMount(opts, value); err != nil {

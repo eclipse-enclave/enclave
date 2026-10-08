@@ -1342,6 +1342,38 @@ func TestParseAllowRootIsGlobal(t *testing.T) {
 	}
 }
 
+// --allow-sensitive-mounts is a session flag: commands that start a container
+// accept it, others reject it.
+func TestParseAllowSensitiveMountsIsSessionFlag(t *testing.T) {
+	cmds := []usercmd.Command{{Name: "triage", Path: "/p/triage", Target: usercmd.TargetSession}}
+	for _, tc := range []struct {
+		args   []string
+		action string
+	}{
+		{args: []string{"--allow-sensitive-mounts"}, action: "run"},
+		{args: []string{"shell", "--allow-sensitive-mounts"}, action: "shell"},
+		{args: []string{"devcontainer", "shell", "--allow-sensitive-mounts"}, action: "shell"},
+		{args: []string{"--allow-sensitive-mounts", "triage"}, action: "user-command"},
+	} {
+		res, err := Parse(tc.args, config.DefaultOptions(), cmds...)
+		if err != nil {
+			t.Fatalf("Parse(%q) failed: %v", tc.args, err)
+		}
+		if res.Action != tc.action {
+			t.Errorf("Parse(%q): action %q, want %q", tc.args, res.Action, tc.action)
+		}
+		if !res.Options.AllowSensitiveMounts || res.Sources.AllowSensitiveMounts != model.SourceCLI {
+			t.Errorf("Parse(%q): AllowSensitiveMounts=%v source=%v, want true from the CLI", tc.args, res.Options.AllowSensitiveMounts, res.Sources.AllowSensitiveMounts)
+		}
+	}
+
+	for _, args := range [][]string{{"ps", "--allow-sensitive-mounts"}, {"exec", "--allow-sensitive-mounts"}} {
+		if _, err := Parse(args, config.DefaultOptions()); err == nil {
+			t.Errorf("Parse(%q): expected an unknown-flag error", args)
+		}
+	}
+}
+
 func TestParseUserCommandHostRejectsSessionFlag(t *testing.T) {
 	defaults := config.DefaultOptions()
 	cmds := []usercmd.Command{{Name: "deploy", Path: "/p/deploy", Target: usercmd.TargetHost}}

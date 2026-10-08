@@ -317,6 +317,7 @@ Merge semantics:
 | `ENCLAVE_AGENT_UPDATE_INTERVAL_HOURS` | Minimum hours after a tool's last successful automatic update before `check-update.sh` is eligible to probe again (`0` = always) |
 | `ENCLAVE_DEVCONTAINER_REWRITE_VARS` | Comma-separated extra env var names for devcontainer home-path normalization |
 | `ENCLAVE_ALLOW_ROOT` | Set to `1` to skip the root check (same as `--allow-root`); see [Running as root](cli-reference.md#running-as-root) |
+| `ENCLAVE_ALLOW_SENSITIVE_MOUNTS` | Set to `1` to mount sensitive host directories anyway (same as `--allow-sensitive-mounts`); see [Sensitive mounts](cli-reference.md#sensitive-mounts) |
 
 These are read by the Windows launcher on the Windows side only, and are not
 forwarded into the WSL2 distribution. See [windows.md](windows.md).
@@ -333,6 +334,10 @@ for event/offline runs.
 
 `--allow-root` is CLI-only as well; `ENCLAVE_ALLOW_ROOT=1` is its only
 alternative, so no config file can let enclave run as root.
+`--allow-sensitive-mounts` is CLI-only too; `ENCLAVE_ALLOW_SENSITIVE_MOUNTS=1`
+is its only alternative, so no config file can let a session mount sensitive
+host data. `add_dirs` and `add_readonly_dirs` entries from config are checked
+like `--add-dir`.
 
 The experimental `qemu` backend only runs unrestricted, slim/no-feature bundles, so selecting it implies `allow_all_network=true` and `slim=true` automatically (with a per-run notice). Requesting features or an allowlist (`--allow-domain`) is rejected because the backend cannot honor them.
 

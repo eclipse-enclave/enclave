@@ -19,8 +19,13 @@ workflow. Rootless Docker is [not supported](rootless.md); rootless podman is, t
 - `--worktree-metadata readonly|none` protects or omits linked-worktree
   gitdir/commondir mounts independently of the working tree. With read-only Git
   metadata, in-container Git writes such as `git add` fail.
-- Additional host directories are explicit CLI/config inputs. Mounting sensitive
-  paths expands the sandbox's host access.
+- Additional host directories are explicit CLI/config inputs. Enclave refuses
+  to mount a project or additional directory that is the home directory or one
+  of its parents, or that overlaps a hidden home entry, a per-user application
+  data directory, enclave's own roots, or the SSH agent socket, read-only or
+  not. `--allow-sensitive-mounts` or `ENCLAVE_ALLOW_SENSITIVE_MOUNTS=1`
+  overrides this; no config file can, and devcontainer or `.git`-pointer mounts
+  stay blocked. See [Sensitive mounts](../cli-reference.md#sensitive-mounts).
 - Per-project Enclave config is keyed by project hash under the host config root,
   outside the worktree. Project-scoped config cannot enable guarded options such
   as unrestricted networking or writable project mounts.

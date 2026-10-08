@@ -1132,7 +1132,7 @@ func (r *Runtime) addWorktreeMetadataMounts(mountArgs *mountAccumulator) {
 	validated := append([]string{}, r.validatedDirs...)
 	validated = append(validated, r.validatedReadonlyDirs...)
 	readOnly := mode == model.WorktreeMetadataReadonly || model.ProjectMountIsReadonly(r.run.ProjectMount)
-	mounts.AddWorktree(mountArgs.MountsPtr(), r.project, &validated, readOnly)
+	mounts.AddWorktree(mountArgs.MountsPtr(), r.project, &validated, readOnly, r.host.Home)
 }
 
 func (r *Runtime) addAdditionalMounts(mountArgs *mountAccumulator) {

@@ -244,7 +244,10 @@ func ProtectFiles(existing []backend.Mount, paths []string) ([]backend.Mount, er
 	return result, nil
 }
 
-func AddWorktree(mounts *[]backend.Mount, project model.Project, validatedDirs *[]string, readOnly bool) {
+// AddWorktree mounts the gitdir and commondir a linked worktree's .git file
+// points to. home locates the sensitive paths a verified external worktree
+// must not expose.
+func AddWorktree(mounts *[]backend.Mount, project model.Project, validatedDirs *[]string, readOnly bool, home string) {
 	gitFile := filepath.Join(project.Dir, ".git")
 	data, err := readRegularFileInDir(project.Dir, ".git")
 	if errors.Is(err, errSymlinkFile) {
@@ -278,8 +281,14 @@ func AddWorktree(mounts *[]backend.Mount, project model.Project, validatedDirs *
 
 	commondirPath, hasCommondir := resolveWorktreeCommondir(gitdirPath)
 	allowExternal := hasCommondir && isVerifiedExternalWorktree(project, gitdirPath, commondirPath)
+	// Paths inside the project are exposed by the project mount anyway, so
+	// only a verified external worktree's paths need the sensitive-path check.
+	var sensitive SensitivePaths
+	if allowExternal {
+		sensitive = NewSensitivePaths(home)
+	}
 
-	if realPath, ok := validateWorktreeMountPath(gitdirPath, validatedDirs, project.RealDir, "gitdir", allowExternal); ok {
+	if realPath, ok := validateWorktreeMountPath(gitdirPath, validatedDirs, project.RealDir, "gitdir", allowExternal, sensitive); ok {
 		*mounts = append(*mounts, backend.Mount{
 			Type:          backend.MountTypeBind,
 			Source:        realPath,
@@ -293,7 +302,7 @@ func AddWorktree(mounts *[]backend.Mount, project model.Project, validatedDirs *
 		return
 	}
 
-	if realPath, ok := validateWorktreeMountPath(commondirPath, validatedDirs, project.RealDir, "commondir", allowExternal); ok {
+	if realPath, ok := validateWorktreeMountPath(commondirPath, validatedDirs, project.RealDir, "commondir", allowExternal, sensitive); ok {
 		*mounts = append(*mounts, backend.Mount{
 			Type:          backend.MountTypeBind,
 			Source:        realPath,
@@ -422,8 +431,10 @@ func resolveExistingPath(path string) (string, error) {
 // repo's `.git` pointer. The path must resolve to inside project.RealDir unless
 // it belongs to a verified external linked-worktree relationship. System
 // directories are hard-blocked (unlike --add-dir, where IsSystemDir is only
-// warned). Returns the resolved path and true on success.
-func validateWorktreeMountPath(path string, validatedDirs *[]string, projectReal string, label string, allowExternal bool) (string, bool) {
+// warned), and so are sensitive paths outside the project, even with
+// --allow-sensitive-mounts: the pointer comes from the repository. Returns the
+// resolved path and true on success.
+func validateWorktreeMountPath(path string, validatedDirs *[]string, projectReal string, label string, allowExternal bool, sensitive SensitivePaths) (string, bool) {
 	if !allowExternal && !util.PathWithin(projectReal, path) {
 		logx.Warnf("Ignoring .git %s pointer outside project dir: %s", label, path)
 		return "", false
@@ -431,6 +442,12 @@ func validateWorktreeMountPath(path string, validatedDirs *[]string, projectReal
 	if util.IsSystemDir(path) {
 		logx.Warnf("Refusing to mount worktree %s in system directory: %s", label, path)
 		return "", false
+	}
+	if !util.PathWithin(projectReal, path) {
+		if reason := sensitive.Reason(path); reason != "" {
+			logx.Warnf("Refusing to mount worktree %s %s: it %s", label, path, reason)
+			return "", false
+		}
 	}
 	realPath, skip, err := validateDirPath(path, validatedDirs, projectReal, "")
 	if err != nil {

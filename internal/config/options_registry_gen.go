@@ -413,6 +413,10 @@ func OptionSpecs() []OptionSpec {
 			},
 		},
 		{
+			Name:  "allow_sensitive_mounts",
+			Group: OptionGroupRun,
+		},
+		{
 			Name:  "project_mount",
 			Group: OptionGroupRun,
 			ApplyDefaultsWithSource: func(opts *model.Options, defaults Defaults, source model.OptionSource, sources *model.OptionSources) {

@@ -9,7 +9,6 @@ package app
 
 import (
 	"encoding/json"
-	"io"
 	"os"
 	"strings"
 	"testing"
@@ -191,6 +190,7 @@ func captureStdout(t *testing.T, fn func()) string {
 	if err != nil {
 		t.Fatalf("create pipe: %v", err)
 	}
+	outCh := drainPipe(reader)
 	os.Stdout = writer
 
 	defer func() {
@@ -202,14 +202,11 @@ func captureStdout(t *testing.T, fn func()) string {
 	if err := writer.Close(); err != nil {
 		t.Fatalf("close writer: %v", err)
 	}
-	data, err := io.ReadAll(reader)
-	if err != nil {
-		t.Fatalf("read stdout: %v", err)
+	res := <-outCh
+	if res.err != nil {
+		t.Fatalf("read stdout: %v", res.err)
 	}
-	if err := reader.Close(); err != nil {
-		t.Fatalf("close reader: %v", err)
-	}
-	return string(data)
+	return string(res.data)
 }
 
 func boolPtr(v bool) *bool {

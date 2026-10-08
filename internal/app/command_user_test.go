@@ -44,21 +44,40 @@ func captureOutput(t *testing.T, fn func()) (stdout, stderr string) {
 	if err != nil {
 		t.Fatalf("pipe: %v", err)
 	}
+	// Drain while fn runs: output larger than the pipe buffer, which shrinks
+	// to a few pages once the user exceeds fs.pipe-user-pages-soft, would
+	// otherwise block fn forever.
+	outCh := drainPipe(outR)
+	errCh := drainPipe(errR)
 	os.Stdout, os.Stderr = outW, errW
 	fn()
 	_ = outW.Close()
 	_ = errW.Close()
 	os.Stdout, os.Stderr = origOut, origErr
 
-	outBytes, err := io.ReadAll(outR)
-	if err != nil {
-		t.Fatalf("read stdout: %v", err)
+	outRes, errRes := <-outCh, <-errCh
+	if outRes.err != nil {
+		t.Fatalf("read stdout: %v", outRes.err)
 	}
-	errBytes, err := io.ReadAll(errR)
-	if err != nil {
-		t.Fatalf("read stderr: %v", err)
+	if errRes.err != nil {
+		t.Fatalf("read stderr: %v", errRes.err)
 	}
-	return string(outBytes), string(errBytes)
+	return string(outRes.data), string(errRes.data)
+}
+
+type pipeResult struct {
+	data []byte
+	err  error
+}
+
+func drainPipe(r *os.File) <-chan pipeResult {
+	ch := make(chan pipeResult, 1)
+	go func() {
+		data, err := io.ReadAll(r)
+		_ = r.Close()
+		ch <- pipeResult{data: data, err: err}
+	}()
+	return ch
 }
 
 func runHostCommandCaptured(t *testing.T, cmd usercmd.Command, args []string, projectDir, home string, allowRoot bool) (stdout, stderr string, code int) {

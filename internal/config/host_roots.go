@@ -97,20 +97,26 @@ func macCacheRoot(home string) string {
 // HostAppDataDirs returns the per-user directories where applications keep
 // their config, data, state, caches, and runtime files: the XDG base
 // directories on Linux and other Unixes, and the entries of ~/Library on macOS
-// except the folders that hold the user's own synced files.
+// except the folders that hold the user's own synced files. Enclave's own roots
+// are listed on their own: an XDG override such as XDG_CONFIG_HOME=$HOME makes
+// a base directory home itself, which cannot be protected without protecting
+// everything under it.
 func HostAppDataDirs(home string) []string {
+	var dirs []string
 	if runtime.GOOS == "darwin" {
-		return macAppDataDirs(home)
+		dirs = macAppDataDirs(home)
+	} else {
+		dirs = xdgAppDataDirs(home)
 	}
-	return xdgAppDataDirs(home)
+	return append(dirs, hostConfigRoot(home), hostStateRoot(home), hostCacheRoot(home))
 }
 
 func xdgAppDataDirs(home string) []string {
 	dirs := []string{
-		filepath.Dir(xdgConfigRoot(home)),
+		xdgBaseDir("XDG_CONFIG_HOME", home, ".config"),
 		xdgBaseDir("XDG_DATA_HOME", home, filepath.Join(".local", "share")),
-		filepath.Dir(xdgStateRoot(home)),
-		filepath.Dir(xdgCacheRoot(home)),
+		xdgBaseDir("XDG_STATE_HOME", home, filepath.Join(".local", "state")),
+		xdgBaseDir("XDG_CACHE_HOME", home, ".cache"),
 	}
 	// XDG_RUNTIME_DIR has no fallback: when it is unset there is none.
 	if dir := os.Getenv("XDG_RUNTIME_DIR"); filepath.IsAbs(dir) {

@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 
+	"enclave/internal/config"
 	"enclave/internal/model"
 )
 
@@ -34,23 +35,44 @@ func mountGuardHome(t *testing.T) (home, project, aws string) {
 	return home, project, aws
 }
 
+func guardProject(dir string) model.Project {
+	return model.Project{Dir: dir, RealDir: dir}
+}
+
+func cliAddDirs(dirs ...string) additionalDirs {
+	return additionalDirs{dirs: dirs, flag: "--add-dir", key: "add_dirs", source: model.SourceCLI}
+}
+
 func TestCheckSensitiveMountsPassesProjectDirectories(t *testing.T) {
 	home, project, _ := mountGuardHome(t)
-	if err := checkSensitiveMounts(project, []string{t.TempDir()}, home, false); err != nil {
+	if err := checkSensitiveMounts(guardProject(project), []additionalDirs{cliAddDirs(t.TempDir())}, home, false); err != nil {
 		t.Fatalf("project directory refused: %v", err)
 	}
 }
 
 func TestCheckSensitiveMountsRefusesWithoutOptIn(t *testing.T) {
 	home, _, aws := mountGuardHome(t)
-	err := checkSensitiveMounts(home, []string{aws}, home, false)
+	m2 := filepath.Join(home, ".m2")
+	if err := os.Mkdir(m2, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	globalConfig, err := config.GlobalConfigPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	additional := []additionalDirs{
+		cliAddDirs(aws),
+		{dirs: []string{m2}, flag: "--add-readonly-dir", key: "add_readonly_dirs", source: model.SourceGlobal},
+	}
+	err = checkSensitiveMounts(guardProject(home), additional, home, false)
 	if err == nil {
-		t.Fatal("expected the home directory and ~/.aws to be refused")
+		t.Fatal("expected the home directory, ~/.aws, and ~/.m2 to be refused")
 	}
 	msg := err.Error()
 	for _, want := range []string{
 		home + " (project directory): is your home directory",
-		aws + " (additional directory): is ~/.aws",
+		aws + " (--add-dir): is ~/.aws",
+		m2 + " (add_readonly_dirs from " + globalConfig + "): is ~/.m2",
 		"--allow-sensitive-mounts",
 		model.EnvAllowSensitiveMounts + "=1",
 	} {
@@ -64,7 +86,7 @@ func TestCheckSensitiveMountsWarnsWhenAllowed(t *testing.T) {
 	home, _, aws := mountGuardHome(t)
 	var err error
 	_, stderr := captureOutput(t, func() {
-		err = checkSensitiveMounts(home, []string{aws}, home, true)
+		err = checkSensitiveMounts(guardProject(home), []additionalDirs{cliAddDirs(aws)}, home, true)
 	})
 	if err != nil {
 		t.Fatalf("opted-in run refused: %v", err)

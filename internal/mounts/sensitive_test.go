@@ -11,7 +11,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 )
@@ -78,7 +77,7 @@ func TestSensitivePathsHomeAndHiddenEntries(t *testing.T) {
 	symlink(t, "/", filepath.Join(home, ".root-link"))
 	symlink(t, home, filepath.Join(home, ".home-link"))
 
-	assertReasons(t, NewSensitivePaths(home), []reasonCase{
+	assertReasons(t, NewSensitivePaths(home, nil), []reasonCase{
 		{home, "is your home directory"},
 		{filepath.Dir(home), "contains your home directory"},
 		{"/", "contains your home directory"},
@@ -95,7 +94,7 @@ func TestSensitivePathsResolveHome(t *testing.T) {
 	link := filepath.Join(realTempDir(t), "home-link")
 	symlink(t, home, link)
 
-	if got, want := NewSensitivePaths(link).Reason(home), "is your home directory"; got != want {
+	if got, want := NewSensitivePaths(link, nil).Reason(home), "is your home directory"; got != want {
 		t.Fatalf("Reason(%s) = %q, want %q", home, got, want)
 	}
 }
@@ -109,22 +108,19 @@ func TestSensitivePathsSSHAgentSocket(t *testing.T) {
 	t.Setenv("SSH_AUTH_SOCK", sock)
 
 	want := "contains the SSH agent socket $SSH_AUTH_SOCK (" + sock + ")"
-	assertReasons(t, NewSensitivePaths(home), []reasonCase{
+	assertReasons(t, NewSensitivePaths(home, nil), []reasonCase{
 		{tmp, want},
 		{filepath.Dir(sock), want},
 		{filepath.Join(tmp, "proj"), ""},
 	})
 
 	t.Setenv("SSH_AUTH_SOCK", "relative/agent.sock")
-	if got := NewSensitivePaths(home).Reason(tmp); got != "" {
+	if got := NewSensitivePaths(home, nil).Reason(tmp); got != "" {
 		t.Fatalf("a relative SSH_AUTH_SOCK must be ignored, got %q", got)
 	}
 }
 
-func TestSensitivePathsXDGDirsAndEnclaveRoots(t *testing.T) {
-	if runtime.GOOS == "darwin" {
-		t.Skip("macOS ignores the XDG variables")
-	}
+func TestSensitivePathsAppDataDirs(t *testing.T) {
 	home := realTempDir(t)
 	outside := realTempDir(t)
 	mkdirs(t,
@@ -133,13 +129,15 @@ func TestSensitivePathsXDGDirsAndEnclaveRoots(t *testing.T) {
 		filepath.Join(outside, "real"),
 		filepath.Join(outside, "proj"),
 	)
-	// A base dir that does not exist yet still resolves through its parent.
+	// A data dir that does not exist yet still resolves through its parent.
 	symlink(t, filepath.Join(outside, "real"), filepath.Join(outside, "link"))
-	t.Setenv("XDG_CONFIG_HOME", filepath.Join(outside, "cfg"))
-	t.Setenv("XDG_STATE_HOME", filepath.Join(outside, "link", "state"))
-	t.Setenv("XDG_RUNTIME_DIR", filepath.Join(outside, "runtime"))
+	appDataDirs := []string{
+		filepath.Join(outside, "cfg"),
+		filepath.Join(outside, "link", "state"),
+		filepath.Join(outside, "runtime"),
+	}
 
-	assertReasons(t, NewSensitivePaths(home), []reasonCase{
+	assertReasons(t, NewSensitivePaths(home, appDataDirs), []reasonCase{
 		{filepath.Join(outside, "cfg"), "is " + filepath.Join(outside, "cfg")},
 		{filepath.Join(outside, "cfg", "gh"), "is inside " + filepath.Join(outside, "cfg")},
 		{outside, "contains " + filepath.Join(outside, "cfg")},
@@ -149,15 +147,14 @@ func TestSensitivePathsXDGDirsAndEnclaveRoots(t *testing.T) {
 	})
 }
 
-func TestSensitivePathsKeepEnclaveRootsWhenXDGPointsAtHome(t *testing.T) {
-	if runtime.GOOS == "darwin" {
-		t.Skip("macOS ignores the XDG variables")
-	}
+// An XDG override such as XDG_CONFIG_HOME=$HOME makes an application data
+// directory home itself. Protecting it would make all of home sensitive, but
+// the data dirs listed under it stay protected.
+func TestSensitivePathsSkipAppDataDirAtHome(t *testing.T) {
 	home := realTempDir(t)
 	mkdirs(t, filepath.Join(home, "enclave"), filepath.Join(home, "code"))
-	t.Setenv("XDG_CONFIG_HOME", home)
 
-	assertReasons(t, NewSensitivePaths(home), []reasonCase{
+	assertReasons(t, NewSensitivePaths(home, []string{home, filepath.Join(home, "enclave")}), []reasonCase{
 		{filepath.Join(home, "enclave"), "is ~/enclave"},
 		{filepath.Join(home, "code"), ""},
 	})
@@ -180,8 +177,7 @@ func TestSensitivePathsSubdirsOfSafeDirsAreSafe(t *testing.T) {
 	symlink(t, filepath.Join(home, "dotfiles", "bash", ".bashrc"), filepath.Join(home, ".bashrc"))
 	writeFile(t, filepath.Join(outside, "ssh-abc", "agent.1"))
 	t.Setenv("SSH_AUTH_SOCK", filepath.Join(outside, "ssh-abc", "agent.1"))
-	t.Setenv("XDG_RUNTIME_DIR", filepath.Join(outside, "runtime"))
-	s := NewSensitivePaths(home)
+	s := NewSensitivePaths(home, []string{filepath.Join(outside, "runtime")})
 
 	for _, root := range []string{home, outside} {
 		err := filepath.WalkDir(root, func(dir string, entry fs.DirEntry, err error) error {

@@ -163,6 +163,21 @@ func TestMacAppDataDirsFallBackToLibrary(t *testing.T) {
 	}
 }
 
+func TestHostAppDataDirsListEnclaveRoots(t *testing.T) {
+	unsetXDGEnv(t)
+	home := t.TempDir()
+	// The config base directory is then home itself, so only the explicit
+	// root keeps enclave's config listed.
+	t.Setenv("XDG_CONFIG_HOME", home)
+
+	got := HostAppDataDirs(home)
+	for _, root := range []string{HostConfigRootDir(home), HostStateRootDir(home), HostCacheDir(home)} {
+		if !slices.Contains(got, root) {
+			t.Errorf("HostAppDataDirs = %q, missing enclave root %q", got, root)
+		}
+	}
+}
+
 // isUnder reports whether path equals root or is nested beneath it.
 func isUnder(path string, root string) bool {
 	if path == root {

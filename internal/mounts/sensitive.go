@@ -13,7 +13,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"enclave/internal/config"
 	"enclave/internal/util"
 )
 
@@ -21,8 +20,8 @@ import (
 // sensitive user data. A directory is sensitive if it is the home directory or
 // one of its ancestors, or if it is, lies inside, or contains a protected
 // location: a hidden top-level entry of home (where it really lives, when it
-// is a symlink), a per-user application data directory, one of Enclave's own
-// roots, or the SSH agent socket.
+// is a symlink), a per-user application data directory, or the SSH agent
+// socket.
 //
 // Because paths form a tree, every subdirectory of a directory that is not
 // sensitive is not sensitive either. The zero value protects nothing.
@@ -36,19 +35,16 @@ type protectedPath struct {
 	path  string
 }
 
-// NewSensitivePaths collects the protected locations for home. Locations that
-// cannot be resolved stay protected under their cleaned path.
-func NewSensitivePaths(home string) SensitivePaths {
+// NewSensitivePaths collects the protected locations for home. appDataDirs are
+// the per-user application data directories, as config.HostAppDataDirs lists
+// them. Locations that cannot be resolved stay protected under their cleaned
+// path.
+func NewSensitivePaths(home string, appDataDirs []string) SensitivePaths {
 	var s SensitivePaths
 	if filepath.IsAbs(home) {
 		s.home = resolveOrClean(home)
 		s.addHiddenEntries()
-		for _, dir := range config.HostAppDataDirs(s.home) {
-			s.add(dir, nil)
-		}
-		// Listed on their own: an XDG override such as XDG_CONFIG_HOME=$HOME
-		// would otherwise leave them unprotected.
-		for _, dir := range []string{config.HostConfigRootDir(s.home), config.HostStateRootDir(s.home), config.HostCacheDir(s.home)} {
+		for _, dir := range appDataDirs {
 			s.add(dir, nil)
 		}
 	}

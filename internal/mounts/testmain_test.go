@@ -13,12 +13,11 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	// The sensitive-path rule protects these locations, so values from the
-	// developer's or CI's environment would change which paths tests can mount.
-	for _, key := range []string{"XDG_CONFIG_HOME", "XDG_STATE_HOME", "XDG_CACHE_HOME", "XDG_DATA_HOME", "XDG_RUNTIME_DIR", "SSH_AUTH_SOCK"} {
-		if err := os.Unsetenv(key); err != nil {
-			panic(err)
-		}
+	// The sensitive-path rule protects the SSH agent socket, so an agent in
+	// the developer's or CI's environment would change which paths tests can
+	// mount.
+	if err := os.Unsetenv("SSH_AUTH_SOCK"); err != nil {
+		panic(err)
 	}
 	os.Exit(m.Run())
 }

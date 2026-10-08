@@ -11,7 +11,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"slices"
 	"strings"
 	"time"
 
@@ -100,7 +99,11 @@ func runExecutionCommand(input *CommandInput) int {
 	}
 	// exec enters an existing container, so it mounts nothing.
 	if isRunAction(input.Action) {
-		if err := checkSensitiveMounts(project.RealDir, slices.Concat(validatedDirs, validatedReadonlyDirs), host.Home, opts.AllowSensitiveMounts); err != nil {
+		additional := []additionalDirs{
+			{dirs: validatedDirs, flag: "--add-dir", key: "add_dirs", source: opts.Sources.AddDirs},
+			{dirs: validatedReadonlyDirs, flag: "--add-readonly-dir", key: "add_readonly_dirs", source: opts.Sources.AddReadonlyDirs},
+		}
+		if err := checkSensitiveMounts(project, additional, host.Home, opts.AllowSensitiveMounts); err != nil {
 			logx.Errorf("%v", err)
 			return 1
 		}

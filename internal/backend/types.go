@@ -316,9 +316,10 @@ type UnfinalizedRemover interface {
 // StaleGatewayRemover removes a gateway sidecar that outlived an interrupted
 // start of the named session. Left running, the sidecar keeps the session's
 // published ports bound and a fresh start of that name fails its host-port
-// checks before it reaches gateway startup.
+// checks before it reaches gateway startup. The project hash confirms the
+// sidecar belongs to this session before it is touched.
 type StaleGatewayRemover interface {
-	RemoveStaleGateway(ctx context.Context, name string) error
+	RemoveStaleGateway(ctx context.Context, name string, projectHash string) error
 }
 
 // ConfigStoreConflictChecker reports whether a running session for the same
@@ -406,7 +407,10 @@ type Session struct {
 	// (i.e. carries the read-only host image inbox mount).
 	ImageInbox bool
 	Ports      []PortMapping
-	Yolo       bool
+	// Network is the Docker-owned per-session bridge, when one is present.
+	// Other backends and legacy/stopped sessions may not have one.
+	Network *SessionNetwork
+	Yolo    bool
 	// SessionMonitor reports whether the agent runs under the managed tmux
 	// session, so a terminal snapshot can be captured via `status`.
 	SessionMonitor bool
@@ -414,6 +418,11 @@ type Session struct {
 	// `status` can capture as that user (empty for sessions without the
 	// monitor or containers labeled before this was recorded).
 	SessionMonitorUser string
+}
+
+type SessionNetwork struct {
+	Name   string
+	Subnet string
 }
 
 type ExecRequest struct {

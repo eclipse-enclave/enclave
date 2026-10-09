@@ -8,6 +8,23 @@ Rootless Docker is not currently supported because the restricted-network
 gateway requires netfilter, ipset, sysctl, `NET_ADMIN`, and `NET_RAW`. See
 [Rootless container engines](rootless.md), which also covers the supported rootless podman backend.
 
+## Preserve Docker firewall integration
+
+Enclave uses a dedicated user-defined bridge for each Docker session. The
+session boundary and host-loopback port publishing rely on the firewall rules
+managed by Docker (under `--backend podman`, netavark manages the equivalent
+rules inside the rootless network namespace and this section does not apply). Do not disable the daemon's `iptables` or `ip6tables`
+integration unless equivalent isolation and publishing rules are maintained
+separately. Configurations such as `"iptables": false` are outside Enclave's
+supported security posture.
+
+For Enclave releases that still put sessions on Docker's default bridge,
+`"icc": false` in `/etc/docker/daemon.json` is an optional interim mitigation
+against direct container-to-container traffic on that bridge. It requires the
+host's `br_netfilter` path to be active, applies only to the default bridge, and
+can break unrelated default-bridge workloads. It is not a substitute for the
+per-session networks used by current releases.
+
 ## Enable userns-remap
 
 1. Ensure subordinate ID ranges exist:

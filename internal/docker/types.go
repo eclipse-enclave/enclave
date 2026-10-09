@@ -185,6 +185,51 @@ type NetworkSettings struct {
 	Ports PortMap `json:"Ports"`
 }
 
+// NetworkCreateOptions is the subset of bridge-network configuration enclave
+// passes to `docker network create`.
+type NetworkCreateOptions struct {
+	Name       string
+	Driver     string
+	Subnet     string
+	EnableIPv6 *bool
+	Labels     map[string]string
+	Options    map[string]string
+}
+
+// NetworkInspectResponse is the subset of `docker network inspect` consumed by
+// the backend for ownership checks, lifecycle decisions, and structured status.
+type NetworkInspectResponse struct {
+	Name    string            `json:"Name"`
+	ID      string            `json:"Id"`
+	Created string            `json:"Created"`
+	Labels  map[string]string `json:"Labels"`
+	IPAM    NetworkIPAM       `json:"IPAM"`
+	// Subnets is where podman reports the address configuration; Docker
+	// reports it under IPAM.Config. The lower-case podman keys (name, id,
+	// labels, containers) decode into the Docker-cased fields above because
+	// encoding/json matches field names case-insensitively.
+	Subnets    []NetworkIPAMConfig        `json:"subnets"`
+	Containers map[string]NetworkEndpoint `json:"Containers"`
+}
+
+// SubnetConfigs returns the network's address configuration regardless of
+// which engine produced the inspect output.
+func (n NetworkInspectResponse) SubnetConfigs() []NetworkIPAMConfig {
+	return append(append([]NetworkIPAMConfig(nil), n.IPAM.Config...), n.Subnets...)
+}
+
+type NetworkIPAM struct {
+	Config []NetworkIPAMConfig `json:"Config"`
+}
+
+type NetworkIPAMConfig struct {
+	Subnet string `json:"Subnet"`
+}
+
+type NetworkEndpoint struct {
+	Name string `json:"Name"`
+}
+
 // ContainerState is the subset of a container's runtime state we consume.
 type ContainerState struct {
 	Status  string `json:"Status"`
@@ -212,9 +257,20 @@ type ImageConfig struct {
 
 // SystemInfo is the subset of `docker info` output we consume.
 type SystemInfo struct {
-	DockerRootDir   string   `json:"DockerRootDir"`
-	SecurityOptions []string `json:"SecurityOptions"`
+	DockerRootDir   string        `json:"DockerRootDir"`
+	SecurityOptions []string      `json:"SecurityOptions"`
+	ServerVersion   string        `json:"ServerVersion"`
+	OSType          string        `json:"OSType"`
+	FirewallBackend *FirewallInfo `json:"FirewallBackend"`
+	Warnings        []string      `json:"Warnings"`
+	// NetworkBackend and NetworkBackendVersion describe podman's network
+	// stack ("netavark", "netavark 1.4.0"). Docker has no equivalent and
+	// leaves them empty, so callers must gate on IsPodman.
+	NetworkBackend        string `json:"-"`
+	NetworkBackendVersion string `json:"-"`
 }
+
+type FirewallInfo struct{}
 
 // PruneReport is the result of an image prune.
 type PruneReport struct {

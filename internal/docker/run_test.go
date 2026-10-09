@@ -13,8 +13,40 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 )
+
+func TestContainerIDFromRunOutput(t *testing.T) {
+	full := strings.Repeat("ab", 32)
+	for _, tc := range []struct{ name, out, want string }{
+		{name: "full id", out: full + "\n", want: full},
+		{name: "empty", out: "", want: ""},
+		{name: "short", out: "abc123\n", want: ""},
+		{name: "not hex", out: strings.Repeat("zz", 32), want: ""},
+		{name: "first line only", out: full + "\nmore\n", want: full},
+	} {
+		if got := containerIDFromRunOutput(tc.out); got != tc.want {
+			t.Errorf("%s: containerIDFromRunOutput(%q) = %q, want %q", tc.name, tc.out, got, tc.want)
+		}
+	}
+}
+
+func TestRunDetachedReturnsPrintedIDWhenStartFails(t *testing.T) {
+	full := strings.Repeat("cd", 32)
+	installNetworkDockerStub(t, `
+printf '%s\n' `+full+`
+printf '%s\n' 'docker: Error response from daemon: failed to create task for container' >&2
+exit 127
+`)
+	id, err := RunDetached(context.Background(), &ContainerConfig{Image: "gateway"}, &HostConfig{}, "session-gateway")
+	if err == nil {
+		t.Fatal("expected RunDetached to fail")
+	}
+	if id != full {
+		t.Fatalf("RunDetached() id = %q, want the printed ID %q", id, full)
+	}
+}
 
 func TestDetachedInteractiveRunModeKeepsTTYAndStdin(t *testing.T) {
 	args := buildRunArgs(&ContainerConfig{Image: "example:test"}, nil, "session", runMode{

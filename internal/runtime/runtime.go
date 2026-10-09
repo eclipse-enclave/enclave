@@ -329,7 +329,7 @@ func (r *Runtime) removeStaleGateway(containerName string) {
 	if !ok {
 		return
 	}
-	if err := remover.RemoveStaleGateway(context.Background(), containerName); err != nil {
+	if err := remover.RemoveStaleGateway(context.Background(), containerName, r.project.Hash); err != nil {
 		logx.Warnf("Failed to check for a stale gateway of %s: %v", containerName, err)
 	}
 }

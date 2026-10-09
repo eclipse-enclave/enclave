@@ -32,7 +32,8 @@ func writeUserScript(t *testing.T, dir, name, body string) string {
 }
 
 // captureOutput swaps os.Stdout/os.Stderr around fn so its output (and any
-// logx message) can be asserted.
+// logx message) can be asserted. Both pipes are drained while fn runs so
+// output larger than the pipe buffer cannot block fn.
 func captureOutput(t *testing.T, fn func()) (stdout, stderr string) {
 	t.Helper()
 	origOut, origErr := os.Stdout, os.Stderr
@@ -44,21 +45,51 @@ func captureOutput(t *testing.T, fn func()) (stdout, stderr string) {
 	if err != nil {
 		t.Fatalf("pipe: %v", err)
 	}
-	os.Stdout, os.Stderr = outW, errW
-	fn()
-	_ = outW.Close()
-	_ = errW.Close()
-	os.Stdout, os.Stderr = origOut, origErr
 
-	outBytes, err := io.ReadAll(outR)
-	if err != nil {
-		t.Fatalf("read stdout: %v", err)
+	type readResult struct {
+		data []byte
+		err  error
 	}
-	errBytes, err := io.ReadAll(errR)
-	if err != nil {
-		t.Fatalf("read stderr: %v", err)
+	drain := func(r *os.File) <-chan readResult {
+		ch := make(chan readResult, 1)
+		go func() {
+			data, err := io.ReadAll(r)
+			_ = r.Close()
+			ch <- readResult{data, err}
+		}()
+		return ch
 	}
-	return string(outBytes), string(errBytes)
+	outCh, errCh := drain(outR), drain(errR)
+
+	os.Stdout, os.Stderr = outW, errW
+	func() {
+		defer func() {
+			os.Stdout, os.Stderr = origOut, origErr
+			_ = outW.Close()
+			_ = errW.Close()
+		}()
+		fn()
+	}()
+
+	outRes, errRes := <-outCh, <-errCh
+	if outRes.err != nil {
+		t.Fatalf("read stdout: %v", outRes.err)
+	}
+	if errRes.err != nil {
+		t.Fatalf("read stderr: %v", errRes.err)
+	}
+	return string(outRes.data), string(errRes.data)
+}
+
+func TestCaptureOutputLargeOutput(t *testing.T) {
+	big := strings.Repeat("x", 1<<20)
+	stdout, stderr := captureOutput(t, func() {
+		_, _ = os.Stdout.WriteString(big)
+		_, _ = os.Stderr.WriteString(big)
+	})
+	if len(stdout) != len(big) || len(stderr) != len(big) {
+		t.Fatalf("captured %d/%d bytes, want %d each", len(stdout), len(stderr), len(big))
+	}
 }
 
 func runHostCommandCaptured(t *testing.T, cmd usercmd.Command, args []string, projectDir, home string, allowRoot bool) (stdout, stderr string, code int) {

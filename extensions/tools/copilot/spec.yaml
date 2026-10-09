@@ -36,7 +36,11 @@ sandbox:
 
 credentials:
   sources:
-    copilot-github-token: { env: [COPILOT_GITHUB_TOKEN] }
+    copilot-github-token:
+      env: [COPILOT_GITHUB_TOKEN]
+      placeholder:
+        prefix: github_pat_
+        random: { encoding: alphanumeric, length: 82 }
 
 network:
   serviceDomains:

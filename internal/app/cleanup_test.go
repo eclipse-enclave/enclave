@@ -34,6 +34,7 @@ func TestResolveCleanupDirs(t *testing.T) {
 		config.HostProjectGeneratedConfigDir(home, project.Hash, run.Tool):                                   true,
 		filepath.Join(config.HostProjectToolDir(home, project.Hash, run.Tool), model.GeneratedSkillsDirName): true,
 		config.HostStoreConfigRootDir(home, run.Tool, project.Hash):                                          true,
+		config.HostStoreConfigBaseRootDir(home, run.Tool, project.Hash):                                      true,
 		config.HostStoreEnvDir(home, run.Tool, project.Hash):                                                 true,
 		config.HostProjectMemoryDir(home, project.Hash, run.Tool):                                            true,
 	}
@@ -231,6 +232,13 @@ func TestResolveEphemeralStoreDirs(t *testing.T) {
 			t.Fatalf("mkdir memory %q: %v", key, err)
 		}
 	}
+	basePath := config.HostStoreConfigBasePath(home, run.Tool, project.Hash, "session-a")
+	if err := os.MkdirAll(filepath.Dir(basePath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(basePath, []byte("generated settings"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 
 	paths := writeScopedToolSpec(t, run.Tool, model.MemoryScopeSession)
 	for _, tc := range []struct {
@@ -242,6 +250,7 @@ func TestResolveEphemeralStoreDirs(t *testing.T) {
 		{
 			name: "default",
 			want: []cleanupDir{
+				{Kind: ephemeralKind, Path: basePath},
 				{Kind: ephemeralKind, Path: filepath.Join(storeRoot, "session-a")},
 				{Kind: ephemeralKind, Path: filepath.Join(storeRoot, "throwaway")},
 				{Kind: memoryKind, Path: filepath.Join(memoryRoot, "session-a")},

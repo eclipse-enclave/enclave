@@ -59,16 +59,30 @@ func DirFor(home string, key backend.StoreKey, kind backend.StoreKind) (string, 
 		}
 		return config.HostStoreEnvDir(home, owner, hash), nil
 	default:
-		hash, err := validateStoreSegment(key.ProjectHash)
+		hash, storeKey, err := configStoreParts(key)
 		if err != nil {
-			return "", fmt.Errorf("store project hash: %w", err)
-		}
-		storeKey, err := validateStoreSegment(configStoreKey(key.Suffix))
-		if err != nil {
-			return "", fmt.Errorf("store key: %w", err)
+			return "", err
 		}
 		return config.HostStoreConfigDir(home, owner, hash, storeKey), nil
 	}
+}
+
+// ConfigBasePath resolves the host-only generated settings snapshot for one
+// config store. It uses the same key validation and state-root guard as stores.
+func ConfigBasePath(home string, key backend.StoreKey) (string, error) {
+	owner, err := validateStoreSegment(key.Owner)
+	if err != nil {
+		return "", fmt.Errorf("store owner: %w", err)
+	}
+	hash, storeKey, err := configStoreParts(key)
+	if err != nil {
+		return "", err
+	}
+	path := config.HostStoreConfigBasePath(home, owner, hash, storeKey)
+	if err := EnsureNoSymlinkChain(config.HostStateRootDir(home), path, false); err != nil {
+		return "", err
+	}
+	return path, nil
 }
 
 // ResolveDir resolves the host directory backing a store and rejects any
@@ -162,6 +176,18 @@ func configStoreKey(suffix string) string {
 		return trimmed
 	}
 	return defaultStoreKey
+}
+
+func configStoreParts(key backend.StoreKey) (string, string, error) {
+	hash, err := validateStoreSegment(key.ProjectHash)
+	if err != nil {
+		return "", "", fmt.Errorf("store project hash: %w", err)
+	}
+	storeKey, err := validateStoreSegment(configStoreKey(key.Suffix))
+	if err != nil {
+		return "", "", fmt.Errorf("store key: %w", err)
+	}
+	return hash, storeKey, nil
 }
 
 // validateStoreSegment rejects any value that is not a single, safe path

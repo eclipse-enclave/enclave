@@ -8,6 +8,7 @@
 package qemu
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -27,7 +28,7 @@ func TestReadOnlyFileMountDoesNotOverwriteHostFile(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	script, err := be.renderRunScript(backend.Request{Argv: []string{"true"}}, nil, []runtimeFileMount{{GuestSource: source, Target: target, ReadOnly: true}})
+	script, err := be.renderRunScript(backend.Request{Argv: []string{"true"}}, nil, []runtimeFileMount{{GuestSource: source, Target: target, ReadOnly: true}}, defaultConsoleSize)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,7 +67,7 @@ func TestRenderPayloadCommandSetsAgentHomeAndUser(t *testing.T) {
 func TestRenderRunScriptMountsWithMmapCacheWhenRequested(t *testing.T) {
 	be := New(Options{})
 
-	script, err := be.renderRunScript(backend.Request{Argv: []string{"true"}}, []runtimeMount{{Tag: "tag-0", Target: "/home/agent/.codex", CacheMmap: true}}, nil)
+	script, err := be.renderRunScript(backend.Request{Argv: []string{"true"}}, []runtimeMount{{Tag: "tag-0", Target: "/home/agent/.codex", CacheMmap: true}}, nil, defaultConsoleSize)
 	if err != nil {
 		t.Fatalf("renderRunScript: %v", err)
 	}
@@ -77,12 +78,40 @@ func TestRenderRunScriptMountsWithMmapCacheWhenRequested(t *testing.T) {
 func TestRenderRunScriptDoesNotMountWithMmapCacheByDefault(t *testing.T) {
 	be := New(Options{})
 
-	script, err := be.renderRunScript(backend.Request{Argv: []string{"true"}}, []runtimeMount{{Tag: "tag-0", Target: "/home/agent/.claude"}}, nil)
+	script, err := be.renderRunScript(backend.Request{Argv: []string{"true"}}, []runtimeMount{{Tag: "tag-0", Target: "/home/agent/.claude"}}, nil, defaultConsoleSize)
 	if err != nil {
 		t.Fatalf("renderRunScript: %v", err)
 	}
 
 	assertNotContains(t, script, "cache=mmap")
+}
+
+// The serial console starts out 0x0, which leaves terminal UIs unrenderable.
+func TestRenderRunScriptSeedsConsoleSize(t *testing.T) {
+	be := New(Options{})
+
+	script, err := be.renderRunScript(backend.Request{Argv: []string{"true"}}, nil, nil, consoleSize{Rows: 47, Cols: 173})
+	if err != nil {
+		t.Fatalf("renderRunScript: %v", err)
+	}
+
+	assertContains(t, script, "stty rows 47 cols 173")
+}
+
+func TestResolveConsoleSizeFallsBackToDefault(t *testing.T) {
+	read, write, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		_ = read.Close()
+		_ = write.Close()
+	}()
+
+	got := resolveConsoleSize(backend.AttachIO{In: read, Out: write, Err: write})
+	if got != defaultConsoleSize {
+		t.Fatalf("consoleSize = %+v, want %+v", got, defaultConsoleSize)
+	}
 }
 
 func TestRenderPayloadCommandPreservesExplicitHomeAndUser(t *testing.T) {
@@ -126,9 +155,46 @@ func TestBuildQEMUArgsUsesPCITransportByDefault(t *testing.T) {
 	}
 
 	assertArgValue(t, args, "-machine", "microvm,accel=kvm:tcg,isa-serial=on,pcie=on")
-	assertContainsArg(t, args, "virtio-net-pci,netdev="+qemuNetdevID)
-	assertContainsArg(t, args, "virtio-9p-pci,fsdev=mount-0,mount_tag=tag-0")
+	assertContainsArg(t, args, "virtio-net-pci,netdev="+qemuNetdevID+",addr=0x1.0x0,multifunction=on")
+	assertContainsArg(t, args, "virtio-9p-pci,fsdev=mount-0,mount_tag=tag-0,addr=0x1.0x1")
 	assertNotContainsArg(t, args, "virtio-net-device,netdev="+qemuNetdevID)
+}
+
+func TestBuildQEMUArgsPacksPCIDevicesIntoMultifunctionSlots(t *testing.T) {
+	be := New(Options{})
+	var mounts []runtimeMount
+	for i := range 40 {
+		mounts = append(mounts, runtimeMount{ID: fmt.Sprintf("mount-%d", i), Tag: fmt.Sprintf("tag-%d", i), Source: "/tmp"})
+	}
+
+	args, err := be.buildQEMUArgs(bundle{Kernel: "/kernel", Initramfs: "/initramfs", MemoryMiB: 512}, guestRuntime{
+		RuntimeInitramfs: "/runtime-initramfs",
+		Mounts:           mounts,
+	}, backend.Request{})
+	if err != nil {
+		t.Fatalf("buildQEMUArgs: %v", err)
+	}
+
+	assertContainsArg(t, args, "virtio-9p-pci,fsdev=mount-6,mount_tag=tag-6,addr=0x1.0x7")
+	assertContainsArg(t, args, "virtio-9p-pci,fsdev=mount-7,mount_tag=tag-7,addr=0x2.0x0,multifunction=on")
+	assertContainsArg(t, args, "virtio-9p-pci,fsdev=mount-38,mount_tag=tag-38,addr=0x5.0x7")
+	assertContainsArg(t, args, "virtio-9p-pci,fsdev=mount-39,mount_tag=tag-39,addr=0x6.0x0")
+}
+
+func TestBuildQEMUArgsRejectsMorePCIDevicesThanTheRootBusHolds(t *testing.T) {
+	be := New(Options{})
+	mounts := make([]runtimeMount, 248)
+	for i := range mounts {
+		mounts[i] = runtimeMount{ID: fmt.Sprintf("mount-%d", i), Tag: fmt.Sprintf("tag-%d", i), Source: "/tmp"}
+	}
+
+	_, err := be.buildQEMUArgs(bundle{Kernel: "/kernel", Initramfs: "/initramfs", MemoryMiB: 512}, guestRuntime{
+		RuntimeInitramfs: "/runtime-initramfs",
+		Mounts:           mounts,
+	}, backend.Request{})
+	if err == nil || !strings.Contains(err.Error(), "249 devices exceed the 248 PCI functions") {
+		t.Fatalf("buildQEMUArgs error = %v, want PCI capacity error", err)
+	}
 }
 
 func TestBuildQEMUArgsCanUseMMIOTransport(t *testing.T) {

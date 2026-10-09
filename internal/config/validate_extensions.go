@@ -331,7 +331,7 @@ func validateBuiltInAllowlistInclude(allowlistsDir string, includePath string) e
 	if !util.PathWithin(allowlistsDir, resolved) {
 		return fmt.Errorf("resolves outside built-in allowlists")
 	}
-	info, err := os.Stat(resolved)
+	info, err := os.Stat(resolved) // #nosec G703 -- resolved is confined to allowlistsDir by PathWithin above.
 	if err != nil {
 		return fmt.Errorf("fragment does not exist: %s", includePath)
 	}

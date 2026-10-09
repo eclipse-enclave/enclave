@@ -158,6 +158,18 @@ set -eu
 
 echo 'eval "$(direnv hook bash)"' >> /home/agent/.bashrc
 
+# Package-manager download caches are build-time only. The Docker image keeps
+# them out of its layers with BuildKit cache mounts; here they would be baked
+# into the rootfs, and every rootfs byte costs a guest RAM byte because the
+# initramfs is unpacked into a ramfs that is never reclaimed.
+rm -rf \
+    /home/agent/.npm \
+    /home/agent/.cache/pip \
+    /home/agent/.cache/uv \
+    /home/agent/.cache/go-build \
+    /root/.npm \
+    /root/.cache
+
 rm -f /tmp/enclave-install-tool.sh /tmp/enclave-provision-rootfs.sh
 PHASE2
 chmod 0755 "$root/tmp/enclave-provision-rootfs.sh"
@@ -176,12 +188,22 @@ fi
 # shellcheck disable=SC2016 # expanded by the child shell, not while assigning here.
 phase3_script='
 set -eu
-apk add --no-cache cpio kmod tar >/dev/null
+apk add --no-cache cpio kmod tar zstd >/dev/null
 
 root=/tmp/rootfs
 mkdir -p "$root"
 tar -C "$root" -xf -
 rm -f "$root/.dockerenv"
+
+# Docker bind-mounts /etc/hosts into the provisioning container, so the export
+# carries an empty placeholder and the guest ends up with no loopback entry at
+# all: resolving "localhost" falls through to musl built-ins, which answer ::1
+# first. /etc/resolv.conf is a placeholder for the same reason but udhcpc
+# rewrites it during startup.
+cat > "$root/etc/hosts" <<HOSTS
+127.0.0.1	localhost localhost.localdomain
+::1	localhost ip6-localhost ip6-loopback
+HOSTS
 
 # docker export leaves runtime placeholders in /dev (a regular-file console
 # would swallow all guest output) and node/npm scratch in /tmp (init mounts a
@@ -210,9 +232,38 @@ kernel_version=$(find "$root/lib/modules" -mindepth 1 -maxdepth 1 -type d | sed 
 if [ -n "$kernel_version" ]; then
     depmod -a -b "$root" "$kernel_version"
 fi
-rm -f "$root"/boot/vmlinuz-*
+# Nothing in the guest reads /boot: it boots the kernel the host hands to QEMU,
+# so the Alpine kernel image, its initramfs, System.map and config would only
+# occupy guest RAM.
+rm -rf "$root/boot"
+mkdir -m 755 "$root/boot"
 
-( cd "$root" && find . -print | cpio -o -H newc --quiet ) > /out/initramfs.cpio
+# Compress the image: the kernel holds the initrd and the fully unpacked ramfs
+# in memory at the same time, so an uncompressed archive costs its own size
+# twice at boot. zstd is both smaller and faster to unpack than gzip here.
+initramfs=/out/initramfs.cpio.zst
+( cd "$root" && find . -print | cpio -o -H newc --quiet ) | zstd -q -f -T0 -9 -o "$initramfs"
+zstd -q -t "$initramfs"
+uncompressed=$(zstd -q -d -c "$initramfs" | wc -c)
+if [ "$uncompressed" -le 0 ]; then
+    echo "empty guest initramfs" >&2
+    exit 1
+fi
+
+# unpack_to_rootfs() only takes an appended plain cpio segment - the host-side
+# run overlay - when it starts on a 4-byte boundary, so pad the compressed
+# image out to one. The kernel skips the padding bytes before the segment.
+compressed=$(wc -c < "$initramfs")
+pad=$(( (4 - compressed % 4) % 4 ))
+if [ "$pad" -gt 0 ]; then
+    dd if=/dev/zero bs=1 count="$pad" >> "$initramfs" 2>/dev/null
+    compressed=$(wc -c < "$initramfs")
+fi
+
+# The host sizes guest memory from the unpacked size: the initramfs becomes the
+# rootfs, a ramfs the guest can never reclaim.
+printf "{\n  \"uncompressedBytes\": %s,\n  \"compressedBytes\": %s,\n  \"compression\": \"zstd\"\n}\n" \
+    "$uncompressed" "$compressed" > /out/enclave-vm-initramfs.json
 '
 docker export "$build_cid" | docker run --rm -i --platform linux/amd64 \
     -v "$output_dir:/out" \

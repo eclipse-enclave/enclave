@@ -23,9 +23,38 @@ omitted when exactly one enclave container is running).
 ## Configuration
 
 - **Command**: `sleep infinity`
-- **Config directory**: `~/.theia`
+- **Config directory**: `~/.theia-ide-next` (the folder the container backend uses)
 - **postStart.openIDE**: `theia-next`. Triggers the host launcher once the
   container is running.
+
+## Extensions
+
+Settings and keymaps are always read from the host's Theia config. Extensions
+run in the backend inside the container and come from two places:
+
+- On attach, Theia asks the container backend to install every extension
+  installed on the host. It downloads them from Open VSX by ID, so extensions
+  that are not on Open VSX (for example installed from a VSIX file) or have no
+  Linux build are skipped without notice.
+- With host config passthrough, Enclave copies the host's
+  `~/.theia-ide-next/deployedPlugins/` into the container at session start, which also
+  covers those extensions:
+
+  ```bash
+  enclave --tool theia-next --host-config passthrough
+  ```
+
+  To enable it permanently for this tool only, set
+  `"tool_overrides": {"theia-next": {"host_config": "passthrough"}}` in
+  `~/.config/enclave/config.json`. Extensions with native code built for macOS
+  or Windows do not run in the Linux container.
+
+Without passthrough, extensions installed in the container persist in the
+per-project config store (`~/.theia-ide-next`). With passthrough, Enclave
+rebuilds that store from the host on every start, so the container always gets
+the host's extensions and extensions installed only in the container are
+removed. Install extensions on the host instead. Backend state such as extension
+storage is kept (`sandbox.statePaths`).
 
 ## API Keys
 

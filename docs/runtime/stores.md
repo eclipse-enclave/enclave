@@ -40,7 +40,10 @@ rollouts, pinned to avoid re-deriving them on every overlaid run. OpenCode pins
 its session database and runtime data there; its separate XDG state directory is
 redirected into the config store as `xdg-state/` so TUI state also survives.
 Mistral Vibe pins its session logs, plans, worktrees, prompt history, trusted
-folders, cache, and project links.
+folders, cache, and project links. Theia and Theia Next pin their backend state
+(extension and workspace storage, model snapshots, backend settings, recent
+workspaces) so it survives the overlay that host config
+passthrough of `deployedPlugins/` activates.
 
 **Ephemeral mode** (`--ephemeral`): A fresh store directory is created with a
 unique suffix key for each session and removed after the container exits. The

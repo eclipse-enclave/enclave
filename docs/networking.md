@@ -14,6 +14,12 @@ enclave --network-log=requests
 
 This forces allowlisted HTTPS traffic through the gateway MITM proxy so the gateway can emit HTTP-style request audit events for both HTTP and HTTPS, instead of one event per TLS connection. Some clients that pin certificates or use custom trust stores may fail in this mode.
 
+The container trusts the gateway CA through `SSL_CERT_FILE` and
+`REQUESTS_CA_BUNDLE` (the system bundle plus the gateway CA, written to
+`/tmp/enclave-ca/ca-certificates.crt` at startup) and `NODE_EXTRA_CA_CERTS`.
+They are set on the container itself, so processes started with `docker exec`,
+such as an attached IDE's backend, trust the gateway as well.
+
 Only the gateway CA persists on the host; leaf certificates stay inside each
 gateway container. Upgrades may leave an unused legacy cache at
 `~/.local/state/enclave/tls/hosts`. On Linux, its old container-owned permissions

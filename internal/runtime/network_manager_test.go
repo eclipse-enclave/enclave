@@ -8,6 +8,7 @@
 package runtime
 
 import (
+	"fmt"
 	"reflect"
 	"testing"
 
@@ -40,6 +41,34 @@ func TestPolicyDomainSourcePaths(t *testing.T) {
 			t.Fatalf("paths = %v, want %v", paths, expected)
 		}
 	})
+
+	for _, inherit := range []bool{false, true} {
+		for _, projectDomains := range []bool{false, true} {
+			name := fmt.Sprintf("inherit=%t/projectDomains=%t", inherit, projectDomains)
+			t.Run(name, func(t *testing.T) {
+				projectPolicy := network.Policy{InheritGlobalPolicy: &inherit}
+				if projectDomains {
+					projectPolicy.Domains.Global = []string{"project.example.com"}
+				}
+				paths := policyDomainSourcePaths(home, projectDir, projectHash, "codex", network.Policy{
+					Domains: network.PolicyDomains{
+						Global: []string{"global.example.com"},
+						Tools:  map[string][]string{"codex": {"api.openai.com"}},
+					},
+				}, projectPolicy)
+				expected := []string{}
+				if inherit {
+					expected = append(expected, config.HostNetworkPolicyPath(home))
+				}
+				if projectDomains {
+					expected = append(expected, config.HostProjectNetworkPolicyPath(home, projectHash))
+				}
+				if !reflect.DeepEqual(paths, expected) {
+					t.Fatalf("paths = %v, want %v", paths, expected)
+				}
+			})
+		}
+	}
 
 	t.Run("returns both paths when both policies contribute", func(t *testing.T) {
 		paths := policyDomainSourcePaths(home, projectDir, projectHash, "codex", network.Policy{

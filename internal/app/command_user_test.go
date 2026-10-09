@@ -81,6 +81,17 @@ func captureOutput(t *testing.T, fn func()) (stdout, stderr string) {
 	return string(outRes.data), string(errRes.data)
 }
 
+func TestCaptureOutputLargeOutput(t *testing.T) {
+	big := strings.Repeat("x", 1<<20)
+	stdout, stderr := captureOutput(t, func() {
+		_, _ = os.Stdout.WriteString(big)
+		_, _ = os.Stderr.WriteString(big)
+	})
+	if len(stdout) != len(big) || len(stderr) != len(big) {
+		t.Fatalf("captured %d/%d bytes, want %d each", len(stdout), len(stderr), len(big))
+	}
+}
+
 func runHostCommandCaptured(t *testing.T, cmd usercmd.Command, args []string, projectDir, home string, allowRoot bool) (stdout, stderr string, code int) {
 	t.Helper()
 	stdout, stderr = captureOutput(t, func() {

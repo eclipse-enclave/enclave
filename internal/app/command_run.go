@@ -311,7 +311,7 @@ func ensureRuntimeImage(input *CommandInput, opts model.Options, buildCfg *build
 		logx.Infof("Forcing image rebuild.")
 	}
 	if opts.NoRebuild {
-		logx.Warnf("Skipping runtime image build due to --no-rebuild.")
+		logx.Warnf("Skipping runtime image build (--no-rebuild or %s=1).", model.EnvNoRebuild)
 		if err := ensureExistingRuntimeImage(opts.ImageName); err != nil {
 			logx.Errorf("%v", err)
 			return buildConfig{}, 1

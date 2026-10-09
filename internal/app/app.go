@@ -16,6 +16,7 @@ import (
 	"enclave/internal/buildinfo"
 	"enclave/internal/cli"
 	"enclave/internal/config"
+	"enclave/internal/envflag"
 	"enclave/internal/logx"
 	"enclave/internal/model"
 	"enclave/internal/theia"
@@ -111,6 +112,7 @@ func Run(args []string) int {
 
 	// Folded like --allow-root, so `enclave config` reports the env opt-in too.
 	parsed.Options.AllowSensitiveMounts = sensitiveMountsAllowed(parsed.Options.AllowSensitiveMounts)
+	applyBuildEnvironment(&parsed)
 	cliOpts := parsed.Options
 	cliSources := parsed.Sources
 	opts, toolDefaults, hasToolDefaults := config.ResolveOptionsForTool(cliOpts, cliSources, globalDefaults, projectDefaults, "")
@@ -195,6 +197,33 @@ func Run(args []string) int {
 		ExtRequest:       parsed.ExtRequest,
 	}
 	return dispatchCommand(&command)
+}
+
+// applyBuildEnvironment folds ENCLAVE_NO_REBUILD into the commands that can
+// build, plus config so it reports what those commands will use.
+func applyBuildEnvironment(parsed *cli.Result) {
+	if !isRunAction(parsed.Action) && parsed.Action != "update" && parsed.Action != "config" {
+		return
+	}
+	parsed.Options.NoRebuild = parsed.Options.NoRebuild || rebuildSuppressedByEnv()
+}
+
+func rebuildSuppressedByEnv() bool {
+	return envflag.Truthy(os.LookupEnv(model.EnvNoRebuild))
+}
+
+// rebuildSuppressionCause names the switches that disabled builds, so errors
+// only tell users to undo what they actually set.
+func rebuildSuppressionCause(opts model.Options) string {
+	fromEnv := rebuildSuppressedByEnv()
+	switch {
+	case fromEnv && opts.Sources.NoRebuild == model.SourceCLI:
+		return "--no-rebuild and " + model.EnvNoRebuild
+	case fromEnv:
+		return model.EnvNoRebuild
+	default:
+		return "--no-rebuild"
+	}
 }
 
 // discoverUserCommands scans the host command directories best-effort. If home

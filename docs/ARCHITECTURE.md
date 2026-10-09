@@ -14,7 +14,8 @@ Enclave is a sandboxing CLI that bootstraps isolated agent tooling in Docker con
    elapsed, tools with `check-update.sh` are probed in a controlled container;
    only changed fingerprints request an automatic rebuild. Agent update stamps
    and fingerprints are committed only after a successful build, and per-tool
-   stages scope cache invalidation to the updated tool. `--no-rebuild` skips
+   stages scope cache invalidation to the updated tool. `--no-rebuild` (or
+   terminal-scoped `ENCLAVE_NO_REBUILD=1`) skips automatic update probes and
    runtime and gateway image builds entirely and uses existing local images or
    fails if they are missing (use it for offline/frozen inputs).
 4. Prepare mounts, persistent stores, auth, and network isolation.
@@ -352,12 +353,15 @@ Guardrail note: project config cannot elevate guarded options such as
 must come from global config (`~/.config/enclave/config.json`) or explicit CLI flags.
 
 `cache_from` can be used to add inline `docker build` cache sources (same as
-`--cache-from`). Some build controls are intentionally CLI-only and not read
+`--cache-from`). Some build controls are intentionally not read
 from config files, including `--rebuild`, `--no-rebuild`,
 `--force-base-image`, `--build-uid`, `--build-gid`, `--runtime-uid-remap`, and
-the buildx cache flags. `--allow-root` is likewise never read from config; its
-only alternative is the `ENCLAVE_ALLOW_ROOT` environment variable. The same
-holds for `--allow-sensitive-mounts` and `ENCLAVE_ALLOW_SENSITIVE_MOUNTS`.
+the buildx cache flags. These are CLI-only except for rebuild suppression:
+`ENCLAVE_NO_REBUILD=1` enables the same no-build path for session commands,
+as described in the [CLI reference](cli-reference.md#image--build).
+`--allow-root` is likewise never read from config; its only alternative is the
+`ENCLAVE_ALLOW_ROOT` environment variable. The same holds for
+`--allow-sensitive-mounts` and `ENCLAVE_ALLOW_SENSITIVE_MOUNTS`.
 
 Runtime image hashes include the effective build UID/GID. Explicit
 `--build-uid` / `--build-gid` values are used when provided; otherwise the host

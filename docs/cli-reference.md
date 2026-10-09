@@ -249,6 +249,18 @@ store that holds memory; the other `--keep` kinds do not apply there. See
 | `--progress <quiet\|compact\|verbose>` | Build output style |
 | `--force-base-image` | Bypass devcontainer base image compatibility checks |
 
+For terminal-wide rebuild suppression, use `export ENCLAVE_NO_REBUILD=1`.
+Session commands (`run`, `shell`, `continue`, `resume`, devcontainer run/shell,
+and user-defined session commands) then reuse local runtime and gateway images
+or QEMU bundles, skip automatic agent update probes, and fail if required assets
+are missing. Non-building commands ignore it, but `enclave config` reports it.
+`--rebuild` and top-level `enclave update` are rejected while it is enabled;
+extension-source updates (`tools update` / `features update`) are unaffected.
+
+Use `unset ENCLAVE_NO_REBUILD` or `export ENCLAVE_NO_REBUILD=0` to restore normal
+behavior, or `ENCLAVE_NO_REBUILD=0 enclave update` for a single invocation.
+There is no config-file key.
+
 ### Auth & Secrets
 
 | Flag | Description |

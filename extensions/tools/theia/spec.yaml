@@ -13,7 +13,17 @@ description: Theia desktop IDE attached to an enclave container
 
 sandbox:
   entrypoint: { run: [sleep, infinity] }
-  configDir: .theia
+  configDir: .theia-ide
+  passthroughPaths: [deployedPlugins/]
+  statePaths:
+    # Backend state that must survive the passthrough overlay, which rebuilds
+    # the store on every start: extension and workspace storage, model
+    # snapshots, backend settings, and recent workspaces.
+    - plugin-storage/
+    - workspace-storage/
+    - model-snapshots/
+    - backend-settings.json
+    - recentworkspace.json
 
 postStart:
   openIDE: theia

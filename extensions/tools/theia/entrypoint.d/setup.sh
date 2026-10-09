@@ -7,4 +7,4 @@
 
 # shellcheck shell=bash
 # Theia extension setup
-mkdir -p "$HOME/.theia"
+mkdir -p "$HOME/.theia-ide"

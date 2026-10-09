@@ -73,16 +73,32 @@ func validateAndNormalizeSecretConfigs(secrets map[string]model.SecretConfig) (m
 		if err != nil {
 			return nil, err
 		}
+		placeholder, err := normalizeSecretPlaceholder(rawID, cfg.Placeholder)
+		if err != nil {
+			return nil, err
+		}
 		normalized[id] = model.SecretConfig{
-			EnvVars:  envVars,
-			Release:  release,
-			APIKey:   cloneBoolPtr(cfg.APIKey),
-			File:     file,
-			Priority: priority,
+			Placeholder: placeholder,
+			EnvVars:     envVars,
+			Release:     release,
+			APIKey:      cloneBoolPtr(cfg.APIKey),
+			File:        file,
+			Priority:    priority,
 		}
 	}
 
 	return normalized, nil
+}
+
+func normalizeSecretPlaceholder(rawID string, cfg *model.SecretPlaceholderConfig) (*model.SecretPlaceholderConfig, error) {
+	if cfg == nil {
+		return nil, nil
+	}
+	if _, err := cfg.ValidatedAlphabet(); err != nil {
+		return nil, fmt.Errorf("secrets[%q]: %w", rawID, err)
+	}
+	cloned := *cfg
+	return &cloned, nil
 }
 
 func validateAndNormalizeProviderCredentialSecrets(providers []model.ProviderConfig, secretIDs map[string]struct{}) error {

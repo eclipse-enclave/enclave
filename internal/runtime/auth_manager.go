@@ -25,7 +25,7 @@ type authManager struct {
 }
 
 type placeholderResolver interface {
-	ResolvePlaceholder(string) (string, error)
+	ResolvePlaceholder(string, *model.SecretPlaceholderConfig) (string, error)
 }
 
 var newPlaceholderResolver = func() placeholderResolver {
@@ -182,23 +182,22 @@ func (m authManager) injectDeclaredSecrets(hooks auth.Hooks, authCtx auth.Contex
 		placeholder := ""
 		var placeholderVars map[string]bool
 		if secretReleaseEnabled && secret.ReleaseHTTP != nil {
-			resolved, err := placeholderResolver.ResolvePlaceholder(secret.ID)
+			resolved, err := placeholderResolver.ResolvePlaceholder(secret.ID, secret.Placeholder)
 			if err != nil {
-				logx.Warnf("Secret release disabled for %s due to placeholder error: %v", secret.ID, err)
-			} else {
-				placeholder = resolved
-				placeholderVars = m.proxyManagedEnvVars(secret)
-				releaseHosts, exactHosts := m.releaseTargetsFor(secret)
-				result.SecretMapping.Entries = append(result.SecretMapping.Entries, model.SecretReleaseEntry{
-					SecretID:    secret.ID,
-					Placeholder: placeholder,
-					Value:       secretValue,
-					Hosts:       releaseHosts,
-					Header:      secret.ReleaseHTTP.Header,
-					Format:      secret.ReleaseHTTP.Format,
-					ExactHosts:  exactHosts,
-				})
+				return result, fmt.Errorf("generate placeholder for secret %q: %w", secret.ID, err)
 			}
+			placeholder = resolved
+			placeholderVars = m.proxyManagedEnvVars(secret)
+			releaseHosts, exactHosts := m.releaseTargetsFor(secret)
+			result.SecretMapping.Entries = append(result.SecretMapping.Entries, model.SecretReleaseEntry{
+				SecretID:    secret.ID,
+				Placeholder: placeholder,
+				Value:       secretValue,
+				Hosts:       releaseHosts,
+				Header:      secret.ReleaseHTTP.Header,
+				Format:      secret.ReleaseHTTP.Format,
+				ExactHosts:  exactHosts,
+			})
 		}
 		// A host selector is a choice, not a credential: persisting it would
 		// pin every later run to the instance one run happened to name, with no

@@ -309,6 +309,8 @@ type SecretConfig struct {
 	// aliases against the file; empty means env-first.
 	File     *SecretFileSource `json:"file,omitempty"`
 	Priority string            `json:"priority,omitempty"`
+
+	Placeholder *SecretPlaceholderConfig `json:"placeholder,omitempty"`
 }
 
 // SecretFileSource sources a secret from a host file rather than an env var.

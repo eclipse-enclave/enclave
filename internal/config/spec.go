@@ -154,6 +154,19 @@ type specCredentialSource struct {
 	File     *specCredentialFile `json:"file,omitempty"`     // host file source
 	Priority string              `json:"priority,omitempty"` // env-first | file-first
 	APIKey   *bool               `json:"apiKey,omitempty"`   // enclave-native
+
+	Placeholder *specCredentialPlaceholder `json:"placeholder,omitempty"`
+}
+
+type specCredentialPlaceholder struct {
+	Prefix string                          `json:"prefix,omitempty"`
+	Suffix string                          `json:"suffix,omitempty"`
+	Random specCredentialPlaceholderRandom `json:"random"`
+}
+
+type specCredentialPlaceholderRandom struct {
+	Encoding string `json:"encoding"`
+	Length   int    `json:"length"`
 }
 
 type specCredentialFile struct {

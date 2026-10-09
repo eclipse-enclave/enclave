@@ -30,6 +30,8 @@ type activeSecret struct {
 	File        *model.SecretFileSource
 	Priority    string
 	source      string
+
+	Placeholder *model.SecretPlaceholderConfig
 }
 
 func (r *Runtime) activeSecrets() ([]activeSecret, error) {
@@ -80,6 +82,7 @@ func (r *Runtime) activeSecrets() ([]activeSecret, error) {
 				ReleaseHTTP: cfg.ReleaseHTTP(),
 				File:        cfg.File,
 				Priority:    cfg.Priority,
+				Placeholder: cfg.Placeholder,
 				source:      source.name,
 			}
 		}

@@ -25,6 +25,73 @@ func mustDoc(t *testing.T, src string) specDocument {
 	return d
 }
 
+func TestCredentialPlaceholderShape(t *testing.T) {
+	for _, kind := range []string{"sandbox", "mixin"} {
+		t.Run(kind, func(t *testing.T) {
+			doc := mustDoc(t, `
+schemaVersion: "1"
+kind: `+kind+`
+name: example
+credentials:
+  sources:
+    example-token:
+      env: [EXAMPLE_TOKEN]
+      placeholder:
+        prefix: vendor_
+        suffix: _end
+        random: {encoding: alphanumeric, length: 40}
+network:
+  serviceAuth:
+    example-token: {headerName: Authorization, hosts: [api.example.com]}
+`)
+			if err := validateServiceAuthMappings(doc, "example/spec.yaml"); err != nil {
+				t.Fatal(err)
+			}
+			secrets, err := validateAndNormalizeSecretConfigs(buildSecrets(doc))
+			if err != nil {
+				t.Fatal(err)
+			}
+			shape := secrets["example-token"].Placeholder
+			if shape == nil || shape.Prefix != "vendor_" || shape.Suffix != "_end" || shape.Random.Encoding != "alphanumeric" || shape.Random.Length != 40 {
+				t.Fatalf("lost shape: %+v", shape)
+			}
+			shape.Random.Length = 1
+			if _, err := validateAndNormalizeSecretConfigs(secrets); err == nil {
+				t.Fatal("accepted insufficient entropy")
+			}
+		})
+	}
+}
+
+func TestPlaceholderRequiresServiceAuth(t *testing.T) {
+	for _, kind := range []string{"sandbox", "mixin"} {
+		for _, network := range []string{"", "network: {}", "network:\n  serviceAuth:\n    other-token: {headerName: Authorization, hosts: [api.example.com]}"} {
+			doc := mustDoc(t, `
+schemaVersion: "1"
+kind: `+kind+`
+name: example
+credentials:
+  sources:
+    other-token: {env: [OTHER_TOKEN]}
+    example-token:
+      env: [EXAMPLE_TOKEN]
+      placeholder:
+        random: {encoding: hex, length: 32}
+`+network)
+			err := validateServiceAuthMappings(doc, "example/spec.yaml")
+			if err == nil || !strings.Contains(err.Error(), `credentials.sources["example-token"].placeholder requires a matching network.serviceAuth entry`) {
+				t.Fatalf("kind=%s network=%q: error = %v", kind, network, err)
+			}
+			source := doc.Credentials.Sources["example-token"]
+			source.Placeholder = nil
+			doc.Credentials.Sources["example-token"] = source
+			if err := validateServiceAuthMappings(doc, "example/spec.yaml"); err != nil {
+				t.Fatalf("raw credential rejected: %v", err)
+			}
+		}
+	}
+}
+
 func TestValidateServiceAuthMappings(t *testing.T) {
 	t.Run("unmatched serviceAuth id fails", func(t *testing.T) {
 		doc := mustDoc(t, `

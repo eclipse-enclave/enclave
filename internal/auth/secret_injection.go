@@ -11,41 +11,60 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"math/big"
 	"strings"
+
+	"enclave/internal/model"
 )
 
 const placeholderPrefix = "ENCLAVE_SECRET_"
 
 type PlaceholderResolver struct {
-	byEnvVar map[string]string
+	bySecretID map[string]string
 }
 
 func NewPlaceholderResolver() *PlaceholderResolver {
 	return &PlaceholderResolver{
-		byEnvVar: map[string]string{},
+		bySecretID: map[string]string{},
 	}
 }
 
-func (r *PlaceholderResolver) ResolvePlaceholder(envVar string) (string, error) {
+func (r *PlaceholderResolver) ResolvePlaceholder(secretID string, shape *model.SecretPlaceholderConfig) (string, error) {
 	if r == nil {
 		return "", fmt.Errorf("placeholder resolver is nil")
 	}
-	name := strings.TrimSpace(envVar)
+	name := strings.TrimSpace(secretID)
 	if name == "" {
-		return "", fmt.Errorf("env var is required")
+		return "", fmt.Errorf("secret ID is required")
 	}
-	if placeholder, ok := r.byEnvVar[name]; ok {
+	if placeholder, ok := r.bySecretID[name]; ok {
 		return placeholder, nil
 	}
-	placeholder, err := newPlaceholder()
+	placeholder, err := newPlaceholder(shape)
 	if err != nil {
 		return "", err
 	}
-	r.byEnvVar[name] = placeholder
+	r.bySecretID[name] = placeholder
 	return placeholder, nil
 }
 
-func newPlaceholder() (string, error) {
+func newPlaceholder(shape *model.SecretPlaceholderConfig) (string, error) {
+	if shape != nil {
+		alphabet, err := shape.ValidatedAlphabet()
+		if err != nil {
+			return "", err
+		}
+		body := make([]byte, shape.Random.Length)
+		bound := big.NewInt(int64(len(alphabet)))
+		for i := range body {
+			n, err := rand.Int(rand.Reader, bound)
+			if err != nil {
+				return "", fmt.Errorf("generate placeholder entropy: %w", err)
+			}
+			body[i] = alphabet[n.Int64()]
+		}
+		return shape.Prefix + string(body) + shape.Suffix, nil
+	}
 	entropy := make([]byte, 24)
 	if _, err := rand.Read(entropy); err != nil {
 		return "", fmt.Errorf("generate placeholder entropy: %w", err)

@@ -47,6 +47,59 @@ func TestParseSkillsValidation(t *testing.T) {
 	}
 }
 
+func TestBackendFlagOnEngineCommands(t *testing.T) {
+	commands := [][]string{
+		{"ps"}, {"status"}, {"stop"}, {"attach"}, {"exec"},
+		{"update"}, {"theia"}, {"theia-next"}, {"cleanup"}, {"info"},
+		{"auth", "import"}, {"auth", "export"}, {"img", "import"},
+		{"network", "status"}, {"network", "log"}, {"network", "apply"},
+		{"network", "add-domain", "example.com", "--global"},
+		{"network", "remove-domain", "example.com", "--global"},
+		{"network", "set-mode", "restricted", "--global"},
+	}
+	for _, command := range commands {
+		t.Run(strings.Join(command, " "), func(t *testing.T) {
+			args := append(append([]string(nil), command...), "--backend", "podman")
+			res, err := Parse(args, config.DefaultOptions())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if res.Options.Backend != "podman" || res.Sources.Backend != model.SourceCLI {
+				t.Fatalf("backend/source = %q/%v", res.Options.Backend, res.Sources.Backend)
+			}
+			opts, _, _ := config.ResolveOptionsForTool(res.Options, res.Sources,
+				config.Defaults{Backend: "docker"}, config.Defaults{}, "")
+			if opts.Backend != "podman" {
+				t.Fatalf("configured backend overrode CLI choice: %q", opts.Backend)
+			}
+		})
+	}
+}
+
+func TestBackendFlagRejectedOnEngineFreeCommands(t *testing.T) {
+	for _, command := range [][]string{
+		{"tools"}, {"features"}, {"review-target"},
+		{"network", "print"}, {"network", "diff"}, {"devcontainer", "generate"},
+	} {
+		t.Run(strings.Join(command, " "), func(t *testing.T) {
+			args := append(append([]string(nil), command...), "--backend", "podman")
+			if _, err := Parse(args, config.DefaultOptions()); err == nil || !strings.Contains(err.Error(), "unknown flag") {
+				t.Fatalf("expected unknown backend flag, got %v", err)
+			}
+		})
+	}
+}
+
+func TestBackendFlagBeforeLifecycleCommand(t *testing.T) {
+	res, err := Parse([]string{"--backend", "podman", "ps", "--json"}, config.DefaultOptions())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Action != "ps" || res.Options.Backend != "podman" || !res.Options.PSJSON {
+		t.Fatalf("unexpected parsed command: action=%q backend=%q json=%v", res.Action, res.Options.Backend, res.Options.PSJSON)
+	}
+}
+
 func TestParseRunArgsDelimiter(t *testing.T) {
 	defaults := config.DefaultOptions()
 	res, err := Parse([]string{"--tool", "codex", "--", "--flag", "value"}, defaults)

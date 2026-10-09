@@ -32,9 +32,9 @@ func authSubcommand(name string, description string, action string, res *Result)
 			return nil
 		},
 	}
-	// auth import/export only consume Tool, AuthScope, and AuthName. The other
+	// auth import/export only consume Backend, Tool, AuthScope, and AuthName. The other
 	// Auth flags (--reset-auth, --no-api-key, --pass-api-key, --pass-env,
 	// --secrets-scope) are runtime-only and have no effect here.
-	addOptionFlagsByName(cmd.Flags(), &res.Options, &res.Sources, "tool", "auth_scope", "auth_name")
+	addOptionFlagsByName(cmd.Flags(), &res.Options, &res.Sources, "backend", "tool", "auth_scope", "auth_name")
 	return cmd
 }

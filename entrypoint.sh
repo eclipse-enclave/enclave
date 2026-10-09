@@ -88,13 +88,29 @@ if [ -n "${ENCLAVE_GATEWAY_CA_CERT_PATH:-}" ] && [ -f "$ENCLAVE_GATEWAY_CA_CERT_
         update-ca-certificates >/dev/null 2>&1 || true
     fi
     system_ca_bundle="/etc/ssl/certs/ca-certificates.crt"
-    if [ -r "$system_ca_bundle" ]; then
-        if enclave_ca_bundle_dir="$(mktemp -d "${TMPDIR:-/tmp}/enclave-ca.XXXXXX")"; then
-            enclave_ca_bundle="$enclave_ca_bundle_dir/ca-certificates.crt"
-            if cat "$system_ca_bundle" "$ENCLAVE_GATEWAY_CA_CERT_PATH" > "$enclave_ca_bundle"; then
-                export REQUESTS_CA_BUNDLE="$enclave_ca_bundle"
-                export SSL_CERT_FILE="$enclave_ca_bundle"
+    if [ -n "${ENCLAVE_GATEWAY_CA_BUNDLE_PATH:-}" ]; then
+        # The container environment already points SSL_CERT_FILE here for
+        # `docker exec` processes, so the file must exist even without a
+        # readable system bundle.
+        enclave_ca_bundle="$ENCLAVE_GATEWAY_CA_BUNDLE_PATH"
+        if mkdir -p "$(dirname "$enclave_ca_bundle")"; then
+            enclave_ca_bundle_tmp="$enclave_ca_bundle.$$"
+            enclave_ca_sources=("$ENCLAVE_GATEWAY_CA_CERT_PATH")
+            if [ -r "$system_ca_bundle" ]; then
+                enclave_ca_sources=("$system_ca_bundle" "$ENCLAVE_GATEWAY_CA_CERT_PATH")
             fi
+            if cat "${enclave_ca_sources[@]}" > "$enclave_ca_bundle_tmp" && chmod 644 "$enclave_ca_bundle_tmp"; then
+                mv -f "$enclave_ca_bundle_tmp" "$enclave_ca_bundle" || true
+            fi
+            rm -f "$enclave_ca_bundle_tmp"
+        fi
+        if [ -s "$enclave_ca_bundle" ]; then
+            export REQUESTS_CA_BUNDLE="$enclave_ca_bundle"
+            export SSL_CERT_FILE="$enclave_ca_bundle"
+        else
+            # A missing bundle leaves Python requests without any trust store,
+            # whereas OpenSSL falls back to the system store when unset.
+            unset REQUESTS_CA_BUNDLE SSL_CERT_FILE
         fi
     fi
     export NODE_EXTRA_CA_CERTS="$ENCLAVE_GATEWAY_CA_CERT_PATH"

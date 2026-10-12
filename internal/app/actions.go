@@ -18,8 +18,8 @@ func isRunAction(action string) bool {
 // backendFreeActions never touch a container engine, so the "auto" backend is
 // left unresolved for them: detection would be wasted work, and a command that
 // lists extensions, prints configuration, or renders policy must not ask which
-// engine to use. Validation of the backend name only runs for the run-like
-// commands and update, so the unresolved value is never checked.
+// engine to use. These actions skip both backend resolution and validation;
+// all other actions validate the resolved backend before dispatch.
 var backendFreeActions = map[string]bool{
 	"config":                  true,
 	"devcontainer-generate":   true,

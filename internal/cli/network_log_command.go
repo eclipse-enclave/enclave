@@ -53,6 +53,6 @@ read, including sessions that have already exited.`,
 	cmd.Flags().StringVar(&view.Type, "type", "", "Filter by event type: dns|http|tcp")
 	cmd.Flags().StringVar(&view.Session, "session", "", "Read one session's log, named by its container")
 	cmd.Flags().BoolVar(&allRunning, "all-running", false, "Read the logs of all running gateways on the host")
-	addOptionFlagsByName(cmd.Flags(), &res.Options, &res.Sources, "tool")
+	addOptionFlagsByName(cmd.Flags(), &res.Options, &res.Sources, "backend", "tool")
 	return cmd
 }

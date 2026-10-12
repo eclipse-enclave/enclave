@@ -39,6 +39,6 @@ Roots honor $XDG_CONFIG_HOME on Linux (ignored on macOS).`, variant),
 		},
 	}
 	// --tool disambiguates a session name used by more than one tool.
-	addOptionFlagsByName(cmd.Flags(), &res.Options, &res.Sources, "tool")
+	addOptionFlagsByName(cmd.Flags(), &res.Options, &res.Sources, "backend", "tool")
 	return cmd
 }

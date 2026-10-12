@@ -36,15 +36,15 @@ func ValidateOptions(opts model.Options, sources model.OptionSources, ctx Valida
 		return opts, sources, warnings, err
 	}
 	if opts.Backend == "" {
+		// Standalone validation accepts zero-value options (including test
+		// fixtures); Run rejects an explicitly empty --backend before this call.
 		opts.Backend = backend.NameDocker
 	}
 	if opts.Devcontainer && opts.Backend != backend.NameDocker {
 		return opts, sources, warnings, fmt.Errorf("devcontainer mode requires --backend %s", backend.NameDocker)
 	}
-	switch opts.Backend {
-	case backend.NameDocker, backend.NamePodman, backend.NameQEMU:
-	default:
-		return opts, sources, warnings, fmt.Errorf("unsupported backend %q (available: %s, %s, %s)", opts.Backend, backend.NameDocker, backend.NamePodman, backend.NameQEMU)
+	if err := validateBackendName(opts.Backend); err != nil {
+		return opts, sources, warnings, err
 	}
 	if opts.Backend == backend.NameQEMU && isRunAction(ctx.Action) {
 		var qemuWarnings []string

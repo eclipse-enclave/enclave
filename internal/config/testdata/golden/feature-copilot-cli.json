@@ -1,0 +1,7 @@
+{
+  "type": "mixin",
+  "name": "copilot-cli",
+  "display_name": "GitHub Copilot CLI",
+  "description": "GitHub Copilot CLI (copilot), also used by Theia's Copilot provider",
+  "priority": 60
+}

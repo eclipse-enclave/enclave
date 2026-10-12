@@ -1,0 +1,10 @@
+{
+  "type": "mixin",
+  "name": "claude-agent-sdk",
+  "display_name": "Claude Agent SDK",
+  "description": "Claude Agent SDK (@anthropic-ai/claude-agent-sdk), used by Theia's Claude Code provider",
+  "priority": 60,
+  "environment": {
+    "CLAUDE_AGENT_SDK_PATH": "/home/agent/.local/lib/node_modules/@anthropic-ai/claude-agent-sdk"
+  }
+}

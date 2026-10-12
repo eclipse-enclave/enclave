@@ -100,6 +100,7 @@ sequenceDiagram
 - Placeholder protection applies only to declared secrets with `release.http` in the selected tool profile or enabled feature manifests.
 - Real secrets are released only on HTTPS requests; plaintext HTTP requests carrying a placeholder are denied.
 - Current secret injection is header-based; file credential mediation is separate work.
+- WebSocket and other protocol upgrades get secret release on the handshake headers; the upgraded connection is then relayed unchanged in both directions.
 
 ## Related Implementation
 

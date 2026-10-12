@@ -88,7 +88,7 @@ IPv6 record, so recording it would report allowed domains as denied.
 
 ### Coverage and granularity
 
-The log records policy decisions and connections, not traffic volume. Three
+The log records policy decisions and connections, not traffic volume. Four
 limits matter before a quiet log is read as a quiet session:
 
 - **Successful DNS lookups are never recorded.** Only denied and failed lookups
@@ -108,6 +108,11 @@ limits matter before a quiet log is read as a quiet session:
   secret was actually resolved for the session. A tool authenticated with an
   OAuth token rather than an API key therefore has no release rule for its API
   host and produces no request-level events for it.
+- **An upgraded connection is one `http` event.** A WebSocket, or any other
+  protocol a client switches to (SPDY for `kubectl exec`, for example), is
+  logged once with status `101`, when it closes. The traffic it carries is
+  relayed without being inspected or logged, so requests multiplexed inside it
+  get no events of their own, even with `--network-log=requests`.
 
 Run the session with `--network-log=requests` to force MITM for every
 allowlisted HTTPS host and get an `http` event per request. In either mode, SSH

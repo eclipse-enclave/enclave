@@ -157,6 +157,11 @@ type proxy struct {
 	audit          *netlog.Appender
 	session        string
 	transport      *http.Transport
+	// upgradeTransport speaks only HTTP/1.1 and carries every request with an
+	// Upgrade header, whether or not Connection names it: HTTP/2 refuses any
+	// Upgrade header, and transport switches to HTTP/1.1 by itself only for
+	// WebSocket, not for upgrades such as SPDY.
+	upgradeTransport *http.Transport
 }
 
 func normalizeHostPatterns(patterns []string) []string {
@@ -172,20 +177,28 @@ func normalizeHostPatterns(patterns []string) []string {
 }
 
 func newProxy(allowedDomains []string, deniedDomains []string, secretRules []model.SecretReleaseEntry, forceHTTPSMITM bool, audit *netlog.Appender, session string) *proxy {
+	upgradeTransport := newUpstreamTransport()
+	upgradeTransport.Protocols = new(http.Protocols)
+	upgradeTransport.Protocols.SetHTTP1(true)
 	return &proxy{
-		allowedDomains: normalizeHostPatterns(allowedDomains),
-		deniedDomains:  normalizeHostPatterns(deniedDomains),
-		secretRules:    secretRules,
-		forceHTTPSMITM: forceHTTPSMITM,
-		audit:          audit,
-		session:        session,
-		transport: &http.Transport{
-			Proxy:                 nil,
-			ForceAttemptHTTP2:     false,
-			IdleConnTimeout:       90 * time.Second,
-			ResponseHeaderTimeout: 120 * time.Second,
-			TLSHandshakeTimeout:   10 * time.Second,
-		},
+		allowedDomains:   normalizeHostPatterns(allowedDomains),
+		deniedDomains:    normalizeHostPatterns(deniedDomains),
+		secretRules:      secretRules,
+		forceHTTPSMITM:   forceHTTPSMITM,
+		audit:            audit,
+		session:          session,
+		transport:        newUpstreamTransport(),
+		upgradeTransport: upgradeTransport,
+	}
+}
+
+func newUpstreamTransport() *http.Transport {
+	return &http.Transport{
+		Proxy:                 nil,
+		ForceAttemptHTTP2:     false,
+		IdleConnTimeout:       90 * time.Second,
+		ResponseHeaderTimeout: 120 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
 	}
 }
 
@@ -286,19 +299,106 @@ func (p *proxy) forward(w http.ResponseWriter, req *http.Request, scheme string)
 			outgoing.Header.Set("X-Forwarded-For", clientIP)
 		}
 	}
-	resp, err := p.transport.RoundTrip(outgoing)
+	transport := p.transport
+	if outgoing.Header.Get("Upgrade") != "" {
+		transport = p.upgradeTransport
+	}
+	resp, err := transport.RoundTrip(outgoing)
 	if err != nil {
 		return forwardResult{}, err
 	}
 	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode == http.StatusSwitchingProtocols {
+		return relayUpgrade(w, outgoing, resp)
+	}
 	copyHeaders(w.Header(), resp.Header)
 	w.WriteHeader(resp.StatusCode)
-	responseBytes, _ := io.Copy(w, resp.Body)
+	// Send the head before waiting for the body: an event stream can stay
+	// silent for a long time after it opens, and the client cannot see the
+	// stream as open until the head arrives.
+	rc := http.NewResponseController(w)
+	_ = rc.Flush()
+	responseBytes, _ := io.Copy(flushWriter{w: w, rc: rc}, resp.Body)
 	return forwardResult{
 		StatusCode:    resp.StatusCode,
 		ResponseBytes: responseBytes,
 		ContentType:   strings.TrimSpace(resp.Header.Get("Content-Type")),
 	}, nil
+}
+
+// flushWriter passes each chunk to the client as soon as it arrives. Without
+// it, streamed responses such as server-sent events sit in the server's write
+// buffer until it fills or the response ends.
+type flushWriter struct {
+	w  io.Writer
+	rc *http.ResponseController
+}
+
+func (f flushWriter) Write(p []byte) (int, error) {
+	n, err := f.w.Write(p)
+	if err != nil {
+		return n, err
+	}
+	return n, f.rc.Flush()
+}
+
+// relayUpgrade completes a protocol switch such as a WebSocket handshake. The
+// 101 response must reach the client before either side sends a frame, and
+// the upgraded connection then carries traffic in both directions, so it is
+// taken over from the HTTP server rather than written as a response body.
+func relayUpgrade(w http.ResponseWriter, req *http.Request, resp *http.Response) (forwardResult, error) {
+	requested, switched := upgradeType(req.Header), upgradeType(resp.Header)
+	if requested == "" || !strings.EqualFold(requested, switched) {
+		return forwardResult{}, fmt.Errorf("upstream switched to protocol %q when %q was requested", switched, requested)
+	}
+	upstream, ok := resp.Body.(io.ReadWriteCloser)
+	if !ok {
+		return forwardResult{}, fmt.Errorf("upgrade response body is not writable")
+	}
+	downstream, buffered, err := http.NewResponseController(w).Hijack()
+	if err != nil {
+		return forwardResult{}, fmt.Errorf("take over upgraded connection: %w", err)
+	}
+	defer func() { _ = downstream.Close() }()
+
+	// From here on the connection is no longer the HTTP server's, so no error
+	// response can be sent: a client that is gone ends the relay.
+	result := forwardResult{StatusCode: resp.StatusCode}
+	head := *resp
+	head.Body = nil
+	if head.Write(buffered) != nil || buffered.Flush() != nil {
+		return result, nil
+	}
+
+	// Either side ending the session ends the relay: closing both connections
+	// unblocks the copy in the other direction.
+	done := make(chan struct{}, 2)
+	go func() {
+		_, _ = io.Copy(upstream, buffered.Reader)
+		done <- struct{}{}
+	}()
+	go func() {
+		result.ResponseBytes, _ = io.Copy(downstream, upstream)
+		done <- struct{}{}
+	}()
+	<-done
+	_ = upstream.Close()
+	_ = downstream.Close()
+	<-done
+	return result, nil
+}
+
+// upgradeType returns the protocol a message asks to switch to, or "" when
+// its Connection header does not name the upgrade.
+func upgradeType(h http.Header) string {
+	for _, value := range h.Values("Connection") {
+		for token := range strings.SplitSeq(value, ",") {
+			if strings.EqualFold(strings.TrimSpace(token), "upgrade") {
+				return h.Get("Upgrade")
+			}
+		}
+	}
+	return ""
 }
 
 type httpsDispatchServer struct {

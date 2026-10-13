@@ -160,8 +160,8 @@ func TestRequiredMemoryMiBCoversUnpackAndWorkload(t *testing.T) {
 	}{
 		// Boot needs 1024 + 384 + 256 MiB, the session 1024 + 2048 MiB.
 		{name: "workload dominates", uncompressed: 1024 << 20, compressed: 384 << 20, want: 3072},
-		// Boot needs 4096 + 1536 + 256 MiB, the session 4096 + 2048 MiB.
-		{name: "unpacking dominates", uncompressed: 4096 << 20, compressed: 1536 << 20, want: 6144},
+		// Boot needs 4096 + 2048 + 256 MiB, the session 4096 + 2048 MiB.
+		{name: "unpacking dominates", uncompressed: 4096 << 20, compressed: 2048 << 20, want: 6656},
 		{name: "unknown sizes", uncompressed: 0, compressed: 0, want: 2048},
 	}
 	for _, tc := range cases {

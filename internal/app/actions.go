@@ -47,7 +47,6 @@ var toolFreeActions = map[string]bool{
 	"config":                  true,
 	"extension-list":          true,
 	"features":                true,
-	"img-import":              true,
 	"ps":                      true,
 	"review-target":           true,
 	"ssh-init":                true,

@@ -163,14 +163,6 @@ Mutation commands (`add-domain`, `remove-domain`, `set-mode`) apply the new poli
 | `enclave auth export --tool <tool>` | Copy auth store files back to the host |
 | `enclave ssh-init` | Initialize isolated SSH keys at `~/.cache/enclave/ssh/`. Not recommended: the key lets the agent push to your Git provider. See [SSH keys](auth.md#ssh-keys) |
 
-### Images
-
-| Command | Description |
-|---------|-------------|
-| `enclave img import` | Import a host clipboard image into the shared read-only inbox (`/mnt/host-images`) |
-
-`img import` flags: `--screenshot` (capture a region screenshot instead of the clipboard), `--no-copy` (do not copy the resulting container path to the host clipboard). Imported images are capped at 10 MiB. The inbox is global — the image is visible to every `--image-inbox` session. See [Host image inbox](host-image-inbox.md).
-
 ### Devcontainer
 
 | Command | Description |
@@ -263,7 +255,6 @@ store that holds memory; the other `--keep` kinds do not apply there. See
 | `--auth-scope <scope>` | `shared` (default) or `project` |
 | `--auth-name <slug>` | Select a named per-tool shared auth store; ignored under `--auth-scope=project` |
 | `--secrets-scope <scope>` | `both` (default), `global`, or `project` |
-| `--image-inbox` | Mount the shared read-only host image inbox at `/mnt/host-images`; feed it with `enclave img import`. See [Host image inbox](host-image-inbox.md). |
 
 ### Networking
 
@@ -336,7 +327,7 @@ The default backend is `auto`: enclave uses docker when its CLI is on `PATH`, ot
 
 Rootless podman without idmapped-mount support has to copy an image into a layer for the keep-id mapping the first time that image starts, and again after every image rebuild. enclave triggers this copy before the gateway starts and prints a notice when it takes longer than two seconds; for multi-gigabyte tool images it takes minutes, during which podman blocks every other podman command, including `enclave ps`.
 
-Commands that use an engine accept `--backend`, including session management, `update`, `theia`/`theia-next`, `info`, `cleanup`, `auth import`/`export`, `img import`, and the engine-using `network` subcommands (`status`, `log`, `apply`, and policy mutations). Without the flag they use the configured backend or detection. Engine-independent commands such as `network print` and `network diff` do not accept it; `config` accepts it to preview option resolution. `cleanup --build-cache` reports nothing to reclaim under podman, which keeps no separate build cache.
+Commands that use an engine accept `--backend`, including session management, `update`, `theia`/`theia-next`, `info`, `cleanup`, `auth import`/`export`, and the engine-using `network` subcommands (`status`, `log`, `apply`, and policy mutations). Without the flag they use the configured backend or detection. Engine-independent commands such as `network print` and `network diff` do not accept it; `config` accepts it to preview option resolution. `cleanup --build-cache` reports nothing to reclaim under podman, which keeps no separate build cache.
 
 ## Experimental QEMU backend
 

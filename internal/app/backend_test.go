@@ -181,7 +181,7 @@ func TestActionUsesBackend(t *testing.T) {
 			t.Fatalf("%s never touches an engine and must not resolve the backend", action)
 		}
 	}
-	for _, action := range []string{"run", "shell", "exec", "update", "info", "ps", "status", "stop", "attach", "cleanup", "theia", "img-import", "network-status", "network-apply", "network-set-mode", "auth-import", "auth-export"} {
+	for _, action := range []string{"run", "shell", "exec", "update", "info", "ps", "status", "stop", "attach", "cleanup", "theia", "network-status", "network-apply", "network-set-mode", "auth-import", "auth-export"} {
 		if !actionUsesBackend(action) {
 			t.Fatalf("%s uses an engine and must resolve the backend", action)
 		}

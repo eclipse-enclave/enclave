@@ -88,8 +88,6 @@ func dispatchCommand(input *CommandInput) int {
 		return runNetworkRemoveDomain(input)
 	case "network-set-mode":
 		return runNetworkSetMode(input)
-	case "img-import":
-		return runImgImport(input)
 	case "exec", "run", "shell", actionContinue, "resume":
 		return runExecutionCommand(input)
 	default:

@@ -34,7 +34,6 @@ var BuiltinNames = []string{
 	"extension",
 	"features",
 	"help",
-	"img",
 	"info",
 	"network",
 	"ps",

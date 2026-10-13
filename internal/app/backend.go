@@ -46,9 +46,9 @@ func qemuBackendOptions(host model.Host, paths model.Paths) backendqemu.Options 
 	return backendqemu.Options{Host: host, Paths: paths}
 }
 
-// newListingBackend builds a backend for read-only commands (ps/status/theia/
-// img import) that only enumerate existing sessions and therefore need no
-// resolved host or paths.
+// newListingBackend builds a backend for read-only commands (ps/status/theia)
+// that only enumerate existing sessions and therefore need no resolved host or
+// paths.
 func newListingBackend(opts model.Options) (backend.Backend, error) {
 	return selectBackend(opts, dockerBackendOptions(model.Host{}, model.Paths{}, opts.BuildOptions, opts.RunOptions))
 }

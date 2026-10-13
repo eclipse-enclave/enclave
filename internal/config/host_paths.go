@@ -145,14 +145,6 @@ func HostProjectToolDir(home string, projectHash string, tool string) string {
 	return filepath.Join(HostProjectDir(home, projectHash), tool)
 }
 
-// HostImageInboxDir is the single global image inbox shared by every
-// --image-inbox session on the host, mounted read-only at /mnt/host-images.
-// It is deliberately not project-scoped: `enclave img import` writes here once
-// and the image is visible to any running (and future) inbox-enabled session.
-func HostImageInboxDir(home string) string {
-	return filepath.Join(hostCacheRoot(home), "inbox")
-}
-
 func HostProjectHistoryDir(home string, projectHash string, tool string) string {
 	return filepath.Join(HostProjectToolDir(home, projectHash, tool), "history")
 }

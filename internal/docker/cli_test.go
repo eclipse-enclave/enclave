@@ -113,14 +113,14 @@ func TestMountFlagsSourceCreatingBinds(t *testing.T) {
 		{Type: MountTypeBind, Source: "/host/project", Target: "/work"},
 		{Type: MountTypeBind, Source: "/host/secret.json", Target: "/auth.json", ReadOnly: true},
 		{Type: MountTypeBind, Source: "/host/cache/npm", Target: "/home/agent/.npm", CreateSourceDir: true},
-		{Type: MountTypeBind, Source: "/host/cache/inbox", Target: "/mnt/host-images", ReadOnly: true, CreateSourceDir: true},
+		{Type: MountTypeBind, Source: "/host/cache/readonly", Target: "/mnt/readonly", ReadOnly: true, CreateSourceDir: true},
 		{Type: MountTypeVolume, Source: "vol", Target: "/data", CreateSourceDir: true},
 	})
 	want := []string{
 		"--mount", "type=bind,source=/host/project,target=/work",
 		"--mount", "type=bind,source=/host/secret.json,target=/auth.json,readonly",
 		"--volume", "/host/cache/npm:/home/agent/.npm",
-		"--volume", "/host/cache/inbox:/mnt/host-images:ro",
+		"--volume", "/host/cache/readonly:/mnt/readonly:ro",
 		"--mount", "type=volume,source=vol,target=/data",
 	}
 	if !reflect.DeepEqual(got, want) {

@@ -148,12 +148,6 @@ func optionCLIFlags() map[string][]CLIFlag {
 				sources.NoMemory = model.SourceCLI
 			}),
 		},
-		"image_inbox": {
-			boolFlag("--image-inbox", "Mount a read-only host image inbox at /mnt/host-images", func(opts *model.Options, sources *model.OptionSources) {
-				opts.ImageInbox = true
-				sources.ImageInbox = model.SourceCLI
-			}),
-		},
 		"force_rebuild": {
 			boolFlag("--rebuild", "Force image rebuild", func(opts *model.Options, sources *model.OptionSources) {
 				opts.ForceRebuild = true

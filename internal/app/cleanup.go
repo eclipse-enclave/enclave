@@ -342,9 +342,6 @@ func resolveCleanupDirs(run model.RunOptions, cleanup model.CleanupOptions, home
 			// The state projects tree holds every project's config/env stores
 			// and history, so a full cleanup removes them all at once.
 			{Kind: historyKind, Path: config.HostProjectsDir(home)},
-			// The image inbox is global (not project-scoped), so it is only
-			// removed by a full cleanup. Held images are user-imported content.
-			{Kind: "inbox", Path: config.HostImageInboxDir(home)},
 		}
 		// Shared tool/feature auth stores live outside the projects tree; they
 		// are removed on a full cleanup unless `--keep auth` is set.

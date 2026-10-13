@@ -11,6 +11,11 @@ export GOCACHE = $(CURDIR)/.gocache
 export GOMODCACHE = $(CURDIR)/.gomodcache
 export GO111MODULE = on
 
+# Ubuntu LTS ships Go 1.24 as golang-1.24-go, which does not put go on PATH.
+ifeq ($(shell command -v go),)
+export PATH := /usr/lib/go-1.24/bin:$(PATH)
+endif
+
 GATEWAY_PROXY_SOURCE_PATHS_FILE := $(CURDIR)/internal/gateway/gateway_proxy_build_inputs.txt
 BUILD_VERSION ?= $(shell dpkg-parsechangelog --show-field Version | sed 's/-[^-]*$$//')
 BUILD_COMMIT ?= unknown

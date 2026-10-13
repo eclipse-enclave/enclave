@@ -554,7 +554,7 @@ const (
 	SessionMonitorTmuxSocket  = AppName
 	SessionMonitorTmuxSession = "main"
 	ImageName                 = AppName + ":latest"
-	AlpineImage               = "alpine@sha256:85fe1e81d6758c208f3e1eed4338a1997e19d4be002d4dd32d3100c9a8c010a0"
+	AlpineImage               = "alpine@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a"
 	HashLength                = 12
 	DetachKeysDefault         = `ctrl-\`
 )

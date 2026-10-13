@@ -77,7 +77,7 @@ RUN --mount=type=cache,id=enclave-apt-cache,target=/var/cache/apt,sharing=locked
 # Install yq (mikefarah/yq) for reading extension spec.yaml metadata during the
 # build (feature/tool enablement, priority, needsRoot, aptPackages). Pinned like
 # the other downloaded tools; jq above stays for agent-facing JSON handling.
-ARG YQ_VERSION=v4.44.6
+ARG YQ_VERSION=v4.54.1
 RUN set -eux; \
     arch="$(dpkg --print-architecture)"; \
     case "$arch" in \

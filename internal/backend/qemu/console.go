@@ -37,12 +37,11 @@ func resolveConsoleSize(attach backend.AttachIO) consoleSize {
 			candidates = append(candidates, file)
 		}
 	}
-	// The session's own stdio first, then the process stdio the backend falls
-	// back to when the caller leaves AttachIO empty.
-	appendFile(attach.Out)
-	appendFile(attach.Err)
-	appendFile(attach.In)
-	candidates = append(candidates, os.Stdout, os.Stderr, os.Stdin)
+	// The same stdio QEMU is handed, so a session piped to a file stays at the
+	// default even when enclave itself runs in a terminal.
+	appendFile(writerOrDefault(attach.Out))
+	appendFile(stderrOrDefault(attach.Err))
+	appendFile(readerOrDefault(attach.In))
 	for _, file := range candidates {
 		cols, rows, err := term.GetSize(int(file.Fd())) // #nosec G115 -- file descriptor from Fd() fits in int on all supported platforms.
 		if err != nil || cols <= 0 || rows <= 0 {

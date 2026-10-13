@@ -20,6 +20,21 @@ theia-next` runs detached automatically, prints the container name, and opens
 the IDE. Use `enclave theia-next <container>` to reattach later (the name may be
 omitted when exactly one enclave container is running).
 
+## Building Theia in the Container
+
+To build Theia itself in the container (`npm ci`, `npm run build`), enable the
+opt-in `native-build-deps` feature for this tool. It provides the headers
+`native-keymap` and `keytar` need. Add this to `~/.config/enclave/config.json`
+and start the next session with `--rebuild`:
+
+```json
+{ "tool_overrides": { "theia-next": { "features": ["+native-build-deps"] } } }
+```
+
+This tool's allowlist includes `electronjs.org`, so `@electron/rebuild` can
+download Electron headers, and `schemastore.org`, so `@theia/core` can download
+the JSON schema catalog.
+
 ## Configuration
 
 - **Command**: `sleep infinity`

@@ -5,13 +5,13 @@
 #
 # SPDX-License-Identifier: MIT
 
-FROM docker.io/library/golang:1.24.4-alpine3.22@sha256:68932fa6d4d4059845c8f40ad7e654e626f3ebd3706eef7846f319293ab5cb7a AS proxy-build
+FROM docker.io/library/golang:1.26.9-alpine3.24@sha256:3082400e369fa24d5fc60bca20edab3f6d604e0c5a690ec66b295eff4dd87ade AS proxy-build
 WORKDIR /src
 COPY . .
 RUN CGO_ENABLED=0 go build -o /out/enclave-gateway-proxy ./cmd/enclave-gateway-proxy
 
 # Enclave gateway container (DNS + transparent proxy)
-FROM docker.io/library/alpine:3.23@sha256:25109184c71bdad752c8312a8623239686a9a2071e8825f20acb8f2198c3f659
+FROM docker.io/library/alpine:3.24@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
 
 RUN apk add --no-cache dnsmasq ipset iptables libcap socat su-exec ca-certificates && \
     dnsmasq_path="$(command -v dnsmasq)" && \

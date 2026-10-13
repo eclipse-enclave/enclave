@@ -29,6 +29,7 @@ Read `README.md` before making user-facing changes.
 - Before committing, run `make build`, `make test`, and `make lint`.
 - Documentation-only changes under `docs/` do not require those checks.
 - Run `make generate` after changing `internal/config/options_def.go` or tool-extension Go code. Generated files are checked in — rebuild and commit them.
+- For dependency, toolchain, image, or GitHub Actions updates, run `make check-versions` and follow `.agents/skills/dependency-updates/SKILL.md`; minimum versions (Go, Docker, buildx, git) may not exceed what the supported Debian and Ubuntu LTS releases ship.
 
 ## License Headers
 

@@ -4,7 +4,8 @@ Concise notes for contributors working on the enclave codebase.
 
 ## Requirements
 
-- Go 1.24.x (see `go.mod` toolchain)
+- Go 1.24 or newer. CI and releases build with the `toolchain` version in
+  `go.mod`, which the `go` command downloads when the local Go is older.
 - Docker daemon running (for runtime testing)
 - Linux or macOS host. Native Windows is unsupported; use WSL2, where the Linux
   instructions apply. `make cross-build` compiles every published cross-target:
@@ -40,6 +41,12 @@ RPM build dependencies with `sudo dnf install git go make rpm-build`. Use
 `make deb-quick` when Go was installed outside APT and therefore does not
 satisfy dpkg's build dependency check; it builds the same binary package
 without that check.
+
+Package builds need network access: `go mod vendor` fetches the modules, and a
+distribution Go older than the `toolchain` in `go.mod` downloads that
+toolchain and builds with it. The Go 1.24 floor is still enforced: the `go`
+directive fixes the language version, and `go vet` in `make lint` rejects
+standard-library APIs newer than it.
 
 Run tests:
 
@@ -154,6 +161,21 @@ Notes:
   - `internal/config/options_cli_gen.go`
   - `internal/model/option_sources_gen.go`
   - `cmd/enclave/tool_imports.go` (tool extension Go imports, `//go:build !windows`)
+
+## Dependency Updates
+
+Report pinned versions, lockstep consistency, available updates, and the
+Debian and Ubuntu versions that cap the minimum supported Go and git:
+
+```bash
+make check-versions
+```
+
+The script (`scripts/check-versions.sh`) only reads; `make lint` runs its
+`--offline` mode, which fails when a lockstep group disagrees or a new pin is
+not in its inventory. The `dependency-updates` agent skill
+(`.agents/skills/dependency-updates/SKILL.md`) turns the output into a
+prioritized plan and describes how to apply each update group.
 
 ## Windows Launcher
 

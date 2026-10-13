@@ -5,7 +5,7 @@
 #
 # SPDX-License-Identifier: MIT
 
-.PHONY: build cross-build install install-binary clean-legacy-assets uninstall clean clean-lint-cache test deb deb-quick rpm lint lint-changed lint-report fmt vet generate lint-tools check-go completions check-license-headers
+.PHONY: build cross-build install install-binary clean-legacy-assets uninstall clean clean-lint-cache test deb deb-quick rpm lint lint-changed lint-report fmt vet generate lint-tools check-go completions check-license-headers check-versions
 .DEFAULT_GOAL := build
 
 BIN_DIR ?= ./bin
@@ -165,6 +165,8 @@ lint: lint-tools
 	@mkdir -p $(LINT_GO_CACHE) $(LINT_GOLANGCI_CACHE)
 	@echo "Checking license headers..."
 	@./scripts/check-license-headers.sh
+	@echo "Checking pinned versions..."
+	@out=$$(./scripts/check-versions.sh --offline) || { printf '%s\n' "$$out"; exit 1; }
 	@echo "Running go vet..."
 	@pkgs="$$(go list ./... | grep -v '/vendor/' || true)"; \
 	if [ -n "$$pkgs" ]; then \
@@ -212,6 +214,10 @@ lint-tools:
 
 check-license-headers:
 	@./scripts/check-license-headers.sh
+
+# Report pinned versions, lockstep consistency, and available updates (network)
+check-versions:
+	@./scripts/check-versions.sh
 
 # Incremental lint - only changed files/packages
 lint-changed: lint-tools

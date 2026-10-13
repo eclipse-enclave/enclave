@@ -23,9 +23,9 @@ for the builder:
 - Build-time caches (npm, pip, uv) and `/boot` are stripped from the rootfs.
   Anything left in it costs guest RAM byte for byte for the whole session.
 
-The image is padded to a 4-byte boundary because the host appends a per-run
-overlay archive to it, and the kernel's `unpack_to_rootfs()` only recognizes an
-appended plain cpio segment that starts on such a boundary.
+The image needs no padding: the host appends a per-run overlay archive at boot
+and aligns it to the 4-byte boundary the kernel's `unpack_to_rootfs()` requires
+(`concatenateFiles`).
 
 Bundles passed via `--image-name` may also ship an uncompressed `initramfs.cpio`
 and either metadata file may be missing: the floor then defaults to 4096 MiB,

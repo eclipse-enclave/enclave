@@ -28,9 +28,8 @@ const (
 	// BundleConfigFile is the metadata file next to vmlinuz/initramfs that
 	// declares host-side QEMU launch settings for a bundle.
 	BundleConfigFile = "enclave-vm-bundle.json"
-	// InitramfsFile is the guest initramfs of a generated bundle. It is a
-	// zstd-compressed newc cpio archive, padded to a 4-byte boundary so the
-	// per-run overlay archive can be appended to it.
+	// InitramfsFile is the guest initramfs of a generated bundle, a
+	// zstd-compressed newc cpio archive.
 	InitramfsFile = "initramfs.cpio.zst"
 	// LegacyInitramfsFile is the uncompressed initramfs name, still accepted for
 	// hand-assembled bundles passed via --image-name.

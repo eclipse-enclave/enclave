@@ -252,16 +252,7 @@ if [ "$uncompressed" -le 0 ]; then
     echo "empty guest initramfs" >&2
     exit 1
 fi
-
-# unpack_to_rootfs() only takes an appended plain cpio segment - the host-side
-# run overlay - when it starts on a 4-byte boundary, so pad the compressed
-# image out to one. The kernel skips the padding bytes before the segment.
 compressed=$(wc -c < "$initramfs")
-pad=$(( (4 - compressed % 4) % 4 ))
-if [ "$pad" -gt 0 ]; then
-    dd if=/dev/zero bs=1 count="$pad" >> "$initramfs" 2>/dev/null
-    compressed=$(wc -c < "$initramfs")
-fi
 
 # The host sizes guest memory from the unpacked size: the initramfs becomes the
 # rootfs, a ramfs the guest can never reclaim.

@@ -7,26 +7,23 @@
 
 module enclave
 
-go 1.24.3
+go 1.24.0
 
-toolchain go1.24.4
+toolchain go1.26.10
 
 require (
 	github.com/BurntSushi/toml v1.6.0
-	github.com/moby/patternmatcher v0.6.0
-	github.com/spf13/cobra v1.8.0
-	github.com/spf13/pflag v1.0.5
+	github.com/moby/patternmatcher v0.6.1
+	github.com/spf13/cobra v1.10.2
+	github.com/spf13/pflag v1.0.10
 	github.com/tidwall/jsonc v0.3.2
-	golang.org/x/crypto v0.47.0
-	golang.org/x/sys v0.40.0
-	golang.org/x/term v0.39.0
+	golang.org/x/crypto v0.48.0
+	golang.org/x/sys v0.41.0
+	golang.org/x/term v0.40.0
 	sigs.k8s.io/yaml v1.6.0
 )
 
 require (
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
-	github.com/kr/text v0.2.0 // indirect
-	github.com/niemeyer/pretty v0.0.0-20200227124842-a10e7caefd8e // indirect
-	go.yaml.in/yaml/v2 v2.4.2 // indirect
-	gopkg.in/check.v1 v1.0.0-20200227125254-8fa46927fb4f // indirect
+	go.yaml.in/yaml/v2 v2.4.4 // indirect
 )

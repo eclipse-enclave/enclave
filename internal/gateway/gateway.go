@@ -540,8 +540,6 @@ func Start(ctx context.Context, cfg StartConfig) (StartResult, error) {
 			return empty, fmt.Errorf("reconcile conflicting gateway container %s: %w", gatewayContainer, reconcileErr)
 		}
 		if reconciled.Removed || !reconciled.Exists {
-			// Removed here, or gone on its own (an auto-removing gateway
-			// finishing its exit): the name is free, run once more.
 			containerID, err = startGatewayContainer(ctx, config, hostConfig, gatewayContainer)
 		} else if reconciled.Exists && reconciled.Owned {
 			return empty, fmt.Errorf("gateway container %q is already running or starting for session %s; run 'enclave stop %s' and retry: %w", gatewayContainer, cfg.ContainerName, cfg.ContainerName, err)
@@ -612,10 +610,8 @@ func gatewayUser() string {
 	return ""
 }
 
-// startGatewayContainer runs the gateway and waits until it reports readiness.
-// A sidecar whose start does not complete is removed again: left running, it
-// keeps the session's published ports bound, and the next start of the same
-// session name fails its host-port checks before it reaches gateway startup.
+// Failed starts must release published ports before the next session's
+// host-port checks.
 func startGatewayContainer(ctx context.Context, config *docker.ContainerConfig, hostConfig *docker.HostConfig, name string) (string, error) {
 	startedAt := time.Now().UTC()
 	containerID, err := startRunDetached(ctx, config, hostConfig, name)
@@ -634,14 +630,9 @@ func startGatewayContainer(ctx context.Context, config *docker.ContainerConfig, 
 	return containerID, nil
 }
 
-// removeFailedGateway runs detached from ctx, which is already cancelled when
-// the start was interrupted. It removes by container ID when the engine
-// reported one so a newer same-name gateway of a concurrent start survives.
-// Without an ID (podman prints none on a failed start, and a killed CLI may
-// not have printed Docker's) the name is inspected first, and only a container
-// that carries this session's gateway labels and is not running is removed, by
-// its inspected ID. A running container whose ID was not returned is left
-// for the next lock-protected startup to reconcile.
+// removeFailedGateway ignores cancellation and removes only by immutable ID.
+// Without an engine-reported ID, only an owned, non-running gateway is eligible;
+// leave running orphans for the next lock-protected startup to reconcile.
 func removeFailedGateway(ctx context.Context, name string, containerID string, config *docker.ContainerConfig) {
 	ctx = context.WithoutCancel(ctx)
 	removeRef := strings.TrimSpace(containerID)
@@ -657,9 +648,6 @@ func removeFailedGateway(ctx context.Context, name string, containerID string, c
 	}
 }
 
-// failedGatewayRemoveRef resolves the container holding name to the ID this
-// start may remove, or "" when nothing holds the name, the holder belongs to
-// another session, or it is running.
 func failedGatewayRemoveRef(ctx context.Context, name string, config *docker.ContainerConfig) string {
 	info, err := startContainerInspect(ctx, name)
 	if err != nil {

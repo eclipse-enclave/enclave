@@ -56,8 +56,6 @@ func TestSessionNetworkActionForDecisionTable(t *testing.T) {
 		{name: "wrong owner", info: dockercmd.NetworkInspectResponse{ID: "network-id", Labels: copyLabels(owned, model.NetworkLabelContainer, "other")}, want: sessionNetworkConflict},
 		{name: "wrong project", info: dockercmd.NetworkInspectResponse{ID: "network-id", Labels: copyLabels(owned, model.NetworkLabelProjectHash, "other")}, want: sessionNetworkConflict},
 		{name: "attached", info: dockercmd.NetworkInspectResponse{ID: "network-id", Labels: owned, Containers: map[string]dockercmd.NetworkEndpoint{"id": {Name: "gateway"}}}, hasEndpoints: true, want: sessionNetworkAttached},
-		// podman reports no endpoint map at all, so the attachment is only
-		// visible through the engine's container list.
 		{name: "attached without an endpoint map", info: dockercmd.NetworkInspectResponse{ID: "network-id", Labels: owned}, hasEndpoints: true, want: sessionNetworkAttached},
 		{name: "reusable", info: dockercmd.NetworkInspectResponse{ID: "network-id", Labels: owned}, want: sessionNetworkReuse},
 	} {
@@ -109,6 +107,47 @@ func TestCreateSessionNetworkSubnetPolicy(t *testing.T) {
 				t.Fatalf("subnet requests = %v, want %v", subnets, tc.wantSubnets)
 			}
 		})
+	}
+}
+
+func TestCreateSessionNetworkPreservesBothSubnetErrors(t *testing.T) {
+	restoreNetworkGlobals(t)
+	firstErr := errors.New("dynamic subnet rejected")
+	retryErr := errors.New("default address pool exhausted")
+	networkCreate = func(_ context.Context, opts dockercmd.NetworkCreateOptions) (string, error) {
+		if opts.Subnet != "" {
+			return "", firstErr
+		}
+		return "", retryErr
+	}
+	_, err := createSessionNetwork(context.Background(), backend.SessionMeta{Name: "session", ProjectHash: "project"}, dockercmd.SystemInfo{ServerVersion: "29.0.0"})
+	if !errors.Is(err, retryErr) {
+		t.Fatalf("createSessionNetwork() error = %v, want retry failure in the error chain", err)
+	}
+	if !strings.Contains(err.Error(), firstErr.Error()) || !strings.Contains(err.Error(), retryErr.Error()) {
+		t.Fatalf("createSessionNetwork() error hides a failure: %v", err)
+	}
+}
+
+func TestCreateSessionNetworkFallbackPreservesErrorClassification(t *testing.T) {
+	restoreNetworkGlobals(t)
+	stubCLI(t, "docker", `case "$*" in
+*"--subnet"*)
+	printf '%s\n' 'Error: invalid subnet' >&2
+	;;
+*)
+	printf '%s\n' 'Error: network with name session-net already exists' >&2
+	;;
+esac
+exit 1
+`)
+	networkCreate = dockercmd.NetworkCreate
+	_, err := createSessionNetwork(context.Background(), backend.SessionMeta{Name: "session", ProjectHash: "project"}, dockercmd.SystemInfo{ServerVersion: "29.0.0"})
+	if !dockercmd.IsAlreadyExists(err) {
+		t.Fatalf("fallback error no longer permits concurrent-create recovery: %v", err)
+	}
+	if !strings.Contains(err.Error(), "invalid subnet") {
+		t.Fatalf("fallback error lost the first failure: %v", err)
 	}
 }
 
@@ -305,9 +344,9 @@ func TestStaleSessionNetworkOwnerSelection(t *testing.T) {
 		{name: "invalid created", info: copyNetwork(base, func(info *dockercmd.NetworkInspectResponse) { info.Created = "invalid" })},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, got := staleSessionNetworkOwner(tc.info, now)
+			got := sessionNetworkEligibleForGC(tc.info, now)
 			if got != tc.want {
-				t.Fatalf("staleSessionNetworkOwner() eligible = %v, want %v", got, tc.want)
+				t.Fatalf("sessionNetworkEligibleForGC() eligible = %v, want %v", got, tc.want)
 			}
 		})
 	}
@@ -437,10 +476,6 @@ func TestCreateSessionNetworkRejectsPodmanCNI(t *testing.T) {
 	}
 }
 
-// netavark parses the isolate value when a container attaches, not when the
-// network is created, so an unsupported isolate=strict yields a network that
-// creates cleanly and then fails every session that attaches to it. The value
-// has to be chosen from the backend version up front.
 func TestCreateSessionNetworkPicksIsolateByNetavarkVersion(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
@@ -478,8 +513,6 @@ func TestCreateSessionNetworkPicksIsolateByNetavarkVersion(t *testing.T) {
 
 func TestCreateSessionNetworkFallsBackToOptedInIsolation(t *testing.T) {
 	restoreNetworkGlobals(t)
-	// podman answers a create with the network's name, so the create path
-	// inspects it afterwards to learn the real ID.
 	logPath := stubCLI(t, "podman", `case "$*" in
 *"network inspect"*)
 	printf '%s\n' '{"name":"session-net","id":"network-id","labels":{}}'
@@ -495,8 +528,7 @@ esac
 `)
 	networkCreate = dockercmd.NetworkCreate
 
-	// An older Podman CLI with a newer netavark rejects strict at creation
-	// and must fall back rather than fail the session.
+	// Pair the old CLI stub with netavark that supports strict.
 	sysInfo := dockercmd.SystemInfo{NetworkBackend: "netavark", NetworkBackendVersion: "netavark 1.7.0"}
 	id, err := createSessionNetwork(context.Background(), backend.SessionMeta{Name: "session", ProjectHash: "project"}, sysInfo)
 	if err != nil || id != "network-id" {
@@ -667,15 +699,11 @@ exit 2
 	}
 }
 
-// podman's network inspect carries no endpoint map, and removal by ID skips
-// podman's own in-use check, so without the container-list query a network is
-// removed out from under a container that is still attached to it.
 func TestRemoveOwnedSessionNetworkKeepsPodmanNetworkWithAttachedPeer(t *testing.T) {
 	restoreNetworkGlobals(t)
 	usePodmanCLI(t)
 	ref := sessionNetworkRef{Name: "session-net", ID: "network-id", Container: "session", ProjectHash: "project"}
-	// The inspect payload is what podman actually returns: labels, no
-	// Containers map, whatever is attached.
+	// Podman omits Containers even when peers are attached.
 	networkInspect = func(_ context.Context, _ string) (dockercmd.NetworkInspectResponse, error) {
 		return dockercmd.NetworkInspectResponse{
 			Name:   "session-net",
@@ -704,8 +732,6 @@ func TestRemoveOwnedSessionNetworkKeepsPodmanNetworkWithAttachedPeer(t *testing.
 	}
 }
 
-// A failed attachment query must not read as "no endpoints": that would make
-// an unreachable engine look like a collectable network.
 func TestSessionNetworkEndpointQueryFailurePropagates(t *testing.T) {
 	restoreNetworkGlobals(t)
 	usePodmanCLI(t)
@@ -721,12 +747,12 @@ func TestSessionNetworkEndpointQueryFailurePropagates(t *testing.T) {
 	}
 }
 
-// podman's --rm teardown outlives the CLI that returned, so removal has to
-// wait for this session's own containers instead of giving up and leaking the
-// network on every ordinary foreground session.
 func TestRemoveOwnedSessionNetworkWaitsOutPodmanTeardown(t *testing.T) {
+	logx.SetLevel("info")
+	logged := captureFile(t, &os.Stdout)
 	restoreNetworkGlobals(t)
 	sessionNetworkRemoveRetryWait = 0
+	sessionNetworkRemoveNoticeAfter = 0
 	usePodmanCLI(t)
 	ref := sessionNetworkRef{Name: "session-net", ID: "network-id", Container: "session"}
 	networkInspect = func(context.Context, string) (dockercmd.NetworkInspectResponse, error) {
@@ -736,7 +762,6 @@ func TestRemoveOwnedSessionNetworkWaitsOutPodmanTeardown(t *testing.T) {
 			Labels: sessionNetworkLabels(backend.SessionMeta{Name: "session"}),
 		}, nil
 	}
-	// The gateway lingers for the first few polls, then podman finishes.
 	polls := 0
 	networkAttachedContainers = func(context.Context, string) ([]string, error) {
 		polls++
@@ -761,10 +786,80 @@ func TestRemoveOwnedSessionNetworkWaitsOutPodmanTeardown(t *testing.T) {
 	if polls != 4 {
 		t.Fatalf("polled %d times, want four endpoint checks before removal", polls)
 	}
+	out := logged()
+	if strings.Count(out, "Waiting to remove per-session network session-net") != 1 ||
+		!strings.Contains(out, "session containers still attached: session-gateway") ||
+		!strings.Contains(out, "(up to "+strconv.Itoa(sessionNetworkRemoveRetries)+" retries)") ||
+		!strings.Contains(out, "Removed per-session network session-net after") {
+		t.Fatalf("missing or repeated default-level teardown diagnostic: %q", out)
+	}
 }
 
-// A container attached from outside the session is not going to disappear, so
-// removal must not burn the whole settling budget on it.
+func TestRemoveOwnedSessionNetworkStaysQuietForShortWaits(t *testing.T) {
+	logx.SetLevel("info")
+	logged := captureFile(t, &os.Stdout)
+	restoreNetworkGlobals(t)
+	sessionNetworkRemoveRetryWait = 0
+	usePodmanCLI(t)
+	ref := sessionNetworkRef{Name: "session-net", ID: "network-id", Container: "session"}
+	networkInspect = func(context.Context, string) (dockercmd.NetworkInspectResponse, error) {
+		return dockercmd.NetworkInspectResponse{
+			Name:   "session-net",
+			ID:     "network-id",
+			Labels: sessionNetworkLabels(backend.SessionMeta{Name: "session"}),
+		}, nil
+	}
+	polls := 0
+	networkAttachedContainers = func(context.Context, string) ([]string, error) {
+		polls++
+		if polls == 1 {
+			return []string{"session-gateway"}, nil
+		}
+		return nil, nil
+	}
+	sessionRuntimeExists = func(context.Context, string) (bool, error) { return false, nil }
+	networkRemove = func(context.Context, string) error { return nil }
+
+	if err := removeOwnedSessionNetwork(context.Background(), ref, sessionNetworkRemoveRetries); err != nil {
+		t.Fatalf("removeOwnedSessionNetwork() error = %v", err)
+	}
+	if out := logged(); out != "" {
+		t.Fatalf("short wait logged at default level: %q", out)
+	}
+}
+
+func TestRemoveOwnedSessionNetworkWarnsWhenBudgetExhausted(t *testing.T) {
+	logx.SetLevel("info")
+	logged := captureFile(t, &os.Stderr)
+	restoreNetworkGlobals(t)
+	sessionNetworkRemoveRetryWait = 0
+	usePodmanCLI(t)
+	ref := sessionNetworkRef{Name: "session-net", ID: "network-id", Container: "session"}
+	networkInspect = func(context.Context, string) (dockercmd.NetworkInspectResponse, error) {
+		return dockercmd.NetworkInspectResponse{
+			Name:   "session-net",
+			ID:     "network-id",
+			Labels: sessionNetworkLabels(backend.SessionMeta{Name: "session"}),
+		}, nil
+	}
+	networkAttachedContainers = func(context.Context, string) ([]string, error) {
+		return []string{"session-gateway"}, nil
+	}
+	networkRemove = func(context.Context, string) error {
+		t.Fatal("removed a network that still had the session's gateway attached")
+		return nil
+	}
+
+	if err := removeOwnedSessionNetwork(context.Background(), ref, 3); err != nil {
+		t.Fatalf("removeOwnedSessionNetwork() error = %v", err)
+	}
+	out := logged()
+	if strings.Count(out, "Leaving per-session network session-net in place") != 1 ||
+		!strings.Contains(out, "session containers still attached: session-gateway") {
+		t.Fatalf("missing or repeated budget-exhausted warning: %q", out)
+	}
+}
+
 func TestRemoveOwnedSessionNetworkDoesNotWaitOutForeignEndpoints(t *testing.T) {
 	restoreNetworkGlobals(t)
 	usePodmanCLI(t)
@@ -794,9 +889,6 @@ func TestRemoveOwnedSessionNetworkDoesNotWaitOutForeignEndpoints(t *testing.T) {
 	}
 }
 
-// Falling back to isolate=true weakens a security guarantee the CLI reference
-// promises enclave warns about, so the notice must reach a default run rather
-// than hide behind --verbose.
 func TestPodmanIsolateFallbackWarnsWithoutVerbose(t *testing.T) {
 	usePodmanCLI(t)
 	logx.SetLevel("info")
@@ -864,6 +956,7 @@ func restoreNetworkGlobals(t *testing.T) {
 	origContainerList := sessionContainerList
 	origRuntimeExists := sessionRuntimeExists
 	origRetryWait := sessionNetworkRemoveRetryWait
+	origNoticeAfter := sessionNetworkRemoveNoticeAfter
 	t.Cleanup(func() {
 		dockerInfo = origInfo
 		networkCreate = origCreate
@@ -874,7 +967,35 @@ func restoreNetworkGlobals(t *testing.T) {
 		sessionContainerList = origContainerList
 		sessionRuntimeExists = origRuntimeExists
 		sessionNetworkRemoveRetryWait = origRetryWait
+		sessionNetworkRemoveNoticeAfter = origNoticeAfter
 	})
+}
+
+// captureFile redirects *target to a temp file until the test ends and
+// returns a reader for what was written so far.
+func captureFile(t *testing.T, target **os.File) func() string {
+	t.Helper()
+	logged, err := os.CreateTemp(t.TempDir(), "captured-log")
+	if err != nil {
+		t.Fatal(err)
+	}
+	original := *target
+	*target = logged
+	t.Cleanup(func() {
+		*target = original
+		_ = logged.Close()
+	})
+	return func() string {
+		t.Helper()
+		if _, err := logged.Seek(0, io.SeekStart); err != nil {
+			t.Fatal(err)
+		}
+		out, err := io.ReadAll(logged)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(out)
+	}
 }
 
 func copyLabels(labels map[string]string, key string, value string) map[string]string {

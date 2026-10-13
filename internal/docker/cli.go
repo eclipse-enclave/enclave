@@ -73,8 +73,8 @@ func (e *cliError) Unwrap() error {
 }
 
 // IsNotFound reports whether err came from a `docker` command that failed
-// because the target image, container, or volume does not exist. It replaces
-// the SDK's errdefs.IsNotFound by matching the daemon's stderr message.
+// because the target image, container, volume, or network does not exist. It
+// replaces the SDK's errdefs.IsNotFound by matching the daemon's stderr message.
 func IsNotFound(err error) bool {
 	if err == nil {
 		return false
@@ -91,20 +91,29 @@ func IsNotFound(err error) bool {
 		"no such container",
 		"no such image",
 		"no such volume",
-		"no such network",
 		"no such object",
 	} {
 		if strings.Contains(s, phrase) {
 			return true
 		}
 	}
-	// Network inspect and removal use "network <name> not found" on some daemon
-	// versions instead of the "No such network" form used elsewhere. The match
-	// is per line: Docker 29 appends its own "exit status 1" line after the
-	// daemon message, so the phrase is not the end of the whole stderr.
+	if len(ce.args) < 2 || ce.args[0] != "network" || (ce.args[1] != "inspect" && ce.args[1] != "rm") {
+		return false
+	}
+	if strings.Contains(s, "no such network") {
+		return true
+	}
+	// Match per line: Docker 29 appends "exit status 1" after the daemon's
+	// "network <name> not found" message. Podman's `network rm` reports
+	// "unable to find network with name or ID <name>: network not found".
 	for _, line := range strings.Split(s, "\n") {
 		line = strings.TrimSpace(line)
-		if strings.Contains(line, "network ") && strings.HasSuffix(line, " not found") {
+		line = strings.TrimPrefix(line, "error response from daemon: ")
+		line = strings.TrimPrefix(line, "error: ")
+		if strings.HasPrefix(line, "network ") && strings.HasSuffix(line, " not found") {
+			return true
+		}
+		if strings.HasSuffix(line, ": network not found") {
 			return true
 		}
 	}

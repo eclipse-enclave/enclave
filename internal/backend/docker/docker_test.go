@@ -23,12 +23,16 @@ import (
 	"enclave/internal/util"
 )
 
-// prepareRunSession names the session and serves its per-session network from
-// a stub, so a mount-focused prepareRun test neither fails the name check nor
-// creates a real network.
+// Stub engine discovery and networking so mount tests need no Docker daemon.
 func prepareRunSession(t *testing.T) backend.SessionMeta {
 	t.Helper()
 	restoreNetworkGlobals(t)
+	dockerInfo = func(context.Context) (dockercmd.SystemInfo, error) {
+		return dockercmd.SystemInfo{}, nil
+	}
+	networkList = func(context.Context, dockercmd.Filters) ([]dockercmd.NetworkInspectResponse, error) {
+		return nil, nil
+	}
 	meta := backend.SessionMeta{Name: "enclave-claude-abc123abc123-main", ProjectHash: "abc123abc123"}
 	networkInspect = func(context.Context, string) (dockercmd.NetworkInspectResponse, error) {
 		return dockercmd.NetworkInspectResponse{

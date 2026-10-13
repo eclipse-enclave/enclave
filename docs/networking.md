@@ -218,6 +218,10 @@ Podman's default pool hands out a `/24` per network
 and is not subject to the Docker pool limit. Published ports still bind
 `127.0.0.1` explicitly on both engines.
 
+Teardown waits for asynchronous session-container removal, common with Podman.
+Waits exceeding one second report the reason and retry limit. The limit counts
+retries, not elapsed time; engine commands can extend the wait.
+
 A network that outlives its session (for example after a `kill -9` of the
 enclave process) is removed at the next session start, or by
 `enclave cleanup --ephemeral`, once it is an hour old and has no endpoints.

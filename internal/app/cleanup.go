@@ -138,8 +138,7 @@ func runCleanup(run model.RunOptions, cleanup model.CleanupOptions) int {
 			cleanupBuildCache(cleanup)
 			return 0
 		}
-		// Container removal takes each container's own network with it; the
-		// prune afterwards catches networks whose container was already gone.
+		// Pruning also catches networks orphaned before this cleanup.
 		cleanupContainers(containerNames)
 		pruneStaleSessionNetworks(run, cleanup, project, false)
 		cleanupDirs(storeDirs)
@@ -470,8 +469,6 @@ func printEphemeralCleanupPlan(containers []string, networks []string, dirs []cl
 	}
 }
 
-// cleanupContainers removes stopped ephemeral containers through the
-// backend's session teardown so their gateway and per-session network go too.
 func cleanupContainers(containers []string) {
 	for _, container := range containers {
 		if err := backenddocker.RemoveSessionContainer(context.Background(), container, true); err != nil {
@@ -480,10 +477,6 @@ func cleanupContainers(containers []string) {
 	}
 }
 
-// pruneStaleSessionNetworks removes (or with dryRun lists) per-session
-// networks that outlived their container, scoped like the container cleanup:
-// the current tool and project unless --all. The same selection runs quietly
-// at every session start.
 func pruneStaleSessionNetworks(run model.RunOptions, cleanup model.CleanupOptions, project model.Project, dryRun bool) []string {
 	ownerPrefix := ""
 	if !cleanup.CleanupAll {

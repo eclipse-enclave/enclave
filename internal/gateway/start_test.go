@@ -20,11 +20,8 @@ import (
 	"enclave/internal/model"
 )
 
-// withGatewayCLIStub installs a container CLI whose gateway never logs the
-// ready marker but always reports a running container, and records every
-// invocation in the returned log file. Tests override what `run` prints and
-// exits with through STUB_RUN_OUTPUT and STUB_RUN_EXIT, and what inspect
-// reports through STUB_INSPECT_JSON.
+// The CLI stub records calls but never reports gateway readiness.
+// STUB_RUN_OUTPUT, STUB_RUN_EXIT, and STUB_INSPECT_JSON control responses.
 func withGatewayCLIStub(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -94,8 +91,6 @@ func TestStartGatewayContainerRemovesSidecarWhenInterruptedBeforeReady(t *testin
 	}
 }
 
-// sessionGatewayConfig is the container config of the session whose gateway
-// the start tests create, carrying the labels ownership checks compare.
 func sessionGatewayConfig() *docker.ContainerConfig {
 	return &docker.ContainerConfig{Image: "gateway", Labels: map[string]string{
 		model.GatewayLabelManaged:     "true",
@@ -104,8 +99,6 @@ func sessionGatewayConfig() *docker.ContainerConfig {
 	}}
 }
 
-// stubInspectJSON renders the inspect view of a gateway container named
-// session-gateway with ID gw123 in the given state and with the given labels.
 func stubInspectJSON(t *testing.T, status string, running bool, labels map[string]string) string {
 	t.Helper()
 	data, err := json.Marshal(docker.InspectResponse{

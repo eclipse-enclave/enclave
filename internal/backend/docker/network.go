@@ -25,34 +25,31 @@ const (
 	sessionNetworkDynamicSubnet  = "0.0.0.0/28"
 	sessionNetworkGCGracePeriod  = time.Hour
 	sessionNetworkEnsureAttempts = 4
-	// podman removes an --rm container asynchronously, and its session and
-	// gateway containers regularly outlive the CLI that returned. The budget
-	// covers that settling time with room for a loaded host; it is only ever
-	// spent while this session's own containers are still present.
+	// Podman removes --rm containers asynchronously; retry while this
+	// session's containers are still present.
 	sessionNetworkRemoveRetries = 40
 	hostBindingIPv4Option       = "com.docker.network.bridge.host_binding_ipv4"
 	// netavark isolates bridge networks from each other only when asked
 	// (netavark 2 / podman 6 made strict the default); Docker isolates
 	// user-defined bridges unconditionally and rejects the option.
-	podmanIsolateOption      = "isolate"
-	podmanIsolateStrict      = "strict"
-	podmanIsolateOptedInOnly = "true"
-	// netavark 1.7.0 added isolate=strict; older releases reject the value
-	// when a container attaches to the network.
+	podmanIsolateOption        = "isolate"
+	podmanIsolateStrict        = "strict"
+	podmanIsolateOptedInOnly   = "true"
 	netavarkStrictIsolateMajor = 1
 	netavarkStrictIsolateMinor = 7
 )
 
 var (
-	sessionNetworkRemoveRetryWait = 250 * time.Millisecond
-	dockerInfo                    = dockercmd.Info
-	networkCreate                 = dockercmd.NetworkCreate
-	networkInspect                = dockercmd.NetworkInspect
-	networkList                   = dockercmd.NetworkList
-	networkRemove                 = dockercmd.NetworkRemove
-	networkAttachedContainers     = dockercmd.NetworkAttachedContainers
-	sessionContainerList          = dockercmd.ContainerList
-	sessionRuntimeExists          = dockerSessionRuntimeExists
+	sessionNetworkRemoveRetryWait   = 250 * time.Millisecond
+	sessionNetworkRemoveNoticeAfter = time.Second
+	dockerInfo                      = dockercmd.Info
+	networkCreate                   = dockercmd.NetworkCreate
+	networkInspect                  = dockercmd.NetworkInspect
+	networkList                     = dockercmd.NetworkList
+	networkRemove                   = dockercmd.NetworkRemove
+	networkAttachedContainers       = dockercmd.NetworkAttachedContainers
+	sessionContainerList            = dockercmd.ContainerList
+	sessionRuntimeExists            = dockerSessionRuntimeExists
 )
 
 type sessionNetworkRef struct {
@@ -70,11 +67,6 @@ const (
 	sessionNetworkAttached
 )
 
-// sessionNetworkHasEndpoints reports whether any container is attached to the
-// network. Docker's inspect carries the endpoint map, but podman omits it
-// entirely, so there the engine is asked for the container list instead.
-// Removal addresses networks by ID, which skips podman's own in-use check, so
-// this is the only guard standing between a live endpoint and a removal.
 func sessionNetworkHasEndpoints(ctx context.Context, info dockercmd.NetworkInspectResponse) (bool, error) {
 	attached, err := sessionNetworkEndpoints(ctx, info)
 	if err != nil {
@@ -83,7 +75,8 @@ func sessionNetworkHasEndpoints(ctx context.Context, info dockercmd.NetworkInspe
 	return len(attached) > 0, nil
 }
 
-// sessionNetworkEndpoints names the containers attached to the network.
+// Podman omits the inspect endpoint map and skips its in-use check on
+// removal by ID, so query attached containers, including stopped ones.
 func sessionNetworkEndpoints(ctx context.Context, info dockercmd.NetworkInspectResponse) ([]string, error) {
 	if len(info.Containers) > 0 {
 		names := make([]string, 0, len(info.Containers))
@@ -98,9 +91,7 @@ func sessionNetworkEndpoints(ctx context.Context, info dockercmd.NetworkInspectR
 	return networkAttachedContainers(ctx, strings.TrimSpace(info.Name))
 }
 
-// sessionOwnsEndpoints reports whether every attached container belongs to this
-// session. Those disappear on their own, so removal is worth waiting out;
-// anything else was attached from outside and the network stays put instead.
+// Wait only for this session's containers; foreign endpoints may persist.
 func sessionOwnsEndpoints(names []string, container string) bool {
 	container = strings.TrimSpace(container)
 	for _, name := range names {
@@ -189,11 +180,8 @@ func (b *Backend) ensureSessionNetwork(ctx context.Context, meta backend.Session
 	return sessionNetworkRef{}, fmt.Errorf("create per-session network %q: repeated concurrent changes prevented ownership verification", name)
 }
 
-// podmanIsolateValue picks the bridge isolation netavark actually accepts.
-// netavark parses the value when a container attaches, not when the network is
-// created. Gate "strict" on its version to avoid attach-time failures. Older
-// Podman versions also validate the value during creation; the fallback below
-// handles those CLIs paired with a newer netavark.
+// netavark before 1.7 rejects strict at container attachment, not creation,
+// so select the value from its version before creating the network.
 func podmanIsolateValue(info dockercmd.SystemInfo) (string, error) {
 	if !dockercmd.IsPodman() {
 		return "", nil
@@ -208,18 +196,10 @@ func podmanIsolateValue(info dockercmd.SystemInfo) (string, error) {
 	if netavarkVersionAtLeast(info.NetworkBackendVersion, netavarkStrictIsolateMajor, netavarkStrictIsolateMinor) {
 		return podmanIsolateStrict, nil
 	}
-	// isolate=true blocks traffic only between networks that also opt in, which
-	// every session network does; containers on podman's default network keep a
-	// route into the session (restricted gateways still filter inbound traffic).
-	// That is a weaker guarantee than the one this
-	// feature advertises, so it is stated unconditionally rather than logged at
-	// debug level.
 	logx.Warnf("This podman installs %s, which has no isolate=strict; session networks are isolated from other enclave sessions but not from non-isolated podman networks. Upgrade netavark to %d.%d.0 or newer for full bridge isolation.", netavarkVersionLabel(info.NetworkBackendVersion), netavarkStrictIsolateMajor, netavarkStrictIsolateMinor)
 	return podmanIsolateOptedInOnly, nil
 }
 
-// netavarkVersionLabel names the network backend for the degraded-isolation
-// warning, which has to stay readable when podman reports no version at all.
 func netavarkVersionLabel(version string) string {
 	if version = strings.TrimSpace(version); version != "" {
 		return version
@@ -227,8 +207,7 @@ func netavarkVersionLabel(version string) string {
 	return "a network backend of unreported version"
 }
 
-// netavarkVersionAtLeast parses podman's "netavark 1.4.0" backend version. An
-// unrecognized or absent value reports false, keeping the safe isolate=true.
+// Podman reports the backend version as "netavark 1.4.0".
 func netavarkVersionAtLeast(version string, wantMajor int, wantMinor int) bool {
 	fields := strings.Fields(strings.TrimSpace(version))
 	if len(fields) == 0 {
@@ -237,8 +216,7 @@ func netavarkVersionAtLeast(version string, wantMajor int, wantMinor int) bool {
 	return dockerVersionAtLeast(fields[len(fields)-1], wantMajor, wantMinor)
 }
 
-// sessionNetworkDriverOptions returns the bridge options for the engine in
-// use. Each engine rejects the other's keys, so nothing is shared.
+// Each engine rejects the other's bridge option keys.
 func sessionNetworkDriverOptions(podman bool, isolate string) map[string]string {
 	if podman {
 		return map[string]string{podmanIsolateOption: isolate}
@@ -262,9 +240,8 @@ func createSessionNetwork(ctx context.Context, meta backend.SessionMeta, info do
 		Labels:     sessionNetworkLabels(meta),
 		Options:    sessionNetworkDriverOptions(podman, isolate),
 	}
-	// info.ServerVersion is the Docker daemon's; podman leaves it empty and its
-	// IPAM hands out a /24 per network from a pool large enough not to need
-	// the small-prefix request.
+	// ServerVersion is Docker's daemon version; Podman uses its own /24
+	// IPAM pool and needs no small-prefix request.
 	if !podman && dockerVersionAtLeast(info.ServerVersion, 29, 0) {
 		opts.Subnet = sessionNetworkDynamicSubnet
 	}
@@ -274,17 +251,18 @@ func createSessionNetwork(ctx context.Context, meta backend.SessionMeta, info do
 		return id, err
 	}
 	if opts.Subnet != "" {
-		// A daemon or CLI that reports a new-enough version can still reject
-		// the unspecified-address subnet request. Fall back to Docker's
-		// default IPAM.
+		// Even newer daemons or CLIs can reject the dynamic-prefix request;
+		// retry with default IPAM.
 		opts.Subnet = ""
-		return networkCreate(ctx, opts)
+		id, retryErr := networkCreate(ctx, opts)
+		if retryErr != nil {
+			return id, fmt.Errorf("create network with subnet %q: %v; retry with default IPAM: %w", sessionNetworkDynamicSubnet, err, retryErr)
+		}
+		return id, nil
 	}
 	if podman && opts.Options[podmanIsolateOption] == podmanIsolateStrict && dockercmd.IsUnsupportedIsolateValue(err) {
-		// Older Podman CLIs parse isolate as a boolean at network creation,
-		// even when the installed netavark supports strict. isolate=true blocks
-		// traffic only between networks that also opt in, which every session does;
-		// containers on podman's default network keep a route into the session.
+		// Older Podman CLIs parse isolate as a boolean during network creation,
+		// even with a netavark version that supports strict.
 		logx.Warnf("podman rejected isolate=strict for the per-session network; using isolate=true, which does not isolate the session from non-isolated podman networks: %v", err)
 		opts.Options = sessionNetworkDriverOptions(podman, podmanIsolateOptedInOnly)
 		return networkCreate(ctx, opts)
@@ -368,6 +346,18 @@ func cleanupSessionNetwork(ref sessionNetworkRef) {
 }
 
 func removeOwnedSessionNetwork(ctx context.Context, ref sessionNetworkRef, retries int) error {
+	started := time.Now()
+	noticed := false
+	wait := func(reason string) {
+		time.Sleep(sessionNetworkRemoveRetryWait)
+		if !noticed && time.Since(started) >= sessionNetworkRemoveNoticeAfter {
+			noticed = true
+			logx.Infof("Waiting to remove per-session network %s: %s (up to %d retries)", ref.Name, reason, retries)
+		}
+	}
+	giveUp := func(reason string) {
+		logx.Warnf("Leaving per-session network %s in place after %s: %s; a later session start or `enclave cleanup --ephemeral` removes it once its containers are gone", ref.Name, time.Since(started).Round(time.Second), reason)
+	}
 	for attempt := 0; attempt <= retries; attempt++ {
 		info, err := networkInspect(ctx, ref.Name)
 		if err != nil {
@@ -385,11 +375,16 @@ func removeOwnedSessionNetwork(ctx context.Context, ref sessionNetworkRef, retri
 			return err
 		}
 		if len(attached) > 0 {
-			if attempt < retries && sessionOwnsEndpoints(attached, ref.Container) {
-				time.Sleep(sessionNetworkRemoveRetryWait)
+			reason := "session containers still attached: " + strings.Join(attached, ", ")
+			if !sessionOwnsEndpoints(attached, ref.Container) {
+				logx.Debugf("Leaving per-session network %s in place because it still has foreign attached endpoints: %s", ref.Name, strings.Join(attached, ", "))
+				return nil
+			}
+			if attempt < retries {
+				wait(reason)
 				continue
 			}
-			logx.Debugf("Leaving per-session network %s in place because it still has attached endpoints: %s", ref.Name, strings.Join(attached, ", "))
+			giveUp(reason)
 			return nil
 		}
 		exists, err := sessionRuntimeExists(ctx, ref.Container)
@@ -397,11 +392,12 @@ func removeOwnedSessionNetwork(ctx context.Context, ref sessionNetworkRef, retri
 			return err
 		}
 		if exists {
+			reason := "session or gateway container still exists"
 			if attempt < retries {
-				time.Sleep(sessionNetworkRemoveRetryWait)
+				wait(reason)
 				continue
 			}
-			logx.Debugf("Leaving per-session network %s in place because a session or gateway container still reserves its name", ref.Name)
+			giveUp(reason)
 			return nil
 		}
 		removeRef, err := inspectedNetworkRemoveRef(info)
@@ -413,10 +409,13 @@ func removeOwnedSessionNetwork(ctx context.Context, ref sessionNetworkRef, retri
 				return nil
 			}
 			if dockercmd.IsActiveEndpoints(err) && attempt < retries {
-				time.Sleep(sessionNetworkRemoveRetryWait)
+				wait("engine reports active endpoints")
 				continue
 			}
 			return err
+		}
+		if noticed {
+			logx.Infof("Removed per-session network %s after %s", ref.Name, time.Since(started).Round(100*time.Millisecond))
 		}
 		return nil
 	}
@@ -460,9 +459,6 @@ func captureSessionNetworkRef(ctx context.Context, containerName string, project
 	return ref, err == nil
 }
 
-// gcSessionNetworks quietly removes leaked per-session networks at session
-// start; `enclave cleanup --ephemeral` runs the same selection through
-// PruneStaleSessionNetworks.
 func (b *Backend) gcSessionNetworks(ctx context.Context, now time.Time) {
 	stale, err := staleSessionNetworks(ctx, now)
 	if err != nil {
@@ -476,11 +472,10 @@ func (b *Backend) gcSessionNetworks(ctx context.Context, now time.Time) {
 	}
 }
 
-// PruneStaleSessionNetworks removes the per-session networks whose session
-// container is gone, has no endpoints, and is past the grace period, and
-// returns their names. ownerPrefix limits it to networks whose owning
-// container name starts with the prefix (empty selects every project and
-// tool). With dryRun it only reports them.
+// PruneStaleSessionNetworks removes endpoint-free session networks past the
+// grace period whose session and gateway containers are gone, returning their names.
+// ownerPrefix restricts owning container names (empty matches all); dryRun
+// reports candidates without removing them.
 func PruneStaleSessionNetworks(ctx context.Context, now time.Time, ownerPrefix string, dryRun bool) ([]string, error) {
 	stale, err := staleSessionNetworks(ctx, now)
 	if err != nil {
@@ -511,7 +506,7 @@ func staleSessionNetworks(ctx context.Context, now time.Time) ([]sessionNetworkR
 	}
 	var candidates []dockercmd.NetworkInspectResponse
 	for _, info := range networks {
-		if _, ok := staleSessionNetworkOwner(info, now); ok && strings.TrimSpace(info.ID) != "" {
+		if sessionNetworkEligibleForGC(info, now) && strings.TrimSpace(info.ID) != "" {
 			candidates = append(candidates, info)
 		}
 	}
@@ -536,8 +531,6 @@ func staleSessionNetworks(ctx context.Context, now time.Time) ([]sessionNetworkR
 		if reserved[owner] || reserved[owner+model.GatewayContainerSuffix] {
 			continue
 		}
-		// The label and grace checks are cheap, so the engine is only asked
-		// about endpoints for networks that are otherwise collectable.
 		hasEndpoints, err := sessionNetworkHasEndpoints(ctx, info)
 		if err != nil || hasEndpoints {
 			continue
@@ -561,15 +554,9 @@ func dockerSessionContainerExists(ctx context.Context, name string) (bool, error
 	return false, err
 }
 
-func staleSessionNetworkOwner(info dockercmd.NetworkInspectResponse, now time.Time) (string, bool) {
-	owner, _, ok := sessionNetworkOwner(info)
-	if !ok || len(info.Containers) > 0 {
-		return "", false
-	}
-	if !sessionNetworkPastGracePeriod(info, now) {
-		return "", false
-	}
-	return owner, true
+func sessionNetworkEligibleForGC(info dockercmd.NetworkInspectResponse, now time.Time) bool {
+	_, _, ok := sessionNetworkOwner(info)
+	return ok && len(info.Containers) == 0 && sessionNetworkPastGracePeriod(info, now)
 }
 
 func fillSessionNetwork(ctx context.Context, session *backend.Session) {

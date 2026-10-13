@@ -203,13 +203,9 @@ func RunDetached(ctx context.Context, config *ContainerConfig, hostConfig *HostC
 	return out, nil
 }
 
-// fullContainerIDLength is the length of the untruncated hexadecimal ID both
-// engines print for a created container.
 const fullContainerIDLength = 64
 
-// containerIDFromRunOutput returns the container ID a failed `docker run`
-// printed, or "" when its output is not one complete engine ID: partial or
-// unexpected output must not become a removal target.
+// Partial or unexpected output must never become a removal target.
 func containerIDFromRunOutput(out string) string {
 	line, _, _ := strings.Cut(strings.TrimSpace(out), "\n")
 	line = strings.TrimSpace(line)

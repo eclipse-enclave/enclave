@@ -36,10 +36,7 @@ func NetworkCreate(ctx context.Context, opts NetworkCreateOptions) (string, erro
 	if !IsPodman() {
 		return out, nil
 	}
-	// podman echoes the network's name where Docker prints its ID. Callers
-	// identify a network by the ID they get back and compare it against
-	// inspect output, so the name has to be resolved here rather than silently
-	// standing in for an ID.
+	// Podman prints the network name, so resolve its ID via inspect.
 	info, err := NetworkInspect(ctx, opts.Name)
 	if err != nil {
 		return "", fmt.Errorf("resolve ID of created network %q: %w", opts.Name, err)
@@ -56,10 +53,8 @@ func NetworkRemove(ctx context.Context, name string) error {
 	return err
 }
 
-// NetworkAttachedContainers returns the names of the containers the engine
-// considers attached to a network, stopped ones included. It replaces the
-// inspect response's endpoint map, which podman does not populate at all, and
-// counts the same containers podman's own in-use check does.
+// NetworkAttachedContainers returns attached container names, including
+// stopped containers counted by Podman's in-use check.
 func NetworkAttachedContainers(ctx context.Context, name string) ([]string, error) {
 	if strings.TrimSpace(name) == "" {
 		return nil, fmt.Errorf("cannot list attached containers without a network name")
@@ -102,13 +97,8 @@ func NetworkList(ctx context.Context, filters Filters) ([]NetworkInspectResponse
 	return inspectNetworks(ctx, ids)
 }
 
-// inspectNetworks batch-inspects networks. The only tolerated failure is an
-// ID that vanished between listing and inspection: both engines then still
-// print the objects they found and report each missing one as not found, so
-// the partial output is complete for the networks that exist. Any other
-// failure is returned even when some output decoded, and a successful inspect
-// has to print exactly one object per requested network; an empty or short
-// response would otherwise pass as "not found".
+// Both engines still print found networks when a listed ID vanishes.
+// Only not-found errors permit partial results; success requires one object per ID.
 func inspectNetworks(ctx context.Context, ids []string) ([]NetworkInspectResponse, error) {
 	if len(ids) == 0 {
 		return nil, nil
@@ -128,10 +118,6 @@ func inspectNetworks(ctx context.Context, ids []string) ([]NetworkInspectRespons
 	return results, nil
 }
 
-// decodeNetworkInspectResponses decodes one inspect object per line. A line
-// that does not parse is an error rather than a skipped network: dropped
-// silently, an existing network would look missing, so its owner would try to
-// create it again and list callers would leave it out of cleanup and status.
 func decodeNetworkInspectResponses(out string) ([]NetworkInspectResponse, error) {
 	lines := splitLines(out)
 	results := make([]NetworkInspectResponse, 0, len(lines))

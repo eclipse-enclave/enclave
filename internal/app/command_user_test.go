@@ -82,6 +82,7 @@ func captureOutput(t *testing.T, fn func()) (stdout, stderr string) {
 }
 
 func TestCaptureOutputLargeOutput(t *testing.T) {
+	origOut, origErr := os.Stdout, os.Stderr
 	big := strings.Repeat("x", 1<<20)
 	stdout, stderr := captureOutput(t, func() {
 		_, _ = os.Stdout.WriteString(big)
@@ -89,6 +90,9 @@ func TestCaptureOutputLargeOutput(t *testing.T) {
 	})
 	if len(stdout) != len(big) || len(stderr) != len(big) {
 		t.Fatalf("captured %d/%d bytes, want %d each", len(stdout), len(stderr), len(big))
+	}
+	if os.Stdout != origOut || os.Stderr != origErr {
+		t.Fatal("captureOutput did not restore stdout and stderr")
 	}
 }
 

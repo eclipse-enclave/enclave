@@ -18,19 +18,30 @@ func TestIsNotFound(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
 		stderr string
+		args   []string
 		want   bool
 	}{
 		{name: "no such container", stderr: "Error: No such container: abc123", want: true},
 		{name: "no such image", stderr: "Error: No such image: foo:latest", want: true},
 		{name: "no such volume", stderr: "Error: No such volume: myvol", want: true},
-		{name: "network not found", stderr: "Error response from daemon: network missing not found", want: true},
+		{name: "network not found", args: []string{"network", "inspect", "missing"}, stderr: "Error response from daemon: network missing not found", want: true},
 		// Docker 29 appends its own "exit status 1" line after the daemon
 		// message, so the phrase is not at the end of the whole stderr.
-		{name: "network rm with trailing exit status", stderr: "Error response from daemon: network abc123 not found\nexit status 1", want: true},
+		{name: "network rm with trailing exit status", args: []string{"network", "rm", "abc123"}, stderr: "Error response from daemon: network abc123 not found\nexit status 1", want: true},
+		{name: "podman network inspect missing", args: []string{"network", "inspect", "missing"}, stderr: "Error: network missing: unable to find network with name or ID missing: network not found", want: true},
+		{name: "podman network rm missing", args: []string{"network", "rm", "missing"}, stderr: "Error: unable to find network with name or ID missing: network not found", want: true},
+		{name: "podman run missing network", args: []string{"run", "--network", "missing", "image"}, stderr: "Error: unable to find network with name or ID missing: network not found", want: false},
+		{name: "no such network", args: []string{"network", "rm", "missing"}, stderr: "Error: No such network: missing", want: true},
+		{name: "run missing network", args: []string{"run", "--network", "missing", "image"}, stderr: "Error response from daemon: network missing not found", want: false},
+		{name: "run no such network", args: []string{"run", "--network", "missing", "image"}, stderr: "Error: No such network: missing", want: false},
+		{name: "container inspect network error", args: []string{"inspect", "container"}, stderr: "Error: network missing not found", want: false},
+		{name: "network create error", args: []string{"network", "create", "missing"}, stderr: "Error: network missing not found", want: false},
+		{name: "unrelated network inspect error", args: []string{"network", "inspect", "missing"}, stderr: "Error: plugin for network missing not found", want: false},
+		{name: "missing command context", stderr: "Error: network missing not found", want: false},
 		{name: "no such object", stderr: "Error: No such object: abc123", want: true},
 		// "network " and the trailing "not found" must come from the same
 		// line; spread across lines they are two unrelated messages.
-		{name: "network and not-found on different lines", stderr: "Error: network sandbox join failed\nmanifest unknown: manifest not found", want: false},
+		{name: "network and not-found on different lines", args: []string{"network", "inspect", "missing"}, stderr: "Error: network sandbox join failed\nmanifest unknown: manifest not found", want: false},
 		// The reviewed footgun: a bare "not found" also appears in unrelated
 		// failures and must not be classified as a missing-object error.
 		{name: "executable not found", stderr: `OCI runtime create failed: exec: "foo": executable file not found in $PATH`, want: false},
@@ -38,7 +49,7 @@ func TestIsNotFound(t *testing.T) {
 		{name: "empty", stderr: "", want: false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := IsNotFound(&cliError{stderr: tc.stderr}); got != tc.want {
+			if got := IsNotFound(&cliError{args: tc.args, stderr: tc.stderr}); got != tc.want {
 				t.Fatalf("IsNotFound(%q) = %v, want %v", tc.stderr, got, tc.want)
 			}
 		})

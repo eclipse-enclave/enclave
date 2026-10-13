@@ -253,9 +253,6 @@ func containsSequence(values []string, want []string) bool {
 	return false
 }
 
-// podman echoes the new network's name where Docker prints its ID. Handing that
-// name back as an ID makes every later comparison against inspect output fail,
-// which silently skips the network's removal and leaks it.
 func TestNetworkCreateResolvesPodmanNameToID(t *testing.T) {
 	dir := t.TempDir()
 	stub := filepath.Join(dir, "podman")

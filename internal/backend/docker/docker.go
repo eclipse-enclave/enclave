@@ -252,17 +252,10 @@ func (b *Backend) RemoveWithoutFinalize(ctx context.Context, ref backend.Session
 	return RemoveSessionContainer(ctx, sessionRefName(ref), false)
 }
 
-// RemoveSessionContainer removes the session container and then tears down
-// its gateway and per-session network. removeVolumes also removes anonymous
-// volumes declared by its image. A missing container counts as removed.
-// The gateway must go second: podman refuses to remove a container whose
-// network namespace another container still joins, even an exited one, so
-// stopping the auto-removing gateway first would leave it behind as an exited
-// container. Gateway and network are captured before the removal, the
-// gateway by immutable ID: once the container is gone, a concurrent start of
-// the same name may already have created a replacement gateway under the
-// name. A removal that fails for any other reason leaves gateway and network
-// alone: the session may still be running on them.
+// RemoveSessionContainer tears down the session, gateway, then network.
+// Podman requires this order because the session joins the gateway's namespace.
+// Capture resource IDs before removal so concurrent same-name replacements survive.
+// Only a successful or not-found session removal permits further teardown.
 func RemoveSessionContainer(ctx context.Context, name string, removeVolumes bool) error {
 	projectHash := captureSessionProjectHash(ctx, name)
 	network, hasNetwork := captureSessionNetworkRef(ctx, name, projectHash)
@@ -291,8 +284,6 @@ func captureSessionProjectHash(ctx context.Context, name string) string {
 	return hash
 }
 
-// captureOwnedGatewayID returns the immutable ID of the session's managed
-// gateway sidecar, or "" when there is none.
 func captureOwnedGatewayID(ctx context.Context, name string, projectHash string) string {
 	if projectHash == "" {
 		return ""
@@ -832,9 +823,8 @@ func warnInsecureDockerConfig(info dockercmd.SystemInfo) {
 	warnInsecureDockerFirewall(info)
 }
 
-// warnInsecureDockerFirewall surfaces daemon warnings that undermine bridge
-// isolation and loopback publishing. podman is skipped: its info carries no
-// daemon warnings or firewall backend, and netavark manages its own rules.
+// Podman's netavark manages its own firewall; only Docker reports daemon
+// firewall warnings and a firewall backend.
 func warnInsecureDockerFirewall(info dockercmd.SystemInfo) {
 	if dockercmd.IsPodman() {
 		return

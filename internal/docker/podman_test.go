@@ -61,8 +61,6 @@ func TestDecodePodmanInfoMapsRootlessAndGraphRoot(t *testing.T) {
 	}
 }
 
-// The network backend version decides whether the per-session network may ask
-// for isolate=strict, so it has to survive the podman info decode.
 func TestDecodePodmanInfoMapsNetworkBackend(t *testing.T) {
 	info, err := decodePodmanInfo([]byte(`{"host":{"networkBackend":"netavark","networkBackendInfo":{"backend":"netavark","version":"netavark 1.4.0"}},"store":{"graphRoot":"/var/lib/containers/storage"}}`))
 	if err != nil {

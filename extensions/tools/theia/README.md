@@ -53,8 +53,8 @@ Without passthrough, extensions installed in the container persist in the
 per-project config store (`~/.theia-ide`). With passthrough, Enclave rebuilds
 that store from the host on every start, so the container always gets the host's
 extensions and extensions installed only in the container are removed. Install
-extensions on the host instead. Backend state such as extension storage is kept
-(`sandbox.statePaths`).
+extensions on the host instead. Backend state such as extension data, custom AI
+prompts, and chat history is kept (`sandbox.statePaths`).
 
 ## API Keys
 

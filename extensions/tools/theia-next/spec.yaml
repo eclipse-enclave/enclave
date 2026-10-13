@@ -17,10 +17,15 @@ sandbox:
   passthroughPaths: [deployedPlugins/]
   statePaths:
     # Backend state that must survive the passthrough overlay, which rebuilds
-    # the store on every start: extension and workspace storage, model
-    # snapshots, backend settings, and recent workspaces.
+    # the store on every start: extension data and storage, workspace data,
+    # custom AI prompts, AI chat history, model snapshots, backend settings,
+    # and recent workspaces.
+    - globalStorage/
     - plugin-storage/
     - workspace-storage/
+    - workspace-metadata/
+    - prompt-templates/
+    - chatSessions/
     - model-snapshots/
     - backend-settings.json
     - recentworkspace.json

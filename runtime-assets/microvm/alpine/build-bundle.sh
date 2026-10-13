@@ -188,6 +188,9 @@ fi
 # shellcheck disable=SC2016 # expanded by the child shell, not while assigning here.
 phase3_script='
 set -eu
+# Without pipefail a failing cpio or zstd still leaves a valid but truncated
+# archive behind, and the size check below would pass on it.
+set -o pipefail
 apk add --no-cache cpio kmod tar zstd >/dev/null
 
 root=/tmp/rootfs

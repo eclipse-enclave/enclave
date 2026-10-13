@@ -335,4 +335,6 @@ Commands that use an engine accept `--backend`, including session management, `u
 
 The backend is x86-64 only: it requires `qemu-system-x86_64` on the host and the bundle builder produces an x86-64 Alpine rootfs (`--platform linux/amd64`, `apk --arch x86_64`) regardless of host architecture. QEMU is launched with `-machine microvm,accel=kvm:tcg`, so only x86-64 Linux hosts get KVM acceleration; on arm64 hosts and on macOS the guest runs under TCG emulation and is correspondingly slow. There is no arm64 guest bundle. Use the default `docker` backend on those hosts.
 
+The guest has no disk: its root filesystem is the unpacked initramfs, held in RAM for the whole session. Guest memory is therefore sized per bundle at launch, at least 4096 MiB (or the tool's `qemuMinMemoryMiB`) and more for large bundles. The host must have that much memory available; the size is not capped to host RAM.
+
 QEMU sessions use the same persistent stores as Docker sessions (host directories under `~/.local/state/enclave/`): auth credentials, tool config, and persisted env are shared per tool/project, so you can switch between `--backend docker` and `--backend qemu` without re-authenticating.

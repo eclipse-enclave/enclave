@@ -125,13 +125,18 @@ On start, enclave publishes each `publish: true` port and prints the resolved
 resolved URL in its `PORTS` column (published ports without a declaration appear
 as `host:port`). Notes:
 
-- **Loopback by default.** Published ports bind to `127.0.0.1` on the host.
-  Binding to another interface is an explicit opt-in via `-p` using the
-  `ip:host:container` form (for example `-p 0.0.0.0:3000:3000`).
+- **Host loopback by default.** Published ports bind to `127.0.0.1` on the
+  host. Binding to another host interface is an explicit opt-in via `-p` using
+  the `ip:host:container` form (for example `-p 0.0.0.0:3000:3000`). The
+  in-container service must still listen on a non-loopback address for Docker
+  to publish it. Enclave's per-session bridge prevents unrelated bridge
+  containers from routing directly to that address; authentication for
+  arbitrary user-published services remains the user's responsibility.
 - **Network isolation.** Under isolation the tool shares the gateway sidecar's
   network namespace, so the binding is applied on the gateway container; off
-  isolation it is applied on the tool container. Either way the port is
-  reachable the same way, including for background/detached sessions.
+  isolation it is applied on the tool container. The attached namespace is
+  enclosed in a dedicated per-session Docker bridge in both modes. Host access
+  is the same either way, including for background/detached sessions.
 - **Host port.** By default (`hostAllocation: fixed`) the host port equals the
   container port, so two concurrent sessions of the same tool contend for the
   same host port. Set `hostAllocation: auto` on an entry to publish it as

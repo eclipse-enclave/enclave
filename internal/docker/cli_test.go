@@ -18,12 +18,30 @@ func TestIsNotFound(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
 		stderr string
+		args   []string
 		want   bool
 	}{
 		{name: "no such container", stderr: "Error: No such container: abc123", want: true},
 		{name: "no such image", stderr: "Error: No such image: foo:latest", want: true},
 		{name: "no such volume", stderr: "Error: No such volume: myvol", want: true},
+		{name: "network not found", args: []string{"network", "inspect", "missing"}, stderr: "Error response from daemon: network missing not found", want: true},
+		// Docker 29 appends its own "exit status 1" line after the daemon
+		// message, so the phrase is not at the end of the whole stderr.
+		{name: "network rm with trailing exit status", args: []string{"network", "rm", "abc123"}, stderr: "Error response from daemon: network abc123 not found\nexit status 1", want: true},
+		{name: "podman network inspect missing", args: []string{"network", "inspect", "missing"}, stderr: "Error: network missing: unable to find network with name or ID missing: network not found", want: true},
+		{name: "podman network rm missing", args: []string{"network", "rm", "missing"}, stderr: "Error: unable to find network with name or ID missing: network not found", want: true},
+		{name: "podman run missing network", args: []string{"run", "--network", "missing", "image"}, stderr: "Error: unable to find network with name or ID missing: network not found", want: false},
+		{name: "no such network", args: []string{"network", "rm", "missing"}, stderr: "Error: No such network: missing", want: true},
+		{name: "run missing network", args: []string{"run", "--network", "missing", "image"}, stderr: "Error response from daemon: network missing not found", want: false},
+		{name: "run no such network", args: []string{"run", "--network", "missing", "image"}, stderr: "Error: No such network: missing", want: false},
+		{name: "container inspect network error", args: []string{"inspect", "container"}, stderr: "Error: network missing not found", want: false},
+		{name: "network create error", args: []string{"network", "create", "missing"}, stderr: "Error: network missing not found", want: false},
+		{name: "unrelated network inspect error", args: []string{"network", "inspect", "missing"}, stderr: "Error: plugin for network missing not found", want: false},
+		{name: "missing command context", stderr: "Error: network missing not found", want: false},
 		{name: "no such object", stderr: "Error: No such object: abc123", want: true},
+		// "network " and the trailing "not found" must come from the same
+		// line; spread across lines they are two unrelated messages.
+		{name: "network and not-found on different lines", args: []string{"network", "inspect", "missing"}, stderr: "Error: network sandbox join failed\nmanifest unknown: manifest not found", want: false},
 		// The reviewed footgun: a bare "not found" also appears in unrelated
 		// failures and must not be classified as a missing-object error.
 		{name: "executable not found", stderr: `OCI runtime create failed: exec: "foo": executable file not found in $PATH`, want: false},
@@ -31,7 +49,7 @@ func TestIsNotFound(t *testing.T) {
 		{name: "empty", stderr: "", want: false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := IsNotFound(&cliError{stderr: tc.stderr}); got != tc.want {
+			if got := IsNotFound(&cliError{args: tc.args, stderr: tc.stderr}); got != tc.want {
 				t.Fatalf("IsNotFound(%q) = %v, want %v", tc.stderr, got, tc.want)
 			}
 		})
@@ -73,6 +91,31 @@ func TestIsSocketPermissionDenied(t *testing.T) {
 	}
 	if IsSocketPermissionDenied(errors.New("permission denied while trying to connect")) {
 		t.Fatal("non-*cliError should not be classified as socket permission denied")
+	}
+}
+
+func TestNetworkErrorClassifiers(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		stderr string
+		check  func(error) bool
+	}{
+		{name: "already exists", stderr: "network with name session-net already exists", check: IsAlreadyExists},
+		{name: "container name conflict", stderr: `Conflict. The container name "/session-gateway" is already in use by container "abc".`, check: IsContainerNameConflict},
+		{name: "active endpoints", stderr: "network session-net has active endpoints", check: IsActiveEndpoints},
+		{name: "podman associated containers", stderr: `Error: "session-net" has associated containers with it. Use -f to forcibly delete containers and pods: network is being used`, check: IsActiveEndpoints},
+		{name: "podman isolate parse", stderr: `Error: strconv.ParseBool: parsing "strict": invalid syntax`, check: IsUnsupportedIsolateValue},
+		{name: "default pool exhausted", stderr: "could not find an available, non-overlapping IPv4 address pool among the defaults to assign to the network", check: IsAddressPoolExhausted},
+		{name: "predefined pools exhausted", stderr: "all predefined address pools have been fully subnetted", check: IsAddressPoolExhausted},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if !tc.check(&cliError{stderr: tc.stderr}) {
+				t.Fatalf("classifier rejected %q", tc.stderr)
+			}
+			if tc.check(errors.New(tc.stderr)) {
+				t.Fatal("classifier accepted a non-CLI error")
+			}
+		})
 	}
 }
 
@@ -125,5 +168,18 @@ func TestMountFlagsSourceCreatingBinds(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("mountFlags() = %v, want %v", got, want)
+	}
+}
+
+func TestUnsupportedIsolateValueRejectsUnrelatedErrors(t *testing.T) {
+	for _, message := range []string{
+		"Error: unsupported bridge network option isolate",
+		"Error: cannot create network isolate: permission denied",
+		`Error: network "strict" has associated containers`,
+		`Error: strconv.ParseBool: parsing "other": invalid syntax`,
+	} {
+		if IsUnsupportedIsolateValue(&cliError{stderr: message}) {
+			t.Errorf("unrelated error triggered weaker isolation: %q", message)
+		}
 	}
 }

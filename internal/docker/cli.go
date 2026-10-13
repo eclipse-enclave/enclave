@@ -73,8 +73,8 @@ func (e *cliError) Unwrap() error {
 }
 
 // IsNotFound reports whether err came from a `docker` command that failed
-// because the target image, container, or volume does not exist. It replaces
-// the SDK's errdefs.IsNotFound by matching the daemon's stderr message.
+// because the target image, container, volume, or network does not exist. It
+// replaces the SDK's errdefs.IsNotFound by matching the daemon's stderr message.
 func IsNotFound(err error) bool {
 	if err == nil {
 		return false
@@ -91,10 +91,29 @@ func IsNotFound(err error) bool {
 		"no such container",
 		"no such image",
 		"no such volume",
-		"no such network",
 		"no such object",
 	} {
 		if strings.Contains(s, phrase) {
+			return true
+		}
+	}
+	if len(ce.args) < 2 || ce.args[0] != "network" || (ce.args[1] != "inspect" && ce.args[1] != "rm") {
+		return false
+	}
+	if strings.Contains(s, "no such network") {
+		return true
+	}
+	// Match per line: Docker 29 appends "exit status 1" after the daemon's
+	// "network <name> not found" message. Podman's `network rm` reports
+	// "unable to find network with name or ID <name>: network not found".
+	for _, line := range strings.Split(s, "\n") {
+		line = strings.TrimSpace(line)
+		line = strings.TrimPrefix(line, "error response from daemon: ")
+		line = strings.TrimPrefix(line, "error: ")
+		if strings.HasPrefix(line, "network ") && strings.HasSuffix(line, " not found") {
+			return true
+		}
+		if strings.HasSuffix(line, ": network not found") {
 			return true
 		}
 	}
@@ -118,6 +137,65 @@ func IsSocketPermissionDenied(err error) bool {
 		return false
 	}
 	return strings.Contains(strings.ToLower(ce.stderr), "permission denied while trying to connect")
+}
+
+// IsAlreadyExists reports whether Docker rejected object creation because an
+// object with the requested name was created concurrently or already exists.
+func IsAlreadyExists(err error) bool {
+	var ce *cliError
+	if !errors.As(err, &ce) {
+		return false
+	}
+	return strings.Contains(strings.ToLower(ce.stderr), "already exists")
+}
+
+// IsContainerNameConflict reports whether Docker rejected container creation
+// because another container already reserves the requested name.
+func IsContainerNameConflict(err error) bool {
+	var ce *cliError
+	if !errors.As(err, &ce) {
+		return false
+	}
+	message := strings.ToLower(ce.stderr)
+	return strings.Contains(message, "container name") && strings.Contains(message, "already in use")
+}
+
+// IsActiveEndpoints reports whether the engine refused to remove a network
+// while one or more containers were still attached. Docker says "has active
+// endpoints"; podman says the network "has associated containers" and "is
+// being used".
+func IsActiveEndpoints(err error) bool {
+	var ce *cliError
+	if !errors.As(err, &ce) {
+		return false
+	}
+	message := strings.ToLower(ce.stderr)
+	return strings.Contains(message, "active endpoints") ||
+		strings.Contains(message, "has associated containers") ||
+		strings.Contains(message, "network is being used")
+}
+
+// IsUnsupportedIsolateValue recognizes older Podman CLIs rejecting strict as
+// a boolean during network creation, independently of the netavark version.
+func IsUnsupportedIsolateValue(err error) bool {
+	var ce *cliError
+	if !errors.As(err, &ce) {
+		return false
+	}
+	message := strings.ToLower(ce.stderr)
+	return strings.Contains(message, `strconv.parsebool: parsing "strict": invalid syntax`)
+}
+
+// IsAddressPoolExhausted reports Docker's stable address-pool exhaustion
+// phrasings so callers can add daemon-specific remediation guidance.
+func IsAddressPoolExhausted(err error) bool {
+	var ce *cliError
+	if !errors.As(err, &ce) {
+		return false
+	}
+	message := strings.ToLower(ce.stderr)
+	return strings.Contains(message, "could not find an available, non-overlapping ipv4 address pool") ||
+		strings.Contains(message, "all predefined address pools have been fully subnetted")
 }
 
 // commandExitCode returns the process exit code of a failed exec.Command and

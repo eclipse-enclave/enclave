@@ -402,9 +402,6 @@ type Session struct {
 	CreatedAt  time.Time
 	Name       string
 	Background bool
-	// ImageInbox reports whether the session was started with --image-inbox
-	// (i.e. carries the read-only host image inbox mount).
-	ImageInbox bool
 	Ports      []PortMapping
 	Yolo       bool
 	// SessionMonitor reports whether the agent runs under the managed tmux

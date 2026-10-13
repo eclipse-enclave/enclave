@@ -33,7 +33,6 @@ type RunOptions struct {
 	BridgePorts          []string
 	Shell                bool
 	Admin                bool
-	ImageInbox           bool
 	SessionMonitor       bool
 	SessionTint          string
 	Timezone             string
@@ -102,14 +101,6 @@ type CleanupOptions struct {
 	CleanupDryRun     bool
 }
 
-// ImgOptions carries arguments for the host-side `img import` command.
-type ImgOptions struct {
-	// ImgScreenshot captures a region screenshot instead of reading the clipboard.
-	ImgScreenshot bool
-	// ImgNoCopy suppresses copying the resulting container path to the host clipboard.
-	ImgNoCopy bool
-}
-
 // StatusOptions carries arguments for the `status` command.
 type StatusOptions struct {
 	// StatusJSON emits machine-readable snapshot objects instead of a table.
@@ -144,7 +135,6 @@ type Options struct {
 	BuildOptions
 	CleanupOptions
 	UpdateOptions
-	ImgOptions
 	StatusOptions
 	PSOptions
 	Sources OptionSources
@@ -536,11 +526,6 @@ const (
 	// UserCommandsContainerDir is the fixed, home-layout-neutral path where the
 	// host session command tree is mounted read-only inside the container.
 	UserCommandsContainerDir = "/opt/" + AppName + "/commands"
-	ContainerImageInboxDir   = "/mnt/host-images"
-	// DefaultImageInboxMaxBytes caps an imported image at 10 MiB: large enough
-	// for real screenshots and pasted images, small enough to reject clipboard
-	// payloads that are clearly not the intended content.
-	DefaultImageInboxMaxBytes = 10 << 20
 	// SessionMonitorTmuxSocket / SessionMonitorTmuxSession name the managed
 	// tmux session the entrypoint creates when the session monitor is enabled.
 	// They are a contract with entrypoint.sh; `status` uses them to capture
@@ -569,10 +554,6 @@ const (
 	// exec.go) still keys off LabelWorktree.
 	LabelProjectDir = AppName + ".project_dir"
 	LabelConfigKey  = AppName + ".config_key"
-	// LabelImageInbox marks a container started with --image-inbox (its value is
-	// "true"). The inbox directory is global rather than session-derived; this
-	// label only lets `img import` detect inbox-enabled sessions.
-	LabelImageInbox = AppName + ".image_inbox"
 	LabelYolo       = AppName + ".yolo"
 	// LabelSessionMonitor marks a container whose agent runs under the managed
 	// tmux session (its value is "true"), so `status` knows a terminal snapshot

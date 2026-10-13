@@ -526,28 +526,6 @@ func OptionDefs() []OptionDef {
 			},
 		},
 		{
-			Name:          "image_inbox",
-			Group:         OptionGroupRun,
-			Kind:          OptionKindBool,
-			OptionField:   "ImageInbox",
-			SourceField:   "ImageInbox",
-			DefaultsField: "ImageInbox",
-			Apply:         ApplyBoolPtr,
-			CLIFlags: []CLIFlagDef{
-				{
-					Name:      "--image-inbox",
-					Usage:     "Mount a read-only host image inbox at /mnt/host-images",
-					ValueKind: CLIValueNone,
-					Action: CLIAction{
-						Kind:        CLIActionSetBool,
-						OptionField: "ImageInbox",
-						SourceField: "ImageInbox",
-						BoolValue:   true,
-					},
-				},
-			},
-		},
-		{
 			Name:        "force_rebuild",
 			Group:       OptionGroupBuild,
 			Kind:        OptionKindBool,

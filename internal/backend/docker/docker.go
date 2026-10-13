@@ -433,14 +433,6 @@ func labelsFromRequest(req backend.Request) map[string]string {
 	if configKey := configKeyFromStores(req.Stores); configKey != "" {
 		labels[model.LabelConfigKey] = configKey
 	}
-	// Mark inbox-enabled sessions so `img import` can find them. The runtime
-	// signals intent by adding the read-only inbox mount.
-	for _, m := range req.Mounts {
-		if m.ContainerPath == model.ContainerImageInboxDir {
-			labels[model.LabelImageInbox] = "true"
-			break
-		}
-	}
 	// Mark session-monitor sessions so `status` knows a tmux snapshot can be
 	// captured, and record the tmux owner so it captures as the right user.
 	// The runtime signals both via entrypoint env vars.
@@ -567,7 +559,6 @@ func sessionFromSummary(c dockercmd.Summary) (backend.Session, bool) {
 		CreatedAt:          createdAt,
 		Name:               sessionName,
 		Background:         strings.EqualFold(labels[model.LabelBackground], "true"),
-		ImageInbox:         strings.EqualFold(labels[model.LabelImageInbox], "true"),
 		Ports:              sessionPortMappings(c.Ports),
 		Yolo:               strings.TrimSpace(labels[model.LabelYolo]) == "1",
 		SessionMonitor:     strings.EqualFold(labels[model.LabelSessionMonitor], "true"),

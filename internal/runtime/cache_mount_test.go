@@ -117,12 +117,10 @@ func TestOnlyDisposableMountsCreateSources(t *testing.T) {
 	home := t.TempDir()
 	r := newCacheMountRuntime(home)
 	r.profile.MemoryDir = ".claude/memory"
-	r.run.ImageInbox = true
 
 	acc := newMountAccumulator(nil, nil)
 	r.addMemoryMounts(acc)
 	r.addHistoryMounts(acc)
-	r.addImageInboxMount(acc)
 	if err := r.addCacheMounts(acc); err != nil {
 		t.Fatalf("addCacheMounts: %v", err)
 	}

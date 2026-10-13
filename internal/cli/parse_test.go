@@ -51,7 +51,7 @@ func TestBackendFlagOnEngineCommands(t *testing.T) {
 	commands := [][]string{
 		{"ps"}, {"status"}, {"stop"}, {"attach"}, {"exec"},
 		{"update"}, {"theia"}, {"theia-next"}, {"cleanup"}, {"info"},
-		{"auth", "import"}, {"auth", "export"}, {"img", "import"},
+		{"auth", "import"}, {"auth", "export"},
 		{"network", "status"}, {"network", "log"}, {"network", "apply"},
 		{"network", "add-domain", "example.com", "--global"},
 		{"network", "remove-domain", "example.com", "--global"},

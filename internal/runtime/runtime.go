@@ -361,7 +361,6 @@ func (r *Runtime) prepareMounts() (*mountAccumulator, hostGitIdentity, error) {
 		return nil, hostGitIdentity{}, err
 	}
 	r.addSSHMount(mountArgs)
-	r.addImageInboxMount(mountArgs)
 	r.addSessionMonitorEnv(mountArgs)
 	if err := r.addCacheMounts(mountArgs); err != nil {
 		return nil, hostGitIdentity{}, err
@@ -1182,29 +1181,6 @@ func (r *Runtime) addSSHMount(mounts *mountAccumulator) {
 		return
 	}
 	logx.Warnf("SSH not configured. Run '%s ssh-init' to enable SSH operations.", model.AppName)
-}
-
-// addImageInboxMount grants the container a single read-only bind mount of the
-// global host image inbox. The directory is shared by every --image-inbox
-// session, so an image imported once is visible everywhere. The agent can only
-// read images the user explicitly imported host-side; the mount is read-only
-// and the container has no channel to import them itself. The inbox is not
-// removed on session teardown (other sessions may share it) — it is cleared by
-// `enclave cleanup --all`.
-func (r *Runtime) addImageInboxMount(mounts *mountAccumulator) {
-	if !r.run.ImageInbox {
-		return
-	}
-	inboxDir := config.HostImageInboxDir(r.host.Home)
-	if err := os.MkdirAll(inboxDir, 0o700); err != nil {
-		logx.Warnf("Failed to create image inbox directory %s: %v", inboxDir, err)
-		return
-	}
-	// The inbox lives under the disposable cache root; an empty recreated inbox
-	// must not block a session start.
-	mounts.AddMount(disposableDirMount(inboxDir, model.ContainerImageInboxDir, true))
-	mounts.AddEnv(model.EnvImageInbox, model.ContainerImageInboxDir)
-	logx.Infof("Host image inbox mounted read-only at %s", model.ContainerImageInboxDir)
 }
 
 // addUserCommandMount exposes the host session command tree read-only inside

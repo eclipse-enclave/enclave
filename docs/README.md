@@ -9,7 +9,6 @@
 - [persistence.md](persistence.md) — Sessions, persistent stores, and cleanup
 - [tools.md](tools.md) — Built-in tools, images, devcontainers, and updates
 - [session-status.md](session-status.md) — Terminal snapshots for external orchestrators
-- [host-image-inbox.md](host-image-inbox.md) — Explicit host image import
 - [windows.md](windows.md) — The WSL2 launcher: setup, working-directory rules, and environment forwarding
 
 ## Developer Documentation

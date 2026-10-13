@@ -229,16 +229,6 @@ func OptionSpecs() []OptionSpec {
 			},
 		},
 		{
-			Name:  "image_inbox",
-			Group: OptionGroupRun,
-			ApplyDefaultsWithSource: func(opts *model.Options, defaults Defaults, source model.OptionSource, sources *model.OptionSources) {
-				if canOverride(sources.ImageInbox, source) && defaults.ImageInbox != nil {
-					opts.ImageInbox = *defaults.ImageInbox
-					sources.ImageInbox = source
-				}
-			},
-		},
-		{
 			Name:  "force_rebuild",
 			Group: OptionGroupBuild,
 		},

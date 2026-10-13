@@ -337,4 +337,6 @@ The backend is x86-64 only: it requires `qemu-system-x86_64` on the host and the
 
 The guest has no disk: its root filesystem is the unpacked initramfs, held in RAM for the whole session. Guest memory is therefore sized per bundle at launch, at least 4096 MiB (or the tool's `qemuMinMemoryMiB`) and more for large bundles. The host must have that much memory available; the size is not capped to host RAM.
 
+On Linux, Enclave warns before launch if the guest allocation exceeds the host's available-memory estimate (`MemAvailable` in `/proc/meminfo`), reporting both sizes. This is advisory: startup continues without reducing guest memory. The check is skipped on other platforms or when the estimate cannot be read. It does not account for cgroup limits or reserve memory, so the absence of a warning does not guarantee the session will fit.
+
 QEMU sessions use the same persistent stores as Docker sessions (host directories under `~/.local/state/enclave/`): auth credentials, tool config, and persisted env are shared per tool/project, so you can switch between `--backend docker` and `--backend qemu` without re-authenticating.

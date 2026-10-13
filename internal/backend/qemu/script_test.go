@@ -268,6 +268,55 @@ func TestBuildQEMUArgsRejectsCommaInHostForward(t *testing.T) {
 	}
 }
 
+func TestHostMemoryWarning(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		meminfo string
+		want    string
+		wantErr bool
+	}{
+		{
+			name:    "available rather than total or free",
+			meminfo: "MemTotal: 16777216 kB\nMemFree: 1048576 kB\nMemAvailable:\t4194304 kB\n",
+			want:    "guest memory is 5120 MiB, but the host reports only 4096 MiB available",
+		},
+		{name: "enough including reclaimable cache", meminfo: "MemFree: 0 kB\nMemAvailable: 6291456 kB\n"},
+		{name: "exactly enough", meminfo: "MemAvailable: 5242880 kB\n"},
+		{
+			name:    "just below allocation",
+			meminfo: "MemAvailable: 5242879 kB\n",
+			want:    "guest memory is 5120 MiB, but the host reports only 5119 MiB available",
+		},
+		{
+			name:    "zero is a valid estimate",
+			meminfo: "MemAvailable: 0 kB\n",
+			want:    "guest memory is 5120 MiB, but the host reports only 0 MiB available",
+		},
+		{name: "missing estimate", meminfo: "MemTotal: 16777216 kB\nMemFree: 1048576 kB\n", wantErr: true},
+		{name: "missing value", meminfo: "MemAvailable:\n", wantErr: true},
+		{name: "missing unit", meminfo: "MemAvailable: 4194304\n", wantErr: true},
+		{name: "wrong unit", meminfo: "MemAvailable: 4194304 MB\n", wantErr: true},
+		{name: "invalid value", meminfo: "MemAvailable: unknown kB\n", wantErr: true},
+		{name: "negative value", meminfo: "MemAvailable: -1 kB\n", wantErr: true},
+		{name: "overflow", meminfo: "MemAvailable: 9223372036854775808 kB\n", wantErr: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			warning, err := hostMemoryWarning(5120, tc.meminfo)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("hostMemoryWarning error = %v, want error %t", err, tc.wantErr)
+			}
+			if tc.want == "" {
+				if warning != "" {
+					t.Fatalf("unexpected warning: %s", warning)
+				}
+				return
+			}
+			assertContains(t, warning, tc.want)
+			assertContains(t, warning, "continuing with unchanged guest memory")
+		})
+	}
+}
+
 func assertContainsArg(t *testing.T, args []string, want string) {
 	t.Helper()
 	for _, arg := range args {

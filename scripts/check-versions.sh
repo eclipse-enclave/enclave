@@ -48,6 +48,7 @@ KNOWN_PINS=(
     'go.mod|^(go|toolchain) '
     '.github/workflows/*.yml|uses: [^ ]+@[0-9a-f]{40} # v[0-9.]+$'
     '.github/workflows/*.yml|go-version-file: go\.mod$'
+    '.github/workflows/ci.yml|go-version: \$\{\{ steps\.go-floor\.outputs\.version \}\}$'
     '.github/workflows/reusable-rpm-build.yml|container: fedora:[0-9]+$'
     'extensions/features/devtools/install.sh|^(GOLANGCI_LINT|GOSEC|GOVULNCHECK)_VERSION='
     'extensions/features/gitlab-cli/install.sh|^GLAB_VERSION=\$\(curl'
@@ -58,9 +59,9 @@ KNOWN_PINS=(
 PIN_PATTERN='@sha256:|uses: [^ .][^ ]*@|[A-Z_]+_VERSION=|^FROM |^[[:space:]]*container: |node-version:|go-version|^toolchain |^go [0-9]'
 
 DEVTOOLS=(
-    'GOLANGCI_LINT_VERSION github.com/golangci/golangci-lint/v2'
-    'GOSEC_VERSION github.com/securego/gosec/v2'
-    'GOVULNCHECK_VERSION golang.org/x/vuln'
+    'GOLANGCI_LINT_VERSION github.com/golangci/golangci-lint/v2 golangci-lint'
+    'GOSEC_VERSION github.com/securego/gosec/v2 gosec'
+    'GOVULNCHECK_VERSION golang.org/x/vuln govulncheck'
 )
 
 problems=0
@@ -146,7 +147,6 @@ image_digest() {
 section "Lockstep groups"
 
 extract go.mod '^go ([0-9]+\.[0-9]+)'
-
 go_floor=$REPLY
 extract go.mod '^go ([0-9.]+)$'
 go_directive=$REPLY
@@ -173,21 +173,18 @@ expect_same "Go floor" "go.mod=$go_floor" "debian/control=$deb_go" \
     "Makefile=$make_go" "Makefile check-go=1.$make_go_check"
 
 extract go.mod '^toolchain go([0-9.]+)'
-
 toolchain=$REPLY
 extract Dockerfile.gateway 'golang:([0-9.]+)-alpine'
 gateway_go=$REPLY
 expect_same "Go toolchain" "go.mod=$toolchain" "Dockerfile.gateway=$gateway_go"
 
 extract Dockerfile.gateway '^FROM docker\.io/library/alpine:([0-9.]+)@'
-
 alpine_runtime=$REPLY
 extract Dockerfile.gateway 'golang:[0-9.]+-alpine([0-9.]+)@'
 alpine_builder=$REPLY
 expect_same "Alpine version" "gateway runtime=$alpine_runtime" "gateway builder=$alpine_builder"
 
 extract Dockerfile.gateway 'library/alpine:[0-9.]+@(sha256:[0-9a-f]{64})'
-
 alpine_gateway=$REPLY
 extract internal/model/types.go 'AlpineImage +=.*alpine@(sha256:[0-9a-f]{64})'
 alpine_model=$REPLY
@@ -197,11 +194,19 @@ expect_same "Alpine digest" "Dockerfile.gateway=$alpine_gateway" \
     "internal/model/types.go=$alpine_model" "build-bundle.sh=$alpine_bundle"
 
 extract debian/control 'git \(>= 1:([0-9.]+)\)'
-
 deb_git=$REPLY
 extract packaging/rpm/enclave.spec '^Requires:[[:space:]]+git >= ([0-9.]+)'
 rpm_git=$REPLY
 expect_same "git floor" "debian/control=$deb_git" "enclave.spec=$rpm_git"
+
+for entry in "${DEVTOOLS[@]}"; do
+    read -r var module name <<<"$entry"
+    extract extensions/features/devtools/install.sh "$var:-(v[0-9.]+)"
+    installed=$REPLY
+    extract extensions/features/devtools/README.md "^- \`$name\` \\(\`(v[0-9.]+)\`\\)"
+    documented=$REPLY
+    expect_same "$name version" "install.sh=$installed" "README.md=$documented"
+done
 
 action_pins=$(git grep -hoE 'uses: [^ .][^ ]*@[0-9a-f]{40} # v[0-9.]+' -- .github/workflows "${EXCLUDED_PATHS[@]}" |
     sed 's/^uses: //' | sort -u)
@@ -254,7 +259,6 @@ done
 # --- Security -----------------------------------------------------------------
 
 extract extensions/features/devtools/install.sh 'GOVULNCHECK_VERSION:-(v[0-9.]+)'
-
 govulncheck_version=$REPLY
 section "Security (govulncheck $govulncheck_version, toolchain go$toolchain)"
 
@@ -360,14 +364,13 @@ done < <(awk '/^require \(/ { block = 1; next } block && /^\)/ { block = 0 } blo
 
 section "Devtools (limit: go $toolchain)"
 for entry in "${DEVTOOLS[@]}"; do
-    read -r var module <<<"$entry"
+    read -r var module name <<<"$entry"
     extract extensions/features/devtools/install.sh "$var:-(v[0-9.]+)"
     pinned=$REPLY
     module_update "$var" "$module" "$pinned" "$toolchain"
 done
 
 # --- Container images -----------------------------------------------------------
-
 
 # check_image LABEL REFERENCE: compare a name:tag@digest pin with the registry.
 check_image() {
@@ -438,7 +441,6 @@ else
 fi
 
 extract .github/workflows/reusable-rpm-build.yml 'container: fedora:([0-9]+)$'
-
 fedora=$REPLY
 if fedora_latest=$(fetch https://endoflife.date/api/v1/products/fedora | jq -re '.result.releases[0].name'); then
     if [ "$fedora_latest" = "$fedora" ]; then
@@ -563,13 +565,12 @@ done
 # shellcheck disable=SC2086 # word splitting intended
 ceiling "Go" $go_packages
 if [ -n "$CEILING" ]; then
-    go_ceiling=$(minor_of "$CEILING")
-    if ! version_le "$go_floor" "$go_ceiling"; then
-        problem "Go floor $go_floor is above the ceiling $go_ceiling"
-    elif [ "$go_floor" != "$go_ceiling" ]; then
-        info "Go floor $go_floor may be raised to $go_ceiling"
+    if ! version_le "$go_directive" "$CEILING"; then
+        problem "Go floor $go_directive is above the ceiling $CEILING"
+    elif [ "$go_directive" != "$CEILING" ]; then
+        info "Go floor $go_directive may be raised to $CEILING"
     else
-        ok "Go floor $go_floor is at the ceiling"
+        ok "Go floor $go_directive is at the ceiling"
     fi
 fi
 ceiling "git" git

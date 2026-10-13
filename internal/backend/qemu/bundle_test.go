@@ -205,27 +205,47 @@ func TestInitramfsPathReportsMissingImage(t *testing.T) {
 	}
 }
 
-// A bundle whose initramfs cannot be unpacked in its declared memory must be
-// rejected on the host; the guest failure mode is an unrelated-looking kernel
-// panic about a missing init.
-func TestCheckBundleMemoryRejectsUndersizedGuest(t *testing.T) {
+// A bundle whose initramfs cannot be unpacked in its declared memory must get
+// more; the guest failure mode is an unrelated-looking kernel panic about a
+// missing init. Prebuilt bundles often ship the metadata without a config.
+func TestResolveBundleMemoryMiBRaisesFloorForLargeInitramfs(t *testing.T) {
 	dir := t.TempDir()
 	meta := []byte(`{"uncompressedBytes":3221225472,"compressedBytes":1073741824,"compression":"zstd"}`)
 	if err := os.WriteFile(filepath.Join(dir, InitramfsMetaFile), meta, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	err := checkBundleMemory(dir, DefaultMemoryMiB)
-	if err == nil {
-		t.Fatal("expected undersized guest memory to be rejected")
+	got, err := resolveBundleMemoryMiB(dir)
+	if err != nil {
+		t.Fatalf("resolveBundleMemoryMiB without config: %v", err)
 	}
-	if !strings.Contains(err.Error(), "needs at least 5120 MiB") {
-		t.Fatalf("error does not name the required memory: %v", err)
+	// 3072 MiB rootfs + 2048 MiB workload headroom, rounded up to 512 MiB.
+	if got != 5120 {
+		t.Fatalf("memoryMiB without config = %d, want 5120", got)
 	}
-	if err := checkBundleMemory(dir, 5120); err != nil {
-		t.Fatalf("checkBundleMemory with sufficient memory: %v", err)
+	if err := os.WriteFile(filepath.Join(dir, BundleConfigFile), []byte(`{"memoryMiB":8192}`), 0o600); err != nil {
+		t.Fatal(err)
 	}
-	if err := checkBundleMemory(t.TempDir(), DefaultMemoryMiB); err != nil {
-		t.Fatalf("checkBundleMemory without metadata: %v", err)
+	got, err = resolveBundleMemoryMiB(dir)
+	if err != nil {
+		t.Fatalf("resolveBundleMemoryMiB with config: %v", err)
+	}
+	if got != 8192 {
+		t.Fatalf("memoryMiB with larger declared floor = %d, want 8192", got)
+	}
+}
+
+func TestResolveBundleMemoryMiBKeepsFloorForSmallInitramfs(t *testing.T) {
+	dir := t.TempDir()
+	meta := []byte(`{"uncompressedBytes":545259520,"compressedBytes":209715200,"compression":"zstd"}`)
+	if err := os.WriteFile(filepath.Join(dir, InitramfsMetaFile), meta, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := resolveBundleMemoryMiB(dir)
+	if err != nil {
+		t.Fatalf("resolveBundleMemoryMiB: %v", err)
+	}
+	if got != DefaultMemoryMiB {
+		t.Fatalf("memoryMiB = %d, want %d", got, DefaultMemoryMiB)
 	}
 }
 

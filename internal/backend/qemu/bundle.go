@@ -66,8 +66,8 @@ const (
 )
 
 // BundleConfig is the host-side metadata stored next to a generated or
-// prebuilt QEMU bundle. MemoryMiB is the effective launch size: the bundle
-// builder raises the profile minimum to whatever the built initramfs needs.
+// prebuilt QEMU bundle. MemoryMiB is the declared memory floor; the launch
+// size is raised to whatever the bundle's initramfs needs.
 type BundleConfig struct {
 	MemoryMiB int `json:"memoryMiB"`
 }
@@ -144,9 +144,6 @@ func resolveBundle(image string) (bundle, error) {
 	if err != nil {
 		return bundle{}, err
 	}
-	if err := checkBundleMemory(resolved, memoryMiB); err != nil {
-		return bundle{}, err
-	}
 	return bundle{Root: resolved, Kernel: kernel, Initramfs: initramfs, MemoryMiB: memoryMiB}, nil
 }
 
@@ -217,26 +214,6 @@ func ReadInitramfsMeta(root string) (InitramfsMeta, error) {
 	return meta, nil
 }
 
-// checkBundleMemory rejects a bundle whose initramfs cannot be unpacked in the
-// memory its config declares. Without it the guest fails deep inside the kernel
-// ("Initramfs unpacking failed: write error", then a no-init panic), which says
-// nothing about the actual cause.
-func checkBundleMemory(root string, memoryMiB int) error {
-	meta, err := ReadInitramfsMeta(root)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil
-		}
-		return err
-	}
-	required := RequiredMemoryMiB(meta.UncompressedBytes, meta.CompressedBytes)
-	if memoryMiB >= required {
-		return nil
-	}
-	return fmt.Errorf("qemu backend: bundle %s needs at least %d MiB to unpack its %d MiB initramfs but %s declares %d MiB; rebuild the bundle with --rebuild",
-		root, required, bytesToMiB(meta.UncompressedBytes), BundleConfigFile, memoryMiB)
-}
-
 func requireRegularFile(path string, label string) (string, error) {
 	info, err := os.Stat(path)
 	if err != nil {
@@ -274,15 +251,27 @@ func ReadBundleConfig(root string) (BundleConfig, error) {
 	return cfg, nil
 }
 
+// resolveBundleMemoryMiB raises the bundle's declared memory floor to what its
+// initramfs needs. The kernel unpacks the image into a ramfs that stays
+// resident as the guest rootfs, so a large bundle needs proportionally more
+// memory; too little and the guest dies in the unpacker ("Initramfs unpacking
+// failed: write error", then a no-init panic).
 func resolveBundleMemoryMiB(root string) (int, error) {
+	memoryMiB := DefaultMemoryMiB
 	cfg, err := ReadBundleConfig(root)
+	if err == nil {
+		memoryMiB = cfg.MemoryMiB
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return 0, err
+	}
+	meta, err := ReadInitramfsMeta(root)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return DefaultMemoryMiB, nil
+			return memoryMiB, nil
 		}
 		return 0, err
 	}
-	return cfg.MemoryMiB, nil
+	return max(memoryMiB, RequiredMemoryMiB(meta.UncompressedBytes, meta.CompressedBytes)), nil
 }
 
 func (b *Backend) prepareGuestRuntime(bundle bundle, req backend.Request, console consoleSize) (guestRuntime, error) {

@@ -7,16 +7,17 @@ The generated bundle contains:
 - `vmlinuz` from Alpine `linux-virt`
 - `initramfs.cpio.zst` with Alpine userland, the selected agent tool, and enclave runtime assets
 - `enclave-vm-initramfs.json` with the packed and unpacked initramfs sizes
-- `enclave-vm-bundle.json` with guest sizing metadata
+- `enclave-vm-bundle.json` with the declared guest memory floor
 
 ## Initramfs sizing
 
 The guest has no disk: the initramfs is unpacked into a ramfs that becomes the
 rootfs and is never reclaimed, and while unpacking the kernel holds the image
 and its unpacked contents at the same time. Guest memory therefore scales with
-the bundle, and the host derives it from `enclave-vm-initramfs.json`
-(`backendqemu.RequiredMemoryMiB`), never below the profile's
-`qemuMinMemoryMiB`. Two consequences for the builder:
+the bundle: at launch the host derives it from `enclave-vm-initramfs.json`
+(`backendqemu.RequiredMemoryMiB`), never below the floor in
+`enclave-vm-bundle.json` (the profile's `qemuMinMemoryMiB`). Two consequences
+for the builder:
 
 - The image is zstd-compressed, which roughly halves the boot-time peak.
 - Build-time caches (npm, pip, uv) and `/boot` are stripped from the rootfs.
@@ -27,7 +28,8 @@ overlay archive to it, and the kernel's `unpack_to_rootfs()` only recognizes an
 appended plain cpio segment that starts on such a boundary.
 
 Bundles passed via `--image-name` may also ship an uncompressed `initramfs.cpio`
-and no metadata; those fall back to the default memory size.
+and either metadata file may be missing: the floor then defaults to 4096 MiB,
+and without `enclave-vm-initramfs.json` it is used as is.
 
 ## Console size
 

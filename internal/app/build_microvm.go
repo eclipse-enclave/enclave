@@ -8,9 +8,9 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -67,8 +67,8 @@ func ensureQEMUBundle(input *CommandInput, opts model.Options, buildCfg buildCon
 		logx.Errorf("%v", err)
 		return buildConfig{}, 1
 	}
-	declaredConfig := qemuBundleConfigForProfile(profile)
-	configHash, err := qemuBundleConfigHash(declaredConfig)
+	bundleConfig := qemuBundleConfigForProfile(profile)
+	configHash, err := qemuBundleConfigHash(bundleConfig)
 	if err != nil {
 		logx.Errorf("%v", err)
 		return buildConfig{}, 1
@@ -86,7 +86,7 @@ func ensureQEMUBundle(input *CommandInput, opts model.Options, buildCfg buildCon
 		}
 		return buildCfg, 0
 	}
-	current, err := qemuBundleCurrent(bundleDir, opts.Tool, bundleHash)
+	current, err := qemuBundleCurrent(bundleDir, opts.Tool, bundleHash, bundleConfig)
 	if err != nil {
 		logx.Debugf("qemu bundle stamp check failed: %v", err)
 	}
@@ -98,7 +98,7 @@ func ensureQEMUBundle(input *CommandInput, opts model.Options, buildCfg buildCon
 		} else {
 			logx.Infof("Agent update interval elapsed, rebuilding qemu bundle automatically.")
 		}
-		if err := buildQEMUBundle(context.Background(), input.Ctx.Paths, host, bundleDir, opts.Tool, bundleHash, declaredConfig.MemoryMiB); err != nil {
+		if err := buildQEMUBundle(context.Background(), input.Ctx.Paths, host, bundleDir, opts.Tool, bundleHash, bundleConfig); err != nil {
 			logx.Errorf("%v", err)
 			return buildConfig{}, 1
 		}
@@ -160,33 +160,14 @@ func ensureExistingQEMUBundle(dir string) error {
 }
 
 // qemuBundleConfigForProfile is the memory floor a profile declares. It feeds
-// the bundle hash; the effective launch size is computed from the built
-// initramfs in buildQEMUBundle and can only be larger.
+// the bundle hash; the backend raises the launch size to what the built
+// initramfs needs.
 func qemuBundleConfigForProfile(profile model.Profile) backendqemu.BundleConfig {
 	memoryMiB := backendqemu.DefaultMemoryMiB
 	if profile.QEMUMinMemoryMiB > memoryMiB {
 		memoryMiB = profile.QEMUMinMemoryMiB
 	}
 	return backendqemu.BundleConfig{MemoryMiB: memoryMiB}
-}
-
-// qemuBundleMemoryMiB raises the declared memory floor to what the built
-// initramfs needs. The kernel unpacks the image into a ramfs that stays
-// resident as the guest rootfs, so a large bundle needs proportionally more
-// memory; too little and the guest dies in the unpacker with no usable init.
-func qemuBundleMemoryMiB(bundleDir string, minMemoryMiB int) (int, error) {
-	meta, err := backendqemu.ReadInitramfsMeta(bundleDir)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return minMemoryMiB, nil
-		}
-		return 0, err
-	}
-	required := backendqemu.RequiredMemoryMiB(meta.UncompressedBytes, meta.CompressedBytes)
-	if required > minMemoryMiB {
-		return required, nil
-	}
-	return minMemoryMiB, nil
 }
 
 func qemuBundleConfigHash(cfg backendqemu.BundleConfig) (string, error) {
@@ -219,19 +200,23 @@ func writeQEMUBundleConfig(dir string, cfg backendqemu.BundleConfig) error {
 	return nil
 }
 
-// qemuBundleCurrent reports whether the cached bundle was built from the same
-// inputs. The stamped hash covers the declared memory floor, so the stored
-// config itself only has to be readable: its memory value is a build output
-// derived from the initramfs, not an input to compare against.
-func qemuBundleCurrent(dir string, tool string, hash string) (bool, error) {
+func qemuBundleCurrent(dir string, tool string, hash string, cfg backendqemu.BundleConfig) (bool, error) {
 	if err := ensureExistingQEMUBundle(dir); err != nil {
 		return false, nil
 	}
-	if _, err := backendqemu.ReadBundleConfig(dir); err != nil {
-		if errors.Is(err, os.ErrNotExist) {
+	expectedConfig, err := qemuBundleConfigJSON(cfg)
+	if err != nil {
+		return false, err
+	}
+	currentConfig, err := os.ReadFile(filepath.Join(dir, backendqemu.BundleConfigFile)) // #nosec G304 -- dir is enclave-managed cache path.
+	if err != nil {
+		if os.IsNotExist(err) {
 			return false, nil
 		}
 		return false, err
+	}
+	if !bytes.Equal(currentConfig, expectedConfig) {
+		return false, nil
 	}
 	data, err := os.ReadFile(filepath.Join(dir, qemuBundleBuildStampFile)) // #nosec G304 -- dir is enclave-managed cache path.
 	if err != nil {
@@ -251,7 +236,7 @@ func qemuBundleCurrent(dir string, tool string, hash string) (bool, error) {
 	return true, nil
 }
 
-func buildQEMUBundle(ctx context.Context, paths model.Paths, host model.Host, bundleDir string, tool string, hash string, minMemoryMiB int) error {
+func buildQEMUBundle(ctx context.Context, paths model.Paths, host model.Host, bundleDir string, tool string, hash string, cfg backendqemu.BundleConfig) error {
 	selection := runtimeImageSelection{Tools: []string{tool}}
 	contextDir, cleanup, err := prepareBuildContext(paths, selection)
 	if err != nil {
@@ -283,14 +268,7 @@ func buildQEMUBundle(ctx context.Context, paths model.Paths, host model.Host, bu
 	if err := ensureExistingQEMUBundle(bundleDir); err != nil {
 		return err
 	}
-	memoryMiB, err := qemuBundleMemoryMiB(bundleDir, minMemoryMiB)
-	if err != nil {
-		return err
-	}
-	if memoryMiB > minMemoryMiB {
-		logx.Infof("Sizing qemu guest memory to %d MiB for the built initramfs.", memoryMiB)
-	}
-	if err := writeQEMUBundleConfig(bundleDir, backendqemu.BundleConfig{MemoryMiB: memoryMiB}); err != nil {
+	if err := writeQEMUBundleConfig(bundleDir, cfg); err != nil {
 		return err
 	}
 	stamp := qemuBundleBuildStamp{Hash: hash, Tool: tool}

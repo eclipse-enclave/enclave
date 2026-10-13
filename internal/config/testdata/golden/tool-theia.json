@@ -3,9 +3,23 @@
   "command": "sleep infinity",
   "yolo_flag": "",
   "yolo_enabled": null,
-  "config_dir": ".theia",
+  "config_dir": ".theia-ide",
+  "state_paths": [
+    "globalStorage/",
+    "plugin-storage/",
+    "workspace-storage/",
+    "workspace-metadata/",
+    "prompt-templates/",
+    "chatSessions/",
+    "model-snapshots/",
+    "backend-settings.json",
+    "recentworkspace.json"
+  ],
   "settings_file": "",
   "settings_target": "",
+  "passthrough_paths": [
+    "deployedPlugins/"
+  ],
   "providers": [
     {
       "name": "anthropic",

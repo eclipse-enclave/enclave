@@ -37,6 +37,10 @@ func (v Variant) Valid() bool {
 
 func (v Variant) Binary() string { return string(v) }
 
+// launcherHint tells users how to get the host CLI launcher. Package installs
+// such as the .deb do not create it.
+const launcherHint = `install the CLI launcher: start the Theia IDE AppImage, which offers to install it, or run "Theia IDE: Create CLI Launcher" from within the IDE`
+
 // containerNamePattern restricts attach-container values to Docker-legal
 // container names. This guards against argv injection if a container name
 // ever flows in from an untrusted source.
@@ -105,7 +109,7 @@ func Launch(variant Variant, containerName string, preferences map[string]any, l
 
 	bin, err := exec.LookPath(variant.Binary())
 	if err != nil {
-		return fail(fmt.Errorf("%s not found on PATH: %w", variant.Binary(), err))
+		return fail(fmt.Errorf("%s not found on PATH: %w; %s", variant.Binary(), err, launcherHint))
 	}
 	args, err := BuildArgs(containerName, preferences)
 	if err != nil {

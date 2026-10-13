@@ -110,6 +110,19 @@ func TestLogPath(t *testing.T) {
 	}
 }
 
+func TestLaunch_MissingBinaryHintsAtCLILauncher(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	err := Launch(VariantTheiaNext, "enclave-theia-next-aaaaaaaa-main", nil, "")
+	if err == nil {
+		t.Fatal("Launch: got nil error, want binary not found")
+	}
+	for _, want := range []string{"theia-next not found on PATH", "Create CLI Launcher"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("Launch error %q does not contain %q", err, want)
+		}
+	}
+}
+
 func TestLaunch_UnsupportedVariant(t *testing.T) {
 	err := Launch(Variant("emacs"), "enclave-claude-aaaaaaaa-main", nil, "")
 	if err == nil || !strings.Contains(err.Error(), "unsupported") {

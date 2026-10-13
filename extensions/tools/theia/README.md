@@ -7,6 +7,14 @@ The IDE process lives on the host; the container provides the dev environment
 that Theia connects into. Theia's AI features call out through the enclave
 gateway, so the same secret-injection and allowlist rules apply.
 
+## Prerequisites
+
+The `theia` CLI launcher must be on the host `PATH`. Package installs such as
+the .deb do not create it. Download [Theia IDE](https://theia-ide.org/) and start the AppImage,
+which offers to install the launcher, or run `Theia IDE: Create CLI Launcher`
+from within the IDE. Without the launcher the container still starts, but the
+IDE does not open.
+
 ## Usage
 
 ```bash

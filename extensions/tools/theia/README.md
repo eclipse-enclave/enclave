@@ -22,11 +22,18 @@ when exactly one enclave container is running).
 
 ## Building Theia in the Container
 
-The default image can build Theia itself (`npm ci`, `npm run build`): the
-`native-build-deps` feature provides the headers `native-keymap` and `keytar`
-need. This tool's allowlist includes `electronjs.org`, so `@electron/rebuild`
-can download Electron headers, and `schemastore.org`, so `@theia/core` can
-download the JSON schema catalog.
+To build Theia itself in the container (`npm ci`, `npm run build`), enable the
+opt-in `native-build-deps` feature for this tool. It provides the headers
+`native-keymap` and `keytar` need. Add this to `~/.config/enclave/config.json`
+and start the next session with `--rebuild`:
+
+```json
+{ "tool_overrides": { "theia": { "features": ["+native-build-deps"] } } }
+```
+
+This tool's allowlist includes `electronjs.org`, so `@electron/rebuild` can
+download Electron headers, and `schemastore.org`, so `@theia/core` can download
+the JSON schema catalog.
 
 ## Configuration
 

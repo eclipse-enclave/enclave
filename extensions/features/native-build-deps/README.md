@@ -4,7 +4,19 @@ System headers that native Node.js modules link against at `npm install` time.
 The base image already ships the compiler toolchain (`build-essential`,
 `pkg-config`, `python3`); this feature adds the libraries some modules probe
 for with `pkg-config`, for example `native-keymap` and `keytar` in Eclipse
-Theia and other Electron apps. Enabled by default.
+Theia and other Electron apps. Opt-in (disabled by default).
+
+To enable it only for the Theia tools, add this to
+`~/.config/enclave/config.json`:
+
+```json
+{
+  "tool_overrides": {
+    "theia": { "features": ["+native-build-deps"] },
+    "theia-next": { "features": ["+native-build-deps"] }
+  }
+}
+```
 
 **Priority**: 75
 

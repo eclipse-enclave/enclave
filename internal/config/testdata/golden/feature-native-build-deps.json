@@ -8,6 +8,5 @@
     "libxkbfile-dev",
     "libsecret-1-dev"
   ],
-  "default_enabled": true,
   "priority": 75
 }

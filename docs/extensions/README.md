@@ -746,7 +746,7 @@ The next time you run `./enclave --rebuild`, only the specified features will be
 
 **Available features:** `devtools`, `native-build-deps`, `github-cli`, `gitlab-cli`, `node-dev`, `playwright`, `python-dev`, `debug-tools`, `shell-extras`
 
-**Opt-in features (not installed unless explicitly listed):** `debug-tools`, `gitlab-cli`, `playwright`, `shell-extras`
+**Opt-in features (not installed unless explicitly listed):** `debug-tools`, `gitlab-cli`, `native-build-deps`, `playwright`, `shell-extras`
 
 ### Installation Order
 
@@ -802,7 +802,7 @@ enable the feature.
 | `gitlab-cli` | 50 | GitLab CLI (glab) (opt-in) |
 | `node-dev` | 70 | Node.js dev tools: typescript, eslint, prettier |
 | `python-dev` | 70 | Python dev tools: black, ruff, mypy, pytest |
-| `native-build-deps` | 75 | Headers for native Node.js modules: libx11, libxkbfile, libsecret |
+| `native-build-deps` | 75 | Headers for native Node.js modules: libx11, libxkbfile, libsecret (opt-in) |
 | `playwright` | 75 | Playwright browsers and MCP server for UI testing (opt-in) |
 | `debug-tools` | 80 | Debug tools: gdb, strace, ltrace, tcpdump (opt-in) |
 | `shell-extras` | 90 | Shell enhancements: zsh, oh-my-zsh, direnv (opt-in) |
@@ -990,10 +990,10 @@ eslint --version
 vim --version
 rg --version       # ripgrep
 
+# Opt-in features (if enabled):
 # Native build headers (native-build-deps feature)
 pkg-config --modversion x11 xkbfile libsecret-1
 
-# Opt-in features (if enabled):
 # GitLab CLI (gitlab-cli feature)
 glab --version
 

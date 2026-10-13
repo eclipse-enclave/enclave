@@ -4,8 +4,10 @@ Concise notes for contributors working on the enclave codebase.
 
 ## Requirements
 
-- Go 1.24 or newer. CI and releases build with the `toolchain` version in
-  `go.mod`, which the `go` command downloads when the local Go is older.
+- Go 1.24 or newer. Releases and most CI jobs build with the `toolchain`
+  version in `go.mod`, which the `go` command downloads when the local Go is
+  older. A separate CI job builds and tests with the exact `go` directive
+  version and `GOTOOLCHAIN=local`.
 - Docker daemon running (for runtime testing)
 - Linux or macOS host. Native Windows is unsupported; use WSL2, where the Linux
   instructions apply. `make cross-build` compiles every published cross-target:
@@ -44,9 +46,9 @@ without that check.
 
 Package builds need network access: `go mod vendor` fetches the modules, and a
 distribution Go older than the `toolchain` in `go.mod` downloads that
-toolchain and builds with it. The Go 1.24 floor is still enforced: the `go`
-directive fixes the language version, and `go vet` in `make lint` rejects
-standard-library APIs newer than it.
+toolchain and builds with it. The `go` directive fixes the language version,
+`go vet` in `make lint` rejects standard-library APIs newer than it, and CI
+builds and tests with the minimum Go version without toolchain switching.
 
 Run tests:
 

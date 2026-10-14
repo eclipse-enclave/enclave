@@ -8,8 +8,10 @@
 package oauthbroker
 
 import (
+	"encoding/base64"
 	"net/http"
 	"path"
+	"slices"
 	"strings"
 )
 
@@ -53,6 +55,11 @@ func (b *githubBroker) roundTrip(req *http.Request, transport, exchange http.Rou
 			basicUser, handle = username, password
 		}
 	}
+	if slices.ContainsFunc(releasedSecrets(req.Context()), func(secret string) bool { return strings.Contains(values[0], secret) }) {
+		// A host-configured secret the proxy released by a declared rule; the
+		// common path guards it.
+		return nil, false, nil
+	}
 	if !strings.HasPrefix(handle, githubHandlePrefix) {
 		if githubHost(req.URL.Hostname()) || githubHost(req.Host) {
 			return nil, true, ErrDenied
@@ -70,10 +77,7 @@ func (b *githubBroker) roundTrip(req *http.Request, transport, exchange http.Rou
 		return nil, true, ErrDenied
 	}
 	outgoing := req.Clone(req.Context())
-	outgoing.Header.Del("Authorization")
-	if containsHandle(outgoing) {
-		return nil, true, ErrDenied
-	}
+	var secrets []string
 	err := b.locked(func() error {
 		g, err := b.readGrant()
 		if err != nil {
@@ -95,6 +99,8 @@ func (b *githubBroker) roundTrip(req *http.Request, transport, exchange http.Rou
 			} else {
 				outgoing.Header.Set("Authorization", "Bearer "+account.Token)
 			}
+			// A reflected Basic header carries the token encoded.
+			secrets = []string{account.Token, base64.StdEncoding.EncodeToString([]byte(basicUser + ":" + account.Token))}
 			return nil
 		}
 		return ErrDenied
@@ -102,7 +108,7 @@ func (b *githubBroker) roundTrip(req *http.Request, transport, exchange http.Rou
 	if err != nil {
 		return nil, true, err
 	}
-	resp, err := transport.RoundTrip(outgoing)
+	resp, err := release(req, outgoing, "Authorization", transport, secrets...)
 	return resp, true, err
 }
 

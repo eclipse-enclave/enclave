@@ -13,6 +13,7 @@ import (
 	"io"
 	"mime"
 	"net/http"
+	"path"
 	"slices"
 	"strings"
 
@@ -130,6 +131,17 @@ var providers = []provider{
 		contentPath: func(host, _ string) bool { return host != "github.com" },
 		patterns:    tokenFields,
 	},
+}
+
+// forbids reports whether req targets one of the provider's credential
+// endpoints. Paths are cleaned, so repeated or dot segments cannot hide one.
+func (p *provider) forbids(req *http.Request) bool {
+	return p.credentialPath(protectedHost(req.URL.Hostname()), path.Clean("/"+req.URL.Path))
+}
+
+// queryCarries reports an API key in the provider's credential parameter.
+func (p *provider) queryCarries(req *http.Request) bool {
+	return p.queryCredential != "" && req.URL.Query().Has(p.queryCredential)
 }
 
 func providerFor(host string) *provider {

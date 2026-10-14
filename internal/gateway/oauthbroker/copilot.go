@@ -143,10 +143,6 @@ func (a copilotAdapter) roundTrip(req *http.Request, transport, exchange http.Ro
 		return nil, true, ErrDenied
 	}
 	outgoing := req.Clone(req.Context())
-	outgoing.Header.Del("Authorization")
-	if containsHandle(outgoing) {
-		return nil, true, ErrDenied
-	}
 	var token string
 	err := b.locked(func() error {
 		g, err := b.readCopilotGrant()
@@ -166,7 +162,7 @@ func (a copilotAdapter) roundTrip(req *http.Request, transport, exchange http.Ro
 		return nil, true, err
 	}
 	outgoing.Header.Set("Authorization", "Bearer "+token)
-	response, err := mediate(outgoing, transport, token)
+	response, err := release(req, outgoing, "Authorization", transport, token)
 	return response, true, err
 }
 

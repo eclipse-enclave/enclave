@@ -247,10 +247,6 @@ func (a openaiAdapter) roundTrip(req *http.Request, transport, exchange http.Rou
 
 func (b *Broker) openaiRelease(req *http.Request, transport http.RoundTripper) (*http.Response, error) {
 	outgoing := req.Clone(req.Context())
-	outgoing.Header.Del("Authorization")
-	if containsHandle(outgoing) {
-		return nil, ErrDenied
-	}
 	var secrets []string
 	err := b.locked(func() error {
 		g, err := b.readOpenAIGrant()
@@ -273,7 +269,7 @@ func (b *Broker) openaiRelease(req *http.Request, transport http.RoundTripper) (
 	if err != nil {
 		return nil, err
 	}
-	return mediate(outgoing, transport, secrets...)
+	return release(req, outgoing, "Authorization", transport, secrets...)
 }
 
 type openaiRequest struct {

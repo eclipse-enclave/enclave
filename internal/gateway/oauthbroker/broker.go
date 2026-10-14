@@ -16,6 +16,7 @@ import (
 	"net"
 	"net/http"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 )
@@ -94,25 +95,25 @@ func (b *Broker) RoundTrip(req *http.Request, transport, exchangeTransport http.
 		return nil, ErrDenied
 	}
 	p := b.requestProvider(req)
-	if p != nil && p.credentialPath(protectedHost(req.URL.Hostname()), req.URL.Path) {
+	if p != nil && p.forbids(req) {
 		return nil, ErrDenied
-	}
-	// Secrets the proxy released by declared rules are host-configured
-	// credentials, not captured grants; guard their reflection instead.
-	if released := releasedSecrets(req.Context()); len(released) != 0 {
-		stripped := withoutSecrets(req, released)
-		if containsHandle(stripped) || (p != nil && rawCredential(stripped)) {
-			return nil, ErrDenied
-		}
-		return mediateAs(p, req, transport, released...)
 	}
 	authorization := req.Header.Values("Authorization")
 	if !b.anthropic || len(authorization) != 1 || authorization[0] != "Bearer "+b.registry.Access || !releaseOrigin(req) {
+		// Secrets the proxy released by declared rules are host-configured
+		// credentials, not captured grants; guard their reflection instead.
+		if released := releasedSecrets(req.Context()); len(released) != 0 {
+			stripped := withoutSecrets(req, released)
+			if containsHandle(stripped) || (p != nil && (rawCredential(stripped) || p.queryCarries(stripped))) {
+				return nil, ErrDenied
+			}
+			return mediateAs(p, req, transport, released...)
+		}
 		// No secret is ever substituted in arbitrary headers, bodies or URLs.
 		// This also rejects handles from ended sessions, and raw credentials
 		// sent to a provider: a protected session authenticates there only
 		// through the gateway.
-		if containsHandle(req) || (p != nil && (carriesCredential(req) || (p.queryCredential != "" && req.URL.Query().Has(p.queryCredential)))) {
+		if containsHandle(req) || (p != nil && (carriesCredential(req) || p.queryCarries(req))) {
 			return nil, ErrDenied
 		}
 		if p != nil {
@@ -121,10 +122,6 @@ func (b *Broker) RoundTrip(req *http.Request, transport, exchangeTransport http.
 		return transport.RoundTrip(req)
 	}
 	outgoing := req.Clone(req.Context())
-	outgoing.Header.Del("Authorization")
-	if containsHandle(outgoing) {
-		return nil, ErrDenied
-	}
 	var secrets []string
 	err := b.locked(func() error {
 		g, err := b.readGrant()
@@ -147,7 +144,26 @@ func (b *Broker) RoundTrip(req *http.Request, transport, exchangeTransport http.
 	if err != nil {
 		return nil, err
 	}
-	return mediate(outgoing, transport, secrets...)
+	return release(req, outgoing, "Authorization", transport, secrets...)
+}
+
+// release sends outgoing, in which an adapter replaced the handle that req
+// carried in header with the real credential. Every release is refused at its
+// provider's credential endpoints and beside any other raw credential, and its
+// response is guarded against reflecting the released credentials, including
+// secrets the proxy released into the request by declared rules.
+func release(req, outgoing *http.Request, header string, transport http.RoundTripper, secrets ...string) (*http.Response, error) {
+	p := requestProvider(req)
+	if p != nil && p.forbids(req) {
+		return nil, ErrDenied
+	}
+	released := releasedSecrets(req.Context())
+	rest := withoutSecrets(req, released)
+	rest.Header.Del(header)
+	if containsHandle(rest) || (p != nil && (rawCredential(rest) || p.queryCarries(rest))) {
+		return nil, ErrDenied
+	}
+	return mediateAs(p, outgoing, transport, append(slices.Clone(secrets), released...)...)
 }
 
 // ContainsHandle conservatively detects credential prefixes for rejection and

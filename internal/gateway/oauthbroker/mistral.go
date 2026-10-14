@@ -133,10 +133,6 @@ func (a mistralAdapter) roundTrip(req *http.Request, transport, exchange http.Ro
 		return nil, true, ErrDenied
 	}
 	outgoing := req.Clone(req.Context())
-	outgoing.Header.Del("Authorization")
-	if containsHandle(outgoing) {
-		return nil, true, ErrDenied
-	}
 	var key string
 	err := b.locked(func() error {
 		g, err := b.readMistralGrant()
@@ -156,7 +152,7 @@ func (a mistralAdapter) roundTrip(req *http.Request, transport, exchange http.Ro
 		return nil, true, err
 	}
 	outgoing.Header.Set("Authorization", "Bearer "+key)
-	response, err := mediate(outgoing, transport, key)
+	response, err := release(req, outgoing, "Authorization", transport, key)
 	return response, true, err
 }
 

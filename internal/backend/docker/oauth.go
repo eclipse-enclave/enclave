@@ -63,12 +63,8 @@ func (b *Backend) PrepareAuthSession(ctx context.Context, key backend.StoreKey, 
 	if _, known := protectedauth.Lookup(key.Owner); protected && !known {
 		return nil, fmt.Errorf("protected auth does not support tool %s", key.Owner)
 	}
-	if protected {
-		uid, uidErr := strconv.Atoi(b.opts.Host.UID)
-		gid, gidErr := strconv.Atoi(b.opts.Host.GID)
-		if uidErr != nil || gidErr != nil || uid <= 0 || gid < 0 {
-			return nil, errors.New("protected OAuth requires a non-root invoking host user")
-		}
+	if protected && !b.nonRootHostUser() {
+		return nil, errors.New("protected OAuth requires a non-root invoking host user")
 	}
 	var nonce [32]byte
 	if _, err := rand.Read(nonce[:]); err != nil {
@@ -656,7 +652,7 @@ func (check *authInspection) available(dir string, owners []hoststore.IdentityRe
 					continue
 				}
 				for _, trusted := range paths {
-					if pathsOverlap(source, trusted) {
+					if hoststore.PathsOverlap(source, trusted) {
 						// Stopped containers can restart with their existing binds.
 						return false, nil
 					}
@@ -809,9 +805,7 @@ func (b *Backend) validateProtectedMounts(req backend.Request, spec runSpec) err
 	if err := b.validateProtectedFeatureMounts(req, spec); err != nil {
 		return err
 	}
-	uid, uidErr := strconv.Atoi(b.opts.Host.UID)
-	gid, gidErr := strconv.Atoi(b.opts.Host.GID)
-	if uidErr != nil || gidErr != nil || uid <= 0 || gid < 0 || req.User != b.opts.Host.UID+":"+b.opts.Host.GID {
+	if !b.nonRootHostUser() || req.User != b.opts.Host.UID+":"+b.opts.Host.GID {
 		return errors.New("protected OAuth workload must explicitly run as the non-root host UID and GID")
 	}
 	if len(b.opts.DevcontainerRunArgs) != 0 || req.Security.Admin || req.RuntimeUIDRemap {
@@ -820,8 +814,12 @@ func (b *Backend) validateProtectedMounts(req backend.Request, spec runSpec) err
 	return nil
 }
 
-func pathsOverlap(first, second string) bool {
-	return util.PathWithin(first, second) || util.PathWithin(second, first)
+// nonRootHostUser reports whether the invoking host user, which protected
+// workloads run as, has a numeric non-root UID and GID.
+func (b *Backend) nonRootHostUser() bool {
+	uid, uidErr := strconv.Atoi(b.opts.Host.UID)
+	gid, gidErr := strconv.Atoi(b.opts.Host.GID)
+	return uidErr == nil && gidErr == nil && uid > 0 && gid >= 0
 }
 
 // The caller holds the cross-engine admission lock until container start.

@@ -259,7 +259,7 @@ func (b *Backend) validateProtectedFeatureMounts(req backend.Request, spec runSp
 	}
 	mounted := false
 	for _, mount := range spec.hostConfig.Mounts {
-		if !pathsOverlap(path.Clean(mount.Target), target) {
+		if !hoststore.PathsOverlap(path.Clean(mount.Target), target) {
 			continue
 		}
 		if mounted || mount.Type != "bind" || mount.Source != view || path.Clean(mount.Target) != target {

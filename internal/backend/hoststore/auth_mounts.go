@@ -57,10 +57,10 @@ func ValidateAuthMounts(home string, sources, views []string) ([]string, error) 
 			return nil, fmt.Errorf("cannot verify workload auth mount %s: %w", original, err)
 		}
 		allowedView := slices.ContainsFunc(views, func(view string) bool { return util.PathWithin(view, source) })
-		if pathsOverlap(source, lockRoot) || (pathsOverlap(source, sessionRoot) && !allowedView) {
+		if PathsOverlap(source, lockRoot) || (PathsOverlap(source, sessionRoot) && !allowedView) {
 			return nil, fmt.Errorf("workload mount overlaps host-only authentication control state: %s", original)
 		}
-		if protected && pathsOverlap(source, featureRoot) {
+		if protected && PathsOverlap(source, featureRoot) {
 			if util.PathWithin(foldCase(source), foldCase(featureRoot)) {
 				return nil, fmt.Errorf("workload mount contains protected feature identities: %s", original)
 			}
@@ -82,7 +82,7 @@ func ValidateAuthMounts(home string, sources, views []string) ([]string, error) 
 				}
 			}
 		}
-		if protected && pathsOverlap(source, authRoot) {
+		if protected && PathsOverlap(source, authRoot) {
 			if util.PathWithin(foldCase(source), foldCase(authRoot)) {
 				return nil, fmt.Errorf("workload mount contains protected authentication identities: %s", original)
 			}
@@ -111,7 +111,9 @@ func ValidateAuthMounts(home string, sources, views []string) ([]string, error) 
 	return checked, nil
 }
 
-func pathsOverlap(first, second string) bool {
+// PathsOverlap reports whether either path contains the other, folding case
+// where volumes usually ignore it.
+func PathsOverlap(first, second string) bool {
 	first, second = foldCase(first), foldCase(second)
 	return util.PathWithin(first, second) || util.PathWithin(second, first)
 }

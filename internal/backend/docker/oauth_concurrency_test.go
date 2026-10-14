@@ -411,7 +411,7 @@ func TestInaccessibleBindAliasStillFailsClosedWithContext(t *testing.T) {
 	if err := os.Symlink(dir, alias); err != nil {
 		t.Fatal(err)
 	}
-	if pathsOverlap(alias, dir) {
+	if hoststore.PathsOverlap(alias, dir) {
 		t.Fatal("fixture must appear lexically disjoint")
 	}
 	if err := os.Chmod(hidden, 0); err != nil {

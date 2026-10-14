@@ -23,7 +23,8 @@ container still gets a writable bind mount at `~/.claude`, but its native
 `.credentials.json` contains handles, not the captured tokens. The real grant
 and handle registry are never workload-mounted. Protected runs use the
 integrity-pinned npm Claude **2.1.63**, independently of the normal client, with
-automatic updates disabled. Startup also requires a private readiness attestation
+automatic updates disabled. `enclave exec` into a protected session selects the
+same pinned clients and fails if they are missing. Startup also requires a private readiness attestation
 from the initialized Claude/GitHub brokers before launching the workload; an
 older gateway image is rejected even with `--no-rebuild`. Stop existing protected
 sessions from older builds and rerun without `--no-rebuild` before sharing their

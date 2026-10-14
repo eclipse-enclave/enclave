@@ -911,6 +911,7 @@ func TestNeutralizeExitError(t *testing.T) {
 // seam: the command's non-zero status must surface as *backend.ExitError so
 // the CLI can exit with the same code.
 func TestExecPreservesExitStatus(t *testing.T) {
+	stubCLI(t, "docker", `[ "$1 $2" = "container inspect" ] && printf '%s\n' '{"Name":"/missing-session","Config":{}}'`+"\n")
 	orig := execInteractive
 	execInteractive = func(context.Context, string, []string, string, bool) error {
 		return &dockercmd.ExitError{Code: 7}

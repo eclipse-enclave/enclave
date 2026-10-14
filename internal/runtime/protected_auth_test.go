@@ -303,14 +303,14 @@ func TestProtectedClientPinsStayConsistent(t *testing.T) {
 			"extensions/tools/claude/entrypoint.d/setup.sh": {
 				"claude-%s/bin", `!= "%s (Claude Code)"`,
 			},
-			"internal/runtime/command_builder.go": {"claude-%s/bin/claude"},
+			"internal/protectedclient/protectedclient.go": {"claude-%s/bin/claude", `!= "%s (Claude Code)"`},
 		}},
 		{"2.87.3", map[string][]string{
 			"extensions/features/github-cli/install.sh": {"protected_version=%s"},
 			"extensions/features/github-cli/feature-entrypoint.d/setup.sh": {
 				"/opt/enclave/gh-%s/bin/gh", `"gh version %s "*`,
 			},
-			"internal/runtime/command_builder.go": {
+			"internal/protectedclient/protectedclient.go": {
 				"/opt/enclave/gh-%s/bin/gh", "'gh version %s '*",
 			},
 		}},

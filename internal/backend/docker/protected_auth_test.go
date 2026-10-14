@@ -151,3 +151,69 @@ func TestAuthSyncNamesProtectedConfigSource(t *testing.T) {
 		t.Fatalf("launched helper with protected config source: %v", got)
 	}
 }
+
+func TestExecSelectsTargetSessionPinnedClients(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		labels      map[string]string
+		env         []string
+		inspectFail bool
+		wantClaude  bool
+		wantGitHub  bool
+		wantError   bool
+	}{
+		{name: "ordinary session", env: []string{"HOME=/home/agent"}},
+		{name: "protected Claude", labels: map[string]string{authProtectedLabel: "true"}, env: []string{"ENCLAVE_PROTECTED_AUTH=1"}, wantClaude: true},
+		{name: "protected Claude and GitHub", labels: map[string]string{authProtectedLabel: "true"}, env: []string{"ENCLAVE_PROTECTED_AUTH=1", model.EnvProtectedGitHub + "=1"}, wantClaude: true, wantGitHub: true},
+		{name: "protected label without client selection", labels: map[string]string{authProtectedLabel: "true"}, wantError: true},
+		{name: "uninspectable target", inspectFail: true, wantError: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			info, err := json.Marshal(dockercmd.InspectResponse{Name: "/session", Config: &dockercmd.ContainerConfig{Labels: tc.labels, Env: tc.env}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("STUB_INSPECT", string(info))
+			script := `[ "$1 $2" = "container inspect" ] && printf '%s\n' "$STUB_INSPECT"` + "\n"
+			if tc.inspectFail {
+				script = "echo 'Cannot connect to the Docker daemon' >&2\nexit 1\n"
+			}
+			stubCLI(t, "docker", script)
+			var execArgv []string
+			orig := execInteractive
+			execInteractive = func(_ context.Context, _ string, argv []string, _ string, _ bool) error {
+				execArgv = argv
+				return nil
+			}
+			t.Cleanup(func() { execInteractive = orig })
+
+			requested := []string{"gh", "auth", "status"}
+			err = New(Options{}).Exec(context.Background(), backend.SessionRef{Name: "session"}, backend.ExecRequest{Argv: requested, TTY: true}, backend.AttachIO{})
+			if tc.wantError {
+				if err == nil || execArgv != nil {
+					t.Fatalf("exec ran without verified client selection: err=%v argv=%v", err, execArgv)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !tc.wantClaude && !tc.wantGitHub {
+				if strings.Join(execArgv, " ") != strings.Join(requested, " ") {
+					t.Fatalf("ordinary exec argv changed: %v", execArgv)
+				}
+				return
+			}
+			if len(execArgv) != 4+len(requested) || execArgv[0] != "bash" || strings.Join(execArgv[4:], " ") != strings.Join(requested, " ") {
+				t.Fatalf("protected exec argv: %v", execArgv)
+			}
+			setup := execArgv[2]
+			if got := strings.Contains(setup, "/home/agent/.local/share/enclave/claude-2.1.63/bin"); got != tc.wantClaude {
+				t.Errorf("pinned Claude selected=%v, want %v", got, tc.wantClaude)
+			}
+			if got := strings.Contains(setup, "/opt/enclave/gh-2.87.3/bin"); got != tc.wantGitHub {
+				t.Errorf("pinned GitHub CLI selected=%v, want %v", got, tc.wantGitHub)
+			}
+		})
+	}
+}

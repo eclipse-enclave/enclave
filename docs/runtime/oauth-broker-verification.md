@@ -175,7 +175,9 @@ the official Linux release archives against these SHA-256 values:
 
 The runtime request checks this binary independently of image-provided hooks;
 `--no-rebuild` with an old image missing the pin fails at startup. Include that
-case when testing ordinary agent and shell starts.
+case when testing ordinary agent and shell starts. `enclave exec` derives the
+same selection from the target session's creation environment; verify that an
+exec shell, direct `gh` and direct `claude` resolve to the pinned clients.
 
 Offline validation passed with the official **2.87.3 Linux amd64** archive after
 verifying the SHA-256 above. In an isolated config directory containing a

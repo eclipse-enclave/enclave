@@ -105,7 +105,7 @@ func ensureExistingRuntimeImageWith(imageName string, exists func(context.Contex
 	if ok {
 		return nil
 	}
-	return fmt.Errorf("runtime image %q does not exist locally; rerun without --no-rebuild or pass --rebuild", imageName)
+	return fmt.Errorf("runtime image %q does not exist locally and builds are disabled (--no-rebuild or %s); re-enable builds to create it", imageName, model.EnvNoRebuild)
 }
 
 type imageInfo struct {
@@ -507,8 +507,11 @@ func resolveRuntimeImageBuildPlan(paths model.Paths, buildCfg buildConfig, opts 
 	if err != nil {
 		return runtimeImageBuildPlan{}, err
 	}
-	resolver := func(tool string) automaticToolUpdateResult {
-		return resolveAutomaticToolUpdate(paths, buildCfg, home, tool, probe)
+	var resolver automaticToolUpdateResolver
+	if !opts.NoRebuild {
+		resolver = func(tool string) automaticToolUpdateResult {
+			return resolveAutomaticToolUpdate(paths, buildCfg, home, tool, probe)
+		}
 	}
 	agentUpdates, err := planAgentUpdatesForTools(forceAll, selection.Tools, home, now, resolver)
 	if err != nil {

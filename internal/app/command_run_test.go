@@ -99,7 +99,7 @@ func TestEnsureExistingRuntimeImageWith(t *testing.T) {
 			t.Fatal("expected missing-image error, got nil")
 		}
 		msg := err.Error()
-		if !strings.Contains(msg, "does not exist locally") || !strings.Contains(msg, "--no-rebuild") || !strings.Contains(msg, "--rebuild") {
+		if !strings.Contains(msg, "does not exist locally") || !strings.Contains(msg, "--no-rebuild") || !strings.Contains(msg, model.EnvNoRebuild) {
 			t.Fatalf("unexpected error message: %q", msg)
 		}
 	})

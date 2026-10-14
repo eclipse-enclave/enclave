@@ -23,6 +23,38 @@ import (
 	"enclave/internal/model"
 )
 
+func TestRuntimeImageBuildPlanNoRebuildSkipsUpdateProbe(t *testing.T) {
+	t.Setenv(model.EnvAgentUpdateIntervalHours, "0")
+	paths := writeTestCodexToolPaths(t, true)
+	home := t.TempDir()
+	now := time.Date(2026, time.September, 30, 12, 0, 0, 0, time.UTC)
+	existing := "2026-09-29T12:00:00Z"
+	writeTestAgentUpdateStamp(t, home, existing, now.Add(-24*time.Hour))
+
+	probeCalls := 0
+	probe := func(model.Paths, buildConfig, string) (string, bool, error) {
+		probeCalls++
+		return "new-version", true, nil
+	}
+	for _, noRebuild := range []bool{true, false} {
+		opts := model.BuildOptions{Slim: true, NoRebuild: noRebuild}
+		plan, err := resolveRuntimeImageBuildPlan(paths, buildConfig{ImageName: "enclave:test"}, opts, "codex", home, false, now, probe)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if noRebuild {
+			if probeCalls != 0 || plan.AgentUpdates.NeedsRebuild || len(plan.AgentUpdates.PendingWrites) != 0 {
+				t.Fatalf("no-rebuild planned an online update: calls=%d plan=%+v", probeCalls, plan.AgentUpdates)
+			}
+			if plan.AgentUpdates.Stamps["codex"] != existing {
+				t.Fatal("no-rebuild must preserve the current agent update stamp")
+			}
+		} else if probeCalls != 1 || !plan.AgentUpdates.NeedsRebuild {
+			t.Fatalf("normal builds must still probe for updates: calls=%d plan=%+v", probeCalls, plan.AgentUpdates)
+		}
+	}
+}
+
 func TestPlanAgentUpdatesForTools(t *testing.T) {
 	now := time.Date(2026, time.March, 20, 12, 0, 0, 0, time.UTC)
 

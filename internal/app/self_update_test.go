@@ -29,6 +29,7 @@ import (
 const fakeLatestCommit = "1234567890abcdef1234567890abcdef12345678"
 
 type fakeSelfUpdater struct {
+	channel         string
 	unsupported     error
 	upToDate        bool
 	checkErr        error
@@ -45,12 +46,12 @@ func (f *fakeSelfUpdater) Check(context.Context) (selfupdate.Status, error) {
 	if f.checkErr != nil {
 		return selfupdate.Status{}, f.checkErr
 	}
-	return selfupdate.Status{CurrentCommit: "abcdef0", LatestCommit: fakeLatestCommit, UpdateAvailable: !f.upToDate}, nil
+	return selfupdate.Status{Channel: "rolling", Current: "abcdef0", Latest: fakeLatestCommit, UpdateAvailable: !f.upToDate}, nil
 }
 
-func (f *fakeSelfUpdater) Install(_ context.Context, expectedCommit string) (string, error) {
+func (f *fakeSelfUpdater) Install(_ context.Context, latest string) (string, error) {
 	f.installs++
-	f.installedCommit = expectedCommit
+	f.installedCommit = latest
 	if f.installErr != nil {
 		return "", f.installErr
 	}
@@ -64,7 +65,10 @@ func useFakeSelfUpdater(t *testing.T, fake *fakeSelfUpdater) string {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	previous := newSelfUpdater
-	newSelfUpdater = func() selfUpdater { return fake }
+	newSelfUpdater = func(channel string) selfUpdater {
+		fake.channel = channel
+		return fake
+	}
 	t.Cleanup(func() { newSelfUpdater = previous })
 	return home
 }
@@ -156,7 +160,7 @@ func TestAutomaticSelfUpdateInstallsWhenOptedIn(t *testing.T) {
 	if stdout != "" {
 		t.Fatalf("update progress written to stdout: %q", stdout)
 	}
-	if !strings.Contains(stderr, "Updated enclave to rolling commit 12345678") {
+	if !strings.Contains(stderr, "Updated enclave to rolling build 12345678") {
 		t.Fatalf("stderr lacks the update result: %q", stderr)
 	}
 }
@@ -256,16 +260,17 @@ func TestRunSelfUpdate(t *testing.T) {
 	})
 }
 
-func TestShortCommit(t *testing.T) {
+func TestShortBuild(t *testing.T) {
 	for commit, want := range map[string]string{
 		"":                          "unknown",
 		"272b035":                   "272b035",
 		"272b035-dirty":             "272b035-dirty",
 		fakeLatestCommit:            "12345678",
 		fakeLatestCommit + "-dirty": "12345678-dirty",
+		"1.10.0-rc.1":               "1.10.0-rc.1",
 	} {
-		if got := shortCommit(commit); got != want {
-			t.Errorf("shortCommit(%q) = %q, want %q", commit, got, want)
+		if got := shortBuild(commit); got != want {
+			t.Errorf("shortBuild(%q) = %q, want %q", commit, got, want)
 		}
 	}
 }
@@ -314,4 +319,50 @@ func TestAutomaticSelfUpdateDebugOutputStaysOffStdout(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestAutomaticSelfUpdateUsesConfiguredChannel(t *testing.T) {
+	fake := &fakeSelfUpdater{upToDate: true}
+	useFakeSelfUpdater(t, fake)
+
+	maybeAutomaticSelfUpdate(cli.Result{Action: "run"}, config.Defaults{UpdateChannel: "stable"})
+	if fake.channel != "stable" {
+		t.Fatalf("updater channel = %q, want the configured stable channel", fake.channel)
+	}
+}
+
+func TestRunSelfUpdateReadsChannelFromGlobalConfig(t *testing.T) {
+	writeGlobalConfig := func(t *testing.T, home string, content string) {
+		t.Helper()
+		path := filepath.Join(home, ".config", "enclave", "config.json")
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	t.Run("configured", func(t *testing.T) {
+		fake := &fakeSelfUpdater{upToDate: true}
+		home := useFakeSelfUpdater(t, fake)
+		writeGlobalConfig(t, home, `{"update_channel":"stable"}`)
+		captureOutput(t, func() { runSelfUpdate() })
+		if fake.channel != "stable" {
+			t.Fatalf("updater channel = %q, want stable", fake.channel)
+		}
+	})
+	t.Run("broken config falls back to the build channel", func(t *testing.T) {
+		fake := &fakeSelfUpdater{upToDate: true}
+		home := useFakeSelfUpdater(t, fake)
+		writeGlobalConfig(t, home, `{"update_channel":`)
+		var code int
+		_, stderr := captureOutput(t, func() { code = runSelfUpdate() })
+		if code != 0 || fake.channel != "" {
+			t.Fatalf("code = %d, channel = %q; want an update from the build channel", code, fake.channel)
+		}
+		if !strings.Contains(stderr, "config.json") {
+			t.Fatalf("stderr does not name the broken config: %q", stderr)
+		}
+	})
 }

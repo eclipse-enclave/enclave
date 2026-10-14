@@ -32,14 +32,16 @@ const (
 type selfUpdater interface {
 	Supported() error
 	Check(ctx context.Context) (selfupdate.Status, error)
-	Install(ctx context.Context, expectedCommit string) (string, error)
+	Install(ctx context.Context, latest string) (string, error)
 }
 
-// newSelfUpdater is a variable so tests can substitute a fake release.
-var newSelfUpdater = func() selfUpdater { return selfupdate.New() }
+// newSelfUpdater returns an updater for the configured update_channel; empty
+// selects the channel the binary was published on. It is a variable so tests
+// can substitute a fake release.
+var newSelfUpdater = func(channel string) selfUpdater { return selfupdate.New(channel) }
 
 func runSelfUpdate() int {
-	updater := newSelfUpdater()
+	updater := newSelfUpdater(globalUpdateChannel())
 	if err := updater.Supported(); err != nil {
 		logx.Errorf("%v", err)
 		return 1
@@ -69,23 +71,38 @@ func runSelfUpdate() int {
 		return 1
 	}
 	if !status.UpdateAvailable {
-		logx.Infof("Enclave is up to date at commit %s.", shortCommit(status.LatestCommit))
+		logx.Infof("Enclave is up to date with the %s channel (%s).", status.Channel, shortBuild(status.Latest))
 		markSelfUpdateChecked(stamp)
 		return 0
 	}
 
-	logx.Infof("Downloading enclave rolling commit %s.", shortCommit(status.LatestCommit))
+	logx.Infof("Downloading enclave %s build %s.", status.Channel, shortBuild(status.Latest))
 	updateCtx, cancelUpdate := context.WithTimeout(context.Background(), selfUpdateInstallTimeout)
-	path, err := updater.Install(updateCtx, status.LatestCommit)
+	path, err := updater.Install(updateCtx, status.Latest)
 	cancelUpdate()
 	if err != nil {
 		logx.Errorf("Update enclave: %v", err)
-		logx.Infof("The updater does not elevate privileges; reinstall the rolling binary manually if %s is not writable.", executablePathForMessage())
+		logx.Infof("The updater does not elevate privileges; reinstall enclave manually if %s is not writable.", executablePathForMessage())
 		return 1
 	}
 	markSelfUpdateChecked(stamp)
-	logx.Successf("Updated enclave from commit %s to %s at %s. The new binary will be used on the next invocation.", shortCommit(status.CurrentCommit), shortCommit(status.LatestCommit), path)
+	logx.Successf("Updated enclave from %s to %s build %s at %s. The new binary will be used on the next invocation.", shortBuild(status.Current), status.Channel, shortBuild(status.Latest), path)
 	return 0
+}
+
+// globalUpdateChannel reads update_channel from the global config alone:
+// self-update runs before the project is resolved, and a broken config must
+// not keep a fixed binary from being installed.
+func globalUpdateChannel() string {
+	global, warnings, err := config.LoadGlobalDefaults()
+	if err != nil {
+		logx.Warnf("Ignoring the global config for this update: %v", err)
+		return ""
+	}
+	for _, warning := range warnings {
+		logx.Warnf(warning.Message)
+	}
+	return global.UpdateChannel
 }
 
 // maybeAutomaticSelfUpdate runs the daily update check before an ordinary
@@ -95,7 +112,7 @@ func maybeAutomaticSelfUpdate(parsed cli.Result, global config.Defaults) {
 	if !automaticSelfUpdateAllowed(parsed) {
 		return
 	}
-	updater := newSelfUpdater()
+	updater := newSelfUpdater(global.UpdateChannel)
 	if err := updater.Supported(); err != nil {
 		logx.DebugNoticef("Skipping enclave update check: %v", err)
 		return
@@ -135,19 +152,19 @@ func maybeAutomaticSelfUpdate(parsed cli.Result, global config.Defaults) {
 		return
 	}
 	if global.AutoUpdate == nil || !*global.AutoUpdate {
-		logx.Warnf("A different enclave rolling binary is available (%s; current %s). Run 'enclave self-update' or set \"auto_update\": true in the global config.", shortCommit(status.LatestCommit), shortCommit(status.CurrentCommit))
+		logx.Warnf("A different enclave %s build is available (%s; current %s). Run 'enclave self-update' or set \"auto_update\": true in the global config.", status.Channel, shortBuild(status.Latest), shortBuild(status.Current))
 		return
 	}
 
-	logx.Noticef("Updating enclave to rolling commit %s.", shortCommit(status.LatestCommit))
+	logx.Noticef("Updating enclave to %s build %s.", status.Channel, shortBuild(status.Latest))
 	updateCtx, cancelUpdate := context.WithTimeout(context.Background(), selfUpdateInstallTimeout)
-	path, err := updater.Install(updateCtx, status.LatestCommit)
+	path, err := updater.Install(updateCtx, status.Latest)
 	cancelUpdate()
 	if err != nil {
 		logx.Warnf("Automatic enclave update failed: %v. Run 'enclave self-update' to retry; the updater does not elevate privileges, so %s must be writable.", err, executablePathForMessage())
 		return
 	}
-	logx.Noticef("Updated enclave to rolling commit %s at %s. The new binary will be used on the next invocation.", shortCommit(status.LatestCommit), path)
+	logx.Noticef("Updated enclave to %s build %s at %s. The new binary will be used on the next invocation.", status.Channel, shortBuild(status.Latest), path)
 }
 
 func automaticSelfUpdateAllowed(parsed cli.Result) bool {
@@ -183,18 +200,23 @@ func writeSelfUpdateStamp(path string) error {
 	return util.WriteFileAtomic(path, []byte(time.Now().UTC().Format(time.RFC3339)+"\n"), 0o600)
 }
 
-func shortCommit(commit string) string {
-	if commit == "" {
+// shortBuild abbreviates a commit identifying a build; versions are kept.
+func shortBuild(build string) string {
+	if build == "" {
 		return "unknown"
 	}
-	base, dirty := strings.CutSuffix(commit, "-dirty")
-	if len(base) > 8 {
+	base, dirty := strings.CutSuffix(build, "-dirty")
+	if len(base) > 8 && isHex(base) {
 		base = base[:8]
 	}
 	if dirty {
 		return base + "-dirty"
 	}
 	return base
+}
+
+func isHex(value string) bool {
+	return strings.Trim(strings.ToLower(value), "0123456789abcdef") == ""
 }
 
 func executablePathForMessage() string {

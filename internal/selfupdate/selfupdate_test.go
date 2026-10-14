@@ -10,16 +10,19 @@ package selfupdate
 import (
 	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"enclave/internal/buildinfo"
+	"enclave/internal/model"
 )
 
 const (
@@ -69,13 +72,15 @@ func (r *testRelease) serve(t *testing.T) *httptest.Server {
 	return server
 }
 
+// newTestService returns a rolling binary updating from a rolling channel
+// that server publishes.
 func newTestService(server *httptest.Server, target string) *Service {
-	service := New()
-	service.refURL = server.URL + "/ref"
-	service.assetsURL = server.URL
+	service := New(model.UpdateChannelRolling)
+	service.sources[model.UpdateChannelRolling] = rollingSource{fetcher: service.fetcher, refURL: server.URL + "/ref", assetsURL: server.URL}
+	service.buildChannel = model.UpdateChannelRolling
 	service.goos = "linux"
 	service.goarch = "amd64"
-	service.current = buildinfo.Info{Version: rollingVersion, Commit: "abcdef0"}
+	service.current = buildinfo.Info{Version: "rolling", Commit: "abcdef0"}
 	service.executablePath = func() (string, error) { return target, nil }
 	service.externalAssets = func(string) (string, bool) { return "", false }
 	return service
@@ -222,15 +227,25 @@ func TestInstallFailuresPreserveExecutable(t *testing.T) {
 		{
 			name: "release moved during download",
 			setup: func(r *testRelease, _ *Service) {
+				// The release moves once Install has confirmed it and started
+				// downloading.
+				var lookups atomic.Int32
 				r.ref = func(w http.ResponseWriter, _ *http.Request) {
-					_, _ = fmt.Fprintf(w, `{"object":{"sha":%q,"type":"commit"}}`, otherCommit)
+					commit := testCommit
+					if lookups.Add(1) > 1 {
+						commit = otherCommit
+					}
+					_, _ = fmt.Fprintf(w, `{"object":{"sha":%q,"type":"commit"}}`, commit)
 				}
 			},
 			wantErr: "moved from 12345678 to abcdef01",
 		},
 		{
-			name:    "source build",
-			setup:   func(_ *testRelease, s *Service) { s.current.Version = "0.1.0" },
+			name: "source build",
+			setup: func(_ *testRelease, s *Service) {
+				s.buildChannel = ""
+				s.current.Version = "0.1.0"
+			},
 			wantErr: `version "0.1.0"`,
 		},
 		{
@@ -257,18 +272,24 @@ func TestInstallFailuresPreserveExecutable(t *testing.T) {
 	}
 }
 
-func TestSupportedRequiresStandaloneRollingBinary(t *testing.T) {
+func TestSupportedRequiresStandaloneReleaseBinary(t *testing.T) {
 	service := newTestService(newTestRelease(nil).serve(t), "/opt/enclave/enclave")
 	if err := service.Supported(); err != nil {
 		t.Fatalf("standalone rolling binary not supported: %v", err)
 	}
 
-	service.current.Version = "0.1.1~git.20261001.42.12345678"
+	service.buildChannel = ""
 	if err := service.Supported(); err == nil {
-		t.Fatal("package build was supported")
+		t.Fatal("package build without a channel stamp was supported")
 	}
 
-	service.current.Version = rollingVersion
+	service.buildChannel = model.UpdateChannelRolling
+	service.channel = "nightly"
+	if err := service.Supported(); err == nil {
+		t.Fatal("unknown update channel was supported")
+	}
+
+	service.channel = model.UpdateChannelRolling
 	var checkedExe string
 	service.externalAssets = func(exe string) (string, bool) {
 		checkedExe = exe
@@ -312,6 +333,66 @@ func TestInstallRemovesStaleUpdateDownloads(t *testing.T) {
 	}
 	if _, err := os.Stat(recent); err != nil {
 		t.Fatalf("recent download, possibly another install's, was removed: %v", err)
+	}
+}
+
+func TestTargetChannelDefaultsToBuildChannel(t *testing.T) {
+	for _, tc := range []struct{ configured, build, want string }{
+		{configured: "", build: "rolling", want: "rolling"},
+		{configured: "", build: "stable", want: "stable"},
+		{configured: "stable", build: "rolling", want: "stable"},
+		{configured: " rolling ", build: "stable", want: "rolling"},
+		{configured: "", build: "", want: ""},
+	} {
+		if got := targetChannel(tc.configured, tc.build); got != tc.want {
+			t.Errorf("targetChannel(%q, %q) = %q, want %q", tc.configured, tc.build, got, tc.want)
+		}
+	}
+}
+
+func TestStableChannelHasNoSourceYet(t *testing.T) {
+	target := writeExecutable(t, 0o755)
+	service := newTestService(newTestRelease(nil).serve(t), target)
+	service.channel = model.UpdateChannelStable
+
+	if err := service.Supported(); err != nil {
+		t.Fatalf("a rolling binary cannot select the stable channel: %v", err)
+	}
+	if _, err := service.Check(context.Background()); !errors.Is(err, ErrChannelUnavailable) {
+		t.Fatalf("Check error = %v, want ErrChannelUnavailable", err)
+	}
+	if _, err := service.Install(context.Background(), testCommit); !errors.Is(err, ErrChannelUnavailable) {
+		t.Fatalf("Install error = %v, want ErrChannelUnavailable", err)
+	}
+	assertUnchanged(t, target)
+}
+
+func TestSwitchingChannelsInstallsTheOtherChannelsBuild(t *testing.T) {
+	newBinary := []byte("stable enclave binary")
+	server := newTestRelease(newBinary).serve(t)
+	target := writeExecutable(t, 0o755)
+	service := newTestService(server, target)
+	// The stable binary is built from the same commit as the running rolling
+	// one, yet it is a different binary and must still be offered.
+	service.current.Commit = testCommit
+	service.sources[model.UpdateChannelStable] = service.sources[model.UpdateChannelRolling]
+	service.channel = model.UpdateChannelStable
+
+	status, err := service.Check(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !status.UpdateAvailable || status.Channel != model.UpdateChannelStable {
+		t.Fatalf("status = %+v, want an available stable update", status)
+	}
+	if status.Current != testCommit {
+		t.Fatalf("current build labelled %q, want its commit", status.Current)
+	}
+	if _, err := service.Install(context.Background(), status.Latest); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(target); string(got) != string(newBinary) {
+		t.Fatalf("installed contents = %q, want the stable binary", got)
 	}
 }
 

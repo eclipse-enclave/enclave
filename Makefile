@@ -20,7 +20,10 @@ GIT_DIRTY = $(shell if [ -n "$$(git status --porcelain 2>/dev/null)" ]; then pri
 BUILD_VERSION ?= $(VERSION)
 BUILD_COMMIT ?= $(if $(strip $(GIT_COMMIT)),$(GIT_COMMIT)$(GIT_DIRTY),unknown)
 BUILD_DATE ?= $(if $(strip $(GIT_COMMIT_DATE)),$(GIT_COMMIT_DATE),unknown)
-BUILD_LDFLAGS = -X enclave/internal/buildinfo.version=$(BUILD_VERSION) -X enclave/internal/buildinfo.commit=$(BUILD_COMMIT) -X enclave/internal/buildinfo.date=$(BUILD_DATE)
+# Release channel of a standalone release binary (rolling or stable); only
+# binaries stamped with one update themselves.
+BUILD_CHANNEL ?=
+BUILD_LDFLAGS = -X enclave/internal/buildinfo.version=$(BUILD_VERSION) -X enclave/internal/buildinfo.commit=$(BUILD_COMMIT) -X enclave/internal/buildinfo.date=$(BUILD_DATE) -X enclave/internal/buildinfo.channel=$(BUILD_CHANNEL)
 REPORTS_DIR := ./reports
 REQUIRED_LINT_TOOLS := golangci-lint gosec shellcheck
 LINT_GO_DIRS := cmd internal extensions/tools

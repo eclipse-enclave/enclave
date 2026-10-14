@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 
@@ -25,6 +26,7 @@ type Defaults struct {
 	ToolOverrides    map[string]Defaults `json:"tool_overrides"`
 	Backend          string              `json:"backend"`
 	AutoUpdate       *bool               `json:"auto_update"`
+	UpdateChannel    string              `json:"update_channel"`
 	HostConfig       string              `json:"host_config"`
 	SkillsValidation string              `json:"skills_validation"`
 	HostConfigPaths  []string            `json:"host_config_paths"`
@@ -64,13 +66,18 @@ type Defaults struct {
 	PlaywrightMCP    *bool               `json:"playwright_mcp"`
 }
 
-func LoadDefaults(projectDir string) (global Defaults, project Defaults, warnings []Warning, err error) {
+// LoadGlobalDefaults reads only the global config, for commands that must not
+// depend on the current project.
+func LoadGlobalDefaults() (Defaults, []Warning, error) {
 	globalPath, err := GlobalConfigPath()
 	if err != nil {
-		return Defaults{}, Defaults{}, nil, err
+		return Defaults{}, nil, err
 	}
+	return readDefaults(globalPath)
+}
 
-	globalDefaults, globalWarns, err := readDefaults(globalPath)
+func LoadDefaults(projectDir string) (global Defaults, project Defaults, warnings []Warning, err error) {
+	globalDefaults, globalWarns, err := LoadGlobalDefaults()
 	if err != nil {
 		return Defaults{}, Defaults{}, nil, err
 	}
@@ -203,6 +210,7 @@ func readDefaults(path string) (Defaults, []Warning, error) {
 	warnings = append(warnings, validateToolOverrides(path, doc, &defaults)...)
 	warnings = append(warnings, validatePassEnvNames(path, &defaults)...)
 	warnings = append(warnings, validateSessionTint(path, &defaults)...)
+	warnings = append(warnings, validateUpdateChannel(path, &defaults)...)
 	return defaults, warnings, nil
 }
 
@@ -349,6 +357,21 @@ func validateSessionTint(path string, defaults *Defaults) []Warning {
 	return warnings
 }
 
+// validateUpdateChannel clears an update_channel that names no release
+// channel, so the binary falls back to the channel it was published on.
+func validateUpdateChannel(path string, defaults *Defaults) []Warning {
+	if defaults == nil {
+		return nil
+	}
+	channel := strings.TrimSpace(defaults.UpdateChannel)
+	defaults.UpdateChannel = channel
+	if channel == "" || slices.Contains(model.UpdateChannels, channel) {
+		return nil
+	}
+	defaults.UpdateChannel = ""
+	return []Warning{newWarning(WarningInvalidValue, "update_channel", "", path, "Ignoring update_channel %q in %s: expected one of %s", channel, path, strings.Join(model.UpdateChannels, ", "))}
+}
+
 func validateTopLevelDefaults(path string, doc map[string]json.RawMessage, defaults *Defaults) []Warning {
 	if defaults == nil {
 		return nil
@@ -402,7 +425,11 @@ func validateToolOverrides(path string, doc map[string]json.RawMessage, defaults
 		if parsed, ok := defaults.ToolOverrides[toolName]; ok {
 			if _, hasAutoUpdate := entry["auto_update"]; hasAutoUpdate {
 				parsed.AutoUpdate = nil
-				warnings = append(warnings, newWarning(WarningInvalidToolOverride, "auto_update", toolName, path, "Ignoring tool_overrides.%s.auto_update in %s: automatic binary updates are configured globally", toolName, path))
+				warnings = append(warnings, newWarning(WarningInvalidToolOverride, "auto_update", toolName, path, "Ignoring tool_overrides.%s.auto_update in %s: binary updates are configured globally", toolName, path))
+			}
+			if _, hasChannel := entry["update_channel"]; hasChannel {
+				parsed.UpdateChannel = ""
+				warnings = append(warnings, newWarning(WarningInvalidToolOverride, "update_channel", toolName, path, "Ignoring tool_overrides.%s.update_channel in %s: binary updates are configured globally", toolName, path))
 			}
 			warnings = append(warnings, validateToolOverrideHostConfigPaths(path, toolName, parsed.HostConfigPaths)...)
 			valid[toolName] = parsed
@@ -491,8 +518,13 @@ func applyProjectDefaultsGuardrails(path string, toolName string, projectRoot st
 
 	if defaults.AutoUpdate != nil {
 		field := projectGuardrailField(toolName, "auto_update")
-		guardrail("auto_update", "Ignoring %s=%v in %s: automatic binary updates are configured globally", field, *defaults.AutoUpdate, path)
+		guardrail("auto_update", "Ignoring %s=%v in %s: binary updates are configured globally", field, *defaults.AutoUpdate, path)
 		defaults.AutoUpdate = nil
+	}
+	if defaults.UpdateChannel != "" {
+		field := projectGuardrailField(toolName, "update_channel")
+		guardrail("update_channel", "Ignoring %s=%q in %s: binary updates are configured globally", field, defaults.UpdateChannel, path)
+		defaults.UpdateChannel = ""
 	}
 
 	if defaults.AllowAllNetwork != nil && *defaults.AllowAllNetwork {

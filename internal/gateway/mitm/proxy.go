@@ -422,10 +422,11 @@ func (p *proxy) forward(w http.ResponseWriter, req *http.Request, scheme string,
 	outgoing.URL = &target
 	outgoing.Body = capture.RequestBody(req.Body)
 	// The broker cannot inspect an upgraded stream, so protected sessions fail
-	// closed by dropping the upgrade request with the other hop-by-hop headers.
-	upgrade := ""
-	if p.oauthBroker == nil {
-		upgrade = upgradeType(req.Header)
+	// closed by dropping upgrade requests to the hosts it mediates along with
+	// the other hop-by-hop headers. Other handshakes still pass its checks.
+	upgrade := upgradeType(req.Header)
+	if p.oauthBroker != nil && (p.oauthBroker.RequiresMITM(target.Host) || p.oauthBroker.RequiresMITM(req.Host)) {
+		upgrade = ""
 	}
 	removeHopHeaders(outgoing.Header)
 	if upgrade != "" {
@@ -443,6 +444,8 @@ func (p *proxy) forward(w http.ResponseWriter, req *http.Request, scheme string,
 	var resp *http.Response
 	var err error
 	switch {
+	case p.oauthBroker != nil && upgrade != "":
+		resp, err = p.oauthBroker.RoundTrip(outgoing, p.upgradeTransport, p.exchangeTransport)
 	case p.oauthBroker != nil:
 		resp, err = p.oauthBroker.RoundTrip(outgoing, p.transport, p.exchangeTransport)
 	case upgrade != "":

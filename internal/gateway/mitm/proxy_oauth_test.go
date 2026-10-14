@@ -355,6 +355,53 @@ func TestBrokerProxyRejectsProtocolUpgrade(t *testing.T) {
 	}
 }
 
+func TestBrokerProxyRelaysUpgradeToUnmediatedHost(t *testing.T) {
+	tlsUpstream := httptest.NewTLSServer(http.NotFoundHandler())
+	defer tlsUpstream.Close()
+	p, _, _ := oauthTestProxy(t, tlsUpstream)
+	upstream := httptest.NewServer(http.HandlerFunc(echoUpgradeHandler))
+	defer upstream.Close()
+	upstreamHost := strings.TrimPrefix(upstream.URL, "http://")
+	host, _, err := net.SplitHostPort(upstreamHost)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.allowedDomains = append(p.allowedDomains, host)
+	proxyServer := httptest.NewServer(p.handler("http"))
+	defer proxyServer.Close()
+
+	assertEchoUpgradeRelayed(t, proxyServer, upstreamHost)
+}
+
+func TestBrokerProxyRejectsUpgradeCarryingHandle(t *testing.T) {
+	var calls atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { calls.Add(1) }))
+	defer upstream.Close()
+	tlsUpstream := httptest.NewTLSServer(http.NotFoundHandler())
+	defer tlsUpstream.Close()
+	p, _, _ := oauthTestProxy(t, tlsUpstream)
+	upstreamHost := strings.TrimPrefix(upstream.URL, "http://")
+	host, _, err := net.SplitHostPort(upstreamHost)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.allowedDomains = append(p.allowedDomains, host)
+	for _, header := range []string{"Authorization", "Sec-WebSocket-Protocol"} {
+		req := httptest.NewRequest(http.MethodGet, "http://"+upstreamHost+"/stream", nil)
+		req.Header.Set("Connection", "Upgrade")
+		req.Header.Set("Upgrade", "websocket")
+		req.Header.Set(header, "Bearer sk-ant-oat01-handle")
+		w := httptest.NewRecorder()
+		p.handler("http")(w, req)
+		if w.Code != http.StatusForbidden {
+			t.Fatalf("%s handle upgrade status = %d, want 403", header, w.Code)
+		}
+	}
+	if calls.Load() != 0 {
+		t.Fatal("handle-bearing upgrade reached upstream")
+	}
+}
+
 func TestOAuthLockFailureIsAuditedAsBrokerDenial(t *testing.T) {
 	var calls atomic.Int32
 	upstream := httptest.NewTLSServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { calls.Add(1) }))

@@ -118,7 +118,7 @@ sequenceDiagram
 - Real secrets are released only on HTTPS requests; plaintext HTTP requests carrying a placeholder are denied.
 - Env-secret injection is restricted to declared headers. The opt-in OAuth adapter below separately mediates captured native-file credentials.
 - Ordinary upstream responses are streamed without credential masking. A provider that reflects an approved auth header can expose its value, so matching a release rule does not remove trust in the provider.
-- WebSocket and other protocol upgrades get secret release on the handshake headers; the upgraded connection is then relayed unchanged in both directions. Sessions with the protected OAuth broker drop upgrade requests and reject `101` responses, because the broker cannot inspect an upgraded stream.
+- WebSocket and other protocol upgrades get secret release on the handshake headers; the upgraded connection is then relayed unchanged in both directions. Sessions with the protected OAuth broker drop upgrade requests to the hosts it mediates and reject their `101` responses, because the broker cannot inspect an upgraded stream. Handshakes to other hosts pass the broker's handle checks before the stream is relayed.
 
 ## Opt-in protected OAuth path
 

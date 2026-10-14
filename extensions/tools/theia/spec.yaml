@@ -36,7 +36,10 @@ postStart:
 credentials:
   sources:
     anthropic-api-key: { env: [ANTHROPIC_API_KEY] }
-    openai-api-key: { env: [OPENAI_API_KEY] }
+    # pi treats an OpenAI key without the sk- prefix as a ChatGPT token.
+    openai-api-key:
+      env: [OPENAI_API_KEY]
+      placeholder: { prefix: "sk-enclave-", random: { encoding: alphanumeric, length: 48 } }
     gemini-api-key: { env: [GEMINI_API_KEY] }
 
 network:

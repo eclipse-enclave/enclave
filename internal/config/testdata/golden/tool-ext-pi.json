@@ -82,6 +82,13 @@
           "header": "authorization",
           "format": "Bearer %s"
         }
+      },
+      "placeholder": {
+        "prefix": "sk-enclave-",
+        "random": {
+          "encoding": "alphanumeric",
+          "length": 48
+        }
       }
     }
   },

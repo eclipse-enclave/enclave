@@ -34,6 +34,8 @@ type provider struct {
 	contentPath func(host, path string) bool
 	// patterns indicate credentials in a structured response elsewhere.
 	patterns [][]byte
+	// queryCredential names a URL parameter that can carry an API key.
+	queryCredential string
 }
 
 var tokenFields = [][]byte{[]byte(`"access_token"`), []byte(`"refresh_token"`), []byte(`"id_token"`), []byte(`"accessToken"`), []byte(`"refreshToken"`)}
@@ -99,6 +101,13 @@ var providers = []provider{
 		domains:        []string{"githubcopilot.com"},
 		credentialPath: genericCredentialPath,
 		contentPath:    func(string, string) bool { return true },
+	},
+	{
+		name:            "google",
+		domains:         []string{"generativelanguage.googleapis.com"},
+		credentialPath:  func(string, string) bool { return false },
+		contentPath:     func(string, string) bool { return true },
+		queryCredential: "key",
 	},
 	{
 		// GitHub logins issue tokens at github.com and Copilot tokens at

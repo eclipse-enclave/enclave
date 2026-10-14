@@ -112,7 +112,7 @@ func (b *Broker) RoundTrip(req *http.Request, transport, exchangeTransport http.
 		// This also rejects handles from ended sessions, and raw credentials
 		// sent to a provider: a protected session authenticates there only
 		// through the gateway.
-		if containsHandle(req) || (p != nil && carriesCredential(req)) {
+		if containsHandle(req) || (p != nil && (carriesCredential(req) || (p.queryCredential != "" && req.URL.Query().Has(p.queryCredential)))) {
 			return nil, ErrDenied
 		}
 		if p != nil {

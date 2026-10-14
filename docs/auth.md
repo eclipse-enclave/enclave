@@ -43,7 +43,7 @@ from `~/.vibe/.env`, which is session-scoped like every native credential file,
 so other settings Vibe writes there, such as `/proxy-setup`, do not persist.
 
 In every protected session the gateway mediates the Anthropic, OpenAI, Mistral,
-GitHub and Copilot domains. Logins it does not capture are refused there, and so
+GitHub and Copilot domains and `generativelanguage.googleapis.com`. Logins it does not capture are refused there, and so
 are raw credentials, such as an API key pasted into a tool: configure API keys as
 [Enclave secrets](#secrets) instead, which the session receives as placeholders.
 WebSocket handshakes to these hosts are checked like requests; the upgraded

@@ -47,7 +47,8 @@ type Options struct {
 	DeniedDomains        []string
 	AllowAllDestinations bool
 	SecretRules          []model.SecretReleaseEntry
-	// OAuthBroker enables the explicitly selected experimental Claude adapter.
+	// OAuthBroker mediates protected credentials for the session's tool and
+	// features.
 	OAuthBroker  *oauthbroker.Broker
 	AuditLogPath string
 	// CaptureDir is empty unless full network capture is enabled.
@@ -150,6 +151,7 @@ func Run(ctx context.Context, opts Options) error {
 		if err := opts.OnReady(); err != nil {
 			_ = httpListener.Close()
 			_ = httpsListener.Close()
+			_ = httpsServer.mitmListener.Close()
 			return fmt.Errorf("proxy readiness failed: %w", err)
 		}
 	}
@@ -197,10 +199,10 @@ type proxy struct {
 	exchangeTransport    *http.Transport
 	captures             *netcapture.Store
 	exchanges            exchangeTracker
-	// upgradeTransport speaks only HTTP/1.1 and carries every request with an
-	// Upgrade header, whether or not Connection names it: HTTP/2 refuses any
-	// Upgrade header, and transport switches to HTTP/1.1 by itself only for
-	// WebSocket, not for upgrades such as SPDY.
+	// upgradeTransport speaks only HTTP/1.1 and carries requests whose
+	// Connection header asks for an upgrade: HTTP/2 refuses any Upgrade header,
+	// and the transport switches to HTTP/1.1 by itself only for WebSocket, not
+	// for upgrades such as SPDY.
 	upgradeTransport *http.Transport
 }
 
@@ -320,9 +322,10 @@ func (p *proxy) logEvent(event netlog.Event) {
 		// either can carry handles or enrollment bootstrap material. Retain only
 		// exact configured hosts and fixed method/media categories, never paths.
 		event.Path = ""
-		if oauthbroker.ContainsHandle(event.Domain) ||
-			(!slices.Contains(p.allowedDomains, event.Domain) && !slices.Contains(p.deniedDomains, event.Domain) && !p.oauthBroker.RequiresMITM(event.Domain)) {
+		if oauthbroker.ContainsHandle(event.Domain) {
 			event.Domain = ""
+		} else if !slices.Contains(p.allowedDomains, event.Domain) && !slices.Contains(p.deniedDomains, event.Domain) {
+			event.Domain = p.oauthBroker.AuditDomain(event.Domain)
 		}
 		switch event.Method {
 		case http.MethodGet, http.MethodHead, http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete, http.MethodConnect, http.MethodOptions, http.MethodTrace:
@@ -396,6 +399,10 @@ func (p *proxy) handler(scheme string) http.HandlerFunc {
 				event.ContentType = result.ContentType
 				event.Verdict = netlog.VerdictPass
 				event.Rule = "upstream-body-error"
+				if req.Context().Err() != nil {
+					// The client went away; the upstream did nothing wrong.
+					event.Rule = "client-closed"
+				}
 				if _, rule := brokerFailure(err); rule != "" {
 					// The broker stopped a response that would carry credentials.
 					event.Verdict, event.Rule = netlog.VerdictDeny, rule

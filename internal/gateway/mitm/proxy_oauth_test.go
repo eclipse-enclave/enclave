@@ -288,6 +288,7 @@ func TestOAuthAuditRetainsOnlyKnownMetadata(t *testing.T) {
 		{"refresh-handle-host", netlog.Event{Domain: "sk-ant-ort01-synthetic.docs.example.com", Method: "GET"}, "", "GET", ""},
 		{"custom-method", netlog.Event{Domain: "docs.example.com", Method: "SYNTHETIC-BOOTSTRAP"}, "docs.example.com", "", ""},
 		{"broker", netlog.Event{Domain: "platform.claude.com", Method: "POST", ContentType: "application/json"}, "platform.claude.com", "POST", "application/json"},
+		{"provider-subdomain", netlog.Event{Domain: "synthetic-bootstrap.anthropic.com", Method: "GET"}, "anthropic.com", "GET", ""},
 		{"custom-media", netlog.Event{Domain: "docs.example.com", Method: "GET", ContentType: "application/synthetic-bootstrap"}, "docs.example.com", "GET", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -718,5 +719,35 @@ func TestOAuthForwarderAbortsResponseReflectingCredential(t *testing.T) {
 	events := readAuditEvents(t, logPath)
 	if last := events[len(events)-1]; last.Verdict != netlog.VerdictDeny || last.Rule != "oauth-broker-response" {
 		t.Fatalf("tripwire abort audit = %+v", last)
+	}
+}
+
+// A client that gives up mid-stream is not an upstream failure.
+func TestAuditDistinguishesClientDisconnects(t *testing.T) {
+	release := make(chan struct{})
+	upstream := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		_, _ = io.WriteString(w, "data: start\n\n")
+		w.(http.Flusher).Flush()
+		select {
+		case <-req.Context().Done():
+		case <-release:
+		}
+	}))
+	defer upstream.Close()
+	defer close(release)
+	p, logPath, _ := oauthTestProxy(t, upstream)
+	ctx, cancel := context.WithCancel(context.Background())
+	req := httptest.NewRequest(http.MethodGet, "https://api.anthropic.com/v1/models", nil).WithContext(ctx)
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		cancel()
+	}()
+	func() {
+		defer func() { _ = recover() }()
+		p.handler("https")(httptest.NewRecorder(), req)
+	}()
+	events := readAuditEvents(t, logPath)
+	if last := events[len(events)-1]; last.Rule != "client-closed" {
+		t.Fatalf("client disconnect audited as %+v", last)
 	}
 }

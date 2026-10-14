@@ -272,7 +272,13 @@ func runNetworkPrint(input *CommandInput) int {
 	// Use the same resolver selection as the deployed bundle so the preview
 	// faithfully reflects what the gateway runs.
 	resolver := network.FirstIPv4Resolver(ep.Resolvers)
-	out, err := network.RenderDnsmasqConfigPreviewForTool(ep, policyCtx.Tool, resolver)
+	render := network.RenderDnsmasqConfigPreviewForTool
+	if input.Options.ProtectAuth {
+		// Protected sessions keep the gateway in unrestricted mode, which then
+		// forwards every lookup; print that rather than the bypass marker.
+		render = network.RenderDnsmasqConfigForTool
+	}
+	out, err := render(ep, policyCtx.Tool, resolver)
 	if err != nil {
 		logx.Errorf("Failed to render dnsmasq config: %v", err)
 		return 1

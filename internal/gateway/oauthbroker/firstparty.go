@@ -217,6 +217,34 @@ func firstPartyHost(host string) bool {
 	return providerFor(host) != nil
 }
 
+// auditHosts are the providers' fixed hosts, which the audit log keeps as is.
+var auditHosts = []string{
+	tokenHost, accessHost, "mcp-proxy.anthropic.com", "claude.ai", "console.anthropic.com",
+	openaiTokenHost, "api.openai.com", openaiReleaseHost,
+	"api.mistral.ai", mistralConsoleHost, "chat.mistral.ai",
+	"api.githubcopilot.com", githubOAuthHost, githubAPIHost,
+	"gitlab.com", "generativelanguage.googleapis.com",
+}
+
+// AuditDomain names host for the audit log without labels a client chose: a
+// provider's fixed host and a declared instance stay as they are, another host
+// below a provider domain is reduced to that domain, and any other host is
+// dropped.
+func (b *Broker) AuditDomain(host string) string {
+	host = protectedHost(host)
+	if slices.Contains(auditHosts, host) || b.instances[host] != nil {
+		return host
+	}
+	if p := providerFor(host); p != nil {
+		for _, domain := range p.domains {
+			if host == domain || strings.HasSuffix(host, "."+domain) {
+				return domain
+			}
+		}
+	}
+	return ""
+}
+
 // InstanceProviders names the provider of each self-hosted instance selected
 // in place of a provider's declared hosts, such as a GitLab instance named by
 // GITLAB_HOST.

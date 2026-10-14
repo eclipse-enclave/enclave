@@ -54,7 +54,9 @@ enclave --tool claude --auth-name protected --protect-auth --allow-all-network
 | Unrestricted, protected | Arbitrary IPv4 destinations; IPv6 remains disabled by the gateway | Gateway remains mandatory; OAuth endpoint/field rules and env-secret header rules still apply |
 
 An unrelated IPv4 destination needs no allowlist entry in the protected
-unrestricted mode, but it cannot redeem protected credentials. Proxy failure
+unrestricted mode, but it cannot redeem protected credentials. TLS without a
+server name (SNI) is refused there, since the gateway could not tell a provider
+from another host. Proxy failure
 locks down egress; it never switches the session to a gateway bypass. Docker,
 Podman and the real login flows still require the
 [engine and human verification runs](runtime/oauth-broker-verification.md).

@@ -265,10 +265,14 @@ func IsProtectedEphemeralIdentity(key StoreKey) bool {
 	return strings.HasPrefix(key.Suffix, protectedEphemeralIdentityPrefix) && len(key.Suffix) > len(protectedEphemeralIdentityPrefix)
 }
 
+// FeatureAuthSessionManager admits the session's native-auth features, such as
+// the GitHub CLI, alongside its tool identity, extending parent.
 type FeatureAuthSessionManager interface {
 	PrepareFeatureAuthSessions(ctx context.Context, parent *AuthSession, session string, names []string, protected bool) (*AuthSession, error)
 }
 
+// FeatureAuthIdentityManager resets or downgrades an idle feature identity,
+// which is shared by every tool and project.
 type FeatureAuthIdentityManager interface {
 	ResetFeatureAuthIdentity(ctx context.Context, name string) error
 	DowngradeFeatureAuthIdentity(ctx context.Context, name string) error

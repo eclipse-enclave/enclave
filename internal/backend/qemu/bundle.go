@@ -110,8 +110,10 @@ type runtimeFileMount struct {
 	Target      string
 	GuestSource string
 	GuestResult string
-	ResultPath  string
-	ReadOnly    bool
+	// StageRoot is the guest-writable staging share; ResultPath lies below it.
+	StageRoot  string
+	ResultPath string
+	ReadOnly   bool
 }
 
 func resolveBundle(image string) (bundle, error) {
@@ -480,6 +482,7 @@ func prepareFileMounts(tempDir string, mounts []backend.Mount) ([]runtimeFileMou
 			Target:      filepath.Clean(mount.ContainerPath),
 			GuestSource: filepath.Join(guestEntry, "source"),
 			GuestResult: filepath.Join(guestEntry, "result"),
+			StageRoot:   root,
 			ResultPath:  resultPath,
 			ReadOnly:    mount.ReadOnly,
 		})
@@ -589,18 +592,65 @@ func (b *Backend) persistFileMounts(files []runtimeFileMount) []error {
 			continue
 		}
 		file.Source = checked[0]
-		data, err := os.ReadFile(file.ResultPath) // #nosec G304 -- result path is generated under the runtime directory.
+		data, err := readStagedResult(file.StageRoot, file.ResultPath)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("persist file mount %s: %w", file.Target, err))
 			continue
 		}
-		info, statErr := os.Stat(file.Source)
-		mode := fsMode(info, statErr)
-		if err := os.WriteFile(file.Source, data, mode); err != nil { // #nosec G306 G304 G703 -- source was supplied as a validated mount source.
+		if err := writeMountSource(file.Source, data); err != nil {
 			errs = append(errs, fmt.Errorf("persist file mount %s: %w", file.Target, err))
 		}
 	}
 	return errs
+}
+
+// readStagedResult reads a file the guest wrote into the staging share. The
+// guest controls everything below root, so links it planted there must not
+// lead the host to read files outside it.
+func readStagedResult(root, path string) ([]byte, error) {
+	rel, err := filepath.Rel(root, path)
+	if err != nil || rel == "." || strings.HasPrefix(rel, "..") {
+		return nil, fmt.Errorf("staged result %s is outside the staging share", path)
+	}
+	share, err := os.OpenRoot(root)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = share.Close() }()
+	f, err := share.Open(rel)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = f.Close() }()
+	if info, err := f.Stat(); err != nil || !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("staged result %s is not a regular file", path)
+	}
+	return io.ReadAll(f)
+}
+
+// writeMountSource replaces a validated host source in place. Opening it
+// within its directory refuses a link planted at its name since validation
+// that would lead elsewhere.
+func writeMountSource(path string, data []byte) error {
+	parent, err := os.OpenRoot(filepath.Dir(path))
+	if err != nil {
+		return err
+	}
+	defer func() { _ = parent.Close() }()
+	name := filepath.Base(path)
+	info, statErr := parent.Lstat(name)
+	if statErr == nil && !info.Mode().IsRegular() {
+		return fmt.Errorf("mount source %s is no longer a regular file", path)
+	}
+	f, err := parent.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, fsMode(info, statErr))
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write(data); err != nil {
+		_ = f.Close()
+		return err
+	}
+	return f.Close()
 }
 
 func fsMode(info os.FileInfo, err error) os.FileMode {

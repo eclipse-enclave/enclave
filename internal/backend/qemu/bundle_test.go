@@ -356,15 +356,62 @@ func TestQEMUCopyBackRejectsRetargetedProtectedPath(t *testing.T) {
 	if err := os.Symlink(grant, source); err != nil {
 		t.Fatal(err)
 	}
-	result := filepath.Join(t.TempDir(), "result")
+	stage := t.TempDir()
+	result := filepath.Join(stage, "result")
 	if err := os.WriteFile(result, []byte("overwrite"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if errs := be.persistFileMounts([]runtimeFileMount{{Source: source, ResultPath: result, Target: "/file"}}); len(errs) == 0 {
+	if errs := be.persistFileMounts([]runtimeFileMount{{Source: source, StageRoot: stage, ResultPath: result, Target: "/file"}}); len(errs) == 0 {
 		t.Fatal("copy-back followed a symlink to a protected grant")
 	}
 	got, err := os.ReadFile(grant)
 	if err != nil || string(got) != "keep-grant" {
 		t.Fatalf("protected grant changed: %q, %v", got, err)
+	}
+}
+
+// The guest writes the staging share, so a link it plants there must not make
+// copy-back read a host file, such as a protected grant, into the mount source.
+func TestQEMUCopyBackRefusesLinksPlantedInStagingShare(t *testing.T) {
+	be := New(Options{Host: model.Host{Home: t.TempDir()}})
+	secret := filepath.Join(t.TempDir(), "oauth-grant.json")
+	if err := os.WriteFile(secret, []byte("real-grant"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for name, plant := range map[string]func(stage string) error{
+		"result link": func(stage string) error {
+			return os.Symlink(secret, filepath.Join(stage, "00", "result"))
+		},
+		"entry link": func(stage string) error {
+			outside := t.TempDir()
+			if err := os.Symlink(secret, filepath.Join(outside, "result")); err != nil {
+				return err
+			}
+			if err := os.RemoveAll(filepath.Join(stage, "00")); err != nil {
+				return err
+			}
+			return os.Symlink(outside, filepath.Join(stage, "00"))
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			stage := t.TempDir()
+			if err := os.MkdirAll(filepath.Join(stage, "00"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := plant(stage); err != nil {
+				t.Fatal(err)
+			}
+			source := filepath.Join(t.TempDir(), "config")
+			if err := os.WriteFile(source, []byte("original"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			file := runtimeFileMount{Source: source, StageRoot: stage, ResultPath: filepath.Join(stage, "00", "result"), Target: "/file"}
+			if errs := be.persistFileMounts([]runtimeFileMount{file}); len(errs) == 0 {
+				t.Fatal("copy-back followed a planted link")
+			}
+			if got, err := os.ReadFile(source); err != nil || string(got) != "original" {
+				t.Fatalf("mount source = %q, %v", got, err)
+			}
+		})
 	}
 }

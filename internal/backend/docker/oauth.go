@@ -785,7 +785,7 @@ func (b *Backend) validateProtectedMounts(req backend.Request, spec runSpec) err
 	if err != nil {
 		return err
 	}
-	if err := rejectNativeAuthSource(cfg.ViewDir); err != nil {
+	if err := rejectNativeAuthSource(cfg.ViewDir, ref.Key.Owner); err != nil {
 		return err
 	}
 	for _, store := range req.Stores {
@@ -865,11 +865,19 @@ func (b *Backend) validateWorkloadAuthMounts(req backend.Request, spec runSpec) 
 	return nil
 }
 
-func rejectNativeAuthSource(dir string) error {
+// rejectNativeAuthSource refuses a directory that holds native credential
+// files, including the tool's own, before anything copies or mounts it.
+func rejectNativeAuthSource(dir, tool string) error {
 	if dir == "" {
 		return nil
 	}
-	for _, rel := range []string{".credentials.json", "auth.json", ".claude.json", ".config.json", "config.json"} {
+	names := []string{".credentials.json", "auth.json", ".claude.json", ".config.json", "config.json"}
+	if description, ok := protectedauth.Lookup(tool); ok {
+		for _, file := range description.Files {
+			names = append(names, file.ConfigPath, file.ViewName)
+		}
+	}
+	for _, rel := range names {
 		if _, err := os.Lstat(filepath.Join(dir, rel)); err == nil {
 			return fmt.Errorf("protected OAuth refuses native auth source %s", rel)
 		} else if !errors.Is(err, os.ErrNotExist) {

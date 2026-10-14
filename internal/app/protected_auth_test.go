@@ -132,8 +132,8 @@ func TestCleanupRetainsProtectedIdentityAndRemovesOtherIdentity(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(legacy, ".enclave-oauth-identity.json"), []byte(`{"schemaVersion":1,"protected":true}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := cleanupDirs(home, authStoreCleanupDirs(home)); err == nil {
-		t.Fatal("cleanup did not report retaining protected auth")
+	if err := cleanupDirs(home, authStoreCleanupDirs(home)); err != nil {
+		t.Fatalf("retaining protected auth failed cleanup: %v", err)
 	}
 	data, err := os.ReadFile(grantPath)
 	if err != nil || string(data) != "trusted-grant" {
@@ -258,8 +258,8 @@ esac
 	os.Stdin = input
 	t.Cleanup(func() { os.Stdin = previousStdin })
 	out := captureStdout(t, func() {
-		if code := runCleanup(model.RunOptions{Tool: "claude"}, model.CleanupOptions{CleanupAll: true, CleanupBuildCache: true}); code != 1 {
-			t.Errorf("cleanup status = %d, want incomplete status 1", code)
+		if code := runCleanup(model.RunOptions{Tool: "claude"}, model.CleanupOptions{CleanupAll: true, CleanupBuildCache: true}); code != 0 {
+			t.Errorf("cleanup status = %d; retaining a protected identity is not a failure", code)
 		}
 	})
 	data, err := os.ReadFile(calls)
@@ -269,8 +269,8 @@ esac
 	if !strings.Contains(string(data), "system df") || !strings.Contains(string(data), "builder prune --force --all") {
 		t.Errorf("retained auth cancelled independent build-cache work: %s", data)
 	}
-	if strings.Contains(out, "Cleanup complete") {
-		t.Errorf("cleanup falsely reported success: %s", out)
+	if !strings.Contains(out, "Retained protected identity "+protected) {
+		t.Errorf("cleanup did not report the retained identity: %s", out)
 	}
 	if _, err := os.Stat(protected); err != nil {
 		t.Fatalf("cleanup removed protected identity: %v", err)
@@ -372,9 +372,9 @@ func TestCleanupKeepsNewProtectedIdentityAfterPlanning(t *testing.T) {
 			if err := hoststore.ProtectIdentity(home, protected, func() (bool, error) { return true, nil }); err != nil {
 				t.Fatal(err)
 			}
-			err := cleanupDirs(home, dirs)
-			if (err != nil) != replaceStray {
-				t.Errorf("cleanup error = %v, expected retained planned identity = %t", err, replaceStray)
+			// Retaining a protected identity is policy, not a failure.
+			if err := cleanupDirs(home, dirs); err != nil {
+				t.Errorf("cleanup error = %v", err)
 			}
 			if _, err := os.Stat(protected); err != nil {
 				t.Fatalf("cleanup deleted newly protected identity: %v", err)
@@ -501,8 +501,8 @@ func TestCleanupSerializesWithProtectedGrantMutation(t *testing.T) {
 					t.Fatal("cleanup did not finish after protection released its lock")
 				}
 			}
-			if cleanupErr == nil || !strings.Contains(cleanupErr.Error(), "gateway-protected") {
-				t.Errorf("cleanup did not recheck committed protection under lock: %v", cleanupErr)
+			if cleanupErr != nil {
+				t.Errorf("retaining the newly protected identity failed cleanup: %v", cleanupErr)
 			}
 			if _, err := os.Stat(identity); err != nil {
 				t.Fatalf("cleanup removed newly protected identity: %v", err)
@@ -560,6 +560,7 @@ func TestProtectedAuthOptionValidation(t *testing.T) {
 		}, false},
 		{"provider key placeholder", func(o *model.Options) { o.PassAPIKey = true }, false},
 		{"custom base image", func(o *model.Options) { o.BaseImage = "custom" }, true},
+		{"default identity", func(o *model.Options) { o.AuthName = "default" }, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -574,6 +575,18 @@ func TestProtectedAuthOptionValidation(t *testing.T) {
 				t.Fatalf("error=%v, want failure=%v", err, tc.fail)
 			}
 		})
+	}
+}
+
+// A global "protect_auth": true must not break commands that act on existing
+// sessions or images; their target decides.
+func TestProtectedAuthValidationAppliesToRunsOnly(t *testing.T) {
+	for _, action := range []string{"exec", "update", "attach"} {
+		opts := config.DefaultOptions()
+		opts.Backend, opts.Tool, opts.ProtectAuth, opts.AuthName, opts.Admin = "docker", "claude", true, "", true
+		if _, _, _, err := ValidateOptions(opts, model.DefaultOptionSources(), ValidationContext{Action: action}); err != nil {
+			t.Fatalf("%s refused by run-only protected checks: %v", action, err)
+		}
 	}
 }
 

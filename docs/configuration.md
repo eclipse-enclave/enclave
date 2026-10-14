@@ -567,8 +567,12 @@ protected-only config store and credentials in a session-scoped view. Concurrent
 sessions may reuse the same `auth_name`; tool and GitHub grants are shared, but
 handles and views remain per-session.
 Reset/downgrade require all sessions using the selected identity to end.
-Saved identity protection is independent of this
-configuration: removing the setting causes a refusal, not a raw-auth fallback.
+A config layer that sets `"protect_auth": true` wins over another config layer
+that sets it false, such as a global `tool_overrides` entry; only the command
+line decides otherwise. `--auth-name default` is refused with protection, which
+would otherwise lock out unnamed ordinary sessions. Saved identity protection is
+independent of this configuration: removing the setting causes a refusal, not a
+raw-auth fallback.
 Provider secrets are released only as placeholders; raw credential variables,
 host config passthrough and credential-helper settings conflict with this mode. See [authentication](auth.md#experimental-protected-authentication)
 for restrictions, reset/downgrade and pending verification.

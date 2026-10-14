@@ -156,11 +156,14 @@ func TestExecSelectsTargetSessionPinnedGitHubCLI(t *testing.T) {
 	for _, tc := range []struct {
 		name        string
 		env         []string
+		user        string
 		inspectFail bool
 		wantGitHub  bool
 		wantError   bool
 	}{
 		{name: "ordinary session", env: []string{"HOME=/home/agent"}},
+		{name: "ordinary admin", env: []string{"HOME=/home/agent"}, user: "root"},
+		{name: "protected admin", env: []string{"ENCLAVE_PROTECTED_AUTH=1"}, user: "root", wantError: true},
 		{name: "protected Claude only", env: []string{"ENCLAVE_PROTECTED_AUTH=1"}},
 		{name: "protected GitHub", env: []string{"ENCLAVE_PROTECTED_AUTH=1", model.EnvProtectedGitHub + "=1"}, wantGitHub: true},
 		{name: "uninspectable target", inspectFail: true, wantError: true},
@@ -185,7 +188,7 @@ func TestExecSelectsTargetSessionPinnedGitHubCLI(t *testing.T) {
 			t.Cleanup(func() { execInteractive = orig })
 
 			requested := []string{"gh", "auth", "status"}
-			err = New(Options{}).Exec(context.Background(), backend.SessionRef{Name: "session"}, backend.ExecRequest{Argv: requested, TTY: true}, backend.AttachIO{})
+			err = New(Options{}).Exec(context.Background(), backend.SessionRef{Name: "session"}, backend.ExecRequest{Argv: requested, User: tc.user, TTY: true}, backend.AttachIO{})
 			if tc.wantError {
 				if err == nil || execArgv != nil {
 					t.Fatalf("exec ran without verified client selection: err=%v argv=%v", err, execArgv)

@@ -181,6 +181,20 @@ func ResolveOptionsForTool(cliOpts model.Options, cliSources model.OptionSources
 		mergeListInto(&opts, held.def, held.values, cliLayer)
 		setOptionSource(&sources, held.def.SourceField, model.SourceCLI)
 	}
+	// Protection is sticky across config layers: a broader layer that turns it
+	// off, such as a global tool override, cannot undo a project that asked
+	// for it. Only the command line decides otherwise.
+	if !opts.ProtectAuth && sources.ProtectAuth != model.SourceCLI {
+		for _, layer := range []struct {
+			source model.OptionSource
+			value  *bool
+		}{{model.SourceToolOverride, toolDefaults.ProtectAuth}, {model.SourceProject, project.ProtectAuth}, {model.SourceGlobal, global.ProtectAuth}} {
+			if layer.value != nil && *layer.value {
+				opts.ProtectAuth, sources.ProtectAuth = true, layer.source
+				break
+			}
+		}
+	}
 	opts.Sources = sources
 	return opts, toolDefaults, hasToolDefaults
 }

@@ -44,13 +44,20 @@ func ValidateOptions(opts model.Options, sources model.OptionSources, ctx Valida
 		// fixtures); Run rejects an explicitly empty --backend before this call.
 		opts.Backend = backend.NameDocker
 	}
-	if opts.ProtectAuth {
+	// Protection applies to the session a run starts; exec, attach and update
+	// act on existing sessions or images, whose own state decides.
+	if opts.ProtectAuth && isRunAction(ctx.Action) {
 		tool, known := protectedauth.Lookup(opts.Tool)
 		if !known || (opts.Backend != backend.NameDocker && opts.Backend != backend.NamePodman) {
 			return opts, sources, warnings, fmt.Errorf("--protect-auth supports the built-in tools on Docker or Podman")
 		}
 		if opts.AuthScope == model.AuthScopeShared && strings.TrimSpace(opts.AuthName) == "" && !opts.Ephemeral && len(tool.Adapters) != 0 {
 			return opts, sources, warnings, fmt.Errorf("--protect-auth with --auth-scope shared requires a fresh --auth-name")
+		}
+		if opts.AuthScope == model.AuthScopeShared && strings.TrimSpace(opts.AuthName) == "default" && !opts.Ephemeral {
+			// Protecting the ordinary shared identity would lock out every
+			// unnamed ordinary session of the tool.
+			return opts, sources, warnings, fmt.Errorf("--protect-auth needs an --auth-name other than default")
 		}
 		var conflict string
 		switch {

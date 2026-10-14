@@ -503,9 +503,13 @@ func printCleanupPlan(home string, dirs []cleanupDir) error {
 	retainedParents := map[string]bool{}
 	for _, dir := range dirs {
 		if err := requireUnprotectedCleanupDir(home, dir); err != nil {
+			retainedParents[filepath.Dir(dir.Path)] = true
+			if errors.Is(err, hoststore.ErrProtectedIdentity) {
+				logx.Infof("Would retain %s: %s (gateway-protected; reset and downgrade it to remove it)", dir.Kind, dir.Path)
+				continue
+			}
 			logx.Infof("Would retain %s: %s (%v)", dir.Kind, dir.Path, err)
 			failures = append(failures, err)
-			retainedParents[filepath.Dir(dir.Path)] = true
 			continue
 		}
 		if dir.Mode == cleanupEmptyAuthTree {
@@ -595,7 +599,11 @@ func cleanupDirs(home string, dirs []cleanupDir) error {
 		} else {
 			err = remove()
 		}
-		if err != nil {
+		if errors.Is(err, hoststore.ErrProtectedIdentity) {
+			// Protection keeps an identity by design; reset and downgrade
+			// remove it.
+			logx.Infof("Retained protected identity %s; reset and downgrade it to remove it", dir.Path)
+		} else if err != nil {
 			failures = append(failures, fmt.Errorf("retaining %s %s: %w", dir.Kind, dir.Path, err))
 		}
 	}

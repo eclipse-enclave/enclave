@@ -42,6 +42,10 @@ type identityState struct {
 	Reservations  []IdentityReservation `json:"reservations,omitempty"`
 }
 
+// ErrProtectedIdentity marks an identity kept by protection rather than by a
+// failure.
+var ErrProtectedIdentity = errors.New("auth identity is gateway-protected")
+
 // RequireUnprotectedAuth is a fail-closed guard for legacy mounts, resets and
 // reconcile helpers. Missing host-only metadata is legacy; corrupt metadata is not.
 // Callers already holding WithLock may call it without taking another lock.
@@ -51,7 +55,7 @@ func RequireUnprotectedAuth(home, dir string) error {
 		return err
 	}
 	if state.Protected {
-		return fmt.Errorf("auth identity is gateway-protected (%s); refusing legacy credential access; use --protect-auth or explicitly reset and downgrade the idle identity", IdentityStatePath(home, dir))
+		return fmt.Errorf("%w (%s); refusing legacy credential access; use --protect-auth or explicitly reset and downgrade the idle identity", ErrProtectedIdentity, IdentityStatePath(home, dir))
 	}
 	return nil
 }

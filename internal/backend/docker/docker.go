@@ -507,7 +507,7 @@ func removeStoppedGateway(ctx context.Context, id string) {
 var execInteractive = dockercmd.ExecInteractive
 
 func (b *Backend) Exec(ctx context.Context, ref backend.SessionRef, req backend.ExecRequest, attach backend.AttachIO) error {
-	argv, err := protectedExecArgv(ctx, sessionRefName(ref), req.Argv)
+	argv, err := protectedExecArgv(ctx, sessionRefName(ref), req.Argv, req.User)
 	if err != nil {
 		return err
 	}
@@ -522,13 +522,17 @@ func (b *Backend) Exec(ctx context.Context, ref backend.SessionRef, req backend.
 // session's entrypoint selected. An exec does not pass through that
 // entrypoint, and the selection comes from the session's creation environment
 // rather than the invoking command's flags.
-func protectedExecArgv(ctx context.Context, name string, argv []string) ([]string, error) {
+func protectedExecArgv(ctx context.Context, name string, argv []string, user string) ([]string, error) {
 	info, err := dockercmd.ContainerInspect(ctx, name)
 	if err != nil {
 		return nil, fmt.Errorf("inspect exec target: %w", err)
 	}
 	if info.Config == nil {
 		return nil, errors.New("inspect exec target: missing container configuration")
+	}
+	// Protected sessions refuse admin mode; an exec must not add it.
+	if user == "root" && containerEnvValue(info.Config, model.EnvProtectedAuth) == "1" {
+		return nil, errors.New("protected sessions do not support admin exec (--admin)")
 	}
 	if containerEnvValue(info.Config, model.EnvProtectedGitHub) != "1" {
 		return argv, nil

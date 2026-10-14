@@ -425,6 +425,33 @@ func TestWorkloadAdmissionLockReleasedOnEngineOutcomes(t *testing.T) {
 	}
 }
 
+// Tools keep native credentials beyond Claude's names, such as pi's
+// agent/auth.json and Vibe's .env; the overlay copy must refuse them too.
+func TestProtectedPrepareRejectsToolNativeCredentialsInOverlay(t *testing.T) {
+	for tool, filename := range map[string]string{"pi": "agent/auth.json", "mistral-vibe": ".env"} {
+		t.Run(tool, func(t *testing.T) {
+			b, key, _ := oauthTestBackend(t)
+			key.Owner = tool
+			ctx := context.Background()
+			ref, err := b.PrepareAuthSession(ctx, key, "session", true, false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			source := t.TempDir()
+			writeFile(t, filepath.Join(source, filename), "synthetic-native-credential")
+			configKey := backend.ProtectedConfigKey(backend.StoreKey{Owner: tool, ProjectHash: "project"})
+			prep := backend.StorePrep{AuthSession: ref, Config: &backend.ConfigStorePrep{Key: configKey, Overlay: &backend.ConfigOverlaySpec{SourceDir: source}}}
+			if _, err := b.PrepareStores(ctx, prep); err == nil {
+				t.Fatalf("copied a %s native credential into the protected store", tool)
+			}
+			store, _ := hoststore.ResolveDir(b.opts.Host.Home, configKey, backend.StoreKindConfig)
+			if _, err := os.Stat(filepath.Join(store, filename)); !os.IsNotExist(err) {
+				t.Fatalf("native credential reached the protected store: %v", err)
+			}
+		})
+	}
+}
+
 func TestProtectedAdmissionRejectsLegacyBindOnEitherEngine(t *testing.T) {
 	for _, engine := range []string{backend.NameDocker, backend.NamePodman} {
 		t.Run(engine, func(t *testing.T) {

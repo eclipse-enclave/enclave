@@ -259,6 +259,10 @@ persisted configuration option. There is no protected GitHub host-import command
 | `enclave cleanup --keep cache,history,auth,memory` | Preserve the listed stores (comma-separated or repeated `--keep`): `cache` (package caches), `history` (shell history, the config store including conversation history, and full network captures), `auth` (auth stores, with `--all`), `memory` (per-project agent memory, no selective effect with `--all`) |
 | `enclave cleanup --build-cache` | Prune Docker build cache (requires confirmation) |
 
+Cleanup keeps protected auth identities, reporting each one it kept; that is
+not a failure. Reset and downgrade an idle identity to remove it. Unreadable
+protection metadata keeps the identity too, and does fail the cleanup.
+
 For a tool with session-scoped memory (Codex), `history` and `memory` name one
 unit: `--keep memory` also preserves the config store and `--keep history` also
 preserves memory. With `--ephemeral`, `--keep memory` preserves each session

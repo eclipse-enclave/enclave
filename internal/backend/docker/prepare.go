@@ -45,7 +45,7 @@ func (b *Backend) PrepareStores(ctx context.Context, prep backend.StorePrep) (ba
 			b.storage.authSession = prep.AuthSession
 			b.storage.viewDir = b.authViewDir(prep.AuthSession)
 			if prep.Config.Overlay != nil {
-				if err := rejectNativeAuthSource(prep.Config.Overlay.SourceDir); err != nil {
+				if err := rejectNativeAuthSource(prep.Config.Overlay.SourceDir, prep.Config.Key.Owner); err != nil {
 					return state, err
 				}
 			}

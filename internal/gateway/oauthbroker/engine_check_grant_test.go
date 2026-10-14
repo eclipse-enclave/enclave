@@ -26,9 +26,17 @@ var adapterMarkers = map[string]string{
 	protectedauth.AdapterCopilot:   copilotHandlePrefix,
 }
 
+func requireBash(t *testing.T) {
+	t.Helper()
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("the engine check script needs bash")
+	}
+}
+
 // engineCheck calls a function of the engine check script.
 func engineCheck(t *testing.T, args ...string) string {
 	t.Helper()
+	requireBash(t)
 	script := filepath.Join("..", "..", "..", "scripts", "protected-auth-engine-check.sh")
 	cmd := exec.Command("bash", append([]string{"-c", `. "$1" && shift && "$@"`, "engine-check", script}, args...)...)
 	output, err := cmd.Output()
@@ -121,6 +129,33 @@ func TestEngineCheckSyntheticGrantsAreAccepted(t *testing.T) {
 				if strings.Contains(rendered.String(), marker) {
 					t.Fatalf("view carries a synthetic secret: %s", rendered.String())
 				}
+			}
+		})
+	}
+}
+
+// The leak scan must fail on any matching file, not only the native one, and
+// on a scan that never completed.
+func TestEngineCheckHandlesOnlyNeedsEvidence(t *testing.T) {
+	native := `{"claudeAiOauth":{"accessToken":"sk-ant-oat01-handle"}}`
+	for name, tc := range map[string]struct {
+		output, want string
+	}{
+		"clean":           {native + "\nscan-done\n", "PASS: claude/handles-only"},
+		"leak elsewhere":  {native + "\nLEAK: /tmp/leaked-grant.json\nscan-done\n", "FAIL: claude/handles-only"},
+		"scan incomplete": {native + "\n", "FAIL: claude/handles-only"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			requireBash(t)
+			script := filepath.Join("..", "..", "..", "scripts", "protected-auth-engine-check.sh")
+			cmd := exec.Command("bash", "-c", `. "$1"; TOOL=claude PROJECT=/project; ensure_grant() { :; }; protected_shell() { printf '%s' "$OUTPUT"; }; check_handles_only`, "engine-check", script)
+			cmd.Env = append(os.Environ(), "OUTPUT="+tc.output)
+			output, err := cmd.Output()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.HasPrefix(string(output), tc.want) {
+				t.Fatalf("check reported %q, want %q", output, tc.want)
 			}
 		})
 	}

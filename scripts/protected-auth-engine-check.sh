@@ -194,7 +194,7 @@ check_enroll() {
         view_link="echo \"view=\$(dirname \"\$(readlink $native)\")\";"
     fi
     # shellcheck disable=SC2016 # Expanded inside the session.
-    out=$(protected_shell "$PROJECT" "echo \"protected=\$ENCLAVE_PROTECTED_AUTH\"; $view_link grep -c \"tools/$TOOL/auth\" /proc/self/mountinfo || true" --auth-scope shared --auth-name check-a)
+    out=$(protected_shell "$PROJECT" "echo \"protected=\$ENCLAVE_PROTECTED_AUTH\"; $view_link echo \"auth-mounts=\$(grep -c \"tools/$TOOL/auth\" /proc/self/mountinfo)\"" --auth-scope shared --auth-name check-a)
     if ! grep -q "protected=1" <<< "$out"; then
         record FAIL enroll "session did not start protected: $(tail -n 3 <<< "$out")"
         return
@@ -207,8 +207,8 @@ check_enroll() {
         record FAIL enroll "identity metadata does not record protection"
         return
     fi
-    if grep -qx '[1-9][0-9]*' <<< "$(tail -n 1 <<< "$out" | tr -d '\r')"; then
-        record FAIL enroll "workload mount table names the real auth store"
+    if ! grep -q '^auth-mounts=0' <<< "$(tr -d '\r' <<< "$out")"; then
+        record FAIL enroll "workload mount table names the real auth store, or was not read: $(grep auth-mounts <<< "$out")"
         return
     fi
     record PASS enroll "protected session started; credentials resolve to the view only"
@@ -229,16 +229,21 @@ check_refuse_unprotected() {
 
 check_handles_only() {
     ensure_grant
-    local out native adapter missing=()
+    local out native adapter missing=() leaks
     native=$(tool_native_file "$TOOL")
-    out=$(protected_shell "$PROJECT" "cat $native; echo; grep -rIl -e '${SYNTHETIC_MARKERS[0]}' -e '${SYNTHETIC_MARKERS[1]}' /home /tmp /run /etc /opt /var 2>/dev/null | head -n 3; echo scan-done" --auth-scope shared --auth-name check-a)
+    # Matching files are reported on LEAK lines; scan-done proves the scan ran.
+    out=$(protected_shell "$PROJECT" "cat $native; echo; grep -rIl -e '${SYNTHETIC_MARKERS[0]}' -e '${SYNTHETIC_MARKERS[1]}' /home /tmp /run /etc /opt /var 2>/dev/null | sed 's/^/LEAK: /'; echo scan-done" --auth-scope shared --auth-name check-a)
+    out=$(tr -d '\r' <<< "$out")
+    leaks=$(grep '^LEAK: ' <<< "$out")
     for adapter in $(tool_adapters "$TOOL"); do
         grep -q "$(adapter_marker "$adapter")" <<< "$out" || missing+=("$adapter")
     done
-    if [ ${#missing[@]} -ne 0 ]; then
+    if ! grep -qx scan-done <<< "$out"; then
+        record FAIL handles-only "the workload scan did not complete: $(tail -n 3 <<< "$out")"
+    elif [ ${#missing[@]} -ne 0 ]; then
         record FAIL handles-only "native file lacks handles for: ${missing[*]} ($(tail -n 3 <<< "$out"))"
-    elif grep -q -e "${SYNTHETIC_MARKERS[0]}" -e "${SYNTHETIC_MARKERS[1]}" <<< "$(sed '/scan-done/q' <<< "$out")"; then
-        record FAIL handles-only "a grant's secret is readable in the workload"
+    elif [ -n "$leaks" ] || grep -q -e "${SYNTHETIC_MARKERS[0]}" -e "${SYNTHETIC_MARKERS[1]}" <<< "$(sed '/^scan-done$/q' <<< "$out")"; then
+        record FAIL handles-only "a grant's secret is readable in the workload: $(tr '\n' ' ' <<< "$leaks")"
     else
         record PASS handles-only "the native file holds handles; no workload file contains a grant's secret"
     fi
@@ -345,10 +350,12 @@ check_concurrency() {
         return
     fi
     out=$(cd "$PROJECT" && "$CLI_BIN" auth reset --tool "$TOOL" --backend "$ENGINE" --auth-scope shared --auth-name check-a 2>&1)
-    if [ -n "$(find "$(identity_dir check-a)" -name '*grant.json' 2>/dev/null)" ]; then
-        record PASS concurrency "two sessions share the identity; reset refused while they run"
-    else
+    if [ -z "$(find "$(identity_dir check-a)" -name '*grant.json' 2>/dev/null)" ]; then
         record FAIL concurrency "reset removed the grants of running sessions: $out"
+    elif ! grep -q "auth identity is in use" <<< "$out"; then
+        record FAIL concurrency "reset kept the grants for another reason: $out"
+    else
+        record PASS concurrency "two sessions share the identity; reset refused while they run"
     fi
 }
 
@@ -440,6 +447,7 @@ cleanup() {
             "$CLI_BIN" stop --backend "$ENGINE" "enclave-$tool-$PROJECT_HASH-$session" >/dev/null 2>&1 || true
         done
     done
+    rm -rf "$ROOT" 2>/dev/null || echo "Left $ROOT behind; remove it after checking its ownership" >&2
 }
 
 write_report() {
@@ -475,6 +483,8 @@ main() {
             *) checks+=("$1"); shift ;;
         esac
     done
+    # Elsewhere Enclave ignores XDG_*, so the checks would touch real state.
+    [ "$(uname -s)" = Linux ] || { echo "the engine check runs on Linux hosts only" >&2; exit 2; }
     [ "$TOOLS" = all ] && TOOLS=$ALL_TOOLS
     for TOOL in $TOOLS; do
         [ -n "$(tool_config_dir "$TOOL")" ] || { echo "unknown tool $TOOL" >&2; exit 2; }
@@ -486,13 +496,17 @@ main() {
     command -v "$ENGINE" >/dev/null 2>&1 || { echo "$ENGINE not found" >&2; exit 2; }
     command -v script >/dev/null 2>&1 || { echo "script (util-linux) is required" >&2; exit 2; }
     [ ${#checks[@]} -gt 0 ] || read -r -a checks <<< "$ALL_CHECKS"
+    for check in "${checks[@]}"; do
+        [[ " $ALL_CHECKS " == *" $check "* ]] || { echo "unknown check $check" >&2; exit 2; }
+    done
 
-    local root
-    root=$(mktemp -d "${TMPDIR:-/tmp}/enclave-protected-check.XXXXXX")
+    # Mount sources are canonical paths; a symlinked TMPDIR would hide leaks.
+    ROOT=$(cd "$(mktemp -d "${TMPDIR:-/tmp}/enclave-protected-check.XXXXXX")" && pwd -P)
+    local root=$ROOT
     export XDG_CONFIG_HOME=$root/config XDG_STATE_HOME=$root/state XDG_CACHE_HOME=$root/cache
     STATE=$XDG_STATE_HOME/enclave
     PROJECT=$root/project
-    REPORT=${REPORT:-$root/report.md}
+    REPORT=${REPORT:-$PWD/protected-auth-engine-check.md}
     mkdir -p "$PROJECT"
     git -C "$PROJECT" init -q
     git -C "$PROJECT" config user.name "Engine Check"

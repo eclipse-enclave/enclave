@@ -273,7 +273,10 @@ scripts/protected-auth-engine-check.sh --engine podman --tool all --report podma
 ```
 
 `--tool` takes a built-in tool name or `all` (default `claude`); trailing
-arguments select checks, such as `handles-only reload`. Per tool, it enrolls a
+arguments select checks, such as `handles-only reload`. It runs on Linux hosts
+only, since elsewhere Enclave ignores the disposable XDG roots, writes the
+report to `protected-auth-engine-check.md` in the current directory unless
+`--report` names another file, and removes its disposable roots on exit. Per tool, it enrolls a
 fresh identity, then seeds a synthetic grant for each of the tool's login
 adapters (accepted by the gateway, useless to a provider). Go tests keep the
 grants and the script's copy of the tool table in step with the gateway. It

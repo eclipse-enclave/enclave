@@ -36,7 +36,7 @@ func expectedReadiness(config Config) readiness {
 
 // MarkReady attests initialized, concurrent-capable adapters in gateway-private
 // session state. Schema 2 requires readers to durably fence shared grant commits.
-// Call only after the MITM listeners are serving, before publishing proxy ready.
+// Call only after the MITM listeners are bound, before publishing proxy ready.
 func (b *Broker) MarkReady() error {
 	if b.github != nil {
 		if err := b.github.locked(func() error {

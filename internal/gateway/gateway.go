@@ -27,6 +27,7 @@ import (
 	"enclave/internal/netcapture"
 	"enclave/internal/netlog"
 	"enclave/internal/network"
+	"enclave/internal/protectedauth"
 	"enclave/internal/util"
 )
 
@@ -536,7 +537,7 @@ func Start(ctx context.Context, cfg StartConfig) (StartResult, error) {
 
 	env := []string{}
 	if cfg.OAuth != nil {
-		env = append(env, model.EnvOAuthBroker+"=claude", model.EnvOAuthIdentity+"="+cfg.OAuth.Identity, model.EnvOAuthIncarnation+"="+cfg.OAuth.Incarnation)
+		env = append(env, model.EnvOAuthBroker+"="+cfg.Profile.Name, model.EnvOAuthIdentity+"="+cfg.OAuth.Identity, model.EnvOAuthIncarnation+"="+cfg.OAuth.Incarnation)
 		for _, feature := range cfg.OAuth.Features {
 			env = append(env, model.EnvOAuthGitHub+"=1", model.EnvOAuthGitHubIdentity+"="+feature.Identity)
 		}
@@ -610,7 +611,7 @@ func Start(ctx context.Context, cfg StartConfig) (StartResult, error) {
 		if err := oauthbroker.ClearReadiness(cfg.OAuth.RuntimeDir); err != nil {
 			return empty, fmt.Errorf("clear prior protected OAuth readiness: %w", err)
 		}
-		expected := oauthbroker.Config{RuntimeDir: cfg.OAuth.RuntimeDir, Identity: cfg.OAuth.Identity, Session: cfg.ContainerName, Incarnation: cfg.OAuth.Incarnation}
+		expected := oauthbroker.Config{Tool: cfg.Profile.Name, RuntimeDir: cfg.OAuth.RuntimeDir, Identity: cfg.OAuth.Identity, Session: cfg.ContainerName, Incarnation: cfg.OAuth.Incarnation}
 		if len(cfg.OAuth.Features) != 0 {
 			expected.GitHub = &oauthbroker.GitHubConfig{Identity: cfg.OAuth.Features[0].Identity}
 		}
@@ -878,8 +879,8 @@ func validateStartConfig(cfg StartConfig) error {
 		return fmt.Errorf("gateway network name is empty")
 	}
 	if cfg.OAuth != nil {
-		if cfg.Profile.Name != "claude" || cfg.OAuth.Identity == "" || cfg.OAuth.Incarnation == "" || cfg.ContainerName == "" || cfg.TLSRootDir == "" {
-			return fmt.Errorf("protected OAuth gateway requires a Claude identity, session, incarnation and TLS CA")
+		if _, known := protectedauth.Lookup(cfg.Profile.Name); !known || cfg.OAuth.Identity == "" || cfg.OAuth.Incarnation == "" || cfg.ContainerName == "" || cfg.TLSRootDir == "" {
+			return fmt.Errorf("protected OAuth gateway requires a supported tool identity, session, incarnation and TLS CA")
 		}
 		paths := []string{cfg.OAuth.StoreDir, cfg.OAuth.RuntimeDir, cfg.OAuth.ViewDir}
 		locks := []string{cfg.OAuth.LockPath}

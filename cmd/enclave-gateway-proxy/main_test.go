@@ -23,7 +23,7 @@ func TestLoadOAuthBrokerRequiresExplicitCompleteConfiguration(t *testing.T) {
 		wantBroker, wantError                      bool
 	}{
 		{name: "disabled"},
-		{name: "unsupported", mode: "codex", identity: "fresh", session: "session", incarnation: "first", wantError: true},
+		{name: "unsupported", mode: "unknown", identity: "fresh", session: "session", incarnation: "first", wantError: true},
 		{name: "missing-identity", mode: "claude", session: "session", incarnation: "first", wantError: true},
 		{name: "missing-session", mode: "claude", identity: "fresh", incarnation: "first", wantError: true},
 		{name: "missing-incarnation", mode: "claude", identity: "fresh", session: "session", wantError: true},

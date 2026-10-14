@@ -50,6 +50,8 @@ const (
 	EnvOAuthGitHub              = EnvPrefix + "OAUTH_GITHUB"
 	EnvOAuthGitHubIdentity      = EnvPrefix + "OAUTH_GITHUB_IDENTITY"
 	EnvProtectedGitHub          = EnvPrefix + "PROTECTED_GITHUB"
+	EnvProtectedAuth            = EnvPrefix + "PROTECTED_AUTH"
+	EnvProtectedAuthFiles       = EnvPrefix + "PROTECTED_AUTH_FILES"
 	EnvGatewayCACertPath        = EnvPrefix + "GATEWAY_CA_CERT_PATH"
 	EnvGatewayCABundlePath      = EnvPrefix + "GATEWAY_CA_BUNDLE_PATH"
 	EnvBin                      = EnvPrefix + "BIN"

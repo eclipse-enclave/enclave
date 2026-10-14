@@ -78,7 +78,12 @@ func (b *Broker) RoundTrip(req *http.Request, transport, exchangeTransport http.
 			return response, err
 		}
 	}
-	if exactOrigin(req, tokenHost) && exactPath(req, tokenPath) {
+	for _, a := range b.adapters {
+		if response, handled, err := a.roundTrip(req, transport, exchangeTransport); handled {
+			return response, err
+		}
+	}
+	if b.anthropic && exactOrigin(req, tokenHost) && exactPath(req, tokenPath) {
 		return b.exchange(req, exchangeTransport)
 	}
 	// Never let a spelling/port/query mismatch on the enrollment origin turn
@@ -86,33 +91,30 @@ func (b *Broker) RoundTrip(req *http.Request, transport, exchangeTransport http.
 	if protectedHost(req.URL.Hostname()) == tokenHost || protectedHost(req.Host) == tokenHost {
 		return nil, ErrDenied
 	}
-	firstParty := firstPartyRequest(req)
-	if firstParty && credentialPath(req.URL.Path) {
+	p := requestProvider(req)
+	if p != nil && p.credentialPath(protectedHost(req.URL.Hostname()), req.URL.Path) {
 		return nil, ErrDenied
 	}
 	// Secrets the proxy released by declared rules are host-configured
 	// credentials, not captured grants; guard their reflection instead.
 	if released := releasedSecrets(req.Context()); len(released) != 0 {
-		if containsHandle(withoutSecrets(req, released)) {
+		stripped := withoutSecrets(req, released)
+		if containsHandle(stripped) || (p != nil && rawCredential(stripped)) {
 			return nil, ErrDenied
 		}
 		return mediate(req, transport, released...)
 	}
-	// No secret is ever substituted in arbitrary headers, bodies or URLs. This
-	// also rejects handles from ended sessions at declared authentication fields.
 	authorization := req.Header.Values("Authorization")
-	if len(authorization) == 0 {
-		if containsHandle(req) {
+	if !b.anthropic || len(authorization) != 1 || authorization[0] != "Bearer "+b.registry.Access || !releaseOrigin(req) {
+		// No secret is ever substituted in arbitrary headers, bodies or URLs.
+		// This also rejects handles from ended sessions, and raw credentials
+		// sent to a provider: a protected session authenticates there only
+		// through the gateway.
+		if containsHandle(req) || (p != nil && carriesCredential(req)) {
 			return nil, ErrDenied
 		}
-		if firstParty {
+		if p != nil {
 			return mediate(req, transport)
-		}
-		return transport.RoundTrip(req)
-	}
-	if len(authorization) != 1 || authorization[0] != "Bearer "+b.registry.Access || !releaseOrigin(req) {
-		if containsHandle(req) || b.RequiresMITM(req.URL.Hostname()) {
-			return nil, ErrDenied
 		}
 		return transport.RoundTrip(req)
 	}

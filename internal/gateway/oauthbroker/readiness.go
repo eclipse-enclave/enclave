@@ -27,7 +27,7 @@ type readiness struct {
 }
 
 func expectedReadiness(config Config) readiness {
-	ready := readiness{Schema: 2, Adapter: "claude", Identity: config.Identity, Session: config.Session, Incarnation: config.Incarnation}
+	ready := readiness{Schema: 3, Adapter: config.Tool, Identity: config.Identity, Session: config.Session, Incarnation: config.Incarnation}
 	if config.GitHub != nil {
 		ready.GitHubIdentity = config.GitHub.Identity
 	}
@@ -35,7 +35,8 @@ func expectedReadiness(config Config) readiness {
 }
 
 // MarkReady attests initialized, concurrent-capable adapters in gateway-private
-// session state. Schema 2 requires readers to durably fence shared grant commits.
+// session state. Schema 2 requires readers to durably fence shared grant
+// commits; schema 3 names the tool whose adapters are active.
 // Call only after the MITM listeners are bound, before publishing proxy ready.
 func (b *Broker) MarkReady() error {
 	if b.github != nil {

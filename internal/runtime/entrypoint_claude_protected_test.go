@@ -64,3 +64,28 @@ func TestProtectedClaudeEntrypointSeedsPersistentAccountStateOnce(t *testing.T) 
 		})
 	}
 }
+
+func TestEntrypointLinksProtectedNativeFilesToView(t *testing.T) {
+	home := t.TempDir()
+	view := filepath.Join(home, ".enclave-auth")
+	configDir := filepath.Join(home, ".pi")
+	writeFile(t, filepath.Join(configDir, "agent", "auth.json"), "stale handles from an earlier session")
+	env := []string{"ENCLAVE_PROTECTED_AUTH=1", "ENCLAVE_PROTECTED_AUTH_FILES=agent/auth.json:auth.json", "ENCLAVE_AUTH_DIR=" + view, "ENCLAVE_TOOL_CONFIG_DIR=" + configDir}
+	if output, err := runEntrypointCommandInHome(t, home, env, "true"); err != nil {
+		t.Fatalf("entrypoint failed: %v\n%s", err, output)
+	}
+	target, err := os.Readlink(filepath.Join(configDir, "agent", "auth.json"))
+	if err != nil || target != filepath.Join(view, "auth.json") {
+		t.Fatalf("native file not linked to the view: %q, %v", target, err)
+	}
+
+	if err := os.Remove(filepath.Join(configDir, "agent", "auth.json")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(configDir, "agent", "auth.json"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if output, err := runEntrypointCommandInHome(t, home, env, "true"); err == nil {
+		t.Fatalf("entrypoint replaced a directory at a native credential path:\n%s", output)
+	}
+}

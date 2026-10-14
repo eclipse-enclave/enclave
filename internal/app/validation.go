@@ -16,6 +16,7 @@ import (
 	"enclave/internal/backend"
 	"enclave/internal/config"
 	"enclave/internal/model"
+	"enclave/internal/protectedauth"
 )
 
 type ValidationContext struct {
@@ -44,8 +45,8 @@ func ValidateOptions(opts model.Options, sources model.OptionSources, ctx Valida
 		opts.Backend = backend.NameDocker
 	}
 	if opts.ProtectAuth {
-		if opts.Tool != "claude" || (opts.Backend != backend.NameDocker && opts.Backend != backend.NamePodman) {
-			return opts, sources, warnings, fmt.Errorf("--protect-auth supports only Claude on Docker or Podman")
+		if _, known := protectedauth.Lookup(opts.Tool); !known || (opts.Backend != backend.NameDocker && opts.Backend != backend.NamePodman) {
+			return opts, sources, warnings, fmt.Errorf("--protect-auth supports the built-in tools on Docker or Podman")
 		}
 		if opts.AuthScope == model.AuthScopeShared && strings.TrimSpace(opts.AuthName) == "" && !opts.Ephemeral {
 			return opts, sources, warnings, fmt.Errorf("--protect-auth with --auth-scope shared requires a fresh --auth-name")
@@ -60,8 +61,6 @@ func ValidateOptions(opts model.Options, sources model.OptionSources, ctx Valida
 			conflict = "runtime UID remapping (--runtime-uid-remap)"
 		case opts.HostConfig != "" && opts.HostConfig != model.HostConfigNone:
 			conflict = "host config passthrough; use --host-config=none"
-		case opts.PassAPIKey:
-			conflict = "API key injection (--pass-api-key)"
 		case opts.BaseImage != "":
 			conflict = "custom base images (--base-image)"
 		}

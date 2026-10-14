@@ -18,5 +18,6 @@ internal/model
 internal/netcapture
 internal/netlog
 internal/network
+internal/protectedauth
 internal/secretfile
 internal/util

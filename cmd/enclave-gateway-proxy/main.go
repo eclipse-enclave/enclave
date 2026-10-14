@@ -25,6 +25,7 @@ import (
 	"enclave/internal/gateway/oauthbroker"
 	"enclave/internal/gateway/tlsstore"
 	"enclave/internal/model"
+	"enclave/internal/protectedauth"
 )
 
 func main() {
@@ -163,9 +164,10 @@ func loadOAuthBroker(config oauthbroker.Config, viewDir string) (*oauthbroker.Br
 	if mode == "" && config.Identity == "" && config.Incarnation == "" && githubMode == "" && githubIdentity == "" && config.GitHub == nil {
 		return nil, nil
 	}
-	if mode != "claude" || config.Identity == "" || config.Session == "" || config.Incarnation == "" {
+	if _, known := protectedauth.Lookup(mode); !known || config.Identity == "" || config.Session == "" || config.Incarnation == "" {
 		return nil, oauthbroker.ErrState
 	}
+	config.Tool = mode
 	if githubMode != "" || githubIdentity != "" || config.GitHub != nil {
 		if githubMode != "1" || githubIdentity == "" {
 			return nil, oauthbroker.ErrState

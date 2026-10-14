@@ -31,6 +31,7 @@ import (
 	"enclave/internal/gateway/oauthbroker"
 	"enclave/internal/logx"
 	"enclave/internal/model"
+	"enclave/internal/protectedauth"
 	"enclave/internal/util"
 )
 
@@ -58,8 +59,8 @@ func (b *Backend) PrepareAuthSession(ctx context.Context, key backend.StoreKey, 
 	if saved && !protected {
 		return nil, errors.New("saved auth identity is protected; rerun with --protect-auth or explicitly downgrade it while idle")
 	}
-	if protected && key.Owner != "claude" {
-		return nil, errors.New("protected OAuth currently supports Claude subscription identities only")
+	if _, known := protectedauth.Lookup(key.Owner); protected && !known {
+		return nil, fmt.Errorf("protected auth does not support tool %s", key.Owner)
 	}
 	if protected {
 		uid, uidErr := strconv.Atoi(b.opts.Host.UID)
@@ -189,17 +190,26 @@ func (b *Backend) sweepAuthLeftovers(check *authInspection) error {
 	if home == "" {
 		return nil
 	}
-	identities, err := os.ReadDir(config.HostStoreAuthTreeDir(home, "claude"))
+	tools, err := os.ReadDir(config.HostStoreAuthRootDir(home))
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	for _, identity := range identities {
-		key := backend.StoreKey{Owner: "claude", Suffix: identity.Name()}
-		if !identity.IsDir() || !backend.IsProtectedEphemeralIdentity(key) {
+	for _, tool := range tools {
+		if _, known := protectedauth.Lookup(tool.Name()); !known || !tool.IsDir() {
 			continue
 		}
-		if err := b.removeEphemeralIdentity(check, key); err != nil {
-			logx.Debugf("Keeping ended session's protected identity for a later sweep: %v", err)
+		identities, err := os.ReadDir(config.HostStoreAuthTreeDir(home, tool.Name()))
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		for _, identity := range identities {
+			key := backend.StoreKey{Owner: tool.Name(), Suffix: identity.Name()}
+			if !identity.IsDir() || !backend.IsProtectedEphemeralIdentity(key) {
+				continue
+			}
+			if err := b.removeEphemeralIdentity(check, key); err != nil {
+				logx.Debugf("Keeping ended session's protected identity for a later sweep: %v", err)
+			}
 		}
 	}
 	reserved, err := hoststore.ReservedIncarnations(home)
@@ -634,7 +644,7 @@ func (b *Backend) registeredAuthGateway(info dockercmd.InspectResponse, engine s
 			}
 			env[key] = value
 		}
-		if env[model.EnvOAuthBroker] != "claude" || env[model.EnvOAuthIncarnation] != owner.Incarnation {
+		if _, known := protectedauth.Lookup(env[model.EnvOAuthBroker]); !known || env[model.EnvOAuthIncarnation] != owner.Incarnation {
 			return false
 		}
 		ref := &backend.AuthSession{Incarnation: owner.Incarnation}
@@ -642,7 +652,7 @@ func (b *Backend) registeredAuthGateway(info dockercmd.InspectResponse, engine s
 		if err := hoststore.EnsureNoSymlinkChain(config.HostStateRootDir(b.opts.Host.Home), runtime, false); err != nil {
 			return false
 		}
-		expected := oauthbroker.Config{RuntimeDir: runtime, Identity: env[model.EnvOAuthIdentity], Session: owner.Session, Incarnation: owner.Incarnation}
+		expected := oauthbroker.Config{Tool: env[model.EnvOAuthBroker], RuntimeDir: runtime, Identity: env[model.EnvOAuthIdentity], Session: owner.Session, Incarnation: owner.Incarnation}
 		if env[model.EnvOAuthGitHub] == "1" {
 			expected.GitHub = &oauthbroker.GitHubConfig{Identity: env[model.EnvOAuthGitHubIdentity]}
 		}

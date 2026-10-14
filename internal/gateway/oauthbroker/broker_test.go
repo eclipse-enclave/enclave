@@ -45,6 +45,7 @@ func fixtureBroker(t *testing.T) *Broker {
 	t.Helper()
 	root := t.TempDir()
 	config := Config{
+		Tool:     "claude",
 		StoreDir: filepath.Join(root, "identity"), RuntimeDir: filepath.Join(root, "runtime"),
 		LockPath: filepath.Join(root, "owner.lock"), Identity: "fresh", Session: "same-container-name", Incarnation: "first",
 	}
@@ -1304,8 +1305,8 @@ func TestRuleReleasedSecretsPassButAreGuarded(t *testing.T) {
 	const secret = "sk-ant-oat01-host-configured-long-lived-token"
 	for _, tc := range []struct {
 		name, url, body string
-		extraHandle      bool
-		wantErr          error
+		extraHandle     bool
+		wantErr         error
 	}{
 		{name: "first-party bearer", url: "https://api.anthropic.com/v1/messages", body: `{"ok":true}`},
 		{name: "first-party reflection", url: "https://api.anthropic.com/v1/messages", body: "data: " + secret, wantErr: ErrResponse},

@@ -27,6 +27,7 @@ import (
 	"enclave/internal/mounts"
 	"enclave/internal/network"
 	"enclave/internal/policy"
+	"enclave/internal/protectedauth"
 	"enclave/internal/termtint"
 	"enclave/internal/util"
 )
@@ -1556,10 +1557,18 @@ func (r *Runtime) addAuthMount(mounts *mountAccumulator, authStore *backend.Stor
 	if r.auth.ProtectAuth {
 		// The backend backs this store with the session's native handle view;
 		// the persistent config store keeps history at the native config dir.
+		// The tool reads its credentials from the view, through its storage
+		// variable or through links the entrypoint creates.
+		tool, _ := protectedauth.Lookup(r.profile.Name)
 		mounts.AddStore(backend.PersistentStore{Kind: authStore.Kind, Key: authStore.Key, ContainerPath: authMountPath})
 		mounts.AddEnv(model.EnvAuthDir, authMountPath)
-		mounts.AddEnv("CLAUDE_SECURESTORAGE_CONFIG_DIR", authMountPath)
-		mounts.AddEnv("ENCLAVE_PROTECTED_AUTH", "1")
+		mounts.AddEnv(model.EnvProtectedAuth, "1")
+		if tool.StorageDirEnv != "" {
+			mounts.AddEnv(tool.StorageDirEnv, authMountPath)
+		}
+		if links := tool.LinkSpec(); links != "" {
+			mounts.AddEnv(model.EnvProtectedAuthFiles, links)
+		}
 		return
 	}
 	mounts.AddStore(backend.PersistentStore{Kind: authStore.Kind, Key: authStore.Key, ContainerPath: authMountPath})

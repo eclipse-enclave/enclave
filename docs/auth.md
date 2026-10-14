@@ -11,7 +11,29 @@ enclave        # Subsequent runs: session reused automatically
 
 ### Experimental gateway-owned Claude OAuth
 
-Opt in on Docker or Podman with one of these identities:
+Every built-in tool can run protected on Docker or Podman. The gateway captures
+the logins each tool supports and gives the tool handles in its native credential
+files, which the session links to a view at `~/.enclave-auth`:
+
+| Tool | Captured logins | Native credential files |
+|------|-----------------|-------------------------|
+| `claude` | Claude subscription | `.credentials.json` (through `CLAUDE_SECURESTORAGE_CONFIG_DIR`) |
+| `pi` | Claude subscription | `~/.pi/agent/auth.json` |
+| `codex` | none yet; ChatGPT login is refused | `~/.codex/auth.json` |
+| `opencode` | none yet; ChatGPT and Copilot logins are refused | `~/.config/opencode/auth.json` |
+| `mistral-vibe` | none yet; browser sign-in is refused | `~/.vibe/.env` |
+| `theia`, `theia-next` | none | none |
+
+In every protected session the gateway mediates the Anthropic, OpenAI, Mistral,
+GitHub and Copilot domains. Logins it does not capture are refused there, and so
+are raw credentials, such as an API key pasted into a tool: configure API keys as
+[Enclave secrets](#secrets) instead, which the session receives as placeholders.
+WebSocket handshakes to these hosts are checked like requests; the upgraded
+stream is relayed unscanned. Self-hosted login hosts, such as GitHub Enterprise,
+are not recognized: under unrestricted networking their logins are not
+protected, and restricted networking blocks them unless allowlisted.
+
+Opt in with one of these identities:
 
 ```bash
 # A fresh named identity, shareable across projects

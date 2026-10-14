@@ -20,6 +20,7 @@ import (
 	"enclave/internal/auth"
 	"enclave/internal/backend"
 	"enclave/internal/model"
+	"enclave/internal/protectedauth"
 	"enclave/internal/util"
 )
 
@@ -27,8 +28,9 @@ func (r *Runtime) validateProtectedAuth() error {
 	if !r.auth.ProtectAuth {
 		return nil
 	}
-	if r.profile.Name != "claude" || r.profile.Command != "claude" || r.profile.ConfigDir != ".claude" {
-		return fmt.Errorf("protected auth requires the standard Claude profile")
+	tool, known := protectedauth.Lookup(r.profile.Name)
+	if !known || r.profile.ConfigDir != tool.ConfigDir {
+		return fmt.Errorf("protected auth does not support tool %s", r.profile.Name)
 	}
 	if r.backend == nil || (r.backend.Name() != backend.NameDocker && r.backend.Name() != backend.NamePodman) {
 		return fmt.Errorf("protected auth requires Docker or Podman")
@@ -50,8 +52,6 @@ func (r *Runtime) validateProtectedAuth() error {
 		return fmt.Errorf("protected auth does not support runtime UID remapping (--runtime-uid-remap)")
 	case r.run.HostConfig != "" && r.run.HostConfig != model.HostConfigNone:
 		return fmt.Errorf("protected auth does not support host config passthrough; use --host-config=none")
-	case r.auth.PassAPIKey:
-		return fmt.Errorf("protected auth does not support API key injection (--pass-api-key)")
 	case r.build.BaseImage != "":
 		return fmt.Errorf("protected auth does not support custom base images (--base-image)")
 	}
@@ -65,6 +65,9 @@ func (r *Runtime) validateProtectedAuth() error {
 		}
 	}
 	for _, arg := range r.run.CmdArgs {
+		if r.profile.Name != "claude" {
+			break
+		}
 		for _, option := range []string{"--settings", "--setting-sources", "--plugin-dir", "--mcp-config"} {
 			if arg == option || strings.HasPrefix(arg, option+"=") {
 				return fmt.Errorf("protected auth does not support %s overrides", option)
@@ -72,7 +75,7 @@ func (r *Runtime) validateProtectedAuth() error {
 		}
 	}
 	for _, key := range r.auth.PassEnv {
-		if protectedCredentialEnv(key) || protectedBindingEnv(key) || (r.protectedGitHubEnabled() && protectedGitHubEnv(key)) {
+		if protectedCredentialEnv(key) || r.protectedBindingEnv(key) || (r.protectedGitHubEnabled() && protectedGitHubEnv(key)) {
 			return fmt.Errorf("protected auth conflicts with --pass-env %s", key)
 		}
 	}
@@ -127,12 +130,16 @@ func protectedCredentialEnv(key string) bool {
 	return false
 }
 
-func protectedBindingEnv(key string) bool {
+// protectedBindingEnv names variables that locate the tool's credentials. The
+// runtime sets the ones it needs; any other value would move credentials away
+// from the gateway's view.
+func (r *Runtime) protectedBindingEnv(key string) bool {
 	switch key {
-	case "CLAUDE_CONFIG_DIR", "CLAUDE_SECURESTORAGE_CONFIG_DIR", model.EnvAuthDir, model.EnvAuthFiles, model.EnvToolConfigDir, "ENCLAVE_PROTECTED_AUTH":
+	case model.EnvAuthDir, model.EnvAuthFiles, model.EnvToolConfigDir, model.EnvProtectedAuth, model.EnvProtectedAuthFiles:
 		return true
 	}
-	return false
+	tool, _ := protectedauth.Lookup(r.profile.Name)
+	return slices.Contains(tool.LocationEnv, key)
 }
 
 // sessionPlaceholders lists the placeholders the gateway releases in this
@@ -158,6 +165,7 @@ func validateProtectedEnv(env []string, placeholders map[string]bool) error {
 func (r *Runtime) validateProtectedBindings(env []string, placeholders map[string]bool) error {
 	configDir := resolveContainerProfilePath(r.containerHome, r.profile.ConfigDir)
 	view := r.containerHome + "/" + model.ContainerAuthDir
+	tool, _ := protectedauth.Lookup(r.profile.Name)
 	for _, assignment := range env {
 		key, value, _ := strings.Cut(assignment, "=")
 		if r.protectedGitHubEnabled() && protectedGitHubEnv(key) {
@@ -174,18 +182,19 @@ func (r *Runtime) validateProtectedBindings(env []string, placeholders map[strin
 				return fmt.Errorf("protected GitHub conflicts with environment setting %s", key)
 			}
 		}
-		if !protectedBindingEnv(key) {
+		if !r.protectedBindingEnv(key) {
 			continue
 		}
-		want := view
+		want := ""
 		switch key {
+		case model.EnvAuthDir, tool.StorageDirEnv:
+			want = view
 		case "CLAUDE_CONFIG_DIR", model.EnvToolConfigDir:
 			want = configDir
-		case model.EnvAuthFiles:
-			want = ""
-		}
-		if key == "ENCLAVE_PROTECTED_AUTH" {
+		case model.EnvProtectedAuth:
 			want = "1"
+		case model.EnvProtectedAuthFiles:
+			want = tool.LinkSpec()
 		}
 		if value != want {
 			return fmt.Errorf("protected auth conflicts with native auth location setting %s", key)
@@ -228,7 +237,7 @@ func (m authManager) prepareProtected(env *[]string, stores storeSet) (model.Aut
 	for _, secret := range secrets {
 		binding := false
 		for _, key := range secret.EnvVars {
-			binding = binding || protectedBindingEnv(key) || (m.protectedGitHubEnabled() && protectedGitHubEnv(key))
+			binding = binding || m.protectedBindingEnv(key) || (m.protectedGitHubEnabled() && protectedGitHubEnv(key))
 		}
 		_, selector := selectors[secret.ID]
 		if !binding && (secret.ReleaseHTTP != nil || selector) {
@@ -244,7 +253,7 @@ func (m authManager) prepareProtected(env *[]string, stores storeSet) (model.Aut
 		}
 	}
 	for key, value := range persisted {
-		if value != "" && (protectedBindingEnv(key) || (m.protectedGitHubEnabled() && protectedGitHubEnv(key))) {
+		if value != "" && (m.protectedBindingEnv(key) || (m.protectedGitHubEnabled() && protectedGitHubEnv(key))) {
 			return model.AuthState{}, SecretMapping{}, fmt.Errorf("protected auth conflicts with persisted environment setting %s", key)
 		}
 	}
@@ -256,13 +265,20 @@ func (m authManager) prepareProtected(env *[]string, stores storeSet) (model.Aut
 		}
 	}
 	if m.configSourceDir != "" {
-		for _, name := range []string{".credentials.json", "config.json", ".claude.json", ".config.json"} {
-			if _, err := os.Lstat(filepath.Join(m.configSourceDir, name)); err == nil || !os.IsNotExist(err) {
+		names := append(m.profile.RuntimeAuthFiles(), ".config.json")
+		tool, _ := protectedauth.Lookup(m.profile.Name)
+		for _, file := range tool.Files {
+			names = append(names, file.ConfigPath)
+		}
+		for _, name := range names {
+			if _, err := os.Lstat(filepath.Join(m.configSourceDir, filepath.FromSlash(name))); err == nil || !os.IsNotExist(err) {
 				return model.AuthState{}, SecretMapping{}, fmt.Errorf("protected auth refuses native auth file in config source: %s", name)
 			}
 		}
-		if err := validateProtectedSettings(filepath.Join(m.configSourceDir, "settings.json"), m.protectedGitHubEnabled()); err != nil {
-			return model.AuthState{}, SecretMapping{}, err
+		if m.profile.Name == "claude" {
+			if err := m.validateProtectedSettings(filepath.Join(m.configSourceDir, "settings.json"), m.protectedGitHubEnabled()); err != nil {
+				return model.AuthState{}, SecretMapping{}, err
+			}
 		}
 	}
 	ctx := auth.Context{Host: m.host, Project: m.project, Profile: m.profile, Run: m.run, Auth: m.auth, Build: m.build, Storage: m.storage(), ConfigStore: stores.Config}
@@ -278,7 +294,7 @@ func (m authManager) prepareProtected(env *[]string, stores storeSet) (model.Aut
 	return model.AuthState{Providers: map[string]model.ProviderAuthState{"anthropic": {HasSession: true}}}, injection.SecretMapping, nil
 }
 
-func validateProtectedSettings(filename string, github bool) error {
+func (r *Runtime) validateProtectedSettings(filename string, github bool) error {
 	data, err := os.ReadFile(filename) // #nosec G304 -- fixed settings.json in the host-composed tool config source, never an HTTP input.
 	if os.IsNotExist(err) {
 		return nil
@@ -301,7 +317,7 @@ func validateProtectedSettings(filename string, github bool) error {
 			return fmt.Errorf("protected auth requires string-valued settings environment")
 		}
 		for key := range env {
-			if protectedCredentialEnv(key) || protectedBindingEnv(key) || (github && protectedGitHubEnv(key)) {
+			if protectedCredentialEnv(key) || r.protectedBindingEnv(key) || (github && protectedGitHubEnv(key)) {
 				return fmt.Errorf("protected auth conflicts with Claude settings environment %s", key)
 			}
 		}

@@ -9,9 +9,10 @@ package oauthbroker
 
 import (
 	"encoding/json"
-	"errors"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 )
 
 // InitializeView creates the native credential file before the workload starts.
@@ -34,8 +35,8 @@ func (b *Broker) InitializeView(dir string) error {
 		if err != nil {
 			return err
 		}
-		data, err := b.nativeView(g)
-		if err != nil && !errors.Is(err, ErrUncertain) {
+		files, err := b.nativeFiles(g)
+		if err != nil {
 			return err
 		}
 		root, err := os.OpenRoot(dir)
@@ -43,21 +44,16 @@ func (b *Broker) InitializeView(dir string) error {
 			return ErrState
 		}
 		defer func() { _ = root.Close() }()
-		for _, name := range []string{".credentials.json", ".claude.json", ".config.json"} {
-			if _, err := root.Lstat(name); !errors.Is(err, os.ErrNotExist) {
-				return ErrState
-			}
+		// The host provisions an empty view; anything else was planted.
+		entries, err := os.ReadDir(dir)
+		if err != nil || len(entries) != 0 {
+			return ErrState
 		}
-		if len(data) != 0 {
-			config, err := nativeAccountConfig(g)
-			if err != nil {
-				return err
-			}
-			if err := writeInitialViewFile(root, dir, ".credentials.json", data); err != nil {
-				return err
-			}
-			if err := writeInitialViewFile(root, dir, ".claude.json", config); err != nil {
-				return err
+		if len(files) != 0 {
+			for _, name := range slices.Sorted(maps.Keys(files)) {
+				if err := writeInitialViewFile(root, dir, name, files[name]); err != nil {
+					return err
+				}
 			}
 			directory, err := root.Open(".")
 			if err != nil {
@@ -78,6 +74,42 @@ func (b *Broker) InitializeView(dir string) error {
 		b.registry = initialized
 		return nil
 	})
+}
+
+// nativeFiles renders the tool's credential files from committed grants. They
+// hold handles and non-secret metadata only; an uncertain grant renders none,
+// so the client asks for a new login.
+func (b *Broker) nativeFiles(g *grant) (map[string][]byte, error) {
+	files := map[string][]byte{}
+	ready := b.anthropic && g != nil && g.Status == "ready"
+	switch b.config.Tool {
+	case "claude":
+		if !ready {
+			return files, nil
+		}
+		credentials, err := b.nativeView(g)
+		if err != nil {
+			return nil, err
+		}
+		config, err := nativeAccountConfig(g)
+		if err != nil {
+			return nil, err
+		}
+		files[".credentials.json"], files[".claude.json"] = credentials, config
+	case "pi":
+		entries := map[string]any{}
+		if ready {
+			entries["anthropic"] = map[string]any{"type": "oauth", "access": b.registry.Access, "refresh": b.registry.Refresh, "expires": g.ExpiresAt * 1000}
+		}
+		if len(entries) != 0 {
+			data, err := json.Marshal(entries)
+			if err != nil {
+				return nil, ErrState
+			}
+			files["auth.json"] = data
+		}
+	}
+	return files, nil
 }
 
 func nativeAccountConfig(g *grant) ([]byte, error) {

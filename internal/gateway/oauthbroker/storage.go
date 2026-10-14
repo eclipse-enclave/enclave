@@ -14,12 +14,14 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
+	"enclave/internal/protectedauth"
 	"enclave/internal/util"
 )
 
@@ -41,7 +43,10 @@ var (
 // mounted into the gateway; deriving it from a container path is not safe.
 // The caller owns admission, UID mapping, reset, and session-end cleanup.
 type Config struct {
-	GitHub      *GitHubConfig
+	GitHub *GitHubConfig
+	// Tool selects the logins the gateway captures and the native view
+	// format; see internal/protectedauth.
+	Tool        string
 	StoreDir    string
 	RuntimeDir  string
 	LockPath    string
@@ -71,20 +76,30 @@ type grant struct {
 	Token       tokenResponse `json:"token"`
 }
 
+// adapter captures one provider's logins and releases its handles. It
+// reports whether it handled the request.
+type adapter interface {
+	roundTrip(req *http.Request, transport, exchange http.RoundTripper) (*http.Response, bool, error)
+}
+
 type Broker struct {
 	github   *githubBroker
-	config   Config
-	registry registry
-	mu       sync.Mutex
-	now      func() time.Time
-	write    func(string, any) error
-	failed   bool
+	adapters []adapter
+	// anthropic enables Claude subscription capture and release.
+	anthropic bool
+	config    Config
+	registry  registry
+	mu        sync.Mutex
+	now       func() time.Time
+	write     func(string, any) error
+	failed    bool
 }
 
 // Open recovers a proxy reload without rotating handles. A new logical session
 // must use a fresh RuntimeDir and incarnation even if its container name repeats.
 func Open(config Config) (*Broker, error) {
-	if config.Identity == "" || config.Session == "" || config.Incarnation == "" || !filepath.IsAbs(config.LockPath) {
+	tool, known := protectedauth.Lookup(config.Tool)
+	if !known || config.Identity == "" || config.Session == "" || config.Incarnation == "" || !filepath.IsAbs(config.LockPath) {
 		return nil, ErrState
 	}
 	// Admission on the host creates this file before mounting it. Missing or
@@ -106,7 +121,7 @@ func Open(config Config) (*Broker, error) {
 	if err != nil || within(store, runtime) || within(runtime, store) {
 		return nil, ErrState
 	}
-	b := &Broker{config: config, now: time.Now, write: durableJSON}
+	b := &Broker{config: config, now: time.Now, write: durableJSON, anthropic: tool.Uses(protectedauth.AdapterAnthropic)}
 	err = b.locked(func() error {
 		path := filepath.Join(config.RuntimeDir, registryFile)
 		if err := readPrivateJSON(path, &b.registry); err != nil {

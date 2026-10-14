@@ -32,7 +32,7 @@ func runningProtectedGateway(t *testing.T, b *Backend, ref *backend.AuthSession)
 	if err != nil {
 		t.Fatal(err)
 	}
-	brokerConfig := oauthbroker.Config{StoreDir: cfg.StoreDir, RuntimeDir: cfg.RuntimeDir, LockPath: cfg.LockPath, Identity: cfg.Identity, Session: ref.Session, Incarnation: ref.Incarnation}
+	brokerConfig := oauthbroker.Config{Tool: "claude", StoreDir: cfg.StoreDir, RuntimeDir: cfg.RuntimeDir, LockPath: cfg.LockPath, Identity: cfg.Identity, Session: ref.Session, Incarnation: ref.Incarnation}
 	info := dockercmd.InspectResponse{
 		Name:   "/" + gateway.ContainerName(ref.Session),
 		State:  &dockercmd.ContainerState{Status: "running", Running: true},
@@ -196,7 +196,7 @@ func TestProtectedSharingRejectsUnverifiedGatewayAndOverlappingMounts(t *testing
 							t.Fatal(err)
 						}
 						if scenario == "old-broker" {
-							if err := os.WriteFile(ready, []byte(strings.Replace(string(data), `"schema":2`, `"schema":1`, 1)), 0o600); err != nil {
+							if err := os.WriteFile(ready, []byte(strings.Replace(string(data), `"schema":3`, `"schema":2`, 1)), 0o600); err != nil {
 								t.Fatal(err)
 							}
 						} else if err := os.Remove(ready); err != nil {

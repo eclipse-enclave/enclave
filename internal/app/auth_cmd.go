@@ -18,6 +18,7 @@ import (
 	"enclave/internal/config"
 	"enclave/internal/logx"
 	"enclave/internal/model"
+	"enclave/internal/protectedauth"
 	"enclave/internal/util"
 )
 
@@ -106,8 +107,8 @@ func runProtectedAuthAction(input *CommandInput) int {
 	if input.Options.AuthScope == model.AuthScopeProject {
 		identity = backend.ProtectedProjectIdentity(ctx.project.Hash)
 	}
-	if ctx.profile.Name != "claude" || identity == "" {
-		logx.Errorf("protected auth commands require --tool claude with --auth-scope project or --auth-scope shared --auth-name <name>")
+	if _, known := protectedauth.Lookup(ctx.profile.Name); !known || identity == "" {
+		logx.Errorf("protected auth commands require a built-in --tool with --auth-scope project or --auth-scope shared --auth-name <name>")
 		return 1
 	}
 	manager, ok := ctx.backend.(backend.AuthSessionManager)

@@ -429,13 +429,10 @@ func (p *proxy) forward(w http.ResponseWriter, req *http.Request, scheme string,
 	outgoing.RequestURI = ""
 	outgoing.URL = &target
 	outgoing.Body = capture.RequestBody(req.Body)
-	// The broker cannot inspect an upgraded stream, so protected sessions fail
-	// closed by dropping upgrade requests to the hosts it mediates along with
-	// the other hop-by-hop headers. Other handshakes still pass its checks.
+	// In protected sessions the broker checks a handshake like any request,
+	// releasing handles and refusing raw credentials; the upgraded stream is
+	// then relayed unscanned.
 	upgrade := upgradeType(req.Header)
-	if p.oauthBroker != nil && (p.oauthBroker.RequiresMITM(target.Host) || p.oauthBroker.RequiresMITM(req.Host)) {
-		upgrade = ""
-	}
 	removeHopHeaders(outgoing.Header)
 	if upgrade != "" {
 		outgoing.Header.Set("Connection", "Upgrade")

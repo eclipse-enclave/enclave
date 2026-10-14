@@ -18,51 +18,154 @@ import (
 	"strings"
 )
 
-// The Claude client is not pinned, so the gateway cannot rely on a fixed set
-// of client endpoints. It mediates every first-party domain instead: a changed
-// client that obtains credentials anywhere but the captured exchange fails
-// there rather than receiving them unmediated.
-var firstPartyDomains = []string{"anthropic.com", "claude.com", "claude.ai"}
+// provider describes the first-party domains of one credential issuer. The
+// gateway mediates them in every protected session, whether or not the tool
+// uses the provider: a client cannot obtain credentials there through an
+// endpoint the gateway does not capture, and raw credentials sent there are
+// refused, so a pasted key never authenticates a protected session.
+type provider struct {
+	name    string
+	domains []string
+	// credentialPath matches token exchanges and credential-minting endpoints
+	// other than captured ones.
+	credentialPath func(host, path string) bool
+	// contentPath carries model output, user files or tool results, which may
+	// legitimately contain credential-like text.
+	contentPath func(host, path string) bool
+	// patterns indicate credentials in a structured response elsewhere.
+	patterns [][]byte
+}
 
-// releaseHosts receive the access token in a Bearer Authorization header on
-// any path, subject to credentialPath and the response tripwire.
-var releaseHosts = []string{accessHost, "mcp-proxy.anthropic.com"}
+var tokenFields = [][]byte{[]byte(`"access_token"`), []byte(`"refresh_token"`), []byte(`"id_token"`), []byte(`"accessToken"`), []byte(`"refreshToken"`)}
 
-// genericCredentialPatterns indicate credentials in a structured first-party
-// response. Model and file content may legitimately contain them, so content
-// paths are only checked for the real tokens themselves.
-var genericCredentialPatterns = [][]byte{[]byte(`"access_token"`), []byte(`"refresh_token"`), []byte("sk-ant-")}
+func withPatterns(extra ...string) [][]byte {
+	patterns := slices.Clone(tokenFields)
+	for _, pattern := range extra {
+		patterns = append(patterns, []byte(pattern))
+	}
+	return patterns
+}
 
-func firstPartyHost(host string) bool {
-	host = protectedHost(host)
-	return slices.ContainsFunc(firstPartyDomains, func(domain string) bool {
-		return host == domain || strings.HasSuffix(host, "."+domain)
+func pathPrefix(path string, prefixes ...string) bool {
+	return slices.ContainsFunc(prefixes, func(prefix string) bool {
+		return path == prefix || strings.HasPrefix(path, prefix+"/")
 	})
 }
 
-func firstPartyRequest(req *http.Request) bool {
-	return firstPartyHost(req.URL.Hostname()) || firstPartyHost(req.Host)
+// genericCredentialPath matches token and API-key endpoints by name.
+func genericCredentialPath(_, path string) bool {
+	path = strings.ToLower(path)
+	return strings.Contains(path, "oauth/token") || strings.Contains(path, "oauth2/token") ||
+		strings.Contains(path, "api_key") || strings.Contains(path, "api-key") || strings.HasSuffix(path, "/token") ||
+		strings.Contains(path, "oauth/revoke")
 }
+
+var providers = []provider{
+	{
+		name:           "anthropic",
+		domains:        []string{"anthropic.com", "claude.com", "claude.ai"},
+		credentialPath: genericCredentialPath,
+		contentPath: func(host, path string) bool {
+			return host == "mcp-proxy.anthropic.com" || pathPrefix(path, "/v1/messages", "/v1/files", "/v1/complete")
+		},
+		patterns: withPatterns("sk-ant-"),
+	},
+	{
+		name:    "openai",
+		domains: []string{"openai.com", "chatgpt.com", "chatgpt-staging.com"},
+		credentialPath: func(host, path string) bool {
+			lower := strings.ToLower(path)
+			// Token sharing and agent registration mint credentials the
+			// gateway does not capture.
+			return genericCredentialPath(host, path) || strings.HasPrefix(lower, "/api/accounts/oauth") || strings.HasPrefix(lower, "/api/accounts/v1/agent")
+		},
+		contentPath: func(host, path string) bool {
+			return host == "api.openai.com" || pathPrefix(path, "/backend-api/codex", "/backend-api/files", "/backend-api/ps")
+		},
+		patterns: withPatterns("sk-proj-", "sk-svcacct-", "sk-admin-"),
+	},
+	{
+		name:    "mistral",
+		domains: []string{"mistral.ai"},
+		credentialPath: func(host, path string) bool {
+			// The browser sign-in exchange returns an API key.
+			return genericCredentialPath(host, path) || strings.HasSuffix(strings.ToLower(path), "/exchange")
+		},
+		contentPath: func(host, _ string) bool { return host == "api.mistral.ai" },
+		patterns:    withPatterns(`"api_key"`),
+	},
+	{
+		name:           "copilot",
+		domains:        []string{"githubcopilot.com"},
+		credentialPath: genericCredentialPath,
+		contentPath:    func(string, string) bool { return true },
+	},
+	{
+		// GitHub logins issue tokens at github.com and Copilot tokens at
+		// api.github.com. Repository content stays unscanned.
+		name:    "github",
+		domains: []string{"github.com"},
+		credentialPath: func(host, path string) bool {
+			lower := strings.ToLower(path)
+			return strings.HasPrefix(lower, "/login/oauth") || strings.HasPrefix(lower, "/login/device") || strings.Contains(lower, "/copilot_internal/")
+		},
+		contentPath: func(host, _ string) bool { return host != "github.com" },
+		patterns:    tokenFields,
+	},
+}
+
+func providerFor(host string) *provider {
+	host = protectedHost(host)
+	for i := range providers {
+		if slices.ContainsFunc(providers[i].domains, func(domain string) bool {
+			return host == domain || strings.HasSuffix(host, "."+domain)
+		}) {
+			return &providers[i]
+		}
+	}
+	return nil
+}
+
+// requestProvider names the provider of either the URL or the Host header, so
+// a mismatch between them cannot route around mediation.
+func requestProvider(req *http.Request) *provider {
+	if p := providerFor(req.URL.Hostname()); p != nil {
+		return p
+	}
+	return providerFor(req.Host)
+}
+
+func firstPartyHost(host string) bool {
+	return providerFor(host) != nil
+}
+
+// releaseHosts receive the Claude access token in a Bearer Authorization
+// header on any path, subject to the response tripwire.
+var releaseHosts = []string{accessHost, "mcp-proxy.anthropic.com"}
 
 func releaseOrigin(req *http.Request) bool {
 	return slices.ContainsFunc(releaseHosts, func(host string) bool { return exactOrigin(req, host) })
 }
 
-// credentialPath matches token exchanges and credential-minting endpoints other
-// than the captured exchange.
-func credentialPath(path string) bool {
-	path = strings.ToLower(path)
-	return strings.Contains(path, "oauth/token") || strings.Contains(path, "oauth2/token") ||
-		strings.Contains(path, "api_key") || strings.Contains(path, "api-key") || strings.HasSuffix(path, "/token")
+// credentialHeaders carry provider credentials. In a protected session they
+// must hold a handle or a rule-released secret when sent to a provider.
+var credentialHeaders = []string{"Authorization", "X-Api-Key", "X-Goog-Api-Key", "Api-Key"}
+
+func carriesCredential(req *http.Request) bool {
+	return slices.ContainsFunc(credentialHeaders, func(name string) bool { return len(req.Header.Values(name)) != 0 })
 }
 
-// contentPath carries model output, user files or MCP tool results.
-func contentPath(req *http.Request) bool {
-	if exactOrigin(req, "mcp-proxy.anthropic.com") {
-		return true
-	}
-	return slices.ContainsFunc([]string{"/v1/messages", "/v1/files", "/v1/complete"}, func(prefix string) bool {
-		return req.URL.Path == prefix || strings.HasPrefix(req.URL.Path, prefix+"/")
+// rawCredential reports a credential header with content beyond an
+// authentication scheme, once released secrets have been blanked.
+func rawCredential(req *http.Request) bool {
+	return slices.ContainsFunc(credentialHeaders, func(name string) bool {
+		return slices.ContainsFunc(req.Header.Values(name), func(value string) bool {
+			fields := strings.Fields(value)
+			if len(fields) > 0 && slices.Contains([]string{"bearer", "basic", "token"}, strings.ToLower(fields[0])) {
+				fields = fields[1:]
+			}
+			return len(fields) != 0
+		})
 	})
 }
 
@@ -117,8 +220,8 @@ func mediate(req *http.Request, transport http.RoundTripper, secrets ...string) 
 			}
 		}
 	}
-	if firstPartyRequest(req) && !contentPath(req) && structuredMedia(resp.Header) {
-		patterns = append(patterns, genericCredentialPatterns...)
+	if p := requestProvider(req); p != nil && !p.contentPath(protectedHost(req.URL.Hostname()), req.URL.Path) && structuredMedia(resp.Header) {
+		patterns = append(patterns, p.patterns...)
 	}
 	// An upgraded stream is relayed as is; it cannot be scanned.
 	if len(patterns) == 0 || resp.StatusCode == http.StatusSwitchingProtocols {

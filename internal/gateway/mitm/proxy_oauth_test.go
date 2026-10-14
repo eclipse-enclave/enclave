@@ -8,6 +8,7 @@
 package mitm
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"io"
@@ -19,6 +20,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"enclave/internal/gateway/oauthbroker"
 	"enclave/internal/netlog"
@@ -116,6 +118,7 @@ func oauthTestProxy(t *testing.T, upstream *httptest.Server) (*proxy, string, oa
 		t.Fatal(err)
 	}
 	config := oauthbroker.Config{
+		Tool:     "claude",
 		StoreDir: filepath.Join(root, "grant"), RuntimeDir: filepath.Join(root, "session"),
 		LockPath: filepath.Join(root, "identity.lock"), Identity: "fixture", Session: testSession, Incarnation: "first",
 	}
@@ -330,28 +333,67 @@ func TestUnrestrictedBrokerAllowsUnrelatedHostsWithoutReleasingHandles(t *testin
 	}
 }
 
-func TestBrokerProxyRejectsProtocolUpgrade(t *testing.T) {
-	var upgradeRequested atomic.Bool
+func TestBrokerProxyChecksUpgradeHandshakes(t *testing.T) {
+	const access = "synthetic-provider-access-credential"
+	var released atomic.Value
 	upstream := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		if req.Header.Get("Upgrade") != "" || req.Header.Get("Connection") != "" {
-			upgradeRequested.Store(true)
+		if req.URL.Path == "/v1/oauth/token" {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"access_token":"`+access+`","refresh_token":"synthetic-provider-refresh-credential","token_type":"Bearer","expires_in":3600,"scope":"user:inference","account":{"uuid":"11111111-1111-1111-1111-111111111111","email_address":"synthetic@example.test"},"organization":{"uuid":"22222222-2222-2222-2222-222222222222"}}`)
+			return
 		}
-		w.Header().Set("Connection", "Upgrade")
-		w.Header().Set("Upgrade", "websocket")
-		w.WriteHeader(http.StatusSwitchingProtocols)
+		released.Store(req.Header.Get("Authorization"))
+		echoUpgradeHandler(w, req)
 	}))
 	defer upstream.Close()
 	p, _, _ := oauthTestProxy(t, upstream)
-	req := httptest.NewRequest(http.MethodGet, "https://api.anthropic.com/stream", nil)
-	req.Header.Set("Connection", "Upgrade")
-	req.Header.Set("Upgrade", "websocket")
-	w := httptest.NewRecorder()
-	p.handler("https")(w, req)
-	if upgradeRequested.Load() {
-		t.Fatal("broker session forwarded the upgrade request")
+	p.upgradeTransport = p.transport.Clone()
+	login := httptest.NewRequest(http.MethodPost, "https://platform.claude.com/v1/oauth/token", strings.NewReader(oauthEnrollmentPayload))
+	login.Header.Set("Content-Type", "application/json")
+	captured := httptest.NewRecorder()
+	p.handler("https")(captured, login)
+	var token struct {
+		Access string `json:"access_token"`
 	}
-	if w.Code != http.StatusBadGateway {
-		t.Fatalf("upgrade status = %d, want 502", w.Code)
+	if err := json.Unmarshal(captured.Body.Bytes(), &token); err != nil || token.Access == "" {
+		t.Fatalf("capture failed: %d %s", captured.Code, captured.Body)
+	}
+	proxyServer := httptest.NewServer(p.handler("https"))
+	defer proxyServer.Close()
+
+	handshake := func(authorization string) (*http.Response, *bufio.Reader, net.Conn) {
+		t.Helper()
+		conn, err := net.Dial("tcp", strings.TrimPrefix(proxyServer.URL, "http://"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
+		if _, err := io.WriteString(conn, "GET /v1/stream HTTP/1.1\r\nHost: api.anthropic.com\r\nConnection: Upgrade\r\nUpgrade: echo\r\nAuthorization: "+authorization+"\r\n\r\n"); err != nil {
+			t.Fatal(err)
+		}
+		reader := bufio.NewReader(conn)
+		resp, err := http.ReadResponse(reader, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return resp, reader, conn
+	}
+
+	resp, _, conn := handshake("Bearer raw-pasted-token")
+	_ = conn.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("raw credential handshake status = %d, want 403", resp.StatusCode)
+	}
+	resp, reader, conn := handshake("Bearer " + token.Access)
+	defer func() { _ = conn.Close() }()
+	if resp.StatusCode != http.StatusSwitchingProtocols || released.Load() != "Bearer "+access {
+		t.Fatalf("handle handshake status = %d, upstream saw %v", resp.StatusCode, released.Load())
+	}
+	if _, err := io.WriteString(conn, "ping\n"); err != nil {
+		t.Fatal(err)
+	}
+	if line, err := reader.ReadString('\n'); err != nil || line != "echo: ping\n" {
+		t.Fatalf("upgraded stream = %q, %v", line, err)
 	}
 }
 

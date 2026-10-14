@@ -44,11 +44,11 @@ func TestProtectedAuthRejectsUnsupportedSources(t *testing.T) {
 		"different build GID":     func(r *Runtime) { r.build.BuildGID = "999" },
 		"custom image":            func(r *Runtime) { r.build.BaseImage = "custom" },
 		"native config":           func(r *Runtime) { r.run.HostConfig = model.HostConfigPassthrough },
-		"API key injection":       func(r *Runtime) { r.auth.PassAPIKey = true },
 		"OAuth env injection":     func(r *Runtime) { r.auth.PassEnv = []string{"CLAUDE_CODE_OAUTH_TOKEN"} },
 		"settings override":       func(r *Runtime) { r.run.CmdArgs = []string{"--settings={}"} },
 		"settings precedence":     func(r *Runtime) { r.run.CmdArgs = []string{"--setting-sources", "project"} },
-		"other tool":              func(r *Runtime) { r.profile.Name = "codex" },
+		"unknown tool":            func(r *Runtime) { r.profile.Name = "unknown" },
+		"foreign layout":          func(r *Runtime) { r.profile.Name = "codex" },
 		"native feature auth": func(r *Runtime) {
 			r.features = []model.Extension{{Name: "github-cli", ConfigDir: ".config/gh", AuthFiles: []string{"hosts.yml"}}}
 		},
@@ -94,7 +94,7 @@ func TestProtectedAuthAllowsSettingsPatchesWithoutNativeHostConfig(t *testing.T)
 		t.Fatalf("compose protected settings patch: %v", err)
 	}
 	settings := settingsRelativePath(t, r)
-	if err := validateProtectedSettings(generatedConfigPath(r, settings), false); err != nil {
+	if err := r.validateProtectedSettings(generatedConfigPath(r, settings), false); err != nil {
 		t.Fatalf("ordinary settings patch rejected: %v", err)
 	}
 	got := readGeneratedJSON(t, r, settings)
@@ -233,7 +233,7 @@ func TestProtectedGitHubRejectsSettingsCredentialOverrides(t *testing.T) {
 	for _, key := range []string{"GH_TOKEN", "GITHUB_TOKEN", "GH_CONFIG_DIR", "GH_HOST", model.EnvProtectedGitHub} {
 		file := filepath.Join(t.TempDir(), "settings.json")
 		writeFile(t, file, fmt.Sprintf("{\"env\":{%q:\"override\"}}", key))
-		if err := validateProtectedSettings(file, true); err == nil {
+		if err := protectedTestRuntime().validateProtectedSettings(file, true); err == nil {
 			t.Errorf("accepted GitHub settings override %s", key)
 		}
 	}
@@ -256,7 +256,7 @@ func TestProtectedAuthSettingsValidation(t *testing.T) {
 		if err := os.WriteFile(file, []byte(tc.body), 0600); err != nil {
 			t.Fatal(err)
 		}
-		err := validateProtectedSettings(file, false)
+		err := protectedTestRuntime().validateProtectedSettings(file, false)
 		if (err != nil) != tc.fail {
 			t.Errorf("settings accepted=%v, wanted=%v", err == nil, !tc.fail)
 		}

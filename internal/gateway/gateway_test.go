@@ -559,10 +559,10 @@ esac
 				callsFile := filepath.Join(root, "calls")
 				t.Setenv("OAUTH_TEST_CALLS", callsFile)
 				readyPath := filepath.Join(oauth.RuntimeDir, "oauth-ready.json")
-				readyBody := `{"schema":2,"adapter":"claude","identity":"selected","session":"session","incarnation":"` + oauth.Incarnation + `","githubIdentity":"github-selected"}`
+				readyBody := `{"schema":3,"adapter":"claude","identity":"selected","session":"session","incarnation":"` + oauth.Incarnation + `","githubIdentity":"github-selected"}`
 				switch readyMode {
 				case "single-owner":
-					readyBody = strings.ReplaceAll(readyBody, `"schema":2`, `"schema":1`)
+					readyBody = strings.ReplaceAll(readyBody, `"schema":3`, `"schema":2`)
 				case "claude-only":
 					readyBody = strings.ReplaceAll(readyBody, `,"githubIdentity":"github-selected"`, "")
 				case "wrong-incarnation":
@@ -672,7 +672,7 @@ func protectedGatewayValidationFixture(t *testing.T) StartConfig {
 
 func TestProtectedGatewayRejectsIncompleteConfiguration(t *testing.T) {
 	for name, change := range map[string]func(*StartConfig){
-		"tool":                  func(c *StartConfig) { c.Profile.Name = "codex" },
+		"tool":                  func(c *StartConfig) { c.Profile.Name = "unknown" },
 		"identity":              func(c *StartConfig) { c.OAuth.Identity = "" },
 		"incarnation":           func(c *StartConfig) { c.OAuth.Incarnation = "" },
 		"session":               func(c *StartConfig) { c.ContainerName = "" },

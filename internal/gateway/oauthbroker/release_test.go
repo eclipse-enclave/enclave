@@ -222,3 +222,47 @@ func TestMediationRefusesStackedEncodings(t *testing.T) {
 		t.Fatalf("stacked encodings passed unscanned: %v", err)
 	}
 }
+
+// A token the provider revoked early answers 401 long before it expires; the
+// next refresh must rotate it rather than return the cached grant.
+func TestRefreshRotatesAfterProviderRejectsAccess(t *testing.T) {
+	b := fixtureBroker(t)
+	enroll(t, b)
+	rotated := fixtureToken()
+	rotated.Access, rotated.Refresh = "synthetic-provider-access-token-02", "synthetic-provider-refresh-token-02"
+	dispatched := 0
+	refresh := func() {
+		t.Helper()
+		response, err := fixtureRoundTrip(b, refreshRequest(t, b), fixtureTransport(func(*http.Request) (*http.Response, error) {
+			dispatched++
+			return fixtureResponse(rotated), nil
+		}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		responseToken(t, response)
+	}
+	refresh()
+	if dispatched != 0 {
+		t.Fatal("refresh far from expiry was not answered from the committed grant")
+	}
+	req, err := http.NewRequest(http.MethodPost, "https://api.anthropic.com/v1/messages", strings.NewReader(`{}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Authorization", "Bearer "+b.registry.Access)
+	response, err := fixtureRoundTrip(b, req, fixtureTransport(func(*http.Request) (*http.Response, error) {
+		rejected := rawFixtureResponse([]byte(`{"type":"error"}`))
+		rejected.StatusCode = http.StatusUnauthorized
+		return rejected, nil
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = response.Body.Close()
+	refresh()
+	g, err := b.readGrant()
+	if dispatched != 1 || err != nil || g.Token.Access != rotated.Access {
+		t.Fatalf("refresh after a 401 dispatched %d times, grant %+v, %v", dispatched, g, err)
+	}
+}

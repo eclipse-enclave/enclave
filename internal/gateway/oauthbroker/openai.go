@@ -269,7 +269,7 @@ func (b *Broker) openaiRelease(req *http.Request, transport http.RoundTripper) (
 	if err != nil {
 		return nil, err
 	}
-	return release(req, outgoing, "Authorization", transport, secrets...)
+	return b.releaseCaptured(req, outgoing, transport, secrets...)
 }
 
 type openaiRequest struct {
@@ -376,7 +376,7 @@ func (b *Broker) openaiExchange(req *http.Request, transport http.RoundTripper) 
 			if g.Status != "ready" {
 				return ErrUncertain
 			}
-			if reuseCommitted(g.ExpiresAt, g.CommittedAt, g.Token.Life, b.now()) {
+			if reuseCommitted(g.ExpiresAt, g.CommittedAt, g.Token.Life, b.now()) && !b.rejectedAccess(g.Token.Access) {
 				response, err = b.openaiProject(g)
 				return err
 			}

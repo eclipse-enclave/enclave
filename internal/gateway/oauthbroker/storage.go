@@ -101,12 +101,14 @@ type Broker struct {
 	copilot *copilotRegistry
 	// instances are self-hosted hosts mediated like their provider.
 	instances map[string]*provider
-	config    Config
-	registry  registry
-	mu        sync.Mutex
-	now       func() time.Time
-	write     func(string, any) error
-	failed    bool
+	// rejected holds hashes of access tokens a provider answered with 401.
+	rejected sync.Map
+	config   Config
+	registry registry
+	mu       sync.Mutex
+	now      func() time.Time
+	write    func(string, any) error
+	failed   bool
 }
 
 // Open recovers a proxy reload without rotating handles. A new logical session

@@ -19,6 +19,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"enclave/internal/util"
 )
 
 // Endpoints of the Claude subscription login, which the gateway captures. The
@@ -144,7 +146,23 @@ func (b *Broker) RoundTrip(req *http.Request, transport, exchangeTransport http.
 	if err != nil {
 		return nil, err
 	}
-	return release(req, outgoing, "Authorization", transport, secrets...)
+	return b.releaseCaptured(req, outgoing, transport, secrets...)
+}
+
+// releaseCaptured releases a captured access token, secrets[0], and records a
+// 401 for it, so the next refresh rotates the grant instead of returning the
+// cached one: a token revoked early would otherwise fail until near expiry.
+func (b *Broker) releaseCaptured(req, outgoing *http.Request, transport http.RoundTripper, secrets ...string) (*http.Response, error) {
+	response, err := release(req, outgoing, "Authorization", transport, secrets...)
+	if err == nil && response.StatusCode == http.StatusUnauthorized {
+		b.rejected.Store(util.HashString(secrets[0]), true)
+	}
+	return response, err
+}
+
+func (b *Broker) rejectedAccess(access string) bool {
+	_, rejected := b.rejected.Load(util.HashString(access))
+	return rejected
 }
 
 // release sends outgoing, in which an adapter replaced the handle that req
@@ -278,7 +296,7 @@ func (b *Broker) exchange(req *http.Request, transport http.RoundTripper) (*http
 			}
 			// Retries and waiting duplicates project a usable committed result.
 			// Client-written expiry and claimed generations are never authoritative.
-			if reuseCommittedGrant(g, b.now()) {
+			if reuseCommittedGrant(g, b.now()) && !b.rejectedAccess(g.Token.Access) {
 				response, err = b.project(g)
 				return err
 			}

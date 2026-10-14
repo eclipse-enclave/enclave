@@ -129,7 +129,11 @@ so other settings Vibe writes there, such as `/proxy-setup`, do not persist.
 #### Sessions and lifecycle
 
 A second login to an identity that already holds a grant for that provider is
-refused; reset the identity to switch accounts. Startup requires a private
+refused; reset the identity to switch accounts. When a provider rejects a
+Claude or ChatGPT access token, for example after a revocation elsewhere, the
+session's next refresh rotates it instead of returning the cached grant.
+Mistral and Copilot credentials do not expire; after a revocation, reset the
+identity and log in again. Startup requires a private
 readiness attestation from the initialized brokers before launching the
 workload; an older gateway image is rejected even with `--no-rebuild`. This is
 an experimental implementation: Docker, rootless Podman, SELinux and real

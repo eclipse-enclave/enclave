@@ -76,6 +76,7 @@ func ensureQEMUBundle(input *CommandInput, opts model.Options, buildCfg buildCon
 	bundleHash := plan.CombinedHash + "-" + assetHash + "-" + configHash
 	bundleDir := qemuBundleDir(host.Home, opts.Tool, bundleHash)
 	buildCfg.ImageName = bundleDir
+	logx.Debugf("qemu bundle hash: %s", bundleHash)
 	logx.Infof("Using qemu bundle: %s", bundleDir)
 	if opts.NoRebuild {
 		logx.Warnf("Skipping qemu bundle build due to --no-rebuild.")
@@ -141,22 +142,26 @@ func sanitizeBundlePart(value string) string {
 }
 
 func ensureExistingQEMUBundle(dir string) error {
-	for _, name := range []string{"vmlinuz", "initramfs.cpio"} {
-		path := filepath.Join(dir, name)
-		info, err := os.Stat(path)
-		if err != nil {
-			if os.IsNotExist(err) {
-				return fmt.Errorf("qemu bundle %q is missing %s; rerun without --no-rebuild or pass --rebuild", dir, name)
-			}
-			return err
+	path := filepath.Join(dir, "vmlinuz")
+	info, err := os.Stat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("qemu bundle %q is missing vmlinuz; rerun without --no-rebuild or pass --rebuild", dir)
 		}
-		if !info.Mode().IsRegular() {
-			return fmt.Errorf("qemu bundle %q has non-file %s", dir, name)
-		}
+		return err
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("qemu bundle %q has non-file vmlinuz", dir)
+	}
+	if _, err := backendqemu.InitramfsPath(dir); err != nil {
+		return fmt.Errorf("%w; rerun without --no-rebuild or pass --rebuild", err)
 	}
 	return nil
 }
 
+// qemuBundleConfigForProfile is the memory floor a profile declares. It feeds
+// the bundle hash; the backend raises the launch size to what the built
+// initramfs needs.
 func qemuBundleConfigForProfile(profile model.Profile) backendqemu.BundleConfig {
 	memoryMiB := backendqemu.DefaultMemoryMiB
 	if profile.QEMUMinMemoryMiB > memoryMiB {
@@ -224,7 +229,11 @@ func qemuBundleCurrent(dir string, tool string, hash string, cfg backendqemu.Bun
 	if err := json.Unmarshal(data, &stamp); err != nil {
 		return false, err
 	}
-	return stamp.Hash == hash && stamp.Tool == tool, nil
+	if stamp.Tool != tool || stamp.Hash != hash {
+		logx.Debugf("qemu bundle stamp mismatch: stamped tool=%s hash=%s", stamp.Tool, stamp.Hash)
+		return false, nil
+	}
+	return true, nil
 }
 
 func buildQEMUBundle(ctx context.Context, paths model.Paths, host model.Host, bundleDir string, tool string, hash string, cfg backendqemu.BundleConfig) error {

@@ -104,7 +104,7 @@ func TestWriteQEMUBundleConfig(t *testing.T) {
 
 func TestQEMUBundleCurrentRequiresExpectedConfig(t *testing.T) {
 	dir := t.TempDir()
-	for _, name := range []string{"vmlinuz", "initramfs.cpio"} {
+	for _, name := range []string{"vmlinuz", backendqemu.InitramfsFile} {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte("x"), 0o644); err != nil {
 			t.Fatal(err)
 		}

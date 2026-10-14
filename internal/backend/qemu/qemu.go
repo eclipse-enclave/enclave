@@ -15,6 +15,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"runtime"
 	"strconv"
 	"strings"
 
@@ -74,7 +75,7 @@ func (b *Backend) Run(ctx context.Context, req backend.Request, attach backend.A
 	if err != nil {
 		return backend.ExitStatus{}, err
 	}
-	runtime, err := b.prepareGuestRuntime(vmBundle, req)
+	runtime, err := b.prepareGuestRuntime(vmBundle, req, resolveConsoleSize(attach))
 	if err != nil {
 		return backend.ExitStatus{}, err
 	}
@@ -94,6 +95,7 @@ func (b *Backend) Run(ctx context.Context, req backend.Request, attach backend.A
 	cmd.Stdout = writerOrDefault(attach.Out)
 	var stderr bytes.Buffer
 	cmd.Stderr = io.MultiWriter(stderrOrDefault(attach.Err), &stderr)
+	warnHostMemory(vmBundle.MemoryMiB)
 	if err := cmd.Start(); err != nil {
 		if errors.Is(err, exec.ErrNotFound) {
 			return backend.ExitStatus{}, fmt.Errorf("qemu backend: %s not found; install qemu-system-x86 on the host", qemuBinary)
@@ -146,6 +148,49 @@ func (b *Backend) Stop(context.Context, backend.SessionRef, backend.StopOptions)
 
 func (b *Backend) Remove(context.Context, backend.SessionRef) error {
 	return fmt.Errorf("qemu backend: remove is not supported")
+}
+
+func warnHostMemory(memoryMiB int) {
+	if runtime.GOOS != "linux" {
+		return
+	}
+	meminfo, err := os.ReadFile("/proc/meminfo")
+	if err != nil {
+		logx.Debugf("qemu backend: skipping host memory check: %v", err)
+		return
+	}
+	warning, err := hostMemoryWarning(memoryMiB, string(meminfo))
+	if err != nil {
+		logx.Debugf("qemu backend: skipping host memory check: %v", err)
+		return
+	}
+	if warning != "" {
+		logx.Warnf("%s", warning)
+	}
+}
+
+func hostMemoryWarning(memoryMiB int, meminfo string) (string, error) {
+	for _, line := range strings.Split(meminfo, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) == 0 || fields[0] != "MemAvailable:" {
+			continue
+		}
+		if len(fields) != 3 || fields[2] != "kB" {
+			return "", fmt.Errorf("invalid MemAvailable in /proc/meminfo: %q", line)
+		}
+		availableKiB, err := strconv.ParseInt(fields[1], 10, 64)
+		if err != nil || availableKiB < 0 {
+			return "", fmt.Errorf("invalid MemAvailable in /proc/meminfo: %q", line)
+		}
+		// MemAvailable estimates memory usable without swapping, including
+		// reclaimable caches. It is a snapshot, not a reservation or guarantee.
+		availableMiB := availableKiB / 1024
+		if int64(memoryMiB) <= availableMiB {
+			return "", nil
+		}
+		return fmt.Sprintf("qemu backend: guest memory is %d MiB, but the host reports only %d MiB available; continuing with unchanged guest memory. Free host memory or use a smaller bundle to reduce the risk of heavy swapping or an out-of-memory kill", memoryMiB, availableMiB), nil
+	}
+	return "", fmt.Errorf("MemAvailable missing from /proc/meminfo")
 }
 
 func logQEMURequest(vmBundle bundle, runtime guestRuntime, req backend.Request, args []string) {

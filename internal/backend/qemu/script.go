@@ -36,6 +36,10 @@ func (b *Backend) buildQEMUArgs(bundle bundle, runtime guestRuntime, req backend
 		return nil, err
 	}
 	transport := qemuTransport()
+	deviceAddrs, err := qemuDeviceAddrs(transport, 1+len(runtime.Mounts))
+	if err != nil {
+		return nil, err
+	}
 	args := []string{
 		"-nodefaults",
 		"-no-user-config",
@@ -50,10 +54,10 @@ func (b *Backend) buildQEMUArgs(bundle bundle, runtime guestRuntime, req backend
 		"-initrd", runtime.RuntimeInitramfs,
 		"-append", qemuKernelAppend(),
 		"-netdev", netdevArg,
-		"-device", qemuNetDeviceArg(transport),
+		"-device", qemuNetDeviceArg(transport) + deviceAddrs[0],
 		"-name", name,
 	}
-	for _, mount := range runtime.Mounts {
+	for i, mount := range runtime.Mounts {
 		if err := rejectQEMUOptionComma("mount source", mount.Source); err != nil {
 			return nil, err
 		}
@@ -63,7 +67,7 @@ func (b *Backend) buildQEMUArgs(bundle bundle, runtime guestRuntime, req backend
 		}
 		args = append(args,
 			"-fsdev", fsArg,
-			"-device", qemu9PDeviceArg(transport, mount),
+			"-device", qemu9PDeviceArg(transport, mount)+deviceAddrs[1+i],
 		)
 	}
 	return args, nil
@@ -71,7 +75,7 @@ func (b *Backend) buildQEMUArgs(bundle bundle, runtime guestRuntime, req backend
 
 // PCI transport (pcie=on plus virtio-*-pci devices) is the default instead of
 // the microvm-native virtio-mmio. A session attaches one virtio-9p device per
-// mount/store (~20 devices), which under mmio forces a second IOAPIC and
+// mount/store (~30 devices), which under mmio forces a second IOAPIC and
 // leaves the ISA serial with a misrouted IRQ: kernel printk still reaches
 // ttyS0 via polled writes, but interrupt-driven userspace console I/O goes
 // dead and the payload appears to hang after the last kernel message. PCI +
@@ -91,6 +95,40 @@ func qemuMachineArg(transport string) string {
 		return "microvm,accel=kvm:tcg,isa-serial=on,pcie=on"
 	}
 	return "microvm,accel=kvm:tcg,isa-serial=on"
+}
+
+const (
+	// Slot 0 of the microvm PCIe root bus holds the GPEX host bridge.
+	qemuPCIFirstSlot        = 1
+	qemuPCISlots            = 32
+	qemuPCIFunctionsPerSlot = 8
+)
+
+// qemuDeviceAddrs returns the address option suffix for each PCI device. Left
+// to QEMU, every device takes a whole slot, and the 31 free slots on the
+// microvm root bus run out once a tool with many feature stores adds enough
+// 9p mounts. Packing eight functions per multifunction slot raises the limit
+// to 248 devices. mmio devices need no address.
+func qemuDeviceAddrs(transport string, count int) ([]string, error) {
+	addrs := make([]string, count)
+	if transport != "pci" {
+		return addrs, nil
+	}
+	capacity := (qemuPCISlots - qemuPCIFirstSlot) * qemuPCIFunctionsPerSlot
+	if count > capacity {
+		return nil, fmt.Errorf("qemu backend: %d devices exceed the %d PCI functions available on the microvm root bus", count, capacity)
+	}
+	for i := range addrs {
+		slot := qemuPCIFirstSlot + i/qemuPCIFunctionsPerSlot
+		function := i % qemuPCIFunctionsPerSlot
+		addrs[i] = fmt.Sprintf(",addr=0x%x.0x%x", slot, function)
+		// Function 0 carries the multifunction bit; guests only scan the
+		// other functions of a slot when it is set.
+		if function == 0 && i+1 < count {
+			addrs[i] += ",multifunction=on"
+		}
+	}
+	return addrs, nil
 }
 
 func qemuNetDeviceArg(transport string) string {
@@ -129,7 +167,7 @@ func rejectQEMUOptionComma(label string, value string) error {
 	return nil
 }
 
-func (b *Backend) renderRunScript(req backend.Request, mounts []runtimeMount, files []runtimeFileMount) (string, error) {
+func (b *Backend) renderRunScript(req backend.Request, mounts []runtimeMount, files []runtimeFileMount, console consoleSize) (string, error) {
 	if len(req.Argv) == 0 {
 		return "", fmt.Errorf("qemu backend: command argv is empty")
 	}
@@ -140,6 +178,11 @@ func (b *Backend) renderRunScript(req backend.Request, mounts []runtimeMount, fi
 	out.WriteString("#!/bin/sh\n")
 	out.WriteString("set -eu\n")
 	out.WriteString("export PATH=/home/" + model.ContainerUser + "/.local/bin:/opt/enclave/node/bin:/sbin:/bin:/usr/sbin:/usr/bin\n")
+	// The console inherited from init reports 0x0 until it is told otherwise,
+	// which leaves terminal UIs either one column wide or stuck on their 80x24
+	// fallback. stty works on the inherited descriptor even though the agent
+	// user cannot open /dev/console itself.
+	fmt.Fprintf(&out, "stty rows %d cols %d 2>/dev/null || true\n", console.Rows, console.Cols)
 	out.WriteString("modprobe 9p 2>/dev/null || true\n")
 	out.WriteString("modprobe 9pnet 2>/dev/null || true\n")
 	out.WriteString("modprobe 9pnet_virtio 2>/dev/null || true\n")

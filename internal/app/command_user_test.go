@@ -45,21 +45,7 @@ func captureOutput(t *testing.T, fn func()) (stdout, stderr string) {
 	if err != nil {
 		t.Fatalf("pipe: %v", err)
 	}
-
-	type readResult struct {
-		data []byte
-		err  error
-	}
-	drain := func(r *os.File) <-chan readResult {
-		ch := make(chan readResult, 1)
-		go func() {
-			data, err := io.ReadAll(r)
-			_ = r.Close()
-			ch <- readResult{data, err}
-		}()
-		return ch
-	}
-	outCh, errCh := drain(outR), drain(errR)
+	outCh, errCh := drainPipe(outR), drainPipe(errR)
 
 	os.Stdout, os.Stderr = outW, errW
 	func() {
@@ -79,6 +65,24 @@ func captureOutput(t *testing.T, fn func()) (stdout, stderr string) {
 		t.Fatalf("read stderr: %v", errRes.err)
 	}
 	return string(outRes.data), string(errRes.data)
+}
+
+type pipeResult struct {
+	data []byte
+	err  error
+}
+
+// drainPipe reads r to EOF in the background. Start it before anything writes
+// to the pipe: the buffer shrinks to a few pages once the user exceeds
+// fs.pipe-user-pages-soft, so even modest output would otherwise block.
+func drainPipe(r *os.File) <-chan pipeResult {
+	ch := make(chan pipeResult, 1)
+	go func() {
+		data, err := io.ReadAll(r)
+		_ = r.Close()
+		ch <- pipeResult{data: data, err: err}
+	}()
+	return ch
 }
 
 func TestCaptureOutputLargeOutput(t *testing.T) {

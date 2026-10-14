@@ -14,6 +14,7 @@ import (
 	"mime"
 	"net/http"
 	"path"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -64,6 +65,49 @@ func genericCredentialPath(_, path string) bool {
 		strings.Contains(path, "oauth/revoke")
 }
 
+// gitlabTokenAPI matches GitLab API paths that create, list or rotate access,
+// deploy, trigger and runner tokens. Namespaced project and group paths are
+// decoded, so their ids may contain slashes.
+var gitlabTokenAPI = regexp.MustCompile(`^/api/v4/(personal_access_tokens|user/personal_access_tokens|deploy_tokens|user/runners|runners/reset_registration_token|users/.+/(personal_access_tokens|impersonation_tokens)|(projects|groups)/.+/(access_tokens|deploy_tokens|triggers|runners/reset_registration_token))(/|$)`)
+
+// gitlabCredentialPath anchors at GitLab's reserved top-level routes, which no
+// repository can take.
+func gitlabCredentialPath(_, path string) bool {
+	lower := strings.ToLower(path)
+	return pathPrefix(lower, "/oauth", "/-/user_settings/personal_access_tokens", "/-/profile/personal_access_tokens") ||
+		lower == "/api/v4/runners" || gitlabTokenAPI.MatchString(lower)
+}
+
+// gitlabContentPath covers repository files, snippets, job logs, artifacts,
+// packages and Git transfers, which may contain token-like text.
+func gitlabContentPath(_, path string) bool {
+	lower := strings.ToLower(path)
+	for _, marker := range []string{"/repository/", "/-/raw/", "/-/blob/", "/snippets", "/jobs/", "/artifacts", "/packages/", ".git/", "/info/refs", "/git-upload-pack", "/git-receive-pack"} {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return strings.HasSuffix(lower, "/raw")
+}
+
+// githubCredentialPath matches GitHub logins, Copilot token minting, and the
+// API that issues runner tokens or legacy authorizations.
+func githubCredentialPath(host, path string) bool {
+	lower := strings.ToLower(path)
+	if strings.HasPrefix(lower, "/login/oauth") || strings.HasPrefix(lower, "/login/device") || strings.Contains(lower, "/copilot_internal/") {
+		return true
+	}
+	if host != "api.github.com" {
+		return false
+	}
+	for _, suffix := range []string{"/actions/runners/registration-token", "/actions/runners/remove-token", "/actions/runners/generate-jitconfig", "/access_tokens"} {
+		if strings.HasSuffix(lower, suffix) {
+			return true
+		}
+	}
+	return pathPrefix(lower, "/authorizations")
+}
+
 var providers = []provider{
 	{
 		name:           "anthropic",
@@ -79,6 +123,11 @@ var providers = []provider{
 		domains: []string{"openai.com", "chatgpt.com", "chatgpt-staging.com"},
 		credentialPath: func(host, path string) bool {
 			lower := strings.ToLower(path)
+			// The device login's code requests return only bootstrap
+			// material; its token exchange is captured.
+			if host == openaiTokenHost && (lower == "/api/accounts/deviceauth/usercode" || lower == "/api/accounts/deviceauth/token") {
+				return false
+			}
 			// Token sharing and agent registration mint credentials the
 			// gateway does not capture.
 			return genericCredentialPath(host, path) || strings.HasPrefix(lower, "/api/accounts/oauth") || strings.HasPrefix(lower, "/api/accounts/v1/agent")
@@ -106,11 +155,13 @@ var providers = []provider{
 	},
 	{
 		// The GitLab CLI authenticates with host-configured tokens; its OAuth
-		// login would bring a token into the workload.
+		// login, and the API that creates tokens, would bring one into the
+		// workload.
 		name:           "gitlab",
 		domains:        []string{"gitlab.com"},
-		credentialPath: genericCredentialPath,
-		contentPath:    func(string, string) bool { return true },
+		credentialPath: gitlabCredentialPath,
+		contentPath:    gitlabContentPath,
+		patterns:       [][]byte{[]byte("glpat-"), []byte("gldt-"), []byte("glrt-"), []byte("glptt-"), []byte("gloas-"), []byte("glcbt-"), []byte("glimt-"), []byte("glsoat-"), []byte("glffct-")},
 	},
 	{
 		name:            "google",
@@ -122,14 +173,11 @@ var providers = []provider{
 	{
 		// GitHub logins issue tokens at github.com and Copilot tokens at
 		// api.github.com. Repository content stays unscanned.
-		name:    "github",
-		domains: []string{"github.com"},
-		credentialPath: func(host, path string) bool {
-			lower := strings.ToLower(path)
-			return strings.HasPrefix(lower, "/login/oauth") || strings.HasPrefix(lower, "/login/device") || strings.Contains(lower, "/copilot_internal/")
-		},
-		contentPath: func(host, _ string) bool { return host != "github.com" },
-		patterns:    tokenFields,
+		name:           "github",
+		domains:        []string{"github.com"},
+		credentialPath: githubCredentialPath,
+		contentPath:    func(host, _ string) bool { return host != "github.com" },
+		patterns:       withPatterns("access_token="),
 	},
 }
 

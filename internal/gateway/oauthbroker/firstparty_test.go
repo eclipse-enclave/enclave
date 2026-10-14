@@ -46,6 +46,7 @@ func TestProvidersRefuseRawCredentialsAndUncapturedEndpoints(t *testing.T) {
 	b := fixtureToolBroker(t, "codex")
 	for _, tc := range []struct {
 		name, method, url, header, value string
+		body, contentType                string
 		denied                           bool
 	}{
 		{name: "pasted Anthropic key", method: http.MethodPost, url: "https://api.anthropic.com/v1/messages", header: "X-Api-Key", value: "sk-ant-api03-pasted", denied: true},
@@ -57,7 +58,18 @@ func TestProvidersRefuseRawCredentialsAndUncapturedEndpoints(t *testing.T) {
 		{name: "pasted GitLab token", method: http.MethodGet, url: "https://gitlab.com/api/v4/user", header: "Private-Token", value: "glpat-pasted", denied: true},
 		{name: "GitLab OAuth login", method: http.MethodPost, url: "https://gitlab.com/oauth/token", denied: true},
 		{name: "Claude token endpoint without adapter", method: http.MethodPost, url: "https://platform.claude.com/v1/oauth/token", denied: true},
-		{name: "OpenAI API-key exchange", method: http.MethodPost, url: "https://auth.openai.com/oauth/token", denied: true},
+		{name: "OpenAI API-key exchange", method: http.MethodPost, url: "https://auth.openai.com/oauth/token", denied: true, contentType: "application/x-www-form-urlencoded",
+			body: "grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Atoken-exchange&client_id=" + openaiClientID + "&requested_token=openai-api-key&subject_token=x&subject_token_type=urn%3Aietf%3Aparams%3Aoauth%3Atoken-type%3Aid_token"},
+		{name: "ChatGPT device code request", method: http.MethodPost, url: "https://auth.openai.com/api/accounts/deviceauth/usercode"},
+		{name: "ChatGPT device code poll", method: http.MethodPost, url: "https://auth.openai.com/api/accounts/deviceauth/token"},
+		{name: "GitLab token rotation", method: http.MethodPost, url: "https://gitlab.com/api/v4/personal_access_tokens/self/rotate", denied: true},
+		{name: "GitLab project access token", method: http.MethodPost, url: "https://gitlab.com/api/v4/projects/acme%2Fapp/access_tokens", denied: true},
+		{name: "GitLab trigger tokens", method: http.MethodGet, url: "https://gitlab.com/api/v4/projects/7/triggers", denied: true},
+		{name: "GitLab repository named like a key", method: http.MethodGet, url: "https://gitlab.com/acme/api-keys.git/info/refs?service=git-upload-pack"},
+		{name: "GitLab repository named token", method: http.MethodGet, url: "https://gitlab.com/acme/token"},
+		{name: "GitHub login behind a doubled slash", method: http.MethodPost, url: "https://github.com//login/oauth/access_token", denied: true},
+		{name: "GitHub runner registration", method: http.MethodPost, url: "https://api.github.com/repos/acme/app/actions/runners/registration-token", denied: true},
+		{name: "GitHub authorizations", method: http.MethodPost, url: "https://api.github.com/authorizations", denied: true},
 		{name: "OpenAI token sharing", method: http.MethodPost, url: "https://auth.openai.com/api/accounts/oauth/token", denied: true},
 		{name: "Mistral sign-in exchange", method: http.MethodPost, url: "https://console.mistral.ai/api/vibe/sign-in/proc/exchange", denied: true},
 		{name: "GitHub device token", method: http.MethodPost, url: "https://github.com/login/oauth/access_token", denied: true},
@@ -66,9 +78,16 @@ func TestProvidersRefuseRawCredentialsAndUncapturedEndpoints(t *testing.T) {
 		{name: "other host credential", method: http.MethodGet, url: "https://api.example.test/v1", header: "Authorization", value: "Bearer theirs"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			req, err := http.NewRequest(tc.method, tc.url, strings.NewReader("{}"))
+			body := tc.body
+			if body == "" {
+				body = "{}"
+			}
+			req, err := http.NewRequest(tc.method, tc.url, strings.NewReader(body))
 			if err != nil {
 				t.Fatal(err)
+			}
+			if tc.contentType != "" {
+				req.Header.Set("Content-Type", tc.contentType)
 			}
 			if tc.header != "" {
 				req.Header.Set(tc.header, tc.value)
@@ -89,6 +108,37 @@ func TestProvidersRefuseRawCredentialsAndUncapturedEndpoints(t *testing.T) {
 			}
 			_ = response.Body.Close()
 		})
+	}
+}
+
+// A token minted through an API that path rules miss still cannot reach the
+// workload in a structured response; repository content is not scanned.
+func TestGitLabResponsesAreCheckedForTokens(t *testing.T) {
+	b := fixtureToolBroker(t, "claude")
+	const released = "glpat-host-configured-0123456789"
+	for _, tc := range []struct {
+		path string
+		ok   bool
+	}{
+		{"/api/graphql", false},
+		{"/api/v4/projects/7/repository/files/README.md/raw", true},
+	} {
+		req, err := http.NewRequest(http.MethodPost, "https://gitlab.com"+tc.path, strings.NewReader("{}"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Private-Token", released)
+		req = req.WithContext(WithReleasedSecrets(req.Context(), []string{released}))
+		response, err := fixtureRoundTrip(b, req, fixtureTransport(func(*http.Request) (*http.Response, error) {
+			return rawFixtureResponse([]byte(`{"token":"glpat-minted-0123456789"}`)), nil
+		}))
+		if err == nil {
+			_, err = io.ReadAll(response.Body)
+			_ = response.Body.Close()
+		}
+		if tc.ok != (err == nil) || (!tc.ok && !errors.Is(err, ErrResponse)) {
+			t.Fatalf("%s: %v", tc.path, err)
+		}
 	}
 }
 

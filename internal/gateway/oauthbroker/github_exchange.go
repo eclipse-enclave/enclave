@@ -211,7 +211,11 @@ func (b *githubBroker) exchange(req *http.Request, transport http.RoundTripper) 
 			return err
 		}
 		g.Accounts[user] = githubAccount{Token: token.Access, Scope: token.Scope}
-		g.Active = user
+		// The first account becomes active for new sessions; a further login
+		// adds an account without switching other sessions to it.
+		if g.Active == "" || g.Accounts[g.Active].Token == "" {
+			g.Active = user
+		}
 		g.Devices[key] = githubDevice{Session: b.config.Session, Incarnation: b.config.Incarnation, User: user, Created: now.Unix()}
 		if err := b.saveGrant(g); err != nil {
 			return err

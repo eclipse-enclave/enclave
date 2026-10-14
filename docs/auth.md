@@ -264,7 +264,9 @@ automatically. Raw GitHub credential env variables and overrides of
 global across tools/projects, not selected by the tool's `--auth-name` or auth
 scope (ephemeral sessions use it too), and supports concurrent protected
 sessions across Docker/Podman. Each keeps its own handle/config view;
-account-token updates are shared without overwriting sibling views. Saved
+account-token updates are shared without overwriting sibling views. Unlike the
+tool logins, the GitHub identity holds several accounts: logging in to another
+one adds it, and the first account stays active for new sessions. Saved
 protection blocks later ordinary feature-auth mounts too. If gateway startup
 rejects an incompatible native store, protection remains and the original files
 are retained. Back up wanted logins on the host, then correct unsupported

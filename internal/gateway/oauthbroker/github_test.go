@@ -746,6 +746,27 @@ func TestGitHubPollOutlivesClientDisconnect(t *testing.T) {
 	}
 }
 
+// Logging in to another account from one session must not switch every
+// later session in every project to it.
+func TestGitHubLoginKeepsTheActiveAccount(t *testing.T) {
+	b := fixtureGitHub(t, "")
+	var calls atomic.Int32
+	for _, login := range []struct{ user, token, code string }{
+		{"alice", githubRealAlice, "first"},
+		{"bob", githubRealBob, "second"},
+	} {
+		response, err := fixtureRoundTrip(b, githubRequest(t, githubTokenPath, login.code), githubSuccessTransport(t, b, &calls, login.user, login.token))
+		if err != nil {
+			t.Fatalf("%s login: %v", login.user, err)
+		}
+		_ = response.Body.Close()
+	}
+	g, err := b.github.readGrant()
+	if err != nil || g.Active != "alice" || g.Accounts["bob"].Token != githubRealBob {
+		t.Fatalf("active = %q, accounts %v, %v", g.Active, len(g.Accounts), err)
+	}
+}
+
 func githubDeviceKey(code string) string {
 	digest := sha256.Sum256([]byte(code))
 	key := sha256.Sum256([]byte(hex.EncodeToString(digest[:20])))

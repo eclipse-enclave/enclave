@@ -58,11 +58,11 @@ func ValidateAuthMounts(home string, sources, views []string) ([]string, error) 
 		}
 		allowedView := slices.ContainsFunc(views, func(view string) bool { return util.PathWithin(view, source) })
 		if pathsOverlap(source, lockRoot) || (pathsOverlap(source, sessionRoot) && !allowedView) {
-			return nil, errors.New("workload mount overlaps host-only authentication control state")
+			return nil, fmt.Errorf("workload mount overlaps host-only authentication control state: %s", original)
 		}
 		if protected && pathsOverlap(source, featureRoot) {
 			if util.PathWithin(foldCase(source), foldCase(featureRoot)) {
-				return nil, errors.New("workload mount contains protected feature identities")
+				return nil, fmt.Errorf("workload mount contains protected feature identities: %s", original)
 			}
 			rel, err := filepath.Rel(foldCase(featureRoot), foldCase(source))
 			if err != nil {
@@ -70,7 +70,7 @@ func ValidateAuthMounts(home string, sources, views []string) ([]string, error) 
 			}
 			parts := strings.Split(rel, string(filepath.Separator))
 			if len(parts) == 1 {
-				return nil, errors.New("workload mount may contain protected feature identities")
+				return nil, fmt.Errorf("workload mount may contain protected feature identities: %s", original)
 			}
 			if len(parts) >= 2 && parts[1] == "auth" {
 				dir, err := ResolveDir(home, backend.StoreKey{Owner: parts[0]}, backend.StoreKindFeatureAuth)
@@ -84,7 +84,7 @@ func ValidateAuthMounts(home string, sources, views []string) ([]string, error) 
 		}
 		if protected && pathsOverlap(source, authRoot) {
 			if util.PathWithin(foldCase(source), foldCase(authRoot)) {
-				return nil, errors.New("workload mount contains protected authentication identities")
+				return nil, fmt.Errorf("workload mount contains protected authentication identities: %s", original)
 			}
 			rel, err := filepath.Rel(foldCase(authRoot), foldCase(source))
 			if err != nil {
@@ -92,7 +92,7 @@ func ValidateAuthMounts(home string, sources, views []string) ([]string, error) 
 			}
 			parts := strings.Split(rel, string(filepath.Separator))
 			if len(parts) == 1 || (len(parts) == 2 && parts[1] == "auth") {
-				return nil, errors.New("workload mount may contain protected authentication identities")
+				return nil, fmt.Errorf("workload mount may contain protected authentication identities: %s", original)
 			}
 			if len(parts) >= 3 && parts[1] == "auth" {
 				dir, err := ResolveDir(home, backend.StoreKey{Owner: parts[0], Suffix: parts[2]}, backend.StoreKindAuth)

@@ -142,3 +142,22 @@ func TestQEMUOlderProcessDetectionAndInspectionFailure(t *testing.T) {
 		})
 	}
 }
+
+// A lease a crashed guest left behind no longer blocks admission and is
+// removed where it is found.
+func TestStaleQEMULeaseIsRetired(t *testing.T) {
+	home, _ := protectedIdentityTestDir(t)
+	lease, err := AcquireQEMULease(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Closing without removing stands in for a guest that crashed.
+	_ = lease.Close()
+	qemuProcessStub(t, "exit 0\n")
+	if err := RequireNoQEMUSessions(context.Background(), home); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(lease.Name()); !os.IsNotExist(err) {
+		t.Fatalf("stale lease survived: %v", err)
+	}
+}

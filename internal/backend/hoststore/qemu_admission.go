@@ -77,13 +77,16 @@ func RequireNoQEMUSessions(ctx context.Context, home string) error {
 		if !info.Mode().IsRegular() || info.Mode().Perm()&0o077 != 0 {
 			return errors.New("invalid QEMU auth admission lease")
 		}
-		release, err := util.TryAcquireFileLock(filepath.Join(root, entry.Name()))
+		path := filepath.Join(root, entry.Name())
+		release, err := util.TryAcquireFileLock(path)
 		if err != nil {
 			return err
 		}
 		if release == nil {
 			return errors.New("stop QEMU sessions before changing protected authentication")
 		}
+		// An unlocked lease outlived its guest, such as after a crash.
+		_ = os.Remove(path) // #nosec G703 -- path is a lease name listed in the trusted host lock directory.
 		release()
 	}
 	// Also cover guests launched before lease tracking was introduced. Only

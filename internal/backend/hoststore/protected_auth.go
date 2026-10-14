@@ -693,13 +693,11 @@ func ensureIdentityDir(dir string) error {
 	return nil
 }
 
+// syncIdentityDir persists directory entries. Admission runs it for ordinary
+// sessions too, so a file system that cannot sync directories must not fail
+// them; util.SyncDir tolerates that.
 func syncIdentityDir(dir string) error {
-	f, err := os.Open(dir) // #nosec G304 -- caller validates this trusted identity directory against symlinks.
-	if err != nil {
-		return err
-	}
-	defer func() { _ = f.Close() }()
-	return f.Sync()
+	return util.SyncDir(dir)
 }
 
 func validateReservation(reservation IdentityReservation) error {

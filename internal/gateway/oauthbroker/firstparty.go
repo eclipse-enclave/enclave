@@ -307,11 +307,11 @@ func mediateAs(p *provider, req *http.Request, transport http.RoundTripper, secr
 	if len(patterns) == 0 {
 		return resp, nil
 	}
-	if encoding := resp.Header.Get("Content-Encoding"); encoding != "" && !strings.EqualFold(encoding, "identity") {
+	if encodings := resp.Header.Values("Content-Encoding"); len(encodings) > 1 || (len(encodings) == 1 && !strings.EqualFold(strings.TrimSpace(encodings[0]), "identity")) {
 		_ = resp.Body.Close()
 		return nil, ErrResponse
 	}
-	resp.Body = &tripwire{body: resp.Body, patterns: patterns}
+	resp.Body = &tripwire{body: resp.Body, patterns: patterns, trailer: resp.Trailer}
 	return resp, nil
 }
 
@@ -321,9 +321,12 @@ func mediateAs(p *provider, req *http.Request, transport http.RoundTripper, secr
 type tripwire struct {
 	body     io.ReadCloser
 	patterns [][]byte
-	pending  []byte
-	safe     int
-	err      error
+	// trailer is filled in when the body reaches EOF; the proxy forwards it
+	// after a successful read.
+	trailer http.Header
+	pending []byte
+	safe    int
+	err     error
 }
 
 func (t *tripwire) Read(p []byte) (int, error) {
@@ -339,6 +342,9 @@ func (t *tripwire) Read(p []byte) (int, error) {
 			return 0, t.err
 		}
 		switch {
+		case errors.Is(err, io.EOF) && t.trailerMatches():
+			t.pending, t.err = nil, ErrResponse
+			return 0, t.err
 		case errors.Is(err, io.EOF):
 			t.err, t.safe = io.EOF, len(t.pending)
 		case err != nil:
@@ -350,6 +356,15 @@ func (t *tripwire) Read(p []byte) (int, error) {
 	n := copy(p, t.pending[:t.safe])
 	t.pending, t.safe = t.pending[n:], t.safe-n
 	return n, nil
+}
+
+func (t *tripwire) trailerMatches() bool {
+	for name, values := range t.trailer {
+		if contains([]byte(name), t.patterns) || slices.ContainsFunc(values, func(value string) bool { return contains([]byte(value), t.patterns) }) {
+			return true
+		}
+	}
+	return false
 }
 
 func (t *tripwire) Close() error {

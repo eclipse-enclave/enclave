@@ -11,6 +11,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 )
@@ -170,5 +171,54 @@ func TestReleasedSecretDoesNotAdmitQueryKey(t *testing.T) {
 		return rawFixtureResponse(nil), nil
 	})); !errors.Is(err, ErrDenied) {
 		t.Fatalf("query key beside a released header passed: %v", err)
+	}
+}
+
+// Trailers arrive with the end of the body, after the headers were checked;
+// the proxy forwards them once the body reads cleanly.
+func TestMediationChecksLateTrailers(t *testing.T) {
+	const secret = "released-provider-secret-0123456789"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		w.Header().Set("Trailer", "X-Echo")
+		_, _ = io.WriteString(w, `{"ok":true}`)
+		w.Header().Set("X-Echo", req.Header.Get("X-Api-Key"))
+	}))
+	defer server.Close()
+	for _, echoed := range []bool{true, false} {
+		req, err := http.NewRequest(http.MethodGet, server.URL, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if echoed {
+			req.Header.Set("X-Api-Key", secret)
+		}
+		response, err := mediate(req, server.Client().Transport, secret)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = io.ReadAll(response.Body)
+		_ = response.Body.Close()
+		if echoed && !errors.Is(err, ErrResponse) {
+			t.Fatalf("trailer reflection passed: %v", err)
+		}
+		if !echoed && err != nil {
+			t.Fatalf("clean trailer refused: %v", err)
+		}
+	}
+}
+
+func TestMediationRefusesStackedEncodings(t *testing.T) {
+	req, err := http.NewRequest(http.MethodGet, "https://api.anthropic.com/v1/models", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = mediate(req, fixtureTransport(func(*http.Request) (*http.Response, error) {
+		response := rawFixtureResponse([]byte("compressed"))
+		response.Header.Add("Content-Encoding", "identity")
+		response.Header.Add("Content-Encoding", "gzip")
+		return response, nil
+	}), "released-provider-secret-0123456789")
+	if !errors.Is(err, ErrResponse) {
+		t.Fatalf("stacked encodings passed unscanned: %v", err)
 	}
 }

@@ -234,12 +234,17 @@ func (b *Backend) Start(ctx context.Context, req backend.Request) (backend.Sessi
 	defer spec.releaseAdmission()
 	id, err := dockercmd.RunDetachedInteractive(ctx, spec.config, spec.hostConfig, spec.name)
 	if err != nil {
-		if ctx.Err() != nil {
-			// The interrupt may have landed after the engine created the
-			// container; it has to go before the gateway it joins.
+		// The engine may have created the container before failing or being
+		// interrupted; it has to go before the gateway it joins, and a
+		// created container would keep the session's reservation. A failure
+		// for another reason, such as a name conflict, must not remove a
+		// container that started.
+		if ctx.Err() != nil || neverStarted(context.WithoutCancel(ctx), spec.name) {
 			if rmErr := dockercmd.ContainerRemove(context.WithoutCancel(ctx), spec.name, true, false); rmErr != nil && !dockercmd.IsNotFound(rmErr) {
-				logx.Warnf("Failed to remove container %s after an interrupted start: %v", spec.name, rmErr)
+				logx.Warnf("Failed to remove container %s after a failed start: %v", spec.name, rmErr)
 			}
+		}
+		if ctx.Err() != nil {
 			err = interruptedStart()
 		}
 		if spec.cleanup != nil {
@@ -249,6 +254,11 @@ func (b *Backend) Start(ctx context.Context, req backend.Request) (backend.Sessi
 	}
 	b.releaseAuthStart(req.AuthSession)
 	return backend.SessionRef{Name: spec.name, ID: id}, nil
+}
+
+func neverStarted(ctx context.Context, name string) bool {
+	info, err := dockercmd.ContainerInspect(ctx, name)
+	return err == nil && info.State != nil && info.State.Status == "created"
 }
 
 func interruptedStart() error {
@@ -395,9 +405,8 @@ func (b *Backend) removeAdmittedSession(ctx context.Context, name string, remove
 	} else {
 		gatewayID, gatewayStopped = captureOwnedGateway(ctx, name, projectHash)
 	}
-	removeErr := dockercmd.ContainerRemove(ctx, name, true, removeVolumes)
-	if removeErr != nil && !dockercmd.IsNotFound(removeErr) {
-		return removeErr
+	if err := dockercmd.ContainerRemoveAndWait(ctx, name, removeVolumes, 10*time.Second); err != nil {
+		return err
 	}
 	if err := ctx.Err(); err != nil {
 		return err
@@ -411,7 +420,7 @@ func (b *Backend) removeAdmittedSession(ctx context.Context, name string, remove
 		// Podman may retain an auto-remove gateway while the workload still
 		// depends on its namespaces. Remove it after removing that dependent.
 		if gatewayID != "" {
-			if err := dockercmd.ContainerRemove(ctx, gatewayID, true, true); err != nil && !dockercmd.IsNotFound(err) {
+			if err := dockercmd.ContainerRemoveAndWait(ctx, gatewayID, true, 10*time.Second); err != nil {
 				return fmt.Errorf("remove admitted session gateway: %w", err)
 			}
 		}

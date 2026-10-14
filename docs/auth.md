@@ -178,7 +178,10 @@ All installed engines must be inspectable; an unavailable daemon causes a
 refusal rather than an assumption that the identity is unused. If a reserved
 session's engine CLI has been removed, restore that CLI and daemon access so
 Enclave can verify the session ended. Removing an executable does not prove its
-containers stopped; reset and downgrade do not bypass that check.
+containers stopped; reset and downgrade do not bypass that check. Engines are
+inspected through the current environment's endpoint, so stop sessions started
+under another `DOCKER_HOST`, `CONTAINER_HOST` or engine context before
+protecting, resetting or downgrading an identity they use.
 
 Protected admission, reset and downgrade also require all of the invoking user's
 Enclave QEMU sessions to have ended, including preparation and host-side

@@ -75,6 +75,17 @@ func (e *cliError) Unwrap() error {
 // IsNotFound reports whether err came from a `docker` command that failed
 // because the target image, container, volume, or network does not exist. It
 // replaces the SDK's errdefs.IsNotFound by matching the daemon's stderr message.
+// IsRemovalInProgress reports that the engine is already removing the
+// container, such as an auto-remove racing an explicit removal.
+func IsRemovalInProgress(err error) bool {
+	var ce *cliError
+	if !errors.As(err, &ce) {
+		return false
+	}
+	s := strings.ToLower(ce.stderr)
+	return strings.Contains(s, "already in progress") || strings.Contains(s, "is being removed")
+}
+
 func IsNotFound(err error) bool {
 	if err == nil {
 		return false

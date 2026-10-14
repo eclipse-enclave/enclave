@@ -139,6 +139,34 @@ func ContainerStop(ctx context.Context, containerID string, timeout *time.Durati
 
 // ContainerRemove removes a container, optionally forcing and removing its
 // anonymous volumes.
+// ContainerRemoveAndWait removes a container and waits, bounded, until the
+// engine no longer lists it, also when an auto-remove got there first.
+func ContainerRemoveAndWait(ctx context.Context, containerID string, removeVolumes bool, timeout time.Duration) error {
+	err := ContainerRemove(ctx, containerID, true, removeVolumes)
+	if err == nil || IsNotFound(err) {
+		return nil
+	}
+	if !IsRemovalInProgress(err) {
+		return err
+	}
+	deadline := time.Now().Add(timeout)
+	for {
+		if _, err := ContainerInspect(ctx, containerID); IsNotFound(err) {
+			return nil
+		} else if err != nil {
+			return err
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("container %s is still being removed", containerID)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+}
+
 func ContainerRemove(ctx context.Context, containerID string, force bool, removeVolumes bool) error {
 	args := []string{"rm"}
 	if force {

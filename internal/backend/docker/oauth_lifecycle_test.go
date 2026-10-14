@@ -111,11 +111,21 @@ func TestAuthAdmissionSweepsUnreservedLeftovers(t *testing.T) {
 	sessions := filepath.Join(config.HostStateRootDir(home), "oauth-sessions")
 	orphan := strings.Repeat("a", 64)
 	preparing := strings.Repeat("b", 64)
-	for _, incarnation := range []string{orphan, preparing, "not-an-incarnation"} {
+	// A workload can leave a directory nobody may traverse in its view.
+	stuck := strings.Repeat("c", 64)
+	for _, incarnation := range []string{orphan, preparing, stuck, "not-an-incarnation"} {
 		if err := os.MkdirAll(filepath.Join(sessions, incarnation, "view"), 0o700); err != nil {
 			t.Fatal(err)
 		}
 	}
+	locked := filepath.Join(sessions, stuck, "view", "locked")
+	if err := os.MkdirAll(filepath.Join(locked, "child"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(locked, 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(locked, 0o700) })
 	held, err := util.AcquireFileLock(b.authStartLock(preparing), nil)
 	if err != nil {
 		t.Fatal(err)
@@ -137,8 +147,10 @@ func TestAuthAdmissionSweepsUnreservedLeftovers(t *testing.T) {
 			t.Errorf("swept live, preparing or unrecognized session state %s: %v", kept, err)
 		}
 	}
-	if _, err := os.Stat(filepath.Join(sessions, orphan)); !errors.Is(err, os.ErrNotExist) {
-		t.Errorf("orphaned session tree survived: %v", err)
+	for _, swept := range []string{orphan, stuck} {
+		if _, err := os.Stat(filepath.Join(sessions, swept)); !errors.Is(err, os.ErrNotExist) {
+			t.Errorf("orphaned session tree %s survived: %v", swept, err)
+		}
 	}
 	for _, lock := range []string{b.authStartLock(live.Incarnation), b.authStartLock(preparing), b.authStartLock(next.Incarnation)} {
 		if _, err := os.Stat(lock); err != nil {

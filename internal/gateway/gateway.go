@@ -1066,6 +1066,18 @@ func ensureExistingGatewayImageWith(profile model.Profile, exists func(context.C
 // StopContainer stops and removes the exact gateway returned by Start. Using
 // its immutable ID prevents delayed error cleanup from stopping a newer
 // same-name gateway created by a concurrent session start.
+// RemoveContainer stops the gateway and waits until it is gone, so a protected
+// session's reservation can be released right after.
+func RemoveContainer(container string) {
+	StopContainer(container)
+	if strings.TrimSpace(container) == "" {
+		return
+	}
+	if err := docker.ContainerRemoveAndWait(context.Background(), container, true, 10*time.Second); err != nil {
+		logx.Warnf("Failed to remove gateway container %s: %v", container, err)
+	}
+}
+
 func StopContainer(container string) {
 	if strings.TrimSpace(container) == "" {
 		return

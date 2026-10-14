@@ -15,6 +15,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -165,10 +166,28 @@ func (b *Backend) removeAuthSessionState(incarnation string) error {
 	if err := hoststore.EnsureNoSymlinkChain(config.HostStateRootDir(b.opts.Host.Home), path, true); err != nil {
 		return err
 	}
-	if err := os.RemoveAll(path); err != nil {
+	if err := removeSessionTree(path); err != nil {
 		return err
 	}
 	return retireStartLock(b.authStartLock(incarnation))
+}
+
+// removeSessionTree removes a session tree the workload could write. Its view
+// may hold directories the workload made untraversable; once the session has
+// ended, make them traversable rather than let one entry stall every later
+// sweep. WalkDir reports links as links, so none is followed.
+func removeSessionTree(path string) error {
+	err := os.RemoveAll(path)
+	for attempt := 0; err != nil && attempt < 3; attempt++ {
+		_ = filepath.WalkDir(path, func(entry string, d fs.DirEntry, _ error) error {
+			if d != nil && d.IsDir() {
+				_ = os.Chmod(entry, 0o700) // #nosec G302 -- owner-only access to delete a session tree.
+			}
+			return nil
+		})
+		err = os.RemoveAll(path)
+	}
+	return err
 }
 
 func retireStartLock(path string) error {
@@ -241,6 +260,8 @@ func (b *Backend) sweepAuthLeftovers(check *authInspection) error {
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
+	// One entry that cannot be removed must not stall the rest of the sweep.
+	var failed []error
 	for _, entry := range entries {
 		incarnation := entry.Name()
 		if reserved[incarnation] || validateAuthSession(&backend.AuthSession{Session: "sweep", Engine: backend.NameDocker, Incarnation: incarnation}) != nil {
@@ -248,14 +269,15 @@ func (b *Backend) sweepAuthLeftovers(check *authInspection) error {
 		}
 		release, err := util.TryAcquireFileLock(b.authStartLock(incarnation))
 		if err != nil {
-			return err
+			failed = append(failed, err)
+			continue
 		}
 		if release == nil {
 			continue
 		}
 		release()
 		if err := b.removeAuthSessionState(incarnation); err != nil {
-			return err
+			failed = append(failed, err)
 		}
 	}
 	reservedLocks := map[string]bool{}
@@ -272,10 +294,10 @@ func (b *Backend) sweepAuthLeftovers(check *authInspection) error {
 			continue
 		}
 		if err := retireStartLock(filepath.Join(config.HostLocksDir(home), name)); err != nil {
-			return err
+			failed = append(failed, err)
 		}
 	}
-	return nil
+	return errors.Join(failed...)
 }
 
 func authReservation(ref *backend.AuthSession) hoststore.IdentityReservation {

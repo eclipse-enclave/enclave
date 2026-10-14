@@ -15,6 +15,18 @@ import (
 	"testing"
 )
 
+func TestIsRemovalInProgress(t *testing.T) {
+	for stderr, want := range map[string]bool{
+		"Error response from daemon: removal of container abc is already in progress": true,
+		"Error: container abc is being removed":                                       true,
+		"Error: No such container: abc":                                               false,
+	} {
+		if got := IsRemovalInProgress(&cliError{stderr: stderr}); got != want {
+			t.Errorf("IsRemovalInProgress(%q) = %t", stderr, got)
+		}
+	}
+}
+
 func TestIsNotFound(t *testing.T) {
 	for _, tc := range []struct {
 		name   string

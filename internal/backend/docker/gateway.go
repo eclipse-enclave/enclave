@@ -113,7 +113,7 @@ func (b *Backend) startGateway(ctx context.Context, req backend.Request, network
 		if strings.TrimSpace(gatewayRef) == "" {
 			gatewayRef = result.ContainerName
 		}
-		gateway.StopContainer(gatewayRef)
+		gateway.RemoveContainer(gatewayRef)
 		cleanupFiles(tempFiles)
 	}
 	return result.ContainerName, cleanup, nil

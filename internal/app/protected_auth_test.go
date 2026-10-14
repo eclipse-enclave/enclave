@@ -539,6 +539,7 @@ func TestProtectedAuthOptionValidation(t *testing.T) {
 		{"podman unrestricted", func(o *model.Options) { o.Backend = "podman"; o.AllowAllNetwork = true }, false},
 		{"unknown tool", func(o *model.Options) { o.Tool = "unknown" }, true},
 		{"codex", func(o *model.Options) { o.Tool = "codex" }, false},
+		{"unnamed theia", func(o *model.Options) { o.Tool, o.AuthName = "theia", "" }, false},
 		{"qemu", func(o *model.Options) { o.Backend = "qemu" }, true},
 		{"project", func(o *model.Options) { o.AuthScope = model.AuthScopeProject }, false},
 		{"unnamed project", func(o *model.Options) { o.AuthScope, o.AuthName = model.AuthScopeProject, "" }, false},

@@ -52,6 +52,8 @@ func TestProvidersRefuseRawCredentialsAndUncapturedEndpoints(t *testing.T) {
 		{name: "pasted Copilot token", method: http.MethodPost, url: "https://api.githubcopilot.com/chat/completions", header: "Authorization", value: "Bearer gho_pasted", denied: true},
 		{name: "pasted Gemini key", method: http.MethodPost, url: "https://generativelanguage.googleapis.com/v1beta/models/m:generateContent", header: "X-Goog-Api-Key", value: "AIzaPasted", denied: true},
 		{name: "pasted Gemini key in query", method: http.MethodGet, url: "https://generativelanguage.googleapis.com/v1beta/models?key=AIzaPasted", denied: true},
+		{name: "pasted GitLab token", method: http.MethodGet, url: "https://gitlab.com/api/v4/user", header: "Private-Token", value: "glpat-pasted", denied: true},
+		{name: "GitLab OAuth login", method: http.MethodPost, url: "https://gitlab.com/oauth/token", denied: true},
 		{name: "Claude token endpoint without adapter", method: http.MethodPost, url: "https://platform.claude.com/v1/oauth/token", denied: true},
 		{name: "OpenAI API-key exchange", method: http.MethodPost, url: "https://auth.openai.com/oauth/token", denied: true},
 		{name: "OpenAI token sharing", method: http.MethodPost, url: "https://auth.openai.com/api/accounts/oauth/token", denied: true},

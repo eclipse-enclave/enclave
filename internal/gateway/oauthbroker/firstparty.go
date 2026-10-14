@@ -103,6 +103,14 @@ var providers = []provider{
 		contentPath:    func(string, string) bool { return true },
 	},
 	{
+		// The GitLab CLI authenticates with host-configured tokens; its OAuth
+		// login would bring a token into the workload.
+		name:           "gitlab",
+		domains:        []string{"gitlab.com"},
+		credentialPath: genericCredentialPath,
+		contentPath:    func(string, string) bool { return true },
+	},
+	{
 		name:            "google",
 		domains:         []string{"generativelanguage.googleapis.com"},
 		credentialPath:  func(string, string) bool { return false },
@@ -158,7 +166,7 @@ func releaseOrigin(req *http.Request) bool {
 
 // credentialHeaders carry provider credentials. In a protected session they
 // must hold a handle or a rule-released secret when sent to a provider.
-var credentialHeaders = []string{"Authorization", "X-Api-Key", "X-Goog-Api-Key", "Api-Key"}
+var credentialHeaders = []string{"Authorization", "X-Api-Key", "X-Goog-Api-Key", "Api-Key", "Private-Token", "Job-Token"}
 
 func carriesCredential(req *http.Request) bool {
 	return slices.ContainsFunc(credentialHeaders, func(name string) bool { return len(req.Header.Values(name)) != 0 })

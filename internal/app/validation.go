@@ -45,10 +45,11 @@ func ValidateOptions(opts model.Options, sources model.OptionSources, ctx Valida
 		opts.Backend = backend.NameDocker
 	}
 	if opts.ProtectAuth {
-		if _, known := protectedauth.Lookup(opts.Tool); !known || (opts.Backend != backend.NameDocker && opts.Backend != backend.NamePodman) {
+		tool, known := protectedauth.Lookup(opts.Tool)
+		if !known || (opts.Backend != backend.NameDocker && opts.Backend != backend.NamePodman) {
 			return opts, sources, warnings, fmt.Errorf("--protect-auth supports the built-in tools on Docker or Podman")
 		}
-		if opts.AuthScope == model.AuthScopeShared && strings.TrimSpace(opts.AuthName) == "" && !opts.Ephemeral {
+		if opts.AuthScope == model.AuthScopeShared && strings.TrimSpace(opts.AuthName) == "" && !opts.Ephemeral && len(tool.Adapters) != 0 {
 			return opts, sources, warnings, fmt.Errorf("--protect-auth with --auth-scope shared requires a fresh --auth-name")
 		}
 		var conflict string

@@ -22,7 +22,7 @@ files, which the session links to a view at `~/.enclave-auth`:
 | `codex` | ChatGPT (browser and device code) | `~/.codex/auth.json` |
 | `opencode` | ChatGPT (browser and headless), GitHub Copilot (GitHub.com device login) | `~/.config/opencode/auth.json` |
 | `mistral-vibe` | Mistral browser sign-in | `~/.vibe/.env` |
-| `theia`, `theia-next` | none | none |
+| `theia`, `theia-next` | none; no `--auth-name` needed, each session gets a fresh identity | none |
 
 ChatGPT handles keep the real tokens' JWT header and claims, which the clients
 read, with the gateway's random signature; only `chatgpt.com` receives the real
@@ -43,7 +43,7 @@ from `~/.vibe/.env`, which is session-scoped like every native credential file,
 so other settings Vibe writes there, such as `/proxy-setup`, do not persist.
 
 In every protected session the gateway mediates the Anthropic, OpenAI, Mistral,
-GitHub and Copilot domains and `generativelanguage.googleapis.com`. Logins it does not capture are refused there, and so
+GitHub, GitLab and Copilot domains and `generativelanguage.googleapis.com`. Logins it does not capture are refused there, and so
 are raw credentials, such as an API key pasted into a tool: configure API keys as
 [Enclave secrets](#secrets) instead, which the session receives as placeholders.
 WebSocket handshakes to these hosts are checked like requests; the upgraded

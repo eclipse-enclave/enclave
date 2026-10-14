@@ -40,7 +40,7 @@ func (r *Runtime) validateProtectedAuth() error {
 		(r.build.BuildGID != "" && r.build.BuildGID != r.host.GID) {
 		return fmt.Errorf("protected auth requires the non-root host UID/GID as the image and workload identity")
 	}
-	if r.run.Persist && r.auth.AuthScope == model.AuthScopeShared && r.auth.AuthName == "" {
+	if r.run.Persist && r.auth.AuthScope == model.AuthScopeShared && r.auth.AuthName == "" && len(tool.Adapters) != 0 {
 		return fmt.Errorf("protected auth with the shared scope requires a named identity (--auth-name)")
 	}
 	switch {
@@ -89,8 +89,10 @@ func (r *Runtime) protectedAuthIdentity() (string, error) {
 	if r.protectedIdentity != "" {
 		return r.protectedIdentity, nil
 	}
+	tool, _ := protectedauth.Lookup(r.profile.Name)
 	switch {
-	case !r.run.Persist:
+	// A tool without login adapters holds no grant worth keeping.
+	case !r.run.Persist || len(tool.Adapters) == 0:
 		name, err := backend.NewProtectedEphemeralIdentity()
 		if err != nil {
 			return "", err

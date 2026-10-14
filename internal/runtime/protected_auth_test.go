@@ -358,6 +358,16 @@ func TestProtectedIdentityFollowsScope(t *testing.T) {
 		t.Fatal("ephemeral runs share an identity")
 	}
 
+	theia := protectedTestRuntime()
+	theia.profile = model.Profile{Name: "theia", ConfigDir: ".theia-ide"}
+	theia.auth.AuthName = ""
+	if err := theia.validateProtectedAuth(); err != nil {
+		t.Fatalf("tool without login adapters needs no identity name: %v", err)
+	}
+	if got, err := theia.protectedAuthIdentity(); err != nil || !backend.IsProtectedEphemeralIdentity(backend.StoreKey{Owner: "theia", Suffix: got}) {
+		t.Fatalf("theia identity = %q, %v", got, err)
+	}
+
 	ephemeral.features = []model.Extension{{Name: "github-cli", ConfigDir: ".config/gh", AuthFiles: []string{"hosts.yml", "config.yml"}}}
 	_, stores := newVolumeManager(ephemeral).BuildPrep("run")
 	if stores.Auth == nil || stores.Auth.Key.Suffix != first {

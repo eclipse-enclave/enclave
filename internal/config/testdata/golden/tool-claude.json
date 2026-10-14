@@ -75,7 +75,8 @@
       "release": {
         "http": {
           "hosts": [
-            "api.anthropic.com"
+            "api.anthropic.com",
+            "mcp-proxy.anthropic.com"
           ],
           "header": "authorization",
           "format": "Bearer %s"

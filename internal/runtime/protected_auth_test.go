@@ -154,7 +154,7 @@ func TestProtectedAuthMountsOnlySessionView(t *testing.T) {
 	if spec := newVolumeManager(r).authSyncSpec(storeSet{Config: &backend.StoreRef{Kind: backend.StoreKindConfig}, Auth: ref}); spec != nil {
 		t.Fatal("real grant scheduled for auth reconciliation")
 	}
-	if err := r.validateProtectedBindings(acc.Env()); err != nil {
+	if err := r.validateProtectedBindings(acc.Env(), nil); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -168,7 +168,7 @@ func TestProtectedAuthRejectsLateEnvironmentOverrides(t *testing.T) {
 		"CLAUDE_CODE_SESSION_ACCESS_TOKEN=real-secret", "CLAUDE_CODE_HOST_CREDS_FILE=/real-secret",
 		"CLAUDE_CODE_HOST_AUTH_ENV_VAR=REAL_SECRET", "CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST=1",
 	} {
-		err := r.validateProtectedBindings([]string{assignment})
+		err := r.validateProtectedBindings([]string{assignment}, nil)
 		if err == nil {
 			t.Errorf("accepted %s", strings.Split(assignment, "=")[0])
 		}
@@ -197,14 +197,14 @@ func TestProtectedGitHubUsesIndependentNativeViewWithoutReconcile(t *testing.T) 
 	if got, ok := lookupEnv(acc.Env(), model.EnvProtectedGitHub); !ok || got != "1" {
 		t.Fatal("protected GitHub launcher was not enabled")
 	}
-	if err := r.validateProtectedBindings(acc.Env()); err != nil {
+	if err := r.validateProtectedBindings(acc.Env(), nil); err != nil {
 		t.Fatal(err)
 	}
 	if spec := newVolumeManager(r).authSyncSpec(stores); spec != nil {
 		t.Fatal("workload feature view scheduled for copyback")
 	}
 	for _, key := range []string{"GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN", "GH_CONFIG_DIR", "GH_HOST", model.EnvProtectedGitHub} {
-		if err := r.validateProtectedBindings(append(acc.Env(), key+"=unsafe")); err == nil {
+		if err := r.validateProtectedBindings(append(acc.Env(), key+"=unsafe"), nil); err == nil {
 			t.Errorf("accepted raw credential or routing override %s", key)
 		}
 		r.auth.PassEnv = []string{key}

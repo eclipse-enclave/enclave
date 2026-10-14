@@ -567,8 +567,8 @@ Claude and GitHub grants are shared, but handles and views remain per-session.
 Reset/downgrade require all sessions using the selected identity to end.
 Saved identity protection is independent of this
 configuration: removing the setting causes a refusal, not a raw-auth fallback.
-Provider env secrets, host config passthrough and credential-helper settings
-conflict with this mode. See [authentication](auth.md#experimental-gateway-owned-claude-oauth)
+Provider secrets are released only as placeholders; raw credential variables,
+host config passthrough and credential-helper settings conflict with this mode. See [authentication](auth.md#experimental-gateway-owned-claude-oauth)
 for restrictions, reset/downgrade and pending verification.
 
 The GitHub feature identity is shared globally, not selected by `auth_name`.

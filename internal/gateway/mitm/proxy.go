@@ -332,13 +332,17 @@ func (p *proxy) handler(scheme string) http.HandlerFunc {
 		// so it holds the placeholders the sandbox sent and never a real value.
 		// A denied request was not relayed and leaves no capture.
 		capture := p.captures.Begin(req, scheme)
-		if err := rewriteHeaders(scheme, host, req.Header, p.secretRules); err != nil {
+		released, err := rewriteHeaders(scheme, host, req.Header, p.secretRules)
+		if err != nil {
 			event.Status = http.StatusForbidden
 			event.Verdict = netlog.VerdictDeny
 			event.Rule = "secret-injection"
 			p.logEvent(event)
 			http.Error(w, "request denied", http.StatusForbidden)
 			return
+		}
+		if p.oauthBroker != nil {
+			req = req.WithContext(oauthbroker.WithReleasedSecrets(req.Context(), released))
 		}
 		result, err := p.forward(w, req, scheme, capture)
 		if err != nil {
@@ -1076,21 +1080,24 @@ func normalizeRule(rule model.SecretReleaseEntry) (model.SecretReleaseEntry, err
 	return rule, nil
 }
 
-func rewriteHeaders(scheme string, host string, headers http.Header, rules []model.SecretReleaseEntry) error {
+// rewriteHeaders swaps placeholders for their secrets in each rule's declared
+// header and host, and returns the secrets it released.
+func rewriteHeaders(scheme string, host string, headers http.Header, rules []model.SecretReleaseEntry) ([]string, error) {
 	normalizedHost, err := domainpattern.NormalizeHost(host)
 	if err != nil {
-		return fmt.Errorf("invalid request host")
+		return nil, fmt.Errorf("invalid request host")
 	}
+	var released []string
 	secureTransport := strings.EqualFold(strings.TrimSpace(scheme), "https")
 	rewritten := make(http.Header)
 	for header, values := range headers {
 		for _, rule := range rules {
 			if strings.Contains(strings.ToLower(header), strings.ToLower(rule.Placeholder)) {
-				return fmt.Errorf("request denied")
+				return nil, fmt.Errorf("request denied")
 			}
 			for _, value := range values {
 				if strings.Contains(value, rule.Placeholder) && (!secureTransport || !releaseHostMatch(normalizedHost, rule) || !strings.EqualFold(header, rule.Header)) {
-					return fmt.Errorf("request denied")
+					return nil, fmt.Errorf("request denied")
 				}
 			}
 		}
@@ -1104,6 +1111,13 @@ func rewriteHeaders(scheme string, host string, headers http.Header, rules []mod
 				if !strings.Contains(value, rule.Placeholder) {
 					continue
 				}
+				if !secureTransport || !strings.EqualFold(header, rule.Header) {
+					return nil, fmt.Errorf("request denied")
+				}
+				if !releaseHostMatch(normalizedHost, rule) {
+					return nil, fmt.Errorf("request denied")
+				}
+				released = append(released, rule.Value)
 				replacement := rule.Value
 				// Apply format only when the header value is the bare placeholder;
 				// this avoids turning "Bearer <placeholder>" into "Bearer Bearer <secret>".
@@ -1122,7 +1136,7 @@ func rewriteHeaders(scheme string, host string, headers http.Header, rules []mod
 	for header, values := range rewritten {
 		headers[header] = values
 	}
-	return nil
+	return released, nil
 }
 
 func hostAllowed(host string, patterns []string) bool {

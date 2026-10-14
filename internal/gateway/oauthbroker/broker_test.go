@@ -1297,3 +1297,52 @@ func TestBrokerLockFailuresUseStateSentinelAndPreserveCallbackErrors(t *testing.
 		})
 	}
 }
+
+func TestRuleReleasedSecretsPassButAreGuarded(t *testing.T) {
+	b := fixtureBroker(t)
+	enroll(t, b)
+	const secret = "sk-ant-oat01-host-configured-long-lived-token"
+	for _, tc := range []struct {
+		name, url, body string
+		extraHandle      bool
+		wantErr          error
+	}{
+		{name: "first-party bearer", url: "https://api.anthropic.com/v1/messages", body: `{"ok":true}`},
+		{name: "first-party reflection", url: "https://api.anthropic.com/v1/messages", body: "data: " + secret, wantErr: ErrResponse},
+		{name: "other host reflection", url: "https://api.example.test/v1/echo", body: secret, wantErr: ErrResponse},
+		{name: "other host structured data", url: "https://api.example.test/v1/data", body: `{"access_token":"theirs"}`},
+		{name: "handle beside released secret", url: "https://api.anthropic.com/v1/messages", body: `{}`, extraHandle: true, wantErr: ErrDenied},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req, err := http.NewRequest(http.MethodPost, tc.url, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			req.Header.Set("Authorization", "Bearer "+secret)
+			if tc.extraHandle {
+				req.Header.Set("X-Other", b.registry.Access)
+			}
+			req = req.WithContext(WithReleasedSecrets(req.Context(), []string{secret}))
+			response, err := fixtureRoundTrip(b, req, fixtureTransport(func(outgoing *http.Request) (*http.Response, error) {
+				if outgoing.Header.Get("Authorization") != "Bearer "+secret {
+					t.Error("released secret was altered")
+				}
+				return rawFixtureResponse([]byte(tc.body)), nil
+			}))
+			var body string
+			if err == nil {
+				body, err = readAllChunks(response.Body)
+				_ = response.Body.Close()
+			}
+			if tc.wantErr != nil {
+				if !errors.Is(err, tc.wantErr) || strings.Contains(body, secret) {
+					t.Fatalf("released secret not guarded: %q, %v", body, err)
+				}
+				return
+			}
+			if err != nil || body != tc.body {
+				t.Fatalf("released request = %q, %v", body, err)
+			}
+		})
+	}
+}

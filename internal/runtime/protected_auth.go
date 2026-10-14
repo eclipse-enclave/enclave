@@ -120,7 +120,8 @@ func protectedCredentialEnv(key string) bool {
 		return true
 	}
 	switch key {
-	case "CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST", "CLAUDE_CODE_API_KEY_FILE_DESCRIPTOR", "CLAUDE_CODE_SESSION_ACCESS_TOKEN", "CLAUDE_CODE_WEBSOCKET_AUTH_FILE_DESCRIPTOR", "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy":
+	case "OPENAI_API_KEY", "CODEX_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY", "GOOGLE_GENERATIVE_AI_API_KEY", "MISTRAL_API_KEY", "COPILOT_GITHUB_TOKEN",
+		"CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST", "CLAUDE_CODE_API_KEY_FILE_DESCRIPTOR", "CLAUDE_CODE_SESSION_ACCESS_TOKEN", "CLAUDE_CODE_WEBSOCKET_AUTH_FILE_DESCRIPTOR", "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy":
 		return true
 	}
 	return false
@@ -134,17 +135,27 @@ func protectedBindingEnv(key string) bool {
 	return false
 }
 
-func validateProtectedEnv(env []string) error {
+// sessionPlaceholders lists the placeholders the gateway releases in this
+// session. A credential variable may carry only one of them.
+func sessionPlaceholders(mapping SecretMapping) map[string]bool {
+	placeholders := map[string]bool{}
+	for _, entry := range mapping.Entries {
+		placeholders[entry.Placeholder] = true
+	}
+	return placeholders
+}
+
+func validateProtectedEnv(env []string, placeholders map[string]bool) error {
 	for _, assignment := range env {
 		key, value, _ := strings.Cut(assignment, "=")
-		if value != "" && protectedCredentialEnv(key) {
-			return fmt.Errorf("protected auth conflicts with environment setting %s", key)
+		if value != "" && protectedCredentialEnv(key) && !placeholders[value] {
+			return fmt.Errorf("protected auth conflicts with environment setting %s; configure it as an Enclave secret", key)
 		}
 	}
 	return nil
 }
 
-func (r *Runtime) validateProtectedBindings(env []string) error {
+func (r *Runtime) validateProtectedBindings(env []string, placeholders map[string]bool) error {
 	configDir := resolveContainerProfilePath(r.containerHome, r.profile.ConfigDir)
 	view := r.containerHome + "/" + model.ContainerAuthDir
 	for _, assignment := range env {
@@ -180,7 +191,7 @@ func (r *Runtime) validateProtectedBindings(env []string) error {
 			return fmt.Errorf("protected auth conflicts with native auth location setting %s", key)
 		}
 	}
-	return validateProtectedEnv(env)
+	return validateProtectedEnv(env, placeholders)
 }
 
 func (m authManager) prepareProtected(env *[]string, stores storeSet) (model.AuthState, SecretMapping, error) {
@@ -209,31 +220,38 @@ func (m authManager) prepareProtected(env *[]string, stores storeSet) (model.Aut
 	if err != nil {
 		return model.AuthState{}, SecretMapping{}, err
 	}
+	// Declared credentials reach the workload only as placeholders the gateway
+	// releases at their declared hosts and header. Host selectors name an
+	// instance, not a credential, and stay plain.
+	selectors := hostCredentialRefs(secrets)
 	var allowed []activeSecret
 	for _, secret := range secrets {
-		providerSecret := false
+		binding := false
 		for _, key := range secret.EnvVars {
-			providerSecret = providerSecret || protectedCredentialEnv(key) || protectedBindingEnv(key) || (m.protectedGitHubEnabled() && protectedGitHubEnv(key))
+			binding = binding || protectedBindingEnv(key) || (m.protectedGitHubEnabled() && protectedGitHubEnv(key))
 		}
-		if !providerSecret {
+		_, selector := selectors[secret.ID]
+		if !binding && (secret.ReleaseHTTP != nil || selector) {
 			allowed = append(allowed, secret)
 			continue
 		}
 		if _, _, found, err := resolveActiveSecretValue(secret, m.host.Home, layers, persisted); err != nil {
 			return model.AuthState{}, SecretMapping{}, fmt.Errorf("resolve protected session credential conflict: %w", err)
+		} else if found && binding {
+			return model.AuthState{}, SecretMapping{}, fmt.Errorf("protected auth conflicts with configured credential %s; use a separate secret scope without it", secret.ID)
 		} else if found {
-			return model.AuthState{}, SecretMapping{}, fmt.Errorf("protected auth conflicts with configured credential %s; use a separate secret scope without provider credentials", secret.ID)
+			return model.AuthState{}, SecretMapping{}, fmt.Errorf("protected auth cannot pass credential %s without a gateway release rule", secret.ID)
 		}
 	}
 	for key, value := range persisted {
-		if value != "" && (protectedCredentialEnv(key) || protectedBindingEnv(key) || (m.protectedGitHubEnabled() && protectedGitHubEnv(key))) {
+		if value != "" && (protectedBindingEnv(key) || (m.protectedGitHubEnabled() && protectedGitHubEnv(key))) {
 			return model.AuthState{}, SecretMapping{}, fmt.Errorf("protected auth conflicts with persisted environment setting %s", key)
 		}
 	}
 	for _, assignment := range os.Environ() {
 		key, value, _ := strings.Cut(assignment, "=")
 		// Unforwarded host proxy settings do not affect the workload.
-		if value != "" && (strings.HasPrefix(key, "ANTHROPIC_") || strings.HasPrefix(key, "CLAUDE_CODE_OAUTH") || strings.HasPrefix(key, "CLAUDE_CODE_USE_") || (m.protectedGitHubEnabled() && protectedGitHubEnv(key))) {
+		if value != "" && m.protectedGitHubEnabled() && protectedGitHubEnv(key) {
 			return model.AuthState{}, SecretMapping{}, fmt.Errorf("protected auth conflicts with host environment setting %s", key)
 		}
 	}
@@ -253,7 +271,7 @@ func (m authManager) prepareProtected(env *[]string, stores storeSet) (model.Aut
 		return model.AuthState{}, SecretMapping{}, err
 	}
 	passed := m.injectPassEnv(env, persisted, injection.InjectedKeys)
-	if err := m.validateProtectedBindings(*env); err != nil {
+	if err := m.validateProtectedBindings(*env, sessionPlaceholders(injection.SecretMapping)); err != nil {
 		return model.AuthState{}, SecretMapping{}, err
 	}
 	m.persistEnvToStore(stores, persisted, injection.SecretValues, passed)

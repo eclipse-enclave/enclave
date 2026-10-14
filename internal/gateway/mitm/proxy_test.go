@@ -53,7 +53,7 @@ func TestRewriteHeadersCustomPlaceholder(t *testing.T) {
 		for _, prefix := range []string{"", "Bearer "} {
 			headers := http.Header{}
 			headers.Set("Authorization", prefix+placeholder)
-			err := rewriteHeaders(tc.scheme, tc.host, headers, rules)
+			_, err := rewriteHeaders(tc.scheme, tc.host, headers, rules)
 			if (err == nil) != tc.allowed {
 				t.Fatalf("%+v: error = %v", tc, err)
 			}
@@ -80,7 +80,7 @@ func TestRewriteHeadersAuthorizedHost(t *testing.T) {
 		},
 	}
 
-	if err := rewriteHeaders("https", "api.example.com", headers, rules); err != nil {
+	if _, err := rewriteHeaders("https", "api.example.com", headers, rules); err != nil {
 		t.Fatalf("rewriteHeaders() error = %v", err)
 	}
 	if got := headers.Get("X-Api-Key"); got != "real-secret" {
@@ -100,7 +100,7 @@ func TestRewriteHeadersPlaintextSecretReleaseBlocked(t *testing.T) {
 		},
 	}
 
-	if err := rewriteHeaders("http", "api.example.com", headers, rules); err == nil {
+	if _, err := rewriteHeaders("http", "api.example.com", headers, rules); err == nil {
 		t.Fatalf("rewriteHeaders() error = nil, want non-nil")
 	}
 	if got := headers.Get("X-Api-Key"); got != "ENCLAVE_SECRET_abc" {
@@ -121,7 +121,7 @@ func TestRewriteHeadersUnauthorizedHostBlocked(t *testing.T) {
 		},
 	}
 
-	if err := rewriteHeaders("https", "evil.example.com", headers, rules); err == nil {
+	if _, err := rewriteHeaders("https", "evil.example.com", headers, rules); err == nil {
 		t.Fatalf("rewriteHeaders() error = nil, want non-nil")
 	}
 }
@@ -139,7 +139,7 @@ func TestRewriteHeadersExactHostRejectsSubdomain(t *testing.T) {
 
 	headers := http.Header{}
 	headers.Set("Private-Token", "ENCLAVE_SECRET_abc")
-	if err := rewriteHeaders("https", "runner.gitlab.example.com", headers, []model.SecretReleaseEntry{rule}); err == nil {
+	if _, err := rewriteHeaders("https", "runner.gitlab.example.com", headers, []model.SecretReleaseEntry{rule}); err == nil {
 		t.Fatal("rewriteHeaders() error = nil, want the subdomain denied")
 	}
 	if got := headers.Get("Private-Token"); got != "ENCLAVE_SECRET_abc" {
@@ -148,7 +148,7 @@ func TestRewriteHeadersExactHostRejectsSubdomain(t *testing.T) {
 
 	headers = http.Header{}
 	headers.Set("Private-Token", "ENCLAVE_SECRET_abc")
-	if err := rewriteHeaders("https", "gitlab.example.com", headers, []model.SecretReleaseEntry{rule}); err != nil {
+	if _, err := rewriteHeaders("https", "gitlab.example.com", headers, []model.SecretReleaseEntry{rule}); err != nil {
 		t.Fatalf("rewriteHeaders() error = %v, want the selected host allowed", err)
 	}
 	if got := headers.Get("Private-Token"); got != "real-secret" {
@@ -211,7 +211,7 @@ func TestRewriteHeadersKeepsExistingPrefixWhenFormatSet(t *testing.T) {
 		},
 	}
 
-	if err := rewriteHeaders("https", "api.example.com", headers, rules); err != nil {
+	if _, err := rewriteHeaders("https", "api.example.com", headers, rules); err != nil {
 		t.Fatalf("rewriteHeaders() error = %v", err)
 	}
 	if got := headers.Get("Authorization"); got != "Bearer real-secret" {
@@ -915,7 +915,7 @@ func TestRewriteHeadersEmptyHostsBlocked(t *testing.T) {
 		},
 	}
 
-	if err := rewriteHeaders("https", "api.example.com", headers, rules); err == nil {
+	if _, err := rewriteHeaders("https", "api.example.com", headers, rules); err == nil {
 		t.Fatalf("rewriteHeaders() error = nil, want non-nil")
 	}
 }

@@ -277,6 +277,9 @@ func (m authManager) proxyManagedEnvVars(secret activeSecret) map[string]bool {
 	for _, envVar := range secret.EnvVars {
 		all[envVar] = true
 	}
+	if m.auth.ProtectAuth {
+		return all
+	}
 	managed := map[string]bool{}
 	for _, envVar := range m.specProxyManaged() {
 		if all[envVar] {
@@ -472,6 +475,10 @@ func (m authManager) shouldUseSecretReleases(activeSecrets []activeSecret) bool 
 	}
 	if !hasHTTPRelease {
 		return false
+	}
+	// Protected sessions keep the gateway in every network mode.
+	if m.auth.ProtectAuth {
+		return true
 	}
 	resolved, err := m.resolveEffectivePolicy()
 	if err != nil {

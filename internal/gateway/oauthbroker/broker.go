@@ -90,6 +90,14 @@ func (b *Broker) RoundTrip(req *http.Request, transport, exchangeTransport http.
 	if firstParty && credentialPath(req.URL.Path) {
 		return nil, ErrDenied
 	}
+	// Secrets the proxy released by declared rules are host-configured
+	// credentials, not captured grants; guard their reflection instead.
+	if released := releasedSecrets(req.Context()); len(released) != 0 {
+		if containsHandle(withoutSecrets(req, released)) {
+			return nil, ErrDenied
+		}
+		return mediate(req, transport, released...)
+	}
 	// No secret is ever substituted in arbitrary headers, bodies or URLs. This
 	// also rejects handles from ended sessions at declared authentication fields.
 	authorization := req.Header.Values("Authorization")
@@ -143,6 +151,24 @@ func (b *Broker) RoundTrip(req *http.Request, transport, exchangeTransport http.
 // authenticate a handle or distinguish it from a real provider credential.
 func ContainsHandle(value string) bool {
 	return strings.Contains(value, accessHandlePrefix) || strings.Contains(value, refreshHandlePrefix) || strings.Contains(value, githubHandlePrefix)
+}
+
+// withoutSecrets blanks released secrets in a copy of req's headers. A
+// host-configured token may share a handle's prefix; only what remains is
+// checked for handles.
+func withoutSecrets(req *http.Request, secrets []string) *http.Request {
+	stripped := req.Clone(req.Context())
+	for key, values := range stripped.Header {
+		cleaned := make([]string, len(values))
+		for i, value := range values {
+			for _, secret := range secrets {
+				value = strings.ReplaceAll(value, secret, "")
+			}
+			cleaned[i] = value
+		}
+		stripped.Header[key] = cleaned
+	}
+	return stripped
 }
 
 func containsHandle(req *http.Request) bool {

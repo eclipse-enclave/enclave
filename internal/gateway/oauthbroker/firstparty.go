@@ -9,6 +9,7 @@ package oauthbroker
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"io"
 	"mime"
@@ -77,8 +78,26 @@ func structuredMedia(header http.Header) bool {
 	return media == "application/json" || strings.HasSuffix(media, "+json") || media == "application/x-www-form-urlencoded" || strings.HasPrefix(media, "text/plain")
 }
 
-// mediate forwards a first-party request and guards its response. secrets are
-// the real credentials released into req, if any.
+type releasedKey struct{}
+
+// WithReleasedSecrets records the secrets the proxy released into a request
+// by its declared rules, so the broker can accept them and guard responses
+// against their reflection.
+func WithReleasedSecrets(ctx context.Context, secrets []string) context.Context {
+	if len(secrets) == 0 {
+		return ctx
+	}
+	return context.WithValue(ctx, releasedKey{}, slices.Clone(secrets))
+}
+
+func releasedSecrets(ctx context.Context) []string {
+	secrets, _ := ctx.Value(releasedKey{}).([]string)
+	return secrets
+}
+
+// mediate forwards a request and guards its response. secrets are the real
+// credentials released into req, if any; structured first-party responses are
+// also checked for credentials the gateway did not capture.
 func mediate(req *http.Request, transport http.RoundTripper, secrets ...string) (*http.Response, error) {
 	req.Header.Set("Accept-Encoding", "identity")
 	resp, err := transport.RoundTrip(req)
@@ -98,10 +117,11 @@ func mediate(req *http.Request, transport http.RoundTripper, secrets ...string) 
 			}
 		}
 	}
-	if !contentPath(req) && structuredMedia(resp.Header) {
+	if firstPartyRequest(req) && !contentPath(req) && structuredMedia(resp.Header) {
 		patterns = append(patterns, genericCredentialPatterns...)
 	}
-	if len(patterns) == 0 {
+	// An upgraded stream is relayed as is; it cannot be scanned.
+	if len(patterns) == 0 || resp.StatusCode == http.StatusSwitchingProtocols {
 		return resp, nil
 	}
 	if encoding := resp.Header.Get("Content-Encoding"); encoding != "" && !strings.EqualFold(encoding, "identity") {

@@ -64,9 +64,13 @@ identities with new sessions. This is an experimental implementation: Docker,
 rootless Podman, SELinux and real login/refresh remain **unverified**. Follow the
 [engine and human test plan](runtime/oauth-broker-verification.md).
 
-The Claude adapter does not migrate existing tool auth. Protected mode
-rejects provider env credentials, host config passthrough, native auth/config
-sources and credential-helper settings. It supports neither QEMU, admin mode,
+The Claude adapter does not migrate existing tool auth. Provider API keys and
+`claude setup-token` tokens configured as [Enclave secrets](#secrets) reach a
+protected session only as placeholders, in every network mode; the gateway
+releases them at their declared hosts and header and aborts responses that echo
+them. Protected mode rejects credentials without a release rule, raw credential
+variables (for example from the project `.env` or `--pass-env`), host config
+passthrough, native auth/config sources and credential-helper settings. It supports neither QEMU, admin mode,
 custom base images, runtime UID remapping nor devcontainers.
 The workload uses the non-root host UID/GID; differing build IDs and gateway service-UID
 collisions are rejected. The built-in `github-cli` feature, enabled by default,

@@ -269,7 +269,7 @@ func (r *Runtime) prepareExecution() (*ExecutionContext, error) {
 	projectEnv, envFileLoaded := r.envFileValues()
 	sessionEnv := append(append([]string{}, mountArgs.Env()...), projectEnv...)
 	if r.auth.ProtectAuth {
-		if err := validateProtectedEnv(sessionEnv); err != nil {
+		if err := validateProtectedEnv(sessionEnv, nil); err != nil {
 			return nil, err
 		}
 	}
@@ -309,7 +309,7 @@ func (r *Runtime) prepareExecution() (*ExecutionContext, error) {
 	env = append(env, projectEnv...)
 	cleanup := mergeCleanup(prepared.Cleanup, networkResult.Cleanup)
 	if r.auth.ProtectAuth {
-		if err := r.validateProtectedBindings(env); err != nil {
+		if err := r.validateProtectedBindings(env, sessionPlaceholders(prepared.SecretMapping)); err != nil {
 			if cleanup != nil {
 				cleanup()
 			}

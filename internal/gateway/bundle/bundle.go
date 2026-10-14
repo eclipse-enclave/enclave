@@ -92,16 +92,36 @@ func ConfigBundleHash(cfg BundleWriteConfig) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	return hashBundle(files.dnsmasq, files.domains), nil
+}
+
+// ActiveBundleHash hashes installed bundle files the way ConfigBundleHash
+// hashes a rendered policy, so a gateway can report what it enforces.
+func ActiveBundleHash(dnsmasqPath, domainsPath string) (string, error) {
+	// #nosec G304 -- paths are fixed gateway bundle locations.
+	dnsmasq, err := os.ReadFile(dnsmasqPath)
+	if err != nil {
+		return "", fmt.Errorf("read active dnsmasq config: %w", err)
+	}
+	// #nosec G304 -- paths are fixed gateway bundle locations.
+	domains, err := os.ReadFile(domainsPath)
+	if err != nil {
+		return "", fmt.Errorf("read active domains: %w", err)
+	}
+	return hashBundle(dnsmasq, domains), nil
+}
+
+func hashBundle(dnsmasq, domains []byte) string {
 	hasher := sha256.New()
 	hasher.Write([]byte(filepath.Base(model.GatewayConfigDNSMasqPath)))
 	hasher.Write([]byte{0})
-	hasher.Write(files.dnsmasq)
+	hasher.Write(dnsmasq)
 	hasher.Write([]byte{0})
 	hasher.Write([]byte(filepath.Base(model.GatewayConfigDomainsPath)))
 	hasher.Write([]byte{0})
-	hasher.Write(files.domains)
+	hasher.Write(domains)
 	hasher.Write([]byte{0})
-	return hex.EncodeToString(hasher.Sum(nil)), nil
+	return hex.EncodeToString(hasher.Sum(nil))
 }
 
 func renderConfigBundle(policy network.EffectivePolicy, tool string) (renderedBundle, error) {
@@ -264,6 +284,9 @@ func ReadAllowedDomains(path string) ([]string, error) {
 type PolicyState struct {
 	Mode       string `json:"mode"`
 	ModeSource string `json:"mode_source,omitempty"`
+	// BundleHash identifies the installed bundle. Sessions of one project and
+	// tool share a staging bundle, so only the gateway knows what it enforces.
+	BundleHash string `json:"bundle_hash,omitempty"`
 }
 
 // ReadMode reads the destination-policy mode from trusted gateway metadata.
@@ -301,6 +324,20 @@ func ReadPolicyState(path string) (PolicyState, error) {
 		return empty, errors.New("invalid gateway destination policy source")
 	}
 	return PolicyState{Mode: mode, ModeSource: meta.ModeSource}, nil
+}
+
+// ReadActiveState reads a gateway's active policy state and the hash of its
+// installed bundle.
+func ReadActiveState(metaPath, dnsmasqPath, domainsPath string) (PolicyState, error) {
+	state, err := ReadPolicyState(metaPath)
+	if err != nil {
+		return PolicyState{}, err
+	}
+	state.BundleHash, err = ActiveBundleHash(dnsmasqPath, domainsPath)
+	if err != nil {
+		return PolicyState{}, err
+	}
+	return state, nil
 }
 
 func normalizeMode(mode string) (string, error) {

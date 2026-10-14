@@ -206,3 +206,36 @@ func TestBundlePreservesExplicitUnrestrictedSessionOverride(t *testing.T) {
 		t.Fatalf("lost recorded session mode override: %+v, %v", state, err)
 	}
 }
+
+func TestReadActiveStateHashesInstalledBundle(t *testing.T) {
+	policy := network.EffectivePolicy{Mode: "restricted", ModeSource: "project", Domains: []string{"allowed.example"}, Resolvers: []string{"9.9.9.9"}}
+	dir := t.TempDir()
+	if err := WriteConfigBundle(BundleWriteConfig{Dir: dir, Policy: policy, Tool: "claude"}); err != nil {
+		t.Fatal(err)
+	}
+	meta, dnsmasq, domains := filepath.Join(dir, "meta.json"), filepath.Join(dir, "dnsmasq.conf"), filepath.Join(dir, "domains.txt")
+	state, err := ReadActiveState(meta, dnsmasq, domains)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := ConfigBundleHash(BundleWriteConfig{Policy: policy, Tool: "claude"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.Mode != "restricted" || state.ModeSource != "project" || state.BundleHash != want {
+		t.Fatalf("active state = %+v, want bundle hash %s", state, want)
+	}
+
+	if err := os.WriteFile(domains, []byte("changed.example\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if changed, err := ReadActiveState(meta, dnsmasq, domains); err != nil || changed.BundleHash == want {
+		t.Fatalf("installed bundle change not reflected: %+v, %v", changed, err)
+	}
+	if err := os.Remove(dnsmasq); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ReadActiveState(meta, dnsmasq, domains); err == nil {
+		t.Fatal("reported active state without an installed bundle")
+	}
+}

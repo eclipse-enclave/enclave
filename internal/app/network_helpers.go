@@ -9,8 +9,6 @@ package app
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -132,28 +130,6 @@ func desiredGatewayBundleHash(resolver policy.EffectiveResolver, target backend.
 		Policy: effective,
 		Tool:   target.Tool,
 	})
-}
-
-func hashGatewayBundleDir(dir string) (string, error) {
-	paths := []string{
-		filepath.Join(dir, filepath.Base(model.GatewayConfigDNSMasqPath)),
-		filepath.Join(dir, filepath.Base(model.GatewayConfigDomainsPath)),
-	}
-
-	hasher := sha256.New()
-	for _, path := range paths {
-		// #nosec G304 -- path is assembled from known bundle filenames under an internal caller-provided directory.
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return "", fmt.Errorf("read bundle file %s: %w", path, err)
-		}
-		hasher.Write([]byte(filepath.Base(path)))
-		hasher.Write([]byte{0})
-		hasher.Write(data)
-		hasher.Write([]byte{0})
-	}
-
-	return hex.EncodeToString(hasher.Sum(nil)), nil
 }
 
 func readGatewayBundleGeneration(bundleDir string) (string, error) {

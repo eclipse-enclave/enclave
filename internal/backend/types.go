@@ -420,6 +420,9 @@ func (g GatewayInfo) ShortID() string {
 type GatewayNetworkState struct {
 	Mode       NetworkMode
 	ModeSource string
+	// BundleHash identifies the bundle the gateway enforces; compare it with
+	// bundle.ConfigBundleHash of the desired policy.
+	BundleHash string
 }
 
 // GatewayFilter scopes a gateway listing; the zero value matches all running

@@ -33,10 +33,10 @@ func main() {
 	// DNS denials must be recorded even when the proxy is disabled.
 	dnsAuditLog := flag.String("dns-audit", "", "Translate this dnsmasq log into network audit events instead of serving as a proxy")
 	networkModePath := flag.String("network-mode", "", "Print the validated gateway bundle network mode")
-	networkStatePath := flag.String("network-state", "", "Print the validated gateway bundle policy state as JSON")
+	networkState := flag.Bool("network-state", false, "Print the active gateway policy state and bundle hash as JSON")
 	flag.Parse()
-	if *networkStatePath != "" {
-		state, err := bundle.ReadPolicyState(*networkStatePath)
+	if *networkState {
+		state, err := bundle.ReadActiveState(model.GatewayActiveMetaPath, model.GatewayActiveDNSMasqPath, model.GatewayActiveDomainsPath)
 		if err != nil {
 			log.Fatal("invalid gateway network state")
 		}

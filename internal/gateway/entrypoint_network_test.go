@@ -13,6 +13,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"enclave/internal/model"
 )
 
 func gatewayNetworkScript(t *testing.T) string {
@@ -219,5 +221,18 @@ enforce_fail_closed_lockdown
 	}
 	if strings.Contains(string(output), "ACCEPT") {
 		t.Fatalf("lockdown retained broad egress allowance: %s", output)
+	}
+}
+
+func TestGatewayEntrypointInstallsActiveBundleAtReportedPaths(t *testing.T) {
+	script := gatewayNetworkScript(t)
+	for name, path := range map[string]string{
+		"DNSMASQ_CONF":        model.GatewayActiveDNSMasqPath,
+		"ACTIVE_DOMAINS_FILE": model.GatewayActiveDomainsPath,
+		"ACTIVE_META_FILE":    model.GatewayActiveMetaPath,
+	} {
+		if !strings.Contains(script, "\n"+name+"=\""+path+"\"\n") {
+			t.Errorf("gateway entrypoint %s no longer installs at the path the proxy reports: %s", name, path)
+		}
 	}
 }

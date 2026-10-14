@@ -230,15 +230,7 @@ func runNetworkStatus(input *CommandInput) int {
 			outcomes = append(outcomes, state)
 			continue
 		}
-		runningHash, err := hashGatewayBundleDir(expectedBundleDir)
-		if err != nil {
-			state.status = "UNKNOWN"
-			state.detail = err.Error()
-			unknown++
-			outcomes = append(outcomes, state)
-			continue
-		}
-		if desiredHash != runningHash {
+		if desiredHash != active.BundleHash {
 			state.status = "STALE"
 			state.detail = "persisted policy differs from running gateway config"
 			needsApply++

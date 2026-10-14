@@ -420,7 +420,9 @@ Network mutations are currently global-only. `--project` scope is planned but no
 Mutating commands (`add-domain`, `remove-domain`, `set-mode`) apply the updated policy to the running gateways of the current project automatically, for every tool, so they do not accept `--tool`. Pass `--no-apply` to persist the change without applying it, or `--all-running` to target every running gateway on the host. Run `enclave network apply` (optionally with `--tool` or `--all-running`) to push the persisted policy to the current project/tool's gateways on demand. Changing a running session's destination mode requires a restart. Same-mode
 reload is supported for both restricted gateways and protected unrestricted
 gateways. Apply reads the active gateway's private metadata, not another
-session's host bundle. A session started with `--allow-all-network` retains that
+session's host bundle. Status likewise compares each gateway's installed bundle
+with the policy it should enforce; a gateway too old to report it shows as
+`UNKNOWN` until its session restarts. A session started with `--allow-all-network` retains that
 explicit override across reloads, even when the saved policy is restricted;
 restart without the flag to adopt the saved mode.
 

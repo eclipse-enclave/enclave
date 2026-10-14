@@ -470,6 +470,10 @@ func (p *proxy) forward(w http.ResponseWriter, req *http.Request, scheme string,
 		return p.relayUpgrade(w, outgoing, resp, capture)
 	}
 	removeHopHeaders(resp.Header)
+	if p.oauthBroker != nil {
+		// HTTP/3 alternatives would take later requests around the proxy.
+		resp.Header.Del("Alt-Svc")
+	}
 	copyHeaders(w.Header(), resp.Header)
 	for name := range resp.Trailer {
 		w.Header().Add("Trailer", name)

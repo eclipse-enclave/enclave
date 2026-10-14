@@ -482,6 +482,20 @@ func websocketUpstream(t *testing.T, access string) (*httptest.Server, *atomic.V
 	return upstream, &released, &extensions
 }
 
+func TestBrokerProxyWithholdsHTTP3Alternatives(t *testing.T) {
+	upstream := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Alt-Svc", `h3=":443"; ma=86400`)
+		_, _ = io.WriteString(w, "ok")
+	}))
+	defer upstream.Close()
+	p, _, _ := oauthTestProxy(t, upstream)
+	w := httptest.NewRecorder()
+	p.handler("https")(w, httptest.NewRequest(http.MethodGet, "https://api.anthropic.com/v1/models", nil))
+	if w.Code != http.StatusOK || w.Header().Get("Alt-Svc") != "" {
+		t.Fatalf("status %d, Alt-Svc %q", w.Code, w.Header().Get("Alt-Svc"))
+	}
+}
+
 func TestBrokerProxyScansWebSocketStreams(t *testing.T) {
 	const access = "synthetic-provider-access-credential"
 	upstream, released, extensions := websocketUpstream(t, access)

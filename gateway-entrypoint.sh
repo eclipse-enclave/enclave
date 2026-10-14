@@ -548,8 +548,14 @@ setup_firewall() {
 $UNIQUE_RESOLVERS
 EOF_RESOLVERS
 
+    if [ -n "${ENCLAVE_OAUTH_BROKER:-}" ]; then
+        # HTTP/3 would reach providers without the proxy's mediation; clients
+        # fall back to TCP.
+        iptables -A OUTPUT -p udp --dport 443 -j DROP || return 1
+    fi
+
     if [ "$network_mode" = "restricted" ]; then
-        iptables -A OUTPUT -m set --match-set "$IPSET_NAME" dst -j ACCEPT
+        iptables -A OUTPUT -m set --match-set "$IPSET_NAME" dst -j ACCEPT || return 1
     fi
 
     if [ "$PROXY_ENABLED" != "true" ]; then
@@ -564,23 +570,32 @@ EOF_RESOLVERS
 
     proxy_uid=$(id -u "$PROXY_USER")
 
-    iptables -A OUTPUT -p tcp --dport 8080 -m addrtype --dst-type LOCAL -j ACCEPT
-    iptables -A OUTPUT -p tcp --dport 8443 -m addrtype --dst-type LOCAL -j ACCEPT
-
-    iptables -t nat -F OUTPUT || true
-    iptables -t nat -A OUTPUT -p tcp --dport 80 -m owner --uid-owner "$proxy_uid" -j RETURN
-    iptables -t nat -A OUTPUT -p tcp --dport 443 -m owner --uid-owner "$proxy_uid" -j RETURN
-    iptables -t nat -A OUTPUT -p tcp --dport 80 -j REDIRECT --to-ports 8080
-    iptables -t nat -A OUTPUT -p tcp --dport 443 -j REDIRECT --to-ports 8443
+    # Without the redirects, allowed HTTP/TLS would bypass the proxy, so a
+    # failure locks egress down instead of leaving a partial rule set.
+    if ! setup_proxy_redirect "$proxy_uid"; then
+        log "Transparent proxy NAT rules failed; egress locked down"
+        enforce_fail_closed_lockdown
+        return 1
+    fi
 
     if [ "$network_mode" = "unrestricted" ]; then
         # Destination access is permissive, but HTTP/TLS still traverses the
         # proxy. Keeping OUTPUT's default DROP preserves crash lockdown.
-        iptables -A OUTPUT -j ACCEPT
+        iptables -A OUTPUT -j ACCEPT || return 1
     fi
 
     log "Transparent proxy NAT rules configured"
     setup_ide_bridge
+}
+
+setup_proxy_redirect() {
+    iptables -A OUTPUT -p tcp --dport 8080 -m addrtype --dst-type LOCAL -j ACCEPT || return 1
+    iptables -A OUTPUT -p tcp --dport 8443 -m addrtype --dst-type LOCAL -j ACCEPT || return 1
+    iptables -t nat -F OUTPUT || return 1
+    iptables -t nat -A OUTPUT -p tcp --dport 80 -m owner --uid-owner "$1" -j RETURN || return 1
+    iptables -t nat -A OUTPUT -p tcp --dport 443 -m owner --uid-owner "$1" -j RETURN || return 1
+    iptables -t nat -A OUTPUT -p tcp --dport 80 -j REDIRECT --to-ports 8080 || return 1
+    iptables -t nat -A OUTPUT -p tcp --dport 443 -j REDIRECT --to-ports 8443 || return 1
 }
 
 setup_kernel_network() {

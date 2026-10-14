@@ -104,6 +104,85 @@ setup_firewall
 	}
 }
 
+// Startup and reload call setup_firewall in a condition, where errexit does
+// not apply; a failed redirect must still keep traffic off unmediated paths.
+func TestGatewayFirewallLocksDownWhenRedirectsFail(t *testing.T) {
+	for _, mode := range []string{"restricted", "unrestricted"} {
+		for _, failing := range []string{"-t nat -F OUTPUT", "--dport 443 -j REDIRECT"} {
+			t.Run(mode+"/"+failing, func(t *testing.T) {
+				dir := t.TempDir()
+				calls := filepath.Join(dir, "iptables.calls")
+				if err := os.WriteFile(filepath.Join(dir, "enclave-gateway-proxy"), []byte("#!/bin/sh\nprintf '%s\\n' \"$TEST_MODE\"\n"), 0o700); err != nil {
+					t.Fatal(err)
+				}
+				script := gatewayNetworkScript(t) + `
+iptables() {
+    printf '%s\n' "$*" >> "$TEST_CALLS"
+    case "$*" in *"$TEST_FAIL"*) return 1 ;; esac
+}
+id() { case "$2" in dnsmasq) echo 990;; gateway) echo 991;; *) return 1;; esac; }
+setup_loopback_forwarding() { :; }
+setup_ide_bridge() { :; }
+UNIQUE_RESOLVERS=9.9.9.9
+PROXY_ENABLED=true
+if setup_firewall; then echo SETUP_SUCCEEDED; fi
+`
+				command := exec.Command("sh", "-c", script)
+				command.Env = append(os.Environ(), "TEST_CALLS="+calls, "TEST_MODE="+mode, "TEST_FAIL="+failing, "PATH="+dir+":"+os.Getenv("PATH"))
+				output, _ := command.CombinedOutput()
+				data, err := os.ReadFile(calls)
+				if err != nil {
+					t.Fatal(err)
+				}
+				rules := string(data)
+				if strings.Contains(string(output), "SETUP_SUCCEEDED") || strings.Contains(rules, "-A OUTPUT -j ACCEPT\n") {
+					t.Fatalf("failed redirect left egress open: %s\n%s", output, rules)
+				}
+				// Lockdown flushes OUTPUT after the failure, dropping any
+				// allowlist rule added before it.
+				failed := strings.LastIndex(rules, failing)
+				if !strings.Contains(rules[failed:], "-F OUTPUT\n") || !strings.Contains(rules[failed:], "-P OUTPUT DROP\n") {
+					t.Fatalf("no lockdown after the failed redirect: %s", rules)
+				}
+			})
+		}
+	}
+}
+
+// Protected sessions drop HTTP/3, which would bypass the proxy.
+func TestGatewayFirewallDropsQUICForProtectedSessions(t *testing.T) {
+	for _, broker := range []string{"", "codex"} {
+		dir := t.TempDir()
+		calls := filepath.Join(dir, "iptables.calls")
+		if err := os.WriteFile(filepath.Join(dir, "enclave-gateway-proxy"), []byte("#!/bin/sh\necho unrestricted\n"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		script := gatewayNetworkScript(t) + `
+iptables() { printf '%s\n' "$*" >> "$TEST_CALLS"; }
+id() { case "$2" in dnsmasq) echo 990;; gateway) echo 991;; *) return 1;; esac; }
+setup_loopback_forwarding() { :; }
+setup_ide_bridge() { :; }
+UNIQUE_RESOLVERS=9.9.9.9
+PROXY_ENABLED=true
+setup_firewall
+`
+		command := exec.Command("sh", "-c", script)
+		command.Env = append(os.Environ(), "TEST_CALLS="+calls, "ENCLAVE_OAUTH_BROKER="+broker, "PATH="+dir+":"+os.Getenv("PATH"))
+		if output, err := command.CombinedOutput(); err != nil {
+			t.Fatalf("setup failed: %v: %s", err, output)
+		}
+		data, err := os.ReadFile(calls)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rules := string(data)
+		drop := strings.Index(rules, "-A OUTPUT -p udp --dport 443 -j DROP\n")
+		if (drop >= 0) != (broker != "") || (drop >= 0 && drop > strings.Index(rules, "-A OUTPUT -j ACCEPT\n")) {
+			t.Fatalf("broker %q: QUIC drop at %d in %s", broker, drop, rules)
+		}
+	}
+}
+
 func TestGatewayUnrestrictedDNSResolverAndBundleState(t *testing.T) {
 	dir := t.TempDir()
 	active := filepath.Join(dir, "active")

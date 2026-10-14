@@ -482,6 +482,24 @@ func websocketUpstream(t *testing.T, access string) (*httptest.Server, *atomic.V
 	return upstream, &released, &extensions
 }
 
+// gRPC needs TE: trailers upstream; other TE values stay hop-by-hop.
+func TestProxyKeepsTrailersTE(t *testing.T) {
+	var te atomic.Value
+	upstream := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		te.Store(req.Header.Get("Te"))
+	}))
+	defer upstream.Close()
+	p, _, _ := oauthTestProxy(t, upstream)
+	for value, want := range map[string]string{"trailers": "trailers", "gzip, trailers": "trailers", "gzip": ""} {
+		req := httptest.NewRequest(http.MethodPost, "https://api.anthropic.com/v1/models", nil)
+		req.Header.Set("Te", value)
+		p.handler("https")(httptest.NewRecorder(), req)
+		if te.Load() != want {
+			t.Fatalf("TE %q reached upstream as %q, want %q", value, te.Load(), want)
+		}
+	}
+}
+
 func TestBrokerProxyWithholdsHTTP3Alternatives(t *testing.T) {
 	upstream := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Alt-Svc", `h3=":443"; ma=86400`)

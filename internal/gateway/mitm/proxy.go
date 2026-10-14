@@ -434,6 +434,10 @@ func (p *proxy) forward(w http.ResponseWriter, req *http.Request, scheme string,
 	// stream that carries released credentials for them.
 	upgrade := upgradeType(req.Header)
 	removeHopHeaders(outgoing.Header)
+	// Like httputil.ReverseProxy, keep the one TE value gRPC depends on.
+	if headerHasToken(req.Header, "Te", "trailers") {
+		outgoing.Header.Set("Te", "trailers")
+	}
 	if upgrade != "" {
 		outgoing.Header.Set("Connection", "Upgrade")
 		outgoing.Header.Set("Upgrade", upgrade)
@@ -552,6 +556,17 @@ func (c captureWriter) Write(p []byte) (int, error) {
 	n, err := c.relay.Write(p)
 	_, _ = c.capture.Write(p[:n])
 	return n, err
+}
+
+func headerHasToken(header http.Header, name, token string) bool {
+	for _, value := range header.Values(name) {
+		for item := range strings.SplitSeq(value, ",") {
+			if strings.EqualFold(strings.TrimSpace(item), token) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // relayUpgrade completes a protocol switch such as a WebSocket handshake. The

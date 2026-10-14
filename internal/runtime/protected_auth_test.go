@@ -430,3 +430,49 @@ func TestProtectedLoginsSkipCallbackPorts(t *testing.T) {
 		}
 	}
 }
+
+// A protected session refuses credentials it could only pass raw, and native
+// credential files in the composed config source.
+func TestPrepareProtectedRefusals(t *testing.T) {
+	for name, tc := range map[string]struct {
+		setup func(t *testing.T, r *Runtime)
+		want  string
+	}{
+		"credential without release rule": {
+			setup: func(t *testing.T, r *Runtime) {
+				t.Setenv("VENDOR_TOKEN", "real-secret")
+				r.profile.Secrets = map[string]model.SecretConfig{"vendor": secretConfig([]string{"VENDOR_TOKEN"}, nil)}
+			},
+			want: "without a gateway release rule",
+		},
+		"credential location override": {
+			setup: func(t *testing.T, r *Runtime) {
+				t.Setenv("CODEX_HOME", "/real-secret")
+				r.profile.Secrets = map[string]model.SecretConfig{"codex-home": secretConfig([]string{"CODEX_HOME"}, nil)}
+			},
+			want: "conflicts with configured credential",
+		},
+		"native file in config source": {
+			setup: func(t *testing.T, r *Runtime) {
+				r.configSourceDir = t.TempDir()
+				if err := os.WriteFile(filepath.Join(r.configSourceDir, "auth.json"), []byte("{}"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			},
+			want: "refuses native auth file in config source",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			r := runtimeWithProfile(t, model.Profile{Name: "codex"})
+			r.auth.ProtectAuth = true
+			tc.setup(t, r)
+			env := []string{}
+			if _, _, err := newAuthManager(r).prepareProtected(&env, storeSet{}); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("prepareProtected = %v, want %q", err, tc.want)
+			}
+			if slices.ContainsFunc(env, func(entry string) bool { return strings.Contains(entry, "real-secret") }) {
+				t.Fatalf("refused credential reached the environment: %v", env)
+			}
+		})
+	}
+}

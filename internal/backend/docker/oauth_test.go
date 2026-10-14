@@ -570,7 +570,10 @@ func TestEngineInspectionFailureRetainsReservation(t *testing.T) {
 	}
 }
 
-func TestProtectedEphemeralRemovalFinalizesReservationAndKeepsGrant(t *testing.T) {
+// Removing an --ephemeral session that used a shared protected identity ends
+// its reservation; the shared grant stays. Per-session identities are covered
+// by TestEphemeralProtectedIdentityIsRemovedOnceUnmountable.
+func TestEphemeralSessionRemovalFinalizesReservationAndKeepsSharedGrant(t *testing.T) {
 	b, key, _ := oauthTestBackend(t)
 	ctx := context.Background()
 	ref, err := b.PrepareAuthSession(ctx, key, "session", true, false)

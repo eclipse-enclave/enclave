@@ -47,9 +47,11 @@ func TestProtectedReadinessRequiresInitializedAdaptersAndExactSession(t *testing
 			if err := VerifyReadiness(b.config); err != nil {
 				t.Fatal(err)
 			}
-			for _, field := range []string{"identity", "session", "incarnation", "github"} {
+			for _, field := range []string{"tool", "identity", "session", "incarnation", "github"} {
 				expected := b.config
 				switch field {
+				case "tool":
+					expected.Tool = "codex"
 				case "identity":
 					expected.Identity = "different"
 				case "session":
@@ -67,15 +69,20 @@ func TestProtectedReadinessRequiresInitializedAdaptersAndExactSession(t *testing
 					t.Fatalf("readiness accepted different %s", field)
 				}
 			}
+			attestation, err := os.ReadFile(filepath.Join(b.config.RuntimeDir, readinessFile))
+			if err != nil {
+				t.Fatal(err)
+			}
 			if err := ClearReadiness(b.config.RuntimeDir); err != nil {
 				t.Fatal(err)
 			}
 			if err := VerifyReadiness(b.config); err == nil {
 				t.Fatal("previous gateway readiness survived clearing")
 			}
-			// A private-looking alias is not attestation from this runtime.
+			// A private-looking alias of a valid attestation is not
+			// attestation from this runtime.
 			outside := filepath.Join(t.TempDir(), "attestation")
-			if err := os.WriteFile(outside, []byte(`{}`), 0o600); err != nil {
+			if err := os.WriteFile(outside, attestation, 0o600); err != nil {
 				t.Fatal(err)
 			}
 			if err := os.Symlink(outside, filepath.Join(b.config.RuntimeDir, readinessFile)); err != nil {

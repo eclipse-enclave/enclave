@@ -237,7 +237,8 @@ func TestOpenAIRefreshFailuresFailClosed(t *testing.T) {
 			return fixtureResponse(map[string]any{"access_token": other, "expires_in": 3600}), nil
 		},
 		"unknown field": func(*http.Request) (*http.Response, error) {
-			return fixtureResponse(map[string]any{"access_token": "a.b.c", "surprise": true}), nil
+			same := fixtureJWT(nil, map[string]any{"exp": int64(1800000000 + 7200), "https://api.openai.com/auth": map[string]any{"chatgpt_account_id": "acct-1"}}, "s")
+			return fixtureResponse(map[string]any{"access_token": same, "expires_in": 3600, "surprise": true}), nil
 		},
 	} {
 		t.Run(name, func(t *testing.T) {

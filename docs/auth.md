@@ -21,7 +21,7 @@ files, which the session links to a view at `~/.enclave-auth`:
 | `pi` | Claude subscription, ChatGPT (`openai-codex`) | `~/.pi/agent/auth.json` |
 | `codex` | ChatGPT (browser and device code) | `~/.codex/auth.json` |
 | `opencode` | ChatGPT (browser and headless); Copilot is refused for now | `~/.config/opencode/auth.json` |
-| `mistral-vibe` | none yet; browser sign-in is refused | `~/.vibe/.env` |
+| `mistral-vibe` | Mistral browser sign-in | `~/.vibe/.env` |
 | `theia`, `theia-next` | none | none |
 
 ChatGPT handles keep the real tokens' JWT header and claims, which the clients
@@ -30,6 +30,12 @@ access token. The token exchange that mints an OpenAI API key from a ChatGPT
 login, and pi's and OpenCode's "Sign in with ChatGPT" token sharing, are refused.
 A second login to an identity that already holds a grant is refused too; reset
 the identity to switch accounts.
+
+Mistral Vibe's browser sign-in returns an API key, which the gateway keeps; Vibe
+stores a handle that the gateway releases to `api.mistral.ai`,
+`console.mistral.ai` and `chat.mistral.ai`. In later sessions the handle comes
+from `~/.vibe/.env`, which is session-scoped like every native credential file,
+so other settings Vibe writes there, such as `/proxy-setup`, do not persist.
 
 In every protected session the gateway mediates the Anthropic, OpenAI, Mistral,
 GitHub and Copilot domains. Logins it does not capture are refused there, and so

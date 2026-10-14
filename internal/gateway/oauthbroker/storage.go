@@ -88,7 +88,9 @@ type Broker struct {
 	// anthropic enables Claude subscription capture and release.
 	anthropic bool
 	// openai holds the ChatGPT sign-in handles when the tool uses it.
-	openai   *openaiRegistry
+	openai *openaiRegistry
+	// mistral holds the Mistral sign-in handle when the tool uses it.
+	mistral  *mistralRegistry
 	config   Config
 	registry registry
 	mu       sync.Mutex
@@ -166,7 +168,12 @@ func Open(config Config) (*Broker, error) {
 			}
 		}
 		if tool.Uses(protectedauth.AdapterOpenAI) {
-			return b.openOpenAI()
+			if err := b.openOpenAI(); err != nil {
+				return err
+			}
+		}
+		if tool.Uses(protectedauth.AdapterMistral) {
+			return b.openMistral()
 		}
 		return nil
 	})
@@ -175,6 +182,9 @@ func Open(config Config) (*Broker, error) {
 	}
 	if b.openai != nil {
 		b.adapters = append(b.adapters, openaiAdapter{b: b})
+	}
+	if b.mistral != nil {
+		b.adapters = append(b.adapters, mistralAdapter{b: b})
 	}
 	if config.GitHub != nil {
 		b.github, err = openGitHub(*config.GitHub)

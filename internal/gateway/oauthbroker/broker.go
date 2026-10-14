@@ -152,7 +152,7 @@ func (b *Broker) RoundTrip(req *http.Request, transport, exchangeTransport http.
 // audit scrubbing, including malformed or wrong-session handles. It does not
 // authenticate a handle or distinguish it from a real provider credential.
 func ContainsHandle(value string) bool {
-	return strings.Contains(value, accessHandlePrefix) || strings.Contains(value, refreshHandlePrefix) || strings.Contains(value, githubHandlePrefix) || strings.Contains(value, openaiHandleMarker)
+	return strings.Contains(value, accessHandlePrefix) || strings.Contains(value, refreshHandlePrefix) || strings.Contains(value, githubHandlePrefix) || strings.Contains(value, openaiHandleMarker) || strings.Contains(value, mistralHandleMarker)
 }
 
 // withoutSecrets blanks released secrets in a copy of req's headers. A

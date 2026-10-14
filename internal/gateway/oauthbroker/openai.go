@@ -33,7 +33,7 @@ import (
 // client and grant.
 const (
 	openaiTokenHost    = "auth.openai.com" // #nosec G101 -- public OAuth host, not a credential.
-	openaiTokenPath    = "/oauth/token" // #nosec G101 -- public OAuth endpoint, not a credential.
+	openaiTokenPath    = "/oauth/token"    // #nosec G101 -- public OAuth endpoint, not a credential.
 	openaiClientID     = "app_EMoamEEZ73f0CkXaXp7hrann"
 	openaiReleaseHost  = "chatgpt.com"
 	openaiGrantFile    = "openai-grant.json"

@@ -117,6 +117,14 @@ func (b *Broker) nativeFiles(g *grant) (map[string][]byte, error) {
 				return nil, err
 			}
 		}
+	case "mistral-vibe":
+		env, err := b.mistralView()
+		if err != nil {
+			return nil, err
+		}
+		if len(env) != 0 {
+			files["vibe.env"] = env
+		}
 	case "pi":
 		entries := map[string]any{}
 		if ready {

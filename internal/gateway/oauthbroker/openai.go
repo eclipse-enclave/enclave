@@ -394,7 +394,9 @@ func (b *Broker) openaiExchange(req *http.Request, transport http.RoundTripper) 
 		if err := b.writeOpenAIGrant(&pending); err != nil {
 			return err
 		}
-		upstream, err := openaiDispatch(req.Context(), req, request, transport)
+		// A client that gives up after dispatch must not cancel a rotation
+		// the provider may complete; siblings share its outcome.
+		upstream, err := openaiDispatch(context.WithoutCancel(req.Context()), req, request, transport)
 		if err != nil {
 			return err
 		}

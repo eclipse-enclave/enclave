@@ -300,7 +300,9 @@ func (b *Broker) exchange(req *http.Request, transport http.RoundTripper) (*http
 		if err != nil {
 			return ErrState
 		}
-		exchangeContext, cancel := context.WithTimeout(req.Context(), exchangeTimeout)
+		// A client that gives up after dispatch must not cancel a rotation
+		// the provider may complete; siblings share its outcome.
+		exchangeContext, cancel := context.WithTimeout(context.WithoutCancel(req.Context()), exchangeTimeout)
 		defer cancel()
 		outgoing := req.Clone(exchangeContext)
 		outgoing.Body = io.NopCloser(bytes.NewReader(payload))

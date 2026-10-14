@@ -1217,33 +1217,27 @@ func TestTripwireStreamsEventsWithoutDelayAndStopsBeforeSecret(t *testing.T) {
 	}
 }
 
-type cancelledBody struct{ context.Context }
-
-func (r cancelledBody) Read([]byte) (int, error) { <-r.Done(); return 0, r.Err() }
-func (cancelledBody) Close() error               { return nil }
-
-func TestCaptureHasWholeExchangeDeadlineAndFailsClosedOnBodyCancellation(t *testing.T) {
+// A client that gives up after dispatch must not cancel the exchange: the
+// provider may rotate the grant, and siblings depend on its outcome.
+func TestExchangeOutlivesClientCancellation(t *testing.T) {
 	b := fixtureBroker(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	req := loginRequest(t).WithContext(ctx)
-	response, err := fixtureRoundTrip(b, req, fixtureTransport(func(outgoing *http.Request) (*http.Response, error) {
+	_, _ = fixtureRoundTrip(b, req, fixtureTransport(func(outgoing *http.Request) (*http.Response, error) {
 		deadline, ok := outgoing.Context().Deadline()
 		if !ok || time.Until(deadline) > exchangeTimeout || time.Until(deadline) < time.Minute {
 			t.Error("capture lacks bounded whole-exchange deadline")
 		}
 		cancel()
-		upstream := rawFixtureResponse(nil)
-		upstream.Body = cancelledBody{Context: outgoing.Context()}
-		upstream.ContentLength = -1
-		return upstream, nil
+		if outgoing.Context().Err() != nil {
+			t.Error("client cancellation reached the dispatched exchange")
+		}
+		return fixtureResponse(fixtureToken()), nil
 	}))
-	if response != nil || !errors.Is(err, ErrResponse) {
-		t.Fatalf("body cancellation = %v, %v", response, err)
-	}
 	stored, err := b.readGrant()
-	if err != nil || stored.Status != "uncertain" {
-		t.Fatalf("cancelled capture state = %+v, %v", stored, err)
+	if err != nil || stored.Status != "ready" {
+		t.Fatalf("exchange after client cancellation = %+v, %v", stored, err)
 	}
 }
 

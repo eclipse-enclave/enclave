@@ -123,7 +123,10 @@ func (b *githubBroker) exchange(req *http.Request, transport http.RoundTripper) 
 	if err != nil {
 		return nil, err
 	}
-	ctx, cancel := context.WithTimeout(req.Context(), exchangeTimeout)
+	client := req.Context()
+	// A client that gives up after dispatch must neither strand a pending
+	// device record nor cancel an exchange GitHub may complete.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(client), exchangeTimeout)
 	defer cancel()
 	req = req.Clone(ctx)
 	if req.URL.Path == githubDevicePath {
@@ -135,7 +138,7 @@ func (b *githubBroker) exchange(req *http.Request, transport http.RoundTripper) 
 	}
 	var projected *http.Response
 	err = b.locked(func() error {
-		if req.Context().Err() != nil {
+		if client.Err() != nil {
 			return ErrDenied
 		}
 		g, err := b.readGrant()

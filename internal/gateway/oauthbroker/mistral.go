@@ -192,7 +192,9 @@ func (b *Broker) mistralExchange(req *http.Request, transport http.RoundTripper)
 		if err != nil {
 			return ErrState
 		}
-		ctx, cancel := context.WithTimeout(req.Context(), exchangeTimeout)
+		// The exchange token is consumed once dispatched; a client that gives
+		// up must not cancel an exchange the provider may complete.
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(req.Context()), exchangeTimeout)
 		defer cancel()
 		outgoing := req.Clone(ctx)
 		outgoing.Body = io.NopCloser(bytes.NewReader(payload))

@@ -8,6 +8,7 @@
 package oauthbroker
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -719,6 +720,29 @@ func TestGitHubPendingCommitFailureReturnsNoResponse(t *testing.T) {
 	response, err = fixtureRoundTrip(reloaded, githubRequest(t, githubTokenPath, "pending"), transport)
 	if response != nil || !errors.Is(err, ErrUncertain) || calls != 1 {
 		t.Fatalf("failed persistence lost its replay fence: %v, calls=%d", err, calls)
+	}
+}
+
+// A workload that drops its poll after dispatch must not leave a pending
+// record behind; otherwise random codes could fill the bounded history.
+func TestGitHubPollOutlivesClientDisconnect(t *testing.T) {
+	b := fixtureGitHub(t, githubNativeFixture())
+	for i := range githubMaxDevices + 1 {
+		ctx, cancel := context.WithCancel(context.Background())
+		req := githubRequest(t, githubTokenPath, fmt.Sprintf("random-%d", i)).WithContext(ctx)
+		_, _ = fixtureRoundTrip(b, req, fixtureTransport(func(out *http.Request) (*http.Response, error) {
+			cancel()
+			// Like a real transport, a cancelled request fails.
+			if err := out.Context().Err(); err != nil {
+				return nil, err
+			}
+			return fixtureResponse(map[string]string{"error": "bad_verification_code"}), nil
+		}))
+		cancel()
+	}
+	g, err := b.github.readGrant()
+	if err != nil || len(g.Devices) != 0 {
+		t.Fatalf("pending records after dropped polls: %d, %v", len(g.Devices), err)
 	}
 }
 

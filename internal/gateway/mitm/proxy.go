@@ -26,6 +26,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"golang.org/x/crypto/cryptobyte"
@@ -144,6 +145,7 @@ func Run(ctx context.Context, opts Options) error {
 		_ = httpsListener.Close()
 		return fmt.Errorf("create HTTPS dispatch server: %w", err)
 	}
+	proxy.guardSelfDial(httpListener, httpsListener, httpsServer.mitmListener)
 	if opts.OnReady != nil {
 		if err := opts.OnReady(); err != nil {
 			_ = httpListener.Close()
@@ -247,6 +249,47 @@ func newUpstreamTransport() *http.Transport {
 		IdleConnTimeout:       90 * time.Second,
 		ResponseHeaderTimeout: 120 * time.Second,
 		TLSHandshakeTimeout:   10 * time.Second,
+	}
+}
+
+var errSelfDial = errors.New("refusing to connect to the proxy's own listener")
+
+// guardSelfDial refuses upstream connections into the proxy's own listeners.
+// A Host naming the gateway, as allow-all mode permits, would otherwise loop a
+// request through the proxy until it runs out of memory. Other local services
+// stay reachable.
+func (p *proxy) guardSelfDial(listeners ...net.Listener) {
+	ports := map[string]bool{}
+	for _, listener := range listeners {
+		if listener == nil {
+			continue
+		}
+		if _, port, err := net.SplitHostPort(listener.Addr().String()); err == nil {
+			ports[port] = true
+		}
+	}
+	own := map[string]bool{}
+	if addrs, err := net.InterfaceAddrs(); err == nil {
+		for _, addr := range addrs {
+			if prefix, ok := addr.(*net.IPNet); ok {
+				own[prefix.IP.String()] = true
+			}
+		}
+	}
+	dialer := &net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second, Control: func(_, address string, _ syscall.RawConn) error {
+		host, port, err := net.SplitHostPort(address)
+		if err != nil || !ports[port] {
+			return nil
+		}
+		if ip := net.ParseIP(host); ip != nil && (ip.IsLoopback() || ip.IsUnspecified() || own[ip.String()]) {
+			return errSelfDial
+		}
+		return nil
+	}}
+	for _, transport := range []*http.Transport{p.transport, p.upgradeTransport, p.exchangeTransport} {
+		if transport != nil {
+			transport.DialContext = dialer.DialContext
+		}
 	}
 }
 

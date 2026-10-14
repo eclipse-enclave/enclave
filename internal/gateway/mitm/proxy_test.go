@@ -1258,3 +1258,32 @@ func TestRunReturnsReadinessFailure(t *testing.T) {
 		t.Fatalf("readiness failure reported success: %v, called=%t", err, called)
 	}
 }
+
+// In allow-all mode a Host naming the proxy itself would loop the request
+// through it; other local services stay reachable.
+func TestProxyRefusesToDialItself(t *testing.T) {
+	local := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, "local service") }))
+	defer local.Close()
+	p := newProxy(nil, nil, nil, false, nil, testSession)
+	p.allowAllDestinations = true
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := &http.Server{Handler: p.handler("http"), ReadHeaderTimeout: time.Second}
+	go func() { _ = server.Serve(listener) }()
+	defer func() { _ = server.Close() }()
+	p.guardSelfDial(listener)
+
+	for target, want := range map[string]int{
+		listener.Addr().String():                 http.StatusBadGateway,
+		strings.TrimPrefix(local.URL, "http://"): http.StatusOK,
+	} {
+		req := httptest.NewRequest(http.MethodGet, "http://"+target+"/", nil)
+		w := httptest.NewRecorder()
+		p.handler("http")(w, req)
+		if w.Code != want {
+			t.Fatalf("%s: status %d, want %d", target, w.Code, want)
+		}
+	}
+}

@@ -17,6 +17,7 @@ import (
 	"strings"
 	"testing"
 
+	"enclave/internal/model"
 	"enclave/internal/protectedauth"
 )
 
@@ -149,5 +150,76 @@ func TestPiViewProjectsAnthropicHandles(t *testing.T) {
 	}
 	if strings.Contains(string(data), fixtureAccess) || strings.Contains(string(data), fixtureRefresh) {
 		t.Fatal("pi view contains the real tokens")
+	}
+}
+
+func TestInstanceProvidersFollowReplacedDeclaredHosts(t *testing.T) {
+	got := InstanceProviders([]model.SecretReleaseEntry{
+		{Hosts: []string{"GitLab.Example.com"}, ExactHosts: true, DeclaredHosts: []string{"gitlab.com", "*.gitlab.com"}},
+		{Hosts: []string{"other.example.com"}, ExactHosts: true, DeclaredHosts: []string{"api.vendor.example"}},
+		{Hosts: []string{"gitlab.com"}},
+	})
+	if len(got) != 1 || got["gitlab.example.com"] != "gitlab" {
+		t.Fatalf("instances = %v", got)
+	}
+}
+
+// A self-managed GitLab instance named by the session's configuration is
+// mediated like gitlab.com: its configured token is released, but logins and
+// pasted tokens are refused there.
+func TestDeclaredInstanceIsMediatedLikeItsProvider(t *testing.T) {
+	b := fixtureToolBroker(t, "claude")
+	config := b.config
+	config.Instances = map[string]string{"gitlab.example.com": "gitlab"}
+	instance, err := Open(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !instance.RequiresMITM("gitlab.example.com") || b.RequiresMITM("gitlab.example.com") {
+		t.Fatal("only a declared instance is intercepted")
+	}
+	const released = "glpat-host-configured-token"
+	for _, tc := range []struct {
+		name, method, url, header, value string
+		released                         bool
+		denied                           bool
+	}{
+		{name: "configured token", method: http.MethodGet, url: "https://gitlab.example.com/api/v4/user", header: "Private-Token", value: released, released: true},
+		{name: "pasted token", method: http.MethodGet, url: "https://gitlab.example.com/api/v4/user", header: "Private-Token", value: "glpat-pasted", denied: true},
+		{name: "OAuth login", method: http.MethodPost, url: "https://gitlab.example.com/oauth/token", denied: true},
+		{name: "anonymous read", method: http.MethodGet, url: "https://gitlab.example.com/api/v4/projects"},
+		{name: "other host", method: http.MethodGet, url: "https://other.example.com/api/v4/user", header: "Private-Token", value: "glpat-pasted"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req, err := http.NewRequest(tc.method, tc.url, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.header != "" {
+				req.Header.Set(tc.header, tc.value)
+			}
+			if tc.released {
+				req = req.WithContext(WithReleasedSecrets(req.Context(), []string{released}))
+			}
+			called := false
+			response, err := fixtureRoundTrip(instance, req, fixtureTransport(func(*http.Request) (*http.Response, error) {
+				called = true
+				return rawFixtureResponse([]byte(`{}`)), nil
+			}))
+			if tc.denied {
+				if !errors.Is(err, ErrDenied) || called {
+					t.Fatalf("not refused: %v, upstream called %t", err, called)
+				}
+				return
+			}
+			if err != nil || !called {
+				t.Fatalf("refused: %v", err)
+			}
+			_ = response.Body.Close()
+		})
+	}
+	config.Instances = map[string]string{"gitlab.example.com": "unknown"}
+	if _, err := Open(config); !errors.Is(err, ErrState) {
+		t.Fatalf("unknown instance provider accepted: %v", err)
 	}
 }

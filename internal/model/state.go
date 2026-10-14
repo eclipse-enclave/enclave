@@ -31,6 +31,10 @@ type SecretReleaseEntry struct {
 	// instance the token belongs to, so releasing it to every host beneath it
 	// would widen exactly what naming the instance is meant to narrow.
 	ExactHosts bool `json:"exact_hosts,omitempty"`
+	// DeclaredHosts are the declared release hosts a selected instance
+	// replaced. A protected gateway mediates the instance like the service
+	// they name.
+	DeclaredHosts []string `json:"declared_hosts,omitempty"`
 }
 
 func (s AuthState) HasAnyEnvCredential() bool {

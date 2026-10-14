@@ -117,6 +117,7 @@ func main() {
 	}
 	broker, err := loadOAuthBroker(oauthbroker.Config{
 		StoreDir: model.GatewayOAuthGrantPath, RuntimeDir: model.GatewayOAuthRuntimePath, LockPath: model.GatewayOAuthLockPath,
+		Instances: oauthbroker.InstanceProviders(rules),
 	}, model.GatewayOAuthViewPath)
 	if err != nil {
 		log.Fatal("protected OAuth initialization failed; inspect the selected identity or start a fresh session")

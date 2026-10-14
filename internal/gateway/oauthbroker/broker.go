@@ -36,7 +36,7 @@ const maxRequestedLifetime = 400 * 24 * 60 * 60
 
 // RequiresMITM installs capture before the first login (there is no grant yet).
 func (b *Broker) RequiresMITM(host string) bool {
-	return firstPartyHost(host) || (b.github != nil && githubHost(host))
+	return firstPartyHost(host) || b.instances[protectedHost(host)] != nil || (b.github != nil && githubHost(host))
 }
 
 func protectedHost(value string) string {
@@ -93,7 +93,7 @@ func (b *Broker) RoundTrip(req *http.Request, transport, exchangeTransport http.
 	if protectedHost(req.URL.Hostname()) == tokenHost || protectedHost(req.Host) == tokenHost {
 		return nil, ErrDenied
 	}
-	p := requestProvider(req)
+	p := b.requestProvider(req)
 	if p != nil && p.credentialPath(protectedHost(req.URL.Hostname()), req.URL.Path) {
 		return nil, ErrDenied
 	}
@@ -104,7 +104,7 @@ func (b *Broker) RoundTrip(req *http.Request, transport, exchangeTransport http.
 		if containsHandle(stripped) || (p != nil && rawCredential(stripped)) {
 			return nil, ErrDenied
 		}
-		return mediate(req, transport, released...)
+		return mediateAs(p, req, transport, released...)
 	}
 	authorization := req.Header.Values("Authorization")
 	if !b.anthropic || len(authorization) != 1 || authorization[0] != "Bearer "+b.registry.Access || !releaseOrigin(req) {
@@ -116,7 +116,7 @@ func (b *Broker) RoundTrip(req *http.Request, transport, exchangeTransport http.
 			return nil, ErrDenied
 		}
 		if p != nil {
-			return mediate(req, transport)
+			return mediateAs(p, req, transport)
 		}
 		return transport.RoundTrip(req)
 	}

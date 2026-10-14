@@ -211,7 +211,7 @@ func (m authManager) injectDeclaredSecrets(hooks auth.Hooks, authCtx auth.Contex
 			placeholder = resolved
 			placeholderVars = m.proxyManagedEnvVars(secret)
 			releaseHosts, exactHosts := m.releaseTargetsFor(secret)
-			result.SecretMapping.Entries = append(result.SecretMapping.Entries, model.SecretReleaseEntry{
+			entry := model.SecretReleaseEntry{
 				SecretID:    secret.ID,
 				Placeholder: placeholder,
 				Value:       secretValue,
@@ -219,7 +219,11 @@ func (m authManager) injectDeclaredSecrets(hooks auth.Hooks, authCtx auth.Contex
 				Header:      secret.ReleaseHTTP.Header,
 				Format:      secret.ReleaseHTTP.Format,
 				ExactHosts:  exactHosts,
-			})
+			}
+			if exactHosts {
+				entry.DeclaredHosts = append([]string{}, secret.ReleaseHTTP.Hosts...)
+			}
+			result.SecretMapping.Entries = append(result.SecretMapping.Entries, entry)
 		}
 		// A host selector is a choice, not a credential: persisting it would
 		// pin every later run to the instance one run happened to name, with no

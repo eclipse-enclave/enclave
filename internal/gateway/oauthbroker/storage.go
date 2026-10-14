@@ -18,6 +18,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -54,6 +55,9 @@ type Config struct {
 	Identity    string
 	Session     string
 	Incarnation string
+	// Instances maps self-hosted hosts to the name of the provider they
+	// serve; see InstanceProviders.
+	Instances map[string]string
 }
 
 type registry struct {
@@ -93,13 +97,15 @@ type Broker struct {
 	// mistral holds the Mistral sign-in handle when the tool uses it.
 	mistral *mistralRegistry
 	// copilot holds the Copilot sign-in handle when the tool uses it.
-	copilot  *copilotRegistry
-	config   Config
-	registry registry
-	mu       sync.Mutex
-	now      func() time.Time
-	write    func(string, any) error
-	failed   bool
+	copilot *copilotRegistry
+	// instances are self-hosted hosts mediated like their provider.
+	instances map[string]*provider
+	config    Config
+	registry  registry
+	mu        sync.Mutex
+	now       func() time.Time
+	write     func(string, any) error
+	failed    bool
 }
 
 // Open recovers a proxy reload without rotating handles. A new logical session
@@ -128,7 +134,14 @@ func Open(config Config) (*Broker, error) {
 	if err != nil || within(store, runtime) || within(runtime, store) {
 		return nil, ErrState
 	}
-	b := &Broker{config: config, now: time.Now, write: durableJSON, anthropic: tool.Uses(protectedauth.AdapterAnthropic)}
+	b := &Broker{config: config, now: time.Now, write: durableJSON, anthropic: tool.Uses(protectedauth.AdapterAnthropic), instances: map[string]*provider{}}
+	for host, name := range config.Instances {
+		i := slices.IndexFunc(providers, func(p provider) bool { return p.name == name })
+		if i < 0 || protectedHost(host) == "" {
+			return nil, ErrState
+		}
+		b.instances[protectedHost(host)] = &providers[i]
+	}
 	err = b.locked(func() error {
 		path := filepath.Join(config.RuntimeDir, registryFile)
 		if err := readPrivateJSON(path, &b.registry); err != nil {

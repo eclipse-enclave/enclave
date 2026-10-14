@@ -15,6 +15,8 @@ import (
 	"net/http"
 	"slices"
 	"strings"
+
+	"enclave/internal/model"
 )
 
 // provider describes the first-party domains of one credential issuer. The
@@ -155,6 +157,42 @@ func firstPartyHost(host string) bool {
 	return providerFor(host) != nil
 }
 
+// InstanceProviders names the provider of each self-hosted instance a release
+// rule selected in place of the provider's declared hosts, such as a GitLab
+// instance named by GITLAB_HOST.
+func InstanceProviders(rules []model.SecretReleaseEntry) map[string]string {
+	instances := map[string]string{}
+	for _, rule := range rules {
+		if !rule.ExactHosts {
+			continue
+		}
+		var p *provider
+		for _, host := range rule.DeclaredHosts {
+			if p = providerFor(strings.TrimPrefix(host, "*.")); p != nil {
+				break
+			}
+		}
+		if p == nil {
+			continue
+		}
+		for _, host := range rule.Hosts {
+			instances[protectedHost(host)] = p.name
+		}
+	}
+	return instances
+}
+
+// requestProvider extends the package-level lookup with declared instances.
+func (b *Broker) requestProvider(req *http.Request) *provider {
+	if p := requestProvider(req); p != nil {
+		return p
+	}
+	if p := b.instances[protectedHost(req.URL.Hostname())]; p != nil {
+		return p
+	}
+	return b.instances[protectedHost(req.Host)]
+}
+
 // releaseHosts receive the Claude access token in a Bearer Authorization
 // header on any path, subject to the response tripwire.
 var releaseHosts = []string{accessHost, "mcp-proxy.anthropic.com"}
@@ -218,6 +256,11 @@ func releasedSecrets(ctx context.Context) []string {
 // credentials released into req, if any; structured first-party responses are
 // also checked for credentials the gateway did not capture.
 func mediate(req *http.Request, transport http.RoundTripper, secrets ...string) (*http.Response, error) {
+	return mediateAs(requestProvider(req), req, transport, secrets...)
+}
+
+// mediateAs mediates req as a request to provider p, which may be nil.
+func mediateAs(p *provider, req *http.Request, transport http.RoundTripper, secrets ...string) (*http.Response, error) {
 	var patterns [][]byte
 	for _, secret := range secrets {
 		if secret != "" {
@@ -246,7 +289,7 @@ func mediate(req *http.Request, transport http.RoundTripper, secrets ...string) 
 		}
 		return scanWebSocket(resp, patterns)
 	}
-	if p := requestProvider(req); p != nil && !p.contentPath(protectedHost(req.URL.Hostname()), req.URL.Path) && structuredMedia(resp.Header) {
+	if p != nil && !p.contentPath(protectedHost(req.URL.Hostname()), req.URL.Path) && structuredMedia(resp.Header) {
 		patterns = append(patterns, p.patterns...)
 	}
 	if len(patterns) == 0 {

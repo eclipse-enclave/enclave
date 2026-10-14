@@ -569,7 +569,10 @@ Secrets are split across two `spec.yaml` sections:
   written to the persisted env store, so it never outlives the run that set it.
   A value that is not a usable host warns and is ignored; wildcards are
   rejected, since the point is to name one instance. Values may be a bare host,
-  `host:port`, or a full URL — the scheme, port and path are stripped.
+  `host:port`, or a full URL — the scheme, port and path are stripped. In
+  protected sessions, when a replaced host belongs to a provider the gateway
+  mediates (such as `gitlab.com`), the selected instance is mediated like that
+  provider.
 
 `network.serviceAuth.<id>.requiredValuePrefix` optionally limits gateway
 protection to a supported credential type. The resolved real value must start

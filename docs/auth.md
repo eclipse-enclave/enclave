@@ -89,9 +89,11 @@ GitHub, GitLab and Copilot domains, their subdomains, and
   the credential; other upgrades carrying credentials are refused.
 
 A client release that changes its login flow fails closed until Enclave adapts.
-Self-hosted login hosts, such as GitHub Enterprise or a self-managed GitLab, are
-not recognized: under unrestricted networking their logins are not protected,
-and restricted networking blocks them unless allowlisted.
+A self-managed GitLab selected with `GITLAB_HOST` is mediated like `gitlab.com`:
+its configured token is released there, while logins and pasted tokens are
+refused. Other self-hosted login hosts, such as GitHub Enterprise, are not
+recognized: under unrestricted networking their logins are not protected, and
+restricted networking blocks them unless allowlisted.
 
 #### Claude subscription
 

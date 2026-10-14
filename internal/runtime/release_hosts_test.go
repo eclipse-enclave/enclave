@@ -232,4 +232,8 @@ func TestInjectDeclaredSecretsMarksSelectedHostExact(t *testing.T) {
 	if !entry.ExactHosts {
 		t.Fatal("entry.ExactHosts = false, want the selected host matched exactly")
 	}
+	// A protected gateway mediates the instance like the declared service.
+	if !slices.Contains(entry.DeclaredHosts, "gitlab.com") {
+		t.Fatalf("entry.DeclaredHosts = %v, want the replaced declared hosts", entry.DeclaredHosts)
+	}
 }

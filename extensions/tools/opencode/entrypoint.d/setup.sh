@@ -111,3 +111,18 @@ NODE
         ln -s "$shared_auth_file" "$auth_file"
     fi
 fi
+
+# OpenCode 2 moves credentials from auth.json into its database, where the
+# gateway's per-session handle view cannot replace stale handles.
+if [ "${ENCLAVE_PROTECTED_AUTH:-}" = "1" ]; then
+    opencode_version=$(opencode --version 2>/dev/null | grep -Eom1 '^[0-9]+\.[0-9]+\.[0-9]+' || true)
+    case "$opencode_version" in
+        1.*) ;;
+        *)
+            echo "Protected auth supports OpenCode 1.x, but this image has OpenCode ${opencode_version:-of an unknown version}." >&2
+            echo "Run OpenCode without --protect-auth until Enclave supports it." >&2
+            exit 1
+            ;;
+    esac
+    unset opencode_version
+fi

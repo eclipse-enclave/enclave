@@ -50,7 +50,8 @@ session view holding handles, which the gateway exchanges for the real tokens
 only at `chatgpt.com` and `githubcopilot.com` hosts. Other provider entries in
 `auth.json` are not protected and keys pasted into it are refused at the
 provider; configure them as Enclave secrets instead. This covers OpenCode 1.x;
-the 2.x storage is not supported. See [auth](../../../docs/auth.md#experimental-protected-authentication) and the
+protected sessions refuse to start with 2.x, which keeps credentials in a
+database instead. See [auth](../../../docs/auth.md#experimental-protected-authentication) and the
 [pending verification plan](../../../docs/runtime/oauth-broker-verification.md).
 
 ## Network Access

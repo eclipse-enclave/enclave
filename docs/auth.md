@@ -22,7 +22,7 @@ session links to a view at `~/.enclave-auth`:
 | `claude` | Claude subscription | `.credentials.json` (through `CLAUDE_SECURESTORAGE_CONFIG_DIR`) |
 | `pi` | Claude subscription, ChatGPT (`openai-codex`) | `~/.pi/agent/auth.json` |
 | `codex` | ChatGPT (browser and device code) | `~/.codex/auth.json` |
-| `opencode` | ChatGPT (browser and headless), GitHub Copilot (GitHub.com device login) | `~/.config/opencode/auth.json` |
+| `opencode` (1.x) | ChatGPT (browser and headless), GitHub Copilot (GitHub.com device login) | `~/.config/opencode/auth.json` |
 | `mistral-vibe` | Mistral browser sign-in | `~/.vibe/.env` |
 | `theia`, `theia-next` | none; no `--auth-name` needed, each session gets a fresh identity | none |
 

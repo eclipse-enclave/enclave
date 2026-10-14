@@ -8,6 +8,7 @@
 package mitm
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/tls"
@@ -23,6 +24,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -464,6 +466,215 @@ func TestProxyAuditLogWritesPassEvent(t *testing.T) {
 	}
 	if event.Session != testSession {
 		t.Fatalf("event session = %q, want %q", event.Session, testSession)
+	}
+}
+
+// echoUpgradeHandler switches to an "echo" protocol on request and then echoes
+// one line, staying silent until the client's first frame like a WebSocket
+// server. Other requests get their protocol version back.
+func echoUpgradeHandler(w http.ResponseWriter, r *http.Request) {
+	if upgradeType(r.Header) != "echo" {
+		_, _ = io.WriteString(w, r.Proto)
+		return
+	}
+	conn, rw, err := http.NewResponseController(w).Hijack()
+	if err != nil {
+		return
+	}
+	defer func() { _ = conn.Close() }()
+	_, _ = rw.WriteString("HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: echo\r\n\r\n")
+	_ = rw.Flush()
+	// Give up like a real server would, so a stuck relay fails the test.
+	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	line, err := rw.ReadString('\n')
+	if err != nil {
+		return
+	}
+	_, _ = rw.WriteString("echo: " + line)
+	_ = rw.Flush()
+}
+
+// assertEchoUpgradeRelayed upgrades a connection to host through the proxy and
+// checks that a frame makes the round trip.
+func assertEchoUpgradeRelayed(t *testing.T, proxyServer *httptest.Server, host string) {
+	t.Helper()
+	conn, err := net.Dial("tcp", strings.TrimPrefix(proxyServer.URL, "http://"))
+	if err != nil {
+		t.Fatalf("dial proxy: %v", err)
+	}
+	defer func() { _ = conn.Close() }()
+	_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
+	if _, err := io.WriteString(conn, "GET /stream HTTP/1.1\r\nHost: "+host+"\r\nConnection: Upgrade\r\nUpgrade: echo\r\n\r\n"); err != nil {
+		t.Fatalf("write upgrade request: %v", err)
+	}
+	reader := bufio.NewReader(conn)
+	resp, err := http.ReadResponse(reader, nil)
+	if err != nil {
+		t.Fatalf("read upgrade response: %v", err)
+	}
+	if resp.StatusCode != http.StatusSwitchingProtocols || resp.Header.Get("Upgrade") != "echo" {
+		t.Fatalf("upgrade response = %d %v, want 101 with Upgrade: echo", resp.StatusCode, resp.Header)
+	}
+	if _, err := io.WriteString(conn, "ping\n"); err != nil {
+		t.Fatalf("write frame: %v", err)
+	}
+	line, err := reader.ReadString('\n')
+	if err != nil {
+		t.Fatalf("read relayed frame: %v", err)
+	}
+	if line != "echo: ping\n" {
+		t.Fatalf("relayed frame = %q, want %q", line, "echo: ping\n")
+	}
+}
+
+func TestProxyRelaysProtocolUpgrade(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(echoUpgradeHandler))
+	defer upstream.Close()
+	upstreamHost := strings.TrimPrefix(upstream.URL, "http://")
+	host, _, err := net.SplitHostPort(upstreamHost)
+	if err != nil {
+		t.Fatalf("SplitHostPort(%q) error = %v", upstreamHost, err)
+	}
+
+	p := newProxy([]string{host}, nil, nil, false, nil, testSession)
+	proxyServer := httptest.NewServer(p.handler("http"))
+	defer proxyServer.Close()
+
+	assertEchoUpgradeRelayed(t, proxyServer, upstreamHost)
+}
+
+func TestProxyRelaysProtocolUpgradeToHTTP2Upstream(t *testing.T) {
+	upstream := httptest.NewUnstartedServer(http.HandlerFunc(echoUpgradeHandler))
+	upstream.EnableHTTP2 = true
+	upstream.StartTLS()
+	defer upstream.Close()
+	upstreamHost := strings.TrimPrefix(upstream.URL, "https://")
+	host, _, err := net.SplitHostPort(upstreamHost)
+	if err != nil {
+		t.Fatalf("SplitHostPort(%q) error = %v", upstreamHost, err)
+	}
+
+	p := newProxy([]string{host}, nil, nil, false, nil, testSession)
+	// Trusting the test CA takes a TLS config, which turns off the HTTP/2
+	// the default transport otherwise negotiates; force it back on.
+	trust := upstream.Client().Transport.(*http.Transport).TLSClientConfig
+	p.transport.TLSClientConfig = trust.Clone()
+	p.transport.ForceAttemptHTTP2 = true
+	p.upgradeTransport.TLSClientConfig = trust.Clone()
+	p.upgradeTransport.ForceAttemptHTTP2 = true
+	proxyServer := httptest.NewServer(p.handler("https"))
+	defer proxyServer.Close()
+
+	req, err := http.NewRequest(http.MethodGet, proxyServer.URL+"/proto", nil)
+	if err != nil {
+		t.Fatalf("NewRequest() error = %v", err)
+	}
+	req.Host = upstreamHost
+	resp, err := proxyServer.Client().Do(req)
+	if err != nil {
+		t.Fatalf("plain request through proxy: %v", err)
+	}
+	proto, _ := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	if string(proto) != "HTTP/2.0" {
+		t.Fatalf("upstream saw %q for a plain request, want HTTP/2.0", proto)
+	}
+
+	assertEchoUpgradeRelayed(t, proxyServer, upstreamHost)
+}
+
+func TestProxyRejectsUnrequestedProtocolSwitch(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, rw, err := http.NewResponseController(w).Hijack()
+		if err != nil {
+			return
+		}
+		defer func() { _ = conn.Close() }()
+		_, _ = rw.WriteString("HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: echo\r\n\r\n")
+		_ = rw.Flush()
+	}))
+	defer upstream.Close()
+	upstreamHost := strings.TrimPrefix(upstream.URL, "http://")
+	host, _, err := net.SplitHostPort(upstreamHost)
+	if err != nil {
+		t.Fatalf("SplitHostPort(%q) error = %v", upstreamHost, err)
+	}
+
+	p := newProxy([]string{host}, nil, nil, false, nil, testSession)
+	proxyServer := httptest.NewServer(p.handler("http"))
+	defer proxyServer.Close()
+
+	req, err := http.NewRequest(http.MethodGet, proxyServer.URL+"/", nil)
+	if err != nil {
+		t.Fatalf("NewRequest() error = %v", err)
+	}
+	req.Host = upstreamHost
+	resp, err := proxyServer.Client().Do(req)
+	if err != nil {
+		t.Fatalf("request through proxy: %v", err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusBadGateway {
+		t.Fatalf("proxy status = %d, want %d", resp.StatusCode, http.StatusBadGateway)
+	}
+}
+
+func TestProxyFlushesStreamedResponse(t *testing.T) {
+	sendFirst := make(chan struct{})
+	sendLast := make(chan struct{})
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rc := http.NewResponseController(w)
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		_ = rc.Flush()
+		<-sendFirst
+		_, _ = io.WriteString(w, "data: first\n\n")
+		_ = rc.Flush()
+		<-sendLast
+		_, _ = io.WriteString(w, "data: last\n\n")
+	}))
+	defer upstream.Close()
+	upstreamHost := strings.TrimPrefix(upstream.URL, "http://")
+	host, _, err := net.SplitHostPort(upstreamHost)
+	if err != nil {
+		t.Fatalf("SplitHostPort(%q) error = %v", upstreamHost, err)
+	}
+
+	p := newProxy([]string{host}, nil, nil, false, nil, testSession)
+	proxyServer := httptest.NewServer(p.handler("http"))
+	defer proxyServer.Close()
+	releaseFirst := sync.OnceFunc(func() { close(sendFirst) })
+	releaseLast := sync.OnceFunc(func() { close(sendLast) })
+	defer releaseLast()
+	defer releaseFirst()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, proxyServer.URL+"/events", nil)
+	if err != nil {
+		t.Fatalf("NewRequest() error = %v", err)
+	}
+	req.Host = upstreamHost
+	resp, err := proxyServer.Client().Do(req)
+	if err != nil {
+		t.Fatalf("stream not opened before its first event: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	releaseFirst()
+	reader := bufio.NewReader(resp.Body)
+	line, err := reader.ReadString('\n')
+	if err != nil || line != "data: first\n" {
+		t.Fatalf("first line = %q, %v; want %q", line, err, "data: first\n")
+	}
+
+	releaseLast()
+	rest, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatalf("read rest of stream: %v", err)
+	}
+	if !strings.Contains(string(rest), "data: last") {
+		t.Fatalf("rest of stream = %q, want the last event", rest)
 	}
 }
 

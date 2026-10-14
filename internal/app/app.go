@@ -27,6 +27,10 @@ func Run(args []string) int {
 	userCmds := discoverUserCommands()
 
 	baseOpts := config.DefaultOptions()
+	// Unset, a binary updates from the channel it was published on; set here
+	// rather than in config so the gateway proxy, which links config, stays
+	// independent of build stamps.
+	baseOpts.UpdateChannel = buildinfo.Channel()
 	parsed, err := cli.Parse(args, baseOpts, userCmds...)
 	if err != nil {
 		// Under --json a rejected request still owes stdout one result envelope.
@@ -74,7 +78,7 @@ func Run(args []string) int {
 	// Updating the binary needs neither the project nor its config, so a broken
 	// one cannot keep a fix from being installed.
 	if parsed.Action == "self-update" {
-		return runSelfUpdate()
+		return runSelfUpdate(parsed.Options.Verbose)
 	}
 
 	projectDir, err := resolveProjectDir()

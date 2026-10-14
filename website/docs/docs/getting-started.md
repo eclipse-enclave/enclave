@@ -134,8 +134,8 @@ make build
 
 ### Updating Enclave
 
-A standalone binary checks its release channel at most once every 24 hours and
-reports when a different build is available. Binaries from the
+When run interactively, a standalone binary checks its release channel at most
+once every 24 hours and reports when a different build is available. Binaries from the
 [rolling release](https://github.com/eclipse-enclave/enclave/releases/tag/rolling)
 follow the `rolling` channel, rebuilt from every push to `main`; official
 releases will follow `stable`. Set `"update_channel"` in the global Enclave

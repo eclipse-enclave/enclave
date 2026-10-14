@@ -126,7 +126,7 @@ sudo install enclave-darwin-arm64 /usr/local/bin/enclave
 A standalone binary installed this way can update itself: `enclave self-update`
 replaces the executable with the latest build of its release channel, here
 `rolling`. Enclave checks for a different build at most once every 24 hours and
-reports it on human-facing commands. To install updates automatically, add
+reports it on interactive commands. To install updates automatically, add
 `"auto_update": true` to the global `config.json`; `"update_channel"` selects
 `rolling` or, once official releases ship, `stable`. The updater never elevates
 privileges, so the executable's directory must be writable. The download is

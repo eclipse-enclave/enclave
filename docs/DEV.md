@@ -339,11 +339,14 @@ global-only: project and `tool_overrides` values are stripped with a warning in
 `globalDefaults.AutoUpdate` and `UpdateChannel` directly (`enclave self-update`
 reads them with `config.LoadGlobalDefaults`, falling back to the build channel
 if the global config is broken); the resolved options exist for `enclave
-config`. The periodic check runs in `app.Run` after `--verbose` is applied,
+config`, where `app.Run` sets the `update_channel` default to
+`buildinfo.Channel()`. The periodic check runs in `app.Run` after `--verbose` is
+applied, only when `promptUsable` sees a terminal on stdin, stdout, and stderr,
 holds a non-blocking host lock (`config.HostSelfUpdateLockPath`) so concurrent
 invocations skip instead of racing, and prints only to stderr (`logx.Noticef`,
 `logx.DebugNoticef`, and `logx.Warnf`; never `Infof` or `Debugf`). `enclave
-self-update` dispatches right after the root guard and waits for the same lock.
+self-update` dispatches right after the root guard, applies `--verbose` and
+global `verbose` itself, and waits for the same lock.
 `selfupdate.Service.Supported` refuses anything but a build stamped with a
 release channel (`make build BUILD_CHANNEL=rolling|stable`, which sets
 `buildinfo.channel`) that runs on its embedded assets (`config.ExternalAppRoot`

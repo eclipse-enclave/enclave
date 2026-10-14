@@ -10,6 +10,7 @@ package app
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -64,12 +65,13 @@ func useFakeSelfUpdater(t *testing.T, fake *fakeSelfUpdater) string {
 	t.Helper()
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	previous := newSelfUpdater
+	previous, previousPrompt := newSelfUpdater, promptUsable
 	newSelfUpdater = func(channel string) selfUpdater {
 		fake.channel = channel
 		return fake
 	}
-	t.Cleanup(func() { newSelfUpdater = previous })
+	promptUsable = func() bool { return true }
+	t.Cleanup(func() { newSelfUpdater, promptUsable = previous, previousPrompt })
 	return home
 }
 
@@ -84,6 +86,7 @@ func stampExists(t *testing.T, home string) bool {
 }
 
 func TestAutomaticSelfUpdateAllowedSkipsMachineOutput(t *testing.T) {
+	useFakeSelfUpdater(t, &fakeSelfUpdater{})
 	for _, parsed := range []cli.Result{
 		{Action: "config", ConfigView: model.ConfigView{JSON: true}},
 		{Action: "ps", Options: model.Options{PSOptions: model.PSOptions{PSJSON: true}}},
@@ -100,6 +103,74 @@ func TestAutomaticSelfUpdateAllowedSkipsMachineOutput(t *testing.T) {
 	}
 	if !automaticSelfUpdateAllowed(cli.Result{Action: "run"}) {
 		t.Fatal("automatic update was not allowed for a normal run")
+	}
+}
+
+func TestAutomaticSelfUpdateSkipsNonInteractiveUse(t *testing.T) {
+	fake := &fakeSelfUpdater{}
+	home := useFakeSelfUpdater(t, fake)
+	promptUsable = func() bool { return false }
+
+	maybeAutomaticSelfUpdate(cli.Result{Action: "ps"}, autoUpdateDefaults(true))
+	if fake.checks != 0 || stampExists(t, home) {
+		t.Fatalf("checked for updates without a terminal (checks = %d)", fake.checks)
+	}
+}
+
+func TestAutomaticSelfUpdateWarnsAboutUnavailableChannel(t *testing.T) {
+	fake := &fakeSelfUpdater{checkErr: fmt.Errorf("%w for the stable channel yet", selfupdate.ErrChannelUnavailable)}
+	useFakeSelfUpdater(t, fake)
+	stable := config.Defaults{UpdateChannel: "stable"}
+
+	stdout, stderr := captureOutput(t, func() { maybeAutomaticSelfUpdate(cli.Result{Action: "run"}, stable) })
+	if stdout != "" || !strings.Contains(stderr, "no release source for the stable channel") {
+		t.Fatalf("stdout = %q, stderr = %q; want a warning on stderr", stdout, stderr)
+	}
+	// Rate-limited like any other check: one warning per interval.
+	_, stderr = captureOutput(t, func() { maybeAutomaticSelfUpdate(cli.Result{Action: "run"}, stable) })
+	if stderr != "" || fake.checks != 1 {
+		t.Fatalf("second run warned again (checks = %d, stderr = %q)", fake.checks, stderr)
+	}
+}
+
+func TestSelfUpdateCommandHonorsVerbose(t *testing.T) {
+	setRunningAsRoot(t, false)
+	t.Cleanup(func() { logx.SetLevel("info") })
+	for _, tc := range []struct {
+		name   string
+		args   []string
+		config string
+	}{
+		{name: "flag", args: []string{"self-update", "--verbose"}},
+		{name: "global config", args: []string{"self-update"}, config: `{"verbose":true}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			logx.SetLevel("info")
+			fake := &fakeSelfUpdater{upToDate: true}
+			home := useFakeSelfUpdater(t, fake)
+			if tc.config != "" {
+				path, err := config.GlobalConfigPath()
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(path, []byte(tc.config), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			// A directory where the stamp belongs makes recording the check
+			// fail, which is reported only at debug level.
+			if err := os.MkdirAll(config.HostSelfUpdateCheckPath(home), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			var code int
+			_, stderr := captureOutput(t, func() { code = Run(tc.args) })
+			if code != 0 || !strings.Contains(stderr, "Failed to record enclave update check") {
+				t.Fatalf("code = %d, stderr = %q; want the debug diagnostic", code, stderr)
+			}
+		})
 	}
 }
 
@@ -235,7 +306,7 @@ func TestRunSelfUpdate(t *testing.T) {
 		fake := &fakeSelfUpdater{unsupported: errors.New("package build")}
 		useFakeSelfUpdater(t, fake)
 		var code int
-		_, stderr := captureOutput(t, func() { code = runSelfUpdate() })
+		_, stderr := captureOutput(t, func() { code = runSelfUpdate(false) })
 		if code != 1 || fake.checks != 0 || !strings.Contains(stderr, "package build") {
 			t.Fatalf("code = %d, checks = %d, stderr = %q; want a refusal before checking", code, fake.checks, stderr)
 		}
@@ -244,7 +315,7 @@ func TestRunSelfUpdate(t *testing.T) {
 		fake := &fakeSelfUpdater{upToDate: true}
 		home := useFakeSelfUpdater(t, fake)
 		var code int
-		captureOutput(t, func() { code = runSelfUpdate() })
+		captureOutput(t, func() { code = runSelfUpdate(false) })
 		if code != 0 || fake.installs != 0 || !stampExists(t, home) {
 			t.Fatalf("code = %d, installs = %d; want a recorded no-op", code, fake.installs)
 		}
@@ -253,7 +324,7 @@ func TestRunSelfUpdate(t *testing.T) {
 		fake := &fakeSelfUpdater{}
 		useFakeSelfUpdater(t, fake)
 		var code int
-		captureOutput(t, func() { code = runSelfUpdate() })
+		captureOutput(t, func() { code = runSelfUpdate(false) })
 		if code != 0 || fake.installedCommit != fakeLatestCommit {
 			t.Fatalf("code = %d, installed %q; want the checked commit", code, fake.installedCommit)
 		}
@@ -332,9 +403,12 @@ func TestAutomaticSelfUpdateUsesConfiguredChannel(t *testing.T) {
 }
 
 func TestRunSelfUpdateReadsChannelFromGlobalConfig(t *testing.T) {
-	writeGlobalConfig := func(t *testing.T, home string, content string) {
+	writeGlobalConfig := func(t *testing.T, content string) {
 		t.Helper()
-		path := filepath.Join(home, ".config", "enclave", "config.json")
+		path, err := config.GlobalConfigPath()
+		if err != nil {
+			t.Fatal(err)
+		}
 		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 			t.Fatal(err)
 		}
@@ -345,19 +419,19 @@ func TestRunSelfUpdateReadsChannelFromGlobalConfig(t *testing.T) {
 
 	t.Run("configured", func(t *testing.T) {
 		fake := &fakeSelfUpdater{upToDate: true}
-		home := useFakeSelfUpdater(t, fake)
-		writeGlobalConfig(t, home, `{"update_channel":"stable"}`)
-		captureOutput(t, func() { runSelfUpdate() })
+		useFakeSelfUpdater(t, fake)
+		writeGlobalConfig(t, `{"update_channel":"stable"}`)
+		captureOutput(t, func() { runSelfUpdate(false) })
 		if fake.channel != "stable" {
 			t.Fatalf("updater channel = %q, want stable", fake.channel)
 		}
 	})
 	t.Run("broken config falls back to the build channel", func(t *testing.T) {
 		fake := &fakeSelfUpdater{upToDate: true}
-		home := useFakeSelfUpdater(t, fake)
-		writeGlobalConfig(t, home, `{"update_channel":`)
+		useFakeSelfUpdater(t, fake)
+		writeGlobalConfig(t, `{"update_channel":`)
 		var code int
-		_, stderr := captureOutput(t, func() { code = runSelfUpdate() })
+		_, stderr := captureOutput(t, func() { code = runSelfUpdate(false) })
 		if code != 0 || fake.channel != "" {
 			t.Fatalf("code = %d, channel = %q; want an update from the build channel", code, fake.channel)
 		}

@@ -32,8 +32,8 @@ func OptionSpecs() []OptionSpec {
 			Name:  "update_channel",
 			Group: OptionGroupGlobal,
 			ApplyDefaultsWithSource: func(opts *model.Options, defaults Defaults, source model.OptionSource, sources *model.OptionSources) {
-				if canOverride(sources.UpdateChannel, source) && strings.TrimSpace(defaults.UpdateChannel) != "" {
-					opts.UpdateChannel = strings.TrimSpace(defaults.UpdateChannel)
+				if canOverride(sources.UpdateChannel, source) && defaults.UpdateChannel != "" {
+					opts.UpdateChannel = defaults.UpdateChannel
 					sources.UpdateChannel = source
 				}
 			},

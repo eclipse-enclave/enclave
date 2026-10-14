@@ -158,6 +158,38 @@ func HasProtectedIdentities(home string) (bool, error) {
 	return protected, nil
 }
 
+// ReservedIncarnations collects the incarnations reserved by any identity, so
+// leftovers of other incarnations can be retired. Callers hold mount admission,
+// which serializes every reservation change. Unreadable metadata is an error,
+// never an empty set.
+func ReservedIncarnations(home string) (map[string]bool, error) {
+	dir := config.HostLocksDir(home)
+	if err := EnsureNoSymlinkChain(config.HostStateRootDir(home), dir, true); err != nil {
+		return nil, err
+	}
+	entries, err := os.ReadDir(dir)
+	if errors.Is(err, os.ErrNotExist) {
+		return map[string]bool{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	reserved := map[string]bool{}
+	for _, entry := range entries {
+		if !strings.HasPrefix(entry.Name(), "store-") || !strings.HasSuffix(entry.Name(), ".identity.json") {
+			continue
+		}
+		state, err := readIdentityStateFile(home, filepath.Join(dir, entry.Name()))
+		if err != nil {
+			return nil, err
+		}
+		for _, reservation := range state.Reservations {
+			reserved[reservation.Incarnation] = true
+		}
+	}
+	return reserved, nil
+}
+
 // AdmitIdentity combines stale-owner reconciliation, optional fresh enrollment
 // and reservation before any workload store exposure. Callers hold mount admission
 // across verification and commit; engine inspection never holds the broker lock.

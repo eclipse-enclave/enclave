@@ -29,6 +29,7 @@ import (
 	dockercmd "enclave/internal/docker"
 	"enclave/internal/gateway"
 	"enclave/internal/gateway/oauthbroker"
+	"enclave/internal/logx"
 	"enclave/internal/model"
 	"enclave/internal/util"
 )
@@ -74,15 +75,22 @@ func (b *Backend) PrepareAuthSession(ctx context.Context, key backend.StoreKey, 
 	key.Owner = strings.TrimSpace(key.Owner)
 	key.Suffix = strings.TrimSpace(key.Suffix)
 	ref := &backend.AuthSession{Key: key, Session: session, Engine: b.Name(), Incarnation: hex.EncodeToString(nonce[:]), Protected: protected}
+	if err := b.sweepAuthLeftovers(); err != nil {
+		logx.Warnf("Retaining stale auth session state: %v", err)
+	}
 	release, err := util.AcquireFileLock(b.authStartLock(ref.Incarnation), nil)
 	if err != nil {
 		return nil, err
 	}
 	b.authStarts.Store(ref.Incarnation, release)
-	admitted := false
+	admitted, reserved := false, false
 	defer func() {
-		if !admitted {
-			b.releaseAuthStart(ref)
+		if admitted {
+			return
+		}
+		b.releaseAuthStart(ref)
+		if reserved {
+			b.rollBackAuthAdmission(dir, ref)
 		}
 	}()
 	check := b.inspectAuth(ctx)
@@ -95,6 +103,7 @@ func (b *Backend) PrepareAuthSession(ctx context.Context, key backend.StoreKey, 
 	if err != nil {
 		return nil, err
 	}
+	reserved = true
 	if protected {
 		for _, path := range []string{dir, b.authRuntimeDir(ref), b.authViewDir(ref)} {
 			if err := hoststore.EnsureNoSymlinkChain(config.HostStateRootDir(b.opts.Host.Home), path, true); err != nil {
@@ -114,6 +123,104 @@ func (b *Backend) PrepareAuthSession(ctx context.Context, key backend.StoreKey, 
 	}
 	admitted = true
 	return ref, nil
+}
+
+// rollBackAuthAdmission releases a reservation whose preparation failed. This
+// process created it and never started a container for it, so its end needs no
+// engine verification. Callers hold mount admission.
+func (b *Backend) rollBackAuthAdmission(dir string, ref *backend.AuthSession) {
+	never := func(hoststore.IdentityReservation) (bool, error) { return true, nil }
+	if err := hoststore.ReleaseIdentity(b.opts.Host.Home, dir, authReservation(ref), never); err != nil {
+		logx.Warnf("Retaining auth session reservation after failed preparation: %v", err)
+		return
+	}
+	if err := b.removeAuthSessionState(ref.Incarnation); err != nil {
+		logx.Warnf("Retaining auth session state after failed preparation: %v", err)
+	}
+}
+
+// removeAuthSessionState removes an ended incarnation's host session tree and
+// start lock. Callers hold mount admission, under which every owner check
+// runs, and have verified the owner ended: it never reacquires its start lock.
+func (b *Backend) removeAuthSessionState(incarnation string) error {
+	path := b.authSessionDir(&backend.AuthSession{Incarnation: incarnation})
+	if err := hoststore.EnsureNoSymlinkChain(config.HostStateRootDir(b.opts.Host.Home), path, true); err != nil {
+		return err
+	}
+	if err := os.RemoveAll(path); err != nil {
+		return err
+	}
+	return retireStartLock(b.authStartLock(incarnation))
+}
+
+func retireStartLock(path string) error {
+	release, err := util.TryAcquireFileLock(path)
+	if err != nil || release == nil {
+		return err
+	}
+	defer release()
+	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return nil
+}
+
+// sweepAuthLeftovers retires session trees and start locks that no identity
+// reserves and no preparing owner holds, such as those left by a crash between
+// releasing a reservation and removing its state. Callers hold mount
+// admission, which serializes reservation changes and owner checks.
+func (b *Backend) sweepAuthLeftovers() error {
+	home := b.opts.Host.Home
+	if home == "" {
+		return nil
+	}
+	reserved, err := hoststore.ReservedIncarnations(home)
+	if err != nil {
+		return err
+	}
+	root := filepath.Join(config.HostStateRootDir(home), "oauth-sessions")
+	if err := hoststore.EnsureNoSymlinkChain(config.HostStateRootDir(home), root, true); err != nil {
+		return err
+	}
+	entries, err := os.ReadDir(root)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	for _, entry := range entries {
+		incarnation := entry.Name()
+		if reserved[incarnation] || validateAuthSession(&backend.AuthSession{Session: "sweep", Engine: backend.NameDocker, Incarnation: incarnation}) != nil {
+			continue
+		}
+		release, err := util.TryAcquireFileLock(b.authStartLock(incarnation))
+		if err != nil {
+			return err
+		}
+		if release == nil {
+			continue
+		}
+		release()
+		if err := b.removeAuthSessionState(incarnation); err != nil {
+			return err
+		}
+	}
+	reservedLocks := map[string]bool{}
+	for incarnation := range reserved {
+		reservedLocks[filepath.Base(b.authStartLock(incarnation))] = true
+	}
+	locks, err := os.ReadDir(config.HostLocksDir(home))
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	for _, lock := range locks {
+		name := lock.Name()
+		if !strings.HasPrefix(name, "auth-start-") || !strings.HasSuffix(name, ".lock") || reservedLocks[name] || !lock.Type().IsRegular() {
+			continue
+		}
+		if err := retireStartLock(filepath.Join(config.HostLocksDir(home), name)); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func authReservation(ref *backend.AuthSession) hoststore.IdentityReservation {
@@ -224,14 +331,7 @@ func (b *Backend) ReleaseAuthSession(ctx context.Context, ref *backend.AuthSessi
 			return err
 		}
 	}
-	if ref.Protected || len(ref.Features) != 0 {
-		path := b.authSessionDir(ref)
-		if err := hoststore.EnsureNoSymlinkChain(config.HostStateRootDir(b.opts.Host.Home), path, true); err != nil {
-			return err
-		}
-		return os.RemoveAll(path)
-	}
-	return nil
+	return b.removeAuthSessionState(ref.Incarnation)
 }
 
 func (b *Backend) ResetAuthIdentity(ctx context.Context, key backend.StoreKey) error {
@@ -420,11 +520,7 @@ func (check *authInspection) reconcileOwner(owner hoststore.IdentityReservation)
 	if err := validateAuthSession(ref); err != nil {
 		return false, err
 	}
-	path := b.authSessionDir(ref)
-	if err := hoststore.EnsureNoSymlinkChain(config.HostStateRootDir(b.opts.Host.Home), path, true); err != nil {
-		return false, err
-	}
-	if err := os.RemoveAll(path); err != nil {
+	if err := b.removeAuthSessionState(owner.Incarnation); err != nil {
 		return false, err
 	}
 	return true, nil

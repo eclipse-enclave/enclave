@@ -290,6 +290,12 @@ Experimental `--protect-auth` uses this layout on Docker/Podman:
 | GitHub feature's native credentials and saved grant | `features/github-cli/auth/`, gateway-only when protected | Shared across tools/projects; survives session removal |
 | GitHub feature handle/config view | `oauth-sessions/<incarnation>/features/github-cli/view/`, mounted at `~/.config/gh` | Rebuilt and removed per logical session |
 | GitHub feature handle registration | `oauth-sessions/<incarnation>/features/github-cli/runtime/`, gateway-only | Survives proxy-process reload, not session end |
+| Preparation lease for a session incarnation | Host-only `locks/auth-start-<incarnation-hash>.lock` | Removed once the session verifiably ended |
+
+A session's transient tree and lease are removed when its reservation is
+released or reconciled. A failed preparation rolls back its reservation, and
+each admission retires trees and leases that no identity reserves and no
+preparing session holds, such as those left by a crash during teardown.
 
 Do not mount the real identity or a parent containing it into a workload or
 auth-reconcile helper. Both inspected-mount and foreground request-driven

@@ -112,8 +112,20 @@ func (b *Broker) nativeFiles(g *grant) (map[string][]byte, error) {
 			}
 		}
 	case "opencode":
+		entries := map[string]any{}
 		if openai != nil {
-			if err := addJSON(files, "auth.json", map[string]any{"openai": map[string]any{"type": "oauth", "access": openai.Access, "refresh": openai.Refresh, "expires": openai.ExpiresAt * 1000, "accountId": openai.AccountID}}); err != nil {
+			entries["openai"] = map[string]any{"type": "oauth", "access": openai.Access, "refresh": openai.Refresh, "expires": openai.ExpiresAt * 1000, "accountId": openai.AccountID}
+		}
+		copilot, err := b.copilotReady()
+		if err != nil {
+			return nil, err
+		}
+		if copilot != "" {
+			// OpenCode stores the non-expiring GitHub token as both fields.
+			entries["github-copilot"] = map[string]any{"type": "oauth", "access": copilot, "refresh": copilot, "expires": 0}
+		}
+		if len(entries) != 0 {
+			if err := addJSON(files, "auth.json", entries); err != nil {
 				return nil, err
 			}
 		}

@@ -79,7 +79,9 @@ func TestMistralSignInCapturesKeyAndReleasesHandle(t *testing.T) {
 			t.Fatalf("%s: handle escaped: %v, %q", tc.url, err, seen)
 		}
 	}
-	if _, err := mistralSignIn(t, b, func() *http.Response { return fixtureResponse(map[string]string{"api_key": "another-real-key-0123456789"}) }); !errors.Is(err, ErrDenied) {
+	if _, err := mistralSignIn(t, b, func() *http.Response {
+		return fixtureResponse(map[string]string{"api_key": "another-real-key-0123456789"})
+	}); !errors.Is(err, ErrDenied) {
 		t.Fatalf("second sign-in replaced the key behind sibling handles: %v", err)
 	}
 

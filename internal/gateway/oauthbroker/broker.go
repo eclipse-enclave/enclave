@@ -73,13 +73,15 @@ func (b *Broker) RoundTrip(req *http.Request, transport, exchangeTransport http.
 	if req == nil || req.URL == nil || transport == nil || exchangeTransport == nil {
 		return nil, ErrDenied
 	}
-	if b.github != nil {
-		if response, handled, err := b.github.roundTrip(req, transport, exchangeTransport); handled {
+	// Tool adapters claim only their own clients' logins and handles, so the
+	// GitHub CLI adapter still sees its own device login.
+	for _, a := range b.adapters {
+		if response, handled, err := a.roundTrip(req, transport, exchangeTransport); handled {
 			return response, err
 		}
 	}
-	for _, a := range b.adapters {
-		if response, handled, err := a.roundTrip(req, transport, exchangeTransport); handled {
+	if b.github != nil {
+		if response, handled, err := b.github.roundTrip(req, transport, exchangeTransport); handled {
 			return response, err
 		}
 	}

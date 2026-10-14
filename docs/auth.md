@@ -20,7 +20,7 @@ files, which the session links to a view at `~/.enclave-auth`:
 | `claude` | Claude subscription | `.credentials.json` (through `CLAUDE_SECURESTORAGE_CONFIG_DIR`) |
 | `pi` | Claude subscription, ChatGPT (`openai-codex`) | `~/.pi/agent/auth.json` |
 | `codex` | ChatGPT (browser and device code) | `~/.codex/auth.json` |
-| `opencode` | ChatGPT (browser and headless); Copilot is refused for now | `~/.config/opencode/auth.json` |
+| `opencode` | ChatGPT (browser and headless), GitHub Copilot (GitHub.com device login) | `~/.config/opencode/auth.json` |
 | `mistral-vibe` | Mistral browser sign-in | `~/.vibe/.env` |
 | `theia`, `theia-next` | none | none |
 
@@ -30,6 +30,11 @@ access token. The token exchange that mints an OpenAI API key from a ChatGPT
 login, and pi's and OpenCode's "Sign in with ChatGPT" token sharing, are refused.
 A second login to an identity that already holds a grant is refused too; reset
 the identity to switch accounts.
+
+OpenCode's Copilot login is a GitHub.com device login of its own OAuth client;
+the gateway keeps the GitHub token and releases it only to `githubcopilot.com`
+hosts, never to GitHub's own API. Copilot through GitHub Enterprise is not
+protected.
 
 Mistral Vibe's browser sign-in returns an API key, which the gateway keeps; Vibe
 stores a handle that the gateway releases to `api.mistral.ai`,

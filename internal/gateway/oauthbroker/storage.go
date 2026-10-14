@@ -90,7 +90,9 @@ type Broker struct {
 	// openai holds the ChatGPT sign-in handles when the tool uses it.
 	openai *openaiRegistry
 	// mistral holds the Mistral sign-in handle when the tool uses it.
-	mistral  *mistralRegistry
+	mistral *mistralRegistry
+	// copilot holds the Copilot sign-in handle when the tool uses it.
+	copilot  *copilotRegistry
 	config   Config
 	registry registry
 	mu       sync.Mutex
@@ -173,7 +175,12 @@ func Open(config Config) (*Broker, error) {
 			}
 		}
 		if tool.Uses(protectedauth.AdapterMistral) {
-			return b.openMistral()
+			if err := b.openMistral(); err != nil {
+				return err
+			}
+		}
+		if tool.Uses(protectedauth.AdapterCopilot) {
+			return b.openCopilot()
 		}
 		return nil
 	})
@@ -185,6 +192,9 @@ func Open(config Config) (*Broker, error) {
 	}
 	if b.mistral != nil {
 		b.adapters = append(b.adapters, mistralAdapter{b: b})
+	}
+	if b.copilot != nil {
+		b.adapters = append(b.adapters, copilotAdapter{b: b})
 	}
 	if config.GitHub != nil {
 		b.github, err = openGitHub(*config.GitHub)

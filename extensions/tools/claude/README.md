@@ -82,8 +82,9 @@ sources; host-provided credential-source overrides are unsupported. The gateway
 mediates all Anthropic and Claude domains, so custody does not depend on the
 client version. The built-in `github-cli` feature uses its own protected adapter;
 other features with native auth files are rejected. Env-only credentials are
-unaffected. The native config and handle file live in a disposable session view
-at `~/.claude`, with agent memory mounted separately. The gateway keeps the real
+unaffected. Config and history persist in a protected-only config store at
+`~/.claude`; the handle file lives in a disposable session view at
+`~/.enclave-auth`. The gateway keeps the real
 grant outside the workload. Multiple protected sessions can share the same named
 identity: gateways coordinate refresh through a common lock while retaining
 separate handles and views. Reset/downgrade require all its sessions to end.

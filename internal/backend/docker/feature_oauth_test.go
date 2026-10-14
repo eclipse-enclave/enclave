@@ -166,7 +166,7 @@ func TestProtectedFeatureSessionRecoveryRetainsLiveGateway(t *testing.T) {
 func TestProtectedFeatureMountsOnlyAdmittedNativeView(t *testing.T) {
 	b, key, _ := oauthTestBackend(t)
 	ref := protectedGitHubTestSession(t, b, key, "session")
-	configKey := backend.StoreKey{Owner: "claude", ProjectHash: "project"}
+	configKey := backend.ProtectedConfigKey(backend.StoreKey{Owner: "claude", ProjectHash: "project"})
 	featureKey := backend.StoreKey{Owner: "github-cli"}
 	if _, err := b.PrepareStores(context.Background(), backend.StorePrep{AuthSession: ref, Config: &backend.ConfigStorePrep{Key: configKey}, Features: []backend.StorePrepEntry{{Key: featureKey}}}); err != nil {
 		t.Fatal(err)

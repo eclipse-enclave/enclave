@@ -18,10 +18,11 @@ enclave --tool claude --auth-scope shared --auth-name protected-test --protect-a
 ```
 
 Complete the normal Claude subscription login. The gateway captures and durably
-stores the access/refresh tokens before returning session-bound handles. The
-container still gets a writable bind mount at `~/.claude`, but its native
-`.credentials.json` contains handles, not the captured tokens. The real grant
-and handle registry are never workload-mounted.
+stores the access/refresh tokens before returning session-bound handles. Claude
+reads its native `.credentials.json` from a session-scoped view at
+`~/.enclave-auth` (`CLAUDE_SECURESTORAGE_CONFIG_DIR`); it contains handles, not
+the captured tokens. The real grant and handle registry are never
+workload-mounted.
 
 Protected runs use the same, unpinned Claude client as ordinary sessions, so
 custody does not depend on a client version. The gateway mediates every
@@ -48,9 +49,7 @@ identities with new sessions. This is an experimental implementation: Docker,
 rootless Podman, SELinux and real login/refresh remain **unverified**. Follow the
 [engine and human test plan](runtime/oauth-broker-verification.md).
 
-The Claude adapter does not migrate existing tool auth or native config files;
-select a clean config/session name if the project's existing config contains
-credentials. Protected mode
+The Claude adapter does not migrate existing tool auth. Protected mode
 rejects provider env credentials, host config passthrough, native auth/config
 sources and credential-helper settings. It supports neither project/ephemeral
 auth, QEMU, admin mode, custom base images, runtime UID remapping nor devcontainers.
@@ -59,11 +58,15 @@ collisions are rejected. The built-in `github-cli` feature, enabled by default,
 has its own protected native-auth adapter; see below. Other features with native
 auth files are rejected. Env-secret and non-auth features remain available.
 
-The whole native config/history view is session-scoped; it is discarded when
-the session ends. Separately mounted agent memory retains its usual lifetime.
-Project and local Claude settings load as in ordinary sessions; host-provided
-settings must not configure credential helpers or provider credentials. Do not expect
-`continue`/`resume` to recover a previous protected session's conversation.
+Claude's config and history at `~/.claude` persist in a config store that only
+protected sessions use (`<store-key>.protected` next to the project's ordinary
+store), so `--continue` and `--resume` work across protected sessions. Ordinary
+and protected sessions do not share history, and the ordinary store, including
+any credentials in it, is never mounted into a protected session. Only the
+credential view is discarded when a session ends. Agent memory retains its usual
+lifetime. Project and local Claude settings load as in ordinary sessions;
+host-provided settings must not configure credential helpers or provider
+credentials.
 
 Multiple protected sessions can share the same Claude identity and GitHub feature
 identity across projects and Docker/Podman. Each session gets independent handles,

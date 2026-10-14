@@ -115,6 +115,34 @@ func TestCurrentConfigVolumeSuffixUsesContainerSuffixForConcurrentUnnamedSession
 	}
 }
 
+func TestConcurrentProtectedSessionsDoNotShareConfigStore(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		protected bool
+		running   string
+		want      string
+	}{
+		{name: "protected session running", protected: true, running: "default.protected", want: "2"},
+		{name: "only ordinary session running", protected: true, running: defaultConfigKey, want: ""},
+		{name: "ordinary beside protected session", running: "default.protected", want: ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := &Runtime{
+				project: model.Project{Dir: "/tmp/repo", RealDir: "/tmp/repo", Hash: "abc123abc123"},
+				profile: model.Profile{Name: "claude", ConfigDir: ".claude"},
+				run:     model.RunOptions{Persist: true},
+				auth:    model.AuthOptions{ProtectAuth: tc.protected},
+			}
+			r.backend = &fakeBackend{configKeyInUse: func(_ backend.SessionMeta, key string) (bool, error) {
+				return key == tc.running, nil
+			}}
+			if got := r.currentConfigVolumeSuffix("enclave-claude-abc123abc123-2", "enclave-claude-abc123abc123"); got != tc.want {
+				t.Fatalf("config suffix = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestCurrentConfigVolumeSuffixKeepsStableWorktreeKeyWhenOnlyOtherWorktreeIsRunning(t *testing.T) {
 	mainProject := model.Project{RealDir: "/tmp/repo"}
 	mainHash := projectPathHash(mainProject)

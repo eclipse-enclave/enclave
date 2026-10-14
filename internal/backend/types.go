@@ -15,6 +15,7 @@ import (
 	"io/fs"
 	"os"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -207,6 +208,28 @@ type AuthSession struct {
 	Incarnation string
 	Protected   bool
 	Features    []string
+}
+
+// protectedConfigSuffix marks config stores used only by protected sessions.
+// Ordinary store suffixes are sanitized session names, hashes or "default",
+// none of which contain a dot, so the two kinds never share a store.
+const protectedConfigSuffix = ".protected"
+
+// ProtectedConfigKey derives the config store of a protected session from the
+// ordinary key. Its history persists across sessions but never holds
+// credentials from an ordinary login.
+func ProtectedConfigKey(key StoreKey) StoreKey {
+	suffix := strings.TrimSpace(key.Suffix)
+	if suffix == "" {
+		suffix = "default"
+	}
+	key.Suffix = suffix + protectedConfigSuffix
+	return key
+}
+
+// IsProtectedConfigKey reports whether key names a protected-only config store.
+func IsProtectedConfigKey(key StoreKey) bool {
+	return strings.HasSuffix(key.Suffix, protectedConfigSuffix) && strings.TrimSuffix(key.Suffix, protectedConfigSuffix) != ""
 }
 
 type FeatureAuthSessionManager interface {

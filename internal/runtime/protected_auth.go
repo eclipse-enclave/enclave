@@ -123,7 +123,8 @@ func validateProtectedEnv(env []string) error {
 }
 
 func (r *Runtime) validateProtectedBindings(env []string) error {
-	view := resolveContainerProfilePath(r.containerHome, r.profile.ConfigDir)
+	configDir := resolveContainerProfilePath(r.containerHome, r.profile.ConfigDir)
+	view := r.containerHome + "/" + model.ContainerAuthDir
 	for _, assignment := range env {
 		key, value, _ := strings.Cut(assignment, "=")
 		if r.protectedGitHubEnabled() && protectedGitHubEnv(key) {
@@ -144,7 +145,10 @@ func (r *Runtime) validateProtectedBindings(env []string) error {
 			continue
 		}
 		want := view
-		if key == model.EnvAuthFiles {
+		switch key {
+		case "CLAUDE_CONFIG_DIR", model.EnvToolConfigDir:
+			want = configDir
+		case model.EnvAuthFiles:
 			want = ""
 		}
 		if key == "ENCLAVE_PROTECTED_AUTH" {

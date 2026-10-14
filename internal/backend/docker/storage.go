@@ -163,7 +163,7 @@ func (s *StoreManager) storeDir(key backend.StoreKey, kind backend.StoreKind) (s
 		}
 		return dir, nil
 	}
-	if ref := s.authSession; ref != nil && ref.Protected && ((kind == backend.StoreKindConfig && key == ref.ConfigKey) || (kind == backend.StoreKindAuth && key == ref.Key)) {
+	if ref := s.authSession; ref != nil && ref.Protected && kind == backend.StoreKindAuth && key == ref.Key {
 		if err := hoststore.EnsureNoSymlinkChain(config.HostStateRootDir(s.host.Home), s.viewDir, true); err != nil {
 			return "", err
 		}

@@ -59,6 +59,9 @@ func (m volumeManager) BuildPrep(volumeSuffix string) (backend.StorePrep, storeS
 	stores := storeSet{}
 
 	configKey := backend.StoreKey{Owner: m.profile.Name, ProjectHash: m.project.Hash, Suffix: strings.TrimSpace(volumeSuffix)}
+	if m.auth.ProtectAuth {
+		configKey = backend.ProtectedConfigKey(configKey)
+	}
 	prep.Config = &backend.ConfigStorePrep{
 		Key:        configKey,
 		Recreate:   !m.run.Persist,

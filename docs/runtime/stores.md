@@ -285,7 +285,8 @@ Experimental `--protect-auth` uses this layout on Docker/Podman:
 |-------|--------------------------|----------|
 | Grant, provider metadata, generation and refresh recovery | Selected existing `tools/claude/auth/<identity>/` directory; gateway-only RW mount | Survives session removal |
 | Identity protection and admission | Host-only `locks/store-<store-path-hash>.identity.json`, outside the auth directory and all workload mounts | Persists across auth reset/removal; only explicit host-side downgrade clears protection |
-| Native auth view containing access/refresh handles | `oauth-sessions/<incarnation>/view/`, mounted at `~/.claude` | Rebuilt and removed per logical session |
+| Claude config and history | `tools/claude/config/<project-hash>/<store-key>.protected/`, mounted at `~/.claude`; never used by ordinary sessions | Persists across protected sessions like an ordinary config store |
+| Native auth view containing access/refresh handles | `oauth-sessions/<incarnation>/view/`, mounted at `~/.enclave-auth` | Rebuilt and removed per logical session |
 | Handle registration, session incarnation and broker readiness attestation | `oauth-sessions/<incarnation>/runtime/`, gateway-only | Survives proxy-process reload, not session end |
 | GitHub feature's native credentials and saved grant | `features/github-cli/auth/`, gateway-only when protected | Shared across tools/projects; survives session removal |
 | GitHub feature handle/config view | `oauth-sessions/<incarnation>/features/github-cli/view/`, mounted at `~/.config/gh` | Rebuilt and removed per logical session |
@@ -300,10 +301,11 @@ preparing session holds, such as those left by a crash during teardown.
 Do not mount the real identity or a parent containing it into a workload or
 auth-reconcile helper. Both inspected-mount and foreground request-driven
 finalization paths omit protected provider and feature auth. Workload-written expiry/metadata
-cannot update the trusted grant. The view is mounted at the default `~/.claude`;
-`CLAUDE_CONFIG_DIR` is not set. `ENCLAVE_AUTH_DIR` and
-`CLAUDE_SECURESTORAGE_CONFIG_DIR` also name that view. The view also holds session-scoped config/history. Agent
-memory is separately mounted. Gateway storage writes preserve the mounted
+cannot update the trusted grant. `ENCLAVE_AUTH_DIR` and
+`CLAUDE_SECURESTORAGE_CONFIG_DIR` name the view at `~/.enclave-auth`;
+`CLAUDE_CONFIG_DIR` is not set. The view also carries initial account state,
+which the Claude setup hook copies into a protected config store that has none.
+Agent memory is separately mounted. Gateway storage writes preserve the mounted
 directory owner; protected-only capabilities let its separate proxy UID write
 private host-owned storage. Container ownership/SELinux behavior still needs
 [engine verification](oauth-broker-verification.md).

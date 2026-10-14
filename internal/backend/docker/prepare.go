@@ -36,15 +36,10 @@ func (b *Backend) PrepareStores(ctx context.Context, prep backend.StorePrep) (ba
 			return state, err
 		}
 		if prep.AuthSession.Protected {
-			if prep.Config == nil {
-				return state, fmt.Errorf("protected OAuth requires a native config view")
-			}
-			originalConfig, err := hoststore.ResolveDir(b.opts.Host.Home, prep.Config.Key, backend.StoreKindConfig)
-			if err != nil {
-				return state, err
-			}
-			if err := rejectNativeAuthSource(originalConfig); err != nil {
-				return state, err
+			// Only protected sessions use this store, and they never receive
+			// real credentials, so its history can persist across sessions.
+			if prep.Config == nil || !backend.IsProtectedConfigKey(prep.Config.Key) {
+				return state, fmt.Errorf("protected OAuth requires its own config store")
 			}
 			prep.AuthSession.ConfigKey = prep.Config.Key
 			b.storage.authSession = prep.AuthSession
@@ -53,7 +48,6 @@ func (b *Backend) PrepareStores(ctx context.Context, prep backend.StorePrep) (ba
 				if err := rejectNativeAuthSource(prep.Config.Overlay.SourceDir); err != nil {
 					return state, err
 				}
-				prep.Config.Overlay.PreservePaths = nil
 			}
 			prep.ResetAuthFiles = nil
 		}

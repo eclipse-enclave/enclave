@@ -134,18 +134,21 @@ func protectedClaudeConfigRuntime(t *testing.T) *Runtime {
 	return r
 }
 
-func TestProtectedAuthMountContainsOnlyView(t *testing.T) {
+func TestProtectedAuthMountsOnlySessionView(t *testing.T) {
 	r := protectedTestRuntime()
 	acc := &mountAccumulator{}
 	ref := &backend.StoreRef{Kind: backend.StoreKindAuth, Key: backend.StoreKey{Owner: "claude", Suffix: "test"}}
 	r.addAuthMount(acc, ref)
-	if len(acc.Stores()) != 0 || len(acc.Mounts()) != 0 {
-		t.Fatal("real auth mount added")
+	if got := acc.Stores(); len(got) != 1 || got[0].Kind != backend.StoreKindAuth || got[0].Key != ref.Key || got[0].ContainerPath != "/home/agent/.enclave-auth" || len(acc.Mounts()) != 0 {
+		t.Fatalf("auth store is not the separately mounted session view: %+v", got)
 	}
 	for _, key := range []string{model.EnvAuthDir, "CLAUDE_SECURESTORAGE_CONFIG_DIR"} {
-		if got, ok := lookupEnv(acc.Env(), key); !ok || got != "/home/agent/.claude" {
+		if got, ok := lookupEnv(acc.Env(), key); !ok || got != "/home/agent/.enclave-auth" {
 			t.Fatalf("%s = %q", key, got)
 		}
+	}
+	if _, stores := newVolumeManager(r).BuildPrep("task"); !backend.IsProtectedConfigKey(stores.Config.Key) || stores.Config.Key.Suffix != "task.protected" {
+		t.Fatalf("protected session shares an ordinary config store: %+v", stores.Config.Key)
 	}
 	if _, ok := lookupEnv(acc.Env(), model.EnvAuthFiles); ok {
 		t.Fatal("legacy auth reconcile enabled")

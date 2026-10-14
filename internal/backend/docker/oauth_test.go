@@ -139,25 +139,32 @@ func TestProtectedReleaseRetainsDetachedOwnerAndCleansVerifiedEnd(t *testing.T) 
 	}
 }
 
-func TestProtectedStoreUsesOnlyEphemeralNativeView(t *testing.T) {
+func TestProtectedStoreKeepsHistoryAndScopesCredentialsToView(t *testing.T) {
 	b, key, _ := oauthTestBackend(t)
 	ctx := context.Background()
 	ref, err := b.PrepareAuthSession(ctx, key, "session", true, false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	configKey := backend.StoreKey{Owner: "claude", ProjectHash: "project"}
+	ordinaryKey := backend.StoreKey{Owner: "claude", ProjectHash: "project"}
+	if _, err := b.PrepareStores(ctx, backend.StorePrep{AuthSession: ref, Config: &backend.ConfigStorePrep{Key: ordinaryKey}, Auth: &backend.StorePrepEntry{Key: key}}); err == nil {
+		t.Fatal("protected session accepted an ordinary config store")
+	}
+	configKey := backend.ProtectedConfigKey(ordinaryKey)
 	_, err = b.PrepareStores(ctx, backend.StorePrep{AuthSession: ref, Config: &backend.ConfigStorePrep{Key: configKey, LayoutDirs: []string{"skills"}}, Auth: &backend.StorePrepEntry{Key: key}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	view, err := b.storage.storeDir(configKey, backend.StoreKindConfig)
-	if err != nil || view != b.authViewDir(ref) {
-		t.Fatalf("native config view=%s, %v", view, err)
+	persistent, err := hoststore.ResolveDir(b.opts.Host.Home, configKey, backend.StoreKindConfig)
+	if err != nil {
+		t.Fatal(err)
 	}
-	auth, err := b.storage.storeDir(key, backend.StoreKindAuth)
-	if err != nil || auth != view {
-		t.Fatalf("auth view=%s, %v", auth, err)
+	if dir, err := b.storage.storeDir(configKey, backend.StoreKindConfig); err != nil || dir != persistent {
+		t.Fatalf("protected config store=%s, %v; want persistent %s", dir, err, persistent)
+	}
+	view, err := b.storage.storeDir(key, backend.StoreKindAuth)
+	if err != nil || view != b.authViewDir(ref) {
+		t.Fatalf("auth view=%s, %v", view, err)
 	}
 	cfg, err := b.protectedGatewayConfig(ref)
 	if err != nil {
@@ -166,9 +173,12 @@ func TestProtectedStoreUsesOnlyEphemeralNativeView(t *testing.T) {
 	if cfg.StoreDir == view || cfg.RuntimeDir == view || cfg.LockPath != hoststore.LockPath(b.opts.Host.Home, cfg.StoreDir) {
 		t.Fatal("gateway mounts alias view or use a different identity lock")
 	}
-	req := backend.Request{AuthSession: ref, Session: backend.SessionMeta{Name: "session", Tool: "claude"}, Stores: []backend.PersistentStore{{Kind: backend.StoreKindConfig, Key: configKey, ContainerPath: "/home/agent/.claude"}}, User: b.opts.Host.UID + ":" + b.opts.Host.GID}
+	req := backend.Request{AuthSession: ref, Session: backend.SessionMeta{Name: "session", Tool: "claude"}, Stores: []backend.PersistentStore{
+		{Kind: backend.StoreKindConfig, Key: configKey, ContainerPath: "/home/agent/.claude"},
+		{Kind: backend.StoreKindAuth, Key: key, ContainerPath: "/home/agent/.enclave-auth"},
+	}, User: b.opts.Host.UID + ":" + b.opts.Host.GID}
 	spec := b.dockerConfig(req)
-	if len(spec.hostConfig.Mounts) != 1 || spec.hostConfig.Mounts[0].Source != view {
+	if len(spec.hostConfig.Mounts) != 2 || spec.hostConfig.Mounts[0].Source != persistent || spec.hostConfig.Mounts[1].Source != view {
 		t.Fatalf("workload mounts=%v", spec.hostConfig.Mounts)
 	}
 	if err := b.validateProtectedMounts(req, spec); err != nil {
@@ -397,7 +407,7 @@ func TestProtectedAdmissionRejectsLegacyBindOnEitherEngine(t *testing.T) {
 	}
 }
 
-func TestProtectedPrepareRejectsExistingNativeConfigAndOverlay(t *testing.T) {
+func TestProtectedPrepareRejectsNativeCredentialsInOverlayAndView(t *testing.T) {
 	for _, where := range []string{"persistent", "overlay", "view"} {
 		for _, filename := range []string{".credentials.json", "auth.json", ".claude.json", ".config.json", "config.json"} {
 			t.Run(where+"/"+filename, func(t *testing.T) {
@@ -407,7 +417,7 @@ func TestProtectedPrepareRejectsExistingNativeConfigAndOverlay(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				configKey := backend.StoreKey{Owner: "claude", ProjectHash: "project"}
+				configKey := backend.ProtectedConfigKey(backend.StoreKey{Owner: "claude", ProjectHash: "project"})
 				prep := backend.StorePrep{AuthSession: ref, Config: &backend.ConfigStorePrep{Key: configKey}}
 				source, _ := hoststore.ResolveDir(b.opts.Host.Home, configKey, backend.StoreKindConfig)
 				if where == "overlay" {
@@ -426,7 +436,13 @@ func TestProtectedPrepareRejectsExistingNativeConfigAndOverlay(t *testing.T) {
 					req := backend.Request{AuthSession: ref, User: b.opts.Host.UID + ":" + b.opts.Host.GID}
 					err = b.validateProtectedMounts(req, b.dockerConfig(req))
 				}
-				if err == nil {
+				// The protected-only store never held a real credential; it
+				// keeps the session state the client wrote there before.
+				if where == "persistent" {
+					if err != nil {
+						t.Fatalf("rejected protected session state: %v", err)
+					}
+				} else if err == nil {
 					t.Fatal("accepted preexisting native credentials")
 				}
 				assertFileContent(t, filepath.Join(source, filename), "synthetic-native-credential")

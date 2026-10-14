@@ -591,6 +591,10 @@ func (r *Runtime) runningConfigKeyExists(key string) bool {
 	if strings.TrimSpace(key) == "" || r.backend == nil {
 		return false
 	}
+	if r.auth.ProtectAuth {
+		// Protected sessions label their own store; ordinary ones never use it.
+		key = backend.ProtectedConfigKey(backend.StoreKey{Suffix: key}).Suffix
+	}
 	checker, ok := r.backend.(backend.ConfigStoreConflictChecker)
 	if !ok {
 		return false
@@ -1540,14 +1544,16 @@ func (r *Runtime) addAuthMount(mounts *mountAccumulator, authStore *backend.Stor
 	if authStore == nil {
 		return
 	}
+	authMountPath := r.containerHome + "/" + model.ContainerAuthDir
 	if r.auth.ProtectAuth {
-		view := resolveContainerProfilePath(r.containerHome, r.profile.ConfigDir)
-		mounts.AddEnv(model.EnvAuthDir, view)
-		mounts.AddEnv("CLAUDE_SECURESTORAGE_CONFIG_DIR", view)
+		// The backend backs this store with the session's native handle view;
+		// the persistent config store keeps history at the native config dir.
+		mounts.AddStore(backend.PersistentStore{Kind: authStore.Kind, Key: authStore.Key, ContainerPath: authMountPath})
+		mounts.AddEnv(model.EnvAuthDir, authMountPath)
+		mounts.AddEnv("CLAUDE_SECURESTORAGE_CONFIG_DIR", authMountPath)
 		mounts.AddEnv("ENCLAVE_PROTECTED_AUTH", "1")
 		return
 	}
-	authMountPath := r.containerHome + "/" + model.ContainerAuthDir
 	mounts.AddStore(backend.PersistentStore{Kind: authStore.Kind, Key: authStore.Key, ContainerPath: authMountPath})
 	mounts.AddEnv(model.EnvAuthDir, authMountPath)
 	authFiles := r.profile.ProviderAuthFiles()

@@ -18,8 +18,10 @@ restricted policy, `--allow-all-network`, and unrestricted policy files.
 
 The selected grant remains in `tools/claude/auth/<identity>/`. Host-only
 `locks/store-<store-path-hash>.identity.json` records protection/reservations.
-`oauth-sessions/<incarnation>/view/` is mounted at the native `~/.claude` location;
-its sibling `runtime/` and the exact host identity lock are gateway-only.
+`oauth-sessions/<incarnation>/view/` is mounted at `~/.enclave-auth`, named by
+`CLAUDE_SECURESTORAGE_CONFIG_DIR`; its sibling `runtime/` and the exact host
+identity lock are gateway-only. Config and history persist in a protected-only
+`<store-key>.protected` config store at `~/.claude`.
 Concurrent protected sessions across Docker/Podman share grants and the identity
 lock, with independent reservations, handles and native views. Only registered,
 attested gateways may share exact grant/lock mounts. Startup leases cover the
@@ -28,8 +30,9 @@ owner. Unavailable engine inspection fails closed.
 
 Protected sessions run the ordinary, unpinned Claude client with its normal
 updates and project/local settings. Saved grants seed a fresh handle file and
-minimal provider-derived account/onboarding metadata. Config/history is
-session-scoped, while separately mounted agent memory retains its normal scope.
+minimal provider-derived account/onboarding metadata, which the setup hook
+copies into a protected config store that lacks it. Agent memory retains its
+normal scope.
 No old Claude auth/config file is imported. Provider env credentials, conflicting
 native auth sources, credential-helper settings and incompatible runtime modes
 are rejected. The built-in GitHub feature has its own adapter; other native-auth
@@ -263,7 +266,7 @@ and binds in the engine report.
 | Commit boundaries | Inject failures before write, file sync, rename and directory sync. Test initial grant/registry publication and refresh separately. No uncommitted grant is acknowledged. Live sibling readers fence visible commits after a writer loses its directory-sync acknowledgement; recovery must not require restarting all siblings. |
 | Live reload | Apply the gateway bundle with the workload alive. The proxy PID changes but gateway/network namespace and handles remain valid. Do not substitute gateway replacement for process reload. |
 | Proxy death | Kill the proxy unexpectedly and demonstrate fail-closed egress. End the affected logical session; start a new one from durable state. |
-| Session reuse | Stop, start again with the same name, and verify fresh handles. Prior-session handles fail even when identity and container name are reused. |
+| Session reuse | Stop, start again with the same name, and verify fresh handles. Prior-session handles fail even when identity and container name are reused. `--continue` and `--resume` find the previous protected conversation; the `.protected` config store holds no real credential, and the ordinary config store is not mounted. |
 | Admission | Simultaneous starts across projects and engines admit multiple protected sessions for the same identity with distinct handles/views. Legacy access still conflicts. Detached CLI exit and proxy reload do not release reservations. Stopping one session or reconciling its stale reservation must preserve sibling grants, handles, views and reservations. Reset, startup reset and downgrade refuse until all selected-identity sessions have ended. Stalled engine inspection must not block sibling credential access. Vanished-container races retry within a bound; unavailable engines and unresolved bind sources still fail closed. |
 | Persistent protection | Omitting opt-in cannot reopen an identity raw. Reset preserves protection. An explicit host-side downgrade is allowed only without an owner; no implicit downgrade on an error. |
 | Mount isolation | Inspect workload, gateway and every reconcile helper. The real store and its parents are absent from workload/helper mounts, including symlink aliases and config overrides. Attempt added-dir mounts from later ordinary sessions too, including concurrent enrollment/start. Preexisting workloads exposing selected grant or trusted control files prevent enrollment. Cover QEMU directory/file staging and copy-back; active/preparing/finalizing QEMU sessions, including older guests without leases, prevent protected admission/reset/downgrade. Kill the parent CLI while QEMU stays alive and verify the inherited lease remains effective. Only the selected identity is mounted into the gateway. |

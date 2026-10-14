@@ -60,7 +60,7 @@ supported under `tool_overrides.<tool>`.
 | `ephemeral` | Run without persistent auth/env stores |
 | `auth_scope` | `shared` or `project` (default: `shared`) |
 | `auth_name` | Named per-tool shared auth identity slug; unset uses the default store |
-| `protect_auth` | Experimental gateway-owned Claude/GitHub authentication (default: `false`); see [Protected OAuth](#protected-oauth) |
+| `protect_auth` | Experimental gateway-owned tool and GitHub credentials (default: `false`); see [Protected OAuth](#protected-oauth) |
 | `secrets_scope` | `both`, `global`, or `project` (default: `both`) |
 | `reset_auth` | Clear auth on start |
 | `no_api_key` | Disable API key injection |
@@ -556,19 +556,21 @@ set in config is resolved by both sides.
 
 ### Protected OAuth
 
-`"protect_auth": true` corresponds to `--protect-auth`. It works with the
-built-in tools, with a fresh `"auth_name"` under `"auth_scope": "shared"`.
-The project scope and `"ephemeral": true` use derived identities.
+`"protect_auth": true` corresponds to `--protect-auth`. It works with every
+built-in tool, with a fresh `"auth_name"` under `"auth_scope": "shared"`.
+The project scope and `"ephemeral": true` use derived identities; Theia and
+Theia Next, which capture no logins, always use a per-session identity.
 The default built-in `github-cli` feature has a protected native-auth adapter;
 other native-auth features are rejected. The experimental Docker/Podman flow
-uses the ordinary Claude client, keeps history in a protected-only config
-store and credentials in a session-scoped view. Concurrent sessions may reuse the same `auth_name`;
-Claude and GitHub grants are shared, but handles and views remain per-session.
+uses the ordinary tool clients, keeps the tool's config and history in a
+protected-only config store and credentials in a session-scoped view. Concurrent
+sessions may reuse the same `auth_name`; tool and GitHub grants are shared, but
+handles and views remain per-session.
 Reset/downgrade require all sessions using the selected identity to end.
 Saved identity protection is independent of this
 configuration: removing the setting causes a refusal, not a raw-auth fallback.
 Provider secrets are released only as placeholders; raw credential variables,
-host config passthrough and credential-helper settings conflict with this mode. See [authentication](auth.md#experimental-gateway-owned-claude-oauth)
+host config passthrough and credential-helper settings conflict with this mode. See [authentication](auth.md#experimental-protected-authentication)
 for restrictions, reset/downgrade and pending verification.
 
 The GitHub feature identity is shared globally, not selected by `auth_name`.

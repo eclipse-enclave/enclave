@@ -283,9 +283,9 @@ Experimental `--protect-auth` uses this layout on Docker/Podman:
 
 | State | Trusted owner / location | Lifetime |
 |-------|--------------------------|----------|
-| Grant, provider metadata, generation and refresh recovery | Selected `tools/claude/auth/<identity>/` directory (`<auth-name>`, `project.<project-hash>` or `ephemeral.<random>`); gateway-only RW mount | Survives session removal, except an ephemeral identity, which is deleted once its session ended |
+| Grant, provider metadata, generation and refresh recovery | Selected `tools/<tool>/auth/<identity>/` directory, one grant file per login adapter (`<auth-name>`, `project.<project-hash>` or `ephemeral.<random>`); gateway-only RW mount | Survives session removal, except an ephemeral identity, which is deleted once its session ended |
 | Identity protection and admission | Host-only `locks/store-<store-path-hash>.identity.json`, outside the auth directory and all workload mounts | Persists across auth reset/removal; only explicit host-side downgrade clears protection |
-| Claude config and history | `tools/claude/config/<project-hash>/<store-key>.protected/`, mounted at `~/.claude`; never used by ordinary sessions | Persists across protected sessions like an ordinary config store |
+| Tool config and history | `tools/<tool>/config/<project-hash>/<store-key>.protected/`, mounted at the tool's config directory, such as `~/.claude`; never used by ordinary sessions | Persists across protected sessions like an ordinary config store |
 | Native auth view containing access/refresh handles | `oauth-sessions/<incarnation>/view/`, mounted at `~/.enclave-auth` | Rebuilt and removed per logical session |
 | Handle registration, session incarnation and broker readiness attestation | `oauth-sessions/<incarnation>/runtime/`, gateway-only | Survives proxy-process reload, not session end |
 | GitHub feature's native credentials and saved grant | `features/github-cli/auth/`, gateway-only when protected | Shared across tools/projects; survives session removal |
@@ -301,9 +301,11 @@ preparing session holds, such as those left by a crash during teardown.
 Do not mount the real identity or a parent containing it into a workload or
 auth-reconcile helper. Both inspected-mount and foreground request-driven
 finalization paths omit protected provider and feature auth. Workload-written expiry/metadata
-cannot update the trusted grant. `ENCLAVE_AUTH_DIR` and
-`CLAUDE_SECURESTORAGE_CONFIG_DIR` name the view at `~/.enclave-auth`;
-`CLAUDE_CONFIG_DIR` is not set. The view also carries initial account state,
+cannot update the trusted grant. `ENCLAVE_AUTH_DIR` names the view at
+`~/.enclave-auth`. Claude reads it through `CLAUDE_SECURESTORAGE_CONFIG_DIR`
+(`CLAUDE_CONFIG_DIR` is not set); for other tools the entrypoint links each
+native credential file listed in `ENCLAVE_PROTECTED_AUTH_FILES` to it, replacing
+whatever the protected config store held there. The view also carries initial account state,
 which the Claude setup hook copies into a protected config store that has none.
 Agent memory is separately mounted. Gateway storage writes preserve the mounted
 directory owner; protected-only capabilities let its separate proxy UID write

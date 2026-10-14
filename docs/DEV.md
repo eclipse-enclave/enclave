@@ -705,11 +705,11 @@ Work is tracked via GitHub Issues.
 and the built-in GitHub CLI feature. `internal/protectedauth` lists each tool's
 login adapters and native credential files; a new tool must be added there,
 with a gateway view format and adapters for its logins, before it can run
-protected. The runtime selects the protected identity per scope
+protected, and to the engine check's tool table, which a Go test compares. The runtime selects the protected identity per scope
 (`protectedAuthIdentity`); ephemeral identities are removed by the Docker backend
 on verified session end or by the admission sweep. Option
 changes are generated from `internal/config/options_def.go`; run `make generate`.
-Protected launches use the ordinary, unpinned Claude client; custody rests on
+Protected launches use the ordinary, unpinned tool clients; custody rests on
 the gateway mediating every first-party domain
 (`internal/gateway/oauthbroker/firstparty.go`). The GitHub
 feature keeps its ordinary apt client and a SHA-256-pinned `gh` 2.87.3 binary at
@@ -730,8 +730,8 @@ Engine snapshots are scoped to mount admission, never cached across its release.
 Inspection runs outside the broker's credential lock; metadata is revalidated
 under that lock before commit. Keep grant mutations locked and test inspection
 churn, bounded retries and sibling access during stalled inspection.
-Readiness schema 2 requires brokers to fence visible shared commits durably before
-credential release. Test separate broker instances and incarnations, rotating
+Readiness schema 3 requires brokers to fence visible shared commits durably before
+credential release and attests the tool whose adapters the gateway opened. Test separate broker instances and incarnations, rotating
 refresh, uncertain writes, sibling teardown, and old-gateway refusal together.
 
 `auth reset|downgrade --feature github-cli` selects the global feature identity

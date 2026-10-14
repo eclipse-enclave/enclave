@@ -5,7 +5,8 @@
 //
 // SPDX-License-Identifier: MIT
 
-// Package oauthbroker implements the experimental Claude OAuth custody mode.
+// Package oauthbroker implements the gateway-side custody of protected tool and
+// feature credentials.
 // Real-client and container compatibility still require manual verification.
 package oauthbroker
 

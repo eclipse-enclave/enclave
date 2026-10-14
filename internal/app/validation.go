@@ -71,7 +71,7 @@ func ValidateOptions(opts model.Options, sources model.OptionSources, ctx Valida
 		if opts.Ephemeral && strings.TrimSpace(opts.AuthName) != "" {
 			warnings = append(warnings, "--auth-name is ignored with --ephemeral; the protected login lasts for this session only")
 		}
-		warnings = append(warnings, "Protected OAuth is experimental; Docker/Podman and real Claude/GitHub logins require validation.")
+		warnings = append(warnings, "Protected OAuth is experimental; Docker/Podman and real tool and GitHub logins require validation.")
 	}
 	if err := validateBackendName(opts.Backend); err != nil {
 		return opts, sources, warnings, err

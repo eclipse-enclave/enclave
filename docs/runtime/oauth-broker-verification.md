@@ -1,10 +1,12 @@
 # OAuth broker verification and handoff
 
-`--protect-auth` provides an **experimental opt-in** Claude subscription flow
-for named shared, per-project and per-session identities on Docker/Podman, including gateway custody
-for the built-in `github-cli` feature. Runtime activation is
-implemented; real Docker/Podman mounts and the Claude and GitHub client
-compatibility gates have **NOT RUN** in the implementation environment. Do not treat this as a
+`--protect-auth` provides an **experimental opt-in** flow for every built-in
+tool, with named shared, per-project and per-session identities on
+Docker/Podman: gateway custody of the Claude subscription, ChatGPT, GitHub
+Copilot and Mistral sign-in logins the tools support, of host-configured API
+keys, and of the built-in `github-cli` feature. Runtime activation is
+implemented; real Docker/Podman mounts and the client compatibility gates have
+**NOT RUN** in the implementation environment. Do not treat this as a
 validated production login mode. Unenrolled identities retain ordinary login
 behavior.
 
@@ -16,24 +18,28 @@ gateway mounts, separate workload config view, reset/downgrade, cleanup and
 same-mode proxy reload are wired. Protected sessions retain mediation under
 restricted policy, `--allow-all-network`, and unrestricted policy files.
 
-The selected grant remains in `tools/claude/auth/<identity>/`. Host-only
+The selected grants remain in `tools/<tool>/auth/<identity>/`, one file per
+provider adapter (`oauth-grant.json`, `openai-grant.json`, `mistral-grant.json`,
+`copilot-grant.json`). Host-only
 `locks/store-<store-path-hash>.identity.json` records protection/reservations.
-`oauth-sessions/<incarnation>/view/` is mounted at `~/.enclave-auth`, named by
-`CLAUDE_SECURESTORAGE_CONFIG_DIR`; its sibling `runtime/` and the exact host
-identity lock are gateway-only. Config and history persist in a protected-only
-`<store-key>.protected` config store at `~/.claude`.
+`oauth-sessions/<incarnation>/view/` is mounted at `~/.enclave-auth`; Claude
+reads it through `CLAUDE_SECURESTORAGE_CONFIG_DIR`, other tools through native
+credential files the entrypoint links to it (`internal/protectedauth`). Its
+sibling `runtime/` and the exact host identity lock are gateway-only. The tool's
+config directory persists in a protected-only `<store-key>.protected` config
+store.
 Concurrent protected sessions across Docker/Podman share grants and the identity
 lock, with independent reservations, handles and native views. Only registered,
 attested gateways may share exact grant/lock mounts. Startup leases cover the
 interval before containers exist; detached exit/reload does not release an
 owner. Unavailable engine inspection fails closed.
 
-Protected sessions run the ordinary, unpinned Claude client with its normal
-updates and project/local settings. Saved grants seed a fresh handle file and
-minimal provider-derived account/onboarding metadata, which the setup hook
-copies into a protected config store that lacks it. Agent memory retains its
+Protected sessions run the ordinary, unpinned tool clients with their normal
+updates and project/local settings. Saved grants seed fresh handle files; for
+Claude also minimal provider-derived account/onboarding metadata, which the
+setup hook copies into a protected config store that lacks it. Agent memory retains its
 normal scope.
-No old Claude auth/config file is imported. Provider env credentials, conflicting
+No old tool auth/config file is imported. Provider env credentials, conflicting
 native auth sources, credential-helper settings and incompatible runtime modes
 are rejected. The built-in GitHub feature has its own adapter; other native-auth
 features are rejected. Non-native/env-secret features remain usable. GitLab's
@@ -63,7 +69,7 @@ views only after verifying the owner ended. Existing legacy parallel-session
 behavior is retained. Native logout removes the local view, not the durable
 grant or copied live handles; neither logout nor host reset proves revocation.
 
-## Current Claude fixture contract
+## Current adapter fixture contract
 
 These are the active adapter limits, **not a verified provider response schema
 or a supported-client compatibility claim**:
@@ -213,7 +219,7 @@ the approved provider remains trusted not to reflect its credential.
 |-------|-------|-----------------|------------------|
 | Local implementation | Development agent without an engine | Runtime/CLI integration, unit/fixture checks, precise adapter schema | See implementation test output; not engine evidence |
 | Container experiment | Agent with Docker and Podman access | Synthetic provider and mounted-view harness; inspect real mounts, ownership, lifecycle and egress | Not run in the implementation environment |
-| Real-client gate | Human, after the container experiment passes | Browser consent and recorded pinned-client lifecycle on each backend | Not run; no supported client version |
+| Real-client gate | Human, after the container experiment passes | Browser consent and recorded client lifecycle for every tool login on each backend | Not run |
 | Production support | Maintainer reviewing both evidence sets | Implemented opt-in and unrestricted mediation verified on each supported matrix row | Pending the preceding gates |
 
 The engine-capable agent can prepare and test the experiment harness without a
@@ -355,8 +361,8 @@ only restricted mode is not completion of the parent feature.
 ## 2. Human real-client gate
 
 After the engine agent provides the experiment report, use a disposable fresh
-Claude subscription identity and record the client version. Do not migrate an
-existing login. Refuse raw credentials in selected native config/auth files,
+identity for every tool login below and record each client version. Do not
+migrate an existing login. Refuse raw credentials in selected native config/auth files,
 provider env credentials and `apiKeyHelper` or alternative-provider settings.
 Record the effective config and mounts without credential values.
 
@@ -461,6 +467,25 @@ For every supported backend:
 6. Repeat the supported lifecycle under
    both unrestricted selectors and verify an unrelated destination works while
    credential release remains scoped.
+
+### Per-tool logins
+
+Run the lifecycle above for each captured login, with the same backends,
+network selectors, concurrency, reset and downgrade steps, replacing `claude` in
+the commands. Record `<client> --version` inside the container for each tool.
+
+| Tool | Login to complete | Confirm, without printing values |
+|------|-------------------|----------------------------------|
+| `claude` | Claude subscription | `.credentials.json` holds `sk-ant-oat01-` handles; streamed reply; real refresh |
+| `pi` | Anthropic (`-p 53692`) and `openai-codex` (port 1455) | both `agent/auth.json` entries hold handles; a reply from each provider; real refresh of each |
+| `codex` | ChatGPT browser login (port 1455) and device-code login | `auth.json` tokens carry `ENCLAVEoai` signatures; a streamed reply over `chatgpt.com`, including WebSocket; real refresh |
+| `opencode` | ChatGPT browser and headless; GitHub Copilot device login | `openai` and `github-copilot` entries hold handles; a reply from a ChatGPT and a Copilot model; ChatGPT refresh |
+| `mistral-vibe` | browser sign-in during onboarding | `~/.vibe/.env` holds an `ENCLAVEmis` handle; a reply; account lookup works; a pasted key is refused |
+| `theia`, `theia-next` | none | API keys configured as Enclave secrets arrive as placeholders and work for AI features |
+
+For every tool, also confirm that pasting a provider API key into the tool is
+refused at the provider host, and that a second login to an identity with a grant
+is refused.
 
 If any required exchange needs additional destinations, fields, headers or
 metadata, stop and revise the explicit adapter contract and synthetic fixtures.

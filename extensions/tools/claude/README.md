@@ -74,19 +74,20 @@ left at the Claude Code defaults.
 | `entrypoint.d/setup.sh` | Runtime setup |
 | `go/` | Custom Go hooks |
 
-## Experimental protected OAuth
+## Experimental protected auth
 
 `--protect-auth` (with a fresh `--auth-name`, `--auth-scope project` or `--ephemeral`) runs the same
 Claude client as ordinary sessions, with its normal updates and settings
 sources; host-provided credential-source overrides are unsupported. The gateway
 mediates all Anthropic and Claude domains, so custody does not depend on the
 client version. The built-in `github-cli` feature uses its own protected adapter;
-other features with native auth files are rejected. Env-only credentials are
-unaffected. Config and history persist in a protected-only config store at
+other features with native auth files are rejected. API keys and
+`CLAUDE_CODE_OAUTH_TOKEN` configured as Enclave secrets reach the session as
+placeholders. Config and history persist in a protected-only config store at
 `~/.claude`; the handle file lives in a disposable session view at
 `~/.enclave-auth`. The gateway keeps the real
 grant outside the workload. Multiple protected sessions can share the same named
 identity: gateways coordinate refresh through a common lock while retaining
 separate handles and views. Reset/downgrade require all its sessions to end.
-See [auth](../../../docs/auth.md#experimental-gateway-owned-claude-oauth)
+See [auth](../../../docs/auth.md#experimental-protected-authentication)
 and the [pending verification plan](../../../docs/runtime/oauth-broker-verification.md).

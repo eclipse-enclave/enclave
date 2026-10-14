@@ -220,8 +220,8 @@ Mutation commands (`add-domain`, `remove-domain`, `set-mode`) apply the new poli
 
 | Command | Description |
 |---------|-------------|
-| `enclave auth reset --tool claude --auth-name <slug>` | Clear an idle protected grant, retaining protection |
-| `enclave auth downgrade --tool claude --auth-name <slug>` | Remove protection from an idle, empty shared identity |
+| `enclave auth reset --tool <tool> --auth-name <slug>` | Clear an idle protected grant, retaining protection; `--auth-scope project` selects the project identity |
+| `enclave auth downgrade --tool <tool> --auth-name <slug>` | Remove protection from an idle, empty identity; `--auth-scope project` selects the project identity |
 | `enclave auth reset --feature github-cli` | Clear the idle protected GitHub feature grant, retaining protection |
 | `enclave auth downgrade --feature github-cli` | Remove protection from the idle, empty global GitHub feature identity |
 | `enclave auth import --tool <tool>` | Copy host auth files into the auth store |
@@ -350,7 +350,7 @@ There is no config-file key.
 | `--pass-api-key` | Allow API key injection in `--ephemeral` mode |
 | `--pass-env <KEY1,KEY2>` | Forward specific host env vars into the container (repeatable, comma-separated); replaces `pass_env` from config, `+KEY` adds, and can forward a key `--no-api-key` withholds |
 | `--auth-scope <scope>` | `shared` (default) or `project` |
-| `--protect-auth` | Experimental gateway-owned credentials for the built-in tools (identity: fresh named shared, per project with `--auth-scope project`, or per session with `--ephemeral`) and the enabled built-in GitHub CLI feature on Docker/Podman; concurrent sessions share identities with separate handles; uses the ordinary tool clients and pins `gh` 2.87.3; see [protected auth](auth.md#experimental-gateway-owned-claude-oauth) |
+| `--protect-auth` | Experimental gateway-owned credentials for the built-in tools (identity: fresh named shared, per project with `--auth-scope project`, or per session with `--ephemeral`) and the enabled built-in GitHub CLI feature on Docker/Podman; concurrent sessions share identities with separate handles; uses the ordinary tool clients and pins `gh` 2.87.3; see [protected auth](auth.md#experimental-protected-authentication) |
 | `--auth-name <slug>` | Select a named per-tool shared auth store; ignored under `--auth-scope=project` |
 | `--secrets-scope <scope>` | `both` (default), `global`, or `project` |
 

@@ -107,9 +107,15 @@ func (m networkManager) Prepare(_ string, authState model.AuthState, _ SecretMap
 		logx.Warnf("Full network capture enabled: headers and bodies of permitted HTTP(S) requests are stored in %s", config.HostProjectNetworkCaptureDir(m.host.Home, m.project.Hash, m.profile.Name))
 	}
 
+	// Anything but an explicit unrestricted mode restricts destinations, so a
+	// misspelled policy mode fails closed.
+	mode := backend.NetworkModeRestricted
+	if unrestricted {
+		mode = backend.NetworkModeUnrestricted
+	}
 	return NetworkResult{
 		Network: backend.NetworkPolicy{
-			Mode:           backend.NetworkMode(effectivePolicy.Mode),
+			Mode:           mode,
 			ModeSource:     effectivePolicy.ModeSource,
 			RequireGateway: m.auth.ProtectAuth,
 			Egress: backend.EgressPolicy{

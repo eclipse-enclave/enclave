@@ -199,3 +199,24 @@ func TestNetworkPreparationSeparatesMediationFromDestinationPolicy(t *testing.T)
 		}
 	}
 }
+
+// A hand-edited policy can carry a mode the CLI never writes; it must still
+// restrict destinations.
+func TestNetworkPreparationRestrictsUnknownModes(t *testing.T) {
+	for _, mode := range []string{"Restricted", "unrestriced", "open"} {
+		t.Run(mode, func(t *testing.T) {
+			home := t.TempDir()
+			if err := network.SavePolicy(config.HostNetworkPolicyPath(home), network.Policy{Mode: mode}); err != nil {
+				t.Fatal(err)
+			}
+			r := &Runtime{host: model.Host{Home: home}, handler: noopRuntimeHandler{}}
+			result, err := newNetworkManager(r).Prepare("session", model.AuthState{}, SecretMapping{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if result.Network.Mode != backend.NetworkModeRestricted || !result.Network.UsesGateway() {
+				t.Fatalf("mode %q gave %+v, want the restricted gateway", mode, result.Network)
+			}
+		})
+	}
+}

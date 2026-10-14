@@ -154,3 +154,67 @@ func TestAuthAdmissionSweepsUnreservedLeftovers(t *testing.T) {
 		t.Fatalf("sweep displaced a live reservation: %v", err)
 	}
 }
+
+func TestEphemeralProtectedIdentityIsRemovedOnceUnmountable(t *testing.T) {
+	b, _, engines := oauthTestBackend(t)
+	ctx := context.Background()
+	name, err := backend.NewProtectedEphemeralIdentity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := backend.StoreKey{Owner: "claude", Suffix: name}
+	ref, err := b.PrepareAuthSession(ctx, key, "ephemeral", true, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b.releaseAuthStart(ref)
+	dir, err := hoststore.ResolveDir(b.opts.Host.Home, key, backend.StoreKindAuth)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(dir, "oauth-grant.json"), "synthetic-grant")
+	// A stopped gateway awaiting removal could still be restarted with the grant.
+	engines[backend.NameDocker] = []dockercmd.InspectResponse{{Name: "/enclave-gateway-stale", State: &dockercmd.ContainerState{Status: "exited"}, Config: &dockercmd.ContainerConfig{}, Mounts: []dockercmd.MountPoint{{Type: dockercmd.MountTypeBind, Source: dir, Destination: "/oauth/grant"}}}}
+	if err := b.ReleaseAuthSession(ctx, ref); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "oauth-grant.json")); err != nil {
+		t.Fatalf("grant removed while a container could still mount it: %v", err)
+	}
+
+	engines[backend.NameDocker] = nil
+	next, err := b.PrepareAuthSession(ctx, backend.StoreKey{Owner: "claude", Suffix: "shared-name"}, "next", true, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer b.releaseAuthStart(next)
+	for _, path := range []string{dir, hoststore.IdentityStatePath(b.opts.Host.Home, dir), hoststore.LockPath(b.opts.Host.Home, dir)} {
+		if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+			t.Errorf("ended ephemeral identity survived the sweep: %s: %v", path, err)
+		}
+	}
+}
+
+func TestLiveEphemeralProtectedIdentitySurvivesSweep(t *testing.T) {
+	b, _, engines := oauthTestBackend(t)
+	ctx := context.Background()
+	name, err := backend.NewProtectedEphemeralIdentity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := backend.StoreKey{Owner: "claude", Suffix: name}
+	live, err := b.PrepareAuthSession(ctx, key, "live", true, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b.releaseAuthStart(live)
+	engines[backend.NameDocker] = []dockercmd.InspectResponse{{Name: "/live", State: &dockercmd.ContainerState{Status: "running", Running: true}, Config: &dockercmd.ContainerConfig{}}}
+	next, err := b.PrepareAuthSession(ctx, backend.StoreKey{Owner: "claude", Suffix: "shared-name"}, "next", true, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer b.releaseAuthStart(next)
+	if err := b.validateAuthReservation(live); err != nil {
+		t.Fatalf("sweep removed a live ephemeral identity: %v", err)
+	}
+}

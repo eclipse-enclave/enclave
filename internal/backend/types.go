@@ -9,6 +9,8 @@ package backend
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -230,6 +232,31 @@ func ProtectedConfigKey(key StoreKey) StoreKey {
 // IsProtectedConfigKey reports whether key names a protected-only config store.
 func IsProtectedConfigKey(key StoreKey) bool {
 	return strings.HasSuffix(key.Suffix, protectedConfigSuffix) && strings.TrimSuffix(key.Suffix, protectedConfigSuffix) != ""
+}
+
+// Protected identities outside the shared scope get derived names containing a
+// dot, which --auth-name never does, so the scopes cannot collide.
+const protectedEphemeralIdentityPrefix = "ephemeral."
+
+// ProtectedProjectIdentity names the protected identity of a project-scoped
+// session.
+func ProtectedProjectIdentity(projectHash string) string {
+	return "project." + projectHash
+}
+
+// NewProtectedEphemeralIdentity names a fresh protected identity for one
+// non-persistent session; the backend deletes it once the session has ended.
+func NewProtectedEphemeralIdentity() (string, error) {
+	var nonce [16]byte
+	if _, err := rand.Read(nonce[:]); err != nil {
+		return "", err
+	}
+	return protectedEphemeralIdentityPrefix + hex.EncodeToString(nonce[:]), nil
+}
+
+// IsProtectedEphemeralIdentity reports whether key names a per-session identity.
+func IsProtectedEphemeralIdentity(key StoreKey) bool {
+	return strings.HasPrefix(key.Suffix, protectedEphemeralIdentityPrefix) && len(key.Suffix) > len(protectedEphemeralIdentityPrefix)
 }
 
 type FeatureAuthSessionManager interface {

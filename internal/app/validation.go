@@ -47,8 +47,8 @@ func ValidateOptions(opts model.Options, sources model.OptionSources, ctx Valida
 		if opts.Tool != "claude" || (opts.Backend != backend.NameDocker && opts.Backend != backend.NamePodman) {
 			return opts, sources, warnings, fmt.Errorf("--protect-auth supports only Claude on Docker or Podman")
 		}
-		if opts.AuthScope != model.AuthScopeShared || strings.TrimSpace(opts.AuthName) == "" || opts.Ephemeral || !opts.Persist {
-			return opts, sources, warnings, fmt.Errorf("--protect-auth requires persistence, --auth-scope shared and a fresh --auth-name")
+		if opts.AuthScope == model.AuthScopeShared && strings.TrimSpace(opts.AuthName) == "" && !opts.Ephemeral {
+			return opts, sources, warnings, fmt.Errorf("--protect-auth with --auth-scope shared requires a fresh --auth-name")
 		}
 		var conflict string
 		switch {
@@ -68,7 +68,10 @@ func ValidateOptions(opts model.Options, sources model.OptionSources, ctx Valida
 		if conflict != "" {
 			return opts, sources, warnings, fmt.Errorf("--protect-auth does not support %s", conflict)
 		}
-		warnings = append(warnings, "Protected OAuth is experimental; Docker/Podman and pinned Claude compatibility require validation. The native config view is session-scoped.")
+		if opts.Ephemeral && strings.TrimSpace(opts.AuthName) != "" {
+			warnings = append(warnings, "--auth-name is ignored with --ephemeral; the protected login lasts for this session only")
+		}
+		warnings = append(warnings, "Protected OAuth is experimental; Docker/Podman and real Claude/GitHub logins require validation.")
 	}
 	if err := validateBackendName(opts.Backend); err != nil {
 		return opts, sources, warnings, err

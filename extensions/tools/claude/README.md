@@ -76,7 +76,7 @@ left at the Claude Code defaults.
 
 ## Experimental protected OAuth
 
-`--protect-auth --auth-scope shared --auth-name <fresh-name>` runs the same
+`--protect-auth` (with a fresh `--auth-name`, `--auth-scope project` or `--ephemeral`) runs the same
 Claude client as ordinary sessions, with its normal updates and settings
 sources; host-provided credential-source overrides are unsupported. The gateway
 mediates all Anthropic and Claude domains, so custody does not depend on the

@@ -702,7 +702,9 @@ Work is tracked via GitHub Issues.
 ## Protected OAuth development
 
 `--protect-auth` is an experimental Docker/Podman path for Claude and the
-built-in GitHub CLI feature. Option
+built-in GitHub CLI feature. The runtime selects the protected identity per scope
+(`protectedAuthIdentity`); ephemeral identities are removed by the Docker backend
+on verified session end or by the admission sweep. Option
 changes are generated from `internal/config/options_def.go`; run `make generate`.
 Protected launches use the ordinary, unpinned Claude client; custody rests on
 the gateway mediating every first-party domain

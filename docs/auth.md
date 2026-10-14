@@ -11,11 +11,26 @@ enclave        # Subsequent runs: session reused automatically
 
 ### Experimental gateway-owned Claude OAuth
 
-Opt in with a **fresh named identity** on Docker or Podman:
+Opt in on Docker or Podman with one of these identities:
 
 ```bash
+# A fresh named identity, shareable across projects
 enclave --tool claude --auth-scope shared --auth-name protected-test --protect-auth
+# One identity per project
+enclave --tool claude --auth-scope project --protect-auth
+# A login that lasts for this session only
+enclave --tool claude --ephemeral --protect-auth
 ```
+
+Project-scoped identities are stored as `project.<project-hash>` and ephemeral
+ones as `ephemeral.<random>` among the shared identities; `--auth-name` never
+contains a dot, so the scopes cannot collide. An ephemeral identity and its
+grant are deleted once its session has ended and no container can mount them
+any more; a later session start removes any that a crash left behind. An
+ordinary `--auth-scope project` session never touches the project's protected
+identity: it uses its own, unprotected login in the project config store. Set
+`"protect_auth": true` in the project configuration to avoid starting one by
+accident.
 
 Complete the normal Claude subscription login. The gateway captures and durably
 stores the access/refresh tokens before returning session-bound handles. Claude
@@ -51,8 +66,8 @@ rootless Podman, SELinux and real login/refresh remain **unverified**. Follow th
 
 The Claude adapter does not migrate existing tool auth. Protected mode
 rejects provider env credentials, host config passthrough, native auth/config
-sources and credential-helper settings. It supports neither project/ephemeral
-auth, QEMU, admin mode, custom base images, runtime UID remapping nor devcontainers.
+sources and credential-helper settings. It supports neither QEMU, admin mode,
+custom base images, runtime UID remapping nor devcontainers.
 The workload uses the non-root host UID/GID; differing build IDs and gateway service-UID
 collisions are rejected. The built-in `github-cli` feature, enabled by default,
 has its own protected native-auth adapter; see below. Other features with native
@@ -110,6 +125,7 @@ stop all sessions using it and run:
 
 ```bash
 enclave auth reset --tool claude --auth-scope shared --auth-name protected-test
+enclave auth reset --tool claude --auth-scope project   # the current project's identity
 ```
 
 `--protect-auth --reset-auth` also resets an idle selected identity before a new
@@ -123,6 +139,7 @@ then explicitly downgrade the empty identity:
 
 ```bash
 enclave auth downgrade --tool claude --auth-scope shared --auth-name protected-test
+enclave auth downgrade --tool claude --auth-scope project
 ```
 
 Native logout only deletes the local view; it does not revoke the durable grant
@@ -164,7 +181,8 @@ Compatible existing files in Enclave's shared GitHub feature store can be
 enrolled while idle. This does not import the host's `~/.config/gh` automatically.
 Raw GitHub credential env variables and overrides of `GH_HOST`/`GH_CONFIG_DIR`
 conflict with the protected feature. The store is global across tools/projects,
-not selected by Claude's `--auth-name`, and supports concurrent protected sessions
+not selected by Claude's `--auth-name` or auth scope (ephemeral sessions use it
+too), and supports concurrent protected sessions
 across Docker/Podman. Each keeps its own handle/config view; account-token updates
 are shared without overwriting sibling views. Saved protection blocks later ordinary feature-auth mounts too.
 If gateway startup rejects an incompatible native store, protection remains and

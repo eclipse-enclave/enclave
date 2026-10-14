@@ -81,7 +81,11 @@ func (m volumeManager) BuildPrep(volumeSuffix string) (backend.StorePrep, storeS
 	}
 	stores.Config = &backend.StoreRef{Kind: backend.StoreKindConfig, Key: configKey}
 
-	if m.shouldCreateSharedAuthVolume() {
+	if m.auth.ProtectAuth && m.protectedIdentity != "" {
+		key := backend.StoreKey{Owner: m.profile.Name, Suffix: m.protectedIdentity}
+		prep.Auth = &backend.StorePrepEntry{Key: key}
+		stores.Auth = &backend.StoreRef{Kind: backend.StoreKindAuth, Key: key}
+	} else if m.shouldCreateSharedAuthVolume() {
 		// Suffix selects the named auth identity; an empty suffix selects default.
 		key := backend.StoreKey{Owner: m.profile.Name, Suffix: m.auth.AuthName}
 		prep.Auth = &backend.StorePrepEntry{Key: key}
@@ -212,6 +216,11 @@ func (m volumeManager) shouldCreateSharedAuthVolume() bool {
 func (m volumeManager) shouldCreateFeatureAuthVolume(ext model.Extension) bool {
 	if ext.ConfigDir == "" || len(ext.AuthFiles) == 0 {
 		return false
+	}
+	// Protected native feature auth always needs its gateway-owned store; a
+	// login without it would reach the workload.
+	if m.auth.ProtectAuth {
+		return true
 	}
 	if !m.run.Persist || m.auth.AuthScope != model.AuthScopeShared {
 		return false

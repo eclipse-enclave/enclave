@@ -102,8 +102,12 @@ func runProtectedAuthAction(input *CommandInput) int {
 	if code != 0 {
 		return code
 	}
-	if ctx.profile.Name != "claude" || input.Options.AuthScope != model.AuthScopeShared || ctx.authName == "" {
-		logx.Errorf("protected auth commands require --tool claude --auth-scope shared --auth-name <name>")
+	identity := ctx.authName
+	if input.Options.AuthScope == model.AuthScopeProject {
+		identity = backend.ProtectedProjectIdentity(ctx.project.Hash)
+	}
+	if ctx.profile.Name != "claude" || identity == "" {
+		logx.Errorf("protected auth commands require --tool claude with --auth-scope project or --auth-scope shared --auth-name <name>")
 		return 1
 	}
 	manager, ok := ctx.backend.(backend.AuthSessionManager)
@@ -111,7 +115,7 @@ func runProtectedAuthAction(input *CommandInput) int {
 		logx.Errorf("backend does not support protected auth identities")
 		return 1
 	}
-	key := backend.StoreKey{Owner: ctx.profile.Name, Suffix: ctx.authName}
+	key := backend.StoreKey{Owner: ctx.profile.Name, Suffix: identity}
 	var err error
 	if input.Action == "auth-reset" {
 		err = manager.ResetAuthIdentity(context.Background(), key)

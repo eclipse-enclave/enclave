@@ -69,6 +69,9 @@ type Runtime struct {
 	releaseHostOverrides map[string][]string
 	backend              backend.Backend
 	authSession          *backend.AuthSession
+	// protectedIdentity is the gateway-owned auth identity of a protected
+	// run, fixed once selected; see protectedAuthIdentity.
+	protectedIdentity string
 }
 
 type ExecutionContext struct {
@@ -424,6 +427,11 @@ func (r *Runtime) prepareVolumes(containerName string, baseContainerName string,
 		return preparedVolumes{}, fmt.Errorf("runtime backend is not configured")
 	}
 	volumeSuffix := r.currentConfigVolumeSuffix(containerName, baseContainerName)
+	if r.auth.ProtectAuth {
+		if _, err := r.protectedAuthIdentity(); err != nil {
+			return preparedVolumes{}, err
+		}
+	}
 	vm := newVolumeManager(r)
 	prep, stores := vm.BuildPrep(volumeSuffix)
 	cleanup := r.ephemeralVolumeCleanup(stores)

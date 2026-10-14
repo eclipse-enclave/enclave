@@ -36,21 +36,19 @@ func protectedTestRuntime() *Runtime {
 
 func TestProtectedAuthRejectsUnsupportedSources(t *testing.T) {
 	cases := map[string]func(*Runtime){
-		"project auth":        func(r *Runtime) { r.auth.AuthScope = model.AuthScopeProject },
-		"unnamed identity":    func(r *Runtime) { r.auth.AuthName = "" },
-		"ephemeral":           func(r *Runtime) { r.run.Ephemeral = true },
-		"admin":               func(r *Runtime) { r.run.Admin = true },
-		"UID remap":           func(r *Runtime) { r.build.RuntimeUIDRemap = true },
-		"root host":           func(r *Runtime) { r.host.UID = "0" },
-		"different build UID": func(r *Runtime) { r.build.BuildUID = "999" },
-		"different build GID": func(r *Runtime) { r.build.BuildGID = "999" },
-		"custom image":        func(r *Runtime) { r.build.BaseImage = "custom" },
-		"native config":       func(r *Runtime) { r.run.HostConfig = model.HostConfigPassthrough },
-		"API key injection":   func(r *Runtime) { r.auth.PassAPIKey = true },
-		"OAuth env injection": func(r *Runtime) { r.auth.PassEnv = []string{"CLAUDE_CODE_OAUTH_TOKEN"} },
-		"settings override":   func(r *Runtime) { r.run.CmdArgs = []string{"--settings={}"} },
-		"settings precedence": func(r *Runtime) { r.run.CmdArgs = []string{"--setting-sources", "project"} },
-		"other tool":          func(r *Runtime) { r.profile.Name = "codex" },
+		"unnamed shared identity": func(r *Runtime) { r.auth.AuthName = "" },
+		"admin":                   func(r *Runtime) { r.run.Admin = true },
+		"UID remap":               func(r *Runtime) { r.build.RuntimeUIDRemap = true },
+		"root host":               func(r *Runtime) { r.host.UID = "0" },
+		"different build UID":     func(r *Runtime) { r.build.BuildUID = "999" },
+		"different build GID":     func(r *Runtime) { r.build.BuildGID = "999" },
+		"custom image":            func(r *Runtime) { r.build.BaseImage = "custom" },
+		"native config":           func(r *Runtime) { r.run.HostConfig = model.HostConfigPassthrough },
+		"API key injection":       func(r *Runtime) { r.auth.PassAPIKey = true },
+		"OAuth env injection":     func(r *Runtime) { r.auth.PassEnv = []string{"CLAUDE_CODE_OAUTH_TOKEN"} },
+		"settings override":       func(r *Runtime) { r.run.CmdArgs = []string{"--settings={}"} },
+		"settings precedence":     func(r *Runtime) { r.run.CmdArgs = []string{"--setting-sources", "project"} },
+		"other tool":              func(r *Runtime) { r.profile.Name = "codex" },
 		"native feature auth": func(r *Runtime) {
 			r.features = []model.Extension{{Name: "github-cli", ConfigDir: ".config/gh", AuthFiles: []string{"hosts.yml"}}}
 		},
@@ -324,5 +322,48 @@ func TestProtectedClientPinsStayConsistent(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestProtectedIdentityFollowsScope(t *testing.T) {
+	shared := protectedTestRuntime()
+	if got, err := shared.protectedAuthIdentity(); err != nil || got != shared.auth.AuthName {
+		t.Fatalf("shared identity = %q, %v", got, err)
+	}
+
+	project := protectedTestRuntime()
+	project.auth.AuthScope, project.auth.AuthName = model.AuthScopeProject, ""
+	if err := project.validateProtectedAuth(); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := project.protectedAuthIdentity(); err != nil || got != "project."+project.project.Hash {
+		t.Fatalf("project identity = %q, %v", got, err)
+	}
+
+	ephemeral := protectedTestRuntime()
+	ephemeral.run.Persist, ephemeral.run.Ephemeral, ephemeral.auth.AuthName = false, true, ""
+	if err := ephemeral.validateProtectedAuth(); err != nil {
+		t.Fatal(err)
+	}
+	first, err := ephemeral.protectedAuthIdentity()
+	if err != nil || !backend.IsProtectedEphemeralIdentity(backend.StoreKey{Owner: "claude", Suffix: first}) {
+		t.Fatalf("ephemeral identity = %q, %v", first, err)
+	}
+	if again, _ := ephemeral.protectedAuthIdentity(); again != first {
+		t.Fatal("ephemeral identity changed within one run")
+	}
+	other := protectedTestRuntime()
+	other.run.Persist, other.run.Ephemeral = false, true
+	if second, _ := other.protectedAuthIdentity(); second == first {
+		t.Fatal("ephemeral runs share an identity")
+	}
+
+	ephemeral.features = []model.Extension{{Name: "github-cli", ConfigDir: ".config/gh", AuthFiles: []string{"hosts.yml", "config.yml"}}}
+	_, stores := newVolumeManager(ephemeral).BuildPrep("run")
+	if stores.Auth == nil || stores.Auth.Key.Suffix != first {
+		t.Fatalf("ephemeral session does not use its identity: %+v", stores.Auth)
+	}
+	if _, ok := stores.Features["github-cli"]; !ok {
+		t.Fatal("ephemeral session lacks the gateway-owned GitHub store; a login would reach the workload")
 	}
 }

@@ -557,7 +557,8 @@ set in config is resolved by both sides.
 ### Protected OAuth
 
 `"protect_auth": true` corresponds to `--protect-auth`. Set it only with
-`"tool": "claude"`, `"auth_scope": "shared"` and a fresh `"auth_name"`.
+`"tool": "claude"`, and with a fresh `"auth_name"` under `"auth_scope": "shared"`.
+The project scope and `"ephemeral": true` use derived identities.
 The default built-in `github-cli` feature has a protected native-auth adapter;
 other native-auth features are rejected. The experimental Docker/Podman flow
 uses the ordinary Claude client, keeps history in a protected-only config

@@ -75,7 +75,8 @@ func (b *Backend) PrepareAuthSession(ctx context.Context, key backend.StoreKey, 
 	key.Owner = strings.TrimSpace(key.Owner)
 	key.Suffix = strings.TrimSpace(key.Suffix)
 	ref := &backend.AuthSession{Key: key, Session: session, Engine: b.Name(), Incarnation: hex.EncodeToString(nonce[:]), Protected: protected}
-	if err := b.sweepAuthLeftovers(); err != nil {
+	check := b.inspectAuth(ctx)
+	if err := b.sweepAuthLeftovers(check); err != nil {
 		logx.Warnf("Retaining stale auth session state: %v", err)
 	}
 	release, err := util.AcquireFileLock(b.authStartLock(ref.Incarnation), nil)
@@ -93,7 +94,6 @@ func (b *Backend) PrepareAuthSession(ctx context.Context, key backend.StoreKey, 
 			b.rollBackAuthAdmission(dir, ref)
 		}
 	}()
-	check := b.inspectAuth(ctx)
 	err = hoststore.AdmitIdentity(b.opts.Host.Home, dir, authReservation(ref), reset,
 		func(owners []hoststore.IdentityReservation) (bool, error) {
 			return check.available(dir, owners, "", b.authRuntimeDir(ref))
@@ -165,14 +165,42 @@ func retireStartLock(path string) error {
 	return nil
 }
 
+// removeEphemeralIdentity deletes a per-session protected identity whose
+// sessions have ended. A container that can still mount it, such as a gateway
+// awaiting removal, defers deletion to a later sweep. Callers hold mount
+// admission.
+func (b *Backend) removeEphemeralIdentity(check *authInspection, key backend.StoreKey) error {
+	dir, err := hoststore.ResolveDir(b.opts.Host.Home, key, backend.StoreKindAuth)
+	if err != nil {
+		return err
+	}
+	return hoststore.RemoveIdleIdentity(b.opts.Host.Home, dir, check.reconcileOwner, func() (bool, error) {
+		return check.available(dir, nil, "")
+	})
+}
+
 // sweepAuthLeftovers retires session trees and start locks that no identity
 // reserves and no preparing owner holds, such as those left by a crash between
-// releasing a reservation and removing its state. Callers hold mount
-// admission, which serializes reservation changes and owner checks.
-func (b *Backend) sweepAuthLeftovers() error {
+// releasing a reservation and removing its state, and per-session identities
+// whose sessions ended. Callers hold mount admission, which serializes
+// reservation changes and owner checks.
+func (b *Backend) sweepAuthLeftovers(check *authInspection) error {
 	home := b.opts.Host.Home
 	if home == "" {
 		return nil
+	}
+	identities, err := os.ReadDir(config.HostStoreAuthTreeDir(home, "claude"))
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	for _, identity := range identities {
+		key := backend.StoreKey{Owner: "claude", Suffix: identity.Name()}
+		if !identity.IsDir() || !backend.IsProtectedEphemeralIdentity(key) {
+			continue
+		}
+		if err := b.removeEphemeralIdentity(check, key); err != nil {
+			logx.Debugf("Keeping ended session's protected identity for a later sweep: %v", err)
+		}
 	}
 	reserved, err := hoststore.ReservedIncarnations(home)
 	if err != nil {
@@ -331,7 +359,15 @@ func (b *Backend) ReleaseAuthSession(ctx context.Context, ref *backend.AuthSessi
 			return err
 		}
 	}
-	return b.removeAuthSessionState(ref.Incarnation)
+	if err := b.removeAuthSessionState(ref.Incarnation); err != nil {
+		return err
+	}
+	if ref.Protected && backend.IsProtectedEphemeralIdentity(ref.Key) {
+		if err := b.removeEphemeralIdentity(check, ref.Key); err != nil {
+			logx.Debugf("Keeping ended session's protected identity for a later sweep: %v", err)
+		}
+	}
+	return nil
 }
 
 func (b *Backend) ResetAuthIdentity(ctx context.Context, key backend.StoreKey) error {

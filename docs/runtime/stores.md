@@ -283,7 +283,7 @@ Experimental `--protect-auth` uses this layout on Docker/Podman:
 
 | State | Trusted owner / location | Lifetime |
 |-------|--------------------------|----------|
-| Grant, provider metadata, generation and refresh recovery | Selected existing `tools/claude/auth/<identity>/` directory; gateway-only RW mount | Survives session removal |
+| Grant, provider metadata, generation and refresh recovery | Selected `tools/claude/auth/<identity>/` directory (`<auth-name>`, `project.<project-hash>` or `ephemeral.<random>`); gateway-only RW mount | Survives session removal, except an ephemeral identity, which is deleted once its session ended |
 | Identity protection and admission | Host-only `locks/store-<store-path-hash>.identity.json`, outside the auth directory and all workload mounts | Persists across auth reset/removal; only explicit host-side downgrade clears protection |
 | Claude config and history | `tools/claude/config/<project-hash>/<store-key>.protected/`, mounted at `~/.claude`; never used by ordinary sessions | Persists across protected sessions like an ordinary config store |
 | Native auth view containing access/refresh handles | `oauth-sessions/<incarnation>/view/`, mounted at `~/.enclave-auth` | Rebuilt and removed per logical session |

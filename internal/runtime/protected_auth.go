@@ -38,8 +38,8 @@ func (r *Runtime) validateProtectedAuth() error {
 		(r.build.BuildGID != "" && r.build.BuildGID != r.host.GID) {
 		return fmt.Errorf("protected auth requires the non-root host UID/GID as the image and workload identity")
 	}
-	if !r.run.Persist || r.run.Ephemeral || r.auth.AuthScope != model.AuthScopeShared || r.auth.AuthName == "" {
-		return fmt.Errorf("protected auth requires a named shared identity and persistence")
+	if r.run.Persist && r.auth.AuthScope == model.AuthScopeShared && r.auth.AuthName == "" {
+		return fmt.Errorf("protected auth with the shared scope requires a named identity (--auth-name)")
 	}
 	switch {
 	case r.devcontainer != nil || r.build.Devcontainer:
@@ -77,6 +77,28 @@ func (r *Runtime) validateProtectedAuth() error {
 		}
 	}
 	return nil
+}
+
+// protectedAuthIdentity selects the gateway-owned identity of a protected run:
+// a fresh one for a non-persistent session, the project's for the project
+// scope, or the named shared identity.
+func (r *Runtime) protectedAuthIdentity() (string, error) {
+	if r.protectedIdentity != "" {
+		return r.protectedIdentity, nil
+	}
+	switch {
+	case !r.run.Persist:
+		name, err := backend.NewProtectedEphemeralIdentity()
+		if err != nil {
+			return "", err
+		}
+		r.protectedIdentity = name
+	case r.auth.AuthScope == model.AuthScopeProject:
+		r.protectedIdentity = backend.ProtectedProjectIdentity(r.project.Hash)
+	default:
+		r.protectedIdentity = r.auth.AuthName
+	}
+	return r.protectedIdentity, nil
 }
 
 func (r *Runtime) protectedGitHubEnabled() bool {

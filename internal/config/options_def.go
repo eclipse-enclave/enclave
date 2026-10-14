@@ -348,7 +348,7 @@ func OptionDefs() []OptionDef {
 			Apply:         ApplyBoolPtr,
 			CLIFlags: []CLIFlagDef{{
 				Name:      "--protect-auth",
-				Usage:     "Experimental gateway-owned Claude OAuth (requires a fresh named shared identity)",
+				Usage:     "Experimental gateway-owned Claude OAuth (named shared, per-project or per-session identity)",
 				ValueKind: CLIValueNone,
 				Action:    CLIAction{Kind: CLIActionSetBool, OptionField: "ProtectAuth", SourceField: "ProtectAuth", BoolValue: true},
 			}},

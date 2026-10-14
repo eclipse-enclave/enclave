@@ -381,6 +381,46 @@ func withIdleIdentity(home, dir string, verifyUnused func() (bool, error), mutat
 	}, mutate)
 }
 
+// RemoveIdleIdentity deletes an identity with its grant, admission metadata and
+// lock once every reserving session has verifiably ended and verifyUnused
+// confirms no container can mount it. It serves per-session identities, which
+// nothing reuses. Callers hold mount admission.
+func RemoveIdleIdentity(home, dir string, verifyEnded func(IdentityReservation) (bool, error), verifyUnused func() (bool, error)) error {
+	if verifyEnded == nil || verifyUnused == nil {
+		return errors.New("cross-engine session verification is required")
+	}
+	err := mutateVerifiedIdentity(home, dir, func(state *identityState) error {
+		if err := reconcileReservations(state, verifyEnded); err != nil {
+			return err
+		}
+		if len(state.Reservations) != 0 {
+			return errors.New("auth identity has active session reservations")
+		}
+		unused, err := verifyUnused()
+		if err != nil {
+			return err
+		}
+		if !unused {
+			return errors.New("auth identity is in use")
+		}
+		return nil
+	}, func(*identityState) error {
+		if err := EnsureNoSymlinkChain(config.HostStateRootDir(home), dir, true); err != nil {
+			return err
+		}
+		return os.RemoveAll(dir)
+	})
+	if err != nil {
+		return err
+	}
+	for _, path := range []string{IdentityStatePath(home, dir), LockPath(home, dir)} {
+		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+	}
+	return syncIdentityDir(config.HostLocksDir(home))
+}
+
 var errIdentityChanged = errors.New("auth identity changed during verification; retry the operation")
 
 // Engine verification can take seconds. Inspect an atomic metadata snapshot

@@ -163,8 +163,9 @@ func TestProtectedAuthRejectsLateEnvironmentOverrides(t *testing.T) {
 	for _, assignment := range []string{
 		"CLAUDE_CONFIG_DIR=/other", "ENCLAVE_AUTH_FILES=.credentials.json",
 		"CLAUDE_CODE_CUSTOM_OAUTH_URL=https://other", "CLAUDE_CODE_OAUTH_TOKEN=real-secret",
-		"HTTPS_PROXY=http://other", "ANTHROPIC_API_KEY=real-secret", "DISABLE_AUTOUPDATER=0",
-		"CLAUDE_CODE_SESSION_ACCESS_TOKEN=real-secret",
+		"HTTPS_PROXY=http://other", "ANTHROPIC_API_KEY=real-secret",
+		"CLAUDE_CODE_SESSION_ACCESS_TOKEN=real-secret", "CLAUDE_CODE_HOST_CREDS_FILE=/real-secret",
+		"CLAUDE_CODE_HOST_AUTH_ENV_VAR=REAL_SECRET", "CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST=1",
 	} {
 		err := r.validateProtectedBindings([]string{assignment})
 		if err == nil {
@@ -246,7 +247,7 @@ func TestProtectedAuthSettingsValidation(t *testing.T) {
 		{`{"apiKeyHelper":"cat secret"}`, true},
 		{`{"env":{"ANTHROPIC_AUTH_TOKEN":"real-secret"}}`, true},
 		{`{"env":{"CLAUDE_CONFIG_DIR":"/other"}}`, true},
-		{`{"env":{"DISABLE_AUTOUPDATER":"0"}}`, true},
+		{`{"env":{"CLAUDE_CODE_HOST_CREDS_FILE":"/other"}}`, true},
 		{`{"forceLoginMethod":"console"}`, true},
 		{`{broken`, true},
 	} {
@@ -264,12 +265,12 @@ func TestProtectedAuthSettingsValidation(t *testing.T) {
 	}
 }
 
-func TestProtectedCommandUsesPinnedClient(t *testing.T) {
+func TestProtectedCommandUsesOrdinaryClient(t *testing.T) {
 	r := protectedTestRuntime()
 	r.run.CmdArgs = []string{"-p", "hello"}
 	cmd := newCommandBuilder(r).Build()
-	if len(cmd) < 7 || cmd[4] != "/home/agent/.local/share/enclave/claude-2.1.63/bin/claude" {
-		t.Fatalf("unpinned command: %v", cmd)
+	if len(cmd) < 7 || cmd[4] != "claude" || strings.Contains(strings.Join(cmd, " "), "--setting-sources") {
+		t.Fatalf("protected command does not run the ordinary client with all setting sources: %v", cmd)
 	}
 }
 
@@ -296,15 +297,6 @@ func TestProtectedClientPinsStayConsistent(t *testing.T) {
 		version string
 		files   map[string][]string
 	}{
-		{"2.1.63", map[string][]string{
-			"extensions/tools/claude/install.sh": {
-				"claude-%s", "claude-code-%s.tgz", `!= "%s"`,
-			},
-			"extensions/tools/claude/entrypoint.d/setup.sh": {
-				"claude-%s/bin", `!= "%s (Claude Code)"`,
-			},
-			"internal/protectedclient/protectedclient.go": {"claude-%s/bin/claude", `!= "%s (Claude Code)"`},
-		}},
 		{"2.87.3", map[string][]string{
 			"extensions/features/github-cli/install.sh": {"protected_version=%s"},
 			"extensions/features/github-cli/feature-entrypoint.d/setup.sh": {

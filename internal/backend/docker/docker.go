@@ -509,10 +509,10 @@ func (b *Backend) Exec(ctx context.Context, ref backend.SessionRef, req backend.
 	return neutralizeExitError(execErr)
 }
 
-// protectedExecArgv gives an exec the pinned clients that the target session's
-// entrypoint selected. An exec does not pass through that entrypoint, and the
-// selection comes from the session's creation environment rather than the
-// invoking command's flags.
+// protectedExecArgv gives an exec the pinned GitHub CLI that the target
+// session's entrypoint selected. An exec does not pass through that
+// entrypoint, and the selection comes from the session's creation environment
+// rather than the invoking command's flags.
 func protectedExecArgv(ctx context.Context, name string, argv []string) ([]string, error) {
 	info, err := dockercmd.ContainerInspect(ctx, name)
 	if err != nil {
@@ -521,12 +521,10 @@ func protectedExecArgv(ctx context.Context, name string, argv []string) ([]strin
 	if info.Config == nil {
 		return nil, errors.New("inspect exec target: missing container configuration")
 	}
-	claude := containerEnvValue(info.Config, "ENCLAVE_PROTECTED_AUTH") == "1"
-	github := containerEnvValue(info.Config, model.EnvProtectedGitHub) == "1"
-	if info.Config.Labels[authProtectedLabel] == "true" && !claude {
-		return nil, errors.New("protected session lacks its pinned client selection")
+	if containerEnvValue(info.Config, model.EnvProtectedGitHub) != "1" {
+		return argv, nil
 	}
-	return protectedclient.Wrap(model.ContainerHome, claude, github, argv), nil
+	return protectedclient.Wrap(argv), nil
 }
 
 func (b *Backend) Logs(ctx context.Context, ref backend.SessionRef, opts backend.LogOptions) (string, error) {

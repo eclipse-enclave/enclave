@@ -94,11 +94,11 @@ func protectedGitHubEnv(key string) bool {
 }
 
 func protectedCredentialEnv(key string) bool {
-	if strings.HasPrefix(key, "ANTHROPIC_") || strings.HasPrefix(key, "CLAUDE_CODE_OAUTH") || strings.HasPrefix(key, "CLAUDE_CODE_CUSTOM_OAUTH") || strings.HasPrefix(key, "CLAUDE_CODE_USE_") || strings.HasPrefix(key, "CLAUDE_CODE_SKIP_") {
+	if strings.HasPrefix(key, "ANTHROPIC_") || strings.HasPrefix(key, "CLAUDE_CODE_OAUTH") || strings.HasPrefix(key, "CLAUDE_CODE_CUSTOM_OAUTH") || strings.HasPrefix(key, "CLAUDE_CODE_USE_") || strings.HasPrefix(key, "CLAUDE_CODE_SKIP_") || strings.HasPrefix(key, "CLAUDE_CODE_HOST_") {
 		return true
 	}
 	switch key {
-	case "CLAUDE_CODE_API_KEY_FILE_DESCRIPTOR", "CLAUDE_CODE_SESSION_ACCESS_TOKEN", "CLAUDE_CODE_WEBSOCKET_AUTH_FILE_DESCRIPTOR", "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy":
+	case "CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST", "CLAUDE_CODE_API_KEY_FILE_DESCRIPTOR", "CLAUDE_CODE_SESSION_ACCESS_TOKEN", "CLAUDE_CODE_WEBSOCKET_AUTH_FILE_DESCRIPTOR", "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy":
 		return true
 	}
 	return false
@@ -106,7 +106,7 @@ func protectedCredentialEnv(key string) bool {
 
 func protectedBindingEnv(key string) bool {
 	switch key {
-	case "CLAUDE_CONFIG_DIR", "CLAUDE_SECURESTORAGE_CONFIG_DIR", model.EnvAuthDir, model.EnvAuthFiles, model.EnvToolConfigDir, "ENCLAVE_PROTECTED_AUTH", "DISABLE_AUTOUPDATER":
+	case "CLAUDE_CONFIG_DIR", "CLAUDE_SECURESTORAGE_CONFIG_DIR", model.EnvAuthDir, model.EnvAuthFiles, model.EnvToolConfigDir, "ENCLAVE_PROTECTED_AUTH":
 		return true
 	}
 	return false
@@ -147,7 +147,7 @@ func (r *Runtime) validateProtectedBindings(env []string) error {
 		if key == model.EnvAuthFiles {
 			want = ""
 		}
-		if key == "ENCLAVE_PROTECTED_AUTH" || key == "DISABLE_AUTOUPDATER" {
+		if key == "ENCLAVE_PROTECTED_AUTH" {
 			want = "1"
 		}
 		if value != want {

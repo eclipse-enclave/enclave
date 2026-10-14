@@ -484,7 +484,7 @@ func TestNewSessionRotatesHandlesAndRejectsOldSession(t *testing.T) {
 }
 
 func TestRejectsHandleReleaseOutsideDeclaredFieldAndDestination(t *testing.T) {
-	for _, variant := range []string{"plaintext", "wrong-host", "wrong-port", "wrong-path", "wrong-method", "query", "escaped-path", "wrong-header", "duplicate-authorization", "refresh-as-access", "extra-handle", "userinfo", "wrong-host-header", "wrong-sni"} {
+	for _, variant := range []string{"plaintext", "wrong-host", "wrong-port", "credential-path", "wrong-header", "duplicate-authorization", "refresh-as-access", "extra-handle", "userinfo", "wrong-host-header", "wrong-sni", "first-party-non-release-host"} {
 		t.Run(variant, func(t *testing.T) {
 			b := fixtureBroker(t)
 			enroll(t, b)
@@ -502,14 +502,11 @@ func TestRejectsHandleReleaseOutsideDeclaredFieldAndDestination(t *testing.T) {
 			case "wrong-port":
 				req.URL.Host += ":444"
 				req.Host = req.URL.Host
-			case "wrong-path":
-				req.URL.Path = "/unapproved"
-			case "wrong-method":
-				req.Method = http.MethodDelete
-			case "query":
-				req.URL.RawQuery = "extra=true"
-			case "escaped-path":
-				req.URL.RawPath = "/v1/%6dessages"
+			case "credential-path":
+				req.URL.Path = "/api/oauth/claude_cli/create_api_key"
+			case "first-party-non-release-host":
+				req.URL.Host = "claude.ai"
+				req.Host = req.URL.Host
 			case "wrong-header":
 				req.Header.Del("Authorization")
 				req.Header.Set("X-Api-Key", b.registry.Access)
@@ -1059,35 +1056,163 @@ func TestSubsecondCommitTimeSurvivesReloadAndDeduplicatesShortGrants(t *testing.
 	}
 }
 
-func TestAccessAllowsOnlyDeclaredBetaQuery(t *testing.T) {
+func TestAccessReleasesAcrossFirstPartyAPIOrigins(t *testing.T) {
 	b := fixtureBroker(t)
 	enroll(t, b)
-	for _, query := range []string{"beta=true", "beta=false", "beta=true&extra=1", "beta=true&beta=false", "%62eta=true", "beta=%74rue"} {
-		t.Run(query, func(t *testing.T) {
-			req, err := http.NewRequest(http.MethodPost, "https://api.anthropic.com/v1/messages?"+query, nil)
+	for _, target := range []struct{ method, url string }{
+		{http.MethodPost, "https://api.anthropic.com/v1/messages?beta=true"},
+		{http.MethodPost, "https://api.anthropic.com/v1/messages/count_tokens"},
+		{http.MethodGet, "https://api.anthropic.com/api/oauth/usage"},
+		{http.MethodDelete, "https://api.anthropic.com/api/oauth/files/file_01"},
+		{http.MethodPost, "https://mcp-proxy.anthropic.com/v1/mcp/server_01"},
+	} {
+		t.Run(target.method+" "+target.url, func(t *testing.T) {
+			req, err := http.NewRequest(target.method, target.url, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
 			req.Header.Set("Authorization", "Bearer "+b.registry.Access)
+			req.Header.Set("Accept-Encoding", "gzip, br")
 			called := false
 			response, err := fixtureRoundTrip(b, req, fixtureTransport(func(outgoing *http.Request) (*http.Response, error) {
 				called = true
-				if outgoing.Header.Get("Authorization") != "Bearer "+fixtureAccess {
-					t.Error("incorrect beta authentication")
+				if outgoing.Header.Get("Authorization") != "Bearer "+fixtureAccess || outgoing.Header.Get("Accept-Encoding") != "identity" {
+					t.Error("released request lacks the real token or uncompressed scanning")
 				}
-				return rawFixtureResponse(nil), nil
+				return rawFixtureResponse([]byte(`{"ok":true}`)), nil
 			}))
-			if query != "beta=true" {
-				if called || response != nil || !errors.Is(err, ErrDenied) {
-					t.Fatalf("unsupported beta query = %v, %v, called %v", response, err, called)
-				}
-				return
-			}
-			if !called || err != nil {
-				t.Fatalf("declared beta query = %v, called %v", err, called)
+			if err != nil || !called {
+				t.Fatalf("first-party release = %v, called %v", err, called)
 			}
 			_ = response.Body.Close()
 		})
+	}
+}
+
+func TestFirstPartyCredentialPathsNeverPassThrough(t *testing.T) {
+	b := fixtureBroker(t)
+	for _, target := range []string{
+		"https://api.anthropic.com/v1/oauth/token",
+		"https://console.anthropic.com/v1/oauth/token",
+		"https://claude.ai/oauth/token",
+		"https://platform.claude.com/v1/oauth/token/revoke",
+		"https://api.anthropic.com/api/oauth/claude_cli/create_api_key",
+		"https://api.anthropic.com/v1/organizations/api_keys",
+	} {
+		req, err := http.NewRequest(http.MethodPost, target, strings.NewReader(`{"grant_type":"refresh_token"}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		response, err := fixtureRoundTrip(b, req, fixtureTransport(func(*http.Request) (*http.Response, error) {
+			t.Errorf("credential endpoint %s dispatched", target)
+			return nil, io.EOF
+		}))
+		if response != nil || !errors.Is(err, ErrDenied) {
+			t.Fatalf("%s = %v, %v", target, response, err)
+		}
+	}
+}
+
+func readAllChunks(body io.Reader) (string, error) {
+	var out strings.Builder
+	buffer := make([]byte, 7)
+	for {
+		n, err := body.Read(buffer)
+		out.Write(buffer[:n])
+		if errors.Is(err, io.EOF) {
+			return out.String(), nil
+		}
+		if err != nil {
+			return out.String(), err
+		}
+	}
+}
+
+func TestFirstPartyResponsesNeverCarryCredentials(t *testing.T) {
+	b := fixtureBroker(t)
+	enroll(t, b)
+	for _, tc := range []struct {
+		name, url, contentType, body string
+		header                       http.Header
+		released                     bool
+		wantErr                      bool
+	}{
+		{name: "reflected access token", url: "https://api.anthropic.com/v1/messages", contentType: "text/event-stream", body: "data: " + fixtureAccess + "\n\n", released: true, wantErr: true},
+		{name: "reflected refresh token", url: "https://api.anthropic.com/api/oauth/profile", contentType: "application/json", body: `{"echo":"` + fixtureRefresh + `"}`, released: true, wantErr: true},
+		{name: "reflected header", url: "https://api.anthropic.com/api/oauth/profile", contentType: "application/json", body: `{}`, header: http.Header{"X-Echo": {"Bearer " + fixtureAccess}}, released: true, wantErr: true},
+		{name: "minted key", url: "https://api.anthropic.com/api/oauth/claude_cli/client_data", contentType: "application/json", body: `{"key":"sk-ant-api03-minted"}`, released: true, wantErr: true},
+		{name: "unexpected token response", url: "https://claude.ai/api/session", contentType: "application/json", body: `{"access_token":"new-format"}`, wantErr: true},
+		{name: "compressed structured response", url: "https://api.anthropic.com/api/oauth/usage", contentType: "application/json", body: `{}`, header: http.Header{"Content-Encoding": {"gzip"}}, released: true, wantErr: true},
+		{name: "model output", url: "https://api.anthropic.com/v1/messages", contentType: "text/event-stream", body: `data: {"text":"use sk-ant-api03-example and \"access_token\""}` + "\n\n", released: true},
+		{name: "web page", url: "https://code.claude.com/docs/en/overview", contentType: "text/html", body: "<code>sk-ant-api03-example</code>"},
+		{name: "account data", url: "https://api.anthropic.com/api/oauth/profile", contentType: "application/json", body: `{"account":{"email":"fixture@example.test"}}`, released: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req, err := http.NewRequest(http.MethodGet, tc.url, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.released {
+				req.Header.Set("Authorization", "Bearer "+b.registry.Access)
+			}
+			response, err := fixtureRoundTrip(b, req, fixtureTransport(func(*http.Request) (*http.Response, error) {
+				upstream := rawFixtureResponse([]byte(tc.body))
+				upstream.Header.Set("Content-Type", tc.contentType)
+				for key, values := range tc.header {
+					upstream.Header[key] = values
+				}
+				return upstream, nil
+			}))
+			var body string
+			if err == nil {
+				body, err = readAllChunks(response.Body)
+				_ = response.Body.Close()
+			}
+			if tc.wantErr {
+				if !errors.Is(err, ErrResponse) {
+					t.Fatalf("credential-bearing response delivered: %q, %v", body, err)
+				}
+				if strings.Contains(body, fixtureAccess) || strings.Contains(body, fixtureRefresh) || strings.Contains(body, "minted") || strings.Contains(body, "new-format") {
+					t.Fatalf("credential bytes escaped before the tripwire: %q", body)
+				}
+				return
+			}
+			if err != nil || body != tc.body {
+				t.Fatalf("ordinary response = %q, %v", body, err)
+			}
+		})
+	}
+}
+
+type chunkedBody struct{ chunks chan []byte }
+
+func (c chunkedBody) Read(p []byte) (int, error) {
+	chunk, ok := <-c.chunks
+	if !ok {
+		return 0, io.EOF
+	}
+	return copy(p, chunk), nil
+}
+
+func (chunkedBody) Close() error { return nil }
+
+func TestTripwireStreamsEventsWithoutDelayAndStopsBeforeSecret(t *testing.T) {
+	secret := "synthetic-secret-value"
+	body := chunkedBody{chunks: make(chan []byte, 1)}
+	tw := &tripwire{body: body, patterns: [][]byte{[]byte(secret)}}
+	buffer := make([]byte, 128)
+
+	body.chunks <- []byte("data: one\n\n")
+	if n, err := tw.Read(buffer); err != nil || string(buffer[:n]) != "data: one\n\n" {
+		t.Fatalf("complete event was held back: %q, %v", buffer[:n], err)
+	}
+	body.chunks <- []byte("data: synthetic-sec")
+	if n, err := tw.Read(buffer); err != nil || string(buffer[:n]) != "data: " {
+		t.Fatalf("partial secret was not held back: %q, %v", buffer[:n], err)
+	}
+	body.chunks <- []byte("ret-value\n\n")
+	if n, err := tw.Read(buffer); !errors.Is(err, ErrResponse) || n != 0 {
+		t.Fatalf("secret split across chunks escaped: %q, %v", buffer[:n], err)
 	}
 }
 
@@ -1121,7 +1246,7 @@ func TestCaptureHasWholeExchangeDeadlineAndFailsClosedOnBodyCancellation(t *test
 	}
 }
 
-func TestPinnedSubscriptionScopeSetDoesNotPermitAPIKeyCreation(t *testing.T) {
+func TestSubscriptionScopeDoesNotPermitAPIKeyCreation(t *testing.T) {
 	b := fixtureBroker(t)
 	token := fixtureToken()
 	token.Scope = "org:create_api_key user:profile user:inference user:sessions:claude_code user:mcp_servers"

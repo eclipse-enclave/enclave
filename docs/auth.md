@@ -21,11 +21,26 @@ Complete the normal Claude subscription login. The gateway captures and durably
 stores the access/refresh tokens before returning session-bound handles. The
 container still gets a writable bind mount at `~/.claude`, but its native
 `.credentials.json` contains handles, not the captured tokens. The real grant
-and handle registry are never workload-mounted. Protected runs use the
-integrity-pinned npm Claude **2.1.63**, independently of the normal client, with
-automatic updates disabled. `enclave exec` into a protected session selects the
-same pinned clients and fails if they are missing. WebSocket and other protocol
-upgrades work, except to the Claude and GitHub hosts the gateway mediates. Startup also requires a private readiness attestation
+and handle registry are never workload-mounted.
+
+Protected runs use the same, unpinned Claude client as ordinary sessions, so
+custody does not depend on a client version. The gateway mediates every
+Anthropic and Claude domain (`anthropic.com`, `claude.com`, `claude.ai` and
+their subdomains):
+
+- It captures the login and refresh exchange at
+  `platform.claude.com/v1/oauth/token`.
+- It releases the real access token only in the `Authorization` header to
+  `api.anthropic.com` and `mcp-proxy.anthropic.com`, on any path.
+- It refuses other token endpoints and API-key endpoints, including token
+  revocation; native logout therefore only clears the session's local view.
+- It aborts any first-party response that would echo the real tokens, and any
+  structured response outside model and file content that carries token fields
+  or `sk-ant-` keys, before those bytes reach the workload.
+
+A client release that changes its login flow fails closed until Enclave adapts.
+WebSocket and other protocol upgrades work, except to the Claude and GitHub
+hosts the gateway mediates. Startup also requires a private readiness attestation
 from the initialized Claude/GitHub brokers before launching the workload; an
 older gateway image is rejected even with `--no-rebuild`. Stop existing protected
 sessions from older builds and rerun without `--no-rebuild` before sharing their
@@ -46,8 +61,8 @@ auth files are rejected. Env-secret and non-auth features remain available.
 
 The whole native config/history view is session-scoped; it is discarded when
 the session ends. Separately mounted agent memory retains its usual lifetime.
-Project/local Claude settings are not loaded by the pinned launcher; user
-settings and Enclave's validated settings overlay apply. Do not expect
+Project and local Claude settings load as in ordinary sessions; host-provided
+settings must not configure credential helpers or provider credentials. Do not expect
 `continue`/`resume` to recover a previous protected session's conversation.
 
 Multiple protected sessions can share the same Claude identity and GitHub feature

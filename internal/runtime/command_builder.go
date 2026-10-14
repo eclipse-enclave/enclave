@@ -40,9 +40,6 @@ func (b commandBuilder) Build() []string {
 	}
 
 	agentArgs := strings.Fields(b.profile.Command)
-	if b.auth.ProtectAuth {
-		agentArgs = []string{protectedclient.ClaudeLauncher(b.containerHome)}
-	}
 	if b.yoloEnabled && b.profile.YoloFlag != "" {
 		agentArgs = append(agentArgs, strings.Fields(b.profile.YoloFlag)...)
 	}
@@ -63,5 +60,5 @@ func (b commandBuilder) withProtectedGitHub(command []string) []string {
 	if !b.protectedGitHubEnabled() {
 		return command
 	}
-	return protectedclient.Wrap(b.containerHome, false, true, command)
+	return protectedclient.Wrap(command)
 }

@@ -1545,7 +1545,6 @@ func (r *Runtime) addAuthMount(mounts *mountAccumulator, authStore *backend.Stor
 		mounts.AddEnv(model.EnvAuthDir, view)
 		mounts.AddEnv("CLAUDE_SECURESTORAGE_CONFIG_DIR", view)
 		mounts.AddEnv("ENCLAVE_PROTECTED_AUTH", "1")
-		mounts.AddEnv("DISABLE_AUTOUPDATER", "1")
 		return
 	}
 	authMountPath := r.containerHome + "/" + model.ContainerAuthDir

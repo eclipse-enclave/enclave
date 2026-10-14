@@ -3,8 +3,8 @@
 `--protect-auth` provides an **experimental opt-in** Claude subscription flow
 for a fresh named shared identity on Docker/Podman, including gateway custody
 for the built-in `github-cli` feature. Runtime activation is
-implemented; real Docker/Podman mounts and both pinned-client compatibility gates
-have **NOT RUN** in the implementation environment. Do not treat this as a
+implemented; real Docker/Podman mounts and the Claude and GitHub client
+compatibility gates have **NOT RUN** in the implementation environment. Do not treat this as a
 validated production login mode. Unenrolled identities retain ordinary login
 behavior.
 
@@ -26,8 +26,7 @@ attested gateways may share exact grant/lock mounts. Startup leases cover the
 interval before containers exist; detached exit/reload does not release an
 owner. Unavailable engine inspection fails closed.
 
-The pinned npm Claude 2.1.63 is installed alongside the ordinary native client,
-with SHA-512 verification and a dedicated launcher; protected sessions disable
+Protected sessions run the ordinary, unpinned Claude client with its normal
 updates and project/local settings. Saved grants seed a fresh handle file and
 minimal provider-derived account/onboarding metadata. Config/history is
 session-scoped, while separately mounted agent memory retains its normal scope.
@@ -68,15 +67,17 @@ or a supported-client compatibility claim**:
 
 | Area | Candidate behavior |
 |------|--------------------|
-| Capture | JSON `POST https://platform.claude.com:443/v1/oauth/token`; the default port may be implicit. Only authorization-code and refresh grants with the pinned client ID are accepted. |
+| Capture | JSON `POST https://platform.claude.com:443/v1/oauth/token`; the default port may be implicit. Only authorization-code and refresh grants with the Claude Code client ID are accepted; an optional integer `expires_in` request field from 1 second to 400 days is forwarded. |
 | Body limits | 64 KiB maximum for both encoded and decoded token responses; JSON with identity or gzip encoding. Requests are bounded JSON without content encoding. Unknown/duplicate/case-mismatched keys, unexpected nested structures and null fields are rejected. |
 | Exchange deadline | Two minutes from upstream dispatch through token response-body consumption. Token exchanges use a dedicated fresh connection with keep-alives disabled, avoiding stale pooled-connection failures without replaying exchanges. Failure after durable intent leaves an uncertain result. |
 | Success fields | `access_token`, `refresh_token`, `token_type`, `expires_in`, `scope`, `account`, `organization`; no other fields. `token_type` is exactly `Bearer`; expiry is an integer from 1 second to 366 days. |
 | Account metadata | On enrollment, `account` requires UUID-shaped `uuid` and a validated `email_address`; `organization` requires UUID-shaped `uuid`. Refresh may omit these objects, but supplied values must match the saved identity. |
-| Scope metadata | Space-separated values drawn only from `user:profile`, `user:inference`, `user:sessions:claude_code`, `user:mcp_servers` and `org:create_api_key`, matching the pinned subscription authorization scope union. The API-key creation endpoint is not approved. |
+| Scope metadata | Space-separated values drawn only from `user:profile`, `user:inference`, `user:sessions:claude_code`, `user:mcp_servers` and `org:create_api_key`, matching the subscription authorization scope union. The API-key creation endpoint is not approved. |
 | Missing refresh replacement | Retain the saved refresh token. Enrollment requires one. |
 | Handle shape | Distinct access/refresh handles use candidate prefixes `sk-ant-oat01-` and `sk-ant-ort01-`, each followed by 256 random bits encoded as hexadecimal. Prefix resemblance is not proof of client compatibility. |
-| Access release | Only `Authorization: Bearer <access-handle>` to `https://api.anthropic.com:443`: `POST /v1/messages` with no query or exactly `beta=true`, or `GET /api/oauth/profile` and `/api/oauth/claude_cli/roles` without queries. |
+| First-party mediation | Every request to `anthropic.com`, `claude.com`, `claude.ai` or a subdomain is intercepted. Other `platform.claude.com` paths, paths containing `oauth/token`, `oauth2/token`, `api_key` or `api-key`, and paths ending in `/token` are denied, including token revocation. Mediated requests ask for `Accept-Encoding: identity`. |
+| Access release | Only `Authorization: Bearer <access-handle>` to `https://api.anthropic.com:443` or `https://mcp-proxy.anthropic.com:443`, any method, path and query outside the denied credential paths. |
+| Response tripwire | Released responses fail before the real access or refresh token would reach the workload, in the body or a header. Structured responses (JSON, form, plain text or untyped) outside `/v1/messages`, `/v1/files`, `/v1/complete` and the MCP proxy fail on `"access_token"`, `"refresh_token"` or `sk-ant-`. Encoded responses that need this check fail. Only a trailing partial match is held back, so streamed events are not delayed. |
 | Refresh release | Only the JSON `refresh_token` field at the exact token endpoint. Session/identity selection comes from trusted configuration, not the request. |
 
 Grant commits update token values, expiry and generation together. Session
@@ -91,12 +92,9 @@ is persisted with subsecond precision. These timing choices still require
 real-client tests.
 
 The native view projects access/refresh handles, expiry and scopes, with
-`subscriptionType` and `rateLimitTier` explicitly null (the pinned loader accepts
-null and fetches profile metadata). Saved ready grants also project minimal
+`subscriptionType` and `rateLimitTier` explicitly null (the inspected loaders
+accept null and fetch profile metadata). Saved ready grants also project minimal
 account/onboarding state. Workload metadata is never imported into the grant.
-The client's optional count-token and first-token-date requests are currently
-denied; static inspection shows fallbacks, but real-client behavior must be
-recorded before extending the exact endpoint list.
 
 ## Local validation evidence
 
@@ -121,45 +119,29 @@ change application behavior. None of these commands exercises real container
 mounts, SELinux, Claude login or GitHub device login. The Docker/Podman experiment and human
 compatibility gates remain **NOT RUN**.
 
-## Candidate pin: static evidence only
+## Claude client compatibility: static evidence
 
-The candidate is the published npm package
-[`@anthropic-ai/claude-code@2.1.63`](https://registry.npmjs.org/@anthropic-ai/claude-code/2.1.63).
-The package was downloaded and inspected statically; its tarball matched this
-registry integrity value, also enforced by the image installer:
+Protected sessions do not pin Claude: it releases too often for Enclave to
+follow. Custody instead rests on first-party mediation, the captured exchange
+and the response tripwire above. A client that changes its login flow fails
+closed. These static observations guide the real-client gate; they are **not a
+verified server schema**. Packages were downloaded and inspected without
+executing them:
 
-```text
-sha512-pjxGFtOWc6SW4qv/c2F8hc+QFJ36+OlevYsnUvBVqr4B+4mJjH+8inSF8sH2Uf9SQd99kG5CxkkHxmUg2rakow==
-```
+| Item | 2.1.63 (npm `cli.js`) | 2.1.300 (native `linux-x64`, 2026-10-14) |
+|------|-----------------------|-------------------------------------------|
+| Token exchange | JSON `POST https://platform.claude.com/v1/oauth/token`, client ID `9d1c250a-e61b-44d9-88ed-5944d1962f5e` | Unchanged |
+| Token request fields | `grant_type`, `code`, `redirect_uri`, `client_id`, `code_verifier`, `state`; refresh adds `refresh_token`, `scope`; optional `expires_in` on login | Same, with optional `expires_in` on refresh too |
+| Logout | Local only | Also `POST <token URL>/revoke` with the refresh token; denied, and the client continues with local logout |
+| Credential file | `(CLAUDE_CONFIG_DIR or ~/.claude)/.credentials.json`, `claudeAiOauth` object | `<CLAUDE_SECURESTORAGE_CONFIG_DIR>/.credentials.json`, same object |
+| Bearer API calls | `/v1/messages`, `/api/oauth/profile`, `/api/oauth/claude_cli/roles` and a few more | Many more `/api/oauth/*` paths (usage, organizations, files, validate) on `api.anthropic.com`, plus `mcp-proxy.anthropic.com` for connectors |
+| Credential minting | `/api/oauth/claude_cli/create_api_key` | Unchanged; denied |
+| Host credential variables | — | `CLAUDE_CODE_HOST_CREDS_FILE`, `CLAUDE_CODE_HOST_AUTH_ENV_VAR`, `CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST`; rejected in protected sessions |
 
-The bundled client code provides these leads for the experiment, **not an
-allowlist or a verified server schema**:
-
-| Item | Static observation |
-|------|--------------------|
-| Token exchange | JSON `POST https://platform.claude.com/v1/oauth/token`; authorization-code and refresh grants |
-| Client ID | `9d1c250a-e61b-44d9-88ed-5944d1962f5e` |
-| Refresh request | `grant_type`, `refresh_token`, `client_id`, `scope` |
-| Token response consumer | `access_token`, `refresh_token`, `expires_in`, `scope`; account UUID/email and organization UUID when present |
-| Omitted replacement | The refresh consumer retains the previous refresh token when the response omits one; actual provider behavior still needs observation |
-| Secondary requests | Bearer-authenticated `/api/oauth/profile` and `/api/oauth/claude_cli/roles` at `https://api.anthropic.com` |
-| Model request query | The bundled beta messages client uses `/v1/messages?beta=true`; CLI quota/model helper paths call that client. This is not evidence for permitting arbitrary queries. |
-| Native credential object | `claudeAiOauth`: `accessToken`, `refreshToken`, `expiresAt`, `scopes`, `subscriptionType`, `rateLimitTier` |
-| Plaintext credential path | `(CLAUDE_CONFIG_DIR or ~/.claude)/.credentials.json` |
-
-Importantly, this package has no `CLAUDE_SECURESTORAGE_CONFIG_DIR` reference.
-The protected path mounts the session view at the default `~/.claude` and leaves
-`CLAUDE_CONFIG_DIR` unset; verify actual file opens and mount placement. The installer now keeps a separate
-pinned npm artifact for protected sessions. Assert `claude --version` inside each
-tested session and verify automatic updates remain disabled. Record the npm/native
-distribution choice, architecture, image digest and client checksum. Changing
-the pin requires rerunning the gate.
-
-The client also contains a non-subscription API-key creation path. That path,
-MCP login and alternative providers are outside the initial subscription adapter.
-Observe all requests during the supported flow to establish which secondary
-endpoints it actually needs. Static searches cannot prove token-shape acceptance,
-absence of JWT/ID-token processing, TLS compatibility or logout semantics.
+Repeat this comparison when Claude changes its login or storage, and record
+`claude --version` in every engine and human run. Static searches cannot prove
+token-shape acceptance, absence of JWT/ID-token processing, TLS compatibility
+or logout semantics.
 
 ## GitHub client pin and required coverage
 
@@ -177,7 +159,7 @@ The runtime request checks this binary independently of image-provided hooks;
 `--no-rebuild` with an old image missing the pin fails at startup. Include that
 case when testing ordinary agent and shell starts. `enclave exec` derives the
 same selection from the target session's creation environment; verify that an
-exec shell, direct `gh` and direct `claude` resolve to the pinned clients.
+exec shell and direct `gh` resolve to the pinned GitHub CLI.
 
 Offline validation passed with the official **2.87.3 Linux amd64** archive after
 verifying the SHA-256 above. In an isolated config directory containing a
@@ -340,7 +322,7 @@ only restricted mode is not completion of the parent feature.
 ## 2. Human real-client gate
 
 After the engine agent provides the experiment report, use a disposable fresh
-Claude subscription identity and the exact pinned artifact. Do not migrate an
+Claude subscription identity and record the client version. Do not migrate an
 existing login. Refuse raw credentials in selected native config/auth files,
 provider env credentials and `apiKeyHelper` or alternative-provider settings.
 Record the effective config and mounts without credential values.
@@ -367,7 +349,7 @@ From a second terminal with the same XDG values, run
 `./bin/enclave network apply --tool claude`; repeat the prompt without replacing
 the gateway. Exit, rerun the launch and confirm saved-login reuse. Compare handle
 hashes privately to confirm new handles; never print live credentials/handles.
-Inside the container, `claude --version` must report `2.1.63 (Claude Code)`.
+Record the output of `claude --version` inside the container.
 
 The default built-in GitHub feature now remains enabled. Inside the same
 container, confirm `gh --version` starts with `gh version 2.87.3`, then run:
@@ -449,8 +431,7 @@ For every supported backend:
 
 If any required exchange needs additional destinations, fields, headers or
 metadata, stop and revise the explicit adapter contract and synthetic fixtures.
-An unexpected server schema must fail closed; pinning the client does not pin
-the provider. Never solve a compatibility failure by passing through raw tokens.
+An unexpected server schema must fail closed. Never solve a compatibility failure by passing through raw tokens.
 
 ## Evidence record template
 

@@ -79,8 +79,8 @@ func TestProtectedGitHubCommandRequiresPinWithoutImageHook(t *testing.T) {
 						t.Fatal(err)
 					}
 				}
-				writeFile(t, filepath.Join(home, ".bashrc"), "export PATH=/usr/bin:/bin\n")
-				client := filepath.Join(home, ".local", "share", "enclave", "claude-2.1.63", "bin", "claude")
+				writeFile(t, filepath.Join(home, ".bashrc"), "export PATH="+filepath.Join(home, "bin")+":/usr/bin:/bin\n")
+				client := filepath.Join(home, "bin", "claude")
 				body := `command -v gh > "$HOME/selected-gh"`
 				writeFile(t, client, "#!/bin/sh\n"+body+"\n")
 				if err := os.Chmod(client, 0o700); err != nil {

@@ -67,21 +67,20 @@ left at the Claude Code defaults.
 | File | Purpose |
 |------|---------|
 | `spec.yaml` | Extension manifest (metadata, sandbox behavior, network, credentials) |
-| `install.sh` | Installs the ordinary Claude Code client via `claude.ai/install.sh`, a separate integrity-pinned npm client for protected OAuth, and `@anthropic-ai/sandbox-runtime` from npm with `--ignore-scripts` (asserting the package landed) |
+| `install.sh` | Installs the Claude Code client via `claude.ai/install.sh` and `@anthropic-ai/sandbox-runtime` from npm with `--ignore-scripts` (asserting the package landed) |
 | `check-update.sh` | Returns the latest GitHub release tag for automatic update probes |
 | `gateway-allowlist.conf` | DNS allowlist for network isolation |
 | `templates/settings.json` | Default settings template |
-| `entrypoint.d/setup.sh` | Runtime setup; protected mode selects/checks the pinned client and disables updates |
+| `entrypoint.d/setup.sh` | Runtime setup |
 | `go/` | Custom Go hooks |
 
 ## Experimental protected OAuth
 
-`--protect-auth --auth-scope shared --auth-name <fresh-name>` uses a separate,
-SHA-512-verified npm Claude 2.1.63 installation at
-`~/.local/share/enclave/claude-2.1.63/`. Ordinary runs retain the native installer
-and normal update behavior. Protected launches disable the updater and select
-only user settings; project/local settings and credential-source overrides are
-unsupported. The built-in `github-cli` feature uses its own protected adapter;
+`--protect-auth --auth-scope shared --auth-name <fresh-name>` runs the same
+Claude client as ordinary sessions, with its normal updates and settings
+sources; host-provided credential-source overrides are unsupported. The gateway
+mediates all Anthropic and Claude domains, so custody does not depend on the
+client version. The built-in `github-cli` feature uses its own protected adapter;
 other features with native auth files are rejected. Env-only credentials are
 unaffected. The native config and handle file live in a disposable session view
 at `~/.claude`, with agent memory mounted separately. The gateway keeps the real

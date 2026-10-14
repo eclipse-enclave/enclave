@@ -560,7 +560,7 @@ set in config is resolved by both sides.
 `"tool": "claude"`, `"auth_scope": "shared"` and a fresh `"auth_name"`.
 The default built-in `github-cli` feature has a protected native-auth adapter;
 other native-auth features are rejected. The experimental Docker/Podman flow
-pins Claude 2.1.63 and uses a session-scoped
+uses the ordinary Claude client and a session-scoped
 native config/history view. Concurrent sessions may reuse the same `auth_name`;
 Claude and GitHub grants are shared, but handles and views remain per-session.
 Reset/downgrade require all sessions using the selected identity to end.

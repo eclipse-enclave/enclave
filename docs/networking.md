@@ -56,7 +56,7 @@ enclave --tool claude --auth-name protected --protect-auth --allow-all-network
 An unrelated IPv4 destination needs no allowlist entry in the protected
 unrestricted mode, but it cannot redeem protected credentials. Proxy failure
 locks down egress; it never switches the session to a gateway bypass. Docker,
-Podman and the pinned Claude flow still require the
+Podman and the real Claude flow still require the
 [engine and human verification runs](runtime/oauth-broker-verification.md).
 
 The experimental `qemu` backend currently has no restricted-egress implementation, so it always runs with all outbound network allowed. Selecting it implies `--allow-all-network` automatically and prints a notice; passing `--allow-domain` (which would require restricted egress) is rejected.

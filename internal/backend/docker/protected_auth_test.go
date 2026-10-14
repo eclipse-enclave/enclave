@@ -152,24 +152,21 @@ func TestAuthSyncNamesProtectedConfigSource(t *testing.T) {
 	}
 }
 
-func TestExecSelectsTargetSessionPinnedClients(t *testing.T) {
+func TestExecSelectsTargetSessionPinnedGitHubCLI(t *testing.T) {
 	for _, tc := range []struct {
 		name        string
-		labels      map[string]string
 		env         []string
 		inspectFail bool
-		wantClaude  bool
 		wantGitHub  bool
 		wantError   bool
 	}{
 		{name: "ordinary session", env: []string{"HOME=/home/agent"}},
-		{name: "protected Claude", labels: map[string]string{authProtectedLabel: "true"}, env: []string{"ENCLAVE_PROTECTED_AUTH=1"}, wantClaude: true},
-		{name: "protected Claude and GitHub", labels: map[string]string{authProtectedLabel: "true"}, env: []string{"ENCLAVE_PROTECTED_AUTH=1", model.EnvProtectedGitHub + "=1"}, wantClaude: true, wantGitHub: true},
-		{name: "protected label without client selection", labels: map[string]string{authProtectedLabel: "true"}, wantError: true},
+		{name: "protected Claude only", env: []string{"ENCLAVE_PROTECTED_AUTH=1"}},
+		{name: "protected GitHub", env: []string{"ENCLAVE_PROTECTED_AUTH=1", model.EnvProtectedGitHub + "=1"}, wantGitHub: true},
 		{name: "uninspectable target", inspectFail: true, wantError: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			info, err := json.Marshal(dockercmd.InspectResponse{Name: "/session", Config: &dockercmd.ContainerConfig{Labels: tc.labels, Env: tc.env}})
+			info, err := json.Marshal(dockercmd.InspectResponse{Name: "/session", Config: &dockercmd.ContainerConfig{Env: tc.env}})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -198,21 +195,14 @@ func TestExecSelectsTargetSessionPinnedClients(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !tc.wantClaude && !tc.wantGitHub {
+			if !tc.wantGitHub {
 				if strings.Join(execArgv, " ") != strings.Join(requested, " ") {
-					t.Fatalf("ordinary exec argv changed: %v", execArgv)
+					t.Fatalf("exec argv changed without a GitHub pin: %v", execArgv)
 				}
 				return
 			}
-			if len(execArgv) != 4+len(requested) || execArgv[0] != "bash" || strings.Join(execArgv[4:], " ") != strings.Join(requested, " ") {
+			if len(execArgv) != 4+len(requested) || execArgv[0] != "bash" || !strings.Contains(execArgv[2], "/opt/enclave/gh-2.87.3/bin") || strings.Join(execArgv[4:], " ") != strings.Join(requested, " ") {
 				t.Fatalf("protected exec argv: %v", execArgv)
-			}
-			setup := execArgv[2]
-			if got := strings.Contains(setup, "/home/agent/.local/share/enclave/claude-2.1.63/bin"); got != tc.wantClaude {
-				t.Errorf("pinned Claude selected=%v, want %v", got, tc.wantClaude)
-			}
-			if got := strings.Contains(setup, "/opt/enclave/gh-2.87.3/bin"); got != tc.wantGitHub {
-				t.Errorf("pinned GitHub CLI selected=%v, want %v", got, tc.wantGitHub)
 			}
 		})
 	}

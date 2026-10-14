@@ -427,3 +427,50 @@ func TestOAuthLockFailureIsAuditedAsBrokerDenial(t *testing.T) {
 		t.Fatalf("lock failure audit = %+v", last)
 	}
 }
+
+func TestOAuthForwarderAbortsResponseReflectingCredential(t *testing.T) {
+	const access = "synthetic-provider-access-credential"
+	upstream := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		switch req.URL.Path {
+		case "/v1/oauth/token":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"access_token":"`+access+`","refresh_token":"synthetic-provider-refresh-credential","token_type":"Bearer","expires_in":3600,"scope":"user:inference","account":{"uuid":"11111111-1111-1111-1111-111111111111","email_address":"synthetic@example.test"},"organization":{"uuid":"22222222-2222-2222-2222-222222222222"}}`)
+		default:
+			w.Header().Set("Content-Type", "text/event-stream")
+			_, _ = io.WriteString(w, "data: start\n\n")
+			w.(http.Flusher).Flush()
+			_, _ = io.WriteString(w, "data: "+req.Header.Get("Authorization")+"\n\n")
+		}
+	}))
+	defer upstream.Close()
+	p, logPath, _ := oauthTestProxy(t, upstream)
+	login := httptest.NewRequest(http.MethodPost, "https://platform.claude.com/v1/oauth/token", strings.NewReader(oauthEnrollmentPayload))
+	login.Header.Set("Content-Type", "application/json")
+	captured := httptest.NewRecorder()
+	p.handler("https")(captured, login)
+	var token struct {
+		Access string `json:"access_token"`
+	}
+	if err := json.Unmarshal(captured.Body.Bytes(), &token); err != nil || token.Access == "" {
+		t.Fatalf("capture failed: %d %s", captured.Code, captured.Body)
+	}
+
+	request := httptest.NewRequest(http.MethodPost, "https://api.anthropic.com/v1/messages", strings.NewReader(`{}`))
+	request.Header.Set("Authorization", "Bearer "+token.Access)
+	result := httptest.NewRecorder()
+	aborted := func() (aborted bool) {
+		defer func() { aborted = recover() == http.ErrAbortHandler }()
+		p.handler("https")(result, request)
+		return false
+	}()
+	if !aborted || strings.Contains(result.Body.String(), access) {
+		t.Fatalf("reflected credential reached the workload: aborted=%v body=%q", aborted, result.Body)
+	}
+	logged, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(logged), access) {
+		t.Fatal("reflected credential reached the audit log")
+	}
+}

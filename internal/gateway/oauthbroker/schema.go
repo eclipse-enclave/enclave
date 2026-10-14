@@ -52,6 +52,7 @@ type tokenRequest struct {
 	State       string `json:"state,omitempty"`
 	Refresh     string `json:"refresh_token,omitempty"` // #nosec G117 -- real token serialized only for the exact trusted HTTPS token endpoint.
 	Scope       string `json:"scope,omitempty"`
+	ExpiresIn   *int64 `json:"expires_in,omitempty"`
 }
 
 func strictJSON(data []byte, dst any) error {

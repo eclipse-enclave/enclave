@@ -302,8 +302,7 @@ auth-reconcile helper. Both inspected-mount and foreground request-driven
 finalization paths omit protected provider and feature auth. Workload-written expiry/metadata
 cannot update the trusted grant. The view is mounted at the default `~/.claude`;
 `CLAUDE_CONFIG_DIR` is not set. `ENCLAVE_AUTH_DIR` and
-`CLAUDE_SECURESTORAGE_CONFIG_DIR` also name that view, but the pinned client uses
-the default path. The view also holds session-scoped config/history. Agent
+`CLAUDE_SECURESTORAGE_CONFIG_DIR` also name that view. The view also holds session-scoped config/history. Agent
 memory is separately mounted. Gateway storage writes preserve the mounted
 directory owner; protected-only capabilities let its separate proxy UID write
 private host-owned storage. Container ownership/SELinux behavior still needs

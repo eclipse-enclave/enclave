@@ -704,11 +704,12 @@ Work is tracked via GitHub Issues.
 `--protect-auth` is an experimental Docker/Podman path for Claude and the
 built-in GitHub CLI feature. Option
 changes are generated from `internal/config/options_def.go`; run `make generate`.
-The Claude installer retains the ordinary native client and installs an
-integrity-pinned npm 2.1.63 alongside it for protected launches. The GitHub
+Protected launches use the ordinary, unpinned Claude client; custody rests on
+the gateway mediating every first-party domain
+(`internal/gateway/oauthbroker/firstparty.go`). The GitHub
 feature keeps its ordinary apt client and a SHA-256-pinned `gh` 2.87.3 binary at
 `/opt/enclave/gh-2.87.3/bin/gh`; protected startup selects and checks that binary.
-Changing either pin,
+Changing the GitHub pin, the first-party mediation rules,
 adapter schema or endpoints requires repeating the [engine and human verification
 plan](runtime/oauth-broker-verification.md), including both unrestricted network
 selectors. No engine or real-client result is implied by unit tests. Protected

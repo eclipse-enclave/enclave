@@ -20,8 +20,8 @@ import (
 	"time"
 )
 
-// Candidate constants inspected in the official 2.1.63 npm artifact. Static
-// inspection is NOT the real-client compatibility gate; see the verification doc.
+// Endpoints of the Claude subscription login, which the gateway captures. The
+// client is not pinned; see firstparty.go for how other endpoints are guarded.
 const tokenHost = "platform.claude.com"
 const accessHost = "api.anthropic.com"
 const tokenPath = "/v1/oauth/token" // #nosec G101 -- public OAuth endpoint, not a credential.
@@ -31,9 +31,12 @@ const refreshWindow = 5 * time.Minute
 const refreshReplayWindow = 30 * time.Second
 const exchangeTimeout = 2 * time.Minute
 
+// maxRequestedLifetime bounds a client-requested token lifetime in seconds.
+const maxRequestedLifetime = 400 * 24 * 60 * 60
+
 // RequiresMITM installs capture before the first login (there is no grant yet).
 func (b *Broker) RequiresMITM(host string) bool {
-	return protectedHost(host) == tokenHost || protectedHost(host) == accessHost || (b.github != nil && githubHost(host))
+	return firstPartyHost(host) || (b.github != nil && githubHost(host))
 }
 
 func protectedHost(value string) string {
@@ -83,6 +86,10 @@ func (b *Broker) RoundTrip(req *http.Request, transport, exchangeTransport http.
 	if protectedHost(req.URL.Hostname()) == tokenHost || protectedHost(req.Host) == tokenHost {
 		return nil, ErrDenied
 	}
+	firstParty := firstPartyRequest(req)
+	if firstParty && credentialPath(req.URL.Path) {
+		return nil, ErrDenied
+	}
 	// No secret is ever substituted in arbitrary headers, bodies or URLs. This
 	// also rejects handles from ended sessions at declared authentication fields.
 	authorization := req.Header.Values("Authorization")
@@ -90,9 +97,12 @@ func (b *Broker) RoundTrip(req *http.Request, transport, exchangeTransport http.
 		if containsHandle(req) {
 			return nil, ErrDenied
 		}
+		if firstParty {
+			return mediate(req, transport)
+		}
 		return transport.RoundTrip(req)
 	}
-	if len(authorization) != 1 || authorization[0] != "Bearer "+b.registry.Access || !exactOrigin(req, accessHost) || !accessEndpoint(req) {
+	if len(authorization) != 1 || authorization[0] != "Bearer "+b.registry.Access || !releaseOrigin(req) {
 		if containsHandle(req) || b.RequiresMITM(req.URL.Hostname()) {
 			return nil, ErrDenied
 		}
@@ -103,6 +113,7 @@ func (b *Broker) RoundTrip(req *http.Request, transport, exchangeTransport http.
 	if containsHandle(outgoing) {
 		return nil, ErrDenied
 	}
+	var secrets []string
 	err := b.locked(func() error {
 		g, err := b.readGrant()
 		if err != nil {
@@ -118,19 +129,13 @@ func (b *Broker) RoundTrip(req *http.Request, transport, exchangeTransport http.
 			return ErrDenied
 		}
 		outgoing.Header.Set("Authorization", "Bearer "+g.Token.Access)
+		secrets = []string{g.Token.Access, g.Token.Refresh}
 		return nil
 	})
 	if err != nil {
 		return nil, err
 	}
-	return transport.RoundTrip(outgoing)
-}
-
-func accessEndpoint(req *http.Request) bool {
-	if req.Method == http.MethodPost && (exactPath(req, "/v1/messages") || (req.URL.Path == "/v1/messages" && req.URL.RawPath == "" && req.URL.RawQuery == "beta=true" && req.URL.Fragment == "")) {
-		return true
-	}
-	return req.Method == http.MethodGet && (exactPath(req, "/api/oauth/profile") || exactPath(req, "/api/oauth/claude_cli/roles"))
+	return mediate(outgoing, transport, secrets...)
 }
 
 // ContainsHandle conservatively detects credential prefixes for rejection and
@@ -182,7 +187,10 @@ func (b *Broker) validateExchange(req *http.Request) (tokenRequest, error) {
 		return tokenRequest{}, ErrDenied
 	}
 	var input tokenRequest
-	if strictJSON(data, &input) != nil || exactKeys(data, "grant_type", "client_id", "code", "redirect_uri", "code_verifier", "state", "refresh_token", "scope") != nil || input.ClientID != clientID {
+	if strictJSON(data, &input) != nil || exactKeys(data, "grant_type", "client_id", "code", "redirect_uri", "code_verifier", "state", "refresh_token", "scope", "expires_in") != nil || input.ClientID != clientID {
+		return tokenRequest{}, ErrDenied
+	}
+	if input.ExpiresIn != nil && (*input.ExpiresIn < 1 || *input.ExpiresIn > maxRequestedLifetime) {
 		return tokenRequest{}, ErrDenied
 	}
 	switch input.GrantType {

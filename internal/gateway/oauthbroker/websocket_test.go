@@ -131,6 +131,24 @@ func TestWebSocketTripwireFailsClosedOnUnscannableFrames(t *testing.T) {
 	}
 }
 
+// A fragment at the size cap must not leave held frames past it, which made
+// the next bound check wrap around.
+func TestWebSocketTripwireBoundsHeldFragments(t *testing.T) {
+	atCap := serverFrame(2, false, strings.Repeat("x", maxWebSocketHeld-len(websocketSecret)/2)+websocketSecret[:len(websocketSecret)/2])
+	nearCap := serverFrame(2, false, strings.Repeat("x", maxWebSocketHeld-20)+websocketSecret[:5])
+	for name, frames := range map[string][][]byte{
+		"frame at cap":       {atCap, serverFrame(0, true, "tail")},
+		"held past cap":      {nearCap, serverFrame(0, true, strings.Repeat("y", 100))},
+		"continuation large": {serverFrame(2, false, websocketSecret[:5]), binary.BigEndian.AppendUint64([]byte{0x80, 127}, 1<<62)},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := relayFrames(frames...); !errors.Is(err, ErrResponse) {
+				t.Fatalf("relay ended with %v", err)
+			}
+		})
+	}
+}
+
 func TestWebSocketTripwireDropsHeldFragmentsAtClose(t *testing.T) {
 	held := serverFrame(1, false, "token "+websocketSecret[:10])
 	closing := serverFrame(8, true, "")

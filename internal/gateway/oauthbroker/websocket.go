@@ -112,7 +112,7 @@ func (w *websocketTripwire) next() error {
 		return ErrResponse
 	case control && (!final || length > 125):
 		return ErrResponse
-	case length > maxWebSocketHeld-uint64(len(w.held)):
+	case length > maxWebSocketHeld || uint64(len(w.held))+uint64(len(header))+length > maxWebSocketHeld:
 		return ErrResponse
 	case !control && (opcode == 0) != w.fragmented:
 		return ErrResponse

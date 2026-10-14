@@ -251,6 +251,26 @@ route to facilitate testing. The existing Go broker/proxy fixtures supply the
 synthetic schemas and failure cases; run the same cases through real namespaces
 and binds in the engine report.
 
+### Scripted engine checks
+
+`scripts/protected-auth-engine-check.sh` covers the matrix rows that need no
+provider account, against disposable XDG roots and a disposable project:
+
+```bash
+make build
+scripts/protected-auth-engine-check.sh --engine docker --report docker.md
+scripts/protected-auth-engine-check.sh --engine podman --report podman.md
+```
+
+It enrolls a fresh identity, then seeds a synthetic grant (accepted by the
+gateway, useless to a provider; a Go test keeps it in step with the schema). It
+checks protection, handle-only views, release refusals, workload and gateway
+mounts, ownership, exec selection, proxy reload, concurrent sessions, cleanup,
+continuity, project and ephemeral scopes, reset and downgrade. Each check passes
+only on positive evidence; the report records checkout, engine, rootless and
+SELinux state. Run it on rootful Docker, rootless Podman and an SELinux
+enforcing host. It does not replace the remaining rows or the human gate.
+
 ### Required experiment matrix
 
 | Case | Assertion and evidence |

@@ -154,11 +154,11 @@ the original files are retained. Back up wanted logins on the host, then correct
 unsupported hosts/schema in that private store before retrying. Reset is not a
 non-destructive rollback: it deletes those original logins and preferences.
 
-The experimental replay history retains at most 64 completed or uncertain device
-exchanges per shared identity. At that limit, new logins fail even after restart;
-existing saved accounts remain usable. Automatic replay retirement is pending.
-Clearing this history currently requires stopping every session and resetting the
-feature identity, which also deletes its saved logins and preferences.
+The gateway records each completed or uncertain device exchange so a lost reply
+can be recovered and a device code is never resent while still redeemable.
+Records retire two hours after the first poll, once GitHub no longer accepts the
+code. At most 64 records can be live at once; beyond that, new logins fail until
+older records retire, while existing saved accounts remain usable.
 
 After stopping all sessions using GitHub, manage this separate identity with:
 

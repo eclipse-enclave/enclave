@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 
 	"enclave/internal/util"
 )
@@ -21,6 +22,18 @@ const githubGrantFile = "github-grant.json"
 const githubRegistryFile = "github-session.json"
 const githubHandlePrefix = "gho_enclave_"
 const githubMaxAccounts = 16
+
+// githubMaxDevices bounds device-code records that have not yet retired.
+const githubMaxDevices = 64
+
+// githubMaxDeviceLifetime bounds the expires_in of accepted device responses.
+const githubMaxDeviceLifetime = time.Hour
+
+// githubDeviceRetention bounds how long a device-code record outlives its
+// first poll. A code is issued before that poll and expires within
+// githubMaxDeviceLifetime, so GitHub itself rejects the code once its record
+// retires: neither a redispatch nor a cross-session replay can yield a token.
+const githubDeviceRetention = 2 * githubMaxDeviceLifetime
 
 // GitHubConfig identifies trusted, separately mounted feature storage. Only
 // ViewDir is exposed to the workload. Session admission is the host's job.
@@ -47,6 +60,8 @@ type githubDevice struct {
 	Session     string `json:"session"`
 	Incarnation string `json:"incarnation"`
 	User        string `json:"user"`
+	// Created is the Unix time of the first poll; zero in older records.
+	Created int64 `json:"created,omitempty"`
 }
 
 type githubRegistry struct {
@@ -63,6 +78,7 @@ type githubBroker struct {
 	registry githubRegistry
 	mu       sync.Mutex
 	write    func(string, any) error
+	now      func() time.Time
 	failed   bool
 }
 
@@ -96,7 +112,7 @@ func openGitHub(config GitHubConfig) (*githubBroker, error) {
 	if err != nil || within(dirs[2], lock) {
 		return nil, ErrState
 	}
-	b := &githubBroker{config: config, write: durableJSON}
+	b := &githubBroker{config: config, write: durableJSON, now: time.Now}
 	err = b.locked(func() error {
 		g, err := b.readGrant()
 		if errors.Is(err, os.ErrNotExist) {
@@ -170,7 +186,7 @@ func (b *githubBroker) readGrant() (*githubGrant, error) {
 	if (len(g.Accounts) > 0 && g.Accounts[g.Active].Token == "") || (len(g.Accounts) == 0 && g.Active != "") {
 		return nil, ErrState
 	}
-	if g.Devices == nil || len(g.Devices) > 64 {
+	if g.Devices == nil || len(g.Devices) > githubMaxDevices {
 		return nil, ErrState
 	}
 	for hash, device := range g.Devices {
@@ -225,4 +241,23 @@ func (b *githubBroker) ensureHandle(user string) error {
 	}
 	b.registry.Handles[user] = handle
 	return nil
+}
+
+// retireGitHubDevices drops device-code records past their retention and
+// starts the retention clock of records without a plausible creation time.
+func retireGitHubDevices(g *githubGrant, now time.Time) bool {
+	changed := false
+	for key, device := range g.Devices {
+		created := time.Unix(device.Created, 0)
+		switch {
+		case device.Created <= 0 || created.After(now):
+			device.Created = now.Unix()
+			g.Devices[key] = device
+			changed = true
+		case now.Sub(created) > githubDeviceRetention:
+			delete(g.Devices, key)
+			changed = true
+		}
+	}
+	return changed
 }

@@ -12,6 +12,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -21,6 +22,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"sigs.k8s.io/yaml"
 )
@@ -708,5 +710,101 @@ func TestGitHubPendingCommitFailureReturnsNoResponse(t *testing.T) {
 	response, err = fixtureRoundTrip(reloaded, githubRequest(t, githubTokenPath, "pending"), transport)
 	if response != nil || !errors.Is(err, ErrUncertain) || calls != 1 {
 		t.Fatalf("failed persistence lost its replay fence: %v, calls=%d", err, calls)
+	}
+}
+
+func githubDeviceKey(code string) string {
+	digest := sha256.Sum256([]byte(code))
+	key := sha256.Sum256([]byte(hex.EncodeToString(digest[:20])))
+	return hex.EncodeToString(key[:])
+}
+
+func seedGitHubDevices(t *testing.T, b *Broker, devices map[string]githubDevice) {
+	t.Helper()
+	if err := b.github.locked(func() error {
+		g, err := b.github.readGrant()
+		if err != nil {
+			return err
+		}
+		g.Devices = devices
+		return b.github.saveGrant(g)
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestGitHubDeviceRecordsRetireAfterCodesExpire(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		created func(now time.Time) int64
+	}{
+		{"recent", func(now time.Time) int64 { return now.Add(-time.Minute).Unix() }},
+		{"unstamped", func(time.Time) int64 { return 0 }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			b := fixtureGitHub(t, "")
+			now := time.Unix(1_800_000_000, 0)
+			b.github.now = func() time.Time { return now }
+			devices := map[string]githubDevice{}
+			for i := range githubMaxDevices {
+				devices[githubDeviceKey(fmt.Sprintf("old-%d", i))] = githubDevice{Session: "other", Incarnation: "other", Created: tc.created(now)}
+			}
+			seedGitHubDevices(t, b, devices)
+			var calls atomic.Int32
+			transport := githubSuccessTransport(t, b, &calls, "alice", githubRealAlice)
+			if _, err := fixtureRoundTrip(b, githubRequest(t, githubTokenPath, "new-device"), transport); !errors.Is(err, ErrState) || calls.Load() != 0 {
+				t.Fatalf("login within retention exceeded the bound: %v, calls=%d", err, calls.Load())
+			}
+			g, err := b.github.readGrant()
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, device := range g.Devices {
+				if device.Created == 0 {
+					t.Fatal("unstamped record did not start its retention clock")
+				}
+			}
+
+			now = now.Add(githubDeviceRetention + time.Second)
+			response, err := fixtureRoundTrip(b, githubRequest(t, githubTokenPath, "new-device"), transport)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_ = githubSafeBody(t, response)
+			g, err = b.github.readGrant()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(g.Devices) != 1 || g.Devices[githubDeviceKey("new-device")].User != "alice" {
+				t.Fatalf("expired records were not retired: %d remain", len(g.Devices))
+			}
+		})
+	}
+}
+
+func TestGitHubRetiredDeviceRecordsRedispatchExpiredCodes(t *testing.T) {
+	b := fixtureGitHub(t, "")
+	now := time.Unix(1_800_000_000, 0)
+	b.github.now = func() time.Time { return now }
+	seedGitHubDevices(t, b, map[string]githubDevice{
+		githubDeviceKey("uncertain"): {Session: b.github.config.Session, Incarnation: b.github.config.Incarnation, Created: now.Unix()},
+	})
+	var calls atomic.Int32
+	expired := fixtureTransport(func(*http.Request) (*http.Response, error) {
+		calls.Add(1)
+		response := fixtureResponse(map[string]string{"error": "expired_token"})
+		response.StatusCode = http.StatusBadRequest
+		return response, nil
+	})
+	if _, err := fixtureRoundTrip(b, githubRequest(t, githubTokenPath, "uncertain"), expired); !errors.Is(err, ErrUncertain) || calls.Load() != 0 {
+		t.Fatalf("uncertain code redispatched before expiry: %v, calls=%d", err, calls.Load())
+	}
+	now = now.Add(githubDeviceRetention + time.Second)
+	response, err := fixtureRoundTrip(b, githubRequest(t, githubTokenPath, "uncertain"), expired)
+	if err != nil || calls.Load() != 1 {
+		t.Fatalf("expired code was not redispatched: %v, calls=%d", err, calls.Load())
+	}
+	if body := githubSafeBody(t, response); !strings.Contains(body, "expired_token") {
+		t.Fatalf("provider expiry not projected: %s", body)
 	}
 }

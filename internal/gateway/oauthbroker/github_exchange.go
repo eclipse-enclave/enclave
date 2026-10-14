@@ -17,6 +17,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 )
 
 const githubDeviceGrant = "urn:ietf:params:oauth:grant-type:device_code"
@@ -141,6 +142,12 @@ func (b *githubBroker) exchange(req *http.Request, transport http.RoundTripper) 
 		if err != nil {
 			return ErrState
 		}
+		now := b.now()
+		if retireGitHubDevices(g, now) {
+			if err := b.saveGrant(g); err != nil {
+				return err
+			}
+		}
 		digest := sha256.Sum256([]byte(form.Get("device_code")))
 		key := hex.EncodeToString(digest[:])
 		if device, exists := g.Devices[key]; exists {
@@ -154,11 +161,12 @@ func (b *githubBroker) exchange(req *http.Request, transport http.RoundTripper) 
 			return err
 		}
 		// Bounded replay history stores only device-code hashes. Pending entries
-		// survive crashes and block redispatch; a new device login can proceed.
-		if len(g.Devices) >= 64 {
+		// survive crashes and block redispatch until their code has expired; a
+		// new device login can proceed.
+		if len(g.Devices) >= githubMaxDevices {
 			return ErrState
 		}
-		g.Devices[key] = githubDevice{Session: b.config.Session, Incarnation: b.config.Incarnation}
+		g.Devices[key] = githubDevice{Session: b.config.Session, Incarnation: b.config.Incarnation, Created: now.Unix()}
 		if err := b.saveGrant(g); err != nil {
 			return err
 		}
@@ -201,7 +209,7 @@ func (b *githubBroker) exchange(req *http.Request, transport http.RoundTripper) 
 		}
 		g.Accounts[user] = githubAccount{Token: token.Access, Scope: token.Scope}
 		g.Active = user
-		g.Devices[key] = githubDevice{Session: b.config.Session, Incarnation: b.config.Incarnation, User: user}
+		g.Devices[key] = githubDevice{Session: b.config.Session, Incarnation: b.config.Incarnation, User: user, Created: now.Unix()}
 		if err := b.saveGrant(g); err != nil {
 			return err
 		}
@@ -267,7 +275,7 @@ func githubDeviceResponse(response *http.Response, data []byte) (*http.Response,
 		Expires  int    `json:"expires_in"`
 		Interval int    `json:"interval"`
 	}
-	if response.StatusCode != http.StatusOK || strictJSON(data, &device) != nil || exactKeys(data, "device_code", "user_code", "verification_uri", "expires_in", "interval") != nil || !githubDeviceCode(device.Device) || !githubUserCode(device.User) || device.URI != "https://github.com/login/device" || device.Expires < 1 || device.Expires > 3600 || device.Interval < 1 || device.Interval > 60 {
+	if response.StatusCode != http.StatusOK || strictJSON(data, &device) != nil || exactKeys(data, "device_code", "user_code", "verification_uri", "expires_in", "interval") != nil || !githubDeviceCode(device.Device) || !githubUserCode(device.User) || device.URI != "https://github.com/login/device" || device.Expires < 1 || device.Expires > int(githubMaxDeviceLifetime/time.Second) || device.Interval < 1 || device.Interval > 60 {
 		return nil, ErrResponse
 	}
 	return projectedResponse(http.StatusOK, device)

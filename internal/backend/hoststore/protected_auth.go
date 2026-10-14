@@ -20,6 +20,7 @@ import (
 
 	"enclave/internal/backend"
 	"enclave/internal/config"
+	"enclave/internal/logx"
 	"enclave/internal/util"
 )
 
@@ -127,7 +128,9 @@ func AcquireAuthMountAdmission(home string) (func(), error) {
 	if err := EnsureNoSymlinkChain(config.HostStateRootDir(home), path, true); err != nil {
 		return nil, err
 	}
-	return util.AcquireFileLock(path, nil)
+	return util.AcquireFileLock(path, func() {
+		logx.Infof("Waiting for another Enclave session to finish starting or stopping...")
+	})
 }
 
 // HasProtectedIdentities examines trusted metadata, not workload auth trees.

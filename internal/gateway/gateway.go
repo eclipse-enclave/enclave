@@ -399,7 +399,10 @@ type StartConfig struct {
 	WorkspaceID       string
 	ProjectHash       string
 	SecretReleaseFile string
-	TLSRootDir        string
+	// ImagePrepared skips the image step a caller already ran with
+	// PrepareImage.
+	ImagePrepared bool
+	TLSRootDir    string
 }
 
 func appendReadOnlyMount(mounts []docker.Mount, hostPath string, containerPath string) []docker.Mount {
@@ -438,6 +441,30 @@ type StaleResult struct {
 	Removed bool
 }
 
+// PrepareImage builds the gateway image when it is missing or stale, or
+// checks that it exists under --no-rebuild. Callers run it before taking locks
+// other sessions wait on, then start with ImagePrepared.
+func PrepareImage(ctx context.Context, cfg StartConfig) error {
+	if cfg.NoRebuild {
+		logx.Warnf("Skipping gateway image build due to --no-rebuild.")
+		return ensureExistingGatewayImageWith(cfg.Profile, docker.ImageExists)
+	}
+	needs, _, err := needsRebuild(cfg.Paths, cfg.Profile, cfg.AllowlistPath)
+	if err != nil {
+		return err
+	}
+	if !cfg.ForceRebuild && !needs {
+		return nil
+	}
+	resolveBuildPlan := func() (bool, string, error) {
+		return needsRebuild(cfg.Paths, cfg.Profile, cfg.AllowlistPath)
+	}
+	executeBuild := func(buildHash string) error {
+		return buildGatewayImage(ctx, cfg.Paths, cfg.Profile, cfg.AllowlistPath, buildHash)
+	}
+	return coordinateGatewayImageBuild(cfg.Home, imageName(cfg.Profile), cfg.ForceRebuild, resolveBuildPlan, executeBuild)
+}
+
 // Start builds the gateway image if needed, then runs the gateway sidecar and
 // waits for it to report readiness. Cancelling ctx aborts the start and
 // removes a sidecar that was already created. The caller holds the
@@ -447,26 +474,9 @@ func Start(ctx context.Context, cfg StartConfig) (StartResult, error) {
 	if err := validateStartConfig(cfg); err != nil {
 		return empty, err
 	}
-	if cfg.NoRebuild {
-		logx.Warnf("Skipping gateway image build (--no-rebuild or %s=1).", model.EnvNoRebuild)
-		if err := ensureExistingGatewayImageWith(cfg.Profile, docker.ImageExists); err != nil {
+	if !cfg.ImagePrepared {
+		if err := PrepareImage(ctx, cfg); err != nil {
 			return empty, err
-		}
-	} else {
-		needs, _, err := needsRebuild(cfg.Paths, cfg.Profile, cfg.AllowlistPath)
-		if err != nil {
-			return empty, err
-		}
-		if cfg.ForceRebuild || needs {
-			resolveBuildPlan := func() (bool, string, error) {
-				return needsRebuild(cfg.Paths, cfg.Profile, cfg.AllowlistPath)
-			}
-			executeBuild := func(buildHash string) error {
-				return buildGatewayImage(ctx, cfg.Paths, cfg.Profile, cfg.AllowlistPath, buildHash)
-			}
-			if err := coordinateGatewayImageBuild(cfg.Home, imageName(cfg.Profile), cfg.ForceRebuild, resolveBuildPlan, executeBuild); err != nil {
-				return empty, err
-			}
 		}
 	}
 

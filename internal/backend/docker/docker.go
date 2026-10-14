@@ -588,6 +588,11 @@ func (b *Backend) prepareRun(ctx context.Context, req backend.Request) (runSpec,
 			return runSpec{}, err
 		}
 	}
+	if req.Network.UsesGateway() {
+		if err := b.prepareGatewayImage(ctx, req); err != nil {
+			return runSpec{}, err
+		}
+	}
 	release, err := hoststore.AcquireAuthMountAdmission(b.opts.Host.Home)
 	if err != nil {
 		return runSpec{}, err

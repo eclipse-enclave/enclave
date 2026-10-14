@@ -29,6 +29,19 @@ import (
 	"enclave/internal/network"
 )
 
+// prepareGatewayImage builds the session's gateway image before startGateway,
+// outside the host-wide admission lock other sessions wait on.
+func (b *Backend) prepareGatewayImage(ctx context.Context, req backend.Request) error {
+	return gateway.PrepareImage(ctx, gateway.StartConfig{
+		Paths:         b.opts.Paths,
+		Profile:       model.Profile{Name: req.Session.Tool},
+		AllowlistPath: req.Network.Egress.AllowlistPath,
+		ForceRebuild:  b.opts.ForceRebuild,
+		NoRebuild:     b.opts.NoRebuild,
+		Home:          b.opts.Host.Home,
+	})
+}
+
 func (b *Backend) startGateway(ctx context.Context, req backend.Request, networkName string) (string, func(), error) {
 	gatewayConfigDir := config.HostProjectGatewayConfigDir(b.opts.Host.Home, req.Session.ProjectHash, req.Session.Tool)
 	policy := network.EffectivePolicy{
@@ -87,6 +100,7 @@ func (b *Backend) startGateway(ctx context.Context, req backend.Request, network
 		ProjectHash:       req.Session.ProjectHash,
 		SecretReleaseFile: secretReleaseFile,
 		TLSRootDir:        config.HostTLSDir(b.opts.Host.Home),
+		ImagePrepared:     true,
 	}
 	result, err := gateway.Start(ctx, startConfig)
 	if err != nil {

@@ -91,6 +91,16 @@ func OptionDefs() []OptionDef {
 			Apply:         ApplyBoolPtr,
 		},
 		{
+			Name:          "update_channel",
+			Group:         OptionGroupGlobal,
+			Kind:          OptionKindString,
+			OptionField:   "UpdateChannel",
+			SourceField:   "UpdateChannel",
+			DefaultsField: "UpdateChannel",
+			Apply:         ApplyString,
+			TrimOnApply:   true,
+		},
+		{
 			Name:           "tool",
 			Group:          OptionGroupRun,
 			Kind:           OptionKindString,

@@ -12,7 +12,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -24,12 +23,9 @@ import (
 
 	"enclave/internal/buildinfo"
 	"enclave/internal/config"
+	"enclave/internal/model"
 	"enclave/internal/util"
 )
-
-// rollingVersion is the version the rolling release stamps into its
-// standalone binaries; packages and source builds carry other versions.
-const rollingVersion = "rolling"
 
 const (
 	rollingRefURL         = "https://api.github.com/repos/eclipse-enclave/enclave/git/ref/tags/rolling"
@@ -47,15 +43,19 @@ const (
 )
 
 type Status struct {
-	CurrentCommit   string
-	LatestCommit    string
+	// Channel is the release channel the update comes from.
+	Channel string
+	// Current names the running build, Latest the channel's newest build.
+	Current         string
+	Latest          string
 	UpdateAvailable bool
 }
 
 type Service struct {
-	client         *http.Client
-	refURL         string
-	assetsURL      string
+	fetcher        fetcher
+	sources        map[string]source
+	channel        string
+	buildChannel   string
 	goos           string
 	goarch         string
 	current        buildinfo.Info
@@ -64,7 +64,9 @@ type Service struct {
 	externalAssets func(exePath string) (string, bool)
 }
 
-func New() *Service {
+// New returns a Service that updates from channel, or from the channel this
+// binary was published on when channel is empty.
+func New(channel string) *Service {
 	// No Client.Timeout: it would also cap reading the binary, failing every
 	// download on a slow link. Callers bound each operation with a context.
 	transport := &http.Transport{Proxy: http.ProxyFromEnvironment}
@@ -72,10 +74,16 @@ func New() *Service {
 		transport = defaultTransport.Clone()
 	}
 	transport.ResponseHeaderTimeout = responseHeaderTimeout
+	fetcher := fetcher{client: &http.Client{Transport: transport}}
+	buildChannel := buildinfo.Channel()
 	return &Service{
-		client:         &http.Client{Transport: transport},
-		refURL:         rollingRefURL,
-		assetsURL:      rollingAssetsURL,
+		fetcher: fetcher,
+		sources: map[string]source{
+			model.UpdateChannelRolling: rollingSource{fetcher: fetcher, refURL: rollingRefURL, assetsURL: rollingAssetsURL},
+			model.UpdateChannelStable:  pendingSource{channel: model.UpdateChannelStable},
+		},
+		channel:        targetChannel(channel, buildChannel),
+		buildChannel:   buildChannel,
 		goos:           runtime.GOOS,
 		goarch:         runtime.GOARCH,
 		current:        buildinfo.Read(),
@@ -85,17 +93,27 @@ func New() *Service {
 	}
 }
 
+func targetChannel(configured string, build string) string {
+	if configured = strings.TrimSpace(configured); configured != "" {
+		return configured
+	}
+	return build
+}
+
 // Supported returns why the running executable must not replace itself, or
-// nil when it may. Only standalone rolling binaries qualify: packages and
-// source builds have their own upgrade paths, and a binary that runs against
-// an asset tree beside it or in ENCLAVE_HOME would keep using those old assets
-// after the swap.
+// nil when it may. Only standalone release binaries qualify: packages and
+// source builds carry no channel stamp and have their own upgrade paths, and
+// a binary that runs against an asset tree beside it or in ENCLAVE_HOME would
+// keep using those old assets after the swap.
 func (s *Service) Supported() error {
 	if _, err := artifactName(s.goos, s.goarch); err != nil {
 		return err
 	}
-	if s.current.Version != rollingVersion {
-		return fmt.Errorf("self-update only replaces standalone rolling binaries, but this build is version %q; upgrade package installs with the package manager and source builds by rebuilding", s.current.Version)
+	if _, ok := s.sources[s.buildChannel]; !ok {
+		return fmt.Errorf("self-update only replaces standalone release binaries, but this is a package or source build (version %q); upgrade it with the package manager or by rebuilding", s.current.Version)
+	}
+	if _, ok := s.sources[s.channel]; !ok {
+		return fmt.Errorf("unknown update channel %q", s.channel)
 	}
 	target, err := s.executablePath()
 	if err != nil {
@@ -107,30 +125,39 @@ func (s *Service) Supported() error {
 	return nil
 }
 
+// Check compares the running build with the newest one on the channel. A
+// binary from another channel is never current, so switching channels
+// installs that channel's build even when it is older.
 func (s *Service) Check(ctx context.Context) (Status, error) {
-	latest, err := s.latestCommit(ctx)
+	src := s.sources[s.channel]
+	latest, err := src.latest(ctx)
 	if err != nil {
 		return Status{}, err
 	}
-	currentCommit := strings.TrimSpace(s.current.Commit)
+	current := s.buildChannel == s.channel && src.isCurrent(s.current, latest)
 	return Status{
-		CurrentCommit:   currentCommit,
-		LatestCommit:    latest,
-		UpdateAvailable: !commitsEqual(currentCommit, latest),
+		Channel:         s.channel,
+		Current:         s.sources[s.buildChannel].label(s.current),
+		Latest:          latest,
+		UpdateAvailable: !current,
 	}, nil
 }
 
-// Install replaces the running executable with the rolling binary built from
-// expectedCommit, the commit Check reported.
-func (s *Service) Install(ctx context.Context, expectedCommit string) (string, error) {
+// Install replaces the running executable with the channel build that latest
+// identifies, as reported by Check.
+func (s *Service) Install(ctx context.Context, latest string) (string, error) {
 	if err := s.Supported(); err != nil {
+		return "", err
+	}
+	src := s.sources[s.channel]
+	if err := confirmLatest(ctx, src, s.channel, latest); err != nil {
 		return "", err
 	}
 	artifact, err := artifactName(s.goos, s.goarch)
 	if err != nil {
 		return "", err
 	}
-	expected, err := s.expectedChecksum(ctx, artifact)
+	expected, err := s.expectedChecksum(ctx, src, artifact)
 	if err != nil {
 		return "", err
 	}
@@ -148,7 +175,7 @@ func (s *Service) Install(ctx context.Context, expectedCommit string) (string, e
 	}
 	removeStaleUpdates(filepath.Dir(target), time.Now())
 
-	response, err := s.get(ctx, s.assetsURL+"/"+artifact)
+	response, err := s.fetcher.get(ctx, src.assetURL(artifact))
 	if err != nil {
 		return "", fmt.Errorf("download %s: %w", artifact, err)
 	}
@@ -179,15 +206,11 @@ func (s *Service) Install(ctx context.Context, expectedCommit string) (string, e
 	if actual != expected {
 		return "", fmt.Errorf("checksum mismatch for %s: got %s, want %s", artifact, actual, expected)
 	}
-	// Each publish replaces the whole rolling release and only moves the tag
-	// forward, so a tag that still names expectedCommit means the checksums
-	// and the binary both came from that commit's release.
-	latest, err := s.latestCommit(ctx)
-	if err != nil {
+	// A publish replaces the channel's whole release and only moves forward,
+	// so a channel naming latest before and after the download means the
+	// checksums and the binary both came from that build.
+	if err := confirmLatest(ctx, src, s.channel, latest); err != nil {
 		return "", err
-	}
-	if !commitsEqual(expectedCommit, latest) {
-		return "", fmt.Errorf("rolling release moved from %.8s to %.8s during the download; run the update again", expectedCommit, latest)
 	}
 
 	if err := tmp.Chmod(info.Mode().Perm()); err != nil {
@@ -209,6 +232,17 @@ func (s *Service) Install(ctx context.Context, expectedCommit string) (string, e
 	return target, nil
 }
 
+func confirmLatest(ctx context.Context, src source, channel string, latest string) error {
+	now, err := src.latest(ctx)
+	if err != nil {
+		return err
+	}
+	if now != latest {
+		return fmt.Errorf("%s release moved from %.8s to %.8s; run the update again", channel, latest, now)
+	}
+	return nil
+}
+
 // removeStaleUpdates deletes temporary downloads that an interrupted install
 // left beside the executable; a signal or crash skips Install's own cleanup.
 func removeStaleUpdates(dir string, now time.Time) {
@@ -221,30 +255,8 @@ func removeStaleUpdates(dir string, now time.Time) {
 	}
 }
 
-func (s *Service) latestCommit(ctx context.Context) (string, error) {
-	response, err := s.get(ctx, s.refURL)
-	if err != nil {
-		return "", fmt.Errorf("resolve rolling release: %w", err)
-	}
-	defer func() { _ = response.Body.Close() }()
-	var ref struct {
-		Object struct {
-			SHA  string `json:"sha"`
-			Type string `json:"type"`
-		} `json:"object"`
-	}
-	if err := json.NewDecoder(io.LimitReader(response.Body, maxRefResponseBytes)).Decode(&ref); err != nil {
-		return "", fmt.Errorf("decode rolling release reference: %w", err)
-	}
-	sha := strings.ToLower(strings.TrimSpace(ref.Object.SHA))
-	if ref.Object.Type != "commit" || len(sha) < 7 || !validHex(sha) {
-		return "", fmt.Errorf("rolling release reference did not identify a commit")
-	}
-	return sha, nil
-}
-
-func (s *Service) expectedChecksum(ctx context.Context, artifact string) (string, error) {
-	response, err := s.get(ctx, s.assetsURL+"/"+checksumsFilename)
+func (s *Service) expectedChecksum(ctx context.Context, src source, artifact string) (string, error) {
+	response, err := s.fetcher.get(ctx, src.assetURL(checksumsFilename))
 	if err != nil {
 		return "", fmt.Errorf("download %s: %w", checksumsFilename, err)
 	}
@@ -266,24 +278,6 @@ func (s *Service) expectedChecksum(ctx context.Context, artifact string) (string
 		return "", fmt.Errorf("read %s: %w", checksumsFilename, err)
 	}
 	return "", fmt.Errorf("%s has no checksum for %s", checksumsFilename, artifact)
-}
-
-func (s *Service) get(ctx context.Context, url string) (*http.Response, error) {
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return nil, err
-	}
-	request.Header.Set("Accept", "application/vnd.github+json")
-	request.Header.Set("User-Agent", "eclipse-enclave-self-update")
-	response, err := s.client.Do(request) // #nosec G704 -- URLs are fixed GitHub release endpoints; tests substitute a local server.
-	if err != nil {
-		return nil, err
-	}
-	if response.StatusCode != http.StatusOK {
-		_ = response.Body.Close()
-		return nil, fmt.Errorf("%s returned %s", url, response.Status)
-	}
-	return response, nil
 }
 
 func artifactName(goos string, goarch string) (string, error) {

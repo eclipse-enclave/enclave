@@ -81,7 +81,7 @@ Ctrl-C or SIGTERM while a session is still starting aborts the start with exit c
 |---------|-------------|
 | `enclave info` | Show configuration and image details |
 | `enclave version`, `enclave --version` | Show the binary version, source commit, and commit date |
-| `enclave self-update` | Replace the host binary with the current GitHub rolling-release binary |
+| `enclave self-update` | Replace the host binary with the latest build of its release channel |
 | `enclave config` | Show configuration values |
 | `enclave tools` | List available tool profiles (`list\|add\|remove\|update` manage installed tool extensions; see below) |
 | `enclave features` | List available feature extensions (`list\|add\|remove\|update` manage installed feature extensions; see below) |
@@ -90,22 +90,32 @@ Ctrl-C or SIGTERM while a session is still starting aborts the start with exit c
 `enclave version` prints one line suitable for bug reports; `--json` emits the version, commit, and date as an object. Builds from modified source append `-dirty` to the commit; unavailable values are reported as `unknown`.
 
 `enclave self-update` downloads the `linux` or `darwin` binary matching the
-host architecture, verifies it against the rolling release's `checksums.txt`,
-and atomically replaces the running executable. The checksums come from the same
-release as the binary, so they detect corrupted or truncated downloads, not a
-compromised release. It never elevates privileges; the executable's directory
-must be writable. Only standalone rolling binaries (`enclave version` reports
-`rolling`) update themselves: package installs, source builds, and binaries
-that run against a runtime asset tree beside them or in `ENCLAVE_HOME` are
-refused and never checked, because replacing the binary alone would leave their
-assets behind. Upgrade those with
-the package manager or by rebuilding.
+host architecture from the configured release channel, verifies it against the
+release's `checksums.txt`, and atomically replaces the running executable. The
+checksums come from the same release as the binary, so they detect corrupted or
+truncated downloads, not a compromised release. It never elevates privileges;
+the executable's directory must be writable.
 
-Other human-facing invocations check the rolling release at most once every 24
-hours, recorded in `~/.local/state/enclave/self-update-check`, and notify on
-stderr, debug diagnostics included, when its commit differs. Set `"auto_update": true` in the global config
-to install it during that check. Checks are skipped for shell completion,
-structured output, and user commands; a failed check waits for the next interval.
+Release channels are `rolling`, rebuilt from every push to `main` and published
+on GitHub, and `stable`, for official releases. A binary follows the channel it
+was published on unless the global config sets `update_channel`; switching
+channels installs the other channel's latest build even if it is older. The
+`stable` channel has no download source yet: stable releases are expected on
+the Eclipse Foundation download server, and until that is wired up, checks on
+`stable` fail and are reported as such.
+
+Only standalone release binaries update themselves: package installs, source
+builds, and binaries that run against a runtime asset tree beside them or in
+`ENCLAVE_HOME` are refused and never checked, because replacing the binary
+alone would leave their assets behind. Upgrade those with the package manager
+or by rebuilding.
+
+Other human-facing invocations check the channel at most once every 24 hours,
+recorded in `~/.local/state/enclave/self-update-check`, and notify on stderr,
+debug diagnostics included, when a different build is available. Set
+`"auto_update": true` in the global config to install it during that check.
+Checks are skipped for shell completion, structured output, and user commands;
+a failed check waits for the next interval.
 
 `enclave config` flags: `--view <mode>` selects the output view — `matrix` (default), `source` (where each value comes from), `diff` (values overridden by higher precedence), or `effective` (effective values only); `--json` emits JSON output.
 

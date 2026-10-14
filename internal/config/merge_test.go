@@ -25,6 +25,7 @@ func TestMergeDefaultsCoversAllFields(t *testing.T) {
 		ToolOverrides:    map[string]Defaults{"test-tool": {NoAPIKey: &trueVal}},
 		Backend:          "docker",
 		AutoUpdate:       &trueVal,
+		UpdateChannel:    "stable",
 		HostConfig:       model.HostConfigPassthrough,
 		SkillsValidation: model.SkillsValidationAgent,
 		HostConfigPaths:  []string{"default", "+commands/"},

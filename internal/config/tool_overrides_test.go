@@ -83,6 +83,40 @@ func TestAutoUpdateIsGlobalOnly(t *testing.T) {
 	}
 }
 
+func TestUpdateChannelIsGlobalOnlyAndValidated(t *testing.T) {
+	globalPath := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(globalPath, []byte(`{"update_channel":" stable ","tool_overrides":{"codex":{"update_channel":"rolling"}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	global, warnings, err := readDefaults(globalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if global.UpdateChannel != "stable" {
+		t.Fatalf("global update_channel = %q, want stable", global.UpdateChannel)
+	}
+	if global.ToolOverrides["codex"].UpdateChannel != "" || !containsSubstring(warnings, "tool_overrides.codex.update_channel") {
+		t.Fatalf("tool override update_channel was retained or not warned about: %v", warnings)
+	}
+
+	if err := os.WriteFile(globalPath, []byte(`{"update_channel":"nightly"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	global, warnings, err = readDefaults(globalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if global.UpdateChannel != "" || !containsSubstring(warnings, `update_channel "nightly"`) {
+		t.Fatalf("unknown channel %q retained or not warned about: %v", global.UpdateChannel, warnings)
+	}
+
+	project := Defaults{UpdateChannel: "rolling"}
+	warnings = applyProjectOverrideGuardrails(globalPath, t.TempDir(), &project)
+	if project.UpdateChannel != "" || !containsSubstring(warnings, "configured globally") {
+		t.Fatalf("project update_channel retained or not warned about: %v", warnings)
+	}
+}
+
 func TestToolOverride_SingleToolApplied(t *testing.T) {
 	sources := model.DefaultOptionSources()
 	opts := DefaultOptions()

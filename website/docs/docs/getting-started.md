@@ -134,18 +134,22 @@ make build
 
 ### Updating Enclave
 
-A standalone rolling binary checks the
+A standalone binary checks its release channel at most once every 24 hours and
+reports when a different build is available. Binaries from the
 [rolling release](https://github.com/eclipse-enclave/enclave/releases/tag/rolling)
-at most once every 24 hours and reports when its commit differs from the running
-binary. Run `enclave self-update` to download the binary for your platform,
-verify it against `checksums.txt`, and atomically replace the current executable.
+follow the `rolling` channel, rebuilt from every push to `main`; official
+releases will follow `stable`. Set `"update_channel"` in the global Enclave
+`config.json` to switch. Run `enclave self-update` to download the binary for
+your platform, verify it against `checksums.txt`, and atomically replace the
+current executable.
 The checksums guard against corrupted downloads, not against a compromised
 release. The updater never elevates privileges, so use the manual install
 procedure above when the executable's directory is not writable.
 
 Automatic replacement is opt-in. Add `"auto_update": true` to the global
-Enclave `config.json`; project and per-tool settings cannot enable it. Checks
-are skipped for shell completion, structured output, and user commands. On Windows,
+Enclave `config.json`; project and per-tool settings cannot enable it or change
+the channel. Checks are skipped for shell completion, structured output, and
+user commands. On Windows,
 `self-update` updates the Linux binary inside WSL2; update the Windows launcher
 itself by reinstalling its Scoop manifest.
 

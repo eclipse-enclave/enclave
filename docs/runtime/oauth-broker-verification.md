@@ -262,18 +262,23 @@ provider account, against disposable XDG roots and a disposable project:
 
 ```bash
 make build
-scripts/protected-auth-engine-check.sh --engine docker --report docker.md
-scripts/protected-auth-engine-check.sh --engine podman --report podman.md
+scripts/protected-auth-engine-check.sh --engine docker --tool all --report docker.md
+scripts/protected-auth-engine-check.sh --engine podman --tool all --report podman.md
 ```
 
-It enrolls a fresh identity, then seeds a synthetic grant (accepted by the
-gateway, useless to a provider; a Go test keeps it in step with the schema). It
-checks protection, handle-only views, release refusals, workload and gateway
-mounts, ownership, exec selection, proxy reload, concurrent sessions, cleanup,
-continuity, project and ephemeral scopes, reset and downgrade. Each check passes
-only on positive evidence; the report records checkout, engine, rootless and
-SELinux state. Run it on rootful Docker, rootless Podman and an SELinux
-enforcing host. It does not replace the remaining rows or the human gate.
+`--tool` takes a built-in tool name or `all` (default `claude`); trailing
+arguments select checks, such as `handles-only reload`. Per tool, it enrolls a
+fresh identity, then seeds a synthetic grant for each of the tool's login
+adapters (accepted by the gateway, useless to a provider). Go tests keep the
+grants and the script's copy of the tool table in step with the gateway. It
+checks protection, the handles in the tool's native credential file, release
+refusals, workload and gateway mounts, ownership, exec selection, proxy reload,
+concurrent sessions, cleanup, continuity, project and ephemeral scopes, reset
+and downgrade. Theia and Theia Next have no login adapter and run only the
+checks that need no named identity. Each check passes only on positive
+evidence; the report records checkout, engine, rootless and SELinux state. Run
+it on rootful Docker, rootless Podman and an SELinux enforcing host. It does not
+replace the remaining rows or the human gate.
 
 ### Required experiment matrix
 

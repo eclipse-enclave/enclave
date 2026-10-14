@@ -714,7 +714,7 @@ the gateway mediating every first-party domain
 (`internal/gateway/oauthbroker/firstparty.go`). The GitHub
 feature keeps its ordinary apt client and a SHA-256-pinned `gh` 2.87.3 binary at
 `/opt/enclave/gh-2.87.3/bin/gh`; protected startup selects and checks that binary.
-`scripts/protected-auth-engine-check.sh` runs the account-free engine checks;
+`scripts/protected-auth-engine-check.sh --tool all` runs the account-free engine checks;
 see the verification plan. Changing the GitHub pin, the first-party mediation rules,
 adapter schema or endpoints requires repeating the [engine and human verification
 plan](runtime/oauth-broker-verification.md), including both unrestricted network

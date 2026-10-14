@@ -98,6 +98,11 @@ func Lookup(name string) (Tool, bool) {
 	return Tool{}, false
 }
 
+// Tools returns every tool that can run protected.
+func Tools() []Tool {
+	return slices.Clone(tools)
+}
+
 // LinkSpec encodes the native files for the entrypoint, which links each
 // config path to its view file.
 func (t Tool) LinkSpec() string {

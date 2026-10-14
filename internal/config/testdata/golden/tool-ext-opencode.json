@@ -18,6 +18,14 @@
           ],
           "header": "x-api-key"
         }
+      },
+      "placeholder": {
+        "prefix": "sk-ant-api03-",
+        "suffix": "AA",
+        "random": {
+          "encoding": "base64url",
+          "length": 93
+        }
       }
     },
     "gemini-api-key": {

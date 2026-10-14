@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"enclave/internal/gateway/oauthbroker"
+	"enclave/internal/model"
 	"enclave/internal/netlog"
 )
 
@@ -330,6 +331,43 @@ func TestUnrestrictedBrokerAllowsUnrelatedHostsWithoutReleasingHandles(t *testin
 	}
 	if calls.Load() != 1 {
 		t.Fatal("credential-bearing unrelated request reached upstream")
+	}
+}
+
+// Claude tells OAuth tokens from API keys by their prefix, so the token's
+// placeholder shares it with the broker's handles. Released, it passes the
+// broker; elsewhere it is refused like a handle.
+func TestBrokerProxyReleasesHandleShapedPlaceholder(t *testing.T) {
+	const real = "sk-ant-oat01-host-configured-long-lived-token"
+	var seen atomic.Value
+	upstream := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		seen.Store(req.Header.Get("Authorization"))
+		_, _ = io.WriteString(w, `{"ok":true}`)
+	}))
+	defer upstream.Close()
+	p, _, _ := oauthTestProxy(t, upstream)
+	placeholder := "sk-ant-oat01-" + strings.Repeat("Ab0_", 23) + "xAA"
+	p.secretRules = []model.SecretReleaseEntry{{Placeholder: placeholder, Value: real, Hosts: []string{"api.anthropic.com"}, Header: "authorization", Format: "Bearer %s"}}
+	p.allowedDomains = append(p.allowedDomains, "claude.ai")
+	for _, tc := range []struct {
+		url  string
+		want int
+	}{
+		{"https://api.anthropic.com/v1/messages", http.StatusOK},
+		{"https://claude.ai/api/organizations", http.StatusForbidden},
+	} {
+		seen.Store("")
+		req := httptest.NewRequest(http.MethodPost, tc.url, strings.NewReader(`{}`))
+		req.Header.Set("Authorization", "Bearer "+placeholder)
+		w := httptest.NewRecorder()
+		p.handler("https")(w, req)
+		want := ""
+		if tc.want == http.StatusOK {
+			want = "Bearer " + real
+		}
+		if w.Code != tc.want || seen.Load() != want {
+			t.Fatalf("%s: status %d, upstream saw %q", tc.url, w.Code, seen.Load())
+		}
 	}
 }
 

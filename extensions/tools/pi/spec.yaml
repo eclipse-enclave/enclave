@@ -42,7 +42,9 @@ credentials:
     openai-api-key:
       env: [OPENAI_API_KEY]
       placeholder: { prefix: "sk-enclave-", random: { encoding: alphanumeric, length: 48 } }
-    anthropic-api-key: { env: [ANTHROPIC_API_KEY] }
+    anthropic-api-key:
+      env: [ANTHROPIC_API_KEY]
+      placeholder: { prefix: "sk-ant-api03-", suffix: "AA", random: { encoding: base64url, length: 93 } }
     anthropic-oauth-token:
       env: [ANTHROPIC_OAUTH_TOKEN]
       apiKey: false

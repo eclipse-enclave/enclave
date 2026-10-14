@@ -66,6 +66,14 @@
           ],
           "header": "x-api-key"
         }
+      },
+      "placeholder": {
+        "prefix": "sk-ant-api03-",
+        "suffix": "AA",
+        "random": {
+          "encoding": "base64url",
+          "length": 93
+        }
       }
     },
     "claude-code-oauth-token": {
@@ -82,7 +90,15 @@
           "format": "Bearer %s"
         }
       },
-      "api_key": false
+      "api_key": false,
+      "placeholder": {
+        "prefix": "sk-ant-oat01-",
+        "suffix": "AA",
+        "random": {
+          "encoding": "base64url",
+          "length": 93
+        }
+      }
     }
   },
   "host_config_dir": ".claude",

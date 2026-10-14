@@ -30,7 +30,9 @@ Provider API keys, for any tool, belong in [Enclave secrets](#secrets): a
 protected session receives them only as placeholders, in every network mode, and
 the gateway releases them at their declared hosts and header and aborts
 responses that echo them. This includes `claude setup-token` tokens as
-`CLAUDE_CODE_OAUTH_TOKEN`.
+`CLAUDE_CODE_OAUTH_TOKEN`. Placeholders keep the prefixes clients check, such as
+`sk-ant-api03-` and `sk-ant-oat01-` for Anthropic keys and tokens and `sk-` for
+OpenAI keys.
 
 Opt in with one of these identities:
 

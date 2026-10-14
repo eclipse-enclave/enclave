@@ -30,17 +30,24 @@ import (
 const fakeLatestCommit = "1234567890abcdef1234567890abcdef12345678"
 
 type fakeSelfUpdater struct {
-	channel         string
-	unsupported     error
-	upToDate        bool
-	checkErr        error
-	installErr      error
+	channel     string
+	unsupported error
+	notWritable error
+	upToDate    bool
+	checkErr    error
+	installErr  error
+	// alreadyInstalled makes Install find the executable already replaced.
+	alreadyInstalled bool
+	// installHook runs inside Install with its context.
+	installHook     func(ctx context.Context) error
 	checks          int
 	installs        int
 	installedCommit string
 }
 
 func (f *fakeSelfUpdater) Supported() error { return f.unsupported }
+
+func (f *fakeSelfUpdater) Writable() error { return f.notWritable }
 
 func (f *fakeSelfUpdater) Check(context.Context) (selfupdate.Status, error) {
 	f.checks++
@@ -50,13 +57,18 @@ func (f *fakeSelfUpdater) Check(context.Context) (selfupdate.Status, error) {
 	return selfupdate.Status{Channel: "rolling", Current: "abcdef0", Latest: fakeLatestCommit, UpdateAvailable: !f.upToDate}, nil
 }
 
-func (f *fakeSelfUpdater) Install(_ context.Context, latest string) (string, error) {
+func (f *fakeSelfUpdater) Install(ctx context.Context, latest string) (string, bool, error) {
 	f.installs++
 	f.installedCommit = latest
-	if f.installErr != nil {
-		return "", f.installErr
+	if f.installHook != nil {
+		if err := f.installHook(ctx); err != nil {
+			return "", false, err
+		}
 	}
-	return "/opt/enclave/enclave", nil
+	if f.installErr != nil {
+		return "", false, f.installErr
+	}
+	return "/opt/enclave/enclave", !f.alreadyInstalled, nil
 }
 
 // useFakeSelfUpdater substitutes fake for the rolling release and returns a
@@ -195,6 +207,20 @@ func TestSelfUpdateCheckDue(t *testing.T) {
 	if !selfUpdateCheckDue(path, now) {
 		t.Fatal("25-hour-old stamp was not due")
 	}
+	// A clock that is set back after a check, or a network home whose server
+	// clock runs slightly ahead, dates the stamp in the future.
+	if err := os.Chtimes(path, now.Add(time.Hour), now.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if selfUpdateCheckDue(path, now) {
+		t.Fatal("stamp one hour ahead was due")
+	}
+	if err := os.Chtimes(path, now.Add(30*24*time.Hour), now.Add(30*24*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if !selfUpdateCheckDue(path, now) {
+		t.Fatal("stamp 30 days ahead suppressed the check")
+	}
 }
 
 func TestAutomaticSelfUpdateNotifiesWithoutOptIn(t *testing.T) {
@@ -231,8 +257,42 @@ func TestAutomaticSelfUpdateInstallsWhenOptedIn(t *testing.T) {
 	if stdout != "" {
 		t.Fatalf("update progress written to stdout: %q", stdout)
 	}
-	if !strings.Contains(stderr, "Updated enclave to rolling build 12345678") {
+	if !strings.Contains(stderr, "Updated enclave to rolling build 1234567 at") {
 		t.Fatalf("stderr lacks the update result: %q", stderr)
+	}
+}
+
+func TestAutomaticSelfUpdateOffersReinstallForUnwritableInstall(t *testing.T) {
+	for _, autoUpdate := range []bool{false, true} {
+		t.Run(fmt.Sprintf("auto_update=%v", autoUpdate), func(t *testing.T) {
+			fake := &fakeSelfUpdater{notWritable: fmt.Errorf("enclave cannot replace /usr/local/bin/enclave because its directory is %w; reinstall it with: sudo install", selfupdate.ErrNotWritable)}
+			useFakeSelfUpdater(t, fake)
+
+			stdout, stderr := captureOutput(t, func() {
+				maybeAutomaticSelfUpdate(cli.Result{Action: "run"}, autoUpdateDefaults(autoUpdate))
+			})
+			if fake.installs != 0 {
+				t.Fatal("attempted to replace an executable in an unwritable directory")
+			}
+			if stdout != "" || !strings.Contains(stderr, "(1234567; current abcdef0), but enclave cannot replace /usr/local/bin/enclave") {
+				t.Fatalf("stdout = %q, stderr = %q; want the reinstall notice on stderr", stdout, stderr)
+			}
+			if strings.Contains(stderr, "enclave self-update") {
+				t.Fatalf("suggested a self-update that cannot work: %q", stderr)
+			}
+		})
+	}
+}
+
+func TestAutomaticSelfUpdateStaysQuietWhenAnotherUpdateInstalledTheBuild(t *testing.T) {
+	fake := &fakeSelfUpdater{alreadyInstalled: true}
+	useFakeSelfUpdater(t, fake)
+
+	_, stderr := captureOutput(t, func() {
+		maybeAutomaticSelfUpdate(cli.Result{Action: "run"}, autoUpdateDefaults(true))
+	})
+	if strings.Contains(stderr, "Updated enclave") {
+		t.Fatalf("claimed an update that another process made: %q", stderr)
 	}
 }
 
@@ -246,8 +306,11 @@ func TestAutomaticSelfUpdateFailureStaysOffStdout(t *testing.T) {
 	if stdout != "" {
 		t.Fatalf("update failure written to stdout: %q", stdout)
 	}
-	if !strings.Contains(stderr, "Automatic enclave update failed: checksum mismatch") {
+	if !strings.Contains(stderr, "Automatic enclave update failed: checksum mismatch. Run 'enclave self-update' to retry.") {
 		t.Fatalf("stderr lacks the failure: %q", stderr)
+	}
+	if strings.Contains(stderr, "privileges") {
+		t.Fatalf("a failure unrelated to permissions blamed them: %q", stderr)
 	}
 }
 
@@ -324,9 +387,48 @@ func TestRunSelfUpdate(t *testing.T) {
 		fake := &fakeSelfUpdater{}
 		useFakeSelfUpdater(t, fake)
 		var code int
-		captureOutput(t, func() { code = runSelfUpdate(false) })
+		stdout, _ := captureOutput(t, func() { code = runSelfUpdate(false) })
 		if code != 0 || fake.installedCommit != fakeLatestCommit {
 			t.Fatalf("code = %d, installed %q; want the checked commit", code, fake.installedCommit)
+		}
+		if !strings.Contains(stdout, "Updated enclave from abcdef0 to rolling build 1234567") {
+			t.Fatalf("stdout lacks the update result: %q", stdout)
+		}
+	})
+	t.Run("installed by another update meanwhile", func(t *testing.T) {
+		fake := &fakeSelfUpdater{alreadyInstalled: true}
+		home := useFakeSelfUpdater(t, fake)
+		var code int
+		stdout, _ := captureOutput(t, func() { code = runSelfUpdate(false) })
+		if code != 0 || !stampExists(t, home) {
+			t.Fatalf("code = %d; want a recorded success", code)
+		}
+		if strings.Contains(stdout, "Updated enclave") || !strings.Contains(stdout, "up to date with the rolling channel (1234567)") {
+			t.Fatalf("stdout = %q, want an up-to-date report", stdout)
+		}
+	})
+	t.Run("unwritable install", func(t *testing.T) {
+		fake := &fakeSelfUpdater{notWritable: fmt.Errorf("enclave cannot replace /usr/local/bin/enclave because its directory is %w", selfupdate.ErrNotWritable)}
+		useFakeSelfUpdater(t, fake)
+		var code int
+		_, stderr := captureOutput(t, func() { code = runSelfUpdate(false) })
+		if code != 1 || fake.installs != 0 {
+			t.Fatalf("code = %d, installs = %d; want a refusal without installing", code, fake.installs)
+		}
+		if !strings.Contains(stderr, "build is available (1234567), but enclave cannot replace /usr/local/bin/enclave") {
+			t.Fatalf("stderr lacks the reinstall notice: %q", stderr)
+		}
+	})
+	t.Run("failure", func(t *testing.T) {
+		fake := &fakeSelfUpdater{installErr: errors.New("checksum mismatch")}
+		useFakeSelfUpdater(t, fake)
+		var code int
+		_, stderr := captureOutput(t, func() { code = runSelfUpdate(false) })
+		if code != 1 || !strings.Contains(stderr, "Update enclave: checksum mismatch") {
+			t.Fatalf("code = %d, stderr = %q; want the failure", code, stderr)
+		}
+		if strings.Contains(stderr, "privileges") {
+			t.Fatalf("a failure unrelated to permissions blamed them: %q", stderr)
 		}
 	})
 }
@@ -336,8 +438,8 @@ func TestShortBuild(t *testing.T) {
 		"":                          "unknown",
 		"272b035":                   "272b035",
 		"272b035-dirty":             "272b035-dirty",
-		fakeLatestCommit:            "12345678",
-		fakeLatestCommit + "-dirty": "12345678-dirty",
+		fakeLatestCommit:            "1234567",
+		fakeLatestCommit + "-dirty": "1234567-dirty",
 		"1.10.0-rc.1":               "1.10.0-rc.1",
 	} {
 		if got := shortBuild(commit); got != want {

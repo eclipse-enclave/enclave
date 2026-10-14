@@ -93,8 +93,16 @@ Ctrl-C or SIGTERM while a session is still starting aborts the start with exit c
 host architecture from the configured release channel, verifies it against the
 release's `checksums.txt`, and atomically replaces the running executable. The
 checksums come from the same release as the binary, so they detect corrupted or
-truncated downloads, not a compromised release. It never elevates privileges;
-the executable's directory must be writable.
+truncated downloads, not a compromised release. If the executable already
+matches the release's checksum, for example because a concurrent update
+installed it, nothing is downloaded. A download that receives no data for 30
+seconds fails; Ctrl-C or SIGTERM aborts it with exit code 130 and removes the
+partial file.
+
+The updater never elevates privileges. When the executable's directory is not
+writable, as after a `sudo install` into `/usr/local/bin`, `self-update` exits
+with an error and both it and the periodic check print the `sudo install`
+command that reinstalls the new build by hand.
 
 Release channels are `rolling`, rebuilt from every push to `main` and published
 on GitHub, and `stable`, for official releases. A binary follows the channel it
@@ -115,7 +123,8 @@ Other interactive invocations, with stdin, stdout, and stderr all terminals,
 check the channel at most once every 24 hours, recorded in
 `~/.local/state/enclave/self-update-check`, and notify when a different build
 is available. Set `"auto_update": true` in the global config to install it
-during that check. All update-check output, including `--verbose` diagnostics,
+during that check; Ctrl-C during that install exits with code 130 without
+running the command. All update-check output, including `--verbose` diagnostics,
 goes to stderr. Checks are skipped for scripts and other non-interactive
 callers, shell completion, structured output, and user commands; a failed check
 waits for the next interval.

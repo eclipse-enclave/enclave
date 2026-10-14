@@ -360,9 +360,15 @@ which point it gets its own source and release CI must stamp
 `internal/app` and an `httptest` server in `internal/selfupdate`; to try a real
 update, build with `make build BUILD_CHANNEL=rolling
 BIN_DIR=/tmp/enclave-rolling` (outside the checkout, so it finds no asset tree)
-and run that binary with `ENCLAVE_HOME` unset. A killed install can leave an
-`.enclave-update-*` file beside the binary; the next install removes those older
-than an hour.
+and run that binary with `ENCLAVE_HOME` unset. `Install` creates its
+`.enclave-update-*` temporary file before any request, skips the download when
+the executable already matches the checksum, and fails a response body that is
+idle for `responseIdleTimeout`. While checking or installing, both paths hold
+SIGINT and SIGTERM through `signal.NotifyContext`, so Install's cleanup runs
+and the process exits 130; only SIGKILL or a crash leaves a temporary file,
+which the next install removes once it is an hour old. `Service.Writable` judges
+the directory with `access(2)` (`config.LooksWritableDir`) so the periodic
+check can print the `sudo install` command instead of offering `self-update`.
 
 Config additive note: feature additive directives (`+`/`-`) are applied against
 the implicit default-enabled feature set when `features` is unset. For example,

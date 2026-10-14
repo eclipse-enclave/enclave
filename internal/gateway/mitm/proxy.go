@@ -349,6 +349,10 @@ func (p *proxy) handler(scheme string) http.HandlerFunc {
 				event.ContentType = result.ContentType
 				event.Verdict = netlog.VerdictPass
 				event.Rule = "upstream-body-error"
+				if _, rule := brokerFailure(err); rule != "" {
+					// The broker stopped a response that would carry credentials.
+					event.Verdict, event.Rule = netlog.VerdictDeny, rule
+				}
 				p.logEvent(event)
 				// Headers are already on the wire. Abort the response instead of
 				// appending a 502 body or making a truncated stream look complete.

@@ -473,4 +473,8 @@ func TestOAuthForwarderAbortsResponseReflectingCredential(t *testing.T) {
 	if strings.Contains(string(logged), access) {
 		t.Fatal("reflected credential reached the audit log")
 	}
+	events := readAuditEvents(t, logPath)
+	if last := events[len(events)-1]; last.Verdict != netlog.VerdictDeny || last.Rule != "oauth-broker-response" {
+		t.Fatalf("tripwire abort audit = %+v", last)
+	}
 }

@@ -49,6 +49,7 @@ const (
 	EnvOAuthIncarnation         = EnvPrefix + "OAUTH_INCARNATION"
 	EnvOAuthGitHub              = EnvPrefix + "OAUTH_GITHUB"
 	EnvOAuthGitHubIdentity      = EnvPrefix + "OAUTH_GITHUB_IDENTITY"
+	EnvOAuthInstances           = EnvPrefix + "OAUTH_INSTANCES"
 	EnvProtectedGitHub          = EnvPrefix + "PROTECTED_GITHUB"
 	EnvProtectedAuth            = EnvPrefix + "PROTECTED_AUTH"
 	EnvProtectedAuthFiles       = EnvPrefix + "PROTECTED_AUTH_FILES"

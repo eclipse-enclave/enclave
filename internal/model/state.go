@@ -31,10 +31,15 @@ type SecretReleaseEntry struct {
 	// instance the token belongs to, so releasing it to every host beneath it
 	// would widen exactly what naming the instance is meant to narrow.
 	ExactHosts bool `json:"exact_hosts,omitempty"`
-	// DeclaredHosts are the declared release hosts a selected instance
-	// replaced. A protected gateway mediates the instance like the service
-	// they name.
-	DeclaredHosts []string `json:"declared_hosts,omitempty"`
+}
+
+// ProviderInstance is a host that serviceAuth.hostsFromCredential selected in
+// place of a service's declared release hosts, such as a GitLab instance
+// named by GITLAB_HOST. A protected gateway mediates it like the provider the
+// declared hosts belong to, whether or not a token for it is configured.
+type ProviderInstance struct {
+	Host          string   `json:"host"`
+	DeclaredHosts []string `json:"declared_hosts"`
 }
 
 func (s AuthState) HasAnyEnvCredential() bool {

@@ -117,7 +117,6 @@ func main() {
 	}
 	broker, err := loadOAuthBroker(oauthbroker.Config{
 		StoreDir: model.GatewayOAuthGrantPath, RuntimeDir: model.GatewayOAuthRuntimePath, LockPath: model.GatewayOAuthLockPath,
-		Instances: oauthbroker.InstanceProviders(rules),
 	}, model.GatewayOAuthViewPath)
 	if err != nil {
 		log.Fatal("protected OAuth initialization failed; inspect the selected identity or start a fresh session")
@@ -169,6 +168,13 @@ func loadOAuthBroker(config oauthbroker.Config, viewDir string) (*oauthbroker.Br
 		return nil, oauthbroker.ErrState
 	}
 	config.Tool = mode
+	if encoded := strings.TrimSpace(os.Getenv(model.EnvOAuthInstances)); encoded != "" {
+		var instances []model.ProviderInstance
+		if err := json.Unmarshal([]byte(encoded), &instances); err != nil {
+			return nil, oauthbroker.ErrState
+		}
+		config.Instances = oauthbroker.InstanceProviders(instances)
+	}
 	if githubMode != "" || githubIdentity != "" || config.GitHub != nil {
 		if githubMode != "1" || githubIdentity == "" {
 			return nil, oauthbroker.ErrState

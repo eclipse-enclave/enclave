@@ -545,6 +545,7 @@ esac
 				oauth := &OAuthConfig{StoreDir: filepath.Join(root, "selected-grant"), RuntimeDir: filepath.Join(root, "session-runtime"), ViewDir: filepath.Join(root, "session-view"), LockPath: filepath.Join(root, "identity.lock"), Identity: "selected", Incarnation: strings.Repeat("a", 64)}
 				feature := FeatureOAuthConfig{Name: "github-cli", StoreDir: filepath.Join(root, "github-grant"), RuntimeDir: filepath.Join(root, "github-runtime"), ViewDir: filepath.Join(root, "github-view"), LockPath: filepath.Join(root, "github.lock"), Identity: "github-selected"}
 				oauth.Features = []FeatureOAuthConfig{feature}
+				oauth.Instances = []model.ProviderInstance{{Host: "gitlab.example.com", DeclaredHosts: []string{"gitlab.com"}}}
 				for _, dir := range []string{oauth.StoreDir, oauth.RuntimeDir, oauth.ViewDir, feature.StoreDir, feature.RuntimeDir, feature.ViewDir} {
 					if err := os.MkdirAll(dir, 0o700); err != nil {
 						t.Fatal(err)
@@ -625,7 +626,7 @@ esac
 						t.Errorf("missing selected identity mount %s -> %s", source, target)
 					}
 				}
-				for _, want := range []string{model.EnvOAuthBroker + "=claude", model.EnvOAuthIdentity + "=selected", model.EnvOAuthIncarnation + "=" + oauth.Incarnation, model.EnvOAuthGitHub + "=1", model.EnvOAuthGitHubIdentity + "=github-selected", "--cap-add\nDAC_OVERRIDE", "--cap-add\nCHOWN"} {
+				for _, want := range []string{model.EnvOAuthBroker + "=claude", model.EnvOAuthIdentity + "=selected", model.EnvOAuthIncarnation + "=" + oauth.Incarnation, model.EnvOAuthGitHub + "=1", model.EnvOAuthGitHubIdentity + "=github-selected", model.EnvOAuthInstances + `=[{"host":"gitlab.example.com","declared_hosts":["gitlab.com"]}]`, "--cap-add\nDAC_OVERRIDE", "--cap-add\nCHOWN"} {
 					if !strings.Contains(args, want) {
 						t.Errorf("missing protected gateway argument %q", want)
 					}

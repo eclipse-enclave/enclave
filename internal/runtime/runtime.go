@@ -84,6 +84,7 @@ type ExecutionContext struct {
 	Network        backend.NetworkPolicy
 	Ports          []backend.PortMapping
 	Secrets        []backend.SecretRelease
+	Instances      []backend.ProviderInstance
 	AuthSync       *backend.AuthSyncSpec
 	Cleanup        func()
 	RunCtx         model.RunContext
@@ -326,6 +327,7 @@ func (r *Runtime) prepareExecution() (*ExecutionContext, error) {
 		Network:        networkResult.Network,
 		Ports:          networkResult.Ports,
 		Secrets:        secretReleases(prepared.SecretMapping),
+		Instances:      providerInstanceRequests(prepared.SecretMapping),
 		AuthSync:       prepared.AuthSync,
 		Cleanup:        cleanup,
 		RunCtx:         runCtx,
@@ -731,6 +733,14 @@ func secretReleases(mapping SecretMapping) []backend.SecretRelease {
 	return secrets
 }
 
+func providerInstanceRequests(mapping SecretMapping) []backend.ProviderInstance {
+	var instances []backend.ProviderInstance
+	for _, instance := range mapping.Instances {
+		instances = append(instances, backend.ProviderInstance{Host: instance.Host, DeclaredHosts: append([]string(nil), instance.DeclaredHosts...)})
+	}
+	return instances
+}
+
 func (r *Runtime) addUniquePort(port string, message string, args ...any) {
 	hasHost, hasContainer, hasExact := util.PortMappingState(r.run.Ports, port)
 	if hasExact || hasHost || hasContainer {
@@ -981,6 +991,7 @@ func (r *Runtime) backendRequest(ctx *ExecutionContext, detached bool, interacti
 		Ports:           append([]backend.PortMapping(nil), ctx.Ports...),
 		Security:        backend.SecurityPosture{Admin: r.run.Admin},
 		Secrets:         append([]backend.SecretRelease(nil), ctx.Secrets...),
+		Instances:       append([]backend.ProviderInstance(nil), ctx.Instances...),
 		RuntimeUIDRemap: r.build.RuntimeUIDRemap,
 		Detached:        detached,
 	}

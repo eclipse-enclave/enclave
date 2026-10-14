@@ -56,6 +56,9 @@ func (b *Backend) startGateway(ctx context.Context, req backend.Request, network
 		cleanupFiles(tempFiles)
 		return "", nil, err
 	}
+	if oauth != nil {
+		oauth.Instances = gatewayInstances(req.Instances)
+	}
 	workspaceID := workspaceIDFromSession(req.Session, b.opts.ProjectDir)
 	captureRoot := ""
 	if b.opts.NetworkLogMode == model.NetworkLogFull {
@@ -300,6 +303,14 @@ func workspaceIDFromSession(session backend.SessionMeta, projectDir string) stri
 		workspaceID = session.Worktree
 	}
 	return workspaceID
+}
+
+func gatewayInstances(instances []backend.ProviderInstance) []model.ProviderInstance {
+	var converted []model.ProviderInstance
+	for _, instance := range instances {
+		converted = append(converted, model.ProviderInstance{Host: instance.Host, DeclaredHosts: append([]string(nil), instance.DeclaredHosts...)})
+	}
+	return converted
 }
 
 func writeSecretReleaseConfig(secrets []backend.SecretRelease) (string, error) {

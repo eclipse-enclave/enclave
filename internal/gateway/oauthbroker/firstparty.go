@@ -217,26 +217,17 @@ func firstPartyHost(host string) bool {
 	return providerFor(host) != nil
 }
 
-// InstanceProviders names the provider of each self-hosted instance a release
-// rule selected in place of the provider's declared hosts, such as a GitLab
-// instance named by GITLAB_HOST.
-func InstanceProviders(rules []model.SecretReleaseEntry) map[string]string {
+// InstanceProviders names the provider of each self-hosted instance selected
+// in place of a provider's declared hosts, such as a GitLab instance named by
+// GITLAB_HOST.
+func InstanceProviders(selected []model.ProviderInstance) map[string]string {
 	instances := map[string]string{}
-	for _, rule := range rules {
-		if !rule.ExactHosts {
-			continue
-		}
-		var p *provider
-		for _, host := range rule.DeclaredHosts {
-			if p = providerFor(strings.TrimPrefix(host, "*.")); p != nil {
+	for _, instance := range selected {
+		for _, host := range instance.DeclaredHosts {
+			if p := providerFor(strings.TrimPrefix(host, "*.")); p != nil && protectedHost(instance.Host) != "" {
+				instances[protectedHost(instance.Host)] = p.name
 				break
 			}
-		}
-		if p == nil {
-			continue
-		}
-		for _, host := range rule.Hosts {
-			instances[protectedHost(host)] = p.name
 		}
 	}
 	return instances

@@ -10,6 +10,7 @@ package gateway
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -363,6 +364,8 @@ type OAuthConfig struct {
 	Identity    string
 	Incarnation string
 	Features    []FeatureOAuthConfig
+	// Instances are self-hosted hosts the broker mediates like a provider.
+	Instances []model.ProviderInstance
 }
 
 type FeatureOAuthConfig struct {
@@ -540,6 +543,14 @@ func Start(ctx context.Context, cfg StartConfig) (StartResult, error) {
 		env = append(env, model.EnvOAuthBroker+"="+cfg.Profile.Name, model.EnvOAuthIdentity+"="+cfg.OAuth.Identity, model.EnvOAuthIncarnation+"="+cfg.OAuth.Incarnation)
 		for _, feature := range cfg.OAuth.Features {
 			env = append(env, model.EnvOAuthGitHub+"=1", model.EnvOAuthGitHubIdentity+"="+feature.Identity)
+		}
+		if len(cfg.OAuth.Instances) != 0 {
+			// Host names only; no credential is part of an instance.
+			instances, err := json.Marshal(cfg.OAuth.Instances)
+			if err != nil {
+				return empty, fmt.Errorf("encode protected provider instances: %w", err)
+			}
+			env = append(env, model.EnvOAuthInstances+"="+string(instances))
 		}
 	}
 

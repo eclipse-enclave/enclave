@@ -20,6 +20,7 @@ import (
 func TestLoadOAuthBrokerRequiresExplicitCompleteConfiguration(t *testing.T) {
 	for _, tc := range []struct {
 		name, mode, identity, session, incarnation string
+		instances                                  string
 		wantBroker, wantError                      bool
 	}{
 		{name: "disabled"},
@@ -29,6 +30,9 @@ func TestLoadOAuthBrokerRequiresExplicitCompleteConfiguration(t *testing.T) {
 		{name: "missing-incarnation", mode: "claude", identity: "fresh", session: "session", wantError: true},
 		{name: "orphan-identity", identity: "fresh", wantError: true},
 		{name: "protected", mode: "claude", identity: "fresh", session: "session", incarnation: "first", wantBroker: true},
+		{name: "instances", mode: "codex", identity: "fresh", session: "session", incarnation: "first", wantBroker: true,
+			instances: `[{"host":"gitlab.example.com","declared_hosts":["gitlab.com","*.gitlab.com"]}]`},
+		{name: "malformed-instances", mode: "codex", identity: "fresh", session: "session", incarnation: "first", instances: "{", wantError: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv(model.EnvOAuthBroker, tc.mode)
@@ -37,6 +41,7 @@ func TestLoadOAuthBrokerRequiresExplicitCompleteConfiguration(t *testing.T) {
 			t.Setenv(model.EnvOAuthIncarnation, tc.incarnation)
 			t.Setenv(model.EnvOAuthGitHub, "")
 			t.Setenv(model.EnvOAuthGitHubIdentity, "")
+			t.Setenv(model.EnvOAuthInstances, tc.instances)
 			root := t.TempDir()
 			config := oauthbroker.Config{StoreDir: filepath.Join(root, "grant"), RuntimeDir: filepath.Join(root, "runtime"), LockPath: filepath.Join(root, "identity.lock")}
 			view := filepath.Join(root, "view")
@@ -54,6 +59,9 @@ func TestLoadOAuthBrokerRequiresExplicitCompleteConfiguration(t *testing.T) {
 			}
 			if tc.wantError && !errors.Is(err, oauthbroker.ErrState) {
 				t.Fatal("unsafe broker configuration did not fail closed")
+			}
+			if broker != nil && broker.RequiresMITM("gitlab.example.com") != (tc.instances != "") {
+				t.Fatal("selected GitLab instance not mediated")
 			}
 			if tc.wantBroker {
 				if err := os.WriteFile(filepath.Join(view, ".credentials.json"), []byte("client-managed"), 0o600); err != nil {

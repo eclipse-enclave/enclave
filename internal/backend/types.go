@@ -67,6 +67,9 @@ type Request struct {
 
 	Security SecurityPosture
 	Secrets  []SecretRelease
+	// Instances are self-hosted hosts selected in place of declared release
+	// hosts; a protected gateway mediates them like their provider.
+	Instances []ProviderInstance
 
 	// AuthSync declares the credential reconciliation to run after a foreground
 	// session exits. It must be carried on the request because foreground
@@ -338,6 +341,12 @@ type HTTPReleaseRule struct {
 	// ExactHosts matches Hosts by equality rather than covering subdomains;
 	// see model.SecretReleaseEntry.
 	ExactHosts bool
+}
+
+// ProviderInstance is a host selected in place of a service's DeclaredHosts.
+type ProviderInstance struct {
+	Host          string
+	DeclaredHosts []string
 }
 
 type PortMapping struct {

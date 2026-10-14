@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"slices"
 
 	"enclave/internal/auth"
 	"enclave/internal/backend"
@@ -183,7 +184,9 @@ func (m authManager) injectDeclaredSecrets(hooks auth.Hooks, authCtx auth.Contex
 		}
 	}
 	hostCredentials := hostCredentialRefs(eligibleSecrets)
-	m.setReleaseHostOverrides(resolveReleaseHostOverrides(eligibleSecrets, m.host.Home, secretsLayers, persistedEnv))
+	overrides := resolveReleaseHostOverrides(eligibleSecrets, m.host.Home, secretsLayers, persistedEnv)
+	m.setReleaseHostOverrides(overrides)
+	result.SecretMapping.Instances = providerInstances(eligibleSecrets, overrides)
 	secretReleaseEnabled := m.shouldUseSecretReleases(eligibleSecrets)
 	for _, secret := range eligibleSecrets {
 		secretValue, secretSource, found, err := resolveActiveSecretValue(secret, m.host.Home, secretsLayers, persistedEnv)
@@ -211,7 +214,7 @@ func (m authManager) injectDeclaredSecrets(hooks auth.Hooks, authCtx auth.Contex
 			placeholder = resolved
 			placeholderVars = m.proxyManagedEnvVars(secret)
 			releaseHosts, exactHosts := m.releaseTargetsFor(secret)
-			entry := model.SecretReleaseEntry{
+			result.SecretMapping.Entries = append(result.SecretMapping.Entries, model.SecretReleaseEntry{
 				SecretID:    secret.ID,
 				Placeholder: placeholder,
 				Value:       secretValue,
@@ -219,11 +222,7 @@ func (m authManager) injectDeclaredSecrets(hooks auth.Hooks, authCtx auth.Contex
 				Header:      secret.ReleaseHTTP.Header,
 				Format:      secret.ReleaseHTTP.Format,
 				ExactHosts:  exactHosts,
-			}
-			if exactHosts {
-				entry.DeclaredHosts = append([]string{}, secret.ReleaseHTTP.Hosts...)
-			}
-			result.SecretMapping.Entries = append(result.SecretMapping.Entries, entry)
+			})
 		}
 		// A host selector is a choice, not a credential: persisting it would
 		// pin every later run to the instance one run happened to name, with no
@@ -467,6 +466,32 @@ func (m authManager) releaseTargetsFor(secret activeSecret) (hosts []string, exa
 		return append([]string{}, override...), true
 	}
 	return append([]string{}, secret.ReleaseHTTP.Hosts...), false
+}
+
+// providerInstances lists each selected host with the declared release hosts it
+// replaced, so a protected gateway can mediate the instance even before any
+// token for it is configured.
+func providerInstances(secrets []activeSecret, overrides map[string][]string) []model.ProviderInstance {
+	var instances []model.ProviderInstance
+	for _, secret := range secrets {
+		hosts, ok := overrides[secret.ID]
+		if !ok || secret.ReleaseHTTP == nil {
+			continue
+		}
+		for _, host := range hosts {
+			i := slices.IndexFunc(instances, func(instance model.ProviderInstance) bool { return instance.Host == host })
+			if i < 0 {
+				instances = append(instances, model.ProviderInstance{Host: host})
+				i = len(instances) - 1
+			}
+			for _, declared := range secret.ReleaseHTTP.Hosts {
+				if !slices.Contains(instances[i].DeclaredHosts, declared) {
+					instances[i].DeclaredHosts = append(instances[i].DeclaredHosts, declared)
+				}
+			}
+		}
+	}
+	return instances
 }
 
 func (m authManager) shouldUseSecretReleases(activeSecrets []activeSecret) bool {

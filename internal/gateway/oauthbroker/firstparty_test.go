@@ -189,10 +189,9 @@ func TestPiViewProjectsAnthropicHandles(t *testing.T) {
 }
 
 func TestInstanceProvidersFollowReplacedDeclaredHosts(t *testing.T) {
-	got := InstanceProviders([]model.SecretReleaseEntry{
-		{Hosts: []string{"GitLab.Example.com"}, ExactHosts: true, DeclaredHosts: []string{"gitlab.com", "*.gitlab.com"}},
-		{Hosts: []string{"other.example.com"}, ExactHosts: true, DeclaredHosts: []string{"api.vendor.example"}},
-		{Hosts: []string{"gitlab.com"}},
+	got := InstanceProviders([]model.ProviderInstance{
+		{Host: "GitLab.Example.com", DeclaredHosts: []string{"*.gitlab.com", "gitlab.com"}},
+		{Host: "other.example.com", DeclaredHosts: []string{"api.vendor.example"}},
 	})
 	if len(got) != 1 || got["gitlab.example.com"] != "gitlab" {
 		t.Fatalf("instances = %v", got)

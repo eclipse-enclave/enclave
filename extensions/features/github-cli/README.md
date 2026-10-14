@@ -37,7 +37,11 @@ trusted feature store.
 
 Use `gh auth login --hostname github.com --git-protocol https --web --insecure-storage`
 inside the protected session; native-file storage contains handles, not provider
-tokens. HTTPS Git remotes work with or without the `.git` suffix. PAT paste,
+tokens. HTTPS Git remotes work with or without the `.git` suffix; release
+asset uploads, gist Git remotes and Git LFS are refused. Login shells keep the
+pinned client first on `PATH`. On architectures other than amd64 and arm64 the
+pinned client is not installed, so protected sessions with this feature refuse
+to start there. PAT paste,
 Enterprise hosts, keyring-only credentials, expiry/refresh-bearing token
 responses and unsupported native/token schemas are not supported. Existing
 compatible native feature credentials are consumed

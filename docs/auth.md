@@ -254,7 +254,9 @@ gh auth login --hostname github.com --git-protocol https --web --insecure-storag
 The gateway captures its token response before it reaches `gh`.
 `--insecure-storage` selects native-file storage of **handles**, not provider
 tokens. Protected HTTPS Git remotes use `https://github.com/<owner>/<repo>`,
-with or without the `.git` suffix. Pasting a PAT, GitHub Enterprise login,
+with or without the `.git` suffix. Handles are released only to
+`api.github.com` and to these remotes; release asset uploads at
+`uploads.github.com`, gist Git remotes and Git LFS are refused. Pasting a PAT, GitHub Enterprise login,
 keyring-only credentials and unsupported native schemas are not protected login
 paths. Expiry/refresh-bearing GitHub token responses are unsupported; unknown
 token responses fail closed. As with Claude login, an already-malicious client

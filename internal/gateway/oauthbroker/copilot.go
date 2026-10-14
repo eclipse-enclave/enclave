@@ -212,7 +212,7 @@ func copilotForm(req *http.Request) (url.Values, bool, error) {
 		return nil, true, ErrDenied
 	}
 	if req.URL.Path == githubDevicePath {
-		if len(form) != 2 || !githubScopes(form.Get("scope"), " ") {
+		if len(form) != 2 || !form.Has("scope") || !githubScopes(form.Get("scope"), " ") {
 			return nil, true, ErrDenied
 		}
 	} else if len(form) != 3 || form.Get("grant_type") != githubDeviceGrant || !githubDeviceCode(form.Get("device_code")) {

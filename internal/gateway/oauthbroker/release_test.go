@@ -266,3 +266,84 @@ func TestRefreshRotatesAfterProviderRejectsAccess(t *testing.T) {
 		t.Fatalf("refresh after a 401 dispatched %d times, grant %+v, %v", dispatched, g, err)
 	}
 }
+
+// encoding/json matches field names by Unicode simple folding, so duplicate
+// detection must fold the same way.
+func TestDuplicateKeysFoldLikeEncodingJSON(t *testing.T) {
+	for _, document := range []string{
+		`{"access_token":"a","ACCESS_TOKEN":"b"}`,
+		`{"access_token":"a","acceſs_token":"b"}`,
+		`{"token":"a","Key":"b","key":"c"}`,
+	} {
+		if uniqueJSON([]byte(document)) == nil {
+			t.Errorf("duplicate keys accepted: %s", document)
+		}
+	}
+	if err := uniqueJSON([]byte(`{"access_token":"a","refresh_token":"b"}`)); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A reflected JWT signature, the secret part of a ChatGPT token, is caught
+// even without the token's header and claims around it.
+func TestChatGPTReleaseGuardsTheSignature(t *testing.T) {
+	f := newOpenAIFixture(t, "codex")
+	handle := f.login()["access_token"].(string)
+	signature := jwtSignature(f.access)
+	req := releaseRequest(t, "https://chatgpt.com/backend-api/codex/responses", handle, nil)
+	response, err := fixtureRoundTrip(f.b, req, fixtureTransport(func(*http.Request) (*http.Response, error) {
+		return rawFixtureResponse([]byte(`{"echo":"` + signature + `"}`)), nil
+	}))
+	if err == nil {
+		_, err = io.ReadAll(response.Body)
+		_ = response.Body.Close()
+	}
+	if signature == "" || !errors.Is(err, ErrResponse) {
+		t.Fatalf("reflected signature passed: %v", err)
+	}
+}
+
+func TestChatGPTLoginRefusesExpiredAndBoundsLongLifetimes(t *testing.T) {
+	for name, tc := range map[string]struct {
+		exp     int64
+		wantErr bool
+	}{
+		"expired":    {exp: 1800000000 - 60, wantErr: true},
+		"centuries":  {exp: 1800000000 + 100*maxLifetime},
+		"in an hour": {exp: 1800000000 + 3600},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newOpenAIFixture(t, "codex")
+			f.access = fixtureJWT(t, map[string]any{"exp": tc.exp, "https://api.openai.com/auth": map[string]any{"chatgpt_account_id": f.account}}, "real-access-signature")
+			// Without expires_in, the token's own exp claim decides.
+			f.respond = func(*http.Request) (*http.Response, error) {
+				return fixtureResponse(map[string]any{"access_token": f.access, "refresh_token": f.rt, "id_token": f.id}), nil
+			}
+			_, err := fixtureRoundTrip(f.b, f.request(false, map[string]string{"grant_type": "authorization_code", "client_id": openaiClientID, "code": "synthetic-code", "code_verifier": "synthetic-verifier", "redirect_uri": "http://127.0.0.1:1455/auth/callback"}), f.transport())
+			if tc.wantErr {
+				if !errors.Is(err, ErrResponse) {
+					t.Fatalf("expired token committed: %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			g, err := f.b.readOpenAIGrant()
+			if err != nil || g.ExpiresAt > f.b.now().Unix()+maxLifetime {
+				t.Fatalf("lifetime unbounded: %+v, %v", g, err)
+			}
+		})
+	}
+}
+
+func TestCopilotDeviceRequestNeedsItsScope(t *testing.T) {
+	b := fixtureToolBroker(t, "opencode")
+	req := copilotRequest(t, githubDevicePath, map[string]string{"client_id": copilotClientID, "extra": "x"})
+	if _, err := fixtureRoundTrip(b, req, fixtureTransport(func(*http.Request) (*http.Response, error) {
+		t.Error("device request with a foreign field dispatched")
+		return nil, io.EOF
+	})); !errors.Is(err, ErrDenied) {
+		t.Fatalf("foreign field accepted: %v", err)
+	}
+}

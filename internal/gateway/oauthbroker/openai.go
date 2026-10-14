@@ -217,6 +217,14 @@ func openaiExpiry(token string) int64 {
 	return 0
 }
 
+func jwtSignature(token string) string {
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 || len(parts[2]) < 16 {
+		return ""
+	}
+	return parts[2]
+}
+
 // handleJWT keeps the real token's header and payload, so clients see the same
 // claims, and replaces its signature with the session's handle signature.
 func handleJWT(token, signature string) string {
@@ -263,7 +271,9 @@ func (b *Broker) openaiRelease(req *http.Request, transport http.RoundTripper) (
 			return ErrDenied
 		}
 		outgoing.Header.Set("Authorization", "Bearer "+g.Token.Access)
-		secrets = []string{g.Token.Access, g.Token.Refresh, g.Token.ID}
+		// Signatures are the secret parts of the JWTs; headers and claims are
+		// in the handles anyway.
+		secrets = []string{g.Token.Access, g.Token.Refresh, g.Token.ID, jwtSignature(g.Token.Access), jwtSignature(g.Token.ID)}
 		return nil
 	})
 	if err != nil {
@@ -480,7 +490,7 @@ func (b *Broker) openaiCommit(body []byte, pending *openaiGrant, refresh bool) (
 		return nil, ErrResponse
 	}
 	if (token.Refresh != "" && !opaqueToken(token.Refresh)) || (token.ID != "" && !jwtShaped(token.ID)) ||
-		(token.Expires != nil && (*token.Expires < 1 || *token.Expires > 86400*366)) ||
+		(token.Expires != nil && (*token.Expires < 1 || *token.Expires > maxLifetime)) ||
 		(token.Type != "" && !strings.EqualFold(token.Type, "bearer")) || (token.Scope != "" && !safeText(token.Scope, 4096)) {
 		return nil, ErrResponse
 	}
@@ -525,8 +535,15 @@ func (b *Broker) openaiCommit(body []byte, pending *openaiGrant, refresh bool) (
 	if token.Expires != nil {
 		expiresAt = committedAt.Unix() + *token.Expires
 	}
-	if expiresAt <= committedAt.Unix() {
+	switch {
+	case expiresAt == 0:
+		// No lifetime given; refresh after an hour.
 		expiresAt = committedAt.Unix() + 3600
+	case expiresAt <= committedAt.Unix():
+		// An access token that is already expired is a broken response.
+		return nil, ErrResponse
+	case expiresAt > committedAt.Unix()+maxLifetime:
+		expiresAt = committedAt.Unix() + maxLifetime
 	}
 	next.Life = expiresAt - committedAt.Unix()
 	committed := openaiGrant{Schema: 1, Identity: b.config.Identity, Generation: pending.Generation + 1, Status: "ready", CommittedAt: committedAt, ExpiresAt: expiresAt, AccountID: account, Token: next}

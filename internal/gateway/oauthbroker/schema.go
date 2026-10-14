@@ -17,6 +17,7 @@ import (
 	"net/mail"
 	"strconv"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 )
 
@@ -100,10 +101,10 @@ func uniqueValue(d *json.Decoder, depth int) error {
 				return ErrResponse
 			}
 			key, ok := token.(string)
-			if !ok || keys[strings.ToLower(key)] {
+			if !ok || keys[foldKey(key)] {
 				return ErrResponse
 			}
-			keys[strings.ToLower(key)] = true
+			keys[foldKey(key)] = true
 		}
 		if err := uniqueValue(d, depth+1); err != nil {
 			return err
@@ -111,6 +112,20 @@ func uniqueValue(d *json.Decoder, depth int) error {
 	}
 	_, err = d.Token()
 	return err
+}
+
+// foldKey maps a key to one representative of its Unicode simple-folding
+// class, as encoding/json matches field names, so "ſ" duplicates "s".
+func foldKey(key string) string {
+	var folded strings.Builder
+	for _, r := range key {
+		least := r
+		for f := unicode.SimpleFold(r); f != r; f = unicode.SimpleFold(f) {
+			least = min(least, f)
+		}
+		folded.WriteRune(least)
+	}
+	return folded.String()
 }
 
 func exactKeys(data []byte, allowed ...string) error {
@@ -160,7 +175,7 @@ func decodeToken(data []byte) (tokenResponse, error) {
 }
 
 func validateToken(t tokenResponse, initial bool) error {
-	if !opaqueToken(t.Access) || t.Type != "Bearer" || t.Expires < 1 || t.Expires > 86400*366 || !validScope(t.Scope) {
+	if !opaqueToken(t.Access) || t.Type != "Bearer" || t.Expires < 1 || t.Expires > maxLifetime || !validScope(t.Scope) {
 		return ErrResponse
 	}
 	if (initial || t.Refresh != "") && !opaqueToken(t.Refresh) {

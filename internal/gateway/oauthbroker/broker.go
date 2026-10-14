@@ -34,8 +34,8 @@ const refreshWindow = 5 * time.Minute
 const refreshReplayWindow = 30 * time.Second
 const exchangeTimeout = 2 * time.Minute
 
-// maxRequestedLifetime bounds a client-requested token lifetime in seconds.
-const maxRequestedLifetime = 400 * 24 * 60 * 60
+// maxLifetime bounds token lifetimes in seconds, requested or granted.
+const maxLifetime = 366 * 24 * 60 * 60
 
 // RequiresMITM installs capture before the first login (there is no grant yet).
 func (b *Broker) RequiresMITM(host string) bool {
@@ -254,7 +254,7 @@ func (b *Broker) validateExchange(req *http.Request) (tokenRequest, error) {
 	if strictJSON(data, &input) != nil || exactKeys(data, "grant_type", "client_id", "code", "redirect_uri", "code_verifier", "state", "refresh_token", "scope", "expires_in") != nil || input.ClientID != clientID {
 		return tokenRequest{}, ErrDenied
 	}
-	if input.ExpiresIn != nil && (*input.ExpiresIn < 1 || *input.ExpiresIn > maxRequestedLifetime) {
+	if input.ExpiresIn != nil && (*input.ExpiresIn < 1 || *input.ExpiresIn > maxLifetime) {
 		return tokenRequest{}, ErrDenied
 	}
 	switch input.GrantType {

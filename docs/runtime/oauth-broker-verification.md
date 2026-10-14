@@ -76,7 +76,7 @@ or a supported-client compatibility claim**:
 
 | Area | Candidate behavior |
 |------|--------------------|
-| Capture | JSON `POST https://platform.claude.com:443/v1/oauth/token`; the default port may be implicit. Only authorization-code and refresh grants with the Claude Code client ID are accepted; an optional integer `expires_in` request field from 1 second to 400 days is forwarded. |
+| Capture | JSON `POST https://platform.claude.com:443/v1/oauth/token`; the default port may be implicit. Only authorization-code and refresh grants with the Claude Code client ID are accepted; an optional integer `expires_in` request field from 1 second to 366 days is forwarded. |
 | Body limits | 64 KiB maximum for both encoded and decoded token responses; JSON with identity or gzip encoding. Requests are bounded JSON without content encoding. Unknown/duplicate/case-mismatched keys, unexpected nested structures and null fields are rejected. |
 | Exchange deadline | Two minutes from upstream dispatch through token response-body consumption. Token exchanges use a dedicated fresh connection with keep-alives disabled, avoiding stale pooled-connection failures without replaying exchanges. Failure after durable intent leaves an uncertain result. |
 | Success fields | `access_token`, `refresh_token`, `token_type`, `expires_in`, `scope`, `account`, `organization`; no other fields. `token_type` is exactly `Bearer`; expiry is an integer from 1 second to 366 days. |

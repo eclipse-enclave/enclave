@@ -371,6 +371,9 @@ sandbox:
   qemuMinMemoryMiB: 4096
   skillsDir: .claude/skills
   memoryDir: .claude/memory
+  # Command-line settings take precedence over the baked settings template,
+  # which opts auto-memory in, so this disables generation without the mount.
+  noMemoryArgs: [--settings, '{"autoMemoryEnabled": false}']
   settingsFile: claude-settings.json
   settingsTarget: .claude/settings.json
   yoloFlag: --dangerously-skip-permissions
@@ -384,8 +387,14 @@ sandbox:
 
 credentials:
   sources:
-    anthropic-api-key: { env: [ANTHROPIC_API_KEY] }
-    claude-code-oauth-token: { env: [CLAUDE_CODE_OAUTH_TOKEN], apiKey: false }
+    # Clients tell Anthropic API keys and OAuth tokens apart by their prefixes.
+    anthropic-api-key:
+      env: [ANTHROPIC_API_KEY]
+      placeholder: { prefix: "sk-ant-api03-", suffix: "AA", random: { encoding: base64url, length: 93 } }
+    claude-code-oauth-token:
+      env: [CLAUDE_CODE_OAUTH_TOKEN]
+      apiKey: false
+      placeholder: { prefix: "sk-ant-oat01-", suffix: "AA", random: { encoding: base64url, length: 93 } }
 
 network:
   serviceDomains:
@@ -393,6 +402,11 @@ network:
     "*.anthropic.com": anthropic-api-key
   serviceAuth:
     anthropic-api-key: { headerName: x-api-key }
+    # A `claude setup-token` token authenticates like a subscription login.
+    claude-code-oauth-token:
+      headerName: authorization
+      valueFormat: "Bearer %s"
+      hosts: [api.anthropic.com, mcp-proxy.anthropic.com]
 
 providers:
   - name: anthropic

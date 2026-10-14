@@ -121,9 +121,26 @@ func (b *Backend) PrepareAuthSession(ctx context.Context, key backend.StoreKey, 
 				return nil, errors.New("protected auth directories must have private permissions")
 			}
 		}
+		ref.Logins = readyLogins(dir, key.Owner)
 	}
 	admitted = true
 	return ref, nil
+}
+
+// readyLogins lists the tool's adapters whose grant in dir is ready.
+func readyLogins(dir, tool string) []string {
+	description, _ := protectedauth.Lookup(tool)
+	var ready []string
+	for _, adapter := range description.Adapters {
+		data, err := os.ReadFile(filepath.Join(dir, protectedauth.GrantFile(adapter))) // #nosec G304 -- fixed grant name in the admitted identity directory.
+		var grant struct {
+			Status string `json:"status"`
+		}
+		if err == nil && json.Unmarshal(data, &grant) == nil && grant.Status == "ready" {
+			ready = append(ready, adapter)
+		}
+	}
+	return ready
 }
 
 // rollBackAuthAdmission releases a reservation whose preparation failed. This

@@ -293,7 +293,30 @@ func (m authManager) prepareProtected(env *[]string, stores storeSet) (model.Aut
 		return model.AuthState{}, SecretMapping{}, err
 	}
 	m.persistEnvToStore(stores, persisted, injection.SecretValues, passed)
-	return model.AuthState{Providers: map[string]model.ProviderAuthState{"anthropic": {HasSession: true}}}, injection.SecretMapping, nil
+	return m.protectedAuthState(injection.ProviderHasEnvCredential), injection.SecretMapping, nil
+}
+
+// protectedAuthState reports a provider session where admission found a ready
+// grant of the adapter that captures its login, so later sessions skip login
+// callback ports as ordinary ones do.
+func (m authManager) protectedAuthState(envCredential map[string]bool) model.AuthState {
+	tool, _ := protectedauth.Lookup(m.profile.Name)
+	var ready []string
+	if m.authSession != nil {
+		ready = m.authSession.Logins
+	}
+	state := model.AuthState{Providers: map[string]model.ProviderAuthState{}}
+	for _, provider := range m.profile.Providers {
+		if provider.Name == "" {
+			continue
+		}
+		adapter, captured := tool.Providers[provider.Name]
+		state.Providers[provider.Name] = model.ProviderAuthState{
+			HasEnvCredential: envCredential[provider.Name],
+			HasSession:       captured && slices.Contains(ready, adapter),
+		}
+	}
+	return state
 }
 
 func (r *Runtime) validateProtectedSettings(filename string, github bool) error {

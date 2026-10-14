@@ -210,6 +210,9 @@ type AuthSession struct {
 	Incarnation string
 	Protected   bool
 	Features    []string
+	// Logins lists the adapters whose grant was ready at admission. It is a
+	// launch hint, such as for skipping login callback ports.
+	Logins []string
 }
 
 // protectedConfigSuffix marks config stores used only by protected sessions.

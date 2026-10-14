@@ -24,6 +24,18 @@ const (
 	AdapterCopilot   = "copilot"
 )
 
+var grantFiles = map[string]string{
+	AdapterAnthropic: "oauth-grant.json",
+	AdapterOpenAI:    "openai-grant.json",
+	AdapterMistral:   "mistral-grant.json",
+	AdapterCopilot:   "copilot-grant.json",
+}
+
+// GrantFile names the durable grant an adapter keeps in a protected identity.
+func GrantFile(adapter string) string {
+	return grantFiles[adapter]
+}
+
 // NativeFile is a credential file the tool reads from its config directory.
 // The session links ConfigPath to ViewName in the handle view.
 type NativeFile struct {
@@ -38,6 +50,9 @@ type Tool struct {
 	// assumes; a same-named extension with another layout is refused.
 	ConfigDir string
 	Adapters  []string
+	// Providers maps the tool's spec providers to the adapters that
+	// capture their logins.
+	Providers map[string]string
 	Files     []NativeFile
 	// StorageDirEnv names a variable that points the tool's credential
 	// storage at the view directly, instead of a linked file.
@@ -52,6 +67,7 @@ var tools = []Tool{
 		Name:          "claude",
 		ConfigDir:     ".claude",
 		Adapters:      []string{AdapterAnthropic},
+		Providers:     map[string]string{"anthropic": AdapterAnthropic},
 		StorageDirEnv: "CLAUDE_SECURESTORAGE_CONFIG_DIR",
 		LocationEnv:   []string{"CLAUDE_CONFIG_DIR", "CLAUDE_SECURESTORAGE_CONFIG_DIR"},
 	},
@@ -59,6 +75,7 @@ var tools = []Tool{
 		Name:        "codex",
 		ConfigDir:   ".codex",
 		Adapters:    []string{AdapterOpenAI},
+		Providers:   map[string]string{"openai-codex": AdapterOpenAI},
 		Files:       []NativeFile{{ConfigPath: "auth.json", ViewName: "auth.json"}},
 		LocationEnv: []string{"CODEX_HOME"},
 	},
@@ -66,6 +83,7 @@ var tools = []Tool{
 		Name:        "opencode",
 		ConfigDir:   ".config/opencode",
 		Adapters:    []string{AdapterOpenAI, AdapterCopilot},
+		Providers:   map[string]string{"openai": AdapterOpenAI, "github-copilot": AdapterCopilot},
 		Files:       []NativeFile{{ConfigPath: "auth.json", ViewName: "auth.json"}},
 		LocationEnv: []string{"OPENCODE_AUTH_CONTENT"},
 	},
@@ -73,6 +91,7 @@ var tools = []Tool{
 		Name:        "pi",
 		ConfigDir:   ".pi",
 		Adapters:    []string{AdapterAnthropic, AdapterOpenAI},
+		Providers:   map[string]string{"anthropic": AdapterAnthropic, "openai-codex": AdapterOpenAI},
 		Files:       []NativeFile{{ConfigPath: "agent/auth.json", ViewName: "auth.json"}},
 		LocationEnv: []string{"PI_CODING_AGENT_DIR"},
 	},
@@ -80,6 +99,7 @@ var tools = []Tool{
 		Name:        "mistral-vibe",
 		ConfigDir:   ".vibe",
 		Adapters:    []string{AdapterMistral},
+		Providers:   map[string]string{"mistral": AdapterMistral},
 		Files:       []NativeFile{{ConfigPath: ".env", ViewName: "vibe.env"}},
 		LocationEnv: []string{"VIBE_HOME"},
 	},

@@ -11,12 +11,15 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
 	"enclave/internal/backend"
 	"enclave/internal/config"
 	"enclave/internal/model"
+	"enclave/internal/protectedauth"
+	"enclave/internal/tools"
 )
 
 type protectedTestBackend struct{ fakeBackend }
@@ -375,5 +378,55 @@ func TestProtectedIdentityFollowsScope(t *testing.T) {
 	}
 	if _, ok := stores.Features["github-cli"]; !ok {
 		t.Fatal("ephemeral session lacks the gateway-owned GitHub store; a login would reach the workload")
+	}
+}
+
+func TestProtectedProvidersNameSpecProviders(t *testing.T) {
+	paths := model.Paths{ToolsDir: filepath.Join("..", "..", "extensions", "tools")}
+	for _, tool := range protectedauth.Tools() {
+		profile, err := config.LoadProfile(paths, tool.Name)
+		if err != nil {
+			t.Fatalf("load %s profile: %v", tool.Name, err)
+		}
+		covered := map[string]bool{}
+		for provider, adapter := range tool.Providers {
+			covered[adapter] = true
+			if !slices.ContainsFunc(profile.Providers, func(p model.ProviderConfig) bool { return p.Name == provider }) {
+				t.Errorf("%s has no provider %s", tool.Name, provider)
+			}
+			if !tool.Uses(adapter) {
+				t.Errorf("%s provider %s maps to unused adapter %s", tool.Name, provider, adapter)
+			}
+		}
+		for _, adapter := range tool.Adapters {
+			if protectedauth.GrantFile(adapter) == "" || !covered[adapter] {
+				t.Errorf("%s adapter %s has no grant file or provider", tool.Name, adapter)
+			}
+		}
+	}
+}
+
+// Like an ordinary login, a captured one makes later sessions skip the login
+// callback port, so concurrent sessions do not compete for it.
+func TestProtectedLoginsSkipCallbackPorts(t *testing.T) {
+	r := protectedTestRuntime()
+	profile, err := config.LoadProfile(model.Paths{ToolsDir: filepath.Join("..", "..", "extensions", "tools")}, "codex")
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.profile = profile
+	for _, tc := range []struct {
+		logins []string
+		ports  []string
+	}{
+		{nil, []string{"1455"}},
+		{[]string{protectedauth.AdapterOpenAI}, nil},
+	} {
+		r.authSession = &backend.AuthSession{Protected: true, Logins: tc.logins}
+		state := newAuthManager(r).protectedAuthState(nil)
+		ctx := model.RunContext{Profile: r.profile, AuthState: state}
+		if got := tools.OAuthPortHints(ctx); !slices.Equal(got, tc.ports) {
+			t.Errorf("logins %v: port hints = %v, want %v", tc.logins, got, tc.ports)
+		}
 	}
 }

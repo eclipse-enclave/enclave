@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -27,6 +28,7 @@ import (
 	dockercmd "enclave/internal/docker"
 	"enclave/internal/gateway"
 	"enclave/internal/model"
+	"enclave/internal/protectedauth"
 	"enclave/internal/util"
 )
 
@@ -81,6 +83,35 @@ func TestProtectedAdmissionCrossEngineAndPreparingOwner(t *testing.T) {
 	}
 	if second.Incarnation == first.Incarnation {
 		t.Fatal("new session reused incarnation")
+	}
+}
+
+func TestProtectedAdmissionReportsReadyLogins(t *testing.T) {
+	b, key, _ := oauthTestBackend(t)
+	key.Owner = "pi"
+	ctx := context.Background()
+	first, err := b.PrepareAuthSession(ctx, key, "first", true, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(first.Logins) != 0 {
+		t.Fatalf("fresh identity reports logins %v", first.Logins)
+	}
+	dir, err := hoststore.ResolveDir(b.opts.Host.Home, key, backend.StoreKindAuth)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for adapter, status := range map[string]string{protectedauth.AdapterAnthropic: "uncertain", protectedauth.AdapterOpenAI: "ready"} {
+		if err := os.WriteFile(filepath.Join(dir, protectedauth.GrantFile(adapter)), []byte(`{"status":"`+status+`"}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	second, err := b.PrepareAuthSession(ctx, key, "second", true, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(second.Logins, []string{protectedauth.AdapterOpenAI}) {
+		t.Fatalf("logins = %v, want only the ready ChatGPT grant", second.Logins)
 	}
 }
 

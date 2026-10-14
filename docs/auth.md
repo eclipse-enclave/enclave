@@ -47,7 +47,9 @@ Then complete the tool's normal login. The gateway captures and durably stores
 the provider tokens before returning session-bound handles, which the tool
 writes to, or reads from, its native credential files. The real grants and
 handle registries are never workload-mounted. Protected identities start fresh;
-existing tool auth is not migrated.
+existing tool auth is not migrated. As in ordinary sessions, Enclave maps a
+login callback port, such as ChatGPT's `1455`, only while the identity holds no
+login for that provider.
 
 Project-scoped identities are stored as `project.<project-hash>` and ephemeral
 ones as `ephemeral.<random>` among the shared identities; `--auth-name` never

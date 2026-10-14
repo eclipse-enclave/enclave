@@ -168,6 +168,12 @@ outside the adapters. Protected sessions drop HTTP/3 and `Alt-Svc`; under
 unrestricted networking, TLS whose outer server name is an unmediated host is
 relayed without mediation, so domain fronting can reach a provider unmediated.
 
+Real grants are owned by the invoking host user, the UID the workload also runs
+as, so their isolation rests on never being mounted into a workload, not on file
+permissions. Mount sources are checked before admission and again right before
+the container is created; a source that turns into a link in between, or
+resolves through a dangling link, is refused.
+
 Protection survives reset and omission of the flag. A protected identity cannot
 silently reopen through legacy mounts; downgrade requires an explicit host
 command while idle and empty. Refresh uncertainty requires reauthentication,

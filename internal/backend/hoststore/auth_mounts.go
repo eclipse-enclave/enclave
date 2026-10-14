@@ -144,6 +144,11 @@ func CanonicalAuthPath(path string) (string, error) {
 		if !errors.Is(err, os.ErrNotExist) {
 			return "", err
 		}
+		// A dangling link is not an absent component: it could point at a
+		// grant that has not been written yet.
+		if _, lerr := os.Lstat(current); lerr == nil {
+			return "", fmt.Errorf("auth mount source %s resolves through a dangling link", path)
+		}
 		parent := filepath.Dir(current)
 		if parent == current {
 			return "", err

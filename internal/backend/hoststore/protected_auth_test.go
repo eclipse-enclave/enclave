@@ -432,3 +432,19 @@ func TestIdentityProtectionAdoptsLegacyMetadata(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// A dangling link is not a missing directory: it may point at a grant that
+// has not been written yet.
+func TestCanonicalAuthPathRefusesDanglingLinks(t *testing.T) {
+	root := t.TempDir()
+	link := filepath.Join(root, "source")
+	if err := os.Symlink(filepath.Join(root, "future-grant"), link); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := CanonicalAuthPath(filepath.Join(link, "file")); err == nil {
+		t.Fatal("dangling link accepted as an absent component")
+	}
+	if got, err := CanonicalAuthPath(filepath.Join(root, "absent", "file")); err != nil || got != filepath.Join(root, "absent", "file") {
+		t.Fatalf("absent components = %q, %v", got, err)
+	}
+}

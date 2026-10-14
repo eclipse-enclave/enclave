@@ -152,6 +152,12 @@ func (b *Backend) Run(ctx context.Context, req backend.Request, attach backend.A
 	// Ctrl-C now reaches the tool through the TTY or the engine's signal
 	// proxying; cancelling ctx must not kill the attached child and strand a
 	// running session.
+	if err := recheckBindSources(spec); err != nil {
+		if spec.cleanup != nil {
+			spec.cleanup()
+		}
+		return backend.ExitStatus{}, err
+	}
 	return attachForeground(context.WithoutCancel(ctx), spec, attach)
 }
 
@@ -232,6 +238,12 @@ func (b *Backend) Start(ctx context.Context, req backend.Request) (backend.Sessi
 		return backend.SessionRef{}, err
 	}
 	defer spec.releaseAdmission()
+	if err := recheckBindSources(spec); err != nil {
+		if spec.cleanup != nil {
+			spec.cleanup()
+		}
+		return backend.SessionRef{}, err
+	}
 	id, err := dockercmd.RunDetachedInteractive(ctx, spec.config, spec.hostConfig, spec.name)
 	if err != nil {
 		// The engine may have created the container before failing or being
@@ -254,6 +266,21 @@ func (b *Backend) Start(ctx context.Context, req backend.Request) (backend.Sessi
 	}
 	b.releaseAuthStart(req.AuthSession)
 	return backend.SessionRef{Name: spec.name, ID: id}, nil
+}
+
+// recheckBindSources confirms, right before the engine creates the container,
+// that every bind source still resolves to the path validated earlier; the
+// engine resolves it again when it mounts.
+func recheckBindSources(spec runSpec) error {
+	for _, mount := range spec.hostConfig.Mounts {
+		if mount.Type != dockercmd.MountTypeBind {
+			continue
+		}
+		if resolved, err := canonicalAuthPath(mount.Source); err != nil || resolved != mount.Source {
+			return fmt.Errorf("bind source %s changed after validation", mount.Source)
+		}
+	}
+	return nil
 }
 
 func neverStarted(ctx context.Context, name string) bool {

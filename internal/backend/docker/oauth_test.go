@@ -817,3 +817,29 @@ func TestQEMULifetimeBlocksProtectedAdmissionAndMutation(t *testing.T) {
 		t.Fatalf("ended QEMU lease blocked recovery: %v", err)
 	}
 }
+
+// A bind source swapped for a link between validation and container creation
+// is refused; the engine would resolve the link when it mounts.
+func TestBindSourcesAreRecheckedBeforeCreate(t *testing.T) {
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := filepath.Join(root, "project")
+	if err := os.Mkdir(source, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	spec := runSpec{hostConfig: &dockercmd.HostConfig{Mounts: []dockercmd.Mount{{Type: dockercmd.MountTypeBind, Source: source}}}}
+	if err := recheckBindSources(spec); err != nil {
+		t.Fatalf("unchanged source refused: %v", err)
+	}
+	if err := os.Remove(source); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(t.TempDir(), source); err != nil {
+		t.Fatal(err)
+	}
+	if err := recheckBindSources(spec); err == nil {
+		t.Fatal("swapped bind source accepted")
+	}
+}

@@ -67,7 +67,8 @@
     {
       "name": "anthropic",
       "credential_secrets": [
-        "anthropic-api-key"
+        "anthropic-api-key",
+        "anthropic-oauth-token"
       ],
       "auth_files": [
         "agent/auth.json"
@@ -141,6 +142,28 @@
             "api.anthropic.com"
           ],
           "header": "x-api-key"
+        }
+      }
+    },
+    "anthropic-oauth-token": {
+      "env_vars": [
+        "ANTHROPIC_OAUTH_TOKEN"
+      ],
+      "release": {
+        "http": {
+          "hosts": [
+            "api.anthropic.com"
+          ],
+          "header": "authorization",
+          "format": "Bearer %s"
+        }
+      },
+      "api_key": false,
+      "placeholder": {
+        "prefix": "sk-ant-oat01-ENCLAVE_SECRET_",
+        "random": {
+          "encoding": "hex",
+          "length": 48
         }
       }
     },

@@ -112,12 +112,75 @@ When persistence is enabled, resolved declared secret and `--pass-env` values
 are stored in the host-side env store. Suppressed API key secrets are
 skipped before resolution, so they are not persisted. For declared secrets with
 `release.http`, the running tool sees placeholders, while the gateway receives
-the real value from host-managed state. The gateway releases real values only on
-HTTPS requests to declared hosts; plaintext HTTP requests carrying placeholders
-are denied. If a client checks token syntax before sending requests, extensions
+the real value from host-managed state. The gateway releases real values only in
+the configured header on HTTPS requests to declared hosts; plaintext HTTP
+requests carrying registered placeholders in headers are denied.
+If a client checks token syntax before sending requests, extensions
 can declare a [custom placeholder shape](extensions/README.md#client-side-credential-format-checks)
 without exposing the real credential. Placeholder generation failures abort
 startup instead of falling back to raw credentials.
+
+### Env-only bearer tokens
+
+With restricted networking, the following env credentials also use gateway
+placeholders:
+
+| Tool | Variable | Release hosts |
+|------|----------|---------------|
+| Claude | `CLAUDE_CODE_OAUTH_TOKEN` (`claude setup-token`) | `api.anthropic.com` |
+| Pi | `ANTHROPIC_OAUTH_TOKEN` | `api.anthropic.com` |
+| Codex | `CODEX_ACCESS_TOKEN` (`at-` personal access tokens only) | `auth.openai.com`, `chatgpt.com` |
+| Codex | `CODEX_API_KEY` / `OPENAI_API_KEY` | `api.openai.com`, `*.openai.com` |
+
+These bearer tokens have `apiKey: false`, so `--no-api-key` does not suppress
+them. Codex API keys remain subject to `--no-api-key`.
+
+Codex receives the resolved API key as both `CODEX_API_KEY` and `OPENAI_API_KEY`.
+For `codex exec`, this bypasses onboarding and the env API key takes precedence
+over a stored ChatGPT login. Codex's interactive TUI (verified with 0.162.1)
+does not use `CODEX_API_KEY` for authentication: a stored login wins, and an
+empty store still requires onboarding. Its API-key entry prefills the
+`OPENAI_API_KEY` placeholder; accepting it authenticates only for that session.
+For persistent interactive use, start with `--no-api-key` and sign in normally.
+The two names are [aliases](#env-aliases): conflicting values in the same
+winning layer fail rather than choosing one silently.
+
+When using API-key auth, Codex also sends the key to
+`chatgpt.com/backend-api/codex/models`.
+That host is not an API-key release target: inspected requests are denied and
+Codex falls back to its built-in model list. Inspection happens with
+`--network-log=requests`, or in coarse mode when `CODEX_ACCESS_TOKEN` is also
+injected. This does not prevent requests to the OpenAI API.
+
+`CODEX_ACCESS_TOKEN` also accepts Agent Identity JWTs upstream. These require
+client-side signature verification and cannot use a synthetic token. Enclave
+rejects non-`at-` values when gateway protection is active; unrestricted
+networking retains ordinary, unprotected env injection.
+
+Placeholders are fresh each session. Before copying auth files to shared tool
+or feature stores, Enclave warns and skips files containing a placeholder,
+without overwriting valid shared credentials. Default placeholders and the
+built-in shaped placeholders are recognizable across sessions; arbitrary
+custom shapes are checked against the current session's registered values.
+This guard does not prevent clients writing local files or writing directly
+into mounted auth stores. At startup, tool auth files are relinked when the
+shared file is non-empty; feature auth files can also be replaced by links to
+empty shared files. The reported local content may therefore already be gone
+when the warning is read. With an empty shared tool store, contaminated local
+files normally remain. Codex is an exception: startup removes a regular local
+`auth.json` containing `ENCLAVE_SECRET_` so an old TUI onboarding key cannot
+cause permanent authentication failures. This cleanup also applies to project
+auth scope, but never removes a shared auth symlink or its target.
+
+Already-contaminated shared stores still require manual recovery. Inspect the
+shared file and re-authenticate, or use `--reset-auth` to clear saved auth and
+persisted env credentials before injecting fresh values.
+
+File-backed and refreshable logins are separate from this env-only protection.
+Enclave does not automatically reuse a Claude setup token in Pi, and it does
+not recommend setting `ANTHROPIC_OAUTH_TOKEN` for Pi: whether Anthropic's terms
+allow a subscription token in a third-party client is between you and
+Anthropic. Enclave only protects the variable if you set it.
 
 Codex OAuth note: the OAuth callback redirects to `http://localhost:1455/auth/callback`. enclave auto-maps port 1455 when no session exists. If you need to re-login, add `-p 1455`. Gateway logs will show `Loopback proxy (socat) enabled on port 1455` when forwarding is active.
 

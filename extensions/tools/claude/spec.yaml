@@ -42,6 +42,7 @@ network:
     "*.anthropic.com": anthropic-api-key
   serviceAuth:
     anthropic-api-key: { headerName: x-api-key }
+    claude-code-oauth-token: { headerName: authorization, valueFormat: "Bearer %s", hosts: [api.anthropic.com] }
 
 providers:
   - name: anthropic

@@ -12,6 +12,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 
 	"enclave/internal/auth"
 	"enclave/internal/backend"
@@ -84,6 +85,9 @@ func (m authManager) Prepare(env *[]string, stores storeSet) (model.AuthState, S
 		return model.AuthState{}, SecretMapping{}, err
 	}
 	passEnvValues := m.injectPassEnv(env, persistedEnv, injection.InjectedKeys)
+	if placeholders := backend.SecretPlaceholders(secretReleases(injection.SecretMapping)); len(placeholders) > 0 {
+		*env = append(*env, model.EnvSecretPlaceholders+"="+backend.EncodeSecretPlaceholders(placeholders))
+	}
 	m.persistEnvToStore(stores, persistedEnv, injection.SecretValues, passEnvValues)
 
 	authState := model.AuthState{
@@ -182,6 +186,9 @@ func (m authManager) injectDeclaredSecrets(hooks auth.Hooks, authCtx auth.Contex
 		placeholder := ""
 		var placeholderVars map[string]bool
 		if secretReleaseEnabled && secret.ReleaseHTTP != nil {
+			if prefix := secret.ReleaseHTTP.RequiredValuePrefix; !strings.HasPrefix(secretValue, prefix) {
+				return result, fmt.Errorf("secret %q (%s): gateway protection requires a value starting with %q; unsupported credential type", secret.ID, strings.Join(secret.EnvVars, ", "), prefix)
+			}
 			resolved, err := placeholderResolver.ResolvePlaceholder(secret.ID, secret.Placeholder)
 			if err != nil {
 				return result, fmt.Errorf("generate placeholder for secret %q: %w", secret.ID, err)

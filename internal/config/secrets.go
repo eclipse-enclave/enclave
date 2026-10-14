@@ -255,12 +255,23 @@ func normalizeSecretRelease(secretID string, release *model.SecretReleaseConfig)
 		return nil, fmt.Errorf("secrets[%q].release.http: format must contain %%s", secretID)
 	}
 
+	prefix := release.HTTP.RequiredValuePrefix
+	if len(prefix) > 256 {
+		return nil, fmt.Errorf("secrets[%q].release.http: required_value_prefix must not exceed 256 bytes", secretID)
+	}
+	for _, b := range []byte(prefix) {
+		if b < 33 || b > 126 {
+			return nil, fmt.Errorf("secrets[%q].release.http: required_value_prefix must contain only non-whitespace printable ASCII", secretID)
+		}
+	}
+
 	return &model.SecretReleaseConfig{
 		HTTP: &model.HTTPSecretReleaseConfig{
-			Hosts:           hosts,
-			Header:          header,
-			Format:          format,
-			HostsFromSecret: strings.TrimSpace(release.HTTP.HostsFromSecret),
+			Hosts:               hosts,
+			Header:              header,
+			Format:              format,
+			RequiredValuePrefix: prefix,
+			HostsFromSecret:     strings.TrimSpace(release.HTTP.HostsFromSecret),
 		},
 	}, nil
 }

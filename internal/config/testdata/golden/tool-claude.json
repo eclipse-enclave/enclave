@@ -72,6 +72,15 @@
       "env_vars": [
         "CLAUDE_CODE_OAUTH_TOKEN"
       ],
+      "release": {
+        "http": {
+          "hosts": [
+            "api.anthropic.com"
+          ],
+          "header": "authorization",
+          "format": "Bearer %s"
+        }
+      },
       "api_key": false
     }
   },

@@ -167,8 +167,8 @@ start_ide_bridge_proxies
 
 agent_label="${TOOL:-${AGENT_NAME:-$USER}}"
 
-# Link shared auth files into the tool config dir when provided.
-if [ -n "$ENCLAVE_AUTH_DIR" ] && [ -n "$ENCLAVE_AUTH_FILES" ] && [ -n "$ENCLAVE_TOOL_CONFIG_DIR" ]; then
+# Load reconciliation helpers for tool and feature auth stores.
+if { [ -n "$ENCLAVE_AUTH_DIR" ] && [ -n "$ENCLAVE_AUTH_FILES" ] && [ -n "$ENCLAVE_TOOL_CONFIG_DIR" ]; } || [ -n "${ENCLAVE_FEATURE_AUTH_MAP:-}" ]; then
     auth_reconcile_lib="${ENCLAVE_AUTH_RECONCILE_LIB:-/usr/local/share/enclave/auth-reconcile.sh}"
     if [ ! -r "$auth_reconcile_lib" ]; then
         echo "Auth reconciliation library missing: $auth_reconcile_lib" >&2
@@ -176,7 +176,10 @@ if [ -n "$ENCLAVE_AUTH_DIR" ] && [ -n "$ENCLAVE_AUTH_FILES" ] && [ -n "$ENCLAVE_
     fi
     # shellcheck disable=SC1090 # Runtime asset path can be overridden by tests.
     . "$auth_reconcile_lib"
+fi
 
+# Link shared auth files into the tool config dir when provided.
+if [ -n "$ENCLAVE_AUTH_DIR" ] && [ -n "$ENCLAVE_AUTH_FILES" ] && [ -n "$ENCLAVE_TOOL_CONFIG_DIR" ]; then
     IFS=',' read -r -a auth_files <<< "$ENCLAVE_AUTH_FILES"
     enclave_sync_shared_auth "$agent_label" "$ENCLAVE_TOOL_CONFIG_DIR" "$ENCLAVE_AUTH_DIR" "" "1" "${auth_files[@]}"
 fi
@@ -212,10 +215,11 @@ if [ -n "${ENCLAVE_FEATURE_AUTH_MAP:-}" ]; then
             if [ -d "$config_path" ] && [ ! -L "$config_path" ]; then
                 continue
             fi
-            # Seed auth from config if auth is empty and a real config file exists
-            if [ -e "$config_path" ] && [ ! -L "$config_path" ] && [ ! -s "$auth_path" ]; then
-                cp -f "$config_path" "$auth_path" 2>/dev/null || true
-                chmod 600 "$auth_path" 2>/dev/null || true
+            if [ ! -s "$config_path" ] || enclave_auth_file_safe_to_sync "$config_path"; then
+                # Seed auth from config if auth is empty and a real config file exists
+                if [ -e "$config_path" ] && [ ! -L "$config_path" ] && [ ! -s "$auth_path" ]; then
+                    enclave_copy_auth_file "$config_path" "$auth_path" || true
+                fi
             fi
             # Remove stale symlinks when auth is missing
             if [ -L "$config_path" ] && [ ! -e "$auth_path" ]; then

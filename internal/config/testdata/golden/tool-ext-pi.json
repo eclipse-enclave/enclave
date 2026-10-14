@@ -20,6 +20,28 @@
         }
       }
     },
+    "anthropic-oauth-token": {
+      "env_vars": [
+        "ANTHROPIC_OAUTH_TOKEN"
+      ],
+      "release": {
+        "http": {
+          "hosts": [
+            "api.anthropic.com"
+          ],
+          "header": "authorization",
+          "format": "Bearer %s"
+        }
+      },
+      "api_key": false,
+      "placeholder": {
+        "prefix": "sk-ant-oat01-ENCLAVE_SECRET_",
+        "random": {
+          "encoding": "hex",
+          "length": 48
+        }
+      }
+    },
     "gemini-api-key": {
       "env_vars": [
         "GEMINI_API_KEY"

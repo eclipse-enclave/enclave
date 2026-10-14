@@ -6,8 +6,33 @@
   "default_included": true,
   "priority": 100,
   "secrets": {
+    "codex-access-token": {
+      "env_vars": [
+        "CODEX_ACCESS_TOKEN"
+      ],
+      "release": {
+        "http": {
+          "hosts": [
+            "auth.openai.com",
+            "chatgpt.com"
+          ],
+          "header": "authorization",
+          "format": "Bearer %s",
+          "required_value_prefix": "at-"
+        }
+      },
+      "api_key": false,
+      "placeholder": {
+        "prefix": "at-ENCLAVE_SECRET_",
+        "random": {
+          "encoding": "hex",
+          "length": 48
+        }
+      }
+    },
     "openai-api-key": {
       "env_vars": [
+        "CODEX_API_KEY",
         "OPENAI_API_KEY"
       ],
       "release": {

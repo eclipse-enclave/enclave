@@ -9,6 +9,8 @@ package model
 
 import "fmt"
 
+const SecretPlaceholderMarker = "ENCLAVE_SECRET_" // #nosec G101 -- recognition marker, not a credential.
+
 // SecretPlaceholderConfig describes a synthetic credential, independent of its secret.
 type SecretPlaceholderConfig struct {
 	Prefix string                  `json:"prefix,omitempty"`

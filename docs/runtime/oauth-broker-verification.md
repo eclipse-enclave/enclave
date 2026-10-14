@@ -21,7 +21,7 @@ restricted policy, `--allow-all-network`, and unrestricted policy files.
 The selected grants remain in `tools/<tool>/auth/<identity>/`, one file per
 provider adapter (`oauth-grant.json`, `openai-grant.json`, `mistral-grant.json`,
 `copilot-grant.json`). Host-only
-`locks/store-<store-path-hash>.identity.json` records protection/reservations.
+`locks/store-<store-key-hash>.identity.json` records protection/reservations.
 `oauth-sessions/<incarnation>/view/` is mounted at `~/.enclave-auth`; Claude
 reads it through `CLAUDE_SECURESTORAGE_CONFIG_DIR`, other tools through native
 credential files the entrypoint links to it (`internal/protectedauth`). Its

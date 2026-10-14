@@ -383,3 +383,52 @@ func TestIdentityBookkeepingDoesNotRecreateOrChmodAuthDirectory(t *testing.T) {
 		})
 	}
 }
+
+// Protection follows the identity, not the spelling of its path: an aliased
+// state root or another case of the same directory finds the same metadata.
+func TestIdentityProtectionSurvivesPathAliases(t *testing.T) {
+	state := t.TempDir()
+	alias := filepath.Join(t.TempDir(), "state-alias")
+	if err := os.Symlink(state, alias); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("XDG_STATE_HOME", state)
+	home := t.TempDir()
+	dir, err := ResolveDir(home, backend.StoreKey{Owner: "claude", Suffix: "fresh"}, backend.StoreKindAuth)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ProtectIdentity(home, dir, unusedIdentity); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("XDG_STATE_HOME", alias)
+	aliased, err := ResolveDir(home, backend.StoreKey{Owner: "claude", Suffix: "fresh"}, backend.StoreKindAuth)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cased := strings.Replace(aliased, string(filepath.Separator)+"claude"+string(filepath.Separator), string(filepath.Separator)+"CLAUDE"+string(filepath.Separator), 1)
+	for _, spelling := range []string{aliased, cased} {
+		if protected, err := IdentityProtected(home, spelling); err != nil || !protected {
+			t.Fatalf("%s: protected = %t, %v", spelling, protected, err)
+		}
+	}
+}
+
+// Builds before path-relative keys kept metadata under the raw path; reading
+// it adopts that metadata rather than losing protection.
+func TestIdentityProtectionAdoptsLegacyMetadata(t *testing.T) {
+	home, dir := identityMetadataTestDir(t)
+	legacy := legacyIdentityStatePath(home, dir)
+	if err := os.WriteFile(legacy, []byte(`{"schemaVersion":1,"protected":true}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if protected, err := IdentityProtected(home, dir); err != nil || !protected {
+		t.Fatalf("legacy protection lost: %t, %v", protected, err)
+	}
+	if _, err := os.Stat(legacy); !os.IsNotExist(err) {
+		t.Fatalf("legacy metadata not adopted: %v", err)
+	}
+	if _, err := os.Stat(IdentityStatePath(home, dir)); err != nil {
+		t.Fatal(err)
+	}
+}

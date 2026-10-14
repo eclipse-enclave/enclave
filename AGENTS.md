@@ -95,7 +95,7 @@ Enclave follows platform-standard roots: the XDG base directories on Linux and o
 
 - Config: `~/.config/enclave/` (`$XDG_CONFIG_HOME`)
 - State: `~/.local/state/enclave/` (`$XDG_STATE_HOME`)
-- Protected tool/feature identity metadata: `~/.local/state/enclave/locks/store-<store-path-hash>.identity.json`; host-only, outside workload auth mounts
+- Protected tool/feature identity metadata: `~/.local/state/enclave/locks/store-<store-key-hash>.identity.json`; host-only, outside workload auth mounts
 - Cache: `~/.cache/enclave/` (`$XDG_CACHE_HOME`)
 - Embedded runtime assets: `~/.cache/enclave/assets/<content-hash>/`
 - Per-project network log and full captures: `~/.local/state/enclave/projects/<hash>/<tool>/logs/network.log` and `logs/capture/<session>/` beside it (captures are removed by project cleanup unless `--keep history`)

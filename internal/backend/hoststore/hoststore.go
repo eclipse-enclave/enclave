@@ -149,11 +149,38 @@ func LockPath(hostHome string, dir string) string {
 	if hostHome == "" || dir == "" {
 		return ""
 	}
-	return config.HostLockPath(hostHome, storeLockBase(dir)+".lock")
+	return config.HostLockPath(hostHome, storeLockBase(hostHome, dir)+".lock")
 }
 
-func storeLockBase(dir string) string {
+// storeLockBase keys a store's lock and identity metadata by its path below
+// the state root, case-folded, so an aliased home or state root, or another
+// spelling on a case-insensitive volume, selects the same lock and protection.
+// Stores outside the state root keep their path as the key.
+func storeLockBase(home, dir string) string {
+	if rel, ok := stateRelative(home, dir); ok {
+		return "store-" + util.HashString(rel)
+	}
 	return "store-" + util.HashString(dir)
+}
+
+func stateRelative(home, dir string) (string, bool) {
+	root := config.HostStateRootDir(home)
+	bases, targets := []string{root}, []string{dir}
+	if canonical, err := CanonicalAuthPath(root); err == nil {
+		bases = append(bases, canonical)
+	}
+	if canonical, err := CanonicalAuthPath(dir); err == nil {
+		targets = append(targets, canonical)
+	}
+	for _, base := range bases {
+		for _, target := range targets {
+			rel, err := filepath.Rel(strings.ToLower(base), strings.ToLower(target))
+			if err == nil && rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+				return filepath.ToSlash(rel), true
+			}
+		}
+	}
+	return "", false
 }
 
 // EnsureNoSymlinkChain rejects a target whose path from root traverses a

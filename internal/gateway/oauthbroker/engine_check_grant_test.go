@@ -15,6 +15,9 @@ import (
 	"strings"
 	"testing"
 
+	"enclave/internal/backend"
+	"enclave/internal/backend/hoststore"
+	"enclave/internal/config"
 	"enclave/internal/protectedauth"
 	"enclave/internal/util"
 )
@@ -76,6 +79,25 @@ func TestEngineCheckToolTableMatchesProtectedAuth(t *testing.T) {
 	}
 	if got := engineCheck(t, "eval", `echo "$ALL_TOOLS"`); got != strings.Join(names, " ") {
 		t.Errorf("ALL_TOOLS = %q, want %q", got, strings.Join(names, " "))
+	}
+}
+
+// The engine check reads identity metadata where the host keeps it.
+func TestEngineCheckFindsIdentityMetadata(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	home := t.TempDir()
+	dir, err := hoststore.ResolveDir(home, backend.StoreKey{Owner: "codex", Suffix: "check-a"}, backend.StoreKindAuth)
+	if err != nil {
+		t.Fatal(err)
+	}
+	requireBash(t)
+	script := filepath.Join("..", "..", "..", "scripts", "protected-auth-engine-check.sh")
+	output, err := exec.Command("bash", "-c", `. "$1"; STATE="$2"; identity_meta "$3"`, "engine-check", script, config.HostStateRootDir(home), dir).Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := strings.TrimSpace(string(output)), hoststore.IdentityStatePath(home, dir); got != want {
+		t.Fatalf("identity_meta = %q, want %q", got, want)
 	}
 }
 

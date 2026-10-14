@@ -150,9 +150,11 @@ protected_shell() {
 }
 
 identity_dir() { echo "$STATE/tools/$TOOL/auth/$1"; }
+# Metadata is keyed by the identity's case-folded path below the state root.
 identity_meta() {
-    local hash
-    hash=$(printf '%s' "$1" | sha256_hex)
+    local rel hash
+    rel=${1#"$STATE"/}
+    hash=$(printf '%s' "$rel" | tr '[:upper:]' '[:lower:]' | sha256_hex)
     echo "$STATE/locks/store-$hash.identity.json"
 }
 container_name() { echo "enclave-$TOOL-$PROJECT_HASH-$1"; }

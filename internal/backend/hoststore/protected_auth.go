@@ -416,7 +416,7 @@ func RemoveIdleIdentity(home, dir string, verifyEnded func(IdentityReservation) 
 	if err != nil {
 		return err
 	}
-	for _, path := range []string{IdentityStatePath(home, dir), LockPath(home, dir)} {
+	for _, path := range []string{IdentityStatePath(home, dir), legacyIdentityStatePath(home, dir), LockPath(home, dir)} {
 		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
@@ -502,7 +502,43 @@ func IdentityStatePath(home, dir string) string {
 	if home == "" || !filepath.IsAbs(dir) {
 		return ""
 	}
-	return config.HostLockPath(home, storeLockBase(dir)+".identity.json")
+	return config.HostLockPath(home, storeLockBase(home, dir)+".identity.json")
+}
+
+// legacyIdentityStatePath is where builds before path-relative keys kept the
+// metadata, keyed by the raw directory path.
+func legacyIdentityStatePath(home, dir string) string {
+	return config.HostLockPath(home, "store-"+util.HashString(dir)+".identity.json")
+}
+
+// adoptLegacyIdentityState moves metadata an earlier build kept under the raw
+// path key to the current key, so saved protection is never lost.
+func adoptLegacyIdentityState(home, dir, file string) error {
+	legacy := legacyIdentityStatePath(home, dir)
+	if legacy == file {
+		return nil
+	}
+	if _, err := os.Lstat(file); !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	if err := EnsureNoSymlinkChain(config.HostStateRootDir(home), legacy, true); err != nil {
+		return err
+	}
+	info, err := os.Lstat(legacy)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if !info.Mode().IsRegular() {
+		return errors.New("invalid protected auth identity metadata file")
+	}
+	// A concurrent adopter may have moved it first.
+	if err := os.Rename(legacy, file); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return syncIdentityDir(filepath.Dir(file))
 }
 
 func readIdentityState(home, dir string) (state identityState, err error) {
@@ -514,6 +550,9 @@ func readIdentityState(home, dir string) (state identityState, err error) {
 	if info, err := os.Lstat(dir); err == nil && (!info.IsDir() || info.Mode()&os.ModeSymlink != 0) {
 		return state, errors.New("auth identity directory is not a real directory")
 	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return state, err
+	}
+	if err := adoptLegacyIdentityState(home, dir, file); err != nil {
 		return state, err
 	}
 	return readIdentityStateFile(home, file)

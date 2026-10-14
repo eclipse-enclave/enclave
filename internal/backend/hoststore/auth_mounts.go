@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 
@@ -60,10 +61,10 @@ func ValidateAuthMounts(home string, sources, views []string) ([]string, error) 
 			return nil, errors.New("workload mount overlaps host-only authentication control state")
 		}
 		if protected && pathsOverlap(source, featureRoot) {
-			if util.PathWithin(source, featureRoot) {
+			if util.PathWithin(foldCase(source), foldCase(featureRoot)) {
 				return nil, errors.New("workload mount contains protected feature identities")
 			}
-			rel, err := filepath.Rel(featureRoot, source)
+			rel, err := filepath.Rel(foldCase(featureRoot), foldCase(source))
 			if err != nil {
 				return nil, err
 			}
@@ -82,10 +83,10 @@ func ValidateAuthMounts(home string, sources, views []string) ([]string, error) 
 			}
 		}
 		if protected && pathsOverlap(source, authRoot) {
-			if util.PathWithin(source, authRoot) {
+			if util.PathWithin(foldCase(source), foldCase(authRoot)) {
 				return nil, errors.New("workload mount contains protected authentication identities")
 			}
-			rel, err := filepath.Rel(authRoot, source)
+			rel, err := filepath.Rel(foldCase(authRoot), foldCase(source))
 			if err != nil {
 				return nil, err
 			}
@@ -111,7 +112,17 @@ func ValidateAuthMounts(home string, sources, views []string) ([]string, error) 
 }
 
 func pathsOverlap(first, second string) bool {
+	first, second = foldCase(first), foldCase(second)
 	return util.PathWithin(first, second) || util.PathWithin(second, first)
+}
+
+// foldCase compares paths case-insensitively where volumes usually are, so a
+// differently cased spelling cannot reach protected state.
+func foldCase(path string) string {
+	if runtime.GOOS == "darwin" || runtime.GOOS == "windows" {
+		return strings.ToLower(path)
+	}
+	return path
 }
 
 // CanonicalAuthPath resolves existing ancestors, retaining absent descendants

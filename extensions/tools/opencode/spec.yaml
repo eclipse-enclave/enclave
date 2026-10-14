@@ -57,7 +57,7 @@ sandbox:
 
 credentials:
   sources:
-    # pi treats an OpenAI key without the sk- prefix as a ChatGPT token.
+    # Clients tell OpenAI API keys from ChatGPT tokens by the sk- prefix.
     openai-api-key:
       env: [OPENAI_API_KEY]
       placeholder: { prefix: "sk-enclave-", random: { encoding: alphanumeric, length: 48 } }

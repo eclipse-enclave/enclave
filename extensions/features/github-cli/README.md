@@ -28,7 +28,7 @@ available in ordinary mode. See [authentication](../../../docs/auth.md).
 
 ### Experimental protected auth
 
-When enabled with Claude's `--protect-auth` flow, the built-in feature keeps its
+When enabled in a `--protect-auth` session of any tool, the built-in feature keeps its
 real native credentials gateway-only. The workload gets a writable
 `~/.config/gh` bind mount containing session-bound token handles. The gateway
 substitutes credentials only in the adapter's approved GitHub.com API and HTTPS
@@ -44,7 +44,7 @@ compatible native feature credentials are consumed
 by the gateway without exposing them in the projected view.
 
 The shared feature identity supports concurrent protected sessions across projects
-and Docker/Podman, independently of Claude's auth name. Each has separate handles
+and Docker/Podman, independently of the tool's auth name. Each has separate handles
 and a native view; gateway grant updates use a common identity lock. New sessions
 receive fresh handles; proxy reload preserves current ones. Saved protection
 persists when the flag is omitted. After stopping every session using the identity, `enclave auth reset --feature github-cli` clears its grant and native
@@ -52,7 +52,8 @@ source files, including `config.yml` preferences, without removing protection;
 an explicit `enclave auth downgrade --feature github-cli`
 requires the identity to be idle and empty.
 
-Engine and live GitHub verification are **NOT RUN**. Follow the
-[verification handoff](../../../docs/runtime/oauth-broker-verification.md).
-This protects captured/saved tokens, not device-login bootstrap material from
+Engine and live GitHub verification are pending; see the
+[verification plan](../../../docs/runtime/oauth-broker-verification.md).
+Ephemeral sessions use this global identity too, so a GitHub login made in an
+`--ephemeral` session persists. This protects captured/saved tokens, not device-login bootstrap material from
 an already-malicious client or every operation a token authorizes.

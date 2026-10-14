@@ -73,7 +73,8 @@ root unless you pass `--allow-root` or set `ENCLAVE_ALLOW_ROOT=1` (see
 directory, too: it refuses to mount your home directory, hidden home entries
 such as `~/.ssh`, or other sensitive host data. To mount one such directory,
 pass it with `--add-sensitive-dir` or list it in `sensitive_dir_exceptions` in
-config; `--allow-sensitive-mounts` lifts the check for all of them (see
+config; `--allow-sensitive-mounts` lifts the general sensitive-path check, but still cannot expose Enclave's
+host lock/session state or protected authentication stores (see
 [Sensitive mounts](docs/cli-reference.md#sensitive-mounts)).
 
 On macOS, install Docker Desktop and the source-build dependencies above.

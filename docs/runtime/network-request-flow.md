@@ -117,16 +117,16 @@ sequenceDiagram
 - Placeholder protection applies only to declared secrets with `release.http` in the selected tool profile or enabled feature manifests.
 - Real secrets are released only on HTTPS requests; plaintext HTTP requests carrying a placeholder are denied.
 - Env-secret injection is restricted to declared headers. The opt-in OAuth adapter below separately mediates captured native-file credentials.
-- Ordinary upstream responses are streamed without credential masking. A provider that reflects an approved auth header can expose its value, so matching a release rule does not remove trust in the provider.
+- Outside protected sessions, upstream responses are streamed without credential masking. A provider that reflects an approved auth header can expose its value, so matching a release rule does not remove trust in the provider. Protected sessions abort a response before a released credential would reach the workload.
 - WebSocket and other protocol upgrades get secret release on the handshake headers; the upgraded connection is then relayed unchanged in both directions. In sessions with the protected OAuth broker, handshakes pass the broker's checks like requests. A handshake that carries a released credential must be a WebSocket upgrade; the broker removes `Sec-WebSocket-Extensions` so frames stay uncompressed, rejects a `101` that negotiates extensions, and scans each server frame for the released credentials, holding back an unfinished fragment that ends in a partial match. A match, or a frame it cannot parse, closes both connections and is audited as `oauth-broker-response`.
 
 ## Opt-in protected OAuth path
 
-`--protect-auth` registers the Claude broker and the enabled built-in GitHub
-feature adapter before login. Each gets a session-specific native auth view
-containing handles. Normal login without that
-option keeps the existing workload-readable credentials. The implemented opt-in
-flow still needs the [pinned-client and container verification runs](oauth-broker-verification.md):
+`--protect-auth` registers the selected tool's login adapters and the enabled
+built-in GitHub feature adapter before login. Each gets a session-specific
+native auth view containing handles. Normal login without that option keeps the
+existing workload-readable credentials. The implemented opt-in flow still needs
+the [real-client and container verification runs](oauth-broker-verification.md):
 
 ```mermaid
 sequenceDiagram
@@ -135,23 +135,32 @@ sequenceDiagram
     participant Store as Gateway-only identity store
     participant Provider as Declared HTTPS endpoint
     Tool->>Broker: Normal login exchange
+    Broker->>Store: Persist uncertain intent
     Broker->>Provider: Forward validated exchange
     Provider-->>Broker: Token response
     Broker->>Broker: Bound, parse, validate explicit schema
     Broker->>Store: Durably commit grant and registration
     Broker-->>Tool: Native response with access/refresh handles
-    Tool->>Broker: Authenticated request / refresh handle
-    Broker->>Broker: Check trusted session and exact endpoint/field
-    Broker->>Store: Read current committed grant
-    Broker->>Provider: Substitute real credential
-    Note over Broker,Store: Refresh serializes and persists outcome before reply
-    Provider-->>Broker: Response
-    Broker-->>Tool: Stream ordinary data / sanitize token response
+    Tool->>Broker: Request with a handle
+    alt credential endpoint, raw credential beside it, or wrong host
+        Broker-->>Tool: Refused
+    else release host
+        Broker->>Store: Read current committed grant
+        Broker->>Provider: Substitute real credential
+        Note over Broker,Store: Refresh serializes and persists outcome before reply
+        Provider-->>Broker: Response, trailers or WebSocket frames
+        alt reflects a released credential
+            Broker-->>Tool: Abort the stream
+        else
+            Broker-->>Tool: Stream data / sanitized token response
+        end
+    end
 ```
 
 Capture must be installed before a grant exists, not inferred from the current
-env-secret mapping snapshot. Only declared HTTPS origins, ports, methods, paths
-and auth fields may resolve broker handles. The adapter rejects unknown token
+env-secret mapping snapshot. Only declared HTTPS origins, ports and auth fields
+may resolve broker handles, on any path except the provider's credential
+endpoints. The adapter rejects unknown token
 response fields, unsupported encodings and unsafe errors/headers; it never
 passes a raw token response through after a parsing or persistence failure.
 Env-secret release separately enforces its declared host and header; it does

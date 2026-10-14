@@ -45,6 +45,7 @@ flowchart LR
         SharedAuthStore["tools/&lt;tool&gt;/auth<br/>shared tool auth store, only with --auth-scope=shared"]
         FeatureAuthStore["features/&lt;feature&gt;/auth<br/>shared feature auth store, only with --auth-scope=shared"]
         ProtectedViews["oauth-sessions/&lt;incarnation&gt;/.../view<br/>session-only native handle views"]
+        Locks["locks/<br/>host-only identity metadata and locks"]
     end
 
     subgraph Docker
@@ -57,14 +58,15 @@ flowchart LR
     CacheDir -->|"bind mount"| Tool
     HistoryDir -->|"bind mount"| Tool
     SSHDir -->|"bind mount"| Tool
-    ConfigStore -->|"ordinary config bind"| Tool
+    ConfigStore -->|"config bind (&lt;key&gt;.protected for protected sessions)"| Tool
     EnvStore -.->|"host-side read/write env file"| Tool
     SharedAuthStore -->|"ordinary auth bind (~/.enclave-auth)"| Tool
     FeatureAuthStore -->|"ordinary feature bind"| Tool
-    SharedAuthStore -->|"protected tool: shared grants + identity lock"| Gateway
-    FeatureAuthStore -->|"protected GitHub: shared grant + identity lock"| Gateway
+    SharedAuthStore -->|"protected tool: shared grants"| Gateway
+    FeatureAuthStore -->|"protected GitHub: shared grant"| Gateway
+    Locks -->|"protected: exact identity lock files"| Gateway
     Gateway -->|"write native handle projection"| ProtectedViews
-    Gateway -.->|"private broker readiness verified before launch"| Tool
+    Gateway -.->|"private readiness attestation, verified by the host before the tool starts"| ProtectedViews
     ProtectedViews -->|"protected native config binds"| Tool
     Gateway --> DnsNet
     Tool -.->|"shares network namespace<br/>resolver/proxy"| Gateway

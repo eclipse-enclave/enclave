@@ -41,7 +41,8 @@ Opt in with one of these identities:
 enclave --tool codex --auth-scope shared --auth-name protected-test --protect-auth
 # One identity per project
 enclave --tool codex --auth-scope project --protect-auth
-# A login that lasts for this session only
+# A login that lasts for this session only; GitHub logins still persist
+# in the shared GitHub CLI feature identity
 enclave --tool codex --ephemeral --protect-auth
 ```
 
@@ -130,11 +131,10 @@ so other settings Vibe writes there, such as `/proxy-setup`, do not persist.
 A second login to an identity that already holds a grant for that provider is
 refused; reset the identity to switch accounts. Startup requires a private
 readiness attestation from the initialized brokers before launching the
-workload; an older gateway image is rejected even with `--no-rebuild`. Stop
-existing protected sessions from older builds and rerun without `--no-rebuild`
-before sharing their identities with new sessions. This is an experimental
-implementation: Docker, rootless Podman, SELinux and real login/refresh remain
-**unverified**. Follow the [engine and human test plan](runtime/oauth-broker-verification.md).
+workload; an older gateway image is rejected even with `--no-rebuild`. This is
+an experimental implementation: Docker, rootless Podman, SELinux and real
+login/refresh remain **unverified**. Follow the [engine and human test
+plan](runtime/oauth-broker-verification.md).
 
 Protected mode rejects credentials without a release rule, raw credential
 variables (for example from the project `.env` or `--pass-env`), host config
@@ -157,16 +157,16 @@ in ordinary sessions; host-provided settings must not configure credential
 helpers or provider credentials.
 
 Multiple protected sessions can share the same tool identity and GitHub feature
-identity across projects and Docker/Podman. Each session gets independent handles,
-native views and a gateway; the gateways serialize grant updates using the same
-host identity lock and read the latest committed tokens. Ending one session does
-not invalidate its siblings. Reset, `--reset-auth` and downgrade require **all**
-sessions using the selected identity to have ended. Ordinary/raw credential mounts
-remain forbidden.
+identity across projects and Docker/Podman. Each session gets independent
+handles, native views and a gateway; the gateways serialize grant updates using
+the same host identity lock and read the latest committed tokens. Ending one
+session does not invalidate its siblings. Reset, `--reset-auth` and downgrade
+require **all** sessions using the selected identity to have ended. Ordinary/raw
+credential mounts remain forbidden.
 
-For a fresh identity, complete its first login before launching additional sessions
-so their native views start authenticated. Then reuse the same `--auth-name`, using
-`--name` to distinguish sessions within a project:
+For a fresh identity, complete its first login before launching additional
+sessions so their native views start authenticated. Then reuse the same
+`--auth-name`, using `--name` to distinguish sessions within a project:
 
 ```bash
 enclave --tool claude --protect-auth --auth-scope shared --auth-name protected-test --name worker-a
@@ -174,23 +174,24 @@ enclave --tool claude --protect-auth --auth-scope shared --auth-name protected-t
 enclave --tool claude --protect-auth --auth-scope shared --auth-name protected-test --name worker-b
 ```
 
-All installed engines must be inspectable; an unavailable daemon causes a refusal
-rather than an assumption that the identity is unused. If a reserved session's
-engine CLI has been removed, restore that CLI and daemon access so Enclave can
-verify the session ended. Removing an executable does not prove its containers
-stopped; reset and downgrade do not bypass that check.
+All installed engines must be inspectable; an unavailable daemon causes a
+refusal rather than an assumption that the identity is unused. If a reserved
+session's engine CLI has been removed, restore that CLI and daemon access so
+Enclave can verify the session ended. Removing an executable does not prove its
+containers stopped; reset and downgrade do not bypass that check.
 
 Protected admission, reset and downgrade also require all of the invoking user's
-QEMU sessions to have ended, including preparation and host-side copy-back;
-QEMU has no reliable host-share inspection API. Process inspection must succeed
-so older guests without admission leases cannot be missed. Ordinary sessions
-can still run concurrently. Detached CLI exit and proxy reload keep its reservation and handles;
-a new logical session gets new handles. `--allow-all-network` and unrestricted
-policies still keep the gateway for credential mediation. Unknown token
-schemas and uncertain refresh outcomes fail closed, without returning tokens.
-After an uncertain exchange, use normal login again with the same account
-or stop all its sessions and reset the identity; reauthentication cannot switch
-the account behind sibling handles. Unexpected proxy death requires ending the session and starting anew.
+QEMU sessions to have ended, including preparation and host-side copy-back; QEMU
+has no reliable host-share inspection API. Process inspection must succeed so
+older guests without admission leases cannot be missed. Ordinary sessions can
+still run concurrently. Detached CLI exit and proxy reload keep a session's
+reservation and handles; a new logical session gets new handles.
+`--allow-all-network` and unrestricted policies still keep the gateway for
+credential mediation. Unknown token schemas and uncertain refresh outcomes fail
+closed, without returning tokens. After an uncertain exchange, use normal login
+again with the same account or stop all its sessions and reset the identity;
+reauthentication cannot switch the account behind sibling handles. Unexpected
+proxy death requires ending the session and starting anew.
 
 Saved identities remain protected when the flag is omitted: the launch fails
 with instructions to opt in again. To clear a grant without removing protection,
@@ -203,12 +204,12 @@ enclave auth reset --tool codex --auth-scope project   # the current project's i
 
 `--protect-auth --reset-auth` also resets an idle selected identity before a new
 session. Import/export and ordinary cleanup cannot expose/delete a protected
-grant. Other Enclave containers and QEMU guests cannot mount a protected grant, its
-parent or an aliased path, including staged file mounts. Host lock/control directories and other sessions' broker state
-are also excluded from workload mounts. Host administrators and host-side
-filesystem/configuration changes remain trusted. To return an idle identity to
-ordinary auth-file handling, first reset it,
-then explicitly downgrade the empty identity:
+grant. Other Enclave containers and QEMU guests cannot mount a protected grant,
+its parent or an aliased path, including staged file mounts. Host lock and
+control directories and other sessions' broker state are also excluded from
+workload mounts. Host administrators and host-side filesystem and configuration
+changes remain trusted. To return an idle identity to ordinary auth-file
+handling, first reset it, then explicitly downgrade the empty identity:
 
 ```bash
 enclave auth downgrade --tool codex --auth-scope shared --auth-name protected-test
@@ -216,12 +217,13 @@ enclave auth downgrade --tool codex --auth-scope project
 ```
 
 Native logout only deletes the local view; it does not revoke the durable grant
-or already copied live handles. Reset removes the selected grants and broker-owned `.oauth-*` interrupted-write
-copies without following symlinks; unrelated entries are retained. It clears
-local custody, not provider-side revocation. This protects captured tokens in supported auth files and
-configured secrets, not arbitrary secret files, unsupported providers/MCP
-authentication, every operation those tokens authorize, or login codes/PKCE
-material exposed to an already-malicious client.
+or already copied live handles. Reset removes the selected grants and
+broker-owned `.oauth-*` interrupted-write copies without following symlinks;
+unrelated entries are retained. It clears local custody, not provider-side
+revocation. This protects captured tokens in supported auth files and configured
+secrets, not arbitrary secret files, unsupported providers/MCP authentication,
+every operation those tokens authorize, or login codes/PKCE material exposed to
+an already-malicious client.
 
 #### GitHub CLI in protected sessions
 
@@ -242,26 +244,27 @@ gh auth login --hostname github.com --git-protocol https --web --insecure-storag
 ```
 
 The gateway captures its token response before it reaches `gh`.
-`--insecure-storage` selects native-file storage of **handles**, not provider tokens.
-Protected HTTPS Git remotes use `https://github.com/<owner>/<repo>`, with or
-without the `.git` suffix. Pasting a PAT,
-GitHub Enterprise login, keyring-only credentials and unsupported native schemas
-are not protected login paths. Expiry/refresh-bearing GitHub token responses
-are unsupported; unknown token responses fail closed. As with
-Claude login, an already-malicious client can steal bootstrap material before
-capture; this is not protection for the entire enrollment process.
+`--insecure-storage` selects native-file storage of **handles**, not provider
+tokens. Protected HTTPS Git remotes use `https://github.com/<owner>/<repo>`,
+with or without the `.git` suffix. Pasting a PAT, GitHub Enterprise login,
+keyring-only credentials and unsupported native schemas are not protected login
+paths. Expiry/refresh-bearing GitHub token responses are unsupported; unknown
+token responses fail closed. As with Claude login, an already-malicious client
+can steal bootstrap material before capture; this is not protection for the
+entire enrollment process.
 
 Compatible existing files in Enclave's shared GitHub feature store can be
-enrolled while idle. This does not import the host's `~/.config/gh` automatically.
-Raw GitHub credential env variables and overrides of `GH_HOST`/`GH_CONFIG_DIR`
-conflict with the protected feature. The store is global across tools/projects,
-not selected by the tool's `--auth-name` or auth scope (ephemeral sessions use it
-too), and supports concurrent protected sessions
-across Docker/Podman. Each keeps its own handle/config view; account-token updates
-are shared without overwriting sibling views. Saved protection blocks later ordinary feature-auth mounts too.
-If gateway startup rejects an incompatible native store, protection remains and
-the original files are retained. Back up wanted logins on the host, then correct
-unsupported hosts/schema in that private store before retrying. Reset is not a
+enrolled while idle. This does not import the host's `~/.config/gh`
+automatically. Raw GitHub credential env variables and overrides of
+`GH_HOST`/`GH_CONFIG_DIR` conflict with the protected feature. The store is
+global across tools/projects, not selected by the tool's `--auth-name` or auth
+scope (ephemeral sessions use it too), and supports concurrent protected
+sessions across Docker/Podman. Each keeps its own handle/config view;
+account-token updates are shared without overwriting sibling views. Saved
+protection blocks later ordinary feature-auth mounts too. If gateway startup
+rejects an incompatible native store, protection remains and the original files
+are retained. Back up wanted logins on the host, then correct unsupported
+hosts/schema in that private store before retrying. Reset is not a
 non-destructive rollback: it deletes those original logins and preferences.
 
 The gateway records each completed or uncertain device exchange so a lost reply
@@ -283,8 +286,8 @@ empty store. Do not combine `--feature` with `--tool`, `--auth-name` or
 `--auth-scope`; add `--backend docker` or `--backend podman` when needed.
 
 GitLab's feature remains env-secret based; this does not add a native GitLab
-credential-file adapter. GitHub engine and live-client verification are
-**NOT RUN**; use the [handoff plan](runtime/oauth-broker-verification.md).
+credential-file adapter. GitHub engine and live-client verification are pending;
+see the [verification plan](runtime/oauth-broker-verification.md).
 
 ## Auth Stores
 
@@ -395,9 +398,12 @@ HTTPS requests to declared hosts, only in each rule's declared header
 deny the whole request. If a client checks token syntax before sending requests,
 extensions can declare a [custom placeholder shape](extensions/README.md#client-side-credential-format-checks)
 without exposing the real credential. Placeholder generation failures abort
-startup instead of falling back to raw credentials. Ordinary provider responses
-are streamed without credential masking; the approved provider is trusted not to
-reflect auth header values.
+startup instead of falling back to raw credentials. Outside protected sessions,
+provider responses are streamed without credential masking; the approved
+provider is trusted not to reflect auth header values. Clients that tell
+credential kinds apart by prefix get placeholders with the same prefix, such as
+`sk-ant-oat01-` for `CLAUDE_CODE_OAUTH_TOKEN`, in ordinary and protected
+sessions alike.
 
 Codex OAuth note: the OAuth callback redirects to `http://localhost:1455/auth/callback`. enclave auto-maps port 1455 when no session exists. If you need to re-login, add `-p 1455`. Gateway logs will show `Loopback proxy (socat) enabled on port 1455` when forwarding is active.
 

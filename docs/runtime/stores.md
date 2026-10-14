@@ -285,7 +285,7 @@ Experimental `--protect-auth` uses this layout on Docker/Podman:
 |-------|--------------------------|----------|
 | Grant, provider metadata, generation and refresh recovery | Selected `tools/<tool>/auth/<identity>/` directory, one grant file per login adapter (`<auth-name>`, `project.<project-hash>` or `ephemeral.<random>`); gateway-only RW mount | Survives session removal, except an ephemeral identity, which is deleted once its session ended |
 | Identity protection and admission | Host-only `locks/store-<store-path-hash>.identity.json`, outside the auth directory and all workload mounts | Persists across auth reset/removal; only explicit host-side downgrade clears protection |
-| Tool config and history | `tools/<tool>/config/<project-hash>/<store-key>.protected/`, mounted at the tool's config directory, such as `~/.claude`; never used by ordinary sessions | Persists across protected sessions like an ordinary config store |
+| Tool config and history | `projects/<project-hash>/<tool>/config-store/<store-key>.protected/`, mounted at the tool's config directory, such as `~/.claude`; never used by ordinary sessions. Generated config, skills and session memory use the same `<store-key>.protected` key | Persists across protected sessions like an ordinary config store |
 | Native auth view containing access/refresh handles | `oauth-sessions/<incarnation>/view/`, mounted at `~/.enclave-auth` | Rebuilt and removed per logical session |
 | Handle registration, session incarnation and broker readiness attestation | `oauth-sessions/<incarnation>/runtime/`, gateway-only | Survives proxy-process reload, not session end |
 | GitHub feature's native credentials and saved grant | `features/github-cli/auth/`, gateway-only when protected | Shared across tools/projects; survives session removal |
@@ -316,9 +316,11 @@ Before workload startup, the host clears prior gateway readiness state and
 requires the broker's private `runtime/oauth-ready.json` attestation to match
 the requested identities, session and incarnation. The proxy publishes it only
 after both native views and MITM listeners are ready. A generic readiness banner
-from an older `--no-rebuild` image cannot enable protected startup. Readiness schema
-2 attests concurrent-capable brokers; older protected sessions must be stopped and
-restarted with rebuilt gateways before sharing their identities.
+from an older `--no-rebuild` image cannot enable protected startup. Readiness
+schema 3 attests concurrent-capable brokers, which fence shared commits (since
+schema 2), and names the tool whose adapters the gateway opened; older protected
+sessions must be stopped and restarted with rebuilt gateways before sharing
+their identities.
 
 Protected sessions may concurrently share an identity across projects and engines.
 Host metadata records each session/incarnation separately; only verified gateways
@@ -381,7 +383,7 @@ the projected native view is mounted at `~/.config/gh`. Workload edits cannot
 replace trusted tokens. Existing compatible native files are read by the gateway,
 not copied into the workload.
 
-This is a single global feature identity, not one identity per Claude
+This is a single global feature identity, not one identity per tool
 `--auth-name`. Concurrent protected sessions across projects and Docker/Podman
 share its grant and identity lock, with separate per-session handles and views. Enrollment refuses existing containers exposing its real
 files or trusted control state. Its host-only protection marker survives reset,
@@ -396,7 +398,7 @@ and native `hosts.yml`/`config.yml` inputs, including preferences, while retaini
 protection. Removing those inputs prevents reimport on the next launch. Use
 `enclave auth downgrade --feature github-cli`
 only when intentionally returning an empty, idle identity to ordinary handling.
-These operations are separate from the selected Claude identity. See
+These operations are separate from the selected tool identity. See
 [authentication](../auth.md#github-cli-in-protected-sessions) and the
 [pending verification matrix](oauth-broker-verification.md).
 

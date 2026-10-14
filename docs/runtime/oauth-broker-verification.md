@@ -207,11 +207,12 @@ currently enforce this fixture contract, not a verified live-service schema:
 | API release | Session handles in the accepted Authorization schemes at `https://api.github.com:443`; GET, HEAD, POST, PUT, PATCH and DELETE, including REST and GraphQL. This is not a repository- or operation-level allowlist. |
 | HTTPS Git release | A handle in the Basic-auth password field at `https://github.com:443/<owner>/<repo>/` or `<repo>.git/`: GET `info/refs` with the exact upload-pack or receive-pack service query, or POST `git-upload-pack`/`git-receive-pack` without a query. SSH and other Git hosts are outside this adapter. |
 | Native view | Fresh `gho_enclave_` handles per account/session. Proxy-process reload keeps them; native account/config edits never overwrite the gateway grant. |
-| Device replay/recovery | A committed exchange can be reprojected only in its original session/incarnation, including proxy reload. Prior-session completed codes are rejected; uncertain attempts cannot be blindly redispatched. Records retire two hours after their first poll, beyond the one-hour maximum lifetime of accepted device codes; a retired code is redispatched and GitHub rejects it. At most 64 unretired completed/uncertain records exist at once; validated pending/slow-down polls do not consume that capacity. |
+| Device replay/recovery | A committed exchange can be reprojected only in its original session/incarnation, including proxy reload. Prior-session completed codes are rejected; uncertain attempts cannot be blindly redispatched. Records retire two hours after they are created or completed, beyond the one-hour maximum lifetime of accepted device codes; a retired code is redispatched and GitHub rejects it. At most 64 unretired completed/uncertain records exist at once; validated pending/slow-down polls do not consume that capacity. |
 
 Unknown/duplicate response fields, unsupported encodings and malformed token
-errors fail closed. Ordinary API/Git responses still stream without masking;
-the approved provider remains trusted not to reflect its credential.
+errors fail closed. API and Git responses stream through the same tripwire as
+other releases: the account token, also in its Basic-auth encoding, aborts the
+response; repository content is not checked for token fields.
 
 ## Acceptance owners and order
 
@@ -327,17 +328,17 @@ release cases for GitHub too. Add these feature-specific checks:
 | Device login | Run the pinned `gh` GitHub.com browser/device flow from an empty store. Token polling returns native-format handles only after durable capture. Exercise pending/denied/expired authorization, malformed and oversized token responses, uncertain outcomes and unsupported expiry/refresh variants. Verify same-session lost-reply recovery, rejection of prior-session device-code replay, failure at the bounded history limit, and successful login after older records retire. No token-response passthrough on error. |
 | API and Git release | Exercise `gh` REST/GraphQL and HTTPS Git against a disposable repository, with remotes both with and without the `.git` suffix. Verify each accepted authorization format and Git credential field at its declared endpoint. Wrong hosts, ports, paths, fields, account handles and sessions fail without release. |
 | Account/config view | Verify every supported imported account and account-switch behavior, plus preserved supported preferences. Unsupported native structures do not get copied verbatim into the workload. Rewriting the native view cannot update the trusted grant or widen release. |
-| Shared feature identity | Concurrent sessions with the same or different Claude auth names share the global GitHub grant with separate handles/views. Concurrent device logins preserve both account updates; device-code replay cannot cross sessions. Replacing an account token is visible to sibling gateways without replacing their handles or local account selection. A live legacy feature bind prevents enrollment; saved protection prevents later ordinary sessions from exposing it. Failed multi-identity admission does not strand another identity. |
-| Lifecycle/reset | Foreground, `exec`, detached stop/remove and cleanup never reconcile projected feature files into real credentials. Feature reset clears trusted credentials without reimporting them on the next launch. Feature downgrade requires idle, empty state; neither command mutates the Claude identity. |
+| Shared feature identity | Concurrent sessions with the same or different tool auth names share the global GitHub grant with separate handles/views. Concurrent device logins preserve both account updates; device-code replay cannot cross sessions. Replacing an account token is visible to sibling gateways without replacing their handles or local account selection. A live legacy feature bind prevents enrollment; saved protection prevents later ordinary sessions from exposing it. Failed multi-identity admission does not strand another identity. |
+| Lifecycle/reset | Foreground, `exec`, detached stop/remove and cleanup never reconcile projected feature files into real credentials. Feature reset clears trusted credentials without reimporting them on the next launch. Feature downgrade requires idle, empty state; neither command mutates the tool identity. |
 
 Do not record device codes, access tokens, authorization headers, Git credential
 helper output or live handles. The device flow still exposes bootstrap material
 to the client and does not defend enrollment against an already-malicious agent.
 
-Ordinary provider responses are streamed without credential masking. Restricting
-release to a declared auth header does not prove that a provider will never
-reflect that header's value; approved providers remain trusted with credentials.
-The bounded token-response adapter does not provide general response filtering.
+Released responses stream through a tripwire that aborts before the exact
+released credentials reach the workload, in headers, trailers, the body or
+WebSocket frames; it is not general response filtering. Responses of
+unprotected sessions are streamed without credential masking.
 
 For mount inspection and synthetic-secret searches, emit assertions and paths,
 not file contents. Log neither real tokens nor live handles. Ordinary HTTP

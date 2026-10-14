@@ -30,8 +30,9 @@ workflow. Rootless Docker is [not supported](rootless.md); rootless podman is, t
   parents, enclave's own roots (a mount of them would let the agent widen its
   own exceptions or network access, or add host commands), and the SSH agent
   socket. Only `--allow-sensitive-mounts` or
-  `ENCLAVE_ALLOW_SENSITIVE_MOUNTS=1` mounts those, and no config file can set
-  it. Devcontainer and `.git`-pointer mounts stay blocked either way. See
+  `ENCLAVE_ALLOW_SENSITIVE_MOUNTS=1` overrides that check, and no config file can set
+  it. Enclave's host lock/session state and protected auth stores remain
+  refused even with that opt-in. Devcontainer and `.git`-pointer mounts stay blocked either way. See
   [Sensitive mounts](../cli-reference.md#sensitive-mounts).
 - Per-project Enclave config is keyed by project hash under the host config root,
   outside the worktree, so neither the repository nor a session can write it.
@@ -122,8 +123,8 @@ for HTTP release are represented by placeholders in the tool environment and
 released by the gateway only in each rule's declared header at matching HTTPS
 hosts. A known placeholder in another header denies the whole request. This
 keeps raw values out of the tool environment, but approved providers receive
-them and ordinary responses are not masked if a provider reflects an auth
-header. Credential files and secrets without HTTP release can contain real
+them. Outside protected sessions, responses are not masked if a provider
+reflects an auth header. Credential files and secrets without HTTP release can contain real
 values inside the tool config/auth store.
 
 Once configured, the SSH key is available to every Docker session, regardless
@@ -131,26 +132,41 @@ of project or tool. SSH on port 22 bypasses the HTTP/TLS proxy, so a push does
 not appear in `network.log`, even with `--network-log=requests` or `full`. See
 [SSH keys](../auth.md#ssh-keys) for its access and how to scope or revoke it.
 
-### Experimental gateway-owned OAuth
+### Experimental gateway-owned credentials
 
-`--protect-auth` enables captured-token custody for a fresh named Claude
-subscription identity on Docker/Podman. The workload's auth file holds
-session-bound handles; the gateway owns the durable grant and substitutes it
-only in approved endpoint/credential fields. The built-in `github-cli` feature
-also keeps its real native credential files gateway-only and gives the workload
-a separate handle view. Existing unprotected login and other secret files are
-unchanged. Container and pinned-client verification are
-still pending; see the [test plan](../runtime/oauth-broker-verification.md).
+`--protect-auth` gives every built-in tool captured-credential custody on
+Docker/Podman, with named shared, per-project and per-session identities. The
+gateway captures the Claude subscription, ChatGPT, GitHub Copilot and Mistral
+sign-in logins the tools support, and holds host-configured API keys. The
+workload's native credential files hold session-bound handles and its
+environment holds placeholders; the gateway owns the durable grants and
+substitutes them only at their declared hosts and headers. The built-in
+`github-cli` feature also keeps its real native credential files gateway-only
+and gives the workload a separate handle view. Unprotected sessions are
+unchanged. Tool clients are not pinned. Container and real-login verification
+are still pending; see the [test plan](../runtime/oauth-broker-verification.md).
 
-A live handle still authorizes the supported requests. This is not resource-level
-authorization, nor does it protect enrollment from a malicious client exporting
-codes, device codes and PKCE verifiers before capture. GitHub support is limited
-to the declared GitHub.com adapter, not PAT paste, Enterprise or arbitrary
-native-auth features. GitLab remains env-secret based. Other providers, MCP
-login, alternate credential sources and arbitrary secret files are outside the
-adapters.
-Approved upstream services remain trusted not to reflect their credentials;
-ordinary response streams are not scrubbed.
+The gateway checks every response to a request that carried a released
+credential for that exact credential, in headers, trailers, the body and
+WebSocket frames, and aborts before it reaches the workload. Structured
+responses from mediated provider hosts outside model, file and repository
+content are also checked for token fields and provider key prefixes. This is a
+tripwire for reflection, not content filtering: model output and repository
+content may contain credential-like text and are checked only for the exact
+released credentials.
+
+A live handle still authorizes the supported requests. This is not
+resource-level authorization: the gateway refuses the providers' known token,
+API-key, credential-minting and revocation endpoints, but an operation a token
+authorizes through another API is outside its view. Nor does it protect
+enrollment from a malicious client exporting codes, device codes and PKCE
+verifiers before capture. GitHub support is limited to the GitHub.com device
+login, not PAT paste or Enterprise; a self-managed GitLab is mediated when
+selected with `GITLAB_HOST`. MCP login, alternate credential sources, keys
+typed into a tool for an unmediated host, and arbitrary secret files are
+outside the adapters. Protected sessions drop HTTP/3 and `Alt-Svc`; under
+unrestricted networking, TLS whose outer server name is an unmediated host is
+relayed without mediation, so domain fronting can reach a provider unmediated.
 
 Protection survives reset and omission of the flag. A protected identity cannot
 silently reopen through legacy mounts; downgrade requires an explicit host

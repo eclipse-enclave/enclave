@@ -152,7 +152,7 @@ func (b *Broker) RoundTrip(req *http.Request, transport, exchangeTransport http.
 // audit scrubbing, including malformed or wrong-session handles. It does not
 // authenticate a handle or distinguish it from a real provider credential.
 func ContainsHandle(value string) bool {
-	return strings.Contains(value, accessHandlePrefix) || strings.Contains(value, refreshHandlePrefix) || strings.Contains(value, githubHandlePrefix)
+	return strings.Contains(value, accessHandlePrefix) || strings.Contains(value, refreshHandlePrefix) || strings.Contains(value, githubHandlePrefix) || strings.Contains(value, openaiHandleMarker)
 }
 
 // withoutSecrets blanks released secrets in a copy of req's headers. A
@@ -316,14 +316,20 @@ func (b *Broker) exchange(req *http.Request, transport http.RoundTripper) (*http
 }
 
 func reuseCommittedGrant(g *grant, now time.Time) bool {
-	if g.ExpiresAt > now.Add(refreshWindow).Unix() {
+	return reuseCommitted(g.ExpiresAt, g.CommittedAt, g.Token.Expires, now)
+}
+
+// reuseCommitted reports whether a refresh can be answered from the committed
+// grant instead of rotating it again.
+func reuseCommitted(expiresAt int64, committedAt time.Time, lifetime int64, now time.Time) bool {
+	if expiresAt > now.Add(refreshWindow).Unix() {
 		return true
 	}
 	// Deduplicate recent/lost replies, including short-lived grants, without
 	// deferring every subsequent refresh until expiry. Half-lifetime caps the
 	// grace period so even tokens shorter than the grace can rotate early.
-	grace := min(refreshReplayWindow, time.Duration(g.Token.Expires)*time.Second/2)
-	return g.ExpiresAt > now.Unix() && now.Before(g.CommittedAt.Add(grace))
+	grace := min(refreshReplayWindow, time.Duration(lifetime)*time.Second/2)
+	return expiresAt > now.Unix() && now.Before(committedAt.Add(grace))
 }
 
 // commitToken runs under the identity lock and never consults native auth files.

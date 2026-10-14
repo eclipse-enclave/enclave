@@ -87,12 +87,14 @@ type Broker struct {
 	adapters []adapter
 	// anthropic enables Claude subscription capture and release.
 	anthropic bool
-	config    Config
-	registry  registry
-	mu        sync.Mutex
-	now       func() time.Time
-	write     func(string, any) error
-	failed    bool
+	// openai holds the ChatGPT sign-in handles when the tool uses it.
+	openai   *openaiRegistry
+	config   Config
+	registry registry
+	mu       sync.Mutex
+	now      func() time.Time
+	write    func(string, any) error
+	failed   bool
 }
 
 // Open recovers a proxy reload without rotating handles. A new logical session
@@ -159,12 +161,20 @@ func Open(config Config) (*Broker, error) {
 			return err
 		}
 		if g != nil {
-			return b.writeGrant(g)
+			if err := b.writeGrant(g); err != nil {
+				return err
+			}
+		}
+		if tool.Uses(protectedauth.AdapterOpenAI) {
+			return b.openOpenAI()
 		}
 		return nil
 	})
 	if err != nil {
 		return nil, err
+	}
+	if b.openai != nil {
+		b.adapters = append(b.adapters, openaiAdapter{b: b})
 	}
 	if config.GitHub != nil {
 		b.github, err = openGitHub(*config.GitHub)

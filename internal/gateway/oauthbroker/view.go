@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"time"
 )
 
 // InitializeView creates the native credential file before the workload starts.
@@ -82,6 +83,10 @@ func (b *Broker) InitializeView(dir string) error {
 func (b *Broker) nativeFiles(g *grant) (map[string][]byte, error) {
 	files := map[string][]byte{}
 	ready := b.anthropic && g != nil && g.Status == "ready"
+	openai, err := b.openaiReady()
+	if err != nil {
+		return nil, err
+	}
 	switch b.config.Tool {
 	case "claude":
 		if !ready {
@@ -96,20 +101,46 @@ func (b *Broker) nativeFiles(g *grant) (map[string][]byte, error) {
 			return nil, err
 		}
 		files[".credentials.json"], files[".claude.json"] = credentials, config
+	case "codex":
+		if openai != nil {
+			tokens := map[string]any{"access_token": openai.Access, "refresh_token": openai.Refresh, "account_id": openai.AccountID}
+			if openai.ID != "" {
+				tokens["id_token"] = openai.ID
+			}
+			if err := addJSON(files, "auth.json", map[string]any{"auth_mode": "chatgpt", "OPENAI_API_KEY": nil, "tokens": tokens, "last_refresh": openai.CommittedAt.Format(time.RFC3339)}); err != nil {
+				return nil, err
+			}
+		}
+	case "opencode":
+		if openai != nil {
+			if err := addJSON(files, "auth.json", map[string]any{"openai": map[string]any{"type": "oauth", "access": openai.Access, "refresh": openai.Refresh, "expires": openai.ExpiresAt * 1000, "accountId": openai.AccountID}}); err != nil {
+				return nil, err
+			}
+		}
 	case "pi":
 		entries := map[string]any{}
 		if ready {
 			entries["anthropic"] = map[string]any{"type": "oauth", "access": b.registry.Access, "refresh": b.registry.Refresh, "expires": g.ExpiresAt * 1000}
 		}
+		if openai != nil {
+			entries["openai-codex"] = map[string]any{"type": "oauth", "access": openai.Access, "refresh": openai.Refresh, "expires": openai.ExpiresAt * 1000, "accountId": openai.AccountID}
+		}
 		if len(entries) != 0 {
-			data, err := json.Marshal(entries)
-			if err != nil {
-				return nil, ErrState
+			if err := addJSON(files, "auth.json", entries); err != nil {
+				return nil, err
 			}
-			files["auth.json"] = data
 		}
 	}
 	return files, nil
+}
+
+func addJSON(files map[string][]byte, name string, value any) error {
+	data, err := json.Marshal(value)
+	if err != nil {
+		return ErrState
+	}
+	files[name] = data
+	return nil
 }
 
 func nativeAccountConfig(g *grant) ([]byte, error) {

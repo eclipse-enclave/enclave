@@ -18,11 +18,18 @@ files, which the session links to a view at `~/.enclave-auth`:
 | Tool | Captured logins | Native credential files |
 |------|-----------------|-------------------------|
 | `claude` | Claude subscription | `.credentials.json` (through `CLAUDE_SECURESTORAGE_CONFIG_DIR`) |
-| `pi` | Claude subscription | `~/.pi/agent/auth.json` |
-| `codex` | none yet; ChatGPT login is refused | `~/.codex/auth.json` |
-| `opencode` | none yet; ChatGPT and Copilot logins are refused | `~/.config/opencode/auth.json` |
+| `pi` | Claude subscription, ChatGPT (`openai-codex`) | `~/.pi/agent/auth.json` |
+| `codex` | ChatGPT (browser and device code) | `~/.codex/auth.json` |
+| `opencode` | ChatGPT (browser and headless); Copilot is refused for now | `~/.config/opencode/auth.json` |
 | `mistral-vibe` | none yet; browser sign-in is refused | `~/.vibe/.env` |
 | `theia`, `theia-next` | none | none |
+
+ChatGPT handles keep the real tokens' JWT header and claims, which the clients
+read, with the gateway's random signature; only `chatgpt.com` receives the real
+access token. The token exchange that mints an OpenAI API key from a ChatGPT
+login, and pi's and OpenCode's "Sign in with ChatGPT" token sharing, are refused.
+A second login to an identity that already holds a grant is refused too; reset
+the identity to switch accounts.
 
 In every protected session the gateway mediates the Anthropic, OpenAI, Mistral,
 GitHub and Copilot domains. Logins it does not capture are refused there, and so

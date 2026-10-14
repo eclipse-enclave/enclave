@@ -147,7 +147,9 @@ func Run(args []string) int {
 	if opts.Verbose {
 		logx.SetLevel("debug")
 	}
-	maybeAutomaticSelfUpdate(parsed, globalDefaults)
+	if maybeAutomaticSelfUpdate(parsed, globalDefaults) {
+		return exitCodeInterrupted
+	}
 
 	if parsed.Action == "cleanup" {
 		return runCleanup(parsed.Options.RunOptions, parsed.Options.CleanupOptions)

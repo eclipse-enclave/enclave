@@ -58,13 +58,16 @@ sudo dnf install ./enclave-*.x86_64.rpm
 ### Other Linux (x86-64 and arm64)
 
 Download the binary matching your architecture, `enclave-linux-amd64` or
-`enclave-linux-arm64`, together with `checksums.txt`. Verify it and put it on
-your `PATH`:
+`enclave-linux-arm64`, together with `checksums.txt`. Verify it and install it
+into `~/.local/bin`, where it can [update itself](#updating-enclave):
 
 ```bash
 sha256sum --check --ignore-missing checksums.txt
-sudo install enclave-linux-amd64 /usr/local/bin/enclave
+install -d ~/.local/bin
+install enclave-linux-amd64 ~/.local/bin/enclave
 ```
+
+Most distributions put `~/.local/bin` on `PATH` at login once it exists.
 
 ### macOS
 
@@ -74,9 +77,12 @@ Download it together with `checksums.txt`:
 ```bash
 shasum -a 256 --check --ignore-missing checksums.txt
 xattr -d com.apple.quarantine ./enclave-darwin-arm64 2>/dev/null || true
-sudo install -d /usr/local/bin
-sudo install enclave-darwin-arm64 /usr/local/bin/enclave
+install -d ~/.local/bin
+install enclave-darwin-arm64 ~/.local/bin/enclave
 ```
+
+macOS does not put `~/.local/bin` on `PATH`; add
+`export PATH="$HOME/.local/bin:$PATH"` to `~/.zshrc`.
 
 :::note
 The macOS binaries are unsigned and not notarized. A download through the browser
@@ -143,8 +149,14 @@ releases will follow `stable`. Set `"update_channel"` in the global Enclave
 your platform, verify it against `checksums.txt`, and atomically replace the
 current executable.
 The checksums guard against corrupted downloads, not against a compromised
-release. The updater never elevates privileges, so use the manual install
-procedure above when the executable's directory is not writable.
+release. A download that receives no data for 30 seconds is aborted, and Ctrl-C
+stops it without leaving a partial file behind.
+
+The updater never elevates privileges. A binary in a directory you cannot
+write, such as one installed with `sudo install` into `/usr/local/bin`, is
+updated by repeating the install procedure above; when a different build is
+available, Enclave prints the `sudo install` command instead of suggesting
+`self-update`.
 
 Automatic replacement is opt-in. Add `"auto_update": true` to the global
 Enclave `config.json`; project and per-tool settings cannot enable it or change

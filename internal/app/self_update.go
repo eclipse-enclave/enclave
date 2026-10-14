@@ -10,10 +10,11 @@ package app
 import (
 	"context"
 	"errors"
-	"fmt"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"enclave/internal/cli"
@@ -32,8 +33,9 @@ const (
 
 type selfUpdater interface {
 	Supported() error
+	Writable() error
 	Check(ctx context.Context) (selfupdate.Status, error)
-	Install(ctx context.Context, latest string) (string, error)
+	Install(ctx context.Context, latest string) (path string, replaced bool, err error)
 }
 
 // newSelfUpdater returns an updater for the configured update_channel; empty
@@ -69,32 +71,62 @@ func runSelfUpdate(verbose bool) int {
 	}
 	defer release()
 	stamp := config.HostSelfUpdateCheckPath(home)
+	// Registered only now: while waiting for the lock, Ctrl-C must still end
+	// the process at once.
+	ctx, stop := interruptibleUpdate()
+	defer stop()
 
-	checkCtx, cancelCheck := context.WithTimeout(context.Background(), selfUpdateCheckTimeout)
+	checkCtx, cancelCheck := context.WithTimeout(ctx, selfUpdateCheckTimeout)
 	status, err := updater.Check(checkCtx)
 	cancelCheck()
+	if ctx.Err() != nil {
+		logx.Warnf("Enclave update interrupted.")
+		return exitCodeInterrupted
+	}
 	if err != nil {
 		logx.Errorf("Check for enclave update: %v", err)
 		return 1
 	}
 	if !status.UpdateAvailable {
-		logx.Infof("Enclave is up to date with the %s channel (%s).", status.Channel, shortBuild(status.Latest))
+		logUpToDate(status)
 		markSelfUpdateChecked(stamp)
 		return 0
 	}
+	if err := updater.Writable(); err != nil {
+		logx.Errorf("A different enclave %s build is available (%s), but %v", status.Channel, shortBuild(status.Latest), err)
+		return 1
+	}
 
-	logx.Infof("Downloading enclave %s build %s.", status.Channel, shortBuild(status.Latest))
-	updateCtx, cancelUpdate := context.WithTimeout(context.Background(), selfUpdateInstallTimeout)
-	path, err := updater.Install(updateCtx, status.Latest)
+	logx.Infof("Updating enclave to %s build %s.", status.Channel, shortBuild(status.Latest))
+	updateCtx, cancelUpdate := context.WithTimeout(ctx, selfUpdateInstallTimeout)
+	path, replaced, err := updater.Install(updateCtx, status.Latest)
 	cancelUpdate()
+	if ctx.Err() != nil {
+		logx.Warnf("Enclave update interrupted.")
+		return exitCodeInterrupted
+	}
 	if err != nil {
 		logx.Errorf("Update enclave: %v", err)
-		logx.Infof("The updater does not elevate privileges; reinstall enclave manually if %s is not writable.", executablePathForMessage())
 		return 1
 	}
 	markSelfUpdateChecked(stamp)
+	if !replaced {
+		logUpToDate(status)
+		return 0
+	}
 	logx.Successf("Updated enclave from %s to %s build %s at %s. The new binary will be used on the next invocation.", shortBuild(status.Current), status.Channel, shortBuild(status.Latest), path)
 	return 0
+}
+
+func logUpToDate(status selfupdate.Status) {
+	logx.Infof("Enclave is up to date with the %s channel (%s).", status.Channel, shortBuild(status.Latest))
+}
+
+// interruptibleUpdate returns a context that SIGINT or SIGTERM cancels. While
+// it is active those signals no longer kill the process, so an interrupted
+// download returns through Install, which removes its temporary file.
+func interruptibleUpdate() (context.Context, context.CancelFunc) {
+	return signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 }
 
 // loadSelfUpdateGlobals reads the global config alone: self-update runs
@@ -114,70 +146,92 @@ func loadSelfUpdateGlobals() config.Defaults {
 
 // maybeAutomaticSelfUpdate runs the daily update check before an ordinary
 // command. Everything it prints goes to stderr: the command's stdout may be
-// redirected or parsed.
-func maybeAutomaticSelfUpdate(parsed cli.Result, global config.Defaults) {
+// redirected or parsed. It reports whether SIGINT or SIGTERM interrupted the
+// check or download, in which case the command must not run.
+func maybeAutomaticSelfUpdate(parsed cli.Result, global config.Defaults) (interrupted bool) {
 	if !automaticSelfUpdateAllowed(parsed) {
-		return
+		return false
 	}
 	updater := newSelfUpdater(global.UpdateChannel)
 	if err := updater.Supported(); err != nil {
 		logx.DebugNoticef("Skipping enclave update check: %v", err)
-		return
+		return false
 	}
 	home, err := config.ResolveHostHome()
 	if err != nil {
 		logx.DebugNoticef("Skipping enclave update check: %v", err)
-		return
+		return false
 	}
 	// Skip rather than wait: another process is already checking or updating.
 	release, locked, err := util.TryAcquireFileLock(config.HostSelfUpdateLockPath(home))
 	if err != nil {
 		logx.DebugNoticef("Skipping enclave update check: %v", err)
-		return
+		return false
 	}
 	if !locked {
-		return
+		return false
 	}
 	defer release()
 	stamp := config.HostSelfUpdateCheckPath(home)
 	if !selfUpdateCheckDue(stamp, time.Now()) {
-		return
+		return false
 	}
 	// Rate-limit failures too: an offline host should not pause on every command.
 	if err := writeSelfUpdateStamp(stamp); err != nil {
 		logx.DebugNoticef("Failed to record enclave update check: %v", err)
 	}
 
-	checkCtx, cancelCheck := context.WithTimeout(context.Background(), automaticSelfUpdateCheckTimeout)
+	ctx, stop := interruptibleUpdate()
+	defer stop()
+	checkCtx, cancelCheck := context.WithTimeout(ctx, automaticSelfUpdateCheckTimeout)
 	status, err := updater.Check(checkCtx)
 	cancelCheck()
+	if ctx.Err() != nil {
+		logx.Warnf("Enclave update interrupted.")
+		return true
+	}
 	if errors.Is(err, selfupdate.ErrChannelUnavailable) {
 		// A configuration problem, unlike a network failure: say so, once per
 		// check interval, instead of finding no updates in silence.
 		logx.Warnf("Enclave update check skipped: %v", err)
-		return
+		return false
 	}
 	if err != nil {
 		logx.DebugNoticef("Enclave update check failed: %v", err)
-		return
+		return false
 	}
 	if !status.UpdateAvailable {
-		return
+		return false
+	}
+	if err := updater.Writable(); err != nil {
+		logx.Warnf("A different enclave %s build is available (%s; current %s), but %v", status.Channel, shortBuild(status.Latest), shortBuild(status.Current), err)
+		return false
 	}
 	if global.AutoUpdate == nil || !*global.AutoUpdate {
 		logx.Warnf("A different enclave %s build is available (%s; current %s). Run 'enclave self-update' or set \"auto_update\": true in the global config.", status.Channel, shortBuild(status.Latest), shortBuild(status.Current))
-		return
+		return false
 	}
 
 	logx.Noticef("Updating enclave to %s build %s.", status.Channel, shortBuild(status.Latest))
-	updateCtx, cancelUpdate := context.WithTimeout(context.Background(), selfUpdateInstallTimeout)
-	path, err := updater.Install(updateCtx, status.Latest)
+	updateCtx, cancelUpdate := context.WithTimeout(ctx, selfUpdateInstallTimeout)
+	path, replaced, err := updater.Install(updateCtx, status.Latest)
 	cancelUpdate()
-	if err != nil {
-		logx.Warnf("Automatic enclave update failed: %v. Run 'enclave self-update' to retry; the updater does not elevate privileges, so %s must be writable.", err, executablePathForMessage())
-		return
+	if ctx.Err() != nil {
+		logx.Warnf("Enclave update interrupted.")
+		return true
 	}
-	logx.Noticef("Updated enclave to %s build %s at %s. The new binary will be used on the next invocation.", status.Channel, shortBuild(status.Latest), path)
+	if errors.Is(err, selfupdate.ErrNotWritable) {
+		logx.Warnf("Automatic enclave update failed: %v", err)
+		return false
+	}
+	if err != nil {
+		logx.Warnf("Automatic enclave update failed: %v. Run 'enclave self-update' to retry.", err)
+		return false
+	}
+	if replaced {
+		logx.Noticef("Updated enclave to %s build %s at %s. The new binary will be used on the next invocation.", status.Channel, shortBuild(status.Latest), path)
+	}
+	return false
 }
 
 // automaticSelfUpdateAllowed limits the periodic check to interactive use:
@@ -195,12 +249,17 @@ func automaticSelfUpdateAllowed(parsed cli.Result) bool {
 	}
 }
 
+// selfUpdateCheckDue also counts a stamp dated an interval or more in the
+// future as due: a clock that was once far ahead (a restored VM, RTC drift)
+// must not suppress checks until it catches up, while the skew of a network
+// home's server clock stays below that.
 func selfUpdateCheckDue(path string, now time.Time) bool {
 	info, err := os.Stat(path)
 	if err != nil {
 		return true
 	}
-	return now.Sub(info.ModTime()) >= selfUpdateCheckInterval
+	age := now.Sub(info.ModTime())
+	return age >= selfUpdateCheckInterval || age <= -selfUpdateCheckInterval
 }
 
 func markSelfUpdateChecked(stamp string) {
@@ -216,14 +275,15 @@ func writeSelfUpdateStamp(path string) error {
 	return util.WriteFileAtomic(path, []byte(time.Now().UTC().Format(time.RFC3339)+"\n"), 0o600)
 }
 
-// shortBuild abbreviates a commit identifying a build; versions are kept.
+// shortBuild abbreviates a commit identifying a build to the seven characters
+// `enclave version` shows; versions are kept.
 func shortBuild(build string) string {
 	if build == "" {
 		return "unknown"
 	}
 	base, dirty := strings.CutSuffix(build, "-dirty")
-	if len(base) > 8 && isHex(base) {
-		base = base[:8]
+	if len(base) > 7 && isHex(base) {
+		base = base[:7]
 	}
 	if dirty {
 		return base + "-dirty"
@@ -233,15 +293,4 @@ func shortBuild(build string) string {
 
 func isHex(value string) bool {
 	return strings.Trim(strings.ToLower(value), "0123456789abcdef") == ""
-}
-
-func executablePathForMessage() string {
-	path, err := os.Executable()
-	if err != nil {
-		return "the enclave executable"
-	}
-	if resolved, resolveErr := filepath.EvalSymlinks(path); resolveErr == nil {
-		path = resolved
-	}
-	return fmt.Sprintf("%q", path)
 }

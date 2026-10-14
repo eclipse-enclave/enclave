@@ -179,7 +179,7 @@ jobs:
             --notes "$(cat <<EOF
           **Rolling release from \`main\`**
 
-          Commit: [\`${GITHUB_SHA::8}\`](${{ github.server_url }}/${{ github.repository }}/commit/${GITHUB_SHA})
+          Commit: [\`${GITHUB_SHA::7}\`](${{ github.server_url }}/${{ github.repository }}/commit/${GITHUB_SHA})
           Date: $(date -u +%Y-%m-%d)
 
           | File | Platform | Notes |
@@ -203,19 +203,22 @@ jobs:
 
           # Other Linux distributions (use enclave-linux-arm64 on arm64 hosts)
           sha256sum --check --ignore-missing checksums.txt
-          sudo install enclave-linux-amd64 /usr/local/bin/enclave
+          install -d ~/.local/bin
+          install enclave-linux-amd64 ~/.local/bin/enclave
 
           # macOS (replace arm64 with amd64 on Intel)
           shasum -a 256 --check --ignore-missing checksums.txt
           xattr -d com.apple.quarantine ./enclave-darwin-arm64 2>/dev/null || true
-          sudo install -d /usr/local/bin
-          sudo install enclave-darwin-arm64 /usr/local/bin/enclave
+          install -d ~/.local/bin
+          install enclave-darwin-arm64 ~/.local/bin/enclave
           \`\`\`
 
           \`\`\`powershell
           # Windows: install the launcher, then enclave itself inside WSL2
           scoop install ${{ github.server_url }}/${{ github.repository }}/releases/download/rolling/enclave.json
           \`\`\`
+
+          The standalone binaries update themselves with \`enclave self-update\` when installed into a directory you own, such as \`~/.local/bin\` (add it to \`PATH\` if needed). The updater never uses \`sudo\`; a system-wide install is updated by installing it again.
 
           The macOS binaries are unsigned and not notarized, so Gatekeeper quarantines browser downloads and \`install\` propagates the attribute; \`curl\` or \`gh release download\` avoids it entirely.
 

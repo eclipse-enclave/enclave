@@ -14,7 +14,10 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
+	"time"
+	"unicode"
 
 	"enclave/internal/buildinfo"
 )
@@ -101,22 +104,108 @@ func (p pendingSource) label(current buildinfo.Info) string {
 
 type fetcher struct {
 	client *http.Client
+	// idleTimeout fails a response body that delivers no data for that long;
+	// the transport's ResponseHeaderTimeout ends once the body starts.
+	idleTimeout time.Duration
 }
 
 func (f fetcher) get(ctx context.Context, url string) (*http.Response, error) {
+	ctx, cancel := context.WithCancelCause(ctx)
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
+		cancel(nil)
 		return nil, err
 	}
 	request.Header.Set("Accept", "application/vnd.github+json")
 	request.Header.Set("User-Agent", "eclipse-enclave-self-update")
 	response, err := f.client.Do(request) // #nosec G704 -- URLs come from fixed release sources; tests substitute a local server.
 	if err != nil {
+		cancel(nil)
 		return nil, err
 	}
 	if response.StatusCode != http.StatusOK {
+		err := responseError(url, response)
 		_ = response.Body.Close()
-		return nil, fmt.Errorf("%s returned %s", url, response.Status)
+		cancel(nil)
+		return nil, err
 	}
+	response.Body = newIdleBody(ctx, cancel, response.Body, f.idleTimeout)
 	return response, nil
+}
+
+// responseError names GitHub's rate limit, which it reports as a bare 403 or
+// 429, and otherwise passes on the message of a GitHub error body.
+func responseError(url string, response *http.Response) error {
+	limited := response.StatusCode == http.StatusForbidden || response.StatusCode == http.StatusTooManyRequests
+	if limited && response.Header.Get("X-RateLimit-Remaining") == "0" {
+		reset := ""
+		if seconds, err := strconv.ParseInt(response.Header.Get("X-RateLimit-Reset"), 10, 64); err == nil {
+			reset = "; it resets at " + time.Unix(seconds, 0).Format("15:04")
+		}
+		return fmt.Errorf("%s returned %s: GitHub API rate limit exceeded%s", url, response.Status, reset)
+	}
+	var body struct {
+		Message string `json:"message"`
+	}
+	if json.NewDecoder(io.LimitReader(response.Body, maxErrorBodyBytes)).Decode(&body) == nil {
+		if message := printableMessage(body.Message); message != "" {
+			return fmt.Errorf("%s returned %s: %s", url, response.Status, message)
+		}
+	}
+	return fmt.Errorf("%s returned %s", url, response.Status)
+}
+
+// printableMessage flattens a server-supplied message to one bounded line
+// without control characters a terminal would interpret.
+func printableMessage(message string) string {
+	message = strings.Join(strings.Fields(strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return ' '
+		}
+		return r
+	}, message)), " ")
+	if runes := []rune(message); len(runes) > maxErrorMessageRunes {
+		message = string(runes[:maxErrorMessageRunes]) + "…"
+	}
+	return message
+}
+
+var errBodyIdle = errors.New("response body idle")
+
+// idleBody cancels its request when timeout passes without data, so a stalled
+// download fails instead of blocking until the operation's deadline.
+type idleBody struct {
+	io.ReadCloser
+	ctx     context.Context
+	cancel  context.CancelCauseFunc
+	timer   *time.Timer
+	timeout time.Duration
+}
+
+func newIdleBody(ctx context.Context, cancel context.CancelCauseFunc, body io.ReadCloser, timeout time.Duration) *idleBody {
+	b := &idleBody{ReadCloser: body, ctx: ctx, cancel: cancel, timeout: timeout}
+	if timeout > 0 {
+		b.timer = time.AfterFunc(timeout, func() { cancel(errBodyIdle) })
+	}
+	return b
+}
+
+func (b *idleBody) Read(p []byte) (int, error) {
+	n, err := b.ReadCloser.Read(p)
+	if n > 0 && b.timer != nil {
+		b.timer.Reset(b.timeout)
+	}
+	if err != nil && errors.Is(context.Cause(b.ctx), errBodyIdle) {
+		err = fmt.Errorf("no data received for %s", b.timeout)
+	}
+	return n, err
+}
+
+func (b *idleBody) Close() error {
+	if b.timer != nil {
+		b.timer.Stop()
+	}
+	err := b.ReadCloser.Close()
+	b.cancel(nil)
+	return err
 }

@@ -83,6 +83,7 @@ func newTestService(server *httptest.Server, target string) *Service {
 	service.current = buildinfo.Info{Version: "rolling", Commit: "abcdef0"}
 	service.executablePath = func() (string, error) { return target, nil }
 	service.externalAssets = func(string) (string, bool) { return "", false }
+	service.writableDir = func(string) bool { return true }
 	return service
 }
 
@@ -167,12 +168,12 @@ func TestInstallVerifiesAndAtomicallyReplacesExecutable(t *testing.T) {
 	server := newTestRelease(newBinary).serve(t)
 	target := writeExecutable(t, 0o751)
 
-	installed, err := newTestService(server, target).Install(context.Background(), testCommit)
+	installed, replaced, err := newTestService(server, target).Install(context.Background(), testCommit)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if installed != target {
-		t.Fatalf("installed path = %q, want %q", installed, target)
+	if installed != target || !replaced {
+		t.Fatalf("Install = %q, %v; want %q replaced", installed, replaced, target)
 	}
 	got, err := os.ReadFile(target)
 	if err != nil {
@@ -238,7 +239,20 @@ func TestInstallFailuresPreserveExecutable(t *testing.T) {
 					_, _ = fmt.Fprintf(w, `{"object":{"sha":%q,"type":"commit"}}`, commit)
 				}
 			},
-			wantErr: "moved from 12345678 to abcdef01",
+			wantErr: "moved from 1234567 to abcdef0",
+		},
+		{
+			name: "stalled download",
+			setup: func(r *testRelease, s *Service) {
+				s.fetcher.idleTimeout = 50 * time.Millisecond
+				r.binary = func(w http.ResponseWriter, req *http.Request) {
+					w.Header().Set("Content-Length", "1000")
+					_, _ = fmt.Fprint(w, "partial")
+					w.(http.Flusher).Flush()
+					<-req.Context().Done()
+				}
+			},
+			wantErr: "no data received for 50ms",
 		},
 		{
 			name: "source build",
@@ -263,7 +277,7 @@ func TestInstallFailuresPreserveExecutable(t *testing.T) {
 			service := newTestService(server, target)
 			tc.setup(release, service)
 
-			_, err := service.Install(context.Background(), testCommit)
+			_, _, err := service.Install(context.Background(), testCommit)
 			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
 				t.Fatalf("Install error = %v, want it to contain %q", err, tc.wantErr)
 			}
@@ -328,7 +342,7 @@ func TestInstallRemovesStaleUpdateDownloads(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := newTestService(server, target).Install(context.Background(), testCommit); err != nil {
+	if _, _, err := newTestService(server, target).Install(context.Background(), testCommit); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(stale); !os.IsNotExist(err) {
@@ -364,7 +378,7 @@ func TestStableChannelHasNoSourceYet(t *testing.T) {
 	if _, err := service.Check(context.Background()); !errors.Is(err, ErrChannelUnavailable) {
 		t.Fatalf("Check error = %v, want ErrChannelUnavailable", err)
 	}
-	if _, err := service.Install(context.Background(), testCommit); !errors.Is(err, ErrChannelUnavailable) {
+	if _, _, err := service.Install(context.Background(), testCommit); !errors.Is(err, ErrChannelUnavailable) {
 		t.Fatalf("Install error = %v, want ErrChannelUnavailable", err)
 	}
 	assertUnchanged(t, target)
@@ -391,7 +405,7 @@ func TestSwitchingChannelsInstallsTheOtherChannelsBuild(t *testing.T) {
 	if status.Current != testCommit {
 		t.Fatalf("current build labelled %q, want its commit", status.Current)
 	}
-	if _, err := service.Install(context.Background(), status.Latest); err != nil {
+	if _, _, err := service.Install(context.Background(), status.Latest); err != nil {
 		t.Fatal(err)
 	}
 	if got, _ := os.ReadFile(target); string(got) != string(newBinary) {
@@ -402,5 +416,152 @@ func TestSwitchingChannelsInstallsTheOtherChannelsBuild(t *testing.T) {
 func TestArtifactNameRejectsWindowsLauncher(t *testing.T) {
 	if _, err := artifactName("windows", "amd64"); err == nil {
 		t.Fatal("artifactName accepted the Windows launcher archive")
+	}
+}
+
+func TestInstallLeavesMatchingExecutableAlone(t *testing.T) {
+	newBinary := []byte("new enclave binary")
+	release := newTestRelease(newBinary)
+	var downloads atomic.Int32
+	serveBinary := release.binary
+	release.binary = func(w http.ResponseWriter, r *http.Request) {
+		downloads.Add(1)
+		serveBinary(w, r)
+	}
+	target := filepath.Join(t.TempDir(), "enclave")
+	if err := os.WriteFile(target, newBinary, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// The running build is older, but another update already replaced the
+	// executable on disk.
+	path, replaced, err := newTestService(release.serve(t), target).Install(context.Background(), testCommit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if path != target || replaced {
+		t.Fatalf("Install = %q, %v; want %q left alone", path, replaced, target)
+	}
+	if downloads.Load() != 0 {
+		t.Fatalf("downloaded the binary %d times, want none", downloads.Load())
+	}
+	if entries, _ := os.ReadDir(filepath.Dir(target)); len(entries) != 1 {
+		t.Fatalf("Install left files behind: %v", entries)
+	}
+}
+
+func TestInstallIntoUnwritableDirectoryFailsOffline(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root can write any directory")
+	}
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests.Add(1)
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	t.Cleanup(server.Close)
+	target := writeExecutable(t, 0o755)
+	dir := filepath.Dir(target)
+	if err := os.Chmod(dir, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
+
+	_, _, err := newTestService(server, target).Install(context.Background(), testCommit)
+	if !errors.Is(err, ErrNotWritable) {
+		t.Fatalf("Install error = %v, want ErrNotWritable", err)
+	}
+	if requests.Load() != 0 {
+		t.Fatalf("made %d requests before finding the directory unwritable", requests.Load())
+	}
+	assertUnchanged(t, target)
+}
+
+func TestWritableNamesTheReinstallCommand(t *testing.T) {
+	server := newTestRelease(nil).serve(t)
+	service := newTestService(server, "/opt/my tools/enclave")
+	if err := service.Writable(); err != nil {
+		t.Fatalf("writable directory reported: %v", err)
+	}
+
+	var checked string
+	service.writableDir = func(dir string) bool {
+		checked = dir
+		return false
+	}
+	err := service.Writable()
+	if !errors.Is(err, ErrNotWritable) {
+		t.Fatalf("Writable error = %v, want ErrNotWritable", err)
+	}
+	if checked != "/opt/my tools" {
+		t.Fatalf("checked %q, want the executable's directory", checked)
+	}
+	for _, want := range []string{
+		server.URL + "/" + testArtifact,
+		"sudo install " + testArtifact + " '/opt/my tools/enclave'",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("Writable error %q lacks %q", err, want)
+		}
+	}
+}
+
+func TestShellArgQuotesOnlyWhenNeeded(t *testing.T) {
+	for path, want := range map[string]string{
+		"/usr/local/bin/enclave":   "/usr/local/bin/enclave",
+		"/home/me/.local/bin/x_1+": "/home/me/.local/bin/x_1+",
+		"/opt/my tools/enclave":    "'/opt/my tools/enclave'",
+		"/opt/$HOME/enclave":       "'/opt/$HOME/enclave'",
+		"/opt/it's/enclave":        `'/opt/it'"'"'s/enclave'`,
+		"/opt/é/enclave":           "'/opt/é/enclave'",
+	} {
+		if got := shellArg(path); got != want {
+			t.Errorf("shellArg(%q) = %s, want %s", path, got, want)
+		}
+	}
+}
+
+func TestFailedRequestsExplainThemselves(t *testing.T) {
+	reset := time.Now().Add(20 * time.Minute).Truncate(time.Second)
+	for _, tc := range []struct {
+		name    string
+		handler http.HandlerFunc
+		want    string
+	}{
+		{
+			name: "rate limit",
+			handler: func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("X-RateLimit-Remaining", "0")
+				w.Header().Set("X-RateLimit-Reset", fmt.Sprint(reset.Unix()))
+				w.WriteHeader(http.StatusForbidden)
+				_, _ = fmt.Fprint(w, `{"message":"API rate limit exceeded for 203.0.113.7."}`)
+			},
+			want: "403 Forbidden: GitHub API rate limit exceeded; it resets at " + reset.Format("15:04"),
+		},
+		{
+			name: "github message",
+			handler: func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusForbidden)
+				_, _ = fmt.Fprint(w, `{"message":"You have exceeded a secondary rate limit.\n\u001b[31mRetry later."}`)
+			},
+			want: "403 Forbidden: You have exceeded a secondary rate limit. [31mRetry later.",
+		},
+		{
+			name: "plain body",
+			handler: func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusNotFound)
+				_, _ = fmt.Fprint(w, "Not Found")
+			},
+			want: "404 Not Found",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(tc.handler)
+			t.Cleanup(server.Close)
+			_, err := New(model.UpdateChannelRolling).fetcher.get(context.Background(), server.URL)
+			if err == nil || !strings.HasSuffix(err.Error(), tc.want) {
+				t.Fatalf("error = %v, want it to end with %q", err, tc.want)
+			}
+		})
 	}
 }

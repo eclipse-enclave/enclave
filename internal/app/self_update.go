@@ -9,6 +9,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -40,8 +41,14 @@ type selfUpdater interface {
 // can substitute a fake release.
 var newSelfUpdater = func(channel string) selfUpdater { return selfupdate.New(channel) }
 
-func runSelfUpdate() int {
-	updater := newSelfUpdater(globalUpdateChannel())
+// runSelfUpdate dispatches before option resolution, so it applies --verbose
+// (or the global verbose setting) itself.
+func runSelfUpdate(verbose bool) int {
+	global := loadSelfUpdateGlobals()
+	if verbose || (global.Verbose != nil && *global.Verbose) {
+		logx.SetLevel("debug")
+	}
+	updater := newSelfUpdater(global.UpdateChannel)
 	if err := updater.Supported(); err != nil {
 		logx.Errorf("%v", err)
 		return 1
@@ -90,19 +97,19 @@ func runSelfUpdate() int {
 	return 0
 }
 
-// globalUpdateChannel reads update_channel from the global config alone:
-// self-update runs before the project is resolved, and a broken config must
-// not keep a fixed binary from being installed.
-func globalUpdateChannel() string {
+// loadSelfUpdateGlobals reads the global config alone: self-update runs
+// before the project is resolved, and a broken config must not keep a fixed
+// binary from being installed.
+func loadSelfUpdateGlobals() config.Defaults {
 	global, warnings, err := config.LoadGlobalDefaults()
 	if err != nil {
 		logx.Warnf("Ignoring the global config for this update: %v", err)
-		return ""
+		return config.Defaults{}
 	}
 	for _, warning := range warnings {
 		logx.Warnf(warning.Message)
 	}
-	return global.UpdateChannel
+	return global
 }
 
 // maybeAutomaticSelfUpdate runs the daily update check before an ordinary
@@ -144,6 +151,12 @@ func maybeAutomaticSelfUpdate(parsed cli.Result, global config.Defaults) {
 	checkCtx, cancelCheck := context.WithTimeout(context.Background(), automaticSelfUpdateCheckTimeout)
 	status, err := updater.Check(checkCtx)
 	cancelCheck()
+	if errors.Is(err, selfupdate.ErrChannelUnavailable) {
+		// A configuration problem, unlike a network failure: say so, once per
+		// check interval, instead of finding no updates in silence.
+		logx.Warnf("Enclave update check skipped: %v", err)
+		return
+	}
 	if err != nil {
 		logx.DebugNoticef("Enclave update check failed: %v", err)
 		return
@@ -167,8 +180,11 @@ func maybeAutomaticSelfUpdate(parsed cli.Result, global config.Defaults) {
 	logx.Noticef("Updated enclave to %s build %s at %s. The new binary will be used on the next invocation.", status.Channel, shortBuild(status.Latest), path)
 }
 
+// automaticSelfUpdateAllowed limits the periodic check to interactive use:
+// scripts and integrations neither wait for the network nor get the binary
+// swapped between two calls.
 func automaticSelfUpdateAllowed(parsed cli.Result) bool {
-	if !promptAllowed(parsed) || parsed.NetworkLogView.JSON || parsed.UserCommand != nil {
+	if !promptAllowed(parsed) || parsed.NetworkLogView.JSON || parsed.UserCommand != nil || !promptUsable() {
 		return false
 	}
 	switch parsed.Action {

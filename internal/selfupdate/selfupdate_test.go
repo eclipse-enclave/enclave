@@ -282,6 +282,9 @@ func TestSupportedRequiresStandaloneReleaseBinary(t *testing.T) {
 	if err := service.Supported(); err == nil {
 		t.Fatal("package build without a channel stamp was supported")
 	}
+	if _, err := service.Check(context.Background()); err == nil {
+		t.Fatal("Check accepted a package build")
+	}
 
 	service.buildChannel = model.UpdateChannelRolling
 	service.channel = "nightly"
@@ -341,7 +344,7 @@ func TestTargetChannelDefaultsToBuildChannel(t *testing.T) {
 		{configured: "", build: "rolling", want: "rolling"},
 		{configured: "", build: "stable", want: "stable"},
 		{configured: "stable", build: "rolling", want: "stable"},
-		{configured: " rolling ", build: "stable", want: "rolling"},
+		{configured: "rolling", build: "stable", want: "rolling"},
 		{configured: "", build: "", want: ""},
 	} {
 		if got := targetChannel(tc.configured, tc.build); got != tc.want {

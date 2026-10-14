@@ -94,7 +94,7 @@ func New(channel string) *Service {
 }
 
 func targetChannel(configured string, build string) string {
-	if configured = strings.TrimSpace(configured); configured != "" {
+	if configured != "" {
 		return configured
 	}
 	return build
@@ -129,6 +129,9 @@ func (s *Service) Supported() error {
 // binary from another channel is never current, so switching channels
 // installs that channel's build even when it is older.
 func (s *Service) Check(ctx context.Context) (Status, error) {
+	if err := s.Supported(); err != nil {
+		return Status{}, err
+	}
 	src := s.sources[s.channel]
 	latest, err := src.latest(ctx)
 	if err != nil {

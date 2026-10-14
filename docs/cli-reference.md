@@ -111,7 +111,8 @@ was published on unless the global config sets `update_channel`; switching
 channels installs the other channel's latest build even if it is older. The
 `stable` channel has no download source yet: stable releases are expected on
 the Eclipse Foundation download server, and until that is wired up, checks on
-`stable` fail and are reported as such.
+`stable` fail: `self-update` exits with an error and the periodic check warns
+once per interval. `enclave config` shows the effective channel.
 
 Only standalone release binaries update themselves: package installs, source
 builds, and binaries that run against a runtime asset tree beside them or in
@@ -119,12 +120,14 @@ builds, and binaries that run against a runtime asset tree beside them or in
 alone would leave their assets behind. Upgrade those with the package manager
 or by rebuilding.
 
-Other human-facing invocations check the channel at most once every 24 hours,
-recorded in `~/.local/state/enclave/self-update-check`, and notify on stderr,
-debug diagnostics included, when a different build is available. Set
-`"auto_update": true` in the global config to install it during that check.
-Checks are skipped for shell completion, structured output, and user commands;
-a failed check waits for the next interval.
+Other interactive invocations, with stdin, stdout, and stderr all terminals,
+check the channel at most once every 24 hours, recorded in
+`~/.local/state/enclave/self-update-check`, and notify when a different build
+is available. Set `"auto_update": true` in the global config to install it
+during that check. All update-check output, including `--verbose` diagnostics,
+goes to stderr. Checks are skipped for scripts and other non-interactive
+callers, shell completion, structured output, and user commands; a failed check
+waits for the next interval.
 
 `enclave config` flags: `--view <mode>` selects the output view — `matrix` (default), `source` (where each value comes from), `diff` (values overridden by higher precedence), or `effective` (effective values only); `--json` emits a versioned JSON envelope (`schemaVersion: "1"`, typed values, structured warnings, and validation status; see [Inspecting Resolved Config](configuration.md#inspecting-resolved-config)).
 

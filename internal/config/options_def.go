@@ -116,7 +116,6 @@ func OptionDefs() []OptionDef {
 			SourceField:    "UpdateChannel",
 			DefaultsField:  "UpdateChannel",
 			Apply:          ApplyString,
-			TrimOnApply:    true,
 		},
 		{
 			Name:           "tool",

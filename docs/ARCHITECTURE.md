@@ -6,11 +6,11 @@ Enclave is a sandboxing CLI that bootstraps isolated agent tooling in Docker con
 
 1. Parse CLI arguments, load host configuration, and resolve the active tool
    profile. If help, version, shell completion, or structured output is
-   requested, skip the periodic binary update check. Other human-facing
-   invocations of a standalone release binary check their update channel
-   (`rolling` or `stable`) at most once per day; `auto_update=true` installs
-   the checksummed platform binary atomically, while the default only reports
-   an available update.
+   requested, or no terminal is attached, skip the periodic binary update check.
+   Other invocations of a standalone release binary check their update channel
+   (`rolling` or `stable`) at most once per day; `auto_update=true` installs the
+   checksummed platform binary atomically, while the default only reports an
+   available update.
 2. Discover repository assets (Dockerfiles, runtime assets, profiles).
 3. Ensure the runtime image is up to date (default or derived); rebuild if needed.
    Rebuild detection hashes the rendered Dockerfile and entrypoint plus build config

@@ -588,10 +588,16 @@ func (r *Runtime) stableConfigKey() string {
 // features, which change the composed skills) never share a generated directory
 // and cannot clobber each other's read-only mounts.
 func (r *Runtime) sessionGeneratedKey() string {
+	key := defaultConfigKey
 	if r.configVolReady && strings.TrimSpace(r.configVolSuffix) != "" {
-		return strings.TrimSpace(r.configVolSuffix)
+		key = strings.TrimSpace(r.configVolSuffix)
 	}
-	return defaultConfigKey
+	if r.auth.ProtectAuth {
+		// Generated config, skills and session memory follow the protected
+		// config store, which ordinary sessions never use.
+		return backend.ProtectedConfigKey(backend.StoreKey{Suffix: key}).Suffix
+	}
+	return key
 }
 
 // runningConfigKeyExists reports whether a running session for this tool,

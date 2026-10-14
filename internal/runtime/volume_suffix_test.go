@@ -186,6 +186,25 @@ func TestGeneratedConfigSourceDirDefaultsToDefaultKey(t *testing.T) {
 	}
 }
 
+// Protected sessions own their config store; generated config, skills and
+// session memory follow it rather than a concurrent ordinary session's.
+func TestProtectedSessionsUseTheirOwnGeneratedKey(t *testing.T) {
+	t.Parallel()
+
+	for _, suffix := range []string{"", "task"} {
+		ordinary := &Runtime{host: model.Host{Home: "/tmp/home"}, project: model.Project{Hash: "abc123abc123"}, profile: model.Profile{Name: "codex"}, configVolSuffix: suffix, configVolReady: true}
+		protected := *ordinary
+		protected.auth.ProtectAuth = true
+		key := protected.sessionGeneratedKey()
+		if key == ordinary.sessionGeneratedKey() || !backend.IsProtectedConfigKey(backend.StoreKey{Suffix: key}) {
+			t.Fatalf("suffix %q: protected key %q, ordinary %q", suffix, key, ordinary.sessionGeneratedKey())
+		}
+		if protected.generatedConfigSourceDir() == ordinary.generatedConfigSourceDir() {
+			t.Fatalf("suffix %q: protected and ordinary sessions share generated config", suffix)
+		}
+	}
+}
+
 func TestGeneratedConfigSourceDirUsesConfigVolumeSuffix(t *testing.T) {
 	t.Parallel()
 

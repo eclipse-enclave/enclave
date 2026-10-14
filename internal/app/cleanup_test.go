@@ -225,12 +225,14 @@ func TestResolveEphemeralStoreDirs(t *testing.T) {
 
 	storeRoot := config.HostStoreConfigRootDir(home, run.Tool, project.Hash)
 	memoryRoot := config.HostProjectMemoryDir(home, project.Hash, run.Tool)
-	for _, key := range []string{"default", "session-a", "throwaway"} {
+	// default.protected is the persistent store of protected sessions;
+	// session-a.protected is a named protected session's store.
+	for _, key := range []string{"default", "default.protected", "session-a", "session-a.protected", "throwaway"} {
 		if err := os.MkdirAll(filepath.Join(storeRoot, key), 0o700); err != nil {
 			t.Fatalf("mkdir store %q: %v", key, err)
 		}
 	}
-	for _, key := range []string{"default", "session-a"} {
+	for _, key := range []string{"default", "default.protected", "session-a", "session-a.protected"} {
 		if err := os.MkdirAll(filepath.Join(memoryRoot, key), 0o700); err != nil {
 			t.Fatalf("mkdir memory %q: %v", key, err)
 		}
@@ -255,8 +257,10 @@ func TestResolveEphemeralStoreDirs(t *testing.T) {
 			want: []cleanupDir{
 				{Kind: ephemeralKind, Path: basePath},
 				{Kind: ephemeralKind, Path: filepath.Join(storeRoot, "session-a")},
+				{Kind: ephemeralKind, Path: filepath.Join(storeRoot, "session-a.protected")},
 				{Kind: ephemeralKind, Path: filepath.Join(storeRoot, "throwaway")},
 				{Kind: memoryKind, Path: filepath.Join(memoryRoot, "session-a")},
+				{Kind: memoryKind, Path: filepath.Join(memoryRoot, "session-a.protected")},
 			},
 		},
 		{

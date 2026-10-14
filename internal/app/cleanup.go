@@ -304,7 +304,9 @@ func resolveEphemeralStoreDirs(run model.RunOptions, cleanup model.CleanupOption
 				scope = model.MemoryScopeProject
 			}
 			for _, key := range keys {
-				if key == persistentConfigStoreKey {
+				// The default stores, ordinary and protected, hold persistent
+				// history; neither is ephemeral.
+				if key == persistentConfigStoreKey || key == backend.ProtectedConfigKey(backend.StoreKey{Suffix: persistentConfigStoreKey}).Suffix {
 					continue
 				}
 				memoryDir := ""

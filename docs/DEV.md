@@ -368,7 +368,9 @@ SIGINT and SIGTERM through `signal.NotifyContext`, so Install's cleanup runs
 and the process exits 130; only SIGKILL or a crash leaves a temporary file,
 which the next install removes once it is an hour old. `Service.Writable` judges
 the directory with `access(2)` (`config.LooksWritableDir`) so the periodic
-check can print the `sudo install` command instead of offering `self-update`.
+check can print the verify-and-reinstall command instead of offering
+`self-update`; `Install` maps a permission error on the final rename (a sticky
+directory) to the same `ErrNotWritable`.
 
 Config additive note: feature additive directives (`+`/`-`) are applied against
 the implicit default-enabled feature set when `features` is unset. For example,

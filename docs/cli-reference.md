@@ -101,8 +101,11 @@ partial file.
 
 The updater never elevates privileges. When the executable's directory is not
 writable, as after a `sudo install` into `/usr/local/bin`, `self-update` exits
-with an error and both it and the periodic check print the `sudo install`
-command that reinstalls the new build by hand.
+with an error and both it and the periodic check print the download URLs of
+the binary and `checksums.txt` and the command that verifies the download and
+reinstalls it with `sudo install`. A replacement the system denies only at the
+end, as in a sticky directory holding another user's binary, is reported the
+same way.
 
 Release channels are `rolling`, rebuilt from every push to `main` and published
 on GitHub, and `stable`, for official releases. A binary follows the channel it

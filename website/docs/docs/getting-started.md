@@ -155,8 +155,8 @@ stops it without leaving a partial file behind.
 The updater never elevates privileges. A binary in a directory you cannot
 write, such as one installed with `sudo install` into `/usr/local/bin`, is
 updated by repeating the install procedure above; when a different build is
-available, Enclave prints the `sudo install` command instead of suggesting
-`self-update`.
+available, Enclave prints the commands that download, verify, and reinstall it
+instead of suggesting `self-update`.
 
 Automatic replacement is opt-in. Add `"auto_update": true` to the global
 Enclave `config.json`; project and per-tool settings cannot enable it or change

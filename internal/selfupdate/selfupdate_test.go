@@ -497,12 +497,48 @@ func TestWritableNamesTheReinstallCommand(t *testing.T) {
 		t.Fatalf("checked %q, want the executable's directory", checked)
 	}
 	for _, want := range []string{
-		server.URL + "/" + testArtifact,
-		"sudo install " + testArtifact + " '/opt/my tools/enclave'",
+		"download " + server.URL + "/" + testArtifact + " and " + server.URL + "/checksums.txt",
+		"with: sha256sum --check --ignore-missing checksums.txt && sudo install " + testArtifact + " '/opt/my tools/enclave'",
 	} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("Writable error %q lacks %q", err, want)
 		}
+	}
+
+	service.goos = "darwin"
+	want := "with: shasum -a 256 --check --ignore-missing checksums.txt && xattr -c enclave-darwin-amd64 && sudo install enclave-darwin-amd64 '/opt/my tools/enclave'"
+	if err := service.Writable(); err == nil || !strings.HasSuffix(err.Error(), want) {
+		t.Errorf("Writable error on macOS = %v, want it to end with %q", err, want)
+	}
+}
+
+// A sticky directory such as /tmp lets anyone create files but refuses to
+// replace another user's, so the final rename can be denied after Writable
+// and CreateTemp both succeeded. Revoking write access during the download
+// produces the same denial without a second user.
+func TestInstallReportsDeniedReplacementAsNotWritable(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root can replace any file")
+	}
+	newBinary := []byte("new enclave binary")
+	release := newTestRelease(newBinary)
+	target := writeExecutable(t, 0o755)
+	dir := filepath.Dir(target)
+	serveBinary := release.binary
+	release.binary = func(w http.ResponseWriter, r *http.Request) {
+		if err := os.Chmod(dir, 0o555); err != nil {
+			t.Error(err)
+		}
+		serveBinary(w, r)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
+
+	_, _, err := newTestService(release.serve(t), target).Install(context.Background(), testCommit)
+	if !errors.Is(err, ErrNotWritable) || !strings.Contains(err.Error(), "sudo install") {
+		t.Fatalf("Install error = %v, want ErrNotWritable with the reinstall command", err)
+	}
+	if got, _ := os.ReadFile(target); string(got) != "old binary" {
+		t.Fatalf("executable changed after a denied replacement: %q", got)
 	}
 }
 

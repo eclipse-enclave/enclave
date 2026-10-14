@@ -119,9 +119,10 @@ func githubGitEndpoint(req *http.Request) bool {
 		return false
 	}
 	parts := strings.Split(strings.TrimPrefix(req.URL.Path, "/"), "/")
-	if len(parts) < 3 || !githubLogin(parts[0]) || !strings.HasSuffix(parts[1], ".git") {
+	if len(parts) < 3 || !githubLogin(parts[0]) {
 		return false
 	}
+	// GitHub serves the smart-HTTP endpoints with and without the suffix.
 	repo := strings.TrimSuffix(parts[1], ".git")
 	if len(repo) == 0 || len(repo) > 100 || repo == "." || repo == ".." {
 		return false

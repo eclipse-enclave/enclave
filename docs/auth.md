@@ -134,8 +134,8 @@ gh auth login --hostname github.com --git-protocol https --web --insecure-storag
 
 The gateway captures its token response before it reaches `gh`.
 `--insecure-storage` selects native-file storage of **handles**, not provider tokens.
-Protected HTTPS Git remotes must use `https://github.com/<owner>/<repo>.git`;
-URLs without the `.git` suffix are not supported by this adapter. Pasting a PAT,
+Protected HTTPS Git remotes use `https://github.com/<owner>/<repo>`, with or
+without the `.git` suffix. Pasting a PAT,
 GitHub Enterprise login, keyring-only credentials and unsupported native schemas
 are not protected login paths. Expiry/refresh-bearing GitHub token responses
 are unsupported; unknown token responses fail closed. As with

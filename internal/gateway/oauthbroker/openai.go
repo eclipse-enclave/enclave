@@ -25,6 +25,7 @@ import (
 	"strings"
 	"time"
 
+	"enclave/internal/protectedauth"
 	"enclave/internal/util"
 )
 
@@ -36,7 +37,6 @@ const (
 	openaiTokenPath    = "/oauth/token"    // #nosec G101 -- public OAuth endpoint, not a credential.
 	openaiClientID     = "app_EMoamEEZ73f0CkXaXp7hrann"
 	openaiReleaseHost  = "chatgpt.com"
-	openaiGrantFile    = "openai-grant.json"
 	openaiRegistryFile = "openai-session.json"
 	// openaiHandleMarker starts the signature segment of JWT-shaped handles
 	// and the refresh handle. Clients parse a handle's header and payload,
@@ -44,6 +44,8 @@ const (
 	// handle's randomness.
 	openaiHandleMarker = "ENCLAVEoai"
 )
+
+var openaiGrantFile = protectedauth.GrantFile(protectedauth.AdapterOpenAI)
 
 type openaiToken struct {
 	Access  string `json:"access"`       // #nosec G117 -- gateway-private grant state; projections carry handles.

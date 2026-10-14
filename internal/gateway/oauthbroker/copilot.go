@@ -24,6 +24,7 @@ import (
 	"strings"
 	"time"
 
+	"enclave/internal/protectedauth"
 	"enclave/internal/util"
 )
 
@@ -32,12 +33,13 @@ import (
 const (
 	copilotClientID     = "Ov23li8tweQw6odWQebz"
 	copilotDomain       = "githubcopilot.com"
-	copilotGrantFile    = "copilot-grant.json"
 	copilotRegistryFile = "copilot-session.json"
 	// copilotHandlePrefix extends the GitHub handle prefix, so the GitHub CLI
 	// adapter refuses a Copilot handle on GitHub's own hosts.
 	copilotHandlePrefix = githubHandlePrefix + "copilot_"
 )
+
+var copilotGrantFile = protectedauth.GrantFile(protectedauth.AdapterCopilot)
 
 type copilotGrant struct {
 	Schema      int       `json:"schema"`

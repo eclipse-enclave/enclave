@@ -18,7 +18,6 @@ import (
 	"testing"
 
 	"enclave/internal/model"
-	"enclave/internal/protectedauth"
 )
 
 func fixtureToolBroker(t *testing.T, tool string) *Broker {
@@ -41,20 +40,6 @@ func reopenAsTool(t *testing.T, b *Broker, tool string) *Broker {
 	}
 	reopened.now = b.now
 	return reopened
-}
-
-// The host reads grant status by these names to tell whether a login exists.
-func TestGrantFilesMatchProtectedAuth(t *testing.T) {
-	for adapter, name := range map[string]string{
-		protectedauth.AdapterAnthropic: grantFile,
-		protectedauth.AdapterOpenAI:    openaiGrantFile,
-		protectedauth.AdapterMistral:   mistralGrantFile,
-		protectedauth.AdapterCopilot:   copilotGrantFile,
-	} {
-		if got := protectedauth.GrantFile(adapter); got != name {
-			t.Errorf("%s grant file = %q, gateway writes %q", adapter, got, name)
-		}
-	}
 }
 
 func TestProvidersRefuseRawCredentialsAndUncapturedEndpoints(t *testing.T) {

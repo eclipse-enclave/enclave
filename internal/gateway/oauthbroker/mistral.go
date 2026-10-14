@@ -24,6 +24,7 @@ import (
 	"strings"
 	"time"
 
+	"enclave/internal/protectedauth"
 	"enclave/internal/util"
 )
 
@@ -31,10 +32,11 @@ import (
 // The gateway keeps the key and gives Vibe a handle in its place.
 const (
 	mistralConsoleHost  = "console.mistral.ai"
-	mistralGrantFile    = "mistral-grant.json"
 	mistralRegistryFile = "mistral-session.json"
 	mistralHandleMarker = "ENCLAVEmis"
 )
+
+var mistralGrantFile = protectedauth.GrantFile(protectedauth.AdapterMistral)
 
 // mistralReleaseHosts receive the key as a Bearer token: the API, account
 // lookup and managed configuration.

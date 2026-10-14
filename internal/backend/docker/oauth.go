@@ -420,7 +420,7 @@ func (b *Backend) DowngradeAuthIdentity(ctx context.Context, key backend.StoreKe
 }
 
 func resetProtectedGrant(dir string) error {
-	return resetProtectedFiles(dir, "oauth-grant.json")
+	return resetProtectedFiles(dir, protectedauth.GrantFiles()...)
 }
 
 // Interrupted durableJSON writes can leave credential-bearing .oauth-* files.
@@ -435,7 +435,7 @@ func resetProtectedFiles(dir string, names ...string) error {
 		return err
 	}
 	for _, entry := range entries {
-		if !slices.Contains(names, entry.Name()) && !strings.HasPrefix(entry.Name(), ".oauth-") {
+		if !slices.Contains(names, entry.Name()) && !strings.HasPrefix(entry.Name(), protectedauth.InterruptedWritePrefix) {
 			continue
 		}
 		if entry.IsDir() {

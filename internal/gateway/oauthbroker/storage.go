@@ -27,7 +27,8 @@ import (
 	"enclave/internal/util"
 )
 
-const grantFile = "oauth-grant.json"
+var grantFile = protectedauth.GrantFile(protectedauth.AdapterAnthropic)
+
 const registryFile = "oauth-session.json"
 const accessHandlePrefix = "sk-ant-oat01-"
 const refreshHandlePrefix = "sk-ant-ort01-"
@@ -318,7 +319,7 @@ func durableJSON(path string, value any) error {
 	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return ErrState
 	}
-	f, err := os.CreateTemp(dir, ".oauth-*")
+	f, err := os.CreateTemp(dir, protectedauth.InterruptedWritePrefix+"*")
 	if err != nil {
 		return ErrState
 	}

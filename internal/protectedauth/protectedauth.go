@@ -36,6 +36,20 @@ func GrantFile(adapter string) string {
 	return grantFiles[adapter]
 }
 
+// GrantFiles names every adapter's grant, for resetting an identity.
+func GrantFiles() []string {
+	names := make([]string, 0, len(grantFiles))
+	for _, name := range grantFiles {
+		names = append(names, name)
+	}
+	slices.Sort(names)
+	return names
+}
+
+// InterruptedWritePrefix starts the temporary files of the gateway's durable
+// writes, which an interrupted write can leave behind with credentials.
+const InterruptedWritePrefix = ".oauth-"
+
 // NativeFile is a credential file the tool reads from its config directory.
 // The session links ConfigPath to ViewName in the handle view.
 type NativeFile struct {

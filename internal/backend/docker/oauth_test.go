@@ -484,13 +484,17 @@ func TestProtectedPrepareRejectsNativeCredentialsInOverlayAndView(t *testing.T) 
 
 func TestProtectedResetAndExplicitDowngrade(t *testing.T) {
 	b, key, _ := oauthTestBackend(t)
+	key.Owner = "pi"
 	ctx := context.Background()
 	ref, err := b.PrepareAuthSession(ctx, key, "session", true, false)
 	if err != nil {
 		t.Fatal(err)
 	}
 	dir, _ := hoststore.ResolveDir(b.opts.Host.Home, key, backend.StoreKindAuth)
-	writeFile(t, filepath.Join(dir, "oauth-grant.json"), "synthetic-grant")
+	// Every adapter's grant, and an interrupted write, are cleared.
+	for _, name := range append(protectedauth.GrantFiles(), protectedauth.InterruptedWritePrefix+"partial") {
+		writeFile(t, filepath.Join(dir, name), "synthetic-grant")
+	}
 	if err := b.ResetAuthIdentity(ctx, key); err == nil {
 		t.Fatal("reset accepted active owner")
 	}

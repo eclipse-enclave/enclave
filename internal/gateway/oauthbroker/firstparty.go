@@ -8,7 +8,6 @@
 package oauthbroker
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -219,29 +218,38 @@ func releasedSecrets(ctx context.Context) []string {
 // credentials released into req, if any; structured first-party responses are
 // also checked for credentials the gateway did not capture.
 func mediate(req *http.Request, transport http.RoundTripper, secrets ...string) (*http.Response, error) {
+	var patterns [][]byte
+	for _, secret := range secrets {
+		if secret != "" {
+			patterns = append(patterns, []byte(secret))
+		}
+	}
+	if len(patterns) != 0 && req.Header.Get("Upgrade") != "" {
+		if err := prepareWebSocket(req); err != nil {
+			return nil, err
+		}
+	}
 	req.Header.Set("Accept-Encoding", "identity")
 	resp, err := transport.RoundTrip(req)
 	if err != nil {
 		return nil, err
 	}
-	var patterns [][]byte
-	for _, secret := range secrets {
-		if secret == "" {
-			continue
+	for _, values := range resp.Header {
+		if slices.ContainsFunc(values, func(value string) bool { return contains([]byte(value), patterns) }) {
+			_ = resp.Body.Close()
+			return nil, ErrResponse
 		}
-		patterns = append(patterns, []byte(secret))
-		for _, values := range resp.Header {
-			if slices.ContainsFunc(values, func(value string) bool { return strings.Contains(value, secret) }) {
-				_ = resp.Body.Close()
-				return nil, ErrResponse
-			}
+	}
+	if resp.StatusCode == http.StatusSwitchingProtocols {
+		if len(patterns) == 0 || req.Header.Get("Upgrade") == "" {
+			return resp, nil
 		}
+		return scanWebSocket(resp, patterns)
 	}
 	if p := requestProvider(req); p != nil && !p.contentPath(protectedHost(req.URL.Hostname()), req.URL.Path) && structuredMedia(resp.Header) {
 		patterns = append(patterns, p.patterns...)
 	}
-	// An upgraded stream is relayed as is; it cannot be scanned.
-	if len(patterns) == 0 || resp.StatusCode == http.StatusSwitchingProtocols {
+	if len(patterns) == 0 {
 		return resp, nil
 	}
 	if encoding := resp.Header.Get("Content-Encoding"); encoding != "" && !strings.EqualFold(encoding, "identity") {
@@ -271,7 +279,7 @@ func (t *tripwire) Read(p []byte) (int, error) {
 		buffer := make([]byte, 32<<10)
 		n, err := t.body.Read(buffer)
 		t.pending = append(t.pending, buffer[:n]...)
-		if slices.ContainsFunc(t.patterns, func(pattern []byte) bool { return bytes.Contains(t.pending, pattern) }) {
+		if contains(t.pending, t.patterns) {
 			t.pending, t.err = nil, ErrResponse
 			return 0, t.err
 		}
@@ -281,25 +289,12 @@ func (t *tripwire) Read(p []byte) (int, error) {
 		case err != nil:
 			t.pending, t.err = nil, err
 		default:
-			t.safe = len(t.pending) - t.partialMatch()
+			t.safe = len(t.pending) - partialMatch(t.pending, t.patterns)
 		}
 	}
 	n := copy(p, t.pending[:t.safe])
 	t.pending, t.safe = t.pending[n:], t.safe-n
 	return n, nil
-}
-
-func (t *tripwire) partialMatch() int {
-	longest := 0
-	for _, pattern := range t.patterns {
-		for k := min(len(pattern)-1, len(t.pending)); k > longest; k-- {
-			if bytes.HasSuffix(t.pending, pattern[:k]) {
-				longest = k
-				break
-			}
-		}
-	}
-	return longest
 }
 
 func (t *tripwire) Close() error {

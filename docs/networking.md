@@ -147,7 +147,8 @@ limits matter before a quiet log is read as a quiet session:
   logged once with status `101`, when it closes or the proxy stops. The traffic
   it carries gets no events of its own, so requests multiplexed inside it do
   not show up in the log, even with `--network-log=requests`. `full` mode
-  stores the messages of a WebSocket in its capture.
+  stores the messages of a WebSocket in its capture. Protected sessions scan a
+  WebSocket that carries a released credential for that credential.
 
 Run the session with `--network-log=requests` (or `full`) to force MITM for
 every permitted HTTPS host and get an `http` event per request. In every mode,

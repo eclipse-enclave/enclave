@@ -430,8 +430,8 @@ func (p *proxy) forward(w http.ResponseWriter, req *http.Request, scheme string,
 	outgoing.URL = &target
 	outgoing.Body = capture.RequestBody(req.Body)
 	// In protected sessions the broker checks a handshake like any request,
-	// releasing handles and refusing raw credentials; the upgraded stream is
-	// then relayed unscanned.
+	// releasing handles and refusing raw credentials, and scans a WebSocket
+	// stream that carries released credentials for them.
 	upgrade := upgradeType(req.Header)
 	removeHopHeaders(outgoing.Header)
 	if upgrade != "" {
@@ -590,18 +590,23 @@ func (p *proxy) relayUpgrade(w http.ResponseWriter, req *http.Request, resp *htt
 	// Either side ending the session ends the relay: closing both connections
 	// unblocks the copy in the other direction.
 	done := make(chan struct{}, 2)
+	var relayErr error
 	go func() {
 		_, _ = io.Copy(toUpstream, buffered.Reader)
 		done <- struct{}{}
 	}()
 	go func() {
-		result.ResponseBytes, _ = io.Copy(toClient, upstream)
+		result.ResponseBytes, relayErr = io.Copy(toClient, upstream)
 		done <- struct{}{}
 	}()
 	<-done
 	_ = upstream.Close()
 	_ = downstream.Close()
 	<-done
+	// The broker cut a stream that would carry credentials.
+	if _, rule := brokerFailure(relayErr); rule != "" {
+		return result, relayErr
+	}
 	return result, nil
 }
 

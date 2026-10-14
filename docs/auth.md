@@ -83,8 +83,10 @@ GitHub, GitLab and Copilot domains, their subdomains, and
 - It aborts any response from these hosts that would echo a real credential, and
   any structured response outside model and file content that carries token
   fields or provider key patterns, before those bytes reach the workload.
-- It checks WebSocket handshakes like requests and relays the upgraded stream
-  unscanned.
+- It checks WebSocket handshakes like requests. When a handshake carries a
+  released credential, it withholds compression from the handshake and scans
+  every server frame, cutting the connection before a frame that would complete
+  the credential; other upgrades carrying credentials are refused.
 
 A client release that changes its login flow fails closed until Enclave adapts.
 Self-hosted login hosts, such as GitHub Enterprise or a self-managed GitLab, are

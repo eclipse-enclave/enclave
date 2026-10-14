@@ -10,6 +10,7 @@ package mitm
 import (
 	"bufio"
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"io"
 	"net"
@@ -371,20 +372,121 @@ func TestBrokerProxyReleasesHandleShapedPlaceholder(t *testing.T) {
 	}
 }
 
-func TestBrokerProxyChecksUpgradeHandshakes(t *testing.T) {
-	const access = "synthetic-provider-access-credential"
-	var released atomic.Value
+// websocketFrame encodes one frame; clients mask theirs.
+func websocketFrame(opcode byte, final, masked bool, payload []byte) []byte {
+	first := opcode
+	if final {
+		first |= 0x80
+	}
+	frame := []byte{first, 0}
+	switch {
+	case len(payload) < 126:
+		frame[1] = byte(len(payload))
+	case len(payload) <= 0xffff:
+		frame[1] = 126
+		frame = binary.BigEndian.AppendUint16(frame, uint16(len(payload)))
+	default:
+		frame[1] = 127
+		frame = binary.BigEndian.AppendUint64(frame, uint64(len(payload)))
+	}
+	if !masked {
+		return append(frame, payload...)
+	}
+	frame[1] |= 0x80
+	key := []byte{1, 2, 3, 4}
+	frame = append(frame, key...)
+	for i, b := range payload {
+		frame = append(frame, b^key[i%4])
+	}
+	return frame
+}
+
+func readWebSocketFrame(r *bufio.Reader) (byte, []byte, error) {
+	header := make([]byte, 2)
+	if _, err := io.ReadFull(r, header); err != nil {
+		return 0, nil, err
+	}
+	length := uint64(header[1] & 0x7f)
+	switch length {
+	case 126:
+		extended := make([]byte, 2)
+		if _, err := io.ReadFull(r, extended); err != nil {
+			return 0, nil, err
+		}
+		length = uint64(binary.BigEndian.Uint16(extended))
+	case 127:
+		extended := make([]byte, 8)
+		if _, err := io.ReadFull(r, extended); err != nil {
+			return 0, nil, err
+		}
+		length = binary.BigEndian.Uint64(extended)
+	}
+	var key []byte
+	if header[1]&0x80 != 0 {
+		key = make([]byte, 4)
+		if _, err := io.ReadFull(r, key); err != nil {
+			return 0, nil, err
+		}
+	}
+	payload := make([]byte, length)
+	if _, err := io.ReadFull(r, payload); err != nil {
+		return 0, nil, err
+	}
+	for i := range payload {
+		if key != nil {
+			payload[i] ^= key[i%4]
+		}
+	}
+	return header[0] & 0x0f, payload, nil
+}
+
+// websocketUpstream captures a Claude login and answers WebSocket frames: it
+// echoes them, or for "reflect" sends the handshake's credential split over
+// two fragments.
+func websocketUpstream(t *testing.T, access string) (*httptest.Server, *atomic.Value, *atomic.Value) {
+	t.Helper()
+	var released, extensions atomic.Value
 	upstream := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		if req.URL.Path == "/v1/oauth/token" {
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = io.WriteString(w, `{"access_token":"`+access+`","refresh_token":"synthetic-provider-refresh-credential","token_type":"Bearer","expires_in":3600,"scope":"user:inference","account":{"uuid":"11111111-1111-1111-1111-111111111111","email_address":"synthetic@example.test"},"organization":{"uuid":"22222222-2222-2222-2222-222222222222"}}`)
 			return
 		}
-		released.Store(req.Header.Get("Authorization"))
-		echoUpgradeHandler(w, req)
+		authorization := req.Header.Get("Authorization")
+		released.Store(authorization)
+		extensions.Store(req.Header.Get("Sec-WebSocket-Extensions"))
+		conn, rw, err := http.NewResponseController(w).Hijack()
+		if err != nil {
+			return
+		}
+		defer func() { _ = conn.Close() }()
+		_, _ = rw.WriteString("HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n")
+		_ = rw.Flush()
+		_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+		for {
+			_, payload, err := readWebSocketFrame(rw.Reader)
+			if err != nil {
+				return
+			}
+			if string(payload) == "reflect" {
+				half := len(authorization) / 2
+				_, _ = rw.Write(websocketFrame(1, false, false, []byte("seen: "+authorization[:half])))
+				_ = rw.Flush()
+				_, _ = rw.Write(websocketFrame(0, true, false, []byte(authorization[half:])))
+			} else {
+				_, _ = rw.Write(websocketFrame(1, true, false, append([]byte("echo: "), payload...)))
+			}
+			_ = rw.Flush()
+		}
 	}))
+	return upstream, &released, &extensions
+}
+
+func TestBrokerProxyScansWebSocketStreams(t *testing.T) {
+	const access = "synthetic-provider-access-credential"
+	upstream, released, extensions := websocketUpstream(t, access)
 	defer upstream.Close()
-	p, _, _ := oauthTestProxy(t, upstream)
+	p, logPath, _ := oauthTestProxy(t, upstream)
 	p.upgradeTransport = p.transport.Clone()
 	login := httptest.NewRequest(http.MethodPost, "https://platform.claude.com/v1/oauth/token", strings.NewReader(oauthEnrollmentPayload))
 	login.Header.Set("Content-Type", "application/json")
@@ -399,14 +501,16 @@ func TestBrokerProxyChecksUpgradeHandshakes(t *testing.T) {
 	proxyServer := httptest.NewServer(p.handler("https"))
 	defer proxyServer.Close()
 
-	handshake := func(authorization string) (*http.Response, *bufio.Reader, net.Conn) {
+	handshake := func(upgrade, authorization string) (*http.Response, *bufio.Reader, net.Conn) {
 		t.Helper()
 		conn, err := net.Dial("tcp", strings.TrimPrefix(proxyServer.URL, "http://"))
 		if err != nil {
 			t.Fatal(err)
 		}
 		_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
-		if _, err := io.WriteString(conn, "GET /v1/stream HTTP/1.1\r\nHost: api.anthropic.com\r\nConnection: Upgrade\r\nUpgrade: echo\r\nAuthorization: "+authorization+"\r\n\r\n"); err != nil {
+		request := "GET /v1/stream HTTP/1.1\r\nHost: api.anthropic.com\r\nConnection: Upgrade\r\nUpgrade: " + upgrade +
+			"\r\nSec-WebSocket-Extensions: permessage-deflate\r\nAuthorization: " + authorization + "\r\n\r\n"
+		if _, err := io.WriteString(conn, request); err != nil {
 			t.Fatal(err)
 		}
 		reader := bufio.NewReader(conn)
@@ -417,21 +521,47 @@ func TestBrokerProxyChecksUpgradeHandshakes(t *testing.T) {
 		return resp, reader, conn
 	}
 
-	resp, _, conn := handshake("Bearer raw-pasted-token")
-	_ = conn.Close()
-	if resp.StatusCode != http.StatusForbidden {
-		t.Fatalf("raw credential handshake status = %d, want 403", resp.StatusCode)
+	for _, tc := range []struct{ upgrade, authorization string }{
+		{"websocket", "Bearer raw-pasted-token"},
+		{"echo", "Bearer " + token.Access},
+	} {
+		resp, _, conn := handshake(tc.upgrade, tc.authorization)
+		_ = conn.Close()
+		if resp.StatusCode != http.StatusForbidden {
+			t.Fatalf("%s upgrade with %q: status %d, want 403", tc.upgrade, tc.authorization, resp.StatusCode)
+		}
 	}
-	resp, reader, conn := handshake("Bearer " + token.Access)
+
+	resp, reader, conn := handshake("websocket", "Bearer "+token.Access)
 	defer func() { _ = conn.Close() }()
-	if resp.StatusCode != http.StatusSwitchingProtocols || released.Load() != "Bearer "+access {
-		t.Fatalf("handle handshake status = %d, upstream saw %v", resp.StatusCode, released.Load())
+	if resp.StatusCode != http.StatusSwitchingProtocols || released.Load() != "Bearer "+access || extensions.Load() != "" {
+		t.Fatalf("handshake status %d, upstream saw %v with extensions %q", resp.StatusCode, released.Load(), extensions.Load())
 	}
-	if _, err := io.WriteString(conn, "ping\n"); err != nil {
+	if _, err := conn.Write(websocketFrame(1, true, true, []byte("ping"))); err != nil {
 		t.Fatal(err)
 	}
-	if line, err := reader.ReadString('\n'); err != nil || line != "echo: ping\n" {
-		t.Fatalf("upgraded stream = %q, %v", line, err)
+	if _, payload, err := readWebSocketFrame(reader); err != nil || string(payload) != "echo: ping" {
+		t.Fatalf("relayed frame = %q, %v", payload, err)
+	}
+	if _, err := conn.Write(websocketFrame(1, true, true, []byte("reflect"))); err != nil {
+		t.Fatal(err)
+	}
+	rest, _ := io.ReadAll(reader)
+	half := ("Bearer " + access)[:len("Bearer "+access)/2]
+	if strings.Contains(string(rest), half) || strings.Contains(string(rest), access) {
+		t.Fatalf("reflected credential reached the workload: %q", rest)
+	}
+	// The relay ends after the client sees the connection close.
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		events := readAuditEvents(t, logPath)
+		if last := events[len(events)-1]; last.Verdict == netlog.VerdictDeny && last.Rule == "oauth-broker-response" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("stream abort was not audited: %+v", events[len(events)-1])
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 

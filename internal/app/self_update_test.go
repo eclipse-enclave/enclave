@@ -403,8 +403,8 @@ func TestRunSelfUpdate(t *testing.T) {
 		if code != 0 || !stampExists(t, home) {
 			t.Fatalf("code = %d; want a recorded success", code)
 		}
-		if strings.Contains(stdout, "Updated enclave") || !strings.Contains(stdout, "up to date with the rolling channel (1234567)") {
-			t.Fatalf("stdout = %q, want an up-to-date report", stdout)
+		if strings.Contains(stdout, "Updated enclave") || !strings.Contains(stdout, "Enclave is already rolling build 1234567.") {
+			t.Fatalf("stdout = %q, want the build already installed", stdout)
 		}
 	})
 	t.Run("unwritable install", func(t *testing.T) {

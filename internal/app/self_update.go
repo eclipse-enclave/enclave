@@ -88,7 +88,7 @@ func runSelfUpdate(verbose bool) int {
 		return 1
 	}
 	if !status.UpdateAvailable {
-		logUpToDate(status)
+		logx.Infof("Enclave is up to date with the %s channel (%s).", status.Channel, shortBuild(status.Latest))
 		markSelfUpdateChecked(stamp)
 		return 0
 	}
@@ -111,15 +111,11 @@ func runSelfUpdate(verbose bool) int {
 	}
 	markSelfUpdateChecked(stamp)
 	if !replaced {
-		logUpToDate(status)
+		logx.Infof("Enclave is already %s build %s.", status.Channel, shortBuild(status.Latest))
 		return 0
 	}
 	logx.Successf("Updated enclave from %s to %s build %s at %s. The new binary will be used on the next invocation.", shortBuild(status.Current), status.Channel, shortBuild(status.Latest), path)
 	return 0
-}
-
-func logUpToDate(status selfupdate.Status) {
-	logx.Infof("Enclave is up to date with the %s channel (%s).", status.Channel, shortBuild(status.Latest))
 }
 
 // interruptibleUpdate returns a context that SIGINT or SIGTERM cancels. While

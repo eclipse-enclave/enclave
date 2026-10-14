@@ -141,7 +141,8 @@ package manager or by rebuilding.
 
 The updater never elevates privileges. A system-wide install, such as
 `sudo install enclave-linux-amd64 /usr/local/bin/enclave`, is updated by
-repeating that step; Enclave still reports new builds, with the command to run.
+repeating these steps; Enclave still reports new builds, with the commands to
+run.
 
 The macOS binaries are unsigned and not notarized, so a binary downloaded
 through a browser carries a quarantine attribute that makes Gatekeeper refuse to

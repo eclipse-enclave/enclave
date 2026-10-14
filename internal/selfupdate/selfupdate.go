@@ -151,13 +151,26 @@ func (s *Service) Writable() error {
 	return nil
 }
 
+// notWritable spells out the manual reinstall, verification included, so it
+// is no less safe than the update it replaces.
 func (s *Service) notWritable(target string) error {
 	artifact, err := artifactName(s.goos, s.goarch)
 	if err != nil {
 		return err
 	}
-	return fmt.Errorf("enclave cannot replace %s because its directory is %w and the updater does not elevate privileges; download %s and reinstall it with: sudo install %s %s",
-		target, ErrNotWritable, s.sources[s.channel].assetURL(artifact), artifact, shellArg(target))
+	src := s.sources[s.channel]
+	return fmt.Errorf("enclave cannot replace %s: its location is %w for this user and the updater does not elevate privileges; download %s and %s into one directory and reinstall from there with: %s",
+		target, ErrNotWritable, src.assetURL(artifact), src.assetURL(checksumsFilename), s.reinstallCommand(artifact, target))
+}
+
+func (s *Service) reinstallCommand(artifact string, target string) string {
+	install := "sudo install " + artifact + " " + shellArg(target)
+	if s.goos == "darwin" {
+		// xattr -c drops the quarantine attribute of a browser download and,
+		// unlike xattr -d, succeeds when there is none.
+		return "shasum -a 256 --check --ignore-missing " + checksumsFilename + " && xattr -c " + artifact + " && " + install
+	}
+	return "sha256sum --check --ignore-missing " + checksumsFilename + " && " + install
 }
 
 // shellArg quotes path for a command line unless it is a plain word.
@@ -281,7 +294,13 @@ func (s *Service) Install(ctx context.Context, latest string) (string, bool, err
 	if err := tmp.Close(); err != nil {
 		return "", false, fmt.Errorf("close update: %w", err)
 	}
-	if err := os.Rename(tmpPath, target); err != nil { // #nosec G703 -- target is the running executable and tmpPath is its sibling.
+	err = os.Rename(tmpPath, target) // #nosec G703 -- target is the running executable and tmpPath is its sibling.
+	if errors.Is(err, fs.ErrPermission) {
+		// A sticky directory such as /tmp passes Writable but refuses to
+		// replace another user's file.
+		return "", false, s.notWritable(target)
+	}
+	if err != nil {
 		return "", false, fmt.Errorf("replace %s: %w", target, err)
 	}
 	installed = true

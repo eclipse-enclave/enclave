@@ -128,9 +128,9 @@ func runProtectedAuthAction(input *CommandInput) int {
 		return 1
 	}
 	if input.Action == "auth-reset" {
-		logx.Successf("Cleared saved OAuth grant for %s; identity remains protected", ctx.authName)
+		logx.Successf("Cleared the saved grants of %s identity %s; it remains protected", ctx.profile.Name, identity)
 	} else {
-		logx.Successf("Removed protection from empty identity %s; future logins use ordinary auth files", ctx.authName)
+		logx.Successf("Removed protection from empty %s identity %s; future logins use ordinary auth files", ctx.profile.Name, identity)
 	}
 	return 0
 }

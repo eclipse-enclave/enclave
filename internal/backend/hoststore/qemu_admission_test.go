@@ -121,16 +121,23 @@ func TestQEMULeaseSerializesWithProtectedAdmission(t *testing.T) {
 }
 
 func TestQEMUOlderProcessDetectionAndInspectionFailure(t *testing.T) {
-	for name, body := range map[string]string{
-		"linux":       "printf '%s\n' qemu-system-x86\n",
-		"macos":       "printf '%s\n' /opt/homebrew/bin/qemu-system-x86_64\n",
-		"unavailable": "exit 1\n",
+	guest := "-machine microvm -device virtio-9p-device,fsdev=control,mount_tag=" + QEMUControlTag
+	for name, tc := range map[string]struct {
+		body    string
+		blocked bool
+	}{
+		"linux guest":    {"printf '%s\n' 'qemu-system-x86_64 " + guest + "'\n", true},
+		"macos guest":    {"printf '%s\n' '/opt/homebrew/bin/qemu-system-aarch64 " + guest + "'\n", true},
+		"unavailable":    {"exit 1\n", true},
+		"podman machine": {"printf '%s\n' '/usr/bin/qemu-system-x86_64 -name podman-machine-default -virtfs local,mount_tag=vol0'\n", false},
+		"colima":         {"printf '%s\n' 'qemu-system-aarch64 -name colima'\n", false},
+		"other command":  {"printf '%s\n' 'grep mount_tag=" + QEMUControlTag + "'\n", false},
 	} {
 		t.Run(name, func(t *testing.T) {
 			home, _ := protectedIdentityTestDir(t)
-			qemuProcessStub(t, body)
-			if err := RequireNoQEMUSessions(context.Background(), home); err == nil {
-				t.Fatal("unverified older QEMU process was ignored")
+			qemuProcessStub(t, tc.body)
+			if err := RequireNoQEMUSessions(context.Background(), home); (err != nil) != tc.blocked {
+				t.Fatalf("admission error = %v, want blocked %t", err, tc.blocked)
 			}
 		})
 	}

@@ -21,6 +21,10 @@ import (
 	"enclave/internal/util"
 )
 
+// QEMUControlTag is the 9p tag of the control share every Enclave guest has;
+// admission recognizes Enclave's QEMU processes by it.
+const QEMUControlTag = "enclave-control"
+
 // AcquireQEMULease registers preparation, guest lifetime and finalization before
 // releasing cross-engine admission. The QEMU child must inherit the returned
 // descriptor; close it only after the child exits and host copy-back finishes.
@@ -82,17 +86,20 @@ func RequireNoQEMUSessions(ctx context.Context, home string) error {
 		}
 		release()
 	}
-	// Also cover guests launched before lease tracking was introduced. Both
-	// Linux and macOS ps expose the invoking user's executable name with -x;
-	// Linux can truncate comm, but retains the identifying qemu-system- prefix.
+	// Also cover guests launched before lease tracking was introduced. Only
+	// Enclave guests share the enclave-control tag; other QEMU users, such as
+	// Docker Desktop, podman machine or Colima, do not block admission. Both
+	// Linux and macOS ps list the invoking user's full command lines with -x
+	// and -ww.
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	output, err := exec.CommandContext(ctx, "ps", "-x", "-o", "comm=").Output()
+	output, err := exec.CommandContext(ctx, "ps", "-x", "-ww", "-o", "args=").Output()
 	if err != nil {
 		return fmt.Errorf("cannot verify existing QEMU sessions: %w", err)
 	}
 	for _, line := range strings.Split(string(output), "\n") {
-		if strings.HasPrefix(filepath.Base(strings.TrimSpace(line)), "qemu-system-") {
+		fields := strings.Fields(line)
+		if len(fields) != 0 && strings.HasPrefix(filepath.Base(fields[0]), "qemu-system-") && strings.Contains(line, "mount_tag="+QEMUControlTag) {
 			return errors.New("stop existing QEMU processes before changing protected authentication")
 		}
 	}

@@ -181,9 +181,10 @@ Enclave can verify the session ended. Removing an executable does not prove its
 containers stopped; reset and downgrade do not bypass that check.
 
 Protected admission, reset and downgrade also require all of the invoking user's
-QEMU sessions to have ended, including preparation and host-side copy-back; QEMU
-has no reliable host-share inspection API. Process inspection must succeed so
-older guests without admission leases cannot be missed. Ordinary sessions can
+Enclave QEMU sessions to have ended, including preparation and host-side
+copy-back; QEMU has no reliable host-share inspection API. Process inspection
+must succeed so older guests without admission leases cannot be missed; other
+QEMU users, such as Docker Desktop, podman machine or Colima, do not block it. Ordinary sessions can
 still run concurrently. Detached CLI exit and proxy reload keep a session's
 reservation and handles; a new logical session gets new handles.
 `--allow-all-network` and unrestricted policies still keep the gateway for

@@ -25,6 +25,11 @@ type Policy struct {
 	Advanced             PolicyAdvanced `json:"advanced,omitempty"`
 }
 
+// InheritsGlobal reports whether a project policy inherits global policy domains.
+func (p Policy) InheritsGlobal() bool {
+	return p.InheritGlobalPolicy == nil || *p.InheritGlobalPolicy
+}
+
 // PolicyDomains holds domain allowlist entries.
 type PolicyDomains struct {
 	Global []string            `json:"global,omitempty"`

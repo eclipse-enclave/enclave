@@ -111,7 +111,7 @@ func Run(args []string) int {
 	}
 
 	// Folded like --allow-root, so `enclave config` reports the env opt-in too.
-	parsed.Options.AllowSensitiveMounts = sensitiveMountsAllowed(parsed.Options.AllowSensitiveMounts)
+	parsed.Options.AllowSensitiveMounts = sensitiveMountsAllowed(parsed.Options.AllowSensitiveMounts, parsed.Sources.AllowSensitiveMounts)
 	applyBuildEnvironment(&parsed)
 	cliOpts := parsed.Options
 	cliSources := parsed.Sources
@@ -204,9 +204,13 @@ func Run(args []string) int {
 }
 
 // applyBuildEnvironment folds ENCLAVE_NO_REBUILD into the commands that can
-// build, plus config so it reports what those commands will use.
+// build, plus config so it reports what those commands will use. An explicit
+// --no-rebuild=true|false wins over the environment.
 func applyBuildEnvironment(parsed *cli.Result) {
 	if !isRunAction(parsed.Action) && parsed.Action != "update" && parsed.Action != "config" {
+		return
+	}
+	if parsed.Sources.NoRebuild == model.SourceCLI {
 		return
 	}
 	parsed.Options.NoRebuild = parsed.Options.NoRebuild || rebuildSuppressedByEnv()

@@ -198,6 +198,8 @@ store that holds memory; the other `--keep` kinds do not apply there. See
 
 ## Flags
 
+Boolean flags accept an explicit value (e.g. `--no-cache=false`) in any form Go's `strconv.ParseBool` accepts: `true`/`false`, `1`/`0`, `t`/`f`, and their upper- and title-case variants; other values are rejected. `--no-yolo=false` is equivalent to `--yolo`.
+
 ### Tool & Session
 
 | Flag | Description |
@@ -253,6 +255,7 @@ extension-source updates (`tools update` / `features update`) are unaffected.
 
 Use `unset ENCLAVE_NO_REBUILD` or `export ENCLAVE_NO_REBUILD=0` to restore normal
 behavior, or `ENCLAVE_NO_REBUILD=0 enclave update` for a single invocation.
+An explicit `--no-rebuild=false` also overrides it for one invocation.
 There is no config-file key.
 
 ### Auth & Secrets
@@ -325,7 +328,7 @@ Commands that start a session (`run`, `shell`, `continue`, `resume`, the `devcon
 
 Read-only mounts get no exemption: reading is enough to leak credentials. The check runs before any image build and on every session start, including `continue` and `resume`. `exec` and `attach` enter running containers and are not checked.
 
-To mount such a directory anyway, pass `--allow-sensitive-mounts` or set `ENCLAVE_ALLOW_SENSITIVE_MOUNTS=1`; each sensitive mount then prints a warning. The opt-in has no config key, so neither global nor project config can grant it. Mounts from the repository stay blocked even with the opt-in: devcontainer bind sources must lie inside the project, and linked-worktree git metadata outside the project is skipped with a warning when it is sensitive.
+To mount such a directory anyway, pass `--allow-sensitive-mounts` or set `ENCLAVE_ALLOW_SENSITIVE_MOUNTS=1`; each sensitive mount then prints a warning. An explicit `--allow-sensitive-mounts=false` overrides the environment variable. The opt-in has no config key, so neither global nor project config can grant it. Mounts from the repository stay blocked even with the opt-in: devcontainer bind sources must lie inside the project, and linked-worktree git metadata outside the project is skipped with a warning when it is sensitive.
 
 The mounts enclave adds itself, such as `~/.gitconfig`, `~/.claude/ide` for the IDE bridge, direnv approvals, and the session stores, come from protected locations by design and are not checked.
 

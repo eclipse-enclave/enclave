@@ -144,6 +144,18 @@ func TestBuildEnvironmentDisabled(t *testing.T) {
 	}
 }
 
+func TestBuildEnvironmentYieldsToExplicitFlag(t *testing.T) {
+	t.Setenv(model.EnvNoRebuild, "1")
+	parsed, err := cli.Parse([]string{"--no-rebuild=false"}, config.DefaultOptions())
+	if err != nil {
+		t.Fatal(err)
+	}
+	applyBuildEnvironment(&parsed)
+	if parsed.Options.NoRebuild {
+		t.Fatal("--no-rebuild=false must override the rebuild environment")
+	}
+}
+
 func TestRebuildSuppressionCause(t *testing.T) {
 	var cliOpts model.Options
 	cliOpts.Sources.NoRebuild = model.SourceCLI

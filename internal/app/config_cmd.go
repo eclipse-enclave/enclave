@@ -9,10 +9,14 @@ package app
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
+	"slices"
 	"strings"
 
+	"enclave/internal/backend"
 	"enclave/internal/config"
 	"enclave/internal/logx"
 	"enclave/internal/model"
@@ -34,32 +38,30 @@ type configRow struct {
 	Effective    string
 }
 
-func runConfig(
-	paths model.Paths,
-	opts model.Options,
-	base model.Options,
-	globalDefaults config.Defaults,
-	projectDefaults config.Defaults,
-	toolOverrideDefaults config.Defaults,
-	hasToolOverride bool,
-	view model.ConfigView,
-	projectDir string,
-) int {
-	opts, warnings := normalizeOptions(opts)
+func runConfig(input *CommandInput) int {
+	paths := input.Ctx.Paths
+	view := input.ConfigView
+	opts, warnings := normalizeOptions(input.Options)
 	for _, warning := range warnings {
 		logx.Warnf(warning)
 	}
 	hostConfigDefaults := []string{}
-	if profile, err := config.LoadProfile(paths, opts.Tool); err == nil {
-		hostConfigDefaults = config.HostConfigPassthroughDefaults(profile)
-		opts.HostConfigPaths = config.ResolveHostConfigPaths(profile, opts.HostConfigPaths)
+	resolvedHostConfigPaths := opts.HostConfigPaths
+	var profile *model.Profile
+	var profileErr error
+	if loaded, err := config.LoadProfile(paths, opts.Tool); err == nil {
+		profile = &loaded
+		hostConfigDefaults = config.HostConfigPassthroughDefaults(loaded)
+		resolvedHostConfigPaths = config.ResolveHostConfigPaths(loaded, opts.HostConfigPaths)
 	} else {
-		logx.Debugf("Skipping host_config_paths resolution for config output: %v", err)
+		profileErr = err
 	}
 
-	rows := buildConfigRows(opts, base, globalDefaults, projectDefaults, toolOverrideDefaults, hasToolOverride, hostConfigDefaults)
+	rowOpts := opts
+	rowOpts.HostConfigPaths = resolvedHostConfigPaths
+	rows := buildConfigRows(rowOpts, input.BaseOptions, input.GlobalDefaults, input.ProjectDefaults, input.ToolDefaults, input.HasToolDefaults, hostConfigDefaults)
 	globalPath, globalErr := config.GlobalConfigPath()
-	projectPath := config.ProjectConfigJSONPath(projectDir)
+	projectPath := config.ProjectConfigJSONPath(input.Ctx.ProjectDir)
 	globalExists := false
 	projectExists := false
 	if globalErr == nil && strings.TrimSpace(globalPath) != "" {
@@ -77,7 +79,11 @@ func runConfig(
 	}
 
 	if view.JSON {
-		return renderConfigJSON(rows, view, globalPath, projectPath, globalExists, projectExists, globalErr)
+		files := configJSONFiles(configJSONPaths(globalPath, projectPath, globalExists, projectExists, globalErr))
+		return writeConfigJSON(configJSONDocument{
+			configJSONEnvelope: buildConfigEnvelope(input, opts, configProfile{profile: profile, err: profileErr, resolvedHostConfigPaths: resolvedHostConfigPaths}, files),
+			configJSONOutput:   legacyConfigJSON(rows, view, globalPath, projectPath, globalExists, projectExists, globalErr),
+		})
 	}
 
 	if globalErr != nil {
@@ -220,6 +226,240 @@ func renderConfigSources(rows []configRow) {
 	}
 }
 
+// configSchemaVersion versions the typed `enclave config --json` envelope,
+// an integration contract for external consumers.
+const configSchemaVersion = "1"
+
+const (
+	configWarningValidation          = "validation"
+	configWarningUnknownFeature      = "unknown_feature"
+	configWarningFeaturesUnavailable = "features_unavailable"
+	configWarningToolUnresolved      = "tool_unresolved"
+	configWarningToolUnavailable     = "tool_unavailable"
+	configWarningProjectUnavailable  = "project_unavailable"
+)
+
+type configJSONDocument struct {
+	configJSONEnvelope
+	configJSONOutput
+}
+
+type configJSONEnvelope struct {
+	SchemaVersion string                      `json:"schemaVersion"`
+	Kind          string                      `json:"kind"`
+	View          string                      `json:"view"`
+	Tool          configJSONTool              `json:"tool"`
+	Project       *configJSONProject          `json:"project"`
+	Files         map[string]configJSONFile   `json:"files"`
+	Options       map[string]configJSONOption `json:"options"`
+	Warnings      []configJSONWarning         `json:"warnings"`
+	Valid         bool                        `json:"valid"`
+	Error         string                      `json:"error"`
+}
+
+type configJSONTool struct {
+	Name   *string `json:"name"`
+	Source string  `json:"source"`
+}
+
+type configJSONProject struct {
+	Dir     string `json:"dir"`
+	RealDir string `json:"realDir"`
+	Hash    string `json:"hash"`
+	Name    string `json:"name"`
+}
+
+type configJSONFile struct {
+	Path   string `json:"path,omitempty"`
+	Status string `json:"status"`
+}
+
+type configJSONOption struct {
+	Kind       string         `json:"kind"`
+	Value      any            `json:"value"`
+	Source     string         `json:"source"`
+	Layers     map[string]any `json:"layers"`
+	Directives *[]string      `json:"directives,omitempty"`
+	ResolvedBy string         `json:"resolvedBy,omitempty"`
+}
+
+type configJSONWarning struct {
+	Code    string `json:"code"`
+	Option  string `json:"option,omitempty"`
+	Layer   string `json:"layer,omitempty"`
+	Path    string `json:"path,omitempty"`
+	Message string `json:"message"`
+}
+
+// configProfile carries the profile lookup that tool-dependent values need.
+type configProfile struct {
+	profile                 *model.Profile
+	err                     error
+	resolvedHostConfigPaths []string
+}
+
+// buildConfigEnvelope reports values a run with these options would use:
+// validated options when validation passes, otherwise the normalized ones.
+// Sources, layers, and directives always describe the configured input.
+func buildConfigEnvelope(input *CommandInput, opts model.Options, profile configProfile, files map[string]configJSONFile) configJSONEnvelope {
+	raw := input.Options
+	envelope := configJSONEnvelope{
+		SchemaVersion: configSchemaVersion,
+		Kind:          "config",
+		View:          input.ConfigView.Mode,
+		Tool:          configJSONTool{Source: sourceLabel(raw.Sources.Tool)},
+		Files:         files,
+		Options:       map[string]configJSONOption{},
+		Warnings:      []configJSONWarning{},
+		Valid:         true,
+	}
+	addWarning := func(code string, option string, message string) {
+		envelope.Warnings = append(envelope.Warnings, configJSONWarning{Code: code, Option: option, Message: message})
+	}
+	for _, w := range input.ConfigWarnings {
+		envelope.Warnings = append(envelope.Warnings, configJSONWarning(w))
+	}
+	if project, err := input.Ctx.Project(); err == nil {
+		envelope.Project = &configJSONProject{Dir: project.Dir, RealDir: project.RealDir, Hash: project.Hash, Name: project.Name}
+	} else {
+		addWarning(configWarningProjectUnavailable, "", fmt.Sprintf("Cannot resolve the project: %v", err))
+	}
+
+	validationOpts := opts
+	if strings.TrimSpace(validationOpts.Backend) == backend.NameAuto {
+		// config leaves the auto backend unresolved; validate the docker default.
+		validationOpts.Backend = backend.NameDocker
+	}
+	validated, _, validationWarnings, validationErr := ValidateOptions(validationOpts, raw.Sources, ValidationContext{Paths: input.Ctx.Paths, Action: "run"})
+	for _, message := range validationWarnings {
+		addWarning(configWarningValidation, "", message)
+	}
+	values := opts
+	if validationErr == nil {
+		values = validated
+		values.Backend = opts.Backend
+	} else {
+		envelope.Valid = false
+		envelope.Error = validationErr.Error()
+	}
+
+	loaded := profile.profile
+	if toolUnset(opts.Tool) {
+		loaded = nil
+		addWarning(configWarningToolUnresolved, "tool", "No tool selected; pass --tool or set \"tool\" in the global config")
+	} else {
+		name := opts.Tool
+		envelope.Tool.Name = &name
+		if loaded == nil {
+			message := fmt.Sprintf("Cannot load tool %q: %v", name, profile.err)
+			if errors.Is(profile.err, fs.ErrNotExist) {
+				message = fmt.Sprintf("Unknown tool %q", name)
+			}
+			addWarning(configWarningToolUnavailable, "tool", message)
+			if envelope.Valid {
+				envelope.Valid = false
+				envelope.Error = message
+			}
+		}
+	}
+
+	var enabledFeatures any
+	if enabled, unknown, err := resolveEnabledFeatureNames(input.Ctx.Paths, values.BuildOptions); err != nil {
+		addWarning(configWarningFeaturesUnavailable, "features", fmt.Sprintf("Cannot list features: %v", err))
+	} else {
+		enabledFeatures = enabled
+		for _, name := range unknown {
+			envelope.Warnings = append(envelope.Warnings, configJSONWarning{
+				Code:    configWarningUnknownFeature,
+				Option:  "features",
+				Layer:   sourceLabel(raw.Sources.Features),
+				Message: fmt.Sprintf("Unknown feature %q selected; it is ignored", name),
+			})
+		}
+	}
+
+	for _, def := range config.OptionDefs() {
+		option := configJSONOption{
+			Kind:   string(def.Kind),
+			Value:  config.OptionTypedEffectiveValue(def, values),
+			Source: sourceLabel(config.OptionEffectiveSource(def, raw.Sources)),
+			Layers: configOptionLayers(def, input),
+		}
+		switch {
+		case def.Kind == config.OptionKindYolo:
+			option.Kind = string(config.OptionKindBool)
+			if loaded != nil {
+				option.Value, option.ResolvedBy = resolveYolo(*loaded, values)
+			}
+		case def.Name == "features":
+			option.Value = enabledFeatures
+			option.Directives = &raw.Features
+		case def.Name == "host_config_paths":
+			option.Value = nil
+			if loaded != nil {
+				option.Value = append([]string{}, profile.resolvedHostConfigPaths...)
+			}
+			option.Directives = &raw.HostConfigPaths
+		}
+		envelope.Options[def.Name] = option
+	}
+	return envelope
+}
+
+// resolveEnabledFeatureNames returns the features a run would enable, without
+// unknown names, plus the unknown names.
+func resolveEnabledFeatureNames(paths model.Paths, build model.BuildOptions) ([]string, []string, error) {
+	selected, unknown, err := resolveFeatureSelection(paths, build)
+	if err != nil {
+		return nil, nil, err
+	}
+	enabled := make([]string, 0, len(selected))
+	for _, name := range selected {
+		if !slices.Contains(unknown, name) {
+			enabled = append(enabled, name)
+		}
+	}
+	return enabled, unknown, nil
+}
+
+func configOptionLayers(def config.OptionDef, input *CommandInput) map[string]any {
+	layers := map[string]any{}
+	if value, ok := config.OptionTypedDefaultsValue(def, input.GlobalDefaults); ok {
+		layers[sourceLabel(model.SourceGlobal)] = value
+	}
+	if value, ok := config.OptionTypedDefaultsValue(def, input.ProjectDefaults); ok {
+		layers[sourceLabel(model.SourceProject)] = value
+	}
+	if input.HasToolDefaults {
+		if value, ok := config.OptionTypedDefaultsValue(def, input.ToolDefaults); ok {
+			layers[sourceLabel(model.SourceToolOverride)] = value
+		}
+	}
+	raw := input.Options
+	if config.OptionEffectiveSource(def, raw.Sources) == model.SourceCLI {
+		if def.Kind == config.OptionKindYolo {
+			if raw.YoloOverride != nil {
+				layers[sourceLabel(model.SourceCLI)] = *raw.YoloOverride
+			}
+		} else {
+			layers[sourceLabel(model.SourceCLI)] = config.OptionTypedEffectiveValue(def, raw)
+		}
+	}
+	return layers
+}
+
+func configJSONFiles(paths map[string]string, status map[string]string) map[string]configJSONFile {
+	files := map[string]configJSONFile{}
+	for _, layer := range []string{"global", "project"} {
+		file := configJSONFile{Path: paths[layer], Status: status[layer]}
+		if file.Status == "" {
+			file.Status = "unavailable"
+		}
+		files[layer] = file
+	}
+	return files
+}
+
 type configJSONOutput struct {
 	Effective map[string]string            `json:"effective,omitempty"`
 	Sources   map[string]configJSONSources `json:"sources,omitempty"`
@@ -237,14 +477,14 @@ type configJSONSources struct {
 	Source       string  `json:"source"`
 }
 
-func renderConfigJSON(rows []configRow, view model.ConfigView, globalPath string, projectPath string, globalExists bool, projectExists bool, globalErr error) int {
+func legacyConfigJSON(rows []configRow, view model.ConfigView, globalPath string, projectPath string, globalExists bool, projectExists bool, globalErr error) configJSONOutput {
 	if view.Mode == "effective" {
 		out := configJSONOutput{Effective: map[string]string{}}
 		out.Paths, out.Status = configJSONPaths(globalPath, projectPath, globalExists, projectExists, globalErr)
 		for _, row := range rows {
 			out.Effective[row.Name] = row.Effective
 		}
-		return writeConfigJSON(out)
+		return out
 	}
 	if view.Mode == "source" {
 		out := configJSONOutput{Sources: map[string]configJSONSources{}}
@@ -255,7 +495,7 @@ func renderConfigJSON(rows []configRow, view model.ConfigView, globalPath string
 				Source:    sourceLabel(row.Source),
 			}
 		}
-		return writeConfigJSON(out)
+		return out
 	}
 
 	out := configJSONOutput{
@@ -275,7 +515,7 @@ func renderConfigJSON(rows []configRow, view model.ConfigView, globalPath string
 			Source:       sourceLabel(row.Source),
 		}
 	}
-	return writeConfigJSON(out)
+	return out
 }
 
 func configJSONPaths(globalPath string, projectPath string, globalExists bool, projectExists bool, globalErr error) (map[string]string, map[string]string) {
@@ -308,7 +548,7 @@ func configJSONPaths(globalPath string, projectPath string, globalExists bool, p
 	return paths, status
 }
 
-func writeConfigJSON(out configJSONOutput) int {
+func writeConfigJSON(out configJSONDocument) int {
 	payload, err := json.MarshalIndent(out, "", "  ")
 	if err != nil {
 		logx.Errorf("Failed to render config JSON: %v", err)

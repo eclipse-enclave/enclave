@@ -88,7 +88,7 @@ Ctrl-C or SIGTERM while a session is still starting aborts the start with exit c
 
 `enclave version` prints one line suitable for bug reports; `--json` emits the version, commit, and date as an object. Builds from modified source append `-dirty` to the commit; unavailable values are reported as `unknown`.
 
-`enclave config` flags: `--view <mode>` selects the output view — `matrix` (default), `source` (where each value comes from), `diff` (values overridden by higher precedence), or `effective` (effective values only); `--json` emits JSON output.
+`enclave config` flags: `--view <mode>` selects the output view — `matrix` (default), `source` (where each value comes from), `diff` (values overridden by higher precedence), or `effective` (effective values only); `--json` emits a versioned JSON envelope (`schemaVersion: "1"`, typed values, structured warnings, and validation status; see [Inspecting Resolved Config](configuration.md#inspecting-resolved-config)).
 
 ### Extensions
 

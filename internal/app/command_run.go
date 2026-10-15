@@ -349,21 +349,33 @@ func buildOrReuseRuntimeImage(input *CommandInput, opts model.Options, host mode
 }
 
 func resolveYoloEnabled(profile model.Profile, opts model.Options) bool {
-	yoloEnabled := profile.YoloEnabledValue()
-	profileHasYoloFlag := profile.YoloFlag != ""
-	if opts.YoloOverride != nil {
-		if !*opts.YoloOverride {
-			warnDisabledYoloIgnored("--no-yolo ignored", profile.Name, profileHasYoloFlag, yoloEnabled)
+	enabled, resolvedBy := resolveYolo(profile, opts)
+	if !enabled {
+		switch resolvedBy {
+		case yoloResolvedByCLI:
+			warnDisabledYoloIgnored("--no-yolo ignored", profile.Name, profile.YoloFlag != "", profile.YoloEnabledValue())
+		case yoloResolvedByConfig:
+			warnDisabledYoloIgnored("Config yolo=false ignored", profile.Name, profile.YoloFlag != "", profile.YoloEnabledValue())
 		}
-		return *opts.YoloOverride
+	}
+	return enabled
+}
+
+const (
+	yoloResolvedByCLI    = "cli"
+	yoloResolvedByConfig = "config"
+	yoloResolvedByTool   = "tool"
+)
+
+// resolveYolo returns whether yolo mode is on and which input decided it.
+func resolveYolo(profile model.Profile, opts model.Options) (bool, string) {
+	if opts.YoloOverride != nil {
+		return *opts.YoloOverride, yoloResolvedByCLI
 	}
 	if profile.YoloEnabled == nil && opts.ConfigDefaultYolo != nil {
-		if !*opts.ConfigDefaultYolo {
-			warnDisabledYoloIgnored("Config yolo=false ignored", profile.Name, profileHasYoloFlag, yoloEnabled)
-		}
-		return *opts.ConfigDefaultYolo
+		return *opts.ConfigDefaultYolo, yoloResolvedByConfig
 	}
-	return yoloEnabled
+	return profile.YoloEnabledValue(), yoloResolvedByTool
 }
 
 func warnDisabledYoloIgnored(prefix string, profileName string, hasYoloFlag bool, yoloEnabled bool) {

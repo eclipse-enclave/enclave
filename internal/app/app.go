@@ -78,12 +78,12 @@ func Run(args []string) int {
 		return 1
 	}
 
-	globalDefaults, projectDefaults, warnings, err := config.LoadDefaults(projectDir)
+	globalDefaults, projectDefaults, configWarnings, err := config.LoadDefaults(projectDir)
 	if err != nil {
 		logx.Errorf("%v", err)
 		return 1
 	}
-	for _, warning := range warnings {
+	for _, warning := range configWarnings {
 		logx.Warnf(warning.Message)
 	}
 
@@ -196,6 +196,7 @@ func Run(args []string) int {
 		ToolDefaults:     toolDefaults,
 		HasToolDefaults:  hasToolDefaults,
 		ConfigView:       parsed.ConfigView,
+		ConfigWarnings:   configWarnings,
 		NetworkLogView:   parsed.NetworkLogView,
 		UserCommandMount: userCommandMount,
 		ExtRequest:       parsed.ExtRequest,

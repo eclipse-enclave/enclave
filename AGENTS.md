@@ -18,7 +18,7 @@ Read `README.md` before making user-facing changes.
 
 ## External Integrations
 
-- Treat CLI JSON schemas, background-run output, lifecycle commands, container naming, and managed tmux behavior as integration contracts for external consumers; coordinate breaking changes. This includes `enclave tools|features list --json` and the shared `add`/`update`/`remove` result envelope (both `schemaVersion: "1"`; see `docs/extensions/installing.md`).
+- Treat CLI JSON schemas, background-run output, lifecycle commands, container naming, and managed tmux behavior as integration contracts for external consumers; coordinate breaking changes. This includes `enclave tools|features list --json` and the shared `add`/`update`/`remove` result envelope (both `schemaVersion: "1"`; see `docs/extensions/installing.md`), and `enclave config --json` (`schemaVersion: "1"`, `kind: "config"`; see `docs/configuration.md`).
 - Prefer structured CLI output over Docker labels or human-readable output for integration contracts.
 
 ## Build and Test

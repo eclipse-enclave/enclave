@@ -21,46 +21,47 @@ import (
 )
 
 type Defaults struct {
-	Tool             string              `json:"tool"`
-	ToolOverrides    map[string]Defaults `json:"tool_overrides"`
-	Backend          string              `json:"backend"`
-	HostConfig       string              `json:"host_config"`
-	SkillsValidation string              `json:"skills_validation"`
-	HostConfigPaths  []string            `json:"host_config_paths"`
-	Yolo             *bool               `json:"yolo"`
-	Ephemeral        *bool               `json:"ephemeral"`
-	AuthScope        string              `json:"auth_scope"`
-	AuthName         string              `json:"auth_name"`
-	SecretsScope     string              `json:"secrets_scope"`
-	ResetAuth        *bool               `json:"reset_auth"`
-	NoAPIKey         *bool               `json:"no_api_key"`
-	PassAPIKey       *bool               `json:"pass_api_key"`
-	PassEnv          []string            `json:"pass_env"`
-	AllowAllNetwork  *bool               `json:"allow_all_network"`
-	NoCache          *bool               `json:"no_cache"`
-	NoHistory        *bool               `json:"no_history"`
-	NoMemory         *bool               `json:"no_memory"`
-	SessionMonitor   *bool               `json:"session_monitor"`
-	SessionTint      string              `json:"session_tint"`
-	Timezone         string              `json:"timezone"`
-	BaseImage        string              `json:"base_image"`
-	Devcontainer     *bool               `json:"devcontainer"`
-	Slim             *bool               `json:"slim"`
-	ImageName        string              `json:"image_name"`
-	Features         []string            `json:"features"`
-	UseRemoteUser    *bool               `json:"use_remote_user"`
-	CacheFrom        []string            `json:"cache_from"`
-	Progress         string              `json:"progress"`
-	NetworkLog       string              `json:"network_log"`
-	Verbose          *bool               `json:"verbose"`
-	Ports            []string            `json:"ports"`
-	AddDirs          []string            `json:"add_dirs"`
-	AddReadonlyDirs  []string            `json:"add_readonly_dirs"`
-	ProjectMount     string              `json:"project_mount"`
-	WorktreeMetadata string              `json:"worktree_metadata"`
-	AllowDomains     []string            `json:"allow_domains"`
-	BridgePorts      []string            `json:"bridge_ports"`
-	PlaywrightMCP    *bool               `json:"playwright_mcp"`
+	Tool                   string              `json:"tool"`
+	ToolOverrides          map[string]Defaults `json:"tool_overrides"`
+	Backend                string              `json:"backend"`
+	HostConfig             string              `json:"host_config"`
+	SkillsValidation       string              `json:"skills_validation"`
+	HostConfigPaths        []string            `json:"host_config_paths"`
+	Yolo                   *bool               `json:"yolo"`
+	Ephemeral              *bool               `json:"ephemeral"`
+	AuthScope              string              `json:"auth_scope"`
+	AuthName               string              `json:"auth_name"`
+	SecretsScope           string              `json:"secrets_scope"`
+	ResetAuth              *bool               `json:"reset_auth"`
+	NoAPIKey               *bool               `json:"no_api_key"`
+	PassAPIKey             *bool               `json:"pass_api_key"`
+	PassEnv                []string            `json:"pass_env"`
+	AllowAllNetwork        *bool               `json:"allow_all_network"`
+	NoCache                *bool               `json:"no_cache"`
+	NoHistory              *bool               `json:"no_history"`
+	NoMemory               *bool               `json:"no_memory"`
+	SessionMonitor         *bool               `json:"session_monitor"`
+	SessionTint            string              `json:"session_tint"`
+	Timezone               string              `json:"timezone"`
+	BaseImage              string              `json:"base_image"`
+	Devcontainer           *bool               `json:"devcontainer"`
+	Slim                   *bool               `json:"slim"`
+	ImageName              string              `json:"image_name"`
+	Features               []string            `json:"features"`
+	UseRemoteUser          *bool               `json:"use_remote_user"`
+	CacheFrom              []string            `json:"cache_from"`
+	Progress               string              `json:"progress"`
+	NetworkLog             string              `json:"network_log"`
+	Verbose                *bool               `json:"verbose"`
+	Ports                  []string            `json:"ports"`
+	AddDirs                []string            `json:"add_dirs"`
+	AddReadonlyDirs        []string            `json:"add_readonly_dirs"`
+	SensitiveDirExceptions []string            `json:"sensitive_dir_exceptions"`
+	ProjectMount           string              `json:"project_mount"`
+	WorktreeMetadata       string              `json:"worktree_metadata"`
+	AllowDomains           []string            `json:"allow_domains"`
+	BridgePorts            []string            `json:"bridge_ports"`
+	PlaywrightMCP          *bool               `json:"playwright_mcp"`
 }
 
 func LoadDefaults(projectDir string) (global Defaults, project Defaults, warnings []string, err error) {
@@ -495,6 +496,12 @@ func applyProjectDefaultsGuardrails(path string, prefix string, projectRoot stri
 
 	defaults.AddDirs, warnings = filterProjectAddDirs(defaults.AddDirs, projectGuardrailField(prefix, "add_dirs"), projectRoot, projectDir, path, warnings)
 	defaults.AddReadonlyDirs, warnings = filterProjectAddDirs(defaults.AddReadonlyDirs, projectGuardrailField(prefix, "add_readonly_dirs"), projectRoot, projectDir, path, warnings)
+
+	if len(defaults.SensitiveDirExceptions) > 0 {
+		field := projectGuardrailField(prefix, "sensitive_dir_exceptions")
+		defaults.SensitiveDirExceptions = nil
+		warnings = append(warnings, fmt.Sprintf("Ignoring %s in %s: project configs cannot exempt sensitive host paths; set it in global config instead", field, path))
+	}
 
 	if len(defaults.PassEnv) > 0 {
 		field := projectGuardrailField(prefix, "pass_env")

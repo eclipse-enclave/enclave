@@ -10,6 +10,9 @@ package app
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -17,6 +20,7 @@ import (
 	"time"
 
 	"enclave/internal/backend"
+	"enclave/internal/config"
 	"enclave/internal/model"
 	"enclave/internal/runtime"
 )
@@ -290,5 +294,106 @@ func TestExecSessionTargetFollowsSessionTint(t *testing.T) {
 	}
 	if got.SessionTint != "#222222" {
 		t.Fatalf("session tint = %q, want the codex tint", got.SessionTint)
+	}
+}
+
+// runMounts resolves the additional mounts of a run in home, returning what
+// the guard printed.
+func runMounts(t *testing.T, home string, project string, opts model.Options) (dirs, readonlyDirs []string, stderr string, err error) {
+	t.Helper()
+	_, stderr = captureOutput(t, func() {
+		dirs, readonlyDirs, err = resolveAdditionalMounts(opts, guardProject(project), home, true)
+	})
+	return dirs, readonlyDirs, stderr, err
+}
+
+// Homeshell passes --add-sensitive-dir for its workstream directories, which
+// may be the project itself: that exempts the project without mounting it a
+// second time.
+func TestResolveAdditionalMountsExemptsProjectThroughFlag(t *testing.T) {
+	home := exceptionHome(t)
+	workstream := filepath.Join(home, ".local", "share", "homeshell", "workstreams", "p-x")
+	link := filepath.Join(home, "code", "p-x")
+	if err := os.Symlink(workstream, link); err != nil {
+		t.Fatal(err)
+	}
+	opts := model.Options{}
+	opts.AddSensitiveDirs = []string{link}
+
+	dirs, readonlyDirs, stderr, err := runMounts(t, home, workstream, opts)
+	if err != nil {
+		t.Fatalf("run refused: %v", err)
+	}
+	if len(dirs) != 0 || len(readonlyDirs) != 0 {
+		t.Errorf("mounts = %q read-write, %q read-only; want the project mounted once, as the project", dirs, readonlyDirs)
+	}
+	if want := "Mounting sensitive host path " + workstream + " (project directory): is inside ~/.local; exempted by --add-sensitive-dir"; !strings.Contains(stderr, want) {
+		t.Errorf("warnings %q do not mention %q", stderr, want)
+	}
+	if strings.Contains(stderr, "Skipping duplicate") {
+		t.Errorf("warnings %q report the project as a duplicate", stderr)
+	}
+}
+
+func TestResolveAdditionalMountsRefusesProjectAsReadonlySensitiveDir(t *testing.T) {
+	home := exceptionHome(t)
+	workstream := filepath.Join(home, ".local", "share", "homeshell", "workstreams", "p-x")
+	opts := model.Options{}
+	opts.AddReadonlySensitiveDirs = []string{workstream}
+
+	_, _, _, err := runMounts(t, home, workstream, opts)
+	want := "--add-readonly-sensitive-dir " + workstream + " is the project directory; use --add-sensitive-dir " + workstream +
+		" to exempt it and --project-mount readonly to mount it read-only"
+	if err == nil || err.Error() != want {
+		t.Fatalf("err = %v, want %q", err, want)
+	}
+}
+
+// The same directory read-write and read-only is mounted once, read-write,
+// and the read-only flag still exempts it.
+func TestResolveAdditionalMountsKeepsReadWriteOverReadonlySensitiveDir(t *testing.T) {
+	home := exceptionHome(t)
+	m2 := filepath.Join(home, ".m2")
+	opts := model.Options{}
+	opts.AddDirs = []string{m2}
+	opts.Sources.AddDirs = model.SourceCLI
+	opts.AddReadonlySensitiveDirs = []string{m2}
+
+	dirs, readonlyDirs, stderr, err := runMounts(t, home, filepath.Join(home, "code", "project"), opts)
+	if err != nil {
+		t.Fatalf("run refused: %v", err)
+	}
+	if !slices.Equal(dirs, []string{m2}) || len(readonlyDirs) != 0 {
+		t.Errorf("mounts = %q read-write, %q read-only; want %s read-write only", dirs, readonlyDirs, m2)
+	}
+	if want := "Mounting sensitive host path " + m2 + " (--add-dir): is ~/.m2; exempted by --add-readonly-sensitive-dir"; !strings.Contains(stderr, want) {
+		t.Errorf("warnings %q do not mention %q", stderr, want)
+	}
+}
+
+// Unlike --add-dir, the flags add their mounts to the configured ones.
+func TestResolveAdditionalMountsKeepsConfiguredDirsBesideSensitiveDirs(t *testing.T) {
+	home := exceptionHome(t)
+	configured := filepath.Join(home, "code", "configured")
+	flagged := filepath.Join(home, ".m2")
+	readonly := filepath.Join(home, "code", "readonly")
+	for _, dir := range []string{configured, readonly} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cli := model.Options{}
+	cli.AddSensitiveDirs = []string{flagged}
+	cliSources := model.OptionSources{}
+	cliSources.AddSensitiveDirs = model.SourceCLI
+	global := config.Defaults{AddDirs: []string{configured}, AddReadonlyDirs: []string{readonly}}
+	opts, _, _ := config.ResolveOptionsForTool(cli, cliSources, global, config.Defaults{}, "claude")
+
+	dirs, readonlyDirs, _, err := runMounts(t, home, filepath.Join(home, "code", "project"), opts)
+	if err != nil {
+		t.Fatalf("run refused: %v", err)
+	}
+	if !slices.Equal(dirs, []string{configured, flagged}) || !slices.Equal(readonlyDirs, []string{readonly}) {
+		t.Errorf("mounts = %q read-write, %q read-only; want [%s %s] and [%s]", dirs, readonlyDirs, configured, flagged, readonly)
 	}
 }

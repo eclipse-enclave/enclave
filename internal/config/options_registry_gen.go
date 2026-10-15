@@ -403,6 +403,24 @@ func OptionSpecs() []OptionSpec {
 			},
 		},
 		{
+			Name:  "add_sensitive_dirs",
+			Group: OptionGroupRun,
+		},
+		{
+			Name:  "add_readonly_sensitive_dirs",
+			Group: OptionGroupRun,
+		},
+		{
+			Name:  "sensitive_dir_exceptions",
+			Group: OptionGroupRun,
+			ApplyDefaultsWithSource: func(opts *model.Options, defaults Defaults, source model.OptionSource, sources *model.OptionSources) {
+				if canOverride(sources.SensitiveDirExceptions, source) && len(defaults.SensitiveDirExceptions) > 0 {
+					opts.SensitiveDirExceptions = copyStringSlice(defaults.SensitiveDirExceptions)
+					sources.SensitiveDirExceptions = source
+				}
+			},
+		},
+		{
 			Name:  "allow_sensitive_mounts",
 			Group: OptionGroupRun,
 		},

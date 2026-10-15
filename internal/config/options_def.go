@@ -1041,6 +1041,57 @@ func OptionDefs() []OptionDef {
 			},
 		},
 		{
+			Name:        "add_sensitive_dirs",
+			Group:       OptionGroupRun,
+			Kind:        OptionKindStringSlice,
+			OptionField: "AddSensitiveDirs",
+			SourceField: "AddSensitiveDirs",
+			Apply:       ApplyNone,
+			CLIFlags: []CLIFlagDef{
+				{
+					Name:                "--add-sensitive-dir",
+					Usage:               "Mount additional directory, even if it is sensitive (warns)",
+					ValueKind:           CLIValueRequired,
+					MissingValueMessage: "--add-sensitive-dir requires a directory path",
+					Action: CLIAction{
+						Kind:        CLIActionAppendString,
+						OptionField: "AddSensitiveDirs",
+						SourceField: "AddSensitiveDirs",
+					},
+				},
+			},
+		},
+		{
+			Name:        "add_readonly_sensitive_dirs",
+			Group:       OptionGroupRun,
+			Kind:        OptionKindStringSlice,
+			OptionField: "AddReadonlySensitiveDirs",
+			SourceField: "AddReadonlySensitiveDirs",
+			Apply:       ApplyNone,
+			CLIFlags: []CLIFlagDef{
+				{
+					Name:                "--add-readonly-sensitive-dir",
+					Usage:               "Mount additional directory read-only, even if it is sensitive (warns)",
+					ValueKind:           CLIValueRequired,
+					MissingValueMessage: "--add-readonly-sensitive-dir requires a directory path",
+					Action: CLIAction{
+						Kind:        CLIActionAppendString,
+						OptionField: "AddReadonlySensitiveDirs",
+						SourceField: "AddReadonlySensitiveDirs",
+					},
+				},
+			},
+		},
+		{
+			Name:          "sensitive_dir_exceptions",
+			Group:         OptionGroupRun,
+			Kind:          OptionKindStringSlice,
+			OptionField:   "SensitiveDirExceptions",
+			SourceField:   "SensitiveDirExceptions",
+			DefaultsField: "SensitiveDirExceptions",
+			Apply:         ApplySliceIfEmpty,
+		},
+		{
 			Name:        "allow_sensitive_mounts",
 			Group:       OptionGroupRun,
 			Kind:        OptionKindBool,

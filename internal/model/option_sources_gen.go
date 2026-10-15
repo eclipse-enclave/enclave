@@ -23,31 +23,34 @@ type GlobalOptionSources struct {
 }
 
 type RunOptionSources struct {
-	AddDirs              OptionSource
-	AddReadonlyDirs      OptionSource
-	AllowAllNetwork      OptionSource
-	AllowDomains         OptionSource
-	AllowSensitiveMounts OptionSource
-	Backend              OptionSource
-	BridgePorts          OptionSource
-	Ephemeral            OptionSource
-	HostConfig           OptionSource
-	HostConfigPaths      OptionSource
-	NetworkLog           OptionSource
-	NoCache              OptionSource
-	NoHistory            OptionSource
-	NoMemory             OptionSource
-	PlaywrightMCP        OptionSource
-	Ports                OptionSource
-	ProjectMount         OptionSource
-	SessionMonitor       OptionSource
-	SessionName          OptionSource
-	SessionTint          OptionSource
-	SkillsValidation     OptionSource
-	Timezone             OptionSource
-	Tool                 OptionSource
-	WorktreeMetadata     OptionSource
-	Yolo                 OptionSource
+	AddDirs                  OptionSource
+	AddReadonlyDirs          OptionSource
+	AddReadonlySensitiveDirs OptionSource
+	AddSensitiveDirs         OptionSource
+	AllowAllNetwork          OptionSource
+	AllowDomains             OptionSource
+	AllowSensitiveMounts     OptionSource
+	Backend                  OptionSource
+	BridgePorts              OptionSource
+	Ephemeral                OptionSource
+	HostConfig               OptionSource
+	HostConfigPaths          OptionSource
+	NetworkLog               OptionSource
+	NoCache                  OptionSource
+	NoHistory                OptionSource
+	NoMemory                 OptionSource
+	PlaywrightMCP            OptionSource
+	Ports                    OptionSource
+	ProjectMount             OptionSource
+	SensitiveDirExceptions   OptionSource
+	SessionMonitor           OptionSource
+	SessionName              OptionSource
+	SessionTint              OptionSource
+	SkillsValidation         OptionSource
+	Timezone                 OptionSource
+	Tool                     OptionSource
+	WorktreeMetadata         OptionSource
+	Yolo                     OptionSource
 }
 
 type AuthOptionSources struct {
@@ -89,31 +92,34 @@ func DefaultOptionSources() OptionSources {
 			Verbose:   SourceDefault,
 		},
 		RunOptionSources: RunOptionSources{
-			AddDirs:              SourceDefault,
-			AddReadonlyDirs:      SourceDefault,
-			AllowAllNetwork:      SourceDefault,
-			AllowDomains:         SourceDefault,
-			AllowSensitiveMounts: SourceDefault,
-			Backend:              SourceDefault,
-			BridgePorts:          SourceDefault,
-			Ephemeral:            SourceDefault,
-			HostConfig:           SourceDefault,
-			HostConfigPaths:      SourceDefault,
-			NetworkLog:           SourceDefault,
-			NoCache:              SourceDefault,
-			NoHistory:            SourceDefault,
-			NoMemory:             SourceDefault,
-			PlaywrightMCP:        SourceDefault,
-			Ports:                SourceDefault,
-			ProjectMount:         SourceDefault,
-			SessionMonitor:       SourceDefault,
-			SessionName:          SourceDefault,
-			SessionTint:          SourceDefault,
-			SkillsValidation:     SourceDefault,
-			Timezone:             SourceDefault,
-			Tool:                 SourceDefault,
-			WorktreeMetadata:     SourceDefault,
-			Yolo:                 SourceDefault,
+			AddDirs:                  SourceDefault,
+			AddReadonlyDirs:          SourceDefault,
+			AddReadonlySensitiveDirs: SourceDefault,
+			AddSensitiveDirs:         SourceDefault,
+			AllowAllNetwork:          SourceDefault,
+			AllowDomains:             SourceDefault,
+			AllowSensitiveMounts:     SourceDefault,
+			Backend:                  SourceDefault,
+			BridgePorts:              SourceDefault,
+			Ephemeral:                SourceDefault,
+			HostConfig:               SourceDefault,
+			HostConfigPaths:          SourceDefault,
+			NetworkLog:               SourceDefault,
+			NoCache:                  SourceDefault,
+			NoHistory:                SourceDefault,
+			NoMemory:                 SourceDefault,
+			PlaywrightMCP:            SourceDefault,
+			Ports:                    SourceDefault,
+			ProjectMount:             SourceDefault,
+			SensitiveDirExceptions:   SourceDefault,
+			SessionMonitor:           SourceDefault,
+			SessionName:              SourceDefault,
+			SessionTint:              SourceDefault,
+			SkillsValidation:         SourceDefault,
+			Timezone:                 SourceDefault,
+			Tool:                     SourceDefault,
+			WorktreeMetadata:         SourceDefault,
+			Yolo:                     SourceDefault,
 		},
 		AuthOptionSources: AuthOptionSources{
 			AuthName:     SourceDefault,
@@ -152,6 +158,12 @@ func MergeOptionSources(base OptionSources, override OptionSources) OptionSource
 	}
 	if override.AddReadonlyDirs != SourceUnset {
 		base.AddReadonlyDirs = override.AddReadonlyDirs
+	}
+	if override.AddReadonlySensitiveDirs != SourceUnset {
+		base.AddReadonlySensitiveDirs = override.AddReadonlySensitiveDirs
+	}
+	if override.AddSensitiveDirs != SourceUnset {
+		base.AddSensitiveDirs = override.AddSensitiveDirs
 	}
 	if override.AllowAllNetwork != SourceUnset {
 		base.AllowAllNetwork = override.AllowAllNetwork
@@ -266,6 +278,9 @@ func MergeOptionSources(base OptionSources, override OptionSources) OptionSource
 	}
 	if override.SecretsScope != SourceUnset {
 		base.SecretsScope = override.SecretsScope
+	}
+	if override.SensitiveDirExceptions != SourceUnset {
+		base.SensitiveDirExceptions = override.SensitiveDirExceptions
 	}
 	if override.SessionMonitor != SourceUnset {
 		base.SessionMonitor = override.SessionMonitor

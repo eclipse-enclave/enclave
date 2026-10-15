@@ -1131,7 +1131,7 @@ func (r *Runtime) addWorktreeMetadataMounts(mountArgs *mountAccumulator) {
 	validated := append([]string{}, r.validatedDirs...)
 	validated = append(validated, r.validatedReadonlyDirs...)
 	readOnly := mode == model.WorktreeMetadataReadonly || model.ProjectMountIsReadonly(r.run.ProjectMount)
-	sensitive := mounts.NewSensitivePaths(r.host.Home, config.HostAppDataDirs(r.host.Home))
+	sensitive := mounts.NewSensitivePaths(r.host.Home, config.HostAppDataDirs(r.host.Home), config.HostEnclaveRoots(r.host.Home))
 	mounts.AddWorktree(mountArgs.MountsPtr(), r.project, &validated, readOnly, sensitive)
 }
 

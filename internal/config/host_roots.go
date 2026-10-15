@@ -98,17 +98,20 @@ func macCacheRoot(home string) string {
 // their config, data, state, caches, and runtime files: the XDG base
 // directories on Linux and other Unixes, and the entries of ~/Library on macOS
 // except the folders that hold the user's own synced files. Enclave's own roots
-// are listed on their own: an XDG override such as XDG_CONFIG_HOME=$HOME makes
-// a base directory home itself, which cannot be protected without protecting
+// are not included; HostEnclaveRoots lists them. They must be listed on their
+// own anyway: an XDG override such as XDG_CONFIG_HOME=$HOME makes a base
+// directory home itself, which cannot be protected without protecting
 // everything under it.
 func HostAppDataDirs(home string) []string {
-	var dirs []string
 	if runtime.GOOS == "darwin" {
-		dirs = macAppDataDirs(home)
-	} else {
-		dirs = xdgAppDataDirs(home)
+		return macAppDataDirs(home)
 	}
-	return append(dirs, hostConfigRoot(home), hostStateRoot(home), hostCacheRoot(home))
+	return xdgAppDataDirs(home)
+}
+
+// HostEnclaveRoots returns Enclave's own config, state, and cache roots.
+func HostEnclaveRoots(home string) []string {
+	return []string{hostConfigRoot(home), hostStateRoot(home), hostCacheRoot(home)}
 }
 
 func xdgAppDataDirs(home string) []string {

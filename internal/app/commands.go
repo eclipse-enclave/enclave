@@ -37,6 +37,8 @@ type CommandInput struct {
 	// ConfigWarnings are the config-loading warnings already logged by Run.
 	ConfigWarnings []config.Warning
 	NetworkLogView model.NetworkLogView
+	// NetworkPrintJSON selects the JSON envelope of `enclave network print`.
+	NetworkPrintJSON bool
 	// UserCommandMount, when set, exposes the host session command tree read-only
 	// inside the container. Populated only for `enclave <name>` session
 	// commands dispatched through the run pipeline.

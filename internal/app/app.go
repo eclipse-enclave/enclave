@@ -123,6 +123,9 @@ func Run(args []string) int {
 	if actionNeedsTool(parsed) {
 		tool, err := resolveTool(opts.Tool, promptAllowed(parsed))
 		if err != nil {
+			if parsed.NetworkPrintJSON {
+				return writeNetworkPolicyEnvelope(os.Stdout, newNetworkPolicyEnvelope(nil, networkPolicyProjectOf(config.ResolveProjectFromDir(projectDir))), err)
+			}
 			logx.Errorf("%v", err)
 			return 1
 		}
@@ -198,6 +201,7 @@ func Run(args []string) int {
 		ConfigView:       parsed.ConfigView,
 		ConfigWarnings:   configWarnings,
 		NetworkLogView:   parsed.NetworkLogView,
+		NetworkPrintJSON: parsed.NetworkPrintJSON,
 		UserCommandMount: userCommandMount,
 		ExtRequest:       parsed.ExtRequest,
 	}

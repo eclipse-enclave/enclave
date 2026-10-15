@@ -144,11 +144,35 @@ enclave network set-mode unrestricted --global      # Or: restricted
 enclave network apply                      # Apply policy to running gateways
 ```
 
-`status`, `print`, and `diff` show the policy a run with the same options would enforce: the tool allowlist and spec domains, the enabled features' allowed and denied domains, declared credential release hosts, `allow_domains`, and `allow_all_network`. They accept the run flags that affect it (`--tool`, `--features`, `--slim`, `--playwright-mcp`, `--allow-domain`, `--allow-all-network`; `status` also `--backend`), so `enclave network print --features +github-cli --allow-domain api.example.com` previews that run. Configured options such as `devcontainer` or `backend: qemu` (which forces `allow_all_network`) are honoured, but `print` and `diff` take no `--backend`, so `run --backend qemu` cannot be previewed with the same argv; pass `--allow-all-network` instead. Hosts selected at session start through `serviceAuth.hostsFromCredential` are not shown. In unrestricted mode `print` emits only `# Mode: unrestricted`. If the options are invalid, `print` and `diff` fail, while `status` warns and summarizes the tool spec and policy files instead. `apply` and the running-gateway comparison in `status` use the tool spec and policy files only, since the options of a running session are not recorded.
+`status`, `print`, and `diff` show the policy a run with the same options would enforce: the tool allowlist and spec domains, the enabled features' allowed and denied domains, declared credential release hosts, `allow_domains`, and `allow_all_network`. They accept the run flags that affect it (`--tool`, `--features`, `--slim`, `--playwright-mcp`, `--allow-domain`, `--allow-all-network`; `status` also `--backend`), so `enclave network print --features +github-cli --allow-domain api.example.com` previews that run. Configured options such as `devcontainer` or `backend: qemu` (which forces `allow_all_network`) are honoured, but `print` and `diff` take no `--backend`, so `run --backend qemu` cannot be previewed with the same argv; pass `--allow-all-network` instead. Hosts selected at session start through `serviceAuth.hostsFromCredential` are not shown. In unrestricted mode `print` emits only `# Mode: unrestricted`; `--json` emits the allowlist as a [JSON envelope](#json-output-schemaversion-1). If the options are invalid, `print` and `diff` fail (`print` also rejects an unknown tool, as a run does), while `status` warns and summarizes the tool spec and policy files instead. `apply` and the running-gateway comparison in `status` use the tool spec and policy files only, since the options of a running session are not recorded.
 
 Network mutations are currently global-only. `--project` scope is planned but not yet supported.
 
 Mutating commands (`add-domain`, `remove-domain`, `set-mode`) apply the updated policy to running gateways automatically. Pass `--no-apply` to persist the change without applying it, or `--all-running` to target every running gateway on the host instead of just the current project/tool. Run `enclave network apply` (optionally with `--all-running`) to push the persisted policy to running gateways on demand. Persisted unrestricted mode still requires a session restart.
+
+### JSON output (`schemaVersion: "1"`)
+
+`enclave network print --json` emits the same allowlist as a versioned envelope instead of the dnsmasq config:
+
+```json
+{
+  "schemaVersion": "1",
+  "kind": "network-policy",
+  "tool": "claude",
+  "project": { "dir": "/home/you/src/app", "hash": "e9671acd2448" },
+  "mode": "restricted",
+  "domains": ["anthropic.com", "api.anthropic.com", "github.com"],
+  "denied": ["telemetry.example.com"],
+  "notes": ["Hosts selected at session start through serviceAuth.hostsFromCredential are not listed."],
+  "error": ""
+}
+```
+
+- `domains`: the allow set the gateway renders, canonical and sorted, without entries equal to or under a denied domain. `denied`: the blackholed domains, sorted.
+- `mode` is `restricted` or `unrestricted`; in unrestricted mode `domains`, `denied`, and `notes` are empty.
+- `project` is `null` when the project cannot be resolved. Arrays are never `null`. Fields are only added, never renamed or removed.
+
+If the policy cannot be resolved (no or unknown tool, options a run would reject, a malformed spec, policy, or defaults file), stdout carries one envelope with `error` set, `mode: null`, and empty arrays (`tool` is `null` for startup failures), and the exit code is 1; unlike `config --json`, there is no result to report. Usage errors go to stderr only (exit 1, empty stdout), as do warnings.
 
 ## Adding Custom Domains
 

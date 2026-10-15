@@ -83,7 +83,9 @@ func networkStatusCommand(res *Result) *cobra.Command {
 }
 
 func networkPrintCommand(res *Result) *cobra.Command {
-	return networkQueryCommand("print", "Print effective dnsmasq configuration", "network-print", res)
+	cmd := networkQueryCommand("print", "Print effective dnsmasq configuration", "network-print", res)
+	cmd.Flags().BoolVar(&res.NetworkPrintJSON, "json", false, "Emit the effective allowlist as JSON")
+	return cmd
 }
 
 func networkDiffCommand(res *Result) *cobra.Command {

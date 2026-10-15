@@ -126,7 +126,7 @@ in one step, printing the container name so you can reattach later with
 | Command | Description |
 |---------|-------------|
 | `enclave network status` | Show network policy status |
-| `enclave network print` | Print effective dnsmasq config |
+| `enclave network print` | Print effective dnsmasq config (`--json` emits the allowlist as a versioned envelope; see [JSON output](networking.md#json-output-schemaversion-1)) |
 | `enclave network diff` | Show changes from built-in defaults |
 | `enclave network add-domain <domain> --global` | Allow a domain |
 | `enclave network remove-domain <domain> --global` | Remove a domain |

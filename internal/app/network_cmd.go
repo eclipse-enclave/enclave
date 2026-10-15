@@ -42,6 +42,16 @@ func resolveCurrentPolicyContext(input *CommandInput) (currentPolicyContext, err
 // enforces. Hosts selected at session start through
 // serviceAuth.hostsFromCredential are unknown here and not included.
 func resolvePreviewPolicyContext(input *CommandInput) (currentPolicyContext, error) {
+	return resolveSessionPolicyContext(input, false)
+}
+
+// resolvePrintPolicyContext is resolvePreviewPolicyContext, except that a tool
+// without a spec is rejected as a run rejects it.
+func resolvePrintPolicyContext(input *CommandInput) (currentPolicyContext, error) {
+	return resolveSessionPolicyContext(input, true)
+}
+
+func resolveSessionPolicyContext(input *CommandInput, requireTool bool) (currentPolicyContext, error) {
 	opts, warnings, err := validateAsRun(input.Ctx.Paths, input.Options, input.Options.Sources)
 	if err != nil {
 		return currentPolicyContext{}, err
@@ -50,6 +60,9 @@ func resolvePreviewPolicyContext(input *CommandInput) (currentPolicyContext, err
 		logx.Warnf(warning)
 	}
 	profile, err := config.LoadProfile(input.Ctx.Paths, opts.Tool)
+	if errors.Is(err, os.ErrNotExist) && requireTool {
+		return currentPolicyContext{}, unknownToolError(input.Ctx.Paths, opts.Tool)
+	}
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return currentPolicyContext{}, fmt.Errorf("load tool %q: %w", opts.Tool, err)
 	}
@@ -59,6 +72,14 @@ func resolvePreviewPolicyContext(input *CommandInput) (currentPolicyContext, err
 	}
 	session := runtime.SessionNetworkInputs(runtimeConfig)
 	return resolvePolicyContext(input, &session)
+}
+
+func unknownToolError(paths model.Paths, tool string) error {
+	available, err := config.ListProfiles(paths)
+	if err != nil || len(available) == 0 {
+		return fmt.Errorf("unknown tool: %s", tool)
+	}
+	return fmt.Errorf("unknown tool: %s (available: %s)", tool, strings.Join(available, " "))
 }
 
 func resolvePolicyContext(input *CommandInput, session *policy.SessionNetworkInputs) (currentPolicyContext, error) {
@@ -232,7 +253,10 @@ func runNetworkStatus(input *CommandInput) int {
 }
 
 func runNetworkPrint(input *CommandInput) int {
-	policyCtx, err := resolvePreviewPolicyContext(input)
+	if input.NetworkPrintJSON {
+		return writeNetworkPolicyJSON(os.Stdout, input)
+	}
+	policyCtx, err := resolvePrintPolicyContext(input)
 	if err != nil {
 		logx.Errorf("Failed to resolve network policy: %v", err)
 		return 1

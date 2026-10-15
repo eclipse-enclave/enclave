@@ -8,9 +8,12 @@
 package app
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -85,6 +88,115 @@ func TestNetworkPrintReflectsSessionOptions(t *testing.T) {
 	out = captureStdout(t, func() { code = runNetworkPrint(input) })
 	if code != 0 || out != "# Mode: unrestricted\n" {
 		t.Fatalf("network print with allow_all_network = %d %q, want the unrestricted marker", code, out)
+	}
+}
+
+func runNetworkPrintJSON(t *testing.T, input *CommandInput) (int, string, map[string]any) {
+	t.Helper()
+	input.NetworkPrintJSON = true
+	var code int
+	out, _ := captureOutput(t, func() { code = runNetworkPrint(input) })
+	var doc map[string]any
+	if err := json.Unmarshal([]byte(out), &doc); err != nil {
+		t.Fatalf("unmarshal network print JSON: %v\n%s", err, out)
+	}
+	return code, out, doc
+}
+
+func TestNetworkPrintJSONEnvelope(t *testing.T) {
+	input := networkPreviewTestInput(t)
+	project, err := input.Ctx.Project()
+	if err != nil {
+		t.Fatalf("resolve project: %v", err)
+	}
+
+	code, out, doc := runNetworkPrintJSON(t, input)
+	want := map[string]any{
+		"schemaVersion": "1",
+		"kind":          "network-policy",
+		"tool":          "speccy",
+		"project":       map[string]any{"dir": project.Dir, "hash": project.Hash},
+		"mode":          "restricted",
+		"domains":       []any{"adhoc.example.com", "api.svc.example.org", "svc.example.com", "tool.example.com"},
+		"denied":        []any{"telemetry.svc.example.com"},
+		"notes":         []any{networkPolicyNoteHostsFromCredential},
+		"error":         "",
+	}
+	if code != 0 || !reflect.DeepEqual(doc, want) {
+		t.Fatalf("network print --json = %d\n%s\nwant %#v", code, out, want)
+	}
+
+	input.Options.AllowAllNetwork = true
+	code, out, doc = runNetworkPrintJSON(t, input)
+	want["mode"] = "unrestricted"
+	want["domains"], want["denied"], want["notes"] = []any{}, []any{}, []any{}
+	if code != 0 || !reflect.DeepEqual(doc, want) {
+		t.Fatalf("network print --json with allow_all_network = %d\n%s\nwant %#v", code, out, want)
+	}
+
+	input.Options.AllowAllNetwork = false
+	input.Options.ProjectMount = "bogus"
+	code, out, doc = runNetworkPrintJSON(t, input)
+	if code != 1 || doc["mode"] != nil || !strings.Contains(doc["error"].(string), "--project-mount") {
+		t.Fatalf("network print --json with invalid options = %d, want exit 1, null mode, and the error:\n%s", code, out)
+	}
+	want["mode"], want["error"] = nil, doc["error"]
+	if !reflect.DeepEqual(doc, want) {
+		t.Fatalf("network print --json error envelope:\n%s\nwant %#v", out, want)
+	}
+
+	input.Options.ProjectMount = ""
+	input.Options.Tool = "bogus"
+	code, out, doc = runNetworkPrintJSON(t, input)
+	want["tool"], want["error"] = "bogus", "unknown tool: bogus (available: speccy)"
+	if code != 1 || !reflect.DeepEqual(doc, want) {
+		t.Fatalf("network print --json with an unknown tool = %d\n%s\nwant %#v", code, out, want)
+	}
+	input.NetworkPrintJSON = false
+	if captureOutput(t, func() { code = runNetworkPrint(input) }); code != 1 {
+		t.Fatalf("network print with an unknown tool exit code = %d, want 1", code)
+	}
+
+}
+
+func TestNetworkPrintJSONWithoutTool(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("HOME does not select the home directory on Windows")
+	}
+	setRunningAsRoot(t, false)
+	stubToolResolution(t, nil, false, "")
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, "config"))
+	t.Setenv("XDG_STATE_HOME", filepath.Join(home, "state"))
+	t.Setenv("XDG_CACHE_HOME", filepath.Join(home, "cache"))
+	projectDir := t.TempDir()
+	t.Chdir(projectDir)
+	project, err := config.ResolveProjectFromDir(projectDir)
+	if err != nil {
+		t.Fatalf("resolve project: %v", err)
+	}
+
+	var code int
+	out, _ := captureOutput(t, func() { code = Run([]string{"network", "print", "--json"}) })
+	var doc map[string]any
+	if err := json.Unmarshal([]byte(out), &doc); err != nil {
+		t.Fatalf("unmarshal network print JSON: %v\n%s", err, out)
+	}
+	errText, _ := doc["error"].(string)
+	want := map[string]any{
+		"schemaVersion": "1",
+		"kind":          "network-policy",
+		"tool":          nil,
+		"project":       map[string]any{"dir": project.Dir, "hash": project.Hash},
+		"mode":          nil,
+		"domains":       []any{},
+		"denied":        []any{},
+		"notes":         []any{},
+		"error":         errText,
+	}
+	if code != 1 || !strings.HasPrefix(errText, "no tool configured") || !reflect.DeepEqual(doc, want) {
+		t.Fatalf("network print --json without a tool = %d\n%s\nwant %#v", code, out, want)
 	}
 }
 

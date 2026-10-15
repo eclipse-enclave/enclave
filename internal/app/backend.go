@@ -93,7 +93,7 @@ var (
 // Structured output and --yes promise not to prompt, whatever the terminal
 // looks like.
 func promptAllowed(parsed cli.Result) bool {
-	if parsed.Options.PSJSON || parsed.Options.StatusJSON || parsed.ConfigView.JSON {
+	if parsed.Options.PSJSON || parsed.Options.StatusJSON || parsed.ConfigView.JSON || parsed.NetworkPrintJSON {
 		return false
 	}
 	if parsed.ExtRequest != nil && (parsed.ExtRequest.JSON || parsed.ExtRequest.Yes) {

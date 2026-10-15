@@ -48,6 +48,8 @@ type Result struct {
 	// ExtRequest is set for the extension-management subcommands (`tools`/
 	// `features` list/add/remove/update); nil otherwise.
 	ExtRequest *extinstall.Request
+	// NetworkPrintJSON selects the JSON envelope of `enclave network print`.
+	NetworkPrintJSON bool
 }
 
 func Parse(args []string, defaults model.Options, userCmds ...usercmd.Command) (Result, error) {

@@ -9,7 +9,7 @@ Source: enclave
 Section: devel
 Priority: optional
 Maintainer: Olaf Lessenich <olessenich@eclipsesource.com>
-Build-Depends: debhelper-compat (= 13), golang-go (>= 2:1.24~)
+Build-Depends: debhelper-compat (= 13), golang-go (>= 2:1.24~) | golang-1.24-go
 Standards-Version: 4.6.2
 Homepage: https://github.com/eclipse-enclave/enclave
 Rules-Requires-Root: no

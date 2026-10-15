@@ -248,6 +248,11 @@ func prepareBuildContext(paths model.Paths, selection runtimeImageSelection) (co
 		}
 	}()
 
+	// The Dockerfile copies this directory even when no features are selected.
+	if err = os.MkdirAll(filepath.Join(stagingDir, "extensions", "features"), 0o750); err != nil {
+		return "", nil, err
+	}
+
 	rootEntries, err := os.ReadDir(paths.AppRoot)
 	if err != nil {
 		return "", nil, err

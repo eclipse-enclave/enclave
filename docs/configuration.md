@@ -224,6 +224,10 @@ the inherited one and `+`/`-` entries amend it:
 - `--playwright-mcp` enables the `playwright` feature it needs even when
   `features` removes it, with a warning.
 
+Feature names, including `+name` entries, must match an installed extension;
+unknown names fail before building or starting a session. Unknown `-name`
+removals only warn. Use `enclave features list` to see available names.
+
 `host_config_paths` is resolved per tool against that tool's reviewed
 `passthroughPaths` from its `spec.yaml`. Use:
 

@@ -25,6 +25,43 @@ import (
 	"enclave/internal/runtime"
 )
 
+func TestRunExecutionRejectsUnknownFeaturesBeforeDocker(t *testing.T) {
+	previousPing := dockerPing
+	dockerPing = func(context.Context) error {
+		t.Fatal("invalid feature selection must fail before contacting Docker")
+		return nil
+	}
+	t.Cleanup(func() { dockerPing = previousPing })
+	for _, mode := range []string{"rebuild", "no-rebuild", "slim"} {
+		t.Run(mode, func(t *testing.T) {
+			opts := config.DefaultOptions()
+			opts.Tool = "claude"
+			opts.Backend = backend.NameDocker
+			opts.Features = []string{"unknown"}
+			opts.ForceRebuild = mode == "rebuild"
+			opts.NoRebuild = mode == "no-rebuild"
+			opts.Slim = mode == "slim"
+			sources := model.DefaultOptionSources()
+			sources.Features = model.SourceCLI
+			input := &CommandInput{
+				Ctx: &AppContext{
+					Paths:           writeTestBuildPaths(t),
+					project:         model.Project{Dir: t.TempDir()},
+					projectResolved: true,
+				},
+				Action:  "run",
+				Options: opts,
+				Sources: sources,
+			}
+			var code int
+			_, stderr := captureOutput(t, func() { code = runExecutionCommand(input) })
+			if code != 1 || !strings.Contains(stderr, "unknown features: unknown") || !strings.Contains(stderr, "enclave features list") {
+				t.Fatalf("exit = %d, stderr = %q", code, stderr)
+			}
+		})
+	}
+}
+
 func TestExecutionRequiresDocker(t *testing.T) {
 	if !executionRequiresDocker("run", model.Options{}) {
 		t.Fatal("docker backend should require Docker")

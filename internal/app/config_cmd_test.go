@@ -326,9 +326,11 @@ func TestConfigJSONFeatures(t *testing.T) {
 		wantValue      []any
 		wantDirectives any
 		wantUnknown    bool
+		wantError      string
 	}{
 		{name: "unset", wantValue: []any{"github-cli", "node-dev"}},
-		{name: "additive with unknown", features: []string{"+shell-extras", "+ghost"}, wantValue: []any{"github-cli", "node-dev", "shell-extras"}, wantDirectives: []any{"+shell-extras", "+ghost"}, wantUnknown: true},
+		{name: "additive", features: []string{"+shell-extras"}, wantValue: []any{"github-cli", "node-dev", "shell-extras"}, wantDirectives: []any{"+shell-extras"}},
+		{name: "additive with unknown", features: []string{"+shell-extras", "+ghost"}, wantError: "features: unknown features: ghost; run 'enclave features list' to see available features"},
 		{name: "none", features: []string{}, wantValue: []any{}, wantDirectives: []any{}},
 		{name: "slim", slim: true, wantValue: []any{}},
 		{name: "playwright_mcp without claude", playwrightMCP: true, wantValue: []any{"github-cli", "node-dev"}},
@@ -342,6 +344,12 @@ func TestConfigJSONFeatures(t *testing.T) {
 
 			doc := runConfigJSON(t, configTestInput(t, paths, opts, nil))
 
+			if tc.wantError != "" {
+				if doc["valid"] != false || doc["error"] != tc.wantError {
+					t.Fatalf("valid/error = %#v/%#v, want false/%q", doc["valid"], doc["error"], tc.wantError)
+				}
+				return
+			}
 			if doc["valid"] != true {
 				t.Fatalf("valid = %#v, error = %#v", doc["valid"], doc["error"])
 			}

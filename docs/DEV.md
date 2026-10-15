@@ -371,6 +371,10 @@ unchanged.
 Build option note: `--features` is available on CLI. In devcontainer mode,
 unset features default to none, so pass `--features` explicitly when needed.
 `--features none` is the explicit "no features" selection.
+Build-option normalization validates feature names against the installed
+extensions before image checks or session startup; unknown additions fail and
+unknown removals warn. Staged contexts retain `extensions/features` even when
+empty, and build scripts must preserve an explicitly empty `FEATURES` value.
 
 Root guard note: `--allow-root` is CLI-only and has no config key, so no config
 file can grant it; `ENCLAVE_ALLOW_ROOT=1` is its only alternative.

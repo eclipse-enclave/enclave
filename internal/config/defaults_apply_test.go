@@ -30,7 +30,10 @@ func TestApplyDefaultsWithSources_MergeSlices(t *testing.T) {
 	opts = ApplyDefaultsWithSources(opts, global, model.SourceGlobal, &sources)
 	opts = ApplyDefaultsWithSources(opts, project, model.SourceProject, &sources)
 
-	wantFeatures := []string{"devtools", "github-cli"}
+	// Directives stay unresolved here: only the app layer knows the available
+	// features, so the merge keeps the inherited entries and appends the
+	// higher-precedence ones in order.
+	wantFeatures := []string{"github-cli", "+devtools"}
 	if !reflect.DeepEqual(opts.Features, wantFeatures) {
 		t.Fatalf("features mismatch: got %v want %v", opts.Features, wantFeatures)
 	}

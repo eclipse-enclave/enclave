@@ -135,6 +135,20 @@ func ResolveToolOverrideDefaults(global Defaults, project Defaults, tool string)
 func ResolveOptionsForTool(cliOpts model.Options, cliSources model.OptionSources, global Defaults, project Defaults, targetTool string) (model.Options, Defaults, bool) {
 	sources := model.MergeOptionSources(model.DefaultOptionSources(), cliSources)
 	opts := cliOpts
+
+	// An additive --features value amends the configured selection instead of
+	// replacing it. canOverride would otherwise lock the field to the CLI value
+	// and drop every configured selection, so hold the directives back, let the
+	// config layers merge, and re-apply them last. A bare CLI list (including
+	// "none") keeps replacing the inherited selection outright.
+	var cliFeatures []string
+	deferCLIFeatures := sources.Features == model.SourceCLI && AdditiveDirectivesOnly(opts.Features)
+	if deferCLIFeatures {
+		cliFeatures = copyStringSlice(opts.Features)
+		opts.Features = nil
+		sources.Features = model.SourceDefault
+	}
+
 	opts = ApplyDefaultsWithSources(opts, global, model.SourceGlobal, &sources)
 	opts = ApplyDefaultsWithSources(opts, project, model.SourceProject, &sources)
 	tool := opts.Tool
@@ -145,6 +159,10 @@ func ResolveOptionsForTool(cliOpts model.Options, cliSources model.OptionSources
 	toolDefaults, hasToolDefaults := ResolveToolOverrideDefaults(global, project, tool)
 	if hasToolDefaults {
 		opts = ApplyDefaultsWithSources(opts, toolDefaults, model.SourceToolOverride, &sources)
+	}
+	if deferCLIFeatures {
+		opts.Features = mergeFeatureSlice(opts.Features, cliFeatures)
+		sources.Features = model.SourceCLI
 	}
 	opts.Sources = sources
 	return opts, toolDefaults, hasToolDefaults
@@ -702,6 +720,8 @@ func mergeDefaults(base Defaults, override Defaults) Defaults {
 			switch def.Apply {
 			case ApplySliceMergeHost:
 				setDefaultsStringSlice(targetField, mergeHostConfigSlice(current, incomingSlice))
+			case ApplySliceMergeFeature:
+				setDefaultsStringSlice(targetField, mergeFeatureSlice(current, incomingSlice))
 			default:
 				setDefaultsStringSlice(targetField, incomingSlice)
 			}
@@ -740,73 +760,106 @@ func mergeToolOverrides(base map[string]Defaults, override map[string]Defaults) 
 	return merged
 }
 
-// hasAdditiveDirective reports whether any value carries a '+' or '-' prefix,
-// which switches mergeStringSlice from replace mode into additive mode.
-func hasAdditiveDirective(values []string) bool {
-	for _, v := range values {
-		if strings.HasPrefix(v, "+") || strings.HasPrefix(v, "-") {
+// isSelectionDirective reports whether a selection entry carries the '+'/'-'
+// prefix that amends an inherited selection instead of anchoring a new one.
+func isSelectionDirective(value string) bool {
+	trimmed := strings.TrimSpace(value)
+	return strings.HasPrefix(trimmed, "+") || strings.HasPrefix(trimmed, "-")
+}
+
+// featureDirectiveName returns the feature a selection entry refers to, with
+// any '+' or '-' prefix stripped. Selector keywords ("default", "all") come
+// back unchanged.
+func featureDirectiveName(value string) string {
+	name := strings.TrimSpace(value)
+	if isSelectionDirective(name) {
+		name = strings.TrimSpace(name[1:])
+	}
+	return name
+}
+
+// HasBareSelectionEntry reports whether a selection carries an entry that is a
+// literal name or a keyword selector rather than a '+'/'-' directive. Such an
+// entry anchors the selection: it states what the set starts from instead of
+// amending whatever was inherited.
+func HasBareSelectionEntry(values []string) bool {
+	for _, raw := range values {
+		if strings.TrimSpace(raw) != "" && !isSelectionDirective(raw) {
 			return true
 		}
 	}
 	return false
 }
 
-// mergeStringSlice merges two string slices with support for additive syntax.
-// If any value in override starts with '+' or '-', additive mode is used:
-//   - '+value' adds 'value' to the base set
-//   - '-value' removes 'value' from the base set
-//
-// If no values have prefixes, override replaces base entirely (default behavior).
-func mergeStringSlice(base, override []string) []string {
-	if !hasAdditiveDirective(override) {
-		// Replace mode (original behavior)
-		return override
+// AdditiveDirectivesOnly reports whether a non-empty selection consists solely
+// of '+'/'-' directives. Such a selection amends the inherited one; a bare
+// entry replaces it.
+func AdditiveDirectivesOnly(values []string) bool {
+	if HasBareSelectionEntry(values) {
+		return false
 	}
-
-	if base == nil {
-		// Preserve additive directives so downstream resolution can apply them
-		// against the implicit default set (e.g. features).
-		return override
-	}
-
-	// Additive mode: start with base, apply modifications
-	result := make(map[string]bool)
-	for _, v := range base {
-		result[v] = true
-	}
-
-	for _, v := range override {
-		if strings.HasPrefix(v, "+") {
-			result[strings.TrimPrefix(v, "+")] = true
-		} else if strings.HasPrefix(v, "-") {
-			delete(result, strings.TrimPrefix(v, "-"))
-		} else {
-			// No prefix in additive mode - treat as add
-			result[v] = true
+	for _, raw := range values {
+		if strings.TrimSpace(raw) != "" {
+			return true
 		}
 	}
-
-	// Convert back to slice
-	merged := make([]string, 0, len(result))
-	for v := range result {
-		merged = append(merged, v)
-	}
-	// Sort for deterministic output
-	sort.Strings(merged)
-	return merged
+	return false
 }
 
-// mergeFeatureSlice merges feature defaults with additive syntax.
-// When base is nil, additive directives are preserved so downstream resolution
-// can apply them against the implicit default-enabled feature set.
+// mergeFeatureSlice layers a feature selection on top of the inherited one.
+//
+// Rules:
+//   - a nil override leaves the inherited selection untouched
+//   - an override carrying any bare entry replaces the inherited selection
+//   - an additive-only override amends it, and a directive for a feature an
+//     inherited directive already mentions drops that inherited directive so
+//     the higher-precedence layer wins the conflict. Inherited bare entries
+//     stay: they anchor the list, and downstream expansion applies removals
+//     after additions, so the override still wins.
+//   - an additive override on top of an explicit empty selection ("none")
+//     resolves to the added names, since there is nothing to amend
+//   - when nothing is inherited the directives are preserved so downstream
+//     resolution can apply them against the implicit default-enabled set
 func mergeFeatureSlice(base, override []string) []string {
-	if !hasAdditiveDirective(override) {
-		return override
+	if override == nil {
+		return copyStringSlice(base)
+	}
+	if !AdditiveDirectivesOnly(override) {
+		return copyStringSlice(override)
 	}
 	if base == nil {
 		return copyStringSlice(override)
 	}
-	return mergeStringSlice(base, override)
+	if len(base) == 0 {
+		resolved := make([]string, 0, len(override))
+		for _, raw := range override {
+			if !strings.HasPrefix(strings.TrimSpace(raw), "+") {
+				continue
+			}
+			if name := featureDirectiveName(raw); name != "" {
+				resolved = append(resolved, name)
+			}
+		}
+		return resolved
+	}
+
+	overridden := make(map[string]struct{}, len(override))
+	for _, raw := range override {
+		if name := featureDirectiveName(raw); name != "" {
+			overridden[name] = struct{}{}
+		}
+	}
+
+	merged := make([]string, 0, len(base)+len(override))
+	for _, raw := range base {
+		if isSelectionDirective(raw) {
+			if _, ok := overridden[featureDirectiveName(raw)]; ok {
+				continue
+			}
+		}
+		merged = append(merged, raw)
+	}
+	return append(merged, override...)
 }
 
 // mergeHostConfigSlice merges raw host_config_paths directives across config
@@ -826,18 +879,7 @@ func mergeHostConfigSlice(base, override []string) []string {
 		return []string{}
 	}
 
-	additiveOnly := true
-	for _, raw := range override {
-		value := strings.TrimSpace(raw)
-		if value == "" {
-			continue
-		}
-		if !strings.HasPrefix(value, "+") && !strings.HasPrefix(value, "-") {
-			additiveOnly = false
-			break
-		}
-	}
-	if !additiveOnly {
+	if !AdditiveDirectivesOnly(override) {
 		return copyStringSlice(override)
 	}
 

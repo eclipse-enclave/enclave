@@ -78,7 +78,7 @@ func attachSessionTint(session backend.Session, fallback string) string {
 		return fallback
 	}
 	for _, warning := range warnings {
-		logx.Debugf("%s", warning)
+		logx.Debugf("%s", warning.Message)
 	}
 	opts, _, _ := config.ResolveOptionsForTool(model.Options{}, model.OptionSources{}, global, project, session.Tool)
 	return opts.SessionTint

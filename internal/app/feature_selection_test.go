@@ -136,3 +136,38 @@ func TestResolveConfiguredFeaturesAllPlusRemoval(t *testing.T) {
 		t.Fatalf("unexpected all+removal resolution: got %v want %v", got, want)
 	}
 }
+
+func TestResolveFeatureSelection(t *testing.T) {
+	paths := testPathsWithFeatures(t)
+
+	cases := []struct {
+		name        string
+		build       model.BuildOptions
+		wantEnabled []string
+		wantUnknown []string
+	}{
+		// resolveConfiguredFeatures maps an explicit empty selection to nil.
+		{name: "explicit empty", build: model.BuildOptions{Features: []string{}}, wantEnabled: nil},
+		{name: "slim", build: model.BuildOptions{Slim: true, Features: []string{"github-cli"}}, wantEnabled: []string{}},
+		{name: "devcontainer unset", build: model.BuildOptions{Devcontainer: true}, wantEnabled: []string{}},
+		{name: "devcontainer explicit", build: model.BuildOptions{Devcontainer: true, Features: []string{"shell-extras"}}, wantEnabled: []string{"shell-extras"}},
+		{name: "additive", build: model.BuildOptions{Features: []string{"+shell-extras", "-node-dev"}}, wantEnabled: []string{"github-cli", "shell-extras"}},
+		{name: "unknown literal", build: model.BuildOptions{Features: []string{"ghost", "github-cli"}}, wantEnabled: []string{"ghost", "github-cli"}, wantUnknown: []string{"ghost"}},
+		{name: "unknown directive", build: model.BuildOptions{Features: []string{"+ghost"}}, wantEnabled: []string{"ghost", "github-cli", "node-dev"}, wantUnknown: []string{"ghost"}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			enabled, unknown, err := resolveFeatureSelection(paths, tc.build)
+			if err != nil {
+				t.Fatalf("resolveFeatureSelection: %v", err)
+			}
+			if !reflect.DeepEqual(enabled, tc.wantEnabled) {
+				t.Fatalf("enabled = %#v, want %#v", enabled, tc.wantEnabled)
+			}
+			if !reflect.DeepEqual(unknown, tc.wantUnknown) {
+				t.Fatalf("unknown = %#v, want %#v", unknown, tc.wantUnknown)
+			}
+		})
+	}
+}

@@ -188,20 +188,15 @@ func coerceQEMURunOptions(opts model.Options, sources model.OptionSources, paths
 	return opts, warnings, nil
 }
 
-// qemuDroppedFeatures returns the feature names a tool-only qemu bundle skips —
-// the set a docker run would install for the same options (config selections
-// plus defaults). Best-effort: if features can't be enumerated it returns nil
-// and the caller logs a generic notice rather than failing the run.
+// qemuDroppedFeatures returns the feature names a tool-only qemu bundle skips:
+// the requested selection, or the default-enabled features when none is
+// requested. --slim and devcontainer mode are not considered. Best-effort: if
+// features can't be enumerated it returns nil and the caller logs a generic
+// notice rather than failing the run.
 func qemuDroppedFeatures(requested []string, paths model.Paths) []string {
-	available, err := config.ListFeatures(paths)
+	names, _, err := resolveFeatureSelection(paths, model.BuildOptions{Features: requested})
 	if err != nil {
 		return nil
-	}
-	var names []string
-	if requested != nil {
-		names = resolveConfiguredFeatures(requested, available)
-	} else {
-		names = defaultEnabledFeatureNames(available)
 	}
 	sort.Strings(names)
 	return names

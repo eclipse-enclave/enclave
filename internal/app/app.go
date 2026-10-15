@@ -84,7 +84,7 @@ func Run(args []string) int {
 		return 1
 	}
 	for _, warning := range warnings {
-		logx.Warnf(warning)
+		logx.Warnf(warning.Message)
 	}
 
 	var userCommandMount *model.UserCommandMount

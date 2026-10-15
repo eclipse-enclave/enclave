@@ -259,34 +259,14 @@ func resolveEnabledFeatures(paths model.Paths, build model.BuildOptions) []model
 		logx.Debugf("Failed to list features: %v", err)
 		return nil
 	}
-	if len(allFeatures) == 0 {
-		return nil
+	selected := selectFeatures(allFeatures, build)
+	requested := make(map[string]bool, len(selected))
+	for _, name := range selected {
+		requested[name] = true
 	}
-	if build.Slim {
-		return nil
-	}
-	if build.Devcontainer && build.Features == nil {
-		return nil
-	}
-	// If explicit features list is provided, filter to only those
-	if build.Features != nil {
-		selected := resolveConfiguredFeatures(build.Features, allFeatures)
-		requested := map[string]bool{}
-		for _, f := range selected {
-			requested[f] = true
-		}
-		var result []model.Extension
-		for _, feat := range allFeatures {
-			if requested[feat.Name] {
-				result = append(result, feat)
-			}
-		}
-		return result
-	}
-	// Otherwise, return all default-enabled features
 	var result []model.Extension
 	for _, feat := range allFeatures {
-		if feat.DefaultEnabled {
+		if requested[feat.Name] {
 			result = append(result, feat)
 		}
 	}

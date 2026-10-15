@@ -1107,7 +1107,7 @@ func TestResolveOptionsForTool_AppliesTargetToolOverrides(t *testing.T) {
 
 const skipWarningCountCheck = -1
 
-func applyProjectGuardrailsForTest(defaults Defaults) (Defaults, []string) {
+func applyProjectGuardrailsForTest(defaults Defaults) (Defaults, []Warning) {
 	warnings := applyProjectOverrideGuardrails("/tmp/project/.enclave/config.json", "/tmp/project", &defaults)
 	return defaults, warnings
 }
@@ -1117,7 +1117,7 @@ func projectConfigPathForTest(t *testing.T) string {
 	return filepath.Join(t.TempDir(), ".enclave", "config.json")
 }
 
-func assertWarnings(t *testing.T, warnings []string, wantCount int, wantSubstrings ...string) {
+func assertWarnings(t *testing.T, warnings []Warning, wantCount int, wantSubstrings ...string) {
 	t.Helper()
 	if wantCount != skipWarningCountCheck && len(warnings) != wantCount {
 		t.Fatalf("expected %d guardrail warnings, got %d: %v", wantCount, len(warnings), warnings)
@@ -1140,9 +1140,9 @@ func boolPtr(v bool) *bool {
 	return &v
 }
 
-func containsSubstring(items []string, needle string) bool {
+func containsSubstring(items []Warning, needle string) bool {
 	for _, item := range items {
-		if strings.Contains(item, needle) {
+		if strings.Contains(item.Message, needle) {
 			return true
 		}
 	}

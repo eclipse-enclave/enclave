@@ -11,8 +11,47 @@ import (
 	"sort"
 	"strings"
 
+	"enclave/internal/config"
 	"enclave/internal/model"
 )
+
+// resolveFeatureSelection returns the feature names build selects and the
+// subset of them that matches no available feature.
+func resolveFeatureSelection(paths model.Paths, build model.BuildOptions) (selected []string, unknown []string, err error) {
+	if featuresDisabled(build) {
+		return []string{}, nil, nil
+	}
+	allFeatures, err := config.ListFeatures(paths)
+	if err != nil {
+		return nil, nil, err
+	}
+	selected = selectFeatures(allFeatures, build)
+	available := make(map[string]struct{}, len(allFeatures))
+	for _, feature := range allFeatures {
+		available[feature.Name] = struct{}{}
+	}
+	for _, name := range selected {
+		if _, ok := available[name]; !ok {
+			unknown = append(unknown, name)
+		}
+	}
+	return selected, unknown, nil
+}
+
+func selectFeatures(allFeatures []model.Extension, build model.BuildOptions) []string {
+	switch {
+	case featuresDisabled(build):
+		return []string{}
+	case build.Features == nil:
+		return defaultEnabledFeatureNames(allFeatures)
+	default:
+		return resolveConfiguredFeatures(build.Features, allFeatures)
+	}
+}
+
+func featuresDisabled(build model.BuildOptions) bool {
+	return build.Slim || (build.Devcontainer && build.Features == nil)
+}
 
 func resolveConfiguredFeatures(requested []string, allFeatures []model.Extension) []string {
 	if requested == nil {

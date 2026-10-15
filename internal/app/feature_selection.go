@@ -58,6 +58,9 @@ func resolveConfiguredFeatures(requested []string, allFeatures []model.Extension
 		return nil
 	}
 	normalized := normalizeAndSortNames(requested)
+	if len(normalized) == 0 {
+		return []string{}
+	}
 	if len(normalized) == 1 {
 		switch strings.ToLower(strings.TrimSpace(normalized[0])) {
 		case model.SelectionDefault:

@@ -13,6 +13,7 @@ import (
 	"sort"
 	"testing"
 
+	"enclave/internal/config"
 	"enclave/internal/model"
 )
 
@@ -80,6 +81,54 @@ func TestResolveEnabledFeaturesSelectionAll(t *testing.T) {
 	want := []string{"github-cli", "node-dev", "shell-extras"}
 	if names := extensionNames(got); !reflect.DeepEqual(names, want) {
 		t.Fatalf("unexpected all selector feature result: got %v want %v", names, want)
+	}
+}
+
+func TestExplicitEmptyFeaturesSurviveValidation(t *testing.T) {
+	paths := testPathsWithFeatures(t)
+	base := model.Options{
+		RunOptions:   model.RunOptions{Tool: "claude"},
+		BuildOptions: model.BuildOptions{ImageName: "test"},
+	}
+
+	cli := base
+	cli.Features = []string{}
+	cliSources := model.DefaultOptionSources()
+	cliSources.Features = model.SourceCLI
+
+	fromConfig, _, _ := config.ResolveOptionsForTool(base, model.OptionSources{}, config.Defaults{Features: []string{}}, config.Defaults{}, "")
+
+	cases := []struct {
+		name    string
+		opts    model.Options
+		sources model.OptionSources
+	}{
+		{name: "cli --features none", opts: cli, sources: cliSources},
+		{name: "config features []", opts: fromConfig, sources: fromConfig.Sources},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, _, _, err := ValidateOptions(tc.opts, tc.sources, ValidationContext{Action: "run", Paths: paths})
+			if err != nil {
+				t.Fatalf("ValidateOptions: %v", err)
+			}
+			if got.Features == nil || len(got.Features) != 0 {
+				t.Fatalf("Features = %#v, want explicit empty", got.Features)
+			}
+			if enabled := resolveEnabledFeatures(paths, got.BuildOptions); len(enabled) != 0 {
+				t.Fatalf("resolveEnabledFeatures = %v, want none", extensionNames(enabled))
+			}
+			selection, err := resolveRuntimeImageSelection(paths, got.BuildOptions, got.Tool)
+			if err != nil {
+				t.Fatalf("resolveRuntimeImageSelection: %v", err)
+			}
+			if selection.Features == nil || len(selection.Features) != 0 {
+				t.Fatalf("selection.Features = %#v, want explicit empty", selection.Features)
+			}
+			if arg := resolveFeaturesArg(got.BuildOptions); arg != "" {
+				t.Fatalf("resolveFeaturesArg = %q, want empty", arg)
+			}
+		})
 	}
 }
 

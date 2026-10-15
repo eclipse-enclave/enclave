@@ -146,8 +146,7 @@ func TestResolveFeatureSelection(t *testing.T) {
 		wantEnabled []string
 		wantUnknown []string
 	}{
-		// resolveConfiguredFeatures maps an explicit empty selection to nil.
-		{name: "explicit empty", build: model.BuildOptions{Features: []string{}}, wantEnabled: nil},
+		{name: "explicit empty", build: model.BuildOptions{Features: []string{}}, wantEnabled: []string{}},
 		{name: "slim", build: model.BuildOptions{Slim: true, Features: []string{"github-cli"}}, wantEnabled: []string{}},
 		{name: "devcontainer unset", build: model.BuildOptions{Devcontainer: true}, wantEnabled: []string{}},
 		{name: "devcontainer explicit", build: model.BuildOptions{Devcontainer: true, Features: []string{"shell-extras"}}, wantEnabled: []string{"shell-extras"}},

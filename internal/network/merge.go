@@ -89,12 +89,12 @@ func Merge(cfg MergeConfig) EffectivePolicy {
 // precedence (project > global > default) onto ep.
 func (ep *EffectivePolicy) resolveModeAndFlags(cfg MergeConfig) {
 	// Resolve mode: project > global > default
-	if cfg.GlobalPolicy.Mode != "" {
-		ep.Mode = cfg.GlobalPolicy.Mode
+	if mode := normalizeMode(cfg.GlobalPolicy.Mode); mode != "" {
+		ep.Mode = mode
 		ep.ModeSource = "global"
 	}
-	if cfg.ProjectPolicy.Mode != "" {
-		ep.Mode = cfg.ProjectPolicy.Mode
+	if mode := normalizeMode(cfg.ProjectPolicy.Mode); mode != "" {
+		ep.Mode = mode
 		ep.ModeSource = "project"
 	}
 
@@ -109,6 +109,10 @@ func (ep *EffectivePolicy) resolveModeAndFlags(cfg MergeConfig) {
 	// Resolve advanced settings
 	ep.Resolvers = append(ep.Resolvers, cfg.GlobalPolicy.Advanced.Resolvers...)
 	ep.Resolvers = append(ep.Resolvers, cfg.ProjectPolicy.Advanced.Resolvers...)
+}
+
+func normalizeMode(mode string) string {
+	return strings.ToLower(strings.TrimSpace(mode))
 }
 
 // collectBuiltInDomains adds the built-in tool allowlist when tool-allowlist

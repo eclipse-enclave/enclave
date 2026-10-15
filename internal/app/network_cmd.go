@@ -339,7 +339,7 @@ func runNetworkApply(input *CommandInput) int {
 			})
 			if err != nil {
 				applyErr = err
-			} else if strings.EqualFold(strings.TrimSpace(resolved.Effective.Mode), model.NetworkModeUnrestricted) {
+			} else if resolved.Effective.Mode == model.NetworkModeUnrestricted {
 				applyErr = fmt.Errorf("live apply does not support unrestricted mode; restart the session to switch mode safely")
 			} else {
 				applyErr = bundle.WriteConfigBundle(bundle.BundleWriteConfig{

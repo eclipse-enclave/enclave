@@ -9,7 +9,6 @@ package app
 
 import (
 	"io"
-	"strings"
 
 	"enclave/internal/model"
 	"enclave/internal/network"
@@ -48,7 +47,7 @@ func writeNetworkPolicyJSON(w io.Writer, input *CommandInput) int {
 	ep := policyCtx.Resolved.Effective
 	envelope := networkPolicyEnvelope{Tool: &policyCtx.Tool}
 	mode := model.NetworkModeUnrestricted
-	if !strings.EqualFold(strings.TrimSpace(ep.Mode), model.NetworkModeUnrestricted) {
+	if ep.Mode != model.NetworkModeUnrestricted {
 		mode = model.NetworkModeRestricted
 		envelope.Domains, envelope.Denied, err = network.EffectiveRenderDomainsForTool(ep, policyCtx.Tool)
 		if err != nil {

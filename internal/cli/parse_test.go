@@ -942,6 +942,16 @@ func TestParseSubcommandOptionFlags(t *testing.T) {
 			},
 		},
 		{
+			name:   "features list --json --tool",
+			args:   []string{"features", "list", "--json", "--tool", "codex"},
+			action: "features",
+			check: func(t *testing.T, res Result) {
+				if res.Options.Tool != "codex" || res.ExtRequest == nil || !res.ExtRequest.JSON {
+					t.Fatalf("tool = %q, request = %+v", res.Options.Tool, res.ExtRequest)
+				}
+			},
+		},
+		{
 			name:   "devcontainer generate build flags",
 			args:   []string{"devcontainer", "generate", "--slim", "--base-image", "ubuntu:24.04", "--image-name", "custom:tag", "--features", "node-dev"},
 			action: "devcontainer-generate",

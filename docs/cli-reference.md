@@ -96,7 +96,7 @@ Ctrl-C or SIGTERM while a session is still starting aborts the start with exit c
 
 | Command | Flags |
 |---------|-------|
-| `list` | `--json` (machine-readable output) |
+| `list` | `--json` (machine-readable output); `features` (bare or `list`) also takes `--slim`, `--features`, and `--tool`, so `enabled` matches a run with those options, including `tool_overrides.<tool>.features` |
 | `add <source>` | `--path <dir>`, `--ref <ref>`, `--name <name>` (repeatable), `--all`, `--yes`/`-y`, `--force`, `--dry-run`, `--json` (requires `--yes`) |
 | `update [<name\|source>...]` | `--ref <ref>` (single extension only), `--yes`/`-y`, `--force`, `--dry-run`, `--json` (requires `--yes`) |
 | `remove <name>...` | `--yes`/`-y`, `--force`, `--json` (requires `--yes`) |

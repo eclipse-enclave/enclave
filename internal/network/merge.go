@@ -157,8 +157,8 @@ func (ep *EffectivePolicy) collectSpecDomains(cfg MergeConfig, addDomain func(st
 	if len(cfg.SpecAllowedDomains) == 0 {
 		return
 	}
-	for _, d := range cfg.SpecAllowedDomains {
-		addDomain(normalizeSpecDomain(d))
+	for _, d := range NormalizeSpecDomains(cfg.SpecAllowedDomains) {
+		addDomain(d)
 	}
 	ep.Sources = append(ep.Sources, PolicySource{Name: "spec allowedDomains"})
 }
@@ -170,14 +170,7 @@ func (ep *EffectivePolicy) collectSpecDeniedDomains(cfg MergeConfig) {
 	if len(cfg.SpecDeniedDomains) == 0 {
 		return
 	}
-	seen := make(map[string]bool)
-	for _, d := range cfg.SpecDeniedDomains {
-		d = normalizeSpecDomain(strings.ToLower(strings.TrimSpace(d)))
-		if d != "" && !seen[d] {
-			seen[d] = true
-			ep.DeniedDomains = append(ep.DeniedDomains, d)
-		}
-	}
+	ep.DeniedDomains = append(ep.DeniedDomains, NormalizeSpecDomains(cfg.SpecDeniedDomains)...)
 	if len(ep.DeniedDomains) > 0 {
 		ep.Sources = append(ep.Sources, PolicySource{Name: "spec deniedDomains"})
 	}
@@ -197,6 +190,22 @@ func normalizeSpecDomain(d string) string {
 		d = host
 	}
 	return d
+}
+
+// NormalizeSpecDomains returns spec.yaml network domains in the lowercased,
+// host-only form the gateway enforces, deduplicated and sorted.
+func NormalizeSpecDomains(domains []string) []string {
+	seen := make(map[string]bool, len(domains))
+	var out []string
+	for _, d := range domains {
+		d = normalizeSpecDomain(strings.ToLower(d))
+		if d != "" && !seen[d] {
+			seen[d] = true
+			out = append(out, d)
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 func addToolDomains(toolDomains map[string][]string, tool string, domains []string) {

@@ -15,6 +15,7 @@ import (
 
 	"enclave/internal/extinstall"
 	"enclave/internal/model"
+	"enclave/internal/network"
 )
 
 // extensionSchemaVersion is the envelope version shared by `list --json` and
@@ -24,9 +25,19 @@ const extensionSchemaVersion = "1"
 
 // extensionListEnvelope is the JSON shape of `list --json`.
 type extensionListEnvelope struct {
-	SchemaVersion string                 `json:"schemaVersion"`
-	Kind          string                 `json:"kind"`
-	Extensions    []extensionListJSONExt `json:"extensions"`
+	SchemaVersion string `json:"schemaVersion"`
+	Kind          string `json:"kind"`
+	// Selection is set for features only. Additive to the v1 contract.
+	Selection  *extensionListSelection `json:"selection,omitempty"`
+	Extensions []extensionListJSONExt  `json:"extensions"`
+}
+
+// extensionListSelection describes the feature selection that produced each
+// entry's enabled flag. Directives is null when no layer configures features.
+type extensionListSelection struct {
+	Directives []string `json:"directives"`
+	Source     string   `json:"source"`
+	Tool       *string  `json:"tool"`
 }
 
 // extensionListJSONExt is the JSON shape of one extension in `list --json`.
@@ -48,6 +59,23 @@ type extensionListJSONExt struct {
 	// directory could not be read (e.g. a corrupt sidecar). When it is set,
 	// Origin is nil and Managed is false. Additive to the v1 contract.
 	OriginError string `json:"originError,omitempty"`
+	// The remaining fields are set for features only. Additive to the v1
+	// contract.
+	DefaultEnabled *bool               `json:"defaultEnabled,omitempty"`
+	NeedsRoot      *bool               `json:"needsRoot,omitempty"`
+	Ports          []extensionListPort `json:"ports,omitempty"`
+	AllowedDomains []string            `json:"allowedDomains,omitempty"`
+	DeniedDomains  []string            `json:"deniedDomains,omitempty"`
+	ReleaseHosts   []string            `json:"releaseHosts,omitempty"`
+}
+
+// extensionListPort mirrors model.PortConfig with camelCase keys.
+type extensionListPort struct {
+	Container      int    `json:"container"`
+	Publish        bool   `json:"publish"`
+	HostAllocation string `json:"hostAllocation"`
+	Label          string `json:"label,omitempty"`
+	OpenURL        string `json:"openUrl,omitempty"`
 }
 
 // extensionListOrigin mirrors extinstall.Origin plus locallyModified, which is
@@ -97,7 +125,35 @@ func extensionListJSONEntries(exts []model.Extension, inventory map[string]extin
 	return entries
 }
 
-func renderExtensionListJSON(w io.Writer, kind model.ExtensionKind, entries []extensionListJSONExt) error {
+// featureListJSONEntries is extensionListJSONEntries plus the feature-only
+// fields.
+func featureListJSONEntries(features []model.Extension, inventory map[string]extinstall.Managed, enabled func(name string) bool) []extensionListJSONExt {
+	entries := extensionListJSONEntries(features, inventory, enabled)
+	for i, feature := range features {
+		entry := &entries[i]
+		entry.DefaultEnabled = &feature.DefaultEnabled
+		entry.NeedsRoot = &feature.NeedsRoot
+		for _, port := range feature.Ports {
+			allocation := port.HostAllocation
+			if allocation == "" {
+				allocation = model.HostAllocationFixed
+			}
+			entry.Ports = append(entry.Ports, extensionListPort{
+				Container:      port.Container,
+				Publish:        port.Publish,
+				HostAllocation: allocation,
+				Label:          port.Label,
+				OpenURL:        port.OpenURL,
+			})
+		}
+		entry.AllowedDomains = network.NormalizeSpecDomains(feature.AllowedDomains)
+		entry.DeniedDomains = network.NormalizeSpecDomains(feature.DeniedDomains)
+		entry.ReleaseHosts = model.ReleaseHosts(feature.Secrets)
+	}
+	return entries
+}
+
+func renderExtensionListJSON(w io.Writer, kind model.ExtensionKind, selection *extensionListSelection, entries []extensionListJSONExt) error {
 	if entries == nil {
 		// "extensions" is always a JSON array, never null.
 		entries = []extensionListJSONExt{}
@@ -105,6 +161,7 @@ func renderExtensionListJSON(w io.Writer, kind model.ExtensionKind, entries []ex
 	return encodeIndentedJSON(w, extensionListEnvelope{
 		SchemaVersion: extensionSchemaVersion,
 		Kind:          string(kind),
+		Selection:     selection,
 		Extensions:    entries,
 	})
 }

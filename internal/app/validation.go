@@ -51,12 +51,8 @@ func ValidateOptions(opts model.Options, sources model.OptionSources, ctx Valida
 	switch sources.Features {
 	case model.SourceCLI:
 		featureSource = "--features"
-	case model.SourceGlobal:
-		featureSource = "features in global config"
-	case model.SourceProject:
-		featureSource = "features in project config"
-	case model.SourceToolOverride:
-		featureSource = "features in tool override"
+	case model.SourceGlobal, model.SourceProject, model.SourceToolOverride:
+		featureSource = "features in config (including inherited entries)"
 	}
 	for _, warning := range featureWarnings {
 		warnings = append(warnings, featureSource+": "+warning)

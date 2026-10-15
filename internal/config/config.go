@@ -798,15 +798,22 @@ func mergeStringSlice(base, override []string) []string {
 
 // mergeFeatureSlice merges feature defaults with additive syntax.
 // When base is nil, additive directives are preserved so downstream resolution
-// can apply them against the implicit default-enabled feature set.
-func mergeFeatureSlice(base, override []string) []string {
+// can apply them against the implicit default-enabled feature set. Removals are
+// also retained separately for validation after merging consumes them.
+func mergeFeatureSlice(base, removals, override []string) ([]string, []string) {
 	if !hasAdditiveDirective(override) {
-		return override
+		return override, nil
+	}
+	removals = copyStringSlice(removals)
+	for _, raw := range override {
+		if value := strings.TrimSpace(raw); strings.HasPrefix(value, "-") {
+			removals = append(removals, value)
+		}
 	}
 	if base == nil {
-		return copyStringSlice(override)
+		return copyStringSlice(override), removals
 	}
-	return mergeStringSlice(base, override)
+	return mergeStringSlice(base, override), removals
 }
 
 // mergeHostConfigSlice merges raw host_config_paths directives across config

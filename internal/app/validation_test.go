@@ -14,6 +14,7 @@ import (
 	"strings"
 	"testing"
 
+	"enclave/internal/config"
 	"enclave/internal/model"
 )
 
@@ -75,11 +76,11 @@ func TestValidateOptionsUnknownFeatureSource(t *testing.T) {
 		want    string
 	}{
 		{model.SourceCLI, "docker", "--features"},
-		{model.SourceGlobal, "docker", "features in global config"},
-		{model.SourceProject, "docker", "features in project config"},
-		{model.SourceToolOverride, "docker", "features in tool override"},
+		{model.SourceGlobal, "docker", "features in config (including inherited entries)"},
+		{model.SourceProject, "docker", "features in config (including inherited entries)"},
+		{model.SourceToolOverride, "docker", "features in config (including inherited entries)"},
 		{model.SourceCLI, "qemu", "--features"},
-		{model.SourceGlobal, "qemu", "features in global config"},
+		{model.SourceGlobal, "qemu", "features in config (including inherited entries)"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.backend+"/"+tc.want, func(t *testing.T) {
@@ -92,6 +93,112 @@ func TestValidateOptionsUnknownFeatureSource(t *testing.T) {
 			_, _, _, err := ValidateOptions(opts, sources, ValidationContext{Action: "run"})
 			if err == nil || !strings.HasPrefix(err.Error(), tc.want+": unknown features: unknown;") {
 				t.Fatalf("expected source %q in unknown-feature error, got %v", tc.want, err)
+			}
+		})
+	}
+}
+
+func TestValidateOptionsLayeredFeatureRemovals(t *testing.T) {
+	paths := testPathsWithFeatureDefaults(t)
+	cases := []struct {
+		name        string
+		global      config.Defaults
+		project     config.Defaults
+		cliFeatures []string
+		want        []string
+		wantWarning bool
+	}{
+		{
+			name:        "unknown project removal against explicit global selection",
+			global:      config.Defaults{Features: []string{"node-dev"}},
+			project:     config.Defaults{Features: []string{"-typo"}},
+			want:        []string{"node-dev"},
+			wantWarning: true,
+		},
+		{
+			name:        "unknown removal against explicit empty selection",
+			global:      config.Defaults{Features: []string{}},
+			project:     config.Defaults{Features: []string{"-typo"}},
+			want:        []string{},
+			wantWarning: true,
+		},
+		{
+			name:        "inherited unknown removal with additive project selection",
+			global:      config.Defaults{Features: []string{"-typo"}},
+			project:     config.Defaults{Features: []string{"+shell-extras"}},
+			want:        []string{"github-cli", "node-dev", "shell-extras"},
+			wantWarning: true,
+		},
+		{
+			name:    "replacement clears inherited removal",
+			global:  config.Defaults{Features: []string{"-typo"}},
+			project: config.Defaults{Features: []string{"node-dev"}},
+			want:    []string{"node-dev"},
+		},
+		{
+			name:        "CLI overrides config removals",
+			global:      config.Defaults{Features: []string{"-typo"}},
+			cliFeatures: []string{"node-dev"},
+			want:        []string{"node-dev"},
+		},
+		{
+			name:        "tool override removal against explicit global selection",
+			global:      config.Defaults{Features: []string{"node-dev"}, ToolOverrides: map[string]config.Defaults{"claude": {Features: []string{"-typo"}}}},
+			want:        []string{"node-dev"},
+			wantWarning: true,
+		},
+		{
+			name:   "tool replacement clears inherited removal",
+			global: config.Defaults{Features: []string{"-typo"}, ToolOverrides: map[string]config.Defaults{"claude": {Features: []string{}}}},
+			want:   []string{},
+		},
+		{
+			name:    "known but unselected removal does not warn",
+			global:  config.Defaults{Features: []string{"node-dev"}},
+			project: config.Defaults{Features: []string{"-github-cli"}},
+			want:    []string{"node-dev"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cliOpts := config.DefaultOptions()
+			cliOpts.Backend = "docker"
+			cliSources := model.DefaultOptionSources()
+			if tc.cliFeatures != nil {
+				cliOpts.Features = tc.cliFeatures
+				cliSources.Features = model.SourceCLI
+			}
+			opts, _, _ := config.ResolveOptionsForTool(cliOpts, cliSources, tc.global, tc.project, "claude")
+			got, _, warnings, err := ValidateOptions(opts, opts.Sources, ValidationContext{Action: "run", Paths: paths})
+			if err != nil {
+				t.Fatalf("ValidateOptions: %v", err)
+			}
+			if !reflect.DeepEqual(got.Features, tc.want) {
+				t.Errorf("features = %v, want %v", got.Features, tc.want)
+			}
+			if tc.wantWarning {
+				if len(warnings) != 1 || !strings.Contains(warnings[0], "ignoring removal of unknown features: typo;") || !strings.Contains(warnings[0], "enclave features list") {
+					t.Errorf("expected actionable warning for config removal, got %v", warnings)
+				}
+			} else if len(warnings) != 0 {
+				t.Errorf("unexpected warnings: %v", warnings)
+			}
+		})
+	}
+}
+
+func TestValidateOptionsInheritedUnknownFeatureSource(t *testing.T) {
+	paths := testPathsWithFeatureDefaults(t)
+	for _, inherited := range []string{"typo", "+typo"} {
+		t.Run(inherited, func(t *testing.T) {
+			cliOpts := config.DefaultOptions()
+			cliOpts.Backend = "docker"
+			global := config.Defaults{Features: []string{inherited}}
+			project := config.Defaults{Features: []string{"+shell-extras"}}
+			opts, _, _ := config.ResolveOptionsForTool(cliOpts, model.DefaultOptionSources(), global, project, "claude")
+			_, _, _, err := ValidateOptions(opts, opts.Sources, ValidationContext{Action: "run", Paths: paths})
+			if err == nil || !strings.HasPrefix(err.Error(), "features in config (including inherited entries): unknown features: typo;") {
+				t.Fatalf("expected inherited-feature error without blaming the project config, got %v", err)
 			}
 		})
 	}

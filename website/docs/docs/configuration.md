@@ -106,6 +106,7 @@ See [Bridging host ports](https://github.com/eclipse-enclave/enclave/blob/main/d
 | --- | --- | --- |
 | `add_dirs` | `--add-dir <path>` | Mount another host directory, writable, at the same path inside the container. |
 | `add_readonly_dirs` | `--add-readonly-dir <path>` | The same, read-only. Good for reference material you do not want touched. |
+| `sensitive_dir_exceptions` | `--add-sensitive-dir <path>`, `--add-readonly-sensitive-dir <path>` (this run only, and mount it) | Allow mounting a sensitive directory, such as a dotfiles repository or `~/.m2`, and everything below it. Global config only; warns on every start. See [Sensitive mounts](https://github.com/eclipse-enclave/enclave/blob/main/docs/cli-reference.md#sensitive-mounts). |
 | `project_mount` | `--project-mount readonly` | Mount the project read-only: the agent can read and analyze, only you can write. |
 
 ### Network
@@ -203,6 +204,7 @@ global config or pass them on the command line instead.
 | `pass_env` | A repository cannot ask for your host environment variables. |
 | `host_config`, `tool_overrides.<tool>.host_config_paths` | A repository cannot widen host-config passthrough. |
 | `add_dirs`, `add_readonly_dirs` outside the project | Project scope can only mount subdirectories of the project itself. |
+| `sensitive_dir_exceptions` | A repository cannot exempt host paths from the sensitive-mount check. |
 | `base_image`, `bridge_ports` | Base image and host-port bridging stay host-side decisions. |
 | `project_mount: "writable"` | Project scope can tighten a stricter global default, never loosen it. |
 | `worktree_metadata` values that relax the inherited mode | Same rule for the linked-worktree git metadata mounts: tighten only. |

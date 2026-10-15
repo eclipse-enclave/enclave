@@ -104,7 +104,7 @@ The restricted network request flow has a separate
 ### Orchestration (`internal/app/`)
 - [`internal/app/app.go`](../internal/app/app.go) wires parsing, defaults merging, and command dispatch.
 - [`internal/app/root_guard.go`](../internal/app/root_guard.go) refuses to run as root before any state is written, unless `--allow-root` or `ENCLAVE_ALLOW_ROOT` opts in.
-- [`internal/app/mount_guard.go`](../internal/app/mount_guard.go) refuses to start a session whose project or additional directories expose sensitive host data, unless `--allow-sensitive-mounts` or `ENCLAVE_ALLOW_SENSITIVE_MOUNTS` opts in.
+- [`internal/app/mount_guard.go`](../internal/app/mount_guard.go) refuses to start a session whose project or additional directories expose sensitive host data, unless a sensitive-dir exception (`--add-sensitive-dir`, `--add-readonly-sensitive-dir`, or global `sensitive_dir_exceptions`) covers them or `--allow-sensitive-mounts` or `ENCLAVE_ALLOW_SENSITIVE_MOUNTS` opts in to all of them.
 - [`internal/app/commands.go`](../internal/app/commands.go) routes commands to handlers (run/continue/resume/exec/shell/cleanup/tools/etc).
 - [`internal/app/command_run.go`](../internal/app/command_run.go) drives the run/continue/resume/exec/shell flow and runtime creation.
 - [`internal/app/build.go`](../internal/app/build.go) manages Docker image build/rebuild detection plus prebuild agent update planning and post-build stamp commits.
@@ -129,7 +129,7 @@ The restricted network request flow has a separate
 - [`internal/runtime/auth_manager.go`](../internal/runtime/auth_manager.go), [`internal/runtime/volume_manager.go`](../internal/runtime/volume_manager.go), [`internal/runtime/network_manager.go`](../internal/runtime/network_manager.go), [`internal/runtime/command_builder.go`](../internal/runtime/command_builder.go) encapsulate focused runtime concerns.
 - [`internal/runtime/secret_mapping.go`](../internal/runtime/secret_mapping.go) defines `SecretMapping` and the gateway wire entries that carry placeholder→secret release rules from auth preparation to the gateway.
 - [`internal/mounts/mounts.go`](../internal/mounts/mounts.go) validates mount paths, worktree support, and port mapping.
-- [`internal/mounts/sensitive.go`](../internal/mounts/sensitive.go) decides which host directories are sensitive: home and its parents, hidden home entries, per-user application data, enclave's own roots, and the SSH agent socket.
+- [`internal/mounts/sensitive.go`](../internal/mounts/sensitive.go) decides which host directories are sensitive: home and its parents, hidden home entries, per-user application data, enclave's own roots, and the SSH agent socket. It also assesses a mount against sensitive-dir exceptions; home, enclave's roots, and the agent socket are hard-protected, so no exception covers them.
 - [`internal/auth/auth.go`](../internal/auth/auth.go) resolves layered secrets, copies auth files, and handles Claude-specific config.
 - [`internal/auth/secret_injection.go`](../internal/auth/secret_injection.go) provides `PlaceholderResolver`, which generates cryptographically random `ENCLAVE_SECRET_*` placeholders for declared env secrets that use gateway-side HTTP release.
 - [`internal/gateway/gateway.go`](../internal/gateway/gateway.go) manages the gateway sidecar container and network.
@@ -368,6 +368,9 @@ as described in the [CLI reference](cli-reference.md#image--build).
 `--allow-root` is likewise never read from config; its only alternative is the
 `ENCLAVE_ALLOW_ROOT` environment variable. The same holds for
 `--allow-sensitive-mounts` and `ENCLAVE_ALLOW_SENSITIVE_MOUNTS`.
+`--add-sensitive-dir` and `--add-readonly-sensitive-dir` are CLI-only as well;
+global config can exempt specific paths only through
+`sensitive_dir_exceptions`, which project config cannot set.
 
 Runtime image hashes include the effective build UID/GID. Explicit
 `--build-uid` / `--build-gid` values are used when provided; otherwise the host

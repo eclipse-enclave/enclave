@@ -310,6 +310,20 @@ func optionCLIFlags() map[string][]CLIFlag {
 				return nil
 			}),
 		},
+		"add_sensitive_dirs": {
+			valueFlag("--add-sensitive-dir", "Mount additional directory, even if it is sensitive (warns)", "--add-sensitive-dir requires a directory path", func(opts *model.Options, sources *model.OptionSources, value string) error {
+				opts.AddSensitiveDirs = append(opts.AddSensitiveDirs, value)
+				sources.AddSensitiveDirs = model.SourceCLI
+				return nil
+			}),
+		},
+		"add_readonly_sensitive_dirs": {
+			valueFlag("--add-readonly-sensitive-dir", "Mount additional directory read-only, even if it is sensitive (warns)", "--add-readonly-sensitive-dir requires a directory path", func(opts *model.Options, sources *model.OptionSources, value string) error {
+				opts.AddReadonlySensitiveDirs = append(opts.AddReadonlySensitiveDirs, value)
+				sources.AddReadonlySensitiveDirs = model.SourceCLI
+				return nil
+			}),
+		},
 		"allow_sensitive_mounts": {
 			boolFlag("--allow-sensitive-mounts", "Allow mounting the home directory, dotfiles, or per-user app data (unsafe)", func(opts *model.Options, sources *model.OptionSources, value bool) {
 				opts.AllowSensitiveMounts = value

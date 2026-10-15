@@ -35,8 +35,8 @@ explicit host opt-in. Guarded at project scope: `tool`, `yolo`,
 `allow_all_network=true`, `allow_domains`, `pass_env`, `host_config`,
 `tool_overrides.<tool>.host_config_paths`, `base_image`, `bridge_ports`,
 `add_dirs`/`add_readonly_dirs` entries outside the project subtree,
-`project_mount="writable"`, and any `worktree_metadata` value that relaxes the
-inherited mode.
+`sensitive_dir_exceptions`, `project_mount="writable"`, and any
+`worktree_metadata` value that relaxes the inherited mode.
 
 `auto_update` and `update_channel` are global-only rather than project or
 per-tool options because they replace the host executable. Project and
@@ -87,6 +87,7 @@ supported under `tool_overrides.<tool>`.
 | `ports` | Publish container ports to the host (container → host) |
 | `add_dirs` | Additional directories to mount |
 | `add_readonly_dirs` | Additional directories to mount read-only |
+| `sensitive_dir_exceptions` | Paths whose subtrees may be mounted although they are sensitive; global config only, mounts nothing. See [Sensitive-dir exceptions](cli-reference.md#sensitive-dir-exceptions) |
 | `project_mount` | `writable` (default) or `readonly` for the project/worktree mount |
 | `worktree_metadata` | Linked-worktree git metadata mounts: `follow` (default), `readonly`, or `none` |
 | `playwright_mcp` | Enable Playwright MCP server (Claude only) |
@@ -354,8 +355,12 @@ for event/offline runs.
 `--allow-root` is CLI-only as well; `ENCLAVE_ALLOW_ROOT=1` is its only
 alternative, so no config file can let enclave run as root.
 `--allow-sensitive-mounts` is CLI-only too; `ENCLAVE_ALLOW_SENSITIVE_MOUNTS=1`
-is its only alternative, so no config file can let a session mount sensitive
-host data. `add_dirs` and `add_readonly_dirs` entries from config are checked
+is its only alternative, so no config file can mount all sensitive host paths.
+Global config can exempt specific paths with `sensitive_dir_exceptions`, which
+warns on every start and never covers home, enclave's own roots, or the SSH
+agent socket; project config cannot set it. `--add-sensitive-dir` and
+`--add-readonly-sensitive-dir` exempt their paths for one run and have no
+config key. `add_dirs` and `add_readonly_dirs` entries from config are checked
 like `--add-dir`.
 
 The experimental `qemu` backend only runs unrestricted, slim/no-feature bundles, so selecting it implies `allow_all_network=true` and `slim=true` automatically (with a per-run notice). Requesting features or an allowlist (`--allow-domain`) is rejected because the backend cannot honor them.

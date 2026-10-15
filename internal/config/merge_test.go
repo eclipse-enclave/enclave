@@ -71,6 +71,9 @@ func TestMergeDefaultsCoversAllFields(t *testing.T) {
 	typ := v.Type()
 
 	for i := 0; i < v.NumField(); i++ {
+		if !typ.Field(i).IsExported() {
+			continue
+		}
 		field := v.Field(i)
 		fieldName := typ.Field(i).Name
 
@@ -82,6 +85,9 @@ func TestMergeDefaultsCoversAllFields(t *testing.T) {
 	// Also verify we haven't forgotten any fields in our test override
 	overrideV := reflect.ValueOf(override)
 	for i := 0; i < overrideV.NumField(); i++ {
+		if !typ.Field(i).IsExported() {
+			continue
+		}
 		field := overrideV.Field(i)
 		fieldName := typ.Field(i).Name
 

@@ -61,6 +61,10 @@ type Defaults struct {
 	AllowDomains     []string            `json:"allow_domains"`
 	BridgePorts      []string            `json:"bridge_ports"`
 	PlaywrightMCP    *bool               `json:"playwright_mcp"`
+
+	// Preserve feature scope boundaries when composing tool overrides. Features
+	// remains the last scope's value for config display.
+	featureLayers [][]string
 }
 
 func LoadDefaults(projectDir string) (global Defaults, project Defaults, warnings []string, err error) {
@@ -700,6 +704,9 @@ func mergeDefaults(base Defaults, override Defaults) Defaults {
 			incomingSlice := copyStringSlice(incomingField.Interface().([]string))
 			current := targetField.Interface().([]string)
 			switch def.Apply {
+			case ApplySliceMergeFeature:
+				merged.featureLayers = append(append([][]string{}, featureDefaultLayers(base)...), featureDefaultLayers(override)...)
+				setDefaultsStringSlice(targetField, incomingSlice)
 			case ApplySliceMergeHost:
 				setDefaultsStringSlice(targetField, mergeHostConfigSlice(current, incomingSlice))
 			default:
@@ -740,10 +747,10 @@ func mergeToolOverrides(base map[string]Defaults, override map[string]Defaults) 
 	return merged
 }
 
-// hasAdditiveDirective reports whether any value carries a '+' or '-' prefix,
-// which switches mergeStringSlice from replace mode into additive mode.
+// hasAdditiveDirective reports whether any value carries a '+' or '-' prefix.
 func hasAdditiveDirective(values []string) bool {
 	for _, v := range values {
+		v = strings.TrimSpace(v)
 		if strings.HasPrefix(v, "+") || strings.HasPrefix(v, "-") {
 			return true
 		}
@@ -751,58 +758,31 @@ func hasAdditiveDirective(values []string) bool {
 	return false
 }
 
-// mergeStringSlice merges two string slices with support for additive syntax.
-// If any value in override starts with '+' or '-', additive mode is used:
-//   - '+value' adds 'value' to the base set
-//   - '-value' removes 'value' from the base set
-//
-// If no values have prefixes, override replaces base entirely (default behavior).
-func mergeStringSlice(base, override []string) []string {
-	if !hasAdditiveDirective(override) {
-		// Replace mode (original behavior)
-		return override
+func featureDefaultLayers(defaults Defaults) [][]string {
+	if defaults.featureLayers != nil {
+		return defaults.featureLayers
 	}
+	if defaults.Features == nil {
+		return nil
+	}
+	return [][]string{defaults.Features}
+}
 
-	if base == nil {
-		// Preserve additive directives so downstream resolution can apply them
-		// against the implicit default set (e.g. features).
-		return override
+func mergeFeatureDefaults(base, removals []string, defaults Defaults) ([]string, []string) {
+	for _, layer := range featureDefaultLayers(defaults) {
+		base, removals = mergeFeatureSlice(base, removals, layer)
 	}
-
-	// Additive mode: start with base, apply modifications
-	result := make(map[string]bool)
-	for _, v := range base {
-		result[v] = true
-	}
-
-	for _, v := range override {
-		if strings.HasPrefix(v, "+") {
-			result[strings.TrimPrefix(v, "+")] = true
-		} else if strings.HasPrefix(v, "-") {
-			delete(result, strings.TrimPrefix(v, "-"))
-		} else {
-			// No prefix in additive mode - treat as add
-			result[v] = true
-		}
-	}
-
-	// Convert back to slice
-	merged := make([]string, 0, len(result))
-	for v := range result {
-		merged = append(merged, v)
-	}
-	// Sort for deterministic output
-	sort.Strings(merged)
-	return merged
+	return base, removals
 }
 
 // mergeFeatureSlice merges feature defaults with additive syntax.
 // When base is nil, additive directives are preserved so downstream resolution
 // can apply them against the implicit default-enabled feature set. Removals are
-// also retained separately for validation after merging consumes them.
+// retained until selectors expand, and separately for validation even when a
+// later addition cancels them.
 func mergeFeatureSlice(base, removals, override []string) ([]string, []string) {
 	if !hasAdditiveDirective(override) {
-		return override, nil
+		return copyStringSlice(override), nil
 	}
 	removals = copyStringSlice(removals)
 	for _, raw := range override {
@@ -813,7 +793,70 @@ func mergeFeatureSlice(base, removals, override []string) ([]string, []string) {
 	if base == nil {
 		return copyStringSlice(override), removals
 	}
-	return mergeStringSlice(base, override), removals
+
+	selected := make(map[string]bool)
+	if hasAdditiveDirective(base) {
+		hasSelector := false
+		for _, raw := range base {
+			value := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(raw), "+"))
+			if isFeatureSelector(value) {
+				hasSelector = true
+				break
+			}
+		}
+		if !hasSelector {
+			selected[model.SelectionDefault] = true
+		}
+	}
+	applyFeatureDirectives(selected, base)
+	applyFeatureDirectives(selected, override)
+
+	merged := make([]string, 0, len(selected))
+	for value := range selected {
+		merged = append(merged, value)
+	}
+	sort.Strings(merged)
+	return merged, removals
+}
+
+func isFeatureSelector(value string) bool {
+	return strings.EqualFold(value, model.SelectionDefault) || strings.EqualFold(value, model.FeatureSelectionAll)
+}
+
+func applyFeatureDirectives(selected map[string]bool, directives []string) {
+	// Match selector expansion: removals win within a scope, while additions in
+	// a later scope can undo an inherited removal.
+	for _, raw := range directives {
+		value := strings.TrimSpace(raw)
+		if strings.HasPrefix(value, "-") {
+			continue
+		}
+		value = strings.TrimSpace(strings.TrimPrefix(value, "+"))
+		if value == "" {
+			continue
+		}
+		if isFeatureSelector(value) {
+			value = strings.ToLower(value)
+		}
+		delete(selected, "-"+value)
+		selected[value] = true
+	}
+	for _, raw := range directives {
+		value := strings.TrimSpace(raw)
+		if !strings.HasPrefix(value, "-") {
+			continue
+		}
+		name := strings.TrimSpace(value[1:])
+		if name == "" {
+			continue
+		}
+		if !isFeatureSelector(name) {
+			delete(selected, name)
+		}
+		if selected[model.SelectionDefault] || selected[model.FeatureSelectionAll] {
+			selected["-"+name] = true
+		}
+	}
 }
 
 // mergeHostConfigSlice merges raw host_config_paths directives across config

@@ -98,7 +98,7 @@ func TestValidateOptionsUnknownFeatureSource(t *testing.T) {
 	}
 }
 
-func TestValidateOptionsLayeredFeatureRemovals(t *testing.T) {
+func TestValidateOptionsLayeredFeatures(t *testing.T) {
 	paths := testPathsWithFeatureDefaults(t)
 	cases := []struct {
 		name        string
@@ -107,7 +107,111 @@ func TestValidateOptionsLayeredFeatureRemovals(t *testing.T) {
 		cliFeatures []string
 		want        []string
 		wantWarning bool
+		wantUnknown bool
 	}{
+		{
+			name:    "project removal from inherited default selector",
+			global:  config.Defaults{Features: []string{"default"}},
+			project: config.Defaults{Features: []string{"-node-dev"}},
+			want:    []string{"github-cli"},
+		},
+		{
+			name:    "project removal from inherited all selector",
+			global:  config.Defaults{Features: []string{"all"}},
+			project: config.Defaults{Features: []string{"-node-dev"}},
+			want:    []string{"github-cli", "shell-extras"},
+		},
+		{
+			name:   "tool removal from inherited default selector",
+			global: config.Defaults{Features: []string{"default"}, ToolOverrides: map[string]config.Defaults{"claude": {Features: []string{"-node-dev"}}}},
+			want:   []string{"github-cli"},
+		},
+		{
+			name:   "tool removal from inherited all selector",
+			global: config.Defaults{Features: []string{"all"}, ToolOverrides: map[string]config.Defaults{"claude": {Features: []string{"-node-dev"}}}},
+			want:   []string{"github-cli", "shell-extras"},
+		},
+		{
+			name:    "later addition reverses inherited removal",
+			global:  config.Defaults{Features: []string{"default"}, ToolOverrides: map[string]config.Defaults{"claude": {Features: []string{"+node-dev"}}}},
+			project: config.Defaults{Features: []string{"-node-dev"}},
+			want:    []string{"github-cli", "node-dev"},
+		},
+		{
+			name:    "project tool addition preserves global tool removal",
+			global:  config.Defaults{ToolOverrides: map[string]config.Defaults{"claude": {Features: []string{"-node-dev"}}}},
+			project: config.Defaults{ToolOverrides: map[string]config.Defaults{"claude": {Features: []string{"+shell-extras"}}}},
+			want:    []string{"github-cli", "shell-extras"},
+		},
+		{
+			name:        "project tool addition preserves global unknown removal",
+			global:      config.Defaults{ToolOverrides: map[string]config.Defaults{"claude": {Features: []string{"-typo"}}}},
+			project:     config.Defaults{ToolOverrides: map[string]config.Defaults{"claude": {Features: []string{"+shell-extras"}}}},
+			want:        []string{"github-cli", "node-dev", "shell-extras"},
+			wantWarning: true,
+		},
+		{
+			name:        "project tool addition preserves global unknown addition",
+			global:      config.Defaults{ToolOverrides: map[string]config.Defaults{"claude": {Features: []string{"+typo"}}}},
+			project:     config.Defaults{ToolOverrides: map[string]config.Defaults{"claude": {Features: []string{"+shell-extras"}}}},
+			wantUnknown: true,
+		},
+		{
+			name:    "project tool replacement clears global unknown addition",
+			global:  config.Defaults{ToolOverrides: map[string]config.Defaults{"claude": {Features: []string{"+typo"}}}},
+			project: config.Defaults{ToolOverrides: map[string]config.Defaults{"claude": {Features: []string{"node-dev"}}}},
+			want:    []string{"node-dev"},
+		},
+		{
+			name:    "project tool empty replacement clears global unknown removal",
+			global:  config.Defaults{ToolOverrides: map[string]config.Defaults{"claude": {Features: []string{"-typo"}}}},
+			project: config.Defaults{ToolOverrides: map[string]config.Defaults{"claude": {Features: []string{}}}},
+			want:    []string{},
+		},
+		{
+			name:    "tool selector replacement excludes top-level selection",
+			global:  config.Defaults{Features: []string{"shell-extras"}, ToolOverrides: map[string]config.Defaults{"claude": {Features: []string{"default"}}}},
+			project: config.Defaults{ToolOverrides: map[string]config.Defaults{"claude": {Features: []string{"-node-dev"}}}},
+			want:    []string{"github-cli"},
+		},
+		{
+			name:    "tool empty base excludes implicit defaults",
+			global:  config.Defaults{Features: []string{"node-dev"}, ToolOverrides: map[string]config.Defaults{"claude": {Features: []string{}}}},
+			project: config.Defaults{ToolOverrides: map[string]config.Defaults{"claude": {Features: []string{"+shell-extras"}}}},
+			want:    []string{"shell-extras"},
+		},
+		{
+			name:    "additive tool layers modify explicit top-level selection",
+			global:  config.Defaults{Features: []string{}, ToolOverrides: map[string]config.Defaults{"claude": {Features: []string{"+node-dev"}}}},
+			project: config.Defaults{ToolOverrides: map[string]config.Defaults{"claude": {Features: []string{"+shell-extras"}}}},
+			want:    []string{"node-dev", "shell-extras"},
+		},
+		{
+			name:        "CLI replaces both tool feature layers",
+			global:      config.Defaults{ToolOverrides: map[string]config.Defaults{"claude": {Features: []string{"+typo"}}}},
+			project:     config.Defaults{ToolOverrides: map[string]config.Defaults{"claude": {Features: []string{"-typo"}}}},
+			cliFeatures: []string{},
+			want:        []string{},
+		},
+		{
+			name:    "project tool addition reverses global tool removal",
+			global:  config.Defaults{ToolOverrides: map[string]config.Defaults{"claude": {Features: []string{"-node-dev"}}}},
+			project: config.Defaults{ToolOverrides: map[string]config.Defaults{"claude": {Features: []string{"+node-dev"}}}},
+			want:    []string{"github-cli", "node-dev"},
+		},
+		{
+			name:        "cancelled unknown tool removal still warns",
+			global:      config.Defaults{Features: []string{}, ToolOverrides: map[string]config.Defaults{"claude": {Features: []string{"-typo"}}}},
+			project:     config.Defaults{ToolOverrides: map[string]config.Defaults{"claude": {Features: []string{"+shell-extras"}}}},
+			want:        []string{"shell-extras"},
+			wantWarning: true,
+		},
+		{
+			name:    "removing every inherited default stays empty",
+			global:  config.Defaults{Features: []string{"default"}},
+			project: config.Defaults{Features: []string{"-node-dev", "-github-cli"}},
+			want:    []string{},
+		},
 		{
 			name:        "unknown project removal against explicit global selection",
 			global:      config.Defaults{Features: []string{"node-dev"}},
@@ -170,6 +274,12 @@ func TestValidateOptionsLayeredFeatureRemovals(t *testing.T) {
 			}
 			opts, _, _ := config.ResolveOptionsForTool(cliOpts, cliSources, tc.global, tc.project, "claude")
 			got, _, warnings, err := ValidateOptions(opts, opts.Sources, ValidationContext{Action: "run", Paths: paths})
+			if tc.wantUnknown {
+				if err == nil || !strings.HasPrefix(err.Error(), "features in config (including inherited entries): unknown features: typo;") {
+					t.Fatalf("expected inherited-feature error, got %v", err)
+				}
+				return
+			}
 			if err != nil {
 				t.Fatalf("ValidateOptions: %v", err)
 			}

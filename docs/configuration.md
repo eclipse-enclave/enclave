@@ -163,6 +163,12 @@ Values without prefixes replace the parent set entirely.
 applied against the implicit default-enabled set, so `["-node-dev"]` removes
 that default feature and `[]` means "none".
 
+Additive entries also modify inherited `"default"` and `"all"` selections after
+those selectors expand. Global and project `tool_overrides` for the same tool
+are applied in order, so a project addition preserves global tool removals.
+A later `+name` can re-enable a removed feature; a replacement selection
+(including `[]`) discards earlier selections and their diagnostics.
+
 Feature names, including `+name` entries, must match an installed extension;
 unknown names fail before building or starting a session. Unknown `-name`
 removals only warn. Use `enclave features list` to see available names.

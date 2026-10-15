@@ -31,15 +31,16 @@ func runFeatures(ctx *AppContext, req *extinstall.Request, opts model.Options, s
 		return 1
 	}
 
-	run, _, err := validateAsRun(ctx.Paths, opts, sources)
+	run, _, err := optionsAsRun(ctx.Paths, opts, sources)
 	validated := err == nil
 	if !validated {
 		logx.Warnf("A run with these options would fail: %v", err)
-		run, _ = normalizeOptions(opts)
 	}
 	enabled := make(map[string]bool)
-	for _, name := range selectFeatures(features, run.BuildOptions) {
-		enabled[name] = true
+	if !featuresDisabled(run.BuildOptions) {
+		for _, name := range selectFeatures(features, run.BuildOptions) {
+			enabled[name] = true
+		}
 	}
 
 	if req != nil && req.JSON {

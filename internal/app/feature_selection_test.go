@@ -14,16 +14,6 @@ import (
 	"enclave/internal/model"
 )
 
-func TestResolveConfiguredFeaturesNil(t *testing.T) {
-	available := []model.Extension{
-		{Name: "devtools", DefaultEnabled: true},
-	}
-
-	if got := resolveConfiguredFeatures(nil, available); got != nil {
-		t.Fatalf("expected nil for nil input, got %v", got)
-	}
-}
-
 func TestResolveConfiguredFeaturesExplicitList(t *testing.T) {
 	available := []model.Extension{
 		{Name: "devtools", DefaultEnabled: true},
@@ -141,32 +131,47 @@ func TestResolveFeatureSelection(t *testing.T) {
 	paths := testPathsWithFeatures(t)
 
 	cases := []struct {
-		name        string
-		build       model.BuildOptions
-		wantEnabled []string
-		wantUnknown []string
+		name         string
+		build        model.BuildOptions
+		wantSelected []string
+		wantEnabled  []string
+		wantUnknown  []string
 	}{
-		{name: "explicit empty", build: model.BuildOptions{Features: []string{}}, wantEnabled: []string{}},
-		{name: "slim", build: model.BuildOptions{Slim: true, Features: []string{"github-cli"}}, wantEnabled: []string{}},
-		{name: "devcontainer unset", build: model.BuildOptions{Devcontainer: true}, wantEnabled: []string{}},
-		{name: "devcontainer explicit", build: model.BuildOptions{Devcontainer: true, Features: []string{"shell-extras"}}, wantEnabled: []string{"shell-extras"}},
-		{name: "additive", build: model.BuildOptions{Features: []string{"+shell-extras", "-node-dev"}}, wantEnabled: []string{"github-cli", "shell-extras"}},
-		{name: "unknown literal", build: model.BuildOptions{Features: []string{"ghost", "github-cli"}}, wantEnabled: []string{"ghost", "github-cli"}, wantUnknown: []string{"ghost"}},
-		{name: "unknown directive", build: model.BuildOptions{Features: []string{"+ghost"}}, wantEnabled: []string{"ghost", "github-cli", "node-dev"}, wantUnknown: []string{"ghost"}},
+		{name: "defaults", build: model.BuildOptions{}, wantSelected: []string{"github-cli", "node-dev"}, wantEnabled: []string{"github-cli", "node-dev"}},
+		{name: "explicit selection", build: model.BuildOptions{Features: []string{"github-cli"}}, wantSelected: []string{"github-cli"}, wantEnabled: []string{"github-cli"}},
+		{name: "default selector", build: model.BuildOptions{Features: []string{model.SelectionDefault}}, wantSelected: []string{"github-cli", "node-dev"}, wantEnabled: []string{"github-cli", "node-dev"}},
+		{name: "all selector", build: model.BuildOptions{Features: []string{model.FeatureSelectionAll}}, wantSelected: []string{"github-cli", "node-dev", "shell-extras"}, wantEnabled: []string{"github-cli", "node-dev", "shell-extras"}},
+		{name: "explicit empty", build: model.BuildOptions{Features: []string{}}, wantSelected: []string{}, wantEnabled: []string{}},
+		{name: "slim", build: model.BuildOptions{Slim: true, Features: []string{"github-cli"}}, wantSelected: []string{}, wantEnabled: []string{}},
+		{name: "devcontainer unset", build: model.BuildOptions{Devcontainer: true}, wantSelected: []string{}, wantEnabled: []string{}},
+		{name: "devcontainer explicit", build: model.BuildOptions{Devcontainer: true, Features: []string{"shell-extras"}}, wantSelected: []string{"shell-extras"}, wantEnabled: []string{"shell-extras"}},
+		{name: "additive", build: model.BuildOptions{Features: []string{"+shell-extras", "-node-dev"}}, wantSelected: []string{"github-cli", "shell-extras"}, wantEnabled: []string{"github-cli", "shell-extras"}},
+		{name: "unknown literal", build: model.BuildOptions{Features: []string{"ghost", "github-cli"}}, wantSelected: []string{"ghost", "github-cli"}, wantEnabled: []string{"github-cli"}, wantUnknown: []string{"ghost"}},
+		{name: "unknown directive", build: model.BuildOptions{Features: []string{"+ghost"}}, wantSelected: []string{"ghost", "github-cli", "node-dev"}, wantEnabled: []string{"github-cli", "node-dev"}, wantUnknown: []string{"ghost"}},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			enabled, unknown, err := resolveFeatureSelection(paths, tc.build)
+			selection, err := resolveFeatureSelection(paths, tc.build)
 			if err != nil {
 				t.Fatalf("resolveFeatureSelection: %v", err)
 			}
-			if !reflect.DeepEqual(enabled, tc.wantEnabled) {
+			if !reflect.DeepEqual(selection.selected, tc.wantSelected) {
+				t.Fatalf("selected = %#v, want %#v", selection.selected, tc.wantSelected)
+			}
+			if enabled := extensionNames(selection.enabled); !reflect.DeepEqual(enabled, tc.wantEnabled) {
 				t.Fatalf("enabled = %#v, want %#v", enabled, tc.wantEnabled)
 			}
-			if !reflect.DeepEqual(unknown, tc.wantUnknown) {
-				t.Fatalf("unknown = %#v, want %#v", unknown, tc.wantUnknown)
+			if !reflect.DeepEqual(selection.unknown, tc.wantUnknown) {
+				t.Fatalf("unknown = %#v, want %#v", selection.unknown, tc.wantUnknown)
 			}
 		})
+	}
+}
+
+func TestFeatureSelectionEnabledNamesSorted(t *testing.T) {
+	selection := featureSelection{enabled: []model.Extension{{Name: "node-dev"}, {Name: "github-cli"}}}
+	if got := selection.enabledNames(); !reflect.DeepEqual(got, []string{"github-cli", "node-dev"}) {
+		t.Fatalf("enabledNames() = %#v", got)
 	}
 }

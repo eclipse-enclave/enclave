@@ -47,6 +47,7 @@ type Runtime struct {
 	devcontainer          *model.DevcontainerConfig
 	features              []model.Extension
 	userCommandMount      *model.UserCommandMount
+	provenance            map[string]any
 	ideBridgePorts        []string
 	projectDir            string
 	containerUser         string
@@ -167,6 +168,7 @@ func New(cfg model.RuntimeConfig) *Runtime {
 		devcontainer:          cfg.Devcontainer,
 		features:              cfg.Features,
 		userCommandMount:      cfg.UserCommandMount,
+		provenance:            cfg.Provenance,
 		projectDir:            projectDir,
 		containerUser:         model.ContainerUser,
 		containerHome:         model.ContainerHome,
@@ -852,6 +854,7 @@ func (r *Runtime) backendRequest(ctx *ExecutionContext, detached bool, interacti
 			DisplayName:  r.sessionDisplayName(ctx.ContainerName, detached),
 			Background:   detached,
 			Yolo:         r.yoloEnabled,
+			Provenance:   r.provenance,
 		},
 		Image:           r.build.ImageName,
 		Argv:            newCommandBuilder(r).Build(),
@@ -1060,20 +1063,8 @@ func (r *Runtime) specProxyManaged() []string {
 	return out
 }
 
-// SessionNetworkInputs returns the network inputs of a session started with
-// cfg, before any release host is selected through
-// serviceAuth.hostsFromCredential.
-func SessionNetworkInputs(cfg model.RuntimeConfig) policy.SessionNetworkInputs {
-	return policy.SessionNetworkInputs{
-		Profile:         cfg.Profile,
-		Features:        cfg.Features,
-		AllowDomains:    cfg.Run.AllowDomains,
-		AllowAllNetwork: cfg.Run.AllowAllNetwork,
-	}
-}
-
 func (r *Runtime) sessionNetworkInputs() policy.SessionNetworkInputs {
-	inputs := SessionNetworkInputs(model.RuntimeConfig{Profile: r.profile, Features: r.features, Run: r.run})
+	inputs := policy.NewSessionNetworkInputs(r.profile, r.features, r.run)
 	inputs.ReleaseHostOverrides = r.releaseHostOverrides
 	return inputs
 }

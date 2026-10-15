@@ -748,11 +748,11 @@ func resolveRuntimeImageSelection(paths model.Paths, opts model.BuildOptions, to
 		selection.Tools = []string{name}
 	}
 
-	features, _, err := resolveFeatureSelection(paths, opts)
+	features, err := resolveFeatureSelection(paths, opts)
 	if err != nil {
 		return runtimeImageSelection{}, err
 	}
-	selection.Features = features
+	selection.Features = features.selected
 	return selection, nil
 }
 

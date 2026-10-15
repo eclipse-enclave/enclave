@@ -31,6 +31,15 @@ unchanged. See [windows.md](windows.md).
 
 `enclave ps` prints one row per container with its `NAME` (container name) and `SESSION` (the `--name` session name, or the auto-assigned `1`, `2`, … for extra sessions; `-` for the project's default container); either can be passed to `attach`, `exec --name`, `stop`, and `theia`. Flags: `--all` (include stopped containers, not just running ones), `--json` (emit a JSON array instead of the table). The flags compose (`ps --all --json`). Each JSON object has the fields `name`, `tool`, `projectDir` (absolute, resolved project path), `projectHash`, `worktree`, `status`, `createdAt` (RFC 3339, empty if unknown), `sessionName`, `background`, `ports` (array of `{containerPort, hostPort, hostIP, protocol}` bindings), and `network` (`{name, subnet}` for the per-session bridge under Docker and podman, `null` for other backends and sessions started by earlier releases).
 
+Session provenance: each JSON object also carries `options`, the options that shape the session, keyed and typed like `options.<name>.value` of [`enclave config --json`](configuration.md#json-output-schemaversion-1), as validated for the run.
+
+- `options.features` holds the sorted enabled feature names; `pass_env` holds variable names, never values.
+- `backend` and `image_name` are the configured values (for example `auto`), not the detected engine or the derived image tag.
+- Host-side and one-shot options (for example `progress`, `verbose`, `reset_auth`, `session_tint`, `session_name`, and build-cache options) are not recorded.
+- `options` is omitted when unknown: sessions started by earlier releases, features that could not be resolved at start, or unreadable recorded provenance. qemu sessions are not listed by `ps`, so they have none.
+
+To compare a session with the current configuration, see [Detecting session drift](configuration.md#detecting-session-drift).
+
 `--backend` selects one engine for `ps`, `status`, `stop`, `attach`, and `exec` without changing the saved backend. For example, after `enclave run --backend podman`, use `enclave ps --backend podman` to find that session and `enclave attach --backend podman <name>` to attach. `ps` does not merge sessions from multiple engines.
 
 `status` reports sessions of the current project (like `exec` without `--name`); `--all` widens it to every project. Flags: `--tool` and `--name` filter sessions; `--json` emits one machine-readable snapshot object per session (screen text and OSC title for external state detection). Each snapshot captures the trailing 24 screen rows. See [Session status snapshots](session-status.md).

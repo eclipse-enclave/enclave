@@ -15,6 +15,7 @@ import (
 	"strings"
 	"testing"
 
+	"enclave/internal/backend"
 	"enclave/internal/config"
 	"enclave/internal/model"
 )
@@ -125,7 +126,7 @@ func TestRenderConfigSources_UsesToolOverrideLabel(t *testing.T) {
 	}
 }
 
-func TestRenderConfigJSON_IncludesToolOverrideFieldAndSource(t *testing.T) {
+func TestLegacyConfigJSON_IncludesToolOverrideFieldAndSource(t *testing.T) {
 	rows := []configRow{
 		{
 			Name:         "no_api_key",
@@ -137,7 +138,7 @@ func TestRenderConfigJSON_IncludesToolOverrideFieldAndSource(t *testing.T) {
 	}
 
 	out := captureStdout(t, func() {
-		code := writeConfigJSON(configJSONDocument{configJSONOutput: legacyConfigJSON(rows, model.ConfigView{}, "", "", false, false, nil)})
+		code := writeConfigJSON(configJSONDocument{configJSONOutput: legacyConfigJSON(rows, model.ConfigView{}, nil, nil)})
 		if code != 0 {
 			t.Fatalf("writeConfigJSON returned %d", code)
 		}
@@ -159,7 +160,7 @@ func TestRenderConfigJSON_IncludesToolOverrideFieldAndSource(t *testing.T) {
 	}
 }
 
-func TestRenderConfigJSON_SourceViewSupportsToolOverride(t *testing.T) {
+func TestLegacyConfigJSON_SourceViewSupportsToolOverride(t *testing.T) {
 	rows := []configRow{
 		{
 			Name:      "no_api_key",
@@ -169,7 +170,7 @@ func TestRenderConfigJSON_SourceViewSupportsToolOverride(t *testing.T) {
 	}
 
 	out := captureStdout(t, func() {
-		code := writeConfigJSON(configJSONDocument{configJSONOutput: legacyConfigJSON(rows, model.ConfigView{Mode: "source"}, "", "", false, false, nil)})
+		code := writeConfigJSON(configJSONDocument{configJSONOutput: legacyConfigJSON(rows, model.ConfigView{Mode: "source"}, nil, nil)})
 		if code != 0 {
 			t.Fatalf("writeConfigJSON returned %d", code)
 		}
@@ -387,7 +388,7 @@ func TestConfigJSONYoloResolution(t *testing.T) {
 	opts.Sources.Yolo = model.SourceCLI
 	input := &CommandInput{Ctx: NewAppContext(testPathsWithFeatures(t), t.TempDir()), Options: opts}
 
-	envelope := buildConfigEnvelope(input, opts, configProfile{profile: &model.Profile{Name: "claude"}}, nil)
+	envelope := buildConfigEnvelope(input, opts, &model.Profile{Name: "claude"}, nil, nil)
 
 	yolo := envelope.Options["yolo"]
 	if yolo.Value != false || yolo.ResolvedBy != yoloResolvedByCLI || yolo.Layers["cli"] != false {
@@ -409,6 +410,55 @@ func TestConfigJSONValuesMatchValidatedRun(t *testing.T) {
 	}
 	if value := configJSONOptionField(t, doc, "backend")["value"]; value != "auto" {
 		t.Fatalf("options.backend.value = %#v, want configured auto", value)
+	}
+}
+
+func TestSessionProvenanceMatchesConfigJSON(t *testing.T) {
+	stubBackendResolution(t, []string{backend.NamePodman}, false)
+	paths := testPathsWithFeatures(t)
+	paths.AppRoot = t.TempDir()
+	profile := model.Profile{Name: "claude", PassthroughPaths: []string{"settings.json"}}
+	opts := config.DefaultOptions()
+	opts.Tool = "claude"
+	opts.Features = []string{"+shell-extras"}
+	opts.PassEnv = []string{"GITHUB_TOKEN"}
+	opts.HostConfig = model.HostConfigPassthrough
+	opts.Sources = model.DefaultOptionSources()
+
+	runInput := configTestInput(t, paths, opts, nil)
+	configuredBackend, err := resolveActionBackend("run", &runInput.Options, false)
+	if err != nil || runInput.Options.Backend != backend.NamePodman {
+		t.Fatalf("backend = %q, err = %v; want detected podman", runInput.Options.Backend, err)
+	}
+	runInput.ConfiguredBackend = configuredBackend
+	project := model.Project{Dir: paths.AppRoot, RealDir: paths.AppRoot, Hash: "abc123def456", Name: "project"}
+	validated, _, _, _, err := ValidateRunOptions(runInput.Options, opts.Sources, ValidationContext{Paths: paths, Action: "run"}, project)
+	if err != nil {
+		t.Fatalf("ValidateRunOptions: %v", err)
+	}
+	validated.HostConfigPaths = config.ResolveHostConfigPaths(profile, validated.HostConfigPaths)
+	runInput.Action = "run"
+	_, recorded := sessionFeaturesAndProvenance(runInput, validated, profile)
+
+	configInput := configTestInput(t, paths, opts, nil)
+	envelope := buildConfigEnvelope(configInput, opts, &profile, nil, nil)
+
+	if features := recorded["features"]; !reflect.DeepEqual(features, []string{"github-cli", "node-dev", "shell-extras"}) {
+		t.Fatalf("features = %#v", features)
+	}
+	for _, def := range config.OptionDefs() {
+		value, ok := recorded[def.Name]
+		if ok != (def.AffectsSession == config.SessionAffected) {
+			t.Fatalf("options.%s recorded = %v, want only session-affecting options", def.Name, ok)
+		}
+		if !ok {
+			continue
+		}
+		got, _ := json.Marshal(value)
+		want, _ := json.Marshal(envelope.Options[def.Name].Value)
+		if string(got) != string(want) {
+			t.Errorf("options.%s = %s, config --json reports %s", def.Name, got, want)
+		}
 	}
 }
 
@@ -502,7 +552,8 @@ func TestConfigJSONKeepsLegacyFields(t *testing.T) {
 	normalized, _ := normalizeOptions(opts)
 	rows := buildConfigRows(normalized, config.DefaultOptions(), global, config.Defaults{}, config.Defaults{}, false, []string{})
 	globalPath, globalErr := config.GlobalConfigPath()
-	legacy, err := json.Marshal(legacyConfigJSON(rows, input.ConfigView, globalPath, config.ProjectConfigJSONPath(input.Ctx.ProjectDir), false, false, globalErr))
+	paths, status := configJSONPaths(globalPath, config.ProjectConfigJSONPath(input.Ctx.ProjectDir), false, false, globalErr)
+	legacy, err := json.Marshal(legacyConfigJSON(rows, input.ConfigView, paths, status))
 	if err != nil {
 		t.Fatal(err)
 	}

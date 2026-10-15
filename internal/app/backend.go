@@ -102,16 +102,34 @@ func promptAllowed(parsed cli.Result) bool {
 	return true
 }
 
+// resolveActionBackend resolves the backend of actions that use one and
+// returns the configured value, which `config --json` and session provenance
+// report instead of the detected engine. A choice the engine prompt saved to
+// the global config is the configured value from then on.
+func resolveActionBackend(action string, opts *model.Options, interactive bool) (string, error) {
+	configured := opts.Backend
+	if actionUsesBackend(action) {
+		if saved := resolveBackend(opts, interactive); saved != "" {
+			configured = saved
+		}
+		if err := validateBackendName(opts.Backend); err != nil {
+			return configured, err
+		}
+	}
+	return configured, nil
+}
+
 // resolveBackend replaces the "auto" backend with the container engine this
 // host has and points the shared CLI wrapper at it. It runs once, right after
 // option resolution, because image builds and engine checks use the wrapper
 // before any backend instance exists. An explicit docker that turns out to be
 // the podman-docker shim is driven as podman. interactive permits the one-time
-// engine question when both engines are installed.
-func resolveBackend(opts *model.Options, interactive bool) {
+// engine question when both engines are installed; it returns the answer
+// when it was saved to the global config.
+func resolveBackend(opts *model.Options, interactive bool) (saved string) {
 	switch {
 	case strings.TrimSpace(opts.Backend) == backend.NameAuto:
-		opts.Backend = detectBackend(interactive)
+		opts.Backend, saved = detectBackend(interactive)
 	case opts.Backend == backend.NameDocker && dockerIsPodmanShim():
 		// Detection maps the shim to podman; an explicit or configured docker
 		// gets the same treatment, since driving the shim as Docker would skip
@@ -123,6 +141,7 @@ func resolveBackend(opts *model.Options, interactive bool) {
 	case backend.NameDocker, backend.NamePodman:
 		docker.SetBinary(opts.Backend)
 	}
+	return saved
 }
 
 // detectBackend picks the engine for the "auto" backend. A single installed
@@ -130,14 +149,15 @@ func resolveBackend(opts *model.Options, interactive bool) {
 // terminal is asked once and the answer is saved to the global config;
 // otherwise (scripts, captured output, --json or --yes) docker is used with a
 // notice instead of blocking on a prompt. With no engine at all the docker
-// default stays so the engine check reports what is missing.
-func detectBackend(interactive bool) string {
+// default stays so the engine check reports what is missing. The second result
+// is the answer when it was saved.
+func detectBackend(interactive bool) (string, string) {
 	clis := detectContainerCLIs()
 	switch len(clis) {
 	case 0:
-		return backend.NameDocker
+		return backend.NameDocker, ""
 	case 1:
-		return clis[0]
+		return clis[0], ""
 	}
 	configPath, err := config.GlobalConfigPath()
 	if err != nil {
@@ -145,16 +165,17 @@ func detectBackend(interactive bool) string {
 	}
 	if !interactive || !promptUsable() {
 		logx.Warnf("Both docker and podman are installed; using docker. Set \"backend\" in %s to choose.", configPath)
-		return backend.NameDocker
+		return backend.NameDocker, ""
 	}
 	question := fmt.Sprintf("Both docker and podman are installed. Which should enclave use? Rootless podman keeps container root unprivileged on the host. The answer is saved to %s.", configPath)
 	choice, err := prompt.Choose(question, []string{backend.NamePodman, backend.NameDocker}, os.Stdin, os.Stderr)
 	if err != nil || choice == "" {
 		logx.Warnf("No backend chosen; using docker for this run.")
-		return backend.NameDocker
+		return backend.NameDocker, ""
 	}
 	if _, err := saveBackendChoice("backend", choice); err != nil {
 		logx.Warnf("Using %s for this run, but the choice could not be saved: %v", choice, err)
+		return choice, ""
 	}
-	return choice
+	return choice, choice
 }

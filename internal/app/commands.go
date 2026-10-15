@@ -43,6 +43,9 @@ type CommandInput struct {
 	// inside the container. Populated only for `enclave <name>` session
 	// commands dispatched through the run pipeline.
 	UserCommandMount *model.UserCommandMount
+	// ConfiguredBackend is the backend option before auto-detection and the
+	// podman-shim mapping resolved Options.Backend.
+	ConfiguredBackend string
 }
 
 func dispatchCommand(input *CommandInput) int {

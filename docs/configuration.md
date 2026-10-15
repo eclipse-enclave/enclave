@@ -415,5 +415,19 @@ option).
 `enclave run`, including the `qemu` backend restrictions, but treats `auto` as
 `docker` and skips the container engine, mounts, and image build.
 
-The earlier keys `effective`, `sources`, `paths`, and `status` are kept
-unchanged for compatibility; they hold display strings (lists as `"[a,b]"`).
+The earlier keys `effective`, `sources`, `paths`, and `status` are unchanged
+for compatibility; they hold display strings (lists as `"[a,b]"`).
+
+### Detecting session drift
+
+`enclave ps --json` records the same typed values in `options` for the options
+that shape a session (see the [`ps` reference](cli-reference.md#session)).
+To check whether a fresh session would differ from a running one:
+
+1. Run `enclave config --json` from the session's `projectDir` with its
+   `--tool` and the same flags.
+2. Compare each key of the session's `options` with `options.<name>.value`.
+   A key missing on either side means unknown, not changed.
+
+Backend-dependent validated values may differ, since `config --json` validates
+`auto` as `docker` while a run validates the detected engine.

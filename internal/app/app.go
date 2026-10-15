@@ -68,20 +68,17 @@ func Run(args []string) int {
 		if parsed.Action == cli.ActionExtensionManage && parsed.ExtRequest != nil {
 			return reportExtensionResults(*parsed.ExtRequest, nil, err)
 		}
-		logx.Errorf("%v", err)
-		return 1
+		return reportStartupError(parsed, "", err)
 	}
 
 	projectDir, err := resolveProjectDir()
 	if err != nil {
-		logx.Errorf("%v", err)
-		return 1
+		return reportStartupError(parsed, "", err)
 	}
 
 	globalDefaults, projectDefaults, configWarnings, err := config.LoadDefaults(projectDir)
 	if err != nil {
-		logx.Errorf("%v", err)
-		return 1
+		return reportStartupError(parsed, projectDir, err)
 	}
 	for _, warning := range configWarnings {
 		logx.Warnf(warning.Message)
@@ -123,22 +120,15 @@ func Run(args []string) int {
 	if actionNeedsTool(parsed) {
 		tool, err := resolveTool(opts.Tool, promptAllowed(parsed))
 		if err != nil {
-			if parsed.NetworkPrintJSON {
-				return writeNetworkPolicyEnvelope(os.Stdout, newNetworkPolicyEnvelope(nil, networkPolicyProjectOf(config.ResolveProjectFromDir(projectDir))), err)
-			}
-			logx.Errorf("%v", err)
-			return 1
+			return reportStartupError(parsed, projectDir, err)
 		}
 		if tool != opts.Tool {
 			opts, toolDefaults, hasToolDefaults = config.ResolveOptionsForTool(cliOpts, cliSources, globalDefaults, projectDefaults, tool)
 		}
 	}
-	if actionUsesBackend(parsed.Action) {
-		resolveBackend(&opts, promptAllowed(parsed))
-		if err := validateBackendName(opts.Backend); err != nil {
-			logx.Errorf("%v", err)
-			return 1
-		}
+	configuredBackend, err := resolveActionBackend(parsed.Action, &opts, promptAllowed(parsed))
+	if err != nil {
+		return reportStartupError(parsed, projectDir, err)
 	}
 	sources := opts.Sources
 	parsed.Options = opts
@@ -180,30 +170,33 @@ func Run(args []string) int {
 
 	paths, err := config.ResolvePaths()
 	if err != nil {
-		logx.Errorf("%v", err)
-		logx.Infof("Set %s to the directory containing Dockerfile and profiles.", model.EnvHome)
-		return 1
+		code := reportStartupError(parsed, projectDir, err)
+		if !parsed.NetworkPrintJSON {
+			logx.Infof("Set %s to the directory containing Dockerfile and profiles.", model.EnvHome)
+		}
+		return code
 	}
 	ctx := NewAppContext(paths, projectDir)
 
 	command := CommandInput{
-		Ctx:              ctx,
-		Action:           parsed.Action,
-		Options:          opts,
-		Sources:          sources,
-		CLIOptions:       cliOpts,
-		CLISources:       cliSources,
-		BaseOptions:      baseOpts,
-		GlobalDefaults:   globalDefaults,
-		ProjectDefaults:  projectDefaults,
-		ToolDefaults:     toolDefaults,
-		HasToolDefaults:  hasToolDefaults,
-		ConfigView:       parsed.ConfigView,
-		ConfigWarnings:   configWarnings,
-		NetworkLogView:   parsed.NetworkLogView,
-		NetworkPrintJSON: parsed.NetworkPrintJSON,
-		UserCommandMount: userCommandMount,
-		ExtRequest:       parsed.ExtRequest,
+		Ctx:               ctx,
+		Action:            parsed.Action,
+		Options:           opts,
+		Sources:           sources,
+		CLIOptions:        cliOpts,
+		CLISources:        cliSources,
+		BaseOptions:       baseOpts,
+		GlobalDefaults:    globalDefaults,
+		ProjectDefaults:   projectDefaults,
+		ToolDefaults:      toolDefaults,
+		HasToolDefaults:   hasToolDefaults,
+		ConfigView:        parsed.ConfigView,
+		ConfigWarnings:    configWarnings,
+		NetworkLogView:    parsed.NetworkLogView,
+		NetworkPrintJSON:  parsed.NetworkPrintJSON,
+		UserCommandMount:  userCommandMount,
+		ExtRequest:        parsed.ExtRequest,
+		ConfiguredBackend: configuredBackend,
 	}
 	return dispatchCommand(&command)
 }
@@ -237,6 +230,17 @@ func rebuildSuppressionCause(opts model.Options) string {
 	default:
 		return "--no-rebuild"
 	}
+}
+
+// reportStartupError reports an error raised before dispatch; `network print
+// --json` still owes stdout its envelope.
+func reportStartupError(parsed cli.Result, projectDir string, err error) int {
+	if parsed.NetworkPrintJSON {
+		resolveProject := func() (model.Project, error) { return config.ResolveProjectFromDir(projectDir) }
+		return writeNetworkPolicyEnvelope(os.Stdout, networkPolicyEnvelope{}, resolveProject, err)
+	}
+	logx.Errorf("%v", err)
+	return 1
 }
 
 // discoverUserCommands scans the host command directories best-effort. If home

@@ -9,6 +9,7 @@ package docker
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -506,6 +507,13 @@ func labelsFromRequest(req backend.Request) map[string]string {
 			}
 		}
 	}
+	if meta.Provenance != nil {
+		if data, err := json.Marshal(meta.Provenance); err != nil {
+			logx.Debugf("Skipping %s label: %v", model.LabelOptions, err)
+		} else {
+			labels[model.LabelOptions] = string(data)
+		}
+	}
 	return labels
 }
 
@@ -607,6 +615,12 @@ func sessionFromSummary(c dockercmd.Summary) (backend.Session, bool) {
 		// worktree; fall back to it so consumers still get a directory.
 		projectDir = worktree
 	}
+	var provenance map[string]any
+	if raw, ok := labels[model.LabelOptions]; ok {
+		if err := json.Unmarshal([]byte(raw), &provenance); err != nil {
+			provenance = nil
+		}
+	}
 	return backend.Session{
 		Ref:                backend.SessionRef{Name: name, ID: id},
 		Tool:               tool,
@@ -621,6 +635,7 @@ func sessionFromSummary(c dockercmd.Summary) (backend.Session, bool) {
 		Yolo:               strings.TrimSpace(labels[model.LabelYolo]) == "1",
 		SessionMonitor:     strings.EqualFold(labels[model.LabelSessionMonitor], "true"),
 		SessionMonitorUser: strings.TrimSpace(labels[model.LabelSessionMonitorUser]),
+		Provenance:         provenance,
 	}, true
 }
 

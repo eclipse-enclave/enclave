@@ -15,52 +15,55 @@ import (
 	"enclave/internal/model"
 )
 
-// resolveFeatureSelection returns the feature names build selects and the
-// subset of them that matches no available feature.
-func resolveFeatureSelection(paths model.Paths, build model.BuildOptions) (selected []string, unknown []string, err error) {
+// featureSelection is what a build selects among the available features:
+// the selected names, including those that match no feature, the matching
+// features in listing order, and the unknown names in selection order.
+type featureSelection struct {
+	selected []string
+	enabled  []model.Extension
+	unknown  []string
+}
+
+func resolveFeatureSelection(paths model.Paths, build model.BuildOptions) (featureSelection, error) {
 	if featuresDisabled(build) {
-		return []string{}, nil, nil
+		return featureSelection{selected: []string{}}, nil
 	}
 	allFeatures, err := config.ListFeatures(paths)
 	if err != nil {
-		return nil, nil, err
+		return featureSelection{}, err
 	}
-	selected = selectFeatures(allFeatures, build)
-	_, unknown = partitionSelected(allFeatures, selected)
-	return selected, unknown, nil
-}
-
-// partitionSelected splits the selected names into the matching features, in
-// listing order, and the names that match none, in selection order.
-func partitionSelected(all []model.Extension, selected []string) (enabled []model.Extension, unknown []string) {
-	requested := make(map[string]bool, len(selected))
-	for _, name := range selected {
+	selection := featureSelection{selected: selectFeatures(allFeatures, build)}
+	requested := make(map[string]bool, len(selection.selected))
+	for _, name := range selection.selected {
 		requested[name] = true
 	}
-	available := make(map[string]bool, len(all))
-	for _, feature := range all {
+	available := make(map[string]bool, len(allFeatures))
+	for _, feature := range allFeatures {
 		available[feature.Name] = true
 		if requested[feature.Name] {
-			enabled = append(enabled, feature)
+			selection.enabled = append(selection.enabled, feature)
 		}
 	}
-	for _, name := range selected {
+	for _, name := range selection.selected {
 		if !available[name] {
-			unknown = append(unknown, name)
+			selection.unknown = append(selection.unknown, name)
 		}
 	}
-	return enabled, unknown
+	return selection, nil
+}
+
+// enabledNames returns the sorted names of the enabled features.
+func (s featureSelection) enabledNames() []string {
+	names := featureNameList(s.enabled)
+	sort.Strings(names)
+	return names
 }
 
 func selectFeatures(allFeatures []model.Extension, build model.BuildOptions) []string {
-	switch {
-	case featuresDisabled(build):
-		return []string{}
-	case build.Features == nil:
+	if build.Features == nil {
 		return defaultEnabledFeatureNames(allFeatures)
-	default:
-		return resolveConfiguredFeatures(build.Features, allFeatures)
 	}
+	return resolveConfiguredFeatures(build.Features, allFeatures)
 }
 
 func featuresDisabled(build model.BuildOptions) bool {
@@ -68,9 +71,6 @@ func featuresDisabled(build model.BuildOptions) bool {
 }
 
 func resolveConfiguredFeatures(requested []string, allFeatures []model.Extension) []string {
-	if requested == nil {
-		return nil
-	}
 	normalized := normalizeAndSortNames(requested)
 	if len(normalized) == 0 {
 		return []string{}

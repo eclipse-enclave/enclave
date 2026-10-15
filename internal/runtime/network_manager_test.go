@@ -19,7 +19,7 @@ import (
 	"enclave/internal/policy"
 )
 
-// The gateway must enforce the policy resolved from SessionNetworkInputs(cfg),
+// The gateway must enforce the policy resolved from policy.NewSessionNetworkInputs,
 // which `enclave network print` renders for the same options.
 func TestNetworkPrepareEnforcesSessionNetworkInputs(t *testing.T) {
 	cfg := model.RuntimeConfig{
@@ -45,7 +45,7 @@ func TestNetworkPrepareEnforcesSessionNetworkInputs(t *testing.T) {
 		t.Fatalf("prepare: %v", err)
 	}
 
-	inputs := SessionNetworkInputs(cfg)
+	inputs := policy.NewSessionNetworkInputs(cfg.Profile, cfg.Features, cfg.Run)
 	resolved, err := policy.NewEffectiveResolver(cfg.Paths, cfg.Host.Home).Resolve(policy.ResolveInput{
 		ProjectDir:  cfg.Project.Dir,
 		ProjectHash: cfg.Project.Hash,

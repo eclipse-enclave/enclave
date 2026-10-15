@@ -21,11 +21,11 @@ import (
 	"enclave/internal/model"
 	"enclave/internal/network"
 	"enclave/internal/policy"
-	"enclave/internal/runtime"
 	"enclave/internal/util"
 )
 
 type currentPolicyContext struct {
+	Tool     string
 	Home     string
 	Project  model.Project
 	Resolver policy.EffectiveResolver
@@ -35,22 +35,11 @@ type currentPolicyContext struct {
 // resolveCurrentPolicyContext resolves the policy from the tool spec and the
 // policy files only, as running gateways are compared and reloaded against it.
 func resolveCurrentPolicyContext(input *CommandInput) (currentPolicyContext, error) {
-	return resolvePolicyContext(input, nil)
+	return resolvePolicyContext(input, input.Options.Tool, nil)
 }
 
-// resolvePreviewPolicyContext resolves the policy a run with the same options
-// enforces. Hosts selected at session start through
-// serviceAuth.hostsFromCredential are unknown here and not included.
-func resolvePreviewPolicyContext(input *CommandInput) (currentPolicyContext, error) {
-	return resolveSessionPolicyContext(input, false)
-}
-
-// resolvePrintPolicyContext is resolvePreviewPolicyContext, except that a tool
-// without a spec is rejected as a run rejects it.
-func resolvePrintPolicyContext(input *CommandInput) (currentPolicyContext, error) {
-	return resolveSessionPolicyContext(input, true)
-}
-
+// resolveSessionPolicyContext resolves the policy a run with the same options
+// enforces. requireTool rejects a tool without a spec as a run rejects it.
 func resolveSessionPolicyContext(input *CommandInput, requireTool bool) (currentPolicyContext, error) {
 	opts, warnings, err := validateAsRun(input.Ctx.Paths, input.Options, input.Options.Sources)
 	if err != nil {
@@ -66,12 +55,15 @@ func resolveSessionPolicyContext(input *CommandInput, requireTool bool) (current
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return currentPolicyContext{}, fmt.Errorf("load tool %q: %w", opts.Tool, err)
 	}
-	runtimeConfig, unknown := sessionRuntimeConfig(input.Ctx.Paths, opts, profile)
-	for _, name := range unknown {
+	selection, err := resolveFeatureSelection(input.Ctx.Paths, opts.BuildOptions)
+	if err != nil {
+		logx.Warnf("Failed to list features: %v", err)
+	}
+	for _, name := range selection.unknown {
 		logx.Warnf("Unknown feature %q selected; it is ignored", name)
 	}
-	session := runtime.SessionNetworkInputs(runtimeConfig)
-	return resolvePolicyContext(input, &session)
+	session := policy.NewSessionNetworkInputs(profile, selection.enabled, opts.RunOptions)
+	return resolvePolicyContext(input, opts.Tool, &session)
 }
 
 func unknownToolError(paths model.Paths, tool string) error {
@@ -82,7 +74,7 @@ func unknownToolError(paths model.Paths, tool string) error {
 	return fmt.Errorf("unknown tool: %s (available: %s)", tool, strings.Join(available, " "))
 }
 
-func resolvePolicyContext(input *CommandInput, session *policy.SessionNetworkInputs) (currentPolicyContext, error) {
+func resolvePolicyContext(input *CommandInput, tool string, session *policy.SessionNetworkInputs) (currentPolicyContext, error) {
 	home, err := config.ResolveHostHome()
 	if err != nil {
 		return currentPolicyContext{}, fmt.Errorf("resolve home: %w", err)
@@ -95,13 +87,14 @@ func resolvePolicyContext(input *CommandInput, session *policy.SessionNetworkInp
 	resolved, err := policyResolver.Resolve(policy.ResolveInput{
 		ProjectDir:  input.Ctx.ProjectDir,
 		ProjectHash: project.Hash,
-		Tool:        input.Options.Tool,
+		Tool:        tool,
 		Session:     session,
 	})
 	if err != nil {
 		return currentPolicyContext{}, fmt.Errorf("resolve effective policy: %w", err)
 	}
 	return currentPolicyContext{
+		Tool:     tool,
 		Home:     home,
 		Project:  project,
 		Resolver: policyResolver,
@@ -110,7 +103,7 @@ func resolvePolicyContext(input *CommandInput, session *policy.SessionNetworkInp
 }
 
 func runNetworkStatus(input *CommandInput) int {
-	policyCtx, err := resolvePreviewPolicyContext(input)
+	policyCtx, err := resolveSessionPolicyContext(input, false)
 	if err != nil {
 		logx.Warnf("Cannot preview the session policy for these options (%v); showing the tool spec and policy files only", err)
 		policyCtx, err = resolveCurrentPolicyContext(input)
@@ -123,7 +116,7 @@ func runNetworkStatus(input *CommandInput) int {
 
 	fmt.Printf("Network Policy Status\n")
 	fmt.Printf("  Mode:           %s (source: %s)\n", ep.Mode, ep.ModeSource)
-	fmt.Printf("  Tool:           %s\n", input.Options.Tool)
+	fmt.Printf("  Tool:           %s\n", policyCtx.Tool)
 	fmt.Printf("  Inherit built-in: %v\n", ep.InheritToolAllowlist)
 	fmt.Printf("  Global domains: %d\n", len(ep.Domains))
 	toolDomainCount := 0
@@ -256,7 +249,7 @@ func runNetworkPrint(input *CommandInput) int {
 	if input.NetworkPrintJSON {
 		return writeNetworkPolicyJSON(os.Stdout, input)
 	}
-	policyCtx, err := resolvePrintPolicyContext(input)
+	policyCtx, err := resolveSessionPolicyContext(input, true)
 	if err != nil {
 		logx.Errorf("Failed to resolve network policy: %v", err)
 		return 1
@@ -266,7 +259,7 @@ func runNetworkPrint(input *CommandInput) int {
 	// Use the same resolver selection as the deployed bundle so the preview
 	// faithfully reflects what the gateway runs.
 	resolver := network.FirstIPv4Resolver(ep.Resolvers)
-	out, err := network.RenderDnsmasqConfigPreviewForTool(ep, input.Options.Tool, resolver)
+	out, err := network.RenderDnsmasqConfigPreviewForTool(ep, policyCtx.Tool, resolver)
 	if err != nil {
 		logx.Errorf("Failed to render dnsmasq config: %v", err)
 		return 1
@@ -276,7 +269,7 @@ func runNetworkPrint(input *CommandInput) int {
 }
 
 func runNetworkDiff(input *CommandInput) int {
-	policyCtx, err := resolvePreviewPolicyContext(input)
+	policyCtx, err := resolveSessionPolicyContext(input, false)
 	if err != nil {
 		logx.Errorf("Failed to resolve network policy: %v", err)
 		return 1
@@ -289,7 +282,7 @@ func runNetworkDiff(input *CommandInput) int {
 		builtInDomains, _ = network.ExtractDomainsRecursive(policyCtx.Resolved.AllowlistPath, input.Ctx.Paths.AllowlistsDir)
 	}
 
-	diff := network.Diff(ep, builtInDomains, input.Options.Tool)
+	diff := network.Diff(ep, builtInDomains, policyCtx.Tool)
 	fmt.Print(network.FormatDiff(diff))
 	return 0
 }

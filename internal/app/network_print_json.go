@@ -41,33 +41,36 @@ type networkPolicyProject struct {
 // writeNetworkPolicyJSON reports the allowlist a run with the input's options
 // enforces.
 func writeNetworkPolicyJSON(w io.Writer, input *CommandInput) int {
-	envelope := newNetworkPolicyEnvelope(&input.Options.Tool, networkPolicyProjectOf(input.Ctx.Project()))
-	return writeNetworkPolicyEnvelope(w, envelope, fillNetworkPolicyEnvelope(&envelope, input))
-}
-
-func newNetworkPolicyEnvelope(tool *string, project *networkPolicyProject) networkPolicyEnvelope {
-	return networkPolicyEnvelope{
-		SchemaVersion: networkPolicySchemaVersion,
-		Kind:          "network-policy",
-		Tool:          tool,
-		Project:       project,
-		Domains:       []string{},
-		Denied:        []string{},
-		Notes:         []string{},
-	}
-}
-
-// networkPolicyProjectOf is nil when the project could not be resolved.
-func networkPolicyProjectOf(project model.Project, err error) *networkPolicyProject {
+	policyCtx, err := resolveSessionPolicyContext(input, true)
 	if err != nil {
-		return nil
+		return writeNetworkPolicyEnvelope(w, networkPolicyEnvelope{Tool: &input.Options.Tool}, input.Ctx.Project, err)
 	}
-	return &networkPolicyProject{Dir: project.Dir, Hash: project.Hash}
+	ep := policyCtx.Resolved.Effective
+	envelope := networkPolicyEnvelope{Tool: &policyCtx.Tool}
+	mode := model.NetworkModeUnrestricted
+	if !strings.EqualFold(strings.TrimSpace(ep.Mode), model.NetworkModeUnrestricted) {
+		mode = model.NetworkModeRestricted
+		envelope.Domains, envelope.Denied, err = network.EffectiveRenderDomainsForTool(ep, policyCtx.Tool)
+		if err != nil {
+			return writeNetworkPolicyEnvelope(w, networkPolicyEnvelope{Tool: &policyCtx.Tool}, input.Ctx.Project, err)
+		}
+		envelope.Notes = []string{networkPolicyNoteHostsFromCredential}
+	}
+	envelope.Mode = &mode
+	return writeNetworkPolicyEnvelope(w, envelope, input.Ctx.Project, nil)
 }
 
-// writeNetworkPolicyEnvelope writes envelope, carrying policyErr in error, and
-// returns the exit code: 1 when the policy could not be resolved.
-func writeNetworkPolicyEnvelope(w io.Writer, envelope networkPolicyEnvelope, policyErr error) int {
+// writeNetworkPolicyEnvelope completes envelope with its constant fields, the
+// project when resolveProject succeeds, and policyErr, writes it, and returns
+// the exit code: 1 when the policy could not be resolved.
+func writeNetworkPolicyEnvelope(w io.Writer, envelope networkPolicyEnvelope, resolveProject func() (model.Project, error), policyErr error) int {
+	envelope.SchemaVersion, envelope.Kind = networkPolicySchemaVersion, "network-policy"
+	if project, err := resolveProject(); err == nil {
+		envelope.Project = &networkPolicyProject{Dir: project.Dir, Hash: project.Hash}
+	}
+	envelope.Domains = append([]string{}, envelope.Domains...)
+	envelope.Denied = append([]string{}, envelope.Denied...)
+	envelope.Notes = append([]string{}, envelope.Notes...)
 	code := 0
 	if policyErr != nil {
 		envelope.Error = policyErr.Error()
@@ -77,27 +80,4 @@ func writeNetworkPolicyEnvelope(w io.Writer, envelope networkPolicyEnvelope, pol
 		return 1
 	}
 	return code
-}
-
-func fillNetworkPolicyEnvelope(envelope *networkPolicyEnvelope, input *CommandInput) error {
-	policyCtx, err := resolvePrintPolicyContext(input)
-	if err != nil {
-		return err
-	}
-	ep := policyCtx.Resolved.Effective
-	mode := model.NetworkModeRestricted
-	if strings.EqualFold(strings.TrimSpace(ep.Mode), model.NetworkModeUnrestricted) {
-		mode = model.NetworkModeUnrestricted
-	}
-	if mode == model.NetworkModeRestricted {
-		domains, denied, err := network.EffectiveRenderDomainsForTool(ep, input.Options.Tool)
-		if err != nil {
-			return err
-		}
-		envelope.Domains = append(envelope.Domains, domains...)
-		envelope.Denied = append(envelope.Denied, denied...)
-		envelope.Notes = append(envelope.Notes, networkPolicyNoteHostsFromCredential)
-	}
-	envelope.Mode = &mode
-	return nil
 }

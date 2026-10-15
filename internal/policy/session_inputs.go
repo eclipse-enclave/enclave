@@ -18,15 +18,27 @@ import (
 // SessionNetworkInputs are a session's contributions to its network policy on
 // top of the built-in allowlist and the policy files. Session startup and the
 // `enclave network` preview both resolve through them, so the preview shows
-// the allowlist a run with the same options enforces.
+// the allowlist a run with the same options enforces, except release hosts
+// selected at session start, which previews cannot know.
 type SessionNetworkInputs struct {
 	Profile         model.Profile
 	Features        []model.Extension
 	AllowDomains    []string
 	AllowAllNetwork bool
 	// ReleaseHostOverrides maps a secret id to hosts selected at session start
-	// through serviceAuth.hostsFromCredential; previews leave it empty.
+	// through serviceAuth.hostsFromCredential.
 	ReleaseHostOverrides map[string][]string
+}
+
+// NewSessionNetworkInputs returns the network inputs of a session started with
+// the given tool, features, and run options.
+func NewSessionNetworkInputs(profile model.Profile, features []model.Extension, run model.RunOptions) SessionNetworkInputs {
+	return SessionNetworkInputs{
+		Profile:         profile,
+		Features:        features,
+		AllowDomains:    run.AllowDomains,
+		AllowAllNetwork: run.AllowAllNetwork,
+	}
 }
 
 // SpecDomains unions network.allowedDomains/deniedDomains across the tool spec

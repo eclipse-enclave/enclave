@@ -253,7 +253,12 @@ Use this when adding a new option so you do not stop after `options_def.go`:
   add the key to `removedConfigFields` in `internal/config/config.go` so
   `readDefaults()` rejects it loudly instead of silently ignoring it.
 - Option registry:
-  add the definition in `internal/config/options_def.go`.
+  add the definition in `internal/config/options_def.go`, including the
+  required `AffectsSession` decision: `SessionAffected` if changing the value
+  makes a fresh session differ from a running one (image, features, mounts,
+  network, env, auth, backend), so it is recorded as session provenance in
+  `enclave ps --json`; `SessionUnaffected` for host-side, UX, or one-shot
+  options. Affected values must not carry secrets.
 - Generated outputs:
   run `make generate` after changing `options_def.go`.
 - Guardrail tests:

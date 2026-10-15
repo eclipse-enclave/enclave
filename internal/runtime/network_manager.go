@@ -81,9 +81,8 @@ func (m networkManager) Prepare(_ string, authState model.AuthState, _ SecretMap
 
 	// Render-ready domains: the allow set has exact and subdomain matches of
 	// denied domains filtered out, and the denied set is carried alongside so
-	// the startup gateway bundle blackholes them (deny wins). `enclave network
-	// print` renders the same domains for the same options, except hosts
-	// selected through serviceAuth.hostsFromCredential.
+	// the startup gateway bundle blackholes them (deny-wins, same rendering
+	// `enclave network print` shows).
 	allowedDomains, deniedDomains, err := network.EffectiveRenderDomainsForTool(effectivePolicy, m.profile.Name)
 	if err != nil {
 		return NetworkResult{}, fmt.Errorf("failed to resolve effective network domains: %w", err)

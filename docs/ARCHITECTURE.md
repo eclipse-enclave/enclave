@@ -142,6 +142,7 @@ The restricted network request flow has a separate
 - [`internal/netlogview/`](../internal/netlogview/) is the query side of that log — filter, aggregate, render — kept out of `netlog` so the gateway sidecar, which only appends and tails, neither links nor ships it.
 - [`internal/network/`](../internal/network/) implements network policy loading and merging for the `network.jsonc` configuration format. Handles dnsmasq config generation, JSONC parsing, and policy merge logic.
 - [`internal/policy/effective_resolver.go`](../internal/policy/effective_resolver.go) centralizes effective-policy resolution for startup, network status, and runtime apply.
+- [`internal/policy/session_inputs.go`](../internal/policy/session_inputs.go) collects a session's spec, feature, release-host, and `allow_domains` contributions, shared by session startup and the `network status`/`print`/`diff` preview.
 - [`internal/app/network_helpers.go`](../internal/app/network_helpers.go) discovers running gateways, verifies bundle mounts, hashes desired/running bundles, and confirms reload outcomes.
 
 ### DevContainer Support

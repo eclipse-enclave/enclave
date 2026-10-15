@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -71,6 +72,26 @@ func TestBackendFlagOnEngineCommands(t *testing.T) {
 				config.Defaults{Backend: "docker"}, config.Defaults{}, "")
 			if opts.Backend != "podman" {
 				t.Fatalf("configured backend overrode CLI choice: %q", opts.Backend)
+			}
+		})
+	}
+}
+
+func TestNetworkPreviewCommandsAcceptSessionPolicyFlags(t *testing.T) {
+	for _, command := range []string{"status", "print", "diff"} {
+		t.Run(command, func(t *testing.T) {
+			res, err := Parse([]string{"network", command, "--tool", "codex", "--features", "+github-cli", "--slim",
+				"--playwright-mcp", "--allow-domain", "api.example.com", "--allow-all-network"}, config.DefaultOptions())
+			if err != nil {
+				t.Fatal(err)
+			}
+			opts, sources := res.Options, res.Sources
+			if opts.Tool != "codex" || !slices.Equal(opts.Features, []string{"+github-cli"}) || !opts.Slim || !opts.PlaywrightMCP ||
+				!slices.Equal(opts.AllowDomains, []string{"api.example.com"}) || !opts.AllowAllNetwork {
+				t.Fatalf("unexpected options: %+v", opts)
+			}
+			if sources.Features != model.SourceCLI || sources.AllowDomains != model.SourceCLI || sources.AllowAllNetwork != model.SourceCLI {
+				t.Fatalf("unexpected sources: %+v", sources)
 			}
 		})
 	}

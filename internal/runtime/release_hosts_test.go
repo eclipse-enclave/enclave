@@ -98,7 +98,7 @@ func TestSpecNetworkDomainsIncludesOverriddenReleaseHost(t *testing.T) {
 		"gitlab-job-token": {"gitlab.example.com"},
 	}
 
-	allowed, _ := r.specNetworkDomains()
+	allowed, _ := r.sessionNetworkInputs().SpecDomains()
 
 	for _, want := range []string{"gitlab.example.com", "gitlab.com", "*.gitlab.com"} {
 		if !slices.Contains(allowed, want) {

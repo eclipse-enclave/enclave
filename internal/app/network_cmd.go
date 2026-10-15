@@ -9,7 +9,9 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"os"
 	"strings"
 
 	"enclave/internal/backend"
@@ -19,6 +21,7 @@ import (
 	"enclave/internal/model"
 	"enclave/internal/network"
 	"enclave/internal/policy"
+	"enclave/internal/runtime"
 	"enclave/internal/util"
 )
 
@@ -29,7 +32,36 @@ type currentPolicyContext struct {
 	Resolved policy.ResolveResult
 }
 
+// resolveCurrentPolicyContext resolves the policy from the tool spec and the
+// policy files only, as running gateways are compared and reloaded against it.
 func resolveCurrentPolicyContext(input *CommandInput) (currentPolicyContext, error) {
+	return resolvePolicyContext(input, nil)
+}
+
+// resolvePreviewPolicyContext resolves the policy a run with the same options
+// enforces. Hosts selected at session start through
+// serviceAuth.hostsFromCredential are unknown here and not included.
+func resolvePreviewPolicyContext(input *CommandInput) (currentPolicyContext, error) {
+	opts, warnings, err := validateAsRun(input.Ctx.Paths, input.Options, input.Options.Sources)
+	if err != nil {
+		return currentPolicyContext{}, err
+	}
+	for _, warning := range warnings {
+		logx.Warnf(warning)
+	}
+	profile, err := config.LoadProfile(input.Ctx.Paths, opts.Tool)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return currentPolicyContext{}, fmt.Errorf("load tool %q: %w", opts.Tool, err)
+	}
+	runtimeConfig, unknown := sessionRuntimeConfig(input.Ctx.Paths, opts, profile)
+	for _, name := range unknown {
+		logx.Warnf("Unknown feature %q selected; it is ignored", name)
+	}
+	session := runtime.SessionNetworkInputs(runtimeConfig)
+	return resolvePolicyContext(input, &session)
+}
+
+func resolvePolicyContext(input *CommandInput, session *policy.SessionNetworkInputs) (currentPolicyContext, error) {
 	home, err := config.ResolveHostHome()
 	if err != nil {
 		return currentPolicyContext{}, fmt.Errorf("resolve home: %w", err)
@@ -43,6 +75,7 @@ func resolveCurrentPolicyContext(input *CommandInput) (currentPolicyContext, err
 		ProjectDir:  input.Ctx.ProjectDir,
 		ProjectHash: project.Hash,
 		Tool:        input.Options.Tool,
+		Session:     session,
 	})
 	if err != nil {
 		return currentPolicyContext{}, fmt.Errorf("resolve effective policy: %w", err)
@@ -56,9 +89,13 @@ func resolveCurrentPolicyContext(input *CommandInput) (currentPolicyContext, err
 }
 
 func runNetworkStatus(input *CommandInput) int {
-	policyCtx, err := resolveCurrentPolicyContext(input)
+	policyCtx, err := resolvePreviewPolicyContext(input)
 	if err != nil {
-		logx.Errorf("Failed to resolve current policy context: %v", err)
+		logx.Warnf("Cannot preview the session policy for these options (%v); showing the tool spec and policy files only", err)
+		policyCtx, err = resolveCurrentPolicyContext(input)
+	}
+	if err != nil {
+		logx.Errorf("Failed to resolve network policy: %v", err)
 		return 1
 	}
 	ep := policyCtx.Resolved.Effective
@@ -195,9 +232,9 @@ func runNetworkStatus(input *CommandInput) int {
 }
 
 func runNetworkPrint(input *CommandInput) int {
-	policyCtx, err := resolveCurrentPolicyContext(input)
+	policyCtx, err := resolvePreviewPolicyContext(input)
 	if err != nil {
-		logx.Errorf("Failed to resolve current policy context: %v", err)
+		logx.Errorf("Failed to resolve network policy: %v", err)
 		return 1
 	}
 	ep := policyCtx.Resolved.Effective
@@ -215,9 +252,9 @@ func runNetworkPrint(input *CommandInput) int {
 }
 
 func runNetworkDiff(input *CommandInput) int {
-	policyCtx, err := resolveCurrentPolicyContext(input)
+	policyCtx, err := resolvePreviewPolicyContext(input)
 	if err != nil {
-		logx.Errorf("Failed to resolve current policy context: %v", err)
+		logx.Errorf("Failed to resolve network policy: %v", err)
 		return 1
 	}
 	ep := policyCtx.Resolved.Effective

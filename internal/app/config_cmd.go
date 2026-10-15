@@ -325,12 +325,7 @@ func buildConfigEnvelope(input *CommandInput, opts model.Options, profile config
 		addWarning(configWarningProjectUnavailable, "", fmt.Sprintf("Cannot resolve the project: %v", err))
 	}
 
-	validationOpts := opts
-	if strings.TrimSpace(validationOpts.Backend) == backend.NameAuto {
-		// config leaves the auto backend unresolved; validate the docker default.
-		validationOpts.Backend = backend.NameDocker
-	}
-	validated, _, validationWarnings, validationErr := ValidateOptions(validationOpts, raw.Sources, ValidationContext{Paths: input.Ctx.Paths, Action: "run"})
+	validated, validationWarnings, validationErr := validateAsRun(input.Ctx.Paths, opts, raw.Sources)
 	for _, message := range validationWarnings {
 		addWarning(configWarningValidation, "", message)
 	}
@@ -404,6 +399,16 @@ func buildConfigEnvelope(input *CommandInput, opts model.Options, profile config
 		envelope.Options[def.Name] = option
 	}
 	return envelope
+}
+
+// validateAsRun validates opts the way a run would. The auto backend is left
+// unresolved by read-only commands, so the docker default is validated.
+func validateAsRun(paths model.Paths, opts model.Options, sources model.OptionSources) (model.Options, []string, error) {
+	if strings.TrimSpace(opts.Backend) == backend.NameAuto {
+		opts.Backend = backend.NameDocker
+	}
+	validated, _, warnings, err := ValidateOptions(opts, sources, ValidationContext{Paths: paths, Action: "run"})
+	return validated, warnings, err
 }
 
 // resolveEnabledFeatureNames returns the features a run would enable, without

@@ -134,6 +134,8 @@ in one step, printing the container name so you can reattach later with
 | `enclave network apply` | Apply policy to running gateways |
 | `enclave network log` | Show gateway network audit events |
 
+`network status`, `print`, and `diff` reflect the run options that shape the allowlist and accept their flags: `--tool`, `--features`, `--slim`, `--playwright-mcp`, `--allow-domain`, and `--allow-all-network` (`status` also takes `--backend`). See [Networking](networking.md#managing-the-network-policy).
+
 Network mutation commands are global-only today. `--project` scope is planned but not yet supported.
 
 `network log` reads the gateway audit log of the current project and tool, including sessions that have already exited:

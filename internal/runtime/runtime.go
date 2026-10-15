@@ -10,7 +10,6 @@ package runtime
 import (
 	"context"
 	"fmt"
-	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -1061,48 +1060,22 @@ func (r *Runtime) specProxyManaged() []string {
 	return out
 }
 
-// specNetworkDomains unions network.allowedDomains/deniedDomains across the
-// tool spec and all enabled mixins, plus every declared HTTP release host
-// (serviceDomains/serviceAuth): a host the proxy injects credentials for must
-// be resolvable, or the release rule is dead weight. A service mixin's
-// declared reachability (and deny rules) apply to the session exactly like
-// the tool spec's own.
-func (r *Runtime) specNetworkDomains() (allowed []string, denied []string) {
-	allowed = append([]string(nil), r.profile.AllowedDomains...)
-	denied = append([]string(nil), r.profile.DeniedDomains...)
-	allowed = append(allowed, r.releaseHosts(r.profile.Secrets)...)
-	for _, feature := range r.features {
-		allowed = append(allowed, feature.AllowedDomains...)
-		denied = append(denied, feature.DeniedDomains...)
-		allowed = append(allowed, r.releaseHosts(feature.Secrets)...)
+// SessionNetworkInputs returns the network inputs of a session started with
+// cfg, before any release host is selected through
+// serviceAuth.hostsFromCredential.
+func SessionNetworkInputs(cfg model.RuntimeConfig) policy.SessionNetworkInputs {
+	return policy.SessionNetworkInputs{
+		Profile:         cfg.Profile,
+		Features:        cfg.Features,
+		AllowDomains:    cfg.Run.AllowDomains,
+		AllowAllNetwork: cfg.Run.AllowAllNetwork,
 	}
-	return allowed, denied
 }
 
-// releaseHosts is model.ReleaseHosts plus any host selected at runtime through
-// serviceAuth.hostsFromCredential, so that host becomes resolvable exactly like
-// a declared one. The override narrows where the token is released, not what
-// the session can reach: dropping the declared hosts here would make e.g.
-// gitlab.com unresolvable for tools whose allowlist has no other source for it.
-// The loaded spec is left untouched.
-func (r *Runtime) releaseHosts(secrets map[string]model.SecretConfig) []string {
-	if len(r.releaseHostOverrides) == 0 {
-		return model.ReleaseHosts(secrets)
-	}
-	effective := maps.Clone(secrets)
-	for id, hosts := range r.releaseHostOverrides {
-		sc, ok := effective[id]
-		if !ok || sc.Release == nil || sc.Release.HTTP == nil {
-			continue
-		}
-		release := *sc.Release
-		http := *release.HTTP
-		http.Hosts = append(append([]string{}, http.Hosts...), hosts...)
-		release.HTTP = &http
-		sc.Release = &release
-		effective[id] = sc
-	}
-	return model.ReleaseHosts(effective)
+func (r *Runtime) sessionNetworkInputs() policy.SessionNetworkInputs {
+	inputs := SessionNetworkInputs(model.RuntimeConfig{Profile: r.profile, Features: r.features, Run: r.run})
+	inputs.ReleaseHostOverrides = r.releaseHostOverrides
+	return inputs
 }
 
 // setReleaseHostOverrides records the release hosts selected at runtime. The
@@ -1595,32 +1568,20 @@ func (r *Runtime) resolveEffectivePolicy() (policy.ResolveResult, error) {
 			r.policyErr = fmt.Errorf("load global policy %s: %w", policyPath, err)
 			return policy.ResolveResult{}, r.policyErr
 		}
-		specAllowed, specDenied := r.specNetworkDomains()
-		effective := network.Merge(network.MergeConfig{
-			GlobalPolicy:       globalPolicy,
-			SpecAllowedDomains: specAllowed,
-			SpecDeniedDomains:  specDenied,
-		})
-		if r.run.AllowAllNetwork {
-			effective.Mode = model.NetworkModeUnrestricted
-			effective.ModeSource = "allow-all-network"
-		}
 		r.policyResult = policy.ResolveResult{
 			GlobalPolicy: globalPolicy,
-			Effective:    effective,
+			Effective:    r.sessionNetworkInputs().Merge(network.MergeConfig{GlobalPolicy: globalPolicy}),
 		}
 		return r.policyResult, nil
 	}
 
-	specAllowed, specDenied := r.specNetworkDomains()
+	session := r.sessionNetworkInputs()
 	resolver := policy.NewEffectiveResolver(r.paths, r.host.Home)
 	resolved, err := resolver.Resolve(policy.ResolveInput{
-		ProjectDir:         r.project.Dir,
-		ProjectHash:        r.project.Hash,
-		Tool:               tool,
-		AllowAllNetwork:    r.run.AllowAllNetwork,
-		SpecAllowedDomains: nonNilStrings(specAllowed),
-		SpecDeniedDomains:  nonNilStrings(specDenied),
+		ProjectDir:  r.project.Dir,
+		ProjectHash: r.project.Hash,
+		Tool:        tool,
+		Session:     &session,
 	})
 	if err != nil {
 		r.policyErr = err
@@ -1628,18 +1589,6 @@ func (r *Runtime) resolveEffectivePolicy() (policy.ResolveResult, error) {
 	}
 	r.policyResult = resolved
 	return resolved, nil
-}
-
-// nonNilStrings returns s unchanged when non-nil, or an empty (non-nil) slice
-// otherwise. The effective-policy resolver treats a nil SpecAllowedDomains/
-// SpecDeniedDomains as "not supplied" and reloads the tool spec from disk;
-// r.profile is already loaded, so passing an explicit empty slice avoids the
-// redundant per-session spec reparse for tools with no inline network domains.
-func nonNilStrings(s []string) []string {
-	if s == nil {
-		return []string{}
-	}
-	return s
 }
 
 func (r *Runtime) addToolSettingsTemplate(mounts *mountAccumulator) {

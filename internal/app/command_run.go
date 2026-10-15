@@ -121,26 +121,16 @@ func runExecutionCommand(input *CommandInput) int {
 	if resolvedBuildConfig.Devcontainer != nil {
 		devcontainerConfig = &resolvedBuildConfig.Devcontainer.RuntimeConfig
 	}
-	enabledFeatures := resolveEnabledFeatures(input.Ctx.Paths, opts.BuildOptions)
-
-	handler := tools.Resolve(profile.Name)
-	runner := runtime.New(model.RuntimeConfig{
-		Paths:                 input.Ctx.Paths,
-		Host:                  host,
-		Project:               project,
-		Profile:               profile,
-		Run:                   opts.RunOptions,
-		Auth:                  opts.AuthOptions,
-		Build:                 opts.BuildOptions,
-		RunSources:            opts.Sources.RunSources(),
-		Handler:               handler,
-		Devcontainer:          devcontainerConfig,
-		ValidatedDirs:         validatedDirs,
-		ValidatedReadonlyDirs: validatedReadonlyDirs,
-		YoloEnabled:           yoloEnabled,
-		Features:              enabledFeatures,
-		UserCommandMount:      input.UserCommandMount,
-	})
+	runtimeConfig, _ := sessionRuntimeConfig(input.Ctx.Paths, opts, profile)
+	runtimeConfig.Host = host
+	runtimeConfig.Project = project
+	runtimeConfig.Handler = tools.Resolve(profile.Name)
+	runtimeConfig.Devcontainer = devcontainerConfig
+	runtimeConfig.ValidatedDirs = validatedDirs
+	runtimeConfig.ValidatedReadonlyDirs = validatedReadonlyDirs
+	runtimeConfig.YoloEnabled = yoloEnabled
+	runtimeConfig.UserCommandMount = input.UserCommandMount
+	runner := runtime.New(runtimeConfig)
 	dockerOpts := dockerBackendOptions(host, input.Ctx.Paths, opts.BuildOptions, opts.RunOptions)
 	dockerOpts.ProjectDir = project.Dir
 	if devcontainerConfig != nil {
@@ -253,24 +243,32 @@ func runErrorExitCode(err error) int {
 	return 1
 }
 
-func resolveEnabledFeatures(paths model.Paths, build model.BuildOptions) []model.Extension {
+// sessionRuntimeConfig returns the session part of the runtime configuration
+// for the validated opts, plus the selected feature names that match no
+// feature. `enclave network` previews derive the session's network inputs
+// from it, so they match what the run enforces.
+func sessionRuntimeConfig(paths model.Paths, opts model.Options, profile model.Profile) (model.RuntimeConfig, []string) {
+	features, unknown := resolveEnabledFeatures(paths, opts.BuildOptions)
+	return model.RuntimeConfig{
+		Paths:      paths,
+		Profile:    profile,
+		Run:        opts.RunOptions,
+		Auth:       opts.AuthOptions,
+		Build:      opts.BuildOptions,
+		RunSources: opts.Sources.RunSources(),
+		Features:   features,
+	}, unknown
+}
+
+// resolveEnabledFeatures returns the available features build selects and the
+// selected names that match none of them.
+func resolveEnabledFeatures(paths model.Paths, build model.BuildOptions) ([]model.Extension, []string) {
 	allFeatures, err := config.ListFeatures(paths)
 	if err != nil {
 		logx.Debugf("Failed to list features: %v", err)
-		return nil
+		return nil, nil
 	}
-	selected := selectFeatures(allFeatures, build)
-	requested := make(map[string]bool, len(selected))
-	for _, name := range selected {
-		requested[name] = true
-	}
-	var result []model.Extension
-	for _, feat := range allFeatures {
-		if requested[feat.Name] {
-			result = append(result, feat)
-		}
-	}
-	return result
+	return partitionSelected(allFeatures, selectFeatures(allFeatures, build))
 }
 
 func ensureRuntimeImage(input *CommandInput, opts model.Options, buildCfg *buildConfig, host model.Host, profile model.Profile) (buildConfig, int) {

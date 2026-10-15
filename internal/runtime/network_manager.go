@@ -76,15 +76,14 @@ func (m networkManager) Prepare(_ string, authState model.AuthState, _ SecretMap
 	}
 
 	if len(m.run.AllowDomains) > 0 {
-		// Copy first to avoid mutating the resolved policy's shared backing array.
-		effectivePolicy.Domains = append(append([]string(nil), effectivePolicy.Domains...), m.run.AllowDomains...)
 		logx.Infof("Allowlisted ad-hoc domains: %s", strings.Join(m.run.AllowDomains, ", "))
 	}
 
 	// Render-ready domains: the allow set has exact and subdomain matches of
 	// denied domains filtered out, and the denied set is carried alongside so
-	// the startup gateway bundle blackholes them (deny-wins, same rendering
-	// `enclave network print` shows).
+	// the startup gateway bundle blackholes them (deny wins). `enclave network
+	// print` renders the same domains for the same options, except hosts
+	// selected through serviceAuth.hostsFromCredential.
 	allowedDomains, deniedDomains, err := network.EffectiveRenderDomainsForTool(effectivePolicy, m.profile.Name)
 	if err != nil {
 		return NetworkResult{}, fmt.Errorf("failed to resolve effective network domains: %w", err)

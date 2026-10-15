@@ -20,7 +20,7 @@ import (
 func TestResolveEnabledFeaturesDefaults(t *testing.T) {
 	paths := testPathsWithFeatures(t)
 
-	got := resolveEnabledFeatures(paths, model.BuildOptions{})
+	got, _ := resolveEnabledFeatures(paths, model.BuildOptions{})
 	want := []string{"github-cli", "node-dev"}
 	if names := extensionNames(got); !reflect.DeepEqual(names, want) {
 		t.Fatalf("unexpected default-enabled features: got %v want %v", names, want)
@@ -30,7 +30,7 @@ func TestResolveEnabledFeaturesDefaults(t *testing.T) {
 func TestResolveEnabledFeaturesExplicitEmpty(t *testing.T) {
 	paths := testPathsWithFeatures(t)
 
-	got := resolveEnabledFeatures(paths, model.BuildOptions{Features: []string{}})
+	got, _ := resolveEnabledFeatures(paths, model.BuildOptions{Features: []string{}})
 	if len(got) != 0 {
 		t.Fatalf("expected no enabled features for explicit empty selection, got %v", extensionNames(got))
 	}
@@ -39,7 +39,7 @@ func TestResolveEnabledFeaturesExplicitEmpty(t *testing.T) {
 func TestResolveEnabledFeaturesSlim(t *testing.T) {
 	paths := testPathsWithFeatures(t)
 
-	got := resolveEnabledFeatures(paths, model.BuildOptions{Slim: true})
+	got, _ := resolveEnabledFeatures(paths, model.BuildOptions{Slim: true})
 	if len(got) != 0 {
 		t.Fatalf("expected no enabled features for --slim, got %v", extensionNames(got))
 	}
@@ -48,7 +48,7 @@ func TestResolveEnabledFeaturesSlim(t *testing.T) {
 func TestResolveEnabledFeaturesDevcontainerDefault(t *testing.T) {
 	paths := testPathsWithFeatures(t)
 
-	got := resolveEnabledFeatures(paths, model.BuildOptions{Devcontainer: true})
+	got, _ := resolveEnabledFeatures(paths, model.BuildOptions{Devcontainer: true})
 	if len(got) != 0 {
 		t.Fatalf("expected no enabled features for devcontainer default, got %v", extensionNames(got))
 	}
@@ -57,7 +57,7 @@ func TestResolveEnabledFeaturesDevcontainerDefault(t *testing.T) {
 func TestResolveEnabledFeaturesExplicitSelection(t *testing.T) {
 	paths := testPathsWithFeatures(t)
 
-	got := resolveEnabledFeatures(paths, model.BuildOptions{Features: []string{"github-cli"}})
+	got, _ := resolveEnabledFeatures(paths, model.BuildOptions{Features: []string{"github-cli"}})
 	want := []string{"github-cli"}
 	if names := extensionNames(got); !reflect.DeepEqual(names, want) {
 		t.Fatalf("unexpected explicit feature result: got %v want %v", names, want)
@@ -67,7 +67,7 @@ func TestResolveEnabledFeaturesExplicitSelection(t *testing.T) {
 func TestResolveEnabledFeaturesSelectionDefault(t *testing.T) {
 	paths := testPathsWithFeatures(t)
 
-	got := resolveEnabledFeatures(paths, model.BuildOptions{Features: []string{model.SelectionDefault}})
+	got, _ := resolveEnabledFeatures(paths, model.BuildOptions{Features: []string{model.SelectionDefault}})
 	want := []string{"github-cli", "node-dev"}
 	if names := extensionNames(got); !reflect.DeepEqual(names, want) {
 		t.Fatalf("unexpected default selector feature result: got %v want %v", names, want)
@@ -77,7 +77,7 @@ func TestResolveEnabledFeaturesSelectionDefault(t *testing.T) {
 func TestResolveEnabledFeaturesSelectionAll(t *testing.T) {
 	paths := testPathsWithFeatures(t)
 
-	got := resolveEnabledFeatures(paths, model.BuildOptions{Features: []string{model.FeatureSelectionAll}})
+	got, _ := resolveEnabledFeatures(paths, model.BuildOptions{Features: []string{model.FeatureSelectionAll}})
 	want := []string{"github-cli", "node-dev", "shell-extras"}
 	if names := extensionNames(got); !reflect.DeepEqual(names, want) {
 		t.Fatalf("unexpected all selector feature result: got %v want %v", names, want)
@@ -115,7 +115,7 @@ func TestExplicitEmptyFeaturesSurviveValidation(t *testing.T) {
 			if got.Features == nil || len(got.Features) != 0 {
 				t.Fatalf("Features = %#v, want explicit empty", got.Features)
 			}
-			if enabled := resolveEnabledFeatures(paths, got.BuildOptions); len(enabled) != 0 {
+			if enabled, _ := resolveEnabledFeatures(paths, got.BuildOptions); len(enabled) != 0 {
 				t.Fatalf("resolveEnabledFeatures = %v, want none", extensionNames(enabled))
 			}
 			selection, err := resolveRuntimeImageSelection(paths, got.BuildOptions, got.Tool)

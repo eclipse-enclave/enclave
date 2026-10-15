@@ -8,13 +8,108 @@
 package app
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"enclave/internal/backend"
+	"enclave/internal/config"
 	"enclave/internal/model"
 )
+
+// networkPreviewTestInput selects a tool with a spec domain, a feature with
+// allowed, denied, and credential release domains, and an allow_domains entry.
+func networkPreviewTestInput(t *testing.T) *CommandInput {
+	t.Helper()
+	root := t.TempDir()
+	paths := model.Paths{
+		ToolsDir:      filepath.Join(root, "tools"),
+		FeaturesDir:   filepath.Join(root, "features"),
+		AllowlistsDir: filepath.Join(root, "allowlists"),
+	}
+	writeAppFile(t, filepath.Join(paths.ToolsDir, "speccy", config.SpecFilename), `schemaVersion: "1"
+kind: sandbox
+name: speccy
+sandbox:
+  entrypoint: { run: [speccy] }
+  configDir: .speccy
+network:
+  allowedDomains: [tool.example.com]
+`, 0o644)
+	writeAppFile(t, filepath.Join(paths.FeaturesDir, "svc", config.SpecFilename), `schemaVersion: "1"
+kind: mixin
+name: svc
+defaultEnabled: false
+credentials:
+  sources:
+    svc-token: { env: [SVC_TOKEN] }
+network:
+  allowedDomains: [svc.example.com]
+  deniedDomains: [telemetry.svc.example.com]
+  serviceDomains:
+    api.svc.example.org: svc-token
+  serviceAuth:
+    svc-token: { headerName: authorization, valueFormat: "Bearer %s" }
+`, 0o644)
+
+	opts := config.DefaultOptions()
+	opts.Tool = "speccy"
+	opts.Features = []string{"+svc"}
+	opts.AllowDomains = []string{"Adhoc.Example.com"}
+	return configTestInput(t, paths, opts, nil)
+}
+
+func TestNetworkPrintReflectsSessionOptions(t *testing.T) {
+	input := networkPreviewTestInput(t)
+
+	var code int
+	out := captureStdout(t, func() { code = runNetworkPrint(input) })
+	if code != 0 {
+		t.Fatalf("runNetworkPrint exit code = %d\n%s", code, out)
+	}
+	for _, want := range []string{
+		"server=/tool.example.com/",
+		"server=/svc.example.com/",
+		"server=/api.svc.example.org/",
+		"server=/adhoc.example.com/",
+		"address=/telemetry.svc.example.com/",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("network print missing %q:\n%s", want, out)
+		}
+	}
+
+	input.Options.AllowAllNetwork = true
+	out = captureStdout(t, func() { code = runNetworkPrint(input) })
+	if code != 0 || out != "# Mode: unrestricted\n" {
+		t.Fatalf("network print with allow_all_network = %d %q, want the unrestricted marker", code, out)
+	}
+}
+
+// Invalid options unrelated to the network must not hide running gateways
+// from status, while print and diff still reject them.
+func TestNetworkStatusFallsBackOnInvalidOptions(t *testing.T) {
+	stubDockerPing(t, errors.New("engine down"))
+	input := networkPreviewTestInput(t)
+	input.Options.ProjectMount = "bogus"
+
+	var code int
+	out, errOut := captureOutput(t, func() { code = runNetworkStatus(input) })
+	if code != 0 || !strings.Contains(out, "Runtime policy state:") {
+		t.Fatalf("runNetworkStatus = %d, want the runtime section:\n%s", code, out)
+	}
+	if !strings.Contains(errOut, "Cannot preview the session policy for these options (--project-mount") {
+		t.Fatalf("stderr = %q, want the preview fallback warning", errOut)
+	}
+	for name, run := range map[string]func(*CommandInput) int{"print": runNetworkPrint, "diff": runNetworkDiff} {
+		captureOutput(t, func() { code = run(input) })
+		if code != 1 {
+			t.Fatalf("%s exit code = %d, want 1 for invalid options", name, code)
+		}
+	}
+}
 
 func TestHashGatewayBundleDirStableForContent(t *testing.T) {
 	dir := t.TempDir()

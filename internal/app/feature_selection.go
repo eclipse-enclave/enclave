@@ -26,16 +26,30 @@ func resolveFeatureSelection(paths model.Paths, build model.BuildOptions) (selec
 		return nil, nil, err
 	}
 	selected = selectFeatures(allFeatures, build)
-	available := make(map[string]struct{}, len(allFeatures))
-	for _, feature := range allFeatures {
-		available[feature.Name] = struct{}{}
+	_, unknown = partitionSelected(allFeatures, selected)
+	return selected, unknown, nil
+}
+
+// partitionSelected splits the selected names into the matching features, in
+// listing order, and the names that match none, in selection order.
+func partitionSelected(all []model.Extension, selected []string) (enabled []model.Extension, unknown []string) {
+	requested := make(map[string]bool, len(selected))
+	for _, name := range selected {
+		requested[name] = true
+	}
+	available := make(map[string]bool, len(all))
+	for _, feature := range all {
+		available[feature.Name] = true
+		if requested[feature.Name] {
+			enabled = append(enabled, feature)
+		}
 	}
 	for _, name := range selected {
-		if _, ok := available[name]; !ok {
+		if !available[name] {
 			unknown = append(unknown, name)
 		}
 	}
-	return selected, unknown, nil
+	return enabled, unknown
 }
 
 func selectFeatures(allFeatures []model.Extension, build model.BuildOptions) []string {

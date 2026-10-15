@@ -163,6 +163,10 @@ Values without prefixes replace the parent set entirely.
 applied against the implicit default-enabled set, so `["-node-dev"]` removes
 that default feature and `[]` means "none".
 
+Feature names, including `+name` entries, must match an installed extension;
+unknown names fail before building or starting a session. Unknown `-name`
+removals only warn. Use `enclave features list` to see available names.
+
 `host_config_paths` is resolved per tool against that tool's reviewed
 `passthroughPaths` from its `spec.yaml`. Use:
 

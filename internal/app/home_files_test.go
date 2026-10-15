@@ -166,15 +166,13 @@ func installHomeFilesScript(t *testing.T) string {
 }
 
 // TestInstallExtensionHomeFilesRespectsSelection verifies the full build script
-// materializes files/home for enabled features and included tools while skipping
-// a defaultEnabled:false feature. Requires mikefarah/yq v4 (skipped otherwise);
-// a docker-build spot-check covers selection on hosts without it.
+// materializes files/home for enabled features and included tools, distinguishing
+// an unset selection (defaults) from an explicitly empty one (no features).
 func TestInstallExtensionHomeFilesRespectsSelection(t *testing.T) {
 	if !hasMikefarahYq(t) {
 		t.Skip("requires mikefarah/yq v4; host has kislyuk yq")
 	}
 	root := t.TempDir()
-	home := t.TempDir()
 	featuresDir := filepath.Join(root, "features")
 	toolsDir := filepath.Join(root, "tools")
 
@@ -193,27 +191,38 @@ func TestInstallExtensionHomeFilesRespectsSelection(t *testing.T) {
 		"schemaVersion: \"1\"\nkind: sandbox\nname: included-tool\n", 0o644)
 	writeHomeFilesFixture(t, filepath.Join(toolsDir, "included-tool", "files", "home", "tool.txt"), "t\n", 0o644)
 
-	cmd := exec.Command("bash", installHomeFilesScript(t))
-	cmd.Env = []string{
-		"PATH=" + os.Getenv("PATH"),
-		"HOME=" + home,
-		"FEATURES=default",
-		"AGENT_TOOLS=all",
-		"ENCLAVE_FEATURES_DIR=" + featuresDir,
-		"ENCLAVE_TOOLS_DIR=" + toolsDir,
+	cases := []struct {
+		name        string
+		featuresEnv []string
+		wantEnabled bool
+	}{
+		{"default", []string{"FEATURES=default"}, true},
+		{"unset", nil, true},
+		{"empty", []string{"FEATURES="}, false},
 	}
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("install-extension-home-files: %v\n%s", err, out)
-	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			cmd := exec.Command("bash", installHomeFilesScript(t))
+			cmd.Env = append([]string{
+				"PATH=" + os.Getenv("PATH"),
+				"HOME=" + home,
+				"AGENT_TOOLS=all",
+				"ENCLAVE_FEATURES_DIR=" + featuresDir,
+				"ENCLAVE_TOOLS_DIR=" + toolsDir,
+			}, tc.featuresEnv...)
+			if out, err := cmd.CombinedOutput(); err != nil {
+				t.Fatalf("install-extension-home-files: %v\n%s", err, out)
+			}
 
-	if _, err := os.Stat(filepath.Join(home, "enabled.txt")); err != nil {
-		t.Fatalf("enabled feature file should be baked: %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(home, "tool.txt")); err != nil {
-		t.Fatalf("included tool file should be baked: %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(home, "disabled.txt")); err == nil {
-		t.Fatalf("disabled feature file must NOT be baked")
+			if tc.wantEnabled {
+				assertPathExists(t, filepath.Join(home, "enabled.txt"))
+			} else {
+				assertPathMissing(t, filepath.Join(home, "enabled.txt"))
+			}
+			assertPathExists(t, filepath.Join(home, "tool.txt"))
+			assertPathMissing(t, filepath.Join(home, "disabled.txt"))
+		})
 	}
 }
 

@@ -19,7 +19,7 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/common.sh"
 # Features: honor defaultEnabled / the FEATURES selection.
 while IFS=$'\t' read -r _priority _name extdir; do
     enclave_copy_home_files "$extdir"
-done < <(enclave_list_enabled_features "${FEATURES:-default}")
+done < <(enclave_list_enabled_features "${FEATURES-default}")
 
 # Tools: honor defaultIncluded / the AGENT_TOOLS selection.
 if [ -d "$ENCLAVE_TOOLS_DIR" ]; then

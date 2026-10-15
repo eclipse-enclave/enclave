@@ -243,6 +243,12 @@ store that holds memory; the other `--keep` kinds do not apply there. See
 | `--progress <quiet\|compact\|verbose>` | Build output style |
 | `--force-base-image` | Bypass devcontainer base image compatibility checks |
 
+Feature names in `--features` (including `+name`) must match an installed
+extension. Unknown names fail before building or starting a session, including
+with `--no-rebuild`; unknown `-name` removals only warn. Run
+`enclave features list` to see available names. `--slim` and `--features none`
+build tool-only images without feature packages or home files.
+
 For terminal-wide rebuild suppression, use `export ENCLAVE_NO_REBUILD=1`.
 Session commands (`run`, `shell`, `continue`, `resume`, devcontainer run/shell,
 and user-defined session commands) then reuse local runtime and gateway images

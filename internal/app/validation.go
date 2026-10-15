@@ -46,6 +46,25 @@ func ValidateOptions(opts model.Options, sources model.OptionSources, ctx Valida
 	if err := validateBackendName(opts.Backend); err != nil {
 		return opts, sources, warnings, err
 	}
+	normalizedBuildOptions, featureWarnings, normErr := normalizeConfiguredBuildOptions(ctx.Paths, opts.BuildOptions)
+	featureSource := "features"
+	switch sources.Features {
+	case model.SourceCLI:
+		featureSource = "--features"
+	case model.SourceGlobal:
+		featureSource = "features in global config"
+	case model.SourceProject:
+		featureSource = "features in project config"
+	case model.SourceToolOverride:
+		featureSource = "features in tool override"
+	}
+	for _, warning := range featureWarnings {
+		warnings = append(warnings, featureSource+": "+warning)
+	}
+	if normErr != nil {
+		return opts, sources, warnings, fmt.Errorf("%s: %w", featureSource, normErr)
+	}
+	opts.BuildOptions = normalizedBuildOptions
 	if opts.Backend == backend.NameQEMU && isRunAction(ctx.Action) {
 		var qemuWarnings []string
 		opts, qemuWarnings, err = coerceQEMURunOptions(opts, sources, ctx.Paths)
@@ -120,11 +139,6 @@ func ValidateOptions(opts model.Options, sources model.OptionSources, ctx Valida
 	default:
 		return opts, sources, warnings, fmt.Errorf("--progress must be %s, %s, or %s", model.BuildProgressQuiet, model.BuildProgressCompact, model.BuildProgressVerbose)
 	}
-	normalizedBuildOptions, normErr := normalizeConfiguredBuildOptions(ctx.Paths, opts.BuildOptions)
-	if normErr != nil {
-		return opts, sources, warnings, normErr
-	}
-	opts.BuildOptions = normalizedBuildOptions
 	if strings.TrimSpace(opts.ImageName) == "" {
 		return opts, sources, warnings, fmt.Errorf("--image-name requires a non-empty value")
 	}

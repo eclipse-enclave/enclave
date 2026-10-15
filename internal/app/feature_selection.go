@@ -8,17 +8,63 @@
 package app
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 
 	"enclave/internal/model"
 )
 
+func validateFeatureNames(requested []string, allFeatures []model.Extension) ([]string, error) {
+	available := make(map[string]struct{}, len(allFeatures))
+	for _, feature := range allFeatures {
+		available[feature.Name] = struct{}{}
+	}
+
+	var unknown, unknownRemovals []string
+	for _, raw := range requested {
+		name := strings.TrimSpace(raw)
+		removal := strings.HasPrefix(name, "-")
+		if removal || strings.HasPrefix(name, "+") {
+			name = strings.TrimSpace(name[1:])
+		}
+		if name == "" {
+			continue
+		}
+		if !removal {
+			switch strings.ToLower(name) {
+			case model.SelectionDefault, model.FeatureSelectionAll:
+				continue
+			}
+		}
+		if _, ok := available[name]; ok {
+			continue
+		}
+		if removal {
+			unknownRemovals = append(unknownRemovals, name)
+		} else {
+			unknown = append(unknown, name)
+		}
+	}
+
+	var warnings []string
+	if len(unknownRemovals) > 0 {
+		warnings = append(warnings, fmt.Sprintf("ignoring removal of unknown features: %s; run 'enclave features list' to see available features", strings.Join(normalizeAndSortNames(unknownRemovals), ", ")))
+	}
+	if len(unknown) > 0 {
+		return warnings, fmt.Errorf("unknown features: %s; run 'enclave features list' to see available features", strings.Join(normalizeAndSortNames(unknown), ", "))
+	}
+	return warnings, nil
+}
+
 func resolveConfiguredFeatures(requested []string, allFeatures []model.Extension) []string {
 	if requested == nil {
 		return nil
 	}
 	normalized := normalizeAndSortNames(requested)
+	if len(normalized) == 0 {
+		return []string{}
+	}
 	if len(normalized) == 1 {
 		switch strings.ToLower(strings.TrimSpace(normalized[0])) {
 		case model.SelectionDefault:

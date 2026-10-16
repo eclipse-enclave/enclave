@@ -278,15 +278,11 @@ func shortBuild(build string) string {
 		return "unknown"
 	}
 	base, dirty := strings.CutSuffix(build, "-dirty")
-	if len(base) > 7 && isHex(base) {
+	if len(base) > 7 && isHexString(base) {
 		base = base[:7]
 	}
 	if dirty {
 		return base + "-dirty"
 	}
 	return base
-}
-
-func isHex(value string) bool {
-	return strings.Trim(strings.ToLower(value), "0123456789abcdef") == ""
 }

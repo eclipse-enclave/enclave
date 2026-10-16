@@ -334,7 +334,7 @@ func normalizeOptions(opts model.Options) (model.Options, []string) {
 	if opts.SkillsValidation == "" {
 		opts.SkillsValidation = model.SkillsValidationStrict
 	}
-	if opts.PlaywrightMCP {
+	if opts.PlaywrightMCP && opts.Tool == "claude" {
 		var overrodeRemoval bool
 		opts.Features, overrodeRemoval = ensureFeature(opts.Features, "playwright")
 		if overrodeRemoval {

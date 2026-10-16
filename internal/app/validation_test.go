@@ -411,6 +411,9 @@ func TestValidatePlaywrightMCP_NonClaude(t *testing.T) {
 	if got.PlaywrightMCP {
 		t.Error("PlaywrightMCP should be false for non-claude tool")
 	}
+	if got.Features != nil {
+		t.Errorf("ignored --playwright-mcp must not add a feature, got %v", got.Features)
+	}
 	found := false
 	for _, w := range warnings {
 		if w == "--playwright-mcp is only supported with Claude; ignoring" {

@@ -331,7 +331,7 @@ func TestConfigJSONFeatures(t *testing.T) {
 		{name: "additive with unknown", features: []string{"+shell-extras", "+ghost"}, wantValue: []any{"github-cli", "node-dev", "shell-extras"}, wantDirectives: []any{"+shell-extras", "+ghost"}, wantUnknown: true},
 		{name: "none", features: []string{}, wantValue: []any{}, wantDirectives: []any{}},
 		{name: "slim", slim: true, wantValue: []any{}},
-		{name: "playwright_mcp", playwrightMCP: true, wantValue: []any{"github-cli", "node-dev", "playwright"}},
+		{name: "playwright_mcp without claude", playwrightMCP: true, wantValue: []any{"github-cli", "node-dev"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

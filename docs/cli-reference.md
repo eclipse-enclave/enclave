@@ -210,6 +210,8 @@ store that holds memory; the other `--keep` kinds do not apply there. See
 | `--bridge-port <port>` | Forward a host port into the container (host → container, repeatable, comma-separated) |
 | `--add-dir <path>` | Mount an additional host directory |
 | `--add-readonly-dir <path>` | Mount an additional host directory read-only |
+| `--add-sensitive-dir <path>` | `--add-dir <path>` plus a sensitive-dir exception for `<path>` for this run (repeatable, CLI-only). See [Sensitive mounts](#sensitive-mounts) |
+| `--add-readonly-sensitive-dir <path>` | `--add-readonly-dir <path>` plus a sensitive-dir exception for `<path>` for this run (repeatable, CLI-only). See [Sensitive mounts](#sensitive-mounts) |
 | `--allow-sensitive-mounts` | Mount the project or additional directories even when they expose sensitive host data (CLI-only). See [Sensitive mounts](#sensitive-mounts) |
 | `--project-mount <writable\|readonly>` | Mount the project/worktree read-write (default) or read-only |
 | `--worktree-metadata <follow\|readonly\|none>` | Linked-worktree git metadata mounts: follow the project mount (default), force read-only, or skip |
@@ -315,7 +317,7 @@ To skip this check, for example in a CI job container, pass `--allow-root` or se
 
 ## Sensitive mounts
 
-Commands that start a session (`run`, `shell`, `continue`, `resume`, the `devcontainer` variants, and session user commands) refuse to mount a project directory or an `--add-dir`/`--add-readonly-dir` entry, including `add_dirs` from config, that would expose sensitive host data. Such a directory is sensitive when it:
+Commands that start a session (`run`, `shell`, `continue`, `resume`, the `devcontainer` variants, and session user commands) refuse to mount a project directory or an additional directory, including `add_dirs`/`add_readonly_dirs` from config, that would expose sensitive host data, unless a [sensitive-dir exception](#sensitive-dir-exceptions) covers it. Such a directory is sensitive when it:
 
 - is your home directory or one of its parents, such as `/` or `/home`; running enclave from `~` is refused
 - is, lies inside, or contains a hidden entry of your home directory, such as `~/.ssh`, `~/.aws`, `~/.config`, or `~/.bashrc`; a hidden entry that is a symlink counts where it points, so a stow-managed dotfiles directory is sensitive too
@@ -323,9 +325,24 @@ Commands that start a session (`run`, `shell`, `continue`, `resume`, the `devcon
 - is, lies inside, or contains enclave's own config, state, or cache root
 - contains the SSH agent socket named by `SSH_AUTH_SOCK`
 
-Read-only mounts get no exemption: reading is enough to leak credentials. The check runs before any image build and on every session start, including `continue` and `resume`. `exec` and `attach` enter running containers and are not checked.
+Read-only mounts are checked the same way: reading is enough to leak credentials. The check runs before any image build and on every session start, including `continue` and `resume`. `exec` and `attach` enter running containers and are not checked.
 
-To mount such a directory anyway, pass `--allow-sensitive-mounts` or set `ENCLAVE_ALLOW_SENSITIVE_MOUNTS=1`; each sensitive mount then prints a warning. The opt-in has no config key, so neither global nor project config can grant it. Mounts from the repository stay blocked even with the opt-in: devcontainer bind sources must lie inside the project, and linked-worktree git metadata outside the project is skipped with a warning when it is sensitive.
+### Sensitive-dir exceptions
+
+A sensitive-dir exception lets one sensitive directory be mounted. It covers its path and everything below it, never a parent; both are compared after `~` expansion and symlink resolution. Exceptions come from two sources, which add up:
+
+- `--add-sensitive-dir <path>` and `--add-readonly-sensitive-dir <path>` mount `<path>` like `--add-dir` and `--add-readonly-dir` and exempt it for this invocation. They add to `add_dirs`/`add_readonly_dirs` from config instead of replacing them. `continue` and `resume` start a fresh run, so pass the flags again. On a path that is not sensitive they behave exactly like `--add-dir` and `--add-readonly-dir`, so wrappers can pass them unconditionally.
+- `sensitive_dir_exceptions` in global config lists paths to exempt on every run; it mounts nothing. A global `tool_overrides.<tool>.sensitive_dir_exceptions` replaces the top-level list. An entry need not exist yet. Entries that are empty, relative, or home or one of its parents are ignored with a warning. Project config cannot set it.
+
+The flags also work for the project directory. `--add-sensitive-dir <project>` exempts it without mounting it a second time. `--add-readonly-sensitive-dir <project>` is refused, because the project mount mode is set with `--project-mount readonly`. An exception for a parent of the project, such as `--add-sensitive-dir ~/.dotfiles` run from `~/.dotfiles/nvim`, mounts that parent and covers the project.
+
+Every exempted mount prints a warning on every start, naming the exception that covers it.
+
+No exception covers a hard-protected location: your home directory and its parents, enclave's own config, state, and cache roots, and the SSH agent socket. A mount that is, lies inside, or contains one of them is refused even when an exception covers it; mount a narrower directory instead. Exposing enclave's roots would let the agent edit `config.json` to widen its own exceptions or network access for the next run, or add a host command under `commands/host/` that runs on the host. Whoever reaches the agent socket can sign with your SSH keys. The roots count where they really live: with `~/.config` linked to `~/.dotfiles/config`, `~/.dotfiles` contains enclave's config root.
+
+### Mounting all sensitive paths
+
+To mount every sensitive directory, hard-protected ones included, pass `--allow-sensitive-mounts` or set `ENCLAVE_ALLOW_SENSITIVE_MOUNTS=1`; each sensitive mount then prints a warning. This blanket opt-in has no config key, so neither global nor project config can grant it; global config can only exempt specific paths. Mounts from the repository stay blocked even with the opt-in or an exception: devcontainer bind sources must lie inside the project, and linked-worktree git metadata outside the project is skipped with a warning when it is sensitive.
 
 The mounts enclave adds itself, such as `~/.gitconfig`, `~/.claude/ide` for the IDE bridge, direnv approvals, and the session stores, come from protected locations by design and are not checked.
 

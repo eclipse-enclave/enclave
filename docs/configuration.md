@@ -173,7 +173,8 @@ and their diagnostics.
 
 Feature names, including `+name` entries, must match an installed extension;
 unknown names fail before building or starting a session. Unknown `-name`
-removals only warn. Use `enclave features list` to see available names.
+removals only warn, as do unknown names when `--slim` or `--backend qemu`
+discards the configured selection. Use `enclave features list` to see available names.
 
 `host_config_paths` is resolved per tool against that tool's reviewed
 `passthroughPaths` from its `spec.yaml`. Use:

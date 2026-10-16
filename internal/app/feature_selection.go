@@ -40,9 +40,17 @@ func validateFeatureNames(requested []string, allFeatures []model.Extension) ([]
 		warnings = append(warnings, fmt.Sprintf("ignoring removal of unknown features: %s; run 'enclave features list' to see available features", strings.Join(normalizeAndSortNames(unknownRemovals), ", ")))
 	}
 	if len(unknown) > 0 {
-		return warnings, fmt.Errorf("unknown features: %s; run 'enclave features list' to see available features", strings.Join(normalizeAndSortNames(unknown), ", "))
+		return warnings, &unknownFeaturesError{names: normalizeAndSortNames(unknown)}
 	}
 	return warnings, nil
+}
+
+type unknownFeaturesError struct {
+	names []string
+}
+
+func (e *unknownFeaturesError) Error() string {
+	return fmt.Sprintf("unknown features: %s; run 'enclave features list' to see available features", strings.Join(e.names, ", "))
 }
 
 func resolveConfiguredFeatures(requested []string, allFeatures []model.Extension) []string {

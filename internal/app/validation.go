@@ -8,6 +8,7 @@
 package app
 
 import (
+	"errors"
 	"fmt"
 	"sort"
 	"strconv"
@@ -56,6 +57,22 @@ func ValidateOptions(opts model.Options, sources model.OptionSources, ctx Valida
 	}
 	for _, warning := range featureWarnings {
 		warnings = append(warnings, featureSource+": "+warning)
+	}
+	var unknownFeatures *unknownFeaturesError
+	if errors.As(normErr, &unknownFeatures) && sources.Features != model.SourceCLI {
+		// A stale config selection must not block a session that discards it.
+		ignoredBy := ""
+		switch {
+		case opts.Slim:
+			ignoredBy = "--slim"
+		case opts.Backend == backend.NameQEMU && isRunAction(ctx.Action):
+			ignoredBy = "--backend qemu"
+		}
+		if ignoredBy != "" {
+			warnings = append(warnings, fmt.Sprintf("%s: %v; ignored because %s discards the feature selection", featureSource, normErr, ignoredBy))
+			normErr = nil
+			normalizedBuildOptions = opts.BuildOptions
+		}
 	}
 	if normErr != nil {
 		return opts, sources, warnings, fmt.Errorf("%s: %w", featureSource, normErr)

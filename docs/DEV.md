@@ -294,7 +294,8 @@ unset features default to none, so pass `--features` explicitly when needed.
 `--features none` is the explicit "no features" selection.
 Build-option normalization validates feature names against the installed
 extensions before image checks or session startup; unknown additions fail and
-unknown removals warn. Staged contexts retain `extensions/features` even when
+unknown removals warn. Config-sourced unknown additions only warn when `--slim`
+or the qemu backend discards the selection. Staged contexts retain `extensions/features` even when
 empty, and build scripts must preserve an explicitly empty `FEATURES` value.
 Config layering retains consumed removals for validation; replacement selections
 clear those inherited diagnostics.

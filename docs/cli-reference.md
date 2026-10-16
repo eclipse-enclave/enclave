@@ -245,7 +245,8 @@ store that holds memory; the other `--keep` kinds do not apply there. See
 
 Feature names in `--features` (including `+name`) must match an installed
 extension. Unknown names fail before building or starting a session, including
-with `--no-rebuild`; unknown `-name` removals only warn. Run
+with `--no-rebuild`; unknown `-name` removals only warn, as do unknown names from
+config when `--slim` or `--backend qemu` discards the selection. Run
 `enclave features list` to see available names. `--slim` and `--features none`
 build tool-only images without feature packages or home files.
 

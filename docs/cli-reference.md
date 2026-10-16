@@ -352,3 +352,11 @@ The guest has no disk: its root filesystem is the unpacked initramfs, held in RA
 On Linux, Enclave warns before launch if the guest allocation exceeds the host's available-memory estimate (`MemAvailable` in `/proc/meminfo`), reporting both sizes. This is advisory: startup continues without reducing guest memory. The check is skipped on other platforms or when the estimate cannot be read. It does not account for cgroup limits or reserve memory, so the absence of a warning does not guarantee the session will fit.
 
 QEMU sessions use the same persistent stores as Docker sessions (host directories under `~/.local/state/enclave/`): auth credentials, tool config, and persisted env are shared per tool/project, so you can switch between `--backend docker` and `--backend qemu` without re-authenticating.
+
+## Host lifecycle inspection
+
+`host_hooks` has no invocation flag or management verb. Configure explicit host
+activation through global/project/per-tool config; inspect effective values and
+entry-field sources with `enclave config`. Extension `list --json` and install
+result envelopes report `hostHooks` capabilities independently of feature
+`enabled`. See [host hooks](extensions/host-hooks.md).

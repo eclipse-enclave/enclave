@@ -59,7 +59,7 @@ func colorPrefix(label string, color Color) string {
 
 // ColorSuppressedByEnv reports whether the environment explicitly disables
 // colored output, regardless of whether a terminal is attached. Consumers that
-// paint something other than log text (see internal/termtint) honor the same
+// paint something other than log text (see internal/hosthooks/builtin) honor the same
 // opt-out without inheriting the terminal auto-detection of ColorEnabledFor.
 func ColorSuppressedByEnv() bool {
 	if os.Getenv("NO_COLOR") != "" {

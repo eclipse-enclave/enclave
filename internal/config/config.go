@@ -16,11 +16,13 @@ import (
 	"sort"
 	"strings"
 
+	"enclave/internal/hosthooks"
 	"enclave/internal/model"
 	"enclave/internal/util"
 )
 
 type Defaults struct {
+	HostHooks        hosthooks.ConfigMap `json:"host_hooks"`
 	Tool             string              `json:"tool"`
 	ToolOverrides    map[string]Defaults `json:"tool_overrides"`
 	Backend          string              `json:"backend"`
@@ -198,7 +200,8 @@ func readDefaults(path string) (Defaults, []string, error) {
 		return Defaults{}, nil, err
 	}
 
-	warnings := validateTopLevelDefaults(path, doc, &defaults)
+	warnings := validateHostHooks(path, &defaults)
+	warnings = append(warnings, validateTopLevelDefaults(path, doc, &defaults)...)
 	warnings = append(warnings, validateToolOverrides(path, doc, &defaults)...)
 	warnings = append(warnings, validatePassEnvNames(path, &defaults)...)
 	warnings = append(warnings, validateSessionTint(path, &defaults)...)
@@ -708,6 +711,7 @@ func mergeDefaults(base Defaults, override Defaults) Defaults {
 		}
 	}
 
+	merged.HostHooks = hosthooks.Merge(base.HostHooks, override.HostHooks)
 	merged.ToolOverrides = mergeToolOverrides(merged.ToolOverrides, override.ToolOverrides)
 
 	return merged

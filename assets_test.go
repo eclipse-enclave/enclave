@@ -34,7 +34,7 @@ func TestEmbeddedAssetInventory(t *testing.T) {
 			t.Errorf("required embedded asset %s: %v", name, err)
 		}
 	}
-	for _, name := range []string{"AGENTS.md", "CLAUDE.md", ".git"} {
+	for _, name := range []string{"AGENTS.md", "CLAUDE.md", ".git", "examples/host-hooks"} {
 		if _, err := fs.Stat(files, name); !os.IsNotExist(err) {
 			t.Errorf("repository-only path %s was embedded", name)
 		}

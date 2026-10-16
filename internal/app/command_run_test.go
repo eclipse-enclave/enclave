@@ -288,7 +288,11 @@ func TestExecSessionTargetFollowsSessionTint(t *testing.T) {
 	if err != nil {
 		t.Fatalf("execSessionTarget() error = %v", err)
 	}
-	if got.SessionTint != "#222222" {
-		t.Fatalf("session tint = %q, want the codex tint", got.SessionTint)
+	if got.Name != codex.Ref.Name {
+		t.Fatalf("wrong target: %+v", got)
+	}
+	targetOpts := targetHostOptions(model.TerminalTarget{Tool: codex.Tool, ProjectDir: codex.ProjectDir}, opts)
+	if targetOpts.SessionTint != "#222222" {
+		t.Fatalf("wrong target config: %+v", targetOpts)
 	}
 }

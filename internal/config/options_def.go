@@ -21,6 +21,7 @@ const (
 type OptionKind string
 
 const (
+	OptionKindHostHooks   OptionKind = "host_hooks"
 	OptionKindString      OptionKind = "string"
 	OptionKindBool        OptionKind = "bool"
 	OptionKindStringSlice OptionKind = "string_slice"
@@ -30,6 +31,7 @@ const (
 type ApplyKind string
 
 const (
+	ApplyHostHooks         ApplyKind = "host_hooks"
 	ApplyNone              ApplyKind = "none"
 	ApplyBoolPtr           ApplyKind = "bool_ptr"
 	ApplyString            ApplyKind = "string"
@@ -81,6 +83,7 @@ type CLIAction struct {
 
 func OptionDefs() []OptionDef {
 	return []OptionDef{
+		{Name: "host_hooks", Group: OptionGroupRun, Kind: OptionKindHostHooks, OptionField: "HostHooks", SourceField: "HostHooks", DefaultsField: "HostHooks", Apply: ApplyHostHooks},
 		{
 			Name:           "tool",
 			Group:          OptionGroupRun,

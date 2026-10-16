@@ -7,7 +7,7 @@
 
 //go:build !windows
 
-package termtint
+package builtin
 
 import (
 	"context"

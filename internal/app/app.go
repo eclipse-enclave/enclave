@@ -24,7 +24,13 @@ import (
 )
 
 func Run(args []string) int {
-	userCmds := discoverUserCommands()
+	replay := consumeHostReplay()
+	replayed := replay != nil
+	invocationID := newInvocationID()
+	if replayed {
+		invocationID = replay.InvocationID
+	}
+	userCmds := discoverUserCommands(replayed)
 
 	baseOpts := config.DefaultOptions()
 	parsed, err := cli.Parse(args, baseOpts, userCmds...)
@@ -37,6 +43,9 @@ func Run(args []string) int {
 		return 1
 	}
 	for _, warning := range parsed.Warnings {
+		if replayed {
+			continue
+		}
 		logx.Warnf(warning)
 	}
 	if parsed.HelpShown || parsed.VersionShown {
@@ -84,7 +93,9 @@ func Run(args []string) int {
 		return 1
 	}
 	for _, warning := range warnings {
-		logx.Warnf(warning)
+		if !replayed {
+			logx.Warnf(warning)
+		}
 	}
 
 	var userCommandMount *model.UserCommandMount
@@ -116,6 +127,13 @@ func Run(args []string) int {
 	cliOpts := parsed.Options
 	cliSources := parsed.Sources
 	opts, toolDefaults, hasToolDefaults := config.ResolveOptionsForTool(cliOpts, cliSources, globalDefaults, projectDefaults, "")
+	if replayed {
+		opts, toolDefaults, hasToolDefaults = config.ResolveOptionsForTool(cliOpts, cliSources, globalDefaults, projectDefaults, replay.Tool)
+		opts.Tool = replay.Tool
+		opts.Backend = replay.Backend
+		opts.Sources.Tool = replay.ToolSource
+		opts.Sources.Backend = replay.BackendSource
+	}
 	// The tool is resolved before anything reads it: per-tool overrides,
 	// image identity and store paths all key on the concrete name, so the
 	// options are layered again once the unset "auto" has an answer. Verbs
@@ -183,7 +201,15 @@ func Run(args []string) int {
 	}
 	ctx := NewAppContext(paths, projectDir)
 
+	seenHookWarnings := map[string]bool{}
+	if replayed {
+		for _, key := range replay.WarningKeys {
+			seenHookWarnings[key] = true
+		}
+	}
 	command := CommandInput{
+		HostHookWarnings: seenHookWarnings,
+		InvocationID:     invocationID, Replayed: replayed, OriginalArgs: append([]string(nil), args...),
 		Ctx:              ctx,
 		Action:           parsed.Action,
 		Options:          opts,
@@ -234,7 +260,7 @@ func rebuildSuppressionCause(opts model.Options) string {
 // cannot be resolved, discovery is skipped (commands that never needed home
 // keep working) and warnings from discovery are logged immediately. It runs
 // before the root guard, so it resolves home without the write probe.
-func discoverUserCommands() []usercmd.Command {
+func discoverUserCommands(quiet ...bool) []usercmd.Command {
 	home, err := config.ResolveHostHomeReadOnly()
 	if err != nil {
 		logx.Debugf("skipping user command discovery: %v", err)
@@ -242,7 +268,9 @@ func discoverUserCommands() []usercmd.Command {
 	}
 	cmds, warnings := usercmd.Discover(home)
 	for _, warning := range warnings {
-		logx.Warnf(warning)
+		if len(quiet) == 0 || !quiet[0] {
+			logx.Warnf(warning)
+		}
 	}
 	return cmds
 }

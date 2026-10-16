@@ -362,10 +362,9 @@ func normalizeAndSortNames(values []string) []string {
 	return normalized
 }
 
-// extensionCommandsSkip keeps an extension's commands/ tree out of the build
-// context. Those are host verbs (internal/usercmd): the image never runs them,
-// and including them would make editing one force a rebuild.
-var extensionCommandsSkip = map[string]struct{}{model.CommandsDirName: {}}
+// extensionCommandsSkip excludes host commands and lifecycle providers from
+// container contexts and image identity. Editing host code cannot rebuild an image.
+var extensionCommandsSkip = map[string]struct{}{model.CommandsDirName: {}, "hooks": {}}
 
 func overlayNamedExtensionDirs(files map[string]mergedExtensionFile, relRoot string, builtinRoot string, userRoot string, names []string) error {
 	for _, name := range names {

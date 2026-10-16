@@ -21,7 +21,7 @@ import (
 // LoadProfile loads the sandbox profile for name from its spec.yaml/spec.json
 // document. It returns os.ErrNotExist (via LoadSpec) if no spec is present.
 func LoadProfile(paths model.Paths, name string) (model.Profile, error) {
-	return loadSpecProfile(paths, name)
+	return loadSpecProfile(paths, name, specWarn)
 }
 
 func ListProfiles(paths model.Paths) ([]string, error) {
@@ -265,4 +265,9 @@ func normalizePortConfigs(ports []model.PortConfig, defaultLabel string) error {
 		}
 	}
 	return nil
+}
+
+// LoadProfileQuiet validates without repeating advisory startup warnings.
+func LoadProfileQuiet(paths model.Paths, name string) (model.Profile, error) {
+	return loadSpecProfile(paths, name, nil)
 }

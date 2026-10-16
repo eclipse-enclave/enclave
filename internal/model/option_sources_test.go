@@ -23,6 +23,7 @@ func TestMergeOptionSourcesCoversAllFields(t *testing.T) {
 			Verbose:   SourceCLI,
 		},
 		RunOptionSources: RunOptionSources{
+			HostHooks:            SourceCLI,
 			Tool:                 SourceCLI,
 			Backend:              SourceCLI,
 			HostConfig:           SourceCLI,

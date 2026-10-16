@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 
 	"enclave/internal/config"
@@ -147,6 +148,34 @@ func buildConfigRows(
 			}
 		}
 		rows = append(rows, row)
+	}
+	hookSources := config.EffectiveHostHookSources(opts)
+	effectiveHooks := config.EffectiveHostHooks(opts)
+	var ids []string
+	for id := range hookSources {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	for _, id := range ids {
+		fields := hookSources[id]
+		for _, field := range []string{"enabled", "order", "settings"} {
+			source, ok := fields[field]
+			if !ok {
+				continue
+			}
+			c := effectiveHooks[id]
+			var value any
+			switch field {
+			case "enabled":
+				value = c.Enabled
+			case "order":
+				value = c.Order
+			case "settings":
+				value = c.Settings
+			}
+			data, _ := json.Marshal(value)
+			rows = append(rows, configRow{Name: "host_hooks." + id + "." + field, Source: source, Effective: string(data)})
+		}
 	}
 	return rows
 }

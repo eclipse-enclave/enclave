@@ -15,7 +15,7 @@ import (
 )
 
 // interruptSignals cancel a start in progress. The foreground run also hands
-// them to termtint, so the tint does not intercept a signal the run survives.
+// them to the terminal scope, so the tint does not intercept a signal the run survives.
 var interruptSignals = []os.Signal{os.Interrupt, syscall.SIGTERM}
 
 // interruptContext returns a context that SIGINT or SIGTERM cancels. A start

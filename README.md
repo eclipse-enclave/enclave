@@ -271,6 +271,14 @@ an extension's, so installing one never takes a name you already use.
 `enclave tools|features list` shows which installed extensions contribute
 verbs.
 
+## Host lifecycle integrations
+
+Explicitly enabled [host hooks](docs/extensions/host-hooks.md) can prepare the host
+environment or mark the terminal during run, exec and attach. User providers and
+installed tool/feature extensions use the same executable JSON protocol. Container
+feature selection does not enable host execution. Existing `session_tint` remains
+supported; external Herdr and tint reference providers live in `examples/host-hooks/`.
+
 ## Learn More
 
 | Topic | Doc |

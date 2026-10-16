@@ -52,3 +52,7 @@ AGENTS.md
 # and its hash, so leaving these in would rebuild the image for every user
 # whenever the logo changes.
 docs/assets
+
+# Host lifecycle reference providers are not container assets.
+examples/host-hooks
+**/hooks

@@ -92,6 +92,8 @@ func optionGroupConst(group config.OptionGroup) string {
 
 func writeApplyDefaultsWithSource(buf *bytes.Buffer, def config.OptionDef) {
 	switch def.Apply {
+	case config.ApplyHostHooks:
+		buf.WriteString("ApplyDefaultsWithSource: applyHostHookDefaults,\n")
 	case config.ApplyNone:
 		return
 	case config.ApplyYoloDefault:

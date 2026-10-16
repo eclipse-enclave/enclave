@@ -47,8 +47,12 @@ func extensionInventory(paths model.Paths, kind model.ExtensionKind, exts []mode
 	return extinstall.Inventory(paths, kind, names, extinstall.InventoryModifications)
 }
 
-func loadProfileOrReport(paths model.Paths, tool string) (model.Profile, error) {
-	profile, err := config.LoadProfile(paths, tool)
+func loadProfileOrReport(paths model.Paths, tool string, quiet ...bool) (model.Profile, error) {
+	load := config.LoadProfile
+	if len(quiet) > 0 && quiet[0] {
+		load = config.LoadProfileQuiet
+	}
+	profile, err := load(paths, tool)
 	if err != nil {
 		logx.Errorf("%v", err)
 		if available, listErr := config.ListProfiles(paths); listErr == nil {

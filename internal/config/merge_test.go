@@ -11,6 +11,7 @@ import (
 	"reflect"
 	"testing"
 
+	"enclave/internal/hosthooks"
 	"enclave/internal/model"
 )
 
@@ -21,6 +22,7 @@ func TestMergeDefaultsCoversAllFields(t *testing.T) {
 	// Create an override with every field set to a non-zero value
 	trueVal := true
 	override := Defaults{
+		HostHooks:        hosthooks.ConfigMap{"user:test": {Enabled: &trueVal}},
 		Tool:             "test-tool",
 		ToolOverrides:    map[string]Defaults{"test-tool": {NoAPIKey: &trueVal}},
 		Backend:          "docker",

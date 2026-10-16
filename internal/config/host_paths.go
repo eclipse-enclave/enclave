@@ -367,3 +367,5 @@ func HostProfileCredentialsPath(home string, profile model.Profile) string {
 func HostProfileOAuthJSONPath(home string, profile model.Profile) string {
 	return HostProfilePath(home, profile.HostOAuthJSON)
 }
+
+func HostHooksDir(home string) string { return filepath.Join(hostConfigRoot(home), "hooks", "host") }

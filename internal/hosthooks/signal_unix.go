@@ -7,7 +7,7 @@
 
 //go:build !windows
 
-package termtint
+package hosthooks
 
 import (
 	"os"

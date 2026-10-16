@@ -16,6 +16,7 @@ import (
 
 	"enclave/internal/config"
 
+	"enclave/internal/hosthooks"
 	"enclave/internal/model"
 )
 
@@ -785,6 +786,10 @@ func capabilityFieldCases() map[string]capabilityFieldCase {
 		// The markers are the command name alone because the row's risk note
 		// wraps at an unpredictable point. TestRenderHostCommandsNamesTheRisk
 		// asserts the wording itself.
+		"HostHooks": {func(c *capabilities) {
+			c.HostHooks = []hosthooks.Capability{{ID: "feature:test", Phases: []string{"prepare"}}}
+		}, "feature:test", "host hook"},
+		"HostHookHandlers": {func(c *capabilities) { c.HostHookHandlers = []string{"hooks/host/prepare abc"} }, "hooks/host/prepare", "handler/content"},
 		"HostCommands": {func(c *capabilities) { c.HostCommands = []string{"vnc-viewer"} },
 			"vnc-viewer", "adds host command vnc-viewer"},
 		"IgnoredGoDir": {func(c *capabilities) { c.IgnoredGoDir = true }, "go/ handlers", "adds ignored go/ handlers"},

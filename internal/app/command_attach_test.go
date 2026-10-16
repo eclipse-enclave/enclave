@@ -14,6 +14,7 @@ import (
 
 	"enclave/internal/backend"
 	"enclave/internal/config"
+	"enclave/internal/model"
 )
 
 func writeGlobalToolTints(t *testing.T) {
@@ -44,7 +45,7 @@ func TestAttachSessionTintFollowsSessionTool(t *testing.T) {
 	writeGlobalToolTints(t)
 	session := backend.Session{Tool: "codex", ProjectDir: t.TempDir()}
 
-	if got := attachSessionTint(session, "#111111"); got != "#222222" {
+	if got := targetHostOptions(model.TerminalTarget{Tool: session.Tool, ProjectDir: session.ProjectDir}, model.Options{RunOptions: model.RunOptions{SessionTint: "#111111"}}).SessionTint; got != "#222222" {
 		t.Fatalf("expected the codex tint, got %q", got)
 	}
 }
@@ -62,7 +63,7 @@ func TestAttachSessionTintFallsBack(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := attachSessionTint(tc.session, "#333333"); got != "#333333" {
+			if got := targetHostOptions(model.TerminalTarget{Tool: tc.session.Tool, ProjectDir: tc.session.ProjectDir}, model.Options{RunOptions: model.RunOptions{SessionTint: "#333333"}}).SessionTint; got != "#333333" {
 				t.Fatalf("expected the resolved fallback tint, got %q", got)
 			}
 		})

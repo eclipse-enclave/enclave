@@ -88,8 +88,11 @@ func removeOne(env Env, req Request, entry Managed) (ActionResult, error) {
 	if len(resolving) > 0 {
 		env.note("host command(s) no longer resolve: %s", strings.Join(resolving, ", "))
 	}
+	if len(entry.HostHooks) > 0 {
+		env.note("host hooks removed; remove their host_hooks config entries to avoid dangling-provider warnings")
+	}
 	// Host state may belong to a reinstall.
 	env.note("host config and state were left untouched")
 	return ActionResult{Name: entry.Name, Action: ActionRemoved, Path: target,
-		HostCommands: entry.HostCommands}, nil
+		HostHooks: entry.HostHooks, HostCommands: entry.HostCommands}, nil
 }

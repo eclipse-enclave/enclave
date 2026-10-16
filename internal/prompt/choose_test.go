@@ -9,6 +9,7 @@ package prompt
 
 import (
 	"bytes"
+	"io"
 	"strings"
 	"testing"
 )
@@ -51,5 +52,17 @@ func TestChooseRejectsAmbiguousFirstLetter(t *testing.T) {
 	}
 	if got != "" {
 		t.Fatalf("ambiguous first letter must not match, got %q", got)
+	}
+}
+
+func TestChoosePreservesUnreadSessionInput(t *testing.T) {
+	input := strings.NewReader("docker\nagent input\n")
+	choice, err := Choose("Backend", []string{"docker", "podman"}, input, io.Discard)
+	if err != nil || choice != "docker" {
+		t.Fatal(choice, err)
+	}
+	remaining, err := io.ReadAll(input)
+	if err != nil || string(remaining) != "agent input\n" {
+		t.Fatal(string(remaining), err)
 	}
 }

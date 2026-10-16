@@ -21,6 +21,8 @@ type GlobalOptionSources struct {
 }
 
 type RunOptionSources struct {
+	SessionTint     OptionSource
+	HostHooks       OptionSource
 	AddDirs         OptionSource
 	AddReadonlyDirs OptionSource
 	AllowAllNetwork OptionSource

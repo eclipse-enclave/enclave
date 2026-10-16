@@ -359,7 +359,7 @@ func applyBridgePort(opts *model.Options, value string) error {
 	return nil
 }
 
-// isValidTintColor reports whether value is an #rrggbb color. termtint keeps its
+// isValidTintColor reports whether value is an #rrggbb color. hosthooks/builtin keeps its
 // own check as a guard before emitting the escape sequence; the format is
 // checked in both places because config must not depend on the terminal
 // packages (see internal/gateway/gateway_proxy_build_inputs.txt).

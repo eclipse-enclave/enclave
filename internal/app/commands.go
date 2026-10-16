@@ -16,10 +16,14 @@ import (
 )
 
 type CommandInput struct {
-	Ctx     *AppContext
-	Action  string
-	Options model.Options
-	Sources model.OptionSources
+	HostHookWarnings map[string]bool
+	InvocationID     string
+	Replayed         bool
+	OriginalArgs     []string
+	Ctx              *AppContext
+	Action           string
+	Options          model.Options
+	Sources          model.OptionSources
 	// ExtRequest is the parsed extension-management request; nil for the verbs
 	// that have none.
 	ExtRequest *extinstall.Request

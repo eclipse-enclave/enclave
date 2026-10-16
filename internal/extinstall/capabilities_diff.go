@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"slices"
 
+	"enclave/internal/hosthooks"
 	"enclave/internal/model"
 )
 
@@ -19,6 +20,8 @@ import (
 // capabilities participates.
 func diffCapabilities(before capabilities, after capabilities) []string {
 	var changes []string
+	changes = append(changes, diffList("host hook (automatic host execution when enabled via host_hooks, outside the sandbox)", mapDescribe(before.HostHooks, func(c hosthooks.Capability) string { return fmt.Sprintf("%s %v", c.ID, c.Phases) }), mapDescribe(after.HostHooks, func(c hosthooks.Capability) string { return fmt.Sprintf("%s %v", c.ID, c.Phases) }))...)
+	changes = append(changes, diffList("host hook handler/content", before.HostHookHandlers, after.HostHookHandlers)...)
 	beforeYolo, afterYolo := before.yoloActive(), after.yoloActive()
 	switch {
 	case afterYolo && !beforeYolo:

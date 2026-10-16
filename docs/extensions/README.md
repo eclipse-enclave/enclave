@@ -1108,3 +1108,11 @@ enclave --tool <name> --rebuild
 | Slim image | `./enclave --slim` | No features installed |
 | Devcontainer | `./enclave devcontainer run` | No features installed |
 | Devcontainer + features | `./enclave devcontainer run --features github-cli` | Only github-cli installed |
+
+## Host lifecycle contributions
+
+Either kind may ship `hooks/host/manifest.json` and executable phase handlers.
+[Host hooks](host-hooks.md) run on the host only through explicit `host_hooks`
+activation, independent of container feature selection. They are distinct from
+`entrypoint.d`, `feature-entrypoint.d` and `commands.startup` inside the sandbox.
+The entire `hooks/` tree is excluded from container contexts and image identity.

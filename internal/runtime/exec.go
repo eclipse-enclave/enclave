@@ -13,28 +13,27 @@ import (
 	"strings"
 
 	"enclave/internal/backend"
-	"enclave/internal/termtint"
+	"enclave/internal/model"
 )
 
-// ExecTarget is the session that `exec --name` resolved to, with the session
-// tint of its tool and project. The zero value selects the running session of
+// ExecTarget is the session that `exec --name` resolved to.
+// The zero value selects the running session of
 // this tool and project.
 type ExecTarget struct {
-	Name        string
-	SessionTint string
+	Name string
 }
 
 func (r *Runtime) Exec(target ExecTarget) error {
-	containerName, sessionTint := target.Name, target.SessionTint
+	containerName := target.Name
 	if containerName == "" {
 		var err error
 		containerName, err = r.resolveExecTarget()
 		if err != nil {
 			return err
 		}
-		sessionTint = r.run.SessionTint
 	}
-	if err := r.ensureRunning(containerName); err != nil {
+	session, err := r.runningSession(containerName)
+	if err != nil {
 		return err
 	}
 
@@ -58,11 +57,14 @@ func (r *Runtime) Exec(target ExecTarget) error {
 	}
 	// An exec occupies the terminal with an interactive TTY into the session, so
 	// it is marked like a session that owns the terminal from the start.
-	restoreTint := termtint.Begin(sessionTint)
-	defer restoreTint()
+	sessionTarget := model.TerminalTarget{Name: containerName, ID: session.Ref.ID, Tool: session.Tool, ProjectDir: session.ProjectDir, ProjectHash: session.ProjectHash}
+	finish := r.beginTerminal(context.Background(), sessionTarget)
+	var execErr error
+	defer func() { finish(execErr) }()
 	// The backend syncs session credentials after the exec completes, deriving
 	// the involved stores from the running container.
-	return execer.Exec(context.Background(), backend.SessionRef{Name: containerName}, backend.ExecRequest{Argv: cmdArgs, User: user, TTY: true}, backend.AttachIO{})
+	execErr = execer.Exec(context.Background(), backend.SessionRef{Name: containerName}, backend.ExecRequest{Argv: cmdArgs, User: user, TTY: true}, backend.AttachIO{})
+	return execErr
 }
 
 // resolveExecTarget finds the running containers for this tool and project
@@ -139,16 +141,16 @@ func (r *Runtime) resolveExecTarget() (string, error) {
 	}
 }
 
-func (r *Runtime) ensureRunning(containerName string) error {
+func (r *Runtime) runningSession(containerName string) (backend.Session, error) {
 	if r.backend == nil {
-		return fmt.Errorf("runtime backend is not configured")
+		return backend.Session{}, fmt.Errorf("runtime backend is not configured")
 	}
 	sessions, err := r.backend.List(context.Background(), backend.SessionFilter{RunningOnly: true, ExactName: containerName})
 	if err != nil {
-		return err
+		return backend.Session{}, err
 	}
 	if len(sessions) == 0 {
-		return fmt.Errorf("no running container found for %s (%s)", r.project.Name, containerName)
+		return backend.Session{}, fmt.Errorf("no running container found for %s (%s)", r.project.Name, containerName)
 	}
-	return nil
+	return sessions[0], nil
 }

@@ -11,6 +11,7 @@ internal/gateway/dnsaudit
 internal/gateway/mitm
 internal/gateway/tlsstore
 internal/git
+internal/hosthooks
 internal/logx
 internal/model
 internal/netlog

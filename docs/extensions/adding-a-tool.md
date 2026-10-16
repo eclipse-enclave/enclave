@@ -185,3 +185,9 @@ directories per project; see
 - Confirm `enclave auth import --tool <tool>` copies required auth files
   (`providers[].authFiles`).
 - Verify the tool runs inside the container (`enclave --tool <tool>`).
+
+## Optional host lifecycle hooks
+
+A selected installed tool can contribute `tool:<name>` through `hooks/host/`.
+Keep vendor-specific settings in the provider, not sandbox spec fields. Enable
+execution explicitly in `host_hooks`; follow the [host-hook contract](host-hooks.md).

@@ -37,3 +37,10 @@ Diagrams are Mermaid blocks embedded in the documentation:
 
 - [ARCHITECTURE.md](ARCHITECTURE.md#diagrams) — Docker runtime and store layout, Go code generation
 - [runtime/network-request-flow.md](runtime/network-request-flow.md#diagram) — Restricted network request flow
+
+## Host contributions
+
+[Host lifecycle hooks](extensions/host-hooks.md) documents the opt-in executable
+protocol, configuration/replay and terminal ownership. External-only reference
+features live in `examples/host-hooks/features/`; `internal/hosthooks/` owns core
+mechanics and `internal/hosthooks/builtin/` the legacy tint adapter.

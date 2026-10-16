@@ -358,7 +358,7 @@ func applyPlan(env Env, req Request, plan installPlan, stage *staging) (ActionRe
 	if req.DryRun {
 		env.outcome(markInfo, logx.ColorCyan, "dry run: would be written to %s", target)
 		return ActionResult{Name: plan.Name, Action: ActionSkipped, Commit: plan.Commit, Path: target,
-			HostCommands: caps.HostCommands}, nil
+			HostHooks: caps.HostHooks, HostCommands: caps.HostCommands}, nil
 	}
 	if req.Interactive {
 		stage.touch(env)
@@ -404,7 +404,7 @@ func applyPlan(env Env, req Request, plan installPlan, stage *staging) (ActionRe
 	env.outcome(markOK, logx.ColorGreen, "%s at %s", plan.Action, installedPath)
 	printPostInstallHints(env, req.Kind, plan.Name, caps, contentChanged)
 	return ActionResult{Name: plan.Name, Action: plan.Action, Commit: plan.Commit, Path: installedPath,
-		HostCommands: caps.HostCommands, Warnings: warnings}, nil
+		HostHooks: caps.HostHooks, HostCommands: caps.HostCommands, Warnings: warnings}, nil
 }
 
 func verbFor(action string) string {
@@ -430,12 +430,12 @@ func renderUpdate(env Env, changedFiles []changedFile, before capabilities, afte
 }
 
 // changesReachImage reports whether any changed file is part of the build
-// context. commands/ is the one tree an extension ships that the image never
-// sees, so a change confined to it must not promise a rebuild.
+// context. Host commands and lifecycle hooks never reach the image, so a
+// change confined to those trees must not promise a rebuild.
 func changesReachImage(changes []changedFile) bool {
 	prefix := model.CommandsDirName + "/"
 	for _, change := range changes {
-		if !strings.HasPrefix(filepath.ToSlash(change.Path), prefix) {
+		if !strings.HasPrefix(filepath.ToSlash(change.Path), prefix) && !strings.HasPrefix(filepath.ToSlash(change.Path), "hooks/") {
 			return true
 		}
 	}
@@ -448,10 +448,14 @@ func changesReachImage(changes []changedFile) bool {
 // provenance sidecar, so re-pinning to a new commit that carries identical
 // content rebuilds nothing and must not say otherwise.
 func printPostInstallHints(env Env, kind model.ExtensionKind, name string, caps capabilities, contentChanged bool) {
-	if contentChanged {
+	hostOnly := caps.hostOnly()
+	for _, hook := range caps.HostHooks {
+		env.note("enable host integration with host_hooks.%s.enabled=true in config (independent of --features)", hook.ID)
+	}
+	if contentChanged && !hostOnly {
 		env.note("the next run rebuilds the image")
 	}
-	if kind != model.KindFeature {
+	if kind != model.KindFeature || hostOnly {
 		return
 	}
 	if caps.Spec.DefaultEnabled != nil && !*caps.Spec.DefaultEnabled {

@@ -8,6 +8,7 @@
 package extinstall
 
 import (
+	"enclave/internal/hosthooks"
 	"fmt"
 
 	"enclave/internal/config"
@@ -24,6 +25,8 @@ type Managed struct {
 	// HostCommands are the enclave verbs this extension contributes from its
 	// commands/host/, which run on the host outside the sandbox. Only a user
 	// directory can carry them, so a built-in reports none.
+	HostHooks    []hosthooks.Capability
+	Warnings     []string
 	HostCommands []string
 	// Modified reports content edited by hand since the install. It is only
 	// filled in at InventoryModifications detail, since answering it costs a
@@ -43,8 +46,8 @@ type InventoryDetail int
 const (
 	// InventoryNames resolves each extension's built-in and user directories,
 	// classifies its Source, and lists the host commands it contributes. No
-	// file inside an extension is opened: the commands are one directory
-	// listing, and every caller needs to know which extension owns a verb.
+	// provenance or full content hash is read. Host hook manifests and
+	// handler metadata are checked read-only, without executing code.
 	InventoryNames InventoryDetail = iota
 	// InventoryProvenance also reads each user extension's provenance sidecar
 	// into Origin: one small JSON document per extension, no content.
@@ -78,6 +81,7 @@ func Inventory(paths model.Paths, kind model.ExtensionKind, names []string, deta
 			// An unreadable commands/host/ is not worth failing a listing over,
 			// and usercmd warns about it on the next invocation anyway.
 			entry.HostCommands, _ = usercmd.ExtensionCommandNames(userDir)
+			entry.HostHooks, entry.Warnings = hosthooks.Extension(string(kind)+":"+name, userDir)
 		}
 		if detail > InventoryNames && userDir != "" {
 			origin, readErr := readOrigin(userDir)

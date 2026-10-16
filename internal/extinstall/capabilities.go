@@ -9,10 +9,12 @@ package extinstall
 
 import (
 	"bufio"
+	"enclave/internal/hosthooks"
 	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strconv"
 	"strings"
@@ -42,9 +44,11 @@ type capabilities struct {
 	WorkspaceFiles      []string
 	HomeFiles           []string
 	// HostCommands are the enclave verbs the extension contributes, which run
-	// on the host rather than in the sandbox. Nothing else an extension ships
-	// executes outside a container, so this is reported on its own.
-	HostCommands []string
+	// on the host rather than in the sandbox. Automatic host hooks are reported
+	// separately because they require explicit lifecycle activation.
+	HostHooks        []hosthooks.Capability
+	HostHookHandlers []string
+	HostCommands     []string
 	// ShadowedHostCommands maps each of HostCommands that will not become a
 	// verb to what takes the name instead, see usercmd.Shadowed. It depends on
 	// the host rather than the tree, so inspect leaves it to the caller.
@@ -120,7 +124,18 @@ func inspect(dir string, kind model.ExtensionKind) (capabilities, error) {
 		return capabilities{}, err
 	}
 
+	hooks, _ := hosthooks.Extension(string(kind)+":"+summary.Name, dir)
+	handlers := []string{}
+	if manifest, err := readTreeManifest(dir); err == nil {
+		for path, digest := range manifest.Files {
+			if strings.HasPrefix(path, "hooks/") {
+				handlers = append(handlers, fmt.Sprintf("%s %v", path, digest))
+			}
+		}
+		sort.Strings(handlers)
+	}
 	return capabilities{
+		HostHooks: hooks, HostHookHandlers: handlers,
 		Spec:                summary,
 		InstallScript:       tree.InstallScript,
 		UpdateProbe:         tree.UpdateProbe && config.UpdateProbeApplies(kind.SpecKind()),
@@ -435,4 +450,20 @@ func joinWithPlus(values []string) string {
 		parts = append(parts, "+"+value)
 	}
 	return strings.Join(parts, ", ")
+}
+
+// hostOnly reports a feature without container behavior, not merely one without
+// an install script. Keep new spec capabilities conservative by default.
+func (c capabilities) hostOnly() bool {
+	if len(c.HostHooks) == 0 || c.Spec.Kind != model.ExtensionKindMixin {
+		return false
+	}
+	spec := c.Spec
+	spec.Kind = ""
+	spec.Name = ""
+	spec.DisplayName = ""
+	spec.Description = ""
+	spec.DefaultEnabled = nil
+	spec.DefaultIncluded = nil
+	return reflect.ValueOf(spec).IsZero() && !c.InstallScript && !c.UpdateProbe && len(c.StartupScripts) == 0 && len(c.AllowDomains) == 0 && len(c.AllowlistDirectives) == 0 && len(c.WorkspaceFiles) == 0 && len(c.HomeFiles) == 0 && len(c.Skills) == 0
 }

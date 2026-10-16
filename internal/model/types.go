@@ -8,6 +8,9 @@
 package model
 
 import (
+	"context"
+	"enclave/internal/hosthooks"
+	"os"
 	"sort"
 	"strings"
 )
@@ -35,6 +38,8 @@ type RunOptions struct {
 	Admin                bool
 	SessionMonitor       bool
 	SessionTint          string
+	HostHooks            hosthooks.ConfigMap
+	HostHookSources      map[string]map[string]OptionSource
 	Timezone             string
 	CmdArgs              []string
 	NoHistory            bool
@@ -140,7 +145,11 @@ type Options struct {
 	Sources OptionSources
 }
 
+type TerminalTarget struct{ Name, ID, Tool, ProjectDir, ProjectHash string }
+type TerminalLifecycle func(context.Context, TerminalTarget, ...os.Signal) func(error)
+
 type RuntimeConfig struct {
+	TerminalLifecycle     TerminalLifecycle
 	Paths                 Paths
 	Host                  Host
 	Project               Project

@@ -8,7 +8,6 @@
 package prompt
 
 import (
-	"bufio"
 	"fmt"
 	"io"
 	"strings"
@@ -23,15 +22,19 @@ const chooseAttempts = 3
 // unique among the options. EOF or exhausted attempts return "" without an
 // error so callers can fall back to a default.
 func Choose(msg string, options []string, stdin io.Reader, stdout io.Writer) (string, error) {
-	scanner := bufio.NewScanner(stdin)
+
 	for attempt := 0; attempt < chooseAttempts; attempt++ {
 		if _, err := fmt.Fprintf(stdout, "%s [%s]: ", msg, strings.Join(options, "/")); err != nil {
 			return "", err
 		}
-		if !scanner.Scan() {
-			return "", scanner.Err()
+		line, err := readChoiceLine(stdin)
+		if err != nil && err != io.EOF {
+			return "", err
 		}
-		if choice, ok := matchChoice(strings.TrimSpace(scanner.Text()), options); ok {
+		if line == "" && err == io.EOF {
+			return "", nil
+		}
+		if choice, ok := matchChoice(strings.TrimSpace(line), options); ok {
 			return choice, nil
 		}
 	}
@@ -59,4 +62,26 @@ func matchChoice(answer string, options []string) (string, bool) {
 		return prefixMatch, true
 	}
 	return "", false
+}
+
+// readChoiceLine avoids buffering bytes intended for the eventual session process.
+func readChoiceLine(in io.Reader) (string, error) {
+	var line strings.Builder
+	var one [1]byte
+	for line.Len() < 4096 {
+		n, err := in.Read(one[:])
+		if n > 0 {
+			if one[0] == '\n' {
+				return line.String(), nil
+			}
+			line.WriteByte(one[0])
+		}
+		if err != nil {
+			return line.String(), err
+		}
+		if n == 0 {
+			return line.String(), io.ErrNoProgress
+		}
+	}
+	return line.String(), fmt.Errorf("prompt answer exceeds 4096 bytes")
 }

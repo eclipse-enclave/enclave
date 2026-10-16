@@ -8,6 +8,7 @@
 package app
 
 import (
+	"enclave/internal/hosthooks"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -42,12 +43,14 @@ type extensionListJSONExt struct {
 	// installed, enabled or not, so a caller auditing which installed
 	// extensions can execute host code reads this rather than Enabled.
 	// Additive to the v1 contract.
-	HostCommands []string             `json:"hostCommands,omitempty"`
-	Origin       *extensionListOrigin `json:"origin,omitempty"`
+	HostHooks    []hosthooks.Capability `json:"hostHooks,omitempty"`
+	HostCommands []string               `json:"hostCommands,omitempty"`
+	Origin       *extensionListOrigin   `json:"origin,omitempty"`
 	// OriginError carries extinstall.Managed.Problem: provenance for a managed
 	// directory could not be read (e.g. a corrupt sidecar). When it is set,
 	// Origin is nil and Managed is false. Additive to the v1 contract.
-	OriginError string `json:"originError,omitempty"`
+	Warnings    []string `json:"warnings,omitempty"`
+	OriginError string   `json:"originError,omitempty"`
 }
 
 // extensionListOrigin mirrors extinstall.Origin plus locallyModified, which is
@@ -78,7 +81,8 @@ func extensionListJSONEntries(exts []model.Extension, inventory map[string]extin
 			Enabled:      enabled(ext.Name),
 			Managed:      managed.Origin != nil,
 			HostCommands: managed.HostCommands,
-			OriginError:  managed.Problem,
+			HostHooks:    managed.HostHooks, Warnings: managed.Warnings,
+			OriginError: managed.Problem,
 		}
 		if managed.Origin != nil {
 			item.Origin = &extensionListOrigin{
@@ -140,6 +144,12 @@ func encodeIndentedJSON(w io.Writer, v any) error {
 // counterpart of a `list --json` field, so the two views stay in step.
 func listingSuffix(entry extinstall.Managed) string {
 	suffix := provenanceSuffix(entry)
+	if len(entry.HostHooks) > 0 {
+		suffix += fmt.Sprintf(" [host hooks: %v; opt-in via host_hooks]", entry.HostHooks)
+	}
+	if len(entry.Warnings) > 0 {
+		suffix += " [warning: " + strings.Join(entry.Warnings, "; ") + "]"
+	}
 	if len(entry.HostCommands) > 0 {
 		suffix += fmt.Sprintf(" [host: %s]", strings.Join(entry.HostCommands, ", "))
 	}

@@ -79,3 +79,35 @@ func TestMergedExtensionFilesExcludesBuiltinHostCommands(t *testing.T) {
 		}
 	}
 }
+
+func TestHostHookFilesNeverReachImageIdentity(t *testing.T) {
+	paths := sidecarFixturePaths(t)
+	for _, root := range []string{paths.FeaturesDir, paths.UserFeaturesDir} {
+		writeAppFile(t, filepath.Join(root, "foo", "spec.yaml"), sidecarFixtureSpec, 0644)
+		writeAppFile(t, filepath.Join(root, "foo", "hooks", "host", "manifest.json"), `{"schemaVersion":"1","phases":{"prepare":"prepare"}}`, 0644)
+		writeAppFile(t, filepath.Join(root, "foo", "hooks", "host", "prepare"), "#!/bin/sh\n", 0755)
+	}
+	selection := runtimeImageSelection{Tools: []string{}, Features: []string{"foo"}}
+	before, err := hashMergedExtensionFiles(paths, selection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeAppFile(t, filepath.Join(paths.UserFeaturesDir, "foo", "hooks", "host", "prepare"), "#!/bin/sh\necho changed\n", 0755)
+	writeAppFile(t, filepath.Join(paths.UserFeaturesDir, "foo", "hooks", "host", "helper.py"), "# new host helper\n", 0644)
+	after, err := hashMergedExtensionFiles(paths, selection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if before != after {
+		t.Fatal("host-only changes altered image identity")
+	}
+	files, err := mergedExtensionFiles(paths, selection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, file := range files {
+		if strings.Contains(file.RelativePath, "/hooks/") {
+			t.Fatal("host provider leaked into image context", file.RelativePath)
+		}
+	}
+}

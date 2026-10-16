@@ -19,6 +19,11 @@ import (
 func OptionSpecs() []OptionSpec {
 	specs := []OptionSpec{
 		{
+			Name:                    "host_hooks",
+			Group:                   OptionGroupRun,
+			ApplyDefaultsWithSource: applyHostHookDefaults,
+		},
+		{
 			Name:  "tool",
 			Group: OptionGroupRun,
 			ApplyDefaultsWithSource: func(opts *model.Options, defaults Defaults, source model.OptionSource, sources *model.OptionSources) {

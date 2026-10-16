@@ -31,6 +31,10 @@ func (c capabilities) render(w io.Writer, style Style, source string) {
 		hostCommands += fmt.Sprintf(" (added as `%s <name>`, run on your host outside the sandbox with your user's privileges)", model.AppName)
 	}
 	row("host commands", hostCommands)
+	row("host hook handlers/content", strings.Join(c.HostHookHandlers, ", "))
+	if len(c.HostHooks) > 0 {
+		row("host hooks", fmt.Sprintf("%v (automatic host execution only when explicitly enabled in host_hooks; outside the sandbox)", c.HostHooks))
+	}
 
 	install := ""
 	switch {

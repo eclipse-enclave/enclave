@@ -5,12 +5,10 @@
 //
 // SPDX-License-Identifier: MIT
 
-package termtint
+package builtin
 
 import (
 	"bytes"
-	"os"
-	"slices"
 	"strings"
 	"testing"
 )
@@ -19,6 +17,8 @@ import (
 // terminal, restoring the real values afterwards.
 func withTerminal(t *testing.T, terminal bool) *bytes.Buffer {
 	t.Helper()
+	t.Setenv("NO_COLOR", "")
+	t.Setenv("ENCLAVE_COLOR", "")
 	buf := &bytes.Buffer{}
 	prevOut, prevIsTerminal := out, isTerminal
 	out, isTerminal = buf, func() bool { return terminal }
@@ -66,10 +66,10 @@ func TestBeginSkips(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			buf := withTerminal(t, tc.terminal)
 			for key, value := range tc.env {
 				t.Setenv(key, value)
 			}
-			buf := withTerminal(t, tc.terminal)
 
 			restore := Begin(tc.color)
 			restore()
@@ -84,8 +84,8 @@ func TestBeginSkips(t *testing.T) {
 // ENCLAVE_COLOR=always may only veto a tint, never force one on: the config key
 // stays the single on/off switch.
 func TestColorAlwaysDoesNotForceTint(t *testing.T) {
-	t.Setenv("ENCLAVE_COLOR", "always")
 	buf := withTerminal(t, true)
+	t.Setenv("ENCLAVE_COLOR", "always")
 
 	restore := Begin("")
 	restore()
@@ -103,25 +103,5 @@ func TestBeginAcceptsUppercaseHex(t *testing.T) {
 
 	if !strings.Contains(buf.String(), "#2A0F12") {
 		t.Fatalf("expected uppercase color to be emitted, got %q", buf.String())
-	}
-}
-
-func TestInterceptedSignalsSkipCallerHandled(t *testing.T) {
-	all := interruptSignals()
-	if len(all) == 0 {
-		t.Skip("no interrupt signals on this platform")
-	}
-	handled := all[:1]
-
-	got := interceptedSignals(handled)
-	if slices.ContainsFunc(got, func(sig os.Signal) bool { return slices.Contains(handled, sig) }) {
-		t.Fatalf("caller-handled signal is still intercepted: %v", got)
-	}
-	if len(got) != len(all)-1 {
-		t.Fatalf("expected %d intercepted signals, got %v", len(all)-1, got)
-	}
-
-	if got := interceptedSignals(all); len(got) != 0 {
-		t.Fatalf("expected nothing intercepted when the caller handles every signal, got %v", got)
 	}
 }

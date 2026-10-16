@@ -395,3 +395,21 @@ Allowed types: `feat`, `fix`, `docs`, `refactor`, `test`, `chore`, `build`, `ci`
 ## Work Tracking
 
 Work is tracked via GitHub Issues.
+
+## Host lifecycle development
+
+`internal/hosthooks` owns protocol, discovery, bounded execution, environment
+composition and terminal cleanup; app owns configuration/replay, and runtime gets
+a narrow callback. Reference providers live outside embedded assets under
+`examples/host-hooks/features/`. Run `go test ./internal/hosthooks/...` and each
+provider's `test_provider.py`. Regenerate option definitions with `make generate`
+and verify a second generation is unchanged. Live tests must use disposable
+sessions and isolated host roots; stub catalogs do not certify Herdr acquisition.
+See the [v1 contract](extensions/host-hooks.md).
+
+Run `python3 scripts/smoke-host-hooks.py` for isolated live Docker/PTY coverage
+using an existing `enclave-claude:latest` image (`CLI_BIN`, `SMOKE_IMAGE`, and
+`SMOKE_BACKEND` override defaults). It covers replay, foreground/redirected output,
+background, exec, attach/detach, agent-handled Ctrl-C and startup SIGTERM. It
+retains its temporary roots and never accesses installed user credentials or
+extensions. It does not certify actual Herdr acquisition.

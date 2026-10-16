@@ -28,11 +28,11 @@ import (
 	"enclave/internal/mounts"
 	"enclave/internal/network"
 	"enclave/internal/policy"
-	"enclave/internal/termtint"
 	"enclave/internal/util"
 )
 
 type Runtime struct {
+	terminalLifecycle     model.TerminalLifecycle
 	paths                 model.Paths
 	host                  model.Host
 	project               model.Project
@@ -153,6 +153,7 @@ func New(cfg model.RuntimeConfig) *Runtime {
 		projectDir = strings.TrimSpace(cfg.Devcontainer.WorkspaceFolder)
 	}
 	return &Runtime{
+		terminalLifecycle:     cfg.TerminalLifecycle,
 		paths:                 cfg.Paths,
 		host:                  cfg.Host,
 		project:               cfg.Project,
@@ -822,19 +823,20 @@ func (r *Runtime) runContainer(runCtx context.Context, ctx *ExecutionContext, re
 		return fmt.Errorf("runtime backend is not configured")
 	}
 	// runCtx turns SIGINT and SIGTERM into a cancelled start that returns through
-	// the deferred restore; termtint must not re-raise them and kill the process
+	// the deferred cleanup; the terminal scope must not re-raise them and kill the process
 	// while the gateway is still being removed.
-	restoreTint := termtint.Begin(r.run.SessionTint, termtint.CallerHandles(interruptSignals...))
-	defer restoreTint()
+	finish := r.beginTerminal(runCtx, model.TerminalTarget{Name: ctx.ContainerName, Tool: r.profile.Name, ProjectDir: r.project.Dir, ProjectHash: r.project.Hash}, interruptSignals...)
+	var runErr error
+	defer func() { finish(runErr) }()
 	// The session-start lock must be released via OnStarted, not after Run
 	// returns: Run blocks for the whole foreground session, and holding the
 	// lock that long would stall every other session start for this tool and
 	// project. The deferred release in Execute only backstops error paths.
-	_, err := be.Run(runCtx, r.backendRequest(ctx, false, true), backend.AttachIO{TTY: true, OnStarted: func() {
+	_, runErr = be.Run(runCtx, r.backendRequest(ctx, false, true), backend.AttachIO{TTY: true, OnStarted: func() {
 		releaseStartLock()
 		r.announcePublishedPorts(ctx.ContainerName)
 	}})
-	return err
+	return runErr
 }
 
 func (r *Runtime) backendRequest(ctx *ExecutionContext, detached bool, interactive bool) backend.Request {

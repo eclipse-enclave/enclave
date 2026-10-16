@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"enclave/internal/hosthooks"
 	"enclave/internal/model"
 	"enclave/internal/util"
 )
@@ -142,6 +143,14 @@ func validateUserExtension(paths model.Paths, kind model.ExtensionKind, name str
 		result.Warnings = append(result.Warnings, fmt.Sprintf("%s %q: user go/ handlers are ignored (requires recompilation)", kind.Label(), name))
 	}
 	validateCommandsDir(kind, name, userDir, result)
+	_, hookWarnings := hosthooks.Extension(string(kind)+":"+name, userDir)
+	for _, warning := range hookWarnings {
+		if strings.Contains(warning, "invalid host hooks") {
+			result.Errors = append(result.Errors, warning)
+		} else {
+			result.Warnings = append(result.Warnings, warning)
+		}
+	}
 
 	if !hasBuiltin && !hasOwnSpecFile(userDir) {
 		result.Warnings = append(result.Warnings, fmt.Sprintf("%s %q: missing %s in user extension (skipping)", kind.Label(), name, SpecFilename))

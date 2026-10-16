@@ -19,7 +19,7 @@ import (
 // an OptionDef, via reflection over the model.Options / Defaults /
 // model.OptionSources field named by the def, keyed on the option Kind. It
 // replaces five closures that scripts/gen_options.go previously emitted per
-// option. Only the `yolo` kind needs bespoke handling.
+// option. The `yolo` and host-hook map kinds need bespoke handling.
 
 func optField(v any, name string) reflect.Value {
 	return reflect.ValueOf(v).FieldByName(name)
@@ -53,6 +53,8 @@ func optSource(sources model.OptionSources, name string) model.OptionSource {
 // for display, with a bool reporting whether it is considered "set".
 func OptionDefaultValue(def OptionDef, opts model.Options) (string, bool) {
 	switch def.Kind {
+	case OptionKindHostHooks:
+		return hostHookValue(optField(opts, def.OptionField).Interface())
 	case OptionKindYolo:
 		return "tool-default", true
 	case OptionKindBool:
@@ -71,6 +73,8 @@ func OptionDefaultsValue(def OptionDef, defaults Defaults) (string, bool) {
 		return "", false
 	}
 	switch def.Kind {
+	case OptionKindHostHooks:
+		return hostHookValue(defaults.HostHooks)
 	case OptionKindYolo, OptionKindBool:
 		return boolPtrValue(optBoolPtr(defaults, def.DefaultsField))
 	case OptionKindStringSlice:
@@ -104,6 +108,9 @@ func OptionCLIValue(def OptionDef, opts model.Options) (string, bool) {
 // OptionEffectiveValue returns the resolved effective value for display.
 func OptionEffectiveValue(def OptionDef, opts model.Options) string {
 	switch def.Kind {
+	case OptionKindHostHooks:
+		value, _ := hostHookValue(EffectiveHostHooks(opts))
+		return value
 	case OptionKindYolo:
 		if opts.YoloOverride != nil {
 			return fmt.Sprintf("%t", *opts.YoloOverride)

@@ -23,6 +23,9 @@ import (
 // extension named name, expecting the given kind (KindSandbox or KindMixin).
 // It returns os.ErrNotExist if neither file is present.
 func LoadSpec(paths model.Paths, name string, kind string) (specDocument, error) {
+	return loadSpec(paths, name, kind, specWarn)
+}
+func loadSpec(paths model.Paths, name, kind string, warn func(string)) (specDocument, error) {
 	specPath, ok := resolveSpecFile(paths, name, kind)
 	if !ok {
 		return specDocument{}, os.ErrNotExist
@@ -52,9 +55,10 @@ func LoadSpec(paths model.Paths, name string, kind string) (specDocument, error)
 		return specDocument{}, err
 	}
 
-	warnReservedFields(doc, name, specWarn)
-
-	warnUnknownFilesEntries(filepath.Join(filepath.Dir(specPath), "files"), name, specWarn)
+	if warn != nil {
+		warnReservedFields(doc, name, warn)
+		warnUnknownFilesEntries(filepath.Join(filepath.Dir(specPath), "files"), name, warn)
+	}
 
 	return doc, nil
 }
@@ -222,8 +226,8 @@ func loadSpecExtension(paths model.Paths, name string, specKind string) (model.E
 
 // loadSpecProfile loads a sandbox spec.yaml/spec.json document as name and
 // maps it onto a validated model.Profile.
-func loadSpecProfile(paths model.Paths, name string) (model.Profile, error) {
-	doc, err := LoadSpec(paths, name, KindSandbox)
+func loadSpecProfile(paths model.Paths, name string, warn func(string)) (model.Profile, error) {
+	doc, err := loadSpec(paths, name, KindSandbox, warn)
 	if err != nil {
 		return model.Profile{}, err
 	}

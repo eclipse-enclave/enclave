@@ -392,3 +392,14 @@ independent of whether other extensions in the same invocation succeeded.
 - There is no extension registry or index — every install names a git
   repository directly — and no signature verification of fetched content;
   trust is whatever you extend to the source you point at.
+
+## Host-hook capabilities
+
+Inventory and add/update/remove v1 envelopes optionally include `hostHooks`, an
+array of `{ "id": "feature:herdr", "phases": ["prepare"] }` objects. `enabled`
+retains its container-selection meaning. Host hooks execute automatically only
+when separately enabled in `host_hooks`; host commands remain manual verbs.
+Installation validates without executing hooks. Updates report phase, handler
+path and hook-content changes; local hook edits are protected by tree integrity.
+Host-only changes do not trigger image rebuilds. Removal leaves config intact;
+remove dangling enabled IDs explicitly. See the [protocol/trust contract](host-hooks.md).

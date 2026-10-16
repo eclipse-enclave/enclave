@@ -93,3 +93,14 @@ Enclave follows platform-standard roots: the XDG base directories on Linux and o
 - User-defined subcommands: `~/.config/enclave/commands/{host,session}/` (executable files become `enclave <name>` verbs)
 
 Per-project config/state is keyed by project hash and kept outside the worktree. See `docs/configuration.md` and `docs/runtime/stores.md` for details.
+
+## Host lifecycle contributions
+
+When changing host hooks, read [the v1 contract](docs/extensions/host-hooks.md).
+Keep protocol/discovery/process/terminal mechanics in `internal/hosthooks`, tint
+compatibility in `internal/hosthooks/builtin`, and config/replay composition in app.
+Runtime consumes a narrow terminal callback. External-only reference providers
+belong in `examples/host-hooks/features/`, outside built-in assets. Maintain the
+`hostHooks` inventory/result fields, capability diffs, validation, integrity and
+image exclusions together. Host activation uses `host_hooks`, independently of
+container `features`; discovery and installation never execute providers.

@@ -7,7 +7,10 @@
 
 package extinstall
 
-import "slices"
+import (
+	"enclave/internal/hosthooks"
+	"slices"
+)
 
 // Per-extension outcomes. These strings are an integration contract: they
 // appear verbatim in `--json` output.
@@ -31,12 +34,14 @@ type ActionResult struct {
 	// HostCommands are the enclave verbs the extension contributes, which run
 	// on the host outside the sandbox. Under --json the narrated capability
 	// summary is discarded, so this is the only way a caller driving the
-	// installer sees the one capability that is not bounded by a container.
+	// installer sees manually invoked host capabilities; HostHooks separately
+	// reports opt-in automatic execution.
 	// On a remove it names the verbs that stopped resolving. Additive to the
 	// v1 contract.
-	HostCommands []string `json:"hostCommands,omitempty"`
-	Warnings     []string `json:"warnings,omitempty"`
-	Error        string   `json:"error,omitempty"`
+	HostHooks    []hosthooks.Capability `json:"hostHooks,omitempty"`
+	HostCommands []string               `json:"hostCommands,omitempty"`
+	Warnings     []string               `json:"warnings,omitempty"`
+	Error        string                 `json:"error,omitempty"`
 }
 
 // HasFailure reports whether any extension failed, so a caller can pick a

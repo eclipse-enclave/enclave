@@ -389,3 +389,18 @@ Default image naming behavior:
 - `--base-image` or devcontainer mode without `--image-name`:
   - `enclave-<tool>:base-<hash>-latest` or `enclave-<tool>:devcontainer-<hash>-latest`
   - slim: `enclave-<tool>:base-<hash>-slim` or `enclave-<tool>:devcontainer-<hash>-slim`
+
+## Host lifecycle boundary
+
+`internal/hosthooks/` owns independent protocol DTOs, installed/user discovery,
+manifest validation, bounded process-group execution, environment composition and
+terminal scopes. `internal/hosthooks/builtin/` contains the legacy tint adapter.
+`internal/app/host_hooks.go` composes invocation/target configuration; app-level
+Unix replay preserves PID and argument boundaries before image/setup work. Runtime
+receives `model.TerminalLifecycle`, not a configuration-loading hook engine.
+Terminal cleanup wraps foreground run, validated exec targets and resolved attach
+targets without changing OnStarted lock release or backend/store cleanup. The
+[lifecycle diagram](extensions/host-hooks.md#phases-and-ownership) is maintained with
+this contract. `examples/host-hooks/` contains external-only Python reference
+features, excluded from runtime/package assets and raw Docker contexts. Extension
+`hooks/` is excluded from assembled contexts and image identity.

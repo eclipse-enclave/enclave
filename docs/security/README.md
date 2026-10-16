@@ -115,3 +115,12 @@ not appear in `network.log`, even with `--network-log=requests`. See
 [SSH keys](../auth.md#ssh-keys) for its access and how to scope or revoke it.
 
 See the [restricted network request flow](../runtime/network-request-flow.md).
+
+## Explicit host lifecycle execution
+
+Enabled [host hooks](../extensions/host-hooks.md) execute with the host user's
+privileges and inherited environment; they are not sandboxed. Installation and
+container feature enablement do not activate them. Review code and explicitly
+configure `host_hooks` before automatic execution. Protocol JSON omits secrets
+and stores, and returned host environment/settings are not implicitly forwarded
+to the sandbox or persistent stores. The container security boundary is unchanged.

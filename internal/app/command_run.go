@@ -44,11 +44,14 @@ func runExecutionCommand(input *CommandInput) int {
 		return 1
 	}
 	for _, warning := range validationWarnings {
+		if input.Replayed {
+			continue
+		}
 		logx.Warnf(warning)
 	}
 	opts.Sources = sources
 
-	profile, err := loadProfileOrReport(input.Ctx.Paths, opts.Tool)
+	profile, err := loadProfileOrReport(input.Ctx.Paths, opts.Tool, input.Replayed)
 	if err != nil {
 		return 1
 	}
@@ -59,7 +62,7 @@ func runExecutionCommand(input *CommandInput) int {
 		logx.Errorf("%v", err)
 		return 1
 	}
-	if fallback {
+	if fallback && !input.Replayed {
 		logx.Warnf("%s does not define %s behavior; falling back to %s behavior", profile.Name, input.Action, sessionMode)
 	}
 	if len(sessionArgs) > 0 {
@@ -67,12 +70,17 @@ func runExecutionCommand(input *CommandInput) int {
 	}
 
 	if autoBackgroundForIDE(input.Action, opts, profile) {
-		logx.Infof("%s auto-launches the %s IDE; starting detached (reattach later with `%s %s <container>`)",
-			profile.Name, profile.PostStart.OpenIDE, model.AppName, profile.PostStart.OpenIDE)
+		if !input.Replayed {
+			logx.Infof("%s auto-launches the %s IDE; starting detached (reattach later with `%s %s <container>`)",
+				profile.Name, profile.PostStart.OpenIDE, model.AppName, profile.PostStart.OpenIDE)
+		}
 		opts.Background = true
 		input.Options.Background = true
 	}
 
+	if !prepareHostLaunch(input, opts, profile, project) {
+		return exitCodeInterrupted
+	}
 	yoloEnabled := resolveYoloEnabled(profile, opts)
 
 	if executionRequiresDocker(input.Action, opts) {
@@ -125,6 +133,7 @@ func runExecutionCommand(input *CommandInput) int {
 
 	handler := tools.Resolve(profile.Name)
 	runner := runtime.New(model.RuntimeConfig{
+		TerminalLifecycle:     terminalLifecycle(input.Action, opts, profile, project, input.InvocationID, input.HostHookWarnings),
 		Paths:                 input.Ctx.Paths,
 		Host:                  host,
 		Project:               project,
@@ -217,8 +226,8 @@ func dispatchRunner(input *CommandInput, runner *runtime.Runtime, execTarget run
 
 // execSessionTarget resolves the `--name` of `exec` like the argument of
 // `attach`: a container name or ID from `enclave ps` matches verbatim from any
-// directory, anything else as a session name, current project first. The tint
-// follows the resolved session, as for attach. Without `--name` it returns the
+// directory, anything else as a session name, current project first. Terminal
+// settings follow the resolved session, as for attach. Without `--name` it returns the
 // zero target, leaving auto-selection to the runtime.
 func execSessionTarget(ctx context.Context, be backend.Backend, opts model.Options, project model.Project) (runtime.ExecTarget, error) {
 	name, given := sessionNameFilter(opts)
@@ -233,7 +242,7 @@ func execSessionTarget(ctx context.Context, be backend.Backend, opts model.Optio
 	if err != nil {
 		return runtime.ExecTarget{}, err
 	}
-	return runtime.ExecTarget{Name: session.Ref.Name, SessionTint: attachSessionTint(session, opts.SessionTint)}, nil
+	return runtime.ExecTarget{Name: session.Ref.Name}, nil
 }
 
 // exitCodeInterrupted is the shell convention for a process ended by SIGINT.

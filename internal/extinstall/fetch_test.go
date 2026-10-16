@@ -36,7 +36,7 @@ func runGitFixture(t *testing.T, dir string, args ...string) string {
 // fixtureRepo builds a real git repository with the given files and returns its
 // path. allowFilter controls uploadpack.allowFilter, so both the partial-fetch
 // path and its fallback can be exercised.
-func fixtureRepo(t *testing.T, allowFilter bool, files map[string]string) string {
+func fixtureRepo(t *testing.T, allowFilter bool, files map[string]string, executables ...string) string {
 	t.Helper()
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not available")
@@ -45,7 +45,11 @@ func fixtureRepo(t *testing.T, allowFilter bool, files map[string]string) string
 	runGitFixture(t, dir, "init", "-q")
 	runGitFixture(t, dir, "symbolic-ref", "HEAD", "refs/heads/main")
 	for rel, content := range files {
-		writeFixture(t, filepath.Join(dir, filepath.FromSlash(rel)), content, 0o644)
+		mode := os.FileMode(0o644)
+		if slices.Contains(executables, rel) {
+			mode = 0o755
+		}
+		writeFixture(t, filepath.Join(dir, filepath.FromSlash(rel)), content, mode)
 	}
 	runGitFixture(t, dir, "add", "-A")
 	runGitFixture(t, dir, "commit", "-qm", "initial")

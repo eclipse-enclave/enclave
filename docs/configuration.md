@@ -367,3 +367,25 @@ enclave config --json            # Emit JSON output
 |------|-------------|
 | `--view <mode>` | Output view: `matrix` (default), `effective` (effective values only), `diff` (values overridden by higher precedence), or `source` (where each value comes from: CLI, tool override, project, global, default) |
 | `--json` | Emit JSON output |
+
+## Host lifecycle configuration
+
+`host_hooks` is a config-only map keyed by canonical provider ID. Entries accept
+optional `enabled`, integer `order` (default 100), and an opaque `settings` object.
+Global, project, and merged per-tool layers inherit omitted fields; supplied
+settings replace completely (`{}` clears them). An empty map does not disable
+inherited providers: use explicit `enabled: false`. Container `features`, slim,
+devcontainer and explicit images do not govern host activation.
+
+Prepare resolves invocation intent; exec/attach terminal phases resolve the actual
+target tool/project, with invocation fallback for older unlabeled sessions. No
+second prepare occurs. `enclave config` shows activation and per-field sources.
+Valid `session_tint` remains a default for `builtin:session-tint`; explicit hook
+config can disable/override it without rewriting configuration. For external tint:
+
+```json
+{"host_hooks":{"builtin:session-tint":{"enabled":false},"feature:session-tint":{"enabled":true,"settings":{"color":"#2a0f12"}}}}
+```
+
+See [host lifecycle hooks](extensions/host-hooks.md) for layouts, full precedence,
+protocol, and the external Herdr/tint examples.

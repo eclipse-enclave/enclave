@@ -275,6 +275,37 @@ func TestSessionFromSummaryProjectDir(t *testing.T) {
 	})
 }
 
+func TestProvenanceLabelsRoundTrip(t *testing.T) {
+	recorded := map[string]any{"pass_env": []string{"GITHUB_TOKEN"}, "yolo": true, "backend": "auto"}
+	labelsFor := func(options map[string]any) map[string]string {
+		return labelsFromRequest(backend.Request{Session: backend.SessionMeta{Tool: "claude", Provenance: options}})
+	}
+	unreadable := labelsFor(recorded)
+	unreadable[model.LabelOptions] = `{"yolo":`
+	cases := []struct {
+		name   string
+		labels map[string]string
+		want   map[string]any
+	}{
+		{name: "recorded", labels: labelsFor(recorded), want: recorded},
+		{name: "not recorded", labels: labelsFor(nil)},
+		{name: "unreadable", labels: unreadable},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			session, ok := sessionFromSummary(dockercmd.Summary{Names: []string{"/enclave-claude-abc123abc123"}, Labels: tc.labels})
+			if !ok {
+				t.Fatal("expected managed session")
+			}
+			got, _ := json.Marshal(session.Provenance)
+			want, _ := json.Marshal(tc.want)
+			if string(got) != string(want) {
+				t.Fatalf("options = %s, want %s", got, want)
+			}
+		})
+	}
+}
+
 func TestPrepareRunAppliesRuntimeUIDRemapEnvAfterDevcontainerEnv(t *testing.T) {
 	installFakeDocker(t)
 	b := newDevcontainerBackend(t.TempDir(),

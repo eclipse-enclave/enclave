@@ -34,11 +34,18 @@ type CommandInput struct {
 	ToolDefaults    config.Defaults
 	HasToolDefaults bool
 	ConfigView      model.ConfigView
-	NetworkLogView  model.NetworkLogView
+	// ConfigWarnings are the config-loading warnings already logged by Run.
+	ConfigWarnings []config.Warning
+	NetworkLogView model.NetworkLogView
+	// NetworkPrintJSON selects the JSON envelope of `enclave network print`.
+	NetworkPrintJSON bool
 	// UserCommandMount, when set, exposes the host session command tree read-only
 	// inside the container. Populated only for `enclave <name>` session
 	// commands dispatched through the run pipeline.
 	UserCommandMount *model.UserCommandMount
+	// ConfiguredBackend is the backend option before auto-detection and the
+	// podman-shim mapping resolved Options.Backend.
+	ConfiguredBackend string
 }
 
 func dispatchCommand(input *CommandInput) int {
@@ -47,7 +54,7 @@ func dispatchCommand(input *CommandInput) int {
 	case "info":
 		return runInfo(input.Ctx, input.Options)
 	case "config":
-		return runConfig(input.Ctx.Paths, input.Options, input.BaseOptions, input.GlobalDefaults, input.ProjectDefaults, input.ToolDefaults, input.HasToolDefaults, input.ConfigView, input.Ctx.ProjectDir)
+		return runConfig(input)
 	case "auth-import":
 		return runAuthImport(input)
 	case "auth-export":

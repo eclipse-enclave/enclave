@@ -10,6 +10,7 @@ package config
 import (
 	"fmt"
 	"reflect"
+	"strings"
 
 	"enclave/internal/model"
 )
@@ -124,4 +125,45 @@ func OptionEffectiveValue(def OptionDef, opts model.Options) string {
 // OptionEffectiveSource returns the source that won for this option.
 func OptionEffectiveSource(def OptionDef, sources model.OptionSources) model.OptionSource {
 	return optSource(sources, def.SourceField)
+}
+
+// OptionTypedEffectiveValue returns the resolved value as a bool, string, or
+// non-nil []string. Yolo depends on the tool profile and returns nil.
+func OptionTypedEffectiveValue(def OptionDef, opts model.Options) any {
+	switch def.Kind {
+	case OptionKindYolo:
+		return nil
+	case OptionKindBool:
+		return optBool(opts, def.OptionField)
+	case OptionKindStringSlice:
+		if values := optSlice(opts, def.OptionField); values != nil {
+			return values
+		}
+		return []string{}
+	default:
+		return optString(opts, def.OptionField)
+	}
+}
+
+// OptionTypedDefaultsValue returns the typed value a config Defaults layer sets
+// and whether it sets one, using the same rules as OptionDefaultsValue.
+func OptionTypedDefaultsValue(def OptionDef, defaults Defaults) (any, bool) {
+	if def.DefaultsField == "" {
+		return nil, false
+	}
+	switch def.Kind {
+	case OptionKindYolo, OptionKindBool:
+		if value := optBoolPtr(defaults, def.DefaultsField); value != nil {
+			return *value, true
+		}
+	case OptionKindStringSlice:
+		if values := optSlice(defaults, def.DefaultsField); values != nil {
+			return values, true
+		}
+	default:
+		if value := optString(defaults, def.DefaultsField); strings.TrimSpace(value) != "" {
+			return value, true
+		}
+	}
+	return nil, false
 }

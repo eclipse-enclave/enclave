@@ -156,6 +156,7 @@ type RuntimeConfig struct {
 	YoloEnabled           bool
 	Features              []Extension
 	UserCommandMount      *UserCommandMount
+	Provenance            map[string]any
 }
 
 // UserCommandMount describes the read-only bind mount that exposes the host
@@ -564,6 +565,10 @@ const (
 	// the right per-user tmux socket even when the container's default exec
 	// user differs (e.g. root under --runtime-uid-remap).
 	LabelSessionMonitorUser = AppName + ".session_monitor_user"
+	// LabelOptions stores a session's provenance, the session-affecting
+	// option values, as compact JSON. It is storage only; `ps --json` is the
+	// contract.
+	LabelOptions = AppName + ".options"
 )
 
 const (

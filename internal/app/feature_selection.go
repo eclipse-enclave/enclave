@@ -11,14 +11,70 @@ import (
 	"sort"
 	"strings"
 
+	"enclave/internal/config"
 	"enclave/internal/model"
 )
 
-func resolveConfiguredFeatures(requested []string, allFeatures []model.Extension) []string {
-	if requested == nil {
-		return nil
+// featureSelection is what a build selects among the available features:
+// the selected names, including those that match no feature, the matching
+// features in listing order, and the unknown names in selection order.
+type featureSelection struct {
+	selected []string
+	enabled  []model.Extension
+	unknown  []string
+}
+
+func resolveFeatureSelection(paths model.Paths, build model.BuildOptions) (featureSelection, error) {
+	if featuresDisabled(build) {
+		return featureSelection{selected: []string{}}, nil
 	}
+	allFeatures, err := config.ListFeatures(paths)
+	if err != nil {
+		return featureSelection{}, err
+	}
+	selection := featureSelection{selected: selectFeatures(allFeatures, build)}
+	requested := make(map[string]bool, len(selection.selected))
+	for _, name := range selection.selected {
+		requested[name] = true
+	}
+	available := make(map[string]bool, len(allFeatures))
+	for _, feature := range allFeatures {
+		available[feature.Name] = true
+		if requested[feature.Name] {
+			selection.enabled = append(selection.enabled, feature)
+		}
+	}
+	for _, name := range selection.selected {
+		if !available[name] {
+			selection.unknown = append(selection.unknown, name)
+		}
+	}
+	return selection, nil
+}
+
+// enabledNames returns the sorted names of the enabled features.
+func (s featureSelection) enabledNames() []string {
+	names := featureNameList(s.enabled)
+	sort.Strings(names)
+	return names
+}
+
+func selectFeatures(allFeatures []model.Extension, build model.BuildOptions) []string {
+	if build.Features == nil {
+		return defaultEnabledFeatureNames(allFeatures)
+	}
+	return resolveConfiguredFeatures(build.Features, allFeatures)
+}
+
+func featuresDisabled(build model.BuildOptions) bool {
+	return build.Slim || (build.Devcontainer && build.Features == nil)
+}
+
+func resolveConfiguredFeatures(requested []string, allFeatures []model.Extension) []string {
 	normalized := normalizeAndSortNames(requested)
+	if len(normalized) == 0 {
+		return []string{}
+	}
 	if len(normalized) == 1 {
 		switch strings.ToLower(strings.TrimSpace(normalized[0])) {
 		case model.SelectionDefault:

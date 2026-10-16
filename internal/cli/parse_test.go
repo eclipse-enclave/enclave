@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -71,6 +72,26 @@ func TestBackendFlagOnEngineCommands(t *testing.T) {
 				config.Defaults{Backend: "docker"}, config.Defaults{}, "")
 			if opts.Backend != "podman" {
 				t.Fatalf("configured backend overrode CLI choice: %q", opts.Backend)
+			}
+		})
+	}
+}
+
+func TestNetworkPreviewCommandsAcceptSessionPolicyFlags(t *testing.T) {
+	for _, command := range []string{"status", "print", "diff"} {
+		t.Run(command, func(t *testing.T) {
+			res, err := Parse([]string{"network", command, "--tool", "codex", "--features", "+github-cli", "--slim",
+				"--playwright-mcp", "--allow-domain", "api.example.com", "--allow-all-network"}, config.DefaultOptions())
+			if err != nil {
+				t.Fatal(err)
+			}
+			opts, sources := res.Options, res.Sources
+			if opts.Tool != "codex" || !slices.Equal(opts.Features, []string{"+github-cli"}) || !opts.Slim || !opts.PlaywrightMCP ||
+				!slices.Equal(opts.AllowDomains, []string{"api.example.com"}) || !opts.AllowAllNetwork {
+				t.Fatalf("unexpected options: %+v", opts)
+			}
+			if sources.Features != model.SourceCLI || sources.AllowDomains != model.SourceCLI || sources.AllowAllNetwork != model.SourceCLI {
+				t.Fatalf("unexpected sources: %+v", sources)
 			}
 		})
 	}
@@ -569,6 +590,44 @@ func TestParseEphemeralFlag(t *testing.T) {
 	}
 }
 
+func TestParseExplicitBoolFlagValues(t *testing.T) {
+	tests := []struct {
+		args  []string
+		check func(model.Options, model.OptionSources) bool
+	}{
+		{[]string{"--no-cache=false"}, func(o model.Options, s model.OptionSources) bool { return !o.NoCache && s.NoCache == model.SourceCLI }},
+		{[]string{"--no-cache"}, func(o model.Options, _ model.OptionSources) bool { return o.NoCache }},
+		{[]string{"--allow-all-network=false"}, func(o model.Options, _ model.OptionSources) bool { return !o.AllowAllNetwork }},
+		{[]string{"--no-yolo=false"}, func(o model.Options, _ model.OptionSources) bool { return o.YoloOverride != nil && *o.YoloOverride }},
+		{[]string{"--yolo=false"}, func(o model.Options, _ model.OptionSources) bool { return o.YoloOverride != nil && !*o.YoloOverride }},
+		{[]string{"--yolo", "--no-yolo"}, func(o model.Options, _ model.OptionSources) bool { return o.YoloOverride != nil && !*o.YoloOverride }},
+		{[]string{"--ephemeral=0"}, func(o model.Options, s model.OptionSources) bool {
+			return !o.Ephemeral && s.Ephemeral == model.SourceCLI
+		}},
+		{[]string{"--allow-root=false", "ps"}, func(o model.Options, s model.OptionSources) bool {
+			return !o.AllowRoot && s.AllowRoot == model.SourceCLI
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(strings.Join(tt.args, " "), func(t *testing.T) {
+			res, err := Parse(tt.args, config.DefaultOptions())
+			if err != nil {
+				t.Fatalf("parse failed: %v", err)
+			}
+			if !tt.check(res.Options, res.Sources) {
+				t.Fatalf("unexpected result: options=%+v sources=%+v", res.Options, res.Sources)
+			}
+		})
+	}
+
+	for _, args := range [][]string{{"--no-cache=banana"}, {"--allow-all-network="}} {
+		_, err := Parse(args, config.DefaultOptions())
+		if err == nil || !strings.HasSuffix(err.Error(), "expected true or false") {
+			t.Errorf("Parse(%q): expected invalid bool value error, got %v", args, err)
+		}
+	}
+}
+
 func TestParseAddReadonlyDirFlag(t *testing.T) {
 	defaults := config.DefaultOptions()
 	res, err := Parse([]string{"--add-readonly-dir", "/tmp/readonly"}, defaults)
@@ -879,6 +938,16 @@ func TestParseSubcommandOptionFlags(t *testing.T) {
 				expected := []string{"node-dev"}
 				if !reflect.DeepEqual(res.Options.Features, expected) {
 					t.Fatalf("expected features %v, got %v", expected, res.Options.Features)
+				}
+			},
+		},
+		{
+			name:   "features list --json --tool",
+			args:   []string{"features", "list", "--json", "--tool", "codex"},
+			action: "features",
+			check: func(t *testing.T, res Result) {
+				if res.Options.Tool != "codex" || res.ExtRequest == nil || !res.ExtRequest.JSON {
+					t.Fatalf("tool = %q, request = %+v", res.Options.Tool, res.ExtRequest)
 				}
 			},
 		},
@@ -1371,8 +1440,7 @@ func TestParseAllowRootIsGlobal(t *testing.T) {
 		{args: []string{"--allow-root", "--tool", "codex"}, action: "run"},
 		{args: []string{"tools", "list", "--allow-root"}, action: "tools"},
 		{args: []string{"--allow-root", "deploy", "x"}, action: "user-command"},
-		// Bool flags ignore their value (as --verbose does), so =false still opts in.
-		{args: []string{"--allow-root=false", "ps"}, action: "ps"},
+		{args: []string{"--allow-root=true", "ps"}, action: "ps"},
 	} {
 		res, err := Parse(tc.args, config.DefaultOptions(), cmds...)
 		if err != nil {

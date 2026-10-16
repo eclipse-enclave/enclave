@@ -156,7 +156,7 @@ func writeCLIFlag(buf *bytes.Buffer, flag config.CLIFlagDef) {
 		open = "boolFlag"
 	}
 	if flag.ValueKind == config.CLIValueNone {
-		fmt.Fprintf(buf, "\t\t\t%s(%q, %q, func(opts *model.Options, sources *model.OptionSources) {\n", open, flag.Name, flag.Usage)
+		fmt.Fprintf(buf, "\t\t\t%s(%q, %q, func(opts *model.Options, sources *model.OptionSources, value bool) {\n", open, flag.Name, flag.Usage)
 		writeCLIActionNoValue(buf, flag.Action)
 		buf.WriteString("\t\t\t}),\n")
 		return
@@ -169,16 +169,17 @@ func writeCLIFlag(buf *bytes.Buffer, flag config.CLIFlagDef) {
 }
 
 func writeCLIActionNoValue(buf *bytes.Buffer, action config.CLIAction) {
+	value := "value"
+	if !action.BoolValue {
+		value = "!value"
+	}
 	switch action.Kind {
 	case config.CLIActionSetBool:
-		fmt.Fprintf(buf, "\t\t\t\topts.%s = %t\n", action.OptionField, action.BoolValue)
+		fmt.Fprintf(buf, "\t\t\t\topts.%s = %s\n", action.OptionField, value)
 		setSource(buf, action)
 	case config.CLIActionSetBoolPtr:
-		fmt.Fprintf(buf, "\t\t\t\tval := %t\n", action.BoolValue)
+		fmt.Fprintf(buf, "\t\t\t\tval := %s\n", value)
 		fmt.Fprintf(buf, "\t\t\t\topts.%s = &val\n", action.OptionField)
-		setSource(buf, action)
-	case config.CLIActionCall:
-		fmt.Fprintf(buf, "\t\t\t\t%s(opts, sources)\n", action.Call)
 		setSource(buf, action)
 	default:
 		panic("unsupported CLI action for no-value flag: " + string(action.Kind))

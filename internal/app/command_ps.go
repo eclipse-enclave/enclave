@@ -57,6 +57,7 @@ type psJSONEntry struct {
 	Background  bool           `json:"background"`
 	Ports       []psJSONPort   `json:"ports"`
 	Network     *psJSONNetwork `json:"network"`
+	Options     map[string]any `json:"options,omitempty"`
 }
 
 // psJSONPort is one published port binding in the ps --json output. Consumers
@@ -286,6 +287,7 @@ func buildPSJSONEntries(sessions []backend.Session) []psJSONEntry {
 			Background:  session.Background,
 			Ports:       buildPSJSONPorts(session.Ports),
 			Network:     buildPSJSONNetwork(session.Network),
+			Options:     session.Provenance,
 		})
 	}
 	sort.Slice(entries, func(i, j int) bool { return entries[i].Name < entries[j].Name })

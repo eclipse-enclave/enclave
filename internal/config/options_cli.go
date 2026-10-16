@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 
 	"enclave/internal/model"
@@ -89,13 +90,17 @@ func attachCLIFlags(specs []OptionSpec) {
 	}
 }
 
-func boolFlag(name string, usage string, apply func(*model.Options, *model.OptionSources)) CLIFlag {
+func boolFlag(name string, usage string, apply func(*model.Options, *model.OptionSources, bool)) CLIFlag {
 	return CLIFlag{
 		Name:      name,
 		Usage:     usage,
 		ValueKind: CLIValueNone,
-		Apply: func(opts *model.Options, sources *model.OptionSources, _ string) error {
-			apply(opts, sources)
+		Apply: func(opts *model.Options, sources *model.OptionSources, value string) error {
+			parsed, err := strconv.ParseBool(value)
+			if err != nil {
+				return errors.New("expected true or false")
+			}
+			apply(opts, sources, parsed)
 			return nil
 		},
 	}

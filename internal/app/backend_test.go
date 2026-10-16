@@ -8,6 +8,7 @@
 package app
 
 import (
+	"os"
 	"strings"
 	"testing"
 
@@ -204,5 +205,39 @@ func TestResolveBackendExplicitDockerOnShimHostUsesPodman(t *testing.T) {
 	}
 	if len(*saved) != 0 {
 		t.Fatalf("the shim switch must not write config, got %v", *saved)
+	}
+}
+
+// The engine prompt saves its answer to the global config, so the session it
+// starts must record that answer, the value `config --json` reports from then on.
+func TestResolveActionBackendReportsSavedPromptChoice(t *testing.T) {
+	saved := stubBackendResolution(t, []string{backend.NameDocker, backend.NamePodman}, true)
+	stdin, answer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	previousStdin := os.Stdin
+	os.Stdin = stdin
+	t.Cleanup(func() {
+		os.Stdin = previousStdin
+		_ = stdin.Close()
+	})
+	if _, err := answer.WriteString(backend.NamePodman + "\n"); err != nil {
+		t.Fatal(err)
+	}
+	if err := answer.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	opts := model.Options{RunOptions: model.RunOptions{Backend: backend.NameAuto}}
+	configured, err := resolveActionBackend("run", &opts, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opts.Backend != backend.NamePodman || configured != backend.NamePodman {
+		t.Fatalf("backend = %q, configured = %q; want the saved podman for both", opts.Backend, configured)
+	}
+	if len(*saved) != 1 {
+		t.Fatalf("expected the choice to be saved once, got %v", *saved)
 	}
 }

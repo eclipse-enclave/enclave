@@ -122,3 +122,16 @@ func TestApplyDefaultsWithSources_HostConfigPathsAdditiveAgainstExplicitEmpty(t 
 		t.Fatalf("host_config_paths additive merge against explicit empty: got %v want %v", opts.HostConfigPaths, want)
 	}
 }
+
+func TestResolveOptionsForTool_ExplicitFalseCLIBoolBeatsGlobal(t *testing.T) {
+	opts := DefaultOptions()
+	var sources model.OptionSources
+	if err := CLIFlagIndex()["--no-cache"].Apply(&opts, &sources, "false"); err != nil {
+		t.Fatal(err)
+	}
+	enabled := true
+	resolved, _, _ := ResolveOptionsForTool(opts, sources, Defaults{NoCache: &enabled}, Defaults{}, "")
+	if resolved.NoCache || resolved.Sources.NoCache != model.SourceCLI {
+		t.Fatalf("no_cache = %v (source %v), want false from cli", resolved.NoCache, resolved.Sources.NoCache)
+	}
+}

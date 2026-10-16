@@ -54,8 +54,14 @@ func networkApplyCommand(res *Result) *cobra.Command {
 	return cmd
 }
 
-// networkQueryCommand builds a read-only network subcommand: NoArgs, a fixed
-// action string, and the shared --tool option flags.
+// sessionPolicyOptionNames are the run options that shape a session's
+// allowlist, so the policy preview reflects a run with the same flags.
+var sessionPolicyOptionNames = []string{
+	"tool", "features", "slim", "playwright_mcp", "allow_domains", "allow_all_network",
+}
+
+// networkQueryCommand builds a read-only network subcommand that previews
+// the policy of a run with the given session options.
 func networkQueryCommand(name string, short string, action string, res *Result) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   name,
@@ -66,7 +72,7 @@ func networkQueryCommand(name string, short string, action string, res *Result) 
 			return nil
 		},
 	}
-	addOptionFlagsByName(cmd.Flags(), &res.Options, &res.Sources, "tool")
+	addOptionFlagsByName(cmd.Flags(), &res.Options, &res.Sources, sessionPolicyOptionNames...)
 	return cmd
 }
 
@@ -77,7 +83,9 @@ func networkStatusCommand(res *Result) *cobra.Command {
 }
 
 func networkPrintCommand(res *Result) *cobra.Command {
-	return networkQueryCommand("print", "Print effective dnsmasq configuration", "network-print", res)
+	cmd := networkQueryCommand("print", "Print effective dnsmasq configuration", "network-print", res)
+	cmd.Flags().BoolVar(&res.NetworkPrintJSON, "json", false, "Emit the effective allowlist as JSON")
+	return cmd
 }
 
 func networkDiffCommand(res *Result) *cobra.Command {

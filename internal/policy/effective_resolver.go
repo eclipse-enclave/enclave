@@ -26,20 +26,13 @@ type EffectiveResolver struct {
 }
 
 type ResolveInput struct {
-	ProjectDir      string
-	ProjectHash     string
-	Tool            string
-	AllowAllNetwork bool
-	// SpecAllowedDomains carries a spec.yaml extension's network.allowedDomains
-	// through to network.Merge, additive to the built-in/policy domains. Leave
-	// nil to have Resolve load them from the tool's spec; a caller that already
-	// holds a loaded profile may pass them explicitly to skip the reload.
-	SpecAllowedDomains []string
-	// SpecDeniedDomains carries a spec.yaml extension's network.deniedDomains
-	// through to network.Merge, blackholed so deny wins over a broader allow.
-	// nil ⇒ Resolve loads it from the tool spec (alongside SpecAllowedDomains,
-	// in a single profile load); a caller may pass it explicitly to skip that.
-	SpecDeniedDomains []string
+	ProjectDir  string
+	ProjectHash string
+	Tool        string
+	// Session supplies the session's spec, feature, and ad-hoc domains. Leave
+	// nil to load only the tool's spec, as for a running gateway whose session
+	// options are unknown.
+	Session *SessionNetworkInputs
 }
 
 type ResolveResult struct {
@@ -87,37 +80,21 @@ func (r EffectiveResolver) Resolve(input ResolveInput) (ResolveResult, error) {
 	allowlistPath := network.ResolveToolAllowlist(r.paths, tool)
 	allowlistPath = config.ResolveAllowlistPath(tool, r.home, projectHash, allowlistPath)
 
-	// Load from the tool's spec when the caller left either nil (see
-	// ResolveInput.SpecAllowedDomains/SpecDeniedDomains for the injection
-	// contract). A single profile load serves both to avoid a double read.
-	specAllowedDomains := input.SpecAllowedDomains
-	specDeniedDomains := input.SpecDeniedDomains
-	if specAllowedDomains == nil || specDeniedDomains == nil {
-		allowed, denied, err := r.loadSpecDomains(tool)
+	session := input.Session
+	if session == nil {
+		loaded, err := r.loadSpecSession(tool)
 		if err != nil {
 			return empty, err
 		}
-		if specAllowedDomains == nil {
-			specAllowedDomains = allowed
-		}
-		if specDeniedDomains == nil {
-			specDeniedDomains = denied
-		}
+		session = &loaded
 	}
 
-	effective := network.Merge(network.MergeConfig{
+	effective := session.Merge(network.MergeConfig{
 		BuiltInAllowlistPath: allowlistPath,
 		AllowlistsDir:        r.paths.AllowlistsDir,
 		GlobalPolicy:         globalPolicy,
 		ProjectPolicy:        projectPolicy,
-		SpecAllowedDomains:   specAllowedDomains,
-		SpecDeniedDomains:    specDeniedDomains,
 	})
-	if input.AllowAllNetwork {
-		effective.Mode = model.NetworkModeUnrestricted
-		effective.ModeSource = "allow-all-network"
-	}
-
 	return ResolveResult{
 		AllowlistPath: allowlistPath,
 		GlobalPolicy:  globalPolicy,
@@ -126,19 +103,16 @@ func (r EffectiveResolver) Resolve(input ResolveInput) (ResolveResult, error) {
 	}, nil
 }
 
-// loadSpecDomains returns the tool's spec.yaml network.allowedDomains (plus
-// its declared HTTP release hosts, which must stay resolvable — mirroring the
-// session runtime's union) and network.deniedDomains from a single profile
-// load. A tool without a spec has no inline domains and is not an error; a
-// malformed spec is surfaced so live resolution fails as session startup would.
-func (r EffectiveResolver) loadSpecDomains(tool string) (allowed []string, denied []string, err error) {
+// loadSpecSession returns session inputs carrying only the tool's spec. A
+// tool without a spec has no inline domains and is not an error; a malformed
+// spec is surfaced so live resolution fails as session startup would.
+func (r EffectiveResolver) loadSpecSession(tool string) (SessionNetworkInputs, error) {
 	profile, err := config.LoadProfile(r.paths, tool)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return nil, nil, nil
+			return SessionNetworkInputs{}, nil
 		}
-		return nil, nil, fmt.Errorf("load spec domains for %q: %w", tool, err)
+		return SessionNetworkInputs{}, fmt.Errorf("load spec domains for %q: %w", tool, err)
 	}
-	allowed = append(append([]string(nil), profile.AllowedDomains...), model.ReleaseHosts(profile.Secrets)...)
-	return allowed, profile.DeniedDomains, nil
+	return SessionNetworkInputs{Profile: profile}, nil
 }

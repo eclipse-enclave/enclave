@@ -748,19 +748,11 @@ func resolveRuntimeImageSelection(paths model.Paths, opts model.BuildOptions, to
 		selection.Tools = []string{name}
 	}
 
-	if opts.Slim || (opts.Devcontainer && opts.Features == nil) {
-		return selection, nil
-	}
-
-	availableFeatures, err := config.ListFeatures(paths)
+	features, err := resolveFeatureSelection(paths, opts)
 	if err != nil {
 		return runtimeImageSelection{}, err
 	}
-	if opts.Features != nil {
-		selection.Features = resolveConfiguredFeatures(opts.Features, availableFeatures)
-	} else {
-		selection.Features = defaultEnabledFeatureNames(availableFeatures)
-	}
+	selection.Features = features.selected
 	return selection, nil
 }
 

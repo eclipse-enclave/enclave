@@ -31,6 +31,15 @@ unchanged. See [windows.md](windows.md).
 
 `enclave ps` prints one row per container with its `NAME` (container name) and `SESSION` (the `--name` session name, or the auto-assigned `1`, `2`, … for extra sessions; `-` for the project's default container); either can be passed to `attach`, `exec --name`, `stop`, and `theia`. Flags: `--all` (include stopped containers, not just running ones), `--json` (emit a JSON array instead of the table). The flags compose (`ps --all --json`). Each JSON object has the fields `name`, `tool`, `projectDir` (absolute, resolved project path), `projectHash`, `worktree`, `status`, `createdAt` (RFC 3339, empty if unknown), `sessionName`, `background`, `ports` (array of `{containerPort, hostPort, hostIP, protocol}` bindings), and `network` (`{name, subnet}` for the per-session bridge under Docker and podman, `null` for other backends and sessions started by earlier releases).
 
+Session provenance: each JSON object also carries `options`, the options that shape the session, keyed and typed like `options.<name>.value` of [`enclave config --json`](configuration.md#json-output-schemaversion-1), as validated for the run.
+
+- `options.features` holds the sorted enabled feature names; `pass_env` holds variable names, never values.
+- `backend` and `image_name` are the configured values (for example `auto`), not the detected engine or the derived image tag.
+- Host-side and one-shot options (for example `progress`, `verbose`, `reset_auth`, `session_tint`, `session_name`, and build-cache options) are not recorded.
+- `options` is omitted when unknown: sessions started by earlier releases, features that could not be resolved at start, or unreadable recorded provenance. qemu sessions are not listed by `ps`, so they have none.
+
+To compare a session with the current configuration, see [Detecting session drift](configuration.md#detecting-session-drift).
+
 `--backend` selects one engine for `ps`, `status`, `stop`, `attach`, and `exec` without changing the saved backend. For example, after `enclave run --backend podman`, use `enclave ps --backend podman` to find that session and `enclave attach --backend podman <name>` to attach. `ps` does not merge sessions from multiple engines.
 
 `status` reports sessions of the current project (like `exec` without `--name`); `--all` widens it to every project. Flags: `--tool` and `--name` filter sessions; `--json` emits one machine-readable snapshot object per session (screen text and OSC title for external state detection). Each snapshot captures the trailing 24 screen rows. See [Session status snapshots](session-status.md).
@@ -88,7 +97,7 @@ Ctrl-C or SIGTERM while a session is still starting aborts the start with exit c
 
 `enclave version` prints one line suitable for bug reports; `--json` emits the version, commit, and date as an object. Builds from modified source append `-dirty` to the commit; unavailable values are reported as `unknown`.
 
-`enclave config` flags: `--view <mode>` selects the output view — `matrix` (default), `source` (where each value comes from), `diff` (values overridden by higher precedence), or `effective` (effective values only); `--json` emits JSON output.
+`enclave config` flags: `--view <mode>` selects the output view — `matrix` (default), `source` (where each value comes from), `diff` (values overridden by higher precedence), or `effective` (effective values only); `--json` emits a versioned JSON envelope (`schemaVersion: "1"`, typed values, structured warnings, and validation status; see [Inspecting Resolved Config](configuration.md#inspecting-resolved-config)).
 
 ### Extensions
 
@@ -96,7 +105,7 @@ Ctrl-C or SIGTERM while a session is still starting aborts the start with exit c
 
 | Command | Flags |
 |---------|-------|
-| `list` | `--json` (machine-readable output) |
+| `list` | `--json` (machine-readable output); `features` (bare or `list`) also takes `--slim`, `--features`, and `--tool`, so `enabled` matches a run with those options, including `tool_overrides.<tool>.features` |
 | `add <source>` | `--path <dir>`, `--ref <ref>`, `--name <name>` (repeatable), `--all`, `--yes`/`-y`, `--force`, `--dry-run`, `--json` (requires `--yes`) |
 | `update [<name\|source>...]` | `--ref <ref>` (single extension only), `--yes`/`-y`, `--force`, `--dry-run`, `--json` (requires `--yes`) |
 | `remove <name>...` | `--yes`/`-y`, `--force`, `--json` (requires `--yes`) |
@@ -126,13 +135,15 @@ in one step, printing the container name so you can reattach later with
 | Command | Description |
 |---------|-------------|
 | `enclave network status` | Show network policy status |
-| `enclave network print` | Print effective dnsmasq config |
+| `enclave network print` | Print effective dnsmasq config (`--json` emits the allowlist as a versioned envelope; see [JSON output](networking.md#json-output-schemaversion-1)) |
 | `enclave network diff` | Show changes from built-in defaults |
 | `enclave network add-domain <domain> --global` | Allow a domain |
 | `enclave network remove-domain <domain> --global` | Remove a domain |
 | `enclave network set-mode restricted\|unrestricted --global` | Set network mode |
 | `enclave network apply` | Apply policy to running gateways |
 | `enclave network log` | Show gateway network audit events |
+
+`network status`, `print`, and `diff` reflect the run options that shape the allowlist and accept their flags: `--tool`, `--features`, `--slim`, `--playwright-mcp`, `--allow-domain`, and `--allow-all-network` (`status` also takes `--backend`). See [Networking](networking.md#managing-the-network-policy).
 
 Network mutation commands are global-only today. `--project` scope is planned but not yet supported.
 
@@ -198,6 +209,8 @@ store that holds memory; the other `--keep` kinds do not apply there. See
 
 ## Flags
 
+Boolean flags accept an explicit value (e.g. `--no-cache=false`) in any form Go's `strconv.ParseBool` accepts: `true`/`false`, `1`/`0`, `t`/`f`, and their upper- and title-case variants; other values are rejected. `--no-yolo=false` is equivalent to `--yolo`.
+
 ### Tool & Session
 
 | Flag | Description |
@@ -253,6 +266,7 @@ extension-source updates (`tools update` / `features update`) are unaffected.
 
 Use `unset ENCLAVE_NO_REBUILD` or `export ENCLAVE_NO_REBUILD=0` to restore normal
 behavior, or `ENCLAVE_NO_REBUILD=0 enclave update` for a single invocation.
+An explicit `--no-rebuild=false` also overrides it for one invocation.
 There is no config-file key.
 
 ### Auth & Secrets
@@ -325,7 +339,7 @@ Commands that start a session (`run`, `shell`, `continue`, `resume`, the `devcon
 
 Read-only mounts get no exemption: reading is enough to leak credentials. The check runs before any image build and on every session start, including `continue` and `resume`. `exec` and `attach` enter running containers and are not checked.
 
-To mount such a directory anyway, pass `--allow-sensitive-mounts` or set `ENCLAVE_ALLOW_SENSITIVE_MOUNTS=1`; each sensitive mount then prints a warning. The opt-in has no config key, so neither global nor project config can grant it. Mounts from the repository stay blocked even with the opt-in: devcontainer bind sources must lie inside the project, and linked-worktree git metadata outside the project is skipped with a warning when it is sensitive.
+To mount such a directory anyway, pass `--allow-sensitive-mounts` or set `ENCLAVE_ALLOW_SENSITIVE_MOUNTS=1`; each sensitive mount then prints a warning. An explicit `--allow-sensitive-mounts=false` overrides the environment variable. The opt-in has no config key, so neither global nor project config can grant it. Mounts from the repository stay blocked even with the opt-in: devcontainer bind sources must lie inside the project, and linked-worktree git metadata outside the project is skipped with a warning when it is sensitive.
 
 The mounts enclave adds itself, such as `~/.gitconfig`, `~/.claude/ide` for the IDE bridge, direnv approvals, and the session stores, come from protected locations by design and are not checked.
 

@@ -366,7 +366,7 @@ func normalizeOptions(opts model.Options) (model.Options, []string) {
 	if opts.SkillsValidation == "" {
 		opts.SkillsValidation = model.SkillsValidationStrict
 	}
-	if opts.PlaywrightMCP {
+	if opts.PlaywrightMCP && opts.Tool == "claude" {
 		opts.Features = ensureFeature(opts.Features, "playwright")
 	}
 	opts.NetworkLog = strings.TrimSpace(strings.ToLower(opts.NetworkLog))

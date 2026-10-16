@@ -138,6 +138,30 @@ func TestValidateOptionsLayeredFeatures(t *testing.T) {
 			want:    []string{"github-cli", "node-dev"},
 		},
 		{
+			name:    "later all selector reverses inherited removal",
+			global:  config.Defaults{Features: []string{"default"}, ToolOverrides: map[string]config.Defaults{"claude": {Features: []string{"+all"}}}},
+			project: config.Defaults{Features: []string{"-node-dev"}},
+			want:    []string{"github-cli", "node-dev", "shell-extras"},
+		},
+		{
+			name:    "later default selector reverses inherited removal",
+			global:  config.Defaults{Features: []string{"default"}, ToolOverrides: map[string]config.Defaults{"claude": {Features: []string{"+default"}}}},
+			project: config.Defaults{Features: []string{"-node-dev"}},
+			want:    []string{"github-cli", "node-dev"},
+		},
+		{
+			name:    "later default selector keeps removal from inherited all",
+			global:  config.Defaults{Features: []string{"all"}, ToolOverrides: map[string]config.Defaults{"claude": {Features: []string{"+default"}}}},
+			project: config.Defaults{Features: []string{"-shell-extras"}},
+			want:    []string{"github-cli", "node-dev"},
+		},
+		{
+			name:    "selector and removal in the same later scope",
+			global:  config.Defaults{Features: []string{"default"}, ToolOverrides: map[string]config.Defaults{"claude": {Features: []string{"+all", "-github-cli"}}}},
+			project: config.Defaults{Features: []string{"-node-dev"}},
+			want:    []string{"node-dev", "shell-extras"},
+		},
+		{
 			name:    "project tool addition preserves global tool removal",
 			global:  config.Defaults{ToolOverrides: map[string]config.Defaults{"claude": {Features: []string{"-node-dev"}}}},
 			project: config.Defaults{ToolOverrides: map[string]config.Defaults{"claude": {Features: []string{"+shell-extras"}}}},

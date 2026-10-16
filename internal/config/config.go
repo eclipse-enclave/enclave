@@ -804,6 +804,11 @@ func applyFeatureDirectives(selected map[string]bool, directives []string) {
 	for _, name := range additions {
 		if IsFeatureSelector(name) {
 			name = strings.ToLower(name)
+			// Without the feature list, "+default" cannot tell which removals
+			// from an inherited "all" target default features, so it keeps them.
+			if name == model.FeatureSelectionAll || !selected[model.FeatureSelectionAll] {
+				clearFeatureRemovalMarkers(selected)
+			}
 		}
 		delete(selected, "-"+name)
 		selected[name] = true
@@ -814,6 +819,14 @@ func applyFeatureDirectives(selected map[string]bool, directives []string) {
 		}
 		if selected[model.SelectionDefault] || selected[model.FeatureSelectionAll] {
 			selected["-"+name] = true
+		}
+	}
+}
+
+func clearFeatureRemovalMarkers(selected map[string]bool) {
+	for key := range selected {
+		if strings.HasPrefix(key, "-") {
+			delete(selected, key)
 		}
 	}
 }

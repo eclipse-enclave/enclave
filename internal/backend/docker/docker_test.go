@@ -736,6 +736,35 @@ exit 0
 	}
 }
 
+func TestRemoveRemovesStoppedGatewayByCapturedID(t *testing.T) {
+	restoreNetworkGlobals(t)
+	logPath := stubCLI(t, "docker", `case "$1" in
+container)
+	case "$5" in
+	enclave-codex-abc123abc123-main-gateway)
+		printf '%s\n' '{"Id":"gateway-id","Config":{"Labels":{"enclave.gateway":"true","enclave.gateway.container":"enclave-codex-abc123abc123-main","enclave.gateway.project_hash":"abc123abc123"}},"State":{"Status":"exited","Running":false}}'
+		;;
+	*)
+		printf '%s\n' 'Error response from daemon: No such container: session' >&2
+		exit 1
+		;;
+	esac
+	;;
+esac
+exit 0
+`)
+	networkInspect = func(context.Context, string) (dockercmd.NetworkInspectResponse, error) {
+		return dockercmd.NetworkInspectResponse{}, errors.New("Error response from daemon: network enclave-codex-abc123abc123-main-net not found")
+	}
+
+	if err := New(Options{}).RemoveWithoutFinalize(context.Background(), backend.SessionRef{Name: "enclave-codex-abc123abc123-main"}); err != nil {
+		t.Fatalf("RemoveWithoutFinalize() error = %v", err)
+	}
+	if calls := stubCalls(t, logPath); !hasCallWithPrefix(calls, "rm gateway-id") {
+		t.Fatalf("stopped gateway must be removed by its captured ID, got %v", calls)
+	}
+}
+
 func TestRemoveSessionContainerControlsAnonymousVolumeRemoval(t *testing.T) {
 	for _, tc := range []struct {
 		name          string

@@ -65,7 +65,7 @@ func (r rollingSource) latest(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("decode rolling release reference: %w", err)
 	}
 	sha := strings.ToLower(strings.TrimSpace(ref.Object.SHA))
-	if ref.Object.Type != "commit" || len(sha) < 7 || !validHex(sha) {
+	if ref.Object.Type != "commit" || (len(sha) != 40 && len(sha) != 64) || !validHex(sha) {
 		return "", fmt.Errorf("rolling release reference did not identify a commit")
 	}
 	return sha, nil

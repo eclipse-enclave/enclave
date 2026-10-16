@@ -163,6 +163,32 @@ func TestCheckRejectsBadReferences(t *testing.T) {
 	}
 }
 
+func TestCheckReferenceSHALengths(t *testing.T) {
+	for _, length := range []int{6, 7, 8, 39, 40, 41, 42, 63, 64, 65} {
+		t.Run(fmt.Sprint(length), func(t *testing.T) {
+			release := newTestRelease(nil)
+			sha := strings.Repeat("a", length)
+			release.ref = func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = fmt.Fprintf(w, `{"object":{"sha":%q,"type":"commit"}}`, sha)
+			}
+			service := newTestService(release.serve(t), "")
+			status, err := service.Check(context.Background())
+			if length != 40 && length != 64 {
+				if err == nil {
+					t.Fatal("Check accepted a non-full-length SHA")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if status.Latest != sha {
+				t.Fatalf("Latest = %q, want %q", status.Latest, sha)
+			}
+		})
+	}
+}
+
 func TestInstallVerifiesAndAtomicallyReplacesExecutable(t *testing.T) {
 	newBinary := []byte("new enclave binary")
 	server := newTestRelease(newBinary).serve(t)

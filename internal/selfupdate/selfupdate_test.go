@@ -268,6 +268,23 @@ func TestInstallFailuresPreserveExecutable(t *testing.T) {
 			wantErr: "moved from 1234567 to abcdef0",
 		},
 		{
+			name: "release moved between checksum and binary",
+			setup: func(r *testRelease, _ *Service) {
+				// The release moves once Install has confirmed it and started
+				// downloading.
+				r.binary = func(w http.ResponseWriter, _ *http.Request) { _, _ = fmt.Fprint(w, "republished binary") }
+				var lookups atomic.Int32
+				r.ref = func(w http.ResponseWriter, _ *http.Request) {
+					commit := testCommit
+					if lookups.Add(1) > 1 {
+						commit = otherCommit
+					}
+					_, _ = fmt.Fprintf(w, `{"object":{"sha":%q,"type":"commit"}}`, commit)
+				}
+			},
+			wantErr: "moved from 1234567 to abcdef0",
+		},
+		{
 			name: "stalled download",
 			setup: func(r *testRelease, s *Service) {
 				s.fetcher.idleTimeout = 50 * time.Millisecond

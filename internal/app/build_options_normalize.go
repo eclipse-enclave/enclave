@@ -12,14 +12,20 @@ import (
 	"enclave/internal/model"
 )
 
-func normalizeConfiguredBuildOptions(paths model.Paths, opts model.BuildOptions) (model.BuildOptions, error) {
-	if opts.Features != nil {
+func normalizeConfiguredBuildOptions(paths model.Paths, opts model.BuildOptions) (model.BuildOptions, []string, error) {
+	var warnings []string
+	if opts.Features != nil || len(opts.FeatureRemovalDirectives) > 0 {
 		availableFeatures, err := config.ListFeatures(paths)
 		if err != nil {
-			return opts, err
+			return opts, warnings, err
+		}
+		requested := append(append([]string{}, opts.Features...), opts.FeatureRemovalDirectives...)
+		warnings, err = validateFeatureNames(requested, availableFeatures)
+		if err != nil {
+			return opts, warnings, err
 		}
 		opts.Features = resolveConfiguredFeatures(opts.Features, availableFeatures)
 	}
 
-	return opts, nil
+	return opts, warnings, nil
 }

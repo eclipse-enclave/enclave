@@ -163,6 +163,19 @@ Values without prefixes replace the parent set entirely.
 applied against the implicit default-enabled set, so `["-node-dev"]` removes
 that default feature and `[]` means "none".
 
+Additive entries also modify inherited `"default"` and `"all"` selections after
+those selectors expand. Global and project `tool_overrides` for the same tool
+are applied in order, so a project addition preserves global tool removals.
+A later `+name` re-enables that feature and a later `+all` re-enables every
+removed feature; `+default` does the same unless an inherited `all` is still
+selected. A replacement selection (including `[]`) discards earlier selections
+and their diagnostics.
+
+Feature names, including `+name` entries, must match an installed extension;
+unknown names fail before building or starting a session. Unknown `-name`
+removals only warn, as do unknown names when `--slim` or `--backend qemu`
+discards the configured selection. Use `enclave features list` to see available names.
+
 `host_config_paths` is resolved per tool against that tool's reviewed
 `passthroughPaths` from its `spec.yaml`. Use:
 

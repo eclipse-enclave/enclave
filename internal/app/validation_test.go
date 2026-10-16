@@ -10,11 +10,373 @@ package app
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
+	"enclave/internal/config"
 	"enclave/internal/model"
 )
+
+func TestValidateOptionsFeatureSelection(t *testing.T) {
+	paths := testPathsWithFeatureDefaults(t)
+	paths.UserFeaturesDir = filepath.Join(t.TempDir(), "features")
+	writeAppFile(t, filepath.Join(paths.UserFeaturesDir, "custom", "spec.yaml"), "schemaVersion: \"1\"\nkind: mixin\nname: custom\ndefaultEnabled: false\n", 0o644)
+
+	cases := []struct {
+		name        string
+		requested   []string
+		want        []string
+		wantUnknown string
+		wantWarning string
+	}{
+		{name: "unset", want: nil},
+		{name: "empty", requested: []string{}, want: []string{}},
+		{name: "all unknown", requested: []string{"unknown-b", "unknown-a", "unknown-b"}, wantUnknown: "unknown-a, unknown-b"},
+		{name: "mixed known and unknown", requested: []string{"node-dev", "unknown"}, wantUnknown: "unknown"},
+		{name: "unknown addition", requested: []string{"+unknown"}, wantUnknown: "unknown"},
+		{name: "unknown with selector", requested: []string{"default", "unknown"}, wantUnknown: "unknown"},
+		{name: "unknown removal", requested: []string{"-unknown"}, want: []string{"github-cli", "node-dev"}, wantWarning: "unknown"},
+		{name: "mixed known and unknown removals", requested: []string{"all", "-node-dev", "-unknown"}, want: []string{"custom", "github-cli", "shell-extras"}, wantWarning: "unknown"},
+		{name: "remove every default", requested: []string{"-node-dev", "-github-cli"}, want: []string{}},
+		{name: "installed feature", requested: []string{"custom"}, want: []string{"custom"}},
+		{name: "known addition", requested: []string{"+shell-extras"}, want: []string{"github-cli", "node-dev", "shell-extras"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			opts := model.Options{BuildOptions: model.BuildOptions{ImageName: "test", Features: tc.requested}}
+			got, _, warnings, err := ValidateOptions(opts, model.DefaultOptionSources(), ValidationContext{Action: "run", Paths: paths})
+			if tc.wantUnknown != "" {
+				if err == nil || !strings.Contains(err.Error(), "unknown features: "+tc.wantUnknown) || !strings.Contains(err.Error(), "enclave features list") {
+					t.Fatalf("expected actionable unknown-feature error for %q, got %v", tc.wantUnknown, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("ValidateOptions: %v", err)
+			}
+			if !reflect.DeepEqual(got.Features, tc.want) {
+				t.Errorf("features = %v, want %v", got.Features, tc.want)
+			}
+			if tc.wantWarning == "" {
+				if len(warnings) != 0 {
+					t.Errorf("unexpected warnings: %v", warnings)
+				}
+			} else if len(warnings) != 1 || !strings.Contains(warnings[0], "ignoring removal of unknown features: "+tc.wantWarning) || !strings.Contains(warnings[0], "enclave features list") {
+				t.Errorf("expected actionable unknown-removal warning, got %v", warnings)
+			}
+		})
+	}
+}
+
+func TestValidateOptionsUnknownFeatureSource(t *testing.T) {
+	cases := []struct {
+		source  model.OptionSource
+		backend string
+		want    string
+	}{
+		{model.SourceCLI, "docker", "--features"},
+		{model.SourceGlobal, "docker", "features in config (including inherited entries)"},
+		{model.SourceProject, "docker", "features in config (including inherited entries)"},
+		{model.SourceToolOverride, "docker", "features in config (including inherited entries)"},
+		{model.SourceCLI, "qemu", "--features"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.backend+"/"+tc.want, func(t *testing.T) {
+			opts := model.Options{
+				RunOptions:   model.RunOptions{Backend: tc.backend},
+				BuildOptions: model.BuildOptions{ImageName: "test", Features: []string{"unknown"}},
+			}
+			sources := model.DefaultOptionSources()
+			sources.Features = tc.source
+			_, _, _, err := ValidateOptions(opts, sources, ValidationContext{Action: "run"})
+			if err == nil || !strings.HasPrefix(err.Error(), tc.want+": unknown features: unknown;") {
+				t.Fatalf("expected source %q in unknown-feature error, got %v", tc.want, err)
+			}
+		})
+	}
+}
+
+func TestValidateOptionsLayeredFeatures(t *testing.T) {
+	paths := testPathsWithFeatureDefaults(t)
+	cases := []struct {
+		name        string
+		global      config.Defaults
+		project     config.Defaults
+		cliFeatures []string
+		want        []string
+		wantWarning bool
+		wantUnknown bool
+	}{
+		{
+			name:    "project removal from inherited default selector",
+			global:  config.Defaults{Features: []string{"default"}},
+			project: config.Defaults{Features: []string{"-node-dev"}},
+			want:    []string{"github-cli"},
+		},
+		{
+			name:    "project removal from inherited all selector",
+			global:  config.Defaults{Features: []string{"all"}},
+			project: config.Defaults{Features: []string{"-node-dev"}},
+			want:    []string{"github-cli", "shell-extras"},
+		},
+		{
+			name:   "tool removal from inherited default selector",
+			global: config.Defaults{Features: []string{"default"}, ToolOverrides: map[string]config.Defaults{"claude": {Features: []string{"-node-dev"}}}},
+			want:   []string{"github-cli"},
+		},
+		{
+			name:   "tool removal from inherited all selector",
+			global: config.Defaults{Features: []string{"all"}, ToolOverrides: map[string]config.Defaults{"claude": {Features: []string{"-node-dev"}}}},
+			want:   []string{"github-cli", "shell-extras"},
+		},
+		{
+			name:    "later addition reverses inherited removal",
+			global:  config.Defaults{Features: []string{"default"}, ToolOverrides: map[string]config.Defaults{"claude": {Features: []string{"+node-dev"}}}},
+			project: config.Defaults{Features: []string{"-node-dev"}},
+			want:    []string{"github-cli", "node-dev"},
+		},
+		{
+			name:    "later all selector reverses inherited removal",
+			global:  config.Defaults{Features: []string{"default"}, ToolOverrides: map[string]config.Defaults{"claude": {Features: []string{"+all"}}}},
+			project: config.Defaults{Features: []string{"-node-dev"}},
+			want:    []string{"github-cli", "node-dev", "shell-extras"},
+		},
+		{
+			name:    "later default selector reverses inherited removal",
+			global:  config.Defaults{Features: []string{"default"}, ToolOverrides: map[string]config.Defaults{"claude": {Features: []string{"+default"}}}},
+			project: config.Defaults{Features: []string{"-node-dev"}},
+			want:    []string{"github-cli", "node-dev"},
+		},
+		{
+			name:    "later default selector keeps removal from inherited all",
+			global:  config.Defaults{Features: []string{"all"}, ToolOverrides: map[string]config.Defaults{"claude": {Features: []string{"+default"}}}},
+			project: config.Defaults{Features: []string{"-shell-extras"}},
+			want:    []string{"github-cli", "node-dev"},
+		},
+		{
+			name:    "selector and removal in the same later scope",
+			global:  config.Defaults{Features: []string{"default"}, ToolOverrides: map[string]config.Defaults{"claude": {Features: []string{"+all", "-github-cli"}}}},
+			project: config.Defaults{Features: []string{"-node-dev"}},
+			want:    []string{"node-dev", "shell-extras"},
+		},
+		{
+			name:    "project tool addition preserves global tool removal",
+			global:  config.Defaults{ToolOverrides: map[string]config.Defaults{"claude": {Features: []string{"-node-dev"}}}},
+			project: config.Defaults{ToolOverrides: map[string]config.Defaults{"claude": {Features: []string{"+shell-extras"}}}},
+			want:    []string{"github-cli", "shell-extras"},
+		},
+		{
+			name:        "project tool addition preserves global unknown removal",
+			global:      config.Defaults{ToolOverrides: map[string]config.Defaults{"claude": {Features: []string{"-typo"}}}},
+			project:     config.Defaults{ToolOverrides: map[string]config.Defaults{"claude": {Features: []string{"+shell-extras"}}}},
+			want:        []string{"github-cli", "node-dev", "shell-extras"},
+			wantWarning: true,
+		},
+		{
+			name:        "project tool addition preserves global unknown addition",
+			global:      config.Defaults{ToolOverrides: map[string]config.Defaults{"claude": {Features: []string{"+typo"}}}},
+			project:     config.Defaults{ToolOverrides: map[string]config.Defaults{"claude": {Features: []string{"+shell-extras"}}}},
+			wantUnknown: true,
+		},
+		{
+			name:    "project tool replacement clears global unknown addition",
+			global:  config.Defaults{ToolOverrides: map[string]config.Defaults{"claude": {Features: []string{"+typo"}}}},
+			project: config.Defaults{ToolOverrides: map[string]config.Defaults{"claude": {Features: []string{"node-dev"}}}},
+			want:    []string{"node-dev"},
+		},
+		{
+			name:    "project tool empty replacement clears global unknown removal",
+			global:  config.Defaults{ToolOverrides: map[string]config.Defaults{"claude": {Features: []string{"-typo"}}}},
+			project: config.Defaults{ToolOverrides: map[string]config.Defaults{"claude": {Features: []string{}}}},
+			want:    []string{},
+		},
+		{
+			name:    "tool selector replacement excludes top-level selection",
+			global:  config.Defaults{Features: []string{"shell-extras"}, ToolOverrides: map[string]config.Defaults{"claude": {Features: []string{"default"}}}},
+			project: config.Defaults{ToolOverrides: map[string]config.Defaults{"claude": {Features: []string{"-node-dev"}}}},
+			want:    []string{"github-cli"},
+		},
+		{
+			name:    "tool empty base excludes implicit defaults",
+			global:  config.Defaults{Features: []string{"node-dev"}, ToolOverrides: map[string]config.Defaults{"claude": {Features: []string{}}}},
+			project: config.Defaults{ToolOverrides: map[string]config.Defaults{"claude": {Features: []string{"+shell-extras"}}}},
+			want:    []string{"shell-extras"},
+		},
+		{
+			name:    "additive tool layers modify explicit top-level selection",
+			global:  config.Defaults{Features: []string{}, ToolOverrides: map[string]config.Defaults{"claude": {Features: []string{"+node-dev"}}}},
+			project: config.Defaults{ToolOverrides: map[string]config.Defaults{"claude": {Features: []string{"+shell-extras"}}}},
+			want:    []string{"node-dev", "shell-extras"},
+		},
+		{
+			name:        "CLI replaces both tool feature layers",
+			global:      config.Defaults{ToolOverrides: map[string]config.Defaults{"claude": {Features: []string{"+typo"}}}},
+			project:     config.Defaults{ToolOverrides: map[string]config.Defaults{"claude": {Features: []string{"-typo"}}}},
+			cliFeatures: []string{},
+			want:        []string{},
+		},
+		{
+			name:    "project tool addition reverses global tool removal",
+			global:  config.Defaults{ToolOverrides: map[string]config.Defaults{"claude": {Features: []string{"-node-dev"}}}},
+			project: config.Defaults{ToolOverrides: map[string]config.Defaults{"claude": {Features: []string{"+node-dev"}}}},
+			want:    []string{"github-cli", "node-dev"},
+		},
+		{
+			name:        "cancelled unknown tool removal still warns",
+			global:      config.Defaults{Features: []string{}, ToolOverrides: map[string]config.Defaults{"claude": {Features: []string{"-typo"}}}},
+			project:     config.Defaults{ToolOverrides: map[string]config.Defaults{"claude": {Features: []string{"+shell-extras"}}}},
+			want:        []string{"shell-extras"},
+			wantWarning: true,
+		},
+		{
+			name:    "removing every inherited default stays empty",
+			global:  config.Defaults{Features: []string{"default"}},
+			project: config.Defaults{Features: []string{"-node-dev", "-github-cli"}},
+			want:    []string{},
+		},
+		{
+			name:        "unknown project removal against explicit global selection",
+			global:      config.Defaults{Features: []string{"node-dev"}},
+			project:     config.Defaults{Features: []string{"-typo"}},
+			want:        []string{"node-dev"},
+			wantWarning: true,
+		},
+		{
+			name:        "unknown removal against explicit empty selection",
+			global:      config.Defaults{Features: []string{}},
+			project:     config.Defaults{Features: []string{"-typo"}},
+			want:        []string{},
+			wantWarning: true,
+		},
+		{
+			name:        "inherited unknown removal with additive project selection",
+			global:      config.Defaults{Features: []string{"-typo"}},
+			project:     config.Defaults{Features: []string{"+shell-extras"}},
+			want:        []string{"github-cli", "node-dev", "shell-extras"},
+			wantWarning: true,
+		},
+		{
+			name:    "replacement clears inherited removal",
+			global:  config.Defaults{Features: []string{"-typo"}},
+			project: config.Defaults{Features: []string{"node-dev"}},
+			want:    []string{"node-dev"},
+		},
+		{
+			name:        "CLI overrides config removals",
+			global:      config.Defaults{Features: []string{"-typo"}},
+			cliFeatures: []string{"node-dev"},
+			want:        []string{"node-dev"},
+		},
+		{
+			name:        "tool override removal against explicit global selection",
+			global:      config.Defaults{Features: []string{"node-dev"}, ToolOverrides: map[string]config.Defaults{"claude": {Features: []string{"-typo"}}}},
+			want:        []string{"node-dev"},
+			wantWarning: true,
+		},
+		{
+			name:   "tool replacement clears inherited removal",
+			global: config.Defaults{Features: []string{"-typo"}, ToolOverrides: map[string]config.Defaults{"claude": {Features: []string{}}}},
+			want:   []string{},
+		},
+		{
+			name:    "known but unselected removal does not warn",
+			global:  config.Defaults{Features: []string{"node-dev"}},
+			project: config.Defaults{Features: []string{"-github-cli"}},
+			want:    []string{"node-dev"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cliOpts := config.DefaultOptions()
+			cliOpts.Backend = "docker"
+			cliSources := model.DefaultOptionSources()
+			if tc.cliFeatures != nil {
+				cliOpts.Features = tc.cliFeatures
+				cliSources.Features = model.SourceCLI
+			}
+			opts, _, _ := config.ResolveOptionsForTool(cliOpts, cliSources, tc.global, tc.project, "claude")
+			got, _, warnings, err := ValidateOptions(opts, opts.Sources, ValidationContext{Action: "run", Paths: paths})
+			if tc.wantUnknown {
+				if err == nil || !strings.HasPrefix(err.Error(), "features in config (including inherited entries): unknown features: typo;") {
+					t.Fatalf("expected inherited-feature error, got %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("ValidateOptions: %v", err)
+			}
+			if !reflect.DeepEqual(got.Features, tc.want) {
+				t.Errorf("features = %v, want %v", got.Features, tc.want)
+			}
+			if tc.wantWarning {
+				if len(warnings) != 1 || !strings.Contains(warnings[0], "ignoring removal of unknown features: typo;") || !strings.Contains(warnings[0], "enclave features list") {
+					t.Errorf("expected actionable warning for config removal, got %v", warnings)
+				}
+			} else if len(warnings) != 0 {
+				t.Errorf("unexpected warnings: %v", warnings)
+			}
+		})
+	}
+}
+
+func TestValidateOptionsInheritedUnknownFeatureSource(t *testing.T) {
+	paths := testPathsWithFeatureDefaults(t)
+	for _, inherited := range []string{"typo", "+typo"} {
+		t.Run(inherited, func(t *testing.T) {
+			cliOpts := config.DefaultOptions()
+			cliOpts.Backend = "docker"
+			global := config.Defaults{Features: []string{inherited}}
+			project := config.Defaults{Features: []string{"+shell-extras"}}
+			opts, _, _ := config.ResolveOptionsForTool(cliOpts, model.DefaultOptionSources(), global, project, "claude")
+			_, _, _, err := ValidateOptions(opts, opts.Sources, ValidationContext{Action: "run", Paths: paths})
+			if err == nil || !strings.HasPrefix(err.Error(), "features in config (including inherited entries): unknown features: typo;") {
+				t.Fatalf("expected inherited-feature error without blaming the project config, got %v", err)
+			}
+		})
+	}
+}
+
+func TestValidateOptionsUnknownFeaturesInDiscardedSelection(t *testing.T) {
+	paths := testPathsWithFeatureDefaults(t)
+	cases := []struct {
+		name      string
+		backend   string
+		slim      bool
+		source    model.OptionSource
+		wantError bool
+		ignoredBy string
+	}{
+		{name: "config selection with slim", backend: "docker", slim: true, source: model.SourceProject, ignoredBy: "--slim"},
+		{name: "config selection with qemu", backend: "qemu", source: model.SourceGlobal, ignoredBy: "--backend qemu"},
+		{name: "CLI selection with slim", backend: "docker", slim: true, source: model.SourceCLI, wantError: true},
+		{name: "config selection without slim", backend: "docker", source: model.SourceProject, wantError: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			opts := model.Options{
+				RunOptions:   model.RunOptions{Backend: tc.backend, Tool: "codex"},
+				BuildOptions: model.BuildOptions{ImageName: "test", Slim: tc.slim, Features: []string{"node-dev", "typo"}},
+			}
+			sources := model.DefaultOptionSources()
+			sources.Features = tc.source
+			_, _, warnings, err := ValidateOptions(opts, sources, ValidationContext{Action: "run", Paths: paths})
+			if tc.wantError {
+				if err == nil || !strings.Contains(err.Error(), "unknown features: typo;") {
+					t.Fatalf("expected unknown-feature error, got %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("ValidateOptions: %v", err)
+			}
+			want := "unknown features: typo; run 'enclave features list' to see available features; ignored because " + tc.ignoredBy + " discards the feature selection"
+			if !strings.Contains(strings.Join(warnings, "\n"), want) {
+				t.Errorf("expected warning %q, got %v", want, warnings)
+			}
+		})
+	}
+}
 
 func TestValidateAuthOptions_CLIOverridesToolOverride(t *testing.T) {
 	tests := []struct {
@@ -391,6 +753,9 @@ func TestValidatePlaywrightMCP_NonClaude(t *testing.T) {
 	if got.PlaywrightMCP {
 		t.Error("PlaywrightMCP should be false for non-claude tool")
 	}
+	if got.Features != nil {
+		t.Errorf("ignored --playwright-mcp must not add a feature, got %v", got.Features)
+	}
 	found := false
 	for _, w := range warnings {
 		if w == "--playwright-mcp is only supported with Claude; ignoring" {
@@ -466,6 +831,8 @@ func TestValidateAllowDomainsRejectsInvalid(t *testing.T) {
 }
 
 func TestValidatePlaywrightMCP_Claude(t *testing.T) {
+	paths := testPathsWithFeatureDefaults(t)
+	writeAppFile(t, filepath.Join(paths.FeaturesDir, "playwright", "spec.yaml"), "schemaVersion: \"1\"\nkind: mixin\nname: playwright\ndefaultEnabled: false\n", 0o644)
 	opts := model.Options{
 		RunOptions: model.RunOptions{PlaywrightMCP: true, Tool: "claude"},
 		BuildOptions: model.BuildOptions{
@@ -473,7 +840,7 @@ func TestValidatePlaywrightMCP_Claude(t *testing.T) {
 		},
 	}
 	sources := model.DefaultOptionSources()
-	ctx := ValidationContext{Action: "info"}
+	ctx := ValidationContext{Action: "info", Paths: paths}
 
 	got, _, warnings, err := ValidateOptions(opts, sources, ctx)
 	if err != nil {
@@ -575,6 +942,7 @@ func TestValidateOptionsQEMUDropsConfigFeaturesWithoutError(t *testing.T) {
 }
 
 func TestValidateOptionsQEMURejectsUnsatisfiableRequests(t *testing.T) {
+	paths := testPathsWithFeatureDefaults(t)
 	base := model.Options{
 		RunOptions:   model.RunOptions{Backend: "qemu", Tool: "codex", AllowAllNetwork: true},
 		BuildOptions: model.BuildOptions{ImageName: "test", Slim: true},
@@ -585,7 +953,7 @@ func TestValidateOptionsQEMURejectsUnsatisfiableRequests(t *testing.T) {
 	withFeatures.Features = []string{"node-dev"}
 	cliSources := model.DefaultOptionSources()
 	cliSources.Features = model.SourceCLI
-	if _, _, _, err := ValidateOptions(withFeatures, cliSources, ValidationContext{Action: "run"}); err == nil {
+	if _, _, _, err := ValidateOptions(withFeatures, cliSources, ValidationContext{Action: "run", Paths: paths}); err == nil {
 		t.Fatal("expected qemu feature validation error")
 	} else if !strings.Contains(err.Error(), "cannot install features") {
 		t.Fatalf("unexpected error: %v", err)

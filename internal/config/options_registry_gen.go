@@ -295,7 +295,7 @@ func OptionSpecs() []OptionSpec {
 			Group: OptionGroupBuild,
 			ApplyDefaultsWithSource: func(opts *model.Options, defaults Defaults, source model.OptionSource, sources *model.OptionSources) {
 				if canOverride(sources.Features, source) && defaults.Features != nil {
-					opts.Features = mergeFeatureSlice(opts.Features, defaults.Features)
+					opts.Features, opts.FeatureRemovalDirectives = mergeFeatureDefaults(opts.Features, opts.FeatureRemovalDirectives, defaults)
 					sources.Features = source
 				}
 			},

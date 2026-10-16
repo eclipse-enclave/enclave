@@ -88,6 +88,10 @@ type BuildOptions struct {
 	BuildxCacheFrom []string
 	BuildxCacheTo   []string
 	Progress        string
+
+	// FeatureRemovalDirectives retains config removals for validation after
+	// merging has consumed them. It does not affect the selected feature set.
+	FeatureRemovalDirectives []string
 }
 
 type CleanupOptions struct {

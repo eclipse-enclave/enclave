@@ -8,6 +8,7 @@
 package app
 
 import (
+	"errors"
 	"fmt"
 	"sort"
 	"strconv"
@@ -46,6 +47,37 @@ func ValidateOptions(opts model.Options, sources model.OptionSources, ctx Valida
 	if err := validateBackendName(opts.Backend); err != nil {
 		return opts, sources, warnings, err
 	}
+	normalizedBuildOptions, featureWarnings, normErr := normalizeConfiguredBuildOptions(ctx.Paths, opts.BuildOptions)
+	featureSource := "features"
+	switch sources.Features {
+	case model.SourceCLI:
+		featureSource = "--features"
+	case model.SourceGlobal, model.SourceProject, model.SourceToolOverride:
+		featureSource = "features in config (including inherited entries)"
+	}
+	for _, warning := range featureWarnings {
+		warnings = append(warnings, featureSource+": "+warning)
+	}
+	var unknownFeatures *unknownFeaturesError
+	if errors.As(normErr, &unknownFeatures) && sources.Features != model.SourceCLI {
+		// A stale config selection must not block a session that discards it.
+		ignoredBy := ""
+		switch {
+		case opts.Slim:
+			ignoredBy = "--slim"
+		case opts.Backend == backend.NameQEMU && isRunAction(ctx.Action):
+			ignoredBy = "--backend qemu"
+		}
+		if ignoredBy != "" {
+			warnings = append(warnings, fmt.Sprintf("%s: %v; ignored because %s discards the feature selection", featureSource, normErr, ignoredBy))
+			normErr = nil
+			normalizedBuildOptions = opts.BuildOptions
+		}
+	}
+	if normErr != nil {
+		return opts, sources, warnings, fmt.Errorf("%s: %w", featureSource, normErr)
+	}
+	opts.BuildOptions = normalizedBuildOptions
 	if opts.Backend == backend.NameQEMU && isRunAction(ctx.Action) {
 		var qemuWarnings []string
 		opts, qemuWarnings, err = coerceQEMURunOptions(opts, sources, ctx.Paths)
@@ -120,11 +152,6 @@ func ValidateOptions(opts model.Options, sources model.OptionSources, ctx Valida
 	default:
 		return opts, sources, warnings, fmt.Errorf("--progress must be %s, %s, or %s", model.BuildProgressQuiet, model.BuildProgressCompact, model.BuildProgressVerbose)
 	}
-	normalizedBuildOptions, normErr := normalizeConfiguredBuildOptions(ctx.Paths, opts.BuildOptions)
-	if normErr != nil {
-		return opts, sources, warnings, normErr
-	}
-	opts.BuildOptions = normalizedBuildOptions
 	if strings.TrimSpace(opts.ImageName) == "" {
 		return opts, sources, warnings, fmt.Errorf("--image-name requires a non-empty value")
 	}
@@ -366,7 +393,7 @@ func normalizeOptions(opts model.Options) (model.Options, []string) {
 	if opts.SkillsValidation == "" {
 		opts.SkillsValidation = model.SkillsValidationStrict
 	}
-	if opts.PlaywrightMCP {
+	if opts.PlaywrightMCP && opts.Tool == "claude" {
 		opts.Features = ensureFeature(opts.Features, "playwright")
 	}
 	opts.NetworkLog = strings.TrimSpace(strings.ToLower(opts.NetworkLog))

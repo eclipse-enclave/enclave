@@ -971,6 +971,44 @@ func TestPrepareBuildContextScopesToSelectedExtensions(t *testing.T) {
 	assertPathMissing(t, filepath.Join(contextDir, "extensions", "features", "shell-extras"))
 }
 
+func TestPrepareBuildContextPreservesEmptyFeaturesDirectory(t *testing.T) {
+	cases := []struct {
+		name string
+		opts model.BuildOptions
+	}{
+		{"slim", model.BuildOptions{Slim: true}},
+		{"features none", model.BuildOptions{Features: []string{}}},
+		{"devcontainer defaults", model.BuildOptions{Devcontainer: true}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			paths := writeTestBuildPaths(t)
+			paths.FeaturesDir = filepath.Join(paths.ExtensionsDir, "features")
+			writeAppFile(t, filepath.Join(paths.FeaturesDir, "unused", "spec.yaml"), "schemaVersion: \"1\"\nkind: mixin\nname: unused\n", 0o644)
+			selection, err := resolveRuntimeImageSelection(paths, tc.opts, "claude")
+			if err != nil {
+				t.Fatalf("resolveRuntimeImageSelection: %v", err)
+			}
+			contextDir, cleanup, err := prepareBuildContext(paths, selection)
+			if err != nil {
+				t.Fatalf("prepareBuildContext: %v", err)
+			}
+			defer cleanup()
+			entries, err := os.ReadDir(filepath.Join(contextDir, "extensions", "features"))
+			if err != nil {
+				t.Fatalf("staged features directory must exist: %v", err)
+			}
+			if len(entries) != 0 {
+				t.Fatalf("staged features must be empty, got %v", entries)
+			}
+			assertPathExists(t, filepath.Join(contextDir, "extensions", "tools", "claude", "spec.yaml"))
+			if got := resolveFeaturesArg(tc.opts); got != "" {
+				t.Errorf("FEATURES build arg = %q, want empty", got)
+			}
+		})
+	}
+}
+
 func TestHashMergedExtensionFilesIgnoresUnselectedExtensions(t *testing.T) {
 	tmp := t.TempDir()
 	appRoot := filepath.Join(tmp, "app")

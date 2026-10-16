@@ -195,9 +195,9 @@ func (b *Backend) syncSharedAuthStores(ctx context.Context, helperImage string, 
 			}
 			return err
 		}
-		if message != "" {
-			for _, line := range strings.Split(message, "\n") {
-				logx.Warnf("%s", strings.TrimPrefix(line, "Warning: "))
+		for _, line := range strings.Split(message, "\n") {
+			if warning, ok := strings.CutPrefix(line, "Warning: "); ok {
+				logx.Warnf("%s", warning)
 			}
 		}
 		return nil

@@ -163,7 +163,8 @@ func TestFinalizeManagedAuthCarriesCustomPlaceholders(t *testing.T) {
 func TestSharedAuthSyncReportsHelperWarnings(t *testing.T) {
 	dir := t.TempDir()
 	const warning = "Warning: Not syncing auth file /config/auth.json: contains a gateway placeholder."
-	script := "#!/bin/sh\nprintf '%s\\n' " + util.ShellQuote(warning) + " >&2\n"
+	const pullProgress = "Unable to find image locally\nPulling from library/alpine\nPull complete"
+	script := "#!/bin/sh\nprintf '%s\\n' " + util.ShellQuote(pullProgress+"\n"+warning+"\nStatus: Downloaded newer image") + " >&2\n"
 	if err := os.WriteFile(filepath.Join(dir, "docker"), []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -180,6 +181,11 @@ func TestSharedAuthSyncReportsHelperWarnings(t *testing.T) {
 	want := "Not syncing auth file " + filepath.Join(configDir, "auth.json") + ": contains a gateway placeholder."
 	if !strings.Contains(out, want) || strings.Contains(out, "Warning: ") || strings.Contains(out, "auth file /config/") {
 		t.Fatalf("incorrect helper warning: %q", out)
+	}
+	for _, noise := range []string{"Unable to find image", "Pulling", "Pull complete", "Downloaded newer image"} {
+		if strings.Contains(out, noise) {
+			t.Fatalf("Docker pull progress logged as a warning: %q", out)
+		}
 	}
 }
 

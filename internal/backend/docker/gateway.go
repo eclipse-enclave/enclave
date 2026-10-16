@@ -11,12 +11,15 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"enclave/internal/backend"
 	"enclave/internal/config"
+	dockercmd "enclave/internal/docker"
 	"enclave/internal/gateway"
 	"enclave/internal/gateway/bundle"
 	"enclave/internal/logx"
@@ -100,6 +103,99 @@ func (b *Backend) RemoveStaleGateway(ctx context.Context, name string, projectHa
 		logx.Warnf("Removed stale gateway container %s left behind by an interrupted start", gatewayName)
 	}
 	return nil
+}
+
+// StopExitedSessionGateways stops the gateways of exited sessions whose name
+// starts with ownerPrefix (empty matches all) and returns the gateway names;
+// dryRun only reports them.
+func StopExitedSessionGateways(ctx context.Context, ownerPrefix string, dryRun bool) ([]string, error) {
+	return stopExitedSessionGateways(ctx, "", ownerPrefix, dryRun)
+}
+
+func (b *Backend) StopExitedSessionGateways(ctx context.Context) error {
+	_, err := StopExitedSessionGateways(ctx, "", false)
+	return err
+}
+
+func stopGatewayIfSessionExited(ctx context.Context, session string) {
+	if _, err := stopExitedSessionGateways(ctx, session, "", false); err != nil {
+		logx.Debugf("Failed to check the gateway of session %s: %v", session, err)
+	}
+}
+
+// stopExitedSessionGateways stops gateways by their listed ID, so a same-name
+// restart, which removes the exited session and its gateway first, keeps its
+// new gateway. An empty session matches all sessions.
+func stopExitedSessionGateways(ctx context.Context, session string, ownerPrefix string, dryRun bool) ([]string, error) {
+	gateways, err := exitedSessionGateways(ctx, session, ownerPrefix)
+	if err != nil {
+		return nil, err
+	}
+	names := make([]string, 0, len(gateways))
+	for _, gw := range gateways {
+		name := dockercmd.PrimaryContainerName(gw)
+		names = append(names, name)
+		if !dryRun {
+			logx.Debugf("Stopping gateway container %s of an exited session", name)
+			gateway.StopContainer(gw.ID)
+		}
+	}
+	return names, nil
+}
+
+// exitedSessionGateways lists the running gateways whose background session
+// container exists and has exited. A starting session has no container yet or
+// one in the "created" state, and a foreground session removes its own gateway,
+// so neither matches.
+func exitedSessionGateways(ctx context.Context, session string, ownerPrefix string) ([]dockercmd.Summary, error) {
+	filters := dockercmd.NewFilters()
+	if session != "" {
+		filters.Add("label", model.GatewayLabelContainer+"="+session)
+	}
+	filters.Add("label", model.GatewayLabelManaged+"=true")
+	filters.Add("status", "running")
+	gateways, err := dockercmd.ContainerList(ctx, dockercmd.ListOptions{Filters: filters})
+	if err != nil {
+		return nil, err
+	}
+	gatewaysBySession := map[string]dockercmd.Summary{}
+	for _, gw := range gateways {
+		owner := gw.Labels[model.GatewayLabelContainer]
+		if owner == "" || gw.Labels[model.GatewayLabelProjectHash] == "" || !strings.HasPrefix(owner, ownerPrefix) ||
+			dockercmd.PrimaryContainerName(gw) != gateway.ContainerName(owner) {
+			continue
+		}
+		gatewaysBySession[owner] = gw
+	}
+	if len(gatewaysBySession) == 0 {
+		return nil, nil
+	}
+	sessions, err := dockercmd.ContainerInspectMany(ctx, slices.Sorted(maps.Keys(gatewaysBySession)))
+	if err != nil {
+		return nil, err
+	}
+	var exited []dockercmd.Summary
+	for _, info := range sessions {
+		gw, ok := gatewaysBySession[strings.TrimPrefix(info.Name, "/")]
+		if !ok || info.Config == nil || !containerExited(info.State) ||
+			info.Config.Labels[model.LabelHash] != gw.Labels[model.GatewayLabelProjectHash] ||
+			!strings.EqualFold(info.Config.Labels[model.LabelBackground], "true") {
+			continue
+		}
+		exited = append(exited, gw)
+	}
+	return exited, nil
+}
+
+func containerExited(state *dockercmd.ContainerState) bool {
+	if state == nil {
+		return false
+	}
+	switch state.Status {
+	case "exited", "dead", "stopped": // Podman also reports "stopped".
+		return true
+	}
+	return false
 }
 
 func workspaceIDFromSession(session backend.SessionMeta, projectDir string) string {

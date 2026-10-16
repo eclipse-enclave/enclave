@@ -322,6 +322,12 @@ type StaleGatewayRemover interface {
 	RemoveStaleGateway(ctx context.Context, name string, projectHash string) error
 }
 
+// ExitedSessionGatewayStopper stops gateways of exited sessions, which would
+// otherwise keep the sessions' ports published.
+type ExitedSessionGatewayStopper interface {
+	StopExitedSessionGateways(ctx context.Context) error
+}
+
 // ConfigStoreConflictChecker reports whether a running session for the same
 // tool, project, and worktree already uses the given config-store key.
 // Sessions predating config-key tracking count as using the caller's stable

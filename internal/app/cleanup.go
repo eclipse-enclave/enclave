@@ -133,11 +133,13 @@ func runCleanup(run model.RunOptions, cleanup model.CleanupOptions) int {
 		// worktree suffix.
 		storeDirs := resolveEphemeralStoreDirs(run, cleanup, home, project, scopes)
 		if cleanup.CleanupDryRun {
+			gatewayNames := stopExitedSessionGateways(run, cleanup, project, true)
 			networkNames := pruneStaleSessionNetworks(run, cleanup, project, true)
-			printEphemeralCleanupPlan(containerNames, networkNames, storeDirs)
+			printEphemeralCleanupPlan(gatewayNames, containerNames, networkNames, storeDirs)
 			cleanupBuildCache(cleanup)
 			return 0
 		}
+		stopExitedSessionGateways(run, cleanup, project, false)
 		// Pruning also catches networks orphaned before this cleanup.
 		cleanupContainers(containerNames)
 		pruneStaleSessionNetworks(run, cleanup, project, false)
@@ -453,10 +455,13 @@ func printCleanupPlan(dirs []cleanupDir) {
 	}
 }
 
-func printEphemeralCleanupPlan(containers []string, networks []string, dirs []cleanupDir) {
-	if len(containers) == 0 && len(networks) == 0 && len(dirs) == 0 {
+func printEphemeralCleanupPlan(gateways []string, containers []string, networks []string, dirs []cleanupDir) {
+	if len(gateways) == 0 && len(containers) == 0 && len(networks) == 0 && len(dirs) == 0 {
 		logx.Infof("Nothing to clean")
 		return
+	}
+	for _, gateway := range gateways {
+		logx.Infof("Would stop gateway: %s", gateway)
 	}
 	for _, container := range containers {
 		logx.Infof("Would remove container: %s", container)
@@ -477,16 +482,27 @@ func cleanupContainers(containers []string) {
 	}
 }
 
-func pruneStaleSessionNetworks(run model.RunOptions, cleanup model.CleanupOptions, project model.Project, dryRun bool) []string {
-	ownerPrefix := ""
-	if !cleanup.CleanupAll {
-		ownerPrefix = ephemeralContainerPrefix(run, project)
+func stopExitedSessionGateways(run model.RunOptions, cleanup model.CleanupOptions, project model.Project, dryRun bool) []string {
+	names, err := backenddocker.StopExitedSessionGateways(context.Background(), cleanupOwnerPrefix(run, cleanup, project), dryRun)
+	if err != nil {
+		logx.Warnf("Failed to list gateway containers of exited sessions: %v", err)
 	}
-	names, err := backenddocker.PruneStaleSessionNetworks(context.Background(), time.Now().UTC(), ownerPrefix, dryRun)
+	return names
+}
+
+func pruneStaleSessionNetworks(run model.RunOptions, cleanup model.CleanupOptions, project model.Project, dryRun bool) []string {
+	names, err := backenddocker.PruneStaleSessionNetworks(context.Background(), time.Now().UTC(), cleanupOwnerPrefix(run, cleanup, project), dryRun)
 	if err != nil {
 		logx.Warnf("Failed to list stale per-session networks: %v", err)
 	}
 	return names
+}
+
+func cleanupOwnerPrefix(run model.RunOptions, cleanup model.CleanupOptions, project model.Project) string {
+	if cleanup.CleanupAll {
+		return ""
+	}
+	return ephemeralContainerPrefix(run, project)
 }
 
 func ephemeralContainerPrefix(run model.RunOptions, project model.Project) string {

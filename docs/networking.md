@@ -202,8 +202,12 @@ Each Docker session gets its own labeled bridge network, in restricted and
 unrestricted modes. Normally only one network namespace is attached: the
 gateway for a restricted session, or the tool container for an unrestricted
 session. The bridge and subnet exist while the session container exists; a
-stopped background session keeps its network until `enclave stop`. Inspect them
-through structured output:
+stopped background session keeps its network until `enclave stop`. Once the
+session has exited, its gateway is stopped, releasing the published ports: by
+`enclave attach` if attached, otherwise at the next session start or `enclave
+cleanup --ephemeral`. Under podman the stopped gateway
+container stays until the session is removed. Inspect networks through
+structured output:
 
 ```bash
 enclave ps --json

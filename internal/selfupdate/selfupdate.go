@@ -274,15 +274,16 @@ func (s *Service) Install(ctx context.Context, latest string) (string, bool, err
 	if written > s.maxBinaryBytes {
 		return "", false, fmt.Errorf("download %s exceeds %d bytes", artifact, s.maxBinaryBytes)
 	}
-	actual := hex.EncodeToString(hasher.Sum(nil))
-	if actual != expected {
-		return "", false, fmt.Errorf("checksum mismatch for %s: got %s, want %s", artifact, actual, expected)
-	}
 	// A publish replaces the channel's whole release and only moves forward,
 	// so a channel naming latest before and after the download means the
 	// checksums and the binary both came from that build.
 	if err := confirmLatest(ctx, src, s.channel, latest); err != nil {
 		return "", false, err
+	}
+
+	actual := hex.EncodeToString(hasher.Sum(nil))
+	if actual != expected {
+		return "", false, fmt.Errorf("checksum mismatch for %s: got %s, want %s", artifact, actual, expected)
 	}
 
 	if err := tmp.Chmod(info.Mode().Perm()); err != nil {

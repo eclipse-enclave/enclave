@@ -53,6 +53,12 @@ func Infof(format string, args ...any) {
 	logf(os.Stdout, "info", ColorCyan, format, args...)
 }
 
+// Noticef is Infof on stderr, for messages incidental to a command whose
+// stdout may be redirected or parsed.
+func Noticef(format string, args ...any) {
+	logf(os.Stderr, "info", ColorCyan, format, args...)
+}
+
 func Warnf(format string, args ...any) {
 	logf(os.Stderr, "warn", ColorYellow, format, args...)
 }
@@ -70,4 +76,12 @@ func Debugf(format string, args ...any) {
 		return
 	}
 	logf(os.Stdout, "debug", ColorDim, format, args...)
+}
+
+// DebugNoticef is Debugf on stderr, the debug-level counterpart of Noticef.
+func DebugNoticef(format string, args ...any) {
+	if level < Debug {
+		return
+	}
+	logf(os.Stderr, "debug", ColorDim, format, args...)
 }

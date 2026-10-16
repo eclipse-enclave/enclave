@@ -196,6 +196,16 @@ func discoverAppRoot(readOnly bool) (string, error) {
 	return root, nil
 }
 
+// ExternalAppRoot reports the asset tree an executable at exePath runs against
+// in place of its embedded assets, following discoverAppRoot's precedence:
+// ENCLAVE_HOME, then the nearest tree at or above the executable's directory.
+func ExternalAppRoot(exePath string) (string, bool) {
+	if root := os.Getenv(model.EnvHome); root != "" {
+		return root, true
+	}
+	return findAppRootFromDir(filepath.Dir(exePath))
+}
+
 func findAppRootFromDir(start string) (string, bool) {
 	dir := start
 	for {

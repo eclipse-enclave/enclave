@@ -333,6 +333,21 @@ the `.git` pointer comes from the repository. Tests that touch the rule clear
 the directories from the environment, clear `XDG_*` as well, while `mounts`
 tests pass them explicitly.
 
+Self-update notes (user-facing behavior: [CLI reference](cli-reference.md#commands)):
+
+- Read `auto_update` and `update_channel` from `globalDefaults`, not resolved
+  project or tool options. Explicit `self-update` uses `config.LoadGlobalDefaults`.
+- Keep all updater output on stderr, including verbose diagnostics: use
+  `logx.Noticef`, `DebugNoticef`, or `Warnf`, never `Infof` or `Debugf`.
+- Both paths hold `config.HostSelfUpdateLockPath`: the periodic check skips a
+  busy lock, while explicit `self-update` waits.
+- Tests replace `newSelfUpdater` in `internal/app` and use an `httptest` release
+  in `internal/selfupdate`. To try a real update, build outside the checkout
+  with `make build BUILD_CHANNEL=rolling BIN_DIR=/tmp/enclave-rolling`, then
+  run `/tmp/enclave-rolling/enclave self-update` with `ENCLAVE_HOME` unset.
+- The stable source is a placeholder until the Eclipse download server
+  contract is known; stable release CI must stamp `BUILD_CHANNEL=stable`.
+
 Config additive note: feature additive directives (`+`/`-`) are applied against
 the implicit default-enabled feature set when `features` is unset. For example,
 `["-node-dev"]` removes that default feature from the implicit set.

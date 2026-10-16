@@ -373,3 +373,24 @@ func entryNames(entries []os.DirEntry) []string {
 	}
 	return names
 }
+
+func TestExternalAppRootFollowsDiscoveryPrecedence(t *testing.T) {
+	withTree := t.TempDir()
+	if err := writeAppAssets(testAppAssets("adjacent"), withTree); err != nil {
+		t.Fatal(err)
+	}
+	standalone := filepath.Join(t.TempDir(), "bin", "enclave")
+
+	t.Setenv(model.EnvHome, "")
+	if root, ok := ExternalAppRoot(filepath.Join(withTree, "bin", "enclave")); !ok || root != withTree {
+		t.Fatalf("tree above the executable: got %q, %v; want %q", root, ok, withTree)
+	}
+	if root, ok := ExternalAppRoot(standalone); ok {
+		t.Fatalf("standalone executable reported external assets at %q", root)
+	}
+
+	t.Setenv(model.EnvHome, "/opt/enclave-assets")
+	if root, ok := ExternalAppRoot(standalone); !ok || root != "/opt/enclave-assets" {
+		t.Fatalf("ENCLAVE_HOME: got %q, %v; want it to take precedence", root, ok)
+	}
+}

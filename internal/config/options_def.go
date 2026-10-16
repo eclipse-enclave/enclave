@@ -82,6 +82,24 @@ type CLIAction struct {
 func OptionDefs() []OptionDef {
 	return []OptionDef{
 		{
+			Name:          "auto_update",
+			Group:         OptionGroupGlobal,
+			Kind:          OptionKindBool,
+			OptionField:   "AutoUpdate",
+			SourceField:   "AutoUpdate",
+			DefaultsField: "AutoUpdate",
+			Apply:         ApplyBoolPtr,
+		},
+		{
+			Name:          "update_channel",
+			Group:         OptionGroupGlobal,
+			Kind:          OptionKindString,
+			OptionField:   "UpdateChannel",
+			SourceField:   "UpdateChannel",
+			DefaultsField: "UpdateChannel",
+			Apply:         ApplyString,
+		},
+		{
 			Name:           "tool",
 			Group:          OptionGroupRun,
 			Kind:           OptionKindString,

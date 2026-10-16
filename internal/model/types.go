@@ -12,9 +12,21 @@ import (
 	"strings"
 )
 
+// Release channels a standalone enclave binary is published on and can update
+// itself from.
+const (
+	UpdateChannelRolling = "rolling"
+	UpdateChannelStable  = "stable"
+)
+
+// UpdateChannels lists the valid update_channel values.
+var UpdateChannels = []string{UpdateChannelStable, UpdateChannelRolling}
+
 type RunOptions struct {
 	Tool                 string
 	Backend              string
+	AutoUpdate           bool
+	UpdateChannel        string
 	HostConfig           string
 	SkillsValidation     string
 	HostConfigPaths      []string

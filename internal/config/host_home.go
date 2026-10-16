@@ -45,7 +45,7 @@ func resolveHostHome(readOnly bool) (string, error) {
 
 	usable := IsWritableDir
 	if readOnly {
-		usable = looksWritableDir
+		usable = LooksWritableDir
 	}
 	if primary != "" && usable(primary) {
 		return primary, nil
@@ -56,9 +56,9 @@ func resolveHostHome(readOnly bool) (string, error) {
 	return "", homeNotWritableError(primary, fallback)
 }
 
-// looksWritableDir reports whether path is a directory the process may create
+// LooksWritableDir reports whether path is a directory the process may create
 // files in, judged from permissions alone so that nothing is written.
-func looksWritableDir(path string) bool {
+func LooksWritableDir(path string) bool {
 	return util.IsDir(path) && accessAllowsCreate(path)
 }
 

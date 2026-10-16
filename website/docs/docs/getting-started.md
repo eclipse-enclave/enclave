@@ -58,13 +58,16 @@ sudo dnf install ./enclave-*.x86_64.rpm
 ### Other Linux (x86-64 and arm64)
 
 Download the binary matching your architecture, `enclave-linux-amd64` or
-`enclave-linux-arm64`, together with `checksums.txt`. Verify it and put it on
-your `PATH`:
+`enclave-linux-arm64`, together with `checksums.txt`. Verify it and install it
+into `~/.local/bin`, where it can [update itself](#updating-enclave):
 
 ```bash
 sha256sum --check --ignore-missing checksums.txt
-sudo install enclave-linux-amd64 /usr/local/bin/enclave
+install -d ~/.local/bin
+install enclave-linux-amd64 ~/.local/bin/enclave
 ```
+
+Most distributions put `~/.local/bin` on `PATH` at login once it exists.
 
 ### macOS
 
@@ -74,9 +77,12 @@ Download it together with `checksums.txt`:
 ```bash
 shasum -a 256 --check --ignore-missing checksums.txt
 xattr -d com.apple.quarantine ./enclave-darwin-arm64 2>/dev/null || true
-sudo install -d /usr/local/bin
-sudo install enclave-darwin-arm64 /usr/local/bin/enclave
+install -d ~/.local/bin
+install enclave-darwin-arm64 ~/.local/bin/enclave
 ```
+
+macOS does not put `~/.local/bin` on `PATH`; add
+`export PATH="$HOME/.local/bin:$PATH"` to `~/.zshrc`.
 
 :::note
 The macOS binaries are unsigned and not notarized. A download through the browser
@@ -134,17 +140,34 @@ make build
 
 ### Updating Enclave
 
-The Enclave binary does not update itself yet, and it does not tell you when a
-newer build is available. The rolling release moves with `main`, so check back
-regularly: `enclave version` prints the version, commit, and commit date of your
-build, which you can compare against the current
-[rolling release](https://github.com/eclipse-enclave/enclave/releases/tag/rolling).
-To update, download the current assets and re-run the install step for your
-platform above. On macOS the re-downloaded binary carries the quarantine
-attribute again, so `xattr -d` has to run before `install`. For the Windows
-launcher, the Scoop manifest pins the archive hashes, so uninstall and install
-it again from the release URL. From a source checkout, run `git pull` followed
-by `make install`.
+When run interactively, a standalone binary checks its release channel at most
+once every 24 hours and reports when a different build is available. Binaries from the
+[rolling release](https://github.com/eclipse-enclave/enclave/releases/tag/rolling)
+follow the `rolling` channel, rebuilt from every push to `main`; official
+releases will follow `stable`. Set `"update_channel"` in the global Enclave
+`config.json` to switch. Run `enclave self-update` to download the binary for
+your platform, verify it against `checksums.txt`, and atomically replace the
+current executable.
+The checksums guard against corrupted downloads, not against a compromised
+release. A download that receives no data for 30 seconds is aborted, and Ctrl-C
+stops it without leaving a partial file behind.
+
+The updater never elevates privileges. A binary in a directory you cannot
+write, such as one installed with `sudo install` into `/usr/local/bin`, is
+updated by repeating the install procedure above; when a different build is
+available, Enclave prints the commands that download, verify, and reinstall it
+instead of suggesting `self-update`.
+
+Automatic replacement is opt-in. Add `"auto_update": true` to the global
+Enclave `config.json`; project and per-tool settings cannot enable it or change
+the channel. Checks are skipped for shell completion, structured output, and
+user commands. On Windows,
+`self-update` updates the Linux binary inside WSL2; update the Windows launcher
+itself by reinstalling its Scoop manifest.
+
+Package and source installs neither check for updates nor self-update. Upgrade
+`.deb` and `.rpm` installs with the package manager, and source checkouts with
+`git pull` followed by `make install`.
 
 :::note
 This is about the Enclave binary itself. `enclave update` rebuilds tool images

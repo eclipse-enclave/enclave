@@ -52,3 +52,20 @@ func TestAcquireFileLockReportsContention(t *testing.T) {
 		t.Fatal("second lock acquisition did not complete after release")
 	}
 }
+
+func TestTryAcquireFileLockSkipsHeldLock(t *testing.T) {
+	lockPath := filepath.Join(t.TempDir(), "test.lock")
+	releaseFirst, ok, err := TryAcquireFileLock(lockPath)
+	if err != nil || !ok {
+		t.Fatalf("acquire free lock: ok=%v err=%v", ok, err)
+	}
+	if release, ok, err := TryAcquireFileLock(lockPath); err != nil || ok || release != nil {
+		t.Fatalf("held lock: ok=%v err=%v release=%v, want not acquired", ok, err, release != nil)
+	}
+	releaseFirst()
+	releaseAgain, ok, err := TryAcquireFileLock(lockPath)
+	if err != nil || !ok {
+		t.Fatalf("acquire released lock: ok=%v err=%v", ok, err)
+	}
+	releaseAgain()
+}

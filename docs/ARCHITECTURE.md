@@ -4,8 +4,13 @@ Enclave is a sandboxing CLI that bootstraps isolated agent tooling in Docker con
 
 ## High-Level Flow
 
-1. Parse CLI arguments and resolve the active tool profile.
-   If help is requested, render Cobra help output and exit without dispatch.
+1. Parse CLI arguments, load host configuration, and resolve the active tool
+   profile. If help, version, shell completion, or structured output is
+   requested, or no terminal is attached, skip the periodic binary update check.
+   Other invocations of a standalone release binary check their update channel
+   (`rolling` or `stable`) at most once per day; `auto_update=true` installs the
+   checksummed platform binary atomically, while the default only reports an
+   available update.
 2. Discover repository assets (Dockerfiles, runtime assets, profiles).
 3. Ensure the runtime image is up to date (default or derived); rebuild if needed.
    Rebuild detection hashes the rendered Dockerfile and entrypoint plus build config
@@ -103,6 +108,7 @@ The restricted network request flow has a separate
 - [`internal/app/commands.go`](../internal/app/commands.go) routes commands to handlers (run/continue/resume/exec/shell/cleanup/tools/etc).
 - [`internal/app/command_run.go`](../internal/app/command_run.go) drives the run/continue/resume/exec/shell flow and runtime creation.
 - [`internal/app/build.go`](../internal/app/build.go) manages Docker image build/rebuild detection plus prebuild agent update planning and post-build stamp commits.
+- [`internal/selfupdate/`](../internal/selfupdate/) resolves the latest build of a release channel through a per-channel source (GitHub for `rolling`; `stable` has none yet) and atomically installs a checksum-verified host binary, refusing package, source, and asset-tree installs; [`internal/app/self_update.go`](../internal/app/self_update.go) owns periodic checks and user-facing policy.
 - [`internal/app/cleanup.go`](../internal/app/cleanup.go) implements `enclave cleanup` (persistent stores, caches, history, and agent memory).
 - [`internal/app/ssh.go`](../internal/app/ssh.go) implements `enclave ssh-init`.
 - [`internal/app/tools.go`](../internal/app/tools.go) lists available tool profiles.

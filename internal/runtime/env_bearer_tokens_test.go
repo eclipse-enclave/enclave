@@ -106,6 +106,13 @@ func TestCodexAccessTokenRejectsUnsupportedTypesWithGateway(t *testing.T) {
 			if err == nil || !strings.Contains(err.Error(), "CODEX_ACCESS_TOKEN") || !strings.Contains(err.Error(), "at-") || strings.Contains(err.Error(), jwt) {
 				t.Fatalf("error = %v", err)
 			}
+			wantSource := map[string]string{"host": "env", "secrets": "secrets", "persisted": "persisted env store"}[source]
+			if !strings.Contains(err.Error(), "from "+wantSource+":") {
+				t.Fatalf("error does not identify credential source: %v", err)
+			}
+			if strings.Contains(err.Error(), "--reset-auth") != (source == "persisted") {
+				t.Fatalf("reset advice should only apply to persisted credentials: %v", err)
+			}
 			if envValue(env, "CODEX_ACCESS_TOKEN") != "" || len(injection.SecretMapping.Entries) != 0 || len(hooks.afterInjected) != 0 {
 				t.Fatal("unsupported token injected or released")
 			}

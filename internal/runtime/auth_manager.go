@@ -187,7 +187,12 @@ func (m authManager) injectDeclaredSecrets(hooks auth.Hooks, authCtx auth.Contex
 		var placeholderVars map[string]bool
 		if secretReleaseEnabled && secret.ReleaseHTTP != nil {
 			if prefix := secret.ReleaseHTTP.RequiredValuePrefix; !strings.HasPrefix(secretValue, prefix) {
-				return result, fmt.Errorf("secret %q (%s): gateway protection requires a value starting with %q; unsupported credential type", secret.ID, strings.Join(secret.EnvVars, ", "), prefix)
+				source, recovery := secretSource, ""
+				if secretSource == "persisted" {
+					source = "persisted env store"
+					recovery = "; use --reset-auth to clear saved auth files and persisted credentials, then inject a supported credential"
+				}
+				return result, fmt.Errorf("secret %q (%s) from %s: gateway protection requires a value starting with %q; unsupported credential type%s", secret.ID, strings.Join(secret.EnvVars, ", "), source, prefix, recovery)
 			}
 			resolved, err := placeholderResolver.ResolvePlaceholder(secret.ID, secret.Placeholder)
 			if err != nil {

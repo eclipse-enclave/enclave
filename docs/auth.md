@@ -156,6 +156,10 @@ injected. This does not prevent requests to the OpenAI API.
 client-side signature verification and cannot use a synthetic token. Enclave
 rejects non-`at-` values when gateway protection is active; unrestricted
 networking retains ordinary, unprotected env injection.
+The rejection identifies the credential source. Unsetting the host variable
+does not clear a previously persisted token; if the error names the persisted
+env store, use `--reset-auth` to clear saved auth files and persisted credentials,
+then supply a supported token.
 
 Placeholders are fresh each session. Before copying auth files to shared tool
 or feature stores, Enclave warns and skips files containing a placeholder,

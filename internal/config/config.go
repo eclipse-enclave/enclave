@@ -747,17 +747,6 @@ func mergeToolOverrides(base map[string]Defaults, override map[string]Defaults) 
 	return merged
 }
 
-// hasAdditiveDirective reports whether any value carries a '+' or '-' prefix.
-func hasAdditiveDirective(values []string) bool {
-	for _, v := range values {
-		v = strings.TrimSpace(v)
-		if strings.HasPrefix(v, "+") || strings.HasPrefix(v, "-") {
-			return true
-		}
-	}
-	return false
-}
-
 func featureDefaultLayers(defaults Defaults) [][]string {
 	if defaults.featureLayers != nil {
 		return defaults.featureLayers
@@ -781,32 +770,21 @@ func mergeFeatureDefaults(base, removals []string, defaults Defaults) ([]string,
 // retained until selectors expand, and separately for validation even when a
 // later addition cancels them.
 func mergeFeatureSlice(base, removals, override []string) ([]string, []string) {
-	if !hasAdditiveDirective(override) {
+	if !HasFeatureDirectives(override) {
 		return copyStringSlice(override), nil
 	}
 	removals = copyStringSlice(removals)
-	for _, raw := range override {
-		if value := strings.TrimSpace(raw); strings.HasPrefix(value, "-") {
-			removals = append(removals, value)
-		}
+	_, removed := SplitFeatureDirectives(override)
+	for _, name := range removed {
+		removals = append(removals, "-"+name)
 	}
 	if base == nil {
 		return copyStringSlice(override), removals
 	}
 
 	selected := make(map[string]bool)
-	if hasAdditiveDirective(base) {
-		hasSelector := false
-		for _, raw := range base {
-			value := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(raw), "+"))
-			if isFeatureSelector(value) {
-				hasSelector = true
-				break
-			}
-		}
-		if !hasSelector {
-			selected[model.SelectionDefault] = true
-		}
+	if HasFeatureDirectives(base) && !HasFeatureSelectors(base) {
+		selected[model.SelectionDefault] = true
 	}
 	applyFeatureDirectives(selected, base)
 	applyFeatureDirectives(selected, override)
@@ -819,38 +797,19 @@ func mergeFeatureSlice(base, removals, override []string) ([]string, []string) {
 	return merged, removals
 }
 
-func isFeatureSelector(value string) bool {
-	return strings.EqualFold(value, model.SelectionDefault) || strings.EqualFold(value, model.FeatureSelectionAll)
-}
-
 func applyFeatureDirectives(selected map[string]bool, directives []string) {
 	// Match selector expansion: removals win within a scope, while additions in
 	// a later scope can undo an inherited removal.
-	for _, raw := range directives {
-		value := strings.TrimSpace(raw)
-		if strings.HasPrefix(value, "-") {
-			continue
+	additions, removals := SplitFeatureDirectives(directives)
+	for _, name := range additions {
+		if IsFeatureSelector(name) {
+			name = strings.ToLower(name)
 		}
-		value = strings.TrimSpace(strings.TrimPrefix(value, "+"))
-		if value == "" {
-			continue
-		}
-		if isFeatureSelector(value) {
-			value = strings.ToLower(value)
-		}
-		delete(selected, "-"+value)
-		selected[value] = true
+		delete(selected, "-"+name)
+		selected[name] = true
 	}
-	for _, raw := range directives {
-		value := strings.TrimSpace(raw)
-		if !strings.HasPrefix(value, "-") {
-			continue
-		}
-		name := strings.TrimSpace(value[1:])
-		if name == "" {
-			continue
-		}
-		if !isFeatureSelector(name) {
+	for _, name := range removals {
+		if !IsFeatureSelector(name) {
 			delete(selected, name)
 		}
 		if selected[model.SelectionDefault] || selected[model.FeatureSelectionAll] {

@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strings"
 
+	"enclave/internal/config"
 	"enclave/internal/model"
 )
 
@@ -22,28 +23,15 @@ func validateFeatureNames(requested []string, allFeatures []model.Extension) ([]
 	}
 
 	var unknown, unknownRemovals []string
-	for _, raw := range requested {
-		name := strings.TrimSpace(raw)
-		removal := strings.HasPrefix(name, "-")
-		if removal || strings.HasPrefix(name, "+") {
-			name = strings.TrimSpace(name[1:])
-		}
-		if name == "" {
-			continue
-		}
-		if !removal {
-			switch strings.ToLower(name) {
-			case model.SelectionDefault, model.FeatureSelectionAll:
-				continue
-			}
-		}
-		if _, ok := available[name]; ok {
-			continue
-		}
-		if removal {
-			unknownRemovals = append(unknownRemovals, name)
-		} else {
+	additions, removals := config.SplitFeatureDirectives(requested)
+	for _, name := range additions {
+		if _, ok := available[name]; !ok && !config.IsFeatureSelector(name) {
 			unknown = append(unknown, name)
+		}
+	}
+	for _, name := range removals {
+		if _, ok := available[name]; !ok {
+			unknownRemovals = append(unknownRemovals, name)
 		}
 	}
 
@@ -76,7 +64,7 @@ func resolveConfiguredFeatures(requested []string, allFeatures []model.Extension
 
 	// Expand keyword selectors ("default", "all") and additive directives
 	// (+feature, -feature) against the available feature set.
-	if hasFeatureDirectives(normalized) || hasFeatureSelectors(normalized) {
+	if config.HasFeatureDirectives(normalized) || config.HasFeatureSelectors(normalized) {
 		return expandFeatureDirectives(normalized, allFeatures)
 	}
 	return normalized
@@ -90,10 +78,11 @@ func resolveConfiguredFeatures(requested []string, allFeatures []model.Extension
 // regardless of list order (normalizeAndSortNames sorts alphabetically).
 func expandFeatureDirectives(normalized []string, allFeatures []model.Extension) []string {
 	selected := make(map[string]struct{}, len(allFeatures))
+	additions, removals := config.SplitFeatureDirectives(normalized)
 
 	// If the list contains only directives (+/-) with no selector keyword,
 	// seed from default-enabled features so the directives have a base.
-	if !hasFeatureSelectors(normalized) {
+	if !config.HasFeatureSelectors(normalized) {
 		for _, f := range allFeatures {
 			if f.DefaultEnabled {
 				selected[f.Name] = struct{}{}
@@ -102,21 +91,8 @@ func expandFeatureDirectives(normalized []string, allFeatures []model.Extension)
 	}
 
 	// Pass 1: additions — expand selectors and collect explicit names.
-	for _, raw := range normalized {
-		value := strings.TrimSpace(raw)
-		if value == "" || strings.HasPrefix(value, "-") {
-			continue
-		}
-
-		bare := value
-		if strings.HasPrefix(value, "+") {
-			bare = strings.TrimSpace(value[1:])
-			if bare == "" {
-				continue
-			}
-		}
-
-		switch strings.ToLower(bare) {
+	for _, name := range additions {
+		switch strings.ToLower(name) {
 		case model.SelectionDefault:
 			for _, f := range allFeatures {
 				if f.DefaultEnabled {
@@ -128,20 +104,13 @@ func expandFeatureDirectives(normalized []string, allFeatures []model.Extension)
 				selected[f.Name] = struct{}{}
 			}
 		default:
-			selected[bare] = struct{}{}
+			selected[name] = struct{}{}
 		}
 	}
 
 	// Pass 2: removals.
-	for _, raw := range normalized {
-		value := strings.TrimSpace(raw)
-		if !strings.HasPrefix(value, "-") {
-			continue
-		}
-		feature := strings.TrimSpace(value[1:])
-		if feature != "" {
-			delete(selected, feature)
-		}
+	for _, name := range removals {
+		delete(selected, name)
 	}
 
 	resolved := make([]string, 0, len(selected))
@@ -168,24 +137,4 @@ func defaultEnabledFeatureNames(features []model.Extension) []string {
 		}
 	}
 	return names
-}
-
-func hasFeatureSelectors(values []string) bool {
-	for _, raw := range values {
-		switch strings.ToLower(strings.TrimSpace(raw)) {
-		case model.SelectionDefault, model.FeatureSelectionAll:
-			return true
-		}
-	}
-	return false
-}
-
-func hasFeatureDirectives(values []string) bool {
-	for _, raw := range values {
-		value := strings.TrimSpace(raw)
-		if strings.HasPrefix(value, "+") || strings.HasPrefix(value, "-") {
-			return true
-		}
-	}
-	return false
 }

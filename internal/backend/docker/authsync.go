@@ -8,11 +8,14 @@
 package docker
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"enclave/internal/backend"
@@ -22,6 +25,8 @@ import (
 	"enclave/internal/model"
 	"enclave/internal/util"
 )
+
+var authSyncMountPath = regexp.MustCompile(`(^|[[:space:]:'"])/(config|auth)/`)
 
 // runRequestAuthSync reconciles credentials after a foreground session ends,
 // driven by the request's declared intent. The container may already be gone
@@ -49,13 +54,14 @@ func (b *Backend) runRequestAuthSync(req backend.Request) {
 	if configDir == "" {
 		return
 	}
+	placeholders := backend.SecretPlaceholders(req.Secrets)
 	if len(spec.AuthFiles) > 0 && authDir != "" {
-		if err := b.syncSharedAuthStores(ctx, req.Image, req.Session.Tool, spec.AuthFiles, configDir, authDir); err != nil {
+		if err := b.syncSharedAuthStores(ctx, req.Image, req.Session.Tool, spec.AuthFiles, configDir, authDir, placeholders...); err != nil {
 			logx.Warnf("Failed to sync shared auth files: %v", err)
 		}
 	}
 	for _, sync := range spec.Features {
-		if err := b.syncFeatureAuthStore(ctx, configDir, sync); err != nil {
+		if err := b.syncFeatureAuthStore(ctx, configDir, sync, placeholders...); err != nil {
 			logx.Warnf("Failed to sync %s feature auth files: %v", sync.Feature, err)
 		}
 	}
@@ -121,7 +127,7 @@ func (b *Backend) finalizeManagedContainerAuth(ctx context.Context, containerNam
 	}
 
 	authFiles := splitAuthFiles(authFilesValue)
-	return b.syncSharedAuthStores(ctx, info.Config.Image, tool, authFiles, configDir, authDir)
+	return b.syncSharedAuthStores(ctx, info.Config.Image, tool, authFiles, configDir, authDir, backend.DecodeSecretPlaceholders(containerEnvValue(info.Config, model.EnvSecretPlaceholders))...)
 }
 
 // syncSharedAuthStores reconciles auth files from the project-specific config
@@ -135,7 +141,7 @@ func (b *Backend) finalizeManagedContainerAuth(ctx context.Context, containerNam
 // CLAUDE_SECURESTORAGE_CONFIG_DIR pointed at the shared auth store, Claude
 // writes .credentials.json there directly, so the config-store source is a
 // dangling symlink and this reconcile no-ops on the healthy path.
-func (b *Backend) syncSharedAuthStores(ctx context.Context, helperImage string, tool string, authFiles []string, configDir string, authDir string) error {
+func (b *Backend) syncSharedAuthStores(ctx context.Context, helperImage string, tool string, authFiles []string, configDir string, authDir string, placeholders ...string) error {
 	if configDir == "" || authDir == "" || configDir == authDir {
 		return nil
 	}
@@ -170,17 +176,40 @@ func (b *Backend) syncSharedAuthStores(ctx context.Context, helperImage string, 
 		return err
 	}
 
-	cmd := sharedAuthSyncCommand(b.reconcileScript, tool, validated, b.chownSpec(), "/config", "/auth")
+	cmd := sharedAuthSyncCommand(b.reconcileScript, tool, validated, b.chownSpec(), "/config", "/auth", placeholders...)
 	hostConfig := sharedAuthSyncHostConfig(configDir, authDir, util.IsSELinuxEnforcing())
 	applyHostUserNamespace(hostConfig)
 
 	return hoststore.WithLock(b.opts.Host.Home, authDir, func() error {
-		return dockercmd.Run(ctx, &dockercmd.ContainerConfig{
+		var stderr bytes.Buffer
+		err := dockercmd.RunWithIOAndStartHook(ctx, &dockercmd.ContainerConfig{
 			Image:      image,
 			Entrypoint: []string{"sh", "-c"},
 			Cmd:        []string{cmd},
 			User:       b.authSyncHelperUser(),
-		}, hostConfig, "")
+		}, hostConfig, "", nil, io.Discard, &stderr, false, nil)
+		message := strings.TrimSpace(mapAuthSyncPaths(stderr.String(), configDir, authDir))
+		if err != nil {
+			if message != "" {
+				return fmt.Errorf("%w: %s", err, message)
+			}
+			return err
+		}
+		for _, line := range strings.Split(message, "\n") {
+			if warning, ok := strings.CutPrefix(line, "Warning: "); ok {
+				logx.Warnf("%s", warning)
+			}
+		}
+		return nil
+	})
+}
+
+func mapAuthSyncPaths(message, configDir, authDir string) string {
+	return authSyncMountPath.ReplaceAllStringFunc(message, func(match string) string {
+		if strings.HasSuffix(match, "/config/") {
+			return strings.TrimSuffix(match, "/config/") + configDir + string(os.PathSeparator)
+		}
+		return strings.TrimSuffix(match, "/auth/") + authDir + string(os.PathSeparator)
 	})
 }
 
@@ -225,9 +254,10 @@ func sharedAuthSyncHostConfig(configDir string, authDir string, selinuxEnforcing
 // sharedAuthSyncCommand assembles the helper container's shell command: the
 // inlined reconcile script (a POSIX function library) followed by the
 // enclave_sync_shared_auth invocation.
-func sharedAuthSyncCommand(script string, tool string, authFiles []string, chown string, configRoot string, authRoot string) string {
+func sharedAuthSyncCommand(script string, tool string, authFiles []string, chown string, configRoot string, authRoot string, placeholders ...string) string {
 	var cmd strings.Builder
 	cmd.WriteString("set -e\n")
+	fmt.Fprintf(&cmd, "%s=%s\n", model.EnvSecretPlaceholders, util.ShellQuote(backend.EncodeSecretPlaceholders(placeholders)))
 	cmd.WriteString(script)
 	cmd.WriteString("\nenclave_sync_shared_auth")
 	for _, arg := range append([]string{tool, configRoot, authRoot, chown, "0"}, authFiles...) {
@@ -260,8 +290,9 @@ func (b *Backend) syncFeatureAuthFromContainer(ctx context.Context, containerNam
 	if featureMap == "" || configDir == "" {
 		return
 	}
+	placeholders := backend.DecodeSecretPlaceholders(containerEnvValue(info.Config, model.EnvSecretPlaceholders))
 	for _, sync := range parseFeatureAuthMap(featureMap) {
-		if err := b.syncFeatureAuthStore(ctx, configDir, sync); err != nil {
+		if err := b.syncFeatureAuthStore(ctx, configDir, sync, placeholders...); err != nil {
 			logx.Warnf("Failed to sync %s feature auth files: %v", sync.Feature, err)
 		}
 	}
@@ -271,7 +302,7 @@ func (b *Backend) syncFeatureAuthFromContainer(ctx context.Context, containerNam
 // feature auth store directory, additively: only when the source is a non-empty
 // regular file and the destination is still empty. This is a plain host-side
 // copy; no helper container is involved.
-func (b *Backend) syncFeatureAuthStore(ctx context.Context, configDir string, sync backend.FeatureAuthSync) error {
+func (b *Backend) syncFeatureAuthStore(ctx context.Context, configDir string, sync backend.FeatureAuthSync, placeholders ...string) error {
 	if configDir == "" || strings.TrimSpace(sync.Feature) == "" {
 		return nil
 	}
@@ -300,7 +331,7 @@ func (b *Backend) syncFeatureAuthStore(ctx context.Context, configDir string, sy
 			if err != nil {
 				return err
 			}
-			if err := copyFeatureAuthFileIfMissing(src, dst); err != nil {
+			if err := copyFeatureAuthFileIfMissing(src, dst, placeholders...); err != nil {
 				return err
 			}
 		}
@@ -311,7 +342,7 @@ func (b *Backend) syncFeatureAuthStore(ctx context.Context, configDir string, sy
 // copyFeatureAuthFileIfMissing copies src to dst only when src is a non-empty
 // regular file and dst is absent or empty, preserving the additive feature-auth
 // semantics (never overwrite an existing credential).
-func copyFeatureAuthFileIfMissing(src string, dst string) error {
+func copyFeatureAuthFileIfMissing(src string, dst string, placeholders ...string) error {
 	si, err := os.Stat(src)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -322,15 +353,19 @@ func copyFeatureAuthFileIfMissing(src string, dst string) error {
 	if !si.Mode().IsRegular() || si.Size() == 0 {
 		return nil
 	}
+	data, err := os.ReadFile(src) // #nosec G304 -- src is validated within the config store by storeFilePath.
+	if err != nil {
+		return err
+	}
+	if backend.ContainsSecretPlaceholder(data, placeholders) {
+		logx.Warnf("Not syncing auth file %s: contains a gateway placeholder.", src)
+		return nil
+	}
 	if di, err := os.Stat(dst); err == nil {
 		if di.Size() > 0 {
 			return nil
 		}
 	} else if !os.IsNotExist(err) {
-		return err
-	}
-	data, err := os.ReadFile(src) // #nosec G304 -- src is validated within the config store by storeFilePath.
-	if err != nil {
 		return err
 	}
 	if err := os.MkdirAll(filepath.Dir(dst), 0o700); err != nil {

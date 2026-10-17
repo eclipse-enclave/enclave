@@ -16,14 +16,24 @@ Enclave sets `PI_TELEMETRY=0` and `PI_SKIP_VERSION_CHECK=1` to disable Pi's
 install/update telemetry and version check while leaving model catalog refresh
 enabled. See Pi's upstream [environment-variable reference](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/environment-variables.md).
 
-## API Keys
+## Env Credentials
 
 | Variable | Purpose |
 |----------|---------|
 | `OPENAI_API_KEY` | OpenAI API access |
 | `ANTHROPIC_API_KEY` | Anthropic API access |
+| `ANTHROPIC_OAUTH_TOKEN` | Anthropic OAuth token (see note below) |
 | `GEMINI_API_KEY` | Google Gemini API access |
 | `MISTRAL_API_KEY` | Mistral API access |
+
+With restricted networking, these credentials use gateway placeholders.
+The Anthropic OAuth placeholder retains the `sk-ant-oat` prefix Pi checks;
+the token is released to `api.anthropic.com` and remains available with
+`--no-api-key`. Enclave protects this variable when you set it; it does not
+recommend using an Anthropic subscription token in Pi. Whether Anthropic's
+terms allow that is between you and Anthropic. Enclave does not alias a Claude
+setup token into Pi. See
+[authentication](../../../docs/auth.md#env-only-bearer-tokens).
 
 ## Auth Files
 

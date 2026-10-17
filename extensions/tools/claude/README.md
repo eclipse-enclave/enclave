@@ -14,7 +14,11 @@ Claude Code is Anthropic's official AI coding assistant CLI.
 | Variable | Purpose |
 |----------|---------|
 | `ANTHROPIC_API_KEY` | Anthropic API access |
-| `CLAUDE_CODE_OAUTH_TOKEN` | OAuth-based authentication |
+| `CLAUDE_CODE_OAUTH_TOKEN` | Env-only token from `claude setup-token` |
+
+With restricted networking, the setup token is replaced by a gateway
+placeholder and released only to `api.anthropic.com`. Stored `/login` credentials
+are not covered by this env-only protection. See [authentication](../../../docs/auth.md#env-only-bearer-tokens).
 
 When `ANTHROPIC_API_KEY` is injected, `entrypoint.d/setup.sh` pre-approves it in
 `~/.claude.json` (`customApiKeyResponses.approved`, the last 20 characters of the

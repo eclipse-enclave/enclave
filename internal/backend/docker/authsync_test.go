@@ -384,14 +384,14 @@ func runSharedAuthSyncCommand(t *testing.T, tool string, authFiles []string, con
 	_ = runSharedAuthSyncCommandOutput(t, tool, authFiles, configDir, authDir)
 }
 
-func runSharedAuthSyncCommandOutput(t *testing.T, tool string, authFiles []string, configDir string, authDir string) string {
+func runSharedAuthSyncCommandOutput(t *testing.T, tool string, authFiles []string, configDir string, authDir string, placeholders ...string) string {
 	t.Helper()
 	scriptPath := filepath.Join("..", "..", "..", "runtime-assets", "auth-reconcile.sh")
 	script, err := os.ReadFile(scriptPath)
 	if err != nil {
 		t.Fatalf("read reconcile script: %v", err)
 	}
-	cmdText := sharedAuthSyncCommand(string(script), tool, authFiles, "", configDir, authDir)
+	cmdText := sharedAuthSyncCommand(string(script), tool, authFiles, "", configDir, authDir, placeholders...)
 	cmd := exec.Command("sh", "-c", cmdText)
 	cmd.Env = append(os.Environ(), "PATH="+fakeJQDir(t)+string(os.PathListSeparator)+os.Getenv("PATH"))
 	out, err := cmd.CombinedOutput()

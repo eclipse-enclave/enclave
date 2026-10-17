@@ -42,3 +42,6 @@ memories = true
 # on enterprise/business/team plans: fastest inference with increased plan
 # usage. Opt out by default; users can still opt in via config patches.
 fast_mode = false
+# The container exits with the TUI, so the detached app-server daemon adds
+# nothing, but it updates itself at runtime to versions the image never built.
+daemon_auto_start = false

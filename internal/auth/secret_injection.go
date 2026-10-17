@@ -17,7 +17,7 @@ import (
 	"enclave/internal/model"
 )
 
-const placeholderPrefix = "ENCLAVE_SECRET_"
+const placeholderPrefix = model.SecretPlaceholderMarker
 
 type PlaceholderResolver struct {
 	bySecretID map[string]string

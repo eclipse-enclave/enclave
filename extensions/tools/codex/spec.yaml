@@ -41,7 +41,13 @@ sandbox:
 
 credentials:
   sources:
-    openai-api-key: { env: [OPENAI_API_KEY] }
+    openai-api-key: { env: [CODEX_API_KEY, OPENAI_API_KEY] }
+    codex-access-token:
+      env: [CODEX_ACCESS_TOKEN]
+      apiKey: false
+      placeholder:
+        prefix: "at-ENCLAVE_SECRET_"
+        random: { encoding: hex, length: 48 }
 
 network:
   serviceDomains:
@@ -49,10 +55,15 @@ network:
     "*.openai.com": openai-api-key
   serviceAuth:
     openai-api-key: { headerName: authorization, valueFormat: "Bearer %s" }
+    codex-access-token:
+      headerName: authorization
+      valueFormat: "Bearer %s"
+      hosts: [auth.openai.com, chatgpt.com]
+      requiredValuePrefix: "at-"
 
 providers:
   - name: openai-codex
-    credentials: [openai-api-key]
+    credentials: [openai-api-key, codex-access-token]
     authFiles: [auth.json]
     oauthPorts: [{ port: "1455" }]
     authSession:

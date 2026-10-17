@@ -125,8 +125,9 @@ type specNetwork struct {
 }
 
 type specServiceAuth struct {
-	HeaderName  string `json:"headerName"`
-	ValueFormat string `json:"valueFormat,omitempty"`
+	HeaderName          string `json:"headerName"`
+	ValueFormat         string `json:"valueFormat,omitempty"`
+	RequiredValuePrefix string `json:"requiredValuePrefix,omitempty"`
 	// Hosts is enclave-native: it lets a service declare its own hosts
 	// directly, needed when multiple services share the same host — which
 	// sbx's host->single-service serviceDomains map cannot express. When set,

@@ -255,12 +255,18 @@ func normalizeSecretRelease(secretID string, release *model.SecretReleaseConfig)
 		return nil, fmt.Errorf("secrets[%q].release.http: format must contain %%s", secretID)
 	}
 
+	prefix := release.HTTP.RequiredValuePrefix
+	if err := model.ValidateSecretLiteral(prefix, "required_value_prefix"); err != nil {
+		return nil, fmt.Errorf("secrets[%q].release.http: %w", secretID, err)
+	}
+
 	return &model.SecretReleaseConfig{
 		HTTP: &model.HTTPSecretReleaseConfig{
-			Hosts:           hosts,
-			Header:          header,
-			Format:          format,
-			HostsFromSecret: strings.TrimSpace(release.HTTP.HostsFromSecret),
+			Hosts:               hosts,
+			Header:              header,
+			Format:              format,
+			RequiredValuePrefix: prefix,
+			HostsFromSecret:     strings.TrimSpace(release.HTTP.HostsFromSecret),
 		},
 	}, nil
 }

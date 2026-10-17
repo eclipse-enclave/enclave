@@ -16,6 +16,8 @@ import (
 	"testing"
 
 	"github.com/BurntSushi/toml"
+
+	"enclave/internal/model"
 )
 
 func TestEntrypoint_SettingsTemplateCopy_DoesNotOverwriteExistingTarget(t *testing.T) {
@@ -406,6 +408,54 @@ func runEntrypointSettingsTemplateWithConfigAndAuth(t *testing.T, templateFilena
 	}
 	out, err := cmd.CombinedOutput()
 	return targetPath, string(out), err
+}
+
+func TestEntrypoint_CodexDaemonTemplateDefault(t *testing.T) {
+	template, err := os.ReadFile(filepath.Join("..", "..", "extensions", "tools", "codex", "templates", "config.toml"))
+	if err != nil {
+		t.Fatalf("read Codex template: %v", err)
+	}
+	targetPath, output, err := runEntrypointSettingsPatchWithToolAndEnv(t, "codex", "config.toml", string(template), nil)
+	if err != nil {
+		t.Fatalf("entrypoint failed: %v\noutput:\n%s", err, output)
+	}
+	assertFileContent(t, targetPath, string(template))
+
+	var config struct {
+		Features map[string]bool `toml:"features"`
+	}
+	if _, err := toml.DecodeFile(targetPath, &config); err != nil {
+		t.Fatalf("decode seeded config: %v", err)
+	}
+	if enabled, present := config.Features["daemon_auto_start"]; !present || enabled {
+		t.Fatal("new config store must disable the app-server daemon")
+	}
+}
+
+func TestEntrypoint_CodexPreservesExistingDaemonSettingsAndCopies(t *testing.T) {
+	for _, config := range []string{
+		"[features]\nmemories = true\n",
+		"[features]\ndaemon_auto_start = true\n",
+		"[features]\ndaemon_auto_start = false\n",
+	} {
+		t.Run(config, func(t *testing.T) {
+			home, _, authDir := entrypointAuthDirs(t)
+			configDir := filepath.Join(home, ".codex")
+			configPath := filepath.Join(configDir, "config.toml")
+			daemonCopy := filepath.Join(configDir, "packages", "app-server-daemon", "keep")
+			writeFile(t, configPath, config)
+			writeFile(t, daemonCopy, "x")
+
+			runEntrypointAuth(t, home, configDir, authDir,
+				"TOOL=codex",
+				model.EnvAuthFiles+"=auth.json",
+				model.EnvToolSettingsTemplate+"="+filepath.Join("..", "..", "extensions", "tools", "codex", "templates", "config.toml"),
+				model.EnvToolSettingsTarget+"="+configPath,
+			)
+			assertFileContent(t, configPath, config)
+			assertFileContent(t, daemonCopy, "x")
+		})
+	}
 }
 
 func runEntrypointSettingsPatchWithToolAndEnv(t *testing.T, tool string, templateFilename string, templateContent string, extraEnv []string) (string, string, error) {

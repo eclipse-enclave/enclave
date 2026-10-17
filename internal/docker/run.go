@@ -94,8 +94,9 @@ func RunInteractive(ctx context.Context, config *ContainerConfig, hostConfig *Ho
 }
 
 // RunInteractiveWithStartHook runs an interactive container and invokes
-// onStarted after Docker reports the named container is running. SIGINT and
-// SIGTERM sent to this process while the child runs are forwarded to it.
+// onStarted after Docker reports the named container is running. SIGINT,
+// SIGTERM and SIGHUP sent to this process while the child runs are forwarded
+// to it.
 func RunInteractiveWithStartHook(ctx context.Context, config *ContainerConfig, hostConfig *HostConfig, name string, onStarted func()) error {
 	if ctx == nil {
 		ctx = context.Background()
@@ -139,17 +140,19 @@ func runCommandWithStartHook(ctx context.Context, name string, cmd *exec.Cmd, on
 	return <-waitCh
 }
 
-// relayInterrupts forwards SIGINT and SIGTERM aimed at this process to the
-// engine child once it is known. Terminal Ctrl-C needs no help: the engine
+// relayInterrupts forwards SIGINT, SIGTERM and SIGHUP aimed at this process to
+// the engine child once it is known. Terminal Ctrl-C needs no help: the engine
 // keeps the TTY in raw mode and proxies it into the container. A signal sent to
 // this process directly, by a supervisor or kill, would otherwise be absorbed
 // by the caller's interrupt handling and leave the session running. The
 // signals are registered before the child starts so none is lost in between;
 // one that arrives early is delivered as soon as the child exists. The
-// returned function stops relaying.
+// returned function stops relaying. When the terminal closes, the kernel
+// already sends SIGHUP to the child, which shares our process group, so the
+// relayed copy is a duplicate; the relay matters for kill -HUP on enclave.
 func relayInterrupts(child <-chan *os.Process) func() {
 	signals := make(chan os.Signal, 1)
-	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
+	signal.Notify(signals, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 	done := make(chan struct{})
 	go func() {
 		var proc *os.Process

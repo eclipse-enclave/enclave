@@ -91,7 +91,7 @@ func (b *Backend) Capabilities() backend.Capabilities {
 func (b *Backend) Storage() backend.StoreManager { return b.storage }
 
 // Run prepares and attaches a foreground session. Cancelling ctx (the caller
-// wires it to SIGINT/SIGTERM) aborts a start still in progress and tears down
+// wires it to SIGINT/SIGTERM/SIGHUP) aborts a start still in progress and tears down
 // what it created; once the session is attached the engine child owns the
 // terminal and is deliberately detached from ctx.
 func (b *Backend) Run(ctx context.Context, req backend.Request, attach backend.AttachIO) (backend.ExitStatus, error) {

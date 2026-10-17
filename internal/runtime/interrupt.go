@@ -16,10 +16,13 @@ import (
 
 // interruptSignals cancel a start in progress. The foreground run also hands
 // them to termtint, so the tint does not intercept a signal the run survives.
-var interruptSignals = []os.Signal{os.Interrupt, syscall.SIGTERM}
+// SIGHUP is among them because the terminal going away must not kill the run
+// before it removes the gateway.
+var interruptSignals = []os.Signal{os.Interrupt, syscall.SIGTERM, syscall.SIGHUP}
 
-// interruptContext returns a context that SIGINT or SIGTERM cancels. A start
-// still in progress observes the cancellation and tears down what it created.
+// interruptContext returns a context that SIGINT, SIGTERM or SIGHUP cancels. A
+// start still in progress observes the cancellation and tears down what it
+// created.
 // Registering the signals also keeps this process alive through them: once the
 // session is attached, the engine child owns the terminal and receives Ctrl-C
 // itself, and the post-session cleanup then runs to completion.

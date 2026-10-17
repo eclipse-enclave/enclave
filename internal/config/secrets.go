@@ -256,13 +256,8 @@ func normalizeSecretRelease(secretID string, release *model.SecretReleaseConfig)
 	}
 
 	prefix := release.HTTP.RequiredValuePrefix
-	if len(prefix) > 256 {
-		return nil, fmt.Errorf("secrets[%q].release.http: required_value_prefix must not exceed 256 bytes", secretID)
-	}
-	for _, b := range []byte(prefix) {
-		if b < 33 || b > 126 {
-			return nil, fmt.Errorf("secrets[%q].release.http: required_value_prefix must contain only non-whitespace printable ASCII", secretID)
-		}
+	if err := model.ValidateSecretLiteral(prefix, "required_value_prefix"); err != nil {
+		return nil, fmt.Errorf("secrets[%q].release.http: %w", secretID, err)
 	}
 
 	return &model.SecretReleaseConfig{

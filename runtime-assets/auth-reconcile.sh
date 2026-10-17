@@ -18,14 +18,32 @@ enclave_is_uint() {
     esac
 }
 
+# ENCLAVE_SECRET_PLACEHOLDERS is newline-delimited. Each entry becomes its own
+# -e argument because POSIX leaves newline-separated pattern lists in a single
+# -e to the implementation (the helper container runs busybox grep).
 enclave_auth_file_safe_to_sync() {
-    if grep -qF -e "ENCLAVE_SECRET_" -e "${ENCLAVE_SECRET_PLACEHOLDERS:-ENCLAVE_SECRET_}" "$1"; then
-        echo "Warning: Not syncing auth file ${2:-$1}: contains a gateway placeholder." >&2
+    scan_file=$1
+    scan_label=${2:-$1}
+    case $- in *f*) scan_noglob=1 ;; *) scan_noglob= ;; esac
+    scan_ifs=$IFS
+    IFS='
+'
+    set -f
+    # shellcheck disable=SC2086
+    set -- $ENCLAVE_SECRET_PLACEHOLDERS
+    IFS=$scan_ifs
+    [ -n "$scan_noglob" ] || set +f
+    for scan_placeholder; do
+        shift
+        [ -n "$scan_placeholder" ] && set -- "$@" -e "$scan_placeholder"
+    done
+    if grep -qF -e "ENCLAVE_SECRET_" "$@" "$scan_file"; then
+        echo "Warning: Not syncing auth file ${scan_label}: contains a gateway placeholder." >&2
         return 1
     else
         scan_status=$?
         if [ "$scan_status" -ne 1 ]; then
-            echo "Warning: Not syncing auth file ${2:-$1}: unable to check for gateway placeholders." >&2
+            echo "Warning: Not syncing auth file ${scan_label}: unable to check for gateway placeholders." >&2
             return 1
         fi
     fi

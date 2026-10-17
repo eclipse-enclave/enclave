@@ -65,7 +65,7 @@ func TestEntrypointAuthDoesNotSeedPlaceholder(t *testing.T) {
 			home, configDir, authDir := entrypointAuthDirs(t)
 			payload := `{"claudeAiOauth":{"accessToken":"` + token + `","expiresAt":999}}`
 			writeFile(t, filepath.Join(configDir, claudeCredentialsFile), payload)
-			runEntrypointAuth(t, home, configDir, authDir, model.EnvSecretPlaceholders+"=vendor_custom_end")
+			runEntrypointAuth(t, home, configDir, authDir, model.EnvSecretPlaceholders+"=other_placeholder\nvendor_custom_end")
 			if _, err := os.Stat(filepath.Join(authDir, claudeCredentialsFile)); !os.IsNotExist(err) {
 				t.Fatal("placeholder seeded into shared auth")
 			}

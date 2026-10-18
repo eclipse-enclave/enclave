@@ -17,6 +17,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"enclave/internal/model"
 )
 
 // dockerBinary is the container CLI executable, "docker" by default. It is a
@@ -270,6 +272,11 @@ func buildRunArgs(config *ContainerConfig, hostConfig *HostConfig, name string, 
 	}
 	if mode.TTY {
 		args = append(args, "--tty")
+	}
+	if mode.Interactive && mode.TTY && !mode.Detach && !mode.Create {
+		// The engine's default ctrl-p,ctrl-q holds back every ctrl-p the tool
+		// should see; use the key `enclave attach` detaches with instead.
+		args = append(args, "--detach-keys", model.DetachKeysDefault)
 	}
 	if strings.TrimSpace(name) != "" {
 		args = append(args, "--name", name)

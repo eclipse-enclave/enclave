@@ -127,7 +127,23 @@ func (b *Backend) Run(ctx context.Context, req backend.Request, attach backend.A
 	// proxying; cancelling ctx must not kill the attached child and strand a
 	// running session.
 	err = runForeground(context.WithoutCancel(ctx), spec.config, spec.hostConfig, spec.name, attach)
+	removeOutlivingContainer(context.WithoutCancel(ctx), spec.name)
 	return exitStatus(err), neutralizeExitError(err)
+}
+
+// removeOutlivingContainer removes a foreground session's container that still
+// runs after its engine client returned: the detach keys were typed, or the
+// client died alone. The session ends with Run, and the deferred cleanup is
+// about to remove the gateway whose network the container uses.
+func removeOutlivingContainer(ctx context.Context, name string) {
+	info, err := dockercmd.ContainerInspect(ctx, name)
+	if err != nil || info.State == nil || !info.State.Running {
+		return
+	}
+	logx.Infof("Session %s was detached; a foreground session ends with its terminal, so it is being removed.", name)
+	if err := dockercmd.ContainerRemove(ctx, name, true, false); err != nil && !dockercmd.IsNotFound(err) {
+		logx.Warnf("Failed to remove container %s after its terminal detached: %v", name, err)
+	}
 }
 
 func (b *Backend) Start(ctx context.Context, req backend.Request) (backend.SessionRef, error) {

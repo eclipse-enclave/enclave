@@ -18,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	"enclave/internal/backend"
 	"enclave/internal/cli"
 )
 
@@ -41,7 +42,7 @@ func TestSelfUpdateInterruptCancelsTheInstall(t *testing.T) {
 	home := useFakeSelfUpdater(t, fake)
 	var code int
 	_, stderr := captureOutput(t, func() { code = runSelfUpdate(false) })
-	if code != exitCodeInterrupted || !strings.Contains(stderr, "Enclave update interrupted.") {
+	if code != backend.ExitCodeInterrupted || !strings.Contains(stderr, "Enclave update interrupted.") {
 		t.Fatalf("code = %d, stderr = %q; want an interrupted exit", code, stderr)
 	}
 	if stampExists(t, home) {

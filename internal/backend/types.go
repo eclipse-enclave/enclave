@@ -487,6 +487,11 @@ type SeedItem struct {
 // what it started.
 var ErrInterrupted = errors.New("interrupted before the session started")
 
+// ExitCodeInterrupted is the shell convention for a process ended by SIGINT. It
+// also reports a foreground session that enclave had to end, so the status
+// says nothing about the tool's own exit.
+const ExitCodeInterrupted = 130
+
 // ExitError reports a session process that exited with a non-zero status.
 type ExitError struct {
 	Code int

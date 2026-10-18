@@ -22,7 +22,7 @@ func TestRunErrorExitCode(t *testing.T) {
 		want int
 	}{
 		{name: "tool exit status", err: &backend.ExitError{Code: 3}, want: 3},
-		{name: "interrupted start", err: fmt.Errorf("run: %w", backend.ErrInterrupted), want: exitCodeInterrupted},
+		{name: "interrupted start", err: fmt.Errorf("run: %w", backend.ErrInterrupted), want: backend.ExitCodeInterrupted},
 		{name: "other failure", err: errors.New("boom"), want: 1},
 	}
 	for _, tc := range cases {

@@ -13,8 +13,6 @@ import (
 	"reflect"
 	"slices"
 	"testing"
-
-	"enclave/internal/model"
 )
 
 func TestIsNotFound(t *testing.T) {
@@ -143,26 +141,27 @@ func TestBuildRunArgsDetachedInteractive(t *testing.T) {
 	}
 }
 
-// Only an attached terminal can type the detach keys, and the engine default
-// would hold back every ctrl-p the tool should see.
+// Only an attached terminal can type the detach keys.
 func TestBuildRunArgsSetsDetachKeysForAttachedTerminals(t *testing.T) {
+	const keys = `ctrl-\`
 	for _, tc := range []struct {
 		name string
 		mode runMode
 		want bool
 	}{
-		{"foreground terminal", runMode{Interactive: true, TTY: true}, true},
-		{"detached terminal", runMode{Detach: true, Interactive: true, TTY: true}, false},
-		{"no terminal", runMode{Interactive: true}, false},
-		{"create", runMode{Create: true, Interactive: true, TTY: true}, false},
+		{"foreground terminal", runMode{Interactive: true, TTY: true, DetachKeys: keys}, true},
+		{"engine default", runMode{Interactive: true, TTY: true}, false},
+		{"detached terminal", runMode{Detach: true, Interactive: true, TTY: true, DetachKeys: keys}, false},
+		{"no terminal", runMode{Interactive: true, DetachKeys: keys}, false},
+		{"create", runMode{Create: true, Interactive: true, TTY: true, DetachKeys: keys}, false},
 	} {
 		args := buildRunArgs(&ContainerConfig{Image: "image"}, nil, "session", tc.mode)
 		i := slices.Index(args, "--detach-keys")
 		if got := i >= 0; got != tc.want {
 			t.Errorf("%s: --detach-keys in %v = %v, want %v", tc.name, args, got, tc.want)
 		}
-		if i >= 0 && (i+1 >= len(args) || args[i+1] != model.DetachKeysDefault) {
-			t.Errorf("%s: detach keys %v, want %q", tc.name, args[i:], model.DetachKeysDefault)
+		if i >= 0 && (i+1 >= len(args) || args[i+1] != keys) {
+			t.Errorf("%s: detach keys %v, want %q", tc.name, args[i:], keys)
 		}
 	}
 }

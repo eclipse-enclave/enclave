@@ -67,15 +67,15 @@ func TestRunInteractiveWithStartHookWaitsForRunningContainer(t *testing.T) {
 	t.Setenv("STUB_RUN_SLEEP", "0.3")
 	t.Setenv("STUB_RUN_EXIT", "0")
 
-	called := false
-	err := RunInteractiveWithStartHook(context.Background(), &ContainerConfig{Image: "example:test"}, nil, "session", func() {
-		called = true
+	startedID := ""
+	err := RunInteractiveWithStartHook(context.Background(), &ContainerConfig{Image: "example:test"}, nil, "session", "", func(id string) {
+		startedID = id
 	})
 	if err != nil {
 		t.Fatalf("RunInteractiveWithStartHook returned error: %v", err)
 	}
-	if !called {
-		t.Fatal("expected start hook to be called")
+	if startedID != "abc" {
+		t.Fatalf("start hook got ID %q, want the inspected abc", startedID)
 	}
 }
 
@@ -85,7 +85,7 @@ func TestRunInteractiveWithStartHookSkipsHookWhenRunFailsBeforeStart(t *testing.
 	t.Setenv("STUB_RUN_EXIT", "125")
 
 	called := false
-	err := RunInteractiveWithStartHook(context.Background(), &ContainerConfig{Image: "example:test"}, nil, "session", func() {
+	err := RunInteractiveWithStartHook(context.Background(), &ContainerConfig{Image: "example:test"}, nil, "session", "", func(string) {
 		called = true
 	})
 	if err == nil {
@@ -103,7 +103,7 @@ func TestRunWithStartHookWaitsForRunningContainer(t *testing.T) {
 	t.Setenv("STUB_RUN_EXIT", "0")
 
 	called := false
-	err := RunWithStartHook(context.Background(), &ContainerConfig{Image: "example:test"}, nil, "session", func() {
+	err := RunWithStartHook(context.Background(), &ContainerConfig{Image: "example:test"}, nil, "session", func(string) {
 		called = true
 	})
 	if err != nil {
@@ -123,7 +123,7 @@ func TestRunWithIOAndStartHookWaitsForRunningContainer(t *testing.T) {
 			t.Setenv("STUB_RUN_EXIT", "0")
 
 			called := false
-			err := RunWithIOAndStartHook(context.Background(), &ContainerConfig{Image: "example:test"}, nil, "session", nil, io.Discard, io.Discard, tty, func() {
+			err := RunWithIOAndStartHook(context.Background(), &ContainerConfig{Image: "example:test"}, nil, "session", nil, io.Discard, io.Discard, tty, "", func(string) {
 				called = true
 			})
 			if err != nil {
@@ -131,6 +131,29 @@ func TestRunWithIOAndStartHookWaitsForRunningContainer(t *testing.T) {
 			}
 			if !called {
 				t.Fatal("expected start hook to be called")
+			}
+		})
+	}
+}
+
+// Embedders that wire their own terminal pass detach keys through, like the
+// foreground run on the process terminal.
+func TestRunWithIOAndStartHookSetsDetachKeysOnlyWithTTY(t *testing.T) {
+	for _, tty := range []bool{false, true} {
+		t.Run(map[bool]string{false: "without TTY", true: "with TTY"}[tty], func(t *testing.T) {
+			withRunStartHookStub(t)
+			argsLog := filepath.Join(t.TempDir(), "args")
+			t.Setenv("STUB_RUN_ARGS", argsLog)
+			if err := RunWithIOAndStartHook(context.Background(), &ContainerConfig{Image: "example:test"}, nil, "session", strings.NewReader(""), io.Discard, io.Discard, tty, "ctrl-x", nil); err != nil {
+				t.Fatalf("RunWithIOAndStartHook returned error: %v", err)
+			}
+			args, err := os.ReadFile(argsLog)
+			if err != nil {
+				t.Fatalf("read run args: %v", err)
+			}
+			got := strings.Contains(string(args), "--detach-keys ctrl-x")
+			if got != tty {
+				t.Fatalf("detach keys set = %v, want %v (args %s)", got, tty, args)
 			}
 		})
 	}
@@ -144,6 +167,9 @@ func withRunStartHookStub(t *testing.T) {
 	script := `#!/bin/sh
 case "$1" in
 run)
+	if [ -n "$STUB_RUN_ARGS" ]; then
+		printf '%s\n' "$*" > "$STUB_RUN_ARGS"
+	fi
 	if [ "$STUB_RUN_TOUCH" = "1" ]; then
 		touch "$STUB_RUNNING_MARKER"
 	fi

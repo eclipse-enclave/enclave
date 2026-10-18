@@ -235,9 +235,6 @@ func execSessionTarget(ctx context.Context, be backend.Backend, opts model.Optio
 	return runtime.ExecTarget{Name: session.Ref.Name, SessionTint: attachSessionTint(session, opts.SessionTint)}, nil
 }
 
-// exitCodeInterrupted is the shell convention for a process ended by SIGINT.
-const exitCodeInterrupted = 130
-
 // runErrorExitCode maps a session error to the process exit code. Tool exits
 // and interrupted starts were already reported, so only other failures log.
 func runErrorExitCode(err error) int {
@@ -246,7 +243,7 @@ func runErrorExitCode(err error) int {
 		return exitErr.Code
 	}
 	if errors.Is(err, backend.ErrInterrupted) {
-		return exitCodeInterrupted
+		return backend.ExitCodeInterrupted
 	}
 	logx.Errorf("%v", err)
 	return 1

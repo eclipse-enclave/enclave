@@ -12,19 +12,25 @@ import (
 	"errors"
 	"io"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"enclave/internal/backend"
 	dockercmd "enclave/internal/docker"
+	"enclave/internal/model"
 )
 
 // outlivingStubScript answers `container inspect` with the state in
-// STUB_STATE (running, exited, or missing) and fails `stop` when
-// STUB_STOP_FAILS is set.
+// STUB_STATE (running, exited, or missing), or missing once the file
+// STUB_GONE exists. It fails `stop` when STUB_STOP_FAILS is set, and fails
+// `rm` like a racing --rm when STUB_RM_IN_PROGRESS is set, creating STUB_GONE
+// unless STUB_RM_STUCK is set.
 const outlivingStubScript = `case "$1" in
 container)
+	[ -n "$STUB_GONE" ] && [ -f "$STUB_GONE" ] && STUB_STATE=missing
 	case "$STUB_STATE" in
 	running) printf '%s\n' '{"Id":"cid","Name":"/s","State":{"Status":"running","Running":true}}' ;;
 	exited) printf '%s\n' '{"Id":"cid","Name":"/s","State":{"Status":"exited","Running":false}}' ;;
@@ -33,6 +39,13 @@ container)
 	;;
 stop)
 	if [ -n "$STUB_STOP_FAILS" ]; then echo "Error: stop failed" >&2; exit 1; fi
+	;;
+rm)
+	if [ -n "$STUB_RM_IN_PROGRESS" ]; then
+		[ -z "$STUB_RM_STUCK" ] && : > "$STUB_GONE"
+		echo "Error response from daemon: removal of container cid is already in progress" >&2
+		exit 1
+	fi
 	;;
 esac
 exit 0
@@ -80,6 +93,46 @@ func TestEndOutlivingSession(t *testing.T) {
 			}
 			if hasCallWithPrefix(calls, "rm --force "+name) || hasCallWithPrefix(calls, "stop "+name) {
 				t.Errorf("container must not be ended by name, calls %v", calls)
+			}
+		})
+	}
+}
+
+// The engine's --rm can already be removing the stopped container: that is not
+// a failure, but the session must still be gone before its gateway.
+func TestEndOutlivingSessionWaitsForRemovalInProgress(t *testing.T) {
+	previous := endedContainerGoneTimeout
+	endedContainerGoneTimeout = 300 * time.Millisecond
+	t.Cleanup(func() { endedContainerGoneTimeout = previous })
+	for _, tc := range []struct {
+		name     string
+		stuck    bool
+		wantWarn bool
+	}{
+		{name: "removed by --rm"},
+		{name: "never removed", stuck: true, wantWarn: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			log := stubCLI(t, "docker", outlivingStubScript)
+			gone := filepath.Join(t.TempDir(), "gone")
+			t.Setenv("STUB_STATE", "running")
+			t.Setenv("STUB_GONE", gone)
+			t.Setenv("STUB_RM_IN_PROGRESS", "1")
+			if tc.stuck {
+				t.Setenv("STUB_RM_STUCK", "1")
+			}
+			var ended bool
+			stderr := captureStderr(t, func() { ended = endOutlivingSession(context.Background(), "s", "cid") })
+			if !ended {
+				t.Fatalf("session not ended, calls %v", stubCalls(t, log))
+			}
+			if got := strings.Contains(stderr, "Failed to remove"); got != tc.wantWarn {
+				t.Errorf("warned = %v, want %v (stderr %q)", got, tc.wantWarn, stderr)
+			}
+			calls := stubCalls(t, log)
+			remove := slices.IndexFunc(calls, func(c string) bool { return strings.HasPrefix(c, "rm --force cid") })
+			if remove < 0 || !slices.ContainsFunc(calls[remove:], func(c string) bool { return strings.HasPrefix(c, "container inspect") }) {
+				t.Errorf("expected a wait for removal after rm, calls %v", calls)
 			}
 		})
 	}
@@ -149,5 +202,15 @@ exit 0
 				t.Errorf("want stop, remove, then cleanup; calls %v", calls)
 			}
 		})
+	}
+}
+
+// A caller's detach keys win; otherwise the run uses the `enclave attach` key.
+func TestForegroundDetachKeys(t *testing.T) {
+	if got := foregroundDetachKeys(backend.AttachIO{}); got != model.DetachKeysDefault {
+		t.Errorf("default = %q, want %q", got, model.DetachKeysDefault)
+	}
+	if got := foregroundDetachKeys(backend.AttachIO{DetachKeys: " ctrl-x "}); got != "ctrl-x" {
+		t.Errorf("override = %q, want ctrl-x", got)
 	}
 }

@@ -172,10 +172,29 @@ func endOutlivingSession(ctx context.Context, name string, id string) bool {
 	if err := dockercmd.ContainerStop(ctx, info.ID, nil); err != nil && !dockercmd.IsNotFound(err) {
 		logx.Warnf("Failed to stop container %s: %v", name, err)
 	}
-	if err := dockercmd.ContainerRemove(ctx, info.ID, true, false); err != nil && !dockercmd.IsNotFound(err) {
+	if err := dockercmd.ContainerRemove(ctx, info.ID, true, false); err != nil && !dockercmd.IsNotFound(err) && !waitContainerGone(ctx, info.ID) {
 		logx.Warnf("Failed to remove container %s after its terminal client returned: %v", name, err)
 	}
 	return true
+}
+
+// endedContainerGoneTimeout bounds the wait for the engine's own --rm.
+var endedContainerGoneTimeout = 10 * time.Second
+
+// waitContainerGone reports whether the container is gone within
+// endedContainerGoneTimeout. Docker rejects a remove that races the --rm
+// already in progress with a conflict, not a not-found.
+func waitContainerGone(ctx context.Context, id string) bool {
+	deadline := time.Now().Add(endedContainerGoneTimeout)
+	for {
+		if _, err := dockercmd.ContainerInspect(ctx, id); dockercmd.IsNotFound(err) {
+			return true
+		}
+		if !time.Now().Before(deadline) {
+			return false
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
 }
 
 func (b *Backend) Start(ctx context.Context, req backend.Request) (backend.SessionRef, error) {
@@ -782,15 +801,20 @@ func isGatewaySummary(c dockercmd.Summary, name string) bool {
 	return strings.HasSuffix(name, model.GatewayContainerSuffix) && strings.HasPrefix(c.Image, model.GatewayImagePrefix)
 }
 
-// foregroundDetachKeys is the key `enclave attach` leaves a session with; a
-// foreground session has no detach, so leaving ends it. It also frees ctrl-p,
+// foregroundDetachKeys falls back to the `enclave attach` key, like Attach. A
+// foreground session has no detach, so the key ends it; it also frees ctrl-p,
 // which the engine's default ctrl-p,ctrl-q holds back from the tool.
-const foregroundDetachKeys = model.DetachKeysDefault
+func foregroundDetachKeys(attach backend.AttachIO) string {
+	if keys := strings.TrimSpace(attach.DetachKeys); keys != "" {
+		return keys
+	}
+	return model.DetachKeysDefault
+}
 
 func runForeground(ctx context.Context, config *dockercmd.ContainerConfig, hostConfig *dockercmd.HostConfig, name string, attach backend.AttachIO, onStarted func(id string)) error {
 	if attach.In == nil && attach.Out == nil && attach.Err == nil {
 		if attach.TTY {
-			return dockercmd.RunInteractiveWithStartHook(ctx, config, hostConfig, name, foregroundDetachKeys, onStarted)
+			return dockercmd.RunInteractiveWithStartHook(ctx, config, hostConfig, name, foregroundDetachKeys(attach), onStarted)
 		}
 		return dockercmd.RunWithStartHook(ctx, config, hostConfig, name, onStarted)
 	}
@@ -803,7 +827,7 @@ func runForeground(ctx context.Context, config *dockercmd.ContainerConfig, hostC
 	if errOut == nil {
 		errOut = io.Discard
 	}
-	return dockercmd.RunWithIOAndStartHook(ctx, config, hostConfig, name, in, out, errOut, attach.TTY, foregroundDetachKeys, onStarted)
+	return dockercmd.RunWithIOAndStartHook(ctx, config, hostConfig, name, in, out, errOut, attach.TTY, foregroundDetachKeys(attach), onStarted)
 }
 
 func applyContainerHardening(hostConfig *dockercmd.HostConfig) {

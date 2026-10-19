@@ -36,6 +36,19 @@ func renderEvents(events []netlog.Event, opts RenderOptions) string {
 	return out.String()
 }
 
+func TestRenderHumanFormNamesPolicyDenialsAsBlocked(t *testing.T) {
+	events := []netlog.Event{
+		{Timestamp: "2026-08-13T12:04:33.100Z", Type: netlog.TypeTCP, Domain: "dns.google", Port: 443, Verdict: netlog.VerdictDeny, Rule: "allowlist", Session: "enclave-demo-codex"},
+	}
+	out := renderEvents(events, humanOptions())
+	if !strings.Contains(out, "dns.google:443") || !strings.HasSuffix(strings.TrimRight(out, "\n"), "blocked by policy") {
+		t.Fatalf("a denial by the allowlist rule should read as blocked, got:\n%s", out)
+	}
+	if strings.Contains(out, "allowlist") {
+		t.Fatalf("a denied row must not show the allowlist rule name, got:\n%s", out)
+	}
+}
+
 func TestRenderHumanFormAlignsColumns(t *testing.T) {
 	out := renderEvents(renderFixture(), humanOptions())
 	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")

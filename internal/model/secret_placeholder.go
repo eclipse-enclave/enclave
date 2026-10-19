@@ -9,6 +9,8 @@ package model
 
 import "fmt"
 
+const SecretPlaceholderMarker = "ENCLAVE_SECRET_" // #nosec G101 -- recognition marker, not a credential.
+
 // SecretPlaceholderConfig describes a synthetic credential, independent of its secret.
 type SecretPlaceholderConfig struct {
 	Prefix string                  `json:"prefix,omitempty"`
@@ -40,14 +42,24 @@ func (c SecretPlaceholderConfig) ValidatedAlphabet() (string, error) {
 		return "", fmt.Errorf("placeholder.random.length must be between %d and 1024 for %s", minimum, c.Random.Encoding)
 	}
 	for _, literal := range []string{c.Prefix, c.Suffix} {
-		if len(literal) > 256 {
-			return "", fmt.Errorf("placeholder prefix and suffix must not exceed 256 bytes")
-		}
-		for _, b := range []byte(literal) {
-			if b < 33 || b > 126 {
-				return "", fmt.Errorf("placeholder prefix and suffix must contain only non-whitespace printable ASCII")
-			}
+		if err := ValidateSecretLiteral(literal, "placeholder prefix and suffix"); err != nil {
+			return "", err
 		}
 	}
 	return alphabet, nil
+}
+
+// ValidateSecretLiteral checks a literal that is matched or substituted in credential
+// values: at most 256 bytes of non-whitespace printable ASCII. The subject names the
+// field in error messages.
+func ValidateSecretLiteral(literal string, subject string) error {
+	if len(literal) > 256 {
+		return fmt.Errorf("%s must not exceed 256 bytes", subject)
+	}
+	for _, b := range []byte(literal) {
+		if b < 33 || b > 126 {
+			return fmt.Errorf("%s must contain only non-whitespace printable ASCII", subject)
+		}
+	}
+	return nil
 }

@@ -112,9 +112,10 @@ When persistence is enabled, resolved declared secret and `--pass-env` values
 are stored in the host-side env store. Suppressed API key secrets are
 skipped before resolution, so they are not persisted. For declared secrets with
 `release.http`, the running tool sees placeholders, while the gateway receives
-the real value from host-managed state. The gateway releases real values only on
-HTTPS requests to declared hosts; plaintext HTTP requests carrying placeholders
-are denied. If a client checks token syntax before sending requests, extensions
+the real value from host-managed state. The gateway releases real values only in
+the configured header on HTTPS requests to declared hosts; plaintext HTTP
+requests carrying registered placeholders in headers are denied.
+If a client checks token syntax before sending requests, extensions
 can declare a [custom placeholder shape](extensions/README.md#client-side-credential-format-checks)
 without exposing the real credential. Placeholder generation failures abort
 startup instead of falling back to raw credentials.
@@ -133,6 +134,44 @@ opencode auth login --provider openai
 ```
 
 Then select `ChatGPT Pro/Plus (browser)`, copy the printed URL, and open it in your host browser. `opencode` listens on `http://localhost:1455/auth/callback`, and enclave auto-maps port `1455` when the `openai` entry is missing from `auth.json`.
+
+### Env-only bearer tokens
+
+With restricted networking, the following env credentials also use gateway
+placeholders:
+
+| Tool | Variable | Release hosts |
+|------|----------|---------------|
+| Claude | `CLAUDE_CODE_OAUTH_TOKEN` (`claude setup-token`) | `api.anthropic.com` |
+| Pi | `ANTHROPIC_OAUTH_TOKEN` | `api.anthropic.com` |
+| Codex | `CODEX_ACCESS_TOKEN` (`at-` personal access tokens only) | `auth.openai.com`, `chatgpt.com` |
+| Codex | `CODEX_API_KEY` / `OPENAI_API_KEY` | `api.openai.com`, `*.openai.com` |
+
+- The bearer tokens have `apiKey: false`, so `--no-api-key` does not suppress
+  them. Codex API keys remain subject to `--no-api-key`.
+- `CODEX_API_KEY` and `OPENAI_API_KEY` are [aliases](#env-aliases); the resolved
+  key is injected under both names. It authenticates `codex exec` without
+  onboarding, while the interactive TUI uses stored auth. For persistent TUI
+  use, start with `--no-api-key` and sign in normally. Details are in the
+  [Codex README](../extensions/tools/codex/README.md#env-credentials).
+- An inspected request that carries a placeholder to a host outside its release
+  list is denied. Codex's API-key model-list request to `chatgpt.com` is one
+  such case; Codex falls back to its built-in model list.
+- `CODEX_ACCESS_TOKEN` must start with `at-` while gateway protection is active.
+  Agent Identity JWTs require client-side signature verification and cannot use
+  a placeholder. The startup error names the credential source; if that is the
+  persisted env store, `--reset-auth` clears it.
+- Placeholders are fresh each session. Auth files containing a placeholder are
+  not copied to shared tool or feature stores; Enclave warns and skips them.
+  Codex startup also removes a regular local `auth.json` containing
+  `ENCLAVE_SECRET_`; shared auth symlinks and their targets are never removed.
+  A shared store that already holds a placeholder needs manual recovery:
+  re-authenticate, or use `--reset-auth` to clear saved auth and persisted env
+  credentials.
+- File-backed and refreshable logins are outside this protection. Enclave does
+  not reuse a Claude setup token in Pi; the
+  [Pi README](../extensions/tools/pi/README.md#env-credentials) covers the
+  `ANTHROPIC_OAUTH_TOKEN` caveat.
 
 ## Secrets
 

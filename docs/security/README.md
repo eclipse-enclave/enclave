@@ -105,9 +105,10 @@ with unrestricted networking and without gateway-side HTTP secret release.
 Host environment variables are not passed unless declared by an enabled
 extension or explicitly selected with `--pass-env`. Declared secrets configured
 for HTTP release are represented by placeholders in the tool environment and
-released by the gateway only for matching HTTPS hosts. This protects those
-environment values from direct exfiltration, but credential files and secrets
-without HTTP release can contain real values inside the tool config/auth store.
+released by the gateway only in the configured header for matching HTTPS hosts.
+This protects those environment values from direct exfiltration, but credential
+files and secrets without HTTP release can contain real values inside the tool
+config/auth store.
 
 Once configured, the SSH key is available to every Docker session, regardless
 of project or tool. SSH on port 22 bypasses the HTTP/TLS proxy, so a push does

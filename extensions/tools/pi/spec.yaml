@@ -40,6 +40,12 @@ credentials:
   sources:
     openai-api-key: { env: [OPENAI_API_KEY] }
     anthropic-api-key: { env: [ANTHROPIC_API_KEY] }
+    anthropic-oauth-token:
+      env: [ANTHROPIC_OAUTH_TOKEN]
+      apiKey: false
+      placeholder:
+        prefix: "sk-ant-oat01-ENCLAVE_SECRET_"
+        random: { encoding: hex, length: 48 }
     gemini-api-key: { env: [GEMINI_API_KEY] }
     mistral-api-key: { env: [MISTRAL_API_KEY] }
 
@@ -54,6 +60,7 @@ network:
   serviceAuth:
     openai-api-key: { headerName: authorization, valueFormat: "Bearer %s" }
     anthropic-api-key: { headerName: x-api-key }
+    anthropic-oauth-token: { headerName: authorization, valueFormat: "Bearer %s", hosts: [api.anthropic.com] }
     gemini-api-key: { headerName: x-goog-api-key }
     mistral-api-key: { headerName: authorization, valueFormat: "Bearer %s" }
 
@@ -71,7 +78,7 @@ providers:
         - { file: agent/auth.json, type: json_pointer_non_null, pointer: /openai-codex }
     oauthPorts: [{ port: "1455" }]
   - name: anthropic
-    credentials: [anthropic-api-key]
+    credentials: [anthropic-api-key, anthropic-oauth-token]
     authFiles: [agent/auth.json]
     authSession:
       checks:

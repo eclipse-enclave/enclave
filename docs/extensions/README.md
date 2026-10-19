@@ -566,6 +566,14 @@ Secrets are split across two `spec.yaml` sections:
   rejected, since the point is to name one instance. Values may be a bare host,
   `host:port`, or a full URL — the scheme, port and path are stripped.
 
+`network.serviceAuth.<id>.requiredValuePrefix` optionally limits gateway
+protection to a supported credential type. The resolved real value must start
+with this literal, otherwise startup fails while gateway protection is active.
+The prefix is at most 256 bytes of non-whitespace printable ASCII. Codex uses
+`"at-"` to distinguish personal access tokens from Agent Identity JWTs, whose
+client-side signature verification cannot accept a placeholder. This check does
+not apply to unrestricted, unprotected env injection.
+
 The placeholder convention is Go `fmt`-style `%s`, not `{secret}`. An empty
 `valueFormat` means "inject the raw secret value" with no wrapping (see
 `anthropic-api-key`'s `x-api-key` header above, which has no `valueFormat`);
@@ -590,9 +598,10 @@ network:
 
 When the gateway is enabled, credentials with a `serviceAuth` entry are
 replaced with random placeholders in the container environment; the gateway
-MITM proxy intercepts HTTPS requests to the declared hosts and rewrites the
-configured header with the real secret, denying plaintext HTTP requests that
-carry a placeholder. Credentials without a `serviceAuth` entry are injected
+MITM proxy intercepts HTTPS requests to the declared hosts and substitutes the
+placeholder only in the configured `headerName`. Inspected requests whose
+placeholder-bearing headers do not satisfy the release rule are denied.
+Credentials without a `serviceAuth` entry are injected
 as normal env vars. Placeholder generation errors abort startup rather than
 falling back to the real credential.
 
@@ -634,6 +643,16 @@ without one are rejected. The setting only affects credentials while secret
 release is active; it does not enable the gateway or turn raw env injection
 into proxying. It handles syntactic client checks, not
 cryptographic validation, token signing, or client-side secret transformations.
+
+Only add `serviceAuth` for credentials the client reads from the environment
+without persisting them. Clients that save a session placeholder to an auth or
+config file cannot reuse it next session. File-backed and refreshable logins
+need separate handling ([#133](https://github.com/eclipse-enclave/enclave/issues/133)).
+Auth reconciliation warns and skips contaminated files rather than copying them
+to shared stores; this is a diagnostic guard, not interception of client writes.
+When client syntax permits, include `ENCLAVE_SECRET_` in a custom prefix or suffix
+so the guard can recognize placeholders from earlier sessions too. Custom shapes
+without that marker are checked against the current session's values.
 
 `providers[]` is enclave-native and describes an auth *provider* (as
 opposed to a raw credential): `name`, `credentials` (a list of

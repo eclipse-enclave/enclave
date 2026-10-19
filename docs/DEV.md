@@ -130,6 +130,42 @@ make lint
 Exception: if a change only touches files under `docs/`, these make targets are
 not required.
 
+### Env-only credential acceptance testing
+
+Unit tests cover credential resolution, placeholder shapes, host release rules,
+and auth-file reconciliation without a real engine or account. In a dedicated
+Docker/Podman environment, test each variable in
+[Env-only bearer tokens](auth.md#env-only-bearer-tokens) independently:
+
+- Make an authenticated tool request, then restart and repeat. Confirm the
+  container gets a fresh placeholder and no placeholder reaches shared auth
+  through reconciliation.
+- Test `codex exec` with only `OPENAI_API_KEY`, then only `CODEX_API_KEY`;
+  neither should require onboarding. Check API-key precedence when a ChatGPT
+  login already exists.
+- Test the Codex TUI separately: an empty store requires onboarding and a stored
+  login wins over the env API key. Accept the prefilled placeholder for one
+  session, then restart with an empty shared store and confirm the old local
+  `auth.json` is removed. Repeat with project auth scope. With valid shared auth,
+  confirm startup restores its symlink instead. Verify persistent TUI login
+  with `--no-api-key`.
+- With `codex exec`, test API-key model-list refresh under `--network-log=requests` and
+  coarse logging with a PAT also injected. Expect a denial at `chatgpt.com` and
+  built-in model-list fallback; OpenAI API requests should still work.
+- Confirm `CODEX_ACCESS_TOKEN` PATs work and Agent Identity JWTs fail clearly
+  with gateway protection active.
+- Write a placeholder into a local auth file, then exercise foreground exit,
+  background stop/remove, and `exec` reconciliation. Expect a visible warning,
+  no contaminated copy, and existing shared credentials unchanged.
+
+Use fake values for the Anthropic tokens. Upstream's error message tells a
+released `sk-ant-oat01-` value apart from a placeholder, and a real
+subscription token in a third-party client is subject to Anthropic's terms.
+
+Record tool versions with the results. In particular, Claude Code is closed
+source: its env-only setup-token behavior needs runtime verification, not just
+changelog evidence. Keep test credentials out of logs and review artifacts.
+
 ## Code Generation
 
 Generated files are checked in. If you change the option definitions or tool

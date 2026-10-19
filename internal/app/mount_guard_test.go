@@ -101,13 +101,15 @@ func TestCheckSensitiveMountsWarnsWhenAllowed(t *testing.T) {
 func TestSensitiveMountsAllowed(t *testing.T) {
 	for _, tc := range []struct {
 		flag    bool
+		source  model.OptionSource
 		env     string
 		set     bool
 		allowed bool
 	}{
-		{flag: true, allowed: true},
+		{flag: true, source: model.SourceCLI, allowed: true},
 		{env: "1", set: true, allowed: true},
 		{env: "0", set: true, allowed: false},
+		{source: model.SourceCLI, env: "1", set: true, allowed: false},
 		{allowed: false},
 	} {
 		if tc.set {
@@ -118,8 +120,8 @@ func TestSensitiveMountsAllowed(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		if got := sensitiveMountsAllowed(tc.flag); got != tc.allowed {
-			t.Errorf("sensitiveMountsAllowed(flag=%v, env=%q set=%v) = %v, want %v", tc.flag, tc.env, tc.set, got, tc.allowed)
+		if got := sensitiveMountsAllowed(tc.flag, tc.source); got != tc.allowed {
+			t.Errorf("sensitiveMountsAllowed(flag=%v, source=%v, env=%q set=%v) = %v, want %v", tc.flag, tc.source, tc.env, tc.set, got, tc.allowed)
 		}
 	}
 }

@@ -21,9 +21,13 @@ import (
 
 // sensitiveMountsAllowed reports whether the user opted in to mounting
 // sensitive host paths, through --allow-sensitive-mounts or
-// ENCLAVE_ALLOW_SENSITIVE_MOUNTS. There is deliberately no config key, so
-// neither global nor project config can grant it.
-func sensitiveMountsAllowed(flag bool) bool {
+// ENCLAVE_ALLOW_SENSITIVE_MOUNTS. An explicit --allow-sensitive-mounts=false
+// wins over the environment. There is deliberately no config key, so neither
+// global nor project config can grant it.
+func sensitiveMountsAllowed(flag bool, source model.OptionSource) bool {
+	if source == model.SourceCLI {
+		return flag
+	}
 	return flag || envflag.Truthy(os.LookupEnv(model.EnvAllowSensitiveMounts))
 }
 

@@ -47,20 +47,20 @@ func optionCLIFlags() map[string][]CLIFlag {
 			}),
 		},
 		"yolo": {
-			boolFlag("--yolo", "Enable YOLO mode", func(opts *model.Options, sources *model.OptionSources) {
-				val := true
+			boolFlag("--yolo", "Enable YOLO mode", func(opts *model.Options, sources *model.OptionSources, value bool) {
+				val := value
 				opts.YoloOverride = &val
 				sources.Yolo = model.SourceCLI
 			}),
-			boolFlag("--no-yolo", "Disable YOLO mode", func(opts *model.Options, sources *model.OptionSources) {
-				val := false
+			boolFlag("--no-yolo", "Disable YOLO mode", func(opts *model.Options, sources *model.OptionSources, value bool) {
+				val := !value
 				opts.YoloOverride = &val
 				sources.Yolo = model.SourceCLI
 			}),
 		},
 		"ephemeral": {
-			boolFlag("--ephemeral", "Ephemeral session (no auth or env stores)", func(opts *model.Options, sources *model.OptionSources) {
-				opts.Ephemeral = true
+			boolFlag("--ephemeral", "Ephemeral session (no auth or env stores)", func(opts *model.Options, sources *model.OptionSources, value bool) {
+				opts.Ephemeral = value
 				sources.Ephemeral = model.SourceCLI
 			}),
 		},
@@ -83,20 +83,20 @@ func optionCLIFlags() map[string][]CLIFlag {
 			}),
 		},
 		"reset_auth": {
-			boolFlag("--reset-auth", "Clear stored auth files and persisted API keys", func(opts *model.Options, sources *model.OptionSources) {
-				opts.ResetAuth = true
+			boolFlag("--reset-auth", "Clear stored auth files and persisted API keys", func(opts *model.Options, sources *model.OptionSources, value bool) {
+				opts.ResetAuth = value
 				sources.ResetAuth = model.SourceCLI
 			}),
 		},
 		"no_api_key": {
-			boolFlag("--no-api-key", "Disable API key injection", func(opts *model.Options, sources *model.OptionSources) {
-				opts.NoAPIKey = true
+			boolFlag("--no-api-key", "Disable API key injection", func(opts *model.Options, sources *model.OptionSources, value bool) {
+				opts.NoAPIKey = value
 				sources.NoAPIKey = model.SourceCLI
 			}),
 		},
 		"pass_api_key": {
-			boolFlag("--pass-api-key", "Allow API key injection in --ephemeral mode", func(opts *model.Options, sources *model.OptionSources) {
-				opts.PassAPIKey = true
+			boolFlag("--pass-api-key", "Allow API key injection in --ephemeral mode", func(opts *model.Options, sources *model.OptionSources, value bool) {
+				opts.PassAPIKey = value
 				sources.PassAPIKey = model.SourceCLI
 			}),
 		},
@@ -119,50 +119,50 @@ func optionCLIFlags() map[string][]CLIFlag {
 			}),
 		},
 		"allow_all_network": {
-			boolFlag("--allow-all-network", "Disable network restrictions", func(opts *model.Options, sources *model.OptionSources) {
-				opts.AllowAllNetwork = true
+			boolFlag("--allow-all-network", "Disable network restrictions", func(opts *model.Options, sources *model.OptionSources, value bool) {
+				opts.AllowAllNetwork = value
 				sources.AllowAllNetwork = model.SourceCLI
 			}),
 		},
 		"no_cache": {
-			boolFlag("--no-cache", "Disable package caches", func(opts *model.Options, sources *model.OptionSources) {
-				opts.NoCache = true
+			boolFlag("--no-cache", "Disable package caches", func(opts *model.Options, sources *model.OptionSources, value bool) {
+				opts.NoCache = value
 				sources.NoCache = model.SourceCLI
 			}),
 		},
 		"session_monitor": {
-			boolFlag("--session-monitor", "Run the agent under the managed tmux session (enables status snapshots)", func(opts *model.Options, sources *model.OptionSources) {
-				opts.SessionMonitor = true
+			boolFlag("--session-monitor", "Run the agent under the managed tmux session (enables status snapshots)", func(opts *model.Options, sources *model.OptionSources, value bool) {
+				opts.SessionMonitor = value
 				sources.SessionMonitor = model.SourceCLI
 			}),
 		},
 		"no_history": {
-			boolFlag("--no-history", "Disable shell history", func(opts *model.Options, sources *model.OptionSources) {
-				opts.NoHistory = true
+			boolFlag("--no-history", "Disable shell history", func(opts *model.Options, sources *model.OptionSources, value bool) {
+				opts.NoHistory = value
 				sources.NoHistory = model.SourceCLI
 			}),
 		},
 		"no_memory": {
-			boolFlag("--no-memory", "Disable per-project agent memory", func(opts *model.Options, sources *model.OptionSources) {
-				opts.NoMemory = true
+			boolFlag("--no-memory", "Disable per-project agent memory", func(opts *model.Options, sources *model.OptionSources, value bool) {
+				opts.NoMemory = value
 				sources.NoMemory = model.SourceCLI
 			}),
 		},
 		"force_rebuild": {
-			boolFlag("--rebuild", "Force image rebuild", func(opts *model.Options, sources *model.OptionSources) {
-				opts.ForceRebuild = true
+			boolFlag("--rebuild", "Force image rebuild", func(opts *model.Options, sources *model.OptionSources, value bool) {
+				opts.ForceRebuild = value
 				sources.ForceRebuild = model.SourceCLI
 			}),
 		},
 		"no_rebuild": {
-			boolFlag("--no-rebuild", "Use existing images and suppress all image builds", func(opts *model.Options, sources *model.OptionSources) {
-				opts.NoRebuild = true
+			boolFlag("--no-rebuild", "Use existing images and suppress all image builds", func(opts *model.Options, sources *model.OptionSources, value bool) {
+				opts.NoRebuild = value
 				sources.NoRebuild = model.SourceCLI
 			}),
 		},
 		"force_base_image": {
-			boolFlag("--force-base-image", "Bypass devcontainer base image compatibility checks", func(opts *model.Options, sources *model.OptionSources) {
-				opts.ForceBaseImage = true
+			boolFlag("--force-base-image", "Bypass devcontainer base image compatibility checks", func(opts *model.Options, sources *model.OptionSources, value bool) {
+				opts.ForceBaseImage = value
 				sources.ForceBaseImage = model.SourceCLI
 			}),
 		},
@@ -174,14 +174,14 @@ func optionCLIFlags() map[string][]CLIFlag {
 			}),
 		},
 		"use_remote_user": {
-			boolFlag("--use-remote-user", "Use devcontainer remoteUser", func(opts *model.Options, sources *model.OptionSources) {
-				opts.UseRemoteUser = true
+			boolFlag("--use-remote-user", "Use devcontainer remoteUser", func(opts *model.Options, sources *model.OptionSources, value bool) {
+				opts.UseRemoteUser = value
 				sources.UseRemoteUser = model.SourceCLI
 			}),
 		},
 		"slim": {
-			boolFlag("--slim", "Tools only, no features", func(opts *model.Options, sources *model.OptionSources) {
-				opts.Slim = true
+			boolFlag("--slim", "Tools only, no features", func(opts *model.Options, sources *model.OptionSources, value bool) {
+				opts.Slim = value
 				sources.Slim = model.SourceCLI
 			}),
 		},
@@ -226,8 +226,8 @@ func optionCLIFlags() map[string][]CLIFlag {
 			}),
 		},
 		"runtime_uid_remap": {
-			boolFlag("--runtime-uid-remap", "Run canonical-UID images after remapping agent to the host UID/GID", func(opts *model.Options, sources *model.OptionSources) {
-				opts.RuntimeUIDRemap = true
+			boolFlag("--runtime-uid-remap", "Run canonical-UID images after remapping agent to the host UID/GID", func(opts *model.Options, sources *model.OptionSources, value bool) {
+				opts.RuntimeUIDRemap = value
 				sources.RuntimeUIDRemap = model.SourceCLI
 			}),
 		},
@@ -271,14 +271,14 @@ func optionCLIFlags() map[string][]CLIFlag {
 			}),
 		},
 		"verbose": {
-			boolFlag("--verbose", "Enable verbose logging", func(opts *model.Options, sources *model.OptionSources) {
-				opts.Verbose = true
+			boolFlag("--verbose", "Enable verbose logging", func(opts *model.Options, sources *model.OptionSources, value bool) {
+				opts.Verbose = value
 				sources.Verbose = model.SourceCLI
 			}),
 		},
 		"allow_root": {
-			boolFlag("--allow-root", "Allow running enclave as root (unsafe)", func(opts *model.Options, sources *model.OptionSources) {
-				opts.AllowRoot = true
+			boolFlag("--allow-root", "Allow running enclave as root (unsafe)", func(opts *model.Options, sources *model.OptionSources, value bool) {
+				opts.AllowRoot = value
 				sources.AllowRoot = model.SourceCLI
 			}),
 		},
@@ -311,8 +311,8 @@ func optionCLIFlags() map[string][]CLIFlag {
 			}),
 		},
 		"allow_sensitive_mounts": {
-			boolFlag("--allow-sensitive-mounts", "Allow mounting the home directory, dotfiles, or per-user app data (unsafe)", func(opts *model.Options, sources *model.OptionSources) {
-				opts.AllowSensitiveMounts = true
+			boolFlag("--allow-sensitive-mounts", "Allow mounting the home directory, dotfiles, or per-user app data (unsafe)", func(opts *model.Options, sources *model.OptionSources, value bool) {
+				opts.AllowSensitiveMounts = value
 				sources.AllowSensitiveMounts = model.SourceCLI
 			}),
 		},
@@ -342,8 +342,8 @@ func optionCLIFlags() map[string][]CLIFlag {
 			}),
 		},
 		"playwright_mcp": {
-			boolFlag("--playwright-mcp", "Enable Playwright MCP server for browser automation", func(opts *model.Options, sources *model.OptionSources) {
-				opts.PlaywrightMCP = true
+			boolFlag("--playwright-mcp", "Enable Playwright MCP server for browser automation", func(opts *model.Options, sources *model.OptionSources, value bool) {
+				opts.PlaywrightMCP = value
 				sources.PlaywrightMCP = model.SourceCLI
 			}),
 		},

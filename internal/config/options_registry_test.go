@@ -42,6 +42,16 @@ func TestOptionSpecsCoverDefaults(t *testing.T) {
 	}
 }
 
+func TestOptionDefsDecideSessionEffect(t *testing.T) {
+	for _, def := range OptionDefs() {
+		switch def.AffectsSession {
+		case SessionAffected, SessionUnaffected:
+		default:
+			t.Errorf("option %q has no AffectsSession decision", def.Name)
+		}
+	}
+}
+
 func TestOptionSpecsHaveSourceFields(t *testing.T) {
 	sourceFields := optionSourceFieldNames()
 	for _, spec := range OptionSpecs() {

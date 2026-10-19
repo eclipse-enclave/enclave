@@ -48,6 +48,8 @@ type Result struct {
 	// ExtRequest is set for the extension-management subcommands (`tools`/
 	// `features` list/add/remove/update); nil otherwise.
 	ExtRequest *extinstall.Request
+	// NetworkPrintJSON selects the JSON envelope of `enclave network print`.
+	NetworkPrintJSON bool
 }
 
 func Parse(args []string, defaults model.Options, userCmds ...usercmd.Command) (Result, error) {
@@ -871,16 +873,28 @@ func featuresCommand(res *Result) *cobra.Command {
 		},
 	}
 	// runFeatures previews which features a run would enable; that depends on
-	// --slim and --features.
-	addOptionFlagsByName(cmd.Flags(), &res.Options, &res.Sources, "slim", "features")
-	addExtensionSubcommands(cmd, res, model.KindFeature, "slim", "features")
+	// --slim, --features, and the tool's tool_overrides.
+	addOptionFlagsByName(cmd.Flags(), &res.Options, &res.Sources, "slim", "features", "tool")
+	addExtensionSubcommands(cmd, res, model.KindFeature, "slim", "features", "tool")
+	setToolUsage(cmd, "Tool whose tool_overrides apply (default: the configured tool; never asks)")
 	return cmd
 }
 
 func toolsCommand(res *Result) *cobra.Command {
 	cmd := simpleCommandWithTool("tools", "List available tool profiles", res)
 	addExtensionSubcommands(cmd, res, model.KindTool, "tool")
+	setToolUsage(cmd, "Tool to mark as selected (default: the configured tool; never asks)")
 	return cmd
+}
+
+// setToolUsage replaces the run-oriented --tool help on listing commands,
+// which read the tool but never ask for one.
+func setToolUsage(cmd *cobra.Command, usage string) {
+	for _, c := range append([]*cobra.Command{cmd}, cmd.Commands()...) {
+		if flag := c.Flags().Lookup("tool"); flag != nil {
+			flag.Usage = usage
+		}
+	}
 }
 
 func versionCommand(res *Result) *cobra.Command {

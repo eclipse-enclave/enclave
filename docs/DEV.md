@@ -220,7 +220,9 @@ to `CreateProcess` unchanged. Two layers check it:
 
 1) Add fields in `model.Options` (and related embedded struct).
 2) Add defaults in `config.Defaults` if configurable.
-3) Add the option entry in `internal/config/options_def.go`.
+3) Add the option entry in `internal/config/options_def.go`, including the
+   required `AffectsSession` decision and, if the option changes the session
+   allowlist, `AffectsNetwork` (see the checklist below).
 4) Run code generation (`make generate`).
 5) Run tests (`go test ./...`).
 6) Update docs for user-visible flag behavior (`docs/cli-reference.md`,
@@ -253,7 +255,14 @@ Use this when adding a new option so you do not stop after `options_def.go`:
   add the key to `removedConfigFields` in `internal/config/config.go` so
   `readDefaults()` rejects it loudly instead of silently ignoring it.
 - Option registry:
-  add the definition in `internal/config/options_def.go`.
+  add the definition in `internal/config/options_def.go`, including the
+  required `AffectsSession` decision: `SessionAffected` if changing the value
+  makes a fresh session differ from a running one (image, features, mounts,
+  network, env, auth, backend), so it is recorded as session provenance in
+  `enclave ps --json`; `SessionUnaffected` for host-side, UX, or one-shot
+  options. Affected values must not carry secrets. Set `AffectsNetwork` when
+  the option changes the session allowlist, so `network status|print|diff`
+  accept its flags; a test fails when an unmarked option changes the preview.
 - Generated outputs:
   run `make generate` after changing `options_def.go`.
 - Guardrail tests:

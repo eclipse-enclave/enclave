@@ -367,3 +367,72 @@ enclave config --json            # Emit JSON output
 |------|-------------|
 | `--view <mode>` | Output view: `matrix` (default), `effective` (effective values only), `diff` (values overridden by higher precedence), or `source` (where each value comes from: CLI, tool override, project, global, default) |
 | `--json` | Emit JSON output |
+
+### JSON output (`schemaVersion: "1"`)
+
+`enclave config --json` emits a versioned envelope for scripts and tools. Every
+view carries the full envelope; `--view` only affects the legacy keys.
+
+| Field | Content |
+|-------|---------|
+| `schemaVersion`, `kind`, `view` | `"1"`, `"config"`, and the selected view |
+| `tool` | `{name, source}`; `name` is `null` when no tool is selected |
+| `project` | `{dir, realDir, hash, name}` of the current project, or `null` (with a `project_unavailable` warning) when it cannot be resolved |
+| `files` | `global` and `project` config files as `{path, status}`, status `present`, `missing`, or `unavailable` |
+| `options` | One entry per option (see below) |
+| `warnings` | Array of `{code, option, layer, path, message}`; `option`, `layer`, and `path` are omitted when not applicable |
+| `valid`, `error` | Whether the options pass the validation a run applies and the tool profile loads, and the first error |
+
+Each `options.<name>` entry has:
+
+- `kind`: `string`, `bool`, or `string_slice`.
+- `value`: the typed value a run with the same options uses, normalized and
+  validated (lowercased domains, conflict resolution, qemu coercion); only
+  normalized if validation fails. Lists are always arrays.
+  `features` is the sorted set a run enables (after `slim`, devcontainer mode,
+  `playwright_mcp`, and `+`/`-` directives, without unknown names), or `null`
+  with a `features_unavailable` warning when features cannot be listed (`valid`
+  can stay `true` then). `host_config_paths` and `yolo` are resolved against
+  the tool (`null` without a loadable tool); `yolo` adds `resolvedBy` (`cli`,
+  `config`, or `tool`). `backend` keeps the configured value, including `auto`.
+- `source`: the layer that last set the raw option: `default`, `global`,
+  `project`, `tool_override`, or `cli`.
+- `layers`: the raw value each of `global`, `project`, `tool_override`, and
+  `cli` sets, after project guardrails and before normalization; absent layers
+  do not set the option.
+- `directives` (`features`, `host_config_paths` only): the raw selection,
+  `null` when unset and `[]` for none.
+
+Warning codes: `invalid_config_json`, `config_path_is_directory`,
+`unsupported_scope`, `invalid_tool_override`, `invalid_value`,
+`suspicious_value`, `project_guardrail`, `project_subtree` (config loading;
+`layer` is `global`, `project`, or `tool_override:<tool>`), `unknown_feature`,
+`features_unavailable`, `tool_unresolved`, `tool_unavailable` (also makes
+`valid` false), `project_unavailable`, and `validation` (e.g. an ignored
+option).
+
+`valid: false` does not change the exit code (0). Validation runs the checks of
+`enclave run`, including the `qemu` backend restrictions, but treats `auto` as
+`docker` and skips the container engine, mounts, and image build.
+
+The earlier keys `effective`, `sources`, `paths`, and `status` are unchanged
+for compatibility; they hold display strings (lists as `"[a,b]"`).
+
+### Detecting session drift
+
+`enclave ps --json` records the same typed values in `options` for the options
+that shape a session (see the [`ps` reference](cli-reference.md#session)).
+To check whether a fresh session would differ from a running one:
+
+1. Run `enclave config --json` from the session's `projectDir` with its
+   `--tool` and the same flags.
+2. Compare each key of the session's `options` with `options.<name>.value`.
+   A key missing on either side means unknown, not changed.
+
+Backend-dependent validated values may differ, since `config --json` validates
+`auto` as `docker` while a run validates the detected engine.
+
+Sessions started with `enclave devcontainer run|shell` cannot be compared.
+Devcontainer mode has no flag, so `config --json` resolves `devcontainer` and
+`features` without it; treat these sessions as unknown. A `devcontainer` key
+set in config is resolved by both sides.

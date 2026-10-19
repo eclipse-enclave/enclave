@@ -155,7 +155,7 @@ func TestSpecNetworkDomainsUnionsMixins(t *testing.T) {
 			},
 		},
 	}
-	allowed, denied := r.specNetworkDomains()
+	allowed, denied := r.sessionNetworkInputs().SpecDomains()
 	if !containsString(allowed, "tool.example.org") || !containsString(allowed, "svc.example.org") {
 		t.Fatalf("expected union of tool+mixin allowed domains, got %v", allowed)
 	}

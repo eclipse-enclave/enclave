@@ -251,7 +251,7 @@ func RenderDNSMasqConfig(domains []string, denied []string, resolver string) str
 }
 
 func RenderDnsmasqConfigForTool(ep EffectivePolicy, tool string, resolver string) (string, error) {
-	if strings.EqualFold(strings.TrimSpace(ep.Mode), model.NetworkModeUnrestricted) {
+	if ep.Mode == model.NetworkModeUnrestricted {
 		return "", fmt.Errorf("live gateway apply does not support unrestricted mode")
 	}
 	domains, denied, err := EffectiveRenderDomainsForTool(ep, tool)
@@ -262,7 +262,7 @@ func RenderDnsmasqConfigForTool(ep EffectivePolicy, tool string, resolver string
 }
 
 func RenderDnsmasqConfigPreviewForTool(ep EffectivePolicy, tool string, resolver string) (string, error) {
-	if strings.EqualFold(strings.TrimSpace(ep.Mode), model.NetworkModeUnrestricted) {
+	if ep.Mode == model.NetworkModeUnrestricted {
 		return "# Mode: unrestricted\n", nil
 	}
 	return RenderDnsmasqConfigForTool(ep, tool, resolver)

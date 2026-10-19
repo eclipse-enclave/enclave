@@ -240,8 +240,8 @@ network:
 		ToolsDir:      toolsDir,
 		AllowlistsDir: allowlistsDir,
 	}, home)
-	// No SpecAllowedDomains supplied on the input: the resolver must load the
-	// tool's spec.yaml network.allowedDomains itself, matching session startup.
+	// No Session supplied on the input: the resolver must load the tool's
+	// spec.yaml network.allowedDomains itself, matching session startup.
 	result, err := resolver.Resolve(ResolveInput{Tool: "speccy"})
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
@@ -279,7 +279,7 @@ network:
 		ToolsDir:      toolsDir,
 		AllowlistsDir: allowlistsDir,
 	}, home)
-	// No Spec*Domains supplied on the input: the resolver must load the tool's
+	// No Session supplied on the input: the resolver must load the tool's
 	// spec.yaml network.deniedDomains itself, matching session startup.
 	result, err := resolver.Resolve(ResolveInput{Tool: "speccy"})
 	if err != nil {

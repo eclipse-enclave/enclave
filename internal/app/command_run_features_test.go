@@ -9,77 +9,62 @@ package app
 
 import (
 	"path/filepath"
-	"reflect"
 	"sort"
 	"testing"
 
+	"enclave/internal/config"
 	"enclave/internal/model"
 )
 
-func TestResolveEnabledFeaturesDefaults(t *testing.T) {
+func TestExplicitEmptyFeaturesSurviveValidation(t *testing.T) {
 	paths := testPathsWithFeatures(t)
-
-	got := resolveEnabledFeatures(paths, model.BuildOptions{})
-	want := []string{"github-cli", "node-dev"}
-	if names := extensionNames(got); !reflect.DeepEqual(names, want) {
-		t.Fatalf("unexpected default-enabled features: got %v want %v", names, want)
+	base := model.Options{
+		RunOptions:   model.RunOptions{Tool: "claude"},
+		BuildOptions: model.BuildOptions{ImageName: "test"},
 	}
-}
 
-func TestResolveEnabledFeaturesExplicitEmpty(t *testing.T) {
-	paths := testPathsWithFeatures(t)
+	cli := base
+	cli.Features = []string{}
+	cliSources := model.DefaultOptionSources()
+	cliSources.Features = model.SourceCLI
 
-	got := resolveEnabledFeatures(paths, model.BuildOptions{Features: []string{}})
-	if len(got) != 0 {
-		t.Fatalf("expected no enabled features for explicit empty selection, got %v", extensionNames(got))
+	fromConfig, _, _ := config.ResolveOptionsForTool(base, model.OptionSources{}, config.Defaults{Features: []string{}}, config.Defaults{}, "")
+
+	cases := []struct {
+		name    string
+		opts    model.Options
+		sources model.OptionSources
+	}{
+		{name: "cli --features none", opts: cli, sources: cliSources},
+		{name: "config features []", opts: fromConfig, sources: fromConfig.Sources},
 	}
-}
-
-func TestResolveEnabledFeaturesSlim(t *testing.T) {
-	paths := testPathsWithFeatures(t)
-
-	got := resolveEnabledFeatures(paths, model.BuildOptions{Slim: true})
-	if len(got) != 0 {
-		t.Fatalf("expected no enabled features for --slim, got %v", extensionNames(got))
-	}
-}
-
-func TestResolveEnabledFeaturesDevcontainerDefault(t *testing.T) {
-	paths := testPathsWithFeatures(t)
-
-	got := resolveEnabledFeatures(paths, model.BuildOptions{Devcontainer: true})
-	if len(got) != 0 {
-		t.Fatalf("expected no enabled features for devcontainer default, got %v", extensionNames(got))
-	}
-}
-
-func TestResolveEnabledFeaturesExplicitSelection(t *testing.T) {
-	paths := testPathsWithFeatures(t)
-
-	got := resolveEnabledFeatures(paths, model.BuildOptions{Features: []string{"github-cli"}})
-	want := []string{"github-cli"}
-	if names := extensionNames(got); !reflect.DeepEqual(names, want) {
-		t.Fatalf("unexpected explicit feature result: got %v want %v", names, want)
-	}
-}
-
-func TestResolveEnabledFeaturesSelectionDefault(t *testing.T) {
-	paths := testPathsWithFeatures(t)
-
-	got := resolveEnabledFeatures(paths, model.BuildOptions{Features: []string{model.SelectionDefault}})
-	want := []string{"github-cli", "node-dev"}
-	if names := extensionNames(got); !reflect.DeepEqual(names, want) {
-		t.Fatalf("unexpected default selector feature result: got %v want %v", names, want)
-	}
-}
-
-func TestResolveEnabledFeaturesSelectionAll(t *testing.T) {
-	paths := testPathsWithFeatures(t)
-
-	got := resolveEnabledFeatures(paths, model.BuildOptions{Features: []string{model.FeatureSelectionAll}})
-	want := []string{"github-cli", "node-dev", "shell-extras"}
-	if names := extensionNames(got); !reflect.DeepEqual(names, want) {
-		t.Fatalf("unexpected all selector feature result: got %v want %v", names, want)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, _, _, err := ValidateOptions(tc.opts, tc.sources, ValidationContext{Action: "run", Paths: paths})
+			if err != nil {
+				t.Fatalf("ValidateOptions: %v", err)
+			}
+			if got.Features == nil || len(got.Features) != 0 {
+				t.Fatalf("Features = %#v, want explicit empty", got.Features)
+			}
+			features, err := resolveFeatureSelection(paths, got.BuildOptions)
+			if err != nil {
+				t.Fatalf("resolveFeatureSelection: %v", err)
+			}
+			if len(features.enabled) != 0 {
+				t.Fatalf("enabled features = %v, want none", extensionNames(features.enabled))
+			}
+			selection, err := resolveRuntimeImageSelection(paths, got.BuildOptions, got.Tool)
+			if err != nil {
+				t.Fatalf("resolveRuntimeImageSelection: %v", err)
+			}
+			if selection.Features == nil || len(selection.Features) != 0 {
+				t.Fatalf("selection.Features = %#v, want explicit empty", selection.Features)
+			}
+			if arg := resolveFeaturesArg(got.BuildOptions); arg != "" {
+				t.Fatalf("resolveFeaturesArg = %q, want empty", arg)
+			}
+		})
 	}
 }
 

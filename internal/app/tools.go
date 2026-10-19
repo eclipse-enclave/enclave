@@ -74,7 +74,7 @@ func runTools(ctx *AppContext, req *extinstall.Request, opts model.Options, _ mo
 	if req != nil && req.JSON {
 		alwaysEnabled := func(string) bool { return true }
 		entries := extensionListJSONEntries(toolExts, inventory, alwaysEnabled)
-		if err := renderExtensionListJSON(os.Stdout, model.KindTool, entries); err != nil {
+		if err := renderExtensionListJSON(os.Stdout, model.KindTool, nil, entries); err != nil {
 			logx.Errorf("%v", err)
 			return 1
 		}

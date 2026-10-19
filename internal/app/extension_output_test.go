@@ -36,7 +36,7 @@ func TestRenderExtensionListJSON(t *testing.T) {
 	)
 
 	var out bytes.Buffer
-	if err := renderExtensionListJSON(&out, model.KindFeature, entries); err != nil {
+	if err := renderExtensionListJSON(&out, model.KindFeature, nil, entries); err != nil {
 		t.Fatalf("renderExtensionListJSON: %v", err)
 	}
 
@@ -78,7 +78,7 @@ func TestRenderExtensionListJSONOmitsOriginWhenUnmanaged(t *testing.T) {
 		map[string]extinstall.Managed{"builtin": {Name: "builtin", Source: "builtin"}},
 		func(string) bool { return true },
 	)
-	if err := renderExtensionListJSON(&out, model.KindTool, entries); err != nil {
+	if err := renderExtensionListJSON(&out, model.KindTool, nil, entries); err != nil {
 		t.Fatalf("renderExtensionListJSON: %v", err)
 	}
 	if bytes.Contains(out.Bytes(), []byte(`"origin"`)) {
@@ -95,7 +95,7 @@ func TestRenderExtensionListJSONReportsOriginError(t *testing.T) {
 	)
 
 	var out bytes.Buffer
-	if err := renderExtensionListJSON(&out, model.KindFeature, entries); err != nil {
+	if err := renderExtensionListJSON(&out, model.KindFeature, nil, entries); err != nil {
 		t.Fatalf("renderExtensionListJSON: %v", err)
 	}
 
@@ -141,7 +141,7 @@ func TestRenderExtensionListJSONReportsHostCommands(t *testing.T) {
 	)
 
 	var out bytes.Buffer
-	if err := renderExtensionListJSON(&out, model.KindFeature, entries); err != nil {
+	if err := renderExtensionListJSON(&out, model.KindFeature, nil, entries); err != nil {
 		t.Fatalf("renderExtensionListJSON: %v", err)
 	}
 	var decoded struct {
@@ -166,6 +166,76 @@ func TestRenderExtensionListJSONReportsHostCommands(t *testing.T) {
 	}
 	if decoded.Extensions[1].HostCommands != nil {
 		t.Errorf("hostCommands = %v, want absent for an extension contributing none", decoded.Extensions[1].HostCommands)
+	}
+}
+
+func TestRenderExtensionListJSONReportsFeatureMetadata(t *testing.T) {
+	feature := model.Extension{
+		Name:           "browser",
+		NeedsRoot:      true,
+		Ports:          []model.PortConfig{{Container: 6080, Publish: true, HostAllocation: model.HostAllocationAuto, Label: "noVNC", OpenURL: "http://localhost:{port}/"}, {Container: 9222}},
+		AllowedDomains: []string{"*.CDN.example.com", "api.example.com:443", "cdn.example.com"},
+		Secrets: map[string]model.SecretConfig{"token": {Release: &model.SecretReleaseConfig{
+			HTTP: &model.HTTPSecretReleaseConfig{Hosts: []string{"api.example.com"}},
+		}}},
+	}
+	entries := featureListJSONEntries([]model.Extension{feature}, nil, func(string) bool { return false })
+	selection := &extensionListSelection{Source: "default"}
+
+	var out bytes.Buffer
+	if err := renderExtensionListJSON(&out, model.KindFeature, selection, entries); err != nil {
+		t.Fatalf("renderExtensionListJSON: %v", err)
+	}
+	var decoded struct {
+		Selection  map[string]any   `json:"selection"`
+		Extensions []map[string]any `json:"extensions"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &decoded); err != nil {
+		t.Fatalf("unmarshal: %v\n%s", err, out.String())
+	}
+	wantSelection := map[string]any{"directives": nil, "source": "default", "tool": nil}
+	if !reflect.DeepEqual(decoded.Selection, wantSelection) {
+		t.Errorf("selection = %#v, want %#v", decoded.Selection, wantSelection)
+	}
+	got := decoded.Extensions[0]
+	want := map[string]any{
+		"defaultEnabled": false,
+		"needsRoot":      true,
+		"ports": []any{
+			map[string]any{"container": float64(6080), "publish": true, "hostAllocation": "auto", "label": "noVNC", "openUrl": "http://localhost:{port}/"},
+			map[string]any{"container": float64(9222), "publish": false, "hostAllocation": "fixed"},
+		},
+		"allowedDomains": []any{"api.example.com", "cdn.example.com"},
+		"releaseHosts":   []any{"api.example.com"},
+	}
+	for key, value := range want {
+		if !reflect.DeepEqual(got[key], value) {
+			t.Errorf("%s = %#v, want %#v", key, got[key], value)
+		}
+	}
+	if _, ok := got["deniedDomains"]; ok {
+		t.Errorf("deniedDomains = %#v, want absent when the spec declares none", got["deniedDomains"])
+	}
+}
+
+func TestRenderExtensionListJSONToolEntriesOmitFeatureFields(t *testing.T) {
+	tool := model.Extension{Name: "claude", AllowedDomains: []string{"api.anthropic.com"}, Ports: []model.PortConfig{{Container: 3000}}}
+	entries := extensionListJSONEntries([]model.Extension{tool}, map[string]extinstall.Managed{"claude": {Source: "builtin"}}, func(string) bool { return true })
+
+	var out bytes.Buffer
+	if err := renderExtensionListJSON(&out, model.KindTool, nil, entries); err != nil {
+		t.Fatalf("renderExtensionListJSON: %v", err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(out.Bytes(), &decoded); err != nil {
+		t.Fatalf("unmarshal: %v\n%s", err, out.String())
+	}
+	if _, ok := decoded["selection"]; ok {
+		t.Error("tool listing carries a selection")
+	}
+	want := map[string]any{"name": "claude", "source": "builtin", "enabled": true, "managed": false}
+	if got := decoded["extensions"].([]any)[0]; !reflect.DeepEqual(got, want) {
+		t.Errorf("tool entry = %#v, want %#v", got, want)
 	}
 }
 

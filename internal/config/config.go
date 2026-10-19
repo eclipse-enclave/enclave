@@ -63,7 +63,7 @@ type Defaults struct {
 	PlaywrightMCP    *bool               `json:"playwright_mcp"`
 }
 
-func LoadDefaults(projectDir string) (global Defaults, project Defaults, warnings []string, err error) {
+func LoadDefaults(projectDir string) (global Defaults, project Defaults, warnings []Warning, err error) {
 	globalPath, err := GlobalConfigPath()
 	if err != nil {
 		return Defaults{}, Defaults{}, nil, err
@@ -73,7 +73,7 @@ func LoadDefaults(projectDir string) (global Defaults, project Defaults, warning
 	if err != nil {
 		return Defaults{}, Defaults{}, nil, err
 	}
-	warnings = append(warnings, globalWarns...)
+	warnings = append(warnings, withFileLayer(globalWarns, warningLayerGlobal)...)
 
 	home, err := ResolveHostHome()
 	if err != nil {
@@ -89,8 +89,8 @@ func LoadDefaults(projectDir string) (global Defaults, project Defaults, warning
 	if err != nil {
 		return Defaults{}, Defaults{}, nil, err
 	}
-	warnings = append(warnings, projectWarns...)
-	warnings = append(warnings, applyProjectOverrideGuardrailsAgainst(projectPath, proj.RealDir, globalDefaults, &projectDefaults)...)
+	warnings = append(warnings, withFileLayer(projectWarns, warningLayerProject)...)
+	warnings = append(warnings, withFileLayer(applyProjectOverrideGuardrailsAgainst(projectPath, proj.RealDir, globalDefaults, &projectDefaults), warningLayerProject)...)
 
 	return globalDefaults, projectDefaults, warnings, nil
 }
@@ -163,7 +163,7 @@ func canOverride(current model.OptionSource, incoming model.OptionSource) bool {
 	}
 }
 
-func readDefaults(path string) (Defaults, []string, error) {
+func readDefaults(path string) (Defaults, []Warning, error) {
 	if path == "" {
 		return Defaults{}, nil, nil
 	}
@@ -175,7 +175,7 @@ func readDefaults(path string) (Defaults, []string, error) {
 		return Defaults{}, nil, err
 	}
 	if info.IsDir() {
-		return Defaults{}, []string{fmt.Sprintf("Config path is a directory: %s", path)}, nil
+		return Defaults{}, []Warning{newWarning(WarningConfigPathIsDirectory, "", "", path, "Config path is a directory: %s", path)}, nil
 	}
 	// #nosec G304 -- path is an explicit config file path resolved by application config logic.
 	data, err := os.ReadFile(path)
@@ -187,7 +187,7 @@ func readDefaults(path string) (Defaults, []string, error) {
 	}
 	var defaults Defaults
 	if err := json.Unmarshal(data, &defaults); err != nil {
-		return Defaults{}, []string{fmt.Sprintf("Invalid config JSON at %s: %v", path, err)}, nil
+		return Defaults{}, []Warning{newWarning(WarningInvalidConfigJSON, "", "", path, "Invalid config JSON at %s: %v", path, err)}, nil
 	}
 	var doc map[string]json.RawMessage
 	if err := json.Unmarshal(data, &doc); err != nil {
@@ -252,12 +252,12 @@ func rejectRemovedConfigFields(path string, doc map[string]json.RawMessage) erro
 // tool_overrides[*].PassEnv) that aren't valid environment variable names.
 // Config-loaded values bypass the CLI's isValidEnvKey check, so this runs for
 // both global and project configs.
-func validatePassEnvNames(path string, defaults *Defaults) []string {
+func validatePassEnvNames(path string, defaults *Defaults) []Warning {
 	if defaults == nil {
 		return nil
 	}
 
-	warnings := make([]string, 0)
+	warnings := make([]Warning, 0)
 	defaults.PassEnv, warnings = filterPassEnv(path, "", defaults.PassEnv, warnings)
 
 	if len(defaults.ToolOverrides) == 0 {
@@ -284,7 +284,7 @@ func validatePassEnvNames(path string, defaults *Defaults) []string {
 	return warnings
 }
 
-func filterPassEnv(path string, toolName string, values []string, warnings []string) ([]string, []string) {
+func filterPassEnv(path string, toolName string, values []string, warnings []Warning) ([]string, []Warning) {
 	if len(values) == 0 {
 		return values, warnings
 	}
@@ -294,10 +294,14 @@ func filterPassEnv(path string, toolName string, values []string, warnings []str
 			kept = append(kept, raw)
 			continue
 		}
+		entry := raw
+		if name, _, hasValue := strings.Cut(raw, "="); hasValue {
+			entry = name + "=…"
+		}
 		if toolName == "" {
-			warnings = append(warnings, fmt.Sprintf("Ignoring pass_env entry %q in %s: not a valid environment variable name", raw, path))
+			warnings = append(warnings, newWarning(WarningInvalidValue, "pass_env", "", path, "Ignoring pass_env entry %q in %s: not a valid environment variable name", entry, path))
 		} else {
-			warnings = append(warnings, fmt.Sprintf("Ignoring tool_overrides.%s.pass_env entry %q in %s: not a valid environment variable name", toolName, raw, path))
+			warnings = append(warnings, newWarning(WarningInvalidValue, "pass_env", toolName, path, "Ignoring tool_overrides.%s.pass_env entry %q in %s: not a valid environment variable name", toolName, entry, path))
 		}
 	}
 	if len(kept) == 0 {
@@ -309,14 +313,14 @@ func filterPassEnv(path string, toolName string, values []string, warnings []str
 // validateSessionTint clears session_tint values (top level and per tool
 // override) that aren't #rrggbb colors, so the warning names the config file
 // that sets them and appears before a session takes over the screen.
-func validateSessionTint(path string, defaults *Defaults) []string {
+func validateSessionTint(path string, defaults *Defaults) []Warning {
 	if defaults == nil {
 		return nil
 	}
 
-	warnings := make([]string, 0)
+	warnings := make([]Warning, 0)
 	if tint := strings.TrimSpace(defaults.SessionTint); tint != "" && !isValidTintColor(tint) {
-		warnings = append(warnings, fmt.Sprintf("Ignoring session_tint %q in %s: expected an #rrggbb color", tint, path))
+		warnings = append(warnings, newWarning(WarningInvalidValue, "session_tint", "", path, "Ignoring session_tint %q in %s: expected an #rrggbb color", tint, path))
 		defaults.SessionTint = ""
 	}
 
@@ -336,7 +340,7 @@ func validateSessionTint(path string, defaults *Defaults) []string {
 		if tint == "" || isValidTintColor(tint) {
 			continue
 		}
-		warnings = append(warnings, fmt.Sprintf("Ignoring tool_overrides.%s.session_tint %q in %s: expected an #rrggbb color", name, tint, path))
+		warnings = append(warnings, newWarning(WarningInvalidValue, "session_tint", name, path, "Ignoring tool_overrides.%s.session_tint %q in %s: expected an #rrggbb color", name, tint, path))
 		override.SessionTint = ""
 		defaults.ToolOverrides[name] = override
 	}
@@ -344,19 +348,19 @@ func validateSessionTint(path string, defaults *Defaults) []string {
 	return warnings
 }
 
-func validateTopLevelDefaults(path string, doc map[string]json.RawMessage, defaults *Defaults) []string {
+func validateTopLevelDefaults(path string, doc map[string]json.RawMessage, defaults *Defaults) []Warning {
 	if defaults == nil {
 		return nil
 	}
-	var warnings []string
+	var warnings []Warning
 	if _, ok := doc["host_config_paths"]; ok {
 		defaults.HostConfigPaths = nil
-		warnings = append(warnings, fmt.Sprintf("Ignoring %q in %s: this option is only supported under tool_overrides.<tool>", "host_config_paths", path))
+		warnings = append(warnings, newWarning(WarningUnsupportedScope, "host_config_paths", "", path, "Ignoring %q in %s: this option is only supported under tool_overrides.<tool>", "host_config_paths", path))
 	}
 	return warnings
 }
 
-func validateToolOverrides(path string, doc map[string]json.RawMessage, defaults *Defaults) []string {
+func validateToolOverrides(path string, doc map[string]json.RawMessage, defaults *Defaults) []Warning {
 	if defaults == nil || len(defaults.ToolOverrides) == 0 {
 		return nil
 	}
@@ -369,7 +373,7 @@ func validateToolOverrides(path string, doc map[string]json.RawMessage, defaults
 	var entries map[string]json.RawMessage
 	if err := json.Unmarshal(rawOverrides, &entries); err != nil {
 		defaults.ToolOverrides = nil
-		return []string{fmt.Sprintf("Ignoring tool_overrides in %s: expected object: %v", path, err)}
+		return []Warning{newWarning(WarningInvalidToolOverride, "", "", path, "Ignoring tool_overrides in %s: expected object: %v", path, err)}
 	}
 
 	valid := make(map[string]Defaults, len(defaults.ToolOverrides))
@@ -379,19 +383,19 @@ func validateToolOverrides(path string, doc map[string]json.RawMessage, defaults
 	}
 	sort.Strings(toolNames)
 
-	warnings := make([]string, 0)
+	warnings := make([]Warning, 0)
 	for _, toolName := range toolNames {
 		var entry map[string]json.RawMessage
 		if err := json.Unmarshal(entries[toolName], &entry); err != nil {
-			warnings = append(warnings, fmt.Sprintf("Ignoring tool_overrides.%s in %s: override must be an object: %v", toolName, path, err))
+			warnings = append(warnings, newWarning(WarningInvalidToolOverride, "", toolName, path, "Ignoring tool_overrides.%s in %s: override must be an object: %v", toolName, path, err))
 			continue
 		}
 		if _, hasTool := entry["tool"]; hasTool {
-			warnings = append(warnings, fmt.Sprintf("Ignoring tool_overrides.%s in %s: field %q is not allowed in per-tool overrides", toolName, path, "tool"))
+			warnings = append(warnings, newWarning(WarningInvalidToolOverride, "", toolName, path, "Ignoring tool_overrides.%s in %s: field %q is not allowed in per-tool overrides", toolName, path, "tool"))
 			continue
 		}
 		if _, hasNested := entry["tool_overrides"]; hasNested {
-			warnings = append(warnings, fmt.Sprintf("Ignoring tool_overrides.%s in %s: field %q is not allowed in per-tool overrides", toolName, path, "tool_overrides"))
+			warnings = append(warnings, newWarning(WarningInvalidToolOverride, "", toolName, path, "Ignoring tool_overrides.%s in %s: field %q is not allowed in per-tool overrides", toolName, path, "tool_overrides"))
 			continue
 		}
 		if parsed, ok := defaults.ToolOverrides[toolName]; ok {
@@ -408,12 +412,12 @@ func validateToolOverrides(path string, doc map[string]json.RawMessage, defaults
 	return warnings
 }
 
-func validateToolOverrideHostConfigPaths(path string, toolName string, values []string) []string {
+func validateToolOverrideHostConfigPaths(path string, toolName string, values []string) []Warning {
 	if len(values) == 0 {
 		return nil
 	}
 
-	warnings := make([]string, 0)
+	warnings := make([]Warning, 0)
 	for _, raw := range values {
 		value := strings.TrimSpace(raw)
 		if value == "" {
@@ -426,17 +430,17 @@ func validateToolOverrideHostConfigPaths(path string, toolName string, values []
 			continue
 		}
 		if filepath.IsAbs(value) || strings.HasPrefix(filepathToSlash(value), "/") {
-			warnings = append(warnings, fmt.Sprintf("Suspicious tool_overrides.%s.host_config_paths entry %q in %s: passthrough paths are relative to the tool config dir, not absolute host paths", toolName, raw, path))
+			warnings = append(warnings, newWarning(WarningSuspiciousValue, "host_config_paths", toolName, path, "Suspicious tool_overrides.%s.host_config_paths entry %q in %s: passthrough paths are relative to the tool config dir, not absolute host paths", toolName, raw, path))
 		}
 	}
 	return warnings
 }
 
-func applyProjectOverrideGuardrails(path string, projectDir string, defaults *Defaults) []string {
+func applyProjectOverrideGuardrails(path string, projectDir string, defaults *Defaults) []Warning {
 	return applyProjectOverrideGuardrailsAgainst(path, projectDir, Defaults{}, defaults)
 }
 
-func applyProjectOverrideGuardrailsAgainst(path string, projectDir string, global Defaults, defaults *Defaults) []string {
+func applyProjectOverrideGuardrailsAgainst(path string, projectDir string, global Defaults, defaults *Defaults) []Warning {
 	if defaults == nil {
 		return nil
 	}
@@ -445,7 +449,7 @@ func applyProjectOverrideGuardrailsAgainst(path string, projectDir string, globa
 	warnings := applyProjectDefaultsGuardrails(path, "", projectRoot, projectDir, global.WorktreeMetadata, defaults, nil)
 
 	if defaults.Tool != "" {
-		warnings = append(warnings, fmt.Sprintf("Ignoring tool=%q in %s: project configs cannot change the active tool; pass --tool or set it in global config instead", defaults.Tool, path))
+		warnings = append(warnings, newWarning(WarningProjectGuardrail, "tool", "", path, "Ignoring tool=%q in %s: project configs cannot change the active tool; pass --tool or set it in global config instead", defaults.Tool, path))
 		defaults.Tool = ""
 	}
 
@@ -461,7 +465,6 @@ func applyProjectOverrideGuardrailsAgainst(path string, projectDir string, globa
 
 	for _, name := range toolNames {
 		override := defaults.ToolOverrides[name]
-		prefix := "tool_overrides." + name
 		inheritedWorktreeMetadata := global.WorktreeMetadata
 		if defaults.WorktreeMetadata != "" {
 			inheritedWorktreeMetadata = defaults.WorktreeMetadata
@@ -469,79 +472,83 @@ func applyProjectOverrideGuardrailsAgainst(path string, projectDir string, globa
 		if globalOverride, ok := global.ToolOverrides[name]; ok && globalOverride.WorktreeMetadata != "" {
 			inheritedWorktreeMetadata = globalOverride.WorktreeMetadata
 		}
-		warnings = applyProjectDefaultsGuardrails(path, prefix, projectRoot, projectDir, inheritedWorktreeMetadata, &override, warnings)
+		warnings = applyProjectDefaultsGuardrails(path, name, projectRoot, projectDir, inheritedWorktreeMetadata, &override, warnings)
 		defaults.ToolOverrides[name] = override
 	}
 
 	return warnings
 }
 
-func applyProjectDefaultsGuardrails(path string, prefix string, projectRoot string, projectDir string, inheritedWorktreeMetadata string, defaults *Defaults, warnings []string) []string {
+func applyProjectDefaultsGuardrails(path string, toolName string, projectRoot string, projectDir string, inheritedWorktreeMetadata string, defaults *Defaults, warnings []Warning) []Warning {
+	guardrail := func(option string, format string, args ...any) {
+		warnings = append(warnings, newWarning(WarningProjectGuardrail, option, toolName, path, format, args...))
+	}
+
 	if defaults.AllowAllNetwork != nil && *defaults.AllowAllNetwork {
-		field := projectGuardrailField(prefix, "allow_all_network")
+		field := projectGuardrailField(toolName, "allow_all_network")
 		valueLabel := field + "=true"
-		if prefix == "" {
+		if toolName == "" {
 			valueLabel = fmt.Sprintf("%q=true", field)
 		}
 		defaults.AllowAllNetwork = nil
-		warnings = append(warnings, fmt.Sprintf("Ignoring %s in %s: project configs cannot enable unrestricted network; set it in global config or CLI instead", valueLabel, path))
+		guardrail("allow_all_network", "Ignoring %s in %s: project configs cannot enable unrestricted network; set it in global config or CLI instead", valueLabel, path)
 	}
 
 	if len(defaults.AllowDomains) > 0 {
-		field := projectGuardrailField(prefix, "allow_domains")
-		warnings = append(warnings, fmt.Sprintf("Ignoring %s=%v in %s: project configs cannot widen the network allowlist; set it in global config or pass --allow-domain instead", field, defaults.AllowDomains, path))
+		field := projectGuardrailField(toolName, "allow_domains")
+		guardrail("allow_domains", "Ignoring %s=%v in %s: project configs cannot widen the network allowlist; set it in global config or pass --allow-domain instead", field, defaults.AllowDomains, path)
 		defaults.AllowDomains = nil
 	}
 
-	defaults.AddDirs, warnings = filterProjectAddDirs(defaults.AddDirs, projectGuardrailField(prefix, "add_dirs"), projectRoot, projectDir, path, warnings)
-	defaults.AddReadonlyDirs, warnings = filterProjectAddDirs(defaults.AddReadonlyDirs, projectGuardrailField(prefix, "add_readonly_dirs"), projectRoot, projectDir, path, warnings)
+	defaults.AddDirs, warnings = filterProjectAddDirs(defaults.AddDirs, "add_dirs", toolName, projectRoot, projectDir, path, warnings)
+	defaults.AddReadonlyDirs, warnings = filterProjectAddDirs(defaults.AddReadonlyDirs, "add_readonly_dirs", toolName, projectRoot, projectDir, path, warnings)
 
 	if len(defaults.PassEnv) > 0 {
-		field := projectGuardrailField(prefix, "pass_env")
+		field := projectGuardrailField(toolName, "pass_env")
 		defaults.PassEnv = nil
-		warnings = append(warnings, fmt.Sprintf("Ignoring %s in %s: project configs cannot forward host environment variables; use global config or CLI instead", field, path))
+		guardrail("pass_env", "Ignoring %s in %s: project configs cannot forward host environment variables; use global config or CLI instead", field, path)
 	}
 
 	if defaults.BaseImage != "" {
-		field := projectGuardrailField(prefix, "base_image")
-		warnings = append(warnings, fmt.Sprintf("Ignoring %s=%q in %s: project configs cannot override the base image; set it in global config or CLI instead", field, defaults.BaseImage, path))
+		field := projectGuardrailField(toolName, "base_image")
+		guardrail("base_image", "Ignoring %s=%q in %s: project configs cannot override the base image; set it in global config or CLI instead", field, defaults.BaseImage, path)
 		defaults.BaseImage = ""
 	}
 
 	if len(defaults.BridgePorts) > 0 {
-		field := projectGuardrailField(prefix, "bridge_ports")
-		warnings = append(warnings, fmt.Sprintf("Ignoring %s=%v in %s: project configs cannot bridge container ports to the host; set it in global config or CLI instead", field, defaults.BridgePorts, path))
+		field := projectGuardrailField(toolName, "bridge_ports")
+		guardrail("bridge_ports", "Ignoring %s=%v in %s: project configs cannot bridge container ports to the host; set it in global config or CLI instead", field, defaults.BridgePorts, path)
 		defaults.BridgePorts = nil
 	}
 
 	if defaults.Yolo != nil {
-		field := projectGuardrailField(prefix, "yolo")
-		warnings = append(warnings, fmt.Sprintf("Ignoring %s=%v in %s: project configs cannot toggle yolo mode; pass --yolo/--no-yolo or set it in global config instead", field, *defaults.Yolo, path))
+		field := projectGuardrailField(toolName, "yolo")
+		guardrail("yolo", "Ignoring %s=%v in %s: project configs cannot toggle yolo mode; pass --yolo/--no-yolo or set it in global config instead", field, *defaults.Yolo, path)
 		defaults.Yolo = nil
 	}
 
 	if defaults.HostConfig != "" {
-		field := projectGuardrailField(prefix, "host_config")
-		warnings = append(warnings, fmt.Sprintf("Ignoring %s=%q in %s: project configs cannot widen host config passthrough; set it in global config or CLI instead", field, defaults.HostConfig, path))
+		field := projectGuardrailField(toolName, "host_config")
+		guardrail("host_config", "Ignoring %s=%q in %s: project configs cannot widen host config passthrough; set it in global config or CLI instead", field, defaults.HostConfig, path)
 		defaults.HostConfig = ""
 	}
 
 	if len(defaults.HostConfigPaths) > 0 {
-		field := projectGuardrailField(prefix, "host_config_paths")
-		warnings = append(warnings, fmt.Sprintf("Ignoring %s=%v in %s: project configs cannot extend host config passthrough; set it in global config or CLI instead", field, defaults.HostConfigPaths, path))
+		field := projectGuardrailField(toolName, "host_config_paths")
+		guardrail("host_config_paths", "Ignoring %s=%v in %s: project configs cannot extend host config passthrough; set it in global config or CLI instead", field, defaults.HostConfigPaths, path)
 		defaults.HostConfigPaths = nil
 	}
 
 	if strings.EqualFold(strings.TrimSpace(defaults.ProjectMount), model.ProjectMountWritable) {
-		field := projectGuardrailField(prefix, "project_mount")
-		warnings = append(warnings, fmt.Sprintf("Ignoring %s=%q in %s: project configs cannot make the project mount writable; set it in global config or CLI instead", field, defaults.ProjectMount, path))
+		field := projectGuardrailField(toolName, "project_mount")
+		guardrail("project_mount", "Ignoring %s=%q in %s: project configs cannot make the project mount writable; set it in global config or CLI instead", field, defaults.ProjectMount, path)
 		defaults.ProjectMount = ""
 	}
 
 	worktreeMetadata := strings.ToLower(strings.TrimSpace(defaults.WorktreeMetadata))
 	if worktreeMetadata != "" && (worktreeMetadata == model.WorktreeMetadataFollow || worktreeMetadataStrength(worktreeMetadata) < worktreeMetadataStrength(inheritedWorktreeMetadata)) {
-		field := projectGuardrailField(prefix, "worktree_metadata")
-		warnings = append(warnings, fmt.Sprintf("Ignoring %s=%q in %s: project configs cannot relax inherited worktree_metadata=%q; set it in global config or CLI instead", field, defaults.WorktreeMetadata, path, model.WorktreeMetadataMode(inheritedWorktreeMetadata)))
+		field := projectGuardrailField(toolName, "worktree_metadata")
+		guardrail("worktree_metadata", "Ignoring %s=%q in %s: project configs cannot relax inherited worktree_metadata=%q; set it in global config or CLI instead", field, defaults.WorktreeMetadata, path, model.WorktreeMetadataMode(inheritedWorktreeMetadata))
 		defaults.WorktreeMetadata = ""
 	}
 
@@ -559,11 +566,11 @@ func worktreeMetadataStrength(value string) int {
 	}
 }
 
-func projectGuardrailField(prefix string, name string) string {
-	if prefix == "" {
+func projectGuardrailField(toolName string, name string) string {
+	if toolName == "" {
 		return name
 	}
-	return prefix + "." + name
+	return "tool_overrides." + toolName + "." + name
 }
 
 // resolveProjectRoot returns the absolute, symlink-evaluated project directory
@@ -586,10 +593,10 @@ func resolveProjectRoot(projectDir string) string {
 }
 
 // filterProjectAddDirs drops entries that resolve outside the project root and
-// appends a warning per dropped entry. fieldLabel is the JSON field name used
-// in the warning (e.g. "add_dirs" or "tool_overrides.<tool>.add_dirs").
-// projectDir anchors relative entries; configPath is used only for warnings.
-func filterProjectAddDirs(entries []string, fieldLabel string, projectRoot string, projectDir string, configPath string, warnings []string) ([]string, []string) {
+// appends a warning per dropped entry. option is the field name and toolName
+// is set for tool_overrides.<tool> entries. projectDir anchors relative
+// entries; configPath is used only for warnings.
+func filterProjectAddDirs(entries []string, option string, toolName string, projectRoot string, projectDir string, configPath string, warnings []Warning) ([]string, []Warning) {
 	if len(entries) == 0 {
 		return entries, warnings
 	}
@@ -599,7 +606,7 @@ func filterProjectAddDirs(entries []string, fieldLabel string, projectRoot strin
 	// paths into the container.
 	if projectRoot == "" {
 		for _, raw := range entries {
-			warnings = append(warnings, projectAddDirsWarning(raw, fieldLabel, configPath))
+			warnings = append(warnings, projectAddDirsWarning(raw, option, toolName, configPath))
 		}
 		return nil, warnings
 	}
@@ -611,7 +618,7 @@ func filterProjectAddDirs(entries []string, fieldLabel string, projectRoot strin
 			kept = append(kept, raw)
 			continue
 		}
-		warnings = append(warnings, projectAddDirsWarning(raw, fieldLabel, configPath))
+		warnings = append(warnings, projectAddDirsWarning(raw, option, toolName, configPath))
 	}
 	if len(kept) == 0 {
 		return nil, warnings
@@ -619,8 +626,8 @@ func filterProjectAddDirs(entries []string, fieldLabel string, projectRoot strin
 	return kept, warnings
 }
 
-func projectAddDirsWarning(entry string, fieldLabel string, configPath string) string {
-	return fmt.Sprintf("Ignoring %s entry %q in %s: project configs can only mount subdirectories of the project; use global config or CLI for other paths", fieldLabel, entry, configPath)
+func projectAddDirsWarning(entry string, option string, toolName string, configPath string) Warning {
+	return newWarning(WarningProjectSubtree, option, toolName, configPath, "Ignoring %s entry %q in %s: project configs can only mount subdirectories of the project; use global config or CLI for other paths", projectGuardrailField(toolName, option), entry, configPath)
 }
 
 // isWithinProjectDir reports whether entry resolves to a path inside projectRoot.

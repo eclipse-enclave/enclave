@@ -76,8 +76,6 @@ func (m networkManager) Prepare(_ string, authState model.AuthState, _ SecretMap
 	}
 
 	if len(m.run.AllowDomains) > 0 {
-		// Copy first to avoid mutating the resolved policy's shared backing array.
-		effectivePolicy.Domains = append(append([]string(nil), effectivePolicy.Domains...), m.run.AllowDomains...)
 		logx.Infof("Allowlisted ad-hoc domains: %s", strings.Join(m.run.AllowDomains, ", "))
 	}
 

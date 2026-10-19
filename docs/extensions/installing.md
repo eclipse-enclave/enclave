@@ -306,6 +306,7 @@ entry per extension, whether built-in or installed:
 {
   "schemaVersion": "1",
   "kind": "feature",
+  "selection": { "directives": ["+demo"], "source": "tool_override", "tool": "claude" },
   "extensions": [
     {
       "name": "github-cli",
@@ -313,7 +314,10 @@ entry per extension, whether built-in or installed:
       "description": "GitHub CLI (gh)",
       "source": "builtin",
       "enabled": true,
-      "managed": false
+      "managed": false,
+      "defaultEnabled": true,
+      "needsRoot": true,
+      "releaseHosts": ["*.ghe.com", "*.github.com", "*.githubusercontent.com", "api.github.com", "ghe.com"]
     },
     {
       "name": "demo",
@@ -331,7 +335,13 @@ entry per extension, whether built-in or installed:
         "commit": "5e6a30d81a0ae3c73172c29f429ee0ba84a28597",
         "installedAt": "2026-08-26T19:42:23Z",
         "locallyModified": false
-      }
+      },
+      "defaultEnabled": false,
+      "needsRoot": false,
+      "ports": [
+        { "container": 6080, "publish": true, "hostAllocation": "auto", "label": "noVNC", "openUrl": "http://localhost:{port}/" }
+      ],
+      "allowedDomains": ["downloads.example.com"]
     }
   ]
 }
@@ -340,6 +350,35 @@ entry per extension, whether built-in or installed:
 `source` is `builtin`, `user`, or `override` (a user directory shadowing a
 built-in of the same name). An entry whose sidecar exists but could not be
 read carries `originError` instead of `origin`, with `managed: false`.
+
+`enabled` reports whether a run with the same options would enable the
+feature. The options are resolved and validated as for a run: `--slim` and
+`backend: qemu` enable no features, `devcontainer` enables none unless
+`features` is set, `playwright_mcp` adds `playwright`, and
+`tool_overrides.<tool>.features` applies for the tool from `--tool` or the
+configured `tool` (an unknown `--tool` simply has no overrides). If a run would
+reject the options, a warning goes to stderr, `enabled` reflects the options
+as configured, without run-time coercion, and the command still exits 0.
+Feature listings also carry:
+
+- `selection`: the configured `features` directives, the layer they come from
+  (`default`, `global`, `project`, `tool_override`, or `cli`), and the tool
+  used for `tool_overrides` (`null` when no tool is configured).
+  `directives: null` means no layer sets features: the defaults apply unless
+  slim, devcontainer, or the qemu backend disables features.
+- `defaultEnabled` and `needsRoot`: the spec's values, always present.
+- `ports`: the declared container ports; `hostAllocation` is `fixed` or `auto`.
+- `allowedDomains` and `deniedDomains`: the spec's network domains in the form
+  the gateway enforces (lowercased, `*.` wildcards collapsed to the parent
+  domain, ports stripped), sorted.
+- `releaseHosts`: the declared hosts that receive a credential, as written in
+  the spec (wildcards kept), sorted. When the feature is enabled they join the
+  allowlist normalised like `allowedDomains`, so `*.github.com` also opens
+  `github.com`. Hosts selected at session start through
+  `serviceAuth.hostsFromCredential` are not included.
+
+Empty entry arrays are omitted rather than emitted as `[]` or `null`. Tool
+listings carry none of these fields.
 
 `add`, `update`, and `remove` share one result envelope (also
 `schemaVersion: "1"`), written to stdout as a single JSON document when

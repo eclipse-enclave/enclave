@@ -145,6 +145,18 @@ func OptionTypedEffectiveValue(def OptionDef, opts model.Options) any {
 	}
 }
 
+// HasDirectives reports whether the option is configured as a directive list
+// that a run resolves rather than uses as is.
+func (def OptionDef) HasDirectives() bool {
+	return def.Apply == ApplySliceMergeFeature || def.Apply == ApplySliceMergeHost
+}
+
+// OptionDirectives returns the directives configured for an option with
+// HasDirectives, or nil when none are configured.
+func OptionDirectives(def OptionDef, opts model.Options) []string {
+	return optSlice(opts, def.OptionField)
+}
+
 // OptionTypedDefaultsValue returns the typed value a config Defaults layer sets
 // and whether it sets one, using the same rules as OptionDefaultsValue.
 func OptionTypedDefaultsValue(def OptionDef, defaults Defaults) (any, bool) {

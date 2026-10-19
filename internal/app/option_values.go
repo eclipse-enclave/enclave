@@ -25,9 +25,9 @@ func typedOptionValue(def config.OptionDef, values model.Options, profile *model
 			return nil, ""
 		}
 		return resolveYolo(*profile, values)
-	case def.Name == "features":
+	case def.Apply == config.ApplySliceMergeFeature:
 		return features, ""
-	case def.Name == "host_config_paths":
+	case def.Apply == config.ApplySliceMergeHost:
 		if profile == nil {
 			return nil, ""
 		}

@@ -137,11 +137,11 @@ func buildConfigRows(
 			Source:       config.OptionEffectiveSource(def, opts.Sources),
 			Effective:    config.OptionEffectiveValue(def, opts),
 		}
-		switch row.Name {
-		case "host_config_paths":
+		switch def.Apply {
+		case config.ApplySliceMergeHost:
 			row.Default = configCell{Value: config.FormatSlice(hostConfigDefaults), Set: true}
 			row.Effective = config.FormatSlice(opts.HostConfigPaths)
-		case "features":
+		case config.ApplySliceMergeFeature:
 			if defaults.Features == nil && !row.Default.Set {
 				row.Default = configCell{Value: model.SelectionDefault, Set: true}
 			}
@@ -366,13 +366,12 @@ func buildConfigEnvelope(input *CommandInput, opts model.Options, profile *model
 			Layers: configOptionLayers(def, input),
 		}
 		option.Value, option.ResolvedBy = typedOptionValue(def, values, loaded, enabledFeatures)
-		switch {
-		case def.Kind == config.OptionKindYolo:
+		if def.Kind == config.OptionKindYolo {
 			option.Kind = string(config.OptionKindBool)
-		case def.Name == "features":
-			option.Directives = &raw.Features
-		case def.Name == "host_config_paths":
-			option.Directives = &raw.HostConfigPaths
+		}
+		if def.HasDirectives() {
+			directives := config.OptionDirectives(def, raw)
+			option.Directives = &directives
 		}
 		envelope.Options[def.Name] = option
 	}

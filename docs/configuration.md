@@ -431,3 +431,8 @@ To check whether a fresh session would differ from a running one:
 
 Backend-dependent validated values may differ, since `config --json` validates
 `auto` as `docker` while a run validates the detected engine.
+
+Sessions started with `enclave devcontainer run|shell` cannot be compared.
+Devcontainer mode has no flag, so `config --json` resolves `devcontainer` and
+`features` without it; treat these sessions as unknown. A `devcontainer` key
+set in config is resolved by both sides.

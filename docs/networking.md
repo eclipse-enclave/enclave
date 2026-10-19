@@ -148,6 +148,7 @@ enclave network apply                      # Apply policy to running gateways
 
 - They accept the run flags that affect the policy (see the [CLI reference](cli-reference.md#network)), e.g. `enclave network print --features +github-cli --allow-domain api.example.com`.
 - Configured options such as `devcontainer` or `backend: qemu` are honoured; `print` and `diff` take no `--backend`, so preview `run --backend qemu` with `--allow-all-network`.
+- Sessions started with `enclave devcontainer run|shell` cannot be previewed: devcontainer mode has no flag, and it drops the default features.
 - Hosts selected at session start through `serviceAuth.hostsFromCredential` are not shown.
 - In unrestricted mode `print` emits only `# Mode: unrestricted`.
 - If the options are invalid, `print` and `diff` fail (`print` also rejects an unknown tool), while `status` warns and summarizes the tool spec and policy files.

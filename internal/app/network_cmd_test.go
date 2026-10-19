@@ -10,6 +10,7 @@ package app
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -202,6 +203,72 @@ func TestNetworkPrintJSONWithoutTool(t *testing.T) {
 
 // Invalid options unrelated to the network must not hide running gateways
 // from status, while print and diff still reject them.
+// TestOnlyNetworkAffectingOptionsChangeThePreview sets every option without
+// AffectsNetwork and expects the same policy, so an option that starts shaping
+// the allowlist gets its flags on the network preview commands.
+func TestOnlyNetworkAffectingOptionsChangeThePreview(t *testing.T) {
+	root := t.TempDir()
+	paths := model.Paths{
+		ToolsDir:      filepath.Join(root, "tools"),
+		FeaturesDir:   filepath.Join(root, "features"),
+		AllowlistsDir: filepath.Join(root, "allowlists"),
+	}
+	writeAppFile(t, filepath.Join(paths.ToolsDir, "claude", config.SpecFilename), `schemaVersion: "1"
+kind: sandbox
+name: claude
+sandbox:
+  entrypoint: { run: [claude] }
+  configDir: .claude
+network:
+  allowedDomains: [tool.example.com]
+`, 0o644)
+	for name, defaultEnabled := range map[string]bool{"base": true, "playwright": false} {
+		writeAppFile(t, filepath.Join(paths.FeaturesDir, name, config.SpecFilename), fmt.Sprintf(`schemaVersion: "1"
+kind: mixin
+name: %[1]s
+defaultEnabled: %[2]t
+network:
+  allowedDomains: [%[1]s.example.com]
+`, name, defaultEnabled), 0o644)
+	}
+	opts := config.DefaultOptions()
+	opts.Tool = "claude"
+	input := configTestInput(t, paths, opts, nil)
+	_, out, want := runNetworkPrintJSON(t, input)
+	if want["error"] != "" || !strings.Contains(out, "base.example.com") {
+		t.Fatalf("baseline network print --json:\n%s", out)
+	}
+
+	options := reflect.ValueOf(&input.Options).Elem()
+	for _, def := range config.OptionDefs() {
+		if def.AffectsNetwork || def.Kind == config.OptionKindYolo {
+			continue
+		}
+		field := options.FieldByName(def.OptionField)
+		if !field.IsValid() {
+			t.Fatalf("option %s: model.Options has no field %s", def.Name, def.OptionField)
+		}
+		saved := reflect.New(field.Type()).Elem()
+		saved.Set(field)
+		switch def.Kind {
+		case config.OptionKindBool:
+			field.SetBool(!field.Bool())
+		case config.OptionKindStringSlice:
+			field.Set(reflect.ValueOf([]string{"probe.example.com"}))
+		default:
+			field.SetString("probe")
+		}
+		_, out, doc := runNetworkPrintJSON(t, input)
+		field.Set(saved)
+		if doc["error"] != "" {
+			continue
+		}
+		if !reflect.DeepEqual(doc, want) {
+			t.Errorf("option %s changes the network policy but lacks AffectsNetwork:\n%s", def.Name, out)
+		}
+	}
+}
+
 func TestNetworkStatusFallsBackOnInvalidOptions(t *testing.T) {
 	stubDockerPing(t, errors.New("engine down"))
 	input := networkPreviewTestInput(t)

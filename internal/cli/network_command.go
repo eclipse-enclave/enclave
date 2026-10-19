@@ -12,6 +12,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"enclave/internal/config"
 	"enclave/internal/model"
 )
 
@@ -54,10 +55,16 @@ func networkApplyCommand(res *Result) *cobra.Command {
 	return cmd
 }
 
-// sessionPolicyOptionNames are the run options that shape a session's
+// sessionPolicyOptionNames returns the options that shape a session's
 // allowlist, so the policy preview reflects a run with the same flags.
-var sessionPolicyOptionNames = []string{
-	"tool", "features", "slim", "playwright_mcp", "allow_domains", "allow_all_network",
+func sessionPolicyOptionNames() []string {
+	var names []string
+	for _, def := range config.OptionDefs() {
+		if def.AffectsNetwork {
+			names = append(names, def.Name)
+		}
+	}
+	return names
 }
 
 // networkQueryCommand builds a read-only network subcommand that previews
@@ -72,7 +79,7 @@ func networkQueryCommand(name string, short string, action string, res *Result) 
 			return nil
 		},
 	}
-	addOptionFlagsByName(cmd.Flags(), &res.Options, &res.Sources, sessionPolicyOptionNames...)
+	addOptionFlagsByName(cmd.Flags(), &res.Options, &res.Sources, sessionPolicyOptionNames()...)
 	return cmd
 }
 

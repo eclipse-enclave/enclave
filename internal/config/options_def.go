@@ -64,6 +64,11 @@ type OptionDef struct {
 	Group          OptionGroup
 	Kind           OptionKind
 	AffectsSession SessionEffect
+	// AffectsNetwork marks options that change a session's allowlist, so the
+	// engine-independent network policy preview accepts their flags. backend
+	// is not marked: the preview honors a configured qemu backend but takes no
+	// engine flag.
+	AffectsNetwork bool
 	OptionField    string
 	SourceField    string
 	DefaultsField  string
@@ -97,6 +102,7 @@ func OptionDefs() []OptionDef {
 			Group:          OptionGroupRun,
 			Kind:           OptionKindString,
 			AffectsSession: SessionAffected,
+			AffectsNetwork: true,
 			OptionField:    "Tool",
 			SourceField:    "Tool",
 			DefaultsField:  "Tool",
@@ -425,6 +431,7 @@ func OptionDefs() []OptionDef {
 			Group:          OptionGroupRun,
 			Kind:           OptionKindBool,
 			AffectsSession: SessionAffected,
+			AffectsNetwork: true,
 			OptionField:    "AllowAllNetwork",
 			SourceField:    "AllowAllNetwork",
 			DefaultsField:  "AllowAllNetwork",
@@ -652,6 +659,7 @@ func OptionDefs() []OptionDef {
 			Group:          OptionGroupBuild,
 			Kind:           OptionKindBool,
 			AffectsSession: SessionAffected,
+			AffectsNetwork: true,
 			OptionField:    "Devcontainer",
 			SourceField:    "Devcontainer",
 			DefaultsField:  "Devcontainer",
@@ -685,6 +693,7 @@ func OptionDefs() []OptionDef {
 			Group:          OptionGroupBuild,
 			Kind:           OptionKindBool,
 			AffectsSession: SessionAffected,
+			AffectsNetwork: true,
 			OptionField:    "Slim",
 			SourceField:    "Slim",
 			DefaultsField:  "Slim",
@@ -734,6 +743,7 @@ func OptionDefs() []OptionDef {
 			Group:          OptionGroupBuild,
 			Kind:           OptionKindStringSlice,
 			AffectsSession: SessionAffected,
+			AffectsNetwork: true,
 			OptionField:    "Features",
 			SourceField:    "Features",
 			DefaultsField:  "Features",
@@ -1171,6 +1181,7 @@ func OptionDefs() []OptionDef {
 			Group:          OptionGroupRun,
 			Kind:           OptionKindStringSlice,
 			AffectsSession: SessionAffected,
+			AffectsNetwork: true,
 			OptionField:    "AllowDomains",
 			SourceField:    "AllowDomains",
 			DefaultsField:  "AllowDomains",
@@ -1194,6 +1205,7 @@ func OptionDefs() []OptionDef {
 			Group:          OptionGroupRun,
 			Kind:           OptionKindBool,
 			AffectsSession: SessionAffected,
+			AffectsNetwork: true,
 			OptionField:    "PlaywrightMCP",
 			SourceField:    "PlaywrightMCP",
 			DefaultsField:  "PlaywrightMCP",

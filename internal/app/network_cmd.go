@@ -56,11 +56,8 @@ func resolveSessionPolicyContext(input *CommandInput, requireTool bool) (current
 		return currentPolicyContext{}, fmt.Errorf("load tool %q: %w", opts.Tool, err)
 	}
 	selection, err := resolveFeatureSelection(input.Ctx.Paths, opts.BuildOptions)
-	if err != nil {
-		logx.Warnf("Failed to list features: %v", err)
-	}
-	for _, name := range selection.unknown {
-		logx.Warnf("Unknown feature %q selected; it is ignored", name)
+	for _, warning := range featureSelectionWarnings(selection, err) {
+		logx.Warnf("%s", warning.Message)
 	}
 	session := policy.NewSessionNetworkInputs(profile, selection.enabled, opts.RunOptions)
 	return resolvePolicyContext(input, opts.Tool, &session)

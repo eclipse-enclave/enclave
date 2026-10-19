@@ -345,18 +345,15 @@ func buildConfigEnvelope(input *CommandInput, opts model.Options, profile *model
 	}
 
 	var enabledFeatures []string
-	if selection, err := resolveFeatureSelection(input.Ctx.Paths, values.BuildOptions); err != nil {
-		addWarning(configWarningFeaturesUnavailable, "features", fmt.Sprintf("Cannot list features: %v", err))
-	} else {
+	selection, err := resolveFeatureSelection(input.Ctx.Paths, values.BuildOptions)
+	if err == nil {
 		enabledFeatures = selection.enabledNames()
-		for _, name := range selection.unknown {
-			envelope.Warnings = append(envelope.Warnings, configJSONWarning{
-				Code:    configWarningUnknownFeature,
-				Option:  "features",
-				Layer:   sourceLabel(raw.Sources.Features),
-				Message: fmt.Sprintf("Unknown feature %q selected; it is ignored", name),
-			})
+	}
+	for _, warning := range featureSelectionWarnings(selection, err) {
+		if warning.Code == configWarningUnknownFeature {
+			warning.Layer = sourceLabel(raw.Sources.Features)
 		}
+		envelope.Warnings = append(envelope.Warnings, warning)
 	}
 
 	if loaded != nil {

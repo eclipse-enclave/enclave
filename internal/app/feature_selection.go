@@ -8,6 +8,7 @@
 package app
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 
@@ -50,6 +51,23 @@ func resolveFeatureSelection(paths model.Paths, build model.BuildOptions) (featu
 		}
 	}
 	return selection, nil
+}
+
+// featureSelectionWarnings describes why a selection resolved with err is
+// incomplete: the features cannot be listed, or selected names are unknown.
+func featureSelectionWarnings(selection featureSelection, err error) []configJSONWarning {
+	if err != nil {
+		return []configJSONWarning{{Code: configWarningFeaturesUnavailable, Option: "features", Message: fmt.Sprintf("Cannot list features: %v", err)}}
+	}
+	warnings := make([]configJSONWarning, 0, len(selection.unknown))
+	for _, name := range selection.unknown {
+		warnings = append(warnings, configJSONWarning{
+			Code:    configWarningUnknownFeature,
+			Option:  "features",
+			Message: fmt.Sprintf("Unknown feature %q selected; it is ignored", name),
+		})
+	}
+	return warnings
 }
 
 // enabledNames returns the sorted names of the enabled features.

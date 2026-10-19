@@ -41,8 +41,10 @@ func typedOptionValue(def config.OptionDef, values model.Options, profile *model
 // nil when features cannot be listed.
 func sessionFeaturesAndProvenance(input *CommandInput, opts model.Options, profile model.Profile) (featureSelection, map[string]any) {
 	selection, err := resolveFeatureSelection(input.Ctx.Paths, opts.BuildOptions)
+	for _, warning := range featureSelectionWarnings(selection, err) {
+		logx.Debugf("%s", warning.Message)
+	}
 	if err != nil {
-		logx.Debugf("Failed to list features: %v", err)
 		return selection, nil
 	}
 	if !isRunAction(input.Action) {

@@ -208,7 +208,7 @@ Network mutation commands are global-only today. `--project` scope is planned bu
 
 `--follow` and `--summary` are mutually exclusive, and `--since session` needs a scope covering exactly one session, so it cannot be combined with `--all-running`. See [Networking](networking.md#reading-the-network-log) for the output format and [Coverage and granularity](networking.md#coverage-and-granularity) for what the log does and does not record.
 
-Mutation commands (`add-domain`, `remove-domain`, `set-mode`) apply the new policy to running gateways by default. Use `--no-apply` to persist only, or `--all-running` to target every running gateway on the host (rather than just the current project/tool). By default the runtime apply targets the selected tool's gateway; pass `--tool <tool>` to target a different tool. `network apply` accepts `--tool` and `--all-running`.
+Mutation commands (`add-domain`, `remove-domain`, `set-mode`) apply the new policy to running gateways by default. The runtime apply targets the current project's gateways for every tool, because these commands edit the global policy. Use `--no-apply` to persist only, or `--all-running` to target every running gateway on the host. `network apply` targets the selected tool's gateway by default and accepts `--tool` and `--all-running`.
 
 ### Auth
 

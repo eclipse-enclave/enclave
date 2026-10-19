@@ -157,7 +157,7 @@ func runNetworkStatus(input *CommandInput) int {
 	if code != 0 {
 		return code
 	}
-	targets, scopeLabel, err := discoverGatewayTargets(input, manager, false)
+	targets, scopeLabel, err := discoverGatewayTargets(input, manager, gatewayScopeProjectTool)
 	if err != nil {
 		fmt.Printf("  Discovery failed: %v\n", err)
 		return 0
@@ -285,6 +285,10 @@ func runNetworkDiff(input *CommandInput) int {
 }
 
 func runNetworkApply(input *CommandInput) int {
+	return applyPolicyToGateways(input, applyGatewayScope(input.Options.AllRunning))
+}
+
+func applyPolicyToGateways(input *CommandInput, scope gatewayTargetScope) int {
 	if code := requireDocker(); code != 0 {
 		return code
 	}
@@ -299,7 +303,7 @@ func runNetworkApply(input *CommandInput) int {
 	if code != 0 {
 		return code
 	}
-	targets, scopeLabel, err := discoverGatewayTargets(input, manager, input.Options.AllRunning)
+	targets, scopeLabel, err := discoverGatewayTargets(input, manager, scope)
 	if err != nil {
 		logx.Errorf("Failed to discover gateway targets: %v", err)
 		return 1
@@ -483,7 +487,7 @@ func runMutationRuntimeApply(input *CommandInput) int {
 	}
 
 	fmt.Printf("\n")
-	exitCode := runNetworkApply(input)
+	exitCode := applyPolicyToGateways(input, mutationGatewayScope(input.Options.AllRunning))
 	if exitCode != 0 {
 		fmt.Printf("Persistence succeeded but runtime apply failed. Running sessions may still enforce the previous policy.\n")
 	}

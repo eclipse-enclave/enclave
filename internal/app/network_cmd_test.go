@@ -333,6 +333,38 @@ func TestRunMutationRuntimeApplyNoApply(t *testing.T) {
 	}
 }
 
+func TestGlobalMutationsApplyToEveryToolOfTheProject(t *testing.T) {
+	project := model.Project{Dir: "/work/current", RealDir: "/work/current", Hash: "p1"}
+
+	filter, label := gatewayTargetFilter(project, "claude", mutationGatewayScope(false))
+	if filter.Tool != "" {
+		t.Fatalf("expected no tool filter for a global mutation, got %q", filter.Tool)
+	}
+	if filter.ProjectHash != "p1" {
+		t.Fatalf("expected project filter p1, got %q", filter.ProjectHash)
+	}
+	if !strings.Contains(label, "all tools") {
+		t.Fatalf("expected scope label to name all tools, got %q", label)
+	}
+
+	filter, _ = gatewayTargetFilter(project, "claude", mutationGatewayScope(true))
+	if filter != (backend.GatewayFilter{}) {
+		t.Fatalf("expected an empty filter with --all-running, got %+v", filter)
+	}
+}
+
+func TestNetworkApplyKeepsTheCurrentToolScope(t *testing.T) {
+	project := model.Project{Dir: "/work/current", RealDir: "/work/current", Hash: "p1"}
+
+	filter, label := gatewayTargetFilter(project, "claude", gatewayScopeProjectTool)
+	if filter.Tool != "claude" || filter.ProjectHash != "p1" {
+		t.Fatalf("expected project/tool filter p1/claude, got %+v", filter)
+	}
+	if label != currentProjectToolLabel("p1", "claude") {
+		t.Fatalf("unexpected scope label %q", label)
+	}
+}
+
 func TestResolveGatewayTargetProjectDirFallbacksToCurrent(t *testing.T) {
 	current := model.Project{Dir: "/work/current", Hash: "p1"}
 	target := backend.GatewayInfo{ID: "aaaaaaaaaaaa", ProjectHash: "p1"}

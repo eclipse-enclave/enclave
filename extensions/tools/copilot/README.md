@@ -28,6 +28,26 @@ import/export. See [Authentication & Secrets](../../../docs/auth.md).
 The gateway sends the declared token as a Bearer authorization header to
 `api.github.com` and `*.githubcopilot.com`.
 
+### Recommended: fine-grained PAT via `COPILOT_GITHUB_TOKEN`
+
+Prefer `COPILOT_GITHUB_TOKEN` with a fine-grained personal access token that
+only grants the **Copilot Requests** permission. This is the minimum Copilot CLI
+needs and the approach recommended by the Copilot CLI maintainers
+([github/copilot-cli#953](https://github.com/github/copilot-cli/issues/953)).
+
+### OAuth login (`/login`) grants broad scopes
+
+> **Warning:** The device-code and browser OAuth login (`/login`) issues a token
+> with far more scopes than Copilot needs. Observed token scopes:
+> `codespace`, `gist`, `read:org`, `read:user`, `repo` (read and write), and
+> `write:plugin_gateway_connections`.
+
+A token with `repo` write access can read and modify private repositories, so
+anyone who obtains the stored OAuth credentials (under
+`~/.local/state/enclave/tools/copilot/`) can act on your GitHub account beyond
+Copilot. Use OAuth only when you accept this risk; otherwise use a fine-grained
+PAT as described above.
+
 ## Memory and Skills
 
 The extension does not declare a native memory directory or memory-disable

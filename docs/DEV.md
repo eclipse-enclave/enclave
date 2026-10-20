@@ -74,9 +74,13 @@ first. It locates an "app root" in this order (`internal/config/paths.go`,
 On Linux the extraction store is
 `${XDG_CACHE_HOME:-~/.cache}/enclave/assets/<hash>/`. On macOS it is
 `~/Library/Caches/org.eclipse.enclave/assets/<hash>/`. Each distinct asset set
-uses its own atomically published directory and does not modify other entries. The tree
-is reproducible from the binary, so deleting it is safe; the next run extracts
-it again.
+uses its own atomically published directory. The tree is reproducible from the
+binary, so deleting it is safe; the next run extracts it again. A binary
+refreshes its entry's mtime at most once a day, under the entry's lock. Whenever
+it extracts or refreshes its entry, it also removes other entries no binary has
+used for 30 days, skipping any whose lock is held (`removeUnusedAppAssets` in
+`internal/config/embedded_assets.go`). A refresh that fails, as in a cache this
+user can read but not write, still leaves the valid entry in use.
 
 Because `bin/enclave` lives inside the checkout, tier 2 finds the repository
 root. Running an in-tree binary therefore uses the working copy's assets:
@@ -377,6 +381,21 @@ the `.git` pointer comes from the repository. Tests that touch the rule clear
 `SSH_AUTH_SOCK` in their `TestMain`; the `app` and `runtime` tests, which take
 the directories from the environment, clear `XDG_*` as well, while `mounts`
 tests pass them explicitly.
+
+Self-update notes (user-facing behavior: [CLI reference](cli-reference.md#commands)):
+
+- Read `auto_update` and `update_channel` from `globalDefaults`, not resolved
+  project or tool options. Explicit `self-update` uses `config.LoadGlobalDefaults`.
+- Keep all updater output on stderr, including verbose diagnostics: use
+  `logx.Noticef`, `DebugNoticef`, or `Warnf`, never `Infof` or `Debugf`.
+- Both paths hold `config.HostSelfUpdateLockPath`: the periodic check skips a
+  busy lock, while explicit `self-update` waits.
+- Tests replace `newSelfUpdater` in `internal/app` and use an `httptest` release
+  in `internal/selfupdate`. To try a real update, build outside the checkout
+  with `make build BUILD_CHANNEL=rolling BIN_DIR=/tmp/enclave-rolling`, then
+  run `/tmp/enclave-rolling/enclave self-update` with `ENCLAVE_HOME` unset.
+- The stable source is a placeholder until the Eclipse download server
+  contract is known; stable release CI must stamp `BUILD_CHANNEL=stable`.
 
 Config additive note: feature additive directives (`+`/`-`) are applied against
 the implicit default-enabled feature set when `features` is unset. For example,

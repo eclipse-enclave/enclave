@@ -296,6 +296,16 @@ func HostRecentProjectsPath(home string) string {
 	return filepath.Join(hostConfigRoot(home), recentProjectsFilename)
 }
 
+func HostSelfUpdateCheckPath(home string) string {
+	return filepath.Join(hostStateRoot(home), "self-update-check")
+}
+
+// HostSelfUpdateLockPath serializes binary update checks and installs across
+// enclave processes.
+func HostSelfUpdateLockPath(home string) string {
+	return HostLockPath(home, "self-update.lock")
+}
+
 // HostConfigRootDir returns the config root for enclave
 // (<XDG_CONFIG_HOME|~/.config>/enclave on Linux, ~/Library/Application
 // Support/org.eclipse.enclave/config on macOS). It is surfaced to user

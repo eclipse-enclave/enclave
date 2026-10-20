@@ -90,12 +90,56 @@ Ctrl-C or SIGTERM while a session is still starting aborts the start with exit c
 |---------|-------------|
 | `enclave info` | Show configuration and image details |
 | `enclave version`, `enclave --version` | Show the binary version, source commit, and commit date |
+| `enclave self-update` | Replace the host binary with the latest build of its release channel |
 | `enclave config` | Show configuration values |
 | `enclave tools` | List available tool profiles (`list\|add\|remove\|update` manage installed tool extensions; see below) |
 | `enclave features` | List available feature extensions (`list\|add\|remove\|update` manage installed feature extensions; see below) |
 | `enclave completion <shell>` | Generate shell completion |
 
 `enclave version` prints one line suitable for bug reports; `--json` emits the version, commit, and date as an object. Builds from modified source append `-dirty` to the commit; unavailable values are reported as `unknown`.
+
+`enclave self-update` downloads the `linux` or `darwin` binary matching the
+host architecture from the configured release channel, verifies it against the
+release's `checksums.txt`, and atomically replaces the running executable. The
+checksums come from the same release as the binary, so they detect corrupted or
+truncated downloads, not a compromised release. If the executable already
+matches the release's checksum, for example because a concurrent update
+installed it, nothing is downloaded. A download that receives no data for 30
+seconds fails; Ctrl-C or SIGTERM aborts it with exit code 130 and removes the
+partial file.
+
+The updater never elevates privileges. When the executable's directory is not
+writable, as after a `sudo install` into `/usr/local/bin`, `self-update` exits
+with an error and both it and the periodic check print the download URLs of
+the binary and `checksums.txt` and the command that verifies the download and
+reinstalls it with `sudo install`. A replacement the system denies only at the
+end, as in a sticky directory holding another user's binary, is reported the
+same way.
+
+Release channels are `rolling`, rebuilt from every push to `main` and published
+on GitHub, and `stable`, for official releases. A binary follows the channel it
+was published on unless the global config sets `update_channel`; switching
+channels installs the other channel's latest build even if it is older. The
+`stable` channel has no download source yet: stable releases are expected on
+the Eclipse Foundation download server, and until that is wired up, checks on
+`stable` fail: `self-update` exits with an error and the periodic check warns
+once per interval. `enclave config` shows the effective channel.
+
+Only standalone release binaries update themselves: package installs, source
+builds, and binaries that run against a runtime asset tree beside them or in
+`ENCLAVE_HOME` are refused and never checked, because replacing the binary
+alone would leave their assets behind. Upgrade those with the package manager
+or by rebuilding.
+
+Other interactive invocations, with stdin, stdout, and stderr all terminals,
+check the channel at most once every 24 hours, recorded in
+`~/.local/state/enclave/self-update-check`, and notify when a different build
+is available. Set `"auto_update": true` in the global config to install it
+during that check; Ctrl-C during that install exits with code 130 without
+running the command. All update-check output, including `--verbose` diagnostics,
+goes to stderr. Checks are skipped for scripts and other non-interactive
+callers, shell completion, structured output, and user commands; a failed check
+waits for the next interval.
 
 `enclave config` flags: `--view <mode>` selects the output view — `matrix` (default), `source` (where each value comes from), `diff` (values overridden by higher precedence), or `effective` (effective values only); `--json` emits a versioned JSON envelope (`schemaVersion: "1"`, typed values, structured warnings, and validation status; see [Inspecting Resolved Config](configuration.md#inspecting-resolved-config)).
 

@@ -105,6 +105,7 @@ func runtimeImageStaticFiles(paths model.Paths) ([]mergedExtensionFile, error) {
 		filepath.ToSlash(filepath.Join("runtime-assets", "build-scripts")),
 		filepath.ToSlash(filepath.Join("runtime-assets", "auth-reconcile.sh")),
 		filepath.ToSlash(filepath.Join("runtime-assets", "net.sh")),
+		filepath.ToSlash(filepath.Join("runtime-assets", "tmux-session.conf")),
 		filepath.ToSlash(filepath.Join("runtime-assets", "kit-init.sh")),
 		"docs",
 	}

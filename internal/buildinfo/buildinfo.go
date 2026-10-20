@@ -21,7 +21,15 @@ var (
 	version string
 	commit  string
 	date    string
+	channel string
 )
+
+// Channel is the release channel this binary was published on (rolling or
+// stable), or empty for package and source builds, which never update
+// themselves.
+func Channel() string {
+	return strings.TrimSpace(channel)
+}
 
 type Info struct {
 	Version string `json:"version"`

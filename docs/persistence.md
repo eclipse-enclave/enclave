@@ -52,8 +52,8 @@ Per-project data is stored on the host and reused across sessions:
 | Embedded runtime assets | `~/.cache/enclave/assets/<content-hash>/` |
 
 Extracted runtime asset entries are reproducible cache data. Deleting them is
-safe, and Enclave extracts the current entry again on the next run. Enclave does
-not garbage collect entries for older binaries yet.
+safe, and Enclave extracts the current entry again on the next run. Entries that
+no binary has used for 30 days are removed automatically.
 
 Everything under the cache root is disposable: deleting it only costs
 performance. Package caches are recreated empty on the next session start, as

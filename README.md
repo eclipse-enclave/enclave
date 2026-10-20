@@ -107,11 +107,13 @@ The rolling release also provides self-contained binaries:
 | `enclave-windows-arm64.zip` | Windows arm64 (WSL2 launcher) |
 
 Download the artifact for your platform together with `checksums.txt`, verify
-it, and place it on your `PATH`. On Linux:
+it, and install it into a directory on your `PATH` that you own, so it can
+update itself. On Linux:
 
 ```bash
 sha256sum --check --ignore-missing checksums.txt
-sudo install enclave-linux-amd64 /usr/local/bin/enclave
+install -d ~/.local/bin
+install enclave-linux-amd64 ~/.local/bin/enclave
 ```
 
 On macOS, substituting `enclave-darwin-amd64` on Intel:
@@ -119,9 +121,28 @@ On macOS, substituting `enclave-darwin-amd64` on Intel:
 ```bash
 shasum -a 256 --check --ignore-missing checksums.txt
 xattr -d com.apple.quarantine ./enclave-darwin-arm64 2>/dev/null || true
-sudo install -d /usr/local/bin
-sudo install enclave-darwin-arm64 /usr/local/bin/enclave
+install -d ~/.local/bin
+install enclave-darwin-arm64 ~/.local/bin/enclave
 ```
+
+Most Linux distributions put `~/.local/bin` on `PATH` at login once it exists;
+on macOS, add `export PATH="$HOME/.local/bin:$PATH"` to `~/.zshrc`.
+
+A standalone binary installed this way can update itself: `enclave self-update`
+replaces the executable with the latest build of its release channel, here
+`rolling`. Enclave checks for a different build at most once every 24 hours and
+reports it on interactive commands. To install updates automatically, add
+`"auto_update": true` to the global `config.json`; `"update_channel"` selects
+`rolling` or, once official releases ship, `stable`. The download is checked
+against the release's `checksums.txt`, which catches corruption but not a
+compromised release, so automatic updates trust whoever can publish the
+release. Package and source installs do not self-update; upgrade them with the
+package manager or by rebuilding.
+
+The updater never elevates privileges. A system-wide install, such as
+`sudo install enclave-linux-amd64 /usr/local/bin/enclave`, is updated by
+repeating these steps; Enclave still reports new builds, with the commands to
+run.
 
 The macOS binaries are unsigned and not notarized, so a binary downloaded
 through a browser carries a quarantine attribute that makes Gatekeeper refuse to

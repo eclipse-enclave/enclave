@@ -18,8 +18,10 @@ type OptionSources struct {
 }
 
 type GlobalOptionSources struct {
-	AllowRoot OptionSource
-	Verbose   OptionSource
+	AllowRoot     OptionSource
+	AutoUpdate    OptionSource
+	UpdateChannel OptionSource
+	Verbose       OptionSource
 }
 
 type RunOptionSources struct {
@@ -85,8 +87,10 @@ func (s OptionSources) RunSources() RunOptionSources { return s.RunOptionSources
 func DefaultOptionSources() OptionSources {
 	return OptionSources{
 		GlobalOptionSources: GlobalOptionSources{
-			AllowRoot: SourceDefault,
-			Verbose:   SourceDefault,
+			AllowRoot:     SourceDefault,
+			AutoUpdate:    SourceDefault,
+			UpdateChannel: SourceDefault,
+			Verbose:       SourceDefault,
 		},
 		RunOptionSources: RunOptionSources{
 			AddDirs:              SourceDefault,
@@ -170,6 +174,9 @@ func MergeOptionSources(base OptionSources, override OptionSources) OptionSource
 	}
 	if override.AuthScope != SourceUnset {
 		base.AuthScope = override.AuthScope
+	}
+	if override.AutoUpdate != SourceUnset {
+		base.AutoUpdate = override.AutoUpdate
 	}
 	if override.Backend != SourceUnset {
 		base.Backend = override.Backend
@@ -287,6 +294,9 @@ func MergeOptionSources(base OptionSources, override OptionSources) OptionSource
 	}
 	if override.Tool != SourceUnset {
 		base.Tool = override.Tool
+	}
+	if override.UpdateChannel != SourceUnset {
+		base.UpdateChannel = override.UpdateChannel
 	}
 	if override.UseRemoteUser != SourceUnset {
 		base.UseRemoteUser = override.UseRemoteUser

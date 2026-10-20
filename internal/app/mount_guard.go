@@ -117,16 +117,18 @@ func configSensitiveDirException(entry, origin, home, realHome string) (mounts.S
 func checkSensitiveMounts(project model.Project, additional []additionalDirs, exceptions []mounts.SensitiveDirException, home string, allowed bool) error {
 	sensitive := mounts.NewSensitivePaths(home, config.HostAppDataDirs(home), config.HostEnclaveRoots(home))
 	var sensitiveMounts, exempted, offenders []string
+	exemptable := false
 	assess := func(dir string, origin string) {
 		a := sensitive.Assess(dir, exceptions)
 		mount := fmt.Sprintf("%s (%s): ", dir, origin)
 		switch {
 		case a.Reason == "":
 			return
-		case a.Exception == nil:
-			offenders = append(offenders, mount+a.Reason)
 		case a.HardReason != "":
 			offenders = append(offenders, mount+a.HardReason+", which no sensitive-dir exception can cover; mount a narrower directory")
+		case a.Exception == nil:
+			offenders = append(offenders, mount+a.Reason)
+			exemptable = true
 		default:
 			exempted = append(exempted, mount+a.Reason+"; exempted by "+a.Exception.Origin)
 		}
@@ -149,9 +151,13 @@ func checkSensitiveMounts(project model.Project, additional []additionalDirs, ex
 		}
 		return nil
 	}
-	return fmt.Errorf("refusing to mount sensitive host paths:\n  %s\n"+
-		"To mount them anyway, pass them with --add-sensitive-dir or --add-readonly-sensitive-dir\n"+
-		"(this works for the project directory too), or list them in sensitive_dir_exceptions in\n%s.\n"+
+	hint := "Run enclave from a project directory, or narrow the additional directories where they are set.\n"
+	if exemptable {
+		hint = "To mount them anyway, pass them with --add-sensitive-dir or --add-readonly-sensitive-dir\n" +
+			"(this works for the project directory too), or list them in sensitive_dir_exceptions in\n" +
+			formatSource(model.SourceGlobal, project.Dir) + ".\n"
+	}
+	return fmt.Errorf("refusing to mount sensitive host paths:\n  %s\n%s"+
 		"Pass --allow-sensitive-mounts or set %s=1 to mount all sensitive paths anyway",
-		strings.Join(offenders, "\n  "), formatSource(model.SourceGlobal, project.Dir), model.EnvAllowSensitiveMounts)
+		strings.Join(offenders, "\n  "), hint, model.EnvAllowSensitiveMounts)
 }

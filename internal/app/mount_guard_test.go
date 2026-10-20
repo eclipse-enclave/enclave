@@ -246,6 +246,37 @@ func TestCheckSensitiveMountsHonorsSensitiveDirExceptions(t *testing.T) {
 				"(this works for the project directory too), or list them in sensitive_dir_exceptions in\n" + global + ".",
 				"Pass --allow-sensitive-mounts or set " + model.EnvAllowSensitiveMounts + "=1 to mount all sensitive paths anyway",
 			},
+			absent: []string{"Run enclave from a project directory"},
+		},
+		{
+			name:    "home project without exceptions",
+			project: home,
+			refused: []string{
+				home + " (project directory): is your home directory" + hardHint,
+				"Run enclave from a project directory, or narrow the additional directories where they are set.\n",
+				"Pass --allow-sensitive-mounts or set " + model.EnvAllowSensitiveMounts + "=1 to mount all sensitive paths anyway",
+			},
+			absent: []string{"--add-sensitive-dir", "sensitive_dir_exceptions"},
+		},
+		{
+			name:    "project inside Enclave's config root without exceptions",
+			project: at(".config/enclave"),
+			refused: []string{
+				at(".config/enclave") + " (project directory): is ~/.config/enclave" + hardHint,
+				"Run enclave from a project directory",
+			},
+			absent: []string{"is inside ~/.config", "--add-sensitive-dir"},
+		},
+		{
+			name:       "hard-protected and exemptable mounts without exceptions",
+			project:    code,
+			additional: []additionalDirs{cliAddDirs(at(".cache"), at(".m2"))},
+			refused: []string{
+				at(".cache") + " (--add-dir): contains ~/.cache/enclave" + hardHint,
+				at(".m2") + " (--add-dir): is ~/.m2\n",
+				"To mount them anyway, pass them with --add-sensitive-dir",
+			},
+			absent: []string{"Run enclave from a project directory"},
 		},
 		{
 			name:     "config exception covering the project",

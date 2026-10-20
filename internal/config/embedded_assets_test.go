@@ -15,9 +15,11 @@ import (
 	"sync"
 	"testing"
 	"testing/fstest"
+	"time"
 
 	"enclave/internal/appassets"
 	"enclave/internal/model"
+	"enclave/internal/util"
 )
 
 func TestDiscoverAppRootDoesNotUseLegacyDataRoot(t *testing.T) {
@@ -335,6 +337,81 @@ func TestFindAppAssetsNeverWrites(t *testing.T) {
 	if _, err := os.Lstat(pruned); !os.IsNotExist(err) {
 		t.Fatalf("lookup repaired the pruned cache entry: %v", err)
 	}
+}
+
+func TestExtractAppAssetsRecordsUseAtMostDaily(t *testing.T) {
+	files := testAppAssets("content")
+	cacheRoot := filepath.Join(t.TempDir(), "cache")
+	root := extractTestAppAssets(t, files, cacheRoot)
+
+	recent := backdateAppAssets(t, root, embeddedAssetUseRefreshInterval-time.Hour)
+	extractTestAppAssets(t, files, cacheRoot)
+	info, err := os.Lstat(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !info.ModTime().Equal(recent) {
+		t.Fatalf("use within the refresh interval rewrote the entry mtime to %v, want %v", info.ModTime(), recent)
+	}
+
+	backdateAppAssets(t, root, embeddedAssetUseRefreshInterval+time.Hour)
+	extractTestAppAssets(t, files, cacheRoot)
+	info, err = os.Lstat(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if age := time.Since(info.ModTime()); age > time.Minute {
+		t.Fatalf("use was not recorded: entry mtime is %v old", age)
+	}
+}
+
+func TestExtractAppAssetsRemovesLongUnusedEntries(t *testing.T) {
+	cacheRoot := filepath.Join(t.TempDir(), "cache")
+	unusedRoot := extractTestAppAssets(t, testAppAssets("unused"), cacheRoot)
+	recentRoot := extractTestAppAssets(t, testAppAssets("recent"), cacheRoot)
+	lockedRoot := extractTestAppAssets(t, testAppAssets("locked"), cacheRoot)
+	backdateAppAssets(t, unusedRoot, embeddedAssetUnusedRetention+time.Hour)
+	backdateAppAssets(t, recentRoot, embeddedAssetUnusedRetention-time.Hour)
+	backdateAppAssets(t, lockedRoot, embeddedAssetUnusedRetention+time.Hour)
+	release, err := util.AcquireFileLock(appAssetsLockPath(cacheRoot, filepath.Base(lockedRoot)), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+
+	extractTestAppAssets(t, testAppAssets("current"), cacheRoot)
+
+	if _, err := os.Lstat(unusedRoot); !os.IsNotExist(err) {
+		t.Fatalf("entry unused beyond the retention remains: %v", err)
+	}
+	if err := validateAppRoot(recentRoot); err != nil {
+		t.Fatalf("entry used within the retention was removed: %v", err)
+	}
+	if err := validateAppRoot(lockedRoot); err != nil {
+		t.Fatalf("entry whose lock is held was removed: %v", err)
+	}
+}
+
+func extractTestAppAssets(t *testing.T, files fstest.MapFS, cacheRoot string) string {
+	t.Helper()
+	key, err := appassets.ContentHash(files)
+	if err != nil {
+		t.Fatal(err)
+	}
+	root, err := extractAppAssets(files, key, cacheRoot)
+	if err != nil {
+		t.Fatalf("extract assets: %v", err)
+	}
+	return root
+}
+
+func backdateAppAssets(t *testing.T, root string, age time.Duration) time.Time {
+	t.Helper()
+	when := time.Now().Add(-age).Truncate(time.Second)
+	if err := os.Chtimes(root, when, when); err != nil {
+		t.Fatal(err)
+	}
+	return when
 }
 
 func testAppAssets(docContent string) fstest.MapFS {

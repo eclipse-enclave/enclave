@@ -74,9 +74,12 @@ first. It locates an "app root" in this order (`internal/config/paths.go`,
 On Linux the extraction store is
 `${XDG_CACHE_HOME:-~/.cache}/enclave/assets/<hash>/`. On macOS it is
 `~/Library/Caches/org.eclipse.enclave/assets/<hash>/`. Each distinct asset set
-uses its own atomically published directory and does not modify other entries. The tree
-is reproducible from the binary, so deleting it is safe; the next run extracts
-it again.
+uses its own atomically published directory. The tree is reproducible from the
+binary, so deleting it is safe; the next run extracts it again. A binary
+refreshes its entry's mtime at most once a day, under the entry's lock. Whenever
+it extracts or refreshes its entry, it also removes other entries no binary has
+used for 30 days, skipping any whose lock is held (`removeUnusedAppAssets` in
+`internal/config/embedded_assets.go`).
 
 Because `bin/enclave` lives inside the checkout, tier 2 finds the repository
 root. Running an in-tree binary therefore uses the working copy's assets:

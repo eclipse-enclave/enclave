@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"enclave/internal/appassets"
+	"enclave/internal/logx"
 	"enclave/internal/util"
 )
 
@@ -97,10 +98,13 @@ func extractAppAssets(files fs.FS, key string, cacheRoot string) (string, error)
 	}
 
 	assetsDir := filepath.Dir(root)
+	published := false
 	if info, err := os.Lstat(root); err == nil {
-		recentlyUsed := time.Since(info.ModTime()) < embeddedAssetUseRefreshInterval
-		if validationErr := validatePublishedAppRoot(root, files); validationErr == nil && recentlyUsed {
-			return root, nil
+		if validationErr := validatePublishedAppRoot(root, files); validationErr == nil {
+			if time.Since(info.ModTime()) < embeddedAssetUseRefreshInterval {
+				return root, nil
+			}
+			published = true
 		}
 	} else if !os.IsNotExist(err) {
 		return "", fmt.Errorf("inspect embedded asset cache %s: %w", root, err)
@@ -112,6 +116,12 @@ func extractAppAssets(files fs.FS, key string, cacheRoot string) (string, error)
 	if err := util.WithFileLock(appAssetsLockPath(cacheRoot, key), func() error {
 		return materializeAppAssets(files, key, assetsDir, root)
 	}); err != nil {
+		// Refreshing only records use, so a cache this user can read but not
+		// write keeps serving a published entry.
+		if published && validatePublishedAppRoot(root, files) == nil {
+			logx.Debugf("Could not record use of embedded assets at %s: %v", root, err)
+			return root, nil
+		}
 		return "", err
 	}
 	removeUnusedAppAssets(cacheRoot, key, time.Now())

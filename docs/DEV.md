@@ -79,7 +79,8 @@ binary, so deleting it is safe; the next run extracts it again. A binary
 refreshes its entry's mtime at most once a day, under the entry's lock. Whenever
 it extracts or refreshes its entry, it also removes other entries no binary has
 used for 30 days, skipping any whose lock is held (`removeUnusedAppAssets` in
-`internal/config/embedded_assets.go`).
+`internal/config/embedded_assets.go`). A refresh that fails, as in a cache this
+user can read but not write, still leaves the valid entry in use.
 
 Because `bin/enclave` lives inside the checkout, tier 2 finds the repository
 root. Running an in-tree binary therefore uses the working copy's assets:

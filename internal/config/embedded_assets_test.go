@@ -365,6 +365,37 @@ func TestExtractAppAssetsRecordsUseAtMostDaily(t *testing.T) {
 	}
 }
 
+func TestExtractAppAssetsServesPublishedEntryWhenUseCannotBeRecorded(t *testing.T) {
+	files := testAppAssets("content")
+	cacheRoot := filepath.Join(t.TempDir(), "cache")
+	root := extractTestAppAssets(t, files, cacheRoot)
+	key := filepath.Base(root)
+	// A directory in place of the lock file cannot be opened even as root.
+	lockPath := appAssetsLockPath(cacheRoot, key)
+	if err := os.Remove(lockPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(lockPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	backdateAppAssets(t, root, embeddedAssetUseRefreshInterval+time.Hour)
+
+	got, err := extractAppAssets(files, key, cacheRoot)
+	if err != nil {
+		t.Fatalf("published entry failed when its use could not be recorded: %v", err)
+	}
+	if got != root {
+		t.Fatalf("root = %q, want %q", got, root)
+	}
+
+	if err := os.RemoveAll(root); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := extractAppAssets(files, key, cacheRoot); err == nil {
+		t.Fatal("extracted a missing entry without taking its lock")
+	}
+}
+
 func TestExtractAppAssetsRemovesLongUnusedEntries(t *testing.T) {
 	cacheRoot := filepath.Join(t.TempDir(), "cache")
 	unusedRoot := extractTestAppAssets(t, testAppAssets("unused"), cacheRoot)

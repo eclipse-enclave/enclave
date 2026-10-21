@@ -328,11 +328,12 @@ does not mean a quiet session:
 `enclave --network-log=requests` routes all allowlisted HTTPS through the
 gateway's MITM proxy, giving one `http` event per request. Clients that pin
 certificates or use custom trust stores may fail. The container trusts the
-gateway CA through `SSL_CERT_FILE` and `REQUESTS_CA_BUNDLE`
+gateway CA through `SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE`, and `GIT_SSL_CAINFO`
 (`/tmp/enclave-ca/ca-certificates.crt`: system bundle plus gateway CA, written
 at startup) and `NODE_EXTRA_CA_CERTS`. They are set on the container, so
 `docker exec` processes such as an attached IDE backend trust it too. Only the
 CA persists on the host; leaf certificates stay in each gateway container.
+Git needs its own variable because its TLS library ignores `SSL_CERT_FILE`.
 
 `--network-log=full` does the same and also stores headers and bodies; see
 [Full capture](#full-capture).

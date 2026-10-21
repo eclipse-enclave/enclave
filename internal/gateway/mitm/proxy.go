@@ -155,8 +155,12 @@ func Run(ctx context.Context, opts Options) error {
 	case <-ctx.Done():
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), serverShutdownTimeout)
 		defer cancel()
+		// Closing the upgraded connections first lets their exchanges be logged
+		// and captured while the servers shut down.
+		proxy.exchanges.closeUpgraded()
 		_ = httpServer.Shutdown(shutdownCtx)
 		_ = httpsServer.Shutdown(shutdownCtx)
+		proxy.exchanges.wait(shutdownCtx)
 		return nil
 	case err := <-errCh:
 		_ = httpServer.Close()
@@ -174,6 +178,7 @@ type proxy struct {
 	session        string
 	// captures is nil unless --network-log=full asked for full captures.
 	captures  *netcapture.Store
+	exchanges exchangeTracker
 	transport *http.Transport
 	// upgradeTransport speaks only HTTP/1.1 and carries every request with an
 	// Upgrade header, whether or not Connection names it: HTTP/2 refuses any
@@ -239,6 +244,8 @@ func (p *proxy) logEvent(event netlog.Event) {
 
 func (p *proxy) handler(scheme string) http.HandlerFunc {
 	return func(w http.ResponseWriter, req *http.Request) {
+		end := p.exchanges.begin()
+		defer end()
 		host := normalizedRequestHost(req)
 		event := newHTTPAuditEvent(req, host, scheme)
 		if scheme == "https" {
@@ -346,7 +353,7 @@ func (p *proxy) forward(w http.ResponseWriter, req *http.Request, scheme string,
 	capture.Response(resp)
 	if resp.StatusCode == http.StatusSwitchingProtocols {
 		// The traffic of the upgraded connection is relayed, not captured.
-		return relayUpgrade(w, outgoing, resp)
+		return p.relayUpgrade(w, outgoing, resp)
 	}
 	copyHeaders(w.Header(), resp.Header)
 	w.WriteHeader(resp.StatusCode)
@@ -403,7 +410,7 @@ func (c captureWriter) Write(p []byte) (int, error) {
 // 101 response must reach the client before either side sends a frame, and
 // the upgraded connection then carries traffic in both directions, so it is
 // taken over from the HTTP server rather than written as a response body.
-func relayUpgrade(w http.ResponseWriter, req *http.Request, resp *http.Response) (forwardResult, error) {
+func (p *proxy) relayUpgrade(w http.ResponseWriter, req *http.Request, resp *http.Response) (forwardResult, error) {
 	requested, switched := upgradeType(req.Header), upgradeType(resp.Header)
 	if requested == "" || !strings.EqualFold(requested, switched) {
 		return forwardResult{}, fmt.Errorf("upstream switched to protocol %q when %q was requested", switched, requested)
@@ -417,6 +424,7 @@ func relayUpgrade(w http.ResponseWriter, req *http.Request, resp *http.Response)
 		return forwardResult{}, fmt.Errorf("take over upgraded connection: %w", err)
 	}
 	defer func() { _ = downstream.Close() }()
+	defer p.exchanges.upgraded(downstream)()
 
 	// From here on the connection is no longer the HTTP server's, so no error
 	// response can be sent: a client that is gone ends the relay.
@@ -443,6 +451,77 @@ func relayUpgrade(w http.ResponseWriter, req *http.Request, resp *http.Response)
 	_ = downstream.Close()
 	<-done
 	return result, nil
+}
+
+// exchangeTracker lets the proxy finish what it relays when it stops. The
+// HTTP servers' Shutdown neither closes nor waits for connections taken over
+// for protocol upgrades, so without it an upgraded connection open at shutdown
+// would be cut without its event or capture being written.
+type exchangeTracker struct {
+	mu       sync.Mutex
+	stopping bool
+	conns    map[io.Closer]struct{}
+	active   sync.WaitGroup
+}
+
+// begin counts an exchange in flight and returns the func that ends it.
+// Exchanges that begin while the proxy stops are not waited for.
+func (t *exchangeTracker) begin() func() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.stopping {
+		return func() {}
+	}
+	t.active.Add(1)
+	return t.active.Done
+}
+
+// upgraded registers a connection taken over for an upgrade, to be closed when
+// the proxy stops, and returns the func that deregisters it. One taken over
+// while the proxy stops is closed at once.
+func (t *exchangeTracker) upgraded(conn io.Closer) func() {
+	t.mu.Lock()
+	if t.stopping {
+		t.mu.Unlock()
+		_ = conn.Close()
+		return func() {}
+	}
+	if t.conns == nil {
+		t.conns = map[io.Closer]struct{}{}
+	}
+	t.conns[conn] = struct{}{}
+	t.mu.Unlock()
+	return func() {
+		t.mu.Lock()
+		delete(t.conns, conn)
+		t.mu.Unlock()
+	}
+}
+
+// closeUpgraded closes the upgraded connections, which ends their relays.
+func (t *exchangeTracker) closeUpgraded() {
+	t.mu.Lock()
+	t.stopping = true
+	conns := t.conns
+	t.conns = nil
+	t.mu.Unlock()
+	for conn := range conns {
+		_ = conn.Close()
+	}
+}
+
+// wait returns once the exchanges in flight have ended, or ctx is done. It
+// follows closeUpgraded, after which no exchange is counted any more.
+func (t *exchangeTracker) wait(ctx context.Context) {
+	done := make(chan struct{})
+	go func() {
+		t.active.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-ctx.Done():
+	}
 }
 
 // upgradeType returns the protocol a message asks to switch to, or "" when

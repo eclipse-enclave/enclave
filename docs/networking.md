@@ -118,9 +118,10 @@ limits matter before a quiet log is read as a quiet session:
   host and produces no request-level events for it.
 - **An upgraded connection is one `http` event.** A WebSocket, or any other
   protocol a client switches to (SPDY for `kubectl exec`, for example), is
-  logged once with status `101`, when it closes. The traffic it carries is
-  relayed without being inspected or logged, so requests multiplexed inside it
-  get no events of their own, even with `--network-log=requests`.
+  logged once with status `101`, when it closes or the proxy stops. The
+  traffic it carries is relayed without being inspected or logged, so requests
+  multiplexed inside it get no events of their own, even with
+  `--network-log=requests`.
 
 Run the session with `--network-log=requests` (or `full`) to force MITM for
 every allowlisted HTTPS host and get an `http` event per request. In every mode,

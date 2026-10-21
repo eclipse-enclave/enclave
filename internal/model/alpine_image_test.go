@@ -13,12 +13,13 @@ import (
 	"testing"
 )
 
-// The `alpine` image token, optionally tagged, pinned by digest. Tags such as
-// golang's `-alpine3.22` do not match because a digit follows the name.
-var alpineDigestPattern = regexp.MustCompile(`\balpine(?::[\w.-]+)?@(sha256:[0-9a-f]{64})`)
+// A digest-pinned `alpine` image reference, optionally tagged. The name must
+// start a path segment or follow a shell `:-` default, so variant tags like
+// golang's `-alpine` do not match.
+var alpineDigestPattern = regexp.MustCompile(`(?:^|[\s/"'=]|:-)alpine(?::[\w.-]+)?@(sha256:[0-9a-f]{64})`)
 
 // TestAlpineImageDigestMatchesOtherPins keeps the hand-maintained Alpine pins
-// in sync. A bump that misses one would leave that path on a stale trust store.
+// consistent so a digest bump cannot miss one of them.
 func TestAlpineImageDigestMatchesOtherPins(t *testing.T) {
 	t.Parallel()
 

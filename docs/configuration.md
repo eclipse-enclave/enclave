@@ -293,6 +293,7 @@ Common settings paths:
 
 | Tool | Native config path |
 |------|--------------------|
+| antigravity | `antigravity-cli/settings.json` |
 | claude | `settings.json` |
 | codex | `config.toml` |
 | mistral-vibe | `config.toml` |

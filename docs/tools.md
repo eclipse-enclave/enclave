@@ -11,6 +11,7 @@ Built-in tool profiles:
 
 | Tool | Description |
 |------|-------------|
+| `antigravity` | [Antigravity CLI](https://github.com/google-antigravity/antigravity-cli) (Google) |
 | `claude` | [Claude Code](https://www.anthropic.com/claude-code) (Anthropic) |
 | `codex` | [Codex CLI](https://github.com/openai/codex) (OpenAI) |
 | `mistral-vibe` | [Mistral Vibe CLI](https://github.com/mistralai/mistral-vibe) (opt-in/experimental) |

@@ -1,0 +1,84 @@
+{
+  "name": "antigravity",
+  "command": "agy",
+  "continue_args": [
+    "--continue"
+  ],
+  "yolo_flag": "--dangerously-skip-permissions",
+  "yolo_enabled": true,
+  "config_dir": ".gemini",
+  "skills_dir": ".gemini/config/skills",
+  "state_paths": [
+    "antigravity-cli/conversations/",
+    "antigravity-cli/conversation_summaries.db*",
+    "antigravity-cli/brain/",
+    "antigravity-cli/implicit/",
+    "antigravity-cli/cache/",
+    "antigravity-cli/log/",
+    "antigravity-cli/builtin/",
+    "antigravity-cli/updater/",
+    "antigravity-cli/jetski_state.pbtxt",
+    "config/projects/",
+    "config/.migrated",
+    "mcp_oauth_tokens.json"
+  ],
+  "settings_file": "antigravity-settings.json",
+  "settings_target": ".gemini/antigravity-cli/settings.json",
+  "passthrough_paths": [
+    "antigravity-cli/keybindings.json",
+    "antigravity-cli/settings.json",
+    "config/AGENTS.md",
+    "config/GEMINI.md",
+    "config/agents.json",
+    "config/agents/",
+    "config/hooks.json",
+    "config/mcp_config.json",
+    "config/plugins.json",
+    "config/rules.json",
+    "config/rules/",
+    "config/skills.json",
+    "config/skills/"
+  ],
+  "qemu_store_cache_mmap": true,
+  "providers": [
+    {
+      "name": "google",
+      "credential_secrets": [
+        "gemini-api-key"
+      ],
+      "auth_files": [
+        "antigravity-cli/antigravity-oauth-token"
+      ],
+      "auth_session": {
+        "mode": "any",
+        "checks": [
+          {
+            "file": "antigravity-cli/antigravity-oauth-token",
+            "type": "file_exists"
+          }
+        ]
+      }
+    }
+  ],
+  "secrets": {
+    "gemini-api-key": {
+      "env_vars": [
+        "GEMINI_API_KEY"
+      ],
+      "release": {
+        "http": {
+          "hosts": [
+            "generativelanguage.googleapis.com"
+          ],
+          "header": "x-goog-api-key"
+        }
+      }
+    }
+  },
+  "host_config_dir": "",
+  "host_credentials_file": "",
+  "host_oauth_json": "",
+  "environment": {
+    "AGY_CLI_DISABLE_AUTO_UPDATE": "true"
+  }
+}

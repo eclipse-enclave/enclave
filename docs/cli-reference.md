@@ -129,7 +129,7 @@ including sessions that have already exited:
 | `--tool <tool>` | Read another tool's log |
 | `--session <name>` | Read one session's events, named by its container (an exited session too) |
 | `--all-running` | Merge the logs of all running gateways on the host |
-| `--show-capture <id>` | Show a full capture instead of events; `--json` emits its record |
+| `--show-capture <id>` | Show a full capture instead of events; `--json` emits its record. WebSocket messages can be read while it is open |
 
 `--follow` excludes `--summary`; `--since session` needs exactly one session
 in scope, so not `--all-running`. `--show-capture` accepts only scope flags
@@ -272,7 +272,7 @@ See [Authentication and secrets](auth.md).
 | `--allow-all-network` | Disable network restrictions. A gateway still logs HTTP/HTTPS on ports 80 and 443 unless `--disable-gateway` is set; see [Unrestricted mode](networking.md#unrestricted-mode) |
 | `--disable-gateway` | Run without a network gateway, so no network log is written. Requires unrestricted network mode (`--allow-all-network`, `allow_all_network`, or policy mode `unrestricted`) and never implies it |
 | `--allow-domain <domain>` | Allow a domain for this run only, without persisting it. Repeatable, comma-separated list flag for `allow_domains` |
-| `--network-log <coarse\|requests\|full>` | Audit mode. `coarse` (default): one pass/deny event per TLS connection, plus per-request events for plaintext HTTP and secret-release hosts. `requests`: MITM all allowlisted HTTPS hosts (every host in unrestricted mode) and log every request. `full`: also store headers and bodies in restricted mode (sensitive; see [Full capture](networking.md#full-capture)). See [Coverage and granularity](networking.md#coverage-and-granularity) |
+| `--network-log <coarse\|requests\|full>` | Audit mode. `coarse` (default): one pass/deny event per TLS connection, plus per-request events for plaintext HTTP and secret-release hosts. `requests`: MITM all allowlisted HTTPS hosts (every host in unrestricted mode) and log every request. `full`: also store headers, bodies, and WebSocket messages in restricted mode (sensitive; see [Full capture](networking.md#full-capture)). See [Coverage and granularity](networking.md#coverage-and-granularity) |
 
 ### Persistence
 

@@ -8,7 +8,6 @@
 package netlogview
 
 import (
-	"bytes"
 	"errors"
 	"net/http"
 	"strings"
@@ -151,20 +150,58 @@ func TestWriteCaptureShowsTextCutInsideACharacter(t *testing.T) {
 	}
 }
 
-func TestTrimPartialRune(t *testing.T) {
-	euro := []byte("€") // three bytes
-	for _, tc := range []struct {
-		in, want []byte
-	}{
-		{[]byte("abc"), []byte("abc")},
-		{append([]byte("ab"), euro...), append([]byte("ab"), euro...)},
-		{append([]byte("ab"), euro[:1]...), []byte("ab")},
-		{append([]byte("ab"), euro[:2]...), []byte("ab")},
-		{[]byte{}, []byte{}},
+// A body the capture decoded is shown as stored, even though the response
+// headers still name the encoding it was relayed in.
+func websocketFixture() CaptureView {
+	view := captureFixture()
+	view.Record.Request = netcapture.Request{Method: "GET", URL: "https://api.example.com/responses", Proto: "HTTP/1.1", Headers: http.Header{"Upgrade": {"websocket"}}}
+	view.Record.Response = &netcapture.Response{Status: http.StatusSwitchingProtocols, Proto: "HTTP/1.1", Headers: http.Header{"Upgrade": {"websocket"}}}
+	view.Record.WebSocket = &netcapture.WebSocket{File: "0123456789abcdef.messages.jsonl", Compression: "permessage-deflate", Messages: 5, StoredMessages: 4, Truncated: true, Error: "server: invalid WebSocket frame: reserved opcode 0x3"}
+	view.Request, view.Response = CapturedBody{}, CapturedBody{}
+	view.Messages = CapturedMessages{
+		Path: "/state/capture/enclave-demo-1/0123456789abcdef.messages.jsonl",
+		List: []netcapture.Message{
+			{Timestamp: "2026-08-13T12:04:31.5Z", From: "client", Type: "text", Bytes: 20, StoredBytes: 26, DecodedFrom: "permessage-deflate", Text: `{"type":"response.create"}`},
+			{Timestamp: "2026-08-13T12:04:32Z", From: "server", Type: "text", Bytes: 9, StoredBytes: 9, Text: "evil\x1b[2Jx"},
+			{Timestamp: "2026-08-13T12:04:33Z", From: "server", Type: "binary", Bytes: 3, StoredBytes: 3, Base64: []byte{1, 2, 3}},
+			{Timestamp: "2026-08-13T12:04:34Z", From: "client", Type: "close", Bytes: 6, StoredBytes: 6, Code: 1000, Text: "done"},
+		},
+	}
+	return view
+}
+
+func TestWriteCaptureRendersWebSocketMessages(t *testing.T) {
+	out := renderCapture(t, websocketFixture())
+	for _, want := range []string{
+		"(WebSocket, 5 messages, 4 stored, permessage-deflate decoded, truncated: /state/capture/enclave-demo-1/0123456789abcdef.messages.jsonl)",
+		"(frames no longer followed: server: invalid WebSocket frame: reserved opcode 0x3)",
+		"> client 12:04:31.500 text (26 B decoded from 20 B of permessage-deflate)\n{\"type\":\"response.create\"}\n",
+		"< server 12:04:32.000 text (9 B)\nevil?[2Jx\n",
+		"< server 12:04:33.000 binary (3 B, binary)\n",
+		"> client 12:04:34.000 close 1000 (6 B)\ndone\n",
 	} {
-		if got := trimPartialRune(tc.in); !bytes.Equal(got, tc.want) {
-			t.Fatalf("trimPartialRune(%q) = %q, want %q", tc.in, got, tc.want)
+		if !strings.Contains(out, want) {
+			t.Fatalf("output lacks %q:\n%s", want, out)
 		}
+	}
+	if strings.Contains(out, "\x1b") || strings.Contains(out, "not captured") {
+		t.Fatalf("output:\n%s", out)
+	}
+}
+
+func TestWriteCaptureRendersAnOpenWebSocket(t *testing.T) {
+	view := websocketFixture()
+	view.Record.WebSocket = &netcapture.WebSocket{File: "0123456789abcdef.messages.jsonl", Open: true}
+	view.Messages.List = view.Messages.List[:2]
+	out := renderCapture(t, view)
+	if !strings.Contains(out, "  open\n") || !strings.Contains(out, "(WebSocket still open, 2 messages so far: ") {
+		t.Fatalf("open socket not described:\n%s", out)
+	}
+
+	view.Messages = CapturedMessages{Path: "/gone", Err: errors.New("open /gone: no such file or directory")}
+	out = renderCapture(t, view)
+	if !strings.Contains(out, "not shown: open /gone: no such file or directory") {
+		t.Fatalf("unreadable messages not reported:\n%s", out)
 	}
 }
 

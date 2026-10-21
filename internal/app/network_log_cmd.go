@@ -455,7 +455,8 @@ func followNetworkLog(paths []string, offsets map[string]int64, filter netlogvie
 }
 
 // showNetworkCapture prints one full capture. With --json the record is
-// emitted as stored, compacted onto one line; the bodies stay in their files.
+// emitted as stored, compacted onto one line; the bodies and WebSocket messages
+// stay in their files.
 func showNetworkCapture(scope networkLogScope, id string, asJSON bool) int {
 	path, err := netcapture.Find(scope.captureRoots, scope.session, id)
 	if errors.Is(err, netcapture.ErrNotFound) {
@@ -499,6 +500,10 @@ func showNetworkCapture(scope networkLogScope, id string, asJSON bool) int {
 	}
 	if record.Response != nil {
 		view.Response = readCapturedBody(path, record.Response.Body)
+	}
+	if record.WebSocket != nil {
+		messagesPath, messages, err := netcapture.ReadMessages(path, record.WebSocket)
+		view.Messages = netlogview.CapturedMessages{List: messages, Path: messagesPath, Err: err}
 	}
 	render := netlogview.RenderOptions{Color: logx.ColorEnabledFor(os.Stdout)}
 	if err := netlogview.WriteCapture(out, view, render); err != nil {

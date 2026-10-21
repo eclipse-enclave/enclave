@@ -66,7 +66,7 @@ sequenceDiagram
                 API-->>Proxy: Upstream response
                 Proxy-->>Tool: Return response
                 opt network_log=full
-                    Proxy->>Cap: Tee bodies while relaying<br/>then write record
+                    Proxy->>Cap: Tee bodies and WebSocket messages while relaying<br/>then write record
                 end
                 Proxy->>Log: HTTP pass (allowlist, capture_id)
             end
@@ -114,7 +114,8 @@ sequenceDiagram
 
 In `full` mode the proxy snapshots each relayed request before header release
 and stores it with the response under `logs/capture/<session>/`; its `http`
-event carries `capture_id`. See [Full capture](../networking.md#full-capture).
+event carries `capture_id`. WebSocket messages are also stored, with an open
+record readable from the handshake. See [Full capture](../networking.md#full-capture).
 
 ## Properties and limits
 

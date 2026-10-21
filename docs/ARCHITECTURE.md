@@ -152,6 +152,7 @@ The network request flow, restricted and unrestricted, has separate
 | [`internal/gateway/bundle/`](../internal/gateway/bundle/bundle.go) | Host-managed bundles (`dnsmasq.conf`, `domains.txt`, `meta.json`) for apply and reload |
 | [`internal/gateway/mitm/`](../internal/gateway/mitm/) | TLS MITM, allowlist checks, placeholder rewriting; writes events through `internal/netlog` |
 | [`internal/gateway/dnsaudit/`](../internal/gateway/dnsaudit/) | Turns dnsmasq denials into `dns` events; own process (`enclave-gateway-proxy -dns-audit <log>`), so it works without the proxy |
+| [`internal/gateway/wsframe/`](../internal/gateway/wsframe/) | Shared RFC 6455 frame parser; unmasks payloads without taking part in the connection |
 | [`internal/gateway/tlsstore/`](../internal/gateway/tlsstore/) | CA and container-private leaf cache; only the CA reaches the host |
 
 ### Tools, network policy, and devcontainers

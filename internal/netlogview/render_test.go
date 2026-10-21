@@ -235,3 +235,11 @@ func TestRenderSummaryLabelsTheDomainlessGroup(t *testing.T) {
 		t.Fatalf("the label did not widen the domain column:\n%s\n%s", lines[0], lines[1])
 	}
 }
+
+func TestRenderHumanRowNamesTheCapture(t *testing.T) {
+	event := netlog.Event{Timestamp: "2026-08-13T12:04:31.412Z", Type: netlog.TypeHTTP, Method: "POST", Domain: "api.anthropic.com", Path: "/v1/messages", Status: 200, ResponseSize: 4300, Verdict: netlog.VerdictPass, Rule: "allowlist", CaptureID: "0123456789abcdef"}
+	row := renderEvents([]netlog.Event{event}, humanOptions())
+	if want := " 12:04:31  ✓  POST  api.anthropic.com        /v1/messages         200  4.2 KB  capture 0123456789abcdef\n"; row != want {
+		t.Fatalf("row =\n%q\nwant\n%q", row, want)
+	}
+}

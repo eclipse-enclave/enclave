@@ -8,7 +8,11 @@
 package app
 
 import (
+	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -18,6 +22,7 @@ import (
 	"enclave/internal/backend"
 	"enclave/internal/config"
 	"enclave/internal/model"
+	"enclave/internal/netcapture"
 	"enclave/internal/netlog"
 	"enclave/internal/netlogview"
 )
@@ -274,6 +279,10 @@ func TestResolveNetworkLogScopeFallsBackWithoutDocker(t *testing.T) {
 		if len(scope.paths) != 1 || scope.paths[0] != want {
 			t.Fatalf("paths = %v, want [%s]", scope.paths, want)
 		}
+		wantRoot := config.HostProjectNetworkCaptureDir(home, "abc", "claude")
+		if len(scope.captureRoots) != 1 || scope.captureRoots[0] != wantRoot {
+			t.Fatalf("capture roots = %v, want [%s]", scope.captureRoots, wantRoot)
+		}
 		if scope.session != "enclave-demo-claude" {
 			t.Fatalf("session = %q, want enclave-demo-claude", scope.session)
 		}
@@ -313,5 +322,122 @@ func TestFilterGatewaysBySession(t *testing.T) {
 	}
 	if matched := filterGatewaysBySession(gateways, "missing"); len(matched) != 0 {
 		t.Fatalf("filterGatewaysBySession(missing) = %+v", matched)
+	}
+}
+
+// writeTestCapture records one exchange in a session directory below root, the
+// way the gateway does, and returns its ID.
+func writeTestCapture(t *testing.T, root string, session string) string {
+	t.Helper()
+	dir, err := netcapture.PrepareSessionDir(root, session)
+	if err != nil {
+		t.Fatalf("PrepareSessionDir() error = %v", err)
+	}
+	store, err := netcapture.Open(netcapture.Options{Dir: dir, Session: session})
+	if err != nil {
+		t.Fatalf("netcapture.Open() error = %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "http://api.example.com/v1/items?draft=1", strings.NewReader(`{"name":"report"}`))
+	req.Header.Set("Content-Type", "application/json")
+	capture := store.Begin(req, "https")
+	_, _ = io.Copy(io.Discard, capture.RequestBody(req.Body))
+	capture.Response(&http.Response{StatusCode: http.StatusCreated, Proto: "HTTP/1.1", Header: http.Header{"Content-Type": {"application/json"}}})
+	_, _ = io.WriteString(capture.ResponseBody(), `{"id":7}`)
+	id := capture.Finish(nil)
+	if id == "" {
+		t.Fatal("capture was not written")
+	}
+	return id
+}
+
+func TestShowNetworkCapturePrintsBothMessages(t *testing.T) {
+	root := t.TempDir()
+	id := writeTestCapture(t, root, "enclave-demo-claude-1")
+	scope := networkLogScope{captureRoots: []string{root}, label: "test"}
+
+	var code int
+	out := captureStdout(t, func() { code = showNetworkCapture(scope, id, false) })
+	if code != 0 {
+		t.Fatalf("showNetworkCapture() = %d", code)
+	}
+	for _, want := range []string{
+		"POST https://api.example.com/v1/items?draft=1",
+		"Content-Type: application/json",
+		`{"name":"report"}`,
+		"HTTP/1.1 201 Created",
+		`{"id":7}`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("output lacks %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestShowNetworkCaptureJSONEmitsTheRecord(t *testing.T) {
+	root := t.TempDir()
+	id := writeTestCapture(t, root, "enclave-demo-claude-1")
+	scope := networkLogScope{captureRoots: []string{root}, label: "test", session: "enclave-demo-claude-1"}
+
+	var code int
+	out := captureStdout(t, func() { code = showNetworkCapture(scope, id, true) })
+	if code != 0 {
+		t.Fatalf("showNetworkCapture() = %d", code)
+	}
+	if strings.Count(out, "\n") != 1 {
+		t.Fatalf("JSON output spans several lines:\n%s", out)
+	}
+	var record netcapture.Record
+	if err := json.Unmarshal([]byte(out), &record); err != nil {
+		t.Fatalf("unmarshal output: %v", err)
+	}
+	if record.ID != id || record.Kind != netcapture.Kind || record.SchemaVersion != netcapture.SchemaVersion {
+		t.Fatalf("record = %+v", record)
+	}
+}
+
+func TestShowNetworkCaptureReportsUnknownIDs(t *testing.T) {
+	root := t.TempDir()
+	writeTestCapture(t, root, "enclave-demo-claude-1")
+	scope := networkLogScope{captureRoots: []string{root}, label: "test"}
+	for _, id := range []string{"ffffffffffffffff", "../escape"} {
+		var code int
+		_, stderr := captureOutput(t, func() { code = showNetworkCapture(scope, id, false) })
+		if code == 0 {
+			t.Fatalf("showNetworkCapture(%q) succeeded", id)
+		}
+		if strings.TrimSpace(stderr) == "" {
+			t.Fatalf("showNetworkCapture(%q) failed silently", id)
+		}
+	}
+}
+
+// A compromised gateway could plant a link to a host file in its session
+// directory; showing the capture must not print that file.
+func TestShowNetworkCaptureDoesNotFollowPlantedLinks(t *testing.T) {
+	root := t.TempDir()
+	id := writeTestCapture(t, root, "enclave-demo-claude-1")
+	secret := filepath.Join(t.TempDir(), "id_ed25519")
+	if err := os.WriteFile(secret, []byte("PRIVATE KEY MATERIAL"), 0o600); err != nil {
+		t.Fatalf("write secret: %v", err)
+	}
+	body := filepath.Join(root, "enclave-demo-claude-1", id+".response.body")
+	if err := os.Remove(body); err != nil {
+		t.Fatalf("remove body: %v", err)
+	}
+	if err := os.Symlink(secret, body); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	scope := networkLogScope{captureRoots: []string{root}, label: "test"}
+
+	var code int
+	out := captureStdout(t, func() { code = showNetworkCapture(scope, id, false) })
+	if code != 0 {
+		t.Fatalf("showNetworkCapture() = %d", code)
+	}
+	if strings.Contains(out, "PRIVATE KEY MATERIAL") {
+		t.Fatalf("output contains the linked file:\n%s", out)
+	}
+	if !strings.Contains(out, "response body not shown") {
+		t.Fatalf("output does not say the body was refused:\n%s", out)
 	}
 }

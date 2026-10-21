@@ -318,8 +318,8 @@ does not mean a quiet session:
   the credential was resolved. A tool logged in with OAuth instead of an API key
   therefore gets no request-level events for its API host.
 - An upgraded connection (WebSocket, SPDY for `kubectl exec`) is one `http`
-  event with status `101`, logged when it closes; its traffic is relayed
-  uninspected, even with `--network-log=requests`.
+  event with status `101`, logged when it closes or the proxy stops; its
+  traffic is relayed uninspected, even with `--network-log=requests`.
 - Only ports 80 and 443 go through the proxy. Other ports, such as SSH on 22,
   reach allowlisted IPs directly and are never recorded.
 - Unrestricted sessions have further gaps; see

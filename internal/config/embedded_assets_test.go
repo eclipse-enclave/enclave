@@ -15,9 +15,11 @@ import (
 	"sync"
 	"testing"
 	"testing/fstest"
+	"time"
 
 	"enclave/internal/appassets"
 	"enclave/internal/model"
+	"enclave/internal/util"
 )
 
 func TestDiscoverAppRootDoesNotUseLegacyDataRoot(t *testing.T) {
@@ -337,6 +339,112 @@ func TestFindAppAssetsNeverWrites(t *testing.T) {
 	}
 }
 
+func TestExtractAppAssetsRecordsUseAtMostDaily(t *testing.T) {
+	files := testAppAssets("content")
+	cacheRoot := filepath.Join(t.TempDir(), "cache")
+	root := extractTestAppAssets(t, files, cacheRoot)
+
+	recent := backdateAppAssets(t, root, embeddedAssetUseRefreshInterval-time.Hour)
+	extractTestAppAssets(t, files, cacheRoot)
+	info, err := os.Lstat(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !info.ModTime().Equal(recent) {
+		t.Fatalf("use within the refresh interval rewrote the entry mtime to %v, want %v", info.ModTime(), recent)
+	}
+
+	backdateAppAssets(t, root, embeddedAssetUseRefreshInterval+time.Hour)
+	extractTestAppAssets(t, files, cacheRoot)
+	info, err = os.Lstat(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if age := time.Since(info.ModTime()); age > time.Minute {
+		t.Fatalf("use was not recorded: entry mtime is %v old", age)
+	}
+}
+
+func TestExtractAppAssetsServesPublishedEntryWhenUseCannotBeRecorded(t *testing.T) {
+	files := testAppAssets("content")
+	cacheRoot := filepath.Join(t.TempDir(), "cache")
+	root := extractTestAppAssets(t, files, cacheRoot)
+	key := filepath.Base(root)
+	// A directory in place of the lock file cannot be opened even as root.
+	lockPath := appAssetsLockPath(cacheRoot, key)
+	if err := os.Remove(lockPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(lockPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	backdateAppAssets(t, root, embeddedAssetUseRefreshInterval+time.Hour)
+
+	got, err := extractAppAssets(files, key, cacheRoot)
+	if err != nil {
+		t.Fatalf("published entry failed when its use could not be recorded: %v", err)
+	}
+	if got != root {
+		t.Fatalf("root = %q, want %q", got, root)
+	}
+
+	if err := os.RemoveAll(root); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := extractAppAssets(files, key, cacheRoot); err == nil {
+		t.Fatal("extracted a missing entry without taking its lock")
+	}
+}
+
+func TestExtractAppAssetsRemovesLongUnusedEntries(t *testing.T) {
+	cacheRoot := filepath.Join(t.TempDir(), "cache")
+	unusedRoot := extractTestAppAssets(t, testAppAssets("unused"), cacheRoot)
+	recentRoot := extractTestAppAssets(t, testAppAssets("recent"), cacheRoot)
+	lockedRoot := extractTestAppAssets(t, testAppAssets("locked"), cacheRoot)
+	backdateAppAssets(t, unusedRoot, embeddedAssetUnusedRetention+time.Hour)
+	backdateAppAssets(t, recentRoot, embeddedAssetUnusedRetention-time.Hour)
+	backdateAppAssets(t, lockedRoot, embeddedAssetUnusedRetention+time.Hour)
+	release, err := util.AcquireFileLock(appAssetsLockPath(cacheRoot, filepath.Base(lockedRoot)), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+
+	extractTestAppAssets(t, testAppAssets("current"), cacheRoot)
+
+	if _, err := os.Lstat(unusedRoot); !os.IsNotExist(err) {
+		t.Fatalf("entry unused beyond the retention remains: %v", err)
+	}
+	if err := validateAppRoot(recentRoot); err != nil {
+		t.Fatalf("entry used within the retention was removed: %v", err)
+	}
+	if err := validateAppRoot(lockedRoot); err != nil {
+		t.Fatalf("entry whose lock is held was removed: %v", err)
+	}
+}
+
+func extractTestAppAssets(t *testing.T, files fstest.MapFS, cacheRoot string) string {
+	t.Helper()
+	key, err := appassets.ContentHash(files)
+	if err != nil {
+		t.Fatal(err)
+	}
+	root, err := extractAppAssets(files, key, cacheRoot)
+	if err != nil {
+		t.Fatalf("extract assets: %v", err)
+	}
+	return root
+}
+
+func backdateAppAssets(t *testing.T, root string, age time.Duration) time.Time {
+	t.Helper()
+	when := time.Now().Add(-age).Truncate(time.Second)
+	if err := os.Chtimes(root, when, when); err != nil {
+		t.Fatal(err)
+	}
+	return when
+}
+
 func testAppAssets(docContent string) fstest.MapFS {
 	return fstest.MapFS{
 		".dockerignore":                                 {Data: []byte("bin\n")},
@@ -372,4 +480,25 @@ func entryNames(entries []os.DirEntry) []string {
 		names = append(names, entry.Name())
 	}
 	return names
+}
+
+func TestExternalAppRootFollowsDiscoveryPrecedence(t *testing.T) {
+	withTree := t.TempDir()
+	if err := writeAppAssets(testAppAssets("adjacent"), withTree); err != nil {
+		t.Fatal(err)
+	}
+	standalone := filepath.Join(t.TempDir(), "bin", "enclave")
+
+	t.Setenv(model.EnvHome, "")
+	if root, ok := ExternalAppRoot(filepath.Join(withTree, "bin", "enclave")); !ok || root != withTree {
+		t.Fatalf("tree above the executable: got %q, %v; want %q", root, ok, withTree)
+	}
+	if root, ok := ExternalAppRoot(standalone); ok {
+		t.Fatalf("standalone executable reported external assets at %q", root)
+	}
+
+	t.Setenv(model.EnvHome, "/opt/enclave-assets")
+	if root, ok := ExternalAppRoot(standalone); !ok || root != "/opt/enclave-assets" {
+		t.Fatalf("ENCLAVE_HOME: got %q, %v; want it to take precedence", root, ok)
+	}
 }

@@ -48,8 +48,8 @@ func TestLooksWritableDirAgreesWithWriteProbe(t *testing.T) {
 		if got := IsWritableDir(tc.dir); got != tc.want {
 			t.Errorf("%s: IsWritableDir = %v, want %v", tc.name, got, tc.want)
 		}
-		if got := looksWritableDir(tc.dir); got != tc.want {
-			t.Errorf("%s: looksWritableDir = %v, want %v", tc.name, got, tc.want)
+		if got := LooksWritableDir(tc.dir); got != tc.want {
+			t.Errorf("%s: LooksWritableDir = %v, want %v", tc.name, got, tc.want)
 		}
 	}
 }

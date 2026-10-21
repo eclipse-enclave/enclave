@@ -121,9 +121,7 @@ func runExecutionCommand(input *CommandInput) int {
 	if resolvedBuildConfig.Devcontainer != nil {
 		devcontainerConfig = &resolvedBuildConfig.Devcontainer.RuntimeConfig
 	}
-	enabledFeatures := resolveEnabledFeatures(input.Ctx.Paths, opts.BuildOptions)
-
-	handler := tools.Resolve(profile.Name)
+	features, provenance := sessionFeaturesAndProvenance(input, opts, profile)
 	runner := runtime.New(model.RuntimeConfig{
 		Paths:                 input.Ctx.Paths,
 		Host:                  host,
@@ -133,12 +131,13 @@ func runExecutionCommand(input *CommandInput) int {
 		Auth:                  opts.AuthOptions,
 		Build:                 opts.BuildOptions,
 		RunSources:            opts.Sources.RunSources(),
-		Handler:               handler,
+		Handler:               tools.Resolve(profile.Name),
 		Devcontainer:          devcontainerConfig,
 		ValidatedDirs:         validatedDirs,
 		ValidatedReadonlyDirs: validatedReadonlyDirs,
 		YoloEnabled:           yoloEnabled,
-		Features:              enabledFeatures,
+		Features:              features.enabled,
+		Provenance:            provenance,
 		UserCommandMount:      input.UserCommandMount,
 	})
 	dockerOpts := dockerBackendOptions(host, input.Ctx.Paths, opts.BuildOptions, opts.RunOptions)
@@ -253,46 +252,6 @@ func runErrorExitCode(err error) int {
 	return 1
 }
 
-func resolveEnabledFeatures(paths model.Paths, build model.BuildOptions) []model.Extension {
-	allFeatures, err := config.ListFeatures(paths)
-	if err != nil {
-		logx.Debugf("Failed to list features: %v", err)
-		return nil
-	}
-	if len(allFeatures) == 0 {
-		return nil
-	}
-	if build.Slim {
-		return nil
-	}
-	if build.Devcontainer && build.Features == nil {
-		return nil
-	}
-	// If explicit features list is provided, filter to only those
-	if build.Features != nil {
-		selected := resolveConfiguredFeatures(build.Features, allFeatures)
-		requested := map[string]bool{}
-		for _, f := range selected {
-			requested[f] = true
-		}
-		var result []model.Extension
-		for _, feat := range allFeatures {
-			if requested[feat.Name] {
-				result = append(result, feat)
-			}
-		}
-		return result
-	}
-	// Otherwise, return all default-enabled features
-	var result []model.Extension
-	for _, feat := range allFeatures {
-		if feat.DefaultEnabled {
-			result = append(result, feat)
-		}
-	}
-	return result
-}
-
 func ensureRuntimeImage(input *CommandInput, opts model.Options, buildCfg *buildConfig, host model.Host, profile model.Profile) (buildConfig, int) {
 	if !isRunAction(input.Action) {
 		return buildConfig{}, 0
@@ -369,21 +328,33 @@ func buildOrReuseRuntimeImage(input *CommandInput, opts model.Options, host mode
 }
 
 func resolveYoloEnabled(profile model.Profile, opts model.Options) bool {
-	yoloEnabled := profile.YoloEnabledValue()
-	profileHasYoloFlag := profile.YoloFlag != ""
-	if opts.YoloOverride != nil {
-		if !*opts.YoloOverride {
-			warnDisabledYoloIgnored("--no-yolo ignored", profile.Name, profileHasYoloFlag, yoloEnabled)
+	enabled, resolvedBy := resolveYolo(profile, opts)
+	if !enabled {
+		switch resolvedBy {
+		case yoloResolvedByCLI:
+			warnDisabledYoloIgnored("--no-yolo ignored", profile.Name, profile.YoloFlag != "", profile.YoloEnabledValue())
+		case yoloResolvedByConfig:
+			warnDisabledYoloIgnored("Config yolo=false ignored", profile.Name, profile.YoloFlag != "", profile.YoloEnabledValue())
 		}
-		return *opts.YoloOverride
+	}
+	return enabled
+}
+
+const (
+	yoloResolvedByCLI    = "cli"
+	yoloResolvedByConfig = "config"
+	yoloResolvedByTool   = "tool"
+)
+
+// resolveYolo returns whether yolo mode is on and which input decided it.
+func resolveYolo(profile model.Profile, opts model.Options) (bool, string) {
+	if opts.YoloOverride != nil {
+		return *opts.YoloOverride, yoloResolvedByCLI
 	}
 	if profile.YoloEnabled == nil && opts.ConfigDefaultYolo != nil {
-		if !*opts.ConfigDefaultYolo {
-			warnDisabledYoloIgnored("Config yolo=false ignored", profile.Name, profileHasYoloFlag, yoloEnabled)
-		}
-		return *opts.ConfigDefaultYolo
+		return *opts.ConfigDefaultYolo, yoloResolvedByConfig
 	}
-	return yoloEnabled
+	return profile.YoloEnabledValue(), yoloResolvedByTool
 }
 
 func warnDisabledYoloIgnored(prefix string, profileName string, hasYoloFlag bool, yoloEnabled bool) {

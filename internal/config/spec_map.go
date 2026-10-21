@@ -233,10 +233,11 @@ func buildSecrets(doc specDocument) map[string]model.SecretConfig {
 			if auth, ok := doc.Network.ServiceAuth[id]; ok {
 				sc.Release = &model.SecretReleaseConfig{
 					HTTP: &model.HTTPSecretReleaseConfig{
-						Hosts:           hostsByService[id],
-						Header:          auth.HeaderName,
-						Format:          auth.ValueFormat,
-						HostsFromSecret: auth.HostsFromCredential,
+						Hosts:               hostsByService[id],
+						Header:              auth.HeaderName,
+						Format:              auth.ValueFormat,
+						RequiredValuePrefix: auth.RequiredValuePrefix,
+						HostsFromSecret:     auth.HostsFromCredential,
 					},
 				}
 			}

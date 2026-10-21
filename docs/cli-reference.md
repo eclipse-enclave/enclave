@@ -31,6 +31,15 @@ unchanged. See [windows.md](windows.md).
 
 `enclave ps` prints one row per container with its `NAME` (container name) and `SESSION` (the `--name` session name, or the auto-assigned `1`, `2`, … for extra sessions; `-` for the project's default container); either can be passed to `attach`, `exec --name`, `stop`, and `theia`. Flags: `--all` (include stopped containers, not just running ones), `--json` (emit a JSON array instead of the table). The flags compose (`ps --all --json`). Each JSON object has the fields `name`, `tool`, `projectDir` (absolute, resolved project path), `projectHash`, `worktree`, `status`, `createdAt` (RFC 3339, empty if unknown), `sessionName`, `background`, `ports` (array of `{containerPort, hostPort, hostIP, protocol}` bindings), and `network` (`{name, subnet}` for the per-session bridge under Docker and podman, `null` for other backends and sessions started by earlier releases).
 
+Session provenance: each JSON object also carries `options`, the options that shape the session, keyed and typed like `options.<name>.value` of [`enclave config --json`](configuration.md#json-output-schemaversion-1), as validated for the run.
+
+- `options.features` holds the sorted enabled feature names; `pass_env` holds variable names, never values.
+- `backend` and `image_name` are the configured values (for example `auto`), not the detected engine or the derived image tag.
+- Host-side and one-shot options (for example `progress`, `verbose`, `reset_auth`, `session_tint`, `session_name`, and build-cache options) are not recorded.
+- `options` is omitted when unknown: sessions started by earlier releases, features that could not be resolved at start, or unreadable recorded provenance. qemu sessions are not listed by `ps`, so they have none.
+
+To compare a session with the current configuration, see [Detecting session drift](configuration.md#detecting-session-drift).
+
 `--backend` selects one engine for `ps`, `status`, `stop`, `attach`, and `exec` without changing the saved backend. For example, after `enclave run --backend podman`, use `enclave ps --backend podman` to find that session and `enclave attach --backend podman <name>` to attach. `ps` does not merge sessions from multiple engines.
 
 `status` reports sessions of the current project (like `exec` without `--name`); `--all` widens it to every project. Flags: `--tool` and `--name` filter sessions; `--json` emits one machine-readable snapshot object per session (screen text and OSC title for external state detection). Each snapshot captures the trailing 24 screen rows. See [Session status snapshots](session-status.md).
@@ -81,6 +90,7 @@ Ctrl-C or SIGTERM while a session is still starting aborts the start with exit c
 |---------|-------------|
 | `enclave info` | Show configuration and image details |
 | `enclave version`, `enclave --version` | Show the binary version, source commit, and commit date |
+| `enclave self-update` | Replace the host binary with the latest build of its release channel |
 | `enclave config` | Show configuration values |
 | `enclave tools` | List available tool profiles (`list\|add\|remove\|update` manage installed tool extensions; see below) |
 | `enclave features` | List available feature extensions (`list\|add\|remove\|update` manage installed feature extensions; see below) |
@@ -88,7 +98,50 @@ Ctrl-C or SIGTERM while a session is still starting aborts the start with exit c
 
 `enclave version` prints one line suitable for bug reports; `--json` emits the version, commit, and date as an object. Builds from modified source append `-dirty` to the commit; unavailable values are reported as `unknown`.
 
-`enclave config` flags: `--view <mode>` selects the output view — `matrix` (default), `source` (where each value comes from), `diff` (values overridden by higher precedence), or `effective` (effective values only); `--json` emits JSON output.
+`enclave self-update` downloads the `linux` or `darwin` binary matching the
+host architecture from the configured release channel, verifies it against the
+release's `checksums.txt`, and atomically replaces the running executable. The
+checksums come from the same release as the binary, so they detect corrupted or
+truncated downloads, not a compromised release. If the executable already
+matches the release's checksum, for example because a concurrent update
+installed it, nothing is downloaded. A download that receives no data for 30
+seconds fails; Ctrl-C or SIGTERM aborts it with exit code 130 and removes the
+partial file.
+
+The updater never elevates privileges. When the executable's directory is not
+writable, as after a `sudo install` into `/usr/local/bin`, `self-update` exits
+with an error and both it and the periodic check print the download URLs of
+the binary and `checksums.txt` and the command that verifies the download and
+reinstalls it with `sudo install`. A replacement the system denies only at the
+end, as in a sticky directory holding another user's binary, is reported the
+same way.
+
+Release channels are `rolling`, rebuilt from every push to `main` and published
+on GitHub, and `stable`, for official releases. A binary follows the channel it
+was published on unless the global config sets `update_channel`; switching
+channels installs the other channel's latest build even if it is older. The
+`stable` channel has no download source yet: stable releases are expected on
+the Eclipse Foundation download server, and until that is wired up, checks on
+`stable` fail: `self-update` exits with an error and the periodic check warns
+once per interval. `enclave config` shows the effective channel.
+
+Only standalone release binaries update themselves: package installs, source
+builds, and binaries that run against a runtime asset tree beside them or in
+`ENCLAVE_HOME` are refused and never checked, because replacing the binary
+alone would leave their assets behind. Upgrade those with the package manager
+or by rebuilding.
+
+Other interactive invocations, with stdin, stdout, and stderr all terminals,
+check the channel at most once every 24 hours, recorded in
+`~/.local/state/enclave/self-update-check`, and notify when a different build
+is available. Set `"auto_update": true` in the global config to install it
+during that check; Ctrl-C during that install exits with code 130 without
+running the command. All update-check output, including `--verbose` diagnostics,
+goes to stderr. Checks are skipped for scripts and other non-interactive
+callers, shell completion, structured output, and user commands; a failed check
+waits for the next interval.
+
+`enclave config` flags: `--view <mode>` selects the output view — `matrix` (default), `source` (where each value comes from), `diff` (values overridden by higher precedence), or `effective` (effective values only); `--json` emits a versioned JSON envelope (`schemaVersion: "1"`, typed values, structured warnings, and validation status; see [Inspecting Resolved Config](configuration.md#inspecting-resolved-config)).
 
 ### Extensions
 
@@ -96,7 +149,7 @@ Ctrl-C or SIGTERM while a session is still starting aborts the start with exit c
 
 | Command | Flags |
 |---------|-------|
-| `list` | `--json` (machine-readable output) |
+| `list` | `--json` (machine-readable output); `features` (bare or `list`) also takes `--slim`, `--features`, and `--tool`, so `enabled` matches a run with those options, including `tool_overrides.<tool>.features` |
 | `add <source>` | `--path <dir>`, `--ref <ref>`, `--name <name>` (repeatable), `--all`, `--yes`/`-y`, `--force`, `--dry-run`, `--json` (requires `--yes`) |
 | `update [<name\|source>...]` | `--ref <ref>` (single extension only), `--yes`/`-y`, `--force`, `--dry-run`, `--json` (requires `--yes`) |
 | `remove <name>...` | `--yes`/`-y`, `--force`, `--json` (requires `--yes`) |
@@ -126,13 +179,15 @@ in one step, printing the container name so you can reattach later with
 | Command | Description |
 |---------|-------------|
 | `enclave network status` | Show network policy status |
-| `enclave network print` | Print effective dnsmasq config |
+| `enclave network print` | Print effective dnsmasq config (`--json` emits the allowlist as a versioned envelope; see [JSON output](networking.md#json-output-schemaversion-1)) |
 | `enclave network diff` | Show changes from built-in defaults |
 | `enclave network add-domain <domain> --global` | Allow a domain |
 | `enclave network remove-domain <domain> --global` | Remove a domain |
 | `enclave network set-mode restricted\|unrestricted --global` | Set network mode |
 | `enclave network apply` | Apply policy to running gateways |
 | `enclave network log` | Show gateway network audit events |
+
+`network status`, `print`, and `diff` reflect the run options that shape the allowlist and accept their flags: `--tool`, `--features`, `--slim`, `--playwright-mcp`, `--allow-domain`, and `--allow-all-network` (`status` also takes `--backend`). See [Networking](networking.md#managing-the-network-policy).
 
 Network mutation commands are global-only today. `--project` scope is planned but not yet supported.
 
@@ -198,6 +253,8 @@ store that holds memory; the other `--keep` kinds do not apply there. See
 
 ## Flags
 
+Boolean flags accept an explicit value (e.g. `--no-cache=false`) in any form Go's `strconv.ParseBool` accepts: `true`/`false`, `1`/`0`, `t`/`f`, and their upper- and title-case variants; other values are rejected. `--no-yolo=false` is equivalent to `--yolo`.
+
 ### Tool & Session
 
 | Flag | Description |
@@ -253,6 +310,7 @@ extension-source updates (`tools update` / `features update`) are unaffected.
 
 Use `unset ENCLAVE_NO_REBUILD` or `export ENCLAVE_NO_REBUILD=0` to restore normal
 behavior, or `ENCLAVE_NO_REBUILD=0 enclave update` for a single invocation.
+An explicit `--no-rebuild=false` also overrides it for one invocation.
 There is no config-file key.
 
 ### Auth & Secrets
@@ -325,7 +383,7 @@ Commands that start a session (`run`, `shell`, `continue`, `resume`, the `devcon
 
 Read-only mounts get no exemption: reading is enough to leak credentials. The check runs before any image build and on every session start, including `continue` and `resume`. `exec` and `attach` enter running containers and are not checked.
 
-To mount such a directory anyway, pass `--allow-sensitive-mounts` or set `ENCLAVE_ALLOW_SENSITIVE_MOUNTS=1`; each sensitive mount then prints a warning. The opt-in has no config key, so neither global nor project config can grant it. Mounts from the repository stay blocked even with the opt-in: devcontainer bind sources must lie inside the project, and linked-worktree git metadata outside the project is skipped with a warning when it is sensitive.
+To mount such a directory anyway, pass `--allow-sensitive-mounts` or set `ENCLAVE_ALLOW_SENSITIVE_MOUNTS=1`; each sensitive mount then prints a warning. An explicit `--allow-sensitive-mounts=false` overrides the environment variable. The opt-in has no config key, so neither global nor project config can grant it. Mounts from the repository stay blocked even with the opt-in: devcontainer bind sources must lie inside the project, and linked-worktree git metadata outside the project is skipped with a warning when it is sensitive.
 
 The mounts enclave adds itself, such as `~/.gitconfig`, `~/.claude/ide` for the IDE bridge, direnv approvals, and the session stores, come from protected locations by design and are not checked.
 

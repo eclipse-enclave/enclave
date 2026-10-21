@@ -9,11 +9,34 @@ OpenAI Codex CLI is OpenAI's terminal-based AI coding agent.
 - **Config directory**: `~/.codex`
 - **Settings file**: `~/.codex/config.toml`
 
-## API Keys
+## Env Credentials
 
 | Variable | Purpose |
 |----------|---------|
-| `OPENAI_API_KEY` | OpenAI API access |
+| `CODEX_API_KEY`, `OPENAI_API_KEY` | Aliases for OpenAI API access |
+| `CODEX_ACCESS_TOKEN` | `at-` personal access token |
+
+With restricted networking, these values are replaced by gateway placeholders.
+API keys are injected under both aliases, so `OPENAI_API_KEY` alone authenticates
+`codex exec` without onboarding and takes precedence over a stored ChatGPT login
+there. The interactive TUI (verified with 0.162.1) uses stored auth instead:
+an empty store still requires onboarding, whose API-key entry prefills the
+placeholder. Accepting it works only for the current session. Startup removes
+regular local `auth.json` files containing `ENCLAVE_SECRET_` rather than reusing
+an old session key; shared auth files are not removed. For persistent TUI use,
+start with `--no-api-key` and sign in normally.
+Conflicting alias values in the same winning layer are rejected.
+
+The API-key model-list request to `chatgpt.com` can be denied when that host is
+inspected; Codex falls back to its built-in model list. API keys are released
+only to the declared OpenAI API hosts. See the
+[authentication notes](../../../docs/auth.md#env-only-bearer-tokens).
+
+Personal access tokens are released to `auth.openai.com` and `chatgpt.com`.
+Agent Identity JWTs in `CODEX_ACCESS_TOKEN` are rejected while gateway protection
+is active: their client-side signature verification cannot use placeholders.
+Stored ChatGPT logins are outside this env-only protection. See
+[authentication](../../../docs/auth.md#env-only-bearer-tokens).
 
 ## Auth Files
 
@@ -33,6 +56,7 @@ The default `config.toml` template configures:
 - Model personality prompt disabled
 - Fast mode (fast service tier with increased plan usage) opted out
 - Memories enabled
+- App-server daemon disabled
 
 Model selection and reasoning effort are left at the Codex defaults; override
 them via config patches if needed.
@@ -44,6 +68,20 @@ already-sandboxed container.
 
 An explicit user trust setting always wins; pre-trust applies only when no trust
 is configured for the directory being opened.
+
+### App-server daemon
+
+By default, Codex runs its threads in a detached app-server daemon that updates
+itself from OpenAI at runtime. Its binaries live under `~/.codex/packages/` in
+the persistent config store, so later sessions keep running the downloaded
+version even after the image is rebuilt. The container exits with the TUI, so
+the daemon adds nothing here. The template sets
+`features.daemon_auto_start = false`, so the TUI runs its app server in-process
+instead. This default applies only to newly created config stores. Existing
+stores keep their settings and downloaded daemon copies; template updates for
+existing stores are tracked in [#159](https://github.com/eclipse-enclave/enclave/issues/159).
+To disable the daemon in an existing store, set `daemon_auto_start = false`
+under `[features]` with a config patch. Set it to `true` to opt in.
 
 ### Optional: TUI status line
 
@@ -98,5 +136,5 @@ current conversation.
 | `check-update.sh` | Returns the latest npm version for automatic update probes |
 | `gateway-allowlist.conf` | DNS allowlist for network isolation |
 | `templates/config.toml` | Default settings template |
-| `entrypoint.d/setup.sh` | Runtime setup (creates config dir; in yolo mode pre-trusts the workspace) |
+| `entrypoint.d/setup.sh` | Runtime setup (creates config dir; removes stale placeholder auth; in yolo mode pre-trusts the workspace) |
 | `go/` | Custom Go hooks |

@@ -125,7 +125,7 @@ func renderConfigBundle(policy network.EffectivePolicy, tool string) (renderedBu
 
 func renderBundleFiles(policy network.EffectivePolicy, tool string) (renderedBundleFiles, error) {
 	var empty renderedBundleFiles
-	if strings.EqualFold(strings.TrimSpace(policy.Mode), model.NetworkModeUnrestricted) {
+	if policy.Mode == model.NetworkModeUnrestricted {
 		return empty, errors.New("live gateway apply does not support unrestricted mode")
 	}
 

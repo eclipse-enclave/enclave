@@ -112,6 +112,13 @@ func TestMergeGlobalMode(t *testing.T) {
 	}
 }
 
+func TestMergeNormalizesMode(t *testing.T) {
+	ep := Merge(MergeConfig{GlobalPolicy: Policy{Mode: " Unrestricted "}})
+	if ep.Mode != model.NetworkModeUnrestricted {
+		t.Fatalf("expected %q, got %q", model.NetworkModeUnrestricted, ep.Mode)
+	}
+}
+
 func TestMergeProjectOverridesGlobal(t *testing.T) {
 	ep := Merge(MergeConfig{
 		GlobalPolicy:  Policy{Mode: "unrestricted"},

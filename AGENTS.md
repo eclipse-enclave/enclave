@@ -18,7 +18,8 @@ Read `README.md` before making user-facing changes.
 
 ## External Integrations
 
-- Treat CLI JSON schemas, background-run output, lifecycle commands, container naming, and managed tmux behavior as integration contracts for external consumers; coordinate breaking changes. This includes `enclave tools|features list --json` and the shared `add`/`update`/`remove` result envelope (both `schemaVersion: "1"`; see `docs/extensions/installing.md`).
+- Treat CLI JSON schemas, background-run output, lifecycle commands, container naming, and managed tmux behavior as integration contracts for external consumers; coordinate breaking changes. This includes `enclave tools|features list --json` and the shared `add`/`update`/`remove` result envelope (both `schemaVersion: "1"`; see `docs/extensions/installing.md`), `enclave config --json` (`schemaVersion: "1"`, `kind: "config"`; see `docs/configuration.md`), and `enclave network print --json` (`schemaVersion: "1"`, `kind: "network-policy"`; see `docs/networking.md`).
+- Session provenance (`options` in `enclave ps --json`) is contract; the `enclave.options` label that stores it is not. Recorded options follow `AffectsSession` in `internal/config/options_def.go` and must never carry secret values.
 - Prefer structured CLI output over Docker labels or human-readable output for integration contracts.
 
 ## Build and Test

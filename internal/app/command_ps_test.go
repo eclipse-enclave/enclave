@@ -415,6 +415,31 @@ func TestBuildPSJSONEntries(t *testing.T) {
 	}
 }
 
+func TestRenderPSJSONProvenance(t *testing.T) {
+	var out strings.Builder
+	err := renderPSJSON(&out, []backend.Session{
+		{
+			Ref:        backend.SessionRef{Name: "enclave-claude-abc123abc123"},
+			Provenance: map[string]any{"yolo": true},
+		},
+		{Ref: backend.SessionRef{Name: "enclave-claude-def456def456"}},
+	})
+	if err != nil {
+		t.Fatalf("renderPSJSON: %v", err)
+	}
+
+	var entries []map[string]any
+	if err := json.Unmarshal([]byte(out.String()), &entries); err != nil {
+		t.Fatalf("unmarshal: %v\n%s", err, out.String())
+	}
+	if options, ok := entries[0]["options"].(map[string]any); !ok || options["yolo"] != true {
+		t.Fatalf("options = %#v, want recorded values", entries[0]["options"])
+	}
+	if options, ok := entries[1]["options"]; ok {
+		t.Fatalf("options = %#v, want omitted when unknown", options)
+	}
+}
+
 func TestRunPSEmitsJSON(t *testing.T) {
 	psCheckDocker = func() error { return nil }
 	psNow = func() time.Time { return time.Date(2026, 3, 19, 12, 0, 0, 0, time.UTC) }

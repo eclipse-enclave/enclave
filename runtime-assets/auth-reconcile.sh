@@ -18,6 +18,38 @@ enclave_is_uint() {
     esac
 }
 
+# ENCLAVE_SECRET_PLACEHOLDERS is newline-delimited. Each entry becomes its own
+# -e argument because POSIX leaves newline-separated pattern lists in a single
+# -e to the implementation (the helper container runs busybox grep).
+enclave_auth_file_safe_to_sync() {
+    scan_file=$1
+    scan_label=${2:-$1}
+    case $- in *f*) scan_noglob=1 ;; *) scan_noglob= ;; esac
+    scan_ifs=$IFS
+    IFS='
+'
+    set -f
+    # shellcheck disable=SC2086
+    set -- $ENCLAVE_SECRET_PLACEHOLDERS
+    IFS=$scan_ifs
+    [ -n "$scan_noglob" ] || set +f
+    for scan_placeholder; do
+        shift
+        [ -n "$scan_placeholder" ] && set -- "$@" -e "$scan_placeholder"
+    done
+    if grep -qF -e "ENCLAVE_SECRET_" "$@" "$scan_file"; then
+        echo "Warning: Not syncing auth file ${scan_label}: contains a gateway placeholder." >&2
+        return 1
+    else
+        scan_status=$?
+        if [ "$scan_status" -ne 1 ]; then
+            echo "Warning: Not syncing auth file ${scan_label}: unable to check for gateway placeholders." >&2
+            return 1
+        fi
+    fi
+    return 0
+}
+
 enclave_copy_auth_file() {
     src_file=$1
     dst_file=$2
@@ -26,6 +58,10 @@ enclave_copy_auth_file() {
     tmp_file="${dst_file}.tmp.$$"
     rm -f "$tmp_file"
     if cp -p "$src_file" "$tmp_file" 2>/dev/null || cp "$src_file" "$tmp_file"; then
+        if ! enclave_auth_file_safe_to_sync "$tmp_file" "$src_file"; then
+            rm -f "$tmp_file"
+            return 0
+        fi
         chmod 600 "$tmp_file" 2>/dev/null || true
         if [ -n "$enclave_auth_chown" ]; then
             chown "$enclave_auth_chown" "$tmp_file" 2>/dev/null || true
@@ -53,10 +89,7 @@ enclave_claude_expires_at() {
 enclave_warn_claude_credentials_drift() {
     src_file=$1
     if [ -s "$src_file" ] && [ ! -L "$src_file" ]; then
-        # This warning is intended to be user-visible during entrypoint startup.
-        # Host-side finalization reuses this helper in a non-attached container,
-        # so its stderr may be discarded; unresolved drift is warned again on the
-        # next startup.
+        # Both entrypoint startup and host-side finalization surface this warning.
         echo "Warning: Claude wrote a real .credentials.json in its config dir; shared secure storage may not be active." >&2
     fi
 }
@@ -124,12 +157,14 @@ enclave_sync_shared_auth() {
         fi
         auth_path="$auth_root/$auth_file"
         config_path="$config_root/$auth_file"
-        if [ "$tool" = "claude" ] && [ "$auth_file" = ".credentials.json" ]; then
-            enclave_sync_claude_credentials "$config_path" "$auth_path"
-        elif [ "$tool" = "mistral-vibe" ] && [ "$auth_file" = ".env" ]; then
-            enclave_sync_newest_auth_file "$config_path" "$auth_path"
-        else
-            enclave_sync_additive_auth_file "$config_path" "$auth_path"
+        if [ ! -s "$config_path" ] || enclave_auth_file_safe_to_sync "$config_path"; then
+            if [ "$tool" = "claude" ] && [ "$auth_file" = ".credentials.json" ]; then
+                enclave_sync_claude_credentials "$config_path" "$auth_path"
+            elif [ "$tool" = "mistral-vibe" ] && [ "$auth_file" = ".env" ]; then
+                enclave_sync_newest_auth_file "$config_path" "$auth_path"
+            else
+                enclave_sync_additive_auth_file "$config_path" "$auth_path"
+            fi
         fi
         if [ "$link_config" = "1" ]; then
             if [ -L "$config_path" ] && [ ! -s "$auth_path" ]; then

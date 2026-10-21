@@ -573,6 +573,7 @@ func buildImage(ctx context.Context, paths model.Paths, host model.Host, combine
 	agentTools := resolveAgentToolsArg(tool)
 	features := resolveFeaturesArg(opts)
 	logDevcontainerFeatureSelection(opts, features)
+	logEmptyFeatureSelection(opts, selection.Features)
 
 	cacheFrom := resolveCacheFrom(opts, buildCfg)
 	username := model.ContainerUser
@@ -748,19 +749,11 @@ func resolveRuntimeImageSelection(paths model.Paths, opts model.BuildOptions, to
 		selection.Tools = []string{name}
 	}
 
-	if opts.Slim || (opts.Devcontainer && opts.Features == nil) {
-		return selection, nil
-	}
-
-	availableFeatures, err := config.ListFeatures(paths)
+	features, err := resolveFeatureSelection(paths, opts)
 	if err != nil {
 		return runtimeImageSelection{}, err
 	}
-	if opts.Features != nil {
-		selection.Features = resolveConfiguredFeatures(opts.Features, availableFeatures)
-	} else {
-		selection.Features = defaultEnabledFeatureNames(availableFeatures)
-	}
+	selection.Features = features.selected
 	return selection, nil
 }
 
@@ -879,6 +872,15 @@ func logDevcontainerFeatureSelection(opts model.BuildOptions, features string) {
 		return
 	}
 	logx.Infof("%s", devcontainerFeatureSelectionMessage(features))
+}
+
+// logEmptyFeatureSelection explains a build without features from an
+// explicitly empty selection, which older versions resolved to the defaults.
+func logEmptyFeatureSelection(opts model.BuildOptions, selected []string) {
+	if opts.Slim || opts.Devcontainer || opts.Features == nil || len(selected) > 0 {
+		return
+	}
+	logx.Infof("Building without features: the feature selection is empty (\"features\": [] or --features none).")
 }
 
 func devcontainerFeatureSelectionMessage(features string) string {

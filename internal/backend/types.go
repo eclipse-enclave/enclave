@@ -86,6 +86,10 @@ type SessionMeta struct {
 	DisplayName  string
 	Background   bool
 	Yolo         bool
+	// Provenance holds the typed values of the session-affecting options the
+	// session was started with. Nil means unknown, e.g. for sessions started
+	// by an older enclave.
+	Provenance map[string]any
 }
 
 type Mount struct {
@@ -421,6 +425,7 @@ type Session struct {
 	// `status` can capture as that user (empty for sessions without the
 	// monitor or containers labeled before this was recorded).
 	SessionMonitorUser string
+	Provenance         map[string]any
 }
 
 type SessionNetwork struct {

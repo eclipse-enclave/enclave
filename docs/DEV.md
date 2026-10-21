@@ -74,9 +74,13 @@ first. It locates an "app root" in this order (`internal/config/paths.go`,
 On Linux the extraction store is
 `${XDG_CACHE_HOME:-~/.cache}/enclave/assets/<hash>/`. On macOS it is
 `~/Library/Caches/org.eclipse.enclave/assets/<hash>/`. Each distinct asset set
-uses its own atomically published directory and does not modify other entries. The tree
-is reproducible from the binary, so deleting it is safe; the next run extracts
-it again.
+uses its own atomically published directory. The tree is reproducible from the
+binary, so deleting it is safe; the next run extracts it again. A binary
+refreshes its entry's mtime at most once a day, under the entry's lock. Whenever
+it extracts or refreshes its entry, it also removes other entries no binary has
+used for 30 days, skipping any whose lock is held (`removeUnusedAppAssets` in
+`internal/config/embedded_assets.go`). A refresh that fails, as in a cache this
+user can read but not write, still leaves the valid entry in use.
 
 Because `bin/enclave` lives inside the checkout, tier 2 finds the repository
 root. Running an in-tree binary therefore uses the working copy's assets:
@@ -129,6 +133,42 @@ make lint
 
 Exception: if a change only touches files under `docs/`, these make targets are
 not required.
+
+### Env-only credential acceptance testing
+
+Unit tests cover credential resolution, placeholder shapes, host release rules,
+and auth-file reconciliation without a real engine or account. In a dedicated
+Docker/Podman environment, test each variable in
+[Env-only bearer tokens](auth.md#env-only-bearer-tokens) independently:
+
+- Make an authenticated tool request, then restart and repeat. Confirm the
+  container gets a fresh placeholder and no placeholder reaches shared auth
+  through reconciliation.
+- Test `codex exec` with only `OPENAI_API_KEY`, then only `CODEX_API_KEY`;
+  neither should require onboarding. Check API-key precedence when a ChatGPT
+  login already exists.
+- Test the Codex TUI separately: an empty store requires onboarding and a stored
+  login wins over the env API key. Accept the prefilled placeholder for one
+  session, then restart with an empty shared store and confirm the old local
+  `auth.json` is removed. Repeat with project auth scope. With valid shared auth,
+  confirm startup restores its symlink instead. Verify persistent TUI login
+  with `--no-api-key`.
+- With `codex exec`, test API-key model-list refresh under `--network-log=requests` and
+  coarse logging with a PAT also injected. Expect a denial at `chatgpt.com` and
+  built-in model-list fallback; OpenAI API requests should still work.
+- Confirm `CODEX_ACCESS_TOKEN` PATs work and Agent Identity JWTs fail clearly
+  with gateway protection active.
+- Write a placeholder into a local auth file, then exercise foreground exit,
+  background stop/remove, and `exec` reconciliation. Expect a visible warning,
+  no contaminated copy, and existing shared credentials unchanged.
+
+Use fake values for the Anthropic tokens. Upstream's error message tells a
+released `sk-ant-oat01-` value apart from a placeholder, and a real
+subscription token in a third-party client is subject to Anthropic's terms.
+
+Record tool versions with the results. In particular, Claude Code is closed
+source: its env-only setup-token behavior needs runtime verification, not just
+changelog evidence. Keep test credentials out of logs and review artifacts.
 
 ## Code Generation
 
@@ -220,7 +260,9 @@ to `CreateProcess` unchanged. Two layers check it:
 
 1) Add fields in `model.Options` (and related embedded struct).
 2) Add defaults in `config.Defaults` if configurable.
-3) Add the option entry in `internal/config/options_def.go`.
+3) Add the option entry in `internal/config/options_def.go`, including the
+   required `AffectsSession` decision and, if the option changes the session
+   allowlist, `AffectsNetwork` (see the checklist below).
 4) Run code generation (`make generate`).
 5) Run tests (`go test ./...`).
 6) Update docs for user-visible flag behavior (`docs/cli-reference.md`,
@@ -253,7 +295,14 @@ Use this when adding a new option so you do not stop after `options_def.go`:
   add the key to `removedConfigFields` in `internal/config/config.go` so
   `readDefaults()` rejects it loudly instead of silently ignoring it.
 - Option registry:
-  add the definition in `internal/config/options_def.go`.
+  add the definition in `internal/config/options_def.go`, including the
+  required `AffectsSession` decision: `SessionAffected` if changing the value
+  makes a fresh session differ from a running one (image, features, mounts,
+  network, env, auth, backend), so it is recorded as session provenance in
+  `enclave ps --json`; `SessionUnaffected` for host-side, UX, or one-shot
+  options. Affected values must not carry secrets. Set `AffectsNetwork` when
+  the option changes the session allowlist, so `network status|print|diff`
+  accept its flags; a test fails when an unmarked option changes the preview.
 - Generated outputs:
   run `make generate` after changing `options_def.go`.
 - Guardrail tests:
@@ -332,6 +381,21 @@ the `.git` pointer comes from the repository. Tests that touch the rule clear
 `SSH_AUTH_SOCK` in their `TestMain`; the `app` and `runtime` tests, which take
 the directories from the environment, clear `XDG_*` as well, while `mounts`
 tests pass them explicitly.
+
+Self-update notes (user-facing behavior: [CLI reference](cli-reference.md#commands)):
+
+- Read `auto_update` and `update_channel` from `globalDefaults`, not resolved
+  project or tool options. Explicit `self-update` uses `config.LoadGlobalDefaults`.
+- Keep all updater output on stderr, including verbose diagnostics: use
+  `logx.Noticef`, `DebugNoticef`, or `Warnf`, never `Infof` or `Debugf`.
+- Both paths hold `config.HostSelfUpdateLockPath`: the periodic check skips a
+  busy lock, while explicit `self-update` waits.
+- Tests replace `newSelfUpdater` in `internal/app` and use an `httptest` release
+  in `internal/selfupdate`. To try a real update, build outside the checkout
+  with `make build BUILD_CHANNEL=rolling BIN_DIR=/tmp/enclave-rolling`, then
+  run `/tmp/enclave-rolling/enclave self-update` with `ENCLAVE_HOME` unset.
+- The stable source is a placeholder until the Eclipse download server
+  contract is known; stable release CI must stamp `BUILD_CHANNEL=stable`.
 
 Config additive note: feature additive directives (`+`/`-`) are applied against
 the implicit default-enabled feature set when `features` is unset. For example,

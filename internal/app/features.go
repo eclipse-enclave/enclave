@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"os"
 
+	"enclave/internal/backend"
 	"enclave/internal/config"
 	"enclave/internal/extinstall"
 	"enclave/internal/logx"
@@ -30,29 +31,29 @@ func runFeatures(ctx *AppContext, req *extinstall.Request, opts model.Options, s
 		return 1
 	}
 
-	available := map[string]struct{}{}
-	if opts.Slim {
-		// No features available in slim mode.
-	} else if opts.Features != nil {
-		selected := resolveConfiguredFeatures(opts.Features, features)
-		for _, f := range selected {
-			available[f] = struct{}{}
-		}
-	} else {
-		for _, f := range features {
-			if f.DefaultEnabled {
-				available[f.Name] = struct{}{}
-			}
+	run, _, err := optionsAsRun(ctx.Paths, opts, sources)
+	validated := err == nil
+	if !validated {
+		logx.Warnf("A run with these options would fail: %v", err)
+	}
+	enabled := make(map[string]bool)
+	if !featuresDisabled(run.BuildOptions) {
+		for _, name := range selectFeatures(features, run.BuildOptions) {
+			enabled[name] = true
 		}
 	}
 
 	if req != nil && req.JSON {
-		isAvailable := func(name string) bool {
-			_, ok := available[name]
-			return ok
+		selection := &extensionListSelection{
+			Directives: opts.Features,
+			Source:     sourceLabel(sources.Features),
 		}
-		entries := extensionListJSONEntries(features, inventory, isAvailable)
-		if err := renderExtensionListJSON(os.Stdout, model.KindFeature, entries); err != nil {
+		if !toolUnset(opts.Tool) {
+			selection.Tool = &opts.Tool
+		}
+		isEnabled := func(name string) bool { return enabled[name] }
+		entries := featureListJSONEntries(features, inventory, isEnabled)
+		if err := renderExtensionListJSON(os.Stdout, model.KindFeature, selection, entries); err != nil {
 			logx.Errorf("%v", err)
 			return 1
 		}
@@ -62,31 +63,26 @@ func runFeatures(ctx *AppContext, req *extinstall.Request, opts model.Options, s
 	for _, feature := range features {
 		suffix := listingSuffix(inventory[feature.Name])
 		switch {
-		case opts.Slim:
-			src := formatSource(sources.Slim, ctx.ProjectDir)
-			if src != "" {
-				fmt.Printf("✗ %s%s (disabled by --slim from %s)\n", feature.Name, suffix, src)
-			} else {
-				fmt.Printf("✗ %s%s (disabled by --slim)\n", feature.Name, suffix)
-			}
-		case opts.Features != nil:
-			if _, ok := available[feature.Name]; ok {
-				fmt.Printf("✓ %s%s\n", feature.Name, suffix)
-			} else {
-				src := formatSource(sources.Features, ctx.ProjectDir)
-				if src != "" {
-					fmt.Printf("✗ %s%s (disabled by features from %s)\n", feature.Name, suffix, src)
-				} else {
-					fmt.Printf("✗ %s%s (disabled by features)\n", feature.Name, suffix)
-				}
-			}
+		case enabled[feature.Name]:
+			fmt.Printf("✓ %s%s\n", feature.Name, suffix)
+		case validated && run.Backend == backend.NameQEMU:
+			fmt.Printf("✗ %s%s (disabled by qemu backend%s)\n", feature.Name, suffix, fromSource(sources.Backend, ctx.ProjectDir))
+		case run.Slim:
+			fmt.Printf("✗ %s%s (disabled by --slim%s)\n", feature.Name, suffix, fromSource(sources.Slim, ctx.ProjectDir))
+		case featuresDisabled(run.BuildOptions):
+			fmt.Printf("✗ %s%s (disabled by devcontainer%s)\n", feature.Name, suffix, fromSource(sources.Devcontainer, ctx.ProjectDir))
+		case run.Features != nil:
+			fmt.Printf("✗ %s%s (disabled by features%s)\n", feature.Name, suffix, fromSource(sources.Features, ctx.ProjectDir))
 		default:
-			if _, ok := available[feature.Name]; ok {
-				fmt.Printf("✓ %s%s\n", feature.Name, suffix)
-			} else {
-				fmt.Printf("✗ %s%s (opt-in)\n", feature.Name, suffix)
-			}
+			fmt.Printf("✗ %s%s (opt-in)\n", feature.Name, suffix)
 		}
 	}
 	return 0
+}
+
+func fromSource(source model.OptionSource, projectDir string) string {
+	if src := formatSource(source, projectDir); src != "" {
+		return " from " + src
+	}
+	return ""
 }

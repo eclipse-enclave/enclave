@@ -39,19 +39,20 @@ func (b *Backend) runRequestAuthSync(req backend.Request) {
 	if config == nil {
 		return
 	}
+	placeholders := backend.SecretPlaceholders(req.Secrets)
 	if auth != nil && len(req.AuthSync.AuthFiles) > 0 {
-		if err := b.syncSharedAuth(ctx, config.Key, auth.Key, req.AuthSync.AuthFiles); err != nil {
+		if err := b.syncSharedAuth(ctx, config.Key, auth.Key, req.AuthSync.AuthFiles, placeholders...); err != nil {
 			logx.Warnf("Failed to sync qemu shared auth files: %v", err)
 		}
 	}
 	for _, sync := range req.AuthSync.Features {
-		if err := b.syncFeatureAuth(ctx, config.Key, sync); err != nil {
+		if err := b.syncFeatureAuth(ctx, config.Key, sync, placeholders...); err != nil {
 			logx.Warnf("Failed to sync %s qemu feature auth files: %v", sync.Feature, err)
 		}
 	}
 }
 
-func (b *Backend) syncSharedAuth(ctx context.Context, configKey backend.StoreKey, authKey backend.StoreKey, files []string) error {
+func (b *Backend) syncSharedAuth(ctx context.Context, configKey backend.StoreKey, authKey backend.StoreKey, files []string, placeholders ...string) error {
 	validated, err := backend.ValidateAuthFilePaths(files)
 	if err != nil {
 		return err
@@ -59,6 +60,10 @@ func (b *Backend) syncSharedAuth(ctx context.Context, configKey backend.StoreKey
 	for _, file := range validated {
 		data, err := b.storage.ReadFile(ctx, configKey, backend.StoreKindConfig, file)
 		if err != nil || len(bytes.TrimSpace(data)) == 0 {
+			continue
+		}
+		if backend.ContainsSecretPlaceholder(data, placeholders) {
+			logx.Warnf("Not syncing auth file %s: contains a gateway placeholder.", file)
 			continue
 		}
 		current, err := b.storage.ReadFile(ctx, authKey, backend.StoreKindAuth, file)
@@ -72,7 +77,7 @@ func (b *Backend) syncSharedAuth(ctx context.Context, configKey backend.StoreKey
 	return nil
 }
 
-func (b *Backend) syncFeatureAuth(ctx context.Context, configKey backend.StoreKey, sync backend.FeatureAuthSync) error {
+func (b *Backend) syncFeatureAuth(ctx context.Context, configKey backend.StoreKey, sync backend.FeatureAuthSync, placeholders ...string) error {
 	feature := strings.TrimSpace(sync.Feature)
 	if feature == "" {
 		return nil
@@ -86,6 +91,10 @@ func (b *Backend) syncFeatureAuth(ctx context.Context, configKey backend.StoreKe
 		sourceRel := filepath.ToSlash(filepath.Join(sync.ConfigDir, file))
 		data, err := b.storage.ReadFile(ctx, configKey, backend.StoreKindConfig, sourceRel)
 		if err != nil || len(bytes.TrimSpace(data)) == 0 {
+			continue
+		}
+		if backend.ContainsSecretPlaceholder(data, placeholders) {
+			logx.Warnf("Not syncing %s auth file %s: contains a gateway placeholder.", feature, file)
 			continue
 		}
 		current, err := b.storage.ReadFile(ctx, featureKey, backend.StoreKindFeatureAuth, file)

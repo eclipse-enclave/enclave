@@ -139,6 +139,28 @@ func ValidateOptions(opts model.Options, sources model.OptionSources, ctx Valida
 	return opts, sources, warnings, nil
 }
 
+// validateAsRun validates opts the way a run would. The auto backend is left
+// unresolved by read-only commands, so the docker default is validated.
+func validateAsRun(paths model.Paths, opts model.Options, sources model.OptionSources) (model.Options, []string, error) {
+	if strings.TrimSpace(opts.Backend) == backend.NameAuto {
+		opts.Backend = backend.NameDocker
+	}
+	validated, _, warnings, err := ValidateOptions(opts, sources, ValidationContext{Paths: paths, Action: "run"})
+	return validated, warnings, err
+}
+
+// optionsAsRun returns the options a run would use: the validated options with
+// the configured backend when validation passes, otherwise the normalized ones.
+func optionsAsRun(paths model.Paths, opts model.Options, sources model.OptionSources) (model.Options, []string, error) {
+	validated, warnings, err := validateAsRun(paths, opts, sources)
+	if err != nil {
+		normalized, _ := normalizeOptions(opts)
+		return normalized, warnings, err
+	}
+	validated.Backend = opts.Backend
+	return validated, warnings, nil
+}
+
 // coerceQEMURunOptions aligns run options with what the experimental qemu
 // backend can actually do, so the user doesn't have to pass flags whose only
 // supported value is dictated by the backend. It has no network gateway
@@ -188,21 +210,17 @@ func coerceQEMURunOptions(opts model.Options, sources model.OptionSources, paths
 	return opts, warnings, nil
 }
 
-// qemuDroppedFeatures returns the feature names a tool-only qemu bundle skips —
-// the set a docker run would install for the same options (config selections
-// plus defaults). Best-effort: if features can't be enumerated it returns nil
-// and the caller logs a generic notice rather than failing the run.
+// qemuDroppedFeatures returns the feature names a tool-only qemu bundle skips:
+// the requested selection, or the default-enabled features when none is
+// requested. --slim and devcontainer mode are not considered. Best-effort: if
+// features can't be enumerated it returns nil and the caller logs a generic
+// notice rather than failing the run.
 func qemuDroppedFeatures(requested []string, paths model.Paths) []string {
-	available, err := config.ListFeatures(paths)
+	selection, err := resolveFeatureSelection(paths, model.BuildOptions{Features: requested})
 	if err != nil {
 		return nil
 	}
-	var names []string
-	if requested != nil {
-		names = resolveConfiguredFeatures(requested, available)
-	} else {
-		names = defaultEnabledFeatureNames(available)
-	}
+	names := selection.selected
 	sort.Strings(names)
 	return names
 }

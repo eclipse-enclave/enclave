@@ -27,6 +27,10 @@ func Run(args []string) int {
 	userCmds := discoverUserCommands()
 
 	baseOpts := config.DefaultOptions()
+	// Unset, a binary updates from the channel it was published on; set here
+	// rather than in config so the gateway proxy, which links config, stays
+	// independent of build stamps.
+	baseOpts.UpdateChannel = buildinfo.Channel()
 	parsed, err := cli.Parse(args, baseOpts, userCmds...)
 	if err != nil {
 		// Under --json a rejected request still owes stdout one result envelope.
@@ -68,25 +72,26 @@ func Run(args []string) int {
 		if parsed.Action == cli.ActionExtensionManage && parsed.ExtRequest != nil {
 			return reportExtensionResults(*parsed.ExtRequest, nil, err)
 		}
-		logx.Errorf("%v", err)
-		return 1
+		return reportStartupError(parsed, "", err)
+	}
+	// Updating the binary needs neither the project nor its config, so a broken
+	// one cannot keep a fix from being installed.
+	if parsed.Action == "self-update" {
+		return runSelfUpdate(parsed.Options.Verbose)
 	}
 
 	projectDir, err := resolveProjectDir()
 	if err != nil {
-		logx.Errorf("%v", err)
-		return 1
+		return reportStartupError(parsed, "", err)
 	}
 
-	globalDefaults, projectDefaults, warnings, err := config.LoadDefaults(projectDir)
+	globalDefaults, projectDefaults, configWarnings, err := config.LoadDefaults(projectDir)
 	if err != nil {
-		logx.Errorf("%v", err)
-		return 1
+		return reportStartupError(parsed, projectDir, err)
 	}
-	for _, warning := range warnings {
-		logx.Warnf(warning)
+	for _, warning := range configWarnings {
+		logx.Warnf(warning.Message)
 	}
-
 	var userCommandMount *model.UserCommandMount
 	if parsed.Action == "user-command" {
 		home, err := config.ResolveHostHome()
@@ -111,7 +116,7 @@ func Run(args []string) int {
 	}
 
 	// Folded like --allow-root, so `enclave config` reports the env opt-in too.
-	parsed.Options.AllowSensitiveMounts = sensitiveMountsAllowed(parsed.Options.AllowSensitiveMounts)
+	parsed.Options.AllowSensitiveMounts = sensitiveMountsAllowed(parsed.Options.AllowSensitiveMounts, parsed.Sources.AllowSensitiveMounts)
 	applyBuildEnvironment(&parsed)
 	cliOpts := parsed.Options
 	cliSources := parsed.Sources
@@ -123,19 +128,15 @@ func Run(args []string) int {
 	if actionNeedsTool(parsed) {
 		tool, err := resolveTool(opts.Tool, promptAllowed(parsed))
 		if err != nil {
-			logx.Errorf("%v", err)
-			return 1
+			return reportStartupError(parsed, projectDir, err)
 		}
 		if tool != opts.Tool {
 			opts, toolDefaults, hasToolDefaults = config.ResolveOptionsForTool(cliOpts, cliSources, globalDefaults, projectDefaults, tool)
 		}
 	}
-	if actionUsesBackend(parsed.Action) {
-		resolveBackend(&opts, promptAllowed(parsed))
-		if err := validateBackendName(opts.Backend); err != nil {
-			logx.Errorf("%v", err)
-			return 1
-		}
+	configuredBackend, err := resolveActionBackend(parsed.Action, &opts, promptAllowed(parsed))
+	if err != nil {
+		return reportStartupError(parsed, projectDir, err)
 	}
 	sources := opts.Sources
 	parsed.Options = opts
@@ -145,6 +146,9 @@ func Run(args []string) int {
 	// bypass dispatchCommand via early return).
 	if opts.Verbose {
 		logx.SetLevel("debug")
+	}
+	if maybeAutomaticSelfUpdate(parsed, globalDefaults) {
+		return exitCodeInterrupted
 	}
 
 	if parsed.Action == "cleanup" {
@@ -177,36 +181,45 @@ func Run(args []string) int {
 
 	paths, err := config.ResolvePaths()
 	if err != nil {
-		logx.Errorf("%v", err)
-		logx.Infof("Set %s to the directory containing Dockerfile and profiles.", model.EnvHome)
-		return 1
+		code := reportStartupError(parsed, projectDir, err)
+		if !parsed.NetworkPrintJSON {
+			logx.Infof("Set %s to the directory containing Dockerfile and profiles.", model.EnvHome)
+		}
+		return code
 	}
 	ctx := NewAppContext(paths, projectDir)
 
 	command := CommandInput{
-		Ctx:              ctx,
-		Action:           parsed.Action,
-		Options:          opts,
-		Sources:          sources,
-		CLIOptions:       cliOpts,
-		CLISources:       cliSources,
-		BaseOptions:      baseOpts,
-		GlobalDefaults:   globalDefaults,
-		ProjectDefaults:  projectDefaults,
-		ToolDefaults:     toolDefaults,
-		HasToolDefaults:  hasToolDefaults,
-		ConfigView:       parsed.ConfigView,
-		NetworkLogView:   parsed.NetworkLogView,
-		UserCommandMount: userCommandMount,
-		ExtRequest:       parsed.ExtRequest,
+		Ctx:               ctx,
+		Action:            parsed.Action,
+		Options:           opts,
+		Sources:           sources,
+		CLIOptions:        cliOpts,
+		CLISources:        cliSources,
+		BaseOptions:       baseOpts,
+		GlobalDefaults:    globalDefaults,
+		ProjectDefaults:   projectDefaults,
+		ToolDefaults:      toolDefaults,
+		HasToolDefaults:   hasToolDefaults,
+		ConfigView:        parsed.ConfigView,
+		ConfigWarnings:    configWarnings,
+		NetworkLogView:    parsed.NetworkLogView,
+		NetworkPrintJSON:  parsed.NetworkPrintJSON,
+		UserCommandMount:  userCommandMount,
+		ExtRequest:        parsed.ExtRequest,
+		ConfiguredBackend: configuredBackend,
 	}
 	return dispatchCommand(&command)
 }
 
 // applyBuildEnvironment folds ENCLAVE_NO_REBUILD into the commands that can
-// build, plus config so it reports what those commands will use.
+// build, plus config so it reports what those commands will use. An explicit
+// --no-rebuild=true|false wins over the environment.
 func applyBuildEnvironment(parsed *cli.Result) {
 	if !isRunAction(parsed.Action) && parsed.Action != "update" && parsed.Action != "config" {
+		return
+	}
+	if parsed.Sources.NoRebuild == model.SourceCLI {
 		return
 	}
 	parsed.Options.NoRebuild = parsed.Options.NoRebuild || rebuildSuppressedByEnv()
@@ -228,6 +241,17 @@ func rebuildSuppressionCause(opts model.Options) string {
 	default:
 		return "--no-rebuild"
 	}
+}
+
+// reportStartupError reports an error raised before dispatch; `network print
+// --json` still owes stdout its envelope.
+func reportStartupError(parsed cli.Result, projectDir string, err error) int {
+	if parsed.NetworkPrintJSON {
+		resolveProject := func() (model.Project, error) { return config.ResolveProjectFromDir(projectDir) }
+		return writeNetworkPolicyEnvelope(os.Stdout, networkPolicyEnvelope{}, resolveProject, err)
+	}
+	logx.Errorf("%v", err)
+	return 1
 }
 
 // discoverUserCommands scans the host command directories best-effort. If home

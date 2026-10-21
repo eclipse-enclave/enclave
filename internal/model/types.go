@@ -12,9 +12,21 @@ import (
 	"strings"
 )
 
+// Release channels a standalone enclave binary is published on and can update
+// itself from.
+const (
+	UpdateChannelRolling = "rolling"
+	UpdateChannelStable  = "stable"
+)
+
+// UpdateChannels lists the valid update_channel values.
+var UpdateChannels = []string{UpdateChannelStable, UpdateChannelRolling}
+
 type RunOptions struct {
 	Tool                 string
 	Backend              string
+	AutoUpdate           bool
+	UpdateChannel        string
 	HostConfig           string
 	SkillsValidation     string
 	HostConfigPaths      []string
@@ -156,6 +168,7 @@ type RuntimeConfig struct {
 	YoloEnabled           bool
 	Features              []Extension
 	UserCommandMount      *UserCommandMount
+	Provenance            map[string]any
 }
 
 // UserCommandMount describes the read-only bind mount that exposes the host
@@ -318,6 +331,8 @@ type HTTPSecretReleaseConfig struct {
 	Hosts  []string `json:"hosts"`
 	Header string   `json:"header"`
 	Format string   `json:"format,omitempty"`
+	// RequiredValuePrefix limits gateway protection to a supported credential type.
+	RequiredValuePrefix string `json:"required_value_prefix,omitempty"`
 	// HostsFromSecret names another secret id whose resolved value is a host.
 	// When that secret resolves, its value replaces Hosts for this release
 	// rule; see spec.yaml network.serviceAuth.hostsFromCredential.
@@ -564,6 +579,10 @@ const (
 	// the right per-user tmux socket even when the container's default exec
 	// user differs (e.g. root under --runtime-uid-remap).
 	LabelSessionMonitorUser = AppName + ".session_monitor_user"
+	// LabelOptions stores a session's provenance, the session-affecting
+	// option values, as compact JSON. It is storage only; `ps --json` is the
+	// contract.
+	LabelOptions = AppName + ".options"
 )
 
 const (

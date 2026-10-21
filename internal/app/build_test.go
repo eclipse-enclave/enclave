@@ -754,6 +754,7 @@ func TestHashRuntimeImageStaticFilesTracksCopiedInputs(t *testing.T) {
 	writeAppFile(t, filepath.Join(appRoot, "runtime-assets", "build-scripts", "install-agent-helper-bins.sh"), "helpers-v1\n", 0o755)
 	writeAppFile(t, filepath.Join(appRoot, "runtime-assets", "auth-reconcile.sh"), "auth-v1\n", 0o755)
 	writeAppFile(t, filepath.Join(appRoot, "runtime-assets", "net.sh"), "net-v1\n", 0o644)
+	writeAppFile(t, filepath.Join(appRoot, "runtime-assets", "tmux-session.conf"), "tmux-v1\n", 0o644)
 	writeAppFile(t, filepath.Join(appRoot, "docs", "README.md"), "docs-v1\n", 0o644)
 	writeAppFile(t, filepath.Join(appRoot, "docs", "assets", "appicon.txt"), "asset-v1\n", 0o644)
 	writeAppFile(t, filepath.Join(appRoot, "docs", "security", "README.md"), "ignored-v1\n", 0o644)
@@ -790,12 +791,21 @@ func TestHashRuntimeImageStaticFilesTracksCopiedInputs(t *testing.T) {
 		t.Fatal("expected hash to change after modifying copied net helper")
 	}
 
+	writeAppFile(t, filepath.Join(appRoot, "runtime-assets", "tmux-session.conf"), "tmux-v2\n", 0o644)
+	hashTmux, err := hashRuntimeImageStaticFiles(paths)
+	if err != nil {
+		t.Fatalf("hashRuntimeImageStaticFiles tmux session config: %v", err)
+	}
+	if hashTmux == hash4 {
+		t.Fatal("expected hash to change after modifying copied tmux session config")
+	}
+
 	writeAppFile(t, filepath.Join(appRoot, "docs", "README.md"), "docs-v2\n", 0o644)
 	hash5, err := hashRuntimeImageStaticFiles(paths)
 	if err != nil {
 		t.Fatalf("hashRuntimeImageStaticFiles docs: %v", err)
 	}
-	if hash5 == hash4 {
+	if hash5 == hashTmux {
 		t.Fatal("expected hash to change after modifying copied docs")
 	}
 

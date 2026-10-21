@@ -790,6 +790,18 @@ func rewriteHeaders(scheme string, host string, headers http.Header, rules []mod
 	}
 	secureTransport := strings.EqualFold(strings.TrimSpace(scheme), "https")
 	for header, values := range headers {
+		for _, rule := range rules {
+			if strings.Contains(strings.ToLower(header), strings.ToLower(rule.Placeholder)) {
+				return fmt.Errorf("request denied")
+			}
+			for _, value := range values {
+				if strings.Contains(value, rule.Placeholder) && (!secureTransport || !releaseHostMatch(normalizedHost, rule) || !strings.EqualFold(header, rule.Header)) {
+					return fmt.Errorf("request denied")
+				}
+			}
+		}
+	}
+	for header, values := range headers {
 		updated := make([]string, len(values))
 		copy(updated, values)
 		changed := false
@@ -797,12 +809,6 @@ func rewriteHeaders(scheme string, host string, headers http.Header, rules []mod
 			for _, rule := range rules {
 				if !strings.Contains(value, rule.Placeholder) {
 					continue
-				}
-				if !secureTransport {
-					return fmt.Errorf("request denied")
-				}
-				if !releaseHostMatch(normalizedHost, rule) {
-					return fmt.Errorf("request denied")
 				}
 				replacement := rule.Value
 				// Apply format only when the header value is the bare placeholder;

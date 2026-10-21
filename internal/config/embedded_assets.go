@@ -14,14 +14,20 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"enclave/internal/appassets"
+	"enclave/internal/logx"
 	"enclave/internal/util"
 )
 
 const (
 	embeddedAssetStoreDir         = "assets"
 	embeddedAssetExtractionPrefix = ".extract-"
+	// An entry's mtime records when a binary last used it. Refreshing it at
+	// most this often keeps most runs from writing to the cache.
+	embeddedAssetUseRefreshInterval = 24 * time.Hour
+	embeddedAssetUnusedRetention    = 30 * 24 * time.Hour
 )
 
 // registeredAppAssets returns the root of the assets embedded in the binary,
@@ -47,18 +53,29 @@ func appAssetsRoot(files fs.FS, key string, cacheRoot string) (string, error) {
 	if files == nil {
 		return "", fmt.Errorf("asset filesystem is nil")
 	}
-	if len(key) != 64 {
+	if !validAppAssetsKey(key) {
 		return "", fmt.Errorf("invalid embedded asset key %q", key)
-	}
-	for _, char := range key {
-		if (char < '0' || char > '9') && (char < 'a' || char > 'f') {
-			return "", fmt.Errorf("invalid embedded asset key %q", key)
-		}
 	}
 	if !filepath.IsAbs(cacheRoot) {
 		return "", fmt.Errorf("asset cache root is not absolute: %s", cacheRoot)
 	}
 	return filepath.Join(cacheRoot, embeddedAssetStoreDir, key), nil
+}
+
+func validAppAssetsKey(key string) bool {
+	if len(key) != 64 {
+		return false
+	}
+	for _, char := range key {
+		if (char < '0' || char > '9') && (char < 'a' || char > 'f') {
+			return false
+		}
+	}
+	return true
+}
+
+func appAssetsLockPath(cacheRoot string, key string) string {
+	return filepath.Join(cacheRoot, ".assets-"+key+".lock")
 }
 
 // findAppAssets returns the published cache entry for key without writing: a
@@ -81,9 +98,13 @@ func extractAppAssets(files fs.FS, key string, cacheRoot string) (string, error)
 	}
 
 	assetsDir := filepath.Dir(root)
-	if _, err := os.Lstat(root); err == nil {
+	published := false
+	if info, err := os.Lstat(root); err == nil {
 		if validationErr := validatePublishedAppRoot(root, files); validationErr == nil {
-			return root, nil
+			if time.Since(info.ModTime()) < embeddedAssetUseRefreshInterval {
+				return root, nil
+			}
+			published = true
 		}
 	} else if !os.IsNotExist(err) {
 		return "", fmt.Errorf("inspect embedded asset cache %s: %w", root, err)
@@ -92,12 +113,18 @@ func extractAppAssets(files fs.FS, key string, cacheRoot string) (string, error)
 	if err := os.MkdirAll(assetsDir, 0o755); err != nil { // #nosec G301 -- extracted build contexts must be traversable.
 		return "", fmt.Errorf("create embedded asset cache %s: %w", assetsDir, err)
 	}
-	lockPath := filepath.Join(cacheRoot, ".assets-"+key+".lock")
-	if err := util.WithFileLock(lockPath, func() error {
+	if err := util.WithFileLock(appAssetsLockPath(cacheRoot, key), func() error {
 		return materializeAppAssets(files, key, assetsDir, root)
 	}); err != nil {
+		// Refreshing only records use, so a cache this user can read but not
+		// write keeps serving a published entry.
+		if published && validatePublishedAppRoot(root, files) == nil {
+			logx.Debugf("Could not record use of embedded assets at %s: %v", root, err)
+			return root, nil
+		}
 		return "", err
 	}
+	removeUnusedAppAssets(cacheRoot, key, time.Now())
 	return root, nil
 }
 
@@ -108,6 +135,8 @@ func materializeAppAssets(files fs.FS, key string, assetsDir string, root string
 
 	if _, err := os.Lstat(root); err == nil {
 		if validationErr := validatePublishedAppRoot(root, files); validationErr == nil {
+			now := time.Now()
+			_ = os.Chtimes(root, now, now) // #nosec G703 -- root is a validated hash entry under the cache directory.
 			return nil
 		}
 		if err := os.RemoveAll(root); err != nil { // #nosec G703 -- root is a validated hash entry under the cache directory.
@@ -160,6 +189,35 @@ func removeInterruptedAppAssetExtractions(assetsDir string, key string) error {
 		}
 	}
 	return nil
+}
+
+// removeUnusedAppAssets removes the entries of other binaries that none has
+// used for embeddedAssetUnusedRetention. Holding an entry's lock excludes its
+// binary from refreshing or extracting it meanwhile; an entry whose lock is
+// held is skipped. Lock files stay, because removing one would let two
+// processes hold that lock at once. Entries are reproducible, so failures are
+// ignored.
+func removeUnusedAppAssets(cacheRoot string, currentKey string, now time.Time) {
+	assetsDir := filepath.Join(cacheRoot, embeddedAssetStoreDir)
+	entries, err := os.ReadDir(assetsDir)
+	if err != nil {
+		return
+	}
+	for _, entry := range entries {
+		key := entry.Name()
+		if key == currentKey || !entry.IsDir() || !validAppAssetsKey(key) {
+			continue
+		}
+		release, locked, err := util.TryAcquireFileLock(appAssetsLockPath(cacheRoot, key))
+		if err != nil || !locked {
+			continue
+		}
+		root := filepath.Join(assetsDir, key)
+		if info, err := os.Lstat(root); err == nil && info.IsDir() && now.Sub(info.ModTime()) >= embeddedAssetUnusedRetention {
+			_ = os.RemoveAll(root) // #nosec G703 -- root is a hash-named direct child returned by os.ReadDir above.
+		}
+		release()
+	}
 }
 
 func validatePublishedAppRoot(root string, files fs.FS) error {

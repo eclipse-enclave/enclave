@@ -23,7 +23,7 @@ script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 repo_root=$(CDPATH='' cd -- "$repo_root" && pwd)
 output_dir=$(mkdir -p "$output_dir" && cd "$output_dir" && pwd)
 
-alpine_image="${ENCLAVE_QEMU_ALPINE_IMAGE:-alpine@sha256:25109184c71bdad752c8312a8623239686a9a2071e8825f20acb8f2198c3f659}"
+alpine_image="${ENCLAVE_QEMU_ALPINE_IMAGE:-alpine@sha256:85fe1e81d6758c208f3e1eed4338a1997e19d4be002d4dd32d3100c9a8c010a0}"
 kernel_package="${ENCLAVE_QEMU_KERNEL_PACKAGE:-linux-virt}"
 
 if ! command -v docker >/dev/null 2>&1; then

@@ -222,7 +222,10 @@ func (b *Backend) Attach(ctx context.Context, ref backend.SessionRef, attach bac
 	if detachKeys == "" {
 		detachKeys = model.DetachKeysDefault
 	}
-	return dockercmd.AttachInteractive(ctx, sessionRefName(ref), detachKeys)
+	name := sessionRefName(ref)
+	err := dockercmd.AttachInteractive(ctx, name, detachKeys)
+	stopGatewayIfSessionExited(context.WithoutCancel(ctx), name)
+	return err
 }
 
 func (b *Backend) Stop(ctx context.Context, ref backend.SessionRef, opts backend.StopOptions) error {
@@ -260,11 +263,15 @@ func (b *Backend) RemoveWithoutFinalize(ctx context.Context, ref backend.Session
 func RemoveSessionContainer(ctx context.Context, name string, removeVolumes bool) error {
 	projectHash := captureSessionProjectHash(ctx, name)
 	network, hasNetwork := captureSessionNetworkRef(ctx, name, projectHash)
-	gatewayID := captureOwnedGatewayID(ctx, name, projectHash)
+	gatewayID, gatewayStopped := captureOwnedGateway(ctx, name, projectHash)
 	if err := dockercmd.ContainerRemove(ctx, name, true, removeVolumes); err != nil && !dockercmd.IsNotFound(err) {
 		return err
 	}
-	gateway.StopContainer(gatewayID)
+	if gatewayStopped {
+		removeStoppedGateway(ctx, gatewayID)
+	} else {
+		gateway.StopContainer(gatewayID)
+	}
 	if hasNetwork {
 		cleanupSessionNetwork(network)
 	}
@@ -285,9 +292,9 @@ func captureSessionProjectHash(ctx context.Context, name string) string {
 	return hash
 }
 
-func captureOwnedGatewayID(ctx context.Context, name string, projectHash string) string {
+func captureOwnedGateway(ctx context.Context, name string, projectHash string) (id string, stopped bool) {
 	if projectHash == "" {
-		return ""
+		return "", false
 	}
 	gatewayName := gateway.ContainerName(name)
 	info, err := dockercmd.ContainerInspect(ctx, gatewayName)
@@ -295,12 +302,22 @@ func captureOwnedGatewayID(ctx context.Context, name string, projectHash string)
 		if !dockercmd.IsNotFound(err) {
 			logx.Debugf("Failed to capture gateway container %s before teardown: %v", gatewayName, err)
 		}
-		return ""
+		return "", false
 	}
 	if !gateway.ContainerOwnedBy(info, name, projectHash) {
-		return ""
+		return "", false
 	}
-	return strings.TrimSpace(info.ID)
+	id = strings.TrimSpace(info.ID)
+	return id, id != "" && containerExited(info.State)
+}
+
+// removeStoppedGateway removes a gateway stopped while its exited session still
+// existed. Podman skips auto-removal while a container joins the gateway's
+// namespace.
+func removeStoppedGateway(ctx context.Context, id string) {
+	if err := dockercmd.ContainerRemove(ctx, id, false, false); err != nil && !dockercmd.IsNotFound(err) {
+		logx.Debugf("Failed to remove stopped gateway container %s: %v", id, err)
+	}
 }
 
 var execInteractive = dockercmd.ExecInteractive

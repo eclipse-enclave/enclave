@@ -44,7 +44,7 @@ To compare a session with the current configuration, see [Detecting session drif
 
 `status` reports sessions of the current project (like `exec` without `--name`); `--all` widens it to every project. Flags: `--tool` and `--name` filter sessions; `--json` emits one machine-readable snapshot object per session (screen text and OSC title for external state detection). Each snapshot captures the trailing 24 screen rows. See [Session status snapshots](session-status.md).
 
-`enclave attach` flags: `--detach-keys <sequence>` overrides the key sequence for detaching from the session (default `ctrl-\`); `--tool` disambiguates a session name used by more than one tool.
+`enclave attach` flags: `--detach-keys <sequence>` overrides the key sequence for detaching from the session (default `ctrl-\`); `--tool` disambiguates a session name used by more than one tool. When `attach` returns and the session has exited, it stops the session's gateway sidecar.
 
 `attach`, `exec --name`, `stop <name>`, and `theia`/`theia-next` accept the
 container name from `enclave ps`, a container ID, or the session name passed to
@@ -238,7 +238,7 @@ Mutation commands (`add-domain`, `remove-domain`, `set-mode`) apply the new poli
 |---------|-------------|
 | `enclave cleanup` | Remove persistent stores and caches for current tool/project |
 | `enclave cleanup --all` | All projects and tools |
-| `enclave cleanup --ephemeral` | Remove stopped containers together with their per-session networks, stale per-session networks of the same tool and project (no container, no endpoints, older than an hour), and ephemeral session stores |
+| `enclave cleanup --ephemeral` | Stop the gateways of exited background sessions, remove stopped containers together with their per-session networks, stale per-session networks of the same tool and project (no container, no endpoints, older than an hour), and ephemeral session stores |
 | `enclave cleanup --dry-run` | Preview what would be removed |
 | `enclave cleanup --keep cache,history,auth,memory` | Preserve the listed stores (comma-separated or repeated `--keep`): `cache` (package caches), `history` (shell history and the config store, including conversation history), `auth` (auth stores, with `--all`), `memory` (per-project agent memory, no selective effect with `--all`) |
 | `enclave cleanup --build-cache` | Prune Docker build cache (requires confirmation) |

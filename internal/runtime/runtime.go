@@ -247,6 +247,7 @@ func (r *Runtime) prepareExecution() (*ExecutionContext, error) {
 		}
 	}
 	r.removeStaleGateway(containerName)
+	r.stopExitedSessionGateways()
 	r.setConfigVolumeSuffix(containerName, baseContainerName)
 
 	r.resolveContainerUser()
@@ -332,6 +333,18 @@ func (r *Runtime) removeStaleGateway(containerName string) {
 	}
 	if err := remover.RemoveStaleGateway(context.Background(), containerName, r.project.Hash); err != nil {
 		logx.Warnf("Failed to check for a stale gateway of %s: %v", containerName, err)
+	}
+}
+
+// stopExitedSessionGateways must run before the OAuth port check for the same
+// reason as removeStaleGateway.
+func (r *Runtime) stopExitedSessionGateways() {
+	stopper, ok := r.backend.(backend.ExitedSessionGatewayStopper)
+	if !ok {
+		return
+	}
+	if err := stopper.StopExitedSessionGateways(context.Background()); err != nil {
+		logx.Warnf("Failed to check for gateways of exited sessions: %v", err)
 	}
 }
 

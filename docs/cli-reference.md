@@ -210,7 +210,7 @@ Network mutation commands are global-only today. `--project` scope is planned bu
 | `--tool <tool>` | Read another tool's log |
 | `--session <name>` | Read one session's events, named by its container (an exited session too) |
 | `--all-running` | Merge the logs of all running gateways on the host |
-| `--show-capture <id>` | Print the exchange captured under `--network-log=full` with this ID (the `capture_id` of its `http` event) instead of events; `--json` emits the capture record |
+| `--show-capture <id>` | Print the exchange captured under `--network-log=full` with this ID (the `capture_id` of its `http` event) instead of events, followed by the messages of a WebSocket, which can be shown while it is still open; `--json` emits the capture record |
 
 `--follow` and `--summary` are mutually exclusive, and `--since session` needs a scope covering exactly one session, so it cannot be combined with `--all-running`. `--show-capture` takes only the scope flags and `--json`. See [Networking](networking.md#reading-the-network-log) for the output format, [Coverage and granularity](networking.md#coverage-and-granularity) for what the log does and does not record, and [Full capture](networking.md#full-capture) for the capture store.
 

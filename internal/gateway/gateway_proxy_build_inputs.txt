@@ -10,6 +10,7 @@ internal/gateway/bundle
 internal/gateway/dnsaudit
 internal/gateway/mitm
 internal/gateway/tlsstore
+internal/gateway/wsframe
 internal/git
 internal/logx
 internal/model

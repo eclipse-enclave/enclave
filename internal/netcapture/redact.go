@@ -68,6 +68,26 @@ func (r *redactor) replace(value []byte) []byte {
 	return out
 }
 
+// payload redacts a message payload held in full. One that was cut short ends
+// without a tail that could be the start of a secret value, so that no part of
+// one is stored.
+func (r *redactor) payload(value []byte, cut bool) []byte {
+	if r == nil {
+		return value
+	}
+	out, _ := r.scan(value, cut)
+	return out
+}
+
+// longest is the length of the longest secret value, which a payload cut short
+// needs beyond its cap so that a value straddling the cap is still found.
+func (r *redactor) longest() int {
+	if r == nil {
+		return 0
+	}
+	return len(r.secrets[0].Value)
+}
+
 // header returns a redacted copy of header; the request's own headers are
 // left alone. Should two names redact to the same one, their values are kept
 // together.

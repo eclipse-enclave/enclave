@@ -352,8 +352,7 @@ func (p *proxy) forward(w http.ResponseWriter, req *http.Request, scheme string,
 	defer func() { _ = resp.Body.Close() }()
 	capture.Response(resp)
 	if resp.StatusCode == http.StatusSwitchingProtocols {
-		// The traffic of the upgraded connection is relayed, not captured.
-		return p.relayUpgrade(w, outgoing, resp)
+		return p.relayUpgrade(w, outgoing, resp, capture)
 	}
 	copyHeaders(w.Header(), resp.Header)
 	w.WriteHeader(resp.StatusCode)
@@ -364,7 +363,7 @@ func (p *proxy) forward(w http.ResponseWriter, req *http.Request, scheme string,
 	_ = rc.Flush()
 	var client io.Writer = flushWriter{w: w, rc: rc}
 	if sink := capture.ResponseBody(); sink != nil {
-		client = captureWriter{client: client, capture: sink}
+		client = captureWriter{relay: client, capture: sink}
 	}
 	responseBytes, copyErr := io.Copy(client, resp.Body)
 	capture.ResponseEnded(copyErr)
@@ -391,17 +390,16 @@ func (f flushWriter) Write(p []byte) (int, error) {
 	return n, f.rc.Flush()
 }
 
-// captureWriter tees the relayed response into its capture. Each chunk is
-// written to the client before it is captured, and only what reached the
-// client is captured; the next chunk is read once the capture has it, so a slow
-// disk slows the stream down.
+// captureWriter tees relayed bytes into their capture. Each chunk is relayed
+// before it is captured, and only what was relayed is captured; the next chunk
+// is read once the capture has it, so a slow disk slows the stream down.
 type captureWriter struct {
-	client  io.Writer
+	relay   io.Writer
 	capture io.Writer
 }
 
 func (c captureWriter) Write(p []byte) (int, error) {
-	n, err := c.client.Write(p)
+	n, err := c.relay.Write(p)
 	_, _ = c.capture.Write(p[:n])
 	return n, err
 }
@@ -410,7 +408,8 @@ func (c captureWriter) Write(p []byte) (int, error) {
 // 101 response must reach the client before either side sends a frame, and
 // the upgraded connection then carries traffic in both directions, so it is
 // taken over from the HTTP server rather than written as a response body.
-func (p *proxy) relayUpgrade(w http.ResponseWriter, req *http.Request, resp *http.Response) (forwardResult, error) {
+// The messages of a WebSocket are captured as each side's bytes are relayed.
+func (p *proxy) relayUpgrade(w http.ResponseWriter, req *http.Request, resp *http.Response, capture *netcapture.Capture) (forwardResult, error) {
 	requested, switched := upgradeType(req.Header), upgradeType(resp.Header)
 	if requested == "" || !strings.EqualFold(requested, switched) {
 		return forwardResult{}, fmt.Errorf("upstream switched to protocol %q when %q was requested", switched, requested)
@@ -435,15 +434,22 @@ func (p *proxy) relayUpgrade(w http.ResponseWriter, req *http.Request, resp *htt
 		return result, nil
 	}
 
+	var toUpstream io.Writer = upstream
+	var toClient io.Writer = downstream
+	if fromClient, fromServer := capture.WebSocket(resp); fromClient != nil {
+		toUpstream = captureWriter{relay: upstream, capture: fromClient}
+		toClient = captureWriter{relay: downstream, capture: fromServer}
+	}
+
 	// Either side ending the session ends the relay: closing both connections
 	// unblocks the copy in the other direction.
 	done := make(chan struct{}, 2)
 	go func() {
-		_, _ = io.Copy(upstream, buffered.Reader)
+		_, _ = io.Copy(toUpstream, buffered.Reader)
 		done <- struct{}{}
 	}()
 	go func() {
-		result.ResponseBytes, _ = io.Copy(downstream, upstream)
+		result.ResponseBytes, _ = io.Copy(toClient, upstream)
 		done <- struct{}{}
 	}()
 	<-done

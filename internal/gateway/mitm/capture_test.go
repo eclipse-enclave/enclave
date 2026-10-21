@@ -10,6 +10,7 @@ package mitm
 import (
 	"bufio"
 	"bytes"
+	"compress/flate"
 	"compress/gzip"
 	"context"
 	"fmt"
@@ -346,7 +347,9 @@ func TestProxyCaptureSkipsDeniedRequests(t *testing.T) {
 	}
 }
 
-func TestProxyCapturesUpgradeHandshakeOnly(t *testing.T) {
+// Upgrades to protocols other than WebSocket, such as SPDY, are relayed
+// without being parsed.
+func TestProxyCapturesOnlyTheHandshakeOfOtherUpgrades(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(echoUpgradeHandler))
 	defer upstream.Close()
 	host, hostPort := upstreamHost(t, upstream)
@@ -358,8 +361,8 @@ func TestProxyCapturesUpgradeHandshakeOnly(t *testing.T) {
 
 	waitForEvents(t, logPath, 1)
 	_, record, _ := capturedEvent(t, logPath, dir)
-	if record.Response == nil || record.Response.Status != http.StatusSwitchingProtocols || record.Response.Body != nil {
-		t.Fatalf("response = %+v, want the 101 head without a body", record.Response)
+	if record.Response == nil || record.Response.Status != http.StatusSwitchingProtocols || record.Response.Body != nil || record.WebSocket != nil {
+		t.Fatalf("response = %+v, websocket = %+v; want the 101 head alone", record.Response, record.WebSocket)
 	}
 	if record.Request.Headers.Get("Upgrade") != "echo" {
 		t.Fatalf("request headers = %v", record.Request.Headers)
@@ -493,5 +496,267 @@ func TestProxyCaptureRedactsSecretsInCompressedResponses(t *testing.T) {
 		if strings.Contains(string(raw), secret) {
 			t.Errorf("%s contains the released secret", entry.Name())
 		}
+	}
+}
+
+// wsFrame builds a WebSocket frame; first is its first header byte. Client
+// frames are masked, as the protocol requires.
+func wsFrame(first byte, payload string, masked bool) []byte {
+	second := byte(len(payload))
+	if masked {
+		second |= 0x80
+	}
+	frame := []byte{first, second}
+	if !masked {
+		return append(frame, payload...)
+	}
+	mask := [4]byte{0xa1, 0xb2, 0xc3, 0xd4}
+	frame = append(frame, mask[:]...)
+	for i := range len(payload) {
+		frame = append(frame, payload[i]^mask[i%4])
+	}
+	return frame
+}
+
+// deflateMessage compresses a message on its own, as permessage-deflate may.
+func deflateMessage(t *testing.T, message string) string {
+	t.Helper()
+	var buffer bytes.Buffer
+	writer, err := flate.NewWriter(&buffer, flate.BestCompression)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = writer.Write([]byte(message))
+	_ = writer.Flush()
+	return string(bytes.TrimSuffix(buffer.Bytes(), []byte{0x00, 0x00, 0xff, 0xff}))
+}
+
+// websocketUpstream accepts a WebSocket handshake with permessage-deflate,
+// reads want bytes and hands them to received, answers with reply, and then
+// waits for the other side to close.
+func websocketUpstream(want int, reply []byte, received chan<- []byte) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
+			http.Error(w, "upgrade required", http.StatusUpgradeRequired)
+			return
+		}
+		conn, rw, err := http.NewResponseController(w).Hijack()
+		if err != nil {
+			return
+		}
+		defer func() { _ = conn.Close() }()
+		_, _ = rw.WriteString("HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Extensions: permessage-deflate\r\n\r\n")
+		_ = rw.Flush()
+		_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
+		got := make([]byte, want)
+		n, _ := io.ReadFull(rw, got)
+		received <- got[:n]
+		_, _ = rw.Write(reply)
+		_ = rw.Flush()
+		_, _ = io.Copy(io.Discard, rw)
+	}
+}
+
+// openWebSocket sends a WebSocket handshake for host through the proxy.
+func openWebSocket(t *testing.T, proxyServer *httptest.Server, host string) (net.Conn, *bufio.Reader) {
+	t.Helper()
+	conn, err := net.Dial("tcp", strings.TrimPrefix(proxyServer.URL, "http://"))
+	if err != nil {
+		t.Fatalf("dial proxy: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+	_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
+	handshake := "GET /responses HTTP/1.1\r\nHost: " + host + "\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n" +
+		"Sec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Extensions: permessage-deflate\r\n\r\n"
+	if _, err := io.WriteString(conn, handshake); err != nil {
+		t.Fatalf("write handshake: %v", err)
+	}
+	reader := bufio.NewReader(conn)
+	resp, err := http.ReadResponse(reader, nil)
+	if err != nil || resp.StatusCode != http.StatusSwitchingProtocols {
+		t.Fatalf("handshake response = %v, %v", resp, err)
+	}
+	return conn, reader
+}
+
+func describeMessages(messages []netcapture.Message) string {
+	var lines []string
+	for _, m := range messages {
+		line := m.From + " " + m.Type + " " + m.Text + string(m.Base64)
+		if m.DecodedFrom != "" {
+			line += " (" + m.DecodedFrom + ")"
+		}
+		lines = append(lines, line)
+	}
+	return strings.Join(lines, "\n")
+}
+
+func TestProxyCapturesWebSocketMessagesWithoutChangingThem(t *testing.T) {
+	clientSends := bytes.Join([][]byte{
+		wsFrame(0x81, "hello", true),
+		wsFrame(0x01, "Hello, ", true),
+		wsFrame(0x89, "p", true),
+		wsFrame(0x80, "world", true),
+		wsFrame(0xc1, deflateMessage(t, "compressed from client"), true),
+		wsFrame(0x88, "\x03\xe8done", true),
+	}, nil)
+	serverSends := bytes.Join([][]byte{
+		wsFrame(0x81, "welcome", false),
+		wsFrame(0xc1, deflateMessage(t, "compressed from server"), false),
+		wsFrame(0x82, "\x01\x02\x03", false),
+		wsFrame(0x88, "\x03\xe8", false),
+	}, nil)
+
+	for _, captured := range []bool{false, true} {
+		received := make(chan []byte, 1)
+		upstream := httptest.NewServer(websocketUpstream(len(clientSends), serverSends, received))
+		host, hostPort := upstreamHost(t, upstream)
+		p := newProxy([]string{host}, nil, nil, false, nil, testSession)
+		var dir, logPath string
+		if captured {
+			p, dir, logPath = captureProxy(t, []string{host}, nil, netcapture.Options{})
+		}
+		proxyServer := httptest.NewServer(p.handler("http"))
+
+		conn, reader := openWebSocket(t, proxyServer, hostPort)
+		if _, err := conn.Write(clientSends); err != nil {
+			t.Fatalf("write frames: %v", err)
+		}
+		clientGot := make([]byte, len(serverSends))
+		if _, err := io.ReadFull(reader, clientGot); err != nil {
+			t.Fatalf("captured=%v: read relayed frames: %v", captured, err)
+		}
+		if upstreamGot := <-received; !bytes.Equal(upstreamGot, clientSends) {
+			t.Fatalf("captured=%v: upstream received %x, want %x", captured, upstreamGot, clientSends)
+		}
+		if !bytes.Equal(clientGot, serverSends) {
+			t.Fatalf("captured=%v: client received %x, want %x", captured, clientGot, serverSends)
+		}
+		_ = conn.Close()
+		if !captured {
+			proxyServer.Close()
+			upstream.Close()
+			continue
+		}
+
+		waitForEvents(t, logPath, 1)
+		event, record, recordPath := capturedEvent(t, logPath, dir)
+		proxyServer.Close()
+		upstream.Close()
+		if event.Status != http.StatusSwitchingProtocols || record.WebSocket == nil || record.WebSocket.Open {
+			t.Fatalf("event %+v, record websocket %+v", event, record.WebSocket)
+		}
+		_, messages, err := netcapture.ReadMessages(recordPath, record.WebSocket)
+		if err != nil {
+			t.Fatalf("ReadMessages() error = %v", err)
+		}
+		// Each side's messages keep their order. Between the sides the lines
+		// follow the order of storing, which can lag the relay; the timestamps,
+		// taken as each message was relayed, put every client message before the
+		// reply the upstream sent only after reading them all.
+		var fromClient, fromServer []netcapture.Message
+		for _, m := range messages {
+			if m.From == netcapture.FromClient {
+				fromClient = append(fromClient, m)
+			} else {
+				fromServer = append(fromServer, m)
+			}
+		}
+		wantClient := strings.Join([]string{
+			"client text hello",
+			"client ping p",
+			"client text Hello, world",
+			"client text compressed from client (permessage-deflate)",
+			"client close done",
+		}, "\n")
+		wantServer := strings.Join([]string{
+			"server text welcome",
+			"server text compressed from server (permessage-deflate)",
+			"server binary \x01\x02\x03",
+			"server close ",
+		}, "\n")
+		if got := describeMessages(fromClient); got != wantClient {
+			t.Fatalf("captured client messages =\n%s\nwant\n%s", got, wantClient)
+		}
+		if got := describeMessages(fromServer); got != wantServer {
+			t.Fatalf("captured server messages =\n%s\nwant\n%s", got, wantServer)
+		}
+		lastClient, err := time.Parse(netlog.TimeFormat, fromClient[len(fromClient)-1].Timestamp)
+		if err != nil {
+			t.Fatalf("client timestamp: %v", err)
+		}
+		firstServer, err := time.Parse(netlog.TimeFormat, fromServer[0].Timestamp)
+		if err != nil {
+			t.Fatalf("server timestamp: %v", err)
+		}
+		if lastClient.After(firstServer) {
+			t.Fatalf("last client message stamped %s, after the reply at %s", lastClient, firstServer)
+		}
+		if socket := record.WebSocket; socket.Compression != "permessage-deflate" || socket.Bytes != int64(len(clientSends)+len(serverSends)) || socket.Messages != 9 {
+			t.Fatalf("record websocket = %+v", socket)
+		}
+	}
+}
+
+func TestProxyShowsAnOpenWebSocketAndFinishesItAtShutdown(t *testing.T) {
+	request := wsFrame(0x81, "first turn", true)
+	received := make(chan []byte, 1)
+	upstream := httptest.NewServer(websocketUpstream(len(request), wsFrame(0x81, "first reply", false), received))
+	defer upstream.Close()
+	host, hostPort := upstreamHost(t, upstream)
+	p, dir, logPath := captureProxy(t, []string{host}, nil, netcapture.Options{})
+	proxyServer := httptest.NewServer(p.handler("http"))
+	defer proxyServer.Close()
+
+	conn, reader := openWebSocket(t, proxyServer, hostPort)
+	if _, err := conn.Write(request); err != nil {
+		t.Fatalf("write frame: %v", err)
+	}
+	<-received
+	if _, err := reader.ReadString('y'); err != nil {
+		t.Fatalf("read reply: %v", err)
+	}
+
+	// While the connection is open the record waits under its open name, with
+	// the messages so far next to it, and nothing is logged yet.
+	var openRecord string
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		matches, _ := filepath.Glob(filepath.Join(dir, "*.open.json"))
+		if len(matches) == 1 {
+			record, err := netcapture.Load(matches[0])
+			if err == nil {
+				if _, messages, _ := netcapture.ReadMessages(matches[0], record.WebSocket); len(messages) == 2 {
+					openRecord = matches[0]
+					break
+				}
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if openRecord == "" {
+		t.Fatal("no open record with both messages while the connection is open")
+	}
+	if events := readAuditEvents(t, logPath); len(events) != 0 {
+		t.Fatalf("events logged before the connection closed: %+v", events)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	p.exchanges.closeUpgraded()
+	p.exchanges.wait(ctx)
+
+	event, record, recordPath := capturedEvent(t, logPath, dir)
+	if event.Status != http.StatusSwitchingProtocols || recordPath != strings.TrimSuffix(openRecord, ".open.json")+".json" {
+		t.Fatalf("event %+v, record %s", event, recordPath)
+	}
+	if record.WebSocket == nil || record.WebSocket.Open || record.WebSocket.StoredMessages != 2 {
+		t.Fatalf("record websocket = %+v", record.WebSocket)
+	}
+	if _, err := os.Stat(openRecord); !os.IsNotExist(err) {
+		t.Fatalf("open record left behind: %v", err)
+	}
+	if _, err := reader.ReadByte(); err == nil {
+		t.Fatal("the client connection is still open after shutdown")
 	}
 }

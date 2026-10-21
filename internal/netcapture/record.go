@@ -7,12 +7,13 @@
 
 // Package netcapture defines the full HTTP capture store of
 // `--network-log=full`: the record format, the gateway-side writer that tees
-// request and response bodies to disk, and the host-side pruning and lookup.
-// Bodies are kept out of the network log, whose events only point at a capture
-// through their capture_id.
+// request and response bodies and WebSocket messages to disk, and the
+// host-side pruning and lookup. Bodies and messages are kept out of the network
+// log, whose events only point at a capture through their capture_id.
 package netcapture
 
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -22,6 +23,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"syscall"
 )
@@ -45,6 +47,9 @@ type Record struct {
 	// Error is set when the request could not be relayed, for example because
 	// the upstream was unreachable.
 	Error string `json:"error,omitempty"`
+	// WebSocket describes the messages of a connection the response switched
+	// to WebSocket.
+	WebSocket *WebSocket `json:"websocket,omitempty"`
 }
 
 // Request is the request as the client sent it, before the gateway released
@@ -78,28 +83,90 @@ type Body struct {
 	DecodedFrom string `json:"decodedFrom,omitempty"`
 }
 
+// WebSocket describes the messages file of a WebSocket connection, which holds
+// one Message per line. The record of a connection still open is the
+// <id>.open.json file, with Open set and the counts not filled in yet; the
+// <id>.json record replaces it when the connection closes.
+type WebSocket struct {
+	File string `json:"file,omitempty"`
+	Open bool   `json:"open,omitempty"`
+	// Compression names the extension whose messages are stored decoded.
+	Compression    string `json:"compression,omitempty"`
+	Messages       int64  `json:"messages"`
+	StoredMessages int64  `json:"storedMessages"`
+	// Bytes counts what crossed the proxy in both directions after the
+	// handshake; StoredBytes is the size of File.
+	Bytes       int64 `json:"bytes"`
+	StoredBytes int64 `json:"storedBytes"`
+	// Truncated is set when not every message is stored whole.
+	Truncated bool `json:"truncated,omitempty"`
+	// Error says why the frames of a direction could not be followed to the
+	// end; its later messages are not captured.
+	Error string `json:"error,omitempty"`
+}
+
+// Message is one line of a WebSocket messages file. Timestamp is when the
+// message's last byte was relayed. Lines keep the order in which each side sent
+// its messages; between the two sides they follow the order of storing, which
+// may lag the relay, so Timestamp is the order across both. Bytes counts the
+// payload as relayed, compressed if it was; StoredBytes the payload stored,
+// after decoding, truncation and redaction. The payload is in Text for text
+// messages and close reasons that are valid UTF-8, and in Base64 otherwise.
+type Message struct {
+	Timestamp   string `json:"ts"`
+	From        string `json:"from"`
+	Type        string `json:"type"`
+	Bytes       int64  `json:"bytes"`
+	StoredBytes int64  `json:"storedBytes"`
+	Truncated   bool   `json:"truncated,omitempty"`
+	DecodedFrom string `json:"decodedFrom,omitempty"`
+	// Compressed marks a payload stored as relayed because it could not be
+	// decoded.
+	Compressed bool   `json:"compressed,omitempty"`
+	Code       int    `json:"code,omitempty"`
+	Text       string `json:"text,omitempty"`
+	Base64     []byte `json:"base64,omitempty"`
+}
+
+// Message senders and types.
+const (
+	FromClient = "client"
+	FromServer = "server"
+
+	MessageText   = "text"
+	MessageBinary = "binary"
+	MessageClose  = "close"
+	MessagePing   = "ping"
+	MessagePong   = "pong"
+)
+
 const (
 	SchemaVersion = "1"
 	Kind          = "network-capture"
 )
 
-// Size limits. A body is truncated at MaxBodyBytes. A session directory keeps
-// its most recent captures within MaxSessionBytes, and the host prunes the
-// store of a project and tool to MaxStoreBytes at every session start.
+// Size limits. A body or message payload is truncated at MaxBodyBytes, and
+// the messages file of a WebSocket stops growing at MaxSocketBytes. A session
+// directory keeps its most recent captures within MaxSessionBytes, and the
+// host prunes the store of a project and tool to MaxStoreBytes at every session
+// start.
 const (
 	MaxBodyBytes    = 8 * 1024 * 1024
+	MaxSocketBytes  = 128 * 1024 * 1024
 	MaxSessionBytes = 512 * 1024 * 1024
 	MaxStoreBytes   = 1024 * 1024 * 1024
 )
 
 const (
 	recordSuffix       = ".json"
+	openRecordSuffix   = ".open.json"
 	requestBodySuffix  = ".request.body"
 	responseBodySuffix = ".response.body"
+	messagesSuffix     = ".messages.jsonl"
 )
 
-// fileSuffixes are the files one capture may consist of, record first.
-var fileSuffixes = []string{recordSuffix, requestBodySuffix, responseBodySuffix}
+// fileSuffixes are the files one capture may consist of, records first.
+var fileSuffixes = []string{recordSuffix, openRecordSuffix, requestBodySuffix, responseBodySuffix, messagesSuffix}
 
 const idBytes = 8
 
@@ -130,16 +197,35 @@ func RecordPath(sessionDir string, id string) string {
 	return filepath.Join(sessionDir, id+recordSuffix)
 }
 
+// OpenRecordPath is the record file of a WebSocket capture whose connection is
+// still open.
+func OpenRecordPath(sessionDir string, id string) string {
+	return filepath.Join(sessionDir, id+openRecordSuffix)
+}
+
 // BodyPath resolves a body's file next to its record. The name comes from the
 // record, so only the body file names the store itself writes are accepted.
 func BodyPath(recordPath string, body *Body) (string, bool) {
 	if body == nil {
 		return "", false
 	}
-	if id, suffix := captureID(body.File); id == "" || suffix == recordSuffix {
+	return siblingPath(recordPath, body.File, requestBodySuffix, responseBodySuffix)
+}
+
+// MessagesPath resolves the messages file of a WebSocket capture next to its
+// record, like BodyPath.
+func MessagesPath(recordPath string, socket *WebSocket) (string, bool) {
+	if socket == nil {
 		return "", false
 	}
-	return filepath.Join(filepath.Dir(recordPath), body.File), true
+	return siblingPath(recordPath, socket.File, messagesSuffix)
+}
+
+func siblingPath(recordPath string, name string, suffixes ...string) (string, bool) {
+	if id, suffix := captureID(name); id == "" || !slices.Contains(suffixes, suffix) {
+		return "", false
+	}
+	return filepath.Join(filepath.Dir(recordPath), name), true
 }
 
 // maxRecordBytes bounds a record read back from disk. Headers are its only
@@ -160,6 +246,33 @@ func ReadBody(recordPath string, body *Body) (string, []byte, error) {
 	}
 	data, err := readCaptureFile(path, MaxBodyBytes)
 	return path, data, err
+}
+
+// ReadMessages reads the messages file a record describes and returns its
+// path. A last line without its newline is still being written and is left
+// out. The second return is empty when nothing was stored.
+func ReadMessages(recordPath string, socket *WebSocket) (string, []Message, error) {
+	path, ok := MessagesPath(recordPath, socket)
+	if !ok {
+		return "", nil, nil
+	}
+	data, err := readCaptureFile(path, MaxSocketBytes)
+	if err != nil {
+		return path, nil, err
+	}
+	var messages []Message
+	for number := 1; ; number++ {
+		line, rest, complete := bytes.Cut(data, []byte{'\n'})
+		if !complete {
+			return path, messages, nil
+		}
+		data = rest
+		var message Message
+		if err := json.Unmarshal(line, &message); err != nil {
+			return path, messages, fmt.Errorf("parse %s line %d: %w", path, number, err)
+		}
+		messages = append(messages, message)
+	}
 }
 
 // readCaptureFile reads a file from a session directory. The gateway can write

@@ -205,8 +205,9 @@ Network mutation commands are global-only today. `--project` scope is planned bu
 | `--tool <tool>` | Read another tool's log |
 | `--session <name>` | Read one session's events, named by its container (an exited session too) |
 | `--all-running` | Merge the logs of all running gateways on the host |
+| `--show-capture <id>` | Print the exchange captured under `--network-log=full` with this ID (the `capture_id` of its `http` event) instead of events; `--json` emits the capture record |
 
-`--follow` and `--summary` are mutually exclusive, and `--since session` needs a scope covering exactly one session, so it cannot be combined with `--all-running`. See [Networking](networking.md#reading-the-network-log) for the output format and [Coverage and granularity](networking.md#coverage-and-granularity) for what the log does and does not record.
+`--follow` and `--summary` are mutually exclusive, and `--since session` needs a scope covering exactly one session, so it cannot be combined with `--all-running`. `--show-capture` takes only the scope flags and `--json`. See [Networking](networking.md#reading-the-network-log) for the output format, [Coverage and granularity](networking.md#coverage-and-granularity) for what the log does and does not record, and [Full capture](networking.md#full-capture) for the capture store.
 
 Mutation commands (`add-domain`, `remove-domain`, `set-mode`) apply the new policy to running gateways by default. Use `--no-apply` to persist only, or `--all-running` to target every running gateway on the host (rather than just the current project/tool). By default the runtime apply targets the selected tool's gateway; pass `--tool <tool>` to target a different tool. `network apply` accepts `--tool` and `--all-running`.
 
@@ -240,7 +241,7 @@ Mutation commands (`add-domain`, `remove-domain`, `set-mode`) apply the new poli
 | `enclave cleanup --all` | All projects and tools |
 | `enclave cleanup --ephemeral` | Stop the gateways of exited background sessions, remove stopped containers together with their per-session networks, stale per-session networks of the same tool and project (no container, no endpoints, older than an hour), and ephemeral session stores |
 | `enclave cleanup --dry-run` | Preview what would be removed |
-| `enclave cleanup --keep cache,history,auth,memory` | Preserve the listed stores (comma-separated or repeated `--keep`): `cache` (package caches), `history` (shell history and the config store, including conversation history), `auth` (auth stores, with `--all`), `memory` (per-project agent memory, no selective effect with `--all`) |
+| `enclave cleanup --keep cache,history,auth,memory` | Preserve the listed stores (comma-separated or repeated `--keep`): `cache` (package caches), `history` (shell history, the config store including conversation history, and full network captures), `auth` (auth stores, with `--all`), `memory` (per-project agent memory, no selective effect with `--all`) |
 | `enclave cleanup --build-cache` | Prune Docker build cache (requires confirmation) |
 
 For a tool with session-scoped memory (Codex), `history` and `memory` name one
@@ -332,7 +333,7 @@ There is no config-file key.
 |------|-------------|
 | `--allow-all-network` | Disable network restrictions |
 | `--allow-domain <domain>` | Add a domain to the gateway allowlist for this run only (repeatable, no persistence) |
-| `--network-log <coarse\|requests>` | Network audit mode. `coarse` (default) logs one pass/deny event per TLS connection, plus per-request events for plaintext HTTP and for hosts the gateway already MITMs for secret release; `requests` forces HTTPS MITM for all allowlisted hosts and emits an audit event per HTTP/HTTPS request. See [Coverage and granularity](networking.md#coverage-and-granularity) |
+| `--network-log <coarse\|requests\|full>` | Network audit mode. `coarse` (default) logs one pass/deny event per TLS connection, plus per-request events for plaintext HTTP and for hosts the gateway already MITMs for secret release; `requests` forces HTTPS MITM for all allowlisted hosts and emits an audit event per HTTP/HTTPS request; `full` does the same and stores the headers and bodies of every relayed request and response under `logs/capture/<session>/` (sensitive; see [Full capture](networking.md#full-capture)). See [Coverage and granularity](networking.md#coverage-and-granularity) |
 
 ### Persistence
 

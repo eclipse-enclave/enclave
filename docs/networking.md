@@ -14,6 +14,9 @@ enclave --network-log=requests
 
 This forces allowlisted HTTPS traffic through the gateway MITM proxy so the gateway can emit HTTP-style request audit events for both HTTP and HTTPS, instead of one event per TLS connection. Some clients that pin certificates or use custom trust stores may fail in this mode.
 
+`--network-log=full` does the same and also stores the headers and bodies of
+every relayed request and its response; see [Full capture](#full-capture).
+
 The container trusts the gateway CA through `SSL_CERT_FILE` and
 `REQUESTS_CA_BUNDLE` (the system bundle plus the gateway CA, written to
 `/tmp/enclave-ca/ca-certificates.crt` at startup) and `NODE_EXTRA_CA_CERTS`.
@@ -45,6 +48,7 @@ enclave network log --summary              # Per-domain aggregate
 enclave network log --verdict deny         # Only what was blocked
 enclave network log --domain '*.github.com' --since 10m
 enclave network log --json | jq            # The integration contract
+enclave network log --show-capture <id>    # One exchange recorded by --network-log=full
 ```
 
 The log is read from disk, so events of a session that has already exited are
@@ -76,7 +80,7 @@ not a terminal.
 
 | Type | Written by | Notes |
 |------|-----------|-------|
-| `http` | MITM proxy | One event per request, with method, path, status and byte counts. Query strings are never logged: only the URL path is recorded. Written for every plaintext HTTP request, and for HTTPS only where the proxy terminates TLS |
+| `http` | MITM proxy | One event per request, with method, path, status and byte counts. Query strings are never logged: only the URL path is recorded. Written for every plaintext HTTP request, and for HTTPS only where the proxy terminates TLS. Under `--network-log=full`, `capture_id` names the [capture](#full-capture) of the request |
 | `tcp` | MITM proxy | One event per TLS connection, written at the ClientHello with the SNI host, the verdict and the matched rule. The requests carried inside the connection are not visible |
 | `dns` | DNS audit translator | One event per denied or failed lookup, with `rule` naming the condition (`nxdomain` for a domain blackholed by policy, `upstream-servfail`, `upstream-refused` or `upstream-nxdomain` for an upstream failure) |
 | `session` | Host, at gateway start | A boundary marker naming the session. Not an audit event: excluded from `--summary` and never matched by `--verdict`, `--domain` or `--type` |
@@ -114,9 +118,9 @@ limits matter before a quiet log is read as a quiet session:
   relayed without being inspected or logged, so requests multiplexed inside it
   get no events of their own, even with `--network-log=requests`.
 
-Run the session with `--network-log=requests` to force MITM for every
-allowlisted HTTPS host and get an `http` event per request. In either mode, SSH
-on port 22 bypasses the HTTP/TLS proxy and is never recorded.
+Run the session with `--network-log=requests` (or `full`) to force MITM for
+every allowlisted HTTPS host and get an `http` event per request. In every mode,
+SSH on port 22 bypasses the HTTP/TLS proxy and is never recorded.
 
 ### Rotation
 
@@ -129,6 +133,161 @@ session never rotates its own log, so a single long-running session can grow pas
 the cap, and worst-case disk use is roughly twice the cap per project and tool.
 Concurrent session starts serialize on a `network.log.lock` file next to the log,
 so two of them cannot discard the generation the other just wrote.
+
+## Full Capture
+
+`--network-log=full` (`"network_log": "full"`) keeps everything `requests` mode
+does and also stores the request line, headers and body of every request the
+MITM proxy relays, together with the response status, headers and body. It is
+off unless selected, and meant for debugging a tool's API traffic or checking
+what an agent sent out.
+
+```bash
+enclave --network-log=full
+enclave network log --type http --since session   # rows end in "capture <id>"
+enclave network log --show-capture 3f9a0c1d2e4b5a69
+```
+
+**A capture is sensitive.** Request bodies are stored as the agent sent them,
+including prompts, file contents, and any token the agent read and put into a
+request. Query strings and cookies are stored too, and so are credentials an
+upstream issues: a session or access token in a response body, and the header
+that later sends it back, are stored as they crossed the proxy and stay valid
+until they expire. Treat the capture directory like the credentials it
+contains.
+
+### Secrets in captures
+
+The proxy snapshots each request before it releases secrets into the headers,
+so the capture holds the placeholders the sandbox sent, never the released
+values. A released value that shows up anywhere else, such as an upstream
+echoing the credential in a response header or body, is replaced by its
+placeholder before it is written. Bodies compressed with `gzip` or `deflate`
+are decoded first, so this covers most API responses. The replacement matches
+the value's literal bytes, so it misses a value that arrives encoded in another
+way: in a body compressed with `br` or `zstd`, URL-encoded, escaped in JSON, or
+in base64. Credentials without an HTTP release rule are ordinary request
+content and are stored as sent.
+
+### Capture store
+
+Captures live next to the network log, one directory per session:
+
+```text
+~/.local/state/enclave/projects/<project-hash>/<tool>/logs/capture/<session>/
+  <id>.json             request line, headers, response head, body metadata
+  <id>.request.body     request body as sent upstream (gzip/deflate decoded)
+  <id>.response.body    response body as relayed to the client (gzip/deflate decoded)
+```
+
+The `http` event of a captured request carries the ID in `capture_id`, so its
+record is `capture/<session>/<capture_id>.json` with `<session>` from the
+event's `session` field. Requests the gateway denies were not relayed and have
+no capture. The record and the event are written when the exchange ends, so a
+stream that is still open has neither yet. The `capture` directory is private
+to your user. The session directories below it are world-writable, because the
+gateway's proxy runs as a different UID, and rely on that parent for
+protection. The capture files belong to that UID: under rootful Docker `ls -l`
+shows whichever host account has the same UID (for example `messagebus`), and
+under rootless Podman a subordinate UID. You can read and delete them, but not
+modify them.
+
+The record (`schemaVersion: "1"`, `kind: "network-capture"`) looks like this:
+
+```json
+{
+  "schemaVersion": "1",
+  "kind": "network-capture",
+  "id": "3f9a0c1d2e4b5a69",
+  "session": "enclave-claude-e9671acd2448-1",
+  "ts": "2026-10-21T10:11:12.345678Z",
+  "durationMs": 1830,
+  "request": {
+    "method": "POST",
+    "url": "https://api.anthropic.com/v1/messages?beta=true",
+    "proto": "HTTP/1.1",
+    "headers": {"Content-Type": ["application/json"], "X-Api-Key": ["<placeholder>"]},
+    "body": {"file": "3f9a0c1d2e4b5a69.request.body", "bytes": 48213, "storedBytes": 48213}
+  },
+  "response": {
+    "status": 200,
+    "proto": "HTTP/1.1",
+    "headers": {"Content-Type": ["text/event-stream"]},
+    "body": {"file": "3f9a0c1d2e4b5a69.response.body", "bytes": 10422, "storedBytes": 10422}
+  }
+}
+```
+
+- Request headers are those the client sent, before secret release and before
+  the proxy adds `X-Forwarded-For` and `X-Forwarded-Proto`. Response headers are
+  those relayed to the client.
+- `body` is absent when a message had none. `bytes` counts what crossed the
+  proxy and `storedBytes` what the file holds. `truncated: true` marks a body
+  that is not stored whole: cut at the size cap or the session budget,
+  interrupted, not decodable to its end, or a request body the upstream
+  answered before reading to the end, in which case what the client sent
+  afterwards is not recorded. `file` is relative to the record and absent when
+  nothing was stored.
+- A body with `Content-Encoding: gzip`, `x-gzip` or `deflate` is stored
+  decoded, and `decodedFrom` names the encoding; `bytes` still counts the
+  encoded bytes relayed, and the headers stay as relayed. Other encodings are
+  stored as relayed, and for `zstd` and `br` `--show-capture` prints the
+  `zstd -dc` or `brotli -dc` command that reads the file.
+- When the request could not be relayed, `error` says why and `response` may be
+  absent. An upgraded connection (status `101`) records the handshake only.
+- Fields are only added, never renamed or removed.
+
+### Size limits and retention
+
+- Each body is stored up to 8 MiB and marked `truncated` beyond that; the
+  client still receives all of it. For a decoded body the cap applies to the
+  decoded bytes, and decoding stops there.
+- Streamed responses such as server-sent events are written to the capture as
+  they are relayed. Each chunk reaches the client before it is written to the
+  capture, but the next chunk is read only afterwards, so a slow disk slows the
+  stream down.
+- A session directory keeps its most recent captures within 512 MiB, deleting
+  the oldest to make room. Bodies count against that budget as they are
+  written, so when captures still in flight fill it on their own, the rest of
+  their bodies is not stored and they are marked `truncated`.
+- At session start the store of the project and tool is pruned to 1 GiB,
+  oldest captures first, across all sessions. Directories are left in place, so
+  a running session keeps writing. Body files that a gateway stopped in the
+  middle of a capture left without a record are removed once nothing has
+  written to them for a day.
+- `enclave cleanup` removes the capture store of the project and tool unless
+  `--keep history` is given, and `enclave cleanup --all` removes every store.
+  To drop captures without a cleanup, delete files in a session directory;
+  deleting the directory of a running session stops its capture until the
+  session starts again.
+
+### What full capture cannot see
+
+Full capture covers the same traffic as `requests` mode, the HTTP requests the
+proxy terminates:
+
+- Traffic inside an upgraded connection (WebSocket, SPDY) is relayed but not
+  captured; only the handshake is. A tool that runs its model conversation over
+  a WebSocket is therefore only partly covered: its prompts and tool output do
+  not appear in the capture.
+- SSH on port 22 bypasses the proxy and is never recorded.
+- Clients that pin certificates or use their own trust store fail in this mode
+  instead of being captured.
+- With `--allow-all-network`, policy mode `unrestricted`, or the `qemu` backend
+  there is no gateway, so nothing is captured.
+
+### Reading captures
+
+`enclave network log --show-capture <id>` prints the request and the response
+as HTTP messages, each followed by the size and location of its body file. It
+takes the scope flags of `network log` (`--tool`, `--session`, `--all-running`)
+and cannot be combined with `--follow`, `--summary`, `--since`, `--verdict`,
+`--domain` or `--type`. Control characters in headers and bodies are replaced,
+so a capture cannot drive the terminal. The gateway can write into its session
+directory, so only regular files are read from there: a symlink, which could
+point at any file you can read, is refused. `--json` emits the record file on one
+line; read the bodies from their files. The files can also be read directly,
+for example with `jq . <id>.json`. HAR export is not supported.
 
 ## Managing the Network Policy
 

@@ -56,6 +56,9 @@ func TestParseNetworkLogRejectsConflicts(t *testing.T) {
 		"follow with summary":       {"network", "log", "--follow", "--summary"},
 		"since session all-running": {"network", "log", "--since", "session", "--all-running"},
 		"session with all-running":  {"network", "log", "--session", "x", "--all-running"},
+		"capture with follow":       {"network", "log", "--show-capture", "0123456789abcdef", "--follow"},
+		"capture with summary":      {"network", "log", "--show-capture", "0123456789abcdef", "--summary"},
+		"capture with filter":       {"network", "log", "--show-capture", "0123456789abcdef", "--verdict", "deny"},
 	}
 	for name, args := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -65,5 +68,15 @@ func TestParseNetworkLogRejectsConflicts(t *testing.T) {
 				t.Fatal("expected the error to name the conflict")
 			}
 		})
+	}
+}
+
+func TestParseNetworkLogShowCapture(t *testing.T) {
+	res, err := Parse([]string{"network", "log", "--show-capture", "0123456789abcdef", "--json", "--session", "enclave-demo-claude"}, config.DefaultOptions())
+	if err != nil {
+		t.Fatalf("parse failed: %v", err)
+	}
+	if res.Action != "network-log" || res.NetworkLogView.ShowCapture != "0123456789abcdef" || !res.NetworkLogView.JSON {
+		t.Fatalf("result = %+v", res.NetworkLogView)
 	}
 }

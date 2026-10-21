@@ -49,6 +49,7 @@ Per-project data is stored on the host and reused across sessions:
 | Shell history | `~/.local/state/enclave/projects/<project-hash>/<tool>/history/` |
 | Agent memory | `~/.local/state/enclave/projects/<project-hash>/<tool>/memory/` (Claude); `memory/<key>/` (Codex, matching the config-store key) |
 | Config/env/auth stores | Host directories under `~/.local/state/enclave/` (bind-mounted; no Docker volumes) |
+| Network log and captures | `~/.local/state/enclave/projects/<project-hash>/<tool>/logs/` (`network.log`; `capture/<session>/` with [`--network-log=full`](networking.md#full-capture)) |
 | Embedded runtime assets | `~/.cache/enclave/assets/<content-hash>/` |
 
 Extracted runtime asset entries are reproducible cache data. Deleting them is
@@ -93,7 +94,7 @@ Options:
 |------|--------|
 | `--all` | Remove stores and caches for all projects and tools |
 | `--ephemeral` | Remove stopped containers and ephemeral session stores |
-| `--keep <kinds>` | Preserve the listed stores (comma-separated or repeated): `cache` (package caches), `history` (shell history), `memory` (per-project agent memory, removed by default; no selective effect with `--all`), `auth` (auth stores, with `--all`) |
+| `--keep <kinds>` | Preserve the listed stores (comma-separated or repeated): `cache` (package caches), `history` (shell history and [full network captures](networking.md#full-capture)), `memory` (per-project agent memory, removed by default; no selective effect with `--all`), `auth` (auth stores, with `--all`) |
 | `--build-cache` | Prune Docker build cache (requires confirmation) |
 | `--dry-run` | Preview what would be removed |
 

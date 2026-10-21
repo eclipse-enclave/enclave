@@ -15,6 +15,17 @@ import (
 )
 
 func WriteFileAtomic(path string, data []byte, mode os.FileMode) error {
+	return writeFileAtomic(path, data, mode, true)
+}
+
+// WriteFileAtomicNoSync is WriteFileAtomic without the fsync, for best-effort
+// files written on a latency-sensitive path: a reader still never sees a
+// partial file, but a crash may lose it.
+func WriteFileAtomicNoSync(path string, data []byte, mode os.FileMode) error {
+	return writeFileAtomic(path, data, mode, false)
+}
+
+func writeFileAtomic(path string, data []byte, mode os.FileMode, sync bool) error {
 	dir := filepath.Dir(path)
 	base := filepath.Base(path)
 	tmp, err := os.CreateTemp(dir, "."+base+".tmp-*")
@@ -33,8 +44,10 @@ func WriteFileAtomic(path string, data []byte, mode os.FileMode) error {
 	if _, err := tmp.Write(data); err != nil {
 		return err
 	}
-	if err := tmp.Sync(); err != nil {
-		return err
+	if sync {
+		if err := tmp.Sync(); err != nil {
+			return err
+		}
 	}
 	if err := tmp.Chmod(mode); err != nil {
 		return err

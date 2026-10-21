@@ -193,7 +193,7 @@ func TestRestrictedProxyAddsForwardingHeaders(t *testing.T) {
 	}
 	req := httptest.NewRequest(http.MethodGet, upstream.URL+"/", nil)
 	req.Host = upstream.Listener.Addr().String()
-	if _, err := p.forward(httptest.NewRecorder(), req, "http"); err != nil {
+	if _, err := p.forward(httptest.NewRecorder(), req, "http", nil); err != nil {
 		t.Fatalf("forward() error = %v", err)
 	}
 

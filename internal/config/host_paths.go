@@ -250,6 +250,12 @@ func HostProjectNetworkLogPath(home string, projectHash string, tool string) str
 	return filepath.Join(HostProjectLogsDir(home, projectHash, tool), "network.log")
 }
 
+// HostProjectNetworkCaptureDir is the full HTTP capture store of a project and
+// tool, with one directory per session below it.
+func HostProjectNetworkCaptureDir(home string, projectHash string, tool string) string {
+	return filepath.Join(HostProjectLogsDir(home, projectHash, tool), "capture")
+}
+
 func HostProjectGatewayConfigDir(home string, projectHash string, tool string) string {
 	return filepath.Join(HostProjectToolDir(home, projectHash, tool), "gateway-config")
 }

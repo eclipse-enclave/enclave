@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"enclave/internal/netlog"
+	"enclave/internal/util"
 )
 
 // Options configures a Store.
@@ -255,7 +256,10 @@ func (c *Capture) Finish(relayErr error) string {
 	payload, err := json.MarshalIndent(c.record, "", "  ")
 	if err == nil {
 		payload = append(payload, '\n')
-		err = writeFileAtomic(RecordPath(s.dir, c.id), payload)
+		// The record lands as one rename so a reader never sees it partial. It
+		// skips the fsync because Finish runs on the relay path and a capture
+		// lost in a crash is acceptable.
+		err = util.WriteFileAtomicNoSync(RecordPath(s.dir, c.id), payload, 0o644)
 	}
 	if err != nil {
 		c.request.remove()
@@ -519,31 +523,6 @@ func (t *teeBody) complete() bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return t.eof
-}
-
-// writeFileAtomic stages the record in a hidden file and renames it into place,
-// so a reader never sees a partial record.
-func writeFileAtomic(path string, payload []byte) error {
-	staged, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".*")
-	if err != nil {
-		return err
-	}
-	stagedPath := staged.Name()
-	defer func() { _ = os.Remove(stagedPath) }()
-	if _, err := staged.Write(payload); err != nil {
-		_ = staged.Close()
-		return err
-	}
-	// CreateTemp creates the file 0600, which the host user cannot read when the
-	// proxy runs under another UID.
-	if err := staged.Chmod(0o644); err != nil { // #nosec G302 -- see bodySink.persist.
-		_ = staged.Close()
-		return err
-	}
-	if err := staged.Close(); err != nil {
-		return err
-	}
-	return os.Rename(stagedPath, path) // #nosec G703 -- both paths are inside the session directory.
 }
 
 // sessionCapture is a finished capture found on disk.

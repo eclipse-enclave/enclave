@@ -1,0 +1,111 @@
+name: Release
+
+# A release tag vX.Y.Z, or vX.Y.Z-alpha.N, -beta.N, -rc.N for a pre-release,
+# builds every artifact with that version, creates the GitHub release for the
+# tag, and publishes the files to download.eclipse.org under
+# enclave/releases/<version>/. Final releases also move releases/latest, which
+# the stable update channel follows; pre-releases do not. Other tag forms are
+# refused: these are the ones the updater, dpkg, and rpm all order alike.
+
+on:
+  push:
+    tags:
+      - 'v[0-9]*'
+
+# Releases publish one after another so that releases/latest moves forward;
+# tags pushed in the meantime wait instead of replacing each other.
+concurrency:
+  group: release
+  queue: max
+
+permissions:
+  contents: read
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.tag.outputs.version }}
+      prerelease: ${{ steps.tag.outputs.prerelease }}
+    steps:
+      - id: tag
+        run: |
+          case "$GITHUB_REF_NAME" in
+            v[0-9]*.[0-9]*.[0-9]*) ;;
+            *) echo "tag $GITHUB_REF_NAME is not a release tag (vX.Y.Z or vX.Y.Z-<pre-release>)" >&2; exit 1 ;;
+          esac
+          version="${GITHUB_REF_NAME#v}"
+          if ! printf '%s\n' "$version" | grep -Eq '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-(alpha|beta|rc)\.(0|[1-9][0-9]*))?$'; then
+            echo "tag $GITHUB_REF_NAME is not a release tag (vX.Y.Z or vX.Y.Z-{alpha,beta,rc}.N, no leading zeros)" >&2
+            exit 1
+          fi
+          prerelease=false
+          case "$version" in *-*) prerelease=true ;; esac
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
+
+  assets:
+    needs: version
+    uses: ./.github/workflows/reusable-release-assets.yml
+    with:
+      channel: stable
+      version: ${{ needs.version.outputs.version }}
+      scoop_base_url: ${{ github.server_url }}/${{ github.repository }}/releases/download/${{ github.ref_name }}
+
+  publish:
+    needs: [version, assets]
+    # Forks carry this file but must not publish with their own secrets.
+    if: ${{ github.repository == 'eclipse-enclave/enclave' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+      VERSION: ${{ needs.version.outputs.version }}
+      PRERELEASE: ${{ needs.version.outputs.prerelease }}
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-assets
+          path: artifacts
+
+      - name: Create GitHub release
+        run: |
+          notes="$(./scripts/release-notes.sh stable "$VERSION" "${{ github.server_url }}/${{ github.repository }}/releases/download/$GITHUB_REF_NAME" "$GITHUB_SHA")"
+          if existing="$(gh release view "$GITHUB_REF_NAME" --json body --jq .body 2>/dev/null)"; then
+            # A re-run from the same commit replaces the assets of the release
+            # it already created; a tag moved to another commit is refused.
+            published="$(printf '%s\n' "$existing" | grep -oE '/commit/[0-9a-f]{40}' | head -n 1 | cut -d/ -f3)"
+            if [ "$published" != "$GITHUB_SHA" ]; then
+              echo "::error::release $GITHUB_REF_NAME was published from commit ${published:-unknown}, not $GITHUB_SHA; a release tag must not move" >&2
+              exit 1
+            fi
+            gh release upload "$GITHUB_REF_NAME" --clobber artifacts/*
+          else
+            flags=()
+            if [ "$PRERELEASE" = true ]; then flags+=(--prerelease); fi
+            gh release create "$GITHUB_REF_NAME" \
+              --verify-tag \
+              --title "Enclave $VERSION" \
+              --notes "$notes" \
+              "${flags[@]}" \
+              artifacts/*
+          fi
+
+      # The updater reads releases/latest (a version) and that version's
+      # directory. Pre-releases are published but never become latest.
+      - name: Publish to download.eclipse.org
+        uses: ./.github/actions/publish-downloads
+        with:
+          source: artifacts
+          target: releases/${{ env.VERSION }}
+          immutable: "true"
+          latest: ${{ env.PRERELEASE != 'true' && env.VERSION || '' }}
+          latest-path: releases/latest
+          username: ${{ secrets.SCP_USERNAME }}
+          ssh-key: ${{ secrets.SCP_KEY }}
+          ssh-passphrase: ${{ secrets.SCP_PASSPHRASE }}

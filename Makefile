@@ -13,9 +13,20 @@ BINARY ?= enclave
 UNAME_S := $(shell uname -s)
 CMD_DIR := ./cmd/enclave
 COMPLETIONS_DIR ?= ./completions
-VERSION ?= 0.1.0
+# Both versions derive from the latest release tag; see scripts/version.sh.
+# VERSION is what `enclave version` and the image label report,
+# PACKAGE_VERSION the deb/rpm version.
+VERSION ?= $(shell ./scripts/version.sh)
+PACKAGE_VERSION ?= $(shell ./scripts/version.sh --package)
+ifeq ($(strip $(VERSION)),)
+$(error scripts/version.sh produced no version; see its output above)
+endif
+ifeq ($(strip $(PACKAGE_VERSION)),)
+$(error scripts/version.sh --package produced no version; see its output above)
+endif
 GIT_COMMIT = $(shell git rev-parse --short HEAD 2>/dev/null)
 GIT_COMMIT_DATE = $(shell git show -s --format=%cs HEAD 2>/dev/null)
+GIT_COMMIT_RFC2822 = $(shell git show -s --format=%cD HEAD 2>/dev/null || date -R)
 GIT_DIRTY = $(shell if [ -n "$$(git status --porcelain 2>/dev/null)" ]; then printf '%s' '-dirty'; fi)
 BUILD_VERSION ?= $(VERSION)
 BUILD_COMMIT ?= $(if $(strip $(GIT_COMMIT)),$(GIT_COMMIT)$(GIT_DIRTY),unknown)
@@ -110,6 +121,17 @@ clean-lint-cache:
 test: check-go
 	go test ./...
 
+# The Debian changelog entry is written into the build copy, so the package
+# version follows the release tags without a commit per build.
+define DEB_CHANGELOG
+enclave ($(PACKAGE_VERSION)-1) unstable; urgency=medium
+
+  * Build of enclave $(BUILD_VERSION), commit $(BUILD_COMMIT).
+
+ -- $(shell sed -n 's/^Maintainer: //p' debian/control)  $(GIT_COMMIT_RFC2822)
+endef
+export DEB_CHANGELOG
+
 # Build Debian package using dpkg-buildpackage
 # Output goes to dist/ directory
 deb:
@@ -117,7 +139,8 @@ deb:
 	@tmpdir=$$(mktemp -d) && \
 	cp -r . "$$tmpdir/enclave" && \
 	cd "$$tmpdir/enclave" && \
-	BUILD_COMMIT='$(BUILD_COMMIT)' BUILD_DATE='$(BUILD_DATE)' \
+	printf '%s\n' "$$DEB_CHANGELOG" > debian/changelog && \
+	BUILD_VERSION='$(BUILD_VERSION)' BUILD_COMMIT='$(BUILD_COMMIT)' BUILD_DATE='$(BUILD_DATE)' \
 		dpkg-buildpackage -us -uc -b && \
 	mv "$$tmpdir"/*.deb "$(CURDIR)/dist/" && \
 	( find "$$tmpdir" -type d -exec chmod u+w {} + 2>/dev/null || true ) && \
@@ -130,7 +153,8 @@ deb-quick:
 	@tmpdir=$$(mktemp -d) && \
 	cp -r . "$$tmpdir/enclave" && \
 	cd "$$tmpdir/enclave" && \
-	BUILD_COMMIT='$(BUILD_COMMIT)' BUILD_DATE='$(BUILD_DATE)' \
+	printf '%s\n' "$$DEB_CHANGELOG" > debian/changelog && \
+	BUILD_VERSION='$(BUILD_VERSION)' BUILD_COMMIT='$(BUILD_COMMIT)' BUILD_DATE='$(BUILD_DATE)' \
 		dpkg-buildpackage -us -uc -b -d && \
 	mv "$$tmpdir"/*.deb "$(CURDIR)/dist/" && \
 	( find "$$tmpdir" -type d -exec chmod u+w {} + 2>/dev/null || true ) && \
@@ -149,11 +173,11 @@ rpm: check-go
 		--exclude='./bin' --exclude='./completions' --exclude='./dist' \
 		--exclude='./vendor' --exclude='./.gocache' --exclude='./.gomodcache' \
 		--exclude='./.tmp' \
-		--transform 's,^\.,enclave-$(VERSION),' \
-		-C "$(CURDIR)" -czf "$$tmpdir/SOURCES/enclave-$(VERSION).tar.gz" . && \
+		--transform 's,^\.,enclave-$(PACKAGE_VERSION),' \
+		-C "$(CURDIR)" -czf "$$tmpdir/SOURCES/enclave-$(PACKAGE_VERSION).tar.gz" . && \
 	rpmbuild --nodeps -bb \
 		--define "_topdir $$tmpdir" \
-		--define "package_version $(VERSION)" \
+		--define "package_version $(PACKAGE_VERSION)" \
 		--define "build_version $(BUILD_VERSION)" \
 		--define "build_commit $(BUILD_COMMIT)" \
 		--define "build_date $(BUILD_DATE)" \

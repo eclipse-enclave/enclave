@@ -116,14 +116,20 @@ reinstalls it with `sudo install`. A replacement the system denies only at the
 end, as in a sticky directory holding another user's binary, is reported the
 same way.
 
-Release channels are `rolling`, rebuilt from every push to `main` and published
-on GitHub, and `stable`, for official releases. A binary follows the channel it
-was published on unless the global config sets `update_channel`; switching
-channels installs the other channel's latest build even if it is older. The
-`stable` channel has no download source yet: stable releases are expected on
-the Eclipse Foundation download server, and until that is wired up, checks on
-`stable` fail: `self-update` exits with an error and the periodic check warns
-once per interval. `enclave config` shows the effective channel.
+Release channels are `rolling`, rebuilt from every push to `main`, and
+`stable`, the official releases cut from version tags. Both are served from
+the Eclipse download server: `rolling` from
+`https://download.eclipse.org/enclave/rolling/`, whose `latest` file names the
+commit of the current build, and `stable` from
+`https://download.eclipse.org/enclave/releases/<version>/`, where
+`releases/latest` names the newest final release (pre-releases such as
+`1.1.0-rc.1`, with `alpha`, `beta`, or `rc`, are published but never become
+`latest`). A binary follows the
+channel it was published on unless the global config sets `update_channel`;
+switching channels installs the other channel's latest build even if it is
+older. Within `stable`, only a higher version is offered: a pre-release or a
+release installed by hand before `latest` moved is never replaced by an older
+one. `enclave config` shows the effective channel.
 
 Only standalone release binaries update themselves: package installs, source
 builds, and binaries that run against a runtime asset tree beside them or in

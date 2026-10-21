@@ -99,7 +99,9 @@ The restricted network request flow has a separate
 - [`internal/config/embedded_assets.go`](../internal/config/embedded_assets.go) extracts assets atomically into a content-keyed platform cache directory when no checkout or package asset tree is adjacent to the executable.
 - [`internal/legacyassets/`](../internal/legacyassets/) removes only exact, known files from the asset tree used by older source installs. It preserves unknown files, never follows symlinks, and never recursively removes directories.
 - [`debian/`](../debian/) holds the Debian packaging, which installs the asset tree next to the executable instead of embedding it.
-- [`packaging/scoop/`](../packaging/scoop/) holds the Scoop manifest template for the Windows launcher archives; the rolling-release workflow substitutes the URLs and hashes into it.
+- [`packaging/scoop/`](../packaging/scoop/) holds the Scoop manifest template for the Windows launcher archives; the release workflows substitute the URLs and hashes into it.
+- [`scripts/version.sh`](../scripts/version.sh) derives the only version from release tags: `enclave version`, the image label, and the deb/rpm versions all follow it (see [Releases](DEV.md#releases)).
+- [`.github/workflows/`](../.github/workflows/) builds and publishes releases: `rolling.yml` on every push to `main` and `release.yml` on version tags, both through `reusable-release-assets.yml`; [`.github/actions/publish-downloads/`](../.github/actions/publish-downloads/) uploads the assets to download.eclipse.org and refuses to replace a release published from another commit.
 
 ### Orchestration (`internal/app/`)
 - [`internal/app/app.go`](../internal/app/app.go) wires parsing, defaults merging, and command dispatch.
@@ -108,7 +110,7 @@ The restricted network request flow has a separate
 - [`internal/app/commands.go`](../internal/app/commands.go) routes commands to handlers (run/continue/resume/exec/shell/cleanup/tools/etc).
 - [`internal/app/command_run.go`](../internal/app/command_run.go) drives the run/continue/resume/exec/shell flow and runtime creation.
 - [`internal/app/build.go`](../internal/app/build.go) manages Docker image build/rebuild detection plus prebuild agent update planning and post-build stamp commits.
-- [`internal/selfupdate/`](../internal/selfupdate/) resolves the latest build of a release channel through a per-channel source (GitHub for `rolling`; `stable` has none yet) and atomically installs a checksum-verified host binary, refusing package, source, and asset-tree installs; [`internal/app/self_update.go`](../internal/app/self_update.go) owns periodic checks and user-facing policy.
+- [`internal/selfupdate/`](../internal/selfupdate/) resolves the latest build of a release channel from its directory on download.eclipse.org (`rolling/latest` names a commit, `releases/latest` a version) and atomically installs a checksum-verified host binary, refusing package, source, and asset-tree installs; [`internal/app/self_update.go`](../internal/app/self_update.go) owns periodic checks and user-facing policy.
 - [`internal/app/cleanup.go`](../internal/app/cleanup.go) implements `enclave cleanup` (persistent stores, caches, history, and agent memory).
 - [`internal/app/ssh.go`](../internal/app/ssh.go) implements `enclave ssh-init`.
 - [`internal/app/tools.go`](../internal/app/tools.go) lists available tool profiles.

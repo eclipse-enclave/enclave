@@ -46,6 +46,7 @@ KNOWN_PINS=(
     'Dockerfile|^FROM (\$\{[A-Z_]+\}|[a-z-]+) AS '
     'Dockerfile.gateway|^FROM docker\.io/library/(golang|alpine):'
     'go.mod|^(go|toolchain) '
+    'Makefile|^[[:space:]]*BUILD_VERSION='\''\$\(BUILD_VERSION\)'\'' '
     '.github/workflows/*.yml|uses: [^ ]+@[0-9a-f]{40} # v[0-9.]+$'
     '.github/workflows/*.yml|go-version-file: go\.mod$'
     '.github/workflows/ci.yml|go-version: \$\{\{ steps\.go-floor\.outputs\.version \}\}$'

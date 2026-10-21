@@ -18,11 +18,6 @@ on:
         required: false
         type: number
         default: 7
-      set_package_version:
-        description: Set a commit-specific package version for rolling builds.
-        required: false
-        type: boolean
-        default: false
 
 permissions:
   contents: read
@@ -32,6 +27,9 @@ jobs:
     runs-on: ${{ inputs.runner }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The package version derives from the latest release tag.
+          fetch-depth: 0
 
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
@@ -41,10 +39,6 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y cpio rpm
-
-      - name: Set package version
-        if: inputs.set_package_version
-        run: echo "VERSION=$(./scripts/rolling-package-version.sh)" >> "$GITHUB_ENV"
 
       - name: Build RPM package
         run: make rpm
@@ -70,15 +64,11 @@ jobs:
         run: dnf install -y git golang make rpm-build cpio diffutils
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
 
       - name: Trust checkout
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
-
-      - name: Set package version
-        if: inputs.set_package_version
-        run: |
-          VERSION=$(./scripts/rolling-package-version.sh)
-          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
 
       - name: Build RPM package
         run: make rpm

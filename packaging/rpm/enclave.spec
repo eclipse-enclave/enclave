@@ -5,7 +5,7 @@
 #
 # SPDX-License-Identifier: MIT
 
-%{!?package_version:%global package_version 0.1.0}
+%{!?package_version:%global package_version 0.0.0}
 %{!?build_version:%global build_version %{package_version}}
 %{!?build_commit:%global build_commit unknown}
 %{!?build_date:%global build_date unknown}

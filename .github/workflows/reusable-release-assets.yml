@@ -1,0 +1,198 @@
+name: Reusable Release Assets
+
+# Builds everything a release publishes, for the rolling and the stable
+# channel alike, and uploads it as one `release-assets` artifact: standalone
+# binaries, the Debian and RPM packages, the Windows launcher archives with
+# their Scoop manifest, and checksums.txt covering all of them.
+
+on:
+  workflow_call:
+    inputs:
+      channel:
+        description: Release channel stamped into the standalone binaries (rolling or stable).
+        required: true
+        type: string
+      scoop_base_url:
+        description: Download URL the Scoop manifest points at.
+        required: true
+        type: string
+      version:
+        description: Version the artifacts must report, e.g. 1.0.0 for the tag v1.0.0; empty accepts the git-derived version.
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            goos: linux
+            goarch: amd64
+            output: enclave-linux-amd64
+            smoke: true
+          - runner: ubuntu-24.04-arm
+            goos: linux
+            goarch: arm64
+            output: enclave-linux-arm64
+            smoke: true
+          - runner: macos-15
+            goos: darwin
+            goarch: arm64
+            output: enclave-darwin-arm64
+            smoke: true
+          # Cross-compiled on the arm64 macOS runner and therefore not smoke-tested.
+          - runner: macos-15
+            goos: darwin
+            goarch: amd64
+            output: enclave-darwin-amd64
+            smoke: false
+          # The Windows binary is the WSL launcher, so it embeds no runtime
+          # assets and there is nothing for the extraction smoke test to check.
+          - runner: ubuntu-latest
+            goos: windows
+            goarch: amd64
+            output: enclave-windows-amd64.exe
+            smoke: false
+          - runner: ubuntu-latest
+            goos: windows
+            goarch: arm64
+            output: enclave-windows-arm64.exe
+            smoke: false
+
+    runs-on: ${{ matrix.runner }}
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The version derives from the latest release tag.
+          fetch-depth: 0
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - name: Build standalone binary
+        run: CGO_ENABLED=0 GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} make build BIN_DIR=. BINARY=${{ matrix.output }} BUILD_CHANNEL=${{ inputs.channel }}
+
+      - name: Smoke test embedded asset extraction
+        if: ${{ matrix.smoke }}
+        run: ./scripts/smoke-standalone-binary.sh "${{ matrix.output }}"
+
+      - name: Note skipped smoke test
+        if: ${{ !matrix.smoke }}
+        run: |
+          echo "::notice::Smoke test skipped for ${{ matrix.output }} (cross-compiled for ${{ matrix.goarch }} on ${{ matrix.runner }})"
+
+      - name: Note manual Windows verification gate
+        if: ${{ matrix.goos == 'windows' }}
+        run: |
+          echo "::notice::${{ matrix.output }} is the WSL launcher. GitHub-hosted windows runners have no WSL2, so the wsl.exe argument round trip is the manual gate in scripts/wsl-shim-verify.ps1."
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ${{ matrix.output }}
+          path: ${{ matrix.output }}
+          retention-days: 1
+
+  build-deb:
+    uses: ./.github/workflows/reusable-deb-build.yml
+    with:
+      runner: ubuntu-24.04
+      artifact_name: deb
+      artifact_retention_days: 1
+
+  build-rpm:
+    uses: ./.github/workflows/reusable-rpm-build.yml
+    with:
+      runner: ubuntu-24.04
+      artifact_name: rpm
+      artifact_retention_days: 1
+
+  assemble:
+    needs: [build, build-deb, build-rpm]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Normalize artifact names
+        run: |
+          cd artifacts
+          for f in *; do [ "$f" = "${f//\~/.}" ] || mv "$f" "${f//\~/.}"; done
+
+      # Windows expects an archive, and Scoop requires one. The launcher is
+      # named enclave.exe inside the archive so `bin` works for both
+      # architectures.
+      - name: Package Windows archives
+        run: |
+          cd artifacts
+          for exe in enclave-windows-*.exe; do
+            arch="${exe#enclave-windows-}"
+            arch="${arch%.exe}"
+            staging="$(mktemp -d)"
+            cp "$exe" "$staging/enclave.exe"
+            (cd "$staging" && zip -q -X "enclave-windows-$arch.zip" enclave.exe)
+            mv "$staging/enclave-windows-$arch.zip" .
+            rm -rf "$staging" "$exe"
+          done
+
+      - name: Generate Scoop manifest
+        env:
+          BASE_URL: ${{ inputs.scoop_base_url }}
+        run: |
+          version="$(./scripts/version.sh)"
+          amd64_hash="$(sha256sum artifacts/enclave-windows-amd64.zip | cut -d' ' -f1)"
+          arm64_hash="$(sha256sum artifacts/enclave-windows-arm64.zip | cut -d' ' -f1)"
+          sed \
+            -e "s|@VERSION@|$version|g" \
+            -e "s|@BASE_URL@|$BASE_URL|g" \
+            -e "s|@AMD64_HASH@|$amd64_hash|g" \
+            -e "s|@ARM64_HASH@|$arm64_hash|g" \
+            packaging/scoop/enclave.template.json > artifacts/enclave.json
+          if grep -q '@' artifacts/enclave.json; then
+            echo "Unsubstituted placeholder left in the Scoop manifest:" >&2
+            grep '@' artifacts/enclave.json >&2
+            exit 1
+          fi
+
+      - name: Generate checksums
+        run: |
+          cd artifacts
+          sha256sum * > checksums.txt
+
+      - name: Verify reported versions
+        env:
+          EXPECTED: ${{ inputs.version }}
+        run: |
+          version="$(./scripts/version.sh)"
+          package_version="$(./scripts/version.sh --package | tr '~' '.')"
+          if [ -n "$EXPECTED" ] && [ "$version" != "$EXPECTED" ]; then
+            echo "checkout derives version $version, but the release is $EXPECTED" >&2
+            exit 1
+          fi
+          chmod +x artifacts/enclave-linux-amd64
+          reported="$(artifacts/enclave-linux-amd64 version)"
+          case "$reported" in
+            "enclave: $version ("*) ;;
+            *) echo "enclave-linux-amd64 reports '$reported', want version $version" >&2; exit 1 ;;
+          esac
+          ls "artifacts/enclave_${package_version}-1_amd64.deb" artifacts/enclave-"${package_version}"-1.*.x86_64.rpm
+          ls artifacts
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-assets
+          path: artifacts/*
+          retention-days: 1

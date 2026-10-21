@@ -107,10 +107,11 @@ if [ -n "${ENCLAVE_GATEWAY_CA_CERT_PATH:-}" ] && [ -f "$ENCLAVE_GATEWAY_CA_CERT_
         if [ -s "$enclave_ca_bundle" ]; then
             export REQUESTS_CA_BUNDLE="$enclave_ca_bundle"
             export SSL_CERT_FILE="$enclave_ca_bundle"
+            export GIT_SSL_CAINFO="$enclave_ca_bundle"
         else
-            # A missing bundle leaves Python requests without any trust store,
-            # whereas OpenSSL falls back to the system store when unset.
-            unset REQUESTS_CA_BUNDLE SSL_CERT_FILE
+            # A missing bundle leaves Python requests and git without any trust
+            # store, whereas OpenSSL falls back to the system store when unset.
+            unset REQUESTS_CA_BUNDLE SSL_CERT_FILE GIT_SSL_CAINFO
         fi
     fi
     export NODE_EXTRA_CA_CERTS="$ENCLAVE_GATEWAY_CA_CERT_PATH"

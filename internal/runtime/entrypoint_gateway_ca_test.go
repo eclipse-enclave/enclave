@@ -71,6 +71,7 @@ func TestEntrypointGatewayCAWritesBundleAtFixedPath(t *testing.T) {
 	captureEnv := `{
 printf 'SSL_CERT_FILE=%s\n' "${SSL_CERT_FILE:-}"
 printf 'REQUESTS_CA_BUNDLE=%s\n' "${REQUESTS_CA_BUNDLE:-}"
+printf 'GIT_SSL_CAINFO=%s\n' "${GIT_SSL_CAINFO:-}"
 printf 'NODE_EXTRA_CA_CERTS=%s\n' "${NODE_EXTRA_CA_CERTS:-}"
 } > "$HOME/gateway-ca-env.out"`
 	cmd := exec.Command("bash", filepath.Join("..", "..", "entrypoint.sh"), "bash", "-lc", captureEnv)
@@ -99,6 +100,9 @@ printf 'NODE_EXTRA_CA_CERTS=%s\n' "${NODE_EXTRA_CA_CERTS:-}"
 	if env["REQUESTS_CA_BUNDLE"] != bundlePath {
 		t.Fatalf("REQUESTS_CA_BUNDLE = %q, want %q", env["REQUESTS_CA_BUNDLE"], bundlePath)
 	}
+	if env["GIT_SSL_CAINFO"] != bundlePath {
+		t.Fatalf("GIT_SSL_CAINFO = %q, want %q", env["GIT_SSL_CAINFO"], bundlePath)
+	}
 	bundle, err := os.ReadFile(bundlePath)
 	if err != nil {
 		t.Fatalf("read bundle: %v", err)
@@ -108,8 +112,8 @@ printf 'NODE_EXTRA_CA_CERTS=%s\n' "${NODE_EXTRA_CA_CERTS:-}"
 	}
 }
 
-// The container environment points SSL_CERT_FILE and REQUESTS_CA_BUNDLE at the
-// bundle before the entrypoint writes it. If the write fails, the entrypoint
+// The container environment points SSL_CERT_FILE, REQUESTS_CA_BUNDLE and
+// GIT_SSL_CAINFO at the bundle before the entrypoint writes it. If the write fails, the entrypoint
 // must not hand a missing trust store to the session.
 func TestEntrypointGatewayCAUnsetsBundleVarsWhenWriteFails(t *testing.T) {
 	t.Parallel()
@@ -140,6 +144,7 @@ func TestEntrypointGatewayCAUnsetsBundleVarsWhenWriteFails(t *testing.T) {
 	captureEnv := `{
 printf 'SSL_CERT_FILE=%s\n' "${SSL_CERT_FILE-<unset>}"
 printf 'REQUESTS_CA_BUNDLE=%s\n' "${REQUESTS_CA_BUNDLE-<unset>}"
+printf 'GIT_SSL_CAINFO=%s\n' "${GIT_SSL_CAINFO-<unset>}"
 printf 'NODE_EXTRA_CA_CERTS=%s\n' "${NODE_EXTRA_CA_CERTS:-}"
 } > "$HOME/gateway-ca-env.out"`
 	cmd := exec.Command("bash", filepath.Join("..", "..", "entrypoint.sh"), "bash", "-lc", captureEnv)
@@ -152,13 +157,14 @@ printf 'NODE_EXTRA_CA_CERTS=%s\n' "${NODE_EXTRA_CA_CERTS:-}"
 		"ENCLAVE_GATEWAY_CA_BUNDLE_PATH=" + bundlePath,
 		"SSL_CERT_FILE=" + bundlePath,
 		"REQUESTS_CA_BUNDLE=" + bundlePath,
+		"GIT_SSL_CAINFO=" + bundlePath,
 	}
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("entrypoint failed: %v\noutput:\n%s", err, string(out))
 	}
 
 	env := readEntrypointEnvFile(t, filepath.Join(home, "gateway-ca-env.out"))
-	for _, key := range []string{"SSL_CERT_FILE", "REQUESTS_CA_BUNDLE"} {
+	for _, key := range []string{"SSL_CERT_FILE", "REQUESTS_CA_BUNDLE", "GIT_SSL_CAINFO"} {
 		if env[key] != "<unset>" {
 			t.Fatalf("%s = %q, want it unset", key, env[key])
 		}

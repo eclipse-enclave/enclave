@@ -47,7 +47,7 @@ type fakeSelfUpdater struct {
 
 func (f *fakeSelfUpdater) Supported() error { return f.unsupported }
 
-func (f *fakeSelfUpdater) Writable() error { return f.notWritable }
+func (f *fakeSelfUpdater) Writable(string) error { return f.notWritable }
 
 func (f *fakeSelfUpdater) Check(context.Context) (selfupdate.Status, error) {
 	f.checks++
@@ -126,22 +126,6 @@ func TestAutomaticSelfUpdateSkipsNonInteractiveUse(t *testing.T) {
 	maybeAutomaticSelfUpdate(cli.Result{Action: "ps"}, autoUpdateDefaults(true))
 	if fake.checks != 0 || stampExists(t, home) {
 		t.Fatalf("checked for updates without a terminal (checks = %d)", fake.checks)
-	}
-}
-
-func TestAutomaticSelfUpdateWarnsAboutUnavailableChannel(t *testing.T) {
-	fake := &fakeSelfUpdater{checkErr: fmt.Errorf("%w for the stable channel yet", selfupdate.ErrChannelUnavailable)}
-	useFakeSelfUpdater(t, fake)
-	stable := config.Defaults{UpdateChannel: "stable"}
-
-	stdout, stderr := captureOutput(t, func() { maybeAutomaticSelfUpdate(cli.Result{Action: "run"}, stable) })
-	if stdout != "" || !strings.Contains(stderr, "no release source for the stable channel") {
-		t.Fatalf("stdout = %q, stderr = %q; want a warning on stderr", stdout, stderr)
-	}
-	// Rate-limited like any other check: one warning per interval.
-	_, stderr = captureOutput(t, func() { maybeAutomaticSelfUpdate(cli.Result{Action: "run"}, stable) })
-	if stderr != "" || fake.checks != 1 {
-		t.Fatalf("second run warned again (checks = %d, stderr = %q)", fake.checks, stderr)
 	}
 }
 

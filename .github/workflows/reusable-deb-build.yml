@@ -18,11 +18,6 @@ on:
         required: false
         type: number
         default: 7
-      set_package_version:
-        description: Rewrite the Debian changelog entry for rolling builds.
-        required: false
-        type: boolean
-        default: false
 
 permissions:
   contents: read
@@ -32,6 +27,9 @@ jobs:
     runs-on: ${{ inputs.runner }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          # The package version derives from the latest release tag.
+          fetch-depth: 0
 
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
@@ -40,18 +38,7 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y debhelper devscripts
-
-      - name: Set package version
-        if: inputs.set_package_version
-        env:
-          DEBEMAIL: rolling@build
-          DEBFULLNAME: Rolling Build
-        run: |
-          VERSION=$(./scripts/rolling-package-version.sh)
-          dch --newversion "${VERSION}-1" \
-              --distribution unstable \
-              "Rolling release, commit ${GITHUB_SHA::8}, $(date -u +%Y-%m-%d)"
+          sudo apt-get install -y debhelper
 
       - name: Build Debian package
         run: |

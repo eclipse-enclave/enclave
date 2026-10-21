@@ -33,7 +33,7 @@ const (
 
 type selfUpdater interface {
 	Supported() error
-	Writable() error
+	Writable(latest string) error
 	Check(ctx context.Context) (selfupdate.Status, error)
 	Install(ctx context.Context, latest string) (path string, replaced bool, err error)
 }
@@ -92,7 +92,7 @@ func runSelfUpdate(verbose bool) int {
 		markSelfUpdateChecked(stamp)
 		return 0
 	}
-	if err := updater.Writable(); err != nil {
+	if err := updater.Writable(status.Latest); err != nil {
 		logx.Errorf("A different enclave %s build is available (%s), but %v", status.Channel, shortBuild(status.Latest), err)
 		return 1
 	}
@@ -186,12 +186,6 @@ func maybeAutomaticSelfUpdate(parsed cli.Result, global config.Defaults) (interr
 		logx.Warnf("Enclave update interrupted.")
 		return true
 	}
-	if errors.Is(err, selfupdate.ErrChannelUnavailable) {
-		// A configuration problem, unlike a network failure: say so, once per
-		// check interval, instead of finding no updates in silence.
-		logx.Warnf("Enclave update check skipped: %v", err)
-		return false
-	}
 	if err != nil {
 		logx.DebugNoticef("Enclave update check failed: %v", err)
 		return false
@@ -199,7 +193,7 @@ func maybeAutomaticSelfUpdate(parsed cli.Result, global config.Defaults) (interr
 	if !status.UpdateAvailable {
 		return false
 	}
-	if err := updater.Writable(); err != nil {
+	if err := updater.Writable(status.Latest); err != nil {
 		logx.Warnf("A different enclave %s build is available (%s; current %s), but %v", status.Channel, shortBuild(status.Latest), shortBuild(status.Current), err)
 		return false
 	}

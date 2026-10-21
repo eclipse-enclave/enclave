@@ -25,6 +25,7 @@ Read `README.md` before making user-facing changes.
 ## Build and Test
 
 - Build with `make build` (or `go build ./cmd/enclave`); run tests with `make test`.
+- The version comes from release tags via `scripts/version.sh`; never hardcode one. See [Releases](docs/DEV.md#releases).
 - Format modified Go files with `gofmt -w`.
 - Run `make lint-changed` for fast feedback while iterating.
 - Before committing, run `make build`, `make test`, and `make lint`.

@@ -1,0 +1,189 @@
+name: Publish to download.eclipse.org
+description: >-
+  Uploads a directory of release assets to the project's area on
+  download.eclipse.org, swapping it in as a whole, and maintains the
+  channel's latest pointer. Follows the Eclipse CBI procedure for GitHub
+  Actions uploads (SSH key provisioned through Otterdog).
+
+inputs:
+  source:
+    description: Local directory whose files are uploaded.
+    required: true
+  target:
+    description: Directory below the project root, e.g. releases/1.0.0 or rolling. Replaced atomically if it exists.
+    required: true
+  latest:
+    description: Value of the channel's latest pointer for this build; empty leaves the pointer alone.
+    required: false
+    default: ""
+  latest-path:
+    description: >-
+      Pointer file below the project root. Inside target (rolling/latest) it is
+      published together with the assets; outside (releases/latest) it is
+      written after the swap and only when the value does not sort below the
+      current one, so a re-run of an old release cannot move the channel back.
+    required: false
+    default: ""
+  commit:
+    description: Source commit recorded in the target's commit file.
+    required: false
+    default: ${{ github.sha }}
+  immutable:
+    description: >-
+      Refuse to replace an existing target that was published from another
+      commit (release directories). A re-run from the same commit still
+      replaces it, so a failed publication can be retried.
+    required: false
+    default: "false"
+  username:
+    description: SSH user on the download server (SCP_USERNAME secret).
+    required: true
+  ssh-key:
+    description: Private SSH key (SCP_KEY secret).
+    required: true
+  ssh-passphrase:
+    description: Passphrase of the SSH key (SCP_PASSPHRASE secret); empty for an unprotected key.
+    required: false
+    default: ""
+  host:
+    description: Download server host.
+    required: false
+    default: projects-storage.eclipse.org
+  known-hosts:
+    description: known_hosts entry pinning the server's host key.
+    required: false
+    default: projects-storage.eclipse.org ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAsn6PO2Uemsr7wIUu5x0RnlRcuK36D2sbmYNe2LSKdb
+  remote-root:
+    description: Project root on the download server.
+    required: false
+    default: /home/data/httpd/download.eclipse.org/enclave
+  public-url:
+    description: URL the project root is served at, used to verify the publication.
+    required: false
+    default: https://download.eclipse.org/enclave
+
+runs:
+  using: composite
+  steps:
+    - name: Upload ${{ inputs.target }}
+      shell: bash
+      env:
+        SOURCE: ${{ inputs.source }}
+        TARGET: ${{ inputs.target }}
+        LATEST: ${{ inputs.latest }}
+        LATEST_PATH: ${{ inputs.latest-path }}
+        COMMIT: ${{ inputs.commit }}
+        IMMUTABLE: ${{ inputs.immutable }}
+        SSH_USERNAME: ${{ inputs.username }}
+        SSH_KEY: ${{ inputs.ssh-key }}
+        SSH_PASSPHRASE: ${{ inputs.ssh-passphrase }}
+        SSH_HOST: ${{ inputs.host }}
+        KNOWN_HOSTS: ${{ inputs.known-hosts }}
+        REMOTE_ROOT: ${{ inputs.remote-root }}
+      run: |
+        set -euo pipefail
+        valid_path() { case "$1" in ''|/*|*/|*..*|*[!A-Za-z0-9._/-]*) return 1 ;; esac; }
+        valid_path "$TARGET" || { echo "invalid target: $TARGET" >&2; exit 1; }
+        case "$LATEST" in
+          *[!A-Za-z0-9._-]*) echo "invalid latest value: $LATEST" >&2; exit 1 ;;
+        esac
+        if [ -n "$LATEST" ]; then
+          valid_path "$LATEST_PATH" || { echo "latest-path is required with latest: $LATEST_PATH" >&2; exit 1; }
+        fi
+        case "$COMMIT" in
+          *[!0-9a-f]*|'') echo "invalid commit: $COMMIT" >&2; exit 1 ;;
+        esac
+        if [ -z "$SSH_USERNAME" ] || [ -z "$SSH_KEY" ]; then
+          echo "SSH credentials for $SSH_HOST are not configured" >&2
+          exit 1
+        fi
+        if [ -z "$KNOWN_HOSTS" ]; then
+          echo "known-hosts must pin the host key of $SSH_HOST" >&2
+          exit 1
+        fi
+        if [ -z "$(ls -A "$SOURCE")" ]; then
+          echo "nothing to upload from $SOURCE" >&2
+          exit 1
+        fi
+
+        umask 077
+        ssh_dir=$(mktemp -d)
+        printf '%s\n' "$SSH_KEY" > "$ssh_dir/key"
+        printf '%s\n' "$KNOWN_HOSTS" > "$ssh_dir/known_hosts"
+        printf '#!/bin/sh\nprintf "%%s\\n" "$SSH_PASSPHRASE"\n' > "$ssh_dir/askpass"
+        chmod +x "$ssh_dir/askpass"
+        eval "$(ssh-agent -s)" >/dev/null
+        trap 'ssh-agent -k >/dev/null 2>&1; rm -rf "$ssh_dir"' EXIT
+        SSH_ASKPASS="$ssh_dir/askpass" SSH_ASKPASS_REQUIRE=force ssh-add "$ssh_dir/key" </dev/null
+        opts=(-o UserKnownHostsFile="$ssh_dir/known_hosts" -o GlobalKnownHostsFile=/dev/null -o StrictHostKeyChecking=yes -o BatchMode=yes)
+        remote="$SSH_USERNAME@$SSH_HOST"
+
+        dir="$REMOTE_ROOT/$TARGET"
+        staging="$dir.tmp-$GITHUB_RUN_ID"
+        pointer=""
+        [ -z "$LATEST" ] || pointer="$REMOTE_ROOT/$LATEST_PATH"
+
+        if [ "$IMMUTABLE" = true ]; then
+          published=$(ssh "${opts[@]}" "$remote" "cat '$dir/commit' 2>/dev/null || true" | tr -d '[:space:]')
+          if [ -n "$published" ] && [ "$published" != "$COMMIT" ]; then
+            echo "::error::$TARGET was published from commit $published and is not replaced from $COMMIT; a release tag must not move" >&2
+            exit 1
+          fi
+        fi
+
+        # Upload beside the target, then swap directories so readers never see
+        # a partial set. Nothing else writes below the project root.
+        ssh "${opts[@]}" "$remote" "rm -rf '$staging' && mkdir -p '$staging'"
+        scp "${opts[@]}" -q -r "$SOURCE"/* "$remote:$staging/"
+        printf '%s\n' "$COMMIT" | ssh "${opts[@]}" "$remote" "cat > '$staging/commit'"
+        if [ -n "$pointer" ] && [ "${LATEST_PATH#"$TARGET"/}" != "$LATEST_PATH" ]; then
+          # A pointer inside the directory is published with the assets.
+          printf '%s\n' "$LATEST" | ssh "${opts[@]}" "$remote" "cat > '$staging/${LATEST_PATH#"$TARGET"/}'"
+          pointer=""
+          echo "$LATEST_PATH -> $LATEST"
+        fi
+        # The previous build is moved back if the new one cannot take its place;
+        # -T fails instead of nesting a directory should another writer appear.
+        ssh "${opts[@]}" "$remote" "rm -rf '$dir.old' && { [ ! -e '$dir' ] || mv -T '$dir' '$dir.old'; } && { mv -T '$staging' '$dir' || { mv -T '$dir.old' '$dir'; exit 1; }; } && rm -rf '$dir.old'"
+        echo "published $TARGET/"
+
+        if [ -n "$pointer" ]; then
+          current=$(ssh "${opts[@]}" "$remote" "cat '$pointer' 2>/dev/null || true" | tr -d '[:space:]')
+          newest=$(printf '%s\n%s\n' "$current" "$LATEST" | sort -V | tail -n 1)
+          if [ -n "$current" ] && [ "$newest" != "$LATEST" ]; then
+            echo "::notice::$LATEST_PATH stays at $current, which is newer than $LATEST"
+          else
+            printf '%s\n' "$LATEST" | ssh "${opts[@]}" "$remote" "cat > '$pointer.tmp-$GITHUB_RUN_ID' && mv '$pointer.tmp-$GITHUB_RUN_ID' '$pointer'"
+            echo "$LATEST_PATH -> $LATEST"
+          fi
+        fi
+
+    # Reads back what the updater will read. The server may lag behind the
+    # upload, so a mismatch after the retries is a warning, not a failure.
+    - name: Verify ${{ inputs.public-url }}/${{ inputs.target }}
+      shell: bash
+      env:
+        SOURCE: ${{ inputs.source }}
+        TARGET: ${{ inputs.target }}
+        LATEST: ${{ inputs.latest }}
+        LATEST_PATH: ${{ inputs.latest-path }}
+        PUBLIC_URL: ${{ inputs.public-url }}
+      run: |
+        set -euo pipefail
+        fetch() { curl -fsSL -H 'Cache-Control: no-cache' --max-time 30 "$1" 2>/dev/null; }
+        check() {
+          [ -f "$SOURCE/checksums.txt" ] || return 0
+          [ "$(fetch "$PUBLIC_URL/$TARGET/checksums.txt")" = "$(cat "$SOURCE/checksums.txt")" ] || return 1
+          if [ -n "$LATEST" ]; then
+            published=$(fetch "$PUBLIC_URL/$LATEST_PATH" | tr -d '[:space:]')
+            [ "$published" = "$LATEST" ] || [ "$(printf '%s\n%s\n' "$published" "$LATEST" | sort -V | tail -n 1)" = "$published" ] || return 1
+          fi
+        }
+        for _ in $(seq 1 12); do
+          if check; then
+            echo "verified $PUBLIC_URL/$TARGET/"
+            exit 0
+          fi
+          sleep 10
+        done
+        echo "::warning::$PUBLIC_URL/$TARGET/ does not yet serve the published files; check it before relying on this build"

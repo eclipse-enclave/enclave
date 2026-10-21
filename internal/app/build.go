@@ -19,6 +19,7 @@ import (
 	"strings"
 	"time"
 
+	"enclave/internal/buildinfo"
 	"enclave/internal/config"
 	"enclave/internal/devcontainer"
 	"enclave/internal/docker"
@@ -601,7 +602,7 @@ func buildImage(ctx context.Context, paths model.Paths, host model.Host, combine
 	}
 	labels := map[string]string{
 		model.LabelHash:    combinedHash,
-		model.LabelVersion: model.Version,
+		model.LabelVersion: buildinfo.Read().Version,
 		model.LabelBuilt:   buildTimestamp,
 	}
 

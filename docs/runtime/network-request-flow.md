@@ -20,6 +20,7 @@ sequenceDiagram
         participant Proxy as enclave-gateway-proxy
         participant Audit as enclave-gateway-proxy<br/>-dns-audit
         participant Log as network.log<br/>(JSONL)
+        participant Cap as Capture store<br/>(network_log=full)
     end
     box External
         participant API as Upstream API
@@ -33,6 +34,9 @@ sequenceDiagram
     Entry->>Proxy: Start transparent proxy
     Entry->>Audit: Start DNS audit translator on the dnsmasq log
     Host->>Log: Rotate above the size cap<br/>and append session start marker
+    opt network_log=full
+        Host->>Cap: Create the session directory<br/>and prune the store to its budget
+    end
 
     Note over Host,API: HTTPS request
     Tool->>DNS: Resolve api.example.com
@@ -46,8 +50,11 @@ sequenceDiagram
         else Destination allowed
             FW->>Proxy: Redirect tcp/443 to :8443
             Proxy->>Proxy: Parse SNI from ClientHello
-            alt Host requires MITM (secret rule host match)
+            alt Host requires MITM (secret rule host match,<br/>or network_log requests or full)
                 Proxy->>Proxy: Terminate TLS using local CA leaf cert
+                opt network_log=full
+                    Proxy->>Proxy: Snapshot the request with its placeholders
+                end
                 Proxy->>Proxy: rewriteHeaders()<br/>Validate and apply host/header release rules
                 alt Placeholder use violates release rule
                     Proxy-->>Tool: HTTP 403 Forbidden
@@ -56,7 +63,10 @@ sequenceDiagram
                     Proxy->>API: Forward HTTPS request
                     API-->>Proxy: Upstream response
                     Proxy-->>Tool: Return response
-                    Proxy->>Log: HTTP pass (allowlist)
+                    opt network_log=full
+                        Proxy->>Cap: Bodies teed while relayed,<br/>then the record
+                    end
+                    Proxy->>Log: HTTP pass (allowlist, capture_id)
                 end
             else Host allowlisted but no secret rule match
                 Proxy->>API: TLS passthrough tunnel
@@ -80,9 +90,9 @@ sequenceDiagram
 2. `gateway-entrypoint.sh` applies a fail-closed firewall (`INPUT DROP` and `OUTPUT DROP`), starts `dnsmasq`, and redirects outbound `tcp/80` and `tcp/443` to `enclave-gateway-proxy`. Inbound traffic is limited to loopback, established/related replies, and published container ports.
 3. DNS resolution goes through `dnsmasq`. Allowlisted domains resolve and populate the `enclave_allowed` `ipset`; non-allowlisted domains fail resolution.
 4. TCP connections are gated by firewall rules and redirected to the proxy. The proxy checks host allowlist rules again using HTTP `Host` / TLS `SNI`.
-5. For hosts that match declared secret `release.http` rules, or for all allowlisted HTTPS when `network_log=requests`, the proxy uses TLS MITM before forwarding upstream.
+5. For hosts that match declared secret `release.http` rules, or for all allowlisted HTTPS when `network_log` is `requests` or `full`, the proxy uses TLS MITM before forwarding upstream.
 6. For inspected requests, a registered placeholder is substituted only in the rule's configured `header` on HTTPS requests to its declared `hosts`. Placeholder-bearing headers that do not satisfy the rule are rejected with HTTP 403.
-7. `network_log=coarse` writes pass/deny events to `~/.local/state/enclave/projects/<hash>/<tool>/logs/network.log`: one `tcp` event per TLS connection at the ClientHello, and an `http` event per request for plaintext HTTP and for the MITM'd hosts of step 5. `network_log=requests` adds request-level HTTP/HTTPS audit events for every allowlisted host. The log is JSONL throughout: the proxy appends HTTP and TCP events, a separate `enclave-gateway-proxy -dns-audit` process translates dnsmasq's own log into `dns` events (so DNS denials are recorded even when the proxy is disabled), and the host appends a session marker at gateway start. Read it with `enclave network log`.
+7. `network_log=coarse` writes pass/deny events to `~/.local/state/enclave/projects/<hash>/<tool>/logs/network.log`: one `tcp` event per TLS connection at the ClientHello, and an `http` event per request for plaintext HTTP and for the MITM'd hosts of step 5. `network_log=requests` adds request-level HTTP/HTTPS audit events for every allowlisted host. `network_log=full` also snapshots each relayed request before step 6 releases secrets into it and stores it, with the response, under `logs/capture/<session>/`; its `http` event carries the `capture_id`. The log is JSONL throughout: the proxy appends HTTP and TCP events, a separate `enclave-gateway-proxy -dns-audit` process translates dnsmasq's own log into `dns` events (so DNS denials are recorded even when the proxy is disabled), and the host appends a session marker at gateway start. Read it with `enclave network log`.
 
 ## Why This Works
 
@@ -95,7 +105,7 @@ sequenceDiagram
 ## Scope and Limits
 
 - In unrestricted mode (`--allow-all-network` or policy mode `unrestricted`), the gateway is bypassed and HTTP secret release is disabled.
-- `--network-log=requests` enables request-level MITM logging in restricted mode.
+- `--network-log=requests` enables request-level MITM logging in restricted mode; `--network-log=full` adds stored request and response headers and bodies. See [Full capture](../networking.md#full-capture).
 - The log records decisions, not traffic volume. In `coarse` mode a reused TLS connection produces a single `tcp` event no matter how many requests it carries, and successful DNS lookups are never recorded, so an absence of events is not evidence of an absence of traffic. See [Coverage and granularity](../networking.md#coverage-and-granularity).
 - Placeholder protection applies only to declared secrets with `release.http` in the selected tool profile or enabled feature manifests.
 - Real secrets are released only in the rule's declared request header on HTTPS requests to its declared hosts. Inspected requests with registered placeholders in headers must satisfy these release rules.

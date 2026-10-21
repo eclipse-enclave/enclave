@@ -203,6 +203,15 @@ enclave --network-log=requests
 This makes the gateway decrypt allowlisted HTTPS traffic, so clients that pin
 certificates may fail in this mode.
 
+To see what was actually sent, start the session with `--network-log=full`.
+The gateway then also stores the headers and bodies of every request and its
+response on the host, and `enclave network log --show-capture <id>` prints one
+of them. Secrets the gateway releases are stored as placeholders, but prompts,
+file contents and anything else the agent sends are kept as sent, so treat the
+capture as sensitive. See
+[Full capture](https://github.com/eclipse-enclave/enclave/blob/main/docs/networking.md#full-capture)
+for where captures are kept and for how long.
+
 ## Next steps
 
 New to Enclave? Start with [Getting Started](/getting-started) to install it and

@@ -17,9 +17,11 @@ This forces allowlisted HTTPS traffic through the gateway MITM proxy so the gate
 `--network-log=full` does the same and also stores the headers and bodies of
 every relayed request and its response; see [Full capture](#full-capture).
 
-The container trusts the gateway CA through `SSL_CERT_FILE` and
-`REQUESTS_CA_BUNDLE` (the system bundle plus the gateway CA, written to
-`/tmp/enclave-ca/ca-certificates.crt` at startup) and `NODE_EXTRA_CA_CERTS`.
+The container trusts the gateway CA through `SSL_CERT_FILE`,
+`REQUESTS_CA_BUNDLE` and `GIT_SSL_CAINFO` (the system bundle plus the gateway
+CA, written to `/tmp/enclave-ca/ca-certificates.crt` at startup) and
+`NODE_EXTRA_CA_CERTS`. Git needs its own variable because its TLS library
+ignores `SSL_CERT_FILE`.
 They are set on the container itself, so processes started with `docker exec`,
 such as an attached IDE's backend, trust the gateway as well.
 

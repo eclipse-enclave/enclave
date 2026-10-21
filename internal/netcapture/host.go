@@ -107,9 +107,9 @@ func PruneStore(root string, maxBytes int64) (int, error) {
 // ErrNotFound reports a capture ID that no session directory in scope holds.
 var ErrNotFound = errors.New("capture not found")
 
-// Find returns the record path of a capture. Without a session every session
-// directory under the roots is searched, which is unambiguous in practice
-// because IDs are random.
+// Find returns the record path of a capture, which for a WebSocket still open
+// is its open record. Without a session every session directory under the
+// roots is searched, which is unambiguous in practice because IDs are random.
 func Find(roots []string, session string, id string) (string, error) {
 	if !ValidID(id) {
 		return "", fmt.Errorf("invalid capture ID %q: expected 16 hex digits", id)
@@ -124,9 +124,12 @@ func Find(roots []string, session string, id string) (string, error) {
 			sessions = sessionDirs(root)
 		}
 		for _, name := range sessions {
-			path := RecordPath(filepath.Join(root, name), id)
-			if info, err := os.Lstat(path); err == nil && info.Mode().IsRegular() {
-				matches = append(matches, path)
+			dir := filepath.Join(root, name)
+			for _, path := range []string{RecordPath(dir, id), OpenRecordPath(dir, id)} {
+				if info, err := os.Lstat(path); err == nil && info.Mode().IsRegular() {
+					matches = append(matches, path)
+					break
+				}
 			}
 		}
 	}

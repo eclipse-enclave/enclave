@@ -106,6 +106,15 @@ Docker and with rootless Podman, check what they cannot:
   no real value.
 - Run `enclave network apply` during a session, which restarts the proxy, and
   confirm capturing continues in the same directory.
+- Run a tool that talks to its model over a WebSocket, such as Copilot CLI with
+  `copilot_cli_websocket_responses`. While a turn runs, confirm
+  `<id>.open.json` and `<id>.messages.jsonl` appear and `--show-capture <id>`
+  lists the messages so far. Once the socket closes, confirm the `101` row of
+  `enclave network log --type http` carries the same ID and its capture holds
+  the prompt and the replies as text, decoded if the `101` response headers
+  accepted `permessage-deflate`.
+- Run `enclave network apply` while a WebSocket is open and confirm its capture
+  is finished with its messages rather than lost.
 
 ## Code generation
 

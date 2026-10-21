@@ -154,6 +154,48 @@ func TestFindLocatesCaptureAcrossRootsAndSessions(t *testing.T) {
 	}
 }
 
+func TestFindFallsBackToTheRecordOfAnOpenSocket(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "session-x")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	id := "00000000000000cc"
+	if err := os.WriteFile(OpenRecordPath(dir, id), []byte(`{}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if path, err := Find([]string{root}, "", id); err != nil || path != OpenRecordPath(dir, id) {
+		t.Fatalf("Find() = %q, %v; want the open record", path, err)
+	}
+	// Once the connection closes, its record wins even if the open one has not
+	// been removed yet.
+	writeCapture(t, dir, id, 1, time.Now())
+	if path, err := Find([]string{root}, "", id); err != nil || path != RecordPath(dir, id) {
+		t.Fatalf("Find() = %q, %v; want the record", path, err)
+	}
+}
+
+func TestPruneStoreSparesSocketsStillOpen(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "session-x")
+	writeCapture(t, dir, "00000000000000dd", 1000, time.Now().Add(-time.Hour))
+	id := "00000000000000ee"
+	open := []string{OpenRecordPath(dir, id), filepath.Join(dir, id+messagesSuffix)}
+	for _, path := range open {
+		if err := os.WriteFile(path, []byte(strings.Repeat("x", 5000)), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if removed, err := PruneStore(root, 2000); err != nil || removed != 0 {
+		t.Fatalf("PruneStore() = %d, %v; the open socket must not count yet", removed, err)
+	}
+	for _, path := range open {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("%s was removed: %v", filepath.Base(path), err)
+		}
+	}
+}
+
 // The state directory is user-chosen, so pattern characters in it are plain
 // characters.
 func TestFindTreatsRootLiterally(t *testing.T) {

@@ -29,7 +29,8 @@ Without --session or --all-running the log of the current project and tool is
 read, including sessions that have already exited.
 
 --show-capture prints one exchange recorded under --network-log=full, named by
-the capture ID its http event carries.`,
+the capture ID its http event carries, and the messages of a WebSocket. The ID
+of a WebSocket still open is in the name of its <id>.open.json record.`,
 		Args: cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
 			if strings.TrimSpace(view.ShowCapture) != "" {

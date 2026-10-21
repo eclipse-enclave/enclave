@@ -373,6 +373,54 @@ func TestShowNetworkCapturePrintsBothMessages(t *testing.T) {
 	}
 }
 
+// A WebSocket capture can be shown while its connection is open, from its open
+// record, and again once the connection closed.
+func TestShowNetworkCapturePrintsWebSocketMessages(t *testing.T) {
+	root := t.TempDir()
+	session := "enclave-demo-copilot-1"
+	dir, err := netcapture.PrepareSessionDir(root, session)
+	if err != nil {
+		t.Fatalf("PrepareSessionDir() error = %v", err)
+	}
+	store, err := netcapture.Open(netcapture.Options{Dir: dir, Session: session})
+	if err != nil {
+		t.Fatalf("netcapture.Open() error = %v", err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "http://api.example.com/responses", nil)
+	capture := store.Begin(req, "https")
+	resp := &http.Response{StatusCode: http.StatusSwitchingProtocols, Proto: "HTTP/1.1", Header: http.Header{"Upgrade": {"websocket"}}}
+	capture.Response(resp)
+	fromClient, fromServer := capture.WebSocket(resp)
+	// A masked frame with an all-zero key carries its payload as is.
+	_, _ = fromClient.Write([]byte{0x81, 0x80 | 6, 0, 0, 0, 0, 'p', 'r', 'o', 'm', 'p', 't'})
+	_, _ = fromServer.Write([]byte{0x81, 5, 'r', 'e', 'p', 'l', 'y'})
+
+	matches, _ := filepath.Glob(filepath.Join(dir, "*.open.json"))
+	if len(matches) != 1 {
+		t.Fatalf("open records = %v", matches)
+	}
+	id := strings.TrimSuffix(filepath.Base(matches[0]), ".open.json")
+	scope := networkLogScope{captureRoots: []string{root}, label: "test"}
+	var code int
+	out := captureStdout(t, func() { code = showNetworkCapture(scope, id, false) })
+	if code != 0 {
+		t.Fatalf("showNetworkCapture() = %d", code)
+	}
+	for _, want := range []string{"HTTP/1.1 101 Switching Protocols", "WebSocket still open, 2 messages so far", "> client", "prompt", "< server", "reply"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("output for the open socket lacks %q:\n%s", want, out)
+		}
+	}
+
+	if capture.Finish(nil) != id {
+		t.Fatal("capture ID changed at close")
+	}
+	out = captureStdout(t, func() { code = showNetworkCapture(scope, id, false) })
+	if code != 0 || !strings.Contains(out, "(WebSocket, 2 messages: ") || !strings.Contains(out, "reply") {
+		t.Fatalf("showNetworkCapture() = %d:\n%s", code, out)
+	}
+}
+
 func TestShowNetworkCaptureJSONEmitsTheRecord(t *testing.T) {
 	root := t.TempDir()
 	id := writeTestCapture(t, root, "enclave-demo-claude-1")

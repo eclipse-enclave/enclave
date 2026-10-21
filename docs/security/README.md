@@ -114,10 +114,10 @@ so privileged services need their own.
 > Enclave shows the relevant `docker info` warnings; see
 > [host hardening](host-hardening.md).
 
-`--network-log=full` stores request and response headers and bodies on the
-host. Captures replace known released values with placeholders, but prompts,
-file contents, and credentials without a release rule are stored as sent. See
-[Full capture](../networking.md#full-capture).
+`--network-log=full` stores request and response headers, bodies, and
+WebSocket messages on the host. Captures replace known released values with
+placeholders, but prompts, file contents, and credentials without a release
+rule are stored as sent. See [Full capture](../networking.md#full-capture).
 
 ## Secrets
 

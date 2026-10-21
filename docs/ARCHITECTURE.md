@@ -139,6 +139,7 @@ The restricted network request flow has a separate
 - [`internal/gateway/mitm/`](../internal/gateway/mitm/) implements TLS MITM request forwarding, allowlist checks, and secret placeholder header rewriting/blocking. It writes audit events through `internal/netlog` so writer and reader cannot drift apart.
 - [`internal/gateway/dnsaudit/`](../internal/gateway/dnsaudit/) tails dnsmasq's log and translates denied or failed lookups into `dns` audit events. It runs as its own process (`enclave-gateway-proxy -dns-audit <log>`) so DNS denials are recorded even when the proxy is disabled.
 - [`internal/gateway/tlsstore/`](../internal/gateway/tlsstore/) manages CA generation and the container-private per-host leaf certificate cache for gateway TLS interception; only the CA is shared with the host.
+- [`internal/gateway/wsframe/`](../internal/gateway/wsframe/) decodes WebSocket frame headers and unmasks payloads without taking part in the connection. It enforces only RFC 6455 and leaves what to accept to its callers, so every component that follows WebSocket frames shares one parser.
 - [`internal/docker/`](../internal/docker/) wraps the Docker CLI for Docker-specific backend/build/cleanup implementation details.
 
 ### Tool Handlers

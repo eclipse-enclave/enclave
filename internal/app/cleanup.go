@@ -365,6 +365,9 @@ func resolveCleanupDirs(run model.RunOptions, cleanup model.CleanupOptions, home
 		{Kind: configStoreKind, Path: config.HostStoreConfigRootDir(home, run.Tool, project.Hash)},
 		{Kind: configStoreKind, Path: config.HostStoreConfigBaseRootDir(home, run.Tool, project.Hash)},
 		{Kind: historyKind, Path: config.HostStoreEnvDir(home, run.Tool, project.Hash)},
+		// Full network captures hold request bodies, so cleanup removes them
+		// while the network log itself stays as the audit trail.
+		{Kind: historyKind, Path: config.HostProjectNetworkCaptureDir(home, project.Hash, run.Tool)},
 		{Kind: memoryKind, Path: config.HostProjectMemoryDir(home, project.Hash, run.Tool)},
 	}
 }

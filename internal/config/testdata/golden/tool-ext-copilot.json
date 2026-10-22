@@ -1,0 +1,32 @@
+{
+  "type": "sandbox",
+  "name": "copilot",
+  "display_name": "Copilot CLI",
+  "description": "Copilot CLI",
+  "default_included": true,
+  "priority": 100,
+  "secrets": {
+    "copilot-github-token": {
+      "env_vars": [
+        "COPILOT_GITHUB_TOKEN"
+      ],
+      "release": {
+        "http": {
+          "hosts": [
+            "*.githubcopilot.com",
+            "api.github.com"
+          ],
+          "header": "authorization",
+          "format": "Bearer %s"
+        }
+      },
+      "placeholder": {
+        "prefix": "github_pat_",
+        "random": {
+          "encoding": "alphanumeric",
+          "length": 82
+        }
+      }
+    }
+  }
+}

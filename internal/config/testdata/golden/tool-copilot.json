@@ -1,0 +1,88 @@
+{
+  "name": "copilot",
+  "command": "copilot --disable-builtin-mcps --disable-client-telemetry",
+  "continue_args": [
+    "--continue"
+  ],
+  "resume_args": [
+    "--resume"
+  ],
+  "yolo_flag": "--yolo",
+  "yolo_enabled": true,
+  "config_dir": ".copilot",
+  "skills_dir": ".copilot/skills",
+  "state_paths": [
+    "config.json",
+    "session-state/",
+    "sidebar-sessions-state/",
+    "command-history-state*",
+    "session-store.db*",
+    "permissions-config.json",
+    "mcp-oauth-config/",
+    "mcp-secrets/",
+    "installed-plugins/",
+    "plugin-data/"
+  ],
+  "settings_file": "copilot-settings.json",
+  "settings_target": ".copilot/settings.json",
+  "passthrough_paths": [
+    "agents/",
+    "copilot-instructions.md",
+    "extensions/",
+    "hooks/",
+    "instructions/",
+    "lsp-config.json",
+    "mcp-config.json",
+    "providers.json",
+    "settings.json",
+    "skills/"
+  ],
+  "qemu_min_memory_mib": 4096,
+  "providers": [
+    {
+      "name": "github",
+      "credential_secrets": [
+        "copilot-github-token"
+      ],
+      "auth_files": [
+        "config.json"
+      ],
+      "auth_session": {
+        "mode": "any",
+        "checks": [
+          {
+            "file": "config.json",
+            "type": "file_exists"
+          }
+        ]
+      }
+    }
+  ],
+  "secrets": {
+    "copilot-github-token": {
+      "env_vars": [
+        "COPILOT_GITHUB_TOKEN"
+      ],
+      "release": {
+        "http": {
+          "hosts": [
+            "*.githubcopilot.com",
+            "api.github.com"
+          ],
+          "header": "authorization",
+          "format": "Bearer %s"
+        }
+      },
+      "placeholder": {
+        "prefix": "github_pat_",
+        "random": {
+          "encoding": "alphanumeric",
+          "length": 82
+        }
+      }
+    }
+  },
+  "host_config_dir": "",
+  "host_credentials_file": "",
+  "host_oauth_json": ""
+}

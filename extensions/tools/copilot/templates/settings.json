@@ -1,0 +1,9 @@
+{
+  "remoteExport": false,
+  "autoUpdate": false,
+  "logLevel": "default",
+  "includeCoAuthoredBy": false,
+  "storeTokenPlaintext": false,
+  "model": "auto",
+  "memory": false
+}

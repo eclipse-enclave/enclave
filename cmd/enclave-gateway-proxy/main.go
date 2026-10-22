@@ -69,9 +69,16 @@ func main() {
 		networkLogMode = model.NetworkLogCoarse
 	}
 	switch networkLogMode {
-	case model.NetworkLogCoarse, model.NetworkLogRequests:
+	case model.NetworkLogCoarse, model.NetworkLogRequests, model.NetworkLogFull:
 	default:
-		log.Fatal("invalid network log mode; expected coarse or requests")
+		log.Fatal("invalid network log mode; expected coarse, requests or full")
+	}
+	captureDir := ""
+	if networkLogMode == model.NetworkLogFull {
+		captureDir = strings.TrimSpace(os.Getenv(model.EnvNetworkCaptureDir))
+		if captureDir == "" {
+			log.Fatal("full network capture requires a capture directory")
+		}
 	}
 
 	rules, err := mitm.LoadRules(strings.TrimSpace(os.Getenv(model.EnvSecretReleaseFile)))
@@ -85,8 +92,9 @@ func main() {
 		DeniedDomains:  deniedDomains,
 		SecretRules:    rules,
 		AuditLogPath:   strings.TrimSpace(os.Getenv(model.EnvNetworkLogFile)),
+		CaptureDir:     captureDir,
 		Session:        strings.TrimSpace(os.Getenv(model.EnvGatewaySession)),
-		ForceHTTPSMITM: networkLogMode == model.NetworkLogRequests,
+		ForceHTTPSMITM: networkLogMode == model.NetworkLogRequests || networkLogMode == model.NetworkLogFull,
 		// The host runtime pre-provisions CA key material under tlsRoot.
 		TLSStore: tlsstore.New(tlsRoot),
 	}

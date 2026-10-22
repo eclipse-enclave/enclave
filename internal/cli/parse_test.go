@@ -996,16 +996,20 @@ func TestParseSubcommandOptionFlags(t *testing.T) {
 }
 
 func TestParseNetworkLog(t *testing.T) {
-	defaults := config.DefaultOptions()
-	res, err := Parse([]string{"--network-log", "requests"}, defaults)
-	if err != nil {
-		t.Fatalf("parse failed: %v", err)
+	for _, mode := range []string{model.NetworkLogCoarse, model.NetworkLogRequests, model.NetworkLogFull} {
+		res, err := Parse([]string{"--network-log", mode}, config.DefaultOptions())
+		if err != nil {
+			t.Fatalf("parse %s failed: %v", mode, err)
+		}
+		if res.Options.NetworkLog != mode {
+			t.Fatalf("expected network log %q, got %q", mode, res.Options.NetworkLog)
+		}
+		if res.Sources.NetworkLog != model.SourceCLI {
+			t.Fatalf("expected network log source CLI, got %v", res.Sources.NetworkLog)
+		}
 	}
-	if res.Options.NetworkLog != model.NetworkLogRequests {
-		t.Fatalf("expected network log %q, got %q", model.NetworkLogRequests, res.Options.NetworkLog)
-	}
-	if res.Sources.NetworkLog != model.SourceCLI {
-		t.Fatalf("expected network log source CLI, got %v", res.Sources.NetworkLog)
+	if _, err := Parse([]string{"--network-log", "bodies"}, config.DefaultOptions()); err == nil {
+		t.Fatal("expected an unknown network log mode to be rejected")
 	}
 }
 

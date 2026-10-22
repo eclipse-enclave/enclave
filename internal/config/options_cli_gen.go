@@ -262,7 +262,7 @@ func optionCLIFlags() map[string][]CLIFlag {
 			}),
 		},
 		"network_log": {
-			valueFlag("--network-log", "Network logging mode: coarse|requests", "--network-log requires a value (coarse|requests)", func(opts *model.Options, sources *model.OptionSources, value string) error {
+			valueFlag("--network-log", "Network logging mode: coarse|requests|full", "--network-log requires a value (coarse|requests|full)", func(opts *model.Options, sources *model.OptionSources, value string) error {
 				if err := applyNetworkLog(opts, value); err != nil {
 					return err
 				}

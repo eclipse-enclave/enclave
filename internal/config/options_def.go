@@ -979,9 +979,9 @@ func OptionDefs() []OptionDef {
 			CLIFlags: []CLIFlagDef{
 				{
 					Name:                "--network-log",
-					Usage:               "Network logging mode: coarse|requests",
+					Usage:               "Network logging mode: coarse|requests|full",
 					ValueKind:           CLIValueRequired,
-					MissingValueMessage: "--network-log requires a value (coarse|requests)",
+					MissingValueMessage: "--network-log requires a value (coarse|requests|full)",
 					Action: CLIAction{
 						Kind:        CLIActionCall,
 						Call:        "applyNetworkLog",

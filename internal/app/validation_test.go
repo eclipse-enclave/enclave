@@ -631,6 +631,26 @@ func TestValidateOptionsNetworkLogRequests(t *testing.T) {
 	}
 }
 
+func TestValidateOptionsNetworkLogFull(t *testing.T) {
+	opts := model.Options{
+		RunOptions: model.RunOptions{
+			Tool:       "claude",
+			NetworkLog: "FULL",
+		},
+		BuildOptions: model.BuildOptions{
+			ImageName: "test",
+		},
+	}
+
+	got, _, _, err := ValidateOptions(opts, model.DefaultOptionSources(), ValidationContext{Action: "info"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.NetworkLog != model.NetworkLogFull {
+		t.Fatalf("NetworkLog = %q, want %q", got.NetworkLog, model.NetworkLogFull)
+	}
+}
+
 func TestValidateOptionsNetworkLogInvalid(t *testing.T) {
 	opts := model.Options{
 		RunOptions: model.RunOptions{

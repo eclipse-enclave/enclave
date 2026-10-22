@@ -114,7 +114,7 @@ See [Bridging host ports](https://github.com/eclipse-enclave/enclave/blob/main/d
 | --- | --- | --- |
 | `allow_domains` | `--allow-domain <domain>` | Add domains to the gateway allowlist. Bare DNS names only, no scheme or path. |
 | `allow_all_network` | `--allow-all-network` | Turn network filtering off entirely for the session. |
-| `network_log` | `--network-log requests` | Log request-level audit events instead of coarse pass/deny. |
+| `network_log` | `--network-log requests` | Log request-level audit events instead of coarse pass/deny. `full` also stores request and response headers and bodies. |
 
 ### Auth and secrets
 

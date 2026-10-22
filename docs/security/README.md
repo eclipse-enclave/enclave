@@ -97,6 +97,12 @@ MITM'd hosts. `--network-log=requests` closes the HTTPS gap for allowlisted
 hosts, but no mode records SSH. Treat a missing event as no evidence either
 way; see [Coverage and granularity](../networking.md#coverage-and-granularity).
 
+`--network-log=full` additionally stores request and response headers and
+bodies on the host. The capture records secret placeholders rather than
+released values, but everything else the agent sends, such as prompts, file
+contents and credentials without a release rule, is stored as sent. See
+[Full capture](../networking.md#full-capture).
+
 The experimental QEMU backend has no restricted-egress implementation. It runs
 with unrestricted networking and without gateway-side HTTP secret release.
 
@@ -112,7 +118,7 @@ config/auth store.
 
 Once configured, the SSH key is available to every Docker session, regardless
 of project or tool. SSH on port 22 bypasses the HTTP/TLS proxy, so a push does
-not appear in `network.log`, even with `--network-log=requests`. See
+not appear in `network.log`, even with `--network-log=requests` or `full`. See
 [SSH keys](../auth.md#ssh-keys) for its access and how to scope or revoke it.
 
 See the [restricted network request flow](../runtime/network-request-flow.md).

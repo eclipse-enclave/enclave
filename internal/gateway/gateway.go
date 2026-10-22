@@ -22,6 +22,7 @@ import (
 	"enclave/internal/docker"
 	"enclave/internal/logx"
 	"enclave/internal/model"
+	"enclave/internal/netcapture"
 	"enclave/internal/netlog"
 	"enclave/internal/network"
 	"enclave/internal/util"
@@ -32,6 +33,8 @@ func imageName(profile model.Profile) string {
 }
 
 const gatewayNetworkLogPath = "/var/log/enclave/network.log"
+
+const gatewayNetworkCaptureDir = "/var/log/enclave/capture"
 
 const (
 	gatewayReadyMarker       = "Gateway ready"
@@ -356,6 +359,7 @@ type StartConfig struct {
 	NoRebuild         bool
 	NetworkLogMode    string
 	NetworkLogPath    string
+	NetworkCaptureDir string
 	GatewayConfigDir  string
 	NetworkName       string
 	PortBindings      docker.PortMap
@@ -455,6 +459,12 @@ func Start(ctx context.Context, cfg StartConfig) (StartResult, error) {
 			return empty, err
 		}
 	}
+	captureDir := ""
+	if cfg.NetworkCaptureDir != "" {
+		if captureDir, err = prepareNetworkCapture(cfg); err != nil {
+			return empty, err
+		}
+	}
 
 	mounts := []docker.Mount{}
 	if overridePath, scope := config.GatewayAllowlistOverridePath(cfg.Profile, cfg.Home, cfg.ProjectHash); overridePath != "" {
@@ -472,6 +482,13 @@ func Start(ctx context.Context, cfg StartConfig) (StartResult, error) {
 			Target: gatewayNetworkLogPath,
 		})
 	}
+	if captureDir != "" {
+		mounts = append(mounts, docker.Mount{
+			Type:   docker.MountTypeBind,
+			Source: captureDir,
+			Target: gatewayNetworkCaptureDir,
+		})
+	}
 	if cfg.SecretReleaseFile != "" {
 		mounts = appendReadOnlyMount(mounts, cfg.SecretReleaseFile, model.GatewaySecretReleasePath)
 	}
@@ -483,6 +500,9 @@ func Start(ctx context.Context, cfg StartConfig) (StartResult, error) {
 	}
 	if strings.TrimSpace(cfg.NetworkLogMode) != "" {
 		env = append(env, model.EnvNetworkLogMode+"="+cfg.NetworkLogMode)
+	}
+	if captureDir != "" {
+		env = append(env, model.EnvNetworkCaptureDir+"="+gatewayNetworkCaptureDir)
 	}
 	if session := strings.TrimSpace(cfg.ContainerName); session != "" {
 		env = append(env, model.EnvGatewaySession+"="+session)
@@ -584,6 +604,26 @@ func prepareNetworkLog(cfg StartConfig) error {
 		return fmt.Errorf("failed to record network log session marker: %w", err)
 	}
 	return nil
+}
+
+// prepareNetworkCapture creates the session's capture directory and prunes the
+// store of the project and tool to its budget. Like log rotation this happens
+// on the host at session start. Pruning removes whole captures, oldest first,
+// from every session including running ones, but never a directory, so a
+// running gateway keeps writing to the directory it bind-mounted.
+func prepareNetworkCapture(cfg StartConfig) (string, error) {
+	dir, err := netcapture.PrepareSessionDir(cfg.NetworkCaptureDir, cfg.ContainerName)
+	if err != nil {
+		return "", fmt.Errorf("failed to create network capture dir: %w", err)
+	}
+	removed, err := netcapture.PruneStore(cfg.NetworkCaptureDir, netcapture.MaxStoreBytes)
+	if err != nil {
+		return "", fmt.Errorf("failed to prune network capture store: %w", err)
+	}
+	if removed > 0 {
+		logx.Debugf("Pruned %d network capture(s) from %s", removed, cfg.NetworkCaptureDir)
+	}
+	return dir, nil
 }
 
 // gatewayUserNS puts the gateway into the same keep-id user namespace the
@@ -737,7 +777,13 @@ func validateStartConfig(cfg StartConfig) error {
 	if cfg.GatewayConfigDir != "" && !util.PathExists(cfg.GatewayConfigDir) {
 		return fmt.Errorf("gateway config dir does not exist: %s", cfg.GatewayConfigDir)
 	}
-	if mode := strings.TrimSpace(cfg.NetworkLogMode); mode != "" && mode != model.NetworkLogCoarse && mode != model.NetworkLogRequests {
+	switch mode := strings.TrimSpace(cfg.NetworkLogMode); mode {
+	case "", model.NetworkLogCoarse, model.NetworkLogRequests:
+	case model.NetworkLogFull:
+		if strings.TrimSpace(cfg.NetworkCaptureDir) == "" {
+			return fmt.Errorf("network log mode %s needs a capture directory", mode)
+		}
+	default:
 		return fmt.Errorf("invalid network log mode: %s", cfg.NetworkLogMode)
 	}
 

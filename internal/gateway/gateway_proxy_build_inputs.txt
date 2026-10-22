@@ -13,6 +13,7 @@ internal/gateway/tlsstore
 internal/git
 internal/logx
 internal/model
+internal/netcapture
 internal/netlog
 internal/network
 internal/secretfile

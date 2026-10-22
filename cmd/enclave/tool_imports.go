@@ -11,6 +11,7 @@
 package main
 
 import (
+	_ "enclave/extensions/tools/antigravity/go"
 	_ "enclave/extensions/tools/claude/go"
 	_ "enclave/extensions/tools/codex/go"
 	_ "enclave/extensions/tools/copilot/go"

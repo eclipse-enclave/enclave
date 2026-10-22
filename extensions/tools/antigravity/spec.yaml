@@ -1,0 +1,88 @@
+# Copyright (C) 2026 Dirk Fauth and others.
+#
+# This program and the accompanying materials are made available under the
+# terms of the MIT License, which is available in the project root.
+#
+# SPDX-License-Identifier: MIT
+
+schemaVersion: "1"
+kind: sandbox
+name: antigravity
+displayName: Antigravity CLI
+description: Google Antigravity CLI (agy)
+
+sandbox:
+  entrypoint: { run: [agy] }
+  # agy keeps everything under ~/.gemini: shared customization in config/
+  # (mcp_config.json, skills/, rules/, hooks.json) and CLI-specific data in
+  # antigravity-cli/ (settings.json, OAuth token, conversations, logs).
+  configDir: .gemini
+  # Conversations are SQLite databases (WAL) inside the config store, and WAL
+  # shared-memory files need mmap semantics on 9p.
+  qemuStoreCacheMmap: true
+  skillsDir: .gemini/config/skills
+  settingsFile: antigravity-settings.json
+  settingsTarget: .gemini/antigravity-cli/settings.json
+  yoloFlag: --dangerously-skip-permissions
+  yoloEnabled: true
+  # agy has no session-picker flag (`--conversation` needs an ID and `/resume`
+  # is interactive), so `enclave resume` falls back to `--continue`.
+  continueArgs: [--continue]
+  statePaths:
+    # Runtime data written by agy. The OAuth token is covered separately by
+    # providers[].authFiles.
+    - antigravity-cli/conversations/
+    - antigravity-cli/conversation_summaries.db*
+    - antigravity-cli/brain/
+    - antigravity-cli/implicit/
+    - antigravity-cli/cache/
+    - antigravity-cli/log/
+    - antigravity-cli/builtin/
+    - antigravity-cli/updater/
+    - antigravity-cli/jetski_state.pbtxt
+    # Workspace-to-project mappings and the migration marker.
+    - config/projects/
+    - config/.migrated
+    # MCP OAuth tokens are credentials, not configuration.
+    - mcp_oauth_tokens.json
+  passthroughPaths:
+    - antigravity-cli/keybindings.json
+    - antigravity-cli/settings.json
+    - config/AGENTS.md
+    - config/GEMINI.md
+    - config/agents.json
+    - config/agents/
+    - config/hooks.json
+    - config/mcp_config.json
+    - config/plugins.json
+    - config/rules.json
+    - config/rules/
+    - config/skills.json
+    - config/skills/
+
+environment:
+  variables:
+    # The installed binary lives in the image; the self-updater would only race
+    # with image rebuilds and write to ~/.local/bin.
+    AGY_CLI_DISABLE_AUTO_UPDATE: "true"
+
+credentials:
+  sources:
+    gemini-api-key: { env: [GEMINI_API_KEY] }
+
+network:
+  serviceDomains:
+    generativelanguage.googleapis.com: gemini-api-key
+  serviceAuth:
+    gemini-api-key: { headerName: x-goog-api-key }
+
+providers:
+  - name: google
+    credentials: [gemini-api-key]
+    # agy selects file-based token storage when no D-Bus keyring is available,
+    # which is always the case in the container.
+    authFiles: [antigravity-cli/antigravity-oauth-token]
+    authSession:
+      mode: any
+      checks:
+        - { file: antigravity-cli/antigravity-oauth-token, type: file_exists }

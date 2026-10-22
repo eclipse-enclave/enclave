@@ -50,17 +50,11 @@ jobs:
           name: release-assets
           path: artifacts
 
-      - name: Create rolling release
-        run: |
-          gh release delete rolling --yes --cleanup-tag || true
-          gh release create rolling \
-            --target "$GITHUB_SHA" \
-            --prerelease \
-            --title "Rolling Release" \
-            --notes "$(./scripts/release-notes.sh rolling "$GITHUB_SHA" "${{ github.server_url }}/${{ github.repository }}/releases/download/rolling")" \
-            artifacts/*
-
       # The updater reads rolling/latest (the commit) and the files beside it.
+      # This runs before the GitHub release is replaced: binaries built before
+      # the move to download.eclipse.org still update from that release, and
+      # must not reach a build that reads a download area this run failed to
+      # fill.
       - name: Publish to download.eclipse.org
         uses: ./.github/actions/publish-downloads
         with:
@@ -71,3 +65,13 @@ jobs:
           username: ${{ secrets.SCP_USERNAME }}
           ssh-key: ${{ secrets.SCP_KEY }}
           ssh-passphrase: ${{ secrets.SCP_PASSPHRASE }}
+
+      - name: Create rolling release
+        run: |
+          gh release delete rolling --yes --cleanup-tag || true
+          gh release create rolling \
+            --target "$GITHUB_SHA" \
+            --prerelease \
+            --title "Rolling Release" \
+            --notes "$(./scripts/release-notes.sh rolling "$GITHUB_SHA" "${{ github.server_url }}/${{ github.repository }}/releases/download/rolling")" \
+            artifacts/*

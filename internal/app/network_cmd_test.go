@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 
@@ -362,6 +363,23 @@ func TestNetworkApplyKeepsTheCurrentToolScope(t *testing.T) {
 	}
 	if label != currentProjectToolLabel("p1", "claude") {
 		t.Fatalf("unexpected scope label %q", label)
+	}
+}
+
+func TestRetryApplyCommandsCoverEveryFailedTool(t *testing.T) {
+	got := retryApplyCommands(gatewayScopeProject, []string{"codex", "claude", "codex"})
+	want := []string{"'enclave network apply --tool claude'", "'enclave network apply --tool codex'"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("retryApplyCommands(project) = %v, want %v", got, want)
+	}
+
+	if got := retryApplyCommands(gatewayScopeProject, []string{""}); len(got) != 0 {
+		t.Fatalf("a gateway without a tool label cannot be retried with --tool, got %v", got)
+	}
+
+	got = retryApplyCommands(gatewayScopeAllRunning, []string{"codex"})
+	if !slices.Equal(got, []string{"'enclave network apply --all-running'"}) {
+		t.Fatalf("retryApplyCommands(all running) = %v", got)
 	}
 }
 

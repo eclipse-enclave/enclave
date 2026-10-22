@@ -38,14 +38,16 @@ func renderEvents(events []netlog.Event, opts RenderOptions) string {
 
 func TestRenderHumanFormNamesPolicyDenialsAsBlocked(t *testing.T) {
 	events := []netlog.Event{
-		{Timestamp: "2026-08-13T12:04:33.100Z", Type: netlog.TypeTCP, Domain: "dns.google", Port: 443, Verdict: netlog.VerdictDeny, Rule: "allowlist", Session: "enclave-demo-codex"},
+		{Timestamp: "2026-08-13T12:04:32.000Z", Type: netlog.TypeDNS, Domain: "dns.google", Verdict: netlog.VerdictDeny, Rule: netlog.RuleNXDomain, Session: "enclave-demo-codex"},
+		{Timestamp: "2026-08-13T12:04:33.100Z", Type: netlog.TypeTCP, Domain: "dns.google", Port: 443, Verdict: netlog.VerdictDeny, Rule: netlog.RuleAllowlist, Session: "enclave-demo-codex"},
+		{Timestamp: "2026-08-13T12:04:34.000Z", Type: netlog.TypeDNS, Domain: "gone.example.com", Verdict: netlog.VerdictDeny, Rule: "upstream-nxdomain", Session: "enclave-demo-codex"},
 	}
-	out := renderEvents(events, humanOptions())
-	if !strings.Contains(out, "dns.google:443") || !strings.HasSuffix(strings.TrimRight(out, "\n"), "blocked by policy") {
-		t.Fatalf("a denial by the allowlist rule should read as blocked, got:\n%s", out)
-	}
-	if strings.Contains(out, "allowlist") {
-		t.Fatalf("a denied row must not show the allowlist rule name, got:\n%s", out)
+	lines := strings.Split(strings.TrimRight(renderEvents(events, humanOptions()), "\n"), "\n")
+	rows := lines[len(lines)-len(events):]
+	for i, want := range []string{"blocked by policy", "blocked by policy", "upstream-nxdomain"} {
+		if !strings.HasSuffix(rows[i], want) {
+			t.Fatalf("row %d should end with %q, got %q", i, want, rows[i])
+		}
 	}
 }
 
@@ -70,7 +72,7 @@ func TestRenderHumanFormAlignsColumns(t *testing.T) {
 	want := []string{
 		" 12:04:31  ✓  GET   api.anthropic.com        /v1/messages         200  4.2 KB",
 		" 12:04:33  ✓  tcp   github.com:443                                     allowlist",
-		" 12:04:35  ✗  dns   telemetry.example.com                              nxdomain",
+		" 12:04:35  ✗  dns   telemetry.example.com                              blocked by policy",
 		" 12:04:36  ✗  GET   evil.test                /x                   403  secret-injection",
 	}
 	for i, row := range rows {
@@ -82,10 +84,8 @@ func TestRenderHumanFormAlignsColumns(t *testing.T) {
 	// Every row starts its detail column at the same offset.
 	offset := strings.Index(rows[0], "4.2 KB")
 	for _, row := range rows[1:] {
-		fields := strings.Fields(row)
-		detail := fields[len(fields)-1]
-		if strings.LastIndex(row, detail) != offset {
-			t.Fatalf("detail column of %q starts at %d, want %d", row, strings.LastIndex(row, detail), offset)
+		if row[offset-1] != ' ' || row[offset] == ' ' {
+			t.Fatalf("detail column of %q does not start at %d", row, offset)
 		}
 	}
 }

@@ -1115,6 +1115,21 @@ func TestParseNetworkAddDomainProjectError(t *testing.T) {
 	}
 }
 
+// The global policy applies to every tool, so a --tool that no longer narrows
+// anything is rejected instead of silently ignored.
+func TestParseNetworkMutationsRejectTool(t *testing.T) {
+	defaults := config.DefaultOptions()
+	for _, args := range [][]string{
+		{"network", "add-domain", "example.com", "--global", "--tool", "codex"},
+		{"network", "remove-domain", "example.com", "--global", "--tool", "codex"},
+		{"network", "set-mode", "restricted", "--global", "--tool", "codex"},
+	} {
+		if _, err := Parse(args, defaults); err == nil {
+			t.Fatalf("expected --tool to be rejected for %v", args)
+		}
+	}
+}
+
 func TestParseNetworkRemoveDomainGlobal(t *testing.T) {
 	defaults := config.DefaultOptions()
 	res, err := Parse([]string{"network", "remove-domain", "example.com", "--global"}, defaults)
@@ -1148,9 +1163,9 @@ func TestParseNetworkSetModeInvalid(t *testing.T) {
 	}
 }
 
-// TestParseNetworkToolFlag guards against a regression where apply and the
-// mutation commands dropped --tool while their apply path still scopes gateway
-// discovery by opts.Tool, locking them to the default tool.
+// TestParseNetworkToolFlag guards against a regression where apply dropped
+// --tool while its apply path still scopes gateway discovery by opts.Tool,
+// locking it to the default tool.
 func TestParseNetworkToolFlag(t *testing.T) {
 	defaults := config.DefaultOptions()
 	for _, tc := range []struct {
@@ -1159,9 +1174,6 @@ func TestParseNetworkToolFlag(t *testing.T) {
 		action string
 	}{
 		{name: "apply", args: []string{"network", "apply", "--tool", "codex"}, action: "network-apply"},
-		{name: "add-domain", args: []string{"network", "add-domain", "example.com", "--global", "--tool", "codex"}, action: "network-add-domain"},
-		{name: "remove-domain", args: []string{"network", "remove-domain", "example.com", "--global", "--tool", "codex"}, action: "network-remove-domain"},
-		{name: "set-mode", args: []string{"network", "set-mode", "restricted", "--global", "--tool", "codex"}, action: "network-set-mode"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			res, err := Parse(tc.args, defaults)

@@ -39,14 +39,18 @@ func actionUsesBackend(action string) bool {
 }
 
 // toolFreeActions never read the default tool: they list or manage sessions,
-// extensions, configuration, and host-side setup, and read --tool at most as
-// an explicit filter. The unset "auto" tool stays unresolved for them, so they
-// neither ask which agent to use nor fail for lack of an answer.
+// extensions, configuration, the global network policy, and host-side setup,
+// and read --tool at most as an explicit filter. The unset "auto" tool stays
+// unresolved for them, so they neither ask which agent to use nor fail for
+// lack of an answer.
 var toolFreeActions = map[string]bool{
 	"attach":                  true,
 	"config":                  true,
 	"extension-list":          true,
 	"features":                true,
+	"network-add-domain":      true,
+	"network-remove-domain":   true,
+	"network-set-mode":        true,
 	"ps":                      true,
 	"review-target":           true,
 	"ssh-init":                true,

@@ -128,7 +128,9 @@ func networkScopedMutationCommand(name string, short string, action string, nArg
 		},
 	}
 	registerNetworkMutationFlags(cmd, &global, &project, &noApply, &allRunning)
-	addOptionFlagsByName(cmd.Flags(), &res.Options, &res.Sources, "backend", "tool")
+	// No --tool: the global policy applies to every tool, and so does the
+	// runtime apply.
+	addOptionFlagsByName(cmd.Flags(), &res.Options, &res.Sources, "backend")
 	return cmd
 }
 

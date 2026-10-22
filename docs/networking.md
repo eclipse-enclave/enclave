@@ -69,8 +69,10 @@ it emits the raw JSONL event stream verbatim, and with `--summary` it emits the
 aggregate as a single JSON object. Events that never carried a host name, such as
 a TLS connection denied at the ClientHello, are grouped under `(no domain)` (an
 empty `domain` in JSON), so the summary totals match what `--verdict deny`
-prints. Colour follows `NO_COLOR` and `ENCLAVE_COLOR`, and is off when stdout is
-not a terminal.
+prints. The last column shows the matched rule of a denied event, except that
+policy denials (`allowlist` on `http` and `tcp` rows, `nxdomain` on `dns` rows)
+read `blocked by policy`; the JSON keeps the raw rule. Colour follows `NO_COLOR`
+and `ENCLAVE_COLOR`, and is off when stdout is not a terminal.
 
 ### What is recorded
 
@@ -156,7 +158,7 @@ enclave network apply                      # Apply policy to running gateways
 
 Network mutations are currently global-only. `--project` scope is planned but not yet supported.
 
-Mutating commands (`add-domain`, `remove-domain`, `set-mode`) apply the updated policy to the running gateways of the current project automatically, for every tool. Pass `--no-apply` to persist the change without applying it, or `--all-running` to target every running gateway on the host. Run `enclave network apply` (optionally with `--tool` or `--all-running`) to push the persisted policy to the current project/tool's gateways on demand. Persisted unrestricted mode still requires a session restart.
+Mutating commands (`add-domain`, `remove-domain`, `set-mode`) apply the updated policy to the running gateways of the current project automatically, for every tool, so they do not accept `--tool`. Pass `--no-apply` to persist the change without applying it, or `--all-running` to target every running gateway on the host. Run `enclave network apply` (optionally with `--tool` or `--all-running`) to push the persisted policy to the current project/tool's gateways on demand. Persisted unrestricted mode still requires a session restart.
 
 ### JSON output (`schemaVersion: "1"`)
 

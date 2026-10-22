@@ -495,7 +495,10 @@ To cut a release, push an annotated tag `vX.Y.Z`, or `vX.Y.Z-alpha.N`,
 `-beta.N`, `-rc.N` for a pre-release, on `main`. Only these forms are
 accepted: they are the ones the updater, dpkg, and rpm all order the same
 way, so a pre-release, the snapshots after it, and the final release upgrade
-into each other in that order.
+into each other in that order. The first release tag must be `v0.1.2` or
+higher, pre-releases such as `v0.1.2-rc.1` included: the packages published
+before it are `0.1.2~~git…` snapshots, and apt and dnf do not upgrade them to
+a `0.1.1` or `0.1.0`.
 
 ```bash
 git tag -a v1.0.0 -m "Enclave 1.0.0"

@@ -15,9 +15,13 @@ CMD_DIR := ./cmd/enclave
 COMPLETIONS_DIR ?= ./completions
 # Both versions derive from the latest release tag; see scripts/version.sh.
 # VERSION is what `enclave version` and the image label report,
-# PACKAGE_VERSION the deb/rpm version.
-VERSION ?= $(shell ./scripts/version.sh)
-PACKAGE_VERSION ?= $(shell ./scripts/version.sh --package)
+# PACKAGE_VERSION the deb/rpm version. Both are computed once per make run.
+ifndef VERSION
+VERSION := $(shell ./scripts/version.sh)
+endif
+ifndef PACKAGE_VERSION
+PACKAGE_VERSION := $(shell ./scripts/version.sh --package)
+endif
 ifeq ($(strip $(VERSION)),)
 $(error scripts/version.sh produced no version; see its output above)
 endif
@@ -122,15 +126,16 @@ test: check-go
 	go test ./...
 
 # The Debian changelog entry is written into the build copy, so the package
-# version follows the release tags without a commit per build.
-define DEB_CHANGELOG
+# version follows the release tags without a commit per build. Only the deb
+# recipes export it: an exported variable is expanded for every recipe line.
+define DEB_CHANGELOG_ENTRY
 enclave ($(PACKAGE_VERSION)-1) unstable; urgency=medium
 
   * Build of enclave $(BUILD_VERSION), commit $(BUILD_COMMIT).
 
  -- $(shell sed -n 's/^Maintainer: //p' debian/control)  $(GIT_COMMIT_RFC2822)
 endef
-export DEB_CHANGELOG
+deb deb-quick: export DEB_CHANGELOG = $(DEB_CHANGELOG_ENTRY)
 
 # Build Debian package using dpkg-buildpackage
 # Output goes to dist/ directory

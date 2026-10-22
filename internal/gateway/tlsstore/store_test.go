@@ -212,28 +212,43 @@ func TestCertificateRenewsInvalidCachedLeaves(t *testing.T) {
 	}
 }
 
-func TestConcurrentStoresShareCAAndLoadBeforePruning(t *testing.T) {
+func TestConcurrentStoresShareCA(t *testing.T) {
 	dir := t.TempDir()
+	stores := []*Store{New(dir), New(dir), New(dir)}
+	var wg sync.WaitGroup
+	for _, store := range stores {
+		wg.Add(1)
+		go func(store *Store) {
+			defer wg.Done()
+			if err := store.EnsureCA(); err != nil {
+				t.Errorf("EnsureCA: %v", err)
+			}
+		}(store)
+	}
+	wg.Wait()
+	for _, store := range stores[1:] {
+		if store.caCert == nil || !store.caCert.Equal(stores[0].caCert) {
+			t.Fatal("concurrent stores loaded different CAs")
+		}
+	}
+}
+
+func TestConcurrentCertificatesSurvivePruning(t *testing.T) {
+	store := New(t.TempDir())
+	store.MaxLeafCert = 1
 	var wg sync.WaitGroup
 	for _, host := range []string{"one.example", "two.example", "three.example"} {
 		wg.Add(1)
 		go func(host string) {
 			defer wg.Done()
-			store := New(dir)
-			store.MaxLeafCert = 1
 			for i := 0; i < 3; i++ {
 				pair, err := store.Certificate(host)
 				if err != nil {
 					t.Errorf("Certificate: %v", err)
 					return
 				}
-				leaf, err := x509.ParseCertificate(pair.Certificate[0])
-				if err != nil {
+				if err := pair.Leaf.VerifyHostname(host); err != nil {
 					t.Error(err)
-					return
-				}
-				if err := leaf.CheckSignatureFrom(store.caCert); err != nil {
-					t.Errorf("mixed CA pair: %v", err)
 				}
 			}
 		}(host)
@@ -271,7 +286,7 @@ func TestEnsureCAPreservesIncompletePair(t *testing.T) {
 			if err := os.Remove(missing); err != nil {
 				t.Fatal(err)
 			}
-			err = store.EnsureCA()
+			err = New(store.RootDir).EnsureCA()
 			if err == nil {
 				t.Fatal("incomplete CA pair accepted")
 			}

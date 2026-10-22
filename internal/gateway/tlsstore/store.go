@@ -46,9 +46,10 @@ type Store struct {
 	CAKeyPath   string
 	MaxLeafCert int
 
-	mu     sync.Mutex
-	caCert *x509.Certificate
-	caKey  any
+	mu      sync.Mutex
+	caCert  *x509.Certificate
+	caKey   any
+	caRoots *x509.CertPool
 }
 
 func New(rootDir string) *Store {
@@ -61,113 +62,98 @@ func New(rootDir string) *Store {
 	}
 }
 
-func (s *Store) withLock(fn func() error) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return util.WithFileLock(filepath.Join(s.HostsDir, ".cache.lock"), fn)
-}
-
 func (s *Store) EnsureCA() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.withCALock()
+	return s.ensureCA()
 }
 
 // The CA never changes after it is loaded, so cache hits skip the file lock and
-// the RSA key parse that would otherwise run on every TLS handshake.
-func (s *Store) withCALock() error {
-	if s.caCert != nil && s.caKey != nil {
+// the RSA key parse that would otherwise run on every TLS handshake. The file
+// lock serializes CA creation across concurrent host enclave processes.
+func (s *Store) ensureCA() error {
+	if s.caCert != nil {
 		return nil
 	}
-	return util.WithFileLock(filepath.Join(s.RootDir, ".ca.lock"), s.ensureCA)
+	return util.WithFileLock(filepath.Join(s.RootDir, ".ca.lock"), s.loadOrCreateCA)
 }
 
-func (s *Store) EnsureLeaf(host string) (certPath, keyPath string, err error) {
-	err = s.withLock(func() error {
-		var inner error
-		certPath, keyPath, inner = s.ensureLeaf(host)
-		return inner
-	})
-	return
+func (s *Store) EnsureLeaf(host string) (string, string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	certPath, keyPath, _, err := s.ensureLeaf(host)
+	return certPath, keyPath, err
 }
 
-func (s *Store) ensureLeaf(host string) (string, string, error) {
+func (s *Store) Certificate(host string) (*tls.Certificate, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, _, pair, err := s.ensureLeaf(host)
+	return pair, err
+}
+
+func (s *Store) ensureLeaf(host string) (string, string, *tls.Certificate, error) {
 	normalizedHost, err := domainpattern.NormalizeHost(host)
 	if err != nil {
-		return "", "", err
+		return "", "", nil, err
 	}
-	if err := s.withCALock(); err != nil {
-		return "", "", err
+	if err := s.ensureCA(); err != nil {
+		return "", "", nil, err
 	}
 	if err := os.MkdirAll(s.HostsDir, 0o700); err != nil {
-		return "", "", fmt.Errorf("create hosts dir: %w", err)
+		return "", "", nil, fmt.Errorf("create hosts dir: %w", err)
 	}
 
 	hostKey := hostCacheKey(normalizedHost)
 	certPath := filepath.Join(s.HostsDir, hostKey+".crt")
 	keyPath := filepath.Join(s.HostsDir, hostKey+".key")
-	if s.caCert == nil || s.caKey == nil {
-		s.caCert, s.caKey, err = loadCA(s.CACertPath, s.CAKeyPath)
-		if err != nil {
-			return "", "", err
-		}
-	}
-	if s.validLeaf(certPath, keyPath, normalizedHost) {
+	if pair := s.cachedLeaf(certPath, keyPath, normalizedHost); pair != nil {
 		now := time.Now()
 		_ = os.Chtimes(certPath, now, now)
 		_ = os.Chtimes(keyPath, now, now)
-		return certPath, keyPath, nil
+		return certPath, keyPath, pair, nil
 	}
 
-	if err := writeLeaf(certPath, keyPath, normalizedHost, s.caCert, s.caKey); err != nil {
-		return "", "", err
+	pair, err := writeLeaf(certPath, keyPath, normalizedHost, s.caCert, s.caKey)
+	if err != nil {
+		return "", "", nil, err
 	}
 	if err := s.pruneLeafCache(hostKey); err != nil {
-		return "", "", err
+		return "", "", nil, err
 	}
-	return certPath, keyPath, nil
+	return certPath, keyPath, pair, nil
 }
 
-func (s *Store) validLeaf(certPath, keyPath, host string) bool {
+// cachedLeaf returns nil unless the cached pair is signed by the current CA,
+// covers host, and stays valid for at least another day.
+func (s *Store) cachedLeaf(certPath, keyPath, host string) *tls.Certificate {
 	pair, err := tls.LoadX509KeyPair(certPath, keyPath)
 	if err != nil {
-		return false
-	}
-	leaf, err := x509.ParseCertificate(pair.Certificate[0])
-	if err != nil {
-		return false
-	}
-	roots := x509.NewCertPool()
-	roots.AddCert(s.caCert)
-	_, err = leaf.Verify(x509.VerifyOptions{DNSName: host, Roots: roots, CurrentTime: time.Now().Add(24 * time.Hour)})
-	return err == nil && !time.Now().Before(leaf.NotBefore)
-}
-
-func (s *Store) Certificate(host string) (cert *tls.Certificate, err error) {
-	err = s.withLock(func() error {
-		certPath, keyPath, err := s.ensureLeaf(host)
-		if err != nil {
-			return err
-		}
-		pair, err := tls.LoadX509KeyPair(certPath, keyPath)
-		if err != nil {
-			return fmt.Errorf("load host certificate: %w", err)
-		}
-		cert = &pair
 		return nil
-	})
-	return
+	}
+	now := time.Now()
+	_, err = pair.Leaf.Verify(x509.VerifyOptions{DNSName: host, Roots: s.caRoots, CurrentTime: now.Add(24 * time.Hour)})
+	if err != nil || now.Before(pair.Leaf.NotBefore) {
+		return nil
+	}
+	return &pair
 }
 
-func (s *Store) ensureCA() error {
+func (s *Store) setCA(cert *x509.Certificate, key any) {
+	s.caCert = cert
+	s.caKey = key
+	s.caRoots = x509.NewCertPool()
+	s.caRoots.AddCert(cert)
+}
+
+func (s *Store) loadOrCreateCA() error {
 	if util.FileExists(s.CACertPath) && util.FileExists(s.CAKeyPath) {
 		pair, err := tls.LoadX509KeyPair(s.CACertPath, s.CAKeyPath)
 		if err != nil {
 			return fmt.Errorf("load trusted CA pair from %s: %w", s.RootDir, err)
 		}
-		s.caCert, err = x509.ParseCertificate(pair.Certificate[0])
-		s.caKey = pair.PrivateKey
-		return err
+		s.setCA(pair.Leaf, pair.PrivateKey)
+		return nil
 	}
 	if util.FileExists(s.CACertPath) || util.FileExists(s.CAKeyPath) {
 		present, missing := s.CACertPath, s.CAKeyPath
@@ -201,6 +187,10 @@ func (s *Store) ensureCA() error {
 	if err != nil {
 		return fmt.Errorf("create CA cert: %w", err)
 	}
+	cert, err := x509.ParseCertificate(der)
+	if err != nil {
+		return fmt.Errorf("parse CA cert: %w", err)
+	}
 	if err := writePEMFile(s.CACertPath, "CERTIFICATE", der, 0o644); err != nil {
 		return err
 	}
@@ -211,6 +201,7 @@ func (s *Store) ensureCA() error {
 	if err := writePEMFile(s.CAKeyPath, "PRIVATE KEY", keyBytes, 0o600); err != nil {
 		return err
 	}
+	s.setCA(cert, priv)
 	return nil
 }
 
@@ -266,14 +257,14 @@ func (s *Store) pruneLeafCache(keepKey string) error {
 
 // Leaves use ECDSA P-256 because they are minted under the store mutex during
 // the client's TLS handshake; RSA keygen there would serialize cold handshakes.
-func writeLeaf(certPath string, keyPath string, host string, caCert *x509.Certificate, caKey any) error {
+func writeLeaf(certPath string, keyPath string, host string, caCert *x509.Certificate, caKey any) (*tls.Certificate, error) {
 	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
-		return fmt.Errorf("generate leaf key: %w", err)
+		return nil, fmt.Errorf("generate leaf key: %w", err)
 	}
 	serial, err := randomSerial()
 	if err != nil {
-		return fmt.Errorf("generate leaf serial: %w", err)
+		return nil, fmt.Errorf("generate leaf serial: %w", err)
 	}
 	now := time.Now()
 	tmpl := &x509.Certificate{
@@ -291,48 +282,23 @@ func writeLeaf(certPath string, keyPath string, host string, caCert *x509.Certif
 	}
 	der, err := x509.CreateCertificate(rand.Reader, tmpl, caCert, &priv.PublicKey, caKey)
 	if err != nil {
-		return fmt.Errorf("create leaf certificate: %w", err)
+		return nil, fmt.Errorf("create leaf certificate: %w", err)
+	}
+	leaf, err := x509.ParseCertificate(der)
+	if err != nil {
+		return nil, fmt.Errorf("parse leaf certificate: %w", err)
 	}
 	if err := writePEMFile(certPath, "CERTIFICATE", der, 0o644); err != nil {
-		return err
+		return nil, err
 	}
 	keyBytes, err := x509.MarshalPKCS8PrivateKey(priv)
 	if err != nil {
-		return fmt.Errorf("encode leaf key: %w", err)
+		return nil, fmt.Errorf("encode leaf key: %w", err)
 	}
 	if err := writePEMFile(keyPath, "PRIVATE KEY", keyBytes, 0o600); err != nil {
-		return err
+		return nil, err
 	}
-	return nil
-}
-
-func loadCA(certPath string, keyPath string) (*x509.Certificate, any, error) {
-	certPEM, err := os.ReadFile(certPath) // #nosec G304 -- path is trusted and resolved by runtime config.
-	if err != nil {
-		return nil, nil, fmt.Errorf("read CA cert: %w", err)
-	}
-	certBlock, _ := pem.Decode(certPEM)
-	if certBlock == nil {
-		return nil, nil, fmt.Errorf("parse CA cert PEM")
-	}
-	cert, err := x509.ParseCertificate(certBlock.Bytes)
-	if err != nil {
-		return nil, nil, fmt.Errorf("parse CA cert: %w", err)
-	}
-
-	keyPEM, err := os.ReadFile(keyPath) // #nosec G304 -- path is trusted and resolved by runtime config.
-	if err != nil {
-		return nil, nil, fmt.Errorf("read CA key: %w", err)
-	}
-	keyBlock, _ := pem.Decode(keyPEM)
-	if keyBlock == nil {
-		return nil, nil, fmt.Errorf("parse CA key PEM")
-	}
-	key, err := x509.ParsePKCS8PrivateKey(keyBlock.Bytes)
-	if err != nil {
-		return nil, nil, fmt.Errorf("parse CA key: %w", err)
-	}
-	return cert, key, nil
+	return &tls.Certificate{Certificate: [][]byte{der}, PrivateKey: priv, Leaf: leaf}, nil
 }
 
 func randomSerial() (*big.Int, error) {

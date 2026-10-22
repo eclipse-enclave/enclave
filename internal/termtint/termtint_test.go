@@ -107,7 +107,7 @@ func TestBeginAcceptsUppercaseHex(t *testing.T) {
 }
 
 func TestInterceptedSignalsSkipCallerHandled(t *testing.T) {
-	all := interruptSignals()
+	all := InterruptSignals()
 	if len(all) == 0 {
 		t.Skip("no interrupt signals on this platform")
 	}

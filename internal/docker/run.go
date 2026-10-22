@@ -42,8 +42,9 @@ func Run(ctx context.Context, config *ContainerConfig, hostConfig *HostConfig, n
 }
 
 // RunWithStartHook runs a container to completion, discarding its output, and
-// invokes onStarted after Docker reports the named container is running.
-func RunWithStartHook(ctx context.Context, config *ContainerConfig, hostConfig *HostConfig, name string, onStarted func()) error {
+// invokes onStarted with the container's ID after Docker reports the named
+// container is running.
+func RunWithStartHook(ctx context.Context, config *ContainerConfig, hostConfig *HostConfig, name string, onStarted func(id string)) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -56,12 +57,14 @@ func RunWithStartHook(ctx context.Context, config *ContainerConfig, hostConfig *
 }
 
 // RunWithIOAndStartHook runs a container wired to the supplied streams and
-// invokes onStarted after Docker reports the named container is running.
-func RunWithIOAndStartHook(ctx context.Context, config *ContainerConfig, hostConfig *HostConfig, name string, in io.Reader, out io.Writer, errOut io.Writer, tty bool, onStarted func()) error {
+// invokes onStarted with the container's ID after Docker reports the named
+// container is running. A non-empty detachKeys replaces the engine's detach
+// keys of an attached terminal.
+func RunWithIOAndStartHook(ctx context.Context, config *ContainerConfig, hostConfig *HostConfig, name string, in io.Reader, out io.Writer, errOut io.Writer, tty bool, detachKeys string, onStarted func(id string)) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	mode := runMode{Interactive: in != nil, TTY: tty}
+	mode := runMode{Interactive: in != nil, TTY: tty, DetachKeys: detachKeys}
 	args := buildRunArgs(config, hostConfig, name, mode)
 	cmd := exec.CommandContext(ctx, dockerBinary, args...) // #nosec G204
 	cmd.Stdin = in
@@ -90,17 +93,19 @@ func RunCapture(ctx context.Context, config *ContainerConfig, hostConfig *HostCo
 // RunInteractive runs a container attached to the current terminal. The docker
 // CLI handles raw-mode, terminal resize, and signal forwarding.
 func RunInteractive(ctx context.Context, config *ContainerConfig, hostConfig *HostConfig, name string) error {
-	return RunInteractiveWithStartHook(ctx, config, hostConfig, name, nil)
+	return RunInteractiveWithStartHook(ctx, config, hostConfig, name, "", nil)
 }
 
 // RunInteractiveWithStartHook runs an interactive container and invokes
-// onStarted after Docker reports the named container is running. SIGINT and
-// SIGTERM sent to this process while the child runs are forwarded to it.
-func RunInteractiveWithStartHook(ctx context.Context, config *ContainerConfig, hostConfig *HostConfig, name string, onStarted func()) error {
+// onStarted with the container's ID after Docker reports the named container
+// is running. A non-empty detachKeys replaces the engine's detach keys. SIGINT,
+// SIGTERM and SIGHUP sent to this process while the child runs are forwarded
+// to it.
+func RunInteractiveWithStartHook(ctx context.Context, config *ContainerConfig, hostConfig *HostConfig, name string, detachKeys string, onStarted func(id string)) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	args := buildRunArgs(config, hostConfig, name, runMode{Interactive: true, TTY: true})
+	args := buildRunArgs(config, hostConfig, name, runMode{Interactive: true, TTY: true, DetachKeys: detachKeys})
 	cmd := exec.CommandContext(ctx, dockerBinary, args...) // #nosec G204
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
@@ -114,7 +119,7 @@ func RunInteractiveWithStartHook(ctx context.Context, config *ContainerConfig, h
 // runCommandWithStartHook starts cmd and invokes onStarted once the named
 // container is running. A non-nil child receives the started process, which is
 // how the interactive path gets signals relayed to the engine.
-func runCommandWithStartHook(ctx context.Context, name string, cmd *exec.Cmd, onStarted func(), child chan<- *os.Process) error {
+func runCommandWithStartHook(ctx context.Context, name string, cmd *exec.Cmd, onStarted func(id string), child chan<- *os.Process) error {
 	if err := cmd.Start(); err != nil {
 		return err
 	}
@@ -126,7 +131,8 @@ func runCommandWithStartHook(ctx context.Context, name string, cmd *exec.Cmd, on
 		waitCh <- cmd.Wait()
 	}()
 	if onStarted != nil && strings.TrimSpace(name) != "" {
-		if err, done := waitForContainerRunning(ctx, name, waitCh); done {
+		id, err, done := waitForContainerRunning(ctx, name, waitCh)
+		if done {
 			return err
 		}
 		select {
@@ -134,22 +140,24 @@ func runCommandWithStartHook(ctx context.Context, name string, cmd *exec.Cmd, on
 			return err
 		default:
 		}
-		onStarted()
+		onStarted(id)
 	}
 	return <-waitCh
 }
 
-// relayInterrupts forwards SIGINT and SIGTERM aimed at this process to the
-// engine child once it is known. Terminal Ctrl-C needs no help: the engine
+// relayInterrupts forwards SIGINT, SIGTERM and SIGHUP aimed at this process to
+// the engine child once it is known. Terminal Ctrl-C needs no help: the engine
 // keeps the TTY in raw mode and proxies it into the container. A signal sent to
 // this process directly, by a supervisor or kill, would otherwise be absorbed
 // by the caller's interrupt handling and leave the session running. The
 // signals are registered before the child starts so none is lost in between;
 // one that arrives early is delivered as soon as the child exists. The
-// returned function stops relaying.
+// returned function stops relaying. When the terminal closes, the kernel
+// already sends SIGHUP to the child, which shares our process group, so the
+// relayed copy is a duplicate; the relay matters for kill -HUP on enclave.
 func relayInterrupts(child <-chan *os.Process) func() {
 	signals := make(chan os.Signal, 1)
-	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
+	signal.Notify(signals, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 	done := make(chan struct{})
 	go func() {
 		var proc *os.Process
@@ -173,17 +181,19 @@ func relayInterrupts(child <-chan *os.Process) func() {
 	}
 }
 
-func waitForContainerRunning(ctx context.Context, name string, waitCh <-chan error) (error, bool) {
+// waitForContainerRunning returns the running container's ID, or done with the
+// run's result when the run ends first.
+func waitForContainerRunning(ctx context.Context, name string, waitCh <-chan error) (id string, err error, done bool) {
 	ticker := time.NewTicker(50 * time.Millisecond)
 	defer ticker.Stop()
 	for {
 		select {
 		case err := <-waitCh:
-			return err, true
+			return "", err, true
 		case <-ticker.C:
 			info, err := ContainerInspect(ctx, name)
 			if err == nil && info.State != nil && info.State.Running {
-				return nil, false
+				return info.ID, nil, false
 			}
 		}
 	}

@@ -4,5 +4,6 @@
   "logLevel": "default",
   "includeCoAuthoredBy": false,
   "storeTokenPlaintext": false,
-  "model": "auto"
+  "model": "auto",
+  "memory": false
 }

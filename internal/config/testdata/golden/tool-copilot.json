@@ -1,6 +1,6 @@
 {
   "name": "copilot",
-  "command": "copilot --disable-builtin-mcps",
+  "command": "copilot --disable-builtin-mcps --disable-client-telemetry",
   "continue_args": [
     "--continue"
   ],
@@ -11,6 +11,18 @@
   "yolo_enabled": true,
   "config_dir": ".copilot",
   "skills_dir": ".copilot/skills",
+  "state_paths": [
+    "config.json",
+    "session-state/",
+    "sidebar-sessions-state/",
+    "command-history-state*",
+    "session-store.db*",
+    "permissions-config.json",
+    "mcp-oauth-config/",
+    "mcp-secrets/",
+    "installed-plugins/",
+    "plugin-data/"
+  ],
   "settings_file": "copilot-settings.json",
   "settings_target": ".copilot/settings.json",
   "passthrough_paths": [

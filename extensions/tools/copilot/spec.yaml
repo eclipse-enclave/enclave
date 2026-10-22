@@ -12,8 +12,20 @@ displayName: Copilot CLI
 description: Copilot CLI
 
 sandbox:
-  entrypoint: { run: [copilot, --disable-builtin-mcps] }
+  entrypoint: { run: [copilot, --disable-builtin-mcps, --disable-client-telemetry] }
   configDir: .copilot
+  statePaths: [
+    config.json,
+    session-state/,
+    sidebar-sessions-state/,
+    command-history-state*,
+    session-store.db*,
+    permissions-config.json,
+    mcp-oauth-config/,
+    mcp-secrets/,
+    installed-plugins/,
+    plugin-data/
+  ]
   qemuMinMemoryMiB: 4096
   skillsDir: .copilot/skills
   settingsFile: copilot-settings.json

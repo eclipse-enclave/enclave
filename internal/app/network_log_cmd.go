@@ -181,7 +181,7 @@ func runningGatewayScope(input *CommandInput, home string, sessionName string) (
 	if code != 0 {
 		return networkLogScope{}, fmt.Errorf("select backend for gateway discovery")
 	}
-	gateways, scopeLabel, err := discoverGatewayTargets(input, manager, true)
+	gateways, scopeLabel, err := discoverGatewayTargets(input, manager, gatewayScopeAllRunning)
 	if err != nil {
 		return networkLogScope{}, err
 	}

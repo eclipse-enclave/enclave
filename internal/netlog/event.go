@@ -50,6 +50,13 @@ const (
 // RuleSessionStart marks the event a gateway writes when it starts.
 const RuleSessionStart = "start"
 
+// RuleAllowlist names the proxy's domain check, for both verdicts.
+const RuleAllowlist = "allowlist"
+
+// RuleNXDomain marks a lookup answered by enclave's own DNS blackhole. An
+// upstream NXDOMAIN carries the "upstream-" prefix instead.
+const RuleNXDomain = "nxdomain"
+
 // SinceSession is the --since value that anchors on a session boundary instead
 // of a clock value. It is shared so the CLI's flag validation and the reader
 // cannot disagree about the keyword.

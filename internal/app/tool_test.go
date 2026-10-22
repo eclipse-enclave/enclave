@@ -157,6 +157,8 @@ func TestActionNeedsTool(t *testing.T) {
 		{name: "devcontainer-generate", parsed: cli.Result{Action: "devcontainer-generate"}, want: true},
 		{name: "network-print", parsed: cli.Result{Action: "network-print"}, want: true},
 		{name: "network-log", parsed: cli.Result{Action: "network-log"}, want: true},
+		// Global policy edits apply to every tool of the project.
+		{name: "network-add-domain", parsed: cli.Result{Action: "network-add-domain"}, want: false},
 		// Background sessions of the default tool are stopped; a named
 		// session is found without it.
 		{name: "stop", parsed: cli.Result{Action: "stop"}, want: true},

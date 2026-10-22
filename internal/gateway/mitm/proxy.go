@@ -233,7 +233,7 @@ func (p *proxy) handler(scheme string) http.HandlerFunc {
 		if !p.hostPermitted(host) {
 			event.Status = http.StatusForbidden
 			event.Verdict = netlog.VerdictDeny
-			event.Rule = "allowlist"
+			event.Rule = netlog.RuleAllowlist
 			p.logEvent(event)
 			http.Error(w, "Domain not in allowlist", http.StatusForbidden)
 			return
@@ -259,7 +259,7 @@ func (p *proxy) handler(scheme string) http.HandlerFunc {
 		event.ResponseSize = result.ResponseBytes
 		event.ContentType = result.ContentType
 		event.Verdict = netlog.VerdictPass
-		event.Rule = "allowlist"
+		event.Rule = netlog.RuleAllowlist
 		p.logEvent(event)
 	}
 }
@@ -502,7 +502,7 @@ func (s *httpsDispatchServer) serveConn(conn net.Conn) {
 		return
 	}
 	if !s.proxy.hostPermitted(host) {
-		s.proxy.logEvent(newTCPAuditEvent(host, netlog.VerdictDeny, "allowlist"))
+		s.proxy.logEvent(newTCPAuditEvent(host, netlog.VerdictDeny, netlog.RuleAllowlist))
 		_ = conn.Close()
 		return
 	}
@@ -511,7 +511,7 @@ func (s *httpsDispatchServer) serveConn(conn net.Conn) {
 		tunnelToAddress(conn, preface, s.mitmAddr)
 		return
 	}
-	s.proxy.logEvent(newTCPAuditEvent(host, netlog.VerdictPass, "allowlist"))
+	s.proxy.logEvent(newTCPAuditEvent(host, netlog.VerdictPass, netlog.RuleAllowlist))
 	tunnelTLS(conn, preface, host)
 }
 

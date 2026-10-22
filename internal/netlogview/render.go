@@ -214,9 +214,15 @@ func humanDomain(event netlog.Event) string {
 }
 
 // humanDetail is the trailing column: the matched rule when the event was
-// denied or carried no payload, and the transferred size otherwise.
+// denied or carried no payload, and the transferred size otherwise. The proxy
+// names its domain check "allowlist" for both verdicts, which on a denied row
+// reads as if the request was allowed; DNS blackhole denials get the same
+// label so one blocked domain reads the same on every row.
 func humanDetail(event netlog.Event) string {
 	if strings.EqualFold(event.Verdict, netlog.VerdictDeny) {
+		if event.Rule == netlog.RuleAllowlist || event.Rule == netlog.RuleNXDomain {
+			return "blocked by policy"
+		}
 		return event.Rule
 	}
 	if event.ResponseSize > 0 {

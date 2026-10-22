@@ -74,7 +74,7 @@ const answerSeparator = " is "
 // lookup of an allowlisted host that has no IPv6 record, so recording it would
 // report allowed domains as denied.
 var rules = map[string]string{
-	"NXDOMAIN": "nxdomain",
+	"NXDOMAIN": netlog.RuleNXDomain,
 	"SERVFAIL": "servfail",
 	"REFUSED":  "refused",
 }

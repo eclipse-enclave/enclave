@@ -77,14 +77,32 @@ jobs:
         run: |
           notes="$(./scripts/release-notes.sh stable "$VERSION" "${{ github.server_url }}/${{ github.repository }}/releases/download/$GITHUB_REF_NAME" "$GITHUB_SHA")"
           if existing="$(gh release view "$GITHUB_REF_NAME" --json body --jq .body 2>/dev/null)"; then
-            # A re-run from the same commit replaces the assets of the release
-            # it already created; a tag moved to another commit is refused.
+            # Check every existing asset before filling gaps from a partial
+            # publication. Even a rebuild of the same commit can differ.
             published="$(printf '%s\n' "$existing" | grep -oE '/commit/[0-9a-f]{40}' | head -n 1 | cut -d/ -f3)"
             if [ "$published" != "$GITHUB_SHA" ]; then
               echo "::error::release $GITHUB_REF_NAME was published from commit ${published:-unknown}, not $GITHUB_SHA; a release tag must not move" >&2
               exit 1
             fi
-            gh release upload "$GITHUB_REF_NAME" --clobber artifacts/*
+            ./scripts/verify-github-release.sh "$GITHUB_REF_NAME" artifacts --allow-missing
+            assets=$(gh api "repos/$GH_REPO/releases/tags/$GITHUB_REF_NAME" \
+              --jq '.assets[] | [.name, (.digest // "unknown"), (.id | tostring), .state] | @tsv')
+            while IFS=$'\t' read -r name _ id state; do
+              [ -n "$name" ] || continue
+              [ -f "artifacts/$name" ] || continue
+              if [ "$state" = starter ]; then
+                # Failed uploads may leave an empty starter entry. Completed
+                # assets were verified above and must never be deleted.
+                gh api --method DELETE "repos/$GH_REPO/releases/assets/$id"
+              fi
+            done <<< "$assets"
+            uploaded=$(printf '%s\n' "$assets" | awk -F '\t' '$4 == "uploaded" { print $1 }')
+            for asset in artifacts/*; do
+              name="${asset##*/}"
+              if ! printf '%s\n' "$uploaded" | grep -Fxq -- "$name"; then
+                gh release upload "$GITHUB_REF_NAME" "$asset"
+              fi
+            done
           else
             flags=()
             if [ "$PRERELEASE" = true ]; then flags+=(--prerelease); fi
@@ -95,6 +113,7 @@ jobs:
               "${flags[@]}" \
               artifacts/*
           fi
+          ./scripts/verify-github-release.sh "$GITHUB_REF_NAME" artifacts
 
       # The updater reads releases/latest (a version) and that version's
       # directory. Pre-releases are published but never become latest.

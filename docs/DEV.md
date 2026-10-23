@@ -512,10 +512,24 @@ and publishes the files on download.eclipse.org. A pre-release tag produces
 a GitHub pre-release and a versioned directory, but does not move
 `releases/latest`. Releases run one at a time with later
 tags queued behind, and `releases/latest` only moves to a version that sorts
-higher, so re-running an old release replaces its assets without pulling the
-stable channel back. Tags are mutable refs, so both the GitHub release notes
+higher, so retrying an old release cannot pull the stable channel back.
+Published release files are immutable on both hosts: retries leave identical
+files untouched, add missing files after a partial failure, and fail before
+adding anything if an existing file differs (including `checksums.txt`).
+Rebuilding the same commit may produce different bytes; retry only the failed
+publish job with its original artifacts, or publish a new version instead.
+The assembled `release-assets` workflow artifact is retained for 30 days for
+tagged releases (including pre-releases), as long as GitHub allows re-running
+a job, and one day for rolling builds.
+GitHub retries verify all completed assets before deleting empty `starter`
+entries left by failed uploads and filling gaps; other unfinished states fail
+without deleting anything. After uploading, both channels require every
+expected GitHub asset to be `uploaded` and to match the workflow's SHA-256
+digest, downloading and hashing the asset when GitHub provides no digest.
+Rolling releases still replace their assets on every publication.
+Tags are mutable refs, so both the GitHub release notes
 and `releases/<version>/commit` record the source commit: a re-run from that
-commit replaces the assets, a tag moved to another commit is refused. A
+commit must pass the file checks, and a tag moved to another commit is refused. A
 ruleset protecting `refs/tags/v*` from deletion and force pushes is the
 server-side complement.
 
@@ -534,10 +548,16 @@ Uploads go through `.github/actions/publish-downloads`, which follows the
 the `SCP_USERNAME`, `SCP_KEY`, and `SCP_PASSPHRASE` secrets are provisioned by
 Otterdog, the server's host key is pinned in the action (update `known-hosts`
 when the Eclipse Foundation rotates it), and each directory is uploaded next
-to its target and swapped in with `mv`, so readers never see a partial set.
+to its target. Before publication, remote SHA-256 verification checks every
+staged file against the workflow's bytes, including `checksums.txt` itself;
+a mismatch or missing file fails before publishing the staged files or
+advancing `latest`, and a failed run removes its staging directory. New directories and rolling builds are published as a whole
+with `mv`; retries of existing releases validate the staged files, then add
+only missing files without replacing existing ones.
 After publishing, the action reads `checksums.txt` and the pointer back over
 `https://download.eclipse.org` and warns when they do not match within two
-minutes. The GitHub release keeps a copy of the assets; the Scoop manifest
+minutes. This HTTP propagation check is separate from the mandatory remote
+integrity check. The GitHub release keeps a copy of the assets; the Scoop manifest
 points at it.
 
 ## Docs and Diagrams

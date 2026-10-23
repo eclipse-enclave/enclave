@@ -27,8 +27,8 @@ if [ "$current" != "$commit" ]; then
   exit 1
 fi
 build=$(gh api "repos/$GH_REPO/actions/runs/$run")
-if ! jq -e --arg commit "$commit" '.path == ".github/workflows/release.yml" and .event == "push" and .head_sha == $commit and .conclusion == "success"' <<< "$build" >/dev/null; then
-  echo "::error::original run is not a successful tagged release build of $commit" >&2
+if ! jq -e --arg commit "$commit" --arg tag "$tag" '.path == ".github/workflows/release.yml" and .event == "push" and .head_branch == $tag and .head_sha == $commit and .conclusion == "success"' <<< "$build" >/dev/null; then
+  echo "::error::original run is not a successful release build of $tag at $commit" >&2
   exit 1
 fi
 prerelease=false

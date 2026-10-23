@@ -23,8 +23,9 @@ jobs:
   promote:
     if: ${{ github.repository == 'eclipse-enclave/enclave' }}
     runs-on: ubuntu-latest
-    # Required reviewers and a main-only deployment branch policy on this
-    # environment, configured in Otterdog, make the dispatch a sign-off.
+    # Provision required reviewers, a main-only branch policy, and isolated
+    # publication credentials in Otterdog before enabling this publisher.
+    # An environment name alone does not establish an approval boundary.
     environment: release
     permissions:
       contents: write
@@ -51,18 +52,23 @@ jobs:
 
       - name: Verify draft assets
         env:
+          BUILD_RUN: ${{ steps.release.outputs.run-id }}
           CHECKSUM: ${{ steps.release.outputs.checksums-sha256 }}
         run: |
+          # Release notes and draft assets are editable. Authenticate both
+          # against the build's independent artifact; never fall back on expiry.
+          gh run download "$BUILD_RUN" --name release-assets --dir original-artifacts
+          ./scripts/verify-release-artifacts.sh original-artifacts "$CHECKSUM"
           gh release download "$TAG" --dir artifacts
           ./scripts/verify-release-artifacts.sh artifacts "$CHECKSUM"
-          ./scripts/verify-github-release.sh "$TAG" artifacts
+          ./scripts/verify-github-release.sh "$TAG" original-artifacts
 
       # The updater reads releases/latest (a version) and that version's
       # directory. Pre-releases are published but never become latest.
       - name: Publish to download.eclipse.org
         uses: ./.github/actions/publish-downloads
         with:
-          source: artifacts
+          source: original-artifacts
           target: releases/${{ steps.release.outputs.version }}
           commit: ${{ steps.release.outputs.commit }}
           immutable: "true"

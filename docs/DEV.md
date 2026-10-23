@@ -520,11 +520,12 @@ they never write the same release at once:
    needed, but leave the marker as it is.
 2. Review the draft, then dispatch **Promote Release**
    (`.github/workflows/promote-release.yml`) from `main` with the tag, such as
-   `v1.2.3`. The job runs in the `release` environment, whose required
-   reviewers and main-only deployment branch policy, configured in Otterdog,
-   make the dispatch a sign-off. It checks the marker against the tag and the
-   build run, verifies the draft's assets against the recorded
-   `checksums.txt`, publishes `releases/<version>/` on download.eclipse.org,
+   `v1.2.3`. The job targets the `release` environment; configure its protections
+   before enabling publication (see below). It checks the marker against the
+   exact tag and successful build run, downloads that run's `release-assets`
+   artifact, and verifies both the marker and draft files against this
+   independent copy. It publishes the original build files to
+   `releases/<version>/` on download.eclipse.org,
    moves `releases/latest` for a final release that sorts higher, and
    publishes the GitHub release last; its Latest marker also only moves to a
    higher version. A pre-release becomes a GitHub pre-release and a versioned
@@ -532,9 +533,28 @@ they never write the same release at once:
 
 Nothing is rebuilt after the tag build, because rebuilding the same commit may
 produce different bytes. The `release-assets` workflow artifact is retained
-for 30 days for tagged releases, as long as GitHub allows re-running the job
-that fills the draft, and one day for rolling builds. A build that cannot be
-retried is replaced by a new version.
+for 30 days for tagged releases and one day for rolling builds. Promotion and
+its retries require the original artifact: if it has expired or been deleted,
+publication fails rather than trusting the editable draft alone. Promote within
+that window; a build that cannot be retried is replaced by a new version.
+
+**Deployment prerequisites:** provision and verify these in Otterdog and on the
+download server before enabling stable publication. The workflow YAML alone
+does not establish them:
+
+- The `release` environment must have required reviewers, prevent self-review,
+  and allow deployments only from `main`. Referencing a nonexistent environment
+  creates an unprotected environment, not an approval gate.
+- Stable publication credentials must be scoped to that protected environment,
+  with equivalent organization/repository-scoped access removed. Rolling must
+  use a distinct credential restricted server-side to its rolling area (or an
+  equivalently isolated publishing service). Sharing an organization-wide SSH
+  key bypasses the stable approval boundary.
+- Protect `main`, workflow changes, and release-tag creation and movement.
+
+These are external configuration requirements, not guarantees provided by the
+current repository workflows. Verify their effective configuration before
+treating dispatch or environment approval as a production sign-off.
 
 Published release files are immutable on both hosts: retries leave identical
 files untouched, add missing files after a partial failure, and fail before

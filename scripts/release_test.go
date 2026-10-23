@@ -391,7 +391,7 @@ fi
 	if output, err := run(prepare, "GITHUB_SHA="+commit); err == nil || !strings.Contains(output, "already published") {
 		t.Fatalf("preparation changed a published release: %v: %s", err, output)
 	}
-	for _, scenario := range []string{"original", "unedited", "published-retry", "missing-marker", "duplicate-marker", "wrong-workflow", "wrong-event", "wrong-commit", "failed-build", "moved-tag"} {
+	for _, scenario := range []string{"original", "unedited", "published-retry", "missing-marker", "duplicate-marker", "wrong-workflow", "wrong-event", "wrong-tag", "wrong-commit", "failed-build", "moved-tag"} {
 		t.Run(scenario, func(t *testing.T) {
 			body := release["body"].(string)
 			if scenario == "unedited" {
@@ -408,12 +408,14 @@ fi
 				t.Fatal(err)
 			}
 			write("release.json", string(metadata), 0o644)
-			build := map[string]string{"path": ".github/workflows/release.yml", "event": "push", "head_sha": commit, "conclusion": "success"}
+			build := map[string]string{"path": ".github/workflows/release.yml", "event": "push", "head_branch": "v1.2.3", "head_sha": commit, "conclusion": "success"}
 			switch scenario {
 			case "wrong-workflow":
 				build["path"] = ".github/workflows/rolling.yml"
 			case "wrong-event":
 				build["event"] = "workflow_dispatch"
+			case "wrong-tag":
+				build["head_branch"] = "v1.2.3-rc.1"
 			case "wrong-commit":
 				build["head_sha"] = strings.Repeat("b", 40)
 			case "failed-build":
@@ -435,6 +437,70 @@ fi
 			}
 			if valid && (!strings.Contains(output, "commit="+commit+"\n") || !strings.Contains(output, "run-id=123\n") || !strings.Contains(output, "prerelease=false\n")) {
 				t.Fatalf("unexpected release provenance: %s", output)
+			}
+		})
+	}
+}
+
+func TestPromotionRequiresOriginalBuild(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("release publication runs on Linux")
+	}
+	promote := releaseShell(t, "../.github/workflows/promote-release.yml", "Verify draft assets")
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, scenario := range []string{"original", "changed-draft", "changed-draft-and-marker", "expired-build"} {
+		t.Run(scenario, func(t *testing.T) {
+			root := t.TempDir()
+			write := func(name, value string, mode os.FileMode) {
+				t.Helper()
+				if err := os.MkdirAll(filepath.Dir(filepath.Join(root, name)), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(root, name), []byte(value), mode); err != nil {
+					t.Fatal(err)
+				}
+			}
+			manifest := func(value string) string { return fmt.Sprintf("%x  binary\n", sha256.Sum256([]byte(value))) }
+			write("build/binary", "original", 0o644)
+			write("build/checksums.txt", manifest("original"), 0o644)
+			candidate := "original"
+			if strings.HasPrefix(scenario, "changed-") {
+				candidate = "substituted release binary"
+			}
+			write("candidate/binary", candidate, 0o644)
+			write("candidate/checksums.txt", manifest(candidate), 0o644)
+			checksum := sha256.Sum256([]byte(manifest("original")))
+			if scenario == "changed-draft-and-marker" {
+				checksum = sha256.Sum256([]byte(manifest(candidate)))
+			}
+			write("gh", `#!/bin/bash
+set -euo pipefail
+case "$1 $2" in
+  'run download')
+    [ "$3" = 123 ]
+    if [ "$SCENARIO" = expired-build ]; then echo 'artifact unavailable' >&2; exit 1; fi
+    mkdir "${!#}"; cp build/* "${!#}/" ;;
+  'release download') mkdir "${!#}"; cp candidate/* "${!#}/" ;;
+  'release view') echo 17 ;;
+  'api repos/test/repo/releases/17')
+    for file in candidate/*; do
+      printf '%s\tsha256:%s\t%s\tuploaded\n' "${file##*/}" "$(sha256sum "$file" | cut -d' ' -f1)" "${file##*/}"
+    done ;;
+  *) echo "unexpected gh arguments: $*" >&2; exit 1 ;;
+esac
+`, 0o755)
+			if err := os.Symlink(cwd, filepath.Join(root, "scripts")); err != nil {
+				t.Fatal(err)
+			}
+			cmd := exec.Command("bash", "-euo", "pipefail", "-c", promote)
+			cmd.Dir = root
+			cmd.Env = append(os.Environ(), "PATH="+root+":"+os.Getenv("PATH"), "GH_REPO=test/repo", "TAG=v1.2.3", "BUILD_RUN=123", "SCENARIO="+scenario, fmt.Sprintf("CHECKSUM=%x", checksum))
+			output, err := cmd.CombinedOutput()
+			if (err == nil) != (scenario == "original") {
+				t.Fatalf("promotion verification = %v: %s", err, output)
 			}
 		})
 	}

@@ -15,19 +15,16 @@ CMD_DIR := ./cmd/enclave
 COMPLETIONS_DIR ?= ./completions
 # Both versions derive from the latest release tag; see scripts/version.sh.
 # VERSION is what `enclave version` and the image label report,
-# PACKAGE_VERSION the deb/rpm version. Both are computed once per make run.
+# PACKAGE_VERSION the deb/rpm version. Both are computed once per make run, but
+# only the targets that stamp them require them, so test and lint still run
+# when a stray tag leaves scripts/version.sh without a version.
 ifndef VERSION
 VERSION := $(shell ./scripts/version.sh)
 endif
 ifndef PACKAGE_VERSION
 PACKAGE_VERSION := $(shell ./scripts/version.sh --package)
 endif
-ifeq ($(strip $(VERSION)),)
-$(error scripts/version.sh produced no version; see its output above)
-endif
-ifeq ($(strip $(PACKAGE_VERSION)),)
-$(error scripts/version.sh --package produced no version; see its output above)
-endif
+require_version = $(if $(strip $($1)),,$(error $1 is empty: scripts/version.sh found no version; see its output above))
 GIT_COMMIT = $(shell git rev-parse --short HEAD 2>/dev/null)
 GIT_COMMIT_DATE = $(shell git show -s --format=%cs HEAD 2>/dev/null)
 GIT_COMMIT_RFC2822 = $(shell git show -s --format=%cD HEAD 2>/dev/null || date -R)
@@ -53,6 +50,7 @@ ZSH_COMPLETION_DIR := $(DATA_HOME)/zsh/site-functions
 BASH_COMPLETION_DIR := $(DATA_HOME)/bash-completion/completions
 
 build: check-go
+	$(call require_version,BUILD_VERSION)
 	mkdir -p $(BIN_DIR)
 	go build -ldflags "$(BUILD_LDFLAGS)" -o $(BIN_DIR)/$(BINARY) $(CMD_DIR)
 
@@ -140,6 +138,7 @@ deb deb-quick: export DEB_CHANGELOG = $(DEB_CHANGELOG_ENTRY)
 # Build Debian package using dpkg-buildpackage
 # Output goes to dist/ directory
 deb:
+	$(call require_version,BUILD_VERSION)$(call require_version,PACKAGE_VERSION)
 	mkdir -p dist
 	@tmpdir=$$(mktemp -d) && \
 	cp -r . "$$tmpdir/enclave" && \
@@ -154,6 +153,7 @@ deb:
 
 # Build Debian package without build dependencies check (faster for development)
 deb-quick:
+	$(call require_version,BUILD_VERSION)$(call require_version,PACKAGE_VERSION)
 	mkdir -p dist
 	@tmpdir=$$(mktemp -d) && \
 	cp -r . "$$tmpdir/enclave" && \
@@ -169,6 +169,7 @@ deb-quick:
 # Build an RPM package. --nodeps lets this run on Debian/Ubuntu hosts, where
 # apt-installed build tools are not represented in the RPM package database.
 rpm: check-go
+	$(call require_version,BUILD_VERSION)$(call require_version,PACKAGE_VERSION)
 	@command -v rpmbuild >/dev/null 2>&1 || { echo "rpmbuild is not installed (on Debian/Ubuntu: sudo apt install rpm)"; exit 1; }
 	mkdir -p dist
 	@tmpdir=$$(mktemp -d) && \

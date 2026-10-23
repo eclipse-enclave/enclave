@@ -508,31 +508,49 @@ git tag -a v1.0.0 -m "Enclave 1.0.0"
 git push origin v1.0.0
 ```
 
-`release.yml` builds the same assets as the rolling workflow, verifies that the
-binary and packages report the tag's version (the triggering tag wins when a
-commit carries several release tags), creates the GitHub release for the tag,
-and publishes the files on download.eclipse.org. A pre-release tag produces
-a GitHub pre-release and a versioned directory, but does not move
-`releases/latest`. Releases run one at a time with later
-tags queued behind, and `releases/latest` only moves to a version that sorts
-higher, so retrying an old release cannot pull the stable channel back.
+A tagged release takes two steps. Both workflows share a concurrency group, so
+they never write the same release at once:
+
+1. **Prepare Release** (`.github/workflows/release.yml`) runs on the tag push.
+   It builds the assets once, verifies that the binary and packages report the
+   tag's version (the triggering tag wins when a commit carries several release
+   tags), and attaches the assets to a draft GitHub release. The draft notes
+   end with a provenance marker, an HTML comment recording the source commit,
+   the build's run ID, and the SHA-256 of `checksums.txt`. Edit the notes as
+   needed, but leave the marker as it is.
+2. Review the draft, then dispatch **Promote Release**
+   (`.github/workflows/promote-release.yml`) from `main` with the tag, such as
+   `v1.2.3`. The job runs in the `release` environment, whose required
+   reviewers and main-only deployment branch policy, configured in Otterdog,
+   make the dispatch a sign-off. It checks the marker against the tag and the
+   build run, verifies the draft's assets against the recorded
+   `checksums.txt`, publishes `releases/<version>/` on download.eclipse.org,
+   moves `releases/latest` for a final release that sorts higher, and
+   publishes the GitHub release last; its Latest marker also only moves to a
+   higher version. A pre-release becomes a GitHub pre-release and a versioned
+   directory, but never moves `releases/latest`.
+
+Nothing is rebuilt after the tag build, because rebuilding the same commit may
+produce different bytes. The `release-assets` workflow artifact is retained
+for 30 days for tagged releases, as long as GitHub allows re-running the job
+that fills the draft, and one day for rolling builds. A build that cannot be
+retried is replaced by a new version.
+
 Published release files are immutable on both hosts: retries leave identical
 files untouched, add missing files after a partial failure, and fail before
-adding anything if an existing file differs (including `checksums.txt`).
-Rebuilding the same commit may produce different bytes; retry only the failed
-publish job with its original artifacts, or publish a new version instead.
-The assembled `release-assets` workflow artifact is retained for 30 days for
-tagged releases (including pre-releases), as long as GitHub allows re-running
-a job, and one day for rolling builds.
+adding anything if an existing file differs (including `checksums.txt`). A
+failed promotion may already have published `releases/<version>/` and moved
+`releases/latest` while the GitHub release is still a draft; running Promote
+Release again finishes it. Retrying an older release cannot pull the stable
+channel back.
 GitHub retries verify all completed assets before deleting empty `starter`
 entries left by failed uploads and filling gaps; other unfinished states fail
 without deleting anything. After uploading, both channels require every
 expected GitHub asset to be `uploaded` and to match the workflow's SHA-256
 digest, downloading and hashing the asset when GitHub provides no digest.
 Rolling releases still replace their assets on every publication.
-Tags are mutable refs, so both the GitHub release notes
-and `releases/<version>/commit` record the source commit: a re-run from that
-commit must pass the file checks, and a tag moved to another commit is refused. A
+Tags are mutable refs, so the provenance marker and `releases/<version>/commit`
+record the source commit, and a tag moved to another commit is refused. A
 ruleset protecting `refs/tags/v*` from deletion and force pushes is the
 server-side complement.
 

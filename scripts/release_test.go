@@ -8,6 +8,9 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -27,11 +30,19 @@ func TestReleaseImmutability(t *testing.T) {
 	}
 	const commit = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	for _, publisher := range []string{"github", "downloads", "rolling"} {
-		for _, scenario := range []string{"first", "identical", "partial", "changed-binary", "changed-checksums", "moved-tag", "no-digest", "changed-no-digest", "extra-file", "starter", "starter-conflict", "open", "corrupt-upload", "missing-upload", "unfinished-upload", "corrupt-manifest"} {
+		for _, scenario := range []string{"first", "identical", "partial", "changed-binary", "changed-checksums", "moved-tag", "no-digest", "changed-no-digest", "extra-file", "starter", "starter-conflict", "open", "corrupt-upload", "missing-upload", "unfinished-upload", "corrupt-manifest", "newer-latest", "prerelease"} {
+			if (scenario == "newer-latest" || scenario == "prerelease") && publisher != "downloads" {
+				continue
+			}
+			// On GitHub, the draft's provenance marker pins the commit; see
+			// TestReleasePreparationAndProvenance.
+			if scenario == "moved-tag" && publisher == "github" {
+				continue
+			}
 			if publisher == "rolling" && scenario != "first" && scenario != "corrupt-upload" && scenario != "missing-upload" && scenario != "corrupt-manifest" {
 				continue
 			}
-			if publisher == "downloads" && (strings.HasPrefix(scenario, "starter") || scenario == "open" || scenario == "unfinished-upload") {
+			if publisher != "github" && (strings.HasPrefix(scenario, "starter") || scenario == "open" || scenario == "unfinished-upload") {
 				continue
 			}
 			t.Run(publisher+"/"+scenario, func(t *testing.T) {
@@ -40,6 +51,9 @@ func TestReleaseImmutability(t *testing.T) {
 				target, latest, latestPath, immutable := "releases/1.2.3", "1.2.3", "releases/latest", "true"
 				if publisher == "rolling" {
 					target, latest, latestPath, immutable = "rolling", commit, "rolling/latest", "false"
+				}
+				if scenario == "prerelease" {
+					target, latest = "releases/1.2.3-rc.1", ""
 				}
 				published := filepath.Join(root, "remote", target)
 				write := func(name, value string, mode os.FileMode) {
@@ -51,7 +65,12 @@ func TestReleaseImmutability(t *testing.T) {
 						t.Fatal(err)
 					}
 				}
-				fresh := scenario == "first" || strings.HasSuffix(scenario, "-upload") || scenario == "corrupt-manifest"
+				fresh := scenario == "first" || strings.HasSuffix(scenario, "-upload") || scenario == "corrupt-manifest" || scenario == "newer-latest" || scenario == "prerelease"
+				wantLatest := latest
+				if scenario == "newer-latest" || scenario == "prerelease" {
+					wantLatest = "2.0.0"
+					write(filepath.Join(root, "remote", latestPath), wantLatest+"\n", 0o644)
+				}
 				files := map[string]string{"binary": "original binary\n", "checksums.txt": "original checksums\n", "a-package": "package\n"}
 				for name, value := range files {
 					write(filepath.Join(root, "artifacts", name), value, 0o644)
@@ -59,7 +78,7 @@ func TestReleaseImmutability(t *testing.T) {
 						write(filepath.Join(published, name), value, 0o644)
 					}
 				}
-				if !fresh {
+				if !fresh || publisher == "github" {
 					write(filepath.Join(published, "commit"), commit+"\n", 0o644)
 				}
 				wantFailure := false
@@ -127,9 +146,7 @@ func TestReleaseImmutability(t *testing.T) {
 				}
 				var script string
 				if publisher == "github" {
-					script = releaseShell(t, "../.github/workflows/release.yml", "Create GitHub release")
-					script = strings.ReplaceAll(script, "${{ github.server_url }}", "https://github.invalid")
-					script = strings.ReplaceAll(script, "${{ github.repository }}", "test/repo")
+					script = `./scripts/upload-github-release.sh v1.2.3 artifacts`
 				} else {
 					script = releaseShell(t, "../.github/actions/publish-downloads/action.yml", "Upload ${{ inputs.target }}")
 				}
@@ -198,16 +215,275 @@ func TestReleaseImmutability(t *testing.T) {
 						t.Error("left the staging directory behind")
 					}
 					data, err := os.ReadFile(filepath.Join(root, "remote", latestPath))
-					if wantFailure {
+					if wantFailure || wantLatest == "" {
 						if !os.IsNotExist(err) {
 							t.Error("latest moved after failed publication")
 						}
-					} else if err != nil || string(data) != latest+"\n" {
+					} else if err != nil || string(data) != wantLatest+"\n" {
 						t.Errorf("latest = %q, %v", data, err)
 					}
 				}
 			})
 		}
+	}
+}
+
+func TestReleaseArtifactManifest(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("release publication runs on Linux")
+	}
+	for _, scenario := range []string{"original", "changed", "missing", "extra", "replaced-manifest"} {
+		t.Run(scenario, func(t *testing.T) {
+			dir := t.TempDir()
+			write := func(name, value string) {
+				t.Helper()
+				if err := os.WriteFile(filepath.Join(dir, name), []byte(value), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			write("binary", "original binary")
+			write("package", "original package")
+			manifest := fmt.Sprintf("%x  binary\n%x  package\n", sha256.Sum256([]byte("original binary")), sha256.Sum256([]byte("original package")))
+			write("checksums.txt", manifest)
+			switch scenario {
+			case "changed", "replaced-manifest":
+				write("binary", "changed binary")
+				if scenario == "replaced-manifest" {
+					write("checksums.txt", fmt.Sprintf("%x  binary\n%x  package\n", sha256.Sum256([]byte("changed binary")), sha256.Sum256([]byte("original package"))))
+				}
+			case "missing":
+				if err := os.Remove(filepath.Join(dir, "package")); err != nil {
+					t.Fatal(err)
+				}
+			case "extra":
+				write("extra", "not in the original build")
+			}
+			output, err := exec.Command("bash", "verify-release-artifacts.sh", dir, fmt.Sprintf("%x", sha256.Sum256([]byte(manifest)))).CombinedOutput()
+			if (err == nil) != (scenario == "original") {
+				t.Fatalf("manifest verification = %v:\n%s", err, output)
+			}
+		})
+	}
+}
+
+func TestReleasePreparationAndProvenance(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("release publication runs on Linux")
+	}
+	root := t.TempDir()
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(cwd, filepath.Join(root, "scripts")); err != nil {
+		t.Fatal(err)
+	}
+	write := func(name, value string, mode os.FileMode) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(root, name), []byte(value), mode); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// release.json is the release and assets/ its uploaded files. Publication
+	// is not supported: preparation must only ever produce a draft.
+	write("gh", `#!/bin/bash
+set -euo pipefail
+if [ "$1 $2" = 'release view' ]; then
+  case "$5" in
+    isDraft) jq -r .isDraft release.json ;;
+    databaseId) echo 17 ;;
+    *) cat release.json ;;
+  esac
+elif [ "$1 $2" = 'release create' ]; then
+  [[ " $* " = *' --draft '* ]]
+  shift 3
+  while [ "$1" != --notes ]; do shift; done
+  jq -n --arg body "$2" '{body: $body, isDraft: true}' > release.json
+elif [ "$1 $2" = 'release upload' ]; then
+  [ "$(jq -r .isDraft release.json)" = true ]
+  mkdir -p assets
+  cp "$4" assets/
+elif [ "$1 $2" = 'api repos/test/repo/releases/17' ]; then
+  for file in assets/*; do
+    [ -e "$file" ] || continue
+    printf '%s\tsha256:%s\t%s\tuploaded\n' "${file##*/}" "$(sha256sum "$file" | cut -d' ' -f1)" "${file##*/}"
+  done
+elif [ "$1" = api ]; then
+  cat run.json
+else
+  echo "unexpected gh arguments: $*" >&2; exit 1
+fi
+`, 0o755)
+	run := func(script string, extra ...string) (string, error) {
+		t.Helper()
+		cmd := exec.Command("bash", "-euo", "pipefail", "-c", script)
+		cmd.Dir = root
+		cmd.Env = append(os.Environ(), "PATH="+root+":"+os.Getenv("PATH"), "GH_REPO=test/repo", "GITHUB_SHA="+strings.Repeat("a", 40), "GITHUB_RUN_ID=123", "GITHUB_REF_NAME=v1.2.3", "VERSION=1.2.3", "PRERELEASE=false", "GITHUB_STEP_SUMMARY="+filepath.Join(root, "summary"))
+		cmd.Env = append(cmd.Env, extra...)
+		output, err := cmd.CombinedOutput()
+		return string(output), err
+	}
+	// A real annotated tag exercises peeling, not just matching a mock SHA.
+	output, err := run(`git init -q; git -c user.name=Test -c user.email=test@example.invalid commit -q --allow-empty -m initial; git -c user.name=Test -c user.email=test@example.invalid tag -a v1.2.3 -m release; mkdir artifacts; printf binary > artifacts/binary; cd artifacts; sha256sum binary > checksums.txt`)
+	if err != nil {
+		t.Fatalf("fixture: %v: %s", err, output)
+	}
+	commit, err := run("git rev-parse HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	commit = strings.TrimSpace(commit)
+	prepare := releaseShell(t, "../.github/workflows/release.yml", "Create draft release")
+	prepare = strings.ReplaceAll(prepare, "${{ github.server_url }}", "https://github.invalid")
+	prepare = strings.ReplaceAll(prepare, "${{ github.repository }}", "test/repo")
+	assertAssets := func(context string) {
+		t.Helper()
+		for _, name := range []string{"binary", "checksums.txt"} {
+			want, err := os.ReadFile(filepath.Join(root, "artifacts", name))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got, err := os.ReadFile(filepath.Join(root, "assets", name)); err != nil || string(got) != string(want) {
+				t.Fatalf("%s: draft asset %s = %q, %v", context, name, got, err)
+			}
+		}
+	}
+	if output, err := run(prepare, "GITHUB_SHA="+commit); err != nil {
+		t.Fatalf("prepare: %v: %s", err, output)
+	}
+	assertAssets("prepare")
+	data, err := os.ReadFile(filepath.Join(root, "release.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var release map[string]any
+	if err := json.Unmarshal(data, &release); err != nil {
+		t.Fatal(err)
+	}
+	unedited := release["body"].(string)
+	// Notes edited on the web come back with CRLF line endings, which reach the
+	// marker line once anything follows it.
+	release["body"] = strings.ReplaceAll("Human-edited notes\n"+unedited+"\nMore notes\n", "\n", "\r\n")
+	data, err = json.Marshal(release)
+	if err != nil {
+		t.Fatal(err)
+	}
+	write("release.json", string(data), 0o644)
+	if err := os.Remove(filepath.Join(root, "assets", "binary")); err != nil {
+		t.Fatal(err)
+	}
+	if output, err := run(prepare, "GITHUB_SHA="+commit); err != nil {
+		t.Fatalf("prepare retry: %v: %s", err, output)
+	}
+	assertAssets("prepare retry")
+	after, err := os.ReadFile(filepath.Join(root, "release.json"))
+	if err != nil || string(after) != string(data) {
+		t.Fatal("preparation retry changed the edited draft notes")
+	}
+	if output, err := run(prepare, "GITHUB_SHA="+commit, "GITHUB_RUN_ID=124"); err == nil {
+		t.Fatalf("preparation accepted a different build run: %s", output)
+	}
+	published, err := json.Marshal(map[string]any{"body": release["body"], "isDraft": false})
+	if err != nil {
+		t.Fatal(err)
+	}
+	write("release.json", string(published), 0o644)
+	if output, err := run(prepare, "GITHUB_SHA="+commit); err == nil || !strings.Contains(output, "already published") {
+		t.Fatalf("preparation changed a published release: %v: %s", err, output)
+	}
+	for _, scenario := range []string{"original", "unedited", "published-retry", "missing-marker", "duplicate-marker", "wrong-workflow", "wrong-event", "wrong-commit", "failed-build", "moved-tag"} {
+		t.Run(scenario, func(t *testing.T) {
+			body := release["body"].(string)
+			if scenario == "unedited" {
+				body = unedited
+			}
+			if scenario == "missing-marker" {
+				body = "human notes only"
+			}
+			if scenario == "duplicate-marker" {
+				body += "\n" + release["body"].(string)
+			}
+			metadata, err := json.Marshal(map[string]any{"body": body, "isDraft": scenario != "published-retry"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			write("release.json", string(metadata), 0o644)
+			build := map[string]string{"path": ".github/workflows/release.yml", "event": "push", "head_sha": commit, "conclusion": "success"}
+			switch scenario {
+			case "wrong-workflow":
+				build["path"] = ".github/workflows/rolling.yml"
+			case "wrong-event":
+				build["event"] = "workflow_dispatch"
+			case "wrong-commit":
+				build["head_sha"] = strings.Repeat("b", 40)
+			case "failed-build":
+				build["conclusion"] = "failure"
+			case "moved-tag":
+				if output, err := run(`git -c user.name=Test -c user.email=test@example.invalid commit -q --allow-empty -m moved; git tag -f v1.2.3`); err != nil {
+					t.Fatalf("move tag: %v: %s", err, output)
+				}
+			}
+			metadata, err = json.Marshal(build)
+			if err != nil {
+				t.Fatal(err)
+			}
+			write("run.json", string(metadata), 0o644)
+			output, err := run(`./scripts/release-info.sh v1.2.3`)
+			valid := scenario == "original" || scenario == "unedited" || scenario == "published-retry"
+			if (err == nil) != valid {
+				t.Fatalf("provenance check = %v, valid %v: %s", err, valid, output)
+			}
+			if valid && (!strings.Contains(output, "commit="+commit+"\n") || !strings.Contains(output, "run-id=123\n") || !strings.Contains(output, "prerelease=false\n")) {
+				t.Fatalf("unexpected release provenance: %s", output)
+			}
+		})
+	}
+}
+
+func TestPromotionMovesGitHubLatestOnlyForward(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("release publication runs on Linux")
+	}
+	publish := releaseShell(t, "../.github/workflows/promote-release.yml", "Publish GitHub release")
+	for _, tc := range []struct {
+		version, prerelease, current, want string
+	}{
+		{"1.2.3", "false", "", "--latest=true"},
+		{"1.2.3", "false", "v1.2.2", "--latest=true"},
+		{"1.10.0", "false", "v1.9.0", "--latest=true"},
+		{"1.2.3", "false", "v1.10.0", "--latest=false"},
+		{"1.3.0-rc.1", "true", "v1.2.3", "--latest=false"},
+	} {
+		t.Run(tc.version+"/"+tc.current, func(t *testing.T) {
+			root := t.TempDir()
+			gh := `#!/bin/bash
+set -euo pipefail
+if [ "$1 $2 $3" = 'release view --json' ]; then
+  [ -n "$CURRENT" ] || exit 1
+  echo "$CURRENT"
+elif [ "$1 $2" = 'release edit' ]; then
+  echo "$*" > edit
+else
+  echo "unexpected gh arguments: $*" >&2; exit 1
+fi
+`
+			if err := os.WriteFile(filepath.Join(root, "gh"), []byte(gh), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			cmd := exec.Command("bash", "-euo", "pipefail", "-c", publish)
+			cmd.Dir = root
+			cmd.Env = append(os.Environ(), "PATH="+root+":"+os.Getenv("PATH"), "TAG=v"+tc.version, "VERSION="+tc.version, "PRERELEASE="+tc.prerelease, "CURRENT="+tc.current)
+			if output, err := cmd.CombinedOutput(); err != nil {
+				t.Fatalf("publish: %v: %s", err, output)
+			}
+			edit, err := os.ReadFile(filepath.Join(root, "edit"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if want := "release edit v" + tc.version + " --draft=false " + tc.want + "\n"; string(edit) != want {
+				t.Fatalf("gh %q, want %q", edit, want)
+			}
+		})
 	}
 }
 
@@ -242,13 +518,17 @@ const fakeReleaseGH = `#!/bin/bash
 set -euo pipefail
 if [ "$1 $2" = 'release view' ]; then
   [ -f "$PUBLISHED/commit" ] || exit 1
-  printf 'https://github.invalid/test/repo/commit/%s\n' "$(cat "$PUBLISHED/commit")"
+  case "$5" in
+    isDraft) echo true ;;
+    databaseId) echo 17 ;;
+    *) echo "unexpected release fields: $5" >&2; exit 1 ;;
+  esac
 elif [ "$1" = api ]; then
   if [ "$2" = --method ]; then
     [ "$3" = DELETE ]
     [ "$(cat "$STATE_DIR/initial-state")" = starter ]
     rm "$PUBLISHED/${4##*/}" "$STATE_DIR/initial-state"
-  elif [[ $2 = */releases/tags/* ]]; then
+  elif [[ $2 = */releases/17 ]]; then
     for file in "$PUBLISHED"/*; do
       [ "${file##*/}" != commit ] || continue
       digest="sha256:$(sha256sum "$file" | cut -d' ' -f1)"
@@ -267,19 +547,13 @@ elif [ "$1 $2" = 'release upload' ]; then
   for file in "$@"; do
     if [ "$clobber" = false ] && [ -e "$PUBLISHED/${file##*/}" ]; then exit 1; fi
     cp "$file" "$PUBLISHED/"
+    case "$NO_DIGEST:${file##*/}" in
+      corrupt-upload:binary) printf broken > "$PUBLISHED/binary" ;;
+      corrupt-manifest:checksums.txt) printf broken > "$PUBLISHED/checksums.txt" ;;
+      missing-upload:binary) rm "$PUBLISHED/binary" ;;
+      unfinished-upload:binary) mkdir -p "$STATE_DIR"; printf starter > "$STATE_DIR/initial-state" ;;
+    esac
   done
-elif [ "$1 $2" = 'release create' ]; then
-  mkdir -p "$PUBLISHED"
-  printf '%s\n' "$GITHUB_SHA" > "$PUBLISHED/commit"
-  for arg in "$@"; do
-    case "$arg" in artifacts/*) cp "$arg" "$PUBLISHED/" ;; esac
-  done
-  case "$NO_DIGEST" in
-    corrupt-upload) printf broken > "$PUBLISHED/binary" ;;
-    corrupt-manifest) printf broken > "$PUBLISHED/checksums.txt" ;;
-    missing-upload) rm "$PUBLISHED/binary" ;;
-    unfinished-upload) mkdir -p "$STATE_DIR"; printf starter > "$STATE_DIR/initial-state" ;;
-  esac
 else
   echo "unexpected gh arguments: $*" >&2
   exit 1

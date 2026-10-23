@@ -16,7 +16,10 @@ case "$mode" in
   *) echo "unknown verification mode: $mode" >&2; exit 2 ;;
 esac
 
-assets=$(gh api "repos/$GH_REPO/releases/tags/$tag" \
+# The by-tag REST endpoint only finds published releases. Let gh resolve the
+# draft too, then use its numeric ID for the complete REST asset metadata.
+release_id=$(gh release view "$tag" --json databaseId --jq .databaseId)
+assets=$(gh api "repos/$GH_REPO/releases/$release_id" \
   --jq '.assets[] | [.name, (.digest // "unknown"), (.id | tostring), .state] | @tsv')
 scratch=$(mktemp -d)
 trap 'rm -rf "$scratch"' EXIT

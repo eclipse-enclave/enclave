@@ -1,0 +1,91 @@
+name: Promote Release
+
+# Publishes a draft prepared by the tag build: its assets go to
+# releases/<version>/ on download.eclipse.org, a final release moves
+# releases/latest, and the GitHub release is published last. Nothing is rebuilt.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Reviewed draft release to publish, e.g. v1.2.3"
+        required: true
+        type: string
+
+concurrency:
+  group: release
+  queue: max
+
+permissions:
+  contents: read
+
+jobs:
+  promote:
+    if: ${{ github.repository == 'eclipse-enclave/enclave' }}
+    runs-on: ubuntu-latest
+    # Required reviewers and a main-only deployment branch policy on this
+    # environment, configured in Otterdog, make the dispatch a sign-off.
+    environment: release
+    permissions:
+      contents: write
+      actions: read
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+      TAG: ${{ inputs.tag }}
+    steps:
+      - name: Require main
+        run: |
+          if [ "$GITHUB_REF" != refs/heads/main ]; then
+            echo "::error::dispatch Promote Release from main, not $GITHUB_REF_NAME" >&2
+            exit 1
+          fi
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Resolve original build
+        id: release
+        run: ./scripts/release-info.sh "$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Verify draft assets
+        env:
+          CHECKSUM: ${{ steps.release.outputs.checksums-sha256 }}
+        run: |
+          gh release download "$TAG" --dir artifacts
+          ./scripts/verify-release-artifacts.sh artifacts "$CHECKSUM"
+          ./scripts/verify-github-release.sh "$TAG" artifacts
+
+      # The updater reads releases/latest (a version) and that version's
+      # directory. Pre-releases are published but never become latest.
+      - name: Publish to download.eclipse.org
+        uses: ./.github/actions/publish-downloads
+        with:
+          source: artifacts
+          target: releases/${{ steps.release.outputs.version }}
+          commit: ${{ steps.release.outputs.commit }}
+          immutable: "true"
+          latest: ${{ steps.release.outputs.prerelease != 'true' && steps.release.outputs.version || '' }}
+          latest-path: releases/latest
+          username: ${{ secrets.SCP_USERNAME }}
+          ssh-key: ${{ secrets.SCP_KEY }}
+          ssh-passphrase: ${{ secrets.SCP_PASSPHRASE }}
+
+      # Last, so the GitHub release only appears once its download area is
+      # complete. A retry after a failure here finishes this step.
+      - name: Publish GitHub release
+        if: ${{ steps.release.outputs.draft == 'true' }}
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+          PRERELEASE: ${{ steps.release.outputs.prerelease }}
+        run: |
+          # Like releases/latest, GitHub's Latest marker only moves forward.
+          latest=false
+          if [ "$PRERELEASE" != true ]; then
+            current=$(gh release view --json tagName --jq .tagName 2>/dev/null || true)
+            if [ "$(printf '%s\n%s\n' "${current#v}" "$VERSION" | sort -V | tail -n 1)" = "$VERSION" ]; then
+              latest=true
+            fi
+          fi
+          gh release edit "$TAG" --draft=false --latest="$latest"

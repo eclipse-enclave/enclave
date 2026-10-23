@@ -76,6 +76,7 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
+          cache: ${{ !startsWith(github.ref, 'refs/tags/') }}
 
       - name: Build standalone binary
         run: CGO_ENABLED=0 GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} make build BIN_DIR=. BINARY=${{ matrix.output }} BUILD_CHANNEL=${{ inputs.channel }}

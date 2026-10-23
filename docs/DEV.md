@@ -529,14 +529,18 @@ they never write the same release at once:
    moves `releases/latest` for a final release that sorts higher, and
    publishes the GitHub release last; its Latest marker also only moves to a
    higher version. A pre-release becomes a GitHub pre-release and a versioned
-   directory, but never moves `releases/latest`.
+   directory, but never moves `releases/latest`. GitHub asset hashes are checked
+   again immediately before publication to catch changes to expected assets
+   during upload. Assets can still change after the check or publication.
 
 Nothing is rebuilt after the tag build, because rebuilding the same commit may
-produce different bytes. The `release-assets` workflow artifact is retained
-for 30 days for tagged releases and one day for rolling builds. Promotion and
-its retries require the original artifact: if it has expired or been deleted,
-publication fails rather than trusting the editable draft alone. Promote within
-that window; a build that cannot be retried is replaced by a new version.
+produce different bytes. Tag builds disable `setup-go` cache restoration and
+saving; rolling and ordinary CI builds retain caching. The `release-assets`
+workflow artifact is retained for 30 days for tagged releases and one day for
+rolling builds. Promotion and its retries require the original artifact.
+If it has expired or been deleted, publication fails rather than trusting the
+editable draft alone. Promote within that window; a build that cannot be
+retried is replaced by a new version.
 
 **Deployment prerequisites:** provision and verify these in Otterdog and on the
 download server before enabling stable publication. The workflow YAML alone

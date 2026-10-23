@@ -94,4 +94,6 @@ jobs:
               latest=true
             fi
           fi
+          # Catch draft changes made while the download-server upload ran.
+          ./scripts/verify-github-release.sh "$TAG" original-artifacts
           gh release edit "$TAG" --draft=false --latest="$latest"

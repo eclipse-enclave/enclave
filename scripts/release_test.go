@@ -510,15 +510,21 @@ func TestPromotionMovesGitHubLatestOnlyForward(t *testing.T) {
 	if runtime.GOOS != "linux" {
 		t.Skip("release publication runs on Linux")
 	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
 	publish := releaseShell(t, "../.github/workflows/promote-release.yml", "Publish GitHub release")
 	for _, tc := range []struct {
 		version, prerelease, current, want string
+		changed                            bool
 	}{
-		{"1.2.3", "false", "", "--latest=true"},
-		{"1.2.3", "false", "v1.2.2", "--latest=true"},
-		{"1.10.0", "false", "v1.9.0", "--latest=true"},
-		{"1.2.3", "false", "v1.10.0", "--latest=false"},
-		{"1.3.0-rc.1", "true", "v1.2.3", "--latest=false"},
+		{"1.2.3", "false", "", "--latest=true", false},
+		{"1.2.3", "false", "v1.2.2", "--latest=true", false},
+		{"1.10.0", "false", "v1.9.0", "--latest=true", false},
+		{"1.2.3", "false", "v1.10.0", "--latest=false", false},
+		{"1.3.0-rc.1", "true", "v1.2.3", "--latest=false", false},
+		{"1.2.3", "false", "v1.2.2", "", true},
 	} {
 		t.Run(tc.version+"/"+tc.current, func(t *testing.T) {
 			root := t.TempDir()
@@ -527,6 +533,10 @@ set -euo pipefail
 if [ "$1 $2 $3" = 'release view --json' ]; then
   [ -n "$CURRENT" ] || exit 1
   echo "$CURRENT"
+elif [ "$1 $2" = 'release view' ]; then
+  echo 17
+elif [ "$1 $2" = 'api repos/test/repo/releases/17' ]; then
+  printf 'binary\tsha256:%s\t1\tuploaded\n' "$ASSET_DIGEST"
 elif [ "$1 $2" = 'release edit' ]; then
   echo "$*" > edit
 else
@@ -536,10 +546,33 @@ fi
 			if err := os.WriteFile(filepath.Join(root, "gh"), []byte(gh), 0o755); err != nil {
 				t.Fatal(err)
 			}
+			if err := os.Symlink(cwd, filepath.Join(root, "scripts")); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Mkdir(filepath.Join(root, "original-artifacts"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(root, "original-artifacts", "binary"), []byte("original"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			asset := "original"
+			if tc.changed {
+				asset = "changed after initial verification"
+			}
 			cmd := exec.Command("bash", "-euo", "pipefail", "-c", publish)
 			cmd.Dir = root
-			cmd.Env = append(os.Environ(), "PATH="+root+":"+os.Getenv("PATH"), "TAG=v"+tc.version, "VERSION="+tc.version, "PRERELEASE="+tc.prerelease, "CURRENT="+tc.current)
-			if output, err := cmd.CombinedOutput(); err != nil {
+			cmd.Env = append(os.Environ(), "PATH="+root+":"+os.Getenv("PATH"), "GH_REPO=test/repo", "TAG=v"+tc.version, "VERSION="+tc.version, "PRERELEASE="+tc.prerelease, "CURRENT="+tc.current, fmt.Sprintf("ASSET_DIGEST=%x", sha256.Sum256([]byte(asset))))
+			output, err := cmd.CombinedOutput()
+			if tc.changed {
+				if err == nil || !strings.Contains(string(output), "differs") {
+					t.Fatalf("published changed assets: %v: %s", err, output)
+				}
+				if _, err := os.Stat(filepath.Join(root, "edit")); !os.IsNotExist(err) {
+					t.Fatal("published the GitHub draft despite changed assets")
+				}
+				return
+			}
+			if err != nil {
 				t.Fatalf("publish: %v: %s", err, output)
 			}
 			edit, err := os.ReadFile(filepath.Join(root, "edit"))

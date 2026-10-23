@@ -129,7 +129,9 @@ channel it was published on unless the global config sets `update_channel`;
 switching channels installs the other channel's latest build even if it is
 older. Within `stable`, only a higher version is offered: a pre-release or a
 release installed by hand before `latest` moved is never replaced by an older
-one. `enclave config` shows the effective channel.
+one. A pre-release therefore updates only once a higher final release becomes
+`latest`; later pre-releases are never offered. `enclave config` shows the
+effective channel.
 
 Only standalone release binaries update themselves: package installs, source
 builds, and binaries that run against a runtime asset tree beside them or in

@@ -747,3 +747,19 @@ func TestFailedRequestsExplainThemselves(t *testing.T) {
 		})
 	}
 }
+
+func TestShortBuild(t *testing.T) {
+	for commit, want := range map[string]string{
+		"":                    "unknown",
+		"272b035":             "272b035",
+		"272b035-dirty":       "272b035-dirty",
+		"272b035ab":           "272b035",
+		testCommit:            "1234567",
+		testCommit + "-dirty": "1234567-dirty",
+		"1.10.0-rc.1":         "1.10.0-rc.1",
+	} {
+		if got := ShortBuild(commit); got != want {
+			t.Errorf("ShortBuild(%q) = %q, want %q", commit, got, want)
+		}
+	}
+}

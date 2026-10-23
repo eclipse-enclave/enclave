@@ -319,7 +319,7 @@ func confirmLatest(ctx context.Context, src source, channel string, latest strin
 		return err
 	}
 	if now != latest {
-		return fmt.Errorf("%s release moved from %s to %s; run the update again", channel, shortBuild(latest), shortBuild(now))
+		return fmt.Errorf("%s release moved from %s to %s; run the update again", channel, ShortBuild(latest), ShortBuild(now))
 	}
 	return nil
 }
@@ -439,13 +439,20 @@ func compareNumbers(a string, b string) int {
 	return strings.Compare(a, b)
 }
 
-// shortBuild abbreviates a full commit to the seven characters `enclave
-// version` shows; versions are kept.
-func shortBuild(build string) string {
-	if (len(build) == 40 || len(build) == 64) && validHex(build) {
-		return build[:7]
+// ShortBuild abbreviates a commit identifying a build to the seven characters
+// `enclave version` shows; versions are kept.
+func ShortBuild(build string) string {
+	if build == "" {
+		return "unknown"
 	}
-	return build
+	base, dirty := strings.CutSuffix(build, "-dirty")
+	if len(base) > 7 && validHex(base) {
+		base = base[:7]
+	}
+	if dirty {
+		return base + "-dirty"
+	}
+	return base
 }
 
 func fileSHA256(path string) (string, error) {
@@ -462,8 +469,9 @@ func fileSHA256(path string) (string, error) {
 }
 
 func validHex(value string) bool {
-	_, err := hex.DecodeString(value)
-	return err == nil
+	return value != "" && !strings.ContainsFunc(value, func(r rune) bool {
+		return (r < '0' || r > '9') && (r < 'a' || r > 'f') && (r < 'A' || r > 'F')
+	})
 }
 
 func resolvedExecutablePath() (string, error) {

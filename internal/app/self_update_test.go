@@ -417,21 +417,6 @@ func TestRunSelfUpdate(t *testing.T) {
 	})
 }
 
-func TestShortBuild(t *testing.T) {
-	for commit, want := range map[string]string{
-		"":                          "unknown",
-		"272b035":                   "272b035",
-		"272b035-dirty":             "272b035-dirty",
-		fakeLatestCommit:            "1234567",
-		fakeLatestCommit + "-dirty": "1234567-dirty",
-		"1.10.0-rc.1":               "1.10.0-rc.1",
-	} {
-		if got := shortBuild(commit); got != want {
-			t.Errorf("shortBuild(%q) = %q, want %q", commit, got, want)
-		}
-	}
-}
-
 func TestAutomaticSelfUpdateDebugOutputStaysOffStdout(t *testing.T) {
 	logx.SetLevel("debug")
 	t.Cleanup(func() { logx.SetLevel("info") })

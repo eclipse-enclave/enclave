@@ -133,11 +133,12 @@ replaces the executable with the latest build of its release channel, here
 `rolling`. Enclave checks for a different build at most once every 24 hours and
 reports it on interactive commands. To install updates automatically, add
 `"auto_update": true` to the global `config.json`; `"update_channel"` selects
-`rolling` or, once official releases ship, `stable`. The download is checked
-against the release's `checksums.txt`, which catches corruption but not a
-compromised release, so automatic updates trust whoever can publish the
-release. Package and source installs do not self-update; upgrade them with the
-package manager or by rebuilding.
+`rolling` or `stable`, the official releases published under
+[download.eclipse.org/enclave/releases/](https://download.eclipse.org/enclave/releases/).
+The download is checked against the release's `checksums.txt`, which catches
+corruption but not a compromised release, so automatic updates trust whoever
+can publish the release. Package and source installs do not self-update;
+upgrade them with the package manager or by rebuilding.
 
 The updater never elevates privileges. A system-wide install, such as
 `sudo install enclave-linux-amd64 /usr/local/bin/enclave`, is updated by

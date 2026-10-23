@@ -1,0 +1,130 @@
+name: Release
+
+# A release tag vX.Y.Z, or vX.Y.Z-alpha.N, -beta.N, -rc.N for a pre-release,
+# builds every artifact with that version, creates the GitHub release for the
+# tag, and publishes the files to download.eclipse.org under
+# enclave/releases/<version>/. Final releases also move releases/latest, which
+# the stable update channel follows; pre-releases do not. Other tag forms are
+# refused: these are the ones the updater, dpkg, and rpm all order alike.
+
+on:
+  push:
+    tags:
+      - 'v[0-9]*'
+
+# Releases publish one after another so that releases/latest moves forward;
+# tags pushed in the meantime wait instead of replacing each other.
+concurrency:
+  group: release
+  queue: max
+
+permissions:
+  contents: read
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.tag.outputs.version }}
+      prerelease: ${{ steps.tag.outputs.prerelease }}
+    steps:
+      - id: tag
+        run: |
+          case "$GITHUB_REF_NAME" in
+            v[0-9]*.[0-9]*.[0-9]*) ;;
+            *) echo "tag $GITHUB_REF_NAME is not a release tag (vX.Y.Z or vX.Y.Z-<pre-release>)" >&2; exit 1 ;;
+          esac
+          version="${GITHUB_REF_NAME#v}"
+          if ! printf '%s\n' "$version" | grep -Eq '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-(alpha|beta|rc)\.(0|[1-9][0-9]*))?$'; then
+            echo "tag $GITHUB_REF_NAME is not a release tag (vX.Y.Z or vX.Y.Z-{alpha,beta,rc}.N, no leading zeros)" >&2
+            exit 1
+          fi
+          prerelease=false
+          case "$version" in *-*) prerelease=true ;; esac
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
+
+  assets:
+    needs: version
+    uses: ./.github/workflows/reusable-release-assets.yml
+    with:
+      channel: stable
+      version: ${{ needs.version.outputs.version }}
+      scoop_base_url: ${{ github.server_url }}/${{ github.repository }}/releases/download/${{ github.ref_name }}
+
+  publish:
+    needs: [version, assets]
+    # Forks carry this file but must not publish with their own secrets.
+    if: ${{ github.repository == 'eclipse-enclave/enclave' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+      VERSION: ${{ needs.version.outputs.version }}
+      PRERELEASE: ${{ needs.version.outputs.prerelease }}
+
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: release-assets
+          path: artifacts
+
+      - name: Create GitHub release
+        run: |
+          notes="$(./scripts/release-notes.sh stable "$VERSION" "${{ github.server_url }}/${{ github.repository }}/releases/download/$GITHUB_REF_NAME" "$GITHUB_SHA")"
+          if existing="$(gh release view "$GITHUB_REF_NAME" --json body --jq .body 2>/dev/null)"; then
+            # Check every existing asset before filling gaps from a partial
+            # publication. Even a rebuild of the same commit can differ.
+            published="$(printf '%s\n' "$existing" | grep -oE '/commit/[0-9a-f]{40}' | head -n 1 | cut -d/ -f3)"
+            if [ "$published" != "$GITHUB_SHA" ]; then
+              echo "::error::release $GITHUB_REF_NAME was published from commit ${published:-unknown}, not $GITHUB_SHA; a release tag must not move" >&2
+              exit 1
+            fi
+            ./scripts/verify-github-release.sh "$GITHUB_REF_NAME" artifacts --allow-missing
+            assets=$(gh api "repos/$GH_REPO/releases/tags/$GITHUB_REF_NAME" \
+              --jq '.assets[] | [.name, (.digest // "unknown"), (.id | tostring), .state] | @tsv')
+            while IFS=$'\t' read -r name _ id state; do
+              [ -n "$name" ] || continue
+              [ -f "artifacts/$name" ] || continue
+              if [ "$state" = starter ]; then
+                # Failed uploads may leave an empty starter entry. Completed
+                # assets were verified above and must never be deleted.
+                gh api --method DELETE "repos/$GH_REPO/releases/assets/$id"
+              fi
+            done <<< "$assets"
+            uploaded=$(printf '%s\n' "$assets" | awk -F '\t' '$4 == "uploaded" { print $1 }')
+            for asset in artifacts/*; do
+              name="${asset##*/}"
+              if ! printf '%s\n' "$uploaded" | grep -Fxq -- "$name"; then
+                gh release upload "$GITHUB_REF_NAME" "$asset"
+              fi
+            done
+          else
+            flags=()
+            if [ "$PRERELEASE" = true ]; then flags+=(--prerelease); fi
+            gh release create "$GITHUB_REF_NAME" \
+              --verify-tag \
+              --title "Enclave $VERSION" \
+              --notes "$notes" \
+              "${flags[@]}" \
+              artifacts/*
+          fi
+          ./scripts/verify-github-release.sh "$GITHUB_REF_NAME" artifacts
+
+      # The updater reads releases/latest (a version) and that version's
+      # directory. Pre-releases are published but never become latest.
+      - name: Publish to download.eclipse.org
+        uses: ./.github/actions/publish-downloads
+        with:
+          source: artifacts
+          target: releases/${{ env.VERSION }}
+          immutable: "true"
+          latest: ${{ env.PRERELEASE != 'true' && env.VERSION || '' }}
+          latest-path: releases/latest
+          username: ${{ secrets.SCP_USERNAME }}
+          ssh-key: ${{ secrets.SCP_KEY }}
+          ssh-passphrase: ${{ secrets.SCP_PASSPHRASE }}

@@ -35,7 +35,7 @@ make rpm
 ```
 
 The default Enclave image includes both packaging toolchains. On Ubuntu, install
-them with `sudo apt install debhelper devscripts rpm`. On Fedora, install the
+them with `sudo apt install debhelper rpm`. On Fedora, install the
 RPM build dependencies with `sudo dnf install git go make rpm-build`. Use
 `make deb-quick` when Go was installed outside APT and therefore does not
 satisfy dpkg's build dependency check; it builds the same binary package
@@ -394,8 +394,9 @@ Self-update notes (user-facing behavior: [CLI reference](cli-reference.md#comman
   in `internal/selfupdate`. To try a real update, build outside the checkout
   with `make build BUILD_CHANNEL=rolling BIN_DIR=/tmp/enclave-rolling`, then
   run `/tmp/enclave-rolling/enclave self-update` with `ENCLAVE_HOME` unset.
-- The stable source is a placeholder until the Eclipse download server
-  contract is known; stable release CI must stamp `BUILD_CHANNEL=stable`.
+- Both channel sources read a `latest` file on download.eclipse.org and the
+  `checksums.txt` beside the artifacts it names; see [Releases](#releases)
+  for the layout. Release CI stamps `BUILD_CHANNEL=stable` or `rolling`.
 
 Config additive note: feature additive directives (`+`/`-`) are applied against
 the implicit default-enabled feature set when `features` is unset. For example,
@@ -442,6 +443,92 @@ invoked from `Dockerfile`.
 - Keep `Dockerfile` structural; move feature/tool composition logic into these scripts.
 - Script contracts are documented in `runtime-assets/build-scripts/README.md`.
 - Validate script changes with `make lint` (`shellcheck` runs on all `*.sh` files and `build-scripts/bin/` helpers).
+
+## Releases
+
+There is one version source: the latest release tag, read by
+`scripts/version.sh`. `make build` stamps `enclave version` and the image label
+with it (`1.0.0` on the tag `v1.0.0`, otherwise `git describe` output such as
+`1.0.0-3-gabc1234`), and `make deb`/`make rpm` use `scripts/version.sh --package`
+(`1.0.0`, or a snapshot such as `1.0.1~~git.20260421.57.abcdef12` that sorts
+above `1.0.0` and below `1.0.1` and all of its pre-releases). Nothing is bumped in a commit; the Debian
+changelog entry is written into the build copy. Until the first release tag
+exists, versions build on a `0.1.1` baseline, one patch above the `0.1.0` the
+packages carried before, so rolling packages keep upgrading. Tag names reach the shell through `make`,
+so the script only emits version characters and fails the build on anything
+else.
+
+To cut a release, push an annotated tag `vX.Y.Z`, or `vX.Y.Z-alpha.N`,
+`-beta.N`, `-rc.N` for a pre-release, on `main`. Only these forms are
+accepted: they are the ones the updater, dpkg, and rpm all order the same
+way, so a pre-release, the snapshots after it, and the final release upgrade
+into each other in that order. The first release tag must be `v0.1.2` or
+higher, pre-releases such as `v0.1.2-rc.1` included: the packages published
+before it are `0.1.2~~git…` snapshots, and apt and dnf do not upgrade them to
+a `0.1.1` or `0.1.0`. Final tags must be annotated as well: `git describe`
+prefers annotated tags, so a lightweight `v0.3.0` on the commit of an
+annotated `v0.3.0-rc.1` makes later snapshots `0.3.0~rc.1…`, which sort below
+`0.3.0`, and apt and dnf stop upgrading.
+
+```bash
+git tag -a v1.0.0 -m "Enclave 1.0.0"
+git push origin v1.0.0
+```
+
+`release.yml` builds the same assets as the rolling workflow, verifies that the
+binary and packages report the tag's version (the triggering tag wins when a
+commit carries several release tags), creates the GitHub release for the tag,
+and publishes the files on download.eclipse.org. A pre-release tag produces
+a GitHub pre-release and a versioned directory, but does not move
+`releases/latest`. Releases run one at a time with later
+tags queued behind, and `releases/latest` only moves to a version that sorts
+higher, so retrying an old release cannot pull the stable channel back.
+Published release files are immutable on both hosts: retries leave identical
+files untouched, add missing files after a partial failure, and fail before
+adding anything if an existing file differs (including `checksums.txt`).
+Rebuilding the same commit may produce different bytes; retry only the failed
+publish job with its original artifacts, or publish a new version instead.
+The assembled `release-assets` workflow artifact is retained for 30 days for
+tagged releases (including pre-releases), as long as GitHub allows re-running
+a job, and one day for rolling builds.
+GitHub retries verify all completed assets before deleting empty `starter`
+entries left by failed uploads and filling gaps; other unfinished states fail
+without deleting anything. After uploading, both channels require every
+expected GitHub asset to be `uploaded` and to match the workflow's SHA-256
+digest, downloading and hashing the asset when GitHub provides no digest.
+Rolling releases still replace their assets on every publication.
+Tags are mutable refs, so both the GitHub release notes
+and `releases/<version>/commit` record the source commit: a re-run from that
+commit must pass the file checks, and a tag moved to another commit is refused. A
+ruleset protecting `refs/tags/v*` from deletion and force pushes is the
+server-side complement.
+
+Layout on `https://download.eclipse.org/enclave/`, which the updater and the
+download links depend on:
+
+| Path | Contents |
+|------|----------|
+| `releases/<version>/` | All assets of one release plus `checksums.txt` and `commit`; versions are plain (`1.0.0`, `1.1.0-rc.1`) |
+| `releases/latest` | One line naming the highest final release, written after its directory is complete |
+| `rolling/` | The assets of the current `main` build, replaced as a whole on every push; only `main` publishes here |
+| `rolling/latest` | One line with the full commit SHA of that build, published together with its assets |
+
+Uploads go through `.github/actions/publish-downloads`, which follows the
+[CBI procedure](https://eclipse.dev/cbi/best-practices/github-actions/upload-to-downloads.eclipse.org/):
+the `SCP_USERNAME`, `SCP_KEY`, and `SCP_PASSPHRASE` secrets are provisioned by
+Otterdog, the server's host key is pinned in the action (update `known-hosts`
+when the Eclipse Foundation rotates it), and each directory is uploaded next
+to its target. Before publication, remote SHA-256 verification checks every
+staged file against the workflow's bytes, including `checksums.txt` itself;
+a mismatch or missing file fails before publishing the staged files or
+advancing `latest`, and a failed run removes its staging directory. New directories and rolling builds are published as a whole
+with `mv`; retries of existing releases validate the staged files, then add
+only missing files without replacing existing ones.
+After publishing, the action reads `checksums.txt` and the pointer back over
+`https://download.eclipse.org` and warns when they do not match within two
+minutes. This HTTP propagation check is separate from the mandatory remote
+integrity check. The GitHub release keeps a copy of the assets; the Scoop manifest
+points at it.
 
 ## Docs and Diagrams
 

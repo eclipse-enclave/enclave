@@ -9,108 +9,32 @@ on:
   workflow_dispatch:
     inputs:
       publish:
-        description: "Delete and recreate the rolling release"
+        description: "Delete and recreate the rolling release (main only)"
         type: boolean
         default: false
 
+# A newer push replaces the pending run, never a running one: a half-finished
+# upload to download.eclipse.org must not be cancelled.
 concurrency:
   group: rolling-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 permissions:
   contents: read
 
 jobs:
-  build:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - runner: ubuntu-24.04
-            goos: linux
-            goarch: amd64
-            output: enclave-linux-amd64
-            smoke: true
-          - runner: ubuntu-24.04-arm
-            goos: linux
-            goarch: arm64
-            output: enclave-linux-arm64
-            smoke: true
-          - runner: macos-15
-            goos: darwin
-            goarch: arm64
-            output: enclave-darwin-arm64
-            smoke: true
-          # Cross-compiled on the arm64 macOS runner and therefore not smoke-tested.
-          - runner: macos-15
-            goos: darwin
-            goarch: amd64
-            output: enclave-darwin-amd64
-            smoke: false
-          # The Windows binary is the WSL launcher, so it embeds no runtime
-          # assets and there is nothing for the extraction smoke test to check.
-          - runner: ubuntu-latest
-            goos: windows
-            goarch: amd64
-            output: enclave-windows-amd64.exe
-            smoke: false
-          - runner: ubuntu-latest
-            goos: windows
-            goarch: arm64
-            output: enclave-windows-arm64.exe
-            smoke: false
-
-    runs-on: ${{ matrix.runner }}
-
-    steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
-
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
-        with:
-          go-version-file: go.mod
-
-      - name: Build standalone binary
-        run: CGO_ENABLED=0 GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} make build BIN_DIR=. BINARY=${{ matrix.output }} VERSION=rolling BUILD_CHANNEL=rolling
-
-      - name: Smoke test embedded asset extraction
-        if: ${{ matrix.smoke }}
-        run: ./scripts/smoke-standalone-binary.sh "${{ matrix.output }}"
-
-      - name: Note skipped smoke test
-        if: ${{ !matrix.smoke }}
-        run: |
-          echo "::notice::Smoke test skipped for ${{ matrix.output }} (cross-compiled for ${{ matrix.goarch }} on ${{ matrix.runner }})"
-
-      - name: Note manual Windows verification gate
-        if: ${{ matrix.goos == 'windows' }}
-        run: |
-          echo "::notice::${{ matrix.output }} is the WSL launcher. GitHub-hosted windows runners have no WSL2, so the wsl.exe argument round trip is the manual gate in scripts/wsl-shim-verify.ps1."
-
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: ${{ matrix.output }}
-          path: ${{ matrix.output }}
-          retention-days: 1
-
-  build-deb:
-    uses: ./.github/workflows/reusable-deb-build.yml
+  assets:
+    uses: ./.github/workflows/reusable-release-assets.yml
     with:
-      runner: ubuntu-24.04
-      artifact_name: deb
-      artifact_retention_days: 1
-      set_package_version: true
+      channel: rolling
+      scoop_base_url: ${{ github.server_url }}/${{ github.repository }}/releases/download/rolling
 
-  build-rpm:
-    uses: ./.github/workflows/reusable-rpm-build.yml
-    with:
-      runner: ubuntu-24.04
-      artifact_name: rpm
-      artifact_retention_days: 1
-      set_package_version: true
-
-  release:
-    needs: [build, build-deb, build-rpm]
-    if: ${{ github.event_name == 'push' || inputs.publish }}
+  publish:
+    needs: assets
+    # Forks carry this file but must not publish with their own secrets, and
+    # only main publishes: the concurrency group is per ref, so a second ref
+    # would write the shared rolling directory concurrently.
+    if: ${{ github.repository == 'eclipse-enclave/enclave' && github.ref == 'refs/heads/main' && (github.event_name == 'push' || inputs.publish) }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -123,51 +47,24 @@ jobs:
 
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
+          name: release-assets
           path: artifacts
-          merge-multiple: true
 
-      - name: Normalize artifact names
-        run: |
-          cd artifacts
-          for f in *; do [ "$f" = "${f//\~/.}" ] || mv "$f" "${f//\~/.}"; done
-
-      # Windows expects an archive, and Scoop requires one. The launcher is
-      # named enclave.exe inside the archive so `bin` works for both
-      # architectures.
-      - name: Package Windows archives
-        run: |
-          cd artifacts
-          for exe in enclave-windows-*.exe; do
-            arch="${exe#enclave-windows-}"
-            arch="${arch%.exe}"
-            staging="$(mktemp -d)"
-            cp "$exe" "$staging/enclave.exe"
-            (cd "$staging" && zip -q -X "enclave-windows-$arch.zip" enclave.exe)
-            mv "$staging/enclave-windows-$arch.zip" .
-            rm -rf "$staging" "$exe"
-          done
-
-      - name: Generate Scoop manifest
-        run: |
-          base_url="${{ github.server_url }}/${{ github.repository }}/releases/download/rolling"
-          amd64_hash="$(sha256sum artifacts/enclave-windows-amd64.zip | cut -d' ' -f1)"
-          arm64_hash="$(sha256sum artifacts/enclave-windows-arm64.zip | cut -d' ' -f1)"
-          sed \
-            -e "s|@VERSION@|rolling-${GITHUB_SHA::8}|g" \
-            -e "s|@BASE_URL@|$base_url|g" \
-            -e "s|@AMD64_HASH@|$amd64_hash|g" \
-            -e "s|@ARM64_HASH@|$arm64_hash|g" \
-            packaging/scoop/enclave.template.json > artifacts/enclave.json
-          if grep -q '@' artifacts/enclave.json; then
-            echo "Unsubstituted placeholder left in the Scoop manifest:" >&2
-            grep '@' artifacts/enclave.json >&2
-            exit 1
-          fi
-
-      - name: Generate checksums
-        run: |
-          cd artifacts
-          sha256sum * > checksums.txt
+      # The updater reads rolling/latest (the commit) and the files beside it.
+      # This runs before the GitHub release is replaced: binaries built before
+      # the move to download.eclipse.org still update from that release, and
+      # must not reach a build that reads a download area this run failed to
+      # fill.
+      - name: Publish to download.eclipse.org
+        uses: ./.github/actions/publish-downloads
+        with:
+          source: artifacts
+          target: rolling
+          latest: ${{ github.sha }}
+          latest-path: rolling/latest
+          username: ${{ secrets.SCP_USERNAME }}
+          ssh-key: ${{ secrets.SCP_KEY }}
+          ssh-passphrase: ${{ secrets.SCP_PASSPHRASE }}
 
       - name: Create rolling release
         run: |
@@ -176,53 +73,6 @@ jobs:
             --target "$GITHUB_SHA" \
             --prerelease \
             --title "Rolling Release" \
-            --notes "$(cat <<EOF
-          **Rolling release from \`main\`**
-
-          Commit: [\`${GITHUB_SHA::7}\`](${{ github.server_url }}/${{ github.repository }}/commit/${GITHUB_SHA})
-          Date: $(date -u +%Y-%m-%d)
-
-          | File | Platform | Notes |
-          |------|----------|-------|
-          | \`enclave_*_amd64.deb\` | Ubuntu 24.04 (x86-64) | Includes all assets |
-          | \`enclave-*.x86_64.rpm\` | Fedora Linux (x86-64) | Includes all assets |
-          | \`enclave-linux-amd64\` | Linux (x86-64) | Self-contained binary with runtime assets |
-          | \`enclave-linux-arm64\` | Linux (arm64) | Self-contained binary with runtime assets |
-          | \`enclave-darwin-arm64\` | macOS (Apple Silicon) | Self-contained binary, unsigned |
-          | \`enclave-darwin-amd64\` | macOS (Intel) | Self-contained binary, unsigned |
-          | \`enclave-windows-amd64.zip\` | Windows (x86-64) | WSL2 launcher only; also install a Linux artifact inside the distribution |
-          | \`enclave-windows-arm64.zip\` | Windows (arm64) | WSL2 launcher only; also install a Linux artifact inside the distribution |
-          | \`enclave.json\` | Windows | Scoop manifest for the archives above |
-
-          \`\`\`sh
-          # Ubuntu 24.04 (resolves dependencies automatically)
-          sudo apt install ./enclave_*_amd64.deb
-
-          # Fedora Linux (resolves dependencies automatically)
-          sudo dnf install ./enclave-*.x86_64.rpm
-
-          # Other Linux distributions (use enclave-linux-arm64 on arm64 hosts)
-          sha256sum --check --ignore-missing checksums.txt
-          install -d ~/.local/bin
-          install enclave-linux-amd64 ~/.local/bin/enclave
-
-          # macOS (replace arm64 with amd64 on Intel)
-          shasum -a 256 --check --ignore-missing checksums.txt
-          xattr -d com.apple.quarantine ./enclave-darwin-arm64 2>/dev/null || true
-          install -d ~/.local/bin
-          install enclave-darwin-arm64 ~/.local/bin/enclave
-          \`\`\`
-
-          \`\`\`powershell
-          # Windows: install the launcher, then enclave itself inside WSL2
-          scoop install ${{ github.server_url }}/${{ github.repository }}/releases/download/rolling/enclave.json
-          \`\`\`
-
-          The standalone binaries update themselves with \`enclave self-update\` when installed into a directory you own, such as \`~/.local/bin\` (add it to \`PATH\` if needed). The updater never uses \`sudo\`; a system-wide install is updated by installing it again.
-
-          The macOS binaries are unsigned and not notarized, so Gatekeeper quarantines browser downloads and \`install\` propagates the attribute; \`curl\` or \`gh release download\` avoids it entirely.
-
-          \`enclave.exe\` is a launcher, not a native port: it forwards every argument to the Linux enclave binary inside a WSL2 distribution, which you install separately using the Linux artifacts above. Run it from a directory inside the distribution. See [docs/windows.md](${{ github.server_url }}/${{ github.repository }}/blob/main/docs/windows.md).
-          EOF
-          )" \
+            --notes "$(./scripts/release-notes.sh rolling "$GITHUB_SHA" "${{ github.server_url }}/${{ github.repository }}/releases/download/rolling")" \
             artifacts/*
+          ./scripts/verify-github-release.sh rolling artifacts

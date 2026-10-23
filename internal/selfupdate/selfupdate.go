@@ -9,6 +9,7 @@ package selfupdate
 
 import (
 	"bufio"
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -31,14 +32,14 @@ import (
 )
 
 const (
-	rollingRefURL         = "https://api.github.com/repos/eclipse-enclave/enclave/git/ref/tags/rolling"
-	rollingAssetsURL      = "https://github.com/eclipse-enclave/enclave/releases/download/rolling"
+	// downloadBaseURL is the project's directory on the Eclipse download
+	// server; each channel publishes below it (see docs/DEV.md, Releases).
+	downloadBaseURL       = "https://download.eclipse.org/enclave"
 	checksumsFilename     = "checksums.txt"
+	latestFilename        = "latest"
 	maxChecksumsBytes     = 1 << 20
-	maxRefResponseBytes   = 64 << 10
+	maxLatestBytes        = 4 << 10
 	maxBinaryBytes        = 128 << 20
-	maxErrorBodyBytes     = 16 << 10
-	maxErrorMessageRunes  = 300
 	responseHeaderTimeout = 30 * time.Second
 	responseIdleTimeout   = 30 * time.Second
 	updateTempPattern     = ".enclave-update-*"
@@ -90,8 +91,8 @@ func New(channel string) *Service {
 	return &Service{
 		fetcher: fetcher,
 		sources: map[string]source{
-			model.UpdateChannelRolling: rollingSource{fetcher: fetcher, refURL: rollingRefURL, assetsURL: rollingAssetsURL},
-			model.UpdateChannelStable:  pendingSource{channel: model.UpdateChannelStable},
+			model.UpdateChannelRolling: newRollingSource(fetcher, downloadBaseURL),
+			model.UpdateChannelStable:  newStableSource(fetcher, downloadBaseURL),
 		},
 		channel:        targetChannel(channel, buildChannel),
 		buildChannel:   buildChannel,
@@ -138,29 +139,30 @@ func (s *Service) Supported() error {
 }
 
 // Writable returns an error wrapping ErrNotWritable, with the command that
-// reinstalls the binary by hand, when this user cannot replace the running
-// executable. It writes nothing, so callers can ask before offering an update.
-func (s *Service) Writable() error {
+// reinstalls the build latest identifies by hand, when this user cannot
+// replace the running executable. It writes nothing, so callers can ask
+// before offering an update.
+func (s *Service) Writable(latest string) error {
 	target, err := s.executablePath()
 	if err != nil {
 		return fmt.Errorf("resolve current executable: %w", err)
 	}
 	if !s.writableDir(filepath.Dir(target)) {
-		return s.notWritable(target)
+		return s.notWritable(target, latest)
 	}
 	return nil
 }
 
 // notWritable spells out the manual reinstall, verification included, so it
 // is no less safe than the update it replaces.
-func (s *Service) notWritable(target string) error {
+func (s *Service) notWritable(target string, latest string) error {
 	artifact, err := artifactName(s.goos, s.goarch)
 	if err != nil {
 		return err
 	}
 	src := s.sources[s.channel]
 	return fmt.Errorf("enclave cannot replace %s: its location is %w for this user and the updater does not elevate privileges; download %s and %s into one directory and reinstall from there with: %s",
-		target, ErrNotWritable, src.assetURL(artifact), src.assetURL(checksumsFilename), s.reinstallCommand(artifact, target))
+		target, ErrNotWritable, src.assetURL(latest, artifact), src.assetURL(latest, checksumsFilename), s.reinstallCommand(artifact, target))
 }
 
 func (s *Service) reinstallCommand(artifact string, target string) string {
@@ -196,7 +198,7 @@ func (s *Service) Check(ctx context.Context) (Status, error) {
 	if err != nil {
 		return Status{}, err
 	}
-	current := s.buildChannel == s.channel && src.isCurrent(s.current, latest)
+	current := s.buildChannel == s.channel && src.upToDate(s.current, latest)
 	return Status{
 		Channel:         s.channel,
 		Current:         s.sources[s.buildChannel].label(s.current),
@@ -234,7 +236,7 @@ func (s *Service) Install(ctx context.Context, latest string) (string, bool, err
 	// Created before any request, so an unwritable directory fails offline.
 	tmp, err := os.CreateTemp(filepath.Dir(target), updateTempPattern)
 	if errors.Is(err, fs.ErrPermission) {
-		return "", false, s.notWritable(target)
+		return "", false, s.notWritable(target, latest)
 	}
 	if err != nil {
 		return "", false, fmt.Errorf("create update beside %s: %w", target, err)
@@ -252,7 +254,7 @@ func (s *Service) Install(ctx context.Context, latest string) (string, bool, err
 	if err := confirmLatest(ctx, src, s.channel, latest); err != nil {
 		return "", false, err
 	}
-	expected, err := s.expectedChecksum(ctx, src, artifact)
+	expected, err := s.expectedChecksum(ctx, src, latest, artifact)
 	if err != nil {
 		return "", false, err
 	}
@@ -260,7 +262,7 @@ func (s *Service) Install(ctx context.Context, latest string) (string, bool, err
 		return target, false, nil
 	}
 
-	response, err := s.fetcher.get(ctx, src.assetURL(artifact))
+	response, err := s.fetcher.get(ctx, src.assetURL(latest, artifact))
 	if err != nil {
 		return "", false, fmt.Errorf("download %s: %w", artifact, err)
 	}
@@ -274,9 +276,9 @@ func (s *Service) Install(ctx context.Context, latest string) (string, bool, err
 	if written > s.maxBinaryBytes {
 		return "", false, fmt.Errorf("download %s exceeds %d bytes", artifact, s.maxBinaryBytes)
 	}
-	// A publish replaces the channel's whole release and only moves forward,
-	// so a channel naming latest before and after the download means the
-	// checksums and the binary both came from that build.
+	// A publish swaps in a build's whole directory before naming it latest
+	// and only moves forward, so a channel naming latest before and after the
+	// download means the checksums and the binary both came from that build.
 	if err := confirmLatest(ctx, src, s.channel, latest); err != nil {
 		return "", false, err
 	}
@@ -299,7 +301,7 @@ func (s *Service) Install(ctx context.Context, latest string) (string, bool, err
 	if errors.Is(err, fs.ErrPermission) {
 		// A sticky directory such as /tmp passes Writable but refuses to
 		// replace another user's file.
-		return "", false, s.notWritable(target)
+		return "", false, s.notWritable(target, latest)
 	}
 	if err != nil {
 		return "", false, fmt.Errorf("replace %s: %w", target, err)
@@ -317,7 +319,7 @@ func confirmLatest(ctx context.Context, src source, channel string, latest strin
 		return err
 	}
 	if now != latest {
-		return fmt.Errorf("%s release moved from %.7s to %.7s; run the update again", channel, latest, now)
+		return fmt.Errorf("%s release moved from %s to %s; run the update again", channel, ShortBuild(latest), ShortBuild(now))
 	}
 	return nil
 }
@@ -334,8 +336,8 @@ func removeStaleUpdates(dir string, now time.Time) {
 	}
 }
 
-func (s *Service) expectedChecksum(ctx context.Context, src source, artifact string) (string, error) {
-	response, err := s.fetcher.get(ctx, src.assetURL(checksumsFilename))
+func (s *Service) expectedChecksum(ctx context.Context, src source, latest string, artifact string) (string, error) {
+	response, err := s.fetcher.get(ctx, src.assetURL(latest, checksumsFilename))
 	if err != nil {
 		return "", fmt.Errorf("download %s: %w", checksumsFilename, err)
 	}
@@ -375,6 +377,84 @@ func commitsEqual(current string, latest string) bool {
 	return strings.HasPrefix(current, latest) || strings.HasPrefix(latest, current)
 }
 
+// compareVersions orders release versions as semantic versions (1.2.0 <
+// 1.10.0, 1.3.0-rc.1 < 1.3.0). A current version that is not a release
+// version, such as unknown or git describe output, sorts below every release
+// so that it is offered the update.
+func compareVersions(current string, latest string) int {
+	current = strings.TrimPrefix(strings.TrimSpace(current), "v")
+	if !releaseVersionPattern.MatchString(current) {
+		return -1
+	}
+	currentCore, currentPre, _ := strings.Cut(current, "-")
+	latestCore, latestPre, _ := strings.Cut(strings.TrimPrefix(strings.TrimSpace(latest), "v"), "-")
+	if c := compareIdentifiers(strings.Split(currentCore, "."), strings.Split(latestCore, ".")); c != 0 {
+		return c
+	}
+	switch {
+	case currentPre == "" && latestPre == "":
+		return 0
+	case currentPre == "":
+		return 1
+	case latestPre == "":
+		return -1
+	}
+	return compareIdentifiers(strings.Split(currentPre, "."), strings.Split(latestPre, "."))
+}
+
+// compareIdentifiers follows semantic versioning: numeric identifiers compare
+// as numbers and sort below alphanumeric ones, and a shorter list of
+// otherwise equal identifiers sorts first.
+func compareIdentifiers(a []string, b []string) int {
+	for i := 0; i < len(a) && i < len(b); i++ {
+		aNumeric, bNumeric := isNumeric(a[i]), isNumeric(b[i])
+		var c int
+		switch {
+		case aNumeric && bNumeric:
+			c = compareNumbers(a[i], b[i])
+		case aNumeric:
+			c = -1
+		case bNumeric:
+			c = 1
+		default:
+			c = strings.Compare(a[i], b[i])
+		}
+		if c != 0 {
+			return c
+		}
+	}
+	return cmp.Compare(len(a), len(b))
+}
+
+func isNumeric(s string) bool {
+	return s != "" && !strings.ContainsFunc(s, func(r rune) bool { return r < '0' || r > '9' })
+}
+
+// compareNumbers orders decimal strings of any length by magnitude.
+func compareNumbers(a string, b string) int {
+	a, b = strings.TrimLeft(a, "0"), strings.TrimLeft(b, "0")
+	if c := cmp.Compare(len(a), len(b)); c != 0 {
+		return c
+	}
+	return strings.Compare(a, b)
+}
+
+// ShortBuild abbreviates a commit identifying a build to the seven characters
+// `enclave version` shows; versions are kept.
+func ShortBuild(build string) string {
+	if build == "" {
+		return "unknown"
+	}
+	base, dirty := strings.CutSuffix(build, "-dirty")
+	if len(base) > 7 && validHex(base) {
+		base = base[:7]
+	}
+	if dirty {
+		return base + "-dirty"
+	}
+	return base
+}
+
 func fileSHA256(path string) (string, error) {
 	file, err := os.Open(path) // #nosec G304 -- path is the running executable.
 	if err != nil {
@@ -389,8 +469,9 @@ func fileSHA256(path string) (string, error) {
 }
 
 func validHex(value string) bool {
-	_, err := hex.DecodeString(value)
-	return err == nil
+	return value != "" && !strings.ContainsFunc(value, func(r rune) bool {
+		return (r < '0' || r > '9') && (r < 'a' || r > 'f') && (r < 'A' || r > 'F')
+	})
 }
 
 func resolvedExecutablePath() (string, error) {

@@ -9,22 +9,16 @@ package selfupdate
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
-	"strconv"
+	"regexp"
 	"strings"
 	"time"
-	"unicode"
 
 	"enclave/internal/buildinfo"
 )
-
-// ErrChannelUnavailable reports a release channel this binary cannot fetch
-// from yet.
-var ErrChannelUnavailable = errors.New("no release source")
 
 // source is where one release channel publishes its standalone binaries,
 // each next to a checksums.txt covering them.
@@ -32,74 +26,96 @@ type source interface {
 	// latest identifies the channel's newest build, e.g. by commit. Callers
 	// only compare identifiers for equality and display them.
 	latest(ctx context.Context) (string, error)
-	// assetURL is the download URL of a file published with that build.
-	assetURL(name string) string
-	// isCurrent reports whether current, a build published on this channel,
-	// is the build latest identifies.
-	isCurrent(current buildinfo.Info, latest string) bool
+	// assetURL is the download URL of a file published with the build that
+	// latest identifies.
+	assetURL(latest string, name string) string
+	// upToDate reports whether current, a build published on this channel,
+	// needs no update to the build latest identifies.
+	upToDate(current buildinfo.Info, latest string) bool
 	// label names current, a build published on this channel, for messages.
 	label(current buildinfo.Info) string
 }
 
-// rollingSource is the GitHub rolling release, rebuilt from every push to
-// main and identified by the commit its tag points at.
-type rollingSource struct {
-	fetcher   fetcher
-	refURL    string
-	assetsURL string
+// downloadSource is a channel directory on the Eclipse download server. Its
+// latest file names the newest build: the commit of the rolling channel,
+// whose artifacts are swapped in place with every push to main, or the
+// version of the stable channel, which keeps a directory per release.
+type downloadSource struct {
+	fetcher fetcher
+	// channelURL is the channel directory, without a trailing slash.
+	channelURL string
+	stable     bool
 }
 
-func (r rollingSource) latest(ctx context.Context) (string, error) {
-	response, err := r.fetcher.get(ctx, r.refURL)
+func newRollingSource(fetcher fetcher, baseURL string) downloadSource {
+	return downloadSource{fetcher: fetcher, channelURL: baseURL + "/rolling"}
+}
+
+func newStableSource(fetcher fetcher, baseURL string) downloadSource {
+	return downloadSource{fetcher: fetcher, channelURL: baseURL + "/releases", stable: true}
+}
+
+// releaseVersionPattern accepts the versions release tags produce: 1.0.0, or
+// 1.1.0-rc.1 with alpha, beta, or rc, and no leading zeros (release.yml and
+// scripts/version.sh enforce the same grammar). Anything else, HTML error
+// pages included, is rejected before it can form a URL.
+var releaseVersionPattern = regexp.MustCompile(`^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-(alpha|beta|rc)\.(0|[1-9][0-9]*))?$`)
+
+func (d downloadSource) latest(ctx context.Context) (string, error) {
+	url := d.channelURL + "/" + latestFilename
+	response, err := d.fetcher.get(ctx, url)
 	if err != nil {
-		return "", fmt.Errorf("resolve rolling release: %w", err)
+		return "", fmt.Errorf("resolve latest %s build: %w", d.name(), err)
 	}
 	defer func() { _ = response.Body.Close() }()
-	var ref struct {
-		Object struct {
-			SHA  string `json:"sha"`
-			Type string `json:"type"`
-		} `json:"object"`
+	body, err := io.ReadAll(io.LimitReader(response.Body, maxLatestBytes))
+	if err != nil {
+		return "", fmt.Errorf("read %s: %w", url, err)
 	}
-	if err := json.NewDecoder(io.LimitReader(response.Body, maxRefResponseBytes)).Decode(&ref); err != nil {
-		return "", fmt.Errorf("decode rolling release reference: %w", err)
+	latest := strings.TrimSpace(string(body))
+	if d.stable {
+		if !releaseVersionPattern.MatchString(latest) {
+			return "", fmt.Errorf("%s did not name a release version", url)
+		}
+		return latest, nil
 	}
-	sha := strings.ToLower(strings.TrimSpace(ref.Object.SHA))
-	if ref.Object.Type != "commit" || (len(sha) != 40 && len(sha) != 64) || !validHex(sha) {
-		return "", fmt.Errorf("rolling release reference did not identify a commit")
+	latest = strings.ToLower(latest)
+	if (len(latest) != 40 && len(latest) != 64) || !validHex(latest) {
+		return "", fmt.Errorf("%s did not name a commit", url)
 	}
-	return sha, nil
+	return latest, nil
 }
 
-func (r rollingSource) assetURL(name string) string {
-	return r.assetsURL + "/" + name
+func (d downloadSource) assetURL(latest string, name string) string {
+	if d.stable {
+		return d.channelURL + "/" + latest + "/" + name
+	}
+	return d.channelURL + "/" + name
 }
 
-func (r rollingSource) isCurrent(current buildinfo.Info, latest string) bool {
+// upToDate: a rolling build is current when it is the published commit. A
+// stable build is current when it is the published release or a newer one,
+// such as a pre-release the pointer never names or a release installed by
+// hand before the pointer moved; the channel never downgrades on its own.
+func (d downloadSource) upToDate(current buildinfo.Info, latest string) bool {
+	if d.stable {
+		return compareVersions(current.Version, latest) >= 0
+	}
 	return commitsEqual(current.Commit, latest)
 }
 
-func (r rollingSource) label(current buildinfo.Info) string {
+func (d downloadSource) label(current buildinfo.Info) string {
+	if d.stable {
+		return strings.TrimSpace(current.Version)
+	}
 	return strings.TrimSpace(current.Commit)
 }
 
-// pendingSource stands in for a channel whose download location is not
-// settled. Stable releases are expected on the Eclipse Foundation download
-// server; once that contract exists it gets its own source.
-type pendingSource struct {
-	channel string
-}
-
-func (p pendingSource) latest(context.Context) (string, error) {
-	return "", fmt.Errorf("%w for the %s channel yet; set \"update_channel\": \"rolling\" or update manually", ErrChannelUnavailable, p.channel)
-}
-
-func (p pendingSource) assetURL(string) string { return "" }
-
-func (p pendingSource) isCurrent(buildinfo.Info, string) bool { return false }
-
-func (p pendingSource) label(current buildinfo.Info) string {
-	return strings.TrimSpace(current.Version)
+func (d downloadSource) name() string {
+	if d.stable {
+		return "stable"
+	}
+	return "rolling"
 }
 
 type fetcher struct {
@@ -116,7 +132,6 @@ func (f fetcher) get(ctx context.Context, url string) (*http.Response, error) {
 		cancel(nil)
 		return nil, err
 	}
-	request.Header.Set("Accept", "application/vnd.github+json")
 	request.Header.Set("User-Agent", "eclipse-enclave-self-update")
 	response, err := f.client.Do(request) // #nosec G704 -- URLs come from fixed release sources; tests substitute a local server.
 	if err != nil {
@@ -124,50 +139,12 @@ func (f fetcher) get(ctx context.Context, url string) (*http.Response, error) {
 		return nil, err
 	}
 	if response.StatusCode != http.StatusOK {
-		err := responseError(url, response)
 		_ = response.Body.Close()
 		cancel(nil)
-		return nil, err
+		return nil, fmt.Errorf("%s returned %s", url, response.Status)
 	}
 	response.Body = newIdleBody(ctx, cancel, response.Body, f.idleTimeout)
 	return response, nil
-}
-
-// responseError names GitHub's rate limit, which it reports as a bare 403 or
-// 429, and otherwise passes on the message of a GitHub error body.
-func responseError(url string, response *http.Response) error {
-	limited := response.StatusCode == http.StatusForbidden || response.StatusCode == http.StatusTooManyRequests
-	if limited && response.Header.Get("X-RateLimit-Remaining") == "0" {
-		reset := ""
-		if seconds, err := strconv.ParseInt(response.Header.Get("X-RateLimit-Reset"), 10, 64); err == nil {
-			reset = "; it resets at " + time.Unix(seconds, 0).Format("15:04")
-		}
-		return fmt.Errorf("%s returned %s: GitHub API rate limit exceeded%s", url, response.Status, reset)
-	}
-	var body struct {
-		Message string `json:"message"`
-	}
-	if json.NewDecoder(io.LimitReader(response.Body, maxErrorBodyBytes)).Decode(&body) == nil {
-		if message := printableMessage(body.Message); message != "" {
-			return fmt.Errorf("%s returned %s: %s", url, response.Status, message)
-		}
-	}
-	return fmt.Errorf("%s returned %s", url, response.Status)
-}
-
-// printableMessage flattens a server-supplied message to one bounded line
-// without control characters a terminal would interpret.
-func printableMessage(message string) string {
-	message = strings.Join(strings.Fields(strings.Map(func(r rune) rune {
-		if unicode.IsControl(r) {
-			return ' '
-		}
-		return r
-	}, message)), " ")
-	if runes := []rune(message); len(runes) > maxErrorMessageRunes {
-		message = string(runes[:maxErrorMessageRunes]) + "…"
-	}
-	return message
 }
 
 var errBodyIdle = errors.New("response body idle")

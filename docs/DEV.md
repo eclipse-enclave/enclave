@@ -498,7 +498,10 @@ way, so a pre-release, the snapshots after it, and the final release upgrade
 into each other in that order. The first release tag must be `v0.1.2` or
 higher, pre-releases such as `v0.1.2-rc.1` included: the packages published
 before it are `0.1.2~~git…` snapshots, and apt and dnf do not upgrade them to
-a `0.1.1` or `0.1.0`.
+a `0.1.1` or `0.1.0`. Final tags must be annotated as well: `git describe`
+prefers annotated tags, so a lightweight `v0.3.0` on the commit of an
+annotated `v0.3.0-rc.1` makes later snapshots `0.3.0~rc.1…`, which sort below
+`0.3.0`, and apt and dnf stop upgrading.
 
 ```bash
 git tag -a v1.0.0 -m "Enclave 1.0.0"

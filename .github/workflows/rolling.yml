@@ -75,3 +75,4 @@ jobs:
             --title "Rolling Release" \
             --notes "$(./scripts/release-notes.sh rolling "$GITHUB_SHA" "${{ github.server_url }}/${{ github.repository }}/releases/download/rolling")" \
             artifacts/*
+          ./scripts/verify-github-release.sh rolling artifacts

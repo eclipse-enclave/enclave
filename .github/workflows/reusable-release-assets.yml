@@ -195,4 +195,6 @@ jobs:
         with:
           name: release-assets
           path: artifacts/*
-          retention-days: 1
+          # Publication retries must reuse the original bytes, not rebuild;
+          # GitHub re-runs jobs for up to 30 days.
+          retention-days: ${{ inputs.channel == 'stable' && 30 || 1 }}

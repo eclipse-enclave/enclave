@@ -341,7 +341,7 @@ There is no config-file key.
 | `--reset-auth` | Clear auth files and persisted keys, then inject fresh |
 | `--no-api-key` | Disable API key injection |
 | `--pass-api-key` | Allow API key injection in `--ephemeral` mode |
-| `--pass-env <KEY1,KEY2>` | Forward specific host env vars into the container (repeatable, comma-separated); replaces `pass_env` from config, `+KEY` adds |
+| `--pass-env <KEY1,KEY2>` | Forward specific host env vars into the container (repeatable, comma-separated); replaces `pass_env` from config, `+KEY` adds, and can forward a key `--no-api-key` withholds |
 | `--auth-scope <scope>` | `shared` (default) or `project` |
 | `--auth-name <slug>` | Select a named per-tool shared auth store; ignored under `--auth-scope=project` |
 | `--secrets-scope <scope>` | `both` (default), `global`, or `project` |

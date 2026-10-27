@@ -12,6 +12,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -463,5 +464,14 @@ func TestLoadProfileOrReportNamesUnknownTool(t *testing.T) {
 	_, errOut := captureOutput(t, func() { _, err = loadProfileOrReport(testPathsWithFeatures(t), "bogus") })
 	if err == nil || !strings.Contains(errOut, "unknown tool: bogus") || strings.Contains(errOut, "file does not exist") {
 		t.Fatalf("loadProfileOrReport(bogus) = %v, stderr %q; want the tool named", err, errOut)
+	}
+}
+
+func TestCLIPassEnvKeysSkipsRemovalsAndNone(t *testing.T) {
+	cli := model.Options{AuthOptions: model.AuthOptions{PassEnv: []string{"none", "OPENAI_API_KEY", "+GH_TOKEN", "-AWS_PROFILE"}}}
+	got := cliPassEnvKeys(cli)
+	want := map[string]bool{"OPENAI_API_KEY": true, "GH_TOKEN": true}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("cliPassEnvKeys = %v, want %v", got, want)
 	}
 }

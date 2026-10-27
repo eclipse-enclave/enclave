@@ -121,6 +121,7 @@ func runExecutionCommand(input *CommandInput) int {
 		Devcontainer:          devcontainerConfig,
 		ValidatedDirs:         validatedDirs,
 		ValidatedReadonlyDirs: validatedReadonlyDirs,
+		CLIPassEnv:            cliPassEnvKeys(input.CLIOptions),
 		YoloEnabled:           yoloEnabled,
 		Features:              features.enabled,
 		Provenance:            provenance,
@@ -449,4 +450,20 @@ func resolveSessionActionArgs(action string, profile model.Profile) ([]string, s
 		action,
 		profile.Name,
 	)
+}
+
+// cliPassEnvKeys returns the keys --pass-env names for this run, the only ones
+// allowed to forward a secret --no-api-key or --ephemeral withholds. It reads
+// the parsed CLI, not entry origins: a --pass-env repeating a configured key
+// keeps the configured origin.
+func cliPassEnvKeys(cli model.Options) map[string]bool {
+	keys := make(map[string]bool, len(cli.PassEnv))
+	for _, raw := range cli.PassEnv {
+		op, key, err := config.ValidateListEntry("pass_env", raw)
+		if err != nil || op == "-" || (op == "" && key == "none") {
+			continue
+		}
+		keys[key] = true
+	}
+	return keys
 }

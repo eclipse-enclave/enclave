@@ -209,6 +209,13 @@ func TestApplyDevcontainerRunArgsBlocksDangerousSecurityOpts(t *testing.T) {
 		{name: "systempaths_unconfined", value: "systempaths=unconfined"},
 		{name: "podman_unmask_all", value: "unmask=ALL"},
 		{name: "podman_unmask_path", value: "unmask=/proc/kcore"},
+		{name: "selinux_spc_type", value: "label=type:spc_t"},
+		{name: "selinux_unconfined_type", value: "label=type:unconfined_t"},
+		{name: "selinux_level", value: "label=level:s0"},
+		{name: "podman_label_nested", value: "label=nested"},
+		{name: "seccomp_profile_path", value: "seccomp=.devcontainer/allow-all.json"},
+		{name: "apparmor_profile", value: "apparmor=custom"},
+		{name: "unknown_option", value: "writable-cgroups=true"},
 	}
 
 	for _, tc := range cases {
@@ -225,14 +232,24 @@ func TestApplyDevcontainerRunArgsBlocksDangerousSecurityOpts(t *testing.T) {
 	}
 }
 
-func TestApplyDevcontainerRunArgsAllowsSafeSecurityOpt(t *testing.T) {
-	b := newDevcontainerBackend(t.TempDir(), "--security-opt", "label=type:container_t")
-	config := &dockercmd.ContainerConfig{}
-	hostConfig := &dockercmd.HostConfig{}
-	b.applyDevcontainerRunArgs(config, hostConfig)
+func TestApplyDevcontainerRunArgsAllowsSafeSecurityOpts(t *testing.T) {
+	for _, value := range []string{
+		"label=type:container_t",
+		"no-new-privileges",
+		"no-new-privileges=true",
+		"no-new-privileges:true",
+		"mask=/proc/acpi",
+	} {
+		t.Run(value, func(t *testing.T) {
+			b := newDevcontainerBackend(t.TempDir(), "--security-opt", value)
+			config := &dockercmd.ContainerConfig{}
+			hostConfig := &dockercmd.HostConfig{}
+			b.applyDevcontainerRunArgs(config, hostConfig)
 
-	if len(hostConfig.SecurityOpt) != 1 || hostConfig.SecurityOpt[0] != "label=type:container_t" {
-		t.Fatalf("expected safe --security-opt to pass through, got %v", hostConfig.SecurityOpt)
+			if !reflect.DeepEqual(hostConfig.SecurityOpt, []string{value}) {
+				t.Fatalf("expected safe --security-opt to pass through, got %v", hostConfig.SecurityOpt)
+			}
+		})
 	}
 }
 

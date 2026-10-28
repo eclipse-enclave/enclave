@@ -123,7 +123,7 @@ var devcontainerRunArgHandlers = []devcontainerRunArgHandler{
 		if !requireRunArgValue(arg, value) {
 			return
 		}
-		if isBlockedSecurityOpt(strings.ToLower(strings.TrimSpace(value))) {
+		if !isAllowedSecurityOpt(strings.ToLower(strings.TrimSpace(value))) {
 			logx.Warnf("devcontainer runArgs --security-opt %q is blocked for security; ignoring (use --allow-risky-devcontainer to override)", value)
 			return
 		}
@@ -292,20 +292,21 @@ func hasMountFlag(options string, flag string) bool {
 	return false
 }
 
-func isBlockedSecurityOpt(norm string) bool {
+// isAllowedSecurityOpt allowlists options that keep or tighten the default
+// confinement. A blocklist cannot keep up: any permissive SELinux type, a
+// repo-supplied seccomp profile, or a new engine option would slip through.
+func isAllowedSecurityOpt(norm string) bool {
 	// Both CLIs still accept the legacy "key:value" form.
 	if !strings.Contains(norm, "=") {
 		norm = strings.Replace(norm, ":", "=", 1)
 	}
 	switch norm {
-	case "seccomp=unconfined",
-		"apparmor=unconfined",
-		"no-new-privileges=false",
-		"no-new-privileges=0",
-		"label=disable",
-		"systempaths=unconfined":
+	case "no-new-privileges",
+		"no-new-privileges=true",
+		"no-new-privileges=1",
+		"label=type:container_t":
 		return true
 	}
-	// podman's unmask lifts the /proc and /sys masks like systempaths=unconfined.
-	return strings.HasPrefix(norm, "unmask=")
+	// podman's mask hides additional paths.
+	return strings.HasPrefix(norm, "mask=")
 }

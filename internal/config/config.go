@@ -488,49 +488,25 @@ func stripGlobalOnlyKeys(path string, defaults *Defaults) []Warning {
 	return warnings
 }
 
-// isWithinProjectDir reports whether entry resolves to a path inside projectRoot.
-// projectRoot must already be absolute and (if possible) symlink-evaluated.
-// projectDir anchors relative entries (so that "./data" resolves relative to
-// the project, not the process working directory). Symlink evaluation falls
-// back to the absolute path when the target does not exist on disk.
-func isWithinProjectDir(entry string, projectRoot string, projectDir string, home string) bool {
-	value := strings.TrimSpace(entry)
-	if value == "" {
-		return false
-	}
-	if home != "" {
-		value = util.ExpandTilde(value, home)
-	}
-
-	if !filepath.IsAbs(value) {
-		if strings.TrimSpace(projectDir) == "" {
-			return false
-		}
-		value = filepath.Join(projectDir, value)
-	}
-
-	within, err := util.RealPathWithin(projectRoot, value)
-	return err == nil && within
-}
-
 // IsPathWithinProjectDir reports whether entry resolves to a path inside
-// projectDir. Relative entries are anchored to projectDir, "~" is expanded
-// against the user's home directory, and symlinks are evaluated when the
-// target exists. Returns false for empty entries or unresolvable projectDir.
-//
-// This is the same containment check applied to project-config add_dirs
-// entries, exported so other packages (notably internal/devcontainer) can
-// clamp externally-supplied paths to the project subtree.
+// projectDir, anchoring relative entries to projectDir and expanding "~".
 func IsPathWithinProjectDir(entry string, projectDir string) bool {
-	if strings.TrimSpace(projectDir) == "" {
+	value := strings.TrimSpace(entry)
+	if value == "" || strings.TrimSpace(projectDir) == "" {
 		return false
 	}
 	root, err := filepath.Abs(projectDir)
 	if err != nil {
 		return false
 	}
-	home, _ := os.UserHomeDir()
-	return isWithinProjectDir(entry, root, root, home)
+	if home, _ := os.UserHomeDir(); home != "" {
+		value = util.ExpandTilde(value, home)
+	}
+	if !filepath.IsAbs(value) {
+		value = filepath.Join(root, value)
+	}
+	within, err := util.RealPathWithin(root, value)
+	return err == nil && within
 }
 
 func mergeDefaults(base Defaults, override Defaults) Defaults {

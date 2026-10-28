@@ -34,7 +34,7 @@ can, with the same effect for that project. The exceptions are `auto_update`
 and `update_channel`: they are global-only rather than project or per-tool
 options because they replace the host executable, so project and tool-override
 values are ignored with a warning. Opt-ins without a config key, such as
-`--allow-sensitive-mounts`, stay CLI-only.
+`--allow-sensitive-mounts`, cannot be granted by any config file.
 
 Top-level `host_config_paths` is not part of that set: it is ignored with a
 warning in any config file, global included, because passthrough paths are only

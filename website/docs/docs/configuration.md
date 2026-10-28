@@ -199,8 +199,8 @@ extra allowed domains, a writable mount, or yolo mode. The exceptions are
 are read from global config only.
 
 Mounting a sensitive directory such as your home directory or `~/.ssh` still
-needs `--allow-sensitive-mounts` on the command line, whichever config file
-asks for it.
+needs `--allow-sensitive-mounts` (or `ENCLAVE_ALLOW_SENSITIVE_MOUNTS=1`),
+whichever config file asks for it: that opt-in has no config key.
 
 ## Per-tool overrides
 

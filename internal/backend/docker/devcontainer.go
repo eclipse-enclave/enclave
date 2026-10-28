@@ -293,13 +293,19 @@ func hasMountFlag(options string, flag string) bool {
 }
 
 func isBlockedSecurityOpt(norm string) bool {
+	// Both CLIs still accept the legacy "key:value" form.
+	if !strings.Contains(norm, "=") {
+		norm = strings.Replace(norm, ":", "=", 1)
+	}
 	switch norm {
 	case "seccomp=unconfined",
 		"apparmor=unconfined",
 		"no-new-privileges=false",
 		"no-new-privileges=0",
-		"label=disable":
+		"label=disable",
+		"systempaths=unconfined":
 		return true
 	}
-	return false
+	// podman's unmask lifts the /proc and /sys masks like systempaths=unconfined.
+	return strings.HasPrefix(norm, "unmask=")
 }

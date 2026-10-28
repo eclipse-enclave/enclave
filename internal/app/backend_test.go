@@ -132,11 +132,6 @@ func TestValidateOptionsAcceptsPodmanBackend(t *testing.T) {
 	if got.AllowAllNetwork || got.Slim {
 		t.Fatal("podman must keep the full docker feature set (no qemu coercion)")
 	}
-
-	opts.Devcontainer = true
-	if _, _, _, err := ValidateOptions(opts, model.DefaultOptionSources(), ValidationContext{Action: "run"}); err == nil {
-		t.Fatal("devcontainer mode is only verified with docker and must be rejected for podman")
-	}
 }
 
 // A --json or --yes invocation must never block on the engine question, even

@@ -204,6 +204,11 @@ func TestApplyDevcontainerRunArgsBlocksDangerousSecurityOpts(t *testing.T) {
 		{name: "label_disable", value: "label=disable"},
 		{name: "mixed_case_seccomp", value: "Seccomp=Unconfined"},
 		{name: "padded_apparmor", value: "  apparmor=unconfined  "},
+		{name: "legacy_colon_seccomp", value: "seccomp:unconfined"},
+		{name: "legacy_colon_label", value: "label:disable"},
+		{name: "systempaths_unconfined", value: "systempaths=unconfined"},
+		{name: "podman_unmask_all", value: "unmask=ALL"},
+		{name: "podman_unmask_path", value: "unmask=/proc/kcore"},
 	}
 
 	for _, tc := range cases {

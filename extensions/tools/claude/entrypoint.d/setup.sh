@@ -37,6 +37,25 @@ if [ -n "${ANTHROPIC_API_KEY:-}" ] && command -v jq >/dev/null 2>&1; then
     unset _key_tail _claude_json _updated
 fi
 
+# Remove the Playwright MCP server that Enclave's former --playwright-mcp and
+# enclave-extensions' playwright-mcp feature register in Claude's persistent
+# local scope, so it does not outlive the feature. The feature's setup runs
+# after this one and registers it again while it is enabled. Only that exact
+# registration matches; a user's own "playwright" server stays.
+if command -v claude >/dev/null 2>&1 && command -v jq >/dev/null 2>&1 && [ -f "$HOME/.claude.json" ]; then
+    if jq -e --arg dir "$PWD" --arg cmd "${ENCLAVE_AGENT_NODE_DIR:-/opt/enclave/node}/bin/npx" '
+        .projects[$dir].mcpServers.playwright
+        | type == "object"
+          and (.type // "stdio") == "stdio"
+          and del(.type) == {
+              command: $cmd,
+              args: ["@playwright/mcp", "--headless", "--no-sandbox", "--browser", "chromium"],
+              env: {PLAYWRIGHT_BROWSERS_PATH: "/opt/playwright-browsers"}
+          }' "$HOME/.claude.json" >/dev/null 2>&1; then
+        claude mcp remove -s local playwright >/dev/null 2>&1 || true
+    fi
+fi
+
 # In yolo mode, suppress Claude Code's interactive prompts inside the
 # already-sandboxed container:
 #   1. skipDangerousModePermissionPrompt in tool settings

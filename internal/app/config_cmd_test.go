@@ -602,3 +602,42 @@ func TestConfigJSONListLayersShowRawValues(t *testing.T) {
 		t.Fatalf("options.ports = %#v, want %#v", ports, want)
 	}
 }
+
+func TestConfigOutputRedactsPassEnvValues(t *testing.T) {
+	const marker = "FAKE_SECRET_MARKER"
+	entry := "GITHUB_TOKEN=" + marker
+	tests := map[string]struct{ global, project config.Defaults }{
+		"global":        {global: config.Defaults{PassEnv: []string{"FOO", entry}}},
+		"project":       {project: config.Defaults{PassEnv: []string{"FOO", entry}}},
+		"tool_override": {global: config.Defaults{ToolOverrides: map[string]config.Defaults{"claude": {PassEnv: []string{"+FOO", entry}}}}},
+	}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			cli := config.DefaultOptions()
+			cli.Tool = "claude"
+			cliSources := model.OptionSources{}
+			cliSources.Tool = model.SourceCLI
+			opts, toolDefaults, hasToolDefaults := config.ResolveOptionsForTool(cli, cliSources, tc.global, tc.project, "claude")
+			input := configTestInput(t, testPathsWithFeatures(t), opts, nil)
+			input.CLIOptions = cli
+			input.GlobalDefaults = tc.global
+			input.ProjectDefaults = tc.project
+			input.ToolDefaults = toolDefaults
+			input.HasToolDefaults = hasToolDefaults
+
+			input.ConfigView = model.ConfigView{JSON: true}
+			doc := captureStdout(t, func() { runConfig(input) })
+			input.ConfigView = model.ConfigView{}
+			table := captureStdout(t, func() { runConfig(input) })
+
+			for view, out := range map[string]string{"json": doc, "table": table} {
+				if strings.Contains(out, marker) {
+					t.Fatalf("%s output leaks the pass_env value:\n%s", view, out)
+				}
+			}
+			if !strings.Contains(doc, "GITHUB_TOKEN=…") {
+				t.Fatalf("json output lacks the redacted entry:\n%s", doc)
+			}
+		})
+	}
+}

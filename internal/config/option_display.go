@@ -38,6 +38,20 @@ func optSlice(v any, name string) []string {
 	return f.Interface().([]string)
 }
 
+// displaySlice reads a list for display; raw layers can hold a rejected
+// pass_env NAME=value entry whose value must not be printed.
+func displaySlice(def OptionDef, v any, name string) []string {
+	values := optSlice(v, name)
+	if values == nil || def.Name != "pass_env" {
+		return values
+	}
+	redacted := make([]string, len(values))
+	for i, value := range values {
+		redacted[i] = RedactListEntry(def.Name, value)
+	}
+	return redacted
+}
+
 func optBoolPtr(v any, name string) *bool {
 	f := optField(v, name)
 	if f.IsNil() {
@@ -59,7 +73,7 @@ func OptionDefaultValue(def OptionDef, opts model.Options) (string, bool) {
 	case OptionKindBool:
 		return boolValue(optBool(opts, def.OptionField))
 	case OptionKindStringSlice:
-		return sliceValue(optSlice(opts, def.OptionField))
+		return sliceValue(displaySlice(def, opts, def.OptionField))
 	default:
 		return stringValue(optString(opts, def.OptionField), def.DefaultRequire)
 	}
@@ -75,7 +89,7 @@ func OptionDefaultsValue(def OptionDef, defaults Defaults) (string, bool) {
 	case OptionKindYolo, OptionKindBool:
 		return boolPtrValue(optBoolPtr(defaults, def.DefaultsField))
 	case OptionKindStringSlice:
-		return sliceValue(optSlice(defaults, def.DefaultsField))
+		return sliceValue(displaySlice(def, defaults, def.DefaultsField))
 	default:
 		return stringValue(optString(defaults, def.DefaultsField), false)
 	}
@@ -96,7 +110,7 @@ func OptionCLIValue(def OptionDef, opts model.Options) (string, bool) {
 	case OptionKindBool:
 		return boolValue(optBool(opts, def.OptionField))
 	case OptionKindStringSlice:
-		return sliceValue(optSlice(opts, def.OptionField))
+		return sliceValue(displaySlice(def, opts, def.OptionField))
 	default:
 		return stringValue(optString(opts, def.OptionField), true)
 	}
@@ -116,7 +130,7 @@ func OptionEffectiveValue(def OptionDef, opts model.Options) string {
 	case OptionKindBool:
 		return fmt.Sprintf("%t", optBool(opts, def.OptionField))
 	case OptionKindStringSlice:
-		return formatSlice(optSlice(opts, def.OptionField))
+		return formatSlice(displaySlice(def, opts, def.OptionField))
 	default:
 		return optString(opts, def.OptionField)
 	}
@@ -136,7 +150,7 @@ func OptionTypedEffectiveValue(def OptionDef, opts model.Options) any {
 	case OptionKindBool:
 		return optBool(opts, def.OptionField)
 	case OptionKindStringSlice:
-		if values := optSlice(opts, def.OptionField); values != nil {
+		if values := displaySlice(def, opts, def.OptionField); values != nil {
 			return values
 		}
 		return []string{}
@@ -169,7 +183,7 @@ func OptionTypedDefaultsValue(def OptionDef, defaults Defaults) (any, bool) {
 			return *value, true
 		}
 	case OptionKindStringSlice:
-		if values := optSlice(defaults, def.DefaultsField); values != nil {
+		if values := displaySlice(def, defaults, def.DefaultsField); values != nil {
 			return values, true
 		}
 	default:

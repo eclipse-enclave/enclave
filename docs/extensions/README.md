@@ -765,9 +765,9 @@ Add an opt-in feature on top of the defaults with `["+debug-tools"]`, or list ev
 
 The next time you run `./enclave --rebuild`, only the specified features will be installed.
 
-**Available features:** `devtools`, `golang-dev`, `native-build-deps`, `github-cli`, `gitlab-cli`, `node-dev`, `python-dev`, `debug-tools`
+**Available features:** `devtools`, `golang-dev`, `github-cli`, `gitlab-cli`, `node-dev`, `python-dev`, `theia-dev`, `debug-tools`
 
-**Opt-in features (not installed unless explicitly listed):** `debug-tools`, `gitlab-cli`, `golang-dev`, `native-build-deps`
+**Opt-in features (not installed unless explicitly listed):** `debug-tools`, `gitlab-cli`, `golang-dev`, `theia-dev`
 
 ### Installation Order
 
@@ -822,10 +822,10 @@ enable the feature.
 | `golang-dev` | 45 | Go toolchain and delve, from Debian (opt-in) |
 | `github-cli` | 50 | GitHub CLI (gh) |
 | `gitlab-cli` | 50 | GitLab CLI (glab) (opt-in) |
-| `node-dev` | 70 | Node.js dev tools: typescript, eslint, prettier |
-| `python-dev` | 70 | Python dev tools: black, ruff, mypy, pytest |
-| `native-build-deps` | 75 | Headers for native Node.js modules: libx11, libxkbfile, libsecret (opt-in) |
-| `debug-tools` | 80 | Debug tools: gdb, strace, ltrace, tcpdump (opt-in) |
+| `node-dev` | 70 | Node.js dev tools: nvm, typescript, yarn, pnpm |
+| `python-dev` | 70 | Python dev tools: black, ruff, mypy, pytest, pre-commit |
+| `theia-dev` | 75 | Headers for building Theia and other Electron apps: libx11, libxkbfile, libsecret (opt-in) |
+| `debug-tools` | 80 | Debug tools: gdb, strace, ltrace, tcpdump, valgrind, sysstat, iproute2 (opt-in) |
 
 ## Key Differences: Tools vs Features
 
@@ -1001,17 +1001,18 @@ gh --version
 # Python tools (python-dev feature)
 black --version
 ruff --version
+pre-commit --version
 
 # Node.js tools (node-dev feature)
 tsc --version
-eslint --version
+pnpm --version
 
 # Dev tools (devtools feature)
 vim --version
 rg --version       # ripgrep
 
 # Opt-in features (if enabled):
-# Native build headers (native-build-deps feature)
+# Theia build headers (theia-dev feature)
 pkg-config --modversion x11 xkbfile libsecret-1
 
 # GitLab CLI (gitlab-cli feature)
@@ -1024,6 +1025,7 @@ dlv version
 # Debug tools (debug-tools feature)
 which gdb
 which strace
+valgrind --version
 ```
 
 ### 4. Verify Feature Entrypoints

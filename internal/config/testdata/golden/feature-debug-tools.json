@@ -2,13 +2,17 @@
   "type": "mixin",
   "name": "debug-tools",
   "display_name": "Debug Tools",
-  "description": "Debugging tools (gdb, strace, ltrace, etc.)",
+  "description": "Debugging and diagnostics tools (gdb, strace, valgrind, pidstat, ss, etc.)",
   "apt_packages": [
     "gdb",
     "ltrace",
     "strace",
     "lsof",
-    "tcpdump"
+    "tcpdump",
+    "valgrind",
+    "sysstat",
+    "iproute2",
+    "file"
   ],
   "priority": 80
 }

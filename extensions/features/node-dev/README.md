@@ -20,13 +20,11 @@ packages. Enabled by default.
 | Package | Purpose |
 |---------|---------|
 | `typescript` | TypeScript compiler |
-| `@types/node` | Node.js type definitions |
-| `ts-node` | TypeScript execution engine |
-| `eslint` | JavaScript/TypeScript linter |
-| `prettier` | Code formatter |
-| `nodemon` | File watcher / auto-restart |
 | `yarn` | Package manager |
 | `pnpm` | Package manager |
+
+Linters, formatters, and type definitions are left to each project's own
+dependencies; run one-off tools with `npx`.
 
 ## Node version precedence
 

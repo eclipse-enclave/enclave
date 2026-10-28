@@ -34,8 +34,9 @@ var retiredExtensions = map[model.ExtensionKind]map[string]retiredExtension{
 		"mistral-vibe": {replacement: "mistral-vibe", moved: true},
 	},
 	model.KindFeature: {
-		"playwright":   {replacement: "playwright-mcp", moved: true},
-		"shell-extras": {replacement: "shell-extras", moved: true},
+		"native-build-deps": {replacement: "theia-dev"},
+		"playwright":        {replacement: "playwright-mcp", moved: true},
+		"shell-extras":      {replacement: "shell-extras", moved: true},
 	},
 }
 

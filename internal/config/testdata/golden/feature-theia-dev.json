@@ -1,0 +1,12 @@
+{
+  "type": "mixin",
+  "name": "theia-dev",
+  "display_name": "Theia Development",
+  "description": "Headers for building Theia and other Electron apps (native-keymap, keytar)",
+  "apt_packages": [
+    "libx11-dev",
+    "libxkbfile-dev",
+    "libsecret-1-dev"
+  ],
+  "priority": 75
+}

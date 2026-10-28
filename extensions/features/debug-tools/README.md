@@ -1,6 +1,7 @@
 # debug-tools
 
-Low-level debugging and tracing tools. Opt-in (disabled by default).
+Low-level debugging, tracing, and diagnostics tools. Opt-in (disabled by
+default).
 
 **Priority**: 80
 
@@ -13,3 +14,7 @@ Low-level debugging and tracing tools. Opt-in (disabled by default).
 | `strace` | System call tracer |
 | `lsof` | List open files |
 | `tcpdump` | Network packet capture |
+| `valgrind` | Memory error and leak checker |
+| `sysstat` | Performance statistics (`pidstat`, `iostat`, `mpstat`, `sar`) |
+| `iproute2` | Network configuration and sockets (`ip`, `ss`) |
+| `file` | File type detection |

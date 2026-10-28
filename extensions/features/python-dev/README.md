@@ -18,3 +18,4 @@ Installs `uv` if not already present, then uses `uv tool install` for each tool:
 | `ipython` | Interactive Python shell |
 | `poetry` | Dependency management |
 | `pipenv` | Dependency management |
+| `pre-commit` | Runs a repository's `.pre-commit-config.yaml` hooks |

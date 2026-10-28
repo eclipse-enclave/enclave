@@ -149,7 +149,7 @@ The full key list, including build and persistence options, is in
 
 Features are optional tool stacks compiled into the image. `devtools`,
 `github-cli`, `node-dev`, and `python-dev` are on by default; `debug-tools`,
-`gitlab-cli`, `golang-dev`, and `native-build-deps` are opt-in.
+`gitlab-cli`, `golang-dev`, and `theia-dev` are opt-in.
 
 Use `+` and `-` to adjust the inherited set instead of replacing it:
 

@@ -9,7 +9,7 @@ schemaVersion: "1"
 kind: mixin
 name: debug-tools
 displayName: Debug Tools
-description: Debugging tools (gdb, strace, ltrace, etc.)
+description: Debugging and diagnostics tools (gdb, strace, valgrind, pidstat, ss, etc.)
 defaultEnabled: false
 priority: 80
 aptPackages:
@@ -18,3 +18,7 @@ aptPackages:
   - strace
   - lsof
   - tcpdump
+  - valgrind
+  - sysstat
+  - iproute2
+  - file

@@ -7,9 +7,9 @@
 
 schemaVersion: "1"
 kind: mixin
-name: native-build-deps
-displayName: Native Build Dependencies
-description: Headers for building native Node.js modules (libx11, libxkbfile, libsecret)
+name: theia-dev
+displayName: Theia Development
+description: Headers for building Theia and other Electron apps (native-keymap, keytar)
 defaultEnabled: false
 priority: 75
 aptPackages:

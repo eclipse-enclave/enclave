@@ -9,6 +9,6 @@ schemaVersion: "1"
 kind: mixin
 name: node-dev
 displayName: Node.js Development Tools
-description: Node.js development tools (typescript, eslint, prettier, etc.)
+description: Node.js development tools (nvm, typescript, yarn, pnpm)
 priority: 70
 failOnInstallError: true

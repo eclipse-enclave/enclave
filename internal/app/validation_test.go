@@ -594,10 +594,17 @@ func TestValidateOptionsQEMURejectsUnsatisfiableRequests(t *testing.T) {
 	// An allowlist implies restricted networking, which qemu cannot provide.
 	withAllowlist := base
 	withAllowlist.AllowDomains = []string{"example.com"}
-	if _, _, _, err := ValidateOptions(withAllowlist, model.DefaultOptionSources(), ValidationContext{Action: "run"}); err == nil {
+	configSources := model.DefaultOptionSources()
+	configSources.AllowDomains = model.SourceProject
+	if _, _, _, err := ValidateOptions(withAllowlist, configSources, ValidationContext{Action: "run"}); err == nil {
 		t.Fatal("expected qemu allow-domain validation error")
-	} else if !strings.Contains(err.Error(), "cannot restrict network access") {
+	} else if !strings.HasSuffix(err.Error(), "cannot restrict network access; remove allow_domains from config") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+	cliAllowSources := model.DefaultOptionSources()
+	cliAllowSources.AllowDomains = model.SourceCLI
+	if _, _, _, err := ValidateOptions(withAllowlist, cliAllowSources, ValidationContext{Action: "run"}); err == nil || !strings.HasSuffix(err.Error(), "remove --allow-domain") {
+		t.Fatalf("error = %v, want the --allow-domain hint", err)
 	}
 
 	// --features none (explicit empty) is accepted.

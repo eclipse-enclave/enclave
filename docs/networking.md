@@ -187,7 +187,7 @@ If the policy cannot be resolved (no or unknown tool, options a run would reject
 ## Adding Custom Domains
 
 Add custom domains through global `~/.config/enclave/network.jsonc`,
-`--allow-domain`, or the global `allow_domains` config key.
+`--allow-domain`, or the `allow_domains` config key (global or project).
 
 ### Global policy inheritance
 
@@ -207,7 +207,7 @@ enclave --allow-domain api.deepseek.com --allow-domain api.example.com
 
 On the Docker backend, `--allow-domain` is inert when combined with `--allow-all-network`: the gateway is not running, so there is no allowlist to extend. The QEMU backend rejects `--allow-domain` because it cannot enforce restricted egress. Bare DNS names only — schemes, paths, ports, and wildcards are rejected.
 
-The same key works in **global** config: `"allow_domains": ["api.deepseek.com"]` in `~/.config/enclave/config.json`. In **project** config (`~/.config/enclave/projects/<hash>/config.json`) it is ignored with a warning — project configs cannot widen the network allowlist. Use `--allow-domain` or global config instead.
+The same key works in config: `"allow_domains": ["api.deepseek.com"]` in global `~/.config/enclave/config.json`, or in project `~/.config/enclave/projects/<hash>/config.json` for one project.
 
 ## Overriding the Main Allowlist
 

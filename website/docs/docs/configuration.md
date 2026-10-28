@@ -189,23 +189,18 @@ replacing it. The precedence order, the patch merge semantics, and the full
 passthrough safety rules are documented in
 [docs/configuration.md](https://github.com/eclipse-enclave/enclave/blob/main/docs/configuration.md).
 
-## What project config cannot do
+## What project config can do
 
-Project config is deliberately weaker than global config: settings that would
-widen the sandbox are ignored there, with a warning naming the file. Set them in
-global config or pass them on the command line instead.
+Project config lives in Enclave's host config root, out of reach of the
+repository and of the agent, so only you can edit it. It can therefore set
+anything global config can, for that project only: a different default tool,
+extra allowed domains, a writable mount, or yolo mode. The exceptions are
+`auto_update` and `update_channel`, which control the Enclave binary itself and
+are read from global config only.
 
-| Ignored in project config | Why |
-| --- | --- |
-| `tool` | Choosing the agent stays a user decision. Pass `--tool` or set it globally. |
-| `yolo` | A repository cannot decide how much autonomy its agent gets. |
-| `allow_all_network`, `allow_domains` | A repository cannot widen its own network allowlist. |
-| `pass_env` | A repository cannot ask for your host environment variables. |
-| `host_config`, `tool_overrides.<tool>.host_config_paths` | A repository cannot widen host-config passthrough. |
-| `add_dirs`, `add_readonly_dirs` outside the project | Project scope can only mount subdirectories of the project itself. |
-| `base_image`, `bridge_ports` | Base image and host-port bridging stay host-side decisions. |
-| `project_mount: "writable"` | Project scope can tighten a stricter global default, never loosen it. |
-| `worktree_metadata` values that relax the inherited mode | Same rule for the linked-worktree git metadata mounts: tighten only. |
+Mounting a sensitive directory such as your home directory or `~/.ssh` still
+needs `--allow-sensitive-mounts` on the command line, whichever config file
+asks for it.
 
 ## Per-tool overrides
 

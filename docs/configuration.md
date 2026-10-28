@@ -6,8 +6,8 @@ Global defaults live in `~/.config/enclave/config.json`. Project overrides live
 in `~/.config/enclave/projects/<hash>/config.json`, keyed by project hash and
 kept outside the worktree. CLI flags always take the highest precedence.
 
-Project overrides live outside the worktree so a project cannot alter its own
-isolation policy. Extension files are discovered from built-in `extensions/`
+Project overrides live outside the worktree, where neither the repository nor a
+session can edit them, so a project cannot alter its own isolation policy. Extension files are discovered from built-in `extensions/`
 plus user-global `~/.config/enclave/extensions/`.
 
 Extensions installed with `enclave tools|features add` carry a
@@ -29,18 +29,12 @@ substitute it for `~/.config/enclave/` in every path below.
 4. Global config (`~/.config/enclave/config.json`)
 5. Built-in defaults
 
-Security guardrail: project config cannot elevate guarded options. Each is
-ignored with a warning naming the file; use global config or CLI flags for
-explicit host opt-in. Guarded at project scope: `tool`, `yolo`,
-`allow_all_network=true`, `allow_domains`, `pass_env`, `host_config`,
-`tool_overrides.<tool>.host_config_paths`, `base_image`, `bridge_ports`,
-`add_dirs`/`add_readonly_dirs` entries outside the project subtree,
-`project_mount="writable"`, and any `worktree_metadata` value that relaxes the
-inherited mode.
-
-`auto_update` and `update_channel` are global-only rather than project or
-per-tool options because they replace the host executable. Project and
-tool-override values are ignored.
+Because only you can edit it, project config may set every option global config
+can, with the same effect for that project. The exceptions are `auto_update`
+and `update_channel`: they are global-only rather than project or per-tool
+options because they replace the host executable, so project and tool-override
+values are ignored with a warning. Opt-ins without a config key, such as
+`--allow-sensitive-mounts`, stay CLI-only.
 
 Top-level `host_config_paths` is not part of that set: it is ignored with a
 warning in any config file, global included, because passthrough paths are only
@@ -92,10 +86,8 @@ supported under `tool_overrides.<tool>`.
 | `playwright_mcp` | Enable Playwright MCP server (Claude only) |
 | `bridge_ports` | Forward host ports into the container (host → container) |
 
-Project config may set `project_mount` to `readonly`, but `project_mount="writable"`
-is ignored at project scope so it cannot weaken a stricter global default. In
-readonly mode, writable `add_dirs` entries inside the project subtree are
-mounted read-only.
+In readonly mode, writable `add_dirs` entries inside the project are mounted
+read-only.
 
 `worktree_metadata` controls the gitdir/commondir mounts that enclave
 resolves from a linked worktree's `.git` file. `follow` ties them to the
@@ -103,9 +95,7 @@ project mount mode, `readonly` forces them read-only while the working copy
 stays writable, and `none` skips them entirely. With read-only metadata the
 agent can edit files and read history (`git log`, `git diff`, `git status`),
 but every git write, including `git add`, fails; staging and committing happen
-on the host. Project config may strengthen the inherited mode from `follow` to
-`readonly` or `none`, or from `readonly` to `none`; settings that would weaken
-the inherited mode are ignored. For a regular repository whose `.git`
+on the host. For a regular repository whose `.git`
 directory sits inside the project, the project mount mode governs and this
 option has no effect.
 
@@ -405,14 +395,14 @@ Each `options.<name>` entry has:
 - `source`: the layer that last set the raw option: `default`, `global`,
   `project`, `tool_override`, or `cli`.
 - `layers`: the raw value each of `global`, `project`, `tool_override`, and
-  `cli` sets, after project guardrails and before normalization; absent layers
+  `cli` sets, after ignored keys are dropped and before normalization; absent layers
   do not set the option.
 - `directives` (`features`, `host_config_paths` only): the raw selection,
   `null` when unset and `[]` for none.
 
 Warning codes: `invalid_config_json`, `config_path_is_directory`,
 `unsupported_scope`, `invalid_tool_override`, `invalid_value`,
-`suspicious_value`, `project_guardrail`, `project_subtree` (config loading;
+`suspicious_value`, `project_guardrail` (config loading;
 `layer` is `global`, `project`, or `tool_override:<tool>`), `unknown_feature`,
 `features_unavailable`, `tool_unresolved`, `tool_unavailable` (also makes
 `valid` false), `project_unavailable`, and `validation` (e.g. an ignored

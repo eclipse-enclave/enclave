@@ -280,8 +280,7 @@ The complete flow from CLI arguments to final options:
 │  1. config.LoadDefaults(projectDir)                                         │
 │     ├── Read ~/.config/enclave/config.json → globalDefaults               │
 │     └── Read <config-root>/projects/<hash>/config.json → projectDefaults    │
-│         (project guardrails can strip blocked elevations, e.g.              │
-│          allow_all_network=true)                                            │
+│         (auto_update and update_channel are dropped: global-only)           │
 │                                                                             │
 │  2. cli.Parse(args, baseOpts)                                               │
 │     ├── Match commands: run, shell, exec, cleanup, config, etc.             │
@@ -316,13 +315,10 @@ The complete flow from CLI arguments to final options:
 
 **Precedence:** CLI > Tool override > Project config > Global config > Built-in defaults
 
-Project guardrails are enforced while loading `~/.config/enclave/projects/<hash>/config.json`. Guarded
-keys are ignored at project scope (including `tool_overrides`) with warnings,
-so they cannot elevate host security defaults. For project mount hardening,
-project config may set `project_mount=readonly` but cannot set
-`project_mount=writable` to weaken a stricter parent default. The
-`worktree_metadata` modes form the order `follow < readonly < none`; project
-config may strengthen the inherited mode, but weaker values are stripped.
+Project config lives in the host config root, out of reach of the repository and
+of sessions, so it may set every option global config can. Only the global-only
+`auto_update` and `update_channel` are dropped while loading
+`~/.config/enclave/projects/<hash>/config.json`, with a warning.
 
 **Key types:**
 - `model.Options` - final resolved options (embedded structs: Run, Auth, Build, Cleanup)
@@ -353,10 +349,6 @@ is:
 3. Project config
 4. Global config
 5. Built-in defaults
-
-Guardrail note: project config cannot elevate guarded options such as
-`allow_all_network=true`; those values are ignored with warnings. Host intent
-must come from global config (`~/.config/enclave/config.json`) or explicit CLI flags.
 
 `cache_from` can be used to add inline `docker build` cache sources (same as
 `--cache-from`). Some build controls are intentionally not read

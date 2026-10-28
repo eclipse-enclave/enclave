@@ -56,10 +56,10 @@ func (b *Backend) applyDevcontainerRunArgs(config *dockercmd.ContainerConfig, ho
 			logx.Warnf("devcontainer runArgs user override ignored")
 			continue
 		case strings.HasPrefix(arg, "--net="):
-			logx.Warnf("devcontainer runArgs --net %q is blocked: network mode is managed by enclave and cannot be overridden by devcontainer (use --allow-risky-devcontainer to override)", strings.TrimPrefix(arg, "--net="))
+			logx.Warnf("devcontainer runArgs --net %q is blocked: network mode is managed by enclave and cannot be overridden by devcontainer", strings.TrimPrefix(arg, "--net="))
 			continue
 		case arg == "--privileged" || strings.HasPrefix(arg, "--privileged="):
-			logx.Warnf("devcontainer runArgs flag %q is blocked for security; ignoring (use --allow-risky-devcontainer to override)", arg)
+			logx.Warnf("devcontainer runArgs flag %q is blocked for security; ignoring", arg)
 			continue
 		case arg == "--init":
 			init := true
@@ -124,7 +124,7 @@ var devcontainerRunArgHandlers = []devcontainerRunArgHandler{
 			return
 		}
 		if !isAllowedSecurityOpt(strings.ToLower(strings.TrimSpace(value))) {
-			logx.Warnf("devcontainer runArgs --security-opt %q is blocked for security; ignoring (use --allow-risky-devcontainer to override)", value)
+			logx.Warnf("devcontainer runArgs --security-opt %q is blocked for security; ignoring", value)
 			return
 		}
 		hostConfig.SecurityOpt = append(hostConfig.SecurityOpt, value)
@@ -135,7 +135,7 @@ var devcontainerRunArgHandlers = []devcontainerRunArgHandler{
 		}
 		normalized := strings.TrimPrefix(strings.ToUpper(strings.TrimSpace(value)), "CAP_")
 		if _, blocked := blockedCapabilities[normalized]; blocked {
-			logx.Warnf("devcontainer runArgs --cap-add %q is blocked for security; ignoring (use --allow-risky-devcontainer to override)", value)
+			logx.Warnf("devcontainer runArgs --cap-add %q is blocked for security; ignoring", value)
 			return
 		}
 		hostConfig.CapAdd = append(hostConfig.CapAdd, value)
@@ -153,7 +153,7 @@ var devcontainerRunArgHandlers = []devcontainerRunArgHandler{
 		if arg == "--net" {
 			flag = "--net"
 		}
-		logx.Warnf("devcontainer runArgs %s %q is blocked: network mode is managed by enclave and cannot be overridden by devcontainer (use --allow-risky-devcontainer to override)", flag, value)
+		logx.Warnf("devcontainer runArgs %s %q is blocked: network mode is managed by enclave and cannot be overridden by devcontainer", flag, value)
 	}},
 	{long: "--add-host", apply: func(_ *Backend, arg, value string, _ *dockercmd.ContainerConfig, hostConfig *dockercmd.HostConfig) {
 		if requireRunArgValue(arg, value) {
@@ -171,7 +171,7 @@ var devcontainerRunArgHandlers = []devcontainerRunArgHandler{
 		}
 	}},
 	{long: "--entrypoint", apply: func(_ *Backend, _ string, _ string, _ *dockercmd.ContainerConfig, _ *dockercmd.HostConfig) {
-		logx.Warnf(`devcontainer runArgs flag "--entrypoint" is blocked for security; ignoring (use --allow-risky-devcontainer to override)`)
+		logx.Warnf(`devcontainer runArgs flag "--entrypoint" is blocked for security; ignoring`)
 	}},
 }
 

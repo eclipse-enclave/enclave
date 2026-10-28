@@ -14,106 +14,69 @@ import (
 	"enclave/internal/model"
 )
 
-func TestApplyDefaultsWithSources_MergeSlices(t *testing.T) {
-	opts := DefaultOptions()
-	sources := model.DefaultOptionSources()
+func resolveConfigOnly(global, project Defaults) model.Options {
+	opts, _, _ := ResolveOptionsForTool(DefaultOptions(), model.OptionSources{}, global, project, "claude")
+	return opts
+}
 
+func TestResolveOptionsMergesSelections(t *testing.T) {
 	global := Defaults{
-		Features:        []string{"github-cli"},
-		HostConfigPaths: []string{"default", "-skills/"},
+		Features:      []string{"github-cli"},
+		ToolOverrides: map[string]Defaults{"claude": {HostConfigPaths: []string{"default", "-skills/"}}},
 	}
 	project := Defaults{
-		Features:        []string{"+devtools"},
-		HostConfigPaths: []string{"+commands/"},
+		Features:      []string{"+devtools"},
+		ToolOverrides: map[string]Defaults{"claude": {HostConfigPaths: []string{"+commands/"}}},
 	}
+	opts := resolveConfigOnly(global, project)
 
-	opts = ApplyDefaultsWithSources(opts, global, model.SourceGlobal, &sources)
-	opts = ApplyDefaultsWithSources(opts, project, model.SourceProject, &sources)
-
-	wantFeatures := []string{"devtools", "github-cli"}
-	if !reflect.DeepEqual(opts.Features, wantFeatures) {
-		t.Fatalf("features mismatch: got %v want %v", opts.Features, wantFeatures)
+	if want := []string{"github-cli", "devtools"}; !reflect.DeepEqual(opts.Features, want) {
+		t.Fatalf("features mismatch: got %v want %v", opts.Features, want)
 	}
-	if sources.Features != model.SourceProject {
-		t.Fatalf("features source mismatch: got %v want %v", sources.Features, model.SourceProject)
+	if opts.Sources.Features != model.SourceProject {
+		t.Fatalf("features source mismatch: got %v want %v", opts.Sources.Features, model.SourceProject)
 	}
-
-	wantHostConfigPaths := []string{"default", "-skills/", "+commands/"}
-	if !reflect.DeepEqual(opts.HostConfigPaths, wantHostConfigPaths) {
-		t.Fatalf("host_config_paths mismatch: got %v want %v", opts.HostConfigPaths, wantHostConfigPaths)
+	if want := []string{"default", "-skills/", "commands/"}; !reflect.DeepEqual(opts.HostConfigPaths, want) {
+		t.Fatalf("host_config_paths mismatch: got %v want %v", opts.HostConfigPaths, want)
 	}
-	if sources.HostConfigPaths != model.SourceProject {
-		t.Fatalf("host_config_paths source mismatch: got %v want %v", sources.HostConfigPaths, model.SourceProject)
+	if opts.Sources.HostConfigPaths != model.SourceToolOverride {
+		t.Fatalf("host_config_paths source mismatch: got %v want %v", opts.Sources.HostConfigPaths, model.SourceToolOverride)
 	}
 }
 
-func TestApplyDefaultsWithSources_AdditiveAgainstImplicitDefaults(t *testing.T) {
-	opts := DefaultOptions()
-	sources := model.DefaultOptionSources()
-
+func TestResolveOptionsKeepsDirectivesAgainstImplicitDefaults(t *testing.T) {
 	project := Defaults{
-		Features:        []string{"+devtools"},
-		HostConfigPaths: []string{"-skills/"},
+		Features:      []string{"+devtools", "-node-dev"},
+		ToolOverrides: map[string]Defaults{"claude": {HostConfigPaths: []string{"-skills/"}}},
 	}
+	opts := resolveConfigOnly(Defaults{}, project)
 
-	opts = ApplyDefaultsWithSources(opts, project, model.SourceProject, &sources)
-
-	wantFeatures := []string{"+devtools"}
-	if !reflect.DeepEqual(opts.Features, wantFeatures) {
-		t.Fatalf("features additive directives should be preserved when base is implicit default, got %v want %v", opts.Features, wantFeatures)
+	if want := []string{"+devtools", "-node-dev"}; !reflect.DeepEqual(opts.Features, want) {
+		t.Fatalf("features directives should be preserved when base is implicit default, got %v want %v", opts.Features, want)
 	}
-	wantHostConfigPaths := []string{"-skills/"}
-	if !reflect.DeepEqual(opts.HostConfigPaths, wantHostConfigPaths) {
-		t.Fatalf("host_config_paths directives should be preserved against implicit defaults, got %v want %v", opts.HostConfigPaths, wantHostConfigPaths)
+	if want := []string{"-skills/"}; !reflect.DeepEqual(opts.HostConfigPaths, want) {
+		t.Fatalf("host_config_paths directives should be preserved against implicit defaults, got %v want %v", opts.HostConfigPaths, want)
 	}
 }
 
-func TestApplyDefaultsWithSources_SubtractiveAgainstImplicitAll(t *testing.T) {
-	opts := DefaultOptions()
-	sources := model.DefaultOptionSources()
-
-	project := Defaults{
-		Features: []string{"-node-dev"},
-	}
-
-	opts = ApplyDefaultsWithSources(opts, project, model.SourceProject, &sources)
-
-	wantFeatures := []string{"-node-dev"}
-	if !reflect.DeepEqual(opts.Features, wantFeatures) {
-		t.Fatalf("features subtractive directives should be preserved when base is implicit default, got %v want %v", opts.Features, wantFeatures)
-	}
-}
-
-func TestApplyDefaultsWithSources_AllowDomainsFromGlobal(t *testing.T) {
-	opts := DefaultOptions()
-	sources := model.DefaultOptionSources()
-
-	global := Defaults{
-		AllowDomains: []string{"api.example.com", "api.deepseek.com"},
-	}
-	opts = ApplyDefaultsWithSources(opts, global, model.SourceGlobal, &sources)
+func TestResolveOptionsAllowDomainsFromGlobal(t *testing.T) {
+	opts := resolveConfigOnly(Defaults{AllowDomains: []string{"api.example.com", "api.deepseek.com"}}, Defaults{})
 
 	want := []string{"api.example.com", "api.deepseek.com"}
 	if !reflect.DeepEqual(opts.AllowDomains, want) {
 		t.Fatalf("allow_domains from global config should reach RunOptions: got %v want %v", opts.AllowDomains, want)
 	}
-	if sources.AllowDomains != model.SourceGlobal {
-		t.Fatalf("allow_domains source should be global, got %v", sources.AllowDomains)
+	if opts.Sources.AllowDomains != model.SourceGlobal {
+		t.Fatalf("allow_domains source should be global, got %v", opts.Sources.AllowDomains)
 	}
 }
 
-func TestApplyDefaultsWithSources_HostConfigPathsAdditiveAgainstExplicitEmpty(t *testing.T) {
-	opts := DefaultOptions()
-	sources := model.DefaultOptionSources()
+func TestResolveOptionsHostConfigPathsAdditiveAgainstExplicitEmpty(t *testing.T) {
+	global := Defaults{ToolOverrides: map[string]Defaults{"claude": {HostConfigPaths: []string{}}}}
+	project := Defaults{ToolOverrides: map[string]Defaults{"claude": {HostConfigPaths: []string{"+statusbar/", "-skills/"}}}}
+	opts := resolveConfigOnly(global, project)
 
-	global := Defaults{HostConfigPaths: []string{}}
-	project := Defaults{HostConfigPaths: []string{"+statusbar/", "-skills/"}}
-
-	opts = ApplyDefaultsWithSources(opts, global, model.SourceGlobal, &sources)
-	opts = ApplyDefaultsWithSources(opts, project, model.SourceProject, &sources)
-
-	want := []string{"statusbar/"}
-	if !reflect.DeepEqual(opts.HostConfigPaths, want) {
+	if want := []string{"statusbar/"}; !reflect.DeepEqual(opts.HostConfigPaths, want) {
 		t.Fatalf("host_config_paths additive merge against explicit empty: got %v want %v", opts.HostConfigPaths, want)
 	}
 }

@@ -20,7 +20,7 @@ func TestAppendCSVUnique(t *testing.T) {
 	// Dedup against the existing slice and within the input; blanks skipped.
 	// `added` counts every kept (non-empty, accepted) item, including ones that
 	// were already present — callers use added==0 to detect "no values".
-	dst, added, err := appendCSVUnique([]string{"a"}, "a, b , ,c,b", keepCSVValue)
+	dst, added, err := appendCSVUnique([]string{"a"}, "a, b , ,c,b", func(s string) (string, bool, error) { return s, true, nil })
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

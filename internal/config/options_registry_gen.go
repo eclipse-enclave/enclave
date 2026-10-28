@@ -71,12 +71,6 @@ func OptionSpecs() []OptionSpec {
 		{
 			Name:  "host_config_paths",
 			Group: OptionGroupRun,
-			ApplyDefaultsWithSource: func(opts *model.Options, defaults Defaults, source model.OptionSource, sources *model.OptionSources) {
-				if canOverride(sources.HostConfigPaths, source) && defaults.HostConfigPaths != nil {
-					opts.HostConfigPaths = mergeHostConfigSlice(opts.HostConfigPaths, defaults.HostConfigPaths)
-					sources.HostConfigPaths = source
-				}
-			},
 		},
 		{
 			Name:  "skills_validation",
@@ -171,12 +165,6 @@ func OptionSpecs() []OptionSpec {
 		{
 			Name:  "pass_env",
 			Group: OptionGroupAuth,
-			ApplyDefaultsWithSource: func(opts *model.Options, defaults Defaults, source model.OptionSource, sources *model.OptionSources) {
-				if canOverride(sources.PassEnv, source) && len(defaults.PassEnv) > 0 {
-					opts.PassEnv = copyStringSlice(defaults.PassEnv)
-					sources.PassEnv = source
-				}
-			},
 		},
 		{
 			Name:  "allow_all_network",
@@ -313,22 +301,10 @@ func OptionSpecs() []OptionSpec {
 		{
 			Name:  "features",
 			Group: OptionGroupBuild,
-			ApplyDefaultsWithSource: func(opts *model.Options, defaults Defaults, source model.OptionSource, sources *model.OptionSources) {
-				if canOverride(sources.Features, source) && defaults.Features != nil {
-					opts.Features = mergeFeatureSlice(opts.Features, defaults.Features)
-					sources.Features = source
-				}
-			},
 		},
 		{
 			Name:  "cache_from",
 			Group: OptionGroupBuild,
-			ApplyDefaultsWithSource: func(opts *model.Options, defaults Defaults, source model.OptionSource, sources *model.OptionSources) {
-				if canOverride(sources.CacheFrom, source) && len(defaults.CacheFrom) > 0 {
-					opts.CacheFrom = copyStringSlice(defaults.CacheFrom)
-					sources.CacheFrom = source
-				}
-			},
 		},
 		{
 			Name:  "build_uid",
@@ -391,12 +367,6 @@ func OptionSpecs() []OptionSpec {
 		{
 			Name:  "ports",
 			Group: OptionGroupRun,
-			ApplyDefaultsWithSource: func(opts *model.Options, defaults Defaults, source model.OptionSource, sources *model.OptionSources) {
-				if canOverride(sources.Ports, source) && len(defaults.Ports) > 0 {
-					opts.Ports = copyStringSlice(defaults.Ports)
-					sources.Ports = source
-				}
-			},
 		},
 		{
 			Name:  "session_name",
@@ -405,22 +375,10 @@ func OptionSpecs() []OptionSpec {
 		{
 			Name:  "add_dirs",
 			Group: OptionGroupRun,
-			ApplyDefaultsWithSource: func(opts *model.Options, defaults Defaults, source model.OptionSource, sources *model.OptionSources) {
-				if canOverride(sources.AddDirs, source) && len(defaults.AddDirs) > 0 {
-					opts.AddDirs = copyStringSlice(defaults.AddDirs)
-					sources.AddDirs = source
-				}
-			},
 		},
 		{
 			Name:  "add_readonly_dirs",
 			Group: OptionGroupRun,
-			ApplyDefaultsWithSource: func(opts *model.Options, defaults Defaults, source model.OptionSource, sources *model.OptionSources) {
-				if canOverride(sources.AddReadonlyDirs, source) && len(defaults.AddReadonlyDirs) > 0 {
-					opts.AddReadonlyDirs = copyStringSlice(defaults.AddReadonlyDirs)
-					sources.AddReadonlyDirs = source
-				}
-			},
 		},
 		{
 			Name:  "allow_sensitive_mounts",
@@ -449,12 +407,6 @@ func OptionSpecs() []OptionSpec {
 		{
 			Name:  "allow_domains",
 			Group: OptionGroupRun,
-			ApplyDefaultsWithSource: func(opts *model.Options, defaults Defaults, source model.OptionSource, sources *model.OptionSources) {
-				if canOverride(sources.AllowDomains, source) && len(defaults.AllowDomains) > 0 {
-					opts.AllowDomains = copyStringSlice(defaults.AllowDomains)
-					sources.AllowDomains = source
-				}
-			},
 		},
 		{
 			Name:  "playwright_mcp",
@@ -469,12 +421,6 @@ func OptionSpecs() []OptionSpec {
 		{
 			Name:  "bridge_ports",
 			Group: OptionGroupRun,
-			ApplyDefaultsWithSource: func(opts *model.Options, defaults Defaults, source model.OptionSource, sources *model.OptionSources) {
-				if canOverride(sources.BridgePorts, source) && len(defaults.BridgePorts) > 0 {
-					opts.BridgePorts = copyStringSlice(defaults.BridgePorts)
-					sources.BridgePorts = source
-				}
-			},
 		},
 	}
 	attachCLIFlags(specs)

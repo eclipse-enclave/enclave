@@ -22,7 +22,12 @@ func runDevcontainerGenerate(input *CommandInput) int {
 		return 1
 	}
 
-	buildOptions, err := normalizeConfiguredBuildOptions(input.Ctx.Paths, input.Options.BuildOptions)
+	// Normalized as for a run, so --playwright-mcp selects the image a run builds.
+	opts, warnings := normalizeOptions(input.Options)
+	for _, warning := range warnings {
+		logx.Warnf("%s", warning)
+	}
+	buildOptions, err := normalizeConfiguredBuildOptions(input.Ctx.Paths, opts.BuildOptions)
 	if err != nil {
 		logx.Errorf("%v", err)
 		return 1

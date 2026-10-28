@@ -1822,3 +1822,60 @@ func TestBuiltinNamesMatchRootCommand(t *testing.T) {
 		t.Fatalf("usercmd.BuiltinNames = %v, root command registers %v", want, got)
 	}
 }
+
+func TestParseListFlags(t *testing.T) {
+	cases := []struct {
+		name  string
+		args  []string
+		field func(model.Options) []string
+		want  []string
+	}{
+		{name: "ports split on commas", args: []string{"-p", "3000,8080:80"}, field: func(o model.Options) []string { return o.Ports }, want: []string{"3000", "8080:80"}},
+		{name: "ports repeat", args: []string{"-p", "3000", "-p", "4000"}, field: func(o model.Options) []string { return o.Ports }, want: []string{"3000", "4000"}},
+		{name: "port removal reaches the merge", args: []string{"-p", "-8080"}, field: func(o model.Options) []string { return o.Ports }, want: []string{"-8080"}},
+		{name: "domains split on commas", args: []string{"--allow-domain", "a.dev,b.dev"}, field: func(o model.Options) []string { return o.AllowDomains }, want: []string{"a.dev", "b.dev"}},
+		{name: "pass-env removal reaches the merge", args: []string{"--pass-env", "-FOO"}, field: func(o model.Options) []string { return o.PassEnv }, want: []string{"-FOO"}},
+		{name: "none is kept", args: []string{"--pass-env", "none,BAR"}, field: func(o model.Options) []string { return o.PassEnv }, want: []string{"none", "BAR"}},
+		{name: "dirs keep commas", args: []string{"--add-dir", "/tmp/a,b"}, field: func(o model.Options) []string { return o.AddDirs }, want: []string{"/tmp/a,b"}},
+		{name: "readonly dirs keep commas", args: []string{"--add-readonly-dir", "/tmp/a,b", "--add-readonly-dir", "-/tmp/c"}, field: func(o model.Options) []string { return o.AddReadonlyDirs }, want: []string{"/tmp/a,b", "-/tmp/c"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			res, err := Parse(append([]string{"run"}, tc.args...), config.DefaultOptions())
+			if err != nil {
+				t.Fatalf("parse failed: %v", err)
+			}
+			if got := tc.field(res.Options); !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("got %#v, want %#v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestParseListFlagsRejectInvalidEntries(t *testing.T) {
+	for _, args := range [][]string{
+		{"-p", "abc"},
+		{"-p", "-abc"},
+		{"--allow-domain", "https://a.dev"},
+		{"--pass-env", "-BAD-NAME"},
+		{"--bridge-port", "+99999"},
+		{"--add-dir", "+"},
+	} {
+		if _, err := Parse(append([]string{"run"}, args...), config.DefaultOptions()); err == nil {
+			t.Errorf("Parse(%v) succeeded, want an error", args)
+		}
+	}
+}
+
+func TestParseFeaturesNoneCannotCombineInEitherOrder(t *testing.T) {
+	for _, args := range [][]string{
+		{"--features", "none,node-dev"},
+		{"--features", "node-dev,none"},
+		{"--features", "none", "--features", "node-dev"},
+		{"--features", "node-dev", "--features", "none"},
+	} {
+		if _, err := Parse(append([]string{"run"}, args...), config.DefaultOptions()); err == nil {
+			t.Errorf("Parse(%v) succeeded, want an error", args)
+		}
+	}
+}

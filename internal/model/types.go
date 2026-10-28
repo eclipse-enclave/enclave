@@ -150,6 +150,9 @@ type Options struct {
 	StatusOptions
 	PSOptions
 	Sources OptionSources
+	// Origins and ListProblems are filled by option resolution; never part of provenance.
+	Origins      ListOrigins
+	ListProblems []ListProblem
 }
 
 type RuntimeConfig struct {

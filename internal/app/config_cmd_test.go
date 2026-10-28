@@ -225,6 +225,7 @@ func configTestInput(t *testing.T, paths model.Paths, opts model.Options, config
 	return &CommandInput{
 		Ctx:            NewAppContext(paths, t.TempDir()),
 		Options:        opts,
+		CLIOptions:     opts,
 		BaseOptions:    config.DefaultOptions(),
 		ConfigView:     model.ConfigView{Mode: "effective", JSON: true},
 		ConfigWarnings: configWarnings,
@@ -397,10 +398,7 @@ func TestConfigJSONYoloResolution(t *testing.T) {
 }
 
 func TestConfigJSONValuesMatchValidatedRun(t *testing.T) {
-	opts := config.DefaultOptions()
-	opts.AllowDomains = []string{"Example.com"}
-	opts.Sources = model.DefaultOptionSources()
-	opts.Sources.AllowDomains = model.SourceGlobal
+	opts, _, _ := config.ResolveOptionsForTool(config.DefaultOptions(), model.OptionSources{}, config.Defaults{AllowDomains: []string{"Example.com"}}, config.Defaults{}, "")
 
 	doc := runConfigJSON(t, configTestInput(t, testPathsWithFeatures(t), opts, nil))
 
@@ -565,5 +563,42 @@ func TestConfigJSONKeepsLegacyFields(t *testing.T) {
 		if !reflect.DeepEqual(doc[key], want[key]) {
 			t.Fatalf("%s = %#v, want %#v", key, doc[key], want[key])
 		}
+	}
+}
+
+func TestConfigRowsShowResolvedFeatures(t *testing.T) {
+	opts := config.DefaultOptions()
+	opts.Tool = "claude"
+	opts.Features = []string{"-node-dev", "+shell-extras"}
+	opts.Sources = model.DefaultOptionSources()
+	opts.Sources.Features = model.SourceGlobal
+	rows := []configRow{{Name: "features", Effective: "-node-dev, +shell-extras"}}
+
+	rows = withResolvedFeatures(rows, testPathsWithFeatures(t), opts, opts.Sources)
+	if want := config.FormatSlice([]string{"github-cli", "shell-extras"}); rows[0].Effective != want {
+		t.Fatalf("features effective = %q, want %q", rows[0].Effective, want)
+	}
+}
+
+func TestConfigJSONListLayersShowRawValues(t *testing.T) {
+	cli := config.DefaultOptions()
+	cli.Ports = []string{"-1000", "+4000"}
+	cliSources := model.OptionSources{}
+	cliSources.Ports = model.SourceCLI
+	global := config.Defaults{Ports: []string{"1000", "2000"}}
+	opts, _, _ := config.ResolveOptionsForTool(cli, cliSources, global, config.Defaults{}, "")
+	input := configTestInput(t, testPathsWithFeatures(t), opts, nil)
+	input.CLIOptions = cli
+	input.GlobalDefaults = global
+
+	ports := configJSONOptionField(t, runConfigJSON(t, input), "ports")
+	want := map[string]any{
+		"kind":   "string_slice",
+		"value":  []any{"2000", "4000"},
+		"source": "cli",
+		"layers": map[string]any{"global": []any{"1000", "2000"}, "cli": []any{"-1000", "+4000"}},
+	}
+	if !reflect.DeepEqual(ports, want) {
+		t.Fatalf("options.ports = %#v, want %#v", ports, want)
 	}
 }

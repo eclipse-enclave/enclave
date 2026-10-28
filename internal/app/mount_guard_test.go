@@ -10,6 +10,7 @@ package app
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -39,13 +40,17 @@ func guardProject(dir string) model.Project {
 	return model.Project{Dir: dir, RealDir: dir}
 }
 
-func cliAddDirs(dirs ...string) additionalDirs {
-	return additionalDirs{dirs: dirs, flag: "--add-dir", key: "add_dirs", source: model.SourceCLI}
+func cliAddDirs(dirs ...string) []additionalDir {
+	var additional []additionalDir
+	for _, dir := range dirs {
+		additional = append(additional, additionalDir{path: dir, origin: "--add-dir"})
+	}
+	return additional
 }
 
 func TestCheckSensitiveMountsPassesProjectDirectories(t *testing.T) {
 	home, project, _ := mountGuardHome(t)
-	if err := checkSensitiveMounts(guardProject(project), []additionalDirs{cliAddDirs(t.TempDir())}, home, false); err != nil {
+	if err := checkSensitiveMounts(guardProject(project), cliAddDirs(t.TempDir()), home, false); err != nil {
 		t.Fatalf("project directory refused: %v", err)
 	}
 }
@@ -56,15 +61,8 @@ func TestCheckSensitiveMountsRefusesWithoutOptIn(t *testing.T) {
 	if err := os.Mkdir(m2, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	globalConfig, err := config.GlobalConfigPath()
-	if err != nil {
-		t.Fatal(err)
-	}
-	additional := []additionalDirs{
-		cliAddDirs(aws),
-		{dirs: []string{m2}, flag: "--add-readonly-dir", key: "add_readonly_dirs", source: model.SourceGlobal},
-	}
-	err = checkSensitiveMounts(guardProject(home), additional, home, false)
+	additional := append(cliAddDirs(aws), additionalDir{path: m2, origin: "add_readonly_dirs in global config"})
+	err := checkSensitiveMounts(guardProject(home), additional, home, false)
 	if err == nil {
 		t.Fatal("expected the home directory, ~/.aws, and ~/.m2 to be refused")
 	}
@@ -72,7 +70,7 @@ func TestCheckSensitiveMountsRefusesWithoutOptIn(t *testing.T) {
 	for _, want := range []string{
 		home + " (project directory): is your home directory",
 		aws + " (--add-dir): is ~/.aws",
-		m2 + " (add_readonly_dirs from " + globalConfig + "): is ~/.m2",
+		m2 + " (add_readonly_dirs in global config): is ~/.m2",
 		"--allow-sensitive-mounts",
 		model.EnvAllowSensitiveMounts + "=1",
 	} {
@@ -86,7 +84,7 @@ func TestCheckSensitiveMountsWarnsWhenAllowed(t *testing.T) {
 	home, _, aws := mountGuardHome(t)
 	var err error
 	_, stderr := captureOutput(t, func() {
-		err = checkSensitiveMounts(guardProject(home), []additionalDirs{cliAddDirs(aws)}, home, true)
+		err = checkSensitiveMounts(guardProject(home), cliAddDirs(aws), home, true)
 	})
 	if err != nil {
 		t.Fatalf("opted-in run refused: %v", err)
@@ -123,5 +121,35 @@ func TestSensitiveMountsAllowed(t *testing.T) {
 		if got := sensitiveMountsAllowed(tc.flag, tc.source); got != tc.allowed {
 			t.Errorf("sensitiveMountsAllowed(flag=%v, source=%v, env=%q set=%v) = %v, want %v", tc.flag, tc.source, tc.env, tc.set, got, tc.allowed)
 		}
+	}
+}
+
+func TestValidateAdditionalDirsKeepsEachEntrysOrigin(t *testing.T) {
+	project := t.TempDir()
+	shared := t.TempDir()
+	cliDir := t.TempDir()
+	global := config.Defaults{AddDirs: []string{shared}, AddReadonlyDirs: []string{shared, filepath.Join(project, "missing")}}
+	cliOpts := config.DefaultOptions()
+	cliOpts.AddDirs = []string{cliDir}
+	cliSources := model.OptionSources{}
+	cliSources.AddDirs = model.SourceCLI
+	opts, _, _ := config.ResolveOptionsForTool(cliOpts, cliSources, global, config.Defaults{}, "")
+
+	_, _, err := validateAdditionalDirs(opts, project, "")
+	if err == nil || !strings.Contains(err.Error(), "add_readonly_dirs in global config: directory not found") {
+		t.Fatalf("error = %v, want the missing directory attributed to global config", err)
+	}
+
+	opts.AddReadonlyDirs = []string{shared}
+	writable, readonly, err := validateAdditionalDirs(opts, project, "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := []additionalDir{{path: shared, origin: "add_dirs in global config"}, {path: cliDir, origin: "--add-dir"}}
+	if !reflect.DeepEqual(writable, want) {
+		t.Fatalf("writable = %#v, want %#v", writable, want)
+	}
+	if len(readonly) != 0 {
+		t.Fatalf("readonly = %#v, want the writable duplicate skipped", readonly)
 	}
 }

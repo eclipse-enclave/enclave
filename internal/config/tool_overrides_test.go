@@ -127,17 +127,15 @@ func TestToolOverride_SingleToolApplied(t *testing.T) {
 		},
 	}
 
-	override, ok := ResolveToolOverrideDefaults(Defaults{}, project, "pi")
+	opts, _, ok := ResolveOptionsForTool(opts, sources, Defaults{}, project, "pi")
 	if !ok {
 		t.Fatalf("expected tool override for pi")
 	}
-
-	opts = ApplyDefaultsWithSources(opts, override, model.SourceToolOverride, &sources)
 	if !opts.NoAPIKey {
 		t.Fatalf("expected no_api_key to be set by tool override")
 	}
-	if sources.NoAPIKey != model.SourceToolOverride {
-		t.Fatalf("expected no_api_key source=%v, got %v", model.SourceToolOverride, sources.NoAPIKey)
+	if opts.Sources.NoAPIKey != model.SourceToolOverride {
+		t.Fatalf("expected no_api_key source=%v, got %v", model.SourceToolOverride, opts.Sources.NoAPIKey)
 	}
 }
 
@@ -152,12 +150,10 @@ func TestToolOverride_MultipleToolsOnlyAffectSelectedTool(t *testing.T) {
 		},
 	}
 
-	override, ok := ResolveToolOverrideDefaults(Defaults{}, project, "pi")
+	opts, _, ok := ResolveOptionsForTool(opts, sources, Defaults{}, project, "pi")
 	if !ok {
 		t.Fatalf("expected tool override for pi")
 	}
-
-	opts = ApplyDefaultsWithSources(opts, override, model.SourceToolOverride, &sources)
 	if !opts.NoAPIKey {
 		t.Fatalf("expected no_api_key to be set for selected tool")
 	}
@@ -217,14 +213,14 @@ func TestToolOverride_CLIWinsOverToolOverride(t *testing.T) {
 	opts.NoAPIKey = true
 	sources.NoAPIKey = model.SourceCLI
 
-	override := Defaults{NoAPIKey: boolPtr(false)}
-	opts = ApplyDefaultsWithSources(opts, override, model.SourceToolOverride, &sources)
+	global := Defaults{ToolOverrides: map[string]Defaults{"pi": {NoAPIKey: boolPtr(false)}}}
+	opts, _, _ = ResolveOptionsForTool(opts, sources, global, Defaults{}, "pi")
 
 	if !opts.NoAPIKey {
 		t.Fatalf("tool override should not override CLI value")
 	}
-	if sources.NoAPIKey != model.SourceCLI {
-		t.Fatalf("expected CLI source to remain unchanged, got %v", sources.NoAPIKey)
+	if opts.Sources.NoAPIKey != model.SourceCLI {
+		t.Fatalf("expected CLI source to remain unchanged, got %v", opts.Sources.NoAPIKey)
 	}
 }
 
@@ -432,52 +428,6 @@ func TestReadDefaults_GlobalPassEnvPreservedWhenValid(t *testing.T) {
 	}
 	if !reflect.DeepEqual(defaults.PassEnv, []string{"VALID_NAME", "ANOTHER_OK"}) {
 		t.Fatalf("expected pass_env preserved, got %v", defaults.PassEnv)
-	}
-}
-
-func TestReadDefaults_GlobalPassEnvDropsInvalidEntries(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "config.json")
-	payload := `{
-  "pass_env": ["1BAD", "FOO BAR", "VALID_NAME"],
-  "tool_overrides": {
-    "codex": {
-      "pass_env": ["OK_NAME", "BAD-DASH"]
-    }
-  }
-}`
-	if err := os.WriteFile(path, []byte(payload), 0o600); err != nil {
-		t.Fatalf("write config: %v", err)
-	}
-
-	defaults, warnings, err := readDefaults(path)
-	if err != nil {
-		t.Fatalf("readDefaults returned error: %v", err)
-	}
-	if !reflect.DeepEqual(defaults.PassEnv, []string{"VALID_NAME"}) {
-		t.Fatalf("expected only VALID_NAME to remain, got %v", defaults.PassEnv)
-	}
-	codex, ok := defaults.ToolOverrides["codex"]
-	if !ok {
-		t.Fatalf("expected codex tool override to remain")
-	}
-	if !reflect.DeepEqual(codex.PassEnv, []string{"OK_NAME"}) {
-		t.Fatalf("expected only OK_NAME to remain in codex override, got %v", codex.PassEnv)
-	}
-	if !containsSubstring(warnings, "\"1BAD\"") {
-		t.Fatalf("expected warning for 1BAD, warnings=%v", warnings)
-	}
-	if !containsSubstring(warnings, "\"FOO BAR\"") {
-		t.Fatalf("expected warning for \"FOO BAR\", warnings=%v", warnings)
-	}
-	if !containsSubstring(warnings, "tool_overrides.codex.pass_env entry \"BAD-DASH\"") {
-		t.Fatalf("expected tool override warning for BAD-DASH, warnings=%v", warnings)
-	}
-	if containsSubstring(warnings, "VALID_NAME") {
-		t.Fatalf("did not expect VALID_NAME in warnings: %v", warnings)
-	}
-	if containsSubstring(warnings, "\"OK_NAME\"") {
-		t.Fatalf("did not expect OK_NAME in warnings: %v", warnings)
 	}
 }
 

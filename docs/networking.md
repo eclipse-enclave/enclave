@@ -199,10 +199,11 @@ allowlist, or extension-domain precedence.
 
 ### Per-run domains
 
-Use `--allow-domain <domain>` (repeatable) to add domains to the gateway allowlist for a single run only. The flag does **not** mutate `~/.config/enclave/network.jsonc` or any project file — it just augments the gateway's in-memory policy for the current container.
+Use `--allow-domain <domain>` (repeatable or comma-separated) to add domains to the gateway allowlist for a single run only. The flag does **not** mutate `~/.config/enclave/network.jsonc` or any project file; it just augments the gateway's in-memory policy for the current container. It replaces `allow_domains` from config for the run; `--allow-domain +api.example.com` adds to them and `--allow-domain -api.example.com` drops one.
 
 ```bash
 enclave --allow-domain api.deepseek.com --allow-domain api.example.com
+enclave --allow-domain api.deepseek.com,api.example.com
 ```
 
 On the Docker backend, `--allow-domain` is inert when combined with `--allow-all-network`: the gateway is not running, so there is no allowlist to extend. The QEMU backend rejects `--allow-domain` because it cannot enforce restricted egress. Bare DNS names only — schemes, paths, ports, and wildcards are rejected.

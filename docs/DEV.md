@@ -277,6 +277,11 @@ and use `Apply: ApplyNone` in `options_def.go` (for example:
 defaults resolution. It reuses the existing `NoRebuild` gates and conflict
 checks rather than adding a config key; see the [CLI reference](cli-reference.md#image--build).
 
+A new list option uses `ApplyListExtras` (or a selection kind) and needs a
+key function in `listEntryKey` and, if entries have a format, a validator in
+`listEntryValidators` (`internal/config/list_entries.go`); its flag uses
+`appendListFlag`.
+
 For config-only options, omit `CLIFlags` instead (for example:
 `host_config_paths`). Project config can set every config-backed option; an
 option that only makes sense host-wide belongs in `stripGlobalOnlyKeys` in
@@ -391,21 +396,27 @@ Self-update notes (user-facing behavior: [CLI reference](cli-reference.md#comman
 - The stable source is a placeholder until the Eclipse download server
   contract is known; stable release CI must stamp `BUILD_CHANNEL=stable`.
 
-Config additive note: feature additive directives (`+`/`-`) are applied against
-the implicit default-enabled feature set when `features` is unset. For example,
-`["-node-dev"]` removes that default feature from the implicit set.
+List option note: list options are folded layer by layer in
+`internal/config/options_lists.go`, with each tool-override file as its own
+layer and the CLI last. A bare `ApplyListExtras` list replaces, `+x`/`-x`
+amend and `[]`/`none` clear, except that `--add-dir` and `--add-readonly-dir`
+add a bare path (`cliAddsPlainEntries`). The selection kinds
+(`features`, `host_config_paths`) replace with a bare list and amend with
+`+`/`-`, the more specific layer winning an item. Feature directives apply to
+the implicit default-enabled set only when no layer selects features. The
+generator emits no `ApplyDefaultsWithSource` for list kinds. See
+[List Options](configuration.md#list-options).
 
-Config additive note: `host_config_paths` uses the same directive style, but it
-resolves against the selected tool profile's reviewed `passthroughPaths`
-instead of global defaults. Use `default` to include the built-in allow-list
-before applying `+`/`-` edits.
+`host_config_paths` resolves against the selected tool profile's reviewed
+`passthroughPaths` instead of global defaults. Use `default` to include the
+built-in allow-list before applying `+`/`-` edits.
 
 ## Option Source Precedence
 
 When a value exists in multiple layers, enclave resolves in this order:
 
 1. CLI flags
-2. Selected tool override (`tool_overrides.<tool>`)
+2. Selected tool override (`tool_overrides.<tool>`; the project file's wins over the global file's)
 3. Project config (`~/.config/enclave/projects/<hash>/config.json`; per-project overrides live outside the worktree, keyed by project hash)
 4. Global config (`~/.config/enclave/config.json`)
 5. Built-in defaults

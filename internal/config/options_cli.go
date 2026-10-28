@@ -15,7 +15,6 @@ import (
 	"strings"
 
 	"enclave/internal/model"
-	"enclave/internal/util"
 )
 
 type CLIValueKind int
@@ -261,51 +260,84 @@ func appendCSVUnique(dst []string, value string, normalize csvValueFunc) ([]stri
 	return dst, added, nil
 }
 
-func keepCSVValue(value string) (string, bool, error) {
-	return value, true, nil
+// appendListFlag appends the entries of one extras list flag value, keeping
+// +/- prefixes and none for the merge to interpret. Values are split on
+// commas except for options whose entries may contain one.
+func appendListFlag(dst []string, option string, flag string, value string, splitCommas bool) ([]string, error) {
+	parts := []string{value}
+	if splitCommas {
+		parts = strings.Split(value, ",")
+	}
+	added := 0
+	for _, part := range parts {
+		entry := strings.TrimSpace(part)
+		if entry == "" && splitCommas {
+			continue
+		}
+		if _, _, err := ValidateListEntry(option, entry); err != nil {
+			return dst, fmt.Errorf("invalid %s value %q: %v", flag, RedactListEntry(option, entry), err)
+		}
+		if !slices.Contains(dst, entry) {
+			dst = append(dst, entry)
+		}
+		added++
+	}
+	if added == 0 {
+		return dst, fmt.Errorf("%s requires a value", flag)
+	}
+	return dst, nil
 }
 
 func applyPassEnv(opts *model.Options, value string) error {
-	if strings.TrimSpace(value) == "" {
-		return errors.New("--pass-env requires a value")
-	}
-	var added int
 	var err error
-	opts.PassEnv, added, err = appendCSVUnique(opts.PassEnv, value, func(key string) (string, bool, error) {
-		if !isValidEnvKey(key) {
-			return "", false, fmt.Errorf("invalid --pass-env key: %s", key)
-		}
-		return key, true, nil
-	})
-	if err != nil {
-		return err
-	}
-	if added == 0 {
-		return errors.New("--pass-env requires at least one key")
-	}
-	return nil
+	opts.PassEnv, err = appendListFlag(opts.PassEnv, "pass_env", "--pass-env", value, true)
+	return err
 }
 
 func applyCacheFrom(opts *model.Options, value string) error {
-	if strings.TrimSpace(value) == "" {
-		return errors.New("--cache-from requires a value")
-	}
-	var added int
 	var err error
-	opts.CacheFrom, added, err = appendCSVUnique(opts.CacheFrom, value, keepCSVValue)
-	if err != nil {
-		return err
-	}
-	if added == 0 {
-		return errors.New("--cache-from requires at least one image")
-	}
-	return nil
+	opts.CacheFrom, err = appendListFlag(opts.CacheFrom, "cache_from", "--cache-from", value, true)
+	return err
+}
+
+func applyPort(opts *model.Options, value string) error {
+	var err error
+	opts.Ports, err = appendListFlag(opts.Ports, "ports", "-p", value, true)
+	return err
+}
+
+func applyAddDir(opts *model.Options, value string) error {
+	var err error
+	opts.AddDirs, err = appendListFlag(opts.AddDirs, "add_dirs", "--add-dir", value, false)
+	return err
+}
+
+func applyAddReadonlyDir(opts *model.Options, value string) error {
+	var err error
+	opts.AddReadonlyDirs, err = appendListFlag(opts.AddReadonlyDirs, "add_readonly_dirs", "--add-readonly-dir", value, false)
+	return err
+}
+
+func applyAllowDomain(opts *model.Options, value string) error {
+	var err error
+	opts.AllowDomains, err = appendListFlag(opts.AllowDomains, "allow_domains", "--allow-domain", value, true)
+	return err
+}
+
+func applyBridgePort(opts *model.Options, value string) error {
+	var err error
+	opts.BridgePorts, err = appendListFlag(opts.BridgePorts, "bridge_ports", "--bridge-port", value, true)
+	return err
 }
 
 func applyFeatures(opts *model.Options, value string) error {
 	if strings.TrimSpace(value) == "" {
 		return errors.New("--features requires a value")
 	}
+	// Repeated flags accumulate, so 'none' must not depend on flag order.
+	errNoneCombined := errors.New("--features value 'none' cannot be combined with other features")
+	priorNone := opts.Features != nil && len(opts.Features) == 0
+	priorFeatures := len(opts.Features) > 0
 	sawNone := false
 	var added int
 	var err error
@@ -320,14 +352,17 @@ func applyFeatures(opts *model.Options, value string) error {
 		return err
 	}
 	if sawNone {
-		if added > 0 {
-			return errors.New("--features value 'none' cannot be combined with other features")
+		if added > 0 || priorFeatures {
+			return errNoneCombined
 		}
 		opts.Features = []string{}
 		return nil
 	}
 	if added == 0 {
 		return errors.New("--features requires at least one feature")
+	}
+	if priorNone {
+		return errNoneCombined
 	}
 	return nil
 }
@@ -341,27 +376,6 @@ func applyProgress(opts *model.Options, value string) error {
 	default:
 		return fmt.Errorf("invalid --progress value: %s (use: %s|%s|%s)", value, model.BuildProgressQuiet, model.BuildProgressCompact, model.BuildProgressVerbose)
 	}
-}
-
-func applyBridgePort(opts *model.Options, value string) error {
-	if strings.TrimSpace(value) == "" {
-		return errors.New("--bridge-port requires a port number")
-	}
-	var added int
-	var err error
-	opts.BridgePorts, added, err = appendCSVUnique(opts.BridgePorts, value, func(port string) (string, bool, error) {
-		if !util.IsPortNumber(port) {
-			return "", false, fmt.Errorf("invalid --bridge-port value: %s (must be 1-65535)", port)
-		}
-		return port, true, nil
-	})
-	if err != nil {
-		return err
-	}
-	if added == 0 {
-		return errors.New("--bridge-port requires at least one port")
-	}
-	return nil
 }
 
 // isValidTintColor reports whether value is an #rrggbb color. termtint keeps its

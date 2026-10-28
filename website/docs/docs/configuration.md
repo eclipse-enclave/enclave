@@ -73,6 +73,22 @@ Highest wins:
 4. Global config
 5. Built-in defaults
 
+Lists such as `ports`, `add_dirs`, `allow_domains`, and `pass_env` combine
+across these layers. A plain list replaces the inherited one, `+x` adds,
+`-x` removes, and `[]` (or `none`) clears, in config files and on the command
+line alike. `--add-dir` is the exception: a plain path adds to the configured
+directories.
+
+```bash
+enclave -p 3000                 # publish only 3000
+enclave -p +3000                # publish 3000 on top of the configured ports
+enclave -p -8080                # drop a configured port for this run
+enclave --add-dir ~/notes       # mount ~/notes next to the configured dirs
+```
+
+The full rules, including features and port clashes, are in
+[List Options](https://github.com/eclipse-enclave/enclave/blob/main/docs/configuration.md#list-options).
+
 When a value is not what you expect, ask Enclave where it came from:
 
 ```bash
@@ -143,7 +159,9 @@ Use `+` and `-` to adjust the inherited set instead of replacing it:
 }
 ```
 
-A list without prefixes replaces the set entirely, and `[]` means none. Check the
+A list without prefixes replaces the set entirely, and `[]` means none. On the
+command line, `--features +debug-tools` adds to the configured features while
+`--features a,b` replaces them. Check the
 result before you build with `enclave features`, which marks every feature `✓`
 or `✗` and names the config file that switched it off:
 

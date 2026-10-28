@@ -81,14 +81,23 @@ func selectFeatures(allFeatures []model.Extension, build model.BuildOptions) []s
 	if build.Features == nil {
 		return defaultEnabledFeatureNames(allFeatures)
 	}
-	return resolveConfiguredFeatures(build.Features, allFeatures)
+	return resolveConfiguredFeatures(build.Features, allFeatures, implicitFeatureBase(allFeatures, build))
+}
+
+// implicitFeatureBase is what a list of only +/- directives amends: the
+// default-enabled features, or none in devcontainer mode.
+func implicitFeatureBase(allFeatures []model.Extension, build model.BuildOptions) []string {
+	if build.Devcontainer {
+		return []string{}
+	}
+	return defaultEnabledFeatureNames(allFeatures)
 }
 
 func featuresDisabled(build model.BuildOptions) bool {
 	return build.Slim || (build.Devcontainer && build.Features == nil)
 }
 
-func resolveConfiguredFeatures(requested []string, allFeatures []model.Extension) []string {
+func resolveConfiguredFeatures(requested []string, allFeatures []model.Extension, implicitBase []string) []string {
 	normalized := normalizeAndSortNames(requested)
 	if len(normalized) == 0 {
 		return []string{}
@@ -105,7 +114,7 @@ func resolveConfiguredFeatures(requested []string, allFeatures []model.Extension
 	// Expand keyword selectors ("default", "all") and additive directives
 	// (+feature, -feature) against the available feature set.
 	if hasFeatureDirectives(normalized) || hasFeatureSelectors(normalized) {
-		return expandFeatureDirectives(normalized, allFeatures)
+		return expandFeatureDirectives(normalized, allFeatures, implicitBase)
 	}
 	return normalized
 }
@@ -116,16 +125,14 @@ func resolveConfiguredFeatures(requested []string, allFeatures []model.Extension
 //
 // Processing uses two passes so that removals always apply after additions
 // regardless of list order (normalizeAndSortNames sorts alphabetically).
-func expandFeatureDirectives(normalized []string, allFeatures []model.Extension) []string {
+func expandFeatureDirectives(normalized []string, allFeatures []model.Extension, implicitBase []string) []string {
 	selected := make(map[string]struct{}, len(allFeatures))
 
-	// If the list contains only directives (+/-) with no selector keyword,
-	// seed from default-enabled features so the directives have a base.
-	if !hasFeatureSelectors(normalized) {
-		for _, f := range allFeatures {
-			if f.DefaultEnabled {
-				selected[f.Name] = struct{}{}
-			}
+	// Only a list of nothing but directives amends the implicit base; a bare
+	// name or selector makes the list an explicit selection.
+	if config.IsDirectiveOnly(normalized) {
+		for _, name := range implicitBase {
+			selected[name] = struct{}{}
 		}
 	}
 

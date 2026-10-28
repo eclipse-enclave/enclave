@@ -255,6 +255,8 @@ store that holds memory; the other `--keep` kinds do not apply there. See
 
 Boolean flags accept an explicit value (e.g. `--no-cache=false`) in any form Go's `strconv.ParseBool` accepts: `true`/`false`, `1`/`0`, `t`/`f`, and their upper- and title-case variants; other values are rejected. `--no-yolo=false` is equivalent to `--yolo`.
 
+List flags (`-p`, `--allow-domain`, `--bridge-port`, `--pass-env`, `--cache-from`) replace the list from config. Prefix a value with `+` to add to the configured list instead (`-p +3000`) or with `-` to drop a configured entry for this run (`-p -8080`, `--pass-env -GH_TOKEN`); `none` clears it. `--add-dir` and `--add-readonly-dir` add a plain path to the configured directories; `none` makes the other paths replace them. Write `./-dir` or `./+dir` for a relative directory starting with `-` or `+`. See [List Options](configuration.md#list-options).
+
 ### Tool & Session
 
 | Flag | Description |
@@ -263,10 +265,10 @@ Boolean flags accept an explicit value (e.g. `--no-cache=false`) in any form Go'
 | `--backend <backend>` | Isolation backend: `auto` (default: docker or podman, whichever is installed), `docker`, `podman`, or experimental `qemu`. Also accepted by engine-using management commands; affects only this invocation. |
 | `--name <name>` | Named persistent session |
 | `--background` | Detached background session |
-| `-p <port>` | Publish a container port to the host (container → host, e.g. `-p 3002`). A host port of `0` (e.g. `-p 0:3000`) lets the daemon pick a free host port (Docker only); read it back with `enclave ps --json`. |
-| `--bridge-port <port>` | Forward a host port into the container (host → container, repeatable, comma-separated) |
-| `--add-dir <path>` | Mount an additional host directory |
-| `--add-readonly-dir <path>` | Mount an additional host directory read-only |
+| `-p <port>` | Publish a container port to the host (container → host, e.g. `-p 3002`). A host port of `0` (e.g. `-p 0:3000`) lets the daemon pick a free host port (Docker only); read it back with `enclave ps --json`. Repeatable, comma-separated; replaces `ports` from config, `+port` adds to it and replaces a configured entry for the same host port |
+| `--bridge-port <port>` | Forward a host port into the container (host → container, repeatable, comma-separated); replaces `bridge_ports` from config, `+port` adds |
+| `--add-dir <path>` | Mount an additional host directory (repeatable, one path per flag, commas are part of the path); adds to `add_dirs` from config |
+| `--add-readonly-dir <path>` | Mount an additional host directory read-only (repeatable, one path per flag); adds to `add_readonly_dirs` from config |
 | `--allow-sensitive-mounts` | Mount the project or additional directories even when they expose sensitive host data (CLI-only). See [Sensitive mounts](#sensitive-mounts) |
 | `--project-mount <writable\|readonly>` | Mount the project/worktree read-write (default) or read-only |
 | `--worktree-metadata <follow\|readonly\|none>` | Linked-worktree git metadata mounts: follow the project mount (default), force read-only, or skip |
@@ -289,8 +291,8 @@ Boolean flags accept an explicit value (e.g. `--no-cache=false`) in any form Go'
 | `--use-remote-user` | Honor devcontainer `remoteUser` for agent sessions |
 | `--slim` | Build without features (tools only) |
 | `--image-name <name>` | Override image name/tag |
-| `--features <list\|default\|all\|none>` | Enable selected feature extensions (comma-separated), or use `default`, `all`, or `none` |
-| `--cache-from <image>` | Reuse inline build cache from an image |
+| `--features <list\|default\|all\|none>` | Enable selected feature extensions (comma-separated), or use `default`, `all`, or `none`. A bare list replaces the configured selection; `+name`/`-name` amend it. `none` cannot be combined with other values |
+| `--cache-from <image>` | Reuse inline build cache from an image (repeatable, comma-separated); replaces `cache_from` from config, `+image` adds |
 | `--build-uid <uid>` | UID to bake into the runtime image instead of the host UID |
 | `--build-gid <gid>` | GID to bake into the runtime image instead of the host GID |
 | `--runtime-uid-remap` | Start as root and remap the container user to the host UID/GID before running |
@@ -321,7 +323,7 @@ There is no config-file key.
 | `--reset-auth` | Clear auth files and persisted keys, then inject fresh |
 | `--no-api-key` | Disable API key injection |
 | `--pass-api-key` | Allow API key injection in `--ephemeral` mode |
-| `--pass-env <KEY1,KEY2>` | Forward specific host env vars into the container |
+| `--pass-env <KEY1,KEY2>` | Forward specific host env vars into the container (repeatable, comma-separated); replaces `pass_env` from config, `+KEY` adds |
 | `--auth-scope <scope>` | `shared` (default) or `project` |
 | `--auth-name <slug>` | Select a named per-tool shared auth store; ignored under `--auth-scope=project` |
 | `--secrets-scope <scope>` | `both` (default), `global`, or `project` |
@@ -331,7 +333,7 @@ There is no config-file key.
 | Flag | Description |
 |------|-------------|
 | `--allow-all-network` | Disable network restrictions |
-| `--allow-domain <domain>` | Add a domain to the gateway allowlist for this run only (repeatable, no persistence) |
+| `--allow-domain <domain>` | Add a domain to the gateway allowlist for this run only (repeatable, comma-separated, no persistence); replaces `allow_domains` from config, `+domain` adds to it |
 | `--network-log <coarse\|requests>` | Network audit mode. `coarse` (default) logs one pass/deny event per TLS connection, plus per-request events for plaintext HTTP and for hosts the gateway already MITMs for secret release; `requests` forces HTTPS MITM for all allowlisted hosts and emits an audit event per HTTP/HTTPS request. See [Coverage and granularity](networking.md#coverage-and-granularity) |
 
 ### Persistence

@@ -292,21 +292,26 @@ The complete flow from CLI arguments to final options:
 │  3. model.MergeOptionSources(baseSources, cliSources)                       │
 │     └── Merge source tracking (CLI wins if set)                             │
 │                                                                             │
-│  4. config.ApplyDefaultsWithSources(opts, globalDefaults, SourceGlobal)     │
-│     └── Apply global config where CLI didn't override                       │
+│  4. config.ResolveOptionsForTool(cliOpts, cliSources, global, project)      │
+│     ├── Hold back CLI lists so config lists fold under them                 │
+│     ├── Global, then project config: scalars where CLI did not set them,    │
+│     │   lists folded as layers (options_lists.go)                           │
+│     ├── Tool override: scalars from both files combined, lists folded       │
+│     │   as two layers (global file, then project file)                      │
+│     └── CLI lists folded last; each entry records its origin                │
 │                                                                             │
-│  5. config.ApplyDefaultsWithSources(opts, projectDefaults, SourceProject)   │
-│     └── Apply project config where global/CLI didn't override               │
+│  5. Lists merge per ApplyKind: ApplyListExtras (bare list replaces,         │
+│     +x/-x amend, [] or none clears; CLI dir flags add) or the selection     │
+│     kinds (bare list replaces, +/- amend, higher layer wins per item)       │
 │                                                                             │
-│  6. Resolve tool override for selected tool                                 │
-│     ├── config.ResolveToolOverrideDefaults(global, project, opts.Tool)      │
-│     └── config.ApplyDefaultsWithSources(..., SourceToolOverride)            │
+│  6. Invalid list entries become ListProblems, reported by validation        │
+│     with the flag or config key and file that set them                      │
 │                                                                             │
 │  7. Resolve the unset tool (app.resolveTool)                                │
 │     ├── "auto" with a terminal: ask once among the installed                │
 │     │   agent profiles and save the answer as "tool" globally               │
 │     ├── otherwise: claude (scripts, --json, --yes, other verbs)             │
-│     └── Steps 3-6 run again for the resolved tool                           │
+│     └── Step 4 runs again for the resolved tool                             │
 │                                                                             │
 │  8. Final Options with Sources tracked                                      │
 │     └── Each field knows: CLI, ToolOverride, Project, Global, or Default   │
@@ -369,13 +374,20 @@ from being accepted as current when it was built for a different numeric user.
 `features` can be set from config or CLI (`--features`). In devcontainer mode,
 the unset default is no enclave features; pass `--features` (or configure
 `features`) to opt in. `--features none` selects zero features explicitly.
-Config additive entries (`+`/`-`) are applied against the implicit
-default-enabled feature set when `features` is otherwise unset.
+`+`/`-` entries amend the configured selection and the more specific layer wins
+an item; they apply to the implicit default-enabled set (empty in devcontainer
+mode) only when no layer selected features.
 
 `host_config_paths` is a per-tool config option resolved against the selected
 tool profile's reviewed `passthroughPaths`. Additive-only entries (`+`/`-`)
-modify that built-in allow-list; bare entries replace it unless `default` is
-included explicitly.
+modify the inherited list or, when none is set, that built-in allow-list; bare
+entries replace it unless `default` is included explicitly.
+
+The extras lists (`add_dirs`, `ports`, `allow_domains`, and the others in
+[List Options](configuration.md#list-options)) replace with a bare list and
+amend with `+`/`-`; only `--add-dir` and `--add-readonly-dir` add a bare path.
+Each resolved entry records its layer (`model.ListOrigins`), so
+validation errors and the sensitive-mount refusal name the flag or config file.
 
 ## Image Naming
 

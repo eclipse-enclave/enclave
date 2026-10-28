@@ -375,6 +375,9 @@ func buildConfigEnvelope(input *CommandInput, opts model.Options, profile *model
 			message := fmt.Sprintf("Cannot load tool %q: %v", name, profileErr)
 			if errors.Is(profileErr, fs.ErrNotExist) {
 				message = fmt.Sprintf("Unknown tool %q", name)
+				if hint := config.RetiredExtensionHint(model.KindTool, name); hint != "" {
+					message = hint
+				}
 			}
 			addWarning(configWarningToolUnavailable, "tool", message)
 			if envelope.Valid {

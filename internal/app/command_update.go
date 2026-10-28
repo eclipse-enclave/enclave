@@ -9,6 +9,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -99,7 +100,12 @@ func resolveUpdateTools(paths model.Paths, opts model.Options) ([]string, error)
 	return normalizeToolNames(
 		requested,
 		available,
-		func(raw string) error { return fmt.Errorf("unknown tool: %s", raw) },
+		func(raw string) error {
+			if hint := config.RetiredExtensionHint(model.KindTool, strings.ToLower(strings.TrimSpace(raw))); hint != "" {
+				return errors.New(hint)
+			}
+			return fmt.Errorf("unknown tool: %s", raw)
+		},
 		func() error { return fmt.Errorf("update requires at least one tool") },
 	)
 }

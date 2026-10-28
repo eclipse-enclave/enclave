@@ -9,6 +9,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/user"
@@ -1174,6 +1175,9 @@ func prepareToolProbeDir(paths model.Paths, tool string) (dir string, cleanup fu
 	case builtinDir == "" && userDir != "":
 		return userDir, func() {}, nil
 	case builtinDir == "" && userDir == "":
+		if hint := config.RetiredExtensionHint(model.KindTool, tool); hint != "" {
+			return "", nil, errors.New(hint)
+		}
 		return "", nil, fmt.Errorf("tool extension not found: %s", tool)
 	}
 

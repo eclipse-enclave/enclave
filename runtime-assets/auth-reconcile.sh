@@ -161,6 +161,8 @@ enclave_sync_shared_auth() {
             if [ "$tool" = "claude" ] && [ "$auth_file" = ".credentials.json" ]; then
                 enclave_sync_claude_credentials "$config_path" "$auth_path"
             elif [ "$tool" = "mistral-vibe" ] && [ "$auth_file" = ".env" ]; then
+                # Vibe (an enclave-extensions tool) replaces the .env symlink
+                # with a real file, so the newer file wins.
                 enclave_sync_newest_auth_file "$config_path" "$auth_path"
             else
                 enclave_sync_additive_auth_file "$config_path" "$auth_path"

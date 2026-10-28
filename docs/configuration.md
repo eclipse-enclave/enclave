@@ -359,7 +359,6 @@ Common settings paths:
 | claude | `settings.json` |
 | codex | `config.toml` |
 | copilot | `settings.json` |
-| mistral-vibe | `config.toml` |
 | opencode | `opencode.json` |
 | pi | `agent/settings.json` |
 

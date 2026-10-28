@@ -11,7 +11,8 @@ export GOCACHE = $(CURDIR)/.gocache
 export GOMODCACHE = $(CURDIR)/.gomodcache
 export GO111MODULE = on
 
-# Prefer Ubuntu's versioned package even when an older default go is on PATH.
+# Ubuntu LTS ships Go 1.24 only as golang-1.24-go, which is not on PATH;
+# prefer it over an older default golang-go.
 ifneq ($(wildcard /usr/lib/go-1.24/bin/go),)
 export PATH := /usr/lib/go-1.24/bin:$(PATH)
 endif

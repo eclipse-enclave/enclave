@@ -250,7 +250,7 @@ done
 
 # --- Security -----------------------------------------------------------------
 
-extract scripts/install-go-linters.sh 'GOVULNCHECK_VERSION:-(v[0-9.]+)'
+extract scripts/install-go-linters.sh '^GOVULNCHECK_VERSION=(v[0-9.]+)$'
 govulncheck_version=$REPLY
 section "Security (govulncheck $govulncheck_version, toolchain go$toolchain)"
 
@@ -357,7 +357,7 @@ done < <(awk '/^require \(/ { block = 1; next } block && /^\)/ { block = 0 } blo
 section "Go linters (limit: go $toolchain)"
 for entry in "${GO_LINTERS[@]}"; do
     read -r var module <<<"$entry"
-    extract scripts/install-go-linters.sh "$var:-(v[0-9.]+)"
+    extract scripts/install-go-linters.sh "^$var=(v[0-9.]+)\$"
     pinned=$REPLY
     module_update "$var" "$module" "$pinned" "$toolchain"
 done

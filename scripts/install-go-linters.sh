@@ -19,29 +19,11 @@ fi
 export GOBIN="${GOBIN:-$HOME/.local/bin}"
 mkdir -p "$GOBIN"
 
-GOLANGCI_LINT_VERSION="${GOLANGCI_LINT_VERSION:-v2.15.0}"
-GOSEC_VERSION="${GOSEC_VERSION:-v2.30.0}"
-GOVULNCHECK_VERSION="${GOVULNCHECK_VERSION:-v1.9.0}"
-GO_INSTALL_RETRIES="${GO_INSTALL_RETRIES:-3}"
-GO_INSTALL_RETRY_DELAY_SECONDS="${GO_INSTALL_RETRY_DELAY_SECONDS:-2}"
-
-case "$GO_INSTALL_RETRIES" in
-    ''|*[!0-9]*)
-        echo "GO_INSTALL_RETRIES must be a positive integer, got: ${GO_INSTALL_RETRIES}" >&2
-        exit 1
-        ;;
-esac
-if [ "$GO_INSTALL_RETRIES" -lt 1 ]; then
-    echo "GO_INSTALL_RETRIES must be >= 1, got: ${GO_INSTALL_RETRIES}" >&2
-    exit 1
-fi
-
-case "$GO_INSTALL_RETRY_DELAY_SECONDS" in
-    ''|*[!0-9]*)
-        echo "GO_INSTALL_RETRY_DELAY_SECONDS must be a non-negative integer, got: ${GO_INSTALL_RETRY_DELAY_SECONDS}" >&2
-        exit 1
-        ;;
-esac
+GOLANGCI_LINT_VERSION=v2.15.0
+GOSEC_VERSION=v2.30.0
+GOVULNCHECK_VERSION=v1.9.0
+GO_INSTALL_RETRIES=3
+GO_INSTALL_RETRY_DELAY_SECONDS=2
 
 is_retryable_go_error() {
     local log_file="$1"

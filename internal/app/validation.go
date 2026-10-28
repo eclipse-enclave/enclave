@@ -173,7 +173,11 @@ func coerceQEMURunOptions(opts model.Options, sources model.OptionSources, paths
 	// silently allowing everything would be a security downgrade, so error even
 	// when the allowlist came from config.
 	if len(opts.AllowDomains) > 0 {
-		return opts, nil, fmt.Errorf("qemu backend has no network gateway and cannot restrict network access; remove --allow-domain")
+		hint := "remove --allow-domain"
+		if sources.AllowDomains != model.SourceCLI {
+			hint = "remove allow_domains from config"
+		}
+		return opts, nil, fmt.Errorf("qemu backend has no network gateway and cannot restrict network access; %s", hint)
 	}
 	// Detached sessions are rejected by the backend only in Start(), which runs
 	// after the (potentially minutes-long) bundle build; fail fast here instead.

@@ -100,10 +100,10 @@ declare hosts or keys for the following providers, so they need extra setup:
 - **Custom OpenAI- and Anthropic-compatible endpoints**, for example
   OpenRouter: allow the endpoint's host, per run with
   `enclave --tool theia-next --allow-domain openrouter.ai` or permanently with
-  `allow_domains` in `~/.config/enclave/config.json` (project configs cannot
-  widen the allowlist), and set the key on the model entry. `"apiKey": true`
-  does not work: inside the container the global OpenAI and Anthropic keys are
-  placeholders that the gateway only releases to their own provider's hosts.
+  `allow_domains` in global or project config, and set the key on the model
+  entry. `"apiKey": true` does not work: inside the container the global OpenAI
+  and Anthropic keys are placeholders that the gateway only releases to their
+  own provider's hosts.
 - **Ollama** on the host: forward its port with `--bridge-port 11434`. On
   Linux with Docker Engine, Ollama must listen on the Docker bridge IP (set with
   `OLLAMA_HOST`) and the firewall must allow the port; see

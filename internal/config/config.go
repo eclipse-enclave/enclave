@@ -98,7 +98,7 @@ func LoadDefaults(projectDir string) (global Defaults, project Defaults, warning
 		return Defaults{}, Defaults{}, nil, err
 	}
 	warnings = append(warnings, withFileLayer(projectWarns, warningLayerProject)...)
-	warnings = append(warnings, withFileLayer(applyProjectOverrideGuardrailsAgainst(projectPath, proj.RealDir, globalDefaults, &projectDefaults), warningLayerProject)...)
+	warnings = append(warnings, withFileLayer(stripGlobalOnlyKeys(projectPath, &projectDefaults), warningLayerProject)...)
 
 	return globalDefaults, projectDefaults, warnings, nil
 }
@@ -468,254 +468,45 @@ func validateToolOverrideHostConfigPaths(path string, toolName string, values []
 	return warnings
 }
 
-func applyProjectOverrideGuardrails(path string, projectDir string, defaults *Defaults) []Warning {
-	return applyProjectOverrideGuardrailsAgainst(path, projectDir, Defaults{}, defaults)
-}
-
-func applyProjectOverrideGuardrailsAgainst(path string, projectDir string, global Defaults, defaults *Defaults) []Warning {
+// stripGlobalOnlyKeys drops the binary update options, which only make sense
+// for the whole host, from project config; readDefaults already drops them from
+// tool_overrides in either file. Project config is host-owned, out of reach of
+// sessions, so it may otherwise set anything global config can.
+func stripGlobalOnlyKeys(path string, defaults *Defaults) []Warning {
 	if defaults == nil {
 		return nil
 	}
-
-	projectRoot := resolveProjectRoot(projectDir)
-	warnings := applyProjectDefaultsGuardrails(path, "", projectRoot, projectDir, global.WorktreeMetadata, defaults, nil)
-
-	if defaults.Tool != "" {
-		warnings = append(warnings, newWarning(WarningProjectGuardrail, "tool", "", path, "Ignoring tool=%q in %s: project configs cannot change the active tool; pass --tool or set it in global config instead", defaults.Tool, path))
-		defaults.Tool = ""
-	}
-
-	if len(defaults.ToolOverrides) == 0 {
-		return warnings
-	}
-
-	toolNames := make([]string, 0, len(defaults.ToolOverrides))
-	for name := range defaults.ToolOverrides {
-		toolNames = append(toolNames, name)
-	}
-	sort.Strings(toolNames)
-
-	for _, name := range toolNames {
-		override := defaults.ToolOverrides[name]
-		inheritedWorktreeMetadata := global.WorktreeMetadata
-		if defaults.WorktreeMetadata != "" {
-			inheritedWorktreeMetadata = defaults.WorktreeMetadata
-		}
-		if globalOverride, ok := global.ToolOverrides[name]; ok && globalOverride.WorktreeMetadata != "" {
-			inheritedWorktreeMetadata = globalOverride.WorktreeMetadata
-		}
-		warnings = applyProjectDefaultsGuardrails(path, name, projectRoot, projectDir, inheritedWorktreeMetadata, &override, warnings)
-		defaults.ToolOverrides[name] = override
-	}
-
-	return warnings
-}
-
-func applyProjectDefaultsGuardrails(path string, toolName string, projectRoot string, projectDir string, inheritedWorktreeMetadata string, defaults *Defaults, warnings []Warning) []Warning {
-	guardrail := func(option string, format string, args ...any) {
-		warnings = append(warnings, newWarning(WarningProjectGuardrail, option, toolName, path, format, args...))
-	}
-
+	var warnings []Warning
 	if defaults.AutoUpdate != nil {
-		field := projectGuardrailField(toolName, "auto_update")
-		guardrail("auto_update", "Ignoring %s=%v in %s: binary updates are configured globally", field, *defaults.AutoUpdate, path)
+		warnings = append(warnings, newWarning(WarningProjectGuardrail, "auto_update", "", path, "Ignoring auto_update=%v in %s: binary updates are configured globally", *defaults.AutoUpdate, path))
 		defaults.AutoUpdate = nil
 	}
 	if defaults.UpdateChannel != "" {
-		field := projectGuardrailField(toolName, "update_channel")
-		guardrail("update_channel", "Ignoring %s=%q in %s: binary updates are configured globally", field, defaults.UpdateChannel, path)
+		warnings = append(warnings, newWarning(WarningProjectGuardrail, "update_channel", "", path, "Ignoring update_channel=%q in %s: binary updates are configured globally", defaults.UpdateChannel, path))
 		defaults.UpdateChannel = ""
 	}
-
-	if defaults.AllowAllNetwork != nil && *defaults.AllowAllNetwork {
-		field := projectGuardrailField(toolName, "allow_all_network")
-		valueLabel := field + "=true"
-		if toolName == "" {
-			valueLabel = fmt.Sprintf("%q=true", field)
-		}
-		defaults.AllowAllNetwork = nil
-		guardrail("allow_all_network", "Ignoring %s in %s: project configs cannot enable unrestricted network; set it in global config or CLI instead", valueLabel, path)
-	}
-
-	if len(defaults.AllowDomains) > 0 {
-		field := projectGuardrailField(toolName, "allow_domains")
-		guardrail("allow_domains", "Ignoring %s=%v in %s: project configs cannot widen the network allowlist; set it in global config or pass --allow-domain instead", field, defaults.AllowDomains, path)
-		defaults.AllowDomains = nil
-	}
-
-	defaults.AddDirs, warnings = filterProjectAddDirs(defaults.AddDirs, "add_dirs", toolName, projectRoot, projectDir, path, warnings)
-	defaults.AddReadonlyDirs, warnings = filterProjectAddDirs(defaults.AddReadonlyDirs, "add_readonly_dirs", toolName, projectRoot, projectDir, path, warnings)
-
-	if len(defaults.PassEnv) > 0 {
-		field := projectGuardrailField(toolName, "pass_env")
-		defaults.PassEnv = nil
-		guardrail("pass_env", "Ignoring %s in %s: project configs cannot forward host environment variables; use global config or CLI instead", field, path)
-	}
-
-	if defaults.BaseImage != "" {
-		field := projectGuardrailField(toolName, "base_image")
-		guardrail("base_image", "Ignoring %s=%q in %s: project configs cannot override the base image; set it in global config or CLI instead", field, defaults.BaseImage, path)
-		defaults.BaseImage = ""
-	}
-
-	if len(defaults.BridgePorts) > 0 {
-		field := projectGuardrailField(toolName, "bridge_ports")
-		guardrail("bridge_ports", "Ignoring %s=%v in %s: project configs cannot bridge container ports to the host; set it in global config or CLI instead", field, defaults.BridgePorts, path)
-		defaults.BridgePorts = nil
-	}
-
-	if defaults.Yolo != nil {
-		field := projectGuardrailField(toolName, "yolo")
-		guardrail("yolo", "Ignoring %s=%v in %s: project configs cannot toggle yolo mode; pass --yolo/--no-yolo or set it in global config instead", field, *defaults.Yolo, path)
-		defaults.Yolo = nil
-	}
-
-	if defaults.HostConfig != "" {
-		field := projectGuardrailField(toolName, "host_config")
-		guardrail("host_config", "Ignoring %s=%q in %s: project configs cannot widen host config passthrough; set it in global config or CLI instead", field, defaults.HostConfig, path)
-		defaults.HostConfig = ""
-	}
-
-	if len(defaults.HostConfigPaths) > 0 {
-		field := projectGuardrailField(toolName, "host_config_paths")
-		guardrail("host_config_paths", "Ignoring %s=%v in %s: project configs cannot extend host config passthrough; set it in global config or CLI instead", field, defaults.HostConfigPaths, path)
-		defaults.HostConfigPaths = nil
-	}
-
-	if strings.EqualFold(strings.TrimSpace(defaults.ProjectMount), model.ProjectMountWritable) {
-		field := projectGuardrailField(toolName, "project_mount")
-		guardrail("project_mount", "Ignoring %s=%q in %s: project configs cannot make the project mount writable; set it in global config or CLI instead", field, defaults.ProjectMount, path)
-		defaults.ProjectMount = ""
-	}
-
-	worktreeMetadata := strings.ToLower(strings.TrimSpace(defaults.WorktreeMetadata))
-	if worktreeMetadata != "" && (worktreeMetadata == model.WorktreeMetadataFollow || worktreeMetadataStrength(worktreeMetadata) < worktreeMetadataStrength(inheritedWorktreeMetadata)) {
-		field := projectGuardrailField(toolName, "worktree_metadata")
-		guardrail("worktree_metadata", "Ignoring %s=%q in %s: project configs cannot relax inherited worktree_metadata=%q; set it in global config or CLI instead", field, defaults.WorktreeMetadata, path, model.WorktreeMetadataMode(inheritedWorktreeMetadata))
-		defaults.WorktreeMetadata = ""
-	}
-
 	return warnings
 }
 
-func worktreeMetadataStrength(value string) int {
-	switch model.WorktreeMetadataMode(value) {
-	case model.WorktreeMetadataNone:
-		return 2
-	case model.WorktreeMetadataReadonly:
-		return 1
-	default:
-		return 0
-	}
-}
-
-func projectGuardrailField(toolName string, name string) string {
-	if toolName == "" {
-		return name
-	}
-	return "tool_overrides." + toolName + "." + name
-}
-
-// resolveProjectRoot returns the absolute, symlink-evaluated project directory
-// used to anchor project-config containment checks. Now that project overrides
-// are hash-keyed under the config root, the project root is passed in
-// explicitly rather than derived from the config path shape. Returns an empty
-// string if projectDir is empty or cannot be resolved.
-func resolveProjectRoot(projectDir string) string {
-	if strings.TrimSpace(projectDir) == "" {
-		return ""
-	}
-	abs, err := filepath.Abs(projectDir)
-	if err != nil {
-		return ""
-	}
-	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
-		return resolved
-	}
-	return abs
-}
-
-// filterProjectAddDirs drops entries that resolve outside the project root and
-// appends a warning per dropped entry. option is the field name and toolName
-// is set for tool_overrides.<tool> entries. projectDir anchors relative
-// entries; configPath is used only for warnings.
-func filterProjectAddDirs(entries []string, option string, toolName string, projectRoot string, projectDir string, configPath string, warnings []Warning) ([]string, []Warning) {
-	if len(entries) == 0 {
-		return entries, warnings
-	}
-
-	// If we cannot determine the project root, drop everything to fail closed:
-	// a project config that we cannot anchor must not mount arbitrary host
-	// paths into the container.
-	if projectRoot == "" {
-		for _, raw := range entries {
-			warnings = append(warnings, projectAddDirsWarning(raw, option, toolName, configPath))
-		}
-		return nil, warnings
-	}
-
-	home, _ := os.UserHomeDir()
-	kept := make([]string, 0, len(entries))
-	for _, raw := range entries {
-		if isWithinProjectDir(raw, projectRoot, projectDir, home) {
-			kept = append(kept, raw)
-			continue
-		}
-		warnings = append(warnings, projectAddDirsWarning(raw, option, toolName, configPath))
-	}
-	if len(kept) == 0 {
-		return nil, warnings
-	}
-	return kept, warnings
-}
-
-func projectAddDirsWarning(entry string, option string, toolName string, configPath string) Warning {
-	return newWarning(WarningProjectSubtree, option, toolName, configPath, "Ignoring %s entry %q in %s: project configs can only mount subdirectories of the project; use global config or CLI for other paths", projectGuardrailField(toolName, option), entry, configPath)
-}
-
-// isWithinProjectDir reports whether entry resolves to a path inside projectRoot.
-// projectRoot must already be absolute and (if possible) symlink-evaluated.
-// projectDir anchors relative entries (so that "./data" resolves relative to
-// the project, not the process working directory). Symlink evaluation falls
-// back to the absolute path when the target does not exist on disk.
-func isWithinProjectDir(entry string, projectRoot string, projectDir string, home string) bool {
-	value := strings.TrimSpace(entry)
-	if value == "" {
-		return false
-	}
-	if home != "" {
-		value = util.ExpandTilde(value, home)
-	}
-
-	if !filepath.IsAbs(value) {
-		if strings.TrimSpace(projectDir) == "" {
-			return false
-		}
-		value = filepath.Join(projectDir, value)
-	}
-
-	within, err := util.RealPathWithin(projectRoot, value)
-	return err == nil && within
-}
-
 // IsPathWithinProjectDir reports whether entry resolves to a path inside
-// projectDir. Relative entries are anchored to projectDir, "~" is expanded
-// against the user's home directory, and symlinks are evaluated when the
-// target exists. Returns false for empty entries or unresolvable projectDir.
-//
-// This is the same containment check applied to project-config add_dirs
-// entries, exported so other packages (notably internal/devcontainer) can
-// clamp externally-supplied paths to the project subtree.
+// projectDir, anchoring relative entries to projectDir and expanding "~".
 func IsPathWithinProjectDir(entry string, projectDir string) bool {
-	if strings.TrimSpace(projectDir) == "" {
+	value := strings.TrimSpace(entry)
+	if value == "" || strings.TrimSpace(projectDir) == "" {
 		return false
 	}
 	root, err := filepath.Abs(projectDir)
 	if err != nil {
 		return false
 	}
-	home, _ := os.UserHomeDir()
-	return isWithinProjectDir(entry, root, root, home)
+	if home, _ := os.UserHomeDir(); home != "" {
+		value = util.ExpandTilde(value, home)
+	}
+	if !filepath.IsAbs(value) {
+		value = filepath.Join(root, value)
+	}
+	within, err := util.RealPathWithin(root, value)
+	return err == nil && within
 }
 
 func mergeDefaults(base Defaults, override Defaults) Defaults {

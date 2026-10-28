@@ -27,8 +27,9 @@ workflow. Rootless Docker is [not supported](rootless.md); rootless podman is, t
   overrides this; no config file can, and devcontainer or `.git`-pointer mounts
   stay blocked. See [Sensitive mounts](../cli-reference.md#sensitive-mounts).
 - Per-project Enclave config is keyed by project hash under the host config root,
-  outside the worktree. Project-scoped config cannot enable guarded options such
-  as unrestricted networking or writable project mounts.
+  outside the worktree, so neither the repository nor a session can write it.
+  It is treated like global config: it may set any option except the
+  global-only `auto_update` and `update_channel`.
 
 ## Project-controlled execution
 

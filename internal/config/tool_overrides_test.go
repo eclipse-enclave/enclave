@@ -27,7 +27,7 @@ func TestSkillsValidationConfigPrecedence(t *testing.T) {
 		t.Fatalf("read defaults: %v, %v", err, warnings)
 	}
 	project := Defaults{SkillsValidation: model.SkillsValidationStrict}
-	project, warnings = applyProjectGuardrailsForTest(project)
+	warnings = stripGlobalOnlyKeys("/tmp/projects/abc/config.json", &project)
 	if len(warnings) != 0 || project.SkillsValidation != model.SkillsValidationStrict {
 		t.Fatalf("project validation option was filtered: %+v, %v", project, warnings)
 	}
@@ -74,7 +74,7 @@ func TestAutoUpdateIsGlobalOnly(t *testing.T) {
 	}
 
 	project := Defaults{AutoUpdate: boolPtr(false)}
-	warnings = applyProjectOverrideGuardrails(globalPath, t.TempDir(), &project)
+	warnings = stripGlobalOnlyKeys(globalPath, &project)
 	if project.AutoUpdate != nil {
 		t.Fatal("project auto_update was retained")
 	}
@@ -111,7 +111,7 @@ func TestUpdateChannelIsGlobalOnlyAndValidated(t *testing.T) {
 	}
 
 	project := Defaults{UpdateChannel: "rolling"}
-	warnings = applyProjectOverrideGuardrails(globalPath, t.TempDir(), &project)
+	warnings = stripGlobalOnlyKeys(globalPath, &project)
 	if project.UpdateChannel != "" || !containsSubstring(warnings, "configured globally") {
 		t.Fatalf("project update_channel retained or not warned about: %v", warnings)
 	}
@@ -342,290 +342,76 @@ func TestReadDefaults_WarnsOnAbsoluteToolOverrideHostConfigPaths(t *testing.T) {
 	}
 }
 
-func TestProjectOverrideGuardrails_BlockAllowAllNetworkElevation(t *testing.T) {
-	defaults := Defaults{
-		AllowAllNetwork: boolPtr(true),
-		ToolOverrides: map[string]Defaults{
-			"codex": {AllowAllNetwork: boolPtr(true), NoAPIKey: boolPtr(true)},
-			"pi":    {AllowAllNetwork: boolPtr(false)},
-		},
+func TestStripGlobalOnlyKeysKeepsEverythingElse(t *testing.T) {
+	settable := Defaults{
+		Tool:             "codex",
+		Yolo:             boolPtr(true),
+		AllowAllNetwork:  boolPtr(true),
+		AllowDomains:     []string{"proj.example.com"},
+		PassEnv:          []string{"GH_TOKEN"},
+		BridgePorts:      []string{"5432"},
+		HostConfig:       "passthrough",
+		HostConfigPaths:  []string{"+commands/"},
+		BaseImage:        "debian:trixie",
+		AddDirs:          []string{"/data/shared"},
+		AddReadonlyDirs:  []string{"/etc"},
+		ProjectMount:     model.ProjectMountWritable,
+		WorktreeMetadata: model.WorktreeMetadataFollow,
 	}
+	defaults := settable
+	defaults.AutoUpdate = boolPtr(true)
+	defaults.UpdateChannel = "rolling"
+	override := settable
+	override.Tool = ""
+	defaults.ToolOverrides = map[string]Defaults{"codex": override}
 
-	warnings := applyProjectOverrideGuardrails("/tmp/project/.enclave/config.json", "/tmp/project", &defaults)
+	warnings := stripGlobalOnlyKeys("/tmp/projects/abc/config.json", &defaults)
 	if len(warnings) != 2 {
-		t.Fatalf("expected 2 guardrail warnings, got %d: %v", len(warnings), warnings)
+		t.Fatalf("warnings = %v, want auto_update and update_channel", warnings)
 	}
-	if defaults.AllowAllNetwork != nil {
-		t.Fatalf("expected project-level allow_all_network=true to be ignored")
+	for _, w := range warnings {
+		if w.Code != WarningProjectGuardrail || !strings.Contains(w.Message, "configured globally") {
+			t.Fatalf("unexpected warning %+v", w)
+		}
 	}
-
-	codex := defaults.ToolOverrides["codex"]
-	if codex.AllowAllNetwork != nil {
-		t.Fatalf("expected tool override allow_all_network=true to be ignored")
-	}
-	if codex.NoAPIKey == nil || !*codex.NoAPIKey {
-		t.Fatalf("expected non-guarded fields to remain unchanged")
-	}
-
-	pi := defaults.ToolOverrides["pi"]
-	if pi.AllowAllNetwork == nil || *pi.AllowAllNetwork {
-		t.Fatalf("expected allow_all_network=false to remain set for project overrides")
-	}
-	if !containsSubstring(warnings, "\"allow_all_network\"=true") {
-		t.Fatalf("expected project warning for allow_all_network=true, warnings=%v", warnings)
-	}
-	if !containsSubstring(warnings, "tool_overrides.codex.allow_all_network=true") {
-		t.Fatalf("expected tool override warning for codex, warnings=%v", warnings)
+	want := settable
+	want.ToolOverrides = map[string]Defaults{"codex": override}
+	if !reflect.DeepEqual(defaults, want) {
+		t.Fatalf("defaults = %+v, want only the update keys removed", defaults)
 	}
 }
 
-func TestToolOverride_ProjectGuardrailAllowsGlobalElevation(t *testing.T) {
-	global := Defaults{
-		ToolOverrides: map[string]Defaults{
-			"codex": {AllowAllNetwork: boolPtr(true)},
-		},
+func TestIsPathWithinProjectDir(t *testing.T) {
+	projectDir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
 	}
-	project := Defaults{
-		ToolOverrides: map[string]Defaults{
-			"codex": {AllowAllNetwork: boolPtr(true)},
-		},
+	outsideDir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
 	}
-
-	warnings := applyProjectOverrideGuardrails("/tmp/project/.enclave/config.json", "/tmp/project", &project)
-	if len(warnings) != 1 {
-		t.Fatalf("expected one guardrail warning, got %d: %v", len(warnings), warnings)
+	if err := os.MkdirAll(filepath.Join(projectDir, "data"), 0o755); err != nil {
+		t.Fatal(err)
 	}
-
-	override, ok := ResolveToolOverrideDefaults(global, project, "codex")
-	if !ok {
-		t.Fatalf("expected tool override to resolve")
+	if err := os.Symlink(outsideDir, filepath.Join(projectDir, "escape")); err != nil {
+		t.Fatal(err)
 	}
-	if override.AllowAllNetwork == nil || !*override.AllowAllNetwork {
-		t.Fatalf("expected global allow_all_network=true to remain effective after project guardrail filtering")
+	cases := []struct {
+		entry string
+		want  bool
+	}{
+		{entry: "./data", want: true},
+		{entry: filepath.Join(projectDir, "data"), want: true},
+		{entry: "", want: false},
+		{entry: "/etc", want: false},
+		{entry: "~/.aws", want: false},
+		{entry: "../sibling/path", want: false},
+		{entry: "./escape", want: false},
 	}
-}
-
-func TestProjectOverrideGuardrails_WorktreeMetadataCannotRelaxInheritedNone(t *testing.T) {
-	global := Defaults{
-		WorktreeMetadata: model.WorktreeMetadataNone,
-		ToolOverrides: map[string]Defaults{
-			"claude": {WorktreeMetadata: model.WorktreeMetadataNone},
-			"codex":  {WorktreeMetadata: model.WorktreeMetadataFollow},
-		},
-	}
-	project := Defaults{
-		WorktreeMetadata: model.WorktreeMetadataReadonly,
-		ToolOverrides: map[string]Defaults{
-			"claude": {WorktreeMetadata: model.WorktreeMetadataReadonly},
-			"codex":  {WorktreeMetadata: model.WorktreeMetadataReadonly},
-		},
-	}
-
-	warnings := applyProjectOverrideGuardrailsAgainst("/tmp/project/.enclave/config.json", "/tmp/project", global, &project)
-	if len(warnings) != 2 {
-		t.Fatalf("expected two guardrail warnings, got %d: %v", len(warnings), warnings)
-	}
-	if project.WorktreeMetadata != "" {
-		t.Fatalf("expected top-level readonly override of none to be cleared, got %q", project.WorktreeMetadata)
-	}
-	if got := project.ToolOverrides["claude"].WorktreeMetadata; got != "" {
-		t.Fatalf("expected claude readonly override of none to be cleared, got %q", got)
-	}
-	if got := project.ToolOverrides["codex"].WorktreeMetadata; got != model.WorktreeMetadataReadonly {
-		t.Fatalf("expected codex readonly to strengthen its global follow override, got %q", got)
-	}
-	if !containsSubstring(warnings, "inherited worktree_metadata=\"none\"") {
-		t.Fatalf("expected inherited none warning, got %v", warnings)
-	}
-}
-
-func TestProjectOverrideGuardrails_AddDirContainment(t *testing.T) {
-	type addDirCase struct {
-		name         string
-		warningCount int
-		warnings     []string
-		setup        func(t *testing.T) (configPath string, defaults Defaults)
-		assert       func(t *testing.T, defaults Defaults)
-	}
-
-	cases := []addDirCase{
-		{
-			name:         "strips add_dirs outside project",
-			warningCount: 2,
-			warnings:     []string{"add_dirs entry \"~/.aws\"", "add_dirs entry \"/etc\""},
-			setup: func(t *testing.T) (string, Defaults) {
-				return projectConfigPathForTest(t), Defaults{AddDirs: []string{"~/.aws", "/etc"}}
-			},
-			assert: func(t *testing.T, defaults Defaults) {
-				if defaults.AddDirs != nil {
-					t.Fatalf("expected add_dirs entries outside project to be dropped, got %v", defaults.AddDirs)
-				}
-			},
-		},
-		{
-			name:         "strips empty add_dirs entry",
-			warningCount: 1,
-			warnings:     []string{"add_dirs entry \"\""},
-			setup: func(t *testing.T) (string, Defaults) {
-				return projectConfigPathForTest(t), Defaults{AddDirs: []string{""}}
-			},
-			assert: func(t *testing.T, defaults Defaults) {
-				if defaults.AddDirs != nil {
-					t.Fatalf("expected empty add_dirs entry to be dropped, got %v", defaults.AddDirs)
-				}
-			},
-		},
-		{
-			name:         "strips add_dirs sibling escape",
-			warningCount: 1,
-			warnings:     []string{"add_dirs entry \"../sibling/path\""},
-			setup: func(t *testing.T) (string, Defaults) {
-				return projectConfigPathForTest(t), Defaults{AddDirs: []string{"../sibling/path"}}
-			},
-			assert: func(t *testing.T, defaults Defaults) {
-				if defaults.AddDirs != nil {
-					t.Fatalf("expected sibling-escape add_dirs entry to be dropped, got %v", defaults.AddDirs)
-				}
-			},
-		},
-		{
-			name:         "keeps add_dirs inside project",
-			warningCount: 0,
-			setup: func(t *testing.T) (string, Defaults) {
-				projectDir := t.TempDir()
-				dataDir := filepath.Join(projectDir, "data")
-				if err := os.MkdirAll(dataDir, 0o755); err != nil {
-					t.Fatalf("mkdir data: %v", err)
-				}
-				return filepath.Join(projectDir, ".enclave", "config.json"), Defaults{AddDirs: []string{"./data"}}
-			},
-			assert: func(t *testing.T, defaults Defaults) {
-				if !reflect.DeepEqual(defaults.AddDirs, []string{"./data"}) {
-					t.Fatalf("expected ./data to be kept, got %v", defaults.AddDirs)
-				}
-			},
-		},
-		{
-			name:         "strips add_readonly_dirs outside project",
-			warningCount: 1,
-			warnings:     []string{"add_readonly_dirs entry \"/etc\""},
-			setup: func(t *testing.T) (string, Defaults) {
-				return projectConfigPathForTest(t), Defaults{AddReadonlyDirs: []string{"/etc"}}
-			},
-			assert: func(t *testing.T, defaults Defaults) {
-				if defaults.AddReadonlyDirs != nil {
-					t.Fatalf("expected add_readonly_dirs entries outside project to be dropped, got %v", defaults.AddReadonlyDirs)
-				}
-			},
-		},
-		{
-			name:         "strips tool override add_dirs outside project",
-			warningCount: skipWarningCountCheck,
-			warnings:     []string{"tool_overrides.codex.add_dirs entry \"/etc\""},
-			setup: func(t *testing.T) (string, Defaults) {
-				return projectConfigPathForTest(t), Defaults{ToolOverrides: map[string]Defaults{
-					"codex": {AddDirs: []string{"/etc"}, NoAPIKey: boolPtr(true)},
-				}}
-			},
-			assert: func(t *testing.T, defaults Defaults) {
-				codex := defaults.ToolOverrides["codex"]
-				if codex.AddDirs != nil {
-					t.Fatalf("expected tool override add_dirs to be dropped, got %v", codex.AddDirs)
-				}
-				assertNoAPIKeyPreserved(t, codex)
-			},
-		},
-		{
-			name:         "strips symlink escape",
-			warningCount: skipWarningCountCheck,
-			warnings:     []string{"add_dirs entry \"./escape\""},
-			setup: func(t *testing.T) (string, Defaults) {
-				projectDir, err := filepath.EvalSymlinks(t.TempDir())
-				if err != nil {
-					t.Fatalf("eval project tempdir: %v", err)
-				}
-				outsideDir, err := filepath.EvalSymlinks(t.TempDir())
-				if err != nil {
-					t.Fatalf("eval outside tempdir: %v", err)
-				}
-				linkPath := filepath.Join(projectDir, "escape")
-				if err := os.Symlink(outsideDir, linkPath); err != nil {
-					t.Fatalf("create symlink: %v", err)
-				}
-				return filepath.Join(projectDir, ".enclave", "config.json"), Defaults{AddDirs: []string{"./escape"}}
-			},
-			assert: func(t *testing.T, defaults Defaults) {
-				if defaults.AddDirs != nil {
-					t.Fatalf("expected symlinked-out add_dirs entry to be dropped, got %v", defaults.AddDirs)
-				}
-			},
-		},
-	}
-
 	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			configPath, defaults := tc.setup(t)
-			projectDir := filepath.Dir(filepath.Dir(configPath))
-			warnings := applyProjectOverrideGuardrails(configPath, projectDir, &defaults)
-			assertWarnings(t, warnings, tc.warningCount, tc.warnings...)
-			tc.assert(t, defaults)
-		})
-	}
-}
-
-func TestProjectOverrideGuardrails_AllowAllNetworkRegression(t *testing.T) {
-	projectDir := t.TempDir()
-	configPath := filepath.Join(projectDir, ".enclave", "config.json")
-
-	defaults := Defaults{
-		AllowAllNetwork: boolPtr(true),
-		ToolOverrides: map[string]Defaults{
-			"codex": {AllowAllNetwork: boolPtr(true)},
-		},
-	}
-
-	warnings := applyProjectOverrideGuardrails(configPath, projectDir, &defaults)
-	if defaults.AllowAllNetwork != nil {
-		t.Fatalf("expected project-level allow_all_network=true to be ignored")
-	}
-	if defaults.ToolOverrides["codex"].AllowAllNetwork != nil {
-		t.Fatalf("expected tool override allow_all_network=true to be ignored")
-	}
-	if !containsSubstring(warnings, "\"allow_all_network\"=true") {
-		t.Fatalf("expected project warning for allow_all_network, warnings=%v", warnings)
-	}
-	if !containsSubstring(warnings, "tool_overrides.codex.allow_all_network=true") {
-		t.Fatalf("expected tool override warning for codex, warnings=%v", warnings)
-	}
-}
-
-func TestProjectOverrideGuardrails_StripsPassEnv(t *testing.T) {
-	defaults := Defaults{
-		PassEnv: []string{"AWS_SECRET_ACCESS_KEY"},
-		ToolOverrides: map[string]Defaults{
-			"codex": {PassEnv: []string{"FOO"}, NoAPIKey: boolPtr(true)},
-		},
-	}
-
-	warnings := applyProjectOverrideGuardrails("/tmp/project/.enclave/config.json", "/tmp/project", &defaults)
-	if len(warnings) != 2 {
-		t.Fatalf("expected 2 guardrail warnings, got %d: %v", len(warnings), warnings)
-	}
-	if defaults.PassEnv != nil {
-		t.Fatalf("expected project pass_env to be cleared, got %v", defaults.PassEnv)
-	}
-	codex := defaults.ToolOverrides["codex"]
-	if codex.PassEnv != nil {
-		t.Fatalf("expected tool_overrides.codex.pass_env to be cleared, got %v", codex.PassEnv)
-	}
-	if codex.NoAPIKey == nil || !*codex.NoAPIKey {
-		t.Fatalf("expected non-guarded fields to remain unchanged")
-	}
-	if !containsSubstring(warnings, "Ignoring pass_env in") {
-		t.Fatalf("expected project pass_env warning, warnings=%v", warnings)
-	}
-	if !containsSubstring(warnings, "tool_overrides.codex.pass_env") {
-		t.Fatalf("expected tool override pass_env warning, warnings=%v", warnings)
+		if got := IsPathWithinProjectDir(tc.entry, projectDir); got != tc.want {
+			t.Errorf("IsPathWithinProjectDir(%q) = %v, want %v", tc.entry, got, tc.want)
+		}
 	}
 }
 
@@ -737,384 +523,6 @@ func TestReadDefaults_SessionTintDropsInvalidValues(t *testing.T) {
 	}
 }
 
-func TestProjectOverrideGuardrails_StripsSensitiveFields(t *testing.T) {
-	cases := []struct {
-		name         string
-		defaults     Defaults
-		warnings     []string
-		warningCount int
-		assert       func(t *testing.T, defaults Defaults)
-	}{
-		{
-			name: "base_image",
-			defaults: Defaults{
-				BaseImage: "attacker.example.com/evil:latest",
-				ToolOverrides: map[string]Defaults{
-					"codex": {BaseImage: "attacker.example.com/codex-evil:latest", NoAPIKey: boolPtr(true)},
-					"pi":    {NoAPIKey: boolPtr(true)},
-				},
-			},
-			warningCount: 2,
-			warnings: []string{
-				"Ignoring base_image=\"attacker.example.com/evil:latest\" in",
-				"tool_overrides.codex.base_image=\"attacker.example.com/codex-evil:latest\"",
-			},
-			assert: func(t *testing.T, defaults Defaults) {
-				if defaults.BaseImage != "" {
-					t.Fatalf("expected project base_image to be cleared, got %q", defaults.BaseImage)
-				}
-				codex := defaults.ToolOverrides["codex"]
-				if codex.BaseImage != "" {
-					t.Fatalf("expected tool_overrides.codex.base_image to be cleared, got %q", codex.BaseImage)
-				}
-				assertNoAPIKeyPreserved(t, codex)
-			},
-		},
-		{
-			name: "bridge_ports",
-			defaults: Defaults{
-				BridgePorts: []string{"22", "5432"},
-				ToolOverrides: map[string]Defaults{
-					"claude": {BridgePorts: []string{"6379"}, NoAPIKey: boolPtr(true)},
-					"pi":     {NoAPIKey: boolPtr(true)},
-				},
-			},
-			warningCount: 2,
-			warnings: []string{
-				"Ignoring bridge_ports=[22 5432] in",
-				"tool_overrides.claude.bridge_ports=[6379]",
-			},
-			assert: func(t *testing.T, defaults Defaults) {
-				if defaults.BridgePorts != nil {
-					t.Fatalf("expected project bridge_ports to be cleared, got %v", defaults.BridgePorts)
-				}
-				claude := defaults.ToolOverrides["claude"]
-				if claude.BridgePorts != nil {
-					t.Fatalf("expected tool_overrides.claude.bridge_ports to be cleared, got %v", claude.BridgePorts)
-				}
-				assertNoAPIKeyPreserved(t, claude)
-			},
-		},
-		{
-			name: "allow_domains",
-			defaults: Defaults{
-				AllowDomains: []string{"evil-c2.example.com", "exfil.example.net"},
-				ToolOverrides: map[string]Defaults{
-					"claude": {AllowDomains: []string{"attacker.example.org"}, NoAPIKey: boolPtr(true)},
-					"pi":     {NoAPIKey: boolPtr(true)},
-				},
-			},
-			warningCount: 2,
-			warnings: []string{
-				"Ignoring allow_domains=[evil-c2.example.com exfil.example.net] in",
-				"tool_overrides.claude.allow_domains=[attacker.example.org]",
-			},
-			assert: func(t *testing.T, defaults Defaults) {
-				if defaults.AllowDomains != nil {
-					t.Fatalf("expected project allow_domains to be cleared, got %v", defaults.AllowDomains)
-				}
-				claude := defaults.ToolOverrides["claude"]
-				if claude.AllowDomains != nil {
-					t.Fatalf("expected tool_overrides.claude.allow_domains to be cleared, got %v", claude.AllowDomains)
-				}
-				assertNoAPIKeyPreserved(t, claude)
-			},
-		},
-		{
-			name:         "top-level host_config",
-			defaults:     Defaults{HostConfig: "passthrough"},
-			warningCount: 1,
-			warnings:     []string{"Ignoring host_config=\"passthrough\" in"},
-			assert: func(t *testing.T, defaults Defaults) {
-				if defaults.HostConfig != "" {
-					t.Fatalf("expected project host_config to be cleared, got %q", defaults.HostConfig)
-				}
-			},
-		},
-		{
-			name:         "top-level host_config_paths",
-			defaults:     Defaults{HostConfigPaths: []string{"+settings.json"}},
-			warningCount: 1,
-			warnings:     []string{"Ignoring host_config_paths=[+settings.json] in"},
-			assert: func(t *testing.T, defaults Defaults) {
-				if defaults.HostConfigPaths != nil {
-					t.Fatalf("expected project host_config_paths to be cleared, got %v", defaults.HostConfigPaths)
-				}
-			},
-		},
-		{
-			name: "tool override host_config",
-			defaults: Defaults{ToolOverrides: map[string]Defaults{
-				"claude": {HostConfig: "passthrough", NoAPIKey: boolPtr(true)},
-			}},
-			warningCount: 1,
-			warnings:     []string{"tool_overrides.claude.host_config=\"passthrough\""},
-			assert: func(t *testing.T, defaults Defaults) {
-				claude := defaults.ToolOverrides["claude"]
-				if claude.HostConfig != "" {
-					t.Fatalf("expected tool_overrides.claude.host_config to be cleared, got %q", claude.HostConfig)
-				}
-				assertNoAPIKeyPreserved(t, claude)
-			},
-		},
-		{
-			name: "tool override host_config_paths",
-			defaults: Defaults{ToolOverrides: map[string]Defaults{
-				"claude": {HostConfigPaths: []string{"+settings.json"}, NoAPIKey: boolPtr(true)},
-			}},
-			warningCount: 1,
-			warnings:     []string{"tool_overrides.claude.host_config_paths=[+settings.json]"},
-			assert: func(t *testing.T, defaults Defaults) {
-				claude := defaults.ToolOverrides["claude"]
-				if claude.HostConfigPaths != nil {
-					t.Fatalf("expected tool_overrides.claude.host_config_paths to be cleared, got %v", claude.HostConfigPaths)
-				}
-				assertNoAPIKeyPreserved(t, claude)
-			},
-		},
-		{
-			name:         "top-level project_mount writable",
-			defaults:     Defaults{ProjectMount: model.ProjectMountWritable},
-			warningCount: 1,
-			warnings:     []string{"Ignoring project_mount=\"writable\" in"},
-			assert: func(t *testing.T, defaults Defaults) {
-				if defaults.ProjectMount != "" {
-					t.Fatalf("expected project_mount to be cleared, got %q", defaults.ProjectMount)
-				}
-			},
-		},
-		{
-			name: "tool override project_mount writable",
-			defaults: Defaults{ToolOverrides: map[string]Defaults{
-				"claude": {ProjectMount: model.ProjectMountWritable, NoAPIKey: boolPtr(true)},
-			}},
-			warningCount: 1,
-			warnings:     []string{"tool_overrides.claude.project_mount=\"writable\""},
-			assert: func(t *testing.T, defaults Defaults) {
-				claude := defaults.ToolOverrides["claude"]
-				if claude.ProjectMount != "" {
-					t.Fatalf("expected tool_overrides.claude.project_mount to be cleared, got %q", claude.ProjectMount)
-				}
-				assertNoAPIKeyPreserved(t, claude)
-			},
-		},
-		{
-			name: "project_mount readonly allowed",
-			defaults: Defaults{
-				ProjectMount: model.ProjectMountReadonly,
-				ToolOverrides: map[string]Defaults{
-					"claude": {ProjectMount: model.ProjectMountReadonly, NoAPIKey: boolPtr(true)},
-				},
-			},
-			warningCount: 0,
-			assert: func(t *testing.T, defaults Defaults) {
-				if defaults.ProjectMount != model.ProjectMountReadonly {
-					t.Fatalf("expected top-level project_mount readonly, got %q", defaults.ProjectMount)
-				}
-				claude := defaults.ToolOverrides["claude"]
-				if claude.ProjectMount != model.ProjectMountReadonly {
-					t.Fatalf("expected tool_overrides.claude.project_mount readonly, got %q", claude.ProjectMount)
-				}
-				assertNoAPIKeyPreserved(t, claude)
-			},
-		},
-		{
-			name:         "top-level worktree_metadata follow",
-			defaults:     Defaults{WorktreeMetadata: model.WorktreeMetadataFollow},
-			warningCount: 1,
-			warnings:     []string{"Ignoring worktree_metadata=\"follow\" in"},
-			assert: func(t *testing.T, defaults Defaults) {
-				if defaults.WorktreeMetadata != "" {
-					t.Fatalf("expected worktree_metadata to be cleared, got %q", defaults.WorktreeMetadata)
-				}
-			},
-		},
-		{
-			name: "tool override worktree_metadata follow",
-			defaults: Defaults{ToolOverrides: map[string]Defaults{
-				"claude": {WorktreeMetadata: model.WorktreeMetadataFollow, NoAPIKey: boolPtr(true)},
-			}},
-			warningCount: 1,
-			warnings:     []string{"tool_overrides.claude.worktree_metadata=\"follow\""},
-			assert: func(t *testing.T, defaults Defaults) {
-				claude := defaults.ToolOverrides["claude"]
-				if claude.WorktreeMetadata != "" {
-					t.Fatalf("expected tool_overrides.claude.worktree_metadata to be cleared, got %q", claude.WorktreeMetadata)
-				}
-				assertNoAPIKeyPreserved(t, claude)
-			},
-		},
-		{
-			name: "worktree_metadata readonly and none allowed",
-			defaults: Defaults{
-				WorktreeMetadata: model.WorktreeMetadataReadonly,
-				ToolOverrides: map[string]Defaults{
-					"claude": {WorktreeMetadata: model.WorktreeMetadataNone, NoAPIKey: boolPtr(true)},
-				},
-			},
-			warningCount: 0,
-			assert: func(t *testing.T, defaults Defaults) {
-				if defaults.WorktreeMetadata != model.WorktreeMetadataReadonly {
-					t.Fatalf("expected top-level worktree_metadata readonly, got %q", defaults.WorktreeMetadata)
-				}
-				claude := defaults.ToolOverrides["claude"]
-				if claude.WorktreeMetadata != model.WorktreeMetadataNone {
-					t.Fatalf("expected tool_overrides.claude.worktree_metadata none, got %q", claude.WorktreeMetadata)
-				}
-				assertNoAPIKeyPreserved(t, claude)
-			},
-		},
-		{
-			name:         "top-level tool",
-			defaults:     Defaults{Tool: "codex"},
-			warningCount: 1,
-			warnings:     []string{"Ignoring tool=\"codex\" in"},
-			assert: func(t *testing.T, defaults Defaults) {
-				if defaults.Tool != "" {
-					t.Fatalf("expected project tool to be cleared, got %q", defaults.Tool)
-				}
-			},
-		},
-		{
-			name:         "top-level yolo true",
-			defaults:     Defaults{Yolo: boolPtr(true)},
-			warningCount: 1,
-			warnings:     []string{"Ignoring yolo=true in"},
-			assert: func(t *testing.T, defaults Defaults) {
-				if defaults.Yolo != nil {
-					t.Fatalf("expected project yolo to be cleared, got %v", *defaults.Yolo)
-				}
-			},
-		},
-		{
-			name:         "top-level yolo false",
-			defaults:     Defaults{Yolo: boolPtr(false)},
-			warningCount: 1,
-			warnings:     []string{"Ignoring yolo=false in"},
-			assert: func(t *testing.T, defaults Defaults) {
-				if defaults.Yolo != nil {
-					t.Fatalf("expected project yolo to be cleared, got %v", *defaults.Yolo)
-				}
-			},
-		},
-		{
-			name: "tool override yolo",
-			defaults: Defaults{ToolOverrides: map[string]Defaults{
-				"claude": {Yolo: boolPtr(true), NoAPIKey: boolPtr(true)},
-			}},
-			warningCount: 1,
-			warnings:     []string{"tool_overrides.claude.yolo=true"},
-			assert: func(t *testing.T, defaults Defaults) {
-				claude := defaults.ToolOverrides["claude"]
-				if claude.Yolo != nil {
-					t.Fatalf("expected tool_overrides.claude.yolo to be cleared, got %v", *claude.Yolo)
-				}
-				assertNoAPIKeyPreserved(t, claude)
-			},
-		},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			defaults, warnings := applyProjectGuardrailsForTest(tc.defaults)
-			assertWarnings(t, warnings, tc.warningCount, tc.warnings...)
-			tc.assert(t, defaults)
-		})
-	}
-}
-
-func TestProjectOverrideGuardrails_EmptySensitiveFieldsNoWarning(t *testing.T) {
-	cases := []struct {
-		name     string
-		defaults Defaults
-		assert   func(t *testing.T, defaults Defaults)
-	}{
-		{
-			name: "base_image",
-			defaults: Defaults{ToolOverrides: map[string]Defaults{
-				"codex": {NoAPIKey: boolPtr(true)},
-			}},
-			assert: func(t *testing.T, defaults Defaults) {
-				if defaults.BaseImage != "" {
-					t.Fatalf("expected base_image to remain empty, got %q", defaults.BaseImage)
-				}
-				if defaults.ToolOverrides["codex"].BaseImage != "" {
-					t.Fatalf("expected tool override base_image to remain empty")
-				}
-			},
-		},
-		{
-			name: "bridge_ports",
-			defaults: Defaults{ToolOverrides: map[string]Defaults{
-				"claude": {NoAPIKey: boolPtr(true)},
-			}},
-			assert: func(t *testing.T, defaults Defaults) {
-				if defaults.BridgePorts != nil {
-					t.Fatalf("expected bridge_ports to remain nil, got %v", defaults.BridgePorts)
-				}
-				if defaults.ToolOverrides["claude"].BridgePorts != nil {
-					t.Fatalf("expected tool override bridge_ports to remain nil")
-				}
-			},
-		},
-		{
-			name: "allow_domains",
-			defaults: Defaults{ToolOverrides: map[string]Defaults{
-				"claude": {NoAPIKey: boolPtr(true)},
-			}},
-			assert: func(t *testing.T, defaults Defaults) {
-				if defaults.AllowDomains != nil {
-					t.Fatalf("expected allow_domains to remain nil, got %v", defaults.AllowDomains)
-				}
-				if defaults.ToolOverrides["claude"].AllowDomains != nil {
-					t.Fatalf("expected tool override allow_domains to remain nil")
-				}
-			},
-		},
-		{
-			name: "top-level host_config",
-			defaults: Defaults{ToolOverrides: map[string]Defaults{
-				"claude": {NoAPIKey: boolPtr(true)},
-			}},
-			assert: func(t *testing.T, defaults Defaults) {
-				if defaults.HostConfig != "" {
-					t.Fatalf("expected host_config to remain empty, got %q", defaults.HostConfig)
-				}
-			},
-		},
-		{
-			name: "top-level tool",
-			defaults: Defaults{ToolOverrides: map[string]Defaults{
-				"codex": {NoAPIKey: boolPtr(true)},
-			}},
-			assert: func(t *testing.T, defaults Defaults) {
-				if defaults.Tool != "" {
-					t.Fatalf("expected tool to remain empty, got %q", defaults.Tool)
-				}
-			},
-		},
-		{
-			name: "top-level yolo",
-			defaults: Defaults{ToolOverrides: map[string]Defaults{
-				"claude": {NoAPIKey: boolPtr(true)},
-			}},
-			assert: func(t *testing.T, defaults Defaults) {
-				if defaults.Yolo != nil {
-					t.Fatalf("expected yolo to remain nil, got %v", *defaults.Yolo)
-				}
-			},
-		},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			defaults, warnings := applyProjectGuardrailsForTest(tc.defaults)
-			assertWarnings(t, warnings, 0)
-			tc.assert(t, defaults)
-		})
-	}
-}
-
 func TestReadDefaults_RejectsRemovedFields(t *testing.T) {
 	cases := map[string]string{
 		"image_mode":                        `{"image_mode":"all"}`,
@@ -1165,37 +573,6 @@ func TestResolveOptionsForTool_AppliesTargetToolOverrides(t *testing.T) {
 	}
 	if codexOpts.Tool != "codex" {
 		t.Fatalf("expected resolved tool codex, got %q", codexOpts.Tool)
-	}
-}
-
-const skipWarningCountCheck = -1
-
-func applyProjectGuardrailsForTest(defaults Defaults) (Defaults, []Warning) {
-	warnings := applyProjectOverrideGuardrails("/tmp/project/.enclave/config.json", "/tmp/project", &defaults)
-	return defaults, warnings
-}
-
-func projectConfigPathForTest(t *testing.T) string {
-	t.Helper()
-	return filepath.Join(t.TempDir(), ".enclave", "config.json")
-}
-
-func assertWarnings(t *testing.T, warnings []Warning, wantCount int, wantSubstrings ...string) {
-	t.Helper()
-	if wantCount != skipWarningCountCheck && len(warnings) != wantCount {
-		t.Fatalf("expected %d guardrail warnings, got %d: %v", wantCount, len(warnings), warnings)
-	}
-	for _, want := range wantSubstrings {
-		if !containsSubstring(warnings, want) {
-			t.Fatalf("expected warning containing %q, warnings=%v", want, warnings)
-		}
-	}
-}
-
-func assertNoAPIKeyPreserved(t *testing.T, defaults Defaults) {
-	t.Helper()
-	if defaults.NoAPIKey == nil || !*defaults.NoAPIKey {
-		t.Fatalf("expected non-guarded fields to remain unchanged")
 	}
 }
 

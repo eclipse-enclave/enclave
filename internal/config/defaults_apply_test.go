@@ -84,11 +84,6 @@ func TestApplyDefaultsWithSources_SubtractiveAgainstImplicitAll(t *testing.T) {
 	}
 }
 
-// allow_domains widens the gateway egress allowlist, so it is a guarded
-// project-config option (stripped by applyProjectOverrideGuardrails — see
-// TestProjectOverrideGuardrails_StripsAllowDomains). It still flows through
-// end-to-end from the trusted sources: global config (asserted here) and the
-// --allow-domain CLI flag.
 func TestApplyDefaultsWithSources_AllowDomainsFromGlobal(t *testing.T) {
 	opts := DefaultOptions()
 	sources := model.DefaultOptionSources()

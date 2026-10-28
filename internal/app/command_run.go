@@ -88,11 +88,15 @@ func runExecutionCommand(input *CommandInput) int {
 		return 1
 	}
 
-	// exec enters an existing container, so it mounts nothing.
-	validatedDirs, validatedReadonlyDirs, err := resolveAdditionalMounts(opts, project, host.Home, isRunAction(input.Action))
-	if err != nil {
-		logx.Errorf("%v", err)
-		return 1
+	// exec enters an existing container, so it mounts nothing and a configured
+	// directory that no longer exists must not block it.
+	var validatedDirs, validatedReadonlyDirs []string
+	if isRunAction(input.Action) {
+		validatedDirs, validatedReadonlyDirs, err = resolveAdditionalMounts(opts, project, host.Home)
+		if err != nil {
+			logx.Errorf("%v", err)
+			return 1
+		}
 	}
 
 	resolvedBuildConfig, code := ensureRuntimeImage(input, opts, buildCfg, host, profile)
@@ -154,12 +158,12 @@ func runExecutionCommand(input *CommandInput) int {
 }
 
 // resolveAdditionalMounts validates the directories to mount besides the
-// project and returns them read-write and read-only. With guard set, it
-// refuses sensitive ones (see checkSensitiveMounts), taking the
+// project and returns them read-write and read-only. It refuses sensitive
+// ones (see checkSensitiveMounts), taking the
 // sensitive-dir exceptions from config and from
 // --add-sensitive-dir/--add-readonly-sensitive-dir. Unlike --add-dir, those
 // flags add to the configured directories instead of replacing them.
-func resolveAdditionalMounts(opts model.Options, project model.Project, home string, guard bool) ([]string, []string, error) {
+func resolveAdditionalMounts(opts model.Options, project model.Project, home string) ([]string, []string, error) {
 	sensitiveDirs, exceptions, err := resolveSensitiveDirFlag(opts.AddSensitiveDirs, false, project, home)
 	if err != nil {
 		return nil, nil, err
@@ -174,15 +178,13 @@ func resolveAdditionalMounts(opts model.Options, project model.Project, home str
 		return nil, nil, err
 	}
 
-	if guard {
-		configExceptions, warnings := configSensitiveDirExceptions(opts, home)
-		for _, warning := range warnings {
-			logx.Warnf("%s", warning)
-		}
-		exceptions = slices.Concat(configExceptions, exceptions, readonlyExceptions)
-		if err := checkSensitiveMounts(project, slices.Concat(writable, readonly), exceptions, home, opts.AllowSensitiveMounts); err != nil {
-			return nil, nil, err
-		}
+	configExceptions, warnings := configSensitiveDirExceptions(opts, home)
+	for _, warning := range warnings {
+		logx.Warnf("%s", warning)
+	}
+	exceptions = slices.Concat(configExceptions, exceptions, readonlyExceptions)
+	if err := checkSensitiveMounts(project, slices.Concat(writable, readonly), exceptions, home, opts.AllowSensitiveMounts); err != nil {
+		return nil, nil, err
 	}
 	return additionalDirPaths(writable), additionalDirPaths(readonly), nil
 }

@@ -340,7 +340,7 @@ func TestExecSessionTargetFollowsSessionTint(t *testing.T) {
 func runMounts(t *testing.T, home string, project string, opts model.Options) (dirs, readonlyDirs []string, stderr string, err error) {
 	t.Helper()
 	_, stderr = captureOutput(t, func() {
-		dirs, readonlyDirs, err = resolveAdditionalMounts(opts, guardProject(project), home, true)
+		dirs, readonlyDirs, err = resolveAdditionalMounts(opts, guardProject(project), home)
 	})
 	return dirs, readonlyDirs, stderr, err
 }

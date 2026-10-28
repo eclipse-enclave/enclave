@@ -46,11 +46,9 @@ func (o ListOrigins) Origin(option string, entry string) (EntryOrigin, bool) {
 	return origin, ok
 }
 
-// ListProblem is a list entry that merging the layers rejected or found to have no effect.
+// ListProblem is a list entry that merging the layers rejected.
 type ListProblem struct {
 	Option  string
-	Entry   string
 	Origin  EntryOrigin
 	Message string
-	Warning bool
 }

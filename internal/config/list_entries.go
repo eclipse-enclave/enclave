@@ -151,16 +151,12 @@ func ListEntryOriginLabel(option string, origins model.ListOrigins, entry string
 	return ListOriginLabel(option, origin)
 }
 
-// CheckListProblems reports what merging the list layers found: the first
-// invalid entry as an error, and entries that had no effect as warnings.
-func CheckListProblems(opts model.Options) ([]string, error) {
-	var warnings []string
-	for _, problem := range opts.ListProblems {
-		message := ListOriginLabel(problem.Option, problem.Origin) + ": " + problem.Message
-		if !problem.Warning {
-			return warnings, errors.New(message)
-		}
-		warnings = append(warnings, message)
+// CheckListProblems reports the first entry that merging the list layers
+// rejected, naming the flag or config file that set it.
+func CheckListProblems(opts model.Options) error {
+	if len(opts.ListProblems) == 0 {
+		return nil
 	}
-	return warnings, nil
+	problem := opts.ListProblems[0]
+	return errors.New(ListOriginLabel(problem.Option, problem.Origin) + ": " + problem.Message)
 }

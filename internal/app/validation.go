@@ -128,9 +128,7 @@ func ValidateOptions(opts model.Options, sources model.OptionSources, ctx Valida
 	if strings.TrimSpace(opts.ImageName) == "" {
 		return opts, sources, warnings, fmt.Errorf("--image-name requires a non-empty value")
 	}
-	listWarnings, err := config.CheckListProblems(opts)
-	warnings = append(warnings, listWarnings...)
-	if err != nil {
+	if err := config.CheckListProblems(opts); err != nil {
 		return opts, sources, warnings, err
 	}
 

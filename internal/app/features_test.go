@@ -240,3 +240,38 @@ func TestRunFeaturesFallsBackWhenValidationFails(t *testing.T) {
 		t.Fatalf("fallback listing attributes features to the qemu backend:\n%s", text)
 	}
 }
+
+func TestFeatureDisabledSourceNamesTheLayerOfTheEntry(t *testing.T) {
+	globalPath, err := config.GlobalConfigPath()
+	if err != nil {
+		t.Skip("no global config path")
+	}
+	cliFeatures := func(values ...string) (model.Options, model.OptionSources) {
+		opts := config.DefaultOptions()
+		sources := model.OptionSources{}
+		if values != nil {
+			opts.Features = values
+			sources.Features = model.SourceCLI
+		}
+		return opts, sources
+	}
+	cases := []struct {
+		name   string
+		global []string
+		cli    []string
+		want   string
+	}{
+		{name: "removal in global, addition on the CLI", global: []string{"-python-dev"}, cli: []string{"+devtools"}, want: " from " + globalPath},
+		{name: "bare global list, addition on the CLI", global: []string{"node-dev"}, cli: []string{"+devtools"}, want: " from " + globalPath},
+		{name: "bare CLI list", global: []string{"-node-dev"}, cli: []string{"node-dev"}, want: " from cli"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cli, cliSources := cliFeatures(tc.cli...)
+			opts, _, _ := config.ResolveOptionsForTool(cli, cliSources, config.Defaults{Features: tc.global}, config.Defaults{}, "claude")
+			if got := featureDisabledSource("python-dev", opts, opts.Sources.Features, ""); got != tc.want {
+				t.Fatalf("source = %q, want %q (features %v)", got, tc.want, opts.Features)
+			}
+		})
+	}
+}

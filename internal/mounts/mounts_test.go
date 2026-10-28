@@ -523,7 +523,7 @@ func TestValidateExtraDirsHintsAtEscapedPrefix(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Chdir(dir)
-	_, err := ValidateExtraDirs([]string{"cache"}, "", "")
+	_, err := ValidateExtraDirsWithExisting([]string{"cache"}, nil, "", "")
 	if err == nil || !strings.Contains(err.Error(), "did you mean ./+cache?") {
 		t.Fatalf("err = %v, want a hint at ./+cache", err)
 	}

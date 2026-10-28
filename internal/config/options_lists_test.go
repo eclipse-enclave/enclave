@@ -88,7 +88,7 @@ func TestExtrasListMergeRejectsMixedLists(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			got := resolvePorts(t, global, Defaults{Ports: tc.project}, tc.cli...)
-			if len(got.ListProblems) != 1 || got.ListProblems[0].Warning || !strings.HasPrefix(got.ListProblems[0].Message, tc.want) {
+			if len(got.ListProblems) != 1 || !strings.HasPrefix(got.ListProblems[0].Message, tc.want) {
 				t.Fatalf("problems = %+v, want one error starting with %q", got.ListProblems, tc.want)
 			}
 			if !reflect.DeepEqual(got.Ports, []string{"1000"}) {
@@ -201,7 +201,7 @@ func TestExtrasListMergePortClashes(t *testing.T) {
 		if !reflect.DeepEqual(got.Ports, []string{"8080:80"}) {
 			t.Fatalf("ports = %v", got.Ports)
 		}
-		if len(got.ListProblems) != 1 || got.ListProblems[0].Warning || got.ListProblems[0].Origin.Source != model.SourceCLI {
+		if len(got.ListProblems) != 1 || got.ListProblems[0].Origin.Source != model.SourceCLI {
 			t.Fatalf("problems = %+v, want one CLI error", got.ListProblems)
 		}
 	})
@@ -296,6 +296,9 @@ func TestMergeDefaultsCombinesToolOverrideLists(t *testing.T) {
 		{name: "amending a replacing list stays bare", global: []string{"1000", "3000"}, local: []string{"+2000", "-3000"}, want: []string{"1000", "2000"}},
 		{name: "removing the last entry of a replacing list clears", global: []string{"3000"}, local: []string{"-3000"}, want: []string{}},
 		{name: "plain list replaces", global: []string{"+3000"}, local: []string{"4000"}, want: []string{"4000"}},
+		{name: "amending none starts empty", global: []string{"none"}, local: []string{"+3000"}, want: []string{"3000"}},
+		{name: "clash replaces the replacing list's entry", global: []string{"8080:80"}, local: []string{"+8080:81"}, want: []string{"8080:81"}},
+		{name: "clash drops the earlier directive", global: []string{"+8080:80", "+3000"}, local: []string{"+8080:81"}, want: []string{"+3000", "+8080:81"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -316,6 +319,11 @@ func TestMergeDefaultsMatchesTheFold(t *testing.T) {
 		{{"1000", "3000"}, {"+2000", "-3000"}},
 		{{"3000"}, {"-3000"}},
 		{{"-8080:80"}, {"+8080:81"}},
+		{{"none"}, {"+3000"}},
+		{{"8080:80"}, {"+8080:81"}},
+		{{"+8080:80"}, {"+8080:81"}},
+		{{"+3000"}, {"none"}},
+		{{"-3000"}, {"+3000"}},
 	} {
 		global := base
 		global.ToolOverrides = map[string]Defaults{"claude": {Ports: pair[0]}}
@@ -341,7 +349,7 @@ func TestListOriginsNameTheConfigFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	opts, _, _ := ResolveOptionsForTool(DefaultOptions(), model.OptionSources{}, global, Defaults{}, "claude")
-	_, err = CheckListProblems(opts)
+	err = CheckListProblems(opts)
 	if want := `ports in ` + path + `: invalid entry "abc"`; err == nil || !strings.HasPrefix(err.Error(), want) {
 		t.Fatalf("error = %v, want prefix %q", err, want)
 	}

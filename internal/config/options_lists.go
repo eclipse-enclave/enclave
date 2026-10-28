@@ -141,10 +141,11 @@ func mergeListValues(def OptionDef, base []string, incoming []string) []string {
 		}
 		return copyStringSlice(incoming)
 	}
+	if def.Apply == ApplyListExtras {
+		return combineExtrasValues(def.Name, base, incoming)
+	}
 	rules := featureSelection
 	switch def.Apply {
-	case ApplyListExtras:
-		rules = selectionRules{key: func(name string) string { return listEntryKey(def.Name, name) }}
 	case ApplySliceMergeHost:
 		rules = hostConfigSelection
 	}
@@ -158,6 +159,58 @@ func mergeListValues(def OptionDef, base []string, incoming []string) []string {
 		values = append(values, entry.value)
 	}
 	return values
+}
+
+// combineExtrasValues combines two extras lists into one that the fold applies
+// the same way as the two in sequence, none and port clashes included.
+func combineExtrasValues(option string, base []string, incoming []string) []string {
+	if extrasListReplaces(incoming) {
+		return copyStringSlice(incoming)
+	}
+	if extrasListReplaces(base) {
+		// Distinct layers, so a clash replaces the base entry as in the fold.
+		lower := extrasMerge{option: option, layer: listLayer{scope: model.ScopeGlobal}}
+		upper := extrasMerge{option: option, layer: listLayer{scope: model.ScopeProject}}
+		merged := upper.mergeReplacing(lower.mergeReplacing(nil, base), incoming)
+		values := make([]string, 0, len(merged))
+		for _, entry := range merged {
+			values = append(values, entry.value)
+		}
+		return values
+	}
+	// Both amend: a later directive overrides an earlier one for the same entry,
+	// and a later addition drops an earlier one it clashes with.
+	values := make([]string, 0, len(base)+len(incoming))
+	for _, raw := range base {
+		lower, _ := parseListDirective(raw)
+		superseded := false
+		for _, next := range incoming {
+			upper, _ := parseListDirective(next)
+			if listEntryKey(option, lower.value) == listEntryKey(option, upper.value) ||
+				(lower.op == '+' && upper.op == '+' && listEntriesClash(option, lower.value, upper.value)) {
+				superseded = true
+				break
+			}
+		}
+		if !superseded {
+			values = append(values, raw)
+		}
+	}
+	return append(values, incoming...)
+}
+
+// extrasListReplaces reports whether an extras list replaces the inherited
+// one rather than amending it.
+func extrasListReplaces(values []string) bool {
+	if len(values) == 0 {
+		return true
+	}
+	for _, raw := range values {
+		if d, isNone := parseListDirective(raw); isNone || d.op == 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // listNone is the keyword that clears an extras list.
@@ -216,10 +269,10 @@ func (m *extrasMerge) mergeReplacing(base []listEntry, incoming []string) []list
 	}
 	switch {
 	case sawNone && len(directives) > 0:
-		m.problem(listNone, fmt.Sprintf("%q cannot be combined with other entries; it clears the list", listNone), false)
+		m.problem(fmt.Sprintf("%q cannot be combined with other entries; it clears the list", listNone))
 		return copyEntries(base)
 	case plain > 0 && prefixed > 0:
-		m.problem(firstPrefixed, fmt.Sprintf("%q mixes a +/- entry into a plain list; a plain list replaces the inherited one, so drop the prefixes or prefix every entry", firstPrefixed), false)
+		m.problem(fmt.Sprintf("%q mixes a +/- entry into a plain list; a plain list replaces the inherited one, so drop the prefixes or prefix every entry", firstPrefixed))
 		return copyEntries(base)
 	case len(incoming) == 0 || sawNone:
 		return []listEntry{}
@@ -264,7 +317,7 @@ func (m *extrasMerge) parse(incoming []string) ([]listDirective, bool) {
 		op, value, err := ValidateListEntry(m.option, raw)
 		if err != nil {
 			entry := RedactListEntry(m.option, raw)
-			m.problem(entry, fmt.Sprintf("invalid entry %q: %v", entry, err), false)
+			m.problem(fmt.Sprintf("invalid entry %q: %v", entry, err))
 			continue
 		}
 		if op == "" && value == listNone {
@@ -296,7 +349,7 @@ func (m *extrasMerge) add(entries []listEntry, value string) []listEntry {
 		}
 		if entry.origin == origin {
 			if !sameKey {
-				m.problem(value, fmt.Sprintf("%q and %q both publish host port %s", entry.value, value, portSpecHostPort(value)), false)
+				m.problem(fmt.Sprintf("%q and %q both publish host port %s", entry.value, value, portSpecHostPort(value)))
 			}
 			// The first entry of the layer stays.
 			result = append(result, entry)
@@ -329,13 +382,11 @@ func (m *extrasMerge) remove(entries []listEntry, d listDirective) []listEntry {
 	return result
 }
 
-func (m *extrasMerge) problem(entry string, message string, warning bool) {
+func (m *extrasMerge) problem(message string) {
 	m.problems = append(m.problems, model.ListProblem{
 		Option:  m.option,
-		Entry:   entry,
 		Origin:  m.layer.origin(),
 		Message: message,
-		Warning: warning,
 	})
 }
 

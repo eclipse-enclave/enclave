@@ -10,6 +10,7 @@ package app
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"enclave/internal/backend"
 	"enclave/internal/config"
@@ -72,12 +73,36 @@ func runFeatures(ctx *AppContext, req *extinstall.Request, opts model.Options, s
 		case featuresDisabled(run.BuildOptions):
 			fmt.Printf("✗ %s%s (disabled by devcontainer%s)\n", feature.Name, suffix, fromSource(sources.Devcontainer, ctx.ProjectDir))
 		case run.Features != nil:
-			fmt.Printf("✗ %s%s (disabled by features%s)\n", feature.Name, suffix, fromSource(sources.Features, ctx.ProjectDir))
+			fmt.Printf("✗ %s%s (disabled by features%s)\n", feature.Name, suffix, featureDisabledSource(feature.Name, opts, sources.Features, ctx.ProjectDir))
 		default:
 			fmt.Printf("✗ %s%s (opt-in)\n", feature.Name, suffix)
 		}
 	}
 	return 0
+}
+
+// featureDisabledSource names the layer that disabled a feature: the one with
+// its -name entry, else the one whose bare list left it out. Layers amend each
+// other, so the source of the whole list is only the fallback.
+func featureDisabledSource(name string, opts model.Options, fallback model.OptionSource, projectDir string) string {
+	origin, ok := opts.Origins.Origin("features", "-"+name)
+	if !ok {
+		for _, entry := range opts.Features {
+			if strings.HasPrefix(entry, "+") || strings.HasPrefix(entry, "-") {
+				continue
+			}
+			if origin, ok = opts.Origins.Origin("features", entry); ok {
+				break
+			}
+		}
+	}
+	if !ok {
+		return fromSource(fallback, projectDir)
+	}
+	if origin.Source != model.SourceCLI && origin.Path != "" {
+		return " from " + origin.Path
+	}
+	return fromSource(origin.Source, projectDir)
 }
 
 func fromSource(source model.OptionSource, projectDir string) string {

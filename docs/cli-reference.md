@@ -255,7 +255,7 @@ store that holds memory; the other `--keep` kinds do not apply there. See
 
 Boolean flags accept an explicit value (e.g. `--no-cache=false`) in any form Go's `strconv.ParseBool` accepts: `true`/`false`, `1`/`0`, `t`/`f`, and their upper- and title-case variants; other values are rejected. `--no-yolo=false` is equivalent to `--yolo`.
 
-List flags (`-p`, `--allow-domain`, `--bridge-port`, `--pass-env`, `--cache-from`) replace the list from config. Prefix a value with `+` to add to the configured list instead (`-p +3000`) or with `-` to drop a configured entry for this run (`-p -8080`, `--pass-env -GH_TOKEN`); `none` clears it. `--add-dir` and `--add-readonly-dir` add a plain path to the configured directories; `none` makes the other paths replace them. Write `./-dir` or `./+dir` for a relative directory starting with `-` or `+`. See [List Options](configuration.md#list-options).
+List flags (`-p`, `--allow-domain`, `--bridge-port`, `--pass-env`, `--cache-from`) replace the list from config. Prefix a value with `+` to add to the configured list instead (`-p +3000`) or with `-` to drop a configured entry for this run (`-p -8080:80`, `--pass-env -GH_TOKEN`); `none` clears it. `--add-dir` and `--add-readonly-dir` add a plain path to the configured directories; `none` makes the other paths replace them. Write `./-dir` or `./+dir` for a relative directory starting with `-` or `+`. See [List Options](configuration.md#list-options).
 
 ### Tool & Session
 

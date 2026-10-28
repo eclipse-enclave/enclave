@@ -82,7 +82,7 @@ directories.
 ```bash
 enclave -p 3000                 # publish only 3000
 enclave -p +3000                # publish 3000 on top of the configured ports
-enclave -p -8080                # drop a configured port for this run
+enclave -p -8080:80             # drop a configured port for this run
 enclave --add-dir ~/notes       # mount ~/notes next to the configured dirs
 ```
 

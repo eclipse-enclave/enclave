@@ -99,10 +99,6 @@ func isDisallowedHomeMount(realPath string, home string) bool {
 	return !util.HasPathPrefix(realPath, home)
 }
 
-func ValidateExtraDirs(extraDirs []string, projectReal string, home string) ([]string, error) {
-	return validateExtraDirs(extraDirs, nil, projectReal, home)
-}
-
 func ValidateExtraDirsWithExisting(extraDirs []string, existing []string, projectReal string, home string) ([]string, error) {
 	validated := append([]string{}, existing...)
 	return validateExtraDirs(extraDirs, &validated, projectReal, home)

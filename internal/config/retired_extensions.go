@@ -33,7 +33,15 @@ var retiredExtensions = map[model.ExtensionKind]map[string]retiredExtension{
 	model.KindTool: {
 		"mistral-vibe": {replacement: "mistral-vibe", moved: true},
 	},
+	model.KindFeature: {
+		"playwright":   {replacement: "playwright-mcp", moved: true},
+		"shell-extras": {replacement: "shell-extras", moved: true},
+	},
 }
+
+// PlaywrightMCPReplacement says what replaced the removed playwright_mcp
+// option and --playwright-mcp flag.
+const PlaywrightMCPReplacement = "install the playwright-mcp feature (enclave features add " + ExtensionsRepo + " --name playwright-mcp) and select +playwright-mcp"
 
 // RetiredExtensionHint says where a retired built-in extension went, or
 // returns "" if name was never retired.

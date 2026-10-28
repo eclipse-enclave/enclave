@@ -146,10 +146,6 @@ func ValidateOptions(opts model.Options, sources model.OptionSources, ctx Valida
 	if err := validateBuildIdentityOptions(opts.BuildOptions); err != nil {
 		return opts, sources, warnings, err
 	}
-	if opts.PlaywrightMCP && opts.Tool != "claude" {
-		warnings = append(warnings, "--playwright-mcp is only supported with Claude; ignoring")
-		opts.PlaywrightMCP = false
-	}
 	progress := normalizeBuildProgress(opts.Progress)
 	if progress == "" {
 		progress = model.BuildProgressCompact
@@ -227,14 +223,11 @@ func coerceQEMURunOptions(opts model.Options, sources model.OptionSources, paths
 	if opts.Background {
 		return opts, nil, fmt.Errorf("qemu backend runs foreground sessions only and cannot start detached; remove --background")
 	}
-	// Features and --playwright-mcp requested on THIS command line cannot be
-	// honored by a tool-only bundle, so fail loudly. The same options coming
-	// from config are dropped with a notice below, so `--backend qemu` still runs.
+	// Features requested on THIS command line cannot be honored by a tool-only
+	// bundle, so fail loudly. Features coming from config are dropped with a
+	// notice below, so `--backend qemu` still runs.
 	if sources.Features == model.SourceCLI && len(opts.Features) > 0 {
 		return opts, nil, fmt.Errorf("qemu backend builds tool-only bundles and cannot install features (%s); pass --features none to run without them", strings.Join(opts.Features, ", "))
-	}
-	if sources.PlaywrightMCP == model.SourceCLI && opts.PlaywrightMCP {
-		return opts, nil, fmt.Errorf("qemu backend builds tool-only bundles and cannot run --playwright-mcp (it needs the playwright feature)")
 	}
 
 	// What a docker run would install for these options (config selections plus
@@ -245,7 +238,6 @@ func coerceQEMURunOptions(opts model.Options, sources model.OptionSources, paths
 	opts.AllowAllNetwork = true
 	opts.Slim = true
 	opts.Features = []string{}
-	opts.PlaywrightMCP = false
 
 	warnings := []string{"qemu backend: network isolation is unavailable (all outbound network allowed)"}
 	if len(dropped) > 0 {
@@ -378,13 +370,6 @@ func normalizeOptions(opts model.Options) (model.Options, []string) {
 	if opts.SkillsValidation == "" {
 		opts.SkillsValidation = model.SkillsValidationStrict
 	}
-	if opts.PlaywrightMCP && opts.Tool == "claude" {
-		var overrodeRemoval bool
-		opts.Features, overrodeRemoval = ensureFeature(opts.Features, "playwright")
-		if overrodeRemoval {
-			warnings = append(warnings, "--playwright-mcp needs the playwright feature; enabling it despite -playwright in features")
-		}
-	}
 	opts.NetworkLog = strings.TrimSpace(strings.ToLower(opts.NetworkLog))
 	if opts.NetworkLog == "" {
 		opts.NetworkLog = model.NetworkLogCoarse
@@ -401,22 +386,6 @@ func normalizeOptions(opts model.Options) (model.Options, []string) {
 	opts.BuildGID = strings.TrimSpace(opts.BuildGID)
 	opts.BuildxCacheDir = strings.TrimSpace(opts.BuildxCacheDir)
 	return opts, warnings
-}
-
-// ensureFeature selects name on top of features and reports whether that
-// overrode a removal of it. When features is nil (meaning "all defaults"), it
-// becomes ["default", name].
-func ensureFeature(features []string, name string) ([]string, bool) {
-	if features == nil {
-		return []string{model.SelectionDefault, name}, false
-	}
-	overrodeRemoval := false
-	for _, raw := range features {
-		if strings.TrimSpace(raw) == "-"+name {
-			overrodeRemoval = true
-		}
-	}
-	return config.AmendFeatures(features, "+"+name), overrodeRemoval
 }
 
 func normalizeBuildProgress(value string) string {

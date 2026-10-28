@@ -89,7 +89,6 @@ supported under `tool_overrides.<tool>`.
 | `sensitive_dir_exceptions` | Paths whose subtrees may be mounted although they are sensitive; mounts nothing. See [Sensitive-dir exceptions](cli-reference.md#sensitive-dir-exceptions) |
 | `project_mount` | `writable` (default) or `readonly` for the project/worktree mount |
 | `worktree_metadata` | Linked-worktree git metadata mounts: `follow` (default), `readonly`, or `none` |
-| `playwright_mcp` | Enable Playwright MCP server (Claude only) |
 | `bridge_ports` | Forward host ports into the container (host → container) |
 
 In readonly mode, writable `add_dirs` entries inside the project are mounted
@@ -217,12 +216,10 @@ the inherited one and `+`/`-` entries amend it:
   configured features, while `--features a,b` replaces them.
 - Only when no layer selects features do directives apply to the implicit
   default-enabled set, so `["-node-dev"]` removes that default feature and
-  `["+shell-extras"]` adds an opt-in one. In devcontainer mode the implicit set
+  `["+debug-tools"]` adds an opt-in one. In devcontainer mode the implicit set
   is empty.
 - `--features none` selects nothing and cannot be combined with other values;
   in config, write `[]`.
-- `--playwright-mcp` enables the `playwright` feature it needs even when
-  `features` removes it, with a warning.
 
 Feature names, including `+name` entries, must match an installed extension;
 unknown names fail before building or starting a session. Unknown `-name`
@@ -463,9 +460,9 @@ Each `options.<name>` entry has:
   validated (lowercased domains, conflict resolution, qemu coercion); only
   normalized if validation fails. Lists are always arrays.
   `features` is the sorted set a run enables (after `slim`, devcontainer mode,
-  `playwright_mcp`, and `+`/`-` directives, without unknown names), or `null`
-  with a `features_unavailable` warning when features cannot be listed (`valid`
-  can stay `true` then). `host_config_paths` and `yolo` are resolved against
+  and `+`/`-` directives, without unknown names), or `null` with a
+  `features_unavailable` warning when features cannot be listed (`valid` can
+  stay `true` then). `host_config_paths` and `yolo` are resolved against
   the tool (`null` without a loadable tool); `yolo` adds `resolvedBy` (`cli`,
   `config`, or `tool`). `backend` keeps the configured value, including `auto`.
 - `source`: the layer that last set the raw option: `default`, `global`,

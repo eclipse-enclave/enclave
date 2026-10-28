@@ -363,12 +363,6 @@ func optionCLIFlags() map[string][]CLIFlag {
 				return nil
 			}),
 		},
-		"playwright_mcp": {
-			boolFlag("--playwright-mcp", "Enable Playwright MCP server for browser automation", func(opts *model.Options, sources *model.OptionSources, value bool) {
-				opts.PlaywrightMCP = value
-				sources.PlaywrightMCP = model.SourceCLI
-			}),
-		},
 		"bridge_ports": {
 			valueFlag("--bridge-port", "Bridge host port into container (repeatable, comma-separated)", "--bridge-port requires a port number", func(opts *model.Options, sources *model.OptionSources, value string) error {
 				if err := applyBridgePort(opts, value); err != nil {

@@ -60,7 +60,6 @@ type RunOptions struct {
 	AllowRoot                bool
 	Background               bool
 	SessionName              string
-	PlaywrightMCP            bool
 	AllRunning               bool
 	NoApply                  bool
 	Force                    bool

@@ -159,12 +159,12 @@ func TestSyncFeatureAuthStoreCopiesIntoFeatureStoreDir(t *testing.T) {
 		t.Fatalf("write config auth: %v", err)
 	}
 
-	sync := backend.FeatureAuthSync{Feature: "playwright", ConfigDir: "pw", AuthFiles: []string{"auth.json"}}
+	sync := backend.FeatureAuthSync{Feature: "gitlab-cli", ConfigDir: "pw", AuthFiles: []string{"auth.json"}}
 	if err := b.syncFeatureAuthStore(context.Background(), configDir, sync); err != nil {
 		t.Fatalf("syncFeatureAuthStore() error = %v", err)
 	}
 
-	dst := filepath.Join(config.HostStoreFeatureAuthDir(home, "playwright"), "auth.json")
+	dst := filepath.Join(config.HostStoreFeatureAuthDir(home, "gitlab-cli"), "auth.json")
 	if data, err := os.ReadFile(dst); err != nil || string(data) != `{"token":"keep"}` {
 		t.Fatalf("feature auth store file = %q err=%v", data, err)
 	}
@@ -184,12 +184,12 @@ func TestSyncFeatureAuthStoreRejectsSymlinkedSource(t *testing.T) {
 		t.Fatalf("symlink config auth: %v", err)
 	}
 
-	sync := backend.FeatureAuthSync{Feature: "playwright", ConfigDir: "", AuthFiles: []string{"auth.json"}}
+	sync := backend.FeatureAuthSync{Feature: "gitlab-cli", ConfigDir: "", AuthFiles: []string{"auth.json"}}
 	if err := b.syncFeatureAuthStore(context.Background(), configDir, sync); err == nil {
 		t.Fatalf("expected symlinked source to be rejected")
 	}
 
-	if _, err := os.Stat(filepath.Join(config.HostStoreFeatureAuthDir(home, "playwright"), "auth.json")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(config.HostStoreFeatureAuthDir(home, "gitlab-cli"), "auth.json")); !os.IsNotExist(err) {
 		t.Fatalf("symlinked source must not be copied into the feature store, err=%v", err)
 	}
 }

@@ -759,15 +759,15 @@ Configure which features to install via `~/.config/enclave/config.json` (global)
 ```
 
 When `features` is not specified, all `defaultEnabled` features are installed (default). An empty array `[]` disables all features.
-Add an opt-in feature on top of the defaults with `["+playwright"]`, or list every feature you want explicitly. See [List Options](../configuration.md#list-options) for how layers combine.
+Add an opt-in feature on top of the defaults with `["+debug-tools"]`, or list every feature you want explicitly. See [List Options](../configuration.md#list-options) for how layers combine.
 
 **Devcontainer mode:** When devcontainer mode is used (`devcontainer run` or config `devcontainer: true`), features are disabled by default (the devcontainer already defines its own environment). To install features alongside a devcontainer, pass `--features` explicitly; `+`/`-` entries then start from no features.
 
 The next time you run `./enclave --rebuild`, only the specified features will be installed.
 
-**Available features:** `devtools`, `golang-dev`, `native-build-deps`, `github-cli`, `gitlab-cli`, `node-dev`, `playwright`, `python-dev`, `debug-tools`, `shell-extras`
+**Available features:** `devtools`, `golang-dev`, `native-build-deps`, `github-cli`, `gitlab-cli`, `node-dev`, `python-dev`, `debug-tools`
 
-**Opt-in features (not installed unless explicitly listed):** `debug-tools`, `gitlab-cli`, `golang-dev`, `native-build-deps`, `playwright`, `shell-extras`
+**Opt-in features (not installed unless explicitly listed):** `debug-tools`, `gitlab-cli`, `golang-dev`, `native-build-deps`
 
 ### Installation Order
 
@@ -825,9 +825,7 @@ enable the feature.
 | `node-dev` | 70 | Node.js dev tools: typescript, eslint, prettier |
 | `python-dev` | 70 | Python dev tools: black, ruff, mypy, pytest |
 | `native-build-deps` | 75 | Headers for native Node.js modules: libx11, libxkbfile, libsecret (opt-in) |
-| `playwright` | 75 | Playwright browsers and MCP server for UI testing (opt-in) |
 | `debug-tools` | 80 | Debug tools: gdb, strace, ltrace, tcpdump (opt-in) |
-| `shell-extras` | 90 | Shell enhancements: zsh, oh-my-zsh, direnv (opt-in) |
 
 ## Key Differences: Tools vs Features
 
@@ -1026,10 +1024,6 @@ dlv version
 # Debug tools (debug-tools feature)
 which gdb
 which strace
-
-# Shell extras (shell-extras feature)
-zsh --version
-type direnv
 ```
 
 ### 4. Verify Feature Entrypoints
@@ -1037,8 +1031,8 @@ type direnv
 ```bash
 # Inside container, verify feature-entrypoint.d scripts ran:
 
-# Shell-extras feature (opt-in) should have set up direnv hooks
-# (check ~/.bashrc or ~/.zshrc for direnv hook)
+# node-dev (on by default) loads nvm without activating a version
+type nvm
 ```
 
 ### 5. Verify Tool-Specific Entrypoints

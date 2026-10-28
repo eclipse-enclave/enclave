@@ -121,7 +121,6 @@ Keep these in mind when interpreting results or changing the script.
 
 - **Deferred**: the website (`website/`, `.github/workflows/website-*.yml`).
 - **Deliberately unpinned**, installed at their latest version on every
-  build; never pin or bump them: claude, uv and oh-my-zsh
-  (curl installers); codex, pi, opencode, playwright MCP and the node-dev
-  global packages (npm); glab and nvm (latest-release lookup); gh and the
+  build; never pin or bump them: claude and uv (curl installers); codex,
+  pi, opencode and the node-dev global packages (npm); glab and nvm (latest-release lookup); gh and the
   Debian packages in the images (distribution repositories).

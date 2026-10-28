@@ -81,12 +81,12 @@ func TestNetworkPreviewCommandsAcceptSessionPolicyFlags(t *testing.T) {
 	for _, command := range []string{"status", "print", "diff"} {
 		t.Run(command, func(t *testing.T) {
 			res, err := Parse([]string{"network", command, "--tool", "codex", "--features", "+github-cli", "--slim",
-				"--playwright-mcp", "--allow-domain", "api.example.com", "--allow-all-network"}, config.DefaultOptions())
+				"--allow-domain", "api.example.com", "--allow-all-network"}, config.DefaultOptions())
 			if err != nil {
 				t.Fatal(err)
 			}
 			opts, sources := res.Options, res.Sources
-			if opts.Tool != "codex" || !slices.Equal(opts.Features, []string{"+github-cli"}) || !opts.Slim || !opts.PlaywrightMCP ||
+			if opts.Tool != "codex" || !slices.Equal(opts.Features, []string{"+github-cli"}) || !opts.Slim ||
 				!slices.Equal(opts.AllowDomains, []string{"api.example.com"}) || !opts.AllowAllNetwork {
 				t.Fatalf("unexpected options: %+v", opts)
 			}
@@ -94,6 +94,19 @@ func TestNetworkPreviewCommandsAcceptSessionPolicyFlags(t *testing.T) {
 				t.Fatalf("unexpected sources: %+v", sources)
 			}
 		})
+	}
+}
+
+func TestRemovedPlaywrightMCPFlagNamesReplacement(t *testing.T) {
+	for _, args := range [][]string{{"--playwright-mcp"}, {"run", "--tool", "claude", "--playwright-mcp"}, {"network", "print", "--playwright-mcp"}} {
+		_, err := Parse(args, config.DefaultOptions())
+		if err == nil || !strings.Contains(err.Error(), "--playwright-mcp was removed") ||
+			!strings.Contains(err.Error(), "enclave features add eclipse-enclave/enclave-extensions --name playwright-mcp") {
+			t.Fatalf("Parse(%v) error = %v, want the removed-flag hint", args, err)
+		}
+	}
+	if _, err := Parse([]string{"--no-such-flag"}, config.DefaultOptions()); err == nil || err.Error() != "unknown flag: --no-such-flag" {
+		t.Fatalf("unknown flag error = %v", err)
 	}
 }
 

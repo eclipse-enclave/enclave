@@ -91,7 +91,7 @@ func (r *Runtime) extensionSkillSourceDirs() []string {
 // featureSkillSourceDirs returns skill directories shipped by enabled features
 // (built-in and user extension trees). Only enabled features contribute, so a
 // feature's skills are absent from the mounted skills directory unless the
-// session opted into the feature (e.g. `--features playwright`). Composing here
+// session opted into the feature (e.g. `--features +golang-dev`). Composing here
 // (rather than writing at container start) is required because the tool skills
 // directory is mounted read-only.
 func (r *Runtime) featureSkillSourceDirs() []string {

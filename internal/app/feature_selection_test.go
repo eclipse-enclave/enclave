@@ -31,7 +31,7 @@ func TestResolveConfiguredFeaturesSelectionDefault(t *testing.T) {
 	available := []model.Extension{
 		{Name: "devtools", DefaultEnabled: true},
 		{Name: "node-dev", DefaultEnabled: true},
-		{Name: "shell-extras", DefaultEnabled: false},
+		{Name: "debug-tools", DefaultEnabled: false},
 	}
 
 	got := resolveConfiguredFeatures([]string{model.SelectionDefault}, available, defaultEnabledFeatureNames(available))
@@ -45,11 +45,11 @@ func TestResolveConfiguredFeaturesSelectionAll(t *testing.T) {
 	available := []model.Extension{
 		{Name: "devtools", DefaultEnabled: true},
 		{Name: "node-dev", DefaultEnabled: true},
-		{Name: "shell-extras", DefaultEnabled: false},
+		{Name: "debug-tools", DefaultEnabled: false},
 	}
 
 	got := resolveConfiguredFeatures([]string{model.FeatureSelectionAll}, available, defaultEnabledFeatureNames(available))
-	want := []string{"devtools", "node-dev", "shell-extras"}
+	want := []string{"devtools", "node-dev", "debug-tools"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("unexpected all selector resolution: got %v want %v", got, want)
 	}
@@ -61,11 +61,11 @@ func TestResolveConfiguredFeaturesAdditiveFromImplicitDefaults(t *testing.T) {
 		{Name: "github-cli", DefaultEnabled: true},
 		{Name: "node-dev", DefaultEnabled: true},
 		{Name: "python-dev", DefaultEnabled: true},
-		{Name: "shell-extras", DefaultEnabled: false},
+		{Name: "debug-tools", DefaultEnabled: false},
 	}
 
-	got := resolveConfiguredFeatures([]string{"-node-dev", "+shell-extras"}, available, defaultEnabledFeatureNames(available))
-	want := []string{"devtools", "github-cli", "python-dev", "shell-extras"}
+	got := resolveConfiguredFeatures([]string{"-node-dev", "+debug-tools"}, available, defaultEnabledFeatureNames(available))
+	want := []string{"debug-tools", "devtools", "github-cli", "python-dev"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("unexpected additive feature resolution: got %v want %v", got, want)
 	}
@@ -88,12 +88,12 @@ func TestResolveConfiguredFeaturesDefaultPlusExplicit(t *testing.T) {
 	available := []model.Extension{
 		{Name: "devtools", DefaultEnabled: true},
 		{Name: "node-dev", DefaultEnabled: true},
-		{Name: "playwright", DefaultEnabled: false},
-		{Name: "shell-extras", DefaultEnabled: false},
+		{Name: "gitlab-cli", DefaultEnabled: false},
+		{Name: "debug-tools", DefaultEnabled: false},
 	}
 
-	got := resolveConfiguredFeatures([]string{"default", "playwright"}, available, defaultEnabledFeatureNames(available))
-	want := []string{"devtools", "node-dev", "playwright"}
+	got := resolveConfiguredFeatures([]string{"default", "gitlab-cli"}, available, defaultEnabledFeatureNames(available))
+	want := []string{"devtools", "gitlab-cli", "node-dev"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("unexpected default+explicit resolution: got %v want %v", got, want)
 	}
@@ -103,11 +103,11 @@ func TestResolveConfiguredFeaturesDefaultPlusRemoval(t *testing.T) {
 	available := []model.Extension{
 		{Name: "devtools", DefaultEnabled: true},
 		{Name: "node-dev", DefaultEnabled: true},
-		{Name: "shell-extras", DefaultEnabled: false},
+		{Name: "debug-tools", DefaultEnabled: false},
 	}
 
-	got := resolveConfiguredFeatures([]string{"default", "-node-dev", "shell-extras"}, available, defaultEnabledFeatureNames(available))
-	want := []string{"devtools", "shell-extras"}
+	got := resolveConfiguredFeatures([]string{"default", "-node-dev", "debug-tools"}, available, defaultEnabledFeatureNames(available))
+	want := []string{"debug-tools", "devtools"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("unexpected default+removal resolution: got %v want %v", got, want)
 	}
@@ -117,10 +117,10 @@ func TestResolveConfiguredFeaturesAllPlusRemoval(t *testing.T) {
 	available := []model.Extension{
 		{Name: "devtools", DefaultEnabled: true},
 		{Name: "node-dev", DefaultEnabled: true},
-		{Name: "shell-extras", DefaultEnabled: false},
+		{Name: "debug-tools", DefaultEnabled: false},
 	}
 
-	got := resolveConfiguredFeatures([]string{"all", "-shell-extras"}, available, defaultEnabledFeatureNames(available))
+	got := resolveConfiguredFeatures([]string{"all", "-debug-tools"}, available, defaultEnabledFeatureNames(available))
 	want := []string{"devtools", "node-dev"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("unexpected all+removal resolution: got %v want %v", got, want)
@@ -140,12 +140,12 @@ func TestResolveFeatureSelection(t *testing.T) {
 		{name: "defaults", build: model.BuildOptions{}, wantSelected: []string{"github-cli", "node-dev"}, wantEnabled: []string{"github-cli", "node-dev"}},
 		{name: "explicit selection", build: model.BuildOptions{Features: []string{"github-cli"}}, wantSelected: []string{"github-cli"}, wantEnabled: []string{"github-cli"}},
 		{name: "default selector", build: model.BuildOptions{Features: []string{model.SelectionDefault}}, wantSelected: []string{"github-cli", "node-dev"}, wantEnabled: []string{"github-cli", "node-dev"}},
-		{name: "all selector", build: model.BuildOptions{Features: []string{model.FeatureSelectionAll}}, wantSelected: []string{"github-cli", "node-dev", "shell-extras"}, wantEnabled: []string{"github-cli", "node-dev", "shell-extras"}},
+		{name: "all selector", build: model.BuildOptions{Features: []string{model.FeatureSelectionAll}}, wantSelected: []string{"debug-tools", "github-cli", "node-dev"}, wantEnabled: []string{"debug-tools", "github-cli", "node-dev"}},
 		{name: "explicit empty", build: model.BuildOptions{Features: []string{}}, wantSelected: []string{}, wantEnabled: []string{}},
 		{name: "slim", build: model.BuildOptions{Slim: true, Features: []string{"github-cli"}}, wantSelected: []string{}, wantEnabled: []string{}},
 		{name: "devcontainer unset", build: model.BuildOptions{Devcontainer: true}, wantSelected: []string{}, wantEnabled: []string{}},
-		{name: "devcontainer explicit", build: model.BuildOptions{Devcontainer: true, Features: []string{"shell-extras"}}, wantSelected: []string{"shell-extras"}, wantEnabled: []string{"shell-extras"}},
-		{name: "additive", build: model.BuildOptions{Features: []string{"+shell-extras", "-node-dev"}}, wantSelected: []string{"github-cli", "shell-extras"}, wantEnabled: []string{"github-cli", "shell-extras"}},
+		{name: "devcontainer explicit", build: model.BuildOptions{Devcontainer: true, Features: []string{"debug-tools"}}, wantSelected: []string{"debug-tools"}, wantEnabled: []string{"debug-tools"}},
+		{name: "additive", build: model.BuildOptions{Features: []string{"+debug-tools", "-node-dev"}}, wantSelected: []string{"debug-tools", "github-cli"}, wantEnabled: []string{"debug-tools", "github-cli"}},
 		{name: "unknown literal", build: model.BuildOptions{Features: []string{"ghost", "github-cli"}}, wantSelected: []string{"ghost", "github-cli"}, wantEnabled: []string{"github-cli"}, wantUnknown: []string{"ghost"}},
 		{name: "unknown directive", build: model.BuildOptions{Features: []string{"+ghost"}}, wantSelected: []string{"ghost", "github-cli", "node-dev"}, wantEnabled: []string{"github-cli", "node-dev"}, wantUnknown: []string{"ghost"}},
 	}

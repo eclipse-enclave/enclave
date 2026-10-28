@@ -421,16 +421,6 @@ func OptionSpecs() []OptionSpec {
 			Group: OptionGroupRun,
 		},
 		{
-			Name:  "playwright_mcp",
-			Group: OptionGroupRun,
-			ApplyDefaultsWithSource: func(opts *model.Options, defaults Defaults, source model.OptionSource, sources *model.OptionSources) {
-				if canOverride(sources.PlaywrightMCP, source) && defaults.PlaywrightMCP != nil {
-					opts.PlaywrightMCP = *defaults.PlaywrightMCP
-					sources.PlaywrightMCP = source
-				}
-			},
-		},
-		{
 			Name:  "bridge_ports",
 			Group: OptionGroupRun,
 		},

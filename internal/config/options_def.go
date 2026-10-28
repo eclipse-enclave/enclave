@@ -1280,30 +1280,6 @@ func OptionDefs() []OptionDef {
 			},
 		},
 		{
-			Name:           "playwright_mcp",
-			Group:          OptionGroupRun,
-			Kind:           OptionKindBool,
-			AffectsSession: SessionAffected,
-			AffectsNetwork: true,
-			OptionField:    "PlaywrightMCP",
-			SourceField:    "PlaywrightMCP",
-			DefaultsField:  "PlaywrightMCP",
-			Apply:          ApplyBoolPtr,
-			CLIFlags: []CLIFlagDef{
-				{
-					Name:      "--playwright-mcp",
-					Usage:     "Enable Playwright MCP server for browser automation",
-					ValueKind: CLIValueNone,
-					Action: CLIAction{
-						Kind:        CLIActionSetBool,
-						OptionField: "PlaywrightMCP",
-						SourceField: "PlaywrightMCP",
-						BoolValue:   true,
-					},
-				},
-			},
-		},
-		{
 			Name:           "bridge_ports",
 			Group:          OptionGroupRun,
 			Kind:           OptionKindStringSlice,

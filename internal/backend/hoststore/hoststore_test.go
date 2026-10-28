@@ -31,7 +31,7 @@ func TestDirMapsEachKindToItsHostDirectory(t *testing.T) {
 		{"env", backend.StoreKey{Owner: "codex", ProjectHash: "abc123abc123"}, backend.StoreKindEnv, config.HostStoreEnvDir(home, "codex", "abc123abc123")},
 		{"auth default identity", backend.StoreKey{Owner: "codex"}, backend.StoreKindAuth, config.HostStoreAuthDir(home, "codex", "")},
 		{"auth named identity (--auth-name)", backend.StoreKey{Owner: "codex", Suffix: "personal"}, backend.StoreKindAuth, config.HostStoreAuthDir(home, "codex", "personal")},
-		{"feature auth", backend.StoreKey{Owner: "playwright"}, backend.StoreKindFeatureAuth, config.HostStoreFeatureAuthDir(home, "playwright")},
+		{"feature auth", backend.StoreKey{Owner: "gitlab-cli"}, backend.StoreKindFeatureAuth, config.HostStoreFeatureAuthDir(home, "gitlab-cli")},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -63,7 +63,6 @@ func TestMergeDefaultsCoversAllFields(t *testing.T) {
 		WorktreeMetadata:       model.WorktreeMetadataReadonly,
 		AllowDomains:           []string{"api.test.com"},
 		BridgePorts:            []string{"9800"},
-		PlaywrightMCP:          &trueVal,
 	}
 
 	base := Defaults{} // All fields zero value

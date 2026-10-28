@@ -75,7 +75,7 @@ func testPathsWithFeatures(t *testing.T) model.Paths {
 
 	writeAppFile(t, filepath.Join(featuresDir, "node-dev", "spec.yaml"), "schemaVersion: \"1\"\nkind: mixin\nname: node-dev\ndefaultEnabled: true\n", 0o644)
 	writeAppFile(t, filepath.Join(featuresDir, "github-cli", "spec.yaml"), "schemaVersion: \"1\"\nkind: mixin\nname: github-cli\ndefaultEnabled: true\n", 0o644)
-	writeAppFile(t, filepath.Join(featuresDir, "shell-extras", "spec.yaml"), "schemaVersion: \"1\"\nkind: mixin\nname: shell-extras\ndefaultEnabled: false\n", 0o644)
+	writeAppFile(t, filepath.Join(featuresDir, "debug-tools", "spec.yaml"), "schemaVersion: \"1\"\nkind: mixin\nname: debug-tools\ndefaultEnabled: false\n", 0o644)
 
 	return model.Paths{
 		FeaturesDir: featuresDir,

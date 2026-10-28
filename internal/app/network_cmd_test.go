@@ -243,7 +243,7 @@ sandbox:
 network:
   allowedDomains: [tool.example.com]
 `, 0o644)
-	for name, defaultEnabled := range map[string]bool{"base": true, "playwright": false} {
+	for name, defaultEnabled := range map[string]bool{"base": true, "gitlab-cli": false} {
 		writeAppFile(t, filepath.Join(paths.FeaturesDir, name, config.SpecFilename), fmt.Sprintf(`schemaVersion: "1"
 kind: mixin
 name: %[1]s

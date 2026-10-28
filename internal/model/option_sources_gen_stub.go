@@ -33,7 +33,6 @@ type RunOptionSources struct {
 	NoCache         OptionSource
 	NoHistory       OptionSource
 	NoMemory        OptionSource
-	PlaywrightMCP   OptionSource
 	Ports           OptionSource
 	SessionName     OptionSource
 	Tool            OptionSource

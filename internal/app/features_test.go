@@ -138,14 +138,14 @@ func runFeaturesJSON(t *testing.T, paths model.Paths, opts model.Options) (selec
 }
 
 func TestRunFeaturesJSONHonoursToolOverride(t *testing.T) {
-	global := config.Defaults{ToolOverrides: map[string]config.Defaults{"claude": {Features: []string{"+shell-extras", "-github-cli"}}}}
+	global := config.Defaults{ToolOverrides: map[string]config.Defaults{"claude": {Features: []string{"+debug-tools", "-github-cli"}}}}
 
 	cases := []struct {
 		tool          string
 		wantSelection map[string]any
 		wantEnabled   []string
 	}{
-		{"claude", map[string]any{"directives": []any{"+shell-extras", "-github-cli"}, "source": "tool_override", "tool": "claude"}, []string{"node-dev", "shell-extras"}},
+		{"claude", map[string]any{"directives": []any{"+debug-tools", "-github-cli"}, "source": "tool_override", "tool": "claude"}, []string{"debug-tools", "node-dev"}},
 		{"", map[string]any{"directives": nil, "source": "default", "tool": nil}, []string{"github-cli", "node-dev"}},
 	}
 	for _, tc := range cases {
@@ -165,26 +165,6 @@ func TestRunFeaturesJSONHonoursToolOverride(t *testing.T) {
 				t.Errorf("enabled = %v, want %v", enabled, tc.wantEnabled)
 			}
 		})
-	}
-}
-
-// A devcontainer run without explicit features enables none, so the listing
-// must not report the defaults as enabled.
-func TestRunFeaturesJSONIncludesPlaywrightForPlaywrightMCP(t *testing.T) {
-	paths := testPathsWithFeatures(t)
-	writeAppFile(t, filepath.Join(paths.FeaturesDir, "playwright", "spec.yaml"), "schemaVersion: \"1\"\nkind: mixin\nname: playwright\n", 0o644)
-	opts := config.DefaultOptions()
-	opts.Tool = "claude"
-	opts.PlaywrightMCP = true
-	opts.Sources = model.DefaultOptionSources()
-
-	selection, enabled := runFeaturesJSON(t, paths, opts)
-	sort.Strings(enabled)
-	if want := []string{"github-cli", "node-dev", "playwright"}; !reflect.DeepEqual(enabled, want) {
-		t.Fatalf("enabled = %v, want %v", enabled, want)
-	}
-	if selection["directives"] != nil {
-		t.Fatalf("selection.directives = %#v, want the configured null", selection["directives"])
 	}
 }
 

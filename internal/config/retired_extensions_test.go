@@ -24,6 +24,8 @@ func TestRetiredExtensionHint(t *testing.T) {
 	}{
 		{model.KindTool, "mistral-vibe", "tool mistral-vibe moved to enclave-extensions: enclave tools add eclipse-enclave/enclave-extensions --name mistral-vibe"},
 		{model.KindFeature, "mistral-vibe", ""},
+		{model.KindFeature, "playwright", "feature playwright moved to enclave-extensions as playwright-mcp: enclave features add eclipse-enclave/enclave-extensions --name playwright-mcp"},
+		{model.KindFeature, "shell-extras", "feature shell-extras moved to enclave-extensions: enclave features add eclipse-enclave/enclave-extensions --name shell-extras"},
 		{model.KindTool, "claude", ""},
 	} {
 		if got := RetiredExtensionHint(tc.kind, tc.name); got != tc.want {

@@ -392,10 +392,6 @@ func (r *Runtime) prepareMounts() (*mountAccumulator, hostGitIdentity, error) {
 	}
 	r.addIdeBridgeMount(mountArgs)
 	r.addDevcontainerEnv(mountArgs)
-	if r.run.PlaywrightMCP && r.profile.Name == "claude" {
-		mountArgs.AddEnv(model.EnvPlaywrightMCP, "1")
-		logx.Infof("Playwright MCP server enabled for Claude Code")
-	}
 	if err := r.protectGitConfigFiles(mountArgs); err != nil {
 		return nil, hostGitIdentity{}, err
 	}

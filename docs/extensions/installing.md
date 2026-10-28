@@ -5,6 +5,15 @@ from git repositories into the user-global extension root
 (`~/.config/enclave/extensions/`). This document covers that installer; see
 [Extension Architecture](README.md) for the spec format itself.
 
+The official extensions repository is
+[enclave-extensions](https://github.com/eclipse-enclave/enclave-extensions). It holds the tools and features that
+are not built in, for example:
+
+```bash
+enclave tools add eclipse-enclave/enclave-extensions --name <tool>
+enclave features add eclipse-enclave/enclave-extensions --name <feature>
+```
+
 ## Commands
 
 | Command | Description |

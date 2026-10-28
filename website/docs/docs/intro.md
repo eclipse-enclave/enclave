@@ -9,9 +9,9 @@ import ThemedImage from '@theme/ThemedImage';
 
 # Eclipse Enclave
 
-Eclipse Enclave runs Claude, Codex, OpenCode, and other AI coding agents at full
-autonomy. Each one runs in its own isolated container, with your files and
-network access under your control.
+Eclipse Enclave runs Claude Code, Codex, Copilot, OpenCode, Pi, Theia, and other
+AI coding agents at full autonomy. Each one runs in its own isolated container,
+with your files and network access under your control.
 
 You get an agent that acts without asking for permission at every step, without
 handing it the run of your host. Run it from any git repository:

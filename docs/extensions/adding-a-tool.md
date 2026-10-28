@@ -2,6 +2,15 @@
 
 Use this checklist to add a new agent CLI end-to-end. Keep changes minimal and focused.
 
+A new tool goes to
+[enclave-extensions](https://github.com/eclipse-enclave/enclave-extensions),
+the official extensions repository, under `tools/<tool>/` there. Core ships only Claude Code,
+Codex, Copilot, Theia (with `theia-next`), OpenCode, and Pi; see
+[CONTRIBUTING.md](../../CONTRIBUTING.md#where-it-goes) for how that set
+changes. The file layout is the same in both repositories, so the steps below
+apply with `tools/<tool>/` in place of `extensions/tools/<tool>/`; the core
+documentation and code-generation steps apply only to the built-in tools.
+
 A tool is a `kind: sandbox` extension. Its on-disk shape is a single
 `spec.yaml` (camelCase fields) plus a few sibling files. The authoritative,
 exhaustive field reference — with worked examples — lives in
@@ -10,7 +19,8 @@ exhaustive field reference — with worked examples — lives in
 *process*; consult the README for the full field list.
 
 ## 1) Create the tool extension directory
-- Create `extensions/tools/<tool>/`.
+- Create `tools/<tool>/` in enclave-extensions (`extensions/tools/<tool>/` for
+  a built-in tool).
 - Add `spec.yaml` with `schemaVersion: "1"`, `kind: sandbox`, `name` (must match
   the directory name), `displayName`, `description`, and a `sandbox` block.
 - Set `defaultIncluded: false` (top-level) for opt-in tools that should not ship
@@ -170,11 +180,13 @@ directories per project; see
 - Keep the allowlist minimal; include registries only when needed (PyPI/npm/etc.).
 
 ## 8) Document and validate
-- Update the built-in tool list in `docs/tools.md`.
-- Update the common config-path table in `docs/configuration.md` if a template was added.
-- Update `docs/ARCHITECTURE.md`, `docs/extensions/README.md`, and `AGENTS.md` if needed.
+- In enclave-extensions, list the tool in its `README.md`.
+- For a built-in tool, update the built-in tool list in `docs/tools.md`, the
+  common config-path table in `docs/configuration.md` if a template was added,
+  and `docs/ARCHITECTURE.md`, `docs/extensions/README.md`, and `AGENTS.md` if
+  needed.
 - If you touched Go files, run `gofmt` on them.
-- If the tool has `go/` hooks or handlers, run `go generate ./cmd/enclave`.
+- If a built-in tool has `go/` hooks or handlers, run `go generate ./cmd/enclave`.
 - Run `enclave validate-extensions`.
 - If a Mermaid diagram documents the changed behavior, update it.
 

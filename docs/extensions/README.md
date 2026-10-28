@@ -23,6 +23,12 @@ Extension definitions are loaded from:
 1. Built-in repository extensions under `extensions/`
 2. User-global overrides under `~/.config/enclave/extensions/`
 
+The official source for tools and features that are not built in is
+[enclave-extensions](https://github.com/eclipse-enclave/enclave-extensions).
+Install one by name, for example
+`enclave tools add eclipse-enclave/enclave-extensions --name <tool>` or
+`enclave features add eclipse-enclave/enclave-extensions --name <feature>`.
+
 Project-local extension definitions (for example,
 `/path/to/project/.enclave/extensions/`) are not loaded. Install extensions
 into the user-global root from a git repository with `enclave features add`
@@ -911,7 +917,15 @@ Hooks run in a fixed order during runtime auth preparation:
 
 ## Adding a New Tool Extension
 
-1. Create `extensions/tools/{tool}/` directory
+A new tool goes to
+[enclave-extensions](https://github.com/eclipse-enclave/enclave-extensions)
+under `tools/<tool>/`, with the same file layout as `extensions/tools/<tool>/`
+here; core ships only the six built-in tools (see
+[CONTRIBUTING.md](../../CONTRIBUTING.md#where-it-goes)). The full checklist is
+[Adding a Tool](adding-a-tool.md).
+
+1. Create the `tools/{tool}/` directory (`extensions/tools/{tool}/` for a
+   built-in tool)
 2. Add `spec.yaml`:
    ```yaml
    schemaVersion: "1"

@@ -24,18 +24,38 @@ Contributions are received under the terms of that license.
 - [1.](#discuss-first) Before starting substantial work, open or identify a
   GitHub issue and discuss the intended change with the project team.
 
+<a name="where-it-goes"></a>
+
+- [2.](#where-it-goes) Open the pull request in the right repository:
+  - A new tool goes to
+    [enclave-extensions](https://github.com/eclipse-enclave/enclave-extensions#readme),
+    the official extensions repository. Enclave itself ships six tools: Claude
+    Code, Codex, and Copilot from large vendors, and the open-source Theia
+    (with its `theia-next` preview profile), OpenCode, and Pi.
+  - A change to one of the six, to a core feature, or to the extension
+    mechanism itself goes here.
+  - A proposal to change the six is an issue here. The Eclipse Enclave
+    [committers](https://projects.eclipse.org/projects/ecd.enclave/who) vote on
+    it for at least one week. It passes with at least three +1 votes and no -1;
+    if the project has three or fewer committers, all of them must vote +1.
+    These are the thresholds of
+    [committer elections](https://www.eclipse.org/projects/handbook/#elections-how).
+    Committers are appointed or elected under the
+    [Eclipse Foundation Development Process](https://www.eclipse.org/projects/dev_process/);
+    a merged commit does not make anyone a committer.
+
 <a name="pull-requests"></a>
 
-- [2.](#pull-requests) Submit changes as GitHub pull requests against `main`.
+- [3.](#pull-requests) Submit changes as GitHub pull requests against `main`.
 
 <a name="focused-changes"></a>
 
-- [3.](#focused-changes) Keep changes focused and follow the repository guidance
+- [4.](#focused-changes) Keep changes focused and follow the repository guidance
   in `AGENTS.md`.
 
 <a name="required-checks"></a>
 
-- [4.](#required-checks) Format modified Go files and run the required checks
+- [5.](#required-checks) Format modified Go files and run the required checks
   before submitting a pull request:
 
   ```sh
@@ -46,7 +66,7 @@ Contributions are received under the terms of that license.
 
 <a name="human-in-the-loop"></a>
 
-- [5.](#human-in-the-loop) Contributors can use whatever tools they would like
+- [6.](#human-in-the-loop) Contributors can use whatever tools they would like
   to craft their contributions, but there must be a human in the loop.
   Contributors must read and review all LLM-generated code or text before they
   ask other project members to review it. The contributor is always the author

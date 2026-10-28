@@ -72,8 +72,7 @@ extensions/
     │       └── host/
     │           └── vnc-viewer     # Becomes `enclave vnc-viewer`, runs on the host
     └── devtools/
-        ├── spec.yaml
-        └── install.sh
+        └── spec.yaml
 ```
 
 `spec.yaml` is the extension manifest. `install.sh`,
@@ -766,9 +765,9 @@ Add an opt-in feature on top of the defaults with `["+playwright"]`, or list eve
 
 The next time you run `./enclave --rebuild`, only the specified features will be installed.
 
-**Available features:** `devtools`, `native-build-deps`, `github-cli`, `gitlab-cli`, `node-dev`, `playwright`, `python-dev`, `debug-tools`, `shell-extras`
+**Available features:** `devtools`, `golang-dev`, `native-build-deps`, `github-cli`, `gitlab-cli`, `node-dev`, `playwright`, `python-dev`, `debug-tools`, `shell-extras`
 
-**Opt-in features (not installed unless explicitly listed):** `debug-tools`, `gitlab-cli`, `native-build-deps`, `playwright`, `shell-extras`
+**Opt-in features (not installed unless explicitly listed):** `debug-tools`, `gitlab-cli`, `golang-dev`, `native-build-deps`, `playwright`, `shell-extras`
 
 ### Installation Order
 
@@ -819,7 +818,8 @@ enable the feature.
 
 | Feature | Priority | Description |
 |---------|----------|-------------|
-| `devtools` | 40 | Core tools + linters (vim, htop, ripgrep, golang-go, shellcheck, golangci-lint, gosec). |
+| `devtools` | 40 | General command-line and network tools (vim, htop, ripgrep, shellcheck, dig) |
+| `golang-dev` | 45 | Go toolchain and delve, from Debian (opt-in) |
 | `github-cli` | 50 | GitHub CLI (gh) |
 | `gitlab-cli` | 50 | GitLab CLI (glab) (opt-in) |
 | `node-dev` | 70 | Node.js dev tools: typescript, eslint, prettier |
@@ -1018,6 +1018,10 @@ pkg-config --modversion x11 xkbfile libsecret-1
 
 # GitLab CLI (gitlab-cli feature)
 glab --version
+
+# Go (golang-dev feature)
+go version
+dlv version
 
 # Debug tools (debug-tools feature)
 which gdb

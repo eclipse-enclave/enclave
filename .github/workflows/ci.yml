@@ -123,7 +123,7 @@ jobs:
         run: echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Install Go lint tools
-        run: ./extensions/features/devtools/install.sh
+        run: ./scripts/install-go-linters.sh
 
       - name: Cache lint caches
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0

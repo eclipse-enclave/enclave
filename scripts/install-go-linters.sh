@@ -6,7 +6,9 @@
 #
 # SPDX-License-Identifier: MIT
 
-# Install repo-required Go linters in the user tool prefix.
+# Install the Go linters that `make lint` and CI need, at the versions CI uses,
+# into GOBIN (default ~/.local/bin). Bump the versions here; the enclave-dev
+# feature in eclipse-enclave/enclave-extensions installs the same ones.
 set -euo pipefail
 
 if ! command -v go >/dev/null 2>&1; then

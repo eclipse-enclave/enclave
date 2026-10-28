@@ -1,6 +1,6 @@
 ---
 name: dependency-updates
-description: Use when checking or applying updates to Enclave's pinned dependencies (Go toolchain and modules, devtools, container images, GitHub Actions) or the LTS version floors, e.g. when asked what needs updating, to refresh pins, or to apply an update group.
+description: Use when checking or applying updates to Enclave's pinned dependencies (Go toolchain and modules, Go linters, container images, GitHub Actions) or the LTS version floors, e.g. when asked what needs updating, to refresh pins, or to apply an update group.
 ---
 
 # Dependency Updates
@@ -71,7 +71,7 @@ asked.
 | Go toolchain | `go.mod` `toolchain`; `Dockerfile.gateway` `golang:<version>-alpine<alpine>@<digest>`. |
 | Go floor | Every location the script lists for "Go floor", including the `golang-<minor>-go` alternative and `/usr/lib/go-<minor>/bin` fallback in `debian/`. Only after the ceiling allows it. |
 | Go modules | `go get <module>@<version>` then `go mod tidy`; confirm the `go` directive did not change. |
-| Devtools | `extensions/features/devtools/install.sh` and the versions in its `README.md`. New gosec or golangci-lint findings must be fixed or justified with `#nosec`/`nolint` and a reason; never weaken the rule set. |
+| Go linters | `scripts/install-go-linters.sh`, and the same versions in the `enclave-dev` feature of eclipse-enclave/enclave-extensions (separate PR). New gosec or golangci-lint findings must be fixed or justified with `#nosec`/`nolint` and a reason; never weaken the rule set. |
 | Container images | The `ARG`/`FROM` lines in `Dockerfile` and `Dockerfile.gateway`. Alpine also: `internal/model/types.go` `AlpineImage` and `runtime-assets/microvm/alpine/build-bundle.sh`, same digest everywhere; check that the packages installed by the gateway and the QEMU bundle exist on the new branch. |
 | GitHub Actions | Every `uses:` of the action, `@<sha> # <tag>`. |
 | yq | `Dockerfile` `YQ_VERSION`; check that `yq_linux_amd64` and `yq_linux_arm64` are still release assets. |
@@ -106,10 +106,10 @@ Keep these in mind when interpreting results or changing the script.
   features) may not exceed the **ceiling**: the lowest version the support
   set ships. An upstream EOL is not a reason to raise one.
 - **Go toolchain** is the latest patch of the oldest supported Go minor:
-  the release the go command switches to when it builds devtools that need
+  the release the go command switches to when it builds Go linters that need
   a newer Go. A newer project minor breaks `make lint`, because analysis
   tools built with an older Go cannot load a newer standard library.
-- **Go modules** may not raise the `go` directive. **Devtools** may not
+- **Go modules** may not raise the `go` directive. **Go linters** may not
   require a Go newer than the toolchain.
 - **Lockstep groups** move together. **One SHA per action**, and it must be
   the commit of the tag in the comment.

@@ -37,8 +37,11 @@ make deb
 make rpm
 ```
 
-The default Enclave image includes both packaging toolchains. On Ubuntu, install
-them with `sudo apt install debhelper rpm`. On Fedora, install the
+Inside Enclave, install the `deb-dev` and `rpm-dev` features from
+[enclave-extensions](https://github.com/eclipse-enclave/enclave-extensions)
+(`enclave features add eclipse-enclave/enclave-extensions --name deb-dev`, and
+the same for `rpm-dev`), then run with `--features +golang-dev,+deb-dev,+rpm-dev`.
+On Ubuntu, install them with `sudo apt install debhelper rpm`. On Fedora, install the
 RPM build dependencies with `sudo dnf install git go make rpm-build`. Use
 `make deb-quick` when Go was installed outside APT and therefore does not
 satisfy dpkg's build dependency check; it builds the same binary package
@@ -142,6 +145,11 @@ make lint
 
 Exception: if a change only touches files under `docs/`, these make targets are
 not required.
+
+`make lint` needs `golangci-lint`, `gosec`, and `shellcheck` on `PATH`.
+`scripts/install-go-linters.sh` installs the Go linters at the versions CI uses
+into `~/.local/bin`; bump them there. Inside Enclave, the `enclave-dev` feature
+from enclave-extensions installs the same versions (with `+golang-dev`).
 
 ### Env-only credential acceptance testing
 

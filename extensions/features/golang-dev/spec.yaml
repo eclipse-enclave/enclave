@@ -1,0 +1,17 @@
+# Copyright (C) 2026 EclipseSource GmbH and others.
+#
+# This program and the accompanying materials are made available under the
+# terms of the MIT License, which is available in the project root.
+#
+# SPDX-License-Identifier: MIT
+
+schemaVersion: "1"
+kind: mixin
+name: golang-dev
+displayName: Go Development
+description: Go toolchain and the delve debugger
+defaultEnabled: false
+priority: 45
+aptPackages:
+  - golang-go
+  - delve

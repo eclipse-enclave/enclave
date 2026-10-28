@@ -1,0 +1,11 @@
+{
+  "type": "mixin",
+  "name": "golang-dev",
+  "display_name": "Go Development",
+  "description": "Go toolchain and the delve debugger",
+  "apt_packages": [
+    "golang-go",
+    "delve"
+  ],
+  "priority": 45
+}

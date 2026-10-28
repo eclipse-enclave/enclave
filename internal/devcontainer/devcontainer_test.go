@@ -265,6 +265,7 @@ func TestResolveSpecRejectsInvalidImageReference(t *testing.T) {
 func TestSummarizeUnsupportedDevcontainerFeatures(t *testing.T) {
 	ignored, suggested := summarizeUnsupportedDevcontainerFeatures(map[string]interface{}{
 		"ghcr.io/devcontainers/features/python:1":            map[string]interface{}{},
+		"ghcr.io/devcontainers/features/go:1":                map[string]interface{}{},
 		"ghcr.io/devcontainers/features/node:2":              map[string]interface{}{},
 		"ghcr.io/devcontainers/features/node:1":              map[string]interface{}{},
 		" ghcr.io/devcontainers/features/github-cli@sha256 ": map[string]interface{}{},
@@ -274,6 +275,7 @@ func TestSummarizeUnsupportedDevcontainerFeatures(t *testing.T) {
 	wantIgnored := []string{
 		"example.com/devcontainer/features/unknown:latest",
 		"ghcr.io/devcontainers/features/github-cli@sha256",
+		"ghcr.io/devcontainers/features/go:1",
 		"ghcr.io/devcontainers/features/node:1",
 		"ghcr.io/devcontainers/features/node:2",
 		"ghcr.io/devcontainers/features/python:1",
@@ -282,7 +284,7 @@ func TestSummarizeUnsupportedDevcontainerFeatures(t *testing.T) {
 		t.Fatalf("ignored mismatch:\n got: %v\nwant: %v", ignored, wantIgnored)
 	}
 
-	wantSuggested := []string{"github-cli", "node-dev", "python-dev"}
+	wantSuggested := []string{"github-cli", "golang-dev", "node-dev", "python-dev"}
 	if !reflect.DeepEqual(suggested, wantSuggested) {
 		t.Fatalf("suggested mismatch:\n got: %v\nwant: %v", suggested, wantSuggested)
 	}
@@ -297,7 +299,7 @@ func TestNormalizeDevcontainerFeatureKeepsRegistryPort(t *testing.T) {
 }
 
 func TestMapDevcontainerFeatureUnknown(t *testing.T) {
-	if mapped, ok := mapDevcontainerFeature("ghcr.io/devcontainers/features/go:1"); ok || mapped != "" {
+	if mapped, ok := mapDevcontainerFeature("ghcr.io/devcontainers/features/rust:1"); ok || mapped != "" {
 		t.Fatalf("expected unknown feature to return empty mapping, got %q (ok=%v)", mapped, ok)
 	}
 }

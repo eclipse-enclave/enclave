@@ -75,10 +75,6 @@ func (m networkManager) Prepare(_ string, authState model.AuthState, _ SecretMap
 		}, nil
 	}
 
-	if len(m.run.AllowDomains) > 0 {
-		logx.Infof("Allowlisted ad-hoc domains: %s", strings.Join(m.run.AllowDomains, ", "))
-	}
-
 	// Render-ready domains: the allow set has exact and subdomain matches of
 	// denied domains filtered out, and the denied set is carried alongside so
 	// the startup gateway bundle blackholes them (deny-wins, same rendering
@@ -87,6 +83,7 @@ func (m networkManager) Prepare(_ string, authState model.AuthState, _ SecretMap
 	if err != nil {
 		return NetworkResult{}, fmt.Errorf("failed to resolve effective network domains: %w", err)
 	}
+	logAdHocDomains(m.run.AllowDomains, deniedDomains)
 
 	env := []string{model.EnvDNSGateway + "=1"}
 	logx.Infof("Network restricted to allowlisted domains via DNS gateway")
@@ -134,4 +131,32 @@ func policyHasDomains(p network.Policy, tool string) bool {
 		return true
 	}
 	return len(p.Domains.Tools[tool]) > 0
+}
+
+// logAdHocDomains reports the --allow-domain entries the gateway allows, and
+// separately those a deny rule filtered out, so a blocked domain never reads
+// as allowlisted.
+func logAdHocDomains(adHoc []string, deniedDomains []string) {
+	kept, denied := partitionAdHocDomains(adHoc, deniedDomains)
+	if len(kept) > 0 {
+		logx.Infof("Allowlisted ad-hoc domains: %s", strings.Join(kept, ", "))
+	}
+	if len(denied) > 0 {
+		logx.Warnf("Ad-hoc domains blocked by a deny rule: %s", strings.Join(denied, ", "))
+	}
+}
+
+func partitionAdHocDomains(adHoc []string, deniedDomains []string) (kept []string, denied []string) {
+	for _, domain := range adHoc {
+		canonical, err := network.CanonicalPolicyDomain(domain)
+		if err != nil {
+			canonical = domain
+		}
+		if network.DomainDeniedBy(canonical, deniedDomains) {
+			denied = append(denied, domain)
+		} else {
+			kept = append(kept, domain)
+		}
+	}
+	return kept, denied
 }

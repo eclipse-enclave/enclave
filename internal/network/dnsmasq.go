@@ -179,16 +179,16 @@ func EffectiveRenderDomainsForTool(policy EffectivePolicy, tool string) (allow [
 	}
 	filtered := make([]string, 0, len(allow))
 	for _, d := range allow {
-		if !domainDeniedBy(d, denied) {
+		if !DomainDeniedBy(d, denied) {
 			filtered = append(filtered, d)
 		}
 	}
 	return filtered, denied, nil
 }
 
-// domainDeniedBy reports whether domain equals any denied entry or is a
+// DomainDeniedBy reports whether domain equals any denied entry or is a
 // subdomain of one ("deny rules take precedence over allow rules").
-func domainDeniedBy(domain string, denied []string) bool {
+func DomainDeniedBy(domain string, denied []string) bool {
 	for _, d := range denied {
 		if domain == d || strings.HasSuffix(domain, "."+d) {
 			return true

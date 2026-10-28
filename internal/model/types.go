@@ -210,6 +210,8 @@ type NetworkLogView struct {
 	Type    string
 	// Session limits output to one gateway, named by its container.
 	Session string
+	// ShowCapture prints the full capture with this ID instead of events.
+	ShowCapture string
 }
 
 type ConfigView struct {
@@ -630,6 +632,7 @@ const (
 	NetworkModeUnrestricted = "unrestricted"
 	NetworkLogCoarse        = "coarse"
 	NetworkLogRequests      = "requests"
+	NetworkLogFull          = "full"
 )
 
 const (

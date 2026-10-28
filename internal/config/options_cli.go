@@ -206,11 +206,11 @@ func applyHostConfig(opts *model.Options, value string) error {
 func applyNetworkLog(opts *model.Options, value string) error {
 	normalized := strings.TrimSpace(strings.ToLower(value))
 	switch normalized {
-	case model.NetworkLogCoarse, model.NetworkLogRequests:
+	case model.NetworkLogCoarse, model.NetworkLogRequests, model.NetworkLogFull:
 		opts.NetworkLog = normalized
 		return nil
 	default:
-		return fmt.Errorf("invalid --network-log: %s (use: %s|%s)", value, model.NetworkLogCoarse, model.NetworkLogRequests)
+		return fmt.Errorf("invalid --network-log: %s (use: %s|%s|%s)", value, model.NetworkLogCoarse, model.NetworkLogRequests, model.NetworkLogFull)
 	}
 }
 

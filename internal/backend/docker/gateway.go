@@ -49,6 +49,10 @@ func (b *Backend) startGateway(ctx context.Context, req backend.Request, network
 	}
 
 	workspaceID := workspaceIDFromSession(req.Session, b.opts.ProjectDir)
+	captureRoot := ""
+	if b.opts.NetworkLogMode == model.NetworkLogFull {
+		captureRoot = config.HostProjectNetworkCaptureDir(b.opts.Host.Home, req.Session.ProjectHash, req.Session.Tool)
+	}
 	startConfig := gateway.StartConfig{
 		Paths:             b.opts.Paths,
 		Profile:           model.Profile{Name: req.Session.Tool},
@@ -58,6 +62,7 @@ func (b *Backend) startGateway(ctx context.Context, req backend.Request, network
 		NoRebuild:         b.opts.NoRebuild,
 		NetworkLogMode:    b.opts.NetworkLogMode,
 		NetworkLogPath:    config.HostProjectNetworkLogPath(b.opts.Host.Home, req.Session.ProjectHash, req.Session.Tool),
+		NetworkCaptureDir: captureRoot,
 		GatewayConfigDir:  gatewayConfigDir,
 		NetworkName:       networkName,
 		PortBindings:      portMap(req.Ports),

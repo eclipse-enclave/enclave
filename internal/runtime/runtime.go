@@ -1545,6 +1545,9 @@ func (r *Runtime) addGatewayCAMount(mounts *mountAccumulator) error {
 	mounts.AddEnv(model.EnvGatewayCABundlePath, model.AgentGatewayCABundlePath)
 	mounts.AddEnv("SSL_CERT_FILE", model.AgentGatewayCABundlePath)
 	mounts.AddEnv("REQUESTS_CA_BUNDLE", model.AgentGatewayCABundlePath)
+	// Git's libcurl (GnuTLS on Debian) ignores SSL_CERT_FILE and reads the
+	// system store, which the entrypoint cannot update as the session user.
+	mounts.AddEnv("GIT_SSL_CAINFO", model.AgentGatewayCABundlePath)
 	mounts.AddEnv("NODE_EXTRA_CA_CERTS", model.AgentGatewayCACertPath)
 	return nil
 }

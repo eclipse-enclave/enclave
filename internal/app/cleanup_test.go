@@ -36,6 +36,7 @@ func TestResolveCleanupDirs(t *testing.T) {
 		config.HostStoreConfigRootDir(home, run.Tool, project.Hash):                                          true,
 		config.HostStoreConfigBaseRootDir(home, run.Tool, project.Hash):                                      true,
 		config.HostStoreEnvDir(home, run.Tool, project.Hash):                                                 true,
+		config.HostProjectNetworkCaptureDir(home, project.Hash, run.Tool):                                    true,
 		config.HostProjectMemoryDir(home, project.Hash, run.Tool):                                            true,
 	}
 

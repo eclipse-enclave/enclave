@@ -82,9 +82,9 @@ func ValidateOptions(opts model.Options, sources model.OptionSources, ctx Valida
 		return opts, sources, warnings, fmt.Errorf("--host-config must be %s or %s", model.HostConfigNone, model.HostConfigPassthrough)
 	}
 	switch opts.NetworkLog {
-	case model.NetworkLogCoarse, model.NetworkLogRequests:
+	case model.NetworkLogCoarse, model.NetworkLogRequests, model.NetworkLogFull:
 	default:
-		return opts, sources, warnings, fmt.Errorf("--network-log must be %s or %s", model.NetworkLogCoarse, model.NetworkLogRequests)
+		return opts, sources, warnings, fmt.Errorf("--network-log must be %s, %s or %s", model.NetworkLogCoarse, model.NetworkLogRequests, model.NetworkLogFull)
 	}
 	switch opts.ProjectMount {
 	case model.ProjectMountWritable, model.ProjectMountReadonly:

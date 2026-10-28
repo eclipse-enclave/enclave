@@ -76,7 +76,7 @@ supported under `tool_overrides.<tool>`.
 | `image_name` | Override default image name/tag |
 | `features` | Feature extensions to enable |
 | `use_remote_user` | Honor devcontainer `remoteUser` for agent sessions |
-| `network_log` | Network audit mode: `coarse` (default, one event per TLS connection) or `requests` (one event per HTTP/HTTPS request, forcing MITM). See [Coverage and granularity](networking.md#coverage-and-granularity) |
+| `network_log` | Network audit mode: `coarse` (default, one event per TLS connection), `requests` (one event per HTTP/HTTPS request, forcing MITM), or `full` (`requests` plus a stored copy of every relayed request and response, headers and bodies included; sensitive, see [Full capture](networking.md#full-capture)). See [Coverage and granularity](networking.md#coverage-and-granularity) |
 | `verbose` | Verbose logging |
 | `ports` | Publish container ports to the host (container → host) |
 | `add_dirs` | Additional directories to mount |

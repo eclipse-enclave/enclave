@@ -16,6 +16,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"net/url"
@@ -31,6 +32,7 @@ import (
 	"enclave/internal/domainpattern"
 	"enclave/internal/gateway/tlsstore"
 	"enclave/internal/model"
+	"enclave/internal/netcapture"
 	"enclave/internal/netlog"
 	"enclave/internal/util"
 )
@@ -42,6 +44,9 @@ type Options struct {
 	DeniedDomains  []string
 	SecretRules    []model.SecretReleaseEntry
 	AuditLogPath   string
+	// CaptureDir is the session directory full captures are written to; empty
+	// disables capturing.
+	CaptureDir string
 	// Session names the gateway that produced an event. Sessions of the same
 	// project and tool share one log file, so without it concurrent sessions
 	// cannot be told apart.
@@ -98,6 +103,17 @@ func Run(ctx context.Context, opts Options) error {
 	defer func() { _ = audit.Close() }()
 
 	proxy := newProxy(opts.AllowedDomains, opts.DeniedDomains, opts.SecretRules, opts.ForceHTTPSMITM, audit, opts.Session)
+	proxy.captures, err = netcapture.Open(netcapture.Options{
+		Dir:     opts.CaptureDir,
+		Session: opts.Session,
+		Secrets: captureSecrets(opts.SecretRules),
+	})
+	if err != nil {
+		// Capturing is an audit aid. A store that cannot be opened, for example
+		// because its directory was deleted on the host, must not take egress
+		// down with it: a proxy that fails to start shuts the gateway.
+		log.Printf("full network capture disabled: %v", err)
+	}
 	httpServer := &http.Server{
 		Addr:              httpAddr,
 		Handler:           proxy.handler("http"),
@@ -156,7 +172,9 @@ type proxy struct {
 	forceHTTPSMITM bool
 	audit          *netlog.Appender
 	session        string
-	transport      *http.Transport
+	// captures is nil unless --network-log=full asked for full captures.
+	captures  *netcapture.Store
+	transport *http.Transport
 	// upgradeTransport speaks only HTTP/1.1 and carries every request with an
 	// Upgrade header, whether or not Connection names it: HTTP/2 refuses any
 	// Upgrade header, and transport switches to HTTP/1.1 by itself only for
@@ -190,6 +208,16 @@ func newProxy(allowedDomains []string, deniedDomains []string, secretRules []mod
 		transport:        newUpstreamTransport(),
 		upgradeTransport: upgradeTransport,
 	}
+}
+
+// captureSecrets lists the values the gateway releases, so that the capture can
+// put the placeholder back wherever a released value shows up.
+func captureSecrets(rules []model.SecretReleaseEntry) []netcapture.Secret {
+	secrets := make([]netcapture.Secret, 0, len(rules))
+	for _, rule := range rules {
+		secrets = append(secrets, netcapture.Secret{Value: rule.Value, Placeholder: rule.Placeholder})
+	}
+	return secrets
 }
 
 func newUpstreamTransport() *http.Transport {
@@ -238,6 +266,10 @@ func (p *proxy) handler(scheme string) http.HandlerFunc {
 			http.Error(w, "Domain not in allowlist", http.StatusForbidden)
 			return
 		}
+		// The capture snapshots the request before secrets are released into it,
+		// so it holds the placeholders the sandbox sent and never a real value.
+		// A denied request was not relayed and leaves no capture.
+		capture := p.captures.Begin(req, scheme)
 		if err := rewriteHeaders(scheme, host, req.Header, p.secretRules); err != nil {
 			event.Status = http.StatusForbidden
 			event.Verdict = netlog.VerdictDeny
@@ -246,15 +278,17 @@ func (p *proxy) handler(scheme string) http.HandlerFunc {
 			http.Error(w, "request denied", http.StatusForbidden)
 			return
 		}
-		result, err := p.forward(w, req, scheme)
+		result, err := p.forward(w, req, scheme, capture)
 		if err != nil {
 			event.Status = http.StatusBadGateway
 			event.Verdict = netlog.VerdictPass
 			event.Rule = "upstream-error"
+			event.CaptureID = capture.Finish(err)
 			p.logEvent(event)
 			http.Error(w, "Upstream request failed", http.StatusBadGateway)
 			return
 		}
+		event.CaptureID = capture.Finish(nil)
 		event.Status = result.StatusCode
 		event.ResponseSize = result.ResponseBytes
 		event.ContentType = result.ContentType
@@ -270,7 +304,7 @@ type forwardResult struct {
 	ContentType   string
 }
 
-func (p *proxy) forward(w http.ResponseWriter, req *http.Request, scheme string) (forwardResult, error) {
+func (p *proxy) forward(w http.ResponseWriter, req *http.Request, scheme string, capture *netcapture.Capture) (forwardResult, error) {
 	target := *req.URL
 	target.Scheme = scheme
 	host := req.Host
@@ -291,6 +325,7 @@ func (p *proxy) forward(w http.ResponseWriter, req *http.Request, scheme string)
 	outgoing := req.Clone(req.Context())
 	outgoing.RequestURI = ""
 	outgoing.URL = &target
+	outgoing.Body = capture.RequestBody(req.Body)
 	outgoing.Header.Set("X-Forwarded-Proto", scheme)
 	if clientIP := clientIPFromAddr(req.RemoteAddr); clientIP != "" {
 		if prior := strings.TrimSpace(outgoing.Header.Get("X-Forwarded-For")); prior != "" {
@@ -308,7 +343,9 @@ func (p *proxy) forward(w http.ResponseWriter, req *http.Request, scheme string)
 		return forwardResult{}, err
 	}
 	defer func() { _ = resp.Body.Close() }()
+	capture.Response(resp)
 	if resp.StatusCode == http.StatusSwitchingProtocols {
+		// The traffic of the upgraded connection is relayed, not captured.
 		return relayUpgrade(w, outgoing, resp)
 	}
 	copyHeaders(w.Header(), resp.Header)
@@ -318,7 +355,12 @@ func (p *proxy) forward(w http.ResponseWriter, req *http.Request, scheme string)
 	// stream as open until the head arrives.
 	rc := http.NewResponseController(w)
 	_ = rc.Flush()
-	responseBytes, _ := io.Copy(flushWriter{w: w, rc: rc}, resp.Body)
+	var client io.Writer = flushWriter{w: w, rc: rc}
+	if sink := capture.ResponseBody(); sink != nil {
+		client = captureWriter{client: client, capture: sink}
+	}
+	responseBytes, copyErr := io.Copy(client, resp.Body)
+	capture.ResponseEnded(copyErr)
 	return forwardResult{
 		StatusCode:    resp.StatusCode,
 		ResponseBytes: responseBytes,
@@ -340,6 +382,21 @@ func (f flushWriter) Write(p []byte) (int, error) {
 		return n, err
 	}
 	return n, f.rc.Flush()
+}
+
+// captureWriter tees the relayed response into its capture. Each chunk is
+// written to the client before it is captured, and only what reached the
+// client is captured; the next chunk is read once the capture has it, so a slow
+// disk slows the stream down.
+type captureWriter struct {
+	client  io.Writer
+	capture io.Writer
+}
+
+func (c captureWriter) Write(p []byte) (int, error) {
+	n, err := c.client.Write(p)
+	_, _ = c.capture.Write(p[:n])
+	return n, err
 }
 
 // relayUpgrade completes a protocol switch such as a WebSocket handshake. The

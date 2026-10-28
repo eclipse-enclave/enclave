@@ -170,6 +170,24 @@ Record tool versions with the results. In particular, Claude Code is closed
 source: its env-only setup-token behavior needs runtime verification, not just
 changelog evidence. Keep test credentials out of logs and review artifacts.
 
+### Full network capture acceptance testing
+
+Unit tests drive the MITM proxy against in-process upstreams. On a host with
+Docker and with rootless Podman, check what they cannot:
+
+- Start a session with `--network-log=full`, make the agent call its model API,
+  and confirm `enclave network log --type http` rows end in `capture <id>` and
+  `enclave network log --show-capture <id>` shows both messages, with a streamed
+  response complete once the stream has ended.
+- Confirm the session directory under `logs/capture/` is readable and deletable
+  by the host user while the gateway's proxy writes it, and that
+  `enclave cleanup` removes it without `sudo` or `podman unshare`.
+- With a declared secret released by the gateway, confirm the captured request
+  headers carry the placeholder and `grep -r` over the capture directory finds
+  no real value.
+- Run `enclave network apply` during a session, which restarts the proxy, and
+  confirm capturing continues in the same directory.
+
 ## Code Generation
 
 Generated files are checked in. If you change the option definitions or tool

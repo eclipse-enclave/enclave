@@ -274,9 +274,9 @@ func TestCheckSensitiveMountsHonorsSensitiveDirExceptions(t *testing.T) {
 			refused: []string{
 				at(".cache") + " (--add-dir): contains ~/.cache/enclave" + hardHint,
 				at(".m2") + " (--add-dir): is ~/.m2\n",
-				"To mount them anyway, pass them with --add-sensitive-dir",
+				"To mount the others anyway, pass them with --add-sensitive-dir",
 			},
-			absent: []string{"Run enclave from a project directory"},
+			absent: []string{"Run enclave from a project directory", "To mount them anyway"},
 		},
 		{
 			name:     "config exception covering the project",
@@ -373,8 +373,18 @@ func TestCheckSensitiveMountsHonorsSensitiveDirExceptions(t *testing.T) {
 			config:     globalExceptions("~/.cache"),
 			additional: []additionalDirs{cliAddDirs(at(".cache"))},
 			allowed:    true,
-			warnings:   []string{"Mounting sensitive host path " + at(".cache") + " (--add-dir): is ~/.cache\n"},
+			warnings:   []string{"Mounting sensitive host path " + at(".cache") + " (--add-dir): contains ~/.cache/enclave\n"},
 			absent:     []string{"exempted by"},
+		},
+		{
+			name:    "blanket opt-in names Enclave's config root",
+			project: code,
+			additional: []additionalDirs{
+				{dirs: []string{at(".config/enclave")}, flag: "--add-readonly-dir", key: "add_readonly_dirs", source: model.SourceCLI},
+			},
+			allowed:  true,
+			warnings: []string{"Mounting sensitive host path " + at(".config/enclave") + " (--add-readonly-dir): is ~/.config/enclave\n"},
+			absent:   []string{"is inside ~/.config"},
 		},
 		{
 			name:       "flag for a directory that is not sensitive",

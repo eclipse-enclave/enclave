@@ -117,7 +117,7 @@ func configSensitiveDirException(entry, origin, home, realHome string) (mounts.S
 func checkSensitiveMounts(project model.Project, additional []additionalDirs, exceptions []mounts.SensitiveDirException, home string, allowed bool) error {
 	sensitive := mounts.NewSensitivePaths(home, config.HostAppDataDirs(home), config.HostEnclaveRoots(home))
 	var sensitiveMounts, exempted, offenders []string
-	exemptable := false
+	exemptable, hardProtected := false, false
 	assess := func(dir string, origin string) {
 		a := sensitive.Assess(dir, exceptions)
 		mount := fmt.Sprintf("%s (%s): ", dir, origin)
@@ -126,13 +126,18 @@ func checkSensitiveMounts(project model.Project, additional []additionalDirs, ex
 			return
 		case a.HardReason != "":
 			offenders = append(offenders, mount+a.HardReason+", which no sensitive-dir exception can cover; mount a narrower directory")
+			hardProtected = true
 		case a.Exception == nil:
 			offenders = append(offenders, mount+a.Reason)
 			exemptable = true
 		default:
 			exempted = append(exempted, mount+a.Reason+"; exempted by "+a.Exception.Origin)
 		}
-		sensitiveMounts = append(sensitiveMounts, mount+a.Reason)
+		reason := a.Reason
+		if a.HardReason != "" {
+			reason = a.HardReason
+		}
+		sensitiveMounts = append(sensitiveMounts, mount+reason)
 	}
 	assess(project.RealDir, "project directory")
 	for _, list := range additional {
@@ -153,7 +158,11 @@ func checkSensitiveMounts(project model.Project, additional []additionalDirs, ex
 	}
 	hint := "Run enclave from a project directory, or narrow the additional directories where they are set.\n"
 	if exemptable {
-		hint = "To mount them anyway, pass them with --add-sensitive-dir or --add-readonly-sensitive-dir\n" +
+		exemptableMounts := "them"
+		if hardProtected {
+			exemptableMounts = "the others"
+		}
+		hint = "To mount " + exemptableMounts + " anyway, pass them with --add-sensitive-dir or --add-readonly-sensitive-dir\n" +
 			"(this works for the project directory too), or list them in sensitive_dir_exceptions in\n" +
 			formatSource(model.SourceGlobal, project.Dir) + ".\n"
 	}

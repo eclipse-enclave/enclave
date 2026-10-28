@@ -20,7 +20,7 @@ func TestResolveConfiguredFeaturesExplicitList(t *testing.T) {
 		{Name: "node-dev", DefaultEnabled: true},
 	}
 
-	got := resolveConfiguredFeatures([]string{" node-dev ", "devtools", "node-dev"}, available)
+	got := resolveConfiguredFeatures([]string{" node-dev ", "devtools", "node-dev"}, available, defaultEnabledFeatureNames(available))
 	want := []string{"devtools", "node-dev"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("unexpected explicit feature normalization: got %v want %v", got, want)
@@ -34,7 +34,7 @@ func TestResolveConfiguredFeaturesSelectionDefault(t *testing.T) {
 		{Name: "shell-extras", DefaultEnabled: false},
 	}
 
-	got := resolveConfiguredFeatures([]string{model.SelectionDefault}, available)
+	got := resolveConfiguredFeatures([]string{model.SelectionDefault}, available, defaultEnabledFeatureNames(available))
 	want := []string{"devtools", "node-dev"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("unexpected default selector resolution: got %v want %v", got, want)
@@ -48,7 +48,7 @@ func TestResolveConfiguredFeaturesSelectionAll(t *testing.T) {
 		{Name: "shell-extras", DefaultEnabled: false},
 	}
 
-	got := resolveConfiguredFeatures([]string{model.FeatureSelectionAll}, available)
+	got := resolveConfiguredFeatures([]string{model.FeatureSelectionAll}, available, defaultEnabledFeatureNames(available))
 	want := []string{"devtools", "node-dev", "shell-extras"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("unexpected all selector resolution: got %v want %v", got, want)
@@ -64,7 +64,7 @@ func TestResolveConfiguredFeaturesAdditiveFromImplicitDefaults(t *testing.T) {
 		{Name: "shell-extras", DefaultEnabled: false},
 	}
 
-	got := resolveConfiguredFeatures([]string{"-node-dev", "+shell-extras"}, available)
+	got := resolveConfiguredFeatures([]string{"-node-dev", "+shell-extras"}, available, defaultEnabledFeatureNames(available))
 	want := []string{"devtools", "github-cli", "python-dev", "shell-extras"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("unexpected additive feature resolution: got %v want %v", got, want)
@@ -77,7 +77,7 @@ func TestResolveConfiguredFeaturesAdditiveRemoveAllDefaults(t *testing.T) {
 		{Name: "github-cli", DefaultEnabled: true},
 	}
 
-	got := resolveConfiguredFeatures([]string{"-devtools", "-github-cli"}, available)
+	got := resolveConfiguredFeatures([]string{"-devtools", "-github-cli"}, available, defaultEnabledFeatureNames(available))
 	want := []string{}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("unexpected additive feature resolution: got %v want %v", got, want)
@@ -92,7 +92,7 @@ func TestResolveConfiguredFeaturesDefaultPlusExplicit(t *testing.T) {
 		{Name: "shell-extras", DefaultEnabled: false},
 	}
 
-	got := resolveConfiguredFeatures([]string{"default", "playwright"}, available)
+	got := resolveConfiguredFeatures([]string{"default", "playwright"}, available, defaultEnabledFeatureNames(available))
 	want := []string{"devtools", "node-dev", "playwright"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("unexpected default+explicit resolution: got %v want %v", got, want)
@@ -106,7 +106,7 @@ func TestResolveConfiguredFeaturesDefaultPlusRemoval(t *testing.T) {
 		{Name: "shell-extras", DefaultEnabled: false},
 	}
 
-	got := resolveConfiguredFeatures([]string{"default", "-node-dev", "shell-extras"}, available)
+	got := resolveConfiguredFeatures([]string{"default", "-node-dev", "shell-extras"}, available, defaultEnabledFeatureNames(available))
 	want := []string{"devtools", "shell-extras"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("unexpected default+removal resolution: got %v want %v", got, want)
@@ -120,7 +120,7 @@ func TestResolveConfiguredFeaturesAllPlusRemoval(t *testing.T) {
 		{Name: "shell-extras", DefaultEnabled: false},
 	}
 
-	got := resolveConfiguredFeatures([]string{"all", "-shell-extras"}, available)
+	got := resolveConfiguredFeatures([]string{"all", "-shell-extras"}, available, defaultEnabledFeatureNames(available))
 	want := []string{"devtools", "node-dev"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("unexpected all+removal resolution: got %v want %v", got, want)
@@ -173,5 +173,26 @@ func TestFeatureSelectionEnabledNamesSorted(t *testing.T) {
 	selection := featureSelection{enabled: []model.Extension{{Name: "node-dev"}, {Name: "github-cli"}}}
 	if got := selection.enabledNames(); !reflect.DeepEqual(got, []string{"github-cli", "node-dev"}) {
 		t.Fatalf("enabledNames() = %#v", got)
+	}
+}
+
+func TestResolveConfiguredFeaturesImplicitBaseOnlyForDirectives(t *testing.T) {
+	available := []model.Extension{
+		{Name: "devtools", DefaultEnabled: true},
+		{Name: "node-dev", DefaultEnabled: true},
+		{Name: "debug-tools"},
+	}
+	defaults := defaultEnabledFeatureNames(available)
+
+	// A bare name makes the list explicit, so its removal does not bring the defaults back.
+	if got := resolveConfiguredFeatures([]string{"node-dev", "-debug-tools"}, available, defaults); !reflect.DeepEqual(got, []string{"node-dev"}) {
+		t.Fatalf("explicit list with removal = %v, want [node-dev]", got)
+	}
+	if got := resolveConfiguredFeatures([]string{"+debug-tools"}, available, defaults); !reflect.DeepEqual(got, []string{"debug-tools", "devtools", "node-dev"}) {
+		t.Fatalf("directives = %v, want defaults plus debug-tools", got)
+	}
+	devcontainer := implicitFeatureBase(available, model.BuildOptions{Devcontainer: true})
+	if got := resolveConfiguredFeatures([]string{"+debug-tools"}, available, devcontainer); !reflect.DeepEqual(got, []string{"debug-tools"}) {
+		t.Fatalf("devcontainer directives = %v, want [debug-tools]", got)
 	}
 }

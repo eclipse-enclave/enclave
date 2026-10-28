@@ -58,16 +58,10 @@ func TestLoadDefaultsWarnings(t *testing.T) {
 			},
 		},
 		{
-			name:   "invalid pass_env and session_tint",
-			global: `{"pass_env":["1BAD","GITHUB_TOKEN=ghp_secret"],"session_tint":"red","tool_overrides":{"codex":{"pass_env":["BAD-DASH"],"session_tint":"#2a0"}}}`,
+			name:   "invalid session_tint",
+			global: `{"session_tint":"red","tool_overrides":{"codex":{"session_tint":"#2a0"}}}`,
 			want: func(global, _ string) []Warning {
 				return []Warning{
-					{Code: WarningInvalidValue, Option: "pass_env", Layer: "global", Path: global,
-						Message: `Ignoring pass_env entry "1BAD" in ` + global + ": not a valid environment variable name"},
-					{Code: WarningInvalidValue, Option: "pass_env", Layer: "global", Path: global,
-						Message: `Ignoring pass_env entry "GITHUB_TOKEN=…" in ` + global + ": not a valid environment variable name"},
-					{Code: WarningInvalidValue, Option: "pass_env", Layer: "tool_override:codex", Path: global,
-						Message: `Ignoring tool_overrides.codex.pass_env entry "BAD-DASH" in ` + global + ": not a valid environment variable name"},
 					{Code: WarningInvalidValue, Option: "session_tint", Layer: "global", Path: global,
 						Message: `Ignoring session_tint "red" in ` + global + ": expected an #rrggbb color"},
 					{Code: WarningInvalidValue, Option: "session_tint", Layer: "tool_override:codex", Path: global,

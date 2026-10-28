@@ -57,6 +57,7 @@ func runConfig(input *CommandInput) int {
 	rowOpts := opts
 	rowOpts.HostConfigPaths = resolvedHostConfigPaths
 	rows := buildConfigRows(rowOpts, input.BaseOptions, input.GlobalDefaults, input.ProjectDefaults, input.ToolDefaults, input.HasToolDefaults, hostConfigDefaults)
+	rows = withRawCLILists(rows, input.CLIOptions, opts.Sources)
 	globalPath, globalErr := config.GlobalConfigPath()
 	projectPath := config.ProjectConfigJSONPath(input.Ctx.ProjectDir)
 	globalExists := false
@@ -82,6 +83,8 @@ func runConfig(input *CommandInput) int {
 			configJSONOutput:   legacyConfigJSON(rows, view, filePaths, fileStatus),
 		})
 	}
+
+	rows = withResolvedFeatures(rows, paths, opts, input.Options.Sources)
 
 	if globalErr != nil {
 		fmt.Printf("Global Config: unavailable (%v)\n", globalErr)
@@ -150,6 +153,43 @@ func buildConfigRows(
 			}
 		}
 		rows = append(rows, row)
+	}
+	return rows
+}
+
+// withResolvedFeatures shows the features a run would enable instead of the
+// raw directives, matching what `config --json` reports.
+func withResolvedFeatures(rows []configRow, paths model.Paths, opts model.Options, sources model.OptionSources) []configRow {
+	values, _, err := optionsAsRun(paths, opts, sources)
+	if err != nil {
+		return rows
+	}
+	selection, err := resolveFeatureSelection(paths, values.BuildOptions)
+	if err != nil {
+		return rows
+	}
+	for i := range rows {
+		if rows[i].Name == "features" {
+			rows[i].Effective = config.FormatSlice(selection.enabledNames())
+		}
+	}
+	return rows
+}
+
+// withRawCLILists shows what the CLI wrote for list options, which merge onto
+// config instead of replacing it.
+func withRawCLILists(rows []configRow, cli model.Options, sources model.OptionSources) []configRow {
+	defs := map[string]config.OptionDef{}
+	for _, def := range config.OptionDefs() {
+		defs[def.Name] = def
+	}
+	for i := range rows {
+		def, ok := defs[rows[i].Name]
+		if !ok || def.Kind != config.OptionKindStringSlice {
+			continue
+		}
+		cli.Sources = sources
+		rows[i].CLI = cellFrom(config.OptionCLIValue(def, cli))
 	}
 	return rows
 }
@@ -393,11 +433,15 @@ func configOptionLayers(def config.OptionDef, input *CommandInput) map[string]an
 	}
 	raw := input.Options
 	if config.OptionEffectiveSource(def, raw.Sources) == model.SourceCLI {
-		if def.Kind == config.OptionKindYolo {
+		switch def.Kind {
+		case config.OptionKindYolo:
 			if raw.YoloOverride != nil {
 				layers[sourceLabel(model.SourceCLI)] = *raw.YoloOverride
 			}
-		} else {
+		case config.OptionKindStringSlice:
+			// Lists merge the CLI onto config; the layer shows what the CLI wrote.
+			layers[sourceLabel(model.SourceCLI)] = config.OptionTypedEffectiveValue(def, input.CLIOptions)
+		default:
 			layers[sourceLabel(model.SourceCLI)] = config.OptionTypedEffectiveValue(def, raw)
 		}
 	}

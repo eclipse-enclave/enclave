@@ -64,6 +64,9 @@ type Defaults struct {
 	AllowDomains     []string            `json:"allow_domains"`
 	BridgePorts      []string            `json:"bridge_ports"`
 	PlaywrightMCP    *bool               `json:"playwright_mcp"`
+
+	// path is the file the values were read from, so list entries can name it.
+	path string
 }
 
 // LoadGlobalDefaults reads only the global config, for commands that must not
@@ -103,10 +106,7 @@ func LoadDefaults(projectDir string) (global Defaults, project Defaults, warning
 	return globalDefaults, projectDefaults, warnings, nil
 }
 
-func ApplyDefaultsWithSources(opts model.Options, defaults Defaults, source model.OptionSource, sources *model.OptionSources) model.Options {
-	if sources == nil {
-		return opts
-	}
+func applyScalarDefaults(opts model.Options, defaults Defaults, source model.OptionSource, sources *model.OptionSources) model.Options {
 	for _, spec := range OptionSpecs() {
 		if spec.ApplyDefaultsWithSource == nil {
 			continue
@@ -138,13 +138,24 @@ func ResolveToolOverrideDefaults(global Defaults, project Defaults, tool string)
 // before a run. When targetTool is non-empty it overrides the configured
 // default tool: the `update` command uses this to resolve each explicit target
 // with that tool's own overrides instead of the default tool's. It returns the
-// resolved options (with Sources populated) plus the applied tool-override
-// defaults and whether any applied.
+// resolved options (with Sources and Origins populated) plus the combined
+// tool-override defaults and whether any applied.
+//
+// A scalar the CLI set blocks every config layer, which is the same as
+// applying it last. Lists the CLI set are held back and merged on top of the
+// config layers, and the two files' tool overrides fold as separate list
+// layers so each entry keeps the file it came from.
 func ResolveOptionsForTool(cliOpts model.Options, cliSources model.OptionSources, global Defaults, project Defaults, targetTool string) (model.Options, Defaults, bool) {
 	sources := model.MergeOptionSources(model.DefaultOptionSources(), cliSources)
 	opts := cliOpts
-	opts = ApplyDefaultsWithSources(opts, global, model.SourceGlobal, &sources)
-	opts = ApplyDefaultsWithSources(opts, project, model.SourceProject, &sources)
+	opts.Origins = nil
+	opts.ListProblems = nil
+	cliLists := holdBackCLILists(&opts, &sources)
+
+	opts = applyScalarDefaults(opts, global, model.SourceGlobal, &sources)
+	applyListLayer(&opts, global, listLayer{source: model.SourceGlobal, scope: model.ScopeGlobal}, &sources)
+	opts = applyScalarDefaults(opts, project, model.SourceProject, &sources)
+	applyListLayer(&opts, project, listLayer{source: model.SourceProject, scope: model.ScopeProject}, &sources)
 	tool := opts.Tool
 	if t := strings.TrimSpace(targetTool); t != "" {
 		tool = t
@@ -152,10 +163,49 @@ func ResolveOptionsForTool(cliOpts model.Options, cliSources model.OptionSources
 	}
 	toolDefaults, hasToolDefaults := ResolveToolOverrideDefaults(global, project, tool)
 	if hasToolDefaults {
-		opts = ApplyDefaultsWithSources(opts, toolDefaults, model.SourceToolOverride, &sources)
+		opts = applyScalarDefaults(opts, toolDefaults, model.SourceToolOverride, &sources)
+		for _, file := range []struct {
+			defaults Defaults
+			scope    model.ConfigScope
+		}{{global, model.ScopeGlobal}, {project, model.ScopeProject}} {
+			if override, ok := file.defaults.ToolOverrides[tool]; ok {
+				applyListLayer(&opts, override, listLayer{source: model.SourceToolOverride, scope: file.scope, tool: tool}, &sources)
+			}
+		}
+	}
+
+	cliLayer := listLayer{source: model.SourceCLI}
+	for _, held := range cliLists {
+		mergeListInto(&opts, held.def, held.values, cliLayer)
+		setOptionSource(&sources, held.def.SourceField, model.SourceCLI)
 	}
 	opts.Sources = sources
 	return opts, toolDefaults, hasToolDefaults
+}
+
+type heldCLIList struct {
+	def    OptionDef
+	values []string
+}
+
+// holdBackCLILists clears the lists the CLI set, so the config layers fold
+// onto the built-in default instead of being blocked, and returns the CLI values.
+func holdBackCLILists(opts *model.Options, sources *model.OptionSources) []heldCLIList {
+	var held []heldCLIList
+	for _, def := range listOptionDefs() {
+		if optSource(*sources, def.SourceField) != model.SourceCLI {
+			continue
+		}
+		field := reflect.ValueOf(opts).Elem().FieldByName(def.OptionField)
+		values := []string{}
+		if !field.IsNil() {
+			values = copyStringSlice(field.Interface().([]string))
+		}
+		held = append(held, heldCLIList{def: def, values: values})
+		field.Set(reflect.Zero(field.Type()))
+		setOptionSource(sources, def.SourceField, model.SourceDefault)
+	}
+	return held
 }
 
 func canOverride(current model.OptionSource, incoming model.OptionSource) bool {
@@ -208,9 +258,13 @@ func readDefaults(path string) (Defaults, []Warning, error) {
 
 	warnings := validateTopLevelDefaults(path, doc, &defaults)
 	warnings = append(warnings, validateToolOverrides(path, doc, &defaults)...)
-	warnings = append(warnings, validatePassEnvNames(path, &defaults)...)
 	warnings = append(warnings, validateSessionTint(path, &defaults)...)
 	warnings = append(warnings, validateUpdateChannel(path, &defaults)...)
+	defaults.path = path
+	for name, override := range defaults.ToolOverrides {
+		override.path = path
+		defaults.ToolOverrides[name] = override
+	}
 	return defaults, warnings, nil
 }
 
@@ -255,68 +309,6 @@ func rejectRemovedConfigFields(path string, doc map[string]json.RawMessage) erro
 		}
 	}
 	return nil
-}
-
-// validatePassEnvNames drops entries from defaults.PassEnv (and each
-// tool_overrides[*].PassEnv) that aren't valid environment variable names.
-// Config-loaded values bypass the CLI's isValidEnvKey check, so this runs for
-// both global and project configs.
-func validatePassEnvNames(path string, defaults *Defaults) []Warning {
-	if defaults == nil {
-		return nil
-	}
-
-	warnings := make([]Warning, 0)
-	defaults.PassEnv, warnings = filterPassEnv(path, "", defaults.PassEnv, warnings)
-
-	if len(defaults.ToolOverrides) == 0 {
-		return warnings
-	}
-
-	toolNames := make([]string, 0, len(defaults.ToolOverrides))
-	for name := range defaults.ToolOverrides {
-		toolNames = append(toolNames, name)
-	}
-	sort.Strings(toolNames)
-
-	for _, name := range toolNames {
-		override := defaults.ToolOverrides[name]
-		if len(override.PassEnv) == 0 {
-			continue
-		}
-		var filtered []string
-		filtered, warnings = filterPassEnv(path, name, override.PassEnv, warnings)
-		override.PassEnv = filtered
-		defaults.ToolOverrides[name] = override
-	}
-
-	return warnings
-}
-
-func filterPassEnv(path string, toolName string, values []string, warnings []Warning) ([]string, []Warning) {
-	if len(values) == 0 {
-		return values, warnings
-	}
-	kept := make([]string, 0, len(values))
-	for _, raw := range values {
-		if isValidEnvKey(raw) {
-			kept = append(kept, raw)
-			continue
-		}
-		entry := raw
-		if name, _, hasValue := strings.Cut(raw, "="); hasValue {
-			entry = name + "=…"
-		}
-		if toolName == "" {
-			warnings = append(warnings, newWarning(WarningInvalidValue, "pass_env", "", path, "Ignoring pass_env entry %q in %s: not a valid environment variable name", entry, path))
-		} else {
-			warnings = append(warnings, newWarning(WarningInvalidValue, "pass_env", toolName, path, "Ignoring tool_overrides.%s.pass_env entry %q in %s: not a valid environment variable name", toolName, entry, path))
-		}
-	}
-	if len(kept) == 0 {
-		return nil, warnings
-	}
-	return kept, warnings
 }
 
 // validateSessionTint clears session_tint values (top level and per tool
@@ -538,14 +530,9 @@ func mergeDefaults(base Defaults, override Defaults) Defaults {
 			if incomingField.IsNil() {
 				continue
 			}
-			incomingSlice := copyStringSlice(incomingField.Interface().([]string))
 			current := targetField.Interface().([]string)
-			switch def.Apply {
-			case ApplySliceMergeHost:
-				setDefaultsStringSlice(targetField, mergeHostConfigSlice(current, incomingSlice))
-			default:
-				setDefaultsStringSlice(targetField, incomingSlice)
-			}
+			incoming := incomingField.Interface().([]string)
+			setDefaultsStringSlice(targetField, mergeListValues(def, current, incoming))
 		}
 	}
 
@@ -578,131 +565,5 @@ func mergeToolOverrides(base map[string]Defaults, override map[string]Defaults) 
 			merged[toolName] = defaults
 		}
 	}
-	return merged
-}
-
-// hasAdditiveDirective reports whether any value carries a '+' or '-' prefix,
-// which switches mergeStringSlice from replace mode into additive mode.
-func hasAdditiveDirective(values []string) bool {
-	for _, v := range values {
-		if strings.HasPrefix(v, "+") || strings.HasPrefix(v, "-") {
-			return true
-		}
-	}
-	return false
-}
-
-// mergeStringSlice merges two string slices with support for additive syntax.
-// If any value in override starts with '+' or '-', additive mode is used:
-//   - '+value' adds 'value' to the base set
-//   - '-value' removes 'value' from the base set
-//
-// If no values have prefixes, override replaces base entirely (default behavior).
-func mergeStringSlice(base, override []string) []string {
-	if !hasAdditiveDirective(override) {
-		// Replace mode (original behavior)
-		return override
-	}
-
-	if base == nil {
-		// Preserve additive directives so downstream resolution can apply them
-		// against the implicit default set (e.g. features).
-		return override
-	}
-
-	// Additive mode: start with base, apply modifications
-	result := make(map[string]bool)
-	for _, v := range base {
-		result[v] = true
-	}
-
-	for _, v := range override {
-		if strings.HasPrefix(v, "+") {
-			result[strings.TrimPrefix(v, "+")] = true
-		} else if strings.HasPrefix(v, "-") {
-			delete(result, strings.TrimPrefix(v, "-"))
-		} else {
-			// No prefix in additive mode - treat as add
-			result[v] = true
-		}
-	}
-
-	// Convert back to slice
-	merged := make([]string, 0, len(result))
-	for v := range result {
-		merged = append(merged, v)
-	}
-	// Sort for deterministic output
-	sort.Strings(merged)
-	return merged
-}
-
-// mergeFeatureSlice merges feature defaults with additive syntax.
-// When base is nil, additive directives are preserved so downstream resolution
-// can apply them against the implicit default-enabled feature set.
-func mergeFeatureSlice(base, override []string) []string {
-	if !hasAdditiveDirective(override) {
-		return override
-	}
-	if base == nil {
-		return copyStringSlice(override)
-	}
-	return mergeStringSlice(base, override)
-}
-
-// mergeHostConfigSlice merges raw host_config_paths directives across config
-// scopes without resolving them against tool defaults yet.
-//
-// Rules:
-// - nil override => no change
-// - explicit empty slice => explicit empty override
-// - additive-only override (+/- entries only) modifies the inherited raw list
-// - any bare entry (including "default") replaces the inherited raw list
-// - additive removals against an explicit empty base are no-ops
-func mergeHostConfigSlice(base, override []string) []string {
-	if override == nil {
-		return copyStringSlice(base)
-	}
-	if len(override) == 0 {
-		return []string{}
-	}
-
-	additiveOnly := true
-	for _, raw := range override {
-		value := strings.TrimSpace(raw)
-		if value == "" {
-			continue
-		}
-		if !strings.HasPrefix(value, "+") && !strings.HasPrefix(value, "-") {
-			additiveOnly = false
-			break
-		}
-	}
-	if !additiveOnly {
-		return copyStringSlice(override)
-	}
-
-	if base == nil {
-		return copyStringSlice(override)
-	}
-	if len(base) == 0 {
-		resolved := make([]string, 0, len(override))
-		for _, raw := range override {
-			value := strings.TrimSpace(raw)
-			if !strings.HasPrefix(value, "+") {
-				continue
-			}
-			bare := strings.TrimSpace(strings.TrimPrefix(value, "+"))
-			if bare != "" {
-				resolved = append(resolved, bare)
-			}
-		}
-		if resolved == nil {
-			return []string{}
-		}
-		return resolved
-	}
-
-	merged := append(copyStringSlice(base), override...)
 	return merged
 }

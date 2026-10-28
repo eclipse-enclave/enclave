@@ -127,7 +127,10 @@ func ResolveHostConfigPaths(profile model.Profile, configured []string) []string
 		case "", model.SelectionDefault:
 			continue
 		default:
+			// A removal matches the entry with or without its trailing slash.
+			bare = strings.TrimSuffix(bare, "/")
 			delete(selected, bare)
+			delete(selected, bare+"/")
 		}
 	}
 

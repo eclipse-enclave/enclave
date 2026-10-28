@@ -29,6 +29,11 @@ substitute it for `~/.config/enclave/` in every path below.
 4. Global config (`~/.config/enclave/config.json`)
 5. Built-in defaults
 
+A tool override is more specific than a top-level setting, so it wins in either
+file: a global `tool_overrides.<tool>` value beats a project's top-level value.
+Between the two files' tool overrides, the project's wins. List options merge
+across these layers; see [List Options](#list-options).
+
 Because only you can edit it, project config may set every option global config
 can, with the same effect for that project. The exceptions are `auto_update`
 and `update_channel`: they are global-only rather than project or per-tool
@@ -139,31 +144,91 @@ killed with `SIGKILL` the reset never runs; clear a leftover tint with
 }
 ```
 
-## Additive Syntax for `features` and `host_config_paths`
+## List Options
 
-Use `+` and `-` prefixes to modify the parent config instead of replacing it:
+List options come in two kinds. Each layer (global, project, the global and
+then the project file's tool override, CLI) merges onto the value it inherits.
+
+**Extras** are `add_dirs`, `add_readonly_dirs`, `ports`, `allow_domains`,
+`bridge_ports`, `pass_env`, and `cache_from`. Config files and CLI flags
+follow the same rules, so existing configs and scripts keep their meaning:
+
+| Entry | Effect |
+|---|---|
+| `x` | replaces the inherited list |
+| `+x` | adds to it |
+| `-x` | removes from it |
+| `[]`, `["none"]`, or `--flag none` | clears |
+
+A list is either plain or all `+`/`-`: mixing the two, or `none` with other
+entries, is an error, because replacing a list and amending it in the same
+place has no meaning a plain list cannot express.
+
+The exception is `--add-dir` and `--add-readonly-dir`: on the command line a
+plain path adds to the configured directories, because mounting one more
+directory is what these flags are almost always used for. `-dir` removes a
+configured one, and `none` makes the other paths replace them.
 
 ```json
-// Global config (~/.config/enclave/config.json):
-{ "features": ["node-dev", "python-dev"] }
+// Global config:
+{ "ports": ["8080:80"], "add_dirs": ["~/shared"] }
 
-// Project config (~/.config/enclave/projects/<hash>/config.json):
-{ "features": ["+devtools", "-python-dev"] }
+// Project config:
+{ "ports": ["+3000"], "add_dirs": ["-~/shared", "+./data"] }
 
-// Result: ["devtools", "node-dev"]
+// Result: ports ["8080:80", "3000"], add_dirs ["./data"]
 ```
 
-Values without prefixes replace the parent set entirely.
+- Removing an entry that is not there is silent.
+- Exactly one prefix is stripped. Write `./+dir`, `./-dir`, or `./none` for a
+  relative directory with such a name; `++x` adds `+x`. When a directory is not
+  found but the name with a leading `+` exists, the error suggests `./+x`.
+- Entries are compared after normalization: `3000`, `3000:3000`, and
+  `127.0.0.1:3000:3000` are the same port; domains are case-insensitive;
+  directories compare as resolved paths.
+- Two ports clash when they publish the same host port on overlapping
+  addresses (an omitted address is `127.0.0.1`; `0.0.0.0` and `::` overlap
+  everything; host port `0` never clashes). Within one layer that is an error;
+  across layers the more specific entry replaces the other, so `-p 8080:81`
+  overrides a configured `8080:80`.
+- An invalid entry, a removal included, is an error that names the flag or the
+  key and file that set it, such as
+  `tool_overrides.claude.pass_env in ~/.config/enclave/config.json`.
 
-`features` defaults to implicit `"default"` when unset. Additive entries are
-applied against the implicit default-enabled set, so `["-node-dev"]` removes
-that default feature and `[]` means "none".
+**Selections** are `features` and `host_config_paths`. A bare list replaces
+the inherited one and `+`/`-` entries amend it:
+
+```json
+// Global config:
+{ "features": ["node-dev", "python-dev"] }
+
+// Project config:
+{ "features": ["+devtools", "-python-dev"] }
+
+// Result: ["node-dev", "devtools"]
+```
+
+- A list with any bare entry (a name or keyword) replaces the inherited one;
+  `[]` selects nothing.
+- A list of only `+`/`-` entries amends the configured selection, and the more
+  specific layer wins per item: a project `+x` restores an `x` that global
+  config removed. The CLI works the same way: `--features +x` adds to the
+  configured features, while `--features a,b` replaces them.
+- Only when no layer selects features do directives apply to the implicit
+  default-enabled set, so `["-node-dev"]` removes that default feature and
+  `["+shell-extras"]` adds an opt-in one. In devcontainer mode the implicit set
+  is empty.
+- `--features none` selects nothing and cannot be combined with other values;
+  in config, write `[]`.
+- `--playwright-mcp` enables the `playwright` feature it needs even when
+  `features` removes it, with a warning.
 
 `host_config_paths` is resolved per tool against that tool's reviewed
 `passthroughPaths` from its `spec.yaml`. Use:
 
 - `["default"]` to start from the built-in reviewed allow-list
-- `["+commands/", "-skills/"]` to modify the built-in reviewed allow-list
+- `["+commands/", "-skills/"]` to modify the built-in reviewed allow-list (a
+  removal matches with or without the trailing `/`)
 - `["settings.json", "agents/"]` to replace the built-in allow-list entirely
 
 Entries are relative to the tool's host config directory, not absolute host
@@ -346,7 +411,7 @@ alternative, so no config file can let enclave run as root.
 `--allow-sensitive-mounts` is CLI-only too; `ENCLAVE_ALLOW_SENSITIVE_MOUNTS=1`
 is its only alternative, so no config file can let a session mount sensitive
 host data. `add_dirs` and `add_readonly_dirs` entries from config are checked
-like `--add-dir`.
+like `--add-dir`, and a refusal names the flag or config file of each entry.
 
 The experimental `qemu` backend only runs unrestricted, slim/no-feature bundles, so selecting it implies `allow_all_network=true` and `slim=true` automatically (with a per-run notice). Requesting features or an allowlist (`--allow-domain`) is rejected because the backend cannot honor them.
 
@@ -395,8 +460,9 @@ Each `options.<name>` entry has:
 - `source`: the layer that last set the raw option: `default`, `global`,
   `project`, `tool_override`, or `cli`.
 - `layers`: the raw value each of `global`, `project`, `tool_override`, and
-  `cli` sets, after ignored keys are dropped and before normalization; absent layers
-  do not set the option.
+  `cli` sets, after ignored keys are dropped and before normalization; absent
+  layers do not set the option. List entries keep their `+`/`-` prefixes as
+  written; `tool_override` shows the two files' overrides combined.
 - `directives` (`features`, `host_config_paths` only): the raw selection,
   `null` when unset and `[]` for none.
 

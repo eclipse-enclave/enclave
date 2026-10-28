@@ -760,9 +760,9 @@ Configure which features to install via `~/.config/enclave/config.json` (global)
 ```
 
 When `features` is not specified, all `defaultEnabled` features are installed (default). An empty array `[]` disables all features.
-Opt-in features require an explicit list; additive-only entries do not change the implicit default.
+Add an opt-in feature on top of the defaults with `["+playwright"]`, or list every feature you want explicitly. See [List Options](../configuration.md#list-options) for how layers combine.
 
-**Devcontainer mode:** When devcontainer mode is used (`devcontainer run` or config `devcontainer: true`), features are disabled by default (the devcontainer already defines its own environment). To install features alongside a devcontainer, pass `--features` explicitly.
+**Devcontainer mode:** When devcontainer mode is used (`devcontainer run` or config `devcontainer: true`), features are disabled by default (the devcontainer already defines its own environment). To install features alongside a devcontainer, pass `--features` explicitly; `+`/`-` entries then start from no features.
 
 The next time you run `./enclave --rebuild`, only the specified features will be installed.
 

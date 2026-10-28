@@ -18,7 +18,6 @@ import (
 	"enclave/internal/config"
 	"enclave/internal/logx"
 	"enclave/internal/model"
-	"enclave/internal/mounts"
 	"enclave/internal/runtime"
 	"enclave/internal/theia"
 	"enclave/internal/tools"
@@ -87,23 +86,16 @@ func runExecutionCommand(input *CommandInput) int {
 		return 1
 	}
 
-	validatedDirs, err := mounts.ValidateExtraDirs(opts.AddDirs, project.RealDir, host.Home)
+	writableDirs, readonlyDirs, err := validateAdditionalDirs(opts, project.RealDir, host.Home)
 	if err != nil {
 		logx.Errorf("%v", err)
 		return 1
 	}
-	validatedReadonlyDirs, err := mounts.ValidateExtraDirsWithExisting(opts.AddReadonlyDirs, validatedDirs, project.RealDir, host.Home)
-	if err != nil {
-		logx.Errorf(err.Error())
-		return 1
-	}
+	validatedDirs := additionalDirPaths(writableDirs)
+	validatedReadonlyDirs := additionalDirPaths(readonlyDirs)
 	// exec enters an existing container, so it mounts nothing.
 	if isRunAction(input.Action) {
-		additional := []additionalDirs{
-			{dirs: validatedDirs, flag: "--add-dir", key: "add_dirs", source: opts.Sources.AddDirs},
-			{dirs: validatedReadonlyDirs, flag: "--add-readonly-dir", key: "add_readonly_dirs", source: opts.Sources.AddReadonlyDirs},
-		}
-		if err := checkSensitiveMounts(project, additional, host.Home, opts.AllowSensitiveMounts); err != nil {
+		if err := checkSensitiveMounts(project, append(writableDirs, readonlyDirs...), host.Home, opts.AllowSensitiveMounts); err != nil {
 			logx.Errorf("%v", err)
 			return 1
 		}

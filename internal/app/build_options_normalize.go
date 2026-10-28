@@ -18,7 +18,7 @@ func normalizeConfiguredBuildOptions(paths model.Paths, opts model.BuildOptions)
 		if err != nil {
 			return opts, err
 		}
-		opts.Features = resolveConfiguredFeatures(opts.Features, availableFeatures)
+		opts.Features = resolveConfiguredFeatures(opts.Features, availableFeatures, implicitFeatureBase(availableFeatures, opts))
 	}
 
 	return opts, nil

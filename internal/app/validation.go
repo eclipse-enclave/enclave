@@ -128,12 +128,8 @@ func ValidateOptions(opts model.Options, sources model.OptionSources, ctx Valida
 	if strings.TrimSpace(opts.ImageName) == "" {
 		return opts, sources, warnings, fmt.Errorf("--image-name requires a non-empty value")
 	}
-	if len(opts.AllowDomains) > 0 {
-		normalized, err := normalizeAllowDomains(opts.AllowDomains)
-		if err != nil {
-			return opts, sources, warnings, err
-		}
-		opts.AllowDomains = normalized
+	if err := config.CheckListProblems(opts); err != nil {
+		return opts, sources, warnings, err
 	}
 
 	return opts, sources, warnings, nil
@@ -229,23 +225,6 @@ func qemuDroppedFeatures(requested []string, paths model.Paths) []string {
 	return names
 }
 
-// normalizeAllowDomains lowercases and validates each entry, rejecting
-// empty values, schemes, paths, and obviously invalid hostnames.
-func normalizeAllowDomains(domains []string) ([]string, error) {
-	out := make([]string, 0, len(domains))
-	for _, raw := range domains {
-		value := strings.ToLower(strings.TrimSpace(raw))
-		if value == "" {
-			return nil, fmt.Errorf("--allow-domain value cannot be empty")
-		}
-		if !isValidDomain(value) {
-			return nil, fmt.Errorf("--allow-domain %q is not a valid domain name", raw)
-		}
-		out = append(out, value)
-	}
-	return out, nil
-}
-
 func validateBuildIdentityOptions(opts model.BuildOptions) error {
 	if err := validateNonNegativeID("--build-uid", opts.BuildUID); err != nil {
 		return err
@@ -265,39 +244,6 @@ func validateNonNegativeID(flag string, value string) error {
 		return fmt.Errorf("%s requires a non-negative numeric value", flag)
 	}
 	return nil
-}
-
-// isValidDomain returns true if s is a bare DNS name: lowercase ASCII
-// letters/digits/hyphens, dots between labels, no scheme/path/port.
-func isValidDomain(s string) bool {
-	if s == "" || len(s) > 253 {
-		return false
-	}
-	if strings.ContainsAny(s, "/:@?#") {
-		return false
-	}
-	if strings.HasPrefix(s, ".") || strings.HasSuffix(s, ".") {
-		return false
-	}
-	labels := strings.Split(s, ".")
-	if len(labels) < 2 {
-		return false
-	}
-	for _, label := range labels {
-		if label == "" || len(label) > 63 {
-			return false
-		}
-		if label[0] == '-' || label[len(label)-1] == '-' {
-			return false
-		}
-		for i := 0; i < len(label); i++ {
-			c := label[i]
-			if (c < 'a' || c > 'z') && (c < '0' || c > '9') && c != '-' {
-				return false
-			}
-		}
-	}
-	return true
 }
 
 func validateAuthOptions(opts model.Options, sources model.OptionSources) (model.Options, model.OptionSources, error) {
@@ -389,7 +335,11 @@ func normalizeOptions(opts model.Options) (model.Options, []string) {
 		opts.SkillsValidation = model.SkillsValidationStrict
 	}
 	if opts.PlaywrightMCP {
-		opts.Features = ensureFeature(opts.Features, "playwright")
+		var overrodeRemoval bool
+		opts.Features, overrodeRemoval = ensureFeature(opts.Features, "playwright")
+		if overrodeRemoval {
+			warnings = append(warnings, "--playwright-mcp needs the playwright feature; enabling it despite -playwright in features")
+		}
 	}
 	opts.NetworkLog = strings.TrimSpace(strings.ToLower(opts.NetworkLog))
 	if opts.NetworkLog == "" {
@@ -409,19 +359,20 @@ func normalizeOptions(opts model.Options) (model.Options, []string) {
 	return opts, warnings
 }
 
-// ensureFeature adds a feature to the list if not already present.
-// When features is nil (meaning "all defaults"), it becomes ["default", feature]
-// so the Dockerfile includes all defaults plus the extra feature.
-func ensureFeature(features []string, name string) []string {
+// ensureFeature selects name on top of features and reports whether that
+// overrode a removal of it. When features is nil (meaning "all defaults"), it
+// becomes ["default", name].
+func ensureFeature(features []string, name string) ([]string, bool) {
 	if features == nil {
-		return []string{model.SelectionDefault, name}
+		return []string{model.SelectionDefault, name}, false
 	}
-	for _, f := range features {
-		if f == name {
-			return features
+	overrodeRemoval := false
+	for _, raw := range features {
+		if strings.TrimSpace(raw) == "-"+name {
+			overrodeRemoval = true
 		}
 	}
-	return append(features, name)
+	return config.AmendFeatures(features, "+"+name), overrodeRemoval
 }
 
 func normalizeBuildProgress(value string) string {

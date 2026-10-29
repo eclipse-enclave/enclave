@@ -10,9 +10,11 @@ package app
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
+	"enclave/internal/config"
 	"enclave/internal/model"
 )
 
@@ -150,6 +152,7 @@ func TestEnsureFeature(t *testing.T) {
 		features []string
 		add      string
 		want     []string
+		overrode bool
 	}{
 		{
 			name:     "nil becomes default plus feature",
@@ -169,10 +172,27 @@ func TestEnsureFeature(t *testing.T) {
 			add:      "playwright",
 			want:     []string{"default", "devtools", "playwright"},
 		},
+		{
+			name:     "overrides a removal",
+			features: []string{"default", "-playwright"},
+			add:      "playwright",
+			want:     []string{"default", "playwright"},
+			overrode: true,
+		},
+		{
+			name:     "amends directives",
+			features: []string{"-playwright", "+devtools"},
+			add:      "playwright",
+			want:     []string{"+devtools", "+playwright"},
+			overrode: true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := ensureFeature(tt.features, tt.add)
+			got, overrode := ensureFeature(tt.features, tt.add)
+			if overrode != tt.overrode {
+				t.Fatalf("overrode = %v, want %v", overrode, tt.overrode)
+			}
 			if len(got) != len(tt.want) {
 				t.Fatalf("got %v, want %v", got, tt.want)
 			}
@@ -403,31 +423,25 @@ func TestValidatePlaywrightMCP_NonClaude(t *testing.T) {
 	}
 }
 
-func TestValidateAllowDomainsLowercases(t *testing.T) {
-	opts := model.Options{
-		RunOptions: model.RunOptions{
-			Tool:         "claude",
-			AllowDomains: []string{"API.DeepSeek.com", "  example.org  "},
-		},
-		BuildOptions: model.BuildOptions{
-			ImageName: "test",
-		},
-	}
-	sources := model.DefaultOptionSources()
-	ctx := ValidationContext{Action: "info"}
+// resolveAllowDomains resolves allow_domains from global config the way a run does.
+func resolveAllowDomains(domains ...string) model.Options {
+	base := config.DefaultOptions()
+	base.Tool = "claude"
+	base.ImageName = "test"
+	base.Backend = "docker"
+	opts, _, _ := config.ResolveOptionsForTool(base, model.OptionSources{}, config.Defaults{AllowDomains: domains}, config.Defaults{}, "")
+	return opts
+}
 
-	got, _, _, err := ValidateOptions(opts, sources, ctx)
+func TestValidateAllowDomainsLowercases(t *testing.T) {
+	opts := resolveAllowDomains("API.DeepSeek.com", "  example.org  ")
+	got, _, _, err := ValidateOptions(opts, opts.Sources, ValidationContext{Action: "info"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	want := []string{"api.deepseek.com", "example.org"}
-	if len(got.AllowDomains) != len(want) {
+	if !reflect.DeepEqual(got.AllowDomains, want) {
 		t.Fatalf("AllowDomains = %v, want %v", got.AllowDomains, want)
-	}
-	for i := range want {
-		if got.AllowDomains[i] != want[i] {
-			t.Fatalf("AllowDomains[%d] = %q, want %q", i, got.AllowDomains[i], want[i])
-		}
 	}
 }
 
@@ -443,25 +457,48 @@ func TestValidateAllowDomainsRejectsInvalid(t *testing.T) {
 		{"trailing dot", "api.example.com."},
 		{"underscore", "api_test.example.com"},
 		{"port", "api.example.com:443"},
+		{"invalid removal", "-api.example.com:443"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			opts := model.Options{
-				RunOptions: model.RunOptions{
-					Tool:         "claude",
-					AllowDomains: []string{tc.domain},
-				},
-				BuildOptions: model.BuildOptions{
-					ImageName: "test",
-				},
-			}
-			sources := model.DefaultOptionSources()
-			ctx := ValidationContext{Action: "info"}
-
-			if _, _, _, err := ValidateOptions(opts, sources, ctx); err == nil {
+			opts := resolveAllowDomains(tc.domain)
+			_, _, _, err := ValidateOptions(opts, opts.Sources, ValidationContext{Action: "info"})
+			if err == nil {
 				t.Fatalf("expected error for invalid domain %q", tc.domain)
 			}
+			if !strings.HasPrefix(err.Error(), "allow_domains in global config: invalid entry") {
+				t.Fatalf("error = %q, want it to name the config key and file", err)
+			}
 		})
+	}
+}
+
+func TestValidateListProblemsNameTheirLayer(t *testing.T) {
+	base := config.DefaultOptions()
+	base.Tool = "claude"
+	base.ImageName = "test"
+	base.Backend = "docker"
+	base.Ports = []string{"8080:80", "8080:81"}
+	cliSources := model.OptionSources{}
+	cliSources.Ports = model.SourceCLI
+	global := config.Defaults{PassEnv: []string{"BAD-NAME=secret"}}
+	opts, _, _ := config.ResolveOptionsForTool(base, cliSources, global, config.Defaults{}, "")
+	_, _, _, err := ValidateOptions(opts, opts.Sources, ValidationContext{Action: "info"})
+	if err == nil || err.Error() != `pass_env in global config: invalid entry "BAD-NAME=…": not a valid environment variable name` {
+		t.Fatalf("error = %v, want the redacted pass_env entry named first", err)
+	}
+
+	opts, _, _ = config.ResolveOptionsForTool(base, cliSources, config.Defaults{}, config.Defaults{}, "")
+	_, _, _, err = ValidateOptions(opts, opts.Sources, ValidationContext{Action: "info"})
+	if err == nil || err.Error() != `-p: "8080:80" and "8080:81" both publish host port 8080` {
+		t.Fatalf("error = %v, want a same-layer port clash", err)
+	}
+
+	project := config.Defaults{Ports: []string{"3000", "-8080:80"}}
+	opts, _, _ = config.ResolveOptionsForTool(base, model.OptionSources{}, config.Defaults{}, project, "")
+	_, _, _, err = ValidateOptions(opts, opts.Sources, ValidationContext{Action: "info"})
+	if err == nil || !strings.HasPrefix(err.Error(), `ports in project config: "-8080:80" mixes a +/- entry into a plain list`) {
+		t.Fatalf("error = %v, want the mixed project list named", err)
 	}
 }
 
@@ -594,10 +631,17 @@ func TestValidateOptionsQEMURejectsUnsatisfiableRequests(t *testing.T) {
 	// An allowlist implies restricted networking, which qemu cannot provide.
 	withAllowlist := base
 	withAllowlist.AllowDomains = []string{"example.com"}
-	if _, _, _, err := ValidateOptions(withAllowlist, model.DefaultOptionSources(), ValidationContext{Action: "run"}); err == nil {
+	configSources := model.DefaultOptionSources()
+	configSources.AllowDomains = model.SourceProject
+	if _, _, _, err := ValidateOptions(withAllowlist, configSources, ValidationContext{Action: "run"}); err == nil {
 		t.Fatal("expected qemu allow-domain validation error")
-	} else if !strings.Contains(err.Error(), "cannot restrict network access") {
+	} else if !strings.HasSuffix(err.Error(), "cannot restrict network access; remove allow_domains from config") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+	cliAllowSources := model.DefaultOptionSources()
+	cliAllowSources.AllowDomains = model.SourceCLI
+	if _, _, _, err := ValidateOptions(withAllowlist, cliAllowSources, ValidationContext{Action: "run"}); err == nil || !strings.HasSuffix(err.Error(), "remove --allow-domain") {
+		t.Fatalf("error = %v, want the --allow-domain hint", err)
 	}
 
 	// --features none (explicit empty) is accepted.

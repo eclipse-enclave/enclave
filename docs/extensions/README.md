@@ -28,8 +28,8 @@ Project-local extension definitions (for example,
 into the user-global root from a git repository with `enclave features add`
 / `enclave tools add`; see [Installing Extensions](installing.md). Select a
 custom tool for a project with
-`enclave --tool <tool>`; project config cannot set the active tool, although
-global config can set a host-wide default. For a project-specific feature,
+`enclave --tool <tool>`, or make it the project's default with `tool` in
+project config (global config sets the host-wide default). For a project-specific feature,
 declare it with `defaultEnabled: false` (to avoid the project-specific
 extension being loaded for all projects/containers), then add
 `"features": ["+my-feature"]` to
@@ -760,9 +760,9 @@ Configure which features to install via `~/.config/enclave/config.json` (global)
 ```
 
 When `features` is not specified, all `defaultEnabled` features are installed (default). An empty array `[]` disables all features.
-Opt-in features require an explicit list; additive-only entries do not change the implicit default.
+Add an opt-in feature on top of the defaults with `["+playwright"]`, or list every feature you want explicitly. See [List Options](../configuration.md#list-options) for how layers combine.
 
-**Devcontainer mode:** When devcontainer mode is used (`devcontainer run` or config `devcontainer: true`), features are disabled by default (the devcontainer already defines its own environment). To install features alongside a devcontainer, pass `--features` explicitly.
+**Devcontainer mode:** When devcontainer mode is used (`devcontainer run` or config `devcontainer: true`), features are disabled by default (the devcontainer already defines its own environment). To install features alongside a devcontainer, pass `--features` explicitly; `+`/`-` entries then start from no features.
 
 The next time you run `./enclave --rebuild`, only the specified features will be installed.
 

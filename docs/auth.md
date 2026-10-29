@@ -232,7 +232,7 @@ The exception is the time zone: `TZ` is set to the host zone (from `$TZ`, the `/
 enclave --pass-env GITHUB_TOKEN,MY_API_KEY
 ```
 
-This can also be set persistently in `config.json` via the `pass_env` key. See [Configuration](configuration.md).
+This can also be set persistently in `config.json` via the `pass_env` key; `--pass-env` replaces it for the run and `--pass-env +KEY` adds to it. See [List Options](configuration.md#list-options).
 
 ## SSH Keys
 

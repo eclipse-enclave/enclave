@@ -284,7 +284,9 @@ func optionCLIFlags() map[string][]CLIFlag {
 		},
 		"ports": {
 			valueFlag("-p", "Publish a container port to the host (e.g. 5391, 8080:80, or 0:5391 for an auto-assigned host port, Docker only)", "-p requires a value", func(opts *model.Options, sources *model.OptionSources, value string) error {
-				opts.Ports = append(opts.Ports, value)
+				if err := applyPort(opts, value); err != nil {
+					return err
+				}
 				sources.Ports = model.SourceCLI
 				return nil
 			}),
@@ -298,14 +300,18 @@ func optionCLIFlags() map[string][]CLIFlag {
 		},
 		"add_dirs": {
 			valueFlag("--add-dir", "Mount additional directory", "--add-dir requires a directory path", func(opts *model.Options, sources *model.OptionSources, value string) error {
-				opts.AddDirs = append(opts.AddDirs, value)
+				if err := applyAddDir(opts, value); err != nil {
+					return err
+				}
 				sources.AddDirs = model.SourceCLI
 				return nil
 			}),
 		},
 		"add_readonly_dirs": {
 			valueFlag("--add-readonly-dir", "Mount additional directory read-only", "--add-readonly-dir requires a directory path", func(opts *model.Options, sources *model.OptionSources, value string) error {
-				opts.AddReadonlyDirs = append(opts.AddReadonlyDirs, value)
+				if err := applyAddReadonlyDir(opts, value); err != nil {
+					return err
+				}
 				sources.AddReadonlyDirs = model.SourceCLI
 				return nil
 			}),
@@ -349,8 +355,10 @@ func optionCLIFlags() map[string][]CLIFlag {
 			}),
 		},
 		"allow_domains": {
-			valueFlag("--allow-domain", "Add domain to gateway allowlist for this run only (repeatable)", "--allow-domain requires a domain name", func(opts *model.Options, sources *model.OptionSources, value string) error {
-				opts.AllowDomains = append(opts.AllowDomains, value)
+			valueFlag("--allow-domain", "Allow domain through the gateway for this run (repeatable; replaces configured allow_domains, +domain adds)", "--allow-domain requires a domain name", func(opts *model.Options, sources *model.OptionSources, value string) error {
+				if err := applyAllowDomain(opts, value); err != nil {
+					return err
+				}
 				sources.AllowDomains = model.SourceCLI
 				return nil
 			}),

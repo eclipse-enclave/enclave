@@ -11,9 +11,12 @@ COPY . .
 RUN CGO_ENABLED=0 go build -o /out/enclave-gateway-proxy ./cmd/enclave-gateway-proxy
 
 # Enclave gateway container (DNS + transparent proxy)
-FROM docker.io/library/alpine:3.23@sha256:25109184c71bdad752c8312a8623239686a9a2071e8825f20acb8f2198c3f659
+FROM docker.io/library/alpine:3.23@sha256:85fe1e81d6758c208f3e1eed4338a1997e19d4be002d4dd32d3100c9a8c010a0
 
-RUN apk add --no-cache dnsmasq ipset iptables libcap socat su-exec ca-certificates && \
+# The proxy validates upstream TLS against this trust store. Upgrade the
+# preinstalled bundle so root removals land without waiting for a new base.
+RUN apk upgrade --no-cache ca-certificates-bundle && \
+    apk add --no-cache dnsmasq ipset iptables libcap socat su-exec ca-certificates && \
     dnsmasq_path="$(command -v dnsmasq)" && \
     setcap cap_net_admin,cap_net_bind_service=+ep "$dnsmasq_path" && \
     if ! id -u dnsmasq >/dev/null 2>&1; then \

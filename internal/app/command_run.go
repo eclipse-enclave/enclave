@@ -155,7 +155,7 @@ func runExecutionCommand(input *CommandInput) int {
 // resolveAdditionalMounts validates the directories to mount besides the
 // project and returns them read-write and read-only. With guard set, it
 // refuses sensitive ones (see checkSensitiveMounts), taking the
-// sensitive-dir exceptions from global config and from
+// sensitive-dir exceptions from config and from
 // --add-sensitive-dir/--add-readonly-sensitive-dir. Unlike --add-dir, those
 // flags add to the configured directories instead of replacing them.
 func resolveAdditionalMounts(opts model.Options, project model.Project, home string, guard bool) ([]string, []string, error) {
@@ -168,41 +168,22 @@ func resolveAdditionalMounts(opts model.Options, project model.Project, home str
 		return nil, nil, err
 	}
 
-	// Read-write lists go first, so a directory in both stays read-write.
-	dirs, err := mounts.ValidateExtraDirs(opts.AddDirs, project.RealDir, home)
-	if err != nil {
-		return nil, nil, err
-	}
-	sensitiveDirs, err = mounts.ValidateExtraDirsWithExisting(sensitiveDirs, dirs, project.RealDir, home)
-	if err != nil {
-		return nil, nil, err
-	}
-	readonlyDirs, err := mounts.ValidateExtraDirsWithExisting(opts.AddReadonlyDirs, slices.Concat(dirs, sensitiveDirs), project.RealDir, home)
-	if err != nil {
-		return nil, nil, err
-	}
-	readonlySensitiveDirs, err = mounts.ValidateExtraDirsWithExisting(readonlySensitiveDirs, slices.Concat(dirs, sensitiveDirs, readonlyDirs), project.RealDir, home)
+	writable, readonly, err := validateAdditionalDirs(opts, sensitiveDirs, readonlySensitiveDirs, project.RealDir, home)
 	if err != nil {
 		return nil, nil, err
 	}
 
 	if guard {
-		configExceptions, warnings := configSensitiveDirExceptions(opts, home, project.Dir)
+		configExceptions, warnings := configSensitiveDirExceptions(opts, home)
 		for _, warning := range warnings {
 			logx.Warnf("%s", warning)
 		}
-		additional := []additionalDirs{
-			{dirs: dirs, flag: "--add-dir", key: "add_dirs", source: opts.Sources.AddDirs},
-			{dirs: sensitiveDirs, flag: addSensitiveDirFlag, source: model.SourceCLI},
-			{dirs: readonlyDirs, flag: "--add-readonly-dir", key: "add_readonly_dirs", source: opts.Sources.AddReadonlyDirs},
-			{dirs: readonlySensitiveDirs, flag: addReadonlySensitiveDirFlag, source: model.SourceCLI},
-		}
 		exceptions = slices.Concat(configExceptions, exceptions, readonlyExceptions)
-		if err := checkSensitiveMounts(project, additional, exceptions, home, opts.AllowSensitiveMounts); err != nil {
+		if err := checkSensitiveMounts(project, slices.Concat(writable, readonly), exceptions, home, opts.AllowSensitiveMounts); err != nil {
 			return nil, nil, err
 		}
 	}
-	return slices.Concat(dirs, sensitiveDirs), slices.Concat(readonlyDirs, readonlySensitiveDirs), nil
+	return additionalDirPaths(writable), additionalDirPaths(readonly), nil
 }
 
 const (

@@ -76,6 +76,9 @@ func TestMergeDefaultsCoversAllFields(t *testing.T) {
 	for i := 0; i < v.NumField(); i++ {
 		field := v.Field(i)
 		fieldName := typ.Field(i).Name
+		if !typ.Field(i).IsExported() {
+			continue
+		}
 
 		if field.IsZero() {
 			t.Errorf("mergeDefaults: field %s was not merged (still zero value) - add it to mergeDefaults()", fieldName)
@@ -87,6 +90,9 @@ func TestMergeDefaultsCoversAllFields(t *testing.T) {
 	for i := 0; i < overrideV.NumField(); i++ {
 		field := overrideV.Field(i)
 		fieldName := typ.Field(i).Name
+		if !typ.Field(i).IsExported() {
+			continue
+		}
 
 		if field.IsZero() {
 			t.Errorf("Test setup error: override.%s is zero - add a test value to the override struct", fieldName)

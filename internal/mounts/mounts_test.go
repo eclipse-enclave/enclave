@@ -516,3 +516,15 @@ func TestAddWorktree_AllowsCommondirInsideProject(t *testing.T) {
 		t.Fatalf("commondir mount source: got %q want %q", mountArgs[1].Source, commondir)
 	}
 }
+
+func TestValidateExtraDirsHintsAtEscapedPrefix(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dir, "+cache"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(dir)
+	_, err := ValidateExtraDirsWithExisting([]string{"cache"}, nil, "", "")
+	if err == nil || !strings.Contains(err.Error(), "did you mean ./+cache?") {
+		t.Fatalf("err = %v, want a hint at ./+cache", err)
+	}
+}

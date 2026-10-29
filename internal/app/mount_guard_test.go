@@ -10,6 +10,7 @@ package app
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -41,13 +42,17 @@ func guardProject(dir string) model.Project {
 	return model.Project{Dir: dir, RealDir: dir}
 }
 
-func cliAddDirs(dirs ...string) additionalDirs {
-	return additionalDirs{dirs: dirs, flag: "--add-dir", key: "add_dirs", source: model.SourceCLI}
+func cliAddDirs(dirs ...string) []additionalDir {
+	var additional []additionalDir
+	for _, dir := range dirs {
+		additional = append(additional, additionalDir{path: dir, origin: "--add-dir"})
+	}
+	return additional
 }
 
 func TestCheckSensitiveMountsPassesProjectDirectories(t *testing.T) {
 	home, project, _ := mountGuardHome(t)
-	if err := checkSensitiveMounts(guardProject(project), []additionalDirs{cliAddDirs(t.TempDir())}, nil, home, false); err != nil {
+	if err := checkSensitiveMounts(guardProject(project), cliAddDirs(t.TempDir()), nil, home, false); err != nil {
 		t.Fatalf("project directory refused: %v", err)
 	}
 }
@@ -58,15 +63,8 @@ func TestCheckSensitiveMountsRefusesWithoutOptIn(t *testing.T) {
 	if err := os.Mkdir(m2, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	globalConfig, err := config.GlobalConfigPath()
-	if err != nil {
-		t.Fatal(err)
-	}
-	additional := []additionalDirs{
-		cliAddDirs(aws),
-		{dirs: []string{m2}, flag: "--add-readonly-dir", key: "add_readonly_dirs", source: model.SourceGlobal},
-	}
-	err = checkSensitiveMounts(guardProject(home), additional, nil, home, false)
+	additional := append(cliAddDirs(aws), additionalDir{path: m2, origin: "add_readonly_dirs in global config"})
+	err := checkSensitiveMounts(guardProject(home), additional, nil, home, false)
 	if err == nil {
 		t.Fatal("expected the home directory, ~/.aws, and ~/.m2 to be refused")
 	}
@@ -74,7 +72,7 @@ func TestCheckSensitiveMountsRefusesWithoutOptIn(t *testing.T) {
 	for _, want := range []string{
 		home + " (project directory): is your home directory",
 		aws + " (--add-dir): is ~/.aws",
-		m2 + " (add_readonly_dirs from " + globalConfig + "): is ~/.m2",
+		m2 + " (add_readonly_dirs in global config): is ~/.m2",
 		"--allow-sensitive-mounts",
 		model.EnvAllowSensitiveMounts + "=1",
 	} {
@@ -88,7 +86,7 @@ func TestCheckSensitiveMountsWarnsWhenAllowed(t *testing.T) {
 	home, _, aws := mountGuardHome(t)
 	var err error
 	_, stderr := captureOutput(t, func() {
-		err = checkSensitiveMounts(guardProject(home), []additionalDirs{cliAddDirs(aws)}, nil, home, true)
+		err = checkSensitiveMounts(guardProject(home), cliAddDirs(aws), nil, home, true)
 	})
 	if err != nil {
 		t.Fatalf("opted-in run refused: %v", err)
@@ -167,17 +165,27 @@ func globalConfigPath(t *testing.T) string {
 }
 
 // globalExceptions is opts with sensitive_dir_exceptions set in global config.
-func globalExceptions(entries ...string) model.Options {
+func globalExceptions(t *testing.T, entries ...string) model.Options {
+	return configExceptions(entries, model.EntryOrigin{Source: model.SourceGlobal, Scope: model.ScopeGlobal, Path: globalConfigPath(t)})
+}
+
+// configExceptions is opts with sensitive_dir_exceptions entries set where
+// origin says, as the list fold records them.
+func configExceptions(entries []string, origin model.EntryOrigin) model.Options {
 	opts := model.Options{}
 	opts.SensitiveDirExceptions = entries
-	opts.Sources.SensitiveDirExceptions = model.SourceGlobal
+	opts.Sources.SensitiveDirExceptions = origin.Source
+	opts.Origins = model.ListOrigins{"sensitive_dir_exceptions": {}}
+	for _, entry := range entries {
+		opts.Origins["sensitive_dir_exceptions"][entry] = origin
+	}
 	return opts
 }
 
 type guardCase struct {
 	name       string
 	project    string
-	additional []additionalDirs
+	additional []additionalDir
 	config     model.Options
 	cli        []mounts.SensitiveDirException
 	allowed    bool
@@ -189,7 +197,7 @@ type guardCase struct {
 
 func runGuardCase(t *testing.T, home string, tc guardCase) {
 	t.Helper()
-	exceptions, warnings := configSensitiveDirExceptions(tc.config, home, tc.project)
+	exceptions, warnings := configSensitiveDirExceptions(tc.config, home)
 	for _, warning := range warnings {
 		t.Errorf("unexpected config warning: %s", warning)
 	}
@@ -270,7 +278,7 @@ func TestCheckSensitiveMountsHonorsSensitiveDirExceptions(t *testing.T) {
 		{
 			name:       "hard-protected and exemptable mounts without exceptions",
 			project:    code,
-			additional: []additionalDirs{cliAddDirs(at(".cache"), at(".m2"))},
+			additional: cliAddDirs(at(".cache"), at(".m2")),
 			refused: []string{
 				at(".cache") + " (--add-dir): contains ~/.cache/enclave" + hardHint,
 				at(".m2") + " (--add-dir): is ~/.m2\n",
@@ -281,7 +289,7 @@ func TestCheckSensitiveMountsHonorsSensitiveDirExceptions(t *testing.T) {
 		{
 			name:     "config exception covering the project",
 			project:  workstream,
-			config:   globalExceptions("~/" + workstreams),
+			config:   globalExceptions(t, "~/"+workstreams),
 			warnings: []string{"Mounting sensitive host path " + workstream + " (project directory): is inside ~/.local" + exempted("~/"+workstreams)},
 		},
 		{
@@ -293,103 +301,93 @@ func TestCheckSensitiveMountsHonorsSensitiveDirExceptions(t *testing.T) {
 		{
 			name:       "mount is a parent of a config exception",
 			project:    code,
-			config:     globalExceptions("~/" + workstreams),
-			additional: []additionalDirs{cliAddDirs(at(".local/share/homeshell"))},
+			config:     globalExceptions(t, "~/"+workstreams),
+			additional: cliAddDirs(at(".local/share/homeshell")),
 			refused:    []string{at(".local/share/homeshell") + " (--add-dir): is inside ~/.local\n"},
 		},
 		{
-			name:    "config exception for a configured mount",
-			project: code,
-			config:  globalExceptions("~/.m2"),
-			additional: []additionalDirs{
-				{dirs: []string{at(".m2")}, flag: "--add-readonly-dir", key: "add_readonly_dirs", source: model.SourceGlobal},
-			},
-			warnings: []string{"Mounting sensitive host path " + at(".m2") + " (add_readonly_dirs from " + global + "): is ~/.m2" + exempted("~/.m2")},
+			name:       "config exception for a configured mount",
+			project:    code,
+			config:     globalExceptions(t, "~/.m2"),
+			additional: []additionalDir{{path: at(".m2"), origin: "add_readonly_dirs in global config"}},
+			warnings:   []string{"Mounting sensitive host path " + at(".m2") + " (add_readonly_dirs in global config): is ~/.m2" + exempted("~/.m2")},
 		},
 		{
-			name:    "read-only mount is a parent of a config exception",
-			project: code,
-			config:  globalExceptions("~/.m2/repository"),
-			additional: []additionalDirs{
-				{dirs: []string{at(".m2")}, flag: "--add-readonly-dir", key: "add_readonly_dirs", source: model.SourceCLI},
-			},
-			refused: []string{at(".m2") + " (--add-readonly-dir): is ~/.m2\n"},
+			name:       "read-only mount is a parent of a config exception",
+			project:    code,
+			config:     globalExceptions(t, "~/.m2/repository"),
+			additional: []additionalDir{{path: at(".m2"), origin: "--add-readonly-dir"}},
+			refused:    []string{at(".m2") + " (--add-readonly-dir): is ~/.m2\n"},
 		},
 		{
 			name:       "exception cannot cover Enclave's cache root",
 			project:    code,
-			config:     globalExceptions("~/.cache"),
-			additional: []additionalDirs{cliAddDirs(at(".cache"))},
+			config:     globalExceptions(t, "~/.cache"),
+			additional: cliAddDirs(at(".cache")),
 			refused:    []string{at(".cache") + " (--add-dir): contains ~/.cache/enclave" + hardHint},
 		},
 		{
 			name:       "exception covers a sibling of Enclave's cache root",
 			project:    code,
-			config:     globalExceptions("~/.cache"),
-			additional: []additionalDirs{cliAddDirs(at(".cache/pip"))},
+			config:     globalExceptions(t, "~/.cache"),
+			additional: cliAddDirs(at(".cache/pip")),
 			warnings:   []string{"Mounting sensitive host path " + at(".cache/pip") + " (--add-dir): is inside ~/.cache" + exempted("~/.cache")},
 		},
 		{
-			name:    "flag exception cannot cover Enclave's config root",
-			project: code,
-			additional: []additionalDirs{
-				{dirs: []string{at(".config")}, flag: "--add-sensitive-dir", source: model.SourceCLI},
-			},
-			cli:     []mounts.SensitiveDirException{mounts.NewSensitiveDirException(at(".config"), "--add-sensitive-dir")},
-			refused: []string{at(".config") + " (--add-sensitive-dir): contains ~/.config/enclave" + hardHint},
+			name:       "flag exception cannot cover Enclave's config root",
+			project:    code,
+			additional: []additionalDir{{path: at(".config"), origin: "--add-sensitive-dir"}},
+			cli:        []mounts.SensitiveDirException{mounts.NewSensitiveDirException(at(".config"), "--add-sensitive-dir")},
+			refused:    []string{at(".config") + " (--add-sensitive-dir): contains ~/.config/enclave" + hardHint},
 		},
 		{
 			name:     "dotfiles project",
 			project:  at(".dotfiles"),
-			config:   globalExceptions("~/.dotfiles"),
+			config:   globalExceptions(t, "~/.dotfiles"),
 			warnings: []string{"Mounting sensitive host path " + at(".dotfiles") + " (project directory): is ~/.dotfiles" + exempted("~/.dotfiles")},
 		},
 		{
 			name:       "host socket directory",
 			project:    code,
-			config:     globalExceptions("~/.local/state"),
-			additional: []additionalDirs{cliAddDirs(at(".local/state/host-connector"))},
+			config:     globalExceptions(t, "~/.local/state"),
+			additional: cliAddDirs(at(".local/state/host-connector")),
 			warnings:   []string{"Mounting sensitive host path " + at(".local/state/host-connector") + " (--add-dir): is inside ~/.local" + exempted("~/.local/state")},
 		},
 		{
 			name:       "exception cannot cover the SSH agent socket",
 			project:    code,
-			config:     globalExceptions("~/.local/state"),
-			additional: []additionalDirs{cliAddDirs(at(".local/state/ssh"))},
+			config:     globalExceptions(t, "~/.local/state"),
+			additional: cliAddDirs(at(".local/state/ssh")),
 			refused:    []string{at(".local/state/ssh") + " (--add-dir): contains the SSH agent socket $SSH_AUTH_SOCK (~/.local/state/ssh/agent.sock)" + hardHint},
 		},
 		{
-			name:    "flag exception cannot cover home",
-			project: code,
-			additional: []additionalDirs{
-				{dirs: []string{home}, flag: "--add-sensitive-dir", source: model.SourceCLI},
-			},
-			cli:     []mounts.SensitiveDirException{mounts.NewSensitiveDirException(home, "--add-sensitive-dir")},
-			refused: []string{home + " (--add-sensitive-dir): is your home directory" + hardHint},
+			name:       "flag exception cannot cover home",
+			project:    code,
+			additional: []additionalDir{{path: home, origin: "--add-sensitive-dir"}},
+			cli:        []mounts.SensitiveDirException{mounts.NewSensitiveDirException(home, "--add-sensitive-dir")},
+			refused:    []string{home + " (--add-sensitive-dir): is your home directory" + hardHint},
 		},
 		{
 			name:       "blanket opt-in mounts hard-protected locations without exemption warnings",
 			project:    code,
-			config:     globalExceptions("~/.cache"),
-			additional: []additionalDirs{cliAddDirs(at(".cache"))},
+			config:     globalExceptions(t, "~/.cache"),
+			additional: cliAddDirs(at(".cache")),
 			allowed:    true,
 			warnings:   []string{"Mounting sensitive host path " + at(".cache") + " (--add-dir): contains ~/.cache/enclave\n"},
 			absent:     []string{"exempted by"},
 		},
 		{
-			name:    "blanket opt-in names Enclave's config root",
-			project: code,
-			additional: []additionalDirs{
-				{dirs: []string{at(".config/enclave")}, flag: "--add-readonly-dir", key: "add_readonly_dirs", source: model.SourceCLI},
-			},
-			allowed:  true,
-			warnings: []string{"Mounting sensitive host path " + at(".config/enclave") + " (--add-readonly-dir): is ~/.config/enclave\n"},
-			absent:   []string{"is inside ~/.config"},
+			name:       "blanket opt-in names Enclave's config root",
+			project:    code,
+			additional: []additionalDir{{path: at(".config/enclave"), origin: "--add-readonly-dir"}},
+			allowed:    true,
+			warnings:   []string{"Mounting sensitive host path " + at(".config/enclave") + " (--add-readonly-dir): is ~/.config/enclave\n"},
+			absent:     []string{"is inside ~/.config"},
 		},
 		{
 			name:       "flag for a directory that is not sensitive",
 			project:    code,
-			additional: []additionalDirs{{dirs: []string{code + "-other"}, flag: "--add-sensitive-dir", source: model.SourceCLI}},
+			additional: []additionalDir{{path: code + "-other", origin: "--add-sensitive-dir"}},
 			cli:        []mounts.SensitiveDirException{mounts.NewSensitiveDirException(code+"-other", "--add-sensitive-dir")},
 		},
 	} {
@@ -410,7 +408,7 @@ func TestCheckSensitiveMountsRefusesDotfilesHoldingEnclaveConfig(t *testing.T) {
 	}
 	runGuardCase(t, home, guardCase{
 		project: dotfiles,
-		config:  globalExceptions("~/.dotfiles"),
+		config:  globalExceptions(t, "~/.dotfiles"),
 		refused: []string{dotfiles + " (project directory): contains ~/.dotfiles/config/enclave (target of ~/.config/enclave), which no sensitive-dir exception can cover"},
 	})
 }
@@ -420,9 +418,9 @@ func TestCheckSensitiveMountsRefusesDotfilesHoldingEnclaveConfig(t *testing.T) {
 func TestConfigSensitiveDirExceptionsIgnoresUnusableEntries(t *testing.T) {
 	home := exceptionHome(t)
 	global := globalConfigPath(t)
-	opts := globalExceptions("~", "/", filepath.Dir(home), "relative/x", " ", "~/.m2")
+	opts := globalExceptions(t, "~", "/", filepath.Dir(home), "relative/x", " ", "~/.m2")
 
-	exceptions, warnings := configSensitiveDirExceptions(opts, home, home)
+	exceptions, warnings := configSensitiveDirExceptions(opts, home)
 	for _, want := range []string{
 		`Ignoring sensitive_dir_exceptions entry "~" in ` + global + ": home and its parents cannot be exempted",
 		`Ignoring sensitive_dir_exceptions entry "/" in ` + global + ": home and its parents cannot be exempted",
@@ -447,17 +445,15 @@ func TestConfigSensitiveDirExceptionsIgnoresUnusableEntries(t *testing.T) {
 	}
 }
 
-// A tool-override entry can only come from global config, so its messages
-// name the tool override and the global config file.
+// A tool-override entry's messages name the tool override and its config
+// file.
 func TestConfigSensitiveDirExceptionsNameToolOverride(t *testing.T) {
 	home := exceptionHome(t)
 	global := globalConfigPath(t)
-	opts := model.Options{}
+	opts := configExceptions([]string{"~/.m2", "~"}, model.EntryOrigin{Source: model.SourceToolOverride, Scope: model.ScopeGlobal, Tool: "claude", Path: global})
 	opts.Tool = "claude"
-	opts.SensitiveDirExceptions = []string{"~/.m2", "~"}
-	opts.Sources.SensitiveDirExceptions = model.SourceToolOverride
 
-	exceptions, warnings := configSensitiveDirExceptions(opts, home, home)
+	exceptions, warnings := configSensitiveDirExceptions(opts, home)
 	wantOrigin := `tool_overrides.claude.sensitive_dir_exceptions entry "~/.m2" in ` + global
 	if len(exceptions) != 1 || exceptions[0].Origin != wantOrigin {
 		t.Errorf("exceptions = %+v, want one with origin %q", exceptions, wantOrigin)
@@ -465,5 +461,35 @@ func TestConfigSensitiveDirExceptionsNameToolOverride(t *testing.T) {
 	wantWarning := `Ignoring tool_overrides.claude.sensitive_dir_exceptions entry "~" in ` + global + ": home and its parents cannot be exempted"
 	if !slices.Equal(warnings, []string{wantWarning}) {
 		t.Errorf("warnings = %q, want %q", warnings, wantWarning)
+	}
+}
+
+func TestValidateAdditionalDirsKeepsEachEntrysOrigin(t *testing.T) {
+	project := t.TempDir()
+	shared := t.TempDir()
+	cliDir := t.TempDir()
+	global := config.Defaults{AddDirs: []string{shared}, AddReadonlyDirs: []string{shared, filepath.Join(project, "missing")}}
+	cliOpts := config.DefaultOptions()
+	cliOpts.AddDirs = []string{cliDir}
+	cliSources := model.OptionSources{}
+	cliSources.AddDirs = model.SourceCLI
+	opts, _, _ := config.ResolveOptionsForTool(cliOpts, cliSources, global, config.Defaults{}, "")
+
+	_, _, err := validateAdditionalDirs(opts, nil, nil, project, "")
+	if err == nil || !strings.Contains(err.Error(), "add_readonly_dirs in global config: directory not found") {
+		t.Fatalf("error = %v, want the missing directory attributed to global config", err)
+	}
+
+	opts.AddReadonlyDirs = []string{shared}
+	writable, readonly, err := validateAdditionalDirs(opts, nil, nil, project, "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := []additionalDir{{path: shared, origin: "add_dirs in global config"}, {path: cliDir, origin: "--add-dir"}}
+	if !reflect.DeepEqual(writable, want) {
+		t.Fatalf("writable = %#v, want %#v", writable, want)
+	}
+	if len(readonly) != 0 {
+		t.Fatalf("readonly = %#v, want the writable duplicate skipped", readonly)
 	}
 }

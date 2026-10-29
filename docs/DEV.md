@@ -277,10 +277,16 @@ and use `Apply: ApplyNone` in `options_def.go` (for example:
 defaults resolution. It reuses the existing `NoRebuild` gates and conflict
 checks rather than adding a config key; see the [CLI reference](cli-reference.md#image--build).
 
+A new list option uses `ApplyListExtras` (or a selection kind) and needs a
+key function in `listEntryKey` and, if entries have a format, a validator in
+`listEntryValidators` (`internal/config/list_entries.go`); its flag uses
+`appendListFlag`.
+
 For config-only options, omit `CLIFlags` instead (for example:
-`host_config_paths`). If a project config must not be able to relax the
-option, add it to `applyProjectDefaultsGuardrails` in `internal/config/config.go`
-alongside the existing guarded keys.
+`host_config_paths`). Project config can set every config-backed option; an
+option that only makes sense host-wide belongs in `stripGlobalOnlyKeys` in
+`internal/config/config.go`, and an opt-in no config file may grant gets no
+config key at all (like `--allow-sensitive-mounts`).
 
 ### Practical Checklist
 
@@ -318,8 +324,8 @@ Use this when adding a new option so you do not stop after `options_def.go`:
   `docs/ARCHITECTURE.md`, and any command docs that describe the affected
   behavior.
 - Security-sensitive options:
-  update `docs/security/README.md` and review whether project config guardrails
-  or validation logic need changes.
+  update `docs/security/README.md` and review whether validation logic needs
+  changes, or whether the opt-in should be CLI-only.
 
 Quick rule of thumb:
 - CLI-only option: model field, `options_def.go`, generate, tests, docs.
@@ -342,13 +348,6 @@ Build option note: `--features` is available on CLI. In devcontainer mode,
 unset features default to none, so pass `--features` explicitly when needed.
 `--features none` is the explicit "no features" selection.
 
-Project mount note: `--project-mount writable|readonly` is config-backed.
-Project config may opt into `readonly`, but guardrails strip `writable` at
-project scope so project defaults cannot weaken a stricter global setting.
-`--worktree-metadata follow|readonly|none` works the same way for the
-linked-worktree gitdir/commondir mounts: project config may strengthen the
-inherited mode (`follow < readonly < none`), but cannot weaken it.
-
 Root guard note: `--allow-root` is CLI-only and has no config key, so no config
 file can grant it; `ENCLAVE_ALLOW_ROOT=1` is its only alternative.
 `checkRootGuard` in `internal/app/root_guard.go` runs early in `app.Run`,
@@ -369,7 +368,7 @@ Mount guard note: `--allow-sensitive-mounts` is CLI-only and has no config key;
 `resolveAdditionalMounts` in `internal/app/command_run.go` validates the
 additional directories, including those of `--add-sensitive-dir` and
 `--add-readonly-sensitive-dir`, and collects their sensitive-dir exceptions.
-For run actions only, it then normalizes the global `sensitive_dir_exceptions`
+For run actions only, it then normalizes the configured `sensitive_dir_exceptions`
 entries (`configSensitiveDirExceptions`) and runs `checkSensitiveMounts`, both
 in `internal/app/mount_guard.go`, before the image build. The rule lives in
 `mounts.SensitivePaths` (`internal/mounts/sensitive.go`), and
@@ -405,28 +404,30 @@ Self-update notes (user-facing behavior: [CLI reference](cli-reference.md#comman
 - The stable source is a placeholder until the Eclipse download server
   contract is known; stable release CI must stamp `BUILD_CHANNEL=stable`.
 
-Config additive note: feature additive directives (`+`/`-`) are applied against
-the implicit default-enabled feature set when `features` is unset. For example,
-`["-node-dev"]` removes that default feature from the implicit set.
+List option note: list options are folded layer by layer in
+`internal/config/options_lists.go`, with each tool-override file as its own
+layer and the CLI last. A bare `ApplyListExtras` list replaces, `+x`/`-x`
+amend and `[]`/`none` clear, except that `--add-dir` and `--add-readonly-dir`
+add a bare path (`cliAddsPlainEntries`). The selection kinds
+(`features`, `host_config_paths`) replace with a bare list and amend with
+`+`/`-`, the more specific layer winning an item. Feature directives apply to
+the implicit default-enabled set only when no layer selects features. The
+generator emits no `ApplyDefaultsWithSource` for list kinds. See
+[List Options](configuration.md#list-options).
 
-Config additive note: `host_config_paths` uses the same directive style, but it
-resolves against the selected tool profile's reviewed `passthroughPaths`
-instead of global defaults. Use `default` to include the built-in allow-list
-before applying `+`/`-` edits.
+`host_config_paths` resolves against the selected tool profile's reviewed
+`passthroughPaths` instead of global defaults. Use `default` to include the
+built-in allow-list before applying `+`/`-` edits.
 
 ## Option Source Precedence
 
 When a value exists in multiple layers, enclave resolves in this order:
 
 1. CLI flags
-2. Selected tool override (`tool_overrides.<tool>`)
+2. Selected tool override (`tool_overrides.<tool>`; the project file's wins over the global file's)
 3. Project config (`~/.config/enclave/projects/<hash>/config.json`; per-project overrides live outside the worktree, keyed by project hash)
 4. Global config (`~/.config/enclave/config.json`)
 5. Built-in defaults
-
-Security guardrail: project config (including `tool_overrides`) cannot elevate
-guarded options such as `allow_all_network=true`. Those values are ignored with
-warnings; use global config or CLI for explicit host opt-in.
 
 ## Network Policy Workflow
 

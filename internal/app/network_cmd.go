@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 
 	"enclave/internal/backend"
@@ -24,11 +25,17 @@ import (
 	"enclave/internal/util"
 )
 
-type currentPolicyContext struct {
-	Tool     string
+// policyResolverContext is what resolving a policy needs before a tool is
+// chosen; gateway apply resolves per target with that gateway's tool.
+type policyResolverContext struct {
 	Home     string
 	Project  model.Project
 	Resolver policy.EffectiveResolver
+}
+
+type currentPolicyContext struct {
+	policyResolverContext
+	Tool     string
 	Resolved policy.ResolveResult
 }
 
@@ -71,19 +78,30 @@ func unknownToolError(paths model.Paths, tool string) error {
 	return fmt.Errorf("unknown tool: %s (available: %s)", tool, strings.Join(available, " "))
 }
 
-func resolvePolicyContext(input *CommandInput, tool string, session *policy.SessionNetworkInputs) (currentPolicyContext, error) {
+func resolvePolicyResolverContext(input *CommandInput) (policyResolverContext, error) {
 	home, err := config.ResolveHostHome()
 	if err != nil {
-		return currentPolicyContext{}, fmt.Errorf("resolve home: %w", err)
+		return policyResolverContext{}, fmt.Errorf("resolve home: %w", err)
 	}
 	project, err := input.Ctx.Project()
 	if err != nil {
-		return currentPolicyContext{}, fmt.Errorf("resolve project context: %w", err)
+		return policyResolverContext{}, fmt.Errorf("resolve project context: %w", err)
 	}
-	policyResolver := policy.NewEffectiveResolver(input.Ctx.Paths, home)
-	resolved, err := policyResolver.Resolve(policy.ResolveInput{
+	return policyResolverContext{
+		Home:     home,
+		Project:  project,
+		Resolver: policy.NewEffectiveResolver(input.Ctx.Paths, home),
+	}, nil
+}
+
+func resolvePolicyContext(input *CommandInput, tool string, session *policy.SessionNetworkInputs) (currentPolicyContext, error) {
+	resolverCtx, err := resolvePolicyResolverContext(input)
+	if err != nil {
+		return currentPolicyContext{}, err
+	}
+	resolved, err := resolverCtx.Resolver.Resolve(policy.ResolveInput{
 		ProjectDir:  input.Ctx.ProjectDir,
-		ProjectHash: project.Hash,
+		ProjectHash: resolverCtx.Project.Hash,
 		Tool:        tool,
 		Session:     session,
 	})
@@ -91,11 +109,9 @@ func resolvePolicyContext(input *CommandInput, tool string, session *policy.Sess
 		return currentPolicyContext{}, fmt.Errorf("resolve effective policy: %w", err)
 	}
 	return currentPolicyContext{
-		Tool:     tool,
-		Home:     home,
-		Project:  project,
-		Resolver: policyResolver,
-		Resolved: resolved,
+		policyResolverContext: resolverCtx,
+		Tool:                  tool,
+		Resolved:              resolved,
 	}, nil
 }
 
@@ -157,7 +173,7 @@ func runNetworkStatus(input *CommandInput) int {
 	if code != 0 {
 		return code
 	}
-	targets, scopeLabel, err := discoverGatewayTargets(input, manager, false)
+	targets, scopeLabel, err := discoverGatewayTargets(input, manager, gatewayScopeProjectTool)
 	if err != nil {
 		fmt.Printf("  Discovery failed: %v\n", err)
 		return 0
@@ -285,11 +301,15 @@ func runNetworkDiff(input *CommandInput) int {
 }
 
 func runNetworkApply(input *CommandInput) int {
+	return applyPolicyToGateways(input, applyGatewayScope(input.Options.AllRunning))
+}
+
+func applyPolicyToGateways(input *CommandInput, scope gatewayTargetScope) int {
 	if code := requireDocker(); code != 0 {
 		return code
 	}
 
-	policyCtx, err := resolveCurrentPolicyContext(input)
+	policyCtx, err := resolvePolicyResolverContext(input)
 	if err != nil {
 		logx.Errorf("Failed to resolve current policy context: %v", err)
 		return 1
@@ -299,7 +319,7 @@ func runNetworkApply(input *CommandInput) int {
 	if code != 0 {
 		return code
 	}
-	targets, scopeLabel, err := discoverGatewayTargets(input, manager, input.Options.AllRunning)
+	targets, scopeLabel, err := discoverGatewayTargets(input, manager, scope)
 	if err != nil {
 		logx.Errorf("Failed to discover gateway targets: %v", err)
 		return 1
@@ -361,6 +381,7 @@ func runNetworkApply(input *CommandInput) int {
 	}
 
 	fmt.Printf("\nTargets:\n")
+	var failedTools []string
 	for _, outcome := range outcomes {
 		target := outcome.target
 		label := fmt.Sprintf("%s (%s, tool=%s, project=%s)", target.Name, target.ShortID(), target.Tool, target.ProjectHash)
@@ -369,14 +390,38 @@ func runNetworkApply(input *CommandInput) int {
 			continue
 		}
 		fmt.Printf("  - FAILED  %s: %v\n", label, outcome.err)
+		failedTools = append(failedTools, target.Tool)
 	}
 
 	fmt.Printf("\nApply summary: %d applied, %d failed\n", applied, failed)
 	if failed > 0 {
-		fmt.Printf("Some gateways were not updated; restart affected sessions or run 'enclave network apply' again after fixing errors.\n")
+		retry := retryApplyCommands(scope, failedTools)
+		if len(retry) == 0 {
+			fmt.Printf("Some gateways were not updated; restart affected sessions.\n")
+		} else {
+			fmt.Printf("Some gateways were not updated; restart affected sessions or run %s after fixing errors.\n", strings.Join(retry, " and "))
+		}
 		return 1
 	}
 	return 0
+}
+
+// retryApplyCommands names the apply runs that reach exactly the failed
+// gateways' scope: a project-wide mutation can fail for a tool that a plain
+// `network apply` would not target. A gateway without a tool label cannot be
+// selected by --tool, so it only gets the restart advice.
+func retryApplyCommands(scope gatewayTargetScope, failedTools []string) []string {
+	if scope == gatewayScopeAllRunning {
+		return []string{"'enclave network apply --all-running'"}
+	}
+	tools := slices.DeleteFunc(slices.Clone(failedTools), func(tool string) bool { return tool == "" })
+	slices.Sort(tools)
+	tools = slices.Compact(tools)
+	commands := make([]string, 0, len(tools))
+	for _, tool := range tools {
+		commands = append(commands, fmt.Sprintf("'enclave network apply --tool %s'", tool))
+	}
+	return commands
 }
 
 func runNetworkAddDomain(input *CommandInput) int {
@@ -483,7 +528,7 @@ func runMutationRuntimeApply(input *CommandInput) int {
 	}
 
 	fmt.Printf("\n")
-	exitCode := runNetworkApply(input)
+	exitCode := applyPolicyToGateways(input, mutationGatewayScope(input.Options.AllRunning))
 	if exitCode != 0 {
 		fmt.Printf("Persistence succeeded but runtime apply failed. Running sessions may still enforce the previous policy.\n")
 	}

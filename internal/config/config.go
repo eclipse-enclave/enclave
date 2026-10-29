@@ -65,6 +65,9 @@ type Defaults struct {
 	AllowDomains           []string            `json:"allow_domains"`
 	BridgePorts            []string            `json:"bridge_ports"`
 	PlaywrightMCP          *bool               `json:"playwright_mcp"`
+
+	// path is the file the values were read from, so list entries can name it.
+	path string
 }
 
 // LoadGlobalDefaults reads only the global config, for commands that must not
@@ -99,15 +102,12 @@ func LoadDefaults(projectDir string) (global Defaults, project Defaults, warning
 		return Defaults{}, Defaults{}, nil, err
 	}
 	warnings = append(warnings, withFileLayer(projectWarns, warningLayerProject)...)
-	warnings = append(warnings, withFileLayer(applyProjectOverrideGuardrailsAgainst(projectPath, proj.RealDir, globalDefaults, &projectDefaults), warningLayerProject)...)
+	warnings = append(warnings, withFileLayer(stripGlobalOnlyKeys(projectPath, &projectDefaults), warningLayerProject)...)
 
 	return globalDefaults, projectDefaults, warnings, nil
 }
 
-func ApplyDefaultsWithSources(opts model.Options, defaults Defaults, source model.OptionSource, sources *model.OptionSources) model.Options {
-	if sources == nil {
-		return opts
-	}
+func applyScalarDefaults(opts model.Options, defaults Defaults, source model.OptionSource, sources *model.OptionSources) model.Options {
 	for _, spec := range OptionSpecs() {
 		if spec.ApplyDefaultsWithSource == nil {
 			continue
@@ -139,13 +139,24 @@ func ResolveToolOverrideDefaults(global Defaults, project Defaults, tool string)
 // before a run. When targetTool is non-empty it overrides the configured
 // default tool: the `update` command uses this to resolve each explicit target
 // with that tool's own overrides instead of the default tool's. It returns the
-// resolved options (with Sources populated) plus the applied tool-override
-// defaults and whether any applied.
+// resolved options (with Sources and Origins populated) plus the combined
+// tool-override defaults and whether any applied.
+//
+// A scalar the CLI set blocks every config layer, which is the same as
+// applying it last. Lists the CLI set are held back and merged on top of the
+// config layers, and the two files' tool overrides fold as separate list
+// layers so each entry keeps the file it came from.
 func ResolveOptionsForTool(cliOpts model.Options, cliSources model.OptionSources, global Defaults, project Defaults, targetTool string) (model.Options, Defaults, bool) {
 	sources := model.MergeOptionSources(model.DefaultOptionSources(), cliSources)
 	opts := cliOpts
-	opts = ApplyDefaultsWithSources(opts, global, model.SourceGlobal, &sources)
-	opts = ApplyDefaultsWithSources(opts, project, model.SourceProject, &sources)
+	opts.Origins = nil
+	opts.ListProblems = nil
+	cliLists := holdBackCLILists(&opts, &sources)
+
+	opts = applyScalarDefaults(opts, global, model.SourceGlobal, &sources)
+	applyListLayer(&opts, global, listLayer{source: model.SourceGlobal, scope: model.ScopeGlobal}, &sources)
+	opts = applyScalarDefaults(opts, project, model.SourceProject, &sources)
+	applyListLayer(&opts, project, listLayer{source: model.SourceProject, scope: model.ScopeProject}, &sources)
 	tool := opts.Tool
 	if t := strings.TrimSpace(targetTool); t != "" {
 		tool = t
@@ -153,10 +164,49 @@ func ResolveOptionsForTool(cliOpts model.Options, cliSources model.OptionSources
 	}
 	toolDefaults, hasToolDefaults := ResolveToolOverrideDefaults(global, project, tool)
 	if hasToolDefaults {
-		opts = ApplyDefaultsWithSources(opts, toolDefaults, model.SourceToolOverride, &sources)
+		opts = applyScalarDefaults(opts, toolDefaults, model.SourceToolOverride, &sources)
+		for _, file := range []struct {
+			defaults Defaults
+			scope    model.ConfigScope
+		}{{global, model.ScopeGlobal}, {project, model.ScopeProject}} {
+			if override, ok := file.defaults.ToolOverrides[tool]; ok {
+				applyListLayer(&opts, override, listLayer{source: model.SourceToolOverride, scope: file.scope, tool: tool}, &sources)
+			}
+		}
+	}
+
+	cliLayer := listLayer{source: model.SourceCLI}
+	for _, held := range cliLists {
+		mergeListInto(&opts, held.def, held.values, cliLayer)
+		setOptionSource(&sources, held.def.SourceField, model.SourceCLI)
 	}
 	opts.Sources = sources
 	return opts, toolDefaults, hasToolDefaults
+}
+
+type heldCLIList struct {
+	def    OptionDef
+	values []string
+}
+
+// holdBackCLILists clears the lists the CLI set, so the config layers fold
+// onto the built-in default instead of being blocked, and returns the CLI values.
+func holdBackCLILists(opts *model.Options, sources *model.OptionSources) []heldCLIList {
+	var held []heldCLIList
+	for _, def := range listOptionDefs() {
+		if optSource(*sources, def.SourceField) != model.SourceCLI {
+			continue
+		}
+		field := reflect.ValueOf(opts).Elem().FieldByName(def.OptionField)
+		values := []string{}
+		if !field.IsNil() {
+			values = copyStringSlice(field.Interface().([]string))
+		}
+		held = append(held, heldCLIList{def: def, values: values})
+		field.Set(reflect.Zero(field.Type()))
+		setOptionSource(sources, def.SourceField, model.SourceDefault)
+	}
+	return held
 }
 
 func canOverride(current model.OptionSource, incoming model.OptionSource) bool {
@@ -209,9 +259,13 @@ func readDefaults(path string) (Defaults, []Warning, error) {
 
 	warnings := validateTopLevelDefaults(path, doc, &defaults)
 	warnings = append(warnings, validateToolOverrides(path, doc, &defaults)...)
-	warnings = append(warnings, validatePassEnvNames(path, &defaults)...)
 	warnings = append(warnings, validateSessionTint(path, &defaults)...)
 	warnings = append(warnings, validateUpdateChannel(path, &defaults)...)
+	defaults.path = path
+	for name, override := range defaults.ToolOverrides {
+		override.path = path
+		defaults.ToolOverrides[name] = override
+	}
 	return defaults, warnings, nil
 }
 
@@ -256,68 +310,6 @@ func rejectRemovedConfigFields(path string, doc map[string]json.RawMessage) erro
 		}
 	}
 	return nil
-}
-
-// validatePassEnvNames drops entries from defaults.PassEnv (and each
-// tool_overrides[*].PassEnv) that aren't valid environment variable names.
-// Config-loaded values bypass the CLI's isValidEnvKey check, so this runs for
-// both global and project configs.
-func validatePassEnvNames(path string, defaults *Defaults) []Warning {
-	if defaults == nil {
-		return nil
-	}
-
-	warnings := make([]Warning, 0)
-	defaults.PassEnv, warnings = filterPassEnv(path, "", defaults.PassEnv, warnings)
-
-	if len(defaults.ToolOverrides) == 0 {
-		return warnings
-	}
-
-	toolNames := make([]string, 0, len(defaults.ToolOverrides))
-	for name := range defaults.ToolOverrides {
-		toolNames = append(toolNames, name)
-	}
-	sort.Strings(toolNames)
-
-	for _, name := range toolNames {
-		override := defaults.ToolOverrides[name]
-		if len(override.PassEnv) == 0 {
-			continue
-		}
-		var filtered []string
-		filtered, warnings = filterPassEnv(path, name, override.PassEnv, warnings)
-		override.PassEnv = filtered
-		defaults.ToolOverrides[name] = override
-	}
-
-	return warnings
-}
-
-func filterPassEnv(path string, toolName string, values []string, warnings []Warning) ([]string, []Warning) {
-	if len(values) == 0 {
-		return values, warnings
-	}
-	kept := make([]string, 0, len(values))
-	for _, raw := range values {
-		if isValidEnvKey(raw) {
-			kept = append(kept, raw)
-			continue
-		}
-		entry := raw
-		if name, _, hasValue := strings.Cut(raw, "="); hasValue {
-			entry = name + "=…"
-		}
-		if toolName == "" {
-			warnings = append(warnings, newWarning(WarningInvalidValue, "pass_env", "", path, "Ignoring pass_env entry %q in %s: not a valid environment variable name", entry, path))
-		} else {
-			warnings = append(warnings, newWarning(WarningInvalidValue, "pass_env", toolName, path, "Ignoring tool_overrides.%s.pass_env entry %q in %s: not a valid environment variable name", toolName, entry, path))
-		}
-	}
-	if len(kept) == 0 {
-		return nil, warnings
-	}
-	return kept, warnings
 }
 
 // validateSessionTint clears session_tint values (top level and per tool
@@ -469,260 +461,45 @@ func validateToolOverrideHostConfigPaths(path string, toolName string, values []
 	return warnings
 }
 
-func applyProjectOverrideGuardrails(path string, projectDir string, defaults *Defaults) []Warning {
-	return applyProjectOverrideGuardrailsAgainst(path, projectDir, Defaults{}, defaults)
-}
-
-func applyProjectOverrideGuardrailsAgainst(path string, projectDir string, global Defaults, defaults *Defaults) []Warning {
+// stripGlobalOnlyKeys drops the binary update options, which only make sense
+// for the whole host, from project config; readDefaults already drops them from
+// tool_overrides in either file. Project config is host-owned, out of reach of
+// sessions, so it may otherwise set anything global config can.
+func stripGlobalOnlyKeys(path string, defaults *Defaults) []Warning {
 	if defaults == nil {
 		return nil
 	}
-
-	projectRoot := resolveProjectRoot(projectDir)
-	warnings := applyProjectDefaultsGuardrails(path, "", projectRoot, projectDir, global.WorktreeMetadata, defaults, nil)
-
-	if defaults.Tool != "" {
-		warnings = append(warnings, newWarning(WarningProjectGuardrail, "tool", "", path, "Ignoring tool=%q in %s: project configs cannot change the active tool; pass --tool or set it in global config instead", defaults.Tool, path))
-		defaults.Tool = ""
-	}
-
-	if len(defaults.ToolOverrides) == 0 {
-		return warnings
-	}
-
-	toolNames := make([]string, 0, len(defaults.ToolOverrides))
-	for name := range defaults.ToolOverrides {
-		toolNames = append(toolNames, name)
-	}
-	sort.Strings(toolNames)
-
-	for _, name := range toolNames {
-		override := defaults.ToolOverrides[name]
-		inheritedWorktreeMetadata := global.WorktreeMetadata
-		if defaults.WorktreeMetadata != "" {
-			inheritedWorktreeMetadata = defaults.WorktreeMetadata
-		}
-		if globalOverride, ok := global.ToolOverrides[name]; ok && globalOverride.WorktreeMetadata != "" {
-			inheritedWorktreeMetadata = globalOverride.WorktreeMetadata
-		}
-		warnings = applyProjectDefaultsGuardrails(path, name, projectRoot, projectDir, inheritedWorktreeMetadata, &override, warnings)
-		defaults.ToolOverrides[name] = override
-	}
-
-	return warnings
-}
-
-func applyProjectDefaultsGuardrails(path string, toolName string, projectRoot string, projectDir string, inheritedWorktreeMetadata string, defaults *Defaults, warnings []Warning) []Warning {
-	guardrail := func(option string, format string, args ...any) {
-		warnings = append(warnings, newWarning(WarningProjectGuardrail, option, toolName, path, format, args...))
-	}
-
+	var warnings []Warning
 	if defaults.AutoUpdate != nil {
-		field := projectGuardrailField(toolName, "auto_update")
-		guardrail("auto_update", "Ignoring %s=%v in %s: binary updates are configured globally", field, *defaults.AutoUpdate, path)
+		warnings = append(warnings, newWarning(WarningProjectGuardrail, "auto_update", "", path, "Ignoring auto_update=%v in %s: binary updates are configured globally", *defaults.AutoUpdate, path))
 		defaults.AutoUpdate = nil
 	}
 	if defaults.UpdateChannel != "" {
-		field := projectGuardrailField(toolName, "update_channel")
-		guardrail("update_channel", "Ignoring %s=%q in %s: binary updates are configured globally", field, defaults.UpdateChannel, path)
+		warnings = append(warnings, newWarning(WarningProjectGuardrail, "update_channel", "", path, "Ignoring update_channel=%q in %s: binary updates are configured globally", defaults.UpdateChannel, path))
 		defaults.UpdateChannel = ""
 	}
-
-	if defaults.AllowAllNetwork != nil && *defaults.AllowAllNetwork {
-		field := projectGuardrailField(toolName, "allow_all_network")
-		valueLabel := field + "=true"
-		if toolName == "" {
-			valueLabel = fmt.Sprintf("%q=true", field)
-		}
-		defaults.AllowAllNetwork = nil
-		guardrail("allow_all_network", "Ignoring %s in %s: project configs cannot enable unrestricted network; set it in global config or CLI instead", valueLabel, path)
-	}
-
-	if len(defaults.AllowDomains) > 0 {
-		field := projectGuardrailField(toolName, "allow_domains")
-		guardrail("allow_domains", "Ignoring %s=%v in %s: project configs cannot widen the network allowlist; set it in global config or pass --allow-domain instead", field, defaults.AllowDomains, path)
-		defaults.AllowDomains = nil
-	}
-
-	defaults.AddDirs, warnings = filterProjectAddDirs(defaults.AddDirs, "add_dirs", toolName, projectRoot, projectDir, path, warnings)
-	defaults.AddReadonlyDirs, warnings = filterProjectAddDirs(defaults.AddReadonlyDirs, "add_readonly_dirs", toolName, projectRoot, projectDir, path, warnings)
-
-	if len(defaults.SensitiveDirExceptions) > 0 {
-		field := projectGuardrailField(toolName, "sensitive_dir_exceptions")
-		defaults.SensitiveDirExceptions = nil
-		guardrail("sensitive_dir_exceptions", "Ignoring %s in %s: project configs cannot exempt sensitive host paths; set it in global config instead", field, path)
-	}
-
-	if len(defaults.PassEnv) > 0 {
-		field := projectGuardrailField(toolName, "pass_env")
-		defaults.PassEnv = nil
-		guardrail("pass_env", "Ignoring %s in %s: project configs cannot forward host environment variables; use global config or CLI instead", field, path)
-	}
-
-	if defaults.BaseImage != "" {
-		field := projectGuardrailField(toolName, "base_image")
-		guardrail("base_image", "Ignoring %s=%q in %s: project configs cannot override the base image; set it in global config or CLI instead", field, defaults.BaseImage, path)
-		defaults.BaseImage = ""
-	}
-
-	if len(defaults.BridgePorts) > 0 {
-		field := projectGuardrailField(toolName, "bridge_ports")
-		guardrail("bridge_ports", "Ignoring %s=%v in %s: project configs cannot bridge container ports to the host; set it in global config or CLI instead", field, defaults.BridgePorts, path)
-		defaults.BridgePorts = nil
-	}
-
-	if defaults.Yolo != nil {
-		field := projectGuardrailField(toolName, "yolo")
-		guardrail("yolo", "Ignoring %s=%v in %s: project configs cannot toggle yolo mode; pass --yolo/--no-yolo or set it in global config instead", field, *defaults.Yolo, path)
-		defaults.Yolo = nil
-	}
-
-	if defaults.HostConfig != "" {
-		field := projectGuardrailField(toolName, "host_config")
-		guardrail("host_config", "Ignoring %s=%q in %s: project configs cannot widen host config passthrough; set it in global config or CLI instead", field, defaults.HostConfig, path)
-		defaults.HostConfig = ""
-	}
-
-	if len(defaults.HostConfigPaths) > 0 {
-		field := projectGuardrailField(toolName, "host_config_paths")
-		guardrail("host_config_paths", "Ignoring %s=%v in %s: project configs cannot extend host config passthrough; set it in global config or CLI instead", field, defaults.HostConfigPaths, path)
-		defaults.HostConfigPaths = nil
-	}
-
-	if strings.EqualFold(strings.TrimSpace(defaults.ProjectMount), model.ProjectMountWritable) {
-		field := projectGuardrailField(toolName, "project_mount")
-		guardrail("project_mount", "Ignoring %s=%q in %s: project configs cannot make the project mount writable; set it in global config or CLI instead", field, defaults.ProjectMount, path)
-		defaults.ProjectMount = ""
-	}
-
-	worktreeMetadata := strings.ToLower(strings.TrimSpace(defaults.WorktreeMetadata))
-	if worktreeMetadata != "" && (worktreeMetadata == model.WorktreeMetadataFollow || worktreeMetadataStrength(worktreeMetadata) < worktreeMetadataStrength(inheritedWorktreeMetadata)) {
-		field := projectGuardrailField(toolName, "worktree_metadata")
-		guardrail("worktree_metadata", "Ignoring %s=%q in %s: project configs cannot relax inherited worktree_metadata=%q; set it in global config or CLI instead", field, defaults.WorktreeMetadata, path, model.WorktreeMetadataMode(inheritedWorktreeMetadata))
-		defaults.WorktreeMetadata = ""
-	}
-
 	return warnings
 }
 
-func worktreeMetadataStrength(value string) int {
-	switch model.WorktreeMetadataMode(value) {
-	case model.WorktreeMetadataNone:
-		return 2
-	case model.WorktreeMetadataReadonly:
-		return 1
-	default:
-		return 0
-	}
-}
-
-func projectGuardrailField(toolName string, name string) string {
-	if toolName == "" {
-		return name
-	}
-	return "tool_overrides." + toolName + "." + name
-}
-
-// resolveProjectRoot returns the absolute, symlink-evaluated project directory
-// used to anchor project-config containment checks. Now that project overrides
-// are hash-keyed under the config root, the project root is passed in
-// explicitly rather than derived from the config path shape. Returns an empty
-// string if projectDir is empty or cannot be resolved.
-func resolveProjectRoot(projectDir string) string {
-	if strings.TrimSpace(projectDir) == "" {
-		return ""
-	}
-	abs, err := filepath.Abs(projectDir)
-	if err != nil {
-		return ""
-	}
-	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
-		return resolved
-	}
-	return abs
-}
-
-// filterProjectAddDirs drops entries that resolve outside the project root and
-// appends a warning per dropped entry. option is the field name and toolName
-// is set for tool_overrides.<tool> entries. projectDir anchors relative
-// entries; configPath is used only for warnings.
-func filterProjectAddDirs(entries []string, option string, toolName string, projectRoot string, projectDir string, configPath string, warnings []Warning) ([]string, []Warning) {
-	if len(entries) == 0 {
-		return entries, warnings
-	}
-
-	// If we cannot determine the project root, drop everything to fail closed:
-	// a project config that we cannot anchor must not mount arbitrary host
-	// paths into the container.
-	if projectRoot == "" {
-		for _, raw := range entries {
-			warnings = append(warnings, projectAddDirsWarning(raw, option, toolName, configPath))
-		}
-		return nil, warnings
-	}
-
-	home, _ := os.UserHomeDir()
-	kept := make([]string, 0, len(entries))
-	for _, raw := range entries {
-		if isWithinProjectDir(raw, projectRoot, projectDir, home) {
-			kept = append(kept, raw)
-			continue
-		}
-		warnings = append(warnings, projectAddDirsWarning(raw, option, toolName, configPath))
-	}
-	if len(kept) == 0 {
-		return nil, warnings
-	}
-	return kept, warnings
-}
-
-func projectAddDirsWarning(entry string, option string, toolName string, configPath string) Warning {
-	return newWarning(WarningProjectSubtree, option, toolName, configPath, "Ignoring %s entry %q in %s: project configs can only mount subdirectories of the project; use global config or CLI for other paths", projectGuardrailField(toolName, option), entry, configPath)
-}
-
-// isWithinProjectDir reports whether entry resolves to a path inside projectRoot.
-// projectRoot must already be absolute and (if possible) symlink-evaluated.
-// projectDir anchors relative entries (so that "./data" resolves relative to
-// the project, not the process working directory). Symlink evaluation falls
-// back to the absolute path when the target does not exist on disk.
-func isWithinProjectDir(entry string, projectRoot string, projectDir string, home string) bool {
-	value := strings.TrimSpace(entry)
-	if value == "" {
-		return false
-	}
-	if home != "" {
-		value = util.ExpandTilde(value, home)
-	}
-
-	if !filepath.IsAbs(value) {
-		if strings.TrimSpace(projectDir) == "" {
-			return false
-		}
-		value = filepath.Join(projectDir, value)
-	}
-
-	within, err := util.RealPathWithin(projectRoot, value)
-	return err == nil && within
-}
-
 // IsPathWithinProjectDir reports whether entry resolves to a path inside
-// projectDir. Relative entries are anchored to projectDir, "~" is expanded
-// against the user's home directory, and symlinks are evaluated when the
-// target exists. Returns false for empty entries or unresolvable projectDir.
-//
-// This is the same containment check applied to project-config add_dirs
-// entries, exported so other packages (notably internal/devcontainer) can
-// clamp externally-supplied paths to the project subtree.
+// projectDir, anchoring relative entries to projectDir and expanding "~".
 func IsPathWithinProjectDir(entry string, projectDir string) bool {
-	if strings.TrimSpace(projectDir) == "" {
+	value := strings.TrimSpace(entry)
+	if value == "" || strings.TrimSpace(projectDir) == "" {
 		return false
 	}
 	root, err := filepath.Abs(projectDir)
 	if err != nil {
 		return false
 	}
-	home, _ := os.UserHomeDir()
-	return isWithinProjectDir(entry, root, root, home)
+	if home, _ := os.UserHomeDir(); home != "" {
+		value = util.ExpandTilde(value, home)
+	}
+	if !filepath.IsAbs(value) {
+		value = filepath.Join(root, value)
+	}
+	within, err := util.RealPathWithin(root, value)
+	return err == nil && within
 }
 
 func mergeDefaults(base Defaults, override Defaults) Defaults {
@@ -754,14 +531,9 @@ func mergeDefaults(base Defaults, override Defaults) Defaults {
 			if incomingField.IsNil() {
 				continue
 			}
-			incomingSlice := copyStringSlice(incomingField.Interface().([]string))
 			current := targetField.Interface().([]string)
-			switch def.Apply {
-			case ApplySliceMergeHost:
-				setDefaultsStringSlice(targetField, mergeHostConfigSlice(current, incomingSlice))
-			default:
-				setDefaultsStringSlice(targetField, incomingSlice)
-			}
+			incoming := incomingField.Interface().([]string)
+			setDefaultsStringSlice(targetField, mergeListValues(def, current, incoming))
 		}
 	}
 
@@ -794,131 +566,5 @@ func mergeToolOverrides(base map[string]Defaults, override map[string]Defaults) 
 			merged[toolName] = defaults
 		}
 	}
-	return merged
-}
-
-// hasAdditiveDirective reports whether any value carries a '+' or '-' prefix,
-// which switches mergeStringSlice from replace mode into additive mode.
-func hasAdditiveDirective(values []string) bool {
-	for _, v := range values {
-		if strings.HasPrefix(v, "+") || strings.HasPrefix(v, "-") {
-			return true
-		}
-	}
-	return false
-}
-
-// mergeStringSlice merges two string slices with support for additive syntax.
-// If any value in override starts with '+' or '-', additive mode is used:
-//   - '+value' adds 'value' to the base set
-//   - '-value' removes 'value' from the base set
-//
-// If no values have prefixes, override replaces base entirely (default behavior).
-func mergeStringSlice(base, override []string) []string {
-	if !hasAdditiveDirective(override) {
-		// Replace mode (original behavior)
-		return override
-	}
-
-	if base == nil {
-		// Preserve additive directives so downstream resolution can apply them
-		// against the implicit default set (e.g. features).
-		return override
-	}
-
-	// Additive mode: start with base, apply modifications
-	result := make(map[string]bool)
-	for _, v := range base {
-		result[v] = true
-	}
-
-	for _, v := range override {
-		if strings.HasPrefix(v, "+") {
-			result[strings.TrimPrefix(v, "+")] = true
-		} else if strings.HasPrefix(v, "-") {
-			delete(result, strings.TrimPrefix(v, "-"))
-		} else {
-			// No prefix in additive mode - treat as add
-			result[v] = true
-		}
-	}
-
-	// Convert back to slice
-	merged := make([]string, 0, len(result))
-	for v := range result {
-		merged = append(merged, v)
-	}
-	// Sort for deterministic output
-	sort.Strings(merged)
-	return merged
-}
-
-// mergeFeatureSlice merges feature defaults with additive syntax.
-// When base is nil, additive directives are preserved so downstream resolution
-// can apply them against the implicit default-enabled feature set.
-func mergeFeatureSlice(base, override []string) []string {
-	if !hasAdditiveDirective(override) {
-		return override
-	}
-	if base == nil {
-		return copyStringSlice(override)
-	}
-	return mergeStringSlice(base, override)
-}
-
-// mergeHostConfigSlice merges raw host_config_paths directives across config
-// scopes without resolving them against tool defaults yet.
-//
-// Rules:
-// - nil override => no change
-// - explicit empty slice => explicit empty override
-// - additive-only override (+/- entries only) modifies the inherited raw list
-// - any bare entry (including "default") replaces the inherited raw list
-// - additive removals against an explicit empty base are no-ops
-func mergeHostConfigSlice(base, override []string) []string {
-	if override == nil {
-		return copyStringSlice(base)
-	}
-	if len(override) == 0 {
-		return []string{}
-	}
-
-	additiveOnly := true
-	for _, raw := range override {
-		value := strings.TrimSpace(raw)
-		if value == "" {
-			continue
-		}
-		if !strings.HasPrefix(value, "+") && !strings.HasPrefix(value, "-") {
-			additiveOnly = false
-			break
-		}
-	}
-	if !additiveOnly {
-		return copyStringSlice(override)
-	}
-
-	if base == nil {
-		return copyStringSlice(override)
-	}
-	if len(base) == 0 {
-		resolved := make([]string, 0, len(override))
-		for _, raw := range override {
-			value := strings.TrimSpace(raw)
-			if !strings.HasPrefix(value, "+") {
-				continue
-			}
-			bare := strings.TrimSpace(strings.TrimPrefix(value, "+"))
-			if bare != "" {
-				resolved = append(resolved, bare)
-			}
-		}
-		if resolved == nil {
-			return []string{}
-		}
-		return resolved
-	}
-
-	merged := append(copyStringSlice(base), override...)
 	return merged
 }

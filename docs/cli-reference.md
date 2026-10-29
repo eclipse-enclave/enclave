@@ -208,7 +208,7 @@ Network mutation commands are global-only today. `--project` scope is planned bu
 
 `--follow` and `--summary` are mutually exclusive, and `--since session` needs a scope covering exactly one session, so it cannot be combined with `--all-running`. See [Networking](networking.md#reading-the-network-log) for the output format and [Coverage and granularity](networking.md#coverage-and-granularity) for what the log does and does not record.
 
-Mutation commands (`add-domain`, `remove-domain`, `set-mode`) apply the new policy to running gateways by default. Use `--no-apply` to persist only, or `--all-running` to target every running gateway on the host (rather than just the current project/tool). By default the runtime apply targets the selected tool's gateway; pass `--tool <tool>` to target a different tool. `network apply` accepts `--tool` and `--all-running`.
+Mutation commands (`add-domain`, `remove-domain`, `set-mode`) apply the new policy to running gateways by default. The runtime apply targets the current project's gateways for every tool, because these commands edit the global policy; they do not accept `--tool`. Use `--no-apply` to persist only, or `--all-running` to target every running gateway on the host. `network apply` targets the selected tool's gateway by default and accepts `--tool` and `--all-running`.
 
 ### Auth
 
@@ -255,6 +255,8 @@ store that holds memory; the other `--keep` kinds do not apply there. See
 
 Boolean flags accept an explicit value (e.g. `--no-cache=false`) in any form Go's `strconv.ParseBool` accepts: `true`/`false`, `1`/`0`, `t`/`f`, and their upper- and title-case variants; other values are rejected. `--no-yolo=false` is equivalent to `--yolo`.
 
+List flags (`-p`, `--allow-domain`, `--bridge-port`, `--pass-env`, `--cache-from`) replace the list from config. Prefix a value with `+` to add to the configured list instead (`-p +3000`) or with `-` to drop a configured entry for this run (`-p -8080:80`, `--pass-env -GH_TOKEN`); `none` clears it. `--add-dir` and `--add-readonly-dir` add a plain path to the configured directories; `none` makes the other paths replace them. Write `./-dir` or `./+dir` for a relative directory starting with `-` or `+`. See [List Options](configuration.md#list-options).
+
 ### Tool & Session
 
 | Flag | Description |
@@ -263,12 +265,12 @@ Boolean flags accept an explicit value (e.g. `--no-cache=false`) in any form Go'
 | `--backend <backend>` | Isolation backend: `auto` (default: docker or podman, whichever is installed), `docker`, `podman`, or experimental `qemu`. Also accepted by engine-using management commands; affects only this invocation. |
 | `--name <name>` | Named persistent session |
 | `--background` | Detached background session |
-| `-p <port>` | Publish a container port to the host (container → host, e.g. `-p 3002`). A host port of `0` (e.g. `-p 0:3000`) lets the daemon pick a free host port (Docker only); read it back with `enclave ps --json`. |
-| `--bridge-port <port>` | Forward a host port into the container (host → container, repeatable, comma-separated) |
-| `--add-dir <path>` | Mount an additional host directory |
-| `--add-readonly-dir <path>` | Mount an additional host directory read-only |
-| `--add-sensitive-dir <path>` | `--add-dir <path>` plus a sensitive-dir exception for `<path>` for this run (repeatable, CLI-only). See [Sensitive mounts](#sensitive-mounts) |
-| `--add-readonly-sensitive-dir <path>` | `--add-readonly-dir <path>` plus a sensitive-dir exception for `<path>` for this run (repeatable, CLI-only). See [Sensitive mounts](#sensitive-mounts) |
+| `-p <port>` | Publish a container port to the host (container → host, e.g. `-p 3002`). A host port of `0` (e.g. `-p 0:3000`) lets the daemon pick a free host port (Docker only); read it back with `enclave ps --json`. Repeatable, comma-separated; replaces `ports` from config, `+port` adds to it and replaces a configured entry for the same host port |
+| `--bridge-port <port>` | Forward a host port into the container (host → container, repeatable, comma-separated); replaces `bridge_ports` from config, `+port` adds |
+| `--add-dir <path>` | Mount an additional host directory (repeatable, one path per flag, commas are part of the path); adds to `add_dirs` from config |
+| `--add-readonly-dir <path>` | Mount an additional host directory read-only (repeatable, one path per flag); adds to `add_readonly_dirs` from config |
+| `--add-sensitive-dir <path>` | `--add-dir <path>` plus a sensitive-dir exception for `<path>` for this run (repeatable, CLI-only); adds to `add_dirs` from config. See [Sensitive mounts](#sensitive-mounts) |
+| `--add-readonly-sensitive-dir <path>` | `--add-readonly-dir <path>` plus a sensitive-dir exception for `<path>` for this run (repeatable, CLI-only); adds to `add_readonly_dirs` from config. See [Sensitive mounts](#sensitive-mounts) |
 | `--allow-sensitive-mounts` | Mount the project or additional directories even when they expose sensitive host data (CLI-only). See [Sensitive mounts](#sensitive-mounts) |
 | `--project-mount <writable\|readonly>` | Mount the project/worktree read-write (default) or read-only |
 | `--worktree-metadata <follow\|readonly\|none>` | Linked-worktree git metadata mounts: follow the project mount (default), force read-only, or skip |
@@ -291,8 +293,8 @@ Boolean flags accept an explicit value (e.g. `--no-cache=false`) in any form Go'
 | `--use-remote-user` | Honor devcontainer `remoteUser` for agent sessions |
 | `--slim` | Build without features (tools only) |
 | `--image-name <name>` | Override image name/tag |
-| `--features <list\|default\|all\|none>` | Enable selected feature extensions (comma-separated), or use `default`, `all`, or `none` |
-| `--cache-from <image>` | Reuse inline build cache from an image |
+| `--features <list\|default\|all\|none>` | Enable selected feature extensions (comma-separated), or use `default`, `all`, or `none`. A bare list replaces the configured selection; `+name`/`-name` amend it. `none` cannot be combined with other values |
+| `--cache-from <image>` | Reuse inline build cache from an image (repeatable, comma-separated); replaces `cache_from` from config, `+image` adds |
 | `--build-uid <uid>` | UID to bake into the runtime image instead of the host UID |
 | `--build-gid <gid>` | GID to bake into the runtime image instead of the host GID |
 | `--runtime-uid-remap` | Start as root and remap the container user to the host UID/GID before running |
@@ -323,7 +325,7 @@ There is no config-file key.
 | `--reset-auth` | Clear auth files and persisted keys, then inject fresh |
 | `--no-api-key` | Disable API key injection |
 | `--pass-api-key` | Allow API key injection in `--ephemeral` mode |
-| `--pass-env <KEY1,KEY2>` | Forward specific host env vars into the container |
+| `--pass-env <KEY1,KEY2>` | Forward specific host env vars into the container (repeatable, comma-separated); replaces `pass_env` from config, `+KEY` adds |
 | `--auth-scope <scope>` | `shared` (default) or `project` |
 | `--auth-name <slug>` | Select a named per-tool shared auth store; ignored under `--auth-scope=project` |
 | `--secrets-scope <scope>` | `both` (default), `global`, or `project` |
@@ -333,7 +335,7 @@ There is no config-file key.
 | Flag | Description |
 |------|-------------|
 | `--allow-all-network` | Disable network restrictions |
-| `--allow-domain <domain>` | Add a domain to the gateway allowlist for this run only (repeatable, no persistence) |
+| `--allow-domain <domain>` | Add a domain to the gateway allowlist for this run only (repeatable, comma-separated, no persistence); replaces `allow_domains` from config, `+domain` adds to it |
 | `--network-log <coarse\|requests>` | Network audit mode. `coarse` (default) logs one pass/deny event per TLS connection, plus per-request events for plaintext HTTP and for hosts the gateway already MITMs for secret release; `requests` forces HTTPS MITM for all allowlisted hosts and emits an audit event per HTTP/HTTPS request. See [Coverage and granularity](networking.md#coverage-and-granularity) |
 
 ### Persistence
@@ -361,7 +363,7 @@ Persistent defaults can be set in `~/.config/enclave/config.json` (global) or `~
 
 ## Tool selection
 
-The tool is unset by default. The first command that needs one asks once which coding agent to use and saves the answer as `"tool"` in `~/.config/enclave/config.json`; later runs read it from there and never ask again. A command needs a tool when it starts a session or builds its image (`run`, `shell`, `continue`, `resume`, `exec`, and `update` without explicit tool arguments) or scopes policy, stores, or containers by tool (`info`, `auth import`, `auth export`, `network …`, `cleanup` without `--all`, and `stop` without a session argument). The question is only asked when stdin, stdout, and stderr are terminals and no `--json` or `--yes` was given; without a terminal, or when the question goes unanswered, the command fails with a message naming `--tool` and the `tool` key instead of guessing an agent. Commands that never read the default tool (`ps`, `status`, `attach`, `tools`, `features`, `config`, `review-target`, `theia`, …) neither ask nor fail; they take `--tool` at most as an explicit filter.
+The tool is unset by default. The first command that needs one asks once which coding agent to use and saves the answer as `"tool"` in `~/.config/enclave/config.json`; later runs read it from there and never ask again. A command needs a tool when it starts a session or builds its image (`run`, `shell`, `continue`, `resume`, `exec`, and `update` without explicit tool arguments) or scopes policy, stores, or containers by tool (`info`, `auth import`, `auth export`, `network …` except `add-domain`, `remove-domain`, and `set-mode`, `cleanup` without `--all`, and `stop` without a session argument). The question is only asked when stdin, stdout, and stderr are terminals and no `--json` or `--yes` was given; without a terminal, or when the question goes unanswered, the command fails with a message naming `--tool` and the `tool` key instead of guessing an agent. Commands that never read the default tool (`ps`, `status`, `attach`, `tools`, `features`, `config`, `review-target`, `theia`, …) neither ask nor fail; they take `--tool` at most as an explicit filter.
 
 The menu lists every installed agent. The IDE profiles (`theia`, `theia-next`) are not offered: they attach a host IDE to a container rather than running an agent in the terminal. Pick them with `--tool theia` or the `tool` key.
 
@@ -390,7 +392,7 @@ Read-only mounts are checked the same way: reading is enough to leak credentials
 A sensitive-dir exception lets one sensitive directory be mounted. It covers its path and everything below it, never a parent; both are compared after `~` expansion and symlink resolution. Exceptions come from two sources, which add up:
 
 - `--add-sensitive-dir <path>` and `--add-readonly-sensitive-dir <path>` mount `<path>` like `--add-dir` and `--add-readonly-dir` and exempt it for this invocation. They add to `add_dirs`/`add_readonly_dirs` from config instead of replacing them. `continue` and `resume` start a fresh run, so pass the flags again. On a path that is not sensitive they just mount it, so wrappers can pass `--add-sensitive-dir` unconditionally. `--add-readonly-sensitive-dir` cannot be passed that way: on the project directory it is refused even when the project is not sensitive, where `--add-readonly-dir` only warns and skips it (see below).
-- `sensitive_dir_exceptions` in global config lists paths to exempt on every run; it mounts nothing. A global `tool_overrides.<tool>.sensitive_dir_exceptions` replaces the top-level list. An entry need not exist yet. Entries that are empty, relative, or home or one of its parents are ignored with a warning. Project config cannot set it.
+- `sensitive_dir_exceptions` in global or project config lists paths to exempt on every run; it mounts nothing. It merges across config layers like the other [list options](configuration.md#list-options). An entry need not exist yet. Entries that are relative, or home or one of its parents, are ignored with a warning.
 
 The flags also work for the project directory. `--add-sensitive-dir <project>` exempts it without mounting it a second time. `--add-readonly-sensitive-dir <project>` is refused, because the project mount mode is set with `--project-mount readonly`. An exception for a parent of the project, such as `--add-sensitive-dir ~/.dotfiles` run from `~/.dotfiles/nvim`, mounts that parent and covers the project.
 
@@ -400,7 +402,7 @@ No exception covers a hard-protected location: your home directory and its paren
 
 ### Mounting all sensitive paths
 
-To mount every sensitive directory, hard-protected ones included, pass `--allow-sensitive-mounts` or set `ENCLAVE_ALLOW_SENSITIVE_MOUNTS=1`; each sensitive mount then prints a warning. An explicit `--allow-sensitive-mounts=false` overrides the environment variable. This blanket opt-in has no config key, so neither global nor project config can grant it; global config can only exempt specific paths. Mounts from the repository stay blocked even with the opt-in or an exception: devcontainer bind sources must lie inside the project, and linked-worktree git metadata outside the project is skipped with a warning when it is sensitive.
+To mount every sensitive directory, hard-protected ones included, pass `--allow-sensitive-mounts` or set `ENCLAVE_ALLOW_SENSITIVE_MOUNTS=1`; each sensitive mount then prints a warning. An explicit `--allow-sensitive-mounts=false` overrides the environment variable. This blanket opt-in has no config key, so neither global nor project config can grant it; config can only exempt specific paths. Mounts from the repository stay blocked even with the opt-in or an exception: devcontainer bind sources must lie inside the project, and linked-worktree git metadata outside the project is skipped with a warning when it is sensitive.
 
 The mounts enclave adds itself, such as `~/.gitconfig`, `~/.claude/ide` for the IDE bridge, direnv approvals, and the session stores, come from protected locations by design and are not checked.
 

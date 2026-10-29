@@ -40,6 +40,7 @@ func resolveDirPath(dir string, home string) (absPath string, realPath string, e
 		dir = util.ExpandTilde(dir, home)
 	}
 
+	written := dir
 	// Convert relative paths to absolute
 	if !filepath.IsAbs(dir) {
 		dir, err = filepath.Abs(dir)
@@ -50,7 +51,7 @@ func resolveDirPath(dir string, home string) (absPath string, realPath string, e
 	}
 	info, statErr := os.Stat(dir)
 	if statErr != nil || !info.IsDir() {
-		err = fmt.Errorf("directory not found: %s", dir)
+		err = fmt.Errorf("directory not found: %s%s", dir, prefixedDirHint(written))
 		return
 	}
 
@@ -94,6 +95,18 @@ func validateDirPath(dir string, validated *[]string, projectReal string, home s
 	return
 }
 
+// prefixedDirHint suggests the escaped form when a relative entry only
+// exists with the leading + that the list merge stripped as an add directive.
+func prefixedDirHint(written string) string {
+	if filepath.IsAbs(written) {
+		return ""
+	}
+	if info, err := os.Stat("+" + written); err == nil && info.IsDir() {
+		return " (did you mean ./+" + written + "?)"
+	}
+	return ""
+}
+
 func isDisallowedHomeMount(realPath string, home string) bool {
 	if home == "" {
 		return false
@@ -102,10 +115,6 @@ func isDisallowedHomeMount(realPath string, home string) bool {
 		return false
 	}
 	return !util.HasPathPrefix(realPath, home)
-}
-
-func ValidateExtraDirs(extraDirs []string, projectReal string, home string) ([]string, error) {
-	return validateExtraDirs(extraDirs, nil, projectReal, home)
 }
 
 func ValidateExtraDirsWithExisting(extraDirs []string, existing []string, projectReal string, home string) ([]string, error) {

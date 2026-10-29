@@ -30,13 +30,18 @@ const (
 type ApplyKind string
 
 const (
-	ApplyNone              ApplyKind = "none"
-	ApplyBoolPtr           ApplyKind = "bool_ptr"
-	ApplyString            ApplyKind = "string"
-	ApplySliceIfEmpty      ApplyKind = "slice_if_empty"
+	ApplyNone        ApplyKind = "none"
+	ApplyBoolPtr     ApplyKind = "bool_ptr"
+	ApplyString      ApplyKind = "string"
+	ApplyYoloDefault ApplyKind = "yolo_default"
+
+	// List kinds are folded layer by layer in options_lists.go.
+	// ApplyListExtras: a plain config list replaces, a plain CLI value adds,
+	// +x adds, -x removes, and [] or none clears.
+	ApplyListExtras ApplyKind = "list_extras"
+	// The selection kinds replace with a bare list and amend with +/- entries.
 	ApplySliceMergeFeature ApplyKind = "slice_merge_feature"
 	ApplySliceMergeHost    ApplyKind = "slice_merge_host"
-	ApplyYoloDefault       ApplyKind = "yolo_default"
 )
 
 type CLIActionKind string
@@ -431,7 +436,7 @@ func OptionDefs() []OptionDef {
 			OptionField:    "PassEnv",
 			SourceField:    "PassEnv",
 			DefaultsField:  "PassEnv",
-			Apply:          ApplySliceIfEmpty,
+			Apply:          ApplyListExtras,
 			CLIFlags: []CLIFlagDef{
 				{
 					Name:                "--pass-env",
@@ -790,7 +795,7 @@ func OptionDefs() []OptionDef {
 			OptionField:    "CacheFrom",
 			SourceField:    "CacheFrom",
 			DefaultsField:  "CacheFrom",
-			Apply:          ApplySliceIfEmpty,
+			Apply:          ApplyListExtras,
 			CLIFlags: []CLIFlagDef{
 				{
 					Name:                "--cache-from",
@@ -1043,7 +1048,7 @@ func OptionDefs() []OptionDef {
 			OptionField:    "Ports",
 			SourceField:    "Ports",
 			DefaultsField:  "Ports",
-			Apply:          ApplySliceIfEmpty,
+			Apply:          ApplyListExtras,
 			CLIFlags: []CLIFlagDef{
 				{
 					Name:                "-p",
@@ -1051,8 +1056,8 @@ func OptionDefs() []OptionDef {
 					ValueKind:           CLIValueRequired,
 					MissingValueMessage: "-p requires a value",
 					Action: CLIAction{
-						Kind:        CLIActionAppendString,
-						OptionField: "Ports",
+						Kind:        CLIActionCall,
+						Call:        "applyPort",
 						SourceField: "Ports",
 					},
 				},
@@ -1088,7 +1093,7 @@ func OptionDefs() []OptionDef {
 			OptionField:    "AddDirs",
 			SourceField:    "AddDirs",
 			DefaultsField:  "AddDirs",
-			Apply:          ApplySliceIfEmpty,
+			Apply:          ApplyListExtras,
 			CLIFlags: []CLIFlagDef{
 				{
 					Name:                "--add-dir",
@@ -1096,8 +1101,8 @@ func OptionDefs() []OptionDef {
 					ValueKind:           CLIValueRequired,
 					MissingValueMessage: "--add-dir requires a directory path",
 					Action: CLIAction{
-						Kind:        CLIActionAppendString,
-						OptionField: "AddDirs",
+						Kind:        CLIActionCall,
+						Call:        "applyAddDir",
 						SourceField: "AddDirs",
 					},
 				},
@@ -1111,7 +1116,7 @@ func OptionDefs() []OptionDef {
 			OptionField:    "AddReadonlyDirs",
 			SourceField:    "AddReadonlyDirs",
 			DefaultsField:  "AddReadonlyDirs",
-			Apply:          ApplySliceIfEmpty,
+			Apply:          ApplyListExtras,
 			CLIFlags: []CLIFlagDef{
 				{
 					Name:                "--add-readonly-dir",
@@ -1119,8 +1124,8 @@ func OptionDefs() []OptionDef {
 					ValueKind:           CLIValueRequired,
 					MissingValueMessage: "--add-readonly-dir requires a directory path",
 					Action: CLIAction{
-						Kind:        CLIActionAppendString,
-						OptionField: "AddReadonlyDirs",
+						Kind:        CLIActionCall,
+						Call:        "applyAddReadonlyDir",
 						SourceField: "AddReadonlyDirs",
 					},
 				},
@@ -1178,7 +1183,7 @@ func OptionDefs() []OptionDef {
 			OptionField:    "SensitiveDirExceptions",
 			SourceField:    "SensitiveDirExceptions",
 			DefaultsField:  "SensitiveDirExceptions",
-			Apply:          ApplySliceIfEmpty,
+			Apply:          ApplyListExtras,
 		},
 		{
 			Name:           "allow_sensitive_mounts",
@@ -1259,16 +1264,16 @@ func OptionDefs() []OptionDef {
 			OptionField:    "AllowDomains",
 			SourceField:    "AllowDomains",
 			DefaultsField:  "AllowDomains",
-			Apply:          ApplySliceIfEmpty,
+			Apply:          ApplyListExtras,
 			CLIFlags: []CLIFlagDef{
 				{
 					Name:                "--allow-domain",
-					Usage:               "Add domain to gateway allowlist for this run only (repeatable)",
+					Usage:               "Allow domain through the gateway for this run (repeatable; replaces configured allow_domains, +domain adds)",
 					ValueKind:           CLIValueRequired,
 					MissingValueMessage: "--allow-domain requires a domain name",
 					Action: CLIAction{
-						Kind:        CLIActionAppendString,
-						OptionField: "AllowDomains",
+						Kind:        CLIActionCall,
+						Call:        "applyAllowDomain",
 						SourceField: "AllowDomains",
 					},
 				},
@@ -1306,7 +1311,7 @@ func OptionDefs() []OptionDef {
 			OptionField:    "BridgePorts",
 			SourceField:    "BridgePorts",
 			DefaultsField:  "BridgePorts",
-			Apply:          ApplySliceIfEmpty,
+			Apply:          ApplyListExtras,
 			CLIFlags: []CLIFlagDef{
 				{
 					Name:                "--bridge-port",

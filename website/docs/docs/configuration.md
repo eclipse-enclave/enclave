@@ -73,6 +73,22 @@ Highest wins:
 4. Global config
 5. Built-in defaults
 
+Lists such as `ports`, `add_dirs`, `allow_domains`, and `pass_env` combine
+across these layers. A plain list replaces the inherited one, `+x` adds,
+`-x` removes, and `[]` (or `none`) clears, in config files and on the command
+line alike. `--add-dir` is the exception: a plain path adds to the configured
+directories.
+
+```bash
+enclave -p 3000                 # publish only 3000
+enclave -p +3000                # publish 3000 on top of the configured ports
+enclave -p -8080:80             # drop a configured port for this run
+enclave --add-dir ~/notes       # mount ~/notes next to the configured dirs
+```
+
+The full rules, including features and port clashes, are in
+[List Options](https://github.com/eclipse-enclave/enclave/blob/main/docs/configuration.md#list-options).
+
 When a value is not what you expect, ask Enclave where it came from:
 
 ```bash
@@ -106,7 +122,7 @@ See [Bridging host ports](https://github.com/eclipse-enclave/enclave/blob/main/d
 | --- | --- | --- |
 | `add_dirs` | `--add-dir <path>` | Mount another host directory, writable, at the same path inside the container. |
 | `add_readonly_dirs` | `--add-readonly-dir <path>` | The same, read-only. Good for reference material you do not want touched. |
-| `sensitive_dir_exceptions` | `--add-sensitive-dir <path>`, `--add-readonly-sensitive-dir <path>` (this run only, and mount it) | Allow mounting a sensitive directory, such as a dotfiles repository or `~/.m2`, and everything below it. Global config only; warns on every start. See [Sensitive mounts](https://github.com/eclipse-enclave/enclave/blob/main/docs/cli-reference.md#sensitive-mounts). |
+| `sensitive_dir_exceptions` | `--add-sensitive-dir <path>`, `--add-readonly-sensitive-dir <path>` (this run only, and mount it) | Allow mounting a sensitive directory, such as a dotfiles repository or `~/.m2`, and everything below it. Warns on every start. See [Sensitive mounts](https://github.com/eclipse-enclave/enclave/blob/main/docs/cli-reference.md#sensitive-mounts). |
 | `project_mount` | `--project-mount readonly` | Mount the project read-only: the agent can read and analyze, only you can write. |
 
 ### Network
@@ -144,7 +160,9 @@ Use `+` and `-` to adjust the inherited set instead of replacing it:
 }
 ```
 
-A list without prefixes replaces the set entirely, and `[]` means none. Check the
+A list without prefixes replaces the set entirely, and `[]` means none. On the
+command line, `--features +debug-tools` adds to the configured features while
+`--features a,b` replaces them. Check the
 result before you build with `enclave features`, which marks every feature `✓`
 or `✗` and names the config file that switched it off:
 
@@ -190,24 +208,18 @@ replacing it. The precedence order, the patch merge semantics, and the full
 passthrough safety rules are documented in
 [docs/configuration.md](https://github.com/eclipse-enclave/enclave/blob/main/docs/configuration.md).
 
-## What project config cannot do
+## What project config can do
 
-Project config is deliberately weaker than global config: settings that would
-widen the sandbox are ignored there, with a warning naming the file. Set them in
-global config or pass them on the command line instead.
+Project config lives in Enclave's host config root, out of reach of the
+repository and of the agent, so only you can edit it. It can therefore set
+anything global config can, for that project only: a different default tool,
+extra allowed domains, a writable mount, or yolo mode. The exceptions are
+`auto_update` and `update_channel`, which control the Enclave binary itself and
+are read from global config only.
 
-| Ignored in project config | Why |
-| --- | --- |
-| `tool` | Choosing the agent stays a user decision. Pass `--tool` or set it globally. |
-| `yolo` | A repository cannot decide how much autonomy its agent gets. |
-| `allow_all_network`, `allow_domains` | A repository cannot widen its own network allowlist. |
-| `pass_env` | A repository cannot ask for your host environment variables. |
-| `host_config`, `tool_overrides.<tool>.host_config_paths` | A repository cannot widen host-config passthrough. |
-| `add_dirs`, `add_readonly_dirs` outside the project | Project scope can only mount subdirectories of the project itself. |
-| `sensitive_dir_exceptions` | A repository cannot exempt host paths from the sensitive-mount check. |
-| `base_image`, `bridge_ports` | Base image and host-port bridging stay host-side decisions. |
-| `project_mount: "writable"` | Project scope can tighten a stricter global default, never loosen it. |
-| `worktree_metadata` values that relax the inherited mode | Same rule for the linked-worktree git metadata mounts: tighten only. |
+Mounting a sensitive directory such as your home directory or `~/.ssh` still
+needs `--allow-sensitive-mounts` (or `ENCLAVE_ALLOW_SENSITIVE_MOUNTS=1`),
+whichever config file asks for it: that opt-in has no config key.
 
 ## Per-tool overrides
 

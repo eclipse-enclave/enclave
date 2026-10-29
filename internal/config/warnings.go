@@ -18,7 +18,6 @@ const (
 	WarningInvalidValue          = "invalid_value"
 	WarningSuspiciousValue       = "suspicious_value"
 	WarningProjectGuardrail      = "project_guardrail"
-	WarningProjectSubtree        = "project_subtree"
 )
 
 const (

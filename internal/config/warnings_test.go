@@ -58,16 +58,10 @@ func TestLoadDefaultsWarnings(t *testing.T) {
 			},
 		},
 		{
-			name:   "invalid pass_env and session_tint",
-			global: `{"pass_env":["1BAD","GITHUB_TOKEN=ghp_secret"],"session_tint":"red","tool_overrides":{"codex":{"pass_env":["BAD-DASH"],"session_tint":"#2a0"}}}`,
+			name:   "invalid session_tint",
+			global: `{"session_tint":"red","tool_overrides":{"codex":{"session_tint":"#2a0"}}}`,
 			want: func(global, _ string) []Warning {
 				return []Warning{
-					{Code: WarningInvalidValue, Option: "pass_env", Layer: "global", Path: global,
-						Message: `Ignoring pass_env entry "1BAD" in ` + global + ": not a valid environment variable name"},
-					{Code: WarningInvalidValue, Option: "pass_env", Layer: "global", Path: global,
-						Message: `Ignoring pass_env entry "GITHUB_TOKEN=…" in ` + global + ": not a valid environment variable name"},
-					{Code: WarningInvalidValue, Option: "pass_env", Layer: "tool_override:codex", Path: global,
-						Message: `Ignoring tool_overrides.codex.pass_env entry "BAD-DASH" in ` + global + ": not a valid environment variable name"},
 					{Code: WarningInvalidValue, Option: "session_tint", Layer: "global", Path: global,
 						Message: `Ignoring session_tint "red" in ` + global + ": expected an #rrggbb color"},
 					{Code: WarningInvalidValue, Option: "session_tint", Layer: "tool_override:codex", Path: global,
@@ -76,20 +70,14 @@ func TestLoadDefaultsWarnings(t *testing.T) {
 			},
 		},
 		{
-			name:    "project guardrails",
-			project: `{"tool":"codex","allow_domains":["evil.example"],"add_dirs":["/etc"],"tool_overrides":{"codex":{"yolo":true,"add_readonly_dirs":["/etc"]}}}`,
+			name:    "project global-only keys",
+			project: `{"tool":"codex","allow_domains":["proj.example"],"add_dirs":["/etc"],"auto_update":true,"tool_overrides":{"codex":{"yolo":true,"update_channel":"rolling"}}}`,
 			want: func(_, project string) []Warning {
 				return []Warning{
-					{Code: WarningProjectGuardrail, Option: "allow_domains", Layer: "project", Path: project,
-						Message: "Ignoring allow_domains=[evil.example] in " + project + ": project configs cannot widen the network allowlist; set it in global config or pass --allow-domain instead"},
-					{Code: WarningProjectSubtree, Option: "add_dirs", Layer: "project", Path: project,
-						Message: `Ignoring add_dirs entry "/etc" in ` + project + ": project configs can only mount subdirectories of the project; use global config or CLI for other paths"},
-					{Code: WarningProjectGuardrail, Option: "tool", Layer: "project", Path: project,
-						Message: `Ignoring tool="codex" in ` + project + ": project configs cannot change the active tool; pass --tool or set it in global config instead"},
-					{Code: WarningProjectSubtree, Option: "add_readonly_dirs", Layer: "tool_override:codex", Path: project,
-						Message: `Ignoring tool_overrides.codex.add_readonly_dirs entry "/etc" in ` + project + ": project configs can only mount subdirectories of the project; use global config or CLI for other paths"},
-					{Code: WarningProjectGuardrail, Option: "yolo", Layer: "tool_override:codex", Path: project,
-						Message: "Ignoring tool_overrides.codex.yolo=true in " + project + ": project configs cannot toggle yolo mode; pass --yolo/--no-yolo or set it in global config instead"},
+					{Code: WarningInvalidToolOverride, Option: "update_channel", Layer: "tool_override:codex", Path: project,
+						Message: "Ignoring tool_overrides.codex.update_channel in " + project + ": binary updates are configured globally"},
+					{Code: WarningProjectGuardrail, Option: "auto_update", Layer: "project", Path: project,
+						Message: "Ignoring auto_update=true in " + project + ": binary updates are configured globally"},
 				}
 			},
 		},

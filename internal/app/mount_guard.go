@@ -8,9 +8,11 @@
 package app
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"enclave/internal/config"
@@ -25,8 +27,8 @@ import (
 // sensitive host paths, through --allow-sensitive-mounts or
 // ENCLAVE_ALLOW_SENSITIVE_MOUNTS. An explicit --allow-sensitive-mounts=false
 // wins over the environment. There is deliberately no config key, so neither
-// global nor project config can grant it. Global config can only exempt
-// specific paths (sensitive_dir_exceptions), which still leaves the
+// global nor project config can grant it. Config can only exempt specific
+// paths (sensitive_dir_exceptions), which still leaves the
 // hard-protected locations refused.
 func sensitiveMountsAllowed(flag bool, source model.OptionSource) bool {
 	if source == model.SourceCLI {
@@ -35,41 +37,63 @@ func sensitiveMountsAllowed(flag bool, source model.OptionSource) bool {
 	return flag || envflag.Truthy(os.LookupEnv(model.EnvAllowSensitiveMounts))
 }
 
-// additionalDirs is a list of additional directories to mount and the option
-// that set it. Config fills a list only when nothing of higher precedence set
-// it, so the whole list has one source.
-type additionalDirs struct {
-	dirs   []string
-	flag   string
-	key    string
-	source model.OptionSource
+// additionalDir is an additional directory to mount, symlink-resolved, and
+// the flag or config key that set it, so a refusal points at what to change.
+type additionalDir struct {
+	path   string
+	origin string
 }
 
-// origin names the flag or config file that set the list, so a refusal points
-// at what to change.
-func (a additionalDirs) origin(projectDir string) string {
-	if a.source == model.SourceCLI {
-		return a.flag
+// validateAdditionalDirs resolves the add_dirs and add_readonly_dirs entries,
+// and the resolved --add-sensitive-dir and --add-readonly-sensitive-dir
+// directories, one at a time, so each validated directory and each error
+// keeps the origin of its entry. Read-write lists go first, so a read-only
+// entry already mounted writable is skipped.
+func validateAdditionalDirs(opts model.Options, sensitiveDirs, readonlySensitiveDirs []string, projectReal string, home string) (writable []additionalDir, readonly []additionalDir, err error) {
+	var seen []string
+	var errs []string
+	resolve := func(entries []string, origin func(entry string) string) []additionalDir {
+		var dirs []additionalDir
+		for _, entry := range entries {
+			origin := origin(entry)
+			validated, err := mounts.ValidateExtraDirsWithExisting([]string{entry}, seen, projectReal, home)
+			if err != nil {
+				errs = append(errs, origin+": "+err.Error())
+				continue
+			}
+			for _, path := range validated {
+				seen = append(seen, path)
+				dirs = append(dirs, additionalDir{path: path, origin: origin})
+			}
+		}
+		return dirs
 	}
-	if src := formatSource(a.source, projectDir); src != "" {
-		return a.key + " from " + src
+	configured := func(option string) func(string) string {
+		return func(entry string) string { return config.ListEntryOriginLabel(option, opts.Origins, entry) }
 	}
-	return a.key
+	flag := func(name string) func(string) string {
+		return func(string) string { return name }
+	}
+	writable = slices.Concat(resolve(opts.AddDirs, configured("add_dirs")), resolve(sensitiveDirs, flag(addSensitiveDirFlag)))
+	readonly = slices.Concat(resolve(opts.AddReadonlyDirs, configured("add_readonly_dirs")), resolve(readonlySensitiveDirs, flag(addReadonlySensitiveDirFlag)))
+	if len(errs) > 0 {
+		return nil, nil, errors.New(strings.Join(errs, "\n"))
+	}
+	return writable, readonly, nil
+}
+
+func additionalDirPaths(dirs []additionalDir) []string {
+	paths := make([]string, 0, len(dirs))
+	for _, dir := range dirs {
+		paths = append(paths, dir.path)
+	}
+	return paths
 }
 
 // configSensitiveDirExceptions turns the effective sensitive_dir_exceptions
 // into exceptions. Unusable entries are dropped with a warning, which fails
-// closed: the guard then acts as if they were not there. Project config never
-// gets here: its entries are dropped when it is loaded.
-func configSensitiveDirExceptions(opts model.Options, home string, projectDir string) ([]mounts.SensitiveDirException, []string) {
-	key := "sensitive_dir_exceptions"
-	file := formatSource(opts.Sources.SensitiveDirExceptions, projectDir)
-	// Project tool overrides are dropped too, so a tool override entry comes
-	// from global config.
-	if opts.Sources.SensitiveDirExceptions == model.SourceToolOverride {
-		key = "tool_overrides." + opts.Tool + "." + key
-		file = formatSource(model.SourceGlobal, projectDir)
-	}
+// closed: the guard then acts as if they were not there.
+func configSensitiveDirExceptions(opts model.Options, home string) ([]mounts.SensitiveDirException, []string) {
 	realHome := home
 	if resolved, err := util.RealPath(home); err == nil {
 		realHome = resolved
@@ -78,7 +102,7 @@ func configSensitiveDirExceptions(opts model.Options, home string, projectDir st
 	var exceptions []mounts.SensitiveDirException
 	var warnings []string
 	for _, entry := range opts.SensitiveDirExceptions {
-		origin := fmt.Sprintf("%s entry %q in %s", key, entry, file)
+		origin := sensitiveDirExceptionOrigin(opts.Origins, entry)
 		exception, unusable := configSensitiveDirException(entry, origin, home, realHome)
 		if unusable != "" {
 			warnings = append(warnings, "Ignoring "+origin+": "+unusable)
@@ -87,6 +111,16 @@ func configSensitiveDirExceptions(opts model.Options, home string, projectDir st
 		exceptions = append(exceptions, exception)
 	}
 	return exceptions, warnings
+}
+
+// sensitiveDirExceptionOrigin names a sensitive_dir_exceptions entry and the
+// config file that set it.
+func sensitiveDirExceptionOrigin(origins model.ListOrigins, entry string) string {
+	key, file, found := strings.Cut(config.ListEntryOriginLabel("sensitive_dir_exceptions", origins, entry), " in ")
+	if !found {
+		return fmt.Sprintf("%s entry %q", key, entry)
+	}
+	return fmt.Sprintf("%s entry %q in %s", key, entry, file)
 }
 
 // configSensitiveDirException resolves one sensitive_dir_exceptions entry, or
@@ -114,7 +148,7 @@ func configSensitiveDirException(entry, origin, home, realHome string) (mounts.S
 // project config. Devcontainer binds need no check: they must resolve inside
 // the project, and nothing inside a project that is not sensitive is
 // sensitive.
-func checkSensitiveMounts(project model.Project, additional []additionalDirs, exceptions []mounts.SensitiveDirException, home string, allowed bool) error {
+func checkSensitiveMounts(project model.Project, additional []additionalDir, exceptions []mounts.SensitiveDirException, home string, allowed bool) error {
 	sensitive := mounts.NewSensitivePaths(home, config.HostAppDataDirs(home), config.HostEnclaveRoots(home))
 	var sensitiveMounts, exempted, offenders []string
 	exemptable, hardProtected := false, false
@@ -140,10 +174,8 @@ func checkSensitiveMounts(project model.Project, additional []additionalDirs, ex
 		sensitiveMounts = append(sensitiveMounts, mount+reason)
 	}
 	assess(project.RealDir, "project directory")
-	for _, list := range additional {
-		for _, dir := range list.dirs {
-			assess(dir, list.origin(project.Dir))
-		}
+	for _, dir := range additional {
+		assess(dir.path, dir.origin)
 	}
 
 	if len(offenders) == 0 || allowed {

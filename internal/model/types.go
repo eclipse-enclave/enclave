@@ -153,6 +153,9 @@ type Options struct {
 	StatusOptions
 	PSOptions
 	Sources OptionSources
+	// Origins and ListProblems are filled by option resolution; never part of provenance.
+	Origins      ListOrigins
+	ListProblems []ListProblem
 }
 
 type RuntimeConfig struct {
@@ -551,7 +554,7 @@ const (
 	SessionMonitorTmuxSocket  = AppName
 	SessionMonitorTmuxSession = "main"
 	ImageName                 = AppName + ":latest"
-	AlpineImage               = "alpine@sha256:25109184c71bdad752c8312a8623239686a9a2071e8825f20acb8f2198c3f659"
+	AlpineImage               = "alpine@sha256:85fe1e81d6758c208f3e1eed4338a1997e19d4be002d4dd32d3100c9a8c010a0"
 	HashLength                = 12
 	DetachKeysDefault         = `ctrl-\`
 )

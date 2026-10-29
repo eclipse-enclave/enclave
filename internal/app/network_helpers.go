@@ -51,19 +51,55 @@ func currentProjectToolLabel(projectHash string, tool string) string {
 	return fmt.Sprintf("current project/tool (%s/%s)", projectHash, tool)
 }
 
-func discoverGatewayTargets(input *CommandInput, manager backend.GatewayManager, allRunning bool) ([]backend.GatewayInfo, string, error) {
-	filter := backend.GatewayFilter{}
-	scopeLabel := "all running gateways"
-	if !allRunning {
-		project, err := input.Ctx.Project()
+type gatewayTargetScope int
+
+const (
+	gatewayScopeProjectTool gatewayTargetScope = iota
+	gatewayScopeProject
+	gatewayScopeAllRunning
+)
+
+// mutationGatewayScope covers every tool of the current project: add-domain,
+// remove-domain, and set-mode edit the global policy, which no tool filters.
+func mutationGatewayScope(allRunning bool) gatewayTargetScope {
+	if allRunning {
+		return gatewayScopeAllRunning
+	}
+	return gatewayScopeProject
+}
+
+func applyGatewayScope(allRunning bool) gatewayTargetScope {
+	if allRunning {
+		return gatewayScopeAllRunning
+	}
+	return gatewayScopeProjectTool
+}
+
+func gatewayTargetFilter(project model.Project, tool string, scope gatewayTargetScope) (backend.GatewayFilter, string) {
+	if scope == gatewayScopeAllRunning {
+		return backend.GatewayFilter{}, "all running gateways"
+	}
+	filter := backend.GatewayFilter{
+		ProjectHash: project.Hash,
+		WorkspaceID: util.WorkspaceIdentityHash(project.RealDir, project.Dir),
+	}
+	if scope == gatewayScopeProject {
+		return filter, fmt.Sprintf("current project, all tools (%s)", project.Hash)
+	}
+	filter.Tool = tool
+	return filter, currentProjectToolLabel(project.Hash, tool)
+}
+
+func discoverGatewayTargets(input *CommandInput, manager backend.GatewayManager, scope gatewayTargetScope) ([]backend.GatewayInfo, string, error) {
+	var project model.Project
+	if scope != gatewayScopeAllRunning {
+		var err error
+		project, err = input.Ctx.Project()
 		if err != nil {
 			return nil, "", err
 		}
-		filter.Tool = input.Options.Tool
-		filter.ProjectHash = project.Hash
-		filter.WorkspaceID = util.WorkspaceIdentityHash(project.RealDir, project.Dir)
-		scopeLabel = currentProjectToolLabel(project.Hash, input.Options.Tool)
 	}
+	filter, scopeLabel := gatewayTargetFilter(project, input.Options.Tool, scope)
 
 	targets, err := manager.ListGateways(context.Background(), filter)
 	if err != nil {

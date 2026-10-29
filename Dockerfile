@@ -7,9 +7,9 @@
 
 # Enclave - Simplified multi-language development environment for agentic tools
 # Base image: debian:trixie-slim (pinned) or ubuntu:24.04
-ARG BASE_IMAGE=debian:trixie-slim@sha256:f6e2cfac5cf956ea044b4bd75e6397b4372ad88fe00908045e9a0d21712ae3ba
+ARG BASE_IMAGE=debian:trixie-slim@sha256:62bd423aeee912639ca8ee681c2b762cb3e25137e0a92b20be455898a9f034ad
 ARG DEVCONTAINER_BASE_IMAGE=0
-ARG AGENT_NODE_IMAGE=node:24-trixie-slim@sha256:0711b541c1c33a8a530ac4f0d391baa9a15b3d804695b1b24a47daa5fb60e74d
+ARG AGENT_NODE_IMAGE=node:24-trixie-slim@sha256:43b9ba1142b8dcf33fa8f922ca1be85714adc444e0586c7cf7726daaeabc1bea
 FROM ${BASE_IMAGE} AS system
 ARG DEVCONTAINER_BASE_IMAGE
 USER root

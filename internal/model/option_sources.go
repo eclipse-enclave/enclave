@@ -17,3 +17,38 @@ const (
 	SourceToolOverride
 	SourceCLI
 )
+
+// ConfigScope names the config file a layer was read from.
+type ConfigScope uint8
+
+const (
+	ScopeNone ConfigScope = iota
+	ScopeGlobal
+	ScopeProject
+)
+
+// EntryOrigin records which layer contributed one entry of a list option.
+type EntryOrigin struct {
+	Source OptionSource
+	Scope  ConfigScope
+	// Tool is set for entries from tool_overrides.<tool>.
+	Tool string
+	// Path is the config file, when known.
+	Path string
+}
+
+// ListOrigins maps an option name to the origin of each entry in its resolved list.
+type ListOrigins map[string]map[string]EntryOrigin
+
+// Origin returns the recorded origin of entry in option, if any.
+func (o ListOrigins) Origin(option string, entry string) (EntryOrigin, bool) {
+	origin, ok := o[option][entry]
+	return origin, ok
+}
+
+// ListProblem is a list entry that merging the layers rejected.
+type ListProblem struct {
+	Option  string
+	Origin  EntryOrigin
+	Message string
+}

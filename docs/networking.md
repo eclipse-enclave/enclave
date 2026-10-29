@@ -69,8 +69,10 @@ it emits the raw JSONL event stream verbatim, and with `--summary` it emits the
 aggregate as a single JSON object. Events that never carried a host name, such as
 a TLS connection denied at the ClientHello, are grouped under `(no domain)` (an
 empty `domain` in JSON), so the summary totals match what `--verdict deny`
-prints. Colour follows `NO_COLOR` and `ENCLAVE_COLOR`, and is off when stdout is
-not a terminal.
+prints. The last column shows the matched rule of a denied event, except that
+policy denials (`allowlist` on `http` and `tcp` rows, `nxdomain` on `dns` rows)
+read `blocked by policy`; the JSON keeps the raw rule. Colour follows `NO_COLOR`
+and `ENCLAVE_COLOR`, and is off when stdout is not a terminal.
 
 ### What is recorded
 
@@ -156,7 +158,7 @@ enclave network apply                      # Apply policy to running gateways
 
 Network mutations are currently global-only. `--project` scope is planned but not yet supported.
 
-Mutating commands (`add-domain`, `remove-domain`, `set-mode`) apply the updated policy to running gateways automatically. Pass `--no-apply` to persist the change without applying it, or `--all-running` to target every running gateway on the host instead of just the current project/tool. Run `enclave network apply` (optionally with `--all-running`) to push the persisted policy to running gateways on demand. Persisted unrestricted mode still requires a session restart.
+Mutating commands (`add-domain`, `remove-domain`, `set-mode`) apply the updated policy to the running gateways of the current project automatically, for every tool, so they do not accept `--tool`. Pass `--no-apply` to persist the change without applying it, or `--all-running` to target every running gateway on the host. Run `enclave network apply` (optionally with `--tool` or `--all-running`) to push the persisted policy to the current project/tool's gateways on demand. Persisted unrestricted mode still requires a session restart.
 
 ### JSON output (`schemaVersion: "1"`)
 
@@ -185,7 +187,7 @@ If the policy cannot be resolved (no or unknown tool, options a run would reject
 ## Adding Custom Domains
 
 Add custom domains through global `~/.config/enclave/network.jsonc`,
-`--allow-domain`, or the global `allow_domains` config key.
+`--allow-domain`, or the `allow_domains` config key (global or project).
 
 ### Global policy inheritance
 
@@ -197,15 +199,16 @@ allowlist, or extension-domain precedence.
 
 ### Per-run domains
 
-Use `--allow-domain <domain>` (repeatable) to add domains to the gateway allowlist for a single run only. The flag does **not** mutate `~/.config/enclave/network.jsonc` or any project file — it just augments the gateway's in-memory policy for the current container.
+Use `--allow-domain <domain>` (repeatable or comma-separated) to add domains to the gateway allowlist for a single run only. The flag does **not** mutate `~/.config/enclave/network.jsonc` or any project file; it just augments the gateway's in-memory policy for the current container. It replaces `allow_domains` from config for the run; `--allow-domain +api.example.com` adds to them and `--allow-domain -api.example.com` drops one.
 
 ```bash
 enclave --allow-domain api.deepseek.com --allow-domain api.example.com
+enclave --allow-domain api.deepseek.com,api.example.com
 ```
 
 On the Docker backend, `--allow-domain` is inert when combined with `--allow-all-network`: the gateway is not running, so there is no allowlist to extend. The QEMU backend rejects `--allow-domain` because it cannot enforce restricted egress. Bare DNS names only — schemes, paths, ports, and wildcards are rejected.
 
-The same key works in **global** config: `"allow_domains": ["api.deepseek.com"]` in `~/.config/enclave/config.json`. In **project** config (`~/.config/enclave/projects/<hash>/config.json`) it is ignored with a warning — project configs cannot widen the network allowlist. Use `--allow-domain` or global config instead.
+The same key works in config: `"allow_domains": ["api.deepseek.com"]` in global `~/.config/enclave/config.json`, or in project `~/.config/enclave/projects/<hash>/config.json` for one project.
 
 ## Overriding the Main Allowlist
 

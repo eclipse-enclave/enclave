@@ -104,7 +104,7 @@ The restricted network request flow has a separate
 ### Orchestration (`internal/app/`)
 - [`internal/app/app.go`](../internal/app/app.go) wires parsing, defaults merging, and command dispatch.
 - [`internal/app/root_guard.go`](../internal/app/root_guard.go) refuses to run as root before any state is written, unless `--allow-root` or `ENCLAVE_ALLOW_ROOT` opts in.
-- [`internal/app/mount_guard.go`](../internal/app/mount_guard.go) refuses to start a session whose project or additional directories expose sensitive host data, unless a sensitive-dir exception (`--add-sensitive-dir`, `--add-readonly-sensitive-dir`, or global `sensitive_dir_exceptions`) covers them or `--allow-sensitive-mounts` or `ENCLAVE_ALLOW_SENSITIVE_MOUNTS` opts in to all of them.
+- [`internal/app/mount_guard.go`](../internal/app/mount_guard.go) refuses to start a session whose project or additional directories expose sensitive host data, unless a sensitive-dir exception (`--add-sensitive-dir`, `--add-readonly-sensitive-dir`, or `sensitive_dir_exceptions` in config) covers them or `--allow-sensitive-mounts` or `ENCLAVE_ALLOW_SENSITIVE_MOUNTS` opts in to all of them.
 - [`internal/app/commands.go`](../internal/app/commands.go) routes commands to handlers (run/continue/resume/exec/shell/cleanup/tools/etc).
 - [`internal/app/command_run.go`](../internal/app/command_run.go) drives the run/continue/resume/exec/shell flow and runtime creation.
 - [`internal/app/build.go`](../internal/app/build.go) manages Docker image build/rebuild detection plus prebuild agent update planning and post-build stamp commits.
@@ -280,8 +280,7 @@ The complete flow from CLI arguments to final options:
 │  1. config.LoadDefaults(projectDir)                                         │
 │     ├── Read ~/.config/enclave/config.json → globalDefaults               │
 │     └── Read <config-root>/projects/<hash>/config.json → projectDefaults    │
-│         (project guardrails can strip blocked elevations, e.g.              │
-│          allow_all_network=true)                                            │
+│         (auto_update and update_channel are dropped: global-only)           │
 │                                                                             │
 │  2. cli.Parse(args, baseOpts)                                               │
 │     ├── Match commands: run, shell, exec, cleanup, config, etc.             │
@@ -293,21 +292,26 @@ The complete flow from CLI arguments to final options:
 │  3. model.MergeOptionSources(baseSources, cliSources)                       │
 │     └── Merge source tracking (CLI wins if set)                             │
 │                                                                             │
-│  4. config.ApplyDefaultsWithSources(opts, globalDefaults, SourceGlobal)     │
-│     └── Apply global config where CLI didn't override                       │
+│  4. config.ResolveOptionsForTool(cliOpts, cliSources, global, project)      │
+│     ├── Hold back CLI lists so config lists fold under them                 │
+│     ├── Global, then project config: scalars where CLI did not set them,    │
+│     │   lists folded as layers (options_lists.go)                           │
+│     ├── Tool override: scalars from both files combined, lists folded       │
+│     │   as two layers (global file, then project file)                      │
+│     └── CLI lists folded last; each entry records its origin                │
 │                                                                             │
-│  5. config.ApplyDefaultsWithSources(opts, projectDefaults, SourceProject)   │
-│     └── Apply project config where global/CLI didn't override               │
+│  5. Lists merge per ApplyKind: ApplyListExtras (bare list replaces,         │
+│     +x/-x amend, [] or none clears; CLI dir flags add) or the selection     │
+│     kinds (bare list replaces, +/- amend, higher layer wins per item)       │
 │                                                                             │
-│  6. Resolve tool override for selected tool                                 │
-│     ├── config.ResolveToolOverrideDefaults(global, project, opts.Tool)      │
-│     └── config.ApplyDefaultsWithSources(..., SourceToolOverride)            │
+│  6. Invalid list entries become ListProblems, reported by validation        │
+│     with the flag or config key and file that set them                      │
 │                                                                             │
 │  7. Resolve the unset tool (app.resolveTool)                                │
 │     ├── "auto" with a terminal: ask once among the installed                │
 │     │   agent profiles and save the answer as "tool" globally               │
 │     ├── otherwise: claude (scripts, --json, --yes, other verbs)             │
-│     └── Steps 3-6 run again for the resolved tool                           │
+│     └── Step 4 runs again for the resolved tool                             │
 │                                                                             │
 │  8. Final Options with Sources tracked                                      │
 │     └── Each field knows: CLI, ToolOverride, Project, Global, or Default   │
@@ -316,13 +320,10 @@ The complete flow from CLI arguments to final options:
 
 **Precedence:** CLI > Tool override > Project config > Global config > Built-in defaults
 
-Project guardrails are enforced while loading `~/.config/enclave/projects/<hash>/config.json`. Guarded
-keys are ignored at project scope (including `tool_overrides`) with warnings,
-so they cannot elevate host security defaults. For project mount hardening,
-project config may set `project_mount=readonly` but cannot set
-`project_mount=writable` to weaken a stricter parent default. The
-`worktree_metadata` modes form the order `follow < readonly < none`; project
-config may strengthen the inherited mode, but weaker values are stripped.
+Project config lives in the host config root, out of reach of the repository and
+of sessions, so it may set every option global config can. Only the global-only
+`auto_update` and `update_channel` are dropped while loading
+`~/.config/enclave/projects/<hash>/config.json`, with a warning.
 
 **Key types:**
 - `model.Options` - final resolved options (embedded structs: Run, Auth, Build, Cleanup)
@@ -354,10 +355,6 @@ is:
 4. Global config
 5. Built-in defaults
 
-Guardrail note: project config cannot elevate guarded options such as
-`allow_all_network=true`; those values are ignored with warnings. Host intent
-must come from global config (`~/.config/enclave/config.json`) or explicit CLI flags.
-
 `cache_from` can be used to add inline `docker build` cache sources (same as
 `--cache-from`). Some build controls are intentionally not read
 from config files, including `--rebuild`, `--no-rebuild`,
@@ -369,8 +366,8 @@ as described in the [CLI reference](cli-reference.md#image--build).
 `ENCLAVE_ALLOW_ROOT` environment variable. The same holds for
 `--allow-sensitive-mounts` and `ENCLAVE_ALLOW_SENSITIVE_MOUNTS`.
 `--add-sensitive-dir` and `--add-readonly-sensitive-dir` are CLI-only as well;
-global config can exempt specific paths only through
-`sensitive_dir_exceptions`, which project config cannot set.
+config can exempt specific paths only through
+`sensitive_dir_exceptions`.
 
 Runtime image hashes include the effective build UID/GID. Explicit
 `--build-uid` / `--build-gid` values are used when provided; otherwise the host
@@ -380,13 +377,20 @@ from being accepted as current when it was built for a different numeric user.
 `features` can be set from config or CLI (`--features`). In devcontainer mode,
 the unset default is no enclave features; pass `--features` (or configure
 `features`) to opt in. `--features none` selects zero features explicitly.
-Config additive entries (`+`/`-`) are applied against the implicit
-default-enabled feature set when `features` is otherwise unset.
+`+`/`-` entries amend the configured selection and the more specific layer wins
+an item; they apply to the implicit default-enabled set (empty in devcontainer
+mode) only when no layer selected features.
 
 `host_config_paths` is a per-tool config option resolved against the selected
 tool profile's reviewed `passthroughPaths`. Additive-only entries (`+`/`-`)
-modify that built-in allow-list; bare entries replace it unless `default` is
-included explicitly.
+modify the inherited list or, when none is set, that built-in allow-list; bare
+entries replace it unless `default` is included explicitly.
+
+The extras lists (`add_dirs`, `ports`, `allow_domains`, and the others in
+[List Options](configuration.md#list-options)) replace with a bare list and
+amend with `+`/`-`; only `--add-dir` and `--add-readonly-dir` add a bare path.
+Each resolved entry records its layer (`model.ListOrigins`), so
+validation errors and the sensitive-mount refusal name the flag or config file.
 
 ## Image Naming
 

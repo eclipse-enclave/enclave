@@ -354,10 +354,13 @@ func TestResolveAdditionalMountsRefusesProjectAsReadonlySensitiveDir(t *testing.
 func TestResolveAdditionalMountsKeepsReadWriteOverReadonlySensitiveDir(t *testing.T) {
 	home := exceptionHome(t)
 	m2 := filepath.Join(home, ".m2")
-	opts := model.Options{}
-	opts.AddDirs = []string{m2}
-	opts.Sources.AddDirs = model.SourceCLI
-	opts.AddReadonlySensitiveDirs = []string{m2}
+	cli := model.Options{}
+	cli.AddDirs = []string{m2}
+	cli.AddReadonlySensitiveDirs = []string{m2}
+	cliSources := model.OptionSources{}
+	cliSources.AddDirs = model.SourceCLI
+	cliSources.AddReadonlySensitiveDirs = model.SourceCLI
+	opts, _, _ := config.ResolveOptionsForTool(cli, cliSources, config.Defaults{}, config.Defaults{}, "claude")
 
 	dirs, readonlyDirs, stderr, err := runMounts(t, home, filepath.Join(home, "code", "project"), opts)
 	if err != nil {
@@ -395,5 +398,25 @@ func TestResolveAdditionalMountsKeepsConfiguredDirsBesideSensitiveDirs(t *testin
 	}
 	if !slices.Equal(dirs, []string{configured, flagged}) || !slices.Equal(readonlyDirs, []string{readonly}) {
 		t.Errorf("mounts = %q read-write, %q read-only; want [%s %s] and [%s]", dirs, readonlyDirs, configured, flagged, readonly)
+	}
+}
+
+// Project config lives outside the repository, so it can exempt paths like
+// global config, and the exemption names it.
+func TestResolveAdditionalMountsHonorsProjectSensitiveDirExceptions(t *testing.T) {
+	home := exceptionHome(t)
+	m2 := filepath.Join(home, ".m2")
+	project := config.Defaults{AddReadonlyDirs: []string{m2}, SensitiveDirExceptions: []string{"~/.m2"}}
+	opts, _, _ := config.ResolveOptionsForTool(model.Options{}, model.OptionSources{}, config.Defaults{}, project, "claude")
+
+	_, readonlyDirs, stderr, err := runMounts(t, home, filepath.Join(home, "code", "project"), opts)
+	if err != nil {
+		t.Fatalf("run refused: %v", err)
+	}
+	if !slices.Equal(readonlyDirs, []string{m2}) {
+		t.Errorf("read-only mounts = %q, want [%s]", readonlyDirs, m2)
+	}
+	if want := `is ~/.m2; exempted by sensitive_dir_exceptions entry "~/.m2" in project config`; !strings.Contains(stderr, want) {
+		t.Errorf("warnings %q do not mention %q", stderr, want)
 	}
 }

@@ -94,14 +94,7 @@ type unknownFeatureGroup struct {
 }
 
 func (g unknownFeatureGroup) message() string {
-	names := normalizeAndSortNames(g.names)
-	message := fmt.Sprintf("%s: unknown features: %s; run 'enclave features list' to see available features", g.label, strings.Join(names, ", "))
-	for _, name := range names {
-		if hint := config.RetiredExtensionHint(model.KindFeature, name); hint != "" {
-			message += "; " + hint
-		}
-	}
-	return message
+	return fmt.Sprintf("%s: unknown features: %s; run 'enclave features list' to see available features", g.label, strings.Join(normalizeAndSortNames(g.names), ", "))
 }
 
 // unknownFeatureGroups groups names by where they were set, in the order the
@@ -199,18 +192,10 @@ func featureSelectionWarnings(selection featureSelection, err error) []configJSO
 		warnings = append(warnings, configJSONWarning{
 			Code:    configWarningUnknownFeature,
 			Option:  "features",
-			Message: unknownFeatureWarning(name),
+			Message: fmt.Sprintf("Unknown feature %q selected; it is ignored", name),
 		})
 	}
 	return warnings
-}
-
-func unknownFeatureWarning(name string) string {
-	message := fmt.Sprintf("Unknown feature %q selected; it is ignored", name)
-	if hint := config.RetiredExtensionHint(model.KindFeature, name); hint != "" {
-		message += "; " + hint
-	}
-	return message
 }
 
 // enabledNames returns the sorted names of the enabled features.

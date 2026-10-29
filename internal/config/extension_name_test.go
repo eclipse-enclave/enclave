@@ -52,7 +52,7 @@ func TestValidateExtensionNameRejectsUnsafeNames(t *testing.T) {
 		"claude", "codex", "copilot", "opencode", "pi", "theia", "theia-next",
 		"devtools", "github-cli", "gitlab-cli", "golang-dev",
 		"node-dev", "python-dev", "theia-dev",
-		// Retired built-in names stay valid for the extensions that replace them.
+		// Former built-in names stay valid for the extensions that took them over.
 		"debug-tools", "mistral-vibe", "native-build-deps", "playwright", "playwright-mcp", "shell-extras",
 		"foo", "foo_bar", "foo.bar", "a", "0", "tool2",
 	}

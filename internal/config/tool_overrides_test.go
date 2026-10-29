@@ -500,12 +500,10 @@ func TestReadDefaults_SessionTintDropsInvalidValues(t *testing.T) {
 
 func TestReadDefaults_RejectsRemovedFields(t *testing.T) {
 	cases := map[string]string{
-		"image_mode":                           `{"image_mode":"all"}`,
-		"agent_tools":                          `{"agent_tools":["claude","codex"]}`,
-		"no_agents":                            `{"no_agents":true}`,
-		"playwright_mcp":                       `{"playwright_mcp":true}`,
-		"tool_overrides.claude.playwright_mcp": `{"tool_overrides":{"claude":{"playwright_mcp":true}}}`,
-		"tool_overrides.claude.agent_tools":    `{"tool_overrides":{"claude":{"agent_tools":["codex"]}}}`,
+		"image_mode":                        `{"image_mode":"all"}`,
+		"agent_tools":                       `{"agent_tools":["claude","codex"]}`,
+		"no_agents":                         `{"no_agents":true}`,
+		"tool_overrides.claude.agent_tools": `{"tool_overrides":{"claude":{"agent_tools":["codex"]}}}`,
 	}
 	for name, payload := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -518,8 +516,6 @@ func TestReadDefaults_RejectsRemovedFields(t *testing.T) {
 				t.Fatalf("expected hard error for removed field %s", name)
 			} else if !strings.Contains(err.Error(), "no longer supported") {
 				t.Fatalf("unexpected error for %s: %v", name, err)
-			} else if strings.HasSuffix(name, "playwright_mcp") && !strings.Contains(err.Error(), "enclave features add eclipse-enclave/enclave-extensions --name playwright-mcp") {
-				t.Fatalf("removed playwright_mcp must name its replacement: %v", err)
 			}
 		})
 	}

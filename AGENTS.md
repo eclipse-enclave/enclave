@@ -74,7 +74,7 @@ Do not push, publish releases, or modify remote issues/PRs unless the maintainer
 ## Extensions
 
 - See `docs/extensions/README.md` for the extension architecture and `docs/extensions/adding-a-tool.md` for the step-by-step guide; every tool or feature extension must include a `README.md`.
-- Core ships six tools (Claude Code, Codex, Copilot, Theia with `theia-next`, OpenCode, Pi). New tools go to `eclipse-enclave/enclave-extensions`; see `CONTRIBUTING.md`. Old names of moved or renamed built-in extensions are listed in `internal/config/retired_extensions.go` so selecting one names its replacement.
+- Core ships six tools (Claude Code, Codex, Copilot, Theia with `theia-next`, OpenCode, Pi). New tools go to `eclipse-enclave/enclave-extensions`; see `CONTRIBUTING.md`.
 - `extensions/tools/<tool>/spec.yaml` (`kind: sandbox`) defines tool runtime, auth, network, settings, and provider behavior.
 - `extensions/features/<feature>/spec.yaml` (`kind: mixin`) defines optional packages, runtime setup, auth, network, and published-port behavior; a feature may also ship a `skills/` directory that is composed into the tool's skills when the feature is enabled.
 - Memory scope, disable arguments, and preserved runtime state are declared with `sandbox.memoryScope`, `sandbox.noMemoryArgs`, and `sandbox.statePaths`; see [Agent Memory](docs/runtime/stores.md#agent-memory) for lifecycle and cleanup behavior.

@@ -225,7 +225,7 @@ func loadSpecExtension(paths model.Paths, name string, specKind string) (model.E
 func loadSpecProfile(paths model.Paths, name string) (model.Profile, error) {
 	doc, err := LoadSpec(paths, name, KindSandbox)
 	if err != nil {
-		return model.Profile{}, notFoundWithHint(err, model.KindTool, name)
+		return model.Profile{}, err
 	}
 
 	profile := specToProfile(doc)

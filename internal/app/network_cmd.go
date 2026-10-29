@@ -71,9 +71,6 @@ func resolveSessionPolicyContext(input *CommandInput, requireTool bool) (current
 }
 
 func unknownToolError(paths model.Paths, tool string) error {
-	if hint := config.RetiredExtensionHint(model.KindTool, tool); hint != "" {
-		return errors.New(hint)
-	}
 	available, err := config.ListProfiles(paths)
 	if err != nil || len(available) == 0 {
 		return fmt.Errorf("unknown tool: %s", tool)

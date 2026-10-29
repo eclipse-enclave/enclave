@@ -276,7 +276,6 @@ var removedConfigFields = []struct{ key, hint string }{
 	{"image_mode", "images are always per-tool; remove it"},
 	{"agent_tools", "images are per-tool; select the agent with --tool"},
 	{"no_agents", "the no-agent image was removed; use a tool image with the shell command instead"},
-	{"playwright_mcp", PlaywrightMCPReplacement + " in features"},
 }
 
 func rejectRemovedConfigFields(path string, doc map[string]json.RawMessage) error {

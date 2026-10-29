@@ -42,8 +42,6 @@ func TestValidateOptionsFeatureSelection(t *testing.T) {
 		{name: "remove every default", requested: []string{"-node-dev", "-github-cli"}, want: []string{}},
 		{name: "installed feature", requested: []string{"custom"}, want: []string{"custom"}},
 		{name: "known addition", requested: []string{"+debug-tools"}, want: []string{"debug-tools", "github-cli", "node-dev"}},
-		{name: "renamed feature", requested: []string{"+native-build-deps"}, wantUnknown: "native-build-deps; run 'enclave features list' to see available features; feature native-build-deps was renamed to theia-dev"},
-		{name: "moved feature", requested: []string{"+playwright"}, wantUnknown: "playwright; run 'enclave features list' to see available features; feature playwright moved to enclave-extensions as playwright-mcp: enclave features add eclipse-enclave/enclave-extensions --name playwright-mcp"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -104,31 +104,13 @@ func Parse(args []string, defaults model.Options, userCmds ...usercmd.Command) (
 	}
 
 	if err := rootCmd.Execute(); err != nil {
-		return res, removedFlagError(err)
+		return res, err
 	}
 	if flag := rootCmd.Flags().Lookup("version"); flag != nil && flag.Changed {
 		res.VersionShown = true
 	}
 
 	return res, nil
-}
-
-// removedFlags maps flags that were dropped to what replaces them, so using
-// one says so instead of only failing as unknown.
-var removedFlags = map[string]string{
-	"playwright-mcp": config.PlaywrightMCPReplacement + " with --features",
-}
-
-func removedFlagError(err error) error {
-	var unknown *pflag.NotExistError
-	if !errors.As(err, &unknown) {
-		return err
-	}
-	name := unknown.GetSpecifiedName()
-	if replacement, ok := removedFlags[name]; ok {
-		return fmt.Errorf("--%s was removed: %s", name, replacement)
-	}
-	return err
 }
 
 // newRootCommand builds the root command with every built-in subcommand

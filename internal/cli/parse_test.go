@@ -97,19 +97,6 @@ func TestNetworkPreviewCommandsAcceptSessionPolicyFlags(t *testing.T) {
 	}
 }
 
-func TestRemovedPlaywrightMCPFlagNamesReplacement(t *testing.T) {
-	for _, args := range [][]string{{"--playwright-mcp"}, {"run", "--tool", "claude", "--playwright-mcp"}, {"network", "print", "--playwright-mcp"}} {
-		_, err := Parse(args, config.DefaultOptions())
-		if err == nil || !strings.Contains(err.Error(), "--playwright-mcp was removed") ||
-			!strings.Contains(err.Error(), "enclave features add eclipse-enclave/enclave-extensions --name playwright-mcp") {
-			t.Fatalf("Parse(%v) error = %v, want the removed-flag hint", args, err)
-		}
-	}
-	if _, err := Parse([]string{"--no-such-flag"}, config.DefaultOptions()); err == nil || err.Error() != "unknown flag: --no-such-flag" {
-		t.Fatalf("unknown flag error = %v", err)
-	}
-}
-
 func TestBackendFlagRejectedOnEngineFreeCommands(t *testing.T) {
 	for _, command := range [][]string{
 		{"tools"}, {"features"}, {"review-target"},

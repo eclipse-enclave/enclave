@@ -8,8 +8,8 @@
 package app
 
 import (
+	"errors"
 	"fmt"
-	"sort"
 	"strconv"
 	"strings"
 
@@ -21,6 +21,9 @@ import (
 type ValidationContext struct {
 	Paths  model.Paths
 	Action string
+	// WarnUnknownFeatures keeps unknown feature names from failing
+	// validation, for previews that report them with featureSelectionWarnings.
+	WarnUnknownFeatures bool
 }
 
 func ValidateOptions(opts model.Options, sources model.OptionSources, ctx ValidationContext) (model.Options, model.OptionSources, []string, error) {
@@ -46,6 +49,43 @@ func ValidateOptions(opts model.Options, sources model.OptionSources, ctx Valida
 	if opts.Devcontainer && opts.Backend == backend.NameQEMU {
 		return opts, sources, warnings, fmt.Errorf("devcontainer mode requires --backend %s or %s", backend.NameDocker, backend.NamePodman)
 	}
+	normalizedBuildOptions, featureWarnings, normErr := normalizeConfiguredBuildOptions(ctx.Paths, opts, sources.Features)
+	warnings = append(warnings, featureWarnings...)
+	var unknownFeatures *unknownFeaturesError
+	if errors.As(normErr, &unknownFeatures) && ctx.WarnUnknownFeatures {
+		// The caller reports unknown names with featureSelectionWarnings.
+		normErr = nil
+		normalizedBuildOptions = opts.BuildOptions
+	}
+	if errors.As(normErr, &unknownFeatures) {
+		// A stale config selection must not block a session that discards it.
+		ignoredBy := ""
+		switch {
+		case opts.Slim:
+			ignoredBy = "--slim"
+		case opts.Backend == backend.NameQEMU && isRunAction(ctx.Action):
+			ignoredBy = "--backend qemu"
+		}
+		if ignoredBy != "" {
+			var fromCLI unknownFeatureGroups
+			for _, group := range unknownFeatures.groups {
+				if group.cli {
+					fromCLI = append(fromCLI, group)
+					continue
+				}
+				warnings = append(warnings, fmt.Sprintf("%s; ignored because %s discards the feature selection", group.message(), ignoredBy))
+			}
+			normErr = nil
+			normalizedBuildOptions = opts.BuildOptions
+			if len(fromCLI) > 0 {
+				normErr = &unknownFeaturesError{groups: fromCLI}
+			}
+		}
+	}
+	if normErr != nil {
+		return opts, sources, warnings, normErr
+	}
+	opts.BuildOptions = normalizedBuildOptions
 	if opts.Backend == backend.NameQEMU && isRunAction(ctx.Action) {
 		var qemuWarnings []string
 		opts, qemuWarnings, err = coerceQEMURunOptions(opts, sources, ctx.Paths)
@@ -120,11 +160,6 @@ func ValidateOptions(opts model.Options, sources model.OptionSources, ctx Valida
 	default:
 		return opts, sources, warnings, fmt.Errorf("--progress must be %s, %s, or %s", model.BuildProgressQuiet, model.BuildProgressCompact, model.BuildProgressVerbose)
 	}
-	normalizedBuildOptions, normErr := normalizeConfiguredBuildOptions(ctx.Paths, opts.BuildOptions)
-	if normErr != nil {
-		return opts, sources, warnings, normErr
-	}
-	opts.BuildOptions = normalizedBuildOptions
 	if strings.TrimSpace(opts.ImageName) == "" {
 		return opts, sources, warnings, fmt.Errorf("--image-name requires a non-empty value")
 	}
@@ -138,10 +173,21 @@ func ValidateOptions(opts model.Options, sources model.OptionSources, ctx Valida
 // validateAsRun validates opts the way a run would. The auto backend is left
 // unresolved by read-only commands, so the docker default is validated.
 func validateAsRun(paths model.Paths, opts model.Options, sources model.OptionSources) (model.Options, []string, error) {
+	return validateRunOptions(opts, sources, ValidationContext{Paths: paths, Action: "run"})
+}
+
+// previewAsRun is validateAsRun for commands that only show what a run would
+// get, such as network print: unknown feature names do not fail, so the caller
+// can report them with featureSelectionWarnings and still show the rest.
+func previewAsRun(paths model.Paths, opts model.Options, sources model.OptionSources) (model.Options, []string, error) {
+	return validateRunOptions(opts, sources, ValidationContext{Paths: paths, Action: "run", WarnUnknownFeatures: true})
+}
+
+func validateRunOptions(opts model.Options, sources model.OptionSources, ctx ValidationContext) (model.Options, []string, error) {
 	if strings.TrimSpace(opts.Backend) == backend.NameAuto {
 		opts.Backend = backend.NameDocker
 	}
-	validated, _, warnings, err := ValidateOptions(opts, sources, ValidationContext{Paths: paths, Action: "run"})
+	validated, _, warnings, err := ValidateOptions(opts, sources, ctx)
 	return validated, warnings, err
 }
 
@@ -220,9 +266,7 @@ func qemuDroppedFeatures(requested []string, paths model.Paths) []string {
 	if err != nil {
 		return nil
 	}
-	names := selection.selected
-	sort.Strings(names)
-	return names
+	return selection.enabledNames()
 }
 
 func validateBuildIdentityOptions(opts model.BuildOptions) error {
@@ -334,7 +378,7 @@ func normalizeOptions(opts model.Options) (model.Options, []string) {
 	if opts.SkillsValidation == "" {
 		opts.SkillsValidation = model.SkillsValidationStrict
 	}
-	if opts.PlaywrightMCP {
+	if opts.PlaywrightMCP && opts.Tool == "claude" {
 		var overrodeRemoval bool
 		opts.Features, overrodeRemoval = ensureFeature(opts.Features, "playwright")
 		if overrodeRemoval {

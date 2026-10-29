@@ -48,7 +48,7 @@ func resolveCurrentPolicyContext(input *CommandInput) (currentPolicyContext, err
 // resolveSessionPolicyContext resolves the policy a run with the same options
 // enforces. requireTool rejects a tool without a spec as a run rejects it.
 func resolveSessionPolicyContext(input *CommandInput, requireTool bool) (currentPolicyContext, error) {
-	opts, warnings, err := validateAsRun(input.Ctx.Paths, input.Options, input.Options.Sources)
+	opts, warnings, err := previewAsRun(input.Ctx.Paths, input.Options, input.Options.Sources)
 	if err != nil {
 		return currentPolicyContext{}, err
 	}

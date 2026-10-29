@@ -151,6 +151,7 @@ func ResolveOptionsForTool(cliOpts model.Options, cliSources model.OptionSources
 	opts := cliOpts
 	opts.Origins = nil
 	opts.ListProblems = nil
+	opts.DroppedRemovals = nil
 	cliLists := holdBackCLILists(&opts, &sources)
 
 	opts = applyScalarDefaults(opts, global, model.SourceGlobal, &sources)

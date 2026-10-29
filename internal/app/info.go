@@ -52,7 +52,10 @@ func runInfo(ctx *AppContext, opts model.Options) int {
 	}
 
 	imageName := opts.ImageName
-	buildOptions, normErr := normalizeConfiguredBuildOptions(ctx.Paths, opts.BuildOptions)
+	buildOptions, featureWarnings, normErr := normalizeConfiguredBuildOptions(ctx.Paths, opts, opts.Sources.Features)
+	for _, warning := range featureWarnings {
+		logx.Warnf("%s", warning)
+	}
 	if normErr != nil {
 		logx.Warnf("Unable to normalize feature directives for image selection: %v", normErr)
 	} else if build, err := resolveBuildConfig(buildOptions, opts.Tool, project, ctx.Paths.AppRoot); err == nil {

@@ -22,10 +22,13 @@ func runDevcontainerGenerate(input *CommandInput) int {
 		return 1
 	}
 
-	buildOptions, err := normalizeConfiguredBuildOptions(input.Ctx.Paths, input.Options.BuildOptions)
+	buildOptions, warnings, err := normalizeConfiguredBuildOptions(input.Ctx.Paths, input.Options, input.Sources.Features)
 	if err != nil {
 		logx.Errorf("%v", err)
 		return 1
+	}
+	for _, warning := range warnings {
+		logx.Warnf("%s", warning)
 	}
 
 	buildCfg, err := resolveBuildConfig(buildOptions, input.Options.Tool, project, input.Ctx.Paths.AppRoot)

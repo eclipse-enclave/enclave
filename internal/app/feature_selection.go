@@ -16,6 +16,134 @@ import (
 	"enclave/internal/model"
 )
 
+// featureEntry is one entry of a features selection and where it was set.
+type featureEntry struct {
+	value string
+	label string
+	cli   bool
+}
+
+// validateFeatureNames checks features entries against the installed
+// features: unknown additions fail and unknown removals only warn. Each message
+// names where its entries were set.
+func validateFeatureNames(entries []featureEntry, allFeatures []model.Extension) ([]string, error) {
+	available := make(map[string]struct{}, len(allFeatures))
+	for _, feature := range allFeatures {
+		available[feature.Name] = struct{}{}
+	}
+
+	var unknown, unknownRemovals, selectorRemovals unknownFeatureGroups
+	for _, entry := range entries {
+		name := strings.TrimSpace(entry.value)
+		removal := strings.HasPrefix(name, "-")
+		if removal || strings.HasPrefix(name, "+") {
+			name = strings.TrimSpace(name[1:])
+		}
+		if name == "" {
+			continue
+		}
+		switch strings.ToLower(name) {
+		case model.SelectionDefault, model.FeatureSelectionAll:
+			if removal {
+				selectorRemovals.add(entry, "-"+name)
+			}
+			continue
+		}
+		if _, ok := available[name]; ok {
+			continue
+		}
+		if removal {
+			unknownRemovals.add(entry, name)
+		} else {
+			unknown.add(entry, name)
+		}
+	}
+
+	var warnings []string
+	for _, group := range selectorRemovals {
+		warnings = append(warnings, fmt.Sprintf("%s: ignoring %s: \"default\" and \"all\" are selectors, not features, and cannot be removed", group.label, strings.Join(normalizeAndSortNames(group.names), ", ")))
+	}
+	for _, group := range unknownRemovals {
+		warnings = append(warnings, fmt.Sprintf("%s: ignoring removal of unknown features: %s; run 'enclave features list' to see available features", group.label, strings.Join(normalizeAndSortNames(group.names), ", ")))
+	}
+	if len(unknown) > 0 {
+		return warnings, &unknownFeaturesError{groups: unknown}
+	}
+	return warnings, nil
+}
+
+// unknownFeaturesError reports unknown feature names, one line per place
+// that set them.
+type unknownFeaturesError struct {
+	groups unknownFeatureGroups
+}
+
+func (e *unknownFeaturesError) Error() string {
+	lines := make([]string, 0, len(e.groups))
+	for _, group := range e.groups {
+		lines = append(lines, group.message())
+	}
+	return strings.Join(lines, "\n")
+}
+
+// unknownFeatureGroup holds the unknown names set in one place.
+type unknownFeatureGroup struct {
+	label string
+	cli   bool
+	names []string
+}
+
+func (g unknownFeatureGroup) message() string {
+	return fmt.Sprintf("%s: unknown features: %s; run 'enclave features list' to see available features", g.label, strings.Join(normalizeAndSortNames(g.names), ", "))
+}
+
+// unknownFeatureGroups groups names by where they were set, in the order the
+// places first appear.
+type unknownFeatureGroups []unknownFeatureGroup
+
+func (g *unknownFeatureGroups) add(entry featureEntry, name string) {
+	for i := range *g {
+		if (*g)[i].label == entry.label {
+			(*g)[i].names = append((*g)[i].names, name)
+			return
+		}
+	}
+	*g = append(*g, unknownFeatureGroup{label: entry.label, cli: entry.cli, names: []string{name}})
+}
+
+// featureEntries lists the features selection of opts and the removals that
+// merging its layers consumed, each named by the flag or config file that
+// option resolution recorded, else by featureSource, the layer that last set
+// the selection.
+func featureEntries(opts model.Options, featureSource model.OptionSource) []featureEntry {
+	fallback := "features"
+	switch featureSource {
+	case model.SourceCLI:
+		fallback = "--features"
+	case model.SourceGlobal:
+		fallback = "features in global config"
+	case model.SourceProject:
+		fallback = "features in project config"
+	case model.SourceToolOverride:
+		fallback = "features in tool override"
+	}
+	entries := make([]featureEntry, 0, len(opts.Features)+len(opts.DroppedRemovals))
+	for _, value := range opts.Features {
+		entry := featureEntry{value: value, label: fallback, cli: featureSource == model.SourceCLI}
+		if origin, ok := opts.Origins.Origin("features", value); ok {
+			entry.label = config.ListOriginLabel("features", origin)
+			entry.cli = origin.Source == model.SourceCLI
+		}
+		entries = append(entries, entry)
+	}
+	for _, removal := range opts.DroppedRemovals {
+		if removal.Option == "features" {
+			entries = append(entries, featureEntry{value: "-" + removal.Name, label: config.ListOriginLabel("features", removal.Origin), cli: removal.Origin.Source == model.SourceCLI})
+		}
+	}
+	return entries
+}
+
 // featureSelection is what a build selects among the available features:
 // the selected names, including those that match no feature, the matching
 // features in listing order, and the unknown names in selection order.

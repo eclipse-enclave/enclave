@@ -22,7 +22,7 @@ func runDevcontainerGenerate(input *CommandInput) int {
 		return 1
 	}
 
-	buildOptions, warnings, err := normalizeConfiguredBuildOptions(input.Ctx.Paths, input.Options.BuildOptions)
+	buildOptions, warnings, err := normalizeConfiguredBuildOptions(input.Ctx.Paths, input.Options, input.Sources.Features)
 	if err != nil {
 		logx.Errorf("%v", err)
 		return 1

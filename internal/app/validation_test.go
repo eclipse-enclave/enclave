@@ -98,6 +98,79 @@ func TestValidateOptionsUnknownFeatureSource(t *testing.T) {
 	}
 }
 
+func TestValidateOptionsUnknownFeatureOrigins(t *testing.T) {
+	paths := testPathsWithFeatureDefaults(t)
+	cases := []struct {
+		name        string
+		cli         []string
+		global      config.Defaults
+		project     config.Defaults
+		wantErrors  []string
+		wantWarning string
+	}{
+		{
+			name:       "inherited name",
+			global:     config.Defaults{Features: []string{"typo"}},
+			project:    config.Defaults{Features: []string{"+shell-extras"}},
+			wantErrors: []string{"features in global config: unknown features: typo;"},
+		},
+		{
+			name:       "inherited addition",
+			global:     config.Defaults{Features: []string{"+typo"}},
+			project:    config.Defaults{Features: []string{"+shell-extras"}},
+			wantErrors: []string{"features in global config: unknown features: typo;"},
+		},
+		{
+			name:       "tool override addition",
+			global:     config.Defaults{ToolOverrides: map[string]config.Defaults{"claude": {Features: []string{"+typo"}}}},
+			project:    config.Defaults{Features: []string{"+shell-extras"}},
+			wantErrors: []string{"tool_overrides.claude.features in global config: unknown features: typo;"},
+		},
+		{
+			name:       "config and command line",
+			cli:        []string{"+other"},
+			global:     config.Defaults{Features: []string{"+typo"}},
+			wantErrors: []string{"features in global config: unknown features: typo;", "--features: unknown features: other;"},
+		},
+		{
+			name:        "removal",
+			global:      config.Defaults{Features: []string{"default"}},
+			project:     config.Defaults{Features: []string{"-typo"}},
+			wantWarning: "features in project config: ignoring removal of unknown features: typo;",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cliOpts := config.DefaultOptions()
+			cliOpts.Backend = "docker"
+			cliSources := model.DefaultOptionSources()
+			if tc.cli != nil {
+				cliOpts.Features = tc.cli
+				cliSources.Features = model.SourceCLI
+			}
+			opts, _, _ := config.ResolveOptionsForTool(cliOpts, cliSources, tc.global, tc.project, "claude")
+			_, _, warnings, err := ValidateOptions(opts, opts.Sources, ValidationContext{Action: "run", Paths: paths})
+			if len(tc.wantErrors) > 0 {
+				if err == nil {
+					t.Fatalf("expected unknown-feature errors %q, got none", tc.wantErrors)
+				}
+				for _, want := range tc.wantErrors {
+					if !strings.Contains(err.Error(), want) {
+						t.Errorf("error %q does not contain %q", err, want)
+					}
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("ValidateOptions: %v", err)
+			}
+			if len(warnings) != 1 || !strings.HasPrefix(warnings[0], tc.wantWarning) {
+				t.Errorf("warnings = %q, want one starting with %q", warnings, tc.wantWarning)
+			}
+		})
+	}
+}
+
 func TestValidateAuthOptions_CLIOverridesToolOverride(t *testing.T) {
 	tests := []struct {
 		name           string

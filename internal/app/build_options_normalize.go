@@ -12,19 +12,23 @@ import (
 	"enclave/internal/model"
 )
 
-func normalizeConfiguredBuildOptions(paths model.Paths, opts model.BuildOptions) (model.BuildOptions, []string, error) {
+// normalizeConfiguredBuildOptions validates and resolves the features
+// selection of opts. featureSource is the layer that last set the selection;
+// it labels entries without a recorded origin.
+func normalizeConfiguredBuildOptions(paths model.Paths, opts model.Options, featureSource model.OptionSource) (model.BuildOptions, []string, error) {
+	build := opts.BuildOptions
 	var warnings []string
-	if opts.Features != nil {
+	if build.Features != nil {
 		availableFeatures, err := config.ListFeatures(paths)
 		if err != nil {
-			return opts, warnings, err
+			return build, warnings, err
 		}
-		warnings, err = validateFeatureNames(opts.Features, availableFeatures)
+		warnings, err = validateFeatureNames(build.Features, availableFeatures, featureEntryLabels(opts.Origins, featureSource))
 		if err != nil {
-			return opts, warnings, err
+			return build, warnings, err
 		}
-		opts.Features = resolveConfiguredFeatures(opts.Features, availableFeatures, implicitFeatureBase(availableFeatures, opts))
+		build.Features = resolveConfiguredFeatures(build.Features, availableFeatures, implicitFeatureBase(availableFeatures, build))
 	}
 
-	return opts, warnings, nil
+	return build, warnings, nil
 }

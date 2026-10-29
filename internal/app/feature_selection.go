@@ -8,6 +8,7 @@
 package app
 
 import (
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -16,13 +17,16 @@ import (
 	"enclave/internal/model"
 )
 
-func validateFeatureNames(requested []string, allFeatures []model.Extension) ([]string, error) {
+// validateFeatureNames checks a features selection against the installed
+// features: unknown additions fail and unknown removals only warn. Each message
+// names where its entries were set, as label reports it.
+func validateFeatureNames(requested []string, allFeatures []model.Extension, label func(entry string) string) ([]string, error) {
 	available := make(map[string]struct{}, len(allFeatures))
 	for _, feature := range allFeatures {
 		available[feature.Name] = struct{}{}
 	}
 
-	var unknown, unknownRemovals []string
+	var unknown, unknownRemovals namesByLabel
 	for _, raw := range requested {
 		name := strings.TrimSpace(raw)
 		removal := strings.HasPrefix(name, "-")
@@ -42,20 +46,63 @@ func validateFeatureNames(requested []string, allFeatures []model.Extension) ([]
 			continue
 		}
 		if removal {
-			unknownRemovals = append(unknownRemovals, name)
+			unknownRemovals.add(label(raw), name)
 		} else {
-			unknown = append(unknown, name)
+			unknown.add(label(raw), name)
 		}
 	}
 
 	var warnings []string
-	if len(unknownRemovals) > 0 {
-		warnings = append(warnings, fmt.Sprintf("ignoring removal of unknown features: %s; run 'enclave features list' to see available features", strings.Join(normalizeAndSortNames(unknownRemovals), ", ")))
+	for _, group := range unknownRemovals {
+		warnings = append(warnings, fmt.Sprintf("%s: ignoring removal of unknown features: %s; run 'enclave features list' to see available features", group.label, strings.Join(normalizeAndSortNames(group.names), ", ")))
 	}
-	if len(unknown) > 0 {
-		return warnings, fmt.Errorf("unknown features: %s; run 'enclave features list' to see available features", strings.Join(normalizeAndSortNames(unknown), ", "))
+	var errs []error
+	for _, group := range unknown {
+		errs = append(errs, fmt.Errorf("%s: unknown features: %s; run 'enclave features list' to see available features", group.label, strings.Join(normalizeAndSortNames(group.names), ", ")))
 	}
-	return warnings, nil
+	return warnings, errors.Join(errs...)
+}
+
+// namesByLabel groups names by label, in the order the labels first appear.
+type namesByLabel []struct {
+	label string
+	names []string
+}
+
+func (g *namesByLabel) add(label string, name string) {
+	for i := range *g {
+		if (*g)[i].label == label {
+			(*g)[i].names = append((*g)[i].names, name)
+			return
+		}
+	}
+	*g = append(*g, struct {
+		label string
+		names []string
+	}{label: label, names: []string{name}})
+}
+
+// featureEntryLabels names where each entry of a features selection was set:
+// the flag or config file that option resolution recorded, else the layer that
+// last set the list.
+func featureEntryLabels(origins model.ListOrigins, source model.OptionSource) func(entry string) string {
+	fallback := "features"
+	switch source {
+	case model.SourceCLI:
+		fallback = "--features"
+	case model.SourceGlobal:
+		fallback = "features in global config"
+	case model.SourceProject:
+		fallback = "features in project config"
+	case model.SourceToolOverride:
+		fallback = "features in tool override"
+	}
+	return func(entry string) string {
+		if origin, ok := origins.Origin("features", entry); ok {
+			return config.ListOriginLabel("features", origin)
+		}
+		return fallback
+	}
 }
 
 // featureSelection is what a build selects among the available features:

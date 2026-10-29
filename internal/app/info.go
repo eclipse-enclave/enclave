@@ -52,7 +52,7 @@ func runInfo(ctx *AppContext, opts model.Options) int {
 	}
 
 	imageName := opts.ImageName
-	buildOptions, featureWarnings, normErr := normalizeConfiguredBuildOptions(ctx.Paths, opts.BuildOptions)
+	buildOptions, featureWarnings, normErr := normalizeConfiguredBuildOptions(ctx.Paths, opts, opts.Sources.Features)
 	for _, warning := range featureWarnings {
 		logx.Warnf("%s", warning)
 	}

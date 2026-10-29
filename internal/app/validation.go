@@ -46,23 +46,10 @@ func ValidateOptions(opts model.Options, sources model.OptionSources, ctx Valida
 	if opts.Devcontainer && opts.Backend == backend.NameQEMU {
 		return opts, sources, warnings, fmt.Errorf("devcontainer mode requires --backend %s or %s", backend.NameDocker, backend.NamePodman)
 	}
-	normalizedBuildOptions, featureWarnings, normErr := normalizeConfiguredBuildOptions(ctx.Paths, opts.BuildOptions)
-	featureSource := "features"
-	switch sources.Features {
-	case model.SourceCLI:
-		featureSource = "--features"
-	case model.SourceGlobal:
-		featureSource = "features in global config"
-	case model.SourceProject:
-		featureSource = "features in project config"
-	case model.SourceToolOverride:
-		featureSource = "features in tool override"
-	}
-	for _, warning := range featureWarnings {
-		warnings = append(warnings, featureSource+": "+warning)
-	}
+	normalizedBuildOptions, featureWarnings, normErr := normalizeConfiguredBuildOptions(ctx.Paths, opts, sources.Features)
+	warnings = append(warnings, featureWarnings...)
 	if normErr != nil {
-		return opts, sources, warnings, fmt.Errorf("%s: %w", featureSource, normErr)
+		return opts, sources, warnings, normErr
 	}
 	opts.BuildOptions = normalizedBuildOptions
 	if opts.Backend == backend.NameQEMU && isRunAction(ctx.Action) {

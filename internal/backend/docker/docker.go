@@ -136,33 +136,28 @@ func attachForeground(ctx context.Context, spec runSpec, attach backend.AttachIO
 	if spec.cleanup != nil {
 		defer spec.cleanup()
 	}
-	var sessionID string
 	var onStarted func(id string)
 	if attach.OnStarted != nil {
-		onStarted = func(id string) {
-			sessionID = id
-			attach.OnStarted()
-		}
+		onStarted = func(string) { attach.OnStarted() }
 	}
-	err := runForeground(ctx, spec.config, spec.hostConfig, spec.name, attach, onStarted)
-	if endOutlivingSession(ctx, spec.name, sessionID) {
+	id, err := runForeground(ctx, spec.config, spec.hostConfig, spec.name, attach, onStarted)
+	if endOutlivingSession(ctx, spec.name, id) {
 		return backend.ExitStatus{Code: backend.ExitCodeInterrupted}, &backend.ExitError{Code: backend.ExitCodeInterrupted}
 	}
 	return exitStatus(err), neutralizeExitError(err)
 }
 
-// endOutlivingSession stops a foreground session's container that still runs
-// after its engine client returned: the detach key was typed, or the client
-// died alone. The deferred cleanup is about to remove the gateway whose network
-// the container uses. It reports whether the session had to be ended.
+// endOutlivingSession stops the container a foreground run created if it still
+// runs after its engine client returned: the detach key was typed, or the
+// client died alone. The deferred cleanup is about to remove the gateway whose
+// network the container uses. Without an ID the run created no container, and
+// one holding the session's name is not ours to end. It reports whether the
+// session had to be ended.
 func endOutlivingSession(ctx context.Context, name string, id string) bool {
-	ref := id
-	if ref == "" {
-		// Without an ID, OnStarted never ran, so the caller still holds the
-		// session-start lock and the name cannot belong to a newer session yet.
-		ref = name
+	if id == "" {
+		return false
 	}
-	info, err := dockercmd.ContainerInspect(ctx, ref)
+	info, err := dockercmd.ContainerInspect(ctx, id)
 	if err != nil || info.State == nil || !info.State.Running {
 		return false
 	}
@@ -185,15 +180,20 @@ var endedContainerGoneTimeout = 10 * time.Second
 // endedContainerGoneTimeout. Docker rejects a remove that races the --rm
 // already in progress with a conflict, not a not-found.
 func waitContainerGone(ctx context.Context, id string) bool {
-	deadline := time.Now().Add(endedContainerGoneTimeout)
+	// The caller's context never expires, so the deadline must also bound a stalled inspect.
+	ctx, cancel := context.WithTimeout(ctx, endedContainerGoneTimeout)
+	defer cancel()
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
 	for {
 		if _, err := dockercmd.ContainerInspect(ctx, id); dockercmd.IsNotFound(err) {
 			return true
 		}
-		if !time.Now().Before(deadline) {
+		select {
+		case <-ctx.Done():
 			return false
+		case <-ticker.C:
 		}
-		time.Sleep(100 * time.Millisecond)
 	}
 }
 
@@ -811,7 +811,8 @@ func foregroundDetachKeys(attach backend.AttachIO) string {
 	return model.DetachKeysDefault
 }
 
-func runForeground(ctx context.Context, config *dockercmd.ContainerConfig, hostConfig *dockercmd.HostConfig, name string, attach backend.AttachIO, onStarted func(id string)) error {
+// runForeground returns the ID of the container it created, if any.
+func runForeground(ctx context.Context, config *dockercmd.ContainerConfig, hostConfig *dockercmd.HostConfig, name string, attach backend.AttachIO, onStarted func(id string)) (string, error) {
 	if attach.In == nil && attach.Out == nil && attach.Err == nil {
 		if attach.TTY {
 			return dockercmd.RunInteractiveWithStartHook(ctx, config, hostConfig, name, foregroundDetachKeys(attach), onStarted)

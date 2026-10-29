@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -38,39 +39,52 @@ func classifyRunError(args []string, err error, stderr string) error {
 // Run runs a container to completion, discarding its output, and returns an
 // *ExitError when the container exits non-zero.
 func Run(ctx context.Context, config *ContainerConfig, hostConfig *HostConfig, name string) error {
-	return RunWithStartHook(ctx, config, hostConfig, name, nil)
+	_, err := RunWithStartHook(ctx, config, hostConfig, name, nil)
+	return err
 }
 
 // RunWithStartHook runs a container to completion, discarding its output, and
-// invokes onStarted with the container's ID after Docker reports the named
-// container is running.
-func RunWithStartHook(ctx context.Context, config *ContainerConfig, hostConfig *HostConfig, name string, onStarted func(id string)) error {
+// invokes onStarted with the container's ID once it is running. It returns the
+// ID of the container this run created, if any.
+func RunWithStartHook(ctx context.Context, config *ContainerConfig, hostConfig *HostConfig, name string, onStarted func(id string)) (string, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	args := buildRunArgs(config, hostConfig, name, runMode{})
+	cid, err := newCIDFile()
+	if err != nil {
+		return "", err
+	}
+	defer cid.remove()
+	args := buildRunArgs(config, hostConfig, name, runMode{CIDFile: cid.path})
 	var stderr bytes.Buffer
 	cmd := exec.CommandContext(ctx, dockerBinary, args...) // #nosec G204 -- args built from caller config, passed without a shell.
 	cmd.Stdout = io.Discard
 	cmd.Stderr = &stderr
-	return classifyRunError(args, runCommandWithStartHook(ctx, name, cmd, onStarted, nil), stderr.String())
+	err = runCommandWithStartHook(ctx, cid, cmd, onStarted, nil)
+	return cid.id(), classifyRunError(args, err, stderr.String())
 }
 
 // RunWithIOAndStartHook runs a container wired to the supplied streams and
-// invokes onStarted with the container's ID after Docker reports the named
-// container is running. A non-empty detachKeys replaces the engine's detach
-// keys of an attached terminal.
-func RunWithIOAndStartHook(ctx context.Context, config *ContainerConfig, hostConfig *HostConfig, name string, in io.Reader, out io.Writer, errOut io.Writer, tty bool, detachKeys string, onStarted func(id string)) error {
+// invokes onStarted with the container's ID once it is running. A non-empty
+// detachKeys replaces the engine's detach keys of an attached terminal. It
+// returns the ID of the container this run created, if any.
+func RunWithIOAndStartHook(ctx context.Context, config *ContainerConfig, hostConfig *HostConfig, name string, in io.Reader, out io.Writer, errOut io.Writer, tty bool, detachKeys string, onStarted func(id string)) (string, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	mode := runMode{Interactive: in != nil, TTY: tty, DetachKeys: detachKeys}
+	cid, err := newCIDFile()
+	if err != nil {
+		return "", err
+	}
+	defer cid.remove()
+	mode := runMode{Interactive: in != nil, TTY: tty, DetachKeys: detachKeys, CIDFile: cid.path}
 	args := buildRunArgs(config, hostConfig, name, mode)
 	cmd := exec.CommandContext(ctx, dockerBinary, args...) // #nosec G204
 	cmd.Stdin = in
 	cmd.Stdout = out
 	cmd.Stderr = errOut
-	return classifyRunError(args, runCommandWithStartHook(ctx, name, cmd, onStarted, nil), "")
+	err = runCommandWithStartHook(ctx, cid, cmd, onStarted, nil)
+	return cid.id(), classifyRunError(args, err, "")
 }
 
 // RunCapture runs a container and returns its trimmed stdout, surfacing stderr
@@ -93,19 +107,25 @@ func RunCapture(ctx context.Context, config *ContainerConfig, hostConfig *HostCo
 // RunInteractive runs a container attached to the current terminal. The docker
 // CLI handles raw-mode, terminal resize, and signal forwarding.
 func RunInteractive(ctx context.Context, config *ContainerConfig, hostConfig *HostConfig, name string) error {
-	return RunInteractiveWithStartHook(ctx, config, hostConfig, name, "", nil)
+	_, err := RunInteractiveWithStartHook(ctx, config, hostConfig, name, "", nil)
+	return err
 }
 
 // RunInteractiveWithStartHook runs an interactive container and invokes
-// onStarted with the container's ID after Docker reports the named container
-// is running. A non-empty detachKeys replaces the engine's detach keys. SIGINT,
-// SIGTERM and SIGHUP sent to this process while the child runs are forwarded
-// to it.
-func RunInteractiveWithStartHook(ctx context.Context, config *ContainerConfig, hostConfig *HostConfig, name string, detachKeys string, onStarted func(id string)) error {
+// onStarted with the container's ID once it is running. A non-empty detachKeys
+// replaces the engine's detach keys. SIGINT, SIGTERM and SIGHUP sent to this
+// process while the child runs are forwarded to it. It returns the ID of the
+// container this run created, if any.
+func RunInteractiveWithStartHook(ctx context.Context, config *ContainerConfig, hostConfig *HostConfig, name string, detachKeys string, onStarted func(id string)) (string, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	args := buildRunArgs(config, hostConfig, name, runMode{Interactive: true, TTY: true, DetachKeys: detachKeys})
+	cid, err := newCIDFile()
+	if err != nil {
+		return "", err
+	}
+	defer cid.remove()
+	args := buildRunArgs(config, hostConfig, name, runMode{Interactive: true, TTY: true, DetachKeys: detachKeys, CIDFile: cid.path})
 	cmd := exec.CommandContext(ctx, dockerBinary, args...) // #nosec G204
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
@@ -113,13 +133,45 @@ func RunInteractiveWithStartHook(ctx context.Context, config *ContainerConfig, h
 	child := make(chan *os.Process, 1)
 	stopRelay := relayInterrupts(child)
 	defer stopRelay()
-	return classifyRunError(args, runCommandWithStartHook(ctx, name, cmd, onStarted, child), "")
+	err = runCommandWithStartHook(ctx, cid, cmd, onStarted, child)
+	return cid.id(), classifyRunError(args, err, "")
 }
 
-// runCommandWithStartHook starts cmd and invokes onStarted once the named
-// container is running. A non-nil child receives the started process, which is
-// how the interactive path gets signals relayed to the engine.
-func runCommandWithStartHook(ctx context.Context, name string, cmd *exec.Cmd, onStarted func(id string), child chan<- *os.Process) error {
+// cidFile is the --cidfile of one run: it names the container that run
+// created, never another one holding the same name.
+type cidFile struct {
+	dir  string
+	path string
+}
+
+// The engine refuses an existing --cidfile, so the path is fresh but unused.
+func newCIDFile() (cidFile, error) {
+	dir, err := os.MkdirTemp("", "enclave-cid-")
+	if err != nil {
+		return cidFile{}, err
+	}
+	return cidFile{dir: dir, path: filepath.Join(dir, "cid")}, nil
+}
+
+// id returns the created container's ID, or "" before creation. Docker may
+// hold an empty file before then; podman deletes it when --rm removes the
+// container.
+func (c cidFile) id() string {
+	data, err := os.ReadFile(c.path)
+	if err != nil {
+		return ""
+	}
+	return containerIDFromRunOutput(string(data))
+}
+
+func (c cidFile) remove() {
+	_ = os.RemoveAll(c.dir)
+}
+
+// runCommandWithStartHook starts cmd and invokes onStarted once the container
+// it created is running. A non-nil child receives the started process, which
+// is how the interactive path gets signals relayed to the engine.
+func runCommandWithStartHook(ctx context.Context, cid cidFile, cmd *exec.Cmd, onStarted func(id string), child chan<- *os.Process) error {
 	if err := cmd.Start(); err != nil {
 		return err
 	}
@@ -130,8 +182,8 @@ func runCommandWithStartHook(ctx context.Context, name string, cmd *exec.Cmd, on
 	go func() {
 		waitCh <- cmd.Wait()
 	}()
-	if onStarted != nil && strings.TrimSpace(name) != "" {
-		id, err, done := waitForContainerRunning(ctx, name, waitCh)
+	if onStarted != nil {
+		id, err, done := waitForContainerRunning(ctx, cid, waitCh)
 		if done {
 			return err
 		}
@@ -181,9 +233,9 @@ func relayInterrupts(child <-chan *os.Process) func() {
 	}
 }
 
-// waitForContainerRunning returns the running container's ID, or done with the
-// run's result when the run ends first.
-func waitForContainerRunning(ctx context.Context, name string, waitCh <-chan error) (id string, err error, done bool) {
+// waitForContainerRunning returns the created container's ID once it runs, or
+// done with the run's result when the run ends first.
+func waitForContainerRunning(ctx context.Context, cid cidFile, waitCh <-chan error) (id string, err error, done bool) {
 	ticker := time.NewTicker(50 * time.Millisecond)
 	defer ticker.Stop()
 	for {
@@ -191,7 +243,11 @@ func waitForContainerRunning(ctx context.Context, name string, waitCh <-chan err
 		case err := <-waitCh:
 			return "", err, true
 		case <-ticker.C:
-			info, err := ContainerInspect(ctx, name)
+			id := cid.id()
+			if id == "" {
+				continue
+			}
+			info, err := ContainerInspect(ctx, id)
 			if err == nil && info.State != nil && info.State.Running {
 				return info.ID, nil, false
 			}

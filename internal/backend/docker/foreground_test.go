@@ -68,7 +68,7 @@ func TestEndOutlivingSession(t *testing.T) {
 		{name: "running", id: "cid", state: "running", wantInspect: "cid", wantEnded: true, wantStop: true, wantRemove: true},
 		{name: "exited", id: "cid", state: "exited", wantInspect: "cid"},
 		{name: "replaced under its name", id: "cid", state: "missing", wantInspect: "cid"},
-		{name: "never seen running", state: "running", wantInspect: name, wantEnded: true, wantStop: true, wantRemove: true},
+		{name: "no container created", state: "running"},
 		{name: "stop fails", id: "cid", state: "running", stopFails: true, wantInspect: "cid", wantEnded: true, wantStop: true, wantRemove: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -82,7 +82,10 @@ func TestEndOutlivingSession(t *testing.T) {
 			if ended != tc.wantEnded {
 				t.Errorf("ended = %v, want %v (calls %v)", ended, tc.wantEnded, calls)
 			}
-			if !hasCallWithPrefix(calls, "container inspect --format {{json .}} "+tc.wantInspect) {
+			if tc.wantInspect == "" && hasCallWithPrefix(calls, "container inspect") {
+				t.Errorf("without an ID nothing may be inspected, calls %v", calls)
+			}
+			if tc.wantInspect != "" && !hasCallWithPrefix(calls, "container inspect --format {{json .}} "+tc.wantInspect) {
 				t.Errorf("expected inspect of %s, calls %v", tc.wantInspect, calls)
 			}
 			if got := hasCallWithPrefix(calls, "stop cid"); got != tc.wantStop {
@@ -138,42 +141,61 @@ func TestEndOutlivingSessionWaitsForRemovalInProgress(t *testing.T) {
 	}
 }
 
+// The caller's context never expires, so a stalled inspect must not outlast the
+// removal timeout and hold up the gateway teardown.
+func TestWaitContainerGoneBoundsStalledInspect(t *testing.T) {
+	previous := endedContainerGoneTimeout
+	endedContainerGoneTimeout = 50 * time.Millisecond
+	t.Cleanup(func() { endedContainerGoneTimeout = previous })
+	stubCLI(t, "docker", "exec sleep 2\n")
+
+	start := time.Now()
+	if waitContainerGone(context.Background(), "cid") {
+		t.Fatal("stalled inspect reported the container gone")
+	}
+	if elapsed := time.Since(start); elapsed > time.Second {
+		t.Fatalf("waitContainerGone took %v, want about %v", elapsed, endedContainerGoneTimeout)
+	}
+}
+
+// foregroundRunStub creates the container (writing STUB_CONTAINER_ID to the
+// run's --cidfile) unless STUB_RUN_CONFLICT is set, in which case run fails
+// like a name conflict. Inspect reports STUB_CONTAINER_ID running either way,
+// standing in for whichever container holds the name.
+const foregroundRunStub = `case "$1" in
+run)
+	if [ -n "$STUB_RUN_CONFLICT" ]; then
+		echo "docker: Error response from daemon: Conflict. The container name is already in use." >&2
+		exit 125
+	fi
+	while [ $# -gt 0 ]; do
+		[ "$1" = --cidfile ] && printf '%s' "$STUB_CONTAINER_ID" > "$2"
+		shift
+	done
+	sleep 0.3
+	;;
+container) printf '{"Id":"%s","Name":"/s","State":{"Status":"running","Running":true}}\n' "$STUB_CONTAINER_ID" ;;
+esac
+exit 0
+`
+
+var foregroundContainerID = strings.Repeat("c1", 32)
+
 // The session must be ended before spec.cleanup removes the gateway whose
 // network it uses, and only a caller with a start hook pays for polling.
 func TestAttachForegroundEndsOutlivingSessionBeforeCleanup(t *testing.T) {
 	const name = "enclave-pi-abc123abc123"
 	for _, tc := range []struct {
-		name        string
-		hook        bool
-		wantInspect string
+		name string
+		hook bool
 	}{
-		{name: "with start hook", hook: true, wantInspect: "cid"},
-		{name: "without start hook", wantInspect: name},
+		{name: "with start hook", hook: true},
+		{name: "without start hook"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			log := stubCLI(t, "docker", `case "$1" in
-run) sleep 0.3 ;;
-container) printf '%s\n' '{"Id":"cid","Name":"/s","State":{"Status":"running","Running":true}}' ;;
-esac
-exit 0
-`)
-			spec := runSpec{
-				config: &dockercmd.ContainerConfig{Image: "image"},
-				name:   name,
-				cleanup: func() {
-					f, err := os.OpenFile(log, os.O_APPEND|os.O_WRONLY, 0)
-					if err != nil {
-						t.Errorf("open call log: %v", err)
-						return
-					}
-					if _, err := f.WriteString("cleanup\n"); err != nil {
-						t.Errorf("append cleanup marker: %v", err)
-					}
-					if err := f.Close(); err != nil {
-						t.Errorf("close call log: %v", err)
-					}
-				},
-			}
+			log := stubCLI(t, "docker", foregroundRunStub)
+			t.Setenv("STUB_CONTAINER_ID", foregroundContainerID)
+			spec := foregroundSpec(t, name, log)
 			started := 0
 			attach := backend.AttachIO{In: strings.NewReader(""), Out: io.Discard}
 			if tc.hook {
@@ -192,16 +214,69 @@ exit 0
 			if !tc.hook && len(inspects) != 1 {
 				t.Errorf("without a start hook expected a single inspect, got %v", inspects)
 			}
-			if last := inspects[len(inspects)-1]; last != "container inspect --format {{json .}} "+tc.wantInspect {
-				t.Errorf("outliving check inspected %q, want %s", last, tc.wantInspect)
+			for _, inspect := range inspects {
+				if inspect != "container inspect --format {{json .}} "+foregroundContainerID {
+					t.Errorf("inspected %q, want only the created container %s", inspect, foregroundContainerID)
+				}
 			}
-			stop := slices.IndexFunc(calls, func(c string) bool { return strings.HasPrefix(c, "stop cid") })
-			remove := slices.IndexFunc(calls, func(c string) bool { return strings.HasPrefix(c, "rm --force cid") })
+			stop := slices.IndexFunc(calls, func(c string) bool { return strings.HasPrefix(c, "stop "+foregroundContainerID) })
+			remove := slices.IndexFunc(calls, func(c string) bool { return strings.HasPrefix(c, "rm --force "+foregroundContainerID) })
 			cleanup := slices.Index(calls, "cleanup")
 			if stop < 0 || remove < stop || cleanup < remove {
 				t.Errorf("want stop, remove, then cleanup; calls %v", calls)
 			}
 		})
+	}
+}
+
+// A run that never created its container, such as one losing a name conflict,
+// must leave the container holding the name alone and report its own failure.
+func TestAttachForegroundSparesContainerHoldingTheName(t *testing.T) {
+	const name = "enclave-pi-abc123abc123"
+	log := stubCLI(t, "docker", foregroundRunStub)
+	t.Setenv("STUB_CONTAINER_ID", foregroundContainerID)
+	t.Setenv("STUB_RUN_CONFLICT", "1")
+	started := false
+	status, err := attachForeground(context.Background(), foregroundSpec(t, name, log), backend.AttachIO{
+		In:        strings.NewReader(""),
+		Out:       io.Discard,
+		OnStarted: func() { started = true },
+	})
+	calls := stubCalls(t, log)
+	if err == nil || status.Code == backend.ExitCodeInterrupted {
+		t.Fatalf("attachForeground() = %v, %v; want the run failure", status, err)
+	}
+	if started {
+		t.Error("OnStarted called for a container this run did not create")
+	}
+	if hasCallWithPrefix(calls, "stop") || hasCallWithPrefix(calls, "rm") {
+		t.Errorf("the existing container must survive, calls %v", calls)
+	}
+	if !slices.Contains(calls, "cleanup") {
+		t.Errorf("expected the gateway cleanup to run, calls %v", calls)
+	}
+}
+
+// foregroundSpec returns a run spec whose cleanup appends "cleanup" to the
+// stub's call log, so tests can order it against engine calls.
+func foregroundSpec(t *testing.T, name string, log string) runSpec {
+	t.Helper()
+	return runSpec{
+		config: &dockercmd.ContainerConfig{Image: "image"},
+		name:   name,
+		cleanup: func() {
+			f, err := os.OpenFile(log, os.O_APPEND|os.O_WRONLY, 0)
+			if err != nil {
+				t.Errorf("open call log: %v", err)
+				return
+			}
+			if _, err := f.WriteString("cleanup\n"); err != nil {
+				t.Errorf("append cleanup marker: %v", err)
+			}
+			if err := f.Close(); err != nil {
+				t.Errorf("close call log: %v", err)
+			}
+		},
 	}
 }
 

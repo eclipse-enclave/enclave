@@ -60,7 +60,8 @@ exit 0
 
 			result := make(chan error, 1)
 			go func() {
-				result <- RunInteractiveWithStartHook(context.Background(), &ContainerConfig{Image: "example:test"}, nil, "session", "", nil)
+				_, err := RunInteractiveWithStartHook(context.Background(), &ContainerConfig{Image: "example:test"}, nil, "session", "", nil)
+				result <- err
 			}()
 			waitForFile(t, started)
 

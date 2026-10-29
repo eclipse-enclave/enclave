@@ -16,16 +16,6 @@ case "$mode" in
   *) echo "unknown verification mode: $mode" >&2; exit 2 ;;
 esac
 
-# GitHub renames uploaded assets, so a name it would change can never match.
-for file in "$source"/*; do
-  name=${file##*/}
-  published=$("$(dirname "$0")/github-asset-name.sh" "$name")
-  if [ "$name" != "$published" ]; then
-    echo "::error::release asset $name would be renamed to $published by GitHub; publish it under that name" >&2
-    exit 1
-  fi
-done
-
 # The by-tag REST endpoint only finds published releases. Let gh resolve the
 # draft too, then use its numeric ID for the complete REST asset metadata.
 release_id=$(gh release view "$tag" --json databaseId --jq .databaseId)

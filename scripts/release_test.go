@@ -686,9 +686,13 @@ func TestReleaseAssetNamesMatchGitHub(t *testing.T) {
 		"enclave-windows-amd64.zip":                                 "enclave-windows-amd64.zip",
 		"enclave-linux-amd64":                                       "enclave-linux-amd64",
 		"checksums.txt":                                             "checksums.txt",
+		"enclave-\u00e9.txt":                                        "enclave-.txt",
 	}
 	for name, want := range names {
-		output, err := exec.Command("sh", "github-asset-name.sh", name).CombinedOutput()
+		cmd := exec.Command("sh", "github-asset-name.sh", name)
+		// The script pins the C locale; a UTF-8 one would widen its letter ranges.
+		cmd.Env = append(os.Environ(), "LC_ALL=en_US.UTF-8")
+		output, err := cmd.CombinedOutput()
 		if err != nil || strings.TrimSpace(string(output)) != want {
 			t.Errorf("github-asset-name.sh %q = %q, %v; want %q", name, output, err, want)
 		}
@@ -733,18 +737,21 @@ func TestReleaseAssetNamesMatchGitHub(t *testing.T) {
 		}
 	}
 
-	// A name GitHub would change is refused before the release is touched.
-	if err := os.WriteFile(filepath.Join(root, "gh"), []byte("#!/bin/sh\necho 'gh must not be called' >&2; exit 1\n"), 0o755); err != nil {
-		t.Fatal(err)
+	// The assemble job fails on a name GitHub would still change, before
+	// either channel publishes anything.
+	verify := releaseShell(t, "../.github/workflows/reusable-release-assets.yml", "Verify asset names")
+	cmd = exec.Command("bash", "-euo", "pipefail", "-c", verify)
+	cmd.Dir = root
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("verify normalized names: %v: %s", err, output)
 	}
 	if err := os.WriteFile(filepath.Join(root, "artifacts", "enclave_1.0.1~~git.20260421.57.abcdef12-1_amd64.deb"), []byte("package"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	cmd = exec.Command("./scripts/verify-github-release.sh", "v1.2.3", "artifacts")
+	cmd = exec.Command("bash", "-euo", "pipefail", "-c", verify)
 	cmd.Dir = root
-	cmd.Env = append(os.Environ(), "PATH="+root+":"+os.Getenv("PATH"), "GH_REPO=test/repo")
 	output, err := cmd.CombinedOutput()
-	if err == nil || !strings.Contains(string(output), "would be renamed") || strings.Contains(string(output), "gh must not be called") {
+	if err == nil || !strings.Contains(string(output), "would be renamed") {
 		t.Fatalf("verification of a name GitHub renames = %v:\n%s", err, output)
 	}
 }

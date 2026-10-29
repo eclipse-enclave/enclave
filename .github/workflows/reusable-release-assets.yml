@@ -183,6 +183,20 @@ jobs:
           cd artifacts
           sha256sum * > checksums.txt
 
+      # A name GitHub would change leaves checksums.txt and download.eclipse.org
+      # disagreeing with the GitHub release; fail here, before either channel
+      # publishes anything.
+      - name: Verify asset names
+        run: |
+          for file in artifacts/*; do
+            name="${file##*/}"
+            published="$(./scripts/github-asset-name.sh "$name")"
+            if [ "$name" != "$published" ]; then
+              echo "::error::$name would be renamed to $published by GitHub" >&2
+              exit 1
+            fi
+          done
+
       - name: Verify reported versions
         env:
           EXPECTED: ${{ inputs.version }}

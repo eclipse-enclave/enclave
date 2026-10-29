@@ -18,6 +18,10 @@
 
 set -eu
 
+# The bracket ranges below are ASCII regardless of the caller's locale.
+LC_ALL=C
+export LC_ALL
+
 [ $# -gt 0 ] || { echo "usage: $0 NAME..." >&2; exit 2; }
 for name do
     printf '%s\n' "$name" | sed -E 's/[^A-Za-z0-9_-]+/./g; s/^\.//; s/\.$//'

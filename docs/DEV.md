@@ -607,7 +607,7 @@ points at it. GitHub renames uploaded assets, collapsing every run of characters
 other than letters, digits, `-`, and `_` into one dot, so the assemble job
 renames the packages the same way (`scripts/github-asset-name.sh`) before
 writing `checksums.txt`: a `1.0.1~~git…` package is published as `1.0.1.git…`
-on both hosts, and the GitHub verification refuses a name that would change.
+on both hosts, and the assemble job fails on a name that would still change.
 
 ## Docs and Diagrams
 

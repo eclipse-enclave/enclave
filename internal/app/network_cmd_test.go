@@ -161,6 +161,26 @@ func TestNetworkPrintJSONEnvelope(t *testing.T) {
 
 }
 
+func TestNetworkPreviewWarnsAboutUnknownFeatures(t *testing.T) {
+	input := networkPreviewTestInput(t)
+	input.Options.Features = []string{"+svc", "+typo"}
+
+	var code int
+	out, errOut := captureOutput(t, func() { code = runNetworkPrint(input) })
+	if code != 0 || !strings.Contains(out, "server=/svc.example.com/") {
+		t.Fatalf("network print with an unknown feature = %d, want the policy of the known ones:\n%s", code, out)
+	}
+	if !strings.Contains(errOut, `Unknown feature "typo" selected; it is ignored`) {
+		t.Fatalf("stderr = %q, want the unknown-feature warning", errOut)
+	}
+
+	code, out, doc := runNetworkPrintJSON(t, input)
+	domains, _ := doc["domains"].([]any)
+	if code != 0 || doc["error"] != "" || !slices.Contains(domains, any("svc.example.com")) {
+		t.Fatalf("network print --json with an unknown feature = %d, want the policy without an error:\n%s", code, out)
+	}
+}
+
 func TestNetworkPrintJSONWithoutTool(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("HOME does not select the home directory on Windows")

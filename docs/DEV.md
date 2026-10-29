@@ -373,7 +373,8 @@ unset features default to none, so pass `--features` explicitly when needed.
 `--features none` is the explicit "no features" selection.
 Build-option normalization validates feature names against the installed
 extensions before image checks or session startup; unknown additions fail and
-unknown removals warn. Option resolution records removals that the list merge
+unknown removals warn. Unknown additions from config only warn when `--slim`
+or the qemu backend discards the selection. Option resolution records removals that the list merge
 consumes (`Options.DroppedRemovals`) so they are validated too; a replacing
 layer clears them. Staged contexts retain `extensions/features` even when
 empty, and build scripts must preserve an explicitly empty `FEATURES` value.

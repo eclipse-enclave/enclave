@@ -8,6 +8,7 @@
 package app
 
 import (
+	"errors"
 	"fmt"
 	"sort"
 	"strconv"
@@ -48,6 +49,32 @@ func ValidateOptions(opts model.Options, sources model.OptionSources, ctx Valida
 	}
 	normalizedBuildOptions, featureWarnings, normErr := normalizeConfiguredBuildOptions(ctx.Paths, opts, sources.Features)
 	warnings = append(warnings, featureWarnings...)
+	var unknownFeatures *unknownFeaturesError
+	if errors.As(normErr, &unknownFeatures) {
+		// A stale config selection must not block a session that discards it.
+		ignoredBy := ""
+		switch {
+		case opts.Slim:
+			ignoredBy = "--slim"
+		case opts.Backend == backend.NameQEMU && isRunAction(ctx.Action):
+			ignoredBy = "--backend qemu"
+		}
+		if ignoredBy != "" {
+			var fromCLI unknownFeatureGroups
+			for _, group := range unknownFeatures.groups {
+				if group.cli {
+					fromCLI = append(fromCLI, group)
+					continue
+				}
+				warnings = append(warnings, fmt.Sprintf("%s; ignored because %s discards the feature selection", group.message(), ignoredBy))
+			}
+			normErr = nil
+			normalizedBuildOptions = opts.BuildOptions
+			if len(fromCLI) > 0 {
+				normErr = &unknownFeaturesError{groups: fromCLI}
+			}
+		}
+	}
 	if normErr != nil {
 		return opts, sources, warnings, normErr
 	}

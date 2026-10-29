@@ -8,7 +8,6 @@
 package app
 
 import (
-	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -21,6 +20,7 @@ import (
 type featureEntry struct {
 	value string
 	label string
+	cli   bool
 }
 
 // validateFeatureNames checks features entries against the installed
@@ -32,7 +32,7 @@ func validateFeatureNames(entries []featureEntry, allFeatures []model.Extension)
 		available[feature.Name] = struct{}{}
 	}
 
-	var unknown, unknownRemovals namesByLabel
+	var unknown, unknownRemovals unknownFeatureGroups
 	for _, entry := range entries {
 		name := strings.TrimSpace(entry.value)
 		removal := strings.HasPrefix(name, "-")
@@ -52,9 +52,9 @@ func validateFeatureNames(entries []featureEntry, allFeatures []model.Extension)
 			continue
 		}
 		if removal {
-			unknownRemovals.add(entry.label, name)
+			unknownRemovals.add(entry, name)
 		} else {
-			unknown.add(entry.label, name)
+			unknown.add(entry, name)
 		}
 	}
 
@@ -62,30 +62,49 @@ func validateFeatureNames(entries []featureEntry, allFeatures []model.Extension)
 	for _, group := range unknownRemovals {
 		warnings = append(warnings, fmt.Sprintf("%s: ignoring removal of unknown features: %s; run 'enclave features list' to see available features", group.label, strings.Join(normalizeAndSortNames(group.names), ", ")))
 	}
-	var errs []error
-	for _, group := range unknown {
-		errs = append(errs, fmt.Errorf("%s: unknown features: %s; run 'enclave features list' to see available features", group.label, strings.Join(normalizeAndSortNames(group.names), ", ")))
+	if len(unknown) > 0 {
+		return warnings, &unknownFeaturesError{groups: unknown}
 	}
-	return warnings, errors.Join(errs...)
+	return warnings, nil
 }
 
-// namesByLabel groups names by label, in the order the labels first appear.
-type namesByLabel []struct {
+// unknownFeaturesError reports unknown feature names, one line per place
+// that set them.
+type unknownFeaturesError struct {
+	groups unknownFeatureGroups
+}
+
+func (e *unknownFeaturesError) Error() string {
+	lines := make([]string, 0, len(e.groups))
+	for _, group := range e.groups {
+		lines = append(lines, group.message())
+	}
+	return strings.Join(lines, "\n")
+}
+
+// unknownFeatureGroup holds the unknown names set in one place.
+type unknownFeatureGroup struct {
 	label string
+	cli   bool
 	names []string
 }
 
-func (g *namesByLabel) add(label string, name string) {
+func (g unknownFeatureGroup) message() string {
+	return fmt.Sprintf("%s: unknown features: %s; run 'enclave features list' to see available features", g.label, strings.Join(normalizeAndSortNames(g.names), ", "))
+}
+
+// unknownFeatureGroups groups names by where they were set, in the order the
+// places first appear.
+type unknownFeatureGroups []unknownFeatureGroup
+
+func (g *unknownFeatureGroups) add(entry featureEntry, name string) {
 	for i := range *g {
-		if (*g)[i].label == label {
+		if (*g)[i].label == entry.label {
 			(*g)[i].names = append((*g)[i].names, name)
 			return
 		}
 	}
-	*g = append(*g, struct {
-		label string
-		names []string
-	}{label: label, names: []string{name}})
+	*g = append(*g, unknownFeatureGroup{label: entry.label, cli: entry.cli, names: []string{name}})
 }
 
 // featureEntries lists the features selection of opts and the removals that
@@ -106,15 +125,16 @@ func featureEntries(opts model.Options, featureSource model.OptionSource) []feat
 	}
 	entries := make([]featureEntry, 0, len(opts.Features)+len(opts.DroppedRemovals))
 	for _, value := range opts.Features {
-		label := fallback
+		entry := featureEntry{value: value, label: fallback, cli: featureSource == model.SourceCLI}
 		if origin, ok := opts.Origins.Origin("features", value); ok {
-			label = config.ListOriginLabel("features", origin)
+			entry.label = config.ListOriginLabel("features", origin)
+			entry.cli = origin.Source == model.SourceCLI
 		}
-		entries = append(entries, featureEntry{value: value, label: label})
+		entries = append(entries, entry)
 	}
 	for _, removal := range opts.DroppedRemovals {
 		if removal.Option == "features" {
-			entries = append(entries, featureEntry{value: "-" + removal.Name, label: config.ListOriginLabel("features", removal.Origin)})
+			entries = append(entries, featureEntry{value: "-" + removal.Name, label: config.ListOriginLabel("features", removal.Origin), cli: removal.Origin.Source == model.SourceCLI})
 		}
 	}
 	return entries

@@ -80,7 +80,6 @@ func TestValidateOptionsUnknownFeatureSource(t *testing.T) {
 		{model.SourceProject, "docker", "features in project config"},
 		{model.SourceToolOverride, "docker", "features in tool override"},
 		{model.SourceCLI, "qemu", "--features"},
-		{model.SourceGlobal, "qemu", "features in global config"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.backend+"/"+tc.want, func(t *testing.T) {
@@ -321,6 +320,47 @@ func TestValidateOptionsLayeredFeatures(t *testing.T) {
 	}
 }
 
+func TestValidateOptionsUnknownFeaturesInDiscardedSelection(t *testing.T) {
+	paths := testPathsWithFeatureDefaults(t)
+	cases := []struct {
+		name      string
+		backend   string
+		slim      bool
+		source    model.OptionSource
+		wantError bool
+		ignoredBy string
+	}{
+		{name: "config selection with slim", backend: "docker", slim: true, source: model.SourceProject, ignoredBy: "--slim"},
+		{name: "config selection with qemu", backend: "qemu", source: model.SourceGlobal, ignoredBy: "--backend qemu"},
+		{name: "CLI selection with slim", backend: "docker", slim: true, source: model.SourceCLI, wantError: true},
+		{name: "config selection without slim", backend: "docker", source: model.SourceProject, wantError: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			opts := model.Options{
+				RunOptions:   model.RunOptions{Backend: tc.backend, Tool: "codex"},
+				BuildOptions: model.BuildOptions{ImageName: "test", Slim: tc.slim, Features: []string{"node-dev", "typo"}},
+			}
+			sources := model.DefaultOptionSources()
+			sources.Features = tc.source
+			_, _, warnings, err := ValidateOptions(opts, sources, ValidationContext{Action: "run", Paths: paths})
+			if tc.wantError {
+				if err == nil || !strings.Contains(err.Error(), "unknown features: typo;") {
+					t.Fatalf("expected unknown-feature error, got %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("ValidateOptions: %v", err)
+			}
+			want := "unknown features: typo; run 'enclave features list' to see available features; ignored because " + tc.ignoredBy + " discards the feature selection"
+			if !strings.Contains(strings.Join(warnings, "\n"), want) {
+				t.Errorf("expected warning %q, got %v", want, warnings)
+			}
+		})
+	}
+}
+
 func TestValidateOptionsUnknownFeatureOrigins(t *testing.T) {
 	paths := testPathsWithFeatureDefaults(t)
 	cases := []struct {
@@ -373,6 +413,24 @@ func TestValidateOptionsUnknownFeatureOrigins(t *testing.T) {
 			wantWarning: "tool_overrides.claude.features in global config: ignoring removal of unknown features: typo;",
 		},
 	}
+	t.Run("slim keeps command-line names strict", func(t *testing.T) {
+		cliOpts := config.DefaultOptions()
+		cliOpts.Backend = "docker"
+		cliOpts.Slim = true
+		cliOpts.Features = []string{"+other"}
+		cliSources := model.DefaultOptionSources()
+		cliSources.Features = model.SourceCLI
+		global := config.Defaults{Features: []string{"+typo"}}
+		opts, _, _ := config.ResolveOptionsForTool(cliOpts, cliSources, global, config.Defaults{}, "claude")
+		_, _, warnings, err := ValidateOptions(opts, opts.Sources, ValidationContext{Action: "run", Paths: paths})
+		if err == nil || err.Error() != "--features: unknown features: other; run 'enclave features list' to see available features" {
+			t.Fatalf("expected only the command-line name to fail, got %v", err)
+		}
+		want := "features in global config: unknown features: typo; run 'enclave features list' to see available features; ignored because --slim discards the feature selection"
+		if strings.Join(warnings, "\n") != want {
+			t.Errorf("warnings = %q, want %q", warnings, want)
+		}
+	})
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			cliOpts := config.DefaultOptions()

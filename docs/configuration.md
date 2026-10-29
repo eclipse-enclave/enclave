@@ -226,8 +226,10 @@ the inherited one and `+`/`-` entries amend it:
 
 Feature names, including `+name` entries, must match an installed extension;
 unknown names fail before building or starting a session. Unknown `-name`
-removals only warn. Both messages name the flag or the key and file that set
-the entry. Use `enclave features list` to see available names.
+removals only warn, as do unknown names from config when `--slim` or
+`--backend qemu` discards the selection. Each message names the flag or the
+key and file that set the entry. Use `enclave features list` to see available
+names.
 
 `host_config_paths` is resolved per tool against that tool's reviewed
 `passthroughPaths` from its `spec.yaml`. Use:

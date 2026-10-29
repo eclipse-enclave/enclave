@@ -70,7 +70,6 @@ supported under `tool_overrides.<tool>`.
 | `no_cache` | Disable package caches |
 | `no_history` | Disable shell history |
 | `no_memory` | Disable per-project agent memory; see [memory controls](runtime/stores.md#agent-memory) |
-| `session_monitor` | Run agents under the managed tmux session (enables `status` snapshots) |
 | `session_tint` | Terminal background color marking a session-owned terminal, as `#rrggbb` (unset: no tint) |
 | `timezone` | Container `TZ`, e.g. `UTC` or `Europe/Vienna` (unset: host time zone); a `TZ` from `.env`, devcontainer `containerEnv`, or `--pass-env` wins |
 | `base_image` | Docker base image override |

@@ -130,12 +130,6 @@ func optionCLIFlags() map[string][]CLIFlag {
 				sources.NoCache = model.SourceCLI
 			}),
 		},
-		"session_monitor": {
-			boolFlag("--session-monitor", "Run the agent under the managed tmux session (enables status snapshots)", func(opts *model.Options, sources *model.OptionSources, value bool) {
-				opts.SessionMonitor = value
-				sources.SessionMonitor = model.SourceCLI
-			}),
-		},
 		"no_history": {
 			boolFlag("--no-history", "Disable shell history", func(opts *model.Options, sources *model.OptionSources, value bool) {
 				opts.NoHistory = value

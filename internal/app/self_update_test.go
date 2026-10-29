@@ -102,7 +102,6 @@ func TestAutomaticSelfUpdateAllowedSkipsMachineOutput(t *testing.T) {
 	for _, parsed := range []cli.Result{
 		{Action: "config", ConfigView: model.ConfigView{JSON: true}},
 		{Action: "ps", Options: model.Options{PSOptions: model.PSOptions{PSJSON: true}}},
-		{Action: "status", Options: model.Options{StatusOptions: model.StatusOptions{StatusJSON: true}}},
 		{Action: "network-log", NetworkLogView: model.NetworkLogView{JSON: true}},
 		{Action: "tools", ExtRequest: &extinstall.Request{JSON: true}},
 		{Action: "review-target"},

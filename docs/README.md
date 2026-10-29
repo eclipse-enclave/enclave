@@ -8,7 +8,6 @@
 - [networking.md](networking.md) — Network isolation, allowlists, and host-port bridging
 - [persistence.md](persistence.md) — Sessions, persistent stores, and cleanup
 - [tools.md](tools.md) — Built-in tools, images, devcontainers, and updates
-- [session-status.md](session-status.md) — Terminal snapshots for external orchestrators
 - [windows.md](windows.md) — The WSL2 launcher: setup, working-directory rules, and environment forwarding
 
 ## Developer Documentation

@@ -43,7 +43,6 @@ var BuiltinNames = []string{
 	"self-update",
 	"shell",
 	"ssh-init",
-	"status",
 	"stop",
 	"theia",
 	"theia-next",

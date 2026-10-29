@@ -375,7 +375,6 @@ func (r *Runtime) prepareMounts() (*mountAccumulator, hostGitIdentity, error) {
 		return nil, hostGitIdentity{}, err
 	}
 	r.addSSHMount(mountArgs)
-	r.addSessionMonitorEnv(mountArgs)
 	if err := r.addCacheMounts(mountArgs); err != nil {
 		return nil, hostGitIdentity{}, err
 	}
@@ -1170,21 +1169,6 @@ func (r *Runtime) addUserCommandMount(mounts *mountAccumulator) {
 	}
 	mounts.AddMount(bindMount(r.userCommandMount.HostDir, r.userCommandMount.ContainerPath, true))
 	logx.Infof("User session commands mounted read-only at %s", r.userCommandMount.ContainerPath)
-}
-
-// addSessionMonitorEnv asks the entrypoint to run the agent under the managed
-// tmux session so `enclave status` can capture terminal snapshots. The
-// backend derives the session-monitor label from this env var. Opt-in via
-// --session-monitor.
-func (r *Runtime) addSessionMonitorEnv(mounts *mountAccumulator) {
-	if !r.run.SessionMonitor {
-		return
-	}
-	mounts.AddEnv(model.EnvSessionMonitor, "1")
-	// Record the tmux owner so `status` can capture as that user; under
-	// --runtime-uid-remap the container's default exec user is root, not the
-	// remapped agent that actually runs tmux.
-	mounts.AddEnv(model.EnvSessionMonitorUser, r.containerUser)
 }
 
 func (r *Runtime) addHistoryMounts(mounts *mountAccumulator) {

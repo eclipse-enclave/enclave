@@ -141,7 +141,6 @@ directly: "enclave --tool codex" is equivalent to "enclave run --tool codex".`,
 	rootCmd.AddCommand(
 		runCommand(res),
 		psCommand(res),
-		statusCommand(res),
 		continueCommand(res),
 		resumeCommand(res),
 		configCommand(res),

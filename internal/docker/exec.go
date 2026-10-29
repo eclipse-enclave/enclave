@@ -43,18 +43,3 @@ func ExecInteractive(ctx context.Context, containerID string, cmd []string, user
 	}
 	return err
 }
-
-// ExecCapture runs cmd inside a running container without a TTY and returns
-// its stdout verbatim. Unlike capture it does not trim the output: callers
-// capture terminal screens where leading/trailing blank lines are meaningful.
-// An empty user runs as the container's default exec user. On failure it
-// returns stdout so far and a *cliError carrying stderr and the exit code.
-func ExecCapture(ctx context.Context, containerID string, cmd []string, user string) (string, error) {
-	args := []string{"exec"}
-	if user != "" {
-		args = append(args, "--user", user)
-	}
-	args = append(args, containerID)
-	args = append(args, cmd...)
-	return captureCmd(ctx, false, args...)
-}

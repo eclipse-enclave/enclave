@@ -156,7 +156,6 @@ func TestPromptAllowed(t *testing.T) {
 	}{
 		{name: "plain run", parsed: cli.Result{Action: "run"}, want: true},
 		{name: "ps --json", parsed: cli.Result{Action: "ps", Options: model.Options{PSOptions: model.PSOptions{PSJSON: true}}}, want: false},
-		{name: "status --json", parsed: cli.Result{Action: "status", Options: model.Options{StatusOptions: model.StatusOptions{StatusJSON: true}}}, want: false},
 		{name: "config view --json", parsed: cli.Result{Action: "config", ConfigView: model.ConfigView{JSON: true}}, want: false},
 		{name: "tools add --json --yes", parsed: cli.Result{Action: cli.ActionExtensionManage, ExtRequest: &extinstall.Request{JSON: true, Yes: true}}, want: false},
 		{name: "tools add --yes", parsed: cli.Result{Action: cli.ActionExtensionManage, ExtRequest: &extinstall.Request{Yes: true}}, want: false},
@@ -177,7 +176,7 @@ func TestActionUsesBackend(t *testing.T) {
 			t.Fatalf("%s never touches an engine and must not resolve the backend", action)
 		}
 	}
-	for _, action := range []string{"run", "shell", "exec", "update", "info", "ps", "status", "stop", "attach", "cleanup", "theia", "network-status", "network-apply", "network-set-mode", "auth-import", "auth-export"} {
+	for _, action := range []string{"run", "shell", "exec", "update", "info", "ps", "stop", "attach", "cleanup", "theia", "network-status", "network-apply", "network-set-mode", "auth-import", "auth-export"} {
 		if !actionUsesBackend(action) {
 			t.Fatalf("%s uses an engine and must resolve the backend", action)
 		}

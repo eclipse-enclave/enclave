@@ -55,9 +55,8 @@ RUN --mount=type=cache,id=enclave-apt-cache,target=/var/cache/apt,sharing=locked
         gettext-base \
         # Process management
         procps psmisc socat \
-        # Session monitor (terminal snapshots via `enclave status`); ncurses-term
-        # ships the tmux-256color terminfo entry the managed session sets as TERM
-        tmux ncurses-term \
+        # Terminfo for host terminals beyond xterm (alacritty, foot, kitty, ...)
+        ncurses-term \
         # Sandbox support
         bubblewrap \
         # Python runtime
@@ -335,14 +334,12 @@ RUN echo 'eval "$(direnv hook bash)"' >> ~/.bashrc && \
 USER root
 COPY runtime-assets/auth-reconcile.sh /usr/local/share/enclave/auth-reconcile.sh
 COPY runtime-assets/net.sh /usr/local/share/enclave/net.sh
-COPY runtime-assets/tmux-session.conf /usr/local/share/enclave/tmux-session.conf
 COPY runtime-assets/kit-init.sh /usr/local/share/enclave/kit-init.sh
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod a+rx /usr/local/bin/entrypoint.sh \
         /usr/local/share/enclave/auth-reconcile.sh \
         /usr/local/share/enclave/net.sh && \
-    chmod a+r /usr/local/share/enclave/tmux-session.conf \
-        /usr/local/share/enclave/kit-init.sh
+    chmod a+r /usr/local/share/enclave/kit-init.sh
 USER ${USERNAME}
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 CMD ["/bin/bash"]

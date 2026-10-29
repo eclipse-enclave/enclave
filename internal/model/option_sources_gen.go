@@ -45,7 +45,6 @@ type RunOptionSources struct {
 	Ports                    OptionSource
 	ProjectMount             OptionSource
 	SensitiveDirExceptions   OptionSource
-	SessionMonitor           OptionSource
 	SessionName              OptionSource
 	SessionTint              OptionSource
 	SkillsValidation         OptionSource
@@ -116,7 +115,6 @@ func DefaultOptionSources() OptionSources {
 			Ports:                    SourceDefault,
 			ProjectMount:             SourceDefault,
 			SensitiveDirExceptions:   SourceDefault,
-			SessionMonitor:           SourceDefault,
 			SessionName:              SourceDefault,
 			SessionTint:              SourceDefault,
 			SkillsValidation:         SourceDefault,
@@ -288,9 +286,6 @@ func MergeOptionSources(base OptionSources, override OptionSources) OptionSource
 	}
 	if override.SensitiveDirExceptions != SourceUnset {
 		base.SensitiveDirExceptions = override.SensitiveDirExceptions
-	}
-	if override.SessionMonitor != SourceUnset {
-		base.SessionMonitor = override.SessionMonitor
 	}
 	if override.SessionName != SourceUnset {
 		base.SessionName = override.SessionName

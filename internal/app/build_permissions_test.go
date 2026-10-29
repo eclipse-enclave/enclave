@@ -22,7 +22,6 @@ func TestCollectAppRootModeIssuesReportsRestrictiveAssets(t *testing.T) {
 	writeModeTestFile(t, filepath.Join(root, "runtime-assets", "auth-reconcile.sh"), 0o640)
 	writeModeTestFile(t, filepath.Join(root, "runtime-assets", "kit-init.sh"), 0o640)
 	writeModeTestFile(t, filepath.Join(root, "runtime-assets", "net.sh"), 0o644)
-	writeModeTestFile(t, filepath.Join(root, "runtime-assets", "tmux-session.conf"), 0o644)
 	writeModeTestFile(t, filepath.Join(root, "extensions", "tools", "claude", "spec.yaml"), 0o640)
 	writeModeTestFile(t, filepath.Join(root, "extensions", "tools", "claude", "install.sh"), 0o644)
 

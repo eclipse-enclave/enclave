@@ -50,7 +50,7 @@ func TestParseSkillsValidation(t *testing.T) {
 
 func TestBackendFlagOnEngineCommands(t *testing.T) {
 	commands := [][]string{
-		{"ps"}, {"status"}, {"stop"}, {"attach"}, {"exec"},
+		{"ps"}, {"stop"}, {"attach"}, {"exec"},
 		{"update"}, {"theia"}, {"theia-next"}, {"cleanup"}, {"info"},
 		{"auth", "import"}, {"auth", "export"},
 		{"network", "status"}, {"network", "log"}, {"network", "apply"},

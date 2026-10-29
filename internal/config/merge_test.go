@@ -42,7 +42,6 @@ func TestMergeDefaultsCoversAllFields(t *testing.T) {
 		NoCache:                &trueVal,
 		NoHistory:              &trueVal,
 		NoMemory:               &trueVal,
-		SessionMonitor:         &trueVal,
 		SessionTint:            "#2a0f12",
 		Timezone:               "UTC",
 		BaseImage:              "test-base-image",

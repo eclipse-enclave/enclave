@@ -730,8 +730,8 @@ func TestShadowedReportsBuiltinsAndUserCommands(t *testing.T) {
 	hostDir, _ := mkdirs(t, home)
 	writeExec(t, filepath.Join(hostDir, "mine"))
 
-	got := Shadowed(home, []string{"status", "mine", "vnc-viewer"})
-	if len(got) != 2 || got["status"] != "a built-in command" ||
+	got := Shadowed(home, []string{"stop", "mine", "vnc-viewer"})
+	if len(got) != 2 || got["stop"] != "a built-in command" ||
 		!strings.Contains(got["mine"], filepath.Join(hostDir, "mine")) {
 		t.Fatalf("Shadowed = %v", got)
 	}
@@ -742,7 +742,7 @@ func TestResolvingSkipsShadowedNames(t *testing.T) {
 	hostDir, _ := mkdirs(t, home)
 	writeExec(t, filepath.Join(hostDir, "mine"))
 	dir := extensionCommandDir(t, home, model.KindFeature, "vnc")
-	for _, name := range []string{"status", "mine", "vnc-viewer"} {
+	for _, name := range []string{"stop", "mine", "vnc-viewer"} {
 		writeExec(t, filepath.Join(dir, name))
 	}
 
@@ -751,7 +751,7 @@ func TestResolvingSkipsShadowedNames(t *testing.T) {
 		t.Fatalf("Resolving = %v, want [vnc-viewer]", got)
 	}
 	names, err := ExtensionCommandNames(extDir)
-	if err != nil || strings.Join(names, ",") != "mine,status,vnc-viewer" {
+	if err != nil || strings.Join(names, ",") != "mine,stop,vnc-viewer" {
 		t.Fatalf("ExtensionCommandNames = %v, %v", names, err)
 	}
 }

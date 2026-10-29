@@ -499,29 +499,6 @@ func OptionDefs() []OptionDef {
 			},
 		},
 		{
-			Name:           "session_monitor",
-			Group:          OptionGroupRun,
-			Kind:           OptionKindBool,
-			AffectsSession: SessionAffected,
-			OptionField:    "SessionMonitor",
-			SourceField:    "SessionMonitor",
-			DefaultsField:  "SessionMonitor",
-			Apply:          ApplyBoolPtr,
-			CLIFlags: []CLIFlagDef{
-				{
-					Name:      "--session-monitor",
-					Usage:     "Run the agent under the managed tmux session (enables status snapshots)",
-					ValueKind: CLIValueNone,
-					Action: CLIAction{
-						Kind:        CLIActionSetBool,
-						OptionField: "SessionMonitor",
-						SourceField: "SessionMonitor",
-						BoolValue:   true,
-					},
-				},
-			},
-		},
-		{
 			Name:           "session_tint",
 			Group:          OptionGroupRun,
 			Kind:           OptionKindString,

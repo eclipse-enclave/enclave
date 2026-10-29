@@ -98,7 +98,7 @@ func TestBuildEnvironmentIgnoresNonBuildingCommands(t *testing.T) {
 	t.Setenv(model.EnvNoRebuild, "1")
 	commands := []usercmd.Command{{Name: "deploy", Target: usercmd.TargetHost, Path: "/commands/host/deploy"}}
 	for _, args := range [][]string{
-		{"ps"}, {"status"}, {"exec"}, {"attach"}, {"stop"},
+		{"ps"}, {"exec"}, {"attach"}, {"stop"},
 		{"network", "status"}, {"network", "apply"}, {"network", "print"},
 		{"info"}, {"devcontainer", "generate"},
 		{"tools", "update", "codex", "--yes"}, {"features", "update", "--yes"},

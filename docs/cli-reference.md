@@ -21,7 +21,6 @@ unchanged. See [windows.md](windows.md).
 | `enclave continue` | Continue the latest session for the selected tool |
 | `enclave resume` | Session picker/list when supported (falls back to `continue`) |
 | `enclave ps` | List enclave containers (`--all` includes stopped, `--json` emits structured output) |
-| `enclave status` | Show terminal snapshots of running sessions |
 | `enclave attach [name]` | Attach to a background session by session name or container name |
 | `enclave exec` | Attach to a running container (`--name` selects one by session or container name) |
 | `enclave exec --admin` | Attach with limited sudo (apt/dpkg) |
@@ -40,9 +39,7 @@ Session provenance: each JSON object also carries `options`, the options that sh
 
 To compare a session with the current configuration, see [Detecting session drift](configuration.md#detecting-session-drift).
 
-`--backend` selects one engine for `ps`, `status`, `stop`, `attach`, and `exec` without changing the saved backend. For example, after `enclave run --backend podman`, use `enclave ps --backend podman` to find that session and `enclave attach --backend podman <name>` to attach. `ps` does not merge sessions from multiple engines.
-
-`status` reports sessions of the current project (like `exec` without `--name`); `--all` widens it to every project. Flags: `--tool` and `--name` filter sessions; `--json` emits one machine-readable snapshot object per session (screen text and OSC title for external state detection). Each snapshot captures the trailing 24 screen rows. See [Session status snapshots](session-status.md).
+`--backend` selects one engine for `ps`, `stop`, `attach`, and `exec` without changing the saved backend. For example, after `enclave run --backend podman`, use `enclave ps --backend podman` to find that session and `enclave attach --backend podman <name>` to attach. `ps` does not merge sessions from multiple engines.
 
 `enclave attach` flags: `--detach-keys <sequence>` overrides the key sequence for detaching from the session (default `ctrl-\`); `--tool` disambiguates a session name used by more than one tool. When `attach` returns and the session has exited, it stops the session's gateway sidecar.
 
@@ -52,7 +49,7 @@ container name from `enclave ps`, a container ID, or the session name passed to
 Session names are matched in sanitized form on both sides (lowercased,
 non-alphanumerics collapsed to `-`, truncated to 32 characters), so a session
 started as `--name "My Task"` is reachable as either `my-task` or `"My Task"`.
-The same holds for the `--name` filter of `ps`, `status`, and `stop`; a `--name`
+The same holds for the `--name` filter of `ps` and `stop`; a `--name`
 that is blank or sanitizes to nothing matches no session rather than all of
 them.
 
@@ -286,7 +283,6 @@ List flags (`-p`, `--allow-domain`, `--bridge-port`, `--pass-env`, `--cache-from
 | `--no-yolo` | Disable YOLO mode (agents will prompt for confirmation) |
 | `--host-config <none\|passthrough>` | Reuse reviewed paths from the host tool config |
 | `--skills-validation <strict\|agent>` | Validate shared skill frontmatter strictly (default) or leave metadata interpretation to the agent; values are case-insensitive |
-| `--session-monitor` | Run the agent under the managed tmux session (enables `status` snapshots) |
 | `--verbose` | Verbose logging |
 | `--allow-root` | Skip the root check (accepted by every command; CLI-only). See [Running as root](#running-as-root) |
 | `--playwright-mcp` | Enable Playwright MCP server for browser automation (Claude only) |

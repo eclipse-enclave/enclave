@@ -500,12 +500,10 @@ func TestReadDefaults_SessionTintDropsInvalidValues(t *testing.T) {
 
 func TestReadDefaults_RejectsRemovedFields(t *testing.T) {
 	cases := map[string]string{
-		"image_mode":                           `{"image_mode":"all"}`,
-		"agent_tools":                          `{"agent_tools":["claude","codex"]}`,
-		"no_agents":                            `{"no_agents":true}`,
-		"session_monitor":                      `{"session_monitor":true}`,
-		"tool_overrides.claude.agent_tools":    `{"tool_overrides":{"claude":{"agent_tools":["codex"]}}}`,
-		"tool_overrides.codex.session_monitor": `{"tool_overrides":{"codex":{"session_monitor":true}}}`,
+		"image_mode":                        `{"image_mode":"all"}`,
+		"agent_tools":                       `{"agent_tools":["claude","codex"]}`,
+		"no_agents":                         `{"no_agents":true}`,
+		"tool_overrides.claude.agent_tools": `{"tool_overrides":{"claude":{"agent_tools":["codex"]}}}`,
 	}
 	for name, payload := range cases {
 		t.Run(name, func(t *testing.T) {

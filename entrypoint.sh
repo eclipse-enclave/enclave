@@ -719,5 +719,4 @@ if [ -t 0 ] && [ -t 1 ]; then
     echo ""
 fi
 
-# Execute the command passed to docker run
 exec "$@"

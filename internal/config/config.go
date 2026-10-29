@@ -269,14 +269,13 @@ func readDefaults(path string) (Defaults, []Warning, error) {
 	return defaults, warnings, nil
 }
 
-// removedConfigFields lists config options that no longer exist. They are hard
-// errors rather than warnings so stale configs surface loudly instead of
-// silently building or running something unexpected.
+// removedConfigFields lists config options dropped with the per-tool-only image
+// model. They are hard errors rather than warnings so stale configs surface
+// loudly instead of silently building something unexpected.
 var removedConfigFields = []struct{ key, hint string }{
 	{"image_mode", "images are always per-tool; remove it"},
 	{"agent_tools", "images are per-tool; select the agent with --tool"},
 	{"no_agents", "the no-agent image was removed; use a tool image with the shell command instead"},
-	{"session_monitor", "the managed tmux session and `enclave status` were removed; remove it"},
 }
 
 func rejectRemovedConfigFields(path string, doc map[string]json.RawMessage) error {

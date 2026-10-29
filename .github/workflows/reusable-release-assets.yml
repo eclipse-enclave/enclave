@@ -128,10 +128,20 @@ jobs:
           path: artifacts
           merge-multiple: true
 
+      # GitHub renames uploaded assets (scripts/github-asset-name.sh). The
+      # packages take their published names here, before checksums.txt is
+      # written, so the GitHub release and download.eclipse.org agree.
       - name: Normalize artifact names
         run: |
-          cd artifacts
-          for f in *; do [ "$f" = "${f//\~/.}" ] || mv "$f" "${f//\~/.}"; done
+          for file in artifacts/*; do
+            name="$(./scripts/github-asset-name.sh "${file##*/}")"
+            [ "${file##*/}" != "$name" ] || continue
+            if [ -e "artifacts/$name" ]; then
+              echo "::error::${file##*/} and $name would both be published as $name" >&2
+              exit 1
+            fi
+            mv "$file" "artifacts/$name"
+          done
 
       # Windows expects an archive, and Scoop requires one. The launcher is
       # named enclave.exe inside the archive so `bin` works for both
@@ -178,7 +188,7 @@ jobs:
           EXPECTED: ${{ inputs.version }}
         run: |
           version="$(./scripts/version.sh)"
-          package_version="$(./scripts/version.sh --package | tr '~' '.')"
+          package_version="$(./scripts/github-asset-name.sh "$(./scripts/version.sh --package)")"
           if [ -n "$EXPECTED" ] && [ "$version" != "$EXPECTED" ]; then
             echo "checkout derives version $version, but the release is $EXPECTED" >&2
             exit 1

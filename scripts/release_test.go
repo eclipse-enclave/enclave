@@ -671,3 +671,80 @@ case "$NO_DIGEST" in
   missing-upload) rm "$dest/binary" ;;
 esac
 `
+
+// GitHub renames uploaded assets, so checksums.txt and download.eclipse.org
+// must already carry the names the GitHub release will show.
+func TestReleaseAssetNamesMatchGitHub(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("release publication runs on Linux")
+	}
+	names := map[string]string{
+		"enclave-0.1.2~~git.20261029.87.e951bfe0-1.fc44.x86_64.rpm": "enclave-0.1.2.git.20261029.87.e951bfe0-1.fc44.x86_64.rpm",
+		"enclave_0.1.2~~git.20261029.87.e951bfe0-1_amd64.deb":       "enclave_0.1.2.git.20261029.87.e951bfe0-1_amd64.deb",
+		"enclave_1.1.0~rc.1-1_amd64.deb":                            "enclave_1.1.0.rc.1-1_amd64.deb",
+		"enclave-1.0.0-1.fc44.x86_64.rpm":                           "enclave-1.0.0-1.fc44.x86_64.rpm",
+		"enclave-windows-amd64.zip":                                 "enclave-windows-amd64.zip",
+		"enclave-linux-amd64":                                       "enclave-linux-amd64",
+		"checksums.txt":                                             "checksums.txt",
+	}
+	for name, want := range names {
+		output, err := exec.Command("sh", "github-asset-name.sh", name).CombinedOutput()
+		if err != nil || strings.TrimSpace(string(output)) != want {
+			t.Errorf("github-asset-name.sh %q = %q, %v; want %q", name, output, err, want)
+		}
+	}
+
+	root := t.TempDir()
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(cwd, filepath.Join(root, "scripts")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(root, "artifacts"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for name := range names {
+		if err := os.WriteFile(filepath.Join(root, "artifacts", name), []byte(name), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cmd := exec.Command("bash", "-euo", "pipefail", "-c", releaseShell(t, "../.github/workflows/reusable-release-assets.yml", "Normalize artifact names"))
+	cmd.Dir = root
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("normalize: %v: %s", err, output)
+	}
+	entries, err := os.ReadDir(filepath.Join(root, "artifacts"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]string{}
+	for _, entry := range entries {
+		data, err := os.ReadFile(filepath.Join(root, "artifacts", entry.Name()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		got[string(data)] = entry.Name()
+	}
+	for name, want := range names {
+		if got[name] != want {
+			t.Errorf("%q was published as %q, want %q", name, got[name], want)
+		}
+	}
+
+	// A name GitHub would change is refused before the release is touched.
+	if err := os.WriteFile(filepath.Join(root, "gh"), []byte("#!/bin/sh\necho 'gh must not be called' >&2; exit 1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "artifacts", "enclave_1.0.1~~git.20260421.57.abcdef12-1_amd64.deb"), []byte("package"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cmd = exec.Command("./scripts/verify-github-release.sh", "v1.2.3", "artifacts")
+	cmd.Dir = root
+	cmd.Env = append(os.Environ(), "PATH="+root+":"+os.Getenv("PATH"), "GH_REPO=test/repo")
+	output, err := cmd.CombinedOutput()
+	if err == nil || !strings.Contains(string(output), "would be renamed") || strings.Contains(string(output), "gh must not be called") {
+		t.Fatalf("verification of a name GitHub renames = %v:\n%s", err, output)
+	}
+}

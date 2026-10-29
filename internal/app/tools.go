@@ -8,7 +8,9 @@
 package app
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"strings"
 
@@ -50,7 +52,11 @@ func extensionInventory(paths model.Paths, kind model.ExtensionKind, exts []mode
 func loadProfileOrReport(paths model.Paths, tool string) (model.Profile, error) {
 	profile, err := config.LoadProfile(paths, tool)
 	if err != nil {
-		logx.Errorf("%v", err)
+		if errors.Is(err, fs.ErrNotExist) {
+			logx.Errorf("unknown tool: %s", tool)
+		} else {
+			logx.Errorf("%v", err)
+		}
 		if available, listErr := config.ListProfiles(paths); listErr == nil {
 			logx.Infof("Available tools: %s", strings.Join(available, " "))
 		}

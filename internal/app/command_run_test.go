@@ -457,3 +457,11 @@ func TestResolveAdditionalMountsHonorsProjectSensitiveDirExceptions(t *testing.T
 		t.Errorf("warnings %q do not mention %q", stderr, want)
 	}
 }
+
+func TestLoadProfileOrReportNamesUnknownTool(t *testing.T) {
+	var err error
+	_, errOut := captureOutput(t, func() { _, err = loadProfileOrReport(testPathsWithFeatures(t), "bogus") })
+	if err == nil || !strings.Contains(errOut, "unknown tool: bogus") || strings.Contains(errOut, "file does not exist") {
+		t.Fatalf("loadProfileOrReport(bogus) = %v, stderr %q; want the tool named", err, errOut)
+	}
+}

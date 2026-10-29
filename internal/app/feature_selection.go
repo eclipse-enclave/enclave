@@ -32,7 +32,7 @@ func validateFeatureNames(entries []featureEntry, allFeatures []model.Extension)
 		available[feature.Name] = struct{}{}
 	}
 
-	var unknown, unknownRemovals unknownFeatureGroups
+	var unknown, unknownRemovals, selectorRemovals unknownFeatureGroups
 	for _, entry := range entries {
 		name := strings.TrimSpace(entry.value)
 		removal := strings.HasPrefix(name, "-")
@@ -42,11 +42,12 @@ func validateFeatureNames(entries []featureEntry, allFeatures []model.Extension)
 		if name == "" {
 			continue
 		}
-		if !removal {
-			switch strings.ToLower(name) {
-			case model.SelectionDefault, model.FeatureSelectionAll:
-				continue
+		switch strings.ToLower(name) {
+		case model.SelectionDefault, model.FeatureSelectionAll:
+			if removal {
+				selectorRemovals.add(entry, "-"+name)
 			}
+			continue
 		}
 		if _, ok := available[name]; ok {
 			continue
@@ -59,6 +60,9 @@ func validateFeatureNames(entries []featureEntry, allFeatures []model.Extension)
 	}
 
 	var warnings []string
+	for _, group := range selectorRemovals {
+		warnings = append(warnings, fmt.Sprintf("%s: ignoring %s: \"default\" and \"all\" are selectors, not features, and cannot be removed", group.label, strings.Join(normalizeAndSortNames(group.names), ", ")))
+	}
 	for _, group := range unknownRemovals {
 		warnings = append(warnings, fmt.Sprintf("%s: ignoring removal of unknown features: %s; run 'enclave features list' to see available features", group.label, strings.Join(normalizeAndSortNames(group.names), ", ")))
 	}

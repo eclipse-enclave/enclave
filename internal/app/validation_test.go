@@ -70,6 +70,34 @@ func TestValidateOptionsFeatureSelection(t *testing.T) {
 	}
 }
 
+func TestValidateOptionsSelectorRemoval(t *testing.T) {
+	paths := testPathsWithFeatureDefaults(t)
+	cases := []struct {
+		requested []string
+		want      []string
+		warning   string
+	}{
+		{requested: []string{"-default"}, want: []string{"github-cli", "node-dev"}, warning: "ignoring -default:"},
+		{requested: []string{"all", "-all"}, want: []string{"github-cli", "node-dev", "shell-extras"}, warning: "ignoring -all:"},
+	}
+	for _, tc := range cases {
+		t.Run(strings.Join(tc.requested, ","), func(t *testing.T) {
+			opts := model.Options{BuildOptions: model.BuildOptions{ImageName: "test", Features: tc.requested}}
+			got, _, warnings, err := ValidateOptions(opts, model.DefaultOptionSources(), ValidationContext{Action: "run", Paths: paths})
+			if err != nil {
+				t.Fatalf("ValidateOptions: %v", err)
+			}
+			if !reflect.DeepEqual(got.Features, tc.want) {
+				t.Errorf("features = %v, want %v", got.Features, tc.want)
+			}
+			want := tc.warning + ` "default" and "all" are selectors, not features, and cannot be removed`
+			if len(warnings) != 1 || !strings.HasSuffix(warnings[0], want) {
+				t.Errorf("warnings = %q, want one ending with %q", warnings, want)
+			}
+		})
+	}
+}
+
 func TestValidateOptionsUnknownFeatureSource(t *testing.T) {
 	cases := []struct {
 		source  model.OptionSource

@@ -35,6 +35,7 @@ coverage.out
 *.orig
 
 # Tool state
+.agents/
 .claude/
 
 # Local agent working files (never committed)

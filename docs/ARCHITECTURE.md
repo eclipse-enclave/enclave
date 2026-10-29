@@ -179,7 +179,7 @@ The restricted network request flow has a separate
 - [`docs/`](../docs/) is included in the runtime build context so the image can install agent-facing help under `/usr/share/doc/enclave/`. [`docs/assets/`](../docs/assets/) is excluded in [`.dockerignore`](../.dockerignore); it holds only `README.md` branding, and keeping it out spares users an image rebuild whenever the logo changes.
 
 ### Repo-only directories
-- [`.agents/skills/`](../.agents/skills/) holds maintainer agent skills, such as the dependency-update workflow that interprets `scripts/check-versions.sh`. It is listed in [`.dockerignore`](../.dockerignore).
+- [`.agents/skills/`](../.agents/skills/) holds maintainer agent skills, such as the dependency-update workflow that interprets `scripts/check-versions.sh`. [`.claude/skills/`](../.claude/skills/) symlinks them for Claude Code, which does not scan `.agents/skills/`. Both are listed in [`.dockerignore`](../.dockerignore).
 - [`website/`](../website/) holds the project website sources. It is listed in [`.dockerignore`](../.dockerignore) so it never reaches a build context.
 
 ## Key Concepts

@@ -11,6 +11,11 @@ export GOCACHE = $(CURDIR)/.gocache
 export GOMODCACHE = $(CURDIR)/.gomodcache
 export GO111MODULE = on
 
+# Prefer Ubuntu's versioned package even when an older default go is on PATH.
+ifneq ($(wildcard /usr/lib/go-1.24/bin/go),)
+export PATH := /usr/lib/go-1.24/bin:$(PATH)
+endif
+
 GATEWAY_PROXY_SOURCE_PATHS_FILE := $(CURDIR)/internal/gateway/gateway_proxy_build_inputs.txt
 BUILD_VERSION ?= $(shell dpkg-parsechangelog --show-field Version | sed 's/-[^-]*$$//')
 BUILD_COMMIT ?= unknown
@@ -91,6 +96,7 @@ override_dh_auto_test:
 	# No tests yet
 
 override_dh_auto_clean:
+	if [ -d .gomodcache ]; then chmod -R u+w .gomodcache; fi
 	rm -rf bin completions vendor .gocache .gomodcache
 
 override_dh_dwz:

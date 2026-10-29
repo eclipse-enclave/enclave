@@ -344,7 +344,10 @@ func readClientHelloFromTLSClient(t *testing.T, serverName string) (string, []by
 	}
 	_ = serverConn.Close()
 	select {
-	case <-clientErr:
+	case err := <-clientErr:
+		if err == nil {
+			t.Fatal("client handshake unexpectedly succeeded")
+		}
 	case <-time.After(2 * time.Second):
 		t.Fatalf("client handshake goroutine did not exit")
 	}

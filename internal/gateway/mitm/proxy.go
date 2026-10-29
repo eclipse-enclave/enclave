@@ -582,19 +582,20 @@ func tunnelToAddress(downstream net.Conn, preface []byte, upstreamAddr string) {
 	}
 	defer func() { _ = upstream.Close() }()
 
-	errCh := make(chan error, 2)
+	done := make(chan struct{}, 2)
 	go func() {
-		_, copyErr := io.Copy(upstream, io.MultiReader(bytes.NewReader(preface), downstream))
+		_, _ = io.Copy(upstream, io.MultiReader(bytes.NewReader(preface), downstream))
 		closeWrite(upstream)
-		errCh <- copyErr
+		done <- struct{}{}
 	}()
 	go func() {
-		_, copyErr := io.Copy(downstream, upstream)
+		_, _ = io.Copy(downstream, upstream)
 		closeWrite(downstream)
-		errCh <- copyErr
+		done <- struct{}{}
 	}()
-	<-errCh
-	<-errCh
+	// Wait for both copy loops; their errors do not change tunnel cleanup.
+	<-done
+	<-done
 }
 
 func closeWrite(conn net.Conn) {

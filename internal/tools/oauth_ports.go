@@ -126,6 +126,7 @@ func hasPortMapping(ports []string, hostPort string, containerPort string) bool 
 }
 
 func ensureHostPortAvailable(port string, providerName string) error {
+	// #nosec G102 -- Availability probe only; closed immediately without accepting connections.
 	listener, err := net.Listen("tcp", "0.0.0.0:"+port)
 	if err != nil {
 		return fmt.Errorf("host port %s is already in use; %s oauth requires it", port, providerName)

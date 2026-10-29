@@ -101,6 +101,7 @@ func prefixedDirHint(written string) string {
 	if filepath.IsAbs(written) {
 		return ""
 	}
+	// #nosec G703 -- written is the user's own add_dirs entry; Stat only probes for the hint and nothing is mounted.
 	if info, err := os.Stat("+" + written); err == nil && info.IsDir() {
 		return " (did you mean ./+" + written + "?)"
 	}

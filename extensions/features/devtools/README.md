@@ -26,9 +26,9 @@ Core development tools and lint tooling. Enabled by default.
 
 ## Installed via `install.sh`
 
-- `golangci-lint` (`v2.10.1`)
-- `gosec` (`v2.23.0`)
-- `govulncheck` (`v1.1.4`)
+- `golangci-lint` (`v2.15.0`)
+- `gosec` (`v2.30.0`)
+- `govulncheck` (`v1.9.0`)
 
 Version overrides are supported via environment variables:
 

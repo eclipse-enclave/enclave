@@ -7,9 +7,9 @@
 
 # Enclave - Simplified multi-language development environment for agentic tools
 # Base image: debian:trixie-slim (pinned) or ubuntu:24.04
-ARG BASE_IMAGE=debian:trixie-slim@sha256:62bd423aeee912639ca8ee681c2b762cb3e25137e0a92b20be455898a9f034ad
+ARG BASE_IMAGE=debian:trixie-slim@sha256:f6b08b09a05725f9431502d3b5714f5c4576e82c1a84fa1debe0c24a7e0c3ec4
 ARG DEVCONTAINER_BASE_IMAGE=0
-ARG AGENT_NODE_IMAGE=node:24-trixie-slim@sha256:43b9ba1142b8dcf33fa8f922ca1be85714adc444e0586c7cf7726daaeabc1bea
+ARG AGENT_NODE_IMAGE=node:24-trixie-slim@sha256:54f84b4cf8432b21aaffd5d3ce8d41e12cea0d10d33c09d2f3c9879d49d6b446
 FROM ${BASE_IMAGE} AS system
 ARG DEVCONTAINER_BASE_IMAGE
 USER root
@@ -77,7 +77,7 @@ RUN --mount=type=cache,id=enclave-apt-cache,target=/var/cache/apt,sharing=locked
 # Install yq (mikefarah/yq) for reading extension spec.yaml metadata during the
 # build (feature/tool enablement, priority, needsRoot, aptPackages). Pinned like
 # the other downloaded tools; jq above stays for agent-facing JSON handling.
-ARG YQ_VERSION=v4.44.6
+ARG YQ_VERSION=v4.54.1
 RUN set -eux; \
     arch="$(dpkg --print-architecture)"; \
     case "$arch" in \

@@ -27,7 +27,7 @@ GO_INSTALL_RETRY_DELAY_SECONDS=2
 
 is_retryable_go_error() {
     local log_file="$1"
-    grep -Eiq "(Temporary failure resolving|no such host|i/o timeout|TLS handshake timeout|connect: network is unreachable|connection reset by peer|proxyconnect tcp|dial tcp: lookup|unexpected EOF|context deadline exceeded)" "$log_file"
+    grep -Eiq "(Temporary failure resolving|no such host|i/o timeout|TLS handshake timeout|connect: network is unreachable|connection reset by peer|proxyconnect tcp|dial tcp: lookup|unexpected EOF|stream error|context deadline exceeded)" "$log_file"
 }
 
 go_install_with_retry() {

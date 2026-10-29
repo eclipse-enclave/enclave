@@ -16,6 +16,7 @@ import (
 	"syscall"
 	"time"
 
+	"enclave/internal/backend"
 	"enclave/internal/cli"
 	"enclave/internal/config"
 	"enclave/internal/logx"
@@ -80,7 +81,7 @@ func runSelfUpdate(verbose bool) int {
 	cancelCheck()
 	if ctx.Err() != nil {
 		logx.Warnf("Enclave update interrupted.")
-		return exitCodeInterrupted
+		return backend.ExitCodeInterrupted
 	}
 	if err != nil {
 		logx.Errorf("Check for enclave update: %v", err)
@@ -102,7 +103,7 @@ func runSelfUpdate(verbose bool) int {
 	cancelUpdate()
 	if ctx.Err() != nil {
 		logx.Warnf("Enclave update interrupted.")
-		return exitCodeInterrupted
+		return backend.ExitCodeInterrupted
 	}
 	if err != nil {
 		logx.Errorf("Update enclave: %v", err)

@@ -11,7 +11,9 @@ package termtint
 
 import "os"
 
-func interruptSignals() []os.Signal {
+// InterruptSignals are the signals that would terminate a session before a
+// deferred restore can run.
+func InterruptSignals() []os.Signal {
 	return []os.Signal{os.Interrupt}
 }
 

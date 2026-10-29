@@ -182,12 +182,12 @@ func (b *Backend) syncSharedAuthStores(ctx context.Context, helperImage string, 
 
 	return hoststore.WithLock(b.opts.Host.Home, authDir, func() error {
 		var stderr bytes.Buffer
-		err := dockercmd.RunWithIOAndStartHook(ctx, &dockercmd.ContainerConfig{
+		_, err := dockercmd.RunWithIOAndStartHook(ctx, &dockercmd.ContainerConfig{
 			Image:      image,
 			Entrypoint: []string{"sh", "-c"},
 			Cmd:        []string{cmd},
 			User:       b.authSyncHelperUser(),
-		}, hostConfig, "", nil, io.Discard, &stderr, false, nil)
+		}, hostConfig, "", nil, io.Discard, &stderr, false, "", nil)
 		message := strings.TrimSpace(mapAuthSyncPaths(stderr.String(), configDir, authDir))
 		if err != nil {
 			if message != "" {

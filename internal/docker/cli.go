@@ -253,6 +253,10 @@ type runMode struct {
 	Detach      bool
 	Interactive bool
 	TTY         bool
+	// DetachKeys overrides the engine's detach keys of an attached terminal.
+	DetachKeys string
+	// CIDFile is where the engine writes the created container's ID.
+	CIDFile string
 }
 
 // buildRunArgs translates a ContainerConfig/HostConfig pair into the argument
@@ -270,6 +274,12 @@ func buildRunArgs(config *ContainerConfig, hostConfig *HostConfig, name string, 
 	}
 	if mode.TTY {
 		args = append(args, "--tty")
+	}
+	if mode.DetachKeys != "" && mode.Interactive && mode.TTY && !mode.Detach && !mode.Create {
+		args = append(args, "--detach-keys", mode.DetachKeys)
+	}
+	if mode.CIDFile != "" {
+		args = append(args, "--cidfile", mode.CIDFile)
 	}
 	if strings.TrimSpace(name) != "" {
 		args = append(args, "--name", name)

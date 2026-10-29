@@ -107,7 +107,7 @@ func Begin(color string, opts ...Option) func() {
 // platform's interrupt set minus those the caller handles.
 func interceptedSignals(callerHandled []os.Signal) []os.Signal {
 	var intercepted []os.Signal
-	for _, sig := range interruptSignals() {
+	for _, sig := range InterruptSignals() {
 		if !slices.Contains(callerHandled, sig) {
 			intercepted = append(intercepted, sig)
 		}

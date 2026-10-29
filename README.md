@@ -236,6 +236,8 @@ Sessions require a configured Git author and committer identity, even outside a 
 
 **Tool selection:** The first interactive session asks which coding agent to run and saves the answer as `"tool"` in `~/.config/enclave/config.json`; later runs start it without asking. Scripts and non-terminal runs are never asked: without a configured tool they fail with a message naming `--tool` and the `tool` key. See [Tool selection](docs/cli-reference.md#tool-selection).
 
+**Foreground sessions:** A session ends with its terminal. Closing the terminal, or typing `Ctrl-\` (the key `enclave attach` detaches with), stops the container and removes its gateway. Use `--background` for a session you can detach from and reattach to with `enclave attach`.
+
 **Authentication:** The simplest and recommended approach is to just log in from inside the container the first time you run — OAuth sessions are saved to a persistent auth store on the host and reused automatically on every subsequent run. No configuration needed.
 
 To use declared env credentials instead, place them in `~/.local/state/enclave/secrets/global.env`. See [Authentication & Secrets](docs/auth.md).

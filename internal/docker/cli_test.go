@@ -11,6 +11,7 @@ import (
 	"errors"
 	"os/exec"
 	"reflect"
+	"slices"
 	"testing"
 )
 
@@ -137,6 +138,31 @@ func TestBuildRunArgsDetachedInteractive(t *testing.T) {
 	wantPrefix := []string{"run", "--detach", "--interactive", "--tty", "--name", "managed", "image"}
 	if !reflect.DeepEqual(got, wantPrefix) {
 		t.Fatalf("buildRunArgs() = %v, want %v", got, wantPrefix)
+	}
+}
+
+// Only an attached terminal can type the detach keys.
+func TestBuildRunArgsSetsDetachKeysForAttachedTerminals(t *testing.T) {
+	const keys = `ctrl-\`
+	for _, tc := range []struct {
+		name string
+		mode runMode
+		want bool
+	}{
+		{"foreground terminal", runMode{Interactive: true, TTY: true, DetachKeys: keys}, true},
+		{"engine default", runMode{Interactive: true, TTY: true}, false},
+		{"detached terminal", runMode{Detach: true, Interactive: true, TTY: true, DetachKeys: keys}, false},
+		{"no terminal", runMode{Interactive: true, DetachKeys: keys}, false},
+		{"create", runMode{Create: true, Interactive: true, TTY: true, DetachKeys: keys}, false},
+	} {
+		args := buildRunArgs(&ContainerConfig{Image: "image"}, nil, "session", tc.mode)
+		i := slices.Index(args, "--detach-keys")
+		if got := i >= 0; got != tc.want {
+			t.Errorf("%s: --detach-keys in %v = %v, want %v", tc.name, args, got, tc.want)
+		}
+		if i >= 0 && (i+1 >= len(args) || args[i+1] != keys) {
+			t.Errorf("%s: detach keys %v, want %q", tc.name, args[i:], keys)
+		}
 	}
 }
 

@@ -15,9 +15,9 @@ import (
 	"syscall"
 )
 
-// interruptSignals are the signals that would terminate a session before a
+// InterruptSignals are the signals that would terminate a session before a
 // deferred restore can run.
-func interruptSignals() []os.Signal {
+func InterruptSignals() []os.Signal {
 	return []os.Signal{syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP}
 }
 

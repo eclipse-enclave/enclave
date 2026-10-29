@@ -91,7 +91,7 @@ func (b *Backend) Capabilities() backend.Capabilities {
 func (b *Backend) Storage() backend.StoreManager { return b.storage }
 
 // Run prepares and attaches a foreground session. Cancelling ctx (the caller
-// wires it to SIGINT/SIGTERM) aborts a start still in progress and tears down
+// wires it to SIGINT/SIGTERM/SIGHUP) aborts a start still in progress and tears down
 // what it created; once the session is attached the engine child owns the
 // terminal and is deliberately detached from ctx.
 func (b *Backend) Run(ctx context.Context, req backend.Request, attach backend.AttachIO) (backend.ExitStatus, error) {
@@ -116,18 +116,85 @@ func (b *Backend) Run(ctx context.Context, req backend.Request, attach backend.A
 		}
 		return backend.ExitStatus{}, err
 	}
-	if spec.cleanup != nil {
-		defer spec.cleanup()
-	}
 	if ctx.Err() != nil {
+		if spec.cleanup != nil {
+			spec.cleanup()
+		}
 		interrupted = true
 		return backend.ExitStatus{}, interruptedStart()
 	}
 	// Ctrl-C now reaches the tool through the TTY or the engine's signal
 	// proxying; cancelling ctx must not kill the attached child and strand a
 	// running session.
-	err = runForeground(context.WithoutCancel(ctx), spec.config, spec.hostConfig, spec.name, attach)
+	return attachForeground(context.WithoutCancel(ctx), spec, attach)
+}
+
+// attachForeground runs a prepared session attached, then tears it down. A
+// container that outlives its engine client is ended before spec.cleanup
+// removes the gateway whose network it uses.
+func attachForeground(ctx context.Context, spec runSpec, attach backend.AttachIO) (backend.ExitStatus, error) {
+	if spec.cleanup != nil {
+		defer spec.cleanup()
+	}
+	var onStarted func(id string)
+	if attach.OnStarted != nil {
+		onStarted = func(string) { attach.OnStarted() }
+	}
+	id, err := runForeground(ctx, spec.config, spec.hostConfig, spec.name, attach, onStarted)
+	if endOutlivingSession(ctx, spec.name, id) {
+		return backend.ExitStatus{Code: backend.ExitCodeInterrupted}, &backend.ExitError{Code: backend.ExitCodeInterrupted}
+	}
 	return exitStatus(err), neutralizeExitError(err)
+}
+
+// endOutlivingSession stops the container a foreground run created if it still
+// runs after its engine client returned: the detach key was typed, or the
+// client died alone. The deferred cleanup is about to remove the gateway whose
+// network the container uses. Without an ID the run created no container, and
+// one holding the session's name is not ours to end. It reports whether the
+// session had to be ended.
+func endOutlivingSession(ctx context.Context, name string, id string) bool {
+	if id == "" {
+		return false
+	}
+	info, err := dockercmd.ContainerInspect(ctx, id)
+	if err != nil || info.State == nil || !info.State.Running {
+		return false
+	}
+	logx.Infof("Session %s outlived its terminal; stopping it.", name)
+	// Stop first so the tool gets SIGTERM and a grace period. Remove explicitly
+	// because --rm is asynchronous and the session must be gone before its gateway.
+	if err := dockercmd.ContainerStop(ctx, info.ID, nil); err != nil && !dockercmd.IsNotFound(err) {
+		logx.Warnf("Failed to stop container %s: %v", name, err)
+	}
+	if err := dockercmd.ContainerRemove(ctx, info.ID, true, false); err != nil && !dockercmd.IsNotFound(err) && !waitContainerGone(ctx, info.ID) {
+		logx.Warnf("Failed to remove container %s after its terminal client returned: %v", name, err)
+	}
+	return true
+}
+
+// endedContainerGoneTimeout bounds the wait for the engine's own --rm.
+var endedContainerGoneTimeout = 10 * time.Second
+
+// waitContainerGone reports whether the container is gone within
+// endedContainerGoneTimeout. Docker rejects a remove that races the --rm
+// already in progress with a conflict, not a not-found.
+func waitContainerGone(ctx context.Context, id string) bool {
+	// The caller's context never expires, so the deadline must also bound a stalled inspect.
+	ctx, cancel := context.WithTimeout(ctx, endedContainerGoneTimeout)
+	defer cancel()
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		if _, err := dockercmd.ContainerInspect(ctx, id); dockercmd.IsNotFound(err) {
+			return true
+		}
+		select {
+		case <-ctx.Done():
+			return false
+		case <-ticker.C:
+		}
+	}
 }
 
 func (b *Backend) Start(ctx context.Context, req backend.Request) (backend.SessionRef, error) {
@@ -734,12 +801,23 @@ func isGatewaySummary(c dockercmd.Summary, name string) bool {
 	return strings.HasSuffix(name, model.GatewayContainerSuffix) && strings.HasPrefix(c.Image, model.GatewayImagePrefix)
 }
 
-func runForeground(ctx context.Context, config *dockercmd.ContainerConfig, hostConfig *dockercmd.HostConfig, name string, attach backend.AttachIO) error {
+// foregroundDetachKeys falls back to the `enclave attach` key, like Attach. A
+// foreground session has no detach, so the key ends it; it also frees ctrl-p,
+// which the engine's default ctrl-p,ctrl-q holds back from the tool.
+func foregroundDetachKeys(attach backend.AttachIO) string {
+	if keys := strings.TrimSpace(attach.DetachKeys); keys != "" {
+		return keys
+	}
+	return model.DetachKeysDefault
+}
+
+// runForeground returns the ID of the container it created, if any.
+func runForeground(ctx context.Context, config *dockercmd.ContainerConfig, hostConfig *dockercmd.HostConfig, name string, attach backend.AttachIO, onStarted func(id string)) (string, error) {
 	if attach.In == nil && attach.Out == nil && attach.Err == nil {
 		if attach.TTY {
-			return dockercmd.RunInteractiveWithStartHook(ctx, config, hostConfig, name, attach.OnStarted)
+			return dockercmd.RunInteractiveWithStartHook(ctx, config, hostConfig, name, foregroundDetachKeys(attach), onStarted)
 		}
-		return dockercmd.RunWithStartHook(ctx, config, hostConfig, name, attach.OnStarted)
+		return dockercmd.RunWithStartHook(ctx, config, hostConfig, name, onStarted)
 	}
 	in := attach.In
 	out := attach.Out
@@ -750,7 +828,7 @@ func runForeground(ctx context.Context, config *dockercmd.ContainerConfig, hostC
 	if errOut == nil {
 		errOut = io.Discard
 	}
-	return dockercmd.RunWithIOAndStartHook(ctx, config, hostConfig, name, in, out, errOut, attach.TTY, attach.OnStarted)
+	return dockercmd.RunWithIOAndStartHook(ctx, config, hostConfig, name, in, out, errOut, attach.TTY, foregroundDetachKeys(attach), onStarted)
 }
 
 func applyContainerHardening(hostConfig *dockercmd.HostConfig) {

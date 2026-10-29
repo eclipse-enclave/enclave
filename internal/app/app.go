@@ -13,6 +13,7 @@ import (
 	"os"
 	"strings"
 
+	"enclave/internal/backend"
 	"enclave/internal/buildinfo"
 	"enclave/internal/cli"
 	"enclave/internal/config"
@@ -148,7 +149,7 @@ func Run(args []string) int {
 		logx.SetLevel("debug")
 	}
 	if maybeAutomaticSelfUpdate(parsed, globalDefaults) {
-		return exitCodeInterrupted
+		return backend.ExitCodeInterrupted
 	}
 
 	if parsed.Action == "cleanup" {

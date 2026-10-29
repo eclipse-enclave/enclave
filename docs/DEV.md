@@ -603,7 +603,11 @@ After publishing, the action reads `checksums.txt` and the pointer back over
 `https://download.eclipse.org` and warns when they do not match within two
 minutes. This HTTP propagation check is separate from the mandatory remote
 integrity check. The GitHub release keeps a copy of the assets; the Scoop manifest
-points at it.
+points at it. GitHub renames uploaded assets, collapsing every run of characters
+other than letters, digits, `-`, and `_` into one dot, so the assemble job
+renames the packages the same way (`scripts/github-asset-name.sh`) before
+writing `checksums.txt`: a `1.0.1~~git…` package is published as `1.0.1.git…`
+on both hosts, and the assemble job fails on a name that would still change.
 
 ## Docs and Diagrams
 

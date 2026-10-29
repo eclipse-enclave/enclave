@@ -1,4 +1,4 @@
-# Eclipse Dash License Tool dependency inventory; generated 2026-10-13.
+# Eclipse Dash License Tool dependency inventory; generated 2026-10-29.
 # CSV columns: id, license, status, source. Comment lines label scope.
 # Release snapshot: refresh before each release using the commands below.
 # Lockfile changes between releases are not automatically reflected here.
@@ -241,7 +241,7 @@ npm/npmjs/-/estraverse/5.3.0, BSD-2-Clause AND MIT, approved, #1557
 npm/npmjs/-/estree-util-attach-comments/3.0.0, MIT, approved, clearlydefined
 npm/npmjs/-/estree-util-build-jsx/3.0.1, MIT, approved, clearlydefined
 npm/npmjs/-/estree-util-is-identifier-name/3.0.0, MIT, approved, clearlydefined
-npm/npmjs/-/estree-util-scope/1.0.0, MIT, approved, clearlydefined
+npm/npmjs/-/estree-util-scope/1.0.0, MIT, approved, #32584
 npm/npmjs/-/estree-util-to-js/2.0.0, MIT, approved, clearlydefined
 npm/npmjs/-/estree-util-value-to-estree/3.5.0, MIT, approved, clearlydefined
 npm/npmjs/-/estree-util-visit/2.0.0, MIT, approved, clearlydefined
@@ -336,7 +336,7 @@ npm/npmjs/-/hyperdyperid/1.2.0, MIT, approved, clearlydefined
 npm/npmjs/-/iconv-lite/0.4.24, MIT, approved, #31380
 npm/npmjs/-/icss-utils/5.1.0, ISC, approved, #24839
 npm/npmjs/-/ignore/5.3.2, MIT, approved, #11665
-npm/npmjs/-/image-size/2.0.2, MIT, approved, clearlydefined
+npm/npmjs/-/image-size/2.0.2, MIT, approved, #32644
 npm/npmjs/-/import-fresh/3.3.1, MIT, approved, #19299
 npm/npmjs/-/import-lazy/4.0.0, MIT, approved, clearlydefined
 npm/npmjs/-/imurmurhash/0.1.4, MIT, approved, clearlydefined
@@ -434,13 +434,13 @@ npm/npmjs/-/lru-cache/5.1.1, ISC, approved, clearlydefined
 npm/npmjs/-/markdown-extensions/2.0.0, MIT, approved, clearlydefined
 npm/npmjs/-/markdown-table/3.0.4, MIT, approved, clearlydefined
 npm/npmjs/-/math-intrinsics/1.1.0, MIT, approved, #17964
-npm/npmjs/-/mdast-util-directive/3.1.0, MIT, approved, clearlydefined
-npm/npmjs/-/mdast-util-find-and-replace/3.0.2, MIT, approved, clearlydefined
+npm/npmjs/-/mdast-util-directive/3.1.0, MIT, approved, #32637
+npm/npmjs/-/mdast-util-find-and-replace/3.0.2, MIT, approved, #32613
 npm/npmjs/-/mdast-util-from-markdown/2.0.3, MIT, approved, #26286
 npm/npmjs/-/mdast-util-frontmatter/2.0.1, MIT, approved, clearlydefined
 npm/npmjs/-/mdast-util-gfm-autolink-literal/2.0.1, MIT, approved, clearlydefined
 npm/npmjs/-/mdast-util-gfm-footnote/2.1.0, MIT, approved, clearlydefined
-npm/npmjs/-/mdast-util-gfm-strikethrough/2.0.0, MIT, approved, clearlydefined
+npm/npmjs/-/mdast-util-gfm-strikethrough/2.0.0, MIT, approved, #32598
 npm/npmjs/-/mdast-util-gfm-table/2.0.0, MIT, approved, clearlydefined
 npm/npmjs/-/mdast-util-gfm-task-list-item/2.0.0, MIT, approved, clearlydefined
 npm/npmjs/-/mdast-util-gfm/3.1.0, MIT, approved, clearlydefined
@@ -466,7 +466,7 @@ npm/npmjs/-/micromark-extension-frontmatter/2.0.0, MIT, approved, clearlydefined
 npm/npmjs/-/micromark-extension-gfm-autolink-literal/2.1.0, MIT, approved, clearlydefined
 npm/npmjs/-/micromark-extension-gfm-footnote/2.1.0, MIT, approved, clearlydefined
 npm/npmjs/-/micromark-extension-gfm-strikethrough/2.1.0, MIT, approved, clearlydefined
-npm/npmjs/-/micromark-extension-gfm-table/2.1.1, MIT, approved, clearlydefined
+npm/npmjs/-/micromark-extension-gfm-table/2.1.1, MIT, approved, #32652
 npm/npmjs/-/micromark-extension-gfm-tagfilter/2.0.0, MIT, approved, clearlydefined
 npm/npmjs/-/micromark-extension-gfm-task-list-item/2.1.0, MIT, approved, clearlydefined
 npm/npmjs/-/micromark-extension-gfm/3.0.0, MIT, approved, clearlydefined

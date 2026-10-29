@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -356,6 +357,9 @@ func TestValidateOptionsUnknownFeaturesInDiscardedSelection(t *testing.T) {
 			want := "unknown features: typo; run 'enclave features list' to see available features; ignored because " + tc.ignoredBy + " discards the feature selection"
 			if !strings.Contains(strings.Join(warnings, "\n"), want) {
 				t.Errorf("expected warning %q, got %v", want, warnings)
+			}
+			if tc.backend == "qemu" && !slices.Contains(warnings, "qemu backend: tool-only bundle, not installing features: node-dev") {
+				t.Errorf("expected the qemu notice to list only installed features, got %v", warnings)
 			}
 		})
 	}

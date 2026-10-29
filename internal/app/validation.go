@@ -10,7 +10,6 @@ package app
 import (
 	"errors"
 	"fmt"
-	"sort"
 	"strconv"
 	"strings"
 
@@ -267,9 +266,7 @@ func qemuDroppedFeatures(requested []string, paths model.Paths) []string {
 	if err != nil {
 		return nil
 	}
-	names := selection.selected
-	sort.Strings(names)
-	return names
+	return selection.enabledNames()
 }
 
 func validateBuildIdentityOptions(opts model.BuildOptions) error {

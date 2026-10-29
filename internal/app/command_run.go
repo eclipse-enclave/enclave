@@ -11,6 +11,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -18,6 +19,7 @@ import (
 	"enclave/internal/config"
 	"enclave/internal/logx"
 	"enclave/internal/model"
+	"enclave/internal/mounts"
 	"enclave/internal/runtime"
 	"enclave/internal/theia"
 	"enclave/internal/tools"
@@ -86,19 +88,11 @@ func runExecutionCommand(input *CommandInput) int {
 		return 1
 	}
 
-	writableDirs, readonlyDirs, err := validateAdditionalDirs(opts, project.RealDir, host.Home)
+	// exec enters an existing container, so it mounts nothing.
+	validatedDirs, validatedReadonlyDirs, err := resolveAdditionalMounts(opts, project, host.Home, isRunAction(input.Action))
 	if err != nil {
 		logx.Errorf("%v", err)
 		return 1
-	}
-	validatedDirs := additionalDirPaths(writableDirs)
-	validatedReadonlyDirs := additionalDirPaths(readonlyDirs)
-	// exec enters an existing container, so it mounts nothing.
-	if isRunAction(input.Action) {
-		if err := checkSensitiveMounts(project, append(writableDirs, readonlyDirs...), host.Home, opts.AllowSensitiveMounts); err != nil {
-			logx.Errorf("%v", err)
-			return 1
-		}
 	}
 
 	resolvedBuildConfig, code := ensureRuntimeImage(input, opts, buildCfg, host, profile)
@@ -156,6 +150,76 @@ func runExecutionCommand(input *CommandInput) int {
 		return 1
 	}
 	return dispatchRunner(input, runner, execTarget)
+}
+
+// resolveAdditionalMounts validates the directories to mount besides the
+// project and returns them read-write and read-only. With guard set, it
+// refuses sensitive ones (see checkSensitiveMounts), taking the
+// sensitive-dir exceptions from config and from
+// --add-sensitive-dir/--add-readonly-sensitive-dir. Unlike --add-dir, those
+// flags add to the configured directories instead of replacing them.
+func resolveAdditionalMounts(opts model.Options, project model.Project, home string, guard bool) ([]string, []string, error) {
+	sensitiveDirs, exceptions, err := resolveSensitiveDirFlag(opts.AddSensitiveDirs, false, project, home)
+	if err != nil {
+		return nil, nil, err
+	}
+	readonlySensitiveDirs, readonlyExceptions, err := resolveSensitiveDirFlag(opts.AddReadonlySensitiveDirs, true, project, home)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	writable, readonly, err := validateAdditionalDirs(opts, sensitiveDirs, readonlySensitiveDirs, project.RealDir, home)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	if guard {
+		configExceptions, warnings := configSensitiveDirExceptions(opts, home)
+		for _, warning := range warnings {
+			logx.Warnf("%s", warning)
+		}
+		exceptions = slices.Concat(configExceptions, exceptions, readonlyExceptions)
+		if err := checkSensitiveMounts(project, slices.Concat(writable, readonly), exceptions, home, opts.AllowSensitiveMounts); err != nil {
+			return nil, nil, err
+		}
+	}
+	return additionalDirPaths(writable), additionalDirPaths(readonly), nil
+}
+
+const (
+	addSensitiveDirFlag         = "--add-sensitive-dir"
+	addReadonlySensitiveDirFlag = "--add-readonly-sensitive-dir"
+)
+
+// resolveSensitiveDirFlag resolves the directories given with
+// --add-sensitive-dir, or with --add-readonly-sensitive-dir if readonly. Each
+// is a sensitive-dir exception for this run, and each but the project
+// directory, which is already mounted, is a directory to mount. The project
+// mount mode alone decides whether the project is read-only.
+func resolveSensitiveDirFlag(dirs []string, readonly bool, project model.Project, home string) ([]string, []mounts.SensitiveDirException, error) {
+	flag := addSensitiveDirFlag
+	if readonly {
+		flag = addReadonlySensitiveDirFlag
+	}
+	var mountDirs []string
+	var exceptions []mounts.SensitiveDirException
+	var errs []error
+	for _, dir := range dirs {
+		realPath, err := mounts.ResolveExtraDir(dir, home)
+		switch {
+		case err != nil:
+			errs = append(errs, err)
+		case realPath == project.RealDir && readonly:
+			errs = append(errs, fmt.Errorf("%s %s is the project directory; use %s %s to exempt it and --project-mount readonly to mount it read-only",
+				flag, dir, addSensitiveDirFlag, dir))
+		default:
+			exceptions = append(exceptions, mounts.NewSensitiveDirException(realPath, flag))
+			if realPath != project.RealDir {
+				mountDirs = append(mountDirs, realPath)
+			}
+		}
+	}
+	return mountDirs, exceptions, errors.Join(errs...)
 }
 
 // autoBackgroundForIDE reports whether a run should be forced detached because

@@ -207,6 +207,31 @@ func TestToolOverride_ClearsNestedToolOverrides(t *testing.T) {
 	}
 }
 
+// sensitive_dir_exceptions is a list like add_dirs: a global tool override
+// replaces the top-level list instead of extending it.
+func TestToolOverride_GlobalSensitiveDirExceptionsReplaceTopLevel(t *testing.T) {
+	global := Defaults{
+		SensitiveDirExceptions: []string{"~/.m2"},
+		ToolOverrides: map[string]Defaults{
+			"claude": {SensitiveDirExceptions: []string{"~/.gradle"}},
+		},
+	}
+	for _, tc := range []struct {
+		tool   string
+		want   []string
+		source model.OptionSource
+	}{
+		{tool: "claude", want: []string{"~/.gradle"}, source: model.SourceToolOverride},
+		{tool: "codex", want: []string{"~/.m2"}, source: model.SourceGlobal},
+	} {
+		opts, _, _ := ResolveOptionsForTool(DefaultOptions(), model.OptionSources{}, global, Defaults{}, tc.tool)
+		if !reflect.DeepEqual(opts.SensitiveDirExceptions, tc.want) || opts.Sources.SensitiveDirExceptions != tc.source {
+			t.Errorf("tool %s: sensitive_dir_exceptions = %q from %v, want %q from %v",
+				tc.tool, opts.SensitiveDirExceptions, opts.Sources.SensitiveDirExceptions, tc.want, tc.source)
+		}
+	}
+}
+
 func TestToolOverride_CLIWinsOverToolOverride(t *testing.T) {
 	sources := model.DefaultOptionSources()
 	opts := DefaultOptions()

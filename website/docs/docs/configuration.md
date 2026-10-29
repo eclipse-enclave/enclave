@@ -122,6 +122,7 @@ See [Bridging host ports](https://github.com/eclipse-enclave/enclave/blob/main/d
 | --- | --- | --- |
 | `add_dirs` | `--add-dir <path>` | Mount another host directory, writable, at the same path inside the container. |
 | `add_readonly_dirs` | `--add-readonly-dir <path>` | The same, read-only. Good for reference material you do not want touched. |
+| `sensitive_dir_exceptions` | `--add-sensitive-dir <path>`, `--add-readonly-sensitive-dir <path>` (this run only, and mount it) | Allow mounting a sensitive directory, such as a dotfiles repository or `~/.m2`, and everything below it. Warns on every start. See [Sensitive mounts](https://github.com/eclipse-enclave/enclave/blob/main/docs/cli-reference.md#sensitive-mounts). |
 | `project_mount` | `--project-mount readonly` | Mount the project read-only: the agent can read and analyze, only you can write. |
 
 ### Network

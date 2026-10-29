@@ -220,7 +220,7 @@ func TestAddWorktree_AllowsVerifiedExternalLinkedWorktree(t *testing.T) {
 	project := model.Project{Dir: projectDir, RealDir: projectDir, Name: "project"}
 	var mountArgs []backend.Mount
 	validated := []string{}
-	AddWorktree(&mountArgs, project, &validated, false, NewSensitivePaths(resolvedRoot, nil))
+	AddWorktree(&mountArgs, project, &validated, false, NewSensitivePaths(resolvedRoot, nil, nil))
 
 	if len(mountArgs) != 2 {
 		t.Fatalf("expected gitdir + commondir mounts, got %d: %v", len(mountArgs), mountArgs)
@@ -272,7 +272,7 @@ func TestAddWorktree_RejectsSensitiveExternalWorktree(t *testing.T) {
 
 	var mountArgs []backend.Mount
 	validated := []string{}
-	AddWorktree(&mountArgs, project, &validated, false, NewSensitivePaths(home, nil))
+	AddWorktree(&mountArgs, project, &validated, false, NewSensitivePaths(home, nil, nil))
 
 	if len(mountArgs) != 0 {
 		t.Fatalf("expected no mounts for a worktree whose repository is in ~/.dotfiles, got %v", mountArgs)

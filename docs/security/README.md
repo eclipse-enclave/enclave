@@ -23,9 +23,16 @@ workflow. Rootless Docker is [not supported](rootless.md); rootless podman is, t
   to mount a project or additional directory that is the home directory or one
   of its parents, or that overlaps a hidden home entry, a per-user application
   data directory, enclave's own roots, or the SSH agent socket, read-only or
-  not. `--allow-sensitive-mounts` or `ENCLAVE_ALLOW_SENSITIVE_MOUNTS=1`
-  overrides this; no config file can, and devcontainer or `.git`-pointer mounts
-  stay blocked. See [Sensitive mounts](../cli-reference.md#sensitive-mounts).
+  not. Per-path sensitive-dir exceptions, from `--add-sensitive-dir`,
+  `--add-readonly-sensitive-dir`, or `sensitive_dir_exceptions` in global or
+  project config, allow specific subtrees and warn on
+  every start. No exception covers the hard-protected locations: home and its
+  parents, enclave's own roots (a mount of them would let the agent widen its
+  own exceptions or network access, or add host commands), and the SSH agent
+  socket. Only `--allow-sensitive-mounts` or
+  `ENCLAVE_ALLOW_SENSITIVE_MOUNTS=1` mounts those, and no config file can set
+  it. Devcontainer and `.git`-pointer mounts stay blocked either way. See
+  [Sensitive mounts](../cli-reference.md#sensitive-mounts).
 - Per-project Enclave config is keyed by project hash under the host config root,
   outside the worktree, so neither the repository nor a session can write it.
   It is treated like global config: it may set any option except the

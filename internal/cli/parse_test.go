@@ -1517,6 +1517,50 @@ func TestParseAllowSensitiveMountsIsSessionFlag(t *testing.T) {
 	}
 }
 
+func TestParseSensitiveDirFlagsAreRepeatableSessionFlags(t *testing.T) {
+	cmds := []usercmd.Command{{Name: "triage", Path: "/p/triage", Target: usercmd.TargetSession}}
+	flags := []string{"--add-sensitive-dir", "/a", "--add-readonly-sensitive-dir", "/b", "--add-sensitive-dir", "/c", "--add-readonly-sensitive-dir", "/d"}
+	for _, tc := range []struct {
+		args   []string
+		action string
+	}{
+		{args: flags, action: "run"},
+		{args: append([]string{"shell"}, flags...), action: "shell"},
+		{args: append([]string{"devcontainer", "shell"}, flags...), action: "shell"},
+		{args: append(append([]string{}, flags...), "triage"), action: "user-command"},
+	} {
+		res, err := Parse(tc.args, config.DefaultOptions(), cmds...)
+		if err != nil {
+			t.Fatalf("Parse(%q) failed: %v", tc.args, err)
+		}
+		if res.Action != tc.action {
+			t.Errorf("Parse(%q): action %q, want %q", tc.args, res.Action, tc.action)
+		}
+		if !reflect.DeepEqual(res.Options.AddSensitiveDirs, []string{"/a", "/c"}) || res.Sources.AddSensitiveDirs != model.SourceCLI {
+			t.Errorf("Parse(%q): AddSensitiveDirs=%q source=%v, want [/a /c] from the CLI", tc.args, res.Options.AddSensitiveDirs, res.Sources.AddSensitiveDirs)
+		}
+		if !reflect.DeepEqual(res.Options.AddReadonlySensitiveDirs, []string{"/b", "/d"}) || res.Sources.AddReadonlySensitiveDirs != model.SourceCLI {
+			t.Errorf("Parse(%q): AddReadonlySensitiveDirs=%q source=%v, want [/b /d] from the CLI", tc.args, res.Options.AddReadonlySensitiveDirs, res.Sources.AddReadonlySensitiveDirs)
+		}
+		if res.Options.AddDirs != nil || res.Options.AddReadonlyDirs != nil {
+			t.Errorf("Parse(%q): the sensitive-dir flags set AddDirs=%q AddReadonlyDirs=%q", tc.args, res.Options.AddDirs, res.Options.AddReadonlyDirs)
+		}
+	}
+
+	for _, args := range [][]string{{"ps", "--add-sensitive-dir", "/a"}, {"exec", "--add-readonly-sensitive-dir", "/a"}} {
+		if _, err := Parse(args, config.DefaultOptions()); err == nil {
+			t.Errorf("Parse(%q): expected an unknown-flag error", args)
+		}
+	}
+
+	for _, flag := range []string{"--add-sensitive-dir", "--add-readonly-sensitive-dir"} {
+		_, err := Parse([]string{flag}, config.DefaultOptions())
+		if err == nil || !strings.Contains(err.Error(), flag) {
+			t.Errorf("Parse(%s) without a value: err = %v, want a missing-value error", flag, err)
+		}
+	}
+}
+
 func TestParseUserCommandHostRejectsSessionFlag(t *testing.T) {
 	defaults := config.DefaultOptions()
 	cmds := []usercmd.Command{{Name: "deploy", Path: "/p/deploy", Target: usercmd.TargetHost}}

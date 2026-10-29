@@ -412,7 +412,7 @@ func listEntryKey(option string, value string) string {
 		}
 	case "allow_domains":
 		return strings.ToLower(value)
-	case "add_dirs", "add_readonly_dirs":
+	case "add_dirs", "add_readonly_dirs", "sensitive_dir_exceptions":
 		return resolvedDirKey(value)
 	case "host_config_paths":
 		return hostConfigSelection.key(value)

@@ -25,7 +25,17 @@ const maxWorktreeMetadataBytes = 4 * 1024
 
 var errSymlinkFile = errors.New("symlink file")
 
-func validateDirPath(dir string, validated *[]string, projectReal string, home string) (realPath string, skip bool, err error) {
+// ResolveExtraDir resolves an additional directory, as given on the command
+// line or in config, to the symlink-resolved path it would be mounted from. It
+// refuses directories that must never be mounted.
+func ResolveExtraDir(dir string, home string) (string, error) {
+	_, realPath, err := resolveDirPath(dir, home)
+	return realPath, err
+}
+
+// resolveDirPath returns dir made absolute, for messages, and its resolved
+// path.
+func resolveDirPath(dir string, home string) (absPath string, realPath string, err error) {
 	if home != "" {
 		dir = util.ExpandTilde(dir, home)
 	}
@@ -57,6 +67,14 @@ func validateDirPath(dir string, validated *[]string, projectReal string, home s
 	}
 	if isDisallowedHomeMount(realPath, home) {
 		err = fmt.Errorf("mounting other users' home directories not allowed: %s", realPath)
+		return
+	}
+	return dir, realPath, nil
+}
+
+func validateDirPath(dir string, validated *[]string, projectReal string, home string) (realPath string, skip bool, err error) {
+	dir, realPath, err = resolveDirPath(dir, home)
+	if err != nil {
 		return
 	}
 	if realPath == projectReal {

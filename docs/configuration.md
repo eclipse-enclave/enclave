@@ -86,6 +86,7 @@ supported under `tool_overrides.<tool>`.
 | `ports` | Publish container ports to the host (container → host) |
 | `add_dirs` | Additional directories to mount |
 | `add_readonly_dirs` | Additional directories to mount read-only |
+| `sensitive_dir_exceptions` | Paths whose subtrees may be mounted although they are sensitive; mounts nothing. See [Sensitive-dir exceptions](cli-reference.md#sensitive-dir-exceptions) |
 | `project_mount` | `writable` (default) or `readonly` for the project/worktree mount |
 | `worktree_metadata` | Linked-worktree git metadata mounts: `follow` (default), `readonly`, or `none` |
 | `playwright_mcp` | Enable Playwright MCP server (Claude only) |
@@ -149,8 +150,8 @@ killed with `SIGKILL` the reset never runs; clear a leftover tint with
 List options come in two kinds. Each layer (global, project, the global and
 then the project file's tool override, CLI) merges onto the value it inherits.
 
-**Extras** are `add_dirs`, `add_readonly_dirs`, `ports`, `allow_domains`,
-`bridge_ports`, `pass_env`, and `cache_from`. Config files and CLI flags
+**Extras** are `add_dirs`, `add_readonly_dirs`, `sensitive_dir_exceptions`,
+`ports`, `allow_domains`, `bridge_ports`, `pass_env`, and `cache_from`. Config files and CLI flags
 follow the same rules, so existing configs and scripts keep their meaning:
 
 | Entry | Effect |
@@ -410,7 +411,11 @@ for event/offline runs.
 alternative, so no config file can let enclave run as root.
 `--allow-sensitive-mounts` is CLI-only too; `ENCLAVE_ALLOW_SENSITIVE_MOUNTS=1`
 is its only alternative, so no config file can let a session mount sensitive
-host data. `add_dirs` and `add_readonly_dirs` entries from config are checked
+host data. Global and project config can exempt specific paths with
+`sensitive_dir_exceptions`, which warns on every start and never covers home,
+enclave's own roots, or the SSH agent socket. `--add-sensitive-dir` and
+`--add-readonly-sensitive-dir` exempt their paths for one run and have no
+config key. `add_dirs` and `add_readonly_dirs` entries from config are checked
 like `--add-dir`, and a refusal names the flag or config file of each entry.
 
 The experimental `qemu` backend only runs unrestricted, slim/no-feature bundles, so selecting it implies `allow_all_network=true` and `slim=true` automatically (with a per-run notice). Requesting features or an allowlist (`--allow-domain`) is rejected because the backend cannot honor them.

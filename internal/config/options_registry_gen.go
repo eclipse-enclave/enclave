@@ -381,6 +381,18 @@ func OptionSpecs() []OptionSpec {
 			Group: OptionGroupRun,
 		},
 		{
+			Name:  "add_sensitive_dirs",
+			Group: OptionGroupRun,
+		},
+		{
+			Name:  "add_readonly_sensitive_dirs",
+			Group: OptionGroupRun,
+		},
+		{
+			Name:  "sensitive_dir_exceptions",
+			Group: OptionGroupRun,
+		},
+		{
 			Name:  "allow_sensitive_mounts",
 			Group: OptionGroupRun,
 		},

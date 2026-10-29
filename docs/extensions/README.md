@@ -765,15 +765,15 @@ Configure which features to install via `~/.config/enclave/config.json` (global)
 ```
 
 When `features` is not specified, all `defaultEnabled` features are installed (default). An empty array `[]` disables all features.
-Add an opt-in feature on top of the defaults with `["+debug-tools"]`, or list every feature you want explicitly. See [List Options](../configuration.md#list-options) for how layers combine.
+Add an opt-in feature on top of the defaults with `["+gitlab-cli"]`, or list every feature you want explicitly. See [List Options](../configuration.md#list-options) for how layers combine.
 
 **Devcontainer mode:** When devcontainer mode is used (`devcontainer run` or config `devcontainer: true`), features are disabled by default (the devcontainer already defines its own environment). To install features alongside a devcontainer, pass `--features` explicitly; `+`/`-` entries then start from no features.
 
 The next time you run `./enclave --rebuild`, only the specified features will be installed.
 
-**Available features:** `devtools`, `golang-dev`, `github-cli`, `gitlab-cli`, `node-dev`, `python-dev`, `theia-dev`, `debug-tools`
+**Available features:** `devtools`, `golang-dev`, `github-cli`, `gitlab-cli`, `node-dev`, `python-dev`, `theia-dev`
 
-**Opt-in features (not installed unless explicitly listed):** `debug-tools`, `gitlab-cli`, `golang-dev`, `theia-dev`
+**Opt-in features (not installed unless explicitly listed):** `gitlab-cli`, `golang-dev`, `theia-dev`
 
 ### Installation Order
 
@@ -831,7 +831,6 @@ enable the feature.
 | `node-dev` | 70 | Node.js dev tools: nvm, typescript, yarn, pnpm |
 | `python-dev` | 70 | Python dev tools: black, ruff, mypy, pytest, pre-commit |
 | `theia-dev` | 75 | Headers for building Theia and other Electron apps: libx11, libxkbfile, libsecret (opt-in) |
-| `debug-tools` | 80 | Debug tools: gdb, strace, ltrace, tcpdump, valgrind, sysstat, iproute2 (opt-in) |
 
 ## Key Differences: Tools vs Features
 
@@ -1035,11 +1034,6 @@ glab --version
 # Go (golang-dev feature)
 go version
 dlv version
-
-# Debug tools (debug-tools feature)
-which gdb
-which strace
-valgrind --version
 ```
 
 ### 4. Verify Feature Entrypoints

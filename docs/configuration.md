@@ -216,7 +216,7 @@ the inherited one and `+`/`-` entries amend it:
   configured features, while `--features a,b` replaces them.
 - Only when no layer selects features do directives apply to the implicit
   default-enabled set, so `["-node-dev"]` removes that default feature and
-  `["+debug-tools"]` adds an opt-in one. In devcontainer mode the implicit set
+  `["+gitlab-cli"]` adds an opt-in one. In devcontainer mode the implicit set
   is empty.
 - `--features none` selects nothing and cannot be combined with other values;
   in config, write `[]`.

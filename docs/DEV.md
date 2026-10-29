@@ -373,7 +373,9 @@ unset features default to none, so pass `--features` explicitly when needed.
 `--features none` is the explicit "no features" selection.
 Build-option normalization validates feature names against the installed
 extensions before image checks or session startup; unknown additions fail and
-unknown removals warn. Staged contexts retain `extensions/features` even when
+unknown removals warn. Option resolution records removals that the list merge
+consumes (`Options.DroppedRemovals`) so they are validated too; a replacing
+layer clears them. Staged contexts retain `extensions/features` even when
 empty, and build scripts must preserve an explicitly empty `FEATURES` value.
 
 Root guard note: `--allow-root` is CLI-only and has no config key, so no config

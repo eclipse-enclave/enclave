@@ -17,18 +17,24 @@ import (
 	"enclave/internal/model"
 )
 
-// validateFeatureNames checks a features selection against the installed
+// featureEntry is one entry of a features selection and where it was set.
+type featureEntry struct {
+	value string
+	label string
+}
+
+// validateFeatureNames checks features entries against the installed
 // features: unknown additions fail and unknown removals only warn. Each message
-// names where its entries were set, as label reports it.
-func validateFeatureNames(requested []string, allFeatures []model.Extension, label func(entry string) string) ([]string, error) {
+// names where its entries were set.
+func validateFeatureNames(entries []featureEntry, allFeatures []model.Extension) ([]string, error) {
 	available := make(map[string]struct{}, len(allFeatures))
 	for _, feature := range allFeatures {
 		available[feature.Name] = struct{}{}
 	}
 
 	var unknown, unknownRemovals namesByLabel
-	for _, raw := range requested {
-		name := strings.TrimSpace(raw)
+	for _, entry := range entries {
+		name := strings.TrimSpace(entry.value)
 		removal := strings.HasPrefix(name, "-")
 		if removal || strings.HasPrefix(name, "+") {
 			name = strings.TrimSpace(name[1:])
@@ -46,9 +52,9 @@ func validateFeatureNames(requested []string, allFeatures []model.Extension, lab
 			continue
 		}
 		if removal {
-			unknownRemovals.add(label(raw), name)
+			unknownRemovals.add(entry.label, name)
 		} else {
-			unknown.add(label(raw), name)
+			unknown.add(entry.label, name)
 		}
 	}
 
@@ -82,12 +88,13 @@ func (g *namesByLabel) add(label string, name string) {
 	}{label: label, names: []string{name}})
 }
 
-// featureEntryLabels names where each entry of a features selection was set:
-// the flag or config file that option resolution recorded, else the layer that
-// last set the list.
-func featureEntryLabels(origins model.ListOrigins, source model.OptionSource) func(entry string) string {
+// featureEntries lists the features selection of opts and the removals that
+// merging its layers consumed, each named by the flag or config file that
+// option resolution recorded, else by featureSource, the layer that last set
+// the selection.
+func featureEntries(opts model.Options, featureSource model.OptionSource) []featureEntry {
 	fallback := "features"
-	switch source {
+	switch featureSource {
 	case model.SourceCLI:
 		fallback = "--features"
 	case model.SourceGlobal:
@@ -97,12 +104,20 @@ func featureEntryLabels(origins model.ListOrigins, source model.OptionSource) fu
 	case model.SourceToolOverride:
 		fallback = "features in tool override"
 	}
-	return func(entry string) string {
-		if origin, ok := origins.Origin("features", entry); ok {
-			return config.ListOriginLabel("features", origin)
+	entries := make([]featureEntry, 0, len(opts.Features)+len(opts.DroppedRemovals))
+	for _, value := range opts.Features {
+		label := fallback
+		if origin, ok := opts.Origins.Origin("features", value); ok {
+			label = config.ListOriginLabel("features", origin)
 		}
-		return fallback
+		entries = append(entries, featureEntry{value: value, label: label})
 	}
+	for _, removal := range opts.DroppedRemovals {
+		if removal.Option == "features" {
+			entries = append(entries, featureEntry{value: "-" + removal.Name, label: config.ListOriginLabel("features", removal.Origin)})
+		}
+	}
+	return entries
 }
 
 // featureSelection is what a build selects among the available features:

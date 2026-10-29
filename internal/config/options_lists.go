@@ -76,7 +76,7 @@ func setOptionSource(sources *model.OptionSources, field string, source model.Op
 }
 
 // mergeListInto merges one layer's raw list for def into opts, keeping
-// opts.Origins and opts.ListProblems in step.
+// opts.Origins, opts.ListProblems, and opts.DroppedRemovals in step.
 func mergeListInto(opts *model.Options, def OptionDef, incoming []string, layer listLayer) {
 	field := reflect.ValueOf(opts).Elem().FieldByName(def.OptionField)
 	var base []listEntry
@@ -91,6 +91,9 @@ func mergeListInto(opts *model.Options, def OptionDef, incoming []string, layer 
 
 	merged, problems := mergeListLayer(def, base, incoming, layer)
 	opts.ListProblems = append(opts.ListProblems, problems...)
+	if def.Apply == ApplySliceMergeFeature {
+		opts.DroppedRemovals = trackDroppedRemovals(opts.DroppedRemovals, def.Name, base, incoming, merged, layer)
+	}
 	if merged == nil {
 		field.Set(reflect.Zero(field.Type()))
 		delete(opts.Origins, def.Name)
@@ -107,6 +110,41 @@ func mergeListInto(opts *model.Options, def OptionDef, incoming []string, layer 
 		opts.Origins = model.ListOrigins{}
 	}
 	opts.Origins[def.Name] = origins
+}
+
+// trackDroppedRemovals updates the removals of option that merging consumed. A
+// replacing list discards the inherited ones along with the inherited
+// selection; an amending list adds each of its removals that left no entry in
+// merged, such as one against an explicit selection.
+func trackDroppedRemovals(dropped []model.DroppedRemoval, option string, base []listEntry, incoming []string, merged []listEntry, layer listLayer) []model.DroppedRemoval {
+	if !IsDirectiveOnly(incoming) {
+		kept := dropped[:0]
+		for _, removal := range dropped {
+			if removal.Option != option {
+				kept = append(kept, removal)
+			}
+		}
+		return kept
+	}
+	if base == nil {
+		return dropped
+	}
+	remaining := make(map[string]bool, len(merged))
+	for _, entry := range merged {
+		remaining[strings.TrimSpace(entry.value)] = true
+	}
+	for _, raw := range incoming {
+		value := strings.TrimSpace(raw)
+		if !strings.HasPrefix(value, "-") {
+			continue
+		}
+		name := strings.TrimSpace(value[1:])
+		if name == "" || remaining["-"+name] {
+			continue
+		}
+		dropped = append(dropped, model.DroppedRemoval{Option: option, Name: name, Origin: layer.origin()})
+	}
+	return dropped
 }
 
 // mergeListLayer merges one layer onto base. A nil result means the list is

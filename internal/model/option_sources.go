@@ -52,3 +52,12 @@ type ListProblem struct {
 	Origin  EntryOrigin
 	Message string
 }
+
+// DroppedRemoval is a -name entry that merging the layers consumed without
+// leaving it in the resolved list, kept so validation can still report a
+// misspelled name.
+type DroppedRemoval struct {
+	Option string
+	Name   string
+	Origin EntryOrigin
+}

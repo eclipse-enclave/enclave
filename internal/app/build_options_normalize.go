@@ -23,7 +23,7 @@ func normalizeConfiguredBuildOptions(paths model.Paths, opts model.Options, feat
 		if err != nil {
 			return build, warnings, err
 		}
-		warnings, err = validateFeatureNames(build.Features, availableFeatures, featureEntryLabels(opts.Origins, featureSource))
+		warnings, err = validateFeatureNames(featureEntries(opts, featureSource), availableFeatures)
 		if err != nil {
 			return build, warnings, err
 		}

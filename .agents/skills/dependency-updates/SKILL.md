@@ -1,6 +1,6 @@
 ---
 name: dependency-updates
-description: Check Enclave's pinned dependencies, toolchains, images and GitHub Actions for updates and produce a prioritized update plan that respects the LTS floors. Use when asked what needs updating, to refresh pins, or to apply an update group.
+description: Use when checking or applying updates to Enclave's pinned dependencies (Go toolchain and modules, devtools, container images, GitHub Actions) or the LTS version floors, e.g. when asked what needs updating, to refresh pins, or to apply an update group.
 ---
 
 # Dependency Updates
@@ -23,7 +23,14 @@ means at least one `PROBLEM` line.
 ## 2. Report
 
 Turn the output into a report, in this order, one line per item with
-current → target and the files to touch:
+current → target and the files to touch, for example:
+
+```text
+yq v4.54.1 → v4.55.0: Dockerfile (YQ_VERSION)
+```
+
+The report is complete when every `PROBLEM`, `update`, `held back`, and
+`not called` line of the output appears in exactly one bucket.
 
 1. **Security**: `PROBLEM` lines from the Security section and an
    unsupported Go toolchain.
@@ -31,10 +38,18 @@ current → target and the files to touch:
    several SHAs or SHAs that do not match their tag, uncovered pins, floors
    above the ceiling, failed lookups).
 3. **Routine**: `update` lines for patch and minor versions and digests.
-4. **Major**: `update` lines marked `MAJOR` or `major change`. Read the
-   upstream release notes between the two versions and summarize what
-   affects this repository (runner or Node requirements, removed inputs,
-   changed defaults). Check the workflows that use the action.
+4. **Major**: `update` lines marked `MAJOR` or `major change`.
+   - GitHub Actions: read the upstream release notes between the two
+     versions and summarize what affects this repository (runner or Node
+     requirements, removed inputs, changed defaults). Check the workflows
+     that use the action.
+   - A new Debian stable: the `BASE_IMAGE` codename and the matching
+     `-<codename>-slim` variant of `AGENT_NODE_IMAGE` change together,
+     because the Node binary is copied into the base image. List the
+     packages that the Dockerfiles and the feature install scripts
+     install that are renamed or missing on the new release.
+   - A new Node LTS: `AGENT_NODE_IMAGE` moves to the new major. Summarize
+     the Node release notes that affect the npm-installed agents.
 5. **Held back**: `held back` lines and `not called` vulnerabilities with
    the reason the script gives. If a held-back module has a vulnerability,
    say that fixing it needs a higher Go floor and that this is the
@@ -88,8 +103,8 @@ Keep these in mind when interpreting results or changing the script.
   `-security` count; `-backports` does not. Update the suite lists when a
   release enters or leaves standard support.
 - **Floors** (`go` directive and packaging Go version, git, Dockerfile
-  features) may not exceed the lowest version the support set ships. An
-  upstream EOL is not a reason to raise one.
+  features) may not exceed the **ceiling**: the lowest version the support
+  set ships. An upstream EOL is not a reason to raise one.
 - **Go toolchain** is the latest patch of the oldest supported Go minor:
   the release the go command switches to when it builds devtools that need
   a newer Go. A newer project minor breaks `make lint`, because analysis

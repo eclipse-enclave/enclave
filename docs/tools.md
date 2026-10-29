@@ -48,9 +48,9 @@ enclave devcontainer generate    # Generate .devcontainer/devcontainer.json
 
 Or set `devcontainer: true` in your config. enclave looks for `.devcontainer/devcontainer.json` or `devcontainer.json` in the project root.
 
-`--base-image` and devcontainer mode are mutually exclusive.
+`--base-image` and devcontainer mode are mutually exclusive. Devcontainer mode runs on the `docker` and `podman` backends, not on `qemu`; see [Podman backend](cli-reference.md#podman-backend) for podman specifics.
 
-Applied devcontainer settings (best effort): `workspaceFolder`, `workspaceMount`, `containerEnv`, `mounts`, `runArgs`, `postCreateCommand`, `postStartCommand`. `remoteUser` is honored for shell-only sessions; agent containers run as the internal user unless `--use-remote-user` is set.
+Applied devcontainer settings (best effort): `workspaceFolder`, `workspaceMount`, `containerEnv`, `mounts`, `runArgs`, `postCreateCommand`, `postStartCommand`. `remoteUser` is honored for shell-only sessions; agent containers run as the internal user unless `--use-remote-user` is set. A `runArgs` `--security-opt` is applied only if it keeps the default confinement (`no-new-privileges`, `label=type:container_t`, podman's `mask=`); any other value, including custom seccomp profiles and SELinux types, is dropped with a warning.
 
 Unsupported fields (`dockerComposeFile`, `features`, `remoteEnv`, `initializeCommand`, `onCreateCommand`, `updateRemoteUserUID`) are ignored with a warning.
 

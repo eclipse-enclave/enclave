@@ -526,6 +526,34 @@ func TestValidatePlaywrightMCP_Claude(t *testing.T) {
 	}
 }
 
+func TestValidateOptionsDevcontainerBackends(t *testing.T) {
+	for _, tc := range []struct {
+		backend string
+		wantErr bool
+	}{
+		{backend: "docker"},
+		{backend: "podman"},
+		{backend: "qemu", wantErr: true},
+	} {
+		t.Run(tc.backend, func(t *testing.T) {
+			opts := model.Options{
+				RunOptions:   model.RunOptions{Backend: tc.backend, Tool: "claude"},
+				BuildOptions: model.BuildOptions{Devcontainer: true, ImageName: "test"},
+			}
+			_, _, _, err := ValidateOptions(opts, model.DefaultOptionSources(), ValidationContext{Action: "run"})
+			if tc.wantErr {
+				if err == nil || !strings.Contains(err.Error(), "devcontainer mode requires --backend docker or podman") {
+					t.Fatalf("expected devcontainer rejection, got %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("expected devcontainer mode to validate with --backend %s, got %v", tc.backend, err)
+			}
+		})
+	}
+}
+
 func TestValidateOptionsQEMURejectsBackground(t *testing.T) {
 	opts := model.Options{
 		RunOptions:   model.RunOptions{Backend: "qemu", Tool: "codex", Background: true},

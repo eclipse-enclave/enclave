@@ -31,10 +31,10 @@ const (
 	otherCommit  = "abcdef0123456789abcdef0123456789abcdef01"
 )
 
-// testRelease serves a rolling release. Its handlers can be swapped per test
-// to simulate a broken or moving release.
+// testRelease serves a rolling channel directory. Its handlers can be swapped
+// per test to simulate a broken or moving release.
 type testRelease struct {
-	ref       http.HandlerFunc
+	latest    http.HandlerFunc
 	checksums http.HandlerFunc
 	binary    http.HandlerFunc
 }
@@ -42,8 +42,8 @@ type testRelease struct {
 func newTestRelease(binary []byte) *testRelease {
 	digest := sha256.Sum256(binary)
 	return &testRelease{
-		ref: func(w http.ResponseWriter, _ *http.Request) {
-			_, _ = fmt.Fprintf(w, `{"object":{"sha":%q,"type":"commit"}}`, testCommit)
+		latest: func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = fmt.Fprintln(w, testCommit)
 		},
 		checksums: func(w http.ResponseWriter, _ *http.Request) {
 			_, _ = fmt.Fprintf(w, "%x  enclave-darwin-arm64\n%x  %s\n", sha256.Sum256(nil), digest, testArtifact)
@@ -58,8 +58,8 @@ func (r *testRelease) serve(t *testing.T) *httptest.Server {
 	t.Helper()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		switch req.URL.Path {
-		case "/ref":
-			r.ref(w, req)
+		case "/latest":
+			r.latest(w, req)
 		case "/checksums.txt":
 			r.checksums(w, req)
 		case "/" + testArtifact:
@@ -76,7 +76,7 @@ func (r *testRelease) serve(t *testing.T) *httptest.Server {
 // that server publishes.
 func newTestService(server *httptest.Server, target string) *Service {
 	service := New(model.UpdateChannelRolling)
-	service.sources[model.UpdateChannelRolling] = rollingSource{fetcher: service.fetcher, refURL: server.URL + "/ref", assetsURL: server.URL}
+	service.sources[model.UpdateChannelRolling] = downloadSource{fetcher: service.fetcher, channelURL: server.URL}
 	service.buildChannel = model.UpdateChannelRolling
 	service.goos = "linux"
 	service.goarch = "amd64"
@@ -142,11 +142,14 @@ func TestCheckComparesShortAndFullCommits(t *testing.T) {
 
 func TestCheckRejectsBadReferences(t *testing.T) {
 	for name, handler := range map[string]http.HandlerFunc{
-		"annotated tag": func(w http.ResponseWriter, _ *http.Request) {
-			_, _ = fmt.Fprintf(w, `{"object":{"sha":%q,"type":"tag"}}`, testCommit)
-		},
 		"not hex": func(w http.ResponseWriter, _ *http.Request) {
-			_, _ = fmt.Fprint(w, `{"object":{"sha":"not-a-commit","type":"commit"}}`)
+			_, _ = fmt.Fprintln(w, "not-a-commit")
+		},
+		"empty": func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = fmt.Fprintln(w, "")
+		},
+		"error page": func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = fmt.Fprintln(w, "<html><body>Moved</body></html>")
 		},
 		"missing release": func(w http.ResponseWriter, r *http.Request) {
 			http.NotFound(w, r)
@@ -154,7 +157,7 @@ func TestCheckRejectsBadReferences(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			release := newTestRelease(nil)
-			release.ref = handler
+			release.latest = handler
 			service := newTestService(release.serve(t), "")
 			if _, err := service.Check(context.Background()); err == nil {
 				t.Fatal("Check accepted a bad rolling reference")
@@ -168,8 +171,8 @@ func TestCheckReferenceSHALengths(t *testing.T) {
 		t.Run(fmt.Sprint(length), func(t *testing.T) {
 			release := newTestRelease(nil)
 			sha := strings.Repeat("a", length)
-			release.ref = func(w http.ResponseWriter, _ *http.Request) {
-				_, _ = fmt.Fprintf(w, `{"object":{"sha":%q,"type":"commit"}}`, sha)
+			release.latest = func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = fmt.Fprintln(w, sha)
 			}
 			service := newTestService(release.serve(t), "")
 			status, err := service.Check(context.Background())
@@ -257,12 +260,12 @@ func TestInstallFailuresPreserveExecutable(t *testing.T) {
 				// The release moves once Install has confirmed it and started
 				// downloading.
 				var lookups atomic.Int32
-				r.ref = func(w http.ResponseWriter, _ *http.Request) {
+				r.latest = func(w http.ResponseWriter, _ *http.Request) {
 					commit := testCommit
 					if lookups.Add(1) > 1 {
 						commit = otherCommit
 					}
-					_, _ = fmt.Fprintf(w, `{"object":{"sha":%q,"type":"commit"}}`, commit)
+					_, _ = fmt.Fprintln(w, commit)
 				}
 			},
 			wantErr: "moved from 1234567 to abcdef0",
@@ -274,12 +277,12 @@ func TestInstallFailuresPreserveExecutable(t *testing.T) {
 				// downloading.
 				r.binary = func(w http.ResponseWriter, _ *http.Request) { _, _ = fmt.Fprint(w, "republished binary") }
 				var lookups atomic.Int32
-				r.ref = func(w http.ResponseWriter, _ *http.Request) {
+				r.latest = func(w http.ResponseWriter, _ *http.Request) {
 					commit := testCommit
 					if lookups.Add(1) > 1 {
 						commit = otherCommit
 					}
-					_, _ = fmt.Fprintf(w, `{"object":{"sha":%q,"type":"commit"}}`, commit)
+					_, _ = fmt.Fprintln(w, commit)
 				}
 			},
 			wantErr: "moved from 1234567 to abcdef0",
@@ -410,21 +413,133 @@ func TestTargetChannelDefaultsToBuildChannel(t *testing.T) {
 	}
 }
 
-func TestStableChannelHasNoSourceYet(t *testing.T) {
-	target := writeExecutable(t, 0o755)
-	service := newTestService(newTestRelease(nil).serve(t), target)
-	service.channel = model.UpdateChannelStable
+// serveStableReleases publishes the stable layout: a latest file naming the
+// newest version beside one directory per release.
+func serveStableReleases(t *testing.T, latest string, binary []byte) *httptest.Server {
+	t.Helper()
+	digest := sha256.Sum256(binary)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		switch req.URL.Path {
+		case "/releases/latest":
+			_, _ = fmt.Fprintln(w, latest)
+		case "/releases/1.2.0/checksums.txt":
+			_, _ = fmt.Fprintf(w, "%x  %s\n", digest, testArtifact)
+		case "/releases/1.2.0/" + testArtifact:
+			_, _ = w.Write(binary)
+		default:
+			http.NotFound(w, req)
+		}
+	}))
+	t.Cleanup(server.Close)
+	return server
+}
 
-	if err := service.Supported(); err != nil {
-		t.Fatalf("a rolling binary cannot select the stable channel: %v", err)
+func TestStableChannelFollowsVersionedReleases(t *testing.T) {
+	newBinary := []byte("stable enclave binary")
+	server := serveStableReleases(t, "1.2.0", newBinary)
+	target := writeExecutable(t, 0o755)
+	service := newTestService(server, target)
+	service.sources[model.UpdateChannelStable] = downloadSource{fetcher: service.fetcher, channelURL: server.URL + "/releases", stable: true}
+	service.buildChannel = model.UpdateChannelStable
+	service.channel = model.UpdateChannelStable
+	service.current = buildinfo.Info{Version: "1.2.0", Commit: "abcdef0"}
+
+	status, err := service.Check(context.Background())
+	if err != nil {
+		t.Fatal(err)
 	}
-	if _, err := service.Check(context.Background()); !errors.Is(err, ErrChannelUnavailable) {
-		t.Fatalf("Check error = %v, want ErrChannelUnavailable", err)
+	if status.UpdateAvailable || status.Latest != "1.2.0" || status.Current != "1.2.0" {
+		t.Fatalf("status = %+v, want 1.2.0 current", status)
 	}
-	if _, _, err := service.Install(context.Background(), testCommit); !errors.Is(err, ErrChannelUnavailable) {
-		t.Fatalf("Install error = %v, want ErrChannelUnavailable", err)
+
+	// Newer builds stay: a release installed by hand before the pointer
+	// moved, or a pre-release, which the pointer never names.
+	for _, newer := range []string{"1.3.0", "1.10.0", "1.2.1", "1.3.0-rc.1", "2.0.0-beta.2"} {
+		service.current.Version = newer
+		status, err = service.Check(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if status.UpdateAvailable {
+			t.Fatalf("status = %+v for current %s, want no downgrade to 1.2.0", status, newer)
+		}
 	}
 	assertUnchanged(t, target)
+
+	for _, older := range []string{"1.1.0", "1.2.0-rc.1", "1.2.0-rc.10", "1.1.10", "0.9.0", "unknown", "1.1.0-3-gabc1234", "", "01.1.0", "1.1.00"} {
+		service.current.Version = older
+		status, err = service.Check(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !status.UpdateAvailable {
+			t.Fatalf("status = %+v for current %q, want an available update", status, older)
+		}
+	}
+	service.current.Version = "1.1.0"
+	status, err = service.Check(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, replaced, err := service.Install(context.Background(), status.Latest); err != nil || !replaced {
+		t.Fatalf("Install = %v, %v; want the release installed", replaced, err)
+	}
+	if got, _ := os.ReadFile(target); string(got) != string(newBinary) {
+		t.Fatalf("installed contents = %q, want the stable binary", got)
+	}
+}
+
+func TestCompareVersions(t *testing.T) {
+	for _, tc := range []struct {
+		current, latest string
+		want            int
+	}{
+		{"1.2.0", "1.2.0", 0},
+		{"v1.2.0", "1.2.0", 0},
+		{"1.2.0", "1.10.0", -1},
+		{"1.10.0", "1.2.0", 1},
+		{"1.2.0-rc.1", "1.2.0", -1},
+		{"1.2.0", "1.2.0-rc.1", 1},
+		{"1.2.0-rc.2", "1.2.0-rc.10", -1},
+		{"1.2.0-alpha.1", "1.2.0-beta.1", -1},
+		{"1.2.0-beta.3", "1.2.0-rc.1", -1},
+		{"1.2.0-rc.1", "1.2.0-alpha.9", 1},
+		{"1.2.0-rc.01", "1.2.0-rc.1", -1},
+		{"100000000000000000000.0.0", "99999999999999999999.0.0", 1},
+		{"1.2.0-rc.100000000000000000000", "1.2.0-rc.99999999999999999999", 1},
+		{"unknown", "1.2.0", -1},
+		{"1.2.0-3-gabc1234", "1.2.0", -1},
+		{"", "0.0.1", -1},
+	} {
+		if got := compareVersions(tc.current, tc.latest); got != tc.want {
+			t.Errorf("compareVersions(%q, %q) = %d, want %d", tc.current, tc.latest, got, tc.want)
+		}
+	}
+}
+
+func TestStableChannelRejectsBadVersions(t *testing.T) {
+	for _, latest := range []string{"", "rolling", "1.2", "../rolling", "1.2.0/x", "<html>", "v1.2.0", "01.2.0", "1.02.0", "1.2.00", "1.2.0-rc1", "1.2.0-rc-1", "1.2.0-alpha", "1.2.0-rc.01", "1.2.0-rc.1.1"} {
+		t.Run(latest, func(t *testing.T) {
+			server := serveStableReleases(t, latest, nil)
+			service := newTestService(server, "")
+			service.sources[model.UpdateChannelStable] = downloadSource{fetcher: service.fetcher, channelURL: server.URL + "/releases", stable: true}
+			service.channel = model.UpdateChannelStable
+			if _, err := service.Check(context.Background()); err == nil {
+				t.Fatalf("Check accepted latest %q", latest)
+			}
+		})
+	}
+}
+
+func TestStableAssetURLsNameTheRelease(t *testing.T) {
+	src := newStableSource(fetcher{}, "https://download.eclipse.org/enclave")
+	if got, want := src.assetURL("1.2.0", checksumsFilename), "https://download.eclipse.org/enclave/releases/1.2.0/checksums.txt"; got != want {
+		t.Fatalf("assetURL = %q, want %q", got, want)
+	}
+	rolling := newRollingSource(fetcher{}, "https://download.eclipse.org/enclave")
+	if got, want := rolling.assetURL(testCommit, testArtifact), "https://download.eclipse.org/enclave/rolling/"+testArtifact; got != want {
+		t.Fatalf("assetURL = %q, want %q", got, want)
+	}
 }
 
 func TestSwitchingChannelsInstallsTheOtherChannelsBuild(t *testing.T) {
@@ -523,7 +638,7 @@ func TestInstallIntoUnwritableDirectoryFailsOffline(t *testing.T) {
 func TestWritableNamesTheReinstallCommand(t *testing.T) {
 	server := newTestRelease(nil).serve(t)
 	service := newTestService(server, "/opt/my tools/enclave")
-	if err := service.Writable(); err != nil {
+	if err := service.Writable(testCommit); err != nil {
 		t.Fatalf("writable directory reported: %v", err)
 	}
 
@@ -532,7 +647,7 @@ func TestWritableNamesTheReinstallCommand(t *testing.T) {
 		checked = dir
 		return false
 	}
-	err := service.Writable()
+	err := service.Writable(testCommit)
 	if !errors.Is(err, ErrNotWritable) {
 		t.Fatalf("Writable error = %v, want ErrNotWritable", err)
 	}
@@ -550,7 +665,7 @@ func TestWritableNamesTheReinstallCommand(t *testing.T) {
 
 	service.goos = "darwin"
 	want := "with: shasum -a 256 --check --ignore-missing checksums.txt && xattr -c enclave-darwin-amd64 && sudo install enclave-darwin-amd64 '/opt/my tools/enclave'"
-	if err := service.Writable(); err == nil || !strings.HasSuffix(err.Error(), want) {
+	if err := service.Writable(testCommit); err == nil || !strings.HasSuffix(err.Error(), want) {
 		t.Errorf("Writable error on macOS = %v, want it to end with %q", err, want)
 	}
 }
@@ -601,37 +716,25 @@ func TestShellArgQuotesOnlyWhenNeeded(t *testing.T) {
 }
 
 func TestFailedRequestsExplainThemselves(t *testing.T) {
-	reset := time.Now().Add(20 * time.Minute).Truncate(time.Second)
 	for _, tc := range []struct {
 		name    string
 		handler http.HandlerFunc
 		want    string
 	}{
 		{
-			name: "rate limit",
-			handler: func(w http.ResponseWriter, _ *http.Request) {
-				w.Header().Set("X-RateLimit-Remaining", "0")
-				w.Header().Set("X-RateLimit-Reset", fmt.Sprint(reset.Unix()))
-				w.WriteHeader(http.StatusForbidden)
-				_, _ = fmt.Fprint(w, `{"message":"API rate limit exceeded for 203.0.113.7."}`)
-			},
-			want: "403 Forbidden: GitHub API rate limit exceeded; it resets at " + reset.Format("15:04"),
-		},
-		{
-			name: "github message",
-			handler: func(w http.ResponseWriter, _ *http.Request) {
-				w.WriteHeader(http.StatusForbidden)
-				_, _ = fmt.Fprint(w, `{"message":"You have exceeded a secondary rate limit.\n\u001b[31mRetry later."}`)
-			},
-			want: "403 Forbidden: You have exceeded a secondary rate limit. [31mRetry later.",
-		},
-		{
-			name: "plain body",
+			name: "not found",
 			handler: func(w http.ResponseWriter, _ *http.Request) {
 				w.WriteHeader(http.StatusNotFound)
-				_, _ = fmt.Fprint(w, "Not Found")
+				_, _ = fmt.Fprint(w, "<html><body>Not Found</body></html>")
 			},
 			want: "404 Not Found",
+		},
+		{
+			name: "forbidden",
+			handler: func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusForbidden)
+			},
+			want: "403 Forbidden",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -642,5 +745,21 @@ func TestFailedRequestsExplainThemselves(t *testing.T) {
 				t.Fatalf("error = %v, want it to end with %q", err, tc.want)
 			}
 		})
+	}
+}
+
+func TestShortBuild(t *testing.T) {
+	for commit, want := range map[string]string{
+		"":                    "unknown",
+		"272b035":             "272b035",
+		"272b035-dirty":       "272b035-dirty",
+		"272b035ab":           "272b035",
+		testCommit:            "1234567",
+		testCommit + "-dirty": "1234567-dirty",
+		"1.10.0-rc.1":         "1.10.0-rc.1",
+	} {
+		if got := ShortBuild(commit); got != want {
+			t.Errorf("ShortBuild(%q) = %q, want %q", commit, got, want)
+		}
 	}
 }

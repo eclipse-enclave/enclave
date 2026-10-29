@@ -1,0 +1,104 @@
+name: Prepare Release
+
+# A release tag vX.Y.Z, or vX.Y.Z-alpha.N, -beta.N, -rc.N for a pre-release,
+# builds the artifacts once and attaches them to a draft GitHub release.
+# Promote Release, a manual workflow, publishes the reviewed draft without
+# rebuilding anything.
+
+on:
+  push:
+    tags:
+      - 'v[0-9]*'
+
+# Shared with Promote Release so preparation and promotion cannot write the
+# same release concurrently.
+concurrency:
+  group: release
+  queue: max
+
+permissions:
+  contents: read
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.tag.outputs.version }}
+      prerelease: ${{ steps.tag.outputs.prerelease }}
+    steps:
+      - id: tag
+        run: |
+          case "$GITHUB_REF_NAME" in
+            v[0-9]*.[0-9]*.[0-9]*) ;;
+            *) echo "tag $GITHUB_REF_NAME is not a release tag (vX.Y.Z or vX.Y.Z-<pre-release>)" >&2; exit 1 ;;
+          esac
+          version="${GITHUB_REF_NAME#v}"
+          if ! printf '%s\n' "$version" | grep -Eq '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-(alpha|beta|rc)\.(0|[1-9][0-9]*))?$'; then
+            echo "tag $GITHUB_REF_NAME is not a release tag (vX.Y.Z or vX.Y.Z-{alpha,beta,rc}.N, no leading zeros)" >&2
+            exit 1
+          fi
+          prerelease=false
+          case "$version" in *-*) prerelease=true ;; esac
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
+
+  assets:
+    needs: version
+    uses: ./.github/workflows/reusable-release-assets.yml
+    with:
+      channel: stable
+      version: ${{ needs.version.outputs.version }}
+      scoop_base_url: ${{ github.server_url }}/${{ github.repository }}/releases/download/${{ github.ref_name }}
+
+  draft:
+    needs: [version, assets]
+    # Forks carry this file but must not publish with their own secrets.
+    if: ${{ github.repository == 'eclipse-enclave/enclave' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+      VERSION: ${{ needs.version.outputs.version }}
+      PRERELEASE: ${{ needs.version.outputs.prerelease }}
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-assets
+          path: artifacts
+
+      - name: Create draft release
+        run: |
+          checksum="$(sha256sum artifacts/checksums.txt | cut -d' ' -f1)"
+          ./scripts/verify-release-artifacts.sh artifacts "$checksum"
+          marker="<!-- enclave-release: $GITHUB_SHA $GITHUB_RUN_ID $checksum -->"
+          notes="$(./scripts/release-notes.sh stable "$VERSION" "${{ github.server_url }}/${{ github.repository }}/releases/download/$GITHUB_REF_NAME" "$GITHUB_SHA")"
+          if existing="$(gh release view "$GITHUB_REF_NAME" --json body,isDraft 2>/dev/null)"; then
+            # Preserve edited notes and the identity of the original build.
+            # Notes edited on the web come back with CRLF line endings.
+            if ! jq -r .body <<< "$existing" | tr -d '\r' | grep -Fxq -- "$marker"; then
+              echo "::error::release $GITHUB_REF_NAME already records another commit, build run, or artifact manifest; use a new release version" >&2
+              exit 1
+            fi
+            if [ "$(jq -r .isDraft <<< "$existing")" != true ]; then
+              echo "::error::release $GITHUB_REF_NAME is already published" >&2
+              exit 1
+            fi
+          else
+            flags=()
+            if [ "$PRERELEASE" = true ]; then flags+=(--prerelease); fi
+            gh release create "$GITHUB_REF_NAME" \
+              --verify-tag --draft \
+              --title "Enclave $VERSION" \
+              --notes "$notes
+
+          Build: ${{ github.server_url }}/${{ github.repository }}/actions/runs/$GITHUB_RUN_ID
+          $marker" \
+              "${flags[@]}"
+          fi
+          ./scripts/upload-github-release.sh "$GITHUB_REF_NAME" artifacts
+          echo "Draft ready. Review it, then run Promote Release for $GITHUB_REF_NAME." >> "$GITHUB_STEP_SUMMARY"

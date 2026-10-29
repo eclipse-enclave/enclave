@@ -1,0 +1,231 @@
+name: Publish to download.eclipse.org
+description: >-
+  Uploads a directory of release assets to the project's area on
+  download.eclipse.org, preserving immutable releases, and maintains the
+  channel's latest pointer. Follows the Eclipse CBI procedure for GitHub
+  Actions uploads (SSH key provisioned through Otterdog).
+
+inputs:
+  source:
+    description: Local directory whose files are uploaded.
+    required: true
+  target:
+    description: Directory below the project root, e.g. releases/1.0.0 or rolling. Replaced atomically unless immutable.
+    required: true
+  latest:
+    description: Value of the channel's latest pointer for this build; empty leaves the pointer alone.
+    required: false
+    default: ""
+  latest-path:
+    description: >-
+      Pointer file below the project root. Inside target (rolling/latest) it is
+      published together with the assets; outside (releases/latest) it is
+      written after the swap and only when the value does not sort below the
+      current one, so a re-run of an old release cannot move the channel back.
+    required: false
+    default: ""
+  commit:
+    description: Source commit recorded in the target's commit file.
+    required: false
+    default: ${{ github.sha }}
+  immutable:
+    description: >-
+      Refuse a different commit or changed contents of any existing file.
+      Identical files are left untouched; only missing files are added,
+      so a partial publication can be retried without replacing release assets.
+    required: false
+    default: "false"
+  username:
+    description: SSH user on the download server (SCP_USERNAME secret).
+    required: true
+  ssh-key:
+    description: Private SSH key (SCP_KEY secret).
+    required: true
+  ssh-passphrase:
+    description: Passphrase of the SSH key (SCP_PASSPHRASE secret); empty for an unprotected key.
+    required: false
+    default: ""
+  host:
+    description: Download server host.
+    required: false
+    default: projects-storage.eclipse.org
+  known-hosts:
+    description: known_hosts entry pinning the server's host key.
+    required: false
+    default: projects-storage.eclipse.org ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAsn6PO2Uemsr7wIUu5x0RnlRcuK36D2sbmYNe2LSKdb
+  remote-root:
+    description: Project root on the download server.
+    required: false
+    default: /home/data/httpd/download.eclipse.org/enclave
+  public-url:
+    description: URL the project root is served at, used to verify the publication.
+    required: false
+    default: https://download.eclipse.org/enclave
+
+runs:
+  using: composite
+  steps:
+    - name: Upload ${{ inputs.target }}
+      shell: bash
+      env:
+        SOURCE: ${{ inputs.source }}
+        TARGET: ${{ inputs.target }}
+        LATEST: ${{ inputs.latest }}
+        LATEST_PATH: ${{ inputs.latest-path }}
+        COMMIT: ${{ inputs.commit }}
+        IMMUTABLE: ${{ inputs.immutable }}
+        SSH_USERNAME: ${{ inputs.username }}
+        SSH_KEY: ${{ inputs.ssh-key }}
+        SSH_PASSPHRASE: ${{ inputs.ssh-passphrase }}
+        SSH_HOST: ${{ inputs.host }}
+        KNOWN_HOSTS: ${{ inputs.known-hosts }}
+        REMOTE_ROOT: ${{ inputs.remote-root }}
+      run: |
+        set -euo pipefail
+        valid_path() { case "$1" in ''|/*|*/|*..*|*[!A-Za-z0-9._/-]*) return 1 ;; esac; }
+        valid_path "$TARGET" || { echo "invalid target: $TARGET" >&2; exit 1; }
+        case "$LATEST" in
+          *[!A-Za-z0-9._-]*) echo "invalid latest value: $LATEST" >&2; exit 1 ;;
+        esac
+        if [ -n "$LATEST" ]; then
+          valid_path "$LATEST_PATH" || { echo "latest-path is required with latest: $LATEST_PATH" >&2; exit 1; }
+        fi
+        case "$COMMIT" in
+          *[!0-9a-f]*|'') echo "invalid commit: $COMMIT" >&2; exit 1 ;;
+        esac
+        if [ -z "$SSH_USERNAME" ] || [ -z "$SSH_KEY" ]; then
+          echo "SSH credentials for $SSH_HOST are not configured" >&2
+          exit 1
+        fi
+        if [ -z "$KNOWN_HOSTS" ]; then
+          echo "known-hosts must pin the host key of $SSH_HOST" >&2
+          exit 1
+        fi
+        if [ -z "$(ls -A "$SOURCE")" ]; then
+          echo "nothing to upload from $SOURCE" >&2
+          exit 1
+        fi
+
+        umask 077
+        ssh_dir=$(mktemp -d)
+        printf '%s\n' "$SSH_KEY" > "$ssh_dir/key"
+        printf '%s\n' "$KNOWN_HOSTS" > "$ssh_dir/known_hosts"
+        printf '#!/bin/sh\nprintf "%%s\\n" "$SSH_PASSPHRASE"\n' > "$ssh_dir/askpass"
+        chmod +x "$ssh_dir/askpass"
+        eval "$(ssh-agent -s)" >/dev/null
+        remove_staging=false
+        cleanup() {
+          # Staging directories are publicly visible; a failed run removes its own.
+          if [ "$remove_staging" = true ]; then
+            ssh "${opts[@]}" "$remote" "rm -rf '$staging'" || true
+          fi
+          ssh-agent -k >/dev/null 2>&1
+          rm -rf "$ssh_dir"
+        }
+        trap cleanup EXIT
+        SSH_ASKPASS="$ssh_dir/askpass" SSH_ASKPASS_REQUIRE=force ssh-add "$ssh_dir/key" </dev/null
+        opts=(-o UserKnownHostsFile="$ssh_dir/known_hosts" -o GlobalKnownHostsFile=/dev/null -o StrictHostKeyChecking=yes -o BatchMode=yes)
+        remote="$SSH_USERNAME@$SSH_HOST"
+
+        dir="$REMOTE_ROOT/$TARGET"
+        staging="$dir.tmp-$GITHUB_RUN_ID"
+        pointer=""
+        [ -z "$LATEST" ] || pointer="$REMOTE_ROOT/$LATEST_PATH"
+
+        if [ "$IMMUTABLE" = true ]; then
+          published=$(ssh "${opts[@]}" "$remote" "cat '$dir/commit' 2>/dev/null || true" | tr -d '[:space:]')
+          if [ -n "$published" ] && [ "$published" != "$COMMIT" ]; then
+            echo "::error::$TARGET was published from commit $published and is not replaced from $COMMIT; a release tag must not move" >&2
+            exit 1
+          fi
+        fi
+
+        # Stage beside the target before validating an immutable release or
+        # swapping in a new directory. Nothing else writes below the root.
+        remove_staging=true
+        ssh "${opts[@]}" "$remote" "rm -rf '$staging' && mkdir -p '$staging'"
+        scp "${opts[@]}" -q -r "$SOURCE"/* "$remote:$staging/"
+        # Hash every workflow file, including checksums.txt itself, and check
+        # the remote bytes before exposing files or advancing either pointer.
+        (cd "$SOURCE" && sha256sum -- *) | ssh "${opts[@]}" "$remote" "cd '$staging' && sha256sum --check --strict -"
+        printf '%s\n' "$COMMIT" | ssh "${opts[@]}" "$remote" "cat > '$staging/commit'"
+        if [ -n "$pointer" ] && [ "${LATEST_PATH#"$TARGET"/}" != "$LATEST_PATH" ]; then
+          # A pointer inside the directory is published with the assets.
+          printf '%s\n' "$LATEST" | ssh "${opts[@]}" "$remote" "cat > '$staging/${LATEST_PATH#"$TARGET"/}'"
+          pointer=""
+          echo "$LATEST_PATH -> $LATEST"
+        fi
+        if [ "$IMMUTABLE" = true ]; then
+          ssh "${opts[@]}" "$remote" "bash -s -- '$dir' '$staging'" <<'PUBLISH'
+        set -euo pipefail
+        dir=$1
+        staging=$2
+        trap 'rm -rf "$staging"' EXIT
+        if [ ! -e "$dir" ]; then
+          mv -T "$staging" "$dir"
+        else
+          # Validate all overlaps before adding anything, including checksums
+          # and commit. A same-commit rebuild is not necessarily identical.
+          for file in "$staging"/*; do
+            name=${file##*/}
+            if [ -e "$dir/$name" ] && ! cmp -s "$file" "$dir/$name"; then
+              echo "::error::published file $name differs; use a new release version" >&2
+              exit 1
+            fi
+          done
+          for file in "$staging"/*; do
+            name=${file##*/}
+            # Linking adds missing files atomically and cannot overwrite one
+            # that appeared since validation. Both paths share a filesystem.
+            [ -e "$dir/$name" ] || ln "$file" "$dir/$name"
+          done
+        fi
+        PUBLISH
+        else
+          # The previous rolling build is moved back if the new one cannot
+          # take its place; -T refuses to nest directories.
+          ssh "${opts[@]}" "$remote" "rm -rf '$dir.old' && { [ ! -e '$dir' ] || mv -T '$dir' '$dir.old'; } && { mv -T '$staging' '$dir' || { mv -T '$dir.old' '$dir'; exit 1; }; } && rm -rf '$dir.old'"
+        fi
+        remove_staging=false
+        echo "published $TARGET/"
+
+        if [ -n "$pointer" ]; then
+          current=$(ssh "${opts[@]}" "$remote" "cat '$pointer' 2>/dev/null || true" | tr -d '[:space:]')
+          newest=$(printf '%s\n%s\n' "$current" "$LATEST" | sort -V | tail -n 1)
+          if [ -n "$current" ] && [ "$newest" != "$LATEST" ]; then
+            echo "::notice::$LATEST_PATH stays at $current, which is newer than $LATEST"
+          else
+            printf '%s\n' "$LATEST" | ssh "${opts[@]}" "$remote" "cat > '$pointer.tmp-$GITHUB_RUN_ID' && mv '$pointer.tmp-$GITHUB_RUN_ID' '$pointer'"
+            echo "$LATEST_PATH -> $LATEST"
+          fi
+        fi
+
+    # Reads back what the updater will read. The server may lag behind the
+    # upload, so a mismatch after the retries is a warning, not a failure.
+    - name: Verify ${{ inputs.public-url }}/${{ inputs.target }}
+      shell: bash
+      env:
+        SOURCE: ${{ inputs.source }}
+        TARGET: ${{ inputs.target }}
+        LATEST: ${{ inputs.latest }}
+        LATEST_PATH: ${{ inputs.latest-path }}
+        PUBLIC_URL: ${{ inputs.public-url }}
+      run: |
+        set -euo pipefail
+        fetch() { curl -fsSL -H 'Cache-Control: no-cache' --max-time 30 "$1" 2>/dev/null; }
+        check() {
+          [ -f "$SOURCE/checksums.txt" ] || return 0
+          [ "$(fetch "$PUBLIC_URL/$TARGET/checksums.txt")" = "$(cat "$SOURCE/checksums.txt")" ] || return 1
+          if [ -n "$LATEST" ]; then
+            published=$(fetch "$PUBLIC_URL/$LATEST_PATH" | tr -d '[:space:]')
+            [ "$published" = "$LATEST" ] || [ "$(printf '%s\n%s\n' "$published" "$LATEST" | sort -V | tail -n 1)" = "$published" ] || return 1
+          fi
+        }
+        for _ in $(seq 1 12); do
+          if check; then
+            echo "verified $PUBLIC_URL/$TARGET/"
+            exit 0
+          fi
+          sleep 10
+        done
+        echo "::warning::$PUBLIC_URL/$TARGET/ does not yet serve the published files; check it before relying on this build"

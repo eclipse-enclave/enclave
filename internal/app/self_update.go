@@ -13,7 +13,6 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"strings"
 	"syscall"
 	"time"
 
@@ -33,7 +32,7 @@ const (
 
 type selfUpdater interface {
 	Supported() error
-	Writable() error
+	Writable(latest string) error
 	Check(ctx context.Context) (selfupdate.Status, error)
 	Install(ctx context.Context, latest string) (path string, replaced bool, err error)
 }
@@ -88,16 +87,16 @@ func runSelfUpdate(verbose bool) int {
 		return 1
 	}
 	if !status.UpdateAvailable {
-		logx.Infof("Enclave is up to date with the %s channel (%s).", status.Channel, shortBuild(status.Latest))
+		logx.Infof("Enclave is up to date with the %s channel (%s).", status.Channel, selfupdate.ShortBuild(status.Latest))
 		markSelfUpdateChecked(stamp)
 		return 0
 	}
-	if err := updater.Writable(); err != nil {
-		logx.Errorf("A different enclave %s build is available (%s), but %v", status.Channel, shortBuild(status.Latest), err)
+	if err := updater.Writable(status.Latest); err != nil {
+		logx.Errorf("A different enclave %s build is available (%s), but %v", status.Channel, selfupdate.ShortBuild(status.Latest), err)
 		return 1
 	}
 
-	logx.Infof("Updating enclave to %s build %s.", status.Channel, shortBuild(status.Latest))
+	logx.Infof("Updating enclave to %s build %s.", status.Channel, selfupdate.ShortBuild(status.Latest))
 	updateCtx, cancelUpdate := context.WithTimeout(ctx, selfUpdateInstallTimeout)
 	path, replaced, err := updater.Install(updateCtx, status.Latest)
 	cancelUpdate()
@@ -111,10 +110,10 @@ func runSelfUpdate(verbose bool) int {
 	}
 	markSelfUpdateChecked(stamp)
 	if !replaced {
-		logx.Infof("Enclave is already %s build %s.", status.Channel, shortBuild(status.Latest))
+		logx.Infof("Enclave is already %s build %s.", status.Channel, selfupdate.ShortBuild(status.Latest))
 		return 0
 	}
-	logx.Successf("Updated enclave from %s to %s build %s at %s. The new binary will be used on the next invocation.", shortBuild(status.Current), status.Channel, shortBuild(status.Latest), path)
+	logx.Successf("Updated enclave from %s to %s build %s at %s. The new binary will be used on the next invocation.", selfupdate.ShortBuild(status.Current), status.Channel, selfupdate.ShortBuild(status.Latest), path)
 	return 0
 }
 
@@ -186,12 +185,6 @@ func maybeAutomaticSelfUpdate(parsed cli.Result, global config.Defaults) (interr
 		logx.Warnf("Enclave update interrupted.")
 		return true
 	}
-	if errors.Is(err, selfupdate.ErrChannelUnavailable) {
-		// A configuration problem, unlike a network failure: say so, once per
-		// check interval, instead of finding no updates in silence.
-		logx.Warnf("Enclave update check skipped: %v", err)
-		return false
-	}
 	if err != nil {
 		logx.DebugNoticef("Enclave update check failed: %v", err)
 		return false
@@ -199,16 +192,16 @@ func maybeAutomaticSelfUpdate(parsed cli.Result, global config.Defaults) (interr
 	if !status.UpdateAvailable {
 		return false
 	}
-	if err := updater.Writable(); err != nil {
-		logx.Warnf("A different enclave %s build is available (%s; current %s), but %v", status.Channel, shortBuild(status.Latest), shortBuild(status.Current), err)
+	if err := updater.Writable(status.Latest); err != nil {
+		logx.Warnf("A different enclave %s build is available (%s; current %s), but %v", status.Channel, selfupdate.ShortBuild(status.Latest), selfupdate.ShortBuild(status.Current), err)
 		return false
 	}
 	if global.AutoUpdate == nil || !*global.AutoUpdate {
-		logx.Warnf("A different enclave %s build is available (%s; current %s). Run 'enclave self-update' or set \"auto_update\": true in the global config.", status.Channel, shortBuild(status.Latest), shortBuild(status.Current))
+		logx.Warnf("A different enclave %s build is available (%s; current %s). Run 'enclave self-update' or set \"auto_update\": true in the global config.", status.Channel, selfupdate.ShortBuild(status.Latest), selfupdate.ShortBuild(status.Current))
 		return false
 	}
 
-	logx.Noticef("Updating enclave to %s build %s.", status.Channel, shortBuild(status.Latest))
+	logx.Noticef("Updating enclave to %s build %s.", status.Channel, selfupdate.ShortBuild(status.Latest))
 	updateCtx, cancelUpdate := context.WithTimeout(ctx, selfUpdateInstallTimeout)
 	path, replaced, err := updater.Install(updateCtx, status.Latest)
 	cancelUpdate()
@@ -225,7 +218,7 @@ func maybeAutomaticSelfUpdate(parsed cli.Result, global config.Defaults) (interr
 		return false
 	}
 	if replaced {
-		logx.Noticef("Updated enclave to %s build %s at %s. The new binary will be used on the next invocation.", status.Channel, shortBuild(status.Latest), path)
+		logx.Noticef("Updated enclave to %s build %s at %s. The new binary will be used on the next invocation.", status.Channel, selfupdate.ShortBuild(status.Latest), path)
 	}
 	return false
 }
@@ -269,20 +262,4 @@ func writeSelfUpdateStamp(path string) error {
 		return err
 	}
 	return util.WriteFileAtomic(path, []byte(time.Now().UTC().Format(time.RFC3339)+"\n"), 0o600)
-}
-
-// shortBuild abbreviates a commit identifying a build to the seven characters
-// `enclave version` shows; versions are kept.
-func shortBuild(build string) string {
-	if build == "" {
-		return "unknown"
-	}
-	base, dirty := strings.CutSuffix(build, "-dirty")
-	if len(base) > 7 && isHexString(base) {
-		base = base[:7]
-	}
-	if dirty {
-		return base + "-dirty"
-	}
-	return base
 }

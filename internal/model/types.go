@@ -534,7 +534,6 @@ const (
 	// host directories on platforms that follow that convention (macOS
 	// Library/Application Support and Library/Caches).
 	AppID                   = "org.eclipse." + AppName
-	Version                 = "1.0.0"
 	HostnamePrefix          = AppName + "-"
 	ContainerUser           = "agent"
 	ContainerHome           = "/home/" + ContainerUser

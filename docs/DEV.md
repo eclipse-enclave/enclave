@@ -38,7 +38,7 @@ make rpm
 ```
 
 The default Enclave image includes both packaging toolchains. On Ubuntu, install
-them with `sudo apt install debhelper devscripts rpm`. On Fedora, install the
+them with `sudo apt install debhelper rpm`. On Fedora, install the
 RPM build dependencies with `sudo dnf install git go make rpm-build`. Use
 `make deb-quick` when Go was installed outside APT and therefore does not
 satisfy dpkg's build dependency check; it builds the same binary package
@@ -425,8 +425,9 @@ Self-update notes (user-facing behavior: [CLI reference](cli-reference.md#comman
   in `internal/selfupdate`. To try a real update, build outside the checkout
   with `make build BUILD_CHANNEL=rolling BIN_DIR=/tmp/enclave-rolling`, then
   run `/tmp/enclave-rolling/enclave self-update` with `ENCLAVE_HOME` unset.
-- The stable source is a placeholder until the Eclipse download server
-  contract is known; stable release CI must stamp `BUILD_CHANNEL=stable`.
+- Both channel sources read a `latest` file on download.eclipse.org and the
+  `checksums.txt` beside the artifacts it names; see [Releases](#releases)
+  for the layout. Release CI stamps `BUILD_CHANNEL=stable` or `rolling`.
 
 List option note: list options are folded layer by layer in
 `internal/config/options_lists.go`, with each tool-override file as its own
@@ -475,6 +476,134 @@ invoked from `Dockerfile`.
 - Keep `Dockerfile` structural; move feature/tool composition logic into these scripts.
 - Script contracts are documented in `runtime-assets/build-scripts/README.md`.
 - Validate script changes with `make lint` (`shellcheck` runs on all `*.sh` files and `build-scripts/bin/` helpers).
+
+## Releases
+
+There is one version source: the latest release tag, read by
+`scripts/version.sh`. `make build` stamps `enclave version` and the image label
+with it (`1.0.0` on the tag `v1.0.0`, otherwise `git describe` output such as
+`1.0.0-3-gabc1234`), and `make deb`/`make rpm` use `scripts/version.sh --package`
+(`1.0.0`, or a snapshot such as `1.0.1~~git.20260421.57.abcdef12` that sorts
+above `1.0.0` and below `1.0.1` and all of its pre-releases). Nothing is bumped in a commit; the Debian
+changelog entry is written into the build copy. Until the first release tag
+exists, versions build on a `0.1.1` baseline, one patch above the `0.1.0` the
+packages carried before, so rolling packages keep upgrading. Tag names reach the shell through `make`,
+so the script only emits version characters and fails the build on anything
+else.
+
+To cut a release, push an annotated tag `vX.Y.Z`, or `vX.Y.Z-alpha.N`,
+`-beta.N`, `-rc.N` for a pre-release, on `main`. Only these forms are
+accepted: they are the ones the updater, dpkg, and rpm all order the same
+way, so a pre-release, the snapshots after it, and the final release upgrade
+into each other in that order. The first release tag must be `v0.1.2` or
+higher, pre-releases such as `v0.1.2-rc.1` included: the packages published
+before it are `0.1.2~~git…` snapshots, and apt and dnf do not upgrade them to
+a `0.1.1` or `0.1.0`. Final tags must be annotated as well: `git describe`
+prefers annotated tags, so a lightweight `v0.3.0` on the commit of an
+annotated `v0.3.0-rc.1` makes later snapshots `0.3.0~rc.1…`, which sort below
+`0.3.0`, and apt and dnf stop upgrading.
+
+```bash
+git tag -a v1.0.0 -m "Enclave 1.0.0"
+git push origin v1.0.0
+```
+
+A tagged release takes two steps. Both workflows share a concurrency group, so
+they never write the same release at once:
+
+1. **Prepare Release** (`.github/workflows/release.yml`) runs on the tag push.
+   It builds the assets once, verifies that the binary and packages report the
+   tag's version (the triggering tag wins when a commit carries several release
+   tags), and attaches the assets to a draft GitHub release. The draft notes
+   end with a provenance marker, an HTML comment recording the source commit,
+   the build's run ID, and the SHA-256 of `checksums.txt`. Edit the notes as
+   needed, but leave the marker as it is.
+2. Review the draft, then dispatch **Promote Release**
+   (`.github/workflows/promote-release.yml`) from `main` with the tag, such as
+   `v1.2.3`. The job targets the `release` environment; configure its protections
+   before enabling publication (see below). It checks the marker against the
+   exact tag and successful build run, downloads that run's `release-assets`
+   artifact, and verifies both the marker and draft files against this
+   independent copy. It publishes the original build files to
+   `releases/<version>/` on download.eclipse.org,
+   moves `releases/latest` for a final release that sorts higher, and
+   publishes the GitHub release last; its Latest marker also only moves to a
+   higher version. A pre-release becomes a GitHub pre-release and a versioned
+   directory, but never moves `releases/latest`. GitHub asset hashes are checked
+   again immediately before publication to catch changes to expected assets
+   during upload. Assets can still change after the check or publication.
+
+Nothing is rebuilt after the tag build, because rebuilding the same commit may
+produce different bytes. Tag builds disable `setup-go` cache restoration and
+saving; rolling and ordinary CI builds retain caching. The `release-assets`
+workflow artifact is retained for 30 days for tagged releases and one day for
+rolling builds. Promotion and its retries require the original artifact.
+If it has expired or been deleted, publication fails rather than trusting the
+editable draft alone. Promote within that window; a build that cannot be
+retried is replaced by a new version.
+
+**Deployment prerequisites:** provision and verify these in Otterdog and on the
+download server before enabling stable publication. The workflow YAML alone
+does not establish them:
+
+- The `release` environment must have required reviewers, prevent self-review,
+  and allow deployments only from `main`. Referencing a nonexistent environment
+  creates an unprotected environment, not an approval gate.
+- Stable publication credentials must be scoped to that protected environment,
+  with equivalent organization/repository-scoped access removed. Rolling must
+  use a distinct credential restricted server-side to its rolling area (or an
+  equivalently isolated publishing service). Sharing an organization-wide SSH
+  key bypasses the stable approval boundary.
+- Protect `main`, workflow changes, and release-tag creation and movement.
+
+These are external configuration requirements, not guarantees provided by the
+current repository workflows. Verify their effective configuration before
+treating dispatch or environment approval as a production sign-off.
+
+Published release files are immutable on both hosts: retries leave identical
+files untouched, add missing files after a partial failure, and fail before
+adding anything if an existing file differs (including `checksums.txt`). A
+failed promotion may already have published `releases/<version>/` and moved
+`releases/latest` while the GitHub release is still a draft; running Promote
+Release again finishes it. Retrying an older release cannot pull the stable
+channel back.
+GitHub retries verify all completed assets before deleting empty `starter`
+entries left by failed uploads and filling gaps; other unfinished states fail
+without deleting anything. After uploading, both channels require every
+expected GitHub asset to be `uploaded` and to match the workflow's SHA-256
+digest, downloading and hashing the asset when GitHub provides no digest.
+Rolling releases still replace their assets on every publication.
+Tags are mutable refs, so the provenance marker and `releases/<version>/commit`
+record the source commit, and a tag moved to another commit is refused. A
+ruleset protecting `refs/tags/v*` from deletion and force pushes is the
+server-side complement.
+
+Layout on `https://download.eclipse.org/enclave/`, which the updater and the
+download links depend on:
+
+| Path | Contents |
+|------|----------|
+| `releases/<version>/` | All assets of one release plus `checksums.txt` and `commit`; versions are plain (`1.0.0`, `1.1.0-rc.1`) |
+| `releases/latest` | One line naming the highest final release, written after its directory is complete |
+| `rolling/` | The assets of the current `main` build, replaced as a whole on every push; only `main` publishes here |
+| `rolling/latest` | One line with the full commit SHA of that build, published together with its assets |
+
+Uploads go through `.github/actions/publish-downloads`, which follows the
+[CBI procedure](https://eclipse.dev/cbi/best-practices/github-actions/upload-to-downloads.eclipse.org/):
+the `SCP_USERNAME`, `SCP_KEY`, and `SCP_PASSPHRASE` secrets are provisioned by
+Otterdog, the server's host key is pinned in the action (update `known-hosts`
+when the Eclipse Foundation rotates it), and each directory is uploaded next
+to its target. Before publication, remote SHA-256 verification checks every
+staged file against the workflow's bytes, including `checksums.txt` itself;
+a mismatch or missing file fails before publishing the staged files or
+advancing `latest`, and a failed run removes its staging directory. New directories and rolling builds are published as a whole
+with `mv`; retries of existing releases validate the staged files, then add
+only missing files without replacing existing ones.
+After publishing, the action reads `checksums.txt` and the pointer back over
+`https://download.eclipse.org` and warns when they do not match within two
+minutes. This HTTP propagation check is separate from the mandatory remote
+integrity check. The GitHub release keeps a copy of the assets; the Scoop manifest
+points at it.
 
 ## Docs and Diagrams
 

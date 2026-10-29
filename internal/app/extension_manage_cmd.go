@@ -13,9 +13,9 @@ import (
 	"io"
 	"os"
 
+	"enclave/internal/buildinfo"
 	"enclave/internal/extinstall"
 	"enclave/internal/logx"
-	"enclave/internal/model"
 )
 
 // newExtinstallEnv wires the installer to the real host.
@@ -35,7 +35,7 @@ func newExtinstallEnv(ctx *AppContext, req extinstall.Request) (extinstall.Env, 
 		Stdin:     os.Stdin,
 		Narration: narrationWriter(req),
 		Style:     extinstall.TerminalStyle(narrationFile(req)),
-		Version:   "enclave " + model.Version,
+		Version:   "enclave " + buildinfo.Read().Version,
 	}, nil
 }
 

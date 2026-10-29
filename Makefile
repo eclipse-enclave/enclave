@@ -13,9 +13,21 @@ BINARY ?= enclave
 UNAME_S := $(shell uname -s)
 CMD_DIR := ./cmd/enclave
 COMPLETIONS_DIR ?= ./completions
-VERSION ?= 0.1.0
+# Both versions derive from the latest release tag; see scripts/version.sh.
+# VERSION is what `enclave version` and the image label report,
+# PACKAGE_VERSION the deb/rpm version. Both are computed once per make run, but
+# only the targets that stamp them require them, so test and lint still run
+# when a stray tag leaves scripts/version.sh without a version.
+ifndef VERSION
+VERSION := $(shell ./scripts/version.sh)
+endif
+ifndef PACKAGE_VERSION
+PACKAGE_VERSION := $(shell ./scripts/version.sh --package)
+endif
+require_version = $(if $(strip $($1)),,$(error $1 is empty: scripts/version.sh found no version; see its output above))
 GIT_COMMIT = $(shell git rev-parse --short HEAD 2>/dev/null)
 GIT_COMMIT_DATE = $(shell git show -s --format=%cs HEAD 2>/dev/null)
+GIT_COMMIT_RFC2822 = $(shell git show -s --format=%cD HEAD 2>/dev/null || date -R)
 GIT_DIRTY = $(shell if [ -n "$$(git status --porcelain 2>/dev/null)" ]; then printf '%s' '-dirty'; fi)
 BUILD_VERSION ?= $(VERSION)
 BUILD_COMMIT ?= $(if $(strip $(GIT_COMMIT)),$(GIT_COMMIT)$(GIT_DIRTY),unknown)
@@ -38,6 +50,7 @@ ZSH_COMPLETION_DIR := $(DATA_HOME)/zsh/site-functions
 BASH_COMPLETION_DIR := $(DATA_HOME)/bash-completion/completions
 
 build: check-go
+	$(call require_version,BUILD_VERSION)
 	mkdir -p $(BIN_DIR)
 	go build -ldflags "$(BUILD_LDFLAGS)" -o $(BIN_DIR)/$(BINARY) $(CMD_DIR)
 
@@ -110,14 +123,28 @@ clean-lint-cache:
 test: check-go
 	go test ./...
 
+# The Debian changelog entry is written into the build copy, so the package
+# version follows the release tags without a commit per build. Only the deb
+# recipes export it: an exported variable is expanded for every recipe line.
+define DEB_CHANGELOG_ENTRY
+enclave ($(PACKAGE_VERSION)-1) unstable; urgency=medium
+
+  * Build of enclave $(BUILD_VERSION), commit $(BUILD_COMMIT).
+
+ -- $(shell sed -n 's/^Maintainer: //p' debian/control)  $(GIT_COMMIT_RFC2822)
+endef
+deb deb-quick: export DEB_CHANGELOG = $(DEB_CHANGELOG_ENTRY)
+
 # Build Debian package using dpkg-buildpackage
 # Output goes to dist/ directory
 deb:
+	$(call require_version,BUILD_VERSION)$(call require_version,PACKAGE_VERSION)
 	mkdir -p dist
 	@tmpdir=$$(mktemp -d) && \
 	cp -r . "$$tmpdir/enclave" && \
 	cd "$$tmpdir/enclave" && \
-	BUILD_COMMIT='$(BUILD_COMMIT)' BUILD_DATE='$(BUILD_DATE)' \
+	printf '%s\n' "$$DEB_CHANGELOG" > debian/changelog && \
+	BUILD_VERSION='$(BUILD_VERSION)' BUILD_COMMIT='$(BUILD_COMMIT)' BUILD_DATE='$(BUILD_DATE)' \
 		dpkg-buildpackage -us -uc -b && \
 	mv "$$tmpdir"/*.deb "$(CURDIR)/dist/" && \
 	( find "$$tmpdir" -type d -exec chmod u+w {} + 2>/dev/null || true ) && \
@@ -126,11 +153,13 @@ deb:
 
 # Build Debian package without build dependencies check (faster for development)
 deb-quick:
+	$(call require_version,BUILD_VERSION)$(call require_version,PACKAGE_VERSION)
 	mkdir -p dist
 	@tmpdir=$$(mktemp -d) && \
 	cp -r . "$$tmpdir/enclave" && \
 	cd "$$tmpdir/enclave" && \
-	BUILD_COMMIT='$(BUILD_COMMIT)' BUILD_DATE='$(BUILD_DATE)' \
+	printf '%s\n' "$$DEB_CHANGELOG" > debian/changelog && \
+	BUILD_VERSION='$(BUILD_VERSION)' BUILD_COMMIT='$(BUILD_COMMIT)' BUILD_DATE='$(BUILD_DATE)' \
 		dpkg-buildpackage -us -uc -b -d && \
 	mv "$$tmpdir"/*.deb "$(CURDIR)/dist/" && \
 	( find "$$tmpdir" -type d -exec chmod u+w {} + 2>/dev/null || true ) && \
@@ -140,6 +169,7 @@ deb-quick:
 # Build an RPM package. --nodeps lets this run on Debian/Ubuntu hosts, where
 # apt-installed build tools are not represented in the RPM package database.
 rpm: check-go
+	$(call require_version,BUILD_VERSION)$(call require_version,PACKAGE_VERSION)
 	@command -v rpmbuild >/dev/null 2>&1 || { echo "rpmbuild is not installed (on Debian/Ubuntu: sudo apt install rpm)"; exit 1; }
 	mkdir -p dist
 	@tmpdir=$$(mktemp -d) && \
@@ -149,11 +179,11 @@ rpm: check-go
 		--exclude='./bin' --exclude='./completions' --exclude='./dist' \
 		--exclude='./vendor' --exclude='./.gocache' --exclude='./.gomodcache' \
 		--exclude='./.tmp' \
-		--transform 's,^\.,enclave-$(VERSION),' \
-		-C "$(CURDIR)" -czf "$$tmpdir/SOURCES/enclave-$(VERSION).tar.gz" . && \
+		--transform 's,^\.,enclave-$(PACKAGE_VERSION),' \
+		-C "$(CURDIR)" -czf "$$tmpdir/SOURCES/enclave-$(PACKAGE_VERSION).tar.gz" . && \
 	rpmbuild --nodeps -bb \
 		--define "_topdir $$tmpdir" \
-		--define "package_version $(VERSION)" \
+		--define "package_version $(PACKAGE_VERSION)" \
 		--define "build_version $(BUILD_VERSION)" \
 		--define "build_commit $(BUILD_COMMIT)" \
 		--define "build_date $(BUILD_DATE)" \

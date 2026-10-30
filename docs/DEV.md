@@ -506,6 +506,15 @@ packages carried before, so rolling packages keep upgrading. Tag names reach the
 so the script only emits version characters and fails the build on anything
 else.
 
+`CHANGELOG.md` is written as changes land, not at release time. A PR with a
+user-visible change adds a bullet under `## Unreleased` at the top of the
+file, creating that section above the latest release when it is missing:
+one line per change, in the user's terms, ending with a link to the PR.
+Breaking changes go under `### Breaking changes` within that section and
+say what to do instead. Before tagging, rename `## Unreleased` to
+`## X.Y.Z - YYYY-MM-DD` in the same PR as any last fixes, so the tagged
+source describes the release it belongs to.
+
 To cut a release, push an annotated tag `vX.Y.Z`, or `vX.Y.Z-alpha.N`,
 `-beta.N`, `-rc.N` for a pre-release, on `main`. Only these forms are
 accepted: they are the ones the updater, dpkg, and rpm all order the same

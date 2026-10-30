@@ -2,6 +2,7 @@
 
 ## User Guides
 
+- [install.md](install.md) — Requirements, engine setup, packages, binaries, and completions
 - [cli-reference.md](cli-reference.md) — Commands and flags
 - [configuration.md](configuration.md) — Config files, tool overrides, and config patches
 - [auth.md](auth.md) — Authentication, OAuth, secrets, and SSH keys

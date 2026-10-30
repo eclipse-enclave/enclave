@@ -39,6 +39,9 @@ type apiKeyInjectionResult struct {
 	SecretValues             map[string]string
 	InjectedKeys             map[string]string
 	SecretMapping            SecretMapping
+	// SuppressedEnvVars are the env vars of secrets withheld by --no-api-key
+	// or --ephemeral, mapped to the reason.
+	SuppressedEnvVars map[string]string
 }
 
 func newAuthManager(r *Runtime) authManager {
@@ -84,7 +87,7 @@ func (m authManager) Prepare(env *[]string, stores storeSet) (model.AuthState, S
 	if err != nil {
 		return model.AuthState{}, SecretMapping{}, err
 	}
-	passEnvValues := m.injectPassEnv(env, persistedEnv, injection.InjectedKeys)
+	passEnvValues := m.injectPassEnv(env, persistedEnv, injection.InjectedKeys, injection.SuppressedEnvVars)
 	if placeholders := backend.SecretPlaceholders(secretReleases(injection.SecretMapping)); len(placeholders) > 0 {
 		*env = append(*env, model.EnvSecretPlaceholders+"="+backend.EncodeSecretPlaceholders(placeholders))
 	}
@@ -163,6 +166,7 @@ func (m authManager) injectDeclaredSecrets(hooks auth.Hooks, authCtx auth.Contex
 		SecretValues:             map[string]string{},
 		InjectedKeys:             map[string]string{},
 		SecretMapping:            SecretMapping{},
+		SuppressedEnvVars:        map[string]string{},
 	}
 	injectedAny := false
 	placeholderResolver := newPlaceholderResolver()
@@ -171,6 +175,9 @@ func (m authManager) injectDeclaredSecrets(hooks auth.Hooks, authCtx auth.Contex
 	eligibleSecrets, suppressedActiveSecrets := partitionInjectableSecrets(activeSecrets, suppressedAPIKeySecrets)
 	for _, secret := range suppressedActiveSecrets {
 		logx.Debugf("Suppressed declared API key secret %s due to %s", secret.ID, suppressionReason)
+		for _, envVar := range secret.EnvVars {
+			result.SuppressedEnvVars[envVar] = suppressionReason
+		}
 	}
 	hostCredentials := hostCredentialRefs(eligibleSecrets)
 	m.setReleaseHostOverrides(resolveReleaseHostOverrides(eligibleSecrets, m.host.Home, secretsLayers, persistedEnv))
@@ -295,13 +302,19 @@ func partitionInjectableSecrets(activeSecrets []activeSecret, suppressedSecrets 
 	return eligible, suppressed
 }
 
-func (m authManager) injectPassEnv(env *[]string, persistedEnv map[string]string, injectedKeys map[string]string) map[string]string {
+func (m authManager) injectPassEnv(env *[]string, persistedEnv map[string]string, injectedKeys map[string]string, suppressed map[string]string) map[string]string {
 	if len(m.auth.PassEnv) == 0 {
 		return nil
 	}
 	passEnvValues := map[string]string{}
 	for _, keyVar := range m.auth.PassEnv {
 		if _, ok := injectedKeys[keyVar]; ok {
+			continue
+		}
+		// --pass-env on the command line is the explicit escape hatch; a
+		// configured pass_env must not quietly undo the suppression.
+		if reason, ok := suppressed[keyVar]; ok && !m.cliPassEnv[keyVar] {
+			logx.Warnf("Not passing %s from pass_env: %s withholds it; pass --pass-env +%s to forward it for this run", keyVar, reason, keyVar)
 			continue
 		}
 		keyValue := os.Getenv(keyVar)

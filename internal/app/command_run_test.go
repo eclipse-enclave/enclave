@@ -12,6 +12,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -339,7 +340,7 @@ func TestExecSessionTargetFollowsSessionTint(t *testing.T) {
 func runMounts(t *testing.T, home string, project string, opts model.Options) (dirs, readonlyDirs []string, stderr string, err error) {
 	t.Helper()
 	_, stderr = captureOutput(t, func() {
-		dirs, readonlyDirs, err = resolveAdditionalMounts(opts, guardProject(project), home, true)
+		dirs, readonlyDirs, err = resolveAdditionalMounts(opts, guardProject(project), home)
 	})
 	return dirs, readonlyDirs, stderr, err
 }
@@ -463,5 +464,14 @@ func TestLoadProfileOrReportNamesUnknownTool(t *testing.T) {
 	_, errOut := captureOutput(t, func() { _, err = loadProfileOrReport(testPathsWithFeatures(t), "bogus") })
 	if err == nil || !strings.Contains(errOut, "unknown tool: bogus") || strings.Contains(errOut, "file does not exist") {
 		t.Fatalf("loadProfileOrReport(bogus) = %v, stderr %q; want the tool named", err, errOut)
+	}
+}
+
+func TestCLIPassEnvKeysSkipsRemovalsAndNone(t *testing.T) {
+	cli := model.Options{AuthOptions: model.AuthOptions{PassEnv: []string{"none", "OPENAI_API_KEY", "+GH_TOKEN", "-AWS_PROFILE"}}}
+	got := cliPassEnvKeys(cli)
+	want := map[string]bool{"OPENAI_API_KEY": true, "GH_TOKEN": true}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("cliPassEnvKeys = %v, want %v", got, want)
 	}
 }

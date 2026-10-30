@@ -206,6 +206,8 @@ enclave --allow-domain api.deepseek.com --allow-domain api.example.com
 enclave --allow-domain api.deepseek.com,api.example.com
 ```
 
+A domain that a deny rule blocks stays blocked; the session start reports it separately from the allowlisted ones.
+
 On the Docker backend, `--allow-domain` is inert when combined with `--allow-all-network`: the gateway is not running, so there is no allowlist to extend. The QEMU backend rejects `--allow-domain` because it cannot enforce restricted egress. Bare DNS names only — schemes, paths, ports, and wildcards are rejected.
 
 The same key works in config: `"allow_domains": ["api.deepseek.com"]` in global `~/.config/enclave/config.json`, or in project `~/.config/enclave/projects/<hash>/config.json` for one project.

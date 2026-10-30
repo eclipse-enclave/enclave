@@ -63,7 +63,7 @@ func TestInjectPassEnvRegistersInjectedKeys(t *testing.T) {
 	persistedEnv := map[string]string{}
 	injectedKeys := map[string]string{}
 
-	m.injectPassEnv(&env, persistedEnv, injectedKeys)
+	m.injectPassEnv(&env, persistedEnv, injectedKeys, nil)
 
 	if got := injectedKeys["MY_TOKEN"]; got != "from-host" {
 		t.Fatalf("injectedKeys[MY_TOKEN] = %q, want %q", got, "from-host")
@@ -85,13 +85,34 @@ func TestInjectPassEnvSkipsAlreadyInjectedKeys(t *testing.T) {
 	persistedEnv := map[string]string{}
 	injectedKeys := map[string]string{"GH_TOKEN": "placeholder"}
 
-	passValues := m.injectPassEnv(&env, persistedEnv, injectedKeys)
+	passValues := m.injectPassEnv(&env, persistedEnv, injectedKeys, nil)
 
 	if len(passValues) != 0 {
 		t.Fatalf("passValues = %v, want none", passValues)
 	}
 	if len(env) != 0 {
 		t.Fatalf("env = %v, want empty", env)
+	}
+}
+
+func TestInjectPassEnvKeepsSuppressedSecretsUnlessNamedOnCLI(t *testing.T) {
+	suppressed := map[string]string{"ANTHROPIC_API_KEY": "--no-api-key"}
+	t.Setenv("ANTHROPIC_API_KEY", "sk-host")
+
+	configured := newAuthManager(&Runtime{auth: model.AuthOptions{PassEnv: []string{"ANTHROPIC_API_KEY"}}})
+	var env []string
+	if values := configured.injectPassEnv(&env, map[string]string{}, map[string]string{}, suppressed); len(values) != 0 || len(env) != 0 {
+		t.Fatalf("configured pass_env forwarded a suppressed secret: values=%v env=%v", values, env)
+	}
+
+	fromCLI := newAuthManager(&Runtime{
+		auth:       model.AuthOptions{PassEnv: []string{"ANTHROPIC_API_KEY"}},
+		cliPassEnv: map[string]bool{"ANTHROPIC_API_KEY": true},
+	})
+	env = nil
+	fromCLI.injectPassEnv(&env, map[string]string{}, map[string]string{}, suppressed)
+	if got := envValue(env, "ANTHROPIC_API_KEY"); got != "sk-host" {
+		t.Fatalf("ANTHROPIC_API_KEY = %q, want --pass-env to forward it", got)
 	}
 }
 
@@ -627,6 +648,14 @@ func TestInjectDeclaredSecretsSuppressesOnlyProviderAPIKeySecrets(t *testing.T) 
 
 			if !injection.ProviderHasEnvCredential["provider"] {
 				t.Fatalf("ProviderHasEnvCredential = false, want true")
+			}
+			for _, envVar := range []string{"OAUTH_TOKEN", "GH_TOKEN", "GITHUB_TOKEN"} {
+				if _, ok := injection.SuppressedEnvVars[envVar]; ok {
+					t.Fatalf("%s should not be in SuppressedEnvVars: %+v", envVar, injection.SuppressedEnvVars)
+				}
+			}
+			if _, ok := injection.SuppressedEnvVars["API_KEY"]; ok == tt.wantAPIKeySecret {
+				t.Fatalf("API_KEY in SuppressedEnvVars = %v, want %v: %+v", ok, !tt.wantAPIKeySecret, injection.SuppressedEnvVars)
 			}
 			if tt.wantAPIKeySecret {
 				if got := envValue(env, "API_KEY"); got == "" {

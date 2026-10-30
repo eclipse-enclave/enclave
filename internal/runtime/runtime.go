@@ -41,6 +41,7 @@ type Runtime struct {
 	auth                  model.AuthOptions
 	build                 model.BuildOptions
 	runSources            model.RunOptionSources
+	cliPassEnv            map[string]bool
 	yoloEnabled           bool
 	validatedDirs         []string
 	validatedReadonlyDirs []string
@@ -162,6 +163,7 @@ func New(cfg model.RuntimeConfig) *Runtime {
 		auth:                  cfg.Auth,
 		build:                 cfg.Build,
 		runSources:            cfg.RunSources,
+		cliPassEnv:            cfg.CLIPassEnv,
 		yoloEnabled:           cfg.YoloEnabled,
 		validatedDirs:         cfg.ValidatedDirs,
 		validatedReadonlyDirs: cfg.ValidatedReadonlyDirs,

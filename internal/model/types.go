@@ -172,10 +172,13 @@ type RuntimeConfig struct {
 	Devcontainer          *DevcontainerConfig
 	ValidatedDirs         []string
 	ValidatedReadonlyDirs []string
-	YoloEnabled           bool
-	Features              []Extension
-	UserCommandMount      *UserCommandMount
-	Provenance            map[string]any
+	// CLIPassEnv holds the pass_env keys named on the command line, which may
+	// forward a secret --no-api-key suppresses; configured keys may not.
+	CLIPassEnv       map[string]bool
+	YoloEnabled      bool
+	Features         []Extension
+	UserCommandMount *UserCommandMount
+	Provenance       map[string]any
 }
 
 // UserCommandMount describes the read-only bind mount that exposes the host

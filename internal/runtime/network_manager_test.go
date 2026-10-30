@@ -147,3 +147,10 @@ func TestPolicyDomainSourcePaths(t *testing.T) {
 		}
 	})
 }
+
+func TestPartitionAdHocDomainsSeparatesDenied(t *testing.T) {
+	kept, denied := partitionAdHocDomains([]string{"ok.example.com", "Blocked.example.com", "api.tracker.example"}, []string{"blocked.example.com", "tracker.example"})
+	if !reflect.DeepEqual(kept, []string{"ok.example.com"}) || !reflect.DeepEqual(denied, []string{"Blocked.example.com", "api.tracker.example"}) {
+		t.Fatalf("kept = %v, denied = %v", kept, denied)
+	}
+}

@@ -166,7 +166,6 @@ func TestActionNeedsTool(t *testing.T) {
 		{name: "cleanup", parsed: cli.Result{Action: "cleanup"}, want: true},
 		{name: "cleanup --all", parsed: cli.Result{Action: "cleanup", Options: model.Options{CleanupOptions: model.CleanupOptions{CleanupAll: true}}}, want: false},
 		{name: "ps", parsed: cli.Result{Action: "ps"}, want: false},
-		{name: "status", parsed: cli.Result{Action: "status"}, want: false},
 		{name: "attach", parsed: cli.Result{Action: "attach"}, want: false},
 		{name: "tools", parsed: cli.Result{Action: "tools"}, want: false},
 		{name: "features", parsed: cli.Result{Action: "features"}, want: false},

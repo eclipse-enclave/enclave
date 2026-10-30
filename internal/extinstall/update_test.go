@@ -628,11 +628,11 @@ func TestHostCommandsReportedOnEveryActionResult(t *testing.T) {
 func TestShadowedHostCommandsAreNotPromised(t *testing.T) {
 	const dir = "extensions/features/foo/commands/host/"
 	files := fooRepoFiles()
-	for _, name := range []string{"status", "mine", "vnc-viewer"} {
+	for _, name := range []string{"stop", "mine", "vnc-viewer"} {
 		files[dir+name] = "#!/bin/sh\n"
 	}
 	fetcher := newFakeFetcher(t, "a1b2c3d4", files)
-	for _, name := range []string{"status", "mine", "vnc-viewer"} {
+	for _, name := range []string{"stop", "mine", "vnc-viewer"} {
 		markExecutable(t, fetcher, dir+name)
 	}
 	env, out := testEnv(t, fetcher, "")
@@ -653,11 +653,11 @@ func TestShadowedHostCommandsAreNotPromised(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Add: %v", err)
 	}
-	if !slices.Equal(installed[0].HostCommands, []string{"mine", "status", "vnc-viewer"}) {
+	if !slices.Equal(installed[0].HostCommands, []string{"mine", "stop", "vnc-viewer"}) {
 		t.Errorf("HostCommands = %v, want every shipped executable", installed[0].HostCommands)
 	}
 	warnings := strings.Join(installed[0].Warnings, "\n")
-	for _, want := range []string{`"status" is not added`, "a built-in command", `"mine" is not added`, own} {
+	for _, want := range []string{`"stop" is not added`, "a built-in command", `"mine" is not added`, own} {
 		if !strings.Contains(warnings, want) {
 			t.Errorf("warnings missing %q:\n%s", want, warnings)
 		}

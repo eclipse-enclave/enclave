@@ -688,7 +688,7 @@ if [ -n "$PROJECT_DIR" ] && { [ -f "$PROJECT_DIR/.mcp.json" ] || [ -f "$PROJECT_
 fi
 
 # Set terminal for better experience. A host TERM without a terminfo entry in
-# the image (e.g. xterm-ghostty) makes tmux refuse to start.
+# the image (e.g. xterm-ghostty) breaks full-screen terminal programs.
 export TERM="${TERM:-xterm-256color}"
 if command -v infocmp >/dev/null 2>&1 && ! infocmp "$TERM" >/dev/null 2>&1; then
     echo "Warning: no terminfo entry for TERM=$TERM; using xterm-256color" >&2
@@ -719,18 +719,4 @@ if [ -t 0 ] && [ -t 1 ]; then
     echo ""
 fi
 
-# Execute the command passed to docker run. When the session monitor is
-# enabled, run it inside a managed tmux session (dedicated socket + config,
-# isolated from any user ~/.tmux.conf) so `enclave status` can capture the
-# rendered screen and OSC title from outside the container.
-#
-# Known trade-off: the tmux client exits 0 regardless of the wrapped command,
-# so the container exit code no longer reflects the agent's. Propagating it
-# would mean giving up exec (a shell waiting on a foreground tmux defers
-# signal traps until the client exits, breaking prompt `docker stop`
-# delivery) — a worse trade for interactive sessions, where the exit code is
-# rarely consumed.
-if [ "${ENCLAVE_SESSION_MONITOR:-}" = "1" ] && [ -t 0 ] && command -v tmux >/dev/null 2>&1; then
-    exec tmux -f /usr/local/share/enclave/tmux-session.conf -L enclave new-session -s main -- "$@"
-fi
 exec "$@"

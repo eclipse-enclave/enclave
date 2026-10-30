@@ -160,10 +160,6 @@ func Run(args []string) int {
 		return runPS(parsed.Options)
 	}
 
-	if parsed.Action == "status" {
-		return runStatus(parsed.Options)
-	}
-
 	if parsed.Action == "stop" {
 		return runStop(parsed.Options, projectDir)
 	}

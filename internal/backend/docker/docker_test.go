@@ -204,23 +204,6 @@ func TestLabelsFromRequestFallsBackToParsedSessionName(t *testing.T) {
 	}
 }
 
-func TestLabelsFromRequestRecordsSessionMonitorOwner(t *testing.T) {
-	labels := labelsFromRequest(backend.Request{
-		Session: backend.SessionMeta{Tool: "claude", Name: "enclave-claude-abc123abc123-1"},
-		Env: []backend.EnvVar{
-			{Name: model.EnvSessionMonitor, Value: "1"},
-			{Name: model.EnvSessionMonitorUser, Value: "agent"},
-		},
-	})
-
-	if labels[model.LabelSessionMonitor] != "true" {
-		t.Fatalf("expected session-monitor label, got %q", labels[model.LabelSessionMonitor])
-	}
-	if labels[model.LabelSessionMonitorUser] != "agent" {
-		t.Fatalf("expected recorded tmux owner label, got %q", labels[model.LabelSessionMonitorUser])
-	}
-}
-
 func TestLabelsFromRequestRecordsProjectDir(t *testing.T) {
 	labels := labelsFromRequest(backend.Request{
 		Session: backend.SessionMeta{

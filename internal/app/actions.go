@@ -54,7 +54,6 @@ var toolFreeActions = map[string]bool{
 	"ps":                      true,
 	"review-target":           true,
 	"ssh-init":                true,
-	"status":                  true,
 	"theia":                   true,
 	"theia-next":              true,
 	"tools":                   true,

@@ -43,7 +43,6 @@ type Defaults struct {
 	NoCache                *bool               `json:"no_cache"`
 	NoHistory              *bool               `json:"no_history"`
 	NoMemory               *bool               `json:"no_memory"`
-	SessionMonitor         *bool               `json:"session_monitor"`
 	SessionTint            string              `json:"session_tint"`
 	Timezone               string              `json:"timezone"`
 	BaseImage              string              `json:"base_image"`

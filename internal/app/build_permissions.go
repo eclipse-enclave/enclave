@@ -52,7 +52,6 @@ func collectAppRootModeIssues(appRoot string) ([]string, error) {
 		filepath.ToSlash(filepath.Join("runtime-assets", "auth-reconcile.sh")),
 		filepath.ToSlash(filepath.Join("runtime-assets", "kit-init.sh")),
 		filepath.ToSlash(filepath.Join("runtime-assets", "net.sh")),
-		filepath.ToSlash(filepath.Join("runtime-assets", "tmux-session.conf")),
 	} {
 		if err := checkAppRootFileMode(appRoot, rel, false, &issues); err != nil {
 			return nil, err

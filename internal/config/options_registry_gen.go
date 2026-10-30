@@ -187,16 +187,6 @@ func OptionSpecs() []OptionSpec {
 			},
 		},
 		{
-			Name:  "session_monitor",
-			Group: OptionGroupRun,
-			ApplyDefaultsWithSource: func(opts *model.Options, defaults Defaults, source model.OptionSource, sources *model.OptionSources) {
-				if canOverride(sources.SessionMonitor, source) && defaults.SessionMonitor != nil {
-					opts.SessionMonitor = *defaults.SessionMonitor
-					sources.SessionMonitor = source
-				}
-			},
-		},
-		{
 			Name:  "session_tint",
 			Group: OptionGroupRun,
 			ApplyDefaultsWithSource: func(opts *model.Options, defaults Defaults, source model.OptionSource, sources *model.OptionSources) {

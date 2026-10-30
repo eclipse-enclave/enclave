@@ -397,10 +397,6 @@ func (b *Backend) Exec(ctx context.Context, ref backend.SessionRef, req backend.
 	return neutralizeExitError(execErr)
 }
 
-func (b *Backend) ExecOutput(ctx context.Context, ref backend.SessionRef, argv []string, user string) (string, error) {
-	return dockercmd.ExecCapture(ctx, sessionRefName(ref), argv, user)
-}
-
 func (b *Backend) Logs(ctx context.Context, ref backend.SessionRef, opts backend.LogOptions) (string, error) {
 	tail := opts.Tail
 	if tail <= 0 {
@@ -576,21 +572,6 @@ func labelsFromRequest(req backend.Request) map[string]string {
 	if configKey := configKeyFromStores(req.Stores); configKey != "" {
 		labels[model.LabelConfigKey] = configKey
 	}
-	// Mark session-monitor sessions so `status` knows a tmux snapshot can be
-	// captured, and record the tmux owner so it captures as the right user.
-	// The runtime signals both via entrypoint env vars.
-	for _, e := range req.Env {
-		switch e.Name {
-		case model.EnvSessionMonitor:
-			if e.Value == "1" {
-				labels[model.LabelSessionMonitor] = "true"
-			}
-		case model.EnvSessionMonitorUser:
-			if e.Value != "" {
-				labels[model.LabelSessionMonitorUser] = e.Value
-			}
-		}
-	}
 	if meta.Provenance != nil {
 		if data, err := json.Marshal(meta.Provenance); err != nil {
 			logx.Debugf("Skipping %s label: %v", model.LabelOptions, err)
@@ -706,20 +687,18 @@ func sessionFromSummary(c dockercmd.Summary) (backend.Session, bool) {
 		}
 	}
 	return backend.Session{
-		Ref:                backend.SessionRef{Name: name, ID: id},
-		Tool:               tool,
-		ProjectHash:        projectHash,
-		Worktree:           worktree,
-		ProjectDir:         projectDir,
-		Status:             c.State,
-		CreatedAt:          createdAt,
-		Name:               sessionName,
-		Background:         strings.EqualFold(labels[model.LabelBackground], "true"),
-		Ports:              sessionPortMappings(c.Ports),
-		Yolo:               strings.TrimSpace(labels[model.LabelYolo]) == "1",
-		SessionMonitor:     strings.EqualFold(labels[model.LabelSessionMonitor], "true"),
-		SessionMonitorUser: strings.TrimSpace(labels[model.LabelSessionMonitorUser]),
-		Provenance:         provenance,
+		Ref:         backend.SessionRef{Name: name, ID: id},
+		Tool:        tool,
+		ProjectHash: projectHash,
+		Worktree:    worktree,
+		ProjectDir:  projectDir,
+		Status:      c.State,
+		CreatedAt:   createdAt,
+		Name:        sessionName,
+		Background:  strings.EqualFold(labels[model.LabelBackground], "true"),
+		Ports:       sessionPortMappings(c.Ports),
+		Yolo:        strings.TrimSpace(labels[model.LabelYolo]) == "1",
+		Provenance:  provenance,
 	}, true
 }
 

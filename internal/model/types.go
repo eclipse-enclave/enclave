@@ -48,7 +48,6 @@ type RunOptions struct {
 	BridgePorts              []string
 	Shell                    bool
 	Admin                    bool
-	SessionMonitor           bool
 	SessionTint              string
 	Timezone                 string
 	CmdArgs                  []string
@@ -115,19 +114,6 @@ type CleanupOptions struct {
 	CleanupDryRun     bool
 }
 
-// StatusOptions carries arguments for the `status` command.
-type StatusOptions struct {
-	// StatusJSON emits machine-readable snapshot objects instead of a table.
-	StatusJSON bool
-	// StatusAll reports sessions from all projects instead of only the
-	// project resolved from the working directory.
-	StatusAll bool
-}
-
-// DefaultStatusLines is the agreed screen-snapshot height: enough bottom rows
-// for state detection without shipping whole scrollback-sized panes.
-const DefaultStatusLines = 24
-
 // PSOptions carries arguments for the host-side `ps` container-listing command.
 type PSOptions struct {
 	// PSAll includes stopped containers in the listing, not just running ones.
@@ -149,7 +135,6 @@ type Options struct {
 	BuildOptions
 	CleanupOptions
 	UpdateOptions
-	StatusOptions
 	PSOptions
 	Sources OptionSources
 	// Origins, ListProblems, and DroppedRemovals are filled by option
@@ -550,16 +535,10 @@ const (
 	// UserCommandsContainerDir is the fixed, home-layout-neutral path where the
 	// host session command tree is mounted read-only inside the container.
 	UserCommandsContainerDir = "/opt/" + AppName + "/commands"
-	// SessionMonitorTmuxSocket / SessionMonitorTmuxSession name the managed
-	// tmux session the entrypoint creates when the session monitor is enabled.
-	// They are a contract with entrypoint.sh; `status` uses them to capture
-	// terminal snapshots via `tmux capture-pane` inside the container.
-	SessionMonitorTmuxSocket  = AppName
-	SessionMonitorTmuxSession = "main"
-	ImageName                 = AppName + ":latest"
-	AlpineImage               = "alpine@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a"
-	HashLength                = 12
-	DetachKeysDefault         = `ctrl-\`
+	ImageName                = AppName + ":latest"
+	AlpineImage              = "alpine@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a"
+	HashLength               = 12
+	DetachKeysDefault        = `ctrl-\`
 )
 
 const (
@@ -579,15 +558,6 @@ const (
 	LabelProjectDir = AppName + ".project_dir"
 	LabelConfigKey  = AppName + ".config_key"
 	LabelYolo       = AppName + ".yolo"
-	// LabelSessionMonitor marks a container whose agent runs under the managed
-	// tmux session (its value is "true"), so `status` knows a terminal snapshot
-	// can be captured via tmux inside the container.
-	LabelSessionMonitor = AppName + ".session_monitor"
-	// LabelSessionMonitorUser records the user that owns the managed tmux
-	// server, so `status` captures via `docker exec --user <user>` and reaches
-	// the right per-user tmux socket even when the container's default exec
-	// user differs (e.g. root under --runtime-uid-remap).
-	LabelSessionMonitorUser = AppName + ".session_monitor_user"
 	// LabelOptions stores a session's provenance, the session-affecting
 	// option values, as compact JSON. It is storage only; `ps --json` is the
 	// contract.

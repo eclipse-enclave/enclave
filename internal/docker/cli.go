@@ -213,16 +213,10 @@ func commandExitCode(err error) (int, bool) {
 // exit). We treat it as a hard error rather than an ExitError.
 const dockerExitCodeUnableToStart = 125
 
-// capture runs `docker <args...>` and returns trimmed stdout. On failure it
-// returns a *cliError carrying stderr and the exit code.
+// capture runs `docker <args...>` without a TTY and returns trimmed stdout. On
+// failure it returns the stdout captured so far and a *cliError carrying stderr
+// and the exit code.
 func capture(ctx context.Context, args ...string) (string, error) {
-	return captureCmd(ctx, true, args...)
-}
-
-// captureCmd runs `docker <args...>` without a TTY and returns its stdout,
-// trimming surrounding whitespace when trim is set. On failure it returns the
-// stdout captured so far and a *cliError carrying stderr and the exit code.
-func captureCmd(ctx context.Context, trim bool, args ...string) (string, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -239,10 +233,7 @@ func captureCmd(ctx context.Context, trim bool, args ...string) (string, error) 
 			err:    err,
 		}
 	}
-	if trim {
-		return strings.TrimSpace(stdout.String()), nil
-	}
-	return stdout.String(), nil
+	return strings.TrimSpace(stdout.String()), nil
 }
 
 // runMode selects the foreground/detached and TTY behaviour for `docker run`.

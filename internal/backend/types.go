@@ -299,13 +299,6 @@ type Execer interface {
 	Exec(ctx context.Context, ref SessionRef, req ExecRequest, io AttachIO) error
 }
 
-// OutputExecer runs a command inside a session without attaching the caller's
-// terminal and returns the command's stdout verbatim. An empty user runs as
-// the container's default exec user.
-type OutputExecer interface {
-	ExecOutput(ctx context.Context, ref SessionRef, argv []string, user string) (string, error)
-}
-
 type LogReader interface {
 	Logs(ctx context.Context, ref SessionRef, opts LogOptions) (string, error)
 }
@@ -416,16 +409,9 @@ type Session struct {
 	Ports      []PortMapping
 	// Network is the Docker-owned per-session bridge, when one is present.
 	// Other backends and legacy/stopped sessions may not have one.
-	Network *SessionNetwork
-	Yolo    bool
-	// SessionMonitor reports whether the agent runs under the managed tmux
-	// session, so a terminal snapshot can be captured via `status`.
-	SessionMonitor bool
-	// SessionMonitorUser is the user that owns the managed tmux server, so
-	// `status` can capture as that user (empty for sessions without the
-	// monitor or containers labeled before this was recorded).
-	SessionMonitorUser string
-	Provenance         map[string]any
+	Network    *SessionNetwork
+	Yolo       bool
+	Provenance map[string]any
 }
 
 type SessionNetwork struct {

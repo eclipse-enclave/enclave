@@ -159,10 +159,11 @@ session by name still applies it.
 Keys merge across layers, a later layer replacing a key's value; a later layer
 cannot remove an inherited key, and `""` sets an empty value. `attach` resolves
 the keys for the session it enters, like `session_tint`. Keys that are not
-environment variable names, and `DOCKER_*`, `CONTAINER_HOST`,
-`CONTAINER_CONNECTION`, and `PATH`, which would send the session to a different
-engine or binary than its setup, are reported when the config file is read and
-ignored. `enclave config` prints the values, so do not use it for secrets.
+environment variable names are reported when the config file is read and
+ignored, and so are keys that change which engine, engine configuration, or
+helper binaries the client uses: `HOME`, `PATH`, `DOCKER_*`, `CONTAINER_*`,
+`CONTAINERS_*`, and `XDG_*`. This list is best effort. `enclave config` prints
+the values, so do not use it for secrets.
 
 This lets tools that inspect the terminal's foreground processes recognize a
 sandboxed agent. For example, [Herdr](https://herdr.dev) reads `HERDR_AGENT`:

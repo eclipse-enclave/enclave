@@ -10,7 +10,6 @@ package config
 import (
 	"encoding/json"
 	"fmt"
-	"maps"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -351,33 +350,6 @@ func validateSessionTint(path string, defaults *Defaults) []Warning {
 		defaults.ToolOverrides[name] = override
 	}
 
-	return warnings
-}
-
-// validateHostEnv drops host_env entries (top level and per tool override)
-// that are not environment variable names, or that would point the session's
-// engine client at another engine or binary than its gateway and cleanup use.
-func validateHostEnv(path string, defaults *Defaults) []Warning {
-	var warnings []Warning
-	drop := func(env map[string]string, tool string, label string) {
-		for _, key := range slices.Sorted(maps.Keys(env)) {
-			reason := ""
-			switch {
-			case !isValidEnvKey(key):
-				reason = "not a valid environment variable name"
-			case strings.HasPrefix(key, "DOCKER_") || key == "CONTAINER_HOST" || key == "CONTAINER_CONNECTION" || key == "PATH":
-				reason = "it would point the session at a different engine or binary than its setup uses"
-			default:
-				continue
-			}
-			delete(env, key)
-			warnings = append(warnings, newWarning(WarningInvalidValue, "host_env", tool, path, "Ignoring %s entry %q in %s: %s", label, key, path, reason))
-		}
-	}
-	drop(defaults.HostEnv, "", "host_env")
-	for _, tool := range slices.Sorted(maps.Keys(defaults.ToolOverrides)) {
-		drop(defaults.ToolOverrides[tool].HostEnv, tool, "tool_overrides."+tool+".host_env")
-	}
 	return warnings
 }
 

@@ -44,7 +44,7 @@ func TestHostEnvMergesKeysAcrossLayers(t *testing.T) {
 
 func TestHostEnvDropsInvalidNames(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
-	data := `{"host_env":{"OK":"1","BAD NAME":"x","DOCKER_HOST":"tcp://x","PATH":"/x"},"tool_overrides":{"claude":{"host_env":{"1BAD":"x","CONTAINER_HOST":"x","HERDR_AGENT":"claude"}}}}`
+	data := `{"host_env":{"OK":"1","BAD NAME":"x","DOCKER_HOST":"tcp://x","HOME":"/x","PATH":"/x"},"tool_overrides":{"claude":{"host_env":{"1BAD":"x","CONTAINERS_CONF":"x","CONTAINER_HOST":"x","HERDR_AGENT":"claude","XDG_RUNTIME_DIR":"/x"}}}}`
 	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -59,12 +59,12 @@ func TestHostEnvDropsInvalidNames(t *testing.T) {
 	for _, warning := range warnings {
 		got = append(got, warning.Message)
 	}
-	for i, want := range []string{`host_env entry "BAD NAME"`, `host_env entry "DOCKER_HOST"`, `host_env entry "PATH"`, `tool_overrides.claude.host_env entry "1BAD"`, `tool_overrides.claude.host_env entry "CONTAINER_HOST"`} {
+	for i, want := range []string{`host_env entry "BAD NAME"`, `host_env entry "DOCKER_HOST"`, `host_env entry "HOME"`, `host_env entry "PATH"`, `tool_overrides.claude.host_env entry "1BAD"`, `tool_overrides.claude.host_env entry "CONTAINERS_CONF"`, `tool_overrides.claude.host_env entry "CONTAINER_HOST"`, `tool_overrides.claude.host_env entry "XDG_RUNTIME_DIR"`} {
 		if i >= len(got) || !strings.Contains(got[i], want) {
 			t.Fatalf("warnings = %q, want %d: %s", got, i, want)
 		}
 	}
-	if len(got) != 5 {
+	if len(got) != 8 {
 		t.Fatalf("warnings = %q", got)
 	}
 }

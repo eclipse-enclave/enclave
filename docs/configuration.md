@@ -477,7 +477,9 @@ enclave config --json            # Emit JSON output
 ### JSON output (`schemaVersion: "1"`)
 
 `enclave config --json` emits a versioned envelope for scripts and tools. Every
-view carries the full envelope; `--view` only affects the legacy keys.
+view carries the full envelope; `--view` only affects the legacy keys. New
+options and option kinds may appear within a schema version; skip options
+whose `kind` you do not recognize.
 
 | Field | Content |
 |-------|---------|

@@ -24,7 +24,9 @@ current CLI and will get more detail over time.
   it.
 - Git. Enclave runs from inside a git repository, and works with git worktrees when
   you want to isolate parallel sessions.
-- Credentials for a supported agent, such as Claude Code, Codex, or OpenCode.
+- Credentials for a supported agent: Claude Code, Codex, Copilot, OpenCode, or
+  Pi are built in, and more are in
+  [enclave-extensions](https://github.com/eclipse-enclave/enclave-extensions).
 
 ## Install
 
@@ -209,6 +211,15 @@ To override the saved answer for a single run, or to change it later:
 
 ```bash
 enclave --tool codex
+```
+
+Tools that are not built in, such as Amp or Antigravity, are in the official
+[enclave-extensions](https://github.com/eclipse-enclave/enclave-extensions)
+repository. Install one, then select it the same way:
+
+```bash
+enclave tools add eclipse-enclave/enclave-extensions --name amp
+enclave --tool amp
 ```
 
 ### Resume a previous session

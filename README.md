@@ -5,7 +5,7 @@
   </picture>
 </h1>
 
-A Docker-based sandbox for running agentic coding tools — Claude, Codex, OpenCode, and others — in an isolated container while keeping your project files on the host. Network access is restricted to allowlisted domains by default, auth and history persist across sessions, and YOLO mode is on so agents can act without confirmation prompts.
+A Docker-based sandbox for running agentic coding tools — Claude Code, Codex, Copilot, OpenCode, Pi, and Theia built in, with more such as Amp and Antigravity in [enclave-extensions](https://github.com/eclipse-enclave/enclave-extensions) — in an isolated container while keeping your project files on the host. Network access is restricted to allowlisted domains by default, auth and history persist across sessions, and YOLO mode is on so agents can act without confirmation prompts.
 
 <a href="https://enclave.eclipse.dev">Website</a> · <a href="https://enclave.eclipse.dev/docs/getting-started">Getting Started</a> · <a href="https://enclave.eclipse.dev/docs">Docs</a>
 
@@ -311,6 +311,7 @@ verbs.
 | Architecture | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) |
 | Extensions | [docs/extensions/README.md](docs/extensions/README.md) |
 | Installing Extensions from Git | [docs/extensions/installing.md](docs/extensions/installing.md) |
+| More tools and features | [enclave-extensions](https://github.com/eclipse-enclave/enclave-extensions) |
 | Security | [docs/security/README.md](docs/security/README.md) |
 
 Project resources: [website](https://enclave.eclipse.dev),

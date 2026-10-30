@@ -628,21 +628,3 @@ func dropSelectionEntries(entries []listEntry, name string, rules selectionRules
 	}
 	return kept
 }
-
-// AmendFeatures applies +/- feature directives on top of a features
-// selection, as a higher-precedence layer would.
-func AmendFeatures(features []string, directives ...string) []string {
-	base := make([]listEntry, 0, len(features))
-	for _, value := range features {
-		base = append(base, listEntry{value: value})
-	}
-	if features == nil {
-		base = nil
-	}
-	merged := mergeSelection(base, directives, listLayer{source: model.SourceCLI}, featureSelection)
-	values := make([]string, 0, len(merged))
-	for _, entry := range merged {
-		values = append(values, entry.value)
-	}
-	return values
-}

@@ -2,7 +2,7 @@
   "type": "mixin",
   "name": "node-dev",
   "display_name": "Node.js Development Tools",
-  "description": "Node.js development tools (typescript, eslint, prettier, etc.)",
+  "description": "Node.js development tools (nvm, typescript, yarn, pnpm)",
   "default_enabled": true,
   "priority": 70
 }

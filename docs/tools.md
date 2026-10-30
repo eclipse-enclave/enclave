@@ -7,6 +7,18 @@ enclave tools      # List available tool profiles
 enclave features   # List available feature extensions
 ```
 
+Core ships six tools: three from large vendors (Claude Code, Codex, Copilot)
+and three open-source ones (Theia, including the `theia-next` preview profile,
+OpenCode, and Pi). Every other tool profile lives in the official
+[enclave-extensions](https://github.com/eclipse-enclave/enclave-extensions) repository. Install one with:
+
+```bash
+enclave tools add eclipse-enclave/enclave-extensions --name <tool>
+```
+
+The six change only by a vote of the Eclipse Enclave committers; see
+[CONTRIBUTING.md](../CONTRIBUTING.md#where-it-goes).
+
 Built-in tool profiles:
 
 | Tool | Description |
@@ -14,7 +26,6 @@ Built-in tool profiles:
 | `claude` | [Claude Code](https://www.anthropic.com/claude-code) (Anthropic) |
 | `codex` | [Codex CLI](https://github.com/openai/codex) (OpenAI) |
 | `copilot` | [GitHub Copilot CLI](https://github.com/features/copilot/cli) (GitHub) |
-| `mistral-vibe` | [Mistral Vibe CLI](https://github.com/mistralai/mistral-vibe) (opt-in/experimental) |
 | `opencode` | [OpenCode](https://opencode.ai/) |
 | `pi` | [Pi](https://github.com/earendil-works/pi) |
 | `theia` | Host [Eclipse Theia](https://theia-ide.org/) desktop IDE attached to an Enclave container |

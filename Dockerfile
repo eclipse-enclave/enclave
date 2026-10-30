@@ -167,7 +167,7 @@ RUN --mount=type=cache,id=enclave-apt-cache,target=/var/cache/apt,sharing=locked
         build-essential gcc g++ make pkg-config \
         python3-dev libssl-dev libffi-dev \
         # Debian packaging tools
-        debhelper dpkg-dev fakeroot lintian
+        dpkg-dev
 
 # Install an agent-private Node runtime from the official Node image.
 # Update AGENT_NODE_IMAGE to move the pinned Node runtime image/digest.

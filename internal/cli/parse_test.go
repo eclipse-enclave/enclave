@@ -81,12 +81,12 @@ func TestNetworkPreviewCommandsAcceptSessionPolicyFlags(t *testing.T) {
 	for _, command := range []string{"status", "print", "diff"} {
 		t.Run(command, func(t *testing.T) {
 			res, err := Parse([]string{"network", command, "--tool", "codex", "--features", "+github-cli", "--slim",
-				"--playwright-mcp", "--allow-domain", "api.example.com", "--allow-all-network"}, config.DefaultOptions())
+				"--allow-domain", "api.example.com", "--allow-all-network"}, config.DefaultOptions())
 			if err != nil {
 				t.Fatal(err)
 			}
 			opts, sources := res.Options, res.Sources
-			if opts.Tool != "codex" || !slices.Equal(opts.Features, []string{"+github-cli"}) || !opts.Slim || !opts.PlaywrightMCP ||
+			if opts.Tool != "codex" || !slices.Equal(opts.Features, []string{"+github-cli"}) || !opts.Slim ||
 				!slices.Equal(opts.AllowDomains, []string{"api.example.com"}) || !opts.AllowAllNetwork {
 				t.Fatalf("unexpected options: %+v", opts)
 			}

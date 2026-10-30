@@ -316,31 +316,27 @@ func TestConfigJSONEnvelope(t *testing.T) {
 
 func TestConfigJSONFeatures(t *testing.T) {
 	paths := testPathsWithFeatures(t)
-	writeAppFile(t, filepath.Join(paths.FeaturesDir, "playwright", "spec.yaml"), "schemaVersion: \"1\"\nkind: mixin\nname: playwright\ndefaultEnabled: false\n", 0o644)
 
 	cases := []struct {
 		name           string
 		features       []string
 		slim           bool
-		playwrightMCP  bool
 		wantValue      []any
 		wantDirectives any
 		wantUnknown    bool
 		wantError      string
 	}{
 		{name: "unset", wantValue: []any{"github-cli", "node-dev"}},
-		{name: "additive", features: []string{"+shell-extras"}, wantValue: []any{"github-cli", "node-dev", "shell-extras"}, wantDirectives: []any{"+shell-extras"}},
-		{name: "additive with unknown", features: []string{"+shell-extras", "+ghost"}, wantError: "features: unknown features: ghost; run 'enclave features list' to see available features"},
+		{name: "additive", features: []string{"+debug-tools"}, wantValue: []any{"debug-tools", "github-cli", "node-dev"}, wantDirectives: []any{"+debug-tools"}},
+		{name: "additive with unknown", features: []string{"+debug-tools", "+ghost"}, wantError: "features: unknown features: ghost; run 'enclave features list' to see available features"},
 		{name: "none", features: []string{}, wantValue: []any{}, wantDirectives: []any{}},
 		{name: "slim", slim: true, wantValue: []any{}},
-		{name: "playwright_mcp without claude", playwrightMCP: true, wantValue: []any{"github-cli", "node-dev"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			opts := config.DefaultOptions()
 			opts.Features = tc.features
 			opts.Slim = tc.slim
-			opts.PlaywrightMCP = tc.playwrightMCP
 
 			doc := runConfigJSON(t, configTestInput(t, paths, opts, nil))
 
@@ -426,7 +422,7 @@ func TestSessionProvenanceMatchesConfigJSON(t *testing.T) {
 	profile := model.Profile{Name: "claude", PassthroughPaths: []string{"settings.json"}}
 	opts := config.DefaultOptions()
 	opts.Tool = "claude"
-	opts.Features = []string{"+shell-extras"}
+	opts.Features = []string{"+debug-tools"}
 	opts.PassEnv = []string{"GITHUB_TOKEN"}
 	opts.HostConfig = model.HostConfigPassthrough
 	opts.Sources = model.DefaultOptionSources()
@@ -449,7 +445,7 @@ func TestSessionProvenanceMatchesConfigJSON(t *testing.T) {
 	configInput := configTestInput(t, paths, opts, nil)
 	envelope := buildConfigEnvelope(configInput, opts, &profile, nil, nil)
 
-	if features := recorded["features"]; !reflect.DeepEqual(features, []string{"github-cli", "node-dev", "shell-extras"}) {
+	if features := recorded["features"]; !reflect.DeepEqual(features, []string{"debug-tools", "github-cli", "node-dev"}) {
 		t.Fatalf("features = %#v", features)
 	}
 	for _, def := range config.OptionDefs() {
@@ -577,13 +573,13 @@ func TestConfigJSONKeepsLegacyFields(t *testing.T) {
 func TestConfigRowsShowResolvedFeatures(t *testing.T) {
 	opts := config.DefaultOptions()
 	opts.Tool = "claude"
-	opts.Features = []string{"-node-dev", "+shell-extras"}
+	opts.Features = []string{"-node-dev", "+debug-tools"}
 	opts.Sources = model.DefaultOptionSources()
 	opts.Sources.Features = model.SourceGlobal
-	rows := []configRow{{Name: "features", Effective: "-node-dev, +shell-extras"}}
+	rows := []configRow{{Name: "features", Effective: "-node-dev, +debug-tools"}}
 
 	rows = withResolvedFeatures(rows, testPathsWithFeatures(t), opts, opts.Sources)
-	if want := config.FormatSlice([]string{"github-cli", "shell-extras"}); rows[0].Effective != want {
+	if want := config.FormatSlice([]string{"debug-tools", "github-cli"}); rows[0].Effective != want {
 		t.Fatalf("features effective = %q, want %q", rows[0].Effective, want)
 	}
 }

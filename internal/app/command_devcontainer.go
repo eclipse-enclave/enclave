@@ -8,9 +8,6 @@
 package app
 
 import (
-	"strings"
-
-	"enclave/internal/config"
 	"enclave/internal/devcontainer"
 	"enclave/internal/logx"
 )
@@ -37,12 +34,8 @@ func runDevcontainerGenerate(input *CommandInput) int {
 		return 1
 	}
 
-	profile, err := config.LoadProfile(input.Ctx.Paths, input.Options.Tool)
+	profile, err := loadProfileOrReport(input.Ctx.Paths, input.Options.Tool)
 	if err != nil {
-		logx.Errorf("%v", err)
-		if available, listErr := config.ListProfiles(input.Ctx.Paths); listErr == nil {
-			logx.Infof("Available tools: %s", strings.Join(available, " "))
-		}
 		return 1
 	}
 

@@ -51,7 +51,7 @@ KNOWN_PINS=(
     '.github/workflows/*.yml|go-version-file: go\.mod$'
     '.github/workflows/ci.yml|go-version: \$\{\{ steps\.go-floor\.outputs\.version \}\}$'
     '.github/workflows/reusable-rpm-build.yml|container: fedora:[0-9]+$'
-    'extensions/features/devtools/install.sh|^(GOLANGCI_LINT|GOSEC|GOVULNCHECK)_VERSION='
+    'scripts/install-go-linters.sh|^(GOLANGCI_LINT|GOSEC|GOVULNCHECK)_VERSION='
     'extensions/features/gitlab-cli/install.sh|^GLAB_VERSION=\$\(curl'
     'extensions/features/node-dev/install.sh|NVM_VERSION=\$\(curl'
     'internal/model/types.go|AlpineImage +='
@@ -59,10 +59,10 @@ KNOWN_PINS=(
 )
 PIN_PATTERN='@sha256:|uses: [^ .][^ ]*@|[A-Z_]+_VERSION=|^FROM |^[[:space:]]*container: |node-version:|go-version|^toolchain |^go [0-9]'
 
-DEVTOOLS=(
-    'GOLANGCI_LINT_VERSION github.com/golangci/golangci-lint/v2 golangci-lint'
-    'GOSEC_VERSION github.com/securego/gosec/v2 gosec'
-    'GOVULNCHECK_VERSION golang.org/x/vuln govulncheck'
+GO_LINTERS=(
+    'GOLANGCI_LINT_VERSION github.com/golangci/golangci-lint/v2'
+    'GOSEC_VERSION github.com/securego/gosec/v2'
+    'GOVULNCHECK_VERSION golang.org/x/vuln'
 )
 
 problems=0
@@ -200,15 +200,6 @@ extract packaging/rpm/enclave.spec '^Requires:[[:space:]]+git >= ([0-9.]+)'
 rpm_git=$REPLY
 expect_same "git floor" "debian/control=$deb_git" "enclave.spec=$rpm_git"
 
-for entry in "${DEVTOOLS[@]}"; do
-    read -r var module name <<<"$entry"
-    extract extensions/features/devtools/install.sh "$var:-(v[0-9.]+)"
-    installed=$REPLY
-    extract extensions/features/devtools/README.md "^- \`$name\` \\(\`(v[0-9.]+)\`\\)"
-    documented=$REPLY
-    expect_same "$name version" "install.sh=$installed" "README.md=$documented"
-done
-
 action_pins=$(git grep -hoE 'uses: [^ .][^ ]*@[0-9a-f]{40} # v[0-9.]+' -- .github/workflows "${EXCLUDED_PATHS[@]}" |
     sed 's/^uses: //' | sort -u)
 actions=$(printf '%s\n' "$action_pins" | cut -d@ -f1 | sort -u)
@@ -259,7 +250,7 @@ done
 
 # --- Security -----------------------------------------------------------------
 
-extract extensions/features/devtools/install.sh 'GOVULNCHECK_VERSION:-(v[0-9.]+)'
+extract scripts/install-go-linters.sh '^GOVULNCHECK_VERSION=(v[0-9.]+)$'
 govulncheck_version=$REPLY
 section "Security (govulncheck $govulncheck_version, toolchain go$toolchain)"
 
@@ -311,7 +302,7 @@ if releases=$(fetch https://proxy.golang.org/golang.org/toolchain/@v/list |
     elif version_le "$toolchain" "$target_toolchain"; then
         problem "go$toolchain is no longer supported; move to go$target_toolchain (go.mod toolchain; Dockerfile.gateway $target_builder)"
     else
-        problem "go$toolchain is newer than go$target_toolchain; devtools built by the go command's toolchain switch use $supported_minor and cannot load a newer standard library"
+        problem "go$toolchain is newer than go$target_toolchain; Go linters built by the go command's toolchain switch use $supported_minor and cannot load a newer standard library"
     fi
 else
     problem "Go toolchain lookup failed"
@@ -363,10 +354,10 @@ while read -r module version; do
     module_update "module" "$module" "$version" "$go_directive"
 done < <(awk '/^require \(/ { block = 1; next } block && /^\)/ { block = 0 } block && !/\/\/ indirect/ { print $1, $2 } /^require [^(]/ { print $2, $3 }' go.mod)
 
-section "Devtools (limit: go $toolchain)"
-for entry in "${DEVTOOLS[@]}"; do
-    read -r var module name <<<"$entry"
-    extract extensions/features/devtools/install.sh "$var:-(v[0-9.]+)"
+section "Go linters (limit: go $toolchain)"
+for entry in "${GO_LINTERS[@]}"; do
+    read -r var module <<<"$entry"
+    extract scripts/install-go-linters.sh "^$var=(v[0-9.]+)\$"
     pinned=$REPLY
     module_update "$var" "$module" "$pinned" "$toolchain"
 done

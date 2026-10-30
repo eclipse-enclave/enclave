@@ -52,5 +52,4 @@ allow_sensitive_mounts | default="false"/true global=""/false project=""/false t
 project_mount | default=""/false global=""/false project=""/false toolOverride=""/false cli=""/false | source=0 effective=""
 worktree_metadata | default=""/false global=""/false project=""/false toolOverride=""/false cli=""/false | source=0 effective=""
 allow_domains | default=""/false global=""/false project=""/false toolOverride=""/false cli=""/false | source=0 effective=""
-playwright_mcp | default="false"/true global=""/false project=""/false toolOverride=""/false cli=""/false | source=0 effective="false"
 bridge_ports | default=""/false global=""/false project=""/false toolOverride=""/false cli=""/false | source=0 effective=""

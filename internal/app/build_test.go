@@ -950,7 +950,7 @@ func TestPrepareBuildContextScopesToSelectedExtensions(t *testing.T) {
 	writeAppFile(t, filepath.Join(appRoot, "extensions", "tools", "codex", "spec.yaml"), "schemaVersion: \"1\"\nkind: sandbox\nname: codex\n", 0o644)
 	writeAppFile(t, filepath.Join(appRoot, "extensions", "tools", "codex", model.InstallScriptFilename), "codex\n", 0o755)
 	writeAppFile(t, filepath.Join(appRoot, "extensions", "features", "python-dev", "spec.yaml"), "schemaVersion: \"1\"\nkind: mixin\nname: python-dev\n", 0o644)
-	writeAppFile(t, filepath.Join(appRoot, "extensions", "features", "shell-extras", "spec.yaml"), "schemaVersion: \"1\"\nkind: mixin\nname: shell-extras\n", 0o644)
+	writeAppFile(t, filepath.Join(appRoot, "extensions", "features", "debug-tools", "spec.yaml"), "schemaVersion: \"1\"\nkind: mixin\nname: debug-tools\n", 0o644)
 	writeAppFile(t, filepath.Join(userExtensions, "tools", "claude", "templates", "custom.json"), "user-template\n", 0o644)
 	writeAppFile(t, filepath.Join(userExtensions, "tools", "codex", "templates", "custom.json"), "unselected-template\n", 0o644)
 
@@ -978,7 +978,7 @@ func TestPrepareBuildContextScopesToSelectedExtensions(t *testing.T) {
 	assertPathExists(t, filepath.Join(contextDir, "extensions", "tools", "claude", "templates", "custom.json"))
 	assertPathMissing(t, filepath.Join(contextDir, "extensions", "tools", "codex"))
 	assertPathExists(t, filepath.Join(contextDir, "extensions", "features", "python-dev", "spec.yaml"))
-	assertPathMissing(t, filepath.Join(contextDir, "extensions", "features", "shell-extras"))
+	assertPathMissing(t, filepath.Join(contextDir, "extensions", "features", "debug-tools"))
 }
 
 func TestPrepareBuildContextPreservesEmptyFeaturesDirectory(t *testing.T) {
@@ -1029,7 +1029,7 @@ func TestHashMergedExtensionFilesIgnoresUnselectedExtensions(t *testing.T) {
 	writeAppFile(t, filepath.Join(appRoot, "extensions", "tools", "codex", "spec.yaml"), "schemaVersion: \"1\"\nkind: sandbox\nname: codex\n", 0o644)
 	writeAppFile(t, filepath.Join(appRoot, "extensions", "tools", "codex", model.InstallScriptFilename), "codex-v1\n", 0o755)
 	writeAppFile(t, filepath.Join(appRoot, "extensions", "features", "python-dev", "spec.yaml"), "schemaVersion: \"1\"\nkind: mixin\nname: python-dev\n", 0o644)
-	writeAppFile(t, filepath.Join(appRoot, "extensions", "features", "shell-extras", "spec.yaml"), "schemaVersion: \"1\"\nkind: mixin\nname: shell-extras\n", 0o644)
+	writeAppFile(t, filepath.Join(appRoot, "extensions", "features", "debug-tools", "spec.yaml"), "schemaVersion: \"1\"\nkind: mixin\nname: debug-tools\n", 0o644)
 
 	paths := model.Paths{
 		AppRoot:           appRoot,
@@ -1060,7 +1060,7 @@ func TestHashMergedExtensionFilesIgnoresUnselectedExtensions(t *testing.T) {
 		t.Fatalf("expected unselected tool mutation to keep hash stable, got %s then %s", hash1, hash2)
 	}
 
-	writeAppFile(t, filepath.Join(appRoot, "extensions", "features", "shell-extras", "spec.yaml"), "schemaVersion: \"1\"\nkind: mixin\nname: shell-extras\ndefaultEnabled: true\n", 0o644)
+	writeAppFile(t, filepath.Join(appRoot, "extensions", "features", "debug-tools", "spec.yaml"), "schemaVersion: \"1\"\nkind: mixin\nname: debug-tools\ndefaultEnabled: true\n", 0o644)
 	hash3, err := hashMergedExtensionFiles(paths, selection)
 	if err != nil {
 		t.Fatalf("hashMergedExtensionFiles unselected feature mutate: %v", err)

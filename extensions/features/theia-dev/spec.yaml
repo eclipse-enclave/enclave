@@ -7,11 +7,12 @@
 
 schemaVersion: "1"
 kind: mixin
-name: shell-extras
-displayName: Shell Extras
-description: Enhanced shell experience (zsh, oh-my-zsh)
+name: theia-dev
+displayName: Theia Development
+description: Headers for building Theia and other Electron apps (native-keymap, keytar)
 defaultEnabled: false
-priority: 90
+priority: 75
 aptPackages:
-  - zsh
-  - bash-completion
+  - libx11-dev
+  - libxkbfile-dev
+  - libsecret-1-dev

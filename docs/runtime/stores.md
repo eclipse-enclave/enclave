@@ -39,8 +39,7 @@ thread databases are rebuildable projections of the preserved `sessions/`
 rollouts, pinned to avoid re-deriving them on every overlaid run. OpenCode pins
 its session database and runtime data there; its separate XDG state directory is
 redirected into the config store as `xdg-state/` so TUI state also survives.
-Mistral Vibe pins its session logs, plans, worktrees, prompt history, trusted
-folders, cache, and project links. Theia and Theia Next pin their backend state
+Theia and Theia Next pin their backend state
 (extension data and storage, workspace data, custom AI prompts, AI chat history,
 model snapshots, backend settings, recent workspaces) so it survives the overlay
 that host config passthrough of `deployedPlugins/` activates.
@@ -226,9 +225,10 @@ store into the tool's config directory:
    - For Claude `.credentials.json`, if both config and auth files exist,
      compare `claudeAiOauth.expiresAt` and keep the fresher credential before
      linking.
-   - For Mistral Vibe `.env`, which Vibe rewrites by replacing the symlink with
-     a real file, a real config file newer (by mtime) than the auth file
-     replaces it before linking.
+   - For Mistral Vibe `.env` (the `mistral-vibe` tool from
+     [enclave-extensions](https://github.com/eclipse-enclave/enclave-extensions)),
+     which Vibe rewrites by replacing the symlink with a real file, a real
+     config file newer (by mtime) than the auth file replaces it before linking.
    - If the config path is a **stale symlink** and the auth path is empty,
      remove the stale link.
    - If the auth path has content, create a symlink: `config path → auth path`.

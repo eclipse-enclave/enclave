@@ -114,7 +114,7 @@ func TestDockerConfigBindMountsStoresFromExactStoreDirs(t *testing.T) {
 			{Kind: backend.StoreKindConfig, Key: backend.StoreKey{Owner: "codex", ProjectHash: hash}, ContainerPath: "/config"},
 			{Kind: backend.StoreKindAuth, Key: backend.StoreKey{Owner: "codex"}, ContainerPath: "/auth", ReadOnly: true},
 			{Kind: backend.StoreKindEnv, Key: backend.StoreKey{Owner: "codex", ProjectHash: hash}, ContainerPath: "/env"},
-			{Kind: backend.StoreKindFeatureAuth, Key: backend.StoreKey{Owner: "playwright"}, ContainerPath: "/feature"},
+			{Kind: backend.StoreKindFeatureAuth, Key: backend.StoreKey{Owner: "gitlab-cli"}, ContainerPath: "/feature"},
 		},
 	}
 
@@ -127,7 +127,7 @@ func TestDockerConfigBindMountsStoresFromExactStoreDirs(t *testing.T) {
 		"/config":  {config.HostStoreConfigDir(home, "codex", hash, "default"), false},
 		"/auth":    {config.HostStoreAuthDir(home, "codex", ""), true},
 		"/env":     {config.HostStoreEnvDir(home, "codex", hash), false},
-		"/feature": {config.HostStoreFeatureAuthDir(home, "playwright"), false},
+		"/feature": {config.HostStoreFeatureAuthDir(home, "gitlab-cli"), false},
 	}
 
 	got := map[string]dockercmd.Mount{}

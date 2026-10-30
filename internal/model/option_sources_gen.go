@@ -41,7 +41,6 @@ type RunOptionSources struct {
 	NoCache                  OptionSource
 	NoHistory                OptionSource
 	NoMemory                 OptionSource
-	PlaywrightMCP            OptionSource
 	Ports                    OptionSource
 	ProjectMount             OptionSource
 	SensitiveDirExceptions   OptionSource
@@ -112,7 +111,6 @@ func DefaultOptionSources() OptionSources {
 			NoCache:                  SourceDefault,
 			NoHistory:                SourceDefault,
 			NoMemory:                 SourceDefault,
-			PlaywrightMCP:            SourceDefault,
 			Ports:                    SourceDefault,
 			ProjectMount:             SourceDefault,
 			SensitiveDirExceptions:   SourceDefault,
@@ -264,9 +262,6 @@ func MergeOptionSources(base OptionSources, override OptionSources) OptionSource
 	}
 	if override.PassEnv != SourceUnset {
 		base.PassEnv = override.PassEnv
-	}
-	if override.PlaywrightMCP != SourceUnset {
-		base.PlaywrightMCP = override.PlaywrightMCP
 	}
 	if override.Ports != SourceUnset {
 		base.Ports = override.Ports

@@ -28,5 +28,6 @@ uv tool install pytest
 uv tool install ipython
 uv tool install poetry
 uv tool install pipenv
+uv tool install pre-commit
 
 echo "Python development tools installed"

@@ -38,7 +38,6 @@ const (
 	EnvGatewayPublishedPorts    = EnvPrefix + "GATEWAY_PUBLISHED_PORTS"
 	EnvFeatureAuthMap           = EnvPrefix + "FEATURE_AUTH_MAP"
 	EnvYolo                     = EnvPrefix + "YOLO"
-	EnvPlaywrightMCP            = EnvPrefix + "PLAYWRIGHT_MCP"
 	EnvSecretPlaceholders       = EnvPrefix + "SECRET_PLACEHOLDERS"
 	EnvSecretReleaseFile        = EnvPrefix + "SECRET_RELEASE_FILE"
 	EnvGatewayTLSRoot           = EnvPrefix + "GATEWAY_TLS_ROOT"

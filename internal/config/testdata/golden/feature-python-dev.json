@@ -2,7 +2,7 @@
   "type": "mixin",
   "name": "python-dev",
   "display_name": "Python Development Tools",
-  "description": "Python development tools (black, ruff, mypy, pytest, etc.)",
+  "description": "Python development tools (black, ruff, mypy, pytest, pre-commit, etc.)",
   "default_enabled": true,
   "priority": 70
 }

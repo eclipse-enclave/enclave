@@ -15,41 +15,15 @@ import (
 	"testing"
 )
 
-func TestCheckVersionsDevtoolsLockstep(t *testing.T) {
-	for _, tool := range []string{"", "golangci-lint", "gosec", "govulncheck"} {
-		name := tool
-		if name == "" {
-			name = "matching"
-		}
-		t.Run(name, func(t *testing.T) {
-			root, _ := versionCheckFixture(t)
-			if tool != "" {
-				path := filepath.Join(root, "extensions", "features", "devtools", "README.md")
-				contents, err := os.ReadFile(path)
-				if err != nil {
-					t.Fatal(err)
-				}
-				lines := strings.Split(string(contents), "\n")
-				for i, line := range lines {
-					if strings.HasPrefix(line, "- `"+tool+"`") {
-						lines[i] = "- `" + tool + "` (`v0.0.0`)"
-					}
-				}
-				if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0o600); err != nil {
-					t.Fatal(err)
-				}
-			}
-			cmd := exec.Command("bash", "scripts/check-versions.sh", "--offline")
-			cmd.Dir = root
-			output, err := cmd.CombinedOutput()
-			if tool == "" {
-				if err != nil {
-					t.Fatalf("matching pins failed: %v\n%s", err, output)
-				}
-			} else if err == nil || !strings.Contains(string(output), tool+" version disagrees") {
-				t.Fatalf("expected %s mismatch, got %v\n%s", tool, err, output)
-			}
-		})
+// TestCheckVersionsOfflinePasses also proves that every pin in the fixture,
+// including the Go linter versions in scripts/install-go-linters.sh, is in the
+// script's inventory: an uncovered pin fails the offline run.
+func TestCheckVersionsOfflinePasses(t *testing.T) {
+	root, _ := versionCheckFixture(t)
+	cmd := exec.Command("bash", "scripts/check-versions.sh", "--offline")
+	cmd.Dir = root
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("offline check failed: %v\n%s", err, output)
 	}
 }
 
@@ -123,7 +97,7 @@ func versionCheckFixture(t *testing.T) (string, string) {
 		"packaging/rpm/enclave.spec", "README.md", "docs/DEV.md", "Makefile",
 		"Dockerfile", "Dockerfile.gateway", "internal/model/types.go",
 		"runtime-assets/microvm/alpine/build-bundle.sh",
-		"extensions/features/devtools/install.sh", "extensions/features/devtools/README.md",
+		"scripts/install-go-linters.sh",
 		".github/workflows/ci.yml", ".github/workflows/reusable-rpm-build.yml",
 	} {
 		contents, err := os.ReadFile(filepath.Join("..", path))

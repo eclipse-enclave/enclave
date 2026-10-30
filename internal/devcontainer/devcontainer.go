@@ -551,6 +551,7 @@ func warnUnsupportedConfig(cfg config) {
 
 var devcontainerFeatureEquivalents = map[string]string{
 	"ghcr.io/devcontainers/features/github-cli": "github-cli",
+	"ghcr.io/devcontainers/features/go":         "golang-dev",
 	"ghcr.io/devcontainers/features/node":       "node-dev",
 	"ghcr.io/devcontainers/features/python":     "python-dev",
 }

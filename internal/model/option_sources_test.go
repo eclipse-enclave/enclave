@@ -52,7 +52,6 @@ func TestMergeOptionSourcesCoversAllFields(t *testing.T) {
 			SessionName:              SourceCLI,
 			SessionTint:              SourceCLI,
 			Timezone:                 SourceCLI,
-			PlaywrightMCP:            SourceCLI,
 		},
 		AuthOptionSources: AuthOptionSources{
 			AuthScope:    SourceCLI,

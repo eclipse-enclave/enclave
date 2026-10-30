@@ -5,6 +5,15 @@ from git repositories into the user-global extension root
 (`~/.config/enclave/extensions/`). This document covers that installer; see
 [Extension Architecture](README.md) for the spec format itself.
 
+The official extensions repository is
+[enclave-extensions](https://github.com/eclipse-enclave/enclave-extensions). It holds the tools and features that
+are not built in, for example:
+
+```bash
+enclave tools add eclipse-enclave/enclave-extensions --name <tool>
+enclave features add eclipse-enclave/enclave-extensions --name <feature>
+```
+
 ## Commands
 
 | Command | Description |
@@ -354,9 +363,9 @@ read carries `originError` instead of `origin`, with `managed: false`.
 `enabled` reports whether a run with the same options would enable the
 feature. The options are resolved and validated as for a run: `--slim` and
 `backend: qemu` enable no features, `devcontainer` enables none unless
-`features` is set, `playwright_mcp` adds `playwright`, and
-`tool_overrides.<tool>.features` applies for the tool from `--tool` or the
-configured `tool` (an unknown `--tool` simply has no overrides). If a run would
+`features` is set, and `tool_overrides.<tool>.features` applies for the tool
+from `--tool` or the configured `tool` (an unknown `--tool` simply has no
+overrides). If a run would
 reject the options, a warning goes to stderr, `enabled` reflects the options
 as configured, without run-time coercion, and the command still exits 0.
 Feature listings also carry:

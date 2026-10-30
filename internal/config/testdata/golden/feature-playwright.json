@@ -1,8 +1,0 @@
-{
-  "type": "mixin",
-  "name": "playwright",
-  "display_name": "Playwright",
-  "description": "Playwright browsers and MCP server for UI testing",
-  "needs_root": true,
-  "priority": 75
-}

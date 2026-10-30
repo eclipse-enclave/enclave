@@ -23,6 +23,12 @@ Extension definitions are loaded from:
 1. Built-in repository extensions under `extensions/`
 2. User-global overrides under `~/.config/enclave/extensions/`
 
+The official source for tools and features that are not built in is
+[enclave-extensions](https://github.com/eclipse-enclave/enclave-extensions).
+Install one by name, for example
+`enclave tools add eclipse-enclave/enclave-extensions --name <tool>` or
+`enclave features add eclipse-enclave/enclave-extensions --name <feature>`.
+
 Project-local extension definitions (for example,
 `/path/to/project/.enclave/extensions/`) are not loaded. Install extensions
 into the user-global root from a git repository with `enclave features add`
@@ -72,8 +78,7 @@ extensions/
     │       └── host/
     │           └── vnc-viewer     # Becomes `enclave vnc-viewer`, runs on the host
     └── devtools/
-        ├── spec.yaml
-        └── install.sh
+        └── spec.yaml
 ```
 
 `spec.yaml` is the extension manifest. `install.sh`,
@@ -760,15 +765,15 @@ Configure which features to install via `~/.config/enclave/config.json` (global)
 ```
 
 When `features` is not specified, all `defaultEnabled` features are installed (default). An empty array `[]` disables all features.
-Add an opt-in feature on top of the defaults with `["+playwright"]`, or list every feature you want explicitly. See [List Options](../configuration.md#list-options) for how layers combine.
+Add an opt-in feature on top of the defaults with `["+gitlab-cli"]`, or list every feature you want explicitly. See [List Options](../configuration.md#list-options) for how layers combine.
 
 **Devcontainer mode:** When devcontainer mode is used (`devcontainer run` or config `devcontainer: true`), features are disabled by default (the devcontainer already defines its own environment). To install features alongside a devcontainer, pass `--features` explicitly; `+`/`-` entries then start from no features.
 
 The next time you run `./enclave --rebuild`, only the specified features will be installed.
 
-**Available features:** `devtools`, `native-build-deps`, `github-cli`, `gitlab-cli`, `node-dev`, `playwright`, `python-dev`, `debug-tools`, `shell-extras`
+**Available features:** `devtools`, `golang-dev`, `github-cli`, `gitlab-cli`, `node-dev`, `python-dev`, `theia-dev`
 
-**Opt-in features (not installed unless explicitly listed):** `debug-tools`, `gitlab-cli`, `native-build-deps`, `playwright`, `shell-extras`
+**Opt-in features (not installed unless explicitly listed):** `gitlab-cli`, `golang-dev`, `theia-dev`
 
 ### Installation Order
 
@@ -819,15 +824,13 @@ enable the feature.
 
 | Feature | Priority | Description |
 |---------|----------|-------------|
-| `devtools` | 40 | Core tools + linters (vim, htop, ripgrep, golang-go, shellcheck, golangci-lint, gosec). |
+| `devtools` | 40 | General command-line and network tools (vim, htop, ripgrep, shellcheck, dig) |
+| `golang-dev` | 45 | Go toolchain and delve, from Debian (opt-in) |
 | `github-cli` | 50 | GitHub CLI (gh) |
 | `gitlab-cli` | 50 | GitLab CLI (glab) (opt-in) |
-| `node-dev` | 70 | Node.js dev tools: typescript, eslint, prettier |
-| `python-dev` | 70 | Python dev tools: black, ruff, mypy, pytest |
-| `native-build-deps` | 75 | Headers for native Node.js modules: libx11, libxkbfile, libsecret (opt-in) |
-| `playwright` | 75 | Playwright browsers and MCP server for UI testing (opt-in) |
-| `debug-tools` | 80 | Debug tools: gdb, strace, ltrace, tcpdump (opt-in) |
-| `shell-extras` | 90 | Shell enhancements: zsh, oh-my-zsh, direnv (opt-in) |
+| `node-dev` | 70 | Node.js dev tools: nvm, typescript, yarn, pnpm |
+| `python-dev` | 70 | Python dev tools: black, ruff, mypy, pytest, pre-commit |
+| `theia-dev` | 75 | Headers for building Theia and other Electron apps: libx11, libxkbfile, libsecret (opt-in) |
 
 ## Key Differences: Tools vs Features
 
@@ -913,7 +916,15 @@ Hooks run in a fixed order during runtime auth preparation:
 
 ## Adding a New Tool Extension
 
-1. Create `extensions/tools/{tool}/` directory
+A new tool goes to
+[enclave-extensions](https://github.com/eclipse-enclave/enclave-extensions)
+under `tools/<tool>/`, with the same file layout as `extensions/tools/<tool>/`
+here; core ships only the six built-in tools (see
+[CONTRIBUTING.md](../../CONTRIBUTING.md#where-it-goes)). The full checklist is
+[Adding a Tool](adding-a-tool.md).
+
+1. Create the `tools/{tool}/` directory (`extensions/tools/{tool}/` for a
+   built-in tool)
 2. Add `spec.yaml`:
    ```yaml
    schemaVersion: "1"
@@ -1003,29 +1014,26 @@ gh --version
 # Python tools (python-dev feature)
 black --version
 ruff --version
+pre-commit --version
 
 # Node.js tools (node-dev feature)
 tsc --version
-eslint --version
+pnpm --version
 
 # Dev tools (devtools feature)
 vim --version
 rg --version       # ripgrep
 
 # Opt-in features (if enabled):
-# Native build headers (native-build-deps feature)
+# Theia build headers (theia-dev feature)
 pkg-config --modversion x11 xkbfile libsecret-1
 
 # GitLab CLI (gitlab-cli feature)
 glab --version
 
-# Debug tools (debug-tools feature)
-which gdb
-which strace
-
-# Shell extras (shell-extras feature)
-zsh --version
-type direnv
+# Go (golang-dev feature)
+go version
+dlv version
 ```
 
 ### 4. Verify Feature Entrypoints
@@ -1033,8 +1041,8 @@ type direnv
 ```bash
 # Inside container, verify feature-entrypoint.d scripts ran:
 
-# Shell-extras feature (opt-in) should have set up direnv hooks
-# (check ~/.bashrc or ~/.zshrc for direnv hook)
+# node-dev (on by default) loads nvm without activating a version
+type nvm
 ```
 
 ### 5. Verify Tool-Specific Entrypoints

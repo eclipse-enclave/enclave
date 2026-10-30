@@ -26,7 +26,7 @@ CLI flag:
 ```json
 {
   "tool": "codex",
-  "features": ["+playwright"],
+  "features": ["+gitlab-cli"],
   "add_readonly_dirs": ["~/reference/specs"]
 }
 ```
@@ -148,20 +148,20 @@ The full key list, including build and persistence options, is in
 ## Features
 
 Features are optional tool stacks compiled into the image. `devtools`,
-`github-cli`, `node-dev`, and `python-dev` are on by default; `playwright`,
-`debug-tools`, `gitlab-cli`, `native-build-deps`, and `shell-extras` are
-opt-in.
+`github-cli`, `node-dev`, and `python-dev` are on by default; `gitlab-cli`,
+`golang-dev`, and `theia-dev` are opt-in. More features, such as `debug-tools`,
+are in [enclave-extensions](https://github.com/eclipse-enclave/enclave-extensions).
 
 Use `+` and `-` to adjust the inherited set instead of replacing it:
 
 ```json
 {
-  "features": ["+playwright", "-python-dev"]
+  "features": ["+gitlab-cli", "-python-dev"]
 }
 ```
 
 A list without prefixes replaces the set entirely, and `[]` means none. On the
-command line, `--features +debug-tools` adds to the configured features while
+command line, `--features +gitlab-cli` adds to the configured features while
 `--features a,b` replaces them. Check the
 result before you build with `enclave features`, which marks every feature `✓`
 or `✗` and names the config file that switched it off:
@@ -170,7 +170,7 @@ or `✗` and names the config file that switched it off:
 enclave features
 ```
 
-The same syntax works on the command line: `--features +playwright`, or the
+The same syntax works on the command line: `--features +gitlab-cli`, or the
 keywords `--features default|all|none`.
 
 ## Reuse the agent config you already have

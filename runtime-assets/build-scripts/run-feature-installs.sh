@@ -32,7 +32,8 @@ fi
 
 if [ "$phase" = "root" ]; then
     # Expose the agent node runtime during root-phase installs so that
-    # feature scripts (e.g. playwright) can use npm/npx.
+    # feature scripts (e.g. enclave-extensions' playwright-mcp) can use
+    # npm/npx.
     # Excluded from user phase: user-phase features like node-dev manage
     # their own Node.js via nvm and must not see the agent-private runtime.
     if [ -d "$ENCLAVE_AGENT_NODE_DIR/bin" ]; then

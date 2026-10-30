@@ -31,7 +31,7 @@ func TestNormalizeConfiguredBuildOptions_NoFeatures(t *testing.T) {
 func TestNormalizeConfiguredBuildOptions_AdditiveAgainstImplicitDefaults(t *testing.T) {
 	paths := testPathsWithFeatureDefaults(t)
 	opts := model.BuildOptions{
-		Features: []string{"-node-dev", "+shell-extras"},
+		Features: []string{"-node-dev", "+debug-tools"},
 	}
 
 	got, _, err := normalizeConfiguredBuildOptions(paths, model.Options{BuildOptions: opts}, model.SourceDefault)
@@ -39,7 +39,7 @@ func TestNormalizeConfiguredBuildOptions_AdditiveAgainstImplicitDefaults(t *test
 		t.Fatalf("normalizeConfiguredBuildOptions: %v", err)
 	}
 
-	want := []string{"github-cli", "shell-extras"}
+	want := []string{"debug-tools", "github-cli"}
 	if !reflect.DeepEqual(got.Features, want) {
 		t.Fatalf("unexpected normalized features: got %v want %v", got.Features, want)
 	}
@@ -52,7 +52,7 @@ func testPathsWithFeatureDefaults(t *testing.T) model.Paths {
 
 	writeAppFile(t, filepath.Join(featuresDir, "node-dev", "spec.yaml"), "schemaVersion: \"1\"\nkind: mixin\nname: node-dev\ndefaultEnabled: true\n", 0o644)
 	writeAppFile(t, filepath.Join(featuresDir, "github-cli", "spec.yaml"), "schemaVersion: \"1\"\nkind: mixin\nname: github-cli\ndefaultEnabled: true\n", 0o644)
-	writeAppFile(t, filepath.Join(featuresDir, "shell-extras", "spec.yaml"), "schemaVersion: \"1\"\nkind: mixin\nname: shell-extras\ndefaultEnabled: false\n", 0o644)
+	writeAppFile(t, filepath.Join(featuresDir, "debug-tools", "spec.yaml"), "schemaVersion: \"1\"\nkind: mixin\nname: debug-tools\ndefaultEnabled: false\n", 0o644)
 
 	return model.Paths{
 		FeaturesDir: featuresDir,

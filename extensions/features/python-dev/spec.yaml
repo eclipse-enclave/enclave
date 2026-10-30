@@ -9,5 +9,5 @@ schemaVersion: "1"
 kind: mixin
 name: python-dev
 displayName: Python Development Tools
-description: Python development tools (black, ruff, mypy, pytest, etc.)
+description: Python development tools (black, ruff, mypy, pytest, pre-commit, etc.)
 priority: 70

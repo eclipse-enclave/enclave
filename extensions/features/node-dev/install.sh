@@ -66,7 +66,7 @@ fi
 # clean so nvm stays usable. These packages are convenience tools; keep a usable
 # Node.js runtime build-fatal, but do not fail the image for a registry blip here.
 if ! npm_config_prefix="$HOME/.local" npm install -g --no-audit --no-fund --progress=false \
-    typescript @types/node ts-node eslint prettier nodemon yarn pnpm; then
+    typescript yarn pnpm; then
     echo "Warning: failed to install optional Node.js global development packages" >&2
 fi
 

@@ -195,7 +195,7 @@ in one step, printing the container name so you can reattach later with
 | `enclave network apply` | Apply policy to running gateways |
 | `enclave network log` | Show gateway network audit events |
 
-`network status`, `print`, and `diff` reflect the run options that shape the allowlist and accept their flags: `--tool`, `--features`, `--slim`, `--playwright-mcp`, `--allow-domain`, and `--allow-all-network` (`status` also takes `--backend`). See [Networking](networking.md#managing-the-network-policy).
+`network status`, `print`, and `diff` reflect the run options that shape the allowlist and accept their flags: `--tool`, `--features`, `--slim`, `--allow-domain`, and `--allow-all-network` (`status` also takes `--backend`). See [Networking](networking.md#managing-the-network-policy).
 
 Network mutation commands are global-only today. `--project` scope is planned but not yet supported.
 
@@ -289,7 +289,6 @@ List flags (`-p`, `--allow-domain`, `--bridge-port`, `--pass-env`, `--cache-from
 | `--session-monitor` | Run the agent under the managed tmux session (enables `status` snapshots) |
 | `--verbose` | Verbose logging |
 | `--allow-root` | Skip the root check (accepted by every command; CLI-only). See [Running as root](#running-as-root) |
-| `--playwright-mcp` | Enable Playwright MCP server for browser automation (Claude only) |
 
 ### Image & Build
 
@@ -437,7 +436,7 @@ Commands that use an engine accept `--backend`, including session management, `u
 
 ## Experimental QEMU backend
 
-`--backend qemu` runs a foreground session in a minimal Alpine microVM bundle. It implies `--allow-all-network` and `--slim` automatically (and prints a notice that network isolation is unavailable), so you don't have to pass them; requesting something it can't honor — `--features`/`--playwright-mcp` or `--allow-domain` — is rejected. Detached sessions, `exec`, `attach`, restricted egress, HTTP secret release, devcontainers, and non-default feature stacks are not supported yet. The bundle builder uses Docker as a packaging helper; the session itself runs under QEMU. A prebuilt bundle can be used without Docker via `--no-rebuild --image-name /path/to/bundle`. Tool installers that assume Debian/glibc may fail until they get dedicated microVM support.
+`--backend qemu` runs a foreground session in a minimal Alpine microVM bundle. It implies `--allow-all-network` and `--slim` automatically (and prints a notice that network isolation is unavailable), so you don't have to pass them; requesting something it can't honor — `--features` or `--allow-domain` — is rejected. Detached sessions, `exec`, `attach`, restricted egress, HTTP secret release, devcontainers, and non-default feature stacks are not supported yet. The bundle builder uses Docker as a packaging helper; the session itself runs under QEMU. A prebuilt bundle can be used without Docker via `--no-rebuild --image-name /path/to/bundle`. Tool installers that assume Debian/glibc may fail until they get dedicated microVM support.
 
 The backend is x86-64 only: it requires `qemu-system-x86_64` on the host and the bundle builder produces an x86-64 Alpine rootfs (`--platform linux/amd64`, `apk --arch x86_64`) regardless of host architecture. QEMU is launched with `-machine microvm,accel=kvm:tcg`, so only x86-64 Linux hosts get KVM acceleration; on arm64 hosts and on macOS the guest runs under TCG emulation and is correspondingly slow. There is no arm64 guest bundle. Use the default `docker` backend on those hosts.
 

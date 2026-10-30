@@ -55,7 +55,7 @@ func TestAttachInteractiveContract(t *testing.T) {
 	t.Run("connect failure surfaces error", func(t *testing.T) {
 		t.Setenv("STUB_STDERR", "Error: No such container: nope")
 		t.Setenv("STUB_EXIT", "1")
-		if err := AttachInteractive(context.Background(), "nope", ""); err == nil {
+		if err := AttachInteractive(context.Background(), "nope", "", nil); err == nil {
 			t.Fatal("expected error when docker could not attach, got nil")
 		}
 	})
@@ -63,8 +63,17 @@ func TestAttachInteractiveContract(t *testing.T) {
 	t.Run("container exit code is benign", func(t *testing.T) {
 		t.Setenv("STUB_STDERR", "")
 		t.Setenv("STUB_EXIT", "130") // e.g. Ctrl-C forwarded to the container
-		if err := AttachInteractive(context.Background(), "running", ""); err != nil {
+		if err := AttachInteractive(context.Background(), "running", "", nil); err != nil {
 			t.Fatalf("expected nil for container exit/detach, got %v", err)
+		}
+	})
+
+	t.Run("env reaches the client", func(t *testing.T) {
+		t.Setenv("STUB_STDERR", "")
+		t.Setenv("STUB_EXIT", "0")
+		env := append(os.Environ(), "STUB_STDERR=Error: No such container: nope", "STUB_EXIT=1")
+		if err := AttachInteractive(context.Background(), "nope", "", env); err == nil {
+			t.Fatal("expected the stub to fail with the passed environment")
 		}
 	})
 }

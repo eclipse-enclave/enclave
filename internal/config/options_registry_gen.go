@@ -207,6 +207,16 @@ func OptionSpecs() []OptionSpec {
 			},
 		},
 		{
+			Name:  "host_env",
+			Group: OptionGroupRun,
+			ApplyDefaultsWithSource: func(opts *model.Options, defaults Defaults, source model.OptionSource, sources *model.OptionSources) {
+				if canOverride(sources.HostEnv, source) && len(defaults.HostEnv) > 0 {
+					opts.HostEnv = mergeStringMap(opts.HostEnv, defaults.HostEnv)
+					sources.HostEnv = source
+				}
+			},
+		},
+		{
 			Name:  "timezone",
 			Group: OptionGroupRun,
 			ApplyDefaultsWithSource: func(opts *model.Options, defaults Defaults, source model.OptionSource, sources *model.OptionSources) {

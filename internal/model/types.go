@@ -50,6 +50,7 @@ type RunOptions struct {
 	Admin                    bool
 	SessionMonitor           bool
 	SessionTint              string
+	HostEnv                  map[string]string
 	Timezone                 string
 	CmdArgs                  []string
 	NoHistory                bool

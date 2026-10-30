@@ -51,6 +51,7 @@ func TestMergeOptionSourcesCoversAllFields(t *testing.T) {
 			BridgePorts:              SourceCLI,
 			SessionName:              SourceCLI,
 			SessionTint:              SourceCLI,
+			HostEnv:                  SourceCLI,
 			Timezone:                 SourceCLI,
 			PlaywrightMCP:            SourceCLI,
 		},

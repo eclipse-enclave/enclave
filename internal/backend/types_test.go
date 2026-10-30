@@ -7,7 +7,10 @@
 
 package backend
 
-import "testing"
+import (
+	"slices"
+	"testing"
+)
 
 func TestValidateFailsClosedForRestrictedNetwork(t *testing.T) {
 	req := Request{Network: NetworkPolicy{Mode: NetworkModeRestricted}}
@@ -35,5 +38,16 @@ func TestValidateAllowsDockerCapabilities(t *testing.T) {
 	caps := Capabilities{RestrictedNetwork: true, SecretHTTPRelease: true}
 	if err := Validate(req, caps); err != nil {
 		t.Fatalf("Validate() error = %v", err)
+	}
+}
+
+func TestAttachIOCommandEnv(t *testing.T) {
+	if env := (AttachIO{}).CommandEnv(); env != nil {
+		t.Fatalf("without HostEnv the session process must inherit, got %d entries", len(env))
+	}
+	t.Setenv("ENCLAVE_TEST_AMBIENT", "kept")
+	env := AttachIO{HostEnv: map[string]string{"ENCLAVE_TEST_B": "2", "ENCLAVE_TEST_A": "1"}}.CommandEnv()
+	if !slices.Contains(env, "ENCLAVE_TEST_AMBIENT=kept") || !slices.Equal(env[len(env)-2:], []string{"ENCLAVE_TEST_A=1", "ENCLAVE_TEST_B=2"}) {
+		t.Fatalf("env = %v", env)
 	}
 }

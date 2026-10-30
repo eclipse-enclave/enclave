@@ -37,6 +37,7 @@ type RunOptionSources struct {
 	Ephemeral                OptionSource
 	HostConfig               OptionSource
 	HostConfigPaths          OptionSource
+	HostEnv                  OptionSource
 	NetworkLog               OptionSource
 	NoCache                  OptionSource
 	NoHistory                OptionSource
@@ -108,6 +109,7 @@ func DefaultOptionSources() OptionSources {
 			Ephemeral:                SourceDefault,
 			HostConfig:               SourceDefault,
 			HostConfigPaths:          SourceDefault,
+			HostEnv:                  SourceDefault,
 			NetworkLog:               SourceDefault,
 			NoCache:                  SourceDefault,
 			NoHistory:                SourceDefault,
@@ -237,6 +239,9 @@ func MergeOptionSources(base OptionSources, override OptionSources) OptionSource
 	}
 	if override.HostConfigPaths != SourceUnset {
 		base.HostConfigPaths = override.HostConfigPaths
+	}
+	if override.HostEnv != SourceUnset {
+		base.HostEnv = override.HostEnv
 	}
 	if override.ImageName != SourceUnset {
 		base.ImageName = override.ImageName

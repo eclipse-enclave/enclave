@@ -25,6 +25,7 @@ const (
 	OptionKindBool        OptionKind = "bool"
 	OptionKindStringSlice OptionKind = "string_slice"
 	OptionKindYolo        OptionKind = "yolo"
+	OptionKindStringMap   OptionKind = "string_map"
 )
 
 type ApplyKind string
@@ -34,6 +35,8 @@ const (
 	ApplyBoolPtr     ApplyKind = "bool_ptr"
 	ApplyString      ApplyKind = "string"
 	ApplyYoloDefault ApplyKind = "yolo_default"
+	// ApplyStringMap merges keys, a later layer replacing a key's value.
+	ApplyStringMap ApplyKind = "string_map"
 
 	// List kinds are folded layer by layer in options_lists.go.
 	// ApplyListExtras: a plain config list replaces, a plain CLI value adds,
@@ -531,6 +534,16 @@ func OptionDefs() []OptionDef {
 			DefaultsField:  "SessionTint",
 			Apply:          ApplyString,
 			TrimOnApply:    true,
+		},
+		{
+			Name:           "host_env",
+			Group:          OptionGroupRun,
+			Kind:           OptionKindStringMap,
+			AffectsSession: SessionUnaffected,
+			OptionField:    "HostEnv",
+			SourceField:    "HostEnv",
+			DefaultsField:  "HostEnv",
+			Apply:          ApplyStringMap,
 		},
 		{
 			Name:           "timezone",

@@ -288,7 +288,7 @@ func execSessionTarget(ctx context.Context, be backend.Backend, opts model.Optio
 	if err != nil {
 		return runtime.ExecTarget{}, err
 	}
-	return runtime.ExecTarget{Name: session.Ref.Name, SessionTint: attachSessionTint(session, opts.SessionTint)}, nil
+	return runtime.ExecTarget{Name: session.Ref.Name, SessionTint: attachSessionRunOptions(session, opts.RunOptions).SessionTint}, nil
 }
 
 // runErrorExitCode maps a session error to the process exit code. Tool exits

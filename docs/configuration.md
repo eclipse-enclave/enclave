@@ -72,6 +72,7 @@ supported under `tool_overrides.<tool>`.
 | `no_memory` | Disable per-project agent memory; see [memory controls](runtime/stores.md#agent-memory) |
 | `session_monitor` | Run agents under the managed tmux session (enables `status` snapshots) |
 | `session_tint` | Terminal background color marking a session-owned terminal, as `#rrggbb` (unset: no tint) |
+| `host_env` | Object of environment variables for the host process that runs an agent session, not the container; see [Host environment](#host-environment) |
 | `timezone` | Container `TZ`, e.g. `UTC` or `Europe/Vienna` (unset: host time zone); a `TZ` from `.env`, devcontainer `containerEnv`, or `--pass-env` wins |
 | `base_image` | Docker base image override |
 | `devcontainer` | Derive base image from devcontainer.json |
@@ -142,6 +143,36 @@ killed with `SIGKILL` the reset never runs; clear a leftover tint with
   "secrets_scope": "project",
   "pass_env": ["GITHUB_TOKEN"],
   "allow_all_network": false
+}
+```
+
+### Host environment
+
+`host_env` sets environment variables on the host process that runs an agent
+session: the `docker` client (or qemu) of `run`, `continue`, and `resume`, and
+of `attach`. Nothing else gets them: not the container (use `pass_env` for
+that), not the engine calls that set up and tear down the session, and not
+`shell` or `exec`, whose terminals run a shell rather than the agent. Sessions
+do not record whether they run a shell, so `attach` to a foreground `shell`
+session by name still applies it.
+
+Keys merge across layers, a later layer replacing a key's value; a later layer
+cannot remove an inherited key, and `""` sets an empty value. `attach` resolves
+the keys for the session it enters, like `session_tint`. Keys that are not
+environment variable names, and `DOCKER_*`, `CONTAINER_HOST`,
+`CONTAINER_CONNECTION`, and `PATH`, which would send the session to a different
+engine or binary than its setup, are reported when the config file is read and
+ignored. `enclave config` prints the values, so do not use it for secrets.
+
+This lets tools that inspect the terminal's foreground processes recognize a
+sandboxed agent. For example, [Herdr](https://herdr.dev) reads `HERDR_AGENT`:
+
+```json
+{
+  "tool_overrides": {
+    "claude": { "host_env": { "HERDR_AGENT": "claude" } },
+    "codex": { "host_env": { "HERDR_AGENT": "codex" } }
+  }
 }
 ```
 
@@ -459,10 +490,11 @@ view carries the full envelope; `--view` only affects the legacy keys.
 
 Each `options.<name>` entry has:
 
-- `kind`: `string`, `bool`, or `string_slice`.
+- `kind`: `string`, `bool`, `string_slice`, or `string_map`.
 - `value`: the typed value a run with the same options uses, normalized and
   validated (lowercased domains, conflict resolution, qemu coercion); only
-  normalized if validation fails. Lists are always arrays.
+  normalized if validation fails. Lists are always arrays, maps always
+  objects.
   `features` is the sorted set a run enables (after `slim`, devcontainer mode,
   `playwright_mcp`, and `+`/`-` directives, without unknown names), or `null`
   with a `features_unavailable` warning when features cannot be listed (`valid`

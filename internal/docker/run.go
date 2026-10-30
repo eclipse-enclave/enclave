@@ -107,16 +107,17 @@ func RunCapture(ctx context.Context, config *ContainerConfig, hostConfig *HostCo
 // RunInteractive runs a container attached to the current terminal. The docker
 // CLI handles raw-mode, terminal resize, and signal forwarding.
 func RunInteractive(ctx context.Context, config *ContainerConfig, hostConfig *HostConfig, name string) error {
-	_, err := RunInteractiveWithStartHook(ctx, config, hostConfig, name, "", nil)
+	_, err := RunInteractiveWithStartHook(ctx, config, hostConfig, name, "", nil, nil)
 	return err
 }
 
 // RunInteractiveWithStartHook runs an interactive container and invokes
 // onStarted with the container's ID once it is running. A non-empty detachKeys
 // replaces the engine's detach keys. SIGINT, SIGTERM and SIGHUP sent to this
-// process while the child runs are forwarded to it. It returns the ID of the
-// container this run created, if any.
-func RunInteractiveWithStartHook(ctx context.Context, config *ContainerConfig, hostConfig *HostConfig, name string, detachKeys string, onStarted func(id string)) (string, error) {
+// process while the child runs are forwarded to it. A non-nil env replaces the
+// client's inherited environment. It returns the ID of the container this run
+// created, if any.
+func RunInteractiveWithStartHook(ctx context.Context, config *ContainerConfig, hostConfig *HostConfig, name string, detachKeys string, env []string, onStarted func(id string)) (string, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -130,6 +131,7 @@ func RunInteractiveWithStartHook(ctx context.Context, config *ContainerConfig, h
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
+	cmd.Env = env
 	child := make(chan *os.Process, 1)
 	stopRelay := relayInterrupts(child)
 	defer stopRelay()

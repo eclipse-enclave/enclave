@@ -10,6 +10,7 @@ package config
 import (
 	"fmt"
 	"reflect"
+	"sort"
 	"strings"
 
 	"enclave/internal/model"
@@ -52,6 +53,27 @@ func displaySlice(def OptionDef, v any, name string) []string {
 	return redacted
 }
 
+func optMap(v any, name string) map[string]string {
+	f := optField(v, name)
+	if f.Len() == 0 {
+		return nil
+	}
+	return f.Interface().(map[string]string)
+}
+
+// mapEntries renders a map as sorted KEY=value entries, nil when empty.
+func mapEntries(values map[string]string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	entries := make([]string, 0, len(values))
+	for key, value := range values {
+		entries = append(entries, key+"="+value)
+	}
+	sort.Strings(entries)
+	return entries
+}
+
 func optBoolPtr(v any, name string) *bool {
 	f := optField(v, name)
 	if f.IsNil() {
@@ -74,6 +96,8 @@ func OptionDefaultValue(def OptionDef, opts model.Options) (string, bool) {
 		return boolValue(optBool(opts, def.OptionField))
 	case OptionKindStringSlice:
 		return sliceValue(displaySlice(def, opts, def.OptionField))
+	case OptionKindStringMap:
+		return sliceValue(mapEntries(optMap(opts, def.OptionField)))
 	default:
 		return stringValue(optString(opts, def.OptionField), def.DefaultRequire)
 	}
@@ -90,6 +114,8 @@ func OptionDefaultsValue(def OptionDef, defaults Defaults) (string, bool) {
 		return boolPtrValue(optBoolPtr(defaults, def.DefaultsField))
 	case OptionKindStringSlice:
 		return sliceValue(displaySlice(def, defaults, def.DefaultsField))
+	case OptionKindStringMap:
+		return sliceValue(mapEntries(optMap(defaults, def.DefaultsField)))
 	default:
 		return stringValue(optString(defaults, def.DefaultsField), false)
 	}
@@ -111,6 +137,8 @@ func OptionCLIValue(def OptionDef, opts model.Options) (string, bool) {
 		return boolValue(optBool(opts, def.OptionField))
 	case OptionKindStringSlice:
 		return sliceValue(displaySlice(def, opts, def.OptionField))
+	case OptionKindStringMap:
+		return sliceValue(mapEntries(optMap(opts, def.OptionField)))
 	default:
 		return stringValue(optString(opts, def.OptionField), true)
 	}
@@ -131,6 +159,8 @@ func OptionEffectiveValue(def OptionDef, opts model.Options) string {
 		return fmt.Sprintf("%t", optBool(opts, def.OptionField))
 	case OptionKindStringSlice:
 		return formatSlice(displaySlice(def, opts, def.OptionField))
+	case OptionKindStringMap:
+		return formatSlice(mapEntries(optMap(opts, def.OptionField)))
 	default:
 		return optString(opts, def.OptionField)
 	}
@@ -142,7 +172,7 @@ func OptionEffectiveSource(def OptionDef, sources model.OptionSources) model.Opt
 }
 
 // OptionTypedEffectiveValue returns the resolved value as a bool, string, or
-// non-nil []string. Yolo depends on the tool profile and returns nil.
+// non-nil []string or map[string]string. Yolo depends on the tool profile and returns nil.
 func OptionTypedEffectiveValue(def OptionDef, opts model.Options) any {
 	switch def.Kind {
 	case OptionKindYolo:
@@ -154,6 +184,11 @@ func OptionTypedEffectiveValue(def OptionDef, opts model.Options) any {
 			return values
 		}
 		return []string{}
+	case OptionKindStringMap:
+		if values := optMap(opts, def.OptionField); values != nil {
+			return values
+		}
+		return map[string]string{}
 	default:
 		return optString(opts, def.OptionField)
 	}
@@ -184,6 +219,10 @@ func OptionTypedDefaultsValue(def OptionDef, defaults Defaults) (any, bool) {
 		}
 	case OptionKindStringSlice:
 		if values := displaySlice(def, defaults, def.DefaultsField); values != nil {
+			return values, true
+		}
+	case OptionKindStringMap:
+		if values := optMap(defaults, def.DefaultsField); values != nil {
 			return values, true
 		}
 	default:

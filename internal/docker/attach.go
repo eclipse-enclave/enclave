@@ -19,8 +19,9 @@ import (
 // AttachInteractive attaches to a running container's stdio. The docker CLI
 // handles raw-mode, terminal resize, and the detach key sequence. It returns an
 // error only when the attach itself fails (for example the container does not
-// exist); a normal detach or container exit returns nil.
-func AttachInteractive(ctx context.Context, containerNameOrID string, detachKeys string) error {
+// exist); a normal detach or container exit returns nil. A non-nil env replaces
+// the client's inherited environment.
+func AttachInteractive(ctx context.Context, containerNameOrID string, detachKeys string, env []string) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -35,6 +36,7 @@ func AttachInteractive(ctx context.Context, containerNameOrID string, detachKeys
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = io.MultiWriter(os.Stderr, &stderr)
+	cmd.Env = env
 	err := cmd.Run()
 	if err == nil {
 		return nil

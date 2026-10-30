@@ -276,6 +276,8 @@ network:
 			field.SetBool(!field.Bool())
 		case config.OptionKindStringSlice:
 			field.Set(reflect.ValueOf([]string{"probe.example.com"}))
+		case config.OptionKindStringMap:
+			field.Set(reflect.ValueOf(map[string]string{"PROBE": "probe.example.com"}))
 		default:
 			field.SetString("probe")
 		}

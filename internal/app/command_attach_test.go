@@ -14,6 +14,7 @@ import (
 
 	"enclave/internal/backend"
 	"enclave/internal/config"
+	"enclave/internal/model"
 )
 
 func writeGlobalToolTints(t *testing.T) {
@@ -29,8 +30,8 @@ func writeGlobalToolTints(t *testing.T) {
 	payload := `{
   "tool": "claude",
   "tool_overrides": {
-    "claude": {"session_tint": "#111111"},
-    "codex": {"session_tint": "#222222"}
+    "claude": {"session_tint": "#111111", "host_env": {"HERDR_AGENT": "claude"}},
+    "codex": {"session_tint": "#222222", "host_env": {"HERDR_AGENT": "codex"}}
   }
 }`
 	if err := os.WriteFile(path, []byte(payload), 0o600); err != nil {
@@ -39,17 +40,18 @@ func writeGlobalToolTints(t *testing.T) {
 }
 
 // The ambient tool is claude, so a codex session must still resolve the codex
-// color rather than the default tool's.
-func TestAttachSessionTintFollowsSessionTool(t *testing.T) {
+// color and host_env rather than the default tool's.
+func TestAttachSessionRunOptionsFollowSessionTool(t *testing.T) {
 	writeGlobalToolTints(t)
 	session := backend.Session{Tool: "codex", ProjectDir: t.TempDir()}
 
-	if got := attachSessionTint(session, "#111111"); got != "#222222" {
-		t.Fatalf("expected the codex tint, got %q", got)
+	got := attachSessionRunOptions(session, model.RunOptions{SessionTint: "#111111", HostEnv: map[string]string{"HERDR_AGENT": "claude"}})
+	if got.SessionTint != "#222222" || got.HostEnv["HERDR_AGENT"] != "codex" {
+		t.Fatalf("expected the codex options, got tint %q host_env %v", got.SessionTint, got.HostEnv)
 	}
 }
 
-func TestAttachSessionTintFallsBack(t *testing.T) {
+func TestAttachSessionRunOptionsFallBack(t *testing.T) {
 	writeGlobalToolTints(t)
 
 	cases := []struct {
@@ -62,8 +64,9 @@ func TestAttachSessionTintFallsBack(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := attachSessionTint(tc.session, "#333333"); got != "#333333" {
-				t.Fatalf("expected the resolved fallback tint, got %q", got)
+			got := attachSessionRunOptions(tc.session, model.RunOptions{SessionTint: "#333333", HostEnv: map[string]string{"HERDR_AGENT": "fallback"}})
+			if got.SessionTint != "#333333" || got.HostEnv["HERDR_AGENT"] != "fallback" {
+				t.Fatalf("expected the fallback options, got tint %q host_env %v", got.SessionTint, got.HostEnv)
 			}
 		})
 	}

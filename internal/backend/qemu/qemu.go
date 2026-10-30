@@ -93,6 +93,7 @@ func (b *Backend) Run(ctx context.Context, req backend.Request, attach backend.A
 	cmd := exec.CommandContext(ctx, qemuBinary, args...) // #nosec G204 -- args are generated from validated request fields.
 	cmd.Stdin = readerOrDefault(attach.In)
 	cmd.Stdout = writerOrDefault(attach.Out)
+	cmd.Env = attach.CommandEnv()
 	var stderr bytes.Buffer
 	cmd.Stderr = io.MultiWriter(stderrOrDefault(attach.Err), &stderr)
 	warnHostMemory(vmBundle.MemoryMiB)

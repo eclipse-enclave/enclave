@@ -30,6 +30,6 @@ This information will help us triage your report more quickly.
 
 ## Supported Versions
 
-Eclipse Enclave does not currently maintain stable release lines. Security
-fixes are applied to the current `main` branch and published in the latest
-rolling prerelease. Older rolling builds are not supported.
+Eclipse Enclave supports the latest stable release and the latest rolling release. Security fixes
+are published in the next stable release and in the rolling release built from `main`. They are
+not backported to older releases.

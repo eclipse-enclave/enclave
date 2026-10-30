@@ -21,6 +21,10 @@ vulnerabilities.
 
 <!-- Please list potential follow-up work, including known issues, possible future work, identified technical debt, and potentially introduced technical debt. If the PR introduces technical debt, specify the reason why this is acceptable. Please create tickets and link them here. Please use the label "technical debt" for new issues when it applies. -->
 
+#### Changelog
+
+- [ ] This PR has a user-visible change and adds it under `## Unreleased` in `CHANGELOG.md` (see [Releases](https://github.com/eclipse-enclave/enclave/blob/main/docs/DEV.md#releases)).
+
 #### Breaking changes
 
 - [ ] This PR introduces breaking changes and has been coordinated with maintainers.

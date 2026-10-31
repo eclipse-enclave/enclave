@@ -21,7 +21,10 @@ They are set on the container itself, so processes started with `docker exec`,
 such as an attached IDE's backend, trust the gateway as well.
 
 Only the gateway CA persists on the host; leaf certificates stay inside each
-gateway container. Upgrades may leave an unused legacy cache at
+gateway container. The CA pair is `ca.crt` and `ca.key` under
+`~/.local/state/enclave/tls/`. If only one of the two files exists, session
+start fails instead of replacing the CA; restore the missing file, or remove the
+remaining one to generate a new CA. Upgrades may leave an unused legacy cache at
 `~/.local/state/enclave/tls/hosts`. On Linux, its old container-owned permissions
 can prevent normal removal; delete it with
 `sudo rm -rf ~/.local/state/enclave/tls/hosts`, or use

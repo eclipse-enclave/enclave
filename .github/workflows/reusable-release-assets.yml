@@ -154,7 +154,8 @@ jobs:
             arch="${arch%.exe}"
             staging="$(mktemp -d)"
             cp "$exe" "$staging/enclave.exe"
-            (cd "$staging" && zip -q -X "enclave-windows-$arch.zip" enclave.exe)
+            cp ../LICENSE.md ../NOTICE.md "$staging/"
+            (cd "$staging" && zip -q -X "enclave-windows-$arch.zip" enclave.exe LICENSE.md NOTICE.md)
             mv "$staging/enclave-windows-$arch.zip" .
             rm -rf "$staging" "$exe"
           done

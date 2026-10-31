@@ -461,7 +461,7 @@ func printEphemeralCleanupPlan(gateways []string, containers []string, networks 
 		return
 	}
 	for _, gateway := range gateways {
-		logx.Infof("Would stop gateway: %s", gateway)
+		logx.Infof("Would stop or remove gateway: %s", gateway)
 	}
 	for _, container := range containers {
 		logx.Infof("Would remove container: %s", container)

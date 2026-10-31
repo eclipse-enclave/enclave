@@ -383,7 +383,7 @@ The menu lists every installed agent. The IDE profiles (`theia`, `theia-next`) a
 
 ## Running as root
 
-enclave refuses to run as root, including through `sudo`. The agent's container user takes the host UID, so as root the agent would run as UID 0, which is host root on bind-mounted directories under rootful Docker. Files enclave and the agent write, both in the project and in the stores under the config, state, and cache roots, would become root-owned, and later runs as the regular user fail on them (with `sudo -E`, those roots are in the regular user's home). Run enclave as a regular user with access to the Docker socket (see the [requirements](../README.md#requirements)), or use rootless podman with `--backend podman`.
+enclave refuses to run as root, including through `sudo`. The agent's container user takes the host UID, so as root the agent would run as UID 0, which is host root on bind-mounted directories under rootful Docker. Files enclave and the agent write, both in the project and in the stores under the config, state, and cache roots, would become root-owned, and later runs as the regular user fail on them (with `sudo -E`, those roots are in the regular user's home). Run enclave as a regular user with access to the Docker socket (see the [requirements](install.md#requirements)), or use rootless podman with `--backend podman`.
 
 To skip this check, for example in a CI job container, pass `--allow-root` or set `ENCLAVE_ALLOW_ROOT=1`; each such run prints a warning. The opt-in only skips the check: running as root stays unsupported, and the runtime image cannot be built for UID 0 yet. The opt-in has no config key, so neither global nor project config can grant it. Help, version, and shell completion work without it and write nothing.
 
@@ -443,3 +443,56 @@ On Linux, Enclave warns before launch if the guest allocation exceeds the host's
 QEMU sessions use the same persistent stores as Docker sessions (host directories under `~/.local/state/enclave/`): auth credentials, tool config, and persisted env are shared per tool/project, so you can switch between `--backend docker` and `--backend qemu` without re-authenticating.
 
 SIGINT, SIGTERM or SIGHUP aimed at the enclave process, including a closed terminal, kills the VM without a guest shutdown. Enclave itself survives the signal, so file mounts are still written back and credentials synced to the store.
+
+## Custom commands
+
+Drop an executable file into `~/.config/enclave/commands/host/<name>` and it
+becomes an `enclave <name>` verb that runs on the host. The file must have the
+executable bit set (`chmod +x`); the OS resolves its interpreter via the
+shebang line, so any language works. Symlinks are followed to their target and
+may point anywhere, so a link to an executable script registers as a command;
+a broken link is warned about. Built-in commands always take precedence over a
+custom command of the same name.
+
+```bash
+mkdir -p ~/.config/enclave/commands/host
+cat > ~/.config/enclave/commands/host/deploy <<'EOS'
+#!/bin/sh
+echo "deploying with args: $@"
+EOS
+chmod +x ~/.config/enclave/commands/host/deploy
+enclave deploy --env prod    # runs the script with ["--env", "prod"]
+```
+
+Everything after the command name is passed to the script verbatim, including
+flags, `--`, and `--help`; stdin, stdout, stderr, and the exit code pass
+through untouched. enclave's own flags must come before the command name, and
+host commands accept only global flags there, as in `enclave --verbose deploy`.
+Host commands run with the inherited environment plus `ENCLAVE_BIN` (path to
+the enclave binary), `ENCLAVE_PROJECT_ROOT` (the current project directory),
+and `ENCLAVE_CONFIG_DIR` (`~/.config/enclave`).
+
+Dropping the executable into `~/.config/enclave/commands/session/<name>`
+instead runs it inside a sandboxed session container, like `enclave shell`.
+The `session/` tree is mounted read-only at a fixed neutral path inside the
+container and the script is exec'd there with its arguments verbatim, so its
+shebang is honored as long as the interpreter and architecture exist in the
+container image; slim images may lack some interpreters. Because the tree is
+mounted at a different path inside the container, absolute symlink targets do
+not resolve there: a session command symlink must be a relative link that stays
+inside `~/.config/enclave/commands/session` across every hop, and an absolute,
+escaping, or looping link is warned about and skipped. Session commands accept
+the full session flag set before the name, as in `enclave --tool codex
+triage ...`, to control the sandbox. Unlike host commands, they do not receive
+`ENCLAVE_BIN`, `ENCLAVE_PROJECT_ROOT`, or `ENCLAVE_CONFIG_DIR`; they see the
+session environment, like `enclave shell`. If the same name exists in both
+`host/` and `session/`, the host command wins.
+
+An installed extension can ship host commands too, in its own `commands/host/`
+directory. They behave like your own, and `enclave tools|features remove`
+removes them with the extension. Because they run on your host rather than in
+the sandbox, `add` and `update` list them in the capability summary shown
+before anything is written; review that row before confirming. Your own
+commands take precedence over an extension's, so installing one never takes a
+name you already use. `enclave tools|features list` shows which installed
+extensions contribute verbs. See [Host commands](extensions/README.md#host-commands).

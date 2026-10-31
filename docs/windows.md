@@ -20,7 +20,7 @@ Linux container runtime and Linux path semantics; the launcher exists so the
 
 2. Make Docker available **inside** the distribution, either through Docker
    Desktop's WSL integration or by installing Docker Engine in the distribution
-   itself. See the [requirements](../README.md#requirements).
+   itself. See the [requirements](install.md#requirements).
 
 3. Install the Linux `enclave` build inside the distribution — the `.deb` or the
    `enclave-linux-amd64` / `enclave-linux-arm64` binary from the

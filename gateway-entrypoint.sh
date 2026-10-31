@@ -8,6 +8,7 @@
 
 set -eu
 
+DNSMASQ_BIN="/usr/local/libexec/enclave/dnsmasq"
 DNSMASQ_CONF="/etc/dnsmasq.d/enclave.conf"
 ACTIVE_DOMAINS_FILE="/run/enclave-gateway/domains.txt"
 IPSET_NAME="enclave_allowed"
@@ -196,10 +197,11 @@ ensure_local_resolver() {
 
 validate_dnsmasq_conf() {
     conf_path="$1"
-    if dnsmasq --test --conf-file="$conf_path" >/dev/null 2>&1; then
+    if validation_output=$("$DNSMASQ_BIN" --test --conf-file="$conf_path" 2>&1); then
         return 0
     fi
     log "dnsmasq config validation failed"
+    printf '%s\n' "$validation_output" >&2
     return 1
 }
 
@@ -543,9 +545,9 @@ start_proxy() {
 start_dnsmasq() {
     log "Starting dnsmasq"
     if [ -n "$DNSMASQ_LOG_FILE" ]; then
-        su-exec "$DNSMASQ_USER:$DNSMASQ_USER" dnsmasq --keep-in-foreground --conf-file="$DNSMASQ_CONF" --log-queries --log-facility="$DNSMASQ_LOG_FILE" &
+        su-exec "$DNSMASQ_USER:$DNSMASQ_USER" "$DNSMASQ_BIN" --keep-in-foreground --conf-file="$DNSMASQ_CONF" --log-queries --log-facility="$DNSMASQ_LOG_FILE" &
     else
-        su-exec "$DNSMASQ_USER:$DNSMASQ_USER" dnsmasq --keep-in-foreground --conf-file="$DNSMASQ_CONF" &
+        su-exec "$DNSMASQ_USER:$DNSMASQ_USER" "$DNSMASQ_BIN" --keep-in-foreground --conf-file="$DNSMASQ_CONF" &
     fi
     DNSMASQ_PID="$!"
 }

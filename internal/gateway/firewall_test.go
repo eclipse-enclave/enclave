@@ -37,7 +37,7 @@ type firewallCall struct {
 	args   []string
 }
 
-func runGatewayFirewall(t *testing.T, invocation string, env ...string) ([]firewallCall, error) {
+func gatewayScriptFunctions(t *testing.T) string {
 	t.Helper()
 	data, err := os.ReadFile(filepath.Join("..", "..", "gateway-entrypoint.sh"))
 	if err != nil {
@@ -48,9 +48,14 @@ func runGatewayFirewall(t *testing.T, invocation string, env ...string) ([]firew
 	if !ok {
 		t.Fatal("gateway entrypoint main invocation not found")
 	}
+	return source
+}
+
+func runGatewayFirewall(t *testing.T, invocation string, env ...string) ([]firewallCall, error) {
+	t.Helper()
 	dir := t.TempDir()
 	scriptPath := filepath.Join(dir, "gateway.sh")
-	if err := os.WriteFile(scriptPath, []byte(source), 0o600); err != nil {
+	if err := os.WriteFile(scriptPath, []byte(gatewayScriptFunctions(t)), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	logPath := filepath.Join(dir, "firewall.log")

@@ -23,7 +23,9 @@ Runtime dependencies:
 - Alternatively, Podman (`podman` on `PATH`, rootless works). Enclave detects
   whichever engine is installed and asks once when both are; see
   [Backend detection](docs/cli-reference.md#backend-detection) and
-  [Podman backend](docs/cli-reference.md#podman-backend).
+  [Podman backend](docs/cli-reference.md#podman-backend). Host AppArmor profiles
+  can affect binaries inside rootless containers; see
+  [AppArmor on rootless Podman](docs/security/rootless.md#apparmor-on-rootless-podman).
 - Git 2.26 or newer is required to read the host identity at session start.
 - Optional: `qemu-system-x86_64` and `cpio` for the experimental `qemu` backend,
   which builds an x86-64 guest and is practical only on x86-64 Linux hosts,

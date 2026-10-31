@@ -522,7 +522,9 @@ func Start(ctx context.Context, cfg StartConfig) (StartResult, error) {
 	}
 	binds, remainingMounts := docker.SplitMountsForSELinux(mounts)
 	hostConfig := &docker.HostConfig{
-		AutoRemove:   true,
+		// Keep even an immediately exited gateway until its startup logs are read.
+		// Failed starts and StopContainer remove it explicitly by ID.
+		AutoRemove:   false,
 		NetworkMode:  docker.NetworkMode(cfg.NetworkName),
 		CapAdd:       []string{"NET_ADMIN", "NET_RAW"},
 		Sysctls:      sysctls,
@@ -619,15 +621,43 @@ func startGatewayContainer(ctx context.Context, config *docker.ContainerConfig, 
 		// A name conflict means the engine created nothing; the container
 		// holding the name belongs to someone else and must survive.
 		if !docker.IsContainerNameConflict(err) {
+			err = gatewayStartupError(ctx, containerID, err)
 			removeFailedGateway(ctx, name, containerID, config)
 		}
 		return "", fmt.Errorf("failed to start gateway container: %w", err)
 	}
-	if err := waitForGatewayReady(ctx, name, startedAt); err != nil {
+	if err := waitForGatewayReady(ctx, containerID, startedAt); err != nil {
+		err = gatewayStartupError(ctx, containerID, err)
 		removeFailedGateway(ctx, name, containerID, config)
 		return "", err
 	}
 	return containerID, nil
+}
+
+// gatewayStartupError reads the retained container's final logs before cleanup,
+// including output emitted after the last readiness poll. Never read by name:
+// an unsuccessful run may not have created the container holding that name.
+func gatewayStartupError(ctx context.Context, containerID string, cause error) error {
+	if strings.TrimSpace(containerID) == "" {
+		return cause
+	}
+	logCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
+	defer cancel()
+	logs, err := docker.ContainerLogsTail(logCtx, containerID, 40)
+	if err != nil {
+		logx.Debugf("Could not read failed gateway startup logs: %v", err)
+		return cause
+	}
+	logs = strings.TrimSpace(logs)
+	if logs == "" {
+		return cause
+	}
+	// Bound even a single very long line in the returned CLI error.
+	const maxLogBytes = 16 * 1024
+	if len(logs) > maxLogBytes {
+		logs = "[truncated]\n" + logs[len(logs)-maxLogBytes:]
+	}
+	return fmt.Errorf("%w\ngateway output:\n  %s", cause, strings.ReplaceAll(logs, "\n", "\n  "))
 }
 
 // removeFailedGateway ignores cancellation and removes only by immutable ID.
@@ -853,7 +883,7 @@ func ensureExistingGatewayImageWith(profile model.Profile, exists func(context.C
 	return fmt.Errorf("gateway image %q does not exist locally and builds are disabled (--no-rebuild or %s); re-enable builds to create it, or use --allow-all-network to bypass the gateway", image, model.EnvNoRebuild)
 }
 
-// StopContainer stops the exact gateway container returned by Start. Using
+// StopContainer stops and removes the exact gateway returned by Start. Using
 // its immutable ID prevents delayed error cleanup from stopping a newer
 // same-name gateway created by a concurrent session start.
 func StopContainer(container string) {
@@ -867,5 +897,8 @@ func StopContainer(container string) {
 			return
 		}
 		logx.Warnf("Failed to stop gateway container %s: %v", container, err)
+	}
+	if err := docker.ContainerRemove(context.Background(), container, true, true); err != nil && !docker.IsNotFound(err) {
+		logx.Warnf("Failed to remove gateway container %s: %v", container, err)
 	}
 }

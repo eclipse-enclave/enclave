@@ -15,10 +15,14 @@ FROM docker.io/library/alpine:3.24@sha256:be2656061b536c1883c4034790e21d0a09c5aa
 
 # The proxy validates upstream TLS against this trust store. Upgrade the
 # preinstalled bundle so root removals land without waiting for a new base.
+# A private executable path avoids attaching the host's dnsmasq AppArmor profile.
 RUN apk upgrade --no-cache ca-certificates-bundle && \
     apk add --no-cache dnsmasq ipset iptables libcap socat su-exec ca-certificates && \
-    dnsmasq_path="$(command -v dnsmasq)" && \
-    setcap cap_net_admin,cap_net_bind_service=+ep "$dnsmasq_path" && \
+    mkdir -p /usr/local/libexec/enclave && \
+    mv /usr/sbin/dnsmasq /usr/local/libexec/enclave/dnsmasq && \
+    setcap cap_net_admin,cap_net_bind_service=+ep /usr/local/libexec/enclave/dnsmasq && \
+    getcap /usr/local/libexec/enclave/dnsmasq | grep -q 'cap_net_bind_service,cap_net_admin=ep' && \
+    test ! -e /usr/sbin/dnsmasq && \
     if ! id -u dnsmasq >/dev/null 2>&1; then \
         adduser -S -D -H -s /sbin/nologin dnsmasq; \
     fi && \

@@ -31,7 +31,7 @@ ps)
 container)
 	case "$last" in
 	gwid)
-		printf '%s\n' '{"Id":"gwid","Name":"/@SESSION@-gateway","Config":{"Labels":{"MANAGED_LABEL":"true","CONTAINER_LABEL":"@SESSION@","PROJECT_LABEL":"abc123abc123"}},"State":{"Status":"running","Running":true}}'
+		printf '%s\n' '{"Id":"gwid","Name":"/@SESSION@-gateway","Config":{"Labels":{"MANAGED_LABEL":"true","CONTAINER_LABEL":"@SESSION@","PROJECT_LABEL":"abc123abc123"}},"State":{"Status":"'"$STUB_GATEWAY_STATUS"'","Running":true}}'
 		;;
 	@SESSION@)
 		if [ "$STUB_SESSION_STATUS" = "missing" ]; then
@@ -52,6 +52,7 @@ exit 0
 
 func stubExitedSessionGateway(t *testing.T, sessionStatus string, sessionHash string) string {
 	t.Helper()
+	t.Setenv("STUB_GATEWAY_STATUS", "running")
 	t.Setenv("STUB_SESSION_STATUS", sessionStatus)
 	t.Setenv("STUB_SESSION_HASH", sessionHash)
 	t.Setenv("STUB_SESSION_BACKGROUND", "true")
@@ -82,6 +83,36 @@ func TestStopExitedSessionGatewaysStopsGatewayByID(t *testing.T) {
 				t.Fatalf("expected the gateway to be stopped by ID, got %v", calls)
 			}
 		})
+	}
+}
+
+func TestStopExitedSessionGatewaysRemovesRetainedStoppedGateway(t *testing.T) {
+	for _, status := range []string{"exited", "dead", "stopped"} {
+		t.Run(status, func(t *testing.T) {
+			logPath := stubExitedSessionGateway(t, "exited", "abc123abc123")
+			t.Setenv("STUB_GATEWAY_STATUS", status)
+			_, err := StopExitedSessionGateways(context.Background(), "", false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			calls := stubCalls(t, logPath)
+			if !hasCallWithPrefix(calls, "ps --no-trunc --format {{.ID}} --all ") || !hasCallWithPrefix(calls, "rm --force --volumes gwid") {
+				t.Fatalf("expected stopped gateway discovery and removal by ID: %v", calls)
+			}
+		})
+	}
+}
+
+func TestStopExitedSessionGatewaysLeavesCreatedGateway(t *testing.T) {
+	logPath := stubExitedSessionGateway(t, "exited", "abc123abc123")
+	t.Setenv("STUB_GATEWAY_STATUS", "created")
+	_, err := StopExitedSessionGateways(context.Background(), "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	calls := stubCalls(t, logPath)
+	if hasCallWithPrefix(calls, "stop ") || hasCallWithPrefix(calls, "rm ") {
+		t.Fatalf("must not tear down a gateway still being created: %v", calls)
 	}
 }
 
@@ -130,7 +161,7 @@ func TestAttachStopsGatewayOfExitedSession(t *testing.T) {
 		t.Fatalf("Attach: %v", err)
 	}
 	calls := stubCalls(t, logPath)
-	if !hasCallWithPrefix(calls, "ps --no-trunc --format {{.ID}} --filter label="+model.GatewayLabelContainer+"="+exitedSession+" ") {
+	if !hasCallWithPrefix(calls, "ps --no-trunc --format {{.ID}} --all --filter label="+model.GatewayLabelContainer+"="+exitedSession+" ") {
 		t.Fatalf("expected the listing to be limited to the session's gateway, got %v", calls)
 	}
 	if !hasCallWithPrefix(calls, "stop --time 3 gwid") {

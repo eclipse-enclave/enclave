@@ -143,23 +143,27 @@ func stopExitedSessionGateways(ctx context.Context, session string, ownerPrefix 
 	return names, nil
 }
 
-// exitedSessionGateways lists the running gateways whose background session
-// container exists and has exited. A starting session has no container yet or
-// one in the "created" state, and a foreground session removes its own gateway,
-// so neither matches.
+// exitedSessionGateways lists running or exited gateways whose background session
+// container exists and has exited. Gateways retain logs until explicit removal.
+// A starting session has no container yet or one in the "created" state, and a
+// foreground session removes its own gateway, so neither matches.
 func exitedSessionGateways(ctx context.Context, session string, ownerPrefix string) ([]dockercmd.Summary, error) {
 	filters := dockercmd.NewFilters()
 	if session != "" {
 		filters.Add("label", model.GatewayLabelContainer+"="+session)
 	}
 	filters.Add("label", model.GatewayLabelManaged+"=true")
-	filters.Add("status", "running")
-	gateways, err := dockercmd.ContainerList(ctx, dockercmd.ListOptions{Filters: filters})
+	gateways, err := dockercmd.ContainerList(ctx, dockercmd.ListOptions{All: true, Filters: filters})
 	if err != nil {
 		return nil, err
 	}
 	gatewaysBySession := map[string]dockercmd.Summary{}
 	for _, gw := range gateways {
+		switch gw.State {
+		case "running", "exited", "dead", "stopped":
+		default:
+			continue
+		}
 		owner := gw.Labels[model.GatewayLabelContainer]
 		if owner == "" || gw.Labels[model.GatewayLabelProjectHash] == "" || !strings.HasPrefix(owner, ownerPrefix) ||
 			dockercmd.PrimaryContainerName(gw) != gateway.ContainerName(owner) {

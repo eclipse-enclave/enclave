@@ -30,6 +30,34 @@ compatible with unprivileged ownership. The blocker for rootless Docker is
 mandatory traffic steering through the gateway, not tool execution or
 persistence.
 
+## AppArmor on rootless Podman
+
+On rootless Podman setups without an engine-applied AppArmor profile, container
+processes can inherit an unconfined label, including a named unconfined-mode
+profile such as `podman (unconfined)`. Executing a binary can then attach a host
+profile matching its path inside the container. `no-new-privileges` does not
+prevent that transition. This can affect tool-container binaries such as
+`/usr/bin/man`; it was observed on Ubuntu 24.04 with Podman 4.9.3.
+
+The gateway installs dnsmasq at `/usr/local/libexec/enclave/dnsmasq` and uses
+that absolute path for validation and startup. This avoids the host-service
+attachment `/usr/{bin,sbin}/dnsmasq` without changing host policy. The private
+binary retains the capabilities needed for DNS and ipset updates. It does not
+provide the container-wide confinement of Docker's usual `docker-default`
+profile, and custom host profiles can still match the private path.
+
+Do not rely on adding the gateway's staging and log paths to the host dnsmasq
+profile: other restrictions still apply. On the tested Ubuntu host, file-path
+overrides allowed startup but the profile denied signals from the named
+unconfined parent, causing policy reloads to hang. The old policy kept allowing
+traffic to names removed by the attempted update until the session was stopped.
+
+Gateway startup failures include the trailing container output in the CLI
+error, including dnsmasq validation errors. For suspected AppArmor denials,
+check the kernel journal or the audit log if auditd is running, and use
+`sudo aa-status` to check profile modes. AppArmor merely being enabled does not
+establish the cause of a startup failure.
+
 Rootful Docker remains the default backend. Docker user namespace remapping can
 reduce host UID exposure while retaining the gateway; see
 [Host hardening](host-hardening.md). The experimental QEMU backend is another

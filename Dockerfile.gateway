@@ -21,7 +21,7 @@ RUN apk upgrade --no-cache ca-certificates-bundle && \
     mkdir -p /usr/local/libexec/enclave && \
     mv /usr/sbin/dnsmasq /usr/local/libexec/enclave/dnsmasq && \
     setcap cap_net_admin,cap_net_bind_service=+ep /usr/local/libexec/enclave/dnsmasq && \
-    getcap /usr/local/libexec/enclave/dnsmasq | grep -q 'cap_net_bind_service,cap_net_admin=ep' && \
+    setcap -v cap_net_admin,cap_net_bind_service=ep /usr/local/libexec/enclave/dnsmasq && \
     test ! -e /usr/sbin/dnsmasq && \
     if ! id -u dnsmasq >/dev/null 2>&1; then \
         adduser -S -D -H -s /sbin/nologin dnsmasq; \

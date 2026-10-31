@@ -42,6 +42,7 @@ func TestDNSMasqValidationDiagnostics(t *testing.T) {
 		{name: "quiet success", output: "syntax check OK", exit: "0"},
 		{name: "multiline failure", output: "cannot read config: Permission denied\n100% failed", exit: "3"},
 		{name: "silent failure", exit: "3"},
+		{name: "leading newline", output: "\ncannot read config: Permission denied", exit: "3"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()
@@ -67,8 +68,12 @@ validate_dnsmasq_conf '/tmp/config with spaces.conf'`,
 			if err == nil || !strings.Contains(out, "dnsmasq config validation failed") {
 				t.Fatalf("failure must retain status and generic message: %q, %v", out, err)
 			}
-			if tc.output != "" && strings.Count(out, tc.output) != 2 {
-				t.Fatalf("expected both stdout and stderr unchanged, got %q", out)
+			expected := strings.TrimLeft(tc.output+"\n"+tc.output, "\n")
+			if expected != "" {
+				expected += "\n"
+			}
+			if out != "[enclave-gateway] dnsmasq config validation failed\n"+expected {
+				t.Fatalf("unexpected failure diagnostic: %q", out)
 			}
 		})
 	}

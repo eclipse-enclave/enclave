@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	"enclave/internal/backend"
 	"enclave/internal/config"
@@ -105,11 +106,16 @@ func (b *Backend) RemoveStaleGateway(ctx context.Context, name string, projectHa
 	return nil
 }
 
-// StopExitedSessionGateways stops the gateways of exited sessions whose name
-// starts with ownerPrefix (empty matches all) and returns the gateway names;
-// dryRun only reports them.
+// StopExitedSessionGateways stops gateways of exited sessions and removes aged,
+// stopped orphans. ownerPrefix scopes session names (empty matches all).
+// It returns the affected gateway names; dryRun only reports them.
 func StopExitedSessionGateways(ctx context.Context, ownerPrefix string, dryRun bool) ([]string, error) {
-	return stopExitedSessionGateways(ctx, "", ownerPrefix, dryRun)
+	stopped, err := stopExitedSessionGateways(ctx, "", ownerPrefix, dryRun)
+	if err != nil {
+		return stopped, err
+	}
+	removed, err := removeStoppedGatewayOrphans(ctx, ownerPrefix, dryRun)
+	return append(stopped, removed...), err
 }
 
 func (b *Backend) StopExitedSessionGateways(ctx context.Context) error {
@@ -137,31 +143,34 @@ func stopExitedSessionGateways(ctx context.Context, session string, ownerPrefix 
 		names = append(names, name)
 		if !dryRun {
 			logx.Debugf("Stopping gateway container %s of an exited session", name)
-			gateway.StopContainer(gw.ID)
+			// Podman requires the dependent session to be removed first. Leave
+			// removal to RemoveSessionContainer while that session still exists.
+			timeout := 3 * time.Second
+			if err := dockercmd.ContainerStop(ctx, gw.ID, &timeout); err != nil && !dockercmd.IsNotFound(err) {
+				return names, err
+			}
 		}
 	}
 	return names, nil
 }
 
-// exitedSessionGateways lists running or exited gateways whose background session
-// container exists and has exited. Gateways retain logs until explicit removal.
-// A starting session has no container yet or one in the "created" state, and a
-// foreground session removes its own gateway, so neither matches.
+// exitedSessionGateways lists running gateways whose background session exists
+// and has exited. A starting session has no container yet or one in the "created"
+// state, and a foreground session removes its own gateway, so neither matches.
 func exitedSessionGateways(ctx context.Context, session string, ownerPrefix string) ([]dockercmd.Summary, error) {
 	filters := dockercmd.NewFilters()
 	if session != "" {
 		filters.Add("label", model.GatewayLabelContainer+"="+session)
 	}
 	filters.Add("label", model.GatewayLabelManaged+"=true")
-	gateways, err := dockercmd.ContainerList(ctx, dockercmd.ListOptions{All: true, Filters: filters})
+	filters.Add("status", "running")
+	gateways, err := dockercmd.ContainerList(ctx, dockercmd.ListOptions{Filters: filters})
 	if err != nil {
 		return nil, err
 	}
 	gatewaysBySession := map[string]dockercmd.Summary{}
 	for _, gw := range gateways {
-		switch gw.State {
-		case "running", "exited", "dead", "stopped":
-		default:
+		if gw.State != "running" {
 			continue
 		}
 		owner := gw.Labels[model.GatewayLabelContainer]
@@ -189,6 +198,70 @@ func exitedSessionGateways(ctx context.Context, session string, ownerPrefix stri
 		exited = append(exited, gw)
 	}
 	return exited, nil
+}
+
+// Allow a failed startup to collect its final logs before an unrelated session's
+// sweep can remove them. This exceeds the 15s readiness and 3s log-read windows.
+const stoppedGatewayOrphanGrace = time.Minute
+
+func removeStoppedGatewayOrphans(ctx context.Context, ownerPrefix string, dryRun bool) ([]string, error) {
+	filters := dockercmd.NewFilters()
+	filters.Add("label", model.GatewayLabelManaged+"=true")
+	gateways, err := dockercmd.ContainerList(ctx, dockercmd.ListOptions{All: true, Filters: filters})
+	if err != nil {
+		return nil, err
+	}
+	var removed []string
+	for _, candidate := range gateways {
+		if !containerExited(&dockercmd.ContainerState{Status: candidate.State}) {
+			continue
+		}
+		owner := candidate.Labels[model.GatewayLabelContainer]
+		_, hash, _, managed := dockercmd.ParseManagedName(owner)
+		if !managed || !strings.HasPrefix(owner, ownerPrefix) || candidate.ID == "" ||
+			hash != candidate.Labels[model.GatewayLabelProjectHash] ||
+			dockercmd.PrimaryContainerName(candidate) != gateway.ContainerName(owner) {
+			continue
+		}
+		eligible, err := stoppedGatewayOrphan(ctx, candidate.ID, owner, hash, time.Now())
+		if err != nil {
+			return removed, err
+		}
+		if !eligible {
+			continue
+		}
+		if !dryRun {
+			// Non-force removal also protects a container restarted after inspection.
+			if err := dockercmd.ContainerRemove(ctx, candidate.ID, false, true); err != nil && !dockercmd.IsNotFound(err) {
+				return removed, err
+			}
+		}
+		removed = append(removed, dockercmd.PrimaryContainerName(candidate))
+	}
+	return removed, nil
+}
+
+func stoppedGatewayOrphan(ctx context.Context, id, owner, hash string, now time.Time) (bool, error) {
+	info, err := dockercmd.ContainerInspect(ctx, id)
+	if dockercmd.IsNotFound(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if info.ID != id || !gateway.ContainerOwnedBy(info, owner, hash) ||
+		!containerExited(info.State) || info.State.Running {
+		return false, nil
+	}
+	finished, err := time.Parse(time.RFC3339Nano, info.State.FinishedAt)
+	if err != nil || finished.IsZero() || now.Sub(finished) < stoppedGatewayOrphanGrace {
+		return false, nil
+	}
+	_, err = dockercmd.ContainerInspect(ctx, owner)
+	if dockercmd.IsNotFound(err) {
+		return true, nil
+	}
+	return false, err
 }
 
 func containerExited(state *dockercmd.ContainerState) bool {

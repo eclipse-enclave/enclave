@@ -40,8 +40,8 @@ prevent that transition. This can affect tool-container binaries such as
 `/usr/bin/man`; it was observed on Ubuntu 24.04 with Podman 4.9.3.
 
 The gateway installs dnsmasq at `/usr/local/libexec/enclave/dnsmasq` and uses
-that absolute path for validation and startup. This avoids the host-service
-attachment `/usr/{bin,sbin}/dnsmasq` without changing host policy. The private
+that absolute path for validation and startup. This keeps a host profile for
+`/usr/{bin,sbin}/dnsmasq` from attaching without changing host policy. The private
 binary retains the capabilities needed for DNS and ipset updates. It does not
 provide the container-wide confinement of Docker's usual `docker-default`
 profile, and custom host profiles can still match the private path.

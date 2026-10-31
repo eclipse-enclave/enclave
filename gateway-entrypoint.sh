@@ -201,7 +201,9 @@ validate_dnsmasq_conf() {
         return 0
     fi
     log "dnsmasq config validation failed"
-    printf '%s\n' "$validation_output" >&2
+    if [ -n "$validation_output" ]; then
+        printf '%s\n' "$validation_output" | sed '/./,$!d' >&2
+    fi
     return 1
 }
 

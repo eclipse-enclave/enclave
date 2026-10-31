@@ -10,6 +10,7 @@ package gateway
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -637,8 +638,10 @@ func startGatewayContainer(ctx context.Context, config *docker.ContainerConfig, 
 // gatewayStartupError reads the retained container's final logs before cleanup,
 // including output emitted after the last readiness poll. Never read by name:
 // an unsuccessful run may not have created the container holding that name.
+// Explicit cancellation skips diagnostics; an expired deadline still permits
+// a bounded final read.
 func gatewayStartupError(ctx context.Context, containerID string, cause error) error {
-	if strings.TrimSpace(containerID) == "" {
+	if strings.TrimSpace(containerID) == "" || errors.Is(cause, context.Canceled) || errors.Is(ctx.Err(), context.Canceled) {
 		return cause
 	}
 	logCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)

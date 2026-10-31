@@ -266,17 +266,34 @@ func TestStartGatewayContainerReadyDoesNotRemoveOrReportLogs(t *testing.T) {
 	assertNoCallWithPrefix(t, calls, "logs --tail", "successful starts need no error output")
 }
 
-func TestGatewayStartupErrorPreservesCauseAndBoundsOutput(t *testing.T) {
+func TestGatewayStartupErrorPreservesExpiredDeadlineAndBoundsOutput(t *testing.T) {
 	withGatewayCLIStub(t)
 	t.Setenv("STUB_FINAL_LOGS", strings.Repeat("x", 20*1024)+"\nfinal diagnostic")
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	err := gatewayStartupError(ctx, "gw123", context.Canceled)
-	if !errors.Is(err, context.Canceled) || !strings.Contains(err.Error(), "final diagnostic") {
-		t.Fatalf("expected original cancellation and diagnostics, got %v", err)
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer cancel()
+	err := gatewayStartupError(ctx, "gw123", context.DeadlineExceeded)
+	if !errors.Is(err, context.DeadlineExceeded) || !strings.Contains(err.Error(), "final diagnostic") {
+		t.Fatalf("expected original deadline error and diagnostics, got %v", err)
 	}
 	if len(err.Error()) > 17*1024 || !strings.Contains(err.Error(), "[truncated]") {
 		t.Fatalf("unbounded or unmarked output: %d bytes", len(err.Error()))
+	}
+}
+
+func TestGatewayStartupErrorSkipsLogsAfterUserCancellation(t *testing.T) {
+	for _, cancelContext := range []bool{false, true} {
+		logPath := withGatewayCLIStub(t)
+		ctx, cancel := context.WithCancel(context.Background())
+		cause := context.Canceled
+		if cancelContext {
+			cancel()
+			cause = errors.New("engine command interrupted")
+		}
+		err := gatewayStartupError(ctx, "gw123", cause)
+		cancel()
+		if err != cause || len(stubCalls(t, logPath)) != 0 {
+			t.Fatalf("cancellation must return immediately without reading logs: %v", err)
+		}
 	}
 }
 

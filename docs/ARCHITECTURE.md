@@ -299,7 +299,8 @@ The complete flow from CLI arguments to final options:
 │  4. config.ResolveOptionsForTool(cliOpts, cliSources, global, project)      │
 │     ├── Hold back CLI lists so config lists fold under them                 │
 │     ├── Global, then project config: scalars where CLI did not set them,    │
-│     │   lists folded as layers (options_lists.go)                           │
+│     │   lists folded as layers (options_lists.go), string maps merged       │
+│     │   key by key (a later layer replaces a key's value)                   │
 │     ├── Tool override: scalars from both files combined, lists folded       │
 │     │   as two layers (global file, then project file)                      │
 │     └── CLI lists folded last; each entry records its origin                │

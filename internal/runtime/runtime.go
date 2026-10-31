@@ -841,11 +841,20 @@ func (r *Runtime) runContainer(runCtx context.Context, ctx *ExecutionContext, re
 	// returns: Run blocks for the whole foreground session, and holding the
 	// lock that long would stall every other session start for this tool and
 	// project. The deferred release in Execute only backstops error paths.
-	_, err := be.Run(runCtx, r.backendRequest(ctx, false, true), backend.AttachIO{TTY: true, OnStarted: func() {
+	_, err := be.Run(runCtx, r.backendRequest(ctx, false, true), backend.AttachIO{TTY: true, HostEnv: r.agentHostEnv(), OnStarted: func() {
 		releaseStartLock()
 		r.announcePublishedPorts(ctx.ContainerName)
 	}})
 	return err
+}
+
+// agentHostEnv returns host_env for a session that runs the agent. A shell
+// gets none, since host_env typically labels the terminal as running an agent.
+func (r *Runtime) agentHostEnv() map[string]string {
+	if r.run.Shell {
+		return nil
+	}
+	return r.run.HostEnv
 }
 
 func (r *Runtime) backendRequest(ctx *ExecutionContext, detached bool, interactive bool) backend.Request {

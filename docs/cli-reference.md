@@ -34,7 +34,7 @@ Session provenance: each JSON object also carries `options`, the options that sh
 
 - `options.features` holds the sorted enabled feature names; `pass_env` holds variable names, never values.
 - `backend` and `image_name` are the configured values (for example `auto`), not the detected engine or the derived image tag.
-- Host-side and one-shot options (for example `progress`, `verbose`, `reset_auth`, `session_tint`, `session_name`, and build-cache options) are not recorded.
+- Host-side and one-shot options (for example `progress`, `verbose`, `reset_auth`, `session_tint`, `host_env`, `session_name`, and build-cache options) are not recorded.
 - `options` is omitted when unknown: sessions started by earlier releases, features that could not be resolved at start, or unreadable recorded provenance. qemu sessions are not listed by `ps`, so they have none.
 
 To compare a session with the current configuration, see [Detecting session drift](configuration.md#detecting-session-drift).

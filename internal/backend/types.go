@@ -13,6 +13,8 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"os"
+	"sort"
 	"time"
 )
 
@@ -268,6 +270,28 @@ type AttachIO struct {
 	// calls it holds that lock until the session exits, blocking every other
 	// session start for the same tool and project, including named sessions.
 	OnStarted func()
+	// HostEnv is added to the environment of the host process that runs the
+	// session (engine client or qemu) and of nothing else, so setup and
+	// cleanup engine calls keep the ambient environment.
+	HostEnv map[string]string
+}
+
+// CommandEnv returns the exec.Cmd environment for the session process: nil
+// (inherit) without HostEnv, else the ambient environment plus HostEnv.
+func (a AttachIO) CommandEnv() []string {
+	if len(a.HostEnv) == 0 {
+		return nil
+	}
+	env := os.Environ()
+	keys := make([]string, 0, len(a.HostEnv))
+	for key := range a.HostEnv {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		env = append(env, key+"="+a.HostEnv[key])
+	}
+	return env
 }
 
 type ExitStatus struct {

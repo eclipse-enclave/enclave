@@ -290,7 +290,7 @@ func (b *Backend) Attach(ctx context.Context, ref backend.SessionRef, attach bac
 		detachKeys = model.DetachKeysDefault
 	}
 	name := sessionRefName(ref)
-	err := dockercmd.AttachInteractive(ctx, name, detachKeys)
+	err := dockercmd.AttachInteractive(ctx, name, detachKeys, attach.CommandEnv())
 	stopGatewayIfSessionExited(context.WithoutCancel(ctx), name)
 	return err
 }
@@ -794,7 +794,7 @@ func foregroundDetachKeys(attach backend.AttachIO) string {
 func runForeground(ctx context.Context, config *dockercmd.ContainerConfig, hostConfig *dockercmd.HostConfig, name string, attach backend.AttachIO, onStarted func(id string)) (string, error) {
 	if attach.In == nil && attach.Out == nil && attach.Err == nil {
 		if attach.TTY {
-			return dockercmd.RunInteractiveWithStartHook(ctx, config, hostConfig, name, foregroundDetachKeys(attach), onStarted)
+			return dockercmd.RunInteractiveWithStartHook(ctx, config, hostConfig, name, foregroundDetachKeys(attach), attach.CommandEnv(), onStarted)
 		}
 		return dockercmd.RunWithStartHook(ctx, config, hostConfig, name, onStarted)
 	}

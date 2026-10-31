@@ -49,6 +49,7 @@ type RunOptions struct {
 	Shell                    bool
 	Admin                    bool
 	SessionTint              string
+	HostEnv                  map[string]string
 	Timezone                 string
 	CmdArgs                  []string
 	NoHistory                bool

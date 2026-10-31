@@ -68,7 +68,7 @@ func TestRunInteractiveWithStartHookWaitsForRunningContainer(t *testing.T) {
 	t.Setenv("STUB_RUN_EXIT", "0")
 
 	startedID := ""
-	createdID, err := RunInteractiveWithStartHook(context.Background(), &ContainerConfig{Image: "example:test"}, nil, "session", "", func(id string) {
+	createdID, err := RunInteractiveWithStartHook(context.Background(), &ContainerConfig{Image: "example:test"}, nil, "session", "", nil, func(id string) {
 		startedID = id
 	})
 	if err != nil {
@@ -88,7 +88,7 @@ func TestRunInteractiveWithStartHookSkipsHookWhenRunFailsBeforeStart(t *testing.
 	t.Setenv("STUB_RUN_EXIT", "125")
 
 	called := false
-	createdID, err := RunInteractiveWithStartHook(context.Background(), &ContainerConfig{Image: "example:test"}, nil, "session", "", func(string) {
+	createdID, err := RunInteractiveWithStartHook(context.Background(), &ContainerConfig{Image: "example:test"}, nil, "session", "", nil, func(string) {
 		called = true
 	})
 	if err == nil {

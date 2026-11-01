@@ -133,6 +133,7 @@ func stopGatewayIfSessionExited(ctx context.Context, session string) {
 func stopExitedSessionGateways(ctx context.Context, session string, ownerPrefix string, dryRun bool) ([]string, error) {
 	gateways, err := exitedSessionGateways(ctx, session, ownerPrefix)
 	if err != nil {
+		logx.Warnf("Failed to check for gateways of exited sessions: %v", err)
 		return nil, err
 	}
 	names := make([]string, 0, len(gateways))
@@ -206,6 +207,7 @@ func removeStoppedGatewayOrphans(ctx context.Context, ownerPrefix string, dryRun
 	filters.Add("label", model.GatewayLabelManaged+"=true")
 	gateways, err := dockercmd.ContainerList(ctx, dockercmd.ListOptions{All: true, Filters: filters})
 	if err != nil {
+		logx.Warnf("Failed to list stopped orphan gateway containers: %v", err)
 		return nil, err
 	}
 	var removed []string

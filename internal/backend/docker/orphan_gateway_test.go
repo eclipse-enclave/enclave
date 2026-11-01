@@ -100,7 +100,7 @@ container)
 			}
 			want := append(runningNames, orphanNames...)
 			if failure == "inspect" || failure == "all" {
-				want = slices.Delete(want, 2, 3)
+				want = slices.DeleteFunc(want, func(name string) bool { return name == orphanNames[0] })
 			}
 			if failure == "remove" || failure == "all" {
 				want = slices.DeleteFunc(want, func(name string) bool { return name == orphanNames[1] })

@@ -485,7 +485,7 @@ func cleanupContainers(containers []string) {
 func stopExitedSessionGateways(run model.RunOptions, cleanup model.CleanupOptions, project model.Project, dryRun bool) []string {
 	names, err := backenddocker.StopExitedSessionGateways(context.Background(), cleanupOwnerPrefix(run, cleanup, project), dryRun)
 	if err != nil {
-		logx.Warnf("Failed to list gateway containers of exited sessions: %v", err)
+		logx.Debugf("Gateway cleanup of exited sessions had errors: %v", err)
 	}
 	return names
 }

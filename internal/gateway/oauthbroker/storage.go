@@ -230,7 +230,7 @@ func within(parent, child string) bool {
 func privateDirectory(path string) error {
 	// The host provisions these directories. The proxy retains its distinct UID
 	// and preserves their ownership when replacing files.
-	info, err := os.Lstat(path)
+	info, err := os.Lstat(path) // #nosec G703 -- host-provisioned gateway-private directory, not a workload-selected path.
 	if err != nil || !info.IsDir() || info.Mode().Perm()&0o077 != 0 {
 		return ErrState
 	}
@@ -290,14 +290,14 @@ func (b *Broker) readGrant() (*grant, error) {
 }
 
 func readPrivateJSON(path string, dst any) error {
-	info, err := os.Lstat(path)
+	info, err := os.Lstat(path) // #nosec G703 -- fixed filename in a validated gateway-private directory.
 	if err != nil {
 		return err
 	}
 	if !info.Mode().IsRegular() || info.Mode().Perm()&0o077 != 0 || info.Size() > maxDocument {
 		return ErrState
 	}
-	data, err := os.ReadFile(path) // #nosec G304 -- fixed filename in trusted gateway-only directory.
+	data, err := os.ReadFile(path) // #nosec G304 G703 -- fixed filename in trusted gateway-only directory.
 	if err != nil {
 		return ErrState
 	}
@@ -316,7 +316,7 @@ func durableJSON(path string, value any) error {
 	if err := privateDirectory(dir); err != nil {
 		return err
 	}
-	if info, err := os.Lstat(path); err == nil && !info.Mode().IsRegular() {
+	if info, err := os.Lstat(path); err == nil && !info.Mode().IsRegular() { // #nosec G703 -- fixed destination in a validated gateway-private directory.
 		return ErrState
 	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return ErrState
@@ -341,7 +341,7 @@ func durableJSON(path string, value any) error {
 	if err := os.Rename(f.Name(), path); err != nil { // #nosec G703 -- fixed destination in the trusted private store; no workload path input.
 		return ErrState
 	}
-	d, err := os.Open(dir) // #nosec G304 -- trusted gateway-only state directory.
+	d, err := os.Open(dir) // #nosec G304 G703 -- trusted gateway-only state directory.
 	if err != nil {
 		return ErrState
 	}

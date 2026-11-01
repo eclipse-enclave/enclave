@@ -105,7 +105,7 @@ func TestIdentityReservationsRejectDuplicateNamesAndIncarnations(t *testing.T) {
 func TestIdentityVerificationDoesNotHoldBrokerLock(t *testing.T) {
 	home, dir := protectedIdentityTestDir(t)
 	verify := func() (bool, error) {
-		release, err := util.TryAcquireFileLock(LockPath(home, dir))
+		release, _, err := util.TryAcquireFileLock(LockPath(home, dir))
 		if err != nil {
 			return false, err
 		}
@@ -132,7 +132,7 @@ func TestIdentityVerificationDoesNotHoldBrokerLock(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := WithIdleProtectedIdentity(home, dir, verify, func() error {
-		release, err := util.TryAcquireFileLock(LockPath(home, dir))
+		release, _, err := util.TryAcquireFileLock(LockPath(home, dir))
 		if err != nil {
 			return err
 		}

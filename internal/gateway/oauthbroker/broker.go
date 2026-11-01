@@ -314,7 +314,7 @@ func (b *Broker) exchange(req *http.Request, transport http.RoundTripper) (*http
 		if err := b.writeGrant(&pending); err != nil {
 			return err
 		}
-		payload, err := json.Marshal(input)
+		payload, err := json.Marshal(input) // #nosec G117 -- OAuth refresh token is intentionally sent only to the validated provider token endpoint.
 		if err != nil {
 			return ErrState
 		}

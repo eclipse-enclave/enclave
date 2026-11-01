@@ -78,7 +78,7 @@ func RequireNoQEMUSessions(ctx context.Context, home string) error {
 			return errors.New("invalid QEMU auth admission lease")
 		}
 		path := filepath.Join(root, entry.Name())
-		release, err := util.TryAcquireFileLock(path)
+		release, _, err := util.TryAcquireFileLock(path)
 		if err != nil {
 			return err
 		}

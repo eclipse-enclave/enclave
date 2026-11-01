@@ -177,7 +177,7 @@ func removeSessionTree(path string) error {
 	for attempt := 0; err != nil && attempt < 3; attempt++ {
 		_ = filepath.WalkDir(path, func(entry string, d fs.DirEntry, _ error) error {
 			if d != nil && d.IsDir() {
-				_ = os.Chmod(entry, 0o700) // #nosec G302 -- owner-only access to delete a session tree.
+				_ = os.Chmod(entry, 0o700) // #nosec G302 G122 -- owner-only cleanup under admission after all workload owners have ended.
 			}
 			return nil
 		})
@@ -187,7 +187,7 @@ func removeSessionTree(path string) error {
 }
 
 func retireStartLock(path string) error {
-	release, err := util.TryAcquireFileLock(path)
+	release, _, err := util.TryAcquireFileLock(path)
 	if err != nil || release == nil {
 		return err
 	}
@@ -263,7 +263,7 @@ func (b *Backend) sweepAuthLeftovers(check *authInspection) error {
 		if reserved[incarnation] || validateAuthSession(&backend.AuthSession{Session: "sweep", Engine: backend.NameDocker, Incarnation: incarnation}) != nil {
 			continue
 		}
-		release, err := util.TryAcquireFileLock(b.authStartLock(incarnation))
+		release, _, err := util.TryAcquireFileLock(b.authStartLock(incarnation))
 		if err != nil {
 			failed = append(failed, err)
 			continue

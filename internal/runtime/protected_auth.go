@@ -288,7 +288,7 @@ func (m authManager) prepareProtected(env *[]string, stores storeSet) (model.Aut
 	if err != nil {
 		return model.AuthState{}, SecretMapping{}, err
 	}
-	passed := m.injectPassEnv(env, persisted, injection.InjectedKeys)
+	passed := m.injectPassEnv(env, persisted, injection.InjectedKeys, injection.SuppressedEnvVars)
 	if err := m.validateProtectedBindings(*env, sessionPlaceholders(injection.SecretMapping)); err != nil {
 		return model.AuthState{}, SecretMapping{}, err
 	}

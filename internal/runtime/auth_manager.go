@@ -12,8 +12,8 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"strings"
 	"slices"
+	"strings"
 
 	"enclave/internal/auth"
 	"enclave/internal/backend"

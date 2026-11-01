@@ -23,7 +23,7 @@ func TestRewriteHeadersRejectsCanonicalizedPlaceholderHeaderNames(t *testing.T) 
 			headers.Add("Authorization", "Bearer "+placeholder)
 			before := headers.Clone()
 			rules := []model.SecretReleaseEntry{{Placeholder: placeholder, Value: "real-secret", Hosts: []string{"api.example.com"}, Header: "authorization", Format: "Bearer %s"}}
-			if err := rewriteHeaders("https", "api.example.com", headers, rules); err == nil {
+			if _, err := rewriteHeaders("https", "api.example.com", headers, rules); err == nil {
 				t.Fatal("canonicalized placeholder header name accepted")
 			}
 			if !reflect.DeepEqual(headers, before) {
@@ -54,7 +54,7 @@ func TestRewriteHeadersRespectsDeclaredHeaders(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			before := tc.headers.Clone()
-			err := rewriteHeaders("https", "api.anthropic.com", tc.headers, rules)
+			_, err := rewriteHeaders("https", "api.anthropic.com", tc.headers, rules)
 			if (err != nil) != tc.deny {
 				t.Fatalf("rewriteHeaders() error = %v, deny = %v", err, tc.deny)
 			}

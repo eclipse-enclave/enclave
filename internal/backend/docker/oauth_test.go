@@ -385,7 +385,26 @@ func TestWorkloadAdmissionLockReleasedOnEngineOutcomes(t *testing.T) {
 	for _, mode := range []string{"foreground", "detached", "failed-start"} {
 		t.Run(mode, func(t *testing.T) {
 			b, _, _ := oauthTestBackend(t)
-			script := "case \"$1\" in\nrun) sleep 0.2 ;;\ncontainer) echo '{\"State\":{\"Running\":true}}' ;;\nesac\n"
+			t.Setenv("TEST_ADMISSION_RUNNING", filepath.Join(t.TempDir(), "running"))
+			script := `case "$1" in
+run)
+	touch "$TEST_ADMISSION_RUNNING"
+	while [ "$#" -gt 0 ]; do
+		if [ "$1" = --cidfile ]; then printf aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa > "$2"; break; fi
+		shift
+	done
+	sleep 0.2
+	rm "$TEST_ADMISSION_RUNNING"
+	;;
+container)
+	if [ -f "$TEST_ADMISSION_RUNNING" ]; then
+		echo '{"Id":"synthetic-container","State":{"Running":true}}'
+	else
+		echo '{"Id":"synthetic-container","State":{"Running":false}}'
+	fi
+	;;
+esac
+`
 			switch mode {
 			case "detached":
 				script = "if [ \"$1\" = run ]; then echo synthetic-container; fi\n"

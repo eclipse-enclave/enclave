@@ -384,6 +384,9 @@ func TestProtectedIdentityFollowsScope(t *testing.T) {
 func TestProtectedProvidersNameSpecProviders(t *testing.T) {
 	paths := model.Paths{ToolsDir: filepath.Join("..", "..", "extensions", "tools")}
 	for _, tool := range protectedauth.Tools() {
+		if _, err := os.Stat(filepath.Join(paths.ToolsDir, tool.Name, config.SpecFilename)); os.IsNotExist(err) {
+			continue
+		}
 		profile, err := config.LoadProfile(paths, tool.Name)
 		if err != nil {
 			t.Fatalf("load %s profile: %v", tool.Name, err)

@@ -15,7 +15,7 @@ import (
 )
 
 func inheritFileOwner(file *os.File, dir string) error {
-	info, err := os.Stat(dir)
+	info, err := os.Stat(dir) // #nosec G703 -- validated private directory containing the new credential file.
 	if err != nil {
 		return ErrState
 	}

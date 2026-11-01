@@ -271,7 +271,7 @@ func TestProtectedAdmissionInspectionDoesNotStallSiblingBroker(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("inspection not reached")
 	}
-	release, err := util.TryAcquireFileLock(hoststore.LockPath(b.opts.Host.Home, dir))
+	release, _, err := util.TryAcquireFileLock(hoststore.LockPath(b.opts.Host.Home, dir))
 	if err != nil {
 		t.Fatal(err)
 	}

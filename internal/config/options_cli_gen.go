@@ -83,8 +83,8 @@ func optionCLIFlags() map[string][]CLIFlag {
 			}),
 		},
 		"protect_auth": {
-			boolFlag("--protect-auth", "Experimental gateway-owned tool credentials (named shared, per-project or per-session identity)", func(opts *model.Options, sources *model.OptionSources) {
-				opts.ProtectAuth = true
+			boolFlag("--protect-auth", "Experimental gateway-owned tool credentials (named shared, per-project or per-session identity)", func(opts *model.Options, sources *model.OptionSources, value bool) {
+				opts.ProtectAuth = value
 				sources.ProtectAuth = model.SourceCLI
 			}),
 		},

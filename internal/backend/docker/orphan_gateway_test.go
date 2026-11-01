@@ -9,12 +9,112 @@ package docker
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
+	dockercmd "enclave/internal/docker"
 	"enclave/internal/model"
 )
+
+func TestGatewaySweepsContinueAfterErrors(t *testing.T) {
+	for _, failure := range []string{"stop", "inspect", "remove", "all"} {
+		t.Run(failure, func(t *testing.T) {
+			t.Setenv("STUB_FAILURE", failure)
+			script := `case "$1" in
+ps)
+	case " $* " in
+	*' status=running '*) printf '%s\n' running1 running2 ;;
+	*) printf '%s\n' orphan1 orphan2 orphan3 ;;
+	esac
+	;;
+stop)
+	case "$STUB_FAILURE:$*" in
+	stop:*running1|all:*running1) echo 'stop failed' >&2; exit 1 ;;
+	esac
+	;;
+rm)
+	case "$STUB_FAILURE:$*" in
+	remove:*orphan2|all:*orphan2) echo 'remove failed' >&2; exit 1 ;;
+	esac
+	;;
+container)
+	# Only the single-container recheck fails, not the initial batch listing.
+	if [ "$#" = 5 ] && [ "$5" = orphan1 ]; then
+		case "$STUB_FAILURE" in
+		inspect|all) echo 'inspect failed' >&2; exit 1 ;;
+		esac
+	fi
+	for id in "$@"; do
+		case "$id" in
+`
+			var runningNames, orphanNames []string
+			for i, id := range []string{"running1", "running2", "orphan1", "orphan2", "orphan3"} {
+				owner := "enclave-pi-abc123abc123-" + id
+				name := owner + model.GatewayContainerSuffix
+				status := "exited"
+				if i < 2 {
+					status = "running"
+					runningNames = append(runningNames, name)
+				} else {
+					orphanNames = append(orphanNames, name)
+				}
+				info := dockercmd.InspectResponse{
+					ID: id, Name: "/" + name,
+					Config: &dockercmd.ContainerConfig{Labels: map[string]string{
+						model.GatewayLabelManaged: "true", model.GatewayLabelContainer: owner,
+						model.GatewayLabelProjectHash: "abc123abc123",
+					}},
+					State: &dockercmd.ContainerState{Status: status, Running: i < 2,
+						FinishedAt: time.Now().Add(-2 * time.Minute).UTC().Format(time.RFC3339Nano)},
+				}
+				raw, err := json.Marshal(info)
+				if err != nil {
+					t.Fatal(err)
+				}
+				script += fmt.Sprintf("%s) printf '%%s\\n' '%s' ;;\n", id, raw)
+				if i < 2 {
+					info.ID, info.Name = "session-"+id, "/"+owner
+					info.Config.Labels = map[string]string{model.LabelHash: "abc123abc123", model.LabelBackground: "true"}
+					info.State = &dockercmd.ContainerState{Status: "exited"}
+					raw, err = json.Marshal(info)
+					if err != nil {
+						t.Fatal(err)
+					}
+					script += fmt.Sprintf("%s) printf '%%s\\n' '%s' ;;\n", owner, raw)
+				}
+			}
+			script += "esac\ndone\n;;\nesac\n"
+			logPath := stubCLI(t, "docker", script)
+			names, err := StopExitedSessionGateways(context.Background(), "", false)
+			if err == nil {
+				t.Fatal("expected sweep error")
+			}
+			for _, operation := range []string{"stop", "inspect", "remove"} {
+				if (failure == operation || failure == "all") && !strings.Contains(err.Error(), operation+" failed") {
+					t.Errorf("missing %s error in %v", operation, err)
+				}
+			}
+			want := append(runningNames, orphanNames...)
+			if failure == "inspect" || failure == "all" {
+				want = slices.Delete(want, 2, 3)
+			}
+			if failure == "remove" || failure == "all" {
+				want = slices.DeleteFunc(want, func(name string) bool { return name == orphanNames[1] })
+			}
+			if !slices.Equal(names, want) {
+				t.Fatalf("names = %v, want %v", names, want)
+			}
+			calls := stubCalls(t, logPath)
+			if !slices.Contains(calls, "stop --time 3 running2") || !slices.Contains(calls, "rm --volumes orphan3") {
+				t.Fatalf("must process later gateways and the orphan sweep: %v", calls)
+			}
+		})
+	}
+}
 
 func TestStopExitedSessionGatewaysReclaimsStoppedOrphans(t *testing.T) {
 	for _, status := range []string{"exited", "dead", "stopped"} {

@@ -366,7 +366,7 @@ Enterprise login are not substitutes for this device-flow gate.
 Repeat using `--backend podman --auth-name broker-podman` on rootless Podman,
 including SELinux enforcing where available. Repeat each backend with
 `--allow-all-network`, then with that flag omitted and
-`enclave network set-mode unrestricted --global --tool claude --no-apply`. Confirm an
+`enclave network set-mode unrestricted --global --no-apply`. Confirm an
 unrelated controlled host is reachable without a domain rule and no protected
 credential reaches it. Do not mistake a successful unrelated request for proof
 that credential capture/refresh still works; repeat the authenticated lifecycle.

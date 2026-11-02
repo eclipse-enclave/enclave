@@ -182,6 +182,85 @@ func TestProtectedAuthRejectsLateEnvironmentOverrides(t *testing.T) {
 	}
 }
 
+func protectedCopilotRuntime(t *testing.T) *Runtime {
+	t.Helper()
+	r := protectedTestRuntime()
+	r.host.Home = t.TempDir()
+	r.project.Hash = "copilot-auth"
+	r.paths.ToolsDir = filepath.Join("..", "..", "extensions", "tools")
+	profile, err := config.LoadProfile(r.paths, "copilot")
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.profile = profile
+	return r
+}
+
+func TestProtectedCopilotRejectsTokenPassEnvWithoutGitHubFeature(t *testing.T) {
+	for _, key := range []string{"GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN"} {
+		t.Run(key, func(t *testing.T) {
+			const raw = "synthetic-copilot-pass-env"
+			t.Setenv(key, raw)
+			r := protectedCopilotRuntime(t)
+			r.auth.PassEnv = []string{key}
+			if r.protectedGitHubEnabled() {
+				t.Fatal("fixture unexpectedly enabled the GitHub CLI feature")
+			}
+			if err := r.validateProtectedAuth(); err == nil || !strings.Contains(err.Error(), key) || strings.Contains(err.Error(), raw) {
+				t.Errorf("early validation must refuse and name only the variable: %v", err)
+			}
+			env := []string{}
+			if _, _, err := newAuthManager(r).prepareProtected(&env, storeSet{}); err == nil || !strings.Contains(err.Error(), key) || strings.Contains(err.Error(), raw) {
+				t.Errorf("late preparation must refuse and name only the variable: %v", err)
+			}
+			if envValue(env, key) != "" {
+				t.Error("refused pass-env credential was appended to the workload environment")
+			}
+			r.auth.ProtectAuth = false
+			if err := r.validateProtectedAuth(); err != nil {
+				t.Fatalf("ordinary Copilot session rejected: %v", err)
+			}
+			env = nil
+			newAuthManager(r).injectPassEnv(&env, nil, map[string]string{}, nil)
+			if envValue(env, key) != raw {
+				t.Error("ordinary pass-env behavior changed")
+			}
+		})
+	}
+}
+
+func TestProtectedCopilotRejectsLateTokenValuesWithoutGitHubFeature(t *testing.T) {
+	for _, key := range []string{"GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN"} {
+		for _, value := range []string{"synthetic-copilot-project-env", "ENCLAVE_SECRET_forged"} {
+			t.Run(key+"/"+value, func(t *testing.T) {
+				r := protectedCopilotRuntime(t)
+				env := []string{key + "=" + value}
+				if _, _, err := newAuthManager(r).prepareProtected(&env, storeSet{}); err == nil || !strings.Contains(err.Error(), key) || strings.Contains(err.Error(), value) {
+					t.Fatalf("late environment must refuse and name only the variable: %v", err)
+				}
+			})
+		}
+	}
+}
+
+func TestProtectedCopilotAllowsDeclaredTokenPlaceholder(t *testing.T) {
+	const raw = "synthetic-copilot-declared-secret"
+	t.Setenv("COPILOT_GITHUB_TOKEN", raw)
+	r := protectedCopilotRuntime(t)
+	if err := r.validateProtectedAuth(); err != nil {
+		t.Fatal(err)
+	}
+	env := []string{}
+	_, mapping, err := newAuthManager(r).prepareProtected(&env, storeSet{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	value := envValue(env, "COPILOT_GITHUB_TOKEN")
+	if value == raw || !sessionPlaceholders(mapping)[value] {
+		t.Fatal("declared credential must remain a registered session placeholder")
+	}
+}
+
 func TestProtectedGitHubUsesIndependentNativeViewWithoutReconcile(t *testing.T) {
 	r := protectedTestRuntime()
 	r.features = []model.Extension{{Name: "github-cli", ConfigDir: ".config/gh", AuthFiles: []string{"hosts.yml", "config.yml"}}}

@@ -144,11 +144,29 @@ Copilot CLI 1.0.105 was checked against a local synthetic server: device login,
 the exact `config.json` account keys, and fresh-process credential reload were
 verified. The same OAuth credential goes to Copilot service hosts directly.
 No `/copilot_internal/v2/token` exchange is opened. On `api.github.com`, only
-`GET /copilot_internal/user` is authorized with this handle; repository APIs,
-GraphQL, gists, managed-settings and team-customization routes remain refused.
+`GET /copilot_internal/user` is authorized with this handle. Repository APIs,
+GraphQL, gists, managed-settings and team-customization routes on
+`api.github.com` remain refused.
 Real-provider inference and the effect of those refused ancillary routes on
 organization accounts remain human compatibility checks. Browser OAuth is not
 captured by this adapter.
+
+The CLI's own design sends its repository-scoped OAuth token to
+`githubcopilot.com` hosts. The gateway releases it on any path at those hosts,
+including the remote GitHub MCP endpoint `https://api.githubcopilot.com/mcp`.
+It keeps custody of the token but cannot narrow its authority there: repository
+operations through Copilot or MCP may still be possible despite the direct
+GitHub API restrictions above.
+
+Protected Copilot refuses `--pass-env` for `GH_TOKEN`, `GITHUB_TOKEN`,
+`GH_ENTERPRISE_TOKEN` and `GITHUB_ENTERPRISE_TOKEN`, even without the GitHub CLI
+feature. Raw values from other workload environment sources are refused too;
+ordinary sessions are unchanged. A configured `COPILOT_GITHUB_TOKEN` Enclave
+secret still uses a gateway-released placeholder.
+
+If GitHub issues a token but the gateway refuses the subsequent account check,
+the login fails without saving that token. The authorization may remain valid;
+revoke it in GitHub's application settings if it is no longer wanted.
 
 #### Mistral Vibe extension
 

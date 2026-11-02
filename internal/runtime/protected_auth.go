@@ -74,8 +74,12 @@ func (r *Runtime) validateProtectedAuth() error {
 			}
 		}
 	}
+	return r.validateProtectedPassEnv()
+}
+
+func (r *Runtime) validateProtectedPassEnv() error {
 	for _, key := range r.auth.PassEnv {
-		if protectedCredentialEnv(key) || r.protectedBindingEnv(key) || (r.protectedGitHubEnabled() && protectedGitHubEnv(key)) {
+		if protectedCredentialEnv(key) || r.protectedCopilotTokenEnv(key) || r.protectedBindingEnv(key) || (r.protectedGitHubEnabled() && protectedGitHubEnv(key)) {
 			return fmt.Errorf("protected auth conflicts with --pass-env %s", key)
 		}
 	}
@@ -115,6 +119,17 @@ func (r *Runtime) protectedGitHubEnabled() bool {
 func protectedGitHubEnv(key string) bool {
 	switch key {
 	case "GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN", "GH_HOST", "GH_CONFIG_DIR", model.EnvProtectedGitHub:
+		return true
+	}
+	return false
+}
+
+func (r *Runtime) protectedCopilotTokenEnv(key string) bool {
+	if r.profile.Name != "copilot" {
+		return false
+	}
+	switch key {
+	case "GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN":
 		return true
 	}
 	return false
@@ -170,6 +185,9 @@ func (r *Runtime) validateProtectedBindings(env []string, placeholders map[strin
 	tool, _ := protectedauth.Lookup(r.profile.Name)
 	for _, assignment := range env {
 		key, value, _ := strings.Cut(assignment, "=")
+		if r.protectedCopilotTokenEnv(key) && value != "" && !placeholders[value] {
+			return fmt.Errorf("protected Copilot auth conflicts with environment setting %s", key)
+		}
 		if r.protectedGitHubEnabled() && protectedGitHubEnv(key) {
 			want := ""
 			switch key {
@@ -207,6 +225,9 @@ func (r *Runtime) validateProtectedBindings(env []string, placeholders map[strin
 
 func (m authManager) prepareProtected(env *[]string, stores storeSet) (model.AuthState, SecretMapping, error) {
 	// Never run the tool's legacy import, API-key or native-auth hooks here.
+	if err := m.validateProtectedPassEnv(); err != nil {
+		return model.AuthState{}, SecretMapping{}, err
+	}
 	persisted := map[string]string{}
 	if stores.Env != nil {
 		if err := m.withStoreLock(stores.Env, func() error {

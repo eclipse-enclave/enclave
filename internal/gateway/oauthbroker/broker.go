@@ -175,6 +175,11 @@ func release(req, outgoing *http.Request, header string, transport http.RoundTri
 	if p != nil && p.forbids(req) {
 		return nil, ErrDenied
 	}
+	return releaseApprovedRequest(req, outgoing, header, transport, secrets...)
+}
+
+func releaseApprovedRequest(req, outgoing *http.Request, header string, transport http.RoundTripper, secrets ...string) (*http.Response, error) {
+	p := requestProvider(req)
 	released := releasedSecrets(req.Context())
 	rest := withoutSecrets(req, released)
 	rest.Header.Del(header)

@@ -82,6 +82,96 @@ func TestEngineCheckToolTableMatchesProtectedAuth(t *testing.T) {
 	}
 }
 
+func TestEngineCheckViewHashIgnoresTerminalControlBytes(t *testing.T) {
+	want := strings.Repeat("a", 64)
+	t.Setenv("TEST_ENGINE_HASH", want)
+	got := engineCheck(t, "eval", `
+PROJECT=unused
+enclave_in() { printf '\0%s\r\n' "$TEST_ENGINE_HASH"; }
+view_hash
+`)
+	if got != want {
+		t.Fatalf("view_hash = %q, want %q", got, want)
+	}
+}
+
+func TestEngineCheckUnrelatedTLSRequiresPassthroughAudit(t *testing.T) {
+	if _, err := exec.LookPath("jq"); err != nil {
+		t.Skip("audit checks need jq")
+	}
+	for _, test := range []struct {
+		name, rule, code, want string
+	}{
+		{"opaque handle passes", "allowlist", "200", "PASS"},
+		{"MITM is not passthrough", "mitm-dispatch", "200", "FAIL"},
+		{"missing audit", "missing", "200", "FAIL"},
+		{"upstream refusal is still passthrough", "allowlist", "403", "PASS"},
+		{"unreachable upstream", "allowlist", "000", "FAIL"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Setenv("TEST_ENGINE_STATE", t.TempDir())
+			t.Setenv("TEST_ENGINE_RULE", test.rule)
+			t.Setenv("TEST_ENGINE_CODE", test.code)
+			got := engineCheck(t, "eval", `
+TOOL=claude STATE=$TEST_ENGINE_STATE PROJECT=$TEST_ENGINE_STATE PROJECT_HASH=probe
+ensure_grant() { :; }
+record() { printf '%s:%s\n' "$1" "$2"; }
+protected_shell() {
+    case "$*" in
+        *'--name check-unrelated'*)
+            local log="$STATE/projects/$PROJECT_HASH/$TOOL/logs/network.log"
+            mkdir -p "$(dirname "$log")"
+            touch "$log"
+            if [ "$TEST_ENGINE_RULE" != missing ]; then
+                printf '{"type":"tcp","verdict":"pass","rule":"allowlist","session":"%s"}\n' "$(container_name check-unrelated)" >> "$log"
+                if [ "$TEST_ENGINE_RULE" = mitm-dispatch ]; then
+                    printf '{"type":"tcp","verdict":"pass","rule":"mitm-dispatch","session":"%s"}\n' "$(container_name check-unrelated)" >> "$log"
+                fi
+            fi
+            printf 'unrelated=200\nunrelated-handle=%s\n' "$TEST_ENGINE_CODE"
+            ;;
+        *) printf '%s\n' pasted-key=403 pasted-token=403 token-lookalike=403 revoke=403 api-key-exchange=403 ;;
+    esac
+}
+check_release_refusals
+`)
+			if got != test.want+":release-refusals" {
+				t.Fatalf("release check = %q, want %s", got, test.want)
+			}
+		})
+	}
+}
+
+func TestEngineCheckConcurrencyRequiresFailedResetAndLiveOwnerReason(t *testing.T) {
+	for _, test := range []struct {
+		message, status, want string
+	}{
+		{"auth identity has active session reservations", "1", "PASS"},
+		{"auth identity is in use", "1", "PASS"},
+		{"permission denied", "1", "FAIL"},
+		{"auth identity is in use", "0", "FAIL"},
+	} {
+		t.Run(test.message+test.status, func(t *testing.T) {
+			t.Setenv("TEST_ENGINE_STATE", t.TempDir())
+			t.Setenv("TEST_ENGINE_MESSAGE", test.message)
+			t.Setenv("TEST_ENGINE_STATUS", test.status)
+			got := engineCheck(t, "eval", `
+TOOL=claude STATE=$TEST_ENGINE_STATE PROJECT=$TEST_ENGINE_STATE PROJECT_HASH=probe ENGINE=docker
+ensure_background() { :; }
+reset_test_cli() { printf '%s\n' "$TEST_ENGINE_MESSAGE" >&2; return "$TEST_ENGINE_STATUS"; }
+CLI_BIN=reset_test_cli
+record() { printf '%s:%s\n' "$1" "$2"; }
+mkdir -p "$(identity_dir check-a)"
+touch "$(identity_dir check-a)/oauth-grant.json"
+check_concurrency
+`)
+			if got != test.want+":concurrency" {
+				t.Fatalf("concurrency check = %q, want %s", got, test.want)
+			}
+		})
+	}
+}
+
 // The engine check reads identity metadata where the host keeps it.
 func TestEngineCheckFindsIdentityMetadata(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())

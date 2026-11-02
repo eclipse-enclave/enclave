@@ -158,19 +158,7 @@ func TestOpenAIReleasesAccessHandleOnlyToChatGPT(t *testing.T) {
 		}
 		req.Header.Set("Authorization", "Bearer "+access)
 		req.Header.Set("ChatGPT-Account-ID", f.account)
-		var seen string
-		response, err := fixtureRoundTrip(f.b, req, fixtureTransport(func(out *http.Request) (*http.Response, error) {
-			seen = out.Header.Get("Authorization")
-			return rawFixtureResponse([]byte(`{}`)), nil
-		}))
-		if tc.released {
-			if err != nil || seen != "Bearer "+f.access {
-				t.Fatalf("%s: release = %v, upstream saw %q", tc.url, err, seen)
-			}
-			_ = response.Body.Close()
-		} else if !errors.Is(err, ErrDenied) || seen != "" {
-			t.Fatalf("%s: handle escaped: %v, %q", tc.url, err, seen)
-		}
+		assertBearerRelease(t, f.b, req, f.access, tc.released)
 	}
 }
 

@@ -24,7 +24,7 @@ CLI_BIN=${CLI_BIN:-$REPO_ROOT/bin/enclave}
 # Every synthetic secret contains one of these, so a scan finds any leak.
 SYNTHETIC_MARKERS=(synthetic-engine-check syntheticenginecheck)
 GH_PIN=/opt/enclave/gh-2.87.3/bin/gh
-ALL_TOOLS="claude codex opencode pi mistral-vibe theia theia-next"
+ALL_TOOLS="claude codex opencode pi copilot theia theia-next"
 ALL_CHECKS="enroll refuse-unprotected handles-only release-refusals mounts exec-pin reload concurrency stop-cleanup continuity project-scope ephemeral reset-downgrade"
 # Checks that need a named identity with grants; adapterless tools skip them.
 IDENTITY_CHECKS=" refuse-unprotected handles-only concurrency project-scope reset-downgrade "
@@ -41,6 +41,17 @@ b64url() { base64 | tr -d '\n=' | tr '+/' '-_'; }
 
 iso_time() { date -u -d "@$1" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -r "$1" +%Y-%m-%dT%H:%M:%SZ; }
 
+engine_rootless() {
+    local metadata rootless
+    if [ "$ENGINE" = podman ]; then
+        rootless=$("$ENGINE" info --format '{{.Host.Security.Rootless}}' 2>/dev/null) || rootless=unknown
+    else
+        metadata=$("$ENGINE" info --format '{{json .SecurityOptions}}' 2>/dev/null) || metadata=null
+        rootless=$(jq -r 'if type == "array" then any(.[]; contains("rootless")) else "unknown" end' <<< "$metadata" 2>/dev/null) || rootless=unknown
+    fi
+    printf '%s\n' "${rootless:-unknown}"
+}
+
 # Per-tool layout, mirroring internal/protectedauth.
 tool_config_dir() {
     case $1 in
@@ -48,7 +59,7 @@ tool_config_dir() {
         codex) echo .codex ;;
         opencode) echo .config/opencode ;;
         pi) echo .pi ;;
-        mistral-vibe) echo .vibe ;;
+        copilot) echo .copilot ;;
         theia) echo .theia-ide ;;
         theia-next) echo .theia-ide-next ;;
     esac
@@ -60,7 +71,7 @@ tool_adapters() {
         codex) echo openai ;;
         opencode) echo openai copilot ;;
         pi) echo anthropic openai ;;
-        mistral-vibe) echo mistral ;;
+        copilot) echo copilot ;;
     esac
 }
 
@@ -71,7 +82,7 @@ tool_native_file() {
         codex) echo "/home/agent/.codex/auth.json" ;;
         opencode) echo "/home/agent/.config/opencode/auth.json" ;;
         pi) echo "/home/agent/.pi/agent/auth.json" ;;
-        mistral-vibe) echo "/home/agent/.vibe/.env" ;;
+        copilot) echo "/home/agent/.copilot/config.json" ;;
     esac
 }
 
@@ -112,7 +123,7 @@ synthetic_grants() (
                     "$identity" "$committed" > "$dir/mistral-grant.json"
                 ;;
             copilot)
-                printf '{"schema":1,"identity":"%s","status":"ready","committedAt":"%s","token":"gho_syntheticenginecheck0123456789","scope":"read:user"}\n' \
+                printf '{"schema":1,"identity":"%s","status":"ready","committedAt":"%s","token":"gho_syntheticenginecheck0123456789","scope":"read:user","login":"engine-check"}\n' \
                     "$identity" "$committed" > "$dir/copilot-grant.json"
                 ;;
         esac
@@ -139,7 +150,7 @@ enclave_in() {
     cmd=$(printf '%q ' "$CLI_BIN" --tool "$TOOL" --backend "$ENGINE" "$@")
     (cd "$dir" && env -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN -u CLAUDE_CODE_OAUTH_TOKEN -u OPENAI_API_KEY \
         -u GEMINI_API_KEY -u MISTRAL_API_KEY -u GH_TOKEN -u GITHUB_TOKEN -u GH_ENTERPRISE_TOKEN -u GITHUB_ENTERPRISE_TOKEN \
-        -u GH_HOST -u GH_CONFIG_DIR -u GITLAB_TOKEN \
+        -u GH_HOST -u GH_CONFIG_DIR -u GITLAB_TOKEN -u COPILOT_GITHUB_TOKEN -u CODEX_API_KEY -u CODEX_ACCESS_TOKEN -u ANTHROPIC_OAUTH_TOKEN \
         script -qec "$cmd" /dev/null 2>&1)
 }
 
@@ -253,15 +264,23 @@ check_handles_only() {
 
 check_release_refusals() {
     ensure_grant
-    local out native marker=""
+    local out native marker="" audit_log audit_before trace
     native=$(tool_native_file "$TOOL")
     has_adapters && marker=$(adapter_marker "$(tool_adapters "$TOOL" | cut -d' ' -f1)")
+    audit_log="$STATE/projects/$PROJECT_HASH/$TOOL/logs/network.log"
+    audit_before=0
+    [ ! -f "$audit_log" ] || audit_before=$(wc -l < "$audit_log")
     # shellcheck disable=SC2016 # Expanded inside the session.
     out=$(protected_shell "$PROJECT" '
         handle=$(grep -o "[A-Za-z0-9._-]*'"${marker:-no-handle}"'[A-Za-z0-9._-]*" '"${native:-/dev/null}"' 2>/dev/null | head -n 1)
         code() { curl -s -o /dev/null -w "%{http_code}" --max-time 20 "$@" || echo curl-fail; }
         echo "unrelated=$(code https://example.com/)"
         if [ -n "$handle" ]; then echo "unrelated-handle=$(code -H "Authorization: Bearer $handle" https://example.com/)"; fi
+    ' --auth-scope shared --auth-name check-a --name check-unrelated)
+    trace=$(tail -n "+$((audit_before + 1))" "$audit_log" 2>/dev/null | jq -s --arg session "$(container_name check-unrelated)" '[.[] | select(.session == $session)]')
+    # shellcheck disable=SC2016 # Expanded inside the session.
+    out+=$(protected_shell "$PROJECT" '
+        code() { curl -s -o /dev/null -w "%{http_code}" --max-time 20 "$@" || echo curl-fail; }
         echo "pasted-key=$(code -X POST -H "x-api-key: sk-ant-api03-pasted" https://api.anthropic.com/v1/messages)"
         echo "pasted-token=$(code -H "Authorization: Bearer pasted" https://chatgpt.com/backend-api/codex/models)"
         echo "token-lookalike=$(code -X POST https://api.anthropic.com/v1/oauth/token)"
@@ -273,11 +292,15 @@ check_release_refusals() {
     for name in pasted-key pasted-token token-lookalike revoke api-key-exchange; do
         grep -q "$name=403" <<< "$out" || failures+=("$name not refused")
     done
-    if has_adapters && ! grep -q 'unrelated-handle=403' <<< "$out"; then
-        failures+=("handle released to an unrelated host")
+    if has_adapters && ! grep -Eq 'unrelated-handle=[1-5][0-9][0-9]' <<< "$out"; then
+        failures+=("opaque handle was not forwarded on unrelated TLS egress")
+    fi
+    if ! jq -e 'any(.[]; .type == "tcp" and .verdict == "pass" and .rule == "allowlist")' <<< "$trace" >/dev/null 2>&1 ||
+        ! jq -e 'all(.[]; .rule != "mitm-dispatch")' <<< "$trace" >/dev/null 2>&1; then
+        failures+=("unrelated TLS was not attested as passthrough; no-secret-rewriting proof unavailable")
     fi
     if [ ${#failures[@]} -eq 0 ]; then
-        record PASS release-refusals "handles, pasted credentials, token and API-key endpoints refused; unrelated egress works"
+        record PASS release-refusals "unrelated TLS is passthrough (opaque handles when present), with no secret rewriting; pasted credentials and credential endpoints refused"
     else
         record FAIL release-refusals "$(IFS=';'; echo "${failures[*]}")"
     fi
@@ -325,7 +348,7 @@ check_exec_pin() {
 }
 
 view_hash() {
-    enclave_in "$PROJECT" exec --name check-bg -- bash -c "find /home/agent/.enclave-auth -type f -exec sha256sum {} + | sort | sha256sum" | grep -o '^[0-9a-f]\{64\}'
+    enclave_in "$PROJECT" exec --name check-bg -- bash -c "find /home/agent/.enclave-auth -type f -exec sha256sum {} + | sort | sha256sum" | tr -d '\0\r' | grep -o '^[0-9a-f]\{64\}'
 }
 
 check_reload() {
@@ -346,15 +369,16 @@ check_reload() {
 
 check_concurrency() {
     ensure_background check-bg
-    local out
+    local out reset_code
     if ! ensure_background check-bg2; then
         record FAIL concurrency "second session for the same identity was refused"
         return
     fi
     out=$(cd "$PROJECT" && "$CLI_BIN" auth reset --tool "$TOOL" --backend "$ENGINE" --auth-scope shared --auth-name check-a 2>&1)
+    reset_code=$?
     if [ -z "$(find "$(identity_dir check-a)" -name '*grant.json' 2>/dev/null)" ]; then
         record FAIL concurrency "reset removed the grants of running sessions: $out"
-    elif ! grep -q "auth identity is in use" <<< "$out"; then
+    elif [ "$reset_code" -eq 0 ] || ! grep -Eq "auth identity (is in use|has active session reservations)" <<< "$out"; then
         record FAIL concurrency "reset kept the grants for another reason: $out"
     else
         record PASS concurrency "two sessions share the identity; reset refused while they run"
@@ -460,7 +484,7 @@ write_report() {
         echo "|------|-------|"
         echo "| Checkout | $(git -C "$REPO_ROOT" rev-parse --short HEAD)$(git -C "$REPO_ROOT" diff --quiet || echo ' (dirty)') |"
         echo "| Engine | $ENGINE $("$ENGINE" version --format '{{.Server.Version}}' 2>/dev/null || "$ENGINE" --version) |"
-        echo "| Rootless | $("$ENGINE" info --format '{{.Host.Security.Rootless}}' 2>/dev/null || echo unknown) |"
+        echo "| Rootless | $(engine_rootless) |"
         echo "| SELinux | $(getenforce 2>/dev/null || echo unavailable) |"
         echo "| OS | $(uname -srm) |"
         echo "| Tools | $TOOLS |"

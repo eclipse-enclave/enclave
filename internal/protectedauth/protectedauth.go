@@ -110,6 +110,19 @@ var tools = []Tool{
 		LocationEnv: []string{"PI_CODING_AGENT_DIR"},
 	},
 	{
+		Name:        "copilot",
+		ConfigDir:   ".copilot",
+		Adapters:    []string{AdapterCopilot},
+		Providers:   map[string]string{"github": AdapterCopilot},
+		Files:       []NativeFile{{ConfigPath: "config.json", ViewName: "config.json"}},
+		LocationEnv: []string{"COPILOT_HOME"},
+	},
+	{Name: "theia", ConfigDir: ".theia-ide"},
+	{Name: "theia-next", ConfigDir: ".theia-ide-next"},
+}
+
+var compatibilityTools = []Tool{
+	{
 		Name:        "mistral-vibe",
 		ConfigDir:   ".vibe",
 		Adapters:    []string{AdapterMistral},
@@ -117,14 +130,17 @@ var tools = []Tool{
 		Files:       []NativeFile{{ConfigPath: ".env", ViewName: "vibe.env"}},
 		LocationEnv: []string{"VIBE_HOME"},
 	},
-	{Name: "theia", ConfigDir: ".theia-ide"},
-	{Name: "theia-next", ConfigDir: ".theia-ide-next"},
 }
 
-// Lookup returns the protected-auth description of a built-in tool. Tools
-// without one cannot run protected.
+// Lookup also recognizes the canonical installed Mistral Vibe extension.
+// Runtime validation still requires its declared native layout to match.
 func Lookup(name string) (Tool, bool) {
 	for _, tool := range tools {
+		if tool.Name == name {
+			return tool, true
+		}
+	}
+	for _, tool := range compatibilityTools {
 		if tool.Name == name {
 			return tool, true
 		}
@@ -132,7 +148,7 @@ func Lookup(name string) (Tool, bool) {
 	return Tool{}, false
 }
 
-// Tools returns every tool that can run protected.
+// Tools returns the shipped tools that can run protected.
 func Tools() []Tool {
 	return slices.Clone(tools)
 }

@@ -10,9 +10,7 @@ package oauthbroker
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
 	"crypto/subtle"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
@@ -69,11 +67,11 @@ func (b *Broker) openMistral() error {
 		if !errors.Is(err, os.ErrNotExist) {
 			return ErrState
 		}
-		var value [32]byte
-		if _, err := rand.Read(value[:]); err != nil {
+		value, err := randomHandle(mistralHandleMarker)
+		if err != nil {
 			return ErrState
 		}
-		r = mistralRegistry{Schema: 1, Identity: b.config.Identity, Session: b.config.Session, Incarnation: b.config.Incarnation, Key: mistralHandleMarker + hex.EncodeToString(value[:])}
+		r = mistralRegistry{Schema: 1, Identity: b.config.Identity, Session: b.config.Session, Incarnation: b.config.Incarnation, Key: value}
 	}
 	if r.Schema != 1 || r.Identity != b.config.Identity || r.Session != b.config.Session || r.Incarnation != b.config.Incarnation || !validHandle(r.Key, mistralHandleMarker) {
 		return ErrState

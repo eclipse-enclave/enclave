@@ -1,73 +1,27 @@
 # OAuth broker verification and handoff
 
-`--protect-auth` provides an **experimental opt-in** flow for every built-in
-tool, with named shared, per-project and per-session identities on
-Docker/Podman: gateway custody of the Claude subscription, ChatGPT, GitHub
-Copilot and Mistral sign-in logins the tools support, of host-configured API
-keys, and of the built-in `github-cli` feature. Runtime activation is
-implemented; real Docker/Podman mounts and the client compatibility gates have
-**NOT RUN** in the implementation environment. Do not treat this as a
-validated production login mode. Unenrolled identities retain ordinary login
-behavior.
+`--protect-auth` is experimental on Docker/Podman. The [supported-tool table](../auth.md#experimental-protected-authentication) distinguishes the seven shipped tools from installed Mistral Vibe compatibility. Keep engine evidence separate from human real-provider login and streaming checks; passing the former does not establish the latter.
 
-## Implemented flow
+## Verification setup
 
-The gateway captures the bounded token response, commits the grant outside the
-workload and returns native-format session handles. Runtime admission, private
-gateway mounts, separate workload config view, reset/downgrade, cleanup and
-same-mode proxy reload are wired. Protected sessions retain mediation under
-restricted policy, `--allow-all-network`, and unrestricted policy files.
+Use the canonical [custody and lifecycle contract](../auth.md#experimental-protected-authentication), [protected identity layout](stores.md#protected-identity-layout), and [GitHub feature layout](stores.md#protected-github-feature) when inspecting mounts, reservations, concurrent sessions, cleanup, reset and downgrade. These sections also cover legacy/parent-mount admission, ordinary-session exclusion and local logout limits.
 
-The selected grants remain in `tools/<tool>/auth/<identity>/`, one file per
-provider adapter (`oauth-grant.json`, `openai-grant.json`, `mistral-grant.json`,
-`copilot-grant.json`). Host-only
-`locks/store-<store-key-hash>.identity.json` records protection/reservations.
-`oauth-sessions/<incarnation>/view/` is mounted at `~/.enclave-auth`; Claude
-reads it through `CLAUDE_SECURESTORAGE_CONFIG_DIR`, other tools through native
-credential files the entrypoint links to it (`internal/protectedauth`). Its
-sibling `runtime/` and the exact host identity lock are gateway-only. The tool's
-config directory persists in a protected-only `<store-key>.protected` config
-store.
-Concurrent protected sessions across Docker/Podman share grants and the identity
-lock, with independent reservations, handles and native views. Only registered,
-attested gateways may share exact grant/lock mounts. Startup leases cover the
-interval before containers exist; detached exit/reload does not release an
-owner. Unavailable engine inspection fails closed.
+Create disposable XDG roots and fresh identities. No old tool credential files
+are imported. Grants are gateway-only files under `tools/<tool>/auth/<identity>/`:
+`oauth-grant.json`, `openai-grant.json`, `copilot-grant.json`, and
+`mistral-grant.json` for the optional compatible extension. The native view is
+session-specific; the grant store, private registry and exact identity lock
+must never become workload mounts. The GitHub feature has its own grant and
+view, independent of the selected tool identity.
 
-Protected sessions run the ordinary, unpinned tool clients with their normal
-updates and project/local settings. Saved grants seed fresh handle files; for
-Claude also minimal provider-derived account/onboarding metadata, which the
-setup hook copies into a protected config store that lacks it. Agent memory retains its
-normal scope.
-No old tool auth/config file is imported. Provider env credentials, conflicting
-native auth sources, credential-helper settings and incompatible runtime modes
-are rejected. The built-in GitHub feature has its own adapter; other native-auth
-features are rejected. Non-native/env-secret features remain usable. GitLab's
-env-secret behavior is unchanged and is not a native GitLab protection claim.
+Record the actual unpinned client versions, image IDs and checkout SHA for each
+run. Verify ownership and private modes on both Docker and rootless Podman;
+SELinux relabeling needs a separate enforcing-host run. Check the ordinary
+protected-config/memory behavior as well as the credential files.
 
-GitHub's existing `features/github-cli/auth/` store is gateway-only when enrolled;
-compatible `hosts.yml`/`config.yml` are not copied into the workload. Its separate
-`oauth-sessions/<incarnation>/features/github-cli/{view,runtime}/` directories
-hold the projected `~/.config/gh` view and private handle registry respectively.
-The feature identity is shared across tools/projects and permits concurrent
-protected sessions across engines, independently of Claude's named identity. Neither startup
-nor finalization uses ordinary feature-file reconciliation. Saved protection
-blocks later ordinary feature mounts; transient state is removed only after
-verified session end.
-
-Protected-only proxy capabilities preserve the separate proxy UID while allowing
-private host-owned storage writes. Atomic writes preserve directory ownership.
-SELinux relabels and rootless mappings require real-engine verification. Protected
-mode suppresses raw DNS query logging and free-text proxy server diagnostics;
-audit events omit request paths and untrusted diagnostic fields. Never enable
-unsanitized OAuth wire recording to debug a login.
-
-Reset clears the grant but preserves protection; downgrade requires an idle,
-empty identity. Protected import/export fails. Cleanup retains protected/corrupt
-identities while removing unrelated state; session teardown removes transient
-views only after verifying the owner ended. Existing legacy parallel-session
-behavior is retained. Native logout removes the local view, not the durable
-grant or copied live handles; neither logout nor host reset proves revocation.
+Use only synthetic grants and local endpoints for automated provider exchanges.
+Real logins remain a human check. Audit paths and untrusted details are redacted;
+never enable unsanitized OAuth wire recording to debug a login.
 
 ## Current adapter fixture contract
 
@@ -90,7 +44,7 @@ or a supported-client compatibility claim**:
 | Host-configured secrets | Placeholders released by declared rules pass the broker; handles beside them are denied. Responses on any host that echo a released secret fail like a released token. `CLAUDE_CODE_OAUTH_TOKEN` is released as `Authorization: Bearer` to `api.anthropic.com` and `mcp-proxy.anthropic.com`. Placeholders keep the client-checked prefixes (`sk-ant-oat01-`, `sk-ant-api03-`, `sk-`); an `sk-ant-oat01-` placeholder outside its release hosts is refused like a handle. Claude 2.1.300 reads the token without a format check on its main path, but selects headers by these prefixes on others; confirm a setup-token session in the human gate. |
 | ChatGPT capture | `POST https://auth.openai.com:443/oauth/token` with client `app_EMoamEEZ73f0CkXaXp7hrann`, form or JSON: authorization-code and refresh grants only; the token-exchange grant is denied. Responses allow `access_token`, `refresh_token`, `id_token`, `expires_in`, `token_type`, `scope`; tokens must be JWT-shaped with a ChatGPT account claim, and a refresh may not change the account. Handles keep the JWT header and payload and replace the signature; the refresh handle is opaque. Release: `Authorization: Bearer` at `https://chatgpt.com:443`, including WebSocket handshakes. Native files: Codex `auth.json` (`auth_mode` `chatgpt`, `last_refresh`), OpenCode `auth.json` `openai`, pi `auth.json` `openai-codex`. |
 | Mistral sign-in capture | `POST https://console.mistral.ai:443/api/vibe/sign-in/<id>/exchange` with exactly `exchange_token` and `code_verifier`; the success response must be exactly `{"api_key"}`. Errors keep only a numeric `error_code`. The key is non-expiring; a failed exchange can be retried, a second sign-in over a ready grant is refused. Release: `Authorization: Bearer` at `api.mistral.ai`, `console.mistral.ai` and `chat.mistral.ai`, including WebSocket handshakes. Native file: Vibe `.env` with `MISTRAL_API_KEY`. |
-| Copilot capture | OpenCode's device login at `https://github.com:443/login/device/code` and `/login/oauth/access_token` with client `Ov23li8tweQw6odWQebz`, JSON or form, validated like the GitHub CLI adapter's; other clients' logins pass to that adapter or are refused. The non-expiring token is kept; a second login over a ready grant is refused. Release: `Authorization: Bearer` at HTTPS `githubcopilot.com` hosts only. Native file: OpenCode `auth.json` `github-copilot` with the handle as `access` and `refresh`. |
+| Copilot capture | OpenCode's device login at `https://github.com:443/login/device/code` and `/login/oauth/access_token` with client `Ov23li8tweQw6odWQebz`, JSON or form, validated like the GitHub CLI adapter's; other clients' logins pass to that adapter or are refused. The non-expiring token is kept; a second login over a ready grant is refused. Release: `Authorization: Bearer` at HTTPS `githubcopilot.com` hosts only. Native file: OpenCode `auth.json` `github-copilot` with the handle as `access` and `refresh`. Copilot CLI uses client `Ov23ctDVkRmgkPke0Mmm` with comma-separated scopes, including `write:plugin_gateway_connections`; only it gets `GET api.github.com/copilot_internal/user`, with sanitized metadata. Its `config.json` has host/login-keyed `authTokens`, `loggedInUsers` and `lastLoggedInUser`. CLI 1.0.105's local probe used the OAuth credential directly at Copilot hosts; no v2 token exchange is enabled. Browser OAuth and ancillary GitHub API routes are refused. |
 | Refresh release | Only the JSON `refresh_token` field at the exact token endpoint. Session/identity selection comes from trusted configuration, not the request. |
 
 Grant commits update token values, expiry and generation together. Session
@@ -129,8 +83,8 @@ The environment supplied `NO_COLOR=1`, which suppresses terminal-tint output in
 pre-existing tests that mock a terminal without clearing that variable. The
 test command removes that inherited suppression; it does not skip tests or
 change application behavior. None of these commands exercises real container
-mounts, SELinux, Claude login or GitHub device login. The Docker/Podman experiment and human
-compatibility gates remain **NOT RUN**.
+mounts, SELinux, Claude login or GitHub device login. Record engine evidence
+separately at its tested revision. Human compatibility gates remain **NOT RUN**.
 
 ## Claude client compatibility: static evidence
 
@@ -484,7 +438,8 @@ the commands. Record `<client> --version` inside the container for each tool.
 | `pi` | Anthropic (`-p 53692`) and `openai-codex` (port 1455) | both `agent/auth.json` entries hold handles; a reply from each provider; real refresh of each |
 | `codex` | ChatGPT browser login (port 1455) and device-code login | `auth.json` tokens carry `ENCLAVEoai` signatures; a streamed reply over `chatgpt.com`, including WebSocket; real refresh |
 | `opencode` | ChatGPT browser and headless; GitHub Copilot device login | `openai` and `github-copilot` entries hold handles; a reply from a ChatGPT and a Copilot model; ChatGPT refresh |
-| `mistral-vibe` | browser sign-in during onboarding | `~/.vibe/.env` holds an `ENCLAVEmis` handle; a reply; account lookup works; a pasted key is refused |
+| `mistral-vibe` (installed compatibility) | browser sign-in during onboarding | `~/.vibe/.env` holds an `ENCLAVEmis` handle; a reply; account lookup works; a pasted key is refused |
+| `copilot` | `copilot login --device-code` | `config.json` contains both canonical and legacy `authTokens` handle keys; clean-process reload; streamed reply; no grant access through repository, GraphQL or gist APIs |
 | `theia`, `theia-next` | none | API keys configured as Enclave secrets arrive as placeholders and work for AI features |
 
 For every tool, also confirm that pasting a provider API key into the tool is

@@ -129,6 +129,10 @@ func (b *Broker) nativeFiles(g *grant) (map[string][]byte, error) {
 				return nil, err
 			}
 		}
+	case "copilot":
+		if err := b.copilotNativeFiles(files); err != nil {
+			return nil, err
+		}
 	case "mistral-vibe":
 		env, err := b.mistralView()
 		if err != nil {

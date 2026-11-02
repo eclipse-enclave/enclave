@@ -12,8 +12,9 @@ enclave        # Subsequent runs: session reused automatically
 ### Experimental protected authentication
 
 With `--protect-auth`, the network gateway keeps the provider credentials of a
-session and the workload sees only handles and placeholders. Every built-in tool
-can run protected on Docker or Podman. The gateway captures the logins each tool
+session and the workload sees only handles and placeholders. The supported
+shipped tools are `claude`, `codex`, `copilot`, `opencode`, `pi`, `theia` and
+`theia-next`, on Docker or Podman. The gateway captures the logins each tool
 supports and gives the tool handles in its native credential files, which the
 session links to a view at `~/.enclave-auth`:
 
@@ -23,8 +24,16 @@ session links to a view at `~/.enclave-auth`:
 | `pi` | Claude subscription, ChatGPT (`openai-codex`) | `~/.pi/agent/auth.json` |
 | `codex` | ChatGPT (browser and device code) | `~/.codex/auth.json` |
 | `opencode` (1.x) | ChatGPT (browser and headless), GitHub Copilot (GitHub.com device login) | `~/.config/opencode/auth.json` |
-| `mistral-vibe` | Mistral browser sign-in | `~/.vibe/.env` |
+| `copilot` | GitHub.com device login | `~/.copilot/config.json` |
 | `theia`, `theia-next` | none; no `--auth-name` needed, each session gets a fresh identity | none |
+
+Mistral Vibe is an optional installed extension, not a shipped tool. The
+canonical `mistral-vibe` extension from
+[enclave-extensions](https://github.com/eclipse-enclave/enclave-extensions)
+retains an explicit compatibility descriptor for provider `mistral`, config
+directory `.vibe`, and native `.env` credentials. It is excluded from the
+default core engine matrix. Other extension layouts do not gain protected
+native auth merely by declaring `authFiles`.
 
 Provider API keys, for any tool, belong in [Enclave secrets](#secrets): a
 protected session receives them only as placeholders, in every network mode, and
@@ -66,8 +75,9 @@ accident.
 
 #### Provider mediation
 
-Protected runs use the same, unpinned tool clients as ordinary sessions, so
-custody does not depend on client versions. In every protected session, whatever
+Protected runs use the same, unpinned tool clients as ordinary sessions. Login
+schemas and native layouts still need compatibility checks when clients change.
+In every protected session, whatever
 the tool, the gateway mediates the Anthropic and Claude (`anthropic.com`,
 `claude.com`, `claude.ai`), OpenAI (`openai.com`, `chatgpt.com`), Mistral,
 GitHub, GitLab and Copilot domains, their subdomains, and
@@ -118,7 +128,29 @@ the gateway keeps the GitHub token and releases it only to `githubcopilot.com`
 hosts, never to GitHub's own API. Copilot through GitHub Enterprise is not
 protected.
 
-#### Mistral
+##### Copilot CLI
+
+Use `copilot login --device-code` inside a protected Copilot session. The
+adapter recognizes the CLI's OAuth client separately from OpenCode's. It keeps
+the GitHub OAuth grant in the gateway and places handles in the CLI's
+`authTokens` account map. Protected startup enables `storeTokenPlaintext` for
+these handles only; ordinary sessions retain the default setting. Protected
+settings must be a JSON object; native `//` header comments are accepted.
+An incompatible settings document is refused without replacing it.
+`config.json` is a session-specific credential view, so noncredential state
+the CLI writes there, such as trusted folders, does not persist across sessions.
+
+Copilot CLI 1.0.105 was checked against a local synthetic server: device login,
+the exact `config.json` account keys, and fresh-process credential reload were
+verified. The same OAuth credential goes to Copilot service hosts directly.
+No `/copilot_internal/v2/token` exchange is opened. On `api.github.com`, only
+`GET /copilot_internal/user` is authorized with this handle; repository APIs,
+GraphQL, gists, managed-settings and team-customization routes remain refused.
+Real-provider inference and the effect of those refused ancillary routes on
+organization accounts remain human compatibility checks. Browser OAuth is not
+captured by this adapter.
+
+#### Mistral Vibe extension
 
 Mistral Vibe's browser sign-in returns an API key, which the gateway keeps; Vibe
 stores a handle that the gateway releases to `api.mistral.ai`,
@@ -136,9 +168,9 @@ Mistral and Copilot credentials do not expire; after a revocation, reset the
 identity and log in again. Startup requires a private
 readiness attestation from the initialized brokers before launching the
 workload; an older gateway image is rejected even with `--no-rebuild`. This is
-an experimental implementation: Docker, rootless Podman, SELinux and real
-login/refresh remain **unverified**. Follow the [engine and human test
-plan](runtime/oauth-broker-verification.md).
+an experimental implementation. Record engine checks separately from human
+login/refresh checks in the [verification plan](runtime/oauth-broker-verification.md).
+SELinux and real-provider compatibility require dedicated runs.
 
 Protected mode rejects credentials without a release rule, raw credential
 variables (for example from the project `.env` or `--pass-env`), host config

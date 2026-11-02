@@ -10,9 +10,7 @@ package oauthbroker
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
 	"crypto/subtle"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
@@ -48,6 +46,7 @@ type copilotGrant struct {
 	CommittedAt time.Time `json:"committedAt"`
 	Token       string    `json:"token,omitempty"` // #nosec G117 -- gateway-private grant state; projections carry handles.
 	Scope       string    `json:"scope,omitempty"`
+	Login       string    `json:"login,omitempty"`
 }
 
 type copilotRegistry struct {
@@ -67,11 +66,11 @@ func (b *Broker) openCopilot() error {
 		if !errors.Is(err, os.ErrNotExist) {
 			return ErrState
 		}
-		var value [32]byte
-		if _, err := rand.Read(value[:]); err != nil {
+		value, err := randomHandle(copilotHandlePrefix)
+		if err != nil {
 			return ErrState
 		}
-		r = copilotRegistry{Schema: 1, Identity: b.config.Identity, Session: b.config.Session, Incarnation: b.config.Incarnation, Token: copilotHandlePrefix + hex.EncodeToString(value[:])}
+		r = copilotRegistry{Schema: 1, Identity: b.config.Identity, Session: b.config.Session, Incarnation: b.config.Incarnation, Token: value}
 	}
 	if r.Schema != 1 || r.Identity != b.config.Identity || r.Session != b.config.Session || r.Incarnation != b.config.Incarnation || !validHandle(r.Token, copilotHandlePrefix) {
 		return ErrState
@@ -97,7 +96,8 @@ func (b *Broker) readCopilotGrant() (*copilotGrant, error) {
 		return nil, ErrState
 	}
 	if g.Schema != 1 || g.Identity != b.config.Identity || (g.Status != "ready" && g.Status != "uncertain") ||
-		(g.Status == "ready" && (!githubToken(g.Token) || g.CommittedAt.Unix() <= 0 || !githubScopes(g.Scope, ","))) {
+		(g.Status == "ready" && (!githubToken(g.Token) || g.CommittedAt.Unix() <= 0 || !copilotScopes(g.Scope, ",", b.config.Tool == "copilot") ||
+			(g.Login != "" && !githubLogin(g.Login)) || (b.config.Tool == "copilot" && !githubLogin(g.Login)))) {
 		return nil, ErrState
 	}
 	if err := util.SyncDir(b.config.StoreDir); err != nil {
@@ -122,7 +122,7 @@ func copilotHost(host string) bool {
 func (a copilotAdapter) roundTrip(req *http.Request, transport, exchange http.RoundTripper) (*http.Response, bool, error) {
 	b := a.b
 	if exactOrigin(req, githubOAuthHost) && (exactPath(req, githubDevicePath) || exactPath(req, githubTokenPath)) {
-		form, ok, err := copilotForm(req)
+		form, ok, err := copilotForm(req, b.copilotLoginClientID())
 		if !ok {
 			// Another client's login, such as the GitHub CLI's.
 			return nil, false, nil
@@ -133,12 +133,26 @@ func (a copilotAdapter) roundTrip(req *http.Request, transport, exchange http.Ro
 		response, err := b.copilotExchange(req, form, exchange)
 		return response, true, err
 	}
+	identityRequest := b.config.Tool == "copilot" && exactOrigin(req, githubAPIHost) && exactPath(req, copilotUserPath) && req.Method == http.MethodGet && req.ContentLength == 0 && (req.Body == nil || req.Body == http.NoBody) && len(req.Trailer) == 0
+	if released := releasedSecrets(req.Context()); identityRequest && len(released) != 0 {
+		stripped := withoutSecrets(req, released)
+		provider := requestProvider(req)
+		if containsHandle(stripped) || rawCredential(stripped) || provider.queryCarries(stripped) {
+			return nil, true, ErrDenied
+		}
+		response, err := mediate(req, transport, released...)
+		if err != nil {
+			return nil, true, err
+		}
+		response, err = projectCopilotUserResponse(response)
+		return response, true, err
+	}
 	authorization := req.Header.Values("Authorization")
 	if len(authorization) != 1 || subtle.ConstantTimeCompare([]byte(authorization[0]), []byte("Bearer "+b.copilot.Token)) != 1 {
 		return nil, false, nil
 	}
 	host := req.URL.Hostname()
-	if req.URL.Scheme != "https" || (req.URL.Port() != "" && req.URL.Port() != "443") || !copilotHost(host) || (req.Host != "" && protectedHost(req.Host) != protectedHost(req.URL.Host) && protectedHost(req.Host) != protectedHost(host)) ||
+	if req.URL.Scheme != "https" || (req.URL.Port() != "" && req.URL.Port() != "443") || (!copilotHost(host) && !identityRequest) || (req.Host != "" && protectedHost(req.Host) != protectedHost(req.URL.Host) && protectedHost(req.Host) != protectedHost(host)) ||
 		(req.TLS != nil && req.TLS.ServerName != "" && protectedHost(req.TLS.ServerName) != protectedHost(host)) {
 		return nil, true, ErrDenied
 	}
@@ -162,13 +176,21 @@ func (a copilotAdapter) roundTrip(req *http.Request, transport, exchange http.Ro
 		return nil, true, err
 	}
 	outgoing.Header.Set("Authorization", "Bearer "+token)
+	if identityRequest {
+		response, err := releaseApprovedRequest(req, outgoing, "Authorization", transport, token)
+		if err != nil {
+			return nil, true, err
+		}
+		response, err = projectCopilotUserResponse(response)
+		return response, true, err
+	}
 	response, err := release(req, outgoing, "Authorization", transport, token)
 	return response, true, err
 }
 
 // copilotForm parses a device login request. ok reports whether it belongs to
 // the Copilot client; err rejects one that does but is malformed.
-func copilotForm(req *http.Request) (url.Values, bool, error) {
+func copilotForm(req *http.Request, clientID string) (url.Values, bool, error) {
 	if req.Method != http.MethodPost || req.Body == nil || req.ContentLength > maxDocument || len(req.Trailer) != 0 || req.Header.Get("Content-Encoding") != "" || len(req.Header.Values("Content-Type")) != 1 {
 		return nil, false, nil
 	}
@@ -200,7 +222,7 @@ func copilotForm(req *http.Request) (url.Values, bool, error) {
 	default:
 		return nil, false, nil
 	}
-	if form.Get("client_id") != copilotClientID {
+	if form.Get("client_id") != clientID {
 		return nil, false, nil
 	}
 	for _, values := range form {
@@ -212,7 +234,11 @@ func copilotForm(req *http.Request) (url.Values, bool, error) {
 		return nil, true, ErrDenied
 	}
 	if req.URL.Path == githubDevicePath {
-		if len(form) != 2 || !form.Has("scope") || !githubScopes(form.Get("scope"), " ") {
+		separator := " "
+		if clientID == copilotCLIClientID {
+			separator = ","
+		}
+		if len(form) != 2 || !form.Has("scope") || !copilotScopes(form.Get("scope"), separator, clientID == copilotCLIClientID) {
 			return nil, true, ErrDenied
 		}
 	} else if len(form) != 3 || form.Get("grant_type") != githubDeviceGrant || !githubDeviceCode(form.Get("device_code")) {
@@ -266,12 +292,19 @@ func (b *Broker) copilotExchange(req *http.Request, form url.Values, transport h
 			Scope  string `json:"scope"`
 		}
 		if response.StatusCode != http.StatusOK || len(fields) != 3 || strictJSON(body, &token) != nil || exactKeys(body, "access_token", "token_type", "scope") != nil ||
-			!githubToken(token.Access) || token.Type != "bearer" || !githubScopes(token.Scope, ",") || strings.Contains(token.Scope, token.Access) {
+			!githubToken(token.Access) || token.Type != "bearer" || !copilotScopes(token.Scope, ",", b.config.Tool == "copilot") || strings.Contains(token.Scope, token.Access) {
 			// The device code is consumed either way; a new login can follow.
 			_ = b.writeCopilotGrant(&copilotGrant{Schema: 1, Identity: b.config.Identity, Status: "uncertain"})
 			return ErrResponse
 		}
-		if err := b.writeCopilotGrant(&copilotGrant{Schema: 1, Identity: b.config.Identity, Status: "ready", CommittedAt: b.now().UTC(), Token: token.Access, Scope: token.Scope}); err != nil {
+		var login string
+		if b.config.Tool == "copilot" {
+			login, err = copilotCurrentUser(ctx, token.Access, transport)
+			if err != nil {
+				return err
+			}
+		}
+		if err := b.writeCopilotGrant(&copilotGrant{Schema: 1, Identity: b.config.Identity, Status: "ready", CommittedAt: b.now().UTC(), Token: token.Access, Scope: token.Scope, Login: login}); err != nil {
 			return err
 		}
 		projected, err = projectedResponse(http.StatusOK, map[string]string{"access_token": b.copilot.Token, "token_type": "bearer", "scope": token.Scope})

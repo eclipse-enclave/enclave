@@ -134,17 +134,18 @@ not appear in `network.log`, even with `--network-log=requests` or `full`. See
 
 ### Experimental gateway-owned credentials
 
-`--protect-auth` gives every built-in tool captured-credential custody on
+`--protect-auth` gives the seven [shipped tools](../auth.md#experimental-protected-authentication) captured-credential custody on
 Docker/Podman, with named shared, per-project and per-session identities. The
-gateway captures the Claude subscription, ChatGPT, GitHub Copilot and Mistral
-sign-in logins the tools support, and holds host-configured API keys. The
+gateway captures the Claude subscription, ChatGPT and GitHub Copilot logins,
+plus Mistral sign-in for the canonical installed extension. It
+also holds host-configured API keys. The
 workload's native credential files hold session-bound handles and its
 environment holds placeholders; the gateway owns the durable grants and
 substitutes them only at their declared hosts and headers. The built-in
 `github-cli` feature also keeps its real native credential files gateway-only
 and gives the workload a separate handle view. Unprotected sessions are
-unchanged. Tool clients are not pinned. Container and real-login verification
-are still pending; see the [test plan](../runtime/oauth-broker-verification.md).
+unchanged. Tool clients are not pinned. Record engine results and human
+real-login checks separately; see the [test plan](../runtime/oauth-broker-verification.md).
 
 The gateway checks every response to a request that carried a released
 credential for that exact credential, in headers, trailers, the body and

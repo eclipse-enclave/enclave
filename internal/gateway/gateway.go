@@ -446,7 +446,7 @@ type StaleResult struct {
 // other sessions wait on, then start with ImagePrepared.
 func PrepareImage(ctx context.Context, cfg StartConfig) error {
 	if cfg.NoRebuild {
-		logx.Warnf("Skipping gateway image build due to --no-rebuild.")
+		logx.Warnf("Skipping gateway image build (--no-rebuild or %s=1).", model.EnvNoRebuild)
 		return ensureExistingGatewayImageWith(cfg.Profile, docker.ImageExists)
 	}
 	needs, _, err := needsRebuild(cfg.Paths, cfg.Profile, cfg.AllowlistPath)
@@ -640,7 +640,7 @@ func Start(ctx context.Context, cfg StartConfig) (StartResult, error) {
 			if err := oauthbroker.VerifyReadiness(expected); err != nil {
 				err = fmt.Errorf("gateway did not attest the requested protected OAuth adapters: %w", err)
 				if cfg.NoRebuild {
-					return fmt.Errorf("%w; rebuild the gateway without --no-rebuild if its adapters are outdated", err)
+					return fmt.Errorf("%w; rebuild the gateway without --no-rebuild or %s if its adapters are outdated", err, model.EnvNoRebuild)
 				}
 				return err
 			}

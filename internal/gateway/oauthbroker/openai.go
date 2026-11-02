@@ -10,10 +10,8 @@ package oauthbroker
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
 	"crypto/subtle"
 	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
@@ -80,22 +78,6 @@ type openaiRegistry struct {
 
 type openaiAdapter struct{ b *Broker }
 
-func openaiHandle(kind string) (string, error) {
-	var value [32]byte
-	if _, err := rand.Read(value[:]); err != nil {
-		return "", err
-	}
-	return openaiHandleMarker + kind + hex.EncodeToString(value[:]), nil
-}
-
-func validOpenAIHandle(value, kind string) bool {
-	if !strings.HasPrefix(value, openaiHandleMarker+kind) {
-		return false
-	}
-	decoded, err := hex.DecodeString(strings.TrimPrefix(value, openaiHandleMarker+kind))
-	return err == nil && len(decoded) == 32
-}
-
 func (b *Broker) openOpenAI() error {
 	path := filepath.Join(b.config.RuntimeDir, openaiRegistryFile)
 	var r openaiRegistry
@@ -108,7 +90,7 @@ func (b *Broker) openOpenAI() error {
 			kind   string
 			target *string
 		}{{"A", &r.Access}, {"I", &r.ID}, {"R", &r.Refresh}} {
-			value, err := openaiHandle(handle.kind)
+			value, err := randomHandle(openaiHandleMarker + handle.kind)
 			if err != nil {
 				return ErrState
 			}
@@ -116,7 +98,7 @@ func (b *Broker) openOpenAI() error {
 		}
 	}
 	if r.Schema != 1 || r.Identity != b.config.Identity || r.Session != b.config.Session || r.Incarnation != b.config.Incarnation ||
-		!validOpenAIHandle(r.Access, "A") || !validOpenAIHandle(r.ID, "I") || !validOpenAIHandle(r.Refresh, "R") {
+		!validHandle(r.Access, openaiHandleMarker+"A") || !validHandle(r.ID, openaiHandleMarker+"I") || !validHandle(r.Refresh, openaiHandleMarker+"R") {
 		return ErrState
 	}
 	// Registration precedes any grant commit, as for the Claude adapter.

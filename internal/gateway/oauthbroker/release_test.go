@@ -70,6 +70,23 @@ func releaseRequest(t *testing.T, url, handle string, headers map[string]string,
 	return req.WithContext(WithReleasedSecrets(req.Context(), released))
 }
 
+func assertBearerRelease(t *testing.T, b *Broker, req *http.Request, real string, allowed bool) {
+	t.Helper()
+	var seen string
+	response, err := fixtureRoundTrip(b, req, fixtureTransport(func(out *http.Request) (*http.Response, error) {
+		seen = out.Header.Get("Authorization")
+		return rawFixtureResponse([]byte(`{}`)), nil
+	}))
+	if allowed {
+		if err != nil || seen != "Bearer "+real {
+			t.Fatalf("%s: release = %v, upstream saw %q", req.URL, err, seen)
+		}
+		_ = response.Body.Close()
+	} else if !errors.Is(err, ErrDenied) || seen != "" {
+		t.Fatalf("%s: handle escaped: %v, %q", req.URL, err, seen)
+	}
+}
+
 func TestEveryReleaseIsRefusedAtCredentialEndpoints(t *testing.T) {
 	for name, f := range releaseFixtures(t) {
 		t.Run(name, func(t *testing.T) {

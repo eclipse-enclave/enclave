@@ -99,19 +99,7 @@ func TestCopilotDeviceLoginCapturesToken(t *testing.T) {
 			t.Fatal(err)
 		}
 		req.Header.Set("Authorization", "Bearer "+b.copilot.Token)
-		var seen string
-		response, err := fixtureRoundTrip(b, req, fixtureTransport(func(out *http.Request) (*http.Response, error) {
-			seen = out.Header.Get("Authorization")
-			return rawFixtureResponse([]byte(`{}`)), nil
-		}))
-		if tc.released {
-			if err != nil || seen != "Bearer "+fixtureCopilotToken {
-				t.Fatalf("%s: release = %v, upstream saw %q", tc.url, err, seen)
-			}
-			_ = response.Body.Close()
-		} else if !errors.Is(err, ErrDenied) || seen != "" {
-			t.Fatalf("%s: handle escaped: %v, %q", tc.url, err, seen)
-		}
+		assertBearerRelease(t, b, req, fixtureCopilotToken, tc.released)
 	}
 	if _, err := copilotPoll(t, b, func() *http.Response {
 		return fixtureResponse(map[string]any{"access_token": "gho_another0123456789", "token_type": "bearer", "scope": "read:user"})

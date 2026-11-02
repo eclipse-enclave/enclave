@@ -123,7 +123,7 @@ prepare_oauth_broker() {
             return 0
             ;;
         # Mirrors internal/protectedauth; a Go test keeps the two in step.
-        claude|codex|opencode|pi|mistral-vibe|theia|theia-next) ;;
+        claude|codex|copilot|opencode|pi|mistral-vibe|theia|theia-next) ;;
         *) log "Unsupported protected OAuth adapter"; return 1 ;;
     esac
     if [ "$PROXY_ENABLED" != "true" ]; then

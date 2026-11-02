@@ -48,6 +48,7 @@ func TestProtectedAuthRejectsUnsupportedSources(t *testing.T) {
 		"custom image":            func(r *Runtime) { r.build.BaseImage = "custom" },
 		"native config":           func(r *Runtime) { r.run.HostConfig = model.HostConfigPassthrough },
 		"OAuth env injection":     func(r *Runtime) { r.auth.PassEnv = []string{"CLAUDE_CODE_OAUTH_TOKEN"} },
+		"Copilot API token env":   func(r *Runtime) { r.auth.PassEnv = []string{"GITHUB_COPILOT_API_TOKEN"} },
 		"settings override":       func(r *Runtime) { r.run.CmdArgs = []string{"--settings={}"} },
 		"settings precedence":     func(r *Runtime) { r.run.CmdArgs = []string{"--setting-sources", "project"} },
 		"unknown tool":            func(r *Runtime) { r.profile.Name = "unknown" },
@@ -383,10 +384,19 @@ func TestProtectedIdentityFollowsScope(t *testing.T) {
 
 func TestProtectedProvidersNameSpecProviders(t *testing.T) {
 	paths := model.Paths{ToolsDir: filepath.Join("..", "..", "extensions", "tools")}
+	installed, err := config.ListProfiles(paths)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var protected []string
 	for _, tool := range protectedauth.Tools() {
-		if _, err := os.Stat(filepath.Join(paths.ToolsDir, tool.Name, config.SpecFilename)); os.IsNotExist(err) {
-			continue
-		}
+		protected = append(protected, tool.Name)
+	}
+	slices.Sort(protected)
+	if !slices.Equal(installed, protected) {
+		t.Fatalf("shipped tools %v differ from protected tools %v", installed, protected)
+	}
+	for _, tool := range protectedauth.Tools() {
 		profile, err := config.LoadProfile(paths, tool.Name)
 		if err != nil {
 			t.Fatalf("load %s profile: %v", tool.Name, err)
@@ -406,6 +416,36 @@ func TestProtectedProvidersNameSpecProviders(t *testing.T) {
 				t.Errorf("%s adapter %s has no grant file or provider", tool.Name, adapter)
 			}
 		}
+	}
+}
+
+func TestProtectedMistralCompatibilityUsesInstalledProfile(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "mistral-vibe", config.SpecFilename), `schemaVersion: "1"
+kind: sandbox
+name: mistral-vibe
+sandbox:
+  configDir: .vibe
+  entrypoint: {run: [vibe]}
+providers:
+  - name: mistral
+    authFiles: [.env]
+`)
+	profile, err := config.LoadProfile(model.Paths{UserToolsDir: root}, "mistral-vibe")
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime := protectedTestRuntime()
+	runtime.profile = profile
+	if err := runtime.validateProtectedAuth(); err != nil {
+		t.Fatalf("canonical installed extension refused: %v", err)
+	}
+	if slices.ContainsFunc(protectedauth.Tools(), func(tool protectedauth.Tool) bool { return tool.Name == profile.Name }) {
+		t.Fatal("optional extension was advertised as a shipped tool")
+	}
+	runtime.profile.ConfigDir = ".incompatible"
+	if err := runtime.validateProtectedAuth(); err == nil {
+		t.Fatal("incompatible installed extension layout accepted")
 	}
 }
 

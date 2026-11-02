@@ -627,6 +627,14 @@ Credentials without a `serviceAuth` entry are injected as normal env vars.
 Placeholder generation errors abort startup rather than falling back to the
 real credential.
 
+#### Protected native credentials
+
+Native `authFiles` declarations do not select arbitrary protected-auth adapters.
+Core uses audited descriptors for the shipped tools, plus explicit compatibility
+with the canonical installed `mistral-vibe` layout (`.vibe`, provider `mistral`,
+native `.env`). Unsupported layouts are refused. Extension-declared native
+adapter selection remains a follow-up; see [protected authentication](../auth.md#experimental-protected-authentication).
+
 #### Client-side credential format checks
 
 Tools and features may declare `credentials.sources.<id>.placeholder` when a

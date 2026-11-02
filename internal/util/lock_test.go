@@ -69,3 +69,23 @@ func TestTryAcquireFileLockSkipsHeldLock(t *testing.T) {
 	}
 	releaseAgain()
 }
+
+func TestTryAcquireFileLockDoesNotWaitOrSteal(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "owner.lock")
+	first, err := AcquireFileLock(path, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(first)
+	second, acquired, err := TryAcquireFileLock(path)
+	if err != nil || acquired || second != nil {
+		t.Fatalf("contended lock = %v, acquired=%v", err, acquired)
+	}
+	first()
+	second, acquired, err = TryAcquireFileLock(path)
+	if err != nil || !acquired || second == nil {
+		t.Fatalf("ended owner lock = %v, acquired=%v", err, acquired)
+	}
+	second()
+	second()
+}

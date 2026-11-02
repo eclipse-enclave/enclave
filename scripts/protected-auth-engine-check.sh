@@ -22,7 +22,8 @@
 #          [--tool <name>|all] [--report FILE] [check...]
 set -u
 
-REPO_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+ENGINE_CHECK_SCRIPT=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")
+REPO_ROOT=$(cd "$(dirname "$ENGINE_CHECK_SCRIPT")/.." && pwd)
 CLI_BIN=${CLI_BIN:-$REPO_ROOT/bin/enclave}
 # Every synthetic secret contains one of these, so a scan finds any leak.
 SYNTHETIC_MARKERS=(synthetic-engine-check syntheticenginecheck)
@@ -136,6 +137,9 @@ synthetic_grants() (
 RESULTS=()
 FAILED=0
 HOLDER_PIDS=()
+HOLDER_GROUP_FILES=()
+HOLDER_WAIT_SECONDS=10
+HOLDER_STOP_FAILED=0
 
 record() {
     local status=$1 name="$TOOL/$2" detail=$3
@@ -192,11 +196,22 @@ ensure_grant() {
 }
 
 start_background() {
-    local ready=".engine-check-$TOOL-$1.ready" pid
+    local ready=".engine-check-$TOOL-$1.ready" pid group_file
+    group_file=$(mktemp "$ROOT/$TOOL-$1.pgid.XXXXXX") || return 1
     rm -f "$PROJECT/$ready"
-    protected_shell "$PROJECT" ": > \"\$PROJECT_DIR/$ready\" && exec sleep infinity" --name "$1" --auth-scope shared --auth-name check-a > "$ROOT/$TOOL-$1.log" 2>&1 &
+    # The group id is written by our host child, outside the workload mount.
+    # shellcheck disable=SC2016 # Expanded by the isolated holder shell.
+    setsid --fork --wait bash -c '
+        set -e
+        printf "%s\n" "$BASHPID" > "$1"
+        source "$2"
+        TOOL=$3 ENGINE=$4 CLI_BIN=$5
+        shift 5
+        protected_shell "$@"
+    ' engine-holder "$group_file" "$ENGINE_CHECK_SCRIPT" "$TOOL" "$ENGINE" "$CLI_BIN" "$PROJECT" ": > \"\$PROJECT_DIR/$ready\" && exec sleep infinity" --name "$1" --auth-scope shared --auth-name check-a > "$ROOT/$TOOL-$1.log" 2>&1 &
     pid=$!
     HOLDER_PIDS+=("$pid")
+    HOLDER_GROUP_FILES+=("$group_file")
     # The command runs only after the real entrypoint has finished its setup.
     while [ ! -f "$PROJECT/$ready" ]; do
         if ! kill -0 "$pid" 2>/dev/null; then
@@ -209,9 +224,31 @@ start_background() {
 }
 
 wait_holders() {
-    local pid
-    for pid in "${HOLDER_PIDS[@]}"; do wait "$pid" || true; done
+    local index pid group deadline failed=0
+    for index in "${!HOLDER_PIDS[@]}"; do
+        pid=${HOLDER_PIDS[$index]}
+        deadline=$((SECONDS + HOLDER_WAIT_SECONDS))
+        while kill -0 "$pid" 2>/dev/null; do
+            if [ "$SECONDS" -ge "$deadline" ]; then
+                echo "Protected shell holder did not exit within ${HOLDER_WAIT_SECONDS}s; terminating its process group" >&2
+                group=$(cat "${HOLDER_GROUP_FILES[$index]}" 2>/dev/null) || group=""
+                if [[ $group =~ ^[0-9]+$ ]] && [ "$group" -gt 1 ]; then
+                    kill -TERM -- "-$group" 2>/dev/null || true
+                    sleep 0.2
+                    kill -KILL -- "-$group" 2>/dev/null || true
+                fi
+                kill -KILL "$pid" 2>/dev/null || true
+                HOLDER_STOP_FAILED=1
+                failed=1
+                break
+            fi
+            sleep 0.1
+        done
+        wait "$pid" 2>/dev/null || true
+    done
     HOLDER_PIDS=()
+    HOLDER_GROUP_FILES=()
+    return "$failed"
 }
 
 ensure_background() {
@@ -442,7 +479,10 @@ check_concurrency() {
 check_stop_cleanup() {
     "$CLI_BIN" stop --backend "$ENGINE" "$(container_name check-bg)" >/dev/null 2>&1
     "$CLI_BIN" stop --backend "$ENGINE" "$(container_name check-bg2)" >/dev/null 2>&1
-    wait_holders
+    if ! wait_holders; then
+        record FAIL stop-cleanup "protected shell holder timed out; disposable state retained for inspection"
+        return
+    fi
     sleep 3
     # The next admission sweeps state a stopped gateway still held.
     protected_shell "$PROJECT" true --auth-scope shared --auth-name check-a >/dev/null
@@ -528,8 +568,21 @@ cleanup() {
             "$CLI_BIN" stop --backend "$ENGINE" "enclave-$tool-$PROJECT_HASH-$session" >/dev/null 2>&1 || true
         done
     done
-    wait_holders
+    if ! wait_holders; then
+        record FAIL holder-cleanup "protected shell holder timed out"
+        write_report
+    fi
+    if [ "$HOLDER_STOP_FAILED" = 1 ]; then
+        echo "Left $ROOT behind after failed holder teardown" >&2
+        return 1
+    fi
     rm -rf "$ROOT" 2>/dev/null || echo "Left $ROOT behind; remove it after checking its ownership" >&2
+}
+
+cleanup_on_exit() {
+    local cleanup_status=$?
+    cleanup || cleanup_status=1
+    exit "$cleanup_status"
 }
 
 write_report() {
@@ -577,6 +630,7 @@ main() {
     [ -x "$CLI_BIN" ] || { echo "enclave binary not found at $CLI_BIN (run make build)" >&2; exit 2; }
     command -v "$ENGINE" >/dev/null 2>&1 || { echo "$ENGINE not found" >&2; exit 2; }
     command -v script >/dev/null 2>&1 || { echo "script (util-linux) is required" >&2; exit 2; }
+    command -v setsid >/dev/null 2>&1 || { echo "setsid (util-linux) is required" >&2; exit 2; }
     [ ${#checks[@]} -gt 0 ] || read -r -a checks <<< "$ALL_CHECKS"
     for check in "${checks[@]}"; do
         [[ " $ALL_CHECKS " == *" $check "* ]] || { echo "unknown check $check" >&2; exit 2; }
@@ -596,7 +650,7 @@ main() {
     echo check > "$PROJECT/README.md"
     PROJECT_HASH=$(cd "$PROJECT" && "$CLI_BIN" --tool claude info 2>/dev/null | awk '/Project Hash:/ {print $3}')
     [ -n "$PROJECT_HASH" ] || { echo "could not resolve the project hash" >&2; exit 2; }
-    trap cleanup EXIT
+    trap cleanup_on_exit EXIT
 
     for TOOL in $TOOLS; do
         for check in "${checks[@]}"; do

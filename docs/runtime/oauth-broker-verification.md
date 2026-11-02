@@ -246,7 +246,9 @@ replace the remaining rows or the human gate.
 
 Lifecycle checks hold protected idle shells as harness-owned background
 processes. A ready marker confirms entrypoint setup finished, and cleanup
-stops the sessions and reaps those processes. The shells make no provider
+stops the sessions and reaps those processes. Holder exit is bounded to ten
+seconds per process; a timeout records failure, terminates the harness-owned
+process group and retains the disposable roots for inspection. The shells make no provider
 requests: real clients can log out and overwrite their native view after a
 synthetic token receives a 401. Reload requires each expected handle marker
 before comparing labeled view hashes; unreadable or missing handles fail with

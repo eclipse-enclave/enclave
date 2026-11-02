@@ -124,19 +124,27 @@ fi
 }
 
 func TestEngineCheckLifecycleHolderWaitsForSetupAndReaps(t *testing.T) {
+	for _, tool := range []string{"script", "setsid"} {
+		if _, err := exec.LookPath(tool); err != nil {
+			t.Skip("lifecycle holders require util-linux")
+		}
+	}
 	for _, fails := range []bool{false, true} {
 		t.Run(strconv.FormatBool(fails), func(t *testing.T) {
-			t.Setenv("TEST_ENGINE_DIR", t.TempDir())
+			dir := t.TempDir()
+			t.Setenv("TEST_ENGINE_DIR", dir)
 			t.Setenv("TEST_ENGINE_FAILS", strconv.FormatBool(fails))
+			if err := os.WriteFile(filepath.Join(dir, "enclave"), []byte(`#!/bin/bash
+[[ " $* " == *" shell "* ]] || exit 2
+[ "$TEST_ENGINE_FAILS" = false ] || exit 17
+sleep 0.05
+echo ready > "$TEST_ENGINE_DIR/.engine-check-claude-check-bg.ready"
+sleep 0.05
+`), 0o700); err != nil {
+				t.Fatal(err)
+			}
 			got := engineCheck(t, "eval", `
-ROOT=$TEST_ENGINE_DIR PROJECT=$TEST_ENGINE_DIR TOOL=claude
-enclave_in() {
-    [ "$2" = shell ] || return 2
-    [ "$TEST_ENGINE_FAILS" = false ] || return 17
-    sleep 0.05
-    echo ready > "$PROJECT/.engine-check-claude-check-bg.ready"
-    sleep 0.05
-}
+ROOT=$TEST_ENGINE_DIR PROJECT=$TEST_ENGINE_DIR TOOL=claude ENGINE=docker CLI_BIN=$TEST_ENGINE_DIR/enclave
 if start_background check-bg; then
     cat "$PROJECT/.engine-check-claude-check-bg.ready"
 else
@@ -153,6 +161,50 @@ wait_holders
 				t.Fatalf("holder = %q, want %q", got, want)
 			}
 		})
+	}
+}
+
+func TestEngineCheckHolderTimeoutTerminatesItsProcessGroup(t *testing.T) {
+	if _, err := exec.LookPath("setsid"); err != nil {
+		t.Skip("holder groups require util-linux")
+	}
+	t.Setenv("TEST_ENGINE_DIR", t.TempDir())
+	got := engineCheck(t, "eval", `
+ROOT=$TEST_ENGINE_DIR
+setsid --fork --wait bash -c '
+    trap "" TERM
+    printf "%s\n" "$BASHPID" > "$1/group"
+    sleep 2 &
+    printf "%s\n" "$!" > "$1/child"
+    wait
+' holder-timeout "$ROOT" &
+HOLDER_PIDS=("$!")
+HOLDER_GROUP_FILES=("$ROOT/group")
+while [ ! -f "$ROOT/child" ]; do sleep 0.01; done
+HOLDER_WAIT_SECONDS=0
+if wait_holders 2> "$ROOT/errors"; then echo unexpected-success; else echo timeout; fi
+[ "$HOLDER_STOP_FAILED" = 1 ] && echo failed
+state=$(ps -o stat= -p "$(cat "$ROOT/child")" 2>/dev/null) || state=""
+case "$state" in ""|Z*) echo descendants-ended ;; *) echo still-running ;; esac
+`)
+	if got != "timeout\nfailed\ndescendants-ended" {
+		t.Fatalf("bounded group teardown = %q", got)
+	}
+}
+
+func TestEngineCheckHolderFailureIsReportedAndStateRetained(t *testing.T) {
+	t.Setenv("TEST_ENGINE_DIR", t.TempDir())
+	got := engineCheck(t, "eval", `
+ROOT=$TEST_ENGINE_DIR PROJECT=$TEST_ENGINE_DIR TOOL=claude TOOLS=claude PROJECT_HASH=probe ENGINE=docker CLI_BIN=false
+record() { printf '%s:%s\n' "$1" "$2"; }
+write_report() { echo report-written; }
+wait_holders() { HOLDER_STOP_FAILED=1; return 1; }
+check_stop_cleanup
+if cleanup 2> "$ROOT/errors"; then echo unexpected-success; else echo cleanup-failed; fi
+[ -d "$ROOT" ] && echo state-retained
+`)
+	if got != "FAIL:stop-cleanup\nFAIL:holder-cleanup\nreport-written\ncleanup-failed\nstate-retained" {
+		t.Fatalf("failed holder cleanup = %q", got)
 	}
 }
 

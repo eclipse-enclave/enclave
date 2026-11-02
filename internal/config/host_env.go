@@ -23,8 +23,8 @@ func mergeStringMap(base, override map[string]string) map[string]string {
 }
 
 // validateHostEnv drops host_env entries (top level and per tool override)
-// that are not environment variable names or that change how the session's
-// engine client reaches its engine.
+// that are not environment variable names, that change how the session's
+// engine client reaches its engine, or that podman copies into the container.
 func validateHostEnv(path string, defaults *Defaults) []Warning {
 	var warnings []Warning
 	drop := func(env map[string]string, tool string, label string) {
@@ -35,6 +35,8 @@ func validateHostEnv(path string, defaults *Defaults) []Warning {
 				reason = "not a valid environment variable name"
 			case hostEnvChangesEngine(key):
 				reason = "it would change which engine, engine configuration, or helper binaries the session's engine client uses"
+			case isProxyEnvKey(key):
+				reason = "podman forwards proxy variables from its client into the container"
 			default:
 				continue
 			}
@@ -60,6 +62,16 @@ func hostEnvChangesEngine(key string) bool {
 		if strings.HasPrefix(key, prefix) {
 			return true
 		}
+	}
+	return false
+}
+
+// isProxyEnvKey matches the variables podman's default http_proxy=true copies
+// from the client environment into the container.
+func isProxyEnvKey(key string) bool {
+	switch strings.ToUpper(key) {
+	case "HTTP_PROXY", "HTTPS_PROXY", "FTP_PROXY", "NO_PROXY":
+		return true
 	}
 	return false
 }

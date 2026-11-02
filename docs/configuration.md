@@ -148,9 +148,11 @@ killed with `SIGKILL` the reset never runs; clear a leftover tint with
 
 `host_env` sets environment variables on the host process that runs an agent
 session: the `docker` client (or qemu) of `run`, `continue`, and `resume`, and
-of `attach`. Nothing else gets them: not the container (use `pass_env` for
-that), not the engine calls that set up and tear down the session, and not
-`shell` or `exec`, whose terminals run a shell rather than the agent. Sessions
+of `attach`. Processes that client spawns inherit them, such as podman's
+`conmon` and its container cleanup command. Nothing else gets them: not the
+container (use `pass_env` for that), not the engine calls Enclave makes
+separately to set up and tear down the session, and not `shell` or `exec`,
+whose terminals run a shell rather than the agent. Sessions
 do not record whether they run a shell, so `attach` to a foreground `shell`
 session by name still applies it.
 
@@ -160,7 +162,9 @@ the keys for the session it enters, like `session_tint`. Keys that are not
 environment variable names are reported when the config file is read and
 ignored, and so are keys that change which engine, engine configuration, or
 helper binaries the client uses: `HOME`, `PATH`, `DOCKER_*`, `CONTAINER_*`,
-`CONTAINERS_*`, and `XDG_*`. This list is best effort. `enclave config` prints
+`CONTAINERS_*`, and `XDG_*`. This list is best effort. The proxy variables
+`HTTP_PROXY`, `HTTPS_PROXY`, `FTP_PROXY`, and `NO_PROXY` (any case) are ignored
+too, because podman copies them from its client into the container. `enclave config` prints
 the values, so do not use it for secrets.
 
 This lets tools that inspect the terminal's foreground processes recognize a

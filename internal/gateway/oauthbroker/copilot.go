@@ -133,8 +133,14 @@ func (a copilotAdapter) roundTrip(req *http.Request, transport, exchange http.Ro
 		response, err := b.copilotExchange(req, form, exchange)
 		return response, true, err
 	}
-	identityRequest := b.config.Tool == "copilot" && exactOrigin(req, githubAPIHost) && exactPath(req, copilotUserPath) && req.Method == http.MethodGet && req.ContentLength == 0 && (req.Body == nil || req.Body == http.NoBody) && len(req.Trailer) == 0
-	if released := releasedSecrets(req.Context()); identityRequest && len(released) != 0 {
+	authorization := req.Header.Values("Authorization")
+	hasHandle := len(authorization) == 1 && subtle.ConstantTimeCompare([]byte(authorization[0]), []byte("Bearer "+b.copilot.Token)) == 1
+	identityRequest := b.config.Tool == "copilot" && exactOrigin(req, githubAPIHost) && exactPath(req, copilotUserPath) && req.Method == http.MethodGet && req.ContentLength == 0 && len(req.Trailer) == 0
+	released := releasedSecrets(req.Context())
+	if identityRequest && (hasHandle || len(released) != 0) && !copilotEmptyBody(req) {
+		return nil, true, ErrDenied
+	}
+	if identityRequest && len(released) != 0 {
 		stripped := withoutSecrets(req, released)
 		provider := requestProvider(req)
 		if containsHandle(stripped) || rawCredential(stripped) || provider.queryCarries(stripped) {
@@ -147,8 +153,7 @@ func (a copilotAdapter) roundTrip(req *http.Request, transport, exchange http.Ro
 		response, err = projectCopilotUserResponse(response)
 		return response, true, err
 	}
-	authorization := req.Header.Values("Authorization")
-	if len(authorization) != 1 || subtle.ConstantTimeCompare([]byte(authorization[0]), []byte("Bearer "+b.copilot.Token)) != 1 {
+	if !hasHandle {
 		return nil, false, nil
 	}
 	host := req.URL.Hostname()

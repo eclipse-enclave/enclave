@@ -10,12 +10,29 @@ package oauthbroker
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"strings"
 )
 
 const copilotCLIClientID = "Ov23ctDVkRmgkPke0Mmm"
 const copilotUserPath = "/copilot_internal/user"
+
+func copilotEmptyBody(req *http.Request) bool {
+	if req.Body == nil || req.Body == http.NoBody {
+		return true
+	}
+	// HTTP/2 represents even an empty server body with a non-nil reader.
+	// Require EOF, not merely a declared zero length, before dispatch.
+	var first [1]byte
+	n, err := req.Body.Read(first[:])
+	if n != 0 || err != io.EOF || len(req.Trailer) != 0 {
+		return false
+	}
+	_ = req.Body.Close()
+	req.Body = http.NoBody
+	return true
+}
 
 func (b *Broker) copilotLoginClientID() string {
 	if b.config.Tool == "copilot" {

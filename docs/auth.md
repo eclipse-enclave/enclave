@@ -151,6 +151,10 @@ Real-provider inference and the effect of those refused ancillary routes on
 organization accounts remain human compatibility checks. Browser OAuth is not
 captured by this adapter.
 
+The entitlement GET accepts an empty body over HTTP/1.1 or HTTP/2. A body or
+trailers are refused; the gateway verifies EOF before accepting a non-nil
+empty reader.
+
 The CLI's own design sends its repository-scoped OAuth token to
 `githubcopilot.com` hosts. The gateway releases it on any path at those hosts,
 including the remote GitHub MCP endpoint `https://api.githubcopilot.com/mcp`.

@@ -105,6 +105,8 @@ func writeApplyDefaultsWithSource(buf *bytes.Buffer, def config.OptionDef) {
 		fmt.Fprintf(buf, "\t\t\tApplyDefaultsWithSource: func(opts *model.Options, defaults Defaults, source model.OptionSource, sources *model.OptionSources) {\n\t\t\t\tif canOverride(sources.%s, source) && defaults.%s != nil {\n\t\t\t\t\topts.%s = *defaults.%s\n\t\t\t\t\tsources.%s = source\n\t\t\t\t}\n\t\t\t},\n", def.SourceField, def.DefaultsField, def.OptionField, def.DefaultsField, def.SourceField)
 	case config.ApplyString:
 		writeApplyStringWithSource(buf, def)
+	case config.ApplyStringMap:
+		fmt.Fprintf(buf, "\t\t\tApplyDefaultsWithSource: func(opts *model.Options, defaults Defaults, source model.OptionSource, sources *model.OptionSources) {\n\t\t\t\tif canOverride(sources.%s, source) && len(defaults.%s) > 0 {\n\t\t\t\t\topts.%s = mergeStringMap(opts.%s, defaults.%s)\n\t\t\t\t\tsources.%s = source\n\t\t\t\t}\n\t\t\t},\n", def.SourceField, def.DefaultsField, def.OptionField, def.OptionField, def.DefaultsField, def.SourceField)
 	case config.ApplyListExtras, config.ApplySliceMergeFeature, config.ApplySliceMergeHost:
 		// Lists are folded layer by layer by applyListLayer, which records entry origins.
 		return

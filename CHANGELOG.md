@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+### Added
+
+- `host_env` sets environment variables on the host-side engine client for agent sessions
+  and `attach`, without passing them into the container. Keys merge across global, project
+  and tool-specific configuration, enabling terminal tools to recognize sandboxed agents.
+  [#191](https://github.com/eclipse-enclave/enclave/pull/191)
+
+### Changed
+
+- `enclave config --json` reports the new `host_env` option with kind `string_map`.
+  `schemaVersion` remains `"1"`; consumers must skip options with unrecognized kinds.
+  [#191](https://github.com/eclipse-enclave/enclave/pull/191)
+
+### Fixed
+
 - Adding or removing a feature no longer reinstalls the features ordered before it when the image
   rebuilds. The first build after upgrading still reinstalls every feature once.
   [#198](https://github.com/eclipse-enclave/enclave/pull/198)

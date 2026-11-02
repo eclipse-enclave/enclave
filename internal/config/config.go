@@ -44,6 +44,7 @@ type Defaults struct {
 	NoHistory              *bool               `json:"no_history"`
 	NoMemory               *bool               `json:"no_memory"`
 	SessionTint            string              `json:"session_tint"`
+	HostEnv                map[string]string   `json:"host_env"`
 	Timezone               string              `json:"timezone"`
 	BaseImage              string              `json:"base_image"`
 	Devcontainer           *bool               `json:"devcontainer"`
@@ -259,6 +260,7 @@ func readDefaults(path string) (Defaults, []Warning, error) {
 	warnings := validateTopLevelDefaults(path, doc, &defaults)
 	warnings = append(warnings, validateToolOverrides(path, doc, &defaults)...)
 	warnings = append(warnings, validateSessionTint(path, &defaults)...)
+	warnings = append(warnings, validateHostEnv(path, &defaults)...)
 	warnings = append(warnings, validateUpdateChannel(path, &defaults)...)
 	defaults.path = path
 	for name, override := range defaults.ToolOverrides {
@@ -533,6 +535,10 @@ func mergeDefaults(base Defaults, override Defaults) Defaults {
 			current := targetField.Interface().([]string)
 			incoming := incomingField.Interface().([]string)
 			setDefaultsStringSlice(targetField, mergeListValues(def, current, incoming))
+		case OptionKindStringMap:
+			if incomingField.Len() > 0 {
+				targetField.Set(reflect.ValueOf(mergeStringMap(targetField.Interface().(map[string]string), incomingField.Interface().(map[string]string))))
+			}
 		}
 	}
 

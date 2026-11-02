@@ -459,6 +459,12 @@ generator emits no `ApplyDefaultsWithSource` for list kinds. See
 `passthroughPaths` instead of global defaults. Use `default` to include the
 built-in allow-list before applying `+`/`-` edits.
 
+String map options (`OptionKindStringMap`, `ApplyStringMap`; `host_env`) go
+through the generated `ApplyDefaultsWithSource`, which calls `mergeStringMap`:
+keys merge across global, project and tool-override layers, a later layer
+replacing a key's value. A layer cannot remove an inherited key, and
+`enclave config --json` always reports the value as an object.
+
 ## Option Source Precedence
 
 When a value exists in multiple layers, enclave resolves in this order:

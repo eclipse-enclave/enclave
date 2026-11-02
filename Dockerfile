@@ -241,7 +241,7 @@ RUN --mount=type=cache,id=enclave-npm-${USER_ID},target=/home/${USERNAME}/.npm,u
     /opt/enclave/build-scripts/run-feature-installs.sh
 # END ENCLAVE_FEATURE_INSTALLS
 
-# After the feature installs, since every later RUN gets this ARG in its cache key.
+# Declared after the feature installs: an ARG joins the cache key of every later RUN in the stage.
 ARG FEATURES=default
 
 # Persist the resolved enabled-feature set so the entrypoint can gate per-feature

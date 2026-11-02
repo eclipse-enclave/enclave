@@ -10,6 +10,7 @@ package app
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -259,12 +260,18 @@ func TestRealDockerfileFeatureArgsKeepFeatureLayersCached(t *testing.T) {
 	if next := strings.Index(afterBlock, "\nFROM "); next != -1 {
 		afterBlock = afterBlock[:next]
 	}
-	argOff := strings.Index(afterBlock, "\nARG FEATURES")
+	argOff := -1
+	if loc := featuresArgLine.FindStringIndex(afterBlock); loc != nil {
+		argOff = loc[0]
+	}
 	manifestOff := strings.Index(afterBlock, ".installed-features")
 	if argOff == -1 || manifestOff < argOff {
 		t.Errorf("ARG FEATURES must follow %s and precede the .installed-features manifest in feature-base (offsets after block: arg %d, manifest %d)", featureInstallMarkerEnd, argOff, manifestOff)
 	}
 }
+
+// Matches only the FEATURES ARG itself, not a FEATURES_* one.
+var featuresArgLine = regexp.MustCompile(`(?m)^ARG FEATURES(=|\s*$)`)
 
 // renderRealDockerfile renders the repo Dockerfile with two features and one tool.
 func renderRealDockerfile(t *testing.T) string {

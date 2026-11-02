@@ -82,16 +82,123 @@ func TestEngineCheckToolTableMatchesProtectedAuth(t *testing.T) {
 	}
 }
 
-func TestEngineCheckViewHashIgnoresTerminalControlBytes(t *testing.T) {
+func TestEngineCheckViewHashRequiresLabeledDigest(t *testing.T) {
 	want := strings.Repeat("a", 64)
-	t.Setenv("TEST_ENGINE_HASH", want)
-	got := engineCheck(t, "eval", `
-PROJECT=unused
-enclave_in() { printf '\0%s\r\n' "$TEST_ENGINE_HASH"; }
-view_hash
+	for _, test := range []struct {
+		name, output, status string
+		valid                bool
+	}{
+		{"plain", "view-hash=" + want + " -\\r\\n", "0", true},
+		{"NUL", "\\0view-hash=" + want + " -\\r\\n", "0", true},
+		{"printable caret-at", "^@view-hash=" + want + " -\\r\\n", "0", true},
+		{"terminal escapes", "\\0337\\0338view-hash=" + want + " -\\r\\n", "0", true},
+		{"unlabeled", want + " -\\n", "0", false},
+		{"missing handles", "missing handle marker\\n", "1", false},
+		{"command failed despite digest", "view-hash=" + want, "1", false},
+		{"multiple digests", "view-hash=" + want + "\\nview-hash=" + want, "0", false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Setenv("TEST_ENGINE_OUTPUT", test.output)
+			t.Setenv("TEST_ENGINE_STATUS", test.status)
+			t.Setenv("TEST_ENGINE_DIR", t.TempDir())
+			got := engineCheck(t, "eval", `
+PROJECT=$TEST_ENGINE_DIR TOOL=claude
+enclave_in() { printf '%b' "$TEST_ENGINE_OUTPUT"; return "$TEST_ENGINE_STATUS"; }
+if hash=$(view_hash 2> "$PROJECT/hash-errors"); then
+    printf 'PASS:%s\n' "$hash"
+elif grep -q 'output bytes:' "$PROJECT/hash-errors"; then
+    echo refused-with-diagnostics
+else
+    echo missing-diagnostics
+fi
 `)
-	if got != want {
-		t.Fatalf("view_hash = %q, want %q", got, want)
+			expected := "refused-with-diagnostics"
+			if test.valid {
+				expected = "PASS:" + want
+			}
+			if got != expected {
+				t.Fatalf("view_hash = %q, want %q", got, expected)
+			}
+		})
+	}
+}
+
+func TestEngineCheckLifecycleHolderWaitsForSetupAndReaps(t *testing.T) {
+	for _, fails := range []bool{false, true} {
+		t.Run(strconv.FormatBool(fails), func(t *testing.T) {
+			t.Setenv("TEST_ENGINE_DIR", t.TempDir())
+			t.Setenv("TEST_ENGINE_FAILS", strconv.FormatBool(fails))
+			got := engineCheck(t, "eval", `
+ROOT=$TEST_ENGINE_DIR PROJECT=$TEST_ENGINE_DIR TOOL=claude
+enclave_in() {
+    [ "$2" = shell ] || return 2
+    [ "$TEST_ENGINE_FAILS" = false ] || return 17
+    sleep 0.05
+    echo ready > "$PROJECT/.engine-check-claude-check-bg.ready"
+    sleep 0.05
+}
+if start_background check-bg; then
+    cat "$PROJECT/.engine-check-claude-check-bg.ready"
+else
+    echo refused
+fi
+wait_holders
+[ "${#HOLDER_PIDS[@]}" -eq 0 ] && echo reaped
+`)
+			want := "ready\nreaped"
+			if fails {
+				want = "refused\nreaped"
+			}
+			if got != want {
+				t.Fatalf("holder = %q, want %q", got, want)
+			}
+		})
+	}
+}
+
+func TestEngineCheckReloadRequiresHandlesSuccessfulApplyAndSync(t *testing.T) {
+	for _, test := range []struct {
+		name, before, after, apply, sync, status, want string
+	}{
+		{"stable", "aaa", "aaa", "0", "IN-SYNC check-bg", "0", "PASS"},
+		{"missing before", "", "aaa", "0", "IN-SYNC check-bg", "0", "FAIL"},
+		{"missing after", "aaa", "", "0", "IN-SYNC check-bg", "0", "FAIL"},
+		{"changed handles", "aaa", "bbb", "0", "IN-SYNC check-bg", "0", "FAIL"},
+		{"apply failed", "aaa", "aaa", "1", "IN-SYNC check-bg", "0", "FAIL"},
+		{"not in sync", "aaa", "aaa", "0", "OUT-OF-SYNC check-bg", "0", "FAIL"},
+		{"status failed despite output", "aaa", "aaa", "0", "IN-SYNC check-bg", "1", "FAIL"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Setenv("TEST_ENGINE_DIR", t.TempDir())
+			t.Setenv("TEST_ENGINE_BEFORE", test.before)
+			t.Setenv("TEST_ENGINE_AFTER", test.after)
+			t.Setenv("TEST_ENGINE_APPLY", test.apply)
+			t.Setenv("TEST_ENGINE_SYNC", test.sync)
+			t.Setenv("TEST_ENGINE_STATUS", test.status)
+			got := engineCheck(t, "eval", `
+PROJECT=$TEST_ENGINE_DIR TOOL=claude ENGINE=docker
+ensure_background() { :; }
+view_hash() {
+    local value=$TEST_ENGINE_BEFORE
+    if [ -f "$PROJECT/captured" ]; then value=$TEST_ENGINE_AFTER; fi
+    touch "$PROJECT/captured"
+    [ -n "$value" ] || return 1
+    echo "$value"
+}
+reload_test_cli() {
+    case "$*" in
+        *'network apply'*) return "$TEST_ENGINE_APPLY" ;;
+        *) echo "$TEST_ENGINE_SYNC"; return "$TEST_ENGINE_STATUS" ;;
+    esac
+}
+CLI_BIN=reload_test_cli
+record() { printf '%s:%s\n' "$1" "$2"; }
+check_reload
+`)
+			if got != test.want+":reload" {
+				t.Fatalf("reload = %q, want %s", got, test.want)
+			}
+		})
 	}
 }
 

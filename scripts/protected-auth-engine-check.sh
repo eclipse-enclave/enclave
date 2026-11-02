@@ -11,6 +11,9 @@
 # cleanup, ownership and continuity, against a real Docker or Podman engine,
 # for every built-in tool. Synthetic grants stand in for captured logins; they
 # never authenticate at a provider. Real logins remain a human check.
+# Lifecycle holders are protected idle shells, not detached real tools: real
+# clients can log out on synthetic grants. Detached tool execution and client
+# compatibility require separate e2e spot checks and the human gate.
 #
 # Runs against disposable XDG roots and a disposable project, so existing
 # Enclave data is untouched. Builds each tool's image on first use.
@@ -132,6 +135,7 @@ synthetic_grants() (
 
 RESULTS=()
 FAILED=0
+HOLDER_PIDS=()
 
 record() {
     local status=$1 name="$TOOL/$2" detail=$3
@@ -188,8 +192,26 @@ ensure_grant() {
 }
 
 start_background() {
-    enclave_in "$PROJECT" run --background --name "$1" --protect-auth --allow-all-network --auth-scope shared --auth-name check-a >/dev/null
-    "$ENGINE" ps --format '{{.Names}}' | grep -qx "$(container_name "$1")"
+    local ready=".engine-check-$TOOL-$1.ready" pid
+    rm -f "$PROJECT/$ready"
+    protected_shell "$PROJECT" ": > \"\$PROJECT_DIR/$ready\" && exec sleep infinity" --name "$1" --auth-scope shared --auth-name check-a > "$ROOT/$TOOL-$1.log" 2>&1 &
+    pid=$!
+    HOLDER_PIDS+=("$pid")
+    # The command runs only after the real entrypoint has finished its setup.
+    while [ ! -f "$PROJECT/$ready" ]; do
+        if ! kill -0 "$pid" 2>/dev/null; then
+            wait "$pid" || true
+            tail -n 10 "$ROOT/$TOOL-$1.log" >&2
+            return 1
+        fi
+        sleep 0.2
+    done
+}
+
+wait_holders() {
+    local pid
+    for pid in "${HOLDER_PIDS[@]}"; do wait "$pid" || true; done
+    HOLDER_PIDS=()
 }
 
 ensure_background() {
@@ -348,22 +370,54 @@ check_exec_pin() {
 }
 
 view_hash() {
-    enclave_in "$PROJECT" exec --name check-bg -- bash -c "find /home/agent/.enclave-auth -type f -exec sha256sum {} + | sort | sha256sum" | tr -d '\0\r' | grep -o '^[0-9a-f]\{64\}'
+    local out digest adapter markers=()
+    for adapter in $(tool_adapters "$TOOL"); do markers+=("$(adapter_marker "$adapter")"); done
+    # Only hashes and missing-marker diagnostics leave the session, never files.
+    # shellcheck disable=SC2016 # Evaluated inside the session.
+    if out=$(enclave_in "$PROJECT" exec --name check-bg -- bash -c '
+        set -euo pipefail
+        for marker do
+            if ! grep -rFq -- "$marker" /home/agent/.enclave-auth; then
+                printf "missing handle marker: %s\n" "$marker" >&2
+                exit 1
+            fi
+        done
+        printf "view-hash="
+        find /home/agent/.enclave-auth -type f -exec sha256sum {} + | sort | sha256sum
+    ' engine-view "${markers[@]}"); then
+        digest=$(tr -d '\0\r' <<< "$out" | grep -o 'view-hash=[0-9a-f]\{64\}' | cut -d= -f2)
+        if [[ $digest =~ ^[0-9a-f]{64}$ ]]; then
+            printf '%s\n' "$digest"
+            return
+        fi
+    fi
+    echo "Cannot read handle-bearing view hash; output bytes:" >&2
+    printf '%s' "$out" | od -An -tx1 >&2
+    return 1
 }
 
 check_reload() {
-    ensure_background check-bg
+    if ! ensure_background check-bg; then
+        record FAIL reload "protected idle shell did not start"
+        return
+    fi
     local before after status
-    before=$(view_hash)
-    (cd "$PROJECT" && "$CLI_BIN" --tool "$TOOL" --backend "$ENGINE" network apply >/dev/null 2>&1)
-    after=$(view_hash)
-    status=$(cd "$PROJECT" && "$CLI_BIN" --tool "$TOOL" --backend "$ENGINE" network status 2>&1)
-    if [ -z "$before" ] || [ "$before" != "$after" ]; then
+    before=$(view_hash) || { record FAIL reload "could not read handles before reload (see output bytes)"; return; }
+    if ! (cd "$PROJECT" && "$CLI_BIN" --tool "$TOOL" --backend "$ENGINE" network apply >/dev/null 2>&1); then
+        record FAIL reload "network apply failed"
+        return
+    fi
+    after=$(view_hash) || { record FAIL reload "could not read handles after reload (see output bytes)"; return; }
+    if ! status=$(cd "$PROJECT" && "$CLI_BIN" --tool "$TOOL" --backend "$ENGINE" network status 2>&1); then
+        record FAIL reload "network status failed"
+        return
+    fi
+    if [ "$before" != "$after" ]; then
         record FAIL reload "handles changed across proxy reload"
     elif ! grep -q "IN-SYNC .*check-bg" <<< "$status"; then
         record FAIL reload "network status after reload: $(grep check-bg <<< "$status")"
     else
-        record PASS reload "proxy reload kept handles; status IN-SYNC"
+        record PASS reload "proxy reload kept idle-shell handles; status IN-SYNC"
     fi
 }
 
@@ -388,6 +442,7 @@ check_concurrency() {
 check_stop_cleanup() {
     "$CLI_BIN" stop --backend "$ENGINE" "$(container_name check-bg)" >/dev/null 2>&1
     "$CLI_BIN" stop --backend "$ENGINE" "$(container_name check-bg2)" >/dev/null 2>&1
+    wait_holders
     sleep 3
     # The next admission sweeps state a stopped gateway still held.
     protected_shell "$PROJECT" true --auth-scope shared --auth-name check-a >/dev/null
@@ -473,6 +528,7 @@ cleanup() {
             "$CLI_BIN" stop --backend "$ENGINE" "enclave-$tool-$PROJECT_HASH-$session" >/dev/null 2>&1 || true
         done
     done
+    wait_holders
     rm -rf "$ROOT" 2>/dev/null || echo "Left $ROOT behind; remove it after checking its ownership" >&2
 }
 

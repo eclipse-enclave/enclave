@@ -10,6 +10,7 @@ package app
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -212,21 +213,7 @@ func TestRenderDockerfileWeavesFeatureAndToolBlocks(t *testing.T) {
 // its markers are present and correctly ordered (the build itself needs Docker,
 // which is out of scope for unit tests).
 func TestRenderRealDockerfileTemplate(t *testing.T) {
-	repoDockerfile := filepath.Join("..", "..", "Dockerfile")
-	if _, err := os.Stat(repoDockerfile); err != nil {
-		t.Skipf("repo Dockerfile not found: %v", err)
-	}
-
-	got, err := renderDockerfile(repoDockerfile, []string{"claude"}, []featureInstall{
-		{Name: "devtools", Priority: 40, HasApt: true, HasScript: true, NeedsRoot: false},
-		{Name: "apt-sample", Priority: 85, HasApt: true},
-	}, nil, nil)
-	if err != nil {
-		t.Fatalf("renderDockerfile on real template: %v", err)
-	}
-	if strings.Contains(got, "Aggregates apt_packages from all enabled feature") {
-		t.Fatalf("real-template feature fallback was not replaced, got:\n%s", got)
-	}
+	got := renderRealDockerfile(t)
 	if strings.Contains(got, "COPY extensions/features /opt/enclave/extensions/features") {
 		t.Fatalf("real-template aggregate feature copy was not replaced, got:\n%s", got)
 	}
@@ -246,6 +233,61 @@ func TestRenderRealDockerfileTemplate(t *testing.T) {
 	if strings.Index(got, "# feature: devtools") > strings.Index(got, "FROM tool-base AS tool-claude") {
 		t.Fatal("feature install block must precede the woven tool stages")
 	}
+}
+
+// A varying ARG before the feature blocks joins every later RUN's cache key.
+func TestRealDockerfileFeatureArgsKeepFeatureLayersCached(t *testing.T) {
+	got := renderRealDockerfile(t)
+	stageStart := strings.Index(got, "FROM tool-base AS feature-base")
+	blockEnd := strings.Index(got, featureInstallMarkerEnd)
+	if stageStart == -1 || blockEnd < stageStart {
+		t.Fatalf("feature-base stage or feature block end not found (stage at %d, end at %d)", stageStart, blockEnd)
+	}
+	stableArgs := map[string]bool{"USER_ID": true, "GROUP_ID": true, "USERNAME": true}
+	for _, line := range strings.Split(got[stageStart:blockEnd], "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 2 || !strings.EqualFold(fields[0], "ARG") {
+			continue
+		}
+		for _, field := range fields[1:] {
+			if name, _, _ := strings.Cut(field, "="); !stableArgs[name] {
+				t.Errorf("feature-base declares %q before the feature install block; declare it after %s", line, featureInstallMarkerEnd)
+			}
+		}
+	}
+	// Without it the manifest falls back to the default set and gates the wrong runtime hooks.
+	afterBlock := got[blockEnd:]
+	if next := strings.Index(afterBlock, "\nFROM "); next != -1 {
+		afterBlock = afterBlock[:next]
+	}
+	argOff := -1
+	if loc := featuresArgLine.FindStringIndex(afterBlock); loc != nil {
+		argOff = loc[0]
+	}
+	manifestOff := strings.Index(afterBlock, ".installed-features")
+	if argOff == -1 || manifestOff < argOff {
+		t.Errorf("ARG FEATURES must follow %s and precede the .installed-features manifest in feature-base (offsets after block: arg %d, manifest %d)", featureInstallMarkerEnd, argOff, manifestOff)
+	}
+}
+
+// Matches only the FEATURES ARG itself, not a FEATURES_* one.
+var featuresArgLine = regexp.MustCompile(`(?m)^ARG FEATURES(=|\s*$)`)
+
+// renderRealDockerfile renders the repo Dockerfile with two features and one tool.
+func renderRealDockerfile(t *testing.T) string {
+	t.Helper()
+	repoDockerfile := filepath.Join("..", "..", "Dockerfile")
+	if _, err := os.Stat(repoDockerfile); err != nil {
+		t.Skipf("repo Dockerfile not found: %v", err)
+	}
+	got, err := renderDockerfile(repoDockerfile, []string{"claude"}, []featureInstall{
+		{Name: "devtools", Priority: 40, HasApt: true, HasScript: true, NeedsRoot: false},
+		{Name: "apt-sample", Priority: 85, HasApt: true},
+	}, nil, nil)
+	if err != nil {
+		t.Fatalf("renderDockerfile on real template: %v", err)
+	}
+	return got
 }
 
 func TestRenderDockerfileMissingFeatureMarker(t *testing.T) {

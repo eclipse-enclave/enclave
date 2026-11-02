@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Adding or removing a feature no longer reinstalls the features ordered before it when the image
+  rebuilds. The first build after upgrading still reinstalls every feature once.
+  [#198](https://github.com/eclipse-enclave/enclave/pull/198)
+
 ## 1.0.0 - 2026-10-30
 
 First release of Eclipse Enclave, a sandbox for running agentic coding tools.

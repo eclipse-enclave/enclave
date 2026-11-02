@@ -18,16 +18,7 @@ import (
 )
 
 func TestStripHomeCacheMountsKeepsRunStepsIntact(t *testing.T) {
-	repoDockerfile := filepath.Join("..", "..", "Dockerfile")
-	if _, err := os.Stat(repoDockerfile); err != nil {
-		t.Skipf("repo Dockerfile not available: %v", err)
-	}
-	rendered, err := renderDockerfile(repoDockerfile, []string{"claude"}, []featureInstall{
-		{Name: "devtools", Priority: 40, HasApt: true, HasScript: true},
-	}, nil, nil)
-	if err != nil {
-		t.Fatalf("renderDockerfile: %v", err)
-	}
+	rendered := renderRealDockerfile(t)
 	if !strings.Contains(rendered, "target=/home/${USERNAME}/.npm") {
 		t.Fatal("test premise: rendered Dockerfile should mount the npm cache under the agent home")
 	}

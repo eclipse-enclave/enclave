@@ -202,7 +202,6 @@ FROM tool-base AS feature-base
 ARG USER_ID=1000
 ARG GROUP_ID=1000
 ARG USERNAME=agent
-ARG FEATURES=default
 
 USER root
 
@@ -212,6 +211,8 @@ USER root
 # or changing one feature does not re-run the others' copies, apt installs, or
 # scripts. The aggregated fallback below supports direct "docker build ." for
 # developer testing but without per-feature layer caching.
+# Fallback only: generated blocks must not see ARG FEATURES (see below).
+ARG FEATURES=default
 COPY extensions/features /opt/enclave/extensions/features
 RUN chmod -R a+rX /opt/enclave/extensions/features && \
     find /opt/enclave/extensions/features -type f -name install.sh -exec chmod a+rx {} +
@@ -239,6 +240,9 @@ RUN --mount=type=cache,id=enclave-npm-${USER_ID},target=/home/${USERNAME}/.npm,u
     ENCLAVE_FEATURE_PHASE=user \
     /opt/enclave/build-scripts/run-feature-installs.sh
 # END ENCLAVE_FEATURE_INSTALLS
+
+# Declared after the feature installs: an ARG joins the cache key of every later RUN in the stage.
+ARG FEATURES=default
 
 # Persist the resolved enabled-feature set so the entrypoint can gate per-feature
 # runtime hooks (initFiles/workspace/startup) to selected features only. Mirrors

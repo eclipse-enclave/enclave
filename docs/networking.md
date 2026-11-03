@@ -193,10 +193,10 @@ stale.
 `127.0.0.1:8080:80` (host IP), and a host port of `0` (`0:3000`,
 `127.0.0.1:0:3000`) to let the engine pick a free port, which avoids
 collisions between sessions. The assigned port is printed at start and listed
-under `ports` in `enclave ps --json`. Auto-assigned ports are Docker-only; the
-`qemu` backend rejects port `0`. Without a host IP, ports bind `127.0.0.1`.
-Container ports 15080 and 15443 are taken by the gateway proxy in every
-session with a gateway, and publishing them is an error; see
+under `ports` in `enclave ps --json`. Auto-assigned ports work with Docker and
+Podman; the `qemu` backend rejects port `0`. Without a host IP, ports bind
+`127.0.0.1`. Container ports 15080 and 15443 are taken by the gateway proxy in
+every session with a gateway, and publishing them is an error; see
 [Unrestricted mode](#unrestricted-mode).
 
 ## Bridging host ports

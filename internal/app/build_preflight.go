@@ -12,8 +12,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
+	"enclave/internal/backend"
+	"enclave/internal/config"
 	"enclave/internal/docker"
 	"enclave/internal/logx"
 	"enclave/internal/model"
@@ -63,7 +66,15 @@ func checkRuntimeImageBuildPreflight(ctx context.Context) error {
 	// front with guidance instead of surfacing a mid-build syntax error.
 	// podman builds with buildah, which handles that syntax natively.
 	if !docker.IsPodman() && !dockerBuildxAvailable(ctx) {
-		return fmt.Errorf("docker buildx is unavailable, but building the sandbox image requires BuildKit. Install the Docker buildx plugin for your platform (packaged as docker-buildx or docker-buildx-plugin; included in Docker Desktop), then retry. See https://docs.docker.com/go/buildx/")
+		message := "docker buildx is unavailable, but building the sandbox image requires BuildKit. Install the Docker buildx plugin for your platform (packaged as docker-buildx or docker-buildx-plugin; included in Docker Desktop), then retry. See https://docs.docker.com/go/buildx/"
+		if slices.Contains(detectContainerCLIs(), backend.NamePodman) {
+			configPath, err := config.GlobalConfigPath()
+			if err != nil {
+				configPath = "the global config.json"
+			}
+			message += fmt.Sprintf(" Podman is installed and does not require buildx. Use --backend podman or set \"backend\": \"podman\" in %s.", configPath)
+		}
+		return fmt.Errorf("%s", message)
 	}
 
 	rootDir, freeBytes, err := dockerRootFreeSpace(ctx)

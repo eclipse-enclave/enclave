@@ -829,13 +829,47 @@ func TestHashRuntimeImageStaticFilesTracksCopiedInputs(t *testing.T) {
 
 func TestCheckRuntimeImageBuildPreflightFailsWithoutBuildx(t *testing.T) {
 	stubBuildxAvailable(t, false)
+	previousDetect := detectContainerCLIs
+	previousBinary := docker.Binary()
+	docker.SetBinary("docker")
+	t.Cleanup(func() {
+		detectContainerCLIs = previousDetect
+		docker.SetBinary(previousBinary)
+	})
 
-	err := checkRuntimeImageBuildPreflight(context.Background())
-	if err == nil {
-		t.Fatal("expected missing buildx to fail")
-	}
-	if !strings.Contains(err.Error(), "docker buildx is unavailable") {
-		t.Fatalf("unexpected error: %v", err)
+	for _, tc := range []struct {
+		name           string
+		clis           []string
+		wantPodmanHint bool
+	}{
+		{name: "docker only", clis: []string{"docker"}},
+		{name: "docker and podman", clis: []string{"docker", "podman"}, wantPodmanHint: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			detectContainerCLIs = func() []string { return tc.clis }
+			err := checkRuntimeImageBuildPreflight(context.Background())
+			if err == nil {
+				t.Fatal("expected missing buildx to fail")
+			}
+			if !strings.Contains(err.Error(), "docker buildx is unavailable") {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if !tc.wantPodmanHint {
+				if strings.Contains(err.Error(), "podman") || strings.Contains(err.Error(), "Podman") {
+					t.Fatalf("suggested unavailable podman: %v", err)
+				}
+				return
+			}
+			configPath, pathErr := config.GlobalConfigPath()
+			if pathErr != nil {
+				t.Fatal(pathErr)
+			}
+			for _, want := range []string{"Podman is installed and does not require buildx", "--backend podman", `"backend": "podman"`, configPath} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error missing %q: %v", want, err)
+				}
+			}
+		})
 	}
 }
 

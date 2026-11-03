@@ -214,8 +214,9 @@ Project config lives in Enclave's host config root, out of reach of the
 repository and of the agent, so only you can edit it. It can therefore set
 anything global config can, for that project only: a different default tool,
 extra allowed domains, a writable mount, or yolo mode. The exceptions are
-`auto_update` and `update_channel`, which control the Enclave binary itself and
-are read from global config only.
+`auto_update` and `update_channel`, which control the Enclave binary itself, and
+`disabled_commands`, because commands are resolved before the project is known.
+These are read from global config only.
 
 Mounting a sensitive directory such as your home directory or `~/.ssh` still
 needs `--allow-sensitive-mounts` (or `ENCLAVE_ALLOW_SENSITIVE_MOUNTS=1`),

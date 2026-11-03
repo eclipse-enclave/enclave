@@ -34,6 +34,7 @@ auth subcommands, and build flags, see the
 | `enclave tools list` | List the available agents, built-in and installed. |
 | `enclave features list` | List the optional features you can enable. |
 | `enclave tools add <source>` | Install an agent from a git repository (same for `features`). |
+| `enclave commands add <source>` | Install extra `enclave` commands from a git repository. |
 
 ## Start a session
 
@@ -74,7 +75,7 @@ Code, Codex, Theia AI, OpenCode, and more.
 enclave --tool codex
 ```
 
-## Add your own agents and features
+## Add your own agents, features and commands
 
 Agents and optional features ship as extensions: a directory with a `spec.yaml`
 that describes how the software is installed, how it authenticates, and which
@@ -112,6 +113,25 @@ enclave tools remove my-agent
 
 `update` refreshes the extension on your host. The image is rebuilt the next time
 you start a session that uses it.
+
+### Add commands
+
+A command extension adds `enclave <name>` commands and nothing else. The commands
+run on your host, outside the sandbox, so nothing is installed into the image and
+there is nothing to enable: once installed, the command is available.
+
+```bash
+enclave commands add acme/kits --name usage
+enclave usage
+```
+
+`list`, `update` and `remove` work as they do for agents and features. To turn off
+a single command, for example one you don't need from a set, list it in your
+global config:
+
+```json
+{ "disabled_commands": ["usage"] }
+```
 
 ## Resume a previous session
 

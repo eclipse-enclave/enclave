@@ -512,13 +512,29 @@ packages carried before, so rolling packages keep upgrading. Tag names reach the
 so the script only emits version characters and fails the build on anything
 else.
 
-`CHANGELOG.md` is written as changes land, not at release time. A PR with a
-user-visible change adds a bullet under `## Unreleased` at the top of the
-file, creating that section above the latest release when it is missing:
-one line per change, in the user's terms, ending with a link to the PR.
-Breaking changes go under `### Breaking changes` within that section and
-say what to do instead. Before tagging, rename `## Unreleased` to
-`## X.Y.Z - YYYY-MM-DD` in the same PR as any last fixes, so the tagged
+PRs do not edit `CHANGELOG.md`, except the release-prep PR. A PR
+describes its user-visible changes in the `changelog` block of its
+description, which the PR template provides: one `- ` item per change,
+in the user's terms, with wrapped lines indented by two spaces as in
+`CHANGELOG.md`, or `none` inside the block when users will not notice
+the change. A breaking change is an item that starts with `Breaking:`
+and says what to do instead. No PR or issue link: the release adds it.
+The note can be corrected in the description until the release,
+without a commit. For example:
+
+```changelog
+- Adding or removing a feature no longer reinstalls the features
+  ordered before it when the image rebuilds.
+```
+
+Before tagging, the release-prep PR collects the notes of the PRs
+merged since the last tag into `## X.Y.Z - YYYY-MM-DD` at the top of
+`CHANGELOG.md`. Each item becomes a bullet ending with a link to its
+PR, grouped under `### Added`, `### Changed` and `### Fixed` as needed,
+and `Breaking:` items go under `### Breaking changes` within that
+section. Release prep may merge, reword or drop notes, for example when
+a later PR in the same release changes the same behavior or a PR was
+reverted. Do this in the same PR as any last fixes, so the tagged
 source describes the release it belongs to.
 
 To cut a release, push an annotated tag `vX.Y.Z`, or `vX.Y.Z-alpha.N`,

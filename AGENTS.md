@@ -62,6 +62,10 @@ When the user explicitly requests a WIP commit, prefix the subject with `wip: `.
 
 Do not push, publish releases, or modify remote issues/PRs unless the maintainer explicitly requests it.
 
+Do not edit `CHANGELOG.md` in a PR, except the release-prep PR. Describe user-visible changes in the `changelog` block of the PR description, or write `none` there, as [Releases](docs/DEV.md#releases) explains.
+
+When reviewing, a missing `CHANGELOG.md` entry is not a finding. These are: an empty or missing `changelog` block, a user-visible change marked `none`, a note not written in the user's terms, and a `Breaking changes` checkbox that disagrees with the `Breaking:` items.
+
 ## Documentation
 
 - Keep documentation concise and aimed at experienced developers.

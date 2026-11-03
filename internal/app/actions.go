@@ -21,6 +21,7 @@ func isRunAction(action string) bool {
 // engine to use. These actions skip both backend resolution and validation;
 // all other actions validate the resolved backend before dispatch.
 var backendFreeActions = map[string]bool{
+	"commands":                true,
 	"config":                  true,
 	"devcontainer-generate":   true,
 	"extension-list":          true,
@@ -45,6 +46,7 @@ func actionUsesBackend(action string) bool {
 // lack of an answer.
 var toolFreeActions = map[string]bool{
 	"attach":                  true,
+	"commands":                true,
 	"config":                  true,
 	"extension-list":          true,
 	"features":                true,

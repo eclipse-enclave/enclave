@@ -829,6 +829,8 @@ func TestCapabilitiesFieldsParticipateInRenderAndDiff(t *testing.T) {
 		"Spec.YoloEnabled":     "see Spec.YoloFlag",
 		"Spec.DefaultEnabled":  "the spec's opt-in flag, not a capability; covered by TestAddOptInFeaturePrintsEnableHint",
 		"Spec.DefaultIncluded": "a profile-composition default, not a capability",
+		"Spec.RuntimeFields": "the document's shape, not a capability: every field it names has its own row; " +
+			"covered by TestAddCommandsOnlyFeatureWarns",
 		"Spec.AllowedDomains": "folded into capabilities.AllowDomains by inspect; covered by " +
 			"TestInspectReportsCapabilities",
 		"Spec.Kind":        "extension identity, not a capability: render's header carries it",

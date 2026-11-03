@@ -428,6 +428,8 @@ func specToExtension(doc specDocument) (model.Extension, extensionManifestState)
 		ext.Type = model.ExtensionKindMixin
 	case KindSandbox:
 		ext.Type = model.ExtensionKindSandbox
+	case KindCommand:
+		ext.Type = model.ExtensionKindCommand
 	}
 
 	// Record the per-entry user of each commands.install step in order. Its

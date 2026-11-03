@@ -19,7 +19,12 @@ func TestExtensionKindMappings(t *testing.T) {
 	if KindFeature.Label() != "feature" || KindTool.Label() != "tool" {
 		t.Fatal("labels wrong")
 	}
-	if KindFeature.Other() != KindTool || KindTool.Other() != KindFeature {
-		t.Fatal("Other() wrong")
+	if KindCommand.SpecKind() != ExtensionKindCommand || KindCommand.DirName() != "commands" || KindCommand.Label() != "command" {
+		t.Fatal("command kind mappings wrong")
+	}
+	for _, kind := range ExtensionKinds {
+		if back, ok := ExtensionKindFor(kind.SpecKind()); !ok || back != kind {
+			t.Fatalf("ExtensionKindFor(%q) = %q, %v", kind.SpecKind(), back, ok)
+		}
 	}
 }

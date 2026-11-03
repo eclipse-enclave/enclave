@@ -1649,10 +1649,11 @@ func TestParseUserCommandHelpSection(t *testing.T) {
 func TestParseUserCommandHelpNamesContributingExtension(t *testing.T) {
 	cmds := []usercmd.Command{
 		{Name: "deploy", Path: "/p/deploy", Target: usercmd.TargetHost},
-		{Name: "vnc-viewer", Path: "/x/vnc/commands/host/vnc-viewer", Target: usercmd.TargetHost, Extension: "vnc"},
+		{Name: "vnc-viewer", Path: "/x/vnc/commands/host/vnc-viewer", Target: usercmd.TargetHost,
+			Extension: "vnc", ExtensionKind: model.KindFeature},
 	}
 	help := captureStdoutCmds(t, cmds, "--help")
-	if !strings.Contains(help, "Host command from the vnc extension") {
+	if !strings.Contains(help, "Host command from the vnc feature extension") {
 		t.Fatalf("expected the extension named for its verb, got:\n%s", help)
 	}
 	if !strings.Contains(help, "User command (/p/deploy)") {

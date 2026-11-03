@@ -58,6 +58,21 @@ func runExtensionList(ctx *AppContext) int {
 		}
 	}
 
+	commands, err := config.ListCommandExtensions(ctx.Paths)
+	if err != nil {
+		logx.Errorf("list command extensions: %v", err)
+		return 1
+	}
+	fmt.Println("")
+	fmt.Println("COMMAND EXTENSIONS")
+	if len(commands) == 0 {
+		fmt.Println("  (none)")
+	} else {
+		for _, ext := range commands {
+			printExtensionLine(ext.Name, config.SourceUser, strings.TrimSpace(ext.Description))
+		}
+	}
+
 	return 0
 }
 

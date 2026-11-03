@@ -18,7 +18,7 @@ Read `README.md` before making user-facing changes.
 
 ## External Integrations
 
-- Treat CLI JSON schemas, background-run output, lifecycle commands, and container naming as integration contracts for external consumers; coordinate breaking changes. This includes `enclave tools|features list --json` and the shared `add`/`update`/`remove` result envelope (both `schemaVersion: "1"`; see `docs/extensions/installing.md`), `enclave config --json` (`schemaVersion: "1"`, `kind: "config"`; see `docs/configuration.md`), and `enclave network print --json` (`schemaVersion: "1"`, `kind: "network-policy"`; see `docs/networking.md`).
+- Treat CLI JSON schemas, background-run output, lifecycle commands, and container naming as integration contracts for external consumers; coordinate breaking changes. This includes `enclave tools|features|commands list --json` and the shared `add`/`update`/`remove` result envelope (both `schemaVersion: "1"`; see `docs/extensions/installing.md`), `enclave config --json` (`schemaVersion: "1"`, `kind: "config"`; see `docs/configuration.md`), and `enclave network print --json` (`schemaVersion: "1"`, `kind: "network-policy"`; see `docs/networking.md`).
 - Session provenance (`options` in `enclave ps --json`) is contract; the `enclave.options` label that stores it is not. Recorded options follow `AffectsSession` in `internal/config/options_def.go` and must never carry secret values.
 - Prefer structured CLI output over Docker labels or human-readable output for integration contracts.
 
@@ -86,8 +86,9 @@ When reviewing, a missing `CHANGELOG.md` entry is not a finding. These are: an e
 - Full host config overrides use `~/.config/enclave/tools/<tool>/` globally and `~/.config/enclave/projects/<hash>/<tool>/config/` per project.
 - JSON/TOML patches mirror native paths under `~/.config/enclave/patches/<tool>/` globally and `~/.config/enclave/projects/<hash>/patches/<tool>/` per project.
 - Shared skills use `~/.config/enclave/skills/<skill>/` globally and `~/.config/enclave/projects/<hash>/skills/<skill>/` per project; tool-specific skills use the canonical tool config roots at the native skills path. Enabled features contribute their `skills/` between tool-extension skills and the shared sources; see `docs/configuration.md` for the full precedence order.
-- Extensions can be installed from a git repository with `enclave features|tools add`; provenance lives in `.enclave-source.json` in the installed extension directory and is excluded from the build context and image hash. See `docs/extensions/installing.md`.
-- Either kind may ship `commands/host/<name>` executables, which become `enclave <name>` verbs on hosts where the extension is installed. They run on the host rather than in a session, so the capability summary reports them in its first row, the update diff repeats the warning, and the `hostCommands` field carries them in both `list --json` and the `add`/`update`/`remove` result envelope. Keep all of those accurate when touching that code. `commands/` is excluded from the build context and image hash like the provenance sidecar, and anything under it other than `host/` is a validation warning. See `docs/extensions/README.md`.
+- A command extension (`kind: command`) lives only under the user root at `~/.config/enclave/extensions/commands/<name>/`, is never built in, and ships host commands and nothing else: the spec accepts metadata fields only. See [Command Extensions](docs/extensions/README.md#command-extensions).
+- Extensions can be installed from a git repository with `enclave features|tools|commands add`; provenance lives in `.enclave-source.json` in the installed extension directory and is excluded from the build context and image hash. See `docs/extensions/installing.md`.
+- Every kind may ship `commands/host/<name>` executables, which become `enclave <name>` verbs on hosts where the extension is installed. They run on the host rather than in a session, so the capability summary reports them in its first row, the update diff repeats the warning, and the `hostCommands` field carries them in both `list --json` and the `add`/`update`/`remove` result envelope. Keep all of those accurate when touching that code. `commands/` is excluded from the build context and image hash like the provenance sidecar, and anything under it other than `host/` is a validation warning. See `docs/extensions/README.md`.
 
 ## Host Data
 
@@ -99,5 +100,6 @@ Enclave follows platform-standard roots: the XDG base directories on Linux and o
 - Embedded runtime assets: `~/.cache/enclave/assets/<content-hash>/`
 - Per-project agent memory: `~/.local/state/enclave/projects/<hash>/<tool>/memory/` (agent-writable; Claude uses this root, Codex uses `<key>/` matching its config-store key; never shared between projects or agents)
 - User-defined subcommands: `~/.config/enclave/commands/{host,session}/` (executable files become `enclave <name>` verbs)
+- Installed extensions: `~/.config/enclave/extensions/{tools,features,commands}/<name>/`
 
 Per-project config/state is keyed by project hash and kept outside the worktree. See `docs/configuration.md` and `docs/runtime/stores.md` for details.

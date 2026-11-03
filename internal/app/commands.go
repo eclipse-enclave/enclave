@@ -71,6 +71,8 @@ func dispatchCommand(input *CommandInput) int {
 		return runTools(input.Ctx, input.ExtRequest, input.Options, input.Sources)
 	case "features":
 		return runFeatures(input.Ctx, input.ExtRequest, input.Options, input.Sources)
+	case "commands":
+		return runCommandExtensions(input.Ctx, input.ExtRequest)
 	case "extension-list":
 		return runExtensionList(input.Ctx)
 	case cli.ActionExtensionManage:

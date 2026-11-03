@@ -96,11 +96,12 @@ func testEnv(t *testing.T, fetcher Fetcher, stdin string) (Env, *bytesBuffer) {
 	t.Helper()
 	root := t.TempDir()
 	paths := model.Paths{
-		ToolsDir:          filepath.Join(root, "app", "extensions", "tools"),
-		FeaturesDir:       filepath.Join(root, "app", "extensions", "features"),
-		UserExtensionsDir: filepath.Join(root, "home", ".config", "enclave", "extensions"),
-		UserToolsDir:      filepath.Join(root, "home", ".config", "enclave", "extensions", "tools"),
-		UserFeaturesDir:   filepath.Join(root, "home", ".config", "enclave", "extensions", "features"),
+		ToolsDir:                 filepath.Join(root, "app", "extensions", "tools"),
+		FeaturesDir:              filepath.Join(root, "app", "extensions", "features"),
+		UserExtensionsDir:        filepath.Join(root, "home", ".config", "enclave", "extensions"),
+		UserToolsDir:             filepath.Join(root, "home", ".config", "enclave", "extensions", "tools"),
+		UserFeaturesDir:          filepath.Join(root, "home", ".config", "enclave", "extensions", "features"),
+		UserCommandExtensionsDir: filepath.Join(root, "home", ".config", "enclave", "extensions", "commands"),
 	}
 	for _, dir := range []string{paths.ToolsDir, paths.FeaturesDir, paths.UserToolsDir, paths.UserFeaturesDir} {
 		if err := os.MkdirAll(dir, 0o750); err != nil {

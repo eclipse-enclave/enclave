@@ -10,10 +10,10 @@ Project overrides live outside the worktree, where neither the repository nor a
 session can edit them, so a project cannot alter its own isolation policy. Extension files are discovered from built-in `extensions/`
 plus user-global `~/.config/enclave/extensions/`.
 
-Extensions installed with `enclave tools|features add` carry a
+Extensions installed with `enclave tools|features|commands add` carry a
 `.enclave-source.json` provenance sidecar in their user-global directory.
 Editing an installed extension's files by hand blocks
-`enclave tools|features update` for that extension until `--force`. See
+`enclave tools|features|commands update` for that extension until `--force`. See
 [Installing Extensions](extensions/installing.md).
 
 The `~/.config/enclave/` paths shown throughout this document are the Linux
@@ -38,7 +38,8 @@ Because only you can edit it, project config may set every option global config
 can, with the same effect for that project. The exceptions are `auto_update`
 and `update_channel`: they are global-only rather than project or per-tool
 options because they replace the host executable, so project and tool-override
-values are ignored with a warning. Opt-ins without a config key, such as
+values are ignored with a warning. `disabled_commands` is global-only too:
+commands are resolved before the project is known. Opt-ins without a config key, such as
 `--allow-sensitive-mounts`, cannot be granted by any config file.
 
 Top-level `host_config_paths` is not part of that set: it is ignored with a
@@ -50,6 +51,7 @@ supported under `tool_overrides.<tool>`.
 | Key | Description |
 |-----|-------------|
 | `auto_update` | Automatically replace a stale standalone binary with the latest build of its update channel during the daily update check (default: `false`; global config only; ignored by package and source builds) |
+| `disabled_commands` | Command names that never become `enclave <name>` verbs, whether an installed extension or your own `commands/` tree provides them. The name resolves to nothing rather than to the next provider, so `enclave <name>` fails as an unknown command. Built-in verbs cannot be disabled (global config only; see [Host commands](extensions/README.md#host-commands)) |
 | `update_channel` | Release channel binary updates come from: `rolling` (builds of `main`) or `stable` (official releases from version tags). Unset follows the channel the binary was published on, which `enclave config` shows as the default (global config only; see [`self-update`](cli-reference.md)) |
 | `tool` | Default tool (e.g. `claude`, `codex`); unset means the first interactive session asks once and writes the answer here (see [Tool selection](cli-reference.md#tool-selection)) |
 | `backend` | Isolation backend: `auto` (default) uses docker or podman, whichever is installed, and asks once when both are; or `docker`, `podman`, experimental `qemu`. Override per invocation with `--backend` on engine-using commands. |

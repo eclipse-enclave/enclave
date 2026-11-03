@@ -126,6 +126,17 @@ func OptionDefs() []OptionDef {
 			Apply:          ApplyString,
 		},
 		{
+			// Config-only: user commands are discovered before flags are parsed.
+			Name:           "disabled_commands",
+			Group:          OptionGroupGlobal,
+			Kind:           OptionKindStringSlice,
+			AffectsSession: SessionUnaffected,
+			OptionField:    "DisabledCommands",
+			SourceField:    "DisabledCommands",
+			DefaultsField:  "DisabledCommands",
+			Apply:          ApplyListExtras,
+		},
+		{
 			Name:           "tool",
 			Group:          OptionGroupRun,
 			Kind:           OptionKindString,

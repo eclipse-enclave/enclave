@@ -68,6 +68,9 @@ type Command struct {
 	// tree. Two extension commands differ by nothing else a user can see, so
 	// warnings and --help both need it to say which one they mean.
 	Extension string
+	// ExtensionKind is the kind of that extension. Names are only unique per
+	// kind, and the kind decides which verb removes it.
+	ExtensionKind model.ExtensionKind
 }
 
 // Discover scans ~/.config/enclave/commands/{host,session}/ and the
@@ -89,10 +92,11 @@ type Command struct {
 // loop warns and is skipped. Host symlinks may point anywhere.
 //
 // Names are resolved in precedence order: the user's own host/ tree, then their
-// session/ tree, then installed extensions. Every loser is reported rather than
+// session/ tree, then installed extensions in model.ExtensionKinds order. Every loser is reported rather than
 // dropped silently, so installing an extension can never quietly take a name
-// the user is already using. Results are returned in deterministic
-// (name-sorted) order.
+// the user is already using. A name listed in the global disabled_commands
+// resolves to nothing at all, whichever source would have won it. Results are
+// returned in deterministic (name-sorted) order.
 func Discover(home string) ([]Command, []string) {
 	hostCmds, warnings := scanDir(config.HostCommandsHostDir(home), TargetHost, sourceUser)
 	sessionCmds, sessionWarnings := scanDir(config.HostCommandsSessionDir(home), TargetSession, sourceUser)
@@ -121,6 +125,11 @@ func Discover(home string) ([]Command, []string) {
 		byName[c.Name] = c
 	}
 
+	disabled, _ := config.DisabledCommands(home)
+	for _, name := range disabled {
+		delete(byName, name)
+	}
+
 	cmds := make([]Command, 0, len(byName))
 	for _, c := range byName {
 		cmds = append(cmds, c)
@@ -130,8 +139,8 @@ func Discover(home string) ([]Command, []string) {
 }
 
 // scanExtensions reads the host command directory of every installed
-// extension, tools before features and alphabetically within each kind, so two
-// extensions claiming one name resolve the same way on every host.
+// extension, in model.ExtensionKinds order and alphabetically within each kind,
+// so two extensions claiming one name resolve the same way on every host.
 //
 // Only the user extension root is read, matching where the installer writes. A
 // built-in extension's own tree ships inside the binary and is unpacked into a
@@ -146,7 +155,7 @@ func scanExtensions(home string) ([]Command, []string) {
 		cmds     []Command
 		warnings []string
 	)
-	for _, kind := range []model.ExtensionKind{model.KindTool, model.KindFeature} {
+	for _, kind := range model.ExtensionKinds {
 		kindDir := filepath.Join(root, kind.DirName())
 		entries, err := os.ReadDir(kindDir)
 		if err != nil {
@@ -165,6 +174,7 @@ func scanExtensions(home string) ([]Command, []string) {
 			warnings = append(warnings, dirWarnings...)
 			for _, c := range found {
 				c.Extension = entry.Name()
+				c.ExtensionKind = kind
 				cmds = append(cmds, c)
 			}
 		}
@@ -179,11 +189,23 @@ func shadowedExtensionWarning(dropped Command, kept Command) string {
 	if kept.Extension != "" {
 		return fmt.Sprintf(
 			"extensions %s and %s both define command %q, using %s and ignoring %s",
-			kept.Extension, dropped.Extension, dropped.Name, kept.Path, dropped.Path)
+			kept.ExtensionLabel(), dropped.ExtensionLabel(), dropped.Name, kept.Path, dropped.Path)
 	}
 	return fmt.Sprintf(
 		"command %q from extension %s is shadowed by your own user command (%s), ignoring %s",
-		dropped.Name, dropped.Extension, kept.Path, dropped.Path)
+		dropped.Name, dropped.ExtensionLabel(), kept.Path, dropped.Path)
+}
+
+// ExtensionLabel names the contributing extension with its kind, e.g.
+// "vnc (feature)", or is empty for the user's own command.
+func (c Command) ExtensionLabel() string {
+	if c.Extension == "" {
+		return ""
+	}
+	if c.ExtensionKind == "" {
+		return c.Extension
+	}
+	return fmt.Sprintf("%s (%s)", c.Extension, c.ExtensionKind.Label())
 }
 
 // ExtensionHostDir is the directory whose executables extDir contributes as

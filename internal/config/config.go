@@ -27,6 +27,7 @@ type Defaults struct {
 	Backend                string              `json:"backend"`
 	AutoUpdate             *bool               `json:"auto_update"`
 	UpdateChannel          string              `json:"update_channel"`
+	DisabledCommands       []string            `json:"disabled_commands"`
 	HostConfig             string              `json:"host_config"`
 	SkillsValidation       string              `json:"skills_validation"`
 	HostConfigPaths        []string            `json:"host_config_paths"`
@@ -425,6 +426,10 @@ func validateToolOverrides(path string, doc map[string]json.RawMessage, defaults
 				parsed.UpdateChannel = ""
 				warnings = append(warnings, newWarning(WarningInvalidToolOverride, "update_channel", toolName, path, "Ignoring tool_overrides.%s.update_channel in %s: binary updates are configured globally", toolName, path))
 			}
+			if _, hasDisabled := entry["disabled_commands"]; hasDisabled {
+				parsed.DisabledCommands = nil
+				warnings = append(warnings, newWarning(WarningInvalidToolOverride, "disabled_commands", toolName, path, "Ignoring tool_overrides.%s.disabled_commands in %s: commands are configured globally", toolName, path))
+			}
 			warnings = append(warnings, validateToolOverrideHostConfigPaths(path, toolName, parsed.HostConfigPaths)...)
 			valid[toolName] = parsed
 		}
@@ -462,8 +467,8 @@ func validateToolOverrideHostConfigPaths(path string, toolName string, values []
 	return warnings
 }
 
-// stripGlobalOnlyKeys drops the binary update options, which only make sense
-// for the whole host, from project config; readDefaults already drops them from
+// stripGlobalOnlyKeys drops the binary update options and disabled_commands,
+// which only make sense for the whole host, from project config; readDefaults already drops them from
 // tool_overrides in either file. Project config is host-owned, out of reach of
 // sessions, so it may otherwise set anything global config can.
 func stripGlobalOnlyKeys(path string, defaults *Defaults) []Warning {
@@ -478,6 +483,10 @@ func stripGlobalOnlyKeys(path string, defaults *Defaults) []Warning {
 	if defaults.UpdateChannel != "" {
 		warnings = append(warnings, newWarning(WarningProjectGuardrail, "update_channel", "", path, "Ignoring update_channel=%q in %s: binary updates are configured globally", defaults.UpdateChannel, path))
 		defaults.UpdateChannel = ""
+	}
+	if defaults.DisabledCommands != nil {
+		warnings = append(warnings, newWarning(WarningProjectGuardrail, "disabled_commands", "", path, "Ignoring disabled_commands in %s: commands are configured globally", path))
+		defaults.DisabledCommands = nil
 	}
 	return warnings
 }

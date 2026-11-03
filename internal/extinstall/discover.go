@@ -110,16 +110,17 @@ func classify(repoDir string, candidates []candidate) []classified {
 }
 
 // selectKind partitions classified candidates into those matching kind, those
-// of the opposite kind (so the caller can name the right verb), and those that
+// of another known kind (so the caller can name the right verb), and those that
 // cannot be installed at all.
 func selectKind(entries []classified, kind model.ExtensionKind) (match []classified, other []classified, skipped []classified) {
 	for _, entry := range entries {
+		entryKind, known := model.ExtensionKindFor(entry.SpecKind)
 		switch {
 		case entry.Skip != "":
 			skipped = append(skipped, entry)
-		case entry.SpecKind == kind.SpecKind():
+		case entryKind == kind:
 			match = append(match, entry)
-		case entry.SpecKind == kind.Other().SpecKind():
+		case known:
 			other = append(other, entry)
 		default:
 			entry.Skip = fmt.Sprintf("unknown kind %q", entry.SpecKind)
@@ -127,4 +128,25 @@ func selectKind(entries []classified, kind model.ExtensionKind) (match []classif
 		}
 	}
 	return match, other, skipped
+}
+
+// otherKindsHint names, for candidates of kinds other than the requested one,
+// how many of each kind there are and the verb that installs them, e.g.
+// "1 feature extension(s) but no command extension; use `enclave features add`".
+func otherKindsHint(other []classified, kind model.ExtensionKind) string {
+	counts := map[model.ExtensionKind]int{}
+	for _, entry := range other {
+		entryKind, _ := model.ExtensionKindFor(entry.SpecKind)
+		counts[entryKind]++
+	}
+	var found, verbs []string
+	for _, k := range model.ExtensionKinds {
+		if counts[k] == 0 {
+			continue
+		}
+		found = append(found, fmt.Sprintf("%d %s", counts[k], k.Label()))
+		verbs = append(verbs, fmt.Sprintf("`%s %s add`", model.AppName, k.DirName()))
+	}
+	return fmt.Sprintf("%s extension(s) but no %s extension; use %s",
+		strings.Join(found, " and "), kind.Label(), strings.Join(verbs, " or "))
 }

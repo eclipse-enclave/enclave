@@ -92,6 +92,22 @@ func TestParseExtensionInteractivity(t *testing.T) {
 	}
 }
 
+func TestParseCommandsVerbs(t *testing.T) {
+	res, err := Parse([]string{"commands"}, model.Options{})
+	if err != nil || res.Action != "commands" {
+		t.Fatalf("Parse(commands) = %q, %v", res.Action, err)
+	}
+	res, err = Parse([]string{"commands", "list", "--json"}, model.Options{})
+	if err != nil || res.Action != "commands" || res.ExtRequest == nil || !res.ExtRequest.JSON {
+		t.Fatalf("Parse(commands list --json) = %+v, %v", res, err)
+	}
+	res, err = Parse([]string{"commands", "add", "acme/kits", "--yes"}, model.Options{})
+	if err != nil || res.Action != ActionExtensionManage || res.ExtRequest.Kind != model.KindCommand ||
+		res.ExtRequest.Op != extinstall.OpAdd {
+		t.Fatalf("Parse(commands add) = %+v, %v", res.ExtRequest, err)
+	}
+}
+
 // A request built without the CLI must not be able to block on a prompt.
 func TestExtensionRequestZeroValueIsNonInteractive(t *testing.T) {
 	if (extinstall.Request{}).Interactive {

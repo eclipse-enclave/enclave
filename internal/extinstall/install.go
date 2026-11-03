@@ -79,8 +79,7 @@ func Add(ctx context.Context, env Env, req Request) ([]ActionResult, error) {
 	}
 	if len(match) == 0 {
 		if len(other) > 0 {
-			return nil, fmt.Errorf("%s contains %d %s extension(s) but no %s; use `enclave %s add`",
-				src.Display(), len(other), req.Kind.Other().Label(), req.Kind.Label(), req.Kind.Other().DirName())
+			return nil, fmt.Errorf("%s contains %s", src.Display(), otherKindsHint(other, req.Kind))
 		}
 		return nil, fmt.Errorf("%s contains no %s extension", src.Display(), req.Kind.Label())
 	}
@@ -326,6 +325,11 @@ func applyPlan(env Env, req Request, plan installPlan, stage *staging) (ActionRe
 		plan.Before.ShadowedHostCommands = usercmd.Shadowed(env.Home, plan.Before.HostCommands)
 	}
 	warnings = append(warnings, caps.shadowedHostCommandWarnings()...)
+	if req.Kind == model.KindFeature && caps.onlyHostCommands() {
+		warnings = append(warnings, fmt.Sprintf(
+			"this feature ships nothing but host commands; publish it with `kind: %s` and install it with `%s %s add`",
+			model.ExtensionKindCommand, model.AppName, model.KindCommand.DirName()))
+	}
 	for _, warning := range warnings {
 		env.outcome(markWarn, logx.ColorYellow, "%s", warning)
 	}
@@ -446,16 +450,21 @@ func changesReachImage(changes []changedFile) bool {
 // its own when the extension's content changed, but an opt-in feature still has
 // to be enabled. The image identity hash is content-based and excludes the
 // provenance sidecar, so re-pinning to a new commit that carries identical
-// content rebuilds nothing and must not say otherwise.
+// content rebuilds nothing and must not say otherwise. Only a run that uses the
+// extension rebuilds, so the note names that run.
 func printPostInstallHints(env Env, kind model.ExtensionKind, name string, caps capabilities, contentChanged bool) {
-	if contentChanged {
-		env.note("the next run rebuilds the image")
-	}
-	if kind != model.KindFeature {
-		return
-	}
-	if caps.Spec.DefaultEnabled != nil && !*caps.Spec.DefaultEnabled {
-		env.note("enable it with: enclave --features +%s", name)
+	switch kind {
+	case model.KindTool:
+		if contentChanged {
+			env.note("the next run of %s rebuilds the image", name)
+		}
+	case model.KindFeature:
+		if contentChanged {
+			env.note("the next run with %s enabled rebuilds the image", name)
+		}
+		if caps.Spec.DefaultEnabled != nil && !*caps.Spec.DefaultEnabled {
+			env.note("enable it with: %s --features +%s", model.AppName, name)
+		}
 	}
 }
 

@@ -7,23 +7,34 @@
 
 package model
 
-// ExtensionKind distinguishes the two extension flavours as the CLI presents
-// them. The on-disk spec spells the same distinction `kind: sandbox|mixin`;
+// ExtensionKind distinguishes the extension flavours as the CLI presents
+// them. The on-disk spec spells the same distinction `kind: sandbox|mixin|command`;
 // SpecKind maps a kind to that token.
 type ExtensionKind string
 
 const (
 	KindTool    ExtensionKind = "tool"
 	KindFeature ExtensionKind = "feature"
+	// KindCommand ships host commands only. It never reaches an image.
+	KindCommand ExtensionKind = "command"
 )
+
+// ExtensionKinds lists every kind in the order host command names resolve:
+// an extension that exists only for its verbs claims a name before one whose
+// verbs are a side feature.
+var ExtensionKinds = []ExtensionKind{KindCommand, KindTool, KindFeature}
 
 // SpecKind is the `kind` token an extension of this kind declares in its spec
 // document, and the Extension.Type it loads as.
 func (k ExtensionKind) SpecKind() string {
-	if k == KindTool {
+	switch k {
+	case KindTool:
 		return ExtensionKindSandbox
+	case KindCommand:
+		return ExtensionKindCommand
+	default:
+		return ExtensionKindMixin
 	}
-	return ExtensionKindMixin
 }
 
 // ExtensionKindFor maps an on-disk spec kind token back to the kind it names.
@@ -34,6 +45,8 @@ func ExtensionKindFor(specKind string) (ExtensionKind, bool) {
 		return KindTool, true
 	case ExtensionKindMixin:
 		return KindFeature, true
+	case ExtensionKindCommand:
+		return KindCommand, true
 	default:
 		return "", false
 	}
@@ -42,19 +55,15 @@ func ExtensionKindFor(specKind string) (ExtensionKind, bool) {
 // DirName is the plural name of this kind: the subdirectory of an extension
 // root holding it, and the CLI parent command that manages it.
 func (k ExtensionKind) DirName() string {
-	if k == KindTool {
+	switch k {
+	case KindTool:
 		return "tools"
+	case KindCommand:
+		return "commands"
+	default:
+		return "features"
 	}
-	return "features"
 }
 
 // Label is the singular noun used in messages.
 func (k ExtensionKind) Label() string { return string(k) }
-
-// Other is the opposite kind.
-func (k ExtensionKind) Other() ExtensionKind {
-	if k == KindTool {
-		return KindFeature
-	}
-	return KindTool
-}

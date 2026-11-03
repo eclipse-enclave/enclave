@@ -39,6 +39,10 @@ func OptionSpecs() []OptionSpec {
 			},
 		},
 		{
+			Name:  "disabled_commands",
+			Group: OptionGroupGlobal,
+		},
+		{
 			Name:  "tool",
 			Group: OptionGroupRun,
 			ApplyDefaultsWithSource: func(opts *model.Options, defaults Defaults, source model.OptionSource, sources *model.OptionSources) {

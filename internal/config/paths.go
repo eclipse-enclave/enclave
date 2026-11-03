@@ -86,6 +86,7 @@ func resolveUserExtensionPaths(paths *model.Paths, home string) {
 	paths.UserExtensionsDir = userExtensionsDir
 	paths.UserToolsDir = filepath.Join(userExtensionsDir, model.KindTool.DirName())
 	paths.UserFeaturesDir = filepath.Join(userExtensionsDir, model.KindFeature.DirName())
+	paths.UserCommandExtensionsDir = filepath.Join(userExtensionsDir, model.KindCommand.DirName())
 }
 
 // HasUserExtensions reports whether the user extension root exists on disk.

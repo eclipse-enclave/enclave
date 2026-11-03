@@ -47,22 +47,30 @@ func ValidateExtensionName(name string) error {
 
 // ExtensionRoots returns the built-in and user extension roots holding
 // extensions of kind. The user root is empty when no host config root could be
-// resolved.
+// resolved, and the built-in root is empty for command extensions, which never
+// ship built in.
 func ExtensionRoots(paths model.Paths, kind model.ExtensionKind) (builtinRoot string, userRoot string) {
-	if kind == model.KindTool {
+	switch kind {
+	case model.KindTool:
 		return paths.ToolsDir, paths.UserToolsDir
+	case model.KindCommand:
+		return "", paths.UserCommandExtensionsDir
+	default:
+		return paths.FeaturesDir, paths.UserFeaturesDir
 	}
-	return paths.FeaturesDir, paths.UserFeaturesDir
 }
 
 // withUserExtensionRoot points the user extension root of kind at root,
 // leaving every other path untouched.
 func withUserExtensionRoot(paths model.Paths, kind model.ExtensionKind, root string) model.Paths {
-	if kind == model.KindTool {
+	switch kind {
+	case model.KindTool:
 		paths.UserToolsDir = root
-		return paths
+	case model.KindCommand:
+		paths.UserCommandExtensionsDir = root
+	default:
+		paths.UserFeaturesDir = root
 	}
-	paths.UserFeaturesDir = root
 	return paths
 }
 
@@ -160,8 +168,10 @@ func ResolveFeatureFile(paths model.Paths, featureName string, fileName string) 
 // exist. SourceLabel classifies the result.
 func ResolveExtensionDirs(paths model.Paths, kind model.ExtensionKind, name string) (builtinDir string, userDir string) {
 	builtinRoot, userRoot := ExtensionRoots(paths, kind)
-	if builtin := filepath.Join(builtinRoot, name); util.IsDir(builtin) {
-		builtinDir = builtin
+	if builtinRoot != "" {
+		if builtin := filepath.Join(builtinRoot, name); util.IsDir(builtin) {
+			builtinDir = builtin
+		}
 	}
 	if userRoot != "" {
 		if candidate := filepath.Join(userRoot, name); util.IsDir(candidate) {
@@ -312,6 +322,25 @@ func ListFeatures(paths model.Paths) ([]model.Extension, error) {
 	})
 
 	return features, nil
+}
+
+// ListCommandExtensions returns the installed command extensions, sorted by
+// name. One whose spec does not load is skipped with a warning.
+func ListCommandExtensions(paths model.Paths) ([]model.Extension, error) {
+	names, err := listSpecNames(paths, KindCommand)
+	if err != nil {
+		return nil, err
+	}
+	var exts []model.Extension
+	for _, name := range names {
+		ext, err := LoadExtension(paths, model.KindCommand, name)
+		if err != nil {
+			specWarn(fmt.Sprintf("command extension %q: %v; skipping", name, err))
+			continue
+		}
+		exts = append(exts, ext)
+	}
+	return exts, nil
 }
 
 // listExtensionDirNames merges the extension directory names found in two

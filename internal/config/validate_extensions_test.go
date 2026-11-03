@@ -336,13 +336,14 @@ func newValidationPaths(t *testing.T) model.Paths {
 
 func testValidationPaths(root string) model.Paths {
 	return model.Paths{
-		ToolsDir:          filepath.Join(root, "extensions", "tools"),
-		FeaturesDir:       filepath.Join(root, "extensions", "features"),
-		UserToolsDir:      filepath.Join(root, ".enclave", "extensions", "tools"),
-		UserFeaturesDir:   filepath.Join(root, ".enclave", "extensions", "features"),
-		AllowlistsDir:     filepath.Join(root, "runtime-assets", "gateway-allowlists"),
-		ExtensionsDir:     filepath.Join(root, "extensions"),
-		UserExtensionsDir: filepath.Join(root, ".enclave", "extensions"),
+		ToolsDir:                 filepath.Join(root, "extensions", "tools"),
+		FeaturesDir:              filepath.Join(root, "extensions", "features"),
+		UserToolsDir:             filepath.Join(root, ".enclave", "extensions", "tools"),
+		UserFeaturesDir:          filepath.Join(root, ".enclave", "extensions", "features"),
+		UserCommandExtensionsDir: filepath.Join(root, ".enclave", "extensions", "commands"),
+		AllowlistsDir:            filepath.Join(root, "runtime-assets", "gateway-allowlists"),
+		ExtensionsDir:            filepath.Join(root, "extensions"),
+		UserExtensionsDir:        filepath.Join(root, ".enclave", "extensions"),
 	}
 }
 

@@ -28,13 +28,12 @@ URL:            https://github.com/eclipse-enclave/enclave
 Source0:        %{name}-%{version}.tar.gz
 
 BuildRequires:  golang >= 1.24
-Requires:       (docker-ce or moby-engine)
-Requires:       (docker-buildx-plugin or docker-buildx)
+Requires:       (((docker-ce or moby-engine) and (docker-buildx-plugin or docker-buildx)) or podman)
 Requires:       git >= 2.26
 
 %description
 Enclave provides isolated container environments for AI coding assistants and
-development tools. It manages Docker containers with network isolation,
+development tools. It manages Docker or Podman containers with network isolation,
 authentication injection, and tool-specific configurations.
 
 %prep

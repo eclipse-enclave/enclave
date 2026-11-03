@@ -50,9 +50,13 @@ sudo dnf install docker docker-buildx
 sudo systemctl enable --now docker
 ```
 
-Access to the Docker socket is required. To use the `docker` group on either
-distribution, add your user and then sign out and back in, or run `newgrp docker`
-to apply the membership in the current terminal:
+To use Podman instead, install it with `sudo apt-get install podman netavark git` on
+Ubuntu 24.04 or `sudo dnf install podman git` on Fedora 44. Podman supports
+rootless use and does not need Docker's buildx plugin or daemon setup.
+
+For Docker, access to the Docker socket is required. To use the `docker` group
+on either distribution, add your user and then sign out and back in, or run
+`newgrp docker` to apply the membership in the current terminal:
 
 ```bash
 sudo gpasswd -a "$USER" docker
@@ -73,6 +77,10 @@ config; `--allow-sensitive-mounts` lifts the check for all of them (see
 On macOS, install Docker Desktop and the source-build dependencies above.
 
 ## Installation
+
+The Debian and RPM packages accept either Docker (with buildx) or Podman.
+Docker is the default dependency when neither engine is installed. To use
+Podman, install it with the commands above before installing the package.
 
 ### Debian package (recommended)
 

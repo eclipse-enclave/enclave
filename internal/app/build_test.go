@@ -854,6 +854,9 @@ func TestCheckRuntimeImageBuildPreflightFailsWithoutBuildx(t *testing.T) {
 			if !strings.Contains(err.Error(), "docker buildx is unavailable") {
 				t.Fatalf("unexpected error: %v", err)
 			}
+			if !strings.HasSuffix(err.Error(), "See https://docs.docker.com/go/buildx/") {
+				t.Fatalf("expected buildx documentation link at the end: %v", err)
+			}
 			if !tc.wantPodmanHint {
 				if strings.Contains(err.Error(), "podman") || strings.Contains(err.Error(), "Podman") {
 					t.Fatalf("suggested unavailable podman: %v", err)

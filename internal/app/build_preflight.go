@@ -66,7 +66,7 @@ func checkRuntimeImageBuildPreflight(ctx context.Context) error {
 	// front with guidance instead of surfacing a mid-build syntax error.
 	// podman builds with buildah, which handles that syntax natively.
 	if !docker.IsPodman() && !dockerBuildxAvailable(ctx) {
-		message := "docker buildx is unavailable, but building the sandbox image requires BuildKit. Install the Docker buildx plugin for your platform (packaged as docker-buildx or docker-buildx-plugin; included in Docker Desktop), then retry. See https://docs.docker.com/go/buildx/"
+		message := "docker buildx is unavailable, but building the sandbox image requires BuildKit. Install the Docker buildx plugin for your platform (packaged as docker-buildx or docker-buildx-plugin; included in Docker Desktop), then retry."
 		if slices.Contains(detectContainerCLIs(), backend.NamePodman) {
 			configPath, err := config.GlobalConfigPath()
 			if err != nil {
@@ -74,7 +74,7 @@ func checkRuntimeImageBuildPreflight(ctx context.Context) error {
 			}
 			message += fmt.Sprintf(" Podman is installed and does not require buildx. Use --backend podman or set \"backend\": \"podman\" in %s.", configPath)
 		}
-		return fmt.Errorf("%s", message)
+		return fmt.Errorf("%s See https://docs.docker.com/go/buildx/", message)
 	}
 
 	rootDir, freeBytes, err := dockerRootFreeSpace(ctx)

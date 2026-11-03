@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"enclave/internal/backend"
 	"enclave/internal/model"
@@ -26,14 +27,23 @@ const exitedSession = "enclave-pi-abc123abc123-leak"
 const exitedSessionGatewayStubScript = `eval last=\${$#}
 case "$1" in
 ps)
+	case " $* " in
+	*' status=running '*) [ "$STUB_GATEWAY_STATUS" = running ] || exit 0 ;;
+	esac
 	echo gwid
 	;;
 container)
 	case "$last" in
 	gwid)
-		printf '%s\n' '{"Id":"gwid","Name":"/@SESSION@-gateway","Config":{"Labels":{"MANAGED_LABEL":"true","CONTAINER_LABEL":"@SESSION@","PROJECT_LABEL":"abc123abc123"}},"State":{"Status":"running","Running":true}}'
+		running=false
+		if [ "$STUB_GATEWAY_STATUS" = running ]; then running=true; fi
+		printf '%s\n' '{"Id":"gwid","Name":"/'"$STUB_GATEWAY_NAME"'","Config":{"Labels":{"MANAGED_LABEL":"'"$STUB_GATEWAY_MANAGED"'","CONTAINER_LABEL":"@SESSION@","PROJECT_LABEL":"'"$STUB_GATEWAY_HASH"'"}},"State":{"Status":"'"$STUB_GATEWAY_STATUS"'","Running":'"$running"',"FinishedAt":"'"$STUB_FINISHED_AT"'"}}'
 		;;
 	@SESSION@)
+		if [ "$STUB_SESSION_STATUS" = "inspect-error" ]; then
+			echo 'Error: permission denied' >&2
+			exit 1
+		fi
 		if [ "$STUB_SESSION_STATUS" = "missing" ]; then
 			echo "Error: No such container: $last" >&2
 			exit 1
@@ -46,12 +56,23 @@ container)
 		;;
 	esac
 	;;
+rm)
+	if [ "$STUB_SESSION_STATUS" != missing ]; then
+		echo 'Error: container gwid has dependent containers which must be removed before it' >&2
+		exit 1
+	fi
+	;;
 esac
 exit 0
 `
 
 func stubExitedSessionGateway(t *testing.T, sessionStatus string, sessionHash string) string {
 	t.Helper()
+	t.Setenv("STUB_GATEWAY_STATUS", "running")
+	t.Setenv("STUB_GATEWAY_NAME", exitedSession+model.GatewayContainerSuffix)
+	t.Setenv("STUB_GATEWAY_HASH", "abc123abc123")
+	t.Setenv("STUB_GATEWAY_MANAGED", "true")
+	t.Setenv("STUB_FINISHED_AT", time.Now().Add(-2*time.Minute).UTC().Format(time.RFC3339Nano))
 	t.Setenv("STUB_SESSION_STATUS", sessionStatus)
 	t.Setenv("STUB_SESSION_HASH", sessionHash)
 	t.Setenv("STUB_SESSION_BACKGROUND", "true")
@@ -78,10 +99,41 @@ func TestStopExitedSessionGatewaysStopsGatewayByID(t *testing.T) {
 			if !slices.Equal(names, []string{exitedSession + model.GatewayContainerSuffix}) {
 				t.Fatalf("unexpected gateways %v", names)
 			}
-			if calls := stubCalls(t, logPath); !hasCallWithPrefix(calls, "stop --time 3 gwid") {
-				t.Fatalf("expected the gateway to be stopped by ID, got %v", calls)
+			calls := stubCalls(t, logPath)
+			if !hasCallWithPrefix(calls, "stop --time 3 gwid") || hasCallWithPrefix(calls, "rm ") {
+				t.Fatalf("expected stop-only while the dependent session exists, got %v", calls)
 			}
 		})
+	}
+}
+
+func TestStopExitedSessionGatewaysKeepsStoppedGatewayWithDependentSession(t *testing.T) {
+	for _, status := range []string{"exited", "dead", "stopped"} {
+		t.Run(status, func(t *testing.T) {
+			logPath := stubExitedSessionGateway(t, "exited", "abc123abc123")
+			t.Setenv("STUB_GATEWAY_STATUS", status)
+			_, err := StopExitedSessionGateways(context.Background(), "", false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			calls := stubCalls(t, logPath)
+			if hasCallWithPrefix(calls, "stop ") || hasCallWithPrefix(calls, "rm ") {
+				t.Fatalf("stopped gateway must wait for session removal: %v", calls)
+			}
+		})
+	}
+}
+
+func TestStopExitedSessionGatewaysLeavesCreatedGateway(t *testing.T) {
+	logPath := stubExitedSessionGateway(t, "exited", "abc123abc123")
+	t.Setenv("STUB_GATEWAY_STATUS", "created")
+	_, err := StopExitedSessionGateways(context.Background(), "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	calls := stubCalls(t, logPath)
+	if hasCallWithPrefix(calls, "stop ") || hasCallWithPrefix(calls, "rm ") {
+		t.Fatalf("must not tear down a gateway still being created: %v", calls)
 	}
 }
 

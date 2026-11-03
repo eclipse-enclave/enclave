@@ -10,6 +10,7 @@ package gateway
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -20,8 +21,8 @@ import (
 	"enclave/internal/model"
 )
 
-// The CLI stub records calls but never reports gateway readiness.
-// STUB_RUN_OUTPUT, STUB_RUN_EXIT, and STUB_INSPECT_JSON control responses.
+// The CLI stub records calls and simulates retained logs after a fast exit.
+// STUB_* variables control run, inspect, and log responses.
 func withGatewayCLIStub(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -30,8 +31,34 @@ func withGatewayCLIStub(t *testing.T) string {
 	script := `#!/bin/sh
 printf '%s\n' "$*" >> "$STUB_CALL_LOG"
 case "$1" in
-run) printf '%s\n' "${STUB_RUN_OUTPUT-gw123}"; exit "${STUB_RUN_EXIT:-0}" ;;
-container) printf '%s\n' "$STUB_INSPECT_JSON" ;;
+image) printf '{}\n' ;;
+run)
+    touch "$STUB_CALL_LOG.created"
+    case " $* " in *" --rm "*) touch "$STUB_CALL_LOG.removed" ;; esac
+    printf '%s\n' "${STUB_RUN_OUTPUT-gw123}"
+    exit "${STUB_RUN_EXIT:-0}"
+    ;;
+container)
+    if [ "${STUB_MISSING_BEFORE_RUN:-0}" = 1 ] && [ ! -f "$STUB_CALL_LOG.created" ]; then
+        echo 'Error: No such container' >&2
+        exit 1
+    fi
+    printf '%s\n' "$STUB_INSPECT_JSON"
+    ;;
+logs)
+    if [ -f "$STUB_CALL_LOG.removed" ]; then
+        echo 'Error: No such container' >&2
+        exit 1
+    fi
+    if [ "$2" = --tail ]; then
+        printf '%s\n' "${STUB_FINAL_LOGS:-}"
+    else
+        printf '%s\n' "${STUB_READY_LOGS:-}"
+    fi
+    exit "${STUB_LOG_EXIT:-0}"
+    ;;
+stop) exit "${STUB_STOP_EXIT:-0}" ;;
+rm) touch "$STUB_CALL_LOG.removed" ;;
 esac
 exit 0
 `
@@ -196,6 +223,100 @@ func TestWaitForGatewayReadyStopsOnCancelledContext(t *testing.T) {
 	err := waitForGatewayReady(ctx, "session-gateway", time.Now())
 	if err == nil || !strings.Contains(err.Error(), "interrupted while waiting for gateway readiness") {
 		t.Fatalf("expected an interruption error, got %v", err)
+	}
+}
+
+func TestStartRetainsImmediateExitDiagnosticsUntilCleanup(t *testing.T) {
+	logPath := withGatewayCLIStub(t)
+	t.Setenv("STUB_MISSING_BEFORE_RUN", "1")
+	t.Setenv("STUB_INSPECT_JSON", stubInspectJSON(t, "exited", false, sessionGatewayConfig().Labels))
+	const diagnostic = "dnsmasq: cannot read /tmp/enclave-gateway-init.test/dnsmasq.conf: Permission denied"
+	t.Setenv("STUB_FINAL_LOGS", "[enclave-gateway] dnsmasq config validation failed\n"+diagnostic)
+
+	_, err := Start(context.Background(), StartConfig{
+		Profile: model.Profile{Name: "claude"}, ContainerName: "session",
+		NetworkName: "network", ProjectHash: "hash", Home: t.TempDir(), NoRebuild: true,
+	})
+	if err == nil || !strings.Contains(err.Error(), diagnostic) || !strings.Contains(err.Error(), "gateway exited during startup") {
+		t.Fatalf("expected the original failure and final dnsmasq output, got %v", err)
+	}
+	calls := stubCalls(t, logPath)
+	for _, call := range calls {
+		if strings.HasPrefix(call, "run ") && strings.Contains(" "+call+" ", " --rm ") {
+			t.Fatalf("startup must retain the container for diagnostics, got %s", call)
+		}
+	}
+	if !hasCall(calls, "container inspect --format {{json .}} gw123") {
+		t.Fatalf("readiness must inspect the immutable ID, got %v", calls)
+	}
+	if len(calls) < 2 || calls[len(calls)-2] != "logs --tail 40 gw123" || calls[len(calls)-1] != "rm --force --volumes gw123" {
+		t.Fatalf("expected final logs before removal by ID, got %v", calls)
+	}
+}
+
+func TestStartGatewayContainerReadyDoesNotRemoveOrReportLogs(t *testing.T) {
+	logPath := withGatewayCLIStub(t)
+	t.Setenv("STUB_READY_LOGS", "[enclave-gateway] Gateway ready")
+	id, err := startGatewayContainer(context.Background(), sessionGatewayConfig(), &docker.HostConfig{}, "session-gateway")
+	if err != nil || id != "gw123" {
+		t.Fatalf("start = %q, %v", id, err)
+	}
+	calls := stubCalls(t, logPath)
+	assertNoCallWithPrefix(t, calls, "rm ", "ready gateway must survive")
+	assertNoCallWithPrefix(t, calls, "logs --tail", "successful starts need no error output")
+}
+
+func TestGatewayStartupErrorPreservesExpiredDeadlineAndBoundsOutput(t *testing.T) {
+	withGatewayCLIStub(t)
+	t.Setenv("STUB_FINAL_LOGS", strings.Repeat("x", 20*1024)+"\nfinal diagnostic")
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer cancel()
+	err := gatewayStartupError(ctx, "gw123", context.DeadlineExceeded)
+	if !errors.Is(err, context.DeadlineExceeded) || !strings.Contains(err.Error(), "final diagnostic") {
+		t.Fatalf("expected original deadline error and diagnostics, got %v", err)
+	}
+	if len(err.Error()) > 17*1024 || !strings.Contains(err.Error(), "[truncated]") {
+		t.Fatalf("unbounded or unmarked output: %d bytes", len(err.Error()))
+	}
+}
+
+func TestGatewayStartupErrorSkipsLogsAfterUserCancellation(t *testing.T) {
+	for _, cancelContext := range []bool{false, true} {
+		logPath := withGatewayCLIStub(t)
+		ctx, cancel := context.WithCancel(context.Background())
+		cause := context.Canceled
+		if cancelContext {
+			cancel()
+			cause = errors.New("engine command interrupted")
+		}
+		err := gatewayStartupError(ctx, "gw123", cause)
+		cancel()
+		if err != cause || len(stubCalls(t, logPath)) != 0 {
+			t.Fatalf("cancellation must return immediately without reading logs: %v", err)
+		}
+	}
+}
+
+func TestGatewayStartupErrorLogFailurePreservesCause(t *testing.T) {
+	withGatewayCLIStub(t)
+	t.Setenv("STUB_LOG_EXIT", "1")
+	cause := errors.New("gateway failed")
+	if err := gatewayStartupError(context.Background(), "gw123", cause); err != cause {
+		t.Fatalf("log failure hid original error: %v", err)
+	}
+}
+
+func TestStopContainerRemovesRetainedGatewayByID(t *testing.T) {
+	for _, stopExit := range []string{"0", "1"} {
+		t.Run("stop exit "+stopExit, func(t *testing.T) {
+			logPath := withGatewayCLIStub(t)
+			t.Setenv("STUB_STOP_EXIT", stopExit)
+			StopContainer("gw123")
+			calls := stubCalls(t, logPath)
+			if len(calls) != 2 || calls[0] != "stop --time 3 gw123" || calls[1] != "rm --force --volumes gw123" {
+				t.Fatalf("expected stop then removal of the same ID, got %v", calls)
+			}
+		})
 	}
 }
 

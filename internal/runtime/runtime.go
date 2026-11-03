@@ -346,7 +346,7 @@ func (r *Runtime) stopExitedSessionGateways() {
 		return
 	}
 	if err := stopper.StopExitedSessionGateways(context.Background()); err != nil {
-		logx.Warnf("Failed to check for gateways of exited sessions: %v", err)
+		logx.Debugf("Gateway cleanup of exited sessions had errors: %v", err)
 	}
 }
 

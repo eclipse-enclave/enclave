@@ -232,9 +232,10 @@ type NetworkEndpoint struct {
 
 // ContainerState is the subset of a container's runtime state we consume.
 type ContainerState struct {
-	Status  string `json:"Status"`
-	Running bool   `json:"Running"`
-	Error   string `json:"Error"`
+	Status     string `json:"Status"`
+	Running    bool   `json:"Running"`
+	Error      string `json:"Error"`
+	FinishedAt string `json:"FinishedAt"`
 }
 
 // MountPoint is an entry in `docker inspect`'s Mounts array.

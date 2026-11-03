@@ -461,7 +461,7 @@ func printEphemeralCleanupPlan(gateways []string, containers []string, networks 
 		return
 	}
 	for _, gateway := range gateways {
-		logx.Infof("Would stop gateway: %s", gateway)
+		logx.Infof("Would stop or remove gateway: %s", gateway)
 	}
 	for _, container := range containers {
 		logx.Infof("Would remove container: %s", container)
@@ -485,7 +485,7 @@ func cleanupContainers(containers []string) {
 func stopExitedSessionGateways(run model.RunOptions, cleanup model.CleanupOptions, project model.Project, dryRun bool) []string {
 	names, err := backenddocker.StopExitedSessionGateways(context.Background(), cleanupOwnerPrefix(run, cleanup, project), dryRun)
 	if err != nil {
-		logx.Warnf("Failed to list gateway containers of exited sessions: %v", err)
+		logx.Debugf("Gateway cleanup of exited sessions had errors: %v", err)
 	}
 	return names
 }

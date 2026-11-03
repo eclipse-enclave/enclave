@@ -395,7 +395,12 @@ func portBindingFlags(bindings PortMap) []string {
 			if binding.HostIP != "" {
 				spec = binding.HostIP + ":"
 			}
-			spec += binding.HostPort + ":" + port.Num() + "/" + port.Proto()
+			hostPort := binding.HostPort
+			if hostPort == "0" {
+				// Both engines accept an empty host port; Podman rejects "0".
+				hostPort = ""
+			}
+			spec += hostPort + ":" + port.Num() + "/" + port.Proto()
 			out = append(out, "--publish", spec)
 		}
 	}

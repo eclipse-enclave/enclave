@@ -83,7 +83,7 @@ supported under `tool_overrides.<tool>`.
 | `use_remote_user` | Honor devcontainer `remoteUser` for agent sessions |
 | `network_log` | Network audit mode: `coarse` (default, one event per TLS connection) or `requests` (one event per HTTP/HTTPS request, forcing MITM). See [Coverage and granularity](networking.md#coverage-and-granularity) |
 | `verbose` | Verbose logging |
-| `ports` | Publish container ports to the host (container → host) |
+| `ports` | Publish container ports to the host (container → host); `0:3000` assigns a free host port on Docker and Podman (see [port publishing](networking.md#port-direction--p-vs---bridge-port)) |
 | `add_dirs` | Additional directories to mount |
 | `add_readonly_dirs` | Additional directories to mount read-only |
 | `sensitive_dir_exceptions` | Paths whose subtrees may be mounted although they are sensitive; mounts nothing. See [Sensitive-dir exceptions](cli-reference.md#sensitive-dir-exceptions) |

@@ -91,12 +91,13 @@ type Command struct {
 // session symlink with an absolute hop, a hop that escapes the directory, or a
 // loop warns and is skipped. Host symlinks may point anywhere.
 //
-// Names are resolved in precedence order: the user's own host/ tree, then their
-// session/ tree, then installed extensions in model.ExtensionKinds order. Every loser is reported rather than
-// dropped silently, so installing an extension can never quietly take a name
-// the user is already using. A name listed in the global disabled_commands
-// resolves to nothing at all, whichever source would have won it. Results are
-// returned in deterministic (name-sorted) order.
+// Names are resolved in precedence order: the user's own host/ tree, then
+// their session/ tree, then installed extensions in model.ExtensionKinds
+// order. Every loser is reported rather than dropped silently, so installing
+// an extension can never quietly take a name the user is already using. A
+// name listed in the global disabled_commands resolves to nothing at all and
+// takes no part in that resolution, so it raises no collision warnings.
+// Results are returned in deterministic (name-sorted) order.
 func Discover(home string) ([]Command, []string) {
 	hostCmds, warnings := scanDir(config.HostCommandsHostDir(home), TargetHost, sourceUser)
 	sessionCmds, sessionWarnings := scanDir(config.HostCommandsSessionDir(home), TargetSession, sourceUser)
@@ -104,11 +105,23 @@ func Discover(home string) ([]Command, []string) {
 	extensionCmds, extensionWarnings := scanExtensions(home)
 	warnings = append(warnings, extensionWarnings...)
 
+	disabledNames, _ := config.DisabledCommands(home)
+	disabled := make(map[string]bool, len(disabledNames))
+	for _, name := range disabledNames {
+		disabled[name] = true
+	}
+
 	byName := make(map[string]Command, len(hostCmds)+len(sessionCmds)+len(extensionCmds))
 	for _, c := range hostCmds {
+		if disabled[c.Name] {
+			continue
+		}
 		byName[c.Name] = c
 	}
 	for _, c := range sessionCmds {
+		if disabled[c.Name] {
+			continue
+		}
 		if existing, ok := byName[c.Name]; ok {
 			warnings = append(warnings, fmt.Sprintf(
 				"user command %q defined in both host (%s) and session (%s); using host, ignoring session",
@@ -118,16 +131,14 @@ func Discover(home string) ([]Command, []string) {
 		byName[c.Name] = c
 	}
 	for _, c := range extensionCmds {
+		if disabled[c.Name] {
+			continue
+		}
 		if existing, ok := byName[c.Name]; ok {
 			warnings = append(warnings, shadowedExtensionWarning(c, existing))
 			continue
 		}
 		byName[c.Name] = c
-	}
-
-	disabled, _ := config.DisabledCommands(home)
-	for _, name := range disabled {
-		delete(byName, name)
 	}
 
 	cmds := make([]Command, 0, len(byName))

@@ -468,9 +468,10 @@ func validateToolOverrideHostConfigPaths(path string, toolName string, values []
 }
 
 // stripGlobalOnlyKeys drops the binary update options and disabled_commands,
-// which only make sense for the whole host, from project config; readDefaults already drops them from
-// tool_overrides in either file. Project config is host-owned, out of reach of
-// sessions, so it may otherwise set anything global config can.
+// which only make sense for the whole host, from project config; readDefaults
+// already drops them from tool_overrides in either file. Project config is
+// host-owned, out of reach of sessions, so it may otherwise set anything
+// global config can.
 func stripGlobalOnlyKeys(path string, defaults *Defaults) []Warning {
 	if defaults == nil {
 		return nil

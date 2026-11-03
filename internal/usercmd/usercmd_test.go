@@ -749,10 +749,14 @@ func TestDiscoverSkipsDisabledCommands(t *testing.T) {
 	writeExec(t, filepath.Join(featureDir, "usage"))
 	writeGlobalConfig(t, home, `{"disabled_commands": ["usage", "mine"]}`)
 
-	cmds, _ := Discover(home)
+	cmds, warnings := Discover(home)
 
 	if len(cmds) != 1 || cmds[0].Name != "report" {
 		t.Fatalf("expected only the enabled verb, got %+v", cmds)
+	}
+	// Two extensions claim usage, but neither is used, so neither is reported.
+	if len(warnings) != 0 {
+		t.Fatalf("disabled names still produced warnings: %v", warnings)
 	}
 	got := Shadowed(home, []string{"usage", "report"})
 	if len(got) != 1 || !strings.Contains(got["usage"], "disabled_commands") {

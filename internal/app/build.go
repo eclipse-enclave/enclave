@@ -294,7 +294,12 @@ func linkOrCopyFile(src string, dst string, mode os.FileMode) error {
 
 func mergedExtensionFiles(paths model.Paths, selection runtimeImageSelection) ([]mergedExtensionFile, error) {
 	effective := map[string]mergedExtensionFile{}
-	skipTop := map[string]struct{}{"tools": {}, "features": {}}
+	// Tools and features are overlaid below by selection; command extensions
+	// never reach the image.
+	skipTop := map[string]struct{}{}
+	for _, kind := range model.ExtensionKinds {
+		skipTop[kind.DirName()] = struct{}{}
+	}
 	if err := overlayFilesFromDir(effective, "extensions", paths.ExtensionsDir, skipTop); err != nil {
 		return nil, err
 	}

@@ -8,8 +8,8 @@
 package model
 
 // ExtensionKind distinguishes the extension flavours as the CLI presents
-// them. The on-disk spec spells the same distinction `kind: sandbox|mixin|command`;
-// SpecKind maps a kind to that token.
+// them. The on-disk spec spells the same distinction
+// `kind: sandbox|mixin|command`; SpecKind maps a kind to that token.
 type ExtensionKind string
 
 const (

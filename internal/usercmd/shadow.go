@@ -55,8 +55,9 @@ var BuiltinNames = []string{
 
 // Shadowed maps each of an extension's command names that cannot become a
 // verb to the reason: a built-in or a command in the user's own commands/ tree
-// takes it, or the global disabled_commands lists it. Names two extensions share are left out, since which one
-// wins depends on the full set installed and Discover reports it on every run.
+// takes it, or the global disabled_commands lists it. Names two extensions
+// share are left out, since which one wins depends on the full set installed
+// and Discover reports it on every run.
 func Shadowed(home string, names []string) map[string]string {
 	if len(names) == 0 {
 		return nil

@@ -321,14 +321,14 @@ Rules worth knowing before you ship one:
   shows up as `ignoring commands/<name>` on the next run.
 - Names resolve in a fixed order: built-in verbs, then the user's own
   `commands/{host,session}/` trees, then command extensions, tools, and
-  features, alphabetically within each kind.
+  features, alphabetically within each kind. Picking a name a built-in or the
+  user already owns means the command is skipped: `add` and `update` warn and
+  leave it out of the capability summary, and every run warns again. Prefer a
+  name tied to the extension.
 - Users install an extension's commands as a set. To drop one verb without
   removing the extension, they list it in `disabled_commands` in their global
   config. So ship verbs together only when they belong together, and put
-  independent ones in separate extensions that can be added by `--name`. Picking a name a built-in
-  or the user already owns means the command is skipped: `add` and `update`
-  warn and leave it out of the capability summary, and every run warns again.
-  Prefer a name tied to the extension.
+  independent ones in separate extensions that can be added by `--name`.
 - `commands/` never enters the build context or the image identity hash.
   Editing a command forces no rebuild, and the script is not present inside the
   image, so nothing in a session can run it.

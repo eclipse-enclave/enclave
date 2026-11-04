@@ -212,7 +212,10 @@ type FeatureAuthSync struct {
 }
 
 type NetworkPolicy struct {
-	Mode           NetworkMode
+	Mode NetworkMode
+	// Gateway reports whether a gateway sidecar runs alongside the session.
+	// It is independent of Mode, which only states the egress policy.
+	Gateway        bool
 	Egress         EgressPolicy
 	LoopbackPorts  []string
 	IdeBridgePorts []string

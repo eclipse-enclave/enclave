@@ -531,10 +531,10 @@ func deflateMessage(t *testing.T, message string) string {
 	return string(bytes.TrimSuffix(buffer.Bytes(), []byte{0x00, 0x00, 0xff, 0xff}))
 }
 
-// websocketUpstream accepts a WebSocket handshake with permessage-deflate,
+// captureWebSocketUpstream accepts a WebSocket handshake with permessage-deflate,
 // reads want bytes and hands them to received, answers with reply, and then
 // waits for the other side to close.
-func websocketUpstream(want int, reply []byte, received chan<- []byte) http.HandlerFunc {
+func captureWebSocketUpstream(want int, reply []byte, received chan<- []byte) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if !strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
 			http.Error(w, "upgrade required", http.StatusUpgradeRequired)
@@ -609,7 +609,7 @@ func TestProxyCapturesWebSocketMessagesWithoutChangingThem(t *testing.T) {
 
 	for _, captured := range []bool{false, true} {
 		received := make(chan []byte, 1)
-		upstream := httptest.NewServer(websocketUpstream(len(clientSends), serverSends, received))
+		upstream := httptest.NewServer(captureWebSocketUpstream(len(clientSends), serverSends, received))
 		host, hostPort := upstreamHost(t, upstream)
 		p := newProxy([]string{host}, nil, nil, false, nil, testSession)
 		var dir, logPath string
@@ -701,7 +701,7 @@ func TestProxyCapturesWebSocketMessagesWithoutChangingThem(t *testing.T) {
 func TestProxyShowsAnOpenWebSocketAndFinishesItAtShutdown(t *testing.T) {
 	request := wsFrame(0x81, "first turn", true)
 	received := make(chan []byte, 1)
-	upstream := httptest.NewServer(websocketUpstream(len(request), wsFrame(0x81, "first reply", false), received))
+	upstream := httptest.NewServer(captureWebSocketUpstream(len(request), wsFrame(0x81, "first reply", false), received))
 	defer upstream.Close()
 	host, hostPort := upstreamHost(t, upstream)
 	p, dir, logPath := captureProxy(t, []string{host}, nil, netcapture.Options{})

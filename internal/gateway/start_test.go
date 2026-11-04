@@ -257,7 +257,7 @@ func TestStartRetainsImmediateExitDiagnosticsUntilCleanup(t *testing.T) {
 func TestStartGatewayContainerReadyDoesNotRemoveOrReportLogs(t *testing.T) {
 	logPath := withGatewayCLIStub(t)
 	t.Setenv("STUB_READY_LOGS", "[enclave-gateway] Gateway ready")
-	id, err := startGatewayContainer(context.Background(), sessionGatewayConfig(), &docker.HostConfig{}, "session-gateway")
+	id, err := startGatewayContainer(context.Background(), sessionGatewayConfig(), &docker.HostConfig{}, "session-gateway", nil)
 	if err != nil || id != "gw123" {
 		t.Fatalf("start = %q, %v", id, err)
 	}

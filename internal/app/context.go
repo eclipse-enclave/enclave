@@ -8,8 +8,11 @@
 package app
 
 import (
+	"fmt"
+
 	"enclave/internal/config"
 	"enclave/internal/model"
+	"enclave/internal/network"
 )
 
 type AppContext struct {
@@ -50,4 +53,28 @@ func (c *AppContext) Project() (model.Project, error) {
 	c.project = project
 	c.projectResolved = true
 	return project, nil
+}
+
+// PolicyNetworkMode returns the network mode the global and project network
+// policy files set, before --allow-all-network is applied.
+func (c *AppContext) PolicyNetworkMode() (string, error) {
+	host, err := c.Host()
+	if err != nil {
+		return "", err
+	}
+	project, err := c.Project()
+	if err != nil {
+		return "", err
+	}
+	globalPath := network.GlobalPolicyPath(host.Home)
+	globalPolicy, err := network.LoadPolicy(globalPath)
+	if err != nil {
+		return "", fmt.Errorf("load global policy %s: %w", globalPath, err)
+	}
+	projectPath := network.ProjectPolicyPath(host.Home, project.Hash)
+	projectPolicy, err := network.LoadPolicy(projectPath)
+	if err != nil {
+		return "", fmt.Errorf("load project policy %s: %w", projectPath, err)
+	}
+	return network.Merge(network.MergeConfig{GlobalPolicy: globalPolicy, ProjectPolicy: projectPolicy}).Mode, nil
 }

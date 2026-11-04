@@ -40,6 +40,7 @@ func TestMergeDefaultsCoversAllFields(t *testing.T) {
 		PassAPIKey:             &trueVal,
 		PassEnv:                []string{"TEST_ENV"},
 		AllowAllNetwork:        &trueVal,
+		DisableGateway:         &trueVal,
 		NoCache:                &trueVal,
 		NoHistory:              &trueVal,
 		NoMemory:               &trueVal,

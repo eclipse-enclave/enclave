@@ -488,6 +488,15 @@ falls back to `strict` for empty or unknown values.
   tests with the real embedded assets) catch writes by backdating directory
   mtimes under a temporary HOME.
 
+### Gateway opt-out
+
+`--disable-gateway` (config key `disable_gateway`) is valid only in
+unrestricted network mode and never implies it. `validateDisableGateway`
+(`internal/app/validation.go`) checks it for run actions after the qemu
+coercion, which implies it. The mode comes from `--allow-all-network` or,
+through `ValidationContext.PolicyNetworkMode` (`AppContext.PolicyNetworkMode`),
+from the global and project network policy files; a nil hook means restricted.
+
 ### Mount guard
 
 - `resolveAdditionalMounts` (`internal/app/command_run.go`) validates

@@ -41,6 +41,7 @@ type Defaults struct {
 	PassAPIKey             *bool               `json:"pass_api_key"`
 	PassEnv                []string            `json:"pass_env"`
 	AllowAllNetwork        *bool               `json:"allow_all_network"`
+	DisableGateway         *bool               `json:"disable_gateway"`
 	NoCache                *bool               `json:"no_cache"`
 	NoHistory              *bool               `json:"no_history"`
 	NoMemory               *bool               `json:"no_memory"`

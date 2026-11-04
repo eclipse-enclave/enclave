@@ -20,7 +20,7 @@ and [Security boundaries](security/README.md#network-boundary) for the limits.
 | Unrestricted | `--allow-all-network`, `allow_all_network` config key, or `enclave network set-mode unrestricted --global` | No gateway; all outbound traffic allowed |
 
 The experimental `qemu` backend always runs unrestricted: selecting it implies
-`--allow-all-network` with a notice, and `--allow-domain` is rejected.
+`--allow-all-network` and `--disable-gateway` with a notice, and `--allow-domain` is rejected.
 
 ## Adding custom domains
 

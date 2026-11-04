@@ -226,60 +226,162 @@ func assertNoCapturedCredentials(t *testing.T, dir string, secrets ...string) {
 }
 
 func TestCopilotCaptureThroughForwarder(t *testing.T) {
-	const credential = "gho_realcopilot0123456789abcdef"
-	upstream := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		if req.URL.Path == "/login/oauth/access_token" {
-			_, _ = io.WriteString(w, `{"access_token":"`+credential+`","token_type":"bearer","scope":"read:user"}`)
-			return
-		}
-		if req.Header.Get("Authorization") != "Bearer "+credential {
-			t.Error("Copilot release missing")
-		}
-		_, _ = io.WriteString(w, `{"reply":"ok"}`)
-	}))
-	defer upstream.Close()
-	p, logPath, config := oauthTestProxy(t, upstream)
-	config.Tool = "opencode"
-	broker, err := oauthbroker.Open(config)
-	if err != nil {
-		t.Fatal(err)
+	for _, mode := range []string{"clean", "header-value", "header-name", "error-header-name", "upgrade-header-name", "malformed-header"} {
+		t.Run(mode, func(t *testing.T) {
+			const credential = "gho_realcopilot0123456789abcdef"
+			upstream := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				if req.URL.Path == "/login/oauth/access_token" {
+					_, _ = io.WriteString(w, `{"access_token":"`+credential+`","token_type":"bearer","scope":"read:user"}`)
+					return
+				}
+				if req.Header.Get("Authorization") != "Bearer "+credential {
+					t.Error("Copilot release missing")
+				}
+				if mode == "malformed-header" {
+					conn, rw, err := http.NewResponseController(w).Hijack()
+					if err != nil {
+						t.Error(err)
+						return
+					}
+					defer func() { _ = conn.Close() }()
+					_, _ = rw.WriteString("HTTP/1.1 200 OK\r\nX_" + credential + "\x00: present\r\nContent-Length: 0\r\n\r\n")
+					_ = rw.Flush()
+					return
+				}
+				switch mode {
+				case "header-value":
+					w.Header().Set("X-Echo", credential)
+				case "header-name", "error-header-name", "upgrade-header-name":
+					w.Header().Set("X_"+credential, "present")
+				}
+				if mode == "upgrade-header-name" {
+					w.Header().Set("Connection", "Upgrade")
+					w.Header().Set("Upgrade", "websocket")
+					w.WriteHeader(http.StatusSwitchingProtocols)
+					return
+				}
+				if mode == "error-header-name" {
+					w.WriteHeader(http.StatusUnauthorized)
+				}
+				_, _ = io.WriteString(w, `{"reply":"ok"}`)
+			}))
+			defer upstream.Close()
+			p, logPath, config := oauthTestProxy(t, upstream)
+			p.upgradeTransport = p.transport.Clone()
+			t.Cleanup(p.upgradeTransport.CloseIdleConnections)
+			config.Tool = "opencode"
+			broker, err := oauthbroker.Open(config)
+			if err != nil {
+				t.Fatal(err)
+			}
+			p.setBroker(broker)
+			p.allowedDomains = append(p.allowedDomains, "github.com", "api.githubcopilot.com")
+			dir := t.TempDir()
+			p.captures, err = netcapture.Open(netcapture.Options{Dir: dir, Session: testSession})
+			if err != nil {
+				t.Fatal(err)
+			}
+			payload := `{"client_id":"Ov23li8tweQw6odWQebz","device_code":"0123456789abcdef0123456789abcdef01234567","grant_type":"urn:ietf:params:oauth:grant-type:device_code"}`
+			req := httptest.NewRequest(http.MethodPost, "https://github.com/login/oauth/access_token", strings.NewReader(payload))
+			req.Header.Set("Content-Type", "application/json")
+			response := httptest.NewRecorder()
+			p.handler("https")(response, req)
+			var token struct {
+				Access string `json:"access_token"`
+			}
+			if err := json.Unmarshal(response.Body.Bytes(), &token); err != nil || token.Access == "" || token.Access == credential {
+				t.Fatalf("Copilot login status %d", response.Code)
+			}
+			req = httptest.NewRequest(http.MethodPost, "https://api.githubcopilot.com/chat/completions", strings.NewReader(`{}`))
+			req.Header.Set("Authorization", "Bearer "+token.Access)
+			if mode == "upgrade-header-name" {
+				req.Method = http.MethodGet
+				req.Header.Set("Connection", "Upgrade")
+				req.Header.Set("Upgrade", "websocket")
+			}
+			response = httptest.NewRecorder()
+			p.handler("https")(response, req)
+			wantStatus := http.StatusOK
+			if mode != "clean" {
+				wantStatus = http.StatusBadGateway
+			}
+			if response.Code != wantStatus {
+				t.Errorf("Copilot API status %d, want %d", response.Code, wantStatus)
+			}
+			events := readAuditEvents(t, logPath)
+			if len(events) != 2 || events[0].CaptureID == "" || events[1].CaptureID == "" {
+				t.Fatal("missing Copilot captures")
+			}
+			record, err := netcapture.Load(netcapture.RecordPath(dir, events[1].CaptureID))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if record.Request.Headers.Get("Authorization") != "Bearer "+token.Access {
+				t.Fatal("capture did not preserve the handle")
+			}
+			wantError := "oauth-broker-response"
+			if mode == "malformed-header" {
+				wantError = "upstream request failed"
+			}
+			if mode != "clean" && (record.Response != nil || record.Error != wantError) {
+				t.Errorf("reflected header was not blocked by the broker: %+v", record)
+			}
+			assertNoCapturedCredentials(t, dir, credential)
+		})
 	}
-	p.setBroker(broker)
-	p.allowedDomains = append(p.allowedDomains, "github.com", "api.githubcopilot.com")
-	dir := t.TempDir()
-	p.captures, err = netcapture.Open(netcapture.Options{Dir: dir, Session: testSession})
-	if err != nil {
-		t.Fatal(err)
+}
+
+func TestProviderTokenShapeInCaptureHeaders(t *testing.T) {
+	const minted = "glpat-0123456789abcdef0123456789"
+	for _, tc := range []struct {
+		name            string
+		inName, upgrade bool
+	}{
+		{"http-value", false, false}, {"http-name", true, false},
+		{"upgrade-value", false, true}, {"upgrade-name", true, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			upstream := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+				if tc.inName {
+					w.Header().Set("X_"+minted, "present")
+				} else {
+					w.Header().Set("X-Echo", minted)
+				}
+				if tc.upgrade {
+					w.Header().Set("Connection", "Upgrade")
+					w.Header().Set("Upgrade", "websocket")
+					w.WriteHeader(http.StatusSwitchingProtocols)
+				}
+			}))
+			defer upstream.Close()
+			p, logPath, _ := oauthTestProxy(t, upstream)
+			p.allowedDomains = append(p.allowedDomains, "gitlab.com")
+			p.upgradeTransport = p.transport.Clone()
+			t.Cleanup(p.upgradeTransport.CloseIdleConnections)
+			req := httptest.NewRequest(http.MethodGet, "https://gitlab.com/api/v4/user", nil)
+			if tc.upgrade {
+				req.Header.Set("Connection", "Upgrade")
+				req.Header.Set("Upgrade", "websocket")
+			}
+			response := httptest.NewRecorder()
+			p.handler("https")(response, req)
+			if response.Code != http.StatusBadGateway {
+				t.Errorf("provider-shaped header status %d, want 502", response.Code)
+			}
+			event := readAuditEvents(t, logPath)[0]
+			if event.CaptureID == "" {
+				t.Fatal("missing failure capture")
+			}
+			dir := filepath.Join(filepath.Dir(logPath), "capture")
+			record, err := netcapture.Load(netcapture.RecordPath(dir, event.CaptureID))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if record.Response != nil || record.Error != "oauth-broker-response" {
+				t.Errorf("provider-shaped header reached capture: %+v", record)
+			}
+			assertNoCapturedCredentials(t, dir, minted)
+		})
 	}
-	payload := `{"client_id":"Ov23li8tweQw6odWQebz","device_code":"0123456789abcdef0123456789abcdef01234567","grant_type":"urn:ietf:params:oauth:grant-type:device_code"}`
-	req := httptest.NewRequest(http.MethodPost, "https://github.com/login/oauth/access_token", strings.NewReader(payload))
-	req.Header.Set("Content-Type", "application/json")
-	response := httptest.NewRecorder()
-	p.handler("https")(response, req)
-	var token struct {
-		Access string `json:"access_token"`
-	}
-	if err := json.Unmarshal(response.Body.Bytes(), &token); err != nil || token.Access == "" || token.Access == credential {
-		t.Fatalf("Copilot login status %d", response.Code)
-	}
-	req = httptest.NewRequest(http.MethodPost, "https://api.githubcopilot.com/chat/completions", strings.NewReader(`{}`))
-	req.Header.Set("Authorization", "Bearer "+token.Access)
-	response = httptest.NewRecorder()
-	p.handler("https")(response, req)
-	if response.Code != http.StatusOK {
-		t.Fatalf("Copilot API status %d", response.Code)
-	}
-	events := readAuditEvents(t, logPath)
-	if len(events) != 2 || events[0].CaptureID == "" || events[1].CaptureID == "" {
-		t.Fatal("missing Copilot captures")
-	}
-	record, err := netcapture.Load(netcapture.RecordPath(dir, events[1].CaptureID))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if record.Request.Headers.Get("Authorization") != "Bearer "+token.Access {
-		t.Fatal("capture did not preserve the handle")
-	}
-	assertNoCapturedCredentials(t, dir, credential)
 }

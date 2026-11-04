@@ -145,7 +145,10 @@ func oauthTestProxy(t *testing.T, upstream *httptest.Server) (*proxy, string, oa
 		return (&net.Dialer{}).DialContext(ctx, network, upstream.Listener.Addr().String())
 	}
 	p.setBroker(broker)
-	captureDir := t.TempDir()
+	captureDir := filepath.Join(root, "capture")
+	if err := os.Mkdir(captureDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
 	p.captures, err = netcapture.Open(netcapture.Options{Dir: captureDir, Session: testSession})
 	if err != nil {
 		t.Fatal(err)
@@ -733,8 +736,16 @@ func TestOAuthForwarderAbortsResponseReflectingCredential(t *testing.T) {
 		t.Fatal("reflected credential reached the audit log")
 	}
 	events := readAuditEvents(t, logPath)
-	if last := events[len(events)-1]; last.Verdict != netlog.VerdictDeny || last.Rule != "oauth-broker-response" {
+	last := events[len(events)-1]
+	if last.Verdict != netlog.VerdictDeny || last.Rule != "oauth-broker-response" || last.CaptureID == "" {
 		t.Fatalf("tripwire abort audit = %+v", last)
+	}
+	record, err := netcapture.Load(netcapture.RecordPath(filepath.Join(filepath.Dir(logPath), "capture"), last.CaptureID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if record.Error != "oauth-broker-response" || record.Response == nil || record.Response.Body == nil || !record.Response.Body.Truncated {
+		t.Fatalf("tripwire capture is not incomplete: %+v", record)
 	}
 }
 

@@ -354,10 +354,19 @@ func mediateAs(p *provider, req *http.Request, transport http.RoundTripper, secr
 	req.Header.Set("Accept-Encoding", "identity")
 	resp, err := transport.RoundTrip(req)
 	if err != nil {
+		if len(patterns) != 0 || p != nil {
+			// A malformed upstream header can put a credential in
+			// the transport's parse error before a Response exists to scan.
+			return nil, errors.New("upstream request failed")
+		}
 		return nil, err
 	}
-	for _, values := range resp.Header {
-		if slices.ContainsFunc(values, func(value string) bool { return contains([]byte(value), patterns) }) {
+	headerPatterns := patterns
+	if p != nil {
+		headerPatterns = append(slices.Clone(patterns), p.patterns...)
+	}
+	for name, values := range resp.Header {
+		if contains([]byte(name), headerPatterns) || slices.ContainsFunc(values, func(value string) bool { return contains([]byte(value), headerPatterns) }) {
 			_ = resp.Body.Close()
 			return nil, ErrResponse
 		}

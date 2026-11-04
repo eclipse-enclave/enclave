@@ -94,6 +94,8 @@ GitHub, GitLab and Copilot domains, their subdomains, and
 - It aborts any response from these hosts that would echo a real credential, and
   any structured response outside model and file content that carries token
   fields or provider key patterns, before those bytes reach the workload.
+- It checks response header names and values for released credentials and
+  provider credential patterns, including upgrade handshakes.
 - It checks WebSocket handshakes like requests. When a handshake carries a
   released credential, it withholds compression from the handshake and scans
   every server frame, cutting the connection before a frame that would complete
@@ -114,13 +116,14 @@ responses, including session handles instead of native token-endpoint
 credentials. Released credentials are withheld from captured responses and
 server WebSocket frames by the same tripwires that protect the workload.
 Broker-denied exchanges leave no capture. Tripwire-aborted exchanges keep a
-credential-free, incomplete capture with `error: "oauth-broker-response"`.
+credential-free capture with `truncated: true` on the body or WebSocket
+metadata and `error: "oauth-broker-response"`.
 
 This does not scan raw tokens the workload already holds in permitted outgoing
 requests or WebSocket frames. Provider upgrades without a credential release
 also have no released-value tripwire. Those payloads can reach full captures.
 See [unscanned outbound credentials](networking.md#unscanned-outbound-credentials)
-and the `scan-outbound-protected-upgrades` follow-up; additional outbound
+and a follow-up issue for outbound scanning; additional outbound
 scanning is outside this mode's guarantee.
 
 #### Claude subscription

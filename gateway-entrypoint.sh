@@ -494,6 +494,20 @@ setup_kernel_network() {
     fi
 }
 
+# web_redirect adds (-A), deletes (-D) or checks (-C) the nat rule that sends
+# the session's TCP traffic on a web port to the proxy listening for it.
+web_redirect() {
+    firewall="$1"
+    action="$2"
+    port="$3"
+    case "$port" in
+        80) proxy_port=8080 ;;
+        443) proxy_port=8443 ;;
+        *) return 1 ;;
+    esac
+    "$firewall" -t nat "$action" OUTPUT -p tcp --dport "$port" -j REDIRECT --to-ports "$proxy_port"
+}
+
 # redirect_web_traffic_to_proxy sends the session's TCP 80/443 through the
 # proxy so it can be logged. The proxy's own connections and connections to
 # local addresses keep their destination. Rules are only appended: flushing the
@@ -505,8 +519,41 @@ redirect_web_traffic_to_proxy() {
         "$firewall" -t nat -A OUTPUT -p tcp --dport "$port" -m owner --uid-owner "$proxy_uid" -j RETURN || return 1
         "$firewall" -t nat -A OUTPUT -p tcp --dport "$port" -m addrtype --dst-type LOCAL -j RETURN || return 1
     done
-    "$firewall" -t nat -A OUTPUT -p tcp --dport 80 -j REDIRECT --to-ports 8080 || return 1
-    "$firewall" -t nat -A OUTPUT -p tcp --dport 443 -j REDIRECT --to-ports 8443 || return 1
+    web_redirect "$firewall" -A 80 || return 1
+    web_redirect "$firewall" -A 443 || return 1
+}
+
+# stop_redirecting_web_traffic removes the redirects to the proxy. A redirect
+# that was never installed, such as IPv6 NAT that never came up, is not an
+# error; one that is still in place afterwards is, because it points at a dead
+# proxy. The RETURN rules stay: without a redirect after them they do nothing.
+stop_redirecting_web_traffic() {
+    removed="true"
+    for firewall in iptables ip6tables; do
+        command -v "$firewall" >/dev/null 2>&1 || continue
+        for port in 80 443; do
+            web_redirect "$firewall" -D "$port" >/dev/null 2>&1 && continue
+            if web_redirect "$firewall" -C "$port" >/dev/null 2>&1; then
+                log "Failed to remove $firewall redirect for port $port"
+                removed="false"
+            fi
+        done
+    done
+    [ "$removed" = "true" ]
+}
+
+# fail_open_without_proxy keeps an unrestricted session online when its proxy
+# dies: the gateway stays up because the session shares its network namespace,
+# and web traffic goes direct instead of being logged.
+fail_open_without_proxy() {
+    log "Proxy exited unexpectedly; removing HTTP/HTTPS redirects (fail open, see $PROXY_LOG_FILE)"
+    if stop_redirecting_web_traffic; then
+        log "Gateway degraded: traffic on ports 80 and 443 is no longer logged"
+    else
+        log "Gateway degraded: some HTTP/HTTPS traffic still goes to the stopped proxy and will fail"
+    fi
+    PROXY_ENABLED="false"
+    PROXY_PID=""
 }
 
 # setup_observing_network prepares an unrestricted gateway: it forwards the
@@ -748,39 +795,46 @@ on_term() {
     shutdown_gateway 0 "Shutdown signal received"
 }
 
-monitor_loop() {
-    while :; do
-        if [ "$RELOAD_PENDING" = "1" ]; then
-            RELOAD_PENDING="0"
-            if gateway_observes_only; then
-                log "Reload ignored: an unrestricted gateway has no policy to apply"
-            elif ! reload_gateway; then
-                shutdown_gateway 1 "Reload failed; shutting down gateway (fail-closed)"
-            fi
+monitor_tick() {
+    if [ "$RELOAD_PENDING" = "1" ]; then
+        RELOAD_PENDING="0"
+        if gateway_observes_only; then
+            log "Reload ignored: an unrestricted gateway has no policy to apply"
+        elif ! reload_gateway; then
+            shutdown_gateway 1 "Reload failed; shutting down gateway (fail-closed)"
         fi
+    fi
 
-        if ! gateway_observes_only && ! is_pid_running "$DNSMASQ_PID"; then
-            shutdown_gateway 1 "dnsmasq exited unexpectedly"
-        fi
+    if ! gateway_observes_only && ! is_pid_running "$DNSMASQ_PID"; then
+        shutdown_gateway 1 "dnsmasq exited unexpectedly"
+    fi
 
-        if [ "$PROXY_ENABLED" = "true" ] && ! is_pid_running "$PROXY_PID"; then
+    if [ "$PROXY_ENABLED" = "true" ] && ! is_pid_running "$PROXY_PID"; then
+        if gateway_observes_only; then
+            fail_open_without_proxy
+        else
             shutdown_gateway 1 "proxy exited unexpectedly"
         fi
+    fi
 
-        # Auditing is not an enforcement path, so a dead translator must not
-        # take egress down with it. Restart it a bounded number of times, then
-        # say plainly that DNS events are no longer recorded.
-        if [ -n "$DNS_AUDIT_PID" ] && ! is_pid_running "$DNS_AUDIT_PID"; then
-            if [ "$DNS_AUDIT_RESTARTS" -lt 3 ]; then
-                DNS_AUDIT_RESTARTS=$((DNS_AUDIT_RESTARTS + 1))
-                log "DNS audit translator exited; restarting (attempt $DNS_AUDIT_RESTARTS)"
-                start_dns_audit
-            else
-                log "DNS audit translator keeps exiting; DNS denials are no longer recorded (see $DNS_AUDIT_LOG_FILE)"
-                DNS_AUDIT_PID=""
-            fi
+    # Auditing is not an enforcement path, so a dead translator must not
+    # take egress down with it. Restart it a bounded number of times, then
+    # say plainly that DNS events are no longer recorded.
+    if [ -n "$DNS_AUDIT_PID" ] && ! is_pid_running "$DNS_AUDIT_PID"; then
+        if [ "$DNS_AUDIT_RESTARTS" -lt 3 ]; then
+            DNS_AUDIT_RESTARTS=$((DNS_AUDIT_RESTARTS + 1))
+            log "DNS audit translator exited; restarting (attempt $DNS_AUDIT_RESTARTS)"
+            start_dns_audit
+        else
+            log "DNS audit translator keeps exiting; DNS denials are no longer recorded (see $DNS_AUDIT_LOG_FILE)"
+            DNS_AUDIT_PID=""
         fi
+    fi
+}
 
+monitor_loop() {
+    while :; do
+        monitor_tick
         sleep 0.1
     done
 }

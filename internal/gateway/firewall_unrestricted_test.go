@@ -31,7 +31,7 @@ func TestUnrestrictedGatewayFirewall(t *testing.T) {
 	}
 	var out strings.Builder
 	for _, call := range calls {
-		line := call.engine + " " + strings.Join(call.args, " ")
+		line := call.String()
 		out.WriteString(line + "\n")
 		if call.engine == "sysctl" {
 			t.Errorf("observing gateway changed an IPv6 setting: %s", line)
@@ -122,5 +122,126 @@ func TestReadGatewayMode(t *testing.T) {
 				t.Fatalf("mode = %+v, want %s", calls, tc.want)
 			}
 		})
+	}
+}
+
+// deadProxy starts and reaps a child so PROXY_PID names a process that is gone.
+const deadProxy = `true & PROXY_PID=$!; wait "$PROXY_PID"; `
+
+// missingIPv4HTTPRedirect makes the IPv4 port 80 redirect absent: deleting and
+// checking it both fail, as iptables does for a rule that is not installed.
+const missingIPv4HTTPRedirect = `iptables() {
+    firewall_mock iptables "$@"
+    case "$*" in
+        "-t nat -D OUTPUT -p tcp --dport 80 "*|"-t nat -C OUTPUT -p tcp --dport 80 "*) return 1 ;;
+    esac
+}
+`
+
+func (c firewallCall) String() string {
+	return c.engine + " " + strings.Join(c.args, " ")
+}
+
+func callLines(calls []firewallCall) []string {
+	lines := make([]string, 0, len(calls))
+	for _, call := range calls {
+		lines = append(lines, call.String())
+	}
+	return lines
+}
+
+func assertCalls(t *testing.T, calls []firewallCall, want []string) {
+	t.Helper()
+	if got := callLines(calls); !slices.Equal(got, want) {
+		t.Fatalf("firewall calls:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+// A dead proxy in an observing gateway removes the web redirects so the
+// session's traffic keeps flowing unlogged, touches nothing else, and keeps
+// the gateway running without acting on the dead proxy again.
+func TestUnrestrictedGatewayProxyDeathFailsOpen(t *testing.T) {
+	calls, err := runGatewayFirewall(t, deadProxy+`GATEWAY_MODE=unrestricted
+monitor_tick
+firewall_mock marker second-tick
+monitor_tick
+firewall_mock marker alive`,
+		"PROXY_ENABLED=true",
+	)
+	if err != nil {
+		t.Fatalf("observing gateway exited after proxy death: %v", err)
+	}
+	assertCalls(t, calls, []string{
+		"iptables -t nat -D OUTPUT -p tcp --dport 80 -j REDIRECT --to-ports 8080",
+		"iptables -t nat -D OUTPUT -p tcp --dport 443 -j REDIRECT --to-ports 8443",
+		"ip6tables -t nat -D OUTPUT -p tcp --dport 80 -j REDIRECT --to-ports 8080",
+		"ip6tables -t nat -D OUTPUT -p tcp --dport 443 -j REDIRECT --to-ports 8443",
+		"marker second-tick",
+		"marker alive",
+	})
+}
+
+// The gateway log tells the user that web traffic is no longer logged.
+func TestUnrestrictedGatewayFailOpenReportsDegradedState(t *testing.T) {
+	calls, err := runGatewayFirewall(t, deadProxy+`GATEWAY_MODE=unrestricted; firewall_mock log "$(monitor_tick | tr '\n' ' ')"`, "PROXY_ENABLED=true")
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := callLines(calls)[len(calls)-1]
+	if !strings.Contains(out, "Proxy exited unexpectedly") || !strings.Contains(out, "no longer logged") {
+		t.Fatalf("degraded state not reported: %q", out)
+	}
+}
+
+// A redirect that was never installed must not stop the remaining redirects
+// from being removed, and is not reported as a failure.
+func TestUnrestrictedGatewayFailOpenToleratesMissingRedirect(t *testing.T) {
+	calls, err := runGatewayFirewall(t, missingIPv4HTTPRedirect+deadProxy+`GATEWAY_MODE=unrestricted; firewall_mock log "$(monitor_tick | tr '\n' ' ')"`,
+		"PROXY_ENABLED=true",
+	)
+	if err != nil {
+		t.Fatalf("observing gateway exited when a redirect was missing: %v", err)
+	}
+	lines := callLines(calls)
+	assertCalls(t, calls[:len(calls)-1], []string{
+		"iptables -t nat -D OUTPUT -p tcp --dport 80 -j REDIRECT --to-ports 8080",
+		"iptables -t nat -C OUTPUT -p tcp --dport 80 -j REDIRECT --to-ports 8080",
+		"iptables -t nat -D OUTPUT -p tcp --dport 443 -j REDIRECT --to-ports 8443",
+		"ip6tables -t nat -D OUTPUT -p tcp --dport 80 -j REDIRECT --to-ports 8080",
+		"ip6tables -t nat -D OUTPUT -p tcp --dport 443 -j REDIRECT --to-ports 8443",
+	})
+	if out := lines[len(lines)-1]; !strings.Contains(out, "no longer logged") || strings.Contains(out, "Failed") {
+		t.Fatalf("missing redirect reported as a failure: %q", out)
+	}
+}
+
+// A redirect that survives its removal still points at the dead proxy; the
+// gateway says so instead of claiming traffic flows unlogged.
+func TestUnrestrictedGatewayFailOpenReportsStuckRedirect(t *testing.T) {
+	calls, err := runGatewayFirewall(t, deadProxy+`GATEWAY_MODE=unrestricted; firewall_mock log "$(monitor_tick | tr '\n' ' ')"`,
+		"PROXY_ENABLED=true",
+		"FAIL_ENGINE=ip6tables",
+		"FAIL_RULE=-t nat -D OUTPUT -p tcp --dport 443 -j REDIRECT --to-ports 8443",
+	)
+	if err != nil {
+		t.Fatalf("observing gateway exited when a redirect could not be removed: %v", err)
+	}
+	out := callLines(calls)[len(calls)-1]
+	if !strings.Contains(out, "Failed to remove ip6tables redirect for port 443") || strings.Contains(out, "no longer logged") {
+		t.Fatalf("stuck redirect not reported: %q", out)
+	}
+}
+
+// A dead proxy in a restricted gateway still locks the namespace down.
+func TestRestrictedGatewayProxyDeathLocksDown(t *testing.T) {
+	calls, err := runGatewayFirewall(t, deadProxy+`DNSMASQ_PID=$$; monitor_tick`, "PROXY_ENABLED=true")
+	if err == nil {
+		t.Fatal("restricted gateway kept running after proxy death")
+	}
+	lines := callLines(calls)
+	for _, want := range []string{"iptables -P OUTPUT DROP", "ip6tables -P OUTPUT DROP"} {
+		if !slices.Contains(lines, want) {
+			t.Errorf("missing lockdown rule %q in %q", want, lines)
+		}
 	}
 }

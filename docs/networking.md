@@ -204,6 +204,19 @@ compressed with `br` or `zstd`, in a WebSocket message that could not be
 decoded, URL-encoded, escaped in JSON, or in base64. Credentials without an
 HTTP release rule are ordinary request content and are stored as sent.
 
+With `--protect-auth`, native token exchanges return session handles before
+capture sees their responses. Captured requests precede the broker's credential
+release; captured responses and server WebSocket frames follow its credential
+tripwires. An exchange the broker denies leaves no capture; its denial stays in
+`network.log`. A tripwire-aborted response keeps its capture, marked incomplete
+with `error: "oauth-broker-response"`, without the credential that triggered it.
+
+Full capture adds no credential scanning of its own for protected grants. Client
+WebSocket frames pass through unchanged, and a provider upgrade that releases no
+credential has no released-value tripwire. A raw token the workload already holds
+or a provider mints in such a stream can therefore be stored as ordinary payload.
+Other upgraded protocols have handshake-only captures.
+
 ### Capture store
 
 Captures live next to the network log, one directory per session:

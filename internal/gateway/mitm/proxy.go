@@ -392,7 +392,13 @@ func (p *proxy) handler(scheme string) http.HandlerFunc {
 		}
 		result, err := p.forward(w, req, scheme, capture)
 		if err != nil {
-			event.CaptureID = capture.Finish(err)
+			if errors.Is(err, oauthbroker.ErrDenied) {
+				capture.Discard()
+			} else if _, rule := brokerFailure(err); rule != "" {
+				event.CaptureID = capture.Finish(errors.New(rule))
+			} else {
+				event.CaptureID = capture.Finish(err)
+			}
 			if result.StatusCode != 0 {
 				event.Status = result.StatusCode
 				event.ResponseSize = result.ResponseBytes
@@ -674,6 +680,7 @@ func (p *proxy) relayUpgrade(w http.ResponseWriter, req *http.Request, resp *htt
 	<-done
 	// The broker cut a stream that would carry credentials.
 	if _, rule := brokerFailure(relayErr); rule != "" {
+		capture.ResponseEnded(relayErr)
 		return result, relayErr
 	}
 	return result, nil

@@ -25,6 +25,7 @@ import (
 
 	"enclave/internal/gateway/oauthbroker"
 	"enclave/internal/model"
+	"enclave/internal/netcapture"
 	"enclave/internal/netlog"
 )
 
@@ -62,6 +63,9 @@ func TestOAuthCaptureThroughForwarder(t *testing.T) {
 	}
 	if strings.Contains(w.Body.String(), access) || strings.Contains(w.Body.String(), refresh) || w.Header().Get("Set-Cookie") != "" {
 		t.Fatal("capture leaked provider credentials")
+	}
+	if events := readAuditEvents(t, logPath); len(events) == 0 || events[0].CaptureID == "" {
+		t.Fatal("token exchange wrote no capture")
 	}
 	var token struct {
 		Access string `json:"access_token"`
@@ -141,6 +145,18 @@ func oauthTestProxy(t *testing.T, upstream *httptest.Server) (*proxy, string, oa
 		return (&net.Dialer{}).DialContext(ctx, network, upstream.Listener.Addr().String())
 	}
 	p.setBroker(broker)
+	captureDir := t.TempDir()
+	p.captures, err = netcapture.Open(netcapture.Options{Dir: captureDir, Session: testSession})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		p.exchanges.closeUpgraded()
+		p.exchanges.wait(ctx)
+		assertNoCapturedCredentials(t, captureDir, "synthetic-provider-access-credential", "synthetic-provider-refresh-credential", "synthetic-provider-secret")
+	})
 	t.Cleanup(p.transport.CloseIdleConnections)
 	return p, logPath, config
 }

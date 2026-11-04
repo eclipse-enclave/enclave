@@ -54,8 +54,9 @@ func TestAddGatewayCAMountSetsTrustEnvOnContainer(t *testing.T) {
 	}
 }
 
-func TestAddGatewayCAMountSkipsUnrestrictedNetwork(t *testing.T) {
+func TestAddGatewayCAMountSkipsDisabledGateway(t *testing.T) {
 	r := gatewayCATestRuntime(t, model.NetworkModeUnrestricted)
+	r.run.DisableGateway = true
 
 	mounts := newMountAccumulator(nil, nil)
 	if err := r.addGatewayCAMount(mounts); err != nil {

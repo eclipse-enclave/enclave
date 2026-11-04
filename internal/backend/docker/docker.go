@@ -451,6 +451,9 @@ func (b *Backend) prepareRun(ctx context.Context, req backend.Request) (runSpec,
 			return runSpec{}, err
 		}
 		joinGatewayNamespaces(spec.hostConfig, gatewayName)
+		// The hostname went to the gateway; a container joining another's
+		// network namespace cannot set one.
+		spec.config.Hostname = ""
 		spec.cleanup = func() {
 			cleanup()
 			cleanupSessionNetwork(sessionNetwork)

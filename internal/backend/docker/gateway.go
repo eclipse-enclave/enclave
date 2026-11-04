@@ -30,6 +30,13 @@ import (
 )
 
 func (b *Backend) startGateway(ctx context.Context, req backend.Request, networkName string) (string, func(), error) {
+	if req.Network.Mode == backend.NetworkModeUnrestricted {
+		name, cleanup, err := b.startObservingGateway(ctx, req, networkName)
+		if err != nil {
+			return "", nil, fmt.Errorf("%w\nTo run this unrestricted session without a gateway (and without a network log), pass --disable-gateway", err)
+		}
+		return name, cleanup, nil
+	}
 	gatewayConfigDir := config.HostProjectGatewayConfigDir(b.opts.Host.Home, req.Session.ProjectHash, req.Session.Tool)
 	policy := network.EffectivePolicy{
 		Mode:          model.NetworkModeRestricted,
@@ -41,42 +48,64 @@ func (b *Backend) startGateway(ctx context.Context, req backend.Request, network
 		return "", nil, fmt.Errorf("failed to write gateway config bundle: %w", err)
 	}
 
-	var tempFiles []string
 	secretReleaseFile, err := writeSecretReleaseConfig(req.Secrets)
 	if err != nil {
 		return "", nil, err
 	}
-	if secretReleaseFile != "" {
-		tempFiles = append(tempFiles, secretReleaseFile)
-	}
+	startConfig := b.gatewayStartConfig(req, networkName, gatewayConfigDir)
+	startConfig.SecretReleaseFile = secretReleaseFile
+	return b.runGateway(ctx, startConfig, "failed to start DNS gateway")
+}
 
+// startObservingGateway starts the gateway of an unrestricted session. It
+// enforces nothing, so it gets an empty policy bundle in its own config
+// directory and no secret releases: the session holds the real values.
+func (b *Backend) startObservingGateway(ctx context.Context, req backend.Request, networkName string) (string, func(), error) {
+	gatewayConfigDir := config.HostProjectUnrestrictedGatewayConfigDir(b.opts.Host.Home, req.Session.ProjectHash, req.Session.Tool)
+	policy := network.EffectivePolicy{Mode: model.NetworkModeUnrestricted}
+	if err := bundle.WriteConfigBundle(bundle.BundleWriteConfig{Dir: gatewayConfigDir, Policy: policy, Tool: req.Session.Tool}); err != nil {
+		return "", nil, fmt.Errorf("failed to write gateway config bundle: %w", err)
+	}
+	startConfig := b.gatewayStartConfig(req, networkName, gatewayConfigDir)
+	startConfig.NetworkMode = model.NetworkModeUnrestricted
+	startConfig.Hostname = req.Hostname
+	return b.runGateway(ctx, startConfig, "failed to start gateway")
+}
+
+func (b *Backend) gatewayStartConfig(req backend.Request, networkName string, gatewayConfigDir string) gateway.StartConfig {
 	workspaceID := workspaceIDFromSession(req.Session, b.opts.ProjectDir)
-	startConfig := gateway.StartConfig{
-		Paths:             b.opts.Paths,
-		Profile:           model.Profile{Name: req.Session.Tool},
-		AllowlistPath:     req.Network.Egress.AllowlistPath,
-		ContainerName:     req.Session.Name,
-		ForceRebuild:      b.opts.ForceRebuild,
-		NoRebuild:         b.opts.NoRebuild,
-		NetworkLogMode:    b.opts.NetworkLogMode,
-		NetworkLogPath:    config.HostProjectNetworkLogPath(b.opts.Host.Home, req.Session.ProjectHash, req.Session.Tool),
-		GatewayConfigDir:  gatewayConfigDir,
-		NetworkName:       networkName,
-		PortBindings:      portMap(req.Ports),
-		ExposedPorts:      portSet(req.Ports),
-		LoopbackPorts:     append([]string(nil), req.Network.LoopbackPorts...),
-		IdeBridgePorts:    append([]string(nil), req.Network.IdeBridgePorts...),
-		Home:              b.opts.Host.Home,
-		ProjectDir:        req.Session.Worktree,
-		WorkspaceID:       workspaceID,
-		ProjectHash:       req.Session.ProjectHash,
-		SecretReleaseFile: secretReleaseFile,
-		TLSRootDir:        config.HostTLSDir(b.opts.Host.Home),
+	return gateway.StartConfig{
+		Paths:            b.opts.Paths,
+		Profile:          model.Profile{Name: req.Session.Tool},
+		AllowlistPath:    req.Network.Egress.AllowlistPath,
+		ContainerName:    req.Session.Name,
+		ForceRebuild:     b.opts.ForceRebuild,
+		NoRebuild:        b.opts.NoRebuild,
+		NetworkLogMode:   b.opts.NetworkLogMode,
+		NetworkLogPath:   config.HostProjectNetworkLogPath(b.opts.Host.Home, req.Session.ProjectHash, req.Session.Tool),
+		GatewayConfigDir: gatewayConfigDir,
+		NetworkName:      networkName,
+		PortBindings:     portMap(req.Ports),
+		ExposedPorts:     portSet(req.Ports),
+		LoopbackPorts:    append([]string(nil), req.Network.LoopbackPorts...),
+		IdeBridgePorts:   append([]string(nil), req.Network.IdeBridgePorts...),
+		Home:             b.opts.Host.Home,
+		ProjectDir:       req.Session.Worktree,
+		WorkspaceID:      workspaceID,
+		ProjectHash:      req.Session.ProjectHash,
+		TLSRootDir:       config.HostTLSDir(b.opts.Host.Home),
+	}
+}
+
+func (b *Backend) runGateway(ctx context.Context, startConfig gateway.StartConfig, errPrefix string) (string, func(), error) {
+	var tempFiles []string
+	if startConfig.SecretReleaseFile != "" {
+		tempFiles = append(tempFiles, startConfig.SecretReleaseFile)
 	}
 	result, err := gateway.Start(ctx, startConfig)
 	if err != nil {
 		cleanupFiles(tempFiles)
-		return "", nil, fmt.Errorf("failed to start DNS gateway: %w", err)
+		return "", nil, fmt.Errorf("%s: %w", errPrefix, err)
 	}
 	tempFiles = append(tempFiles, result.TempFiles...)
 	cleanup := func() {

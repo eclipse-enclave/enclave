@@ -716,16 +716,19 @@ const (
 var KitInitSubstitutedVars = []string{KitInitWorkdirVar, KitInitHomeVar, KitInitUserVar}
 
 const (
-	GatewayImageTagLatest        = "latest"
-	GatewayImagePrefix           = AppName + "-gateway-"
-	GatewayContainerSuffix       = "-gateway"
-	GatewayLabelManaged          = AppName + ".gateway"
-	GatewayLabelHash             = AppName + ".gateway.hash"
-	GatewayLabelAgent            = LabelAgent
-	GatewayLabelProjectHash      = AppName + ".gateway.project_hash"
-	GatewayLabelProjectDir       = AppName + ".gateway.project_dir"
-	GatewayLabelWorkspaceHash    = AppName + ".gateway.workspace_hash"
-	GatewayLabelContainer        = AppName + ".gateway.container"
+	GatewayImageTagLatest     = "latest"
+	GatewayImagePrefix        = AppName + "-gateway-"
+	GatewayContainerSuffix    = "-gateway"
+	GatewayLabelManaged       = AppName + ".gateway"
+	GatewayLabelHash          = AppName + ".gateway.hash"
+	GatewayLabelAgent         = LabelAgent
+	GatewayLabelProjectHash   = AppName + ".gateway.project_hash"
+	GatewayLabelProjectDir    = AppName + ".gateway.project_dir"
+	GatewayLabelWorkspaceHash = AppName + ".gateway.workspace_hash"
+	GatewayLabelContainer     = AppName + ".gateway.container"
+	// GatewayLabelMode names the network mode of an unrestricted gateway. A
+	// gateway without it is restricted, including those started before it existed.
+	GatewayLabelMode             = AppName + ".gateway.mode"
 	SessionNetworkSuffix         = "-net"
 	NetworkLabelManaged          = AppName + ".network"
 	NetworkLabelContainer        = AppName + ".network.container"

@@ -45,7 +45,10 @@ type Options struct {
 	// Session names the gateway that produced an event. Sessions of the same
 	// project and tool share one log file, so without it concurrent sessions
 	// cannot be told apart.
-	Session        string
+	Session string
+	// NetworkMode is the session's network mode; the proxy derives what it
+	// enforces from it. Anything but unrestricted counts as restricted.
+	NetworkMode    string
 	ForceHTTPSMITM bool
 	TLSStore       *tlsstore.Store
 	OnReady        func()
@@ -98,6 +101,7 @@ func Run(ctx context.Context, opts Options) error {
 	defer func() { _ = audit.Close() }()
 
 	proxy := newProxy(opts.AllowedDomains, opts.DeniedDomains, opts.SecretRules, opts.ForceHTTPSMITM, audit, opts.Session)
+	proxy.caps = capabilitiesFor(opts.NetworkMode)
 	httpServer := &http.Server{
 		Addr:              httpAddr,
 		Handler:           proxy.handler("http"),
@@ -149,7 +153,19 @@ func Run(ctx context.Context, opts Options) error {
 	}
 }
 
+// capabilities are what the proxy does beyond logging. They are derived from
+// the session's network mode: restricted turns all of them on, unrestricted
+// only observes.
+type capabilities struct {
+	enforceAllowlist bool
+}
+
+func capabilitiesFor(networkMode string) capabilities {
+	return capabilities{enforceAllowlist: networkMode != model.NetworkModeUnrestricted}
+}
+
 type proxy struct {
+	caps           capabilities
 	allowedDomains []string
 	deniedDomains  []string
 	secretRules    []model.SecretReleaseEntry
@@ -181,6 +197,7 @@ func newProxy(allowedDomains []string, deniedDomains []string, secretRules []mod
 	upgradeTransport.Protocols = new(http.Protocols)
 	upgradeTransport.Protocols.SetHTTP1(true)
 	return &proxy{
+		caps:             capabilitiesFor(model.NetworkModeRestricted),
 		allowedDomains:   normalizeHostPatterns(allowedDomains),
 		deniedDomains:    normalizeHostPatterns(deniedDomains),
 		secretRules:      secretRules,
@@ -259,7 +276,7 @@ func (p *proxy) handler(scheme string) http.HandlerFunc {
 		event.ResponseSize = result.ResponseBytes
 		event.ContentType = result.ContentType
 		event.Verdict = netlog.VerdictPass
-		event.Rule = netlog.RuleAllowlist
+		event.Rule = p.passRule()
 		p.logEvent(event)
 	}
 }
@@ -511,7 +528,7 @@ func (s *httpsDispatchServer) serveConn(conn net.Conn) {
 		tunnelToAddress(conn, preface, s.mitmAddr)
 		return
 	}
-	s.proxy.logEvent(newTCPAuditEvent(host, netlog.VerdictPass, netlog.RuleAllowlist))
+	s.proxy.logEvent(newTCPAuditEvent(host, netlog.VerdictPass, s.proxy.passRule()))
 	tunnelTLS(conn, preface, host)
 }
 
@@ -851,10 +868,20 @@ func hostAllowed(host string, patterns []string) bool {
 // denied host more specific than an allowed parent (deny tracking.example.com,
 // allow example.com) would otherwise pass here — the deny check closes that.
 func (p *proxy) hostPermitted(host string) bool {
+	if !p.caps.enforceAllowlist {
+		return true
+	}
 	if hostAllowed(host, p.deniedDomains) {
 		return false
 	}
 	return hostAllowed(host, p.allowedDomains)
+}
+
+func (p *proxy) passRule() string {
+	if !p.caps.enforceAllowlist {
+		return netlog.RuleUnrestricted
+	}
+	return netlog.RuleAllowlist
 }
 
 func newHTTPAuditEvent(req *http.Request, host string, scheme string) netlog.Event {

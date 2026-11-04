@@ -17,9 +17,44 @@ import (
 	"enclave/internal/network"
 )
 
-func TestRenderConfigBundleRejectsUnrestricted(t *testing.T) {
-	_, err := renderConfigBundle(network.EffectivePolicy{Mode: "unrestricted"}, "codex")
-	if err == nil {
+// An unrestricted bundle carries no policy: the gateway only observes, so it
+// has nothing to enforce, and meta.json records the mode it branches on.
+func TestWriteConfigBundleUnrestricted(t *testing.T) {
+	dir := t.TempDir()
+	err := WriteConfigBundle(BundleWriteConfig{
+		Dir:    dir,
+		Policy: network.EffectivePolicy{Mode: "unrestricted", Domains: []string{"example.com"}, Resolvers: []string{"9.9.9.9"}},
+		Tool:   "codex",
+	})
+	if err != nil {
+		t.Fatalf("write bundle: %v", err)
+	}
+	for _, name := range []string{"dnsmasq.conf", "domains.txt", "denied.txt"} {
+		data, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil {
+			t.Fatalf("read %s: %v", name, err)
+		}
+		if len(data) != 0 {
+			t.Fatalf("%s = %q, want empty", name, data)
+		}
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "meta.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var meta bundleMeta
+	if err := json.Unmarshal(data, &meta); err != nil {
+		t.Fatal(err)
+	}
+	if meta.Mode != "unrestricted" || meta.Tool != "codex" || meta.Generation == "" || meta.DomainCount != 0 || meta.Resolver != "" {
+		t.Fatalf("meta = %+v, want unrestricted codex bundle with a generation", meta)
+	}
+}
+
+// Live apply compares restricted bundles only, so hashing an unrestricted
+// policy stays an error.
+func TestConfigBundleHashRejectsUnrestricted(t *testing.T) {
+	if _, err := ConfigBundleHash(BundleWriteConfig{Policy: network.EffectivePolicy{Mode: "unrestricted"}, Tool: "codex"}); err == nil {
 		t.Fatal("expected unrestricted mode to be rejected")
 	}
 }

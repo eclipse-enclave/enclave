@@ -43,6 +43,7 @@ const (
 	EnvGatewayTLSRoot           = EnvPrefix + "GATEWAY_TLS_ROOT"
 	EnvGatewayProxyReadyFile    = EnvPrefix + "GATEWAY_PROXY_READY_FILE"
 	EnvGatewaySession           = EnvPrefix + "GATEWAY_SESSION"
+	EnvGatewayNetworkMode       = EnvPrefix + "GATEWAY_NETWORK_MODE"
 	EnvGatewayCACertPath        = EnvPrefix + "GATEWAY_CA_CERT_PATH"
 	EnvGatewayCABundlePath      = EnvPrefix + "GATEWAY_CA_BUNDLE_PATH"
 	EnvBin                      = EnvPrefix + "BIN"

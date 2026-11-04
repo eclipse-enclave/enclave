@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"enclave/internal/backend"
 	dockercmd "enclave/internal/docker"
 	"enclave/internal/model"
 )
@@ -153,5 +154,32 @@ func TestWaitForGatewayReloadTimesOut(t *testing.T) {
 	}
 	if got := err.Error(); got != "timed out waiting for gateway reload confirmation (generation=gen-1)" {
 		t.Fatalf("waitForGatewayReload() error = %q, want timeout message", got)
+	}
+}
+
+func TestParseGatewayTargetsReadsNetworkMode(t *testing.T) {
+	containers := []dockercmd.Summary{
+		{
+			ID:     "aaaaaaaaaaaaaaaa",
+			Names:  []string{"/observing"},
+			Labels: map[string]string{model.GatewayLabelMode: model.NetworkModeUnrestricted},
+		},
+		{
+			ID:     "bbbbbbbbbbbbbbbb",
+			Names:  []string{"/unlabelled"},
+			Labels: map[string]string{},
+		},
+	}
+	targets := gatewayInfosFromSummaries(containers)
+	got := map[string]backend.NetworkMode{}
+	for _, target := range targets {
+		got[target.Name] = target.NetworkMode
+	}
+	want := map[string]backend.NetworkMode{
+		"observing":  backend.NetworkModeUnrestricted,
+		"unlabelled": backend.NetworkModeRestricted,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("network modes = %v, want %v", got, want)
 	}
 }

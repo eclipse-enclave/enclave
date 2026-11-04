@@ -369,6 +369,13 @@ type GatewayInfo struct {
 	ProjectDir       string
 	WorkspaceID      string
 	SessionContainer string
+	// A running gateway never switches modes, so an unrestricted one never
+	// receives a policy.
+	NetworkMode NetworkMode
+}
+
+func (g GatewayInfo) Unrestricted() bool {
+	return g.NetworkMode == NetworkModeUnrestricted
 }
 
 func (g GatewayInfo) ShortID() string {

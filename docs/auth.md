@@ -106,6 +106,23 @@ refused. Other self-hosted login hosts, such as GitHub Enterprise, are not
 recognized: under unrestricted networking their logins are not protected, and
 restricted networking blocks them unless allowlisted.
 
+#### Full network capture
+
+`--network-log=full` can be used with `--protect-auth`. Captures hold the
+workload's requests before credential release and the broker's sanitized
+responses, including session handles instead of native token-endpoint
+credentials. Released credentials are withheld from captured responses and
+server WebSocket frames by the same tripwires that protect the workload.
+Broker-denied exchanges leave no capture. Tripwire-aborted exchanges keep a
+credential-free, incomplete capture with `error: "oauth-broker-response"`.
+
+This does not scan raw tokens the workload already holds in permitted outgoing
+requests or WebSocket frames. Provider upgrades without a credential release
+also have no released-value tripwire. Those payloads can reach full captures.
+See [unscanned outbound credentials](networking.md#unscanned-outbound-credentials)
+and the `scan-outbound-protected-upgrades` follow-up; additional outbound
+scanning is outside this mode's guarantee.
+
 #### Claude subscription
 
 The gateway captures the login and refresh exchange at

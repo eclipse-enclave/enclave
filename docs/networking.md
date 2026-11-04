@@ -211,11 +211,15 @@ tripwires. An exchange the broker denies leaves no capture; its denial stays in
 `network.log`. A tripwire-aborted response keeps its capture, marked incomplete
 with `error: "oauth-broker-response"`, without the credential that triggered it.
 
+#### Unscanned outbound credentials
+
 Full capture adds no credential scanning of its own for protected grants. Client
 WebSocket frames pass through unchanged, and a provider upgrade that releases no
 credential has no released-value tripwire. A raw token the workload already holds
 or a provider mints in such a stream can therefore be stored as ordinary payload.
-Other upgraded protocols have handshake-only captures.
+Other upgraded protocols have handshake-only captures. The
+`scan-outbound-protected-upgrades` follow-up tracks scanning these paths; it is
+not implemented by full capture.
 
 ### Capture store
 

@@ -62,6 +62,7 @@ func gatewayInfosFromSummaries(containers []dockercmd.Summary) []backend.Gateway
 			ProjectDir:       c.Labels[model.GatewayLabelProjectDir],
 			WorkspaceID:      c.Labels[model.GatewayLabelWorkspaceHash],
 			SessionContainer: c.Labels[model.GatewayLabelContainer],
+			NetworkMode:      gatewayNetworkMode(c.Labels),
 		})
 	}
 
@@ -79,6 +80,15 @@ func gatewayInfosFromSummaries(containers []dockercmd.Summary) []backend.Gateway
 	})
 
 	return gateways
+}
+
+// gatewayNetworkMode reads the mode label, which only unrestricted gateways
+// carry: gateways started before it existed are restricted.
+func gatewayNetworkMode(labels map[string]string) backend.NetworkMode {
+	if labels[model.GatewayLabelMode] == string(backend.NetworkModeUnrestricted) {
+		return backend.NetworkModeUnrestricted
+	}
+	return backend.NetworkModeRestricted
 }
 
 func containerDisplayName(names []string, containerID string) string {

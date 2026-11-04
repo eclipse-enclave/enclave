@@ -7,7 +7,10 @@
 
 package model
 
-import "strings"
+import (
+	"slices"
+	"strings"
+)
 
 const (
 	EnvPrefix = "ENCLAVE_"
@@ -68,12 +71,13 @@ func IsReservedEnvKey(key string) bool {
 }
 
 // FilterReservedEnv splits KEY=VALUE entries into those Enclave may pass on
-// and the keys it must drop because IsReservedEnvKey reserves them.
-func FilterReservedEnv(values []string) (kept []string, dropped []string) {
+// and the keys it must drop because IsReservedEnvKey, or one of alsoReserved
+// for sources with a longer list, reserves them.
+func FilterReservedEnv(values []string, alsoReserved ...func(key string) bool) (kept []string, dropped []string) {
 	kept = make([]string, 0, len(values))
 	for _, value := range values {
 		key, _, _ := strings.Cut(value, "=")
-		if IsReservedEnvKey(key) {
+		if IsReservedEnvKey(key) || slices.ContainsFunc(alsoReserved, func(reserved func(string) bool) bool { return reserved(key) }) {
 			dropped = append(dropped, key)
 			continue
 		}

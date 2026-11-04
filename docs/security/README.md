@@ -52,6 +52,16 @@ and environment files first:
   reserved `PROJECT_DIR`, `HOST_PROJECT_DIR`, `TOOL`, and `ENCLAVE_*` keys,
   which are ignored with a warning naming the key and its source. Devcontainer
   `containerEnv` and `runArgs` environment values follow the same rule.
+- The project `.env` has to be a regular file in the project directory. A
+  symlink, a directory, or a special file there is ignored with a warning.
+- The project `.env` is repository content, so it does not choose the
+  session's proxy or the certificates it trusts, with or without the gateway.
+  The proxy variables (`HTTP_PROXY`, `HTTPS_PROXY`, `FTP_PROXY`, `ALL_PROXY`,
+  `NO_PROXY`) and the TLS trust variables (`SSL_CERT_FILE`, `SSL_CERT_DIR`,
+  `REQUESTS_CA_BUNDLE`, `CURL_CA_BUNDLE`, `NODE_EXTRA_CA_CERTS`,
+  `GIT_SSL_CAINFO`) are reserved there as well, in upper and lower case. Pass
+  them from the host environment or a
+  [secrets file](../auth.md#secrets-files) with `--pass-env`.
 - Devcontainer mode reads the project's `devcontainer.json`; filtered mounts,
   [run arguments](../tools.md#devcontainer-support), and lifecycle commands
   still shape the container.

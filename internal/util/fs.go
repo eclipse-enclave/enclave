@@ -9,6 +9,7 @@ package util
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"syscall"
@@ -75,4 +76,43 @@ func SyncDir(path string) error {
 		return err
 	}
 	return nil
+}
+
+// ErrSymlinkFile is what OpenRegularFileInDir returns for a symlink.
+var ErrSymlinkFile = errors.New("file is a symlink")
+
+// OpenRegularFileInDir opens name in dir when it is a regular file there. The
+// lookup goes through an os.Root on dir and does not follow a symlink at name;
+// the opened file is the one that was checked. The caller closes it.
+func OpenRegularFileInDir(dir string, name string) (*os.File, error) {
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = root.Close() }()
+
+	info, err := root.Lstat(name)
+	if err != nil {
+		return nil, err
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return nil, ErrSymlinkFile
+	}
+	if !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("not a regular file: %s", name)
+	}
+
+	file, err := root.Open(name)
+	if err != nil {
+		return nil, err
+	}
+	openedInfo, err := file.Stat()
+	if err == nil && !os.SameFile(info, openedInfo) {
+		err = fmt.Errorf("file changed while opening: %s", name)
+	}
+	if err != nil {
+		_ = file.Close()
+		return nil, err
+	}
+	return file, nil
 }

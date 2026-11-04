@@ -16,11 +16,11 @@ Rules-Requires-Root: no
 
 Package: enclave
 Architecture: any
-Depends: ${shlibs:Depends}, ${misc:Depends}, docker.io | docker-ce,
- docker-buildx | docker-buildx-plugin, git (>= 1:2.26)
+Depends: ${shlibs:Depends}, ${misc:Depends}, docker.io | docker-ce | podman,
+ docker-buildx | docker-buildx-plugin | podman, git (>= 1:2.26)
 Description: Container-based development environment manager
  Enclave provides isolated container environments for AI coding assistants
- and development tools. It manages Docker containers with network isolation,
- authentication injection, and tool-specific configurations.
+ and development tools. It manages Docker or Podman containers with network
+ isolation, authentication injection, and tool-specific configurations.
  .
  Supported tools include Claude, Codex, OpenCode, and more.

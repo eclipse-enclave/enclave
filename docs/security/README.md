@@ -72,15 +72,24 @@ HTTP/TLS proxy) that enforces the domain allowlist by DNS and Host/SNI; see the
   request detail exists only for plaintext HTTP and MITM'd hosts
   (`--network-log=requests` closes the HTTPS gap). A missing event proves
   nothing; see [Coverage and granularity](../networking.md#coverage-and-granularity).
-- The experimental QEMU backend runs unrestricted, without gateway-side
-  credential release.
+- In unrestricted mode only TCP 80 and 443 are logged at all; see
+  [Unrestricted mode](../networking.md#unrestricted-mode).
+- The experimental QEMU backend runs unrestricted, without a gateway (so
+  without a network log) and without gateway-side credential release.
 
 Restricted gateways drop inbound IPv4 and IPv6 by default, admitting only
 loopback, established or related replies, and published ports (including
-OAuth callbacks). Unrestricted sessions have no such filter.
+OAuth callbacks). Unrestricted sessions have no inbound filter, with or without
+a gateway.
+
+Unrestricted sessions start a gateway too, but it only observes: it redirects
+TCP 80 and 443 through the proxy to write the network log and enforces nothing.
+It still runs privileged, so a gateway vulnerability is in scope for
+unrestricted sessions as well. `--disable-gateway` runs an unrestricted session
+without it.
 
 Each Docker and Podman session has its own bridge network (the gateway attaches
-in restricted mode, the tool in unrestricted mode), so other networks and
+when one runs, the tool with `--disable-gateway`), so other networks and
 sessions cannot route to its listeners:
 
 | Engine | Bridge isolation |

@@ -177,6 +177,11 @@ sequenceDiagram
 - Proxy death removes the redirects and the gateway keeps running, so traffic
   continues unlogged; the gateway container stopping takes the session
   offline.
+- OAuth callback ports (`oauthPorts`) reach a listener on `127.0.0.1` through
+  a DNAT in `nat PREROUTING` and, for connections to the gateway's own IPv4
+  address generated inside the namespace (rootless podman's port forwarder),
+  in `nat OUTPUT`. If either rule cannot be added, a socat proxy on the
+  container address takes over.
 - `enclave network apply` skips these gateways; `enclave network status` shows
   them as `UNRESTRICTED`. A mode change needs a session restart.
 

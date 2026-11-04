@@ -1,5 +1,6 @@
 iptables -t nat -L PREROUTING
 iptables -t nat -A PREROUTING -p tcp --dport 1455 -j DNAT --to-destination 127.0.0.1:1455
+iptables -t nat -A OUTPUT -p tcp -d 10.88.0.5 --dport 1455 -j DNAT --to-destination 127.0.0.1:1455
 iptables -m owner -h
 iptables -t nat -A OUTPUT -p tcp --dport 80 -m owner --uid-owner 105 -j RETURN
 iptables -t nat -A OUTPUT -p tcp --dport 80 -m addrtype --dst-type LOCAL -j RETURN

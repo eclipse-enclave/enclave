@@ -24,6 +24,8 @@ type Context struct {
 	Run     model.RunOptions
 	Auth    model.AuthOptions
 	Build   model.BuildOptions
+	// ContainerHome locates the runtime-selected shared auth mount.
+	ContainerHome string
 
 	// Storage performs store operations; nil in minimal test setups.
 	Storage backend.StoreManager

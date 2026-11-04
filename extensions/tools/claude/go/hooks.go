@@ -14,6 +14,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path"
+	"slices"
 
 	"enclave/internal/auth"
 	"enclave/internal/backend"
@@ -100,8 +102,73 @@ func readOAuthAccount(hostHome string, profile model.Profile) any {
 
 type claudeHooks struct{}
 
+// scrubStoredAPIKeys removes keys written by older hooks without discarding
+// onboarding, OAuth account metadata, or unrelated settings.
+func scrubStoredAPIKeys(ctx auth.Context, store *backend.StoreRef) error {
+	if store == nil {
+		return nil
+	}
+	for _, rel := range claudeConfigFiles {
+		data, err := ctx.Storage.ReadFile(context.Background(), store.Key, store.Kind, rel)
+		var link *backend.StoreSymlinkError
+		if errors.As(err, &link) && ctx.ContainerHome != "" && ctx.ConfigStore != nil && *store == *ctx.ConfigStore &&
+			slices.Contains(ctx.Profile.ProviderAuthFiles(), rel) &&
+			link.Target == path.Join(ctx.ContainerHome, model.ContainerAuthDir, rel) {
+			// The entrypoint links this file to the shared auth mount, and the
+			// link stays when the project later uses its own auth. It resolves
+			// only inside the container, so it is not followed: a shared auth
+			// store is scrubbed on its own below.
+			continue
+		}
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return fmt.Errorf("read Claude config %s for credential cleanup: %w", rel, err)
+		}
+		var payload map[string]json.RawMessage
+		if err := json.Unmarshal(data, &payload); err != nil {
+			return fmt.Errorf("parse Claude config %s for credential cleanup: %w", rel, err)
+		}
+		_, anthropic := payload["anthropicApiKey"]
+		_, primary := payload["primaryApiKey"]
+		if !anthropic && !primary {
+			continue
+		}
+		delete(payload, "anthropicApiKey")
+		delete(payload, "primaryApiKey")
+		data, err = json.Marshal(payload)
+		if err != nil {
+			return err
+		}
+		if err := ctx.Storage.WriteFile(context.Background(), store.Key, store.Kind, rel, data, 0o600); err != nil {
+			return fmt.Errorf("clean stored Claude credentials in %s: %w", rel, err)
+		}
+	}
+	return nil
+}
+
 func (claudeHooks) OnAuthReady(ctx auth.Context) (bool, error) {
-	if ctx.Storage == nil || ctx.AuthStorage == nil || ctx.ConfigStore == nil {
+	if ctx.Storage == nil {
+		return false, nil
+	}
+	// The runtime holds the config-store lock while invoking this hook.
+	if err := scrubStoredAPIKeys(ctx, ctx.ConfigStore); err != nil {
+		return false, err
+	}
+	if ctx.AuthStorage != nil && (ctx.ConfigStore == nil || *ctx.AuthStorage != *ctx.ConfigStore) {
+		scrub := func() error { return scrubStoredAPIKeys(ctx, ctx.AuthStorage) }
+		var err error
+		if locker, ok := ctx.Storage.(backend.StoreLocker); ok {
+			err = locker.WithStoreLock(context.Background(), ctx.AuthStorage.Key, ctx.AuthStorage.Kind, scrub)
+		} else {
+			err = scrub()
+		}
+		if err != nil {
+			return false, err
+		}
+	}
+	if ctx.AuthStorage == nil || ctx.ConfigStore == nil {
 		return false, nil
 	}
 
@@ -130,8 +197,6 @@ func (claudeHooks) AfterEnvInjected(ctx auth.Context, injected map[string]string
 		logx.Debugf("Failed to clear statsig state: %v", err)
 	}
 	if err := writeClaudeConfig(ctx, ctx.AuthStorage, map[string]any{
-		"anthropicApiKey":        value,
-		"primaryApiKey":          value,
 		"allowTelemetry":         false,
 		"forceLoginMethod":       "console",
 		"hasCompletedOnboarding": true,

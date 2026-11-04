@@ -47,6 +47,22 @@ func (c *captureHooks) FinalizeAuth(auth.Context, model.AuthState) error { retur
 
 type failingPlaceholderResolver struct{}
 
+type failingReadyHooks struct{ stubHooks }
+
+func (failingReadyHooks) OnAuthReady(auth.Context) (bool, error) {
+	return false, fmt.Errorf("credential cleanup failed")
+}
+
+func TestPrepareFailsWhenAuthStoreCleanupFails(t *testing.T) {
+	profile := model.Profile{Name: "cleanup-failure-test"}
+	auth.RegisterHooks(profile.Name, failingReadyHooks{})
+	r := runtimeWithProfile(t, profile)
+	var env []string
+	if _, _, err := newAuthManager(r).Prepare(&env, storeSet{}); err == nil || !strings.Contains(err.Error(), "credential cleanup failed") {
+		t.Fatalf("Prepare error = %v, want cleanup failure", err)
+	}
+}
+
 func (failingPlaceholderResolver) ResolvePlaceholder(string, *model.SecretPlaceholderConfig) (string, error) {
 	return "", fmt.Errorf("boom")
 }

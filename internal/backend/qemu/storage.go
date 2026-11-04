@@ -67,7 +67,11 @@ func (s *StoreManager) ReadFile(_ context.Context, key backend.StoreKey, kind ba
 		return nil, err
 	}
 	if info.Mode()&os.ModeSymlink != 0 {
-		return nil, fmt.Errorf("refusing to read symlinked store path %q", rel)
+		link, err := root.Readlink(name)
+		if err != nil {
+			return nil, err
+		}
+		return nil, &backend.StoreSymlinkError{Path: filepath.ToSlash(name), Target: link}
 	}
 	return root.ReadFile(name)
 }

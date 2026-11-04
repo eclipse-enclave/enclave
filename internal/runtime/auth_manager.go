@@ -52,15 +52,16 @@ func (m authManager) Prepare(env *[]string, stores storeSet) (model.AuthState, S
 	hooks := auth.HooksFor(m.profile)
 	authStorage := stores.AuthStorage()
 	authCtx := auth.Context{
-		Host:        m.host,
-		Project:     m.project,
-		Profile:     m.profile,
-		Run:         m.run,
-		Auth:        m.auth,
-		Build:       m.build,
-		Storage:     m.storage(),
-		ConfigStore: stores.Config,
-		AuthStorage: authStorage,
+		Host:          m.host,
+		Project:       m.project,
+		Profile:       m.profile,
+		Run:           m.run,
+		Auth:          m.auth,
+		Build:         m.build,
+		ContainerHome: m.containerHome,
+		Storage:       m.storage(),
+		ConfigStore:   stores.Config,
+		AuthStorage:   authStorage,
 	}
 	persistedEnv := m.readPersistedEnv(stores)
 
@@ -70,7 +71,7 @@ func (m authManager) Prepare(env *[]string, stores storeSet) (model.AuthState, S
 		_, err := hooks.OnAuthReady(authCtx)
 		return err
 	}); err != nil {
-		logx.Warnf("Auth ready hook failed: %v", err)
+		return model.AuthState{}, SecretMapping{}, fmt.Errorf("prepare auth store: %w", err)
 	}
 
 	secretsLayers, err := auth.ResolveSecretsLayers(m.host.Home, m.project.Hash, m.profile.Name, m.auth.SecretsScope)

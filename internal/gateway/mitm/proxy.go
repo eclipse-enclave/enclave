@@ -106,7 +106,7 @@ func Run(ctx context.Context, opts Options) error {
 	defer func() { _ = audit.Close() }()
 
 	proxy := newProxy(opts.AllowedDomains, opts.DeniedDomains, opts.SecretRules, opts.ForceHTTPSMITM, audit, opts.Session)
-	proxy.caps = capabilitiesFor(opts.NetworkMode)
+	proxy.setCapabilities(capabilitiesFor(opts.NetworkMode))
 	httpServer := proxy.newHTTPServer()
 	httpServer.Addr = httpAddr
 	httpListener, err := net.Listen("tcp", httpAddr)
@@ -163,6 +163,9 @@ type capabilities struct {
 	// dialled instead of re-resolving its SNI or Host, and tunnels traffic the
 	// proxy cannot parse there unchanged.
 	dialOriginalDestination bool
+	// releaseSecrets swaps placeholders for real values. An unrestricted
+	// session already holds the real values.
+	releaseSecrets bool
 }
 
 func capabilitiesFor(networkMode string) capabilities {
@@ -170,7 +173,42 @@ func capabilitiesFor(networkMode string) capabilities {
 	return capabilities{
 		enforceAllowlist:        restricted,
 		dialOriginalDestination: !restricted,
+		releaseSecrets:          restricted,
 	}
+}
+
+// setCapabilities configures the proxy for caps. Dialling the original
+// destination also applies to intercepted HTTPS requests, whose URL keeps the
+// requested name so the upstream certificate is checked against it.
+func (p *proxy) setCapabilities(caps capabilities) {
+	p.caps = caps
+	if !caps.dialOriginalDestination {
+		return
+	}
+	for _, transport := range []*http.Transport{p.transport, p.upgradeTransport} {
+		transport.DialContext = dialOriginalDestination
+	}
+	// A custom dialer turns off the HTTP/2 the transport otherwise
+	// negotiates; the upgrade transport is pinned to HTTP/1.1 regardless.
+	p.transport.ForceAttemptHTTP2 = true
+}
+
+// dialOriginalDestination dials the original destination a request carries in
+// its context instead of addr. The transport pools connections by name, so a
+// request may reuse a connection dialled for another request to the same name.
+func dialOriginalDestination(ctx context.Context, network string, addr string) (net.Conn, error) {
+	if dst := originalDestinationFrom(ctx); dst.IsValid() {
+		addr = dst.String()
+	}
+	return (&net.Dialer{}).DialContext(ctx, network, addr)
+}
+
+// releaseRules are the secret release rules the proxy applies.
+func (p *proxy) releaseRules() []model.SecretReleaseEntry {
+	if !p.caps.releaseSecrets {
+		return nil
+	}
+	return p.secretRules
 }
 
 type proxy struct {
@@ -267,10 +305,8 @@ func (p *proxy) handler(scheme string) http.HandlerFunc {
 			http.Error(w, "Domain not in allowlist", http.StatusForbidden)
 			return
 		}
-		// A request without host only gets here in an unrestricted proxy,
-		// which has no secrets to release.
 		if host != "" {
-			if err := rewriteHeaders(scheme, host, req.Header, p.secretRules); err != nil {
+			if err := rewriteHeaders(scheme, host, req.Header, p.releaseRules()); err != nil {
 				event.Status = http.StatusForbidden
 				event.Verdict = netlog.VerdictDeny
 				event.Rule = "secret-injection"
@@ -311,8 +347,9 @@ func (p *proxy) forward(w http.ResponseWriter, req *http.Request, scheme string)
 		host = normalizedRequestHost(req)
 	}
 	target.Host = host
-	if dst := originalDestinationFrom(req.Context()); dst.IsValid() {
-		// Keep the Host header and only redirect the dial.
+	if dst := originalDestinationFrom(req.Context()); dst.IsValid() && (scheme == "http" || strings.TrimSpace(target.Host) == "") {
+		// Keep the Host header and only redirect the dial. HTTPS keeps the
+		// name in the URL for certificate checks; the transport dials dst.
 		target.Host = dst.String()
 	}
 	if strings.TrimSpace(target.Host) == "" {
@@ -441,9 +478,13 @@ func upgradeType(h http.Header) string {
 type httpsDispatchServer struct {
 	listener     net.Listener
 	mitmListener net.Listener
-	proxy        *proxy
-	mitmServer   *http.Server
-	mitmAddr     string
+	// handoff passes intercepted connections of a proxy that dials original
+	// destinations to the MITM server in process, so each keeps its
+	// destination; a loopback tunnel would lose it.
+	handoff    *handoffListener
+	proxy      *proxy
+	mitmServer *http.Server
+	mitmAddr   string
 
 	mu      sync.Mutex
 	conns   map[net.Conn]struct{}
@@ -458,10 +499,12 @@ func newHTTPSDispatchServer(proxy *proxy, store *tlsstore.Store, listener net.Li
 	server := &httpsDispatchServer{
 		listener:     listener,
 		mitmListener: mitmListener,
+		handoff:      newHandoffListener(mitmListener.Addr()),
 		proxy:        proxy,
 		mitmServer: &http.Server{
 			Handler:           proxy.handler("https"),
 			ReadHeaderTimeout: 10 * time.Second,
+			ConnContext:       originalDestinationConnContext,
 			TLSConfig: &tls.Config{
 				MinVersion: tls.VersionTLS12,
 				GetCertificate: func(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
@@ -479,13 +522,17 @@ func newHTTPSDispatchServer(proxy *proxy, store *tlsstore.Store, listener net.Li
 }
 
 func (s *httpsDispatchServer) Serve() error {
-	errCh := make(chan error, 1)
-	go func() {
-		if err := s.mitmServer.ServeTLS(s.mitmListener, "", ""); err != nil && !errors.Is(err, http.ErrServerClosed) && !errors.Is(err, net.ErrClosed) {
+	errCh := make(chan error, 2)
+	serveMITM := func(listener net.Listener) {
+		if err := s.mitmServer.ServeTLS(listener, "", ""); err != nil && !errors.Is(err, http.ErrServerClosed) && !errors.Is(err, net.ErrClosed) {
 			errCh <- err
 			_ = s.listener.Close()
 		}
-	}()
+	}
+	go serveMITM(s.mitmListener)
+	if s.proxy.caps.dialOriginalDestination {
+		go serveMITM(s.handoff)
+	}
 
 	for {
 		conn, err := s.listener.Accept()
@@ -517,6 +564,7 @@ func (s *httpsDispatchServer) Shutdown(ctx context.Context) error {
 	go func() {
 		_ = s.listener.Close()
 		_ = s.mitmListener.Close()
+		_ = s.handoff.Close()
 		_ = s.mitmServer.Shutdown(ctx)
 		close(done)
 	}()
@@ -547,7 +595,7 @@ func (s *httpsDispatchServer) serveConn(conn net.Conn) {
 		_ = conn.Close()
 		return
 	}
-	if shouldMITM(host, s.proxy.secretRules, s.proxy.forceHTTPSMITM) {
+	if shouldMITM(host, s.proxy.releaseRules(), s.proxy.forceHTTPSMITM) {
 		s.proxy.logEvent(newTCPAuditEvent(host, netlog.VerdictPass, "mitm-dispatch"))
 		tunnelToAddress(conn, preface, s.mitmAddr)
 		return
@@ -566,9 +614,9 @@ func (s *httpsDispatchServer) serveTransparentConn(conn net.Conn) {
 	if err != nil {
 		host, preface = "", recorded.read.Bytes()
 	}
-	if host != "" && shouldMITM(host, s.proxy.secretRules, s.proxy.forceHTTPSMITM) {
+	if host != "" && shouldMITM(host, s.proxy.releaseRules(), s.proxy.forceHTTPSMITM) {
 		s.proxy.logEvent(newTCPAuditEvent(host, netlog.VerdictPass, "mitm-dispatch"))
-		tunnelToAddress(conn, preface, s.mitmAddr)
+		s.intercept(conn, preface, dst)
 		return
 	}
 	target := ""

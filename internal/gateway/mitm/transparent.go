@@ -9,7 +9,9 @@ package mitm
 
 import (
 	"bufio"
+	"bytes"
 	"context"
+	"crypto/tls"
 	"errors"
 	"io"
 	"net"
@@ -80,12 +82,7 @@ func (p *proxy) newHTTPServer() *http.Server {
 	return &http.Server{
 		Handler:           p.handler("http"),
 		ReadHeaderTimeout: 10 * time.Second,
-		ConnContext: func(ctx context.Context, conn net.Conn) context.Context {
-			if sniffed, ok := conn.(*sniffedConn); ok && sniffed.dst.IsValid() {
-				return context.WithValue(ctx, originalDstKey{}, sniffed.dst)
-			}
-			return ctx
-		},
+		ConnContext:       originalDestinationConnContext,
 	}
 }
 
@@ -208,4 +205,90 @@ type sniffedConn struct {
 
 func (c *sniffedConn) Read(p []byte) (int, error) {
 	return c.reader.Read(p)
+}
+
+func (c *sniffedConn) originalDestination() netip.AddrPort {
+	return c.dst
+}
+
+// originalDestinationConnContext hands a connection's original destination,
+// if it carries one, to the handlers of its requests.
+func originalDestinationConnContext(ctx context.Context, conn net.Conn) context.Context {
+	if tlsConn, ok := conn.(*tls.Conn); ok {
+		conn = tlsConn.NetConn()
+	}
+	carrier, ok := conn.(interface{ originalDestination() netip.AddrPort })
+	if !ok || !carrier.originalDestination().IsValid() {
+		return ctx
+	}
+	return context.WithValue(ctx, originalDstKey{}, carrier.originalDestination())
+}
+
+// intercept hands a TLS connection to the MITM server together with its
+// original destination and returns once the server is done with it.
+func (s *httpsDispatchServer) intercept(conn net.Conn, preface []byte, dst netip.AddrPort) {
+	intercepted := &interceptedConn{
+		sniffedConn: sniffedConn{Conn: conn, reader: io.MultiReader(bytes.NewReader(preface), conn), dst: dst},
+		closed:      make(chan struct{}),
+	}
+	if !s.handoff.deliver(intercepted) {
+		_ = conn.Close()
+		return
+	}
+	<-intercepted.closed
+}
+
+// interceptedConn replays the ClientHello read while dispatching, carries the
+// connection's original destination, and reports when the MITM server closes
+// it.
+type interceptedConn struct {
+	sniffedConn
+	closed    chan struct{}
+	closeOnce sync.Once
+}
+
+func (c *interceptedConn) Close() error {
+	err := c.Conn.Close()
+	c.closeOnce.Do(func() { close(c.closed) })
+	return err
+}
+
+// handoffListener is a listener fed in process instead of by the network.
+type handoffListener struct {
+	addr  net.Addr
+	conns chan net.Conn
+	done  chan struct{}
+	once  sync.Once
+}
+
+func newHandoffListener(addr net.Addr) *handoffListener {
+	return &handoffListener{addr: addr, conns: make(chan net.Conn), done: make(chan struct{})}
+}
+
+// deliver passes conn to Accept and reports false once the listener is closed.
+func (l *handoffListener) deliver(conn net.Conn) bool {
+	select {
+	case l.conns <- conn:
+		return true
+	case <-l.done:
+		return false
+	}
+}
+
+func (l *handoffListener) Accept() (net.Conn, error) {
+	select {
+	case conn := <-l.conns:
+		return conn, nil
+	case <-l.done:
+		return nil, net.ErrClosed
+	}
+}
+
+func (l *handoffListener) Close() error {
+	l.once.Do(func() { close(l.done) })
+	return nil
+}
+
+func (l *handoffListener) Addr() net.Addr {
+	return l.addr
 }

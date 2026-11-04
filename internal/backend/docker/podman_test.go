@@ -64,7 +64,7 @@ func TestAuthSyncHelperRunsAsRootUnderDocker(t *testing.T) {
 
 func TestPodmanSessionsJoinGatewayUserNamespace(t *testing.T) {
 	hostConfig := &dockercmd.HostConfig{}
-	joinGatewayNamespaces(hostConfig, "enclave-codex-abc-gateway")
+	joinGatewayNamespaces(hostConfig, "enclave-codex-abc-gateway", false)
 	if hostConfig.NetworkMode != "container:enclave-codex-abc-gateway" {
 		t.Fatalf("session must join the gateway network namespace, got %q", hostConfig.NetworkMode)
 	}
@@ -75,8 +75,27 @@ func TestPodmanSessionsJoinGatewayUserNamespace(t *testing.T) {
 	usePodmanCLI(t)
 	hostConfig = &dockercmd.HostConfig{}
 	applyHostUserNamespace(hostConfig)
-	joinGatewayNamespaces(hostConfig, "enclave-codex-abc-gateway")
+	joinGatewayNamespaces(hostConfig, "enclave-codex-abc-gateway", false)
 	if hostConfig.UserNS != "container:enclave-codex-abc-gateway" {
 		t.Fatalf("podman sessions must share the gateway user namespace, got %q", hostConfig.UserNS)
+	}
+}
+
+func TestSessionsWithHostnameJoinGatewayUTSNamespaceOnlyUnderPodman(t *testing.T) {
+	hostConfig := &dockercmd.HostConfig{}
+	joinGatewayNamespaces(hostConfig, "enclave-codex-abc-gateway", true)
+	if hostConfig.UTSMode != "" {
+		t.Fatalf("docker shares the hostname with --network container: and rejects --uts container:, got %q", hostConfig.UTSMode)
+	}
+
+	usePodmanCLI(t)
+	hostConfig = &dockercmd.HostConfig{}
+	joinGatewayNamespaces(hostConfig, "enclave-codex-abc-gateway", false)
+	if hostConfig.UTSMode != "" {
+		t.Fatalf("sessions without a hostname must keep their UTS namespace, got %q", hostConfig.UTSMode)
+	}
+	joinGatewayNamespaces(hostConfig, "enclave-codex-abc-gateway", true)
+	if hostConfig.UTSMode != "container:enclave-codex-abc-gateway" {
+		t.Fatalf("podman sessions must share the gateway hostname, got %q", hostConfig.UTSMode)
 	}
 }

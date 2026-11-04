@@ -132,6 +132,8 @@ enclave.worktree=/work/project
 --init
 --userns
 container:enclave-claude-abc123abc123-main-gateway
+--uts
+container:enclave-claude-abc123abc123-main-gateway
 --network
 container:enclave-claude-abc123abc123-main-gateway
 --mount

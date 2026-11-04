@@ -249,7 +249,17 @@ step_disabled_gateway() {
   pass "--disable-gateway runs without a gateway or log and is rejected in restricted mode"
 }
 
-ALL="baseline fg_auth_sync cross_project bg_stop_finalize exec_sync ps persisted_env reset_auth ephemeral restart_stopped network_status restricted_network unrestricted_network_log disabled_gateway"
+step_unrestricted_hostname() {
+  local args
+  for args in "--allow-all-network" "--allow-all-network --disable-gateway"; do
+    # shellcheck disable=SC2086
+    out=$(run_tty "$P1" shell $args -- -c 'echo "hostname=$(hostname)"')
+    echo "$out" | grep -q "hostname=enclave-project1" || fail "hostname: $args session lost its hostname ($out)"
+  done
+  pass "unrestricted sessions keep their hostname with and without a gateway"
+}
+
+ALL="baseline fg_auth_sync cross_project bg_stop_finalize exec_sync ps persisted_env reset_auth ephemeral restart_stopped network_status restricted_network unrestricted_network_log unrestricted_hostname disabled_gateway"
 steps=${*:-$ALL}
 for s in $steps; do
   echo "=== step: $s ==="

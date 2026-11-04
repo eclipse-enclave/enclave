@@ -155,6 +155,7 @@ directly: "enclave --tool codex" is equivalent to "enclave run --tool codex".`,
 		hiddenSimpleCommand("ssh-init", "Initialize SSH directory", res),
 		toolsCommand(res),
 		featuresCommand(res),
+		commandsCommand(res),
 		updateCommand(res),
 		stopCommand(res),
 		attachCommand(res),
@@ -235,7 +236,11 @@ func registerUserCommands(rootCmd *cobra.Command, userCmds []usercmd.Command, re
 // get rid of it, and the path is only where it happens to live.
 func userCommandShort(uc usercmd.Command) string {
 	if uc.Extension != "" {
-		return fmt.Sprintf("Host command from the %s extension (%s)", uc.Extension, uc.Path)
+		owner := uc.Extension
+		if uc.ExtensionKind != "" {
+			owner += " " + uc.ExtensionKind.Label()
+		}
+		return fmt.Sprintf("Host command from the %s extension (%s)", owner, uc.Path)
 	}
 	return fmt.Sprintf("User command (%s)", uc.Path)
 }
@@ -884,6 +889,12 @@ func toolsCommand(res *Result) *cobra.Command {
 	cmd := simpleCommandWithTool("tools", "List available tool profiles", res)
 	addExtensionSubcommands(cmd, res, model.KindTool, "tool")
 	setToolUsage(cmd, "Tool to mark as selected (default: the configured tool; never asks)")
+	return cmd
+}
+
+func commandsCommand(res *Result) *cobra.Command {
+	cmd := simpleCommand("commands", "List installed command extensions", res)
+	addExtensionSubcommands(cmd, res, model.KindCommand)
 	return cmd
 }
 

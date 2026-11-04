@@ -299,12 +299,14 @@ in both `host/` and `session/`, the host command wins.
 
 An installed extension can ship host commands too, in its own
 `commands/host/` directory. They behave exactly like your own, and
-`enclave tools|features remove` takes them away again. They run on your host
+`enclave tools|features|commands remove` takes them away again. A command
+extension (`enclave commands add`) ships nothing but host commands. They run on your host
 rather than in the sandbox, so `add` and `update` report them in the capability
 summary before anything is written. Read that row. Your own commands outrank
 an extension's, so installing one never takes a name you already use.
-`enclave tools|features list` shows which installed extensions contribute
-verbs.
+`enclave tools|features|commands list` shows which installed extensions
+contribute verbs. To turn off a single verb, yours or an extension's, list it in
+`disabled_commands` in the global config.
 
 ## Learn More
 

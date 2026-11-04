@@ -126,6 +126,10 @@ type SpecSummary struct {
 	YoloEnabled           bool
 	DefaultEnabled        *bool
 	DefaultIncluded       *bool
+	// RuntimeFields are the top-level keys the document sets beyond its
+	// metadata, spelled as in the document. Empty means the spec only
+	// describes the extension.
+	RuntimeFields []string
 }
 
 // SummarizeSpecDir reads dir's spec.yaml (falling back to spec.json) and
@@ -158,6 +162,7 @@ func summarizeSpecDocument(doc specDocument) SpecSummary {
 		AptPackages:     doc.AptPackages,
 		DefaultEnabled:  doc.DefaultEnabled,
 		DefaultIncluded: doc.DefaultIncluded,
+		RuntimeFields:   specRuntimeFields(doc),
 	}
 	if doc.Commands != nil {
 		for _, cmd := range doc.Commands.Install {

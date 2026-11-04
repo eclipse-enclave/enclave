@@ -26,6 +26,7 @@ var BuiltinNames = []string{
 	"attach",
 	"auth",
 	"cleanup",
+	"commands",
 	"completion",
 	"config",
 	"continue",
@@ -53,9 +54,10 @@ var BuiltinNames = []string{
 }
 
 // Shadowed maps each of an extension's command names that cannot become a
-// verb to what takes it instead: a built-in, or a command in the user's own
-// commands/ tree. Names two extensions share are left out, since which one
-// wins depends on the full set installed and Discover reports it on every run.
+// verb to the reason: a built-in or a command in the user's own commands/ tree
+// takes it, or the global disabled_commands lists it. Names two extensions
+// share are left out, since which one wins depends on the full set installed
+// and Discover reports it on every run.
 func Shadowed(home string, names []string) map[string]string {
 	if len(names) == 0 {
 		return nil
@@ -73,13 +75,16 @@ func Shadowed(home string, names []string) map[string]string {
 			own[c.Name] = c.Path
 		}
 	}
+	disabled, configPath := config.DisabledCommands(home)
 	shadowed := map[string]string{}
 	for _, name := range names {
 		switch path, ok := own[name]; {
 		case slices.Contains(BuiltinNames, name):
-			shadowed[name] = "a built-in command"
+			shadowed[name] = "a built-in command takes the name"
+		case slices.Contains(disabled, name):
+			shadowed[name] = fmt.Sprintf("disabled_commands in %s lists it", configPath)
 		case ok:
-			shadowed[name] = fmt.Sprintf("your user command %s", path)
+			shadowed[name] = fmt.Sprintf("your user command %s takes the name", path)
 		}
 	}
 	return shadowed

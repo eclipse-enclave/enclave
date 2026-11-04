@@ -701,6 +701,82 @@ func TestDiscoverExtensionCommandCollisionPrefersTools(t *testing.T) {
 	}
 }
 
+// A command extension exists only for its verbs, so it claims a name before a
+// tool or feature that ships the same one on the side.
+func TestDiscoverCommandExtensionOutranksToolsAndFeatures(t *testing.T) {
+	home := t.TempDir()
+	toolDir := extensionCommandDir(t, home, model.KindTool, "alpha")
+	writeExec(t, filepath.Join(toolDir, "usage"))
+	featureDir := extensionCommandDir(t, home, model.KindFeature, "alpha")
+	writeExec(t, filepath.Join(featureDir, "usage"))
+	commandDir := extensionCommandDir(t, home, model.KindCommand, "zeta")
+	writeExec(t, filepath.Join(commandDir, "usage"))
+
+	cmds, warnings := Discover(home)
+
+	if len(cmds) != 1 || cmds[0].Extension != "zeta" || cmds[0].ExtensionKind != model.KindCommand {
+		t.Fatalf("expected the command extension to win, got %+v", cmds)
+	}
+	if len(warnings) != 2 || !strings.Contains(warnings[0], "zeta (command)") || !strings.Contains(warnings[0], "alpha (tool)") ||
+		!strings.Contains(warnings[1], "alpha (feature)") {
+		t.Fatalf("expected collision warnings naming each extension with its kind, got %v", warnings)
+	}
+}
+
+func writeGlobalConfig(t *testing.T, home string, content string) string {
+	t.Helper()
+	path := filepath.Join(config.HostConfigRootDir(home), "config.json")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	return path
+}
+
+// A disabled name resolves to nothing, not to the next source in line, so
+// disabling one extension's verb cannot hand the name to another one.
+func TestDiscoverSkipsDisabledCommands(t *testing.T) {
+	home := t.TempDir()
+	hostDir, _ := mkdirs(t, home)
+	writeExec(t, filepath.Join(hostDir, "mine"))
+	commandDir := extensionCommandDir(t, home, model.KindCommand, "kit")
+	featureDir := extensionCommandDir(t, home, model.KindFeature, "other")
+	for _, name := range []string{"usage", "report"} {
+		writeExec(t, filepath.Join(commandDir, name))
+	}
+	writeExec(t, filepath.Join(featureDir, "usage"))
+	writeGlobalConfig(t, home, `{"disabled_commands": ["usage", "mine"]}`)
+
+	cmds, warnings := Discover(home)
+
+	if len(cmds) != 1 || cmds[0].Name != "report" {
+		t.Fatalf("expected only the enabled verb, got %+v", cmds)
+	}
+	// Two extensions claim usage, but neither is used, so neither is reported.
+	if len(warnings) != 0 {
+		t.Fatalf("disabled names still produced warnings: %v", warnings)
+	}
+	got := Shadowed(home, []string{"usage", "report"})
+	if len(got) != 1 || !strings.Contains(got["usage"], "disabled_commands") {
+		t.Fatalf("Shadowed = %v, want usage reported as disabled", got)
+	}
+}
+
+// An entry with list-operator syntax must not make the whole list a no-op.
+func TestDiscoverDisablesNamesNextToOperatorLookalikes(t *testing.T) {
+	home := t.TempDir()
+	mkdirs(t, home)
+	commandDir := extensionCommandDir(t, home, model.KindCommand, "kit")
+	writeExec(t, filepath.Join(commandDir, "edge"))
+	writeGlobalConfig(t, home, `{"disabled_commands": ["edge", "+hello"]}`)
+
+	if cmds, _ := Discover(home); len(cmds) != 0 {
+		t.Fatalf("disabled verb still discovered: %+v", cmds)
+	}
+}
+
 func TestDiscoverWithoutInstalledExtensionsIsQuiet(t *testing.T) {
 	home := t.TempDir()
 	mkdirs(t, home)
@@ -731,7 +807,7 @@ func TestShadowedReportsBuiltinsAndUserCommands(t *testing.T) {
 	writeExec(t, filepath.Join(hostDir, "mine"))
 
 	got := Shadowed(home, []string{"stop", "mine", "vnc-viewer"})
-	if len(got) != 2 || got["stop"] != "a built-in command" ||
+	if len(got) != 2 || got["stop"] != "a built-in command takes the name" ||
 		!strings.Contains(got["mine"], filepath.Join(hostDir, "mine")) {
 		t.Fatalf("Shadowed = %v", got)
 	}

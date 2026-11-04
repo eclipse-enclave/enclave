@@ -46,6 +46,9 @@ func ValidateExtensions(paths model.Paths) (ExtensionValidation, error) {
 	if err := validateUserExtensions(paths, model.KindFeature, &result); err != nil {
 		return result, err
 	}
+	if err := validateUserExtensions(paths, model.KindCommand, &result); err != nil {
+		return result, err
+	}
 
 	return result, nil
 }
@@ -153,6 +156,9 @@ func validateUserExtension(paths model.Paths, kind model.ExtensionKind, name str
 	case validateOverrideContent:
 		validateSpecContent(paths, kind, name, result)
 	}
+	if kind == model.KindCommand {
+		validateCommandExtensionTree(name, userDir, result)
+	}
 
 	if kind == model.KindTool {
 		userAllowlistPath := filepath.Join(userDir, model.AllowlistFilename)
@@ -186,6 +192,55 @@ func validateCommandsDir(kind model.ExtensionKind, name string, userDir string, 
 			kind.Label(), name, model.CommandsDirName, entry.Name(),
 			model.CommandsDirName, model.CommandsHostDirName))
 	}
+}
+
+// commandExtensionInertEntries are the runtime files and directories a tool or
+// feature ships. A command extension never reaches an image, so any of them
+// there is a mistake rather than something to act on.
+var commandExtensionInertEntries = []string{
+	model.InstallScriptFilename,
+	model.CheckUpdateScriptFilename,
+	model.AllowlistFilename,
+	model.ExtensionFilesDir,
+	model.ExtensionGoDir,
+	model.SkillsDirName,
+	model.TemplatesDir,
+	model.ToolEntrypointDir,
+	model.FeatureEntrypointDir,
+}
+
+// validateCommandExtensionTree checks what only a command extension needs: it
+// has to contribute a verb, and it must not carry runtime files that nothing
+// would ever read.
+func validateCommandExtensionTree(name string, userDir string, result *ExtensionValidation) {
+	for _, entry := range commandExtensionInertEntries {
+		if util.PathExists(filepath.Join(userDir, entry)) {
+			result.Warnings = append(result.Warnings, fmt.Sprintf(
+				"command extension %q: ignoring %s (a command extension only ships %s/%s/)",
+				name, entry, model.CommandsDirName, model.CommandsHostDirName))
+		}
+	}
+	if !hasExecutable(filepath.Join(userDir, model.CommandsDirName, model.CommandsHostDirName)) {
+		result.Errors = append(result.Errors, fmt.Sprintf(
+			"command extension %q: no executable in %s/%s/, so it adds no command",
+			name, model.CommandsDirName, model.CommandsHostDirName))
+	}
+}
+
+// hasExecutable reports whether dir holds a regular file, or a symlink to one,
+// with an executable bit: the files usercmd turns into verbs.
+func hasExecutable(dir string) bool {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return false
+	}
+	for _, entry := range entries {
+		info, err := os.Stat(filepath.Join(dir, entry.Name()))
+		if err == nil && info.Mode().IsRegular() && info.Mode().Perm()&0o111 != 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // validateUserOnlyExtension validates a user extension that shadows no

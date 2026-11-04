@@ -60,8 +60,8 @@ func narrationWriter(req extinstall.Request) io.Writer {
 // extensionOp is the shape of extinstall.Add/Update/Remove.
 type extensionOp func(context.Context, extinstall.Env, extinstall.Request) ([]extinstall.ActionResult, error)
 
-// extensionOps has no OpList entry: listing is served by the `tools`/`features`
-// handlers.
+// extensionOps has no OpList entry: listing is served by the `tools`,
+// `features` and `commands` handlers.
 var extensionOps = map[extinstall.Op]extensionOp{
 	extinstall.OpAdd:    extinstall.Add,
 	extinstall.OpUpdate: extinstall.Update,

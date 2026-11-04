@@ -1,7 +1,7 @@
 # Installing Extensions from Git
 
-`enclave tools` and `enclave features` install, update, and remove extensions
-from git repositories into the user-global extension root
+`enclave tools`, `enclave features`, and `enclave commands` install, update,
+and remove extensions from git repositories into the user-global extension root
 (`~/.config/enclave/extensions/`). This document covers that installer; see
 [Extension Architecture](README.md) for the spec format itself.
 
@@ -23,8 +23,12 @@ enclave features add eclipse-enclave/enclave-extensions --name <feature>
 | `enclave features update [<name\|source>...]` / `enclave tools update [<name\|source>...]` | Refresh installed extensions from their recorded source |
 | `enclave features remove <name>...` / `enclave tools remove <name>...` | Remove installed extensions |
 
-`enclave features` and `enclave tools` with no subcommand are aliases for
-`list`. `enclave features update`/`enclave tools update` refresh extension
+`enclave commands list|add|update|remove` does the same for
+[command extensions](README.md#command-extensions), which only ship host
+commands and have no built-in counterpart.
+
+`enclave features`, `enclave tools`, and `enclave commands` with no subcommand
+are aliases for `list`. `enclave features update`/`enclave tools update` refresh extension
 **sources** on the host; they do not touch images. The unrelated top-level
 `enclave update` rebuilds container **images** from whatever extensions are
 currently on disk. Installing or updating an extension changes its content
@@ -57,7 +61,8 @@ it — the escape hatch for exactly this case.
 ## Discovery
 
 The verb fixes the kind: `enclave tools add` looks only for `kind: sandbox`
-extensions, `enclave features add` only for `kind: mixin`. With no subpath in
+extensions, `enclave features add` only for `kind: mixin`, and
+`enclave commands add` only for `kind: command`. With no subpath in
 the source, the whole repository (up to 8 directories deep) is scanned for
 spec documents (`spec.yaml`/`spec.json`) whose `kind` matches and whose spec
 `name` matches their containing directory's name — a mismatch, or a name the
@@ -82,9 +87,12 @@ and a destination path.
   the names being installed are checked: `--name foo` still errors on two
   `foo` directories, but a duplicate pair you did not ask for is not your
   problem.
-- If the source has extensions of the *other* kind but none of the requested
-  one, the error names the right verb (`enclave features add` when you ran
-  `enclave tools add` against a features-only repo).
+- If the source has extensions of *other* kinds but none of the requested
+  one, the error counts them per kind and names the verb for each
+  (`enclave features add` when you ran `enclave tools add` against a
+  features-only repo).
+- A feature that ships nothing but host commands installs, with a warning
+  pointing at `kind: command` and `enclave commands add`.
 
 ## Trust
 
@@ -99,7 +107,7 @@ sandbox, and a host command is not.
 
 Because `--json` replaces the narrated summary with the result envelope, every
 verb also appears in that envelope's `hostCommands` field, on `add`, `update`,
-and `remove` alike. `enclave tools|features list` reports the same set per
+and `remove` alike. `enclave tools|features|commands list` reports the same set per
 installed extension, as a `[host: ...]` suffix in its text output and as
 `hostCommands` under `--json`, so you can audit after the fact which
 extensions can execute host code. They resolve whenever an extension is
@@ -308,8 +316,11 @@ tree, so no set of directories describes it.
 
 ## JSON contracts
 
-`enclave <features|tools> list --json` emits `schemaVersion: "1"` and one
-entry per extension, whether built-in or installed:
+`enclave <features|tools|commands> list --json` emits `schemaVersion: "1"` and
+one entry per extension, whether built-in or installed. `kind` is `tool`,
+`feature`, or `command`; `command` was added after the envelope's first
+release, so a consumer that switches on `kind` should tolerate values it does
+not know:
 
 ```json
 {
@@ -386,8 +397,10 @@ Feature listings also carry:
   `github.com`. Hosts selected at session start through
   `serviceAuth.hostsFromCredential` are not included.
 
-Empty entry arrays are omitted rather than emitted as `[]` or `null`. Tool
-listings carry none of these fields.
+Empty entry arrays are omitted rather than emitted as `[]` or `null`. Tool and
+command listings carry none of these fields. Every tool and command extension
+reports `enabled: true`: a tool is selected per run, and a command extension
+has nothing to enable.
 
 `add`, `update`, and `remove` share one result envelope (also
 `schemaVersion: "1"`), written to stdout as a single JSON document when

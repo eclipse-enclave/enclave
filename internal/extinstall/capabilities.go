@@ -73,10 +73,24 @@ func (c capabilities) shadowedHostCommandWarnings() []string {
 	for _, name := range c.HostCommands {
 		if by, shadowed := c.ShadowedHostCommands[name]; shadowed {
 			warnings = append(warnings, fmt.Sprintf(
-				"host command %q is not added as `%s %s`: %s takes the name", name, model.AppName, name, by))
+				"host command %q is not added as `%s %s`: %s", name, model.AppName, name, by))
 		}
 	}
 	return warnings
+}
+
+// onlyHostCommands reports whether a feature contributes host commands and
+// nothing a session would see: a spec that sets at most the feature's own
+// selection fields, and no file anything in the build or at startup reads.
+func (c capabilities) onlyHostCommands() bool {
+	for _, field := range c.Spec.RuntimeFields {
+		if field != "defaultEnabled" && field != "priority" {
+			return false
+		}
+	}
+	return len(c.HostCommands) > 0 && !c.InstallScript && len(c.StartupScripts) == 0 &&
+		len(c.AllowDomains) == 0 && len(c.AllowlistDirectives) == 0 && len(c.Skills) == 0 &&
+		len(c.WorkspaceFiles) == 0 && len(c.HomeFiles) == 0
 }
 
 // yoloActive reports whether the extension arranges for the agent's launch
@@ -109,9 +123,12 @@ func inspect(dir string, kind model.ExtensionKind) (capabilities, error) {
 		return capabilities{}, err
 	}
 	domains := append([]string{}, summary.AllowedDomains...)
-	allowlistDomains, allowlistDirectives, err := parseAllowlistFile(filepath.Join(dir, model.AllowlistFilename))
-	if err != nil {
-		return capabilities{}, err
+	var allowlistDomains, allowlistDirectives []string
+	if kind != model.KindCommand {
+		allowlistDomains, allowlistDirectives, err = parseAllowlistFile(filepath.Join(dir, model.AllowlistFilename))
+		if err != nil {
+			return capabilities{}, err
+		}
 	}
 	// Read separately from the tree walk so this and the inventory answer
 	// "which verbs does this extension add" from the same code.
@@ -152,7 +169,8 @@ type extensionTree struct {
 }
 
 // scanExtensionTree answers every filesystem-derived capability in one walk of
-// dir. The provenance sidecar counts towards nothing.
+// dir. The provenance sidecar counts towards nothing. A command extension only
+// counts its content: none of the runtime files it might carry is ever read.
 func scanExtensionTree(dir string, kind model.ExtensionKind) (extensionTree, error) {
 	var (
 		skillsPrefix    = model.SkillsDirName + "/"
@@ -164,6 +182,9 @@ func scanExtensionTree(dir string, kind model.ExtensionKind) (extensionTree, err
 
 	err := walkExtensionEntries(dir, func(rel string, _ string, entry fs.DirEntry) error {
 		if entry.IsDir() {
+			if kind == model.KindCommand {
+				return nil
+			}
 			if rel == model.ExtensionGoDir {
 				tree.GoDir = true
 			}
@@ -181,6 +202,9 @@ func scanExtensionTree(dir string, kind model.ExtensionKind) (extensionTree, err
 		}
 		tree.Files++
 		tree.Bytes += info.Size()
+		if kind == model.KindCommand {
+			return nil
+		}
 
 		switch rel {
 		case model.InstallScriptFilename:

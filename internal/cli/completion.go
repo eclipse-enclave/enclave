@@ -159,7 +159,7 @@ func registerCompletions(rootCmd *cobra.Command) error {
 
 	// add --name names an extension in the source, not on this host; installed
 	// names are only a hint for re-adding one.
-	for _, kind := range []model.ExtensionKind{model.KindFeature, model.KindTool} {
+	for _, kind := range model.ExtensionKinds {
 		completer := installedExtensionCompleter(kind)
 		for _, sub := range []string{"remove", "update"} {
 			if cmd := findSubCommand(rootCmd, kind.DirName(), sub); cmd != nil {

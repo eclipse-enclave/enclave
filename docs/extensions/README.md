@@ -4,17 +4,20 @@ This document describes Enclave's modular extension system.
 
 ## Overview
 
-Enclave uses a unified extension architecture that supports two types of extensions:
+Enclave uses a unified extension architecture that supports three types of extensions:
 
 1. **Tool Extensions** - Runnable AI coding agents (Claude, Codex, OpenCode, etc.)
 2. **Feature Extensions** - Development tools and capabilities (GitHub CLI, Python dev tools, etc.)
+3. **Command Extensions** - Host commands only, with no container side (see [Command Extensions](#command-extensions))
 
 Extensions are organized into two directories:
 
 - `extensions/tools/` - AI coding agents (Claude, Codex, OpenCode, etc.)
 - `extensions/features/` - Development tools (GitHub CLI, Python tools, etc.)
 
-This separation makes it immediately clear what type each extension is.
+This separation makes it immediately clear what type each extension is. Command
+extensions are never built in: they only exist under the user root, in
+`~/.config/enclave/extensions/commands/`.
 
 ## Extension Sources
 
@@ -105,7 +108,7 @@ identical behavior. The differences are called out below.
 
 ```yaml
 schemaVersion: "1"        # enclave owns this version; sbx alignment is per-release
-kind: sandbox | mixin     # sandbox = tool (was "tool"), mixin = feature (was "feature")
+kind: sandbox | mixin | command  # sandbox = tool, mixin = feature, command = host commands only
 name: <kebab-case>        # must match the extension's directory name
 displayName: <human name>
 description: <one line>
@@ -281,7 +284,7 @@ priority: 80
 
 ## Host commands
 
-Both kinds may ship `commands/host/<name>`. Every executable file there becomes
+Every kind may ship `commands/host/<name>`. Every executable file there becomes
 an `enclave <name>` verb on any host where the extension is installed, with the
 same contract as a command the user drops into
 `~/.config/enclave/commands/host/`: the shebang picks the interpreter,
@@ -317,10 +320,15 @@ Rules worth knowing before you ship one:
   than left inert: a `commands/session/` or a misspelled `commands/hosts/`
   shows up as `ignoring commands/<name>` on the next run.
 - Names resolve in a fixed order: built-in verbs, then the user's own
-  `commands/{host,session}/` trees, then extensions. Picking a name a built-in
-  or the user already owns means the command is skipped: `add` and `update`
-  warn and leave it out of the capability summary, and every run warns again.
-  Prefer a name tied to the extension.
+  `commands/{host,session}/` trees, then command extensions, tools, and
+  features, alphabetically within each kind. Picking a name a built-in or the
+  user already owns means the command is skipped: `add` and `update` warn and
+  leave it out of the capability summary, and every run warns again. Prefer a
+  name tied to the extension.
+- Users install an extension's commands as a set. To drop one verb without
+  removing the extension, they list it in `disabled_commands` in their global
+  config. So ship verbs together only when they belong together, and put
+  independent ones in separate extensions that can be added by `--name`.
 - `commands/` never enters the build context or the image identity hash.
   Editing a command forces no rebuild, and the script is not present inside the
   image, so nothing in a session can run it.
@@ -331,6 +339,46 @@ Rules worth knowing before you ship one:
   adds a real command instead. A directory the user creates under the extension
   root by hand is read like any installed one, including one that overrides a
   built-in.
+
+## Command Extensions
+
+A command that has no container side, say an `enclave usage` that reads
+persisted sessions on the host, does not belong in a feature: a feature is
+listed, enabled, and built into the image, none of which means anything for a
+host command. A command extension (`kind: command`) ships host commands and
+nothing else:
+
+```
+usage/
+├── spec.yaml
+├── README.md
+└── commands/
+    └── host/
+        └── usage     # chmod +x, becomes `enclave usage`
+```
+
+```yaml
+schemaVersion: "1"
+kind: command
+name: usage
+displayName: Session usage
+description: Token usage across persisted sessions
+```
+
+- The spec accepts `schemaVersion`, `kind`, `name`, `displayName`, and
+  `description` only. Any other field is a load error rather than a warning,
+  since nothing would ever read it. That includes the `commands:` key
+  (install/startup/initFiles), which is unrelated to the `commands/` directory.
+- `commands/host/` follows the [host command](#host-commands) rules. At least
+  one executable is required. Runtime files a tool or feature would ship
+  (`install.sh`, `files/`, `skills/`, and so on) are reported as ignored.
+- Manage them with `enclave commands list|add|update|remove`
+  ([Installing Extensions](installing.md)). They install into
+  `~/.config/enclave/extensions/commands/<name>/`, never reach the build
+  context or the image hash, and `add` prints neither a rebuild note nor an
+  enable hint. Installed means available.
+- `kind: command` is enclave's own. The sbx kit format has no host commands, so
+  there is nothing there to match.
 
 ## Tool Extensions
 

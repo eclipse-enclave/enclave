@@ -27,6 +27,7 @@ type RunOptions struct {
 	Backend                  string
 	AutoUpdate               bool
 	UpdateChannel            string
+	DisabledCommands         []string
 	HostConfig               string
 	SkillsValidation         string
 	HostConfigPaths          []string
@@ -484,8 +485,11 @@ type Paths struct {
 	UserExtensionsDir string // ~/.config/enclave/extensions/
 	UserToolsDir      string // ~/.config/enclave/extensions/tools/
 	UserFeaturesDir   string // ~/.config/enclave/extensions/features/
-	AllowlistsDir     string // For gateway allowlist fragments (shared across extensions)
-	BuildScriptsDir   string // Docker weaving scripts copied into image during build
+	// UserCommandExtensionsDir holds command extensions. There are no built-in
+	// ones, so it has no counterpart under ExtensionsDir.
+	UserCommandExtensionsDir string // ~/.config/enclave/extensions/commands/
+	AllowlistsDir            string // For gateway allowlist fragments (shared across extensions)
+	BuildScriptsDir          string // Docker weaving scripts copied into image during build
 }
 
 type Project struct {
@@ -646,11 +650,13 @@ const (
 )
 
 // Extension kind discriminator values, matching the public spec.yaml
-// `kind: sandbox|mixin` tokens. These are the canonical (and only accepted)
-// values for Extension.Type.
+// `kind: sandbox|mixin|command` tokens. These are the canonical (and only
+// accepted) values for Extension.Type. sandbox and mixin come from the sbx kit
+// format; command is enclave-native, since sbx has no host commands.
 const (
 	ExtensionKindSandbox = "sandbox"
 	ExtensionKindMixin   = "mixin"
+	ExtensionKindCommand = "command"
 )
 
 const (

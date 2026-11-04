@@ -20,7 +20,8 @@ import (
 )
 
 // LoadSpec resolves and parses the spec.yaml (or spec.json) document for the
-// extension named name, expecting the given kind (KindSandbox or KindMixin).
+// extension named name, expecting the given kind (KindSandbox, KindMixin or
+// KindCommand).
 // It returns os.ErrNotExist if neither file is present.
 func LoadSpec(paths model.Paths, name string, kind string) (specDocument, error) {
 	specPath, ok := resolveSpecFile(paths, name, kind)
@@ -38,6 +39,9 @@ func LoadSpec(paths model.Paths, name string, kind string) (specDocument, error)
 	}
 	if doc.Name != name {
 		return specDocument{}, fmt.Errorf("%s name must be %q", specPath, name)
+	}
+	if err := validateCommandSpec(doc, specPath); err != nil {
+		return specDocument{}, err
 	}
 	if err := validateStartupCommands(doc, specPath); err != nil {
 		return specDocument{}, err

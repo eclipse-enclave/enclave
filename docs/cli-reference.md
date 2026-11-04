@@ -91,6 +91,7 @@ Ctrl-C, SIGTERM or SIGHUP while a session is still starting aborts the start wit
 | `enclave config` | Show configuration values |
 | `enclave tools` | List available tool profiles (`list\|add\|remove\|update` manage installed tool extensions; see below) |
 | `enclave features` | List available feature extensions (`list\|add\|remove\|update` manage installed feature extensions; see below) |
+| `enclave commands` | List installed command extensions (`list\|add\|remove\|update` manage them; see below) |
 | `enclave completion <shell>` | Generate shell completion |
 
 `enclave version` prints one line suitable for bug reports; `--json` emits the version, commit, and date as an object. Builds from modified source append `-dirty` to the commit; unavailable values are reported as `unknown`.
@@ -150,7 +151,7 @@ waits for the next interval.
 
 ### Extensions
 
-`enclave tools` and `enclave features` (bare) are aliases for their `list` subcommand. Every verb below exists for both `enclave tools <verb>` and `enclave features <verb>`; see [Installing Extensions](extensions/installing.md) for the full behavior.
+`enclave tools`, `enclave features`, and `enclave commands` (bare) are aliases for their `list` subcommand. Every verb below exists for `enclave tools <verb>`, `enclave features <verb>`, and `enclave commands <verb>`; see [Installing Extensions](extensions/installing.md) for the full behavior and [Command Extensions](extensions/README.md#command-extensions) for the command kind.
 
 | Command | Flags |
 |---------|-------|
@@ -159,7 +160,7 @@ waits for the next interval.
 | `update [<name\|source>...]` | `--ref <ref>` (single extension only), `--yes`/`-y`, `--force`, `--dry-run`, `--json` (requires `--yes`) |
 | `remove <name>...` | `--yes`/`-y`, `--force`, `--json` (requires `--yes`) |
 
-`enclave features update`/`enclave tools update` refresh installed extension **sources**; they are unrelated to the top-level `enclave update`, which rebuilds container **images**.
+`enclave features update`/`enclave tools update`/`enclave commands update` refresh installed extension **sources**; they are unrelated to the top-level `enclave update`, which rebuilds container **images**.
 
 ### IDE
 

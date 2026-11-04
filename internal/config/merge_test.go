@@ -26,6 +26,7 @@ func TestMergeDefaultsCoversAllFields(t *testing.T) {
 		Backend:                "docker",
 		AutoUpdate:             &trueVal,
 		UpdateChannel:          "stable",
+		DisabledCommands:       []string{"usage"},
 		HostConfig:             model.HostConfigPassthrough,
 		SkillsValidation:       model.SkillsValidationAgent,
 		HostConfigPaths:        []string{"default", "+commands/"},

@@ -179,8 +179,11 @@ func mergeListValues(def OptionDef, base []string, incoming []string) []string {
 		}
 		return copyStringSlice(incoming)
 	}
-	if def.Apply == ApplyListExtras {
+	switch def.Apply {
+	case ApplyListExtras:
 		return combineExtrasValues(def.Name, base, incoming)
+	case ApplyStringSlice:
+		return copyStringSlice(incoming)
 	}
 	rules := featureSelection
 	switch def.Apply {

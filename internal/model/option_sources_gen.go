@@ -18,10 +18,11 @@ type OptionSources struct {
 }
 
 type GlobalOptionSources struct {
-	AllowRoot     OptionSource
-	AutoUpdate    OptionSource
-	UpdateChannel OptionSource
-	Verbose       OptionSource
+	AllowRoot        OptionSource
+	AutoUpdate       OptionSource
+	DisabledCommands OptionSource
+	UpdateChannel    OptionSource
+	Verbose          OptionSource
 }
 
 type RunOptionSources struct {
@@ -89,10 +90,11 @@ func (s OptionSources) RunSources() RunOptionSources { return s.RunOptionSources
 func DefaultOptionSources() OptionSources {
 	return OptionSources{
 		GlobalOptionSources: GlobalOptionSources{
-			AllowRoot:     SourceDefault,
-			AutoUpdate:    SourceDefault,
-			UpdateChannel: SourceDefault,
-			Verbose:       SourceDefault,
+			AllowRoot:        SourceDefault,
+			AutoUpdate:       SourceDefault,
+			DisabledCommands: SourceDefault,
+			UpdateChannel:    SourceDefault,
+			Verbose:          SourceDefault,
 		},
 		RunOptionSources: RunOptionSources{
 			AddDirs:                  SourceDefault,
@@ -217,6 +219,9 @@ func MergeOptionSources(base OptionSources, override OptionSources) OptionSource
 	}
 	if override.Devcontainer != SourceUnset {
 		base.Devcontainer = override.Devcontainer
+	}
+	if override.DisabledCommands != SourceUnset {
+		base.DisabledCommands = override.DisabledCommands
 	}
 	if override.Ephemeral != SourceUnset {
 		base.Ephemeral = override.Ephemeral

@@ -18,6 +18,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"os"
 	"slices"
@@ -55,6 +56,10 @@ type Options struct {
 }
 
 const serverShutdownTimeout = 1 * time.Second
+
+// ruleUpstreamError marks a passed connection or request the proxy could not
+// deliver.
+const ruleUpstreamError = "upstream-error"
 
 const maxTLSRecordsBeforeClientHelloLength = 16
 
@@ -102,11 +107,8 @@ func Run(ctx context.Context, opts Options) error {
 
 	proxy := newProxy(opts.AllowedDomains, opts.DeniedDomains, opts.SecretRules, opts.ForceHTTPSMITM, audit, opts.Session)
 	proxy.caps = capabilitiesFor(opts.NetworkMode)
-	httpServer := &http.Server{
-		Addr:              httpAddr,
-		Handler:           proxy.handler("http"),
-		ReadHeaderTimeout: 10 * time.Second,
-	}
+	httpServer := proxy.newHTTPServer()
+	httpServer.Addr = httpAddr
 	httpListener, err := net.Listen("tcp", httpAddr)
 	if err != nil {
 		return fmt.Errorf("listen HTTP proxy on %s: %w", httpAddr, err)
@@ -126,7 +128,7 @@ func Run(ctx context.Context, opts Options) error {
 
 	errCh := make(chan error, 2)
 	go func() {
-		if err := httpServer.Serve(httpListener); err != nil && !errors.Is(err, http.ErrServerClosed) && !errors.Is(err, net.ErrClosed) {
+		if err := proxy.serveHTTP(httpServer, httpListener); err != nil && !errors.Is(err, http.ErrServerClosed) && !errors.Is(err, net.ErrClosed) {
 			errCh <- fmt.Errorf("serve HTTP proxy: %w", err)
 		}
 	}()
@@ -154,14 +156,21 @@ func Run(ctx context.Context, opts Options) error {
 }
 
 // capabilities are what the proxy does beyond logging. They are derived from
-// the session's network mode: restricted turns all of them on, unrestricted
-// only observes.
+// the session's network mode: restricted enforces, unrestricted only observes.
 type capabilities struct {
 	enforceAllowlist bool
+	// dialOriginalDestination sends each connection to the address the client
+	// dialled instead of re-resolving its SNI or Host, and tunnels traffic the
+	// proxy cannot parse there unchanged.
+	dialOriginalDestination bool
 }
 
 func capabilitiesFor(networkMode string) capabilities {
-	return capabilities{enforceAllowlist: networkMode != model.NetworkModeUnrestricted}
+	restricted := networkMode != model.NetworkModeUnrestricted
+	return capabilities{
+		enforceAllowlist:        restricted,
+		dialOriginalDestination: !restricted,
+	}
 }
 
 type proxy struct {
@@ -172,7 +181,9 @@ type proxy struct {
 	forceHTTPSMITM bool
 	audit          *netlog.Appender
 	session        string
-	transport      *http.Transport
+	// originalDst reports where the client sent a redirected connection.
+	originalDst func(net.Conn) (netip.AddrPort, error)
+	transport   *http.Transport
 	// upgradeTransport speaks only HTTP/1.1 and carries every request with an
 	// Upgrade header, whether or not Connection names it: HTTP/2 refuses any
 	// Upgrade header, and transport switches to HTTP/1.1 by itself only for
@@ -204,6 +215,7 @@ func newProxy(allowedDomains []string, deniedDomains []string, secretRules []mod
 		forceHTTPSMITM:   forceHTTPSMITM,
 		audit:            audit,
 		session:          session,
+		originalDst:      kernelOriginalDestination,
 		transport:        newUpstreamTransport(),
 		upgradeTransport: upgradeTransport,
 	}
@@ -239,7 +251,7 @@ func (p *proxy) handler(scheme string) http.HandlerFunc {
 				p.logEvent(mismatchEvent)
 			}
 		}
-		if host == "" {
+		if host == "" && !originalDestinationFrom(req.Context()).IsValid() {
 			event.Status = http.StatusBadRequest
 			event.Verdict = netlog.VerdictDeny
 			event.Rule = "invalid-host"
@@ -255,19 +267,23 @@ func (p *proxy) handler(scheme string) http.HandlerFunc {
 			http.Error(w, "Domain not in allowlist", http.StatusForbidden)
 			return
 		}
-		if err := rewriteHeaders(scheme, host, req.Header, p.secretRules); err != nil {
-			event.Status = http.StatusForbidden
-			event.Verdict = netlog.VerdictDeny
-			event.Rule = "secret-injection"
-			p.logEvent(event)
-			http.Error(w, "request denied", http.StatusForbidden)
-			return
+		// A request without host only gets here in an unrestricted proxy,
+		// which has no secrets to release.
+		if host != "" {
+			if err := rewriteHeaders(scheme, host, req.Header, p.secretRules); err != nil {
+				event.Status = http.StatusForbidden
+				event.Verdict = netlog.VerdictDeny
+				event.Rule = "secret-injection"
+				p.logEvent(event)
+				http.Error(w, "request denied", http.StatusForbidden)
+				return
+			}
 		}
 		result, err := p.forward(w, req, scheme)
 		if err != nil {
 			event.Status = http.StatusBadGateway
 			event.Verdict = netlog.VerdictPass
-			event.Rule = "upstream-error"
+			event.Rule = ruleUpstreamError
 			p.logEvent(event)
 			http.Error(w, "Upstream request failed", http.StatusBadGateway)
 			return
@@ -295,6 +311,10 @@ func (p *proxy) forward(w http.ResponseWriter, req *http.Request, scheme string)
 		host = normalizedRequestHost(req)
 	}
 	target.Host = host
+	if dst := originalDestinationFrom(req.Context()); dst.IsValid() {
+		// Keep the Host header and only redirect the dial.
+		target.Host = dst.String()
+	}
 	if strings.TrimSpace(target.Host) == "" {
 		return forwardResult{}, fmt.Errorf("missing request host")
 	}
@@ -512,6 +532,10 @@ func (s *httpsDispatchServer) Shutdown(ctx context.Context) error {
 func (s *httpsDispatchServer) serveConn(conn net.Conn) {
 	defer s.untrackConn(conn)
 
+	if s.proxy.caps.dialOriginalDestination {
+		s.serveTransparentConn(conn)
+		return
+	}
 	host, preface, err := readClientHello(conn)
 	if err != nil {
 		s.proxy.logEvent(newTCPAuditEvent("", netlog.VerdictDeny, "tls-clienthello"))
@@ -530,6 +554,44 @@ func (s *httpsDispatchServer) serveConn(conn net.Conn) {
 	}
 	s.proxy.logEvent(newTCPAuditEvent(host, netlog.VerdictPass, s.proxy.passRule()))
 	tunnelTLS(conn, preface, host)
+}
+
+// serveTransparentConn is serveConn for a proxy that only observes: every
+// connection reaches the address the client dialled, including those without
+// SNI and those that are not TLS at all.
+func (s *httpsDispatchServer) serveTransparentConn(conn net.Conn) {
+	dst := s.proxy.originalDestination(conn)
+	recorded := &recordingConn{Conn: conn}
+	host, preface, err := readClientHello(recorded)
+	if err != nil {
+		host, preface = "", recorded.read.Bytes()
+	}
+	if host != "" && shouldMITM(host, s.proxy.secretRules, s.proxy.forceHTTPSMITM) {
+		s.proxy.logEvent(newTCPAuditEvent(host, netlog.VerdictPass, "mitm-dispatch"))
+		tunnelToAddress(conn, preface, s.mitmAddr)
+		return
+	}
+	target := ""
+	switch {
+	case dst.IsValid():
+		target = dst.String()
+	case host != "":
+		target = net.JoinHostPort(host, "443")
+	}
+	s.proxy.passThrough(conn, preface, host, 443, target)
+}
+
+// recordingConn keeps every byte read through it, so traffic the proxy failed
+// to parse can still be forwarded in full.
+type recordingConn struct {
+	net.Conn
+	read bytes.Buffer
+}
+
+func (c *recordingConn) Read(p []byte) (int, error) {
+	n, err := c.Conn.Read(p)
+	c.read.Write(p[:n])
+	return n, err
 }
 
 func (s *httpsDispatchServer) trackConn(conn net.Conn) {

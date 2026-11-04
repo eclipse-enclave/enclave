@@ -608,6 +608,9 @@ func TestParseExplicitBoolFlagValues(t *testing.T) {
 		{[]string{"--no-cache=false"}, func(o model.Options, s model.OptionSources) bool { return !o.NoCache && s.NoCache == model.SourceCLI }},
 		{[]string{"--no-cache"}, func(o model.Options, _ model.OptionSources) bool { return o.NoCache }},
 		{[]string{"--allow-all-network=false"}, func(o model.Options, _ model.OptionSources) bool { return !o.AllowAllNetwork }},
+		{[]string{"--disable-gateway"}, func(o model.Options, s model.OptionSources) bool {
+			return o.DisableGateway && !o.AllowAllNetwork && s.DisableGateway == model.SourceCLI
+		}},
 		{[]string{"--no-yolo=false"}, func(o model.Options, _ model.OptionSources) bool { return o.YoloOverride != nil && *o.YoloOverride }},
 		{[]string{"--yolo=false"}, func(o model.Options, _ model.OptionSources) bool { return o.YoloOverride != nil && !*o.YoloOverride }},
 		{[]string{"--yolo", "--no-yolo"}, func(o model.Options, _ model.OptionSources) bool { return o.YoloOverride != nil && !*o.YoloOverride }},

@@ -402,6 +402,14 @@ directory mtimes under a temporary HOME (`internal/app/root_guard_test.go`, and
 `cmd/enclave/main_test.go`, the only tests that run with the real embedded
 assets).
 
+Gateway opt-out note: `--disable-gateway` (config key `disable_gateway`) is
+valid only in unrestricted network mode and never implies it.
+`validateDisableGateway` in `internal/app/validation.go` checks it for run
+actions after the qemu coercion, which implies it. The mode comes from
+`--allow-all-network` or, through `ValidationContext.PolicyNetworkMode`
+(`AppContext.PolicyNetworkMode`), from the global and project network policy
+files; a nil hook means restricted.
+
 Mount guard note: `--allow-sensitive-mounts` is CLI-only and has no config key;
 `ENCLAVE_ALLOW_SENSITIVE_MOUNTS=1` is its only alternative.
 `resolveAdditionalMounts` in `internal/app/command_run.go` validates the

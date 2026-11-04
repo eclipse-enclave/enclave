@@ -578,7 +578,7 @@ func TestConfigRowsShowResolvedFeatures(t *testing.T) {
 	opts.Sources.Features = model.SourceGlobal
 	rows := []configRow{{Name: "features", Effective: "-node-dev, +debug-tools"}}
 
-	rows = withResolvedFeatures(rows, testPathsWithFeatures(t), opts, opts.Sources)
+	rows = withResolvedFeatures(rows, NewAppContext(testPathsWithFeatures(t), t.TempDir()), opts, opts.Sources)
 	if want := config.FormatSlice([]string{"debug-tools", "github-cli"}); rows[0].Effective != want {
 		t.Fatalf("features effective = %q, want %q", rows[0].Effective, want)
 	}

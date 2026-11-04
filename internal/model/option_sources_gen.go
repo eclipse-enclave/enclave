@@ -35,6 +35,7 @@ type RunOptionSources struct {
 	AllowSensitiveMounts     OptionSource
 	Backend                  OptionSource
 	BridgePorts              OptionSource
+	DisableGateway           OptionSource
 	Ephemeral                OptionSource
 	HostConfig               OptionSource
 	HostConfigPaths          OptionSource
@@ -106,6 +107,7 @@ func DefaultOptionSources() OptionSources {
 			AllowSensitiveMounts:     SourceDefault,
 			Backend:                  SourceDefault,
 			BridgePorts:              SourceDefault,
+			DisableGateway:           SourceDefault,
 			Ephemeral:                SourceDefault,
 			HostConfig:               SourceDefault,
 			HostConfigPaths:          SourceDefault,
@@ -219,6 +221,9 @@ func MergeOptionSources(base OptionSources, override OptionSources) OptionSource
 	}
 	if override.Devcontainer != SourceUnset {
 		base.Devcontainer = override.Devcontainer
+	}
+	if override.DisableGateway != SourceUnset {
+		base.DisableGateway = override.DisableGateway
 	}
 	if override.DisabledCommands != SourceUnset {
 		base.DisabledCommands = override.DisabledCommands

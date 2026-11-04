@@ -84,7 +84,7 @@ func runConfig(input *CommandInput) int {
 		})
 	}
 
-	rows = withResolvedFeatures(rows, paths, opts, input.Options.Sources)
+	rows = withResolvedFeatures(rows, input.Ctx, opts, input.Options.Sources)
 
 	if globalErr != nil {
 		fmt.Printf("Global Config: unavailable (%v)\n", globalErr)
@@ -159,12 +159,12 @@ func buildConfigRows(
 
 // withResolvedFeatures shows the features a run would enable instead of the
 // raw directives, matching what `config --json` reports.
-func withResolvedFeatures(rows []configRow, paths model.Paths, opts model.Options, sources model.OptionSources) []configRow {
-	values, _, err := optionsAsRun(paths, opts, sources)
+func withResolvedFeatures(rows []configRow, appCtx *AppContext, opts model.Options, sources model.OptionSources) []configRow {
+	values, _, err := optionsAsRun(appCtx, opts, sources)
 	if err != nil {
 		return rows
 	}
-	selection, err := resolveFeatureSelection(paths, values.BuildOptions)
+	selection, err := resolveFeatureSelection(appCtx.Paths, values.BuildOptions)
 	if err != nil {
 		return rows
 	}
@@ -355,7 +355,7 @@ func buildConfigEnvelope(input *CommandInput, opts model.Options, profile *model
 		addWarning(configWarningProjectUnavailable, "", fmt.Sprintf("Cannot resolve the project: %v", err))
 	}
 
-	values, validationWarnings, validationErr := optionsAsRun(input.Ctx.Paths, opts, raw.Sources)
+	values, validationWarnings, validationErr := optionsAsRun(input.Ctx, opts, raw.Sources)
 	for _, message := range validationWarnings {
 		addWarning(configWarningValidation, "", message)
 	}

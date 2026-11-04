@@ -32,7 +32,7 @@ func runFeatures(ctx *AppContext, req *extinstall.Request, opts model.Options, s
 		return 1
 	}
 
-	run, _, err := optionsAsRun(ctx.Paths, opts, sources)
+	run, _, err := optionsAsRun(ctx, opts, sources)
 	validated := err == nil
 	if !validated {
 		logx.Warnf("A run with these options would fail: %v", err)

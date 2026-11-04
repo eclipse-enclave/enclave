@@ -8,6 +8,7 @@
 package app
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -1083,5 +1084,92 @@ func TestValidateOptionsNetworkLogInvalid(t *testing.T) {
 	_, _, _, err := ValidateOptions(opts, model.DefaultOptionSources(), ValidationContext{Action: "info"})
 	if err == nil {
 		t.Fatal("expected invalid network log mode to fail validation")
+	}
+}
+
+func TestValidateOptionsDisableGatewayRequiresUnrestrictedMode(t *testing.T) {
+	policyMode := func(mode string) func() (string, error) {
+		return func() (string, error) { return mode, nil }
+	}
+	cases := []struct {
+		name            string
+		allowAllNetwork bool
+		allowSource     model.OptionSource
+		disableSource   model.OptionSource
+		policyMode      func() (string, error)
+		wantErr         string
+	}{
+		{name: "cli flag in restricted mode", disableSource: model.SourceCLI, wantErr: "--disable-gateway requires unrestricted network mode"},
+		{name: "global config in restricted mode", disableSource: model.SourceGlobal, wantErr: "disable_gateway requires unrestricted network mode"},
+		{name: "tool override in restricted mode", disableSource: model.SourceToolOverride, wantErr: "disable_gateway requires unrestricted network mode"},
+		{name: "persisted restricted policy mode", disableSource: model.SourceCLI, policyMode: policyMode(model.NetworkModeRestricted), wantErr: "requires unrestricted network mode"},
+		{name: "unreadable policy", disableSource: model.SourceCLI, policyMode: func() (string, error) { return "", errors.New("bad policy") }, wantErr: "bad policy"},
+		{name: "cli allow-all-network", allowAllNetwork: true, allowSource: model.SourceCLI, disableSource: model.SourceCLI},
+		{name: "config allow_all_network", allowAllNetwork: true, allowSource: model.SourceGlobal, disableSource: model.SourceGlobal},
+		{name: "persisted unrestricted policy mode", disableSource: model.SourceProject, policyMode: policyMode(model.NetworkModeUnrestricted)},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			opts := model.Options{
+				RunOptions:   model.RunOptions{Tool: "codex", AllowAllNetwork: tc.allowAllNetwork, DisableGateway: true},
+				BuildOptions: model.BuildOptions{ImageName: "test"},
+			}
+			sources := model.DefaultOptionSources()
+			sources.DisableGateway = tc.disableSource
+			if tc.allowAllNetwork {
+				sources.AllowAllNetwork = tc.allowSource
+			}
+			got, _, _, err := ValidateOptions(opts, sources, ValidationContext{Action: "run", PolicyNetworkMode: tc.policyMode})
+			if tc.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("err = %v, want it to contain %q", err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if !got.DisableGateway {
+				t.Error("DisableGateway was dropped")
+			}
+			if got.AllowAllNetwork != tc.allowAllNetwork {
+				t.Errorf("AllowAllNetwork = %v, want %v: --disable-gateway must never imply it", got.AllowAllNetwork, tc.allowAllNetwork)
+			}
+		})
+	}
+}
+
+func TestValidateOptionsDisableGatewayIgnoredOutsideRuns(t *testing.T) {
+	opts := model.Options{
+		RunOptions:   model.RunOptions{Tool: "codex", DisableGateway: true},
+		BuildOptions: model.BuildOptions{ImageName: "test"},
+	}
+	if _, _, _, err := ValidateOptions(opts, model.DefaultOptionSources(), ValidationContext{Action: "build"}); err != nil {
+		t.Fatalf("non-run action rejected disable_gateway: %v", err)
+	}
+}
+
+func TestValidateOptionsQEMUImpliesDisableGateway(t *testing.T) {
+	for _, explicit := range []bool{false, true} {
+		opts := model.Options{
+			RunOptions:   model.RunOptions{Backend: "qemu", Tool: "codex", DisableGateway: explicit},
+			BuildOptions: model.BuildOptions{ImageName: "test"},
+		}
+		sources := model.DefaultOptionSources()
+		if explicit {
+			sources.DisableGateway = model.SourceCLI
+		}
+		restricted := func() (string, error) { return model.NetworkModeRestricted, nil }
+		got, _, warnings, err := ValidateOptions(opts, sources, ValidationContext{Action: "run", PolicyNetworkMode: restricted})
+		if err != nil {
+			t.Fatalf("explicit=%v: unexpected error: %v", explicit, err)
+		}
+		if !got.AllowAllNetwork || !got.DisableGateway {
+			t.Errorf("explicit=%v: AllowAllNetwork=%v DisableGateway=%v, want both implied", explicit, got.AllowAllNetwork, got.DisableGateway)
+		}
+		joined := strings.Join(warnings, "\n")
+		if !strings.Contains(joined, "--allow-all-network") || !strings.Contains(joined, "--disable-gateway") {
+			t.Errorf("explicit=%v: qemu notice must mention both implied flags, got: %v", explicit, warnings)
+		}
 	}
 }

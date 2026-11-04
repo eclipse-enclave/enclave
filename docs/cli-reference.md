@@ -348,6 +348,7 @@ There is no config-file key.
 | Flag | Description |
 |------|-------------|
 | `--allow-all-network` | Disable network restrictions |
+| `--disable-gateway` | Run without a network gateway, so no network log is written. Requires unrestricted network mode (`--allow-all-network`, `allow_all_network`, or policy mode `unrestricted`) and never implies it |
 | `--allow-domain <domain>` | Add a domain to the gateway allowlist for this run only (repeatable, comma-separated, no persistence); replaces `allow_domains` from config, `+domain` adds to it |
 | `--network-log <coarse\|requests>` | Network audit mode. `coarse` (default) logs one pass/deny event per TLS connection, plus per-request events for plaintext HTTP and for hosts the gateway already MITMs for secret release; `requests` forces HTTPS MITM for all allowlisted hosts and emits an audit event per HTTP/HTTPS request. See [Coverage and granularity](networking.md#coverage-and-granularity) |
 
@@ -433,7 +434,7 @@ Commands that use an engine accept `--backend`, including session management, `u
 
 ## Experimental QEMU backend
 
-`--backend qemu` runs a foreground session in a minimal Alpine microVM bundle. It implies `--allow-all-network` and `--slim` automatically (and prints a notice that network isolation is unavailable), so you don't have to pass them; requesting something it can't honor — `--features` or `--allow-domain` — is rejected. Detached sessions, `exec`, `attach`, restricted egress, HTTP secret release, devcontainers, and non-default feature stacks are not supported yet. The bundle builder uses Docker as a packaging helper; the session itself runs under QEMU. A prebuilt bundle can be used without Docker via `--no-rebuild --image-name /path/to/bundle`. Tool installers that assume Debian/glibc may fail until they get dedicated microVM support.
+`--backend qemu` runs a foreground session in a minimal Alpine microVM bundle. It implies `--allow-all-network`, `--disable-gateway`, and `--slim` automatically (and prints a notice that network isolation is unavailable), so you don't have to pass them; requesting something it can't honor — `--features` or `--allow-domain` — is rejected. Detached sessions, `exec`, `attach`, restricted egress, HTTP secret release, devcontainers, and non-default feature stacks are not supported yet. The bundle builder uses Docker as a packaging helper; the session itself runs under QEMU. A prebuilt bundle can be used without Docker via `--no-rebuild --image-name /path/to/bundle`. Tool installers that assume Debian/glibc may fail until they get dedicated microVM support.
 
 The backend is x86-64 only: it requires `qemu-system-x86_64` on the host and the bundle builder produces an x86-64 Alpine rootfs (`--platform linux/amd64`, `apk --arch x86_64`) regardless of host architecture. QEMU is launched with `-machine microvm,accel=kvm:tcg`, so only x86-64 Linux hosts get KVM acceleration; on arm64 hosts and on macOS the guest runs under TCG emulation and is correspondingly slow. There is no arm64 guest bundle. Use the default `docker` backend on those hosts.
 

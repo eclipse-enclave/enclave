@@ -493,6 +493,29 @@ func OptionDefs() []OptionDef {
 			},
 		},
 		{
+			Name:           "disable_gateway",
+			Group:          OptionGroupRun,
+			Kind:           OptionKindBool,
+			AffectsSession: SessionAffected,
+			OptionField:    "DisableGateway",
+			SourceField:    "DisableGateway",
+			DefaultsField:  "DisableGateway",
+			Apply:          ApplyBoolPtr,
+			CLIFlags: []CLIFlagDef{
+				{
+					Name:      "--disable-gateway",
+					Usage:     "Run without a network gateway (requires unrestricted network mode)",
+					ValueKind: CLIValueNone,
+					Action: CLIAction{
+						Kind:        CLIActionSetBool,
+						OptionField: "DisableGateway",
+						SourceField: "DisableGateway",
+						BoolValue:   true,
+					},
+				},
+			},
+		},
+		{
 			Name:           "no_cache",
 			Group:          OptionGroupRun,
 			Kind:           OptionKindBool,

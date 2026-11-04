@@ -68,6 +68,7 @@ supported under `tool_overrides.<tool>`.
 | `pass_api_key` | Allow API key in ephemeral mode |
 | `pass_env` | List of host env vars to forward |
 | `allow_all_network` | Disable network restrictions |
+| `disable_gateway` | Run without a network gateway, so no network log is written; requires unrestricted network mode, otherwise the run fails |
 | `allow_domains` | Extra domains added to the gateway allowlist (bare DNS names; ignored when `allow_all_network=true`) |
 | `no_cache` | Disable package caches |
 | `no_history` | Disable shell history |
@@ -459,7 +460,7 @@ enclave's own roots, or the SSH agent socket. `--add-sensitive-dir` and
 config key. `add_dirs` and `add_readonly_dirs` entries from config are checked
 like `--add-dir`, and a refusal names the flag or config file of each entry.
 
-The experimental `qemu` backend only runs unrestricted, slim/no-feature bundles, so selecting it implies `allow_all_network=true` and `slim=true` automatically (with a per-run notice). Requesting features or an allowlist (`--allow-domain`) is rejected because the backend cannot honor them.
+The experimental `qemu` backend only runs unrestricted, slim/no-feature bundles, so selecting it implies `allow_all_network=true`, `disable_gateway=true`, and `slim=true` automatically (with a per-run notice). Requesting features or an allowlist (`--allow-domain`) is rejected because the backend cannot honor them.
 
 ## Inspecting Resolved Config
 

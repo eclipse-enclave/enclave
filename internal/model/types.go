@@ -36,6 +36,7 @@ type RunOptions struct {
 	Persist                  bool
 	Ephemeral                bool
 	AllowAllNetwork          bool
+	DisableGateway           bool
 	Ports                    []string
 	AddDirs                  []string
 	AddReadonlyDirs          []string

@@ -34,7 +34,7 @@ To disable all restrictions:
 enclave --allow-all-network
 ```
 
-The experimental `qemu` backend currently has no restricted-egress implementation, so it always runs with all outbound network allowed. Selecting it implies `--allow-all-network` automatically and prints a notice; passing `--allow-domain` (which would require restricted egress) is rejected.
+The experimental `qemu` backend currently has no restricted-egress implementation, so it always runs with all outbound network allowed. Selecting it implies `--allow-all-network` and `--disable-gateway` automatically and prints a notice; passing `--allow-domain` (which would require restricted egress) is rejected.
 
 ## Reading the Network Log
 

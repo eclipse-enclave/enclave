@@ -51,7 +51,7 @@ supported under `tool_overrides.<tool>`.
 | Key | Description |
 |-----|-------------|
 | `auto_update` | Automatically replace a stale standalone binary with the latest build of its update channel during the daily update check (default: `false`; global config only; ignored by package and source builds) |
-| `disabled_commands` | Command names that never become `enclave <name>` verbs, whether an installed extension or your own `commands/` tree provides them. The name resolves to nothing rather than to the next provider, so `enclave <name>` fails as an unknown command. Built-in verbs cannot be disabled (global config only; see [Host commands](extensions/README.md#host-commands)) |
+| `disabled_commands` | Command names that never become `enclave <name>` verbs, whether an installed extension or your own `commands/` tree provides them. The name resolves to nothing rather than to the next provider, so `enclave <name>` fails as an unknown command. Entries are literal names: the `+`/`-`/`none` list syntax does not apply. Built-in verbs cannot be disabled (global config only; see [Host commands](extensions/README.md#host-commands)) |
 | `update_channel` | Release channel binary updates come from: `rolling` (builds of `main`) or `stable` (official releases from version tags). Unset follows the channel the binary was published on, which `enclave config` shows as the default (global config only; see [`self-update`](cli-reference.md)) |
 | `tool` | Default tool (e.g. `claude`, `codex`); unset means the first interactive session asks once and writes the answer here (see [Tool selection](cli-reference.md#tool-selection)) |
 | `backend` | Isolation backend: `auto` (default) uses docker or podman, whichever is installed, and asks once when both are; or `docker`, `podman`, experimental `qemu`. Override per invocation with `--backend` on engine-using commands. |
@@ -185,6 +185,7 @@ sandboxed agent. For example, [Herdr](https://herdr.dev) reads `HERDR_AGENT`:
 
 List options come in two kinds. Each layer (global, project, the global and
 then the project file's tool override, CLI) merges onto the value it inherits.
+`disabled_commands` is neither: it is global-only and lists literal names.
 
 **Extras** are `add_dirs`, `add_readonly_dirs`, `sensitive_dir_exceptions`,
 `ports`, `allow_domains`, `bridge_ports`, `pass_env`, and `cache_from`. Config files and CLI flags

@@ -37,6 +37,8 @@ const (
 	ApplyYoloDefault ApplyKind = "yolo_default"
 	// ApplyStringMap merges keys, a later layer replacing a key's value.
 	ApplyStringMap ApplyKind = "string_map"
+	// ApplyStringSlice takes a later layer's list as is: no +/- or none grammar.
+	ApplyStringSlice ApplyKind = "string_slice"
 
 	// List kinds are folded layer by layer in options_lists.go.
 	// ApplyListExtras: a plain config list replaces, a plain CLI value adds,
@@ -127,6 +129,7 @@ func OptionDefs() []OptionDef {
 		},
 		{
 			// Config-only: user commands are discovered before flags are parsed.
+			// Literal names, so a stray +/- or none cannot silently disable nothing.
 			Name:           "disabled_commands",
 			Group:          OptionGroupGlobal,
 			Kind:           OptionKindStringSlice,
@@ -134,7 +137,7 @@ func OptionDefs() []OptionDef {
 			OptionField:    "DisabledCommands",
 			SourceField:    "DisabledCommands",
 			DefaultsField:  "DisabledCommands",
-			Apply:          ApplyListExtras,
+			Apply:          ApplyStringSlice,
 		},
 		{
 			Name:           "tool",

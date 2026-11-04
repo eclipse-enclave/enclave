@@ -7,23 +7,16 @@
 
 package config
 
-import (
-	"path/filepath"
+import "path/filepath"
 
-	"enclave/internal/model"
-)
-
-// DisabledCommands resolves disabled_commands from the global config under
-// home. Command discovery runs before flags and the full config load, so a
-// broken file disables nothing here: the full load reports it.
+// DisabledCommands reads disabled_commands from the global config under home.
+// Discovery runs before LoadDefaults, which rejects a broken file before any
+// verb runs, so returning nothing on a read error here fails closed.
 func DisabledCommands(home string) (names []string, configPath string) {
 	configPath = filepath.Join(hostConfigRoot(home), configFilename)
 	defaults, _, err := readDefaults(configPath)
 	if err != nil {
 		return nil, configPath
 	}
-	opts := DefaultOptions()
-	sources := model.DefaultOptionSources()
-	applyListLayer(&opts, defaults, listLayer{source: model.SourceGlobal, scope: model.ScopeGlobal}, &sources)
-	return opts.DisabledCommands, configPath
+	return defaults.DisabledCommands, configPath
 }

@@ -764,6 +764,19 @@ func TestDiscoverSkipsDisabledCommands(t *testing.T) {
 	}
 }
 
+// An entry with list-operator syntax must not make the whole list a no-op.
+func TestDiscoverDisablesNamesNextToOperatorLookalikes(t *testing.T) {
+	home := t.TempDir()
+	mkdirs(t, home)
+	commandDir := extensionCommandDir(t, home, model.KindCommand, "kit")
+	writeExec(t, filepath.Join(commandDir, "edge"))
+	writeGlobalConfig(t, home, `{"disabled_commands": ["edge", "+hello"]}`)
+
+	if cmds, _ := Discover(home); len(cmds) != 0 {
+		t.Fatalf("disabled verb still discovered: %+v", cmds)
+	}
+}
+
 func TestDiscoverWithoutInstalledExtensionsIsQuiet(t *testing.T) {
 	home := t.TempDir()
 	mkdirs(t, home)

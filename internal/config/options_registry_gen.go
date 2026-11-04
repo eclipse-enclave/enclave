@@ -41,6 +41,12 @@ func OptionSpecs() []OptionSpec {
 		{
 			Name:  "disabled_commands",
 			Group: OptionGroupGlobal,
+			ApplyDefaultsWithSource: func(opts *model.Options, defaults Defaults, source model.OptionSource, sources *model.OptionSources) {
+				if canOverride(sources.DisabledCommands, source) && defaults.DisabledCommands != nil {
+					opts.DisabledCommands = copyStringSlice(defaults.DisabledCommands)
+					sources.DisabledCommands = source
+				}
+			},
 		},
 		{
 			Name:  "tool",

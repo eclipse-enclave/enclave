@@ -13,6 +13,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"enclave/internal/model"
 )
 
 func TestDisabledCommandsReadsGlobalConfig(t *testing.T) {
@@ -40,6 +42,33 @@ func TestDisabledCommandsReadsGlobalConfig(t *testing.T) {
 	}
 	if names, _ := DisabledCommands(home); len(names) != 0 {
 		t.Fatalf("a broken config disabled %v", names)
+	}
+}
+
+// A switch that turns off verbs must not fail open: entries that look like
+// list operators are names too, and the full load agrees with discovery.
+func TestDisabledCommandsTakesNamesLiterally(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	path := filepath.Join(hostConfigRoot(home), configFilename)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(`{"disabled_commands": ["edge", "+hello", "none"]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"edge", "+hello", "none"}
+	if names, _ := DisabledCommands(home); !slices.Equal(names, want) {
+		t.Fatalf("DisabledCommands = %v, want %v", names, want)
+	}
+
+	global, _, err := readDefaults(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	opts, _, _ := ResolveOptionsForTool(DefaultOptions(), model.DefaultOptionSources(), global, Defaults{}, "")
+	if !slices.Equal(opts.DisabledCommands, want) || len(opts.ListProblems) != 0 {
+		t.Fatalf("resolved %v with problems %+v, want %v and none", opts.DisabledCommands, opts.ListProblems, want)
 	}
 }
 

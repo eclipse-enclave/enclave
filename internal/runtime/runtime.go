@@ -895,7 +895,9 @@ func (r *Runtime) backendRequest(ctx *ExecutionContext, detached bool, interacti
 		// reconcile via Stop/Remove finalize while the container still exists.
 		req.AuthSync = ctx.AuthSync
 	}
-	if req.Network.Mode != backend.NetworkModeRestricted {
+	// A session joining the gateway's network namespace cannot set its own
+	// hostname.
+	if !req.Network.Gateway {
 		req.Hostname = model.HostnamePrefix + r.project.Name
 	}
 	return req
@@ -1519,7 +1521,7 @@ func (r *Runtime) addDirenvMount(mounts *mountAccumulator) {
 }
 
 func (r *Runtime) addGatewayCAMount(mounts *mountAccumulator) error {
-	if !r.shouldUseGateway() {
+	if !r.gatewayRuns() {
 		return nil
 	}
 	store := tlsstore.New(config.HostTLSDir(r.host.Home))
@@ -1540,13 +1542,21 @@ func (r *Runtime) addGatewayCAMount(mounts *mountAccumulator) error {
 	return nil
 }
 
-func (r *Runtime) shouldUseGateway() bool {
+// networkRestricted reports whether the session's network mode is restricted.
+// An unresolvable policy counts as restricted so enforcement fails closed.
+func (r *Runtime) networkRestricted() bool {
 	resolved, err := r.resolveEffectivePolicy()
 	if err != nil {
-		logx.Warnf("Failed to resolve effective network policy for gateway decision: %v", err)
+		logx.Warnf("Failed to resolve effective network policy: %v", err)
 		return true
 	}
 	return resolved.Effective.Mode != model.NetworkModeUnrestricted
+}
+
+// gatewayRuns reports whether a gateway sidecar runs alongside the session.
+// Today that is exactly the restricted sessions.
+func (r *Runtime) gatewayRuns() bool {
+	return r.networkRestricted()
 }
 
 func (r *Runtime) resolveEffectivePolicy() (policy.ResolveResult, error) {

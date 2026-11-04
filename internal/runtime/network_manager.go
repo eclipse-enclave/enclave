@@ -67,6 +67,7 @@ func (m networkManager) Prepare(_ string, authState model.AuthState, _ SecretMap
 		return NetworkResult{
 			Network: backend.NetworkPolicy{
 				Mode:           backend.NetworkModeUnrestricted,
+				Gateway:        m.gatewayRuns(),
 				LoopbackPorts:  append([]string(nil), loopbackPorts...),
 				IdeBridgePorts: append([]string(nil), m.ideBridgePorts...),
 			},
@@ -100,7 +101,8 @@ func (m networkManager) Prepare(_ string, authState model.AuthState, _ SecretMap
 
 	return NetworkResult{
 		Network: backend.NetworkPolicy{
-			Mode: backend.NetworkModeRestricted,
+			Mode:    backend.NetworkModeRestricted,
+			Gateway: m.gatewayRuns(),
 			Egress: backend.EgressPolicy{
 				AllowedDomains: allowedDomains,
 				DeniedDomains:  deniedDomains,

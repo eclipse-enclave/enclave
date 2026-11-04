@@ -1,0 +1,42 @@
+iptables -P INPUT DROP
+iptables -F INPUT
+iptables -A INPUT -i lo -j ACCEPT
+iptables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
+iptables -A INPUT -p tcp --dport 1455 -j ACCEPT
+iptables -A INPUT -p tcp --dport 3000 -j ACCEPT
+iptables -A INPUT -p udp --dport 5353 -j ACCEPT
+iptables -P OUTPUT DROP
+iptables -F OUTPUT
+iptables -A OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
+iptables -A OUTPUT -o lo -j ACCEPT
+iptables -A OUTPUT -p udp --dport 53 -d 127.0.0.1 -j ACCEPT
+iptables -A OUTPUT -p tcp --dport 53 -d 127.0.0.1 -j ACCEPT
+iptables -t nat -L PREROUTING
+iptables -t nat -A PREROUTING -p tcp --dport 1455 -j DNAT --to-destination 127.0.0.1:1455
+iptables -m owner -h
+iptables -A OUTPUT -p udp --dport 53 -d 1.1.1.1 -m owner --uid-owner 105 -j ACCEPT
+iptables -A OUTPUT -p tcp --dport 53 -d 1.1.1.1 -m owner --uid-owner 105 -j ACCEPT
+iptables -A OUTPUT -m set --match-set enclave_allowed dst -j ACCEPT
+iptables -A OUTPUT -p tcp --dport 8080 -m addrtype --dst-type LOCAL -j ACCEPT
+iptables -A OUTPUT -p tcp --dport 8443 -m addrtype --dst-type LOCAL -j ACCEPT
+iptables -t nat -F OUTPUT
+iptables -t nat -A OUTPUT -p tcp --dport 80 -m owner --uid-owner 105 -j RETURN
+iptables -t nat -A OUTPUT -p tcp --dport 443 -m owner --uid-owner 105 -j RETURN
+iptables -t nat -A OUTPUT -p tcp --dport 80 -j REDIRECT --to-ports 8080
+iptables -t nat -A OUTPUT -p tcp --dport 443 -j REDIRECT --to-ports 8443
+iptables -t nat -A OUTPUT -p tcp -d 127.0.0.1 --dport 9800 -j DNAT --to-destination 172.17.0.1:9800
+iptables -t nat -A POSTROUTING -p tcp -d 172.17.0.1 --dport 9800 -j MASQUERADE
+iptables -A OUTPUT -p tcp -d 172.17.0.1 --dport 9800 -j ACCEPT
+sysctl -w net.ipv6.conf.all.disable_ipv6=1
+sysctl -w net.ipv6.conf.default.disable_ipv6=1
+ip6tables -P INPUT DROP
+ip6tables -F INPUT
+ip6tables -A INPUT -i lo -j ACCEPT
+ip6tables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
+ip6tables -A INPUT -p tcp --dport 1455 -j ACCEPT
+ip6tables -A INPUT -p tcp --dport 3000 -j ACCEPT
+ip6tables -A INPUT -p udp --dport 5353 -j ACCEPT
+ip6tables -P OUTPUT DROP
+ip6tables -F OUTPUT
+ip6tables -A OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
+ip6tables -A OUTPUT -o lo -j ACCEPT

@@ -257,3 +257,23 @@ func TestDeclaredInstanceIsMediatedLikeItsProvider(t *testing.T) {
 		t.Fatalf("unknown instance provider accepted: %v", err)
 	}
 }
+
+func TestHeaderCredentialMatchingPreservesValueCase(t *testing.T) {
+	patterns := [][]byte{[]byte("glpat-MixedCase012345")}
+	for _, tc := range []struct {
+		name   string
+		header http.Header
+		want   bool
+	}{
+		{"canonicalized name", http.Header{"X-Glpat-Mixedcase012345": {"present"}}, true},
+		{"lowercase name", http.Header{"x-glpat-mixedcase012345": {"present"}}, true},
+		{"exact value", http.Header{"X-Echo": {"glpat-MixedCase012345"}}, true},
+		{"case-distinct value", http.Header{"X-Echo": {"glpat-mixedcase012345"}}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := headersContain(tc.header, patterns); got != tc.want {
+				t.Fatalf("headersContain = %t, want %t", got, tc.want)
+			}
+		})
+	}
+}

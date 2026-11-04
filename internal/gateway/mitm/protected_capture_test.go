@@ -218,7 +218,7 @@ func assertNoCapturedCredentials(t *testing.T, dir string, secrets ...string) {
 			t.Fatal(err)
 		}
 		for _, secret := range secrets {
-			if bytes.Contains(raw, []byte(secret)) {
+			if bytes.Contains(bytes.ToLower(raw), bytes.ToLower([]byte(secret))) {
 				t.Errorf("capture file %s contains a broker credential", entry.Name())
 			}
 		}
@@ -226,9 +226,9 @@ func assertNoCapturedCredentials(t *testing.T, dir string, secrets ...string) {
 }
 
 func TestCopilotCaptureThroughForwarder(t *testing.T) {
-	for _, mode := range []string{"clean", "header-value", "header-name", "error-header-name", "upgrade-header-name", "malformed-header"} {
+	for _, mode := range []string{"clean", "header-value", "header-name", "error-header-name", "upgrade-header-name", "malformed-header", "canonical-name", "canonical-error-name", "canonical-upgrade-name"} {
 		t.Run(mode, func(t *testing.T) {
-			const credential = "gho_realcopilot0123456789abcdef"
+			const credential = "gho_reAlcoPilot0123456789ABcdef"
 			upstream := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
 				if req.URL.Path == "/login/oauth/access_token" {
@@ -237,6 +237,26 @@ func TestCopilotCaptureThroughForwarder(t *testing.T) {
 				}
 				if req.Header.Get("Authorization") != "Bearer "+credential {
 					t.Error("Copilot release missing")
+				}
+				if strings.HasPrefix(mode, "canonical-") {
+					conn, rw, err := http.NewResponseController(w).Hijack()
+					if err != nil {
+						t.Error(err)
+						return
+					}
+					defer func() { _ = conn.Close() }()
+					status := "200 OK"
+					extra := "Content-Length: 0\r\n"
+					if mode == "canonical-error-name" {
+						status = "401 Unauthorized"
+					}
+					if mode == "canonical-upgrade-name" {
+						status = "101 Switching Protocols"
+						extra = "Connection: Upgrade\r\nUpgrade: websocket\r\n"
+					}
+					_, _ = rw.WriteString("HTTP/1.1 " + status + "\r\nX-" + credential + ": present\r\n" + extra + "\r\n")
+					_ = rw.Flush()
+					return
 				}
 				if mode == "malformed-header" {
 					conn, rw, err := http.NewResponseController(w).Hijack()
@@ -295,7 +315,7 @@ func TestCopilotCaptureThroughForwarder(t *testing.T) {
 			}
 			req = httptest.NewRequest(http.MethodPost, "https://api.githubcopilot.com/chat/completions", strings.NewReader(`{}`))
 			req.Header.Set("Authorization", "Bearer "+token.Access)
-			if mode == "upgrade-header-name" {
+			if mode == "upgrade-header-name" || mode == "canonical-upgrade-name" {
 				req.Method = http.MethodGet
 				req.Header.Set("Connection", "Upgrade")
 				req.Header.Set("Upgrade", "websocket")
@@ -333,7 +353,7 @@ func TestCopilotCaptureThroughForwarder(t *testing.T) {
 }
 
 func TestProviderTokenShapeInCaptureHeaders(t *testing.T) {
-	const minted = "glpat-0123456789abcdef0123456789"
+	const minted = "glpat-MixedCase0123456789ABcdef"
 	for _, tc := range []struct {
 		name            string
 		inName, upgrade bool
@@ -344,7 +364,7 @@ func TestProviderTokenShapeInCaptureHeaders(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			upstream := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 				if tc.inName {
-					w.Header().Set("X_"+minted, "present")
+					w.Header().Set("X-"+minted, "present")
 				} else {
 					w.Header().Set("X-Echo", minted)
 				}

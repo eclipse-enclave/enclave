@@ -364,3 +364,39 @@ func TestCopilotDeviceRequestNeedsItsScope(t *testing.T) {
 		t.Fatalf("foreign field accepted: %v", err)
 	}
 }
+
+func TestMediationChecksCanonicalizedTrailerNames(t *testing.T) {
+	const secret = "glpat-MixedCase0123456789"
+	for _, name := range []string{"declared", "undeclared"} {
+		t.Run(name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+				conn, rw, err := http.NewResponseController(w).Hijack()
+				if err != nil {
+					t.Error(err)
+					return
+				}
+				defer func() { _ = conn.Close() }()
+				declaration := ""
+				if name == "declared" {
+					declaration = "Trailer: X-Glpat-Mixedcase0123456789\r\n"
+				}
+				_, _ = rw.WriteString("HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n" + declaration + "\r\n2\r\n{}\r\n0\r\nX-" + secret + ": present\r\n\r\n")
+				_ = rw.Flush()
+			}))
+			defer server.Close()
+			req, err := http.NewRequest(http.MethodGet, server.URL, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			response, err := mediate(req, server.Client().Transport, secret)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = io.ReadAll(response.Body)
+			_ = response.Body.Close()
+			if !errors.Is(err, ErrResponse) {
+				t.Fatalf("canonicalized trailer name was not blocked: %v", err)
+			}
+		})
+	}
+}

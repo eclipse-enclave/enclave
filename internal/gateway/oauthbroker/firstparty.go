@@ -365,11 +365,9 @@ func mediateAs(p *provider, req *http.Request, transport http.RoundTripper, secr
 	if p != nil {
 		headerPatterns = append(slices.Clone(patterns), p.patterns...)
 	}
-	for name, values := range resp.Header {
-		if contains([]byte(name), headerPatterns) || slices.ContainsFunc(values, func(value string) bool { return contains([]byte(value), headerPatterns) }) {
-			_ = resp.Body.Close()
-			return nil, ErrResponse
-		}
+	if headersContain(resp.Header, headerPatterns) {
+		_ = resp.Body.Close()
+		return nil, ErrResponse
 	}
 	if resp.StatusCode == http.StatusSwitchingProtocols {
 		if len(patterns) == 0 || req.Header.Get("Upgrade") == "" {
@@ -387,7 +385,7 @@ func mediateAs(p *provider, req *http.Request, transport http.RoundTripper, secr
 		_ = resp.Body.Close()
 		return nil, ErrResponse
 	}
-	resp.Body = &tripwire{body: resp.Body, patterns: patterns, trailer: resp.Trailer}
+	resp.Body = &tripwire{body: resp.Body, patterns: patterns, trailer: &resp.Trailer}
 	return resp, nil
 }
 
@@ -397,9 +395,9 @@ func mediateAs(p *provider, req *http.Request, transport http.RoundTripper, secr
 type tripwire struct {
 	body     io.ReadCloser
 	patterns [][]byte
-	// trailer is filled in when the body reaches EOF; the proxy forwards it
-	// after a successful read.
-	trailer http.Header
+	// net/http may allocate the trailer map only at EOF for undeclared fields.
+	// Keep the response field, not its initial map value.
+	trailer *http.Header
 	pending []byte
 	safe    int
 	err     error
@@ -418,7 +416,7 @@ func (t *tripwire) Read(p []byte) (int, error) {
 			return 0, t.err
 		}
 		switch {
-		case errors.Is(err, io.EOF) && t.trailerMatches():
+		case errors.Is(err, io.EOF) && t.trailer != nil && headersContain(*t.trailer, t.patterns):
 			t.pending, t.err = nil, ErrResponse
 			return 0, t.err
 		case errors.Is(err, io.EOF):
@@ -434,9 +432,17 @@ func (t *tripwire) Read(p []byte) (int, error) {
 	return n, nil
 }
 
-func (t *tripwire) trailerMatches() bool {
-	for name, values := range t.trailer {
-		if contains([]byte(name), t.patterns) || slices.ContainsFunc(values, func(value string) bool { return contains([]byte(value), t.patterns) }) {
+// HTTP parsers re-case field names, so credentials in names must be matched
+// without case. Field values are not re-cased and remain case-sensitive.
+func headersContain(header http.Header, patterns [][]byte) bool {
+	for name, values := range header {
+		lowerName := strings.ToLower(name)
+		for _, pattern := range patterns {
+			if strings.Contains(lowerName, strings.ToLower(string(pattern))) {
+				return true
+			}
+		}
+		if slices.ContainsFunc(values, func(value string) bool { return contains([]byte(value), patterns) }) {
 			return true
 		}
 	}

@@ -94,8 +94,9 @@ GitHub, GitLab and Copilot domains, their subdomains, and
 - It aborts any response from these hosts that would echo a real credential, and
   any structured response outside model and file content that carries token
   fields or provider key patterns, before those bytes reach the workload.
-- It checks response header names and values for released credentials and
-  provider credential patterns, including upgrade handshakes.
+- It checks response header names without case and values case-sensitively for
+  released credentials and provider credential patterns, including upgrade
+  handshakes. Trailer names are checked the same way.
 - It checks WebSocket handshakes like requests. When a handshake carries a
   released credential, it withholds compression from the handshake and scans
   every server frame, cutting the connection before a frame that would complete

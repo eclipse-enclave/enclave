@@ -67,7 +67,7 @@ supported under `tool_overrides.<tool>`.
 | `no_api_key` | Disable API key injection |
 | `pass_api_key` | Allow API key in ephemeral mode |
 | `pass_env` | List of host env vars to forward |
-| `allow_all_network` | Disable network restrictions |
+| `allow_all_network` | Disable network restrictions; a gateway still logs HTTP/HTTPS unless `disable_gateway` is set |
 | `disable_gateway` | Run without a network gateway, so no network log is written; requires unrestricted network mode, otherwise the run fails |
 | `allow_domains` | Extra domains added to the gateway allowlist (bare DNS names; ignored when `allow_all_network=true`) |
 | `no_cache` | Disable package caches |

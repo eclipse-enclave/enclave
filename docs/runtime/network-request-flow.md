@@ -1,6 +1,6 @@
 # Network Request Flow
 
-This document describes how enclave handles outbound network requests in restricted mode, including DNS policy enforcement, proxying, and secret placeholder rewriting.
+This document describes how enclave handles outbound network requests in restricted mode, including DNS policy enforcement, proxying, and secret placeholder rewriting, and how the observing gateway of an unrestricted session logs them.
 
 ## Diagram
 
@@ -94,13 +94,66 @@ sequenceDiagram
 
 ## Scope and Limits
 
-- In unrestricted mode (`--allow-all-network` or policy mode `unrestricted`), the gateway is bypassed and HTTP secret release is disabled.
-- `--network-log=requests` enables request-level MITM logging in restricted mode.
+- In unrestricted mode (`--allow-all-network`, `allow_all_network`, or policy mode `unrestricted`), the gateway only observes ports 80 and 443 and HTTP secret release is disabled; see [Unrestricted Mode](#unrestricted-mode). With `--disable-gateway` there is no gateway.
+- `--network-log=requests` enables request-level MITM logging in both modes.
 - The log records decisions, not traffic volume. In `coarse` mode a reused TLS connection produces a single `tcp` event no matter how many requests it carries, and successful DNS lookups are never recorded, so an absence of events is not evidence of an absence of traffic. See [Coverage and granularity](../networking.md#coverage-and-granularity).
 - Placeholder protection applies only to declared secrets with `release.http` in the selected tool profile or enabled feature manifests.
 - Real secrets are released only in the rule's declared request header on HTTPS requests to its declared hosts. Inspected requests with registered placeholders in headers must satisfy these release rules.
 - Current secret injection is header-based; file credential mediation is separate work.
 - WebSocket and other protocol upgrades get secret release on the handshake headers; the upgraded connection is then relayed unchanged in both directions.
+
+## Unrestricted Mode
+
+An unrestricted session starts the same gateway image with an unrestricted bundle (`meta.json` records the mode, the gateway container carries the `enclave.gateway.mode=unrestricted` label, and the bundle lives in `gateway-config-unrestricted/`). The gateway observes but never enforces. Sessions started with `--disable-gateway` have no gateway and no network log.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    box Host
+        participant Host as Host runtime<br/>(internal/runtime)
+    end
+    box Agent Container
+        participant Tool as Tool process<br/>(agent CLI)
+    end
+    box Gateway Container
+        participant Entry as gateway-entrypoint.sh
+        participant NAT as iptables / ip6tables nat
+        participant Proxy as enclave-gateway-proxy
+        participant Log as network.log<br/>(JSONL)
+    end
+    box External
+        participant Dst as Original destination
+    end
+
+    Note over Host,Dst: Session startup
+    Host->>Entry: Start gateway with unrestricted bundle<br/>and TLS root (no secret mapping)
+    Entry->>NAT: Redirect tcp/80 and tcp/443 to 8080/8443 (IPv4 and IPv6)<br/>no INPUT/OUTPUT filters, no dnsmasq
+    Entry->>Proxy: Start transparent proxy (all hosts allowed)
+    Host->>Log: Rotate above the size cap<br/>and append session start marker
+
+    Note over Tool,Dst: HTTPS request
+    Tool->>Tool: Resolve via Docker's resolver
+    Tool->>NAT: Connect address:443
+    NAT->>Proxy: Redirect to :8443
+    Proxy->>Proxy: Read original destination (SO_ORIGINAL_DST)<br/>and parse SNI from ClientHello
+    alt network_log=requests
+        Proxy->>Proxy: Terminate TLS using local CA leaf cert
+        Proxy->>Dst: Forward each request to the original destination
+        Proxy->>Log: HTTP pass (unrestricted) per request
+    else coarse, or no SNI / not TLS
+        Proxy->>Dst: Passthrough tunnel to the original destination
+        Proxy->>Log: TCP pass (unrestricted)
+    end
+
+    Note over Tool,Dst: Other TCP ports and UDP bypass the proxy and are not logged.
+    Note over Entry,NAT: If the proxy dies, the entrypoint removes the redirects (fail open).
+```
+
+- Nothing is denied: no inbound or outbound filters, IPv6 left as is, DNS stays with Docker's resolver, and the proxy dials the destination from the kernel's NAT record instead of re-resolving SNI or `Host`.
+- Plaintext HTTP on port 80 gets an `http` event per request; non-HTTP bytes on port 80 and TLS without SNI on port 443 are tunnelled with a `tcp` event.
+- No secret release: declared secrets are injected into the session with real values, as without a gateway.
+- Proxy death removes the redirects and the gateway keeps running, so traffic continues unlogged; the gateway container stopping takes the session offline.
+- `enclave network apply` skips these gateways; `enclave network status` shows them as `UNRESTRICTED`. A mode change needs a session restart.
 
 ## Related Implementation
 

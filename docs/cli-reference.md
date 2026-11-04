@@ -189,8 +189,8 @@ in one step, printing the container name so you can reattach later with
 | `enclave network diff` | Show changes from built-in defaults |
 | `enclave network add-domain <domain> --global` | Allow a domain |
 | `enclave network remove-domain <domain> --global` | Remove a domain |
-| `enclave network set-mode restricted\|unrestricted --global` | Set network mode |
-| `enclave network apply` | Apply policy to running gateways |
+| `enclave network set-mode restricted\|unrestricted --global` | Set network mode; running sessions keep their mode until restarted |
+| `enclave network apply` | Apply policy to running gateways; gateways of unrestricted sessions are skipped |
 | `enclave network log` | Show gateway network audit events |
 
 `network status`, `print`, and `diff` reflect the run options that shape the allowlist and accept their flags: `--tool`, `--features`, `--slim`, `--allow-domain`, and `--allow-all-network` (`status` also takes `--backend`). See [Networking](networking.md#managing-the-network-policy).
@@ -347,10 +347,10 @@ There is no config-file key.
 
 | Flag | Description |
 |------|-------------|
-| `--allow-all-network` | Disable network restrictions |
+| `--allow-all-network` | Disable network restrictions. A gateway still runs and logs HTTP/HTTPS on ports 80 and 443 unless `--disable-gateway` is set; see [Unrestricted mode](networking.md#unrestricted-mode) |
 | `--disable-gateway` | Run without a network gateway, so no network log is written. Requires unrestricted network mode (`--allow-all-network`, `allow_all_network`, or policy mode `unrestricted`) and never implies it |
 | `--allow-domain <domain>` | Add a domain to the gateway allowlist for this run only (repeatable, comma-separated, no persistence); replaces `allow_domains` from config, `+domain` adds to it |
-| `--network-log <coarse\|requests>` | Network audit mode. `coarse` (default) logs one pass/deny event per TLS connection, plus per-request events for plaintext HTTP and for hosts the gateway already MITMs for secret release; `requests` forces HTTPS MITM for all allowlisted hosts and emits an audit event per HTTP/HTTPS request. See [Coverage and granularity](networking.md#coverage-and-granularity) |
+| `--network-log <coarse\|requests>` | Network audit mode. `coarse` (default) logs one pass/deny event per TLS connection, plus per-request events for plaintext HTTP and for hosts the gateway already MITMs for secret release; `requests` forces HTTPS MITM for all allowlisted hosts (every host in unrestricted mode) and emits an audit event per HTTP/HTTPS request. See [Coverage and granularity](networking.md#coverage-and-granularity) |
 
 ### Persistence
 

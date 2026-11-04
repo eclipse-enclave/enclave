@@ -490,7 +490,7 @@ When a value exists in multiple layers, enclave resolves in this order:
 - Mutation commands (`network add-domain/remove-domain/set-mode`) auto-apply by default.
 - Use `--no-apply` on mutation commands to persist only.
 - Use `--all-running` with `network apply` or mutation commands to target all running gateways.
-- `network set-mode unrestricted --global` is persisted immediately, but running restricted sessions must be restarted; unrestricted mode is not live-applied.
+- `network set-mode` is persisted immediately, but a running gateway keeps the mode its session started with: switching in either direction needs a session restart, and `apply` skips unrestricted gateways.
 
 ## Extensions
 

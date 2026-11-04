@@ -30,7 +30,7 @@ func newUnrestrictedTestProxy(t *testing.T) (*proxy, string) {
 	}
 	t.Cleanup(func() { _ = audit.Close() })
 	p := newProxy(nil, nil, nil, false, audit, testSession)
-	p.caps = capabilitiesFor(model.NetworkModeUnrestricted)
+	p.setCapabilities(capabilitiesFor(model.NetworkModeUnrestricted))
 	return p, logPath
 }
 

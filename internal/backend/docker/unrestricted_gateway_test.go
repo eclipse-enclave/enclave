@@ -110,6 +110,26 @@ func TestUnrestrictedSessionStartsObservingGateway(t *testing.T) {
 	}
 }
 
+// --network-log=requests reaches an observing gateway as it reaches a
+// restricted one; the gateway mounts the CA it decrypts with.
+func TestUnrestrictedGatewayReceivesRequestsLogMode(t *testing.T) {
+	b, home := lockinBackend(t)
+	b.opts.NetworkLogMode = model.NetworkLogRequests
+	logPath := lockinEngine(t, backend.NameDocker)
+	req := unrestrictedGatewayRequest(t)
+
+	if _, err := b.Start(context.Background(), req); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+
+	gw := runInvocation(t, engineInvocations(t, logPath, home), req.Session.Name+model.GatewayContainerSuffix)
+	for _, want := range []string{"--env " + model.EnvNetworkLogMode + "=" + model.NetworkLogRequests, "target=/tls/ca.key"} {
+		if !strings.Contains(gw, want) {
+			t.Errorf("gateway invocation lacks %q:\n%s", want, gw)
+		}
+	}
+}
+
 // failingGatewayEngine answers like lockinEngine but fails every container run.
 func failingGatewayEngine(t *testing.T) {
 	t.Helper()

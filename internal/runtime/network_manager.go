@@ -125,6 +125,9 @@ func (m networkManager) Prepare(_ string, authState model.AuthState, _ SecretMap
 // the session gets no DNS-gateway signal and keeps Docker's resolver.
 func (m networkManager) observedUnrestrictedNetwork(allowlistPath string, loopbackPorts []string, ports []backend.PortMapping) NetworkResult {
 	logx.Infof("Network log records HTTP/HTTPS traffic on ports 80 and 443 (pass --disable-gateway to run without a gateway)")
+	if m.run.NetworkLog == model.NetworkLogRequests {
+		logx.Infof("Request-level network logging enabled; forcing HTTPS MITM for all hosts")
+	}
 	return NetworkResult{
 		Network: backend.NetworkPolicy{
 			Mode:    backend.NetworkModeUnrestricted,

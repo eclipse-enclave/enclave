@@ -21,9 +21,15 @@ enclave --add-sensitive-dir ~/.m2       # Mount a sensitive directory for this r
 | `worktree_metadata` | `--worktree-metadata <follow\|readonly\|none>` | Linked-worktree Git metadata mounts |
 | `sensitive_dir_exceptions` | `--add-sensitive-dir`, `--add-readonly-sensitive-dir` (CLI-only, also mount the path) | Paths whose subtrees may be mounted although they are sensitive |
 
-`--add-dir` and `--add-readonly-dir` take one path per flag (commas belong to
-the path) and add to the configured list; see
-[List options](configuration.md#list-options).
+`--add-dir` and `--add-readonly-dir` take one path per flag and add to the
+configured list; see [List options](configuration.md#list-options).
+
+Enclave passes most mounts to the engine as `--mount`. There, a path on the
+host or in the container cannot contain a comma, a double quote, or a line
+break. Cache directories Enclave creates, and every bind mount on a host with
+SELinux enforcing, are passed as `--volume` instead: there, a path cannot
+contain a colon, and a comma is fine. The session stops with an error naming
+the path; this includes the project directory.
 
 ## Project mount
 

@@ -39,7 +39,11 @@ func TestFormatBind(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := formatBind(tt.mount); got != tt.expected {
+			got, err := formatBind(tt.mount)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != tt.expected {
 				t.Errorf("formatBind() = %q, want %q", got, tt.expected)
 			}
 		})
@@ -54,7 +58,13 @@ func TestSplitBindMounts(t *testing.T) {
 		{Type: MountTypeTmpfs, Target: "/tmp"},
 	}
 
-	binds, remaining := splitBindMounts(mounts)
+	binds, remaining, err := splitBindMounts(mounts)
+
+	if err != nil {
+
+		t.Fatal(err)
+
+	}
 
 	if len(binds) != 2 {
 		t.Fatalf("expected 2 binds, got %d", len(binds))
@@ -100,7 +110,10 @@ func TestSplitBindMountsCounts(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			binds, remaining := splitBindMounts(tc.mounts)
+			binds, remaining, err := splitBindMounts(tc.mounts)
+			if err != nil {
+				t.Fatal(err)
+			}
 			if len(binds) != tc.wantBinds {
 				t.Errorf("expected %d binds, got %d", tc.wantBinds, len(binds))
 			}
@@ -117,7 +130,13 @@ func TestSplitMountsForSELinuxWith(t *testing.T) {
 		{Type: MountTypeTmpfs, Target: "/tmp"},
 	}
 
-	binds, remaining := SplitMountsForSELinuxWith(mounts, false)
+	binds, remaining, err := SplitMountsForSELinuxWith(mounts, false)
+
+	if err != nil {
+
+		t.Fatal(err)
+
+	}
 	if binds != nil {
 		t.Errorf("binds = %v, want nil when not enforcing", binds)
 	}
@@ -125,7 +144,10 @@ func TestSplitMountsForSELinuxWith(t *testing.T) {
 		t.Fatalf("remaining = %v, want all mounts passed through", remaining)
 	}
 
-	binds, remaining = SplitMountsForSELinuxWith(mounts, true)
+	binds, remaining, err = SplitMountsForSELinuxWith(mounts, true)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(binds) != 1 || binds[0] != "/host/a:/container/a:z" {
 		t.Errorf("binds = %v, want [/host/a:/container/a:z]", binds)
 	}

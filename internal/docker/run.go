@@ -55,7 +55,10 @@ func RunWithStartHook(ctx context.Context, config *ContainerConfig, hostConfig *
 		return "", err
 	}
 	defer cid.remove()
-	args := buildRunArgs(config, hostConfig, name, runMode{CIDFile: cid.path})
+	args, err := buildRunArgs(config, hostConfig, name, runMode{CIDFile: cid.path})
+	if err != nil {
+		return "", err
+	}
 	var stderr bytes.Buffer
 	cmd := exec.CommandContext(ctx, dockerBinary, args...) // #nosec G204 -- args built from caller config, passed without a shell.
 	cmd.Stdout = io.Discard
@@ -78,7 +81,10 @@ func RunWithIOAndStartHook(ctx context.Context, config *ContainerConfig, hostCon
 	}
 	defer cid.remove()
 	mode := runMode{Interactive: in != nil, TTY: tty, DetachKeys: detachKeys, CIDFile: cid.path}
-	args := buildRunArgs(config, hostConfig, name, mode)
+	args, err := buildRunArgs(config, hostConfig, name, mode)
+	if err != nil {
+		return "", err
+	}
 	cmd := exec.CommandContext(ctx, dockerBinary, args...) // #nosec G204
 	cmd.Stdin = in
 	cmd.Stdout = out
@@ -93,7 +99,10 @@ func RunCapture(ctx context.Context, config *ContainerConfig, hostConfig *HostCo
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	args := buildRunArgs(config, hostConfig, name, runMode{})
+	args, err := buildRunArgs(config, hostConfig, name, runMode{})
+	if err != nil {
+		return "", err
+	}
 	var stdout, stderr bytes.Buffer
 	cmd := exec.CommandContext(ctx, dockerBinary, args...) // #nosec G204
 	cmd.Stdout = &stdout
@@ -126,7 +135,10 @@ func RunInteractiveWithStartHook(ctx context.Context, config *ContainerConfig, h
 		return "", err
 	}
 	defer cid.remove()
-	args := buildRunArgs(config, hostConfig, name, runMode{Interactive: true, TTY: true, DetachKeys: detachKeys, CIDFile: cid.path})
+	args, err := buildRunArgs(config, hostConfig, name, runMode{Interactive: true, TTY: true, DetachKeys: detachKeys, CIDFile: cid.path})
+	if err != nil {
+		return "", err
+	}
 	cmd := exec.CommandContext(ctx, dockerBinary, args...) // #nosec G204
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
@@ -263,7 +275,10 @@ func waitForContainerRunning(ctx context.Context, cid cidFile, waitCh <-chan err
 // container: Docker prints it before attempting the start, podman prints
 // nothing on failure.
 func RunDetached(ctx context.Context, config *ContainerConfig, hostConfig *HostConfig, name string) (string, error) {
-	args := buildRunArgs(config, hostConfig, name, runMode{Detach: true})
+	args, err := buildRunArgs(config, hostConfig, name, runMode{Detach: true})
+	if err != nil {
+		return "", err
+	}
 	out, err := capture(ctx, args...)
 	if err != nil {
 		return containerIDFromRunOutput(out), err
@@ -286,7 +301,10 @@ func containerIDFromRunOutput(out string) string {
 // RunDetachedInteractive starts a detached container with stdin open and a TTY,
 // so it can later be reattached interactively.
 func RunDetachedInteractive(ctx context.Context, config *ContainerConfig, hostConfig *HostConfig, name string) (string, error) {
-	args := buildRunArgs(config, hostConfig, name, runMode{Detach: true, Interactive: true, TTY: true})
+	args, err := buildRunArgs(config, hostConfig, name, runMode{Detach: true, Interactive: true, TTY: true})
+	if err != nil {
+		return "", err
+	}
 	id, err := capture(ctx, args...)
 	if err != nil {
 		return "", err
@@ -296,6 +314,9 @@ func RunDetachedInteractive(ctx context.Context, config *ContainerConfig, hostCo
 
 // ContainerCreate creates a container without starting it and returns its ID.
 func ContainerCreate(ctx context.Context, config *ContainerConfig, hostConfig *HostConfig, name string) (string, error) {
-	args := buildRunArgs(config, hostConfig, name, runMode{Create: true})
+	args, err := buildRunArgs(config, hostConfig, name, runMode{Create: true})
+	if err != nil {
+		return "", err
+	}
 	return capture(ctx, args...)
 }

@@ -49,11 +49,14 @@ exit 127
 }
 
 func TestDetachedInteractiveRunModeKeepsTTYAndStdin(t *testing.T) {
-	args := buildRunArgs(&ContainerConfig{Image: "example:test"}, nil, "session", runMode{
+	args, err := buildRunArgs(&ContainerConfig{Image: "example:test"}, nil, "session", runMode{
 		Detach:      true,
 		Interactive: true,
 		TTY:         true,
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, want := range []string{"--detach", "--interactive", "--tty"} {
 		if !slices.Contains(args, want) {
 			t.Fatalf("expected %s in args %v", want, args)

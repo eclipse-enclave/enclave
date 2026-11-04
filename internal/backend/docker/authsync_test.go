@@ -467,7 +467,10 @@ func assertFileContent(t *testing.T, path string, want string) {
 }
 
 func TestSharedAuthSyncHostConfigRelabelsForSELinux(t *testing.T) {
-	hostConfig := sharedAuthSyncHostConfig("/host/config", "/host/auth", true)
+	hostConfig, err := sharedAuthSyncHostConfig("/host/config", "/host/auth", true)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	if len(hostConfig.Mounts) != 0 {
 		t.Fatalf("Mounts = %v, want none (binds should carry the relabel flag)", hostConfig.Mounts)
@@ -490,7 +493,10 @@ func TestSharedAuthSyncHostConfigRelabelsForSELinux(t *testing.T) {
 }
 
 func TestSharedAuthSyncHostConfigWithoutSELinux(t *testing.T) {
-	hostConfig := sharedAuthSyncHostConfig("/host/config", "/host/auth", false)
+	hostConfig, err := sharedAuthSyncHostConfig("/host/config", "/host/auth", false)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	if len(hostConfig.Binds) != 0 {
 		t.Fatalf("Binds = %v, want none without SELinux", hostConfig.Binds)

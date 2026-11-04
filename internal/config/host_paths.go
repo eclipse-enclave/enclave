@@ -254,6 +254,13 @@ func HostProjectGatewayConfigDir(home string, projectHash string, tool string) s
 	return filepath.Join(HostProjectToolDir(home, projectHash, tool), "gateway-config")
 }
 
+// HostProjectUnrestrictedGatewayConfigDir holds the bundle of unrestricted
+// gateways, apart from the restricted one so that neither can overwrite the
+// other's while sessions of both modes run.
+func HostProjectUnrestrictedGatewayConfigDir(home string, projectHash string, tool string) string {
+	return filepath.Join(HostProjectToolDir(home, projectHash, tool), "gateway-config-unrestricted")
+}
+
 func HostSecretsDir(home string) string {
 	return filepath.Join(hostStateRoot(home), "secrets")
 }

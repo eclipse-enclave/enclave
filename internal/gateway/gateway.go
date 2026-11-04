@@ -369,6 +369,11 @@ type StartConfig struct {
 	ProjectHash       string
 	SecretReleaseFile string
 	TLSRootDir        string
+	// NetworkMode is the session's network mode; only unrestricted is labelled.
+	NetworkMode string
+	// Hostname is set on the gateway because the session, which joins its
+	// network namespace, cannot set its own.
+	Hostname string
 }
 
 func appendReadOnlyMount(mounts []docker.Mount, hostPath string, containerPath string) []docker.Mount {
@@ -506,6 +511,7 @@ func Start(ctx context.Context, cfg StartConfig) (StartResult, error) {
 	}
 	config := &docker.ContainerConfig{
 		Image:        imageName(cfg.Profile),
+		Hostname:     cfg.Hostname,
 		User:         gatewayUser(),
 		Env:          env,
 		ExposedPorts: cfg.ExposedPorts,
@@ -864,6 +870,9 @@ func gatewayLabels(cfg StartConfig) map[string]string {
 	if cfg.ProjectHash != "" {
 		labels[model.GatewayLabelProjectHash] = cfg.ProjectHash
 	}
+	if cfg.NetworkMode == model.NetworkModeUnrestricted {
+		labels[model.GatewayLabelMode] = cfg.NetworkMode
+	}
 	if cfg.ProjectDir != "" {
 		labels[model.GatewayLabelProjectDir] = cfg.ProjectDir
 	}
@@ -883,7 +892,7 @@ func ensureExistingGatewayImageWith(profile model.Profile, exists func(context.C
 	if ok {
 		return nil
 	}
-	return fmt.Errorf("gateway image %q does not exist locally and builds are disabled (--no-rebuild or %s); re-enable builds to create it, or use --allow-all-network to bypass the gateway", image, model.EnvNoRebuild)
+	return fmt.Errorf("gateway image %q does not exist locally and builds are disabled (--no-rebuild or %s); re-enable builds to create it, or use --allow-all-network --disable-gateway to run without the gateway", image, model.EnvNoRebuild)
 }
 
 // StopContainer stops and removes the exact gateway returned by Start. Using

@@ -77,9 +77,10 @@ func viewSessionNetwork(t *testing.T, r *Runtime) sessionNetworkView {
 	}
 }
 
-// TestLockinUnrestrictedSessionNetwork pins the gateway-less unrestricted
-// session: no gateway, no DNS-gateway signal, real hostname, no CA, no secret release. All
-// routes to unrestricted mode and both policy-resolution paths (with and
+// TestLockinUnrestrictedSessionNetwork pins the unrestricted session with a
+// disabled gateway, which must stay the gateway-less session of before:
+// no gateway, no DNS-gateway signal, real hostname, no CA, no secret release.
+// All routes to unrestricted mode and both policy-resolution paths (with and
 // without a tool name) must produce it.
 func TestLockinUnrestrictedSessionNetwork(t *testing.T) {
 	want := sessionNetworkView{
@@ -102,7 +103,9 @@ func TestLockinUnrestrictedSessionNetwork(t *testing.T) {
 			{"allow-all over restricted", true, model.NetworkModeRestricted},
 		} {
 			t.Run("tool="+tool+"/"+tc.name, func(t *testing.T) {
-				got := viewSessionNetwork(t, lockinNetworkRuntime(t, tool, tc.allowAll, tc.persistedMode))
+				r := lockinNetworkRuntime(t, tool, tc.allowAll, tc.persistedMode)
+				r.run.DisableGateway = true
+				got := viewSessionNetwork(t, r)
 				if !reflect.DeepEqual(got, want) {
 					t.Fatalf("unrestricted session network drifted:\n got  %+v\n want %+v", got, want)
 				}

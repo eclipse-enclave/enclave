@@ -858,9 +858,10 @@ func (r *Runtime) backendRequest(ctx *ExecutionContext, detached bool, interacti
 		// reconcile via Stop/Remove finalize while the container still exists.
 		req.AuthSync = ctx.AuthSync
 	}
-	// A session joining the gateway's network namespace cannot set its own
-	// hostname.
-	if !req.Network.Gateway {
+	// A restricted session's hostname is the gateway's own. An unrestricted
+	// session keeps its hostname; when it joins a gateway's network namespace,
+	// the backend sets it on the gateway.
+	if req.Network.Mode == backend.NetworkModeUnrestricted {
 		req.Hostname = model.HostnamePrefix + r.project.Name
 	}
 	return req
@@ -1516,10 +1517,10 @@ func (r *Runtime) networkRestricted() bool {
 	return resolved.Effective.Mode != model.NetworkModeUnrestricted
 }
 
-// gatewayRuns reports whether a gateway sidecar runs alongside the session.
-// Today that is exactly the restricted sessions.
+// gatewayRuns reports whether a gateway sidecar runs alongside the session:
+// always in restricted mode, and in unrestricted mode unless disabled.
 func (r *Runtime) gatewayRuns() bool {
-	return r.networkRestricted()
+	return r.networkRestricted() || !r.run.DisableGateway
 }
 
 func (r *Runtime) resolveEffectivePolicy() (policy.ResolveResult, error) {

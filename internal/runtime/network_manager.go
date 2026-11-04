@@ -57,6 +57,9 @@ func (m networkManager) Prepare(_ string, authState model.AuthState, _ SecretMap
 
 	if effectivePolicy.Mode == model.NetworkModeUnrestricted {
 		logx.Warnf("Network restrictions disabled - container has unrestricted internet access")
+		if m.gatewayRuns() {
+			return m.observedUnrestrictedNetwork(resolved.AllowlistPath, loopbackPorts, ports), nil
+		}
 		var env []string
 		if len(loopbackPorts) > 0 {
 			env = append(env, model.EnvLoopbackPorts+"="+strings.Join(loopbackPorts, ","))
@@ -67,7 +70,6 @@ func (m networkManager) Prepare(_ string, authState model.AuthState, _ SecretMap
 		return NetworkResult{
 			Network: backend.NetworkPolicy{
 				Mode:           backend.NetworkModeUnrestricted,
-				Gateway:        m.gatewayRuns(),
 				LoopbackPorts:  append([]string(nil), loopbackPorts...),
 				IdeBridgePorts: append([]string(nil), m.ideBridgePorts...),
 			},
@@ -115,6 +117,26 @@ func (m networkManager) Prepare(_ string, authState model.AuthState, _ SecretMap
 		Env:   env,
 		Ports: ports,
 	}, nil
+}
+
+// observedUnrestrictedNetwork is an unrestricted session with a gateway that
+// only observes. As in restricted mode, the gateway owns the session's ports
+// and bridges, so the session gets no forwarding env of its own; unlike it,
+// the session gets no DNS-gateway signal and keeps Docker's resolver.
+func (m networkManager) observedUnrestrictedNetwork(allowlistPath string, loopbackPorts []string, ports []backend.PortMapping) NetworkResult {
+	logx.Infof("Network log records HTTP/HTTPS traffic on ports 80 and 443 (pass --disable-gateway to run without a gateway)")
+	return NetworkResult{
+		Network: backend.NetworkPolicy{
+			Mode:    backend.NetworkModeUnrestricted,
+			Gateway: true,
+			// The gateway image is shared by both modes and built from the
+			// allowlist, so both must build it from the same one.
+			Egress:         backend.EgressPolicy{AllowlistPath: allowlistPath},
+			LoopbackPorts:  append([]string(nil), loopbackPorts...),
+			IdeBridgePorts: append([]string(nil), m.ideBridgePorts...),
+		},
+		Ports: ports,
+	}
 }
 
 func policyDomainSourcePaths(home string, projectDir string, projectHash string, tool string, globalPolicy network.Policy, projectPolicy network.Policy) []string {

@@ -30,6 +30,9 @@ PROXY_PID=""
 DNS_AUDIT_PID=""
 DNS_AUDIT_RESTARTS="0"
 RELOAD_PENDING="0"
+# The session's network mode, from the bundle's meta.json. Restricted enforces
+# the policy; unrestricted only observes. Anything unrecognised is restricted.
+GATEWAY_MODE="restricted"
 
 UNIQUE_RESOLVERS=""
 
@@ -183,6 +186,21 @@ read_bundle_generation() {
     generation=$(sed -n 's/.*"generation"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$GATEWAY_CONFIG_META" | head -n 1)
     [ -n "$generation" ] || return 1
     printf '%s\n' "$generation"
+}
+
+read_gateway_mode() {
+    mode=""
+    if [ -f "$GATEWAY_CONFIG_META" ]; then
+        mode=$(sed -n 's/.*"mode"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$GATEWAY_CONFIG_META" | head -n 1)
+    fi
+    case "$mode" in
+        unrestricted) GATEWAY_MODE="unrestricted" ;;
+        *) GATEWAY_MODE="restricted" ;;
+    esac
+}
+
+gateway_observes_only() {
+    [ "$GATEWAY_MODE" = "unrestricted" ]
 }
 
 ensure_local_resolver() {
@@ -451,13 +469,17 @@ EOF_RESOLVERS
     setup_ide_bridge
 }
 
-setup_kernel_network() {
+enable_route_localnet() {
     if [ -d /proc/sys/net/ipv4/conf/all ]; then
         sysctl -w net.ipv4.conf.all.route_localnet=1 >/dev/null 2>&1 || true
     fi
     if [ -d /proc/sys/net/ipv4/conf/eth0 ]; then
         sysctl -w net.ipv4.conf.eth0.route_localnet=1 >/dev/null 2>&1 || true
     fi
+}
+
+setup_kernel_network() {
+    enable_route_localnet
 
     if command -v sysctl >/dev/null 2>&1; then
         sysctl -w net.ipv6.conf.all.disable_ipv6=1 >/dev/null 2>&1 || true
@@ -470,6 +492,44 @@ setup_kernel_network() {
         ip6tables -A OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT || return 1
         ip6tables -A OUTPUT -o lo -j ACCEPT || return 1
     fi
+}
+
+# redirect_web_traffic_to_proxy sends the session's TCP 80/443 through the
+# proxy so it can be logged. The proxy's own connections and connections to
+# local addresses keep their destination. Rules are only appended: flushing the
+# nat OUTPUT chain would drop Docker's embedded DNS rules the session relies on.
+redirect_web_traffic_to_proxy() {
+    firewall="$1"
+    proxy_uid="$2"
+    for port in 80 443; do
+        "$firewall" -t nat -A OUTPUT -p tcp --dport "$port" -m owner --uid-owner "$proxy_uid" -j RETURN || return 1
+        "$firewall" -t nat -A OUTPUT -p tcp --dport "$port" -m addrtype --dst-type LOCAL -j RETURN || return 1
+    done
+    "$firewall" -t nat -A OUTPUT -p tcp --dport 80 -j REDIRECT --to-ports 8080 || return 1
+    "$firewall" -t nat -A OUTPUT -p tcp --dport 443 -j REDIRECT --to-ports 8443 || return 1
+}
+
+# setup_observing_network prepares an unrestricted gateway: it forwards the
+# same ports as a restricted one and routes web traffic through the proxy, but
+# installs no filters, leaves IPv6 enabled and does not take over DNS.
+setup_observing_network() {
+    setup_loopback_forwarding
+    enable_route_localnet
+
+    if [ "$PROXY_ENABLED" = "true" ]; then
+        if ! iptables -m owner -h >/dev/null 2>&1; then
+            log "Owner match unavailable; cannot safely enable proxy"
+            return 1
+        fi
+        proxy_uid=$(id -u "$PROXY_USER")
+        redirect_web_traffic_to_proxy iptables "$proxy_uid" || return 1
+        if command -v ip6tables >/dev/null 2>&1 && ! redirect_web_traffic_to_proxy ip6tables "$proxy_uid"; then
+            log "IPv6 NAT unavailable; IPv6 HTTP/HTTPS traffic is not logged"
+        fi
+        log "Transparent proxy NAT rules configured (observing only)"
+    fi
+
+    setup_ide_bridge
 }
 
 enforce_fail_closed_lockdown() {
@@ -661,7 +721,7 @@ shutdown_gateway() {
     trap - HUP TERM INT
     log "$reason"
 
-    if [ "$code" -ne 0 ]; then
+    if [ "$code" -ne 0 ] && ! gateway_observes_only; then
         enforce_fail_closed_lockdown
     fi
 
@@ -692,12 +752,14 @@ monitor_loop() {
     while :; do
         if [ "$RELOAD_PENDING" = "1" ]; then
             RELOAD_PENDING="0"
-            if ! reload_gateway; then
+            if gateway_observes_only; then
+                log "Reload ignored: an unrestricted gateway has no policy to apply"
+            elif ! reload_gateway; then
                 shutdown_gateway 1 "Reload failed; shutting down gateway (fail-closed)"
             fi
         fi
 
-        if ! is_pid_running "$DNSMASQ_PID"; then
+        if ! gateway_observes_only && ! is_pid_running "$DNSMASQ_PID"; then
             shutdown_gateway 1 "dnsmasq exited unexpectedly"
         fi
 
@@ -723,12 +785,37 @@ monitor_loop() {
     done
 }
 
+# main_observing runs an unrestricted gateway: the proxy logs web traffic and
+# nothing else changes, so neither dnsmasq nor the DNS audit runs.
+main_observing() {
+    log "Network mode unrestricted: logging HTTP/HTTPS on ports 80 and 443 without filtering"
+    if ! setup_observing_network; then
+        exit 1
+    fi
+    if ! prepare_proxy_runtime_data; then
+        exit 1
+    fi
+    ENCLAVE_GATEWAY_NETWORK_MODE="$GATEWAY_MODE"
+    export ENCLAVE_GATEWAY_NETWORK_MODE
+    if ! start_proxy; then
+        exit 1
+    fi
+
+    log "Gateway ready"
+    monitor_loop
+}
+
 main() {
     trap on_hup HUP
     trap on_term TERM INT
 
     normalize_proxy_enabled
     init_log_files
+    read_gateway_mode
+    if gateway_observes_only; then
+        main_observing
+        return
+    fi
     ensure_local_resolver
 
     tmp_dir=$(mktemp -d /tmp/enclave-gateway-init.XXXXXX)

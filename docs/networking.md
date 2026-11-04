@@ -61,6 +61,11 @@ Costs:
 - If the proxy inside the gateway dies, the gateway removes its redirects and
   traffic flows unlogged. If the gateway container stops, the session loses
   network access, because it shares the gateway's network namespace.
+- The gateway's proxy listens on ports 8080 and 8443 in the namespace the
+  session shares, so a server inside the session cannot use those ports, and
+  publishing them with `-p` (for example `-p 8080`) does not reach the session.
+  Use another container port, or `--disable-gateway`. Restricted sessions have
+  the same limit.
 
 To run without a gateway, and without a network log:
 
@@ -178,6 +183,8 @@ stale.
 collisions between sessions. The assigned port is printed at start and listed
 under `ports` in `enclave ps --json`. Auto-assigned ports are Docker-only; the
 `qemu` backend rejects port `0`. Without a host IP, ports bind `127.0.0.1`.
+Container ports 8080 and 8443 are taken by the gateway proxy in every session
+with a gateway; see [Unrestricted mode](#unrestricted-mode).
 
 ## Bridging host ports
 

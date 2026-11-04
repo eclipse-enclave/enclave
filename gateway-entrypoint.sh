@@ -284,10 +284,20 @@ atomic_swap_ipset() {
     return 0
 }
 
+# setup_loopback_forwarding makes listeners on 127.0.0.1 reachable through
+# published ports. Forwarded connections arriving over the bridge (Docker) pass
+# nat PREROUTING. With "local", connections generated inside the namespace to
+# the gateway's own address (rootless podman's port forwarder) are redirected
+# in nat OUTPUT as well.
+#
+# Callers run this before setup_kernel_network/enable_route_localnet, so the
+# DNAT-vs-socat choice depends on the namespace's initial route_localnet.
 setup_loopback_forwarding() {
     if [ -z "${ENCLAVE_LOOPBACK_PORTS:-}" ]; then
         return
     fi
+    redirect_local="false"
+    [ "${1:-}" = "local" ] && redirect_local="true"
 
     route_localnet="0"
     if command -v sysctl >/dev/null 2>&1; then
@@ -324,6 +334,28 @@ setup_loopback_forwarding() {
         return
     fi
 
+    local_ip=""
+    if [ "$redirect_local" = "true" ] && [ "$force_socat" = "false" ]; then
+        if command -v enclave_resolve_bind_ip >/dev/null 2>&1; then
+            local_ip=$(enclave_resolve_bind_ip || true)
+        fi
+        case "$local_ip" in
+            *[!0-9.]*|"") local_ip="" ;;
+        esac
+    fi
+
+    redirect_local_connections() {
+        port="$1"
+        if [ -z "$local_ip" ]; then
+            log "Unable to determine gateway IPv4 address; using socat fallback for local connections to port $port"
+            return 1
+        fi
+        if ! iptables -t nat -A OUTPUT -p tcp -d "$local_ip" --dport "$port" -j DNAT --to-destination 127.0.0.1:"$port" >/dev/null 2>&1; then
+            log "Failed to add local loopback redirect for port $port; using socat fallback"
+            return 1
+        fi
+    }
+
     while IFS= read -r port; do
         [ -z "$port" ] && continue
         if [ "$force_socat" = "true" ]; then
@@ -333,6 +365,9 @@ setup_loopback_forwarding() {
         if iptables -t nat -L PREROUTING >/dev/null 2>&1; then
             if iptables -t nat -A PREROUTING -p tcp --dport "$port" -j DNAT --to-destination 127.0.0.1:"$port" >/dev/null 2>&1; then
                 log "DNAT port $port to loopback listener"
+                if [ "$redirect_local" = "true" ] && ! redirect_local_connections "$port"; then
+                    start_loopback_proxy "$port"
+                fi
             else
                 log "Failed to add loopback redirect for port $port; using socat fallback"
                 start_loopback_proxy "$port"
@@ -560,7 +595,7 @@ fail_open_without_proxy() {
 # same ports as a restricted one and routes web traffic through the proxy, but
 # installs no filters, leaves IPv6 enabled and does not take over DNS.
 setup_observing_network() {
-    setup_loopback_forwarding
+    setup_loopback_forwarding local
     enable_route_localnet
 
     if [ "$PROXY_ENABLED" = "true" ]; then

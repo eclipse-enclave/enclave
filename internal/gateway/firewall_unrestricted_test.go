@@ -17,10 +17,11 @@ import (
 
 // TestUnrestrictedGatewayFirewall pins the rules an observing gateway
 // installs: TCP 80/443 redirected to the proxy for IPv4 and IPv6, the
-// published, loopback and IDE bridge forwarding of restricted mode, and
-// nothing that filters traffic, disables IPv6 or takes over DNS.
+// published, loopback and IDE bridge forwarding of restricted mode plus the
+// local loopback redirect rootless podman needs, and nothing that filters
+// traffic, disables IPv6 or takes over DNS.
 func TestUnrestrictedGatewayFirewall(t *testing.T) {
-	calls, err := runGatewayFirewall(t, lockinFirewallMocks+"setup_observing_network",
+	calls, err := runGatewayFirewall(t, loopbackForwardingMocks+"setup_observing_network",
 		"ENCLAVE_GATEWAY_PUBLISHED_PORTS=1455/tcp,3000/tcp",
 		"ENCLAVE_LOOPBACK_PORTS=1455",
 		"ENCLAVE_IDE_BRIDGE_PORTS=9800",
@@ -243,5 +244,106 @@ func TestRestrictedGatewayProxyDeathLocksDown(t *testing.T) {
 		if !slices.Contains(lines, want) {
 			t.Errorf("missing lockdown rule %q in %q", want, lines)
 		}
+	}
+}
+
+// loopbackForwardingMocks resolve the gateway's own address and record socat
+// loopback proxies as firewall calls.
+const loopbackForwardingMocks = lockinFirewallMocks + `
+socat() { :; }
+enclave_resolve_bind_ip() { ip="${BIND_IP-10.88.0.5}"; [ -n "$ip" ] && printf '%s\n' "$ip"; }
+enclave_start_socat_loopback_proxy() { firewall_mock socat "$@"; }
+`
+
+func loopbackDNAT(chain, match, port string) string {
+	return "iptables -t nat -A " + chain + " -p tcp " + match + "--dport " + port + " -j DNAT --to-destination 127.0.0.1:" + port
+}
+
+func hasLocalLoopbackDNAT(lines []string) bool {
+	return slices.ContainsFunc(lines, func(l string) bool {
+		return strings.Contains(l, "-A OUTPUT") && strings.Contains(l, "DNAT --to-destination 127.0.0.1")
+	})
+}
+
+func countSocat(lines []string) int {
+	n := 0
+	for _, line := range lines {
+		if strings.HasPrefix(line, "socat ") {
+			n++
+		}
+	}
+	return n
+}
+
+// Rootless podman's port forwarder dials the container address from inside
+// the namespace, so its connections pass nat OUTPUT instead of PREROUTING.
+func TestUnrestrictedGatewayRedirectsLocalConnectionsToLoopbackListener(t *testing.T) {
+	calls, err := runGatewayFirewall(t, loopbackForwardingMocks+"setup_observing_network",
+		"ENCLAVE_LOOPBACK_PORTS=1455,1456",
+		"PROXY_ENABLED=false",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := callLines(calls)
+	for _, port := range []string{"1455", "1456"} {
+		for _, want := range []string{
+			loopbackDNAT("PREROUTING", "", port),
+			loopbackDNAT("OUTPUT", "-d 10.88.0.5 ", port),
+		} {
+			if !slices.Contains(lines, want) {
+				t.Errorf("missing %q in %q", want, lines)
+			}
+		}
+	}
+	if countSocat(lines) != 0 {
+		t.Errorf("socat fallback started although DNAT succeeded: %q", lines)
+	}
+}
+
+func TestUnrestrictedGatewayFallsBackToSocatWithoutLocalRedirect(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		env            []string
+		socat          int
+		triedLocalDNAT bool
+	}{
+		{"rule fails", []string{"FAIL_ENGINE=iptables", "FAIL_RULE=" + strings.TrimPrefix(loopbackDNAT("OUTPUT", "-d 10.88.0.5 ", "1455"), "iptables ")}, 1, true},
+		// The socat fallback resolves the same address, so it is disabled too.
+		{"no address", []string{"BIND_IP="}, 0, false},
+		{"IPv6 address", []string{"BIND_IP=fd00::5"}, 1, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			calls, err := runGatewayFirewall(t, loopbackForwardingMocks+"setup_observing_network",
+				append([]string{"ENCLAVE_LOOPBACK_PORTS=1455", "PROXY_ENABLED=false"}, tc.env...)...,
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+			lines := callLines(calls)
+			if !slices.Contains(lines, loopbackDNAT("PREROUTING", "", "1455")) {
+				t.Errorf("PREROUTING redirect dropped: %q", lines)
+			}
+			if socatCalls := countSocat(lines); socatCalls != tc.socat {
+				t.Errorf("socat fallback ran %d times, want %d: %q", socatCalls, tc.socat, lines)
+			}
+			if hasLocalLoopbackDNAT(lines) != tc.triedLocalDNAT {
+				t.Errorf("OUTPUT DNAT attempted = %v, want %v: %q", !tc.triedLocalDNAT, tc.triedLocalDNAT, lines)
+			}
+		})
+	}
+}
+
+// A restricted gateway keeps its pinned loopback forwarding: PREROUTING only.
+func TestRestrictedGatewayInstallsNoLocalLoopbackRedirect(t *testing.T) {
+	calls, err := runGatewayFirewall(t, loopbackForwardingMocks+"setup_firewall",
+		"ENCLAVE_LOOPBACK_PORTS=1455",
+		"PROXY_ENABLED=false",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lines := callLines(calls); hasLocalLoopbackDNAT(lines) {
+		t.Errorf("restricted gateway redirected local connections: %q", lines)
 	}
 }

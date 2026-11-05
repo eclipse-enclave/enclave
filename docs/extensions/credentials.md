@@ -3,8 +3,9 @@
 How tool and feature specs declare secrets (`credentials.sources`), how the
 gateway injects them as HTTP headers (`network.serviceDomains`,
 `network.serviceAuth`), and how Enclave detects a login (`providers`). Tools
-and features may declare all of it; the service id is the same key in all
-three maps. For how users supply credentials, see
+and features may declare credentials and service auth; `providers` is
+tool-only, and a feature's `providers` is ignored. The service id is the same
+key in all three maps. For how users supply credentials, see
 [Authentication and secrets](../auth.md).
 
 From `extensions/tools/claude/spec.yaml`:
@@ -175,8 +176,8 @@ ASCII without whitespace. `random.encoding` and `random.length` are required:
 
 ## Providers
 
-`providers[]` is Enclave-native and describes an auth provider, as opposed to a
-raw credential.
+`providers[]` is Enclave-native and tool-only. It describes an auth provider,
+as opposed to a raw credential.
 
 | Field | Meaning |
 |-------|---------|
@@ -230,7 +231,7 @@ preparation:
 
 | Hook | Runs |
 |------|------|
-| `OnAuthReady` | After auth stores are prepared. Use `VolumeHasSession` to gate behavior; it is true when any provider session is detected through `providers[].authSession` or auth file presence. |
+| `OnAuthReady` | After auth stores are prepared. Use `StorageHasSession` to gate behavior; it is true when any provider session is detected through `providers[].authSession` or auth file presence. |
 | `AfterEnvInjected` | After API keys are injected as env vars |
 | `FinalizeAuth` | Last chance to adjust config stores before the container starts |
 

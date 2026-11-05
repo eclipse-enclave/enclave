@@ -35,7 +35,7 @@ commands: {...}           # install, startup, initFiles
 network: {...}
 environment: {...}
 credentials: {...}
-providers: [...]          # Enclave-native
+providers: [...]          # Enclave-native; kind: sandbox only
 ports: [...]              # Enclave-native; tools and enabled features
 caches: [...]             # Enclave-native; persistent per-project cache mounts
 

@@ -123,9 +123,9 @@ All start after Wave 0 merges. None depend on each other.
 P1-D and P1-P are split by engine so that neither waits for the other's
 machine. P1-P runs on this host's podman 4.9 / netavark 1.4 under
 `isolate=true` and, if a strict-capable netavark is available, under `strict`
-too; a pre-P1 matrix is already in `prototypes.md` and backs change request
-CR-1 in the proposal. If CR-1 is rejected and strict is unavailable, A7 and
-A13 reject `--peer-group` on Podman; nothing else changes.
+too; a pre-P1 matrix is already in `prototypes.md` and backs CR-1, which is
+accepted. A7 and A13 reject `--peer-group` only on a podman without an
+isolate option.
 
 Merge order after Wave 1: A1, A2, A6, A5, A8. Prototype reports feed bound
 values into A12 and corrections into the interface document.
@@ -202,7 +202,7 @@ Every package agent gets the same brief shape:
 - `entrypoint.sh` and `gateway-entrypoint.sh` are shell with many callers.
   A5 and A14 each own one; neither edits the other.
 - Podman results arriving late. A7 and A13 implement the rejection path with
-  the threshold as one constant (strict, or any isolate option once CR-1 is
-  accepted); flipping it is a one-line change after P1-P passes.
+  the threshold as one constant (any isolate option, per CR-1); tightening
+  it is a one-line change if P1-P contradicts the pre-P1 matrix.
 - Merge order matters within a wave because stubs are replaced by bodies.
   The coordinator merges in the listed order and rebases the rest.

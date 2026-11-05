@@ -48,14 +48,13 @@
 <body>
 
 <h1>Agent-to-Agent communication for Enclave</h1>
-<p class="meta">Design proposal, draft 6, revision 1. November 2026. Branch <code>a2a</code>. Design contracts settled with Astra after four review rounds. <strong>Not yet called converged</strong>: the A2A spec pin includes a carrier check that can still force a design change, and prototypes P1 to P3 are evidence gates. <span class="status">contracts settled, gates open</span> <span class="status">one change request pending Astra</span></p>
+<p class="meta">Design proposal, draft 6, revision 2. November 2026. Branch <code>a2a</code>. Design contracts settled with Astra after four review rounds. <strong>Not yet called converged</strong>: the A2A spec pin includes a carrier check that can still force a design change, and prototypes P1 to P3 are evidence gates. <span class="status">contracts settled, gates open</span></p>
 
 <div class="decision"><strong>Remaining gates.</strong>
 <ol>
   <li><strong>Spec pin and carrier check</strong> (design-change gate): pin one tagged A2A release and confirm it has a legal carrier for every custom representation in <a href="#carriers">section 4</a>. A missing carrier is a design change, not an implementation detail.</li>
   <li><strong>P1, P2, P3</strong> (evidence gates): listed in <a href="#scope">section 23</a>. They validate the contracts; they do not reopen them unless they fail.</li>
   <li><strong>Bounds</strong>: numerical measurement during the prototypes (<a href="#bounds">section 17</a>).</li>
-  <li><strong>Change request CR-1, pending Astra</strong>: relax the Podman requirement from <code>isolate=strict</code> to "isolate option present" and add hub INPUT rules. Evidence and wording in <a href="#cr1">section 8</a>. Until accepted, the strict-only text stands.</li>
 </ol>
 </div>
 
@@ -199,7 +198,7 @@ flowchart LR
 
 <h3>Processes and restrictions</h3>
 <ul>
-  <li><strong>Root supervisor</strong>, the gateway's own pattern: installs OUTPUT rules admitting only the adapter endpoints in the committed snapshot, INPUT rules admitting only each member's gateway address on that bridge's interface to the hub port (policy DROP otherwise), disables forwarding, and reloads on signal. Takes no input from the proxy. The INPUT rules are hygiene under <code>strict</code> and the required control under <code>isolate=true</code> (CR-1).</li>
+  <li><strong>Root supervisor</strong>, the gateway's own pattern: installs OUTPUT rules admitting only the adapter endpoints in the committed snapshot, INPUT rules admitting only each member's gateway address on that bridge's interface to the hub port (policy DROP otherwise), disables forwarding, and reloads on signal. Takes no input from the proxy. The INPUT rules are hygiene under <code>strict</code> and the required control under <code>isolate=true</code>.</li>
   <li><strong>Unprivileged proxy</strong>, non-root, no capabilities, read-only rootfs, no-new-privileges, started by the supervisor. Cannot modify the snapshot.</li>
   <li>No engine socket. Mounts: the snapshot directory read-only, a status directory for the two status files, and the audit log path.</li>
   <li>Proxy targets are member names resolved from the committed snapshot, never addresses, URLs or commands from a request. The hub is not a general proxy.</li>
@@ -266,12 +265,12 @@ flowchart LR
   <li><strong>OUTPUT (nat):</strong> explicit RETURN for the hub address before the REDIRECT rules, even though the hub port is outside 80 and 443.</li>
   <li><strong>IPv6 guarantee:</strong> adapter and hub listen on IPv4 only, and the existing ip6tables INPUT and OUTPUT DROP policies receive no A2A exception. Link-local addresses exist on every interface; this rule is what makes them irrelevant, not IPAM configuration.</li>
   <li><strong>Restricted mode only.</strong> <code>--peer-group</code> is rejected with <code>--allow-all-network</code> and with the qemu backend.</li>
-  <li><strong>Podman support matrix (current decision).</strong> Supported with netavark <code>isolate=strict</code> only. On the <code>isolate=true</code> fallback, <code>--peer-group</code> is rejected with a message naming the required netavark version.</li>
+  <li><strong>Podman support matrix.</strong> Supported with any netavark that accepts the <code>isolate</code> option; <code>strict</code> is used when available, as today, and <code>true</code> otherwise. Without an isolate option, <code>--peer-group</code> is rejected with a message naming the required netavark version. Decided by CR-1 below.</li>
 </ul>
-<div class="decision" id="cr1"><strong>CR-1 (pending Astra): isolate option present instead of strict only.</strong>
+<div class="decision" id="cr1"><strong>CR-1 (accepted by the maintainer, 2026-11-05): isolate option present instead of strict only.</strong> Astra's review had asked for strict only; the maintainer accepted the relaxation on the measured evidence below, and the reviewer may object in the next pass.
 <p>Measured on Ubuntu 24.04, podman 4.9.3 rootless, netavark 1.4.0 (no strict), two <code>isolate=true</code> bridges, a multi-homed hub, and a bystander on a non-isolated bridge: members cannot reach each other in either direction; the hub reaches each member only over that member's bridge; a member reaches the hub only at the hub's address on its own bridge; routing through the hub is blocked. A non-isolated bystander <em>can</em> reach member bridges and the hub address; that is the only thing <code>strict</code> adds, in both directions.</p>
 <p>Inbound bystander traffic to a member is already dropped by the gateway INPUT policy, which is the documented posture of the existing fallback. Outbound member traffic is governed by the gateway OUTPUT allowlist. Inbound bystander traffic to the hub is not covered by draft 6 and would be closed by <strong>hub INPUT rules</strong>: the supervisor admits, per bridge interface, only that member's gateway address to the hub port, everything else dropped. With that rule the properties A2A relies on hold without <code>strict</code>.</p>
-<p>Proposed decision: <code>--peer-group</code> requires a netavark that accepts the <code>isolate</code> option (<code>true</code> or <code>strict</code>); <code>strict</code> is used when available, as today; the hub installs the INPUT rules unconditionally. P1-P must reproduce the matrix under both values. Full data in <code>prototypes.md</code>.</p>
+<p>Decision: <code>--peer-group</code> requires a netavark that accepts the <code>isolate</code> option (<code>true</code> or <code>strict</code>); <code>strict</code> is used when available, as today; the hub installs the INPUT rules unconditionally. P1-P must reproduce the matrix under both values. Full data in <code>prototypes.md</code>.</p>
 </div>
 <div class="note">A later hardening step can remove the gateway INPUT rule by having the adapter open an outbound connection to the hub and multiplexing requests back over it. Not in v1.</div>
 
@@ -477,7 +476,7 @@ sequenceDiagram
 <table>
 <thead><tr><th>Option</th><th>Meaning</th></tr></thead>
 <tbody>
-<tr><td><code>--peer-group &lt;name&gt;</code></td><td>Join the session to a peer group under the group lock. Config key <code>peer_group</code>. Rejected with <code>--allow-all-network</code>, the qemu backend, and Podman without strict isolation (without any isolate option once CR-1 is accepted).</td></tr>
+<tr><td><code>--peer-group &lt;name&gt;</code></td><td>Join the session to a peer group under the group lock. Config key <code>peer_group</code>. Rejected with <code>--allow-all-network</code>, the qemu backend, and Podman without an isolate option.</td></tr>
 <tr><td><code>--role orchestrator|worker</code></td><td>Role within the group, exclusive. Default <code>worker</code>. Workers start in serve mode. One orchestrator per group.</td></tr>
 <tr><td><code>--a2a-description &lt;text&gt;</code></td><td>Agent card description for this session. Data, not identity.</td></tr>
 <tr><td><code>--a2a-log coarse|full</code></td><td>Audit granularity. <code>coarse</code> is status-only.</td></tr>
@@ -586,7 +585,7 @@ sequenceDiagram
 <tr><td>Spec version and carriers</td><td>Pin one tagged release before the first type; JSON-RPC only; every custom representation needs a legal carrier or the design changes</td><td>Names in drafts were from memory of 0.3; custom fields must not be smuggled.</td></tr>
 <tr><td>Streaming to the model</td><td>No streaming tool; blocking send with handle carrying actual state</td><td>Expected MCP semantics, confirmed by P3 for context visibility only.</td></tr>
 <tr><td>IPv6</td><td>IPv4-only listeners plus existing ip6tables DROP policies</td><td>IPAM settings do not disable link-local.</td></tr>
-<tr><td>Podman</td><td>Strict isolation only; reject otherwise. <strong>CR-1 pending:</strong> isolate option present suffices with hub INPUT rules</td><td>Measured: <code>isolate=true</code> already blocks member-to-member; strict only adds bystander isolation, which gateway INPUT and hub INPUT rules cover.</td></tr>
+<tr><td>Podman</td><td>Any isolate option (<code>true</code> or <code>strict</code>) with hub INPUT rules; reject only without one. Supersedes the earlier strict-only decision via CR-1</td><td>Measured: <code>isolate=true</code> already blocks member-to-member; strict only adds bystander isolation, which gateway INPUT and hub INPUT rules cover. Reviewer had asked for strict; maintainer accepted the evidence.</td></tr>
 <tr><td>Lifecycle ownership</td><td>Host CLI under a group lock; teardown disconnects the hub; reconcile on every lifecycle command and on demand</td><td>Existing teardown treats extra endpoints as foreign.</td></tr>
 <tr><td>Cleanup inventory</td><td>Host-written before admission, retained until deletion succeeds, scoped by member and group generation</td><td>Deletion must not depend on a live hub or worker and must not hit reused stores.</td></tr>
 <tr><td>Retention</td><td>TTL is expiration, not erasure; three state kinds; active and queued contexts never expire; restrictions never expire; bounded tombstones</td><td>Mappings, transcripts and shared stores have different owners.</td></tr>

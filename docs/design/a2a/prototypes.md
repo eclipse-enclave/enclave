@@ -47,6 +47,6 @@ podman run -d --name a2a-bystander --network a2a-n3 docker.io/library/alpine:3.2
 # then: podman exec <src> ping -c1 -W1 <dst ip> for each row of the table
 ```
 
-Change request against proposal draft 6 (pending Astra): replace "strict
+Change request CR-1 against proposal draft 6, accepted by the maintainer on 2026-11-05: replace "strict
 isolation only" with "isolate option present (`true` or `strict`)", and add
 hub INPUT rules restricted to member gateway addresses per interface.

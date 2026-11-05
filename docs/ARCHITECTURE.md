@@ -197,7 +197,7 @@ extensions, hence the `//go:build !windows` on
 |------|---------|
 | [`Dockerfile`](../Dockerfile) | Runtime image: `tool-base` -> `feature-base` -> `standard` plus per-tool stages; contexts and hashes scoped to the selected tools and features |
 | [`Dockerfile.gateway`](../Dockerfile.gateway) | Gateway image (DNS, transparent proxy, MITM proxy) |
-| [`gateway-entrypoint.sh`](../gateway-entrypoint.sh) | Supervisor: validates bundles, runs dnsmasq and proxy, reloads on SIGHUP, fails closed; for an unrestricted bundle, only the 80/443 redirect and proxy, no reloads, fail open when the proxy dies |
+| [`gateway-entrypoint.sh`](../gateway-entrypoint.sh) | Supervisor: validates bundles, runs dnsmasq and proxy, reloads on SIGHUP, fails closed; when the container's `ENCLAVE_GATEWAY_NETWORK_MODE` is `unrestricted`, only the 80/443 redirect and proxy, no reloads, fail open when the proxy dies |
 | [`entrypoint.sh`](../entrypoint.sh) | Auth symlinks, settings seeding, telemetry defaults, direnv, gitconfig |
 | [`runtime-assets/gateway-allowlists/`](../runtime-assets/gateway-allowlists/) | Base DNS allowlists and fragments |
 | [`runtime-assets/build-scripts/`](../runtime-assets/build-scripts/) | Build composition: features, templates, agent tool helpers |
@@ -353,9 +353,10 @@ real secret.
 The tool container is ephemeral (`--rm`); in restricted mode the gateway
 enforces Host/SNI ([Network isolation](#network-isolation)). Mount modes are in
 [mounts.md](mounts.md). Host policy resolution writes
-`projects/<hash>/<tool>/gateway-config/` for the gateway; unrestricted
-gateways use the sibling `gateway-config-unrestricted/`, which apply never
-writes.
+`projects/<hash>/<tool>/gateway-config/` for restricted gateways only. The
+host sets a gateway's mode in its container environment
+(`ENCLAVE_GATEWAY_NETWORK_MODE`), never in a file; unrestricted gateways get no
+bundle.
 
 Git config protection runs after mount composition: read-only file overlays on
 existing repository config and includes at their exposed paths, writable parent

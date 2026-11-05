@@ -105,15 +105,12 @@ func ConfigBundleHash(cfg BundleWriteConfig) (string, error) {
 
 func renderConfigBundle(policy network.EffectivePolicy, tool string) (renderedBundle, error) {
 	var empty renderedBundle
-	if policy.Mode == model.NetworkModeUnrestricted {
-		return renderUnrestrictedBundle(tool)
-	}
 	files, err := renderBundleFiles(policy, tool)
 	if err != nil {
 		return empty, err
 	}
 
-	meta, err := renderBundleMeta(model.NetworkModeRestricted, strings.TrimSpace(tool), files.resolver, files.domainCount, time.Now().UTC())
+	meta, err := renderBundleMeta(strings.TrimSpace(tool), files.resolver, files.domainCount, time.Now().UTC())
 	if err != nil {
 		return empty, err
 	}
@@ -124,17 +121,6 @@ func renderConfigBundle(policy network.EffectivePolicy, tool string) (renderedBu
 		denied:  files.denied,
 		meta:    meta,
 	}, nil
-}
-
-// renderUnrestrictedBundle renders the bundle of a gateway that only observes:
-// it enforces no policy, so the policy files are empty and meta.json carries
-// the mode the gateway branches on.
-func renderUnrestrictedBundle(tool string) (renderedBundle, error) {
-	meta, err := renderBundleMeta(model.NetworkModeUnrestricted, strings.TrimSpace(tool), "", 0, time.Now().UTC())
-	if err != nil {
-		return renderedBundle{}, err
-	}
-	return renderedBundle{dnsmasq: []byte{}, domains: []byte{}, denied: []byte{}, meta: meta}, nil
 }
 
 func renderBundleFiles(policy network.EffectivePolicy, tool string) (renderedBundleFiles, error) {
@@ -165,11 +151,11 @@ func renderBundleFiles(policy network.EffectivePolicy, tool string) (renderedBun
 	return files, nil
 }
 
-func renderBundleMeta(mode string, tool string, resolver string, domainCount int, generatedAt time.Time) ([]byte, error) {
+func renderBundleMeta(tool string, resolver string, domainCount int, generatedAt time.Time) ([]byte, error) {
 	metaValue := bundleMeta{
 		GeneratedAt: generatedAt.Format(time.RFC3339),
 		Generation:  generatedAt.Format(time.RFC3339Nano),
-		Mode:        mode,
+		Mode:        model.NetworkModeRestricted,
 		Tool:        tool,
 		Resolver:    resolver,
 		DomainCount: domainCount,

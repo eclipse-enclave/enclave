@@ -17,37 +17,20 @@ import (
 	"enclave/internal/network"
 )
 
-// An unrestricted bundle carries no policy: the gateway only observes, so it
-// has nothing to enforce, and meta.json records the mode it branches on.
-func TestWriteConfigBundleUnrestricted(t *testing.T) {
+// An unrestricted gateway enforces nothing and takes its mode from its
+// container, so a bundle on disk never carries the unrestricted mode.
+func TestWriteConfigBundleRejectsUnrestricted(t *testing.T) {
 	dir := t.TempDir()
 	err := WriteConfigBundle(BundleWriteConfig{
 		Dir:    dir,
-		Policy: network.EffectivePolicy{Mode: "unrestricted", Domains: []string{"example.com"}, Resolvers: []string{"9.9.9.9"}},
+		Policy: network.EffectivePolicy{Mode: "unrestricted"},
 		Tool:   "codex",
 	})
-	if err != nil {
-		t.Fatalf("write bundle: %v", err)
+	if err == nil {
+		t.Fatal("WriteConfigBundle() wrote an unrestricted bundle")
 	}
-	for _, name := range []string{"dnsmasq.conf", "domains.txt", "denied.txt"} {
-		data, err := os.ReadFile(filepath.Join(dir, name))
-		if err != nil {
-			t.Fatalf("read %s: %v", name, err)
-		}
-		if len(data) != 0 {
-			t.Fatalf("%s = %q, want empty", name, data)
-		}
-	}
-	data, err := os.ReadFile(filepath.Join(dir, "meta.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var meta bundleMeta
-	if err := json.Unmarshal(data, &meta); err != nil {
-		t.Fatal(err)
-	}
-	if meta.Mode != "unrestricted" || meta.Tool != "codex" || meta.Generation == "" || meta.DomainCount != 0 || meta.Resolver != "" {
-		t.Fatalf("meta = %+v, want unrestricted codex bundle with a generation", meta)
+	if entries, _ := os.ReadDir(dir); len(entries) != 0 {
+		t.Fatalf("WriteConfigBundle() left files after refusing: %v", entries)
 	}
 }
 

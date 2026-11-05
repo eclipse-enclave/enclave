@@ -39,6 +39,8 @@ enclave-claude-abc123abc123-main-gateway
 --user
 0:0
 --env
+ENCLAVE_GATEWAY_NETWORK_MODE=restricted
+--env
 ENCLAVE_NETWORK_LOG_FILE=/var/log/enclave/network.log
 --env
 ENCLAVE_NETWORK_LOG_MODE=coarse

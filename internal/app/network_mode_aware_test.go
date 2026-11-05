@@ -20,7 +20,6 @@ import (
 	"enclave/internal/model"
 	"enclave/internal/network"
 	"enclave/internal/policy"
-	"enclave/internal/util"
 )
 
 type fakeGatewayManager struct {
@@ -136,10 +135,6 @@ func TestNetworkApplySkipsUnrestrictedGateways(t *testing.T) {
 		}
 		if !strings.Contains(out.String(), "Apply summary: 1 applied, 0 failed, 1 skipped") {
 			t.Fatalf("scope %d: summary missing the skip:\n%s", scope, out.String())
-		}
-		unrestrictedDir := config.HostProjectUnrestrictedGatewayConfigDir(f.resolverCtx.Home, f.unrestricted.ProjectHash, f.unrestricted.Tool)
-		if util.PathExists(unrestrictedDir) {
-			t.Fatalf("scope %d: apply wrote the unrestricted bundle directory %s", scope, unrestrictedDir)
 		}
 	}
 }

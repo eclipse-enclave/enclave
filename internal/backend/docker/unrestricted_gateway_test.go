@@ -56,8 +56,8 @@ func runInvocation(t *testing.T, calls []string, name string) string {
 
 // TestUnrestrictedSessionStartsObservingGateway pins an unrestricted session
 // with a gateway: the gateway carries the mode label, the session's hostname,
-// ports and bridges, and mounts its own config directory; the session joins
-// its namespace without the DNS-gateway signal.
+// ports and bridges, and gets no config bundle; the session joins its
+// namespace without the DNS-gateway signal.
 func TestUnrestrictedSessionStartsObservingGateway(t *testing.T) {
 	for _, engine := range []string{backend.NameDocker, backend.NamePodman} {
 		t.Run(engine, func(t *testing.T) {
@@ -73,15 +73,13 @@ func TestUnrestrictedSessionStartsObservingGateway(t *testing.T) {
 			gatewayName := req.Session.Name + model.GatewayContainerSuffix
 			gw := runInvocation(t, calls, gatewayName)
 			session := runInvocation(t, calls, req.Session.Name)
-			unrestrictedDir := config.HostProjectUnrestrictedGatewayConfigDir(home, req.Session.ProjectHash, req.Session.Tool)
-			restrictedDir := config.HostProjectGatewayConfigDir(home, req.Session.ProjectHash, req.Session.Tool)
+			toolDir := config.HostProjectToolDir(home, req.Session.ProjectHash, req.Session.Tool)
 			for _, want := range []string{
 				"--label " + model.GatewayLabelMode + "=" + model.NetworkModeUnrestricted,
 				"--hostname " + req.Hostname,
 				"--publish 127.0.0.1:13000:3000/tcp",
 				"--env ENCLAVE_LOOPBACK_PORTS=1455",
 				"--env ENCLAVE_IDE_BRIDGE_PORTS=9800",
-				"target=" + model.GatewayConfigDir + ",readonly",
 				"target=/tls/ca.crt",
 			} {
 				if !strings.Contains(gw, want) {
@@ -90,6 +88,9 @@ func TestUnrestrictedSessionStartsObservingGateway(t *testing.T) {
 			}
 			if strings.Contains(gw, "secret-releases.json") {
 				t.Errorf("unrestricted gateway received secret releases:\n%s", gw)
+			}
+			if strings.Contains(gw, model.GatewayConfigDir) {
+				t.Errorf("unrestricted gateway received a config bundle:\n%s", gw)
 			}
 			for _, want := range []string{"--network container:" + gatewayName} {
 				if !strings.Contains(session, want) {
@@ -101,11 +102,35 @@ func TestUnrestrictedSessionStartsObservingGateway(t *testing.T) {
 					t.Errorf("session invocation carries %q:\n%s", unwanted, session)
 				}
 			}
-			if util.PathExists(restrictedDir) {
-				t.Errorf("unrestricted session wrote the restricted gateway config dir %s", restrictedDir)
+			for _, dir := range []string{"gateway-config", "gateway-config-unrestricted"} {
+				if path := filepath.Join(toolDir, dir); util.PathExists(path) {
+					t.Errorf("unrestricted session wrote a gateway config bundle to %s", path)
+				}
 			}
-			assertLockinGolden(t, "unrestricted-gateway-session-start-"+engine,
-				lockinCalls(t, logPath, home)+"\n=== gateway config bundle ===\n"+lockinDir(t, unrestrictedDir))
+			assertLockinGolden(t, "unrestricted-gateway-session-start-"+engine, lockinCalls(t, logPath, home))
+		})
+	}
+}
+
+// The gateway takes its network mode from its container environment, which
+// cannot change after the container is created, not from a file on the host.
+func TestGatewayEnvironmentCarriesNetworkMode(t *testing.T) {
+	for _, mode := range []backend.NetworkMode{backend.NetworkModeRestricted, backend.NetworkModeUnrestricted} {
+		t.Run(string(mode), func(t *testing.T) {
+			b, home := lockinBackend(t)
+			logPath := lockinEngine(t, backend.NameDocker)
+			req := lockinRequest(prepareRunSession(t))
+			req.Network.Mode = mode
+			req.Network.Gateway = true
+
+			if _, err := b.Start(context.Background(), req); err != nil {
+				t.Fatalf("Start() error = %v", err)
+			}
+
+			gw := runInvocation(t, engineInvocations(t, logPath, home), req.Session.Name+model.GatewayContainerSuffix)
+			if want := "--env " + model.EnvGatewayNetworkMode + "=" + string(mode) + " "; !strings.Contains(gw, want) {
+				t.Errorf("gateway invocation lacks %q:\n%s", want, gw)
+			}
 		})
 	}
 }

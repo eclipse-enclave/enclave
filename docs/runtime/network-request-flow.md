@@ -27,7 +27,7 @@ sequenceDiagram
     end
 
     Note over Host,API: Session startup
-    Host->>Entry: Start gateway with config bundle<br/>(dnsmasq.conf, domains.txt, meta.json)
+    Host->>Entry: Start gateway with ENCLAVE_GATEWAY_NETWORK_MODE=restricted<br/>and config bundle (dnsmasq.conf, domains.txt, meta.json)
     Host->>Entry: Mount optional secret mapping JSON<br/>and TLS root (ca.crt/ca.key)
     Entry->>DNS: Start with rendered allowlist config
     Entry->>FW: INPUT DROP + loopback, reply and published-port exceptions<br/>OUTPUT DROP + local DNS allow<br/>NAT redirect 80/443 to the proxy on 127.0.0.1:15080/15443
@@ -119,10 +119,12 @@ sequenceDiagram
 
 ## Unrestricted mode
 
-An unrestricted session starts the same gateway image with an unrestricted
-bundle: `meta.json` records the mode, the container carries the
-`enclave.gateway.mode=unrestricted` label, and the bundle lives in
-`gateway-config-unrestricted/`. The gateway observes but never enforces.
+An unrestricted session starts the same gateway image with
+`ENCLAVE_GATEWAY_NETWORK_MODE=unrestricted` in its container environment and
+the `enclave.gateway.mode=unrestricted` label, and without a config bundle.
+The gateway takes its mode only from that environment, so no file on the host
+can change it. It observes but never enforces. Sessions started with
+`--disable-gateway` have no gateway and no network log.
 
 ```mermaid
 sequenceDiagram
@@ -144,7 +146,7 @@ sequenceDiagram
     end
 
     Note over Host,Dst: Session startup
-    Host->>Entry: Start gateway with unrestricted bundle<br/>and TLS root (no secret mapping)
+    Host->>Entry: Start gateway with ENCLAVE_GATEWAY_NETWORK_MODE=unrestricted<br/>and TLS root (no bundle, no secret mapping)
     Entry->>NAT: Redirect tcp/80 and tcp/443 to loopback 15080/15443 (IPv4 and IPv6)<br/>no INPUT/OUTPUT filters, no dnsmasq
     Entry->>Proxy: Start transparent proxy (all hosts allowed)
     Host->>Log: Rotate above the size cap<br/>and append session start marker

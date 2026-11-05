@@ -49,10 +49,21 @@ const (
 	A2ASessionIDPlaceholder = "{sessionId}"
 	// A2AEventFormatClaudeStreamJSON is Claude Code's "-p --output-format stream-json".
 	A2AEventFormatClaudeStreamJSON = "claude-stream-json"
+	// A2AEventFormatCodexExecJSON is Codex's "exec --json".
+	A2AEventFormatCodexExecJSON = "codex-exec-json"
+	// A2AEventFormatPiJSON is Pi's "-p --mode json".
+	A2AEventFormatPiJSON = "pi-json"
+	// A2AEventFormatCopilotJSON is Copilot's "--output-format json".
+	A2AEventFormatCopilotJSON = "copilot-json"
 )
 
 // A2AEventFormats lists the event formats a driver exists for.
-var A2AEventFormats = []string{A2AEventFormatClaudeStreamJSON}
+var A2AEventFormats = []string{
+	A2AEventFormatClaudeStreamJSON,
+	A2AEventFormatCodexExecJSON,
+	A2AEventFormatPiJSON,
+	A2AEventFormatCopilotJSON,
+}
 
 // ValidateA2ASpec checks an a2a block; errors name the field as "a2a.<field>".
 func ValidateA2ASpec(spec *A2ASpec) error {

@@ -1,0 +1,4 @@
+{"type":"session","id":"11111111-2222-4333-8444-555555555555","cwd":"/workspace/project","timestamp":"2026-11-05T00:00:00.000Z"}
+{"type":"agent_start"}
+{"type":"agent_end","messages":[{"role":"assistant","content":[{"type":"text","text":""}],"stopReason":"error"}],"willRetry":false}
+{"type":"agent_settled","aborted":false}

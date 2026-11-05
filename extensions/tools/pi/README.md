@@ -62,6 +62,24 @@ are trusted inside the sandbox without showing Pi's project trust prompt. This
 runtime override does not modify persisted Pi settings; use `--no-yolo` to omit
 it.
 
+## A2A peer groups (experimental)
+
+Pi 1.3.x supports workers and orchestrators. Workers use `-p --mode json`,
+receive prompts on stdin, and resume an exact session ID. Each context has
+its own directory under `agent/a2a-sessions/` in the config store so cleanup
+does not affect other contexts. `--approve` trusts project resources; Pi's
+built-in tools do not otherwise require approval prompts.
+
+Orchestrators load an explicit extension that registers the `enclave-a2a`
+stdio MCP server without modifying Pi settings. The built-in MCP extension
+is explicitly enabled, including when discovery is disabled. The server uses
+direct tool exposure and a 120-second request timeout, above A2A's default
+90-second wait. User configuration must not replace or disable that server.
+
+The `a2a-provenance` skill is composed only into peer group sessions.
+The adapter checks the tested Pi version range at startup; the ordinary
+Pi installer remains unpinned.
+
 ## Files
 
 | File | Purpose |

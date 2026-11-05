@@ -85,6 +85,27 @@ project-specific setting. It does not make the stored memories project-scoped.
 The extension's `enclave-help` skill is installed alongside managed skills in
 `~/.copilot/skills`.
 
+## A2A peer groups (experimental)
+
+Copilot CLI 1.0.105 through the 1.0 series supports worker and orchestrator
+roles. Workers read prompts from stdin and decode JSONL output; the orchestrator
+gets an additive `enclave-a2a` MCP server without changing saved MCP settings.
+The `a2a-provenance` skill is composed only for peer-group sessions.
+
+Each worker context uses its own `COPILOT_HOME` under
+`~/.copilot/a2a-harness/copilot/<session-id>/`. This keeps both the native
+transcript and Copilot's SQLite prompt/answer index inside the context's
+retention unit. Configuration, credentials, MCP definitions, instructions and
+skills are linked from the normal config store. Installed plugins and their
+runtime data are not inherited. Worker auto-updates, session cloud sync and
+CLI file logging are disabled; the image's installed CLI version is checked
+before serving tasks. Ordinary and orchestrator sessions retain their normal
+config layout.
+
+The driver has real-CLI offline-provider coverage for new sessions, resume and
+retention. Live GitHub authentication and mixed-engine Copilot sessions remain
+unverified; see [the prototype report](../../../docs/design/a2a/reports/P2-copilot.md).
+
 ## Network Access
 
 The Copilot service domains are `api.github.com` and `*.githubcopilot.com`.
@@ -107,6 +128,8 @@ before enabling memory.
 | `check-update.sh` | Returns the latest npm package version for update probes |
 | `gateway-allowlist.conf` | DNS allowlist for network isolation |
 | `templates/settings.json` | Default Copilot settings template |
+| `templates/a2a-mcp.json` | Additive MCP definition for A2A orchestrators |
 | `entrypoint.d/setup.sh` | Creates `~/.copilot` and sets `COPILOT_HOME` |
 | `skills/enclave-help/SKILL.md` | Bundled skill for answering questions from Enclave's documentation |
+| `skills/a2a-provenance/SKILL.md` | Peer-group provenance and task recovery guidance |
 | `go/handler.go` | Registers the Copilot tool handler |

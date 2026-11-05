@@ -281,7 +281,7 @@ A session joins with `--peer-group <name> --name <member>` (see
 [A2A flags](#a2a-experimental)). The session name is the member name.
 
 - **Orchestrator** (`--role orchestrator`): the interactive agent as usual,
-  with the tool's A2A client added (for Claude Code an MCP server with
+  with the tool's A2A client added (an MCP server with
   `list_peers`, `send_task`, `get_task` and `cancel_task`).
 - **Worker** (default role): runs the A2A adapter as its main process and
   serves tasks with the tool in non-interactive mode. A worker starts in the
@@ -290,6 +290,15 @@ A session joins with `--peer-group <name> --name <member>` (see
   terminal pane. Ctrl-C ends the worker, which leaves the group. With
   `--background` the worker detaches like any other session and
   `enclave attach` shows its log.
+
+Claude Code, Codex, Copilot and Pi can be workers or integrated MCP
+orchestrators, including in the same group. OpenCode and Theia do not have
+built-in A2A support. Workers refuse unsupported CLI versions; see the
+[support table](extensions/README.md#a2a-peer-groups-sandboxa2a-experimental).
+For example, start read-only Claude and Codex reviewers with `--tool claude`
+and `--tool codex`, then start either tool with `--role orchestrator` to
+coordinate them. Keep the same `--peer-group` and give every session a
+distinct `--name`.
 
 Rejected at start, before anything is created:
 

@@ -30,6 +30,13 @@
 set -u
 
 REPO_ROOT=$(cd "$(dirname "$0")/.." && pwd)
+# The mixed review owns its isolated roots and lifecycle; keep the original
+# Claude-only lifecycle smoke unchanged.
+if [ "${1:-}" = mixed_review ]; then
+  shift
+  [ "$#" = 0 ] || { echo 'mixed_review must be run on its own' >&2; exit 2; }
+  exec "$REPO_ROOT/scripts/a2a-mixed-smoke.sh"
+fi
 CLI_BIN=${CLI_BIN:-$REPO_ROOT/bin/enclave}
 ENGINE=${ENGINE:-docker}
 PREFIX=${A2A_SMOKE_PREFIX:-a2a-smoke}

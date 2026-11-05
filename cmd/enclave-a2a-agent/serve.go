@@ -24,6 +24,9 @@ import (
 	"enclave/internal/a2aagent"
 	"enclave/internal/a2aagent/contexttable"
 	"enclave/internal/a2aagent/driver/claude"
+	"enclave/internal/a2aagent/driver/codex"
+	"enclave/internal/a2aagent/driver/copilot"
+	"enclave/internal/a2aagent/driver/pi"
 	"enclave/internal/a2aagent/executor"
 	"enclave/internal/a2aagent/server"
 	"enclave/internal/buildinfo"
@@ -68,6 +71,24 @@ func newDriver(environ []string, log io.Writer) (a2aagent.Driver, []a2a.AgentSki
 	switch spec.EventFormat {
 	case tools.EventFormatClaudeStreamJSON:
 		d, err := claude.New(spec, claude.Options{ExtraArgs: extra, Log: log})
+		if err != nil {
+			return nil, nil, err
+		}
+		driver = d
+	case tools.EventFormatCodexExecJSON:
+		d, err := codex.New(spec, codex.Options{ExtraArgs: extra, Log: log})
+		if err != nil {
+			return nil, nil, err
+		}
+		driver = d
+	case tools.EventFormatCopilotJSON:
+		d, err := copilot.New(spec, copilot.Options{ExtraArgs: extra, Log: log})
+		if err != nil {
+			return nil, nil, err
+		}
+		driver = d
+	case tools.EventFormatPiJSON:
+		d, err := pi.New(spec, pi.Options{ExtraArgs: extra, Log: log})
 		if err != nil {
 			return nil, nil, err
 		}

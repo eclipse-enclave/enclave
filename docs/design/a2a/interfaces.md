@@ -1279,3 +1279,37 @@ proposed change, reason, decision.
   timeout (docs and smoke cleanup package); CR-F5a-3 accepted, duration
   minimums go to `docs/configuration.md` (D4/configuration docs); CR-F5a-4
   sent to F5b (`stop --peer-group` exit rule).
+- **CR-MH-1** (2026-11-05, multi-harness handoff): accepted by the
+  maintainer's implementation request. Extends the original Claude-only
+  serve-mode scope: `codex-exec-json`, `copilot-json` and `pi-json` join
+  `claude-stream-json` in `model.A2AEventFormats` and `newDriver` selects
+  the corresponding compiled-in driver. No hub, wire, task-handle or CLI
+  schema changes. All four tools declare worker commands, compatible CLI
+  version gates and session-local MCP orchestrator arguments. Codex's MCP
+  environment allowlist explicitly passes the client configuration; it
+  must not depend on the harness inheriting arbitrary variables.
+- **CR-MH-2** (2026-11-05, retention probes): accepted implementation
+  constraint. A native shared database containing prompt/reply data cannot
+  be inventoried as a per-context file. Copilot and Pi use private native
+  storage per pre-bound session; deletion must not remove another context.
+  OpenCode's shared transcript database blocks worker support until it has
+  a safe isolation or per-session deletion strategy. Theia's IDE entrypoint
+  has no headless worker protocol. Neither tool ships integrated A2A
+  support in this change. CR-A11-2 remains available for manual non-MCP
+  orchestrators; this change does not silently wire `client hold` into IDEs.
+- **CR-MH-3** (2026-11-05, validation): the mixed review smoke is
+  `ENGINE=docker|podman scripts/a2a-smoke.sh mixed_review`, with
+  `A2A_SMOKE_ORCHESTRATOR_TOOL=claude|codex`. It exercises both reviewers,
+  rebuttals in their original contexts, synthesis, and group teardown.
+  Harness prototype evidence and container-engine acceptance are separate
+  gates; reports must say which were actually run.
+- **CR-MH-4** (2026-11-05, pre-spawn retention): accepted as a focused
+  follow-up to CR-A9-2. Optional `a2aagent.InvocationInventory` exposes
+  `InvocationTranscripts(Invocation) []string`, called after `Command` and
+  persisted before `Start`; a persistence failure prevents the spawn.
+  Claude, Copilot and Pi inventory pre-bound session paths this way. Codex
+  redirects its SQLite databases into a private per-turn directory and
+  inventories that directory before spawn, resuming from the retained
+  rollouts with a fresh database. `Outcome.Transcripts` still adds paths
+  discovered dynamically. The remaining CR-A9-2 gap for dynamically learned
+  paths is not represented as solved by this optional interface.

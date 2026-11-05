@@ -604,12 +604,28 @@ turn with the argv this block describes. `--peer-group` sessions use an image
 variant (`enclave-<tool>:a2a-<tag>`) that adds the adapter; the tool's
 `install.sh` needs no changes.
 
+Built-in support (the version gate applies to workers):
+
+| Tool | Worker | Integrated MCP orchestrator | Worker version gate |
+| --- | --- | --- | --- |
+| Claude Code | yes | yes | `>=2.1.306 <3.0.0` |
+| Codex | yes | yes | `>=0.166.0 <0.167.0` |
+| Copilot | yes | yes | `>=1.0.105 <1.1.0` |
+| Pi | yes | yes | `>=1.3.0 <1.4.0` |
+| OpenCode | no | no built-in wiring | Shared transcript database prevents context-scoped cleanup |
+| Theia | no | no built-in wiring | IDE entrypoint, not a headless harness |
+
+Mix supported tools freely within a group; the hub and context handles are
+independent of the harness. Version ranges reflect the probed CLI protocol,
+not a promise of compatibility with later releases. See the
+[`P2-*` reports](../design/a2a/reports/) for evidence and limitations.
+
 | Field | Required | Meaning |
 | --- | --- | --- |
 | `command` | yes | Headless argv. The task prompt goes to stdin, never into argv |
 | `resumeArgs` | yes | Appended to continue an existing context; contains `{sessionId}` |
 | `newSessionArgs` | no | Appended for a new context; contains `{sessionId}` |
-| `eventFormat` | yes | Decoder for the tool's stdout; v1 supports only `claude-stream-json` |
+| `eventFormat` | yes | Decoder for the tool's stdout; see [Event format](#event-format) |
 | `versionCommand`, `versions` | both or neither | Harness version pin |
 | `skills[]` | no | Agent card skills: `id` (unique), `name`, `description`, optional `tags` |
 | `orchestratorArgs` | no | Appended to the interactive command of orchestrator sessions |
@@ -633,10 +649,11 @@ orchestrator role does not need the block.
 
 #### Worker turns
 
-For each turn the adapter builds the argv as `command`, then
-`sandbox.yoloFlag`, then `resumeArgs` for a context that already has a
+For each turn the driver builds the argv from `command`,
+`sandbox.yoloFlag`, and `resumeArgs` for a context that already has a
 harness session or `newSessionArgs` for a new one, with `{sessionId}`
-replaced by a UUID. The prompt, prefixed with a one-line provenance header,
+replaced by the session ID. Drivers handle harness-specific stdin markers
+and session-storage arguments. The prompt, prefixed with a one-line provenance header,
 goes to stdin, and stdout is decoded per `eventFormat`. `ENCLAVE_A2A_*`
 variables are removed from the tool's environment.
 
@@ -668,7 +685,19 @@ stream.
 
 #### Event format
 
-`eventFormat` selects a Go driver compiled into `enclave-a2a-agent`.
+`eventFormat` selects a Go driver compiled into `enclave-a2a-agent`:
+
+| Format | Session event | Successful outcome |
+| --- | --- | --- |
+| `claude-stream-json` | `system/init` | Last successful `result` |
+| `codex-exec-json` | `thread.started` | `turn.completed` and its final `agent_message` |
+| `copilot-json` | Session ID in the event envelope | Successful `result` and the final assistant message |
+| `pi-json` | `session` | Successful `agent_end`, followed by `agent_settled` |
+
+All drivers log and skip unknown event kinds and reject EOF without an
+outcome. Tool calls and reasoning are not final messages. A nonzero harness
+exit still fails the turn, even if stdout appeared successful.
+
 `claude-stream-json` decodes Claude Code's `-p --output-format stream-json
 --verbose` output: `system/init` reports the session ID, main-thread
 `assistant` text becomes task progress, and the last `result` before EOF is
@@ -676,6 +705,20 @@ the final message (an error `result` fails the task). Unknown events are
 logged and skipped, so new event types in a minor release do not break turns.
 The driver also sets `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1` so one process
 yields one result.
+
+Codex chooses its own session ID; its driver adds the stdin marker `-`,
+discovers only that thread's files, and redirects SQLite data to a private
+directory per turn for the retention inventory. Copilot and
+Pi choose the session ID before starting and isolate each context's native
+session storage, so cleanup cannot remove another context's database or
+transcripts. See the tool READMEs for storage details.
+
+Drivers implementing `InvocationInventory` also list deterministic paths
+immediately after building the command. The executor persists them before
+starting the process and refuses to start if that write fails, so a crash
+before the first harness event cannot orphan the private data directories.
+Paths only discoverable after a harness-chosen session ID still arrive in
+`Outcome.Transcripts`.
 
 A tool whose output no existing driver decodes needs a new driver in core: an
 implementation of `a2aagent.Driver` under `internal/a2aagent/driver/<name>/`,
@@ -694,7 +737,12 @@ after the user's arguments and before a `--` terminator: Claude's
 followed it, and after `--` the arguments would themselves become
 positional. Without `orchestratorArgs` the session starts with a warning, and
 the agent can reach its peers only through the `enclave-a2a-agent client`
-CLI.
+CLI; a manual integration must also keep `client hold` running for liveness.
+Codex uses additive `-c mcp_servers.enclave-a2a.*` overrides, including an
+explicit environment allowlist for the A2A client. Copilot loads an additive
+MCP JSON template; Pi loads an explicit extension registering a native MCP
+server. None of these integrations edits the user's normal MCP settings or
+adds the server to sessions without `--peer-group`.
 
 #### Agent card skills and `a2a-*` skills
 

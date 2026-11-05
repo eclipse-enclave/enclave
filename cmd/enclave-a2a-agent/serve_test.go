@@ -9,6 +9,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"path/filepath"
@@ -17,6 +18,8 @@ import (
 
 	"enclave/internal/a2a"
 	"enclave/internal/a2aagent"
+	"enclave/internal/config"
+	"enclave/internal/model"
 )
 
 func serveEnv(role string) []string {
@@ -32,6 +35,52 @@ func serveEnv(role string) []string {
 		a2a.EnvOutboundToken + "=out",
 		a2a.EnvAdapterPort + "=41821",
 		a2a.EnvTableDir + "=/tmp/a2a/0000000000000abc",
+	}
+}
+
+// Exercise the shipped specs through the same JSON envelope as runtime, so a
+// spec accepted by the loader cannot silently lack its compiled-in driver.
+func TestBuiltInHarnessDriverSelection(t *testing.T) {
+	paths := model.Paths{ToolsDir: filepath.Join("..", "..", "extensions", "tools")}
+	for _, tool := range []string{"claude", "codex", "copilot", "pi"} {
+		t.Run(tool, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("HOME", home)
+			t.Setenv("CODEX_HOME", filepath.Join(home, ".codex"))
+			t.Setenv("COPILOT_HOME", filepath.Join(home, ".copilot"))
+			t.Setenv("PI_CODING_AGENT_DIR", filepath.Join(home, ".pi", "agent"))
+			profile, err := config.LoadProfile(paths, tool)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if profile.A2A == nil {
+				t.Fatal("missing A2A spec")
+			}
+			block, err := json.Marshal(harnessEnv{A2ASpec: *profile.A2A, YoloFlag: profile.YoloFlag})
+			if err != nil {
+				t.Fatal(err)
+			}
+			driver, skills, err := newDriver([]string{a2a.EnvHarness + "=" + string(block), a2a.EnvYolo + "=1"}, io.Discard)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if driver.Name() != profile.A2A.EventFormat || len(skills) == 0 {
+				t.Fatalf("driver %q, skills %v", driver.Name(), skills)
+			}
+			id, err := driver.NewSessionID()
+			if err != nil {
+				t.Fatal(err)
+			}
+			cmd, err := driver.Command(context.Background(), a2aagent.Invocation{
+				NewHarnessSessionID: id, WorkDir: t.TempDir(), Env: []string{"HOME=" + home},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(strings.Join(cmd.Args, " "), profile.YoloFlag) {
+				t.Fatalf("worker lacks bypass flag: %q", cmd.Args)
+			}
+		})
 	}
 }
 

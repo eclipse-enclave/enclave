@@ -444,6 +444,50 @@ func TestNewSessionIsBoundBeforeStart(t *testing.T) {
 	}
 }
 
+type inventoryDriver struct {
+	a2aagent.Driver
+	paths []string
+}
+
+func (d inventoryDriver) InvocationTranscripts(a2aagent.Invocation) []string { return d.paths }
+
+type inventoryFailTable struct{ *contexttable.Table }
+
+func (t inventoryFailTable) BindHarnessSession(contextID, sessionID string, paths []string) error {
+	if len(paths) > 0 {
+		return errors.New("inventory write failed")
+	}
+	return t.Table.BindHarnessSession(contextID, sessionID, paths)
+}
+
+func TestInvocationInventorySurvivesCrashBeforeAnyEvent(t *testing.T) {
+	for _, preBound := range []string{"", "pre-bound-session"} {
+		t.Run("session="+preBound, func(t *testing.T) {
+			h := newHarness(t, setup{mode: fakedriver.ModeCrash, tweak: func(opts *Options) {
+				opts.Driver = inventoryDriver{Driver: opts.Driver, paths: []string{"private/turn-1"}}
+			}})
+			h.drv.NewSession = preBound
+			rec := h.waitEnded(h.send(orch, "", "x").TaskID)
+			wantEnding(t, rec, ending{a2a.TaskStateFailed, "", a2a.TerminationConfirmed})
+			ctxRec, err := h.tbl.Context(orch, rec.ContextID)
+			if err != nil || len(ctxRec.Transcripts) != 1 || ctxRec.Transcripts[0] != "private/turn-1" {
+				t.Fatalf("inventory lost before first harness event: %+v %v", ctxRec, err)
+			}
+		})
+	}
+}
+
+func TestInventoryPersistenceFailurePreventsHarnessStart(t *testing.T) {
+	h := newHarness(t, setup{mode: fakedriver.ModeComplete, tweak: func(opts *Options) {
+		opts.Table = inventoryFailTable{opts.Table.(*contexttable.Table)}
+		opts.Driver = inventoryDriver{Driver: opts.Driver, paths: []string{"private/turn-1"}}
+	}})
+	rec := h.waitEnded(h.send(orch, "", "x").TaskID)
+	if rec.State != a2a.TaskStateFailed || rec.PGID != 0 || !strings.Contains(h.log.String(), "persist harness inventory") {
+		t.Fatalf("harness started without inventory: %+v; log %s", rec, h.log.String())
+	}
+}
+
 func TestTasksRunSerially(t *testing.T) {
 	h := newHarness(t, setup{mode: fakedriver.ModeSlow})
 	first := h.send(orch, "", "1")

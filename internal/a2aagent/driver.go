@@ -63,3 +63,11 @@ type Driver interface {
 	// Decode reads until EOF; unknown events are logged and skipped, EOF without an outcome event is an error (CR-P2-2).
 	Decode(r io.Reader, emit func(HarnessEvent)) (Outcome, error)
 }
+
+// InvocationInventory is optional for drivers with storage paths known after
+// Command. The executor persists these config-store-relative paths before
+// starting the harness, including when the harness chooses its own session ID.
+// Decode's Outcome can add paths learned from the stream later.
+type InvocationInventory interface {
+	InvocationTranscripts(Invocation) []string
+}

@@ -1,0 +1,6 @@
+{"type":"thread.started","thread_id":"11111111-2222-4333-8444-555555555555"}
+{"type":"turn.started"}
+{"type":"item.started","item":{"id":"item_0","type":"mcp_tool_call","server":"enclave-a2a","tool":"probe","arguments":{},"result":null,"error":null,"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_0","type":"mcp_tool_call","server":"enclave-a2a","tool":"probe","arguments":{},"result":{"content":[{"type":"text","text":"A2A_OK"}],"structured_content":null},"error":null,"status":"completed"}}
+{"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"A2A_OK"}}
+{"type":"turn.completed","usage":{"input_tokens":42762,"cached_input_tokens":38528,"cache_write_input_tokens":0,"output_tokens":107,"reasoning_output_tokens":0}}

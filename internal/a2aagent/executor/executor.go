@@ -421,6 +421,13 @@ func (e *Executor) start(rec *a2aagent.TaskRecord, text string) (*harnessProc, e
 	if err != nil {
 		return nil, err
 	}
+	if inventory, ok := e.opts.Driver.(a2aagent.InvocationInventory); ok {
+		if paths := inventory.InvocationTranscripts(inv); len(paths) > 0 {
+			if err := e.opts.Table.BindHarnessSession(rec.ContextID, "", paths); err != nil {
+				return nil, fmt.Errorf("persist harness inventory: %w", errors.New(describe(err)))
+			}
+		}
+	}
 	if cmd.Env == nil {
 		cmd.Env = inv.Env
 	} else {

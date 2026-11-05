@@ -30,6 +30,9 @@ type (
 const (
 	SessionIDPlaceholder        = model.A2ASessionIDPlaceholder
 	EventFormatClaudeStreamJSON = model.A2AEventFormatClaudeStreamJSON
+	EventFormatCodexExecJSON    = model.A2AEventFormatCodexExecJSON
+	EventFormatPiJSON           = model.A2AEventFormatPiJSON
+	EventFormatCopilotJSON      = model.A2AEventFormatCopilotJSON
 )
 
 // ValidateA2ASpec checks an a2a block; errors name the field as "a2a.<field>".

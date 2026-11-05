@@ -42,6 +42,31 @@ Stored ChatGPT logins are outside this env-only protection. See
 
 - `auth.json`
 
+## A2A peer groups (experimental)
+
+Codex CLI 0.166.x can be a worker or an orchestrator. Workers use
+`codex exec --json`, read task prompts from stdin and resume the exact thread
+ID reported by Codex. A final agent message is successful only when the turn
+also completes; interrupted or failed streams fail the task.
+
+Workers disable the detached daemon and memories. Each turn uses a private
+SQLite directory in the config store: Codex's databases contain conversation
+text, so retention removes that directory along with the thread's rollouts
+and shell snapshots without deleting another context's data. Resumed turns
+rebuild their database from the retained rollout.
+
+Orchestrators add the `enclave-a2a-agent mcp` stdio server using invocation-only
+config overrides. Codex filters the environment of MCP subprocesses, so the
+spec explicitly forwards the required A2A connection and lifetime variables.
+No persistent MCP config is written; ordinary sessions keep their own settings.
+The group-only `a2a-provenance` skill explains authenticated task headers,
+untrusted peer results, task handles, waits and retries.
+The MCP tool timeout is 150 seconds, covering A2A's default 90-second send wait
+and admission grace. Use shorter per-call waits with longer-running tasks;
+the returned handle remains available for subsequent `get_task` calls.
+
+See [A2A peer groups](../../../docs/configuration.md#a2a-peer-groups-experimental).
+
 ## Network Access
 
 Allowlisted domains include OpenAI, GitHub, and common package registries

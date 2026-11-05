@@ -21,7 +21,8 @@
     "mcp-oauth-config/",
     "mcp-secrets/",
     "installed-plugins/",
-    "plugin-data/"
+    "plugin-data/",
+    "a2a-harness/"
   ],
   "settings_file": "copilot-settings.json",
   "settings_target": ".copilot/settings.json",
@@ -84,5 +85,51 @@
   },
   "host_config_dir": "",
   "host_credentials_file": "",
-  "host_oauth_json": ""
+  "host_oauth_json": "",
+  "a2a": {
+    "command": [
+      "copilot",
+      "--output-format",
+      "json",
+      "--disable-builtin-mcps",
+      "--disable-client-telemetry",
+      "--no-auto-update",
+      "--no-ask-user",
+      "--log-level",
+      "none",
+      "--sync-session=off"
+    ],
+    "newSessionArgs": [
+      "--session-id",
+      "{sessionId}"
+    ],
+    "resumeArgs": [
+      "--resume",
+      "{sessionId}"
+    ],
+    "eventFormat": "copilot-json",
+    "versionCommand": [
+      "copilot",
+      "--no-auto-update",
+      "--version"
+    ],
+    "versions": "\u003e=1.0.105 \u003c1.1.0",
+    "skills": [
+      {
+        "id": "coding",
+        "name": "Coding",
+        "description": "Reads, edits and tests code in the worker's project and answers with a summary of what it did.",
+        "tags": [
+          "code",
+          "review",
+          "refactor",
+          "test"
+        ]
+      }
+    ],
+    "orchestratorArgs": [
+      "--additional-mcp-config",
+      "@/usr/local/share/enclave/templates/copilot-a2a-mcp.json"
+    ]
+  }
 }

@@ -178,6 +178,19 @@ func TranscriptPaths(cwd, sessionID string) []string {
 		"tasks/"+sessionID)
 }
 
+// InvocationTranscripts inventories pre-bound sessions even if the process
+// dies before its system/init event (InvocationInventory).
+func (d *Driver) InvocationTranscripts(inv a2aagent.Invocation) []string {
+	id := inv.HarnessSessionID
+	if id == "" {
+		id = inv.NewHarnessSessionID
+	}
+	if !uuidPattern.MatchString(id) {
+		return nil
+	}
+	return TranscriptPaths(inv.WorkDir, id)
+}
+
 // maxProjectDirName is where Claude starts shortening project directory names
 // with a hash this driver does not reproduce.
 const maxProjectDirName = 200

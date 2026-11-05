@@ -1,0 +1,5 @@
+{"type":"user.message","data":{"content":"Reply with exactly OK.\n","transformedContent":"<current_datetime>2026-11-05T18:02:15.700+01:00</current_datetime>\n\nReply with exactly OK.","messageId":"8164e328-1dad-4f0a-aa4a-43d54c029b07","supportedNativeDocumentMimeTypes":[],"delivery":"idle","interactionId":"b222d416-6151-40a3-8796-a29047c32272","turnId":"0","parentAgentTaskId":"ab2935d2-a47a-46d9-9188-993316f109aa"}}
+{"type":"assistant.turn_start","data":{"turnId":"0","interactionId":"b222d416-6151-40a3-8796-a29047c32272"}}
+{"type":"assistant.message","data":{"messageId":"fc40a200-e12f-42d7-b2b2-ce4fc9eae20b","originatingMessageId":"8164e328-1dad-4f0a-aa4a-43d54c029b07","model":"gpt-4.1","content":"OK","toolRequests":[],"interactionId":"b222d416-6151-40a3-8796-a29047c32272","turnId":"0","rte":false,"apiCallId":"probe"}}
+{"type":"assistant.turn_end","data":{"turnId":"0"}}
+{"type":"result","sessionId":"11111111-1111-4111-8111-111111111111","exitCode":0}

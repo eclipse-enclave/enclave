@@ -21,6 +21,19 @@ sandbox:
   yoloEnabled: true
   continueArgs: [--continue]
   resumeArgs: [--resume]
+  a2a:
+    command: [pi, -p, --mode, json]
+    newSessionArgs: [--session-id, "{sessionId}"]
+    resumeArgs: [--session, "{sessionId}"]
+    eventFormat: pi-json
+    versionCommand: [pi, --version]
+    versions: ">=1.3.0 <1.4.0"
+    orchestratorArgs: [--extension, builtin:mcp, --extension, /usr/local/share/enclave/templates/pi-a2a-mcp.js]
+    skills:
+      - id: coding
+        name: Coding
+        description: Read, review and modify project files with Pi
+        tags: [code, review]
   passthroughPaths:
     - agent/AGENTS.md
     - agent/extensions/

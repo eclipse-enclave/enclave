@@ -38,6 +38,31 @@ sandbox:
   continueArgs: [resume, --last]
   resumeArgs: [resume]
   passthroughPaths: [config.toml, skills/]
+  a2a:
+    command: [codex, exec, --json, -c, features.daemon_auto_start=false, -c, features.memories=false]
+    resumeArgs: [resume, "{sessionId}"]
+    eventFormat: codex-exec-json
+    versionCommand: [codex, --version]
+    # Codex is pre-1.0: pin the minor whose protocol was probed.
+    versions: ">=0.166.0 <0.167.0"
+    skills:
+      - id: coding
+        name: Coding
+        description: Reads, edits and tests code in the worker's project and answers with a summary of what it did.
+        tags: [code, review, refactor, test]
+    orchestratorArgs:
+      - -c
+      - features.daemon_auto_start=false
+      - -c
+      - 'mcp_servers.enclave-a2a.command="enclave-a2a-agent"'
+      - -c
+      - 'mcp_servers.enclave-a2a.args=["mcp"]'
+      # Native default (60s) is shorter than A2A's 90s send wait plus grace.
+      - -c
+      - mcp_servers.enclave-a2a.tool_timeout_sec=150
+      # Codex's stdio MCP environment is an allowlist, not full inheritance.
+      - -c
+      - 'mcp_servers.enclave-a2a.env_vars=["ENCLAVE_A2A_ROLE","ENCLAVE_A2A_GROUP","ENCLAVE_A2A_GROUP_GENERATION","ENCLAVE_A2A_MEMBER","ENCLAVE_A2A_MEMBER_GENERATION","ENCLAVE_A2A_HUB_HOST","ENCLAVE_A2A_HUB_PORT","ENCLAVE_A2A_INBOUND_TOKEN","ENCLAVE_A2A_TABLE_DIR","ENCLAVE_A2A_SEND_WAIT","ENCLAVE_A2A_MAX_REQUEST_BYTES","ENCLAVE_A2A_MAX_RESULT_BYTES","ENCLAVE_A2A_RECORD_LIMIT","ENCLAVE_A2A_RECORD_MAX_AGE","ENCLAVE_A2A_RECONNECT_WINDOW","ENCLAVE_A2A_CONTEXT_TTL","ENCLAVE_A2A_TERMINATION_TIMEOUT","ENCLAVE_A2A_HEARTBEAT_INTERVAL"]'
 
 credentials:
   sources:

@@ -202,13 +202,16 @@ directories per project; see
 
 ## 10) Optional: A2A peer group support (experimental)
 
-A tool without `sandbox.a2a` can be a peer group orchestrator but not a
-worker. To add worker support (field reference and semantics in
+A tool without `sandbox.a2a` cannot be a worker; a manual orchestrator
+integration also needs the client CLI and a running `client hold` for
+liveness. Claude Code, Codex, Copilot and Pi ship integrated worker and MCP
+orchestrator support. To add worker support (field reference and semantics in
 [A2A peer groups](README.md#a2a-peer-groups-sandboxa2a-experimental)):
 
 1. Check that the tool has a headless mode that reads the prompt from stdin,
    resumes a session by ID, and writes an event stream that an existing
-   `eventFormat` decodes. v1 supports only `claude-stream-json`; another
+   `eventFormat` decodes. Core supports `claude-stream-json`,
+   `codex-exec-json`, `copilot-json` and `pi-json`; another
    format needs a driver in core (`internal/a2aagent/driver/`), so raise it
    with the maintainers first.
 2. Make sure `sandbox.yoloFlag` is set: workers require yolo mode.
@@ -231,14 +234,26 @@ worker. To add worker support (field reference and semantics in
        orchestratorArgs: [--mcp-config, /usr/local/share/enclave/templates/claude-a2a-mcp.json]
    ```
 
-   Pin `versions` from the release you tested to the next major. Add
-   `newSessionArgs` if the tool accepts a caller-chosen session ID.
-4. For orchestrator support, ship an MCP config under `templates/` that starts
-   `enclave-a2a-agent mcp`, and point `orchestratorArgs` at its baked path
-   (`/usr/local/share/enclave/templates/<tool>-<file>`).
+   Gate `versions` from the release you tested to a compatible boundary
+   (for a pre-1.0 CLI, normally the next minor). Add `newSessionArgs` if the
+   tool accepts a caller-chosen session ID. Verify that the driver's
+   `Outcome.Transcripts` covers only that context's native storage; a shared
+   transcript database needs per-context isolation, never whole-file deletion.
+4. For orchestrator support, add only session-local MCP configuration through
+   `orchestratorArgs`: a template under `templates/`, CLI config overrides,
+   or a native extension. Templates are baked at
+   `/usr/local/share/enclave/templates/<tool>-<file>`. Start
+   `enclave-a2a-agent mcp` and verify that the tool passes the `ENCLAVE_A2A_*`
+   environment to it (some MCP clients filter inherited variables). Check
+   the actual handshake and peer calls, not just the config listing.
 5. Put group-only guidance in a skill named `a2a-<name>` under `skills/`; it
    is composed only into `--peer-group` sessions.
 6. Run `enclave validate-extensions`, then start an orchestrator and a worker
    in one group (`--peer-group <group> --name <member>`, plus
    `--role orchestrator` for the orchestrator) and send the worker a task with
    `enclave a2a send <worker> <text>`.
+7. Test mixed tools, resume in the same context, cancellation and inventory
+   cleanup. `ENGINE=docker scripts/a2a-smoke.sh mixed_review` exercises
+   Claude + Codex reviewers and a Claude lead; repeat with
+   `A2A_SMOKE_ORCHESTRATOR_TOOL=codex` and `ENGINE=podman`. These are real,
+   billed calls using copies of the host's shared auth stores.

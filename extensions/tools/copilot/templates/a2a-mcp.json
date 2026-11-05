@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "enclave-a2a": {
+      "type": "local",
+      "command": "enclave-a2a-agent",
+      "args": ["mcp"],
+      "tools": ["*"]
+    }
+  }
+}

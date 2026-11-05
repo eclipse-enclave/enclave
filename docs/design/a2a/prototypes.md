@@ -24,12 +24,16 @@ Conclusions:
   multi-homed hub reaches each member only over that member's bridge) hold
   under `isolate=true`.
 - What `strict` adds is blocking non-isolated podman networks from reaching
-  isolated bridges, in both directions. Inbound to a member is already covered
-  by the gateway's INPUT DROP policy, the documented fallback posture. Inbound
-  to the hub is not covered by anything in draft 6 and must be closed by hub
-  INPUT rules admitting only each member's gateway address on that bridge's
-  interface. Outbound from a member is covered by the gateway's OUTPUT
-  allowlist.
+  isolated bridges, in both directions. Inbound to a member is covered by the
+  gateway's INPUT DROP policy except on published ports, which the existing
+  rules accept on any interface; a bystander can therefore reach a session's
+  published listeners under `isolate=true`. That is pre-existing fallback
+  behavior, unchanged by A2A, and the reason the fallback is weaker, not
+  equivalent. Inbound to the hub is closed by hub INPUT rules admitting only
+  each member's gateway address on that bridge's interface. Outbound from a
+  member is covered by the gateway's OUTPUT allowlist.
+- Not yet measured here: bystander to a member's published port. P1-P
+  records it as the expected difference.
 - Forwarding through the hub was blocked by routing alone; the hub still
   disables forwarding as specified.
 
@@ -47,6 +51,6 @@ podman run -d --name a2a-bystander --network a2a-n3 docker.io/library/alpine:3.2
 # then: podman exec <src> ping -c1 -W1 <dst ip> for each row of the table
 ```
 
-Change request CR-1 against proposal draft 6, accepted by the maintainer on 2026-11-05: replace "strict
+Change request CR-1 against proposal draft 6, accepted on 2026-11-05 with the reviewer's correction that the fallback is weaker, not equivalent: replace "strict
 isolation only" with "isolate option present (`true` or `strict`)", and add
 hub INPUT rules restricted to member gateway addresses per interface.

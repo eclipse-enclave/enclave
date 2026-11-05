@@ -8,11 +8,9 @@
 package app
 
 import (
-	"fmt"
-
 	"enclave/internal/config"
 	"enclave/internal/model"
-	"enclave/internal/network"
+	"enclave/internal/policy"
 )
 
 type AppContext struct {
@@ -66,15 +64,5 @@ func (c *AppContext) PolicyNetworkMode() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	globalPath := network.GlobalPolicyPath(host.Home)
-	globalPolicy, err := network.LoadPolicy(globalPath)
-	if err != nil {
-		return "", fmt.Errorf("load global policy %s: %w", globalPath, err)
-	}
-	projectPath := network.ProjectPolicyPath(host.Home, project.Hash)
-	projectPolicy, err := network.LoadPolicy(projectPath)
-	if err != nil {
-		return "", fmt.Errorf("load project policy %s: %w", projectPath, err)
-	}
-	return network.Merge(network.MergeConfig{GlobalPolicy: globalPolicy, ProjectPolicy: projectPolicy}).Mode, nil
+	return policy.NetworkMode(host.Home, project.Hash)
 }

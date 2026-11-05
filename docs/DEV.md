@@ -1,268 +1,296 @@
-# Developer Guide
+# Developer guide
 
-Concise notes for contributors working on the enclave codebase.
+How to build, test, and change the Enclave codebase. For the contribution
+process (issues, ECA, pull requests), see [CONTRIBUTING.md](../CONTRIBUTING.md);
+for how the code is organized, see [ARCHITECTURE.md](ARCHITECTURE.md).
 
-## Requirements
+## Prerequisites
 
-- Go 1.24 or newer. Releases and most CI jobs build with the `toolchain`
-  version in `go.mod`, which the `go` command downloads when the local Go is
-  older. A separate CI job builds and tests with the exact `go` directive
-  version and `GOTOOLCHAIN=local`.
-- Docker daemon running (for runtime testing)
-- Linux or macOS host. Native Windows is unsupported; use WSL2, where the Linux
-  instructions apply. `make cross-build` compiles every published cross-target:
-  `darwin/arm64`, `darwin/amd64`, `linux/arm64`, `windows/amd64`, and
-  `windows/arm64`. It builds `./...` rather than just `./cmd/enclave`, so the
-  windows targets also keep the whole tree portable even though the published
-  windows binary is only the WSL launcher.
+The [quick start](../CONTRIBUTING.md#building-from-source) lists the basics:
+Go 1.24 or newer, Make, and `make build|install|test|lint`. In addition:
 
-## Common Commands
+- Releases and most CI jobs build with the `toolchain` in `go.mod`, which `go`
+  downloads when the local Go is older. One CI job uses the exact `go`
+  directive version with `GOTOOLCHAIN=local`.
+- A running Docker or Podman engine, for runtime testing.
+- Linux or macOS. Native Windows is unsupported; use WSL2.
+- `golangci-lint`, `gosec`, and `shellcheck` for `make lint`
+  ([Before you commit](#before-you-commit)).
 
-Build the CLI (plain `make` is equivalent to `make build`):
+## More make targets
 
-```bash
-make build
-```
+| Command | Purpose |
+|---------|---------|
+| `make lint-changed` | Lint staged, unstaged, and untracked changes; faster than `make lint` |
+| `make lint-changed BASE_REF=main` | Lint all changes since `main` |
+| `make generate` | [Code generation](#code-generation) |
+| `make cross-build` | Compile `./...` for `darwin/arm64`, `darwin/amd64`, `linux/arm64`, `windows/amd64`, and `windows/arm64`; the whole tree must stay portable, although the Windows binary is only the [WSL launcher](#windows-launcher) |
+| `make check-versions` | [Dependency updates](#dependency-updates) |
+| `make deb`, `make rpm`, `make deb-quick` | [Packaging](#packaging) |
 
-Install to your PATH:
+Format Go code with `gofmt -w`. Plain `make` equals `make build`.
 
-```bash
-make install
-```
-
-Build distribution packages:
-
-```bash
-make deb
-make rpm
-```
-
-Inside Enclave, install the `deb-dev` and `rpm-dev` features from
-[enclave-extensions](https://github.com/eclipse-enclave/enclave-extensions)
-(`enclave features add eclipse-enclave/enclave-extensions --name deb-dev`, and
-the same for `rpm-dev`), then run with `--features +golang-dev,+deb-dev,+rpm-dev`.
-On an Ubuntu host, install the packaging tools with `sudo apt install debhelper rpm`. On Fedora, install the
-RPM build dependencies with `sudo dnf install git go make rpm-build`. Use
-`make deb-quick` when Go was installed outside APT and therefore does not
-satisfy dpkg's build dependency check; it builds the same binary package
-without that check.
-
-Package builds need network access: `go mod vendor` fetches the modules, and a
-distribution Go older than the `toolchain` in `go.mod` downloads that
-toolchain and builds with it. The `go` directive fixes the language version,
-`go vet` in `make lint` rejects standard-library APIs newer than it, and CI
-builds and tests with the minimum Go version without toolchain switching.
-
-Run tests:
-
-```bash
-make test
-```
-
-Format code:
-
-```bash
-gofmt -w .
-```
-
-Lint only changed files/packages (faster than full `make lint` during iteration):
-
-```bash
-make lint-changed                    # staged + unstaged + untracked changes
-make lint-changed BASE_REF=main      # all changes since main
-```
-
-## Running Changes from the Working Copy
-
-enclave embeds its runtime assets, but a development binary uses checkout files
-first. It locates an "app root" in this order (`internal/config/paths.go`,
-`discoverAppRoot`):
-
-1. `ENCLAVE_HOME`, which must contain the required assets when set.
-2. Walk up from the binary's directory until a valid app root is found.
-3. Extract the embedded assets into a content-hash-keyed directory under the
-   platform cache root.
-
-On Linux the extraction store is
-`${XDG_CACHE_HOME:-~/.cache}/enclave/assets/<hash>/`. On macOS it is
-`~/Library/Caches/org.eclipse.enclave/assets/<hash>/`. Each distinct asset set
-uses its own atomically published directory. The tree is reproducible from the
-binary, so deleting it is safe; the next run extracts it again. A binary
-refreshes its entry's mtime at most once a day, under the entry's lock. Whenever
-it extracts or refreshes its entry, it also removes other entries no binary has
-used for 30 days, skipping any whose lock is held (`removeUnusedAppAssets` in
-`internal/config/embedded_assets.go`). A refresh that fails, as in a cache this
-user can read but not write, still leaves the valid entry in use.
-
-Because `bin/enclave` lives inside the checkout, tier 2 finds the repository
-root. Running an in-tree binary therefore uses the working copy's assets:
+## Run changes from the working copy
 
 ```bash
 make build
 ./bin/enclave --tool <tool> [args…]
-```
-
-When in doubt, pin the app root explicitly. This defeats a stale `ENCLAVE_HOME`,
-an installed `enclave` earlier on your `PATH`, or launching from an unexpected
-directory:
-
-```bash
+# Pin the app root against a stale ENCLAVE_HOME or an installed enclave:
 ENCLAVE_HOME="$(pwd)" ./bin/enclave --tool <tool> [args…]
 ```
 
+### How the binary finds its assets
+
+`discoverAppRoot` (`internal/config/paths.go`) tries, in order:
+
+1. `ENCLAVE_HOME`, which must contain the required assets when set.
+2. The binary's directory and its parents. `bin/enclave` therefore uses the
+   checkout; package installs use `/usr/share/enclave`.
+3. The embedded assets, extracted to
+   `${XDG_CACHE_HOME:-~/.cache}/enclave/assets/<hash>/` (Linux) or
+   `~/Library/Caches/org.eclipse.enclave/assets/<hash>/` (macOS).
+
+Extraction (`internal/config/embedded_assets.go`):
+
+- Each content hash gets its own directory, published atomically via a
+  per-content lock, a temporary sibling, and a rename, so concurrent first runs
+  share one complete entry. Missing or invalid entries are recreated, so
+  deleting the tree is safe.
+- The entry's mtime records its last use, refreshed at most daily under its
+  lock. A failed refresh (a read-only cache, for example) keeps the entry in
+  use.
+- After extracting or refreshing, `removeUnusedAppAssets` removes entries
+  unused for 30 days whose lock it can take without waiting.
+- Shell completion runs before the root guard and never extracts: it uses a
+  published entry or reads the built-in extension names from the binary.
+
 ### Picking up asset and template changes
 
-Tool templates and other build inputs are baked into the Docker image at build
-time, not mounted at run time. The build check hashes asset **content** into the
-image's `enclave.hash` label, so editing an asset normally triggers an
-automatic rebuild. To force it, pass `--rebuild`:
+Tool templates and other build inputs are baked into the image at build time,
+not mounted at run time. The build check hashes asset content into the image's
+`enclave.hash` label, so editing an asset normally triggers an automatic
+rebuild. To force one:
 
 ```bash
 ./bin/enclave --tool <tool> --rebuild
 ```
 
-Gotchas:
+| Pitfall | Fix |
+|---------|-----|
+| An installed `enclave` on your `PATH` uses the assets embedded when it was built, not your checkout | Invoke `./bin/enclave` |
+| Full config overrides under `~/.config/enclave/tools/<tool>/` and `~/.config/enclave/projects/<hash>/<tool>/config/`, or JSON/TOML patches under the global or project `patches/<tool>/` directories, shadow your working-copy template | Clear them to see the in-tree version |
+| `--no-cache` only disables runtime package cache mounts, not `docker build` caching or asset refresh | Use `--rebuild` |
 
-- Invoke `./bin/enclave`, not an installed `enclave` on your `PATH`. An
-  installed binary uses the assets embedded when it was built, not your
-  checkout.
-- Canonical full config overrides under `~/.config/enclave/tools/<tool>/`
-  and `~/.config/enclave/projects/<hash>/<tool>/config/`, plus JSON/TOML patches
-  under the global/project `patches/<tool>/` directories, can shadow your
-  working-copy template. Clear them if you want to see the in-tree version.
-- `--no-cache` is **not** the flag for this — it only disables runtime package
-  cache mounts, not `docker build` caching or asset refresh. Use `--rebuild`.
+## Before you commit
 
-## Pre-commit Checks
+Run `make build`, `make test`, and `make lint`; changes only under `docs/` do
+not need them. `scripts/install-go-linters.sh` installs the Go linters at CI's
+versions into `~/.local/bin` (bump them there). Inside Enclave, the
+`enclave-dev` feature from enclave-extensions installs the same versions
+(with `+golang-dev`).
 
-Before committing, run:
+## Code generation
+
+Generated files are checked in. After changing option definitions or tool
+extension Go code, run `make generate` (`go generate ./internal/config
+./cmd/enclave`) and commit the outputs:
+
+| Input | Generated output |
+|-------|------------------|
+| `internal/config/options_def.go` (via `scripts/gen_options.go`) | `internal/config/options_registry_gen.go`, `internal/config/options_cli_gen.go`, `internal/model/option_sources_gen.go` |
+| Tool extension Go packages (via `cmd/enclave/internal/gen_tool_imports`) | `cmd/enclave/tool_imports.go` (`//go:build !windows`) |
+
+See also the [diagram](ARCHITECTURE.md#go-code-generation).
+
+## Adding or updating options
+
+User-facing model: [configuration.md](configuration.md); resolution flow:
+[ARCHITECTURE.md](ARCHITECTURE.md#option-resolution-flow).
+
+### Checklist
+
+| Step | Where | Applies to |
+|------|-------|------------|
+| Field in the relevant `model.*Options` struct | `internal/model/types.go` | All |
+| Default in `config.Defaults` | `internal/config/config.go` | Config-backed |
+| Option entry with `AffectsSession` and, if needed, `AffectsNetwork` (below); then `make generate` | `internal/config/options_def.go` | All |
+| Guardrail fixture values | `internal/config/merge_test.go`, `internal/model/option_sources_test.go` | Config-backed, new sources |
+| Focused parsing and runtime tests, then `go test ./...` | | All |
+| Docs for user-visible behavior | `docs/cli-reference.md`, `docs/configuration.md`, `docs/ARCHITECTURE.md`, command docs | All |
+| Security notes; review validation and whether the opt-in should be CLI-only | `docs/security/README.md` | Security-sensitive |
+| Key in `removedConfigFields`, so `readDefaults()` rejects it loudly | `internal/config/config.go` | Removed keys |
+
+- `AffectsSession` is required. `SessionAffected` when a new value makes a
+  fresh session differ from a running one (image, features, mounts, network,
+  env, auth, backend); the value is recorded as provenance in
+  `enclave ps --json`, so it must not carry secrets. `SessionUnaffected` for
+  host-side, UX, or one-shot options.
+- `AffectsNetwork` when the option changes the session allowlist, so
+  `network status|print|diff` accept its flags; a test fails otherwise.
+
+### Option kinds
+
+| Kind | How to define it |
+|------|------------------|
+| CLI-only (for example `--force-base-image`, `--no-rebuild`) | Omit `DefaultsField` and use `Apply: ApplyNone` |
+| Config-only (for example `host_config_paths`) | Omit `CLIFlags` |
+| Host-wide only | Add the key to `stripGlobalOnlyKeys` in `internal/config/config.go`; project config can otherwise set every config-backed option |
+| Opt-in no config file may grant (like `--allow-sensitive-mounts`) | No config key at all |
+| List | `ApplyListExtras` or a selection kind; a key function in `listEntryKey` and, if entries have a format, a validator in `listEntryValidators` (`internal/config/list_entries.go`); the flag uses `appendListFlag` |
+| String map (`OptionKindStringMap`, `ApplyStringMap`) | [String map options](ARCHITECTURE.md#string-map-options) |
+
+`ENCLAVE_NO_REBUILD=1`, the terminal-scoped form of `--no-rebuild`, is applied
+in `app.Run` after user session commands are rewritten and before defaults
+resolution, reusing the `NoRebuild` gates and conflict checks instead of a
+config key. Options with subsystem rules are in
+[Subsystem notes](ARCHITECTURE.md#subsystem-notes).
+
+## Testing extensions
+
+Manual end-to-end checks with the
+[working-copy](#run-changes-from-the-working-copy) binary.
+
+### Go code and metadata
 
 ```bash
+go generate ./cmd/enclave            # Refresh generated tool imports
+make build                           # Build the CLI
+./bin/enclave validate-extensions    # Validate extension metadata
+./bin/enclave --help                 # Verify tool loading works
+./bin/enclave --tool claude          # Should recognize claude as a valid tool
+```
+
+### Build and run
+
+```bash
+./bin/enclave --tool claude --rebuild   # claude image with all default-enabled features
+./bin/enclave --tool codex              # another tool
+```
+
+### Features inside the container
+
+Start a session (`./bin/enclave --tool claude`) and check:
+
+| Feature | Default | Check |
+|---------|---------|-------|
+| `github-cli` | Enabled | `gh --version` |
+| `python-dev` | Enabled | `black --version`, `ruff --version`, `pre-commit --version` |
+| `node-dev` | Enabled | `tsc --version`, `pnpm --version`; `type nvm` (its `feature-entrypoint.d` script loads nvm without activating a version) |
+| `devtools` | Enabled | `vim --version`, `rg --version` |
+| `theia-dev` | Opt-in | `pkg-config --modversion x11 xkbfile libsecret-1` |
+| `gitlab-cli` | Opt-in | `glab --version` |
+| `golang-dev` | Opt-in | `go version`, `dlv version` |
+
+Every image hooks direnv into the shell, independent of features: `type direnv`
+should find it.
+
+### Tool-specific entrypoints
+
+Tool `entrypoint.d` scripts run only for the selected tool. Start
+`./bin/enclave --tool claude` and `./bin/enclave --tool codex` and check that
+each tool's own setup ran.
+
+### Minimal images
+
+| Command | Inside the container |
+|---------|----------------------|
+| `./bin/enclave --tool claude --slim --rebuild` | `claude --version` works; `gh --version` fails (feature not installed); `vim --version` fails (only `vim-tiny`) |
+| `./bin/enclave devcontainer run --rebuild` | `gh --version` fails: devcontainer mode disables features by default |
+| `./bin/enclave devcontainer run --features github-cli --rebuild` | Only `github-cli` is installed |
+
+### `spec.yaml` is required
+
+`spec.yaml` (or `spec.json`) is mandatory, and its `kind` and `name` fields must
+match the extension's location. To check, temporarily move it out and restore
+it afterwards:
+
+```bash
+mv extensions/tools/claude/spec.yaml /tmp/
 make build
-make test
-make lint
+./bin/enclave --tool claude --help   # Should fail: spec.yaml not found
+mv /tmp/spec.yaml extensions/tools/claude/
 ```
 
-Exception: if a change only touches files under `docs/`, these make targets are
-not required.
+### Direct Docker builds
 
-`make lint` needs `golangci-lint`, `gosec`, and `shellcheck` on `PATH`.
-`scripts/install-go-linters.sh` installs the Go linters at the versions CI uses
-into `~/.local/bin`; bump them there. Inside Enclave, the `enclave-dev` feature
-from enclave-extensions installs the same versions (with `+golang-dev`).
-
-### Env-only credential acceptance testing
-
-Unit tests cover credential resolution, placeholder shapes, host release rules,
-and auth-file reconciliation without a real engine or account. In a dedicated
-Docker/Podman environment, test each variable in
-[Env-only bearer tokens](auth.md#env-only-bearer-tokens) independently:
-
-- Make an authenticated tool request, then restart and repeat. Confirm the
-  container gets a fresh placeholder and no placeholder reaches shared auth
-  through reconciliation.
-- Test `codex exec` with only `OPENAI_API_KEY`, then only `CODEX_API_KEY`;
-  neither should require onboarding. Check API-key precedence when a ChatGPT
-  login already exists.
-- Test the Codex TUI separately: an empty store requires onboarding and a stored
-  login wins over the env API key. Accept the prefilled placeholder for one
-  session, then restart with an empty shared store and confirm the old local
-  `auth.json` is removed. Repeat with project auth scope. With valid shared auth,
-  confirm startup restores its symlink instead. Verify persistent TUI login
-  with `--no-api-key`.
-- With `codex exec`, test API-key model-list refresh under `--network-log=requests` and
-  coarse logging with a PAT also injected. Expect a denial at `chatgpt.com` and
-  built-in model-list fallback; OpenAI API requests should still work.
-- Confirm `CODEX_ACCESS_TOKEN` PATs work and Agent Identity JWTs fail clearly
-  with gateway protection active.
-- Write a placeholder into a local auth file, then exercise foreground exit,
-  background stop/remove, and `exec` reconciliation. Expect a visible warning,
-  no contaminated copy, and existing shared credentials unchanged.
-
-Use fake values for the Anthropic tokens. Upstream's error message tells a
-released `sk-ant-oat01-` value apart from a placeholder, and a real
-subscription token in a third-party client is subject to Anthropic's terms.
-
-Record tool versions with the results. In particular, Claude Code is closed
-source: its env-only setup-token behavior needs runtime verification, not just
-changelog evidence. Keep test credentials out of logs and review artifacts.
-
-## Code Generation
-
-Generated files are checked in. If you change the option definitions or tool
-imports, regenerate and commit the outputs.
-
-Generate all:
+For quick experiments you can build the Dockerfile directly. The raw
+Dockerfile falls back to installing the default-included tool set, without the
+per-tool layer caching of `enclave --tool <name> --rebuild`:
 
 ```bash
-make generate
+# All default-enabled features
+docker build -t enclave:latest .
+
+# Specific features only (opt-in ones included)
+docker build \
+  --build-arg FEATURES="github-cli python-dev" \
+  -t enclave:selective .
+
+docker run --rm enclave:selective gh --version     # Works
+docker run --rm enclave:selective glab --version   # Fails (not installed)
+
+# Watch feature installation order
+docker build --progress=plain . 2>&1 | \
+  grep -E "(Installing feature|Feature .+: added)"
 ```
 
-Or run directly:
+## Windows launcher
 
-```bash
-go generate ./internal/config ./cmd/enclave
-```
+On Windows, `cmd/enclave` builds `main_windows.go`, which forwards to the Linux
+binary inside WSL2 ([windows.md](windows.md)). Without assets and extensions
+([why](ARCHITECTURE.md#windows-launcher)) it is about 3 MB, against roughly
+14 MB for the Linux binary.
 
-Notes:
-- Option definitions live in `internal/config/options_def.go`.
-- Generated outputs:
-  - `internal/config/options_registry_gen.go`
-  - `internal/config/options_cli_gen.go`
-  - `internal/model/option_sources_gen.go`
-  - `cmd/enclave/tool_imports.go` (tool extension Go imports, `//go:build !windows`)
+### Build and test on Linux
 
-## Dependency Updates
-
-Report pinned versions, lockstep consistency, available updates, and the
-Debian and Ubuntu versions that cap the minimum supported Go and git:
-
-```bash
-make check-versions
-```
-
-The script (`scripts/check-versions.sh`) only reads; `make lint` runs its
-`--offline` mode, which fails when a lockstep group disagrees or a new pin is
-not in its inventory. The `dependency-updates` agent skill
-(`.agents/skills/dependency-updates/SKILL.md`) turns the output into a
-prioritized plan and describes how to apply each update group.
-
-## Windows Launcher
-
-On Windows, `cmd/enclave` builds `main_windows.go`, a launcher that forwards to
-the Linux binary inside WSL2 (see [windows.md](windows.md) for the user-facing
-behavior). It links neither the embedded runtime assets nor the tool extensions,
-because it never builds an image — which is why `cmd/enclave/tool_imports.go` is
-generated with a `//go:build !windows` constraint. The result is around 3 MB
-against roughly 14 MB for the Linux binary.
-
-All the logic lives in `internal/wslshim`, and everything except the two
-drive-letter queries (`GetDriveType` and `WNetGetConnection`) is
-host-independent, so it builds and is tested on Linux:
+All logic is in `internal/wslshim`, and everything except the two drive-letter
+queries is host-independent:
 
 ```bash
 go test ./internal/wslshim/...
 GOOS=windows go build ./... && GOOS=windows go vet ./...
 ```
 
-`make lint` runs `go vet` and `gosec` a second time with `GOOS=windows`, because
-neither one looks at a file its build constraints exclude — without that pass the
-`unsafe.Pointer` code in `drivetype_windows.go` and its `#nosec` annotations are
-checked by nothing. `golangci-lint` is not repeated that way, so the
-Windows-only files remain outside it.
+- `make lint` runs `go vet` and `gosec` again with `GOOS=windows`, since
+  neither checks files their build constraints exclude; otherwise the
+  `unsafe.Pointer` code in `drivetype_windows.go` and its `#nosec` annotations
+  would go unchecked. `golangci-lint` is not repeated, so Windows-only files
+  stay outside it.
+- The two shell scripts the launcher sends into the distribution are Go
+  constants. `internal/wslshim/script_exec_test.go` executes them against the
+  host's `sh` on non-Windows platforms, which keeps `probeScript` and the
+  marker `parseProbeOutput` looks for from drifting apart.
 
-The two shell scripts the launcher sends into the distribution are Go constants,
-so `internal/wslshim/script_exec_test.go` executes them against the host's `sh`
-on non-Windows platforms. That is what keeps `probeScript` and the marker
-`parseProbeOutput` looks for from drifting apart.
+### How it finds the Linux binary
 
-Argument quoting is the risky part. Windows passes a single command-line string
-and `wsl.exe` re-parses it, so the launcher builds that string itself and hands it
-to `CreateProcess` unchanged. Two layers check it:
+`make install` puts `enclave` in `~/.local/bin`, which is only on `PATH` via
+`~/.profile`, and a non-login shell does not read that file. So the launcher
+resolves the path first and then executes it:
+
+1. `wsl.exe [-d <distro>] --cd / -e /bin/sh -lc '<fixed probe>'` runs a login
+   shell that tries `command -v enclave` and then `~/.local/bin/enclave`,
+   `/usr/local/bin/enclave`, and `/usr/bin/enclave`.
+   - The probe interpolates nothing.
+   - It prints its answer behind an `enclave-bin=` marker, so a shell profile
+     that writes to standard output is not mistaken for the path.
+   - Passing `--cd` here also detects support for it, at no extra cost.
+2. `wsl.exe [-d <distro>] --cd <path> -e <absolute path> <your arguments…>`
+   runs the binary directly, with no shell to re-parse anything.
+
+This costs one extra round trip, roughly 100–300 ms on a cold distribution. The
+result is not cached. On a `wsl.exe` old enough to lack `--cd`, the launcher
+retries and changes directory through a shell instead, still passing the
+arguments as positional parameters so they are never re-split.
+
+### Argument quoting
+
+Windows passes a single command-line string and `wsl.exe` re-parses it, so the
+launcher builds that string itself and hands it to `CreateProcess` unchanged.
+This is the riskiest part of the launcher; two layers check it.
 
 1. A golden table in `internal/wslshim/quote_test.go` round-trips every argument
-   shape through a reimplementation of `CommandLineToArgvW`. This runs in CI on
-   every push. The same table is exported to
+   shape through a reimplementation of `CommandLineToArgvW`. It runs in CI on
+   every push. The table is exported to
    `internal/wslshim/testdata/wsl-quoting-golden.json`; regenerate it after
    changing the escaping or the table, and commit it:
 
@@ -270,9 +298,9 @@ to `CreateProcess` unchanged. Two layers check it:
    ENCLAVE_UPDATE_GOLDEN=1 go test ./internal/wslshim
    ```
 
-2. `scripts/wsl-shim-verify.ps1` feeds those same command lines to a real
-   `wsl.exe` and compares the NUL-separated argv the Linux side receives. This
-   **cannot** run in GitHub-hosted CI, because `windows-latest` runners have no
+2. `scripts/wsl-shim-verify.ps1` feeds the same command lines to a real
+   `wsl.exe` and compares the NUL-separated argv the Linux side receives. It
+   cannot run in GitHub-hosted CI, because `windows-latest` runners have no
    WSL2. Run it manually on a Windows host with WSL2 before publishing Windows
    artifacts:
 
@@ -281,393 +309,83 @@ to `CreateProcess` unchanged. Two layers check it:
    ```
 
    Without PowerShell 7, use Windows PowerShell. A script reached through
-   `\\wsl.localhost` counts as remote, so the execution policy refuses it unless
-   the run bypasses it:
+   `\\wsl.localhost` counts as remote, so the execution policy refuses it
+   unless the run bypasses it:
 
    ```powershell
    powershell -ExecutionPolicy Bypass -File .\scripts\wsl-shim-verify.ps1
    ```
 
-## Adding or Updating Options
+## Packaging
 
-1) Add fields in `model.Options` (and related embedded struct).
-2) Add defaults in `config.Defaults` if configurable.
-3) Add the option entry in `internal/config/options_def.go`, including the
-   required `AffectsSession` decision and, if the option changes the session
-   allowlist, `AffectsNetwork` (see the checklist below).
-4) Run code generation (`make generate`).
-5) Run tests (`go test ./...`).
-6) Update docs for user-visible flag behavior (`docs/cli-reference.md`,
-   `docs/configuration.md`, `docs/ARCHITECTURE.md`, and related command docs).
+| Environment | Setup |
+|-------------|-------|
+| Ubuntu host | `sudo apt install debhelper rpm` |
+| Fedora host | `sudo dnf install git go make rpm-build` |
+| Inside Enclave | Add the `deb-dev` and `rpm-dev` features from [enclave-extensions](https://github.com/eclipse-enclave/enclave-extensions) (`enclave features add eclipse-enclave/enclave-extensions --name deb-dev`, same for `rpm-dev`) and run with `--features +golang-dev,+deb-dev,+rpm-dev` |
 
-For options not configurable via config files, omit `DefaultsField`
-and use `Apply: ApplyNone` in `options_def.go` (for example:
-`--force-base-image` and `--no-rebuild`).
+- `make deb-quick` skips dpkg's build dependency check, for a Go installed
+  outside APT; the package is the same.
+- Package builds need network access: `go mod vendor` fetches modules, and a
+  distribution Go older than the `go.mod` `toolchain` downloads it.
+- The `go` directive fixes the language version; `go vet` in `make lint`
+  rejects newer standard-library APIs, and CI tests the minimum Go without
+  toolchain switching.
 
-`--no-rebuild` also has the terminal-scoped `ENCLAVE_NO_REBUILD=1` switch.
-`app.Run` applies it after rewriting user-defined session commands and before
-defaults resolution. It reuses the existing `NoRebuild` gates and conflict
-checks rather than adding a config key; see the [CLI reference](cli-reference.md#image--build).
+## Dependency updates
 
-A new list option uses `ApplyListExtras` (or a selection kind) and needs a
-key function in `listEntryKey` and, if entries have a format, a validator in
-`listEntryValidators` (`internal/config/list_entries.go`); its flag uses
-`appendListFlag`.
+```bash
+make check-versions
+```
 
-For config-only options, omit `CLIFlags` instead (for example:
-`host_config_paths`). Project config can set every config-backed option; an
-option that only makes sense host-wide belongs in `stripGlobalOnlyKeys` in
-`internal/config/config.go`, and an opt-in no config file may grant gets no
-config key at all (like `--allow-sensitive-mounts`).
+This reports pinned versions, lockstep consistency, available updates, and the
+Debian and Ubuntu versions that cap the minimum supported Go and git.
 
-### Practical Checklist
+- The script (`scripts/check-versions.sh`) only reads. `make lint` runs its
+  `--offline` mode, which fails when a lockstep group disagrees or a new pin is
+  not in its inventory.
+- The `dependency-updates` agent skill
+  (`.agents/skills/dependency-updates/SKILL.md`) turns the output into a
+  prioritized plan and describes how to apply each update group.
+- Direct Go module dependencies are listed in
+  [DEPENDENCIES.md](DEPENDENCIES.md).
 
-Use this when adding a new option so you do not stop after `options_def.go`:
-
-- Core types:
-  add the field to the relevant `model.*Options` struct in
-  `internal/model/types.go`.
-- Config-backed options:
-  add the field to `config.Defaults` in `internal/config/config.go`.
-- Removed config keys:
-  add the key to `removedConfigFields` in `internal/config/config.go` so
-  `readDefaults()` rejects it loudly instead of silently ignoring it.
-- Option registry:
-  add the definition in `internal/config/options_def.go`, including the
-  required `AffectsSession` decision: `SessionAffected` if changing the value
-  makes a fresh session differ from a running one (image, features, mounts,
-  network, env, auth, backend), so it is recorded as session provenance in
-  `enclave ps --json`; `SessionUnaffected` for host-side, UX, or one-shot
-  options. Affected values must not carry secrets. Set `AffectsNetwork` when
-  the option changes the session allowlist, so `network status|print|diff`
-  accept its flags; a test fails when an unmarked option changes the preview.
-- Generated outputs:
-  run `make generate` after changing `options_def.go`.
-- Guardrail tests:
-  if you added a config-backed option or new option source, update the fixture
-  values in:
-  - `internal/config/merge_test.go`
-  - `internal/model/option_sources_test.go`
-- Behavioral tests:
-  add or update focused tests for parsing and runtime behavior, not just the
-  generated files.
-- Docs:
-  update `docs/cli-reference.md`, `docs/configuration.md`,
-  `docs/ARCHITECTURE.md`, and any command docs that describe the affected
-  behavior.
-- Security-sensitive options:
-  update `docs/security/README.md` and review whether validation logic needs
-  changes, or whether the opt-in should be CLI-only.
-
-Quick rule of thumb:
-- CLI-only option: model field, `options_def.go`, generate, tests, docs.
-- Config-backed option: model field, `config.Defaults`, `options_def.go`,
-  generate, merge/source test fixtures, tests, docs.
-- User-facing runtime option: all of the above plus security notes when
-  applicable.
-
-Backend option note: `--backend` is config-backed and defaults to `auto`, which `app.resolveBackend` turns into `docker` or `podman` from `backenddocker.DetectCLIs()` (prompting once via `prompt.Choose` and persisting with `config.WriteGlobalDefault` when both are installed and a terminal is present); engine-using management commands register the same option by name so the CLI override takes precedence without taking every Run-group flag. `podman` reuses the Docker backend (`internal/backend/docker`) over the podman CLI by switching the binary in `internal/docker` once at startup (`docker.SetBinary`), with `docker.IsPodman()` gating the few engine differences (`--userns=keep-id`, `info` schema, build cache flags, and `renderEngineDockerfile` stripping home-directory cache mounts from the rendered Dockerfile); experimental `qemu` is available for foreground slim/no-feature unrestricted sessions.
-
-Shared skills note: `--skills-validation strict|agent` is config-backed,
-defaults to `strict`, and supports global, project, and selected tool overrides.
-Normalize casing and whitespace before validating; runtime callers resolve the
-mode through `model.SkillsValidationMode`, which falls back to strict for empty
-or unknown values. Apply the mode in both skill composition paths. It affects
-shared skills only; source precedence and whole-directory replacement remain
-unchanged.
-
-Build option note: `--features` is available on CLI. In devcontainer mode,
-unset features default to none, so pass `--features` explicitly when needed.
-`--features none` is the explicit "no features" selection.
-Build-option normalization validates feature names against the installed
-extensions before image checks or session startup; unknown additions fail and
-unknown removals warn. Unknown additions from config only warn when `--slim`
-or the qemu backend discards the selection. Option resolution records removals that the list merge
-consumes (`Options.DroppedRemovals`) so they are validated too; a replacing
-layer clears them. Staged contexts retain `extensions/features` even when
-empty, and build scripts must preserve an explicitly empty `FEATURES` value.
-
-Root guard note: `--allow-root` is CLI-only and has no config key, so no config
-file can grant it; `ENCLAVE_ALLOW_ROOT=1` is its only alternative.
-`checkRootGuard` in `internal/app/root_guard.go` runs early in `app.Run`,
-before any state is written; tests pin the root check through the
-`runningAsRoot` seam. The opt-in only skips the check: images cannot be built
-for UID 0 yet. Code that runs before the guard (user command discovery,
-parsing, help, version, and shell completion) must not write, not even a file
-it removes again: it uses `config.ResolveHostHomeReadOnly` and
-`config.ResolvePathsReadOnly`, which check home writability with access(2)
-instead of a probe file, so they pick the same home, and never extract the
-embedded assets. The tests catch such writes by backdating the
-directory mtimes under a temporary HOME (`internal/app/root_guard_test.go`, and
-`cmd/enclave/main_test.go`, the only tests that run with the real embedded
-assets).
-
-Mount guard note: `--allow-sensitive-mounts` is CLI-only and has no config key;
-`ENCLAVE_ALLOW_SENSITIVE_MOUNTS=1` is its only alternative.
-`resolveAdditionalMounts` in `internal/app/command_run.go` validates the
-additional directories, including those of `--add-sensitive-dir` and
-`--add-readonly-sensitive-dir`, and collects their sensitive-dir exceptions.
-For run actions only, it then normalizes the configured `sensitive_dir_exceptions`
-entries (`configSensitiveDirExceptions`) and runs `checkSensitiveMounts`, both
-in `internal/app/mount_guard.go`, before the image build. The rule lives in
-`mounts.SensitivePaths` (`internal/mounts/sensitive.go`), and
-`SensitivePaths.Assess` weighs a mount against the exceptions. Callers pass
-`config.HostAppDataDirs`, the platform's per-user application data
-directories, and `config.HostEnclaveRoots`, enclave's own roots, separately so
-`mounts` can tag the roots (and the SSH agent socket) hard-protected without
-depending on `config`. Hard-protected locations are scanned in full, since
-`Reason` stops at the first match. A refusal names the flag or config file
-each additional directory came from. Devcontainer bind sources are not checked
-separately: they must resolve inside the project, and every subdirectory of a
-directory that is not sensitive is not sensitive either
-(`TestSensitivePathsSubdirsOfSafeDirsAreSafe`). External linked-worktree
-metadata is checked in `mounts.AddWorktree` regardless of the opt-in, because
-the `.git` pointer comes from the repository; it uses `Reason`, and exceptions
-must never reach it. Tests that touch the rule clear
-`SSH_AUTH_SOCK` in their `TestMain`; the `app` and `runtime` tests, which take
-the directories from the environment, clear `XDG_*` as well, while `mounts`
-tests pass them explicitly.
-
-Self-update notes (user-facing behavior: [CLI reference](cli-reference.md#commands)):
-
-- Read `auto_update` and `update_channel` from `globalDefaults`, not resolved
-  project or tool options. Explicit `self-update` uses `config.LoadGlobalDefaults`.
-- Keep all updater output on stderr, including verbose diagnostics: use
-  `logx.Noticef`, `DebugNoticef`, or `Warnf`, never `Infof` or `Debugf`.
-- Both paths hold `config.HostSelfUpdateLockPath`: the periodic check skips a
-  busy lock, while explicit `self-update` waits.
-- Tests replace `newSelfUpdater` in `internal/app` and use an `httptest` release
-  in `internal/selfupdate`. To try a real update, build outside the checkout
-  with `make build BUILD_CHANNEL=rolling BIN_DIR=/tmp/enclave-rolling`, then
-  run `/tmp/enclave-rolling/enclave self-update` with `ENCLAVE_HOME` unset.
-- Both channel sources read a `latest` file on download.eclipse.org and the
-  `checksums.txt` beside the artifacts it names; see [Releases](#releases)
-  for the layout. Release CI stamps `BUILD_CHANNEL=stable` or `rolling`.
-
-List option note: list options are folded layer by layer in
-`internal/config/options_lists.go`, with each tool-override file as its own
-layer and the CLI last. A bare `ApplyListExtras` list replaces, `+x`/`-x`
-amend and `[]`/`none` clear, except that `--add-dir` and `--add-readonly-dir`
-add a bare path (`cliAddsPlainEntries`). The selection kinds
-(`features`, `host_config_paths`) replace with a bare list and amend with
-`+`/`-`, the more specific layer winning an item. Feature directives apply to
-the implicit default-enabled set only when no layer selects features. The
-generator emits no `ApplyDefaultsWithSource` for list kinds. See
-[List Options](configuration.md#list-options).
-
-`host_config_paths` resolves against the selected tool profile's reviewed
-`passthroughPaths` instead of global defaults. Use `default` to include the
-built-in allow-list before applying `+`/`-` edits.
-
-String map options (`OptionKindStringMap`, `ApplyStringMap`; `host_env`) go
-through the generated `ApplyDefaultsWithSource`, which calls `mergeStringMap`:
-keys merge across global, project and tool-override layers, a later layer
-replacing a key's value. A layer cannot remove an inherited key, and
-`enclave config --json` always reports the value as an object.
-
-## Option Source Precedence
-
-When a value exists in multiple layers, enclave resolves in this order:
-
-1. CLI flags
-2. Selected tool override (`tool_overrides.<tool>`; the project file's wins over the global file's)
-3. Project config (`~/.config/enclave/projects/<hash>/config.json`; per-project overrides live outside the worktree, keyed by project hash)
-4. Global config (`~/.config/enclave/config.json`)
-5. Built-in defaults
-
-## Network Policy Workflow
-
-- Use `enclave network status` to inspect effective policy and runtime sync state.
-- Use `enclave network apply` to push persisted policy to running gateways.
-- Mutation commands (`network add-domain/remove-domain/set-mode`) auto-apply by default.
-- Use `--no-apply` on mutation commands to persist only.
-- Use `--all-running` with `network apply` or mutation commands to target all running gateways.
-- `network set-mode unrestricted --global` is persisted immediately, but running restricted sessions must be restarted; unrestricted mode is not live-applied.
-
-## Extensions
-
-Every extension (tool or feature) must include a `README.md` in its directory.
-See `docs/extensions/README.md` for the full extension architecture.
-
-## Docker Weaving Scripts
+## Docker weaving scripts
 
 Build composition scripts live in `runtime-assets/build-scripts/` and are
 invoked from `Dockerfile`.
 
-- Keep `Dockerfile` structural; move feature/tool composition logic into these scripts.
+- Keep `Dockerfile` structural; move feature and tool composition logic into
+  these scripts.
 - Script contracts are documented in `runtime-assets/build-scripts/README.md`.
-- Validate script changes with `make lint` (`shellcheck` runs on all `*.sh` files and `build-scripts/bin/` helpers).
+- Validate script changes with `make lint`, which runs `shellcheck` on all
+  `*.sh` files and the `build-scripts/bin/` helpers.
+
+## Extensions
+
+Every tool or feature extension must include a `README.md` in its directory.
+See [extensions/README.md](extensions/README.md) for the extension architecture
+and [Testing extensions](#testing-extensions) for manual checks.
 
 ## Releases
 
-There is one version source: the latest release tag, read by
-`scripts/version.sh`. `make build` stamps `enclave version` and the image label
-with it (`1.0.0` on the tag `v1.0.0`, otherwise `git describe` output such as
-`1.0.0-3-gabc1234`), and `make deb`/`make rpm` use `scripts/version.sh --package`
-(`1.0.0`, or a snapshot such as `1.0.1~~git.20260421.57.abcdef12` that sorts
-above `1.0.0` and below `1.0.1` and all of its pre-releases). Nothing is bumped in a commit; the Debian
-changelog entry is written into the build copy. Until the first release tag
-exists, versions build on a `0.1.1` baseline, one patch above the `0.1.0` the
-packages carried before, so rolling packages keep upgrading. Tag names reach the shell through `make`,
-so the script only emits version characters and fails the build on anything
-else.
+PRs do not edit `CHANGELOG.md` (except the release-prep PR); they describe
+user-visible changes in the `changelog` block of the PR description, as the
+[PR checklist](../CONTRIBUTING.md#pull-request-checklist) explains.
+Versioning, tagging, publishing, and release acceptance testing are in
+[RELEASING.md](RELEASING.md).
 
-PRs do not edit `CHANGELOG.md`, except the release-prep PR. A PR
-describes its user-visible changes in the `changelog` block of its
-description, which the PR template provides: one `- ` item per change,
-in the user's terms, with wrapped lines indented by two spaces as in
-`CHANGELOG.md`, or `none` inside the block when users will not notice
-the change. A breaking change is an item that starts with `Breaking:`
-and says what to do instead. No PR or issue link: the release adds it.
-The note can be corrected in the description until the release,
-without a commit. For example:
-
-```changelog
-- Adding or removing a feature no longer reinstalls the features
-  ordered before it when the image rebuilds.
-```
-
-Before tagging, the release-prep PR collects the notes of the PRs
-merged since the last tag into `## X.Y.Z - YYYY-MM-DD` at the top of
-`CHANGELOG.md`. Each item becomes a bullet ending with a link to its
-PR, grouped under `### Added`, `### Changed` and `### Fixed` as needed,
-and `Breaking:` items go under `### Breaking changes` within that
-section. Release prep may merge, reword or drop notes, for example when
-a later PR in the same release changes the same behavior or a PR was
-reverted. Do this in the same PR as any last fixes, so the tagged
-source describes the release it belongs to.
-
-To cut a release, push an annotated tag `vX.Y.Z`, or `vX.Y.Z-alpha.N`,
-`-beta.N`, `-rc.N` for a pre-release, on `main`. Only these forms are
-accepted: they are the ones the updater, dpkg, and rpm all order the same
-way, so a pre-release, the snapshots after it, and the final release upgrade
-into each other in that order. The first release tag must be `v0.1.2` or
-higher, pre-releases such as `v0.1.2-rc.1` included: the packages published
-before it are `0.1.2~~git…` snapshots, and apt and dnf do not upgrade them to
-a `0.1.1` or `0.1.0`. Final tags must be annotated as well: `git describe`
-prefers annotated tags, so a lightweight `v0.3.0` on the commit of an
-annotated `v0.3.0-rc.1` makes later snapshots `0.3.0~rc.1…`, which sort below
-`0.3.0`, and apt and dnf stop upgrading.
-
-```bash
-git tag -a v1.0.0 -m "Enclave 1.0.0"
-git push origin v1.0.0
-```
-
-A tagged release takes two steps. Both workflows share a concurrency group, so
-they never write the same release at once:
-
-1. **Prepare Release** (`.github/workflows/release.yml`) runs on the tag push.
-   It builds the assets once, verifies that the binary and packages report the
-   tag's version (the triggering tag wins when a commit carries several release
-   tags), and attaches the assets to a draft GitHub release. The draft notes
-   end with a provenance marker, an HTML comment recording the source commit,
-   the build's run ID, and the SHA-256 of `checksums.txt`. Edit the notes as
-   needed, but leave the marker as it is.
-2. Review the draft, then dispatch **Promote Release**
-   (`.github/workflows/promote-release.yml`) from `main` with the tag, such as
-   `v1.2.3`. The job targets the `release` environment; configure its protections
-   before enabling publication (see below). It checks the marker against the
-   exact tag and successful build run, downloads that run's `release-assets`
-   artifact, and verifies both the marker and draft files against this
-   independent copy. It publishes the original build files to
-   `releases/<version>/` on download.eclipse.org,
-   moves `releases/latest` for a final release that sorts higher, and
-   publishes the GitHub release last; its Latest marker also only moves to a
-   higher version. A pre-release becomes a GitHub pre-release and a versioned
-   directory, but never moves `releases/latest`. GitHub asset hashes are checked
-   again immediately before publication to catch changes to expected assets
-   during upload. Assets can still change after the check or publication.
-
-Nothing is rebuilt after the tag build, because rebuilding the same commit may
-produce different bytes. Tag builds disable `setup-go` cache restoration and
-saving; rolling and ordinary CI builds retain caching. The `release-assets`
-workflow artifact is retained for 30 days for tagged releases and one day for
-rolling builds. Promotion and its retries require the original artifact.
-If it has expired or been deleted, publication fails rather than trusting the
-editable draft alone. Promote within that window; a build that cannot be
-retried is replaced by a new version.
-
-**Deployment prerequisites:** provision and verify these in Otterdog and on the
-download server before enabling stable publication. The workflow YAML alone
-does not establish them:
-
-- The `release` environment must have required reviewers, prevent self-review,
-  and allow deployments only from `main`. Referencing a nonexistent environment
-  creates an unprotected environment, not an approval gate.
-- Stable publication credentials must be scoped to that protected environment,
-  with equivalent organization/repository-scoped access removed. Rolling must
-  use a distinct credential restricted server-side to its rolling area (or an
-  equivalently isolated publishing service). Sharing an organization-wide SSH
-  key bypasses the stable approval boundary.
-- Protect `main`, workflow changes, and release-tag creation and movement.
-
-These are external configuration requirements, not guarantees provided by the
-current repository workflows. Verify their effective configuration before
-treating dispatch or environment approval as a production sign-off.
-
-Published release files are immutable on both hosts: retries leave identical
-files untouched, add missing files after a partial failure, and fail before
-adding anything if an existing file differs (including `checksums.txt`). A
-failed promotion may already have published `releases/<version>/` and moved
-`releases/latest` while the GitHub release is still a draft; running Promote
-Release again finishes it. Retrying an older release cannot pull the stable
-channel back.
-GitHub retries verify all completed assets before deleting empty `starter`
-entries left by failed uploads and filling gaps; other unfinished states fail
-without deleting anything. After uploading, both channels require every
-expected GitHub asset to be `uploaded` and to match the workflow's SHA-256
-digest, downloading and hashing the asset when GitHub provides no digest.
-Rolling releases still replace their assets on every publication.
-Tags are mutable refs, so the provenance marker and `releases/<version>/commit`
-record the source commit, and a tag moved to another commit is refused. A
-ruleset protecting `refs/tags/v*` from deletion and force pushes is the
-server-side complement.
-
-Layout on `https://download.eclipse.org/enclave/`, which the updater and the
-download links depend on:
-
-| Path | Contents |
-|------|----------|
-| `releases/<version>/` | All assets of one release plus `checksums.txt` and `commit`; versions are plain (`1.0.0`, `1.1.0-rc.1`) |
-| `releases/latest` | One line naming the highest final release, written after its directory is complete |
-| `rolling/` | The assets of the current `main` build, replaced as a whole on every push; only `main` publishes here |
-| `rolling/latest` | One line with the full commit SHA of that build, published together with its assets |
-
-Uploads go through `.github/actions/publish-downloads`, which follows the
-[CBI procedure](https://eclipse.dev/cbi/best-practices/github-actions/upload-to-downloads.eclipse.org/):
-the `SCP_USERNAME`, `SCP_KEY`, and `SCP_PASSPHRASE` secrets are provisioned by
-Otterdog, the server's host key is pinned in the action (update `known-hosts`
-when the Eclipse Foundation rotates it), and each directory is uploaded next
-to its target. Before publication, remote SHA-256 verification checks every
-staged file against the workflow's bytes, including `checksums.txt` itself;
-a mismatch or missing file fails before publishing the staged files or
-advancing `latest`, and a failed run removes its staging directory. New directories and rolling builds are published as a whole
-with `mv`; retries of existing releases validate the staged files, then add
-only missing files without replacing existing ones.
-After publishing, the action reads `checksums.txt` and the pointer back over
-`https://download.eclipse.org` and warns when they do not match within two
-minutes. This HTTP propagation check is separate from the mandatory remote
-integrity check. The GitHub release keeps a copy of the assets; the Scoop manifest
-points at it. GitHub renames uploaded assets, collapsing every run of characters
-other than letters, digits, `-`, and `_` into one dot, so the assemble job
-renames the packages the same way (`scripts/github-asset-name.sh`) before
-writing `checksums.txt`: a `1.0.1~~git…` package is published as `1.0.1.git…`
-on both hosts, and the assemble job fails on a name that would still change.
-
-## Docs and Diagrams
+## Docs and diagrams
 
 - Keep docs concise and aimed at experienced developers.
-- Diagrams are Mermaid code blocks embedded in the docs; update them together with the behavior they document.
+- Diagrams are Mermaid code blocks embedded in the docs; update them together
+  with the behavior they document.
 
 ## Commits
 
-Use Conventional Commits for commit subjects:
-`type: short imperative summary`
+Use Conventional Commits: `type: short imperative summary`.
 
-Allowed types: `feat`, `fix`, `docs`, `refactor`, `test`, `chore`, `build`, `ci`,
-`perf`, `revert`.
+Allowed types: `feat`, `fix`, `docs`, `refactor`, `test`, `chore`, `build`,
+`ci`, `perf`, `revert`.
 
-## Work Tracking
-
-Work is tracked via GitHub Issues.
+Work is tracked in GitHub Issues.

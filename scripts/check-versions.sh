@@ -159,8 +159,8 @@ extract debian/rules '/usr/lib/go-([0-9]+\.[0-9]+)/bin'
 deb_rules_go=$REPLY
 extract packaging/rpm/enclave.spec '^BuildRequires:[[:space:]]+golang >= ([0-9]+\.[0-9]+)'
 rpm_go=$REPLY
-extract README.md 'Go ([0-9]+\.[0-9]+) or newer'
-readme_go=$REPLY
+extract CONTRIBUTING.md 'Go ([0-9]+\.[0-9]+) or newer'
+contributing_go=$REPLY
 extract docs/DEV.md 'Go ([0-9]+\.[0-9]+) or newer'
 dev_go=$REPLY
 extract Makefile 'Install Go ([0-9]+\.[0-9]+)\+'
@@ -170,7 +170,7 @@ extract Makefile '"\$\$GO_VER" -lt ([0-9]+)'
 make_go_check=$REPLY
 expect_same "Go floor" "go.mod=$go_floor" "debian/control=$deb_go" \
     "debian/control alternative=$deb_go_pkg" "debian/rules=$deb_rules_go" \
-    "enclave.spec=$rpm_go" "README.md=$readme_go" "docs/DEV.md=$dev_go" \
+    "enclave.spec=$rpm_go" "CONTRIBUTING.md=$contributing_go" "docs/DEV.md=$dev_go" \
     "Makefile=$make_go" "Makefile check-go=1.$make_go_check"
 
 extract go.mod '^toolchain go([0-9.]+)'

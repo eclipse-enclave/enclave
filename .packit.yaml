@@ -1,0 +1,50 @@
+# See the documentation for more information:
+# https://packit.dev/docs/configuration/
+
+specfile_path: packaging/rpm/enclave.spec
+
+# name in upstream package repository or registry (e.g. in PyPI)
+upstream_package_name: enclave
+# downstream (Fedora) RPM package name
+downstream_package_name: enclave
+
+srpm_build_deps:
+  - golang
+
+jobs:
+  - job: copr_build
+    trigger: commit
+    identifier: main
+    branch: main$
+    targets:
+      - fedora-all
+  - job: copr_build
+    trigger: pull_request
+    targets: [fedora-stable]
+  - job: copr_build
+    trigger: release
+    identifier: release
+    owner: filippor
+    project: tests
+    targets:
+      - fedora-all
+
+notifications:
+  pull_request:
+    successful_build: true
+
+actions:
+  post-upstream-clone:
+    - go mod vendor -modcacherw
+  get-current-version:
+    - ./scripts/version.sh --package
+  create-archive:
+     - |
+      bash -euo pipefail -c '
+        name="enclave-${PACKIT_PROJECT_VERSION:?}"
+        git archive --prefix="$name/" -o "$name.tar" HEAD
+        tar --append --file="$name.tar" \
+          --transform="s,^,$name/," vendor
+        gzip -f "$name.tar"
+        printf "%s\n" "$name.tar.gz"
+      '

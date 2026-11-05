@@ -42,7 +42,9 @@ authentication injection, and tool-specific configurations.
 %build
 export GOCACHE="%{_builddir}/%{name}-%{version}/.gocache"
 export GOMODCACHE="%{_builddir}/%{name}-%{version}/.gomodcache"
-go mod vendor -modcacherw
+if [ ! -f vendor/modules.txt ]; then
+    go mod vendor -modcacherw
+fi
 mkdir -p bin completions
 # Package-managed builds install the asset tree beside the executable. Disable
 # cgo so RPMs built on Debian or Ubuntu do not acquire host glibc requirements.

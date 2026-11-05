@@ -65,6 +65,26 @@ type Defaults struct {
 	WorktreeMetadata       string              `json:"worktree_metadata"`
 	AllowDomains           []string            `json:"allow_domains"`
 	BridgePorts            []string            `json:"bridge_ports"`
+	PeerGroup              string              `json:"peer_group"`
+	A2ARole                string              `json:"a2a_role"`
+	A2ADescription         string              `json:"a2a_description"`
+	A2ALog                 string              `json:"a2a_log"`
+	A2AContextTTL          string              `json:"a2a_context_ttl"`
+	A2AQueueDepth          string              `json:"a2a_queue_depth"`
+	A2ATaskDeadline        string              `json:"a2a_task_deadline"`
+	A2ASendWait            string              `json:"a2a_send_wait"`
+	A2AHostSendWait        string              `json:"a2a_host_send_wait"`
+	A2AMaxRequestSize      string              `json:"a2a_max_request_size"`
+	A2AMaxResultSize       string              `json:"a2a_max_result_size"`
+	A2AHubRetainedResults  string              `json:"a2a_hub_retained_results"`
+	A2ARecordLimit         string              `json:"a2a_record_limit"`
+	A2ARecordMaxAge        string              `json:"a2a_record_max_age"`
+	A2AReconnectWindow     string              `json:"a2a_reconnect_window"`
+	A2ACommitTimeout       string              `json:"a2a_commit_timeout"`
+	A2ADepartureAckTimeout string              `json:"a2a_departure_ack_timeout"`
+	A2ACredentialLifetime  string              `json:"a2a_credential_lifetime"`
+	A2AStatusStaleness     string              `json:"a2a_status_staleness"`
+	A2ATerminationTimeout  string              `json:"a2a_termination_timeout"`
 
 	// path is the file the values were read from, so list entries can name it.
 	path string
@@ -263,6 +283,7 @@ func readDefaults(path string) (Defaults, []Warning, error) {
 	warnings = append(warnings, validateSessionTint(path, &defaults)...)
 	warnings = append(warnings, validateHostEnv(path, &defaults)...)
 	warnings = append(warnings, validateUpdateChannel(path, &defaults)...)
+	warnings = append(warnings, validateA2ADefaults(path, &defaults)...)
 	defaults.path = path
 	for name, override := range defaults.ToolOverrides {
 		override.path = path

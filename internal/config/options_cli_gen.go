@@ -366,5 +366,48 @@ func optionCLIFlags() map[string][]CLIFlag {
 				return nil
 			}),
 		},
+		"peer_group": {
+			valueFlag("--peer-group", "Join this session to an A2A peer group (experimental; requires --name)", "--peer-group requires a group name", func(opts *model.Options, sources *model.OptionSources, value string) error {
+				if err := applyPeerGroup(opts, value); err != nil {
+					return err
+				}
+				sources.PeerGroup = model.SourceCLI
+				return nil
+			}),
+		},
+		"a2a_role": {
+			valueFlag("--role", "A2A role in the peer group: orchestrator|worker (default: worker)", "--role requires a value (orchestrator|worker)", func(opts *model.Options, sources *model.OptionSources, value string) error {
+				if err := applyA2ARole(opts, value); err != nil {
+					return err
+				}
+				sources.A2ARole = model.SourceCLI
+				return nil
+			}),
+		},
+		"a2a_description": {
+			valueFlag("--a2a-description", "A2A agent card description for this session", "--a2a-description requires a value", func(opts *model.Options, sources *model.OptionSources, value string) error {
+				opts.A2ADescription = value
+				sources.A2ADescription = model.SourceCLI
+				return nil
+			}),
+		},
+		"a2a_log": {
+			valueFlag("--a2a-log", "A2A audit granularity: coarse|full (default: coarse; set by the member that creates the group)", "--a2a-log requires a value (coarse|full)", func(opts *model.Options, sources *model.OptionSources, value string) error {
+				if err := applyA2ALog(opts, value); err != nil {
+					return err
+				}
+				sources.A2ALog = model.SourceCLI
+				return nil
+			}),
+		},
+		"a2a_context_ttl": {
+			valueFlag("--a2a-context-ttl", "Idle expiry of A2A worker contexts, e.g. 24h", "--a2a-context-ttl requires a duration", func(opts *model.Options, sources *model.OptionSources, value string) error {
+				if err := applyA2AContextTTL(opts, value); err != nil {
+					return err
+				}
+				sources.A2AContextTTL = model.SourceCLI
+				return nil
+			}),
+		},
 	}
 }

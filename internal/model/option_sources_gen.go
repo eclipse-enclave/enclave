@@ -26,6 +26,25 @@ type GlobalOptionSources struct {
 }
 
 type RunOptionSources struct {
+	A2ACommitTimeout         OptionSource
+	A2AContextTTL            OptionSource
+	A2ACredentialLifetime    OptionSource
+	A2ADepartureAckTimeout   OptionSource
+	A2ADescription           OptionSource
+	A2AHostSendWait          OptionSource
+	A2AHubRetainedResults    OptionSource
+	A2ALog                   OptionSource
+	A2AMaxRequestSize        OptionSource
+	A2AMaxResultSize         OptionSource
+	A2AQueueDepth            OptionSource
+	A2AReconnectWindow       OptionSource
+	A2ARecordLimit           OptionSource
+	A2ARecordMaxAge          OptionSource
+	A2ARole                  OptionSource
+	A2ASendWait              OptionSource
+	A2AStatusStaleness       OptionSource
+	A2ATaskDeadline          OptionSource
+	A2ATerminationTimeout    OptionSource
 	AddDirs                  OptionSource
 	AddReadonlyDirs          OptionSource
 	AddReadonlySensitiveDirs OptionSource
@@ -43,6 +62,7 @@ type RunOptionSources struct {
 	NoCache                  OptionSource
 	NoHistory                OptionSource
 	NoMemory                 OptionSource
+	PeerGroup                OptionSource
 	Ports                    OptionSource
 	ProjectMount             OptionSource
 	SensitiveDirExceptions   OptionSource
@@ -97,6 +117,25 @@ func DefaultOptionSources() OptionSources {
 			Verbose:          SourceDefault,
 		},
 		RunOptionSources: RunOptionSources{
+			A2ACommitTimeout:         SourceDefault,
+			A2AContextTTL:            SourceDefault,
+			A2ACredentialLifetime:    SourceDefault,
+			A2ADepartureAckTimeout:   SourceDefault,
+			A2ADescription:           SourceDefault,
+			A2AHostSendWait:          SourceDefault,
+			A2AHubRetainedResults:    SourceDefault,
+			A2ALog:                   SourceDefault,
+			A2AMaxRequestSize:        SourceDefault,
+			A2AMaxResultSize:         SourceDefault,
+			A2AQueueDepth:            SourceDefault,
+			A2AReconnectWindow:       SourceDefault,
+			A2ARecordLimit:           SourceDefault,
+			A2ARecordMaxAge:          SourceDefault,
+			A2ARole:                  SourceDefault,
+			A2ASendWait:              SourceDefault,
+			A2AStatusStaleness:       SourceDefault,
+			A2ATaskDeadline:          SourceDefault,
+			A2ATerminationTimeout:    SourceDefault,
 			AddDirs:                  SourceDefault,
 			AddReadonlyDirs:          SourceDefault,
 			AddReadonlySensitiveDirs: SourceDefault,
@@ -114,6 +153,7 @@ func DefaultOptionSources() OptionSources {
 			NoCache:                  SourceDefault,
 			NoHistory:                SourceDefault,
 			NoMemory:                 SourceDefault,
+			PeerGroup:                SourceDefault,
 			Ports:                    SourceDefault,
 			ProjectMount:             SourceDefault,
 			SensitiveDirExceptions:   SourceDefault,
@@ -157,6 +197,63 @@ func DefaultOptionSources() OptionSources {
 }
 
 func MergeOptionSources(base OptionSources, override OptionSources) OptionSources {
+	if override.A2ACommitTimeout != SourceUnset {
+		base.A2ACommitTimeout = override.A2ACommitTimeout
+	}
+	if override.A2AContextTTL != SourceUnset {
+		base.A2AContextTTL = override.A2AContextTTL
+	}
+	if override.A2ACredentialLifetime != SourceUnset {
+		base.A2ACredentialLifetime = override.A2ACredentialLifetime
+	}
+	if override.A2ADepartureAckTimeout != SourceUnset {
+		base.A2ADepartureAckTimeout = override.A2ADepartureAckTimeout
+	}
+	if override.A2ADescription != SourceUnset {
+		base.A2ADescription = override.A2ADescription
+	}
+	if override.A2AHostSendWait != SourceUnset {
+		base.A2AHostSendWait = override.A2AHostSendWait
+	}
+	if override.A2AHubRetainedResults != SourceUnset {
+		base.A2AHubRetainedResults = override.A2AHubRetainedResults
+	}
+	if override.A2ALog != SourceUnset {
+		base.A2ALog = override.A2ALog
+	}
+	if override.A2AMaxRequestSize != SourceUnset {
+		base.A2AMaxRequestSize = override.A2AMaxRequestSize
+	}
+	if override.A2AMaxResultSize != SourceUnset {
+		base.A2AMaxResultSize = override.A2AMaxResultSize
+	}
+	if override.A2AQueueDepth != SourceUnset {
+		base.A2AQueueDepth = override.A2AQueueDepth
+	}
+	if override.A2AReconnectWindow != SourceUnset {
+		base.A2AReconnectWindow = override.A2AReconnectWindow
+	}
+	if override.A2ARecordLimit != SourceUnset {
+		base.A2ARecordLimit = override.A2ARecordLimit
+	}
+	if override.A2ARecordMaxAge != SourceUnset {
+		base.A2ARecordMaxAge = override.A2ARecordMaxAge
+	}
+	if override.A2ARole != SourceUnset {
+		base.A2ARole = override.A2ARole
+	}
+	if override.A2ASendWait != SourceUnset {
+		base.A2ASendWait = override.A2ASendWait
+	}
+	if override.A2AStatusStaleness != SourceUnset {
+		base.A2AStatusStaleness = override.A2AStatusStaleness
+	}
+	if override.A2ATaskDeadline != SourceUnset {
+		base.A2ATaskDeadline = override.A2ATaskDeadline
+	}
+	if override.A2ATerminationTimeout != SourceUnset {
+		base.A2ATerminationTimeout = override.A2ATerminationTimeout
+	}
 	if override.AddDirs != SourceUnset {
 		base.AddDirs = override.AddDirs
 	}
@@ -270,6 +367,9 @@ func MergeOptionSources(base OptionSources, override OptionSources) OptionSource
 	}
 	if override.PassEnv != SourceUnset {
 		base.PassEnv = override.PassEnv
+	}
+	if override.PeerGroup != SourceUnset {
+		base.PeerGroup = override.PeerGroup
 	}
 	if override.Ports != SourceUnset {
 		base.Ports = override.Ports

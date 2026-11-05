@@ -434,6 +434,206 @@ func OptionSpecs() []OptionSpec {
 			Name:  "bridge_ports",
 			Group: OptionGroupRun,
 		},
+		{
+			Name:  "peer_group",
+			Group: OptionGroupRun,
+			ApplyDefaultsWithSource: func(opts *model.Options, defaults Defaults, source model.OptionSource, sources *model.OptionSources) {
+				if canOverride(sources.PeerGroup, source) && strings.TrimSpace(defaults.PeerGroup) != "" {
+					opts.PeerGroup = strings.TrimSpace(defaults.PeerGroup)
+					sources.PeerGroup = source
+				}
+			},
+		},
+		{
+			Name:  "a2a_role",
+			Group: OptionGroupRun,
+			ApplyDefaultsWithSource: func(opts *model.Options, defaults Defaults, source model.OptionSource, sources *model.OptionSources) {
+				if canOverride(sources.A2ARole, source) && strings.TrimSpace(defaults.A2ARole) != "" {
+					opts.A2ARole = strings.TrimSpace(defaults.A2ARole)
+					sources.A2ARole = source
+				}
+			},
+		},
+		{
+			Name:  "a2a_description",
+			Group: OptionGroupRun,
+			ApplyDefaultsWithSource: func(opts *model.Options, defaults Defaults, source model.OptionSource, sources *model.OptionSources) {
+				if canOverride(sources.A2ADescription, source) && strings.TrimSpace(defaults.A2ADescription) != "" {
+					opts.A2ADescription = strings.TrimSpace(defaults.A2ADescription)
+					sources.A2ADescription = source
+				}
+			},
+		},
+		{
+			Name:  "a2a_log",
+			Group: OptionGroupRun,
+			ApplyDefaultsWithSource: func(opts *model.Options, defaults Defaults, source model.OptionSource, sources *model.OptionSources) {
+				if canOverride(sources.A2ALog, source) && strings.TrimSpace(defaults.A2ALog) != "" {
+					opts.A2ALog = strings.TrimSpace(defaults.A2ALog)
+					sources.A2ALog = source
+				}
+			},
+		},
+		{
+			Name:  "a2a_context_ttl",
+			Group: OptionGroupRun,
+			ApplyDefaultsWithSource: func(opts *model.Options, defaults Defaults, source model.OptionSource, sources *model.OptionSources) {
+				if canOverride(sources.A2AContextTTL, source) && strings.TrimSpace(defaults.A2AContextTTL) != "" {
+					opts.A2AContextTTL = strings.TrimSpace(defaults.A2AContextTTL)
+					sources.A2AContextTTL = source
+				}
+			},
+		},
+		{
+			Name:  "a2a_queue_depth",
+			Group: OptionGroupRun,
+			ApplyDefaultsWithSource: func(opts *model.Options, defaults Defaults, source model.OptionSource, sources *model.OptionSources) {
+				if canOverride(sources.A2AQueueDepth, source) && strings.TrimSpace(defaults.A2AQueueDepth) != "" {
+					opts.A2AQueueDepth = strings.TrimSpace(defaults.A2AQueueDepth)
+					sources.A2AQueueDepth = source
+				}
+			},
+		},
+		{
+			Name:  "a2a_task_deadline",
+			Group: OptionGroupRun,
+			ApplyDefaultsWithSource: func(opts *model.Options, defaults Defaults, source model.OptionSource, sources *model.OptionSources) {
+				if canOverride(sources.A2ATaskDeadline, source) && strings.TrimSpace(defaults.A2ATaskDeadline) != "" {
+					opts.A2ATaskDeadline = strings.TrimSpace(defaults.A2ATaskDeadline)
+					sources.A2ATaskDeadline = source
+				}
+			},
+		},
+		{
+			Name:  "a2a_send_wait",
+			Group: OptionGroupRun,
+			ApplyDefaultsWithSource: func(opts *model.Options, defaults Defaults, source model.OptionSource, sources *model.OptionSources) {
+				if canOverride(sources.A2ASendWait, source) && strings.TrimSpace(defaults.A2ASendWait) != "" {
+					opts.A2ASendWait = strings.TrimSpace(defaults.A2ASendWait)
+					sources.A2ASendWait = source
+				}
+			},
+		},
+		{
+			Name:  "a2a_host_send_wait",
+			Group: OptionGroupRun,
+			ApplyDefaultsWithSource: func(opts *model.Options, defaults Defaults, source model.OptionSource, sources *model.OptionSources) {
+				if canOverride(sources.A2AHostSendWait, source) && strings.TrimSpace(defaults.A2AHostSendWait) != "" {
+					opts.A2AHostSendWait = strings.TrimSpace(defaults.A2AHostSendWait)
+					sources.A2AHostSendWait = source
+				}
+			},
+		},
+		{
+			Name:  "a2a_max_request_size",
+			Group: OptionGroupRun,
+			ApplyDefaultsWithSource: func(opts *model.Options, defaults Defaults, source model.OptionSource, sources *model.OptionSources) {
+				if canOverride(sources.A2AMaxRequestSize, source) && strings.TrimSpace(defaults.A2AMaxRequestSize) != "" {
+					opts.A2AMaxRequestSize = strings.TrimSpace(defaults.A2AMaxRequestSize)
+					sources.A2AMaxRequestSize = source
+				}
+			},
+		},
+		{
+			Name:  "a2a_max_result_size",
+			Group: OptionGroupRun,
+			ApplyDefaultsWithSource: func(opts *model.Options, defaults Defaults, source model.OptionSource, sources *model.OptionSources) {
+				if canOverride(sources.A2AMaxResultSize, source) && strings.TrimSpace(defaults.A2AMaxResultSize) != "" {
+					opts.A2AMaxResultSize = strings.TrimSpace(defaults.A2AMaxResultSize)
+					sources.A2AMaxResultSize = source
+				}
+			},
+		},
+		{
+			Name:  "a2a_hub_retained_results",
+			Group: OptionGroupRun,
+			ApplyDefaultsWithSource: func(opts *model.Options, defaults Defaults, source model.OptionSource, sources *model.OptionSources) {
+				if canOverride(sources.A2AHubRetainedResults, source) && strings.TrimSpace(defaults.A2AHubRetainedResults) != "" {
+					opts.A2AHubRetainedResults = strings.TrimSpace(defaults.A2AHubRetainedResults)
+					sources.A2AHubRetainedResults = source
+				}
+			},
+		},
+		{
+			Name:  "a2a_record_limit",
+			Group: OptionGroupRun,
+			ApplyDefaultsWithSource: func(opts *model.Options, defaults Defaults, source model.OptionSource, sources *model.OptionSources) {
+				if canOverride(sources.A2ARecordLimit, source) && strings.TrimSpace(defaults.A2ARecordLimit) != "" {
+					opts.A2ARecordLimit = strings.TrimSpace(defaults.A2ARecordLimit)
+					sources.A2ARecordLimit = source
+				}
+			},
+		},
+		{
+			Name:  "a2a_record_max_age",
+			Group: OptionGroupRun,
+			ApplyDefaultsWithSource: func(opts *model.Options, defaults Defaults, source model.OptionSource, sources *model.OptionSources) {
+				if canOverride(sources.A2ARecordMaxAge, source) && strings.TrimSpace(defaults.A2ARecordMaxAge) != "" {
+					opts.A2ARecordMaxAge = strings.TrimSpace(defaults.A2ARecordMaxAge)
+					sources.A2ARecordMaxAge = source
+				}
+			},
+		},
+		{
+			Name:  "a2a_reconnect_window",
+			Group: OptionGroupRun,
+			ApplyDefaultsWithSource: func(opts *model.Options, defaults Defaults, source model.OptionSource, sources *model.OptionSources) {
+				if canOverride(sources.A2AReconnectWindow, source) && strings.TrimSpace(defaults.A2AReconnectWindow) != "" {
+					opts.A2AReconnectWindow = strings.TrimSpace(defaults.A2AReconnectWindow)
+					sources.A2AReconnectWindow = source
+				}
+			},
+		},
+		{
+			Name:  "a2a_commit_timeout",
+			Group: OptionGroupRun,
+			ApplyDefaultsWithSource: func(opts *model.Options, defaults Defaults, source model.OptionSource, sources *model.OptionSources) {
+				if canOverride(sources.A2ACommitTimeout, source) && strings.TrimSpace(defaults.A2ACommitTimeout) != "" {
+					opts.A2ACommitTimeout = strings.TrimSpace(defaults.A2ACommitTimeout)
+					sources.A2ACommitTimeout = source
+				}
+			},
+		},
+		{
+			Name:  "a2a_departure_ack_timeout",
+			Group: OptionGroupRun,
+			ApplyDefaultsWithSource: func(opts *model.Options, defaults Defaults, source model.OptionSource, sources *model.OptionSources) {
+				if canOverride(sources.A2ADepartureAckTimeout, source) && strings.TrimSpace(defaults.A2ADepartureAckTimeout) != "" {
+					opts.A2ADepartureAckTimeout = strings.TrimSpace(defaults.A2ADepartureAckTimeout)
+					sources.A2ADepartureAckTimeout = source
+				}
+			},
+		},
+		{
+			Name:  "a2a_credential_lifetime",
+			Group: OptionGroupRun,
+			ApplyDefaultsWithSource: func(opts *model.Options, defaults Defaults, source model.OptionSource, sources *model.OptionSources) {
+				if canOverride(sources.A2ACredentialLifetime, source) && strings.TrimSpace(defaults.A2ACredentialLifetime) != "" {
+					opts.A2ACredentialLifetime = strings.TrimSpace(defaults.A2ACredentialLifetime)
+					sources.A2ACredentialLifetime = source
+				}
+			},
+		},
+		{
+			Name:  "a2a_status_staleness",
+			Group: OptionGroupRun,
+			ApplyDefaultsWithSource: func(opts *model.Options, defaults Defaults, source model.OptionSource, sources *model.OptionSources) {
+				if canOverride(sources.A2AStatusStaleness, source) && strings.TrimSpace(defaults.A2AStatusStaleness) != "" {
+					opts.A2AStatusStaleness = strings.TrimSpace(defaults.A2AStatusStaleness)
+					sources.A2AStatusStaleness = source
+				}
+			},
+		},
+		{
+			Name:  "a2a_termination_timeout",
+			Group: OptionGroupRun,
+			ApplyDefaultsWithSource: func(opts *model.Options, defaults Defaults, source model.OptionSource, sources *model.OptionSources) {
+				if canOverride(sources.A2ATerminationTimeout, source) && strings.TrimSpace(defaults.A2ATerminationTimeout) != "" {
+					opts.A2ATerminationTimeout = strings.TrimSpace(defaults.A2ATerminationTimeout)
+					sources.A2ATerminationTimeout = source
+				}
+			},
+		},
 	}
 	attachCLIFlags(specs)
 	return specs

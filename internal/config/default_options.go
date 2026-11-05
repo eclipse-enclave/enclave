@@ -20,6 +20,7 @@ func DefaultOptions() model.Options {
 			ProjectMount:     model.ProjectMountWritable,
 			WorktreeMetadata: model.WorktreeMetadataFollow,
 			Persist:          true,
+			A2AOptions:       defaultA2AOptions(),
 		},
 		AuthOptions: model.AuthOptions{
 			AuthScope:    model.AuthScopeShared,

@@ -104,10 +104,12 @@ func optionFieldName(name string) string {
 }
 
 var optionInitialisms = map[string]string{
+	"a2a": "A2A",
 	"api": "API",
 	"dns": "DNS",
 	"gid": "GID",
 	"mcp": "MCP",
 	"ssh": "SSH",
+	"ttl": "TTL",
 	"uid": "UID",
 }

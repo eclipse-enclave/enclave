@@ -64,6 +64,32 @@ type RunOptions struct {
 	AllRunning               bool
 	NoApply                  bool
 	Force                    bool
+	A2AOptions
+}
+
+// A2AOptions are the experimental A2A peer-group options. Bounds are kept as
+// the configured strings; config.ParseA2A* turns them into typed values.
+type A2AOptions struct {
+	PeerGroup              string
+	A2ARole                string
+	A2ADescription         string
+	A2ALog                 string
+	A2AContextTTL          string
+	A2AQueueDepth          string
+	A2ATaskDeadline        string
+	A2ASendWait            string
+	A2AHostSendWait        string
+	A2AMaxRequestSize      string
+	A2AMaxResultSize       string
+	A2AHubRetainedResults  string
+	A2ARecordLimit         string
+	A2ARecordMaxAge        string
+	A2AReconnectWindow     string
+	A2ACommitTimeout       string
+	A2ADepartureAckTimeout string
+	A2ACredentialLifetime  string
+	A2AStatusStaleness     string
+	A2ATerminationTimeout  string
 }
 
 // MemoryDisabled reports whether this run must not use or generate agent
@@ -103,6 +129,9 @@ type BuildOptions struct {
 	BuildxCacheFrom []string
 	BuildxCacheTo   []string
 	Progress        string
+	// A2AAgent selects the image variant with enclave-a2a-agent; set for
+	// --peer-group sessions, never by an option.
+	A2AAgent bool
 }
 
 type CleanupOptions struct {
@@ -273,6 +302,8 @@ type Profile struct {
 	// aliases listed here, only those aliases carry the placeholder; the rest
 	// receive the raw value. Internal-only, like AllowedDomains/EnvVariables.
 	ProxyManaged []string `json:"proxyManaged,omitempty"`
+	// A2A is spec.yaml's sandbox.a2a block; nil means the tool cannot run in serve mode.
+	A2A *A2ASpec `json:"a2a,omitempty"`
 }
 
 // CacheConfig declares one persistent per-project cache directory: Name is the

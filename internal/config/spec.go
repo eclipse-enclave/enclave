@@ -7,7 +7,13 @@
 
 package config
 
-import "enclave/internal/model"
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+
+	"enclave/internal/model"
+)
 
 // On-disk kinds and filenames for the spec.yaml format. The kind tokens are the
 // same values as the runtime Extension.Type discriminator (model is the
@@ -84,6 +90,30 @@ type specSandbox struct {
 	HostConfigDir      string   `json:"hostConfigDir,omitempty"`
 	HostCredentials    string   `json:"hostCredentialsFile,omitempty"`
 	HostOAuthJSON      string   `json:"hostOauthJson,omitempty"`
+
+	// A2A declares the headless invocation for serve mode (A2A peer groups).
+	A2A *specA2A `json:"a2a,omitempty"`
+}
+
+// specA2A validates the a2a block while decoding, so every spec parse path
+// (built-in, user, untrusted install candidates) rejects an invalid block.
+type specA2A struct {
+	model.A2ASpec
+}
+
+func (s *specA2A) UnmarshalJSON(data []byte) error {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	// A custom unmarshaler escapes the outer UnmarshalStrict, so stay strict here.
+	dec.DisallowUnknownFields()
+	var spec model.A2ASpec
+	if err := dec.Decode(&spec); err != nil {
+		return fmt.Errorf("sandbox.a2a: %w", err)
+	}
+	if err := model.ValidateA2ASpec(&spec); err != nil {
+		return fmt.Errorf("sandbox.%w", err)
+	}
+	s.A2ASpec = spec
+	return nil
 }
 
 type specEntrypoint struct {

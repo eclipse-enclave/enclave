@@ -390,6 +390,10 @@ func specToProfile(doc specDocument) model.Profile {
 	p.HostConfigDir = sb.HostConfigDir
 	p.HostCredentialsFile = sb.HostCredentials
 	p.HostOAuthJSON = sb.HostOAuthJSON
+	if sb.A2A != nil {
+		a2a := sb.A2A.A2ASpec
+		p.A2A = &a2a
+	}
 
 	return p
 }

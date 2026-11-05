@@ -30,6 +30,21 @@ sandbox:
   hostConfigDir: .claude
   hostCredentialsFile: .credentials.json
   hostOauthJson: .claude.json
+  a2a:
+    command: [claude, -p, --output-format, stream-json, --verbose]
+    newSessionArgs: [--session-id, "{sessionId}"]
+    resumeArgs: [--resume, "{sessionId}"]
+    eventFormat: claude-stream-json
+    versionCommand: [claude, --version]
+    # Lower bound: the version the stream-json facts were verified against (P2).
+    versions: ">=2.1.306 <3.0.0"
+    skills:
+      - id: coding
+        name: Coding
+        description: Reads, edits and tests code in the worker's project and answers with a summary of what it did.
+        tags: [code, review, refactor, test]
+    # Appended after the prompt: --mcp-config is variadic and would swallow it.
+    orchestratorArgs: [--mcp-config, /usr/local/share/enclave/templates/claude-a2a-mcp.json]
 
 credentials:
   sources:

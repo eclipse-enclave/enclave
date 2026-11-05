@@ -1,25 +1,14 @@
-# Tool Profiles & Images
+# Tools and images
 
-## Built-in Tools
+Which agents Enclave ships, how their images are built, named, and updated, and
+how to control builds and caches.
+
+## Built-in tools
 
 ```bash
 enclave tools      # List available tool profiles
 enclave features   # List available feature extensions
 ```
-
-Core ships six tools: three from large vendors (Claude Code, Codex, Copilot)
-and three open-source ones (Theia, including the `theia-next` preview profile,
-OpenCode, and Pi). Every other tool profile lives in the official
-[enclave-extensions](https://github.com/eclipse-enclave/enclave-extensions) repository. Install one with:
-
-```bash
-enclave tools add eclipse-enclave/enclave-extensions --name <tool>
-```
-
-The six change only by a vote of the Eclipse Enclave committers; see
-[CONTRIBUTING.md](../CONTRIBUTING.md#where-it-goes).
-
-Built-in tool profiles:
 
 | Tool | Description |
 |------|-------------|
@@ -31,25 +20,32 @@ Built-in tool profiles:
 | `theia` | Host [Eclipse Theia](https://theia-ide.org/) desktop IDE attached to an Enclave container |
 | `theia-next` | Preview [Theia Next](https://theia-ide.org/) desktop IDE attached to an Enclave container |
 
-Tool profiles live in `extensions/tools/<tool>/spec.yaml` (`kind: sandbox`) and declare the command, config directory, optional skills directory, QEMU microVM settings, and auth providers (API key vars, auth files, OAuth ports).
-
-Which one runs is asked once on the first interactive session and then read from the `tool` key; the IDE profiles are selected explicitly with `--tool theia`. See [Tool selection](cli-reference.md#tool-selection).
-
-## Base Images
-
-The default base image is `debian:trixie-slim`. Override with `--base-image`:
+These six (Theia counting with its `theia-next` preview) change only by a vote
+of the Eclipse Enclave committers; see
+[CONTRIBUTING.md](../CONTRIBUTING.md#where-it-goes). Every other tool lives in
+[enclave-extensions](https://github.com/eclipse-enclave/enclave-extensions):
 
 ```bash
-enclave --base-image ubuntu:24.04
+enclave tools add eclipse-enclave/enclave-extensions --name <tool>
 ```
 
-The Dockerfile assumes a Debian/Ubuntu-style base (apt, bash).
+The tool is chosen once and saved as the `tool` key; IDE profiles are selected
+with `--tool theia`. See [Tool selection](cli-reference.md#tool-selection).
+Profiles live in `extensions/tools/<tool>/spec.yaml` (`kind: sandbox`) and
+declare the command, config and skills directories, QEMU settings, and auth
+providers; see [Extensions](extensions/README.md).
 
-When the base image already has a UID 1000 user (e.g. `node` in `node:22`), enclave renames it to `agent` and keeps a compatibility symlink from the original home path to `/home/agent`. This preserves home-path-based tool configs but cannot fix hardcoded absolute paths outside the home directory.
+## Base images
 
-## Devcontainer Support
+The default base image is `debian:trixie-slim`. Override it with
+`--base-image` or `base_image`, e.g. `enclave --base-image ubuntu:24.04`.
 
-Derive the base image from a `devcontainer.json` in your project:
+- The Dockerfile assumes a Debian/Ubuntu-style base (apt, bash).
+- An existing UID 1000 user (e.g. `node` in `node:22`) is renamed to `agent`,
+  with a symlink from its original home to `/home/agent`. Home-relative tool
+  configs keep working; hardcoded absolute paths outside home do not.
+
+## Devcontainer support
 
 ```bash
 enclave devcontainer run         # Start from devcontainer.json
@@ -57,97 +53,138 @@ enclave devcontainer shell       # Interactive shell from devcontainer.json
 enclave devcontainer generate    # Generate .devcontainer/devcontainer.json
 ```
 
-Or set `devcontainer: true` in your config. enclave looks for `.devcontainer/devcontainer.json` or `devcontainer.json` in the project root.
+Or set `"devcontainer": true`. Enclave reads `.devcontainer/devcontainer.json`
+or `devcontainer.json` in the project root.
 
-`--base-image` and devcontainer mode are mutually exclusive. Devcontainer mode runs on the `docker` and `podman` backends, not on `qemu`; see [Podman backend](cli-reference.md#podman-backend) for podman specifics.
+- Mutually exclusive with `--base-image`.
+- Runs on `docker` and `podman`, not `qemu`; see
+  [Podman devcontainers](backends.md#devcontainers).
+- Enables no Enclave features unless you pass `--features` or set `features`.
+- Bind sources must lie inside the project; in read-only project mode,
+  devcontainer project mounts are read-only. See [Mounts](mounts.md).
 
-Applied devcontainer settings (best effort): `workspaceFolder`, `workspaceMount`, `containerEnv`, `mounts`, `runArgs`, `postCreateCommand`, `postStartCommand`. `remoteUser` is honored for shell-only sessions; agent containers run as the internal user unless `--use-remote-user` is set. A `runArgs` `--security-opt` is applied only if it keeps the default confinement (`no-new-privileges`, `label=type:container_t`, podman's `mask=`); any other value, including custom seccomp profiles and SELinux types, is dropped with a warning.
+| `devcontainer.json` field | Handling |
+|---------------------------|----------|
+| `workspaceFolder`, `workspaceMount`, `containerEnv`, `mounts`, `postCreateCommand`, `postStartCommand` | Applied (best effort) |
+| `runArgs` | Applied (best effort). A `--security-opt` survives only if it keeps the default confinement (`no-new-privileges`, `label=type:container_t`, podman's `mask=`); others, including custom seccomp profiles and SELinux types, are dropped with a warning |
+| `remoteUser` | Honored for shell-only sessions; agent containers use the internal user unless `--use-remote-user` is set |
+| `dockerComposeFile`, `features`, `remoteEnv`, `initializeCommand`, `onCreateCommand`, `updateRemoteUserUID` | Ignored with a warning |
 
-Unsupported fields (`dockerComposeFile`, `features`, `remoteEnv`, `initializeCommand`, `onCreateCommand`, `updateRemoteUserUID`) are ignored with a warning.
+## Image variants and naming
 
-## Image Variants
+Each tool gets its own image.
 
-Images are per-tool: each agent gets its own image, selected with `--tool`
-or the `tool` key.
+| Build | Image tag |
+|-------|-----------|
+| Default (tool plus default features) | `enclave-<tool>:latest` |
+| `--slim` (tool only) | `enclave-<tool>:slim` |
+| Explicit `features` or `--features` | `enclave-<tool>:custom-<hash>-latest` (slim: `custom-<hash>-slim`) |
+| `--base-image` | `enclave-<tool>:base-<hash>-latest` (slim: `base-<hash>-slim`) |
+| Devcontainer mode | `enclave-<tool>:devcontainer-<hash>-latest` (slim: `devcontainer-<hash>-slim`) |
+| `--image-name <name>` | Used as given; disables all derivation above |
 
-| Flag | Image tag | Description |
-|------|-----------|-------------|
-| (default) | `enclave-<tool>:latest` | Selected tool + default features |
-| `--slim` | `enclave-<tool>:slim` | Selected tool, no features |
+When Enclave runs from a checkout of its own sources on a non-default branch,
+the default and slim tags get a `branch-<name>-<hash>-` prefix so they do not
+overwrite default-branch images. Podman stores images as
+`localhost/enclave-<tool>:...`.
 
-Use `--image-name <name>` to override the tag. When running from a non-default branch, the tag is automatically prefixed with the branch name and hash to avoid overwriting main images.
+## Node runtime
 
-When `--base-image` or devcontainer mode is active without `--image-name`, the image name is auto-derived (e.g. `enclave-<tool>:base-<hash>-latest`).
+Node-based agent CLIs run on a private Node at `/opt/enclave/node`, pinned in
+`Dockerfile` via `AGENT_NODE_IMAGE`. User shells and project commands use the
+`node`/`npm` from the base image or nvm.
 
-## Node Runtime
-
-enclave installs a private Node runtime at `/opt/enclave/node` for Node-based agent CLIs. Agent launchers are pinned to this runtime, while user shells and project commands use the user-facing `node`/`npm` from the base image or nvm. The private runtime version is pinned in `Dockerfile` via `AGENT_NODE_IMAGE`.
-
-## Agent Updates
-
-Agent CLIs auto-update after the interval elapses (24 hours by default), but only for tools that define `extensions/tools/<tool>/check-update.sh`. On a steady-state run, once that interval has elapsed, enclave runs the hook in a probe container; only a changed upstream fingerprint triggers a rebuild.
-
-To refresh an agent now, use the build-only `update` command. It rebuilds the tool's image with the latest agent CLI and exits without starting a session:
+## Agent updates
 
 ```bash
-enclave update              # Refresh the default tool's image, then exit
-enclave update codex        # Refresh a specific tool
-enclave update claude codex # Refresh several tools
+enclave update              # Rebuild the default tool's image, then exit
+enclave update codex        # A specific tool
+enclave update claude codex # Several tools
 ```
 
-With no arguments, `update` targets the resolved default tool (honoring `--tool` and config). It accepts the same build flags as a run (for example `--slim`, `--features`, `--base-image`), so it refreshes the exact image variant a matching run would use.
+`update` always rebuilds and starts no session. Without arguments it targets
+the resolved default tool. It accepts the run's build flags (`--slim`,
+`--features`, `--base-image`, …) to refresh the matching image variant, and
+`--backend` to select the engine.
 
-`update` always rebuilds. A normal `enclave` run never forces an agent update — it relies on the automatic interval check above. Tools without `check-update.sh` do not auto-update, but they still refresh on `enclave update`, on an explicit `--rebuild`, or when another change already causes a rebuild.
+Automatic updates apply only to tools with
+`extensions/tools/<tool>/check-update.sh`. Once the interval has elapsed (24
+hours by default; `ENCLAVE_AGENT_UPDATE_INTERVAL_HOURS=0` probes on every
+rebuild-eligible run), a run executes the hook in a probe container and
+rebuilds only on a changed upstream fingerprint. A normal run never forces an
+update. Tools without the hook refresh on `enclave update`, `--rebuild`, or any
+other rebuild.
 
-Set `ENCLAVE_AGENT_UPDATE_INTERVAL_HOURS=0` to run automatic update probes on every rebuild-eligible invocation. For offline events or frozen build inputs, use `--no-rebuild` to suppress image builds entirely (existing images are reused).
+`enclave tools|features|commands update` refresh extension sources, not
+images.
 
-## Build Cache
+## Build cache
 
-The image rebuilds when the Dockerfile template, entrypoint, target, base image/devcontainer, or features change, when an automatic update probe reports a changed fingerprint for a tool hook, or when forced via `--rebuild` or the `update` command.
+The image rebuilds when the Dockerfile template, entrypoint, target, base image
+or devcontainer, or features change; when an update probe reports a new
+fingerprint; or on `--rebuild` and `enclave update`.
 
-`--no-rebuild` bypasses all runtime and gateway image builds for the current invocation, including automatic update probes and rebuilds. It uses existing local images as-is and fails fast if a required image is missing.
+### Suppressing rebuilds
 
-`--no-cache` disables the runtime package cache mounts from `~/.cache/enclave/`
-and does not affect the Docker build cache. Package managers can still use
-container-local caches that are discarded with the container.
+`--no-rebuild` skips all runtime and gateway image builds and update probes for
+one invocation, uses existing local images, and fails fast if one is missing.
 
-Enclave pins the pnpm store to `~/.local/share/pnpm/store`, backed by the
-persistent cache unless `--no-cache` is set, so pnpm's mount-boundary detection
-cannot create `.pnpm-store` in the project. The path is set via
-`PNPM_CONFIG_STORE_DIR` (pnpm 11 and later) and a `store-dir` entry in pnpm's
-global config file (pnpm 9 and 10), which project-level pnpm config overrides. Store and project
-are separate mounts, so pnpm copies packages instead of hard-linking them.
+`export ENCLAVE_NO_REBUILD=1` does the same for every session command (`run`,
+`shell`, `continue`, `resume`, devcontainer run/shell, user session commands),
+including QEMU bundles.
 
-By default, enclave builds with `docker build` and inline image cache.
-`--cache-from <image>` adds image cache sources, and the current tool image's
-own prior build (`enclave-<tool>:...`) is considered automatically when present.
+- Non-building commands ignore it; `enclave config` reports it.
+- `--rebuild` and `enclave update` are rejected while it is set; extension
+  source updates are unaffected.
+- Override it with `unset ENCLAVE_NO_REBUILD`, `ENCLAVE_NO_REBUILD=0`, or
+  `--no-rebuild=false`. There is no config key.
 
-Use buildx for shared incremental layer cache:
+### Package caches
+
+`--no-cache` disables the package cache mounts from `~/.cache/enclave/`, not the
+Docker build cache. Container-local caches still work and are discarded with
+the container.
+
+The pnpm store is pinned to `~/.local/share/pnpm/store` (persistent unless
+`--no-cache`), so pnpm cannot create `.pnpm-store` in the project. It is set via
+`PNPM_CONFIG_STORE_DIR` (pnpm 11+) and `store-dir` in pnpm's global config
+(pnpm 9 and 10), which project pnpm config overrides. Store and project are
+separate mounts, so pnpm copies instead of hard-linking.
+
+### Image build cache
+
+Builds use `docker build` with inline cache. `--cache-from` (or `cache_from`)
+adds sources; the tool image's own prior build is used automatically. All
+builds need the buildx plugin (the Dockerfile uses `RUN --mount`); without it
+Enclave fails before building and says how to install it.
 
 ```bash
 enclave --buildx-cache-dir ~/.cache/enclave/buildx --rebuild shell -- -lc true
 ```
 
-`--buildx-cache-dir` uses buildx for the build, imports the local cache when it
-is populated, and exports a `type=local,mode=max` cache. Use
-`--buildx-cache-from` and `--buildx-cache-to` for raw buildx cache specs such as
-registry or shared-directory targets. All image builds require the buildx
-plugin because the Dockerfile uses BuildKit-only `RUN --mount` cache mounts. If
-buildx is unavailable, enclave fails before starting the build and reports how
-to install it.
+| Flag | Effect |
+|------|--------|
+| `--buildx-cache-dir <path>` | Build with buildx, import the local cache if populated, export a `type=local,mode=max` cache |
+| `--buildx-cache-from <spec>`, `--buildx-cache-to <spec>` | Raw buildx cache specs, e.g. registry or shared-directory targets |
 
-Runtime images normally bake the host UID/GID. For shared event artifacts,
-build with a canonical identity and remap at runtime:
+Podman ignores these flags; see [Podman image builds](backends.md#image-builds).
+
+### Build UID and GID
+
+Images bake the host UID/GID. For shared event artifacts, bake a canonical
+identity and remap at runtime:
 
 ```bash
 enclave --build-uid 1000 --build-gid 1000 --runtime-uid-remap --rebuild shell -- -lc true
 ```
 
-The image hash includes the effective build UID/GID, so a loaded image built for
-a different numeric identity is rebuilt instead of being treated as current.
-Runtime UID remap is incompatible with devcontainer `remoteUser` when that user
-would be applied for shell sessions.
+The image hash includes the effective build UID/GID, so an image built for
+another identity is rebuilt. Runtime remap is incompatible with a devcontainer
+`remoteUser` applied to shell sessions.
 
-## Runtime Assets
+## Runtime assets
 
-Runtime DNS allowlists live in `runtime-assets/gateway-allowlists/` and are baked into the image at build time. Tool settings templates live in `extensions/tools/<tool>/templates/` and are copied to `/usr/local/share/enclave/templates/` inside the container. See [Configuration](configuration.md) for full config overrides and JSON/TOML patches.
+DNS allowlists in `runtime-assets/gateway-allowlists/` are baked into the
+image. Tool settings templates in `extensions/tools/<tool>/templates/` are
+copied to `/usr/local/share/enclave/templates/` in the container; see
+[Tool config](tool-config.md).

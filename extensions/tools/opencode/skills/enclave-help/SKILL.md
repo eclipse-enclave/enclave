@@ -22,15 +22,23 @@ attempting in-container file edits.
 | Path | Topic |
 |------|-------|
 | `docs/README.md` | Documentation index |
+| `docs/install.md` | Requirements, installation, updates, running as root, upgrade notes |
+| `docs/cli-reference.md` | All commands and flags |
+| `docs/configuration.md` | Config files, precedence, keys, list options, environment variables |
+| `docs/tool-config.md` | Tool config overrides, managed skills, config patches |
+| `docs/persistence.md` | Sessions, background mode, stored data, cleanup |
+| `docs/git.md` | Git identity, config protection, commit signing |
+| `docs/mounts.md` | Project mount, extra directories, sensitive mounts |
+| `docs/networking.md` | Network isolation, gateway, network log, port bridging |
+| `docs/auth.md` | Authentication, secrets, API keys, SSH keys |
+| `docs/tools.md` | Supported agent tools, images, devcontainers, updates |
+| `docs/backends.md` | Docker, Podman, and QEMU backends |
+| `docs/commands.md` | Custom host and session commands |
+| `docs/integration.md` | JSON output contracts for scripts |
+| `docs/windows.md` | Windows (WSL2) launcher |
 | `docs/ARCHITECTURE.md` | Detailed architecture with diagrams |
-| `docs/cli-reference.md` | CLI flags and options |
-| `docs/configuration.md` | Config files and settings |
-| `docs/networking.md` | Network isolation and gateway |
-| `docs/auth.md` | Authentication and API keys |
-| `docs/persistence.md` | Persistent stores and session data |
-| `docs/tools.md` | Supported agent tools |
-| `docs/extensions/` | Extension system (adding tools, features) |
-| `docs/runtime/` | Runtime behavior (stores, auth sync, network flow) |
+| `docs/extensions/` | Extension system (installing, adding tools and features, spec reference) |
+| `docs/runtime/` | Runtime internals (stores, network request flow) |
 | `docs/security/` | Security model and host hardening |
 | `extensions/tools/<tool>/README.md` | Per-tool documentation |
 | `extensions/features/<feature>/README.md` | Per-feature documentation |

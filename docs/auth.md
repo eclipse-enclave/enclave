@@ -1,144 +1,123 @@
-# Authentication & Secrets
+# Authentication and secrets
 
-## Logging In
+How agents log in, where credentials are stored, and how API keys, secrets
+files, host environment variables, and SSH keys reach a session.
 
-**The recommended approach is to simply log in from inside the container the first time you run.** Most AI coding agents support OAuth and will prompt you to authenticate on first launch. Your session is saved to a persistent auth store (a host directory under `~/.local/state/enclave/`) and reused automatically on every subsequent run — no host-side configuration needed.
+## Log in from the agent
 
-```bash
-enclave        # First run: log in from inside the agent
-enclave        # Subsequent runs: session reused automatically
-```
+Log in inside the container on the first run; most agents prompt for OAuth on
+first launch. Enclave saves the login in a persistent auth store on the host and
+reuses it on later runs, with no host-side setup. Some OAuth flows need a
+callback port; see [OAuth callback ports](#oauth-callback-ports).
 
-## Auth Stores
+## Auth stores
 
-OAuth and session files are stored in host directories under
-`~/.local/state/enclave/` (bind-mounted into the container; no Docker
-volumes). By default, auth files are shared per tool across projects while tool
-configuration remains per-project. Foreground exits, `exec` exits, background
-stops, and GUI stop/remove actions finalize credentials into the shared auth
-store.
+Auth files live in host directories under `~/.local/state/enclave/`,
+bind-mounted into the container (no Docker volumes). Store internals are in
+[Persistent stores](runtime/stores.md).
 
-```bash
---auth-scope=shared   # Shared per-tool auth store across all projects (default)
---auth-scope=project  # Per-project auth (kept in the project config store)
-```
+| Flag | Where auth lives |
+|------|------------------|
+| `--auth-scope=shared` (default) | One store per tool, shared by all projects; tool configuration stays per project |
+| `--auth-scope=project` | The project's config store |
 
-Use `--reset-auth` to clear saved auth and start fresh:
+- Credentials are written back to the shared store on foreground exit, `exec`
+  exit, background stop, and GUI stop or remove.
+- `--reset-auth` clears saved auth and persisted env secrets, then injects fresh
+  credentials. With shared scope it clears both the shared store and the
+  current project or session config store, so stale local credentials cannot
+  reseed shared auth.
+- `--ephemeral` uses no persistent store at all;
+  `--ephemeral --pass-api-key` still injects API keys from env and secrets
+  files.
 
-```bash
-enclave --reset-auth   # Clears auth files + persisted env secrets, then injects fresh credentials
-```
+### Named auth identities
 
-With shared auth scope, reset clears both the shared auth store and the current
-project/session config store so stale local credentials cannot immediately
-reseed shared auth.
-
-### Named Auth Identities
-
-By default each tool has a single shared auth store
-(`~/.local/state/enclave/tools/<tool>/auth/default/`). `--auth-name <slug>`
-selects a *separate* shared auth store per tool
-(`.../tools/<tool>/auth/<slug>/`), so you can keep several credential sets
-logged in at once and pick one per run without wiping the others:
+`--auth-name <slug>` selects a separate shared store,
+`~/.local/state/enclave/tools/<tool>/auth/<slug>/`, instead of `.../default/`.
+Use it to keep several logins for one tool, such as two subscriptions or a
+subscription and API-key billing, and pick one per run:
 
 ```bash
 enclave --tool codex --auth-name personal   # ChatGPT subscription login
 enclave --tool codex --auth-name api        # API-key billing login
-enclave --tool claude                        # Unnamed default identity (unchanged)
+enclave --tool claude                       # Default identity
 ```
 
-This covers two cases: keeping two subscriptions for the same tool logged in at
-once, and holding a subscription login alongside API-key billing so you can pick
-one per run. When the flag is unset, the default identity is used.
+- The slug is lowercased: 1 to 32 characters of `[a-z0-9]` with interior
+  hyphens.
+- Set a default per project or globally with the `auth_name` key in
+  `config.json` (see [Configuration](configuration.md)).
+- Ignored with a warning under `--auth-scope=project`.
 
-The slug is lowercased and must be 1 to 32 characters of `[a-z0-9]` with interior
-hyphens (e.g. `personal`, `api-key`). Pin a default per project or globally with
-the `auth_name` key in `config.json` (see [Configuration](configuration.md)).
+## Import and export host logins
 
-`--auth-name` applies only under the default `--auth-scope=shared`; it is ignored
-(with a warning) under `--auth-scope=project`, where auth already lives in the
-per-project config store.
-
-Use `--ephemeral` for a completely isolated run with no persistent stores:
+Enclave reconciles auth files between the config store and the shared store by
+itself. These commands only move credentials between the host tool's native
+config and Enclave's stores:
 
 ```bash
-enclave --ephemeral              # No auth or env stores
-enclave --ephemeral --pass-api-key  # Ephemeral but inject API keys from env/secrets
+enclave auth import --tool claude   # Seed the store from a host login, once
+enclave auth export --tool <tool>   # Copy store files back to the host
 ```
 
-## Auth Import / Export
+`--tool` is required. `--auth-scope` and `--auth-name` select the store as for
+a session (`--auth-name` has no effect with project scope). Declared env
+secrets and the env store are not touched. Do not run the host tool on the same
+credentials while importing or while a container uses them.
 
-Move host auth files into or out of the auth store:
+### Claude and concurrent sessions
 
-```bash
-enclave auth import --tool <tool>   # Copy host auth files into the auth store
-enclave auth export --tool <tool>   # Copy auth store files back to the host
-```
+With shared scope, Enclave points `CLAUDE_SECURESTORAGE_CONFIG_DIR` at the
+shared store. Claude keeps `.credentials.json` and `.oauth_refresh.lock` there
+and coordinates refreshes itself (lock-serialized refresh, mtime-based
+re-reads, adopting a token another session rotated), so parallel long-running
+sessions keep working after a refresh. `--auth-scope=project` opts out into
+isolated credentials without this coordination.
 
-Both commands honor `--auth-scope` (`shared` or `project`) and `--auth-name`
-(seed or extract a specific named identity's shared auth store).
+## OAuth callback ports
 
-**Host OAuth reuse** (only when the host agent is not running concurrently):
+| Tool | Callback | Mapping |
+|------|----------|---------|
+| Codex | `localhost:1455/auth/callback` | Automatic when no session exists; add `-p 1455` to log in again. The gateway log shows `Loopback proxy (socat) enabled on port 1455` while active |
+| OpenCode (ChatGPT Pro/Plus) | `localhost:1455/auth/callback` | Automatic when `auth.json` has no `openai` entry |
+| Pi (ChatGPT/Codex OAuth) | port 1455 | Automatic when `auth.json` has no `openai-codex` entry; add `-p 1455` to log in again |
+| Pi (Anthropic OAuth) | port 53692 | Not automatic; add `-p 53692` |
 
-```bash
-enclave auth import --tool claude   # One-time seed from host
-enclave                             # Subsequent runs reuse the auth store
-```
-
-Avoid running the host agent and the container at the same time in this mode.
-
-Claude concurrency note: in the default `shared` auth scope, enclave only
-co-locates Claude's secure-storage directory by pointing
-`CLAUDE_SECURESTORAGE_CONFIG_DIR` at the shared auth store. Claude itself reads
-and writes `.credentials.json` and `.oauth_refresh.lock` there and handles its
-native refresh coordination, including lock-based refresh serialization,
-mtime-based credential re-reads, and adopting a peer's freshly rotated token.
-Because all concurrent containers use the same Claude-managed store, parallel,
-long-running sessions keep working after a token refresh. Use
-`--auth-scope=project` to opt out into per-project isolated credentials (no
-cross-session coordination).
-
-## API Keys
-
-Provider credentials follow the same layered resolution as other secrets (see
-below). Use `--no-api-key` to suppress provider credential secrets that are API
-keys. Provider credential secrets default to API keys; profiles can set
-`apiKey: false` on OAuth/provider token secrets so those tokens continue to
-resolve normally. Feature-declared secrets that are not provider credentials also
-continue to resolve normally. In `--ephemeral` mode, `--pass-api-key` controls
-only API key secrets.
-
-When persistence is enabled, resolved declared secret and `--pass-env` values
-are stored in the host-side env store. Suppressed API key secrets are
-skipped before resolution, so they are not persisted. For declared secrets with
-`release.http`, the running tool sees placeholders, while the gateway receives
-the real value from host-managed state. The gateway releases real values only in
-the configured header on HTTPS requests to declared hosts; plaintext HTTP
-requests carrying registered placeholders in headers are denied.
-If a client checks token syntax before sending requests, extensions
-can declare a [custom placeholder shape](extensions/README.md#client-side-credential-format-checks)
-without exposing the real credential. Placeholder generation failures abort
-startup instead of falling back to raw credentials.
-
-Codex OAuth note: the OAuth callback redirects to `http://localhost:1455/auth/callback`. enclave auto-maps port 1455 when no session exists. If you need to re-login, add `-p 1455`. Gateway logs will show `Loopback proxy (socat) enabled on port 1455` when forwarding is active.
-
-Pi Anthropic OAuth note: Enclave does not auto-map the callback port. Add
-`-p 53692` when starting a Pi session in which you intend to log in with
-Anthropic OAuth.
-
-OpenCode ChatGPT subscription note: for `opencode`, complete OpenAI browser auth from the CLI inside the container rather than from `/connect` in the TUI. Use:
+For OpenCode, log in from the CLI rather than `/connect` in the TUI, select
+`ChatGPT Pro/Plus (browser)`, and open the printed URL in the host browser:
 
 ```bash
 enclave --tool opencode shell
 opencode auth login --provider openai
 ```
 
-Then select `ChatGPT Pro/Plus (browser)`, copy the printed URL, and open it in your host browser. `opencode` listens on `http://localhost:1455/auth/callback`, and enclave auto-maps port `1455` when the `openai` entry is missing from `auth.json`.
+## API keys
+
+Provider credentials are declared by extensions and resolved like other
+[secrets](#secrets-files).
+
+- `--no-api-key` withholds provider credentials that are API keys. Credentials
+  marked `apiKey: false` (OAuth and provider tokens) and feature secrets that
+  are not provider credentials still resolve.
+- In `--ephemeral` mode, `--pass-api-key` controls only API key secrets.
+- With persistence on, resolved declared secrets and `--pass-env` values are
+  saved in the host-side env store. Withheld API keys are skipped before
+  resolution and never saved.
+
+With restricted networking, credentials that an extension routes through the
+gateway reach the tool only as placeholders; the gateway inserts the real value
+in one header on HTTPS requests to the declared hosts and denies plaintext HTTP
+requests that carry a placeholder. If a placeholder cannot be generated,
+startup fails instead of falling back to the real value. Extension authors
+find the rules, including
+[custom placeholder shapes](extensions/credentials.md#client-side-credential-format-checks),
+in [Placeholders](extensions/credentials.md#placeholders); the request path is
+in [Network request flow](runtime/network-request-flow.md).
 
 ### Env-only bearer tokens
 
-With restricted networking, the following env credentials also use gateway
-placeholders:
+These env credentials use gateway placeholders under restricted networking:
 
 | Tool | Variable | Release hosts |
 |------|----------|---------------|
@@ -147,55 +126,46 @@ placeholders:
 | Codex | `CODEX_ACCESS_TOKEN` (`at-` personal access tokens only) | `auth.openai.com`, `chatgpt.com` |
 | Codex | `CODEX_API_KEY` / `OPENAI_API_KEY` | `api.openai.com`, `*.openai.com` |
 
-- The bearer tokens have `apiKey: false`, so `--no-api-key` does not suppress
-  them. Codex API keys remain subject to `--no-api-key`.
-- `CODEX_API_KEY` and `OPENAI_API_KEY` are [aliases](#env-aliases); the resolved
-  key is injected under both names. It authenticates `codex exec` without
-  onboarding, while the interactive TUI uses stored auth. For persistent TUI
-  use, start with `--no-api-key` and sign in normally. Details are in the
-  [Codex README](../extensions/tools/codex/README.md#env-credentials).
-- An inspected request that carries a placeholder to a host outside its release
-  list is denied. Codex's API-key model-list request to `chatgpt.com` is one
-  such case; Codex falls back to its built-in model list.
-- `CODEX_ACCESS_TOKEN` must start with `at-` while gateway protection is active.
-  Agent Identity JWTs require client-side signature verification and cannot use
-  a placeholder. The startup error names the credential source; if that is the
-  persisted env store, `--reset-auth` clears it.
-- Placeholders are fresh each session. Auth files containing a placeholder are
-  not copied to shared tool or feature stores; Enclave warns and skips them.
-  Codex startup also removes a regular local `auth.json` containing
-  `ENCLAVE_SECRET_`; shared auth symlinks and their targets are never removed.
-  A shared store that already holds a placeholder needs manual recovery:
-  re-authenticate, or use `--reset-auth` to clear saved auth and persisted env
-  credentials.
-- File-backed and refreshable logins are outside this protection. Enclave does
-  not reuse a Claude setup token in Pi; the
-  [Pi README](../extensions/tools/pi/README.md#env-credentials) covers the
-  `ANTHROPIC_OAUTH_TOKEN` caveat.
+- The bearer tokens are `apiKey: false`, so `--no-api-key` does not withhold
+  them; Codex API keys are withheld.
+- `CODEX_API_KEY` and `OPENAI_API_KEY` are [aliases](#env-aliases) and get the
+  same value. The key authenticates `codex exec` without onboarding; the TUI
+  uses stored auth, so for persistent TUI use start with `--no-api-key` and
+  sign in.
+  See the [Codex README](../extensions/tools/codex/README.md#env-credentials).
+- A placeholder sent to a host outside its release list is denied. Codex's
+  API-key model-list request to `chatgpt.com` is one such case; Codex falls
+  back to its built-in model list.
+- `CODEX_ACCESS_TOKEN` must start with `at-` while gateway protection is active:
+  Agent Identity JWTs need client-side signature checks and cannot use a
+  placeholder. The startup error names the source; `--reset-auth` clears it
+  from the persisted env store.
+- File-backed and refreshable logins are not protected. Enclave does not reuse
+  a Claude setup token in Pi; see the
+  [Pi README](../extensions/tools/pi/README.md#env-credentials).
+- Placeholders change every session. Auth files containing one are not copied
+  to shared stores (Enclave warns), and Codex startup removes a regular local
+  `auth.json` containing `ENCLAVE_SECRET_`; shared auth symlinks and their
+  targets are never removed. A shared store that already holds a placeholder
+  needs a new login or `--reset-auth`.
 
-## Secrets
+## Secrets files
 
-Layered secrets files are used as inputs for declared env secrets and `--pass-env`. They are not copied as-is into the container.
+Layered `.env` files supply values for declared env secrets and `--pass-env`.
+They are never copied into the container as files.
 
 | Layer | File | Scope |
 |-------|------|-------|
 | 1 | `~/.local/state/enclave/secrets/global.env` | All agents, all projects |
-| 2 | `~/.local/state/enclave/secrets/global/<tool>.env` | Specific agent, all projects |
-| 3 | `~/.local/state/enclave/secrets/projects/<hash>/<tool>.env` | Specific agent, specific project |
+| 2 | `~/.local/state/enclave/secrets/global/<tool>.env` | One agent, all projects |
+| 3 | `~/.local/state/enclave/secrets/projects/<hash>/<tool>.env` | One agent, one project |
 
-Later layers override earlier ones. File format: standard `.env` (`KEY=VALUE`, `#` comments, `export` prefix, single/double quotes).
+Later layers override earlier ones. The format is standard `.env` (`KEY=VALUE`,
+`#` comments, optional `export`, single or double quotes). A value in
+`global.env` is enough as long as an active extension declares the secret.
 
-Declared secrets from the selected tool profile and enabled feature manifests use this same resolution. Placing a value in `global.env` (layer 1) is sufficient as long as the secret is declared by the active extensions.
-
-**`--secrets-scope`** controls which per-tool layers are read (`both` by default):
-
-- `both` — layers 1–3 (global shared + global per-tool + project per-tool)
-- `global` — layers 1–2 only
-- `project` — layers 1 and 3 only
-
-Layer 1 (`global.env`) is always read regardless of scope.
-
-**Example:** declared Anthropic credential globally, project override for the same tool:
+`--secrets-scope` selects the per-tool layers: `both` (default, 1–3),
+`global` (1–2), or `project` (1 and 3). Layer 1 is always read.
 
 ```bash
 # All runs of the tool can use this credential
@@ -205,57 +175,76 @@ echo 'ANTHROPIC_API_KEY=sk-ant-readonly...' > ~/.local/state/enclave/secrets/glo
 echo 'ANTHROPIC_API_KEY=sk-ant-project...' > ~/.local/state/enclave/secrets/projects/<hash>/claude.env
 ```
 
-### Env Aliases
+### Env aliases
 
-A declared secret may list several env-var aliases for one credential, for
-example `GH_TOKEN` and `GITHUB_TOKEN`. Each alias is looked up on its own — host
-environment first, then the layered secrets files from layer 3 down to layer 1,
-then the host-side env store — and the alias found in the highest layer wins.
-Its value is injected into *every* alias of that secret and written back to the
-env store, so rotating a token in one alias is enough and a stale value in the
-env store heals after one run.
+A declared secret can list several aliases for one credential, such as
+`GH_TOKEN` and `GITHUB_TOKEN`. Each alias is looked up on its own: host
+environment, then secrets layers 3 to 1, then the env store. The alias found in
+the highest layer wins, and its value is injected into every alias and written
+back to the env store, so rotating one alias is enough and a stale stored value
+is replaced after one run. Two aliases with different values in the winning
+layer fail the run, naming the layer; disagreement in a lower layer is only
+logged.
 
-If two aliases resolve from that same winning layer with different values, the
-run fails and the error names the layer — enclave cannot pick between them.
-Aliases that disagree from a lower layer are only logged, since the winning
-value overrides them anyway.
+## Host environment variables
 
-## Passing Host Environment Variables
-
-Host environment variables do **not** leak into the container unless explicitly opted in.
-
-The exception is the time zone: `TZ` is set to the host zone (from `$TZ`, the `/etc/localtime` symlink, or `/etc/timezone`) so tool timestamps and git commits match the host. A `TZ` from the project `.env`, devcontainer `containerEnv`, or `--pass-env` takes precedence; set `TZ=UTC` there to keep UTC for one project, or set the `timezone` option (e.g. `"timezone": "UTC"` in global `config.json`) to replace the host zone everywhere. The zone roughly reveals the host's location to anything the agent can reach. Both backends ship the zone database.
-
-**`--pass-env KEY1,KEY2`** forwards specific host environment variables into the container. It takes priority over layered secrets for the same key and is the escape hatch for values that are not declared as extension secrets.
+Host variables reach the container only when you opt in.
+`--pass-env KEY1,KEY2` forwards them and takes priority over the secrets files
+for the same key:
 
 ```bash
 enclave --pass-env GITHUB_TOKEN,MY_API_KEY
 ```
 
-This can also be set persistently in `config.json` via the `pass_env` key; `--pass-env` replaces it for the run and `--pass-env +KEY` adds to it. A secret withheld by `--no-api-key` (or `--ephemeral` without `--pass-api-key`) is forwarded only when `--pass-env` names it on the command line (use `--pass-env +KEY` to keep the rest of the configured list); a configured `pass_env` entry for it is skipped with a warning. See [List Options](configuration.md#list-options).
+- The `pass_env` config key sets it persistently. On the command line,
+  `--pass-env` replaces that list for the run and `--pass-env +KEY` adds to it
+  (see [List options](configuration.md#list-options)).
+- A secret withheld by `--no-api-key`, or by `--ephemeral` without
+  `--pass-api-key`, is forwarded only if `--pass-env` names it on the command
+  line (`+KEY` keeps the configured list). A `pass_env` config entry for it is
+  skipped with a warning.
 
-## SSH Keys
+### Time zone
 
-Giving an agent an SSH key is not recommended. The key lets the agent write to systems outside the sandbox, and Enclave cannot restrict how it is used. Let the agent commit in the container, review the diff, and push from the host instead.
+`TZ` is set to the host zone, read from `$TZ`, the `/etc/localtime` symlink, or
+`/etc/timezone`, so timestamps and Git commits match the host. Both backends
+ship the zone database.
 
-Use `ssh-init` only for sessions that must push without host intervention:
+- A `TZ` from the project `.env`, devcontainer `containerEnv`, or `--pass-env`
+  wins; set `TZ=UTC` there for one project.
+- The `timezone` option (for example `"timezone": "UTC"` in global
+  `config.json`) replaces the host zone everywhere.
+- The zone roughly reveals the host's location to anything the agent can reach.
 
-```bash
-enclave ssh-init
-```
+## SSH keys
 
-`ssh-init` stores keys in Enclave's host cache: `~/.cache/enclave/ssh/` by default on Linux, `$XDG_CACHE_HOME/enclave/ssh/` when set, and `~/Library/Caches/org.eclipse.enclave/ssh/` on macOS.
+> [!WARNING]
+> Giving an agent an SSH key is not recommended. The key lets the agent write
+> to systems outside the sandbox, and Enclave cannot restrict how it is used.
+> Let the agent commit in the container, review the diff, and push from the
+> host.
 
-Docker mounts this directory read-only into every session, across all projects and tools. There is no per-session opt-out. Read-only access stops the agent from changing the key files, but it can still use the key for any operation allowed by the Git provider, including force pushes and branch deletion.
+For sessions that must push without you, run `enclave ssh-init`:
 
-The generated key has no passphrase and is usable as soon as it is mounted.
+- Keys are stored in `~/.cache/enclave/ssh/` on Linux
+  (`$XDG_CACHE_HOME/enclave/ssh/` when set) and
+  `~/Library/Caches/org.eclipse.enclave/ssh/` on macOS. You can replace them
+  there.
+- The directory is mounted read-only into every session of every project and
+  tool, with no per-session opt-out. Read-only stops edits to the key files, not
+  force pushes or branch deletion at the Git provider.
+- The generated key has no passphrase and works as soon as it is mounted.
 
-Scope the key before you register it:
+Scope the key before registering it:
 
-- Prefer a deploy key limited to one repository. On GitHub, use repository Settings > Deploy keys; on GitLab, use repository Settings > Repository > Deploy keys. Enable write access only if needed.
-- For access to several repositories, use a dedicated machine account with minimal membership instead of a personal account.
-- To revoke access, delete the key at the provider, then delete the host cache directory listed above.
+- Prefer a deploy key limited to one repository, with write access only if
+  needed (GitHub: repository Settings > Deploy keys; GitLab: Settings >
+  Repository > Deploy keys). Never use a key with broader access than the
+  session needs.
+- For several repositories, use a dedicated machine account with minimal
+  membership, not a personal account.
+- To revoke, delete the key at the provider, then the host directory above.
 
-You can replace the generated keys in the same directory. Do not use a key with broader access than the session needs.
-
-Commit and tag signing are disabled inside the container (see [Persistence](persistence.md#git)), so you cannot distinguish an agent's pushes from your own by their signatures.
+Commit and tag signing are disabled in the container (see
+[Git](git.md#signing)), so signatures cannot tell an agent's pushes from yours.
+SSH on port 22 bypasses the gateway proxy and is not logged.

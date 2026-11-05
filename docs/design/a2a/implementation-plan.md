@@ -88,9 +88,9 @@ Merge order: W0-B stubs, then W0-A type names.
 | A4 | `Dockerfile.a2ahub`, `a2ahub-entrypoint.sh`, `internal/gateway/a2ahub_build.go` | proxy code |
 | A5 | `gateway-entrypoint.sh`, `runtime-assets/net.sh`, `internal/gateway/` (overlay mount, markers) | bundle package |
 | A6 | `internal/docker/network*.go` (connect, disconnect), `internal/docker/signal.go` | backend lifecycle |
-| A7 | `internal/backend/docker/a2ahub.go`, `network.go` (ownership, teardown), `a2a_reconcile.go` | app, cli |
+| A7 | `internal/backend/docker/a2ahub.go`, `network.go` (ownership, teardown), `a2a_reconcile.go`, `internal/backend/types.go` (additive, CR-W0B-1) | app, cli |
 | A8 | `internal/a2aagent/contexttable/`, `internal/a2aagent/executor/` | server, driver |
-| A9 | `internal/a2aagent/driver/claude/`, `internal/tools/a2aspec.go`, `extensions/tools/claude/spec.yaml` (a2a block) | server |
+| A9 | `internal/a2aagent/driver/claude/`, `internal/tools/a2aspec.go`, `extensions/tools/claude/spec.yaml` (a2a block), `internal/config/spec.go` and the model projection (additive, CR-W0B-2) | server |
 | A10 | `internal/a2aagent/server/`, `cmd/enclave-a2a-agent/` (serve) | contexttable internals |
 | A11 | `internal/a2aagent/mcp/`, `cmd/enclave-a2a-agent/` (mcp subcommand) | server |
 | A12 | `internal/config/options_def.go`, generated files, `docs/configuration.md` option rows | cli verbs |

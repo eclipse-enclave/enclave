@@ -128,7 +128,7 @@
 
 <h2 id="protocol">4. The A2A protocol, spec pin and carrier check</h2>
 <p>A2A (Agent2Agent, originally from Google, now a Linux Foundation project) is the open protocol for agents delegating work to agents.</p>
-<div class="decision"><strong>Gate:</strong> no Go type is written before one tagged A2A release is pinned here, with version and spec URL. We speak the <strong>JSON-RPC binding only</strong>. Every method name, the agent card path, the task state list and the message and artifact shapes below must be validated against the pinned document. The names here are from memory of the 0.3 binding and the spec has moved since. <span class="open">Pinned version: open.</span></div>
+<div class="decision"><strong>Gate:</strong> no Go type is written before one tagged A2A release is pinned here, with version and spec URL. We speak the <strong>JSON-RPC binding only</strong>. Every method name, the agent card path, the task state list and the message and artifact shapes below must be validated against the pinned document. The names here are from memory of the 0.3 binding and the spec has moved since. Pinned version: A2A v1.0.1 (wire version <code>1.0</code>), <a href="https://a2a-protocol.org/v1.0.1/specification/">spec</a> and <a href="https://github.com/a2aproject/A2A/blob/3303592588e388e62e0f69f701af531d2f4e3991/specification/a2a.proto">normative proto</a>; renames and shapes in <a href="spec-pin.md">spec-pin.md</a>.</div>
 <dl>
   <dt>Agent card</dt><dd>JSON document under <code>/.well-known/</code>: name, description, skills, service URL, capabilities and security schemes. Cards served by the hub carry hub-facing URLs only (<code>a2a.enclave:&lt;port&gt;/peers/&lt;name&gt;</code>).</dd>
   <dt>JSON-RPC 2.0 over HTTP</dt><dd>Send (request and response), stream (Server-Sent Events), get task, cancel task, resubscribe.</dd>
@@ -149,7 +149,7 @@
 <tr><td>Principal and provenance</td><td>Hub (principal), adapter (provenance)</td><td>Message metadata plus the text prefix</td></tr>
 </tbody>
 </table>
-<p>If the pinned version lacks a legal carrier for any row, the design changes before implementation. <span class="open">Carrier check: open.</span></p>
+<p>If the pinned version lacks a legal carrier for any row, the design changes before implementation. Carrier check: passed against v1.0.1. Every row has a legal carrier; queue depth in the card needs a declared extension, and hub delivery errors use codes outside the <code>-32001</code> to <code>-32099</code> range A2A claims. Details and open items in <a href="spec-pin.md#carrier-table">spec-pin.md</a>.</p>
 <p>A2A is strictly client and server per task. That maps onto exclusive roles: the orchestrator is the client, workers are servers.</p>
 
 <h2 id="topology">5. Topology: a hub on every member's bridge</h2>
@@ -202,7 +202,7 @@ flowchart LR
   <li><strong>Unprivileged proxy</strong>, non-root, no capabilities, read-only rootfs, no-new-privileges, started by the supervisor. Cannot modify the snapshot.</li>
   <li>No engine socket. Mounts: the snapshot directory read-only, a status directory for the two status files, and the audit log path.</li>
   <li>Proxy targets are member names resolved from the committed snapshot, never addresses, URLs or commands from a request. The hub is not a general proxy.</li>
-  <li>Blast radius of a compromised proxy: send tasks to and read results from every worker in its group, using the outbound tokens it holds. Nothing else. A compromised supervisor is a gateway-equivalent container on each member bridge, bounded by the gateways' own INPUT rules. <span class="open">Verification is part of P1.</span></li>
+  <li>Blast radius of a compromised proxy: send tasks to and read results from every worker in its group, using the outbound tokens it holds. Nothing else. A compromised supervisor is a root container on each member bridge: it can read every outbound token of its group and, with its own rules removed, reach the host and the internet through the engine's NAT. Member gateways drop all hub-sourced traffic except to the adapter port, ahead of their published-port rules, so it reaches no member listener beyond the adapter. Measured in P1 (CR-P1D-2, <a href="prototypes.md">prototypes.md</a>).</li>
 </ul>
 
 <h3>Revisioned snapshot publication</h3>
@@ -244,7 +244,7 @@ flowchart LR
   <li><strong>Hub authorization</strong> is a routing check: exclusive roles, owner match from the advisory cache when present.</li>
   <li><strong>Worker authorization is authoritative.</strong> The adapter binds every task and context to group, worker, principal and member generation. A replacement orchestrator has a new generation and cannot resume or read existing contexts by default; explicit inheritance is a later feature.</li>
   <li><strong>Handles are locators, not authorization.</strong> A task handle is worker name, task ID and member generation; a context handle is worker name, context ID, member generation and a random part. Presenting a handle authorizes nothing; the presented credential's principal must match the binding. Handles are independent of the hub epoch, so hub restart invalidates none.</li>
-  <li><strong>Provenance</strong> derives from the authenticated principal, never from request content: message metadata plus one fixed-format line prefixed to the prompt text (bracketed header, fixed field order, no prose, then a blank line), because the harness only sees text. A small shipped skill explains the header. Exact tokens are settled with the first adapter.</li>
+  <li><strong>Provenance</strong> derives from the authenticated principal, never from request content: message metadata plus one fixed-format line prefixed to the prompt text (bracketed header, fixed field order, no prose, then a blank line), because the harness only sees text. A small shipped skill explains the header. Format, settled with the first adapter: <code>[a2a group=&lt;group&gt; from=&lt;member&gt; role=&lt;role&gt; generation=&lt;generation&gt; task=&lt;taskID&gt; context=&lt;contextID&gt;]</code>, fields in this order, single spaces, unquoted, no value containing whitespace or <code>]</code>; <code>from</code> is <code>_host</code> for the host principal; task and context are the worker's raw IDs, not handles.</li>
   <li><strong>Reconciliation</strong> from engine labels and host records is performed by the enclave CLI, never by the hub.</li>
 </ul>
 
@@ -298,7 +298,7 @@ flowchart LR
   <li><strong><code>send_task</code> blocks</strong> up to a wait bound and returns the final message on a terminal state. When the bound elapses it returns a task handle with the <em>actual</em> current state: submitted with queue position, or working. The task continues; <code>get_task</code> retrieves it. A wait timeout is never a cancellation.</li>
   <li><strong>Explicit retries only.</strong> Each send carries a client message ID. A send is a retry only when flagged as one; the client preserves the message ID and retry flag across its own reconnects. Unflagged sends are new tasks.</li>
   <li><strong>No streaming tool.</strong> Expectation, confirmed by P3 for model-context visibility only: MCP progress notifications do not enter the model context in Claude Code, and a streamed tool result would put the worker's output into the orchestrator's context a second time. P3 makes no claims about billing, caching or token accounting.</li>
-  <li>Wired into the harness via the existing config template and patch mechanism. A plain CLI fallback for tools without MCP.</li>
+  <li>Wired into the harness by a baked MCP config file that the session launch passes to the harness for orchestrator sessions only (<code>sandbox.a2a.orchestratorArgs</code>); settings templates and patches apply to every session and cannot depend on the role. A plain CLI fallback for tools without MCP.</li>
 </ul>
 
 <h2 id="contexts">10. Contexts, handles, dedupe</h2>
@@ -452,11 +452,12 @@ sequenceDiagram
 <tr><td>Identity</td><td>Host-provisioned principal; inbound identity headers stripped; provenance from the authenticated principal only; handles are locators.</td></tr>
 <tr><td>Authorization</td><td>Group membership is topology. Hub checks roles and an advisory cache for routing; the worker's binding of tasks and contexts to principal and generation is authoritative.</td></tr>
 <tr><td>Reachability</td><td>No host listener. No shared segment. One scoped INPUT, one scoped OUTPUT and one NAT exemption per member. IPv6 blocked by existing DROP policies.</td></tr>
-<tr><td>Hub compromise</td><td>Unprivileged proxy with name-based targets only; root supervisor fed solely by the committed snapshot; hub INPUT limited to member gateway addresses; mixed or corrupt snapshots refused; revocation by revision with conntrack flush; engine disconnect as connectivity fallback; no engine access.</td></tr>
-<tr><td>Transport</td><td>Plaintext HTTP in v1, accepted risk as stated in <a href="#hub">the hub</a>. TLS deferred with the CA choice open.</td></tr>
+<tr><td>Hub compromise</td><td>Unprivileged proxy with name-based targets only; root supervisor fed solely by the committed snapshot; hub INPUT limited to member gateway addresses; mixed or corrupt snapshots refused; revocation by revision with conntrack flush; engine disconnect as connectivity fallback; no engine access. Member gateways admit only the adapter port from the hub address. A compromised supervisor holds all outbound tokens of its group and has hub egress to host and internet; v1 does not block that egress below the hub.</td></tr>
+<tr><td>Transport</td><td>Plaintext HTTP in v1, accepted risk as stated in <a href="#hub">the hub</a>. TLS deferred with the CA choice open. This is a stated non-conformance with A2A 1.0 spec 7.1, which makes encryption a MUST; so is answering <code>ListTasks</code> with unsupported operation (spec 3.1). See <a href="spec-pin.md">spec-pin.md</a>.</td></tr>
 <tr><td>Fail-closed</td><td>Generation and revision reconciliation; lost state rejects resume, replay and ambiguous retries; unknown outcomes reported as unknown with termination unconfirmed; quarantine and departure obligations durable until host confirmation.</td></tr>
 <tr><td>Capability discipline</td><td>Containers hold <em>message</em> capabilities only. Spawning, attaching and host commands stay on the host.</td></tr>
 <tr><td>Audit</td><td>Status-only by default; codes not content; content only with explicit <code>--a2a-log=full</code>.</td></tr>
+<tr><td>Worker self-integrity</td><td>A worker is trusted about itself. Its harness runs as the adapter's user and can read the adapter's tokens and rewrite its own context table, so that table is advisory for the worker's own state. The host never relies on it to protect another member: isolation between members rests on topology, the hub and per-member tokens, none of which a worker can reach.</td></tr>
 <tr><td>Prompt injection</td><td>Same risk on every transport. Mitigated by provenance from authenticated identity, workers never initiating, and the shipped skill.</td></tr>
 <tr><td>Secrets</td><td>Tokens never recorded in session provenance (<code>AffectsSession</code> rules apply). Membership file carries hashes; the secrets file is readable by the proxy uid only; invocation credentials are bounded and single-use.</td></tr>
 <tr><td>Egress</td><td>Unchanged except the hub rule. The allowlist and proxy govern everything else.</td></tr>

@@ -69,6 +69,7 @@ wordmark in white; do not mix them up, or the wordmark disappears.
 | `../assets/enclave-logo-horizontal-lightbg.svg` | marketing site footer |
 | `../assets/{favicon,social-card}.png` | marketing site favicon and social card |
 | `../../docs/assets/enclave-logo-horizontal-{lightbg,darkbg}.png` | repository `README.md` |
+| `static/img/architecture{,-dark}.svg` | docs intro page and repository `README.md` (session anatomy diagram) |
 
 The favicon and social card are rendered from the SVGs. The README uses PNG
 because these SVGs carry their fills in an embedded `<style>` block, and PNG

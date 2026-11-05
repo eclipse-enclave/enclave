@@ -46,6 +46,7 @@ config-source overlays and stays out of host config passthrough:
 | Tool | Pinned state |
 |------|--------------|
 | Codex | Memory index database; `state_*.sqlite*` and `thread_history_*.sqlite*` (rebuildable from `sessions/`, pinned to skip rebuilding on each overlaid run) |
+| Copilot | `config.json`, session state and store, command history, permissions, MCP OAuth config and secrets, installed plugins and plugin data |
 | OpenCode | Session database and runtime data; its XDG state directory is redirected into the store as `xdg-state/`, so TUI state survives |
 | Theia, Theia Next | Extension data and storage, workspace data, custom AI prompts, AI chat history, model snapshots, backend settings, recent workspaces; host passthrough of `deployedPlugins/` activates the overlay |
 
@@ -263,7 +264,8 @@ sequenceDiagram
     Ctr->>Ctr: Tool reads and writes auth through the symlinks
     Ctr-->>Host: Exit
     Host->>Helper: Post-exit sync with auth-reconcile.sh
-    Helper->>Helper: Config store to shared auth store (additive,<br/>Claude by expiresAt, Mistral Vibe .env by mtime)<br/>and to feature stores (additive)
+    Helper->>Helper: Config store to shared auth store (additive,<br/>Claude by expiresAt, Mistral Vibe .env by mtime)
+    Host->>Host: Copy config store auth files to feature stores (additive)
 ```
 
 ## Auth scoping and flags

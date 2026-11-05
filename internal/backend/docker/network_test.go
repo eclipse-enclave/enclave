@@ -936,9 +936,12 @@ func TestSessionOwnsEndpoints(t *testing.T) {
 		{name: "foreign peer", names: []string{"peer"}, want: false},
 		{name: "session plus peer", names: []string{"session", "peer"}, want: false},
 		{name: "prefix lookalike", names: []string{"session-other"}, want: false},
+		{name: "labeled hub", names: []string{"session", "enclave-a2a-hub-review"}, want: true},
+		{name: "unlabeled hub name", names: []string{"enclave-a2a-hub-other"}, want: false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := sessionOwnsEndpoints(tc.names, "session"); got != tc.want {
+			hubs := map[string]bool{"enclave-a2a-hub-review": true}
+			if got := sessionOwnsEndpoints(tc.names, "session", hubs); got != tc.want {
 				t.Fatalf("sessionOwnsEndpoints(%v) = %v, want %v", tc.names, got, tc.want)
 			}
 		})

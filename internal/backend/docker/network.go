@@ -92,14 +92,67 @@ func sessionNetworkEndpoints(ctx context.Context, info dockercmd.NetworkInspectR
 }
 
 // Wait only for this session's containers; foreign endpoints may persist.
-func sessionOwnsEndpoints(names []string, container string) bool {
+// Labeled A2A hub endpoints (hubs) count as owned: teardown disconnects them.
+func sessionOwnsEndpoints(names []string, container string, hubs map[string]bool) bool {
 	container = strings.TrimSpace(container)
 	for _, name := range names {
-		if name = strings.TrimSpace(name); name != container && name != container+model.GatewayContainerSuffix {
+		if name = strings.TrimSpace(name); name != container && name != container+model.GatewayContainerSuffix && !hubs[name] {
 			return false
 		}
 	}
 	return true
+}
+
+// peerGroupMinPodmanIsolate is the weakest netavark isolate value that
+// --peer-group accepts (CR-1); tightening it to strict is this one line.
+const peerGroupMinPodmanIsolate = podmanIsolateOptedInOnly
+
+func podmanIsolateRank(value string) int {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case podmanIsolateStrict:
+		return 2
+	case podmanIsolateOptedInOnly:
+		return 1
+	}
+	return 0
+}
+
+var networkDriverOptions = func(ctx context.Context, network string) (map[string]string, error) {
+	info, err := networkInspect(ctx, network)
+	if err != nil {
+		return nil, err
+	}
+	if info.Options == nil {
+		return map[string]string{}, nil
+	}
+	return info.Options, nil
+}
+
+// checkPeerGroupNetworkIsolation rejects --peer-group on a Podman session
+// network without an isolate option; Docker isolates user-defined bridges.
+func checkPeerGroupNetworkIsolation(ctx context.Context, network string) error {
+	if !dockercmd.IsPodman() {
+		return nil
+	}
+	options, err := networkDriverOptions(ctx, network)
+	if err != nil {
+		return fmt.Errorf("inspect isolation of network %s: %w", network, err)
+	}
+	if podmanIsolateRank(options[podmanIsolateOption]) < podmanIsolateRank(peerGroupMinPodmanIsolate) {
+		return fmt.Errorf("--peer-group needs a podman session network with isolate=%s or stronger; network %s has isolate=%q", peerGroupMinPodmanIsolate, network, options[podmanIsolateOption])
+	}
+	return nil
+}
+
+// disconnectHubEndpoints detaches labeled hubs from a session network so the
+// network can be removed without -f, which would remove the hub itself.
+func disconnectHubEndpoints(ctx context.Context, network string, hubs map[string]bool) error {
+	for hub := range hubs {
+		if err := hubNetworkDisconnect(ctx, network, hub, false); err != nil {
+			return fmt.Errorf("disconnect A2A hub %s from %s: %w", hub, network, err)
+		}
+	}
+	return nil
 }
 
 func sessionNetworkName(containerName string) string {
@@ -159,7 +212,7 @@ func (b *Backend) ensureSessionNetwork(ctx context.Context, meta backend.Session
 			case sessionNetworkConflict:
 				return sessionNetworkRef{}, fmt.Errorf("docker network %q already exists and is not owned by this enclave session", name)
 			case sessionNetworkAttached:
-				return sessionNetworkRef{}, attachedSessionNetworkError(meta.Name, name, attached)
+				return sessionNetworkRef{}, attachedSessionNetworkError(meta.Name, name, attached, labeledHubEndpoints(ctx, attached))
 			}
 		} else if !dockercmd.IsNotFound(err) {
 			return sessionNetworkRef{}, fmt.Errorf("inspect per-session network %q: %w", name, err)
@@ -315,8 +368,8 @@ func newSessionNetworkRef(name string, id string, container string, projectHash 
 	}, nil
 }
 
-func attachedSessionNetworkError(containerName string, networkName string, attached []string) error {
-	if sessionOwnsEndpoints(attached, containerName) {
+func attachedSessionNetworkError(containerName string, networkName string, attached []string, hubs map[string]bool) error {
+	if sessionOwnsEndpoints(attached, containerName, hubs) {
 		return fmt.Errorf("session %s already running or requires stale-resource cleanup: Docker network %q has attached endpoints; run 'enclave stop %s' and retry", containerName, networkName, containerName)
 	}
 	containerName = strings.TrimSpace(containerName)
@@ -358,6 +411,7 @@ func removeOwnedSessionNetwork(ctx context.Context, ref sessionNetworkRef, retri
 	giveUp := func(reason string) {
 		logx.Warnf("Leaving per-session network %s in place after %s: %s; a later session start or `enclave cleanup --ephemeral` removes it once its containers are gone", ref.Name, time.Since(started).Round(time.Second), reason)
 	}
+	hubsDisconnected := false
 	for attempt := 0; attempt <= retries; attempt++ {
 		info, err := networkInspect(ctx, ref.Name)
 		if err != nil {
@@ -376,9 +430,25 @@ func removeOwnedSessionNetwork(ctx context.Context, ref sessionNetworkRef, retri
 		}
 		if len(attached) > 0 {
 			reason := "session containers still attached: " + strings.Join(attached, ", ")
-			if !sessionOwnsEndpoints(attached, ref.Container) {
+			hubs := labeledHubEndpoints(ctx, attached)
+			if !sessionOwnsEndpoints(attached, ref.Container, hubs) {
 				logx.Debugf("Leaving per-session network %s in place because it still has foreign attached endpoints: %s", ref.Name, strings.Join(attached, ", "))
 				return nil
+			}
+			if len(hubs) == len(attached) && !hubsDisconnected {
+				exists, err := sessionRuntimeExists(ctx, ref.Container)
+				if err != nil {
+					return err
+				}
+				if !exists {
+					// Only hubs remain: disconnect them first, never network rm -f.
+					if err := disconnectHubEndpoints(ctx, ref.Name, hubs); err != nil {
+						return err
+					}
+					hubsDisconnected = true
+					attempt--
+					continue
+				}
 			}
 			if attempt < retries {
 				wait(reason)
@@ -460,6 +530,7 @@ func captureSessionNetworkRef(ctx context.Context, containerName string, project
 }
 
 func (b *Backend) gcSessionNetworks(ctx context.Context, now time.Time) {
+	gcPeerGroupHubs(ctx)
 	stale, err := staleSessionNetworks(ctx, now)
 	if err != nil {
 		logx.Debugf("Failed to list stale per-session networks: %v", err)
@@ -477,6 +548,9 @@ func (b *Backend) gcSessionNetworks(ctx context.Context, now time.Time) {
 // ownerPrefix restricts owning container names (empty matches all); dryRun
 // reports candidates without removing them.
 func PruneStaleSessionNetworks(ctx context.Context, now time.Time, ownerPrefix string, dryRun bool) ([]string, error) {
+	if !dryRun {
+		gcPeerGroupHubs(ctx)
+	}
 	stale, err := staleSessionNetworks(ctx, now)
 	if err != nil {
 		return nil, err

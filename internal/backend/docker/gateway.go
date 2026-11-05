@@ -73,6 +73,9 @@ func (b *Backend) startGateway(ctx context.Context, req backend.Request, network
 		SecretReleaseFile: secretReleaseFile,
 		TLSRootDir:        config.HostTLSDir(b.opts.Host.Home),
 	}
+	if req.PeerGroup != nil {
+		startConfig.A2AOverlayDir = req.PeerGroup.OverlayDir
+	}
 	result, err := gateway.Start(ctx, startConfig)
 	if err != nil {
 		cleanupFiles(tempFiles)

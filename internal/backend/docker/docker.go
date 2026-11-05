@@ -117,11 +117,27 @@ func (b *Backend) Run(ctx context.Context, req backend.Request, attach backend.A
 		return backend.ExitStatus{}, err
 	}
 	if ctx.Err() != nil {
+		spec.envFile.remove()
+		if spec.join != nil {
+			_ = spec.join.Fail(ctx)
+		}
 		if spec.cleanup != nil {
 			spec.cleanup()
 		}
 		interrupted = true
 		return backend.ExitStatus{}, interruptedStart()
+	}
+	if spec.join != nil {
+		// The lock cannot be held for the life of a foreground session; the
+		// member leaves when the session ends, before its network goes.
+		spec.join.Started()
+		join, cleanup := spec.join, spec.cleanup
+		spec.cleanup = func() {
+			join.LeaveOnExit(context.Background())
+			if cleanup != nil {
+				cleanup()
+			}
+		}
 	}
 	// Ctrl-C now reaches the tool through the TTY or the engine's signal
 	// proxying; cancelling ctx must not kill the attached child and strand a
@@ -136,9 +152,15 @@ func attachForeground(ctx context.Context, spec runSpec, attach backend.AttachIO
 	if spec.cleanup != nil {
 		defer spec.cleanup()
 	}
+	defer spec.envFile.remove()
 	var onStarted func(id string)
-	if attach.OnStarted != nil {
-		onStarted = func(string) { attach.OnStarted() }
+	if attach.OnStarted != nil || spec.envFile != nil {
+		onStarted = func(string) {
+			spec.envFile.remove()
+			if attach.OnStarted != nil {
+				attach.OnStarted()
+			}
+		}
 	}
 	id, err := runForeground(ctx, spec.config, spec.hostConfig, spec.name, attach, onStarted)
 	if endOutlivingSession(ctx, spec.name, id) {
@@ -206,6 +228,7 @@ func (b *Backend) Start(ctx context.Context, req backend.Request) (backend.Sessi
 		return backend.SessionRef{}, err
 	}
 	id, err := dockercmd.RunDetachedInteractive(ctx, spec.config, spec.hostConfig, spec.name)
+	spec.envFile.remove()
 	if err != nil {
 		if ctx.Err() != nil {
 			// The interrupt may have landed after the engine created the
@@ -215,10 +238,16 @@ func (b *Backend) Start(ctx context.Context, req backend.Request) (backend.Sessi
 			}
 			err = interruptedStart()
 		}
+		if spec.join != nil {
+			_ = spec.join.Fail(ctx)
+		}
 		if spec.cleanup != nil {
 			spec.cleanup()
 		}
 		return backend.SessionRef{}, err
+	}
+	if spec.join != nil {
+		spec.join.Started()
 	}
 	return backend.SessionRef{Name: spec.name, ID: id}, nil
 }
@@ -410,9 +439,32 @@ type runSpec struct {
 	hostConfig *dockercmd.HostConfig
 	name       string
 	cleanup    func()
+	// join is the peer group join this start completes, nil otherwise.
+	join backend.PeerGroupJoin
+	// envFile is removed as soon as the engine has created the container.
+	envFile *secretEnvFile
 }
 
 func (b *Backend) prepareRun(ctx context.Context, req backend.Request) (runSpec, error) {
+	join, err := joinFor(req.PeerGroup)
+	if err != nil {
+		return runSpec{}, err
+	}
+	spec, err := b.prepareSessionRun(ctx, req, join)
+	if err != nil {
+		if join != nil {
+			_ = join.Fail(ctx)
+		}
+		return runSpec{}, err
+	}
+	spec.join = join
+	return spec, nil
+}
+
+func (b *Backend) prepareSessionRun(ctx context.Context, req backend.Request, join backend.PeerGroupJoin) (runSpec, error) {
+	if join != nil && req.Network.Mode != backend.NetworkModeRestricted {
+		return runSpec{}, fmt.Errorf("--peer-group requires restricted networking")
+	}
 	if err := backend.Validate(req, b.Capabilities()); err != nil {
 		return runSpec{}, err
 	}
@@ -441,11 +493,30 @@ func (b *Backend) prepareRun(ctx context.Context, req backend.Request) (runSpec,
 	if err != nil {
 		return runSpec{}, err
 	}
+	if join != nil {
+		// The join rolls back before the network goes, so its hub leaves first.
+		if err := join.OnSessionNetwork(ctx, sessionNetwork.Name); err != nil {
+			_ = join.Fail(ctx)
+			cleanupSessionNetwork(sessionNetwork)
+			return runSpec{}, err
+		}
+	}
 	if req.Network.Mode == backend.NetworkModeRestricted {
 		gatewayName, cleanup, err := b.startGateway(ctx, req, sessionNetwork.Name)
 		if err != nil {
+			if join != nil {
+				_ = join.Fail(ctx)
+			}
 			cleanupSessionNetwork(sessionNetwork)
 			return runSpec{}, err
+		}
+		if join != nil {
+			if err := join.OnGateway(ctx, gatewayName, sessionNetwork.Name); err != nil {
+				_ = join.Fail(ctx)
+				cleanup()
+				cleanupSessionNetwork(sessionNetwork)
+				return runSpec{}, err
+			}
 		}
 		joinGatewayNamespaces(spec.hostConfig, gatewayName)
 		spec.cleanup = func() {
@@ -464,6 +535,21 @@ func (b *Backend) prepareRun(ctx context.Context, req backend.Request) (runSpec,
 		}
 	}
 	applySELinuxMounts(spec.hostConfig, util.IsSELinuxEnforcing())
+	if req.PeerGroup != nil {
+		// The A2A tokens must never appear on an argv.
+		envFile, err := writeSecretEnvFile(req.PeerGroup.Env)
+		if err != nil {
+			if join != nil {
+				_ = join.Fail(ctx)
+			}
+			spec.cleanup()
+			return runSpec{}, fmt.Errorf("write peer group env file: %w", err)
+		}
+		if envFile != nil {
+			spec.config.EnvFiles = []string{envFile.path}
+			spec.envFile = envFile
+		}
+	}
 	return spec, nil
 }
 
@@ -577,6 +663,11 @@ func labelsFromRequest(req backend.Request) map[string]string {
 			logx.Debugf("Skipping %s label: %v", model.LabelOptions, err)
 		} else {
 			labels[model.LabelOptions] = string(data)
+		}
+	}
+	if req.PeerGroup != nil {
+		for key, value := range req.PeerGroup.Labels {
+			labels[key] = value
 		}
 	}
 	return labels
@@ -699,6 +790,7 @@ func sessionFromSummary(c dockercmd.Summary) (backend.Session, bool) {
 		Ports:       sessionPortMappings(c.Ports),
 		Yolo:        strings.TrimSpace(labels[model.LabelYolo]) == "1",
 		Provenance:  provenance,
+		PeerGroup:   sessionPeerGroupFromLabels(labels),
 	}, true
 }
 

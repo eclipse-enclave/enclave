@@ -70,6 +70,9 @@ type Request struct {
 	// sessions are removed on exit, leaving nothing to inspect afterwards.
 	AuthSync *AuthSyncSpec
 
+	// PeerGroup is set only for --peer-group member sessions (CR-W0B-1).
+	PeerGroup *PeerGroupSession
+
 	RuntimeUIDRemap bool
 	Detached        bool
 }
@@ -436,6 +439,8 @@ type Session struct {
 	Network    *SessionNetwork
 	Yolo       bool
 	Provenance map[string]any
+	// PeerGroup is nil for sessions outside a peer group.
+	PeerGroup *SessionPeerGroup
 }
 
 type SessionNetwork struct {

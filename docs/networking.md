@@ -240,7 +240,8 @@ These two flags handle opposite directions of port forwarding:
 Each Docker session gets its own labeled bridge network, in restricted and
 unrestricted modes. Normally only one network namespace is attached: the
 gateway for a restricted session, or the tool container for an unrestricted
-session. The bridge and subnet exist while the session container exists; a
+session. A session in a [peer group](#a2a-peer-groups-experimental) also has
+the group's hub attached. The bridge and subnet exist while the session container exists; a
 stopped background session keeps its network until `enclave stop`. Once the
 session has exited, its gateway is stopped, releasing the published ports: by
 `enclave attach` if attached, otherwise at the next session start or `enclave
@@ -255,7 +256,8 @@ enclave ps --json
 
 Restricted gateways also drop unsolicited inbound IPv4 and IPv6 traffic, even
 if a peer can route to the session. Only loopback, established/related replies,
-and published container ports are admitted. OAuth callback forwarding remains
+and published container ports are admitted (plus the A2A adapter port for the
+hub of a [peer group](#a2a-peer-groups-experimental)). OAuth callback forwarding remains
 available through its published port; DNS and proxy listeners are not exposed
 to peers unless explicitly published. Unrestricted sessions have no gateway
 inbound filter.
@@ -287,7 +289,9 @@ unsupported integration, `docker network connect <network-name> <peer-container>
 can deliberately attach a peer to the network named in the `enclave ps --json`
 output. Enclave does not manage or authorize that peer, and the network cannot
 be removed until it disconnects. Restricted gateways still require a published
-port for the peer to reach a session listener.
+port for the peer to reach a session listener. The A2A hub is the one peer
+Enclave attaches and manages itself; see
+[A2A peer groups](#a2a-peer-groups-experimental).
 
 ### Migrating from the default bridge
 
@@ -298,6 +302,151 @@ port for the peer to reach a session listener.
 - Session startup now requires a successful `docker info` or `podman info`
   query to select network options. Previously, failure of this query only
   suppressed configuration warnings.
+
+## A2A Peer Groups (experimental)
+
+`--peer-group <name>` joins a session to a group of sessions that exchange A2A
+tasks: one orchestrator sends, workers answer. Options are listed in
+[configuration](configuration.md#a2a-peer-groups-experimental) and the
+`enclave a2a` verbs in the [CLI reference](cli-reference.md#a2a-peer-groups-experimental).
+This section covers the network side. The feature is experimental; topology
+and rules may change. Design rationale and measurements are in
+[design/a2a/](design/a2a/).
+
+`--peer-group` needs restricted networking and a gateway: it is rejected with
+`--allow-all-network`, with the `qemu` backend, and on a Podman session network
+without an `isolate` option.
+
+### Topology
+
+Each group has one hub container, `enclave-a2a-hub-<group>`. It has no network
+of its own: the host attaches it to each member's session bridge at join and
+detaches it at leave. The hub is created on the first member's bridge and
+removed when the last member leaves. Members never share a bridge, so all A2A
+traffic passes through the hub, which forwards only between the orchestrator
+and named workers.
+
+```mermaid
+flowchart LR
+    subgraph BO["orchestrator bridge"]
+        OG["orchestrator gateway<br/>(tool shares its netns)"]
+    end
+    subgraph B1["worker-1 bridge"]
+        G1["worker-1 gateway<br/>(tool and adapter :41821)"]
+    end
+    subgraph B2["worker-2 bridge"]
+        G2["worker-2 gateway<br/>(tool and adapter :41821)"]
+    end
+    HUB["A2A hub<br/>:41820, one address per bridge"]
+    OG -- "tasks to a2a.enclave:41820" --> HUB
+    G1 -- "control connection :41820" --> HUB
+    G2 -- "control connection :41820" --> HUB
+    HUB -- "forwarded tasks :41821" --> G1
+    HUB -- "forwarded tasks :41821" --> G2
+```
+
+- The hub takes a static address on each bridge: the last usable IPv4 address
+  of the session subnet (`.14` on a Docker `/28`, `.254` on a Podman `/24`), or
+  the next lower free one if that is taken. `enclave ps --json` reports it as
+  `a2a.hub.address`. The bridge needs an IPv4 subnet of `/29` or larger.
+- Members reach the hub as `a2a.enclave` on port `41820`. Workers run the A2A
+  adapter on port `41821`; the orchestrator has no adapter port.
+- The hub runs with all capabilities dropped except `NET_ADMIN`, `NET_RAW`,
+  `SETUID`, `SETGID`, `KILL` and `DAC_READ_SEARCH`, a read-only root
+  filesystem, `no-new-privileges`, IPv4 forwarding off, and no engine socket.
+  A root supervisor owns the firewall; the proxy runs as uid `65532` without
+  capabilities.
+- A2A sessions share the restricted gateway's namespace like any session, so
+  the gateway rules below govern what the tool and the adapter can reach.
+
+### Gateway rules
+
+The host writes a per-session overlay file to
+`~/.local/state/enclave/projects/<hash>/<tool>/a2a-overlay/<session>/overlay.json`,
+mounted read-only into the gateway at `/etc/enclave-a2a-overlay`. Only
+`--peer-group` sessions get the mount. The gateway reads it at start and on
+every reload (including `enclave network apply`), so the A2A rules survive
+policy changes. While the member is in the group, the overlay adds:
+
+| Table | Rule |
+|-------|------|
+| filter INPUT | Accept TCP from the hub address to the adapter port on the bridge interface (workers only) |
+| filter INPUT | Drop everything else from the hub address, ahead of the published-port accepts |
+| filter OUTPUT | Accept TCP to the hub address and port `41820` |
+| nat OUTPUT | `RETURN` for the hub address, before the transparent-proxy `REDIRECT` rules |
+| dnsmasq | `host-record=a2a.enclave,<hub address>` |
+
+The INPUT rules sit after the established/related accept, so hub replies on
+connections the member opened still pass. The hub-sourced drop keeps a
+compromised hub away from published ports, which otherwise accept any source.
+The gateway logs one `A2A overlay applied`, `cleared`, `validation failed` or
+`apply failed` line per read; a failed read takes the existing fail-closed
+reload path and stops the gateway. At leave the host writes an inactive
+overlay, waits for the `cleared` marker and removes the file. Existing
+connections are cut by the hub and the engine disconnect, not by the gateway.
+
+### Hub rules
+
+The supervisor installs the hub's filter table from each membership revision
+the host publishes:
+
+- Policy `DROP` on INPUT, OUTPUT and FORWARD, for IPv4 and IPv6, installed
+  before the first revision is read. Loopback is accepted (host-side
+  `enclave a2a` calls run inside the hub over loopback through the engine,
+  with no host listener).
+- INPUT: established/related, plus TCP to port `41820` from each member's
+  gateway address, on that member's bridge interface and to the hub's address
+  on that bridge.
+- OUTPUT: established/related, plus TCP from the hub's address to each
+  worker's gateway address and adapter port, on that worker's interface.
+- On removal or revocation the supervisor installs the new rules, aborts the
+  hub's sockets to the removed address (`ss -K`) and flushes its conntrack
+  entries, so open streams close promptly.
+
+A snapshot that fails verification is refused and the last committed rules
+stay. A removal that cannot commit falls back to disconnecting the hub from
+the member's bridge, which cuts connectivity regardless of rules.
+
+### IPv6
+
+The hub and the adapter listen on IPv4 only, and neither the gateway's nor the
+hub's ip6tables `DROP` policies get an A2A exception. Link-local IPv6
+addresses exist on every interface even with IPv6 disabled in IPAM; the DROP
+policies are what make them unusable.
+
+### Podman
+
+| Session network | `--peer-group` |
+|-----------------|----------------|
+| `isolate=strict` (netavark >= 1.7) | Supported, untested: the full matrix has only been run under `isolate=true` |
+| `isolate=true` | Supported as a weaker fallback |
+| no `isolate` option | Rejected |
+
+Under `isolate=true` the A2A paths behave as under `strict`: members cannot
+reach each other directly or through the hub, and the hub INPUT rules keep a
+non-isolated bystander network away from the hub. The difference is the one
+`isolate=true` already has without A2A: a container on a non-isolated Podman
+network can reach a session's published ports directly (a dev server, the
+OAuth callback port), bypassing the `127.0.0.1` host binding. `strict` blocks
+that. Docker isolates user-defined bridges from each other, so it has no
+equivalent gap.
+
+### Security limits
+
+- **Plaintext HTTP.** A2A traffic and bearer tokens travel unencrypted between
+  gateways and hub. Root on the host and anything that gains a member
+  gateway's or the hub's network namespace can read them. This is an accepted
+  v1 risk and a stated non-conformance with A2A 1.0, which requires encrypted
+  transport (spec section 7.1). TLS is deferred; see
+  [spec-pin.md](design/a2a/spec-pin.md).
+- **Compromised hub proxy.** It can send tasks to and read results from every
+  worker of its group, and nothing else.
+- **Compromised hub supervisor.** It is root in a container attached to every
+  member bridge. It can read every outbound token of its group and, by
+  removing its own rules, reach the host and the internet through the
+  engine's NAT. v1 does not block hub egress below the hub. Member gateways
+  limit it to the worker adapter ports; it reaches no other member listener,
+  including published ports.
 
 ## Bridging Host Ports
 

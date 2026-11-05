@@ -14,6 +14,8 @@ how auth files are synchronized, and how CLI flags affect store behavior.
 | Env | `~/.local/state/enclave/projects/<hash>/<tool>/env/` | Per-tool, per-project | Persisted declared secret and `--pass-env` values |
 | Shared auth | `~/.local/state/enclave/tools/<tool>/auth/<identity>/` | Per-tool, all projects | OAuth/session files shared across projects; `<identity>` is `default` or the `--auth-name` slug |
 | Feature auth | `~/.local/state/enclave/features/<feature>/auth/` | Per-feature, all tools/projects | Feature-specific auth (e.g. `github-cli`) |
+| A2A group (experimental) | `~/.local/state/enclave/a2a/<group>/` | Per peer group, all projects | Group record, published membership, hub status and audit, cleanup inventory; see [A2A Peer Group Data](#a2a-peer-group-data-experimental) |
+| A2A context table (experimental) | `<config store>/a2a/<memberGeneration>/` | Per member generation | Worker contexts, tasks, dedupe and restrictions; orchestrator send journal |
 
 The `<hash>` segment is a 12-character hex string derived from the project
 directory path, making per-project stores unique per project. The config store
@@ -415,7 +417,217 @@ Source: [`internal/runtime/volume_manager.go`](../../internal/runtime/volume_man
 `--ephemeral` cleanup removes ephemeral config-store directories (every
 `config-store/<key>` other than `default`), stopped ephemeral containers, and
 per-session networks whose session is gone (see
-[networking](../networking.md#per-session-docker-networks)).
+[networking](../networking.md#per-session-docker-networks)). For peer group
+members it first runs the A2A leave, and it reconciles every peer group; see
+[A2A cleanup](#inventory-and-deletion).
+
+## A2A Peer Group Data (experimental)
+
+Sessions started with `--peer-group` (see
+[CLI reference](../cli-reference.md#a2a-peer-groups-experimental)) keep group
+state under the state root and a context table in each member's config store.
+The feature is experimental: the files below are internal, not integration
+contracts, and may change without notice. Use `enclave ps --json` and
+`enclave a2a peers --json` instead of reading them. Design rationale is in
+[`docs/design/a2a/`](../design/a2a/proposal.html#retention).
+
+Every JSON file carries `"schemaVersion": "1"` and is replaced atomically.
+Group and member **generations** are random 16-hex-digit IDs: a group gets a
+new one each time it is created under its name, a member on every join. All
+A2A data is scoped by them, so a recreated group or a rejoined member never
+sees, or deletes, the data of an earlier generation.
+
+### Group Directory
+
+```text
+~/.local/state/enclave/
+  a2a/<group>/
+    group.json                        group record
+    snapshots/<revision>/             membership.json, secrets.json, manifest.json
+    snapshots/current                 symlink to the committed revision
+    status/supervisor.json            hub acknowledgments
+    status/proxy.json
+    audit/audit.jsonl                 hub audit log
+    host-secrets/outbound.json        host copy of hub-to-worker tokens
+    host-secrets/host-journal.json    `enclave a2a send` journal
+    inventory/<groupGeneration>.json  cleanup inventory
+  locks/a2a-<group>.lock              group lock
+  projects/<hash>/<tool>/a2a-overlay/<session container>/overlay.json
+```
+
+| Path | Contents and lifetime |
+|------|-----------------------|
+| `group.json` (0600) | Group generation, host principal, members (role, generation, state, session container, project hash, config-store key, network addresses), committed and pending snapshot revision, departures, open obligations, releases, and the hashes of live host invocation credentials (never the credential). Deleted at teardown. |
+| `group.json` `engine` | `name` (`docker` or `podman`) and `root` (the engine's storage root, which tells a rootless daemon from a rootful one), written when the group is created. Lifecycle commands and reconcile refuse a group recorded on another engine or daemon; `enclave a2a` verbs switch to the recorded engine unless `--backend` names another. A record without `engine` (written before the field existed) adopts the engine where its hub or a member session exists, and is otherwise only reported, never torn down. |
+| `snapshots/` | Membership revisions the hub reads (mounted read-only). `secrets.json` is mode 0400 and owned by the hub proxy uid 65532 (or its mapped uid under rootless Podman), so the host user may not be able to read it. After each commit only the committed revision, the previous committed one and the revision `current` points at are kept. Emptied when the group is created, so revisions never span generations. |
+| `status/` (1777) | One file per hub reader with its applied and rejected revision; each replaces only its own file. Emptied when the group is created. |
+| `audit/audit.jsonl` (dir 1777) | One line per hub request. `--a2a-log full` adds request and response text. No size bound or rotation. Kept across group recreation; removed with the group directory. Read by `enclave a2a log`. |
+| `host-secrets/` (0700, files 0600) | `outbound.json` holds the tokens the hub presents to workers, because the published `secrets.json` may be unreadable. `host-journal.json` keeps the last 100 host sends, including the message text, so `enclave a2a task retry` can resend with the original message ID; a journal of another group generation reads as empty. Recreated empty when the group is created, deleted at teardown. |
+| `inventory/` | See [Inventory and Deletion](#inventory-and-deletion). |
+| `locks/a2a-<group>.lock` | Serializes every mutation of the group. Reconcile waits at most 3 s and then reports the group busy. Never deleted. |
+| `a2a-overlay/` | Per-session gateway overlay that admits the hub, mounted read-only into the gateway. Cleared and deleted at leave. |
+
+### Context Table
+
+Each member gets a table directory in its config store, keyed by its member
+generation:
+
+```text
+<config store>/a2a/<memberGeneration>/   in the container: <ConfigDir>/a2a/<memberGeneration>/
+  contexts.json        contexts (principal binding, harness session ID, last activity, tracked files) and tombstones
+  tasks/<taskID>.json  one record per task: state, reason, termination, result (truncated to the result bound)
+  dedupe.json          message-ID dedupe records per principal
+  restrictions.json    admission stops, quarantine, heartbeat
+  transcripts/         reserved; the Claude driver does not write here
+  journal.json         orchestrator only: send journal
+```
+
+`<config store>` is the member's `config-store/<key>/` directory. A worker's
+adapter is the only writer of its table; the host signals it through the
+adapter's control socket and reads `restrictions.json` for `ps`, `a2a peers`
+and reconcile. A table whose header names another group or worker generation
+is ignored. The adapter rewrites `restrictions.json` every 30 s; when its
+`updatedAt` is older than `a2a_status_staleness` (default `5m`), `ps --json`
+reports the worker's status fields as `unknown`.
+
+**Claude per-session files.** Claude cannot be told to write its session data
+into the table, so it lands in the config store as usual. For every harness
+session the adapter records these config-store-relative paths on the context:
+
+- `projects/<encoded cwd>/<session>.jsonl` and `projects/<encoded cwd>/<session>/`
+- `session-env/<session>/`
+- `file-history/<session>/`
+- `tasks/<session>/`
+
+They are deleted when the context expires and when the inventory deletes the
+table. Paths that resolve outside the config store are refused. When the
+encoded working directory exceeds 200 characters, Claude shortens it with a
+hash the adapter does not reproduce, so the `projects/` entries are not tracked
+and stay until project cleanup.
+
+**Orchestrator send journal.** An orchestrator's MCP client keeps
+`journal.json` (with `journal.lock`) in its own table directory. It records
+each send (message ID, peer, context, content hash, handle and last known
+state) before the request leaves, so a retry after an MCP server restart
+reuses the original message ID. It keeps the last 100 entries and stores a
+hash of the text, not the text. It is deleted with the table.
+
+### Retention
+
+The worker adapter applies these bounds every 30 s while it runs:
+
+| Record | Expires | Bound (default) |
+|--------|---------|-----------------|
+| Context | Idle time since the last enqueued task; replaced by a tombstone, its tracked Claude files deleted | `a2a_context_ttl` (`24h`) |
+| Tombstone | Age since expiry, then oldest first above the count | `a2a_record_max_age` (`168h`), `a2a_record_limit` (`1000`) |
+| Task record | Terminal tasks only: age since the task ended, then oldest first above the count | same |
+| Dedupe record | Only once its task is terminal or gone; same age and count | same |
+| Admission stop, quarantine | Never; only a host reconcile releases them | |
+
+Active work is excluded: a context with a queued or running task never
+expires, and records of non-terminal tasks are never evicted. When active
+tasks alone fill `a2a_record_limit`, new sends are refused as queue full.
+Expiry runs only while the adapter runs, so a stopped worker keeps its contexts
+until it starts again.
+
+TTL ends a context; it does not erase what the agent learned. Agent memory,
+settings, shell history and edits to the project are shared by all contexts of
+a worker and are never removed by A2A, only by `enclave cleanup`.
+
+The hub keeps at most `a2a_hub_retained_results` (default `100`) terminal task
+summaries per worker, in memory only; a hub restart drops them.
+
+### Inventory and Deletion
+
+The cleanup inventory, `inventory/<groupGeneration>.json`, lists the table
+directory of every member generation that joined. A join writes the entry
+before any token or hub attachment exists, so every table that may exist is
+listed, and the entry survives the member's departure, container removal and
+hub restarts.
+
+```mermaid
+stateDiagram-v2
+    [*] --> admitting: join starts
+    admitting --> [*]: join rolled back
+    admitting --> member: revision committed
+    member --> eligible: leave
+    admitting --> eligible: reconcile of a crashed join
+    eligible --> [*]: table and tracked files deleted
+```
+
+- Eligible tables are deleted when the last member leaves and the group is
+  torn down. Until then a departed member's table stays in its config store.
+  Reconcile deletes every table listed by an inventory of an earlier group
+  generation.
+- Deletion removes the Claude files listed in `contexts.json`, then the table
+  directory. Each entry's store path must end in its member generation;
+  anything else is refused, so deletion never reaches another generation.
+- A failed deletion keeps the entry with `lastError` and `lastAttemptAt`;
+  reconcile retries it. The inventory file goes when its last entry does, and
+  the group directory (audit log included) once `group.json` and every
+  inventory file are gone.
+
+The general cleanup commands interact with this as follows:
+
+- Project cleanup deletes the tool's config stores, tables included, without
+  touching the group directory; the inventory later finds nothing to delete.
+- `cleanup --all` removes the projects tree but neither `a2a/` nor the group
+  locks. Stop the group first, or run `enclave a2a reconcile` afterwards.
+- `cleanup --ephemeral` runs the leave for every selected container that is a
+  group member (orchestrators first), removes the containers, reconciles every
+  group, then removes the stores. It exits 3 if an obligation stays open.
+
+### Departure and Quarantine
+
+When an orchestrator leaves, every active worker must acknowledge that it
+persisted an admission stop for that orchestrator, discarded its queued tasks
+and terminated its running task. The acknowledgments are recorded under
+`departures` in `group.json`. A worker that cannot be reached or reports
+`unconfirmed` termination marks the departure `degraded`, adds a
+`departure-ack` or `quarantine-release` obligation, and makes `stop`, `cleanup`
+and `a2a reconcile` exit 3. A worker that cannot confirm termination of a task
+quarantines itself and accepts no new tasks. Admission stops and quarantine
+live in the worker's `restrictions.json` and survive hub and adapter restarts.
+
+Caveats:
+
+- Only a host reconcile releases them: a quarantine once the worker reports no
+  surviving descendant, a suspected-departure admission stop once the
+  orchestrator is alive with an unchanged generation.
+- An orchestrator lost without an observing enclave process (a background
+  session, or `kill -9` of the foreground `enclave`) is only suspected after
+  `a2a_reconnect_window`; the departure becomes authoritative only when a
+  reconcile finds its session gone or exited.
+- A stopped worker stays a member and keeps the hub. Reconcile cannot ask it to
+  release a quarantine, and `ps` keeps reporting the state from its table.
+- The table is advisory about the worker itself. The worker's harness runs as
+  the same user as the adapter, so it can edit `restrictions.json` or use the
+  control socket to clear its own quarantine.
+
+### Repairing a Group
+
+`enclave a2a reconcile` repairs groups under their lock: it removes members
+whose session is gone (and an orchestrator whose session has exited), finishes
+crashed joins and leaves, republishes an uncommitted revision, retries open
+obligations, disconnects the hub from bridges no member owns, restarts a
+stopped hub that still has members, tears down an empty group, and deletes the
+tables of earlier group generations. A group recorded on another engine is
+reported as skipped.
+
+Sessions without `--peer-group` pay no A2A cost, so not every command
+reconciles:
+
+| Command | Reconciles |
+|---------|------------|
+| `enclave run` without `--peer-group` | nothing |
+| `enclave run --peer-group <g>` | every group, before joining |
+| `enclave stop <session>` | only the groups a stopped member belonged to |
+| `enclave stop --peer-group <g>` | that group, after stopping its members |
+| `enclave cleanup --ephemeral` | every group |
+| `enclave a2a reconcile [--peer-group <g>]` | every group, or the named one |
+
+A stale group whose members were removed outside enclave stays on disk until
+one of these commands runs for it.
 
 ## Source Files
 
@@ -428,3 +640,6 @@ per-session networks whose session is gone (see
 - [`internal/runtime/auth_manager.go`](../../internal/runtime/auth_manager.go) — Declared secret injection, env persistence, session checks
 - [`internal/runtime/runtime.go`](../../internal/runtime/runtime.go) — Mount assembly (`addConfigMount`, `addAuthMount`, `addFeatureAuthMounts`), execution flow
 - [`entrypoint.sh`](../../entrypoint.sh), [`runtime-assets/auth-reconcile.sh`](../../runtime-assets/auth-reconcile.sh) — In-container and helper-container symlink/reconcile logic for shared and feature auth
+- [`internal/peergroup/`](../../internal/peergroup/): A2A group directory layout, group record, snapshots, status and cleanup inventory
+- [`internal/a2aagent/table.go`](../../internal/a2aagent/table.go), [`internal/a2aagent/contexttable/`](../../internal/a2aagent/contexttable/): A2A context table format, retention and expiry
+- [`internal/backend/docker/a2a_leave.go`](../../internal/backend/docker/a2a_leave.go), [`internal/backend/docker/a2a_reconcile.go`](../../internal/backend/docker/a2a_reconcile.go): A2A leave, departure acknowledgments, teardown, inventory deletion and reconcile

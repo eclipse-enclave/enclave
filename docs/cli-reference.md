@@ -27,6 +27,7 @@ unchanged. See [windows.md](windows.md).
 | `enclave shell` | Open an interactive shell in the container |
 | `enclave shell --admin` | Shell with limited sudo |
 | `enclave stop [name]` | Stop background containers, or one session by name |
+| `enclave stop --peer-group <name>` | Stop every member of an A2A peer group, then its hub (experimental; see [A2A peer groups](#a2a-peer-groups-experimental)) |
 
 `enclave ps` prints one row per container with its `NAME` (container name) and `SESSION` (the `--name` session name, or the auto-assigned `1`, `2`, … for extra sessions; `-` for the project's default container); either can be passed to `attach`, `exec --name`, `stop`, and `theia`. Flags: `--all` (include stopped containers, not just running ones), `--json` (emit a JSON array instead of the table). The flags compose (`ps --all --json`). Each JSON object has the fields `name`, `tool`, `projectDir` (absolute, resolved project path), `projectHash`, `worktree`, `status`, `createdAt` (RFC 3339, empty if unknown), `sessionName`, `background`, `ports` (array of `{containerPort, hostPort, hostIP, protocol}` bindings), and `network` (`{name, subnet}` for the per-session bridge under Docker and podman, `null` for other backends and sessions started by earlier releases).
 
@@ -255,6 +256,253 @@ preserves memory. With `--ephemeral`, `--keep memory` preserves each session
 store that holds memory; the other `--keep` kinds do not apply there. See
 [Agent Memory](runtime/stores.md#agent-memory).
 
+### A2A peer groups (experimental)
+
+A peer group connects named sessions of one host through a per-group hub: one
+orchestrator delegates tasks to workers over the A2A protocol, and the host
+can send tasks as well. The feature is experimental; its flags, verbs and JSON
+output may change without a deprecation period. The design rationale is in
+the [A2A proposal](design/a2a/proposal.html).
+
+| Command | Description |
+|---------|-------------|
+| `enclave a2a peers` | Members of a peer group with their card data and status (`--json`) |
+| `enclave a2a log` | Print the hub audit log, one JSON object per line (`--tail <n>` keeps the last n) |
+| `enclave a2a send <peer> <text>` | Send a task to a worker as the host principal (`--detach`, `--context <ctx:handle>`, `--wait <duration>`, `--json`); `<text>` `-` reads stdin |
+| `enclave a2a task get <handle>` | State and result of a task the host principal sent (`--wait <duration>`, `--json`) |
+| `enclave a2a task cancel <handle>` | Cancel such a task (`--json`) |
+| `enclave a2a task retry <handle-or-message-id>` | Resend a host task flagged as a retry, with its original message ID, text and context (`--wait <duration>`, `--json`) |
+| `enclave a2a reconcile` | Re-publish or roll back uncommitted revisions, retry departure, quarantine and cleanup obligations; all groups unless `--peer-group` is passed |
+| `enclave stop --peer-group <name>` | Stop every member (orchestrator first), then the hub; no prompt |
+
+#### Sessions in a group
+
+A session joins with `--peer-group <name> --name <member>` (see
+[A2A flags](#a2a-experimental)). The session name is the member name.
+
+- **Orchestrator** (`--role orchestrator`): the interactive agent as usual,
+  with the tool's A2A client added (for Claude Code an MCP server with
+  `list_peers`, `send_task`, `get_task` and `cancel_task`).
+- **Worker** (default role): runs the A2A adapter as its main process and
+  serves tasks with the tool in non-interactive mode. A worker starts in the
+  foreground without a TTY: the adapter log streams to the terminal, stdin is
+  not attached and the detach key does not apply, so give each worker its own
+  terminal pane. Ctrl-C ends the worker, which leaves the group. With
+  `--background` the worker detaches like any other session and
+  `enclave attach` shows its log.
+
+Rejected at start, before anything is created:
+
+| Case | Reason |
+|------|--------|
+| `--peer-group` without `--name` | The session name is the member name |
+| `--peer-group` with `--allow-all-network` (flag or config) | The group route is part of the restricted network gateway |
+| `--peer-group` with `--backend qemu` | No network gateway to isolate the group |
+| `--role`, `--a2a-description`, `--a2a-log` or `--a2a-context-ttl` on the command line without `--peer-group` | Usage error; configured `a2a_*` values without a group are accepted and ignored |
+| Worker whose tool has no `sandbox.a2a` block or no yolo flag, or with yolo disabled (`--no-yolo`, `yolo: false`) | Nobody can approve permission prompts in serve mode |
+| Worker started as a shell (`enclave shell`) | The adapter is the session's main process |
+
+The join itself fails (exit 1, nothing left behind) on Podman when the
+session network has no `isolate=true` or stronger, and when the group runs on
+another engine (see below). A running container with the member's name is
+refused as for any named session.
+
+Stopping a member with `stop <name>`, the batch `stop`, `cleanup --ephemeral`
+or Ctrl-C in its foreground session makes it leave the group before its
+container is removed; orchestrators leave first. After an orchestrator stops,
+the remaining members and the matching `stop --peer-group` command are
+printed. `stop --peer-group` takes only `--peer-group` from the command line
+(a configured `peer_group` never turns `stop` into a group stop) and refuses a
+session argument or `--name`. The last member to leave stops the hub and
+deletes the group record.
+
+#### Engine of a group
+
+The group record stores the engine that created it (`docker` or `podman`,
+plus that daemon's storage root); the group's containers are invisible to any
+other engine. The A2A commands follow it:
+
+- `send`, `task` and `reconcile --peer-group` switch to the recorded engine
+  and log the switch. An explicit `--backend` that names another engine is an
+  error that names the right one.
+- `stop --peer-group` does not switch: it refuses when its backend differs
+  from the recorded engine; pass that engine with `--backend`.
+- A `--peer-group` run on another engine or another daemon of the same engine
+  is refused, and `reconcile` without `--peer-group` reports such groups as
+  `skipped` and leaves them alone.
+- `peers` and `log` read host state only and need no engine.
+
+A record written before engines were recorded adopts the current engine once
+its hub or a member session is found there; otherwise the group is only
+reported, never torn down.
+
+#### Reconciliation
+
+Sessions without `--peer-group` do no A2A work: a plain `run` performs no
+reconcile, and a plain `stop` reconciles only the groups a stopped container
+belonged to (none for a non-member, which also skips the engine query). A
+group whose members were removed outside enclave, or whose hub died, is
+repaired only by:
+
+| Trigger | Groups reconciled |
+|---------|-------------------|
+| `enclave --peer-group <g>` (run) | All, before the join |
+| `stop <name>` or batch `stop` of a member | The member's group |
+| `stop --peer-group <g>` | `<g>`, then all |
+| `cleanup --ephemeral` | All |
+| `enclave a2a reconcile` | All, or the one named by `--peer-group` |
+
+A group whose lock another enclave command holds is reported as busy and left
+for the next reconcile. `send` and `task` do not reconcile: when the hub is
+not running they fail with the `enclave a2a reconcile --peer-group <g>
+--backend <engine>` command that restarts it.
+
+#### Host commands
+
+`--peer-group <name>` may be omitted when exactly one group has a record; a
+configured `peer_group` names the group for every verb except `reconcile`,
+which covers all groups unless the flag is passed on the command line. `send`,
+`task`, `reconcile` and `stop --peer-group` also accept `--backend`. Options
+are described under
+[A2A peer groups](configuration.md#a2a-peer-groups-experimental).
+
+`peers` reads the group record, the published membership and each worker's
+`restrictions.json`; it never contacts the hub. `send` and `task` act as the
+group's host principal: each invocation gets an invocation credential that
+lives for the operation bound plus 60 s (2 minutes for non-blocking calls,
+capped at `a2a_credential_lifetime`), published to the hub before the call
+and revoked when it ends, also after Ctrl-C. A `--wait` above
+`a2a_credential_lifetime` minus 60 s is a usage error. The call runs through
+the engine as `enclave-a2a-hub call` inside the hub container; no port is
+opened on the host.
+
+```mermaid
+sequenceDiagram
+    participant CLI as enclave a2a send
+    participant Hub as hub (call)
+    participant W as worker adapter
+    CLI->>Hub: publish host credential
+    CLI->>Hub: SendStreamingMessage
+    Hub->>W: forward
+    W-->>CLI: -31019 (epoch unconfirmed, nothing admitted)
+    CLI->>Hub: resend unchanged
+    W-->>CLI: task ID, status updates
+    alt task ends within the wait
+        W-->>CLI: terminal state and result (exit 0 or 5)
+    else wait elapses
+        CLI-->>CLI: print handle and state (exit 4), task continues
+    end
+    CLI->>Hub: revoke credential
+```
+
+- `send` blocks for `a2a_host_send_wait` (or `--wait`), following the
+  stream; after a dropped stream it resubscribes or polls the task. When the
+  wait elapses, or the credential expires mid-stream, it prints the handle
+  with the task's state and exits 4; the task continues.
+- `--detach` returns as soon as the worker admitted the task and prints its
+  handle (exit 0).
+- A worker that has not yet confirmed its hub connection answers `-31019`
+  (`EPOCH_UNCONFIRMED`) and admits nothing; `send`, `--detach` and the
+  orchestrator's client resend the same message automatically until the
+  worker accepts it; the code is reported as an error only when the wait
+  ends first.
+- A stream lost before the worker returned a task ID leaves the outcome
+  unknown: exit 1 with the message ID and a `task retry` hint.
+- `task get` returns at once unless `--wait` is given; on a task that is
+  still running it exits 4. `task cancel` exits 0 whenever the worker
+  answered, whatever the outcome.
+- A handle or journal entry from an earlier generation of the worker (the
+  member restarted) is refused before a credential is issued.
+- Interrupting a wait never cancels the task; the handle, if known, goes to
+  stderr and the exit code is 130.
+
+Host sends are recorded (message ID, peer, context, text) in the group's host
+state, at most 100 entries, deleted with the group, so `task retry` can resend
+one whose outcome was lost, using the handle or the message ID printed by
+`send`.
+
+Exit codes of the A2A commands, and of `run`, `stop` and `cleanup` where a group is involved:
+
+| Code | Meaning |
+|------|---------|
+| 0 | Success; for `send`, `task get` and `task retry` the task completed |
+| 1 | Error: usage, rejection, delivery error, lock or engine failure, outcome unknown |
+| 3 | Degraded: an obligation stayed open after the leave and the reconcile that follows it (unconfirmed termination, unreachable worker, uncommitted removal); run `enclave a2a reconcile` later. Returned by `reconcile`, `stop` of members, `stop --peer-group`, `cleanup --ephemeral`, and a foreground member session that exited 0 |
+| 4 | The wait ended before the task did (`send`, `task get`, `task retry`); the handle and actual state were printed |
+| 5 | The task ended `failed`, `canceled` or `rejected` |
+| 130 | Interrupted |
+
+`--json` output of `send` and `task` is one object:
+
+```json
+{
+  "schemaVersion": "1",
+  "kind": "a2a-task",
+  "group": "review",
+  "peer": "worker-1",
+  "handle": "task:worker-1:a1b2c3d4e5f60718:t9",
+  "state": "TASK_STATE_SUBMITTED",
+  "queuePosition": 0,
+  "messageId": "00000000-0000-4000-8000-000000000000",
+  "context": "ctx:worker-1:a1b2c3d4e5f60718:c1",
+  "note": "The wait ended; the task continues. Use `enclave a2a task get <handle>`."
+}
+```
+
+`group` is always present; the other fields are omitted when empty: `reason`
+and `termination` (`confirmed`, `unconfirmed`, `not-applicable`) as the
+worker reported them, `message` (the final result text) on a terminal state,
+`error` (`<message> [<code> <REASON>]`) and `note`. `state` uses the A2A
+`TASK_STATE_*` names.
+
+`peers --json` is one object of `kind: "a2a-peers"` with `schemaVersion`,
+`group`, `groupGeneration`, `snapshotRevision`, `hub` (`{container, port}`)
+and `members`. Each member has `name`, `role`, `generation`, `state`
+(`joining`, `active`, `leaving`), `tool`, `sessionContainer`, `projectPath`,
+`mountMode`, `description`, `port` (adapter port, `null` for the
+orchestrator), `hubAddress`, `joinedAt`, `skills` (agent card skills), and the
+status fields of the `ps --json` `a2a` object below. Under `--json` an error
+before a result exists is reported as an object with `schemaVersion`, `kind`
+and `error`.
+
+`enclave ps --json` adds `a2a` to every entry: `null` outside a peer group,
+otherwise:
+
+```json
+"a2a": {
+  "group": "review",
+  "groupGeneration": "3f9c0a1b2c3d4e5f",
+  "role": "worker",
+  "generation": "a1b2c3d4e5f60718",
+  "port": 41821,
+  "hub": { "container": "enclave-a2a-hub-review", "address": "172.18.0.14", "port": 41820 },
+  "snapshotRevision": 7,
+  "quarantine": "no",
+  "quarantineAt": "2026-11-05T12:00:00Z",
+  "quarantineSource": "worker-table",
+  "admissionStop": "unknown",
+  "admissionStopAt": null,
+  "admissionStopSource": null,
+  "departure": "no",
+  "departureAt": "2026-11-05T11:00:00Z",
+  "departureSource": "group-record"
+}
+```
+
+`quarantine`, `admissionStop` and `departure` are `yes`, `no` or `unknown`;
+missing data is `unknown`, never `no`. `…Source` is `worker-table` (the
+worker's `restrictions.json`, read from its config store) or `group-record`,
+and `…At` is the source record's timestamp; both are `null` when the value is
+`unknown`. A worker table whose heartbeat is older than
+`a2a_status_staleness` counts as missing. `quarantine` is the worker's own
+quarantine; for the orchestrator it is always `no`. `admissionStop` is a
+worker's own admission stops; for the orchestrator it is `yes` when any active
+worker stops it, and `unknown` when a worker table is missing and none does.
+`departure` is `yes` while the group record holds an unfinished departure or
+departure-acknowledgment obligation for that member and generation. `port` is
+`null` for the orchestrator, and `hub` and `snapshotRevision` come from the
+group record.
+
 ---
 
 ## Flags
@@ -358,6 +606,21 @@ There is no config-file key.
 | `--no-cache` | Disable package caches |
 | `--no-history` | Disable shell history |
 | `--no-memory` | Disable per-project agent memory; see [memory controls](runtime/stores.md#agent-memory) |
+
+### A2A (experimental)
+
+| Flag | Description |
+|------|-------------|
+| `--peer-group <name>` | Join the session to an A2A peer group (requires `--name`); rejected with `--allow-all-network`, the qemu backend and Podman without network isolation |
+| `--role <orchestrator\|worker>` | Role in the group (default `worker`); one orchestrator per group |
+| `--a2a-description <text>` | Agent card description of this session |
+| `--a2a-log <coarse\|full>` | Hub audit granularity (default `coarse`, status only); taken from the member that creates the group |
+| `--a2a-context-ttl <duration>` | Idle expiry of a worker's contexts (default `24h`) |
+
+A worker runs in the foreground without a TTY unless `--background` is
+passed. See [A2A peer groups](configuration.md#a2a-peer-groups-experimental)
+for the config-only bounds and [A2A peer groups](#a2a-peer-groups-experimental)
+for the rejections, the `enclave a2a` verbs and `stop --peer-group`.
 
 ---
 

@@ -98,6 +98,8 @@ the complete set and semantics):
   `cache=mmap`; required when the store holds SQLite databases in WAL mode.
 - `hostConfigDir` / `hostCredentialsFile` / `hostOauthJson`: (optional) host-side
   locations used by `auth import/export`.
+- `a2a`: (optional, experimental) headless invocation for A2A peer group
+  workers; see [step 10](#10-optional-a2a-peer-group-support-experimental).
 
 ## 3) Declare credentials, service auth, and providers
 
@@ -197,3 +199,46 @@ directories per project; see
 - Confirm `enclave auth import --tool <tool>` copies required auth files
   (`providers[].authFiles`).
 - Verify the tool runs inside the container (`enclave --tool <tool>`).
+
+## 10) Optional: A2A peer group support (experimental)
+
+A tool without `sandbox.a2a` can be a peer group orchestrator but not a
+worker. To add worker support (field reference and semantics in
+[A2A peer groups](README.md#a2a-peer-groups-sandboxa2a-experimental)):
+
+1. Check that the tool has a headless mode that reads the prompt from stdin,
+   resumes a session by ID, and writes an event stream that an existing
+   `eventFormat` decodes. v1 supports only `claude-stream-json`; another
+   format needs a driver in core (`internal/a2aagent/driver/`), so raise it
+   with the maintainers first.
+2. Make sure `sandbox.yoloFlag` is set: workers require yolo mode.
+3. Add the block. Claude's, for reference:
+
+   ```yaml
+   sandbox:
+     a2a:
+       command: [claude, -p, --output-format, stream-json, --verbose]
+       newSessionArgs: [--session-id, "{sessionId}"]
+       resumeArgs: [--resume, "{sessionId}"]
+       eventFormat: claude-stream-json
+       versionCommand: [claude, --version]
+       versions: ">=2.1.306 <3.0.0"
+       skills:
+         - id: coding
+           name: Coding
+           description: Reads, edits and tests code in the worker's project and answers with a summary of what it did.
+           tags: [code, review, refactor, test]
+       orchestratorArgs: [--mcp-config, /usr/local/share/enclave/templates/claude-a2a-mcp.json]
+   ```
+
+   Pin `versions` from the release you tested to the next major. Add
+   `newSessionArgs` if the tool accepts a caller-chosen session ID.
+4. For orchestrator support, ship an MCP config under `templates/` that starts
+   `enclave-a2a-agent mcp`, and point `orchestratorArgs` at its baked path
+   (`/usr/local/share/enclave/templates/<tool>-<file>`).
+5. Put group-only guidance in a skill named `a2a-<name>` under `skills/`; it
+   is composed only into `--peer-group` sessions.
+6. Run `enclave validate-extensions`, then start an orchestrator and a worker
+   in one group (`--peer-group <group> --name <member>`, plus
+   `--role orchestrator` for the orchestrator) and send the worker a task with
+   `enclave a2a send <worker> <text>`.

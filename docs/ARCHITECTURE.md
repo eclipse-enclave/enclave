@@ -26,6 +26,13 @@ Enclave is a sandboxing CLI that bootstraps isolated agent tooling in Docker con
 4. Prepare mounts, persistent stores, auth, and network isolation.
 5. Run the tool or shell inside an ephemeral container.
 
+A session started with `--peer-group` (experimental) adds three things to
+this flow: step 3 builds the A2A agent image variant and the hub image, step 4
+reconciles and joins the peer group under the group lock, and step 5 completes
+the join while the backend creates the bridge, the gateway and the session
+container. Sessions without `--peer-group` make no A2A call. See
+[A2A peer groups](#a2a-peer-groups-experimental).
+
 ## Diagrams
 
 ### Docker runtime
@@ -83,6 +90,74 @@ flowchart LR
     ToolImportsGen --> ToolImports["cmd/enclave/tool_imports.go"]
 ```
 
+### A2A peer group join
+
+A member joins while the backend starts its session; every step before the
+session container exists rolls back on failure. A foreground session leaves
+the same way in reverse when it ends.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant CLI as enclave run --peer-group
+    participant PG as backend/docker PeerGroups
+    participant State as ~/.local/state/enclave/a2a/#lt;group#gt;
+    participant Engine as Docker or Podman
+    participant GW as Member gateway
+    participant Hub as Hub (supervisor + proxy)
+
+    CLI->>CLI: build agent image variant and hub image
+    CLI->>PG: reconcile, then Join (takes group lock)
+    PG->>State: load or create group.json, worktree guard,<br/>inventory, tokens, member "joining"
+    CLI->>Engine: create session bridge
+    PG->>PG: OnSessionNetwork: Podman isolation check,<br/>hub address = last free host address of the subnet
+    PG->>State: write a2a-overlay/#lt;container#gt;/overlay.json (active)
+    CLI->>Engine: create gateway with overlay mounted read-only
+    GW->>GW: apply overlay rules and a2a.enclave DNS record,<br/>log "A2A overlay applied"
+    PG->>Engine: OnGateway: start hub on this bridge (--ip)<br/>or connect it to the bridge
+    PG->>State: publish snapshot revision N (membership, secrets, manifest)
+    PG->>Hub: SIGHUP
+    Hub->>Hub: supervisor renders firewall rules,<br/>proxy reloads routing and tokens
+    Hub->>State: status/supervisor.json and proxy.json: appliedRevision N
+    PG->>State: member "active", group record saved
+    CLI->>Engine: start session container
+    Note over CLI,PG: Started releases the group lock once the container exists
+    Note over Engine,Hub: worker: adapter opens the control stream (hello)<br/>orchestrator: MCP client opens the liveness stream
+```
+
+### A2A request through the hub
+
+An orchestrator's `send_task` call, end to end. Host verbs (`enclave a2a
+send`, `task`) take the same route from the hub inward, entering through
+engine exec of `enclave-a2a-hub call` with a short-lived invocation
+credential instead of the orchestrator's token.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Agent as Orchestrator agent (Claude Code)
+    participant MCP as enclave-a2a-agent mcp
+    participant Hub as Hub proxy
+    participant Adapter as enclave-a2a-agent serve
+    participant Harness as Worker harness (claude -p)
+
+    Agent->>MCP: send_task {peer, text}
+    MCP->>MCP: journal the message ID before sending
+    MCP->>Hub: POST a2a.enclave:41820/peers/#lt;worker#gt;<br/>SendStreamingMessage, Bearer inbound token
+    Note over MCP,Hub: orchestrator gateway: dnsmasq resolves a2a.enclave to the hub,<br/>overlay rules allow it and bypass the proxy redirect
+    Hub->>Hub: authenticate the token, check the role,<br/>strip Authorization and X-Enclave-A2A-*
+    Hub->>Adapter: POST #lt;worker gateway address#gt;:41821, Bearer outbound token,<br/>X-Enclave-A2A-* principal headers
+    Note over Hub,Adapter: worker gateway: overlay rules admit the hub only on the adapter port
+    Adapter->>Adapter: check the principal against the control-stream membership,<br/>persist dedupe and task records, queue
+    Adapter-->>MCP: SSE: first event carries the task (relayed by the hub)
+    Adapter->>Harness: run with the provenance line on stdin
+    Harness-->>Adapter: stream-json events, final result
+    Adapter-->>Hub: SSE status updates, result artifact
+    Hub->>Hub: append audit/audit.jsonl
+    Hub-->>MCP: SSE passthrough
+    MCP-->>Agent: result, or a task handle once a2a_send_wait elapses
+```
+
 The restricted network request flow has a separate
 [sequence diagram](runtime/network-request-flow.md).
 
@@ -92,9 +167,11 @@ The restricted network request flow has a separate
 - [`cmd/enclave/main_unix.go`](../cmd/enclave/main_unix.go) is the binary entrypoint everywhere except Windows. It loads the selected asset variant and delegates to `app.Run`.
 - [`cmd/enclave/main_windows.go`](../cmd/enclave/main_windows.go) is the Windows entrypoint. It delegates to [`internal/wslshim/`](../internal/wslshim/), which forwards every argument to the Linux binary inside a WSL2 distribution. It links neither the embedded assets nor the tool extensions, because it never builds an image; that is why [`cmd/enclave/tool_imports.go`](../cmd/enclave/tool_imports.go) is generated with a `//go:build !windows` constraint. See [windows.md](windows.md).
 - [`cmd/enclave-gateway-proxy/main.go`](../cmd/enclave-gateway-proxy/main.go) is the gateway sidecar MITM proxy entrypoint used by `Dockerfile.gateway`.
+- [`cmd/enclave-a2a-hub/`](../cmd/enclave-a2a-hub/) is the A2A hub binary built by `Dockerfile.a2ahub`: `proxy` (the unprivileged proxy), `render-rules` (firewall rules for the root supervisor) and `call` (host access through engine exec).
+- [`cmd/enclave-a2a-agent/`](../cmd/enclave-a2a-agent/) is the in-session A2A binary of the agent image variant: `serve` (worker adapter), `mcp` (orchestrator stdio MCP server), `client` (CLI fallback) and `ctl` (host signals to a worker through engine exec).
 
 ### Distribution assets
-- [`assets_embed.go`](../assets_embed.go) embeds the runtime build context, documentation, extensions, and gateway proxy build sources in standalone CLI binaries. Debian and RPM builds select [`assets_noembed.go`](../assets_noembed.go) with the `enclave_no_embed` build tag because package-managed builds install the same tree next to the executable. Package definitions live under [`debian/`](../debian/) and [`packaging/rpm/`](../packaging/rpm/).
+- [`assets_embed.go`](../assets_embed.go) embeds the runtime build context, documentation, extensions, and the gateway proxy, A2A hub, and A2A agent build sources in standalone CLI binaries. Debian and RPM builds select [`assets_noembed.go`](../assets_noembed.go) with the `enclave_no_embed` build tag because package-managed builds install the same tree next to the executable. Package definitions live under [`debian/`](../debian/) and [`packaging/rpm/`](../packaging/rpm/).
 - [`internal/appassets/`](../internal/appassets/) registers the embedded filesystem, computes its content key, and defines normalized extraction modes.
 - [`internal/config/embedded_assets.go`](../internal/config/embedded_assets.go) extracts assets atomically into a content-keyed platform cache directory when no checkout or package asset tree is adjacent to the executable.
 - [`internal/legacyassets/`](../internal/legacyassets/) removes only exact, known files from the asset tree used by older source installs. It preserves unknown files, never follows symlinks, and never recursively removes directories.
@@ -118,6 +195,7 @@ The restricted network request flow has a separate
 - [`internal/app/network_cmd.go`](../internal/app/network_cmd.go) implements `enclave network` subcommands (status, print, diff, apply, add-domain, remove-domain, set-mode).
 - [`internal/app/network_log_cmd.go`](../internal/app/network_log_cmd.go) implements `enclave network log`: it resolves the logs in scope, filters the event stream, and feeds rows, follow, or summary output.
 - [`internal/cli/network_command.go`](../internal/cli/network_command.go) defines Cobra command structure and flag parsing for the `network` subcommand tree.
+- [`internal/app/a2a_wiring.go`](../internal/app/a2a_wiring.go) carries a `--peer-group` session from option checks through join to its exit code, and makes members leave before `stop` or `cleanup` removes their containers. [`internal/app/a2a_cmd.go`](../internal/app/a2a_cmd.go) and [`internal/app/a2a_host.go`](../internal/app/a2a_host.go) implement the `enclave a2a` verbs and their host access; [`internal/app/a2a_agent_build.go`](../internal/app/a2a_agent_build.go) builds the agent image variant. [`internal/cli/a2a_command.go`](../internal/cli/a2a_command.go) defines the `a2a` command tree.
 
 ### Configuration and Profiles
 - [`extensions/tools/`](../extensions/tools/) contains per-tool configuration (`spec.yaml`, templates, allowlists, install scripts, optional `check-update.sh` hooks).
@@ -140,6 +218,22 @@ The restricted network request flow has a separate
 - [`internal/gateway/dnsaudit/`](../internal/gateway/dnsaudit/) tails dnsmasq's log and translates denied or failed lookups into `dns` audit events. It runs as its own process (`enclave-gateway-proxy -dns-audit <log>`) so DNS denials are recorded even when the proxy is disabled.
 - [`internal/gateway/tlsstore/`](../internal/gateway/tlsstore/) manages CA generation and the container-private per-host leaf certificate cache for gateway TLS interception; only the CA is shared with the host.
 - [`internal/docker/`](../internal/docker/) wraps the Docker CLI for Docker-specific backend/build/cleanup implementation details.
+
+### A2A peer groups (experimental)
+
+Agent-to-agent communication between sessions of one host; design rationale
+and measured engine behaviour are in [`design/a2a/`](design/a2a/).
+
+- [`internal/a2a/`](../internal/a2a/) is the hand-written subset of the A2A v1.0 JSON-RPC binding plus the enclave-owned wire contract (headers, error codes, handles, env names, provenance line, ctl messages). Standard library only, because the host and both container binaries import it.
+- [`internal/peergroup/`](../internal/peergroup/) owns the host-side group state: group record, revisioned snapshots, status acknowledgments, cleanup inventory, tokens, worktree guard, gateway overlay file, labels and paths. It does not import `internal/config`, so the hub binary stays small.
+- [`internal/a2ahub/`](../internal/a2ahub/) is the hub proxy: it loads the published snapshot, authenticates members and host credentials, forwards JSON-RPC and SSE to workers by name, holds the worker control and orchestrator liveness streams, writes the audit log, and renders the supervisor's firewall rules.
+- [`internal/a2aagent/`](../internal/a2aagent/) is the in-session library behind `enclave-a2a-agent`. It holds the boundary interfaces and the context table format the host also reads; implementations live in [`contexttable/`](../internal/a2aagent/contexttable/) (persisted contexts, tasks, dedupe and restrictions), [`executor/`](../internal/a2aagent/executor/) (one task at a time, each harness run in its own process group, descendant tree confirmed gone), [`driver/claude/`](../internal/a2aagent/driver/claude/) (Claude Code's `-p --output-format stream-json` mode), [`server/`](../internal/a2aagent/server/) (worker adapter: JSON-RPC server, hub control connection, host ctl socket) and [`mcp/`](../internal/a2aagent/mcp/) (orchestrator stdio MCP server, CLI fallback, liveness connection, durable send journal).
+- [`internal/backend/peergroup.go`](../internal/backend/peergroup.go) defines `PeerGroupBackend` (hub start, stop, reload, connect, disconnect, worker signals, gateway overlay reload, hub listing) and the join hooks a member's session start calls. [`internal/backend/docker/`](../internal/backend/docker/) implements them in `a2ahub.go` and drives join, leave and reconcile in the `a2a_*.go` files (`PeerGroups`). The qemu backend has no peer group support.
+- [`internal/runtime/peer_group.go`](../internal/runtime/peer_group.go) runs the join hook during session start and appends the profile's `sandbox.a2a.orchestratorArgs` to orchestrator sessions; [`internal/runtime/skills_mount.go`](../internal/runtime/skills_mount.go) composes `a2a-*` extension skills only into `--peer-group` sessions.
+- [`internal/gateway/a2a_overlay.go`](../internal/gateway/a2a_overlay.go) validates the overlay directory and matches the gateway's overlay log markers; [`internal/gateway/a2ahub_build.go`](../internal/gateway/a2ahub_build.go) builds and looks up the hub image, staging only the inputs listed in `a2ahub_build_inputs.txt`.
+- [`internal/tools/a2aspec.go`](../internal/tools/a2aspec.go) is the `sandbox.a2a` profile block (headless command, session arguments, event format, supported versions, card skills, orchestrator arguments). Claude Code is the only tool that declares it in v1.
+- [`internal/a2ae2e/`](../internal/a2ae2e/) is a test-only package (`docker` build tag) that drives the `enclave` binary against a real engine: an orchestrator, two workers, a plain session, a host send, departure acknowledgments, reconcile and teardown, without credentials or billed requests.
+- [`scripts/a2a-smoke.sh`](../scripts/a2a-smoke.sh) is the live smoke test on Docker or Podman with the host's real Claude login: run-path rejections, real tasks, Ctrl-C and cancel, orchestrator stop, the degraded departure path with a late acknowledgment, reconcile after `kill -9`, and teardown.
 
 ### Tool Handlers
 - [`internal/tools/handler.go`](../internal/tools/handler.go) defines handler hooks used by runtime.
@@ -177,6 +271,11 @@ The restricted network request flow has a separate
 - [`runtime-assets/auth-reconcile.sh`](../runtime-assets/auth-reconcile.sh) holds shared shell logic used by the entrypoint and helper containers to reconcile shared auth files. Shell and backend reconciliation skip files containing gateway placeholders; custom session values travel in `ENCLAVE_SECRET_PLACEHOLDERS` so detached lifecycle syncs can recognize them without carrying real secrets.
 - [`runtime-assets/net.sh`](../runtime-assets/net.sh) holds shared entrypoint network helpers (local resolver, Docker host gateway resolution, and loopback proxy setup).
 - [`runtime-assets/microvm/alpine/`](../runtime-assets/microvm/alpine/) holds the experimental QEMU Alpine bundle init and builder.
+- [`Dockerfile.a2ahub`](../Dockerfile.a2ahub) builds the A2A hub image (`enclave-a2a-hub:latest`) on the gateway's Alpine base, independent of any tool profile. Its Go build stage copies only the paths in [`internal/gateway/a2ahub_build_inputs.txt`](../internal/gateway/a2ahub_build_inputs.txt), which together with the Dockerfile and entrypoint form the rebuild hash.
+- [`a2ahub-entrypoint.sh`](../a2ahub-entrypoint.sh) is the hub's root supervisor: it loads fixed DROP policies, starts the proxy as uid 65532, and on start and every SIGHUP verifies the current snapshot through `render-rules`, applies the rules, aborts sockets and flushes conntrack of removed members, sends gratuitous ARP, writes `supervisor.json` and forwards the reload to the proxy. A refused snapshot keeps the last applied rules and is reported as `rejectedRevision`; a proxy exit or an unwritable status file stops the hub, which `enclave a2a reconcile` restarts.
+- [`runtime-assets/a2a-agent/`](../runtime-assets/a2a-agent/) holds `enclave-install-a2a-agent`, which builds `enclave-a2a-agent` in the variant's Go builder stage, and `enclave-a2a-entrypoint`, the variant's ENTRYPOINT: it runs `entrypoint.sh` with `enclave-a2a-agent serve` in place of the interactive command for workers and passes everything else through. [`internal/app/a2a_agent_build_inputs.txt`](../internal/app/a2a_agent_build_inputs.txt) lists the sources that stage copies and its hash covers.
+- [`gateway-entrypoint.sh`](../gateway-entrypoint.sh) also applies the A2A overlay of `--peer-group` sessions from `/etc/enclave-a2a-overlay/overlay.json` at start and on every SIGHUP, logging one `A2A overlay applied|cleared|validation failed|apply failed (generation=<n>)` marker per read. Gateways of other sessions have no overlay mount and no A2A rules.
+- [`extensions/tools/claude/`](../extensions/tools/claude/) declares the `sandbox.a2a` block in `spec.yaml`, ships `templates/a2a-mcp.json` (the orchestrator's MCP server config) and the `a2a-provenance` skill that explains the provenance line to workers.
 - [`extensions/tools/<tool>/templates/`](../extensions/tools/) holds per-tool settings templates baked into the image during build.
 - [`docs/`](../docs/) is included in the runtime build context so the image can install agent-facing help under `/usr/share/doc/enclave/`. [`docs/assets/`](../docs/assets/) is excluded in [`.dockerignore`](../.dockerignore); it holds only `README.md` branding, and keeping it out spares users an image rebuild whenever the logo changes.
 
@@ -204,6 +303,7 @@ The restricted network request flow has a separate
 - **Declared secrets and HTTP release**: tool profiles and enabled feature manifests can declare `secrets`. Each secret lists env-var aliases and can optionally define `release.http` target hosts/header formatting. Declared secrets are resolved from host env, layered secrets files, or persisted env; when gateway release is enabled, matching secrets are replaced with `ENCLAVE_SECRET_*` placeholders inside the container. The flow is: extension `secrets` config → `PlaceholderResolver` generates placeholders → `SecretMapping` entries written to a JSON file → gateway proxy loads secret release rules and substitutes placeholders in the declared headers on HTTPS requests to the declared hosts. Inspected requests with registered placeholders in headers that do not satisfy their release rules are denied. This protection is limited to env-var injection: credential files written by auth hooks can still contain the real secret in the config/auth store.
 - **Gateway audit events**: the gateway emits JSONL network events to the host-mounted network log path (`~/.local/state/enclave/projects/<hash>/<tool>/logs/network.log`), all through the shared `netlog.Event` contract. Default `network_log=coarse` records one `tcp` event per TLS connection, written at the ClientHello before the tunnel opens, plus per-request `http` events for plaintext HTTP and for the hosts already MITM'd for secret release; connection reuse therefore hides request volume, and successful DNS lookups are not recorded at all. `network_log=requests` adds request-level HTTP/HTTPS audit events by forcing allowlisted HTTPS through MITM. Two more writers share the file: the DNS audit translator appends `dns` denials, and the host appends a `session` marker at each gateway start. Every event carries the session name, because sessions of the same project and tool share one file. The host rotates the log at session start when it exceeds `netlog.MaxLogBytes` (32 MB), copying it to `network.log.1` and truncating it in place so a session already running keeps writing to the file it bind-mounted. `enclave network log` reads it back; logged HTTP paths never include query strings.
 - **Gateway and network labels**: gateway containers are tagged with Docker labels (`enclave.gateway`, `enclave.agent`, `enclave.gateway.project_hash`, etc.) for runtime discovery by `network status` and `network apply`. Per-session bridges carry separate ownership and project labels for conservative lifecycle management; consumers use the structured `enclave ps --json` network field instead of deriving internal names.
+- **A2A peer groups (experimental)**: `--peer-group <name>` together with `--name` joins a session to a group of agents on one host; `--role` makes it the group's single orchestrator or a worker (default). An orchestrator runs its agent as usual, with the `enclave-a2a-agent mcp` server added through `orchestratorArgs`. A worker runs `enclave-a2a-agent serve`, an A2A adapter that runs each task as a headless harness turn (yolo is required, since nobody can approve prompts). All traffic goes through a per-group hub container that has no network of its own: it is attached to each member's session bridge at a static address, the member's gateway admits it through the A2A overlay, and the hub's own firewall only lets it reach member gateways. Membership changes are published as revisioned snapshots under the group lock and count as committed only when both the hub's supervisor and proxy acknowledge the revision. Revocation is never rolled back: a failed leave step records an obligation in the group record that `enclave a2a reconcile` (and every A2A command, `stop` of a member, and `cleanup`) retries. Workers never send; only the orchestrator and the host principal (`enclave a2a send|task`) do. Rejected with `--allow-all-network`, the qemu backend, and Podman bridges without network isolation. The hub is removed with the group's last member. See [A2A peer groups](configuration.md#a2a-peer-groups-experimental), the [`enclave a2a` verbs](cli-reference.md#a2a-peer-groups-experimental) and [`design/a2a/`](design/a2a/).
 - **Live policy reload**: the `enclave network apply` command writes an updated config bundle to the host, signals the gateway with SIGHUP, and polls logs for reload confirmation. The gateway supervisor validates the new bundle before swapping, with fail-closed semantics on error.
 
 ## Containers and Stores
@@ -212,6 +312,7 @@ The restricted network request flow has a separate
 
 - **Tool container**: the primary ephemeral container launched for the tool or shell. It mounts the project directory read-write by default, or read-only when `project_mount=readonly` / `--project-mount readonly` is set. Linked worktree git metadata mounts follow the same mode by default; `worktree_metadata=readonly|none` forces them read-only or skips them independently of the project mount. Devcontainer-derived project bind mounts are forced read-only in readonly mode, and writable `add_dirs` entries inside the project subtree are clamped to read-only. Additional directories outside the project, caches, and history are mounted according to their own options. The container is removed on exit (`--rm`).
 - **Gateway sidecar**: when network isolation is enabled, a per-session gateway container is attached to the session's dedicated bridge. The tool container shares the gateway's network namespace, uses it as its resolver, and has outbound access enforced by the proxy (Host/SNI). Host policy resolution writes `~/.local/state/enclave/projects/<hash>/<tool>/gateway-config/`, and runtime apply sends `SIGHUP` so the gateway supervisor reloads dnsmasq/proxy with fail-closed semantics.
+- **A2A hub** (experimental, one per peer group): `enclave-a2a-hub-<group>`, labeled `enclave.a2a.hub=true` with the group and group generation. It is created on the first member's bridge with `--ip` and connected to each later member's bridge at the last free host address of that subnet; it never gets a network of its own. It runs with `--cap-drop ALL` plus `NET_ADMIN`, `NET_RAW`, `SETUID`, `SETGID`, `KILL` and `DAC_READ_SEARCH`, a read-only root, `no-new-privileges`, IP forwarding off and no restart policy. It mounts the group's `snapshots/` read-only, `status/` and `audit/` read-write. Member session containers carry `enclave.a2a.*` labels with group, member, role and generations; `enclave ps --json` reports them in its `a2a` object.
 
 Git config protection is applied after runtime mount composition. Existing config files for the current repository and discovered includes receive read-only file overlays at their exposed bind-mount paths; the surrounding project and Git metadata retain their configured modes. Writable parent-directory binds prevent rename-based replacement, and linked-worktree pointer files are read-only. Docker also protects aliases introduced by devcontainer `runArgs`. QEMU bind-mounts staged read-only files over their guest targets instead of copying onto targets that may live in writable host mounts. See [Git config protection](persistence.md#git).
 
@@ -243,6 +344,7 @@ Other host-side data:
   - `nvm/` - nvm-installed Node.js versions
   - `<name>/` - one directory per [extension-declared cache](extensions/README.md#project-caches-caches)
 - **History**: `~/.local/state/enclave/projects/<hash>/<tool>/history/` for shell history.
+- **A2A peer group state** (experimental): `~/.local/state/enclave/a2a/<group>/` holds `group.json` (members, pending revision, open obligations), `inventory/<groupGeneration>.json` (member stores to delete at teardown), `snapshots/<revision>/` with a `current` symlink, the hub's `status/` and `audit/audit.jsonl`, and `host-secrets/` (outbound tokens and the host send journal, 0600). `locks/a2a-<group>.lock` serializes every change to them. Each member session's gateway overlay is `projects/<hash>/<tool>/a2a-overlay/<container>/overlay.json`, and its context table (contexts, tasks, dedupe, restrictions; the orchestrator's send journal) lives in its config store under `a2a/<memberGeneration>/`, deleted through the inventory when the group is torn down.
 - **Agent memory**: `~/.local/state/enclave/projects/<hash>/<tool>/memory/` for per-project, agent-writable memory, bind-mounted into the harness's native memory path (`sandbox.memoryDir`). Never shared between projects or agents, disabled with `--no-memory`, and skipped for ephemeral (`--ephemeral`) sessions. `sandbox.memoryScope: session` keys it by config-store key (`memory/<key>/`), and `sandbox.statePaths` protects tool runtime state during config overlays. See [Agent Memory](runtime/stores.md#agent-memory) for isolation and cleanup policy.
 - **Home config files**: `~/.local/state/enclave/projects/<hash>/<tool>/home-config/` for host-home files created in the container:
   - `npmrc` → `~/.npmrc`
@@ -408,3 +510,5 @@ Default image naming behavior:
 - `--base-image` or devcontainer mode without `--image-name`:
   - `enclave-<tool>:base-<hash>-latest` or `enclave-<tool>:devcontainer-<hash>-latest`
   - slim: `enclave-<tool>:base-<hash>-slim` or `enclave-<tool>:devcontainer-<hash>-slim`
+- `--peer-group` (experimental) without `--image-name`: the A2A agent variant prefixes the derived tag with `a2a-` (for example `enclave-<tool>:a2a-latest`). The variant adds the `enclave-a2a-agent` build stage and the entrypoint wrapper, and its hash adds the agent's build inputs, so images of other sessions are unchanged.
+- The A2A hub image is `enclave-a2a-hub:latest` for every tool; its `enclave.a2ahub.hash` label decides rebuilds, and `--no-rebuild` uses the existing image or fails.

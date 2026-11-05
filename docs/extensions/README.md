@@ -59,7 +59,11 @@ extensions/
 │       ├── spec.yaml               # Extension spec: metadata, sandbox, network, credentials, providers
 │       ├── gateway-allowlist.conf  # Network allowlist (required)
 │       ├── templates/
-│       │   └── settings.json      # Settings template
+│       │   ├── settings.json      # Settings template
+│       │   └── a2a-mcp.json       # MCP config for A2A orchestrator sessions
+│       ├── skills/
+│       │   ├── enclave-help/      # Composed into every session
+│       │   └── a2a-provenance/    # a2a-*: composed only into --peer-group sessions
 │       ├── entrypoint.d/
 │       │   └── setup.sh           # Tool-specific startup script
 │       ├── install.sh             # Docker build installation
@@ -429,6 +433,19 @@ sandbox:
   hostConfigDir: .claude
   hostCredentialsFile: .credentials.json
   hostOauthJson: .claude.json
+  a2a:                       # optional, experimental; see "A2A peer groups" below
+    command: [claude, -p, --output-format, stream-json, --verbose]
+    newSessionArgs: [--session-id, "{sessionId}"]
+    resumeArgs: [--resume, "{sessionId}"]
+    eventFormat: claude-stream-json
+    versionCommand: [claude, --version]
+    versions: ">=2.1.306 <3.0.0"
+    skills:
+      - id: coding
+        name: Coding
+        description: Reads, edits and tests code in the worker's project and answers with a summary of what it did.
+        tags: [code, review, refactor, test]
+    orchestratorArgs: [--mcp-config, /usr/local/share/enclave/templates/claude-a2a-mcp.json]
 
 credentials:
   sources:
@@ -458,7 +475,9 @@ providers:
 `noMemoryArgs`, `statePaths`, `settingsFile`, `settingsTarget`, `yoloFlag`,
 `yoloEnabled`, `continueArgs`, `resumeArgs`, `passthroughPaths`,
 `qemuMinMemoryMiB`, `qemuStoreCacheMmap`, `hostConfigDir`, `hostCredentialsFile`,
-and `hostOauthJson`) are enclave-native tool metadata. `sandbox.entrypoint.run`
+`hostOauthJson`, and the `a2a` block described in
+[A2A peer groups](#a2a-peer-groups-sandboxa2a-experimental)) are enclave-native
+tool metadata. `sandbox.entrypoint.run`
 is the shared sbx-style command to launch the tool.
 
 Memory and runtime state policy is declared in the spec, including for installed
@@ -563,9 +582,130 @@ selected harness. Built-in duplicated skills remain per-tool so they can carry
 harness-specific metadata. Tools without `sandbox.skillsDir` ignore all
 shared sources.
 
+Extension skills (layers 1 to 3) whose directory name starts with `a2a-` are
+composed only into sessions started with `--peer-group`, in either role. Use
+the prefix for guidance that only makes sense inside a peer group, such as
+Claude's `a2a-provenance`. Skills from the user's own sources (layers 4 to 8)
+are not filtered.
+
 Canonical host-side tool config overrides live under `~/.config/enclave/tools/<tool>/` (global) and `~/.config/enclave/projects/<hash>/<tool>/config/` (project).
 
 Generic JSON/TOML patches mirror native config paths under `~/.config/enclave/patches/<tool>/` and `~/.config/enclave/projects/<hash>/patches/<tool>/`. Patches require `sandbox.configDir`, and each target must exist in a lower-precedence layer. Resolution layers built-in config, host passthrough, global full-or-patch, then project full-or-patch. Defining a full file and patch for the same path at one scope is an error.
+
+### A2A peer groups (`sandbox.a2a`, experimental)
+
+`sandbox.a2a` declares how Enclave runs the tool headless inside an
+[A2A peer group](../configuration.md#a2a-peer-groups-experimental). The
+feature is experimental; the block's shape may change without a deprecation
+period. A group has one orchestrator (the interactive tool, plus an MCP server
+for reaching peers) and any number of workers. A worker's main process is the
+A2A adapter (`enclave-a2a-agent serve`), which runs the tool once per task
+turn with the argv this block describes. `--peer-group` sessions use an image
+variant (`enclave-<tool>:a2a-<tag>`) that adds the adapter; the tool's
+`install.sh` needs no changes.
+
+| Field | Required | Meaning |
+| --- | --- | --- |
+| `command` | yes | Headless argv. The task prompt goes to stdin, never into argv |
+| `resumeArgs` | yes | Appended to continue an existing context; contains `{sessionId}` |
+| `newSessionArgs` | no | Appended for a new context; contains `{sessionId}` |
+| `eventFormat` | yes | Decoder for the tool's stdout; v1 supports only `claude-stream-json` |
+| `versionCommand`, `versions` | both or neither | Harness version pin |
+| `skills[]` | no | Agent card skills: `id` (unique), `name`, `description`, optional `tags` |
+| `orchestratorArgs` | no | Appended to the interactive command of orchestrator sessions |
+
+The block is validated when the spec loads, for built-in, user and
+`enclave tools add` candidates alike; errors name the field
+(`sandbox.a2a.resumeArgs ...`):
+
+- Unknown keys are rejected.
+- Argv lists have no blank tokens. `resumeArgs` and `newSessionArgs` contain
+  `{sessionId}` exactly once, as a whole token or inside one
+  (`--resume={sessionId}`); `command`, `versionCommand` and `orchestratorArgs`
+  must not contain it.
+- `eventFormat` must name a format the adapter has a driver for.
+
+**Tools without the block cannot run as workers.** `--peer-group` with the
+default `--role worker` fails for such a tool, as it does when the tool has no
+`sandbox.yoloFlag`, when yolo mode is disabled (`--no-yolo`, `yolo=false`), or
+with `--shell`: nobody can answer a permission prompt in a headless turn. The
+orchestrator role does not need the block.
+
+#### Worker turns
+
+For each turn the adapter builds the argv as `command`, then
+`sandbox.yoloFlag`, then `resumeArgs` for a context that already has a
+harness session or `newSessionArgs` for a new one, with `{sessionId}`
+replaced by a UUID. The prompt, prefixed with a one-line provenance header,
+goes to stdin, and stdout is decoded per `eventFormat`. `ENCLAVE_A2A_*`
+variables are removed from the tool's environment.
+
+```mermaid
+flowchart LR
+  task[Task from the hub] --> adapter[enclave-a2a-agent serve]
+  adapter -->|"argv: command + yoloFlag + resumeArgs or newSessionArgs<br/>stdin: header + prompt"| tool[Tool process]
+  tool -->|"stdout in eventFormat"| adapter
+  adapter -->|"progress, final message"| result[Task result]
+```
+
+`newSessionArgs` lets the adapter pick the session ID and record it in the
+worker's context table before the process starts, so a crash during startup
+cannot leave a transcript the table does not know about. Without
+`newSessionArgs` the tool picks the ID and the driver reads it from the event
+stream (`system/init` for Claude).
+
+#### Version pin
+
+When `versionCommand` is set, the adapter runs it once at startup, takes the
+first `major.minor.patch` in its stdout, and refuses to serve when that version
+is outside `versions`. A range is a space-separated conjunction of `>=`, `>`,
+`<=`, `<` and `=` constraints on exact `major.minor.patch` versions
+(`">=2.1.306 <3.0.0"`); prerelease tags, `~` and `^` are not supported. Set the
+lower bound to the version you verified the event format against, and the
+upper bound to the next major: `install.sh` installs the latest release, and a
+worker that refuses to start is better than one that misreads a changed
+stream.
+
+#### Event format
+
+`eventFormat` selects a Go driver compiled into `enclave-a2a-agent`.
+`claude-stream-json` decodes Claude Code's `-p --output-format stream-json
+--verbose` output: `system/init` reports the session ID, main-thread
+`assistant` text becomes task progress, and the last `result` before EOF is
+the final message (an error `result` fails the task). Unknown events are
+logged and skipped, so new event types in a minor release do not break turns.
+The driver also sets `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1` so one process
+yields one result.
+
+A tool whose output no existing driver decodes needs a new driver in core: an
+implementation of `a2aagent.Driver` under `internal/a2aagent/driver/<name>/`,
+the format name in `model.A2AEventFormats`, and a case in `newDriver`
+(`cmd/enclave-a2a-agent/serve.go`). A third-party tool can only use a format
+core already supports.
+
+#### Orchestrator arguments
+
+`orchestratorArgs` connect the interactive tool to the group. Claude's value
+loads `templates/a2a-mcp.json` (baked as `claude-a2a-mcp.json`), which starts
+`enclave-a2a-agent mcp` as an MCP server with the `list_peers`, `send_task`,
+`get_task` and `cancel_task` tools. The runtime appends `orchestratorArgs`
+after the user's arguments and before a `--` terminator: Claude's
+`--mcp-config` is variadic and would consume a positional prompt that
+followed it, and after `--` the arguments would themselves become
+positional. Without `orchestratorArgs` the session starts with a warning, and
+the agent can reach its peers only through the `enclave-a2a-agent client`
+CLI.
+
+#### Agent card skills and `a2a-*` skills
+
+`skills[]` is the only source of the skills on the worker's agent card, which
+`enclave a2a peers` also shows. Card skills describe the worker to
+its peers; they are unrelated to the tool's `skills/` directory. For tool
+guidance that only applies inside a group, ship a skill whose name starts
+with `a2a-`; see the skill composition order above.
+
+Design rationale and measured harness behaviour are in
+[`docs/design/a2a/`](../design/a2a/).
 
 ### Credentials, service auth, and providers
 
@@ -991,6 +1131,8 @@ here; core ships only the six built-in tools (see
    - `templates/` for settings files
    - `entrypoint.d/setup.sh` for container initialization
    - `go/` for custom hooks/handlers (requires recompiling binary)
+   - `sandbox.a2a` so the tool can run as a peer group worker (experimental;
+     see [A2A peer groups](#a2a-peer-groups-sandboxa2a-experimental))
 5. If adding Go code, run `go generate ./cmd/enclave` to refresh tool imports
 
 ## Adding a New Feature Extension

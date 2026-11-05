@@ -465,6 +465,27 @@ keys merge across global, project and tool-override layers, a later layer
 replacing a key's value. A layer cannot remove an inherited key, and
 `enclave config --json` always reports the value as an object.
 
+A2A option note: the `peer_group` and `a2a_*` options (experimental) follow
+the checklist above, plus:
+
+- Add a validated key to `a2aOptions` in `internal/config/a2a_options.go`
+  with its value kind and, for a duration, a minimum below which the bound
+  defeats its purpose; add the default to `defaultA2AOptions`. Config files, flags and
+  `ValidateA2AOptions` all enforce the kind and minimum. Bounds are
+  config-only in v1; a flag needs a reason.
+- A value the session or hub reads goes through `a2aSessionEnv` or
+  `a2aHubEnv` in `internal/app/a2a_wiring.go` as an `ENCLAVE_A2A_*` variable
+  (durations as Go durations, sizes in bytes). Hub values are per group: the
+  member that creates the group sets them, so document them as per group.
+- `AffectsSession` provenance is recorded for every session, not only
+  members: a new `SessionAffected` `a2a_*` key appears additively in the
+  `options` of `enclave ps --json` for plain sessions too, with its default.
+  Session provenance is an integration contract, so treat the key as one
+  (see `AGENTS.md`). To tell a user-set value from the
+  default (for example `--role` without `--peer-group`), check the option
+  source, not the value.
+- No option carries a token or credential; those come from the join.
+
 ## Option Source Precedence
 
 When a value exists in multiple layers, enclave resolves in this order:
@@ -488,6 +509,67 @@ When a value exists in multiple layers, enclave resolves in this order:
 
 Every extension (tool or feature) must include a `README.md` in its directory.
 See `docs/extensions/README.md` for the full extension architecture.
+
+## A2A Peer Groups (experimental)
+
+Design documents live in [`design/a2a/`](design/a2a/):
+[`proposal.html`](design/a2a/proposal.html) (rationale and security model),
+[`interfaces.md`](design/a2a/interfaces.md) (the frozen cross-package
+contracts; its change-request log at the end overrides older text),
+[`spec-pin.md`](design/a2a/spec-pin.md) (the pinned A2A 1.0 subset and
+conformance gaps), [`prototypes.md`](design/a2a/prototypes.md) (engine
+measurements) and `reports/` (one per implementation package, with open bugs
+and untested items). User-facing behaviour is in the
+[CLI reference](cli-reference.md#a2a-peer-groups-experimental),
+[configuration](configuration.md#a2a-peer-groups-experimental),
+[networking](networking.md#a2a-peer-groups-experimental) and
+[security](security/a2a.md).
+
+`make test` covers A2A without an engine or credentials, including the real
+adapter with a fake harness (`internal/a2aagent/mcp/adaptertest`). Tests that
+need more carry build tags, which `make test` and `make lint` do not set:
+
+| Command | Needs | Covers |
+|---------|-------|--------|
+| `go test -tags docker ./internal/docker ./internal/backend/docker -run Engine` | Docker or Podman | Static hub addresses, join, leave, teardown, host credentials and hub calls against a stand-in hub |
+| `go test -tags docker ./internal/a2ae2e -v -timeout 30m` (Linux) | Docker or Podman | The `enclave` binary end to end: orchestrator, two workers, a plain session, host send, departure acknowledgments, reconcile, teardown. Temporary XDG roots and no credentials, so nothing is billed; the worker's harness fails its task for lack of a login |
+| `go test -tags claude ./internal/a2aagent/driver/claude/` | `claude` on `PATH` | The Claude Code driver against the real binary with its own `HOME` and config dir. Billed turns need `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` and are skipped without one |
+
+Environment for the tagged tests:
+
+- `ENCLAVE_TEST_ENGINE=podman` selects Podman (default `docker`).
+- `ENCLAVE_TEST_HUB_IMAGE=enclave-a2a-hub:latest` runs the engine tests
+  against the real hub image instead of the stand-in; any `--peer-group` run
+  builds it.
+- `ENCLAVE_TEST_USERNS_REMAP=1` enables `TestEngineA2AUsernsRemapFileAccess`;
+  run the whole `Engine` suite on a Docker daemon with `userns-remap`.
+- `ENCLAVE_TEST_IMAGE` overrides the base image of the stand-ins;
+  `ENCLAVE_TEST_BIN` and `ENCLAVE_TEST_A2A_PREFIX` point `a2ae2e` at a built
+  binary and name its resources.
+
+Lint tagged files explicitly, for example
+`golangci-lint run --build-tags docker ./internal/a2ae2e/...`.
+
+[`scripts/a2a-smoke.sh`](../scripts/a2a-smoke.sh) is the live smoke test with
+the host's real Claude login. Run it after `make build`; it needs `jq` and
+`bc`:
+
+```bash
+ENGINE=docker scripts/a2a-smoke.sh             # every step
+A2A_SMOKE_REAL=0 ENGINE=podman scripts/a2a-smoke.sh
+scripts/a2a-smoke.sh rejections kill9_reconcile  # selected steps
+```
+
+- `ENGINE` is `docker` (default) or `podman`.
+- `A2A_SMOKE_REAL=1` (default) runs four small Claude Code tasks with
+  `ANTHROPIC_MODEL` (default `haiku`); `0` skips the steps that need them.
+- Every group, session, container and network is named after
+  `A2A_SMOKE_PREFIX` (default `a2a-smoke`), and cleanup removes only those,
+  plus the run's per-project state. `CLI_BIN` and `SMOKE_ROOT` override the
+  binary and the scratch directory. Images it builds stay.
+- Your config root is only read: the workers and the orchestrator stop run
+  with copies of it that set termination and acknowledgment timeouts.
+- Exit status 0 means every check passed.
 
 ## Docker Weaving Scripts
 

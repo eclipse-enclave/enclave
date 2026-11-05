@@ -108,6 +108,14 @@ way; see [Coverage and granularity](../networking.md#coverage-and-granularity).
 The experimental QEMU backend has no restricted-egress implementation. It runs
 with unrestricted networking and without gateway-side HTTP secret release.
 
+## A2A peer groups
+
+Sessions joined with the experimental `--peer-group` exchange tasks through a
+per-group hub over plaintext HTTP, with per-member tokens and host-issued
+identity. A worker is trusted about itself only, and task text and results
+are untrusted input to the receiving agent. See [A2A peer groups](a2a.md) for
+the model, the compromised-hub blast radius and what is not covered yet.
+
 ## Secrets
 
 Host environment variables are not passed unless declared by an enabled

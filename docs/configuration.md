@@ -92,6 +92,7 @@ supported under `tool_overrides.<tool>`.
 | `project_mount` | `writable` (default) or `readonly` for the project/worktree mount |
 | `worktree_metadata` | Linked-worktree git metadata mounts: `follow` (default), `readonly`, or `none` |
 | `bridge_ports` | Forward host ports into the container (host → container) |
+| `peer_group`, `a2a_*` | Experimental A2A peer groups; see [A2A peer groups](#a2a-peer-groups-experimental) |
 
 In readonly mode, writable `add_dirs` entries inside the project are mounted
 read-only.
@@ -180,6 +181,85 @@ sandboxed agent. For example, [Herdr](https://herdr.dev) reads `HERDR_AGENT`:
   }
 }
 ```
+
+### A2A peer groups (experimental)
+
+These options join a session to an A2A peer group and bound the group's
+traffic. The feature is experimental and may change without a deprecation
+period. Bounds have no flags in v1; set them in config, per project or per
+tool. The `a2a_*` flags without `--peer-group` are a usage error; configured
+`a2a_*` values apply only once a session joins a group.
+
+| Key | Flag | Default | Minimum | Meaning |
+| --- | --- | --- | --- | --- |
+| `peer_group` | `--peer-group <name>` | unset | | Group to join: lowercase letters, digits and `-`, starting with a letter or digit, at most 32 characters. Requires `--name` |
+| `a2a_role` | `--role orchestrator\|worker` | `worker` | | Role in the group; a worker runs the A2A adapter instead of the interactive agent |
+| `a2a_description` | `--a2a-description <text>` | unset | | Agent card description |
+| `a2a_log` | `--a2a-log coarse\|full` | `coarse` | | Hub audit granularity; `coarse` records status only. Per group |
+| `a2a_context_ttl` | `--a2a-context-ttl <duration>` | `24h` | `1m` | Idle expiry of a worker's contexts |
+| `a2a_queue_depth` | | `8` | | Tasks a worker queues behind the running one |
+| `a2a_task_deadline` | | `30m` | `10s` | Execution deadline of one task |
+| `a2a_send_wait` | | `90s` | `1s` | How long the orchestrator's `send_task` and `get_task` block before returning a handle |
+| `a2a_host_send_wait` | | `10m` | `1s` | How long `enclave a2a send` blocks before printing a handle |
+| `a2a_max_request_size` | | `1MiB` | | Size of a request's text parts. The hub's limit is per group |
+| `a2a_max_result_size` | | `256KiB` | | Size of a result; longer results are truncated with a marker |
+| `a2a_hub_retained_results` | | `100` | | Terminal summaries the hub keeps per worker. Per group |
+| `a2a_record_limit` | | `1000` | | Dedupe, task and tombstone records a worker keeps |
+| `a2a_record_max_age` | | `168h` | `1m` | Age after which those records are dropped, whichever limit comes first |
+| `a2a_reconnect_window` | | `60s` | `5s` | Time an adapter or orchestrator has to reconnect to the hub. The hub's window is per group |
+| `a2a_commit_timeout` | | `5s` | `1s` | Wait for the hub to acknowledge a membership change |
+| `a2a_departure_ack_timeout` | | `30s` | `1s` | Wait for each worker's acknowledgment of an orchestrator departure (also per retry in reconcile) before it is reported as degraded |
+| `a2a_credential_lifetime` | | `15m` | `2m` | Upper bound of a host invocation credential (see below) |
+| `a2a_status_staleness` | | `5m` | `10s` | Age after which a worker's status record reads as `unknown` in `ps --json` |
+| `a2a_termination_timeout` | | `10s` | `1s` | Wait after `SIGTERM`, and again after `SIGKILL`, before a worker that cannot confirm termination is quarantined |
+
+Durations use Go syntax (`90s`, `30m`, `24h`; no days) and must reach the
+minimum, below which the bound defeats its purpose. Sizes are bytes or a
+count with `KiB` or `MiB`. Counts are positive integers. Invalid values in a
+config file are reported when it is read and ignored, so the next layer or
+the default applies; an invalid flag value is an error.
+
+**Per-group options.** A peer group has one hub, started by the member that
+creates the group. The hub takes `a2a_log`, `a2a_hub_retained_results`,
+`a2a_reconnect_window`, and `a2a_max_request_size` from that member; later
+members' values for these keys do not change it. `a2a_reconnect_window` and
+`a2a_max_request_size` also bound each session's own side, so set them to the
+same values across the group. To change a per-group option, stop the group
+(`enclave stop --peer-group <name>`) and start it again.
+
+**Send waits.** A send blocks until the task finishes or the wait elapses,
+then returns a handle with the task's current state; the task continues and
+`get_task` or `enclave a2a task get` picks it up. The wait is split in two:
+
+- `a2a_send_wait` (`90s`) bounds the orchestrator's MCP `send_task` and a
+  blocking `get_task`; the agent's `wait_seconds` is clamped to it. Keep it
+  below 120 s: interactive Claude Code moves MCP calls that run longer to
+  the background, after which the agent holds a Claude task ID instead of
+  the task handle. Enclave does not enforce this limit.
+- `a2a_host_send_wait` (`10m`) bounds `enclave a2a send` and `task retry`
+  from the host; `--wait <duration>` overrides it per call.
+
+**Credential lifetime.** Each host `enclave a2a send` or `enclave a2a task`
+call gets its own invocation credential, revoked when the call ends. It lives for the call's
+wait plus 60 s, or 2 minutes for non-blocking calls, and never longer than
+`a2a_credential_lifetime` (itself capped at 1 hour). A blocking wait above
+`a2a_credential_lifetime` minus 60 s is rejected, so with the defaults
+`a2a_host_send_wait` and `--wait` may be at most `14m`; raise
+`a2a_credential_lifetime` together with them.
+
+**Worker launch.** A worker runs the A2A adapter as the session's main
+process, in the foreground without a TTY: the adapter's log streams to the
+terminal, stdin is not attached, and Ctrl-C stops the worker and leaves the
+group. Give each worker its own terminal pane, or start it with
+`--background` and read the log with `enclave attach`. A worker cannot start
+a shell and needs yolo mode, because nobody can answer permission prompts.
+Orchestrators run interactively like any other session.
+
+`ps --json` records every option above except `a2a_log`, `a2a_host_send_wait`,
+`a2a_hub_retained_results`, `a2a_commit_timeout`, `a2a_departure_ack_timeout`,
+`a2a_credential_lifetime`, and `a2a_status_staleness`, which act on the host
+or the hub rather than the session. For the design rationale, see
+[docs/design/a2a/](design/a2a/).
 
 ## List Options
 

@@ -30,10 +30,11 @@
 - [security/README.md](security/README.md) — Current security boundaries and residual risks
 - [security/host-hardening.md](security/host-hardening.md) — Rootful Docker host hardening
 - [security/rootless.md](security/rootless.md) — Rootless engines: podman supported, rootless Docker not
+- [security/a2a.md](security/a2a.md): A2A peer group message plane (experimental)
 
 ## Diagrams
 
 Diagrams are Mermaid blocks embedded in the documentation:
 
-- [ARCHITECTURE.md](ARCHITECTURE.md#diagrams) — Docker runtime and store layout, Go code generation
+- [ARCHITECTURE.md](ARCHITECTURE.md#diagrams) — Docker runtime and store layout, Go code generation, A2A peer group join and request flow
 - [runtime/network-request-flow.md](runtime/network-request-flow.md#diagram) — Restricted network request flow

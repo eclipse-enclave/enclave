@@ -64,6 +64,8 @@ install -D -m 0644 Dockerfile "$app_root/Dockerfile"
 install -D -m 0644 Dockerfile.gateway "$app_root/Dockerfile.gateway"
 install -D -m 0755 entrypoint.sh "$app_root/entrypoint.sh"
 install -D -m 0755 gateway-entrypoint.sh "$app_root/gateway-entrypoint.sh"
+install -D -m 0644 Dockerfile.a2ahub "$app_root/Dockerfile.a2ahub"
+install -D -m 0755 a2ahub-entrypoint.sh "$app_root/a2ahub-entrypoint.sh"
 install -D -m 0644 .dockerignore "$app_root/.dockerignore"
 
 mkdir -p "$app_root/docs"
@@ -83,13 +85,15 @@ cp -a runtime-assets/. "$app_root/runtime-assets/"
 chmod -R u+rwX,go+rX "$app_root/runtime-assets"
 find "$app_root/runtime-assets/build-scripts" -type f \( -name '*.sh' -o -path '*/bin/*' \) -exec chmod a+rx {} +
 
-# Install gateway proxy Go sources required by Dockerfile.gateway.
-while IFS= read -r path; do
+# Install the Go sources of the gateway proxy (Dockerfile.gateway), the A2A
+# agent image variant and the A2A hub (Dockerfile.a2ahub).
+cat internal/gateway/gateway_proxy_build_inputs.txt internal/app/a2a_agent_build_inputs.txt \
+    internal/gateway/a2ahub_build_inputs.txt | while IFS= read -r path; do
     case "$path" in ""|\#*) continue ;; esac
     dest="$app_root/$(dirname "$path")"
     mkdir -p "$dest"
     cp -a "$path" "$dest/"
-done < internal/gateway/gateway_proxy_build_inputs.txt
+done
 
 install -D -m 0644 completions/enclave \
     "%{buildroot}%{_datadir}/bash-completion/completions/enclave"

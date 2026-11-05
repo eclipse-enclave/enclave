@@ -42,6 +42,7 @@ func TestFileMode(t *testing.T) {
 	tests := map[string]uint32{
 		"entrypoint.sh":                                 0o755,
 		"gateway-entrypoint.sh":                         0o755,
+		"a2ahub-entrypoint.sh":                          0o755,
 		"extensions/tools/demo/install.sh":              0o755,
 		"extensions/features/demo/install.sh":           0o755,
 		"extensions/tools/demo/check-update.sh":         0o644,

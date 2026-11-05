@@ -68,11 +68,11 @@ asked.
 
 | Group | Edit |
 |---|---|
-| Go toolchain | `go.mod` `toolchain`; `Dockerfile.gateway` `golang:<version>-alpine<alpine>@<digest>`. |
+| Go toolchain | `go.mod` `toolchain`; `Dockerfile.gateway` and `Dockerfile.a2ahub` `golang:<version>-alpine<alpine>@<digest>`; `internal/app/a2a_agent_build.go` `a2aAgentBuilderImage`, same ref everywhere. |
 | Go floor | Every location the script lists for "Go floor", including the `golang-<minor>-go` alternative and `/usr/lib/go-<minor>/bin` fallback in `debian/`. Only after the ceiling allows it. |
 | Go modules | `go get <module>@<version>` then `go mod tidy`; confirm the `go` directive did not change. |
 | Go linters | `scripts/install-go-linters.sh`, and the same versions in the `enclave-dev` feature of eclipse-enclave/enclave-extensions (separate PR). New gosec or golangci-lint findings must be fixed or justified with `#nosec`/`nolint` and a reason; never weaken the rule set. |
-| Container images | The `ARG`/`FROM` lines in `Dockerfile` and `Dockerfile.gateway`. Alpine also: `internal/model/types.go` `AlpineImage` and `runtime-assets/microvm/alpine/build-bundle.sh`, same digest everywhere; check that the packages installed by the gateway and the QEMU bundle exist on the new branch. |
+| Container images | The `ARG`/`FROM` lines in `Dockerfile`, `Dockerfile.gateway` and `Dockerfile.a2ahub` (the last two use identical images), plus `a2aAgentBuilderImage` in `internal/app/a2a_agent_build.go`. Alpine also: `internal/model/types.go` `AlpineImage` and `runtime-assets/microvm/alpine/build-bundle.sh`, same digest everywhere; check that the packages installed by the gateway and the QEMU bundle exist on the new branch. |
 | GitHub Actions | Every `uses:` of the action, `@<sha> # <tag>`. |
 | yq | `Dockerfile` `YQ_VERSION`; check that `yq_linux_amd64` and `yq_linux_arm64` are still release assets. |
 | Fedora CI | `container:` in `.github/workflows/reusable-rpm-build.yml`. |

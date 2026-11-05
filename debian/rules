@@ -18,6 +18,8 @@ export PATH := /usr/lib/go-1.24/bin:$(PATH)
 endif
 
 GATEWAY_PROXY_SOURCE_PATHS_FILE := $(CURDIR)/internal/gateway/gateway_proxy_build_inputs.txt
+A2A_AGENT_SOURCE_PATHS_FILE := $(CURDIR)/internal/app/a2a_agent_build_inputs.txt
+A2A_HUB_SOURCE_PATHS_FILE := $(CURDIR)/internal/gateway/a2ahub_build_inputs.txt
 BUILD_VERSION ?= $(shell dpkg-parsechangelog --show-field Version | sed 's/-[^-]*$$//')
 BUILD_COMMIT ?= unknown
 BUILD_DATE ?= unknown
@@ -48,6 +50,8 @@ override_dh_auto_install:
 	install -D -m 0644 Dockerfile.gateway $(CURDIR)/debian/enclave/usr/share/enclave/Dockerfile.gateway
 	install -D -m 0755 entrypoint.sh $(CURDIR)/debian/enclave/usr/share/enclave/entrypoint.sh
 	install -D -m 0755 gateway-entrypoint.sh $(CURDIR)/debian/enclave/usr/share/enclave/gateway-entrypoint.sh
+	install -D -m 0644 Dockerfile.a2ahub $(CURDIR)/debian/enclave/usr/share/enclave/Dockerfile.a2ahub
+	install -D -m 0755 a2ahub-entrypoint.sh $(CURDIR)/debian/enclave/usr/share/enclave/a2ahub-entrypoint.sh
 	install -D -m 0644 .dockerignore $(CURDIR)/debian/enclave/usr/share/enclave/.dockerignore
 	install -D -m 0644 LICENSE.md $(CURDIR)/debian/enclave/usr/share/doc/enclave/LICENSE.md
 	install -D -m 0644 NOTICE.md $(CURDIR)/debian/enclave/usr/share/doc/enclave/NOTICE.md
@@ -71,15 +75,15 @@ override_dh_auto_install:
 	chmod -R u+rwX,go+rX $(CURDIR)/debian/enclave/usr/share/enclave/runtime-assets
 	find $(CURDIR)/debian/enclave/usr/share/enclave/runtime-assets/build-scripts -type f \( -name '*.sh' -o -path '*/bin/*' \) -exec chmod a+rx {} +
 
-	# Install gateway proxy Go sources required by Dockerfile.gateway build stage
+	# Install the Go sources of the gateway proxy (Dockerfile.gateway), the A2A agent image variant and the A2A hub (Dockerfile.a2ahub)
 	# Clear previously staged Go sources first; cp -r never deletes, so files removed upstream would otherwise linger.
 	rm -rf $(CURDIR)/debian/enclave/usr/share/enclave/internal $(CURDIR)/debian/enclave/usr/share/enclave/cmd $(CURDIR)/debian/enclave/usr/share/enclave/go.mod $(CURDIR)/debian/enclave/usr/share/enclave/go.sum
-	while IFS= read -r path; do \
+	cat $(GATEWAY_PROXY_SOURCE_PATHS_FILE) $(A2A_AGENT_SOURCE_PATHS_FILE) $(A2A_HUB_SOURCE_PATHS_FILE) | while IFS= read -r path; do \
 		case "$$path" in ""|\#*) continue ;; esac; \
 		dest="$(CURDIR)/debian/enclave/usr/share/enclave/$$(dirname "$$path")"; \
 		mkdir -p "$$dest"; \
 		cp -r "$$path" "$$dest/"; \
-	done < $(GATEWAY_PROXY_SOURCE_PATHS_FILE)
+	done
 
 	# Install shell completions. Debian searches zsh/vendor-completions for
 	# distro-packaged functions; zsh/site-functions under /usr is not on fpath.

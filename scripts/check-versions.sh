@@ -45,6 +45,8 @@ KNOWN_PINS=(
     'Dockerfile|^ARG (BASE_IMAGE|AGENT_NODE_IMAGE|YQ_VERSION)='
     'Dockerfile|^FROM (\$\{[A-Z_]+\}|[a-z-]+) AS '
     'Dockerfile.gateway|^FROM docker\.io/library/(golang|alpine):'
+    'Dockerfile.a2ahub|^FROM docker\.io/library/(golang|alpine):'
+    'internal/app/a2a_agent_build.go|^const a2aAgentBuilderImage = "docker\.io/library/golang:'
     'go.mod|^(go|toolchain) '
     'Makefile|^[[:space:]]*BUILD_VERSION='\''\$\(BUILD_VERSION\)'\'' '
     '.github/workflows/*.yml|uses: [^ ]+@[0-9a-f]{40} # v[0-9.]+$'
@@ -194,6 +196,18 @@ alpine_bundle=$REPLY
 expect_same "Alpine digest" "Dockerfile.gateway=$alpine_gateway" \
     "internal/model/types.go=$alpine_model" "build-bundle.sh=$alpine_bundle"
 
+# The A2A hub and agent builds must use the gateway's exact images, which puts them in the groups above.
+a2a_image_files=(Dockerfile.gateway Dockerfile.a2ahub internal/app/a2a_agent_build.go)
+for image in golang alpine; do
+    refs=$(git grep -hoE "docker\.io/library/$image:[^ \"]+" -- "${a2a_image_files[@]}" | sort -u)
+    count=$(printf '%s\n' "$refs" | grep -c .) || true
+    if [ "$count" -gt 1 ]; then
+        problem "$image image is pinned $count ways: $(printf '%s\n' "$refs" | paste -sd' ' -)"
+    else
+        ok "$image image: one pin across ${a2a_image_files[*]}"
+    fi
+done
+
 extract debian/control 'git \(>= 1:([0-9.]+)\)'
 deb_git=$REPLY
 extract packaging/rpm/enclave.spec '^Requires:[[:space:]]+git >= ([0-9.]+)'
@@ -298,9 +312,9 @@ if releases=$(fetch https://proxy.golang.org/golang.org/toolchain/@v/list |
     if [ "$toolchain" = "$target_toolchain" ]; then
         ok "go$toolchain is the latest patch of the oldest supported minor ($supported_minor; newest $newest_minor)"
     elif [ "$(minor_of "$toolchain")" = "$supported_minor" ]; then
-        update "Go toolchain $toolchain -> $target_toolchain (go.mod toolchain; Dockerfile.gateway $target_builder)"
+        update "Go toolchain $toolchain -> $target_toolchain (go.mod toolchain; Dockerfile.gateway and Dockerfile.a2ahub $target_builder)"
     elif version_le "$toolchain" "$target_toolchain"; then
-        problem "go$toolchain is no longer supported; move to go$target_toolchain (go.mod toolchain; Dockerfile.gateway $target_builder)"
+        problem "go$toolchain is no longer supported; move to go$target_toolchain (go.mod toolchain; Dockerfile.gateway and Dockerfile.a2ahub $target_builder)"
     else
         problem "go$toolchain is newer than go$target_toolchain; Go linters built by the go command's toolchain switch use $supported_minor and cannot load a newer standard library"
     fi

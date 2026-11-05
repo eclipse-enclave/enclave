@@ -22,10 +22,11 @@ import (
 // dotfiles added below these trees in future. The repository-root .dockerignore
 // must be listed directly.
 //
-//go:embed .dockerignore Dockerfile Dockerfile.gateway entrypoint.sh gateway-entrypoint.sh LICENSE.md NOTICE.md
+//go:embed .dockerignore Dockerfile Dockerfile.gateway Dockerfile.a2ahub entrypoint.sh gateway-entrypoint.sh a2ahub-entrypoint.sh LICENSE.md NOTICE.md
 //go:embed all:docs all:extensions all:runtime-assets
-//go:embed go.mod go.sum all:cmd/enclave-gateway-proxy
+//go:embed go.mod go.sum all:cmd/enclave-gateway-proxy all:cmd/enclave-a2a-agent all:cmd/enclave-a2a-hub
 //go:embed all:internal/appassets all:internal/config all:internal/domainpattern
+//go:embed all:internal/a2a all:internal/a2aagent all:internal/a2ahub all:internal/buildinfo all:internal/peergroup all:internal/tools
 //go:embed all:internal/gateway/bundle all:internal/gateway/dnsaudit all:internal/gateway/mitm all:internal/gateway/tlsstore
 //go:embed all:internal/git all:internal/logx all:internal/model all:internal/netlog all:internal/network all:internal/secretfile all:internal/util
 var files embed.FS

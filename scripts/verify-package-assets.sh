@@ -24,6 +24,8 @@ app_root="$package_root/usr/share/enclave"
 [ -f "$app_root/.dockerignore" ]
 [ -f "$app_root/Dockerfile" ]
 [ -f "$app_root/Dockerfile.gateway" ]
+[ -f "$app_root/Dockerfile.a2ahub" ]
+[ -x "$app_root/a2ahub-entrypoint.sh" ]
 [ ! -e "$app_root/AGENTS.md" ]
 [ ! -e "$app_root/CLAUDE.md" ]
 diff -qr "$repo_root/docs" "$app_root/docs"
@@ -43,15 +45,17 @@ diff -qr "$repo_root/docs" "$app_root/docs"
 # files they mistake for host executables -- Fedora's brp-mangle-shebangs
 # rewrites /bin/sh to /usr/bin/sh, which does not exist in the Alpine gateway
 # image -- so compare content rather than only checking that files exist.
-for asset in .dockerignore Dockerfile Dockerfile.gateway entrypoint.sh \
-    gateway-entrypoint.sh extensions/tools extensions/features runtime-assets; do
+for asset in .dockerignore Dockerfile Dockerfile.gateway Dockerfile.a2ahub entrypoint.sh \
+    gateway-entrypoint.sh a2ahub-entrypoint.sh extensions/tools extensions/features runtime-assets; do
     diff -qr "$repo_root/$asset" "$app_root/$asset"
 done
 
-while IFS= read -r path; do
+cat "$repo_root/internal/gateway/gateway_proxy_build_inputs.txt" \
+    "$repo_root/internal/app/a2a_agent_build_inputs.txt" \
+    "$repo_root/internal/gateway/a2ahub_build_inputs.txt" | while IFS= read -r path; do
     case "$path" in ""|\#*) continue ;; esac
     diff -qr "$repo_root/$path" "$app_root/$path"
-done < "$repo_root/internal/gateway/gateway_proxy_build_inputs.txt"
+done
 
 # Package builds can run as root (the Fedora job container does), so both
 # invocations pass --allow-root: the negative case below must get past the

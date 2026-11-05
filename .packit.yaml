@@ -14,7 +14,13 @@ srpm_build_deps:
 jobs:
   - job: copr_build
     trigger: commit
+    identifier: main
     branch: main$
+    targets:
+      - fedora-all-x86_64
+  - job: copr_build
+    trigger: release
+    identifier: release
     owner: filippor
     project: tests
     targets:

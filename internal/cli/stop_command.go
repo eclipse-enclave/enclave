@@ -21,7 +21,7 @@ A session name of another project is not accepted here — pass its container na
 
 Without an argument, every background container of the selected tool is removed,
 across all projects; --name narrows that to matching sessions of the current
-project.`,
+project. --peer-group stops every member of the group, then its hub.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(_ *cobra.Command, cmdArgs []string) error {
 			res.Action = "stop"
@@ -29,7 +29,8 @@ project.`,
 			return nil
 		},
 	}
-	// stop accepts --tool and --name to filter background containers.
-	addOptionFlagsByName(cmd.Flags(), &res.Options, &res.Sources, "backend", "tool", "session_name")
+	// stop accepts --tool and --name to filter background containers, and
+	// --peer-group to stop a whole group instead.
+	addOptionFlagsByName(cmd.Flags(), &res.Options, &res.Sources, "backend", "tool", "session_name", "peer_group")
 	return cmd
 }

@@ -68,6 +68,7 @@ type Runtime struct {
 	// cached, so the replacement host reaches the allow set too.
 	releaseHostOverrides map[string][]string
 	backend              backend.Backend
+	peerGroupJoiner      PeerGroupJoiner
 }
 
 type ExecutionContext struct {
@@ -82,6 +83,9 @@ type ExecutionContext struct {
 	AuthSync       *backend.AuthSyncSpec
 	Cleanup        func()
 	RunCtx         model.RunContext
+	ConfigStore    *backend.StoreRef
+	// PeerGroup is set by joinPeerGroup for --peer-group sessions only.
+	PeerGroup *backend.PeerGroupSession
 }
 
 type mountAccumulator struct {
@@ -204,6 +208,9 @@ func (r *Runtime) Execute() error {
 	}
 	runCtx, stop := interruptContext()
 	defer stop()
+	if err := r.joinPeerGroup(runCtx, ctx); err != nil {
+		return err
+	}
 	// The backend syncs auth files from the config store to the shared auth
 	// store after the container exits, per the request's AuthSync intent.
 	return r.runContainer(runCtx, ctx, releaseStartLock)
@@ -305,6 +312,7 @@ func (r *Runtime) prepareExecution() (*ExecutionContext, error) {
 		AuthSync:       prepared.AuthSync,
 		Cleanup:        cleanup,
 		RunCtx:         runCtx,
+		ConfigStore:    prepared.Stores.Config,
 	}, nil
 }
 
@@ -841,10 +849,17 @@ func (r *Runtime) runContainer(runCtx context.Context, ctx *ExecutionContext, re
 	// returns: Run blocks for the whole foreground session, and holding the
 	// lock that long would stall every other session start for this tool and
 	// project. The deferred release in Execute only backstops error paths.
-	_, err := be.Run(runCtx, r.backendRequest(ctx, false, true), backend.AttachIO{TTY: true, HostEnv: r.agentHostEnv(), OnStarted: func() {
+	onStarted := func() {
 		releaseStartLock()
 		r.announcePublishedPorts(ctx.ContainerName)
-	}})
+	}
+	if r.servesPeerGroup() {
+		// A worker's adapter reads no input; without a TTY its log streams to
+		// the pane and Ctrl-C reaches it through the engine's signal proxy.
+		_, err := be.Run(runCtx, r.backendRequest(ctx, false, false), backend.AttachIO{Out: os.Stdout, Err: os.Stderr, OnStarted: onStarted})
+		return err
+	}
+	_, err := be.Run(runCtx, r.backendRequest(ctx, false, true), backend.AttachIO{TTY: true, HostEnv: r.agentHostEnv(), OnStarted: onStarted})
 	return err
 }
 
@@ -889,6 +904,7 @@ func (r *Runtime) backendRequest(ctx *ExecutionContext, detached bool, interacti
 		Secrets:         append([]backend.SecretRelease(nil), ctx.Secrets...),
 		RuntimeUIDRemap: r.build.RuntimeUIDRemap,
 		Detached:        detached,
+		PeerGroup:       ctx.PeerGroup,
 	}
 	if !detached {
 		// Post-run sync only applies to foreground sessions; detached sessions

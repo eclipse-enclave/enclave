@@ -50,6 +50,8 @@ type Result struct {
 	ExtRequest *extinstall.Request
 	// NetworkPrintJSON selects the JSON envelope of `enclave network print`.
 	NetworkPrintJSON bool
+	// A2A is set for the `enclave a2a` verbs; nil otherwise.
+	A2A *A2ARequest
 }
 
 func Parse(args []string, defaults model.Options, userCmds ...usercmd.Command) (Result, error) {
@@ -166,6 +168,7 @@ directly: "enclave --tool codex" is equivalent to "enclave run --tool codex".`,
 		extensionCommand(res),
 		completionCommand(res),
 		reviewTargetCommand(res),
+		a2aCommand(res),
 	)
 
 	// Completion registration is best-effort at runtime; correctness (every

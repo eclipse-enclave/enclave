@@ -31,7 +31,11 @@ var portableSkillNamePattern = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
 type skillSource struct {
 	dir    string
 	shared bool
+	// withA2A keeps extension skills named a2a-*, which only peer group sessions get (CR-A15-2).
+	withA2A bool
 }
+
+const a2aSkillPrefix = "a2a-"
 
 func (r *Runtime) addSkillMounts(mounts *mountAccumulator) error {
 	skillsDir := strings.TrimSpace(r.profile.SkillsDir)
@@ -61,11 +65,12 @@ func (r *Runtime) addSkillMounts(mounts *mountAccumulator) error {
 	// Overlay order (later wins): built-in tool, user-extension, enabled
 	// features, global shared, project shared.
 	sources := make([]skillSource, 0, 4)
+	withA2A := r.peerGroupRole() != ""
 	for _, sourceDir := range r.extensionSkillSourceDirs() {
-		sources = append(sources, skillSource{dir: sourceDir})
+		sources = append(sources, skillSource{dir: sourceDir, withA2A: withA2A})
 	}
 	for _, sourceDir := range r.featureSkillSourceDirs() {
-		sources = append(sources, skillSource{dir: sourceDir})
+		sources = append(sources, skillSource{dir: sourceDir, withA2A: withA2A})
 	}
 	sources = append(sources,
 		skillSource{dir: globalSkillsDir, shared: true},
@@ -117,7 +122,7 @@ func mergeSkillSources(targetDir string, sources []skillSource, validation strin
 		if source.shared {
 			err = overlaySharedSkillSource(targetDir, source.dir, validation)
 		} else {
-			err = overlaySkillSource(targetDir, source.dir)
+			err = overlaySkillSource(targetDir, source.dir, source.withA2A)
 		}
 		if err != nil {
 			return fmt.Errorf("overlay skills from %q: %w", source.dir, err)
@@ -140,9 +145,22 @@ func clearDirectory(dir string) error {
 	return nil
 }
 
-func overlaySkillSource(targetDir string, sourceDir string) error {
-	return overlayValidatedSkillSource(targetDir, sourceDir, nil)
+func overlaySkillSource(targetDir string, sourceDir string, withA2A bool) error {
+	if withA2A {
+		return overlayValidatedSkillSource(targetDir, sourceDir, nil)
+	}
+	return overlayValidatedSkillSource(targetDir, sourceDir, skipA2ASkills)
 }
+
+func skipA2ASkills(_ string, directoryName string) error {
+	if strings.HasPrefix(directoryName, a2aSkillPrefix) {
+		return errSkipSkill
+	}
+	return nil
+}
+
+// errSkipSkill drops a skill without the warning a failed validation logs.
+var errSkipSkill = errors.New("skill not composed into this session")
 
 func overlaySharedSkillSource(targetDir string, sourceDir string, validation string) error {
 	return overlayValidatedSkillSource(targetDir, sourceDir, sharedSkillValidator(validation))
@@ -174,6 +192,9 @@ func overlayValidatedSkillSource(targetDir string, sourceDir string, validate fu
 		sourcePath := filepath.Join(sourceDir, entry.Name())
 		if validate != nil {
 			if err := validate(sourcePath, entry.Name()); err != nil {
+				if errors.Is(err, errSkipSkill) {
+					continue
+				}
 				logx.Warnf("Skipping shared skill %q: %v", filepath.Join(sourceDir, entry.Name()), err)
 				continue
 			}

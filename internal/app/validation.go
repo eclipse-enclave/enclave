@@ -46,6 +46,12 @@ func ValidateOptions(opts model.Options, sources model.OptionSources, ctx Valida
 	if err := validateBackendName(opts.Backend); err != nil {
 		return opts, sources, warnings, err
 	}
+	if isRunAction(ctx.Action) {
+		// Before the qemu coercion, which would turn the qemu rejection into an unrestricted-network one.
+		if err := validateA2ARunOptions(opts, sources); err != nil {
+			return opts, sources, warnings, err
+		}
+	}
 	if opts.Devcontainer && opts.Backend == backend.NameQEMU {
 		return opts, sources, warnings, fmt.Errorf("devcontainer mode requires --backend %s or %s", backend.NameDocker, backend.NamePodman)
 	}
@@ -338,6 +344,7 @@ func ValidateRunOptions(opts model.Options, sources model.OptionSources, ctx Val
 	if !isRunAction(ctx.Action) {
 		return opts, sources, warnings, nil, nil
 	}
+	opts.A2AAgent = opts.PeerGroup != ""
 	buildConfig, err := resolveBuildConfig(opts.BuildOptions, opts.Tool, project, ctx.Paths.AppRoot)
 	if err != nil {
 		return opts, sources, warnings, nil, err

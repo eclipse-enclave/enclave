@@ -218,7 +218,7 @@ func (r *Runtime) applyExtensionSkillsLayer(targetDir string) error {
 		return fmt.Errorf("create generated skills directory %q: %w", skillsTargetDir, err)
 	}
 	for _, sourceDir := range sourceDirs {
-		if err := overlaySkillSource(skillsTargetDir, sourceDir); err != nil {
+		if err := overlaySkillSource(skillsTargetDir, sourceDir, r.peerGroupRole() != ""); err != nil {
 			return fmt.Errorf("overlay extension skills from %q: %w", sourceDir, err)
 		}
 	}

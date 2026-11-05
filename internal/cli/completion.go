@@ -125,6 +125,8 @@ func registerCompletions(rootCmd *cobra.Command) error {
 		"auth-scope":    staticValuesCompleter(model.AuthScopeShared, model.AuthScopeProject),
 		"secrets-scope": staticValuesCompleter(model.SecretsScopeProject, model.SecretsScopeGlobal, model.SecretsScopeBoth),
 		"progress":      staticValuesCompleter(model.BuildProgressQuiet, model.BuildProgressCompact, model.BuildProgressVerbose),
+		"role":          staticValuesCompleter(config.A2ARoleOrchestrator, config.A2ARoleWorker),
+		"a2a-log":       staticValuesCompleter(config.A2ALogCoarse, config.A2ALogFull),
 	}
 
 	// Each of these flags now lives on the leaf commands that consume it

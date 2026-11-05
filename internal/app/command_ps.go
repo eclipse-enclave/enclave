@@ -58,6 +58,8 @@ type psJSONEntry struct {
 	Ports       []psJSONPort   `json:"ports"`
 	Network     *psJSONNetwork `json:"network"`
 	Options     map[string]any `json:"options,omitempty"`
+	// A2A is null for sessions outside a peer group (interfaces.md section 9).
+	A2A *psJSONA2A `json:"a2a"`
 }
 
 // psJSONPort is one published port binding in the ps --json output. Consumers
@@ -90,7 +92,9 @@ func runPS(opts model.Options) int {
 	}
 
 	if opts.PSJSON {
-		if err := renderPSJSON(os.Stdout, sessions); err != nil {
+		entries := buildPSJSONEntries(sessions)
+		attachPSA2A(entries, psA2AObjects(opts, sessions))
+		if err := renderPSJSONEntries(os.Stdout, entries); err != nil {
 			logx.Errorf("render container json: %v", err)
 			return 1
 		}
@@ -315,7 +319,17 @@ func buildPSJSONPorts(bindings []backend.PortMapping) []psJSONPort {
 }
 
 func renderPSJSON(w io.Writer, sessions []backend.Session) error {
-	entries := buildPSJSONEntries(sessions)
+	return renderPSJSONEntries(w, buildPSJSONEntries(sessions))
+}
+
+// attachPSA2A sets each entry's a2a object by session container name.
+func attachPSA2A(entries []psJSONEntry, objects map[string]*psJSONA2A) {
+	for i := range entries {
+		entries[i].A2A = objects[entries[i].Name]
+	}
+}
+
+func renderPSJSONEntries(w io.Writer, entries []psJSONEntry) error {
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	return enc.Encode(entries)

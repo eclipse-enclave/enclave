@@ -1,0 +1,121 @@
+[
+  {
+    "name": "enclave-claude-ab12cd34ef56",
+    "tool": "claude",
+    "projectDir": "",
+    "projectHash": "ab12cd34ef56",
+    "worktree": "",
+    "status": "running",
+    "createdAt": "",
+    "sessionName": "",
+    "background": false,
+    "ports": [],
+    "network": null,
+    "a2a": null
+  },
+  {
+    "name": "enclave-claude-ab12cd34ef56-lead",
+    "tool": "claude",
+    "projectDir": "",
+    "projectHash": "ab12cd34ef56",
+    "worktree": "",
+    "status": "running",
+    "createdAt": "",
+    "sessionName": "lead",
+    "background": false,
+    "ports": [],
+    "network": null,
+    "a2a": {
+      "group": "review",
+      "groupGeneration": "3f9c0a1b2c3d4e5f",
+      "role": "orchestrator",
+      "generation": "0f1e2d3c4b5a6978",
+      "port": null,
+      "hub": {
+        "container": "enclave-a2a-hub-review",
+        "address": "172.18.0.30",
+        "port": 41820
+      },
+      "snapshotRevision": 7,
+      "quarantine": "no",
+      "quarantineAt": "2026-11-05T11:00:00Z",
+      "quarantineSource": "group-record",
+      "admissionStop": "yes",
+      "admissionStopAt": "2026-11-05T12:00:00Z",
+      "admissionStopSource": "worker-table",
+      "departure": "no",
+      "departureAt": "2026-11-05T11:00:00Z",
+      "departureSource": "group-record"
+    }
+  },
+  {
+    "name": "enclave-claude-ab12cd34ef56-worker-1",
+    "tool": "claude",
+    "projectDir": "",
+    "projectHash": "ab12cd34ef56",
+    "worktree": "",
+    "status": "running",
+    "createdAt": "",
+    "sessionName": "worker-1",
+    "background": true,
+    "ports": [],
+    "network": null,
+    "a2a": {
+      "group": "review",
+      "groupGeneration": "3f9c0a1b2c3d4e5f",
+      "role": "worker",
+      "generation": "a1b2c3d4e5f60718",
+      "port": 41821,
+      "hub": {
+        "container": "enclave-a2a-hub-review",
+        "address": "172.18.0.14",
+        "port": 41820
+      },
+      "snapshotRevision": 7,
+      "quarantine": "no",
+      "quarantineAt": "2026-11-05T12:00:00Z",
+      "quarantineSource": "worker-table",
+      "admissionStop": "yes",
+      "admissionStopAt": "2026-11-05T12:00:00Z",
+      "admissionStopSource": "worker-table",
+      "departure": "no",
+      "departureAt": "2026-11-05T11:00:00Z",
+      "departureSource": "group-record"
+    }
+  },
+  {
+    "name": "enclave-claude-ab12cd34ef56-worker-2",
+    "tool": "claude",
+    "projectDir": "",
+    "projectHash": "ab12cd34ef56",
+    "worktree": "",
+    "status": "running",
+    "createdAt": "",
+    "sessionName": "worker-2",
+    "background": true,
+    "ports": [],
+    "network": null,
+    "a2a": {
+      "group": "review",
+      "groupGeneration": "3f9c0a1b2c3d4e5f",
+      "role": "worker",
+      "generation": "1122334455667788",
+      "port": 41821,
+      "hub": {
+        "container": "enclave-a2a-hub-review",
+        "address": "172.18.0.46",
+        "port": 41820
+      },
+      "snapshotRevision": 7,
+      "quarantine": "unknown",
+      "quarantineAt": null,
+      "quarantineSource": null,
+      "admissionStop": "unknown",
+      "admissionStopAt": null,
+      "admissionStopSource": null,
+      "departure": "yes",
+      "departureAt": "2026-11-05T11:55:00Z",
+      "departureSource": "group-record"
+    }
+  }
+]

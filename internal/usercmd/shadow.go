@@ -23,6 +23,7 @@ import (
 var BuiltinNames = []string{
 	"__complete",
 	"__completeNoDesc",
+	"a2a",
 	"attach",
 	"auth",
 	"cleanup",

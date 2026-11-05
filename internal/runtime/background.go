@@ -38,6 +38,12 @@ func (r *Runtime) ExecuteBackground() (string, error) {
 	}
 	runCtx, stop := interruptContext()
 	defer stop()
+	if err := r.joinPeerGroup(runCtx, ctx); err != nil {
+		if ctx.Cleanup != nil {
+			ctx.Cleanup()
+		}
+		return "", err
+	}
 	if _, err := be.Start(runCtx, r.backendRequest(ctx, true, true)); err != nil {
 		if ctx.Cleanup != nil {
 			ctx.Cleanup()

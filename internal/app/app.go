@@ -172,6 +172,10 @@ func Run(args []string) int {
 		return runReviewTarget(projectDir, parsed.ReviewTarget)
 	}
 
+	if parsed.Action == cli.ActionA2A {
+		return runA2A(parsed.Options, parsed.A2A)
+	}
+
 	if parsed.Action == "theia" || parsed.Action == "theia-next" {
 		return runTheia(theia.Variant(parsed.Action), projectDir, parsed.Options)
 	}

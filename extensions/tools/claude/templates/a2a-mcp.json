@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "enclave-a2a": {
+      "command": "enclave-a2a-agent",
+      "args": ["mcp"]
+    }
+  }
+}

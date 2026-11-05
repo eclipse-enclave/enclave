@@ -45,6 +45,7 @@ func actionUsesBackend(action string) bool {
 // unresolved for them, so they neither ask which agent to use nor fail for
 // lack of an answer.
 var toolFreeActions = map[string]bool{
+	cli.ActionA2A:             true,
 	"attach":                  true,
 	"commands":                true,
 	"config":                  true,

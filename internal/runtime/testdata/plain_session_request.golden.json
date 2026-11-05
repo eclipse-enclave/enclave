@@ -1,0 +1,154 @@
+{
+  "Foreground": {
+    "Session": {
+      "Tool": "claude",
+      "ProjectHash": "abc123abc123",
+      "Worktree": "/work/project",
+      "RealWorktree": "/work/project",
+      "Name": "enclave-claude-abc123abc123-review",
+      "DisplayName": "review",
+      "Background": false,
+      "Yolo": true,
+      "Provenance": null
+    },
+    "Image": "enclave-claude:latest",
+    "Argv": [
+      "bash",
+      "-c",
+      "if [ -f ~/.bashrc ]; then . ~/.bashrc; fi; exec \"$@\"",
+      "bash",
+      "claude",
+      "--dangerously-skip-permissions",
+      "--settings",
+      "{\"autoMemoryEnabled\": false}",
+      "--resume",
+      "fix the bug"
+    ],
+    "Entrypoint": null,
+    "Env": [
+      {
+        "Name": "TZ",
+        "Value": "UTC"
+      },
+      {
+        "Name": "FOO",
+        "Value": "bar"
+      },
+      {
+        "Name": "TERM",
+        "Value": "xterm-256color"
+      }
+    ],
+    "WorkingDir": "/work/project",
+    "User": "",
+    "Hostname": "",
+    "Mounts": [
+      {
+        "Type": "",
+        "Source": "/host/src",
+        "ContainerPath": "/work/project",
+        "ReadOnly": false,
+        "CreateSourceDir": false
+      }
+    ],
+    "Stores": null,
+    "ProtectedFiles": null,
+    "Network": {
+      "Mode": "restricted",
+      "Egress": {
+        "AllowedDomains": null,
+        "DeniedDomains": null,
+        "Resolvers": null,
+        "AllowlistPath": ""
+      },
+      "LoopbackPorts": null,
+      "IdeBridgePorts": null
+    },
+    "Ports": null,
+    "Security": {
+      "Admin": false
+    },
+    "Secrets": null,
+    "AuthSync": null,
+    "PeerGroup": null,
+    "RuntimeUIDRemap": false,
+    "Detached": false
+  },
+  "ForegroundTTY": true,
+  "ForegroundOutSet": false,
+  "Background": {
+    "Session": {
+      "Tool": "claude",
+      "ProjectHash": "abc123abc123",
+      "Worktree": "/work/project",
+      "RealWorktree": "/work/project",
+      "Name": "enclave-claude-abc123abc123-review",
+      "DisplayName": "review",
+      "Background": true,
+      "Yolo": true,
+      "Provenance": null
+    },
+    "Image": "enclave-claude:latest",
+    "Argv": [
+      "bash",
+      "-c",
+      "if [ -f ~/.bashrc ]; then . ~/.bashrc; fi; exec \"$@\"",
+      "bash",
+      "claude",
+      "--dangerously-skip-permissions",
+      "--settings",
+      "{\"autoMemoryEnabled\": false}",
+      "--resume",
+      "fix the bug"
+    ],
+    "Entrypoint": null,
+    "Env": [
+      {
+        "Name": "TZ",
+        "Value": "UTC"
+      },
+      {
+        "Name": "FOO",
+        "Value": "bar"
+      },
+      {
+        "Name": "TERM",
+        "Value": "xterm-256color"
+      }
+    ],
+    "WorkingDir": "/work/project",
+    "User": "",
+    "Hostname": "",
+    "Mounts": [
+      {
+        "Type": "",
+        "Source": "/host/src",
+        "ContainerPath": "/work/project",
+        "ReadOnly": false,
+        "CreateSourceDir": false
+      }
+    ],
+    "Stores": null,
+    "ProtectedFiles": null,
+    "Network": {
+      "Mode": "restricted",
+      "Egress": {
+        "AllowedDomains": null,
+        "DeniedDomains": null,
+        "Resolvers": null,
+        "AllowlistPath": ""
+      },
+      "LoopbackPorts": null,
+      "IdeBridgePorts": null
+    },
+    "Ports": null,
+    "Security": {
+      "Admin": false
+    },
+    "Secrets": null,
+    "AuthSync": null,
+    "PeerGroup": null,
+    "RuntimeUIDRemap": false,
+    "Detached": true
+  }
+}

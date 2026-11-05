@@ -44,7 +44,7 @@ func (b commandBuilder) Build() []string {
 	if b.run.MemoryDisabled() {
 		agentArgs = append(agentArgs, b.profile.NoMemoryArgs...)
 	}
-	agentArgs = append(agentArgs, b.run.CmdArgs...)
+	agentArgs = appendAfterUserArgs(agentArgs, b.run.CmdArgs, b.orchestratorArgs())
 
 	// bash -c uses the next argument as $0; the rest become $1.. for exec "$@".
 	return append([]string{"bash", "-c", agentWrapperTemplate, "bash"}, agentArgs...)

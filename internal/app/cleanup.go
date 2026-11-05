@@ -18,6 +18,7 @@ import (
 	"strings"
 	"time"
 
+	"enclave/internal/backend"
 	backenddocker "enclave/internal/backend/docker"
 	"enclave/internal/config"
 	"enclave/internal/docker"
@@ -140,11 +141,22 @@ func runCleanup(run model.RunOptions, cleanup model.CleanupOptions) int {
 			return 0
 		}
 		stopExitedSessionGateways(run, cleanup, project, false)
-		// Pruning also catches networks orphaned before this cleanup.
+		ctx := context.Background()
+		leaver := newA2ALeaver(ctx, model.Options{RunOptions: cleanupEngineRunOptions(run)})
+		for _, name := range orderOrchestratorsFirst(containerNames, leaverMembers(leaver)) {
+			leaver.leave(ctx, name)
+		}
 		cleanupContainers(containerNames)
+		// Before the prune: reconcile disconnects the hub from bridges of removed members.
+		degraded := leaver.reconcile(ctx)
+		// Pruning also catches networks orphaned before this cleanup.
 		pruneStaleSessionNetworks(run, cleanup, project, false)
 		cleanupDirs(storeDirs)
 		cleanupBuildCache(cleanup)
+		if degraded {
+			logx.Warnf("Cleanup complete; a peer group has open obligations, retry with `%s a2a reconcile`", model.AppName)
+			return a2aExitDegraded
+		}
 		logx.Successf("Cleanup complete")
 		return 0
 	}
@@ -559,4 +571,22 @@ func cleanupBuildCache(cleanup model.CleanupOptions) {
 		return
 	}
 	logx.Successf("Reclaimed %s of build cache", util.FormatBytes(report.SpaceReclaimed))
+}
+
+// cleanupEngineRunOptions names the engine cleanup talks to, for the peer group lifecycle.
+func cleanupEngineRunOptions(run model.RunOptions) model.RunOptions {
+	if run.Backend != backend.NameDocker && run.Backend != backend.NamePodman {
+		run.Backend = backend.NameDocker
+		if docker.IsPodman() {
+			run.Backend = backend.NamePodman
+		}
+	}
+	return run
+}
+
+func leaverMembers(l *a2aLeaver) map[string]a2aMemberRef {
+	if l == nil {
+		return nil
+	}
+	return l.members
 }

@@ -75,6 +75,12 @@ func runExecutionCommand(input *CommandInput) int {
 	}
 
 	yoloEnabled := resolveYoloEnabled(profile, opts)
+	if isRunAction(input.Action) {
+		if err := validateA2AProfile(opts, profile, yoloEnabled); err != nil {
+			logx.Errorf("%v", err)
+			return 1
+		}
+	}
 
 	if executionRequiresDocker(input.Action, opts) {
 		if code := requireDocker(); code != 0 {
@@ -142,6 +148,14 @@ func runExecutionCommand(input *CommandInput) int {
 		return 1
 	}
 	runner.SetBackend(be)
+	peerGroupRun, err := prepareA2ARun(context.Background(), input.Action, opts, input.Ctx.Paths, host, project, profile, be)
+	if err != nil {
+		logx.Errorf("%v", err)
+		return 1
+	}
+	if peerGroupRun != nil {
+		runner.SetPeerGroupJoiner(peerGroupRun.joinSession)
+	}
 	var execTarget runtime.ExecTarget
 	if input.Action == "exec" {
 		execTarget, err = execSessionTarget(context.Background(), be, opts, project)
@@ -154,7 +168,7 @@ func runExecutionCommand(input *CommandInput) int {
 		logx.Errorf("%v", err)
 		return 1
 	}
-	return dispatchRunner(input, runner, execTarget)
+	return peerGroupRun.exitCode(dispatchRunner(input, runner, execTarget))
 }
 
 // resolveAdditionalMounts validates the directories to mount besides the

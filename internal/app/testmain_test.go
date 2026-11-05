@@ -11,10 +11,13 @@ import (
 	"os"
 	"testing"
 
+	"enclave/internal/a2aagent/executor/fakedriver"
 	"enclave/internal/model"
 )
 
 func TestMain(m *testing.M) {
+	// The real-adapter A2A tests re-execute this binary as the fake harness.
+	fakedriver.Main()
 	// Prevent host XDG environment variables from overriding the home-based
 	// path resolution used by tests. Without this, tests that pass t.TempDir()
 	// as home share the real host XDG directories, causing cross-test pollution.

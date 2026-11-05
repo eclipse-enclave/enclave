@@ -99,6 +99,9 @@ func promptAllowed(parsed cli.Result) bool {
 	if parsed.ExtRequest != nil && (parsed.ExtRequest.JSON || parsed.ExtRequest.Yes) {
 		return false
 	}
+	if parsed.A2A != nil && parsed.A2A.JSON {
+		return false
+	}
 	return true
 }
 

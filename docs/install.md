@@ -56,9 +56,11 @@ The group grants root-equivalent privileges. See Docker's
 
 ## Install
 
-Builds are published on the GitHub
-[rolling release](https://github.com/eclipse-enclave/enclave/releases/tag/rolling),
-rebuilt from every push to `main`.
+Download from the
+[latest release](https://github.com/eclipse-enclave/enclave/releases/latest).
+Builds of every push to `main` are on the
+[rolling release](https://github.com/eclipse-enclave/enclave/releases/tag/rolling);
+see [Release channels](#release-channels).
 
 | Platform | Artifact | Install with |
 |----------|----------|--------------|
@@ -155,10 +157,21 @@ line above their setup. A plain zsh setup without `compinit` needs
 | Standalone binary in a system directory (e.g. after `sudo install`) | Repeat the install steps; Enclave prints the commands |
 | `.deb`, `.rpm` | Package manager |
 | Source build, or a binary using a runtime asset tree beside it or in `ENCLAVE_HOME` | Rebuild or reinstall |
+| Windows launcher | Reinstall its Scoop manifest; `enclave self-update` updates the Linux binary inside WSL2 |
 
 Only standalone release binaries update themselves. The other installs are
 refused and never checked, because replacing the binary alone would leave
 their assets behind.
+
+To install updates automatically and pin the [channel](#release-channels), set
+both keys in the global `~/.config/enclave/config.json`:
+
+```json
+{
+  "auto_update": true,
+  "update_channel": "stable"
+}
+```
 
 ### `enclave self-update`
 
@@ -189,8 +202,9 @@ configured release channel, verifies it against the release's
 
 - A binary follows the channel it was published on unless the global config
   sets `update_channel`. `enclave config` shows the effective channel.
-- Switching channels installs the other channel's latest build, even if it is
-  older.
+- To switch, set `update_channel` to the other channel and run
+  `enclave self-update` (or wait for the next check with `auto_update`). It
+  installs that channel's latest build, even if it is older.
 - Within `stable`, only a higher version is offered. A pre-release (`alpha`,
   `beta`, or `rc`, such as `1.1.0-rc.1`) is published but never becomes
   `latest`, so it updates only once a higher final release becomes `latest`;

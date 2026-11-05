@@ -26,13 +26,13 @@ runtime and Linux path semantics.
 
 3. Install the Linux `enclave` build inside the distribution: the `.deb` or the
    `enclave-linux-amd64` / `enclave-linux-arm64` binary from the
-   [rolling release](https://github.com/eclipse-enclave/enclave/releases/tag/rolling).
+   [latest release](https://github.com/eclipse-enclave/enclave/releases/latest).
    This binary runs the sessions.
 
 4. Install the launcher on Windows with [Scoop](https://scoop.sh):
 
    ```powershell
-   scoop install https://github.com/eclipse-enclave/enclave/releases/download/rolling/enclave.json
+   scoop install https://github.com/eclipse-enclave/enclave/releases/latest/download/enclave.json
    ```
 
    Or download `enclave-windows-amd64.zip` (`enclave-windows-arm64.zip` on
@@ -49,7 +49,7 @@ installed in the distribution).
   distribution's `/etc/wsl.conf`). `ENCLAVE_ALLOW_ROOT` set on Windows is
   forwarded into the distribution like any other `ENCLAVE_` variable.
 - `winget` is not supported: it needs a pull request into
-  `microsoft/winget-pkgs` per release, which does not fit a rolling release.
+  `microsoft/winget-pkgs` per release.
 
 ## Working directory
 

@@ -47,7 +47,7 @@ Details and setup commands: [Installation](docs/install.md#requirements).
 ### 2. Install
 
 Download from the
-[rolling release](https://github.com/eclipse-enclave/enclave/releases/tag/rolling):
+[latest release](https://github.com/eclipse-enclave/enclave/releases/latest):
 
 ```bash
 sudo apt install ./enclave_*_amd64.deb     # Ubuntu 24.04, x86-64
@@ -55,7 +55,7 @@ sudo dnf install ./enclave-*.x86_64.rpm    # Fedora, x86-64
 ```
 
 Standalone binaries for Linux and macOS (x86-64 and arm64) update themselves
-with `enclave self-update`. See
+with `enclave self-update` ([Updating](docs/install.md#updating)). See
 [Getting Started](https://enclave.eclipse.dev/docs/getting-started) for each
 platform, or [Installation](docs/install.md) for all options, including
 building from source.

@@ -30,13 +30,15 @@ current CLI and will get more detail over time.
 
 ## Install
 
-Prebuilt binaries, a Debian package, and an RPM package are published on the
-[rolling release page](https://github.com/eclipse-enclave/enclave/releases/tag/rolling).
+Prebuilt binaries, a Debian package, and an RPM package are published with
+each release. Download them from the
+[latest release](https://github.com/eclipse-enclave/enclave/releases/latest).
 
 :::info
-The rolling release is a pre-release built from the current `main` branch, not a
-stable versioned release. Its assets are replaced as `main` moves, so expect
-behavior to change between downloads.
+To try unreleased changes, use the
+[rolling release](https://github.com/eclipse-enclave/enclave/releases/tag/rolling)
+instead. It is a pre-release rebuilt from every push to `main`, and its assets
+are replaced as `main` moves, so expect behavior to change between downloads.
 :::
 
 ### Ubuntu 24.04 (x86-64)
@@ -108,13 +110,13 @@ That is all you need to run Enclave from a WSL shell. To run it from PowerShell
 too, install the Windows launcher as well:
 
 ```powershell
-scoop install https://github.com/eclipse-enclave/enclave/releases/download/rolling/enclave.json
+scoop install https://github.com/eclipse-enclave/enclave/releases/latest/download/enclave.json
 ```
 
 `enclave.exe` forwards every argument to the Linux binary inside the distribution
 and returns its exit code. It is a launcher, not a native build, so step 3 is
 still required. Alternatively, download `enclave-windows-amd64.zip` (or
-`enclave-windows-arm64.zip`) from the rolling release and put the extracted
+`enclave-windows-arm64.zip`) from the latest release and put the extracted
 `enclave.exe` on your `PATH`.
 
 :::note
@@ -142,36 +144,24 @@ make build
 
 ### Updating Enclave
 
-When run interactively, a standalone binary checks its release channel at most
-once every 24 hours and reports when a different build is available. Binaries from the
-[rolling release](https://github.com/eclipse-enclave/enclave/releases/tag/rolling)
-follow the `rolling` channel, rebuilt from every push to `main`; official
-releases, published under
-[download.eclipse.org/enclave/releases/](https://download.eclipse.org/enclave/releases/),
-follow `stable`. Set `"update_channel"` in the global Enclave
-`config.json` to switch. Run `enclave self-update` to download the binary for
-your platform, verify it against `checksums.txt`, and atomically replace the
-current executable.
-The checksums guard against corrupted downloads, not against a compromised
-release. A download that receives no data for 30 seconds is aborted, and Ctrl-C
-stops it without leaving a partial file behind.
+A standalone binary in a directory you own updates itself with
+`enclave self-update`. Interactive runs check for a newer build once a day; to
+install it automatically and to pick the release channel, set these keys in the
+[global config](./configuration.md):
 
-The updater never elevates privileges. A binary in a directory you cannot
-write, such as one installed with `sudo install` into `/usr/local/bin`, is
-updated by repeating the install procedure above; when a different build is
-available, Enclave prints the commands that download, verify, and reinstall it
-instead of suggesting `self-update`.
+```json
+{
+  "auto_update": true,
+  "update_channel": "stable"
+}
+```
 
-Automatic replacement is opt-in. Add `"auto_update": true` to the global
-Enclave `config.json`; project and per-tool settings cannot enable it or change
-the channel. Checks are skipped for shell completion, structured output, and
-user commands. On Windows,
-`self-update` updates the Linux binary inside WSL2; update the Windows launcher
-itself by reinstalling its Scoop manifest.
-
-Package and source installs neither check for updates nor self-update. Upgrade
-`.deb` and `.rpm` installs with the package manager, and source checkouts with
-`git pull` followed by `make install`.
+`stable` follows official releases, `rolling` follows builds of `main`. Without
+`update_channel`, a binary follows the channel it was downloaded from; to
+switch, change it and run `enclave self-update`. Package installs update through
+the package manager. See
+[Updating](https://github.com/eclipse-enclave/enclave/blob/main/docs/install.md#updating)
+for the other install methods and details.
 
 :::note
 This is about the Enclave binary itself. `enclave update` rebuilds tool images

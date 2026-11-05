@@ -39,6 +39,8 @@ var dockerImportAllowlist = []string{
 	"internal/app/cleanup.go",
 	"internal/devcontainer/devcontainer.go",
 	"internal/gateway/gateway.go",
+	// The A2A hub image is built like the gateway image (CR-A4-1).
+	"internal/gateway/a2ahub_build.go",
 }
 
 func TestDockerImportsConfinedToBackendAndCarveOuts(t *testing.T) {

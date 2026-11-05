@@ -1,0 +1,11 @@
+# Single source of truth for A2A hub image build inputs besides Dockerfile.a2ahub and a2ahub-entrypoint.sh.
+# The hub build stages exactly these paths; TestA2AHubBuildInputsCoverInternalDeps enforces coverage.
+go.mod
+go.sum
+cmd/enclave-a2a-hub
+internal/a2a
+internal/a2ahub
+internal/logx
+internal/model
+internal/peergroup
+internal/util

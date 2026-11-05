@@ -1,0 +1,24 @@
+# Copyright (C) 2026 EclipseSource GmbH and others.
+#
+# This program and the accompanying materials are made available under the
+# terms of the MIT License, which is available in the project root.
+#
+# SPDX-License-Identifier: MIT
+
+FROM docker.io/library/golang:1.26.10-alpine3.24@sha256:a2012b4a1d1f9f7e9f44e0d39b805a901e856b1dd80b4e6ee4338db547050308 AS hub-build
+WORKDIR /src
+COPY go.mod go.sum ./
+COPY cmd/ cmd/
+COPY internal/ internal/
+RUN CGO_ENABLED=0 go build -o /out/enclave-a2a-hub ./cmd/enclave-a2a-hub
+
+# Enclave A2A hub (root firewall supervisor + unprivileged proxy), same base as the gateway
+FROM docker.io/library/alpine:3.24@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a
+
+RUN apk add --no-cache conntrack-tools iproute2-ss iptables iputils-arping su-exec
+
+COPY --from=hub-build /out/enclave-a2a-hub /usr/local/bin/enclave-a2a-hub
+COPY a2ahub-entrypoint.sh /usr/local/bin/a2ahub-entrypoint.sh
+RUN chmod a+rx /usr/local/bin/a2ahub-entrypoint.sh /usr/local/bin/enclave-a2a-hub
+
+ENTRYPOINT ["/usr/local/bin/a2ahub-entrypoint.sh"]

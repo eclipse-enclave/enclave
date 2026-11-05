@@ -525,6 +525,9 @@ func Validate(req Request, caps Capabilities) error {
 	if req.Network.Mode == NetworkModeRestricted && !caps.RestrictedNetwork {
 		return fmt.Errorf("backend cannot enforce restricted networking; rerun with --allow-all-network to proceed unrestricted")
 	}
+	if req.Network.Mode == NetworkModeRestricted && !req.Network.Gateway {
+		return fmt.Errorf("restricted networking requires a gateway")
+	}
 	if req.Network.Mode == NetworkModeRestricted && !caps.SecretHTTPRelease {
 		for _, secret := range req.Secrets {
 			if secret.HTTP != nil {

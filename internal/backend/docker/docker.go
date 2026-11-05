@@ -416,9 +416,6 @@ func (b *Backend) prepareRun(ctx context.Context, req backend.Request) (runSpec,
 	if err := backend.Validate(req, b.Capabilities()); err != nil {
 		return runSpec{}, err
 	}
-	if req.Network.Mode == backend.NetworkModeRestricted && !req.Network.Gateway {
-		return runSpec{}, fmt.Errorf("restricted networking requires a gateway")
-	}
 	dockerSystemInfo, err := dockerInfo(ctx)
 	if err != nil {
 		return runSpec{}, fmt.Errorf("read %s info: %w", dockercmd.Binary(), err)

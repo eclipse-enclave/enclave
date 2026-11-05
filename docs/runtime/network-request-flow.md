@@ -30,7 +30,7 @@ sequenceDiagram
     Host->>Entry: Start gateway with config bundle<br/>(dnsmasq.conf, domains.txt, meta.json)
     Host->>Entry: Mount optional secret mapping JSON<br/>and TLS root (ca.crt/ca.key)
     Entry->>DNS: Start with rendered allowlist config
-    Entry->>FW: INPUT DROP + loopback, reply and published-port exceptions<br/>OUTPUT DROP + local DNS allow<br/>NAT redirect 80/443 to 8080/8443
+    Entry->>FW: INPUT DROP + loopback, reply and published-port exceptions<br/>OUTPUT DROP + local DNS allow<br/>NAT redirect 80/443 to the proxy on 127.0.0.1:15080/15443
     Entry->>Proxy: Start transparent proxy
     Entry->>Audit: Start DNS audit translator on the dnsmasq log
     Host->>Log: Rotate above the size cap<br/>and append session start marker
@@ -41,7 +41,7 @@ sequenceDiagram
         DNS->>FW: Add resolved IP to enclave_allowed (ipset)
         DNS-->>Tool: Return A/AAAA answer
         Tool->>FW: Connect api.example.com:443
-        FW->>Proxy: Redirect tcp/443 to :8443
+        FW->>Proxy: Redirect tcp/443 to 127.0.0.1:15443
         Proxy->>Proxy: Parse SNI from ClientHello
         alt SNI not in allowlist
             Proxy-->>Tool: Close connection
@@ -145,14 +145,14 @@ sequenceDiagram
 
     Note over Host,Dst: Session startup
     Host->>Entry: Start gateway with unrestricted bundle<br/>and TLS root (no secret mapping)
-    Entry->>NAT: Redirect tcp/80 and tcp/443 to 8080/8443 (IPv4 and IPv6)<br/>no INPUT/OUTPUT filters, no dnsmasq
+    Entry->>NAT: Redirect tcp/80 and tcp/443 to loopback 15080/15443 (IPv4 and IPv6)<br/>no INPUT/OUTPUT filters, no dnsmasq
     Entry->>Proxy: Start transparent proxy (all hosts allowed)
     Host->>Log: Rotate above the size cap<br/>and append session start marker
 
     Note over Tool,Dst: HTTPS request
     Tool->>Tool: Resolve via Docker's resolver
     Tool->>NAT: Connect address:443
-    NAT->>Proxy: Redirect to :8443
+    NAT->>Proxy: Redirect to loopback :15443
     Proxy->>Proxy: Read original destination (SO_ORIGINAL_DST)<br/>and parse SNI from ClientHello
     alt network_log=requests
         Proxy->>Proxy: Terminate TLS using local CA leaf cert

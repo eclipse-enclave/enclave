@@ -11,8 +11,16 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
+
+	"enclave/internal/model"
+)
+
+var (
+	proxyHTTPPort  = strconv.Itoa(model.GatewayProxyHTTPPort)
+	proxyHTTPSPort = strconv.Itoa(model.GatewayProxyHTTPSPort)
 )
 
 // TestUnrestrictedGatewayFirewall pins the rules an observing gateway
@@ -46,8 +54,8 @@ func TestUnrestrictedGatewayFirewall(t *testing.T) {
 	}
 	for _, engine := range []string{"iptables", "ip6tables"} {
 		for _, want := range []string{
-			"-t nat -A OUTPUT -p tcp --dport 80 -j REDIRECT --to-ports 8080",
-			"-t nat -A OUTPUT -p tcp --dport 443 -j REDIRECT --to-ports 8443",
+			"-t nat -A OUTPUT -p tcp --dport 80 -j REDIRECT --to-ports " + proxyHTTPPort,
+			"-t nat -A OUTPUT -p tcp --dport 443 -j REDIRECT --to-ports " + proxyHTTPSPort,
 		} {
 			if !strings.Contains(out.String(), engine+" "+want+"\n") {
 				t.Errorf("missing %s %s", engine, want)
@@ -74,7 +82,7 @@ func TestUnrestrictedGatewayFirewallIPv4ErrorsPropagate(t *testing.T) {
 	_, err := runGatewayFirewall(t, lockinFirewallMocks+"setup_observing_network",
 		"PROXY_ENABLED=true",
 		"FAIL_ENGINE=iptables",
-		"FAIL_RULE=-t nat -A OUTPUT -p tcp --dport 443 -j REDIRECT --to-ports 8443",
+		"FAIL_RULE=-t nat -A OUTPUT -p tcp --dport 443 -j REDIRECT --to-ports "+proxyHTTPSPort,
 	)
 	if err == nil {
 		t.Fatal("observing gateway ignored a failed IPv4 redirect")
@@ -173,10 +181,10 @@ firewall_mock marker alive`,
 		t.Fatalf("observing gateway exited after proxy death: %v", err)
 	}
 	assertCalls(t, calls, []string{
-		"iptables -t nat -D OUTPUT -p tcp --dport 80 -j REDIRECT --to-ports 8080",
-		"iptables -t nat -D OUTPUT -p tcp --dport 443 -j REDIRECT --to-ports 8443",
-		"ip6tables -t nat -D OUTPUT -p tcp --dport 80 -j REDIRECT --to-ports 8080",
-		"ip6tables -t nat -D OUTPUT -p tcp --dport 443 -j REDIRECT --to-ports 8443",
+		"iptables -t nat -D OUTPUT -p tcp --dport 80 -j REDIRECT --to-ports " + proxyHTTPPort,
+		"iptables -t nat -D OUTPUT -p tcp --dport 443 -j REDIRECT --to-ports " + proxyHTTPSPort,
+		"ip6tables -t nat -D OUTPUT -p tcp --dport 80 -j REDIRECT --to-ports " + proxyHTTPPort,
+		"ip6tables -t nat -D OUTPUT -p tcp --dport 443 -j REDIRECT --to-ports " + proxyHTTPSPort,
 		"marker second-tick",
 		"marker alive",
 	})
@@ -205,11 +213,11 @@ func TestUnrestrictedGatewayFailOpenToleratesMissingRedirect(t *testing.T) {
 	}
 	lines := callLines(calls)
 	assertCalls(t, calls[:len(calls)-1], []string{
-		"iptables -t nat -D OUTPUT -p tcp --dport 80 -j REDIRECT --to-ports 8080",
-		"iptables -t nat -C OUTPUT -p tcp --dport 80 -j REDIRECT --to-ports 8080",
-		"iptables -t nat -D OUTPUT -p tcp --dport 443 -j REDIRECT --to-ports 8443",
-		"ip6tables -t nat -D OUTPUT -p tcp --dport 80 -j REDIRECT --to-ports 8080",
-		"ip6tables -t nat -D OUTPUT -p tcp --dport 443 -j REDIRECT --to-ports 8443",
+		"iptables -t nat -D OUTPUT -p tcp --dport 80 -j REDIRECT --to-ports " + proxyHTTPPort,
+		"iptables -t nat -C OUTPUT -p tcp --dport 80 -j REDIRECT --to-ports " + proxyHTTPPort,
+		"iptables -t nat -D OUTPUT -p tcp --dport 443 -j REDIRECT --to-ports " + proxyHTTPSPort,
+		"ip6tables -t nat -D OUTPUT -p tcp --dport 80 -j REDIRECT --to-ports " + proxyHTTPPort,
+		"ip6tables -t nat -D OUTPUT -p tcp --dport 443 -j REDIRECT --to-ports " + proxyHTTPSPort,
 	})
 	if out := lines[len(lines)-1]; !strings.Contains(out, "no longer logged") || strings.Contains(out, "Failed") {
 		t.Fatalf("missing redirect reported as a failure: %q", out)
@@ -222,7 +230,7 @@ func TestUnrestrictedGatewayFailOpenReportsStuckRedirect(t *testing.T) {
 	calls, err := runGatewayFirewall(t, deadProxy+`GATEWAY_MODE=unrestricted; firewall_mock log "$(monitor_tick | tr '\n' ' ')"`,
 		"PROXY_ENABLED=true",
 		"FAIL_ENGINE=ip6tables",
-		"FAIL_RULE=-t nat -D OUTPUT -p tcp --dport 443 -j REDIRECT --to-ports 8443",
+		"FAIL_RULE=-t nat -D OUTPUT -p tcp --dport 443 -j REDIRECT --to-ports "+proxyHTTPSPort,
 	)
 	if err != nil {
 		t.Fatalf("observing gateway exited when a redirect could not be removed: %v", err)

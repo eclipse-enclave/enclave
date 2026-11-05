@@ -37,8 +37,10 @@ import (
 )
 
 type Options struct {
-	HTTPAddr       string
-	HTTPSAddr      string
+	// HTTPPort and HTTPSPort are the loopback ports the proxy listens on; zero
+	// selects the gateway's ports.
+	HTTPPort       int
+	HTTPSPort      int
 	AllowedDomains []string
 	DeniedDomains  []string
 	SecretRules    []model.SecretReleaseEntry
@@ -90,13 +92,13 @@ func Run(ctx context.Context, opts Options) error {
 	if opts.TLSStore == nil {
 		return fmt.Errorf("TLS store is required")
 	}
-	httpAddr := strings.TrimSpace(opts.HTTPAddr)
-	if httpAddr == "" {
-		httpAddr = ":8080"
+	httpPort := opts.HTTPPort
+	if httpPort == 0 {
+		httpPort = model.GatewayProxyHTTPPort
 	}
-	httpsAddr := strings.TrimSpace(opts.HTTPSAddr)
-	if httpsAddr == "" {
-		httpsAddr = ":8443"
+	httpsPort := opts.HTTPSPort
+	if httpsPort == 0 {
+		httpsPort = model.GatewayProxyHTTPSPort
 	}
 
 	audit, err := netlog.NewAppender(opts.AuditLogPath)
@@ -108,16 +110,15 @@ func Run(ctx context.Context, opts Options) error {
 	proxy := newProxy(opts.AllowedDomains, opts.DeniedDomains, opts.SecretRules, opts.ForceHTTPSMITM, audit, opts.Session)
 	proxy.setCapabilities(capabilitiesFor(opts.NetworkMode))
 	httpServer := proxy.newHTTPServer()
-	httpServer.Addr = httpAddr
-	httpListener, err := net.Listen("tcp", httpAddr)
+	httpListener, err := listenLoopback(httpPort)
 	if err != nil {
-		return fmt.Errorf("listen HTTP proxy on %s: %w", httpAddr, err)
+		return fmt.Errorf("listen HTTP proxy on port %d: %w", httpPort, err)
 	}
 
-	httpsListener, err := net.Listen("tcp", httpsAddr)
+	httpsListener, err := listenLoopback(httpsPort)
 	if err != nil {
 		_ = httpListener.Close()
-		return fmt.Errorf("listen HTTPS proxy on %s: %w", httpsAddr, err)
+		return fmt.Errorf("listen HTTPS proxy on port %d: %w", httpsPort, err)
 	}
 	httpsServer, err := newHTTPSDispatchServer(proxy, opts.TLSStore, httpsListener)
 	if err != nil {

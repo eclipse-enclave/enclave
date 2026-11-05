@@ -71,9 +71,9 @@ func TestUnrestrictedProxyForwardsAndLogsPlaintextHTTP(t *testing.T) {
 // An unrestricted proxy passes TLS for any SNI and logs a tcp pass event.
 func TestUnrestrictedProxyPassesAndLogsTLS(t *testing.T) {
 	p, logPath := newUnrestrictedTestProxy(t)
+	p.originalDst = fixedOriginalDestination(t, startTLSUpstream(t))
 	server := &httpsDispatchServer{proxy: p, conns: map[net.Conn]struct{}{}}
 	clientConn, serverConn := net.Pipe()
-	defer func() { _ = clientConn.Close() }()
 
 	done := make(chan struct{})
 	go func() {
@@ -81,8 +81,8 @@ func TestUnrestrictedProxyPassesAndLogsTLS(t *testing.T) {
 		close(done)
 	}()
 	go func() {
-		// Upstream is unreachable, so the handshake fails after the proxy
-		// has read the ClientHello and decided.
+		// Closing the client ends the tunnel, so serveConn returns.
+		defer func() { _ = clientConn.Close() }()
 		_ = tls.Client(clientConn, &tls.Config{ServerName: "localhost", InsecureSkipVerify: true}).Handshake() // #nosec G402 -- test-only.
 	}()
 	select {

@@ -1,0 +1,16 @@
+{
+  "task": {
+    "id": "task-uuid",
+    "status": {
+      "state": "TASK_STATE_INPUT_REQUIRED",
+      "message": {
+        "role": "ROLE_AGENT",
+        "parts": [
+          {
+            "text": "I need more details. Where would you like to fly from and to?"
+          }
+        ]
+      }
+    }
+  }
+}

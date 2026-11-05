@@ -1,0 +1,18 @@
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "error": {
+    "code": -31001,
+    "message": "adapter unreachable",
+    "data": [
+      {
+        "@type": "type.googleapis.com/google.rpc.ErrorInfo",
+        "reason": "ADAPTER_UNREACHABLE",
+        "domain": "enclave.eclipse.dev",
+        "metadata": {
+          "member": "worker-1"
+        }
+      }
+    ]
+  }
+}

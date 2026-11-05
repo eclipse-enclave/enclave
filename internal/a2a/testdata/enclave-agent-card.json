@@ -1,0 +1,57 @@
+{
+  "name": "worker-1",
+  "description": "Reviews Go code",
+  "supportedInterfaces": [
+    {
+      "url": "http://a2a.enclave:8080/peers/worker-1",
+      "protocolBinding": "JSONRPC",
+      "protocolVersion": "1.0"
+    }
+  ],
+  "version": "1",
+  "capabilities": {
+    "streaming": true,
+    "extensions": [
+      {
+        "uri": "https://enclave.eclipse.dev/a2a/ext/v1",
+        "description": "enclave peer group",
+        "required": true,
+        "params": {
+          "queueDepth": 4
+        }
+      }
+    ]
+  },
+  "securitySchemes": {
+    "bearer": {
+      "httpAuthSecurityScheme": {
+        "scheme": "Bearer"
+      }
+    }
+  },
+  "securityRequirements": [
+    {
+      "schemes": {
+        "bearer": {
+          "list": []
+        }
+      }
+    }
+  ],
+  "defaultInputModes": [
+    "text/plain"
+  ],
+  "defaultOutputModes": [
+    "text/plain"
+  ],
+  "skills": [
+    {
+      "id": "delegate",
+      "name": "Delegate",
+      "description": "Run a task in this worker session",
+      "tags": [
+        "enclave"
+      ]
+    }
+  ]
+}

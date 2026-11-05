@@ -1,0 +1,17 @@
+{
+  "artifactUpdate": {
+    "taskId": "t-1",
+    "contextId": "ctx-0123",
+    "artifact": {
+      "artifactId": "result",
+      "parts": [
+        {
+          "text": "LGTM",
+          "mediaType": "text/plain"
+        }
+      ]
+    },
+    "append": true,
+    "lastChunk": true
+  }
+}

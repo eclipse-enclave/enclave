@@ -1,0 +1,14 @@
+{
+  "statusUpdate": {
+    "taskId": "t-1",
+    "contextId": "ctx-0123",
+    "status": {
+      "state": "TASK_STATE_SUBMITTED"
+    },
+    "metadata": {
+      "https://enclave.eclipse.dev/a2a/ext/v1": {
+        "queuePosition": 0
+      }
+    }
+  }
+}

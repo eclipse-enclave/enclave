@@ -1,0 +1,20 @@
+{
+  "task": {
+    "id": "d8c6243f-5f7a-4f6f-821d-957ce51e856c",
+    "contextId": "c295ea44-7543-4f78-b524-7a38915ad6e4",
+    "status": {
+      "state": "TASK_STATE_COMPLETED",
+      "timestamp": "2025-04-17T17:47:09.680794Z"
+    },
+    "artifacts": [
+      {
+        "artifactId": "c5e0382f-b57f-4da7-87d8-b85171fad17c",
+        "parts": [
+          {
+            "text": "[{\"ticketNumber\":\"REQ12312\",\"description\":\"request for VPN access\"},{\"ticketNumber\":\"REQ23422\",\"description\":\"Add to DL - team-gcp-onboarding\"}]"
+          }
+        ]
+      }
+    ]
+  }
+}

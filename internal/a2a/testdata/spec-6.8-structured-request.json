@@ -1,0 +1,28 @@
+{
+  "message": {
+    "role": "ROLE_USER",
+    "parts": [
+      {
+        "text": "Show me a list of my open IT tickets",
+        "metadata": {
+          "mediaType": "application/json",
+          "schema": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "ticketNumber": {
+                  "type": "string"
+                },
+                "description": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    ],
+    "messageId": "85b26db5-ffbb-4278-a5da-a7b09dea1b47"
+  }
+}

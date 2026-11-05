@@ -1,0 +1,25 @@
+{
+  "jsonrpc": "2.0",
+  "id": "req-1",
+  "method": "SendStreamingMessage",
+  "params": {
+    "message": {
+      "messageId": "msg-1",
+      "contextId": "ctx-0123",
+      "role": "ROLE_USER",
+      "parts": [
+        {
+          "text": "Review internal/a2a"
+        }
+      ],
+      "metadata": {
+        "https://enclave.eclipse.dev/a2a/ext/v1": {
+          "retry": true
+        }
+      },
+      "extensions": [
+        "https://enclave.eclipse.dev/a2a/ext/v1"
+      ]
+    }
+  }
+}

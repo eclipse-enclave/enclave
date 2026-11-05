@@ -1,0 +1,12 @@
+{
+  "message": {
+    "taskId": "task-uuid",
+    "role": "ROLE_USER",
+    "parts": [
+      {
+        "text": "From San Francisco to New York"
+      }
+    ],
+    "messageId": "msg-2"
+  }
+}

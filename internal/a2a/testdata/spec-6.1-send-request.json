@@ -1,0 +1,11 @@
+{
+  "message": {
+    "role": "ROLE_USER",
+    "parts": [
+      {
+        "text": "What is the weather today?"
+      }
+    ],
+    "messageId": "msg-uuid"
+  }
+}

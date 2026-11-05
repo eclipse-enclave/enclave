@@ -1,0 +1,12 @@
+{
+  "message": {
+    "messageId": "m-1",
+    "contextId": "ctx-0123",
+    "role": "ROLE_AGENT",
+    "parts": [
+      {
+        "text": "done"
+      }
+    ]
+  }
+}

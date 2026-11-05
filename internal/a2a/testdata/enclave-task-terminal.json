@@ -1,0 +1,49 @@
+{
+  "task": {
+    "id": "t-1",
+    "contextId": "ctx-0123",
+    "status": {
+      "state": "TASK_STATE_FAILED",
+      "message": {
+        "messageId": "m-9",
+        "role": "ROLE_AGENT",
+        "parts": [
+          {
+            "text": "canceled, termination unconfirmed"
+          }
+        ]
+      },
+      "timestamp": "2026-11-05T10:00:00Z"
+    },
+    "history": [
+      {
+        "messageId": "msg-1",
+        "contextId": "ctx-0123",
+        "taskId": "t-1",
+        "role": "ROLE_USER",
+        "parts": [
+          {
+            "text": "Review internal/a2a"
+          }
+        ],
+        "metadata": {
+          "https://enclave.eclipse.dev/a2a/ext/v1": {
+            "principal": {
+              "group": "g",
+              "groupGeneration": "0123456789abcdef",
+              "member": "orch",
+              "role": "orchestrator",
+              "generation": "fedcba9876543210"
+            }
+          }
+        }
+      }
+    ],
+    "metadata": {
+      "https://enclave.eclipse.dev/a2a/ext/v1": {
+        "termination": "unconfirmed",
+        "reason": "cancel"
+      }
+    }
+  }
+}

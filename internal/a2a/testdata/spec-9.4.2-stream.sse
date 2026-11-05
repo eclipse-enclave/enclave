@@ -1,0 +1,6 @@
+data: {"jsonrpc": "2.0", "id": 1, "result": {"task": {"id": "task-uuid", "status": {"state": "TASK_STATE_WORKING"}}}}
+
+data: {"jsonrpc": "2.0", "id": 1, "result": {"artifactUpdate": {"taskId": "task-uuid", "artifact": {"parts": [{"text": "# Climate Change Report\n\n"}]}}}}
+
+data: {"jsonrpc": "2.0", "id": 1, "result": {"statusUpdate": {"taskId": "task-uuid", "status": {"state": "TASK_STATE_COMPLETED"}}}}
+

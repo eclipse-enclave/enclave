@@ -1,0 +1,54 @@
+{
+  "name": "Research Assistant Agent",
+  "description": "AI agent for academic research and fact-checking",
+  "supportedInterfaces": [
+    {
+      "url": "https://research-agent.example.com/a2a/v1",
+      "protocolBinding": "HTTP+JSON",
+      "protocolVersion": "0.3"
+    }
+  ],
+  "capabilities": {
+    "streaming": false,
+    "pushNotifications": false,
+    "extensions": [
+      {
+        "uri": "https://standards.org/extensions/citations/v1",
+        "description": "Provides citation formatting and source verification",
+        "required": false
+      },
+      {
+        "uri": "https://example.com/extensions/geolocation/v1",
+        "description": "Location-based search capabilities",
+        "required": false
+      }
+    ]
+  },
+  "defaultInputModes": [
+    "text/plain"
+  ],
+  "defaultOutputModes": [
+    "text/plain"
+  ],
+  "skills": [
+    {
+      "id": "academic-research",
+      "name": "Academic Research Assistant",
+      "description": "Provides research assistance with citations and source verification",
+      "tags": [
+        "research",
+        "citations",
+        "academic"
+      ],
+      "examples": [
+        "Find peer-reviewed articles on climate change"
+      ],
+      "inputModes": [
+        "text/plain"
+      ],
+      "outputModes": [
+        "text/plain"
+      ]
+    }
+  ]
+}

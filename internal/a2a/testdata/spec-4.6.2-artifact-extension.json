@@ -1,0 +1,28 @@
+{
+  "artifactId": "research-summary-001",
+  "name": "Climate Change Summary",
+  "parts": [
+    {
+      "text": "Global temperatures have risen by 1.1°C since pre-industrial times, with significant impacts on weather patterns and sea levels."
+    }
+  ],
+  "extensions": [
+    "https://standards.org/extensions/citations/v1"
+  ],
+  "metadata": {
+    "https://standards.org/extensions/citations/v1": {
+      "sources": [
+        {
+          "title": "Global Temperature Anomalies - 2023 Report",
+          "authors": [
+            "Smith, J.",
+            "Johnson, M."
+          ],
+          "url": "https://climate.gov/reports/2023-temperature",
+          "accessDate": "2025-10-21",
+          "relevantText": "Global temperatures have risen by 1.1°C"
+        }
+      ]
+    }
+  }
+}

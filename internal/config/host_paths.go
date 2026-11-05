@@ -175,13 +175,13 @@ func HostProjectGeneratedConfigDir(home string, projectHash string, tool string)
 
 // HostStoreConfigRootDir is the host directory holding every config store key
 // for a tool within a project (the "default" store plus any ephemeral
-// session/worktree keys).
+// session keys).
 func HostStoreConfigRootDir(home string, tool string, projectHash string) string {
 	return filepath.Join(HostProjectToolDir(home, projectHash, tool), "config-store")
 }
 
 // HostStoreConfigDir is the host directory backing a tool's config store for a
-// project. The key is either "default" or a session/worktree suffix, mirroring
+// project. The key is either "default" or a session suffix, mirroring
 // the config-generated/<key> convention.
 func HostStoreConfigDir(home string, tool string, projectHash string, key string) string {
 	return filepath.Join(HostStoreConfigRootDir(home, tool, projectHash), key)

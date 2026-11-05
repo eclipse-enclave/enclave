@@ -24,24 +24,16 @@ func TestSessionMemoryMountFollowsConfigStoreKey(t *testing.T) {
 	for _, tc := range []struct {
 		name       string
 		run        model.RunOptions
-		worktree   bool
 		concurrent bool
 		wantKey    string
 	}{
 		{name: "default", wantKey: "default"},
 		{name: "named", run: model.RunOptions{SessionName: "review"}, wantKey: "review"},
 		{name: "background", run: model.RunOptions{Background: true, SessionName: "worker"}, wantKey: "worker"},
-		{name: "worktree", run: model.RunOptions{HostConfig: model.HostConfigPassthrough}, worktree: true},
 		{name: "concurrent", concurrent: true, wantKey: "2"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			project := model.Project{Dir: "/tmp/repo", RealDir: "/tmp/repo"}
-			project.Hash = projectPathHash(project)
-			if tc.worktree {
-				project.Dir = "/tmp/repo-feature"
-				project.RealDir = project.Dir
-				tc.wantKey = projectPathHash(project)
-			}
+			project := model.Project{Dir: "/tmp/repo", RealDir: "/tmp/repo", Hash: "abc123abc123"}
 			r := &Runtime{
 				host:          model.Host{Home: t.TempDir()},
 				project:       project,

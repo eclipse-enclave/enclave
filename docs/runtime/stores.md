@@ -17,8 +17,9 @@ how auth files are synchronized, and how CLI flags affect store behavior.
 
 The `<hash>` segment is a 12-character hex string derived from the project
 directory path, making per-project stores unique per project. The config store
-`<key>` is `default` for the persistent store or a session/worktree-specific
-suffix for isolated/ephemeral sessions.
+`<key>` is `default` for the persistent store or a session-specific suffix for
+named, concurrent, or ephemeral sessions. A linked git worktree is a separate
+project with its own `<hash>`.
 
 ## Config Store
 
@@ -29,7 +30,7 @@ at `$HOME/<ConfigDir>` inside the container.
 **Persistent mode** (default): The default foreground session uses
 the `config-store/default` directory. Additional concurrent sessions that would
 otherwise clobber the same writable config instead get a suffixed store keyed by
-session or worktree identity, while shared auth remains in the tool-global auth
+session identity, while shared auth remains in the tool-global auth
 store. Tool state such as conversation history, settings, and cached tokens
 persists between runs. A tool's `sandbox.statePaths` declares config-relative
 runtime state that must survive config-source overlays and stay out of host
@@ -61,9 +62,9 @@ launch. For `sandbox.settingsTarget`, it carries in-tool key edits forward by
 comparing the store file with a snapshot of the previous generated file and
 merging those edits into the current generated file. New patch or override
 edits win conflicts. Snapshots live outside the mounted store in
-`config-store-baselines/<key>`, follow the same per-project/worktree/session
-scope, and are cleaned up with their stores. Missing or malformed store files,
-or a missing snapshot, use the generated settings unchanged. Merging can drop
+`config-store-baselines/<key>`, follow the same per-project/session scope, and
+are cleaned up with their stores. Missing or malformed store files, or a missing
+snapshot, use the generated settings unchanged. Merging can drop
 comments and formatting from the tool's copy. A launch without an overlay
 invalidates any snapshot for that store key. The first overlay launch after
 upgrading from a version without snapshots also uses generated settings once;
@@ -83,17 +84,13 @@ lives under `~/.local/state/enclave/projects/<hash>/<tool>/memory/`:
 
 Session scope keeps each memory repository with the config-store database that
 coordinates its writers. Reusing a named session reuses its memory; changing the
-name starts with a separate store. Worktrees and concurrent-session suffixes
-also have separate stores. This deliberately favors writer isolation over
-sharing learned context. An ad-hoc concurrent store may never be reused and
-remains until cleanup.
+name starts with a separate store. Concurrent-session suffixes also have
+separate stores, and a linked worktree, being its own project, has its own. This
+deliberately favors writer isolation over sharing learned context. An ad-hoc
+concurrent store may never be reused and remains until cleanup.
 
 Because the key is the config-store key, memory follows the config store
-wherever it goes. In a linked worktree that means the key is `default` until the
-project has a config override or patch, and the worktree's own key afterwards:
-adding the first override moves the worktree's memory (and its conversation
-history) to a fresh store, so the agent starts over. Nothing is deleted. The
-previous store stays until cleanup.
+wherever it goes.
 
 Enabling `memoryScope` on a tool that already ran without one does not migrate
 anything. Memory the tool previously wrote inside its config store stays there,

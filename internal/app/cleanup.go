@@ -28,7 +28,7 @@ import (
 )
 
 // persistentConfigStoreKey is the config-store key for the persistent ("kept")
-// store; every other key denotes an ephemeral session/worktree store. It
+// store; every other key denotes an ephemeral session store. It
 // mirrors defaultStoreKey in internal/backend/docker.
 const persistentConfigStoreKey = "default"
 
@@ -129,8 +129,7 @@ func runCleanup(run model.RunOptions, cleanup model.CleanupOptions) int {
 			logx.Errorf("Failed to list containers: %v", containersErr)
 			return 1
 		}
-		// Ephemeral config stores are host directories keyed by a session or
-		// worktree suffix.
+		// Ephemeral config stores are host directories keyed by a session suffix.
 		storeDirs := resolveEphemeralStoreDirs(run, cleanup, home, project, scopes)
 		if cleanup.CleanupDryRun {
 			gatewayNames := stopExitedSessionGateways(run, cleanup, project, true)

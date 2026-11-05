@@ -16,69 +16,6 @@ import (
 	"enclave/internal/model"
 )
 
-func TestWorktreeConfigVolumeSuffixUsesSiblingWorktreeHashWhenConfigSourceIsActive(t *testing.T) {
-	t.Parallel()
-
-	mainProject := model.Project{RealDir: "/tmp/repo"}
-	mainHash := projectPathHash(mainProject)
-
-	r := &Runtime{
-		project: model.Project{
-			Dir:     "/tmp/repo-feature",
-			RealDir: "/tmp/repo-feature",
-			Hash:    mainHash,
-		},
-		profile: model.Profile{Name: "claude", ConfigDir: ".claude"},
-		run:     model.RunOptions{HostConfig: model.HostConfigPassthrough},
-	}
-
-	got := r.worktreeConfigVolumeSuffix()
-	want := projectPathHash(r.project)
-	if got != want {
-		t.Fatalf("worktreeConfigVolumeSuffix() = %q, want %q", got, want)
-	}
-}
-
-func TestWorktreeConfigVolumeSuffixSkipsMainWorktree(t *testing.T) {
-	t.Parallel()
-
-	project := model.Project{
-		Dir:     "/tmp/repo",
-		RealDir: "/tmp/repo",
-	}
-	project.Hash = projectPathHash(project)
-
-	r := &Runtime{
-		project: project,
-		profile: model.Profile{Name: "claude", ConfigDir: ".claude"},
-		run:     model.RunOptions{HostConfig: model.HostConfigPassthrough},
-	}
-
-	if got := r.worktreeConfigVolumeSuffix(); got != "" {
-		t.Fatalf("worktreeConfigVolumeSuffix() = %q, want empty suffix", got)
-	}
-}
-
-func TestWorktreeConfigVolumeSuffixSkipsWhenConfigSourceIsInactive(t *testing.T) {
-	t.Parallel()
-
-	mainProject := model.Project{RealDir: "/tmp/repo"}
-	mainHash := projectPathHash(mainProject)
-
-	r := &Runtime{
-		project: model.Project{
-			Dir:     "/tmp/repo-feature",
-			RealDir: "/tmp/repo-feature",
-			Hash:    mainHash,
-		},
-		profile: model.Profile{Name: "claude", ConfigDir: ".claude"},
-	}
-
-	if got := r.worktreeConfigVolumeSuffix(); got != "" {
-		t.Fatalf("worktreeConfigVolumeSuffix() = %q, want empty suffix", got)
-	}
-}
-
 func TestConfigSourceChownSpec(t *testing.T) {
 	t.Parallel()
 
@@ -105,40 +42,12 @@ func TestCurrentConfigVolumeSuffixUsesContainerSuffixForConcurrentUnnamedSession
 	}
 
 	r.backend = &fakeBackend{configKeyInUse: func(meta backend.SessionMeta, key string) (bool, error) {
-		return meta.Tool == "claude" && meta.ProjectHash == "abc123abc123" &&
-			meta.Worktree == "/tmp/repo" && key == defaultConfigKey, nil
+		return meta.Tool == "claude" && meta.ProjectHash == "abc123abc123" && key == defaultConfigKey, nil
 	}}
 
 	got := r.currentConfigVolumeSuffix("enclave-claude-abc123abc123-2", "enclave-claude-abc123abc123")
 	if got != "2" {
 		t.Fatalf("currentConfigVolumeSuffix() = %q, want %q", got, "2")
-	}
-}
-
-func TestCurrentConfigVolumeSuffixKeepsStableWorktreeKeyWhenOnlyOtherWorktreeIsRunning(t *testing.T) {
-	mainProject := model.Project{RealDir: "/tmp/repo"}
-	mainHash := projectPathHash(mainProject)
-
-	r := &Runtime{
-		project: model.Project{
-			Dir:     "/tmp/repo-feature",
-			RealDir: "/tmp/repo-feature",
-			Hash:    mainHash,
-		},
-		profile: model.Profile{Name: "claude", ConfigDir: ".claude"},
-		run:     model.RunOptions{HostConfig: model.HostConfigPassthrough, Persist: true},
-	}
-
-	// The only running session is on a different worktree, so its config key
-	// does not conflict with this worktree's stable key.
-	r.backend = &fakeBackend{configKeyInUse: func(meta backend.SessionMeta, key string) (bool, error) {
-		return meta.Worktree == "/tmp/repo" && key == defaultConfigKey, nil
-	}}
-
-	got := r.currentConfigVolumeSuffix("enclave-claude-"+mainHash+"-2", "enclave-claude-"+mainHash)
-	want := projectPathHash(r.project)
-	if got != want {
-		t.Fatalf("currentConfigVolumeSuffix() = %q, want %q", got, want)
 	}
 }
 
@@ -165,12 +74,12 @@ func TestGeneratedConfigSourceDirUsesConfigVolumeSuffix(t *testing.T) {
 		host:            model.Host{Home: "/tmp/home"},
 		project:         model.Project{Hash: "abc123abc123"},
 		profile:         model.Profile{Name: "claude"},
-		configVolSuffix: "worktreehash",
+		configVolSuffix: "review",
 		configVolReady:  true,
 	}
 
 	got := r.generatedConfigSourceDir()
-	want := filepath.Join(config.HostProjectGeneratedConfigDir("/tmp/home", "abc123abc123", "claude"), "worktreehash")
+	want := filepath.Join(config.HostProjectGeneratedConfigDir("/tmp/home", "abc123abc123", "claude"), "review")
 	if got != want {
 		t.Fatalf("generatedConfigSourceDir() = %q, want %q", got, want)
 	}

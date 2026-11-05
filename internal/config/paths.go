@@ -12,7 +12,6 @@ import (
 	"os"
 	"path/filepath"
 
-	gitutil "enclave/internal/git"
 	"enclave/internal/model"
 	"enclave/internal/util"
 )
@@ -119,47 +118,17 @@ func ResolveProjectFromDir(dir string) (model.Project, error) {
 		return model.Project{}, fmt.Errorf("resolve project dir %s: %w", realPath, err)
 	}
 
-	hashPath := resolveProjectHashPath(absPath)
-	projectHash := ProjectHashForPath(hashPath)
-
 	return model.Project{
 		Dir:     dir,
 		RealDir: absPath,
-		Hash:    projectHash,
+		Hash:    ProjectHashForPath(absPath),
 		Name:    filepath.Base(dir),
 	}, nil
 }
 
-// resolveProjectHashPath returns the canonical path used to derive the project
-// hash. For the main worktree (where `.git` is a directory) we fall back to
-// `git worktree list` so linked worktrees in the same repo share the main
-// worktree's hash. We refuse to consult that command when `.git` is a regular
-// file pointer, because the pointer is attacker-controlled in a fresh clone
-// and would otherwise let a malicious repo inherit another project's hash and
-// its persisted state (auth stores, generated config, skills overlays, ...).
+// ProjectHashForPath derives the project hash from the canonical directory path.
 func ProjectHashForPath(path string) string {
 	return model.ShortHash(util.HashString(path))
-}
-
-func resolveProjectHashPath(absPath string) string {
-	gitFile := filepath.Join(absPath, ".git")
-	info, err := os.Lstat(gitFile)
-	if err != nil || info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
-		return absPath
-	}
-
-	mainPath := gitutil.ResolveMainWorktree(absPath)
-
-	realMainPath, err := filepath.EvalSymlinks(mainPath)
-	if err != nil {
-		realMainPath = mainPath
-	}
-
-	canonicalMainPath, err := filepath.Abs(realMainPath)
-	if err != nil {
-		return absPath
-	}
-	return canonicalMainPath
 }
 
 func discoverAppRoot(readOnly bool) (string, error) {

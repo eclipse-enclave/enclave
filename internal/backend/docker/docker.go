@@ -864,8 +864,8 @@ func sessionRefName(ref backend.SessionRef) string {
 	return strings.TrimSpace(ref.ID)
 }
 
-// ConfigStoreKeyInUse reports whether a running session for the same tool,
-// project, and worktree already uses the given config-store key. The key is
+// ConfigStoreKeyInUse reports whether a running session for the same tool and
+// project already uses the given config-store key. The key is
 // tracked as a Docker label; sessions predating that label used the stable
 // key, which is what callers pass, so an unset label counts as a match.
 func (b *Backend) ConfigStoreKeyInUse(ctx context.Context, meta backend.SessionMeta, key string) (bool, error) {
@@ -881,10 +881,6 @@ func (b *Backend) ConfigStoreKeyInUse(ctx context.Context, meta backend.SessionM
 		return false, err
 	}
 	for _, summary := range containers {
-		worktree := strings.TrimSpace(summary.Labels[model.LabelWorktree])
-		if worktree != strings.TrimSpace(meta.Worktree) {
-			continue
-		}
 		existingKey := strings.TrimSpace(summary.Labels[model.LabelConfigKey])
 		if existingKey == "" {
 			existingKey = key

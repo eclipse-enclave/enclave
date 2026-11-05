@@ -1,0 +1,612 @@
+<!DOCTYPE html>
+<!--
+  Copyright (C) 2026 EclipseSource GmbH and others.
+
+  This program and the accompanying materials are made available under the
+  terms of the MIT License, which is available in the project root.
+
+  SPDX-License-Identifier: MIT
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Enclave: Agent-to-Agent (A2A) communication proposal</title>
+<script type="module">
+  import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+  mermaid.initialize({ startOnLoad: true, theme: "neutral" });
+</script>
+<style>
+  :root { --fg:#1f2328; --muted:#59636e; --line:#d0d7de; --bg:#fff; --code:#f6f8fa; --accent:#0969da; --warn:#9a6700; --warnbg:#fff8c5; }
+  @media (prefers-color-scheme: dark) {
+    :root { --fg:#e6edf3; --muted:#9198a1; --line:#3d444d; --bg:#0d1117; --code:#161b22; --accent:#4493f8; --warn:#d29922; --warnbg:#2a2000; }
+  }
+  html { font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; color: var(--fg); background: var(--bg); }
+  body { max-width: 900px; margin: 2rem auto; padding: 0 1.25rem; }
+  h1 { font-size: 1.8rem; margin: 0 0 .25rem; }
+  h2 { font-size: 1.35rem; margin-top: 2.4rem; border-bottom: 1px solid var(--line); padding-bottom: .3rem; }
+  h3 { font-size: 1.1rem; margin-top: 1.6rem; }
+  .meta { color: var(--muted); margin-bottom: 2rem; }
+  nav { border: 1px solid var(--line); border-radius: 6px; padding: .75rem 1.25rem; }
+  nav ol { margin: 0; padding-left: 1.25rem; columns: 2; }
+  nav a { text-decoration: none; color: var(--accent); }
+  code { font: .9em ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; background: var(--code); padding: .1em .35em; border-radius: 4px; }
+  pre { background: var(--code); padding: .9rem 1rem; border-radius: 6px; overflow-x: auto; }
+  pre code { background: none; padding: 0; }
+  table { border-collapse: collapse; width: 100%; margin: 1rem 0; }
+  th, td { border: 1px solid var(--line); padding: .45rem .7rem; text-align: left; vertical-align: top; }
+  th { background: var(--code); }
+  .note { border-left: 4px solid var(--accent); padding: .5rem 1rem; background: var(--code); border-radius: 0 6px 6px 0; margin: 1rem 0; }
+  .decision { border-left: 4px solid var(--warn); background: var(--warnbg); padding: .5rem 1rem; border-radius: 0 6px 6px 0; margin: 1rem 0; }
+  .mermaid { background: var(--code); border-radius: 6px; padding: 1rem; margin: 1rem 0; display: flex; justify-content: center; }
+  dt { font-weight: 600; margin-top: .6rem; }
+  dd { margin-left: 1.25rem; }
+  .status { display:inline-block; font-size:.75rem; padding:.1em .5em; border-radius:999px; border:1px solid var(--line); color: var(--muted); vertical-align: middle; }
+  .open { color: var(--warn); font-weight: 600; }
+</style>
+</head>
+<body>
+
+<h1>Agent-to-Agent communication for Enclave</h1>
+<p class="meta">Design proposal, draft 6, revision 1. November 2026. Branch <code>a2a</code>. Design contracts settled with Astra after four review rounds. <strong>Not yet called converged</strong>: the A2A spec pin includes a carrier check that can still force a design change, and prototypes P1 to P3 are evidence gates. <span class="status">contracts settled, gates open</span> <span class="status">one change request pending Astra</span></p>
+
+<div class="decision"><strong>Remaining gates.</strong>
+<ol>
+  <li><strong>Spec pin and carrier check</strong> (design-change gate): pin one tagged A2A release and confirm it has a legal carrier for every custom representation in <a href="#carriers">section 4</a>. A missing carrier is a design change, not an implementation detail.</li>
+  <li><strong>P1, P2, P3</strong> (evidence gates): listed in <a href="#scope">section 23</a>. They validate the contracts; they do not reopen them unless they fail.</li>
+  <li><strong>Bounds</strong>: numerical measurement during the prototypes (<a href="#bounds">section 17</a>).</li>
+  <li><strong>Change request CR-1, pending Astra</strong>: relax the Podman requirement from <code>isolate=strict</code> to "isolate option present" and add hub INPUT rules. Evidence and wording in <a href="#cr1">section 8</a>. Until accepted, the strict-only text stands.</li>
+</ol>
+</div>
+
+<nav>
+<strong>Contents</strong>
+<ol>
+  <li><a href="#goal">Goal and constraints</a></li>
+  <li><a href="#today">What enclave gives us today</a></li>
+  <li><a href="#rejected">Transports considered and rejected</a></li>
+  <li><a href="#protocol">The A2A protocol, spec pin and carrier check</a></li>
+  <li><a href="#topology">Topology: a hub on every member's bridge</a></li>
+  <li><a href="#hub">The hub: processes, snapshot publication, commit</a></li>
+  <li><a href="#identity">Identity: principal, generation, epoch, host principal</a></li>
+  <li><a href="#gateway">Gateway changes</a></li>
+  <li><a href="#adapter">In-container pieces</a></li>
+  <li><a href="#contexts">Contexts, handles, dedupe</a></li>
+  <li><a href="#flow">Request flow</a></li>
+  <li><a href="#termination">Task endings and termination status</a></li>
+  <li><a href="#departure">Liveness, departure, acknowledgments, quarantine</a></li>
+  <li><a href="#failclosed">Fail-closed semantics</a></li>
+  <li><a href="#lifecycle">Lifecycle: join, leave, teardown, recovery</a></li>
+  <li><a href="#retention">Retention, inventory, cleanup</a></li>
+  <li><a href="#bounds">Bounds</a></li>
+  <li><a href="#security">Security model</a></li>
+  <li><a href="#herdr">Herdr and terminal orchestration</a></li>
+  <li><a href="#cli">CLI and config surface</a></li>
+  <li><a href="#cost">Token cost and when to use it</a></li>
+  <li><a href="#deps">Dependencies</a></li>
+  <li><a href="#scope">Scope: prototypes, v1 and later</a></li>
+  <li><a href="#decisions">Decision log</a></li>
+</ol>
+</nav>
+
+<h2 id="goal">1. Goal and constraints</h2>
+<p>Let agents running in separate enclave sessions delegate work to each other, with the same isolation guarantees a single session has today. The interaction must be:</p>
+<ul>
+  <li><strong>Clean.</strong> A standard protocol, no file or git mailbox conventions, tool agnostic.</li>
+  <li><strong>Performant.</strong> Local HTTP, no polling, final results only in the model's context.</li>
+  <li><strong>Secure.</strong> No new host listeners, no shared network segment between peers, no host control capability inside a container, every message authenticated, authorized against host-provisioned identity, fail-closed on lost state, and audited.</li>
+  <li><strong>Composable with terminal orchestration.</strong> Herdr or tmux remain the human's control plane. Enclave gains no daemon.</li>
+</ul>
+
+<h2 id="today">2. What enclave gives us today</h2>
+<ul>
+  <li>Each session has its own labeled bridge network. In restricted mode the gateway sidecar is the attached endpoint and the tool container shares its network namespace. Unrestricted sessions (<code>--allow-all-network</code>) and the qemu backend have no gateway.</li>
+  <li>Session bridges are ordinary engine bridges, not internal networks: anything attached has a default route to the host gateway and from there to the internet. The gateway's own iptables rules are what restrict a session.</li>
+  <li>Restricted gateways set INPUT to DROP, admit loopback and established traffic, and accept each published port with a bare <code>--dport</code> rule on any interface (<code>gateway-entrypoint.sh</code>, <code>setup_input_firewall</code>). The same function runs for ip6tables, whose INPUT and OUTPUT policies are DROP. Egress is an ipset allowlist plus a NAT REDIRECT of ports 80 and 443 into the transparent proxy.</li>
+  <li>The gateway entrypoint stays resident as a root supervisor and reinstalls rules on SIGHUP, which <code>network apply</code> sends through the engine after rewriting the config bundle. The bundle is per project and tool (<code>HostProjectGatewayConfigDir</code>), shared by every session of that pair; session-specific values such as published ports reach the gateway through its environment, which cannot change after start.</li>
+  <li>Tool containers run with engine default capabilities (NET_RAW included on Docker); the gateway adds NET_ADMIN and NET_RAW.</li>
+  <li>Network teardown waits only for the session's own containers and treats any other endpoint as foreign (<code>sessionOwnsEndpoints</code>); garbage collection requires zero attached containers.</li>
+  <li>Podman networks are created with <code>isolate=strict</code>; older netavark falls back to <code>isolate=true</code> with a warning. Docker user bridges are isolated by the engine.</li>
+  <li>Named background sessions: <code>enclave --background --name worker-1</code>, with <code>ps --json</code>, <code>attach</code>, <code>exec</code> and <code>stop</code>. A foreground session's enclave process stays attached until the container exits. There is no daemon run mode. Cross-process locks live under <code>~/.local/state/enclave/locks/</code>.</li>
+  <li>Persistent stores are host directories bind-mounted into containers, so the host can read a worker's store without the container running.</li>
+  <li>Tool config is injected through templates and patches, which is the path for adding an MCP server entry to a harness.</li>
+  <li>The docs state that container-to-container access is not a compatibility contract. A2A is therefore a new, explicit channel.</li>
+</ul>
+
+<h2 id="rejected">3. Transports considered and rejected</h2>
+<table>
+<thead><tr><th>Option</th><th>Why not</th></tr></thead>
+<tbody>
+<tr><td><strong>Shared directory mailbox</strong> via <code>--add-dir</code></td><td>Polling, no streaming, bespoke protocol. Rejected by the maintainer.</td></tr>
+<tr><td><strong>Git worktrees and branches</strong> as the message bus</td><td>Robust but slow and not a conversation. Rejected by the maintainer.</td></tr>
+<tr><td><strong>Host loopback hop</strong> (<code>-p 127.0.0.1:0:PORT</code> on one side, <code>--bridge-port</code> on the other)</td><td>Works for a demo without code changes and needs one bridge per pair without webhooks. The objection is the host side: a host listener per worker, and on Linux the host service must listen on the engine bridge IP with firewall rules.</td></tr>
+<tr><td><strong>Terminal scraping</strong> through the Herdr or tmux socket</td><td>Lossy, and the socket is a host control plane. Never mount it into a container.</td></tr>
+<tr><td><strong>Shared peer network</strong>, all members on one bridge</td><td>Exposes every member's published ports to every peer, because the existing INPUT rules are not interface or source scoped, and a worker with NET_RAW can ARP-spoof the hub. Scoped IP rules do not fix the spoofing. <strong>Not a fallback</strong>: an engine that fails P1 is unsupported for <code>--peer-group</code>.</td></tr>
+<tr><td><strong>Supervised host daemon</strong> for prompt departure detection</td><td>Enclave has no daemon mode by design. Departure is detected promptly where a host process already exists and as a bounded suspicion otherwise; see <a href="#departure">departure</a>.</td></tr>
+<tr><td><strong>Hub recreation</strong> on membership change</td><td>Would end every task in the group on each join. The hub reloads a revisioned snapshot instead.</td></tr>
+</tbody>
+</table>
+
+<h2 id="protocol">4. The A2A protocol, spec pin and carrier check</h2>
+<p>A2A (Agent2Agent, originally from Google, now a Linux Foundation project) is the open protocol for agents delegating work to agents.</p>
+<div class="decision"><strong>Gate:</strong> no Go type is written before one tagged A2A release is pinned here, with version and spec URL. We speak the <strong>JSON-RPC binding only</strong>. Every method name, the agent card path, the task state list and the message and artifact shapes below must be validated against the pinned document. The names here are from memory of the 0.3 binding and the spec has moved since. <span class="open">Pinned version: open.</span></div>
+<dl>
+  <dt>Agent card</dt><dd>JSON document under <code>/.well-known/</code>: name, description, skills, service URL, capabilities and security schemes. Cards served by the hub carry hub-facing URLs only (<code>a2a.enclave:&lt;port&gt;/peers/&lt;name&gt;</code>).</dd>
+  <dt>JSON-RPC 2.0 over HTTP</dt><dd>Send (request and response), stream (Server-Sent Events), get task, cancel task, resubscribe.</dd>
+  <dt>Task and context IDs</dt><dd><strong>Issued by the worker adapter</strong>, as a normal A2A server, and persisted there. The hub translates nothing; it reads responses to cache ownership keyed by worker name and ID. Every request names its target worker, so IDs cannot collide across workers.</dd>
+  <dt>Task state machine</dt><dd>Submitted, working, completed, canceled, failed, rejected. Input-required and auth-required are not emitted in v1. No state is invented; see <a href="#termination">task endings</a>.</dd>
+  <dt>Messages and artifacts</dt><dd>v1 accepts text parts only. Results arrive as artifacts.</dd>
+  <dt>Push notifications</dt><dd>Deferred. When added, the webhook URL points at the hub, which workers already reach over their egress rule.</dd>
+</dl>
+<h3 id="carriers">Custom representations requiring a carrier in the pinned spec</h3>
+<table>
+<thead><tr><th>Representation</th><th>Set by</th><th>Expected carrier</th></tr></thead>
+<tbody>
+<tr><td>Termination status (confirmed, unconfirmed, not-applicable)</td><td>Adapter only</td><td>Task or status metadata</td></tr>
+<tr><td>Structured ending reason (cancel, deadline, hub-lost, epoch-changed, orchestrator-lost, outcome-unknown)</td><td>Adapter only</td><td>Task or status metadata</td></tr>
+<tr><td>Queue depth and queue position</td><td>Adapter</td><td>Card extension area; task metadata</td></tr>
+<tr><td>Client message ID and retry flag</td><td>Client</td><td>Message ID field plus message metadata</td></tr>
+<tr><td>Hub delivery error (adapter unreachable, unknown member, revoked)</td><td>Hub</td><td>JSON-RPC error object, never a task state</td></tr>
+<tr><td>Principal and provenance</td><td>Hub (principal), adapter (provenance)</td><td>Message metadata plus the text prefix</td></tr>
+</tbody>
+</table>
+<p>If the pinned version lacks a legal carrier for any row, the design changes before implementation. <span class="open">Carrier check: open.</span></p>
+<p>A2A is strictly client and server per task. That maps onto exclusive roles: the orchestrator is the client, workers are servers.</p>
+
+<h2 id="topology">5. Topology: a hub on every member's bridge</h2>
+<p>One enclave-managed <strong>hub</strong> container per peer group. The hub has no network of its own. It is connected to each member's existing session bridge as an additional endpoint at join, with a <strong>static address</strong> assigned by the host inside that bridge's subnet, and disconnected at leave. Members never share a network segment.</p>
+
+<pre class="mermaid">
+flowchart LR
+  subgraph n1[session bridge: orchestrator]
+    direction LR
+    T1[tool container<br/>harness + a2a client MCP] --- G1[gateway]
+  end
+  subgraph n2[session bridge: worker-1]
+    direction LR
+    T2[tool container<br/>a2a server adapter + headless harness] --- G2[gateway]
+  end
+  subgraph n3[session bridge: worker-2]
+    direction LR
+    T3[tool container<br/>a2a server adapter + headless harness] --- G3[gateway]
+  end
+  H[(a2a hub, one per group<br/>root supervisor + unprivileged proxy<br/>revisioned snapshot · audit)]
+  G1 --- H
+  G2 --- H
+  G3 --- H
+</pre>
+
+<ul>
+  <li><strong>No shared segment.</strong> Existing published-port INPUT rules stay unreachable to peers. ARP spoofing between members is impossible.</li>
+  <li><strong>One policy and audit point</strong> per group.</li>
+  <li><strong>Two scoped rules per member</strong> in the gateway, one NAT exemption, one DNS record.</li>
+  <li><strong>No host listener.</strong></li>
+  <li><strong>Group isolation by topology.</strong> Two groups are two hubs; tokens are per group and per member.</li>
+  <li><strong>Static hub addresses</strong> survive a hub container restart, so gateway overlays stay valid.</li>
+</ul>
+<div class="note"><strong>Gate P1:</strong> a multi-homed container under rootless Podman with netavark <code>isolate=strict</code> and under Docker, with the evidence list in <a href="#scope">scope</a>. No fallback topology exists.</div>
+
+<h3>Conversation-set isolation</h3>
+<ul>
+  <li><strong>Between groups:</strong> separate hub, separate attachments, separate tokens.</li>
+  <li><strong>Within a group:</strong> conversations are context IDs, each its own harness session in the worker. Tasks in one context share that transcript by design; two contexts never share one. All contexts of a worker share its container state (project mount, config store, memory, shell history), exactly as consecutive runs in one session do today.</li>
+  <li><strong>Same project in several groups:</strong> isolated on the network and token level; per-project stores and the worktree are enclave's existing model. See the <a href="#hub">worktree guard</a>.</li>
+  <li><strong>Audit and names</strong> are per group. Session names are unique within a group.</li>
+</ul>
+
+<h2 id="hub">6. The hub: processes, snapshot publication, commit</h2>
+<p>A small Go service built on the gateway base image, one instance per group. It is <strong>stateless beyond the host-published snapshot</strong>: membership, identity and credentials come from the host, task bookkeeping is an ephemeral cache, and all durable state lives in workers or on the host.</p>
+
+<h3>Processes and restrictions</h3>
+<ul>
+  <li><strong>Root supervisor</strong>, the gateway's own pattern: installs OUTPUT rules admitting only the adapter endpoints in the committed snapshot, INPUT rules admitting only each member's gateway address on that bridge's interface to the hub port (policy DROP otherwise), disables forwarding, and reloads on signal. Takes no input from the proxy. The INPUT rules are hygiene under <code>strict</code> and the required control under <code>isolate=true</code> (CR-1).</li>
+  <li><strong>Unprivileged proxy</strong>, non-root, no capabilities, read-only rootfs, no-new-privileges, started by the supervisor. Cannot modify the snapshot.</li>
+  <li>No engine socket. Mounts: the snapshot directory read-only, a status directory for the two status files, and the audit log path.</li>
+  <li>Proxy targets are member names resolved from the committed snapshot, never addresses, URLs or commands from a request. The hub is not a general proxy.</li>
+  <li>Blast radius of a compromised proxy: send tasks to and read results from every worker in its group, using the outbound tokens it holds. Nothing else. A compromised supervisor is a gateway-equivalent container on each member bridge, bounded by the gateways' own INPUT rules. <span class="open">Verification is part of P1.</span></li>
+</ul>
+
+<h3>Revisioned snapshot publication</h3>
+<ul>
+  <li>The host publishes a <strong>snapshot per revision</strong>: a directory named by the revision number under the group's snapshot root, containing the <strong>membership file</strong> (members, roles, member generations, canonical project paths, mount modes, adapter endpoints, hub addresses, hashes of inbound session-to-hub tokens), the <strong>secrets file</strong> (outbound hub-to-worker tokens, owned and readable by the proxy uid only), and a <strong>manifest</strong> listing both files with content hashes and the revision.</li>
+  <li>The group's snapshot root is mounted into the hub as a <strong>directory, never individual files</strong>, so new snapshot directories become visible without inode pinning. Activation is an atomic rename of a <code>current</code> symlink inside the root.</li>
+  <li>Supervisor and proxy load only through <code>current</code>, verify both files against the manifest hashes, and refuse a snapshot whose files disagree with the manifest or carry different revisions. A reader that observes a mixed or corrupt snapshot <strong>keeps its last committed revision</strong> and reports the error and the rejected revision in its status file.</li>
+  <li>Each reader writes its applied revision to its own <strong>status file</strong>. The host treats a publication as <strong>committed only when both status files show the new revision</strong> within the ack timeout. A SIGHUP or any other signal is a nudge, never an acknowledgment.</li>
+  <li>Readers cache nothing across restart; on start they load <code>current</code>, verify, and write status. Retention of old snapshot directories is bounded; the host removes them after commit of a newer one.</li>
+  <li>Keeping the last committed revision on a bad update is deliberately <strong>not</strong> relied on for removals: a removal that fails to commit falls back to the engine-level disconnect described in <a href="#lifecycle">lifecycle</a>, which cuts connectivity regardless of rules.</li>
+</ul>
+
+<h3>Responsibilities</h3>
+<dl>
+  <dt>Registry</dt><dd>Served from the committed snapshot: each member's card and a group listing. The only user-provided field is the card description, which is data, not identity.</dd>
+  <dt>Policy</dt><dd>Roles are exclusive and host-declared: the one orchestrator sends, workers respond. Workers cannot initiate and cannot address each other. A session is a member of exactly one group.</dd>
+  <dt>Proxy</dt><dd>Forwards JSON-RPC to the named worker with SSE passthrough and no buffering. Strips any identity-bearing header, authenticates the inbound token against the snapshot hash, and forwards with that worker's outbound token from the secrets file plus the authenticated principal. Bodies and IDs are never rewritten. Responses are read to cache ownership; the cache is advisory and an absent entry means "forward and let the worker decide".</dd>
+  <dt>Orchestrator liveness</dt><dd>Holds the authenticated liveness connection from the orchestrator's client; see <a href="#departure">departure</a>. Worker connections never establish orchestrator liveness.</dd>
+  <dt>Delivery errors</dt><dd>When a worker is unreachable, unknown to the snapshot, or its principal is revoked, the hub returns a <strong>JSON-RPC delivery error</strong>. The hub never emits an A2A task state; outcomes are adapter-authoritative.</dd>
+  <dt>Worktree guard</dt><dd>At join, the host compares the new member's host-canonical project path and mount mode with existing members. Two writable members on one path are refused, the orchestrator included; any other overlap warns. Documented v1 limits: bind-mount aliases, nested additional directories, shared git metadata between linked worktrees, and overlap across groups are not detected.</dd>
+  <dt>Audit</dt><dd>JSONL, status-only by default: timestamp, principal, target, group, method, task ID, context ID, outcome code, termination status, snapshot revision. Error entries carry codes and reasons, never excerpts of message text, metadata or the provenance line. Content is logged only with explicit <code>--a2a-log=full</code>.</dd>
+</dl>
+
+<h3>Addressing and transport</h3>
+<p>Each member reaches the hub as <code>a2a.enclave</code>, resolved by its own gateway's dnsmasq to the hub's static address on that member's bridge. The hub listens on IPv4 on a port outside 80 and 443. <strong>Transport is plaintext HTTP in v1, an explicitly accepted risk</strong>: traffic and bearer tokens are readable by root on the host and by anything that gains the gateway's or the hub's network namespace. This is not claimed to be equivalent to any confidentiality the gateway provides elsewhere. TLS is deferred; reusing the gateway CA is one option to evaluate against a dedicated A2A CA or pinned identities, and nothing is selected until trust roots, key issuance, rotation, identity and cross-gateway boundaries are specified.</p>
+
+<h2 id="identity">7. Identity: principal, generation, epoch, host principal</h2>
+<table>
+<thead><tr><th>Term</th><th>Assigned</th><th>Carried in</th><th>Changes when</th></tr></thead>
+<tbody>
+<tr><td><strong>Principal</strong></td><td>By the host at join</td><td>Both tokens; forwarded by the hub on every request</td><td>Never for a given join</td></tr>
+<tr><td><strong>Member generation</strong></td><td>By the host at join, per member</td><td>Principal, tokens, context handles, task handles, bindings, dedupe records, admission-stop and quarantine records, cleanup inventory</td><td>The member leaves and a session with the same name joins again (orchestrator replacement included)</td></tr>
+<tr><td><strong>Hub execution epoch</strong></td><td>By the hub at start</td><td>Control connection handshake, audit entries, the hub's advisory cache</td><td>Hub restart. Never part of a handle.</td></tr>
+<tr><td><strong>Group generation</strong></td><td>By the host when a group is first created</td><td>Snapshot manifest, group record, cleanup inventory, host principal</td><td>A group name is reused after full teardown</td></tr>
+</tbody>
+</table>
+<ul>
+  <li>Principal = group, member name, role, member generation. Two unique tokens per member and direction, inbound session-to-hub and outbound hub-to-session, issued at join; the inbound token is revoked at leave or departure, the outbound token at worker leave or group stop. Never shared between workers.</li>
+  <li><strong>Hub authorization</strong> is a routing check: exclusive roles, owner match from the advisory cache when present.</li>
+  <li><strong>Worker authorization is authoritative.</strong> The adapter binds every task and context to group, worker, principal and member generation. A replacement orchestrator has a new generation and cannot resume or read existing contexts by default; explicit inheritance is a later feature.</li>
+  <li><strong>Handles are locators, not authorization.</strong> A task handle is worker name, task ID and member generation; a context handle is worker name, context ID, member generation and a random part. Presenting a handle authorizes nothing; the presented credential's principal must match the binding. Handles are independent of the hub epoch, so hub restart invalidates none.</li>
+  <li><strong>Provenance</strong> derives from the authenticated principal, never from request content: message metadata plus one fixed-format line prefixed to the prompt text (bracketed header, fixed field order, no prose, then a blank line), because the harness only sees text. A small shipped skill explains the header. Exact tokens are settled with the first adapter.</li>
+  <li><strong>Reconciliation</strong> from engine labels and host records is performed by the enclave CLI, never by the hub.</li>
+</ul>
+
+<h3>Host principal</h3>
+<ul>
+  <li>One <strong>stable host principal per group</strong>, provisioned at group creation with its own member generation, recorded in the group record and in every snapshot. Its generation changes only with the group generation, so it cannot inherit across group reuse.</li>
+  <li>Every <code>enclave a2a</code> invocation that acts as the host principal receives a <strong>short-lived, single-invocation credential</strong> issued by the host under the group lock, representing the host principal, valid for a bounded lifetime and revoked when the invocation ends or the lifetime elapses, whichever comes first. The credential's hash is published in the snapshot for the proxy to verify; its removal is a snapshot revision.</li>
+  <li>Adapters bind tasks and contexts created through such a credential to the <strong>host principal and its generation</strong>, never to the invocation. A later invocation with a fresh credential may query, cancel or retry a detached task because it presents the same principal and generation.</li>
+  <li>The host principal has <strong>no liveness</strong>. Its tasks run to their deadlines. A blocking host send returns the final message; a detached host send returns a handle and the work continues to its deadline.</li>
+</ul>
+
+<h2 id="gateway">8. Gateway changes</h2>
+<ul>
+  <li><strong>Hub attachment.</strong> Connected to the session bridge at join with a static address and disconnected at leave by the host. Teardown and GC learn to disconnect an enclave-labeled hub endpoint instead of treating it as foreign.</li>
+  <li><strong>Session-local overlay file.</strong> Hub address, port and the <code>a2a.enclave</code> record are written to a per-session file in a directory mounted read-only into the gateway and re-read on reload. Not environment variables, which cannot change on a running gateway, and never the per-project bundle, which a reload would clobber for other sessions.</li>
+  <li><strong>INPUT (filter):</strong> <code>-i &lt;bridge if&gt; -s &lt;hub address&gt; -p tcp --dport &lt;adapter port&gt; -j ACCEPT</code>.</li>
+  <li><strong>OUTPUT (filter):</strong> accept <code>-d &lt;hub address&gt; -p tcp --dport &lt;hub port&gt;</code>.</li>
+  <li><strong>OUTPUT (nat):</strong> explicit RETURN for the hub address before the REDIRECT rules, even though the hub port is outside 80 and 443.</li>
+  <li><strong>IPv6 guarantee:</strong> adapter and hub listen on IPv4 only, and the existing ip6tables INPUT and OUTPUT DROP policies receive no A2A exception. Link-local addresses exist on every interface; this rule is what makes them irrelevant, not IPAM configuration.</li>
+  <li><strong>Restricted mode only.</strong> <code>--peer-group</code> is rejected with <code>--allow-all-network</code> and with the qemu backend.</li>
+  <li><strong>Podman support matrix (current decision).</strong> Supported with netavark <code>isolate=strict</code> only. On the <code>isolate=true</code> fallback, <code>--peer-group</code> is rejected with a message naming the required netavark version.</li>
+</ul>
+<div class="decision" id="cr1"><strong>CR-1 (pending Astra): isolate option present instead of strict only.</strong>
+<p>Measured on Ubuntu 24.04, podman 4.9.3 rootless, netavark 1.4.0 (no strict), two <code>isolate=true</code> bridges, a multi-homed hub, and a bystander on a non-isolated bridge: members cannot reach each other in either direction; the hub reaches each member only over that member's bridge; a member reaches the hub only at the hub's address on its own bridge; routing through the hub is blocked. A non-isolated bystander <em>can</em> reach member bridges and the hub address; that is the only thing <code>strict</code> adds, in both directions.</p>
+<p>Inbound bystander traffic to a member is already dropped by the gateway INPUT policy, which is the documented posture of the existing fallback. Outbound member traffic is governed by the gateway OUTPUT allowlist. Inbound bystander traffic to the hub is not covered by draft 6 and would be closed by <strong>hub INPUT rules</strong>: the supervisor admits, per bridge interface, only that member's gateway address to the hub port, everything else dropped. With that rule the properties A2A relies on hold without <code>strict</code>.</p>
+<p>Proposed decision: <code>--peer-group</code> requires a netavark that accepts the <code>isolate</code> option (<code>true</code> or <code>strict</code>); <code>strict</code> is used when available, as today; the hub installs the INPUT rules unconditionally. P1-P must reproduce the matrix under both values. Full data in <code>prototypes.md</code>.</p>
+</div>
+<div class="note">A later hardening step can remove the gateway INPUT rule by having the adapter open an outbound connection to the hub and multiplexing requests back over it. Not in v1.</div>
+
+<h2 id="adapter">9. In-container pieces</h2>
+<p>One Go binary with two modes, baked into the tool image like the other runtime assets.</p>
+
+<h3>Server adapter (worker side)</h3>
+<ul>
+  <li>Listens on the adapter port on IPv4, serves the agent card, accepts send and stream. Rejects any request lacking this worker's outbound token or carrying a principal of an unknown member generation.</li>
+  <li>Keeps an authenticated control connection to the hub, over which the hub presents its epoch. Used for streaming and for detecting hub loss. It never establishes orchestrator liveness.</li>
+  <li>Turns each message into a <strong>headless harness invocation</strong>. Each context ID maps to one harness session; follow-up turns use the harness's resume mechanism. Cheap in principle; confirmed by P2.</li>
+  <li>Owns the persisted <strong>context table</strong> under a fixed subdirectory of the worker's config store on the host: contexts, bindings, harness session IDs, last activity, task records with state and termination, queued task IDs, tombstones, dedupe records, per-principal admission-stop flags, quarantine state. This is the durable record; the hub has none. The host reads it directly from the filesystem for <code>ps</code> and reconcile.</li>
+  <li>Returns the worker's final assistant message only, never the event stream or tool calls. Streams task status and artifact events toward the hub for the UI and audit. Terminal results are retained in the table for later fetch.</li>
+  <li><strong>Tasks are serialized per worker.</strong> The harness runs in its own process group; the adapter confirms termination of every descendant before dequeuing the next task. Queue depth is advertised in the card.</li>
+  <li><strong>Cancel</strong> leaves the worktree untouched. The orchestrator can ask in the next turn of the same context what state was left.</li>
+  <li><strong>No <code>input-required</code>.</strong> A headless run answers and exits. A worker that needs a decision ends its turn with the question; the orchestrator answers with the next message in the same context.</li>
+  <li>The tool's <code>spec.yaml</code> declares the invocation: command template, resume argument, event format. Tools without it cannot run in serve mode and report that clearly.</li>
+  <li>A worker runs in <strong>serve mode</strong>: the adapter is the session's main process. <code>enclave attach</code> shows its log.</li>
+</ul>
+
+<h3>Client (orchestrator side)</h3>
+<ul>
+  <li>Exposed to the interactive agent as a stdio <strong>MCP server</strong> with tools <code>list_peers</code>, <code>send_task</code>, <code>get_task</code>, <code>cancel_task</code>.</li>
+  <li>Holds the authenticated <strong>orchestrator liveness connection</strong> to the hub for as long as the client process runs.</li>
+  <li><strong><code>send_task</code> blocks</strong> up to a wait bound and returns the final message on a terminal state. When the bound elapses it returns a task handle with the <em>actual</em> current state: submitted with queue position, or working. The task continues; <code>get_task</code> retrieves it. A wait timeout is never a cancellation.</li>
+  <li><strong>Explicit retries only.</strong> Each send carries a client message ID. A send is a retry only when flagged as one; the client preserves the message ID and retry flag across its own reconnects. Unflagged sends are new tasks.</li>
+  <li><strong>No streaming tool.</strong> Expectation, confirmed by P3 for model-context visibility only: MCP progress notifications do not enter the model context in Claude Code, and a streamed tool result would put the worker's output into the orchestrator's context a second time. P3 makes no claims about billing, caching or token accounting.</li>
+  <li>Wired into the harness via the existing config template and patch mechanism. A plain CLI fallback for tools without MCP.</li>
+</ul>
+
+<h2 id="contexts">10. Contexts, handles, dedupe</h2>
+<ul>
+  <li><strong>Create versus resume.</strong> A send without a context ID creates a context; the worker issues the handle. A send with a context ID must match a live binding on that worker for the same principal and generation. Unknown IDs are rejected; expired IDs answer "expired" from a tombstone; a handle issued by another worker is unknown by construction. The hub never routes by context, since every request names its worker.</li>
+  <li><strong>Dedupe at the worker.</strong> Lookup by principal, member generation and client message ID, without needing a context ID. Admission is persisted in the context table <em>before</em> execution starts, and the record binds the message ID to the request content; a reuse with different content is rejected. A flagged retry whose original is known returns its outcome or attaches to it in flight, <strong>including after a hub restart</strong>, because the record is in the worker. A flagged retry whose original is evicted or from another generation is rejected as ambiguous, never replayed.</li>
+  <li><strong>Epoch independence.</strong> Task and context lookups go to the worker by handle; the hub's cache is advisory. A fresh hub forwards queries it has never seen and the worker's binding decides. Absent cache never means allow and never means deny.</li>
+  <li><strong>Tombstones and records are bounded</strong> by count and age (see <a href="#bounds">bounds</a>); eviction of a dedupe record turns a later flagged retry into an ambiguous rejection, which is the intended fail-closed result.</li>
+</ul>
+
+<h2 id="flow">11. Request flow</h2>
+<pre class="mermaid">
+sequenceDiagram
+  participant O as orchestrator harness
+  participant C as a2a client (MCP)
+  participant H as hub proxy
+  participant A as worker adapter
+  participant W as worker harness (headless)
+  Note over C,H: authenticated liveness connection held by C
+  O->>C: send_task with peer, text, wait bound, message ID
+  C->>H: JSON-RPC send or stream, inbound orchestrator token
+  H->>H: verify token against snapshot hash, strip identity headers, check role
+  H->>A: forward unchanged with worker outbound token and principal
+  A->>A: dedupe lookup, persist admission, bind to principal and generation, issue IDs
+  A->>W: spawn headless run in process group, resume by context
+  W-->>A: event stream
+  A-->>H: SSE events, terminal state with termination status
+  H->>H: cache owner by worker and task ID, status-only audit
+  H-->>C: SSE passthrough, or JSON-RPC delivery error if A is unreachable
+  C-->>O: final message, or handle with actual state when wait elapses
+</pre>
+
+<h2 id="termination">12. Task endings and termination status</h2>
+<p>Outcomes are <strong>adapter-authoritative</strong>. The hub never emits an A2A terminal state; when it cannot reach the adapter it returns a delivery error and the task keeps the adapter's last reported state. A terminal state never by itself implies the work stopped; the adapter sets a separate <strong>termination</strong> field, which the hub forwards and never infers.</p>
+<table>
+<thead><tr><th>Event</th><th>A2A state</th><th>Structured reason</th><th>Termination</th></tr></thead>
+<tbody>
+<tr><td>Explicit cancel, process group killed and confirmed</td><td>canceled</td><td>cancel</td><td>confirmed</td></tr>
+<tr><td>Explicit cancel, kill not confirmed within the bound</td><td>failed</td><td>cancel, outcome unknown</td><td>unconfirmed; worker quarantined</td></tr>
+<tr><td>Caller wait timeout</td><td>unchanged (submitted or working)</td><td>none; handle returned</td><td>not applicable</td></tr>
+<tr><td>Execution deadline reached, killed and confirmed</td><td>failed</td><td>deadline</td><td>confirmed</td></tr>
+<tr><td>Reconnect window elapsed at the adapter, killed and confirmed</td><td>failed</td><td>hub-lost</td><td>confirmed</td></tr>
+<tr><td>Hub cannot reach the adapter</td><td>unchanged at the adapter; hub returns a delivery error</td><td>delivery error: adapter unreachable</td><td>not set by the hub; resolved by adapter reconnect or host reconcile</td></tr>
+<tr><td>Hub epoch changed while running or queued</td><td>failed</td><td>epoch-changed</td><td>confirmed by the adapter, or unconfirmed and quarantined; not applicable for queued</td></tr>
+<tr><td>Queued task discarded on suspected or confirmed orchestrator departure</td><td>failed</td><td>orchestrator-lost</td><td>not applicable (never ran)</td></tr>
+<tr><td>Running task terminated on authoritative orchestrator departure</td><td>failed</td><td>orchestrator-lost</td><td>confirmed, or unconfirmed and quarantined</td></tr>
+<tr><td>Adapter restarted with a surviving subprocess</td><td>failed</td><td>outcome unknown</td><td>confirmed after the kill, else unconfirmed and quarantined</td></tr>
+</tbody>
+</table>
+<p>"Outcome unknown" is represented as the standard failed state plus the structured reason and the termination field. No A2A state is invented. A task is never reported as canceled or retry-safe unless termination is confirmed.</p>
+
+<h2 id="departure">13. Liveness, departure, acknowledgments, quarantine</h2>
+<ul>
+  <li><strong>Liveness source.</strong> Only the authenticated orchestrator-to-hub connection held by the client establishes orchestrator liveness. Worker connections prove nothing about the orchestrator. The host principal has no liveness.</li>
+  <li><strong>Prompt detection</strong> where a host process exists: a foreground orchestrator's enclave process observes container exit and initiates authoritative departure. Abrupt loss of that enclave process (for example <code>kill -9</code>) removes the observer and falls back to the bounded path.</li>
+  <li><strong>Bounded detection</strong> otherwise (background orchestrators, lost observer): liveness connection absent past the reconnect window means <strong>suspected departure</strong>.</li>
+  <li><strong>On suspected departure</strong>, each adapter persists an admission-stop flag for that principal, stops dequeuing for it, fails its queued tasks with reason orchestrator-lost, and lets running work continue only to its existing execution deadline. A later reconnect does not silently undo this: admission resumes only after a host reconcile confirms the orchestrator is alive and its generation unchanged.</li>
+  <li><strong>Authoritative departure</strong> is a host-observed session stop or removal. The host revokes the inbound token by snapshot revision (proxy ack closes that principal's streams), then requires from <strong>every worker</strong> an acknowledgment carrying three facts: the admission-stop flag for that principal is persisted; queued work for that principal is discarded and recorded as failed with reason orchestrator-lost; running work for that principal is terminated, with the termination field set by the adapter.</li>
+  <li><strong>Completion.</strong> The departure is reported complete only when every worker has acknowledged with termination confirmed. A worker that cannot be reached, or reports unconfirmed termination, yields a <strong>degraded</strong> result: the host records a durable reconciliation obligation in the group record, the worker is quarantined, and the departure is <strong>never reported as a successful cancellation</strong>. Reconcile retries the acknowledgments until all are confirmed.</li>
+  <li><strong>Connectivity fallback.</strong> Supervisor and proxy acks prove access revocation only. The engine-level disconnect of the hub attachment cuts connectivity when revocation cannot commit; it satisfies none of the three worker facts.</li>
+  <li><strong>Quarantine.</strong> A worker that cannot confirm termination accepts no new tasks, records the quarantine in its context table, is reported in <code>ps</code>, and is released only by a host reconcile that confirms no descendant survives. Revocation, admission stop and quarantine are durable in the worker's table and the group record; they survive hub restart and are never cleared by reconnection.</li>
+  <li>This is a stated v1 limit: an unattended background orchestrator's exit is seen within the reconnect window as a suspicion, and confirmed at the next host lifecycle command or <code>enclave a2a reconcile</code>.</li>
+</ul>
+
+<h2 id="failclosed">14. Fail-closed semantics</h2>
+<p>Reconciliation compares member generations and snapshot revisions; anything from an unknown generation or an uncommitted revision is rejected.</p>
+<table>
+<thead><tr><th>Loss</th><th>Behavior</th></tr></thead>
+<tbody>
+<tr><td>Hub restarts (new epoch)</td><td>Adapters observe the new epoch on the control handshake and end old-epoch running and queued tasks per the <a href="#termination">table</a>. Contexts, bindings, dedupe records, task records and handles are generation-bound in workers and remain valid; the fresh hub forwards and workers decide. Authenticated reconnect that preserves tasks across epochs is a later refinement.</td></tr>
+<tr><td>Transient transport loss between adapter and hub</td><td>Not a departure. The task continues unobserved within the reconnect window; an authenticated reconnect to the same epoch resumes reporting. Past the window the adapter kills and records hub-lost.</td></tr>
+<tr><td>Orchestrator departure, suspected or authoritative</td><td>See <a href="#departure">departure</a>.</td></tr>
+<tr><td>Terminal detach, MCP client restart, caller wait timeout</td><td>Never a cancellation. The task is reachable by its handle; the client's liveness connection is re-established on restart within the window.</td></tr>
+<tr><td>Snapshot publication fails to commit</td><td>For additions: the join fails and is rolled back. For removals: engine-level disconnect and degraded report; the obligation stays in the group record.</td></tr>
+<tr><td>Lost execution state (adapter restart with a surviving subprocess)</td><td>Resume and replay are rejected; the surviving process group is killed and termination confirmed before any conflicting work starts; the outcome is reported unknown.</td></tr>
+<tr><td>Lost context ownership (binding record missing)</td><td>Resume is refused even when the transcript exists.</td></tr>
+<tr><td>Lost or evicted dedupe record</td><td>A flagged retry is rejected as ambiguous.</td></tr>
+<tr><td>Worker session stopped</td><td>Running task shows a delivery error at the hub; its record in the worker's table is what reconcile reads; contexts follow <a href="#retention">retention</a>.</td></tr>
+</tbody>
+</table>
+
+<h2 id="lifecycle">15. Lifecycle: join, leave, teardown, recovery</h2>
+<h3>Join (host, under the group lock)</h3>
+<ol>
+  <li>Create or load the group record and group generation; on first creation provision the host principal.</li>
+  <li><strong>Write the cleanup inventory entry</strong> for the new member (store path, member generation, group generation) before anything else, so a crash at any later step leaves something to delete.</li>
+  <li>Provision principal, member generation and both tokens; run the worktree guard.</li>
+  <li>Start the hub if absent; assign a static hub address on the session bridge and connect.</li>
+  <li>Write the session-local gateway overlay and reload the gateway.</li>
+  <li>Publish snapshot revision N+1 (membership, secrets, manifest), swap <code>current</code>, and wait for supervisor and proxy acks of N+1. No ack within the timeout: roll back every step above, including the inventory entry, and fail the join.</li>
+  <li>Start the session with its token and adapter configuration.</li>
+</ol>
+<h3>Leave (host, under the group lock)</h3>
+<ol>
+  <li>Record leave intent in the group record.</li>
+  <li>Publish a snapshot without the member: inbound token hash removed, and for a worker its outbound token removed. Wait for the proxy ack (streams for that principal closed, token refused) and the supervisor ack (deny rules applied, conntrack entries for the endpoint flushed).</li>
+  <li>For an orchestrator or host-initiated departure: collect the three-fact worker acknowledgments from every worker (<a href="#departure">departure</a>).</li>
+  <li>Disconnect the hub from the member's bridge. If step 2 did not commit, this step runs immediately as the connectivity fallback and the leave is reported degraded.</li>
+  <li>Remove the gateway overlay; stop the hub if it was the last member.</li>
+  <li>Mark the inventory entry eligible for deletion at group teardown; retain it until deletion succeeds.</li>
+</ol>
+<ul>
+  <li><strong>Teardown</strong> disconnects the hub before removing the session network; the foreign-endpoint rule is amended to recognize enclave-labeled hub endpoints as owned.</li>
+  <li><strong>Reconciliation</strong> runs on every session start, stop, <code>cleanup --ephemeral</code> and <code>enclave a2a reconcile</code>: hubs attached to bridges whose session is gone are disconnected; hubs with zero members are removed; stale attachments past the existing grace period are cleaned like stale networks; uncommitted snapshot revisions are re-published or rolled back; pending departure obligations are retried; quarantined workers are checked and released when no descendant survives; suspected departures are confirmed or cleared; pending cleanup inventory entries are retried.</li>
+  <li><strong>Hub lifetime:</strong> first member joins to last member's session container removed. A stopped background worker keeps its network and therefore keeps the hub alive.</li>
+  <li><strong>Stopping the orchestrator</strong> is authoritative departure for its principal, leaves background workers up, and prints the member list with the stop command. <code>enclave stop --peer-group &lt;name&gt;</code> stops every member and the hub. No interactive prompt in the stop path.</li>
+</ul>
+
+<h2 id="retention">16. Retention, inventory, cleanup</h2>
+<p>TTL is <strong>context expiration</strong>, not guaranteed data erasure. Three kinds of state are distinguished:</p>
+<table>
+<thead><tr><th>State</th><th>Owner</th><th>Expires</th><th>Erased</th></tr></thead>
+<tbody>
+<tr><td>Hub cache (owners, retained terminal summaries, streams) and snapshot directories</td><td>Hub, in memory per epoch; host for snapshots</td><td>Retention bound, hub restart; old snapshots after a newer commit</td><td>With the hub; by the host</td></tr>
+<tr><td>Context table: bindings, task records, dedupe records, tombstones, admission-stop flags, quarantine state, A2A-owned harness transcripts</td><td>Worker adapter, in a fixed subdirectory of the worker's config store on the host</td><td>Idle TTL measured by the adapter from last activity, which is updated at enqueue. <strong>A context with queued or running tasks never expires.</strong> Expiry unbinds, leaves a bounded tombstone, and deletes the transcript as housekeeping. Admission-stop and quarantine records never expire; only host reconcile clears them</td><td>At group teardown by the host, from the cleanup inventory</td></tr>
+<tr><td>Shared memory, config store, shell history</td><td>Existing per-project stores</td><td>Never by A2A</td><td>Only by the existing cleanup command. Shared across all contexts of a worker and across runs; stated as a caveat in the docs</td></tr>
+</tbody>
+</table>
+<ul>
+  <li><strong>Cleanup inventory.</strong> A host-written record per group under the state directory lists every member's A2A store path with member and group generation. It is written <strong>before admission</strong>, retained until deletion of each entry succeeds, survives worker departure, container removal and hub restart, and is scoped to the group generation so a reused group name or store never causes deletion of another generation's data.</li>
+  <li><strong>Group record.</strong> Host-written: group generation, host principal, members and generations, current committed snapshot revision, pending departure obligations, host-confirmed departures and releases.</li>
+</ul>
+
+<h2 id="bounds">17. Bounds</h2>
+<p>Defaults are placeholders until the prototypes produce numbers. All are options following the usual definition mechanism.</p>
+<table>
+<thead><tr><th>Bound</th><th>Placeholder default</th><th>Status</th></tr></thead>
+<tbody>
+<tr><td>Queue depth per worker</td><td>8</td><td><span class="open">open</span></td></tr>
+<tr><td>Task execution deadline</td><td>30 min</td><td><span class="open">open</span></td></tr>
+<tr><td>Blocking send wait (MCP and host)</td><td>10 min, then handle</td><td><span class="open">open, P3</span></td></tr>
+<tr><td>Request size (text parts)</td><td>1 MiB</td><td><span class="open">open</span></td></tr>
+<tr><td>Result size</td><td>256 KiB, truncated with marker</td><td><span class="open">open</span></td></tr>
+<tr><td>Retained terminal summaries per worker (hub cache)</td><td>100</td><td><span class="open">open</span></td></tr>
+<tr><td>Dedupe records, task records and tombstones per worker</td><td>1000 or 7 days, whichever first</td><td><span class="open">open</span></td></tr>
+<tr><td>Reconnect window (adapter to hub, and orchestrator liveness)</td><td>60 s</td><td><span class="open">open, P1/P2</span></td></tr>
+<tr><td>Snapshot commit ack timeout</td><td>10 s</td><td><span class="open">open, P1</span></td></tr>
+<tr><td>Worker departure acknowledgment timeout</td><td>30 s, then degraded</td><td><span class="open">open, P2</span></td></tr>
+<tr><td>Host invocation credential lifetime</td><td>15 min or invocation end</td><td><span class="open">open</span></td></tr>
+<tr><td><code>ps</code> record staleness bound</td><td>5 min, then unknown</td><td><span class="open">open</span></td></tr>
+<tr><td>Context idle TTL</td><td>24 h</td><td>decided</td></tr>
+<tr><td>Termination confirmation timeout before quarantine</td><td>10 s, then SIGKILL, then 10 s</td><td><span class="open">open, P2</span></td></tr>
+</tbody>
+</table>
+
+<h2 id="security">18. Security model</h2>
+<table>
+<thead><tr><th>Concern</th><th>Handling</th></tr></thead>
+<tbody>
+<tr><td>Authentication</td><td>Two unique tokens per member and direction, host-issued at join. Inbound hashes in the membership file; outbound tokens in the proxy-only secrets file; both published per revision. Member generation checked on every request.</td></tr>
+<tr><td>Identity</td><td>Host-provisioned principal; inbound identity headers stripped; provenance from the authenticated principal only; handles are locators.</td></tr>
+<tr><td>Authorization</td><td>Group membership is topology. Hub checks roles and an advisory cache for routing; the worker's binding of tasks and contexts to principal and generation is authoritative.</td></tr>
+<tr><td>Reachability</td><td>No host listener. No shared segment. One scoped INPUT, one scoped OUTPUT and one NAT exemption per member. IPv6 blocked by existing DROP policies.</td></tr>
+<tr><td>Hub compromise</td><td>Unprivileged proxy with name-based targets only; root supervisor fed solely by the committed snapshot; hub INPUT limited to member gateway addresses; mixed or corrupt snapshots refused; revocation by revision with conntrack flush; engine disconnect as connectivity fallback; no engine access.</td></tr>
+<tr><td>Transport</td><td>Plaintext HTTP in v1, accepted risk as stated in <a href="#hub">the hub</a>. TLS deferred with the CA choice open.</td></tr>
+<tr><td>Fail-closed</td><td>Generation and revision reconciliation; lost state rejects resume, replay and ambiguous retries; unknown outcomes reported as unknown with termination unconfirmed; quarantine and departure obligations durable until host confirmation.</td></tr>
+<tr><td>Capability discipline</td><td>Containers hold <em>message</em> capabilities only. Spawning, attaching and host commands stay on the host.</td></tr>
+<tr><td>Audit</td><td>Status-only by default; codes not content; content only with explicit <code>--a2a-log=full</code>.</td></tr>
+<tr><td>Prompt injection</td><td>Same risk on every transport. Mitigated by provenance from authenticated identity, workers never initiating, and the shipped skill.</td></tr>
+<tr><td>Secrets</td><td>Tokens never recorded in session provenance (<code>AffectsSession</code> rules apply). Membership file carries hashes; the secrets file is readable by the proxy uid only; invocation credentials are bounded and single-use.</td></tr>
+<tr><td>Egress</td><td>Unchanged except the hub rule. The allowlist and proxy govern everything else.</td></tr>
+</tbody>
+</table>
+
+<h2 id="herdr">19. Herdr and terminal orchestration</h2>
+<p>Herdr stays the <strong>human's</strong> control plane; A2A is the <strong>agents'</strong> control plane.</p>
+<ul>
+  <li>One Herdr pane per session: <code>enclave --peer-group review --role worker --name worker-1</code>. Herdr's idle and done detection keeps working for interactive sessions.</li>
+  <li>The orchestrator runs interactively in its own pane with the MCP client, which doubles as its liveness connection. Worker output streams in the worker panes.</li>
+  <li>Host-side verbs run through engine exec into the hub or workers, the mechanism policy reload already uses. No host listener.</li>
+  <li>Spawning workers from inside a sandbox is a control capability and stays out of the hub.</li>
+</ul>
+
+<h2 id="cli">20. CLI and config surface</h2>
+<table>
+<thead><tr><th>Option</th><th>Meaning</th></tr></thead>
+<tbody>
+<tr><td><code>--peer-group &lt;name&gt;</code></td><td>Join the session to a peer group under the group lock. Config key <code>peer_group</code>. Rejected with <code>--allow-all-network</code>, the qemu backend, and Podman without strict isolation (without any isolate option once CR-1 is accepted).</td></tr>
+<tr><td><code>--role orchestrator|worker</code></td><td>Role within the group, exclusive. Default <code>worker</code>. Workers start in serve mode. One orchestrator per group.</td></tr>
+<tr><td><code>--a2a-description &lt;text&gt;</code></td><td>Agent card description for this session. Data, not identity.</td></tr>
+<tr><td><code>--a2a-log coarse|full</code></td><td>Audit granularity. <code>coarse</code> is status-only.</td></tr>
+<tr><td><code>--a2a-context-ttl &lt;duration&gt;</code></td><td>Idle expiry for worker contexts. Default 24h.</td></tr>
+<tr><td>Bound options</td><td>One option per row of the <a href="#bounds">bounds table</a>, names to follow the existing conventions.</td></tr>
+<tr><td><code>enclave a2a peers [--json]</code></td><td>List members, cards, and per-member status read from the worker tables and the group record.</td></tr>
+<tr><td><code>enclave a2a log</code></td><td>Read the group audit log.</td></tr>
+<tr><td><code>enclave a2a send &lt;peer&gt; &lt;text&gt; [--detach]</code></td><td>Act as the host principal under a single-invocation credential. Blocking by default; <code>--detach</code> returns a handle and the task runs to its deadline.</td></tr>
+<tr><td><code>enclave a2a task get|cancel|retry &lt;handle&gt;</code></td><td>Host-principal operations on a detached task under a fresh invocation credential; authorized by principal and generation, not by the handle.</td></tr>
+<tr><td><code>enclave a2a reconcile [--peer-group &lt;name&gt;]</code></td><td>Run reconciliation on demand: re-publish or roll back uncommitted revisions, retry departure obligations, release quarantine, retry cleanup inventory.</td></tr>
+<tr><td><code>enclave stop --peer-group &lt;name&gt;</code></td><td>Stop every member and the hub, collecting departure acknowledgments.</td></tr>
+<tr><td><code>enclave ps --json</code></td><td>Gains an <code>a2a</code> object per session; see below. Integration contract; ships with the schema update.</td></tr>
+</tbody>
+</table>
+<h3><code>ps --json</code> a2a object</h3>
+<p>Fields: <code>group</code>, <code>groupGeneration</code>, <code>role</code>, <code>generation</code>, <code>port</code>, <code>hub</code>, <code>snapshotRevision</code>, <code>quarantine</code>, <code>admissionStop</code>, <code>departure</code>. The last three are <strong>tri-state strings</strong> <code>yes</code>, <code>no</code>, <code>unknown</code>, each paired with a <code>…At</code> timestamp and a <code>…Source</code> of <code>worker-table</code> or <code>group-record</code>. The authoritative source is the worker's context table read directly from the host filesystem; the group record supplies host-confirmed departures and obligations. A record older than the staleness bound reads as <code>unknown</code>. Never <code>no</code> by default; absence of data is <code>unknown</code>.</p>
+<p>Tool extension <code>spec.yaml</code> gains an <code>a2a</code> block: headless command template, resume argument, event format. Agent card skills come from the tool spec only in v1.</p>
+
+<h2 id="cost">21. Token cost and when to use it</h2>
+<table>
+<thead><tr><th>Cost</th><th>Orchestrator</th><th>Worker</th></tr></thead>
+<tbody>
+<tr><td>Protocol framing</td><td>Zero, envelopes never reach a model</td><td>Zero</td></tr>
+<tr><td>MCP tool definitions</td><td>A few hundred tokens once per session</td><td>None</td></tr>
+<tr><td>Provenance prefix</td><td>None</td><td>Roughly 20 to 30 tokens per message</td></tr>
+<tr><td>Task text and result</td><td>Once each, like a subagent prompt and report</td><td>Once each</td></tr>
+<tr><td>Fresh context</td><td>None</td><td>Full harness system prompt per context ID</td></tr>
+</tbody>
+</table>
+<p>This is subagent parity minus forking: a worker can never inherit the orchestrator's context prefix, so everything it needs is serialized into the task text. The blocking send, final-message-only result and serialized workers keep the orchestrator's context from growing more than that. These are context-size observations; billing and caching are provider behavior and not claimed here. A2A across enclaves is an isolation and composition tool, not a token saver. It pays off where subagents' sharing is wrong: least privilege per role, different repositories or trust levels, different harnesses or images, long-lived warm workers, per-worker observability, and later cross-host groups. Fan-out of short tasks in one repository stays with subagents and forks.</p>
+
+<h2 id="deps">22. Dependencies</h2>
+<ul>
+  <li><strong>Protocol layer:</strong> JSON-RPC 2.0, HTTP, SSE. Go standard library.</li>
+  <li><strong>A2A Go SDK:</strong> not used. Hand-written subset validated against the pinned spec, in <code>internal/a2a</code>.</li>
+  <li><strong>Hub image:</strong> gateway base image and build pipeline, including the supervisor pattern.</li>
+  <li><strong>In-container binary:</strong> a second Go entry point, built like the gateway binary and copied into the tool image.</li>
+</ul>
+
+<h2 id="scope">23. Scope: prototypes, v1 and later</h2>
+<h3>Prototypes (evidence gates)</h3>
+<ol>
+  <li><strong>P1, topology, hub and gateway.</strong> On rootless Podman with strict isolation and on Docker: a multi-homed hub reaches each gateway's adapter port and nothing else; members cannot reach each other directly or via the hub except through hub-mediated A2A; existing published ports stay unreachable to peers; hub egress to the internet and host is blocked; IPv6 and link-local traffic is dropped; DNS record and NAT exemption work and survive a policy reload; the session-local overlay survives reload; <strong>snapshot swap is visible to supervisor and proxy on both engines, both ack the same revision, a mixed or corrupt snapshot is refused and the last committed revision retained with status reported</strong>; removal under active traffic kills existing connections (conntrack); an invalid update followed by engine disconnect cuts connectivity; hub container restart keeps static addresses and reloads <code>current</code>; token revocation by revision closes existing streams; join, leave, failed join with rollback, concurrent stop, crash and stale-attachment recovery behave as in <a href="#lifecycle">lifecycle</a>; unattended background orchestrator exit yields suspected departure within the window; verified supervisor and proxy capability and mount restrictions, including secrets file readability; <strong>hub INPUT rules block a non-isolated bystander under <code>isolate=true</code> and the full matrix holds under both isolate values</strong> (CR-1).</li>
+  <li><strong>P2, harness and adapter.</strong> Claude Code headless with resume by context; dedupe admission and cleanup inventory persisted before execution and a crash between them leaves a deletable entry and no orphan task; cancellation kills the process group and every descendant with confirmed termination; an escaped descendant yields quarantine; adapter restart with a surviving subprocess yields outcome unknown; hub epoch change ends running and queued old-epoch tasks; admission-stop, quarantine and departure obligations persist across adapter and hub restart; <strong>three-fact departure acknowledgments are produced, a missing ack yields degraded with a durable obligation, and reconcile completes it later</strong>; active and queued contexts never expire; teardown deletes from the inventory after members have disappeared and never touches another generation's store.</li>
+  <li><strong>P3, client.</strong> A blocking MCP call over a multi-minute task in Claude Code: progress notification visibility; wait timeout returning a handle with actual state including queued; reconnect after client restart with retry identity preserved; flagged retry after hub restart returns the known outcome; flagged retry after record eviction rejected as ambiguous; a handle presented under a foreign generation rejected; host-principal detached send, then get, cancel and retry under fresh invocation credentials; confirmation that nothing streams into the model context.</li>
+</ol>
+<h3>v1</h3>
+<ol>
+  <li>Hub per group: root supervisor and unprivileged proxy fed by the revisioned snapshot with manifest verification and status acks, name-based proxy with SSE passthrough and principal forwarding, delivery errors, orchestrator liveness, status-only audit, advisory cache, stateless restart with epoch.</li>
+  <li>Gateway: hub attachment with static address, session-local overlay file, scoped INPUT and OUTPUT rules, NAT exemption, DNS record, restricted mode and strict-Podman only.</li>
+  <li>Host lifecycle: group record, group generation and host principal, group lock, inventory-first join with rollback, revisioned leave with proxy, supervisor and worker acknowledgments and engine-disconnect fallback, teardown disconnect, reconciliation on start, stop, cleanup and on demand, invocation credentials.</li>
+  <li>Adapter in serve mode for <strong>Claude Code only</strong>, text parts only, persisted context table with principal and generation binding, worker-issued IDs, dedupe, tombstones, admission-stop and quarantine records, departure acknowledgments, serialized tasks in process groups, confirmed termination, adapter-authoritative outcomes, cancel without revert, no input-required, idle TTL with active exclusion.</li>
+  <li>MCP client with four tools, liveness connection, blocking send with handle, explicit retries, CLI fallback.</li>
+  <li>Options and verbs from the CLI table, bounds as options, <code>ps --json</code> tri-state object.</li>
+  <li>Shipped provenance skill.</li>
+  <li>Docs: networking, cli-reference, configuration, ARCHITECTURE diagrams, retention and departure caveats.</li>
+</ol>
+<h3>Later</h3>
+<ul>
+  <li>TLS between gateway and hub, after the CA and identity questions are specified.</li>
+  <li>Authenticated worker reconnect preserving tasks across hub epochs.</li>
+  <li>Explicit context inheritance for a replacement orchestrator.</li>
+  <li>Push notifications terminating at the hub.</li>
+  <li>Adapters for Codex, OpenCode, Pi.</li>
+  <li>Several orchestrators per group; nested groups.</li>
+  <li>Reverse-tunnel mode removing the INPUT rule.</li>
+  <li>Parallel read-only tasks per worker; cancel with revert.</li>
+  <li>Feature-contributed card skills; file and data parts.</li>
+  <li>Host-side external peers over a published loopback port, under explicit opt-in.</li>
+</ul>
+
+<h2 id="decisions">24. Decision log</h2>
+<table>
+<thead><tr><th>Question</th><th>Decision</th><th>Why</th></tr></thead>
+<tbody>
+<tr><td>Hub per host, project or group</td><td>Per group</td><td>Isolation by topology, not hub policy.</td></tr>
+<tr><td>Shared group bridge or hub on each member's bridge</td><td>Hub on each member's bridge with static addresses; no fallback topology</td><td>Existing INPUT rules are not interface scoped; scoped IP rules do not stop ARP spoofing. An engine that fails P1 is unsupported.</td></tr>
+<tr><td>Hub inbound</td><td>Supervisor INPUT rules admit only member gateway addresses per interface</td><td>Closes bystander access to the hub regardless of netavark version; hygiene under strict.</td></tr>
+<tr><td>Hub egress and membership changes</td><td>Root supervisor and unprivileged proxy reload a host-published snapshot; never hub recreation</td><td>Session bridges are not internal networks; capabilities dropped once cannot follow membership; recreation would end every task on each join.</td></tr>
+<tr><td>Snapshot publication</td><td>Revision-named directory with membership, secrets and manifest hashes; directory mount; atomic <code>current</code> symlink swap; readers verify same revision and hashes, refuse mixed or corrupt snapshots, retain last committed revision and report status; host commit requires supervisor and proxy acks of the same revision</td><td>Two independent file replacements are not one coherent revision; single-file bind mounts pin inodes; a signal is not an acknowledgment.</td></tr>
+<tr><td>Outbound credentials</td><td>Secrets file readable by the proxy uid only, published with the membership file in the same revision; rotated at worker join, revoked at worker leave or group stop; re-read on restart, never cached</td><td>The proxy needs real outbound tokens; the membership file holds inbound hashes only.</td></tr>
+<tr><td>Removal commit</td><td>Retained-last-revision is not relied on for removals; an uncommitted removal triggers engine-level disconnect and a degraded report</td><td>Keeping old rules on a bad update is fail-open for removal.</td></tr>
+<tr><td>Join ordering</td><td>Cleanup inventory entry first, then provisioning, attachment, overlay, snapshot commit, session start; rollback on any failure</td><td>A crash mid-join must leave something to delete and nothing admitted.</td></tr>
+<tr><td>Leave ordering</td><td>Intent, snapshot revision with proxy and supervisor acks, worker three-fact acks for departures, engine disconnect, overlay removal, inventory retained until deletion</td><td>Access revocation and task termination are different facts with different witnesses.</td></tr>
+<tr><td>Departure completion</td><td>Complete only with every worker's confirmed-termination ack; otherwise degraded, durable obligation, quarantine, never a successful cancellation; engine disconnect is connectivity fallback only</td><td>Supervisor and proxy acks prove revocation, not termination.</td></tr>
+<tr><td>Gateway overlay delivery</td><td>Session-local file in a read-only directory, re-read on reload</td><td>Environment cannot change on a running gateway; the bundle is shared per project and tool.</td></tr>
+<tr><td>Task and context IDs</td><td>Issued and persisted by the worker; hub reads, never rewrites</td><td>Translation contradicted unchanged bodies and SSE passthrough; explicit peer naming makes IDs unambiguous.</td></tr>
+<tr><td>Handles</td><td>Worker name, ID and member generation; locators only; epoch-independent; hub cache advisory; absent cache means forward, never allow or deny</td><td>The worker persists everything a handle needs; epoch-bound handles would break on every hub restart.</td></tr>
+<tr><td>Task outcomes</td><td>Adapter-authoritative; hub emits delivery errors, never task states</td><td>A proxy-authored terminal state could contradict the worker's later report.</td></tr>
+<tr><td>Context routing and recovery</td><td>None at the hub; worker-issued verifiable handles; create only without ID; resume only against a live binding; tombstones for expired</td><td>Every request names its worker; the worker owns the binding.</td></tr>
+<tr><td>Dedupe</td><td>At the worker, by principal, generation and client message ID; admission persisted before execution; content-bound; explicit retries only; known originals honored across hub restart; evicted or foreign-generation retries rejected</td><td>Hub retention is bounded and ephemeral; replay is the failure to avoid.</td></tr>
+<tr><td>Generation versus epoch</td><td>Member generation keys all durable state and handles; hub epoch only in handshake, audit and cache; group generation scopes cleanup and the host principal</td><td>Hub restart must not invalidate contexts; replacement must not inherit; reused names must not delete other data.</td></tr>
+<tr><td>Host principal</td><td>One stable host principal per group and generation; bounded single-invocation credentials represent it; detached query, cancel and retry under fresh credentials; handle is a locator; no liveness</td><td>Per-invocation principals could not recover detached work; a handle must not be bearer authorization.</td></tr>
+<tr><td>Where authorization lives</td><td>Hub routes; worker binding to principal and generation is authoritative</td><td>A stateless hub moves authorization, it does not remove it.</td></tr>
+<tr><td>Identity</td><td>Host-provisioned principal; two unique tokens per member; inbound identity headers stripped</td><td>Identity must not come from request content or shared tokens.</td></tr>
+<tr><td>Orchestrator replacement</td><td>New generation; no context inheritance by default</td><td>Name reuse must not grant access to earlier conversations.</td></tr>
+<tr><td>Hub restart</td><td>Old-epoch running and queued tasks ended by adapters; all generation-bound state survives; fresh hub forwards</td><td>Simplest fail-closed behavior; reconnect-preserve is later.</td></tr>
+<tr><td>Liveness source</td><td>Authenticated orchestrator-to-hub connection held by the client only; host principal has none</td><td>Worker connections prove nothing about the orchestrator; nothing enforceable attaches to a short-lived host invocation.</td></tr>
+<tr><td>Departure detection</td><td>Prompt via the foreground enclave process; bounded suspicion otherwise; no daemon</td><td>Enclave has no daemon mode by design; stated v1 limit.</td></tr>
+<tr><td>Suspected departure effect</td><td>Persist admission stop; fail queued tasks; running work to its deadline; reconnect never silently restores; host reconcile releases</td><td>A pause state is what a reconnect could silently undo; failing is cheap for a live orchestrator.</td></tr>
+<tr><td>Durable restrictions</td><td>Admission stop, quarantine and obligations live in the worker table and the group record, never in the hub</td><td>Hub state is ephemeral; restrictions must survive restart.</td></tr>
+<tr><td>Cancel completion</td><td>Only on adapter-acknowledged confirmed termination; otherwise quarantine until host reconcile</td><td>Connection loss is not proof of termination.</td></tr>
+<tr><td>Task endings</td><td>Four events named; termination field set by the adapter only; unknown outcome rides failed with a structured reason; hub-side unreachability is a delivery error</td><td>A terminal state must not imply the work stopped; no invented A2A state.</td></tr>
+<tr><td><code>ps --json</code> status</td><td>Tri-state strings with timestamp and source; worker table authoritative, read from the host filesystem; stale reads as unknown; never no by default</td><td>Booleans cannot express unavailable data.</td></tr>
+<tr><td>Transport</td><td>Plaintext HTTP in v1 as an explicitly accepted risk; TLS deferred with CA choice open</td><td>Not claimed equivalent to any other confidentiality; CA trust and rotation unspecified.</td></tr>
+<tr><td>Spec version and carriers</td><td>Pin one tagged release before the first type; JSON-RPC only; every custom representation needs a legal carrier or the design changes</td><td>Names in drafts were from memory of 0.3; custom fields must not be smuggled.</td></tr>
+<tr><td>Streaming to the model</td><td>No streaming tool; blocking send with handle carrying actual state</td><td>Expected MCP semantics, confirmed by P3 for context visibility only.</td></tr>
+<tr><td>IPv6</td><td>IPv4-only listeners plus existing ip6tables DROP policies</td><td>IPAM settings do not disable link-local.</td></tr>
+<tr><td>Podman</td><td>Strict isolation only; reject otherwise. <strong>CR-1 pending:</strong> isolate option present suffices with hub INPUT rules</td><td>Measured: <code>isolate=true</code> already blocks member-to-member; strict only adds bystander isolation, which gateway INPUT and hub INPUT rules cover.</td></tr>
+<tr><td>Lifecycle ownership</td><td>Host CLI under a group lock; teardown disconnects the hub; reconcile on every lifecycle command and on demand</td><td>Existing teardown treats extra endpoints as foreign.</td></tr>
+<tr><td>Cleanup inventory</td><td>Host-written before admission, retained until deletion succeeds, scoped by member and group generation</td><td>Deletion must not depend on a live hub or worker and must not hit reused stores.</td></tr>
+<tr><td>Retention</td><td>TTL is expiration, not erasure; three state kinds; active and queued contexts never expire; restrictions never expire; bounded tombstones</td><td>Mappings, transcripts and shared stores have different owners.</td></tr>
+<tr><td>Transcript sharing</td><td>Tasks in one context share it; contexts never do</td><td>Corrected wording.</td></tr>
+<tr><td>Worker continuity</td><td>One harness session per context ID</td><td>The client decides what belongs together.</td></tr>
+<tr><td>Concurrency per worker</td><td>Serialized; process groups; confirmed termination before next task</td><td>One container, one project mount.</td></tr>
+<tr><td>Cancel effect</td><td>Kill, keep context, leave worktree untouched</td><td>Reverting is destructive; the orchestrator can ask.</td></tr>
+<tr><td>input-required</td><td>Omitted in v1</td><td>A headless run cannot pause.</td></tr>
+<tr><td>Worktree guard</td><td>Host-canonical paths and modes; refuse two writable members including the orchestrator; warn otherwise; limits documented</td><td>Cheap check with host data; not a guarantee.</td></tr>
+<tr><td>Audit</td><td>Status-only by default; codes not content</td><td>Content only on explicit opt-in.</td></tr>
+<tr><td>Orchestrators per group</td><td>One in v1</td><td>Shared worker state leaks between orchestrators regardless of ownership.</td></tr>
+<tr><td>Nesting</td><td>None in v1</td><td>Contradicted single-group membership.</td></tr>
+<tr><td>Unrestricted sessions</td><td>Rejected with <code>--peer-group</code></td><td>No gateway to attach to.</td></tr>
+<tr><td>Host-side send and departure signaling</td><td>Engine exec into hub or workers</td><td>Same mechanism as policy reload; works when the hub is down.</td></tr>
+<tr><td>Provenance</td><td>From authenticated principal; metadata plus one fixed-format line and a shipped skill</td><td>The harness only sees text.</td></tr>
+<tr><td>Teardown with mixed members</td><td>Workers stay up; <code>stop --peer-group</code> for the bulk case</td><td>A warm worker is what the user paid for.</td></tr>
+<tr><td>Agent card skills</td><td>Tool spec only in v1</td><td>One source to validate first.</td></tr>
+<tr><td>Bounds</td><td>Placeholders until prototypes produce numbers</td><td>Numbers, not design.</td></tr>
+</tbody>
+</table>
+
+</body>
+</html>

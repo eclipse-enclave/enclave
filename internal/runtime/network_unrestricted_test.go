@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"enclave/internal/backend"
@@ -81,5 +82,45 @@ func TestUnrestrictedGatewayUsesRestrictedAllowlistBuildInput(t *testing.T) {
 	}
 	if unrestricted.network.Egress.AllowlistPath != restricted.network.Egress.AllowlistPath {
 		t.Fatalf("unrestricted allowlist path = %q, want %q", unrestricted.network.Egress.AllowlistPath, restricted.network.Egress.AllowlistPath)
+	}
+}
+
+// The gateway proxy listens on its ports in the namespace the session shares,
+// so a published container port of the proxy cannot reach the session. A
+// session with a gateway refuses it; a session without one can publish it.
+func TestPublishedProxyPortRequiresDisabledGateway(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		allowAll       bool
+		disableGateway bool
+		port           string
+		wantErr        bool
+	}{
+		{"restricted http proxy port", false, false, "15080", true},
+		{"restricted https proxy port", false, false, "127.0.0.1:8443:15443", true},
+		{"unrestricted http proxy port", true, false, "15080", true},
+		{"unrestricted https proxy port", true, false, "0:15443", true},
+		{"proxy port with a leading zero", true, false, "015080", true},
+		{"proxy port as host port only", true, false, "15080:3000", false},
+		{"disabled gateway", true, true, "15080", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := lockinNetworkRuntime(t, "codex", tc.allowAll, "")
+			r.run.DisableGateway = tc.disableGateway
+			r.run.Ports = []string{tc.port}
+			_, err := newNetworkManager(r).Prepare("enclave-session", model.AuthState{}, SecretMapping{})
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("Prepare() accepted published port %s with a gateway", tc.port)
+				}
+				if !strings.Contains(err.Error(), "gateway") {
+					t.Fatalf("Prepare() error = %v, want it to name the gateway", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Prepare() error = %v", err)
+			}
+		})
 	}
 }

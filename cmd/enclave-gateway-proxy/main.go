@@ -86,8 +86,6 @@ func main() {
 		log.Fatalf("failed to load secret release rules: %v", err)
 	}
 	opts := mitm.Options{
-		HTTPAddr:       ":8080",
-		HTTPSAddr:      ":8443",
 		AllowedDomains: allowedDomains,
 		DeniedDomains:  deniedDomains,
 		SecretRules:    rules,

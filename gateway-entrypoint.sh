@@ -14,6 +14,10 @@ ACTIVE_DOMAINS_FILE="/run/enclave-gateway/domains.txt"
 IPSET_NAME="enclave_allowed"
 DNSMASQ_USER="dnsmasq"
 PROXY_USER="gateway"
+# The proxy listens on these loopback ports; keep them in sync with
+# GatewayProxyHTTPPort and GatewayProxyHTTPSPort in internal/model.
+PROXY_HTTP_PORT="15080"
+PROXY_HTTPS_PORT="15443"
 PROXY_ENABLED="${PROXY_ENABLED:-true}"
 NETWORK_LOG_FILE="${ENCLAVE_NETWORK_LOG_FILE:-}"
 GATEWAY_CONFIG_DIR="${ENCLAVE_GATEWAY_CONFIG_DIR:-/etc/enclave-gateway-config}"
@@ -491,14 +495,14 @@ EOF_RESOLVERS
 
     proxy_uid=$(id -u "$PROXY_USER")
 
-    iptables -A OUTPUT -p tcp --dport 8080 -m addrtype --dst-type LOCAL -j ACCEPT
-    iptables -A OUTPUT -p tcp --dport 8443 -m addrtype --dst-type LOCAL -j ACCEPT
+    iptables -A OUTPUT -p tcp --dport "$PROXY_HTTP_PORT" -m addrtype --dst-type LOCAL -j ACCEPT
+    iptables -A OUTPUT -p tcp --dport "$PROXY_HTTPS_PORT" -m addrtype --dst-type LOCAL -j ACCEPT
 
     iptables -t nat -F OUTPUT || true
     iptables -t nat -A OUTPUT -p tcp --dport 80 -m owner --uid-owner "$proxy_uid" -j RETURN
     iptables -t nat -A OUTPUT -p tcp --dport 443 -m owner --uid-owner "$proxy_uid" -j RETURN
-    iptables -t nat -A OUTPUT -p tcp --dport 80 -j REDIRECT --to-ports 8080
-    iptables -t nat -A OUTPUT -p tcp --dport 443 -j REDIRECT --to-ports 8443
+    iptables -t nat -A OUTPUT -p tcp --dport 80 -j REDIRECT --to-ports "$PROXY_HTTP_PORT"
+    iptables -t nat -A OUTPUT -p tcp --dport 443 -j REDIRECT --to-ports "$PROXY_HTTPS_PORT"
 
     log "Transparent proxy NAT rules configured"
     setup_ide_bridge
@@ -536,8 +540,8 @@ web_redirect() {
     action="$2"
     port="$3"
     case "$port" in
-        80) proxy_port=8080 ;;
-        443) proxy_port=8443 ;;
+        80) proxy_port="$PROXY_HTTP_PORT" ;;
+        443) proxy_port="$PROXY_HTTPS_PORT" ;;
         *) return 1 ;;
     esac
     "$firewall" -t nat "$action" OUTPUT -p tcp --dport "$port" -j REDIRECT --to-ports "$proxy_port"

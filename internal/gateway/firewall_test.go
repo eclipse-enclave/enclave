@@ -197,8 +197,8 @@ func TestGatewayFirewallInboundPolicy(t *testing.T) {
 					{"unpublished listener", inboundPacket{"eth0", "NEW", "tcp", "9999"}, false},
 					{"dns udp", inboundPacket{"eth0", "NEW", "udp", "53"}, false},
 					{"dns tcp", inboundPacket{"eth0", "NEW", "tcp", "53"}, false},
-					{"http proxy", inboundPacket{"eth0", "NEW", "tcp", "8080"}, false},
-					{"tls proxy", inboundPacket{"eth0", "NEW", "tcp", "8443"}, false},
+					{"http proxy", inboundPacket{"eth0", "NEW", "tcp", proxyHTTPPort}, false},
+					{"tls proxy", inboundPacket{"eth0", "NEW", "tcp", proxyHTTPSPort}, false},
 					{"published tcp", inboundPacket{"eth0", "NEW", "tcp", "3000"}, true},
 					{"host port is not container port", inboundPacket{"eth0", "NEW", "tcp", "13000"}, false},
 					{"published udp", inboundPacket{"eth0", "NEW", "udp", "5353"}, true},
@@ -207,7 +207,7 @@ func TestGatewayFirewallInboundPolicy(t *testing.T) {
 					{"oauth callback", inboundPacket{"eth0", "NEW", "tcp", "1455"}, true},
 					{"outbound IDE bridge is not inbound", inboundPacket{"eth0", "NEW", "tcp", "9800"}, false},
 					{"local dns", inboundPacket{"lo", "NEW", "udp", "53"}, true},
-					{"local proxy", inboundPacket{"lo", "NEW", "tcp", "8443"}, true},
+					{"local proxy", inboundPacket{"lo", "NEW", "tcp", proxyHTTPSPort}, true},
 					{"established reply", inboundPacket{"eth0", "ESTABLISHED", "tcp", "40000"}, true},
 					{"related reply", inboundPacket{"eth0", "RELATED", "icmp", ""}, true},
 				} {
@@ -229,7 +229,7 @@ func TestGatewayFirewallWithoutPublishedPorts(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, engine := range []string{"iptables", "ip6tables"} {
-		for _, port := range []string{"53", "1455", "3000", "8080", "8443", "9999"} {
+		for _, port := range []string{"53", "1455", "3000", proxyHTTPPort, proxyHTTPSPort, "9999"} {
 			packet := inboundPacket{"eth0", "NEW", "tcp", port}
 			if got := inputVerdict(t, calls, engine, packet); got != "DROP" {
 				t.Fatalf("%s accepted unpublished port %s", engine, port)
@@ -279,7 +279,7 @@ func TestGatewayFirewallLockdownClosesInbound(t *testing.T) {
 		for _, packet := range []inboundPacket{
 			{"eth0", "NEW", "tcp", "3000"},
 			{"eth0", "ESTABLISHED", "tcp", "40000"},
-			{"lo", "NEW", "tcp", "8443"},
+			{"lo", "NEW", "tcp", proxyHTTPSPort},
 		} {
 			if got := inputVerdict(t, calls, engine, packet); got != "DROP" {
 				t.Fatalf("%s input verdict after lockdown = %s for %+v", engine, got, packet)

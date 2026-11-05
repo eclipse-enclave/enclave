@@ -9,6 +9,7 @@ package runtime
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"enclave/internal/backend"
@@ -54,6 +55,11 @@ func (m networkManager) Prepare(_ string, authState model.AuthState, _ SecretMap
 		return NetworkResult{}, fmt.Errorf("failed to resolve effective network policy: %w", err)
 	}
 	effectivePolicy := resolved.Effective
+	if m.gatewayRuns() {
+		if err := rejectGatewayProxyPorts(ports); err != nil {
+			return NetworkResult{}, err
+		}
+	}
 
 	if effectivePolicy.Mode == model.NetworkModeUnrestricted {
 		logx.Warnf("Network restrictions disabled - container has unrestricted internet access")
@@ -140,6 +146,23 @@ func (m networkManager) observedUnrestrictedNetwork(allowlistPath string, loopba
 		},
 		Ports: ports,
 	}
+}
+
+// rejectGatewayProxyPorts refuses to publish a container port the gateway's
+// proxy listens on: the session shares the gateway's namespace, so nothing in
+// the session could serve it.
+func rejectGatewayProxyPorts(ports []backend.PortMapping) error {
+	for _, port := range ports {
+		// Compare numbers: "015080" publishes the same port as "15080".
+		containerPort, err := strconv.Atoi(port.ContainerPort)
+		if err != nil {
+			continue
+		}
+		if containerPort == model.GatewayProxyHTTPPort || containerPort == model.GatewayProxyHTTPSPort {
+			return fmt.Errorf("container port %s is reserved for the network gateway's proxy; publish another container port (or, with --allow-all-network, add --disable-gateway)", port.ContainerPort)
+		}
+	}
+	return nil
 }
 
 func policyDomainSourcePaths(home string, projectDir string, projectHash string, tool string, globalPolicy network.Policy, projectPolicy network.Policy) []string {

@@ -753,3 +753,11 @@ const (
 	// name it for processes started with `docker exec`.
 	AgentGatewayCABundlePath = "/tmp/enclave-ca/ca-certificates.crt"
 )
+
+// The gateway proxy listens on these loopback ports in the namespace the
+// session shares, so the session cannot use them. gateway-entrypoint.sh
+// redirects TCP 80 and 443 to them.
+const (
+	GatewayProxyHTTPPort  = 15080
+	GatewayProxyHTTPSPort = 15443
+)

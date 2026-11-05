@@ -1,8 +1,10 @@
 # Network Request Flow
 
-This document describes how enclave handles outbound network requests in restricted mode, including DNS policy enforcement, proxying, and secret placeholder rewriting.
+This document describes gateway-mediated outbound requests: restricted destination
+policy by default, and unrestricted IPv4 destinations with protected OAuth.
+Unprotected unrestricted sessions continue to bypass the gateway.
 
-## Diagram
+## Restricted destination flow
 
 ```mermaid
 sequenceDiagram
@@ -32,7 +34,9 @@ sequenceDiagram
     Entry->>DNS: Start with rendered allowlist config
     Entry->>FW: INPUT DROP + loopback, reply and published-port exceptions<br/>OUTPUT DROP + local DNS allow<br/>NAT redirect 80/443 to 8080/8443
     Entry->>Proxy: Start transparent proxy
-    Entry->>Audit: Start DNS audit translator on the dnsmasq log
+    opt Unprotected session only
+        Entry->>Audit: Start DNS audit translator on the dnsmasq log
+    end
     Host->>Log: Rotate above the size cap<br/>and append session start marker
     opt network_log=full
         Host->>Cap: Create the session directory<br/>and prune the store to its budget
@@ -77,8 +81,10 @@ sequenceDiagram
         end
     else Domain not in allowlist
         DNS-->>Tool: NXDOMAIN from the blackhole
-        DNS->>Audit: dnsmasq log line
-        Audit->>Log: DNS deny (nxdomain)
+        opt Unprotected session
+            DNS->>Audit: dnsmasq log line
+            Audit->>Log: DNS deny (nxdomain)
+        end
     end
 
     Note over Tool,Proxy: When secret injection is active, the container sees placeholders only.<br/>Real secrets are released only in-flight for matching host/header rules.
@@ -91,8 +97,8 @@ sequenceDiagram
 3. DNS resolution goes through `dnsmasq`. Allowlisted domains resolve and populate the `enclave_allowed` `ipset`; non-allowlisted domains fail resolution.
 4. TCP connections are gated by firewall rules and redirected to the proxy. The proxy checks host allowlist rules again using HTTP `Host` / TLS `SNI`.
 5. For hosts that match declared secret `release.http` rules, or for all allowlisted HTTPS when `network_log` is `requests` or `full`, the proxy uses TLS MITM before forwarding upstream.
-6. For inspected requests, a registered placeholder is substituted only in the rule's configured `header` on HTTPS requests to its declared `hosts`. Placeholder-bearing headers that do not satisfy the rule are rejected with HTTP 403.
-7. `network_log=coarse` writes pass/deny events to `~/.local/state/enclave/projects/<hash>/<tool>/logs/network.log`: one `tcp` event per TLS connection at the ClientHello, and an `http` event per request for plaintext HTTP and for the MITM'd hosts of step 5. `network_log=requests` adds request-level HTTP/HTTPS audit events for every allowlisted host. `network_log=full` also snapshots each relayed request before step 6 releases secrets into it and stores it, with the response, under `logs/capture/<session>/`; its `http` event carries the `capture_id`. The log is JSONL throughout: the proxy appends HTTP and TCP events, a separate `enclave-gateway-proxy -dns-audit` process translates dnsmasq's own log into `dns` events (so DNS denials are recorded even when the proxy is disabled), and the host appends a session marker at gateway start. Read it with `enclave network log`.
+6. If a known placeholder appears on plaintext HTTP, on a host outside that secret rule's `hosts`, or in a header other than that rule's declared header (matched case-insensitively), the proxy blocks the whole request with HTTP 403.
+7. `network_log=coarse` writes pass/deny events to `~/.local/state/enclave/projects/<hash>/<tool>/logs/network.log`: one `tcp` event per TLS connection at the ClientHello, and an `http` event per request for plaintext HTTP and for the MITM'd hosts of step 5. `network_log=requests` adds request-level HTTP/HTTPS audit events for every allowlisted host. `network_log=full` also snapshots each relayed request before step 6 releases secrets into it and stores it, with the response, under `logs/capture/<session>/`; its `http` event carries the `capture_id`. The log is JSONL throughout: the proxy appends HTTP and TCP events, and the host appends a session marker at gateway start. In unprotected sessions, a separate `enclave-gateway-proxy -dns-audit` process translates dnsmasq's log into `dns` events, even when the proxy is disabled. Protected sessions disable raw DNS logging and this translator. Read it with `enclave network log`.
 
 ## Why This Works
 
@@ -104,13 +110,92 @@ sequenceDiagram
 
 ## Scope and Limits
 
-- In unrestricted mode (`--allow-all-network` or policy mode `unrestricted`), the gateway is bypassed and HTTP secret release is disabled.
-- `--network-log=requests` enables request-level MITM logging in restricted mode; `--network-log=full` adds stored request and response headers and bodies. See [Full capture](../networking.md#full-capture).
+- Without `--protect-auth`, unrestricted mode (`--allow-all-network` or policy mode `unrestricted`) bypasses the gateway and disables HTTP secret release. Protected sessions retain mediation under both selectors; see below.
+- `--network-log=requests` enables request-level MITM logging for permitted destinations whenever the gateway runs.
+- `--network-log=full` adds stored HTTP exchanges and WebSocket messages whenever the gateway runs. See [Full capture](../networking.md#full-capture).
 - The log records decisions, not traffic volume. In `coarse` mode a reused TLS connection produces a single `tcp` event no matter how many requests it carries, and successful DNS lookups are never recorded, so an absence of events is not evidence of an absence of traffic. See [Coverage and granularity](../networking.md#coverage-and-granularity).
 - Placeholder protection applies only to declared secrets with `release.http` in the selected tool profile or enabled feature manifests.
-- Real secrets are released only in the rule's declared request header on HTTPS requests to its declared hosts. Inspected requests with registered placeholders in headers must satisfy these release rules.
-- Current secret injection is header-based; file credential mediation is separate work.
-- WebSocket and other protocol upgrades get secret release on the handshake headers; the upgraded connection is then relayed unchanged in both directions.
+- Env secrets are released only in the declared request header on HTTPS requests to declared hosts. Inspected placeholder-bearing headers that violate those conditions, including on plaintext HTTP, deny the request.
+- Env-secret injection is restricted to declared headers. The opt-in OAuth adapter below separately mediates captured native-file credentials.
+- Outside protected sessions, upstream responses are streamed without credential masking. A provider that reflects an approved auth header can expose its value, so matching a release rule does not remove trust in the provider. Protected sessions abort a response before a released credential would reach the workload.
+- WebSocket and other protocol upgrades get secret release on the handshake headers; the upgraded connection is then relayed unchanged in both directions. In sessions with the protected OAuth broker, handshakes pass the broker's checks like requests. A handshake that carries a released credential must be a WebSocket upgrade; the broker removes `Sec-WebSocket-Extensions` so frames stay uncompressed, rejects a `101` that negotiates extensions, and scans each server frame for the released credentials, holding back an unfinished fragment that ends in a partial match. A match, or a frame it cannot parse, closes both connections and is audited as `oauth-broker-response`.
+
+## Opt-in protected OAuth path
+
+`--protect-auth` registers the selected tool's login adapters and the enabled
+built-in GitHub feature adapter before login. Each gets a session-specific
+native auth view containing handles. Normal login without that option keeps the
+existing workload-readable credentials. The implemented opt-in flow still needs
+the [real-client and container verification runs](oauth-broker-verification.md):
+
+```mermaid
+sequenceDiagram
+    participant Tool as Workload / native auth view
+    participant Broker as Gateway broker
+    participant Store as Gateway-only identity store
+    participant Provider as Declared HTTPS endpoint
+    Tool->>Broker: Normal login exchange
+    Broker->>Store: Persist uncertain intent
+    Broker->>Provider: Forward validated exchange
+    Provider-->>Broker: Token response
+    Broker->>Broker: Bound, parse, validate explicit schema
+    Broker->>Store: Durably commit grant and registration
+    Broker-->>Tool: Native response with access/refresh handles
+    Tool->>Broker: Request with a handle
+    alt credential endpoint, raw credential beside it, or wrong host
+        Broker-->>Tool: Refused
+    else release host
+        Broker->>Store: Read current committed grant
+        Broker->>Provider: Substitute real credential
+        Note over Broker,Store: Refresh serializes and persists outcome before reply
+        Provider-->>Broker: Response, trailers or WebSocket frames
+        alt reflects a released credential
+            Broker-->>Tool: Abort the stream
+        else
+            Broker-->>Tool: Stream data / sanitized token response
+        end
+    end
+```
+
+Capture must be installed before a grant exists, not inferred from the current
+env-secret mapping snapshot. Only declared HTTPS origins, ports and auth fields
+may resolve broker handles, on any path except the provider's credential
+endpoints. The adapter rejects unknown token
+response fields, unsupported encodings and unsafe errors/headers; it never
+passes a raw token response through after a parsing or persistence failure.
+Env-secret release separately enforces its declared host and header; it does
+not gain the broker's endpoint-specific path and method restrictions.
+
+The GitHub adapter keeps its real feature-auth files gateway-only, captures the
+supported GitHub.com device-token response and releases credentials only through
+its declared API and HTTPS Git authentication fields. It does not enable
+Enterprise, PAT-paste bootstrap or other native-auth features. GitLab remains
+env-secret based. See the [adapter limits and verification gates](oauth-broker-verification.md).
+
+### Unrestricted destinations with mediation
+
+With protected auth, either unrestricted selector keeps the same gateway
+namespace, CA, broker mounts and selective MITM. DNS forwards every domain to
+the configured upstream resolver. The IPv4 firewall permits arbitrary
+destinations while still redirecting ports 80/443 through the proxy; only the
+proxy UID bypasses interception. The proxy skips destination allowlists, not
+credential release checks. IPv6 remains disabled, as in restricted gateways.
+
+The OUTPUT chain's default remains DROP. The supervisor flushes permissive
+rules on unexpected proxy/gateway failure, so this mode cannot silently turn
+into a bypass. Ordinary upstream responses still stream promptly.
+
+Same-mode bundle reload restarts the proxy process without replacing the
+gateway or its handle registry. Active gateway metadata records both the mode
+and its source. `network apply` preserves a session's `--allow-all-network`
+override; policy-driven mode changes require a new session and are rejected
+before writing the replacement bundle. The gateway also refuses mode switches
+during reload. New logical sessions receive fresh handles.
+
+Protected sessions disable raw dnsmasq query logging and the DNS audit
+translator. Network logs therefore contain no DNS events for those sessions;
+untrusted HTTP/TLS audit details are also redacted. This reduces diagnostic
+coverage and does not turn logs into a safe recorder of OAuth exchanges.
 
 ## Related Implementation
 
@@ -118,4 +203,5 @@ sequenceDiagram
 - [`internal/runtime/auth_manager.go`](../../internal/runtime/auth_manager.go)
 - [`internal/gateway/bundle/bundle.go`](../../internal/gateway/bundle/bundle.go)
 - [`internal/gateway/mitm/proxy.go`](../../internal/gateway/mitm/proxy.go)
+- [`internal/gateway/oauthbroker/`](../../internal/gateway/oauthbroker/) (opt-in native-auth adapters)
 - [`gateway-entrypoint.sh`](../../gateway-entrypoint.sh)

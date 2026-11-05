@@ -312,3 +312,41 @@ func TestStoreBudgetBoundsBodiesInFlight(t *testing.T) {
 		t.Fatal("no body was marked truncated although the budget ran out")
 	}
 }
+
+func TestDiscardRemovesBodiesAndOpenWebSocket(t *testing.T) {
+	store := openTestStore(t, Options{})
+	req := httptest.NewRequest(http.MethodPost, "https://api.example.test/", strings.NewReader("request"))
+	capture := store.Begin(req, "https")
+	if _, err := io.Copy(io.Discard, capture.RequestBody(req.Body)); err != nil {
+		t.Fatal(err)
+	}
+	resp := &http.Response{StatusCode: http.StatusSwitchingProtocols, Header: http.Header{"Upgrade": {"websocket"}}}
+	capture.Response(resp)
+	_, server := capture.WebSocket(resp)
+	if server == nil {
+		t.Fatal("missing socket capture")
+	}
+	if _, err := server.Write([]byte{0x81, 2, 'o', 'k'}); err != nil {
+		t.Fatal(err)
+	}
+	if store.used == 0 {
+		t.Fatal("capture reserved no bytes")
+	}
+	capture.Discard()
+	entries, err := os.ReadDir(store.dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 || store.used != 0 {
+		t.Fatalf("discard left %d files and %d charged bytes", len(entries), store.used)
+	}
+	if _, err := io.WriteString(capture.request, "late write"); err != nil {
+		t.Fatal(err)
+	}
+	entries, err = os.ReadDir(store.dir)
+	if err != nil || len(entries) != 0 {
+		t.Fatal("late body write recreated discarded data")
+	}
+	var disabled *Capture
+	disabled.Discard()
+}

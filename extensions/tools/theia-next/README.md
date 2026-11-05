@@ -115,6 +115,15 @@ declare hosts or keys for the following providers, so they need extra setup:
 - **Hugging Face** (experimental): allow `huggingface.co`, then set the key in
   Theia's settings or pass `HUGGINGFACE_API_KEY` with `--pass-env`.
 
+## Experimental protected auth
+
+`--protect-auth` needs no `--auth-name`: Theia has no login for the gateway to
+capture, so each session gets a fresh identity. The API keys above reach the
+session as placeholders. Keys entered in Theia's settings, or passed with
+`--pass-env` where protected mode allows it (such as `HUGGINGFACE_API_KEY`), are
+visible to the workload; the gateway refuses them at the Anthropic, OpenAI,
+Google and Mistral hosts. See [auth](../../../docs/auth.md#experimental-protected-authentication).
+
 ## IDE Preferences
 
 Preference overrides passed to Theia via `--session-preference` are merged from

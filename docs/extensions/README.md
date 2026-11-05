@@ -371,6 +371,9 @@ sandbox:
   qemuMinMemoryMiB: 4096
   skillsDir: .claude/skills
   memoryDir: .claude/memory
+  # Command-line settings take precedence over the baked settings template,
+  # which opts auto-memory in, so this disables generation without the mount.
+  noMemoryArgs: [--settings, '{"autoMemoryEnabled": false}']
   settingsFile: claude-settings.json
   settingsTarget: .claude/settings.json
   yoloFlag: --dangerously-skip-permissions
@@ -384,8 +387,14 @@ sandbox:
 
 credentials:
   sources:
-    anthropic-api-key: { env: [ANTHROPIC_API_KEY] }
-    claude-code-oauth-token: { env: [CLAUDE_CODE_OAUTH_TOKEN], apiKey: false }
+    # Clients tell Anthropic API keys and OAuth tokens apart by their prefixes.
+    anthropic-api-key:
+      env: [ANTHROPIC_API_KEY]
+      placeholder: { prefix: "sk-ant-api03-", suffix: "AA", random: { encoding: base64url, length: 93 } }
+    claude-code-oauth-token:
+      env: [CLAUDE_CODE_OAUTH_TOKEN]
+      apiKey: false
+      placeholder: { prefix: "sk-ant-oat01-", suffix: "AA", random: { encoding: base64url, length: 93 } }
 
 network:
   serviceDomains:
@@ -393,6 +402,11 @@ network:
     "*.anthropic.com": anthropic-api-key
   serviceAuth:
     anthropic-api-key: { headerName: x-api-key }
+    # A `claude setup-token` token authenticates like a subscription login.
+    claude-code-oauth-token:
+      headerName: authorization
+      valueFormat: "Bearer %s"
+      hosts: [api.anthropic.com, mcp-proxy.anthropic.com]
 
 providers:
   - name: anthropic
@@ -569,7 +583,10 @@ Secrets are split across two `spec.yaml` sections:
   written to the persisted env store, so it never outlives the run that set it.
   A value that is not a usable host warns and is ignored; wildcards are
   rejected, since the point is to name one instance. Values may be a bare host,
-  `host:port`, or a full URL — the scheme, port and path are stripped.
+  `host:port`, or a full URL — the scheme, port and path are stripped. In
+  protected sessions, when a replaced host belongs to a provider the gateway
+  mediates (such as `gitlab.com`), the selected instance is mediated like that
+  provider.
 
 `network.serviceAuth.<id>.requiredValuePrefix` optionally limits gateway
 protection to a supported credential type. The resolved real value must start
@@ -603,12 +620,20 @@ network:
 
 When the gateway is enabled, credentials with a `serviceAuth` entry are
 replaced with random placeholders in the container environment; the gateway
-MITM proxy intercepts HTTPS requests to the declared hosts and substitutes the
-placeholder only in the configured `headerName`. Inspected requests whose
-placeholder-bearing headers do not satisfy the release rule are denied.
-Credentials without a `serviceAuth` entry are injected
-as normal env vars. Placeholder generation errors abort startup rather than
-falling back to the real credential.
+MITM proxy intercepts HTTPS requests to the declared hosts and rewrites the
+configured header with the real secret. A known placeholder in any other header
+(case-insensitive comparison), or on plaintext HTTP, denies the whole request.
+Credentials without a `serviceAuth` entry are injected as normal env vars.
+Placeholder generation errors abort startup rather than falling back to the
+real credential.
+
+#### Protected native credentials
+
+Native `authFiles` declarations do not select arbitrary protected-auth adapters.
+Core uses audited descriptors for the shipped tools, plus explicit compatibility
+with the canonical installed `mistral-vibe` layout (`.vibe`, provider `mistral`,
+native `.env`). Unsupported layouts are refused. Extension-declared native
+adapter selection remains a follow-up; see [protected authentication](../auth.md#experimental-protected-authentication).
 
 #### Client-side credential format checks
 

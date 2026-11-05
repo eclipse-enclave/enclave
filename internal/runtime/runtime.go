@@ -27,6 +27,7 @@ import (
 	"enclave/internal/mounts"
 	"enclave/internal/network"
 	"enclave/internal/policy"
+	"enclave/internal/protectedauth"
 	"enclave/internal/termtint"
 	"enclave/internal/util"
 )
@@ -68,6 +69,10 @@ type Runtime struct {
 	// cached, so the replacement host reaches the allow set too.
 	releaseHostOverrides map[string][]string
 	backend              backend.Backend
+	authSession          *backend.AuthSession
+	// protectedIdentity is the gateway-owned auth identity of a protected
+	// run, fixed once selected; see protectedAuthIdentity.
+	protectedIdentity string
 }
 
 type ExecutionContext struct {
@@ -79,6 +84,7 @@ type ExecutionContext struct {
 	Network        backend.NetworkPolicy
 	Ports          []backend.PortMapping
 	Secrets        []backend.SecretRelease
+	Instances      []backend.ProviderInstance
 	AuthSync       *backend.AuthSyncSpec
 	Cleanup        func()
 	RunCtx         model.RunContext
@@ -228,6 +234,9 @@ func (r *Runtime) sessionStartLockName() string {
 }
 
 func (r *Runtime) prepareExecution() (*ExecutionContext, error) {
+	if err := r.validateProtectedAuth(); err != nil {
+		return nil, err
+	}
 	config.WriteProjectMarkers(r.host.Home, r.project.Hash, r.project.RealDir)
 	baseContainerName := r.baseContainerName()
 	var containerName string
@@ -261,6 +270,11 @@ func (r *Runtime) prepareExecution() (*ExecutionContext, error) {
 	}
 	projectEnv, envFileLoaded := r.envFileValues()
 	sessionEnv := append(append([]string{}, mountArgs.Env()...), projectEnv...)
+	if r.auth.ProtectAuth {
+		if err := validateProtectedEnv(sessionEnv, nil); err != nil {
+			return nil, err
+		}
+	}
 	if err := validateGitIdentity(gitIdentity, sessionEnv); err != nil {
 		return nil, err
 	}
@@ -280,6 +294,9 @@ func (r *Runtime) prepareExecution() (*ExecutionContext, error) {
 	r.applyFeaturePorts()
 	runCtx.Run = r.run
 	if err := r.handler.ValidateRun(runCtx); err != nil {
+		if prepared.Cleanup != nil {
+			prepared.Cleanup()
+		}
 		return nil, err
 	}
 	networkResult, err := newNetworkManager(r).Prepare(containerName, prepared.AuthState, prepared.SecretMapping)
@@ -293,6 +310,14 @@ func (r *Runtime) prepareExecution() (*ExecutionContext, error) {
 	env = append(env, networkResult.Env...)
 	env = append(env, projectEnv...)
 	cleanup := mergeCleanup(prepared.Cleanup, networkResult.Cleanup)
+	if r.auth.ProtectAuth {
+		if err := r.validateProtectedBindings(env, sessionPlaceholders(prepared.SecretMapping)); err != nil {
+			if cleanup != nil {
+				cleanup()
+			}
+			return nil, err
+		}
+	}
 	return &ExecutionContext{
 		ContainerName:  containerName,
 		Mounts:         mountArgs.Mounts(),
@@ -302,6 +327,7 @@ func (r *Runtime) prepareExecution() (*ExecutionContext, error) {
 		Network:        networkResult.Network,
 		Ports:          networkResult.Ports,
 		Secrets:        secretReleases(prepared.SecretMapping),
+		Instances:      providerInstanceRequests(prepared.SecretMapping),
 		AuthSync:       prepared.AuthSync,
 		Cleanup:        cleanup,
 		RunCtx:         runCtx,
@@ -404,9 +430,71 @@ func (r *Runtime) prepareVolumes(containerName string, baseContainerName string,
 		return preparedVolumes{}, fmt.Errorf("runtime backend is not configured")
 	}
 	volumeSuffix := r.currentConfigVolumeSuffix(containerName, baseContainerName)
+	if r.auth.ProtectAuth {
+		if _, err := r.protectedAuthIdentity(); err != nil {
+			return preparedVolumes{}, err
+		}
+	}
 	vm := newVolumeManager(r)
 	prep, stores := vm.BuildPrep(volumeSuffix)
 	cleanup := r.ephemeralVolumeCleanup(stores)
+	manager, hasAdmission := r.backend.(backend.AuthSessionManager)
+	var admitted *backend.AuthSession
+	if hasAdmission {
+		cleanup = mergeCleanup(cleanup, func() {
+			if admitted != nil {
+				if err := manager.ReleaseAuthSession(context.Background(), admitted); err != nil {
+					logx.Warnf("Auth identity reservations retained: %v", err)
+				}
+			}
+		})
+	}
+	if r.auth.ProtectAuth && stores.Auth == nil {
+		return preparedVolumes{}, fmt.Errorf("protected auth requires a declared shared provider auth store")
+	}
+	if stores.Auth != nil {
+		if hasAdmission {
+			session, err := manager.PrepareAuthSession(context.Background(), stores.Auth.Key, containerName, r.auth.ProtectAuth, r.auth.ResetAuth)
+			admitted = session
+			if err != nil {
+				cleanup()
+				return preparedVolumes{}, err
+			}
+			if session == nil || session.Protected != r.auth.ProtectAuth || session.Key != stores.Auth.Key || session.Session != containerName {
+				cleanup()
+				return preparedVolumes{}, fmt.Errorf("backend returned inconsistent auth session admission")
+			}
+			r.authSession = session
+			prep.AuthSession = session
+		} else if r.auth.ProtectAuth {
+			return preparedVolumes{}, fmt.Errorf("backend does not support protected auth admission")
+		}
+	}
+	if len(stores.Features) != 0 {
+		if features, ok := r.backend.(backend.FeatureAuthSessionManager); ok && hasAdmission {
+			names := make([]string, 0, len(stores.Features))
+			for name := range stores.Features {
+				names = append(names, name)
+			}
+			session, err := features.PrepareFeatureAuthSessions(context.Background(), admitted, containerName, names, r.auth.ProtectAuth)
+			if session != nil {
+				admitted = session
+				r.authSession = session
+				prep.AuthSession = session
+			}
+			if err != nil {
+				if cleanup != nil {
+					cleanup()
+				}
+				return preparedVolumes{}, err
+			}
+		} else if r.auth.ProtectAuth {
+			if cleanup != nil {
+				cleanup()
+			}
+			return preparedVolumes{}, fmt.Errorf("backend does not support protected feature auth admission")
+		}
+	}
 	state, err := r.backend.PrepareStores(context.Background(), prep)
 	if err != nil {
 		if cleanup != nil {
@@ -500,10 +588,16 @@ func (r *Runtime) stableConfigKey() string {
 // features, which change the composed skills) never share a generated directory
 // and cannot clobber each other's read-only mounts.
 func (r *Runtime) sessionGeneratedKey() string {
+	key := defaultConfigKey
 	if r.configVolReady && strings.TrimSpace(r.configVolSuffix) != "" {
-		return strings.TrimSpace(r.configVolSuffix)
+		key = strings.TrimSpace(r.configVolSuffix)
 	}
-	return defaultConfigKey
+	if r.auth.ProtectAuth {
+		// Generated config, skills and session memory follow the protected
+		// config store, which ordinary sessions never use.
+		return backend.ProtectedConfigKey(backend.StoreKey{Suffix: key}).Suffix
+	}
+	return key
 }
 
 // runningConfigKeyExists reports whether a running session for this tool,
@@ -513,6 +607,10 @@ func (r *Runtime) sessionGeneratedKey() string {
 func (r *Runtime) runningConfigKeyExists(key string) bool {
 	if strings.TrimSpace(key) == "" || r.backend == nil {
 		return false
+	}
+	if r.auth.ProtectAuth {
+		// Protected sessions label their own store; ordinary ones never use it.
+		key = backend.ProtectedConfigKey(backend.StoreKey{Suffix: key}).Suffix
 	}
 	checker, ok := r.backend.(backend.ConfigStoreConflictChecker)
 	if !ok {
@@ -639,6 +737,14 @@ func secretReleases(mapping SecretMapping) []backend.SecretRelease {
 		})
 	}
 	return secrets
+}
+
+func providerInstanceRequests(mapping SecretMapping) []backend.ProviderInstance {
+	var instances []backend.ProviderInstance
+	for _, instance := range mapping.Instances {
+		instances = append(instances, backend.ProviderInstance{Host: instance.Host, DeclaredHosts: append([]string(nil), instance.DeclaredHosts...)})
+	}
+	return instances
 }
 
 func (r *Runtime) addUniquePort(port string, message string, args ...any) {
@@ -862,8 +968,12 @@ func (r *Runtime) backendRequest(ctx *ExecutionContext, detached bool, interacti
 	user := ""
 	r.applyDevcontainerUserIntent(&user, &env)
 	r.applyRuntimeUIDRemapIntent(&user, &env)
+	if r.auth.ProtectAuth {
+		user = r.host.UID + ":" + r.host.GID
+	}
 
 	req := backend.Request{
+		AuthSession: r.authSession,
 		Session: backend.SessionMeta{
 			Tool:         r.profile.Name,
 			ProjectHash:  r.project.Hash,
@@ -887,6 +997,7 @@ func (r *Runtime) backendRequest(ctx *ExecutionContext, detached bool, interacti
 		Ports:           append([]backend.PortMapping(nil), ctx.Ports...),
 		Security:        backend.SecurityPosture{Admin: r.run.Admin},
 		Secrets:         append([]backend.SecretRelease(nil), ctx.Secrets...),
+		Instances:       append([]backend.ProviderInstance(nil), ctx.Instances...),
 		RuntimeUIDRemap: r.build.RuntimeUIDRemap,
 		Detached:        detached,
 	}
@@ -895,7 +1006,7 @@ func (r *Runtime) backendRequest(ctx *ExecutionContext, detached bool, interacti
 		// reconcile via Stop/Remove finalize while the container still exists.
 		req.AuthSync = ctx.AuthSync
 	}
-	if req.Network.Mode != backend.NetworkModeRestricted {
+	if !req.Network.UsesGateway() {
 		req.Hostname = model.HostnamePrefix + r.project.Name
 	}
 	return req
@@ -1460,6 +1571,23 @@ func (r *Runtime) addAuthMount(mounts *mountAccumulator, authStore *backend.Stor
 		return
 	}
 	authMountPath := r.containerHome + "/" + model.ContainerAuthDir
+	if r.auth.ProtectAuth {
+		// The backend backs this store with the session's native handle view;
+		// the persistent config store keeps history at the native config dir.
+		// The tool reads its credentials from the view, through its storage
+		// variable or through links the entrypoint creates.
+		tool, _ := protectedauth.Lookup(r.profile.Name)
+		mounts.AddStore(backend.PersistentStore{Kind: authStore.Kind, Key: authStore.Key, ContainerPath: authMountPath})
+		mounts.AddEnv(model.EnvAuthDir, authMountPath)
+		mounts.AddEnv(model.EnvProtectedAuth, "1")
+		if tool.StorageDirEnv != "" {
+			mounts.AddEnv(tool.StorageDirEnv, authMountPath)
+		}
+		if links := tool.LinkSpec(); links != "" {
+			mounts.AddEnv(model.EnvProtectedAuthFiles, links)
+		}
+		return
+	}
 	mounts.AddStore(backend.PersistentStore{Kind: authStore.Kind, Key: authStore.Key, ContainerPath: authMountPath})
 	mounts.AddEnv(model.EnvAuthDir, authMountPath)
 	authFiles := r.profile.ProviderAuthFiles()
@@ -1486,6 +1614,16 @@ func (r *Runtime) addFeatureAuthMounts(mounts *mountAccumulator, featureStores m
 	for _, feat := range r.features {
 		store, ok := featureStores[feat.Name]
 		if !ok {
+			continue
+		}
+		if r.auth.ProtectAuth {
+			mountPath := resolveContainerProfilePath(r.containerHome, feat.ConfigDir)
+			mounts.AddStore(backend.PersistentStore{Kind: store.Kind, Key: store.Key, ContainerPath: mountPath})
+			if feat.Name == "github-cli" {
+				mounts.AddEnv(model.EnvProtectedGitHub, "1")
+				mounts.AddEnv("GH_CONFIG_DIR", mountPath)
+				mounts.AddEnv("GH_HOST", "github.com")
+			}
 			continue
 		}
 		mountPath := r.containerHome + "/" + model.ContainerFeatureAuthDir + "/" + feat.Name
@@ -1544,6 +1682,9 @@ func (r *Runtime) addGatewayCAMount(mounts *mountAccumulator) error {
 }
 
 func (r *Runtime) shouldUseGateway() bool {
+	if r.auth.ProtectAuth {
+		return true
+	}
 	resolved, err := r.resolveEffectivePolicy()
 	if err != nil {
 		logx.Warnf("Failed to resolve effective network policy for gateway decision: %v", err)

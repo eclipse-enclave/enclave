@@ -67,6 +67,10 @@ var toolFreeActions = map[string]bool{
 // name their scope themselves and never read the default.
 func actionNeedsTool(parsed cli.Result) bool {
 	switch parsed.Action {
+	case "auth-import", "auth-export", "auth-reset", "auth-downgrade":
+		// These require an explicit --tool, so a saved default answers
+		// nothing; asking for one would only save an unrelated answer.
+		return false
 	case "update":
 		return len(parsed.Options.UpdateTools) == 0
 	case "stop":

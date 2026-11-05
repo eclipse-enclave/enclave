@@ -11,6 +11,8 @@ set -eu
 DNSMASQ_BIN="/usr/local/libexec/enclave/dnsmasq"
 DNSMASQ_CONF="/etc/dnsmasq.d/enclave.conf"
 ACTIVE_DOMAINS_FILE="/run/enclave-gateway/domains.txt"
+ACTIVE_DENIED_FILE="/run/enclave-gateway/denied.txt"
+ACTIVE_META_FILE="/run/enclave-gateway/meta.json"
 IPSET_NAME="enclave_allowed"
 DNSMASQ_USER="dnsmasq"
 PROXY_USER="gateway"
@@ -19,6 +21,7 @@ NETWORK_LOG_FILE="${ENCLAVE_NETWORK_LOG_FILE:-}"
 GATEWAY_CONFIG_DIR="${ENCLAVE_GATEWAY_CONFIG_DIR:-/etc/enclave-gateway-config}"
 GATEWAY_CONFIG_DNSMASQ="$GATEWAY_CONFIG_DIR/dnsmasq.conf"
 GATEWAY_CONFIG_DOMAINS="$GATEWAY_CONFIG_DIR/domains.txt"
+GATEWAY_CONFIG_DENIED="$GATEWAY_CONFIG_DIR/denied.txt"
 GATEWAY_CONFIG_META="$GATEWAY_CONFIG_DIR/meta.json"
 DNSMASQ_LOG_FILE=""
 PROXY_LOG_FILE="/var/log/enclave/proxy.log"
@@ -110,6 +113,87 @@ normalize_proxy_enabled() {
     esac
 }
 
+prepare_oauth_broker() {
+    case "${ENCLAVE_OAUTH_BROKER:-}" in
+        "")
+            if [ -n "${ENCLAVE_OAUTH_GITHUB:-}${ENCLAVE_OAUTH_GITHUB_IDENTITY:-}" ]; then
+                log "Protected feature auth requires the OAuth broker"
+                return 1
+            fi
+            return 0
+            ;;
+        # Mirrors internal/protectedauth; a Go test keeps the two in step.
+        claude|codex|copilot|opencode|pi|mistral-vibe|theia|theia-next) ;;
+        *) log "Unsupported protected OAuth adapter"; return 1 ;;
+    esac
+    if [ "$PROXY_ENABLED" != "true" ]; then
+        log "Protected OAuth requires the gateway proxy"
+        return 1
+    fi
+    for oauth_dir in /oauth/grant /oauth/runtime /oauth/view; do
+        if [ ! -d "$oauth_dir" ] || [ -L "$oauth_dir" ]; then
+            log "Protected OAuth mount is missing or invalid"
+            return 1
+        fi
+    done
+    if [ ! -f /oauth/identity.lock ] || [ -L /oauth/identity.lock ]; then
+        log "Protected OAuth shared identity lock is missing or invalid"
+        return 1
+    fi
+    # The protected workload runs as this host-owned view's numeric owner.
+    # Sharing an exempt service UID would bypass transparent interception.
+    oauth_view_uid=$(stat -c '%u' /oauth/view) || return 1
+    oauth_proxy_uid=$(id -u "$PROXY_USER") || return 1
+    oauth_dns_uid=$(id -u "$DNSMASQ_USER") || return 1
+    case "$oauth_view_uid" in
+        ""|*[!0-9]*|0)
+            log "Protected OAuth requires an unprivileged workload UID"
+            return 1
+            ;;
+    esac
+    if [ "$oauth_view_uid" = "$oauth_proxy_uid" ] || [ "$oauth_view_uid" = "$oauth_dns_uid" ]; then
+        log "Protected OAuth workload UID conflicts with a gateway service UID"
+        return 1
+    fi
+    case "${ENCLAVE_OAUTH_GITHUB:-}" in
+        "")
+            if [ -n "${ENCLAVE_OAUTH_GITHUB_IDENTITY:-}" ]; then
+                log "Protected GitHub identity has no adapter"
+                return 1
+            fi
+            ;;
+        1)
+            if [ -z "${ENCLAVE_OAUTH_GITHUB_IDENTITY:-}" ]; then
+                log "Protected GitHub identity is missing"
+                return 1
+            fi
+            for oauth_dir in /oauth/features/github-cli/grant /oauth/features/github-cli/runtime /oauth/features/github-cli/view; do
+                if [ ! -d "$oauth_dir" ] || [ -L "$oauth_dir" ]; then
+                    log "Protected GitHub mount is missing or invalid"
+                    return 1
+                fi
+            done
+            if [ ! -f /oauth/features/github-cli/identity.lock ] || [ -L /oauth/features/github-cli/identity.lock ]; then
+                log "Protected GitHub identity lock is missing or invalid"
+                return 1
+            fi
+            oauth_github_uid=$(stat -c '%u' /oauth/features/github-cli/view) || return 1
+            if [ "$oauth_github_uid" != "$oauth_view_uid" ]; then
+                log "Protected feature and workload views have different owners"
+                return 1
+            fi
+            ;;
+        *) log "Unsupported protected GitHub adapter mode"; return 1 ;;
+    esac
+    # Keep the proxy UID distinct from the workload's firewall identity. These
+    # file capabilities permit access to host-owned 0700 stores and preserve
+    # host ownership when replacing records, without changing directory owners.
+    if ! setcap cap_dac_override,cap_chown=ep /usr/local/bin/enclave-gateway-proxy; then
+        log "Unable to configure protected OAuth storage access"
+        return 1
+    fi
+}
+
 init_log_files() {
     mkdir -p /var/log/enclave /run/enclave-gateway
 
@@ -118,9 +202,11 @@ init_log_files() {
         touch "$NETWORK_LOG_FILE"
         # Proxy runs as an unprivileged user and appends to this bind-mounted path.
         chmod 666 "$NETWORK_LOG_FILE" 2>/dev/null || true
-        DNSMASQ_LOG_FILE="/var/log/enclave/dnsmasq.log"
-        touch "$DNSMASQ_LOG_FILE"
-        chown "$DNSMASQ_USER:$DNSMASQ_USER" "$DNSMASQ_LOG_FILE" 2>/dev/null || true
+        if [ -z "${ENCLAVE_OAUTH_BROKER:-}" ]; then
+            DNSMASQ_LOG_FILE="/var/log/enclave/dnsmasq.log"
+            touch "$DNSMASQ_LOG_FILE"
+            chown "$DNSMASQ_USER:$DNSMASQ_USER" "$DNSMASQ_LOG_FILE" 2>/dev/null || true
+        fi
     fi
 
     : > "$PROXY_LOG_FILE"
@@ -145,6 +231,14 @@ load_resolvers_from_conf() {
         [ -z "$line" ] && continue
 
         case "$line" in
+            server=[0-9]*)
+                resolver=${line#server=}
+                resolver=${resolver%%#*}
+                if is_ipv4 "$resolver"; then
+                    parsed_resolvers="${parsed_resolvers}${parsed_resolvers:+
+}$resolver"
+                fi
+                ;;
             server=/*/*)
                 resolver=$(echo "$line" | cut -d/ -f3)
                 resolver=${resolver%%#*}
@@ -173,6 +267,11 @@ copy_host_bundle() {
     target_dir="$1"
     cp "$GATEWAY_CONFIG_DNSMASQ" "$target_dir/dnsmasq.conf"
     cp "$GATEWAY_CONFIG_DOMAINS" "$target_dir/domains.txt"
+    if [ -f "$GATEWAY_CONFIG_DENIED" ]; then
+        cp "$GATEWAY_CONFIG_DENIED" "$target_dir/denied.txt"
+    else
+        : > "$target_dir/denied.txt"
+    fi
     cp "$GATEWAY_CONFIG_META" "$target_dir/meta.json"
 }
 
@@ -217,6 +316,14 @@ render_and_validate_bundle() {
 
     log "Using host-managed gateway config bundle from $GATEWAY_CONFIG_DIR"
     copy_host_bundle "$target_dir"
+    candidate_mode=$(enclave-gateway-proxy -network-mode "$target_dir/meta.json") || return 1
+    if [ -f "$ACTIVE_META_FILE" ]; then
+        active_mode=$(enclave-gateway-proxy -network-mode "$ACTIVE_META_FILE") || return 1
+        if [ "$candidate_mode" != "$active_mode" ]; then
+            log "Changing gateway destination mode requires a new session"
+            return 1
+        fi
+    fi
     validate_dnsmasq_conf "$target_dir/dnsmasq.conf" || return 1
     load_resolvers_from_conf "$target_dir/dnsmasq.conf"
 
@@ -227,6 +334,8 @@ install_bundle() {
     target_dir="$1"
     mv "$target_dir/dnsmasq.conf" "$DNSMASQ_CONF"
     mv "$target_dir/domains.txt" "$ACTIVE_DOMAINS_FILE"
+    mv "$target_dir/denied.txt" "$ACTIVE_DENIED_FILE"
+    mv "$target_dir/meta.json" "$ACTIVE_META_FILE"
 }
 
 restore_bundle() {
@@ -236,6 +345,12 @@ restore_bundle() {
     fi
     if [ -f "$rollback_dir/domains.txt" ]; then
         cp "$rollback_dir/domains.txt" "$ACTIVE_DOMAINS_FILE"
+    fi
+    if [ -f "$rollback_dir/denied.txt" ]; then
+        cp "$rollback_dir/denied.txt" "$ACTIVE_DENIED_FILE"
+    fi
+    if [ -f "$rollback_dir/meta.json" ]; then
+        cp "$rollback_dir/meta.json" "$ACTIVE_META_FILE"
     fi
     if [ -f "$DNSMASQ_CONF" ]; then
         load_resolvers_from_conf "$DNSMASQ_CONF"
@@ -392,6 +507,15 @@ EOF_PUBLISHED
 }
 
 setup_firewall() {
+    network_mode=$(enclave-gateway-proxy -network-mode "$ACTIVE_META_FILE") || return 1
+    case "$network_mode" in
+        restricted|unrestricted) ;;
+        *) log "Invalid gateway destination policy mode"; return 1 ;;
+    esac
+    if [ "$network_mode" = "unrestricted" ] && [ "$PROXY_ENABLED" != "true" ]; then
+        log "Unrestricted mediated networking requires the proxy"
+        return 1
+    fi
     setup_input_firewall iptables || return 1
     iptables -P OUTPUT DROP || return 1
     iptables -F OUTPUT || return 1
@@ -424,7 +548,15 @@ setup_firewall() {
 $UNIQUE_RESOLVERS
 EOF_RESOLVERS
 
-    iptables -A OUTPUT -m set --match-set "$IPSET_NAME" dst -j ACCEPT
+    if [ -n "${ENCLAVE_OAUTH_BROKER:-}" ]; then
+        # HTTP/3 would reach providers without the proxy's mediation; clients
+        # fall back to TCP.
+        iptables -A OUTPUT -p udp --dport 443 -j DROP || return 1
+    fi
+
+    if [ "$network_mode" = "restricted" ]; then
+        iptables -A OUTPUT -m set --match-set "$IPSET_NAME" dst -j ACCEPT || return 1
+    fi
 
     if [ "$PROXY_ENABLED" != "true" ]; then
         setup_ide_bridge
@@ -438,17 +570,32 @@ EOF_RESOLVERS
 
     proxy_uid=$(id -u "$PROXY_USER")
 
-    iptables -A OUTPUT -p tcp --dport 8080 -m addrtype --dst-type LOCAL -j ACCEPT
-    iptables -A OUTPUT -p tcp --dport 8443 -m addrtype --dst-type LOCAL -j ACCEPT
+    # Without the redirects, allowed HTTP/TLS would bypass the proxy, so a
+    # failure locks egress down instead of leaving a partial rule set.
+    if ! setup_proxy_redirect "$proxy_uid"; then
+        log "Transparent proxy NAT rules failed; egress locked down"
+        enforce_fail_closed_lockdown
+        return 1
+    fi
 
-    iptables -t nat -F OUTPUT || true
-    iptables -t nat -A OUTPUT -p tcp --dport 80 -m owner --uid-owner "$proxy_uid" -j RETURN
-    iptables -t nat -A OUTPUT -p tcp --dport 443 -m owner --uid-owner "$proxy_uid" -j RETURN
-    iptables -t nat -A OUTPUT -p tcp --dport 80 -j REDIRECT --to-ports 8080
-    iptables -t nat -A OUTPUT -p tcp --dport 443 -j REDIRECT --to-ports 8443
+    if [ "$network_mode" = "unrestricted" ]; then
+        # Destination access is permissive, but HTTP/TLS still traverses the
+        # proxy. Keeping OUTPUT's default DROP preserves crash lockdown.
+        iptables -A OUTPUT -j ACCEPT || return 1
+    fi
 
     log "Transparent proxy NAT rules configured"
     setup_ide_bridge
+}
+
+setup_proxy_redirect() {
+    iptables -A OUTPUT -p tcp --dport 8080 -m addrtype --dst-type LOCAL -j ACCEPT || return 1
+    iptables -A OUTPUT -p tcp --dport 8443 -m addrtype --dst-type LOCAL -j ACCEPT || return 1
+    iptables -t nat -F OUTPUT || return 1
+    iptables -t nat -A OUTPUT -p tcp --dport 80 -m owner --uid-owner "$1" -j RETURN || return 1
+    iptables -t nat -A OUTPUT -p tcp --dport 443 -m owner --uid-owner "$1" -j RETURN || return 1
+    iptables -t nat -A OUTPUT -p tcp --dport 80 -j REDIRECT --to-ports 8080 || return 1
+    iptables -t nat -A OUTPUT -p tcp --dport 443 -j REDIRECT --to-ports 8443 || return 1
 }
 
 setup_kernel_network() {
@@ -612,6 +759,12 @@ reload_gateway() {
     if [ -f "$ACTIVE_DOMAINS_FILE" ]; then
         cp "$ACTIVE_DOMAINS_FILE" "$rollback_dir/domains.txt"
     fi
+    if [ -f "$ACTIVE_DENIED_FILE" ]; then
+        cp "$ACTIVE_DENIED_FILE" "$rollback_dir/denied.txt"
+    fi
+    if [ -f "$ACTIVE_META_FILE" ]; then
+        cp "$ACTIVE_META_FILE" "$rollback_dir/meta.json"
+    fi
 
     if ! render_and_validate_bundle "$tmp_dir"; then
         rm -rf "$tmp_dir"
@@ -728,6 +881,9 @@ main() {
     trap on_term TERM INT
 
     normalize_proxy_enabled
+    if ! prepare_oauth_broker; then
+        exit 1
+    fi
     init_log_files
     ensure_local_resolver
 

@@ -33,6 +33,15 @@ type SecretReleaseEntry struct {
 	ExactHosts bool `json:"exact_hosts,omitempty"`
 }
 
+// ProviderInstance is a host that serviceAuth.hostsFromCredential selected in
+// place of a service's declared release hosts, such as a GitLab instance
+// named by GITLAB_HOST. A protected gateway mediates it like the provider the
+// declared hosts belong to, whether or not a token for it is configured.
+type ProviderInstance struct {
+	Host          string   `json:"host"`
+	DeclaredHosts []string `json:"declared_hosts"`
+}
+
 func (s AuthState) HasAnyEnvCredential() bool {
 	for _, provider := range s.Providers {
 		if provider.HasEnvCredential {

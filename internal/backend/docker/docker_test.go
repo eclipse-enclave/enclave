@@ -55,6 +55,8 @@ func TestPrepareRunProtectsGitConfigFromRunArgAliases(t *testing.T) {
 		t.Fatal(err)
 	}
 	b := newDevcontainerBackend(project, "--volume", project+":/alias", "--volume", configPath+":/direct")
+	// Keep host state outside the aliased project so auth-state guards stay out of scope.
+	b.opts.Host.Home = t.TempDir()
 	spec, err := b.prepareRun(context.Background(), backend.Request{
 		Image:          "test",
 		Session:        prepareRunSession(t),
@@ -85,6 +87,8 @@ func TestPrepareRunDoesNotProtectUnrelatedReadOnlyFileAliases(t *testing.T) {
 		t.Fatal(err)
 	}
 	b := newDevcontainerBackend(project, "--volume", project+":/alias", "--volume", path+":/direct")
+	// Keep host state outside the aliased project so auth-state guards stay out of scope.
+	b.opts.Host.Home = t.TempDir()
 	spec, err := b.prepareRun(context.Background(), backend.Request{
 		Image:   "test",
 		Session: prepareRunSession(t),
@@ -318,6 +322,7 @@ func TestPrepareRunAppliesRuntimeUIDRemapEnvAfterDevcontainerEnv(t *testing.T) {
 	if err != nil {
 		t.Fatalf("prepareRun() error = %v", err)
 	}
+	defer spec.releaseAdmission()
 	if got, want := spec.hostConfig.NetworkMode, dockercmd.NetworkMode(sessionNetworkName(req.Session.Name)); got != want {
 		t.Fatalf("NetworkMode = %q, want %q", got, want)
 	}
@@ -353,6 +358,7 @@ func TestPrepareRunSkipsDevcontainerRunArgsForDetachedRequests(t *testing.T) {
 	if err != nil {
 		t.Fatalf("prepareRun() error = %v", err)
 	}
+	defer spec.releaseAdmission()
 
 	if got := lastEnvValue(spec.config.Env, "DEVCONTAINER_ONLY"); got != "" {
 		t.Fatalf("detached run should not apply devcontainer env, got %q in %v", got, spec.config.Env)
@@ -779,7 +785,7 @@ exit 0
 	}
 }
 
-func TestRemoveSessionContainerControlsAnonymousVolumeRemoval(t *testing.T) {
+func TestRemoveAdmittedSessionControlsAnonymousVolumeRemoval(t *testing.T) {
 	for _, tc := range []struct {
 		name          string
 		removeVolumes bool
@@ -802,8 +808,8 @@ exit 0
 				return dockercmd.NetworkInspectResponse{}, errors.New("Error response from daemon: network session-net not found")
 			}
 
-			if err := RemoveSessionContainer(context.Background(), "session", tc.removeVolumes); err != nil {
-				t.Fatalf("RemoveSessionContainer() error = %v", err)
+			if err := New(Options{}).removeAdmittedSession(context.Background(), "session", tc.removeVolumes); err != nil {
+				t.Fatalf("removeAdmittedSession() error = %v", err)
 			}
 			if calls := stubCalls(t, logPath); !hasCallWithPrefix(calls, tc.wantCall) {
 				t.Fatalf("calls = %v, want %q", calls, tc.wantCall)
@@ -905,6 +911,7 @@ func TestNeutralizeExitError(t *testing.T) {
 // seam: the command's non-zero status must surface as *backend.ExitError so
 // the CLI can exit with the same code.
 func TestExecPreservesExitStatus(t *testing.T) {
+	stubCLI(t, "docker", `[ "$1 $2" = "container inspect" ] && printf '%s\n' '{"Name":"/missing-session","Config":{}}'`+"\n")
 	orig := execInteractive
 	execInteractive = func(context.Context, string, []string, string, bool) error {
 		return &dockercmd.ExitError{Code: 7}
@@ -922,7 +929,7 @@ func TestExecPreservesExitStatus(t *testing.T) {
 	}
 }
 
-func TestRemoveSessionContainerChecksResourceProjectAndOwner(t *testing.T) {
+func TestRemoveChecksResourceProjectAndOwner(t *testing.T) {
 	for _, tc := range []struct {
 		name, owner, hash string
 		wantCleanup       bool
@@ -970,7 +977,7 @@ exit 0
 			sessionRuntimeExists = func(context.Context, string) (bool, error) { return false, nil }
 			removed := false
 			networkRemove = func(context.Context, string) error { removed = true; return nil }
-			if err := RemoveSessionContainer(context.Background(), "session", false); err != nil {
+			if err := New(Options{}).RemoveWithoutFinalize(context.Background(), backend.SessionRef{Name: "session"}); err != nil {
 				t.Fatal(err)
 			}
 			stopped := hasCallWithPrefix(stubCalls(t, logPath), "stop --time 3 gateway-id")

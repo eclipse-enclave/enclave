@@ -185,6 +185,27 @@ if [ -n "$ENCLAVE_AUTH_DIR" ] && [ -n "$ENCLAVE_AUTH_FILES" ] && [ -n "$ENCLAVE_
     enclave_sync_shared_auth "$agent_label" "$ENCLAVE_TOOL_CONFIG_DIR" "$ENCLAVE_AUTH_DIR" "" "1" "${auth_files[@]}"
 fi
 
+# Protected sessions read native credentials from the gateway's handle view.
+# Whatever an earlier session left at these paths holds at most stale handles.
+if [ "${ENCLAVE_PROTECTED_AUTH:-}" = "1" ] && [ -n "${ENCLAVE_PROTECTED_AUTH_FILES:-}" ]; then
+    if [ -z "${ENCLAVE_AUTH_DIR:-}" ] || [ -z "${ENCLAVE_TOOL_CONFIG_DIR:-}" ]; then
+        echo "Protected auth view is not configured" >&2
+        exit 1
+    fi
+    IFS=',' read -r -a protected_links <<< "$ENCLAVE_PROTECTED_AUTH_FILES"
+    for protected_link in "${protected_links[@]}"; do
+        protected_target="$ENCLAVE_TOOL_CONFIG_DIR/${protected_link%%:*}"
+        mkdir -p "$(dirname "$protected_target")"
+        if [ -d "$protected_target" ] && [ ! -L "$protected_target" ]; then
+            echo "Protected auth file is a directory: $protected_target" >&2
+            exit 1
+        fi
+        rm -f "$protected_target"
+        ln -s "$ENCLAVE_AUTH_DIR/${protected_link#*:}" "$protected_target"
+    done
+    unset protected_links protected_link protected_target
+fi
+
 # Link feature auth files into their respective config dirs when provided.
 # Format: feat:config_dir:file1,file2|feat2:config_dir2:file3,file4
 if [ -n "${ENCLAVE_FEATURE_AUTH_MAP:-}" ]; then

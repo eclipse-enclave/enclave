@@ -16,6 +16,7 @@ import (
 	"enclave/internal/backend"
 	"enclave/internal/config"
 	"enclave/internal/model"
+	"enclave/internal/protectedauth"
 )
 
 type ValidationContext struct {
@@ -42,6 +43,42 @@ func ValidateOptions(opts model.Options, sources model.OptionSources, ctx Valida
 		// Standalone validation accepts zero-value options (including test
 		// fixtures); Run rejects an explicitly empty --backend before this call.
 		opts.Backend = backend.NameDocker
+	}
+	// Protection applies to the session a run starts; exec, attach and update
+	// act on existing sessions or images, whose own state decides.
+	if opts.ProtectAuth && isRunAction(ctx.Action) {
+		tool, known := protectedauth.Lookup(opts.Tool)
+		if !known || (opts.Backend != backend.NameDocker && opts.Backend != backend.NamePodman) {
+			return opts, sources, warnings, fmt.Errorf("--protect-auth supports the built-in tools on Docker or Podman")
+		}
+		if opts.AuthScope == model.AuthScopeShared && strings.TrimSpace(opts.AuthName) == "" && !opts.Ephemeral && len(tool.Adapters) != 0 {
+			return opts, sources, warnings, fmt.Errorf("--protect-auth with --auth-scope shared requires a fresh --auth-name")
+		}
+		if opts.AuthScope == model.AuthScopeShared && strings.TrimSpace(opts.AuthName) == "default" && !opts.Ephemeral {
+			// Protecting the ordinary shared identity would lock out every
+			// unnamed ordinary session of the tool.
+			return opts, sources, warnings, fmt.Errorf("--protect-auth needs an --auth-name other than default")
+		}
+		var conflict string
+		switch {
+		case opts.Devcontainer:
+			conflict = "devcontainers (--devcontainer)"
+		case opts.Admin:
+			conflict = "admin mode (--admin)"
+		case opts.RuntimeUIDRemap:
+			conflict = "runtime UID remapping (--runtime-uid-remap)"
+		case opts.HostConfig != "" && opts.HostConfig != model.HostConfigNone:
+			conflict = "host config passthrough; use --host-config=none"
+		case opts.BaseImage != "":
+			conflict = "custom base images (--base-image)"
+		}
+		if conflict != "" {
+			return opts, sources, warnings, fmt.Errorf("--protect-auth does not support %s", conflict)
+		}
+		if opts.Ephemeral && strings.TrimSpace(opts.AuthName) != "" {
+			warnings = append(warnings, "--auth-name is ignored with --ephemeral; the protected login lasts for this session only")
+		}
+		warnings = append(warnings, "Protected OAuth is experimental; Docker/Podman and real tool and GitHub logins require validation.")
 	}
 	if err := validateBackendName(opts.Backend); err != nil {
 		return opts, sources, warnings, err

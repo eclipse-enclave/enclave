@@ -187,6 +187,7 @@ func Run(args []string) int {
 	ctx := NewAppContext(paths, projectDir)
 
 	command := CommandInput{
+		AuthFeature:       parsed.AuthFeature,
 		Ctx:               ctx,
 		Action:            parsed.Action,
 		Options:           opts,

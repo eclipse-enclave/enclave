@@ -22,7 +22,8 @@
 
 - [runtime/stores.md](runtime/stores.md) — Persistent store lifecycle and auth reconciliation
 - [runtime/auth-sync.md](runtime/auth-sync.md) — Explicit auth import and export
-- [runtime/network-request-flow.md](runtime/network-request-flow.md) — Restricted-mode request flow
+- [runtime/network-request-flow.md](runtime/network-request-flow.md) — Restricted and protected-unrestricted request flow
+- [runtime/oauth-broker-verification.md](runtime/oauth-broker-verification.md) — Experimental protected OAuth, client compatibility evidence, and engine/human verification gates
 
 ## Security
 
@@ -35,4 +36,4 @@
 Diagrams are Mermaid blocks embedded in the documentation:
 
 - [ARCHITECTURE.md](ARCHITECTURE.md#diagrams) — Docker runtime and store layout, Go code generation
-- [runtime/network-request-flow.md](runtime/network-request-flow.md#diagram) — Restricted network request flow
+- [runtime/network-request-flow.md](runtime/network-request-flow.md#diagram) — Restricted network flow and protected OAuth mediation

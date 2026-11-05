@@ -123,6 +123,16 @@ func OptionSpecs() []OptionSpec {
 			},
 		},
 		{
+			Name:  "protect_auth",
+			Group: OptionGroupAuth,
+			ApplyDefaultsWithSource: func(opts *model.Options, defaults Defaults, source model.OptionSource, sources *model.OptionSources) {
+				if canOverride(sources.ProtectAuth, source) && defaults.ProtectAuth != nil {
+					opts.ProtectAuth = *defaults.ProtectAuth
+					sources.ProtectAuth = source
+				}
+			},
+		},
+		{
 			Name:  "reset_auth",
 			Group: OptionGroupAuth,
 			ApplyDefaultsWithSource: func(opts *model.Options, defaults Defaults, source model.OptionSource, sources *model.OptionSources) {

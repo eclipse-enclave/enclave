@@ -33,11 +33,33 @@ can prevent normal removal; delete it with
 `podman unshare rm -rf ~/.local/state/enclave/tls/hosts` when rootless podman
 last owned it.
 
-To disable all restrictions:
+To disable destination restrictions:
 
 ```bash
 enclave --allow-all-network
 ```
+
+Without protected auth, this retains the existing gateway bypass and disables
+HTTP credential release. With `--protect-auth`, either `--allow-all-network` or
+policy `mode: unrestricted` keeps the gateway, TLS trust and credential mediation:
+
+```bash
+enclave --tool claude --auth-name protected --protect-auth --allow-all-network
+```
+
+| Session | Destination policy | Credential mediation |
+|---------|--------------------|----------------------|
+| Default | DNS, firewall and proxy allowlists | Declared env-secret release; OAuth only with `--protect-auth` |
+| Unrestricted, unprotected | Gateway bypass | Disabled |
+| Unrestricted, protected | Arbitrary IPv4 destinations; IPv6 remains disabled by the gateway | Gateway remains mandatory; OAuth endpoint/field rules and env-secret header rules still apply |
+
+An unrelated IPv4 destination needs no allowlist entry in the protected
+unrestricted mode, but it cannot redeem protected credentials. TLS without a
+server name (SNI) is refused there, since the gateway could not tell a provider
+from another host. Proxy failure
+locks down egress; it never switches the session to a gateway bypass. Docker,
+Podman and the real login flows still require the
+[engine and human verification runs](runtime/oauth-broker-verification.md).
 
 The experimental `qemu` backend currently has no restricted-egress implementation, so it always runs with all outbound network allowed. Selecting it implies `--allow-all-network` automatically and prints a notice; passing `--allow-domain` (which would require restricted egress) is rejected.
 
@@ -89,7 +111,13 @@ and `ENCLAVE_COLOR`, and is off when stdout is not a terminal.
 | `dns` | DNS audit translator | One event per denied or failed lookup, with `rule` naming the condition (`nxdomain` for a domain blackholed by policy, `upstream-servfail`, `upstream-refused` or `upstream-nxdomain` for an upstream failure) |
 | `session` | Host, at gateway start | A boundary marker naming the session. Not an audit event: excluded from `--summary` and never matched by `--verdict`, `--domain` or `--type` |
 
-A blocked lookup usually produces two `dns` events, one for the A query and one
+Protected OAuth sessions disable dnsmasq's raw query log and its DNS audit
+translator so attacker-controlled query names cannot record bootstrap material
+or handles. They therefore have no `dns` events, including for denied lookups.
+Broker audit events redact untrusted request details while preserving safe
+policy verdicts; they are not OAuth wire traces.
+
+A blocked lookup in an unprotected session usually produces two `dns` events, one for the A query and one
 for the AAAA query, because the resolver asks for both. `NODATA` answers are not
 recorded: dnsmasq returns `NODATA-IPv6` for every allowlisted host without an
 IPv6 record, so recording it would report allowed domains as denied.
@@ -113,18 +141,19 @@ limits matter before a quiet log is read as a quiet session:
 - **`http` events for HTTPS require the proxy to terminate TLS.** In `coarse`
   mode that happens only for hosts covered by a declared secret's HTTP release
   rules, where the gateway has to rewrite a header anyway, and only when that
-  secret was actually resolved for the session. A tool authenticated with an
-  OAuth token rather than an API key therefore has no release rule for its API
-  host and produces no request-level events for it.
+  secret was actually resolved for the session. Protected OAuth separately
+  registers its capture and API hosts before login; those hosts also use MITM.
+  Unprotected native OAuth alone does not register a release rule.
 - **An upgraded connection is one `http` event.** A WebSocket, or any other
   protocol a client switches to (SPDY for `kubectl exec`, for example), is
   logged once with status `101`, when it closes or the proxy stops. The traffic
   it carries gets no events of its own, so requests multiplexed inside it do
   not show up in the log, even with `--network-log=requests`. `full` mode
-  stores the messages of a WebSocket in its capture.
+  stores the messages of a WebSocket in its capture. Protected sessions scan a
+  WebSocket that carries a released credential for that credential.
 
 Run the session with `--network-log=requests` (or `full`) to force MITM for
-every allowlisted HTTPS host and get an `http` event per request. In every mode,
+every permitted HTTPS host and get an `http` event per request. In every mode,
 SSH on port 22 bypasses the HTTP/TLS proxy and is never recorded.
 
 ### Rotation
@@ -174,6 +203,23 @@ bytes, so it misses a value that arrives encoded in another way: in a body
 compressed with `br` or `zstd`, in a WebSocket message that could not be
 decoded, URL-encoded, escaped in JSON, or in base64. Credentials without an
 HTTP release rule are ordinary request content and are stored as sent.
+
+With `--protect-auth`, native token exchanges return session handles before
+capture sees their responses. Captured requests precede the broker's credential
+release; captured responses and server WebSocket frames follow its credential
+tripwires. An exchange the broker denies leaves no capture; its denial stays in
+`network.log`. A tripwire-aborted response keeps its capture, marked
+`truncated: true` on the body or WebSocket metadata, with
+`error: "oauth-broker-response"`, without the credential that triggered it.
+
+#### Unscanned outbound credentials
+
+Full capture adds no credential scanning of its own for protected grants. Client
+WebSocket frames pass through unchanged, and a provider upgrade that releases no
+credential has no released-value tripwire. A raw token the workload already holds
+or a provider mints in such a stream can therefore be stored as ordinary payload.
+Other upgraded protocols have handshake-only captures. A follow-up issue tracks
+scanning these paths; it is not implemented by full capture.
 
 ### Capture store
 
@@ -391,7 +437,15 @@ enclave network apply                      # Apply policy to running gateways
 
 Network mutations are currently global-only. `--project` scope is planned but not yet supported.
 
-Mutating commands (`add-domain`, `remove-domain`, `set-mode`) apply the updated policy to the running gateways of the current project automatically, for every tool, so they do not accept `--tool`. Pass `--no-apply` to persist the change without applying it, or `--all-running` to target every running gateway on the host. Run `enclave network apply` (optionally with `--tool` or `--all-running`) to push the persisted policy to the current project/tool's gateways on demand. Persisted unrestricted mode still requires a session restart.
+Mutating commands (`add-domain`, `remove-domain`, `set-mode`) apply the updated policy to the running gateways of the current project automatically, for every tool, so they do not accept `--tool`. Pass `--no-apply` to persist the change without applying it, or `--all-running` to target every running gateway on the host. Run `enclave network apply` (optionally with `--tool` or `--all-running`) to push the persisted policy to the current project/tool's gateways on demand. Changing a running session's destination mode requires a restart. Same-mode
+reload is supported for both restricted gateways and protected unrestricted
+gateways. Apply reads the active gateway's private metadata, not another
+session's host bundle. Status likewise compares each gateway's installed bundle
+with the policy it should enforce; a gateway too old to report it shows as
+`UNKNOWN` until its session restarts. A session started with `--allow-all-network` retains that
+explicit override across reloads, even when the saved policy is restricted;
+restart without the flag to adopt the saved mode.
+
 
 ### JSON output (`schemaVersion: "1"`)
 
@@ -441,7 +495,8 @@ enclave --allow-domain api.deepseek.com,api.example.com
 
 A domain that a deny rule blocks stays blocked; the session start reports it separately from the allowlisted ones.
 
-On the Docker backend, `--allow-domain` is inert when combined with `--allow-all-network`: the gateway is not running, so there is no allowlist to extend. The QEMU backend rejects `--allow-domain` because it cannot enforce restricted egress. Bare DNS names only — schemes, paths, ports, and wildcards are rejected.
+On the Docker backend, `--allow-domain` is inert when combined with `--allow-all-network`: destination allowlists are inactive (a protected session still runs its
+credential-mediating gateway). The QEMU backend rejects `--allow-domain` because it cannot enforce restricted egress. Bare DNS names only — schemes, paths, ports, and wildcards are rejected.
 
 The same key works in config: `"allow_domains": ["api.deepseek.com"]` in global `~/.config/enclave/config.json`, or in project `~/.config/enclave/projects/<hash>/config.json` for one project.
 

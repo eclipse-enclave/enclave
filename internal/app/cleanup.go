@@ -16,9 +16,12 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"syscall"
 	"time"
 
+	"enclave/internal/backend"
 	backenddocker "enclave/internal/backend/docker"
+	"enclave/internal/backend/hoststore"
 	"enclave/internal/config"
 	"enclave/internal/docker"
 	"enclave/internal/logx"
@@ -141,10 +144,14 @@ func runCleanup(run model.RunOptions, cleanup model.CleanupOptions) int {
 		}
 		stopExitedSessionGateways(run, cleanup, project, false)
 		// Pruning also catches networks orphaned before this cleanup.
-		cleanupContainers(containerNames)
+		containerErr := cleanupContainers(home, containerNames)
 		pruneStaleSessionNetworks(run, cleanup, project, false)
-		cleanupDirs(storeDirs)
+		cleanupErr := errors.Join(containerErr, cleanupDirs(home, storeDirs))
 		cleanupBuildCache(cleanup)
+		if cleanupErr != nil {
+			logx.Errorf("Cleanup incomplete: %v", cleanupErr)
+			return 1
+		}
 		logx.Successf("Cleanup complete")
 		return 0
 	}
@@ -164,13 +171,20 @@ func runCleanup(run model.RunOptions, cleanup model.CleanupOptions) int {
 	dirPaths := cleanupDirsForRemoval(run, cleanup, home, project, memoryScope)
 
 	if cleanup.CleanupDryRun {
-		printCleanupPlan(dirPaths)
+		planErr := printCleanupPlan(home, dirPaths)
 		cleanupBuildCache(cleanup)
+		if planErr != nil {
+			return 1
+		}
 		return 0
 	}
 
-	cleanupDirs(dirPaths)
+	cleanupErr := cleanupDirs(home, dirPaths)
 	cleanupBuildCache(cleanup)
+	if cleanupErr != nil {
+		logx.Errorf("Cleanup incomplete: %v", cleanupErr)
+		return 1
+	}
 
 	logx.Successf("Cleanup complete")
 	return 0
@@ -290,7 +304,9 @@ func resolveEphemeralStoreDirs(run model.RunOptions, cleanup model.CleanupOption
 				scope = model.MemoryScopeProject
 			}
 			for _, key := range keys {
-				if key == persistentConfigStoreKey {
+				// The default stores, ordinary and protected, hold persistent
+				// history; neither is ephemeral.
+				if key == persistentConfigStoreKey || key == backend.ProtectedConfigKey(backend.StoreKey{Suffix: persistentConfigStoreKey}).Suffix {
 					continue
 				}
 				memoryDir := ""
@@ -337,9 +353,19 @@ func listSubdirs(dir string) []string {
 	return names
 }
 
+type cleanupRemovalMode uint8
+
+const (
+	cleanupRecursive cleanupRemovalMode = iota
+	cleanupEntryOnly
+	cleanupEmptyAuthTree
+)
+
 type cleanupDir struct {
-	Kind string
-	Path string
+	Kind      string
+	Path      string
+	ReadError error
+	Mode      cleanupRemovalMode
 }
 
 func resolveCleanupDirs(run model.RunOptions, cleanup model.CleanupOptions, home string, project model.Project) []cleanupDir {
@@ -372,13 +398,33 @@ func resolveCleanupDirs(run model.RunOptions, cleanup model.CleanupOptions, home
 	}
 }
 
-// authStoreCleanupDirs enumerates the shared tool and feature auth store
-// directories on the host. They are project-independent, so they only
-// participate in a full (--all) cleanup and are gated by `--keep auth`.
+// authStoreCleanupDirs enumerates project-independent auth entries for --all,
+// gated by --keep auth. Identity directories are guarded; non-directories are
+// unlinked without an identity check unless they become directories before
+// removal. Each tool tree's empty-directory removal follows its entries, so
+// retained or newly created children prevent removal of their parent.
 func authStoreCleanupDirs(home string) []cleanupDir {
 	var dirs []cleanupDir
 	for _, tool := range listSubdirs(config.HostStoreAuthRootDir(home)) {
-		dirs = append(dirs, cleanupDir{Kind: authKind, Path: config.HostStoreAuthTreeDir(home, tool)})
+		tree := config.HostStoreAuthTreeDir(home, tool)
+		info, err := os.Lstat(tree)
+		if err != nil || !info.IsDir() {
+			dirs = append(dirs, cleanupDir{Kind: authKind, Path: tree, ReadError: err, Mode: cleanupEntryOnly})
+			continue
+		}
+		entries, err := os.ReadDir(tree)
+		if err != nil {
+			dirs = append(dirs, cleanupDir{Kind: authKind, Path: tree, ReadError: err, Mode: cleanupEmptyAuthTree})
+			continue
+		}
+		for _, entry := range entries {
+			mode := cleanupEntryOnly
+			if entry.IsDir() {
+				mode = cleanupRecursive
+			}
+			dirs = append(dirs, cleanupDir{Kind: authKind, Path: filepath.Join(tree, entry.Name()), Mode: mode})
+		}
+		dirs = append(dirs, cleanupDir{Kind: authKind, Path: tree, Mode: cleanupEmptyAuthTree})
 	}
 	for _, feature := range listSubdirs(config.HostStoreFeatureAuthRootDir(home)) {
 		dirs = append(dirs, cleanupDir{Kind: authKind, Path: config.HostStoreFeatureAuthDir(home, feature)})
@@ -448,14 +494,35 @@ func isEphemeralContainer(name string) bool {
 	return model.IsHashSegment(hash)
 }
 
-func printCleanupPlan(dirs []cleanupDir) {
+func printCleanupPlan(home string, dirs []cleanupDir) error {
 	if len(dirs) == 0 {
 		logx.Infof("Nothing to clean")
-		return
+		return nil
 	}
+	var failures []error
+	retainedParents := map[string]bool{}
 	for _, dir := range dirs {
+		if err := requireUnprotectedCleanupDir(home, dir); err != nil {
+			retainedParents[filepath.Dir(dir.Path)] = true
+			if errors.Is(err, hoststore.ErrProtectedIdentity) {
+				logx.Infof("Would retain %s: %s (gateway-protected; reset and downgrade it to remove it)", dir.Kind, dir.Path)
+				continue
+			}
+			logx.Infof("Would retain %s: %s (%v)", dir.Kind, dir.Path, err)
+			failures = append(failures, err)
+			continue
+		}
+		if dir.Mode == cleanupEmptyAuthTree {
+			if retainedParents[dir.Path] {
+				logx.Infof("Would retain auth tree: %s (contains retained entries)", dir.Path)
+			} else {
+				logx.Infof("Would remove auth tree if empty: %s", dir.Path)
+			}
+			continue
+		}
 		logx.Infof("Would remove %s: %s", dir.Kind, dir.Path)
 	}
+	return errors.Join(failures...)
 }
 
 func printEphemeralCleanupPlan(gateways []string, containers []string, networks []string, dirs []cleanupDir) {
@@ -477,12 +544,22 @@ func printEphemeralCleanupPlan(gateways []string, containers []string, networks 
 	}
 }
 
-func cleanupContainers(containers []string) {
+func cleanupContainers(home string, containers []string) error {
+	engine := backend.NameDocker
+	if docker.IsPodman() {
+		engine = backend.NamePodman
+	}
+	be := backenddocker.New(backenddocker.Options{Engine: engine, Host: model.Host{Home: home}})
+	var failures []error
 	for _, container := range containers {
-		if err := backenddocker.RemoveSessionContainer(context.Background(), container, true); err != nil {
+		// Cleanup has always discarded stopped ephemeral session auth. Preserve
+		// that policy while using the backend's verified gateway/lease cleanup.
+		if err := be.RemoveEphemeralSession(context.Background(), backend.SessionRef{Name: container}); err != nil {
 			logx.Warnf("Failed to remove container %s: %v", container, err)
+			failures = append(failures, err)
 		}
 	}
+	return errors.Join(failures...)
 }
 
 func stopExitedSessionGateways(run model.RunOptions, cleanup model.CleanupOptions, project model.Project, dryRun bool) []string {
@@ -512,12 +589,66 @@ func ephemeralContainerPrefix(run model.RunOptions, project model.Project) strin
 	return fmt.Sprintf("%s-%s-%s-", model.AppName, run.Tool, project.Hash)
 }
 
-func cleanupDirs(dirs []cleanupDir) {
+func cleanupDirs(home string, dirs []cleanupDir) error {
+	var failures []error
 	for _, dir := range dirs {
-		if err := os.RemoveAll(dir.Path); err != nil {
-			logx.Warnf("Failed to remove %s at %s: %v", dir.Kind, dir.Path, err)
+		remove := func() error { return removeCleanupDir(home, dir) }
+		var err error
+		if dir.Kind == authKind && dir.Mode != cleanupEmptyAuthTree {
+			err = hoststore.WithLock(home, dir.Path, remove)
+		} else {
+			err = remove()
+		}
+		if errors.Is(err, hoststore.ErrProtectedIdentity) {
+			// Protection keeps an identity by design; reset and downgrade
+			// remove it.
+			logx.Infof("Retained protected identity %s; reset and downgrade it to remove it", dir.Path)
+		} else if err != nil {
+			failures = append(failures, fmt.Errorf("retaining %s %s: %w", dir.Kind, dir.Path, err))
 		}
 	}
+	return errors.Join(failures...)
+}
+
+func removeCleanupDir(home string, dir cleanupDir) error {
+	if err := requireUnprotectedCleanupDir(home, dir); err != nil {
+		return err
+	}
+	var err error
+	if dir.Mode == cleanupRecursive {
+		err = os.RemoveAll(dir.Path)
+	} else {
+		// Never recursively remove the parent after enumerating identities:
+		// retained or newly created children must prevent its removal.
+		err = os.Remove(dir.Path)
+		if dir.Mode == cleanupEmptyAuthTree && (errors.Is(err, syscall.ENOTEMPTY) || errors.Is(err, syscall.EEXIST)) {
+			return nil
+		}
+	}
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return nil
+}
+
+func requireUnprotectedCleanupDir(home string, dir cleanupDir) error {
+	if dir.ReadError != nil && !errors.Is(dir.ReadError, os.ErrNotExist) {
+		return dir.ReadError
+	}
+	if dir.Kind != authKind || dir.Mode == cleanupEmptyAuthTree {
+		return nil
+	}
+	info, err := os.Lstat(dir.Path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if !info.IsDir() {
+		return nil
+	}
+	return hoststore.RequireUnprotectedAuth(home, dir.Path)
 }
 
 func cleanupBuildCache(cleanup model.CleanupOptions) {

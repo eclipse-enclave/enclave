@@ -102,6 +102,21 @@ func ResolveDir(home string, key backend.StoreKey, kind backend.StoreKind) (stri
 	return dir, nil
 }
 
+// ResolveLegacyDir resolves a store for legacy backend operations, rejecting
+// protected auth identities before their real grants can be mounted or changed.
+func ResolveLegacyDir(home string, key backend.StoreKey, kind backend.StoreKind) (string, error) {
+	dir, err := ResolveDir(home, key, kind)
+	if err != nil {
+		return "", err
+	}
+	if kind == backend.StoreKindAuth || kind == backend.StoreKindFeatureAuth {
+		if err := RequireUnprotectedAuth(home, dir); err != nil {
+			return "", err
+		}
+	}
+	return dir, nil
+}
+
 // Dir reports the host directory backing a store, or an empty string when the
 // store key is incomplete or malformed. It exists for informational output
 // (e.g. the info command); session code must not construct or pass around
@@ -120,14 +135,52 @@ func Dir(home string, key backend.StoreKey, kind backend.StoreKind) string {
 // directory, so concurrent sessions can never desync — regardless of which
 // backend they run under.
 func WithLock(hostHome string, dir string, fn func() error) error {
-	if hostHome == "" || dir == "" {
-		return fn()
-	}
-	lockPath := config.HostLockPath(hostHome, "store-"+util.HashString(dir)+".lock")
+	lockPath := LockPath(hostHome, dir)
 	if lockPath == "" {
 		return fn()
 	}
 	return util.WithFileLock(lockPath, fn)
+}
+
+// LockPath returns the exact host lock used by WithLock. A gateway must mount
+// this one file and lock it directly; hashing its in-container store path would
+// create an unrelated lock and fail to serialize host reset with grant writes.
+func LockPath(hostHome string, dir string) string {
+	if hostHome == "" || dir == "" {
+		return ""
+	}
+	return config.HostLockPath(hostHome, storeLockBase(hostHome, dir)+".lock")
+}
+
+// storeLockBase keys a store's lock and identity metadata by its path below
+// the state root, case-folded, so an aliased home or state root, or another
+// spelling on a case-insensitive volume, selects the same lock and protection.
+// Stores outside the state root keep their path as the key.
+func storeLockBase(home, dir string) string {
+	if rel, ok := stateRelative(home, dir); ok {
+		return "store-" + util.HashString(rel)
+	}
+	return "store-" + util.HashString(dir)
+}
+
+func stateRelative(home, dir string) (string, bool) {
+	root := config.HostStateRootDir(home)
+	bases, targets := []string{root}, []string{dir}
+	if canonical, err := CanonicalAuthPath(root); err == nil {
+		bases = append(bases, canonical)
+	}
+	if canonical, err := CanonicalAuthPath(dir); err == nil {
+		targets = append(targets, canonical)
+	}
+	for _, base := range bases {
+		for _, target := range targets {
+			rel, err := filepath.Rel(strings.ToLower(base), strings.ToLower(target))
+			if err == nil && rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+				return filepath.ToSlash(rel), true
+			}
+		}
+	}
+	return "", false
 }
 
 // EnsureNoSymlinkChain rejects a target whose path from root traverses a

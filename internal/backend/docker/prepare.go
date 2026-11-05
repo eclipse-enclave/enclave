@@ -31,6 +31,32 @@ import (
 // tool.
 func (b *Backend) PrepareStores(ctx context.Context, prep backend.StorePrep) (backend.StoreState, error) {
 	state := backend.StoreState{}
+	if prep.AuthSession != nil {
+		if err := b.validateAuthReservation(prep.AuthSession); err != nil {
+			return state, err
+		}
+		if prep.AuthSession.Protected {
+			// Only protected sessions use this store, and they never receive
+			// real credentials, so its history can persist across sessions.
+			if prep.Config == nil || !backend.IsProtectedConfigKey(prep.Config.Key) {
+				return state, fmt.Errorf("protected OAuth requires its own config store")
+			}
+			prep.AuthSession.ConfigKey = prep.Config.Key
+			b.storage.authSession = prep.AuthSession
+			b.storage.viewDir = b.authViewDir(prep.AuthSession)
+			if prep.Config.Overlay != nil {
+				if err := rejectNativeAuthSource(prep.Config.Overlay.SourceDir, prep.Config.Key.Owner); err != nil {
+					return state, err
+				}
+			}
+			prep.ResetAuthFiles = nil
+		}
+	}
+	if prep.Auth != nil {
+		if _, err := b.storage.storeDir(prep.Auth.Key, backend.StoreKindAuth); err != nil {
+			return state, err
+		}
+	}
 	if prep.Config != nil {
 		b.prepareConfigStore(*prep.Config)
 	}
@@ -199,6 +225,11 @@ func (b *Backend) resetAuthFiles(ctx context.Context, prep backend.StorePrep) {
 	}
 
 	if err := b.storage.WithStoreLock(ctx, lockKey, lockKind, func() error {
+		if prep.Auth != nil {
+			if _, err := b.storage.storeDir(prep.Auth.Key, backend.StoreKindAuth); err != nil {
+				return err
+			}
+		}
 		logx.Infof("Resetting %s auth files in store", title)
 		for _, authFile := range authFiles {
 			if err := b.storage.RemovePath(ctx, prep.Config.Key, backend.StoreKindConfig, authFile); err != nil {

@@ -13,6 +13,16 @@ import (
 	"os/exec"
 )
 
+func ExecCapture(ctx context.Context, containerID string, cmd []string, user string) (string, error) {
+	args := []string{"exec"}
+	if user != "" {
+		args = append(args, "--user", user)
+	}
+	args = append(args, containerID)
+	args = append(args, cmd...)
+	return capture(ctx, args...)
+}
+
 // ExecInteractive runs cmd inside a running container attached to the current
 // terminal. The docker CLI handles raw-mode and terminal resize. A non-zero
 // command exit is returned as an *ExitError.

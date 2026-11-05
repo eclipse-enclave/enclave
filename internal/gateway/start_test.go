@@ -105,7 +105,7 @@ func TestStartGatewayContainerRemovesSidecarWhenInterruptedBeforeReady(t *testin
 	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
 	defer cancel()
 
-	_, err := startGatewayContainer(ctx, &docker.ContainerConfig{Image: "gateway"}, &docker.HostConfig{}, "session-gateway")
+	_, err := startGatewayContainer(ctx, &docker.ContainerConfig{Image: "gateway"}, &docker.HostConfig{}, "session-gateway", nil)
 	if err == nil {
 		t.Fatal("expected an error when the context ends before the gateway is ready")
 	}
@@ -155,7 +155,7 @@ func TestStartGatewayContainerRemovesSidecarWhenStartFails(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	_, err := startGatewayContainer(ctx, sessionGatewayConfig(), &docker.HostConfig{}, "session-gateway")
+	_, err := startGatewayContainer(ctx, sessionGatewayConfig(), &docker.HostConfig{}, "session-gateway", nil)
 	if err == nil || !strings.Contains(err.Error(), "failed to start gateway container") {
 		t.Fatalf("expected a start failure, got %v", err)
 	}
@@ -172,7 +172,7 @@ func TestStartGatewayContainerRemovesSidecarByIDTheEnginePrinted(t *testing.T) {
 	t.Setenv("STUB_RUN_OUTPUT", printedID)
 	t.Setenv("STUB_RUN_EXIT", "127")
 
-	_, err := startGatewayContainer(context.Background(), sessionGatewayConfig(), &docker.HostConfig{}, "session-gateway")
+	_, err := startGatewayContainer(context.Background(), sessionGatewayConfig(), &docker.HostConfig{}, "session-gateway", nil)
 	if err == nil || !strings.Contains(err.Error(), "failed to start gateway container") {
 		t.Fatalf("expected a start failure, got %v", err)
 	}
@@ -189,7 +189,7 @@ func TestStartGatewayContainerLeavesRunningSidecarWhenStartFailsWithoutID(t *tes
 	t.Setenv("STUB_RUN_EXIT", "127")
 	t.Setenv("STUB_INSPECT_JSON", stubInspectJSON(t, "running", true, sessionGatewayConfig().Labels))
 
-	_, err := startGatewayContainer(context.Background(), sessionGatewayConfig(), &docker.HostConfig{}, "session-gateway")
+	_, err := startGatewayContainer(context.Background(), sessionGatewayConfig(), &docker.HostConfig{}, "session-gateway", nil)
 	if err == nil {
 		t.Fatal("expected a start failure")
 	}
@@ -207,7 +207,7 @@ func TestStartGatewayContainerLeavesForeignSidecarWhenStartFailsWithoutID(t *tes
 		model.GatewayLabelProjectHash: "hash",
 	}))
 
-	_, err := startGatewayContainer(context.Background(), sessionGatewayConfig(), &docker.HostConfig{}, "session-gateway")
+	_, err := startGatewayContainer(context.Background(), sessionGatewayConfig(), &docker.HostConfig{}, "session-gateway", nil)
 	if err == nil {
 		t.Fatal("expected a start failure")
 	}
@@ -220,7 +220,7 @@ func TestWaitForGatewayReadyStopsOnCancelledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	err := waitForGatewayReady(ctx, "session-gateway", time.Now())
+	err := waitForGatewayReady(ctx, "session-gateway", time.Now(), nil)
 	if err == nil || !strings.Contains(err.Error(), "interrupted while waiting for gateway readiness") {
 		t.Fatalf("expected an interruption error, got %v", err)
 	}
@@ -257,7 +257,7 @@ func TestStartRetainsImmediateExitDiagnosticsUntilCleanup(t *testing.T) {
 func TestStartGatewayContainerReadyDoesNotRemoveOrReportLogs(t *testing.T) {
 	logPath := withGatewayCLIStub(t)
 	t.Setenv("STUB_READY_LOGS", "[enclave-gateway] Gateway ready")
-	id, err := startGatewayContainer(context.Background(), sessionGatewayConfig(), &docker.HostConfig{}, "session-gateway")
+	id, err := startGatewayContainer(context.Background(), sessionGatewayConfig(), &docker.HostConfig{}, "session-gateway", nil)
 	if err != nil || id != "gw123" {
 		t.Fatalf("start = %q, %v", id, err)
 	}
@@ -337,5 +337,16 @@ func TestGatewayUserNSKeepsHostIDsUnderPodman(t *testing.T) {
 	}
 	if got := gatewayUser(); got != "0:0" {
 		t.Fatalf("podman gateway must run as root inside keep-id, got %q", got)
+	}
+}
+
+func TestOrdinaryGatewayRetainsGenericReadiness(t *testing.T) {
+	logPath := withGatewayCLIStub(t)
+	script := "#!/bin/sh\ncase \"$1\" in\nrun) echo gateway-id ;;\nlogs) echo '[enclave-gateway] Gateway ready' ;;\nesac\n"
+	if err := os.WriteFile(filepath.Join(filepath.Dir(logPath), "docker"), []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := startGatewayContainer(context.Background(), &docker.ContainerConfig{Image: "gateway"}, &docker.HostConfig{}, "session-gateway", nil); err != nil {
+		t.Fatal(err)
 	}
 }

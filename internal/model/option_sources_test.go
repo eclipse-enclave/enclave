@@ -57,6 +57,7 @@ func TestMergeOptionSourcesCoversAllFields(t *testing.T) {
 			AuthScope:    SourceCLI,
 			AuthName:     SourceCLI,
 			ResetAuth:    SourceCLI,
+			ProtectAuth:  SourceCLI,
 			NoAPIKey:     SourceCLI,
 			PassAPIKey:   SourceCLI,
 			SecretsScope: SourceCLI,

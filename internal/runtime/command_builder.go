@@ -9,6 +9,8 @@ package runtime
 
 import (
 	"strings"
+
+	"enclave/internal/protectedclient"
 )
 
 const agentWrapperTemplate = "if [ -f ~/.bashrc ]; then . ~/.bashrc; fi; exec \"$@\""
@@ -29,12 +31,12 @@ func (b commandBuilder) Build() []string {
 				cmdArgs = []string{"/bin/bash"}
 			}
 			// bash -c uses the next argument as $0; the rest become $1.. for exec "$@".
-			return append([]string{"bash", "-c", "echo 'Admin shell - sudo access enabled' && exec \"$@\"", "bash"}, cmdArgs...)
+			return b.withProtectedGitHub(append([]string{"bash", "-c", "echo 'Admin shell - sudo access enabled' && exec \"$@\"", "bash"}, cmdArgs...))
 		}
 		if len(b.run.CmdArgs) > 0 {
-			return append([]string{"/bin/bash"}, b.run.CmdArgs...)
+			return b.withProtectedGitHub(append([]string{"/bin/bash"}, b.run.CmdArgs...))
 		}
-		return []string{"/bin/bash"}
+		return b.withProtectedGitHub([]string{"/bin/bash"})
 	}
 
 	agentArgs := strings.Fields(b.profile.Command)
@@ -47,5 +49,16 @@ func (b commandBuilder) Build() []string {
 	agentArgs = append(agentArgs, b.run.CmdArgs...)
 
 	// bash -c uses the next argument as $0; the rest become $1.. for exec "$@".
-	return append([]string{"bash", "-c", agentWrapperTemplate, "bash"}, agentArgs...)
+	wrapper := agentWrapperTemplate
+	if b.protectedGitHubEnabled() {
+		wrapper = "if [ -f ~/.bashrc ]; then . ~/.bashrc; fi\n" + protectedclient.GitHubSetup + "\nexec \"$@\""
+	}
+	return append([]string{"bash", "-c", wrapper, "bash"}, agentArgs...)
+}
+
+func (b commandBuilder) withProtectedGitHub(command []string) []string {
+	if !b.protectedGitHubEnabled() {
+		return command
+	}
+	return protectedclient.Wrap(command)
 }

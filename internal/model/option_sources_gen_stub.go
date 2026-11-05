@@ -40,6 +40,7 @@ type RunOptionSources struct {
 }
 
 type AuthOptionSources struct {
+	ProtectAuth  OptionSource
 	AuthName     OptionSource
 	AuthScope    OptionSource
 	NoAPIKey     OptionSource

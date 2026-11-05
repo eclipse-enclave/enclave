@@ -220,9 +220,19 @@ Mutation commands (`add-domain`, `remove-domain`, `set-mode`) apply the new poli
 
 | Command | Description |
 |---------|-------------|
+| `enclave auth reset --tool <tool> --auth-name <slug>` | Clear an idle protected grant, retaining protection; `--auth-scope project` selects the project identity |
+| `enclave auth downgrade --tool <tool> --auth-name <slug>` | Remove protection from an idle, empty identity; `--auth-scope project` selects the project identity |
+| `enclave auth reset --feature github-cli` | Clear the idle protected GitHub feature grant, retaining protection |
+| `enclave auth downgrade --feature github-cli` | Remove protection from the idle, empty global GitHub feature identity |
 | `enclave auth import --tool <tool>` | Copy host auth files into the auth store |
 | `enclave auth export --tool <tool>` | Copy auth store files back to the host |
 | `enclave ssh-init` | Initialize isolated SSH keys at `~/.cache/enclave/ssh/`. Not recommended: the key lets the agent push to your Git provider. See [SSH keys](auth.md#ssh-keys) |
+
+`--feature github-cli` is available only on `auth reset` and `auth downgrade`.
+It selects the shared global feature identity, does not resolve a default tool,
+and cannot be combined with `--tool`, `--auth-name` or `--auth-scope`. Choose the
+engine with `--backend` when needed. The selector is command-only; it is not a
+persisted configuration option. There is no protected GitHub host-import command.
 
 ### Devcontainer
 
@@ -248,6 +258,10 @@ Mutation commands (`add-domain`, `remove-domain`, `set-mode`) apply the new poli
 | `enclave cleanup --dry-run` | Preview what would be removed |
 | `enclave cleanup --keep cache,history,auth,memory` | Preserve the listed stores (comma-separated or repeated `--keep`): `cache` (package caches), `history` (shell history, the config store including conversation history, and full network captures), `auth` (auth stores, with `--all`), `memory` (per-project agent memory, no selective effect with `--all`) |
 | `enclave cleanup --build-cache` | Prune Docker build cache (requires confirmation) |
+
+Cleanup keeps protected auth identities, reporting each one it kept; that is
+not a failure. Reset and downgrade an idle identity to remove it. Unreadable
+protection metadata keeps the identity too, and does fail the cleanup.
 
 For a tool with session-scoped memory (Codex), `history` and `memory` name one
 unit: `--keep memory` also preserves the config store and `--keep history` also
@@ -340,6 +354,7 @@ There is no config-file key.
 | `--pass-api-key` | Allow API key injection in `--ephemeral` mode |
 | `--pass-env <KEY1,KEY2>` | Forward specific host env vars into the container (repeatable, comma-separated); replaces `pass_env` from config, `+KEY` adds, and can forward a key `--no-api-key` withholds |
 | `--auth-scope <scope>` | `shared` (default) or `project` |
+| `--protect-auth` | Experimental gateway-owned credentials for the built-in tools (identity: fresh named shared, per project with `--auth-scope project`, or per session with `--ephemeral`) and the enabled built-in GitHub CLI feature on Docker/Podman; concurrent sessions share identities with separate handles; uses the ordinary tool clients and pins `gh` 2.87.3; see [protected auth](auth.md#experimental-protected-authentication) |
 | `--auth-name <slug>` | Select a named per-tool shared auth store; ignored under `--auth-scope=project` |
 | `--secrets-scope <scope>` | `both` (default), `global`, or `project` |
 
@@ -347,7 +362,7 @@ There is no config-file key.
 
 | Flag | Description |
 |------|-------------|
-| `--allow-all-network` | Disable network restrictions |
+| `--allow-all-network` | Disable destination restrictions; protected auth retains gateway mediation |
 | `--allow-domain <domain>` | Add a domain to the gateway allowlist for this run only (repeatable, comma-separated, no persistence); replaces `allow_domains` from config, `+domain` adds to it |
 | `--network-log <coarse\|requests\|full>` | Network audit mode. `coarse` (default) logs one pass/deny event per TLS connection, plus per-request events for plaintext HTTP and for hosts the gateway already MITMs for secret release; `requests` forces HTTPS MITM for all allowlisted hosts and emits an audit event per HTTP/HTTPS request; `full` does the same and stores the headers and bodies of every relayed request and response under `logs/capture/<session>/` (sensitive; see [Full capture](networking.md#full-capture)). See [Coverage and granularity](networking.md#coverage-and-granularity) |
 
@@ -376,7 +391,12 @@ Persistent defaults can be set in `~/.config/enclave/config.json` (global) or `~
 
 ## Tool selection
 
-The tool is unset by default. The first command that needs one asks once which coding agent to use and saves the answer as `"tool"` in `~/.config/enclave/config.json`; later runs read it from there and never ask again. A command needs a tool when it starts a session or builds its image (`run`, `shell`, `continue`, `resume`, `exec`, and `update` without explicit tool arguments) or scopes policy, stores, or containers by tool (`info`, `auth import`, `auth export`, `network …` except `add-domain`, `remove-domain`, and `set-mode`, `cleanup` without `--all`, and `stop` without a session argument). The question is only asked when stdin, stdout, and stderr are terminals and no `--json` or `--yes` was given; without a terminal, or when the question goes unanswered, the command fails with a message naming `--tool` and the `tool` key instead of guessing an agent. Commands that never read the default tool (`ps`, `status`, `attach`, `tools`, `features`, `config`, `review-target`, `theia`, …) neither ask nor fail; they take `--tool` at most as an explicit filter.
+The tool is unset by default. The first command that needs one asks once which coding agent to use and saves the answer as `"tool"` in `~/.config/enclave/config.json`; later runs read it from there and never ask again. A command needs a tool when it starts a session or builds its image (`run`, `shell`, `continue`, `resume`, `exec`, and `update` without explicit tool arguments) or scopes policy, stores, or containers by tool (`info`, `network …` except `add-domain`, `remove-domain`, and `set-mode`, `cleanup` without `--all`, and `stop` without a session argument). The question is only asked when stdin, stdout, and stderr are terminals and no `--json` or `--yes` was given; without a terminal, or when the question goes unanswered, the command fails with a message naming `--tool` and the `tool` key instead of guessing an agent. Commands that never read the default tool (`ps`, `status`, `attach`, `tools`, `features`, `config`, `review-target`, `theia`, …) neither ask nor fail; they take `--tool` at most as an explicit filter.
+
+Auth lifecycle commands are an exception: `auth import`, `auth export`,
+`auth reset` and `auth downgrade` require an explicit CLI `--tool`; the saved
+default is not sufficient. `auth reset|downgrade --feature github-cli` instead
+selects the feature identity and must not be combined with `--tool`.
 
 The menu lists every installed agent. The IDE profiles (`theia`, `theia-next`) are not offered: they attach a host IDE to a container rather than running an agent in the terminal. Pick them with `--tool theia` or the `tool` key.
 
@@ -415,7 +435,7 @@ No exception covers a hard-protected location: your home directory and its paren
 
 ### Mounting all sensitive paths
 
-To mount every sensitive directory, hard-protected ones included, pass `--allow-sensitive-mounts` or set `ENCLAVE_ALLOW_SENSITIVE_MOUNTS=1`; each sensitive mount then prints a warning. An explicit `--allow-sensitive-mounts=false` overrides the environment variable. This blanket opt-in has no config key, so neither global nor project config can grant it; config can only exempt specific paths. Mounts from the repository stay blocked even with the opt-in or an exception: devcontainer bind sources must lie inside the project, and linked-worktree git metadata outside the project is skipped with a warning when it is sensitive.
+To mount every sensitive directory, including locations hard-protected by the sensitive-path check, pass `--allow-sensitive-mounts` or set `ENCLAVE_ALLOW_SENSITIVE_MOUNTS=1`; each sensitive mount then prints a warning. An explicit `--allow-sensitive-mounts=false` overrides the environment variable. On Docker and Podman, mounts containing Enclave's host lock and OAuth session state (`locks/` and `oauth-sessions/` under the state root), or a protected auth store, remain refused even with this opt-in. This blanket opt-in has no config key, so neither global nor project config can grant it; config can only exempt specific paths. Mounts from the repository stay blocked even with the opt-in or an exception: devcontainer bind sources must lie inside the project, and linked-worktree git metadata outside the project is skipped with a warning when it is sensitive.
 
 The mounts enclave adds itself, such as `~/.gitconfig`, `~/.claude/ide` for the IDE bridge, direnv approvals, and the session stores, come from protected locations by design and are not checked.
 
@@ -429,7 +449,7 @@ The default backend is `auto`: enclave uses docker when its CLI is on `PATH`, ot
 
 Rootless podman without idmapped-mount support has to copy an image into a layer for the keep-id mapping the first time that image starts, and again after every image rebuild. enclave triggers this copy before the gateway starts and prints a notice when it takes longer than two seconds; for multi-gigabyte tool images it takes minutes, during which podman blocks every other podman command, including `enclave ps`.
 
-Commands that use an engine accept `--backend`, including session management, `update`, `theia`/`theia-next`, `info`, `cleanup`, `auth import`/`export`, and the engine-using `network` subcommands (`status`, `log`, `apply`, and policy mutations). Without the flag they use the configured backend or detection. Engine-independent commands such as `network print` and `network diff` do not accept it; `config` accepts it to preview option resolution. `cleanup --build-cache` reports nothing to reclaim under podman, which keeps no separate build cache.
+Commands that use an engine accept `--backend`, including session management, `update`, `theia`/`theia-next`, `info`, `cleanup`, `auth import`/`export`/`reset`/`downgrade`, and the engine-using `network` subcommands (`status`, `log`, `apply`, and policy mutations). Without the flag they use the configured backend or detection. Engine-independent commands such as `network print` and `network diff` do not accept it; `config` accepts it to preview option resolution. `cleanup --build-cache` reports nothing to reclaim under podman, which keeps no separate build cache.
 
 ## Experimental QEMU backend
 

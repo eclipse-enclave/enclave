@@ -41,7 +41,9 @@ sandbox:
 
 credentials:
   sources:
-    openai-api-key: { env: [CODEX_API_KEY, OPENAI_API_KEY] }
+    openai-api-key:
+      env: [CODEX_API_KEY, OPENAI_API_KEY]
+      placeholder: { prefix: "sk-enclave-", random: { encoding: alphanumeric, length: 48 } }
     codex-access-token:
       env: [CODEX_ACCESS_TOKEN]
       apiKey: false

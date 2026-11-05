@@ -11,6 +11,9 @@ import "enclave/internal/model"
 
 type SecretMapping struct {
 	Entries []model.SecretReleaseEntry
+	// Instances are the hosts selected in place of declared release hosts,
+	// with or without a resolved token.
+	Instances []model.ProviderInstance
 }
 
 func (m SecretMapping) HasEntries() bool {

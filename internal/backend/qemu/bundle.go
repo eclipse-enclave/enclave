@@ -16,11 +16,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
 
 	"enclave/internal/backend"
+	"enclave/internal/backend/hoststore"
 	"enclave/internal/model"
 )
 
@@ -108,8 +110,10 @@ type runtimeFileMount struct {
 	Target      string
 	GuestSource string
 	GuestResult string
-	ResultPath  string
-	ReadOnly    bool
+	// StageRoot is the guest-writable staging share; ResultPath lies below it.
+	StageRoot  string
+	ResultPath string
+	ReadOnly   bool
 }
 
 func resolveBundle(image string) (bundle, error) {
@@ -274,6 +278,12 @@ func resolveBundleMemoryMiB(root string) (int, error) {
 }
 
 func (b *Backend) prepareGuestRuntime(bundle bundle, req backend.Request, console consoleSize) (guestRuntime, error) {
+	// Guard file sources before staging can copy credential bytes.
+	checked, err := b.validateAuthMounts(req.Mounts)
+	if err != nil {
+		return guestRuntime{}, err
+	}
+	req.Mounts = checked
 	// Before anything inspects the sources: prepareFileMounts stats every bind
 	// source and rejects a missing one, so a later creation pass would never run
 	// for the case CreateSourceDir exists for.
@@ -356,6 +366,11 @@ func createDisposableMountSources(mounts []backend.Mount) error {
 }
 
 func (b *Backend) buildRuntimeMounts(req backend.Request, controlDir string, fileStageSource string) ([]runtimeMount, error) {
+	checked, err := b.validateAuthMounts(req.Mounts)
+	if err != nil {
+		return nil, err
+	}
+	req.Mounts = checked
 	mounts := make([]runtimeMount, 0, len(req.Mounts)+len(req.Stores)+2)
 	idx := 0
 	for _, mount := range req.Mounts {
@@ -405,12 +420,28 @@ func (b *Backend) buildRuntimeMounts(req backend.Request, controlDir string, fil
 	if fileStageSource != "" {
 		mounts = append(mounts, runtimeMount{ID: "files", Tag: "enclave-files", Source: fileStageSource, Target: guestFilesPath})
 	}
-	mounts = append(mounts, runtimeMount{ID: "control", Tag: "enclave-control", Source: controlDir, Target: guestControlPath})
+	mounts = append(mounts, runtimeMount{ID: "control", Tag: hoststore.QEMUControlTag, Source: controlDir, Target: guestControlPath})
 	// Parent mounts must precede children, including late-added config anchors.
 	sort.SliceStable(mounts, func(i, j int) bool {
 		return strings.Count(mounts[i].Target, "/") < strings.Count(mounts[j].Target, "/")
 	})
 	return mounts, nil
+}
+
+func (b *Backend) validateAuthMounts(mounts []backend.Mount) ([]backend.Mount, error) {
+	sources := make([]string, len(mounts))
+	for i, mount := range mounts {
+		sources[i] = mount.Source
+	}
+	checked, err := hoststore.ValidateAuthMounts(b.opts.Host.Home, sources, nil)
+	if err != nil {
+		return nil, err
+	}
+	result := slices.Clone(mounts)
+	for i := range result {
+		result[i].Source = checked[i]
+	}
+	return result, nil
 }
 
 func prepareFileMounts(tempDir string, mounts []backend.Mount) ([]runtimeFileMount, string, error) {
@@ -451,6 +482,7 @@ func prepareFileMounts(tempDir string, mounts []backend.Mount) ([]runtimeFileMou
 			Target:      filepath.Clean(mount.ContainerPath),
 			GuestSource: filepath.Join(guestEntry, "source"),
 			GuestResult: filepath.Join(guestEntry, "result"),
+			StageRoot:   root,
 			ResultPath:  resultPath,
 			ReadOnly:    mount.ReadOnly,
 		})
@@ -548,24 +580,77 @@ func segmentPadding(offset int64) int {
 	return initramfsSegmentAlignment - int(remainder)
 }
 
-func persistFileMounts(files []runtimeFileMount) []error {
+func (b *Backend) persistFileMounts(files []runtimeFileMount) []error {
 	var errs []error
 	for _, file := range files {
 		if file.ReadOnly {
 			continue
 		}
-		data, err := os.ReadFile(file.ResultPath) // #nosec G304 -- result path is generated under the runtime directory.
+		checked, err := hoststore.ValidateAuthMounts(b.opts.Host.Home, []string{file.Source}, nil)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("persist file mount %s: %w", file.Target, err))
 			continue
 		}
-		info, statErr := os.Stat(file.Source)
-		mode := fsMode(info, statErr)
-		if err := os.WriteFile(file.Source, data, mode); err != nil { // #nosec G306 G304 G703 -- source was supplied as a validated mount source.
+		file.Source = checked[0]
+		data, err := readStagedResult(file.StageRoot, file.ResultPath)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("persist file mount %s: %w", file.Target, err))
+			continue
+		}
+		if err := writeMountSource(file.Source, data); err != nil {
 			errs = append(errs, fmt.Errorf("persist file mount %s: %w", file.Target, err))
 		}
 	}
 	return errs
+}
+
+// readStagedResult reads a file the guest wrote into the staging share. The
+// guest controls everything below root, so links it planted there must not
+// lead the host to read files outside it.
+func readStagedResult(root, path string) ([]byte, error) {
+	rel, err := filepath.Rel(root, path)
+	if err != nil || rel == "." || strings.HasPrefix(rel, "..") {
+		return nil, fmt.Errorf("staged result %s is outside the staging share", path)
+	}
+	share, err := os.OpenRoot(root)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = share.Close() }()
+	f, err := share.Open(rel)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = f.Close() }()
+	if info, err := f.Stat(); err != nil || !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("staged result %s is not a regular file", path)
+	}
+	return io.ReadAll(f)
+}
+
+// writeMountSource replaces a validated host source in place. Opening it
+// within its directory refuses a link planted at its name since validation
+// that would lead elsewhere.
+func writeMountSource(path string, data []byte) error {
+	parent, err := os.OpenRoot(filepath.Dir(path))
+	if err != nil {
+		return err
+	}
+	defer func() { _ = parent.Close() }()
+	name := filepath.Base(path)
+	info, statErr := parent.Lstat(name)
+	if statErr == nil && !info.Mode().IsRegular() {
+		return fmt.Errorf("mount source %s is no longer a regular file", path)
+	}
+	f, err := parent.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, fsMode(info, statErr))
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write(data); err != nil {
+		_ = f.Close()
+		return err
+	}
+	return f.Close()
 }
 
 func fsMode(info os.FileInfo, err error) os.FileMode {

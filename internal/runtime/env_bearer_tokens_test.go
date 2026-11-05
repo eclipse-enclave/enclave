@@ -36,11 +36,11 @@ func TestEnvBearerTokensUseGatewayPlaceholdersAcrossSessions(t *testing.T) {
 		tool, env, value, prefix, provider, header string
 		hosts                                      []string
 	}{
-		{"claude", "CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-oat01-real-claude", "ENCLAVE_SECRET_", "anthropic", "authorization", []string{"api.anthropic.com"}},
+		{"claude", "CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-oat01-real-claude", "sk-ant-oat01-", "anthropic", "authorization", []string{"api.anthropic.com", "mcp-proxy.anthropic.com"}},
 		{"pi", "ANTHROPIC_OAUTH_TOKEN", "sk-ant-oat01-real-pi", "sk-ant-oat01-ENCLAVE_SECRET_", "anthropic", "authorization", []string{"api.anthropic.com"}},
 		{"codex", "CODEX_ACCESS_TOKEN", "at-real-codex", "at-ENCLAVE_SECRET_", "openai-codex", "authorization", []string{"auth.openai.com", "chatgpt.com"}},
-		{"codex", "CODEX_API_KEY", "real-openai", "ENCLAVE_SECRET_", "openai-codex", "authorization", []string{"*.openai.com", "api.openai.com"}},
-		{"codex", "OPENAI_API_KEY", "real-openai", "ENCLAVE_SECRET_", "openai-codex", "authorization", []string{"*.openai.com", "api.openai.com"}},
+		{"codex", "CODEX_API_KEY", "real-openai", "sk-enclave-", "openai-codex", "authorization", []string{"*.openai.com", "api.openai.com"}},
+		{"codex", "OPENAI_API_KEY", "real-openai", "sk-enclave-", "openai-codex", "authorization", []string{"*.openai.com", "api.openai.com"}},
 	} {
 		t.Run(tc.tool+"/"+tc.env, func(t *testing.T) {
 			r := bearerTokenRuntime(t, tc.tool)

@@ -9,8 +9,6 @@ package app
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -108,7 +106,7 @@ func discoverGatewayTargets(input *CommandInput, manager backend.GatewayManager,
 	return targets, scopeLabel, nil
 }
 
-func desiredGatewayBundleHash(resolver policy.EffectiveResolver, target backend.GatewayInfo, targetProjectDir string) (string, error) {
+func desiredGatewayBundleHash(resolver policy.EffectiveResolver, target backend.GatewayInfo, targetProjectDir string, active backend.GatewayNetworkState) (string, error) {
 	if strings.TrimSpace(target.Tool) == "" {
 		return "", fmt.Errorf("missing tool label on gateway %s", target.ShortID())
 	}
@@ -124,32 +122,14 @@ func desiredGatewayBundleHash(resolver policy.EffectiveResolver, target backend.
 		return "", err
 	}
 
+	effective, err := gatewayPolicyForReload(resolved.Effective, active)
+	if err != nil {
+		return "", err
+	}
 	return bundle.ConfigBundleHash(bundle.BundleWriteConfig{
-		Policy: resolved.Effective,
+		Policy: effective,
 		Tool:   target.Tool,
 	})
-}
-
-func hashGatewayBundleDir(dir string) (string, error) {
-	paths := []string{
-		filepath.Join(dir, filepath.Base(model.GatewayConfigDNSMasqPath)),
-		filepath.Join(dir, filepath.Base(model.GatewayConfigDomainsPath)),
-	}
-
-	hasher := sha256.New()
-	for _, path := range paths {
-		// #nosec G304 -- path is assembled from known bundle filenames under an internal caller-provided directory.
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return "", fmt.Errorf("read bundle file %s: %w", path, err)
-		}
-		hasher.Write([]byte(filepath.Base(path)))
-		hasher.Write([]byte{0})
-		hasher.Write(data)
-		hasher.Write([]byte{0})
-	}
-
-	return hex.EncodeToString(hasher.Sum(nil)), nil
 }
 
 func readGatewayBundleGeneration(bundleDir string) (string, error) {

@@ -51,3 +51,28 @@ func TestAttachIOCommandEnv(t *testing.T) {
 		t.Fatalf("env = %v", env)
 	}
 }
+
+func TestNetworkGatewayMediationIsIndependentOfRestrictions(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		policy NetworkPolicy
+		want   bool
+	}{
+		{"restricted", NetworkPolicy{Mode: NetworkModeRestricted}, true},
+		{"legacy unrestricted bypass", NetworkPolicy{Mode: NetworkModeUnrestricted}, false},
+		{"mediated unrestricted", NetworkPolicy{Mode: NetworkModeUnrestricted, RequireGateway: true}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.policy.UsesGateway(); got != tc.want {
+				t.Fatalf("UsesGateway() = %t, want %t", got, tc.want)
+			}
+		})
+	}
+	req := Request{Network: NetworkPolicy{Mode: NetworkModeUnrestricted, RequireGateway: true}}
+	if err := Validate(req, Capabilities{}); err == nil {
+		t.Fatal("accepted required credential mediation on unsupported backend")
+	}
+	if err := Validate(req, Capabilities{SecretHTTPRelease: true}); err != nil {
+		t.Fatalf("destination restrictions unnecessarily required for mediation: %v", err)
+	}
+}

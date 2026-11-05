@@ -11,6 +11,22 @@
 export COPILOT_HOME="$HOME/.copilot"
 mkdir -p "$COPILOT_HOME"
 
+if [ "${ENCLAVE_PROTECTED_AUTH:-}" = "1" ]; then
+	_settings="$COPILOT_HOME/settings.json"
+	_settings_tmp=$(mktemp "$COPILOT_HOME/.protected-settings.XXXXXX")
+	if [ -f "$_settings" ]; then
+		if ! grep -v '^[[:space:]]*//' "$_settings" | jq -e -s 'if length == 1 and (.[0] | type) == "object" then .[0] + {storeTokenPlaintext:true} else error("expected one settings object") end' > "$_settings_tmp"; then
+			rm -f "$_settings_tmp"
+			echo "Cannot prepare protected Copilot settings: expected a JSON object with optional // headers" >&2
+			exit 1
+		fi
+	else
+		printf '%s\n' '{"storeTokenPlaintext":true}' > "$_settings_tmp"
+	fi
+	mv "$_settings_tmp" "$_settings"
+	unset _settings _settings_tmp
+fi
+
 # In yolo mode, remember the project workspace as trusted for future sessions.
 if [ "${ENCLAVE_YOLO:-}" = "1" ] && [ -n "${PROJECT_DIR:-}" ] && command -v jq >/dev/null 2>&1; then
 	_config="$COPILOT_HOME/config.json"

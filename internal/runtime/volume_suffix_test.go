@@ -115,6 +115,34 @@ func TestCurrentConfigVolumeSuffixUsesContainerSuffixForConcurrentUnnamedSession
 	}
 }
 
+func TestConcurrentProtectedSessionsDoNotShareConfigStore(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		protected bool
+		running   string
+		want      string
+	}{
+		{name: "protected session running", protected: true, running: "default.protected", want: "2"},
+		{name: "only ordinary session running", protected: true, running: defaultConfigKey, want: ""},
+		{name: "ordinary beside protected session", running: "default.protected", want: ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := &Runtime{
+				project: model.Project{Dir: "/tmp/repo", RealDir: "/tmp/repo", Hash: "abc123abc123"},
+				profile: model.Profile{Name: "claude", ConfigDir: ".claude"},
+				run:     model.RunOptions{Persist: true},
+				auth:    model.AuthOptions{ProtectAuth: tc.protected},
+			}
+			r.backend = &fakeBackend{configKeyInUse: func(_ backend.SessionMeta, key string) (bool, error) {
+				return key == tc.running, nil
+			}}
+			if got := r.currentConfigVolumeSuffix("enclave-claude-abc123abc123-2", "enclave-claude-abc123abc123"); got != tc.want {
+				t.Fatalf("config suffix = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestCurrentConfigVolumeSuffixKeepsStableWorktreeKeyWhenOnlyOtherWorktreeIsRunning(t *testing.T) {
 	mainProject := model.Project{RealDir: "/tmp/repo"}
 	mainHash := projectPathHash(mainProject)
@@ -155,6 +183,25 @@ func TestGeneratedConfigSourceDirDefaultsToDefaultKey(t *testing.T) {
 	want := filepath.Join(config.HostProjectGeneratedConfigDir("/tmp/home", "abc123abc123", "claude"), "default")
 	if got != want {
 		t.Fatalf("generatedConfigSourceDir() = %q, want %q", got, want)
+	}
+}
+
+// Protected sessions own their config store; generated config, skills and
+// session memory follow it rather than a concurrent ordinary session's.
+func TestProtectedSessionsUseTheirOwnGeneratedKey(t *testing.T) {
+	t.Parallel()
+
+	for _, suffix := range []string{"", "task"} {
+		ordinary := &Runtime{host: model.Host{Home: "/tmp/home"}, project: model.Project{Hash: "abc123abc123"}, profile: model.Profile{Name: "codex"}, configVolSuffix: suffix, configVolReady: true}
+		protected := *ordinary
+		protected.auth.ProtectAuth = true
+		key := protected.sessionGeneratedKey()
+		if key == ordinary.sessionGeneratedKey() || !backend.IsProtectedConfigKey(backend.StoreKey{Suffix: key}) {
+			t.Fatalf("suffix %q: protected key %q, ordinary %q", suffix, key, ordinary.sessionGeneratedKey())
+		}
+		if protected.generatedConfigSourceDir() == ordinary.generatedConfigSourceDir() {
+			t.Fatalf("suffix %q: protected and ordinary sessions share generated config", suffix)
+		}
 	}
 }
 

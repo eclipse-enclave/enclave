@@ -17,13 +17,16 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"enclave/internal/backend"
+	"enclave/internal/backend/hoststore"
 	dockercmd "enclave/internal/docker"
 	"enclave/internal/gateway"
 	"enclave/internal/logx"
 	"enclave/internal/model"
+	"enclave/internal/protectedclient"
 	"enclave/internal/util"
 )
 
@@ -44,6 +47,7 @@ type Options struct {
 }
 
 type Backend struct {
+	authStarts         sync.Map
 	opts               Options
 	storage            *StoreManager
 	reconcileScript    string
@@ -95,6 +99,20 @@ func (b *Backend) Storage() backend.StoreManager { return b.storage }
 // what it created; once the session is attached the engine child owns the
 // terminal and is deliberately detached from ctx.
 func (b *Backend) Run(ctx context.Context, req backend.Request, attach backend.AttachIO) (backend.ExitStatus, error) {
+	if req.AuthSession != nil {
+		defer func() {
+			if err := b.ReleaseAuthSession(context.Background(), req.AuthSession); err != nil {
+				logx.Warnf("Retaining auth session reservation: %v", err)
+			}
+		}()
+		onStarted := attach.OnStarted
+		attach.OnStarted = func() {
+			b.releaseAuthStart(req.AuthSession)
+			if onStarted != nil {
+				onStarted()
+			}
+		}
+	}
 	// Post-run credential sync runs on every foreground outcome (success,
 	// tool failure, even setup failure), matching the previous runtime
 	// behavior. Registered first so it runs after the gateway teardown. An
@@ -116,6 +134,14 @@ func (b *Backend) Run(ctx context.Context, req backend.Request, attach backend.A
 		}
 		return backend.ExitStatus{}, err
 	}
+	defer spec.releaseAdmission()
+	onStarted := attach.OnStarted
+	attach.OnStarted = func() {
+		spec.releaseAdmission()
+		if onStarted != nil {
+			onStarted()
+		}
+	}
 	if ctx.Err() != nil {
 		if spec.cleanup != nil {
 			spec.cleanup()
@@ -126,6 +152,12 @@ func (b *Backend) Run(ctx context.Context, req backend.Request, attach backend.A
 	// Ctrl-C now reaches the tool through the TTY or the engine's signal
 	// proxying; cancelling ctx must not kill the attached child and strand a
 	// running session.
+	if err := recheckBindSources(spec); err != nil {
+		if spec.cleanup != nil {
+			spec.cleanup()
+		}
+		return backend.ExitStatus{}, err
+	}
 	return attachForeground(context.WithoutCancel(ctx), spec, attach)
 }
 
@@ -205,14 +237,26 @@ func (b *Backend) Start(ctx context.Context, req backend.Request) (backend.Sessi
 		}
 		return backend.SessionRef{}, err
 	}
+	defer spec.releaseAdmission()
+	if err := recheckBindSources(spec); err != nil {
+		if spec.cleanup != nil {
+			spec.cleanup()
+		}
+		return backend.SessionRef{}, err
+	}
 	id, err := dockercmd.RunDetachedInteractive(ctx, spec.config, spec.hostConfig, spec.name)
 	if err != nil {
-		if ctx.Err() != nil {
-			// The interrupt may have landed after the engine created the
-			// container; it has to go before the gateway it joins.
+		// The engine may have created the container before failing or being
+		// interrupted; it has to go before the gateway it joins, and a
+		// created container would keep the session's reservation. A failure
+		// for another reason, such as a name conflict, must not remove a
+		// container that started.
+		if ctx.Err() != nil || neverStarted(context.WithoutCancel(ctx), spec.name) {
 			if rmErr := dockercmd.ContainerRemove(context.WithoutCancel(ctx), spec.name, true, false); rmErr != nil && !dockercmd.IsNotFound(rmErr) {
-				logx.Warnf("Failed to remove container %s after an interrupted start: %v", spec.name, rmErr)
+				logx.Warnf("Failed to remove container %s after a failed start: %v", spec.name, rmErr)
 			}
+		}
+		if ctx.Err() != nil {
 			err = interruptedStart()
 		}
 		if spec.cleanup != nil {
@@ -220,7 +264,28 @@ func (b *Backend) Start(ctx context.Context, req backend.Request) (backend.Sessi
 		}
 		return backend.SessionRef{}, err
 	}
+	b.releaseAuthStart(req.AuthSession)
 	return backend.SessionRef{Name: spec.name, ID: id}, nil
+}
+
+// recheckBindSources confirms, right before the engine creates the container,
+// that every bind source still resolves to the path validated earlier; the
+// engine resolves it again when it mounts.
+func recheckBindSources(spec runSpec) error {
+	for _, mount := range spec.hostConfig.Mounts {
+		if mount.Type != dockercmd.MountTypeBind {
+			continue
+		}
+		if resolved, err := canonicalAuthPath(mount.Source); err != nil || resolved != mount.Source {
+			return fmt.Errorf("bind source %s changed after validation", mount.Source)
+		}
+	}
+	return nil
+}
+
+func neverStarted(ctx context.Context, name string) bool {
+	info, err := dockercmd.ContainerInspect(ctx, name)
+	return err == nil && info.State != nil && info.State.Status == "created"
 }
 
 func interruptedStart() error {
@@ -308,6 +373,18 @@ func (b *Backend) Stop(ctx context.Context, ref backend.SessionRef, opts backend
 			stopErr = err
 		}
 	}
+	if stopErr == nil {
+		if info, err := dockercmd.ContainerInspect(ctx, name); err == nil {
+			if session := authSessionFromInspect(info, b.Name()); session != nil {
+				gateway.StopContainer(captureOwnedGatewayID(ctx, name, strings.TrimSpace(info.Config.Labels[model.LabelHash])))
+				if err := b.ReleaseAuthSession(ctx, session); err != nil {
+					return err
+				}
+			}
+		} else if !dockercmd.IsNotFound(err) {
+			return err
+		}
+	}
 	return stopErr
 }
 
@@ -316,22 +393,49 @@ func (b *Backend) Remove(ctx context.Context, ref backend.SessionRef) error {
 	if err := b.finalizeManagedContainerAuth(ctx, name); err != nil {
 		return fmt.Errorf("finalize auth before removing container %s: %w", name, err)
 	}
-	return RemoveSessionContainer(ctx, name, false)
+	return b.removeAdmittedSession(ctx, name, false)
 }
 
 func (b *Backend) RemoveWithoutFinalize(ctx context.Context, ref backend.SessionRef) error {
-	return RemoveSessionContainer(ctx, sessionRefName(ref), false)
+	return b.removeAdmittedSession(ctx, sessionRefName(ref), false)
 }
 
-// RemoveSessionContainer tears down the session, gateway, then network.
-// Podman requires this order because the session joins the gateway's namespace.
-// Capture resource IDs before removal so concurrent same-name replacements survive.
-// Only a successful or not-found session removal permits further teardown.
-func RemoveSessionContainer(ctx context.Context, name string, removeVolumes bool) error {
+// RemoveEphemeralSession preserves cleanup's removal of anonymous volumes while
+// also finalizing the stopped session's gateway and admission reservation.
+func (b *Backend) RemoveEphemeralSession(ctx context.Context, ref backend.SessionRef) error {
+	return b.removeAdmittedSession(ctx, sessionRefName(ref), true)
+}
+
+// removeAdmittedSession tears down the session, gateway, then network, and
+// finally releases the session's auth admission. Podman requires this order
+// because the session joins the gateway's namespace. Capture resource IDs
+// before removal so concurrent same-name replacements survive. Only a
+// successful or not-found session removal permits further teardown.
+func (b *Backend) removeAdmittedSession(ctx context.Context, name string, removeVolumes bool) error {
+	info, inspectErr := dockercmd.ContainerInspect(ctx, name)
+	if inspectErr != nil && !dockercmd.IsNotFound(inspectErr) {
+		return inspectErr
+	}
+	ref := authSessionFromInspect(info, b.Name())
 	projectHash := captureSessionProjectHash(ctx, name)
 	network, hasNetwork := captureSessionNetworkRef(ctx, name, projectHash)
-	gatewayID, gatewayStopped := captureOwnedGateway(ctx, name, projectHash)
-	if err := dockercmd.ContainerRemove(ctx, name, true, removeVolumes); err != nil && !dockercmd.IsNotFound(err) {
+	var gatewayID string
+	var gatewayStopped bool
+	if ref != nil {
+		// An admitted session keeps its reservation until its gateway is
+		// provably gone, so an undecidable gateway aborts the teardown.
+		id, err := ownedGatewayID(ctx, name, projectHash)
+		if err != nil {
+			return fmt.Errorf("inspect admitted session gateway: %w", err)
+		}
+		gatewayID = id
+	} else {
+		gatewayID, gatewayStopped = captureOwnedGateway(ctx, name, projectHash)
+	}
+	if err := dockercmd.ContainerRemoveAndWait(ctx, name, removeVolumes, 10*time.Second); err != nil {
+		return err
+	}
+	if err := ctx.Err(); err != nil {
 		return err
 	}
 	if gatewayStopped {
@@ -339,10 +443,23 @@ func RemoveSessionContainer(ctx context.Context, name string, removeVolumes bool
 	} else {
 		gateway.StopContainer(gatewayID)
 	}
+	if ref != nil {
+		// Podman may retain an auto-remove gateway while the workload still
+		// depends on its namespaces. Remove it after removing that dependent.
+		if gatewayID != "" {
+			if err := dockercmd.ContainerRemoveAndWait(ctx, gatewayID, true, 10*time.Second); err != nil {
+				return fmt.Errorf("remove admitted session gateway: %w", err)
+			}
+		}
+	} else if dockercmd.IsNotFound(inspectErr) {
+		if err := b.RemoveStaleGateway(ctx, name, projectHash); err != nil {
+			return err
+		}
+	}
 	if hasNetwork {
 		cleanupSessionNetwork(network)
 	}
-	return nil
+	return b.ReleaseAuthSession(ctx, ref)
 }
 
 // Use the session's metadata, not the resource being removed, to establish
@@ -357,6 +474,33 @@ func captureSessionProjectHash(ctx context.Context, name string) string {
 	}
 	_, hash, _, _ := dockercmd.ParseManagedName(name)
 	return hash
+}
+
+func captureOwnedGatewayID(ctx context.Context, name string, projectHash string) string {
+	id, err := ownedGatewayID(ctx, name, projectHash)
+	if err != nil {
+		logx.Debugf("Failed to capture gateway container %s before teardown: %v", gateway.ContainerName(name), err)
+	}
+	return id
+}
+
+// ownedGatewayID reports an error only when the gateway's existence or
+// ownership cannot be determined.
+func ownedGatewayID(ctx context.Context, name string, projectHash string) (string, error) {
+	if projectHash == "" {
+		return "", nil
+	}
+	info, err := dockercmd.ContainerInspect(ctx, gateway.ContainerName(name))
+	if err != nil {
+		if dockercmd.IsNotFound(err) {
+			return "", nil
+		}
+		return "", err
+	}
+	if !gateway.ContainerOwnedBy(info, name, projectHash) {
+		return "", nil
+	}
+	return strings.TrimSpace(info.ID), nil
 }
 
 func captureOwnedGateway(ctx context.Context, name string, projectHash string) (id string, stopped bool) {
@@ -390,11 +534,37 @@ func removeStoppedGateway(ctx context.Context, id string) {
 var execInteractive = dockercmd.ExecInteractive
 
 func (b *Backend) Exec(ctx context.Context, ref backend.SessionRef, req backend.ExecRequest, attach backend.AttachIO) error {
-	execErr := execInteractive(ctx, sessionRefName(ref), req.Argv, req.User, req.TTY)
+	argv, err := protectedExecArgv(ctx, sessionRefName(ref), req.Argv, req.User)
+	if err != nil {
+		return err
+	}
+	execErr := execInteractive(ctx, sessionRefName(ref), argv, req.User, req.TTY)
 	// Sync credentials from the session's config store on every exec outcome so
 	// they are durable immediately, not only at a later stop/remove.
 	b.syncAfterExec(sessionRefName(ref))
 	return neutralizeExitError(execErr)
+}
+
+// protectedExecArgv gives an exec the pinned GitHub CLI that the target
+// session's entrypoint selected. An exec does not pass through that
+// entrypoint, and the selection comes from the session's creation environment
+// rather than the invoking command's flags.
+func protectedExecArgv(ctx context.Context, name string, argv []string, user string) ([]string, error) {
+	info, err := dockercmd.ContainerInspect(ctx, name)
+	if err != nil {
+		return nil, fmt.Errorf("inspect exec target: %w", err)
+	}
+	if info.Config == nil {
+		return nil, errors.New("inspect exec target: missing container configuration")
+	}
+	// Protected sessions refuse admin mode; an exec must not add it.
+	if user == "root" && containerEnvValue(info.Config, model.EnvProtectedAuth) == "1" {
+		return nil, errors.New("protected sessions do not support admin exec (--admin)")
+	}
+	if containerEnvValue(info.Config, model.EnvProtectedGitHub) != "1" {
+		return argv, nil
+	}
+	return protectedclient.Wrap(argv), nil
 }
 
 func (b *Backend) Logs(ctx context.Context, ref backend.SessionRef, opts backend.LogOptions) (string, error) {
@@ -406,15 +576,39 @@ func (b *Backend) Logs(ctx context.Context, ref backend.SessionRef, opts backend
 }
 
 type runSpec struct {
-	config     *dockercmd.ContainerConfig
-	hostConfig *dockercmd.HostConfig
-	name       string
-	cleanup    func()
+	config           *dockercmd.ContainerConfig
+	hostConfig       *dockercmd.HostConfig
+	name             string
+	cleanup          func()
+	releaseAdmission func()
 }
 
 func (b *Backend) prepareRun(ctx context.Context, req backend.Request) (runSpec, error) {
+	if req.AuthSession != nil {
+		if req.AuthSession.Session != req.Session.Name || req.AuthSession.Engine != b.Name() {
+			return runSpec{}, fmt.Errorf("auth session does not match workload")
+		}
+		if err := b.validateAuthReservation(req.AuthSession); err != nil {
+			return runSpec{}, err
+		}
+		if req.AuthSession.Protected {
+			b.storage.authSession = req.AuthSession
+			b.storage.viewDir = b.authViewDir(req.AuthSession)
+			if !req.Network.UsesGateway() {
+				return runSpec{}, fmt.Errorf("protected OAuth requires gateway mediation")
+			}
+		}
+	}
 	if err := backend.Validate(req, b.Capabilities()); err != nil {
 		return runSpec{}, err
+	}
+	for _, store := range req.Stores {
+		if store.Kind != backend.StoreKindAuth && store.Kind != backend.StoreKindFeatureAuth {
+			continue
+		}
+		if _, err := b.storage.storeDir(store.Key, store.Kind); err != nil {
+			return runSpec{}, err
+		}
 	}
 	dockerSystemInfo, err := dockerInfo(ctx)
 	if err != nil {
@@ -434,6 +628,25 @@ func (b *Backend) prepareRun(ctx context.Context, req backend.Request) (runSpec,
 			return runSpec{}, err
 		}
 	}
+	if req.Network.UsesGateway() {
+		if err := b.prepareGatewayImage(ctx, req); err != nil {
+			return runSpec{}, err
+		}
+	}
+	release, err := hoststore.AcquireAuthMountAdmission(b.opts.Host.Home)
+	if err != nil {
+		return runSpec{}, err
+	}
+	prepared := false
+	defer func() {
+		if !prepared {
+			release()
+		}
+	}()
+	spec.releaseAdmission = release
+	if err := b.validateProtectedMounts(req, spec); err != nil {
+		return runSpec{}, err
+	}
 	if err := b.prepareImageUserNamespace(ctx, req.Image); err != nil {
 		return runSpec{}, err
 	}
@@ -441,7 +654,7 @@ func (b *Backend) prepareRun(ctx context.Context, req backend.Request) (runSpec,
 	if err != nil {
 		return runSpec{}, err
 	}
-	if req.Network.Mode == backend.NetworkModeRestricted {
+	if req.Network.UsesGateway() {
 		gatewayName, cleanup, err := b.startGateway(ctx, req, sessionNetwork.Name)
 		if err != nil {
 			cleanupSessionNetwork(sessionNetwork)
@@ -464,6 +677,7 @@ func (b *Backend) prepareRun(ctx context.Context, req backend.Request) (runSpec,
 		}
 	}
 	applySELinuxMounts(spec.hostConfig, util.IsSELinuxEnforcing())
+	prepared = true
 	return spec, nil
 }
 
@@ -546,6 +760,7 @@ func labelsFromRequest(req backend.Request) map[string]string {
 	labels := map[string]string{
 		model.LabelConfigKey: "default",
 	}
+	addAuthSessionLabels(labels, req.AuthSession)
 	if meta.Tool != "" {
 		labels[model.LabelAgent] = meta.Tool
 	}

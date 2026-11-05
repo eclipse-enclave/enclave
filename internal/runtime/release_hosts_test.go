@@ -8,6 +8,7 @@
 package runtime
 
 import (
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -231,5 +232,28 @@ func TestInjectDeclaredSecretsMarksSelectedHostExact(t *testing.T) {
 	}
 	if !entry.ExactHosts {
 		t.Fatal("entry.ExactHosts = false, want the selected host matched exactly")
+	}
+}
+
+// A protected gateway mediates a selected instance like the declared service,
+// so the instance reaches the backend request whether or not a token for it
+// resolves.
+func TestSelectedInstanceReachesTheRequestWithoutToken(t *testing.T) {
+	for _, token := range []string{"gitlab-token-value", ""} {
+		t.Run(fmt.Sprintf("token=%t", token != ""), func(t *testing.T) {
+			t.Setenv("GITLAB_HOST", "https://gitlab.example.com/group")
+			t.Setenv("GITLAB_TOKEN", token)
+			t.Setenv("JOB_TOKEN", "")
+			r := runtimeWithProfile(t, gitlabLikeProfile())
+			env := []string{}
+			injection, err := newAuthManager(r).injectDeclaredSecrets(stubHooks{}, authContextForRuntime(r), &env, map[string]string{}, nil, nil, mustActiveSecrets(t, r))
+			if err != nil {
+				t.Fatal(err)
+			}
+			instances := providerInstanceRequests(injection.SecretMapping)
+			if len(instances) != 1 || instances[0].Host != "gitlab.example.com" || !slices.Contains(instances[0].DeclaredHosts, "gitlab.com") {
+				t.Fatalf("instances = %+v", instances)
+			}
+		})
 	}
 }

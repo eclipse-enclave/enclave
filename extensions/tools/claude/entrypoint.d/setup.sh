@@ -8,6 +8,12 @@
 # shellcheck shell=bash
 # Claude extension setup
 mkdir -p "$HOME/.claude"
+# A protected session's handle view carries initial account state; the
+# persistent config store keeps its own copy once it has one.
+if [ "${ENCLAVE_PROTECTED_AUTH:-}" = "1" ] && [ -f "${ENCLAVE_AUTH_DIR:-}/.claude.json" ] &&
+    [ ! -e "$HOME/.claude/.claude.json" ] && [ ! -L "$HOME/.claude/.claude.json" ]; then
+    cp "$ENCLAVE_AUTH_DIR/.claude.json" "$HOME/.claude/.claude.json"
+fi
 export DISABLE_TELEMETRY=1
 export DISABLE_ERROR_REPORTING=1
 export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1

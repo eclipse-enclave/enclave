@@ -9,9 +9,376 @@ enclave        # First run: log in from inside the agent
 enclave        # Subsequent runs: session reused automatically
 ```
 
+### Experimental protected authentication
+
+With `--protect-auth`, the network gateway keeps the provider credentials of a
+session and the workload sees only handles and placeholders. The supported
+shipped tools are `claude`, `codex`, `copilot`, `opencode`, `pi`, `theia` and
+`theia-next`, on Docker or Podman. The gateway captures the logins each tool
+supports and gives the tool handles in its native credential files, which the
+session links to a view at `~/.enclave-auth`:
+
+| Tool | Captured logins | Native credential files |
+|------|-----------------|-------------------------|
+| `claude` | Claude subscription | `.credentials.json` (through `CLAUDE_SECURESTORAGE_CONFIG_DIR`) |
+| `pi` | Claude subscription, ChatGPT (`openai-codex`) | `~/.pi/agent/auth.json` |
+| `codex` | ChatGPT (browser and device code) | `~/.codex/auth.json` |
+| `opencode` (1.x) | ChatGPT (browser and headless), GitHub Copilot (GitHub.com device login) | `~/.config/opencode/auth.json` |
+| `copilot` | GitHub.com device login | `~/.copilot/config.json` |
+| `theia`, `theia-next` | none; no `--auth-name` needed, each session gets a fresh identity | none |
+
+Mistral Vibe is an optional installed extension, not a shipped tool. The
+canonical `mistral-vibe` extension from
+[enclave-extensions](https://github.com/eclipse-enclave/enclave-extensions)
+retains an explicit compatibility descriptor for provider `mistral`, config
+directory `.vibe`, and native `.env` credentials. It is excluded from the
+default core engine matrix. Other extension layouts do not gain protected
+native auth merely by declaring `authFiles`.
+
+Provider API keys, for any tool, belong in [Enclave secrets](#secrets): a
+protected session receives them only as placeholders, in every network mode, and
+the gateway releases them at their declared hosts and header and aborts
+responses that echo them. This includes `claude setup-token` tokens as
+`CLAUDE_CODE_OAUTH_TOKEN`. Placeholders keep the prefixes clients check, such as
+`sk-ant-api03-` and `sk-ant-oat01-` for Anthropic keys and tokens and `sk-` for
+OpenAI keys.
+
+Opt in with one of these identities:
+
+```bash
+# A fresh named identity, shareable across projects
+enclave --tool codex --auth-scope shared --auth-name protected-test --protect-auth
+# One identity per project
+enclave --tool codex --auth-scope project --protect-auth
+# A login that lasts for this session only; GitHub logins still persist
+# in the shared GitHub CLI feature identity
+enclave --tool codex --ephemeral --protect-auth
+```
+
+Then complete the tool's normal login. The gateway captures and durably stores
+the provider tokens before returning session-bound handles, which the tool
+writes to, or reads from, its native credential files. The real grants and
+handle registries are never workload-mounted. Protected identities start fresh;
+existing tool auth is not migrated. As in ordinary sessions, Enclave maps a
+login callback port, such as ChatGPT's `1455`, only while the identity holds no
+login for that provider.
+
+Project-scoped identities are stored as `project.<project-hash>` and ephemeral
+ones as `ephemeral.<random>` among the shared identities; `--auth-name` never
+contains a dot, so the scopes cannot collide. An ephemeral identity and its
+grant are deleted once its session has ended and no container can mount them
+any more; a later session start removes any that a crash left behind. An
+ordinary `--auth-scope project` session never touches the project's protected
+identity: it uses its own, unprotected login in the project config store. Set
+`"protect_auth": true` in the project configuration to avoid starting one by
+accident.
+
+#### Provider mediation
+
+Protected runs use the same, unpinned tool clients as ordinary sessions. Login
+schemas and native layouts still need compatibility checks when clients change.
+In every protected session, whatever
+the tool, the gateway mediates the Anthropic and Claude (`anthropic.com`,
+`claude.com`, `claude.ai`), OpenAI (`openai.com`, `chatgpt.com`), Mistral,
+GitHub, GitLab and Copilot domains, their subdomains, and
+`generativelanguage.googleapis.com`:
+
+- It captures the supported login and refresh exchanges and releases each real
+  credential only in the `Authorization` header to the hosts that use it.
+- It refuses logins it does not capture, other token endpoints, API-key
+  endpoints and token revocation; native logout therefore only clears the
+  session's local view.
+- It refuses raw credentials, such as an API key pasted into a tool, in
+  credential headers and Gemini's `key` query parameter; configure them as
+  Enclave secrets instead.
+- It aborts any response from these hosts that would echo a real credential, and
+  any structured response outside model and file content that carries token
+  fields or provider key patterns, before those bytes reach the workload.
+- It checks response header names without case and values case-sensitively for
+  released credentials and provider credential patterns, including upgrade
+  handshakes. Trailer names are checked the same way.
+- It checks WebSocket handshakes like requests. When a handshake carries a
+  released credential, it withholds compression from the handshake and scans
+  every server frame, cutting the connection before a frame that would complete
+  the credential; other upgrades carrying credentials are refused.
+
+A client release that changes its login flow fails closed until Enclave adapts.
+A self-managed GitLab selected with `GITLAB_HOST` is mediated like `gitlab.com`:
+its configured token is released there, while logins and pasted tokens are
+refused. Other self-hosted login hosts, such as GitHub Enterprise, are not
+recognized: under unrestricted networking their logins are not protected, and
+restricted networking blocks them unless allowlisted.
+
+#### Full network capture
+
+`--network-log=full` can be used with `--protect-auth`. Captures hold the
+workload's requests before credential release and the broker's sanitized
+responses, including session handles instead of native token-endpoint
+credentials. Released credentials are withheld from captured responses and
+server WebSocket frames by the same tripwires that protect the workload.
+Broker-denied exchanges leave no capture. Tripwire-aborted exchanges keep a
+credential-free capture with `truncated: true` on the body or WebSocket
+metadata and `error: "oauth-broker-response"`.
+
+This does not scan raw tokens the workload already holds in permitted outgoing
+requests or WebSocket frames. Provider upgrades without a credential release
+also have no released-value tripwire. Those payloads can reach full captures.
+See [unscanned outbound credentials](networking.md#unscanned-outbound-credentials)
+and a follow-up issue for outbound scanning; additional outbound
+scanning is outside this mode's guarantee.
+
+#### Claude subscription
+
+The gateway captures the login and refresh exchange at
+`platform.claude.com/v1/oauth/token` and releases the real access token to
+`api.anthropic.com` and `mcp-proxy.anthropic.com`, on any path. Claude reads its
+native `.credentials.json` from the view (`CLAUDE_SECURESTORAGE_CONFIG_DIR`);
+pi reads the same login from the `anthropic` entry of its `auth.json`.
+
+#### ChatGPT
+
+Codex, OpenCode and pi sign in at `auth.openai.com`. ChatGPT handles keep the
+real tokens' JWT header and claims, which the clients read, with the gateway's
+random signature; only `chatgpt.com` receives the real access token. The token
+exchange that mints an OpenAI API key from a ChatGPT login is refused.
+
+#### GitHub Copilot
+
+OpenCode's Copilot login is a GitHub.com device login of its own OAuth client;
+the gateway keeps the GitHub token and releases it only to `githubcopilot.com`
+hosts, never to GitHub's own API. Copilot through GitHub Enterprise is not
+protected.
+
+##### Copilot CLI
+
+Use `copilot login --device-code` inside a protected Copilot session. The
+adapter recognizes the CLI's OAuth client separately from OpenCode's. It keeps
+the GitHub OAuth grant in the gateway and places handles in the CLI's
+`authTokens` account map. Protected startup enables `storeTokenPlaintext` for
+these handles only; ordinary sessions retain the default setting. Protected
+settings must be a JSON object; native `//` header comments are accepted.
+An incompatible settings document is refused without replacing it.
+`config.json` is a session-specific credential view, so noncredential state
+the CLI writes there, such as trusted folders, does not persist across sessions.
+
+Copilot CLI 1.0.105 was checked against a local synthetic server: device login,
+the exact `config.json` account keys, and fresh-process credential reload were
+verified. The same OAuth credential goes to Copilot service hosts directly.
+No `/copilot_internal/v2/token` exchange is opened. On `api.github.com`, only
+`GET /copilot_internal/user` is authorized with this handle. Repository APIs,
+GraphQL, gists, managed-settings and team-customization routes on
+`api.github.com` remain refused.
+Real-provider inference and the effect of those refused ancillary routes on
+organization accounts remain human compatibility checks. Browser OAuth is not
+captured by this adapter.
+
+The entitlement GET accepts an empty body over HTTP/1.1 or HTTP/2. A body or
+trailers are refused; the gateway verifies EOF before accepting a non-nil
+empty reader.
+
+The CLI's own design sends its repository-scoped OAuth token to
+`githubcopilot.com` hosts. The gateway releases it on any path at those hosts,
+including the remote GitHub MCP endpoint `https://api.githubcopilot.com/mcp`.
+It keeps custody of the token but cannot narrow its authority there: repository
+operations through Copilot or MCP may still be possible despite the direct
+GitHub API restrictions above.
+
+Protected Copilot refuses `--pass-env` for `GH_TOKEN`, `GITHUB_TOKEN`,
+`GH_ENTERPRISE_TOKEN` and `GITHUB_ENTERPRISE_TOKEN`, even without the GitHub CLI
+feature. Raw values from other workload environment sources are refused too;
+ordinary sessions are unchanged. A configured `COPILOT_GITHUB_TOKEN` Enclave
+secret still uses a gateway-released placeholder.
+
+If GitHub issues a token but the gateway refuses the subsequent account check,
+the login fails without saving that token. The authorization may remain valid;
+revoke it in GitHub's application settings if it is no longer wanted.
+
+#### Mistral Vibe extension
+
+Mistral Vibe's browser sign-in returns an API key, which the gateway keeps; Vibe
+stores a handle that the gateway releases to `api.mistral.ai`,
+`console.mistral.ai` and `chat.mistral.ai`. In later sessions the handle comes
+from `~/.vibe/.env`, which is session-scoped like every native credential file,
+so other settings Vibe writes there, such as `/proxy-setup`, do not persist.
+
+#### Sessions and lifecycle
+
+A second login to an identity that already holds a grant for that provider is
+refused; reset the identity to switch accounts. When a provider rejects a
+Claude or ChatGPT access token, for example after a revocation elsewhere, the
+session's next refresh rotates it instead of returning the cached grant.
+Mistral and Copilot credentials do not expire; after a revocation, reset the
+identity and log in again. Startup requires a private
+readiness attestation from the initialized brokers before launching the
+workload; an older gateway image is rejected even with `--no-rebuild`. This is
+an experimental implementation. Record engine checks separately from human
+login/refresh checks in the [verification plan](runtime/oauth-broker-verification.md).
+SELinux and real-provider compatibility require dedicated runs.
+
+Protected mode rejects credentials without a release rule, raw credential
+variables (for example from the project `.env` or `--pass-env`), host config
+passthrough, native auth/config sources and credential-helper settings. It
+supports neither QEMU, admin mode, custom base images, runtime UID remapping nor
+devcontainers. The workload uses the non-root host UID/GID; differing build IDs
+and gateway service-UID collisions are rejected. The built-in `github-cli`
+feature, enabled by default, has its own protected native-auth adapter; see
+below. Other features with native auth files are rejected. Env-secret and
+non-auth features remain available.
+
+The tool's config directory, such as Claude's history at `~/.claude`, persists
+in a config store that only protected sessions use (`<store-key>.protected` next
+to the project's ordinary store), so `--continue` and `--resume` work across
+protected sessions. Ordinary and protected sessions do not share history, and
+the ordinary store, including any credentials in it, is never mounted into a
+protected session. Only the credential view is discarded when a session ends.
+Agent memory retains its usual lifetime. Project and local tool settings load as
+in ordinary sessions; host-provided settings must not configure credential
+helpers or provider credentials.
+
+Multiple protected sessions can share the same tool identity and GitHub feature
+identity across projects and Docker/Podman. Each session gets independent
+handles, native views and a gateway; the gateways serialize grant updates using
+the same host identity lock and read the latest committed tokens. Ending one
+session does not invalidate its siblings. Reset, `--reset-auth` and downgrade
+require **all** sessions using the selected identity to have ended. Ordinary/raw
+credential mounts remain forbidden.
+
+For a fresh identity, complete its first login before launching additional
+sessions so their native views start authenticated. Then reuse the same
+`--auth-name`, using `--name` to distinguish sessions within a project:
+
+```bash
+enclave --tool claude --protect-auth --auth-scope shared --auth-name protected-test --name worker-a
+# In another terminal, after the first login:
+enclave --tool claude --protect-auth --auth-scope shared --auth-name protected-test --name worker-b
+```
+
+All installed engines must be inspectable; an unavailable daemon causes a
+refusal rather than an assumption that the identity is unused. If a reserved
+session's engine CLI has been removed, restore that CLI and daemon access so
+Enclave can verify the session ended. Removing an executable does not prove its
+containers stopped; reset and downgrade do not bypass that check. Engines are
+inspected through the current environment's endpoint, so stop sessions started
+under another `DOCKER_HOST`, `CONTAINER_HOST` or engine context before
+protecting, resetting or downgrading an identity they use.
+
+Protected admission, reset and downgrade also require all of the invoking user's
+Enclave QEMU sessions to have ended, including preparation and host-side
+copy-back; QEMU has no reliable host-share inspection API. Process inspection
+must succeed so older guests without admission leases cannot be missed; other
+QEMU users, such as Docker Desktop, podman machine or Colima, do not block it. Ordinary sessions can
+still run concurrently. Detached CLI exit and proxy reload keep a session's
+reservation and handles; a new logical session gets new handles.
+`--allow-all-network` and unrestricted policies still keep the gateway for
+credential mediation. Unknown token schemas and uncertain refresh outcomes fail
+closed, without returning tokens. After an uncertain exchange, use normal login
+again with the same account or stop all its sessions and reset the identity;
+reauthentication cannot switch the account behind sibling handles. Unexpected
+proxy death requires ending the session and starting anew.
+
+Saved identities remain protected when the flag is omitted: the launch fails
+with instructions to opt in again. To clear a grant without removing protection,
+stop all sessions using it and run:
+
+```bash
+enclave auth reset --tool codex --auth-scope shared --auth-name protected-test
+enclave auth reset --tool codex --auth-scope project   # the current project's identity
+```
+
+`--protect-auth --reset-auth` also resets an idle selected identity before a new
+session. Import/export and ordinary cleanup cannot expose/delete a protected
+grant. Other Enclave containers and QEMU guests cannot mount a protected grant,
+its parent or an aliased path, including staged file mounts. Host lock and
+control directories and other sessions' broker state are also excluded from
+workload mounts. Host administrators and host-side filesystem and configuration
+changes remain trusted. To return an idle identity to ordinary auth-file
+handling, first reset it, then explicitly downgrade the empty identity:
+
+```bash
+enclave auth downgrade --tool codex --auth-scope shared --auth-name protected-test
+enclave auth downgrade --tool codex --auth-scope project
+```
+
+Native logout only deletes the local view; it does not revoke the durable grant
+or already copied live handles. Reset removes the selected grants and
+broker-owned `.oauth-*` interrupted-write copies without following symlinks;
+unrelated entries are retained. It clears local custody, not provider-side
+revocation. This protects captured tokens in supported auth files and configured
+secrets, not arbitrary secret files, unsupported providers/MCP authentication,
+every operation those tokens authorize, or login codes/PKCE material exposed to
+an already-malicious client.
+
+#### GitHub CLI in protected sessions
+
+The built-in `github-cli` feature uses gateway custody too; enabling it does not
+restore plaintext feature-auth mounts. Its real `hosts.yml` and `config.yml`
+stay outside the workload. The container instead gets a session-specific
+native-format view at `~/.config/gh`, with handles in token fields. Proxy reload
+preserves those handles; a new session gets fresh ones. Native-file writes in
+the workload are not reconciled back into trusted credentials.
+
+Protected sessions select the SHA-256-pinned GitHub CLI **2.87.3**; the ordinary
+apt client is left available for unprotected sessions. Startup checks the pinned
+binary even with `--no-rebuild`; an old image without it must be rebuilt. The
+supported bootstrap is GitHub.com's device login:
+
+```bash
+gh auth login --hostname github.com --git-protocol https --web --insecure-storage
+```
+
+The gateway captures its token response before it reaches `gh`.
+`--insecure-storage` selects native-file storage of **handles**, not provider
+tokens. Protected HTTPS Git remotes use `https://github.com/<owner>/<repo>`,
+with or without the `.git` suffix. Handles are released only to
+`api.github.com` and to these remotes; release asset uploads at
+`uploads.github.com`, gist Git remotes and Git LFS are refused. Pasting a PAT, GitHub Enterprise login,
+keyring-only credentials and unsupported native schemas are not protected login
+paths. Expiry/refresh-bearing GitHub token responses are unsupported; unknown
+token responses fail closed. As with Claude login, an already-malicious client
+can steal bootstrap material before capture; this is not protection for the
+entire enrollment process.
+
+Compatible existing files in Enclave's shared GitHub feature store can be
+enrolled while idle. This does not import the host's `~/.config/gh`
+automatically. Raw GitHub credential env variables and overrides of
+`GH_HOST`/`GH_CONFIG_DIR` conflict with the protected feature. The store is
+global across tools/projects, not selected by the tool's `--auth-name` or auth
+scope (ephemeral sessions use it too), and supports concurrent protected
+sessions across Docker/Podman. Each keeps its own handle/config view;
+account-token updates are shared without overwriting sibling views. Unlike the
+tool logins, the GitHub identity holds several accounts: logging in to another
+one adds it, and the first account stays active for new sessions. Saved
+protection blocks later ordinary feature-auth mounts too. If gateway startup
+rejects an incompatible native store, protection remains and the original files
+are retained. Back up wanted logins on the host, then correct unsupported
+hosts/schema in that private store before retrying. Reset is not a
+non-destructive rollback: it deletes those original logins and preferences.
+
+The gateway records each completed or uncertain device exchange so a lost reply
+can be recovered and a device code is never resent while still redeemable.
+Records retire two hours after the first poll, once GitHub no longer accepts the
+code. At most 64 records can be live at once; beyond that, new logins fail until
+older records retire, while existing saved accounts remain usable.
+
+After stopping all sessions using GitHub, manage this separate identity with:
+
+```bash
+enclave auth reset --feature github-cli
+enclave auth downgrade --feature github-cli  # Only if returning to ordinary auth
+```
+
+Reset deletes the saved grant and imported `hosts.yml`/`config.yml`, including
+preferences, while retaining protection. Downgrade additionally requires an
+empty store. Do not combine `--feature` with `--tool`, `--auth-name` or
+`--auth-scope`; add `--backend docker` or `--backend podman` when needed.
+
+GitLab's feature remains env-secret based; this does not add a native GitLab
+credential-file adapter. GitHub engine and live-client verification are pending;
+see the [verification plan](runtime/oauth-broker-verification.md).
+
 ## Auth Stores
 
-OAuth and session files are stored in host directories under
+Outside protected mode, OAuth and session files are stored in host directories under
 `~/.local/state/enclave/` (bind-mounted into the container; no Docker
 volumes). By default, auth files are shared per tool across projects while tool
 configuration remains per-project. Foreground exits, `exec` exits, background
@@ -75,7 +442,7 @@ enclave auth import --tool <tool>   # Copy host auth files into the auth store
 enclave auth export --tool <tool>   # Copy auth store files back to the host
 ```
 
-Both commands honor `--auth-scope` (`shared` or `project`) and `--auth-name`
+All auth commands accept `--backend docker|podman|auto`. Import/export honor `--auth-scope` (`shared` or `project`) and `--auth-name`
 (seed or extract a specific named identity's shared auth store).
 
 **Host OAuth reuse** (only when the host agent is not running concurrently):
@@ -112,13 +479,18 @@ When persistence is enabled, resolved declared secret and `--pass-env` values
 are stored in the host-side env store. Suppressed API key secrets are
 skipped before resolution, so they are not persisted. For declared secrets with
 `release.http`, the running tool sees placeholders, while the gateway receives
-the real value from host-managed state. The gateway releases real values only in
-the configured header on HTTPS requests to declared hosts; plaintext HTTP
-requests carrying registered placeholders in headers are denied.
-If a client checks token syntax before sending requests, extensions
-can declare a [custom placeholder shape](extensions/README.md#client-side-credential-format-checks)
+the real value from host-managed state. The gateway releases real values only on
+HTTPS requests to declared hosts, only in each rule's declared header
+(case-insensitive). Known placeholders in other headers, or on plaintext HTTP,
+deny the whole request. If a client checks token syntax before sending requests,
+extensions can declare a [custom placeholder shape](extensions/README.md#client-side-credential-format-checks)
 without exposing the real credential. Placeholder generation failures abort
-startup instead of falling back to raw credentials.
+startup instead of falling back to raw credentials. Outside protected sessions,
+provider responses are streamed without credential masking; the approved
+provider is trusted not to reflect auth header values. Clients that tell
+credential kinds apart by prefix get placeholders with the same prefix, such as
+`sk-ant-oat01-` for `CLAUDE_CODE_OAUTH_TOKEN`, in ordinary and protected
+sessions alike.
 
 Codex OAuth note: the OAuth callback redirects to `http://localhost:1455/auth/callback`. enclave auto-maps port 1455 when no session exists. If you need to re-login, add `-p 1455`. Gateway logs will show `Loopback proxy (socat) enabled on port 1455` when forwarding is active.
 

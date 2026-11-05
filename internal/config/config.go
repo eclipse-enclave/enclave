@@ -34,6 +34,7 @@ type Defaults struct {
 	Ephemeral              *bool               `json:"ephemeral"`
 	AuthScope              string              `json:"auth_scope"`
 	AuthName               string              `json:"auth_name"`
+	ProtectAuth            *bool               `json:"protect_auth"`
 	SecretsScope           string              `json:"secrets_scope"`
 	ResetAuth              *bool               `json:"reset_auth"`
 	NoAPIKey               *bool               `json:"no_api_key"`
@@ -179,6 +180,20 @@ func ResolveOptionsForTool(cliOpts model.Options, cliSources model.OptionSources
 	for _, held := range cliLists {
 		mergeListInto(&opts, held.def, held.values, cliLayer)
 		setOptionSource(&sources, held.def.SourceField, model.SourceCLI)
+	}
+	// Protection is sticky across config layers: a broader layer that turns it
+	// off, such as a global tool override, cannot undo a project that asked
+	// for it. Only the command line decides otherwise.
+	if !opts.ProtectAuth && sources.ProtectAuth != model.SourceCLI {
+		for _, layer := range []struct {
+			source model.OptionSource
+			value  *bool
+		}{{model.SourceToolOverride, toolDefaults.ProtectAuth}, {model.SourceProject, project.ProtectAuth}, {model.SourceGlobal, global.ProtectAuth}} {
+			if layer.value != nil && *layer.value {
+				opts.ProtectAuth, sources.ProtectAuth = true, layer.source
+				break
+			}
+		}
 	}
 	opts.Sources = sources
 	return opts, toolDefaults, hasToolDefaults

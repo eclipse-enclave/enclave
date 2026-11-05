@@ -10,6 +10,7 @@ package gateway
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -21,11 +22,13 @@ import (
 
 	"enclave/internal/config"
 	"enclave/internal/docker"
+	"enclave/internal/gateway/oauthbroker"
 	"enclave/internal/logx"
 	"enclave/internal/model"
 	"enclave/internal/netcapture"
 	"enclave/internal/netlog"
 	"enclave/internal/network"
+	"enclave/internal/protectedauth"
 	"enclave/internal/util"
 )
 
@@ -351,7 +354,31 @@ func ContainerName(containerName string) string {
 	return containerName + model.GatewayContainerSuffix
 }
 
+// OAuthConfig contains host-owned broker mounts. Only ViewDir is shared with
+// the workload; the other paths must never appear in its mount namespace.
+type OAuthConfig struct {
+	StoreDir    string
+	RuntimeDir  string
+	ViewDir     string
+	LockPath    string
+	Identity    string
+	Incarnation string
+	Features    []FeatureOAuthConfig
+	// Instances are self-hosted hosts the broker mediates like a provider.
+	Instances []model.ProviderInstance
+}
+
+type FeatureOAuthConfig struct {
+	Name       string
+	StoreDir   string
+	RuntimeDir string
+	ViewDir    string
+	LockPath   string
+	Identity   string
+}
+
 type StartConfig struct {
+	OAuth             *OAuthConfig
 	Paths             model.Paths
 	Profile           model.Profile
 	AllowlistPath     string
@@ -372,7 +399,10 @@ type StartConfig struct {
 	WorkspaceID       string
 	ProjectHash       string
 	SecretReleaseFile string
-	TLSRootDir        string
+	// ImagePrepared skips the image step a caller already ran with
+	// PrepareImage.
+	ImagePrepared bool
+	TLSRootDir    string
 }
 
 func appendReadOnlyMount(mounts []docker.Mount, hostPath string, containerPath string) []docker.Mount {
@@ -411,6 +441,30 @@ type StaleResult struct {
 	Removed bool
 }
 
+// PrepareImage builds the gateway image when it is missing or stale, or
+// checks that it exists under --no-rebuild. Callers run it before taking locks
+// other sessions wait on, then start with ImagePrepared.
+func PrepareImage(ctx context.Context, cfg StartConfig) error {
+	if cfg.NoRebuild {
+		logx.Warnf("Skipping gateway image build (--no-rebuild or %s=1).", model.EnvNoRebuild)
+		return ensureExistingGatewayImageWith(cfg.Profile, docker.ImageExists)
+	}
+	needs, _, err := needsRebuild(cfg.Paths, cfg.Profile, cfg.AllowlistPath)
+	if err != nil {
+		return err
+	}
+	if !cfg.ForceRebuild && !needs {
+		return nil
+	}
+	resolveBuildPlan := func() (bool, string, error) {
+		return needsRebuild(cfg.Paths, cfg.Profile, cfg.AllowlistPath)
+	}
+	executeBuild := func(buildHash string) error {
+		return buildGatewayImage(ctx, cfg.Paths, cfg.Profile, cfg.AllowlistPath, buildHash)
+	}
+	return coordinateGatewayImageBuild(cfg.Home, imageName(cfg.Profile), cfg.ForceRebuild, resolveBuildPlan, executeBuild)
+}
+
 // Start builds the gateway image if needed, then runs the gateway sidecar and
 // waits for it to report readiness. Cancelling ctx aborts the start and
 // removes a sidecar that was already created. The caller holds the
@@ -420,26 +474,9 @@ func Start(ctx context.Context, cfg StartConfig) (StartResult, error) {
 	if err := validateStartConfig(cfg); err != nil {
 		return empty, err
 	}
-	if cfg.NoRebuild {
-		logx.Warnf("Skipping gateway image build (--no-rebuild or %s=1).", model.EnvNoRebuild)
-		if err := ensureExistingGatewayImageWith(cfg.Profile, docker.ImageExists); err != nil {
+	if !cfg.ImagePrepared {
+		if err := PrepareImage(ctx, cfg); err != nil {
 			return empty, err
-		}
-	} else {
-		needs, _, err := needsRebuild(cfg.Paths, cfg.Profile, cfg.AllowlistPath)
-		if err != nil {
-			return empty, err
-		}
-		if cfg.ForceRebuild || needs {
-			resolveBuildPlan := func() (bool, string, error) {
-				return needsRebuild(cfg.Paths, cfg.Profile, cfg.AllowlistPath)
-			}
-			executeBuild := func(buildHash string) error {
-				return buildGatewayImage(ctx, cfg.Paths, cfg.Profile, cfg.AllowlistPath, buildHash)
-			}
-			if err := coordinateGatewayImageBuild(cfg.Home, imageName(cfg.Profile), cfg.ForceRebuild, resolveBuildPlan, executeBuild); err != nil {
-				return empty, err
-			}
 		}
 	}
 
@@ -494,8 +531,39 @@ func Start(ctx context.Context, cfg StartConfig) (StartResult, error) {
 		mounts = appendReadOnlyMount(mounts, cfg.SecretReleaseFile, model.GatewaySecretReleasePath)
 	}
 	mounts = appendTLSCAMounts(mounts, cfg.TLSRootDir)
+	if cfg.OAuth != nil {
+		mounts = append(mounts, []docker.Mount{
+			{Type: docker.MountTypeBind, Source: cfg.OAuth.StoreDir, Target: model.GatewayOAuthGrantPath},
+			{Type: docker.MountTypeBind, Source: cfg.OAuth.RuntimeDir, Target: model.GatewayOAuthRuntimePath},
+			{Type: docker.MountTypeBind, Source: cfg.OAuth.ViewDir, Target: model.GatewayOAuthViewPath},
+			{Type: docker.MountTypeBind, Source: cfg.OAuth.LockPath, Target: model.GatewayOAuthLockPath},
+		}...)
+		for _, feature := range cfg.OAuth.Features {
+			mounts = append(mounts, []docker.Mount{
+				{Type: docker.MountTypeBind, Source: feature.StoreDir, Target: model.GatewayOAuthGitHubGrantPath},
+				{Type: docker.MountTypeBind, Source: feature.RuntimeDir, Target: model.GatewayOAuthGitHubRuntimePath},
+				{Type: docker.MountTypeBind, Source: feature.ViewDir, Target: model.GatewayOAuthGitHubViewPath},
+				{Type: docker.MountTypeBind, Source: feature.LockPath, Target: model.GatewayOAuthGitHubLockPath},
+			}...)
+		}
+	}
 
 	env := []string{}
+	if cfg.OAuth != nil {
+		env = append(env, model.EnvOAuthBroker+"="+cfg.Profile.Name, model.EnvOAuthIdentity+"="+cfg.OAuth.Identity, model.EnvOAuthIncarnation+"="+cfg.OAuth.Incarnation)
+		for _, feature := range cfg.OAuth.Features {
+			env = append(env, model.EnvOAuthGitHub+"=1", model.EnvOAuthGitHubIdentity+"="+feature.Identity)
+		}
+		if len(cfg.OAuth.Instances) != 0 {
+			// Host names only; no credential is part of an instance.
+			instances, err := json.Marshal(cfg.OAuth.Instances)
+			if err != nil {
+				return empty, fmt.Errorf("encode protected provider instances: %w", err)
+			}
+			env = append(env, model.EnvOAuthInstances+"="+string(instances))
+		}
+	}
+
 	if cfg.NetworkLogPath != "" {
 		env = append(env, model.EnvNetworkLogFile+"="+gatewayNetworkLogPath)
 	}
@@ -556,14 +624,37 @@ func Start(ctx context.Context, cfg StartConfig) (StartResult, error) {
 		UserNS:       gatewayUserNS(),
 	}
 
-	containerID, err := startGatewayContainer(ctx, config, hostConfig, gatewayContainer)
+	if cfg.OAuth != nil {
+		hostConfig.CapAdd = append(hostConfig.CapAdd, "DAC_OVERRIDE", "CHOWN")
+	}
+	var verifyReady func() error
+	if cfg.OAuth != nil {
+		if err := oauthbroker.ClearReadiness(cfg.OAuth.RuntimeDir); err != nil {
+			return empty, fmt.Errorf("clear prior protected OAuth readiness: %w", err)
+		}
+		expected := oauthbroker.Config{Tool: cfg.Profile.Name, RuntimeDir: cfg.OAuth.RuntimeDir, Identity: cfg.OAuth.Identity, Session: cfg.ContainerName, Incarnation: cfg.OAuth.Incarnation}
+		if len(cfg.OAuth.Features) != 0 {
+			expected.GitHub = &oauthbroker.GitHubConfig{Identity: cfg.OAuth.Features[0].Identity}
+		}
+		verifyReady = func() error {
+			if err := oauthbroker.VerifyReadiness(expected); err != nil {
+				err = fmt.Errorf("gateway did not attest the requested protected OAuth adapters: %w", err)
+				if cfg.NoRebuild {
+					return fmt.Errorf("%w; rebuild the gateway without --no-rebuild or %s if its adapters are outdated", err, model.EnvNoRebuild)
+				}
+				return err
+			}
+			return nil
+		}
+	}
+	containerID, err := startGatewayContainer(ctx, config, hostConfig, gatewayContainer, verifyReady)
 	if err != nil && docker.IsContainerNameConflict(err) {
 		reconciled, reconcileErr := ReconcileStale(ctx, cfg.ContainerName, cfg.ProjectHash)
 		if reconcileErr != nil {
 			return empty, fmt.Errorf("reconcile conflicting gateway container %s: %w", gatewayContainer, reconcileErr)
 		}
 		if reconciled.Removed || !reconciled.Exists {
-			containerID, err = startGatewayContainer(ctx, config, hostConfig, gatewayContainer)
+			containerID, err = startGatewayContainer(ctx, config, hostConfig, gatewayContainer, verifyReady)
 		} else if reconciled.Exists && reconciled.Owned {
 			return empty, fmt.Errorf("gateway container %q is already running or starting for session %s; run 'enclave stop %s' and retry: %w", gatewayContainer, cfg.ContainerName, cfg.ContainerName, err)
 		}
@@ -653,9 +744,10 @@ func gatewayUser() string {
 	return ""
 }
 
+// startGatewayContainer runs the gateway and waits until it reports readiness.
 // Failed starts must release published ports before the next session's
 // host-port checks.
-func startGatewayContainer(ctx context.Context, config *docker.ContainerConfig, hostConfig *docker.HostConfig, name string) (string, error) {
+func startGatewayContainer(ctx context.Context, config *docker.ContainerConfig, hostConfig *docker.HostConfig, name string, verifyReady func() error) (string, error) {
 	startedAt := time.Now().UTC()
 	containerID, err := startRunDetached(ctx, config, hostConfig, name)
 	if err != nil {
@@ -667,7 +759,7 @@ func startGatewayContainer(ctx context.Context, config *docker.ContainerConfig, 
 		}
 		return "", fmt.Errorf("failed to start gateway container: %w", err)
 	}
-	if err := waitForGatewayReady(ctx, containerID, startedAt); err != nil {
+	if err := waitForGatewayReady(ctx, containerID, startedAt, verifyReady); err != nil {
 		err = gatewayStartupError(ctx, containerID, err)
 		removeFailedGateway(ctx, name, containerID, config)
 		return "", err
@@ -807,6 +899,42 @@ func validateStartConfig(cfg StartConfig) error {
 	if strings.TrimSpace(cfg.NetworkName) == "" {
 		return fmt.Errorf("gateway network name is empty")
 	}
+	if cfg.OAuth != nil {
+		if _, known := protectedauth.Lookup(cfg.Profile.Name); !known || cfg.OAuth.Identity == "" || cfg.OAuth.Incarnation == "" || cfg.ContainerName == "" || cfg.TLSRootDir == "" {
+			return fmt.Errorf("protected OAuth gateway requires a supported tool identity, session, incarnation and TLS CA")
+		}
+		paths := []string{cfg.OAuth.StoreDir, cfg.OAuth.RuntimeDir, cfg.OAuth.ViewDir}
+		locks := []string{cfg.OAuth.LockPath}
+		if len(cfg.OAuth.Features) > 1 {
+			return errors.New("protected OAuth gateway supports one native feature")
+		}
+		for _, feature := range cfg.OAuth.Features {
+			if feature.Name != "github-cli" || feature.Identity == "" {
+				return errors.New("protected OAuth gateway supports github-cli native authentication only")
+			}
+			paths = append(paths, feature.StoreDir, feature.RuntimeDir, feature.ViewDir)
+			locks = append(locks, feature.LockPath)
+		}
+		for _, path := range paths {
+			info, err := os.Lstat(path)
+			if !filepath.IsAbs(path) || err != nil || !info.IsDir() || info.Mode().Perm()&0o077 != 0 {
+				return fmt.Errorf("protected OAuth gateway requires private real directories")
+			}
+		}
+		for i, a := range paths {
+			for j, b := range paths {
+				if i != j && (util.PathWithin(a, b) || util.PathWithin(b, a)) {
+					return fmt.Errorf("protected OAuth gateway directories must be disjoint")
+				}
+			}
+		}
+		for _, lock := range locks {
+			info, err := os.Lstat(lock)
+			if !filepath.IsAbs(lock) || err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0o077 != 0 {
+				return fmt.Errorf("protected OAuth gateway requires the existing private identity lock")
+			}
+		}
+	}
 	if cfg.GatewayConfigDir != "" && !util.PathExists(cfg.GatewayConfigDir) {
 		return fmt.Errorf("gateway config dir does not exist: %s", cfg.GatewayConfigDir)
 	}
@@ -845,7 +973,7 @@ func validateStartConfig(cfg StartConfig) error {
 	return nil
 }
 
-func waitForGatewayReady(ctx context.Context, containerID string, since time.Time) error {
+func waitForGatewayReady(ctx context.Context, containerID string, since time.Time, verifyReady func() error) error {
 	deadline := time.Now().Add(gatewayReadyTimeout)
 	for time.Now().Before(deadline) {
 		if err := ctx.Err(); err != nil {
@@ -853,6 +981,9 @@ func waitForGatewayReady(ctx context.Context, containerID string, since time.Tim
 		}
 		logs, err := docker.ContainerLogsSince(ctx, containerID, since)
 		if err == nil && HasLogLine(logs, gatewayReadyMarker) {
+			if verifyReady != nil {
+				return verifyReady()
+			}
 			return nil
 		}
 		if err != nil && !docker.IsNotFound(err) {
@@ -929,12 +1060,24 @@ func ensureExistingGatewayImageWith(profile model.Profile, exists func(context.C
 	if ok {
 		return nil
 	}
-	return fmt.Errorf("gateway image %q does not exist locally and builds are disabled (--no-rebuild or %s); re-enable builds to create it, or use --allow-all-network to bypass the gateway", image, model.EnvNoRebuild)
+	return fmt.Errorf("gateway image %q does not exist locally and builds are disabled (--no-rebuild or %s); re-enable builds to create it", image, model.EnvNoRebuild)
 }
 
 // StopContainer stops and removes the exact gateway returned by Start. Using
 // its immutable ID prevents delayed error cleanup from stopping a newer
 // same-name gateway created by a concurrent session start.
+// RemoveContainer stops the gateway and waits until it is gone, so a protected
+// session's reservation can be released right after.
+func RemoveContainer(container string) {
+	StopContainer(container)
+	if strings.TrimSpace(container) == "" {
+		return
+	}
+	if err := docker.ContainerRemoveAndWait(context.Background(), container, true, 10*time.Second); err != nil {
+		logx.Warnf("Failed to remove gateway container %s: %v", container, err)
+	}
+}
+
 func StopContainer(container string) {
 	if strings.TrimSpace(container) == "" {
 		return

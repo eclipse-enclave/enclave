@@ -74,6 +74,7 @@ func (r RunOptions) MemoryDisabled() bool {
 }
 
 type AuthOptions struct {
+	ProtectAuth  bool
 	ResetAuth    bool
 	NoAPIKey     bool
 	PassAPIKey   bool
@@ -736,11 +737,23 @@ const (
 	GatewayConfigDomainsPath     = GatewayConfigDir + "/domains.txt"
 	GatewayConfigDeniedPath      = GatewayConfigDir + "/denied.txt"
 	GatewayConfigMetaPath        = GatewayConfigDir + "/meta.json"
-	GatewaySecretReleasePath     = "/etc/enclave/secret-releases.json" // #nosec G101 -- configuration file path, not a credential.
-	GatewayTLSRootPath           = "/tls"
-	GatewayTLSCACertPath         = GatewayTLSRootPath + "/ca.crt"
-	GatewayTLSCAKeyPath          = GatewayTLSRootPath + "/ca.key"
-	AgentGatewayCACertPath       = "/usr/local/share/ca-certificates/enclave-gateway.crt"
+	// The gateway entrypoint installs validated bundle files here.
+	GatewayActiveDNSMasqPath      = DNSMasqConfigDir + "/enclave.conf"
+	GatewayActiveDomainsPath      = "/run/enclave-gateway/domains.txt"
+	GatewayActiveMetaPath         = "/run/enclave-gateway/meta.json"
+	GatewaySecretReleasePath      = "/etc/enclave/secret-releases.json" // #nosec G101 -- configuration file path, not a credential.
+	GatewayTLSRootPath            = "/tls"
+	GatewayOAuthGrantPath         = "/oauth/grant"
+	GatewayOAuthRuntimePath       = "/oauth/runtime"
+	GatewayOAuthViewPath          = "/oauth/view"
+	GatewayOAuthLockPath          = "/oauth/identity.lock"
+	GatewayOAuthGitHubGrantPath   = "/oauth/features/github-cli/grant"
+	GatewayOAuthGitHubRuntimePath = "/oauth/features/github-cli/runtime"
+	GatewayOAuthGitHubViewPath    = "/oauth/features/github-cli/view"
+	GatewayOAuthGitHubLockPath    = "/oauth/features/github-cli/identity.lock"
+	GatewayTLSCACertPath          = GatewayTLSRootPath + "/ca.crt"
+	GatewayTLSCAKeyPath           = GatewayTLSRootPath + "/ca.key"
+	AgentGatewayCACertPath        = "/usr/local/share/ca-certificates/enclave-gateway.crt"
 	// AgentGatewayCABundlePath is the system bundle plus the gateway CA, written
 	// by the entrypoint at a fixed path so the container-level SSL_CERT_FILE can
 	// name it for processes started with `docker exec`.

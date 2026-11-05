@@ -10,9 +10,11 @@ package docker
 import (
 	"context"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
+	"enclave/internal/backend"
 	dockercmd "enclave/internal/docker"
 	"enclave/internal/model"
 )
@@ -153,5 +155,37 @@ func TestWaitForGatewayReloadTimesOut(t *testing.T) {
 	}
 	if got := err.Error(); got != "timed out waiting for gateway reload confirmation (generation=gen-1)" {
 		t.Fatalf("waitForGatewayReload() error = %q, want timeout message", got)
+	}
+}
+
+const testBundleHash = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+
+func TestReadGatewayNetworkStateUsesActiveMetadata(t *testing.T) {
+	calls := stubCLI(t, "docker", `printf '%s\n' '{"mode":"unrestricted","mode_source":"allow-all-network","bundle_hash":"`+testBundleHash+`"}'`+"\n")
+	b := New(Options{})
+	state, err := b.ReadGatewayNetworkState(context.Background(), "gateway-session")
+	if err != nil || state.Mode != backend.NetworkModeUnrestricted || state.ModeSource != "allow-all-network" || state.BundleHash != testBundleHash {
+		t.Fatalf("active policy state = %+v, %v", state, err)
+	}
+	got := stubCalls(t, calls)
+	if len(got) != 1 || !strings.HasSuffix(got[0], "gateway-session enclave-gateway-proxy -network-state") {
+		t.Fatalf("read shared host bundle instead of gateway-private active state: %v", got)
+	}
+}
+
+func TestReadGatewayNetworkStateRequiresActiveBundleHash(t *testing.T) {
+	for _, hash := range []string{"", "not-hex", strings.ToUpper(testBundleHash), testBundleHash[:62]} {
+		stubCLI(t, "docker", `printf '%s\n' '{"mode":"restricted","bundle_hash":"`+hash+`"}'`+"\n")
+		if _, err := New(Options{}).ReadGatewayNetworkState(context.Background(), "gateway-session"); err == nil {
+			t.Fatalf("accepted active state with bundle hash %q", hash)
+		}
+	}
+}
+
+func TestReadGatewayNetworkStateRejectsInvalidMode(t *testing.T) {
+	stubCLI(t, "docker", `printf '%s\n' '{"mode":"disabled"}'`+"\n")
+	b := New(Options{})
+	if _, err := b.ReadGatewayNetworkState(context.Background(), "gateway-session"); err == nil {
+		t.Fatal("accepted unknown active destination mode")
 	}
 }

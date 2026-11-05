@@ -191,9 +191,10 @@ func (s *StoreManager) WithStoreLock(_ context.Context, key backend.StoreKey, ki
 }
 
 // storePath resolves the shared host directory backing a store, guarding the
-// enclave-owned path chain against planted symlinks (see hoststore.ResolveDir).
+// enclave-owned path chain against planted symlinks and rejecting protected
+// auth identities (see hoststore.ResolveLegacyDir).
 func (s *StoreManager) storePath(key backend.StoreKey, kind backend.StoreKind) (string, error) {
-	return hoststore.ResolveDir(s.host.Home, key, kind)
+	return hoststore.ResolveLegacyDir(s.host.Home, key, kind)
 }
 
 func (s *StoreManager) storeRelPath(key backend.StoreKey, kind backend.StoreKind, rel string) (string, error) {

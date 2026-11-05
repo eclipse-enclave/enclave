@@ -59,6 +59,9 @@ func (m volumeManager) BuildPrep(volumeSuffix string) (backend.StorePrep, storeS
 	stores := storeSet{}
 
 	configKey := backend.StoreKey{Owner: m.profile.Name, ProjectHash: m.project.Hash, Suffix: strings.TrimSpace(volumeSuffix)}
+	if m.auth.ProtectAuth {
+		configKey = backend.ProtectedConfigKey(configKey)
+	}
 	prep.Config = &backend.ConfigStorePrep{
 		Key:        configKey,
 		Recreate:   !m.run.Persist,
@@ -78,7 +81,11 @@ func (m volumeManager) BuildPrep(volumeSuffix string) (backend.StorePrep, storeS
 	}
 	stores.Config = &backend.StoreRef{Kind: backend.StoreKindConfig, Key: configKey}
 
-	if m.shouldCreateSharedAuthVolume() {
+	if m.auth.ProtectAuth && m.protectedIdentity != "" {
+		key := backend.StoreKey{Owner: m.profile.Name, Suffix: m.protectedIdentity}
+		prep.Auth = &backend.StorePrepEntry{Key: key}
+		stores.Auth = &backend.StoreRef{Kind: backend.StoreKindAuth, Key: key}
+	} else if m.shouldCreateSharedAuthVolume() {
 		// Suffix selects the named auth identity; an empty suffix selects default.
 		key := backend.StoreKey{Owner: m.profile.Name, Suffix: m.auth.AuthName}
 		prep.Auth = &backend.StorePrepEntry{Key: key}
@@ -127,13 +134,16 @@ func (m volumeManager) authSyncSpec(stores storeSet) *backend.AuthSyncSpec {
 		return nil
 	}
 	spec := &backend.AuthSyncSpec{}
-	if m.shouldCreateSharedAuthVolume() && stores.Auth != nil {
+	if !m.auth.ProtectAuth && m.shouldCreateSharedAuthVolume() && stores.Auth != nil {
 		if authFiles, err := backend.ValidateAuthFilePaths(m.authFiles); err == nil {
 			spec.AuthFiles = authFiles
 		}
 	}
 	for _, feat := range m.features {
 		if _, ok := stores.Features[feat.Name]; !ok {
+			continue
+		}
+		if m.auth.ProtectAuth {
 			continue
 		}
 		authFiles, err := backend.ValidateAuthFilePaths(feat.AuthFiles)
@@ -206,6 +216,11 @@ func (m volumeManager) shouldCreateSharedAuthVolume() bool {
 func (m volumeManager) shouldCreateFeatureAuthVolume(ext model.Extension) bool {
 	if ext.ConfigDir == "" || len(ext.AuthFiles) == 0 {
 		return false
+	}
+	// Protected native feature auth always needs its gateway-owned store; a
+	// login without it would reach the workload.
+	if m.auth.ProtectAuth {
+		return true
 	}
 	if !m.run.Persist || m.auth.AuthScope != model.AuthScopeShared {
 		return false

@@ -21,7 +21,10 @@ import (
 
 	"enclave/internal/backend"
 	"enclave/internal/config"
+	"enclave/internal/gateway/bundle"
 	"enclave/internal/model"
+	"enclave/internal/network"
+	"enclave/internal/policy"
 )
 
 // networkPreviewTestInput selects a tool with a spec domain, a feature with
@@ -313,39 +316,60 @@ func TestNetworkStatusFallsBackOnInvalidOptions(t *testing.T) {
 	}
 }
 
-func TestHashGatewayBundleDirStableForContent(t *testing.T) {
-	dir := t.TempDir()
-	files := map[string]string{
-		filepath.Base(model.GatewayConfigDNSMasqPath): "dnsmasq",
-		filepath.Base(model.GatewayConfigDomainsPath): "example.com\n",
-	}
-	for name, contents := range files {
-		if err := os.WriteFile(filepath.Join(dir, name), []byte(contents), 0o644); err != nil {
-			t.Fatalf("write %s: %v", name, err)
+func TestDesiredBundleHashMatchesEachGatewayActiveBundle(t *testing.T) {
+	home := t.TempDir()
+	toolsDir := filepath.Join(t.TempDir(), "tools")
+	allowlistsDir := filepath.Join(t.TempDir(), "allowlists")
+	for name, contents := range map[string]string{
+		filepath.Join(toolsDir, "claude", "spec.yaml"):                    "schemaVersion: \"1\"\nkind: sandbox\nname: claude\n",
+		filepath.Join(toolsDir, "claude", model.GatewayAllowlistFilename): "server=/api.anthropic.com/8.8.8.8\n",
+		filepath.Join(allowlistsDir, "base.conf"):                         "server=/example.com/8.8.8.8\n",
+	} {
+		if err := os.MkdirAll(filepath.Dir(name), 0o750); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(name, []byte(contents), 0o600); err != nil {
+			t.Fatal(err)
 		}
 	}
-
-	first, err := hashGatewayBundleDir(dir)
+	resolver := policy.NewEffectiveResolver(model.Paths{ToolsDir: toolsDir, AllowlistsDir: allowlistsDir}, home)
+	target := backend.GatewayInfo{ID: "aaaaaaaaaaaa", Tool: "claude", ProjectHash: "p1"}
+	projectDir := t.TempDir()
+	resolved, err := resolver.Resolve(policy.ResolveInput{ProjectDir: projectDir, ProjectHash: target.ProjectHash, Tool: target.Tool})
 	if err != nil {
-		t.Fatalf("first hash: %v", err)
-	}
-	second, err := hashGatewayBundleDir(dir)
-	if err != nil {
-		t.Fatalf("second hash: %v", err)
-	}
-	if first != second {
-		t.Fatalf("expected stable hash, got %q and %q", first, second)
+		t.Fatal(err)
 	}
 
-	if err := os.WriteFile(filepath.Join(dir, filepath.Base(model.GatewayConfigDomainsPath)), []byte("changed.example.com\n"), 0o644); err != nil {
-		t.Fatalf("rewrite domains: %v", err)
+	// A restricted session and a protected --allow-all-network session of the
+	// same project and tool share one staging bundle but enforce different ones.
+	var installed []string
+	for _, active := range []backend.GatewayNetworkState{
+		{Mode: backend.NetworkModeRestricted, ModeSource: "default"},
+		{Mode: backend.NetworkModeUnrestricted, ModeSource: "allow-all-network"},
+	} {
+		effective, err := gatewayPolicyForReload(resolved.Effective, active)
+		if err != nil {
+			t.Fatal(err)
+		}
+		dir := t.TempDir()
+		if err := bundle.WriteConfigBundle(bundle.BundleWriteConfig{Dir: dir, Policy: effective, Tool: target.Tool}); err != nil {
+			t.Fatal(err)
+		}
+		active.BundleHash, err = bundle.ActiveBundleHash(filepath.Join(dir, filepath.Base(model.GatewayConfigDNSMasqPath)), filepath.Join(dir, filepath.Base(model.GatewayConfigDomainsPath)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		desired, err := desiredGatewayBundleHash(resolver, target, projectDir, active)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if desired != active.BundleHash {
+			t.Fatalf("%s gateway reported stale while enforcing its desired bundle", active.Mode)
+		}
+		installed = append(installed, active.BundleHash)
 	}
-	third, err := hashGatewayBundleDir(dir)
-	if err != nil {
-		t.Fatalf("third hash: %v", err)
-	}
-	if third == first {
-		t.Fatal("expected hash to change when bundle content changes")
+	if installed[0] == installed[1] {
+		t.Fatal("fixture does not distinguish the sessions' active bundles")
 	}
 }
 
@@ -438,5 +462,41 @@ func TestReadGatewayBundleGeneration(t *testing.T) {
 	}
 	if got != generation {
 		t.Fatalf("unexpected generation: want %q, got %q", generation, got)
+	}
+}
+
+func TestGatewayPolicyForReloadPreservesSessionMode(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		active    backend.GatewayNetworkState
+		next      string
+		want      string
+		wantError bool
+	}{
+		{"restricted update", backend.GatewayNetworkState{Mode: backend.NetworkModeRestricted, ModeSource: "default"}, "restricted", "restricted", false},
+		{"unrestricted policy update", backend.GatewayNetworkState{Mode: backend.NetworkModeUnrestricted, ModeSource: "project"}, "unrestricted", "unrestricted", false},
+		{"flag overrides saved restricted policy", backend.GatewayNetworkState{Mode: backend.NetworkModeUnrestricted, ModeSource: "allow-all-network"}, "restricted", "unrestricted", false},
+		{"flag overrides saved unrestricted policy", backend.GatewayNetworkState{Mode: backend.NetworkModeUnrestricted, ModeSource: "allow-all-network"}, "unrestricted", "unrestricted", false},
+		{"policy switched to restricted", backend.GatewayNetworkState{Mode: backend.NetworkModeUnrestricted, ModeSource: "project"}, "restricted", "", true},
+		{"policy switched to unrestricted", backend.GatewayNetworkState{Mode: backend.NetworkModeRestricted}, "unrestricted", "", true},
+		{"missing active metadata", backend.GatewayNetworkState{}, "unrestricted", "", true},
+		{"invalid active override", backend.GatewayNetworkState{Mode: backend.NetworkModeRestricted, ModeSource: "allow-all-network"}, "restricted", "", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			next := network.EffectivePolicy{Mode: tc.next, ModeSource: "project", Domains: []string{"new.example"}, Resolvers: []string{"9.9.9.9"}}
+			got, err := gatewayPolicyForReload(next, tc.active)
+			if (err != nil) != tc.wantError {
+				t.Fatalf("reload policy error = %v, want error %t", err, tc.wantError)
+			}
+			if tc.wantError {
+				return
+			}
+			if got.Mode != tc.want || len(got.Domains) != 1 || got.Domains[0] != "new.example" || len(got.Resolvers) != 1 || got.Resolvers[0] != "9.9.9.9" {
+				t.Fatalf("reload changed destination mode or discarded policy update: %+v", got)
+			}
+			if tc.active.ModeSource == "allow-all-network" && got.ModeSource != "allow-all-network" {
+				t.Fatal("reload lost the session's explicit unrestricted override")
+			}
+		})
 	}
 }

@@ -265,7 +265,29 @@ func (c *Capture) ResponseEnded(err error) {
 	if c == nil || err == nil {
 		return
 	}
-	c.response.markIncomplete()
+	if c.socket != nil {
+		c.socket.mu.Lock()
+		c.socket.truncated = true
+		c.socket.mu.Unlock()
+	} else {
+		c.response.markIncomplete()
+	}
+}
+
+// Discard closes the capture and removes its bodies, messages and live record.
+// A broker denial must leave no capture, including partially streamed files.
+func (c *Capture) Discard() {
+	if c == nil {
+		return
+	}
+	closeBody(c.request, c.requestDecoder)
+	closeBody(c.response, c.responseDecoder)
+	if c.socket != nil {
+		c.socket.finish()
+	}
+	stored := c.request.stored + c.response.stored + c.socket.storedBytes() + c.openRecord
+	removeCapture(c.store.dir, c.id)
+	c.store.release(stored)
 }
 
 // Finish writes the record and returns the capture ID, or "" when nothing was

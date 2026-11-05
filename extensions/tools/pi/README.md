@@ -45,6 +45,18 @@ port 1455 when the `openai-codex` entry is missing. Anthropic OAuth is opt-in;
 add `-p 53692` when logging in. Add `-p 1455` to re-login with Codex when an
 entry already exists.
 
+## Experimental protected auth
+
+With `--protect-auth` (and a fresh `--auth-name`, `--auth-scope project` or
+`--ephemeral`), the gateway captures the Anthropic and `openai-codex` (ChatGPT)
+logins and keeps the tokens. `agent/auth.json` links to a session view holding
+handles, which the gateway exchanges for the real tokens only at
+`api.anthropic.com`, `mcp-proxy.anthropic.com` and `chatgpt.com`. API keys
+pasted into `auth.json` are refused at the provider; configure them as Enclave
+secrets instead. See
+[auth](../../../docs/auth.md#experimental-protected-authentication) and the
+[pending verification plan](../../../docs/runtime/oauth-broker-verification.md).
+
 ## Network Access
 
 Allowlisted domains include `pi.dev` for Pi's model catalog, OpenAI, Anthropic,

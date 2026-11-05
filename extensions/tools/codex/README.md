@@ -42,6 +42,17 @@ Stored ChatGPT logins are outside this env-only protection. See
 
 - `auth.json`
 
+## Experimental protected auth
+
+With `--protect-auth` (and a fresh `--auth-name`, `--auth-scope project` or
+`--ephemeral`), the gateway captures the ChatGPT login, browser or device code,
+and keeps the tokens. `~/.codex/auth.json` links to a session view holding
+handles, which only `chatgpt.com` exchanges for the real access token. The token
+exchange that mints an API key from the login is refused; configure
+`OPENAI_API_KEY` as an Enclave secret instead, which the session sees as a
+placeholder. See [auth](../../../docs/auth.md#experimental-protected-authentication) and the
+[pending verification plan](../../../docs/runtime/oauth-broker-verification.md).
+
 ## Network Access
 
 Allowlisted domains include OpenAI, GitHub, and common package registries

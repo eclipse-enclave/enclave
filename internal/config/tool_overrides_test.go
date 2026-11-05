@@ -249,6 +249,23 @@ func TestToolOverride_CLIWinsOverToolOverride(t *testing.T) {
 	}
 }
 
+// A project that asks for protected auth keeps it even when a broader layer,
+// such as a global tool override, turns it off; the command line still decides.
+func TestProtectAuthIsStickyAcrossConfigLayers(t *testing.T) {
+	global := Defaults{ToolOverrides: map[string]Defaults{"codex": {ProtectAuth: boolPtr(false)}}}
+	project := Defaults{ProtectAuth: boolPtr(true)}
+	opts, _, _ := ResolveOptionsForTool(DefaultOptions(), model.OptionSources{}, global, project, "codex")
+	if !opts.ProtectAuth || opts.Sources.ProtectAuth != model.SourceProject {
+		t.Fatalf("protect_auth = %t from %v, want the project's true", opts.ProtectAuth, opts.Sources.ProtectAuth)
+	}
+	cli := DefaultOptions()
+	cli.ProtectAuth = false
+	opts, _, _ = ResolveOptionsForTool(cli, model.OptionSources{AuthOptionSources: model.AuthOptionSources{ProtectAuth: model.SourceCLI}}, global, project, "codex")
+	if opts.ProtectAuth {
+		t.Fatal("config overrode the command line's choice")
+	}
+}
+
 func TestReadDefaults_InvalidToolOverrideEntriesIgnoredWithWarnings(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.json")

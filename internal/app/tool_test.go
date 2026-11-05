@@ -153,7 +153,10 @@ func TestActionNeedsTool(t *testing.T) {
 		// never read, so asking for one would save an unrelated answer.
 		{name: "update with explicit targets", parsed: cli.Result{Action: "update", Options: model.Options{UpdateOptions: model.UpdateOptions{UpdateTools: []string{"codex"}}}}, want: false},
 		{name: "info", parsed: cli.Result{Action: "info"}, want: true},
-		{name: "auth-import", parsed: cli.Result{Action: "auth-import"}, want: true},
+		{name: "auth-import", parsed: cli.Result{Action: "auth-import"}, want: false},
+		{name: "tool auth reset", parsed: cli.Result{Action: "auth-reset"}, want: false},
+		{name: "feature auth reset", parsed: cli.Result{Action: "auth-reset", AuthFeature: "github-cli"}, want: false},
+		{name: "feature auth downgrade", parsed: cli.Result{Action: "auth-downgrade", AuthFeature: "github-cli"}, want: false},
 		{name: "devcontainer-generate", parsed: cli.Result{Action: "devcontainer-generate"}, want: true},
 		{name: "network-print", parsed: cli.Result{Action: "network-print"}, want: true},
 		{name: "network-log", parsed: cli.Result{Action: "network-log"}, want: true},

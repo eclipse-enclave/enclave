@@ -864,6 +864,56 @@ func TestShouldUseSecretReleases(t *testing.T) {
 			t.Fatalf("shouldUseSecretReleases() = false, want true")
 		}
 	})
+
+	t.Run("protected sessions keep releases in unrestricted mode", func(t *testing.T) {
+		t.Setenv("XDG_CONFIG_HOME", "")
+		home := t.TempDir()
+		policyPath := config.HostNetworkPolicyPath(home)
+		if err := os.MkdirAll(filepath.Dir(policyPath), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(policyPath, []byte(`{"mode":"unrestricted"}`), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		r := runtimeWithProfile(t, model.Profile{Name: "tool"})
+		r.host.Home = home
+		r.auth.ProtectAuth = true
+		if got := newAuthManager(r).shouldUseSecretReleases(activeSecrets); !got {
+			t.Fatal("protected session would inject the raw credential")
+		}
+	})
+}
+
+func TestProtectedInjectionPlaceholdersEveryAlias(t *testing.T) {
+	t.Setenv("PRIMARY_TOKEN", "real-secret")
+	t.Setenv("SECONDARY_TOKEN", "real-secret")
+	r := runtimeWithProfile(t, model.Profile{
+		Name:         "tool",
+		ProxyManaged: []string{"PRIMARY_TOKEN"},
+		Secrets: map[string]model.SecretConfig{
+			"api-key": secretConfig([]string{"PRIMARY_TOKEN", "SECONDARY_TOKEN"}, &model.HTTPSecretReleaseConfig{
+				Hosts:  []string{"api.example.com"},
+				Header: "x-api-key",
+			}),
+		},
+	})
+	r.auth.ProtectAuth = true
+	env := []string{}
+	injection, err := newAuthManager(r).injectDeclaredSecrets(stubHooks{}, authContextForRuntime(r), &env, map[string]string{}, nil, nil, mustActiveSecrets(t, r))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"PRIMARY_TOKEN", "SECONDARY_TOKEN"} {
+		if got := envValue(env, name); got == "real-secret" || !sessionPlaceholders(injection.SecretMapping)[got] {
+			t.Fatalf("%s = %q, want a session placeholder", name, got)
+		}
+	}
+	if err := validateProtectedEnv(append(env, "OPENAI_API_KEY="+envValue(env, "PRIMARY_TOKEN")), sessionPlaceholders(injection.SecretMapping)); err != nil {
+		t.Fatalf("placeholder rejected: %v", err)
+	}
+	if err := validateProtectedEnv([]string{"OPENAI_API_KEY=ENCLAVE_SECRET_forged"}, sessionPlaceholders(injection.SecretMapping)); err == nil {
+		t.Fatal("unknown credential value accepted")
+	}
 }
 
 func TestBuildPersistedEnvPersistsDeclaredSecrets(t *testing.T) {

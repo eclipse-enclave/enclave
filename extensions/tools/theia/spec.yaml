@@ -35,8 +35,14 @@ postStart:
 
 credentials:
   sources:
-    anthropic-api-key: { env: [ANTHROPIC_API_KEY] }
-    openai-api-key: { env: [OPENAI_API_KEY] }
+    # Clients tell Anthropic API keys and OAuth tokens apart by their prefixes.
+    anthropic-api-key:
+      env: [ANTHROPIC_API_KEY]
+      placeholder: { prefix: "sk-ant-api03-", suffix: "AA", random: { encoding: base64url, length: 93 } }
+    # Clients tell OpenAI API keys from ChatGPT tokens by the sk- prefix.
+    openai-api-key:
+      env: [OPENAI_API_KEY]
+      placeholder: { prefix: "sk-enclave-", random: { encoding: alphanumeric, length: 48 } }
     gemini-api-key: { env: [GEMINI_API_KEY] }
 
 network:

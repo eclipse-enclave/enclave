@@ -29,10 +29,24 @@ import (
 	"enclave/internal/network"
 )
 
+// prepareGatewayImage builds the session's gateway image before startGateway,
+// outside the host-wide admission lock other sessions wait on.
+func (b *Backend) prepareGatewayImage(ctx context.Context, req backend.Request) error {
+	return gateway.PrepareImage(ctx, gateway.StartConfig{
+		Paths:         b.opts.Paths,
+		Profile:       model.Profile{Name: req.Session.Tool},
+		AllowlistPath: req.Network.Egress.AllowlistPath,
+		ForceRebuild:  b.opts.ForceRebuild,
+		NoRebuild:     b.opts.NoRebuild,
+		Home:          b.opts.Host.Home,
+	})
+}
+
 func (b *Backend) startGateway(ctx context.Context, req backend.Request, networkName string) (string, func(), error) {
 	gatewayConfigDir := config.HostProjectGatewayConfigDir(b.opts.Host.Home, req.Session.ProjectHash, req.Session.Tool)
 	policy := network.EffectivePolicy{
-		Mode:          model.NetworkModeRestricted,
+		Mode:          string(req.Network.Mode),
+		ModeSource:    req.Network.ModeSource,
 		Domains:       append([]string(nil), req.Network.Egress.AllowedDomains...),
 		DeniedDomains: append([]string(nil), req.Network.Egress.DeniedDomains...),
 		Resolvers:     append([]string(nil), req.Network.Egress.Resolvers...),
@@ -50,12 +64,21 @@ func (b *Backend) startGateway(ctx context.Context, req backend.Request, network
 		tempFiles = append(tempFiles, secretReleaseFile)
 	}
 
+	oauth, err := b.protectedGatewayConfig(req.AuthSession)
+	if err != nil {
+		cleanupFiles(tempFiles)
+		return "", nil, err
+	}
+	if oauth != nil {
+		oauth.Instances = gatewayInstances(req.Instances)
+	}
 	workspaceID := workspaceIDFromSession(req.Session, b.opts.ProjectDir)
 	captureRoot := ""
 	if b.opts.NetworkLogMode == model.NetworkLogFull {
 		captureRoot = config.HostProjectNetworkCaptureDir(b.opts.Host.Home, req.Session.ProjectHash, req.Session.Tool)
 	}
 	startConfig := gateway.StartConfig{
+		OAuth:             oauth,
 		Paths:             b.opts.Paths,
 		Profile:           model.Profile{Name: req.Session.Tool},
 		AllowlistPath:     req.Network.Egress.AllowlistPath,
@@ -77,6 +100,7 @@ func (b *Backend) startGateway(ctx context.Context, req backend.Request, network
 		ProjectHash:       req.Session.ProjectHash,
 		SecretReleaseFile: secretReleaseFile,
 		TLSRootDir:        config.HostTLSDir(b.opts.Host.Home),
+		ImagePrepared:     true,
 	}
 	result, err := gateway.Start(ctx, startConfig)
 	if err != nil {
@@ -89,7 +113,7 @@ func (b *Backend) startGateway(ctx context.Context, req backend.Request, network
 		if strings.TrimSpace(gatewayRef) == "" {
 			gatewayRef = result.ContainerName
 		}
-		gateway.StopContainer(gatewayRef)
+		gateway.RemoveContainer(gatewayRef)
 		cleanupFiles(tempFiles)
 	}
 	return result.ContainerName, cleanup, nil
@@ -293,6 +317,14 @@ func workspaceIDFromSession(session backend.SessionMeta, projectDir string) stri
 		workspaceID = session.Worktree
 	}
 	return workspaceID
+}
+
+func gatewayInstances(instances []backend.ProviderInstance) []model.ProviderInstance {
+	var converted []model.ProviderInstance
+	for _, instance := range instances {
+		converted = append(converted, model.ProviderInstance{Host: instance.Host, DeclaredHosts: append([]string(nil), instance.DeclaredHosts...)})
+	}
+	return converted
 }
 
 func writeSecretReleaseConfig(secrets []backend.SecretRelease) (string, error) {

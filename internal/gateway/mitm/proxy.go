@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"mime"
 	"net"
 	"net/http"
 	"net/url"
@@ -25,11 +26,13 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"golang.org/x/crypto/cryptobyte"
 
 	"enclave/internal/domainpattern"
+	"enclave/internal/gateway/oauthbroker"
 	"enclave/internal/gateway/tlsstore"
 	"enclave/internal/model"
 	"enclave/internal/netcapture"
@@ -38,14 +41,17 @@ import (
 )
 
 type Options struct {
-	HTTPAddr       string
-	HTTPSAddr      string
-	AllowedDomains []string
-	DeniedDomains  []string
-	SecretRules    []model.SecretReleaseEntry
-	AuditLogPath   string
-	// CaptureDir is the session directory full captures are written to; empty
-	// disables capturing.
+	HTTPAddr             string
+	HTTPSAddr            string
+	AllowedDomains       []string
+	DeniedDomains        []string
+	AllowAllDestinations bool
+	SecretRules          []model.SecretReleaseEntry
+	// OAuthBroker mediates protected credentials for the session's tool and
+	// features.
+	OAuthBroker  *oauthbroker.Broker
+	AuditLogPath string
+	// CaptureDir is empty unless full network capture is enabled.
 	CaptureDir string
 	// Session names the gateway that produced an event. Sessions of the same
 	// project and tool share one log file, so without it concurrent sessions
@@ -53,7 +59,7 @@ type Options struct {
 	Session        string
 	ForceHTTPSMITM bool
 	TLSStore       *tlsstore.Store
-	OnReady        func()
+	OnReady        func() error
 }
 
 const serverShutdownTimeout = 1 * time.Second
@@ -103,6 +109,8 @@ func Run(ctx context.Context, opts Options) error {
 	defer func() { _ = audit.Close() }()
 
 	proxy := newProxy(opts.AllowedDomains, opts.DeniedDomains, opts.SecretRules, opts.ForceHTTPSMITM, audit, opts.Session)
+	proxy.setBroker(opts.OAuthBroker)
+	proxy.allowAllDestinations = opts.AllowAllDestinations
 	proxy.captures, err = netcapture.Open(netcapture.Options{
 		Dir:     opts.CaptureDir,
 		Session: opts.Session,
@@ -118,6 +126,9 @@ func Run(ctx context.Context, opts Options) error {
 		Addr:              httpAddr,
 		Handler:           proxy.handler("http"),
 		ReadHeaderTimeout: 10 * time.Second,
+	}
+	if opts.OAuthBroker != nil {
+		httpServer.ErrorLog = log.New(io.Discard, "", 0)
 	}
 	httpListener, err := net.Listen("tcp", httpAddr)
 	if err != nil {
@@ -135,6 +146,15 @@ func Run(ctx context.Context, opts Options) error {
 		_ = httpsListener.Close()
 		return fmt.Errorf("create HTTPS dispatch server: %w", err)
 	}
+	proxy.guardSelfDial(httpListener, httpsListener, httpsServer.mitmListener)
+	if opts.OnReady != nil {
+		if err := opts.OnReady(); err != nil {
+			_ = httpListener.Close()
+			_ = httpsListener.Close()
+			_ = httpsServer.mitmListener.Close()
+			return fmt.Errorf("proxy readiness failed: %w", err)
+		}
+	}
 
 	errCh := make(chan error, 2)
 	go func() {
@@ -147,9 +167,6 @@ func Run(ctx context.Context, opts Options) error {
 			errCh <- fmt.Errorf("serve HTTPS proxy: %w", err)
 		}
 	}()
-	if opts.OnReady != nil {
-		opts.OnReady()
-	}
 
 	select {
 	case <-ctx.Done():
@@ -170,20 +187,22 @@ func Run(ctx context.Context, opts Options) error {
 }
 
 type proxy struct {
-	allowedDomains []string
-	deniedDomains  []string
-	secretRules    []model.SecretReleaseEntry
-	forceHTTPSMITM bool
-	audit          *netlog.Appender
-	session        string
-	// captures is nil unless --network-log=full asked for full captures.
-	captures  *netcapture.Store
-	exchanges exchangeTracker
-	transport *http.Transport
-	// upgradeTransport speaks only HTTP/1.1 and carries every request with an
-	// Upgrade header, whether or not Connection names it: HTTP/2 refuses any
-	// Upgrade header, and transport switches to HTTP/1.1 by itself only for
-	// WebSocket, not for upgrades such as SPDY.
+	allowedDomains       []string
+	deniedDomains        []string
+	allowAllDestinations bool
+	secretRules          []model.SecretReleaseEntry
+	oauthBroker          *oauthbroker.Broker
+	forceHTTPSMITM       bool
+	audit                *netlog.Appender
+	session              string
+	transport            *http.Transport
+	exchangeTransport    *http.Transport
+	captures             *netcapture.Store
+	exchanges            exchangeTracker
+	// upgradeTransport speaks only HTTP/1.1 and carries requests whose
+	// Connection header asks for an upgrade: HTTP/2 refuses any Upgrade header,
+	// and the transport switches to HTTP/1.1 by itself only for WebSocket, not
+	// for upgrades such as SPDY.
 	upgradeTransport *http.Transport
 }
 
@@ -235,10 +254,92 @@ func newUpstreamTransport() *http.Transport {
 	}
 }
 
+var errSelfDial = errors.New("refusing to connect to the proxy's own listener")
+
+// guardSelfDial refuses upstream connections into the proxy's own listeners.
+// A Host naming the gateway, as allow-all mode permits, would otherwise loop a
+// request through the proxy until it runs out of memory. Other local services
+// stay reachable.
+func (p *proxy) guardSelfDial(listeners ...net.Listener) {
+	ports := map[string]bool{}
+	for _, listener := range listeners {
+		if listener == nil {
+			continue
+		}
+		if _, port, err := net.SplitHostPort(listener.Addr().String()); err == nil {
+			ports[port] = true
+		}
+	}
+	own := map[string]bool{}
+	if addrs, err := net.InterfaceAddrs(); err == nil {
+		for _, addr := range addrs {
+			if prefix, ok := addr.(*net.IPNet); ok {
+				own[prefix.IP.String()] = true
+			}
+		}
+	}
+	dialer := &net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second, Control: func(_, address string, _ syscall.RawConn) error {
+		host, port, err := net.SplitHostPort(address)
+		if err != nil || !ports[port] {
+			return nil
+		}
+		if ip := net.ParseIP(host); ip != nil && (ip.IsLoopback() || ip.IsUnspecified() || own[ip.String()]) {
+			return errSelfDial
+		}
+		return nil
+	}}
+	for _, transport := range []*http.Transport{p.transport, p.upgradeTransport, p.exchangeTransport} {
+		if transport != nil {
+			transport.DialContext = dialer.DialContext
+		}
+	}
+}
+
+// setBroker configures the current transport before the proxy starts serving.
+func (p *proxy) setBroker(broker *oauthbroker.Broker) {
+	p.oauthBroker = broker
+	if broker == nil {
+		p.exchangeTransport = nil
+		return
+	}
+	p.transport.DisableCompression = true
+	p.exchangeTransport = p.transport.Clone()
+	p.exchangeTransport.DisableKeepAlives = true
+	p.exchangeTransport.DisableCompression = true
+	p.exchangeTransport.ForceAttemptHTTP2 = false
+	p.exchangeTransport.TLSNextProto = map[string]func(string, *tls.Conn) http.RoundTripper{}
+	if p.exchangeTransport.TLSClientConfig != nil {
+		p.exchangeTransport.TLSClientConfig.NextProtos = []string{"http/1.1"}
+	}
+}
+
 // logEvent stamps the gateway session on every event, so a log shared by
 // concurrent sessions of the same project and tool can be split again.
 func (p *proxy) logEvent(event netlog.Event) {
 	event.Session = p.session
+	if p.oauthBroker != nil {
+		// Normalization does not make client-chosen subdomains or free text safe:
+		// either can carry handles or enrollment bootstrap material. Retain only
+		// exact configured hosts and fixed method/media categories, never paths.
+		event.Path = ""
+		if oauthbroker.ContainsHandle(event.Domain) {
+			event.Domain = ""
+		} else if !slices.Contains(p.allowedDomains, event.Domain) && !slices.Contains(p.deniedDomains, event.Domain) {
+			event.Domain = p.oauthBroker.AuditDomain(event.Domain)
+		}
+		switch event.Method {
+		case http.MethodGet, http.MethodHead, http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete, http.MethodConnect, http.MethodOptions, http.MethodTrace:
+		default:
+			event.Method = ""
+		}
+		mediaType, _, _ := mime.ParseMediaType(event.ContentType)
+		switch mediaType {
+		case "application/json", "application/octet-stream", "application/x-www-form-urlencoded", "text/plain", "text/html", "text/event-stream":
+			event.ContentType = mediaType
+		default:
+			event.ContentType = ""
+		}
+	}
 	p.audit.Append(event)
 }
 
@@ -277,7 +378,8 @@ func (p *proxy) handler(scheme string) http.HandlerFunc {
 		// so it holds the placeholders the sandbox sent and never a real value.
 		// A denied request was not relayed and leaves no capture.
 		capture := p.captures.Begin(req, scheme)
-		if err := rewriteHeaders(scheme, host, req.Header, p.secretRules); err != nil {
+		released, err := rewriteHeaders(scheme, host, req.Header, p.secretRules)
+		if err != nil {
 			event.Status = http.StatusForbidden
 			event.Verdict = netlog.VerdictDeny
 			event.Rule = "secret-injection"
@@ -285,14 +387,49 @@ func (p *proxy) handler(scheme string) http.HandlerFunc {
 			http.Error(w, "request denied", http.StatusForbidden)
 			return
 		}
+		if p.oauthBroker != nil {
+			req = req.WithContext(oauthbroker.WithReleasedSecrets(req.Context(), released))
+		}
 		result, err := p.forward(w, req, scheme, capture)
 		if err != nil {
-			event.Status = http.StatusBadGateway
-			event.Verdict = netlog.VerdictPass
-			event.Rule = "upstream-error"
-			event.CaptureID = capture.Finish(err)
+			if errors.Is(err, oauthbroker.ErrDenied) {
+				capture.Discard()
+			} else if _, rule := brokerFailure(err); rule != "" {
+				event.CaptureID = capture.Finish(errors.New(rule))
+			} else {
+				event.CaptureID = capture.Finish(err)
+			}
+			if result.StatusCode != 0 {
+				event.Status = result.StatusCode
+				event.ResponseSize = result.ResponseBytes
+				event.ContentType = result.ContentType
+				event.Verdict = netlog.VerdictPass
+				event.Rule = "upstream-body-error"
+				if req.Context().Err() != nil {
+					// The client went away; the upstream did nothing wrong.
+					event.Rule = "client-closed"
+				}
+				if _, rule := brokerFailure(err); rule != "" {
+					// The broker stopped a response that would carry credentials.
+					event.Verdict, event.Rule = netlog.VerdictDeny, rule
+				}
+				p.logEvent(event)
+				// Headers are already on the wire. Abort the response instead of
+				// appending a 502 body or making a truncated stream look complete.
+				panic(http.ErrAbortHandler)
+			}
+			event.Status, event.Rule = brokerFailure(err)
+			message := "Protected OAuth request failed"
+			if event.Status != 0 {
+				event.Verdict = netlog.VerdictDeny
+			} else {
+				event.Status = http.StatusBadGateway
+				event.Verdict = netlog.VerdictPass
+				event.Rule = "upstream-error"
+				message = "Upstream request failed"
+			}
 			p.logEvent(event)
-			http.Error(w, "Upstream request failed", http.StatusBadGateway)
+			http.Error(w, message, event.Status)
 			return
 		}
 		event.CaptureID = capture.Finish(nil)
@@ -302,6 +439,21 @@ func (p *proxy) handler(scheme string) http.HandlerFunc {
 		event.Verdict = netlog.VerdictPass
 		event.Rule = netlog.RuleAllowlist
 		p.logEvent(event)
+	}
+}
+
+func brokerFailure(err error) (int, string) {
+	switch {
+	case errors.Is(err, oauthbroker.ErrDenied):
+		return http.StatusForbidden, "oauth-broker-denied"
+	case errors.Is(err, oauthbroker.ErrUncertain):
+		return http.StatusServiceUnavailable, "oauth-broker-uncertain"
+	case errors.Is(err, oauthbroker.ErrState):
+		return http.StatusServiceUnavailable, "oauth-broker-state"
+	case errors.Is(err, oauthbroker.ErrResponse):
+		return http.StatusBadGateway, "oauth-broker-response"
+	default:
+		return 0, ""
 	}
 }
 
@@ -333,6 +485,19 @@ func (p *proxy) forward(w http.ResponseWriter, req *http.Request, scheme string,
 	outgoing.RequestURI = ""
 	outgoing.URL = &target
 	outgoing.Body = capture.RequestBody(req.Body)
+	// In protected sessions the broker checks a handshake like any request,
+	// releasing handles and refusing raw credentials, and scans a WebSocket
+	// stream that carries released credentials for them.
+	upgrade := upgradeType(req.Header)
+	removeHopHeaders(outgoing.Header)
+	// Like httputil.ReverseProxy, keep the one TE value gRPC depends on.
+	if headerHasToken(req.Header, "Te", "trailers") {
+		outgoing.Header.Set("Te", "trailers")
+	}
+	if upgrade != "" {
+		outgoing.Header.Set("Connection", "Upgrade")
+		outgoing.Header.Set("Upgrade", upgrade)
+	}
 	outgoing.Header.Set("X-Forwarded-Proto", scheme)
 	if clientIP := clientIPFromAddr(req.RemoteAddr); clientIP != "" {
 		if prior := strings.TrimSpace(outgoing.Header.Get("X-Forwarded-For")); prior != "" {
@@ -341,53 +506,98 @@ func (p *proxy) forward(w http.ResponseWriter, req *http.Request, scheme string,
 			outgoing.Header.Set("X-Forwarded-For", clientIP)
 		}
 	}
-	transport := p.transport
-	if outgoing.Header.Get("Upgrade") != "" {
-		transport = p.upgradeTransport
+	var resp *http.Response
+	var err error
+	switch {
+	case p.oauthBroker != nil && upgrade != "":
+		resp, err = p.oauthBroker.RoundTrip(outgoing, p.upgradeTransport, p.exchangeTransport)
+	case p.oauthBroker != nil:
+		resp, err = p.oauthBroker.RoundTrip(outgoing, p.transport, p.exchangeTransport)
+	case upgrade != "":
+		resp, err = p.upgradeTransport.RoundTrip(outgoing)
+	default:
+		resp, err = p.transport.RoundTrip(outgoing)
 	}
-	resp, err := transport.RoundTrip(outgoing)
 	if err != nil {
 		return forwardResult{}, err
 	}
 	defer func() { _ = resp.Body.Close() }()
 	capture.Response(resp)
 	if resp.StatusCode == http.StatusSwitchingProtocols {
+		if upgrade == "" {
+			return forwardResult{}, errors.New("upstream protocol upgrade is unsupported")
+		}
 		return p.relayUpgrade(w, outgoing, resp, capture)
 	}
+	removeHopHeaders(resp.Header)
+	if p.oauthBroker != nil {
+		// HTTP/3 alternatives would take later requests around the proxy.
+		resp.Header.Del("Alt-Svc")
+	}
 	copyHeaders(w.Header(), resp.Header)
+	for name := range resp.Trailer {
+		w.Header().Add("Trailer", name)
+	}
+	result := forwardResult{
+		StatusCode:  resp.StatusCode,
+		ContentType: strings.TrimSpace(resp.Header.Get("Content-Type")),
+	}
 	w.WriteHeader(resp.StatusCode)
-	// Send the head before waiting for the body: an event stream can stay
-	// silent for a long time after it opens, and the client cannot see the
-	// stream as open until the head arrives.
-	rc := http.NewResponseController(w)
-	_ = rc.Flush()
-	var client io.Writer = flushWriter{w: w, rc: rc}
+	writer := flushingWriter{ResponseWriter: w, controller: http.NewResponseController(w)}
+	if err := writer.flush(); err != nil {
+		return result, err
+	}
+	var client io.Writer = writer
 	if sink := capture.ResponseBody(); sink != nil {
 		client = captureWriter{relay: client, capture: sink}
 	}
-	responseBytes, copyErr := io.Copy(client, resp.Body)
-	capture.ResponseEnded(copyErr)
-	return forwardResult{
-		StatusCode:    resp.StatusCode,
-		ResponseBytes: responseBytes,
-		ContentType:   strings.TrimSpace(resp.Header.Get("Content-Type")),
-	}, nil
+	result.ResponseBytes, err = io.Copy(client, resp.Body)
+	capture.ResponseEnded(err)
+	if err != nil {
+		return result, err
+	}
+	for name, values := range resp.Trailer {
+		w.Header()[http.TrailerPrefix+name] = values
+	}
+	return result, nil
 }
 
-// flushWriter passes each chunk to the client as soon as it arrives. Without
-// it, streamed responses such as server-sent events sit in the server's write
-// buffer until it fills or the response ends.
-type flushWriter struct {
-	w  io.Writer
-	rc *http.ResponseController
+// flushingWriter passes each chunk to the client as soon as it arrives.
+// Without it, streamed responses such as server-sent events sit in the
+// server's write buffer until it fills or the response ends.
+type flushingWriter struct {
+	http.ResponseWriter
+	controller *http.ResponseController
 }
 
-func (f flushWriter) Write(p []byte) (int, error) {
-	n, err := f.w.Write(p)
+func (w flushingWriter) Write(buf []byte) (int, error) {
+	n, err := w.ResponseWriter.Write(buf)
 	if err != nil {
 		return n, err
 	}
-	return n, f.rc.Flush()
+	return n, w.flush()
+}
+
+func (w flushingWriter) flush() error {
+	err := w.controller.Flush()
+	if errors.Is(err, http.ErrNotSupported) {
+		return nil
+	}
+	return err
+}
+
+func removeHopHeaders(header http.Header) {
+	for _, connection := range header.Values("Connection") {
+		for _, name := range strings.Split(connection, ",") {
+			header.Del(strings.TrimSpace(name))
+		}
+	}
+	for _, name := range []string{
+		"Connection", "Proxy-Connection", "Keep-Alive", "Proxy-Authenticate",
+		"Proxy-Authorization", "Te", "Trailer", "Transfer-Encoding", "Upgrade",
+	} {
+		header.Del(name)
+	}
 }
 
 // captureWriter tees relayed bytes into their capture. Each chunk is relayed
@@ -402,6 +612,17 @@ func (c captureWriter) Write(p []byte) (int, error) {
 	n, err := c.relay.Write(p)
 	_, _ = c.capture.Write(p[:n])
 	return n, err
+}
+
+func headerHasToken(header http.Header, name, token string) bool {
+	for _, value := range header.Values(name) {
+		for item := range strings.SplitSeq(value, ",") {
+			if strings.EqualFold(strings.TrimSpace(item), token) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // relayUpgrade completes a protocol switch such as a WebSocket handshake. The
@@ -444,18 +665,24 @@ func (p *proxy) relayUpgrade(w http.ResponseWriter, req *http.Request, resp *htt
 	// Either side ending the session ends the relay: closing both connections
 	// unblocks the copy in the other direction.
 	done := make(chan struct{}, 2)
+	var relayErr error
 	go func() {
 		_, _ = io.Copy(toUpstream, buffered.Reader)
 		done <- struct{}{}
 	}()
 	go func() {
-		result.ResponseBytes, _ = io.Copy(toClient, upstream)
+		result.ResponseBytes, relayErr = io.Copy(toClient, upstream)
 		done <- struct{}{}
 	}()
 	<-done
 	_ = upstream.Close()
 	_ = downstream.Close()
 	<-done
+	// The broker cut a stream that would carry credentials.
+	if _, rule := brokerFailure(relayErr); rule != "" {
+		capture.ResponseEnded(relayErr)
+		return result, relayErr
+	}
 	return result, nil
 }
 
@@ -580,6 +807,11 @@ func newHTTPSDispatchServer(proxy *proxy, store *tlsstore.Store, listener net.Li
 		mitmAddr: mitmListener.Addr().String(),
 		conns:    map[net.Conn]struct{}{},
 	}
+	if proxy.oauthBroker != nil {
+		// net/http TLS and panic diagnostics may include client-selected text.
+		// Structured broker audit events remain available without that text.
+		server.mitmServer.ErrorLog = log.New(io.Discard, "", 0)
+	}
 	return server, nil
 }
 
@@ -648,7 +880,7 @@ func (s *httpsDispatchServer) serveConn(conn net.Conn) {
 		_ = conn.Close()
 		return
 	}
-	if shouldMITM(host, s.proxy.secretRules, s.proxy.forceHTTPSMITM) {
+	if shouldMITM(host, s.proxy.secretRules, s.proxy.forceHTTPSMITM) || (s.proxy.oauthBroker != nil && s.proxy.oauthBroker.RequiresMITM(host)) {
 		s.proxy.logEvent(newTCPAuditEvent(host, netlog.VerdictPass, "mitm-dispatch"))
 		tunnelToAddress(conn, preface, s.mitmAddr)
 		return
@@ -926,20 +1158,24 @@ func normalizeRule(rule model.SecretReleaseEntry) (model.SecretReleaseEntry, err
 	return rule, nil
 }
 
-func rewriteHeaders(scheme string, host string, headers http.Header, rules []model.SecretReleaseEntry) error {
+// rewriteHeaders swaps placeholders for their secrets in each rule's declared
+// header and host, and returns the secrets it released.
+func rewriteHeaders(scheme string, host string, headers http.Header, rules []model.SecretReleaseEntry) ([]string, error) {
 	normalizedHost, err := domainpattern.NormalizeHost(host)
 	if err != nil {
-		return fmt.Errorf("invalid request host")
+		return nil, fmt.Errorf("invalid request host")
 	}
+	var released []string
 	secureTransport := strings.EqualFold(strings.TrimSpace(scheme), "https")
+	rewritten := make(http.Header)
 	for header, values := range headers {
 		for _, rule := range rules {
 			if strings.Contains(strings.ToLower(header), strings.ToLower(rule.Placeholder)) {
-				return fmt.Errorf("request denied")
+				return nil, fmt.Errorf("request denied")
 			}
 			for _, value := range values {
 				if strings.Contains(value, rule.Placeholder) && (!secureTransport || !releaseHostMatch(normalizedHost, rule) || !strings.EqualFold(header, rule.Header)) {
-					return fmt.Errorf("request denied")
+					return nil, fmt.Errorf("request denied")
 				}
 			}
 		}
@@ -953,10 +1189,17 @@ func rewriteHeaders(scheme string, host string, headers http.Header, rules []mod
 				if !strings.Contains(value, rule.Placeholder) {
 					continue
 				}
+				if !secureTransport || !strings.EqualFold(header, rule.Header) {
+					return nil, fmt.Errorf("request denied")
+				}
+				if !releaseHostMatch(normalizedHost, rule) {
+					return nil, fmt.Errorf("request denied")
+				}
+				released = append(released, rule.Value)
 				replacement := rule.Value
 				// Apply format only when the header value is the bare placeholder;
 				// this avoids turning "Bearer <placeholder>" into "Bearer Bearer <secret>".
-				if strings.EqualFold(header, rule.Header) && rule.Format != "" && strings.TrimSpace(value) == rule.Placeholder {
+				if rule.Format != "" && strings.TrimSpace(value) == rule.Placeholder {
 					replacement = strings.ReplaceAll(rule.Format, "%s", rule.Value)
 				}
 				value = strings.ReplaceAll(value, rule.Placeholder, replacement)
@@ -965,10 +1208,13 @@ func rewriteHeaders(scheme string, host string, headers http.Header, rules []mod
 			updated[i] = value
 		}
 		if changed {
-			headers[header] = updated
+			rewritten[header] = updated
 		}
 	}
-	return nil
+	for header, values := range rewritten {
+		headers[header] = values
+	}
+	return released, nil
 }
 
 func hostAllowed(host string, patterns []string) bool {
@@ -993,6 +1239,9 @@ func hostAllowed(host string, patterns []string) bool {
 // denied host more specific than an allowed parent (deny tracking.example.com,
 // allow example.com) would otherwise pass here — the deny check closes that.
 func (p *proxy) hostPermitted(host string) bool {
+	if p.allowAllDestinations {
+		return true
+	}
 	if hostAllowed(host, p.deniedDomains) {
 		return false
 	}

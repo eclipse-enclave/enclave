@@ -79,7 +79,7 @@ isolated credentials without this coordination.
 
 | Tool | Callback | Mapping |
 |------|----------|---------|
-| Codex | `localhost:1455/auth/callback` | Automatic when no session exists; add `-p 1455` to log in again. The gateway log shows `Loopback proxy (socat) enabled on port 1455` while active |
+| Codex | `localhost:1455/auth/callback` | Automatic when no session exists; add `-p 1455` to log in again. The gateway log shows `DNAT port 1455 to loopback listener` while active, or `Loopback proxy (socat) enabled on port 1455` on the fallback path |
 | OpenCode (ChatGPT Pro/Plus) | `localhost:1455/auth/callback` | Automatic when `auth.json` has no `openai` entry |
 | Pi (ChatGPT/Codex OAuth) | port 1455 | Automatic when `auth.json` has no `openai-codex` entry; add `-p 1455` to log in again |
 | Pi (Anthropic OAuth) | port 53692 | Not automatic; add `-p 53692` |
@@ -133,9 +133,11 @@ These env credentials use gateway placeholders under restricted networking:
   uses stored auth, so for persistent TUI use start with `--no-api-key` and
   sign in.
   See the [Codex README](../extensions/tools/codex/README.md#env-credentials).
-- A placeholder sent to a host outside its release list is denied. Codex's
-  API-key model-list request to `chatgpt.com` is one such case; Codex falls
-  back to its built-in model list.
+- An inspected request that sends a placeholder to a host outside its release
+  list is denied; HTTPS to hosts the gateway does not inspect is tunneled
+  unchanged ([request flow](runtime/network-request-flow.md#flow-summary)).
+  Codex's API-key model-list request to `chatgpt.com` is one such denial;
+  Codex falls back to its built-in model list.
 - `CODEX_ACCESS_TOKEN` must start with `at-` while gateway protection is active:
   Agent Identity JWTs need client-side signature checks and cannot use a
   placeholder. The startup error names the source; `--reset-auth` clears it

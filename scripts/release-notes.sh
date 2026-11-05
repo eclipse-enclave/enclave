@@ -12,7 +12,8 @@
 #   release-notes.sh stable <version> <assets-url> <commit>
 #
 # assets-url is the GitHub download URL of the release's assets; the same
-# files are published on download.eclipse.org (see docs/DEV.md, Releases).
+# files are published on download.eclipse.org (see
+# docs/RELEASING.md#download-layout).
 # The Commit line records the source of a release; release.yml refuses to
 # republish a version from another commit.
 

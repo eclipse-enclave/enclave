@@ -66,8 +66,9 @@ func RunWithStartHook(ctx context.Context, config *ContainerConfig, hostConfig *
 
 // RunWithIOAndStartHook runs a container wired to the supplied streams and
 // invokes onStarted with the container's ID once it is running. A non-empty
-// detachKeys replaces the engine's detach keys of an attached terminal. It
-// returns the ID of the container this run created, if any.
+// detachKeys replaces the engine's detach keys of an attached terminal.
+// SIGINT, SIGTERM and SIGHUP sent to this process while the child runs are
+// forwarded to it. It returns the ID of the container this run created, if any.
 func RunWithIOAndStartHook(ctx context.Context, config *ContainerConfig, hostConfig *HostConfig, name string, in io.Reader, out io.Writer, errOut io.Writer, tty bool, detachKeys string, onStarted func(id string)) (string, error) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -83,7 +84,12 @@ func RunWithIOAndStartHook(ctx context.Context, config *ContainerConfig, hostCon
 	cmd.Stdin = in
 	cmd.Stdout = out
 	cmd.Stderr = errOut
-	err = runCommandWithStartHook(ctx, cid, cmd, onStarted, nil)
+	// Without a TTY a terminal Ctrl-C also reaches the engine directly, so it
+	// sees that one twice; a signal sent to this process alone would otherwise be lost.
+	child := make(chan *os.Process, 1)
+	stopRelay := relayInterrupts(child)
+	defer stopRelay()
+	err = runCommandWithStartHook(ctx, cid, cmd, onStarted, child)
 	return cid.id(), classifyRunError(args, err, "")
 }
 

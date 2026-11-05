@@ -53,6 +53,9 @@ type ContainerConfig struct {
 	Hostname     string            `json:"Hostname,omitempty"`
 	Labels       map[string]string `json:"Labels,omitempty"`
 	ExposedPorts PortSet           `json:"ExposedPorts,omitempty"`
+	// EnvFiles are passed as --env-file so secret values stay off the argv;
+	// the CLI reads them, so callers may delete them once run returns.
+	EnvFiles []string `json:"-"`
 }
 
 // StrSlice is a string slice that also decodes from a single JSON string.
@@ -102,6 +105,12 @@ type HostConfig struct {
 	CapAdd      []string
 	CapDrop     []string
 	Sysctls     map[string]string
+	// ReadonlyRootfs renders --read-only.
+	ReadonlyRootfs bool
+	// IPv4Address renders --ip, a static address on NetworkMode's network.
+	IPv4Address string
+	// LogDriver renders --log-driver.
+	LogDriver string
 }
 
 // NetworkMode is the container network mode (for example "" for the default
@@ -210,6 +219,8 @@ type NetworkInspectResponse struct {
 	// encoding/json matches field names case-insensitively.
 	Subnets    []NetworkIPAMConfig        `json:"subnets"`
 	Containers map[string]NetworkEndpoint `json:"Containers"`
+	// Options are the driver options (Podman: "options", e.g. isolate).
+	Options map[string]string `json:"Options"`
 }
 
 // SubnetConfigs returns the network's address configuration regardless of

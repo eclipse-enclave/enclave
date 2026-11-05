@@ -217,10 +217,18 @@ const dockerExitCodeUnableToStart = 125
 // failure it returns the stdout captured so far and a *cliError carrying stderr
 // and the exit code.
 func capture(ctx context.Context, args ...string) (string, error) {
+	return captureInput(ctx, nil, args...)
+}
+
+// captureInput is capture with stdin, for inputs that must stay off the argv.
+func captureInput(ctx context.Context, stdin []byte, args ...string) (string, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	cmd := exec.CommandContext(ctx, dockerBinary, args...) // #nosec G204 -- args are fixed flags and caller-controlled values passed without a shell.
+	if stdin != nil {
+		cmd.Stdin = bytes.NewReader(stdin)
+	}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -290,6 +298,9 @@ func buildRunArgs(config *ContainerConfig, hostConfig *HostConfig, name string, 
 		for _, env := range config.Env {
 			args = append(args, "--env", env)
 		}
+		for _, file := range config.EnvFiles {
+			args = append(args, "--env-file", file)
+		}
 		args = append(args, sortedMapFlags("--label", config.Labels)...)
 		args = append(args, exposedPortFlags(config.ExposedPorts)...)
 		if len(config.Entrypoint) > 0 {
@@ -314,6 +325,15 @@ func buildRunArgs(config *ContainerConfig, hostConfig *HostConfig, name string, 
 		}
 		if !hostConfig.NetworkMode.IsEmpty() {
 			args = append(args, "--network", string(hostConfig.NetworkMode))
+		}
+		if hostConfig.IPv4Address != "" {
+			args = append(args, "--ip", hostConfig.IPv4Address)
+		}
+		if hostConfig.ReadonlyRootfs {
+			args = append(args, "--read-only")
+		}
+		if hostConfig.LogDriver != "" {
+			args = append(args, "--log-driver", hostConfig.LogDriver)
 		}
 		for _, bind := range hostConfig.Binds {
 			args = append(args, "--volume", bind)

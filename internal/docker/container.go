@@ -126,6 +126,25 @@ func summaryFromInspect(info InspectResponse) Summary {
 	return summary
 }
 
+// ContainerStart starts an existing, stopped container.
+func ContainerStart(ctx context.Context, containerID string) error {
+	_, err := capture(ctx, "start", containerID)
+	return err
+}
+
+// Unshare runs a command in podman's rootless user namespace ("podman
+// unshare"); other engines have no equivalent.
+func Unshare(ctx context.Context, command ...string) error {
+	if !IsPodman() {
+		return fmt.Errorf("%s has no unshare command", Binary())
+	}
+	if len(command) == 0 {
+		return fmt.Errorf("unshare requires a command")
+	}
+	_, err := capture(ctx, append([]string{"unshare"}, command...)...)
+	return err
+}
+
 // ContainerStop stops a container, optionally overriding the kill timeout.
 func ContainerStop(ctx context.Context, containerID string, timeout *time.Duration) error {
 	args := []string{"stop"}

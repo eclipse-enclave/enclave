@@ -1,0 +1,40 @@
+# See the documentation for more information:
+# https://packit.dev/docs/configuration/
+
+specfile_path: packaging/rpm/enclave.spec
+
+# name in upstream package repository or registry (e.g. in PyPI)
+upstream_package_name: enclave
+# downstream (Fedora) RPM package name
+downstream_package_name: enclave
+
+srpm_build_deps:
+  - golang
+
+jobs:
+  - job: copr_build
+    trigger: commit
+    branch: main$
+    owner: filippor
+    project: tests
+    targets:
+      - fedora-all-x86_64
+
+actions:
+  get-current-version:
+    - ./scripts/version.sh --package
+  create-archive:
+    - |
+      bash -euc '
+        set -o pipefail
+        root="$PWD"
+        version="${PACKIT_PROJECT_VERSION:?}"
+        archive="$root/enclave-$version.tar.gz"
+        workdir=$(mktemp -d)
+        trap "rm -rf \"$workdir\"" EXIT
+        git archive --prefix="enclave-$version/" HEAD | tar -x -C "$workdir"
+        cd "$workdir/enclave-$version"
+        go mod vendor -modcacherw >&2
+        tar -czf "$archive" -C "$workdir" "enclave-$version"
+        printf "%s\n" "$archive"
+      '

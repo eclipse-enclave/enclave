@@ -24,12 +24,23 @@ DNSMASQ_LOG_FILE=""
 PROXY_LOG_FILE="/var/log/enclave/proxy.log"
 DNS_AUDIT_LOG_FILE="/var/log/enclave/dns-audit.log"
 PROXY_READY_FILE="/var/lib/enclave/proxy/proxy.ready"
+A2A_OVERLAY_FILE="/etc/enclave-a2a-overlay/overlay.json"
+A2A_OVERLAY_MAX_BYTES="4096"
 
 DNSMASQ_PID=""
 PROXY_PID=""
 DNS_AUDIT_PID=""
 DNS_AUDIT_RESTARTS="0"
 RELOAD_PENDING="0"
+
+# Overlay state of the current read; PENDING means a marker is still owed.
+A2A_OVERLAY_PENDING="false"
+A2A_OVERLAY_ACTIVE="false"
+A2A_OVERLAY_GENERATION=""
+A2A_HUB_ADDRESS=""
+A2A_HUB_PORT=""
+A2A_ADAPTER_PORT=""
+A2A_DNS_NAME=""
 
 UNIQUE_RESOLVERS=""
 
@@ -185,6 +196,191 @@ read_bundle_generation() {
     printf '%s\n' "$generation"
 }
 
+a2a_overlay_marker() {
+    log "A2A overlay $1 (generation=$A2A_OVERLAY_GENERATION)"
+}
+
+# Logs the apply failure marker if the current overlay read still owes one.
+a2a_overlay_apply_failed() {
+    if [ "$A2A_OVERLAY_PENDING" = "true" ]; then
+        A2A_OVERLAY_PENDING="false"
+        a2a_overlay_marker "apply failed"
+    fi
+}
+
+a2a_overlay_succeeded() {
+    if [ "$A2A_OVERLAY_PENDING" != "true" ]; then
+        return 0
+    fi
+    A2A_OVERLAY_PENDING="false"
+    if [ "$A2A_OVERLAY_ACTIVE" = "true" ]; then
+        a2a_overlay_marker "applied"
+    else
+        a2a_overlay_marker "cleared"
+    fi
+}
+
+a2a_is_uint() {
+    case "$1" in
+        0) return 0 ;;
+        ''|0*|*[!0-9]*) return 1 ;;
+    esac
+    [ "${#1}" -le 20 ]
+}
+
+a2a_is_port() {
+    a2a_is_uint "$1" && [ "${#1}" -le 5 ] && [ "$1" -ge 1 ] && [ "$1" -le 65535 ]
+}
+
+a2a_is_unicast_ipv4() {
+    echo "$1" | grep -Eq '^(0|[1-9][0-9]{0,2})(\.(0|[1-9][0-9]{0,2})){3}$' || return 1
+    a2a_old_ifs="$IFS"
+    IFS=.
+    # shellcheck disable=SC2086 # Split the validated dotted quad into octets.
+    set -- $1
+    IFS="$a2a_old_ifs"
+    for a2a_octet in "$@"; do
+        [ "$a2a_octet" -le 255 ] || return 1
+    done
+    case "$1" in
+        0|127|22[4-9]|23[0-9]|24[0-9]|25[0-5]) return 1 ;;
+    esac
+    return 0
+}
+
+a2a_is_dns_name() {
+    [ "${#1}" -le 253 ] || return 1
+    echo "$1" | grep -Eq '^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$'
+}
+
+# Prints the raw value of a top-level key that occurs exactly once.
+a2a_overlay_field() {
+    a2a_count=$(printf '%s' "$1" | grep -o "\"$2\"[[:space:]]*:" | wc -l)
+    [ "$a2a_count" -eq 1 ] || return 1
+    a2a_value=$(printf '%s\n' "$1" | sed -n 's/.*"'"$2"'"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
+    if [ -z "$a2a_value" ]; then
+        a2a_value=$(printf '%s\n' "$1" | sed -n 's/.*"'"$2"'"[[:space:]]*:[[:space:]]*\([0-9a-z]*\).*/\1/p')
+    fi
+    [ -n "$a2a_value" ] || return 1
+    printf '%s\n' "$a2a_value"
+}
+
+# A missing overlay means no A2A rules and no marker; an invalid one logs the
+# validation marker and returns 1.
+load_a2a_overlay() {
+    A2A_OVERLAY_PENDING="false"
+    A2A_OVERLAY_ACTIVE="false"
+    A2A_OVERLAY_GENERATION=""
+    A2A_HUB_ADDRESS=""
+    A2A_HUB_PORT=""
+    A2A_ADAPTER_PORT=""
+    A2A_DNS_NAME=""
+
+    if [ ! -e "$A2A_OVERLAY_FILE" ]; then
+        return 0
+    fi
+    A2A_OVERLAY_GENERATION="unknown"
+
+    if ! parse_a2a_overlay; then
+        A2A_OVERLAY_ACTIVE="false"
+        a2a_overlay_marker "validation failed"
+        return 1
+    fi
+    A2A_OVERLAY_PENDING="true"
+    return 0
+}
+
+parse_a2a_overlay() {
+    [ -f "$A2A_OVERLAY_FILE" ] && [ -r "$A2A_OVERLAY_FILE" ] || return 1
+    a2a_size=$(wc -c < "$A2A_OVERLAY_FILE") || return 1
+    [ "$a2a_size" -le "$A2A_OVERLAY_MAX_BYTES" ] || return 1
+    a2a_json=$(tr -d '\n\r\t' < "$A2A_OVERLAY_FILE") || return 1
+    # No valid value needs escaping, so rejecting backslashes keeps the field matcher exact.
+    case "$a2a_json" in
+        *\\*) return 1 ;;
+        \{*\}) ;;
+        *) return 1 ;;
+    esac
+
+    a2a_generation=$(a2a_overlay_field "$a2a_json" generation) || return 1
+    a2a_is_uint "$a2a_generation" || return 1
+    A2A_OVERLAY_GENERATION="$a2a_generation"
+
+    a2a_schema=$(a2a_overlay_field "$a2a_json" schemaVersion) || return 1
+    [ "$a2a_schema" = "1" ] || return 1
+
+    a2a_active=$(a2a_overlay_field "$a2a_json" active) || return 1
+    case "$a2a_active" in
+        false) return 0 ;;
+        true) ;;
+        *) return 1 ;;
+    esac
+
+    a2a_hub_address=$(a2a_overlay_field "$a2a_json" hubAddress) || return 1
+    a2a_is_unicast_ipv4 "$a2a_hub_address" || return 1
+    a2a_hub_port=$(a2a_overlay_field "$a2a_json" hubPort) || return 1
+    a2a_is_port "$a2a_hub_port" || return 1
+    a2a_adapter_port=$(a2a_overlay_field "$a2a_json" adapterPort) || return 1
+    if [ "$a2a_adapter_port" != "0" ]; then
+        a2a_is_port "$a2a_adapter_port" || return 1
+    fi
+    a2a_dns_name=$(a2a_overlay_field "$a2a_json" dnsName) || return 1
+    a2a_is_dns_name "$a2a_dns_name" || return 1
+
+    A2A_OVERLAY_ACTIVE="true"
+    A2A_HUB_ADDRESS="$a2a_hub_address"
+    A2A_HUB_PORT="$a2a_hub_port"
+    A2A_ADAPTER_PORT="$a2a_adapter_port"
+    A2A_DNS_NAME="$a2a_dns_name"
+    return 0
+}
+
+# host-record answers only the exact name and, like a hosts entry, outranks address=/#/.
+append_a2a_overlay_dns() {
+    if [ "$A2A_OVERLAY_ACTIVE" != "true" ]; then
+        return 0
+    fi
+    printf '\nhost-record=%s,%s\n' "$A2A_DNS_NAME" "$A2A_HUB_ADDRESS" >> "$1"
+}
+
+setup_a2a_input_rules() {
+    if [ "$A2A_OVERLAY_ACTIVE" != "true" ]; then
+        return 0
+    fi
+    if [ "$A2A_ADAPTER_PORT" != "0" ]; then
+        setup_a2a_adapter_accept || return 1
+    fi
+    # A compromised hub must not reach published ports, which accept any source.
+    iptables -A INPUT -s "$A2A_HUB_ADDRESS" -j DROP
+}
+
+setup_a2a_adapter_accept() {
+    if ! command -v enclave_route_interface_ipv4 >/dev/null 2>&1; then
+        log "A2A overlay: network helper unavailable"
+        return 1
+    fi
+    a2a_bridge_if=$(enclave_route_interface_ipv4 "$A2A_HUB_ADDRESS" || true)
+    if [ -z "$a2a_bridge_if" ] || [ "$a2a_bridge_if" = "lo" ]; then
+        log "A2A overlay: no interface routes to hub address $A2A_HUB_ADDRESS"
+        return 1
+    fi
+    iptables -A INPUT -i "$a2a_bridge_if" -s "$A2A_HUB_ADDRESS" -p tcp --dport "$A2A_ADAPTER_PORT" -j ACCEPT
+}
+
+setup_a2a_output_rule() {
+    if [ "$A2A_OVERLAY_ACTIVE" != "true" ]; then
+        return 0
+    fi
+    iptables -A OUTPUT -d "$A2A_HUB_ADDRESS" -p tcp --dport "$A2A_HUB_PORT" -j ACCEPT
+}
+
+setup_a2a_nat_exemption() {
+    if [ "$A2A_OVERLAY_ACTIVE" != "true" ]; then
+        return 0
+    fi
+    iptables -t nat -A OUTPUT -d "$A2A_HUB_ADDRESS" -j RETURN
+}
+
 ensure_local_resolver() {
     if command -v enclave_ensure_local_resolver >/dev/null 2>&1; then
         enclave_ensure_local_resolver
@@ -217,6 +413,7 @@ render_and_validate_bundle() {
 
     log "Using host-managed gateway config bundle from $GATEWAY_CONFIG_DIR"
     copy_host_bundle "$target_dir"
+    append_a2a_overlay_dns "$target_dir/dnsmasq.conf" || return 1
     validate_dnsmasq_conf "$target_dir/dnsmasq.conf" || return 1
     load_resolvers_from_conf "$target_dir/dnsmasq.conf"
 
@@ -225,7 +422,7 @@ render_and_validate_bundle() {
 
 install_bundle() {
     target_dir="$1"
-    mv "$target_dir/dnsmasq.conf" "$DNSMASQ_CONF"
+    mv "$target_dir/dnsmasq.conf" "$DNSMASQ_CONF" || return 1
     mv "$target_dir/domains.txt" "$ACTIVE_DOMAINS_FILE"
 }
 
@@ -368,6 +565,9 @@ setup_input_firewall() {
     "$firewall" -F INPUT || return 1
     "$firewall" -A INPUT -i lo -j ACCEPT || return 1
     "$firewall" -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT || return 1
+    if [ "$firewall" = "iptables" ]; then
+        setup_a2a_input_rules || return 1
+    fi
 
     published_ports=$(printf '%s' "${ENCLAVE_GATEWAY_PUBLISHED_PORTS:-}" | tr ',' '\n')
     while IFS= read -r published; do
@@ -398,6 +598,7 @@ setup_firewall() {
 
     iptables -A OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT || return 1
     iptables -A OUTPUT -o lo -j ACCEPT || return 1
+    setup_a2a_output_rule || return 1
 
     iptables -A OUTPUT -p udp --dport 53 -d 127.0.0.1 -j ACCEPT
     iptables -A OUTPUT -p tcp --dport 53 -d 127.0.0.1 -j ACCEPT
@@ -442,6 +643,7 @@ EOF_RESOLVERS
     iptables -A OUTPUT -p tcp --dport 8443 -m addrtype --dst-type LOCAL -j ACCEPT
 
     iptables -t nat -F OUTPUT || true
+    setup_a2a_nat_exemption || return 1
     iptables -t nat -A OUTPUT -p tcp --dport 80 -m owner --uid-owner "$proxy_uid" -j RETURN
     iptables -t nat -A OUTPUT -p tcp --dport 443 -m owner --uid-owner "$proxy_uid" -j RETURN
     iptables -t nat -A OUTPUT -p tcp --dport 80 -j REDIRECT --to-ports 8080
@@ -602,6 +804,11 @@ reload_gateway() {
     fi
     log "Reload requested (generation=$generation)"
 
+    if ! load_a2a_overlay; then
+        log "Reload validation failed (generation=$generation)"
+        return 1
+    fi
+
     tmp_dir=$(mktemp -d /tmp/enclave-gateway-reload.XXXXXX)
     rollback_dir="$tmp_dir/rollback"
     mkdir -p "$rollback_dir"
@@ -615,6 +822,7 @@ reload_gateway() {
 
     if ! render_and_validate_bundle "$tmp_dir"; then
         rm -rf "$tmp_dir"
+        a2a_overlay_apply_failed
         log "Reload validation failed (generation=$generation)"
         return 1
     fi
@@ -622,6 +830,7 @@ reload_gateway() {
     if ! install_bundle "$tmp_dir"; then
         restore_bundle "$rollback_dir"
         rm -rf "$tmp_dir"
+        a2a_overlay_apply_failed
         log "Reload apply failed (generation=$generation)"
         return 1
     fi
@@ -629,6 +838,7 @@ reload_gateway() {
     if ! atomic_swap_ipset; then
         restore_bundle "$rollback_dir"
         rm -rf "$tmp_dir"
+        a2a_overlay_apply_failed
         log "Reload ipset swap failed (generation=$generation)"
         return 1
     fi
@@ -637,6 +847,7 @@ reload_gateway() {
         restore_bundle "$rollback_dir"
         reload_children >/dev/null 2>&1 || true
         rm -rf "$tmp_dir"
+        a2a_overlay_apply_failed
         log "Reload apply failed (generation=$generation)"
         return 1
     fi
@@ -645,11 +856,13 @@ reload_gateway() {
         restore_bundle "$rollback_dir"
         reload_children >/dev/null 2>&1 || true
         rm -rf "$tmp_dir"
+        a2a_overlay_apply_failed
         log "Reload process restart failed (generation=$generation)"
         return 1
     fi
 
     rm -rf "$tmp_dir"
+    a2a_overlay_succeeded
     log "Reload completed (generation=$generation)"
     return 0
 }
@@ -723,6 +936,11 @@ monitor_loop() {
     done
 }
 
+startup_failed() {
+    a2a_overlay_apply_failed
+    exit 1
+}
+
 main() {
     trap on_hup HUP
     trap on_term TERM INT
@@ -731,12 +949,16 @@ main() {
     init_log_files
     ensure_local_resolver
 
+    if ! load_a2a_overlay; then
+        exit 1
+    fi
+
     tmp_dir=$(mktemp -d /tmp/enclave-gateway-init.XXXXXX)
     if ! render_and_validate_bundle "$tmp_dir"; then
         rm -rf "$tmp_dir"
-        exit 1
+        startup_failed
     fi
-    install_bundle "$tmp_dir"
+    install_bundle "$tmp_dir" || startup_failed
     rm -rf "$tmp_dir"
 
     startup_generation=$(read_bundle_generation || true)
@@ -744,21 +966,22 @@ main() {
         log "Loaded gateway bundle generation=$startup_generation"
     fi
 
-    create_ipset
+    create_ipset || startup_failed
     if ! setup_firewall; then
-        exit 1
+        startup_failed
     fi
-    setup_kernel_network
+    setup_kernel_network || startup_failed
 
     if ! prepare_proxy_runtime_data; then
-        exit 1
+        startup_failed
     fi
     if ! start_proxy; then
-        exit 1
+        startup_failed
     fi
     start_dnsmasq
     start_dns_audit
 
+    a2a_overlay_succeeded
     log "Gateway ready"
     monitor_loop
 }

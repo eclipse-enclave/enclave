@@ -25,6 +25,7 @@ import (
 	"enclave/internal/model"
 	"enclave/internal/netlog"
 	"enclave/internal/network"
+	"enclave/internal/peergroup"
 	"enclave/internal/util"
 )
 
@@ -369,6 +370,8 @@ type StartConfig struct {
 	ProjectHash       string
 	SecretReleaseFile string
 	TLSRootDir        string
+	// A2AOverlayDir is set only for --peer-group sessions.
+	A2AOverlayDir string
 }
 
 func appendReadOnlyMount(mounts []docker.Mount, hostPath string, containerPath string) []docker.Mount {
@@ -477,6 +480,7 @@ func Start(ctx context.Context, cfg StartConfig) (StartResult, error) {
 		mounts = appendReadOnlyMount(mounts, cfg.SecretReleaseFile, model.GatewaySecretReleasePath)
 	}
 	mounts = appendTLSCAMounts(mounts, cfg.TLSRootDir)
+	mounts = appendA2AOverlayMount(mounts, cfg.A2AOverlayDir)
 
 	env := []string{}
 	if cfg.NetworkLogPath != "" {
@@ -784,6 +788,10 @@ func validateStartConfig(cfg StartConfig) error {
 		}
 	}
 
+	if err := validateA2AOverlayDir(cfg.A2AOverlayDir); err != nil {
+		return err
+	}
+
 	if cfg.TLSRootDir == "" {
 		return nil
 	}
@@ -853,6 +861,67 @@ func HasLogLine(logs string, marker string) bool {
 		}
 	}
 	return false
+}
+
+var (
+	overlayReloadTimeout      = 15 * time.Second
+	overlayReloadPollInterval = 250 * time.Millisecond
+
+	overlayContainerSignal    = docker.ContainerSignal
+	overlayContainerLogsSince = docker.ContainerLogsSince
+	overlayContainerInspect   = docker.ContainerInspect
+)
+
+// appendA2AOverlayMount mounts the session-local overlay directory, not the
+// file, so the host's atomic rename is visible to a running gateway.
+func appendA2AOverlayMount(mounts []docker.Mount, overlayDir string) []docker.Mount {
+	if overlayDir == "" {
+		return mounts
+	}
+	return appendReadOnlyMount(mounts, overlayDir, peergroup.GatewayOverlayDir)
+}
+
+// ReloadOverlay signals the gateway to re-read its A2A overlay and waits for
+// the marker of generation, which the host wrote before calling.
+func ReloadOverlay(ctx context.Context, containerID string, generation uint64) error {
+	signalAt := time.Now().UTC()
+	if err := overlayContainerSignal(ctx, containerID, "SIGHUP"); err != nil {
+		return fmt.Errorf("signal gateway to reload A2A overlay: %w", err)
+	}
+	return WaitForOverlay(ctx, containerID, generation, signalAt)
+}
+
+// WaitForOverlay waits for the overlay marker of generation in gateway logs
+// written since the given time. A failure marker or a gateway exit is an error.
+func WaitForOverlay(ctx context.Context, containerID string, generation uint64, since time.Time) error {
+	deadline := time.Now().Add(overlayReloadTimeout)
+	for {
+		logs, err := overlayContainerLogsSince(ctx, containerID, since)
+		if err != nil {
+			return fmt.Errorf("read gateway logs for A2A overlay: %w", err)
+		}
+		if done, outcome := OverlayLogOutcome(logs, generation); done {
+			return outcome
+		}
+		inspect, err := overlayContainerInspect(ctx, containerID)
+		if err != nil {
+			if docker.IsNotFound(err) {
+				return fmt.Errorf("gateway exited before applying A2A overlay (generation=%d)", generation)
+			}
+			return fmt.Errorf("inspect gateway while waiting for A2A overlay: %w", err)
+		}
+		if inspect.State == nil || !inspect.State.Running {
+			return fmt.Errorf("gateway exited before applying A2A overlay (generation=%d)", generation)
+		}
+		if !time.Now().Before(deadline) {
+			return fmt.Errorf("timed out waiting for gateway A2A overlay (generation=%d)", generation)
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("interrupted while waiting for gateway A2A overlay: %w", ctx.Err())
+		case <-time.After(overlayReloadPollInterval):
+		}
+	}
 }
 
 func gatewayLabels(cfg StartConfig) map[string]string {

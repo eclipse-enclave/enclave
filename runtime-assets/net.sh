@@ -67,3 +67,12 @@ enclave_start_socat_loopback_proxy() {
     _enclave_bind_ip="$2"
     socat "TCP-LISTEN:${_enclave_port},reuseaddr,fork,bind=${_enclave_bind_ip}" "TCP:127.0.0.1:${_enclave_port}" >/dev/null 2>&1 &
 }
+
+# Prints the interface the kernel uses to reach an IPv4 address.
+enclave_route_interface_ipv4() {
+    ip -4 route get "$1" 2>/dev/null | awk '{
+        for (i = 1; i < NF; i++) {
+            if ($i == "dev") { print $(i + 1); exit }
+        }
+    }' | grep -E '^[A-Za-z0-9_.-]{1,15}$'
+}

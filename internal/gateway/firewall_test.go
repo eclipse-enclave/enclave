@@ -53,12 +53,22 @@ func gatewayScriptFunctions(t *testing.T) string {
 
 func runGatewayFirewall(t *testing.T, invocation string, env ...string) ([]firewallCall, error) {
 	t.Helper()
+	calls, _, err := runGatewayScript(t, invocation, env...)
+	return calls, err
+}
+
+// runGatewayScript is runGatewayFirewall that also returns the gateway output.
+func runGatewayScript(t *testing.T, invocation string, env ...string) ([]firewallCall, string, error) {
+	t.Helper()
 	dir := t.TempDir()
 	scriptPath := filepath.Join(dir, "gateway.sh")
 	if err := os.WriteFile(scriptPath, []byte(gatewayScriptFunctions(t)), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	logPath := filepath.Join(dir, "firewall.log")
+	if err := os.WriteFile(logPath, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
 	cmd := exec.Command("sh", "-c", `. "$1"
 firewall_mock() {
     engine="$1"
@@ -89,13 +99,16 @@ UNIQUE_RESOLVERS=1.1.1.1
 	}
 	var calls []firewallCall
 	for _, line := range strings.Split(strings.TrimSpace(string(log)), "\n") {
+		if line == "" {
+			continue
+		}
 		engine, args, ok := strings.Cut(line, "\t")
 		if !ok {
 			t.Fatalf("invalid firewall call: %q", line)
 		}
 		calls = append(calls, firewallCall{engine: engine, args: strings.Fields(args)})
 	}
-	return calls, runErr
+	return calls, string(out), runErr
 }
 
 type inboundPacket struct {
@@ -105,15 +118,41 @@ type inboundPacket struct {
 	port     string
 }
 
+// filterPacket is a packet seen by one chain; an empty uid matches no owner rule.
+type filterPacket struct {
+	inIface  string
+	outIface string
+	source   string
+	dest     string
+	state    string
+	protocol string
+	port     string
+	uid      string
+}
+
 // inputVerdict evaluates the recorded filter rules independently of bridge
 // isolation, as if a peer can route directly to the gateway namespace.
 func inputVerdict(t *testing.T, calls []firewallCall, engine string, packet inboundPacket) string {
+	t.Helper()
+	return chainVerdict(t, calls, engine, "filter", "INPUT", filterPacket{
+		inIface: packet.iface, state: packet.state, protocol: packet.protocol, port: packet.port,
+	})
+}
+
+// chainVerdict replays -P, -F and -A calls for one table and chain and returns
+// the first matching target, or the policy. Set matches never match.
+func chainVerdict(t *testing.T, calls []firewallCall, engine string, table string, chain string, packet filterPacket) string {
 	t.Helper()
 	policy := "ACCEPT"
 	var rules [][]string
 	for _, call := range calls {
 		args := call.args
-		if call.engine != engine || len(args) < 2 || args[1] != "INPUT" {
+		callTable := "filter"
+		if len(args) >= 2 && args[0] == "-t" {
+			callTable = args[1]
+			args = args[2:]
+		}
+		if call.engine != engine || callTable != table || len(args) < 2 || args[1] != chain {
 			continue
 		}
 		switch args[0] {
@@ -131,21 +170,37 @@ func inputVerdict(t *testing.T, calls []firewallCall, engine string, packet inbo
 		for i := 0; i < len(rule); i += 2 {
 			switch rule[i] {
 			case "-i":
-				matches = matches && packet.iface == rule[i+1]
+				matches = matches && packet.inIface == rule[i+1]
+			case "-o":
+				matches = matches && packet.outIface == rule[i+1]
+			case "-s":
+				matches = matches && packet.source == rule[i+1]
+			case "-d":
+				matches = matches && packet.dest == rule[i+1]
 			case "-p":
 				matches = matches && packet.protocol == rule[i+1]
 			case "--dport":
 				matches = matches && packet.port == rule[i+1]
 			case "--state":
 				matches = matches && containsState(rule[i+1], packet.state)
+			case "--uid-owner":
+				matches = matches && packet.uid == rule[i+1]
+			case "--dst-type":
+				matches = matches && rule[i+1] == "LOCAL" && strings.HasPrefix(packet.dest, "127.")
+			case "--match-set":
+				matches = false
+				i++
 			case "-m":
-				if rule[i+1] != "state" {
+				switch rule[i+1] {
+				case "state", "owner", "set", "addrtype":
+				default:
 					t.Fatalf("unsupported match in rule %v", rule)
 				}
 			case "-j":
 				verdict = rule[i+1]
+			case "--to-ports", "--to-destination":
 			default:
-				t.Fatalf("unsupported input rule %v", rule)
+				t.Fatalf("unsupported %s rule %v", chain, rule)
 			}
 		}
 		if matches {

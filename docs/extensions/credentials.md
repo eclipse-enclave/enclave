@@ -3,9 +3,8 @@
 How tool and feature specs declare secrets (`credentials.sources`), how the
 gateway injects them as HTTP headers (`network.serviceDomains`,
 `network.serviceAuth`), and how Enclave detects a login (`providers`). Tools
-and features may declare credentials and service auth; `providers` is
-tool-only, and a feature's `providers` is ignored. The service id is the same
-key in all three maps. For how users supply credentials, see
+may declare all of it, features all but `providers`. The service id is the same
+key in each map. For how users supply credentials, see
 [Authentication and secrets](../auth.md).
 
 From `extensions/tools/claude/spec.yaml`:

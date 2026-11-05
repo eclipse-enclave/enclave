@@ -35,9 +35,8 @@ not a hardened container-escape boundary.
   [Sensitive mounts](../mounts.md#sensitive-mounts).
 - Per-project Enclave config lives outside the worktree, keyed by project
   hash, so neither the repository nor a session can write it. It may set any
-  option except the global-only `auto_update`, `update_channel`, and
-  `disabled_commands`, so a project cannot re-enable a command the user
-  disabled.
+  option except the [global-only](../configuration.md#global-only) ones, so it
+  cannot change binary updates or re-enable a command the user disabled.
 - Existing Git config files are read-only, but the rest of the Git metadata is
   writable: an agent can still install hooks or redirect Git to an unprotected
   config, affecting later Git commands on the host. Use

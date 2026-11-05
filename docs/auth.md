@@ -79,7 +79,7 @@ isolated credentials without this coordination.
 
 | Tool | Callback | Mapping |
 |------|----------|---------|
-| Codex | `localhost:1455/auth/callback` | Automatic when no session exists; add `-p 1455` to log in again. The gateway log shows `DNAT port 1455 to loopback listener` while active, or `Loopback proxy (socat) enabled on port 1455` on the fallback path |
+| Codex | `localhost:1455/auth/callback` | Automatic when no session exists; add `-p 1455` to log in again. The gateway log shows `DNAT port 1455 to loopback listener` while active, or `Loopback proxy (socat) enabled on port 1455` when DNAT is unavailable |
 | OpenCode (ChatGPT Pro/Plus) | `localhost:1455/auth/callback` | Automatic when `auth.json` has no `openai` entry |
 | Pi (ChatGPT/Codex OAuth) | port 1455 | Automatic when `auth.json` has no `openai-codex` entry; add `-p 1455` to log in again |
 | Pi (Anthropic OAuth) | port 53692 | Not automatic; add `-p 53692` |

@@ -265,7 +265,7 @@ sequenceDiagram
     Ctr-->>Host: Exit
     Host->>Helper: Post-exit sync with auth-reconcile.sh
     Helper->>Helper: Config store to shared auth store (additive,<br/>Claude by expiresAt, Mistral Vibe .env by mtime)
-    Host->>Host: Copy config store auth files to feature stores (additive)
+    Host->>Host: Config store to feature stores (additive)
 ```
 
 ## Auth scoping and flags

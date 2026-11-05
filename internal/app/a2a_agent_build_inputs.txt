@@ -1,0 +1,12 @@
+# Source paths the A2A agent image variant's build stage copies and its hash
+# covers; nothing else. Tests keep it equal to the agent's real dependencies.
+go.mod
+go.sum
+cmd/enclave-a2a-agent
+internal/a2a
+internal/a2aagent
+internal/buildinfo
+internal/logx
+internal/model
+internal/tools
+internal/util

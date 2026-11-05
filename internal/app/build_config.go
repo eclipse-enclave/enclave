@@ -31,6 +31,14 @@ type buildConfig struct {
 }
 
 func resolveBuildConfig(opts model.BuildOptions, tool string, project model.Project, appRoot string) (buildConfig, error) {
+	cfg, err := resolveImageBuildConfig(opts, tool, project, appRoot)
+	if err == nil && opts.A2AAgent && !opts.ImageNameSet {
+		cfg.ImageName = a2aAgentImageName(cfg.ImageName)
+	}
+	return cfg, err
+}
+
+func resolveImageBuildConfig(opts model.BuildOptions, tool string, project model.Project, appRoot string) (buildConfig, error) {
 	imageName := strings.TrimSpace(opts.ImageName)
 	if imageName == "" {
 		return buildConfig{}, fmt.Errorf("--image-name requires a non-empty value")

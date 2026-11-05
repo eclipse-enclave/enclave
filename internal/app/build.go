@@ -37,6 +37,7 @@ type mergedExtensionFile struct {
 type runtimeImageSelection struct {
 	Tools    []string
 	Features []string
+	A2AAgent bool
 }
 
 const agentUpdateStampUnknown = "unknown"
@@ -473,6 +474,9 @@ func needsRebuildForSelection(paths model.Paths, buildCfg buildConfig, selection
 		return false, "", err
 	}
 	dockerfileContent, err := renderEngineDockerfile(paths.Dockerfile, selection.Tools, featureInstalls, nil, nil)
+	if err == nil && selection.A2AAgent {
+		dockerfileContent, err = withA2AAgentBuild(dockerfileContent)
+	}
 	if err != nil {
 		return false, "", err
 	}
@@ -492,6 +496,13 @@ func needsRebuildForSelection(paths model.Paths, buildCfg buildConfig, selection
 	combinedHash := dockerfileHash + "-" + entrypointHash + "-" + extensionsHash + "-" + staticHash
 	if buildCfg.HashSuffix != "" {
 		combinedHash += "-" + buildCfg.HashSuffix
+	}
+	if selection.A2AAgent {
+		agentHash, err := hashA2AAgentBuildInputs(paths)
+		if err != nil {
+			return false, "", err
+		}
+		combinedHash += "-a2a-agent-" + agentHash
 	}
 
 	inspect, err := docker.ImageInspect(context.Background(), buildCfg.ImageName)
@@ -568,6 +579,9 @@ func buildImage(ctx context.Context, paths model.Paths, host model.Host, combine
 		return err
 	}
 	dockerfileContent, err := renderEngineDockerfile(paths.Dockerfile, updates.Tools, featureInstalls, updates.Stamps, updates.ForceTools)
+	if err == nil && selection.A2AAgent {
+		dockerfileContent, err = withA2AAgentBuild(dockerfileContent)
+	}
 	if err != nil {
 		return err
 	}
@@ -765,6 +779,7 @@ func resolveRuntimeImageSelection(paths model.Paths, opts model.BuildOptions, to
 		return runtimeImageSelection{}, err
 	}
 	selection.Features = features.selected
+	selection.A2AAgent = opts.A2AAgent
 	return selection, nil
 }
 

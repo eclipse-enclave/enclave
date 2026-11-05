@@ -1,0 +1,27 @@
+#!/bin/sh
+# Copyright (C) 2026 EclipseSource GmbH and others.
+#
+# This program and the accompanying materials are made available under the
+# terms of the MIT License, which is available in the project root.
+#
+# SPDX-License-Identifier: MIT
+
+# ENTRYPOINT of the A2A agent image variant. Workers run the adapter in place of
+# the interactive command; entrypoint.sh still does all session setup.
+set -eu
+
+# Overridable by tests, like the entrypoint's library paths.
+entrypoint="${ENCLAVE_A2A_ENTRYPOINT:-/usr/local/bin/entrypoint.sh}"
+
+case "${ENCLAVE_A2A_ROLE:-}" in
+    "" | orchestrator)
+        exec "$entrypoint" "$@"
+        ;;
+    worker)
+        exec "$entrypoint" enclave-a2a-agent serve
+        ;;
+    *)
+        echo "Unknown ENCLAVE_A2A_ROLE: ${ENCLAVE_A2A_ROLE}" >&2
+        exit 1
+        ;;
+esac

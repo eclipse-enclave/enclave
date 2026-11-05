@@ -1,0 +1,30 @@
+#!/bin/sh
+# Copyright (C) 2026 EclipseSource GmbH and others.
+#
+# This program and the accompanying materials are made available under the
+# terms of the MIT License, which is available in the project root.
+#
+# SPDX-License-Identifier: MIT
+
+# Builds enclave-a2a-agent from <source-dir> into <out-dir>. POSIX sh because
+# it runs in the Alpine Go builder stage, not in the session image.
+set -eu
+
+if [ "$#" -ne 2 ]; then
+    echo "usage: enclave-install-a2a-agent <source-dir> <out-dir>" >&2
+    exit 2
+fi
+src=$1
+out=$2
+
+mkdir -p "$out"
+(cd "$src" && CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o "$out/enclave-a2a-agent" ./cmd/enclave-a2a-agent)
+chmod 0755 "$out/enclave-a2a-agent"
+
+# Without arguments the binary prints its usage and exits 2; anything else means it does not run.
+status=0
+"$out/enclave-a2a-agent" >/dev/null 2>&1 || status=$?
+if [ "$status" -ne 2 ]; then
+    echo "enclave-a2a-agent smoke check failed: exit $status, want 2" >&2
+    exit 1
+fi

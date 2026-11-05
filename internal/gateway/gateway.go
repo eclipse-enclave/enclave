@@ -369,7 +369,9 @@ type StartConfig struct {
 	ProjectHash       string
 	SecretReleaseFile string
 	TLSRootDir        string
-	// NetworkMode is the session's network mode; only unrestricted is labelled.
+	// NetworkMode is the session's network mode. The gateway reads it from its
+	// environment; anything but unrestricted counts as restricted. Only
+	// unrestricted is labelled.
 	NetworkMode string
 	// Hostname is set on the gateway because the session, which joins its
 	// network namespace, cannot set its own.
@@ -483,7 +485,7 @@ func Start(ctx context.Context, cfg StartConfig) (StartResult, error) {
 	}
 	mounts = appendTLSCAMounts(mounts, cfg.TLSRootDir)
 
-	env := []string{}
+	env := []string{model.EnvGatewayNetworkMode + "=" + gatewayNetworkMode(cfg)}
 	if cfg.NetworkLogPath != "" {
 		env = append(env, model.EnvNetworkLogFile+"="+gatewayNetworkLogPath)
 	}
@@ -859,6 +861,13 @@ func HasLogLine(logs string, marker string) bool {
 		}
 	}
 	return false
+}
+
+func gatewayNetworkMode(cfg StartConfig) string {
+	if cfg.NetworkMode == model.NetworkModeUnrestricted {
+		return model.NetworkModeUnrestricted
+	}
+	return model.NetworkModeRestricted
 }
 
 func gatewayLabels(cfg StartConfig) map[string]string {

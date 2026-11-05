@@ -17,13 +17,13 @@ enclave-claude-abc123abc123-main-gateway
 --hostname
 enclave-project
 --env
+ENCLAVE_GATEWAY_NETWORK_MODE=unrestricted
+--env
 ENCLAVE_NETWORK_LOG_FILE=/var/log/enclave/network.log
 --env
 ENCLAVE_NETWORK_LOG_MODE=coarse
 --env
 ENCLAVE_GATEWAY_SESSION=enclave-claude-abc123abc123-main
---env
-ENCLAVE_GATEWAY_CONFIG_DIR=/etc/enclave-gateway-config
 --env
 ENCLAVE_GATEWAY_PUBLISHED_PORTS=3000/tcp
 --env
@@ -50,8 +50,6 @@ enclave.gateway.workspace_hash=65d80d2c48b3d23b89fb7644fbb034a40f899515baa72f5ae
 3000/tcp
 --network
 enclave-claude-abc123abc123-main-net
---mount
-type=bind,source=<state>/projects/abc123abc123/codex/gateway-config-unrestricted,target=/etc/enclave-gateway-config,readonly
 --mount
 type=bind,source=<state>/projects/abc123abc123/codex/logs/network.log,target=/var/log/enclave/network.log
 --mount
@@ -115,17 +113,3 @@ no-new-privileges
 enclave-codex:latest
 codex
 ---
-
-=== gateway config bundle ===
---- denied.txt ---
---- dnsmasq.conf ---
---- domains.txt ---
---- meta.json ---
-{
-  "generated_at": "<time>",
-  "generation": "<time>",
-  "mode": "unrestricted",
-  "tool": "codex",
-  "resolver": "",
-  "domain_count": 0
-}

@@ -100,40 +100,6 @@ func TestUnrestrictedGatewayShutdownDoesNotLockDown(t *testing.T) {
 	}
 }
 
-func TestReadGatewayMode(t *testing.T) {
-	dir := t.TempDir()
-	for _, tc := range []struct {
-		name string
-		meta string
-		want string
-	}{
-		{"unrestricted", `{"generation": "1", "mode": "unrestricted"}`, "unrestricted"},
-		{"restricted", `{"mode": "restricted"}`, "restricted"},
-		{"no mode", `{"generation": "1"}`, "restricted"},
-		{"unknown mode", `{"mode": "open"}`, "restricted"},
-		{"missing meta", "", "restricted"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			configDir := filepath.Join(dir, tc.name)
-			if err := os.MkdirAll(configDir, 0o750); err != nil {
-				t.Fatal(err)
-			}
-			if tc.meta != "" {
-				if err := os.WriteFile(filepath.Join(configDir, "meta.json"), []byte(tc.meta), 0o600); err != nil {
-					t.Fatal(err)
-				}
-			}
-			calls, err := runGatewayFirewall(t, `read_gateway_mode; firewall_mock mode "$GATEWAY_MODE"`, "ENCLAVE_GATEWAY_CONFIG_DIR="+configDir)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if len(calls) != 1 || strings.Join(calls[0].args, " ") != tc.want {
-				t.Fatalf("mode = %+v, want %s", calls, tc.want)
-			}
-		})
-	}
-}
-
 // deadProxy starts and reaps a child so PROXY_PID names a process that is gone.
 const deadProxy = `true & PROXY_PID=$!; wait "$PROXY_PID"; `
 
@@ -353,5 +319,48 @@ func TestRestrictedGatewayInstallsNoLocalLoopbackRedirect(t *testing.T) {
 	}
 	if lines := callLines(calls); hasLocalLoopbackDNAT(lines) {
 		t.Errorf("restricted gateway redirected local connections: %q", lines)
+	}
+}
+
+// The gateway takes its network mode from its container environment, set when
+// the container is created, never from the bundle on the host: a bundle that
+// claims unrestricted must not turn a restricted gateway into an observer.
+// Anything but unrestricted is restricted, and the proxy inherits the mode the
+// entrypoint decided on.
+func TestGatewayModeComesFromEnvironment(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		envMode  string
+		metaMode string
+		want     string
+	}{
+		{"environment unrestricted", "unrestricted", "", "unrestricted"},
+		{"environment restricted", "restricted", "", "restricted"},
+		{"environment unset", "", "", "restricted"},
+		{"unknown value", "observe", "", "restricted"},
+		{"padded value", " unrestricted", "", "restricted"},
+		{"bundle claims unrestricted, environment unset", "", "unrestricted", "restricted"},
+		{"bundle claims unrestricted, environment restricted", "restricted", "unrestricted", "restricted"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			configDir := t.TempDir()
+			if tc.metaMode != "" {
+				meta := `{"generation":"g1","mode":"` + tc.metaMode + `"}`
+				if err := os.WriteFile(filepath.Join(configDir, "meta.json"), []byte(meta), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			env := []string{"ENCLAVE_GATEWAY_CONFIG_DIR=" + configDir}
+			if tc.envMode != "" {
+				env = append(env, "ENCLAVE_GATEWAY_NETWORK_MODE="+tc.envMode)
+			}
+			calls, err := runGatewayFirewall(t, `read_gateway_mode; firewall_mock mode "$GATEWAY_MODE" "$(sh -c 'printf %s "$ENCLAVE_GATEWAY_NETWORK_MODE"')"`, env...)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got, want := strings.Join(calls[len(calls)-1].args, " "), tc.want+" "+tc.want; got != want {
+				t.Fatalf("gateway mode, proxy mode = %q, want %q", got, want)
+			}
+		})
 	}
 }

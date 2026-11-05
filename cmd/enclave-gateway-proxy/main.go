@@ -56,8 +56,8 @@ func main() {
 	}
 	readyFile := strings.TrimSpace(os.Getenv(model.EnvGatewayProxyReadyFile))
 
-	// The entrypoint sets the mode from the bundle's meta.json. An
-	// unrestricted gateway installs no policy files: it has nothing to enforce.
+	// The entrypoint passes on the mode the host set on the container. An
+	// unrestricted gateway has no policy files: it has nothing to enforce.
 	networkMode := strings.TrimSpace(os.Getenv(model.EnvGatewayNetworkMode))
 	var allowedDomains, deniedDomains []string
 	if networkMode != model.NetworkModeUnrestricted {

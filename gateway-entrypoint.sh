@@ -34,8 +34,9 @@ PROXY_PID=""
 DNS_AUDIT_PID=""
 DNS_AUDIT_RESTARTS="0"
 RELOAD_PENDING="0"
-# The session's network mode, from the bundle's meta.json. Restricted enforces
-# the policy; unrestricted only observes. Anything unrecognised is restricted.
+# The session's network mode, from the container environment. Restricted
+# enforces the policy; unrestricted only observes. Anything unrecognised is
+# restricted.
 GATEWAY_MODE="restricted"
 
 UNIQUE_RESOLVERS=""
@@ -192,15 +193,16 @@ read_bundle_generation() {
     printf '%s\n' "$generation"
 }
 
+# read_gateway_mode takes the mode from the environment the host set when it
+# created the container, never from the bundle on the host, and passes the
+# normalised value on to the proxy.
 read_gateway_mode() {
-    mode=""
-    if [ -f "$GATEWAY_CONFIG_META" ]; then
-        mode=$(sed -n 's/.*"mode"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$GATEWAY_CONFIG_META" | head -n 1)
-    fi
-    case "$mode" in
+    case "${ENCLAVE_GATEWAY_NETWORK_MODE:-}" in
         unrestricted) GATEWAY_MODE="unrestricted" ;;
         *) GATEWAY_MODE="restricted" ;;
     esac
+    ENCLAVE_GATEWAY_NETWORK_MODE="$GATEWAY_MODE"
+    export ENCLAVE_GATEWAY_NETWORK_MODE
 }
 
 gateway_observes_only() {
@@ -888,8 +890,6 @@ main_observing() {
     if ! prepare_proxy_runtime_data; then
         exit 1
     fi
-    ENCLAVE_GATEWAY_NETWORK_MODE="$GATEWAY_MODE"
-    export ENCLAVE_GATEWAY_NETWORK_MODE
     if ! start_proxy; then
         exit 1
     fi

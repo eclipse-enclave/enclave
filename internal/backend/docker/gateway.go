@@ -53,20 +53,16 @@ func (b *Backend) startGateway(ctx context.Context, req backend.Request, network
 		return "", nil, err
 	}
 	startConfig := b.gatewayStartConfig(req, networkName, gatewayConfigDir)
+	startConfig.NetworkMode = model.NetworkModeRestricted
 	startConfig.SecretReleaseFile = secretReleaseFile
 	return b.runGateway(ctx, startConfig, "failed to start DNS gateway")
 }
 
 // startObservingGateway starts the gateway of an unrestricted session. It
-// enforces nothing, so it gets an empty policy bundle in its own config
-// directory and no secret releases: the session holds the real values.
+// enforces nothing, so it gets no config bundle and no secret releases: the
+// session holds the real values.
 func (b *Backend) startObservingGateway(ctx context.Context, req backend.Request, networkName string) (string, func(), error) {
-	gatewayConfigDir := config.HostProjectUnrestrictedGatewayConfigDir(b.opts.Host.Home, req.Session.ProjectHash, req.Session.Tool)
-	policy := network.EffectivePolicy{Mode: model.NetworkModeUnrestricted}
-	if err := bundle.WriteConfigBundle(bundle.BundleWriteConfig{Dir: gatewayConfigDir, Policy: policy, Tool: req.Session.Tool}); err != nil {
-		return "", nil, fmt.Errorf("failed to write gateway config bundle: %w", err)
-	}
-	startConfig := b.gatewayStartConfig(req, networkName, gatewayConfigDir)
+	startConfig := b.gatewayStartConfig(req, networkName, "")
 	startConfig.NetworkMode = model.NetworkModeUnrestricted
 	startConfig.Hostname = req.Hostname
 	return b.runGateway(ctx, startConfig, "failed to start gateway")

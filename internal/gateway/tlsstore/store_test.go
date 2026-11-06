@@ -8,11 +8,14 @@
 package tlsstore
 
 import (
+	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/pem"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -145,5 +148,158 @@ func TestEnsureLeafPrunesOldEntries(t *testing.T) {
 	oneCert := filepath.Join(store.HostsDir, oneKey+".crt")
 	if _, err := os.Stat(oneCert); !os.IsNotExist(err) {
 		t.Fatalf("oldest cert %q still exists; prune did not run", oneCert)
+	}
+}
+
+func TestLeafPruningKeepsRequestedCertificate(t *testing.T) {
+	store := New(t.TempDir())
+	store.MaxLeafCert = 1
+	certPath, keyPath, err := store.EnsureLeaf("existing.example")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A touched cache entry can look newer than a fresh file on a filesystem
+	// with coarse timestamps, or after the system clock moves backwards.
+	future := time.Now().Add(time.Hour)
+	for _, path := range []string{certPath, keyPath} {
+		if err := os.Chtimes(path, future, future); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := store.Certificate("requested.example"); err != nil {
+		t.Fatalf("pruned the certificate being returned: %v", err)
+	}
+	if _, err := os.Stat(certPath); !os.IsNotExist(err) {
+		t.Fatalf("old entry remains in a one-entry cache: %v", err)
+	}
+}
+
+func TestCertificateRenewsInvalidCachedLeaves(t *testing.T) {
+	store := New(t.TempDir())
+	for _, age := range []time.Duration{-time.Hour, time.Hour} {
+		original, err := store.Certificate("api.example")
+		if err != nil {
+			t.Fatal(err)
+		}
+		leaf, err := x509.ParseCertificate(original.Certificate[0])
+		if err != nil {
+			t.Fatal(err)
+		}
+		leaf.NotAfter = time.Now().Add(age)
+		der, err := x509.CreateCertificate(rand.Reader, leaf, store.caCert, leaf.PublicKey, store.caKey)
+		if err != nil {
+			t.Fatal(err)
+		}
+		certPath := filepath.Join(store.HostsDir, hostCacheKey("api.example")+".crt")
+		if err := writePEMFile(certPath, "CERTIFICATE", der, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		renewed, err := store.Certificate("api.example")
+		if err != nil {
+			t.Fatal(err)
+		}
+		parsed, err := x509.ParseCertificate(renewed.Certificate[0])
+		if err != nil || time.Until(parsed.NotAfter) < 48*time.Hour {
+			t.Fatalf("leaf not renewed: %v", err)
+		}
+	}
+	keyPath := filepath.Join(store.HostsDir, hostCacheKey("api.example")+".key")
+	if err := os.WriteFile(keyPath, []byte("malformed"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Certificate("api.example"); err != nil {
+		t.Fatalf("malformed leaf not repaired: %v", err)
+	}
+}
+
+func TestConcurrentStoresShareCA(t *testing.T) {
+	dir := t.TempDir()
+	stores := []*Store{New(dir), New(dir), New(dir)}
+	var wg sync.WaitGroup
+	for _, store := range stores {
+		wg.Add(1)
+		go func(store *Store) {
+			defer wg.Done()
+			if err := store.EnsureCA(); err != nil {
+				t.Errorf("EnsureCA: %v", err)
+			}
+		}(store)
+	}
+	wg.Wait()
+	for _, store := range stores[1:] {
+		if store.caCert == nil || !store.caCert.Equal(stores[0].caCert) {
+			t.Fatal("concurrent stores loaded different CAs")
+		}
+	}
+}
+
+func TestConcurrentCertificatesSurvivePruning(t *testing.T) {
+	store := New(t.TempDir())
+	store.MaxLeafCert = 1
+	var wg sync.WaitGroup
+	for _, host := range []string{"one.example", "two.example", "three.example"} {
+		wg.Add(1)
+		go func(host string) {
+			defer wg.Done()
+			for i := 0; i < 3; i++ {
+				pair, err := store.Certificate(host)
+				if err != nil {
+					t.Errorf("Certificate: %v", err)
+					return
+				}
+				if err := pair.Leaf.VerifyHostname(host); err != nil {
+					t.Error(err)
+				}
+			}
+		}(host)
+	}
+	wg.Wait()
+}
+
+func TestEnsureCADoesNotAccessProxyOwnedLeafCache(t *testing.T) {
+	store := New(t.TempDir())
+	if err := os.Mkdir(store.HostsDir, 0); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chmod(store.HostsDir, 0o700) }()
+	if err := store.EnsureCA(); err != nil {
+		t.Fatalf("host CA setup accessed proxy-owned cache: %v", err)
+	}
+}
+
+func TestEnsureCAPreservesIncompletePair(t *testing.T) {
+	for _, keep := range []string{"ca.crt", "ca.key"} {
+		t.Run(keep, func(t *testing.T) {
+			store := New(t.TempDir())
+			if err := store.EnsureCA(); err != nil {
+				t.Fatal(err)
+			}
+			path := filepath.Join(store.RootDir, keep)
+			before, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			missing := store.CACertPath
+			if keep == "ca.crt" {
+				missing = store.CAKeyPath
+			}
+			if err := os.Remove(missing); err != nil {
+				t.Fatal(err)
+			}
+			err = New(store.RootDir).EnsureCA()
+			if err == nil {
+				t.Fatal("incomplete CA pair accepted")
+			}
+			if !strings.Contains(err.Error(), missing) || !strings.Contains(err.Error(), path) {
+				t.Fatalf("error does not name both CA files: %v", err)
+			}
+			after, err := os.ReadFile(path)
+			if err != nil || string(after) != string(before) {
+				t.Fatalf("existing trust material changed: %v", err)
+			}
+			if _, err := os.Stat(missing); !os.IsNotExist(err) {
+				t.Fatalf("missing CA file was regenerated: %v", err)
+			}
+		})
 	}
 }

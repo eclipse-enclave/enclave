@@ -25,8 +25,8 @@ import (
 	"enclave/internal/util"
 )
 
-// defaultStoreKey is the config-store key used when a session has no
-// worktree/session suffix. It mirrors the config-generated/<key> convention.
+// defaultStoreKey is the config-store key used when a session has no session
+// suffix. It mirrors the config-generated/<key> convention.
 const defaultStoreKey = "default"
 
 // DirFor maps a neutral store identity to its host directory. Every store key

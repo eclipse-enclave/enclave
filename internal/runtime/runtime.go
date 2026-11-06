@@ -472,25 +472,11 @@ func (r *Runtime) deriveConfigVolumeSuffix(containerName string, baseContainerNa
 	if r.run.Background || r.run.SessionName != "" {
 		return r.resolvedSessionName()
 	}
-	stableSuffix := r.worktreeConfigVolumeSuffix()
-	if containerName == baseContainerName {
-		return stableSuffix
+	suffix, ok := strings.CutPrefix(containerName, baseContainerName+"-")
+	if !ok || !r.runningConfigKeyExists(defaultConfigKey) {
+		return ""
 	}
-	suffix := strings.TrimPrefix(containerName, baseContainerName+"-")
-	if suffix == containerName {
-		return stableSuffix
-	}
-	if r.runningConfigKeyExists(r.stableConfigKey()) {
-		return suffix
-	}
-	return stableSuffix
-}
-
-func (r *Runtime) stableConfigKey() string {
-	if suffix := r.worktreeConfigVolumeSuffix(); suffix != "" {
-		return suffix
-	}
-	return defaultConfigKey
+	return suffix
 }
 
 // sessionGeneratedKey is the per-session subdirectory name that isolates
@@ -506,8 +492,8 @@ func (r *Runtime) sessionGeneratedKey() string {
 	return defaultConfigKey
 }
 
-// runningConfigKeyExists reports whether a running session for this tool,
-// project, and worktree already uses the given config-store key. How that is
+// runningConfigKeyExists reports whether a running session for this tool and
+// project already uses the given config-store key. How that is
 // tracked (a Docker label today) is a backend detail behind
 // ConfigStoreConflictChecker.
 func (r *Runtime) runningConfigKeyExists(key string) bool {
@@ -521,34 +507,11 @@ func (r *Runtime) runningConfigKeyExists(key string) bool {
 	inUse, err := checker.ConfigStoreKeyInUse(context.Background(), backend.SessionMeta{
 		Tool:        r.profile.Name,
 		ProjectHash: r.project.Hash,
-		Worktree:    r.project.Dir,
 	}, key)
 	if err != nil {
 		return false
 	}
 	return inUse
-}
-
-func (r *Runtime) worktreeConfigVolumeSuffix() string {
-	if !r.shouldMountToolConfigSource() {
-		return ""
-	}
-	currentHash := projectPathHash(r.project)
-	if currentHash == "" || currentHash == r.project.Hash {
-		return ""
-	}
-	return currentHash
-}
-
-func projectPathHash(project model.Project) string {
-	path := strings.TrimSpace(project.RealDir)
-	if path == "" {
-		path = strings.TrimSpace(project.Dir)
-	}
-	if path == "" {
-		return ""
-	}
-	return model.ShortHash(util.HashString(path))
 }
 
 func (r *Runtime) prepareRunContext(authState model.AuthState) model.RunContext {

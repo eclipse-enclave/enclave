@@ -350,7 +350,7 @@ type ExitedSessionGatewayStopper interface {
 }
 
 // ConfigStoreConflictChecker reports whether a running session for the same
-// tool, project, and worktree already uses the given config-store key.
+// tool and project already uses the given config-store key.
 // Sessions predating config-key tracking count as using the caller's stable
 // key, so callers must pass the stable key they would fall back to.
 type ConfigStoreConflictChecker interface {

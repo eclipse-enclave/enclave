@@ -252,13 +252,12 @@ h2 + .section-lead { margin-top: 0; }
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 32px 28px 24px;
-  max-width: 860px;
+  max-width: 1000px;
   width: 100%;
   box-shadow: var(--shadow-sm);
+  overflow-x: auto;
 }
-.diagram-wrap svg { width: 100%; height: auto; }
-/* Authored near 1:1, so cap the width rather than letting it scale up. */
-.diagram-stacked { display: none; max-width: 340px; margin: 0 auto; }
+.diagram-wrap img { display: block; width: 100%; height: auto; }
 .diagram-caption { font-size: 0.9rem; color: var(--muted); margin-top: 16px; }
 
 /* ------- UI preview (coming soon) ------- */
@@ -401,7 +400,7 @@ footer.site-footer a { font-weight: 600; }
   .nav-links a.hide-sm { display: none; }
   section { padding: 54px 0; }
   .hero { padding: 56px 20px 56px; }
-  .diagram-wide { display: none; }
-  .diagram-stacked { display: block; }
   .diagram-wrap { padding: 24px 16px 18px; }
+  /* Too detailed to shrink to phone width; scroll it instead. */
+  .diagram-wrap img { min-width: 680px; }
 }

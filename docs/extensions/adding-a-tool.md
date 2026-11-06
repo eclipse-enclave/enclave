@@ -1,35 +1,35 @@
-# Adding a Tool
+# Adding a tool
 
-Use this checklist to add a new agent CLI end-to-end. Keep changes minimal and focused.
+Steps to add a new agent CLI as a tool extension (`kind: sandbox`). Field
+semantics are in the [spec reference](spec-reference.md).
+
+## Where it goes
 
 A new tool goes to
 [enclave-extensions](https://github.com/eclipse-enclave/enclave-extensions),
-the official extensions repository, under `tools/<tool>/` there. Core ships only Claude Code,
-Codex, Copilot, Theia (with `theia-next`), OpenCode, and Pi; see
+the official extensions repository, under `tools/<tool>/`. Core ships only
+Claude Code, Codex, Copilot, Theia (with `theia-next`), OpenCode, and Pi; see
 [CONTRIBUTING.md](../../CONTRIBUTING.md#where-it-goes) for how that set
-changes. The file layout is the same in both repositories, so the steps below
-apply with `tools/<tool>/` in place of `extensions/tools/<tool>/`; the core
-documentation and code-generation steps apply only to the built-in tools.
+changes.
 
-A tool is a `kind: sandbox` extension. Its on-disk shape is a single
-`spec.yaml` (camelCase fields) plus a few sibling files. The authoritative,
-exhaustive field reference — with worked examples — lives in
-[`docs/extensions/README.md`](README.md#tool-extensions) (and the
-`specDocument` struct in `internal/config/spec.go`). This checklist covers the
-*process*; consult the README for the full field list.
+The file layout is the same in both repositories. Use `tools/<tool>/` in
+enclave-extensions where the steps below say `extensions/tools/<tool>/`. The
+core documentation and code-generation steps apply only to built-in tools.
 
-## 1) Create the tool extension directory
-- Create `tools/<tool>/` in enclave-extensions (`extensions/tools/<tool>/` for
-  a built-in tool).
-- Add `spec.yaml` with `schemaVersion: "1"`, `kind: sandbox`, `name` (must match
-  the directory name), `displayName`, `description`, and a `sandbox` block.
-- Set `defaultIncluded: false` (top-level) for opt-in tools that should not ship
-  in the default image.
-- Add `install.sh` with the install steps (runs during image build).
-- Add `gateway-allowlist.conf` for the tool's network allowlist.
-- Optionally add `check-update.sh` if the tool should participate in automatic
-  update probes.
-- Add a `README.md` documenting the tool extension.
+## 1. Create the directory and spec
+
+Create `extensions/tools/<tool>/` with:
+
+| File | Content |
+|------|---------|
+| `spec.yaml` | `schemaVersion: "1"`, `kind: sandbox`, `name` (must match the directory name), `displayName`, `description`, and a `sandbox` block |
+| `install.sh` | Install steps; runs during the image build |
+| `gateway-allowlist.conf` | The tool's DNS allowlist (step 6) |
+| `README.md` | Documents the extension |
+| `check-update.sh` | Optional; opts into [automatic updates](spec-reference.md#automatic-updates-check-updatesh) |
+
+Set top-level `defaultIncluded: false` for an opt-in tool that should not ship
+in the default image.
 
 Minimal skeleton:
 
@@ -49,151 +49,89 @@ sandbox:
 
 ### Installing from npm
 
-For a tool that is a plain npm package, `install.sh` can delegate to the shared
-helper, which installs through the private agent Node runtime and verifies the
+For a tool that is a plain npm package, `install.sh` can call the shared
+helper. It installs through the private agent Node runtime and checks that the
 binary landed on `PATH`:
 
 ```sh
 enclave-install-npm-tool [npm-flag ...] <package> <binary> [label]
 ```
 
-Leading `-`-prefixed arguments are forwarded to `npm install`, and must be
-self-contained — `--flag` or `--flag=value`. A flag that takes a separate value
-(`--omit dev`) would consume the package argument.
+- Leading `-`-prefixed arguments are forwarded to `npm install`. They must be
+  self-contained (`--flag` or `--flag=value`); a flag with a separate value,
+  such as `--omit dev`, would consume the package argument.
+- Pass `--ignore-scripts` unless the package needs its lifecycle scripts, so
+  dependency-authored code does not run at image build time. Check upstream
+  first: some packages resolve a platform binary in a `postinstall` and break
+  without it.
 
-Pass `--ignore-scripts` unless the package needs its lifecycle scripts, so
-dependency-authored code does not run at image build time. Check upstream
-first: some packages resolve a platform binary in a `postinstall` and break
-without it.
+## 2. Fill in the `sandbox` block
 
-## 2) Fill in the `sandbox` block
+Set the fields the tool needs; see
+[Tool fields](spec-reference.md#tool-fields-sandbox). Usually:
 
-`sandbox.*` is enclave-native tool metadata. Common fields (see the README for
-the complete set and semantics):
+- `entrypoint.run`, `configDir`
+- `yoloFlag` (and `yoloEnabled` if yolo mode should be off by default)
+- `continueArgs` and `resumeArgs`
+- `skillsDir` if the tool supports skills
+- `memoryDir`, `memoryScope`, `noMemoryArgs`, `statePaths` if the tool keeps
+  memory or runtime state. Read
+  [Agent memory](../runtime/stores.md#agent-memory)
+  before enabling background memory generation.
+- `passthroughPaths` for `host_config=passthrough`, config-only
+- `hostConfigDir`, `hostCredentialsFile`, `hostOauthJson` for
+  `enclave auth import/export`
+- `qemuMinMemoryMiB`, `qemuStoreCacheMmap` if the defaults do not work on the
+  qemu backend
 
-- `entrypoint.run`: argv used to launch the tool (sbx-style command).
-- `configDir`: config directory under `$HOME`, backed by the persistent config store.
-- `skillsDir`: (optional) path below `configDir` where shared and tool-specific
-  managed skills are composed. It may be home-relative or absolute, matching
-  `configDir`.
-- `memoryDir` / `memoryScope` / `noMemoryArgs`: (optional) native memory path,
-  project or session scope, and native disable arguments. See
-  [Agent Memory](../runtime/stores.md#agent-memory) before enabling background
-  memory generation.
-- `statePaths`: (optional) config-relative runtime state preserved across config
-  overlays and excluded from host config passthrough (including database sidecars).
-- `settingsFile` / `settingsTarget`: aggregated template filename under
-  `/usr/local/share/enclave/templates/` and its target below `configDir`.
-- `yoloFlag` / `yoloEnabled`: flag to skip approvals, and whether yolo mode is on
-  by default (`yoloEnabled` defaults to `true`).
-- `continueArgs` / `resumeArgs`: args for `enclave continue` (latest session)
-  and `enclave resume` (session picker). One-step fallback between them; if
-  both are missing, those commands are unsupported for the tool.
-- `passthroughPaths`: (optional) narrow, reviewed allow-list for
-  `host_config=passthrough` — keep it config-only.
-- `qemuMinMemoryMiB`: (optional) minimum memory for generated QEMU microVM
-  bundles; the effective size is max(default 4096 MiB, this value, what the
-  built initramfs needs to unpack and stay resident).
-- `qemuStoreCacheMmap`: (optional) mount the tool's config store with 9p
-  `cache=mmap`; required when the store holds SQLite databases in WAL mode.
-- `hostConfigDir` / `hostCredentialsFile` / `hostOauthJson`: (optional) host-side
-  locations used by `auth import/export`.
+## 3. Declare credentials and providers
 
-## 3) Declare credentials, service auth, and providers
+Declare `credentials.sources`, `network.serviceDomains` and
+`network.serviceAuth`, and `providers[]`; see
+[Credentials and providers](credentials.md). Mark OAuth and session tokens
+with `apiKey: false`.
 
-Secrets are split across `credentials` and `network` (see the README's
-"Credentials, service auth, and providers" section for the full model):
+## 4. Optional: ports and caches
 
-- `credentials.sources.<id>`: the credential itself — `env` (one or more
-  env-var aliases) and the enclave-native `apiKey` bool (`false` for
-  OAuth/session tokens; omitted/`true` means it's an API key).
-- `network.serviceDomains` (`host -> service-id`) + `network.serviceAuth.<id>`
-  (`headerName`, optional `valueFormat` with a Go `fmt`-style `%s`): how the
-  gateway injects the credential as an HTTP header when proxying to those hosts.
-  Every service-id in `serviceDomains` needs a `serviceAuth` entry; hosts that
-  only need to be reachable belong under `network.allowedDomains`.
-- `providers[]`: enclave-native auth provider — `name`, `credentials` (a list
-  of `credentials.sources` keys), `authFiles` (relative to `sandbox.configDir`),
-  `authSession` (`mode: any|all` + `checks`), `oauthPorts`, and
-  `securestorageDirEnv`.
+- Declare top-level `ports` to publish a port without Go code; see
+  [Ports](spec-reference.md#ports-ports).
+- Declare top-level `caches` to persist container-home directories per
+  project; see [Project caches](spec-reference.md#project-caches-caches).
 
-## 4) Optional: declarative ports
+## 5. Add a settings template and startup script
 
-A tool can publish a default port without any Go code by declaring top-level
-`ports`:
+1. Create `extensions/tools/<tool>/templates/<filename>`. It is copied into the
+   image as `/usr/local/share/enclave/templates/<tool>-<filename>`.
+2. Reference it from `sandbox.settingsFile` (`<tool>-<filename>`) and
+   `sandbox.settingsTarget` (path below `configDir`). Template copying is
+   handled centrally from these two fields.
+3. Include privacy defaults (disable telemetry, update checks, session logging)
+   when the tool supports them. Keep comments short and limited to non-obvious
+   behavior.
+4. Create `extensions/tools/<tool>/entrypoint.d/setup.sh` to create the config
+   directory and export tool-specific env vars (for example `TOOL_HOME`).
 
-```yaml
-ports:
-  - container: 3000
-    publish: true
-    label: Theia IDE
-    openUrl: "http://localhost:{host_port}"
-```
+See [Templates](spec-reference.md#templates).
 
-On start, enclave publishes each `publish: true` port and prints the resolved
-`openUrl` (`{host_port}` is replaced with the resolved host port; defaults to
-`http://localhost:{host_port}`). While the session runs, `enclave ps` shows the
-resolved URL in its `PORTS` column (published ports without a declaration appear
-as `host:port`). Notes:
+## 6. Add a DNS allowlist
 
-- **Host loopback by default.** Published ports bind to `127.0.0.1` on the
-  host. Binding to another host interface is an explicit opt-in via `-p` using
-  the `ip:host:container` form (for example `-p 0.0.0.0:3000:3000`). The
-  in-container service must still listen on a non-loopback address for Docker
-  to publish it. Enclave's per-session bridge prevents unrelated bridge
-  containers from routing directly to that address; authentication for
-  arbitrary user-published services remains the user's responsibility.
-- **Network isolation.** Under isolation the tool shares the gateway sidecar's
-  network namespace, so the binding is applied on the gateway container; off
-  isolation it is applied on the tool container. The attached namespace is
-  enclosed in a dedicated per-session Docker bridge in both modes. Host access
-  is the same either way, including for background/detached sessions.
-- **Host port.** By default (`hostAllocation: fixed`) the host port equals the
-  container port, so two concurrent sessions of the same tool contend for the
-  same host port. Set `hostAllocation: auto` on an entry to publish it as
-  `0:<container>` instead: the daemon assigns a free host port, and the
-  resolved value appears in the printed `openUrl` and in `enclave ps`.
-- `providers[].oauthPorts` is a separate mechanism for OAuth loopback callbacks
-  and is unaffected.
+Create `extensions/tools/<tool>/gateway-allowlist.conf`. Keep it minimal and
+include registries (PyPI, npm, ...) only when needed. It can include fragments
+with `conf-file=`.
 
-A tool can also declare top-level `caches` to persist container-home
-directories per project; see
-[Project caches](README.md#project-caches-caches).
+## 7. Document and validate
 
-## 5) Add a settings template
-- Create `extensions/tools/<tool>/templates/<filename>`.
-- It is copied into the image as `/usr/local/share/enclave/templates/<tool>-<filename>`.
-- Reference it from `sandbox.settingsFile` (aggregated name like
-  `<tool>-settings.json`) and `sandbox.settingsTarget` (path below `configDir`).
-- Include privacy defaults (disable telemetry, update checks, session logging)
-  when supported. Keep comments concise and focused on non-obvious behavior.
-
-## 6) Wire template setup in `entrypoint.sh`
-- Create `extensions/tools/<tool>/entrypoint.d/setup.sh`.
-- Create the config directory.
-- Template copying is handled centrally via `sandbox.settingsFile` +
-  `sandbox.settingsTarget`.
-- Export any tool-specific env vars (example: `TOOL_HOME`).
-
-## 7) Add a DNS allowlist
-- Create `extensions/tools/<tool>/gateway-allowlist.conf`.
-- Keep the allowlist minimal; include registries only when needed (PyPI/npm/etc.).
-
-## 8) Document and validate
 - In enclave-extensions, list the tool in its `README.md`.
-- For a built-in tool, update the built-in tool list in `docs/tools.md`, the
-  common config-path table in `docs/configuration.md` if a template was added,
-  and `docs/ARCHITECTURE.md`, `docs/extensions/README.md`, and `AGENTS.md` if
-  needed.
-- If you touched Go files, run `gofmt` on them.
-- If a built-in tool has `go/` hooks or handlers, run `go generate ./cmd/enclave`.
+- For a built-in tool, update the tool list in `docs/tools.md`, the config-path
+  table in `docs/tool-config.md` if a template was added, and
+  `docs/ARCHITECTURE.md`, `docs/extensions/`, and `AGENTS.md` if needed.
+- Run `gofmt` on any Go files you touched.
+- For a built-in tool with `go/` hooks or handlers, run
+  `go generate ./cmd/enclave`.
 - Run `enclave validate-extensions`.
-- If a Mermaid diagram documents the changed behavior, update it.
+- Update any Mermaid diagram that documents the changed behavior.
 
-## 9) Optional: auth and UX checks
-- Confirm declared `credentials.sources` and `providers[].credentials` cover all
-  required env-based auth inputs, and mark OAuth/provider-token credentials with
-  `apiKey: false` when `--no-api-key` should not suppress them.
-- Confirm `enclave auth import --tool <tool>` copies required auth files
-  (`providers[].authFiles`).
-- Verify the tool runs inside the container (`enclave --tool <tool>`).
+## 8. Check auth and the session
+
+- Run the [credentials checklist](credentials.md#checklist-for-authors).
+- Start the tool in the container with `enclave --tool <tool>`.

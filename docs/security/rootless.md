@@ -1,65 +1,56 @@
 # Rootless container engines
 
-**Status:** rootless Docker is unsupported; rootless podman is supported through
-`--backend podman`; rootful Docker is the default backend.
+Rootful Docker is the default backend, rootless Podman is supported through
+`--backend podman`, and rootless Docker is not supported.
 
-The restricted-network gateway shares a network namespace with the tool
-container and relies on:
+## Why rootless Docker is not supported
 
-- iptables filtering and NAT redirects;
-- ipset allowlists populated by dnsmasq;
-- network sysctls;
-- `NET_ADMIN` and `NET_RAW` capabilities.
+The restricted-network gateway shares a network namespace with the tool and
+needs iptables filtering and NAT redirects, ipset allowlists populated by
+dnsmasq, network sysctls, and `NET_ADMIN` and `NET_RAW`. Rootless Docker cannot
+provide this host-kernel netfilter behavior. Without it, a session would also
+lose domain enforcement, request auditing, and gateway-side credential release,
+so Enclave does not fall back to unrestricted networking.
 
-Rootless Docker cannot provide the required host-kernel netfilter behavior. A
-session that bypassed these controls would also bypass domain enforcement,
-request auditing, and gateway-side HTTP secret release, so Enclave does not
-automatically degrade to unrestricted networking. Supporting rootless Docker
-would require a different enforced egress design in which the tool has no direct
-route around a userspace proxy; cooperative `HTTP_PROXY` configuration alone is
-insufficient because arbitrary agent processes can ignore it.
+Support would need an egress design in which the tool has no route around a
+userspace proxy; cooperative `HTTP_PROXY` settings are not enough, because any
+agent process can ignore them. The tool itself runs as a non-root user and the
+host-directory stores work with unprivileged ownership, so traffic steering is
+the only blocker.
 
-Rootless podman is different: with `--backend podman` the gateway keeps
-`NET_ADMIN`/`NET_RAW` inside its own user and network namespaces, so netfilter
-steering and DNS enforcement work there, and the tool container joins that
-namespace exactly as under Docker (see
-[Podman backend](../cli-reference.md#podman-backend)).
+With rootless Podman, the gateway keeps `NET_ADMIN` and `NET_RAW` inside its own
+user and network namespaces, so steering and DNS enforcement work, and the tool
+joins that namespace as under Docker. See [Podman](../backends.md#podman).
 
-The tool container itself runs as a non-root user and host-directory stores are
-compatible with unprivileged ownership. The blocker for rootless Docker is
-mandatory traffic steering through the gateway, not tool execution or
-persistence.
+Alternatives:
+
+- Docker user namespace remapping reduces host UID exposure and keeps the
+  gateway; see [Host hardening](host-hardening.md).
+- The experimental QEMU backend runs foreground tool-only sessions, with
+  unrestricted network access and no gateway-side credential release.
 
 ## AppArmor on rootless Podman
 
-On rootless Podman setups without an engine-applied AppArmor profile, container
-processes can inherit an unconfined label, including a named unconfined-mode
-profile such as `podman (unconfined)`. Executing a binary can then attach a host
-profile matching its path inside the container. `no-new-privileges` does not
-prevent that transition. This can affect tool-container binaries such as
-`/usr/bin/man`; it was observed on Ubuntu 24.04 with Podman 4.9.3.
+Without an engine-applied AppArmor profile, container processes can inherit an
+unconfined label, including a named unconfined-mode profile such as
+`podman (unconfined)`. Executing a binary can then attach a host profile that
+matches its path in the container, and `no-new-privileges` does not prevent
+it. This can hit tool-container binaries such as `/usr/bin/man`; it was seen on
+Ubuntu 24.04 with Podman 4.9.3.
 
-The gateway installs dnsmasq at `/usr/local/libexec/enclave/dnsmasq` and uses
-that absolute path for validation and startup. This keeps a host profile for
-`/usr/{bin,sbin}/dnsmasq` from attaching without changing host policy. The private
-binary retains the capabilities needed for DNS and ipset updates. It does not
-provide the container-wide confinement of Docker's usual `docker-default`
-profile, and custom host profiles can still match the private path.
+The gateway therefore runs dnsmasq from `/usr/local/libexec/enclave/dnsmasq`
+(also for validation), so a host profile for `/usr/{bin,sbin}/dnsmasq` does not
+attach and host policy stays unchanged. The private binary keeps the
+capabilities for DNS and ipset updates, but lacks the container-wide
+confinement of Docker's `docker-default` profile, and custom host profiles can
+still match its path.
 
 Do not rely on adding the gateway's staging and log paths to the host dnsmasq
-profile: other restrictions still apply. On the tested Ubuntu host, file-path
-overrides allowed startup but the profile denied signals from the named
-unconfined parent, causing policy reloads to hang. The old policy kept allowing
-traffic to names removed by the attempted update until the session was stopped.
+profile. On the tested Ubuntu host this allowed startup, but the profile denied
+signals from the named unconfined parent, policy reloads hung, and the old
+policy kept allowing names the update removed until the session stopped.
 
-Gateway startup failures include the trailing container output in the CLI
-error, including dnsmasq validation errors. For suspected AppArmor denials,
-check the kernel journal or the audit log if auditd is running, and use
-`sudo aa-status` to check profile modes. AppArmor merely being enabled does not
-establish the cause of a startup failure.
-
-Rootful Docker remains the default backend. Docker user namespace remapping can
-reduce host UID exposure while retaining the gateway; see
-[Host hardening](host-hardening.md). The experimental QEMU backend is another
-option for foreground tool-only sessions, but it runs with unrestricted network
-access and does not provide gateway-side secret release.
+To troubleshoot, read the gateway startup error: it includes the container's
+trailing output and dnsmasq validation errors. For suspected denials, check the
+kernel journal (or the audit log with auditd) and `sudo aa-status`; AppArmor
+being enabled does not by itself explain a failure.

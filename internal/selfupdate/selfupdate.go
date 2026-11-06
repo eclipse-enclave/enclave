@@ -33,7 +33,8 @@ import (
 
 const (
 	// downloadBaseURL is the project's directory on the Eclipse download
-	// server; each channel publishes below it (see docs/DEV.md, Releases).
+	// server; each channel publishes below it (see
+	// docs/RELEASING.md#download-layout).
 	downloadBaseURL       = "https://download.eclipse.org/enclave"
 	checksumsFilename     = "checksums.txt"
 	latestFilename        = "latest"

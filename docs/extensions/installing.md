@@ -1,13 +1,9 @@
-# Installing Extensions from Git
+# Installing extensions from git
 
-`enclave tools`, `enclave features`, and `enclave commands` install, update,
-and remove extensions from git repositories into the user-global extension root
-(`~/.config/enclave/extensions/`). This document covers that installer; see
-[Extension Architecture](README.md) for the spec format itself.
-
-The official extensions repository is
-[enclave-extensions](https://github.com/eclipse-enclave/enclave-extensions). It holds the tools and features that
-are not built in, for example:
+`enclave tools|features|commands` install, update, and remove extensions from
+git repositories into `~/.config/enclave/extensions/`. The official repository,
+[enclave-extensions](https://github.com/eclipse-enclave/enclave-extensions),
+holds the tools and features that are not built in:
 
 ```bash
 enclave tools add eclipse-enclave/enclave-extensions --name <tool>
@@ -18,158 +14,137 @@ enclave features add eclipse-enclave/enclave-extensions --name <feature>
 
 | Command | Description |
 |---------|-------------|
-| `enclave features list` / `enclave tools list` | List extensions (built-in and installed), with source and provenance |
-| `enclave features add <source>` / `enclave tools add <source>` | Install an extension from a git repository |
-| `enclave features update [<name\|source>...]` / `enclave tools update [<name\|source>...]` | Refresh installed extensions from their recorded source |
-| `enclave features remove <name>...` / `enclave tools remove <name>...` | Remove installed extensions |
+| `enclave tools\|features\|commands list` | List extensions (built-in and installed), with source and provenance |
+| `enclave tools\|features\|commands add <source>` | Install an extension from a git repository |
+| `enclave tools\|features\|commands update [<name\|source>...]` | Refresh installed extensions from their recorded source |
+| `enclave tools\|features\|commands remove <name>...` | Remove installed extensions |
 
-`enclave commands list|add|update|remove` does the same for
-[command extensions](README.md#command-extensions), which only ship host
-commands and have no built-in counterpart.
+| Flag | Verbs | Effect |
+|------|-------|--------|
+| `--name <name>` | `add` | Install only the named extension; repeatable |
+| `--all` | `add` | Install every match |
+| `--path <subpath>` | `add` | Directory inside the source |
+| `--ref <ref>` | `add`, `update` | Branch, tag, or commit |
+| `--dry-run` | `add`, `update` | Fetch, stage, and validate, but write nothing |
+| `--yes`, `-y` | `add`, `update`, `remove` | Skip the confirmation prompt (the summary is still shown) |
+| `--force` | `add`, `update`, `remove` | Override collision policy and local-edit protection |
+| `--json` | all | Machine-readable output. For `add`, `update`, and `remove` it implies non-interactive and requires `--yes`. See [JSON output](json-output.md). |
 
-`enclave features`, `enclave tools`, and `enclave commands` with no subcommand
-are aliases for `list`. `enclave features update`/`enclave tools update` refresh extension
-**sources** on the host; they do not touch images. The unrelated top-level
-`enclave update` rebuilds container **images** from whatever extensions are
-currently on disk. Installing or updating an extension changes its content
-hash, which is what actually triggers a rebuild on the next run.
+`features list` also accepts `--tool`, `--features`, and `--slim` and reports
+which features a run with them would enable. `tools list` accepts `--tool` to
+mark the selected tool.
+
+- With no subcommand, each is an alias for `list`. `enclave commands` manages
+  [command extensions](README.md#command-extensions).
+- `update` here refreshes sources on the host. The unrelated top-level
+  `enclave update` rebuilds images. A changed extension changes its content
+  hash, which rebuilds the image on the next run.
 
 ## Sources
 
 | Form | Example |
 |------|---------|
 | `owner/repo` shorthand | `acme/kits` (assumes `https://github.com`) |
-| shorthand with subpath | `acme/kits/extensions/features/github-cli` |
-| https/http/git URL | `https://gitlab.com/acme/kits` |
-| forge tree URL | `https://github.com/acme/kits/tree/v1.2.0/extensions/tools/foo` |
-| ssh/scp-style remote | `git@github.com:acme/kits.git`, `ssh://git@host/acme/kits.git` |
-| local path | `./my-kits`, `~/kits`, `/abs/path/to/kits` |
+| Shorthand with subpath | `acme/kits/extensions/features/github-cli` |
+| https, http, or git URL | `https://gitlab.com/acme/kits` |
+| Forge tree URL | `https://github.com/acme/kits/tree/v1.2.0/extensions/tools/foo` |
+| ssh or scp-style remote | `git@github.com:acme/kits.git`, `ssh://git@host/acme/kits.git` |
+| Local path | `./my-kits`, `~/kits`, `/abs/path/to/kits` |
 
-A trailing `.git` is stripped from shorthands and plain URLs. A forge tree URL
-(`/tree/<ref>/...`, including GitLab's `/-/tree/<ref>/...`) supplies both the
-ref and the subpath; a conflicting `--ref` is rejected rather than silently
-overriding it, and a `--path` is rejected when the source string already
-names one.
-
-The `owner/repo` shorthand is exactly two segments: everything after the
-second segment is taken as the subpath. This makes it ambiguous for GitLab
-subgroups (`group/subgroup/project` would parse `subgroup` as the repo name
-and `project` as a subpath). For a nested-group repository, use the full
-clone URL instead, and pass `--path` to name the extension directory inside
-it — the escape hatch for exactly this case.
+- A trailing `.git` is stripped from shorthands and plain URLs.
+- A tree URL (`/tree/<ref>/...`, GitLab `/-/tree/<ref>/...`) supplies ref and
+  subpath; a conflicting `--ref` or an extra `--path` is rejected.
+- The shorthand is exactly two segments, the rest is the subpath. For a GitLab
+  subgroup (`group/subgroup/project`), use the clone URL plus `--path`.
 
 ## Discovery
 
-The verb fixes the kind: `enclave tools add` looks only for `kind: sandbox`
-extensions, `enclave features add` only for `kind: mixin`, and
-`enclave commands add` only for `kind: command`. With no subpath in
-the source, the whole repository (up to 8 directories deep) is scanned for
-spec documents (`spec.yaml`/`spec.json`) whose `kind` matches and whose spec
-`name` matches their containing directory's name — a mismatch, or a name the
-loader could never resolve, is reported as a skip rather than silently
-ignored. A spec at the repository root is not checked against a directory
-name (there is none); its declared `name` must still not contain a path
-separator or `..`, since nothing else stands between an untrusted spec value
-and a destination path.
+The verb fixes the kind (`tools`: `sandbox`, `features`: `mixin`, `commands`:
+`command`). Without a subpath, the repository is scanned up to 8 directories
+deep for specs whose `kind` matches and whose `name` matches the directory;
+mismatches and unresolvable names are reported as skips. A root-level spec has
+no directory to match, but its `name` must not contain a path separator or
+`..`.
 
-- Exactly one match: installed without asking.
-- Several matches, no `--name`/`--all`: listed and, interactively, confirmed
-  with a prompt; non-interactively (`--yes`/`--json`) this is an error —
-  `add` never guesses which ones you meant.
-- `--name <name>` (repeatable) installs only the named extension(s); `--all`
-  installs every match. They are mutually exclusive, and so are `--path` and
-  `--name`: one addresses a directory inside the source, the other filters
-  discovery results within it.
-- Two matched candidates in different directories that declare the *same*
-  name are a hard error naming both directories, even under `--all` — there
-  is no way to install both into the same destination directory, so you
-  disambiguate with `--path` up front rather than have one silently win. Only
-  the names being installed are checked: `--name foo` still errors on two
-  `foo` directories, but a duplicate pair you did not ask for is not your
-  problem.
-- If the source has extensions of *other* kinds but none of the requested
-  one, the error counts them per kind and names the verb for each
-  (`enclave features add` when you ran `enclave tools add` against a
-  features-only repo).
-- A feature that ships nothing but host commands installs, with a warning
-  pointing at `kind: command` and `enclave commands add`.
+| Situation | Result |
+|-----------|--------|
+| Exactly one match | Installed without asking |
+| Several matches, no `--name` or `--all` | Listed and confirmed interactively; an error with `--yes` or `--json` |
+| `--name <name>` | Only the named extensions |
+| `--all` | Every match |
+| Two matches in different directories with the same name | Error naming both directories, even with `--all`; disambiguate with `--path`. Only names being installed are checked. |
+| Extensions of other kinds only | Error counting them per kind and naming the right verb |
+| Feature that ships only host commands | Installs, with a warning pointing at `kind: command` and `enclave commands add` |
+
+`--name` and `--all` are mutually exclusive, and so are `--path` and `--name`:
+one addresses a directory inside the source, the other filters discovery
+results within it.
 
 ## Trust
 
-An extension is unreviewed code and configuration that, once installed, can
-run at container build and start time, and, if it ships
-[host commands](README.md#host-commands), on your host as your user. That last
-one is the only capability that executes outside a container, so it is the
-summary's first row after the source, naming each verb and saying where it
-runs. An update that gains one repeats the warning on its diff. Treat that row
-as the decision point: everything else an extension does is bounded by the
-sandbox, and a host command is not.
+An installed extension is unreviewed code that runs at container build and
+start time.
 
-Because `--json` replaces the narrated summary with the result envelope, every
-verb also appears in that envelope's `hostCommands` field, on `add`, `update`,
-and `remove` alike. `enclave tools|features|commands list` reports the same set per
-installed extension, as a `[host: ...]` suffix in its text output and as
-`hostCommands` under `--json`, so you can audit after the fact which
-extensions can execute host code. They resolve whenever an extension is
-installed, whether or not it is enabled. `hostCommands` lists every executable
-the extension ships, including one whose name a built-in or your own command
-already takes. The summary leaves that one out and `add` warns about it.
+> [!WARNING]
+> [Host commands](../commands.md#commands-from-extensions) are the only
+> capability that runs outside a container, on your host as your user. The
+> capability summary lists them in its first row after the source, naming each
+> verb. Treat that row as the decision point.
 
-Before writing anything, `add` and `update` show a capability summary
-distilled from the staged content itself
-(never from claims elsewhere): whether it needs root to install, runs an
-install/startup script (by count and script name, never full command text —
-this is a capability summary, not a code audit), how many `commands.install`
-steps run as root (a step with no `user` field defaults to root, independently
-of the top-level `needsRoot`), whether it ships a `check-update.sh` that enclave
-runs in a container on each automatic update check, widens the network allowlist
-or denies domains, publishes a container port on the host, declares
-per-project cache mounts in the container home, declares credentials and where
-they're released as HTTP headers, whether it flips on the
-approval-bypass flag (`sandbox.yoloFlag`, active by default once declared) or
-appends its own argv to the agent for `--continue`/`--resume`/`--no-memory`
-(`sandbox.continueArgs`/`resumeArgs`/`noMemoryArgs`, which can carry the same
-flag), keeps a writable agent-memory directory between sessions and at what
-scope (`sandbox.memoryDir`/`memoryScope`), pins store paths the config overlay
-may not replace (`sandbox.statePaths`), launches an IDE on your host after start
-(`postStart.openIDE`), contributes host commands, ships skills, host
-config/credential passthrough, or seeds files into your project directory. An
-update shows the same information as a diff against what's currently installed,
-so a newly granted capability is visible before you accept it.
+### Capability summary
 
-The diff goes one level below the summary wherever a spec can change what an
-extension does without changing the shape of the document: `commands.install`
-and `commands.startup` are compared by their command text (not by entry count,
-and not by the author's `description`), `environment.variables` by value as well
-as by name, and a `commands.initFiles` entry by its mode and a digest of the
-content it writes. Rewriting a step, flipping a variable, or replacing a seeded
-file's content is reported even when nothing about the structure moved.
+Before writing anything, `add` and `update` summarize what the staged content
+declares and ships. Scripts are reported by count and name only; review their
+code yourself.
 
-`--yes` skips the confirmation prompt after the summary is shown; it never
-skips the summary itself. `--json` implies non-interactive and requires
-`--yes` (it has no way to prompt).
+| Capability | Source in the extension |
+|------------|-------------------------|
+| Runs commands on the host | `commands/host/*` |
+| Needs root to install | `needsRoot` |
+| Runs an install or startup script | `install.sh`, `commands.install`, `commands.startup` |
+| Install steps running as root | `commands.install` entries without `user` (default root, independent of `needsRoot`) |
+| Runs an update probe in a container on each automatic update check | `check-update.sh` |
+| Widens the network allowlist or denies domains | `network.allowedDomains`, `network.deniedDomains` |
+| Publishes a container port on the host | `ports` |
+| Declares per-project cache mounts in the container home | `caches` |
+| Declares credentials and where they are released as HTTP headers | `credentials`, `network.serviceAuth` |
+| Turns on the approval-bypass flag (active by default once declared) | `sandbox.yoloFlag` |
+| Appends its own argv for continue, resume, or no-memory (can carry the same flag) | `sandbox.continueArgs`, `resumeArgs`, `noMemoryArgs` |
+| Keeps a writable agent-memory directory between sessions, and at what scope | `sandbox.memoryDir`, `memoryScope` |
+| Pins store paths the config overlay may not replace | `sandbox.statePaths` |
+| Launches an IDE on your host after start | `postStart.openIDE` |
+| Ships skills | `skills/` |
+| Host config or credential passthrough | `sandbox.passthroughPaths`, `hostConfigDir`, `hostCredentialsFile`, `hostOauthJson` |
+| Seeds files into your project directory | `commands.initFiles`, `files/workspace/**` |
 
-Under `--json`, git may not ask for credentials either, on the terminal or
-through an askpass program: a private HTTPS remote fails with git's own
-message rather than blocking on a question nobody sees. That covers a
-scripted `GIT_ASKPASS` too, since git offers no way to tell one from a
-dialog, so an unattended install wants a credential helper. Helpers keep
-working, and an ssh key passphrase is ssh's own prompt, which can still
-appear.
+The summary also lists environment variables, proxy-managed aliases,
+providers, credential files, `gateway-allowlist.conf` directives, apt packages,
+`files/home/**`, feature `configDir` and `authFiles`, whether the extension
+shadows a built-in, an ignored `go/` directory, and the content size.
 
-`--force` overrides collision policy —
-replacing an already-installed extension, one that was hand-edited, one
-enclave did not install, or **one that would shadow a built-in extension of
-the same name** — but never overrides a validation error: a spec that fails
-to load, or content that violates the [limits](#limits) below, blocks the
-install regardless of `--force`. An extension's name is one of those
-validation errors: it must match `^[a-z0-9][a-z0-9._-]*$`. The name becomes a
-directory, a build-context path, and an interpolation into the generated
-Dockerfile, so the charset is deliberately narrower than what a filesystem
-accepts. `--dry-run` performs the same fetch,
-staging, and validation as a real install and prints what would happen, but
-never touches the destination — see the identical behavior under [Update
-semantics](#update-semantics).
+An update shows a diff against the installed version, so new capabilities are
+visible before you accept, and a gained host command repeats the warning. The
+diff also catches changes that keep the shape: `commands.install` and
+`commands.startup` by command text, `environment.variables` by value, and
+`commands.initFiles` by mode and content digest.
+
+### Auditing host commands
+
+Under `--json`, the `add`/`update`/`remove` envelope carries host commands in
+`hostCommands`. `list` shows them per extension as a `[host: ...]` suffix, or
+`hostCommands` with `--json`. They resolve whenever an extension is installed,
+enabled or not. `hostCommands` includes executables whose name a built-in or
+your own command already takes; the summary omits those, and `add` warns.
+
+### Prompts, credentials, and `--force`
+
+- Under `--json`, git may not prompt for credentials, on the terminal or via
+  askpass (including a scripted `GIT_ASKPASS`), so a private HTTPS remote fails
+  with git's message. Use a credential helper. An ssh passphrase prompt can
+  still appear.
+- `--force` replaces an installed, hand-edited, or unmanaged extension, or one
+  that shadows a built-in. It never overrides a validation error: a spec that
+  fails to load or violates the [limits](#limits) blocks the install.
 
 ## Provenance
 
@@ -180,46 +155,35 @@ extension directory:
 |-------|---------|
 | `remote`, `source`, `subpath` | Redacted remote URL, the source string as given (also redacted), and the repository subpath |
 | `ref`, `refType` | The requested ref and whether it is a `branch`, `tag`, or `commit` |
-| `commit` | The exact commit installed |
+| `commit` | The exact commit installed. For an annotated tag, the commit it points at, never the tag object's id. |
 | `installedAt`, `installedBy` | Install timestamp and the enclave version that performed it |
 | `treeHash` | A digest of the installed files, used to detect local edits |
 
-`commit` is always a commit: an annotated tag records the commit it points at,
-never the tag object's own id.
+- Without `--ref`, the install follows the remote HEAD's branch; a detached
+  HEAD is recorded as a commit pin.
+- The sidecar is excluded from the build context and image hash, so re-pinning
+  identical content does not rebuild and prints no rebuild hint.
+- Hand edits change the tree hash; `update` then refuses until `--force`, which
+  discards them.
 
-Without `--ref`, the install follows the branch the remote's HEAD names. A
-source whose HEAD names no branch — a local clone sitting on a detached HEAD —
-offers nothing to follow, so the install records a commit pin instead and
-`update` treats it as one.
+| Sidecar state | Meaning | `update` | `remove` |
+|---------------|---------|----------|----------|
+| Present | Managed install | Updates | Removes |
+| Missing | Unmanaged: placed by hand or predates the installer ("not installed by enclave") | Skips; `--force` does not invent a source; re-add it to manage it | Requires `--force` |
+| Unparseable | "its provenance file could not be read" | Skips; re-add it to manage it | Requires `--force` |
 
-This sidecar is excluded from the Docker build context and from the image
-identity hash — re-pinning to a new commit with byte-identical content does
-not force a rebuild, and the sidecar never reaches the image. Such a re-pin
-therefore prints no "rebuilds the image" hint either: there is nothing for the
-next run to rebuild. A directory under the user extension root with no
-sidecar is unmanaged: it was placed there by hand (or predates the
-installer), so `update` skips it (there is no recorded source to update from,
-and `--force` does not invent one) while `remove` requires `--force`. A
-sidecar that exists but fails to parse is reported distinctly ("its
-provenance file could not be read") from a missing one ("not installed by
-enclave").
-
-An extension whose `spec.yaml` no longer loads, which an upstream
-`schemaVersion` bump is enough to cause, stays manageable: `remove` and
-`update` enumerate the directories under the extension roots rather than the
-specs that parse, so recovery never means deleting a directory by hand.
-
-Editing an installed extension's files by hand changes its tree hash. The
-next `update` detects the mismatch and refuses to overwrite your edits until
-you pass `--force`, which discards them.
+`remove` and `update` enumerate directories, not parsed specs, so an extension
+whose spec no longer loads (for example after a `schemaVersion` bump) stays
+manageable.
 
 ## Update semantics
 
-With no arguments, `update` targets every extension of that kind installed
-from a git source (built-ins and unmanaged directories are skipped). An
-argument containing `/`, `:`, or `~` (or a lone `.`) is read as a source, in
-any form `add` accepts, and targets every extension of that kind installed
-from it:
+With no arguments, `update` targets every extension of that kind installed from
+a git source; built-ins and unmanaged directories are skipped.
+
+An argument containing `/`, `:`, or `~` (or a lone `.`) is read as a source, in
+any form `add` accepts, and targets every extension of that kind installed from
+it:
 
 ```sh
 enclave features update acme/kits
@@ -227,229 +191,83 @@ enclave features update acme/kits/extensions/features   # only extensions under 
 enclave features update https://gitlab.com/acme/kits/-/tree/main/extensions/features
 ```
 
-A source matches when its remote equals the recorded one (credentials
-removed) and the recorded subpath lies at or below the source's subpath. The
-remote is compared as written, so `acme/kits` does not match an extension
-installed from `git@github.com:acme/kits`. Only the `owner/repo/...`
-shorthand and forge tree URLs carry a subpath; any other URL, scp-style, or
-local-path source selects every extension installed from that repository. A
-tree URL also names a ref and matches only extensions recorded at that ref, so
-the string passed to `add` works unchanged. To move extensions to a different
-ref, pass `--ref`, which requires the arguments to select a single extension.
-Names and sources can be mixed, and a source that matches nothing is an
-error. For each target:
+- A source matches when its remote equals the recorded one as written,
+  credentials removed (`acme/kits` does not match `git@github.com:acme/kits`),
+  and the recorded subpath is at or below the source's.
+- Only shorthands and tree URLs carry a subpath; other sources select the whole
+  repository. A tree URL also matches only its ref, so the `add` string works
+  unchanged.
+- Names and sources can be mixed; a source matching nothing is an error.
+- `--ref <ref>` moves one extension to another ref; selecting more than one is
+  an error.
 
-- **Commit pin, no `--ref`/`--force`**: nothing to check — a commit is
-  immutable, so an install pinned to one is already up to date with **no
-  network call at all**. (Local edits still block this path with an error
-  telling you to pass `--force`.)
-- **Branch or tag pin**: a single `git ls-remote` resolves the ref to a
-  commit. If it matches the recorded commit and there are no local edits,
-  the run prints "up to date" and stops — nothing is fetched or staged.
-- Otherwise, the new commit is fetched, staged, and validated exactly like
-  `add`; the changed-file list (added/removed/modified paths, capped with a
-  count once there are more than a handful) and the capability diff are
-  shown, and the swap happens after confirmation (or immediately under
-  `--yes`).
+For each target:
 
-Targets that share a remote and a ref — several extensions from one kit
-repository — are resolved and fetched once for the whole run, not once each.
+| Pin | What `update` does |
+|-----|--------------------|
+| Commit, no `--ref` or `--force` | Nothing to check, no network call. Local edits still block with an error asking for `--force`. |
+| Branch or tag | One `git ls-remote` resolves the ref. If it matches the recorded commit and there are no local edits, prints "up to date" and stops. |
+| Otherwise | Fetches, stages, and validates like `add`; shows the changed files (capped with a count) and the capability diff; swaps after confirmation, or immediately with `--yes`. |
 
-`--ref <ref>` moves a single named extension to a different branch, tag, or
-commit; it errors if more than one target is selected. `--dry-run` performs
-the fetch/stage/validate but writes nothing.
+Targets that share a remote and a ref, such as several extensions from one kit
+repository, are resolved and fetched once for the whole run.
 
 ## Staging and recovery
 
-`add` and `update` never write into the destination directly. Content is
-staged in a `.incoming-*` directory created inside the destination directory
-itself, so the final rename never crosses a filesystem boundary; only after
-staging, validation, and confirmation does the swap happen. During the swap,
-any content already at the destination is first moved aside to a
-`.replaced-*` directory, the staged directory is renamed into its place, and
-the moved-aside copy is deleted once the new content is live.
+`add` and `update` stage content in `.incoming-*` inside the destination
+directory (so the rename stays on one filesystem). After validation and
+confirmation, existing content moves to `.replaced-*`, the staged directory is
+renamed into place, and the old copy is deleted. Both are dot-directories,
+invisible to listing and validation, and leftovers are swept after 24 hours.
 
-Both prefixes are dot-directories: they are invisible to extension listing
-and validation, and a leftover from an interrupted run is swept away
-automatically after 24 hours.
+> [!WARNING]
+> `.replaced-*` is only a recovery window. If a process is killed between the
+> two renames, the previous content is recoverable from that directory until
+> the next sweep, at most 24 hours later.
 
-A `--dry-run` stages in the system temp directory instead, since it never
-commits and so needs neither the same-filesystem rename nor the destination
-to exist. That is what makes "writes nothing" hold on a host that has never
-installed an extension: the user extension root is not created either.
-
-`.replaced-*` is a **time-boxed recovery window, not a durable backup**. If a
-process is killed between the swap's two renames, the previous content is
-recoverable from that directory — but only until the next sweep runs; after
-24 hours it is gone for good. Waiting a day before checking is not safe.
+`--dry-run` stages in the system temp directory and writes nothing, not even
+the user extension root.
 
 ## Remove semantics
 
-`remove` only ever touches user-installed extensions:
+`remove` only touches user-installed extensions:
 
-- A built-in is never removable — there is nothing to remove.
-- Removing a user extension that **overlaid** a built-in of the same name
-  reactivates the built-in; the output says so explicitly.
-- An extension enclave did not install (no readable sidecar) needs `--force`.
-- Per-project and per-tool host state — patches, persistent stores, auth —
-  is deliberately left in place. It may belong to a future reinstall, and
-  `remove` only ever removes the extension directory itself; the output
-  names what was left untouched.
-- Host commands go with the directory, so the verbs they added stop resolving.
-  Nothing was copied into `~/.config/enclave/commands/` to clean up.
+- A built-in is never removable.
+- Removing a user extension that overlaid a built-in of the same name
+  reactivates the built-in, and the output says so.
+- An extension Enclave did not install (no readable sidecar) needs `--force`.
+- Host state (patches, persistent stores, auth) is kept for a reinstall; the
+  output names it.
+- Host commands go with the directory; nothing was copied into
+  `~/.config/enclave/commands/`.
 
 ## Requirements
 
-`git` must be on `PATH`; there is no other transport. A fetch prefers a
-blobless, shallow, single-ref fetch (`--filter=blob:none --depth 1`) followed
-by a sparse checkout of only the directories being installed, so file content
-you don't need is never downloaded. Each stage degrades independently on a
-server that can't do better — a server that ignores or rejects the object
-filter falls back to a full shallow fetch, a checkout that can't go sparse
-falls back to a full checkout of the fetched commit, and a server that
-refuses to fetch a bare commit SHA falls back to fetching the default branch
-and checking out the pinned commit from it. None of this is negotiated by
-probing the server's git version; every step is a plain try-then-fall-back.
-Submodules are never fetched or checked out. A repository whose root is
-itself an extension is checked out in full: that extension owns the whole
-tree, so no set of directories describes it.
+`git` must be on `PATH`; there is no other transport.
 
-## JSON contracts
+A fetch is blobless, shallow, and single-ref (`--filter=blob:none --depth 1`),
+with a sparse checkout of the installed directories. Each step falls back
+independently on failure, without probing the server version:
 
-`enclave <features|tools|commands> list --json` emits `schemaVersion: "1"` and
-one entry per extension, whether built-in or installed. `kind` is `tool`,
-`feature`, or `command`; `command` was added after the envelope's first
-release, so a consumer that switches on `kind` should tolerate values it does
-not know:
+| Server limitation | Fallback |
+|-------------------|----------|
+| Ignores or rejects the object filter | Full shallow fetch |
+| Checkout cannot go sparse | Full checkout of the fetched commit |
+| Refuses to fetch a bare commit SHA | Fetch the default branch and check out the pinned commit from it |
 
-```json
-{
-  "schemaVersion": "1",
-  "kind": "feature",
-  "selection": { "directives": ["+demo"], "source": "tool_override", "tool": "claude" },
-  "extensions": [
-    {
-      "name": "github-cli",
-      "displayName": "GitHub CLI",
-      "description": "GitHub CLI (gh)",
-      "source": "builtin",
-      "enabled": true,
-      "managed": false,
-      "defaultEnabled": true,
-      "needsRoot": true,
-      "releaseHosts": ["*.ghe.com", "*.github.com", "*.githubusercontent.com", "api.github.com", "ghe.com"]
-    },
-    {
-      "name": "demo",
-      "displayName": "Demo",
-      "description": "Demo feature for documentation walkthrough",
-      "source": "user",
-      "enabled": true,
-      "managed": true,
-      "origin": {
-        "remote": "/tmp/acme-kits",
-        "source": "/tmp/acme-kits",
-        "subpath": "extensions/features/demo",
-        "ref": "main",
-        "refType": "branch",
-        "commit": "5e6a30d81a0ae3c73172c29f429ee0ba84a28597",
-        "installedAt": "2026-08-26T19:42:23Z",
-        "locallyModified": false
-      },
-      "defaultEnabled": false,
-      "needsRoot": false,
-      "ports": [
-        { "container": 6080, "publish": true, "hostAllocation": "auto", "label": "noVNC", "openUrl": "http://localhost:{port}/" }
-      ],
-      "allowedDomains": ["downloads.example.com"]
-    }
-  ]
-}
-```
-
-`source` is `builtin`, `user`, or `override` (a user directory shadowing a
-built-in of the same name). An entry whose sidecar exists but could not be
-read carries `originError` instead of `origin`, with `managed: false`.
-
-`enabled` reports whether a run with the same options would enable the
-feature. The options are resolved and validated as for a run: `--slim` and
-`backend: qemu` enable no features, `devcontainer` enables none unless
-`features` is set, and `tool_overrides.<tool>.features` applies for the tool
-from `--tool` or the configured `tool` (an unknown `--tool` simply has no
-overrides). If a run would
-reject the options, a warning goes to stderr, `enabled` reflects the options
-as configured, without run-time coercion, and the command still exits 0.
-Feature listings also carry:
-
-- `selection`: the configured `features` directives, the layer they come from
-  (`default`, `global`, `project`, `tool_override`, or `cli`), and the tool
-  used for `tool_overrides` (`null` when no tool is configured).
-  `directives: null` means no layer sets features: the defaults apply unless
-  slim, devcontainer, or the qemu backend disables features.
-- `defaultEnabled` and `needsRoot`: the spec's values, always present.
-- `ports`: the declared container ports; `hostAllocation` is `fixed` or `auto`.
-- `allowedDomains` and `deniedDomains`: the spec's network domains in the form
-  the gateway enforces (lowercased, `*.` wildcards collapsed to the parent
-  domain, ports stripped), sorted.
-- `releaseHosts`: the declared hosts that receive a credential, as written in
-  the spec (wildcards kept), sorted. When the feature is enabled they join the
-  allowlist normalised like `allowedDomains`, so `*.github.com` also opens
-  `github.com`. Hosts selected at session start through
-  `serviceAuth.hostsFromCredential` are not included.
-
-Empty entry arrays are omitted rather than emitted as `[]` or `null`. Tool and
-command listings carry none of these fields. Every tool and command extension
-reports `enabled: true`: a tool is selected per run, and a command extension
-has nothing to enable.
-
-`add`, `update`, and `remove` share one result envelope (also
-`schemaVersion: "1"`), written to stdout as a single JSON document when
-`--json` is passed:
-
-```json
-{
-  "schemaVersion": "1",
-  "kind": "feature",
-  "results": [
-    {
-      "name": "demo",
-      "action": "installed",
-      "commit": "5e6a30d81a0ae3c73172c29f429ee0ba84a28597",
-      "path": "/home/you/.config/enclave/extensions/features/demo"
-    }
-  ]
-}
-```
-
-`action` is one of `installed`, `updated`, `unchanged`, `removed`, `skipped`,
-or `failed`; a failed entry carries `error` instead of `commit`/`path`. An
-entry's `error` never repeats its `name` (`"has local modifications; pass
---force to discard them"`, not `"foo has local modifications…"`) — `name` is
-the identifier, so prepend it if you want a full line, which is what the
-human-facing output does. In
-`--json` mode, this document is the whole report: stdout carries nothing else,
-and the human narration (discovery listing, skip/warn lines, the capability
-summary, post-install hints) is not rendered at all rather than dumped on
-stderr — warnings appear in each result's `warnings`, and failures in its
-`error`. An error that ends the run before any extension is touched (an
-unreachable source, a rejected flag combination) is reported as a `failed`
-result with an empty `name`, so stdout is parseable unconditionally. The
-process exits non-zero if any result's `action` is `failed`,
-independent of whether other extensions in the same invocation succeeded.
+Submodules are never fetched or checked out. A repository whose root is itself
+an extension is checked out in full.
 
 ## Limits
 
-- Extensions install into the **user-global** root only
-  (`~/.config/enclave/extensions/`); project-local extension directories are
-  never loaded (see [Extension Sources](README.md#extension-sources)).
-- An extension is capped at 1000 files and 10 MiB of content; symlinks and
-  other non-regular files are rejected by name, as is any path that would
-  escape the destination directory. A candidate's `spec.yaml` is the first
-  repository content read, before anything is copied, and is held to the same
-  rule plus a 1 MiB cap: a symlinked spec is reported as unusable rather than
-  followed out of the checkout.
-- A `go/` directory in an installed extension is copied but never compiled
-  in: custom hooks/handlers still require rebuilding the `enclave` binary.
-- There is no extension registry or index — every install names a git
-  repository directly — and no signature verification of fetched content;
-  trust is whatever you extend to the source you point at.
+- Names must match `^[a-z0-9][a-z0-9._-]*$`, since a name becomes a directory,
+  a build-context path, and part of the generated Dockerfile.
+- User-global root only; project-local extensions are never loaded
+  ([Extension sources](README.md#extension-sources)).
+- At most 1000 files and 10 MiB. Symlinks, other non-regular files, and paths
+  escaping the destination are rejected by name. The spec is read first, under
+  the same rules plus a 1 MiB cap; a symlinked spec is reported as unusable.
+- A `go/` directory is copied but never compiled in
+  ([Go code](README.md#go-code-tools-only)).
+- No registry, index, or signature verification: trust is whatever you extend
+  to the git repository you name.

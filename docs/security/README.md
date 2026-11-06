@@ -1,126 +1,118 @@
 # Security boundaries
 
-Enclave reduces an agent's access to the host and network; it is not a hardened
-container escape boundary. The supported Docker backend uses a rootful daemon.
-Use [host hardening](host-hardening.md) where compatible with the required
-workflow. Rootless Docker is [not supported](rootless.md); rootless podman is, through `--backend podman`.
+What Enclave protects against, where its boundaries are, and the risks that
+remain. Enclave reduces an agent's access to the host and the network; it is
+not a hardened container-escape boundary.
+
+| Engine | Status |
+|--------|--------|
+| Rootful Docker | Default; apply [host hardening](host-hardening.md) where the workflow allows |
+| Rootless Podman | Supported with `--backend podman` ([rootless engines](rootless.md)) |
+| Rootless Docker | Not supported ([why](rootless.md)) |
+| QEMU | Experimental, no restricted egress ([below](#network-boundary)) |
 
 ## Host filesystem
 
-- Enclave refuses to run as root: the agent would then run as UID 0, which is
-  host root on bind-mounted directories under rootful Docker, and files it
-  writes would become root-owned. `--allow-root` or `ENCLAVE_ALLOW_ROOT=1`
-  overrides this; no config file can. [userns-remap](host-hardening.md) limits
-  what container UID 0 maps to on the host.
-- The project is a host bind mount and is writable by default. Agent changes are
-  real host changes.
-- `--project-mount readonly` makes the project/worktree read-only and clamps
-  writable additional mounts inside that subtree to read-only.
-- `--worktree-metadata readonly|none` protects or omits linked-worktree
-  gitdir/commondir mounts independently of the working tree. With read-only Git
-  metadata, in-container Git writes such as `git add` fail.
-- Additional host directories are explicit CLI/config inputs. Enclave refuses
-  to mount a project or additional directory that is the home directory or one
-  of its parents, or that overlaps a hidden home entry, a per-user application
-  data directory, enclave's own roots, or the SSH agent socket, read-only or
-  not. Per-path sensitive-dir exceptions, from `--add-sensitive-dir`,
-  `--add-readonly-sensitive-dir`, or `sensitive_dir_exceptions` in global or
-  project config, allow specific subtrees and warn on
-  every start. No exception covers the hard-protected locations: home and its
-  parents, enclave's own roots (a mount of them would let the agent widen its
-  own exceptions or network access, or add host commands), and the SSH agent
-  socket. Only `--allow-sensitive-mounts` or
-  `ENCLAVE_ALLOW_SENSITIVE_MOUNTS=1` mounts those, and no config file can set
-  it. Devcontainer and `.git`-pointer mounts stay blocked either way. See
-  [Sensitive mounts](../cli-reference.md#sensitive-mounts).
-- Per-project Enclave config is keyed by project hash under the host config root,
-  outside the worktree, so neither the repository nor a session can write it.
-  It is treated like global config: it may set any option except the
-  global-only `auto_update` and `update_channel`.
+- Enclave refuses to run as root: the agent would run as UID 0, which is host
+  root on bind mounts under rootful Docker, and its files would become
+  root-owned. Only `--allow-root` or `ENCLAVE_ALLOW_ROOT=1` overrides this, not
+  config. [userns-remap](host-hardening.md#enable-userns-remap) limits what
+  container UID 0 maps to.
+- The project is a writable host bind mount by default, so agent changes are
+  real host changes. `--project-mount readonly` makes it read-only and clamps
+  writable additional mounts inside it.
+- `--worktree-metadata readonly|none` protects or omits linked-worktree gitdir
+  and commondir mounts; read-only metadata makes Git writes such as `git add`
+  fail.
+- Additional directories are mounted only from explicit CLI or config inputs.
+  Home and its parents, hidden home entries, per-user application data,
+  Enclave's own roots, and the SSH agent socket are refused, read-only or not.
+  Per-path exceptions warn on every start, but cannot unlock home, Enclave's
+  roots (which would let the agent widen its own policy or add host commands),
+  or the agent socket; only `--allow-sensitive-mounts` or
+  `ENCLAVE_ALLOW_SENSITIVE_MOUNTS=1` can, never config. Devcontainer and
+  `.git`-pointer mounts stay blocked. Rules:
+  [Sensitive mounts](../mounts.md#sensitive-mounts).
+- Per-project Enclave config lives outside the worktree, keyed by project
+  hash, so neither the repository nor a session can write it. It may set any
+  option except the [global-only](../configuration.md#global-only) ones, so it
+  cannot change binary updates or re-enable a command the user disabled.
+- Existing Git config files are read-only, but the rest of the Git metadata is
+  writable: an agent can still install hooks or redirect Git to an unprotected
+  config, affecting later Git commands on the host. Use
+  `--project-mount readonly` when metadata must not change; see
+  [Git](../git.md).
 
 ## Project-controlled execution
 
-- The project `.env` file is loaded into the container environment.
-- Devcontainer mode reads project-controlled `devcontainer.json`; filtered
-  mounts, run arguments, and lifecycle commands still influence the container.
-- `commands.initFiles` and `files/workspace` from enabled extensions may write
-  into the mounted project according to their documented overwrite rules.
+Treat an untrusted repository as executable input and review its devcontainer
+and environment files first:
 
-Treat an untrusted repository as executable input. Review its devcontainer and
-environment files before enabling those paths.
+- The project `.env` is loaded into the container environment.
+- Devcontainer mode reads the project's `devcontainer.json`; filtered mounts,
+  run arguments, and lifecycle commands still shape the container.
+- `commands.initFiles` and `files/workspace` of enabled extensions may write
+  into the project under their documented overwrite rules.
 
 ## Network boundary
 
-Restricted Docker sessions use a gateway sidecar with dnsmasq, iptables/ipset,
-and an HTTP/TLS proxy. DNS and Host/SNI checks enforce the domain allowlist, but
-an allowed IP is reachable on arbitrary ports and broad CDN allowlists increase
-tunneling surface. The privileged gateway has `NET_ADMIN`/`NET_RAW` and shares
-the tool's network namespace; a gateway vulnerability can weaken policy.
+Restricted sessions use a gateway sidecar (dnsmasq, iptables and ipset, an
+HTTP/TLS proxy) that enforces the domain allowlist by DNS and Host/SNI; see the
+[network request flow](../runtime/network-request-flow.md). Limits:
 
-Restricted gateways use default-drop inbound IPv4 and IPv6 policies. They admit
-only loopback, established/related replies, and published container ports,
-including published OAuth callbacks. Unpublished session, DNS, and proxy
-listeners remain blocked even if another container has a route into the session.
-Unrestricted sessions do not have this gateway filter.
+- An allowed IP is reachable on any port; ports other than 80 and 443 skip the
+  proxy and the log. Broad CDN allowlists widen the tunneling surface.
+- The gateway is privileged (`NET_ADMIN`, `NET_RAW`) and shares the tool's
+  network namespace, so a gateway vulnerability can weaken policy.
+- The allowlist is destination policy, not content policy: paths, methods,
+  bodies, responses, and a service's own proxy or relay features are not
+  constrained. Treat every allowlisted service as part of the trust boundary.
+- The network log records decisions, not all traffic: in `coarse` mode a reused
+  TLS connection is one event, successful DNS lookups are not logged, and
+  request detail exists only for plaintext HTTP and MITM'd hosts
+  (`--network-log=requests` closes the HTTPS gap). A missing event proves
+  nothing; see [Coverage and granularity](../networking.md#coverage-and-granularity).
+- The experimental QEMU backend runs unrestricted, without gateway-side
+  credential release.
 
-Every Docker and podman session is enclosed in its own user-defined bridge
-network. In restricted mode the gateway is the network's attached endpoint and
-the tool shares its network namespace; in unrestricted mode the tool is
-attached directly. This prevents unrelated bridge networks and other Enclave
-sessions from routing directly to listeners in the session. Docker isolates
-user-defined bridges unconditionally; under podman netavark is required and the
-network is created with `isolate=strict`. Older netavark versions or Podman CLIs
-that reject `strict` fall back to `isolate=true` with a warning, which leaves
-containers on non-isolated podman networks a route into the session. The native
-netavark `firewalld` driver also [does not support bridge isolation](https://github.com/containers/netavark/blob/main/docs/netavark-firewalld.7.md).
-The gateway inbound filter still applies to restricted sessions in these cases.
-Published ports
-still have the reachability requested by their host binding. In particular,
-Docker Desktop's `host.docker.internal` route can let another container reach a
-port published on host loopback, so privileged services need their own
-per-session authentication. Enclave does not add authentication to arbitrary
-services published with `-p`.
+Restricted gateways drop inbound IPv4 and IPv6 by default, admitting only
+loopback, established or related replies, and published ports (including
+OAuth callbacks). Unrestricted sessions have no such filter.
 
-Bridge separation and loopback publishing depend on engine-managed firewall
-rules: Docker's on the host, netavark's inside the rootless network namespace
-under podman. A Docker daemon configured with `"iptables": false` or
-`"ip6tables": false` without equivalent replacement rules is outside the
-supported security posture; Docker documents that [disabling its firewall integration can expose
-bridge-container ports](https://docs.docker.com/engine/network/packet-filtering-firewalls/#prevent-docker-from-manipulating-firewall-rules).
-Enclave surfaces relevant `docker info` warnings when the daemon reports them.
-See [host hardening](host-hardening.md).
+Each Docker and Podman session has its own bridge network (the gateway attaches
+in restricted mode, the tool in unrestricted mode), so other networks and
+sessions cannot route to its listeners:
 
-The allowlist is destination policy, not content policy. It does not constrain
-URL paths, methods, request bodies, responses, or an upstream service's own
-proxy and relay features. An allowlisted API, package registry, or other service
-can therefore return untrusted content or provide indirect access beyond what
-its hostname suggests. Treat every allowlisted service as part of the trust
-boundary.
+| Engine | Bridge isolation |
+|--------|------------------|
+| Docker | Always isolated |
+| Podman with netavark | `isolate=strict` |
+| Older netavark, or a Podman CLI rejecting `strict` | `isolate=true` with a warning; non-isolated Podman networks can still route in |
+| netavark's native `firewalld` driver | [None](https://github.com/containers/netavark/blob/main/docs/netavark-firewalld.7.md) |
 
-The network log is an audit trail of decisions, not a record of everything that
-crossed the boundary. In the default `coarse` mode a reused TLS connection
-yields one event however many requests it carries, successful DNS lookups are
-never recorded, and request-level detail exists only for plaintext HTTP and
-MITM'd hosts. `--network-log=requests` closes the HTTPS gap for allowlisted
-hosts, but no mode records SSH. Treat a missing event as no evidence either
-way; see [Coverage and granularity](../networking.md#coverage-and-granularity).
+The gateway's inbound filter still protects restricted sessions in the weaker
+cases. Published ports keep the reach of their host binding: Docker Desktop's
+`host.docker.internal` can let another container reach a port published on
+host loopback. Enclave adds no authentication to services published with `-p`,
+so privileged services need their own.
 
-The experimental QEMU backend has no restricted-egress implementation. It runs
-with unrestricted networking and without gateway-side HTTP secret release.
+> [!WARNING]
+> Isolation and loopback publishing rely on engine-managed firewall rules
+> (Docker's on the host, netavark's in Podman's rootless namespace). A Docker
+> daemon with `"iptables": false` or `"ip6tables": false` and no equivalent
+> rules is unsupported;
+> [disabling Docker's firewall integration can expose bridge-container ports](https://docs.docker.com/engine/network/packet-filtering-firewalls/#prevent-docker-from-manipulating-firewall-rules).
+> Enclave shows the relevant `docker info` warnings; see
+> [host hardening](host-hardening.md).
 
 ## Secrets
 
-Host environment variables are not passed unless declared by an enabled
-extension or explicitly selected with `--pass-env`. Declared secrets configured
-for HTTP release are represented by placeholders in the tool environment and
-released by the gateway only in the configured header for matching HTTPS hosts.
-This protects those environment values from direct exfiltration, but credential
-files and secrets without HTTP release can contain real values inside the tool
-config/auth store.
-
-Once configured, the SSH key is available to every Docker session, regardless
-of project or tool. SSH on port 22 bypasses the HTTP/TLS proxy, so a push does
-not appear in `network.log`, even with `--network-log=requests`. See
-[SSH keys](../auth.md#ssh-keys) for its access and how to scope or revoke it.
-
-See the [restricted network request flow](../runtime/network-request-flow.md).
+- Host environment variables pass only when an extension declares them or
+  `--pass-env` selects them.
+- Credentials with an HTTP release rule appear as placeholders; the gateway
+  releases the real value only in the configured header to matching HTTPS
+  hosts ([API keys](../auth.md#api-keys)). Credential files and secrets without
+  a release rule can hold real values in the config or auth store.
+- A configured SSH key is available to every session of every project and
+  tool, and SSH on port 22 bypasses the proxy, so pushes never appear in
+  `network.log`. See [SSH keys](../auth.md#ssh-keys).

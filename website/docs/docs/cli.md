@@ -183,9 +183,9 @@ narrows them down.
 
 ### Detach without stopping the session
 
-Once attached, press `Ctrl-\` (the docker attach default) to detach from the
-session while leaving the container and its agent running. You can then reattach
-later with `enclave attach <container>`.
+Once attached, press `Ctrl-\` (Enclave's default, replacing the engine's
+`ctrl-p,ctrl-q`) to detach from the session while leaving the container and its
+agent running. You can then reattach later with `enclave attach <container>`.
 
 To use a different detach key sequence, pass `--detach-keys` when attaching:
 
@@ -198,9 +198,9 @@ detaching, so use the detach key when you want to leave the container running.
 
 ## Audit outbound network access
 
-With the default Docker backend, every outbound connection passes through the
-session's gateway, which records what it allowed and what it blocked. Read that
-log at any time, including for sessions that have already exited:
+With the Docker and Podman backends, every outbound connection passes through
+the session's gateway, which records what it allowed and what it blocked. Read
+that log at any time, including for sessions that have already exited:
 
 ```bash
 enclave network log                 # everything this project's sessions reached

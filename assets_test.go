@@ -24,7 +24,7 @@ func TestEmbeddedAssetInventory(t *testing.T) {
 		"Dockerfile.gateway",
 		"entrypoint.sh",
 		"gateway-entrypoint.sh",
-		"LICENSE.md",
+		"LICENSE",
 		"NOTICE.md",
 		"docs/README.md",
 		"extensions/tools/claude/spec.yaml",

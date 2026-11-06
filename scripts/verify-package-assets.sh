@@ -27,7 +27,7 @@ app_root="$package_root/usr/share/enclave"
 [ ! -e "$app_root/AGENTS.md" ]
 [ ! -e "$app_root/CLAUDE.md" ]
 diff -qr "$repo_root/docs" "$app_root/docs"
-[ -f "$package_root/usr/share/doc/enclave/LICENSE.md" ]
+[ -f "$package_root/usr/share/doc/enclave/LICENSE" ]
 [ -f "$package_root/usr/share/doc/enclave/NOTICE.md" ]
 
 # Completions are only found if they sit in a directory the shell searches by

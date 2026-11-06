@@ -22,7 +22,7 @@ import (
 // dotfiles added below these trees in future. The repository-root .dockerignore
 // must be listed directly.
 //
-//go:embed .dockerignore Dockerfile Dockerfile.gateway entrypoint.sh gateway-entrypoint.sh LICENSE.md NOTICE.md
+//go:embed .dockerignore Dockerfile Dockerfile.gateway entrypoint.sh gateway-entrypoint.sh LICENSE NOTICE.md
 //go:embed all:docs all:extensions all:runtime-assets
 //go:embed go.mod go.sum all:cmd/enclave-gateway-proxy
 //go:embed all:internal/appassets all:internal/config all:internal/domainpattern

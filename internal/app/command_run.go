@@ -37,8 +37,9 @@ func runExecutionCommand(input *CommandInput) int {
 	var validationWarnings []string
 	var buildCfg *buildConfig
 	opts, sources, validationWarnings, buildCfg, err := ValidateRunOptions(opts, input.Sources, ValidationContext{
-		Paths:  input.Ctx.Paths,
-		Action: input.Action,
+		Paths:             input.Ctx.Paths,
+		Action:            input.Action,
+		PolicyNetworkMode: input.Ctx.PolicyNetworkMode,
 	}, project)
 	if err != nil {
 		logx.Errorf("%v", err)

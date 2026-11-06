@@ -17,9 +17,27 @@ import (
 	"enclave/internal/network"
 )
 
-func TestRenderConfigBundleRejectsUnrestricted(t *testing.T) {
-	_, err := renderConfigBundle(network.EffectivePolicy{Mode: "unrestricted"}, "codex")
+// An unrestricted gateway enforces nothing and takes its mode from its
+// container, so a bundle on disk never carries the unrestricted mode.
+func TestWriteConfigBundleRejectsUnrestricted(t *testing.T) {
+	dir := t.TempDir()
+	err := WriteConfigBundle(BundleWriteConfig{
+		Dir:    dir,
+		Policy: network.EffectivePolicy{Mode: "unrestricted"},
+		Tool:   "codex",
+	})
 	if err == nil {
+		t.Fatal("WriteConfigBundle() wrote an unrestricted bundle")
+	}
+	if entries, _ := os.ReadDir(dir); len(entries) != 0 {
+		t.Fatalf("WriteConfigBundle() left files after refusing: %v", entries)
+	}
+}
+
+// Live apply compares restricted bundles only, so hashing an unrestricted
+// policy stays an error.
+func TestConfigBundleHashRejectsUnrestricted(t *testing.T) {
+	if _, err := ConfigBundleHash(BundleWriteConfig{Policy: network.EffectivePolicy{Mode: "unrestricted"}, Tool: "codex"}); err == nil {
 		t.Fatal("expected unrestricted mode to be rejected")
 	}
 }

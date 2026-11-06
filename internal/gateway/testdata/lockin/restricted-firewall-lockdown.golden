@@ -1,0 +1,8 @@
+iptables -P INPUT DROP
+iptables -F INPUT
+iptables -P OUTPUT DROP
+iptables -F OUTPUT
+ip6tables -P INPUT DROP
+ip6tables -F INPUT
+ip6tables -P OUTPUT DROP
+ip6tables -F OUTPUT

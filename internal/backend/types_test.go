@@ -30,9 +30,32 @@ func TestValidateFailsClosedForHTTPSecretRelease(t *testing.T) {
 	}
 }
 
+// Nothing but the gateway enforces a restricted session's policy, so no
+// backend may start one without it, whatever its capabilities.
+func TestValidateRequiresGatewayForRestrictedNetwork(t *testing.T) {
+	caps := Capabilities{RestrictedNetwork: true, SecretHTTPRelease: true}
+	for _, tc := range []struct {
+		name    string
+		network NetworkPolicy
+		wantErr bool
+	}{
+		{"restricted without gateway", NetworkPolicy{Mode: NetworkModeRestricted}, true},
+		{"restricted with gateway", NetworkPolicy{Mode: NetworkModeRestricted, Gateway: true}, false},
+		{"unrestricted without gateway", NetworkPolicy{Mode: NetworkModeUnrestricted}, false},
+		{"unrestricted with gateway", NetworkPolicy{Mode: NetworkModeUnrestricted, Gateway: true}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := Validate(Request{Network: tc.network}, caps)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("Validate() error = %v, want error %v", err, tc.wantErr)
+			}
+		})
+	}
+}
+
 func TestValidateAllowsDockerCapabilities(t *testing.T) {
 	req := Request{
-		Network: NetworkPolicy{Mode: NetworkModeRestricted},
+		Network: NetworkPolicy{Mode: NetworkModeRestricted, Gateway: true},
 		Secrets: []SecretRelease{{SecretID: "api-key", HTTP: &HTTPReleaseRule{Hosts: []string{"example.com"}, Header: "Authorization"}}},
 	}
 	caps := Capabilities{RestrictedNetwork: true, SecretHTTPRelease: true}

@@ -36,6 +36,7 @@ type RunOptions struct {
 	Persist                  bool
 	Ephemeral                bool
 	AllowAllNetwork          bool
+	DisableGateway           bool
 	Ports                    []string
 	AddDirs                  []string
 	AddReadonlyDirs          []string
@@ -715,16 +716,19 @@ const (
 var KitInitSubstitutedVars = []string{KitInitWorkdirVar, KitInitHomeVar, KitInitUserVar}
 
 const (
-	GatewayImageTagLatest        = "latest"
-	GatewayImagePrefix           = AppName + "-gateway-"
-	GatewayContainerSuffix       = "-gateway"
-	GatewayLabelManaged          = AppName + ".gateway"
-	GatewayLabelHash             = AppName + ".gateway.hash"
-	GatewayLabelAgent            = LabelAgent
-	GatewayLabelProjectHash      = AppName + ".gateway.project_hash"
-	GatewayLabelProjectDir       = AppName + ".gateway.project_dir"
-	GatewayLabelWorkspaceHash    = AppName + ".gateway.workspace_hash"
-	GatewayLabelContainer        = AppName + ".gateway.container"
+	GatewayImageTagLatest     = "latest"
+	GatewayImagePrefix        = AppName + "-gateway-"
+	GatewayContainerSuffix    = "-gateway"
+	GatewayLabelManaged       = AppName + ".gateway"
+	GatewayLabelHash          = AppName + ".gateway.hash"
+	GatewayLabelAgent         = LabelAgent
+	GatewayLabelProjectHash   = AppName + ".gateway.project_hash"
+	GatewayLabelProjectDir    = AppName + ".gateway.project_dir"
+	GatewayLabelWorkspaceHash = AppName + ".gateway.workspace_hash"
+	GatewayLabelContainer     = AppName + ".gateway.container"
+	// GatewayLabelMode names the network mode of an unrestricted gateway. A
+	// gateway without it is restricted, including those started before it existed.
+	GatewayLabelMode             = AppName + ".gateway.mode"
 	SessionNetworkSuffix         = "-net"
 	NetworkLabelManaged          = AppName + ".network"
 	NetworkLabelContainer        = AppName + ".network.container"
@@ -748,4 +752,12 @@ const (
 	// by the entrypoint at a fixed path so the container-level SSL_CERT_FILE can
 	// name it for processes started with `docker exec`.
 	AgentGatewayCABundlePath = "/tmp/enclave-ca/ca-certificates.crt"
+)
+
+// The gateway proxy listens on these loopback ports in the namespace the
+// session shares, so the session cannot use them. gateway-entrypoint.sh
+// redirects TCP 80 and 443 to them.
+const (
+	GatewayProxyHTTPPort  = 15080
+	GatewayProxyHTTPSPort = 15443
 )

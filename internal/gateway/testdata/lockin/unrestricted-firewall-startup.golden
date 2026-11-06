@@ -1,0 +1,19 @@
+iptables -t nat -L PREROUTING
+iptables -t nat -A PREROUTING -p tcp --dport 1455 -j DNAT --to-destination 127.0.0.1:1455
+iptables -t nat -A OUTPUT -p tcp -d 10.88.0.5 --dport 1455 -j DNAT --to-destination 127.0.0.1:1455
+iptables -m owner -h
+iptables -t nat -A OUTPUT -p tcp --dport 80 -m owner --uid-owner 105 -j RETURN
+iptables -t nat -A OUTPUT -p tcp --dport 80 -m addrtype --dst-type LOCAL -j RETURN
+iptables -t nat -A OUTPUT -p tcp --dport 443 -m owner --uid-owner 105 -j RETURN
+iptables -t nat -A OUTPUT -p tcp --dport 443 -m addrtype --dst-type LOCAL -j RETURN
+iptables -t nat -A OUTPUT -p tcp --dport 80 -j REDIRECT --to-ports 15080
+iptables -t nat -A OUTPUT -p tcp --dport 443 -j REDIRECT --to-ports 15443
+ip6tables -t nat -A OUTPUT -p tcp --dport 80 -m owner --uid-owner 105 -j RETURN
+ip6tables -t nat -A OUTPUT -p tcp --dport 80 -m addrtype --dst-type LOCAL -j RETURN
+ip6tables -t nat -A OUTPUT -p tcp --dport 443 -m owner --uid-owner 105 -j RETURN
+ip6tables -t nat -A OUTPUT -p tcp --dport 443 -m addrtype --dst-type LOCAL -j RETURN
+ip6tables -t nat -A OUTPUT -p tcp --dport 80 -j REDIRECT --to-ports 15080
+ip6tables -t nat -A OUTPUT -p tcp --dport 443 -j REDIRECT --to-ports 15443
+iptables -t nat -A OUTPUT -p tcp -d 127.0.0.1 --dport 9800 -j DNAT --to-destination 172.17.0.1:9800
+iptables -t nat -A POSTROUTING -p tcp -d 172.17.0.1 --dport 9800 -j MASQUERADE
+iptables -A OUTPUT -p tcp -d 172.17.0.1 --dport 9800 -j ACCEPT

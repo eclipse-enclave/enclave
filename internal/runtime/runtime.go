@@ -858,7 +858,10 @@ func (r *Runtime) backendRequest(ctx *ExecutionContext, detached bool, interacti
 		// reconcile via Stop/Remove finalize while the container still exists.
 		req.AuthSync = ctx.AuthSync
 	}
-	if req.Network.Mode != backend.NetworkModeRestricted {
+	// A restricted session's hostname is the gateway's own. An unrestricted
+	// session keeps its hostname; when it joins a gateway's network namespace,
+	// the backend sets it on the gateway.
+	if req.Network.Mode == backend.NetworkModeUnrestricted {
 		req.Hostname = model.HostnamePrefix + r.project.Name
 	}
 	return req
@@ -1482,7 +1485,7 @@ func (r *Runtime) addDirenvMount(mounts *mountAccumulator) {
 }
 
 func (r *Runtime) addGatewayCAMount(mounts *mountAccumulator) error {
-	if !r.shouldUseGateway() {
+	if !r.gatewayRuns() {
 		return nil
 	}
 	store := tlsstore.New(config.HostTLSDir(r.host.Home))
@@ -1503,13 +1506,21 @@ func (r *Runtime) addGatewayCAMount(mounts *mountAccumulator) error {
 	return nil
 }
 
-func (r *Runtime) shouldUseGateway() bool {
+// networkRestricted reports whether the session's network mode is restricted.
+// An unresolvable policy counts as restricted so enforcement fails closed.
+func (r *Runtime) networkRestricted() bool {
 	resolved, err := r.resolveEffectivePolicy()
 	if err != nil {
-		logx.Warnf("Failed to resolve effective network policy for gateway decision: %v", err)
+		logx.Warnf("Failed to resolve effective network policy: %v", err)
 		return true
 	}
 	return resolved.Effective.Mode != model.NetworkModeUnrestricted
+}
+
+// gatewayRuns reports whether a gateway sidecar runs alongside the session:
+// always in restricted mode, and in unrestricted mode unless disabled.
+func (r *Runtime) gatewayRuns() bool {
+	return r.networkRestricted() || !r.run.DisableGateway
 }
 
 func (r *Runtime) resolveEffectivePolicy() (policy.ResolveResult, error) {

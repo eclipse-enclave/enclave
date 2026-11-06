@@ -40,6 +40,17 @@ func TestBuildRunArgsPassesUserNamespaceMode(t *testing.T) {
 	}
 }
 
+func TestBuildRunArgsPassesUTSNamespaceMode(t *testing.T) {
+	args := buildRunArgs(&ContainerConfig{Image: "example:test"}, &HostConfig{UTSMode: "container:gw"}, "", runMode{})
+	idx := slices.Index(args, "--uts")
+	if idx < 0 || idx+1 >= len(args) || args[idx+1] != "container:gw" {
+		t.Fatalf("expected --uts container:gw in %v", args)
+	}
+	if slices.Contains(buildRunArgs(&ContainerConfig{Image: "example:test"}, &HostConfig{}, "", runMode{}), "--uts") {
+		t.Fatal("empty UTSMode must not emit --uts")
+	}
+}
+
 func TestDecodePodmanInfoMapsRootlessAndGraphRoot(t *testing.T) {
 	info, err := decodePodmanInfo([]byte(`{"host":{"security":{"rootless":true}},"store":{"graphRoot":"/home/u/.local/share/containers/storage"}}`))
 	if err != nil {

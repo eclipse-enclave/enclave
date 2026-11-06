@@ -61,12 +61,18 @@ Restricted gateways use default-drop inbound IPv4 and IPv6 policies. They admit
 only loopback, established/related replies, and published container ports,
 including published OAuth callbacks. Unpublished session, DNS, and proxy
 listeners remain blocked even if another container has a route into the session.
-Unrestricted sessions do not have this gateway filter.
+Unrestricted sessions have no inbound filter, with or without a gateway.
+
+Unrestricted sessions start a gateway too, but it only observes: it redirects
+TCP 80 and 443 through the proxy to write the network log and enforces nothing.
+It still runs privileged, so a gateway vulnerability is in scope for
+unrestricted sessions as well. `--disable-gateway` runs an unrestricted session
+without it.
 
 Every Docker and podman session is enclosed in its own user-defined bridge
-network. In restricted mode the gateway is the network's attached endpoint and
-the tool shares its network namespace; in unrestricted mode the tool is
-attached directly. This prevents unrelated bridge networks and other Enclave
+network. When a gateway runs, it is the network's attached endpoint and the tool
+shares its network namespace; with `--disable-gateway` the tool is attached
+directly. This prevents unrelated bridge networks and other Enclave
 sessions from routing directly to listeners in the session. Docker isolates
 user-defined bridges unconditionally; under podman netavark is required and the
 network is created with `isolate=strict`. Older netavark versions or Podman CLIs
@@ -102,11 +108,14 @@ crossed the boundary. In the default `coarse` mode a reused TLS connection
 yields one event however many requests it carries, successful DNS lookups are
 never recorded, and request-level detail exists only for plaintext HTTP and
 MITM'd hosts. `--network-log=requests` closes the HTTPS gap for allowlisted
-hosts, but no mode records SSH. Treat a missing event as no evidence either
-way; see [Coverage and granularity](../networking.md#coverage-and-granularity).
+hosts, but no mode records SSH. In unrestricted mode only TCP 80 and 443 are
+logged at all. Treat a missing event as no evidence either way; see
+[Coverage and granularity](../networking.md#coverage-and-granularity) and
+[Unrestricted mode](../networking.md#unrestricted-mode).
 
 The experimental QEMU backend has no restricted-egress implementation. It runs
-with unrestricted networking and without gateway-side HTTP secret release.
+with unrestricted networking, without a gateway (so without a network log), and
+without gateway-side HTTP secret release.
 
 ## Secrets
 

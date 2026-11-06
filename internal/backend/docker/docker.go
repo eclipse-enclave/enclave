@@ -441,13 +441,16 @@ func (b *Backend) prepareRun(ctx context.Context, req backend.Request) (runSpec,
 	if err != nil {
 		return runSpec{}, err
 	}
-	if req.Network.Mode == backend.NetworkModeRestricted {
+	if req.Network.Gateway {
 		gatewayName, cleanup, err := b.startGateway(ctx, req, sessionNetwork.Name)
 		if err != nil {
 			cleanupSessionNetwork(sessionNetwork)
 			return runSpec{}, err
 		}
-		joinGatewayNamespaces(spec.hostConfig, gatewayName)
+		joinGatewayNamespaces(spec.hostConfig, gatewayName, req.Hostname != "")
+		// The hostname went to the gateway; a container joining another's
+		// network namespace cannot set one.
+		spec.config.Hostname = ""
 		spec.cleanup = func() {
 			cleanup()
 			cleanupSessionNetwork(sessionNetwork)
@@ -523,10 +526,18 @@ func (b *Backend) dockerConfig(req backend.Request) runSpec {
 // the gateway already runs with the keep-id mapping (see gateway.gatewayUserNS),
 // and a separate keep-id namespace could not mount sysfs in a network namespace
 // it does not own, which fails container creation under runc.
-func joinGatewayNamespaces(hostConfig *dockercmd.HostConfig, gatewayName string) {
+//
+// A session that carries a hostname hands it to the gateway. Docker shares the
+// UTS namespace along with the network namespace (and rejects --uts
+// container:); podman does not, so there the session joins it explicitly to
+// keep the hostname.
+func joinGatewayNamespaces(hostConfig *dockercmd.HostConfig, gatewayName string, shareHostname bool) {
 	hostConfig.NetworkMode = dockercmd.NetworkMode("container:" + gatewayName)
 	if hostConfig.UserNS != "" {
 		hostConfig.UserNS = "container:" + gatewayName
+	}
+	if shareHostname && dockercmd.IsPodman() {
+		hostConfig.UTSMode = "container:" + gatewayName
 	}
 }
 

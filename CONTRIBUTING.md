@@ -14,7 +14,7 @@ Use](https://www.eclipse.org/legal/terms-of-use/).
 
 ## Project License
 
-Eclipse Enclave is distributed under the [MIT License](LICENSE.md).
+Eclipse Enclave is distributed under the [MIT License](LICENSE).
 Contributions are received under the terms of that license.
 
 ## Contributing Code

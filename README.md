@@ -329,5 +329,5 @@ contribute verbs. To turn off a single verb, yours or an extension's, list it in
 Project resources: [website](https://enclave.eclipse.dev),
 [Eclipse project page](https://projects.eclipse.org/projects/ecd.enclave),
 [contributing guide](CONTRIBUTING.md), [security policy](SECURITY.md),
-[code of conduct](CODE_OF_CONDUCT.md), [license](LICENSE.md), and
+[code of conduct](CODE_OF_CONDUCT.md), [license](LICENSE), and
 [notices](NOTICE.md).

@@ -368,6 +368,10 @@ Quick rule of thumb:
 
 Backend option note: `--backend` is config-backed and defaults to `auto`, which `app.resolveBackend` turns into `docker` or `podman` from `backenddocker.DetectCLIs()` (prompting once via `prompt.Choose` and persisting with `config.WriteGlobalDefault` when both are installed and a terminal is present); engine-using management commands register the same option by name so the CLI override takes precedence without taking every Run-group flag. `podman` reuses the Docker backend (`internal/backend/docker`) over the podman CLI by switching the binary in `internal/docker` once at startup (`docker.SetBinary`), with `docker.IsPodman()` gating the few engine differences (`--userns=keep-id`, `info` schema, build cache flags, and `renderEngineDockerfile` stripping home-directory cache mounts from the rendered Dockerfile); experimental `qemu` is available for foreground slim/no-feature unrestricted sessions.
 
+Port publishing note: keep `"0"` as the internal auto-assigned host-port
+sentinel. Only `internal/docker/cli.go` renders it as an empty host port in
+`--publish` flags, which both Docker and Podman accept. QEMU rejects it.
+
 Shared skills note: `--skills-validation strict|agent` is config-backed,
 defaults to `strict`, and supports global, project, and selected tool overrides.
 Normalize casing and whitespace before validating; runtime callers resolve the

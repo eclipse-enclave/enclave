@@ -271,7 +271,7 @@ List flags (`-p`, `--allow-domain`, `--bridge-port`, `--pass-env`, `--cache-from
 | `--backend <backend>` | Isolation backend: `auto` (default: docker or podman, whichever is installed), `docker`, `podman`, or experimental `qemu`. Also accepted by engine-using management commands; affects only this invocation. |
 | `--name <name>` | Named persistent session |
 | `--background` | Detached background session |
-| `-p <port>` | Publish a container port to the host (container → host, e.g. `-p 3002`). A host port of `0` (e.g. `-p 0:3000`) lets the daemon pick a free host port (Docker only); read it back with `enclave ps --json`. Repeatable, comma-separated; replaces `ports` from config, `+port` adds to it and replaces a configured entry for the same host port |
+| `-p <port>` | Publish a container port to the host (container → host, e.g. `-p 3002`). A host port of `0` (e.g. `-p 0:3000`) lets Docker or Podman pick a free host port; read it back with `enclave ps --json`. Repeatable, comma-separated; replaces `ports` from config, `+port` adds to it and replaces a configured entry for the same host port |
 | `--bridge-port <port>` | Forward a host port into the container (host → container, repeatable, comma-separated); replaces `bridge_ports` from config, `+port` adds |
 | `--add-dir <path>` | Mount an additional host directory (repeatable, one path per flag, commas are part of the path); adds to `add_dirs` from config |
 | `--add-readonly-dir <path>` | Mount an additional host directory read-only (repeatable, one path per flag); adds to `add_readonly_dirs` from config |

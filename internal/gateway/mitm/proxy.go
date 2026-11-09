@@ -434,6 +434,13 @@ func (p *proxy) handler(scheme string) http.HandlerFunc {
 				return
 			}
 		}
+		if capture != nil && req.Header.Get("Accept-Encoding") != "" {
+			// Redaction matches literal bytes, so a captured exchange asks the
+			// upstream for an unencoded body. Without the header the transport
+			// asks for gzip and decodes it itself. The record keeps the header
+			// the client sent.
+			req.Header.Set("Accept-Encoding", "identity")
+		}
 		result, err := p.forward(w, req, scheme, capture)
 		if err != nil {
 			event.Status = http.StatusBadGateway

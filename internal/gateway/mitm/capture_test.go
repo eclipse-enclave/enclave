@@ -432,10 +432,74 @@ func TestProxyCaptureMarksRequestBodyTheUpstreamDidNotRead(t *testing.T) {
 // Most APIs compress their responses. The client still gets the compressed
 // bytes as sent, while the capture stores them decoded so that an echoed
 // credential is redacted there too.
-func TestProxyCaptureRedactsSecretsInCompressedResponses(t *testing.T) {
+func TestProxyCaptureOmitsBodiesUpstreamsEncodeAnyway(t *testing.T) {
 	const placeholder = "ENCLAVE_SECRET_0123456789abcdef"
 	const secret = "sk-live-do-not-store-0123456789"
+	for _, encoding := range []string{"gzip", "br"} {
+		t.Run(encoding, func(t *testing.T) {
+			var relayed []byte
+			upstream := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				// This upstream ignores Accept-Encoding: identity.
+				var buffer bytes.Buffer
+				writer := gzip.NewWriter(&buffer)
+				_, _ = fmt.Fprintf(writer, `{"authorization":%q}`, r.Header.Get("Authorization"))
+				_ = writer.Close()
+				relayed = buffer.Bytes()
+				w.Header().Set("Content-Encoding", encoding)
+				_, _ = w.Write(relayed)
+			}))
+			defer upstream.Close()
+
+			rules := []model.SecretReleaseEntry{{
+				SecretID:    "API_KEY",
+				Placeholder: placeholder,
+				Value:       secret,
+				Hosts:       []string{"example.com"},
+				Header:      "authorization",
+				Format:      "Bearer %s",
+			}}
+			p, dir, logPath := captureProxy(t, []string{"example.com"}, rules, netcapture.Options{})
+			p.transport.TLSClientConfig = upstream.Client().Transport.(*http.Transport).TLSClientConfig.Clone()
+			p.transport.DialContext = func(ctx context.Context, network string, _ string) (net.Conn, error) {
+				return (&net.Dialer{}).DialContext(ctx, network, upstream.Listener.Addr().String())
+			}
+
+			req := httptest.NewRequest(http.MethodGet, "https://example.com/v1/whoami", nil)
+			req.Host = "example.com"
+			req.Header.Set("Authorization", placeholder)
+			req.Header.Set("Accept-Encoding", "gzip, br")
+			recorder := httptest.NewRecorder()
+			p.handler("https")(recorder, req)
+
+			if recorder.Header().Get("Content-Encoding") != encoding || !bytes.Equal(recorder.Body.Bytes(), relayed) {
+				t.Fatalf("client did not receive the response as relayed: %q %x", recorder.Header().Get("Content-Encoding"), recorder.Body.Bytes())
+			}
+			_, record, _ := capturedEvent(t, logPath, dir)
+			if record.Response == nil || record.Response.BodyOmitted != netcapture.OmittedEncoding || record.Response.Body != nil {
+				t.Fatalf("response = %+v, want its body omitted", record.Response)
+			}
+			if record.Response.Headers.Get("Content-Encoding") != encoding {
+				t.Fatalf("response headers = %v, want them stored", record.Response.Headers)
+			}
+			entries, err := os.ReadDir(dir)
+			if err != nil {
+				t.Fatalf("read capture dir: %v", err)
+			}
+			for _, entry := range entries {
+				if strings.HasSuffix(entry.Name(), ".response.body") {
+					t.Errorf("response body stored as %s", entry.Name())
+				}
+			}
+		})
+	}
+}
+
+func TestProxyCaptureKeepsTransportGzipForClientsWithoutAcceptEncoding(t *testing.T) {
+	const placeholder = "ENCLAVE_SECRET_0123456789abcdef"
+	const secret = "sk-live-do-not-store-0123456789"
+	var upstreamAccepts string
 	upstream := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamAccepts = r.Header.Get("Accept-Encoding")
 		w.Header().Set("Content-Encoding", "gzip")
 		writer := gzip.NewWriter(w)
 		_, _ = fmt.Fprintf(writer, `{"authorization":%q}`, r.Header.Get("Authorization"))
@@ -460,38 +524,93 @@ func TestProxyCaptureRedactsSecretsInCompressedResponses(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "https://example.com/v1/whoami", nil)
 	req.Host = "example.com"
 	req.Header.Set("Authorization", placeholder)
-	req.Header.Set("Accept-Encoding", "gzip")
 	recorder := httptest.NewRecorder()
 	p.handler("https")(recorder, req)
 
-	relayed, err := gzip.NewReader(bytes.NewReader(recorder.Body.Bytes()))
-	if err != nil {
-		t.Fatalf("client did not receive the gzip body as sent: %v", err)
+	// The transport asked for gzip and decoded it, as without a capture.
+	if upstreamAccepts != "gzip" || recorder.Header().Get("Content-Encoding") != "" {
+		t.Fatalf("upstream saw %q, client got Content-Encoding %q", upstreamAccepts, recorder.Header().Get("Content-Encoding"))
 	}
-	plain, _ := io.ReadAll(relayed)
-	if string(plain) != `{"authorization":"Bearer `+secret+`"}` {
-		t.Fatalf("client received %q", plain)
-	}
-
 	_, record, recordPath := capturedEvent(t, logPath, dir)
-	body := record.Response.Body
-	if body == nil || body.DecodedFrom != "gzip" || body.Bytes != int64(recorder.Body.Len()) {
-		t.Fatalf("response body = %+v, want it decoded from gzip", body)
-	}
-	if got := readCapturedBody(t, recordPath, body); got != `{"authorization":"Bearer `+placeholder+`"}` {
+	if got := readCapturedBody(t, recordPath, record.Response.Body); got != `{"authorization":"Bearer `+placeholder+`"}` {
 		t.Fatalf("captured body = %q", got)
 	}
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		t.Fatalf("read capture dir: %v", err)
-	}
-	for _, entry := range entries {
-		raw, err := os.ReadFile(filepath.Join(dir, entry.Name())) // #nosec G304 -- test-owned temp path.
-		if err != nil {
-			t.Fatalf("read %s: %v", entry.Name(), err)
-		}
-		if strings.Contains(string(raw), secret) {
-			t.Errorf("%s contains the released secret", entry.Name())
-		}
+}
+
+func TestProxyCaptureRedactsSecretsUpstreamsWouldCompress(t *testing.T) {
+	const placeholder = "ENCLAVE_SECRET_0123456789abcdef"
+	const secret = "sk-live-do-not-store-0123456789"
+	const clientAccepts = "gzip, deflate, br, zstd"
+	for _, encoding := range []string{"gzip", "br", "zstd"} {
+		t.Run(encoding, func(t *testing.T) {
+			var upstreamAccepts string
+			upstream := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				upstreamAccepts = r.Header.Get("Accept-Encoding")
+				body := fmt.Sprintf(`{"authorization":%q}`, r.Header.Get("Authorization"))
+				if !strings.Contains(upstreamAccepts, encoding) {
+					_, _ = io.WriteString(w, body)
+					return
+				}
+				// A server that may compress does; the stand-in encoding is
+				// enough to show the body would not be stored as sent.
+				w.Header().Set("Content-Encoding", encoding)
+				writer := gzip.NewWriter(w)
+				_, _ = io.WriteString(writer, body)
+				_ = writer.Close()
+			}))
+			defer upstream.Close()
+
+			rules := []model.SecretReleaseEntry{{
+				SecretID:    "API_KEY",
+				Placeholder: placeholder,
+				Value:       secret,
+				Hosts:       []string{"example.com"},
+				Header:      "authorization",
+				Format:      "Bearer %s",
+			}}
+			p, dir, logPath := captureProxy(t, []string{"example.com"}, rules, netcapture.Options{})
+			p.transport.TLSClientConfig = upstream.Client().Transport.(*http.Transport).TLSClientConfig.Clone()
+			p.transport.DialContext = func(ctx context.Context, network string, _ string) (net.Conn, error) {
+				return (&net.Dialer{}).DialContext(ctx, network, upstream.Listener.Addr().String())
+			}
+
+			req := httptest.NewRequest(http.MethodGet, "https://example.com/v1/whoami", nil)
+			req.Host = "example.com"
+			req.Header.Set("Authorization", placeholder)
+			req.Header.Set("Accept-Encoding", clientAccepts)
+			recorder := httptest.NewRecorder()
+			p.handler("https")(recorder, req)
+
+			if upstreamAccepts != "identity" {
+				t.Fatalf("upstream saw Accept-Encoding %q, want identity", upstreamAccepts)
+			}
+			if got := recorder.Header().Get("Content-Encoding"); got != "" {
+				t.Fatalf("client received Content-Encoding %q", got)
+			}
+			if got := recorder.Body.String(); got != `{"authorization":"Bearer `+secret+`"}` {
+				t.Fatalf("client received %q", got)
+			}
+
+			_, record, recordPath := capturedEvent(t, logPath, dir)
+			if got := record.Request.Headers.Get("Accept-Encoding"); got != clientAccepts {
+				t.Fatalf("captured Accept-Encoding = %q, want the client's", got)
+			}
+			if got := readCapturedBody(t, recordPath, record.Response.Body); got != `{"authorization":"Bearer `+placeholder+`"}` {
+				t.Fatalf("captured body = %q", got)
+			}
+			entries, err := os.ReadDir(dir)
+			if err != nil {
+				t.Fatalf("read capture dir: %v", err)
+			}
+			for _, entry := range entries {
+				raw, err := os.ReadFile(filepath.Join(dir, entry.Name())) // #nosec G304 -- test-owned temp path.
+				if err != nil {
+					t.Fatalf("read %s: %v", entry.Name(), err)
+				}
+				if strings.Contains(string(raw), secret) {
+					t.Errorf("%s contains the released secret", entry.Name())
+				}
+			}
+		})
 	}
 }

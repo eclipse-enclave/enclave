@@ -21,7 +21,7 @@ Read `README.md` before making user-facing changes.
 - Treat CLI JSON schemas, background-run output, lifecycle commands, and container naming as integration contracts for external consumers; coordinate breaking changes. This includes `enclave tools|features|commands list --json` and the shared `add`/`update`/`remove` result envelope (both `schemaVersion: "1"`; see `docs/extensions/json-output.md`), `enclave config --json` (`schemaVersion: "1"`, `kind: "config"`), and `enclave network print --json` (`schemaVersion: "1"`, `kind: "network-policy"`). `docs/integration.md` documents all JSON contracts.
 - Session provenance (`options` in `enclave ps --json`) is contract; the `enclave.options` label that stores it is not. Recorded options follow `AffectsSession` in `internal/config/options_def.go` and must never carry secret values.
 - Prefer structured CLI output over Docker labels or human-readable output for integration contracts.
-- HomeShell (`eclipse-enclave/homeshell`) is a known consumer. Its Enclave provider (`daemon/internal/provider/enclave/cli.go`) also relies on `exec`, `--pass-env +NAME`, `--add-sensitive-dir`, and `ps --json --all`; coordinate breaking changes to those with it.
+- HomeShell is a known consumer that relies on more than the JSON contracts; `docs/integration.md#known-consumers` lists what it uses. Coordinate breaking changes to those with it.
 
 ## Build and Test
 

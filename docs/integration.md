@@ -16,10 +16,8 @@ Background-run output, lifecycle commands, and container naming
 (`enclave-<tool>-<project-hash>`, plus `-<session>` for other sessions; see
 [Session names](persistence.md#session-names)) are integration contracts too.
 
-[HomeShell](https://github.com/eclipse-enclave/homeshell) is built on these
-contracts; its
-[Enclave provider](https://github.com/eclipse-enclave/homeshell/blob/main/daemon/internal/provider/enclave/cli.go)
-shows which commands and flags it relies on.
+Known consumers rely on more than the JSON output; see
+[Known consumers](#known-consumers).
 
 ## `ps --json`
 
@@ -150,3 +148,16 @@ with `error` set, `mode: null`, empty arrays (`tool: null` for startup
 failures), and exit code 1. Usage errors and warnings go to stderr only (exit
 1, empty stdout). Policy inputs:
 [Managing the network policy](networking.md#managing-the-network-policy).
+
+## Known consumers
+
+[HomeShell](https://github.com/eclipse-enclave/homeshell) drives sessions
+through the `enclave` CLI. Besides the JSON contracts above, it relies on:
+
+- `run --background` and `continue`, with `--tool`, `--name`,
+  `--pass-env +NAME`, and `--add-sensitive-dir`
+- `attach`, `exec`, and `stop` on a session
+- `ps --json --all`
+- `tools list --json` and `features list --json`
+
+Coordinate breaking changes to any of these with HomeShell.

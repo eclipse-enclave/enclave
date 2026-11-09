@@ -429,9 +429,8 @@ func TestProxyCaptureMarksRequestBodyTheUpstreamDidNotRead(t *testing.T) {
 	}
 }
 
-// Most APIs compress their responses. The client still gets the compressed
-// bytes as sent, while the capture stores them decoded so that an echoed
-// credential is redacted there too.
+// An upstream that ignores identity encoding is still relayed unchanged, but
+// its encoded body is never stored.
 func TestProxyCaptureOmitsBodiesUpstreamsEncodeAnyway(t *testing.T) {
 	const placeholder = "ENCLAVE_SECRET_0123456789abcdef"
 	const secret = "sk-live-do-not-store-0123456789"
@@ -536,12 +535,16 @@ func TestProxyCaptureOmitsEncodedRequestBodies(t *testing.T) {
 	}
 }
 
-func TestProxyCaptureKeepsTransportGzipForClientsWithoutAcceptEncoding(t *testing.T) {
+func TestProxyCaptureRequestsIdentityForClientsWithoutAcceptEncoding(t *testing.T) {
 	const placeholder = "ENCLAVE_SECRET_0123456789abcdef"
 	const secret = "sk-live-do-not-store-0123456789"
 	var upstreamAccepts string
 	upstream := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		upstreamAccepts = r.Header.Get("Accept-Encoding")
+		if upstreamAccepts == "identity" {
+			_, _ = fmt.Fprintf(w, `{"authorization":%q}`, r.Header.Get("Authorization"))
+			return
+		}
 		w.Header().Set("Content-Encoding", "gzip")
 		writer := gzip.NewWriter(w)
 		_, _ = fmt.Fprintf(writer, `{"authorization":%q}`, r.Header.Get("Authorization"))
@@ -569,11 +572,14 @@ func TestProxyCaptureKeepsTransportGzipForClientsWithoutAcceptEncoding(t *testin
 	recorder := httptest.NewRecorder()
 	p.handler("https")(recorder, req)
 
-	// The transport asked for gzip and decoded it, as without a capture.
-	if upstreamAccepts != "gzip" || recorder.Header().Get("Content-Encoding") != "" {
+	// Capture asks for identity even when the client sent no encoding header.
+	if upstreamAccepts != "identity" || recorder.Header().Get("Content-Encoding") != "" {
 		t.Fatalf("upstream saw %q, client got Content-Encoding %q", upstreamAccepts, recorder.Header().Get("Content-Encoding"))
 	}
 	_, record, recordPath := capturedEvent(t, logPath, dir)
+	if record.Request.Headers.Get("Accept-Encoding") != "" {
+		t.Fatal("capture changed the original request's encoding header")
+	}
 	if got := readCapturedBody(t, recordPath, record.Response.Body); got != `{"authorization":"Bearer `+placeholder+`"}` {
 		t.Fatalf("captured body = %q", got)
 	}
@@ -654,5 +660,118 @@ func TestProxyCaptureRedactsSecretsUpstreamsWouldCompress(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// A relay error does not turn an intentionally omitted body into an empty
+// truncated body. Unencoded partial responses still retain their captured bytes.
+func TestProxyCaptureInterruptedResponsesKeepOmittedBodiesAbsent(t *testing.T) {
+	for _, encoding := range []string{"", "gzip", "br"} {
+		t.Run("encoding="+encoding, func(t *testing.T) {
+			const partial = "partial response"
+			upstream := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Length", "100")
+				if encoding != "" {
+					w.Header().Set("Content-Encoding", encoding)
+				}
+				_, _ = io.WriteString(w, partial)
+			}))
+			defer upstream.Close()
+			p, dir, logPath := captureProxy(t, []string{"example.com"}, nil, netcapture.Options{})
+			p.transport.TLSClientConfig = upstream.Client().Transport.(*http.Transport).TLSClientConfig.Clone()
+			p.transport.DialContext = func(ctx context.Context, network string, _ string) (net.Conn, error) {
+				return (&net.Dialer{}).DialContext(ctx, network, upstream.Listener.Addr().String())
+			}
+			req := httptest.NewRequest(http.MethodGet, "https://example.com/interrupted", nil)
+			req.Host = "example.com"
+			req.Header.Set("Accept-Encoding", "identity")
+			recorder := httptest.NewRecorder()
+			p.handler("https")(recorder, req)
+			if recorder.Code != http.StatusOK || recorder.Body.String() != partial {
+				t.Fatalf("relayed %d %q", recorder.Code, recorder.Body.String())
+			}
+			_, record, recordPath := capturedEvent(t, logPath, dir)
+			if record.Response == nil {
+				t.Fatal("response missing")
+			}
+			if encoding == "" {
+				body := record.Response.Body
+				if record.Response.BodyOmitted != "" || body == nil || !body.Truncated || body.Bytes != int64(len(partial)) {
+					t.Fatalf("unencoded response = %+v", record.Response)
+				}
+				if got := readCapturedBody(t, recordPath, body); got != partial {
+					t.Fatalf("stored %q", got)
+				}
+				return
+			}
+			if record.Response.BodyOmitted != netcapture.OmittedEncoding || record.Response.Body != nil {
+				t.Fatalf("encoded response = %+v", record.Response)
+			}
+			if matches, _ := filepath.Glob(filepath.Join(dir, "*.response.body")); len(matches) != 0 {
+				t.Fatalf("omitted body files: %v", matches)
+			}
+		})
+	}
+}
+
+func TestProxyCaptureOmitsRepeatedGzipEncodingWithoutClientAcceptEncoding(t *testing.T) {
+	const placeholder = "ENCLAVE_SECRET_0123456789abcdef"
+	const secret = "synthetic-released-value-not-for-capture"
+	var relayed []byte
+	var upstreamAccepts string
+	upstream := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamAccepts = r.Header.Get("Accept-Encoding")
+		payload := []byte(r.Header.Get("Authorization"))
+		for range 2 {
+			var buffer bytes.Buffer
+			writer := gzip.NewWriter(&buffer)
+			_, _ = writer.Write(payload)
+			_ = writer.Close()
+			payload = buffer.Bytes()
+		}
+		relayed = payload
+		w.Header().Add("Content-Encoding", "gzip")
+		w.Header().Add("Content-Encoding", "gzip")
+		_, _ = w.Write(payload)
+	}))
+	defer upstream.Close()
+	rules := []model.SecretReleaseEntry{{SecretID: "test", Placeholder: placeholder, Value: secret, Hosts: []string{"example.com"}, Header: "authorization", Format: "Bearer %s"}}
+	p, dir, logPath := captureProxy(t, []string{"example.com"}, rules, netcapture.Options{})
+	p.transport.TLSClientConfig = upstream.Client().Transport.(*http.Transport).TLSClientConfig.Clone()
+	p.transport.DialContext = func(ctx context.Context, network string, _ string) (net.Conn, error) {
+		return (&net.Dialer{}).DialContext(ctx, network, upstream.Listener.Addr().String())
+	}
+	req := httptest.NewRequest(http.MethodGet, "https://example.com/repeated-encoding", nil)
+	req.Host = "example.com"
+	req.Header.Set("Authorization", placeholder)
+	recorder := httptest.NewRecorder()
+	p.handler("https")(recorder, req)
+	_, record, recordPath := capturedEvent(t, logPath, dir)
+	if record.Response.Body != nil {
+		stored, err := gzip.NewReader(strings.NewReader(readCapturedBody(t, recordPath, record.Response.Body)))
+		if err != nil {
+			t.Fatalf("unexpected stored body: %v", err)
+		}
+		defer func() { _ = stored.Close() }()
+		decoded, err := io.ReadAll(stored)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(decoded) == "Bearer "+secret {
+			t.Fatal("stored encoded body contains the released value after decompression")
+		}
+		t.Fatal("encoded response body stored")
+	}
+	if record.Response.BodyOmitted != netcapture.OmittedEncoding {
+		t.Fatalf("response = %+v", record.Response)
+	}
+	if upstreamAccepts != "identity" || record.Request.Headers.Get("Accept-Encoding") != "" {
+		t.Fatalf("upstream accepted %q, original request headers %v", upstreamAccepts, record.Request.Headers)
+	}
+	if recorder.Code != http.StatusOK || len(recorder.Header().Values("Content-Encoding")) != 2 || !bytes.Equal(recorder.Body.Bytes(), relayed) {
+		t.Fatal("encoded response was not relayed unchanged")
+	}
+	if matches, _ := filepath.Glob(filepath.Join(dir, "*.response.body")); len(matches) != 0 {
+		t.Fatalf("omitted body files: %v", matches)
 	}
 }

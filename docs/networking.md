@@ -354,8 +354,7 @@ does and also stores the request line, headers and body of every request the
 MITM proxy relays, together with the response status, headers and body. It is
 off unless selected, and meant for debugging a tool's API traffic or checking
 what an agent sent out. While it captures, the proxy asks upstreams for
-uncompressed responses when the client accepts compressed ones, so captured
-traffic uses more bandwidth.
+uncompressed responses, so captured traffic uses more bandwidth.
 
 ```bash
 enclave --network-log=full
@@ -445,8 +444,8 @@ The record (`schemaVersion: "1"`, `kind: "network-capture"`) looks like this:
   answered before reading to the end, in which case what the client sent
   afterwards is not recorded. `file` is relative to the record and absent when
   nothing was stored.
-- Bodies are stored as relayed. A request or response whose
-  `Content-Encoding` is anything but `identity` has no `body`, and its
+- Stored bodies have known secret values replaced. A request or response
+  whose `Content-Encoding` is anything but `identity` has no `body`, and its
   `bodyOmitted` is `unexpected content encoding`.
 - When the request could not be relayed, `error` says why and `response` may be
   absent. An upgraded connection (status `101`) records the handshake only.

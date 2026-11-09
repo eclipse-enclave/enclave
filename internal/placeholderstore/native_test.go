@@ -8,6 +8,7 @@
 package placeholderstore
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -72,5 +73,71 @@ func TestClassifyNativeOwnershipAndResetResidue(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestClassifyNativeRefusesUnknownKeysInOriginalRegularFile(t *testing.T) {
+	real, views := t.TempDir(), t.TempDir()
+	profile := claudeProfile()
+	profile.Providers[0].AuthSecrets = profile.Providers[0].AuthSecrets[:1]
+	nativeFile(t, real, ".credentials.json", nativeOAuth(accessToken, refreshToken))
+	view, err := Project(real, views, "original", profile, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sanitized, err := os.ReadFile(filepath.Join(view.Dir, ".credentials.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, nested := range []bool{false, true} {
+		var doc map[string]any
+		if err := json.Unmarshal(sanitized, &doc); err != nil {
+			t.Fatal(err)
+		}
+		target := doc
+		if nested {
+			target = doc["claudeAiOauth"].(map[string]any)
+		}
+		target["unknownCredential"] = "synthetic-unknown-raw-looking-credential"
+		raw, err := json.Marshal(doc)
+		if err != nil {
+			t.Fatal(err)
+		}
+		config := t.TempDir()
+		nativeFile(t, config, ".credentials.json", string(raw))
+		if _, err := ClassifyNative(config, "/home/agent/.enclave-auth", profile, view.Bindings, nil, false); err == nil {
+			t.Fatal("classifier kept an unsanitized regular file after stripping unknown keys")
+		}
+		unchanged, err := os.ReadFile(filepath.Join(config, ".credentials.json"))
+		if err != nil || string(unchanged) != string(raw) {
+			t.Fatal("classification changed the original file")
+		}
+	}
+}
+
+func TestClassifyNativeRefusesAnInRootSymlinkedParent(t *testing.T) {
+	real, views, config := t.TempDir(), t.TempDir(), t.TempDir()
+	profile := claudeProfile()
+	profile.Providers[0].AuthSecrets = profile.Providers[0].AuthSecrets[:1]
+	nativeFile(t, real, ".credentials.json", nativeOAuth(accessToken, refreshToken))
+	view, err := Project(real, views, "original", profile, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sanitized, err := os.ReadFile(filepath.Join(view.Dir, ".credentials.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	nativeFile(t, config, "inside/.credentials.json", string(sanitized))
+	if err := os.Symlink("inside", filepath.Join(config, "parent")); err != nil {
+		t.Fatal(err)
+	}
+	nested := "parent/.credentials.json"
+	profile.Providers[0].AuthSecrets[0].File = nested
+	for i := range view.Bindings.Bindings {
+		view.Bindings.Bindings[i].File = nested
+	}
+	if _, err := ClassifyNative(config, "/home/agent/.enclave-auth", profile, view.Bindings, nil, false); err == nil {
+		t.Fatal("classifier followed a parent symlink that os.Root confines but does not reject")
 	}
 }

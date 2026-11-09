@@ -14,30 +14,22 @@ import (
 // visitFields visits present string fields; absent, null and empty fields carry
 // no credential. Only unescaped object fields are supported.
 func visitFields(doc any, parts []string, prefix string, visit func(string, string, func(string)) error) error {
-	part := parts[0]
-	switch node := doc.(type) {
-	case map[string]any:
-		keys := []string{part}
-		for _, key := range keys {
-			value, ok := node[key]
-			if !ok || value == nil || value == "" {
-				continue
-			}
-			pointer := prefix + "/" + key
-			if len(parts) > 1 {
-				if err := visitFields(value, parts[1:], pointer, visit); err != nil {
-					return err
-				}
-			} else if text, ok := value.(string); ok {
-				if err := visit(pointer, text, func(replacement string) { node[key] = replacement }); err != nil {
-					return err
-				}
-			} else {
-				return fmt.Errorf("credential field %s must be a string", pointer)
-			}
-		}
-	default:
+	node, ok := doc.(map[string]any)
+	if !ok {
 		return fmt.Errorf("credential pointer traverses a non-object")
 	}
-	return nil
+	key := parts[0]
+	value, exists := node[key]
+	if !exists || value == nil || value == "" {
+		return nil
+	}
+	pointer := prefix + "/" + key
+	if len(parts) > 1 {
+		return visitFields(value, parts[1:], pointer, visit)
+	}
+	text, ok := value.(string)
+	if !ok {
+		return fmt.Errorf("credential field %s must be a string", pointer)
+	}
+	return visit(pointer, text, func(replacement string) { node[key] = replacement })
 }

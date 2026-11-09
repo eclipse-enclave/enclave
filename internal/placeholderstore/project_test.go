@@ -135,7 +135,6 @@ func TestProjectRefusesAmbiguousNativeFilesWithoutPublishing(t *testing.T) {
 	for name, data := range map[string]string{
 		"duplicate":                           `{"claudeAiOauth":{"accessToken":"first","accessToken":"second"}}`,
 		"wrong type":                          `{"claudeAiOauth":{"accessToken":123}}`,
-		"undeclared":                          `{"claudeAiOauth":{"accessToken":"raw","newCredential":"raw"}}`,
 		"trailing":                            `{} {}`,
 		"placeholder in real store":           nativeOAuth("ENCLAVE_SECRET_not-a-real-grant", refreshToken),
 		"raw copied into metadata":            `{"claudeAiOauth":{"accessToken":"same-raw-credential","refreshToken":"other-raw-credential","subscriptionType":"same-raw-credential"}}`,
@@ -160,7 +159,7 @@ func TestProjectRefusesAmbiguousNativeFilesWithoutPublishing(t *testing.T) {
 }
 
 func TestProjectRejectsSymlinksAndSpecialFiles(t *testing.T) {
-	for _, kind := range []string{"file symlink", "parent symlink", "directory"} {
+	for _, kind := range []string{"file symlink", "parent symlink", "in-root file symlink", "in-root parent symlink", "directory"} {
 		t.Run(kind, func(t *testing.T) {
 			real, views := t.TempDir(), t.TempDir()
 			profile := claudeProfile()
@@ -175,6 +174,17 @@ func TestProjectRejectsSymlinksAndSpecialFiles(t *testing.T) {
 				outside := t.TempDir()
 				nativeFile(t, outside, ".credentials.json", nativeOAuth(accessToken, refreshToken))
 				if err := os.Symlink(outside, filepath.Join(real, "parent")); err != nil {
+					t.Fatal(err)
+				}
+				profile.Providers[0].AuthSecrets[0].File = "parent/.credentials.json"
+			case "in-root file symlink":
+				nativeFile(t, real, "inside-auth", nativeOAuth(accessToken, refreshToken))
+				if err := os.Symlink("inside-auth", filepath.Join(real, ".credentials.json")); err != nil {
+					t.Fatal(err)
+				}
+			case "in-root parent symlink":
+				nativeFile(t, real, "inside/.credentials.json", nativeOAuth(accessToken, refreshToken))
+				if err := os.Symlink("inside", filepath.Join(real, "parent")); err != nil {
 					t.Fatal(err)
 				}
 				profile.Providers[0].AuthSecrets[0].File = "parent/.credentials.json"
@@ -245,7 +255,6 @@ func TestProjectEmptyIdentityAndMetadataOnlyConfig(t *testing.T) {
 
 func TestProjectRejectsCredentialsNestedInMetadata(t *testing.T) {
 	for _, data := range []string{
-		`{"oauthAccount":{"accessToken":"undeclared-nested-credential"}}`,
 		`{"oauthAccount":{"emailAddress":{"token":"undeclared-nested-credential"}}}`,
 		`{"allowTelemetry":{"token":"undeclared-nested-credential"}}`,
 	} {
@@ -301,5 +310,50 @@ func TestLoadBindingsRejectsAmbiguousMetadata(t *testing.T) {
 		if _, err := LoadBindings(real); err == nil {
 			t.Fatal("accepted invalid binding metadata")
 		}
+	}
+}
+
+func TestProjectStripsUnknownKeysWithoutChangingNativeFiles(t *testing.T) {
+	const unknown = "synthetic-unknown-credential-not-for-the-view"
+	for _, file := range []string{".credentials.json", "config.json"} {
+		t.Run(file, func(t *testing.T) {
+			real, views := t.TempDir(), t.TempDir()
+			nativeFile(t, real, ".credentials.json", nativeOAuth(accessToken, refreshToken))
+			var doc map[string]any
+			if file == ".credentials.json" {
+				doc = map[string]any{
+					"claudeAiOauth":   map[string]any{"accessToken": accessToken, "refreshToken": refreshToken, "newCredential": unknown},
+					"futureClientKey": map[string]any{"token": unknown},
+				}
+			} else {
+				doc = map[string]any{
+					"oauthAccount":    map[string]any{"displayName": "fixture-user", "accessToken": unknown},
+					"futureClientKey": map[string]any{"token": unknown},
+				}
+			}
+			source, err := json.Marshal(doc)
+			if err != nil {
+				t.Fatal(err)
+			}
+			nativeFile(t, real, file, string(source))
+			view, err := Project(real, views, "strip-unknown", claudeProfile(), nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			projected, err := os.ReadFile(filepath.Join(view.Dir, file))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if bytes.Contains(projected, []byte(unknown)) || bytes.Contains(projected, []byte("futureClientKey")) || bytes.Contains(projected, []byte("newCredential")) {
+				t.Fatal("unknown credential-bearing keys reached the view")
+			}
+			if file == "config.json" && !bytes.Contains(projected, []byte("fixture-user")) {
+				t.Fatal("known metadata was removed with unknown keys")
+			}
+			original, err := os.ReadFile(filepath.Join(real, file))
+			if err != nil || !bytes.Equal(original, source) {
+				t.Fatal("projection changed the canonical native file")
+			}
+		})
 	}
 }

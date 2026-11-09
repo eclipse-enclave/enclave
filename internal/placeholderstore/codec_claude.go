@@ -12,9 +12,54 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+
+	"enclave/internal/model"
 )
 
-func decodeNative(codec string, data []byte) (map[string]any, []string, error) {
+type nativePurpose bool
+
+const (
+	strictNative  nativePurpose = false
+	projectedView nativePurpose = true
+)
+
+type nativeValue struct {
+	field   model.AuthSecretField
+	value   string
+	replace func(string)
+}
+
+func decodeAuthFile(file model.AuthFileSecret, data []byte, purpose nativePurpose) (map[string]any, []nativeValue, error) {
+	doc, pointers, err := decodeNative(file.Codec, data, purpose)
+	if err != nil {
+		return nil, nil, err
+	}
+	declared := map[string]bool{}
+	for _, field := range file.Fields {
+		declared[field.Pointer] = true
+	}
+	for _, pointer := range pointers {
+		if !declared[pointer] {
+			return nil, nil, fmt.Errorf("credential field %s is not declared", pointer)
+		}
+	}
+	var values []nativeValue
+	for _, field := range file.Fields {
+		parts, err := model.AuthPointerSegments(field.Pointer)
+		if err != nil {
+			return nil, nil, err
+		}
+		if err := visitFields(doc, parts, "", func(_ string, value string, replace func(string)) error {
+			values = append(values, nativeValue{field: field, value: value, replace: replace})
+			return nil
+		}); err != nil {
+			return nil, nil, err
+		}
+	}
+	return doc, values, nil
+}
+
+func decodeNative(codec string, data []byte, purpose nativePurpose) (map[string]any, []string, error) {
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	if err := uniqueJSONValue(decoder, 0); err != nil {
 		return nil, nil, fmt.Errorf("invalid native credential JSON")
@@ -30,7 +75,7 @@ func decodeNative(codec string, data []byte) (map[string]any, []string, error) {
 	}
 	switch codec {
 	case "claude-credentials":
-		if err := typedFields(doc, map[string]string{"claudeAiOauth": "object"}); err != nil {
+		if err := filterFields(doc, map[string]string{"claudeAiOauth": "object"}, purpose); err != nil {
 			return nil, nil, err
 		}
 		if oauth, exists := doc["claudeAiOauth"]; exists {
@@ -38,17 +83,17 @@ func decodeNative(codec string, data []byte) (map[string]any, []string, error) {
 			if !ok {
 				return nil, nil, fmt.Errorf("claudeAiOauth must be an object")
 			}
-			if err := typedFields(object, map[string]string{"accessToken": "string", "refreshToken": "string", "expiresAt": "number", "scopes": "strings", "subscriptionType": "string", "rateLimitTier": "string"}); err != nil {
+			if err := filterFields(object, map[string]string{"accessToken": "string", "refreshToken": "string", "expiresAt": "number", "scopes": "strings", "subscriptionType": "string", "rateLimitTier": "string"}, purpose); err != nil {
 				return nil, nil, err
 			}
 		}
 		return doc, []string{"/claudeAiOauth/accessToken", "/claudeAiOauth/refreshToken"}, nil
 	case "claude-config":
-		if err := typedFields(doc, map[string]string{"primaryApiKey": "string", "anthropicApiKey": "string", "allowTelemetry": "bool", "hasCompletedOnboarding": "bool", "lastOnboardingVersion": "string", "forceLoginMethod": "string", "oauthAccount": "object"}); err != nil {
+		if err := filterFields(doc, map[string]string{"primaryApiKey": "string", "anthropicApiKey": "string", "allowTelemetry": "bool", "hasCompletedOnboarding": "bool", "lastOnboardingVersion": "string", "forceLoginMethod": "string", "oauthAccount": "object"}, purpose); err != nil {
 			return nil, nil, err
 		}
 		if account, ok := doc["oauthAccount"].(map[string]any); ok {
-			if err := typedFields(account, map[string]string{"accountUuid": "string", "emailAddress": "string", "organizationUuid": "string", "organizationRole": "string", "workspaceRole": "string", "displayName": "string"}); err != nil {
+			if err := filterFields(account, map[string]string{"accountUuid": "string", "emailAddress": "string", "organizationUuid": "string", "organizationRole": "string", "workspaceRole": "string", "displayName": "string"}, purpose); err != nil {
 				return nil, nil, err
 			}
 		}
@@ -58,13 +103,17 @@ func decodeNative(codec string, data []byte) (map[string]any, []string, error) {
 	}
 }
 
-// Native metadata has a closed, typed schema too: a nested object must not
-// become an undeclared credential channel just because its parent is allowed.
-func typedFields(object map[string]any, allowed map[string]string) error {
+// Only known metadata leaves may reach a view. Kept native files must already
+// satisfy the allowlist; projection can discard extra keys.
+func filterFields(object map[string]any, allowed map[string]string, purpose nativePurpose) error {
 	for key, value := range object {
 		kind, ok := allowed[key]
 		if !ok {
-			return fmt.Errorf("unsupported native credential fields")
+			if purpose == strictNative {
+				return fmt.Errorf("unsupported native credential fields")
+			}
+			delete(object, key)
+			continue
 		}
 		if value == nil {
 			continue

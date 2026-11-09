@@ -145,22 +145,12 @@ func (b *Bindings) field(provider, file, pointer, kind string, shape *model.Secr
 
 // readRegular rejects symlinks in every component and verifies the opened inode.
 func readRegular(root *os.Root, name string) ([]byte, error) {
-	if !model.ValidAuthFilePath(name) {
-		return nil, fmt.Errorf("invalid native credential file %q", name)
-	}
-	parts := strings.Split(name, "/")
-	for i := 1; i <= len(parts); i++ {
-		info, err := root.Lstat(strings.Join(parts[:i], "/"))
-		if err != nil {
-			return nil, err
-		}
-		if info.Mode()&os.ModeSymlink != 0 || (i < len(parts) && !info.IsDir()) || (i == len(parts) && !info.Mode().IsRegular()) {
-			return nil, fmt.Errorf("native credential file %q is not a regular confined file", name)
-		}
-	}
-	before, err := root.Lstat(name)
+	before, err := nativePathInfo(root, name)
 	if err != nil {
 		return nil, err
+	}
+	if !before.Mode().IsRegular() {
+		return nil, fmt.Errorf("native credential file %q is not a regular confined file", name)
 	}
 	file, err := root.Open(name)
 	if err != nil {
@@ -179,6 +169,27 @@ func readRegular(root *os.Root, name string) ([]byte, error) {
 		return nil, fmt.Errorf("native credential file %q exceeds its size limit", name)
 	}
 	return data, err
+}
+
+// nativePathInfo is shared by classification and regular-file reads. Only the
+// leaf may be a symlink; classification checks its exact target without following.
+func nativePathInfo(root *os.Root, name string) (os.FileInfo, error) {
+	if !model.ValidAuthFilePath(name) {
+		return nil, fmt.Errorf("invalid native credential file %q", name)
+	}
+	parts := strings.Split(name, "/")
+	var info os.FileInfo
+	for i := 1; i <= len(parts); i++ {
+		var err error
+		info, err = root.Lstat(strings.Join(parts[:i], "/"))
+		if err != nil {
+			return nil, err
+		}
+		if i < len(parts) && (!info.IsDir() || info.Mode()&os.ModeSymlink != 0) {
+			return nil, fmt.Errorf("native credential file %q has a symlinked or non-directory parent", name)
+		}
+	}
+	return info, nil
 }
 
 func openStoreRoot(dir string) (*os.Root, error) {

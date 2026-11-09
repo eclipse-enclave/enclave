@@ -353,7 +353,9 @@ the cap per project and tool. Concurrent starts serialize on
 does and also stores the request line, headers and body of every request the
 MITM proxy relays, together with the response status, headers and body. It is
 off unless selected, and meant for debugging a tool's API traffic or checking
-what an agent sent out.
+what an agent sent out. While it captures, the proxy asks upstreams for
+uncompressed responses when the client accepts compressed ones, so captured
+traffic uses more bandwidth.
 
 ```bash
 enclave --network-log=full
@@ -375,12 +377,15 @@ The proxy snapshots each request before it releases secrets into the headers,
 so the capture holds the placeholders the sandbox sent, never the released
 values. A released value that shows up anywhere else, such as an upstream
 echoing the credential in a response header or body, is replaced by its
-placeholder before it is written. Bodies compressed with `gzip` or `deflate`
-are decoded first, so this covers most API responses. The replacement matches
-the value's literal bytes, so it misses a value that arrives encoded in another
-way: in a body compressed with `br` or `zstd`, URL-encoded, escaped in JSON, or
-in base64. Credentials without an HTTP release rule are ordinary request
-content and are stored as sent.
+placeholder before it is written. The replacement matches the value's literal
+bytes, so a response body has to arrive unencoded: the proxy asks for that, and
+when an upstream compresses a response anyway, the capture keeps its headers
+but not its body (`bodyOmitted`), and the client receives it unchanged. The
+replacement also misses a value that is URL-encoded, escaped in JSON, or in
+base64. Request bodies are stored as the client sent them, compressed if it
+compressed them; released values never appear in them, because secrets are
+released into headers only. Credentials without an HTTP release rule are
+ordinary request content and are stored as sent.
 
 ### Capture store
 
@@ -389,8 +394,8 @@ Captures live next to the network log, one directory per session:
 ```text
 ~/.local/state/enclave/projects/<project-hash>/<tool>/logs/capture/<session>/
   <id>.json             request line, headers, response head, body metadata
-  <id>.request.body     request body as sent upstream (gzip/deflate decoded)
-  <id>.response.body    response body as relayed to the client (gzip/deflate decoded)
+  <id>.request.body     request body as sent upstream
+  <id>.response.body    response body as relayed to the client
 ```
 
 The `http` event of a captured request carries the ID in `capture_id`, so its
@@ -437,15 +442,14 @@ The record (`schemaVersion: "1"`, `kind: "network-capture"`) looks like this:
 - `body` is absent when a message had none. `bytes` counts what crossed the
   proxy and `storedBytes` what the file holds. `truncated: true` marks a body
   that is not stored whole: cut at the size cap or the session budget,
-  interrupted, not decodable to its end, or a request body the upstream
+  interrupted, or a request body the upstream
   answered before reading to the end, in which case what the client sent
   afterwards is not recorded. `file` is relative to the record and absent when
   nothing was stored.
-- A body with `Content-Encoding: gzip`, `x-gzip` or `deflate` is stored
-  decoded, and `decodedFrom` names the encoding; `bytes` still counts the
-  encoded bytes relayed, and the headers stay as relayed. Other encodings are
-  stored as relayed, and for `zstd` and `br` `--show-capture` prints the
-  `zstd -dc` or `brotli -dc` command that reads the file.
+- Bodies are stored as relayed. A request body the client compressed stays
+  encoded, and `--show-capture` does not print it. A response whose
+  `Content-Encoding` is anything but `identity` has no `body`, and
+  `bodyOmitted` is `unexpected content encoding`.
 - When the request could not be relayed, `error` says why and `response` may be
   absent. An upgraded connection (status `101`) records the handshake only.
 - Fields are only added, never renamed or removed.
@@ -453,8 +457,7 @@ The record (`schemaVersion: "1"`, `kind: "network-capture"`) looks like this:
 ### Size limits and retention
 
 - Each body is stored up to 8 MiB and marked `truncated` beyond that; the
-  client still receives all of it. For a decoded body the cap applies to the
-  decoded bytes, and decoding stops there.
+  client still receives all of it.
 - Streamed responses such as server-sent events are written to the capture as
   they are relayed. Each chunk reaches the client before it is written to the
   capture, but the next chunk is read only afterwards, so a slow disk slows the

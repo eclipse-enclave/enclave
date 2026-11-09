@@ -88,6 +88,9 @@ func WriteCapture(out io.StringWriter, view CaptureView, opts RenderOptions) err
 			text.WriteString("\n" + opts.colorize("(the upgraded connection is not captured)", logx.ColorDim) + "\n")
 		}
 		writeBody(&text, "response", response.Body, view.Response, response.Headers, opts)
+		if response.BodyOmitted != "" {
+			text.WriteString(opts.colorize("(response body not stored: "+displaySafe(response.BodyOmitted)+")", logx.ColorDim) + "\n")
+		}
 	} else if record.Error == "" {
 		text.WriteString("\n" + opts.colorize("(no response recorded)", logx.ColorDim) + "\n")
 	}
@@ -115,19 +118,10 @@ func writeBody(text *strings.Builder, label string, body *netcapture.Body, store
 	if body == nil {
 		return
 	}
-	// A body the capture decoded is shown as stored; its headers still name the
-	// encoding it was relayed in. Every other encoding, repeated ones included,
-	// was stored as relayed and is not shown.
+	// A body with a content encoding was stored as relayed and is not shown.
 	encoding := strings.Join(headers.Values("Content-Encoding"), ", ")
 	size := util.FormatBytes(body.StoredBytes)
-	switch {
-	case body.DecodedFrom != "":
-		encoding = ""
-		size += " decoded from " + util.FormatBytes(body.Bytes) + " of " + displaySafe(body.DecodedFrom)
-		if body.Truncated {
-			size += ", truncated"
-		}
-	case body.Truncated:
+	if body.Truncated {
 		size += " of " + util.FormatBytes(body.Bytes) + ", truncated"
 	}
 	note := label + " body"
@@ -150,20 +144,6 @@ func writeBody(text *strings.Builder, label string, body *netcapture.Body, store
 		}
 	}
 	text.WriteString(opts.colorize("("+note+")", logx.ColorDim) + "\n")
-	if command, ok := decodeCommands[strings.ToLower(strings.TrimSpace(encoding))]; ok && len(stored.Data) > 0 {
-		text.WriteString(opts.colorize("(decode with: "+command+" "+shellQuote(displaySafe(stored.Path))+")", logx.ColorDim) + "\n")
-	}
-}
-
-func shellQuote(value string) string {
-	return "'" + strings.ReplaceAll(value, "'", `'\''`) + "'"
-}
-
-// decodeCommands name a tool that decodes a content encoding the viewer cannot,
-// so the stored body can still be read.
-var decodeCommands = map[string]string{
-	"br":   "brotli -dc",
-	"zstd": "zstd -dc",
 }
 
 // displayBody returns the body as terminal text, or a note saying why it is

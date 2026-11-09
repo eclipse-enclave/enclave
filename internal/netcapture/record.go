@@ -63,19 +63,23 @@ type Response struct {
 	Proto   string      `json:"proto,omitempty"`
 	Headers http.Header `json:"headers"`
 	Body    *Body       `json:"body,omitempty"`
+	// BodyOmitted says why the body was relayed but not stored.
+	BodyOmitted string `json:"bodyOmitted,omitempty"`
 }
 
-// Body describes a stored message body. Bytes counts what crossed the proxy;
-// StoredBytes what File holds, which differs when the body was truncated or
-// decoded, or a secret value was replaced by its placeholder. DecodedFrom
-// names the content encoding File was decoded from; without it, File holds the
-// body as relayed.
+// OmittedEncoding is why the body of a response with a content encoding is not
+// stored: redaction cannot find a secret inside encoded bytes.
+const OmittedEncoding = "unexpected content encoding"
+
+// Body describes a stored message body, which File holds as relayed. Bytes
+// counts what crossed the proxy; StoredBytes what File holds, which differs
+// when the body was truncated or a secret value was replaced by its
+// placeholder.
 type Body struct {
 	File        string `json:"file,omitempty"`
 	Bytes       int64  `json:"bytes"`
 	StoredBytes int64  `json:"storedBytes"`
 	Truncated   bool   `json:"truncated,omitempty"`
-	DecodedFrom string `json:"decodedFrom,omitempty"`
 }
 
 const (

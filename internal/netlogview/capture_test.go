@@ -96,12 +96,8 @@ func TestWriteCaptureDescribesBodiesItCannotShow(t *testing.T) {
 	if !strings.Contains(out, "response body br-encoded, not shown") {
 		t.Fatalf("encoded body not described:\n%s", out)
 	}
-	if !strings.Contains(out, "(decode with: brotli -dc '/state/capture/enclave-demo-1/0123456789abcdef.response.body')") {
-		t.Fatalf("no decode hint for br:\n%s", out)
-	}
 
-	// The capture leaves a body encoded twice as relayed, so it is described
-	// rather than decoded once into something unreadable.
+	// A body encoded twice is described the same way.
 	view = captureFixture()
 	view.Record.Response.Headers = http.Header{"Content-Encoding": {"gzip", "gzip"}}
 	out = renderCapture(t, view)
@@ -172,21 +168,14 @@ func TestTrimPartialRune(t *testing.T) {
 	}
 }
 
-// A body the capture decoded is shown as stored, even though the response
-// headers still name the encoding it was relayed in.
-func TestWriteCaptureShowsBodiesDecodedAtCapture(t *testing.T) {
+func TestWriteCaptureNotesAnOmittedResponseBody(t *testing.T) {
 	view := captureFixture()
-	view.Record.Response.Headers = http.Header{"Content-Encoding": {"gzip"}}
-	view.Record.Response.Body = &netcapture.Body{File: "0123456789abcdef.response.body", Bytes: 31, StoredBytes: 16, DecodedFrom: "gzip"}
-	view.Response.Data = []byte(`{"decoded":true}`)
+	view.Record.Response.Headers = http.Header{"Content-Encoding": {"br"}}
+	view.Record.Response.Body = nil
+	view.Record.Response.BodyOmitted = netcapture.OmittedEncoding
+	view.Response = CapturedBody{}
 	out := renderCapture(t, view)
-	if !strings.Contains(out, `{"decoded":true}`) {
-		t.Fatalf("decoded body not shown:\n%s", out)
-	}
-	if !strings.Contains(out, "(response body, 16 B decoded from 31 B of gzip: /state/capture/enclave-demo-1/0123456789abcdef.response.body)") {
-		t.Fatalf("decoding not described:\n%s", out)
-	}
-	if strings.Contains(out, "not decodable") {
-		t.Fatalf("stored body decoded a second time:\n%s", out)
+	if !strings.Contains(out, "(response body not stored: unexpected content encoding)") {
+		t.Fatalf("omitted body not noted:\n%s", out)
 	}
 }

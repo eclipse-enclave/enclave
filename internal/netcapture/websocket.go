@@ -50,7 +50,6 @@ type socketCapture struct {
 	// session's is used up, or a write failed.
 	full      bool
 	truncated bool
-	closed    bool
 }
 
 // newSocket creates the messages file of a WebSocket connection whose
@@ -123,7 +122,7 @@ func (s *socketCapture) add(message Message, cut bool) {
 	if cut {
 		s.truncated = true
 	}
-	if s.full || s.closed {
+	if s.full {
 		s.truncated = true
 		return
 	}
@@ -161,7 +160,8 @@ func (s *socketCapture) add(message Message, cut bool) {
 }
 
 // finish ends both directions once the relay has stopped, stores what they
-// still hold as cut short, and describes the socket for the record.
+// still hold as cut short, and describes the socket for the record. Both
+// relay goroutines have returned by then, so nothing adds a message after it.
 func (s *socketCapture) finish() *WebSocket {
 	if s == nil {
 		return nil
@@ -170,14 +170,11 @@ func (s *socketCapture) finish() *WebSocket {
 	s.server.finish()
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if !s.closed {
-		s.closed = true
-		if err := s.file.Close(); err != nil {
-			s.truncated = true
-		}
-		if s.stored == 0 {
-			_ = os.Remove(s.path)
-		}
+	if err := s.file.Close(); err != nil {
+		s.truncated = true
+	}
+	if s.stored == 0 {
+		_ = os.Remove(s.path)
 	}
 	socket := &WebSocket{
 		Compression:    s.compression,

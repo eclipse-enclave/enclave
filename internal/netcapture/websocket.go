@@ -116,13 +116,11 @@ func negotiatedExtensions(header http.Header) (*deflateParams, bool) {
 }
 
 // add stores a finished message, unless the socket is full.
-func (s *socketCapture) add(message Message, cut bool) {
+func (s *socketCapture) add(message Message) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.messages++
-	if cut {
-		s.truncated = true
-	}
+	s.truncated = s.truncated || message.Truncated
 	if s.full {
 		s.truncated = true
 		return
@@ -405,7 +403,7 @@ func (d *socketDirection) emit(pending *pendingMessage, cut bool) {
 	message.StoredBytes = int64(len(payload))
 	message.Truncated = cut
 	setPayload(&message, payload, textual)
-	d.socket.add(message, cut)
+	d.socket.add(message)
 }
 
 // setPayload puts the payload into the field its type calls for. Text that is

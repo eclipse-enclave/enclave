@@ -34,8 +34,6 @@ type Options struct {
 	// MaxBodyBytes and MaxBytes default to MaxBodyBytes and MaxSessionBytes.
 	MaxBodyBytes int64
 	MaxBytes     int64
-	// Now is the clock; nil means time.Now.
-	Now func() time.Time
 }
 
 // Store writes the captures of one gateway session. Write errors never reach
@@ -47,7 +45,6 @@ type Store struct {
 	redactor *redactor
 	maxBody  int64
 	maxBytes int64
-	now      func() time.Time
 
 	mu sync.Mutex
 	// used is what the directory holds: finished captures plus the bodies of the
@@ -88,16 +85,12 @@ func Open(opts Options) (*Store, error) {
 		redactor: newRedactor(opts.Secrets),
 		maxBody:  opts.MaxBodyBytes,
 		maxBytes: opts.MaxBytes,
-		now:      opts.Now,
 	}
 	if s.maxBody <= 0 {
 		s.maxBody = MaxBodyBytes
 	}
 	if s.maxBytes <= 0 {
 		s.maxBytes = MaxSessionBytes
-	}
-	if s.now == nil {
-		s.now = time.Now
 	}
 
 	existing, err := scanSessionDir(dir, func(time.Time) bool { return true })
@@ -141,7 +134,7 @@ func (s *Store) Begin(req *http.Request, scheme string) *Capture {
 	if err != nil {
 		return nil
 	}
-	started := s.now()
+	started := time.Now()
 	capture := &Capture{
 		store:   s,
 		id:      id,
@@ -237,7 +230,7 @@ func (c *Capture) Finish(relayErr error) string {
 		return ""
 	}
 	s := c.store
-	c.record.DurationMS = s.now().Sub(c.started).Milliseconds()
+	c.record.DurationMS = time.Since(c.started).Milliseconds()
 	// An upstream may answer before it has read the whole request body, and the
 	// transport can go on sending it after the response is relayed. What it
 	// sends from here on is not recorded, so the body is marked incomplete.

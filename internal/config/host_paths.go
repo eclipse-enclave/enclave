@@ -258,8 +258,12 @@ func HostSecretsDir(home string) string {
 	return filepath.Join(hostStateRoot(home), "secrets")
 }
 
+func HostSecretsProjectDir(home, projectHash string) string {
+	return filepath.Join(HostSecretsDir(home), "projects", projectHash)
+}
+
 func HostSecretsProjectFile(home string, projectHash string, tool string) string {
-	return filepath.Join(HostSecretsDir(home), "projects", projectHash, tool+".env")
+	return filepath.Join(HostSecretsProjectDir(home, projectHash), tool+".env")
 }
 
 func HostSecretsGlobalSharedFile(home string) string {
@@ -329,19 +333,16 @@ func GlobalConfigPath() (string, error) {
 	return filepath.Join(hostConfigRoot(home), configFilename), nil
 }
 
-// ProjectConfigJSONPath resolves the per-project override config path for a
-// project directory: <config-root>/projects/<hash>/config.json. Returns an
-// empty string when the host home or project hash cannot be resolved.
-func ProjectConfigJSONPath(projectDir string) string {
+// ResolvedProjectConfigJSONPath uses the command's selected configuration source.
+func ResolvedProjectConfigJSONPath(project model.Project) string {
+	if project.ConfigSourceHash() == "" {
+		return ""
+	}
 	home, err := ResolveHostHome()
 	if err != nil {
 		return ""
 	}
-	project, err := ResolveProjectFromDir(projectDir)
-	if err != nil {
-		return ""
-	}
-	return HostProjectConfigJSONPath(home, project.Hash)
+	return HostProjectConfigJSONPath(home, project.ConfigSourceHash())
 }
 
 func HostProfilePath(home string, path string) string {

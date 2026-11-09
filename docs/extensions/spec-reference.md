@@ -100,7 +100,7 @@ A `kind: command` spec accepts only `schemaVersion`, `kind`, `name`,
 | `configDir` | Config directory under `$HOME`, backed by the persistent config store |
 | `skillsDir` | Path below `configDir` where managed skills are composed; see [Skills](#skills) |
 | `memoryDir` | Home-relative native memory directory ([lifecycle](../runtime/stores.md#agent-memory)) |
-| `memoryScope` | Requires `memoryDir`. `project` (default) shares memory per project and tool; `session` (also requires `configDir`) pairs it with each config store for writer isolation and cleanup |
+| `memoryScope` | Requires `memoryDir`. `project` (default) shares memory per config anchor and tool, including inheriting worktrees; `session` (also requires `configDir`) pairs it with each checkout-local config store for writer isolation and cleanup. See [Agent memory](../runtime/stores.md#agent-memory) |
 | `noMemoryArgs` | Argv inserted before user arguments for `--no-memory` and `--ephemeral`; use the tool's native controls. Trimmed, blanks dropped, as for `continueArgs` |
 | `statePaths` | Requires `configDir`. Config-relative runtime state (include database sidecars) preserved across overlays and excluded from passthrough. Trailing `/` matches a tree; globs match paths or basenames; absolute paths, traversal, and selection directives are rejected |
 | `settingsFile` | Aggregated template name under `/usr/local/share/enclave/templates/`; see [Templates](#templates) |

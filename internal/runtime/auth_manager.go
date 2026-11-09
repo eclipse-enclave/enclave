@@ -48,6 +48,10 @@ func newAuthManager(r *Runtime) authManager {
 	return authManager{Runtime: r}
 }
 
+func (m authManager) projectSecretsLayers() ([]auth.SecretsLayer, error) {
+	return auth.ResolveSecretsLayers(m.host.Home, m.project.ConfigSourceHash(), m.profile.Name, m.auth.SecretsScope)
+}
+
 func (m authManager) Prepare(env *[]string, stores storeSet) (model.AuthState, SecretMapping, error) {
 	hooks := auth.HooksFor(m.profile)
 	authStorage := stores.AuthStorage()
@@ -73,7 +77,7 @@ func (m authManager) Prepare(env *[]string, stores storeSet) (model.AuthState, S
 		logx.Warnf("Auth ready hook failed: %v", err)
 	}
 
-	secretsLayers, err := auth.ResolveSecretsLayers(m.host.Home, m.project.Hash, m.profile.Name, m.auth.SecretsScope)
+	secretsLayers, err := m.projectSecretsLayers()
 	if err != nil {
 		logx.Warnf("Failed to read layered secrets: %v", err)
 		secretsLayers = nil

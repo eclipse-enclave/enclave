@@ -34,6 +34,7 @@ func cfgGoldenBool(b bool) *bool { return &b }
 func TestBuildConfigRowsGolden(t *testing.T) {
 	var opts model.Options
 	opts.Tool = "codex"
+	opts.WorktreeInheritance = false
 	opts.Sources.Tool = model.SourceCLI
 	opts.AuthScope = "project"
 	opts.Sources.AuthScope = model.SourceProject
@@ -53,6 +54,7 @@ func TestBuildConfigRowsGolden(t *testing.T) {
 
 	var base model.Options
 	base.Tool = "claude"
+	base.WorktreeInheritance = false
 	base.AuthScope = "shared"
 
 	var global config.Defaults

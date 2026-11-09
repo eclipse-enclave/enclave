@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"enclave/internal/backend"
+	"enclave/internal/config"
 	"enclave/internal/docker"
 	"enclave/internal/model"
 )
@@ -419,8 +420,9 @@ func TestRenderPSJSONProvenance(t *testing.T) {
 	var out strings.Builder
 	err := renderPSJSON(&out, []backend.Session{
 		{
-			Ref:        backend.SessionRef{Name: "enclave-claude-abc123abc123"},
-			Provenance: map[string]any{"yolo": true},
+			Ref:          backend.SessionRef{Name: "enclave-claude-abc123abc123"},
+			Provenance:   map[string]any{"yolo": true},
+			ConfigSource: &backend.ConfigSource{Dir: "/repo/main", Hash: config.ProjectHashForPath("/repo/main")},
 		},
 		{Ref: backend.SessionRef{Name: "enclave-claude-def456def456"}},
 	})
@@ -437,6 +439,29 @@ func TestRenderPSJSONProvenance(t *testing.T) {
 	}
 	if options, ok := entries[1]["options"]; ok {
 		t.Fatalf("options = %#v, want omitted when unknown", options)
+	}
+	if source, ok := entries[0]["configSource"].(map[string]any); !ok || source["dir"] != "/repo/main" || source["hash"] != config.ProjectHashForPath("/repo/main") {
+		t.Fatalf("configSource = %#v", entries[0]["configSource"])
+	}
+	if _, ok := entries[1]["configSource"]; ok {
+		t.Fatal("unknown config source must be omitted")
+	}
+}
+
+func TestRenderPSJSONReportsMalformedPinWithoutEmptySource(t *testing.T) {
+	var out strings.Builder
+	if err := renderPSJSON(&out, []backend.Session{{ConfigSource: &backend.ConfigSource{}}}); err != nil {
+		t.Fatal(err)
+	}
+	var entries []map[string]any
+	if err := json.Unmarshal([]byte(out.String()), &entries); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := entries[0]["configSource"]; ok {
+		t.Fatalf("invalid source exposed: %s", out.String())
+	}
+	if entries[0]["configSourceError"] != "invalid pinned config source" {
+		t.Fatalf("missing pin error: %s", out.String())
 	}
 }
 

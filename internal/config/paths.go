@@ -119,10 +119,12 @@ func ResolveProjectFromDir(dir string) (model.Project, error) {
 	}
 
 	return model.Project{
-		Dir:     dir,
-		RealDir: absPath,
-		Hash:    ProjectHashForPath(absPath),
-		Name:    filepath.Base(dir),
+		Dir:        dir,
+		RealDir:    absPath,
+		Hash:       ProjectHashForPath(absPath),
+		ConfigHash: ProjectHashForPath(absPath),
+		ConfigDir:  absPath,
+		Name:       filepath.Base(dir),
 	}, nil
 }
 

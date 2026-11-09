@@ -61,19 +61,23 @@ func runFeatures(ctx *AppContext, req *extinstall.Request, opts model.Options, s
 		return 0
 	}
 
+	projectConfigPath := ""
+	if project, err := ctx.Project(); err == nil {
+		projectConfigPath = config.ResolvedProjectConfigJSONPath(project)
+	}
 	for _, feature := range features {
 		suffix := listingSuffix(inventory[feature.Name])
 		switch {
 		case enabled[feature.Name]:
 			fmt.Printf("✓ %s%s\n", feature.Name, suffix)
 		case validated && run.Backend == backend.NameQEMU:
-			fmt.Printf("✗ %s%s (disabled by qemu backend%s)\n", feature.Name, suffix, fromSource(sources.Backend, ctx.ProjectDir))
+			fmt.Printf("✗ %s%s (disabled by qemu backend%s)\n", feature.Name, suffix, fromSource(sources.Backend, projectConfigPath))
 		case run.Slim:
-			fmt.Printf("✗ %s%s (disabled by --slim%s)\n", feature.Name, suffix, fromSource(sources.Slim, ctx.ProjectDir))
+			fmt.Printf("✗ %s%s (disabled by --slim%s)\n", feature.Name, suffix, fromSource(sources.Slim, projectConfigPath))
 		case featuresDisabled(run.BuildOptions):
-			fmt.Printf("✗ %s%s (disabled by devcontainer%s)\n", feature.Name, suffix, fromSource(sources.Devcontainer, ctx.ProjectDir))
+			fmt.Printf("✗ %s%s (disabled by devcontainer%s)\n", feature.Name, suffix, fromSource(sources.Devcontainer, projectConfigPath))
 		case run.Features != nil:
-			fmt.Printf("✗ %s%s (disabled by features%s)\n", feature.Name, suffix, featureDisabledSource(feature.Name, opts, sources.Features, ctx.ProjectDir))
+			fmt.Printf("✗ %s%s (disabled by features%s)\n", feature.Name, suffix, featureDisabledSource(feature.Name, opts, sources.Features, projectConfigPath))
 		default:
 			fmt.Printf("✗ %s%s (opt-in)\n", feature.Name, suffix)
 		}
@@ -84,7 +88,7 @@ func runFeatures(ctx *AppContext, req *extinstall.Request, opts model.Options, s
 // featureDisabledSource names the layer that disabled a feature: the one with
 // its -name entry, else the one whose bare list left it out. Layers amend each
 // other, so the source of the whole list is only the fallback.
-func featureDisabledSource(name string, opts model.Options, fallback model.OptionSource, projectDir string) string {
+func featureDisabledSource(name string, opts model.Options, fallback model.OptionSource, projectConfigPath string) string {
 	origin, ok := opts.Origins.Origin("features", "-"+name)
 	if !ok {
 		for _, entry := range opts.Features {
@@ -97,16 +101,16 @@ func featureDisabledSource(name string, opts model.Options, fallback model.Optio
 		}
 	}
 	if !ok {
-		return fromSource(fallback, projectDir)
+		return fromSource(fallback, projectConfigPath)
 	}
 	if origin.Source != model.SourceCLI && origin.Path != "" {
 		return " from " + origin.Path
 	}
-	return fromSource(origin.Source, projectDir)
+	return fromSource(origin.Source, projectConfigPath)
 }
 
-func fromSource(source model.OptionSource, projectDir string) string {
-	if src := formatSource(source, projectDir); src != "" {
+func fromSource(source model.OptionSource, projectConfigPath string) string {
+	if src := formatSource(source, projectConfigPath); src != "" {
 		return " from " + src
 	}
 	return ""

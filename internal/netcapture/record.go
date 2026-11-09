@@ -119,12 +119,6 @@ func ValidID(id string) bool {
 	return idPattern.MatchString(id)
 }
 
-// SessionDir is the directory one session's captures are written to. Sessions
-// are named by their container, which is a safe single path element.
-func SessionDir(root string, session string) string {
-	return filepath.Join(root, session)
-}
-
 // RecordPath is the record file of a capture in a session directory.
 func RecordPath(sessionDir string, id string) string {
 	return filepath.Join(sessionDir, id+recordSuffix)

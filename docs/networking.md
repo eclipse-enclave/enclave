@@ -493,8 +493,9 @@ The record of a connection upgraded to WebSocket describes its messages file:
   case.
 - The proxy offers upstreams no WebSocket extension. When a handshake response
   accepts one anyway, such as `permessage-deflate`, the messages are relayed
-  unchanged but not stored: the `websocket` object has only
-  `messagesOmitted`, `unexpected WebSocket extension`.
+  unchanged but not stored. The handshake remains visible while open, with
+  `messagesOmitted: "unexpected WebSocket extension"` and no messages file;
+  its counters stay zero.
 - In `<id>.open.json`, `open` is `true` and the counts are not filled in yet.
 
 Each line of the messages file is one message:

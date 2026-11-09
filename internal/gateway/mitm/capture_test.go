@@ -1019,6 +1019,7 @@ func TestProxyCaptureOmitsWebSocketMessagesOfAnExtensionNegotiatedAnyway(t *test
 	defer proxyServer.Close()
 
 	conn, reader, _ := openWebSocket(t, proxyServer, hostPort)
+	defer func() { _ = conn.Close() }()
 	if _, err := conn.Write(sends); err != nil {
 		t.Fatalf("write frames: %v", err)
 	}
@@ -1029,12 +1030,26 @@ func TestProxyCaptureOmitsWebSocketMessagesOfAnExtensionNegotiatedAnyway(t *test
 	if upstreamGot := <-received; !bytes.Equal(upstreamGot, sends) || !bytes.Equal(clientGot, reply) {
 		t.Fatalf("frames not relayed unchanged: upstream %x, client %x", upstreamGot, clientGot)
 	}
+	open, err := filepath.Glob(filepath.Join(dir, "*.open.json"))
+	if err != nil || len(open) != 1 {
+		t.Fatalf("live omitted handshake has %d open records: %v", len(open), err)
+	}
+	live, err := netcapture.Load(open[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if live.WebSocket == nil || !live.WebSocket.Open || live.WebSocket.MessagesOmitted != netcapture.OmittedExtension || live.WebSocket.File != "" {
+		t.Fatalf("live omission websocket = %+v", live.WebSocket)
+	}
 	_ = conn.Close()
 
 	waitForEvents(t, logPath, 1)
 	_, record, _ := capturedEvent(t, logPath, dir)
-	if record.WebSocket == nil || record.WebSocket.MessagesOmitted != netcapture.OmittedExtension || record.WebSocket.File != "" {
+	if record.WebSocket == nil || record.WebSocket.Open || record.WebSocket.MessagesOmitted != netcapture.OmittedExtension || record.WebSocket.File != "" {
 		t.Fatalf("record websocket = %+v", record.WebSocket)
+	}
+	if matches, _ := filepath.Glob(filepath.Join(dir, "*.open.json")); len(matches) != 0 {
+		t.Fatalf("open records after close: %v", matches)
 	}
 	if matches, _ := filepath.Glob(filepath.Join(dir, "*.messages.jsonl")); len(matches) != 0 {
 		t.Fatalf("messages stored: %v", matches)

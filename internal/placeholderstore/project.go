@@ -53,6 +53,17 @@ func Project(realDir, viewsDir, session string, profile model.Profile, configure
 		return view, err
 	}
 	defer func() { _ = os.RemoveAll(stage) }()
+	type projectedFile struct {
+		name     string
+		document map[string]any
+	}
+	var files []projectedFile
+	var credentials []string
+	for _, entry := range configured {
+		if entry.Value != "" {
+			credentials = append(credentials, entry.Value)
+		}
+	}
 	for _, provider := range profile.Providers {
 		for _, file := range provider.AuthSecrets {
 			data, err := readRegular(root, file.File)
@@ -62,18 +73,33 @@ func Project(realDir, viewsDir, session string, profile model.Profile, configure
 			if err != nil {
 				return View{}, fmt.Errorf("read native credentials %s: %w", file.File, err)
 			}
-			projected, releases, err := projectFile(provider.Name, file, data, &bindings, profile.Secrets, configured)
+			document, releases, values, err := projectFile(provider.Name, file, data, &bindings, profile.Secrets, configured)
 			if err != nil {
 				return View{}, fmt.Errorf("project native credentials %s: %w", file.File, err)
 			}
-			target := filepath.Join(stage, filepath.FromSlash(file.File))
-			if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
-				return View{}, err
-			}
-			if err := os.WriteFile(target, projected, 0o600); err != nil {
-				return View{}, err
-			}
+			files = append(files, projectedFile{name: file.File, document: document})
+			credentials = append(credentials, values...)
 			view.Releases = append(view.Releases, releases...)
+		}
+	}
+	// Every known credential must be absent from every projected document,
+	// regardless of which file declared it or the declaration order.
+	for _, file := range files {
+		for _, credential := range credentials {
+			if containsCredential(file.document, credential) {
+				return View{}, fmt.Errorf("project native credentials %s: credential value remains outside its declared field", file.name)
+			}
+		}
+		projected, err := json.Marshal(file.document)
+		if err != nil {
+			return View{}, err
+		}
+		target := filepath.Join(stage, filepath.FromSlash(file.name))
+		if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
+			return View{}, err
+		}
+		if err := os.WriteFile(target, projected, 0o600); err != nil {
+			return View{}, err
 		}
 	}
 	if err := SaveBindings(realDir, bindings); err != nil {
@@ -87,10 +113,10 @@ func Project(realDir, viewsDir, session string, profile model.Profile, configure
 	return view, nil
 }
 
-func projectFile(provider string, file model.AuthFileSecret, data []byte, bindings *Bindings, secrets map[string]model.SecretConfig, configured []model.SecretReleaseEntry) ([]byte, []model.SecretReleaseEntry, error) {
+func projectFile(provider string, file model.AuthFileSecret, data []byte, bindings *Bindings, secrets map[string]model.SecretConfig, configured []model.SecretReleaseEntry) (map[string]any, []model.SecretReleaseEntry, []string, error) {
 	doc, credentialPointers, err := decodeNative(file.Codec, data)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	declared := map[string]bool{}
 	for _, field := range file.Fields {
@@ -98,7 +124,7 @@ func projectFile(provider string, file model.AuthFileSecret, data []byte, bindin
 	}
 	for _, pointer := range credentialPointers {
 		if !declared[pointer] {
-			return nil, nil, fmt.Errorf("credential field %s is not declared", pointer)
+			return nil, nil, nil, fmt.Errorf("credential field %s is not declared", pointer)
 		}
 	}
 	var rawValues []string
@@ -106,7 +132,7 @@ func projectFile(provider string, file model.AuthFileSecret, data []byte, bindin
 	for _, field := range file.Fields {
 		parts, err := model.AuthPointerSegments(field.Pointer)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 		err = visitFields(doc, parts, "", func(pointer, value string, replace func(string)) error {
 			var release model.SecretReleaseEntry
@@ -128,7 +154,9 @@ func projectFile(provider string, file model.AuthFileSecret, data []byte, bindin
 				return err
 			}
 			replace(binding.project(value))
-			rawValues = append(rawValues, value)
+			if !strings.Contains(value, model.SecretPlaceholderMarker) {
+				rawValues = append(rawValues, value)
+			}
 			if field.Release != "" {
 				if field.Kind != "apiKey" {
 					secret := secrets[field.Release]
@@ -147,19 +175,10 @@ func projectFile(provider string, file model.AuthFileSecret, data []byte, bindin
 			return nil
 		})
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 	}
-	for _, value := range rawValues {
-		if !strings.Contains(value, model.SecretPlaceholderMarker) && containsCredential(doc, value) {
-			return nil, nil, fmt.Errorf("credential value remains outside its declared field")
-		}
-	}
-	projected, err := json.Marshal(doc)
-	if err != nil {
-		return nil, nil, err
-	}
-	return projected, releases, nil
+	return doc, releases, rawValues, nil
 }
 
 func containsCredential(value any, credential string) bool {

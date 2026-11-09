@@ -61,7 +61,7 @@ func TestNativeAuthMountPlanSeparatesRealStoreFromAgent(t *testing.T) {
 	}
 }
 
-func nativeEntrypoint(t *testing.T, home, configDir, authDir, ops string) ([]byte, error) {
+func nativeEntrypoint(t *testing.T, home, configDir, authDir, ops string, extraEnv ...string) ([]byte, error) {
 	t.Helper()
 	project := filepath.Join(home, "project")
 	if err := os.MkdirAll(project, 0o700); err != nil {
@@ -69,6 +69,7 @@ func nativeEntrypoint(t *testing.T, home, configDir, authDir, ops string) ([]byt
 	}
 	cmd := exec.Command("bash", filepath.Join("..", "..", "entrypoint.sh"), "true")
 	cmd.Env = []string{"PATH=" + fakeJQDir(t) + string(os.PathListSeparator) + os.Getenv("PATH"), "HOME=" + home, "PROJECT_DIR=" + project, "TOOL=claude", "ENCLAVE_TOOLS_DIR=" + filepath.Join("..", "..", "extensions", "tools"), model.EnvToolConfigDir + "=" + configDir, model.EnvAuthDir + "=" + authDir, model.EnvAuthFiles + "=" + claudeCredentialsFile, model.EnvNativeAuthOps + "=" + ops, "ENCLAVE_AUTH_RECONCILE_LIB=" + filepath.Join("..", "..", "runtime-assets", "auth-reconcile.sh")}
+	cmd.Env = append(cmd.Env, extraEnv...)
 	return cmd.CombinedOutput()
 }
 
@@ -141,6 +142,49 @@ func TestNativeAuthPlanExecutesClassifiedEntrypointVerbs(t *testing.T) {
 			real, err := os.ReadFile(filepath.Join(input.RealDir, claudeCredentialsFile))
 			if err != nil || strings.Contains(string(real), model.SecretPlaceholderMarker) {
 				t.Fatal("entrypoint wrote placeholder into real store")
+			}
+		})
+	}
+}
+
+func TestNativeAuthCreateRejectsDirectoryAppearingAtLink(t *testing.T) {
+	realLn, err := exec.LookPath("ln")
+	if err != nil {
+		t.Fatal(err)
+	}
+	realMkdir, err := exec.LookPath("mkdir")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, kind := range []string{"directory", "symlink-to-directory"} {
+		t.Run(kind, func(t *testing.T) {
+			home, configDir, authDir := entrypointAuthDirs(t)
+			native := filepath.Join(configDir, claudeCredentialsFile)
+			foreign, shim := t.TempDir(), t.TempDir()
+			script := `#!/bin/sh
+for argument do destination=$argument; done
+if [ "$destination" = "$ENCLAVE_RACE_NATIVE" ] && [ ! -e "$destination" ] && [ ! -L "$destination" ]; then
+    case "$ENCLAVE_RACE_KIND" in
+        directory) "$ENCLAVE_REAL_MKDIR" "$destination" || exit 98 ;;
+        symlink-to-directory) "$ENCLAVE_REAL_LN" -s "$ENCLAVE_RACE_FOREIGN" "$destination" || exit 98 ;;
+    esac
+fi
+exec "$ENCLAVE_REAL_LN" "$@"
+`
+			if err := os.WriteFile(filepath.Join(shim, "ln"), []byte(script), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("PATH", shim+string(os.PathListSeparator)+os.Getenv("PATH"))
+			_, err := nativeEntrypoint(t, home, configDir, authDir, claudeCredentialsFile+":create:", "ENCLAVE_RACE_NATIVE="+native, "ENCLAVE_RACE_FOREIGN="+foreign, "ENCLAVE_RACE_KIND="+kind, "ENCLAVE_REAL_LN="+realLn, "ENCLAVE_REAL_MKDIR="+realMkdir)
+			if err == nil {
+				t.Fatal("entrypoint accepted a directory appearing immediately before link creation")
+			}
+			if _, err := os.Lstat(native); err != nil {
+				t.Fatal("fixture did not interleave its directory at the destination")
+			}
+			entries, err := os.ReadDir(native)
+			if err != nil || len(entries) != 0 {
+				t.Fatal("link creation descended into the raced directory")
 			}
 		})
 	}

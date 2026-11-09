@@ -27,47 +27,20 @@ type AuthSecretField struct {
 	Placeholder *SecretPlaceholderConfig `json:"placeholder,omitempty"`
 }
 
-// TokenEndpoint describes the fixed exchange intercepted by a protected gateway.
-type TokenEndpoint struct {
-	Host   string            `json:"host"`
-	Path   string            `json:"path"`
-	Body   string            `json:"body"`
-	Grants []string          `json:"grants"`
-	Fields map[string]string `json:"fields"`
-	Deny   []AuthEndpoint    `json:"deny,omitempty"`
-}
-
-type AuthEndpoint struct {
-	Host string `json:"host"`
-	Path string `json:"path"`
-}
-
-// AuthPointerSegments parses an RFC 6901 pointer with at most one wildcard.
+// AuthPointerSegments parses the object-field pointers needed by Claude.
+// Wildcards, escaped names and array traversal are deferred with other codecs.
 func AuthPointerSegments(pointer string) ([]string, error) {
-	if !strings.HasPrefix(pointer, "/") || strings.ContainsRune(pointer, '\x00') {
-		return nil, fmt.Errorf("auth secret pointer must start with /")
+	if !strings.HasPrefix(pointer, "/") || strings.ContainsAny(pointer, "~*\x00") {
+		return nil, fmt.Errorf("auth secret pointer must name unescaped object fields")
 	}
 	parts := strings.Split(pointer[1:], "/")
-	if len(parts) > 32 {
-		return nil, fmt.Errorf("auth secret pointer nesting limit exceeded")
+	if len(parts) > 2 {
+		return nil, fmt.Errorf("unsupported auth secret pointer depth")
 	}
-	wildcards := 0
-	for i, part := range parts {
-		for j := 0; j < len(part); j++ {
-			if part[j] == '~' {
-				j++
-				if j == len(part) || (part[j] != '0' && part[j] != '1') {
-					return nil, fmt.Errorf("invalid auth secret pointer escape")
-				}
-			}
+	for _, part := range parts {
+		if part == "" {
+			return nil, fmt.Errorf("auth secret pointer field is empty")
 		}
-		parts[i] = strings.ReplaceAll(strings.ReplaceAll(part, "~1", "/"), "~0", "~")
-		if parts[i] == "*" {
-			wildcards++
-		}
-	}
-	if wildcards > 1 {
-		return nil, fmt.Errorf("auth secret pointer permits only one wildcard")
 	}
 	return parts, nil
 }

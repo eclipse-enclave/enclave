@@ -12,8 +12,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"enclave/internal/model"
 )
 
 func TestClassifyNativeOwnershipAndResetResidue(t *testing.T) {
@@ -74,22 +72,5 @@ func TestClassifyNativeOwnershipAndResetResidue(t *testing.T) {
 				}
 			}
 		})
-	}
-}
-
-func TestPointerWildcardsExpandConcreteEscapedBindings(t *testing.T) {
-	doc := map[string]any{"a/b": map[string]any{"~": map[string]any{"two": "second-credential", "one": "first-credential"}}}
-	parts, err := model.AuthPointerSegments("/a~1b/~0/*")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var pointers []string
-	err = visitFields(doc, parts, "", func(pointer, value string, replace func(string)) error {
-		pointers = append(pointers, pointer)
-		replace("placeholder:" + value)
-		return nil
-	})
-	if err != nil || len(pointers) != 2 || pointers[0] != "/a~1b/~0/one" || pointers[1] != "/a~1b/~0/two" {
-		t.Fatalf("wildcard pointers = %v, %v", pointers, err)
 	}
 }

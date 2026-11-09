@@ -69,16 +69,6 @@ providers:
         fields:
           - { pointer: /primaryApiKey, kind: apiKey, release: anthropic-api-key }
           - { pointer: /anthropicApiKey, kind: apiKey, release: anthropic-api-key }
-    tokenEndpoint:
-      host: platform.claude.com
-      path: /v1/oauth/token
-      body: json
-      grants: [authorization_code, refresh_token]
-      fields: { access: access_token, refresh: refresh_token, expiresIn: expires_in, scope: scope }
-      deny:
-        - { host: api.anthropic.com, path: /api/oauth/claude_cli/create_api_key }
-        - { host: api.anthropic.com, path: /api/oauth/claude_cli/client_data }
-        - { host: platform.claude.com, path: /v1/oauth/revoke }
     securestorageDirEnv: CLAUDE_SECURESTORAGE_CONFIG_DIR
     authSession:
       mode: any

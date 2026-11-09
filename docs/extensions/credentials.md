@@ -217,9 +217,9 @@ User-facing behavior per tool is in
 
 ### Native auth declarations (internal)
 
-`providers[].authSecrets` and `tokenEndpoint` are reserved for the internal
-protected-auth implementation. They do not enable a protected session or change
-ordinary auth behavior. No `--protect-auth` option is available: provider exchange
+`providers[].authSecrets` is reserved for the internal protected-auth
+implementation. It does not enable a protected session or change ordinary auth
+behavior. No `--protect-auth` option is available: provider exchange
 interception, canonical-store permissions and a gateway capability check must
 land before workloads can use this path.
 
@@ -227,18 +227,18 @@ land before workloads can use this path.
 |-------|---------|
 | `authSecrets[].file` | Unique relative path already listed in `authFiles` |
 | `authSecrets[].codec` | Native format; projection currently implements `claude-credentials` and `claude-config` |
-| `authSecrets[].fields[].pointer` | RFC 6901 pointer, with at most one whole `*` segment |
+| `authSecrets[].fields[].pointer` | Unescaped object-field pointer; only the Claude fields below are implemented |
 | `fields[].kind` | `access`, `refresh`, `id`, or `apiKey` |
 | `fields[].release` | Existing `network.serviceAuth` id; required for access/API keys, forbidden for refresh/ID tokens |
-| `fields[].placeholder` | Opaque prefix/suffix/random shape, or `{ shape: jwt }` for access/ID tokens |
-| `tokenEndpoint` | Exact normalized `host`, absolute `path`, body format (`json`, `form`, `either`), allowed `grants`, response `fields`, and exact `deny` host/path pairs |
+| `fields[].placeholder` | Opaque prefix/suffix/random shape; API keys reuse their env placeholder |
 
 Every file placeholder contains `ENCLAVE_SECRET_`. Base64url shapes include the
 marker within the declared random-body length and retain at least 128 random
-bits. Hex/alphanumeric shapes place the marker before their random body. JWTs
-retain native header/payload segments and use a stable placeholder signature.
-API-key fields use the configured env credential's placeholder and refuse a raw
-native key when no such credential is configured.
+bits. Hex/alphanumeric shapes place the marker before their random body.
+Wildcard/escaped pointers, arrays, JWT signatures and other codecs are deferred
+until their tools are implemented. API-key fields use the configured env
+credential's placeholder and refuse a raw native key when no such credential is
+configured.
 
 The prototype reads only declared, bounded regular files and publishes private
 per-session views. `bindings.json` stores placeholder identities, not grants;

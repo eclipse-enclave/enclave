@@ -108,7 +108,7 @@ Good to know:
 | Custom commands | Your own `enclave <name>` verbs, run on the host or in a session | [Commands](docs/commands.md) |
 | Backends | Docker, Podman, and an experimental QEMU microVM backend | [Backends](docs/backends.md) |
 | Security | What the sandbox protects against and what it does not | [Security](docs/security/README.md) |
-| Graphical frontend | Web UI and desktop app to start, watch, and answer sessions | [HomeShell](https://github.com/eclipse-enclave/homeshell) |
+| Graphical frontend | Web UI and desktop app to start, watch, and answer sessions (preview) | [HomeShell](https://github.com/eclipse-enclave/homeshell) |
 
 All commands and flags: [CLI reference](docs/cli-reference.md). The full index
 is in [docs/README.md](docs/README.md).

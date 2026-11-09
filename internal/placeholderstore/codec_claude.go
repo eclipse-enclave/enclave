@@ -16,11 +16,12 @@ import (
 	"enclave/internal/model"
 )
 
-type nativePurpose bool
+type nativePurpose int
 
 const (
-	strictNative  nativePurpose = false
-	projectedView nativePurpose = true
+	strictNative nativePurpose = iota
+	projectedView
+	canonicalNative
 )
 
 type nativeValue struct {
@@ -112,7 +113,9 @@ func filterFields(object map[string]any, allowed map[string]string, purpose nati
 			if purpose == strictNative {
 				return fmt.Errorf("unsupported native credential fields")
 			}
-			delete(object, key)
+			if purpose == projectedView {
+				delete(object, key)
+			}
 			continue
 		}
 		if value == nil {

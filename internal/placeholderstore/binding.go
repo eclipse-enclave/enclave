@@ -17,13 +17,12 @@ import (
 	"io"
 	"io/fs"
 	"os"
-	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	"enclave/internal/auth"
 	"enclave/internal/model"
-	"enclave/internal/util"
 )
 
 const BindingsFile = "bindings.json"
@@ -31,8 +30,9 @@ const maxFileBytes = 1 << 20
 
 // Bindings contains only placeholder identifiers, never real credential values.
 type Bindings struct {
-	Schema   int       `json:"schema"`
-	Bindings []Binding `json:"bindings"`
+	Schema    int                      `json:"schema"`
+	Bindings  []Binding                `json:"bindings"`
+	Providers map[string]ExchangeState `json:"providers,omitempty"`
 }
 
 type Binding struct {
@@ -43,8 +43,30 @@ type Binding struct {
 	Placeholder string `json:"placeholder,omitempty"`
 }
 
-func (b Binding) Matches(value string) bool {
+// ExchangeState holds recovery and non-secret replay metadata. Tokens stay only
+// in the native file identified by Fingerprint.
+type ExchangeState struct {
+	Generation  uint64          `json:"generation"`
+	Fingerprint string          `json:"fingerprint,omitempty"`
+	ExpiresAt   *time.Time      `json:"expiresAt,omitempty"`
+	Replay      *ReplayFields   `json:"replay,omitempty"`
+	Inflight    *ExchangeIntent `json:"inflight,omitempty"`
+	Uncertain   bool            `json:"uncertain,omitempty"`
+}
 
+type ReplayFields struct {
+	Scope     *string `json:"scope,omitempty"`
+	TokenType *string `json:"tokenType,omitempty"`
+}
+
+type ExchangeIntent struct {
+	Generation uint64    `json:"generation"`
+	StartedAt  time.Time `json:"startedAt"`
+	Login      bool      `json:"login"`
+	Session    string    `json:"session"`
+}
+
+func (b Binding) Matches(value string) bool {
 	return value == b.Placeholder && value != ""
 }
 
@@ -103,13 +125,11 @@ func SaveBindings(dir string, bindings Bindings) error {
 	if err != nil {
 		return err
 	}
-	if err := util.WriteFileAtomic(filepath.Join(dir, BindingsFile), data, 0o600); err != nil {
-		return err
-	}
-	return util.SyncDir(dir)
+	return WriteNative(dir, BindingsFile, data)
 }
 
-func (b *Bindings) field(provider, file, pointer, kind string, shape *model.SecretPlaceholderConfig, real, apiPlaceholder string) (Binding, error) {
+// Bind returns the stable opaque placeholder for a declared credential field.
+func (b *Bindings) Bind(provider, file, pointer, kind string, shape *model.SecretPlaceholderConfig, apiPlaceholder string) (Binding, error) {
 	for _, binding := range b.Bindings {
 		if binding.Provider == provider && binding.File == file && binding.Pointer == pointer {
 			if binding.Kind != kind {

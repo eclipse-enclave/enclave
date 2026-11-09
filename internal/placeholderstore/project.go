@@ -73,7 +73,7 @@ func Project(realDir, viewsDir, session string, profile model.Profile, configure
 			if err != nil {
 				return View{}, fmt.Errorf("read native credentials %s: %w", file.File, err)
 			}
-			document, releases, values, err := projectFile(provider.Name, file, data, &bindings, profile.Secrets, configured)
+			document, releases, values, err := ProjectFile(provider.Name, file, data, &bindings, profile.Secrets, configured)
 			if err != nil {
 				return View{}, fmt.Errorf("project native credentials %s: %w", file.File, err)
 			}
@@ -113,7 +113,9 @@ func Project(realDir, viewsDir, session string, profile model.Profile, configure
 	return view, nil
 }
 
-func projectFile(provider string, file model.AuthFileSecret, data []byte, bindings *Bindings, secrets map[string]model.SecretConfig, configured []model.SecretReleaseEntry) (map[string]any, []model.SecretReleaseEntry, []string, error) {
+// ProjectFile renders one native document without writing it or the bindings.
+// Callers check all known values across their complete output before publishing.
+func ProjectFile(provider string, file model.AuthFileSecret, data []byte, bindings *Bindings, secrets map[string]model.SecretConfig, configured []model.SecretReleaseEntry) (map[string]any, []model.SecretReleaseEntry, []string, error) {
 	doc, values, err := decodeAuthFile(file, data, projectedView)
 	if err != nil {
 		return nil, nil, nil, err
@@ -136,7 +138,7 @@ func projectFile(provider string, file model.AuthFileSecret, data []byte, bindin
 		} else if strings.Contains(value, model.SecretPlaceholderMarker) {
 			return nil, nil, nil, fmt.Errorf("real native credential field %s contains a placeholder", pointer)
 		}
-		binding, err := bindings.field(provider, file.File, pointer, field.Kind, field.Placeholder, value, release.Placeholder)
+		binding, err := bindings.Bind(provider, file.File, pointer, field.Kind, field.Placeholder, release.Placeholder)
 		if err != nil {
 			return nil, nil, nil, err
 		}

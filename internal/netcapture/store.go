@@ -51,12 +51,7 @@ type Store struct {
 	// ones still in flight.
 	used int64
 	// finished is ordered oldest first, which is the order they are evicted in.
-	finished []storedCapture
-}
-
-type storedCapture struct {
-	id    string
-	bytes int64
+	finished []sessionCapture
 }
 
 // Open prepares the store for a session directory the host created. A nil
@@ -93,15 +88,14 @@ func Open(opts Options) (*Store, error) {
 		s.maxBytes = MaxSessionBytes
 	}
 
-	existing, err := scanSessionDir(dir, func(time.Time) bool { return true })
+	s.finished, err = scanSessionDir(dir, func(time.Time) bool { return true })
 	if err != nil {
 		return nil, err
 	}
-	for _, capture := range existing {
-		s.finished = append(s.finished, storedCapture{id: capture.id, bytes: capture.bytes})
+	for _, capture := range s.finished {
 		s.used += capture.bytes
 	}
-	for _, id := range s.overBudget(0) {
+	for _, id := range s.overBudget(0, 0) {
 		removeCapture(dir, id)
 	}
 	return s, nil
@@ -260,7 +254,7 @@ func (c *Capture) Finish(relayErr error) string {
 		s.release(bodies)
 		return ""
 	}
-	s.finish(storedCapture{id: c.id, bytes: bodies + int64(len(payload))}, bodies)
+	s.finish(sessionCapture{id: c.id, bytes: bodies + int64(len(payload))}, bodies)
 	return c.id
 }
 
@@ -295,10 +289,7 @@ func (s *Store) newBodySink(name string) *bodySink {
 // more is granted and the caller stops storing its body.
 func (s *Store) reserve(n int64) int64 {
 	s.mu.Lock()
-	var evicted []string
-	for s.used+n > s.maxBytes && len(s.finished) > 0 {
-		evicted = append(evicted, s.evictOldest())
-	}
+	evicted := s.overBudget(n, 0)
 	granted := min(n, max(0, s.maxBytes-s.used))
 	s.used += granted
 	s.mu.Unlock()
@@ -321,11 +312,11 @@ func (s *Store) release(bytes int64) {
 //
 // The files of evicted captures are deleted after the lock is released, so
 // that bodies still being written never wait for the deletions.
-func (s *Store) finish(capture storedCapture, counted int64) {
+func (s *Store) finish(capture sessionCapture, counted int64) {
 	s.mu.Lock()
 	s.used += capture.bytes - counted
 	s.finished = append(s.finished, capture)
-	evicted := s.overBudget(1)
+	evicted := s.overBudget(0, 1)
 	s.mu.Unlock()
 	for _, id := range evicted {
 		removeCapture(s.dir, id)
@@ -333,24 +324,18 @@ func (s *Store) finish(capture storedCapture, counted int64) {
 }
 
 // overBudget drops the oldest finished captures from the books until the
-// directory fits the budget again, or only keep of them are left, and returns
-// their IDs for deletion. Captures still in flight are never evicted. The
-// caller holds s.mu, or has the store to itself.
-func (s *Store) overBudget(keep int) []string {
+// directory has room for extra more bytes, or only keep of them are left, and
+// returns their IDs for deletion. Captures still in flight are never evicted.
+// The caller holds s.mu, or has the store to itself.
+func (s *Store) overBudget(extra int64, keep int) []string {
 	var evicted []string
-	for s.used > s.maxBytes && len(s.finished) > keep {
-		evicted = append(evicted, s.evictOldest())
+	for s.used+extra > s.maxBytes && len(s.finished) > keep {
+		oldest := s.finished[0]
+		s.finished = s.finished[1:]
+		s.used -= oldest.bytes
+		evicted = append(evicted, oldest.id)
 	}
 	return evicted
-}
-
-// evictOldest drops the oldest finished capture from the books and returns its
-// ID. The caller holds s.mu and deletes the files.
-func (s *Store) evictOldest() string {
-	oldest := s.finished[0]
-	s.finished = s.finished[1:]
-	s.used -= oldest.bytes
-	return oldest.id
 }
 
 // removeCapture deletes the record first, so a reader never finds a record
@@ -518,7 +503,8 @@ func (t *teeBody) complete() bool {
 	return t.eof
 }
 
-// sessionCapture is a finished capture found on disk.
+// sessionCapture is a finished capture in a session directory; modified is
+// only set for one found on disk.
 type sessionCapture struct {
 	id       string
 	bytes    int64

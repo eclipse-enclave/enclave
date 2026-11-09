@@ -101,8 +101,10 @@ func TestReadHeaderReturnsTheBytesRead(t *testing.T) {
 	if _, _, err := ReadHeader(bytes.NewReader(nil)); !errors.Is(err, io.EOF) {
 		t.Fatalf("ReadHeader() between frames = %v, want io.EOF", err)
 	}
-	if _, _, err := ReadHeader(bytes.NewReader(raw[:3])); !errors.Is(err, io.ErrUnexpectedEOF) {
-		t.Fatalf("ReadHeader() of a cut header = %v, want io.ErrUnexpectedEOF", err)
+	for cut := 1; cut < len(raw); cut++ {
+		if _, _, err := ReadHeader(bytes.NewReader(raw[:cut])); !errors.Is(err, io.ErrUnexpectedEOF) {
+			t.Fatalf("ReadHeader() of a header cut at %d = %v, want io.ErrUnexpectedEOF", cut, err)
+		}
 	}
 	if _, _, err := ReadHeader(bytes.NewReader(header(0x83, 0, nil))); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("ReadHeader() of a reserved opcode = %v, want ErrInvalid", err)

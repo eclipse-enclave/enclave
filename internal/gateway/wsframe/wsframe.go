@@ -133,19 +133,14 @@ func ReadHeader(r io.Reader) (Header, []byte, error) {
 	}
 	raw = raw[:headerLen(raw[1])]
 	if _, err := io.ReadFull(r, raw[2:]); err != nil {
-		return Header{}, raw, noEOF(err)
+		// EOF here is inside a header, not between frames.
+		if errors.Is(err, io.EOF) {
+			err = io.ErrUnexpectedEOF
+		}
+		return Header{}, raw, err
 	}
 	h, _, err := Parse(raw)
 	return h, raw, err
-}
-
-// noEOF reports a header cut short as such, not as a stream that ended between
-// frames.
-func noEOF(err error) error {
-	if errors.Is(err, io.EOF) {
-		return io.ErrUnexpectedEOF
-	}
-	return err
 }
 
 // Unmask applies the masking key to payload in place. offset is the position

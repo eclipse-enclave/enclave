@@ -78,6 +78,11 @@ type Response struct {
 // redaction cannot find a secret inside encoded bytes.
 const OmittedEncoding = "unexpected content encoding"
 
+// OmittedExtension is why the messages of a WebSocket that negotiated an
+// extension are not stored: the proxy offered none, and an extension such as
+// permessage-deflate encodes the payloads redaction has to read.
+const OmittedExtension = "unexpected WebSocket extension"
+
 // Body describes a stored message body, which File holds as relayed. Bytes
 // counts what crossed the proxy; StoredBytes what File holds, which differs
 // when the body was truncated or a secret value was replaced by its
@@ -96,10 +101,10 @@ type Body struct {
 type WebSocket struct {
 	File string `json:"file,omitempty"`
 	Open bool   `json:"open,omitempty"`
-	// Compression names the extension whose messages are stored decoded.
-	Compression    string `json:"compression,omitempty"`
-	Messages       int64  `json:"messages"`
-	StoredMessages int64  `json:"storedMessages"`
+	// MessagesOmitted says why the messages were relayed but not stored.
+	MessagesOmitted string `json:"messagesOmitted,omitempty"`
+	Messages        int64  `json:"messages"`
+	StoredMessages  int64  `json:"storedMessages"`
 	// Bytes counts what crossed the proxy in both directions after the
 	// handshake; StoredBytes is the size of File.
 	Bytes       int64 `json:"bytes"`
@@ -115,8 +120,8 @@ type WebSocket struct {
 // message's last byte was relayed. Lines keep the order in which each side sent
 // its messages; between the two sides they follow the order of storing, which
 // may lag the relay, so Timestamp is the order across both. Bytes counts the
-// payload as relayed, compressed if it was; StoredBytes the payload stored,
-// after decoding, truncation and redaction. The payload is in Text for text
+// payload as relayed; StoredBytes the payload stored, after truncation and
+// redaction. The payload is in Text for text
 // messages and close reasons that are valid UTF-8, and in Base64 otherwise.
 type Message struct {
 	Timestamp   string `json:"ts"`
@@ -125,13 +130,9 @@ type Message struct {
 	Bytes       int64  `json:"bytes"`
 	StoredBytes int64  `json:"storedBytes"`
 	Truncated   bool   `json:"truncated,omitempty"`
-	DecodedFrom string `json:"decodedFrom,omitempty"`
-	// Compressed marks a payload stored as relayed because it could not be
-	// decoded.
-	Compressed bool   `json:"compressed,omitempty"`
-	Code       int    `json:"code,omitempty"`
-	Text       string `json:"text,omitempty"`
-	Base64     []byte `json:"base64,omitempty"`
+	Code        int    `json:"code,omitempty"`
+	Text        string `json:"text,omitempty"`
+	Base64      []byte `json:"base64,omitempty"`
 }
 
 // Message senders and types.

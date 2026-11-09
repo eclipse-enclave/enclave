@@ -10,7 +10,6 @@ package mitm
 import (
 	"bufio"
 	"bytes"
-	"compress/flate"
 	"compress/gzip"
 	"context"
 	"fmt"
@@ -820,22 +819,9 @@ func wsFrame(first byte, payload string, masked bool) []byte {
 	return frame
 }
 
-// deflateMessage compresses a message on its own, as permessage-deflate may.
-func deflateMessage(t *testing.T, message string) string {
-	t.Helper()
-	var buffer bytes.Buffer
-	writer, err := flate.NewWriter(&buffer, flate.BestCompression)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, _ = writer.Write([]byte(message))
-	_ = writer.Flush()
-	return string(bytes.TrimSuffix(buffer.Bytes(), []byte{0x00, 0x00, 0xff, 0xff}))
-}
-
-// websocketUpstream accepts a WebSocket handshake with permessage-deflate,
-// reads want bytes and hands them to received, answers with reply, and then
-// waits for the other side to close.
+// websocketUpstream accepts a WebSocket handshake, and permessage-deflate if
+// the handshake offers it, reads want bytes and hands them to received,
+// answers with reply, and then waits for the other side to close.
 func websocketUpstream(want int, reply []byte, received chan<- []byte) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if !strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
@@ -847,7 +833,11 @@ func websocketUpstream(want int, reply []byte, received chan<- []byte) http.Hand
 			return
 		}
 		defer func() { _ = conn.Close() }()
-		_, _ = rw.WriteString("HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Extensions: permessage-deflate\r\n\r\n")
+		head := "HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n"
+		if strings.Contains(r.Header.Get("Sec-WebSocket-Extensions"), "permessage-deflate") {
+			head += "Sec-WebSocket-Extensions: permessage-deflate\r\n"
+		}
+		_, _ = rw.WriteString(head + "\r\n")
 		_ = rw.Flush()
 		_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
 		got := make([]byte, want)
@@ -859,8 +849,10 @@ func websocketUpstream(want int, reply []byte, received chan<- []byte) http.Hand
 	}
 }
 
-// openWebSocket sends a WebSocket handshake for host through the proxy.
-func openWebSocket(t *testing.T, proxyServer *httptest.Server, host string) (net.Conn, *bufio.Reader) {
+// openWebSocket sends a WebSocket handshake for host through the proxy, offering
+// permessage-deflate, and returns the connection, its reader and the
+// handshake response.
+func openWebSocket(t *testing.T, proxyServer *httptest.Server, host string) (net.Conn, *bufio.Reader, *http.Response) {
 	t.Helper()
 	conn, err := net.Dial("tcp", strings.TrimPrefix(proxyServer.URL, "http://"))
 	if err != nil {
@@ -878,17 +870,13 @@ func openWebSocket(t *testing.T, proxyServer *httptest.Server, host string) (net
 	if err != nil || resp.StatusCode != http.StatusSwitchingProtocols {
 		t.Fatalf("handshake response = %v, %v", resp, err)
 	}
-	return conn, reader
+	return conn, reader, resp
 }
 
 func describeMessages(messages []netcapture.Message) string {
 	var lines []string
 	for _, m := range messages {
-		line := m.From + " " + m.Type + " " + m.Text + string(m.Base64)
-		if m.DecodedFrom != "" {
-			line += " (" + m.DecodedFrom + ")"
-		}
-		lines = append(lines, line)
+		lines = append(lines, m.From+" "+m.Type+" "+m.Text+string(m.Base64))
 	}
 	return strings.Join(lines, "\n")
 }
@@ -899,12 +887,10 @@ func TestProxyCapturesWebSocketMessagesWithoutChangingThem(t *testing.T) {
 		wsFrame(0x01, "Hello, ", true),
 		wsFrame(0x89, "p", true),
 		wsFrame(0x80, "world", true),
-		wsFrame(0xc1, deflateMessage(t, "compressed from client"), true),
 		wsFrame(0x88, "\x03\xe8done", true),
 	}, nil)
 	serverSends := bytes.Join([][]byte{
 		wsFrame(0x81, "welcome", false),
-		wsFrame(0xc1, deflateMessage(t, "compressed from server"), false),
 		wsFrame(0x82, "\x01\x02\x03", false),
 		wsFrame(0x88, "\x03\xe8", false),
 	}, nil)
@@ -920,7 +906,13 @@ func TestProxyCapturesWebSocketMessagesWithoutChangingThem(t *testing.T) {
 		}
 		proxyServer := httptest.NewServer(p.handler("http"))
 
-		conn, reader := openWebSocket(t, proxyServer, hostPort)
+		conn, reader, handshake := openWebSocket(t, proxyServer, hostPort)
+		// A captured connection offers the upstream no extension, so it
+		// accepts none and the messages cross the proxy uncompressed.
+		accepted := handshake.Header.Get("Sec-WebSocket-Extensions")
+		if want := map[bool]string{false: "permessage-deflate", true: ""}[captured]; accepted != want {
+			t.Fatalf("captured=%v: handshake accepted extensions %q, want %q", captured, accepted, want)
+		}
 		if _, err := conn.Write(clientSends); err != nil {
 			t.Fatalf("write frames: %v", err)
 		}
@@ -968,12 +960,10 @@ func TestProxyCapturesWebSocketMessagesWithoutChangingThem(t *testing.T) {
 			"client text hello",
 			"client ping p",
 			"client text Hello, world",
-			"client text compressed from client (permessage-deflate)",
 			"client close done",
 		}, "\n")
 		wantServer := strings.Join([]string{
 			"server text welcome",
-			"server text compressed from server (permessage-deflate)",
 			"server binary \x01\x02\x03",
 			"server close ",
 		}, "\n")
@@ -994,9 +984,60 @@ func TestProxyCapturesWebSocketMessagesWithoutChangingThem(t *testing.T) {
 		if lastClient.After(firstServer) {
 			t.Fatalf("last client message stamped %s, after the reply at %s", lastClient, firstServer)
 		}
-		if socket := record.WebSocket; socket.Compression != "permessage-deflate" || socket.Bytes != int64(len(clientSends)+len(serverSends)) || socket.Messages != 9 {
+		if socket := record.WebSocket; socket.Bytes != int64(len(clientSends)+len(serverSends)) || socket.Messages != 7 {
 			t.Fatalf("record websocket = %+v", socket)
 		}
+	}
+}
+
+func TestProxyCaptureOmitsWebSocketMessagesOfAnExtensionNegotiatedAnyway(t *testing.T) {
+	// This upstream accepts permessage-deflate although the handshake it
+	// received offered no extension.
+	sends := wsFrame(0xc1, "\xf2\x48\xcd\xc9\xc9\x07\x00", true)
+	reply := wsFrame(0xc1, "\xf2\x48\xcd\xc9\xc9\x07\x00", false)
+	received := make(chan []byte, 1)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, rw, err := http.NewResponseController(w).Hijack()
+		if err != nil {
+			return
+		}
+		defer func() { _ = conn.Close() }()
+		_, _ = rw.WriteString("HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Extensions: permessage-deflate\r\n\r\n")
+		_ = rw.Flush()
+		_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
+		got := make([]byte, len(sends))
+		n, _ := io.ReadFull(rw, got)
+		received <- got[:n]
+		_, _ = rw.Write(reply)
+		_ = rw.Flush()
+		_, _ = io.Copy(io.Discard, rw)
+	}))
+	defer upstream.Close()
+	host, hostPort := upstreamHost(t, upstream)
+	p, dir, logPath := captureProxy(t, []string{host}, nil, netcapture.Options{})
+	proxyServer := httptest.NewServer(p.handler("http"))
+	defer proxyServer.Close()
+
+	conn, reader, _ := openWebSocket(t, proxyServer, hostPort)
+	if _, err := conn.Write(sends); err != nil {
+		t.Fatalf("write frames: %v", err)
+	}
+	clientGot := make([]byte, len(reply))
+	if _, err := io.ReadFull(reader, clientGot); err != nil {
+		t.Fatalf("read relayed frames: %v", err)
+	}
+	if upstreamGot := <-received; !bytes.Equal(upstreamGot, sends) || !bytes.Equal(clientGot, reply) {
+		t.Fatalf("frames not relayed unchanged: upstream %x, client %x", upstreamGot, clientGot)
+	}
+	_ = conn.Close()
+
+	waitForEvents(t, logPath, 1)
+	_, record, _ := capturedEvent(t, logPath, dir)
+	if record.WebSocket == nil || record.WebSocket.MessagesOmitted != netcapture.OmittedExtension || record.WebSocket.File != "" {
+		t.Fatalf("record websocket = %+v", record.WebSocket)
+	}
+	if matches, _ := filepath.Glob(filepath.Join(dir, "*.messages.jsonl")); len(matches) != 0 {
+		t.Fatalf("messages stored: %v", matches)
 	}
 }
 
@@ -1010,7 +1051,7 @@ func TestProxyShowsAnOpenWebSocketAndFinishesItAtShutdown(t *testing.T) {
 	proxyServer := httptest.NewServer(p.handler("http"))
 	defer proxyServer.Close()
 
-	conn, reader := openWebSocket(t, proxyServer, hostPort)
+	conn, reader, _ := openWebSocket(t, proxyServer, hostPort)
 	if _, err := conn.Write(request); err != nil {
 		t.Fatalf("write frame: %v", err)
 	}

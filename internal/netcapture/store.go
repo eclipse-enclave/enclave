@@ -230,12 +230,16 @@ func (c *Capture) WebSocket(resp *http.Response) (fromClient io.Writer, fromServ
 		return nil, nil
 	}
 	s := c.store
-	socket := s.newSocket(c.id, resp.Header)
+	if len(resp.Header.Values("Sec-WebSocket-Extensions")) != 0 {
+		c.record.WebSocket = &WebSocket{MessagesOmitted: OmittedExtension}
+		return nil, nil
+	}
+	socket := s.newSocket(c.id)
 	if socket == nil {
 		return nil, nil
 	}
 	c.socket = socket
-	c.record.WebSocket = &WebSocket{File: filepath.Base(socket.path), Open: true, Compression: socket.compression}
+	c.record.WebSocket = &WebSocket{File: filepath.Base(socket.path), Open: true}
 	c.record.DurationMS = time.Since(c.started).Milliseconds()
 	if size, err := writeRecord(OpenRecordPath(s.dir, c.id), c.record); err == nil {
 		c.openRecord = size
@@ -274,7 +278,9 @@ func (c *Capture) Finish(relayErr error) string {
 	if relayErr != nil {
 		c.record.Error = s.redactor.string(relayErr.Error())
 	}
-	c.record.WebSocket = c.socket.finish()
+	if c.socket != nil {
+		c.record.WebSocket = c.socket.finish()
+	}
 	stored := c.request.stored + c.response.stored + c.socket.storedBytes()
 
 	size, err := writeRecord(RecordPath(s.dir, c.id), c.record)

@@ -150,18 +150,16 @@ func TestWriteCaptureShowsTextCutInsideACharacter(t *testing.T) {
 	}
 }
 
-// A body the capture decoded is shown as stored, even though the response
-// headers still name the encoding it was relayed in.
 func websocketFixture() CaptureView {
 	view := captureFixture()
 	view.Record.Request = netcapture.Request{Method: "GET", URL: "https://api.example.com/responses", Proto: "HTTP/1.1", Headers: http.Header{"Upgrade": {"websocket"}}}
 	view.Record.Response = &netcapture.Response{Status: http.StatusSwitchingProtocols, Proto: "HTTP/1.1", Headers: http.Header{"Upgrade": {"websocket"}}}
-	view.Record.WebSocket = &netcapture.WebSocket{File: "0123456789abcdef.messages.jsonl", Compression: "permessage-deflate", Messages: 5, StoredMessages: 4, Truncated: true, Error: "server: invalid WebSocket frame: reserved opcode 0x3"}
+	view.Record.WebSocket = &netcapture.WebSocket{File: "0123456789abcdef.messages.jsonl", Messages: 5, StoredMessages: 4, Truncated: true, Error: "server: invalid WebSocket frame: reserved opcode 0x3"}
 	view.Request, view.Response = CapturedBody{}, CapturedBody{}
 	view.Messages = CapturedMessages{
 		Path: "/state/capture/enclave-demo-1/0123456789abcdef.messages.jsonl",
 		List: []netcapture.Message{
-			{Timestamp: "2026-08-13T12:04:31.5Z", From: "client", Type: "text", Bytes: 20, StoredBytes: 26, DecodedFrom: "permessage-deflate", Text: `{"type":"response.create"}`},
+			{Timestamp: "2026-08-13T12:04:31.5Z", From: "client", Type: "text", Bytes: 26, StoredBytes: 26, Text: `{"type":"response.create"}`},
 			{Timestamp: "2026-08-13T12:04:32Z", From: "server", Type: "text", Bytes: 9, StoredBytes: 9, Text: "evil\x1b[2Jx"},
 			{Timestamp: "2026-08-13T12:04:33Z", From: "server", Type: "binary", Bytes: 3, StoredBytes: 3, Base64: []byte{1, 2, 3}},
 			{Timestamp: "2026-08-13T12:04:34Z", From: "client", Type: "close", Bytes: 6, StoredBytes: 6, Code: 1000, Text: "done"},
@@ -173,9 +171,9 @@ func websocketFixture() CaptureView {
 func TestWriteCaptureRendersWebSocketMessages(t *testing.T) {
 	out := renderCapture(t, websocketFixture())
 	for _, want := range []string{
-		"(WebSocket, 5 messages, 4 stored, permessage-deflate decoded, truncated: /state/capture/enclave-demo-1/0123456789abcdef.messages.jsonl)",
+		"(WebSocket, 5 messages, 4 stored, truncated: /state/capture/enclave-demo-1/0123456789abcdef.messages.jsonl)",
 		"(frames no longer followed: server: invalid WebSocket frame: reserved opcode 0x3)",
-		"> client 12:04:31.500 text (26 B decoded from 20 B of permessage-deflate)\n{\"type\":\"response.create\"}\n",
+		"> client 12:04:31.500 text (26 B)\n{\"type\":\"response.create\"}\n",
 		"< server 12:04:32.000 text (9 B)\nevil?[2Jx\n",
 		"< server 12:04:33.000 binary (3 B, binary)\n",
 		"> client 12:04:34.000 close 1000 (6 B)\ndone\n",
@@ -214,6 +212,16 @@ func TestWriteCaptureNotesAnOmittedResponseBody(t *testing.T) {
 	out := renderCapture(t, view)
 	if !strings.Contains(out, "(response body not stored: unexpected content encoding)") {
 		t.Fatalf("omitted body not noted:\n%s", out)
+	}
+}
+
+func TestWriteCaptureNotesOmittedWebSocketMessages(t *testing.T) {
+	view := websocketFixture()
+	view.Record.WebSocket = &netcapture.WebSocket{MessagesOmitted: netcapture.OmittedExtension}
+	view.Messages = CapturedMessages{}
+	out := renderCapture(t, view)
+	if !strings.Contains(out, "(WebSocket messages not stored: unexpected WebSocket extension)") {
+		t.Fatalf("omitted messages not noted:\n%s", out)
 	}
 }
 

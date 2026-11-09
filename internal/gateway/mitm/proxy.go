@@ -458,8 +458,11 @@ func (p *proxy) handler(scheme string) http.HandlerFunc {
 		if capture != nil {
 			// Explicit identity also disables the transport's automatic gzip
 			// decoding, so unexpected encoding headers remain visible to the
-			// capture's omission check. The record keeps the client's headers.
+			// capture's omission check. No WebSocket extension such as
+			// permessage-deflate is offered either. The record keeps the
+			// client's headers.
 			req.Header.Set("Accept-Encoding", "identity")
+			req.Header.Del("Sec-WebSocket-Extensions")
 		}
 		result, err := p.forward(w, req, scheme, capture)
 		if err != nil {

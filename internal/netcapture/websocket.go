@@ -9,13 +9,10 @@ package netcapture
 
 import (
 	"bytes"
-	"compress/flate"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"net/http"
 	"os"
 	"path/filepath"
 	"slices"
@@ -28,18 +25,13 @@ import (
 	"enclave/internal/netlog"
 )
 
-const permessageDeflate = "permessage-deflate"
-
 // socketCapture follows the frames of a WebSocket connection in both
 // directions and appends each message to the messages file as one line. Each
 // direction is fed by the goroutine relaying it, so the two only share the
 // file and its counts.
 type socketCapture struct {
-	store *Store
-	path  string
-	// compression is the extension the handshake response accepted and the
-	// capture decodes, or "".
-	compression    string
+	store          *Store
+	path           string
 	client, server *socketDirection
 
 	mu             sync.Mutex
@@ -53,9 +45,9 @@ type socketCapture struct {
 	truncated bool
 }
 
-// newSocket creates the messages file of a WebSocket connection whose
-// handshake response carried header, or returns nil when it cannot.
-func (s *Store) newSocket(id string, header http.Header) *socketCapture {
+// newSocket creates the messages file of a WebSocket connection, or returns
+// nil when it cannot.
+func (s *Store) newSocket(id string) *socketCapture {
 	path := filepath.Join(s.dir, id+messagesSuffix)
 	// Readable by the host user; see bodySink.persist.
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY|os.O_APPEND, 0o644) // #nosec G302 G304 -- path is built from a generated ID inside the session directory.
@@ -63,56 +55,9 @@ func (s *Store) newSocket(id string, header http.Header) *socketCapture {
 		return nil
 	}
 	socket := &socketCapture{store: s, path: path, file: file}
-	deflate, other := negotiatedExtensions(header)
-	// Another extension may give the reserved bits a meaning the capture does
-	// not know, so messages are decoded only when permessage-deflate is the
-	// only one.
-	if deflate != nil && !other {
-		socket.compression = permessageDeflate
-	}
 	socket.client = &socketDirection{socket: socket, from: FromClient}
 	socket.server = &socketDirection{socket: socket, from: FromServer}
-	if socket.compression != "" {
-		socket.client.inflater = &inflater{takeover: !deflate.clientNoContextTakeover}
-		socket.server.inflater = &inflater{takeover: !deflate.serverNoContextTakeover}
-	}
 	return socket
-}
-
-type deflateParams struct {
-	serverNoContextTakeover bool
-	clientNoContextTakeover bool
-}
-
-// negotiatedExtensions reads the extensions a handshake response accepted:
-// the permessage-deflate parameters, if it was accepted once, and whether
-// anything else was. The window size parameters do not matter for decoding,
-// which always keeps the largest window.
-func negotiatedExtensions(header http.Header) (*deflateParams, bool) {
-	var deflate *deflateParams
-	other := false
-	for _, value := range header.Values("Sec-WebSocket-Extensions") {
-		for extension := range strings.SplitSeq(value, ",") {
-			name, params, _ := strings.Cut(extension, ";")
-			switch name = strings.ToLower(strings.TrimSpace(name)); {
-			case name == "":
-			case name != permessageDeflate || deflate != nil:
-				other = true
-			default:
-				deflate = &deflateParams{}
-				for param := range strings.SplitSeq(params, ";") {
-					key, _, _ := strings.Cut(param, "=")
-					switch strings.ToLower(strings.TrimSpace(key)) {
-					case "server_no_context_takeover":
-						deflate.serverNoContextTakeover = true
-					case "client_no_context_takeover":
-						deflate.clientNoContextTakeover = true
-					}
-				}
-			}
-		}
-	}
-	return deflate, other
 }
 
 // add stores a finished message, unless the socket is full.
@@ -176,7 +121,6 @@ func (s *socketCapture) finish() *WebSocket {
 		_ = os.Remove(s.path)
 	}
 	socket := &WebSocket{
-		Compression:    s.compression,
 		Messages:       s.messages,
 		StoredMessages: s.storedMessages,
 		Bytes:          s.client.wire + s.server.wire,
@@ -211,8 +155,6 @@ func (s *socketCapture) remove() {
 type socketDirection struct {
 	socket *socketCapture
 	from   string
-	// inflater decodes compressed messages; nil without permessage-deflate.
-	inflater *inflater
 	// wire counts the bytes this side sent.
 	wire int64
 	// relayed is when the bytes being parsed were relayed, which is when a
@@ -234,7 +176,6 @@ type socketDirection struct {
 // pendingMessage is a data message whose frames are still arriving.
 type pendingMessage struct {
 	opcode wsframe.Opcode
-	rsv    byte
 	// payload holds the payload as relayed and unmasked, up to the buffer
 	// limit; bytes counts all of it.
 	payload []byte
@@ -275,6 +216,13 @@ func (d *socketDirection) readHeader(p []byte) []byte {
 }
 
 func (d *socketDirection) beginFrame(header wsframe.Header) {
+	// The capture withholds extension offers from the handshake, so no
+	// extension gives the reserved bits a meaning, and the receiving side
+	// fails the connection.
+	if header.Rsv != 0 {
+		d.stop(errors.New("reserved bits set without a negotiated extension"))
+		return
+	}
 	d.frame, d.inFrame, d.offset = header, true, 0
 	switch {
 	case header.Opcode.IsControl():
@@ -290,7 +238,7 @@ func (d *socketDirection) beginFrame(header wsframe.Header) {
 		if d.message != nil {
 			d.emit(d.message, true)
 		}
-		d.message = &pendingMessage{opcode: header.Opcode, rsv: header.Rsv}
+		d.message = &pendingMessage{opcode: header.Opcode}
 	}
 	if header.Length == 0 {
 		d.endFrame()
@@ -367,7 +315,7 @@ func (d *socketDirection) flush() {
 	d.inFrame, d.message = false, nil
 }
 
-// emit decodes, redacts and stores a message. cut marks one that did not
+// emit redacts and stores a message. cut marks one that did not
 // arrive whole.
 func (d *socketDirection) emit(pending *pendingMessage, cut bool) {
 	store := d.socket.store
@@ -379,24 +327,11 @@ func (d *socketDirection) emit(pending *pendingMessage, cut bool) {
 	}
 	payload := pending.payload
 	cut = cut || pending.bytes > int64(len(payload))
-	switch {
-	case pending.rsv == 0:
-	case pending.rsv == wsframe.RSV1 && d.inflater != nil:
-		decoded, more, ok := d.inflater.inflate(payload, !cut, d.bufferLimit())
-		if ok {
-			payload, cut = decoded, cut || more
-			message.DecodedFrom = permessageDeflate
-		} else {
-			message.Compressed = true
-		}
-	default:
-		message.Compressed = true
-	}
 	payload = store.redactor.payload(payload, cut)
 	if int64(len(payload)) > store.maxBody {
 		payload, cut = payload[:store.maxBody], true
 	}
-	textual := (message.Type == MessageText || message.Type == MessageClose) && !message.Compressed
+	textual := message.Type == MessageText || message.Type == MessageClose
 	if cut && textual {
 		payload = TrimPartialRune(payload)
 	}
@@ -453,92 +388,4 @@ func messageType(opcode wsframe.Opcode) string {
 	default:
 		return fmt.Sprintf("opcode-%#x", byte(opcode))
 	}
-}
-
-// windowSize is the DEFLATE window: how far back a compressed message can
-// refer, into the messages before it when the context is taken over.
-const windowSize = 32 << 10
-
-// maxInflate bounds the decoding of one message. Past the size cap a message
-// is decoded only to keep the window right for the messages after it.
-const maxInflate = 8 * MaxBodyBytes
-
-// inflater decodes the permessage-deflate messages of one direction (RFC
-// 7692). With context takeover the direction is one DEFLATE stream whose
-// messages refer back into earlier ones. A decompressor cannot resume once its
-// input has run out, so each message is decoded by a fresh one primed with
-// the last window of decoded output.
-type inflater struct {
-	takeover bool
-	window   []byte
-	// lost is set when the window is no longer known, so later messages cannot
-	// be decoded.
-	lost   bool
-	reader io.ReadCloser
-	buffer []byte
-}
-
-// inflate decodes a message as far as limit, and reports whether it decoded to
-// more than that and whether decoding worked. complete is false for a message
-// that did not arrive whole.
-func (f *inflater) inflate(payload []byte, complete bool, limit int) ([]byte, bool, bool) {
-	if f.lost {
-		return nil, false, false
-	}
-	// The sender strips the empty block that ends each message.
-	input := bytes.NewReader(append(payload[:len(payload):len(payload)], 0x00, 0x00, 0xff, 0xff))
-	var dictionary []byte
-	if f.takeover {
-		dictionary = f.window
-	}
-	if f.reader == nil {
-		f.reader = flate.NewReaderDict(input, dictionary)
-		f.buffer = make([]byte, windowSize)
-	} else if err := f.reader.(flate.Resetter).Reset(input, dictionary); err != nil {
-		f.lost = f.takeover
-		return nil, false, false
-	}
-	var out []byte
-	window := f.window
-	total := 0
-	var err error
-	for {
-		var n int
-		n, err = f.reader.Read(f.buffer)
-		total += n
-		if room := limit - len(out); room > 0 {
-			out = append(out, f.buffer[:min(n, room)]...)
-		}
-		if f.takeover {
-			window = appendWindow(window, f.buffer[:n])
-		} else if total > limit {
-			break
-		}
-		if err != nil || total > maxInflate {
-			break
-		}
-	}
-	// Without a closing block the decompressor runs out of input after the
-	// message, which is how a message normally ends.
-	failed := err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF)
-	if f.takeover {
-		f.window = window
-		f.lost = failed || !complete || total > maxInflate
-	}
-	if failed {
-		return nil, false, false
-	}
-	return out, total > len(out), true
-}
-
-// appendWindow keeps the last windowSize bytes of window followed by data.
-func appendWindow(window []byte, data []byte) []byte {
-	if len(data) >= windowSize {
-		return append(window[:0], data[len(data)-windowSize:]...)
-	}
-	window = append(window, data...)
-	if excess := len(window) - windowSize; excess > 0 {
-		window = append(window[:0], window[excess:]...)
-	}
-	return window
 }

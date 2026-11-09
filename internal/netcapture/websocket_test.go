@@ -447,12 +447,34 @@ func TestWebSocketCaptureOmitsMessagesOfANegotiatedExtension(t *testing.T) {
 	if client, server := capture.WebSocket(resp); client != nil || server != nil {
 		t.Fatal("WebSocket() captures a connection with an extension the proxy did not offer")
 	}
-	record, err := Load(RecordPath(store.dir, capture.Finish(nil)))
+	openPath := OpenRecordPath(store.dir, capture.id)
+	open, err := Load(openPath)
 	if err != nil {
-		t.Fatalf("Load() error = %v", err)
+		t.Fatalf("no open omission record: %v", err)
 	}
-	if record.WebSocket == nil || record.WebSocket.MessagesOmitted != OmittedExtension || record.WebSocket.File != "" {
-		t.Fatalf("record websocket = %+v", record.WebSocket)
+	if open.WebSocket == nil || !open.WebSocket.Open || open.WebSocket.MessagesOmitted != OmittedExtension || open.WebSocket.File != "" || open.Response.Status != http.StatusSwitchingProtocols {
+		t.Fatalf("open omission record = %+v", open)
+	}
+	info, err := os.Stat(openPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if store.used != info.Size() || capture.openRecord != info.Size() {
+		t.Fatalf("open record accounting: used %d, booked %d, size %d", store.used, capture.openRecord, info.Size())
+	}
+	if client, server := capture.WebSocket(resp); client != nil || server != nil || store.used != info.Size() {
+		t.Fatal("repeated WebSocket() changed an omitted capture or its accounting")
+	}
+	record, messages := finishSocket(t, store, capture)
+	if record.WebSocket.Open || record.WebSocket.MessagesOmitted != OmittedExtension || record.WebSocket.File != "" || len(messages) != 0 {
+		t.Fatalf("record websocket = %+v; messages = %v", record.WebSocket, messages)
+	}
+	info, err = os.Stat(RecordPath(store.dir, capture.id))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if store.used != info.Size() {
+		t.Fatalf("final record accounting: used %d, size %d", store.used, info.Size())
 	}
 	if matches, _ := filepath.Glob(filepath.Join(store.dir, "*"+messagesSuffix)); len(matches) != 0 {
 		t.Fatalf("messages stored: %v", matches)

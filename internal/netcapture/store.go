@@ -225,27 +225,29 @@ func (c *Capture) ResponseBody() io.Writer {
 // see the bytes in the order they are relayed. Both are nil when the
 // connection is not captured.
 func (c *Capture) WebSocket(resp *http.Response) (fromClient io.Writer, fromServer io.Writer) {
-	if c == nil || c.socket != nil || resp == nil || resp.StatusCode != http.StatusSwitchingProtocols ||
+	if c == nil || c.record.WebSocket != nil || resp == nil || resp.StatusCode != http.StatusSwitchingProtocols ||
 		!strings.EqualFold(strings.TrimSpace(resp.Header.Get("Upgrade")), "websocket") {
 		return nil, nil
 	}
 	s := c.store
 	if len(resp.Header.Values("Sec-WebSocket-Extensions")) != 0 {
-		c.record.WebSocket = &WebSocket{MessagesOmitted: OmittedExtension}
-		return nil, nil
+		c.record.WebSocket = &WebSocket{Open: true, MessagesOmitted: OmittedExtension}
+	} else {
+		c.socket = s.newSocket(c.id)
+		if c.socket == nil {
+			return nil, nil
+		}
+		c.record.WebSocket = &WebSocket{File: filepath.Base(c.socket.path), Open: true}
 	}
-	socket := s.newSocket(c.id)
-	if socket == nil {
-		return nil, nil
-	}
-	c.socket = socket
-	c.record.WebSocket = &WebSocket{File: filepath.Base(socket.path), Open: true}
 	c.record.DurationMS = time.Since(c.started).Milliseconds()
 	if size, err := writeRecord(OpenRecordPath(s.dir, c.id), c.record); err == nil {
 		c.openRecord = size
 		s.count(size)
 	}
-	return socket.client, socket.server
+	if c.socket == nil {
+		return nil, nil
+	}
+	return c.socket.client, c.socket.server
 }
 
 // ResponseEnded reports how relaying the response body ended; an error marks
@@ -280,6 +282,9 @@ func (c *Capture) Finish(relayErr error) string {
 	}
 	if c.socket != nil {
 		c.record.WebSocket = c.socket.finish()
+	}
+	if c.record.WebSocket != nil {
+		c.record.WebSocket.Open = false
 	}
 	stored := c.request.stored + c.response.stored + c.socket.storedBytes()
 

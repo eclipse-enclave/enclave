@@ -9,7 +9,6 @@ package netcapture
 
 import (
 	"bytes"
-	"compress/flate"
 	"encoding/binary"
 	"encoding/json"
 	"io"
@@ -63,18 +62,15 @@ func feed(w io.Writer, piece int, frames ...[]byte) {
 	}
 }
 
-// beginSocket captures a WebSocket handshake whose response accepted
-// extensions, and returns the capture and the writers for each direction.
-func beginSocket(t *testing.T, store *Store, extensions string) (*Capture, io.Writer, io.Writer) {
+// beginSocket captures a WebSocket handshake and returns the capture and the
+// writers for each direction.
+func beginSocket(t *testing.T, store *Store) (*Capture, io.Writer, io.Writer) {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodGet, "http://api.example.com/responses", nil)
 	req.Header.Set("Connection", "Upgrade")
 	req.Header.Set("Upgrade", "websocket")
 	capture := store.Begin(req, "https")
 	resp := &http.Response{StatusCode: http.StatusSwitchingProtocols, Proto: "HTTP/1.1", Header: http.Header{"Connection": {"Upgrade"}, "Upgrade": {"websocket"}}}
-	if extensions != "" {
-		resp.Header.Set("Sec-WebSocket-Extensions", extensions)
-	}
 	capture.Response(resp)
 	client, server := capture.WebSocket(resp)
 	if client == nil || server == nil {
@@ -125,7 +121,7 @@ func assertMessages(t *testing.T, messages []Message, want ...string) {
 
 func TestWebSocketCaptureStoresMessagesInOrder(t *testing.T) {
 	store := openTestStore(t, Options{})
-	capture, client, server := beginSocket(t, store, "")
+	capture, client, server := beginSocket(t, store)
 
 	open, err := Load(OpenRecordPath(store.dir, capture.id))
 	if err != nil {
@@ -168,7 +164,7 @@ func TestWebSocketCaptureStoresMessagesInOrder(t *testing.T) {
 
 func TestWebSocketCaptureReassemblesFragmentedMessages(t *testing.T) {
 	store := openTestStore(t, Options{})
-	capture, client, server := beginSocket(t, store, "")
+	capture, client, server := beginSocket(t, store)
 
 	feed(client, 3,
 		wsFrame(0x01, []byte("Hello, "), &clientMask),
@@ -194,112 +190,30 @@ func TestWebSocketCaptureReassemblesFragmentedMessages(t *testing.T) {
 	}
 }
 
-// deflater compresses the messages of one direction as permessage-deflate
-// does: each message ends in a sync flush whose empty block is stripped.
-type deflater struct {
-	takeover bool
-	buffer   bytes.Buffer
-	writer   *flate.Writer
-}
-
-func (d *deflater) compress(t *testing.T, message string) []byte {
-	t.Helper()
-	if d.writer == nil || !d.takeover {
-		writer, err := flate.NewWriter(&d.buffer, flate.BestCompression)
-		if err != nil {
-			t.Fatal(err)
-		}
-		d.writer = writer
-	}
-	_, _ = d.writer.Write([]byte(message))
-	_ = d.writer.Flush()
-	out := bytes.TrimSuffix(d.buffer.Bytes(), []byte{0x00, 0x00, 0xff, 0xff})
-	out = append([]byte{}, out...)
-	d.buffer.Reset()
-	return out
-}
-
-func TestWebSocketCaptureDecodesPermessageDeflate(t *testing.T) {
-	turn := strings.Repeat(`{"role":"user","content":"edit README.md and keep the license header"}`, 20)
-	for name, tc := range map[string]struct {
-		extensions string
-		takeover   bool
-	}{
-		"with context takeover":    {extensions: "permessage-deflate; client_max_window_bits=15", takeover: true},
-		"without context takeover": {extensions: "permessage-deflate; server_no_context_takeover; client_no_context_takeover"},
-	} {
-		t.Run(name, func(t *testing.T) {
-			store := openTestStore(t, Options{})
-			capture, client, server := beginSocket(t, store, tc.extensions)
-			fromClient := &deflater{takeover: tc.takeover}
-			fromServer := &deflater{takeover: tc.takeover}
-
-			first := fromClient.compress(t, turn)
-			second := fromClient.compress(t, turn)
-			if tc.takeover && len(second) >= len(first)/4 {
-				t.Fatalf("second message is %d bytes, first %d: it does not refer back into the first", len(second), len(first))
-			}
-			feed(client, 7, wsFrame(0xc1, first, &clientMask), wsFrame(0xc1, second, &clientMask))
-			// An uncompressed message may sit between compressed ones.
-			feed(server, 7, wsFrame(0xc1, fromServer.compress(t, "reply one"), nil), wsFrame(0x81, []byte("plain"), nil), wsFrame(0xc1, fromServer.compress(t, "reply one, again"), nil))
-			// A compressed message may be fragmented; only its first frame is marked.
-			last := fromServer.compress(t, "reply in pieces")
-			feed(server, 2, wsFrame(0x41, last[:3], nil), wsFrame(0x80, last[3:], nil))
-
-			record, messages := finishSocket(t, store, capture)
-			assertMessages(t, messages,
-				"client text "+turn,
-				"client text "+turn,
-				"server text reply one",
-				"server text plain",
-				"server text reply one, again",
-				"server text reply in pieces",
-			)
-			if record.WebSocket.Compression != "permessage-deflate" {
-				t.Fatalf("record websocket = %+v", record.WebSocket)
-			}
-			if messages[1].DecodedFrom != "permessage-deflate" || messages[1].Bytes != int64(len(second)) || messages[1].StoredBytes != int64(len(turn)) {
-				t.Fatalf("decoded message = %+v", messages[1])
-			}
-			if messages[3].DecodedFrom != "" {
-				t.Fatalf("uncompressed message = %+v", messages[3])
-			}
-		})
-	}
-}
-
-func TestWebSocketCaptureKeepsMessagesItCannotDecode(t *testing.T) {
+func TestWebSocketCaptureStopsFollowingFramesWithReservedBits(t *testing.T) {
+	// The capture offers no extension, so a frame with a reserved bit set, such
+	// as a compressed one, breaks the protocol for both sides.
 	store := openTestStore(t, Options{})
-	capture, _, server := beginSocket(t, store, "permessage-deflate")
-	feed(server, 64, wsFrame(0xc1, []byte{0xff, 0xff, 0xff}, nil), wsFrame(0xa1, []byte("rsv2"), nil))
-	_, messages := finishSocket(t, store, capture)
-	if len(messages) != 2 || !messages[0].Compressed || !bytes.Equal(messages[0].Base64, []byte{0xff, 0xff, 0xff}) || messages[0].Text != "" {
-		t.Fatalf("undecodable message = %+v", messages)
-	}
-	if !messages[1].Compressed || string(messages[1].Base64) != "rsv2" {
-		t.Fatalf("message with a reserved bit no extension claims = %+v", messages[1])
-	}
+	capture, client, server := beginSocket(t, store)
+	feed(server, 64, serverText("before"), wsFrame(0xc1, []byte{0xf2, 0x48, 0xcd, 0xc9, 0xc9, 0x07, 0x00}, nil), serverText("after"))
+	feed(client, 64, clientText("client side unaffected"))
 
-	// Without the extension accepted, a compressed frame is kept as relayed.
-	store = openTestStore(t, Options{})
-	capture, _, server = beginSocket(t, store, "")
-	compressed := (&deflater{}).compress(t, "hello")
-	feed(server, 64, wsFrame(0xc1, compressed, nil))
-	_, messages = finishSocket(t, store, capture)
-	if len(messages) != 1 || !messages[0].Compressed || !bytes.Equal(messages[0].Base64, compressed) {
-		t.Fatalf("compressed message without the extension = %+v", messages)
+	record, messages := finishSocket(t, store, capture)
+	assertMessages(t, messages,
+		"server text before",
+		"client text client side unaffected",
+	)
+	if record.WebSocket.Error != "server: reserved bits set without a negotiated extension" {
+		t.Fatalf("record websocket = %+v", record.WebSocket)
 	}
 }
 
 func TestWebSocketCaptureTruncatesMessagesOverTheCap(t *testing.T) {
 	store := openTestStore(t, Options{MaxBodyBytes: 16})
-	capture, client, server := beginSocket(t, store, "permessage-deflate")
+	capture, client, server := beginSocket(t, store)
 	feed(client, 10, clientText("0123456789abcdefOVER"))
-	// Decoding goes on past the cap, so the window stays right and the next
-	// message, which refers back into this one, still decodes.
-	fromServer := &deflater{takeover: true}
 	long := "a" + strings.Repeat("\u00e9", 40)
-	feed(server, 10, wsFrame(0xc1, fromServer.compress(t, long), nil), wsFrame(0xc1, fromServer.compress(t, long[:11]), nil))
+	feed(server, 10, serverText(long), serverText(long[:11]))
 
 	record, messages := finishSocket(t, store, capture)
 	if m := messages[0]; m.Text != "0123456789abcdef" || !m.Truncated || m.Bytes != 20 || m.StoredBytes != 16 {
@@ -315,7 +229,7 @@ func TestWebSocketCaptureTruncatesMessagesOverTheCap(t *testing.T) {
 		t.Fatal("the cap does not fall inside a character")
 	}
 	if m := messages[1]; m.Text != want || !m.Truncated || m.StoredBytes != int64(len(want)) {
-		t.Fatalf("decoded message over the cap = %+v", m)
+		t.Fatalf("text message cut inside a character = %+v", m)
 	}
 	if m := messages[2]; m.Text != long[:11] || m.Truncated {
 		t.Fatalf("message after one over the cap = %+v", m)
@@ -327,7 +241,7 @@ func TestWebSocketCaptureTruncatesMessagesOverTheCap(t *testing.T) {
 
 func TestWebSocketCaptureStopsStoringAtTheSocketBudget(t *testing.T) {
 	store := openTestStore(t, Options{MaxSocketBytes: 400})
-	capture, client, _ := beginSocket(t, store, "")
+	capture, client, _ := beginSocket(t, store)
 	for range 20 {
 		feed(client, 64, clientText(strings.Repeat("x", 50)))
 	}
@@ -344,7 +258,7 @@ func TestWebSocketCaptureStopsStoringAtTheSocketBudget(t *testing.T) {
 func TestWebSocketCaptureHoldsTheSessionBudgetWhileOpen(t *testing.T) {
 	store := openTestStore(t, Options{MaxBytes: 2048})
 	earlier := captureExchange(t, store, "", strings.Repeat("r", 1024))
-	capture, client, _ := beginSocket(t, store, "")
+	capture, client, _ := beginSocket(t, store)
 	for range 40 {
 		feed(client, 64, clientText(strings.Repeat("x", 50)))
 	}
@@ -368,14 +282,13 @@ func TestWebSocketCaptureRedactsReleasedSecrets(t *testing.T) {
 	const secret = "sk-live-do-not-store-0123456789"
 	const placeholder = "ENCLAVE_SECRET_0123456789abcdef"
 	store := openTestStore(t, Options{MaxBodyBytes: 64, Secrets: []Secret{{Value: secret, Placeholder: placeholder}}})
-	capture, client, server := beginSocket(t, store, "permessage-deflate")
+	capture, client, server := beginSocket(t, store)
 
 	half := len(secret) / 2
 	feed(server, 9,
 		serverText("token "+secret),
 		wsFrame(0x01, []byte("split "+secret[:half]), nil),
 		wsFrame(0x80, []byte(secret[half:]), nil),
-		wsFrame(0xc1, (&deflater{}).compress(t, "compressed "+secret), nil),
 		// A value that straddles the cap is replaced before the payload is cut.
 		serverText(strings.Repeat("p", 50)+secret),
 	)
@@ -389,7 +302,6 @@ func TestWebSocketCaptureRedactsReleasedSecrets(t *testing.T) {
 	assertMessages(t, messages,
 		"server text token "+placeholder,
 		"server text split "+placeholder,
-		"server text compressed "+placeholder,
 		"server text "+strings.Repeat("p", 50)+placeholder[:14],
 		"client close "+placeholder,
 		"server text tail ",
@@ -405,7 +317,7 @@ func TestWebSocketCaptureRedactsReleasedSecrets(t *testing.T) {
 
 func TestWebSocketCaptureKeepsWhatArrivedOfUnfinishedMessages(t *testing.T) {
 	store := openTestStore(t, Options{})
-	capture, client, server := beginSocket(t, store, "")
+	capture, client, server := beginSocket(t, store)
 	feed(client, 64, wsFrame(0x01, []byte("first half, "), &clientMask), wsFrame(0x00, []byte("second"), &clientMask))
 	frame := serverText("cut off in the middle")
 	feed(server, 64, frame[:10])
@@ -422,7 +334,7 @@ func TestWebSocketCaptureKeepsWhatArrivedOfUnfinishedMessages(t *testing.T) {
 
 func TestWebSocketCaptureStopsFollowingAnInvalidStream(t *testing.T) {
 	store := openTestStore(t, Options{})
-	capture, client, server := beginSocket(t, store, "")
+	capture, client, server := beginSocket(t, store)
 	feed(server, 64, serverText("before"), wsFrame(0x83, []byte("reserved"), nil), serverText("after"))
 	feed(client, 64, clientText("client side unaffected"))
 
@@ -458,7 +370,7 @@ func TestWebSocketCaptureLeavesOtherUpgradesAlone(t *testing.T) {
 
 func TestWebSocketCaptureWithoutMessagesStoresNoFile(t *testing.T) {
 	store := openTestStore(t, Options{})
-	capture, _, _ := beginSocket(t, store, "")
+	capture, _, _ := beginSocket(t, store)
 	record, messages := finishSocket(t, store, capture)
 	if record.WebSocket.File != "" || len(messages) != 0 {
 		t.Fatalf("record websocket = %+v", record.WebSocket)
@@ -491,7 +403,7 @@ func TestReadMessagesSkipsALineStillBeingWritten(t *testing.T) {
 func TestOpenRemovesSocketsLeftOpenByAStoppedGateway(t *testing.T) {
 	dir := t.TempDir()
 	store := openTestStore(t, Options{Dir: dir})
-	capture, client, _ := beginSocket(t, store, "")
+	capture, client, _ := beginSocket(t, store)
 	feed(client, 64, clientText("never closed"))
 	finished := captureExchange(t, store, "", "kept")
 
@@ -522,5 +434,27 @@ func TestTrimPartialRune(t *testing.T) {
 		if got := TrimPartialRune(tc.in); !bytes.Equal(got, tc.want) {
 			t.Fatalf("TrimPartialRune(%q) = %q, want %q", tc.in, got, tc.want)
 		}
+	}
+}
+
+func TestWebSocketCaptureOmitsMessagesOfANegotiatedExtension(t *testing.T) {
+	store := openTestStore(t, Options{})
+	req := httptest.NewRequest(http.MethodGet, "http://api.example.com/responses", nil)
+	req.Header.Set("Upgrade", "websocket")
+	capture := store.Begin(req, "https")
+	resp := &http.Response{StatusCode: http.StatusSwitchingProtocols, Proto: "HTTP/1.1", Header: http.Header{"Upgrade": {"websocket"}, "Sec-Websocket-Extensions": {"permessage-deflate"}}}
+	capture.Response(resp)
+	if client, server := capture.WebSocket(resp); client != nil || server != nil {
+		t.Fatal("WebSocket() captures a connection with an extension the proxy did not offer")
+	}
+	record, err := Load(RecordPath(store.dir, capture.Finish(nil)))
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if record.WebSocket == nil || record.WebSocket.MessagesOmitted != OmittedExtension || record.WebSocket.File != "" {
+		t.Fatalf("record websocket = %+v", record.WebSocket)
+	}
+	if matches, _ := filepath.Glob(filepath.Join(store.dir, "*"+messagesSuffix)); len(matches) != 0 {
+		t.Fatalf("messages stored: %v", matches)
 	}
 }

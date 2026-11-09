@@ -171,6 +171,10 @@ func writeBody(text *strings.Builder, label string, body *netcapture.Body, store
 // writeMessages prints a note on a WebSocket's messages file, then each
 // message: > for what the client sent, < for what the server sent.
 func writeMessages(text *strings.Builder, socket *netcapture.WebSocket, stored CapturedMessages, opts RenderOptions) {
+	if socket.MessagesOmitted != "" {
+		text.WriteString("\n" + opts.colorize("(WebSocket messages not stored: "+displaySafe(socket.MessagesOmitted)+")", logx.ColorDim) + "\n")
+		return
+	}
 	note := "WebSocket"
 	if socket.Open {
 		note += fmt.Sprintf(" still open, %d messages so far", len(stored.List))
@@ -179,9 +183,6 @@ func writeMessages(text *strings.Builder, socket *netcapture.WebSocket, stored C
 		if socket.StoredMessages != socket.Messages {
 			note += fmt.Sprintf(", %d stored", socket.StoredMessages)
 		}
-	}
-	if socket.Compression != "" {
-		note += ", " + displaySafe(socket.Compression) + " decoded"
 	}
 	if socket.Truncated {
 		note += ", truncated"
@@ -215,16 +216,8 @@ func writeMessage(text *strings.Builder, message netcapture.Message, opts Render
 		head += fmt.Sprintf(" %d", message.Code)
 	}
 	size := util.FormatBytes(message.StoredBytes)
-	switch {
-	case message.Compressed:
-		size = util.FormatBytes(message.Bytes) + " compressed, not decodable"
-	case message.DecodedFrom != "":
-		size += " decoded from " + util.FormatBytes(message.Bytes) + " of " + displaySafe(message.DecodedFrom)
-	case message.Truncated:
-		size += " of " + util.FormatBytes(message.Bytes)
-	}
 	if message.Truncated {
-		size += ", truncated"
+		size += " of " + util.FormatBytes(message.Bytes) + ", truncated"
 	}
 	if len(message.Base64) > 0 {
 		size += ", binary"

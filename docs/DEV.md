@@ -111,8 +111,8 @@ Docker and with rootless Podman, check what they cannot:
   `<id>.open.json` and `<id>.messages.jsonl` appear and `--show-capture <id>`
   lists the messages so far. Once the socket closes, confirm the `101` row of
   `enclave network log --type http` carries the same ID and its capture holds
-  the prompt and the replies as text, decoded if the `101` response headers
-  accepted `permessage-deflate`.
+  the prompt and the replies as text, and that the `101` response headers
+  accepted no `permessage-deflate`.
 - Run `enclave network apply` while a WebSocket is open and confirm its capture
   is finished with its messages rather than lost.
 

@@ -361,8 +361,8 @@ does and also stores the request line, headers and body of every request the
 MITM proxy relays, together with the response status, headers and body, and
 the messages of WebSocket connections. It is off unless selected, and meant for
 debugging a tool's API traffic or checking what an agent sent out. While it
-captures, the proxy asks upstreams for uncompressed responses, so captured
-traffic uses more bandwidth.
+captures, the proxy asks upstreams for uncompressed responses and offers no
+WebSocket compression, so captured traffic uses more bandwidth.
 
 ```bash
 enclave --network-log=full
@@ -384,16 +384,14 @@ The proxy snapshots each request before it releases secrets into the headers,
 so the capture holds the placeholders the sandbox sent, never the released
 values. A released value that shows up anywhere else, such as an upstream
 echoing the credential in a response header or body, is replaced by its
-placeholder before it is written. WebSocket messages compressed with
-`permessage-deflate` are decoded first. The replacement matches the value's
-literal bytes, so a response body has to arrive unencoded: the proxy asks for
-that, and when an upstream compresses a response anyway, the capture keeps its
-headers but not its body (`bodyOmitted`), and the client receives it unchanged.
-The replacement also misses a value in a WebSocket message that could not be
-decoded, or that is URL-encoded, escaped in JSON, or in base64. A request body
-the client compressed is forwarded unchanged but not stored either.
-Credentials without an HTTP release rule are ordinary request content and are
-stored as sent.
+placeholder before it is written. The replacement matches the value's literal
+bytes, so a response body has to arrive unencoded: the proxy asks for that, and
+when an upstream compresses a response anyway, the capture keeps its headers
+but not its body (`bodyOmitted`), and the client receives it unchanged. The
+replacement also misses a value that is URL-encoded, escaped in JSON, or in
+base64. A request body the client compressed is forwarded unchanged but not
+stored either. Credentials without an HTTP release rule are ordinary request
+content and are stored as sent.
 
 ### Capture store
 
@@ -479,10 +477,9 @@ The record of a connection upgraded to WebSocket describes its messages file:
 ```json
 "websocket": {
   "file": "3f9a0c1d2e4b5a69.messages.jsonl",
-  "compression": "permessage-deflate",
   "messages": 42,
   "storedMessages": 42,
-  "bytes": 162380,
+  "bytes": 498380,
   "storedBytes": 498112
 }
 ```
@@ -491,15 +488,19 @@ The record of a connection upgraded to WebSocket describes its messages file:
   `file`. `bytes` counts what crossed the proxy after the handshake, and
   `storedBytes` is the size of `file`. `truncated: true` marks a WebSocket not
   stored whole. `error` says why the frames of one side could no longer be
-  followed; its later messages are not captured.
-- `compression` is `permessage-deflate` when the handshake response accepted
-  that extension and no other; its messages are stored decoded.
+  followed; its later messages are not captured. A frame with a reserved bit
+  set, which only an extension the proxy did not offer could set, is such a
+  case.
+- The proxy offers upstreams no WebSocket extension. When a handshake response
+  accepts one anyway, such as `permessage-deflate`, the messages are relayed
+  unchanged but not stored: the `websocket` object has only
+  `messagesOmitted`, `unexpected WebSocket extension`.
 - In `<id>.open.json`, `open` is `true` and the counts are not filled in yet.
 
 Each line of the messages file is one message:
 
 ```json
-{"ts":"2026-10-21T10:11:13.204518Z","from":"client","type":"text","bytes":812,"storedBytes":2304,"decodedFrom":"permessage-deflate","text":"{\"type\":\"response.create\", ...}"}
+{"ts":"2026-10-21T10:11:13.204518Z","from":"client","type":"text","bytes":2304,"storedBytes":2304,"text":"{\"type\":\"response.create\", ...}"}
 ```
 
 - `from` is `client` or `server`; `type` is `text`, `binary`, `close`, `ping`
@@ -511,21 +512,14 @@ Each line of the messages file is one message:
   across both.
 - The payload is in `text` for text messages and close reasons that are valid
   UTF-8, and in `base64` otherwise. A close also carries its status `code`.
-- `bytes` counts the payload as relayed, compressed if it was, and
-  `storedBytes` the payload stored. `decodedFrom` marks a payload stored
-  decoded. `compressed: true` marks one stored as relayed because it could not
-  be decoded: it was compressed by another extension, it was corrupt, or an
-  earlier message too large to decode left the decoder without the history
-  later messages refer to. `truncated: true` marks a payload cut at the size
+- `bytes` counts the payload as relayed and `storedBytes` the payload stored.
+  `truncated: true` marks a payload cut at the size
   cap or by the end of the connection.
 
 ### Size limits and retention
 
 - Each body and each WebSocket message is stored up to 8 MiB and marked
-  `truncated` beyond that; the other side still receives all of it. For a
-  decoded message the cap applies to the decoded bytes, and decoding stops
-  there, unless later messages may refer back into a compressed one: it is then
-  decoded on to at most 64 MiB, so that they still decode.
+  `truncated` beyond that; the other side still receives all of it.
 - The messages file of a WebSocket stops growing at 128 MiB. Further messages
   are counted but not stored, and the WebSocket is marked `truncated`, so a
   long-lived connection keeps its start.
@@ -557,8 +551,6 @@ proxy terminates, and the WebSocket connections among them:
 - Traffic inside other upgraded connections (SPDY for `kubectl exec`, h2c) is
   relayed but not captured; only the handshake is. WebSocket over HTTP/2
   (RFC 8441) is not captured either.
-- WebSocket messages compressed by an extension other than
-  `permessage-deflate`, or that cannot be decoded, are stored as relayed.
 - SSH on port 22 bypasses the proxy and is never recorded.
 - Clients that pin certificates or use their own trust store fail in this mode
   instead of being captured.

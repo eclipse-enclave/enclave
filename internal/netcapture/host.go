@@ -36,7 +36,7 @@ func PrepareSessionDir(root string, session string) (string, error) {
 	if err := os.Chmod(root, 0o700); err != nil { // #nosec G302 -- a directory needs its execute bit; owner only.
 		return "", err
 	}
-	dir := SessionDir(root, session)
+	dir := filepath.Join(root, session)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", err
 	}
@@ -124,7 +124,7 @@ func Find(roots []string, session string, id string) (string, error) {
 			sessions = sessionDirs(root)
 		}
 		for _, name := range sessions {
-			path := RecordPath(SessionDir(root, name), id)
+			path := RecordPath(filepath.Join(root, name), id)
 			if info, err := os.Lstat(path); err == nil && info.Mode().IsRegular() {
 				matches = append(matches, path)
 			}

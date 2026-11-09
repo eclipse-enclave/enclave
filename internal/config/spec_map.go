@@ -276,6 +276,8 @@ func buildProviders(doc specDocument) []model.ProviderConfig {
 			Name:                sp.Name,
 			CredentialSecrets:   sp.Credentials,
 			AuthFiles:           sp.AuthFiles,
+			AuthSecrets:         sp.AuthSecrets,
+			TokenEndpoint:       sp.TokenEndpoint,
 			SecurestorageDirEnv: sp.SecurestorageDirEnv,
 		}
 		if sp.AuthSession != nil {

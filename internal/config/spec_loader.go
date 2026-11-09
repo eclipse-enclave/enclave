@@ -49,6 +49,9 @@ func LoadSpec(paths model.Paths, name string, kind string) (specDocument, error)
 	if err := validateServiceAuthMappings(doc, specPath); err != nil {
 		return specDocument{}, err
 	}
+	if err := validateAuthSecrets(doc, specPath); err != nil {
+		return specDocument{}, err
+	}
 	if err := validateProxyManaged(doc, specPath); err != nil {
 		return specDocument{}, err
 	}

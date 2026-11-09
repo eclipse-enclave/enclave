@@ -182,7 +182,26 @@ fi
 # Link shared auth files into the tool config dir when provided.
 if [ -n "$ENCLAVE_AUTH_DIR" ] && [ -n "$ENCLAVE_AUTH_FILES" ] && [ -n "$ENCLAVE_TOOL_CONFIG_DIR" ]; then
     IFS=',' read -r -a auth_files <<< "$ENCLAVE_AUTH_FILES"
-    enclave_sync_shared_auth "$agent_label" "$ENCLAVE_TOOL_CONFIG_DIR" "$ENCLAVE_AUTH_DIR" "" "1" "${auth_files[@]}"
+    if [ -n "${ENCLAVE_NATIVE_AUTH_OPS:-}" ]; then
+        IFS=',' read -r -a native_ops <<< "$ENCLAVE_NATIVE_AUTH_OPS"
+        [ "${#native_ops[@]}" -eq "${#auth_files[@]}" ] || { echo "Invalid native auth operations" >&2; exit 1; }
+        [ -z "${ENCLAVE_FEATURE_AUTH_MAP:-}" ] || { echo "Native feature auth unavailable in protected mode" >&2; exit 1; }
+        for auth_file in "${auth_files[@]}"; do
+            native_matches=0
+            for native_op in "${native_ops[@]}"; do
+                IFS=':' read -r native_file native_verb native_digest native_extra <<< "$native_op"
+                [ "$native_file" = "$auth_file" ] || continue
+                native_matches=$((native_matches + 1))
+                if [ -n "$native_extra" ] || ! enclave_apply_native_auth "$ENCLAVE_TOOL_CONFIG_DIR" "$ENCLAVE_AUTH_DIR" "$native_file" "$native_verb" "$native_digest"; then
+                    echo "Native auth path changed since classification: $auth_file" >&2
+                    exit 1
+                fi
+            done
+            [ "$native_matches" -eq 1 ] || { echo "Missing or duplicate native auth operation: $auth_file" >&2; exit 1; }
+        done
+    else
+        enclave_sync_shared_auth "$agent_label" "$ENCLAVE_TOOL_CONFIG_DIR" "$ENCLAVE_AUTH_DIR" "" "1" "${auth_files[@]}"
+    fi
 fi
 
 # Link feature auth files into their respective config dirs when provided.

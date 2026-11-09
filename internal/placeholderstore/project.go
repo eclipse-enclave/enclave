@@ -1,0 +1,183 @@
+// Copyright (C) 2026 EclipseSource GmbH and others.
+//
+// This program and the accompanying materials are made available under the
+// terms of the MIT License, which is available in the project root.
+//
+// SPDX-License-Identifier: MIT
+
+package placeholderstore
+
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io/fs"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"enclave/internal/model"
+)
+
+type View struct {
+	Dir      string
+	Bindings Bindings
+	Releases []model.SecretReleaseEntry
+}
+
+// Project reads only declared native files and atomically publishes a sanitized
+// view. The caller holds the real store lock for the entire operation.
+func Project(realDir, viewsDir, session string, profile model.Profile, configured []model.SecretReleaseEntry) (View, error) {
+	var view View
+	if session == "" || filepath.Base(session) != session || session == "." || session == ".." {
+		return view, fmt.Errorf("invalid placeholder session")
+	}
+	bindings, err := LoadBindings(realDir)
+	if err != nil {
+		return view, err
+	}
+	root, err := openStoreRoot(realDir)
+	if err != nil {
+		return view, err
+	}
+	defer func() { _ = root.Close() }()
+	if err := os.MkdirAll(viewsDir, 0o700); err != nil {
+		return view, err
+	}
+	info, err := os.Lstat(viewsDir)
+	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return view, fmt.Errorf("placeholder parent must be a private directory")
+	}
+	stage, err := os.MkdirTemp(viewsDir, "."+session+"-")
+	if err != nil {
+		return view, err
+	}
+	defer func() { _ = os.RemoveAll(stage) }()
+	for _, provider := range profile.Providers {
+		for _, file := range provider.AuthSecrets {
+			data, err := readRegular(root, file.File)
+			if errors.Is(err, fs.ErrNotExist) {
+				continue
+			}
+			if err != nil {
+				return View{}, fmt.Errorf("read native credentials %s: %w", file.File, err)
+			}
+			projected, releases, err := projectFile(provider.Name, file, data, &bindings, profile.Secrets, configured)
+			if err != nil {
+				return View{}, fmt.Errorf("project native credentials %s: %w", file.File, err)
+			}
+			target := filepath.Join(stage, filepath.FromSlash(file.File))
+			if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
+				return View{}, err
+			}
+			if err := os.WriteFile(target, projected, 0o600); err != nil {
+				return View{}, err
+			}
+			view.Releases = append(view.Releases, releases...)
+		}
+	}
+	if err := SaveBindings(realDir, bindings); err != nil {
+		return View{}, err
+	}
+	view.Dir = filepath.Join(viewsDir, strings.TrimPrefix(filepath.Base(stage), "."))
+	if err := os.Rename(stage, view.Dir); err != nil {
+		return View{}, err
+	}
+	view.Bindings = bindings
+	return view, nil
+}
+
+func projectFile(provider string, file model.AuthFileSecret, data []byte, bindings *Bindings, secrets map[string]model.SecretConfig, configured []model.SecretReleaseEntry) ([]byte, []model.SecretReleaseEntry, error) {
+	doc, credentialPointers, err := decodeNative(file.Codec, data)
+	if err != nil {
+		return nil, nil, err
+	}
+	declared := map[string]bool{}
+	for _, field := range file.Fields {
+		declared[field.Pointer] = true
+	}
+	for _, pointer := range credentialPointers {
+		if !declared[pointer] {
+			return nil, nil, fmt.Errorf("credential field %s is not declared", pointer)
+		}
+	}
+	var rawValues []string
+	var releases []model.SecretReleaseEntry
+	for _, field := range file.Fields {
+		parts, err := model.AuthPointerSegments(field.Pointer)
+		if err != nil {
+			return nil, nil, err
+		}
+		err = visitFields(doc, parts, "", func(pointer, value string, replace func(string)) error {
+			var release model.SecretReleaseEntry
+			if field.Kind == "apiKey" {
+				for _, entry := range configured {
+					if entry.SecretID == field.Release {
+						release = entry
+						break
+					}
+				}
+				if release.Placeholder == "" {
+					return fmt.Errorf("credential field %s requires configured secret %s", pointer, field.Release)
+				}
+			} else if strings.Contains(value, model.SecretPlaceholderMarker) {
+				return fmt.Errorf("real native credential field %s contains a placeholder", pointer)
+			}
+			binding, err := bindings.field(provider, file.File, pointer, field.Kind, field.Placeholder, value, release.Placeholder)
+			if err != nil {
+				return err
+			}
+			replace(binding.project(value))
+			rawValues = append(rawValues, value)
+			if field.Release != "" {
+				if field.Kind != "apiKey" {
+					secret := secrets[field.Release]
+					if secret.Release == nil || secret.Release.HTTP == nil {
+						return fmt.Errorf("credential field %s has no HTTP release", pointer)
+					}
+					rule := secret.Release.HTTP
+					release = model.SecretReleaseEntry{SecretID: field.Release, Value: value, Hosts: rule.Hosts, Header: rule.Header, Format: rule.Format}
+				}
+				release.Placeholder = binding.Placeholder
+				if binding.Signature != "" {
+					release.Placeholder = binding.project(value)
+				}
+				releases = append(releases, release)
+			}
+			return nil
+		})
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+	for _, value := range rawValues {
+		if !strings.Contains(value, model.SecretPlaceholderMarker) && containsCredential(doc, value) {
+			return nil, nil, fmt.Errorf("credential value remains outside its declared field")
+		}
+	}
+	projected, err := json.Marshal(doc)
+	if err != nil {
+		return nil, nil, err
+	}
+	return projected, releases, nil
+}
+
+func containsCredential(value any, credential string) bool {
+	switch node := value.(type) {
+	case string:
+		return strings.Contains(node, credential)
+	case map[string]any:
+		for key, child := range node {
+			if strings.Contains(key, credential) || containsCredential(child, credential) {
+				return true
+			}
+		}
+	case []any:
+		for _, child := range node {
+			if containsCredential(child, credential) {
+				return true
+			}
+		}
+	}
+	return false
+}

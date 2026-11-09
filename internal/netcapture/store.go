@@ -230,7 +230,7 @@ func (c *Capture) Finish(relayErr error) string {
 		c.request.markIncomplete()
 	}
 	c.record.Request.Body = c.request.close()
-	if body := c.response.close(); c.record.Response != nil {
+	if body := c.response.close(); c.record.Response != nil && c.record.Response.BodyOmitted == "" {
 		c.record.Response.Body = body
 	}
 	if relayErr != nil {

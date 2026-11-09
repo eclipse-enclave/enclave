@@ -60,8 +60,22 @@ Two things follow from the layout:
 - Project config lives **outside** the worktree, keyed by hash. A repository
   cannot carry its own sandbox policy, and an agent working in it cannot rewrite
   the rules it runs under.
-- **Each git worktree is its own project.** A worktree at `../myproject-agent`
-  gets its own hash, its own project config, and its own persistent state.
+- Each Git worktree keeps its own runtime state, project settings, and memory
+  by default. Inheriting the main checkout's project inputs and project memory
+  is an explicit opt-in; session-scoped memory stays separate.
+
+To opt into the main or bare repository's project inputs and project memory,
+set this in global or checkout-local config:
+
+```json
+{"worktree_inheritance": true}
+```
+
+Or pass `--worktree-inheritance=true` for one invocation. Review the anchor's
+inputs first: opting in ignores checkout-local overrides, including stricter
+policies. See
+[Linked worktrees](https://github.com/eclipse-enclave/enclave/blob/main/docs/configuration.md#linked-worktrees)
+for precedence, session pins, fallback behavior, and cleanup.
 
 ## Precedence
 

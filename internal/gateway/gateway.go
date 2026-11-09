@@ -367,6 +367,7 @@ type StartConfig struct {
 	ProjectDir        string
 	WorkspaceID       string
 	ProjectHash       string
+	ConfigHash        string
 	SecretReleaseFile string
 	TLSRootDir        string
 }
@@ -388,6 +389,25 @@ func appendTLSCAMounts(mounts []docker.Mount, tlsRootDir string) []docker.Mount 
 	}
 	mounts = appendReadOnlyMount(mounts, filepath.Join(tlsRootDir, "ca.crt"), model.GatewayTLSCACertPath)
 	return appendReadOnlyMount(mounts, filepath.Join(tlsRootDir, "ca.key"), model.GatewayTLSCAKeyPath)
+}
+
+func gatewayMounts(cfg StartConfig) []docker.Mount {
+	var mounts []docker.Mount
+	// Built-ins stay baked into the image; only user overrides are mounted.
+	if path, scope := config.GatewayAllowlistOverridePath(cfg.Profile, cfg.Home, cfg.ConfigHash); path != "" {
+		mounts = appendReadOnlyMount(mounts, path, model.GatewayAllowlistOverridePath)
+		logx.Infof("Using %s gateway allowlist override", scope)
+	}
+	if cfg.GatewayConfigDir != "" {
+		mounts = appendReadOnlyMount(mounts, cfg.GatewayConfigDir, model.GatewayConfigDir)
+	}
+	if cfg.NetworkLogPath != "" {
+		mounts = append(mounts, docker.Mount{Type: docker.MountTypeBind, Source: cfg.NetworkLogPath, Target: gatewayNetworkLogPath})
+	}
+	if cfg.SecretReleaseFile != "" {
+		mounts = appendReadOnlyMount(mounts, cfg.SecretReleaseFile, model.GatewaySecretReleasePath)
+	}
+	return appendTLSCAMounts(mounts, cfg.TLSRootDir)
 }
 
 // StartResult holds the output of a successful gateway start.
@@ -457,26 +477,7 @@ func Start(ctx context.Context, cfg StartConfig) (StartResult, error) {
 		}
 	}
 
-	mounts := []docker.Mount{}
-	if overridePath, scope := config.GatewayAllowlistOverridePath(cfg.Profile, cfg.Home, cfg.ProjectHash); overridePath != "" {
-		mounts = appendReadOnlyMount(mounts, overridePath, model.GatewayAllowlistOverridePath)
-		logx.Infof("Using %s gateway allowlist override", scope)
-	}
-	if cfg.GatewayConfigDir != "" {
-		mounts = appendReadOnlyMount(mounts, cfg.GatewayConfigDir, model.GatewayConfigDir)
-	}
-
-	if cfg.NetworkLogPath != "" {
-		mounts = append(mounts, docker.Mount{
-			Type:   docker.MountTypeBind,
-			Source: cfg.NetworkLogPath,
-			Target: gatewayNetworkLogPath,
-		})
-	}
-	if cfg.SecretReleaseFile != "" {
-		mounts = appendReadOnlyMount(mounts, cfg.SecretReleaseFile, model.GatewaySecretReleasePath)
-	}
-	mounts = appendTLSCAMounts(mounts, cfg.TLSRootDir)
+	mounts := gatewayMounts(cfg)
 
 	env := []string{}
 	if cfg.NetworkLogPath != "" {

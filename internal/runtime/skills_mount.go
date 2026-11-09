@@ -41,7 +41,7 @@ func (r *Runtime) addSkillMounts(mounts *mountAccumulator) error {
 	containerSkillsDir := resolveContainerProfilePath(r.containerHome, skillsDir)
 
 	globalSkillsDir := config.HostSkillsDir(r.host.Home)
-	projectSkillsDir := config.HostProjectSkillsDir(r.host.Home, r.project.Hash)
+	projectSkillsDir := config.HostProjectSkillsDir(r.host.Home, r.project.ConfigSourceHash())
 	projectToolDir := config.HostProjectToolDir(r.host.Home, r.project.Hash, r.profile.Name)
 	// Key the generated directory per session (as the config-source path does),
 	// so concurrent sessions with different feature selections compose into

@@ -27,7 +27,8 @@ type EffectiveResolver struct {
 
 type ResolveInput struct {
 	ProjectDir  string
-	ProjectHash string
+	ProjectHash string // Runtime owner, never used as a config source when ConfigHash is set.
+	ConfigHash  string
 	Tool        string
 	// Session supplies the session's spec, feature, and ad-hoc domains. Leave
 	// nil to load only the tool's spec, as for a running gateway whose session
@@ -62,6 +63,10 @@ func (r EffectiveResolver) Resolve(input ResolveInput) (ResolveResult, error) {
 		return empty, fmt.Errorf("project hash is required")
 	}
 
+	configHash := strings.TrimSpace(input.ConfigHash)
+	if configHash == "" {
+		configHash = projectHash
+	}
 	globalPolicyPath := network.GlobalPolicyPath(r.home)
 	globalPolicy, err := network.LoadPolicy(globalPolicyPath)
 	if err != nil {
@@ -70,7 +75,7 @@ func (r EffectiveResolver) Resolve(input ResolveInput) (ResolveResult, error) {
 
 	projectPolicy := network.Policy{}
 	if projectDir != "" {
-		projectPolicyPath := network.ProjectPolicyPath(r.home, projectHash)
+		projectPolicyPath := network.ProjectPolicyPath(r.home, configHash)
 		projectPolicy, err = network.LoadPolicy(projectPolicyPath)
 		if err != nil {
 			return empty, fmt.Errorf("load project policy %s: %w", projectPolicyPath, err)
@@ -78,7 +83,7 @@ func (r EffectiveResolver) Resolve(input ResolveInput) (ResolveResult, error) {
 	}
 
 	allowlistPath := network.ResolveToolAllowlist(r.paths, tool)
-	allowlistPath = config.ResolveAllowlistPath(tool, r.home, projectHash, allowlistPath)
+	allowlistPath = config.ResolveAllowlistPath(tool, r.home, configHash, allowlistPath)
 
 	session := input.Session
 	if session == nil {

@@ -10,7 +10,7 @@ package config
 import "path/filepath"
 
 // DisabledCommands reads disabled_commands from the global config under home.
-// Discovery runs before LoadDefaults, which rejects a broken file before any
+// Discovery runs before defaults loading, which rejects a broken file before any
 // verb runs, so returning nothing on a read error here fails closed.
 func DisabledCommands(home string) (names []string, configPath string) {
 	configPath = filepath.Join(hostConfigRoot(home), configFilename)

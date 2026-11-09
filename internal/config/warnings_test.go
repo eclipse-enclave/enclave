@@ -87,9 +87,17 @@ func TestLoadDefaultsWarnings(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			projectDir, globalPath, projectPath := setupWarningConfigs(t, tc.global, tc.project)
 
-			_, _, got, err := LoadDefaults(projectDir)
+			resolved, err := ResolveProjectFromDir(projectDir)
 			if err != nil {
-				t.Fatalf("LoadDefaults: %v", err)
+				t.Fatal(err)
+			}
+			home, err := ResolveHostHome()
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, _, got, err := LoadDefaultsFromProject(home, resolved)
+			if err != nil {
+				t.Fatalf("LoadDefaultsFromProject: %v", err)
 			}
 			want := tc.want(globalPath, projectPath)
 			if !reflect.DeepEqual(got, want) {

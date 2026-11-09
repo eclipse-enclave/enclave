@@ -90,4 +90,4 @@ When reviewing, a missing `CHANGELOG.md` entry is not a finding. These are: an e
 
 ## Host Data
 
-Enclave uses the XDG base directories on Linux and other Unixes and the Apple layout on macOS (`XDG_*` overrides are ignored there); root resolution lives in `internal/config/host_roots.go`. Per-project config and state are keyed by project hash and kept outside the worktree. Per-project agent memory is agent-writable and never shared between projects or agents. The full path table is in [Host directories](docs/configuration.md#host-directories); store details are in `docs/runtime/stores.md`.
+Enclave uses the XDG base directories on Linux and other Unixes and the Apple layout on macOS (`XDG_*` overrides are ignored there); root resolution lives in `internal/config/host_roots.go`. Per-project config and state are keyed by project hash and kept outside the worktree. Agent memory is agent-writable: project scope follows the selected config anchor and tool, while session scope follows the checkout's config store. The full path table is in [Host directories](docs/configuration.md#host-directories); store details are in `docs/runtime/stores.md`.

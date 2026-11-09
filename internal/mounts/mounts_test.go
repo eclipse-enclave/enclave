@@ -9,6 +9,7 @@ package mounts
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -192,6 +193,36 @@ func TestAddWorktree_RejectsGitdirInSystemDir(t *testing.T) {
 	}
 }
 
+func TestAddWorktreeAllowsVerifiedSeparateGitDir(t *testing.T) {
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	main, metadata, linked := filepath.Join(root, "main"), filepath.Join(root, "metadata"), filepath.Join(root, "linked")
+	git := func(dir string, args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(), "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v %s", args, err, out)
+		}
+	}
+	git(root, "init", "--separate-git-dir", metadata, main)
+	git(main, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "--allow-empty", "-m", "initial")
+	git(main, "worktree", "add", "-b", "linked", linked)
+	for _, readonly := range []bool{false, true} {
+		var got []backend.Mount
+		AddWorktree(&got, model.Project{Dir: linked, RealDir: linked}, &[]string{}, readonly, SensitivePaths{})
+		if len(got) != 2 {
+			t.Fatalf("metadata mounts: %+v", got)
+		}
+		if got[0].Source != filepath.Join(metadata, "worktrees", "linked") || got[1].Source != metadata || got[0].ReadOnly != readonly || got[1].ReadOnly != readonly {
+			t.Fatalf("unexpected metadata mounts: %+v", got)
+		}
+	}
+}
+
 func TestAddWorktree_AllowsVerifiedExternalLinkedWorktree(t *testing.T) {
 	root := t.TempDir()
 	resolvedRoot, err := filepath.EvalSymlinks(root)
@@ -361,17 +392,6 @@ func TestAddWorktree_RejectsSymlinkedGitFile(t *testing.T) {
 
 	if len(mountArgs) != 0 {
 		t.Fatalf("expected no mounts for symlinked .git file, got %v", mountArgs)
-	}
-}
-
-func TestReadRegularFileInDirRejectsOversizedFile(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, ".git"), []byte(strings.Repeat("x", maxWorktreeMetadataBytes+1)), 0o644); err != nil {
-		t.Fatalf("write oversized .git: %v", err)
-	}
-
-	if _, err := readRegularFileInDir(dir, ".git"); err == nil {
-		t.Fatalf("expected oversized metadata file to be rejected")
 	}
 }
 

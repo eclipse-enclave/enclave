@@ -51,6 +51,10 @@ func (b *Backend) startGateway(ctx context.Context, req backend.Request, network
 	}
 
 	workspaceID := workspaceIDFromSession(req.Session, b.opts.ProjectDir)
+	configHash := req.Session.ProjectHash
+	if req.Session.ConfigSource != nil {
+		configHash = req.Session.ConfigSource.Hash
+	}
 	startConfig := gateway.StartConfig{
 		Paths:             b.opts.Paths,
 		Profile:           model.Profile{Name: req.Session.Tool},
@@ -70,6 +74,7 @@ func (b *Backend) startGateway(ctx context.Context, req backend.Request, network
 		ProjectDir:        req.Session.Worktree,
 		WorkspaceID:       workspaceID,
 		ProjectHash:       req.Session.ProjectHash,
+		ConfigHash:        configHash,
 		SecretReleaseFile: secretReleaseFile,
 		TLSRootDir:        config.HostTLSDir(b.opts.Host.Home),
 	}

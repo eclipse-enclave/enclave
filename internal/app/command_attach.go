@@ -73,10 +73,20 @@ func attachSessionRunOptions(session backend.Session, fallback model.RunOptions)
 	if session.Tool == "" || session.ProjectDir == "" {
 		return fallback
 	}
-	global, project, warnings, err := config.LoadDefaults(session.ProjectDir)
+	resolved, err := sessionConfigProject(session)
 	if err != nil {
-		logx.Debugf("resolve session options for %s: %v", session.Ref.Name, err)
-		return fallback
+		logx.Warnf("Cannot resolve session config for %s: %v", session.Ref.Name, err)
+		return model.RunOptions{}
+	}
+	home, err := config.ResolveHostHome()
+	if err != nil {
+		logx.Warnf("Cannot resolve home for session %s: %v", session.Ref.Name, err)
+		return model.RunOptions{}
+	}
+	global, project, warnings, err := config.LoadDefaultsFromProject(home, resolved)
+	if err != nil {
+		logx.Warnf("Cannot read session options for %s: %v", session.Ref.Name, err)
+		return model.RunOptions{}
 	}
 	for _, warning := range warnings {
 		logx.Debugf("%s", warning.Message)

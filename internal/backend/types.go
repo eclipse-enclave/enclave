@@ -79,7 +79,14 @@ type EnvVar struct {
 	Value string
 }
 
+// ConfigSource pins the canonical project layer selected when a session starts.
+type ConfigSource struct {
+	Dir  string `json:"dir"`
+	Hash string `json:"hash"`
+}
+
 type SessionMeta struct {
+	ConfigSource *ConfigSource
 	Tool         string
 	ProjectHash  string
 	Worktree     string
@@ -418,10 +425,11 @@ type SessionFilter struct {
 }
 
 type Session struct {
-	Ref         SessionRef
-	Tool        string
-	ProjectHash string
-	Worktree    string
+	ConfigSource *ConfigSource
+	Ref          SessionRef
+	Tool         string
+	ProjectHash  string
+	Worktree     string
 	// ProjectDir is the absolute, symlink-resolved project directory. It may be
 	// empty for containers started by an older enclave that did not record the
 	// project-dir label.

@@ -572,6 +572,10 @@ func labelsFromRequest(req backend.Request) map[string]string {
 	if configKey := configKeyFromStores(req.Stores); configKey != "" {
 		labels[model.LabelConfigKey] = configKey
 	}
+	if meta.ConfigSource != nil {
+		data, _ := json.Marshal(meta.ConfigSource)
+		labels[model.LabelConfigSource] = string(data)
+	}
 	if meta.Provenance != nil {
 		if data, err := json.Marshal(meta.Provenance); err != nil {
 			logx.Debugf("Skipping %s label: %v", model.LabelOptions, err)
@@ -686,19 +690,28 @@ func sessionFromSummary(c dockercmd.Summary) (backend.Session, bool) {
 			provenance = nil
 		}
 	}
+	var configSource *backend.ConfigSource
+	if raw, ok := labels[model.LabelConfigSource]; ok {
+		configSource = &backend.ConfigSource{}
+		if err := json.Unmarshal([]byte(raw), configSource); err != nil {
+			// Preserve presence so malformed pins never become legacy fallback.
+			configSource = &backend.ConfigSource{}
+		}
+	}
 	return backend.Session{
-		Ref:         backend.SessionRef{Name: name, ID: id},
-		Tool:        tool,
-		ProjectHash: projectHash,
-		Worktree:    worktree,
-		ProjectDir:  projectDir,
-		Status:      c.State,
-		CreatedAt:   createdAt,
-		Name:        sessionName,
-		Background:  strings.EqualFold(labels[model.LabelBackground], "true"),
-		Ports:       sessionPortMappings(c.Ports),
-		Yolo:        strings.TrimSpace(labels[model.LabelYolo]) == "1",
-		Provenance:  provenance,
+		ConfigSource: configSource,
+		Ref:          backend.SessionRef{Name: name, ID: id},
+		Tool:         tool,
+		ProjectHash:  projectHash,
+		Worktree:     worktree,
+		ProjectDir:   projectDir,
+		Status:       c.State,
+		CreatedAt:    createdAt,
+		Name:         sessionName,
+		Background:   strings.EqualFold(labels[model.LabelBackground], "true"),
+		Ports:        sessionPortMappings(c.Ports),
+		Yolo:         strings.TrimSpace(labels[model.LabelYolo]) == "1",
+		Provenance:   provenance,
 	}, true
 }
 

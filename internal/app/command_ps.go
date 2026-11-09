@@ -46,18 +46,25 @@ type psRow struct {
 // psJSONEntry is the structured shape emitted by `ps --json`. Field names and
 // their JSON tags are a consumer-facing contract; keep them stable.
 type psJSONEntry struct {
-	Name        string         `json:"name"`
-	Tool        string         `json:"tool"`
-	ProjectDir  string         `json:"projectDir"`
-	ProjectHash string         `json:"projectHash"`
-	Worktree    string         `json:"worktree"`
-	Status      string         `json:"status"`
-	CreatedAt   string         `json:"createdAt"`
-	SessionName string         `json:"sessionName"`
-	Background  bool           `json:"background"`
-	Ports       []psJSONPort   `json:"ports"`
-	Network     *psJSONNetwork `json:"network"`
-	Options     map[string]any `json:"options,omitempty"`
+	Name              string              `json:"name"`
+	Tool              string              `json:"tool"`
+	ProjectDir        string              `json:"projectDir"`
+	ProjectHash       string              `json:"projectHash"`
+	Worktree          string              `json:"worktree"`
+	Status            string              `json:"status"`
+	CreatedAt         string              `json:"createdAt"`
+	SessionName       string              `json:"sessionName"`
+	Background        bool                `json:"background"`
+	Ports             []psJSONPort        `json:"ports"`
+	Network           *psJSONNetwork      `json:"network"`
+	Options           map[string]any      `json:"options,omitempty"`
+	ConfigSource      *psJSONConfigSource `json:"configSource,omitempty"`
+	ConfigSourceError string              `json:"configSourceError,omitempty"`
+}
+
+type psJSONConfigSource struct {
+	Dir  string `json:"dir"`
+	Hash string `json:"hash"`
 }
 
 // psJSONPort is one published port binding in the ps --json output. Consumers
@@ -275,23 +282,36 @@ func buildPSJSONEntries(sessions []backend.Session) []psJSONEntry {
 		if !session.CreatedAt.IsZero() {
 			createdAt = session.CreatedAt.UTC().Format(time.RFC3339)
 		}
+		configSource, configSourceError := buildPSJSONConfigSource(session.ConfigSource)
 		entries = append(entries, psJSONEntry{
-			Name:        session.Ref.Name,
-			Tool:        session.Tool,
-			ProjectDir:  session.ProjectDir,
-			ProjectHash: session.ProjectHash,
-			Worktree:    session.Worktree,
-			Status:      status,
-			CreatedAt:   createdAt,
-			SessionName: session.Name,
-			Background:  session.Background,
-			Ports:       buildPSJSONPorts(session.Ports),
-			Network:     buildPSJSONNetwork(session.Network),
-			Options:     session.Provenance,
+			Name:              session.Ref.Name,
+			Tool:              session.Tool,
+			ProjectDir:        session.ProjectDir,
+			ProjectHash:       session.ProjectHash,
+			Worktree:          session.Worktree,
+			Status:            status,
+			CreatedAt:         createdAt,
+			SessionName:       session.Name,
+			Background:        session.Background,
+			Ports:             buildPSJSONPorts(session.Ports),
+			Network:           buildPSJSONNetwork(session.Network),
+			Options:           session.Provenance,
+			ConfigSource:      configSource,
+			ConfigSourceError: configSourceError,
 		})
 	}
 	sort.Slice(entries, func(i, j int) bool { return entries[i].Name < entries[j].Name })
 	return entries
+}
+
+func buildPSJSONConfigSource(source *backend.ConfigSource) (*psJSONConfigSource, string) {
+	if source == nil {
+		return nil, ""
+	}
+	if err := validatePinnedConfigSource(source.Dir, source.Hash); err != nil {
+		return nil, err.Error()
+	}
+	return &psJSONConfigSource{Dir: source.Dir, Hash: source.Hash}, ""
 }
 
 func buildPSJSONNetwork(network *backend.SessionNetwork) *psJSONNetwork {

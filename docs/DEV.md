@@ -128,6 +128,23 @@ User-facing model: [configuration.md](configuration.md); resolution flow:
 - `AffectsNetwork` when the option changes the session allowlist, so
   `network status|print|diff` accept its flags; a test fails otherwise.
 
+Opted-in verified worktrees use the main checkout's project layer. Pass the
+resolved `model.Project` through the command context: use `ConfigHash` for
+user-authored inputs and project memory, and `Hash` for runtime ownership. The
+filesystem verifier in `internal/gitworktree` is shared by app project
+resolution and mounts; the gateway-facing `config` package does not import it.
+See [Linked worktrees](configuration.md#linked-worktrees).
+
+The source selector is a session-affecting bootstrap boolean. Read only that
+key from the checkout-local file, then from the verified anchor's file, before
+selecting a layer, so ignored obsolete or invalid options cannot block
+inheritance. Preserve the deciding project-level value for normal source
+reporting. Actions that build on the selected source belong in
+`actionRequiresConfigSource` so they fail instead of using a fallback layer.
+Precedence and supported scopes are documented in
+[Linked worktrees](configuration.md#linked-worktrees); JSON fields are defined
+in [Integration](integration.md#config---json).
+
 ### Option kinds
 
 | Kind | How to define it |

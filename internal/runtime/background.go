@@ -92,7 +92,7 @@ func (r *Runtime) runPostStart(containerName string) {
 	// Use the resolved per-session yolo value (r.yoloEnabled), not the
 	// profile default, so toggling yolo off for this session also withholds
 	// the always_allow IDE preferences.
-	prefs, err := theia.LoadPreferences(r.host.Home, r.projectDir, r.yoloEnabled)
+	prefs, err := theia.LoadPreferencesForProject(r.host.Home, r.project, r.yoloEnabled)
 	if err != nil {
 		logx.Warnf("load %s preferences: %v", variant, err)
 		return

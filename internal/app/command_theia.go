@@ -10,6 +10,7 @@ package app
 import (
 	"context"
 
+	"enclave/internal/backend"
 	"enclave/internal/config"
 	"enclave/internal/logx"
 	"enclave/internal/model"
@@ -55,7 +56,12 @@ func runTheia(variant theia.Variant, projectDir string, opts model.Options) int 
 		return 1
 	}
 
-	prefs, err := theia.LoadPreferences(home, projectDir, theia.ContainerYoloEnabled(ctx, be, containerName))
+	sessionDir := session.ProjectDir
+	if sessionDir == "" {
+		sessionDir = projectDir
+	}
+	session.ProjectDir = sessionDir
+	prefs, err := theiaSessionPreferences(home, session, theia.ContainerYoloEnabled(ctx, be, containerName))
 	if err != nil {
 		logx.Errorf("%v", err)
 		return 1
@@ -68,4 +74,15 @@ func runTheia(variant theia.Variant, projectDir string, opts model.Options) int 
 	}
 	logx.Infof("launched %s attached to %s (logs: %s)", variant, containerName, logPath)
 	return 0
+}
+
+func theiaSessionPreferences(home string, session backend.Session, yolo bool) (map[string]any, error) {
+	if !yolo {
+		return nil, nil
+	}
+	project, err := sessionConfigProject(session)
+	if err != nil {
+		return nil, err
+	}
+	return theia.LoadPreferencesForProject(home, project, true)
 }

@@ -14,6 +14,12 @@ import "enclave/internal/model"
 
 func optionCLIFlags() map[string][]CLIFlag {
 	return map[string][]CLIFlag{
+		"worktree_inheritance": {
+			boolFlag("--worktree-inheritance", "Opt into inheriting project inputs and project memory from the verified worktree anchor (default: false, or the main checkout's setting)", func(opts *model.Options, sources *model.OptionSources, value bool) {
+				opts.WorktreeInheritance = value
+				sources.WorktreeInheritance = model.SourceCLI
+			}),
+		},
 		"tool": {
 			valueFlag("--tool", "Tool profile (default: asked once on the first interactive run, then the saved choice)", "--tool requires a value (see --help for available tools)", func(opts *model.Options, sources *model.OptionSources, value string) error {
 				opts.Tool = value

@@ -18,11 +18,12 @@ type OptionSources struct {
 }
 
 type GlobalOptionSources struct {
-	AllowRoot        OptionSource
-	AutoUpdate       OptionSource
-	DisabledCommands OptionSource
-	UpdateChannel    OptionSource
-	Verbose          OptionSource
+	AllowRoot           OptionSource
+	AutoUpdate          OptionSource
+	DisabledCommands    OptionSource
+	UpdateChannel       OptionSource
+	Verbose             OptionSource
+	WorktreeInheritance OptionSource
 }
 
 type RunOptionSources struct {
@@ -90,11 +91,12 @@ func (s OptionSources) RunSources() RunOptionSources { return s.RunOptionSources
 func DefaultOptionSources() OptionSources {
 	return OptionSources{
 		GlobalOptionSources: GlobalOptionSources{
-			AllowRoot:        SourceDefault,
-			AutoUpdate:       SourceDefault,
-			DisabledCommands: SourceDefault,
-			UpdateChannel:    SourceDefault,
-			Verbose:          SourceDefault,
+			AllowRoot:           SourceDefault,
+			AutoUpdate:          SourceDefault,
+			DisabledCommands:    SourceDefault,
+			UpdateChannel:       SourceDefault,
+			Verbose:             SourceDefault,
+			WorktreeInheritance: SourceDefault,
 		},
 		RunOptionSources: RunOptionSources{
 			AddDirs:                  SourceDefault,
@@ -318,6 +320,9 @@ func MergeOptionSources(base OptionSources, override OptionSources) OptionSource
 	}
 	if override.Verbose != SourceUnset {
 		base.Verbose = override.Verbose
+	}
+	if override.WorktreeInheritance != SourceUnset {
+		base.WorktreeInheritance = override.WorktreeInheritance
 	}
 	if override.WorktreeMetadata != SourceUnset {
 		base.WorktreeMetadata = override.WorktreeMetadata

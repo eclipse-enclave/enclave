@@ -666,6 +666,31 @@ func TestParseProjectMountFlag(t *testing.T) {
 	}
 }
 
+func TestParseWorktreeInheritance(t *testing.T) {
+	for _, args := range [][]string{{"--worktree-inheritance=false"}, {"shell", "--worktree-inheritance=false"}, {"config", "--json", "--worktree-inheritance=false"}, {"info", "--worktree-inheritance=false"}, {"network", "print", "--json", "--worktree-inheritance=false"}, {"--worktree-inheritance=false", "network", "print"}, {"cleanup", "--worktree-inheritance=false"}, {"tools", "list", "--worktree-inheritance=false"}, {"features", "list", "--worktree-inheritance=false"}} {
+		res, err := Parse(args, config.DefaultOptions())
+		if err != nil || res.Options.WorktreeInheritance || res.Sources.WorktreeInheritance != model.SourceCLI {
+			t.Fatalf("Parse(%q): flag=%v source=%v err=%v", args, res.Options.WorktreeInheritance, res.Sources.WorktreeInheritance, err)
+		}
+	}
+	for _, target := range []usercmd.Target{usercmd.TargetHost, usercmd.TargetSession} {
+		res, err := Parse([]string{"--worktree-inheritance=false", "task"}, config.DefaultOptions(), usercmd.Command{Name: "task", Target: target, Path: "/tmp/task"})
+		if err != nil || res.Options.WorktreeInheritance {
+			t.Fatalf("user command %s: flag=%v err=%v", target, res.Options.WorktreeInheritance, err)
+		}
+	}
+	res, err := Parse(nil, config.DefaultOptions())
+	if err != nil || res.Options.WorktreeInheritance {
+		t.Fatalf("inheritance enabled without opt-in: %+v %v", res.Options, err)
+	}
+	for _, args := range [][]string{{"--worktree-inheritance"}, {"--worktree-inheritance=true"}} {
+		res, err := Parse(args, config.DefaultOptions())
+		if err != nil || !res.Options.WorktreeInheritance {
+			t.Fatalf("expected explicit opt-in: %+v %v", res.Options, err)
+		}
+	}
+}
+
 func TestParseWorktreeMetadataFlag(t *testing.T) {
 	defaults := config.DefaultOptions()
 	res, err := Parse([]string{"--worktree-metadata", "none"}, defaults)

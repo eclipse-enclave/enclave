@@ -102,6 +102,7 @@ func resolvePolicyContext(input *CommandInput, tool string, session *policy.Sess
 	resolved, err := resolverCtx.Resolver.Resolve(policy.ResolveInput{
 		ProjectDir:  input.Ctx.ProjectDir,
 		ProjectHash: resolverCtx.Project.Hash,
+		ConfigHash:  resolverCtx.Project.ConfigSourceHash(),
 		Tool:        tool,
 		Session:     session,
 	})
@@ -150,7 +151,7 @@ func runNetworkStatus(input *CommandInput) int {
 	}
 
 	globalPolicyPath := network.GlobalPolicyPath(policyCtx.Home)
-	projectPolicyPath := network.ProjectPolicyPath(policyCtx.Home, policyCtx.Project.Hash)
+	projectPolicyPath := network.ProjectPolicyPath(policyCtx.Home, policyCtx.Project.ConfigSourceHash())
 	fmt.Printf("\nPolicy files:\n")
 	if util.PathExists(globalPolicyPath) {
 		fmt.Printf("  Global:  %s\n", globalPolicyPath)
@@ -214,7 +215,14 @@ func runNetworkStatus(input *CommandInput) int {
 			continue
 		}
 
-		desiredHash, err := desiredGatewayBundleHash(policyCtx.Resolver, target, targetProjectDir)
+		configHash, err := gatewayConfigHash(manager, target, targetProjectDir)
+		if err != nil {
+			state.status, state.detail = "UNKNOWN", err.Error()
+			unknown++
+			outcomes = append(outcomes, state)
+			continue
+		}
+		desiredHash, err := desiredGatewayBundleHash(policyCtx.Resolver, target, targetProjectDir, configHash)
 		if err != nil {
 			state.status = "STALE"
 			state.detail = fmt.Sprintf("cannot render desired bundle: %v", err)
@@ -347,9 +355,14 @@ func applyPolicyToGateways(input *CommandInput, scope gatewayTargetScope) int {
 		if applyErr == nil {
 			targetProjectDir, applyErr = resolveGatewayTargetProjectDir(policyCtx.Project, target)
 		}
+		configHash := ""
+		if applyErr == nil {
+			configHash, applyErr = gatewayConfigHash(manager, target, targetProjectDir)
+		}
 		generation := ""
 		if applyErr == nil {
 			resolved, err := policyCtx.Resolver.Resolve(policy.ResolveInput{
+				ConfigHash:  configHash,
 				ProjectDir:  targetProjectDir,
 				ProjectHash: target.ProjectHash,
 				Tool:        target.Tool,

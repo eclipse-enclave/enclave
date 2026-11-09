@@ -244,6 +244,9 @@ the tool spec.
 Tools also ship a `gateway-allowlist.conf` ([Tool files](#tool-files)); keep
 it minimal and include registries (PyPI, npm, ...) only when needed.
 
+Provider auth fields, including the reserved native-auth declarations, are
+listed in [Providers](credentials.md#providers).
+
 ## Ports (`ports`)
 
 Tools and features can publish container ports without Go code:

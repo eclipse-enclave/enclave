@@ -31,6 +31,7 @@ const (
 	EnvToolSettingsTemplate     = EnvPrefix + "TOOL_SETTINGS_TEMPLATE"
 	EnvToolSettingsTarget       = EnvPrefix + "TOOL_SETTINGS_TARGET"
 	EnvAuthDir                  = EnvPrefix + "AUTH_DIR"
+	EnvNativeAuthOps            = EnvPrefix + "NATIVE_AUTH_OPS"
 	EnvAuthFiles                = EnvPrefix + "AUTH_FILES"
 	EnvNetworkLogFile           = EnvPrefix + "NETWORK_LOG_FILE"
 	EnvNetworkLogMode           = EnvPrefix + "NETWORK_LOG_MODE"

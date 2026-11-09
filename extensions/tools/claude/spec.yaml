@@ -48,6 +48,37 @@ providers:
   - name: anthropic
     credentials: [anthropic-api-key, claude-code-oauth-token]
     authFiles: [config.json, .credentials.json]
+    # Reserved for the internal protected-auth implementation; no session flag yet.
+    authSecrets:
+      - file: .credentials.json
+        codec: claude-credentials
+        fields:
+          - pointer: /claudeAiOauth/accessToken
+            kind: access
+            release: claude-code-oauth-token
+            placeholder:
+              prefix: sk-ant-oat01-
+              random: { encoding: base64url, length: 86 }
+          - pointer: /claudeAiOauth/refreshToken
+            kind: refresh
+            placeholder:
+              prefix: sk-ant-ort01-
+              random: { encoding: base64url, length: 86 }
+      - file: config.json
+        codec: claude-config
+        fields:
+          - { pointer: /primaryApiKey, kind: apiKey, release: anthropic-api-key }
+          - { pointer: /anthropicApiKey, kind: apiKey, release: anthropic-api-key }
+    tokenEndpoint:
+      host: platform.claude.com
+      path: /v1/oauth/token
+      body: json
+      grants: [authorization_code, refresh_token]
+      fields: { access: access_token, refresh: refresh_token, expiresIn: expires_in, scope: scope }
+      deny:
+        - { host: api.anthropic.com, path: /api/oauth/claude_cli/create_api_key }
+        - { host: api.anthropic.com, path: /api/oauth/claude_cli/client_data }
+        - { host: platform.claude.com, path: /v1/oauth/revoke }
     securestorageDirEnv: CLAUDE_SECURESTORAGE_CONFIG_DIR
     authSession:
       mode: any

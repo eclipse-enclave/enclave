@@ -66,11 +66,11 @@ Copilot's server-side memory.
 If you accept this cross-project sharing, run `/memory on` inside a Copilot
 session to enable it, or `/memory off` to disable it again. When an Enclave config
 override or patch is active, the changed setting carries forward in that
-project's config store. See [Tool Config Patches](../../../docs/configuration.md#tool-config-patches)
+project's config store. See [Tool Config Patches](../../../docs/tool-config.md#tool-config-patches)
 for settings persistence and precedence.
 
 For a persistent opt-in, add `"memory": true` to a
-[settings patch](../../../docs/configuration.md#tool-config-patches), for example
+[settings patch](../../../docs/tool-config.md#tool-config-patches), for example
 `~/.config/enclave/patches/copilot/settings.json` on Linux:
 
 ```json

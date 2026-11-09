@@ -28,7 +28,7 @@ That single env var selects the instance for `glab`, retargets token injection
 at it, and joins the network allowlist — no spec edit or `allow_domains` entry.
 The tokens then go only to that exact host — not to its subdomains, and not to
 `gitlab.com`, which stays reachable but sees no token.
-See `serviceAuth.hostsFromCredential` in `docs/extensions/README.md` for the
+See `serviceAuth.hostsFromCredential` in `docs/extensions/credentials.md` for the
 accepted value forms.
 
 `GITLAB_HOST` applies to the run that sets it and is not written to the

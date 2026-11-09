@@ -23,7 +23,7 @@ vulnerabilities.
 
 #### Changelog
 
-<!-- User-visible changes, in the user's terms, as "- " items like in CHANGELOG.md: one item per change, wrapped lines indented by two spaces. Start an item with "Breaking:" for a breaking change and say what to do instead. Write "none" in the block if users won't notice the change. No PR or issue link, the release adds it. Do not edit CHANGELOG.md. See https://github.com/eclipse-enclave/enclave/blob/main/docs/DEV.md#releases -->
+<!-- User-visible changes, in the user's terms, as "- " items like in CHANGELOG.md: one item per change, wrapped lines indented by two spaces. Start an item with "Breaking:" for a breaking change and say what to do instead. Write "none" in the block if users won't notice the change. No PR or issue link, the release adds it. Do not edit CHANGELOG.md. See https://github.com/eclipse-enclave/enclave/blob/main/CONTRIBUTING.md#pull-request-checklist -->
 
 ```changelog
 ```

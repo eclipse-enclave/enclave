@@ -1,345 +1,145 @@
 # Networking
 
-## How It Works
+How Enclave restricts outbound network access, how to allow more domains,
+forward ports in both directions, and read the network audit log.
 
-By default, network access is restricted via a gateway sidecar (dnsmasq + transparent proxy). DNS only resolves allowlisted domains and the proxy enforces Host/SNI against the same allowlist. This prevents agents from making arbitrary outbound requests.
+## How it works
 
-Pass/deny audit events are logged to `~/.local/state/enclave/projects/<project-hash>/<tool>/logs/network.log`. Read them with [`enclave network log`](#reading-the-network-log). The default `coarse` mode records one event per TLS connection rather than one per request, so read [Coverage and granularity](#coverage-and-granularity) before drawing conclusions from what the log does or does not contain.
+By default, every session runs behind a gateway sidecar with dnsmasq and a
+transparent proxy. DNS resolves only allowlisted domains, and the proxy checks
+the HTTP `Host` header or TLS SNI against the same allowlist. Pass and deny
+decisions are logged to
+`~/.local/state/enclave/projects/<project-hash>/<tool>/logs/network.log`
+([reading the log](#reading-the-network-log)). See
+[Network request flow](runtime/network-request-flow.md) for the request path
+and [Security boundaries](security/README.md#network-boundary) for the limits.
 
-For request-level logging, enable:
+| Mode | Selected by | Effect |
+|------|-------------|--------|
+| Restricted | Default | Gateway enforces the allowlist |
+| Unrestricted | `--allow-all-network`, `allow_all_network` config key, or `enclave network set-mode unrestricted --global` | No gateway; all outbound traffic allowed |
 
-```bash
-enclave --network-log=requests
-```
+The experimental `qemu` backend always runs unrestricted: selecting it implies
+`--allow-all-network` with a notice, and `--allow-domain` is rejected.
 
-This forces allowlisted HTTPS traffic through the gateway MITM proxy so the gateway can emit HTTP-style request audit events for both HTTP and HTTPS, instead of one event per TLS connection. Some clients that pin certificates or use custom trust stores may fail in this mode.
+## Adding custom domains
 
-The container trusts the gateway CA through `SSL_CERT_FILE` and
-`REQUESTS_CA_BUNDLE` (the system bundle plus the gateway CA, written to
-`/tmp/enclave-ca/ca-certificates.crt` at startup) and `NODE_EXTRA_CA_CERTS`.
-They are set on the container itself, so processes started with `docker exec`,
-such as an attached IDE's backend, trust the gateway as well.
-
-Only the gateway CA persists on the host; leaf certificates stay inside each
-gateway container. Upgrades may leave an unused legacy cache at
-`~/.local/state/enclave/tls/hosts`. On Linux, its old container-owned permissions
-can prevent normal removal; delete it with
-`sudo rm -rf ~/.local/state/enclave/tls/hosts`, or use
-`podman unshare rm -rf ~/.local/state/enclave/tls/hosts` when rootless podman
-last owned it.
-
-To disable all restrictions:
-
-```bash
-enclave --allow-all-network
-```
-
-The experimental `qemu` backend currently has no restricted-egress implementation, so it always runs with all outbound network allowed. Selecting it implies `--allow-all-network` automatically and prints a notice; passing `--allow-domain` (which would require restricted egress) is rejected.
-
-## Reading the Network Log
+| Scope | How |
+|-------|-----|
+| One run | `--allow-domain <domain>` (repeatable or comma-separated) |
+| All projects | `allow_domains` in `~/.config/enclave/config.json`, or `enclave network add-domain <domain> --global` (writes `~/.config/enclave/network.jsonc`) |
+| One project | `allow_domains` in `~/.config/enclave/projects/<hash>/config.json` |
 
 ```bash
-enclave network log                        # Events of the current project and tool
-enclave network log --follow               # Stream new events as they arrive
-enclave network log --summary              # Per-domain aggregate
-enclave network log --verdict deny         # Only what was blocked
-enclave network log --domain '*.github.com' --since 10m
-enclave network log --json | jq            # The integration contract
-```
-
-The log is read from disk, so events of a session that has already exited are
-still available. `--session <container>` reads one session's events and
-`--all-running` merges every running gateway's log in timestamp order; only
-`--all-running` needs Docker. `--session` uses it when reachable, so a session of
-another project can be named, and otherwise reads this project's log. A name that
-appears on no event is an error rather than an empty result. Concurrent sessions
-of the same project and tool append to one file, so `--session` also filters on
-the `session` field: events written before session stamping existed carry none
-and are not shown.
-
-`--since` takes a duration (`10m`), an RFC3339 timestamp, or `session`, which
-resolves to the start of the most recent session in scope and therefore needs a
-scope covering exactly one session. Because it anchors on a session boundary it
-also limits the output to that session's events, so a concurrent session sharing
-the file does not bleed in. Combined with `--session` it resolves to that
-session's own start.
-
-Output is the aligned human form. `--json` is the machine contract: on its own
-it emits the raw JSONL event stream verbatim, and with `--summary` it emits the
-aggregate as a single JSON object. Events that never carried a host name, such as
-a TLS connection denied at the ClientHello, are grouped under `(no domain)` (an
-empty `domain` in JSON), so the summary totals match what `--verdict deny`
-prints. The last column shows the matched rule of a denied event, except that
-policy denials (`allowlist` on `http` and `tcp` rows, `nxdomain` on `dns` rows)
-read `blocked by policy`; the JSON keeps the raw rule. Colour follows `NO_COLOR`
-and `ENCLAVE_COLOR`, and is off when stdout is not a terminal.
-
-### What is recorded
-
-| Type | Written by | Notes |
-|------|-----------|-------|
-| `http` | MITM proxy | One event per request, with method, path, status and byte counts. Query strings are never logged: only the URL path is recorded. Written for every plaintext HTTP request, and for HTTPS only where the proxy terminates TLS |
-| `tcp` | MITM proxy | One event per TLS connection, written at the ClientHello with the SNI host, the verdict and the matched rule. The requests carried inside the connection are not visible |
-| `dns` | DNS audit translator | One event per denied or failed lookup, with `rule` naming the condition (`nxdomain` for a domain blackholed by policy, `upstream-servfail`, `upstream-refused` or `upstream-nxdomain` for an upstream failure) |
-| `session` | Host, at gateway start | A boundary marker naming the session. Not an audit event: excluded from `--summary` and never matched by `--verdict`, `--domain` or `--type` |
-
-A blocked lookup usually produces two `dns` events, one for the A query and one
-for the AAAA query, because the resolver asks for both. `NODATA` answers are not
-recorded: dnsmasq returns `NODATA-IPv6` for every allowlisted host without an
-IPv6 record, so recording it would report allowed domains as denied.
-
-### Coverage and granularity
-
-The log records policy decisions and connections, not traffic volume. Four
-limits matter before a quiet log is read as a quiet session:
-
-- **Successful DNS lookups are never recorded.** Only denied and failed lookups
-  produce a `dns` event, and dnsmasq answers repeat lookups from its cache
-  without going upstream at all.
-- **In `coarse` mode an HTTPS connection is one `tcp` event, not one per
-  request.** The proxy reads the ClientHello, records the SNI host, and tunnels
-  the rest through without decrypting it. A client holding a long-lived HTTP/2
-  connection — an agent talking to its model API, for example — produces a
-  single event when the connection is opened and nothing for the hundreds of
-  requests that follow. Short-lived connections (a `git fetch`, a CLI call, a
-  poller reconnecting) produce one event each, so they dominate a coarse log
-  even when they carry far less traffic.
-- **`http` events for HTTPS require the proxy to terminate TLS.** In `coarse`
-  mode that happens only for hosts covered by a declared secret's HTTP release
-  rules, where the gateway has to rewrite a header anyway, and only when that
-  secret was actually resolved for the session. A tool authenticated with an
-  OAuth token rather than an API key therefore has no release rule for its API
-  host and produces no request-level events for it.
-- **An upgraded connection is one `http` event.** A WebSocket, or any other
-  protocol a client switches to (SPDY for `kubectl exec`, for example), is
-  logged once with status `101`, when it closes. The traffic it carries is
-  relayed without being inspected or logged, so requests multiplexed inside it
-  get no events of their own, even with `--network-log=requests`.
-
-Run the session with `--network-log=requests` to force MITM for every
-allowlisted HTTPS host and get an `http` event per request. In either mode, SSH
-on port 22 bypasses the HTTP/TLS proxy and is never recorded.
-
-### Rotation
-
-At session start, a log larger than 32 MB is copied to `network.log.1`,
-replacing any previous generation, and then truncated in place. The reader reads
-`.1` first, so the boundary is invisible. Truncating
-rather than renaming keeps the file a running gateway has bind-mounted, so a
-session that is already going on keeps writing where readers can see it. A
-session never rotates its own log, so a single long-running session can grow past
-the cap, and worst-case disk use is roughly twice the cap per project and tool.
-Concurrent session starts serialize on a `network.log.lock` file next to the log,
-so two of them cannot discard the generation the other just wrote.
-
-## Managing the Network Policy
-
-Use the `network` subcommand to inspect and modify network policy without editing files manually:
-
-```bash
-enclave network status                     # Show network policy status
-enclave network print                      # Print effective dnsmasq config
-enclave network diff                       # Show changes from built-in defaults
-enclave network add-domain example.com --global     # Allow a domain
-enclave network remove-domain example.com --global  # Remove a domain
-enclave network set-mode unrestricted --global      # Or: restricted
-enclave network apply                      # Apply policy to running gateways
-```
-
-`status`, `print`, and `diff` show the policy a run with the same options would enforce: tool allowlist and spec domains, enabled features' allowed and denied domains, credential release hosts, `allow_domains`, and `allow_all_network`.
-
-- They accept the run flags that affect the policy (see the [CLI reference](cli-reference.md#network)), e.g. `enclave network print --features +github-cli --allow-domain api.example.com`.
-- Configured options such as `devcontainer` or `backend: qemu` are honoured; `print` and `diff` take no `--backend`, so preview `run --backend qemu` with `--allow-all-network`.
-- Sessions started with `enclave devcontainer run|shell` cannot be previewed: devcontainer mode has no flag, and it drops the default features.
-- Hosts selected at session start through `serviceAuth.hostsFromCredential` are not shown.
-- In unrestricted mode `print` emits only `# Mode: unrestricted`.
-- If the options are invalid, `print` and `diff` fail (`print` also rejects an unknown tool), while `status` warns and summarizes the tool spec and policy files.
-- `apply` and the running-gateway comparison in `status` use the tool spec and policy files only, not the options a session recorded.
-
-Network mutations are currently global-only. `--project` scope is planned but not yet supported.
-
-Mutating commands (`add-domain`, `remove-domain`, `set-mode`) apply the updated policy to the running gateways of the current project automatically, for every tool, so they do not accept `--tool`. Pass `--no-apply` to persist the change without applying it, or `--all-running` to target every running gateway on the host. Run `enclave network apply` (optionally with `--tool` or `--all-running`) to push the persisted policy to the current project/tool's gateways on demand. Persisted unrestricted mode still requires a session restart.
-
-### JSON output (`schemaVersion: "1"`)
-
-`enclave network print --json` emits the same allowlist as a versioned envelope instead of the dnsmasq config:
-
-```json
-{
-  "schemaVersion": "1",
-  "kind": "network-policy",
-  "tool": "claude",
-  "project": { "dir": "/home/you/src/app", "hash": "e9671acd2448" },
-  "mode": "restricted",
-  "domains": ["anthropic.com", "api.anthropic.com", "github.com"],
-  "denied": ["telemetry.example.com"],
-  "notes": ["Hosts selected at session start through serviceAuth.hostsFromCredential are not listed."],
-  "error": ""
-}
-```
-
-- `domains`: the allow set the gateway renders, canonical and sorted, without entries equal to or under a denied domain. `denied`: the blackholed domains, sorted.
-- `mode` is `restricted` or `unrestricted`; in unrestricted mode `domains`, `denied`, and `notes` are empty.
-- `project` is `null` when the project cannot be resolved. Arrays are never `null`. Fields are only added, never renamed or removed.
-
-If the policy cannot be resolved (no or unknown tool, options a run would reject, a malformed spec, policy, or defaults file), stdout carries one envelope with `error` set, `mode: null`, and empty arrays (`tool` is `null` for startup failures), and the exit code is 1; unlike `config --json`, there is no result to report. Usage errors go to stderr only (exit 1, empty stdout), as do warnings.
-
-## Adding Custom Domains
-
-Add custom domains through global `~/.config/enclave/network.jsonc`,
-`--allow-domain`, or the `allow_domains` config key (global or project).
-
-### Global policy inheritance
-
-A project policy at `~/.config/enclave/projects/<hash>/network.jsonc` can set
-`"inherit_global_policy": false` to exclude domain entries from both
-`domains.global` and `domains.tools` in the global policy. The project's own
-entries still apply. This switch does not change mode, resolver, built-in tool
-allowlist, or extension-domain precedence.
-
-### Per-run domains
-
-Use `--allow-domain <domain>` (repeatable or comma-separated) to add domains to the gateway allowlist for a single run only. The flag does **not** mutate `~/.config/enclave/network.jsonc` or any project file; it just augments the gateway's in-memory policy for the current container. It replaces `allow_domains` from config for the run; `--allow-domain +api.example.com` adds to them and `--allow-domain -api.example.com` drops one.
-
-```bash
-enclave --allow-domain api.deepseek.com --allow-domain api.example.com
 enclave --allow-domain api.deepseek.com,api.example.com
 ```
 
-A domain that a deny rule blocks stays blocked; the session start reports it separately from the allowlisted ones.
+- `--allow-domain` changes only the running gateway's policy, not policy or
+  project files. It replaces `allow_domains` for the run; `+api.example.com`
+  adds to the configured list and `-api.example.com` drops one.
+- Only bare DNS names are accepted, without schemes, paths, ports, or
+  wildcards.
+- A domain blocked by a deny rule stays blocked; session start reports it
+  separately.
+- It has no effect with `--allow-all-network`, because no gateway runs.
 
-On the Docker backend, `--allow-domain` is inert when combined with `--allow-all-network`: the gateway is not running, so there is no allowlist to extend. The QEMU backend rejects `--allow-domain` because it cannot enforce restricted egress. Bare DNS names only — schemes, paths, ports, and wildcards are rejected.
+A project policy at `~/.config/enclave/projects/<hash>/network.jsonc` can set
+`"inherit_global_policy": false` to ignore the domain entries of
+`domains.global` and `domains.tools` in the global policy. The project's own
+entries still apply; mode, resolver, built-in tool allowlist, and
+extension-domain precedence are unchanged.
 
-The same key works in config: `"allow_domains": ["api.deepseek.com"]` in global `~/.config/enclave/config.json`, or in project `~/.config/enclave/projects/<hash>/config.json` for one project.
+## Overriding the main allowlist
 
-## Overriding the Main Allowlist
-
-Replace the built-in allowlist entirely without rebuilding the image:
+These files replace the built-in allowlist without rebuilding the image; the
+project file takes precedence:
 
 - Global: `~/.config/enclave/gateway-allowlists/<tool>.conf`
-- Per-project: `~/.config/enclave/projects/<project-hash>/gateway-allowlists/<tool>.conf`
+- Project: `~/.config/enclave/projects/<project-hash>/gateway-allowlists/<tool>.conf`
 
-Project overrides take precedence over global. These files replace the built-in allowlist; use standard dnsmasq `server=` or `conf-file=` lines (referencing `/etc/dnsmasq.allowlists/...`).
+Use dnsmasq `server=` or `conf-file=` lines that reference
+`/etc/dnsmasq.allowlists/...`. Without an override, the tool's own
+`gateway-allowlist.conf` applies, read from
+`~/.config/enclave/extensions/tools/<tool>/` before the built-in extension tree
+(so a user-installed tool enforces the allowlist it ships). A tool without one
+falls back to the broader `base.conf`. The built-in allowlists live in
+`runtime-assets/gateway-allowlists/` and are baked into the image.
 
-The built-in allowlists live in `runtime-assets/gateway-allowlists/` in the repo and are baked into the container image at build time.
-
-Without an override, the tool's own `gateway-allowlist.conf` applies. It is resolved from `~/.config/enclave/extensions/tools/<tool>/` first and from the built-in extension tree second, so a user-installed tool extension enforces the allowlist it ships. A tool that declares none falls back to `base.conf`, which allows more domains than a tool-specific allowlist.
-
-## Port Direction: `-p` vs `--bridge-port`
-
-These two flags handle opposite directions of port forwarding:
-
-- **`-p <port>`** — Publishes a **container** port to the **host** (container → host). Use this when the agent starts a service inside the container (e.g. a dev server on port 3000) and you want to access it from your host browser.
-
-  Accepts Docker's publish forms: `3000` (host `3000` → container `3000`), `8080:80` (host:container), and `127.0.0.1:8080:80` (explicit host-IP). A host port of `0` — e.g. `-p 0:3000` or `-p 127.0.0.1:0:3000` — asks the daemon to assign a free host port at runtime, which avoids collisions when many sessions publish the same container port. The assigned port is printed once the session starts and is discoverable with `enclave ps --json` (each session lists its `ports` bindings). Auto-assigned host ports are Docker-only; the experimental QEMU backend rejects a host port of `0`.
-
-- **`--bridge-port <port>`** — Forwards a **host** port into the **container** (host → container). Use this when you have a service running on your host (e.g. an MCP server on port 9800) and the agent needs to reach it at `localhost:9800` from inside the container.
-
-## Per-session Docker networks
-
-Each Docker session gets its own labeled bridge network, in restricted and
-unrestricted modes. Normally only one network namespace is attached: the
-gateway for a restricted session, or the tool container for an unrestricted
-session. The bridge and subnet exist while the session container exists; a
-stopped background session keeps its network until `enclave stop`. Once the
-session has exited, its gateway is stopped, releasing the published ports: by
-`enclave attach` if attached, otherwise at the next session start or `enclave
-cleanup --ephemeral`. Under podman the stopped gateway
-container stays until the session is removed. Inspect networks through
-structured output:
+## Managing the network policy
 
 ```bash
-enclave ps --json
-# ... "network": {"name": "...", "subnet": "172.30.0.0/28"}
+enclave network status                              # Policy status and sync state of running gateways
+enclave network print                               # Effective dnsmasq config
+enclave network diff                                # Changes from built-in defaults
+enclave network add-domain example.com --global     # Allow a domain
+enclave network remove-domain example.com --global  # Remove a domain
+enclave network set-mode unrestricted --global      # Or: restricted
+enclave network apply                               # Apply policy to running gateways
 ```
 
-Restricted gateways also drop unsolicited inbound IPv4 and IPv6 traffic, even
-if a peer can route to the session. Only loopback, established/related replies,
-and published container ports are admitted. OAuth callback forwarding remains
-available through its published port; DNS and proxy listeners are not exposed
-to peers unless explicitly published. Unrestricted sessions have no gateway
-inbound filter.
+`status`, `print`, and `diff` show the policy a run with the same options would
+enforce: tool allowlist and spec domains, features' allowed and denied domains,
+credential release hosts, `allow_domains`, and `allow_all_network`. They accept
+the run flags that shape it ([CLI reference](cli-reference.md#network)), for
+example `enclave network print --features +github-cli --allow-domain api.example.com`.
+`print --json` emits a versioned envelope; see
+[`network print --json`](integration.md#network-print---json).
 
-Docker 29 and newer allocate a small dynamic IPv4 prefix for each session. On
-older daemons, Docker's default allocation applies and the stock address pools
-can limit the number of concurrent networks. If pool allocation is exhausted,
-upgrade the daemon or configure Docker's `default-address-pools`.
+- Configured options such as `devcontainer` or `backend: qemu` are honored.
+  `print` and `diff` take no `--backend`; preview `run --backend qemu` with
+  `--allow-all-network`.
+- Not shown: sessions started with `enclave devcontainer run|shell` (no flag
+  selects devcontainer mode, and it drops the default features), and hosts
+  chosen at start through `serviceAuth.hostsFromCredential`.
+- In unrestricted mode, `print` emits only `# Mode: unrestricted`.
+- Invalid options make `print` and `diff` fail (`print` also rejects an unknown
+  tool); `status` warns and summarizes the tool spec and policy files.
+- `apply` and the running-gateway comparison in `status` use the tool spec and
+  policy files only, not the options a session recorded.
 
-Under `--backend podman` the same networks require netavark and are created with
-`isolate=strict`, since netavark isolates bridge networks from each other only
-on request before podman 6. Older netavark versions or Podman CLIs that reject
-`strict` fall back to `isolate=true` with a warning: non-isolated networks can
-still route to the session, but restricted gateways retain their inbound filter.
-Podman's default pool hands out a `/24` per network
-and is not subject to the Docker pool limit. Published ports still bind
-`127.0.0.1` explicitly on both engines.
+Changes are global only; `--project` scope is planned. `add-domain`,
+`remove-domain`, and `set-mode` apply the result to running gateways of the
+current project, for every tool (so they take no `--tool`). `--no-apply` only
+persists; `--all-running` targets every running gateway on the host.
+`enclave network apply` (optionally `--tool` or `--all-running`) pushes the
+persisted policy on demand. Unrestricted mode is never applied live: running
+restricted sessions must be restarted.
 
-Teardown waits for asynchronous session-container removal, common with Podman.
-Waits exceeding one second report the reason and retry limit. The limit counts
-retries, not elapsed time; engine commands can extend the wait.
+## Port direction: `-p` vs `--bridge-port`
 
-A network that outlives its session (for example after a `kill -9` of the
-enclave process) is removed at the next session start, or by
-`enclave cleanup --ephemeral`, once it is an hour old and has no endpoints.
+| Flag | Direction | Example |
+|------|-----------|---------|
+| `-p <port>` | Container to host | Open the agent's dev server on port 3000 from the host browser |
+| `--bridge-port <port>` | Host to container | Let the agent reach a host MCP server at `localhost:9800` |
 
-Container-to-container access is not a compatibility contract. As an advanced,
-unsupported integration, `docker network connect <network-name> <peer-container>`
-can deliberately attach a peer to the network named in the `enclave ps --json`
-output. Enclave does not manage or authorize that peer, and the network cannot
-be removed until it disconnects. Restricted gateways still require a published
-port for the peer to reach a session listener.
+`-p` takes Docker's publish forms: `3000`, `8080:80` (host:container),
+`127.0.0.1:8080:80` (host IP), and a host port of `0` (`0:3000`,
+`127.0.0.1:0:3000`) to let the engine pick a free port, which avoids
+collisions between sessions. The assigned port is printed at start and listed
+under `ports` in `enclave ps --json`. Auto-assigned ports are Docker-only; the
+`qemu` backend rejects port `0`. Without a host IP, ports bind `127.0.0.1`.
 
-### Migrating from the default bridge
-
-- Podman hosts using CNI must switch to netavark before starting sessions.
-- On Linux Docker Engine, existing `docker0`-specific firewall rules for
-  `--bridge-port` and the IDE bridge no longer match. Replace them with rules
-  for each session's bridge and subnet; see [host service configuration](#linux-host-service-configuration).
-- Session startup now requires a successful `docker info` or `podman info`
-  query to select network options. Previously, failure of this query only
-  suppressed configuration warnings.
-
-## Bridging Host Ports
-
-`--bridge-port` forwards host-side services into the container on `localhost`.
-Restricted sessions configure DNAT in the gateway sidecar, with a userspace
-proxy fallback when DNAT is unavailable. Unrestricted sessions run the
-userspace proxy in the tool container. The automatic IDE bridge follows the
-same placement and discovers VS Code extension ports from
-`~/.claude/ide/*.lock` files.
+## Bridging host ports
 
 ```bash
-enclave --bridge-port 9800                       # Single port
-enclave --bridge-port 9800,9801                  # Comma-separated
-enclave --bridge-port 9800 --bridge-port 9801    # Repeated flag
+enclave --bridge-port 9800,9801    # Or repeat the flag; config key: "bridge_ports": ["9800"]
 ```
 
-Or set them in config:
-
-```json
-{
-  "bridge_ports": ["9800", "9801"]
-}
-```
-
-Explicit bridge ports are merged with any auto-discovered IDE ports and deduplicated.
+Restricted sessions use DNAT in the gateway, with a userspace proxy as
+fallback; unrestricted sessions run the proxy in the tool container. The
+automatic IDE bridge works the same way, discovers VS Code extension ports from
+`~/.claude/ide/*.lock`, and is merged and deduplicated with explicit ports.
 
 ### Linux: host service configuration
 
-On Linux with Docker Engine, `host-gateway` resolves to the gateway address of
-Docker's default bridge (typically `172.17.0.1`), while traffic originates from
-the session's dedicated bridge interface and subnet. Consequently:
+With Docker Engine on Linux, `host-gateway` resolves to the default bridge's
+gateway (typically `172.17.0.1`), while traffic comes from the session's own
+bridge and subnet. The host service must bind to that gateway address, not
+`127.0.0.1`, and the firewall must allow the session subnet on the session
+bridge. Docker Desktop reaches host loopback through its VM, so this does not
+apply there.
 
-1. The host service must bind to the default-bridge gateway address, not
-   `127.0.0.1`.
-2. The host firewall must allow the session subnet on the session bridge
-   interface.
-
-Docker Desktop routes `host.docker.internal` through its VM and can reach host
-loopback services directly, so these Linux Engine steps do not apply there.
-
-Start the session first, then select its structured network entry. The network
-is ephemeral, so capture these values while the session is running:
+Capture the values while the session runs:
 
 ```bash
 SESSION_NAME=enclave-codex-abc123abc123-main
@@ -350,31 +150,155 @@ SESSION_INTERFACE="br-${NETWORK_ID:0:12}"
 HOST_GATEWAY=$(docker network inspect bridge --format '{{(index .IPAM.Config 0).Gateway}}')
 ```
 
-Bind the service to `$HOST_GATEWAY`; do not use `0.0.0.0`, which also exposes
-it on external-facing interfaces:
+Bind the service to `$HOST_GATEWAY`, not `0.0.0.0`, which also exposes it
+externally, and allow only that source and destination (UFW shown):
 
 ```bash
 my-mcp-server --host "$HOST_GATEWAY" --port 9800
-```
 
-If a host firewall blocks the traffic, allow only the session source and
-destination. For UFW:
-
-```bash
 sudo ufw allow in on "$SESSION_INTERFACE" from "$SESSION_SUBNET" to "$HOST_GATEWAY" port 9800 proto tcp
 
 # Remove the rule when the bridge is no longer needed.
 sudo ufw delete allow in on "$SESSION_INTERFACE" from "$SESSION_SUBNET" to "$HOST_GATEWAY" port 9800 proto tcp
 ```
 
-Both the interface and subnet change with each session, so recreate this UFW
-rule after every start. A stable rule requires a broader policy: configure a
-known Docker `default-address-pools` range, then use iptables or nftables to
-match the `br-` interface prefix and that source range. Such a rule also
-admits non-Enclave Docker bridges allocated from the range; use the per-session
-rule when those containers are not equally trusted.
+The interface and subnet change every session, so recreate the rule after each
+start. A stable rule needs a known Docker `default-address-pools` range and an
+iptables or nftables match on the `br-` prefix and that range; it also admits
+other Docker bridges from the range, so prefer the per-session rule when those
+containers are less trusted. Other firewalls need the equivalent: the session
+subnet on the session bridge, to the default-bridge gateway and port only. In
+the session, the service stays at `localhost:9800`.
 
-The equivalent rule for another firewall permits the session subnet on the
-session bridge interface to reach only the default-bridge gateway and required
-TCP port. Inside the session, the service remains available at
-`localhost:9800` through the DNAT bridge.
+## Reading the network log
+
+```bash
+enclave network log                        # Current project and tool
+enclave network log --follow               # Stream new events
+enclave network log --summary              # Per-domain aggregate
+enclave network log --verdict deny         # Only what was blocked
+enclave network log --domain '*.github.com' --since 10m
+enclave network log --json | jq            # The integration contract
+```
+
+The log is read from disk, so exited sessions remain visible. All flags are in
+the [CLI reference](cli-reference.md#network).
+
+- `--session <container>` reads one session. It uses Docker when reachable, so
+  another project's session can be named; otherwise it reads this project's
+  log. A name on no event is an error. Concurrent sessions of a project and tool
+  share one file, so it filters on the `session` field; events from before
+  session stamping have none and are not shown.
+- `--all-running` merges every running gateway's log by timestamp and needs
+  Docker.
+- `--since` takes a duration (`10m`), an RFC3339 time, or `session`: the start
+  of the most recent session in scope, which must cover exactly one session.
+  It then shows only that session's events, even if a concurrent session
+  shares the file; with `--session` it is that session's start.
+
+Output is aligned text. `--json` alone emits the raw JSONL events; with
+`--summary` it emits one JSON object. Events without a host name (such as a TLS
+connection denied at the ClientHello) are grouped as `(no domain)`, an empty
+`domain` in JSON, so summary totals match `--verdict deny`. Policy denials
+(`allowlist` on `http`/`tcp`, `nxdomain` on `dns`) show `blocked by policy` in
+the rule column; JSON keeps the raw rule. Color follows `NO_COLOR` and
+`ENCLAVE_COLOR` and is off when stdout is not a terminal.
+
+### What is recorded
+
+| Type | Written by | Notes |
+|------|-----------|-------|
+| `http` | MITM proxy | One per request: method, path (never the query string), status, byte counts. Every plaintext HTTP request; HTTPS only where the proxy terminates TLS |
+| `tcp` | MITM proxy | One per TLS connection at the ClientHello: SNI host, verdict, matched rule. Requests inside are not visible |
+| `dns` | DNS audit translator | One per denied or failed lookup. `rule`: `nxdomain` (blocked by policy), or `upstream-servfail`, `upstream-refused`, `upstream-nxdomain` |
+| `session` | Host, at gateway start | Boundary marker. Not an audit event: excluded from `--summary`, never matched by `--verdict`, `--domain`, or `--type` |
+
+A blocked lookup usually logs two `dns` events (A and AAAA). `NODATA` answers
+are not recorded, because dnsmasq returns `NODATA-IPv6` for every allowlisted
+host without an IPv6 record.
+
+### Coverage and granularity
+
+The log records decisions and connections, not traffic volume, so a quiet log
+does not mean a quiet session:
+
+- Successful DNS lookups are never recorded, and dnsmasq answers repeats from
+  its cache.
+- In `coarse` mode (default), an HTTPS connection is one `tcp` event; the rest
+  is tunneled undecrypted. A long-lived HTTP/2 connection, such as an agent's
+  model API connection, logs once for hundreds of requests, while short-lived
+  connections (`git fetch`, CLI calls, reconnecting pollers) log each time and
+  dominate the log.
+- `http` events for HTTPS need TLS termination. In `coarse` mode that happens
+  only for hosts of a declared credential's HTTP release rule, and only when
+  the credential was resolved. A tool logged in with OAuth instead of an API key
+  therefore gets no request-level events for its API host.
+- An upgraded connection (WebSocket, SPDY for `kubectl exec`) is one `http`
+  event with status `101`, logged when it closes; its traffic is relayed
+  uninspected, even with `--network-log=requests`.
+- Only ports 80 and 443 go through the proxy. Other ports, such as SSH on 22,
+  reach allowlisted IPs directly and are never recorded.
+
+### Request-level logging
+
+`enclave --network-log=requests` routes all allowlisted HTTPS through the
+gateway's MITM proxy, giving one `http` event per request. Clients that pin
+certificates or use custom trust stores may fail. The container trusts the
+gateway CA through `SSL_CERT_FILE` and `REQUESTS_CA_BUNDLE`
+(`/tmp/enclave-ca/ca-certificates.crt`: system bundle plus gateway CA, written
+at startup) and `NODE_EXTRA_CA_CERTS`. They are set on the container, so
+`docker exec` processes such as an attached IDE backend trust it too. Only the
+CA persists on the host; leaf certificates stay in each gateway container.
+
+### Rotation
+
+At session start, a log over 32 MB is copied to `network.log.1` (replacing the
+old copy) and truncated in place; the reader reads `.1` first. Truncating keeps
+the file a running gateway has bind-mounted. A session never rotates its own
+log, so one long session can exceed the cap, and worst-case use is about twice
+the cap per project and tool. Concurrent starts serialize on
+`network.log.lock`, so neither discards the other's copy.
+
+## Per-session Docker networks
+
+Each session gets its own labeled bridge network, in both modes. Restricted
+sessions attach the gateway and the tool shares its namespace; unrestricted
+sessions attach the tool container. Inspect it with:
+
+```bash
+enclave ps --json
+# ... "network": {"name": "...", "subnet": "172.30.0.0/28"}
+```
+
+- Restricted gateways drop unsolicited inbound IPv4 and IPv6 traffic. Only
+  loopback, established or related replies, and published ports (including
+  OAuth callbacks) get in; DNS and proxy listeners stay unexposed. Unrestricted
+  sessions have no inbound filter.
+- Docker 29 and newer allocate a small dynamic IPv4 prefix per session. Older
+  daemons use the stock address pools, which can limit concurrent networks; if
+  they run out, upgrade or set `default-address-pools`.
+- Podman specifics are in
+  [Podman per-session networks](backends.md#per-session-networks).
+
+Lifecycle:
+
+- The network lives as long as the session container; a stopped background
+  session keeps it until `enclave stop`.
+- After the session exits, its gateway is stopped and its published ports are
+  released: by `enclave attach` if attached, otherwise at the next session
+  start or by `enclave cleanup --ephemeral`.
+- Teardown waits for asynchronous container removal (common with Podman).
+  Waits over one second report the reason and retry limit; the limit counts
+  retries, so engine commands can extend the wait.
+- A network left behind (for example after `kill -9` of enclave) is removed at
+  the next session start or by `enclave cleanup --ephemeral` once it is an hour
+  old and has no endpoints.
+
+Container-to-container access is not a compatibility contract. As an
+unsupported integration, `docker network connect <network-name> <peer>` can
+attach a peer to the network from `enclave ps --json`. Enclave does not manage
+or authorize it, the network cannot be removed until it disconnects, and a
+restricted gateway still admits it only on published ports.
+
+Upgrading from releases that used the default bridge: see
+[Upgrade notes](install.md#upgrade-notes).

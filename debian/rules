@@ -49,7 +49,7 @@ override_dh_auto_install:
 	install -D -m 0755 entrypoint.sh $(CURDIR)/debian/enclave/usr/share/enclave/entrypoint.sh
 	install -D -m 0755 gateway-entrypoint.sh $(CURDIR)/debian/enclave/usr/share/enclave/gateway-entrypoint.sh
 	install -D -m 0644 .dockerignore $(CURDIR)/debian/enclave/usr/share/enclave/.dockerignore
-	install -D -m 0644 LICENSE.md $(CURDIR)/debian/enclave/usr/share/doc/enclave/LICENSE.md
+	install -D -m 0644 LICENSE $(CURDIR)/debian/enclave/usr/share/doc/enclave/LICENSE
 	install -D -m 0644 NOTICE.md $(CURDIR)/debian/enclave/usr/share/doc/enclave/NOTICE.md
 	mkdir -p $(CURDIR)/debian/enclave/usr/share/enclave/docs
 	cp -a docs/. $(CURDIR)/debian/enclave/usr/share/enclave/docs/

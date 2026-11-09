@@ -1,140 +1,75 @@
 # Configuration
 
-## Config Files
+Where Enclave reads configuration, how layers combine, every config key, list
+syntax, and environment variables. Agent-native config (settings, skills,
+patches) is in [Tool config](tool-config.md).
 
-Global defaults live in `~/.config/enclave/config.json`. Project overrides live
-in `~/.config/enclave/projects/<hash>/config.json`, keyed by project hash and
-kept outside the worktree. CLI flags always take the highest precedence.
+## Config files
 
-Project overrides live outside the worktree, where neither the repository nor a
-session can edit them, so a project cannot alter its own isolation policy. Extension files are discovered from built-in `extensions/`
-plus user-global `~/.config/enclave/extensions/`.
+| File | Scope |
+|------|-------|
+| `~/.config/enclave/config.json` | Global defaults |
+| `~/.config/enclave/projects/<hash>/config.json` | One project, keyed by project hash |
 
-Extensions installed with `enclave tools|features|commands add` carry a
-`.enclave-source.json` provenance sidecar in their user-global directory.
-Editing an installed extension's files by hand blocks
-`enclave tools|features|commands update` for that extension until `--force`. See
-[Installing Extensions](extensions/installing.md).
+Project config lives outside the worktree, so neither the repository nor a
+session can change its own isolation policy. Since only you edit it, it may set
+every option global config can, except:
 
-The `~/.config/enclave/` paths shown throughout this document are the Linux
-(XDG) config root. On macOS the config root is
-`~/Library/Application Support/org.eclipse.enclave/config/` instead;
-substitute it for `~/.config/enclave/` in every path below.
+| Option | Why |
+|--------|-----|
+| `auto_update`, `update_channel` | Global-only because they replace the host executable; project and tool-override values are ignored with a warning |
+| `disabled_commands` | Global-only because commands resolve before the project is known |
+| Top-level `host_config_paths` | Ignored with a warning in any file; set it under `tool_overrides.<tool>` |
+| Opt-ins without a config key | See [CLI-only options](#cli-only-options) |
 
-**Option source precedence** (highest to lowest):
+Extensions come from the built-in `extensions/` tree and
+`~/.config/enclave/extensions/`; see
+[Installing extensions](extensions/installing.md).
+
+## Host directories
+
+Paths in these docs use the Linux layout.
+
+| Root | Linux | macOS |
+|------|-------|-------|
+| Config | `~/.config/enclave/` (`$XDG_CONFIG_HOME`) | `~/Library/Application Support/org.eclipse.enclave/config/` |
+| State | `~/.local/state/enclave/` (`$XDG_STATE_HOME`) | `~/Library/Application Support/org.eclipse.enclave/state/` |
+| Cache | `~/.cache/enclave/` (`$XDG_CACHE_HOME`) | `~/Library/Caches/org.eclipse.enclave/` |
+
+`XDG_*` overrides are ignored on macOS. Contents:
+[Data on the host](persistence.md#data-on-the-host).
+
+## Precedence
+
+Highest to lowest:
 
 1. CLI flags
-2. Selected tool override (`tool_overrides.<tool>` in config)
-3. Project config (`~/.config/enclave/projects/<hash>/config.json`)
-4. Global config (`~/.config/enclave/config.json`)
+2. Selected tool override (`tool_overrides.<tool>`)
+3. Project config
+4. Global config
 5. Built-in defaults
 
-A tool override is more specific than a top-level setting, so it wins in either
-file: a global `tool_overrides.<tool>` value beats a project's top-level value.
-Between the two files' tool overrides, the project's wins. List options merge
-across these layers; see [List Options](#list-options).
+A tool override beats a top-level value in either file, so a global
+`tool_overrides.<tool>` value beats a project's top-level value; between the
+two files' overrides, the project's wins. Lists merge across layers (see
+[List options](#list-options)); string maps such as `host_env` merge per key.
+`enclave config --view source` shows where each value came from.
 
-Because only you can edit it, project config may set every option global config
-can, with the same effect for that project. The exceptions are `auto_update`
-and `update_channel`: they are global-only rather than project or per-tool
-options because they replace the host executable, so project and tool-override
-values are ignored with a warning. `disabled_commands` is global-only too:
-commands are resolved before the project is known. Opt-ins without a config key, such as
-`--allow-sensitive-mounts`, cannot be granted by any config file.
+### CLI-only options
 
-Top-level `host_config_paths` is not part of that set: it is ignored with a
-warning in any config file, global included, because passthrough paths are only
-supported under `tool_overrides.<tool>`.
+Never read from config files, so no config can run Enclave as root or mount all
+sensitive data:
 
-## Config Keys
+| Flag | Environment alternative |
+|------|-------------------------|
+| `--rebuild`, `--force-base-image`, `--name` | None |
+| `--no-rebuild` | `ENCLAVE_NO_REBUILD=1`; see [Suppressing rebuilds](tools.md#suppressing-rebuilds) |
+| `--build-uid`, `--build-gid`, `--runtime-uid-remap`, `--buildx-cache-*` | None |
+| `--allow-root` | `ENCLAVE_ALLOW_ROOT=1`; see [Running as root](install.md#running-as-root) |
+| `--allow-sensitive-mounts` | `ENCLAVE_ALLOW_SENSITIVE_MOUNTS=1`; see [Mounts](mounts.md#mounting-all-sensitive-paths) |
+| `--add-sensitive-dir`, `--add-readonly-sensitive-dir` | None; config can exempt paths with `sensitive_dir_exceptions` |
 
-| Key | Description |
-|-----|-------------|
-| `auto_update` | Automatically replace a stale standalone binary with the latest build of its update channel during the daily update check (default: `false`; global config only; ignored by package and source builds) |
-| `disabled_commands` | Command names that never become `enclave <name>` verbs, whether an installed extension or your own `commands/` tree provides them. The name resolves to nothing rather than to the next provider, so `enclave <name>` fails as an unknown command. Entries are literal names: the `+`/`-`/`none` list syntax does not apply. Built-in verbs cannot be disabled (global config only; see [Host commands](extensions/README.md#host-commands)) |
-| `update_channel` | Release channel binary updates come from: `rolling` (builds of `main`) or `stable` (official releases from version tags). Unset follows the channel the binary was published on, which `enclave config` shows as the default (global config only; see [`self-update`](cli-reference.md)) |
-| `tool` | Default tool (e.g. `claude`, `codex`); unset means the first interactive session asks once and writes the answer here (see [Tool selection](cli-reference.md#tool-selection)) |
-| `backend` | Isolation backend: `auto` (default) uses docker or podman, whichever is installed, and asks once when both are; or `docker`, `podman`, experimental `qemu`. Override per invocation with `--backend` on engine-using commands. |
-| `host_config` | `none` (default) or `passthrough` |
-| `skills_validation` | Shared skill validation: `strict` (default) or `agent`; supports tool overrides |
-| `tool_overrides.<tool>.host_config_paths` | Per-tool passthrough path directives (`default`, `+path`, `-path`, or explicit list) |
-| `yolo` | Enable YOLO mode (default: `true`). Only consulted when the selected tool's profile leaves `yoloEnabled` unset; every bundled CLI agent sets it, so use `--yolo`/`--no-yolo` for those |
-| `ephemeral` | Run without persistent auth/env stores |
-| `auth_scope` | `shared` or `project` (default: `shared`) |
-| `auth_name` | Named per-tool shared auth identity slug; unset uses the default store |
-| `secrets_scope` | `both`, `global`, or `project` (default: `both`) |
-| `reset_auth` | Clear auth on start |
-| `no_api_key` | Disable API key injection |
-| `pass_api_key` | Allow API key in ephemeral mode |
-| `pass_env` | List of host env vars to forward |
-| `allow_all_network` | Disable network restrictions |
-| `allow_domains` | Extra domains added to the gateway allowlist (bare DNS names; ignored when `allow_all_network=true`) |
-| `no_cache` | Disable package caches |
-| `no_history` | Disable shell history |
-| `no_memory` | Disable per-project agent memory; see [memory controls](runtime/stores.md#agent-memory) |
-| `session_tint` | Terminal background color marking a session-owned terminal, as `#rrggbb` (unset: no tint) |
-| `host_env` | Object of environment variables for the host process that runs an agent session, not the container; see [Host environment](#host-environment) |
-| `timezone` | Container `TZ`, e.g. `UTC` or `Europe/Vienna` (unset: host time zone); a `TZ` from `.env`, devcontainer `containerEnv`, or `--pass-env` wins |
-| `base_image` | Docker base image override |
-| `devcontainer` | Derive base image from devcontainer.json |
-| `slim` | Build without features (tools only) |
-| `cache_from` | Docker build cache source |
-| `progress` | Docker build progress output style |
-| `image_name` | Override default image name/tag |
-| `features` | Feature extensions to enable |
-| `use_remote_user` | Honor devcontainer `remoteUser` for agent sessions |
-| `network_log` | Network audit mode: `coarse` (default, one event per TLS connection) or `requests` (one event per HTTP/HTTPS request, forcing MITM). See [Coverage and granularity](networking.md#coverage-and-granularity) |
-| `verbose` | Verbose logging |
-| `ports` | Publish container ports to the host (container → host) |
-| `add_dirs` | Additional directories to mount |
-| `add_readonly_dirs` | Additional directories to mount read-only |
-| `sensitive_dir_exceptions` | Paths whose subtrees may be mounted although they are sensitive; mounts nothing. See [Sensitive-dir exceptions](cli-reference.md#sensitive-dir-exceptions) |
-| `project_mount` | `writable` (default) or `readonly` for the project/worktree mount |
-| `worktree_metadata` | Linked-worktree git metadata mounts: `follow` (default), `readonly`, or `none` |
-| `bridge_ports` | Forward host ports into the container (host → container) |
-
-In readonly mode, writable `add_dirs` entries inside the project are mounted
-read-only.
-
-`worktree_metadata` controls the gitdir/commondir mounts that enclave
-resolves from a linked worktree's `.git` file. `follow` ties them to the
-project mount mode, `readonly` forces them read-only while the working copy
-stays writable, and `none` skips them entirely. With read-only metadata the
-agent can edit files and read history (`git log`, `git diff`, `git status`),
-but every git write, including `git add`, fails; staging and committing happen
-on the host. For a regular repository whose `.git`
-directory sits inside the project, the project mount mode governs and this
-option has no effect.
-
-Regardless of these modes, existing config files for the current repository
-receive read-only file mounts; other Git metadata stays writable in writable
-mode. See [Git config protection](persistence.md#git) for scope and limitations.
-
-`session_tint` marks the terminal that owns a session, so a sandboxed session
-is visually distinct from an ordinary shell. When set to an `#rrggbb` value,
-`run` (including `shell`, `continue`, and `resume`), `exec`, and `attach` set
-the terminal background on start and reset it on exit. Inside tmux 3.3 or later
-only the session's pane is tinted; elsewhere the whole window is. Because only
-the background changes, pick a color that keeps your foreground text readable —
-enclave does not adjust it. Invalid values are reported when the config file is
-read and ignored.
-
-The tint is skipped when stdout is not a terminal and when `NO_COLOR` or
-`ENCLAVE_COLOR=never` is set; `ENCLAVE_COLOR=always` does not enable it, as the
-config key is the only switch. Because per-tool and per-project config layers
-apply, `tool_overrides.<tool>.session_tint` gives each tool its own color and a
-project config gives each project one; `attach` and `exec --name` resolve the
-color for the tool and project of the session they enter, not for the current
-directory.
-Agents that paint their own background can cover the tint.
-
-The reset restores the terminal's configured default background, not whatever
-background was in effect before the session, so a color set at runtime (theme
-switchers, base16-style scripts) is dropped when the session ends. If enclave is
-killed with `SIGKILL` the reset never runs; clear a leftover tint with
-`printf '\e]111\a'`.
-
-**Example:**
+## Config keys
 
 ```json
 {
@@ -146,31 +81,101 @@ killed with `SIGKILL` the reset never runs; clear a leftover tint with
 }
 ```
 
+Every key except `tool` and the global-only ones can also be set under
+`tool_overrides.<tool>`. An override that sets `tool` or a nested
+`tool_overrides` is ignored as a whole with a warning.
+
+### Global only
+
+| Key | Description |
+|-----|-------------|
+| `auto_update` | Replace a stale standalone binary with the latest build of its channel during the daily check (default `false`; package and source builds ignore it). See [Updating](install.md#updating) |
+| `update_channel` | `rolling` (builds of `main`) or `stable` (tagged releases). Unset follows the channel the binary was published on |
+| `disabled_commands` | Command names that never become `enclave <name>` verbs, from any provider; the name then fails as unknown instead of falling through. Literal names, no `+`/`-`/`none` syntax; built-in verbs cannot be disabled. See [Custom commands](commands.md#where-commands-come-from) |
+
+### Tool and session
+
+| Key | Description |
+|-----|-------------|
+| `tool` | Default tool; unset means the first interactive session asks once and saves it ([Tool selection](cli-reference.md#tool-selection)) |
+| `backend` | `auto` (default), `docker`, `podman`, or experimental `qemu`; see [Backends](backends.md) |
+| `yolo` | YOLO mode (default `true`). Only consulted when the tool profile leaves `yoloEnabled` unset; every bundled CLI agent sets it, so use `--yolo`/`--no-yolo` |
+| `host_config` | `none` (default) or `passthrough`; see [Host config passthrough](tool-config.md#host-config-passthrough) |
+| `tool_overrides.<tool>.host_config_paths` | Passthrough path directives (`default`, `+path`, `-path`, or a list) |
+| `skills_validation` | `strict` (default) or `agent`; see [Managed skills](tool-config.md#validation) |
+| `session_tint` | `#rrggbb` background for session terminals (unset: none); see [Session tint](#session-tint) |
+| `host_env` | Env vars for the host process running the session; see [Host environment](#host-environment) |
+| `timezone` | Container `TZ`, e.g. `UTC` (unset: host zone); see [Time zone](auth.md#time-zone) |
+| `verbose` | Verbose logging |
+
+### Auth and secrets
+
+See [Authentication and secrets](auth.md).
+
+| Key | Description |
+|-----|-------------|
+| `ephemeral` | No persistent auth/env stores |
+| `auth_scope` | `shared` (default) or `project` |
+| `auth_name` | Named per-tool shared auth identity; unset uses the default |
+| `secrets_scope` | `both` (default), `global`, or `project` |
+| `reset_auth` | Clear auth on start |
+| `no_api_key` | Disable API key injection |
+| `pass_api_key` | Allow API keys in ephemeral mode |
+| `pass_env` | Host env vars to forward |
+
+### Network
+
+See [Networking](networking.md).
+
+| Key | Description |
+|-----|-------------|
+| `allow_all_network` | Disable network restrictions |
+| `allow_domains` | Extra allowlisted domains (bare DNS names; ignored with `allow_all_network`) |
+| `network_log` | `coarse` (default) or `requests`; see [Coverage and granularity](networking.md#coverage-and-granularity) |
+| `ports` | Publish container ports to the host |
+| `bridge_ports` | Forward host ports into the container |
+
+### Persistence, mounts, image
+
+| Key | Description |
+|-----|-------------|
+| `no_cache`, `no_history` | Disable package caches or shell history |
+| `no_memory` | Disable agent memory; see [Agent memory](runtime/stores.md#agent-memory) |
+| `project_mount` | `writable` (default) or `readonly`; see [Mounts](mounts.md) |
+| `worktree_metadata` | `follow` (default), `readonly`, or `none` |
+| `add_dirs`, `add_readonly_dirs` | Additional directories to mount (read-write or read-only) |
+| `sensitive_dir_exceptions` | Sensitive paths allowed to be mounted; mounts nothing |
+| `base_image` | Base image override; see [Tools and images](tools.md) |
+| `devcontainer` | Derive the base image from devcontainer.json |
+| `slim` | Build without features |
+| `features` | Features to enable; see [Selections](#selections) |
+| `use_remote_user` | Honor devcontainer `remoteUser` for agent sessions |
+| `image_name` | Override the image name/tag |
+| `cache_from` | Inline build cache sources |
+| `progress` | Build output style: `quiet`, `compact` (default), or `verbose` |
+
+### Session tint
+
+`session_tint` sets the terminal background while `run` (and `shell`,
+`continue`, `resume`), `exec`, or `attach` owns the terminal, and resets it on
+exit. Inside tmux 3.3+ only the pane is tinted.
+
+- Pick a color that keeps your text readable; Enclave does not adjust it.
+  Invalid values are reported and ignored.
+- Per-tool and per-project layers apply. `attach` and `exec --name` use the
+  color of the session's tool and project, not of the current directory.
+- Skipped when stdout is not a terminal, or with `NO_COLOR` or
+  `ENCLAVE_COLOR=never`; `ENCLAVE_COLOR=always` does not enable it.
+- Agents that paint their own background can cover it.
+- The reset restores the terminal's configured default, so a color set at
+  runtime by a theme switcher is lost. After `SIGKILL` no reset runs; clear it
+  with `printf '\e]111\a'`.
+
 ### Host environment
 
-`host_env` sets environment variables on the host process that runs an agent
-session: the `docker` client (or qemu) of `run`, `continue`, and `resume`, and
-of `attach`. Processes that client spawns inherit them, such as podman's
-`conmon` and its container cleanup command. Nothing else gets them: not the
-container (use `pass_env` for that), not the engine calls Enclave makes
-separately to set up and tear down the session, and not `shell` or `exec`,
-whose terminals run a shell rather than the agent. Sessions
-do not record whether they run a shell, so `attach` to a foreground `shell`
-session by name still applies it.
-
-Keys merge across layers, a later layer replacing a key's value; a later layer
-cannot remove an inherited key, and `""` sets an empty value. `attach` resolves
-the keys for the session it enters, like `session_tint`. Keys that are not
-environment variable names are reported when the config file is read and
-ignored, and so are keys that change which engine, engine configuration, or
-helper binaries the client uses: `HOME`, `PATH`, `DOCKER_*`, `CONTAINER_*`,
-`CONTAINERS_*`, and `XDG_*`. This list is best effort. The proxy variables
-`HTTP_PROXY`, `HTTPS_PROXY`, `FTP_PROXY`, and `NO_PROXY` (any case) are ignored
-too, because podman copies them from its client into the container. `enclave config` prints
-the values, so do not use it for secrets.
-
-This lets tools that inspect the terminal's foreground processes recognize a
-sandboxed agent. For example, [Herdr](https://herdr.dev) reads `HERDR_AGENT`:
+`host_env` sets variables on the host process running an agent session, so
+tools that inspect a terminal's foreground processes can recognize the agent.
+For example, [Herdr](https://herdr.dev) reads `HERDR_AGENT`:
 
 ```json
 {
@@ -181,31 +186,42 @@ sandboxed agent. For example, [Herdr](https://herdr.dev) reads `HERDR_AGENT`:
 }
 ```
 
-## List Options
+- Receives them: the `docker` client (or qemu) of `run`, `continue`, `resume`,
+  and `attach`, and what it spawns (e.g. podman's `conmon` and cleanup).
+- Does not: the container (use `pass_env`), Enclave's separate setup and
+  teardown engine calls, `shell`, and `exec`. `attach` to a foreground `shell`
+  session still applies it, since sessions do not record that.
+- `attach` resolves the keys of the session it enters.
+- A later layer replaces a key's value but cannot remove it; `""` sets empty.
+- Ignored with a warning: invalid names; `HOME`, `PATH`, `DOCKER_*`,
+  `CONTAINER_*`, `CONTAINERS_*`, `XDG_*` (a non-exhaustive denylist of engine
+  settings); and `HTTP_PROXY`, `HTTPS_PROXY`, `FTP_PROXY`, `NO_PROXY` in any
+  case, which podman would copy into the container.
 
-List options come in two kinds. Each layer (global, project, the global and
-then the project file's tool override, CLI) merges onto the value it inherits.
-`disabled_commands` is neither: it is global-only and lists literal names.
+> [!WARNING]
+> `enclave config` prints `host_env` values; do not put secrets there.
 
-**Extras** are `add_dirs`, `add_readonly_dirs`, `sensitive_dir_exceptions`,
-`ports`, `allow_domains`, `bridge_ports`, `pass_env`, and `cache_from`. Config files and CLI flags
-follow the same rules, so existing configs and scripts keep their meaning:
+## List options
+
+Each layer (global, project, global then project tool override, CLI) merges
+onto the list it inherits. `disabled_commands` is not a list option.
+
+### Extras
+
+`add_dirs`, `add_readonly_dirs`, `sensitive_dir_exceptions`, `ports`,
+`allow_domains`, `bridge_ports`, `pass_env`, and `cache_from`, in config and on
+the CLI:
 
 | Entry | Effect |
-|---|---|
-| `x` | replaces the inherited list |
-| `+x` | adds to it |
-| `-x` | removes from it |
-| `[]`, `["none"]`, or `--flag none` | clears |
+|-------|--------|
+| `x` | Replaces the inherited list |
+| `+x` | Adds |
+| `-x` | Removes |
+| `[]`, `["none"]`, `--flag none` | Clears |
 
-A list is either plain or all `+`/`-`: mixing the two, or `none` with other
-entries, is an error, because replacing a list and amending it in the same
-place has no meaning a plain list cannot express.
-
-The exception is `--add-dir` and `--add-readonly-dir`: on the command line a
-plain path adds to the configured directories, because mounting one more
-directory is what these flags are almost always used for. `-dir` removes a
-configured one, and `none` makes the other paths replace them.
+A list is all plain or all `+`/`-`; mixing, or `none` with other entries, is an
+error. Exception: on the CLI, a plain `--add-dir`/`--add-readonly-dir` path
+adds; `-dir` removes and `none` makes the other paths replace.
 
 ```json
 // Global config:
@@ -217,24 +233,22 @@ configured one, and `none` makes the other paths replace them.
 // Result: ports ["8080:80", "3000"], add_dirs ["./data"]
 ```
 
-- Removing an entry that is not there is silent.
-- Exactly one prefix is stripped. Write `./+dir`, `./-dir`, or `./none` for a
-  relative directory with such a name; `++x` adds `+x`. When a directory is not
-  found but the name with a leading `+` exists, the error suggests `./+x`.
-- Entries are compared after normalization: `3000`, `3000:3000`, and
-  `127.0.0.1:3000:3000` are the same port; domains are case-insensitive;
-  directories compare as resolved paths.
-- Two ports clash when they publish the same host port on overlapping
-  addresses (an omitted address is `127.0.0.1`; `0.0.0.0` and `::` overlap
-  everything; host port `0` never clashes). Within one layer that is an error;
-  across layers the more specific entry replaces the other, so `-p 8080:81`
-  overrides a configured `8080:80`.
-- An invalid entry, a removal included, is an error that names the flag or the
-  key and file that set it, such as
+- Removing a missing entry is silent.
+- One prefix is stripped: write `./+dir`, `./-dir`, `./none` for such names;
+  `++x` adds `+x`. If a directory is missing but `+<name>` exists, the error
+  suggests `./+x`.
+- Entries compare normalized: `3000`, `3000:3000`, and `127.0.0.1:3000:3000`
+  are one port; domains are case-insensitive; directories compare resolved.
+- Ports clash on the same host port with overlapping addresses (omitted means
+  `127.0.0.1`; `0.0.0.0` and `::` overlap all; host port `0` never clashes).
+  Within a layer that is an error; across layers the more specific entry wins,
+  so `-p 8080:81` overrides a configured `8080:80`.
+- Invalid entries, removals included, name the flag or key and file, e.g.
   `tool_overrides.claude.pass_env in ~/.config/enclave/config.json`.
 
-**Selections** are `features` and `host_config_paths`. A bare list replaces
-the inherited one and `+`/`-` entries amend it:
+### Selections
+
+`features` and `host_config_paths`:
 
 ```json
 // Global config:
@@ -246,305 +260,50 @@ the inherited one and `+`/`-` entries amend it:
 // Result: ["node-dev", "devtools"]
 ```
 
-- A list with any bare entry (a name or keyword) replaces the inherited one;
-  `[]` selects nothing.
-- A list of only `+`/`-` entries amends the configured selection, and the more
-  specific layer wins per item: a project `+x` restores an `x` that global
-  config removed. The CLI works the same way: `--features +x` adds to the
-  configured features, while `--features a,b` replaces them.
-- Only when no layer selects features do directives apply to the implicit
-  default-enabled set, so `["-node-dev"]` removes that default feature and
-  `["+gitlab-cli"]` adds an opt-in one. In devcontainer mode the implicit set
-  is empty.
-- `--features none` selects nothing and cannot be combined with other values;
-  in config, write `[]`.
+- Any bare entry (name or keyword) replaces the inherited list; `[]` selects
+  nothing.
+- Only `+`/`-` entries amend it, and the more specific layer wins per item (a
+  project `+x` restores an `x` removed globally). Same on the CLI:
+  `--features +x` adds, `--features a,b` replaces.
+- If no layer selects features, directives amend the default-enabled set:
+  `["-node-dev"]` drops a default feature, `["+gitlab-cli"]` adds an opt-in
+  one. In devcontainer mode that set is empty.
+- `--features none` (in config `[]`) selects nothing and takes no other values.
 
-Feature names, including `+name` entries, must match an installed extension;
-unknown names fail before building or starting a session. Unknown `-name`
-removals only warn, as do unknown names from config when `--slim` or
-`--backend qemu` discards the selection. Each message names the flag or the
-key and file that set the entry. Use `enclave features list` to see available
-names.
+Feature names must match an installed extension. An unknown name, including
+`+name`, fails before building, even with `--no-rebuild`. Unknown `-name`
+removals, unknown names from config that `--slim` or `--backend qemu` discard,
+and unknown names in `network print`/`status`/`diff` (previewed without them)
+only warn.
+Messages name the flag or key and file; `enclave features list` shows the
+names. `host_config_paths` resolution:
+[Host config passthrough](tool-config.md#host-config-passthrough).
 
-`host_config_paths` is resolved per tool against that tool's reviewed
-`passthroughPaths` from its `spec.yaml`. Use:
-
-- `["default"]` to start from the built-in reviewed allow-list
-- `["+commands/", "-skills/"]` to modify the built-in reviewed allow-list (a
-  removal matches with or without the trailing `/`)
-- `["settings.json", "agents/"]` to replace the built-in allow-list entirely
-
-Entries are relative to the tool's host config directory, not absolute host
-paths. For Claude, `settings.json` means `~/.claude/settings.json`, and adding a
-helper script should use `+statusline-command.sh`, not
-`+/home/alice/.claude/statusline-command.sh`.
-
-`host_config_paths` only affects `host_config=passthrough`. A hard safety
-backstop still blocks auth files, OAuth JSON, history/session files, and common
-runtime-state directories even if you add them here.
-
-Passthrough follows symlinks: an allow-listed entry copies whatever its symlink
-resolves to, even a target outside the tool config directory. This is what lets
-dotfile managers (home-manager/Nix, GNU stow, chezmoi) symlink configs into
-place. The auth/OAuth backstop still rejects any symlink that resolves to a known
-credential file, but the history/session/state backstop is anchored at the config
-root and does not re-match those names at nested paths reached through a symlinked
-directory (e.g. `sessions/` blocks `~/.claude/sessions` but not a symlinked
-`commands/` that contains a `sessions/` subdir). Because the config directory and
-its symlinks are user-controlled, only point allow-listed entries at content you
-intend to share with the container.
-
-## Tool Config Overrides
-
-Override tool-native config files without rebuilding the image.
-
-Canonical override directories:
-
-- Global: `~/.config/enclave/tools/<tool>/`
-- Per-project: `~/.config/enclave/projects/<project-hash>/<tool>/config/`
-
-Each directory mirrors the tool's native config layout. For example, Claude overrides live under `~/.config/enclave/tools/claude/` with files like `settings.json`, `commands/...`, `agents/...`, and `skills/...`.
-
-At startup, enclave assembles a generated config source from:
-
-1. Built-in settings, templates, tool-extension skills, and enabled-feature skills
-2. Allow-listed host config when `host_config=passthrough`
-3. Global shared skills, then global tool-specific overrides and patches
-4. Project shared skills, then project tool-specific overrides and patches
-
-The generated source is then copied into the writable tool config store before auth symlinks and tool-specific setup run.
-
-## Managed Skills
-
-A tool receives managed skills only when its extension declares `sandbox.skillsDir`. Shared skills use tool-neutral paths:
-
-- Global: `~/.config/enclave/skills/<skill>/`
-- Per-project: `~/.config/enclave/projects/<project-hash>/skills/<skill>/`
-
-Tool-specific skills belong in the canonical native config tree. Mirror `skillsDir` relative to `configDir`:
-
-- Global: `~/.config/enclave/tools/<tool>/<relative-skills-path>/<skill>/`
-- Per-project: `~/.config/enclave/projects/<project-hash>/<tool>/config/<relative-skills-path>/<skill>/`
-
-For example, Claude uses `skills/`, while Pi uses `agent/skills/`:
-
-```text
-~/.config/enclave/tools/claude/skills/review/
-~/.config/enclave/tools/pi/agent/skills/review/
-```
-
-Skill precedence, lowest to highest, is:
-
-1. Built-in tool-extension skills
-2. User-global tool-extension skills
-3. Skills shipped by enabled features (only features selected for the session contribute; see [Extensions](extensions/README.md))
-4. Allow-listed native host config when passthrough is enabled
-5. Global shared skills
-6. Global tool-specific skills
-7. Project shared skills
-8. Project tool-specific skills
-
-A higher-precedence same-named skill replaces the complete lower-precedence skill directory; files from two versions are not merged. Project scope therefore wins over global specificity: a project shared skill overrides a global tool-specific skill, while a project tool-specific skill overrides both.
-
-With `host_config=passthrough`, every built-in skill-capable tool passes its native host skills directory through by default: the tool's reviewed `passthroughPaths` includes the skills path (`skills/` for most tools, `agent/skills/` for pi). Opt out under the selected tool override:
-
-```json
-{
-  "tool_overrides": {
-    "claude": {
-      "host_config_paths": ["default", "-skills/"]
-    }
-  }
-}
-```
-
-For pi, use `-agent/skills/`. At session start the log lists exactly which allow-listed paths pass through. Shared skills do not require host passthrough; the directives above exclude host skills while retaining passthrough for other settings.
-
-`skills_validation` controls validation of global and project shared skills:
-
-- `strict` (default): `SKILL.md` must be a regular, readable file with YAML frontmatter containing required `name` and `description` fields and optional `license`, `compatibility`, and `metadata` fields. The name must match the directory and use lowercase letters, numbers, and hyphens. Other fields, including `allowed-tools` and `disable-model-invocation`, cause the skill to be skipped.
-- `agent`: require a regular, readable `SKILL.md`, then copy its bytes and supporting files unchanged. Enclave does not parse the frontmatter, enforce name matching, strip fields, or translate metadata between agents. The selected agent validates and interprets the skill; metadata accepted by one agent may be ignored or rejected by another.
-
-In both modes, overrides are keyed by directory name. In `agent` mode, different directories can declare the same frontmatter `name` and both reach the agent; Enclave does not deduplicate them.
-
-Enclave warns and skips invalid shared skills rather than failing the session. A skipped higher-precedence skill leaves the lower-precedence skill intact. Tool-specific overrides, host passthrough, and extension skills are unaffected by this option.
-
-Set `"skills_validation": "agent"` in global or project `config.json`, or under `tool_overrides.<tool>`. The mode applies to all shared skills in the session. Values are case-insensitive and surrounding whitespace is ignored. The normal option precedence applies; `--skills-validation strict|agent` takes priority over config files. Project configuration may select `agent` because it is stored in Enclave's host-managed configuration root and does not expose additional host paths.
-
-In both modes, symlinked skill directories and symlinks inside skills are ignored; `SKILL.md` itself must be a regular file.
-
-Built-in skills remain tool-specific so extensions can carry harness-specific metadata. Skills shipped by enabled features overlay as trusted extension content and skip shared-skill validation. Tools without `sandbox.skillsDir` ignore all shared skill sources.
-
-## Tool Config Patches
-
-A full config override uses the file's native path in the canonical config directory:
-
-- Global: `~/.config/enclave/tools/<tool>/<native-config-path>`
-- Per-project: `~/.config/enclave/projects/<project-hash>/<tool>/config/<native-config-path>`
-
-A patch mirrors the same native path below a dedicated patch directory:
-
-- Global: `~/.config/enclave/patches/<tool>/<native-config-path>`
-- Per-project: `~/.config/enclave/projects/<project-hash>/patches/<tool>/<native-config-path>`
-
-Common settings paths:
-
-| Tool | Native config path |
-|------|--------------------|
-| claude | `settings.json` |
-| codex | `config.toml` |
-| copilot | `settings.json` |
-| opencode | `opencode.json` |
-| pi | `agent/settings.json` |
-
-Patches can target any existing JSON or TOML file in the generated tool config, not only the declared settings file. The target must exist in a lower-precedence layer.
-
-Config files are resolved from lowest to highest precedence:
-
-1. Built-in config
-2. Allow-listed host config when `host_config=passthrough`
-3. Global full file or patch
-4. Project full file or patch
-
-A patch merges onto the complete lower-precedence result. A full file replaces the effective config at its scope. Defining both a full file and a patch for the same path at the same scope is an error.
-
-Merge semantics:
-- **JSON:** scalars replace, objects deep-merge, arrays replace, `null` deletes keys
-- **TOML:** scalars replace, tables deep-merge, arrays replace (key deletion not supported)
-
-When a config source is active, Enclave carries edits made by the tool to its
-declared settings file (`sandbox.settingsTarget`) into the next launch. It
-merges changed keys into the current generated settings. New patch or override
-values win conflicts; objects merge recursively, while arrays and scalars are
-atomic. Only that settings file is carried forward, independently for each
-project/worktree/session store; patch and override files are never changed.
-A launch without an overlay resets the carry-over baseline. Entrypoint writes
-to this file also carry over, including yolo-mode permission and trust keys,
-until changed by a patch, override, or the tool. See [Config Store](runtime/stores.md#config-store)
-for snapshot lifecycle, missing-file behavior, and upgrade limitations.
-
-## Environment Variables
+## Environment variables
 
 | Variable | Description |
 |----------|-------------|
-| `ENCLAVE_HOME` | Override asset discovery to point at a specific repo checkout |
-| `ENCLAVE_LOG_LEVEL` | Log level: `info` (default) or `debug` |
-| `ENCLAVE_AGENT_UPDATE_INTERVAL_HOURS` | Minimum hours after a tool's last successful automatic update before `check-update.sh` is eligible to probe again (`0` = always) |
-| `ENCLAVE_NO_REBUILD` | Set to `1` to suppress session image/bundle builds and automatic agent update probes; see [Image & Build](cli-reference.md#image--build). |
-| `ENCLAVE_DEVCONTAINER_REWRITE_VARS` | Comma-separated extra env var names for devcontainer home-path normalization |
-| `ENCLAVE_ALLOW_ROOT` | Set to `1` to skip the root check (same as `--allow-root`); see [Running as root](cli-reference.md#running-as-root) |
-| `ENCLAVE_ALLOW_SENSITIVE_MOUNTS` | Set to `1` to mount sensitive host directories anyway (same as `--allow-sensitive-mounts`); see [Sensitive mounts](cli-reference.md#sensitive-mounts) |
+| `ENCLAVE_HOME` | Point asset discovery at a specific repo checkout |
+| `ENCLAVE_LOG_LEVEL` | `info` (default) or `debug` |
+| `ENCLAVE_QEMU_CPU`, `ENCLAVE_QEMU_TRANSPORT`, `ENCLAVE_QEMU_KERNEL_APPEND_EXTRA` | QEMU backend tuning; see [Backends](backends.md#tuning-variables) |
+| `ENCLAVE_AGENT_UPDATE_INTERVAL_HOURS` | Hours after a tool's last automatic update before `check-update.sh` may probe again (`0` = always) |
+| `ENCLAVE_NO_REBUILD` | `1` suppresses session image/bundle builds and update probes; see [Suppressing rebuilds](tools.md#suppressing-rebuilds) |
+| `ENCLAVE_DEVCONTAINER_REWRITE_VARS` | Extra env var names (comma-separated) for devcontainer home-path normalization |
+| `ENCLAVE_ALLOW_ROOT` | `1` = `--allow-root` |
+| `ENCLAVE_ALLOW_SENSITIVE_MOUNTS` | `1` = `--allow-sensitive-mounts` |
+| `ENCLAVE_COLOR` | `always` forces color, `never` disables it; otherwise only on a terminal. A non-empty `NO_COLOR` wins |
 
-These are read by the Windows launcher on the Windows side only, and are not
-forwarded into the WSL2 distribution. See [windows.md](windows.md).
+Windows launcher variables (`ENCLAVE_WSL_*`):
+[Windows](windows.md#environment-variables).
 
-| Variable | Description |
-|----------|-------------|
-| `ENCLAVE_WSL_DISTRO` | Distribution to use for a Windows drive working directory; ignored with a warning when the working directory already names one |
-| `ENCLAVE_WSL_ALLOW_WINDOWS_PATH` | Set to `1` to accept a Windows drive working directory and reach it through `/mnt/<letter>` |
-| `ENCLAVE_WSL_FORWARD_ENV` | Comma-separated extra variables to forward into the distribution, each optionally with a `WSLENV` flag suffix (`/p`, `/l`, `/u`, `/w`) |
-
-Buildx cache and canonical build UID/GID controls are CLI-only. Use
-`--buildx-cache-dir`, `--build-uid`, `--build-gid`, and `--runtime-uid-remap`
-for event/offline runs.
-
-`--allow-root` is CLI-only as well; `ENCLAVE_ALLOW_ROOT=1` is its only
-alternative, so no config file can let enclave run as root.
-`--allow-sensitive-mounts` is CLI-only too; `ENCLAVE_ALLOW_SENSITIVE_MOUNTS=1`
-is its only alternative, so no config file can let a session mount sensitive
-host data. Global and project config can exempt specific paths with
-`sensitive_dir_exceptions`, which warns on every start and never covers home,
-enclave's own roots, or the SSH agent socket. `--add-sensitive-dir` and
-`--add-readonly-sensitive-dir` exempt their paths for one run and have no
-config key. `add_dirs` and `add_readonly_dirs` entries from config are checked
-like `--add-dir`, and a refusal names the flag or config file of each entry.
-
-The experimental `qemu` backend only runs unrestricted, slim/no-feature bundles, so selecting it implies `allow_all_network=true` and `slim=true` automatically (with a per-run notice). Requesting features or an allowlist (`--allow-domain`) is rejected because the backend cannot honor them.
-
-## Inspecting Resolved Config
+## Inspecting resolved config
 
 ```bash
-enclave config                   # Show configuration values (matrix view)
-enclave config --view source     # Annotate each value with where it came from
-enclave config --view diff       # Show values overridden by higher precedence
-enclave config --view effective  # Show effective values only
-enclave config --json            # Emit JSON output
+enclave config                   # All layers side by side (matrix)
+enclave config --view source     # Where each value came from
+enclave config --view diff       # Values overridden by higher precedence
+enclave config --view effective  # Effective values only
+enclave config --json            # Versioned JSON envelope
 ```
 
-| Flag | Description |
-|------|-------------|
-| `--view <mode>` | Output view: `matrix` (default), `effective` (effective values only), `diff` (values overridden by higher precedence), or `source` (where each value comes from: CLI, tool override, project, global, default) |
-| `--json` | Emit JSON output |
-
-### JSON output (`schemaVersion: "1"`)
-
-`enclave config --json` emits a versioned envelope for scripts and tools. Every
-view carries the full envelope; `--view` only affects the legacy keys. New
-options and option kinds may appear within a schema version; skip options
-whose `kind` you do not recognize.
-
-| Field | Content |
-|-------|---------|
-| `schemaVersion`, `kind`, `view` | `"1"`, `"config"`, and the selected view |
-| `tool` | `{name, source}`; `name` is `null` when no tool is selected |
-| `project` | `{dir, realDir, hash, name}` of the current project, or `null` (with a `project_unavailable` warning) when it cannot be resolved |
-| `files` | `global` and `project` config files as `{path, status}`, status `present`, `missing`, or `unavailable` |
-| `options` | One entry per option (see below) |
-| `warnings` | Array of `{code, option, layer, path, message}`; `option`, `layer`, and `path` are omitted when not applicable |
-| `valid`, `error` | Whether the options pass the validation a run applies and the tool profile loads, and the first error |
-
-Each `options.<name>` entry has:
-
-- `kind`: `string`, `bool`, `string_slice`, or `string_map`.
-- `value`: the typed value a run with the same options uses, normalized and
-  validated (lowercased domains, conflict resolution, qemu coercion); only
-  normalized if validation fails. Lists are always arrays, maps always
-  objects.
-  `features` is the sorted set a run enables (after `slim`, devcontainer mode,
-  and `+`/`-` directives, without unknown names), or `null` with a
-  `features_unavailable` warning when features cannot be listed (`valid` can
-  stay `true` then). `host_config_paths` and `yolo` are resolved against
-  the tool (`null` without a loadable tool); `yolo` adds `resolvedBy` (`cli`,
-  `config`, or `tool`). `backend` keeps the configured value, including `auto`.
-- `source`: the layer that last set the raw option: `default`, `global`,
-  `project`, `tool_override`, or `cli`.
-- `layers`: the raw value each of `global`, `project`, `tool_override`, and
-  `cli` sets, after ignored keys are dropped and before normalization; absent
-  layers do not set the option. List entries keep their `+`/`-` prefixes as
-  written; `tool_override` shows the two files' overrides combined.
-- `directives` (`features`, `host_config_paths` only): the raw selection,
-  `null` when unset and `[]` for none.
-
-Warning codes: `invalid_config_json`, `config_path_is_directory`,
-`unsupported_scope`, `invalid_tool_override`, `invalid_value`,
-`suspicious_value`, `project_guardrail` (config loading;
-`layer` is `global`, `project`, or `tool_override:<tool>`), `unknown_feature`,
-`features_unavailable`, `tool_unresolved`, `tool_unavailable` (also makes
-`valid` false), `project_unavailable`, and `validation` (e.g. an ignored
-option).
-
-`valid: false` does not change the exit code (0). Validation runs the checks of
-`enclave run`, including the `qemu` backend restrictions, but treats `auto` as
-`docker` and skips the container engine, mounts, and image build.
-
-The earlier keys `effective`, `sources`, `paths`, and `status` are unchanged
-for compatibility; they hold display strings (lists as `"[a,b]"`).
-
-### Detecting session drift
-
-`enclave ps --json` records the same typed values in `options` for the options
-that shape a session (see the [`ps` reference](cli-reference.md#session)).
-To check whether a fresh session would differ from a running one:
-
-1. Run `enclave config --json` from the session's `projectDir` with its
-   `--tool` and the same flags.
-2. Compare each key of the session's `options` with `options.<name>.value`.
-   A key missing on either side means unknown, not changed.
-
-Backend-dependent validated values may differ, since `config --json` validates
-`auto` as `docker` while a run validates the detected engine.
-
-Sessions started with `enclave devcontainer run|shell` cannot be compared.
-Devcontainer mode has no flag, so `config --json` resolves `devcontainer` and
-`features` without it; treat these sessions as unknown. A `devcontainer` key
-set in config is resolved by both sides.
+JSON schema and session drift: [`config --json`](integration.md#config---json).

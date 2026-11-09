@@ -162,6 +162,41 @@ func TestResolveProjectFromDir_GitDirSymlinkSpoofing(t *testing.T) {
 	}
 }
 
+func TestResolveProjectFromDir_GitDirCommonDirIsIgnored(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git is not installed")
+	}
+
+	tmp := t.TempDir()
+	otherDir := filepath.Join(tmp, "other")
+	projectDir := filepath.Join(tmp, "project")
+
+	runGitInDir(t, tmp, "init", otherDir)
+	runGitInDir(t, tmp, "init", projectDir)
+
+	// Git honours $GIT_DIR/commondir in a regular .git directory too.
+	commonDir := filepath.Join(otherDir, ".git") + "\n"
+	if err := os.WriteFile(filepath.Join(projectDir, ".git", "commondir"), []byte(commonDir), 0o644); err != nil {
+		t.Fatalf("write commondir: %v", err)
+	}
+
+	otherProject, err := ResolveProjectFromDir(otherDir)
+	if err != nil {
+		t.Fatalf("resolve other project: %v", err)
+	}
+	project, err := ResolveProjectFromDir(projectDir)
+	if err != nil {
+		t.Fatalf("resolve project: %v", err)
+	}
+
+	if project.Hash == otherProject.Hash {
+		t.Fatalf("project must not take the hash of the repository its commondir points to (%q)", otherProject.Hash)
+	}
+	if want := ProjectHashForPath(project.RealDir); project.Hash != want {
+		t.Fatalf("expected hash of the project's own path %q, got %q", want, project.Hash)
+	}
+}
+
 func runGitInDir(t *testing.T, dir string, args ...string) {
 	t.Helper()
 	cmd := exec.Command("git", args...)

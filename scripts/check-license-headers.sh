@@ -15,7 +15,7 @@ is_candidate() {
         .github/*.yaml | .github/*.yml)
             return 1
             ;;
-        LICENSE | LICENSE.md | NOTICE | NOTICE.md)
+        LICENSE | NOTICE | NOTICE.md)
             return 1
             ;;
         */testdata/* | *.md | *.json | *.lock | *.sum | *.golden | *.svg | *.png | *.pdf | *.txt)

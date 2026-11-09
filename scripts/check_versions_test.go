@@ -94,7 +94,7 @@ func versionCheckFixture(t *testing.T) (string, string) {
 	root := t.TempDir()
 	for _, path := range []string{
 		"scripts/check-versions.sh", "go.mod", "debian/control", "debian/rules",
-		"packaging/rpm/enclave.spec", "README.md", "docs/DEV.md", "Makefile",
+		"packaging/rpm/enclave.spec", "CONTRIBUTING.md", "docs/DEV.md", "Makefile",
 		"Dockerfile", "Dockerfile.gateway", "internal/model/types.go",
 		"runtime-assets/microvm/alpine/build-bundle.sh",
 		"scripts/install-go-linters.sh",

@@ -1,360 +1,129 @@
-# Extension Architecture
+# Extensions
 
-This document describes Enclave's modular extension system.
+Extensions add agents, development tools, and host commands to Enclave.
 
-## Overview
+| Page | For |
+|------|-----|
+| [Installing extensions](installing.md) | Installing, updating, and removing extensions from git |
+| [Spec reference](spec-reference.md) | Every `spec.yaml` field and sibling file |
+| [Credentials and providers](credentials.md) | Secrets, gateway header injection, placeholders, auth detection |
+| [Adding a tool](adding-a-tool.md), [Adding a feature](adding-a-feature.md) | Step-by-step guides |
+| [Custom commands](../commands.md) | Host and session commands, including extension-shipped ones |
+| [JSON output](json-output.md) | `list --json` and the `add`/`update`/`remove` result envelope |
+| [DEV.md](../DEV.md#testing-extensions) | Testing the extension system itself |
 
-Enclave uses a unified extension architecture that supports three types of extensions:
+## Extension kinds
 
-1. **Tool Extensions** - Runnable AI coding agents (Claude, Codex, OpenCode, etc.)
-2. **Feature Extensions** - Development tools and capabilities (GitHub CLI, Python dev tools, etc.)
-3. **Command Extensions** - Host commands only, with no container side (see [Command Extensions](#command-extensions))
+| Kind | `kind` | Purpose | Built-in location |
+|------|--------|---------|-------------------|
+| Tool | `sandbox` | A runnable AI coding agent (Claude, Codex, OpenCode, ...) | `extensions/tools/<name>/` |
+| Feature | `mixin` | Development tools added to the tool image (GitHub CLI, Python tools, ...) | `extensions/features/<name>/` |
+| Command | `command` | Host commands only, no container side | None; user root only |
 
-Extensions are organized into two directories:
+## Built-in features
 
-- `extensions/tools/` - AI coding agents (Claude, Codex, OpenCode, etc.)
-- `extensions/features/` - Development tools (GitHub CLI, Python tools, etc.)
+| Feature | Priority | Default | Contents |
+|---------|----------|---------|----------|
+| `devtools` | 40 | on | General command-line and network tools (vim, htop, ripgrep, shellcheck, dig) |
+| `golang-dev` | 45 | opt-in | Go toolchain and delve, from Debian |
+| `github-cli` | 50 | on | GitHub CLI (`gh`) |
+| `gitlab-cli` | 50 | opt-in | GitLab CLI (`glab`) |
+| `node-dev` | 70 | on | Node.js dev tools: nvm, typescript, yarn, pnpm |
+| `python-dev` | 70 | on | Python dev tools: black, ruff, mypy, pytest, pre-commit |
+| `theia-dev` | 75 | opt-in | Headers for building Theia and other Electron apps: libx11, libxkbfile, libsecret |
 
-This separation makes it immediately clear what type each extension is. Command
-extensions are never built in: they only exist under the user root, in
-`~/.config/enclave/extensions/commands/`.
+Select features with the `features` key or `--features`
+([List options](../configuration.md#list-options)). Built-in tools are listed
+in [Tools](../tools.md). More tools and features are in
+[enclave-extensions](https://github.com/eclipse-enclave/enclave-extensions):
 
-## Extension Sources
+```bash
+enclave tools add eclipse-enclave/enclave-extensions --name <tool>
+enclave features add eclipse-enclave/enclave-extensions --name <feature>
+```
 
-Extension definitions are loaded from:
+## Extension sources
 
-1. Built-in repository extensions under `extensions/`
-2. User-global overrides under `~/.config/enclave/extensions/`
+| Root | Contents |
+|------|----------|
+| `extensions/` in this repository | Built-in extensions |
+| `~/.config/enclave/extensions/` | User-global extensions, where `add` installs; per file, these win over built-ins |
 
-The official source for tools and features that are not built in is
-[enclave-extensions](https://github.com/eclipse-enclave/enclave-extensions).
-Install one by name, for example
-`enclave tools add eclipse-enclave/enclave-extensions --name <tool>` or
-`enclave features add eclipse-enclave/enclave-extensions --name <feature>`.
+Project-local definitions (for example `<project>/.enclave/extensions/`) are
+never loaded, so opening a repository cannot supply install or startup code.
 
-Project-local extension definitions (for example,
-`/path/to/project/.enclave/extensions/`) are not loaded. Install extensions
-into the user-global root from a git repository with `enclave features add`
-/ `enclave tools add`; see [Installing Extensions](installing.md). Select a
-custom tool for a project with
-`enclave --tool <tool>`, or make it the project's default with `tool` in
-project config (global config sets the host-wide default). For a project-specific feature,
-declare it with `defaultEnabled: false` (to avoid the project-specific
-extension being loaded for all projects/containers), then add
-`"features": ["+my-feature"]` to
-`~/.config/enclave/projects/<hash>/config.json`; see
-[Configuration](../configuration.md). Keeping executable extension definitions
-outside the checkout prevents a repository from supplying extension install and
-startup code merely by being opened.
+To use a custom extension in one project only:
 
-When an extension exists in both built-in and user-global roots, user files
-take precedence over built-in files with per-file overlay behavior.
+- Tool: `enclave --tool <tool>`, or `tool` in the project config.
+- Feature: declare it with `defaultEnabled: false`, then add
+  `"features": ["+my-feature"]` to
+  `~/.config/enclave/projects/<hash>/config.json`
+  ([Configuration](../configuration.md)).
 
-## Directory Structure
+## Directory layout
 
 ```
 extensions/
 ├── tools/
 │   └── claude/
-│       ├── spec.yaml               # Extension spec: metadata, sandbox, network, credentials, providers
-│       ├── gateway-allowlist.conf  # Network allowlist (required)
-│       ├── templates/
-│       │   └── settings.json      # Settings template
-│       ├── entrypoint.d/
-│       │   └── setup.sh           # Tool-specific startup script
-│       ├── install.sh             # Docker build installation
-│       └── go/                    # Optional Go code
-│           ├── hooks.go           # Auth hooks
-│           └── handler.go         # Tool handler
+│       ├── spec.yaml               # Manifest: metadata, sandbox, network, credentials, providers
+│       ├── gateway-allowlist.conf  # DNS allowlist (falls back to base.conf if missing)
+│       ├── install.sh              # Runs during the image build
+│       ├── check-update.sh         # Optional: upstream fingerprint for automatic updates
+│       ├── templates/settings.json # Settings template
+│       ├── config-base/            # Optional: seed files for the config store
+│       ├── entrypoint.d/setup.sh   # Sourced at startup, only for this tool
+│       ├── skills/                 # Optional: agent skills
+│       ├── commands/host/          # Optional: host commands (user root only)
+│       └── go/                     # Optional: auth hooks and handler, compiled into the binary
 └── features/
     ├── github-cli/
     │   ├── spec.yaml
     │   └── install.sh
-    ├── node-dev/
-    │   ├── spec.yaml
-    │   ├── install.sh
-    │   └── feature-entrypoint.d/
-    │       └── setup.sh           # Runs for ALL tools
-    ├── vnc/
-    │   ├── spec.yaml
-    │   └── commands/
-    │       └── host/
-    │           └── vnc-viewer     # Becomes `enclave vnc-viewer`, runs on the host
-    └── devtools/
-        └── spec.yaml
+    └── node-dev/
+        ├── spec.yaml
+        ├── install.sh
+        └── feature-entrypoint.d/setup.sh  # Sourced at startup for every tool
 ```
 
-`spec.yaml` is the extension manifest. `install.sh`,
-`gateway-allowlist.conf`, `entrypoint.d/`, `feature-entrypoint.d/`,
-`templates/`, `skills/`, and `commands/` remain sibling files rather than
-fields in the manifest. The in-container build shell scripts under
-`runtime-assets/build-scripts/` read the metadata they need (feature/tool
-enablement, `priority`, `needsRoot`, `aptPackages`, `failOnInstallError`)
-straight from `spec.yaml` (falling back to `spec.json`) with `yq`.
+Only `spec.yaml` is the manifest; the other entries are sibling files (see
+[tool files](spec-reference.md#tool-files) and
+[feature files](spec-reference.md#feature-files)). The build scripts in
+`runtime-assets/build-scripts/` read enablement, `priority`, `needsRoot`,
+`aptPackages`, `failOnInstallError`, and `commands.install` from `spec.yaml`
+(or `spec.json`) with `yq`.
 
-## Extension Spec (`spec.yaml`)
+## Tools and features compared
 
-Every extension has one `spec.yaml` (`spec.json` is also accepted — YAML is a
-JSON superset, and the loader reads both with `sigs.k8s.io/yaml`) describing
-its metadata, sandbox/mixin behavior, network policy, and credentials. Field
-names are camelCase. The schema is defined by `specDocument` in
-`internal/config/spec.go`; that struct is the authoritative on-disk shape.
-
-Enclave follows the naming and directory structure of Docker's experimental
-[sandbox kit format](https://docs.docker.com/ai/sandboxes/customize/kit-reference/),
-but implements an independent contract with both extensions and restrictions.
-This document is the Enclave reference; do not assume an arbitrary sbx kit has
-identical behavior. The differences are called out below.
-
-```yaml
-schemaVersion: "1"        # enclave owns this version; sbx alignment is per-release
-kind: sandbox | mixin | command  # sandbox = tool, mixin = feature, command = host commands only
-name: <kebab-case>        # must match the extension's directory name
-displayName: <human name>
-description: <one line>
-
-sandbox: {...}            # kind: sandbox only, see "Tool Extensions" below
-commands: {...}           # install/startup/initFiles, see below
-network: {...}
-environment: {...}
-credentials: {...}
-providers: [...]          # enclave-native, see "Tool Extensions" below
-ports: [...]              # enclave-native; honored for tools and enabled features
-caches: [...]             # enclave-native; persistent per-project cache mounts, see below
-
-# mixin-only fields (kind: mixin)
-priority: <int, default 100>
-aptPackages: [<packages>]
-needsRoot: <bool>
-failOnInstallError: <bool>
-defaultEnabled: <bool>
-
-# tool-only field (kind: sandbox)
-defaultIncluded: <bool>
-```
-
-`name` and `kind` are validated against the file's location and directory
-name at load time.
-
-### Reserved and deferred fields
-
-The schema mirrors Docker's experimental [sandbox kit format](https://docs.docker.com/ai/sandboxes/customize/kit-reference/)
-so an sbx kit loads here, but a few sbx fields are accepted and then **warn and
-no-op** — a declared value is never a silent no-op:
-
-- `sandbox.image` — enclave keeps its own Debian base and never swaps it for a
-  spec-declared image.
-- `sandbox.aiFilename` and `agentContext` — no delivery path enclave can
-  guarantee reaches the agent (the project-root memory file is the mounted host
-  repo). Ship tool guidance via a skill or the tool's own config instead.
-
-Because enclave keeps its own base image and ignores `sandbox.image`, a
-pure-sbx **sandbox** (tool) kit that relies on the sbx base image for its
-tooling will load but cannot start a session ("tool not installed in image")
-unless it also ships an `install.sh` that installs the tool's entrypoint. A
-pure-sbx **mixin** kit that only layers packages/config works without one.
-
-A few honored fields also diverge from sbx on purpose, because the workspace is
-the mounted host project directory and installs happen at `docker build` time:
-
-- `files/home/**` is baked into `$HOME` in the image at **build** time — kit
-  content wins on overwrite, and changing it requires a rebuild.
-- `files/workspace/**` is copied into the project at container **start** and
-  **never clobbers** an existing host file (warns and skips).
-- `commands.startup` running as root is **rejected loudly at load**.
-- the `network.serviceDomains` ↔ `network.serviceAuth` pairing must be complete
-  in both directions; an incomplete mapping is **rejected loudly at load**
-  (see below).
-- `commands.install` (mixins only) is woven into the build; an `install.sh`
-  sidecar wins if a feature ships both.
-
-### Startup-seeded files (`commands.initFiles`)
-
-`commands.initFiles` entries seed a file at container start. Fields per entry:
-`path`, `content`, `mode` (octal string), `onlyIfMissing`, `description`. Both
-`path` and `content` pass through `envsubst` with an allowlist of exactly
-`${WORKDIR}` (the project directory, `$PROJECT_DIR`), `${HOME}`, and `${USER}`;
-any other variable is left literal. Implemented in
-`runtime-assets/kit-init.sh` (`enclave_write_init_file`,
-`enclave_apply_init_files`).
-
-Caveat: an entry whose path resolves under `${WORKDIR}` (or is relative)
-writes into the user's **real** project directory, and the default is to
-**overwrite** on every container start — set `onlyIfMissing: true` to seed
-once. This is deliberately unlike `files/workspace/**`, which never clobbers.
-
-### Environment (`environment`)
-
-Honored for both sandbox and mixin extensions:
-
-- `environment.variables` — env vars injected into the container. Enabled
-  mixins contribute first; the tool spec wins on key conflicts. Keys must be
-  valid POSIX names, and reserved names (`PROJECT_DIR`, `TOOL`, anything
-  prefixed `ENCLAVE_`) are skipped with a warning.
-- `environment.proxyManaged` — names the credential env aliases that receive
-  the proxy-swapped placeholder instead of the raw value in the container
-  environment (the gateway injects the real secret at the network edge). Each
-  entry must match a declared `credentials.sources.<id>.env` alias; a typo is
-  a load error. Entries are unioned across the tool spec and all enabled
-  mixins.
-
-### Project caches (`caches`)
-
-Honored for both sandbox and mixin extensions (enclave-native). Each entry
-persists one directory of the container home across sessions of the same
-project — e.g. the Maven local repository for a `java-dev` feature:
-
-```yaml
-caches:
-  - name: m2               # subdirectory under the enclave-managed project cache dir
-    target: .m2/repository # container path inside $HOME
-```
-
-At session start the declared entries join the built-in package caches (npm,
-pip, go, go-build, cargo, pnpm, uv, yarn, bun, nvm):
-`~/.cache/enclave/<tool>/<project-hash>/<name>` on the host is bind-mounted at
-`$HOME/<target>`. `--no-cache` disables extension caches along with the
-built-in ones; `enclave cleanup` removes them unless `--keep cache` is set.
-
-The host side is always enclave-managed: a spec names a cache subdirectory and
-a container target, never a host path. Load-time validation rejects names
-outside the extension-name charset, targets that escape the container home,
-and collisions with built-in caches or reserved mounts (auth stores, shell
-history). Across the tool spec and all enabled features, an identical
-`name` + `target` pair dedupes; the same name with a different target — or the
-same target under a different name — fails session start with an error naming
-both claimants.
-
-A cache mount starts empty and **shadows image-baked content** at its target.
-Seed it from a `feature-entrypoint.d/` script on first start, the way
-`node-dev` copies the image's default Node version into the persistent `nvm`
-cache.
-
-If the target's parent directory does not exist in the image, the container
-runtime creates it as root and the agent cannot write siblings next to the
-mount (e.g. `~/.m2/settings.xml` beside a `.m2/repository` cache). Create and
-chown the parent in the extension's `install.sh` when siblings matter.
-
-### Examples
-
-**Tool extension (`extensions/tools/claude/spec.yaml`)** — see the full
-worked example under [Tool Extensions](#tool-extensions) below.
-
-**Opt-in tool (not included by default):**
-```yaml
-schemaVersion: "1"
-kind: sandbox
-name: example-heavy-tool
-description: Example heavy tool
-defaultIncluded: false
-```
-
-**Feature with root install (`extensions/features/github-cli/spec.yaml`):**
-```yaml
-schemaVersion: "1"
-kind: mixin
-name: github-cli
-displayName: GitHub CLI
-description: GitHub CLI (gh)
-needsRoot: true
-priority: 50
-```
-
-**Feature with apt packages (`extensions/features/devtools/spec.yaml`):**
-```yaml
-schemaVersion: "1"
-kind: mixin
-name: devtools
-displayName: Development Tools
-description: Core development tools
-priority: 40
-aptPackages: [vim, htop, tree, ripgrep]
-```
-
-**Opt-in feature (disabled by default):**
-```yaml
-schemaVersion: "1"
-kind: mixin
-name: debug-tools
-description: Debugging tools (gdb, strace, ltrace, etc.)
-defaultEnabled: false
-aptPackages: [gdb, strace, ltrace, tcpdump]
-priority: 80
-```
+| Aspect | Tool (`kind: sandbox`) | Feature (`kind: mixin`) |
+|--------|------------------------|-------------------------|
+| `sandbox` block | Required | Not used |
+| `gateway-allowlist.conf` | Ships one; falls back to `base.conf` | Not used; declares domains in `network` |
+| Startup scripts | `entrypoint.d/`, only for this tool | `feature-entrypoint.d/`, for every tool |
+| Selection | `--tool` or `tool`; one image per tool | `features` or `--features`; rebuilds on the next run |
+| `needsRoot`, `aptPackages` | Not used | Install user; apt packages |
+| Declared `ports` | Published for every session of the tool | Published when the feature is enabled |
+| `credentials`, `network` | Yes | Yes |
 
 ## Host commands
 
-Every kind may ship `commands/host/<name>`. Every executable file there becomes
-an `enclave <name>` verb on any host where the extension is installed, with the
-same contract as a command the user drops into
-`~/.config/enclave/commands/host/`: the shebang picks the interpreter,
-arguments after the verb pass through verbatim, stdin/stdout/stderr and the exit
-code pass through untouched, and the environment carries `ENCLAVE_BIN`,
-`ENCLAVE_PROJECT_ROOT`, and `ENCLAVE_CONFIG_DIR`. `remove` takes the verbs away
-with the extension.
+Every extension kind may ship `commands/host/` executables, which become
+`enclave <name>` verbs on the host. They are read only from extensions under
+`~/.config/enclave/extensions/`, never from built-ins. See
+[Custom commands](../commands.md#commands-from-extensions).
 
-```
-extensions/features/vnc/
-├── spec.yaml
-└── commands/
-    └── host/
-        └── vnc-viewer     # chmod +x, becomes `enclave vnc-viewer`
-```
+## Command extensions
 
-These run **on the host**, outside the sandbox, with the user's privileges.
-That is unlike everything else an extension ships, so `add` and `update` report
-them in the capability summary's first row, saying as much, before writing
-anything, and `list` reports them per extension in both its text and `--json`
-output. Ship one only when the job genuinely cannot be done inside a session:
-driving a host GUI, or talking to something the sandbox deliberately cannot
-reach.
-
-Rules worth knowing before you ship one:
-
-- The file needs its executable bit set in the repository. A non-executable
-  file next to the scripts (a `README`, a data file) is ignored silently: it is
-  never reported as a command and never warned about, since the file is yours
-  and the user cannot change it.
-- Only `commands/host/` is read. Anything else under `commands/` contributes
-  nothing in any direction, so it is reported as a validation warning rather
-  than left inert: a `commands/session/` or a misspelled `commands/hosts/`
-  shows up as `ignoring commands/<name>` on the next run.
-- Names resolve in a fixed order: built-in verbs, then the user's own
-  `commands/{host,session}/` trees, then command extensions, tools, and
-  features, alphabetically within each kind. Picking a name a built-in or the
-  user already owns means the command is skipped: `add` and `update` warn and
-  leave it out of the capability summary, and every run warns again. Prefer a
-  name tied to the extension.
-- Users install an extension's commands as a set. To drop one verb without
-  removing the extension, they list it in `disabled_commands` in their global
-  config. So ship verbs together only when they belong together, and put
-  independent ones in separate extensions that can be added by `--name`.
-- `commands/` never enters the build context or the image identity hash.
-  Editing a command forces no rebuild, and the script is not present inside the
-  image, so nothing in a session can run it.
-- Only the user's extension root (`~/.config/enclave/extensions/`) is scanned,
-  which is where `add` installs. A built-in extension shipped inside the binary
-  is unpacked into a content-addressed cache rather than a configuration
-  directory, so its own `commands/` is not read and a built-in that wants a verb
-  adds a real command instead. A directory the user creates under the extension
-  root by hand is read like any installed one, including one that overrides a
-  built-in.
-
-## Command Extensions
-
-A command that has no container side, say an `enclave usage` that reads
-persisted sessions on the host, does not belong in a feature: a feature is
-listed, enabled, and built into the image, none of which means anything for a
-host command. A command extension (`kind: command`) ships host commands and
-nothing else:
+A command extension (`kind: command`) ships host commands and nothing else.
+Use it for a command with no container side, such as an `enclave usage` that
+reads persisted sessions on the host. A feature would be listed, enabled, and
+built into the image for no purpose.
 
 ```
 usage/
 ├── spec.yaml
 ├── README.md
-└── commands/
-    └── host/
-        └── usage     # chmod +x, becomes `enclave usage`
+└── commands/host/usage     # chmod +x, becomes `enclave usage`
 ```
 
 ```yaml
@@ -365,821 +134,85 @@ displayName: Session usage
 description: Token usage across persisted sessions
 ```
 
-- The spec accepts `schemaVersion`, `kind`, `name`, `displayName`, and
-  `description` only. Any other field is a load error rather than a warning,
-  since nothing would ever read it. That includes the `commands:` key
-  (install/startup/initFiles), which is unrelated to the `commands/` directory.
-- `commands/host/` follows the [host command](#host-commands) rules. At least
-  one executable is required. Runtime files a tool or feature would ship
-  (`install.sh`, `files/`, `skills/`, and so on) are reported as ignored.
+- The spec accepts only `schemaVersion`, `kind`, `name`, `displayName`, and
+  `description`. Any other field is a load error, including the `commands:`
+  key, which is unrelated to the `commands/` directory.
+- At least one executable in `commands/host/` is required
+  ([rules](../commands.md#shipping-host-commands-in-an-extension)). Runtime
+  files such as `install.sh`, `files/`, or `skills/` are reported as ignored.
 - Manage them with `enclave commands list|add|update|remove`
-  ([Installing Extensions](installing.md)). They install into
+  ([Installing extensions](installing.md)). They install into
   `~/.config/enclave/extensions/commands/<name>/`, never reach the build
-  context or the image hash, and `add` prints neither a rebuild note nor an
-  enable hint. Installed means available.
-- `kind: command` is enclave's own. The sbx kit format has no host commands, so
-  there is nothing there to match.
+  context or image hash, and `add` prints no rebuild or enable hint: installed
+  means available.
+- They are never built in. `kind: command` is Enclave's own; sbx kits have no
+  host commands.
 
-## Tool Extensions
+## How it works
 
-Tool extensions are runnable AI coding agents (`kind: sandbox`). They require
-additional files beyond `spec.yaml`.
-
-### Required Files
-
-| File | Purpose |
-|------|---------|
-| `spec.yaml` | Extension spec: `kind: sandbox`, `sandbox.*` metadata, `network`, `credentials`, `providers`, `ports` |
-| `gateway-allowlist.conf` | dnsmasq config for network isolation. Resolved from the user extension tree ahead of the built-in one; a tool that ships none falls back to the broader `base.conf` |
-| `install.sh` | Installation script run during Docker build |
-
-### Optional Files
-
-| File | Purpose |
-|------|---------|
-| `templates/` | Settings templates copied to `/usr/local/share/enclave/templates/` |
-| `config-base/` | Seed files for the tool's config store, overlaid into the generated config source before the host and per-project layers |
-| `check-update.sh` | Optional prebuild hook that returns a stable upstream fingerprint for automatic update probes |
-| `entrypoint.d/*.sh` | Scripts sourced at container startup (only for matching tool) |
-| `go/` | Go code for custom hooks/handlers (compiled into binary) |
-| `commands/host/*` | Executables that become `enclave <name>` verbs, running on the **host**. See [Host commands](#host-commands) |
-
-### Complete example — `extensions/tools/claude/spec.yaml`
-
-```yaml
-schemaVersion: "1"
-kind: sandbox
-name: claude
-displayName: Claude Code
-description: Claude Code AI assistant
-
-sandbox:
-  entrypoint: { run: [claude] }
-  configDir: .claude
-  qemuMinMemoryMiB: 4096
-  skillsDir: .claude/skills
-  memoryDir: .claude/memory
-  settingsFile: claude-settings.json
-  settingsTarget: .claude/settings.json
-  yoloFlag: --dangerously-skip-permissions
-  yoloEnabled: true
-  continueArgs: [--continue]
-  resumeArgs: [--resume]
-  passthroughPaths: [agents/, commands/, settings.json, skills/]
-  hostConfigDir: .claude
-  hostCredentialsFile: .credentials.json
-  hostOauthJson: .claude.json
-
-credentials:
-  sources:
-    anthropic-api-key: { env: [ANTHROPIC_API_KEY] }
-    claude-code-oauth-token: { env: [CLAUDE_CODE_OAUTH_TOKEN], apiKey: false }
-
-network:
-  serviceDomains:
-    api.anthropic.com: anthropic-api-key
-    "*.anthropic.com": anthropic-api-key
-  serviceAuth:
-    anthropic-api-key: { headerName: x-api-key }
-
-providers:
-  - name: anthropic
-    credentials: [anthropic-api-key, claude-code-oauth-token]
-    authFiles: [config.json, .credentials.json]
-    securestorageDirEnv: CLAUDE_SECURESTORAGE_CONFIG_DIR
-    authSession:
-      mode: any
-      checks:
-        - { file: config.json, type: file_exists }
-        - { file: .credentials.json, type: file_exists }
-```
-
-`sandbox.*` fields (`configDir`, `skillsDir`, `memoryDir`, `memoryScope`,
-`noMemoryArgs`, `statePaths`, `settingsFile`, `settingsTarget`, `yoloFlag`,
-`yoloEnabled`, `continueArgs`, `resumeArgs`, `passthroughPaths`,
-`qemuMinMemoryMiB`, `qemuStoreCacheMmap`, `hostConfigDir`, `hostCredentialsFile`,
-and `hostOauthJson`) are enclave-native tool metadata. `sandbox.entrypoint.run`
-is the shared sbx-style command to launch the tool.
-
-Memory and runtime state policy is declared in the spec, including for installed
-third-party tools:
-
-- `memoryDir`: home-relative native memory directory.
-- `memoryScope`: `project` (default) shares memory within a project/tool;
-  `session` requires `memoryDir` and `configDir` and pairs memory with each config
-  store for writer isolation and cleanup.
-- `noMemoryArgs`: argv inserted before user arguments for `--no-memory` and
-  `--ephemeral`. Use native controls to disable memory use and generation.
-  Entries are trimmed and blank ones dropped, as for `continueArgs`/`resumeArgs`.
-- `statePaths`: config-relative runtime-state paths to preserve during overlays
-  and exclude from host config passthrough. Requires `configDir`. A trailing `/`
-  matches a directory tree; globs match paths or basenames. Absolute paths,
-  traversal, and selection directives are rejected.
-
-See [Agent Memory](../runtime/stores.md#agent-memory) for lifecycle semantics.
-
-When using `templates/`, set `sandbox.configDir`, `sandbox.settingsFile`
-(aggregated name like `<tool>-settings.json`: the `<tool>-` prefix followed by
-the template's bare filename, path separators are rejected), and `sandbox.settingsTarget`
-(path under `configDir`). Runtime composes the template into the generated tool
-config source before container startup. The template and the optional
-`config-base/` directory are resolved from the built-in tree and from
-`~/.config/enclave/extensions/tools/<tool>/`, with the user extension tree
-winning per file, the same precedence the image build context applies. A
-user-global tool extension can therefore use `templates/` without being
-upstreamed.
-
-If a tool supports host config passthrough, declare a narrow reviewed
-`sandbox.passthroughPaths` allow-list. Host passthrough is fail closed: only
-listed paths are eligible for copy, and a hard-coded deny backstop still
-blocks auth/history/session/runtime-state paths.
-
-Generated QEMU microVM bundles use max(default 4096 MiB,
-`sandbox.qemuMinMemoryMiB`, what the built initramfs needs). Use it for tools
-that need more memory than the default to start reliably; it never has to
-account for the bundle's own size, because the guest rootfs is the unpacked
-initramfs and the host sizes memory to it at launch. Set
-`sandbox.qemuStoreCacheMmap` when the tool's config store needs 9p
-`cache=mmap` (for example SQLite WAL shared-memory files).
-
-`check-update.sh` runs in a controlled containerized probe environment, never directly on the host. Contract:
-- Exit `0` with non-empty stdout: valid upstream fingerprint.
-- Empty stdout or non-zero exit: fingerprint unknown, no automatic rebuild.
-- The fingerprint is compared against the last successful stored fingerprint in host build state. A changed fingerprint marks the tool for automatic update on the next build; unchanged fingerprints do not.
-
-If a tool supports skills, set `sandbox.skillsDir` to a path below
-`sandbox.configDir` (both may be home-relative or absolute). Each immediate
-child of a skill source is one named skill directory. Enclave composes the
-native skills path in this order, from lowest to highest precedence:
-
-1. Built-in tool-extension skills: `extensions/tools/<tool>/skills/`
-2. User-global tool-extension skills:
-   `~/.config/enclave/extensions/tools/<tool>/skills/`
-3. Feature-extension skills: `extensions/features/<feature>/skills/` (and the
-   user extension tree); only features enabled for the session contribute
-4. Allow-listed host config, when `host_config=passthrough`
-5. Global shared skills: `~/.config/enclave/skills/<skill>/`
-6. Global tool-specific skills:
-   `~/.config/enclave/tools/<tool>/<relative-skills-path>/<skill>/`
-7. Project shared skills: `~/.config/enclave/projects/<hash>/skills/<skill>/`
-8. Project tool-specific skills:
-   `~/.config/enclave/projects/<hash>/<tool>/config/<relative-skills-path>/<skill>/`
-
-Host passthrough (layer 4) delivers host skills for every built-in tool with
-skill support: each reviewed `passthroughPaths` allow-list includes the tool's
-skills path (`skills/` for most tools, `agent/skills/` for pi). Opt out for a
-specific tool under `tool_overrides.<tool>.host_config_paths`; for example:
-
-```json
-{
-  "tool_overrides": {
-    "claude": {
-      "host_config_paths": ["default", "-skills/"]
-    }
-  }
-}
-```
-
-At session start the log lists exactly which allow-listed paths pass through.
-
-For tool-specific sources (layers 6 and 8), `<relative-skills-path>` mirrors
-`sandbox.skillsDir` relative to `sandbox.configDir`. For example, a skill
-named `review` for Claude (`skillsDir: .claude/skills`) lives at
-`~/.config/enclave/tools/claude/skills/review/`, and for Pi
-(`skillsDir: .pi/agent/skills`) at
-`~/.config/enclave/tools/pi/agent/skills/review/`. A higher-precedence
-same-named skill replaces the complete lower-precedence directory. In
-particular, project shared skills override global tool-specific skills, and
-project tool-specific skills override both. The effective skills are mounted
-at `sandbox.skillsDir`. The same layout and precedence are documented with
-host paths in [Configuration](../configuration.md#managed-skills) and
-[persistent stores](../runtime/stores.md#managed-skills).
-
-Shared skills use strict portable Agent Skills frontmatter by default. Set
-`skills_validation` to `agent` to leave metadata interpretation to the selected
-agent. Invalid shared skills warn and are skipped, so one bad source does not
-prevent a tool session from starting. Tool-specific skills are validated by the
-selected harness. Built-in duplicated skills remain per-tool so they can carry
-harness-specific metadata. Tools without `sandbox.skillsDir` ignore all
-shared sources.
-
-Canonical host-side tool config overrides live under `~/.config/enclave/tools/<tool>/` (global) and `~/.config/enclave/projects/<hash>/<tool>/config/` (project).
-
-Generic JSON/TOML patches mirror native config paths under `~/.config/enclave/patches/<tool>/` and `~/.config/enclave/projects/<hash>/patches/<tool>/`. Patches require `sandbox.configDir`, and each target must exist in a lower-precedence layer. Resolution layers built-in config, host passthrough, global full-or-patch, then project full-or-patch. Defining a full file and patch for the same path at one scope is an error.
-
-### Credentials, service auth, and providers
-
-Secrets are split across two `spec.yaml` sections:
-
-- `credentials.sources.<id>` declares the credential itself: `env` (one or
-  more env-var aliases for the same credential) and the enclave-native
-  `apiKey` bool (`false` for OAuth/session tokens; omitted/`true` means it's
-  an API key). See [Authentication](../auth.md#env-aliases) for how multiple
-  aliases are resolved against each other.
-- `credentials.sources.<id>.file` optionally sources the secret from a host
-  file: `path` (supports `~`) plus a `parser` — empty for the trimmed raw file
-  contents, or `json:<dot.path>` (e.g. `json:auth.token`) to extract a scalar
-  from a JSON document. The dot-path is split on `.`; it is **not** an RFC
-  6901 JSON Pointer. A malformed parser is a load error, but a missing file —
-  or a file that does not (yet) contain the key — quietly falls back to the
-  env aliases.
-- `credentials.sources.<id>.priority` orders the two: `env-first` (the
-  default) consults the env aliases before the file, `file-first` the reverse.
-- `network.serviceDomains` (`host -> service-id`) plus
-  `network.serviceAuth.<service-id>` (`headerName`, optional `valueFormat`)
-  describe how the gateway injects that credential as an HTTP header when it
-  proxies requests to those hosts. The service-id in `serviceAuth` and
-  `serviceDomains` is the same key used under `credentials.sources`. Every
-  service-id in `serviceDomains` must also have a `serviceAuth` entry; without
-  one the mapping is inert — the hosts never reach the allowlist and the
-  credential is injected as a raw env value — so the spec is rejected at load.
-  To make hosts reachable without injecting a credential, list them under
-  `network.allowedDomains` instead. The pairing is required in both directions:
-  a `serviceAuth` entry also needs at least one host, either from
-  `serviceDomains` or from its own `hosts` list.
-- `network.serviceAuth.<service-id>.hostsFromCredential` names another
-  `credentials.sources` id whose resolved value is a host, for services that
-  can point at a self-hosted instance. It does not stand in for the hosts the
-  pairing above requires: the service still needs `hosts` or `serviceDomains`
-  entries, which remain the release targets whenever the credential is unset.
-  When that credential resolves, its value
-  becomes the **only** host this service's token is released to, replacing the
-  declared `hosts` and any `serviceDomains` entries pointing at the service —
-  an instance-specific token must not be released to the public default host as
-  well. Unlike a declared host, which the gateway also applies to everything
-  beneath it, the selected host is matched exactly: the token reaches
-  `gitlab.example.com` and not `runner.gitlab.example.com`. The network allow
-  set is *not* narrowed: the selected host is added to it (with the usual
-  subdomain reach, so the instance's other hosts stay resolvable), and the
-  declared hosts stay reachable. So one env var is enough to make the tool
-  reach the instance with token injection working. An unset credential
-  keeps the declared hosts as the release targets, and the resolved value is not
-  written to the persisted env store, so it never outlives the run that set it.
-  A value that is not a usable host warns and is ignored; wildcards are
-  rejected, since the point is to name one instance. Values may be a bare host,
-  `host:port`, or a full URL — the scheme, port and path are stripped.
-
-`network.serviceAuth.<id>.requiredValuePrefix` optionally limits gateway
-protection to a supported credential type. The resolved real value must start
-with this literal, otherwise startup fails while gateway protection is active.
-The prefix is at most 256 bytes of non-whitespace printable ASCII. Codex uses
-`"at-"` to distinguish personal access tokens from Agent Identity JWTs, whose
-client-side signature verification cannot accept a placeholder. This check does
-not apply to unrestricted, unprotected env injection.
-
-The placeholder convention is Go `fmt`-style `%s`, not `{secret}`. An empty
-`valueFormat` means "inject the raw secret value" with no wrapping (see
-`anthropic-api-key`'s `x-api-key` header above, which has no `valueFormat`);
-a non-empty `valueFormat` must contain `%s` (see `"Bearer %s"` in the
-`github-cli` example below, or codex's `openai-api-key: { headerName:
-authorization, valueFormat: "Bearer %s" }`).
-
-`network.serviceAuth.<id>.hosts` is a **enclave-native superset** over sbx:
-it lets a service declare its own hosts directly, which `serviceDomains`
-(a single `host -> service-id` mapping) cannot express when multiple
-services share the same host. `gitlab-cli` uses this — three tokens
-(`gitlab-token`, `gitlab-oauth-token`, `gitlab-job-token`) are all valid on
-`gitlab.com`:
-
-```yaml
-network:
-  serviceAuth:
-    gitlab-token:       { headerName: private-token, hosts: [gitlab.com, "*.gitlab.com"] }
-    gitlab-oauth-token:  { headerName: authorization, valueFormat: "Bearer %s", hosts: [gitlab.com, "*.gitlab.com"] }
-    gitlab-job-token:    { headerName: job-token, hosts: [gitlab.com, "*.gitlab.com"] }
-```
-
-When the gateway is enabled, credentials with a `serviceAuth` entry are
-replaced with random placeholders in the container environment; the gateway
-MITM proxy intercepts HTTPS requests to the declared hosts and substitutes the
-placeholder only in the configured `headerName`. Inspected requests whose
-placeholder-bearing headers do not satisfy the release rule are denied.
-Credentials without a `serviceAuth` entry are injected
-as normal env vars. Placeholder generation errors abort startup rather than
-falling back to the real credential.
-
-#### Client-side credential format checks
-
-Tools and features may declare `credentials.sources.<id>.placeholder` when a
-client rejects the default `ENCLAVE_SECRET_<48 hex characters>` shape before
-sending a request:
-
-```yaml
-credentials:
-  sources:
-    example-token:
-      env: [EXAMPLE_API_TOKEN]
-      placeholder:
-        prefix: "vendor_"
-        suffix: "_end" # optional
-        random: { encoding: hex, length: 48 }
-```
-
-`prefix` and `suffix` are optional literals (at most 256 bytes each, printable
-ASCII without whitespace). `random.encoding` and `random.length` are required:
-
-| Encoding | Random-body characters | Length range |
-|----------|------------------------|--------------|
-| `hex` | `0-9a-f` | 32–1024 |
-| `base64url` | `A-Za-z0-9-_` (no padding) | 22–1024 |
-| `alphanumeric` | `A-Za-z0-9` | 22–1024 |
-
-Length counts random-body characters, excluding the prefix and suffix. Characters
-are sampled uniformly and independently; these minimum lengths provide at least
-128 bits of entropy. Static placeholders are not supported. Values are fresh per
-session and shared across a credential's proxy-managed env aliases, never derived
-from the real secret. The gateway replaces the entire registered value, with the
-same HTTPS and release-host restrictions as default placeholders.
-
-A custom placeholder requires a matching `network.serviceAuth` entry; specs
-without one are rejected. The setting only affects credentials while secret
-release is active; it does not enable the gateway or turn raw env injection
-into proxying. It handles syntactic client checks, not
-cryptographic validation, token signing, or client-side secret transformations.
-
-Only add `serviceAuth` for credentials the client reads from the environment
-without persisting them. Clients that save a session placeholder to an auth or
-config file cannot reuse it next session. File-backed and refreshable logins
-need separate handling ([#133](https://github.com/eclipse-enclave/enclave/issues/133)).
-Auth reconciliation warns and skips contaminated files rather than copying them
-to shared stores; this is a diagnostic guard, not interception of client writes.
-When client syntax permits, include `ENCLAVE_SECRET_` in a custom prefix or suffix
-so the guard can recognize placeholders from earlier sessions too. Custom shapes
-without that marker are checked against the current session's values.
-
-`providers[]` is enclave-native and describes an auth *provider* (as
-opposed to a raw credential): `name`, `credentials` (a list of
-`credentials.sources` keys), `authFiles` (paths relative to `sandbox.configDir`),
-`authSession` (`mode`: `any`/`all`, plus `checks`), `oauthPorts`, and
-`securestorageDirEnv`.
-
-Auth session detection is provider-specific and defaults to "any auth file exists" for that provider. For multi-provider auth files, use `providers[].authSession` with `mode` (`any` or `all`) and `checks`:
-- `file_exists`: require a file to exist.
-- `json_pointer`: require a JSON Pointer (RFC 6901) to resolve in a JSON file (null counts as present).
-- `json_pointer_non_null`: require a JSON Pointer (RFC 6901) to resolve to a non-null value.
-OAuth callback port mapping is defined per provider in `providers[].oauthPorts`.
-
-A provider may set `providers[].securestorageDirEnv` to the name of an environment variable the tool reads to locate its credential-storage directory. In the `shared` auth scope, enclave sets it to the shared auth store mount so the tool writes its credential file there directly. Claude uses `CLAUDE_SECURESTORAGE_CONFIG_DIR` so concurrent sessions coordinate OAuth refresh-token rotation natively (see [persistent stores](../runtime/stores.md) and [authentication](../auth.md)).
-
-`--no-api-key` suppresses provider credentials whose `credentials.sources.<id>.apiKey` is unset/`true`; it does not suppress credentials with `apiKey: false`.
-
-Session continuation arguments are declared under `sandbox`:
-- `continueArgs`: args appended after the command when the user runs `enclave continue`; should target the latest session.
-- `resumeArgs`: args appended after the command when the user runs `enclave resume`; should open a session picker/list when the tool supports it.
-- Fallbacks are one-step only (no loops):
-  - `continue` falls back to `resumeArgs` if `continueArgs` is missing.
-  - `resume` falls back to `continueArgs` if `resumeArgs` is missing.
-  - If both are missing, both commands are unsupported for that tool.
-
-### Build Selection
-
-Runtime images are per-tool: the CLI builds and runs exactly one tool image per
-session, selected with `--tool <name>` or the `tool` key. Each tool gets its
-own image tagged `enclave-<tool>:...`, so rebuilding or updating one tool
-never invalidates another tool's image.
-
-```bash
-enclave --rebuild                  # build/run the selected tool
-enclave --tool codex --rebuild     # build/run the codex image
-```
-
-Internally the CLI sets the `AGENT_TOOLS` build arg to the single selected tool,
-and `enclave-install-tool` installs just that tool. A tool with
-`defaultIncluded: false` is opt-in: it is still selectable with `--tool <name>`,
-but it is excluded from the direct-Docker fallback's default set (see below).
-
-Direct `docker build .` also works for quick testing (see
-[Developer Testing](#developer-testing-direct-docker-builds)), but without
-per-tool layer caching. The raw Dockerfile defaults `AGENT_TOOLS=all`, which
-installs every tool whose `defaultIncluded` is omitted or set to `true`.
-
-## Feature Extensions
-
-Feature extensions provide development tools and capabilities that work with all tools.
-
-### Required Files
-
-| File | Purpose |
-|------|---------|
-| `spec.yaml` | Extension spec: `kind: mixin`, optional `aptPackages` |
-
-Mixin specs may also declare `configDir`, `authFiles`, and `credentials`/`network` for shared tooling such as `github-cli` or `gitlab-cli`:
-
-```yaml
-schemaVersion: "1"
-kind: mixin
-name: github-cli
-displayName: GitHub CLI
-description: GitHub CLI (gh)
-needsRoot: true
-priority: 50
-configDir: .config/gh
-authFiles: [hosts.yml, config.yml]
-credentials:
-  sources:
-    github-token: { env: [GH_TOKEN, GITHUB_TOKEN] }
-network:
-  serviceDomains:
-    api.github.com: github-token
-    "*.github.com": github-token
-  serviceAuth:
-    github-token: { headerName: authorization, valueFormat: "Bearer %s" }
-```
-
-A mixin's `network` block is honored in full: its
-`allowedDomains`/`deniedDomains` and its `serviceDomains`/`serviceAuth`
-credential injection apply to the session alongside the tool spec's own, and
-every host the proxy injects credentials for is unioned into the session
-allow set so it resolves. A service mixin thus declares its own reachability
-without help from the tool spec.
-
-### Optional Files
-
-| File | Purpose |
-|------|---------|
-| `install.sh` | Installation script (runs as root if `needsRoot: true`) |
-| `feature-entrypoint.d/*.sh` | Scripts sourced at startup for ALL tools |
-| `skills/` | Agent skills composed into the tool's skills directory when the feature is enabled |
-| `commands/host/*` | Executables that become `enclave <name>` verbs, running on the **host**. See [Host commands](#host-commands) |
-
-### Feature Selection
-
-Configure which features to install via `~/.config/enclave/config.json` (global) or `~/.config/enclave/projects/<hash>/config.json` (project):
-
-```json
-{
-  "features": ["github-cli", "python-dev", "devtools"]
-}
-```
-
-When `features` is not specified, all `defaultEnabled` features are installed (default). An empty array `[]` disables all features.
-Add an opt-in feature on top of the defaults with `["+gitlab-cli"]`, or list every feature you want explicitly. See [List Options](../configuration.md#list-options) for how layers combine.
-
-**Devcontainer mode:** When devcontainer mode is used (`devcontainer run` or config `devcontainer: true`), features are disabled by default (the devcontainer already defines its own environment). To install features alongside a devcontainer, pass `--features` explicitly; `+`/`-` entries then start from no features.
-
-The next time you run `./enclave --rebuild`, only the specified features will be installed.
-
-**Available features:** `devtools`, `golang-dev`, `github-cli`, `gitlab-cli`, `node-dev`, `python-dev`, `theia-dev`
-
-**Opt-in features (not installed unless explicitly listed):** `gitlab-cli`, `golang-dev`, `theia-dev`
-
-### Installation Order
-
-Features are installed in priority order (lower `priority` numbers first; default
-100, ties broken by name).
-
-The CLI generates **one source-copy + install block per selected feature**: copy
-that feature's directory, make it readable/executable, install its apt packages,
-then run its `install.sh` in the appropriate root/user phase if present. Adding,
-removing, or changing one feature only invalidates layers at or after its
-position — the other features' copies, apt installs, and scripts stay cached and
-are not re-run.
-
-A direct `docker build .` (no CLI) uses an aggregated fallback instead: all apt
-packages installed together, then all root scripts, then all user scripts. This
-is simpler but re-runs every feature whenever the selection changes (see
-[Developer Testing](#developer-testing-direct-docker-builds)).
-
-Either way, a feature must be **self-contained**: its `install.sh` may rely only
-on its own `aptPackages` (or its own downloads), never on packages contributed
-by another feature, since per-feature ordering no longer guarantees that every
-other feature's apt packages are present first.
-
-### Feature install failure behavior
-
-- Default behavior: feature `install.sh` failures are warnings (build continues).
-- `ENCLAVE_FEATURE_INSTALL_STRICT=1`: all feature install failures are fatal.
-- Per-feature override: set `failOnInstallError: true` in `spec.yaml` to make that feature's install failure fatal even when strict mode is disabled.
-
-### Declared ports
-
-A feature can declare top-level `ports` exactly like a tool (see
-[Adding a tool, "declarative ports"](adding-a-tool.md#4-optional-declarative-ports)).
-Entries with `publish: true` are published only for sessions that enable the
-feature; user `-p` mappings and tool-declared ports win when they already map
-the same container port. `hostAllocation` selects the host port: `fixed` (the
-default) mirrors the container port, while `auto` publishes with an OS-assigned
-host port (the `-p 0:<port>` form) so concurrent sessions do not contend — the
-resolved port appears in the printed `openUrl` and in `enclave ps`.
-
-### Declared caches
-
-A feature can declare top-level `caches` exactly like a tool (see
-[Project caches](#project-caches-caches)); entries apply only to sessions that
-enable the feature.
-
-### Available Features
-
-| Feature | Priority | Description |
-|---------|----------|-------------|
-| `devtools` | 40 | General command-line and network tools (vim, htop, ripgrep, shellcheck, dig) |
-| `golang-dev` | 45 | Go toolchain and delve, from Debian (opt-in) |
-| `github-cli` | 50 | GitHub CLI (gh) |
-| `gitlab-cli` | 50 | GitLab CLI (glab) (opt-in) |
-| `node-dev` | 70 | Node.js dev tools: nvm, typescript, yarn, pnpm |
-| `python-dev` | 70 | Python dev tools: black, ruff, mypy, pytest, pre-commit |
-| `theia-dev` | 75 | Headers for building Theia and other Electron apps: libx11, libxkbfile, libsecret (opt-in) |
-
-## Key Differences: Tools vs Features
-
-| Aspect | Tool (`kind: sandbox`) | Feature (`kind: mixin`) |
-|--------|------|---------|
-| `spec.yaml` `sandbox` block | Required | N/A |
-| `gateway-allowlist.conf` | Required | N/A (uses tool's network) |
-| `entrypoint.d/` | Runs only for this tool | N/A |
-| `feature-entrypoint.d/` | N/A | Runs for ALL tools |
-| Selection | `--tool` (per-tool image; internal `AGENT_TOOLS`) | `FEATURES` build arg |
-| Selectable at runtime | Yes (`--tool`) | No (build-time only) |
-| `needsRoot` | N/A | Controls install user |
-| `aptPackages` | N/A | Auto-installed apt packages |
-| Declared `ports` | Published for every session of the tool | Published when the feature is enabled |
-
-## How It Works
-
-### Build Time (Dockerfile)
-
-The Dockerfile defines a single final stage (`standard`) on top of several
-internal build stages:
+### Build time
 
 ```text
 system -> tool-base -> feature-base -> tool-* -> standard (final image)
 ```
 
-| Stage | Description |
-|-------|-------------|
+| Stage | Contents |
+|-------|----------|
 | `system` | Base system packages and the non-root `agent` user |
 | `tool-base` | Shared build deps, the private agent Node runtime, helper binaries |
-| `feature-base` | One source-copy + install block per selected feature, priority ordered; the per-feature cache boundary |
-| `tool-*` | Per-tool install stage (one per selected tool); the per-tool cache boundary |
-| `standard` | Final image: copies the selected tool stage(s) onto `feature-base`, then templates + docs. Tagged `:latest`; `--slim` builds the same stage with no features |
+| `feature-base` | One copy-and-install block per selected feature, in priority order: source tree, apt packages, `install.sh` in the root or user phase. Changing one feature does not re-run the others ([installation order](spec-reference.md#installation-order)). |
+| `tool-*` | Generated per selected tool; runs `install.sh` through `enclave-install-tool` |
+| `standard` | Final image: the tool stage output on `feature-base`, plus templates and bundled docs. Tagged `:latest`; `--slim` builds it with no features |
 
-**Build process:**
+Before building, the CLI resolves the tool and feature selection, stages only
+the selected extension trees (user overrides merged onto built-ins) into the
+build context, and copies the build scripts to `/opt/enclave/build-scripts/`.
+Tools with `check-update.sh` may be probed in a container first, when the
+automatic update interval has elapsed.
 
-1. Effective tool/feature selection is resolved from the current build options.
-2. Only the selected extension trees are staged into the runtime image build context (with user overrides merged onto built-ins).
-3. Docker weaving scripts are copied to `/opt/enclave/build-scripts/` from `runtime-assets/build-scripts/`.
-4. `tool-base` installs shared build deps, the private agent Node runtime, and helper binaries.
-5. `feature-base` copies and installs each selected feature in its own priority-ordered block (source tree, apt packages, then its `install.sh` in the root/user phase), so changing one feature does not re-run the others. (Direct `docker build .` falls back to aggregated `FEATURES`-aware phases.)
-6. Before the rebuild gate, tools with `check-update.sh` may be probed in a containerized environment when the automatic update interval has elapsed.
-7. Generated `tool-*` stages run `install.sh` via `enclave-install-tool` for the selected tool set.
-8. `standard` starts from `feature-base`, copies in outputs from the selected tool stages, then aggregates templates and bundled docs.
-
-Feature selection semantics:
-- `FEATURES=default`: install only features with `defaultEnabled` omitted/true.
-- `FEATURES=all`: install every feature (including opt-in).
-- `FEATURES="name1 name2"`: install only listed features.
-- `FEATURES=""`: install no features.
-
-Tool selection semantics (`AGENT_TOOLS` is an installer-internal build arg; the
-CLI sets it to the single selected tool):
-- `AGENT_TOOLS=<tool>`: install just that tool (what the CLI emits per image).
-- `AGENT_TOOLS="name1 name2"`: install only the listed tools.
-- `AGENT_TOOLS=all`: install every tool with `defaultIncluded` omitted/true (the direct-Docker fallback default).
-
-### Runtime (entrypoint.sh)
-
-1. Determines current tool from `$TOOL` env var
-2. Sources scripts from `extensions/tools/{tool}/entrypoint.d/*.sh` (tool-specific)
-3. Sources scripts from `extensions/*/feature-entrypoint.d/*.sh` (all features)
-
-### Go Registration (Tools Only)
-
-1. Extensions with `go/` directory are imported via `go generate ./cmd/enclave` (outputs `cmd/enclave/tool_imports.go`)
-2. `init()` functions register hooks via `auth.RegisterHooks()` and handlers via `tools.RegisterHandler()`
-
-### Auth Hook Phases (Tools Only)
-
-Hooks run in a fixed order during runtime auth preparation:
-
-- `OnAuthReady`: runs after auth stores are prepared; use `VolumeHasSession` to gate behavior (true when any provider session is detected via `providers[].authSession` or auth file presence)
-- `AfterEnvInjected`: runs after API keys are injected as env vars
-- `FinalizeAuth`: last chance to adjust config stores before the container starts
-
-## Framework Integration
-
-- `internal/model/types.go`: `Extension` struct with `IsMixin()` and `IsSandbox()` methods
-- `internal/config/extension.go`: Extension loading and filtering functions
-- `internal/config/profile.go`: `ListProfiles()` returns only tool extensions
-- `internal/runtime/network_manager.go`: Loads DNS allowlists from `extensions/tools/{tool}/gateway-allowlist.conf`, resolved from the user extension tree ahead of the built-in one
-
-## Adding a New Tool Extension
-
-A new tool goes to
-[enclave-extensions](https://github.com/eclipse-enclave/enclave-extensions)
-under `tools/<tool>/`, with the same file layout as `extensions/tools/<tool>/`
-here; core ships only the six built-in tools (see
-[CONTRIBUTING.md](../../CONTRIBUTING.md#where-it-goes)). The full checklist is
-[Adding a Tool](adding-a-tool.md).
-
-1. Create the `tools/{tool}/` directory (`extensions/tools/{tool}/` for a
-   built-in tool)
-2. Add `spec.yaml`:
-   ```yaml
-   schemaVersion: "1"
-   kind: sandbox
-   name: mytool
-   description: My AI tool
-   sandbox:
-     entrypoint: { run: [mytool] }
-   ```
-3. Add required files:
-   - `sandbox`, `credentials`, `network`, `providers` fields in `spec.yaml` as needed (see the claude example above)
-   - `gateway-allowlist.conf` (can include fragments via `conf-file=`)
-   - `install.sh` with installation commands
-4. Optionally add:
-   - `check-update.sh` to opt into automatic update probes
-   - `templates/` for settings files
-   - `entrypoint.d/setup.sh` for container initialization
-   - `go/` for custom hooks/handlers (requires recompiling binary)
-5. If adding Go code, run `go generate ./cmd/enclave` to refresh tool imports
-
-## Adding a New Feature Extension
-
-1. Create `extensions/features/{feature}/` directory
-2. Add `spec.yaml`:
-   ```yaml
-   schemaVersion: "1"
-   kind: mixin
-   name: myfeature
-   description: My development tools
-   aptPackages: [tool1, tool2]
-   priority: 70
-   ```
-3. Optionally add:
-   - `install.sh` for custom installation (set `needsRoot: true` if it needs root)
-   - `feature-entrypoint.d/setup.sh` for runtime initialization
-
-### Feature Guidelines
-
-- **Priority**: Lower values install earlier. Use 40-60 for core tools, 70-80 for language tools, 90+ for shell/UI
-- **aptPackages**: Prefer apt packages over install.sh when possible
-- **needsRoot**: Only set `true` if the install script requires root (e.g., adding apt repos)
-- **feature-entrypoint.d/**: Use sparingly; these scripts run on every container start
-
-## Testing & Verification
-
-Use the following steps to verify the extension system is working correctly.
-
-### 1. Go Code Verification
+Each tool gets its own image, `enclave-<tool>:...`, so rebuilding one tool
+never invalidates another:
 
 ```bash
-# Refresh generated tool imports
-go generate ./cmd/enclave
-
-# Build CLI and verify no errors
-go build ./cmd/enclave
-
-# Validate extension metadata
-./enclave validate-extensions
-
-# Verify tool loading works
-./enclave --help
-./enclave --tool claude    # Should recognize claude as valid tool
+enclave --rebuild                  # build and run the selected tool
+enclave --tool codex --rebuild     # build and run the codex image
 ```
 
-### 2. Build and Run with enclave
+| Build arg | Value | Installs |
+|-----------|-------|----------|
+| `AGENT_TOOLS` | `<tool>` | That tool (what the CLI sets per image) |
+| | `"name1 name2"` | The listed tools |
+| | `all` | Tools with `defaultIncluded` omitted or `true` (raw Dockerfile default) |
+| `FEATURES` | `default` | Features with `defaultEnabled` omitted or `true` |
+| | `all` | Every feature, including opt-in |
+| | `"name1 name2"` | The listed features |
+| | `""` | No features |
 
-```bash
-# Build and run the claude image with all default-enabled features
-./enclave --tool claude --rebuild
+A direct `docker build .` has no per-tool layer caching and uses the
+aggregated feature fallback ([DEV.md](../DEV.md#testing-extensions)).
 
-# Run another tool
-./enclave --tool codex
-```
+### Runtime
 
-### 3. Verify Features in Container
+At container start, `entrypoint.sh`:
 
-```bash
-# Start a shell session
-./enclave --tool claude
+1. Reads the tool from `$TOOL` and sources its `entrypoint.d/*.sh`.
+2. Sources `feature-entrypoint.d/*.sh` of every feature enabled at build time.
+3. Writes `commands.initFiles` and copies `files/workspace/**` for the tool and
+   enabled features, then runs their `commands.startup` entries, so all files
+   exist before any startup command runs.
 
-# Inside container, verify features are installed:
+### Go code (tools only)
 
-# Default-enabled features:
-# GitHub CLI (github-cli feature)
-gh --version
+Extensions with a `go/` directory are imported by `go generate ./cmd/enclave`
+(writes `cmd/enclave/tool_imports.go`). Their `init()` functions register auth
+hooks with `auth.RegisterHooks()` ([auth hooks](credentials.md#auth-hooks-go))
+and handlers with `tools.RegisterHandler()`. An installed extension's `go/` is
+copied but never compiled in; it requires rebuilding the `enclave` binary.
 
-# Python tools (python-dev feature)
-black --version
-ruff --version
-pre-commit --version
-
-# Node.js tools (node-dev feature)
-tsc --version
-pnpm --version
-
-# Dev tools (devtools feature)
-vim --version
-rg --version       # ripgrep
-
-# Opt-in features (if enabled):
-# Theia build headers (theia-dev feature)
-pkg-config --modversion x11 xkbfile libsecret-1
-
-# GitLab CLI (gitlab-cli feature)
-glab --version
-
-# Go (golang-dev feature)
-go version
-dlv version
-```
-
-### 4. Verify Feature Entrypoints
-
-```bash
-# Inside container, verify feature-entrypoint.d scripts ran:
-
-# node-dev (on by default) loads nvm without activating a version
-type nvm
-```
-
-### 5. Verify Tool-Specific Entrypoints
-
-```bash
-# Tool entrypoint.d scripts run only for the selected tool
-./enclave --tool claude
-# Claude-specific setup should have run
-
-./enclave --tool codex
-# Codex-specific setup should have run
-```
-
-### 6. Test Minimal Images
-
-```bash
-# Test agents-only image (no features)
-./enclave --tool claude --slim --rebuild
-
-# Inside container:
-claude --version   # Should work (tool installed)
-gh --version       # Should fail (feature not installed)
-vim --version      # Should fail (only vim-tiny)
-
-# Devcontainer mode also disables features by default
-./enclave devcontainer run --rebuild
-
-# Inside container:
-gh --version       # Should fail (feature not installed)
-
-# Opt in to features explicitly with --features
-./enclave devcontainer run --features github-cli --rebuild
-```
-
-### 7. Verify `spec.yaml` Is Required
-
-`spec.yaml` (or `spec.json`) is mandatory and its `kind`/`name` fields must
-match the extension's location.
-
-```bash
-# Temporarily remove spec.yaml from a tool
-mv extensions/tools/claude/spec.yaml /tmp/
-go build ./cmd/enclave
-./enclave --tool claude --help   # Should fail: spec.yaml not found
-mv /tmp/spec.yaml extensions/tools/claude/
-```
-
-### Developer Testing (Direct Docker Builds)
-
-For quick testing during development, you can build the Dockerfile directly.
-The raw Dockerfile includes a fallback that installs the default-included tool
-set, but without the per-tool layer caching that the CLI provides:
-
-```bash
-# Build with all default-enabled features (default)
-docker build -t enclave:latest .
-
-# Build with specific features only (including opt-in)
-docker build \
-  --build-arg FEATURES="github-cli python-dev" \
-  -t enclave:selective .
-
-# Verify selective build
-docker run --rm enclave:selective gh --version      # Works
-docker run --rm enclave:selective glab --version     # Fails (not installed)
-
-# Watch feature installation order
-docker build --progress=plain . 2>&1 | \
-  grep -E "(Installing feature|Feature .+: adding)"
-```
-
-For production builds with per-tool layer caching, use the CLI:
-
-```bash
-enclave --tool <name> --rebuild
-```
-
-### Quick Verification Checklist
-
-| Test | Command | Expected |
-|------|---------|----------|
-| Go builds | `go build ./cmd/enclave` | No errors |
-| Claude run | `./enclave --tool claude` | Starts claude in container |
-| Tool select | `./enclave --tool codex` | Starts codex |
-| gh installed | (in container) `gh --version` | Shows version |
-| glab installed (opt-in) | (in container) `glab --version` | Shows version when enabled |
-| Python tools | (in container) `black --version` | Shows version |
-| Node tools | (in container) `tsc --version` | Shows TypeScript |
-| direnv hook | (in container) `type direnv` | Found |
-| Slim image | `./enclave --slim` | No features installed |
-| Devcontainer | `./enclave devcontainer run` | No features installed |
-| Devcontainer + features | `./enclave devcontainer run --features github-cli` | Only github-cli installed |
+| File | Role |
+|------|------|
+| `internal/config/spec.go` | `specDocument`, the authoritative on-disk spec shape |
+| `internal/model/types.go` | `Extension` with `IsMixin()` and `IsSandbox()` |
+| `internal/config/extension.go` | Extension loading and filtering |
+| `internal/config/profile.go` | `ListProfiles()` returns only tool extensions |
+| `internal/network/merge.go` | `ResolveToolAllowlist` finds `gateway-allowlist.conf`, user tree first, else `base.conf` |

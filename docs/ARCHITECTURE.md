@@ -1,28 +1,27 @@
 # Architecture
 
-Enclave is a sandboxing CLI that bootstraps isolated agent tooling in Docker containers by default, with an experimental QEMU microVM backend for a narrow foreground run path, while persisting only the data you choose (host-directory stores, caches, history). The Go code is organized under `internal/` as small, focused packages with a thin CLI entrypoint in `cmd/`.
+How Enclave's code is organized and how a session comes together. The Go code
+lives in small packages under `internal/` behind a thin CLI entrypoint in
+`cmd/`. Sessions run in Docker or Podman containers, or in an experimental QEMU
+microVM ([backends.md](backends.md)). Build and test commands are in
+[DEV.md](DEV.md).
 
-## High-Level Flow
+## High-level flow
 
-1. Parse CLI arguments, load host configuration, and resolve the active tool
-   profile. If help, version, shell completion, or structured output is
-   requested, or no terminal is attached, skip the periodic binary update check.
-   Other invocations of a standalone release binary check their update channel
-   (`rolling` or `stable`) at most once per day; `auto_update=true` installs the
-   checksummed platform binary atomically, while the default only reports an
-   available update.
+1. Parse CLI arguments, load host configuration, and resolve the tool profile.
+   Standalone release binaries check for updates at most daily
+   ([Updating](install.md#updating), [Self-update](#self-update)).
 2. Discover repository assets (Dockerfiles, runtime assets, profiles).
-3. Ensure the runtime image is up to date (default or derived); rebuild if needed.
-   Rebuild detection hashes the rendered Dockerfile and entrypoint plus build config
-   (target, base image/devcontainer, features, agent tools). A side-effect-free
-   agent update planner also runs before the rebuild gate. When the interval has
-   elapsed, tools with `check-update.sh` are probed in a controlled container;
-   only changed fingerprints request an automatic rebuild. Agent update stamps
-   and fingerprints are committed only after a successful build, and per-tool
-   stages scope cache invalidation to the updated tool. `--no-rebuild` (or
-   terminal-scoped `ENCLAVE_NO_REBUILD=1`) skips automatic update probes and
-   runtime and gateway image builds entirely and uses existing local images or
-   fails if they are missing (use it for offline/frozen inputs).
+3. Ensure the runtime image is current, rebuilding if needed:
+   - Rebuild detection hashes the rendered Dockerfile and entrypoint plus build
+     config (target, base image or devcontainer, features, agent tools).
+   - A side-effect-free agent update planner runs before the rebuild gate. Once
+     the interval has elapsed, tools with `check-update.sh` are probed in a
+     controlled container, and only changed fingerprints request a rebuild.
+   - Update stamps and fingerprints are committed only after a successful
+     build. Per-tool stages scope cache invalidation to the updated tool.
+   - `--no-rebuild` / `ENCLAVE_NO_REBUILD=1` skips probes and all image builds
+     ([Suppressing rebuilds](tools.md#suppressing-rebuilds)).
 4. Prepare mounts, persistent stores, auth, and network isolation.
 5. Run the tool or shell inside an ephemeral container.
 
@@ -69,14 +68,14 @@ flowchart LR
 ```mermaid
 flowchart LR
     Developer([Developer]) --> Make["make generate"]
-    Make --> GenConfig["go generate ./config"]
+    Make --> GenConfig["go generate ./internal/config"]
     Make --> GenCmd["go generate ./cmd/enclave"]
 
     GenConfig --> GenOptions["scripts/gen_options.go"]
-    OptionsDef["config/options_def.go"] --> GenOptions
-    GenOptions --> OptionsRegistry["config/options_registry_gen.go"]
-    GenOptions --> OptionsCLI["config/options_cli_gen.go"]
-    GenOptions --> OptionSources["model/option_sources_gen.go"]
+    OptionsDef["internal/config/options_def.go"] --> GenOptions
+    GenOptions --> OptionsRegistry["internal/config/options_registry_gen.go"]
+    GenOptions --> OptionsCLI["internal/config/options_cli_gen.go"]
+    GenOptions --> OptionSources["internal/model/option_sources_gen.go"]
 
     GenCmd --> CmdGen["cmd/enclave/gen.go"]
     CmdGen --> ToolImportsGen["cmd/enclave/internal/gen_tool_imports"]
@@ -86,325 +85,455 @@ flowchart LR
 The restricted network request flow has a separate
 [sequence diagram](runtime/network-request-flow.md).
 
-## Repository Layout
+## Repository layout
 
-### Entry Points
-- [`cmd/enclave/main_unix.go`](../cmd/enclave/main_unix.go) is the binary entrypoint everywhere except Windows. It loads the selected asset variant and delegates to `app.Run`.
-- [`cmd/enclave/main_windows.go`](../cmd/enclave/main_windows.go) is the Windows entrypoint. It delegates to [`internal/wslshim/`](../internal/wslshim/), which forwards every argument to the Linux binary inside a WSL2 distribution. It links neither the embedded assets nor the tool extensions, because it never builds an image; that is why [`cmd/enclave/tool_imports.go`](../cmd/enclave/tool_imports.go) is generated with a `//go:build !windows` constraint. See [windows.md](windows.md).
-- [`cmd/enclave-gateway-proxy/main.go`](../cmd/enclave-gateway-proxy/main.go) is the gateway sidecar MITM proxy entrypoint used by `Dockerfile.gateway`.
+### Entry points
+
+| Path | Purpose |
+|------|---------|
+| [`cmd/enclave/main_unix.go`](../cmd/enclave/main_unix.go) | Entrypoint except on Windows; loads the asset variant and calls `app.Run` |
+| [`cmd/enclave/main_windows.go`](../cmd/enclave/main_windows.go) | Windows entrypoint; delegates to the [WSL launcher](#windows-launcher) |
+| [`cmd/enclave-gateway-proxy/main.go`](../cmd/enclave-gateway-proxy/main.go) | Gateway MITM proxy, used by `Dockerfile.gateway` |
 
 ### Distribution assets
-- [`assets_embed.go`](../assets_embed.go) embeds the runtime build context, documentation, extensions, and gateway proxy build sources in standalone CLI binaries. Debian and RPM builds select [`assets_noembed.go`](../assets_noembed.go) with the `enclave_no_embed` build tag because package-managed builds install the same tree next to the executable. Package definitions live under [`debian/`](../debian/) and [`packaging/rpm/`](../packaging/rpm/).
-- [`internal/appassets/`](../internal/appassets/) registers the embedded filesystem, computes its content key, and defines normalized extraction modes.
-- [`internal/config/embedded_assets.go`](../internal/config/embedded_assets.go) extracts assets atomically into a content-keyed platform cache directory when no checkout or package asset tree is adjacent to the executable.
-- [`internal/legacyassets/`](../internal/legacyassets/) removes only exact, known files from the asset tree used by older source installs. It preserves unknown files, never follows symlinks, and never recursively removes directories.
-- [`debian/`](../debian/) holds the Debian packaging, which installs the asset tree next to the executable instead of embedding it.
-- [`packaging/scoop/`](../packaging/scoop/) holds the Scoop manifest template for the Windows launcher archives; the release workflows substitute the URLs and hashes into it.
-- [`scripts/version.sh`](../scripts/version.sh) derives the only version from release tags: `enclave version`, the image label, and the deb/rpm versions all follow it (see [Releases](DEV.md#releases)).
-- [`.github/workflows/`](../.github/workflows/) builds and publishes releases: `rolling.yml` on every push to `main` and `release.yml` on version tags, both through `reusable-release-assets.yml`; [`.github/actions/publish-downloads/`](../.github/actions/publish-downloads/) uploads the assets to download.eclipse.org and refuses to replace a release published from another commit.
+
+| Path | Purpose |
+|------|---------|
+| [`assets_embed.go`](../assets_embed.go) | Embeds the build context, docs, extensions, and gateway proxy sources in standalone binaries |
+| [`assets_noembed.go`](../assets_noembed.go) | Used by deb/rpm builds (`enclave_no_embed` tag), which install the tree next to the executable |
+| [`internal/appassets/`](../internal/appassets/) | Registers the embedded filesystem, its content key, and extraction modes |
+| [`internal/config/embedded_assets.go`](../internal/config/embedded_assets.go) | Extracts assets into the content-keyed cache ([details](DEV.md#how-the-binary-finds-its-assets)) |
+| [`internal/legacyassets/`](../internal/legacyassets/) | Removes only exact, known files of older source installs; keeps unknown files, never follows symlinks or recurses |
+| [`debian/`](../debian/), [`packaging/rpm/`](../packaging/rpm/), [`packaging/scoop/`](../packaging/scoop/) | Packaging; the release workflows fill URLs and hashes into the Scoop template |
+| [`scripts/version.sh`](../scripts/version.sh) | The only version source ([Versions](RELEASING.md#versions)) |
+| [`.github/workflows/`](../.github/workflows/), [`.github/actions/publish-downloads/`](../.github/actions/publish-downloads/) | Release builds and uploads ([RELEASING.md](RELEASING.md)) |
 
 ### Orchestration (`internal/app/`)
-- [`internal/app/app.go`](../internal/app/app.go) wires parsing, defaults merging, and command dispatch.
-- [`internal/app/root_guard.go`](../internal/app/root_guard.go) refuses to run as root before any state is written, unless `--allow-root` or `ENCLAVE_ALLOW_ROOT` opts in.
-- [`internal/app/mount_guard.go`](../internal/app/mount_guard.go) refuses to start a session whose project or additional directories expose sensitive host data, unless a sensitive-dir exception (`--add-sensitive-dir`, `--add-readonly-sensitive-dir`, or `sensitive_dir_exceptions` in config) covers them or `--allow-sensitive-mounts` or `ENCLAVE_ALLOW_SENSITIVE_MOUNTS` opts in to all of them.
-- [`internal/app/commands.go`](../internal/app/commands.go) routes commands to handlers (run/continue/resume/exec/shell/cleanup/tools/etc).
-- [`internal/app/command_run.go`](../internal/app/command_run.go) drives the run/continue/resume/exec/shell flow and runtime creation.
-- [`internal/app/build.go`](../internal/app/build.go) manages Docker image build/rebuild detection plus prebuild agent update planning and post-build stamp commits.
-- [`internal/selfupdate/`](../internal/selfupdate/) resolves the latest build of a release channel from its directory on download.eclipse.org (`rolling/latest` names a commit, `releases/latest` a version) and atomically installs a checksum-verified host binary, refusing package, source, and asset-tree installs; [`internal/app/self_update.go`](../internal/app/self_update.go) owns periodic checks and user-facing policy.
-- [`internal/app/cleanup.go`](../internal/app/cleanup.go) implements `enclave cleanup` (persistent stores, caches, history, and agent memory).
-- [`internal/app/ssh.go`](../internal/app/ssh.go) implements `enclave ssh-init`.
-- [`internal/app/tools.go`](../internal/app/tools.go) lists available tool profiles.
-- [`internal/extinstall/`](../internal/extinstall/) installs, updates, and removes tool, feature, and command extensions from git repositories into the user-global extension root, backing `enclave tools|features|commands add|update|remove`.
-- [`internal/app/network_cmd.go`](../internal/app/network_cmd.go) implements `enclave network` subcommands (status, print, diff, apply, add-domain, remove-domain, set-mode).
-- [`internal/app/network_log_cmd.go`](../internal/app/network_log_cmd.go) implements `enclave network log`: it resolves the logs in scope, filters the event stream, and feeds rows, follow, or summary output.
-- [`internal/cli/network_command.go`](../internal/cli/network_command.go) defines Cobra command structure and flag parsing for the `network` subcommand tree.
 
-### Configuration and Profiles
-- [`extensions/tools/`](../extensions/tools/) contains per-tool configuration (`spec.yaml`, templates, allowlists, install scripts, optional `check-update.sh` hooks).
-- [`internal/config/paths.go`](../internal/config/paths.go) resolves `Dockerfile`, `entrypoint.sh`, extensions, and runtime assets from `ENCLAVE_HOME`, an executable-adjacent app root, or the embedded asset store.
-- [`internal/config/profile.go`](../internal/config/profile.go) loads and lists tool profiles from extension directories.
-- [`internal/domainpattern/pattern.go`](../internal/domainpattern/pattern.go) validates and normalizes strict domain patterns used by secret release host mappings.
+| Path | Purpose |
+|------|---------|
+| [`app.go`](../internal/app/app.go) | Parsing, defaults merging, command dispatch |
+| [`root_guard.go`](../internal/app/root_guard.go) | Root refusal ([Root guard](#root-guard)) |
+| [`mount_guard.go`](../internal/app/mount_guard.go) | Sensitive-mount refusal ([Mount guard](#mount-guard)) |
+| [`commands.go`](../internal/app/commands.go) | Routes commands to handlers |
+| [`command_run.go`](../internal/app/command_run.go) | run, continue, resume, exec, and shell flow |
+| [`build.go`](../internal/app/build.go) | Rebuild detection, agent update planning, stamp commits |
+| [`self_update.go`](../internal/app/self_update.go), [`internal/selfupdate/`](../internal/selfupdate/) | Update policy; channel resolution and checksum-verified atomic install ([Self-update](#self-update)) |
+| [`cleanup.go`](../internal/app/cleanup.go) | `enclave cleanup` |
+| [`ssh.go`](../internal/app/ssh.go) | `enclave ssh-init` |
+| [`tools.go`](../internal/app/tools.go) | Lists tool profiles |
+| [`network_cmd.go`](../internal/app/network_cmd.go), [`network_log_cmd.go`](../internal/app/network_log_cmd.go) | `enclave network` subcommands and `network log` |
+| [`internal/cli/network_command.go`](../internal/cli/network_command.go) | Cobra tree for `network` |
+| [`internal/extinstall/`](../internal/extinstall/) | `enclave tools|features|commands add|update|remove` |
 
-### Runtime Execution
-- [`internal/runtime/runtime.go`](../internal/runtime/runtime.go) coordinates mounts, persistent stores, auth injection, network isolation, and container execution through the selected isolation backend.
-- [`internal/backend/`](../internal/backend/) defines the backend-neutral session/lifecycle contract, request types, capability validation, and storage API. [`internal/backend/docker/`](../internal/backend/docker/) implements that contract on top of Docker; [`internal/backend/qemu/`](../internal/backend/qemu/) implements the experimental QEMU foreground backend.
-- [`internal/runtime/auth_manager.go`](../internal/runtime/auth_manager.go), [`internal/runtime/volume_manager.go`](../internal/runtime/volume_manager.go), [`internal/runtime/network_manager.go`](../internal/runtime/network_manager.go), [`internal/runtime/command_builder.go`](../internal/runtime/command_builder.go) encapsulate focused runtime concerns.
-- [`internal/runtime/secret_mapping.go`](../internal/runtime/secret_mapping.go) defines `SecretMapping` and the gateway wire entries that carry placeholder→secret release rules from auth preparation to the gateway.
-- [`internal/mounts/mounts.go`](../internal/mounts/mounts.go) validates mount paths, worktree support, and port mapping.
-- [`internal/mounts/sensitive.go`](../internal/mounts/sensitive.go) decides which host directories are sensitive: home and its parents, hidden home entries, per-user application data, enclave's own roots, and the SSH agent socket. It also assesses a mount against sensitive-dir exceptions; home, enclave's roots, and the agent socket are hard-protected, so no exception covers them.
-- [`internal/auth/auth.go`](../internal/auth/auth.go) resolves layered secrets, copies auth files, and handles Claude-specific config.
-- [`internal/auth/secret_injection.go`](../internal/auth/secret_injection.go) provides `PlaceholderResolver`, which generates cryptographically random `ENCLAVE_SECRET_*` placeholders for declared env secrets that use gateway-side HTTP release.
-- [`internal/gateway/gateway.go`](../internal/gateway/gateway.go) manages the gateway sidecar container and network. Gateway containers retain logs until explicit removal: failed starts collect the final output before cleanup, and normal teardown removes the sidecar by its immutable ID.
-- [`internal/gateway/bundle/bundle.go`](../internal/gateway/bundle/bundle.go) writes host-managed gateway bundles (`dnsmasq.conf`, `domains.txt`, `meta.json`) used for runtime apply/reload.
-- [`internal/gateway/mitm/`](../internal/gateway/mitm/) implements TLS MITM request forwarding, allowlist checks, and secret placeholder header rewriting/blocking. It writes audit events through `internal/netlog` so writer and reader cannot drift apart.
-- [`internal/gateway/dnsaudit/`](../internal/gateway/dnsaudit/) tails dnsmasq's log and translates denied or failed lookups into `dns` audit events. It runs as its own process (`enclave-gateway-proxy -dns-audit <log>`) so DNS denials are recorded even when the proxy is disabled.
-- [`internal/gateway/tlsstore/`](../internal/gateway/tlsstore/) manages CA generation and the container-private per-host leaf certificate cache for gateway TLS interception; only the CA is shared with the host.
-- [`internal/docker/`](../internal/docker/) wraps the Docker CLI for Docker-specific backend/build/cleanup implementation details.
+### Configuration and profiles
 
-### Tool Handlers
-- [`internal/tools/handler.go`](../internal/tools/handler.go) defines handler hooks used by runtime.
-- [`extensions/tools/<tool>/go/handler.go`](../extensions/tools/) registers per-tool behavior (ports and validation hooks).
+| Path | Purpose |
+|------|---------|
+| [`extensions/tools/`](../extensions/tools/) | Per-tool `spec.yaml`, templates, allowlists, install and `check-update.sh` scripts |
+| [`internal/config/paths.go`](../internal/config/paths.go) | Resolves the app root (`ENCLAVE_HOME`, adjacent tree, or embedded store) |
+| [`internal/config/profile.go`](../internal/config/profile.go) | Loads and lists tool profiles |
+| [`internal/domainpattern/pattern.go`](../internal/domainpattern/pattern.go) | Strict domain patterns for secret release hosts |
 
-### Network Policy
-- [`internal/netlog/`](../internal/netlog/) owns the network audit log format: the `Event` type both gateway writers use, plus the file handling around it (append, scan, follow, rotation). It knows nothing about Docker, policy, or the CLI.
-- [`internal/netlogview/`](../internal/netlogview/) is the query side of that log — filter, aggregate, render — kept out of `netlog` so the gateway sidecar, which only appends and tails, neither links nor ships it.
-- [`internal/network/`](../internal/network/) implements network policy loading and merging for the `network.jsonc` configuration format. Handles dnsmasq config generation, JSONC parsing, and policy merge logic.
-- [`internal/policy/effective_resolver.go`](../internal/policy/effective_resolver.go) centralizes effective-policy resolution for startup, network status, and runtime apply.
-- [`internal/policy/session_inputs.go`](../internal/policy/session_inputs.go) collects a session's spec, feature, release-host, and `allow_domains` contributions, shared by session startup and the `network status`/`print`/`diff` preview.
-- [`internal/app/network_helpers.go`](../internal/app/network_helpers.go) discovers running gateways, verifies bundle mounts, hashes desired/running bundles, and confirms reload outcomes.
+### Runtime execution
 
-### DevContainer Support
-- [`internal/devcontainer/`](../internal/devcontainer/) generates `devcontainer.json` configurations for devcontainer mode.
+| Path | Purpose |
+|------|---------|
+| [`internal/runtime/runtime.go`](../internal/runtime/runtime.go) | Coordinates mounts, stores, auth, network, and execution through the backend |
+| [`internal/runtime/`](../internal/runtime/) `auth_manager.go`, `volume_manager.go`, `network_manager.go`, `command_builder.go` | Focused runtime concerns |
+| [`internal/runtime/secret_mapping.go`](../internal/runtime/secret_mapping.go) | `SecretMapping`: placeholder release rules passed to the gateway |
+| [`internal/backend/`](../internal/backend/) | Backend-neutral session contract; [`docker/`](../internal/backend/docker/) (also Podman) and [`qemu/`](../internal/backend/qemu/) implement it |
+| [`internal/docker/`](../internal/docker/) | Wraps the Docker or Podman CLI |
+| [`internal/mounts/mounts.go`](../internal/mounts/mounts.go) | Mount path validation, worktrees, port mapping |
+| [`internal/mounts/sensitive.go`](../internal/mounts/sensitive.go) | The sensitive-path rule ([mounts.md](mounts.md#sensitive-mounts)) |
+| [`internal/auth/auth.go`](../internal/auth/auth.go) | Layered secrets, auth file copies, Claude-specific config |
+| [`internal/auth/secret_injection.go`](../internal/auth/secret_injection.go) | `PlaceholderResolver`: random `ENCLAVE_SECRET_*` placeholders |
+| [`internal/gateway/gateway.go`](../internal/gateway/gateway.go) | Sidecar container and network; keeps logs until explicit removal, removes by immutable ID |
+| [`internal/gateway/bundle/`](../internal/gateway/bundle/bundle.go) | Host-managed bundles (`dnsmasq.conf`, `domains.txt`, `meta.json`) for apply and reload |
+| [`internal/gateway/mitm/`](../internal/gateway/mitm/) | TLS MITM, allowlist checks, placeholder rewriting; writes events through `internal/netlog` |
+| [`internal/gateway/dnsaudit/`](../internal/gateway/dnsaudit/) | Turns dnsmasq denials into `dns` events; own process (`enclave-gateway-proxy -dns-audit <log>`), so it works without the proxy |
+| [`internal/gateway/tlsstore/`](../internal/gateway/tlsstore/) | CA and container-private leaf cache; only the CA reaches the host |
 
-### Windows Launcher
-- [`internal/wslshim/`](../internal/wslshim/) implements the Windows launcher end to end: it classifies the Windows working directory into a distribution and a Linux path, resolves the Linux `enclave` binary through one preflight round trip, builds the Windows command line itself so free-form arguments survive `wsl.exe`'s re-parsing, constructs `WSLENV` for the variables it forwards, and propagates the child's exit code. It depends only on the standard library, the standard-library-only [`internal/envflag/`](../internal/envflag/), and `golang.org/x/sys/windows` plus `mpr.dll`, and only the two drive-letter queries (`GetDriveType` and `WNetGetConnection`, both behind one-method seams) touch Win32, so the rest is host-independent and tested on Linux.
+### Tools, network policy, and devcontainers
 
-### Shared Types and Utilities
-- [`internal/model/types.go`](../internal/model/types.go) defines core types and constants used across packages.
-- [`internal/util/util.go`](../internal/util/util.go) provides hashing, path checks, and string helpers.
-- [`internal/envflag/`](../internal/envflag/) parses on/off environment switches such as `ENCLAVE_ALLOW_ROOT`. The Windows launcher imports it too, so it depends on the standard library only.
-- [`internal/logx/logx.go`](../internal/logx/logx.go) provides structured logging with color output and a debug level.
-- [`internal/testutil/`](../internal/testutil/) holds test helpers shared across packages, such as the tree snapshots that catch writes to a temporary HOME.
-- [`internal/usercmd/usercmd.go`](../internal/usercmd/usercmd.go) discovers user-defined subcommands dropped into `~/.config/enclave/commands/{host,session}/`, plus the `commands/host/` directory of every installed extension (executable files become `enclave <name>` verbs). Discovered names are intercepted in `cli.Parse` before Cobra/`normalizeArgs` (see the User-defined subcommands concept below); built-ins always win.
+| Path | Purpose |
+|------|---------|
+| [`internal/tools/handler.go`](../internal/tools/handler.go), [`extensions/tools/<tool>/go/`](../extensions/tools/) | Handler hooks and per-tool registrations (ports, validation) |
+| [`internal/netlog/`](../internal/netlog/) | Audit log format (`Event`) and file handling; no Docker, policy, or CLI knowledge |
+| [`internal/netlogview/`](../internal/netlogview/) | Log queries (filter, aggregate, render), kept out of `netlog` so the sidecar does not ship it |
+| [`internal/network/`](../internal/network/) | `network.jsonc` policy loading, merging, dnsmasq config generation |
+| [`internal/policy/effective_resolver.go`](../internal/policy/effective_resolver.go) | Effective policy for startup, `network status`, and apply |
+| [`internal/policy/session_inputs.go`](../internal/policy/session_inputs.go) | A session's policy contributions, shared by startup and the `network status`/`print`/`diff` preview |
+| [`internal/app/network_helpers.go`](../internal/app/network_helpers.go) | Finds running gateways, verifies bundle mounts, confirms reloads |
+| [`internal/devcontainer/`](../internal/devcontainer/) | Generates `devcontainer.json` |
 
-### Container Assets
-- [`Dockerfile`](../Dockerfile) builds the runtime image with a split build graph (`tool-base` -> `feature-base` -> `standard`) plus generated per-tool stages. Runtime image build contexts and structural rebuild hashes are scoped to the selected tools/features for the current image variant.
-- [`Dockerfile.gateway`](../Dockerfile.gateway) builds the gateway sidecar image (DNS + transparent proxy + MITM rewrite proxy binary).
-- [`gateway-entrypoint.sh`](../gateway-entrypoint.sh) runs a supervisor that validates bundles, starts dnsmasq/proxy, handles SIGHUP reloads, and fails closed on reload/process errors.
-- [`entrypoint.sh`](../entrypoint.sh) performs in-container setup (auth symlinks, settings seeding, telemetry defaults, direnv, gitconfig).
-- [`runtime-assets/gateway-allowlists/`](../runtime-assets/gateway-allowlists/) holds base DNS allowlists and domain fragments baked into the image.
-- [`runtime-assets/build-scripts/`](../runtime-assets/build-scripts/) holds Docker build composition scripts (feature selection/install, template aggregation, agent tool helper setup).
-- [`runtime-assets/auth-reconcile.sh`](../runtime-assets/auth-reconcile.sh) holds shared shell logic used by the entrypoint and helper containers to reconcile shared auth files. Shell and backend reconciliation skip files containing gateway placeholders; custom session values travel in `ENCLAVE_SECRET_PLACEHOLDERS` so detached lifecycle syncs can recognize them without carrying real secrets.
-- [`runtime-assets/net.sh`](../runtime-assets/net.sh) holds shared entrypoint network helpers (local resolver, Docker host gateway resolution, and loopback proxy setup).
-- [`runtime-assets/microvm/alpine/`](../runtime-assets/microvm/alpine/) holds the experimental QEMU Alpine bundle init and builder.
-- [`extensions/tools/<tool>/templates/`](../extensions/tools/) holds per-tool settings templates baked into the image during build.
-- [`docs/`](../docs/) is included in the runtime build context so the image can install agent-facing help under `/usr/share/doc/enclave/`. [`docs/assets/`](../docs/assets/) is excluded in [`.dockerignore`](../.dockerignore); it holds only `README.md` branding, and keeping it out spares users an image rebuild whenever the logo changes.
+### Windows launcher
+
+[`internal/wslshim/`](../internal/wslshim/) maps the Windows working directory
+to a distribution and Linux path, resolves the Linux `enclave` in one preflight
+round trip, builds the command line itself so arguments survive `wsl.exe`,
+constructs `WSLENV`, and propagates the exit code. It depends only on the
+standard library, [`internal/envflag/`](../internal/envflag/), and
+`golang.org/x/sys/windows` plus `mpr.dll`; only `GetDriveType` and
+`WNetGetConnection` (behind one-method seams) touch Win32. It links no assets or
+extensions, hence the `//go:build !windows` on
+[`cmd/enclave/tool_imports.go`](../cmd/enclave/tool_imports.go). Testing:
+[DEV.md](DEV.md#windows-launcher); behavior: [windows.md](windows.md).
+
+### Shared types and utilities
+
+| Path | Purpose |
+|------|---------|
+| [`internal/model/types.go`](../internal/model/types.go) | Core types and constants |
+| [`internal/util/util.go`](../internal/util/util.go) | Hashing, path checks, string helpers |
+| [`internal/envflag/`](../internal/envflag/) | On/off env switches; stdlib only, since the launcher imports it |
+| [`internal/logx/logx.go`](../internal/logx/logx.go) | Logging with color and debug level |
+| [`internal/testutil/`](../internal/testutil/) | Shared test helpers, such as HOME write snapshots |
+| [`internal/usercmd/usercmd.go`](../internal/usercmd/usercmd.go) | User and extension command discovery ([below](#user-defined-and-extension-commands)) |
+
+### Container assets
+
+| Path | Purpose |
+|------|---------|
+| [`Dockerfile`](../Dockerfile) | Runtime image: `tool-base` -> `feature-base` -> `standard` plus per-tool stages; contexts and hashes scoped to the selected tools and features |
+| [`Dockerfile.gateway`](../Dockerfile.gateway) | Gateway image (DNS, transparent proxy, MITM proxy) |
+| [`gateway-entrypoint.sh`](../gateway-entrypoint.sh) | Supervisor: validates bundles, runs dnsmasq and proxy, reloads on SIGHUP, fails closed |
+| [`entrypoint.sh`](../entrypoint.sh) | Auth symlinks, settings seeding, telemetry defaults, direnv, gitconfig |
+| [`runtime-assets/gateway-allowlists/`](../runtime-assets/gateway-allowlists/) | Base DNS allowlists and fragments |
+| [`runtime-assets/build-scripts/`](../runtime-assets/build-scripts/) | Build composition: features, templates, agent tool helpers |
+| [`runtime-assets/auth-reconcile.sh`](../runtime-assets/auth-reconcile.sh) | Shared auth reconciliation; skips placeholder files, and recognizes custom placeholders via `ENCLAVE_SECRET_PLACEHOLDERS` without real secrets |
+| [`runtime-assets/net.sh`](../runtime-assets/net.sh) | Resolver, host gateway resolution, loopback proxy |
+| [`runtime-assets/microvm/alpine/`](../runtime-assets/microvm/alpine/) | QEMU bundle init and builder |
+| [`extensions/tools/<tool>/templates/`](../extensions/tools/) | Settings templates baked into the image |
+| [`docs/`](../docs/) | In the build context for agent help under `/usr/share/doc/enclave/`; [`docs/assets/`](../docs/assets/) is excluded in [`.dockerignore`](../.dockerignore) so logo changes cause no rebuild |
 
 ### Repo-only directories
-- [`.agents/skills/`](../.agents/skills/) holds maintainer agent skills, such as the dependency-update workflow that interprets `scripts/check-versions.sh`. [`.claude/skills/`](../.claude/skills/) symlinks them for Claude Code, which does not scan `.agents/skills/`. On Windows, Git checks these links out as plain files unless `core.symlinks` is enabled, and Claude Code then does not find the skills. Both are listed in [`.dockerignore`](../.dockerignore).
-- [`website/`](../website/) holds the project website sources. It is listed in [`.dockerignore`](../.dockerignore) so it never reaches a build context.
 
-## Key Concepts
+Both are in [`.dockerignore`](../.dockerignore).
 
-- **Profiles** (`extensions/tools/<tool>/spec.yaml`, `kind: sandbox`): define tool command, session continuation args (`continueArgs`, `resumeArgs`), config location, optional settings/skills metadata (`settingsFile`, `settingsTarget`, `skillsDir`), optional agent-memory policy (`memoryDir`, `memoryScope`, `noMemoryArgs`) and pinned runtime state (`statePaths`), optional host passthrough allow-list (`passthroughPaths`), optional QEMU bundle minimum memory (`qemuMinMemoryMiB`) and config-store cache hint (`qemuStoreCacheMmap`), declared credential sources (`credentials.sources`) including API-key metadata, YOLO flag, and per-provider auth configuration (`providers`: credentials, auth files, auth session checks, OAuth ports).
-- **Runtime assets** (`runtime-assets/gateway-allowlists/`, `runtime-assets/build-scripts/`, `runtime-assets/auth-reconcile.sh`, `runtime-assets/net.sh`): DNS allowlists, Docker weaving scripts, and shared entrypoint helpers baked into the image. Tool templates live in `extensions/tools/<tool>/templates/` and are aggregated during build.
-- **Asset discovery**: `ENCLAVE_HOME` has explicit precedence, followed by a valid app root above the resolved executable path. This keeps package-managed installs on `/usr/share/enclave` and in-tree builds on live checkout files. Other binaries extract their embedded assets into an `assets/<content-hash>/` directory under the platform cache root; entries no binary has used for 30 days are removed. The former unversioned data-root lookup is not used.
-- **Tool selection** ([`internal/app/tool.go`](../internal/app/tool.go)): `--tool` selects the sandbox profile. The default is unset: the first command that needs a tool asks once which installed agent to use and saves the answer as `"tool"` in the global config. `actionNeedsTool` in [`internal/app/actions.go`](../internal/app/actions.go) decides which verbs need one; `update` with explicit tool arguments, `stop <session>` and `cleanup --all` name their own scope, and listing, status, extension and configuration verbs never read the default and leave it unresolved. The menu offers every installed agent profile and never the IDE profiles; without a terminal, under `--json` or `--yes`, or when the question goes unanswered, the command fails naming `--tool` and the `tool` key instead of guessing an agent.
-- **Image selection**: images are per-tool. The default tag is `enclave-<tool>:latest` for the selected tool; `--slim` uses `enclave-<tool>:slim`. When running from a git checkout on a non-default branch, the tag is prefixed with the branch name and hash (for example, `enclave-codex:branch-<name>-<hash>-latest`) to avoid overwriting main images. `--base-image` or devcontainer mode derives a separate tag (e.g., `enclave-codex:base-<hash>-latest`) unless `--image-name` is set.
-- **Agent Node isolation**: Node-based agent CLIs are installed with a private runtime at `/opt/enclave/node` and launcher shebangs are rewritten to that absolute node path. This keeps agent runtime Node independent from user/project `node` on PATH.
-- **Isolation backend**: `--backend` selects the session isolation backend. The default `auto` resolves once at startup to `docker` or `podman`, whichever CLI is on `PATH` (asking once, and saving the answer to the global config, when both are). `docker` supports the full feature set. `podman` is the same backend driven through podman's Docker-compatible CLI: `internal/docker` switches its binary once at startup, and the backend adds `--userns=keep-id` to the gateway (run as root inside it) and auth-reconcile containers, while the session container joins the gateway's user namespace together with its network namespace, so the host UID/GID survives rootless podman's user namespace on bind-mounted stores and the session never joins a network namespace owned by a foreign user namespace (which fails under runc). Experimental `qemu` supports foreground slim/no-feature unrestricted sessions in an Alpine microVM bundle; it is x86-64 only (`qemu-system-x86_64`, x86-64 guest rootfs) and is KVM-accelerated only on x86-64 Linux hosts. Both backends realize persistent stores from the shared host-directory layout (`internal/backend/hoststore`), so auth, tool config, and persisted env are shared between containers and microVMs.
-- **User-defined subcommands**: executables under `~/.config/enclave/commands/{host,session}/` become `enclave <name>` verbs. `cli.Parse` discovers them, registers name-only stub commands (Cobra group "User Commands") so they list in `--help` and shell completion, and intercepts a matching first positional *before* `normalizeArgs`/Cobra so the trailing line reaches the script verbatim (preserving the unknown-command rejection for everything else). enclave flags must precede the name: host commands accept only the global group, session commands accept the full session flag set. `host/` commands exec directly on the host (`os/exec`, exit code/stdin/stdout passthrough, `ENCLAVE_BIN`/`ENCLAVE_PROJECT_ROOT`/`ENCLAVE_CONFIG_DIR` injected). `session/` commands run through the normal run pipeline as a shell-style execution (`opts.Shell=true`, argv `bash -c 'exec "$@"' <name> <container-path> <args>` so the script's shebang is honored via execve).
-- **Extension-contributed host commands**: `usercmd.Discover` scans each installed extension's `commands/host/` under the user extension root as a third source, after the user's own `host/` and `session/` trees, so an install never takes a name already in use. Within it, command extensions (`kind: command`, `~/.config/enclave/extensions/commands/`) come before tools and features (`model.ExtensionKinds`). A command extension carries only spec metadata and `commands/host/`; the extension loader never reads its root, so it reaches no build context. Names in the global `disabled_commands` are dropped before collision resolution; they are literal names without list syntax, so no entry can make the list a no-op (`config.DisabledCommands`, read before flags are parsed). `overlayNamedExtensionDirs` excludes `commands/` from the build context and the image identity hash, while `TreeHash` still covers it. `usercmd.ExtensionCommandNames` is the filter the installer, `list`, and `remove` share. See [Host commands](extensions/README.md#host-commands).
-- **Session command isolation boundary**: session commands mount only the `session/` tree, read-only, at the fixed neutral container path `/opt/enclave/commands` (`model.UserCommandsContainerDir`) via a dedicated `model.UserCommandMount` — never through `mounts.AddAdditional` (which mirrors host paths and would leak the home layout). No mount/backend code path ever references the `host/` tree, and no enclave host-data directory is otherwise mounted, so host commands stay invisible in-container by construction. Session commands receive no `ENCLAVE_*` env injection.
-- **Detached sessions**: `--background` runs detached tool containers that can be reattached. There is no separate daemon run mode.
-- **Persistent stores**: per-tool/project stores hold tool configs; an optional env store persists env auth and `--pass-env` values when persistence is enabled (default unless `--ephemeral`). Stores are host directories under `~/.local/state/enclave/` bind-mounted into the container (no Docker volumes). `internal/backend/hoststore` resolves both store and generated-settings snapshot paths and manages settings carry-over across config overlays for Docker and QEMU. See [`docs/runtime/stores.md`](runtime/stores.md) for detailed store lifecycle, auth symlinks, and scoping documentation.
-- **Caches/history**: host-side caches are stored under `~/.cache/enclave/` and shell history under `~/.local/state/enclave/projects/`.
-- **Network isolation**: every Docker session gets a dedicated, labeled bridge network. By default, a gateway sidecar (dnsmasq + transparent proxy) is the attached endpoint and the tool shares its network namespace; unrestricted sessions attach the tool directly instead. The gateway admits inbound traffic only for loopback, established/related replies, and published container ports. It restricts outbound domains: DNS blocks unknown domains, and the proxy is passthrough-by-default with MITM only for hosts that need secret release rewriting unless `network_log=requests` forces MITM for all allowlisted HTTPS. The session start runs under a context that SIGINT/SIGTERM/SIGHUP cancels: a sidecar whose start fails or is interrupted is removed again, by the ID the engine reported or, when it reported none, only if the container holding the name carries the session's labels and is not running; a sidecar orphaned by an earlier interrupted start of the same session name is removed before the OAuth port checks run (`backend.StaleGatewayRemover`). Startup recovery uses `gateway.ReconcileStale` under the session-start lock: a sidecar carrying the session's own labels is removed by immutable ID as soon as its session container is absent, regardless of age or running state. The lock serializes starts of the same session name until the session container is running; an existing session's sidecar is preserved while the session has not exited. Sidecars of exited background sessions are stopped by immutable ID on every Docker start before the OAuth port checks (`backend.ExitedSessionGatewayStopper`), by `enclave cleanup --ephemeral`, and after `enclave attach` returns. They are removed only after their dependent session container is removed. Session starts and `cleanup --ephemeral` also remove owned, terminal-state orphans whose session is absent and whose `FinishedAt` is at least one minute old; recent failures retain their logs, unknown timestamps are kept, and running orphans remain for lock-protected recovery.
-- **Foreground session lifecycle**: once the session is attached, the run no longer follows the start context. SIGINT/SIGTERM/SIGHUP aimed at the enclave process are forwarded to the engine child, which proxies them into the container, so a closed terminal ends the session with its gateway removed. When the engine client returns while the session container still runs (the foreground detach key `ctrl-\`, or the client dying alone), the run stops and then removes the container by the ID it captured once the container was running, before the gateway goes, and reports exit code 130.
-- **Declared secrets and HTTP release**: tool profiles and enabled feature manifests can declare `secrets`. Each secret lists env-var aliases and can optionally define `release.http` target hosts/header formatting. Declared secrets are resolved from host env, layered secrets files, or persisted env; when gateway release is enabled, matching secrets are replaced with `ENCLAVE_SECRET_*` placeholders inside the container. The flow is: extension `secrets` config → `PlaceholderResolver` generates placeholders → `SecretMapping` entries written to a JSON file → gateway proxy loads secret release rules and substitutes placeholders in the declared headers on HTTPS requests to the declared hosts. Inspected requests with registered placeholders in headers that do not satisfy their release rules are denied. This protection is limited to env-var injection: credential files written by auth hooks can still contain the real secret in the config/auth store.
-- **Gateway audit events**: the gateway emits JSONL network events to the host-mounted network log path (`~/.local/state/enclave/projects/<hash>/<tool>/logs/network.log`), all through the shared `netlog.Event` contract. Default `network_log=coarse` records one `tcp` event per TLS connection, written at the ClientHello before the tunnel opens, plus per-request `http` events for plaintext HTTP and for the hosts already MITM'd for secret release; connection reuse therefore hides request volume, and successful DNS lookups are not recorded at all. `network_log=requests` adds request-level HTTP/HTTPS audit events by forcing allowlisted HTTPS through MITM. Two more writers share the file: the DNS audit translator appends `dns` denials, and the host appends a `session` marker at each gateway start. Every event carries the session name, because sessions of the same project and tool share one file. The host rotates the log at session start when it exceeds `netlog.MaxLogBytes` (32 MB), copying it to `network.log.1` and truncating it in place so a session already running keeps writing to the file it bind-mounted. `enclave network log` reads it back; logged HTTP paths never include query strings.
-- **Gateway and network labels**: gateway containers are tagged with Docker labels (`enclave.gateway`, `enclave.agent`, `enclave.gateway.project_hash`, etc.) for runtime discovery by `network status` and `network apply`. Per-session bridges carry separate ownership and project labels for conservative lifecycle management; consumers use the structured `enclave ps --json` network field instead of deriving internal names.
-- **Live policy reload**: the `enclave network apply` command writes an updated config bundle to the host, signals the gateway with SIGHUP, and polls logs for reload confirmation. The gateway supervisor validates the new bundle before swapping, with fail-closed semantics on error.
+| Path | Purpose |
+|------|---------|
+| [`.agents/skills/`](../.agents/skills/) | Maintainer agent skills, symlinked from [`.claude/skills/`](../.claude/skills/) for Claude Code. On Windows the links need `core.symlinks`, or Claude Code does not find them |
+| [`website/`](../website/) | Website sources |
 
-## Containers and Stores
+## Key concepts
 
-### Containers
+### Tool profiles and asset discovery
 
-- **Tool container**: the primary ephemeral container launched for the tool or shell. It mounts the project directory read-write by default, or read-only when `project_mount=readonly` / `--project-mount readonly` is set. Linked worktree git metadata mounts follow the same mode by default; `worktree_metadata=readonly|none` forces them read-only or skips them independently of the project mount. Devcontainer-derived project bind mounts are forced read-only in readonly mode, and writable `add_dirs` entries inside the project subtree are clamped to read-only. Additional directories outside the project, caches, and history are mounted according to their own options. The container is removed on exit (`--rm`).
-- **Gateway sidecar**: when network isolation is enabled, a per-session gateway container is attached to the session's dedicated bridge. The tool container shares the gateway's network namespace, uses it as its resolver, and has outbound access enforced by the proxy (Host/SNI). Host policy resolution writes `~/.local/state/enclave/projects/<hash>/<tool>/gateway-config/`, and runtime apply sends `SIGHUP` so the gateway supervisor reloads dnsmasq/proxy with fail-closed semantics.
+A tool profile is `extensions/tools/<tool>/spec.yaml` (`kind: sandbox`)
+([fields](extensions/spec-reference.md)). Assets resolve as described in
+[DEV.md](DEV.md#how-the-binary-finds-its-assets); the former unversioned
+data-root lookup is not used.
 
-Git config protection is applied after runtime mount composition. Existing config files for the current repository and discovered includes receive read-only file overlays at their exposed bind-mount paths; the surrounding project and Git metadata retain their configured modes. Writable parent-directory binds prevent rename-based replacement, and linked-worktree pointer files are read-only. Docker also protects aliases introduced by devcontainer `runArgs`. QEMU bind-mounts staged read-only files over their guest targets instead of copying onto targets that may live in writable host mounts. See [Git config protection](persistence.md#git).
+### Tool selection
 
-### Persistent stores
+`resolveTool` in [`internal/app/tool.go`](../internal/app/tool.go) asks once
+among installed agent profiles (never IDE profiles) and saves `"tool"`
+globally; without a terminal, under `--json` or `--yes`, or unanswered, it
+fails naming `--tool` and the `tool` key
+([Tool selection](cli-reference.md#tool-selection)). `actionNeedsTool` in
+[`internal/app/actions.go`](../internal/app/actions.go) decides which verbs need
+a tool: `update <tool>…`, `stop <session>`, and `cleanup --all` name their own
+scope, and listing, status, extension, and configuration verbs leave it
+unresolved.
 
-Persistent stores are host directories under `~/.local/state/enclave/` (honoring `$XDG_STATE_HOME`), bind-mounted into the container. There are no Docker volumes; store paths are derived from tool + project hash:
+### Images and agent Node
 
-- **Tool config store**: `~/.local/state/enclave/projects/<hash>/<tool>/config-store/<key>/` stores the tool’s config directory (for example, `.claude` or `.codex`). `<key>` is `default` for the persistent store; `--ephemeral` uses a unique suffixed key and leaves the `default` store untouched.
-- **Env store**: `~/.local/state/enclave/projects/<hash>/<tool>/env/` stores persisted env auth data and additional `--pass-env` values when persistence is enabled (default unless `--ephemeral`).
-- **Shared auth store** (when `--auth-scope=shared`): `~/.local/state/enclave/tools/<tool>/auth/<identity>/` stores OAuth files shared across projects for the tool; `<identity>` is `default` or the `--auth-name` slug.
-- **Feature auth store** (when `--auth-scope=shared` and feature defines `authFiles`): `~/.local/state/enclave/features/<feature>/auth/` stores feature auth files shared across tools/projects (for example `github-cli`).
+Images are per tool; naming rules are in
+[tools.md](tools.md#image-variants-and-naming). Node-based agent CLIs use a
+private runtime at `/opt/enclave/node`, with launcher shebangs rewritten to it,
+so the project's `node` cannot affect the agent.
 
-Other host-side data:
+### Isolation backends
 
-- **Embedded asset cache**: standalone binaries extract into `${XDG_CACHE_HOME:-~/.cache}/enclave/assets/<hash>/` on Linux or `~/Library/Caches/org.eclipse.enclave/assets/<hash>/` on macOS. Extraction uses a per-content lock, temporary sibling directory, and atomic rename so concurrent first runs share one complete entry. Missing or invalid entries are recreated from the binary. An entry's mtime records its last use, refreshed at most daily under the per-content lock; a valid entry stays in use if the refresh fails. After extracting or refreshing its own entry, a binary removes other entries unused for 30 days whose lock it can take without waiting. Shell completion runs before the root guard, so it never extracts: it uses an entry that is already published, or else reads the built-in extension names from the binary.
-- **Locks**: `~/.local/state/enclave/locks/` holds the cross-process lock files (store, skills-mount, and extension-install locks included). `image-build-<hash>.lock` serializes builds of one runtime or gateway image: a process that finds it taken prints `Waiting for another enclave process to finish building <image>.`, then re-resolves its build plan and skips the build if the other process completed it. `session-start-<hash>.lock` serializes startup per tool and project until the backend reports the container running; waiters print `Waiting for another enclave session to finish starting.`. This covers unnamed, `--background`, and `--name` sessions: it coordinates container-name and config-store allocation, duplicate-name checks, and writes to the shared gateway config bundle. Named sessions still share that bundle, and explicit numeric names can overlap automatic allocation. Running sessions execute concurrently after the startup lock is released.
-- **QEMU stores**: the experimental QEMU backend mounts the same host-directory stores as the Docker backend (resolved via `internal/backend/hoststore`) into the guest over 9p, so auth, config, and env state are shared across backends.
-- **QEMU bundles**: generated microVM bundles live under `${XDG_CACHE_HOME:-~/.cache}/enclave/microvm/<tool>/<hash>/` unless `--image-name` points at an explicit bundle directory.
-- **Caches**: `~/.cache/enclave/<tool>/<hash>/` for package managers and build tools:
-  - `npm/` - npm package cache
-  - `pip/` - pip package cache
-  - `go/` - Go module cache (GOMODCACHE)
-  - `go-build/` - Go build cache
-  - `cargo/` - Rust/Cargo cache
-  - `pnpm/` - pnpm store
-  - `uv/` - uv (Python) cache
-  - `yarn/` - Yarn cache
-  - `bun/` - Bun cache
-  - `nvm/` - nvm-installed Node.js versions
-  - `<name>/` - one directory per [extension-declared cache](extensions/README.md#project-caches-caches)
-- **History**: `~/.local/state/enclave/projects/<hash>/<tool>/history/` for shell history.
-- **Agent memory**: `~/.local/state/enclave/projects/<hash>/<tool>/memory/` for per-project, agent-writable memory, bind-mounted into the harness's native memory path (`sandbox.memoryDir`). Never shared between projects or agents, disabled with `--no-memory`, and skipped for ephemeral (`--ephemeral`) sessions. `sandbox.memoryScope: session` keys it by config-store key (`memory/<key>/`), and `sandbox.statePaths` protects tool runtime state during config overlays. See [Agent Memory](runtime/stores.md#agent-memory) for isolation and cleanup policy.
-- **Home config files**: `~/.local/state/enclave/projects/<hash>/<tool>/home-config/` for host-home files created in the container:
-  - `npmrc` → `~/.npmrc`
-  - `yarnrc` → `~/.yarnrc`
-  - `yarnrc.yml` → `~/.yarnrc.yml`
-  - `bunfig.toml` → `~/.bunfig.toml`
-  - `node_repl_history` → `~/.node_repl_history`
-- **Tool config overrides** (user-edited, config root, keyed by project hash and outside the worktree):
-  - Global overrides: `~/.config/enclave/tools/<tool>/`
-  - Project overrides: `~/.config/enclave/projects/<hash>/<tool>/config/`
-- **Managed skills**:
-  - Shared sources: `~/.config/enclave/skills/<skill>/` globally and `~/.config/enclave/projects/<hash>/skills/<skill>/` per project.
-  - Tool-specific sources mirror `skillsDir` relative to `configDir` under `~/.config/enclave/tools/<tool>/` and `~/.config/enclave/projects/<hash>/<tool>/config/`.
-  - Precedence is built-in extension, user extension, enabled-feature skills, host passthrough, global shared, global tool-specific, project shared, project tool-specific. Same-named skills replace complete directories.
-  - Enabled features may ship a `skills/` directory (`extensions/features/<feature>/skills/` and the user extension tree); only features selected for the session contribute. They overlay as trusted extension content and skip the portable-skill validation applied to shared skills.
-  - Shared `SKILL.md` files use `skills_validation`: `strict` (default) checks portable frontmatter; `agent` requires a regular, readable file and leaves metadata validation to the agent. Invalid shared skills warn and are skipped. Both modes ignore symlinked skill directories and symlinks inside skills. Tools without `skillsDir` are unaffected.
-  - When the config-source path handles skills, sources are composed into `config-generated/<key>/<relative skills dir>`; otherwise the fallback separate mount materializes `~/.local/state/enclave/projects/<hash>/<tool>/skills-generated/<key>/`. Both paths key the generated directory by `<key>` (the config-store suffix) so concurrent sessions with different feature selections never share a directory.
-- **Config patches**: global JSON/TOML patches mirror native config paths under `~/.config/enclave/patches/<tool>/`; project patches use `~/.config/enclave/projects/<hash>/patches/<tool>/`. Each patch merges an existing lower-precedence target in the generated config source.
-- **Generated config source**: `~/.local/state/enclave/projects/<hash>/<tool>/config-generated/<key>/`, where `<key>` is `default` or a session/worktree-specific suffix when the writable config store is isolated. Startup builds this tree from built-in settings/templates, optional allow-listed host config (`--host-config=passthrough` + resolved `host_config_paths`), managed skills, canonical global/project config overrides, and global/project config patches, then overlays it into the writable tool config store before auth symlinks and tool setup run.
+`--backend auto` resolves to `docker` or `podman`
+([backends.md](backends.md)). Podman reuses the Docker backend; the engine
+differences are in
+[Backend detection and Podman](#backend-detection-and-podman).
+QEMU runs foreground, slim, unrestricted sessions in an Alpine microVM. All
+backends realize stores from the shared host layout
+(`internal/backend/hoststore`), so auth, config, and env state are shared
+between containers and microVMs; QEMU mounts them over 9p.
 
-The cleanup command in [`internal/app/cleanup.go`](../internal/app/cleanup.go) can remove stores and host-side data for a single tool/project or across all projects.
+### User-defined and extension commands
 
-## Extension Points
+User-facing rules: [commands.md](commands.md).
 
-- Add new tools by following [`docs/extensions/adding-a-tool.md`](extensions/adding-a-tool.md) and [`docs/extensions/README.md`](extensions/README.md). Create an extension directory under `extensions/tools/<tool>/` with a `spec.yaml`, `install.sh`, and `gateway-allowlist.conf`. Add `check-update.sh` when the tool should participate in automatic update probes.
-- Add DNS rules by editing [`runtime-assets/gateway-allowlists/`](../runtime-assets/gateway-allowlists/) or by using host overrides (`~/.config/enclave/gateway-allowlists/<tool>.conf` and the project-scoped `~/.config/enclave/projects/<hash>/gateway-allowlists/<tool>.conf`).
-- Add templates for new CLIs in `extensions/tools/<tool>/templates/`. They are aggregated into the image during build.
-- Canonical full config overrides live under `~/.config/enclave/tools/<tool>/` and project-scoped `~/.config/enclave/projects/<hash>/<tool>/config/`. Generic JSON/TOML patches use the global/project patch trees described above. Resolution layers built-in config, host passthrough, global full-or-patch, then project full-or-patch; a patch merges the complete lower-precedence result, and a same-path, same-scope full file plus patch is an error.
-- Shared managed skills live under `~/.config/enclave/skills/<skill>/` and `~/.config/enclave/projects/<hash>/skills/<skill>/`; tool-specific skills use the canonical config roots at the native `skillsDir` path. See [Configuration](configuration.md#managed-skills) for precedence and portability rules.
+- `cli.Parse` registers name-only stubs (Cobra group "User Commands") for
+  `--help` and completion, and intercepts a matching first positional before
+  `normalizeArgs` and Cobra, so trailing arguments reach the script verbatim.
+- `host/` commands run via `os/exec`. `session/` commands run through the run
+  pipeline with `opts.Shell=true` and argv
+  `bash -c 'exec "$@"' <name> <container-path> <args>`, so the shebang is
+  honored via execve.
+- Session commands see only the `session/` tree, mounted read-only at
+  `/opt/enclave/commands` (`model.UserCommandsContainerDir`) through a
+  dedicated `model.UserCommandMount`, never via `mounts.AddAdditional`, which
+  mirrors host paths and would leak the home layout. No code path mounts the
+  `host/` tree, so host commands are invisible in the container by
+  construction.
+- `usercmd.Discover` scans installed extensions' `commands/host/` as a third
+  source after the user's trees; command extensions come before tools and
+  features (`model.ExtensionKinds`). The extension loader never reads a command
+  extension's root, so it reaches no build context.
+- `disabled_commands` names are dropped before collision resolution
+  (`config.DisabledCommands`, read before flags are parsed).
+- `overlayNamedExtensionDirs` excludes `commands/` from the build context and
+  image hash; `TreeHash` still covers it. `usercmd.ExtensionCommandNames` is
+  the filter shared by the installer, `list`, and `remove`.
 
-## Option Resolution Flow
+### Sessions
 
-The complete flow from CLI arguments to final options:
+`--background` runs detached, reattachable containers; there is no daemon mode.
+Once a foreground session is attached, SIGINT, SIGTERM, and SIGHUP are forwarded
+to the engine child. If the engine client returns while the container still
+runs, the run stops and removes the container by the ID captured at start,
+before the gateway, and exits 130
+([Interrupts and signals](persistence.md#interrupts-and-signals)).
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                            app.Run(args)                                     │
-│                                                                             │
-│  1. config.LoadDefaults(projectDir)                                         │
-│     ├── Read ~/.config/enclave/config.json → globalDefaults               │
-│     └── Read <config-root>/projects/<hash>/config.json → projectDefaults    │
-│         (auto_update and update_channel are dropped: global-only)           │
-│                                                                             │
-│  2. cli.Parse(args, baseOpts)                                               │
-│     ├── Match commands: run, shell, exec, cleanup, config, etc.             │
-│     ├── Match flags via CLIFlagIndex() registry (generated), including      │
-│     │   generated run options such as --backend, --host-config, --add-dir, │
-│     │   --add-readonly-dir, and --project-mount                            │
-│     └── Returns: Result{Options, Action, HelpShown, Sources, ConfigView}     │
-│                                                                             │
-│  3. model.MergeOptionSources(baseSources, cliSources)                       │
-│     └── Merge source tracking (CLI wins if set)                             │
-│                                                                             │
-│  4. config.ResolveOptionsForTool(cliOpts, cliSources, global, project)      │
-│     ├── Hold back CLI lists so config lists fold under them                 │
-│     ├── Global, then project config: scalars where CLI did not set them,    │
-│     │   lists folded as layers (options_lists.go), string maps merged       │
-│     │   key by key (a later layer replaces a key's value)                   │
-│     ├── Tool override: scalars from both files combined, lists folded       │
-│     │   as two layers (global file, then project file)                      │
-│     └── CLI lists folded last; each entry records its origin                │
-│                                                                             │
-│  5. Lists merge per ApplyKind: ApplyListExtras (bare list replaces,         │
-│     +x/-x amend, [] or none clears; CLI dir flags add) or the selection     │
-│     kinds (bare list replaces, +/- amend, higher layer wins per item)       │
-│                                                                             │
-│  6. Invalid list entries become ListProblems, reported by validation        │
-│     with the flag or config key and file that set them                      │
-│                                                                             │
-│  7. Resolve the unset tool (app.resolveTool)                                │
-│     ├── "auto" with a terminal: ask once among the installed                │
-│     │   agent profiles and save the answer as "tool" globally               │
-│     ├── otherwise: claude (scripts, --json, --yes, other verbs)             │
-│     └── Step 4 runs again for the resolved tool                             │
-│                                                                             │
-│  8. Final Options with Sources tracked                                      │
-│     └── Each field knows: CLI, ToolOverride, Project, Global, or Default   │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
+### Network isolation
 
-**Precedence:** CLI > Tool override > Project config > Global config > Built-in defaults
+Every Docker session gets a dedicated, labeled bridge. The gateway sidecar is
+the attached endpoint and the tool shares its network namespace; unrestricted
+sessions attach the tool directly. DNS blocks unknown domains; the proxy
+tunnels TLS and uses MITM only for secret-release hosts or under
+`network_log=requests`. User-facing behavior is in
+[networking.md](networking.md); the request path is in
+[network-request-flow.md](runtime/network-request-flow.md).
 
-Project config lives in the host config root, out of reach of the repository and
-of sessions, so it may set every option global config can. Only the global-only
-`auto_update` and `update_channel` are dropped while loading
-`~/.config/enclave/projects/<hash>/config.json`, with a warning.
+Sidecar lifecycle:
 
-**Key types:**
-- `model.Options` - final resolved options (embedded structs: Run, Auth, Build, Cleanup)
-- `model.OptionSources` - tracks where each option came from
-- `config.Defaults` - values from config files (includes `tool_overrides`)
-- `config.OptionSpec` - registry defining each option's behavior (generated from `internal/config/options_def.go`)
+| Situation | Handling |
+|-----------|----------|
+| Start fails or is interrupted | Removed by the engine-reported ID; without one, only if the container holding the name has the session's labels and is not running |
+| Orphan of an earlier interrupted start of the same name | Removed before the OAuth port checks (`backend.StaleGatewayRemover`) |
+| Startup recovery | `gateway.ReconcileStale`, under the session-start lock, removes a sidecar with the session's labels once its session container is absent |
+| Exited background session | Stopped by ID on every Docker start (`backend.ExitedSessionGatewayStopper`), by `cleanup --ephemeral`, and after `attach` returns; removed only after its session container |
+| Terminal-state orphan, session absent | Removed by session starts and `cleanup --ephemeral` once `FinishedAt` is at least a minute old; unknown timestamps and running orphans are kept |
 
-**Source tracking:**
-- `SourceDefault` - built-in default
-- `SourceGlobal` - from `~/.config/enclave/config.json`
-- `SourceProject` - from `~/.config/enclave/projects/<hash>/config.json`
-- `SourceToolOverride` - from selected `tool_overrides.<tool>`
-- `SourceCLI` - from command-line flag
+Gateways and bridges carry labels (`enclave.gateway`, `enclave.agent`,
+`enclave.gateway.project_hash`, ownership labels) for discovery and lifecycle;
+consumers should use `enclave ps --json` instead. `network apply` writes a new
+bundle, sends SIGHUP, and polls logs for confirmation; the supervisor validates
+before swapping and fails closed.
 
-The `enclave config --view source` command uses this to show where each value came from.
+Audit events go through `netlog.Event` to `logs/network.log`: the MITM proxy
+writes `tcp` and `http` events, `dnsaudit` writes `dns` denials, and the host
+writes a `session` marker per gateway start. The host rotates at session start
+above `netlog.MaxLogBytes` by copy and truncate, so running sessions keep their
+bind-mounted file
+([Reading the network log](networking.md#reading-the-network-log)).
 
-See [Configuration](configuration.md) for the user-facing option and source model.
+### Declared credentials and HTTP release
 
-## Config Defaults
+Extensions declare `credentials.sources` and `network.serviceDomains` /
+`network.serviceAuth`; `internal/config/spec_map.go` validates the mapping into
+internal secret configs with release rules
+([credentials.md](extensions/credentials.md)). With gateway release enabled:
 
-Config defaults can be set in `~/.config/enclave/config.json` (global) and
-`~/.config/enclave/projects/<hash>/config.json` (project; per-project
-overrides are keyed by project hash and live outside the worktree). Precedence
-is:
+1. `PlaceholderResolver` replaces matching values with `ENCLAVE_SECRET_*`
+   placeholders in the container.
+2. `SecretMapping` entries are written to a JSON file for the gateway.
+3. The proxy substitutes placeholders in the declared header on HTTPS requests
+   to the declared hosts and denies inspected requests whose placeholders do
+   not satisfy their rules.
 
-1. CLI flags
-2. Selected tool override (`tool_overrides.<tool>`)
-3. Project config
-4. Global config
-5. Built-in defaults
+This covers env injection only; files written by auth hooks can still hold the
+real secret.
 
-`cache_from` can be used to add inline `docker build` cache sources (same as
-`--cache-from`). Some build controls are intentionally not read
-from config files, including `--rebuild`, `--no-rebuild`,
-`--force-base-image`, `--build-uid`, `--build-gid`, `--runtime-uid-remap`, and
-the buildx cache flags. These are CLI-only except for rebuild suppression:
-`ENCLAVE_NO_REBUILD=1` enables the same no-build path for session commands,
-as described in the [CLI reference](cli-reference.md#image--build).
-`--allow-root` is likewise never read from config; its only alternative is the
-`ENCLAVE_ALLOW_ROOT` environment variable. The same holds for
-`--allow-sensitive-mounts` and `ENCLAVE_ALLOW_SENSITIVE_MOUNTS`.
-`--add-sensitive-dir` and `--add-readonly-sensitive-dir` are CLI-only as well;
-config can exempt specific paths only through
-`sensitive_dir_exceptions`.
+## Containers and stores
 
-Runtime image hashes include the effective build UID/GID. Explicit
-`--build-uid` / `--build-gid` values are used when provided; otherwise the host
-UID/GID is included after host resolution. This prevents a loaded shared image
-from being accepted as current when it was built for a different numeric user.
+The tool container is ephemeral (`--rm`); with network isolation the gateway
+enforces Host/SNI ([Network isolation](#network-isolation)). Mount modes are in
+[mounts.md](mounts.md). Host policy resolution writes
+`projects/<hash>/<tool>/gateway-config/` for the gateway.
 
-`features` can be set from config or CLI (`--features`). In devcontainer mode,
-the unset default is no enclave features; pass `--features` (or configure
-`features`) to opt in. `--features none` selects zero features explicitly.
-`+`/`-` entries amend the configured selection and the more specific layer wins
-an item; they apply to the implicit default-enabled set (empty in devcontainer
-mode) only when no layer selected features.
+Git config protection runs after mount composition: read-only file overlays on
+existing repository config and includes at their exposed paths, writable parent
+binds against rename, read-only worktree pointers, devcontainer `runArgs`
+aliases on Docker, and staged read-only bind mounts on QEMU
+([git.md](git.md#config-protection)).
 
-`host_config_paths` is a per-tool config option resolved against the selected
-tool profile's reviewed `passthroughPaths`. Additive-only entries (`+`/`-`)
-modify the inherited list or, when none is set, that built-in allow-list; bare
-entries replace it unless `default` is included explicitly.
+### Host data
 
-The extras lists (`add_dirs`, `ports`, `allow_domains`, and the others in
-[List Options](configuration.md#list-options)) replace with a bare list and
-amend with `+`/`-`; only `--add-dir` and `--add-readonly-dir` add a bare path.
-Each resolved entry records its layer (`model.ListOrigins`), so
-validation errors and the sensitive-mount refusal name the flag or config file.
+Stores are documented in [runtime/stores.md](runtime/stores.md), user-visible
+locations in [persistence.md](persistence.md#data-on-the-host), and macOS paths
+in [configuration.md](configuration.md#host-directories). Paths not covered
+there:
 
-## Image Naming
+| Path | Contents |
+|------|----------|
+| `~/.cache/enclave/<tool>/<hash>/` | `npm/`, `pip/`, `go/` (`GOMODCACHE`), `go-build/`, `cargo/`, `pnpm/`, `uv/`, `yarn/`, `bun/`, `nvm/` (nvm Node versions), and one `<name>/` per [extension cache](extensions/spec-reference.md#project-caches-caches) |
+| `~/.local/state/enclave/projects/<hash>/<tool>/home-config/` | `npmrc`, `yarnrc`, `yarnrc.yml`, `bunfig.toml`, `node_repl_history`, linked as the matching dotfiles in `~` |
+| `~/.local/state/enclave/projects/<hash>/<tool>/config-generated/<key>/` | Generated config source (below) |
+| `${XDG_CACHE_HOME:-~/.cache}/enclave/microvm/<tool>/<hash>/` | QEMU bundles, unless `--image-name` names one |
+| `~/.local/state/enclave/locks/` | Cross-process locks: store, skills-mount, extension-install, self-update, and the two below |
 
-Images are per-tool; `<tool>` below is the selected tool.
-Default image naming behavior:
+The generated config source is rebuilt at startup from built-in settings and
+templates, allow-listed host config (`--host-config=passthrough` plus
+`host_config_paths`), managed skills, global and project overrides, then global
+and project patches. It is overlaid into the writable config store before auth
+symlinks and tool setup ([tool-config.md](tool-config.md)).
 
-- Explicit `--image-name`: always used (no auto-derivation).
-- Default build: `enclave-<tool>:latest` (or `enclave-<tool>:branch-<name>-<hash>-latest` on non-default git branches)
-- `--slim`: `enclave-<tool>:slim`
-- `--base-image` or devcontainer mode without `--image-name`:
-  - `enclave-<tool>:base-<hash>-latest` or `enclave-<tool>:devcontainer-<hash>-latest`
-  - slim: `enclave-<tool>:base-<hash>-slim` or `enclave-<tool>:devcontainer-<hash>-slim`
+| Lock | Effect |
+|------|--------|
+| `image-build-<hash>.lock` | Serializes builds of one image; a waiter prints `Waiting for another enclave process to finish building <image>.` and skips the build if the other process completed it |
+| `session-start-<hash>.lock` | Serializes startup per tool and project (unnamed, `--background`, and `--name`) until the container runs; waiters print `Waiting for another enclave session to finish starting.` |
+
+The session-start lock coordinates container names, config-store allocation,
+duplicate-name checks, and writes to the shared gateway bundle. Explicit
+numeric names can still overlap automatic allocation.
+
+## Extension points
+
+| To add | Where |
+|--------|-------|
+| A tool | [adding-a-tool.md](extensions/adding-a-tool.md) |
+| A feature | [adding-a-feature.md](extensions/adding-a-feature.md) |
+| DNS rules | [`runtime-assets/gateway-allowlists/`](../runtime-assets/gateway-allowlists/), or host overrides ([networking.md](networking.md#overriding-the-main-allowlist)) |
+| Templates | `extensions/tools/<tool>/templates/` |
+| User config, patches, skills | [tool-config.md](tool-config.md) |
+
+## Option resolution flow
+
+`app.Run(args)` resolves options in this order:
+
+1. `config.LoadDefaults(projectDir)` reads `~/.config/enclave/config.json`
+   (global) and `<config-root>/projects/<hash>/config.json` (project),
+   dropping the global-only keys `auto_update`, `update_channel`, and
+   `disabled_commands` from the project file.
+2. `cli.Parse(args, baseOpts)` matches commands and flags through the
+   generated `CLIFlagIndex()` registry and returns
+   `Result{Options, Action, HelpShown, Sources, ConfigView}`.
+3. `model.MergeOptionSources(baseSources, cliSources)` merges source tracking;
+   the CLI wins where set.
+4. `config.ResolveOptionsForTool(cliOpts, cliSources, global, project)`
+   applies the layers:
+   - CLI lists are held back so config lists fold under them.
+   - Global, then project config: scalars where the CLI did not set them,
+     lists folded as layers (`options_lists.go`), string maps merged key by
+     key (a later layer replaces a key's value).
+   - Tool override: scalars from both files combined, lists folded as two
+     layers (global file, then project file).
+   - CLI lists fold last; each entry records its origin.
+5. Lists merge per `ApplyKind`: `ApplyListExtras` (bare list replaces,
+   `+x`/`-x` amend, `[]` or `none` clears; CLI dir flags add) or the selection
+   kinds (bare list replaces, `+`/`-` amend, higher layer wins per item).
+6. Invalid list entries become `ListProblems`; validation reports them with
+   the flag, or the config key and file, that set them.
+7. An unset tool is resolved by `app.resolveTool`
+   ([Tool selection](#tool-selection)), then step 4 runs again for it.
+8. Each field of the final `Options` records its source: CLI, ToolOverride,
+   Project, Global, or Default.
+
+Precedence and the global-only keys are in
+[configuration.md](configuration.md#precedence).
+
+| Type | Role |
+|------|------|
+| `model.Options` | Resolved options (embedded Run, Auth, Build, Cleanup) |
+| `model.OptionSources` | Per-field origin: `SourceDefault`, `SourceGlobal`, `SourceProject`, `SourceToolOverride`, `SourceCLI`; shown by `enclave config --view source` |
+| `model.ListOrigins` | Per-entry layer of list options, so errors and the mount refusal name the flag or file |
+| `config.Defaults` | Config file values, including `tool_overrides` |
+| `config.OptionSpec` | Generated registry from `internal/config/options_def.go` |
+
+## Subsystem notes
+
+Rules for options that need care when changed; the general checklist is in
+[DEV.md](DEV.md#adding-or-updating-options).
+
+### Backend detection and Podman
+
+- `app.resolveBackend` turns `auto` into `docker` or `podman` from
+  `backenddocker.DetectCLIs()`; with both installed and a terminal it asks via
+  `prompt.Choose` and saves with `config.WriteGlobalDefault`.
+- Engine-using management commands register `--backend` by name, so the CLI
+  value wins without taking every Run-group flag.
+- Podman: `docker.SetBinary` switches `internal/docker` once at startup;
+  `docker.IsPodman()` gates `--userns=keep-id`, the `info` schema, build cache
+  flags, and `renderEngineDockerfile` stripping home-directory cache mounts.
+  Gateway and auth-reconcile containers get `--userns=keep-id`; the session
+  joins the gateway's user and network namespaces, keeping host UID/GID on
+  bind mounts and avoiding a network namespace owned by a foreign user
+  namespace, which fails under runc.
+
+### Skills validation
+
+`--skills-validation strict|agent` (default `strict`; global, project, and tool
+override) applies to shared skills in both composition paths. Normalize casing
+and whitespace first; runtime callers use `model.SkillsValidationMode`, which
+falls back to `strict` for empty or unknown values.
+
+### Features
+
+- Build-option normalization validates names against installed extensions
+  before image checks: unknown additions fail, unknown removals warn, and
+  unknown additions from config only warn when `--slim` or qemu discards the
+  selection.
+- Removals consumed by the list merge are recorded in
+  `Options.DroppedRemovals` and validated too; a replacing layer clears them.
+- Staged contexts keep `extensions/features` even when empty, and build scripts
+  must preserve an explicitly empty `FEATURES`.
+
+### Root guard
+
+- `checkRootGuard` (`internal/app/root_guard.go`) runs early in `app.Run`,
+  before any state is written; tests use the `runningAsRoot` seam. The opt-in
+  only skips the check: images cannot be built for UID 0 yet.
+- Code before the guard (command discovery, parsing, help, version,
+  completion) must not write, even a file it removes again. It uses
+  `config.ResolveHostHomeReadOnly` and `config.ResolvePathsReadOnly`, which
+  test writability with access(2), and never extracts assets.
+- `internal/app/root_guard_test.go` and `cmd/enclave/main_test.go` (the only
+  tests with the real embedded assets) catch writes by backdating directory
+  mtimes under a temporary HOME.
+
+### Mount guard
+
+- `resolveAdditionalMounts` (`internal/app/command_run.go`) validates
+  additional directories and collects their exceptions. For run actions it then
+  normalizes `sensitive_dir_exceptions` (`configSensitiveDirExceptions`) and
+  runs `checkSensitiveMounts` (`internal/app/mount_guard.go`) before the build.
+- The rule is `mounts.SensitivePaths`; `Assess` weighs a mount against
+  exceptions. Callers pass `config.HostAppDataDirs` and
+  `config.HostEnclaveRoots` separately, so `mounts` can mark the roots and the
+  SSH agent socket hard-protected without importing `config`. Hard-protected
+  locations are scanned in full, since `Reason` stops at the first match.
+- Devcontainer bind sources are not checked separately: they resolve inside
+  the project, and subdirectories of a non-sensitive directory are not
+  sensitive (`TestSensitivePathsSubdirsOfSafeDirsAreSafe`).
+- `mounts.AddWorktree` checks external worktree metadata regardless of the
+  opt-in, using `Reason`; exceptions must never reach it.
+- Tests clear `SSH_AUTH_SOCK` in `TestMain`; `app` and `runtime` tests also
+  clear `XDG_*`, while `mounts` tests pass directories explicitly.
+
+### Self-update
+
+- Read `auto_update` and `update_channel` from `globalDefaults`; explicit
+  `self-update` uses `config.LoadGlobalDefaults`.
+- Updater output goes to stderr only: `logx.Noticef`, `DebugNoticef`, or
+  `Warnf`, never `Infof` or `Debugf`.
+- Both paths hold `config.HostSelfUpdateLockPath`; the periodic check skips a
+  busy lock, explicit `self-update` waits.
+- Tests replace `newSelfUpdater` and use an `httptest` release. For a real
+  update, build with
+  `make build BUILD_CHANNEL=rolling BIN_DIR=/tmp/enclave-rolling` and run
+  `/tmp/enclave-rolling/enclave self-update` with `ENCLAVE_HOME` unset.
+- Channels read `latest` and `checksums.txt` on download.eclipse.org
+  ([layout](RELEASING.md#download-layout)); release CI stamps `BUILD_CHANNEL`.
+
+### List options
+
+Lists fold per layer in `internal/config/options_lists.go`
+([order](#option-resolution-flow)); `cliAddsPlainEntries` makes `--add-dir` and
+`--add-readonly-dir` add bare paths. The generator emits
+no `ApplyDefaultsWithSource` for list kinds. `host_config_paths` resolves
+against the profile's `passthroughPaths`. Syntax:
+[configuration.md](configuration.md#list-options).
+
+### String map options
+
+String maps (`OptionKindStringMap`, `ApplyStringMap`; currently `host_env`) go
+through the generated `ApplyDefaultsWithSource`, which calls `mergeStringMap`:
+keys merge across layers, a later layer replaces a key's value, no layer can
+remove an inherited key, and `enclave config --json` reports an object.

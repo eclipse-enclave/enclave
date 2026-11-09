@@ -1,48 +1,76 @@
 # Contributing to Eclipse Enclave
 
-Thanks for your interest in Eclipse Enclave, a sandboxed runtime for executing
-AI agents in isolated, policy-controlled environments.
+Eclipse Enclave runs AI coding agents in isolated, policy-controlled
+containers. This page covers how to build it, where changes go, and what a pull
+request needs.
 
-- Project home: https://projects.eclipse.org/projects/ecd.enclave
-- Developer resources: https://projects.eclipse.org/projects/ecd.enclave/developer
-- Source code: https://github.com/eclipse-enclave/enclave
+> [!TIP]
+> Looking for build instructions? Start with
+> [Building from source](#building-from-source) below; the
+> [Developer Guide](docs/DEV.md) has the full build, test, and packaging
+> reference.
 
-## Terms of Use
+| Resource | Link |
+|----------|------|
+| Source code | https://github.com/eclipse-enclave/enclave |
+| Project home | https://projects.eclipse.org/projects/ecd.enclave |
+| Developer resources | https://projects.eclipse.org/projects/ecd.enclave/developer |
+| Mailing list | [enclave-dev](https://accounts.eclipse.org/mailing-list/enclave-dev) |
+| Architecture | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) |
 
-This repository is subject to the [Eclipse Foundation Terms of
-Use](https://www.eclipse.org/legal/terms-of-use/).
+## Building from source
 
-## Project License
+Requirements:
 
-Eclipse Enclave is distributed under the [MIT License](LICENSE.md).
-Contributions are received under the terms of that license.
+- Go 1.24 or newer, and Make. If your distribution ships an older Go, use the
+  official [Go installation instructions](https://go.dev/doc/install).
+- Linux or macOS. On Windows, use WSL2.
+- A container engine to run what you build; see
+  [Installation](docs/install.md#requirements).
 
-## Contributing Code
+```bash
+git clone https://github.com/eclipse-enclave/enclave.git
+cd enclave
+make build      # build bin/enclave
+make install    # install to ~/.local/bin (Linux) or /usr/local/bin (macOS)
+make test       # run the tests
+make lint       # run the linters
+```
+
+The [Developer Guide](docs/DEV.md) is the full reference: running changes
+from the working copy, tests, package builds, code generation, and the option
+checklist.
+
+## Contributing code
 
 <a name="discuss-first"></a>
 
-- [1.](#discuss-first) Before starting substantial work, open or identify a
-  GitHub issue and discuss the intended change with the project team.
+- [1.](#discuss-first) Before starting substantial work, open or find a GitHub
+  issue and discuss the change with the project team.
 
 <a name="where-it-goes"></a>
 
 - [2.](#where-it-goes) Open the pull request in the right repository:
-  - A new tool goes to
-    [enclave-extensions](https://github.com/eclipse-enclave/enclave-extensions#readme),
-    the official extensions repository. Enclave itself ships six tools: Claude
-    Code, Codex, and Copilot from large vendors, and the open-source Theia
-    (with its `theia-next` preview profile), OpenCode, and Pi.
-  - A change to one of the six, to a core feature, or to the extension
-    mechanism itself goes here.
-  - A proposal to change the six is an issue here. The Eclipse Enclave
-    [committers](https://projects.eclipse.org/projects/ecd.enclave/who) vote on
-    it for at least one week. It passes with at least three +1 votes and no -1;
-    if the project has three or fewer committers, all of them must vote +1.
-    These are the thresholds of
-    [committer elections](https://www.eclipse.org/projects/handbook/#elections-how).
-    Committers are appointed or elected under the
-    [Eclipse Foundation Development Process](https://www.eclipse.org/projects/dev_process/);
-    a merged commit does not make anyone a committer.
+
+  | Change | Repository |
+  |--------|------------|
+  | A new tool | [enclave-extensions](https://github.com/eclipse-enclave/enclave-extensions#readme), the official extensions repository |
+  | A change to one of the six core tools, a core feature, or the extension mechanism | This repository |
+  | A proposal to change the set of six core tools | An issue in this repository |
+
+  Enclave ships six tools: Claude Code, Codex, and Copilot from large vendors,
+  and the open-source Theia (with its `theia-next` preview profile), OpenCode,
+  and Pi.
+
+  The Eclipse Enclave
+  [committers](https://projects.eclipse.org/projects/ecd.enclave/who) vote on
+  a proposal to change the six for at least one week. It passes with at least
+  three +1 votes and no -1; if the project has three or fewer committers, all
+  of them must vote +1. These are the thresholds of
+  [committer elections](https://www.eclipse.org/projects/handbook/#elections-how).
+  Committers are appointed or elected under the
+  [Eclipse Foundation Development Process](https://www.eclipse.org/projects/dev_process/);
+  a merged commit does not make anyone a committer.
 
 <a name="pull-requests"></a>
 
@@ -50,13 +78,13 @@ Contributions are received under the terms of that license.
 
 <a name="focused-changes"></a>
 
-- [4.](#focused-changes) Keep changes focused and follow the repository guidance
-  in `AGENTS.md`.
+- [4.](#focused-changes) Keep changes focused and follow the repository
+  guidance in [AGENTS.md](AGENTS.md).
 
 <a name="required-checks"></a>
 
-- [5.](#required-checks) Format modified Go files and run the required checks
-  before submitting a pull request:
+- [5.](#required-checks) Format modified Go files with `gofmt -w` and run the
+  required checks before submitting:
 
   ```sh
   make build
@@ -64,34 +92,51 @@ Contributions are received under the terms of that license.
   make lint
   ```
 
+  Documentation-only changes under `docs/` do not need them.
+
 <a name="human-in-the-loop"></a>
 
-- [6.](#human-in-the-loop) Contributors can use whatever tools they would like
-  to craft their contributions, but there must be a human in the loop.
-  Contributors must read and review all LLM-generated code or text before they
-  ask other project members to review it. The contributor is always the author
-  and is fully accountable for their contributions. Contributors should be
-  sufficiently confident that the contribution is high enough quality that
-  asking for a review is a good use of scarce maintainer time, and they should
-  be able to answer questions about their work themselves during review.
+- [6.](#human-in-the-loop) Use whatever tools you like to write a
+  contribution, but keep a human in the loop. Read and review all
+  LLM-generated code or text before asking others to review it. You are the
+  author and fully accountable for the contribution: be confident that it is
+  worth a maintainer's review time, and be able to answer questions about it
+  yourself.
 
-## Eclipse Foundation Development Process
+## Pull request checklist
 
-This Eclipse Foundation open source project is governed by the [Eclipse
-Foundation Development Process](https://www.eclipse.org/projects/dev_process/)
-and operates under the [Eclipse Foundation Intellectual Property
-Policy](https://www.eclipse.org/org/documents/Eclipse_IP_Policy.pdf).
+- Commit messages follow Conventional Commits (`type: short imperative
+  summary`); see [Commits](docs/DEV.md#commits).
+- The PR description has a `changelog` block (the PR template provides it).
+  Do not edit `CHANGELOG.md`; only the release-prep PR does.
+  - Write one `- ` item per user-visible change, in the user's terms, with
+    wrapped lines indented by two spaces as in `CHANGELOG.md`.
+  - Write `none` inside the block when users will not notice the change.
+  - Start a breaking change with `Breaking:` and say what to do instead.
+  - Do not add a PR or issue link; the release adds it.
+  - The note can be corrected in the description until the release, without
+    a commit.
 
-## Eclipse Contributor Agreement
+  ```changelog
+  - Adding or removing a feature no longer reinstalls the features
+    ordered before it when the image rebuilds.
+  ```
 
-Contributors must electronically sign the [Eclipse Contributor Agreement
-(ECA)](https://www.eclipse.org/legal/eca/).
+  See [Releases](docs/RELEASING.md) for how the notes are collected.
 
-The ECA records that every contribution complies with the Developer Certificate
-of Origin. The email address in a contribution's Git `Author` field must match
-the email address associated with the contributor's ECA.
+## Legal
 
-## Contact
-
-Contact the project developers through the [enclave-dev mailing
-list](https://accounts.eclipse.org/mailing-list/enclave-dev).
+- Terms of use: this repository is subject to the
+  [Eclipse Foundation Terms of Use](https://www.eclipse.org/legal/terms-of-use/).
+- License: Eclipse Enclave is distributed under the
+  [MIT License](LICENSE). Contributions are received under the terms of
+  that license.
+- Development process: the project is governed by the
+  [Eclipse Foundation Development Process](https://www.eclipse.org/projects/dev_process/)
+  and operates under the
+  [Eclipse Foundation Intellectual Property Policy](https://www.eclipse.org/org/documents/Eclipse_IP_Policy.pdf).
+- Eclipse Contributor Agreement: sign the
+  [ECA](https://www.eclipse.org/legal/eca/) electronically. It records that
+  every contribution complies with the Developer Certificate of Origin. The
+  email address in a commit's Git `Author` field must match the one associated
+  with your ECA.

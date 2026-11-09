@@ -3,12 +3,14 @@
 `enclave.template.json` is the [Scoop](https://scoop.sh) manifest for the Windows
 launcher. The release workflows substitute `@VERSION@`, `@BASE_URL@`,
 `@AMD64_HASH@`, and `@ARM64_HASH@` and publish the result as `enclave.json`
-next to the archives, so it can be installed straight from the release (replace
-`rolling` with a release tag such as `v1.0.0` for an official release):
+next to the archives, so it can be installed straight from the release:
 
 ```powershell
-scoop install https://github.com/eclipse-enclave/enclave/releases/download/rolling/enclave.json
+scoop install https://github.com/eclipse-enclave/enclave/releases/latest/download/enclave.json
 ```
+
+Replace `latest/download` with `download/v<version>` for a specific release, or
+with `download/rolling` for the current build of `main`.
 
 The manifest pins the archive hashes. Rolling-release assets are replaced as
 `main` moves, so a manifest cached from an earlier build will fail hash

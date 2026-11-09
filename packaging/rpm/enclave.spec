@@ -101,7 +101,7 @@ install -D -m 0644 completions/_enclave \
 install -D -m 0644 README.md "$doc_root/README.md"
 install -D -m 0644 docs/ARCHITECTURE.md "$doc_root/ARCHITECTURE.md"
 install -D -m 0644 docs/extensions/README.md "$doc_root/EXTENSIONS.md"
-install -D -m 0644 LICENSE.md "$doc_root/LICENSE.md"
+install -D -m 0644 LICENSE "$doc_root/LICENSE"
 install -D -m 0644 NOTICE.md "$doc_root/NOTICE.md"
 
 %clean
@@ -121,7 +121,7 @@ rm -rf "%{buildroot}"
 %doc %{_datadir}/doc/%{name}/README.md
 %doc %{_datadir}/doc/%{name}/ARCHITECTURE.md
 %doc %{_datadir}/doc/%{name}/EXTENSIONS.md
-%license %{_datadir}/doc/%{name}/LICENSE.md
+%license %{_datadir}/doc/%{name}/LICENSE
 %license %{_datadir}/doc/%{name}/NOTICE.md
 
 %changelog

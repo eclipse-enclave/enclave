@@ -18,19 +18,19 @@ Read `README.md` before making user-facing changes.
 
 ## External Integrations
 
-- Treat CLI JSON schemas, background-run output, lifecycle commands, and container naming as integration contracts for external consumers; coordinate breaking changes. This includes `enclave tools|features|commands list --json` and the shared `add`/`update`/`remove` result envelope (both `schemaVersion: "1"`; see `docs/extensions/installing.md`), `enclave config --json` (`schemaVersion: "1"`, `kind: "config"`; see `docs/configuration.md`), and `enclave network print --json` (`schemaVersion: "1"`, `kind: "network-policy"`; see `docs/networking.md`).
+- Treat CLI JSON schemas, background-run output, lifecycle commands, and container naming as integration contracts for external consumers; coordinate breaking changes. This includes `enclave tools|features|commands list --json` and the shared `add`/`update`/`remove` result envelope (both `schemaVersion: "1"`; see `docs/extensions/json-output.md`), `enclave config --json` (`schemaVersion: "1"`, `kind: "config"`), and `enclave network print --json` (`schemaVersion: "1"`, `kind: "network-policy"`). `docs/integration.md` documents all JSON contracts.
 - Session provenance (`options` in `enclave ps --json`) is contract; the `enclave.options` label that stores it is not. Recorded options follow `AffectsSession` in `internal/config/options_def.go` and must never carry secret values.
 - Prefer structured CLI output over Docker labels or human-readable output for integration contracts.
 
 ## Build and Test
 
 - Build with `make build` (or `go build ./cmd/enclave`); run tests with `make test`.
-- The version comes from release tags via `scripts/version.sh`; never hardcode one. See [Releases](docs/DEV.md#releases).
+- The version comes from release tags via `scripts/version.sh`; never hardcode one. See [Versions](docs/RELEASING.md#versions).
 - Format modified Go files with `gofmt -w`.
 - Run `make lint-changed` for fast feedback while iterating.
 - Before committing, run `make build`, `make test`, and `make lint`.
 - Documentation-only changes under `docs/` do not require those checks.
-- Run `make generate` after changing `internal/config/options_def.go` or tool-extension Go code. Generated files are checked in — rebuild and commit them.
+- Run `make generate` after changing `internal/config/options_def.go` or tool-extension Go code. Generated files are checked in: rebuild and commit them.
 - For dependency, toolchain, image, or GitHub Actions updates, run `make check-versions` and follow `.agents/skills/dependency-updates/SKILL.md`; minimum versions (Go, Docker, buildx, git) may not exceed what the supported Debian and Ubuntu LTS releases ship.
 
 ## License Headers
@@ -62,44 +62,32 @@ When the user explicitly requests a WIP commit, prefix the subject with `wip: `.
 
 Do not push, publish releases, or modify remote issues/PRs unless the maintainer explicitly requests it.
 
-Do not edit `CHANGELOG.md` in a PR, except the release-prep PR. Describe user-visible changes in the `changelog` block of the PR description, or write `none` there, as [Releases](docs/DEV.md#releases) explains.
+Do not edit `CHANGELOG.md` in a PR, except the release-prep PR. Describe user-visible changes in the `changelog` block of the PR description, or write `none` there, as the [pull request checklist](CONTRIBUTING.md#pull-request-checklist) explains.
 
 When reviewing, a missing `CHANGELOG.md` entry is not a finding. These are: an empty or missing `changelog` block, a user-visible change marked `none`, a note not written in the user's terms, and a `Breaking changes` checkbox that disagrees with the `Breaking:` items.
 
 ## Documentation
 
-- Keep documentation concise and aimed at experienced developers.
+- Keep documentation concise and aimed at experienced developers. Lead with common tasks, put reference tables next, and keep edge cases after the main flow.
+- Give each fact one canonical page and link to it from elsewhere; `docs/README.md` maps topics to pages.
+- Wrap Markdown prose at 80 columns. Use sentence-case headings; avoid em dashes, bold-label paragraphs, and filler.
 - Document user-visible flags and behavior changes.
 - Diagrams are Mermaid code blocks embedded in the docs; update them together with the behavior they document.
 - Update `docs/ARCHITECTURE.md` and `docs/README.md` when repository layout changes.
 - Update `docs/ARCHITECTURE.md`, this file, and relevant extension docs when profile, template, patch, or runtime-asset organization changes.
 - Update `docs/cli-reference.md`, `docs/configuration.md`, and `docs/DEV.md` when CLI flags or option definitions change.
+- Update the documentation index in `extensions/tools/*/skills/enclave-help/SKILL.md` when docs pages are added, renamed, or removed.
 
 ## Extensions
 
-- See `docs/extensions/README.md` for the extension architecture and `docs/extensions/adding-a-tool.md` for the step-by-step guide; every tool or feature extension must include a `README.md`.
+- Start with `docs/extensions/README.md` (architecture), `docs/extensions/spec-reference.md` (`spec.yaml` fields), and `docs/extensions/adding-a-tool.md` / `adding-a-feature.md` (step-by-step guides). Every tool or feature extension must include a `README.md`.
 - Core ships six tools (Claude Code, Codex, Copilot, Theia with `theia-next`, OpenCode, Pi). New tools go to `eclipse-enclave/enclave-extensions`; see `CONTRIBUTING.md`.
-- `extensions/tools/<tool>/spec.yaml` (`kind: sandbox`) defines tool runtime, auth, network, settings, and provider behavior.
-- `extensions/features/<feature>/spec.yaml` (`kind: mixin`) defines optional packages, runtime setup, auth, network, and published-port behavior; a feature may also ship a `skills/` directory that is composed into the tool's skills when the feature is enabled.
-- Memory scope, disable arguments, and preserved runtime state are declared with `sandbox.memoryScope`, `sandbox.noMemoryArgs`, and `sandbox.statePaths`; see [Agent Memory](docs/runtime/stores.md#agent-memory) for lifecycle and cleanup behavior.
-- Tool settings templates live under `extensions/tools/<tool>/templates/` and are baked into the image.
-- Full host config overrides use `~/.config/enclave/tools/<tool>/` globally and `~/.config/enclave/projects/<hash>/<tool>/config/` per project.
-- JSON/TOML patches mirror native paths under `~/.config/enclave/patches/<tool>/` globally and `~/.config/enclave/projects/<hash>/patches/<tool>/` per project.
-- Shared skills use `~/.config/enclave/skills/<skill>/` globally and `~/.config/enclave/projects/<hash>/skills/<skill>/` per project; tool-specific skills use the canonical tool config roots at the native skills path. Enabled features contribute their `skills/` between tool-extension skills and the shared sources; see `docs/configuration.md` for the full precedence order.
-- A command extension (`kind: command`) lives only under the user root at `~/.config/enclave/extensions/commands/<name>/`, is never built in, and ships host commands and nothing else: the spec accepts metadata fields only. See [Command Extensions](docs/extensions/README.md#command-extensions).
-- Extensions can be installed from a git repository with `enclave features|tools|commands add`; provenance lives in `.enclave-source.json` in the installed extension directory and is excluded from the build context and image hash. See `docs/extensions/installing.md`.
-- Every kind may ship `commands/host/<name>` executables, which become `enclave <name>` verbs on hosts where the extension is installed. They run on the host rather than in a session, so the capability summary reports them in its first row, the update diff repeats the warning, and the `hostCommands` field carries them in both `list --json` and the `add`/`update`/`remove` result envelope. Keep all of those accurate when touching that code. `commands/` is excluded from the build context and image hash like the provenance sidecar, and anything under it other than `host/` is a validation warning. See `docs/extensions/README.md`.
+- Kinds: tools (`kind: sandbox`, `extensions/tools/<tool>/`), features (`kind: mixin`, `extensions/features/<feature>/`), and command extensions (`kind: command`, user root only, host commands only). Tool settings templates live under `extensions/tools/<tool>/templates/` and are baked into the image.
+- Memory scope, disable arguments, and preserved runtime state are declared with `sandbox.memoryScope`, `sandbox.noMemoryArgs`, and `sandbox.statePaths`; see [Agent Memory](docs/runtime/stores.md#agent-memory).
+- User-side overrides, patches, and skills (paths and precedence) are documented in `docs/tool-config.md`.
+- Provenance (`.enclave-source.json`) and `commands/` in an installed extension are excluded from the build context and image hash. See `docs/extensions/installing.md`.
+- Every kind may ship `commands/host/<name>` executables, which run on the host as `enclave <name>` verbs. The capability summary reports them in its first row, the update diff repeats the warning, and the `hostCommands` field carries them in `list --json` and the `add`/`update`/`remove` result envelope. Keep all of those accurate when touching that code. Anything under `commands/` other than `host/` is a validation warning. See `docs/commands.md`.
 
 ## Host Data
 
-Enclave follows platform-standard roots: the XDG base directories on Linux and other Unixes, and the Apple layout under `~/Library/Application Support/org.eclipse.enclave/` and `~/Library/Caches/org.eclipse.enclave/` on macOS (`XDG_*` overrides are ignored there). Root resolution lives in `internal/config/host_roots.go`. Linux examples:
-
-- Config: `~/.config/enclave/` (`$XDG_CONFIG_HOME`)
-- State: `~/.local/state/enclave/` (`$XDG_STATE_HOME`)
-- Cache: `~/.cache/enclave/` (`$XDG_CACHE_HOME`)
-- Embedded runtime assets: `~/.cache/enclave/assets/<content-hash>/`
-- Per-project agent memory: `~/.local/state/enclave/projects/<hash>/<tool>/memory/` (agent-writable; Claude uses this root, Codex uses `<key>/` matching its config-store key; never shared between projects or agents)
-- User-defined subcommands: `~/.config/enclave/commands/{host,session}/` (executable files become `enclave <name>` verbs)
-- Installed extensions: `~/.config/enclave/extensions/{tools,features,commands}/<name>/`
-
-Per-project config/state is keyed by project hash and kept outside the worktree. See `docs/configuration.md` and `docs/runtime/stores.md` for details.
+Enclave uses the XDG base directories on Linux and other Unixes and the Apple layout on macOS (`XDG_*` overrides are ignored there); root resolution lives in `internal/config/host_roots.go`. Per-project config and state are keyed by project hash and kept outside the worktree. Per-project agent memory is agent-writable and never shared between projects or agents. The full path table is in [Host directories](docs/configuration.md#host-directories); store details are in `docs/runtime/stores.md`.

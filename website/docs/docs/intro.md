@@ -76,13 +76,22 @@ network restrictions.
 
 <figure className="enclave-diagram">
   <ThemedImage
-    alt="Eclipse Enclave architecture: the developer passes a working directory, extra mounts, and secrets into an isolated Docker container whose outbound traffic passes through a filtering gateway"
+    alt="Anatomy of an Enclave session: the developer, the project worktree, extra mounts, secrets, and a persistent store feed an ephemeral sandbox running the AI coding agent; all sandbox traffic leaves through a filtering gateway that allows or blocks it"
     sources={{
       light: useBaseUrl('/img/architecture.svg'),
       dark: useBaseUrl('/img/architecture-dark.svg'),
     }}
   />
 </figure>
+
+The numbers mark the four controls Enclave puts around an agent:
+
+1. See: only the mounted worktree, extra mounts, and secrets you pass in.
+   Declared credentials arrive as placeholders.
+2. Run: an ephemeral container per session, isolated from the host.
+3. Reach: only allowlisted domains, through the gateway, which logs allowed
+   and blocked connections.
+4. Keep: auth, config, history, and memory persist in a store on the host.
 
 ## Coming soon: HomeShell
 

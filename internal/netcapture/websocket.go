@@ -18,6 +18,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -183,22 +184,12 @@ func (s *socketCapture) finish() *WebSocket {
 		Bytes:          s.client.wire + s.server.wire,
 		StoredBytes:    s.stored,
 		Truncated:      s.truncated,
-		Error:          strings.Join(nonEmpty(s.client.err, s.server.err), "; "),
+		Error:          strings.Join(slices.DeleteFunc([]string{s.client.err, s.server.err}, func(err string) bool { return err == "" }), "; "),
 	}
 	if s.stored > 0 {
 		socket.File = filepath.Base(s.path)
 	}
 	return socket
-}
-
-func nonEmpty(values ...string) []string {
-	var out []string
-	for _, value := range values {
-		if value != "" {
-			out = append(out, value)
-		}
-	}
-	return out
 }
 
 func (s *socketCapture) storedBytes() int64 {

@@ -219,9 +219,9 @@ User-facing behavior per tool is in
 
 `providers[].authSecrets` and `tokenEndpoint` are reserved for the internal protected-auth
 implementation. They do not enable a protected session or change ordinary auth
-behavior. No `--protect-auth` option is available: provider exchange
-interception, canonical-store permissions and a gateway capability check must
-land before workloads can use this path.
+behavior. No `--protect-auth` option is available. Claude exchange interception,
+canonical-store IO and the gateway capability gate are internal seams; workload
+activation still requires backend wiring and the mixed-mode session ledger.
 
 | Field | Meaning |
 |-------|---------|

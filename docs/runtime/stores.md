@@ -297,3 +297,32 @@ stopped ephemeral containers, and per-session networks whose session is gone
 | [`internal/runtime/auth_manager.go`](../../internal/runtime/auth_manager.go) | Declared secret injection, env persistence, session checks |
 | [`internal/runtime/runtime.go`](../../internal/runtime/runtime.go) | Mount assembly (`addConfigMount`, `addAuthMount`, `addFeatureAuthMounts`), execution flow |
 | [`entrypoint.sh`](../../entrypoint.sh), [`runtime-assets/auth-reconcile.sh`](../../runtime-assets/auth-reconcile.sh) | In-container and helper-container symlink and reconcile logic |
+
+## Internal native-auth exchanges
+
+This path is not enabled for workloads. Claude's declared OAuth endpoint is
+intercepted before ordinary forwarding. Under the canonical hoststore lock, the
+gateway reloads native files and `bindings.json`, then durably records an exchange
+intent before dispatching once (30-second bound, no redirects or HTTP retries).
+It commits tokens by durable native-file rename before updating bindings.
+Existing UID, GID and mode are preserved. Bindings contain placeholders and
+non-secret generation, expiry and recovery metadata, never raw tokens.
+
+Refresh replay reads current native values only when the exact native-file
+content matches the committed generation and its absolute expiry remains valid.
+Every content change invalidates replay. Missing or malformed `expires_in` does
+not discard a consumed grant: tokens are committed without expiry or replay.
+Only explicitly non-consuming OAuth 400 errors clear a failed refresh; ambiguous
+failures and orphan intents require a new login. The gateway scans its rebuilt,
+allowlisted response body and headers before returning any bytes.
+
+API release reads current access values; refresh and ID fields are never API
+header credentials. `--reset-auth` also removes the canonical bindings under the
+store lock, invalidating surviving placeholders without refusing a live session.
+
+A native gateway runs its proxy as the host store owner, including under
+rootless Podman's existing `keep-id` mapping. It does not change canonical
+ownership/modes or add capabilities. A fresh, workload-inaccessible runtime
+directory holds readiness tied to the session and the configuration actually
+loaded by the proxy. Missing or mismatched readiness stops startup, including
+with an older gateway image and `--no-rebuild`.

@@ -250,3 +250,14 @@ Scope the key before registering it:
 Commit and tag signing are disabled in the container (see
 [Git](git.md#signing)), so signatures cannot tell an agent's pushes from yours.
 SSH on port 22 bypasses the gateway proxy and is not logged.
+
+## Protected native auth (internal, unavailable)
+
+`--protect-auth` is reserved, not an available CLI option. Ordinary sessions
+still receive native auth files. The internal Claude implementation projects
+OAuth fields into stable placeholders and mediates the declared token endpoint;
+it does not enable a protected workload. Activation also requires the all-holder
+ledger that refuses concurrent ordinary/protected sessions on one project.
+
+Exchange state and failure recovery are described in
+[Persistent stores](runtime/stores.md#internal-native-auth-exchanges).

@@ -749,6 +749,10 @@ const (
 	GatewayConfigDeniedPath      = GatewayConfigDir + "/denied.txt"
 	GatewayConfigMetaPath        = GatewayConfigDir + "/meta.json"
 	GatewaySecretReleasePath     = "/etc/enclave/secret-releases.json" // #nosec G101 -- configuration file path, not a credential.
+	GatewayNativeAuthConfigPath  = "/etc/enclave/native-auth.json"
+	GatewayNativeAuthStorePath   = "/native-auth"
+	GatewayNativeAuthLockPath    = "/native-auth.lock"
+	GatewayNativeAuthRuntimePath = "/run/enclave-native-auth"
 	GatewayTLSRootPath           = "/tls"
 	GatewayTLSCACertPath         = GatewayTLSRootPath + "/ca.crt"
 	GatewayTLSCAKeyPath          = GatewayTLSRootPath + "/ca.key"

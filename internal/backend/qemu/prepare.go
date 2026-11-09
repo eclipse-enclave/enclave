@@ -19,6 +19,7 @@ import (
 	"enclave/internal/backend/hoststore"
 	"enclave/internal/logx"
 	"enclave/internal/model"
+	"enclave/internal/placeholderstore"
 	"enclave/internal/util"
 )
 
@@ -103,15 +104,27 @@ func (b *Backend) resetAuthFiles(ctx context.Context, prep backend.StorePrep) {
 		}
 		return
 	}
-	for _, authFile := range authFiles {
-		if err := b.storage.RemovePath(ctx, prep.Config.Key, backend.StoreKindConfig, authFile); err != nil && !os.IsNotExist(err) {
-			logx.Warnf("Failed to reset config auth file %s: %v", authFile, err)
-		}
-		if prep.Auth != nil {
-			if err := b.storage.RemovePath(ctx, prep.Auth.Key, backend.StoreKindAuth, authFile); err != nil && !os.IsNotExist(err) {
-				logx.Warnf("Failed to reset shared auth file %s: %v", authFile, err)
+	lockKey, lockKind := prep.Config.Key, backend.StoreKindConfig
+	if prep.Auth != nil {
+		lockKey, lockKind = prep.Auth.Key, backend.StoreKindAuth
+	}
+	if err := b.storage.WithStoreLock(ctx, lockKey, lockKind, func() error {
+		for _, authFile := range authFiles {
+			if err := b.storage.RemovePath(ctx, prep.Config.Key, backend.StoreKindConfig, authFile); err != nil && !os.IsNotExist(err) {
+				return err
+			}
+			if prep.Auth != nil {
+				if err := b.storage.RemovePath(ctx, prep.Auth.Key, backend.StoreKindAuth, authFile); err != nil && !os.IsNotExist(err) {
+					return err
+				}
 			}
 		}
+		if prep.ResetNativeBindings {
+			return b.storage.RemovePath(ctx, lockKey, lockKind, placeholderstore.BindingsFile)
+		}
+		return nil
+	}); err != nil {
+		logx.Warnf("Failed to reset %s auth files in qemu store: %v", util.TitleCase(prep.Config.Key.Owner), err)
 	}
 }
 

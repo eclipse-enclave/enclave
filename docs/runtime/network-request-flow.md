@@ -210,3 +210,33 @@ sequenceDiagram
 [`internal/gateway/bundle/bundle.go`](../../internal/gateway/bundle/bundle.go),
 [`internal/gateway/mitm/proxy.go`](../../internal/gateway/mitm/proxy.go),
 [`gateway-entrypoint.sh`](../../gateway-entrypoint.sh)
+
+## Internal native-auth path (unavailable to workloads)
+
+The optional internal exchange configuration adds MITM for its token, deny and
+release hosts, even before a login exists. Endpoint handling precedes header
+release and forwarding. Only the declared HTTPS POST and JSON/form grants may
+exchange; denial and malformed requests cannot fall back to ordinary forwarding.
+The proxy buffers and sanitizes exchange responses before sending bytes.
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant Proxy
+    participant Store as Canonical store + lock
+    participant OAuth as Declared OAuth endpoint
+    Client->>Proxy: Code or refresh placeholder
+    Proxy->>Store: Lock, reload, recover orphan intent
+    alt Same native generation and unexpired replay
+        Store-->>Proxy: Current tokens + absolute expiry
+    else Dispatch needed
+        Proxy->>Store: Durable in-flight intent
+        Proxy->>OAuth: One bounded request
+        OAuth-->>Proxy: Tokens or error
+        Proxy->>Store: Durable native update, then bindings
+    end
+    Proxy->>Proxy: Rebuild placeholders, containment scan
+    Proxy-->>Client: Sanitized response
+```
+
+See [store transaction details](stores.md#internal-native-auth-exchanges).

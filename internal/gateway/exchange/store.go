@@ -130,7 +130,7 @@ func bindingFor(bindings placeholderstore.Bindings, provider, file string, field
 func (s *Store) Releases(ctx context.Context, headers http.Header) ([]model.SecretReleaseEntry, error) {
 	marked := false
 	for key, values := range headers {
-		if strings.Contains(key, model.SecretPlaceholderMarker) {
+		if strings.Contains(strings.ToLower(key), strings.ToLower(model.SecretPlaceholderMarker)) {
 			marked = true
 		}
 		for _, v := range values {
@@ -198,4 +198,28 @@ func (s *Store) Releases(ctx context.Context, headers http.Header) ([]model.Secr
 		}
 	}
 	return rules, nil
+}
+
+// RequiresMITM includes exchange and deny endpoints even before an identity has
+// credentials, so a first login cannot bypass mediation through a TLS tunnel.
+func (s *Store) RequiresMITM(host string) bool {
+	endpoint := s.config.Provider.TokenEndpoint
+	if host == endpoint.Host {
+		return true
+	}
+	for _, denied := range endpoint.Deny {
+		if host == denied.Host {
+			return true
+		}
+	}
+	for _, secret := range s.config.Secrets {
+		if secret.Release != nil && secret.Release.HTTP != nil {
+			for _, pattern := range secret.Release.HTTP.Hosts {
+				if domainpattern.MatchNormalizedHost(host, pattern) {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }

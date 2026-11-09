@@ -127,7 +127,19 @@ func (s *Store) transact(parent context.Context, values map[string]string, forma
 		return fail()
 	}
 	headers := safeHeaders(upstream.Header)
+	hasTokens := false
+	for _, kind := range []string{"access", "refresh", "id"} {
+		if key := endpoint.Fields[kind]; key != "" {
+			if _, ok := object[key]; ok {
+				hasTokens = true
+				credentials = append(credentials, textField(object, key))
+			}
+		}
+	}
 	errorCode := textField(object, "error")
+	if hasTokens && (errorCode != "" || upstream.StatusCode < 200 || upstream.StatusCode >= 300) {
+		return fail()
+	}
 	if upstream.StatusCode < 200 || upstream.StatusCode >= 300 || errorCode != "" {
 		pending := upstream.StatusCode >= 200 && upstream.StatusCode < 300 && slices.Contains([]string{"authorization_pending", "slow_down"}, errorCode)
 		if upstream.StatusCode >= 200 && upstream.StatusCode < 300 && !pending {
@@ -190,11 +202,21 @@ func (s *Store) transact(parent context.Context, values map[string]string, forma
 		}
 	}
 	replay := placeholderstore.ReplayFields{}
-	if scope := textField(object, endpoint.Fields["scope"]); scope != "" {
+	unsafeMetadata := false
+	nonSecret := func(value string) bool {
+		for _, credential := range credentials {
+			if contains(value, credential) {
+				unsafeMetadata = true
+				return false
+			}
+		}
+		return true
+	}
+	if scope := textField(object, endpoint.Fields["scope"]); scope != "" && nonSecret(scope) {
 		replay.Scope = &scope
 		oauth["scopes"] = strings.Fields(scope)
 	}
-	if tokenType := textField(object, "token_type"); tokenType != "" {
+	if tokenType := textField(object, "token_type"); tokenType != "" && nonSecret(tokenType) {
 		replay.TokenType = &tokenType
 	}
 	state.ExpiresAt = nil
@@ -236,7 +258,7 @@ func (s *Store) transact(parent context.Context, values map[string]string, forma
 	if placeholderstore.SaveBindings(s.dir, bindings) != nil {
 		return refusal(http.StatusBadGateway)
 	}
-	if !contained(mustJSON(projected), headers, credentials) {
+	if unsafeMetadata || !contained(mustJSON(projected), headers, credentials) {
 		return refusal(http.StatusBadGateway)
 	}
 	replyState := state

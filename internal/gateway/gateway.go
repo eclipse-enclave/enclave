@@ -16,11 +16,13 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
 	"enclave/internal/config"
 	"enclave/internal/docker"
+	"enclave/internal/gateway/exchange"
 	"enclave/internal/logx"
 	"enclave/internal/model"
 	"enclave/internal/netcapture"
@@ -379,7 +381,8 @@ type StartConfig struct {
 	NetworkMode string
 	// Hostname is set on the gateway because the session, which joins its
 	// network namespace, cannot set its own.
-	Hostname string
+	Hostname   string
+	NativeAuth *NativeAuthStart
 }
 
 func appendReadOnlyMount(mounts []docker.Mount, hostPath string, containerPath string) []docker.Mount {
@@ -531,6 +534,17 @@ func Start(ctx context.Context, cfg StartConfig) (StartResult, error) {
 	if cfg.TLSRootDir != "" {
 		env = append(env, model.EnvGatewayTLSRoot+"="+model.GatewayTLSRootPath)
 	}
+	var nativeRuntime, nativeDigest string
+	mounts, env, nativeRuntime, nativeDigest, err = prepareNativeAuth(cfg.NativeAuth, mounts, env)
+	if err != nil {
+		return empty, err
+	}
+	nativeStarted := false
+	defer func() {
+		if nativeRuntime != "" && !nativeStarted {
+			_ = os.RemoveAll(nativeRuntime)
+		}
+	}()
 	config := &docker.ContainerConfig{
 		Image:        imageName(cfg.Profile),
 		Hostname:     cfg.Hostname,
@@ -580,7 +594,12 @@ func Start(ctx context.Context, cfg StartConfig) (StartResult, error) {
 		return empty, err
 	}
 
+	if err := checkNativeAuthStarted(nativeRuntime, nativeDigest, cfg.ContainerName, containerID); err != nil {
+		return empty, err
+	}
+	nativeStarted = true
 	return StartResult{
+		TempFiles:     nativeRuntimeFiles(nativeRuntime),
 		ContainerName: gatewayContainer,
 		ContainerID:   containerID,
 	}, nil
@@ -968,4 +987,59 @@ func StopContainer(container string) {
 	if err := docker.ContainerRemove(context.Background(), container, true, true); err != nil && !docker.IsNotFound(err) {
 		logx.Warnf("Failed to remove gateway container %s: %v", container, err)
 	}
+}
+
+// NativeAuthStart is an internal startup seam. The public option remains
+// unavailable until the all-holder mixed-mode gate can protect the shared config.
+type NativeAuthStart struct {
+	ConfigFile string
+	StoreDir   string
+	LockPath   string
+	UID, GID   int
+}
+
+func prepareNativeAuth(cfg *NativeAuthStart, mounts []docker.Mount, env []string) ([]docker.Mount, []string, string, string, error) {
+	if cfg == nil {
+		return mounts, env, "", "", nil
+	}
+	if cfg.StoreDir == "" || cfg.LockPath == "" || cfg.UID <= 0 || cfg.GID < 0 {
+		return nil, nil, "", "", fmt.Errorf("protected auth requires a store, canonical lock and non-root host identity")
+	}
+	_, digest, err := exchange.ReadConfig(cfg.ConfigFile)
+	if err != nil {
+		return nil, nil, "", "", err
+	}
+	// Create/open the host's canonical lock inode before bind mounting it. The
+	// directory stays host-only; every gateway and host writer locks this inode.
+	lock, err := os.OpenFile(cfg.LockPath, os.O_CREATE|os.O_RDWR, 0o600) // #nosec G304 -- hoststore-derived canonical path.
+	if err != nil {
+		return nil, nil, "", "", err
+	}
+	_ = lock.Close()
+	runtime, err := os.MkdirTemp("", "enclave-native-runtime-*")
+	if err != nil {
+		return nil, nil, "", "", err
+	}
+	mounts = appendReadOnlyMount(mounts, cfg.ConfigFile, model.GatewayNativeAuthConfigPath)
+	mounts = append(mounts, docker.Mount{Type: docker.MountTypeBind, Source: cfg.StoreDir, Target: model.GatewayNativeAuthStorePath}, docker.Mount{Type: docker.MountTypeBind, Source: cfg.LockPath, Target: model.GatewayNativeAuthLockPath}, docker.Mount{Type: docker.MountTypeBind, Source: runtime, Target: model.GatewayNativeAuthRuntimePath})
+	env = append(env, model.EnvNativeAuthConfig+"="+model.GatewayNativeAuthConfigPath, model.EnvNativeAuthStore+"="+model.GatewayNativeAuthStorePath, model.EnvNativeAuthLock+"="+model.GatewayNativeAuthLockPath, model.EnvNativeAuthRuntime+"="+model.GatewayNativeAuthRuntimePath, model.EnvRuntimeUID+"="+strconv.Itoa(cfg.UID), model.EnvRuntimeGID+"="+strconv.Itoa(cfg.GID))
+	return mounts, env, runtime, digest, nil
+}
+
+func checkNativeAuthStarted(runtime, digest, session, containerID string) error {
+	if runtime == "" {
+		return nil
+	}
+	if err := exchange.CheckCapability(runtime, digest, session); err != nil {
+		StopContainer(containerID)
+		return err
+	}
+	return nil
+}
+
+func nativeRuntimeFiles(dir string) []string {
+	if dir == "" {
+		return nil
+	}
+	return []string{filepath.Join(dir, exchange.CapabilityFile), dir}
 }

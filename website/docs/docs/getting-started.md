@@ -240,3 +240,6 @@ enclave ps
 See the [CLI Commands](/cli) reference for the full set of commands you can run,
 and [Configuration](/configuration) to pick a default agent, mount extra
 directories, or widen the network allowlist per project.
+
+To start and watch sessions from a graphical UI instead of the terminal, try
+[HomeShell](/#homeshell).

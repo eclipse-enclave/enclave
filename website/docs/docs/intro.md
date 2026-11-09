@@ -93,19 +93,19 @@ The numbers mark the four controls Enclave puts around an agent:
    and blocked connections.
 4. Keep: auth, config, history, and memory persist in a store on the host.
 
-## Coming soon: HomeShell
+## HomeShell (preview) \{#homeshell}
 
-Today Enclave is a CLI. HomeShell is a graphical companion on the way: group
-your work into projects, split each into workstreams, and run agent sessions
-across them. Start, watch, and switch between sandboxed sessions with a live
-overview of every agent's status.
+[HomeShell](https://github.com/eclipse-enclave/homeshell) is a graphical
+companion for Enclave: start, watch, and answer agent sessions across your
+projects from one web UI or desktop window. Install it from the
+[HomeShell README](https://github.com/eclipse-enclave/homeshell#install).
 
 <figure className="enclave-diagram">
   <img
     src={useBaseUrl('/img/homeshell.png')}
     alt="HomeShell: a graphical dashboard listing Enclave projects, workstreams, and running agent sessions"
   />
-  <figcaption className="enclave-caption">HomeShell is in active development and not yet released.</figcaption>
+  <figcaption className="enclave-caption">Builds follow every change to HomeShell; there is no stable release yet.</figcaption>
 </figure>
 
 ## Next steps

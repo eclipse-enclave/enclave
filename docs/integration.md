@@ -16,6 +16,11 @@ Background-run output, lifecycle commands, and container naming
 (`enclave-<tool>-<project-hash>`, plus `-<session>` for other sessions; see
 [Session names](persistence.md#session-names)) are integration contracts too.
 
+[HomeShell](https://github.com/eclipse-enclave/homeshell) is built on these
+contracts; its
+[Enclave provider](https://github.com/eclipse-enclave/homeshell/blob/main/daemon/internal/provider/enclave/cli.go)
+shows which commands and flags it relies on.
+
 ## `ps --json`
 
 An array with one object per container (`--all` adds stopped ones):

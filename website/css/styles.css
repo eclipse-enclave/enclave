@@ -200,6 +200,7 @@ h2 + .section-lead { margin-top: 0; }
 }
 .hero-cmd .note::before { content: '# '; }
 .hero-actions { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; margin-bottom: 30px; }
+.section-actions { justify-content: flex-start; margin-top: 26px; margin-bottom: 0; }
 .hero-facts {
   list-style: none;
   display: flex;
@@ -260,7 +261,7 @@ h2 + .section-lead { margin-top: 0; }
 .diagram-wrap img { display: block; width: 100%; height: auto; }
 .diagram-caption { font-size: 0.9rem; color: var(--muted); margin-top: 16px; }
 
-/* ------- UI preview (coming soon) ------- */
+/* ------- HomeShell preview ------- */
 .ui-preview { position: relative; }
 .sticker {
   position: absolute;

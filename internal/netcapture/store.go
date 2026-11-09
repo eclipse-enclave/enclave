@@ -145,6 +145,9 @@ func (s *Store) Begin(req *http.Request, scheme string) *Capture {
 	}
 	capture.request = s.newBodySink(id + requestBodySuffix)
 	capture.response = s.newBodySink(id + responseBodySuffix)
+	if encoded(req.Header) {
+		capture.record.Request.BodyOmitted = OmittedEncoding
+	}
 	return capture
 }
 
@@ -159,7 +162,7 @@ func requestURL(req *http.Request, scheme string) string {
 // RequestBody wraps the body the proxy forwards so that what the upstream
 // reads is captured as it goes.
 func (c *Capture) RequestBody(body io.ReadCloser) io.ReadCloser {
-	if c == nil || body == http.NoBody {
+	if c == nil || body == http.NoBody || c.record.Request.BodyOmitted != "" {
 		return body
 	}
 	c.requestBody = &teeBody{ReadCloser: body, sink: c.request}
@@ -178,12 +181,20 @@ func (c *Capture) Response(resp *http.Response) {
 	}
 	// The proxy asks for an unencoded body; one encoded anyway is relayed but
 	// not stored, so no secret it may hold reaches the disk unredacted.
-	for _, encoding := range resp.Header.Values("Content-Encoding") {
+	if encoded(resp.Header) {
+		c.record.Response.BodyOmitted = OmittedEncoding
+	}
+}
+
+// encoded reports whether a message body carries a content encoding other
+// than identity, which redaction cannot see into.
+func encoded(header http.Header) bool {
+	for _, encoding := range header.Values("Content-Encoding") {
 		if !strings.EqualFold(strings.TrimSpace(encoding), "identity") {
-			c.record.Response.BodyOmitted = OmittedEncoding
-			break
+			return true
 		}
 	}
+	return false
 }
 
 // ResponseBody returns the writer the relayed response body is copied to, or

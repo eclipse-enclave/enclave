@@ -179,3 +179,15 @@ func TestWriteCaptureNotesAnOmittedResponseBody(t *testing.T) {
 		t.Fatalf("omitted body not noted:\n%s", out)
 	}
 }
+
+func TestWriteCaptureNotesAnOmittedRequestBody(t *testing.T) {
+	view := captureFixture()
+	view.Record.Request.Headers = http.Header{"Content-Encoding": {"gzip"}}
+	view.Record.Request.Body = nil
+	view.Record.Request.BodyOmitted = netcapture.OmittedEncoding
+	view.Request = CapturedBody{}
+	out := renderCapture(t, view)
+	if !strings.Contains(out, "(request body not stored: unexpected content encoding)") {
+		t.Fatalf("omitted request body not noted:\n%s", out)
+	}
+}

@@ -60,10 +60,6 @@ type decodingSink struct {
 	failed bool
 }
 
-func newDecodingSink(sink *bodySink, encoding string) *decodingSink {
-	return &decodingSink{sink: sink, encoding: encoding}
-}
-
 // Write always reports success: the client's copy of the body must not depend
 // on the capture.
 func (d *decodingSink) Write(p []byte) (int, error) {

@@ -150,7 +150,7 @@ func (s *Store) Begin(req *http.Request, scheme string) *Capture {
 	capture.request = s.newBodySink(id + requestBodySuffix)
 	capture.response = s.newBodySink(id + responseBodySuffix)
 	if encoding := decodableEncoding(req.Header); encoding != "" {
-		capture.requestDecoder = newDecodingSink(capture.request, encoding)
+		capture.requestDecoder = &decodingSink{sink: capture.request, encoding: encoding}
 	}
 	return capture
 }
@@ -192,7 +192,7 @@ func (c *Capture) Response(resp *http.Response) {
 		Headers: c.store.redactor.header(resp.Header),
 	}
 	if encoding := decodableEncoding(resp.Header); encoding != "" {
-		c.responseDecoder = newDecodingSink(c.response, encoding)
+		c.responseDecoder = &decodingSink{sink: c.response, encoding: encoding}
 	}
 }
 

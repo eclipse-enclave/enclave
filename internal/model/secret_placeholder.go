@@ -13,7 +13,6 @@ const SecretPlaceholderMarker = "ENCLAVE_SECRET_" // #nosec G101 -- recognition 
 
 // SecretPlaceholderConfig describes a synthetic credential, independent of its secret.
 type SecretPlaceholderConfig struct {
-	Shape  string                  `json:"shape,omitempty"`
 	Prefix string                  `json:"prefix,omitempty"`
 	Suffix string                  `json:"suffix,omitempty"`
 	Random SecretPlaceholderRandom `json:"random"`

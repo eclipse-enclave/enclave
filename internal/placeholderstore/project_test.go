@@ -243,26 +243,6 @@ func TestProjectEmptyIdentityAndMetadataOnlyConfig(t *testing.T) {
 	}
 }
 
-func TestJWTBindingFollowsClaimsButKeepsSignature(t *testing.T) {
-	bindings := Bindings{Schema: 1}
-	shape := &model.SecretPlaceholderConfig{Shape: "jwt"}
-	first, err := bindings.field("provider", "auth.json", "/id", "id", shape, "header.claims.signature", "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	second, err := bindings.field("provider", "auth.json", "/id", "id", shape, "new-header.new-claims.new-signature", "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	projected := second.project("new-header.new-claims.new-signature")
-	if first != second || !strings.HasPrefix(projected, "new-header.new-claims.") || !bindings.Claims(projected) || !strings.Contains(second.Signature, model.SecretPlaceholderMarker) {
-		t.Fatal("JWT binding did not preserve claims and stable recognizable signature")
-	}
-	if _, err := bindings.field("provider", "auth.json", "/id", "id", shape, "malformed", ""); err == nil {
-		t.Fatal("reused JWT binding accepted malformed token")
-	}
-}
-
 func TestProjectRejectsCredentialsNestedInMetadata(t *testing.T) {
 	for _, data := range []string{
 		`{"oauthAccount":{"accessToken":"undeclared-nested-credential"}}`,

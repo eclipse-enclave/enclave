@@ -148,7 +148,6 @@ The network request flow, restricted and unrestricted, has separate
 | [`internal/mounts/sensitive.go`](../internal/mounts/sensitive.go) | The sensitive-path rule ([mounts.md](mounts.md#sensitive-mounts)) |
 | [`internal/auth/auth.go`](../internal/auth/auth.go) | Layered secrets, auth file copies, Claude-specific config |
 | [`internal/placeholderstore/`](../internal/placeholderstore/) | Internal native credential projection, stable bindings and native-path classification; no protected workload startup yet |
-| [`internal/runtime/native_auth_plan.go`](../internal/runtime/native_auth_plan.go) | Isolated agent-view/gateway-native mount-plan seam, not connected to session startup |
 | [`internal/auth/secret_injection.go`](../internal/auth/secret_injection.go) | `PlaceholderResolver`: random `ENCLAVE_SECRET_*` placeholders |
 | [`internal/gateway/gateway.go`](../internal/gateway/gateway.go) | Sidecar container and network; keeps logs until explicit removal, removes by immutable ID |
 | [`internal/gateway/bundle/`](../internal/gateway/bundle/bundle.go) | Host-managed bundles (`dnsmasq.conf`, `domains.txt`, `meta.json`) for apply and reload |

@@ -9,11 +9,8 @@ package config
 
 import (
 	"fmt"
-	"path"
 	"slices"
-	"strings"
 
-	"enclave/internal/domainpattern"
 	"enclave/internal/model"
 )
 
@@ -25,7 +22,7 @@ func validateAuthSecrets(doc specDocument, specPath string) error {
 				return fmt.Errorf("%s: provider %s authSecrets file %q must name a unique authFiles entry", specPath, provider.Name, file.File)
 			}
 			files[file.File] = true
-			if !slices.Contains([]string{"claude-credentials", "claude-config", "codex-auth", "provider-map", "copilot-config"}, file.Codec) || len(file.Fields) == 0 {
+			if !slices.Contains([]string{"claude-credentials", "claude-config"}, file.Codec) || len(file.Fields) == 0 {
 				return fmt.Errorf("%s: authSecrets %s requires a supported codec and fields", specPath, file.File)
 			}
 			pointers := map[string]bool{}
@@ -37,14 +34,6 @@ func validateAuthSecrets(doc specDocument, specPath string) error {
 				if err := validateAuthSecretField(doc, field); err != nil {
 					return fmt.Errorf("%s: authSecrets %s %s: %w", specPath, file.File, field.Pointer, err)
 				}
-			}
-		}
-		if provider.TokenEndpoint != nil {
-			if len(provider.AuthSecrets) == 0 {
-				return fmt.Errorf("%s: provider %s tokenEndpoint requires authSecrets", specPath, provider.Name)
-			}
-			if err := validateTokenEndpoint(*provider.TokenEndpoint); err != nil {
-				return fmt.Errorf("%s: provider %s tokenEndpoint: %w", specPath, provider.Name, err)
 			}
 		}
 	}
@@ -77,43 +66,11 @@ func validateAuthSecretField(doc specDocument, field model.AuthSecretField) erro
 		}
 	}
 	if shape := field.Placeholder; shape != nil {
-		if shape.Shape == "jwt" {
-			if (field.Kind != "access" && field.Kind != "id") || shape.Prefix != "" || shape.Suffix != "" || shape.Random != (model.SecretPlaceholderRandom{}) {
-				return fmt.Errorf("jwt shape is only for access/id and cannot carry prefix, suffix, or random")
-			}
-		} else {
-			if shape.Shape != "" {
-				return fmt.Errorf("unsupported placeholder shape")
-			}
-			if _, err := shape.ValidatedAlphabet(); err != nil {
-				return err
-			}
-			if shape.Random.Encoding == "base64url" && shape.Random.Length < len(model.SecretPlaceholderMarker)+22 {
-				return fmt.Errorf("placeholder body must retain at least 128 random bits after its marker")
-			}
+		if _, err := shape.ValidatedAlphabet(); err != nil {
+			return err
 		}
-	}
-	return nil
-}
-
-func validateTokenEndpoint(endpoint model.TokenEndpoint) error {
-	for _, target := range append([]model.AuthEndpoint{{Host: endpoint.Host, Path: endpoint.Path}}, endpoint.Deny...) {
-		host, err := domainpattern.NormalizeHost(target.Host)
-		if err != nil || host == "" || host != target.Host || strings.Contains(host, "*") || !strings.HasPrefix(target.Path, "/") || path.Clean(target.Path) != target.Path || strings.ContainsAny(target.Path, "?#\x00") {
-			return fmt.Errorf("requires exact normalized hosts and absolute paths")
-		}
-	}
-	if !slices.Contains([]string{"json", "form", "either"}, endpoint.Body) || len(endpoint.Grants) == 0 || endpoint.Fields["access"] == "" {
-		return fmt.Errorf("requires body json/form/either, grants, and fields.access")
-	}
-	for name, value := range endpoint.Fields {
-		if !slices.Contains([]string{"access", "refresh", "id", "expiresIn", "scope"}, name) || value == "" {
-			return fmt.Errorf("invalid token field %q", name)
-		}
-	}
-	for _, grant := range endpoint.Grants {
-		if grant == "" || strings.ContainsAny(grant, " \t\r\n\x00") {
-			return fmt.Errorf("grant names must not be empty or contain whitespace")
+		if shape.Random.Encoding == "base64url" && shape.Random.Length < len(model.SecretPlaceholderMarker)+22 {
+			return fmt.Errorf("placeholder body must retain at least 128 random bits after its marker")
 		}
 	}
 	return nil

@@ -153,7 +153,7 @@ func projectFile(provider string, file model.AuthFileSecret, data []byte, bindin
 			if err != nil {
 				return err
 			}
-			replace(binding.project(value))
+			replace(binding.Placeholder)
 			if !strings.Contains(value, model.SecretPlaceholderMarker) {
 				rawValues = append(rawValues, value)
 			}
@@ -167,9 +167,6 @@ func projectFile(provider string, file model.AuthFileSecret, data []byte, bindin
 					release = model.SecretReleaseEntry{SecretID: field.Release, Value: value, Hosts: rule.Hosts, Header: rule.Header, Format: rule.Format}
 				}
 				release.Placeholder = binding.Placeholder
-				if binding.Signature != "" {
-					release.Placeholder = binding.project(value)
-				}
 				releases = append(releases, release)
 			}
 			return nil

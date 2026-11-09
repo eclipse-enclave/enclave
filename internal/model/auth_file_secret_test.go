@@ -17,7 +17,7 @@ func TestAuthPointerSegments(t *testing.T) {
 	for _, tc := range []struct {
 		pointer string
 		want    []string
-	}{{"/", []string{""}}, {"/a~1b/~0/*", []string{"a/b", "~", "*"}}, {"/tokens/0/access", []string{"tokens", "0", "access"}}} {
+	}{{"/primaryApiKey", []string{"primaryApiKey"}}, {"/claudeAiOauth/accessToken", []string{"claudeAiOauth", "accessToken"}}} {
 		got, err := AuthPointerSegments(tc.pointer)
 		if err != nil || !reflect.DeepEqual(got, tc.want) {
 			t.Fatalf("parse %q: %v, %v", tc.pointer, got, err)

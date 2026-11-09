@@ -41,14 +41,10 @@ type Binding struct {
 	Pointer     string `json:"pointer"`
 	Kind        string `json:"kind"`
 	Placeholder string `json:"placeholder,omitempty"`
-	Signature   string `json:"signature,omitempty"`
 }
 
 func (b Binding) Matches(value string) bool {
-	if b.Signature != "" {
-		parts := strings.Split(value, ".")
-		return len(parts) == 3 && parts[2] == b.Signature
-	}
+
 	return value == b.Placeholder && value != ""
 }
 
@@ -93,10 +89,7 @@ func LoadBindings(dir string) (Bindings, error) {
 		key := binding.Provider + "\x00" + binding.File + "\x00" + binding.Pointer
 		_, pointerErr := model.AuthPointerSegments(binding.Pointer)
 		value := binding.Placeholder
-		if binding.Signature != "" {
-			value = binding.Signature
-		}
-		if binding.Provider == "" || !slices.Contains([]string{"access", "refresh", "id", "apiKey"}, binding.Kind) || !model.ValidAuthFilePath(binding.File) || pointerErr != nil || seen[key] || (binding.Placeholder == "") == (binding.Signature == "") || !strings.Contains(value, model.SecretPlaceholderMarker) {
+		if binding.Provider == "" || !slices.Contains([]string{"access", "refresh", "id", "apiKey"}, binding.Kind) || !model.ValidAuthFilePath(binding.File) || pointerErr != nil || seen[key] || binding.Placeholder == "" || !strings.Contains(value, model.SecretPlaceholderMarker) {
 			return b, fmt.Errorf("invalid native credential binding")
 		}
 		seen[key] = true
@@ -117,12 +110,9 @@ func SaveBindings(dir string, bindings Bindings) error {
 }
 
 func (b *Bindings) field(provider, file, pointer, kind string, shape *model.SecretPlaceholderConfig, real, apiPlaceholder string) (Binding, error) {
-	if shape != nil && shape.Shape == "jwt" && len(strings.Split(real, ".")) != 3 {
-		return Binding{}, fmt.Errorf("native credential is not JWT-shaped")
-	}
 	for _, binding := range b.Bindings {
 		if binding.Provider == provider && binding.File == file && binding.Pointer == pointer {
-			if binding.Kind != kind || (binding.Signature != "") != (shape != nil && shape.Shape == "jwt") {
+			if binding.Kind != kind {
 				return Binding{}, fmt.Errorf("native credential binding changed; reset the identity")
 			}
 			return binding, nil
@@ -130,15 +120,12 @@ func (b *Bindings) field(provider, file, pointer, kind string, shape *model.Secr
 	}
 	binding := Binding{Provider: provider, File: file, Pointer: pointer, Kind: kind}
 	var err error
-	switch {
-	case kind == "apiKey":
+	if kind == "apiKey" {
 		if !strings.Contains(apiPlaceholder, model.SecretPlaceholderMarker) {
 			return binding, fmt.Errorf("native API key requires a recognizable env placeholder")
 		}
 		binding.Placeholder = apiPlaceholder
-	case shape != nil && shape.Shape == "jwt":
-		binding.Signature, err = auth.NewPlaceholderResolver().ResolvePlaceholder(pointer, &model.SecretPlaceholderConfig{Prefix: model.SecretPlaceholderMarker, Random: model.SecretPlaceholderRandom{Encoding: "base64url", Length: 28}})
-	default:
+	} else {
 		if shape != nil {
 			copy := *shape
 			copy.Prefix += model.SecretPlaceholderMarker
@@ -154,14 +141,6 @@ func (b *Bindings) field(provider, file, pointer, kind string, shape *model.Secr
 	}
 	b.Bindings = append(b.Bindings, binding)
 	return binding, nil
-}
-
-func (b Binding) project(real string) string {
-	if b.Signature == "" {
-		return b.Placeholder
-	}
-	parts := strings.Split(real, ".")
-	return parts[0] + "." + parts[1] + "." + b.Signature
 }
 
 // readRegular rejects symlinks in every component and verifies the opened inode.

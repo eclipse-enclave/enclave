@@ -274,9 +274,7 @@ func (c *Capture) Finish(relayErr error) string {
 	if relayErr != nil {
 		c.record.Error = s.redactor.string(relayErr.Error())
 	}
-	if c.socket != nil {
-		c.record.WebSocket = c.socket.finish()
-	}
+	c.record.WebSocket = c.socket.finish()
 	stored := c.request.stored + c.response.stored + c.socket.storedBytes()
 
 	size, err := writeRecord(RecordPath(s.dir, c.id), c.record)

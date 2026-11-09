@@ -382,10 +382,9 @@ bytes, so a response body has to arrive unencoded: the proxy asks for that, and
 when an upstream compresses a response anyway, the capture keeps its headers
 but not its body (`bodyOmitted`), and the client receives it unchanged. The
 replacement also misses a value that is URL-encoded, escaped in JSON, or in
-base64. Request bodies are stored as the client sent them, compressed if it
-compressed them; released values never appear in them, because secrets are
-released into headers only. Credentials without an HTTP release rule are
-ordinary request content and are stored as sent.
+base64. A request body the client compressed is forwarded unchanged but not
+stored either. Credentials without an HTTP release rule are ordinary request
+content and are stored as sent.
 
 ### Capture store
 
@@ -446,9 +445,8 @@ The record (`schemaVersion: "1"`, `kind: "network-capture"`) looks like this:
   answered before reading to the end, in which case what the client sent
   afterwards is not recorded. `file` is relative to the record and absent when
   nothing was stored.
-- Bodies are stored as relayed. A request body the client compressed stays
-  encoded, and `--show-capture` does not print it. A response whose
-  `Content-Encoding` is anything but `identity` has no `body`, and
+- Bodies are stored as relayed. A request or response whose
+  `Content-Encoding` is anything but `identity` has no `body`, and its
   `bodyOmitted` is `unexpected content encoding`.
 - When the request could not be relayed, `error` says why and `response` may be
   absent. An upgraded connection (status `101`) records the handshake only.

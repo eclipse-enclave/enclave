@@ -494,6 +494,48 @@ func TestProxyCaptureOmitsBodiesUpstreamsEncodeAnyway(t *testing.T) {
 	}
 }
 
+func TestProxyCaptureOmitsEncodedRequestBodies(t *testing.T) {
+	var buffer bytes.Buffer
+	writer := gzip.NewWriter(&buffer)
+	_, _ = io.WriteString(writer, `{"prompt":"compressed by the client"}`)
+	_ = writer.Close()
+	sent := buffer.Bytes()
+	var upstreamGot []byte
+	var upstreamEncoding string
+	upstream := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamEncoding = r.Header.Get("Content-Encoding")
+		upstreamGot, _ = io.ReadAll(r.Body)
+		_, _ = io.WriteString(w, "ok")
+	}))
+	defer upstream.Close()
+
+	p, dir, logPath := captureProxy(t, []string{"example.com"}, nil, netcapture.Options{})
+	p.transport.TLSClientConfig = upstream.Client().Transport.(*http.Transport).TLSClientConfig.Clone()
+	p.transport.DialContext = func(ctx context.Context, network string, _ string) (net.Conn, error) {
+		return (&net.Dialer{}).DialContext(ctx, network, upstream.Listener.Addr().String())
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "https://example.com/v1/messages", bytes.NewReader(sent))
+	req.Host = "example.com"
+	req.Header.Set("Content-Encoding", "gzip")
+	recorder := httptest.NewRecorder()
+	p.handler("https")(recorder, req)
+
+	if upstreamEncoding != "gzip" || !bytes.Equal(upstreamGot, sent) {
+		t.Fatalf("upstream received %q-encoded %x, want the body as sent", upstreamEncoding, upstreamGot)
+	}
+	_, record, recordPath := capturedEvent(t, logPath, dir)
+	if record.Request.BodyOmitted != netcapture.OmittedEncoding || record.Request.Body != nil {
+		t.Fatalf("request = %+v, want its body omitted", record.Request)
+	}
+	if got := readCapturedBody(t, recordPath, record.Response.Body); got != "ok" {
+		t.Fatalf("response body = %q", got)
+	}
+	if matches, _ := filepath.Glob(filepath.Join(dir, "*.request.body")); len(matches) != 0 {
+		t.Fatalf("request body stored: %v", matches)
+	}
+}
+
 func TestProxyCaptureKeepsTransportGzipForClientsWithoutAcceptEncoding(t *testing.T) {
 	const placeholder = "ENCLAVE_SECRET_0123456789abcdef"
 	const secret = "sk-live-do-not-store-0123456789"

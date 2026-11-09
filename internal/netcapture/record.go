@@ -55,6 +55,8 @@ type Request struct {
 	Proto   string      `json:"proto,omitempty"`
 	Headers http.Header `json:"headers"`
 	Body    *Body       `json:"body,omitempty"`
+	// BodyOmitted says why the body was forwarded but not stored.
+	BodyOmitted string `json:"bodyOmitted,omitempty"`
 }
 
 // Response is the upstream response as the proxy relayed it to the client.
@@ -67,8 +69,8 @@ type Response struct {
 	BodyOmitted string `json:"bodyOmitted,omitempty"`
 }
 
-// OmittedEncoding is why the body of a response with a content encoding is not
-// stored: redaction cannot find a secret inside encoded bytes.
+// OmittedEncoding is why a body with a content encoding is not stored:
+// redaction cannot find a secret inside encoded bytes.
 const OmittedEncoding = "unexpected content encoding"
 
 // Body describes a stored message body, which File holds as relayed. Bytes

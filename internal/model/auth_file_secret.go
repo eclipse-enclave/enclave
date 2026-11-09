@@ -27,6 +27,21 @@ type AuthSecretField struct {
 	Placeholder *SecretPlaceholderConfig `json:"placeholder,omitempty"`
 }
 
+// TokenEndpoint describes the fixed exchange intercepted by a protected gateway.
+type TokenEndpoint struct {
+	Host   string            `json:"host"`
+	Path   string            `json:"path"`
+	Body   string            `json:"body"`
+	Grants []string          `json:"grants"`
+	Fields map[string]string `json:"fields"`
+	Deny   []AuthEndpoint    `json:"deny,omitempty"`
+}
+
+type AuthEndpoint struct {
+	Host string `json:"host"`
+	Path string `json:"path"`
+}
+
 // AuthPointerSegments parses the object-field pointers needed by Claude.
 // Wildcards, escaped names and array traversal are deferred with other codecs.
 func AuthPointerSegments(pointer string) ([]string, error) {

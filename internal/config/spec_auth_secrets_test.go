@@ -25,11 +25,11 @@ func TestClaudeAuthSecretsSpecProjection(t *testing.T) {
 		t.Fatal(err)
 	}
 	provider := profile.Providers[0]
-	if len(provider.AuthSecrets) != 2 {
+	if len(provider.AuthSecrets) != 2 || provider.TokenEndpoint == nil || provider.TokenEndpoint.Host != "platform.claude.com" || len(provider.TokenEndpoint.Deny) != 3 {
 		t.Fatal("native auth declarations lost in runtime profile")
 	}
 	summary := summarizeSpecDocument(doc)
-	if len(summary.Providers[0].AuthSecrets) != 2 {
+	if len(summary.Providers[0].AuthSecrets) != 2 || summary.Providers[0].TokenEndpoint == nil {
 		t.Fatal("native auth declarations lost in capability summary")
 	}
 }
@@ -54,7 +54,13 @@ func TestAuthSecretsValidation(t *testing.T) {
 		"refresh invalid shape": func(d *specDocument) {
 			d.Providers[0].AuthSecrets[0].Fields[1].Placeholder = &model.SecretPlaceholderConfig{}
 		},
-		"insufficient entropy": func(d *specDocument) { d.Providers[0].AuthSecrets[0].Fields[0].Placeholder.Random.Length = 36 },
+		"insufficient entropy":    func(d *specDocument) { d.Providers[0].AuthSecrets[0].Fields[0].Placeholder.Random.Length = 36 },
+		"endpoint wildcard":       func(d *specDocument) { d.Providers[0].TokenEndpoint.Host = "*.claude.com" },
+		"endpoint query":          func(d *specDocument) { d.Providers[0].TokenEndpoint.Path = "/v1/oauth/token?other=1" },
+		"endpoint traversal":      func(d *specDocument) { d.Providers[0].TokenEndpoint.Path = "/v1/../oauth/token" },
+		"endpoint body":           func(d *specDocument) { d.Providers[0].TokenEndpoint.Body = "protobuf" },
+		"endpoint missing access": func(d *specDocument) { delete(d.Providers[0].TokenEndpoint.Fields, "access") },
+		"deny wildcard":           func(d *specDocument) { d.Providers[0].TokenEndpoint.Deny[0].Host = "*.anthropic.com" },
 	}
 	for name, mutate := range cases {
 		t.Run(name, func(t *testing.T) {

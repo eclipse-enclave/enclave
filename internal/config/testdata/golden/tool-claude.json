@@ -84,6 +84,35 @@
           ]
         }
       ],
+      "token_endpoint": {
+        "host": "platform.claude.com",
+        "path": "/v1/oauth/token",
+        "body": "json",
+        "grants": [
+          "authorization_code",
+          "refresh_token"
+        ],
+        "fields": {
+          "access": "access_token",
+          "expiresIn": "expires_in",
+          "refresh": "refresh_token",
+          "scope": "scope"
+        },
+        "deny": [
+          {
+            "host": "api.anthropic.com",
+            "path": "/api/oauth/claude_cli/create_api_key"
+          },
+          {
+            "host": "api.anthropic.com",
+            "path": "/api/oauth/claude_cli/client_data"
+          },
+          {
+            "host": "platform.claude.com",
+            "path": "/v1/oauth/revoke"
+          }
+        ]
+      },
       "auth_session": {
         "mode": "any",
         "checks": [

@@ -211,7 +211,7 @@ enclave_apply_native_auth() {
             [ ! -e "$native_path" ] && [ ! -L "$native_path" ] || return 1
             mkdir -p "$native_parent" || return 1
             # No force: a file appearing since classification must win.
-            ln -s "$native_target" "$native_path"
+            ln -sT "$native_target" "$native_path"
             return $?
             ;;
         *) return 1 ;;
@@ -221,7 +221,7 @@ enclave_apply_native_auth() {
     [ "${native_actual%% *}" = "$native_digest" ] || return 1
     [ "$native_verb" = link ] || return 0
     native_tmp="${native_path}.enclave-link.$$"
-    ln -s "$native_target" "$native_tmp" || return 1
+    ln -sT "$native_target" "$native_tmp" || return 1
     if ! mv -T "$native_tmp" "$native_path"; then
         rm -f "$native_tmp"
         return 1

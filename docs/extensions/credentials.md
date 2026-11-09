@@ -217,8 +217,8 @@ User-facing behavior per tool is in
 
 ### Native auth declarations (internal)
 
-`providers[].authSecrets` is reserved for the internal protected-auth
-implementation. It does not enable a protected session or change ordinary auth
+`providers[].authSecrets` and `tokenEndpoint` are reserved for the internal protected-auth
+implementation. They do not enable a protected session or change ordinary auth
 behavior. No `--protect-auth` option is available: provider exchange
 interception, canonical-store permissions and a gateway capability check must
 land before workloads can use this path.
@@ -231,6 +231,7 @@ land before workloads can use this path.
 | `fields[].kind` | `access`, `refresh`, `id`, or `apiKey` |
 | `fields[].release` | Existing `network.serviceAuth` id; required for access/API keys, forbidden for refresh/ID tokens |
 | `fields[].placeholder` | Opaque prefix/suffix/random shape; API keys reuse their env placeholder |
+| `tokenEndpoint` | Exact normalized `host`, absolute `path`, JSON/form body, allowed grants, response fields, and explicit deny host/path pairs |
 
 Every file placeholder contains `ENCLAVE_SECRET_`. Base64url shapes include the
 marker within the declared random-body length and retain at least 128 random

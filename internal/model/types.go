@@ -380,6 +380,7 @@ type ProviderConfig struct {
 	CredentialSecrets []string           `json:"credential_secrets,omitempty"`
 	AuthFiles         []string           `json:"auth_files,omitempty"`
 	AuthSecrets       []AuthFileSecret   `json:"auth_secrets,omitempty"`
+	TokenEndpoint     *TokenEndpoint     `json:"token_endpoint,omitempty"`
 	AuthSession       *AuthSessionConfig `json:"auth_session,omitempty"`
 	OAuthPorts        []OAuthPortConfig  `json:"oauth_ports,omitempty"`
 	// SecurestorageDirEnv, when set, names an environment variable the tool

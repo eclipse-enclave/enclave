@@ -181,6 +181,7 @@ type specProvider struct {
 	Credentials         []string               `json:"credentials,omitempty"` // was credential_secrets
 	AuthFiles           []string               `json:"authFiles,omitempty"`
 	AuthSecrets         []model.AuthFileSecret `json:"authSecrets,omitempty"`
+	TokenEndpoint       *model.TokenEndpoint   `json:"tokenEndpoint,omitempty"`
 	AuthSession         *specAuthSession       `json:"authSession,omitempty"`
 	OAuthPorts          []specOAuthPort        `json:"oauthPorts,omitempty"`
 	SecurestorageDirEnv string                 `json:"securestorageDirEnv,omitempty"`

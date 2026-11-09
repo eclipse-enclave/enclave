@@ -68,6 +68,9 @@ func WriteCapture(out io.StringWriter, view CaptureView, opts RenderOptions) err
 	text.WriteString(opts.colorize(requestLine, logx.ColorBold) + "\n")
 	writeHeaders(&text, request.Headers)
 	writeBody(&text, "request", request.Body, view.Request, request.Headers, opts)
+	if request.BodyOmitted != "" {
+		text.WriteString(opts.colorize("(request body not stored: "+displaySafe(request.BodyOmitted)+")", logx.ColorDim) + "\n")
+	}
 
 	if record.Error != "" {
 		text.WriteString("\n" + opts.colorize("Relay failed: "+displaySafe(record.Error), logx.ColorRed) + "\n")

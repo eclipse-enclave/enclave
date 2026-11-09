@@ -121,7 +121,7 @@ type Capture struct {
 // the gateway releases secrets into the headers, so the capture records the
 // placeholders the sandbox sent.
 func (s *Store) Begin(req *http.Request, scheme string) *Capture {
-	if s == nil || req == nil {
+	if s == nil {
 		return nil
 	}
 	id, err := newID()
@@ -157,20 +157,16 @@ func (s *Store) Begin(req *http.Request, scheme string) *Capture {
 
 func requestURL(req *http.Request, scheme string) string {
 	host := req.Host
-	if host == "" && req.URL != nil {
+	if host == "" {
 		host = req.URL.Host
 	}
-	target := "/"
-	if req.URL != nil {
-		target = req.URL.RequestURI()
-	}
-	return scheme + "://" + host + target
+	return scheme + "://" + host + req.URL.RequestURI()
 }
 
 // RequestBody wraps the body the proxy forwards so that what the upstream
 // reads is captured as it goes.
 func (c *Capture) RequestBody(body io.ReadCloser) io.ReadCloser {
-	if c == nil || body == nil || body == http.NoBody {
+	if c == nil || body == http.NoBody {
 		return body
 	}
 	var sink io.Writer = c.request
@@ -183,7 +179,7 @@ func (c *Capture) RequestBody(body io.ReadCloser) io.ReadCloser {
 
 // Response snapshots the head of the upstream response.
 func (c *Capture) Response(resp *http.Response) {
-	if c == nil || resp == nil {
+	if c == nil {
 		return
 	}
 	c.record.Response = &Response{

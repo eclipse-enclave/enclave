@@ -18,6 +18,7 @@ import (
 	"enclave/internal/backend/hoststore"
 	"enclave/internal/logx"
 	"enclave/internal/model"
+	"enclave/internal/placeholderstore"
 	"enclave/internal/util"
 )
 
@@ -220,6 +221,9 @@ func (b *Backend) resetAuthFiles(ctx context.Context, prep backend.StorePrep) {
 					return err
 				}
 			}
+		}
+		if prep.ResetNativeBindings {
+			return b.storage.RemovePath(ctx, lockKey, lockKind, placeholderstore.BindingsFile)
 		}
 		return nil
 	}); err != nil {

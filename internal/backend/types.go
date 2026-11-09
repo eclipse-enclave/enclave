@@ -156,6 +156,9 @@ type StorePrep struct {
 	// ResetAuthFiles lists store-relative auth files to delete from the config
 	// store and (when present) the shared auth store before the session starts.
 	ResetAuthFiles []string
+	// ResetNativeBindings removes only canonical binding/recovery state, not a
+	// similarly named file in the shared project config.
+	ResetNativeBindings bool
 }
 
 type ConfigStorePrep struct {

@@ -51,6 +51,36 @@ if [ -r "$enclave_net_lib" ]; then
     . "$enclave_net_lib"
 fi
 
+# Alpine's gateway image does not carry shadow's usermod/groupmod. Rewrite
+# only the container identity databases, before firewall rules or children exist.
+# Native store ownership and modes are never changed.
+remap_native_proxy_identity() {
+    [ -n "${ENCLAVE_NATIVE_AUTH_CONFIG:-}" ] || return 0
+    if [ "$PROXY_ENABLED" != "true" ] || [ -z "${ENCLAVE_NATIVE_AUTH_STORE:-}" ] || [ -z "${ENCLAVE_NATIVE_AUTH_LOCK:-}" ] || [ -z "${ENCLAVE_NATIVE_AUTH_RUNTIME:-}" ]; then
+        log "Protected auth requires the proxy, native store, lock and runtime directory"
+        return 1
+    fi
+    native_uid="${ENCLAVE_RUNTIME_UID:-}"
+    native_gid="${ENCLAVE_RUNTIME_GID:-}"
+    case "$native_uid:$native_gid" in
+        *[!0-9:]*|:*|*:) log "Invalid protected proxy identity"; return 1 ;;
+    esac
+    if ! { [ "$native_uid" -gt 0 ] && [ "$native_uid" -le 2147483647 ] && [ "$native_gid" -ge 0 ] && [ "$native_gid" -le 2147483647 ]; }; then
+        log "Protected proxy requires a non-root host identity"
+        return 1
+    fi
+    if [ "$native_uid" -eq "$(id -u "$DNSMASQ_USER")" ]; then
+        log "Protected proxy identity collides with the DNS user"
+        return 1
+    fi
+    awk -F: -v OFS=: -v uid="$native_uid" -v gid="$native_gid" '$1 == "gateway" { $3=uid; $4=gid } { print }' /etc/passwd > /etc/passwd.enclave-native
+    awk -F: -v OFS=: -v gid="$native_gid" '$1 == "gateway" { $3=gid } { print }' /etc/group > /etc/group.enclave-native
+    cat /etc/passwd.enclave-native > /etc/passwd
+    cat /etc/group.enclave-native > /etc/group
+    rm /etc/passwd.enclave-native /etc/group.enclave-native
+    [ "$(id -u "$PROXY_USER")" -eq "$native_uid" ] && [ "$(id -g "$PROXY_USER")" -eq "$native_gid" ]
+}
+
 is_ipv4() {
     echo "$1" | grep -Eq '^[0-9]+(\.[0-9]+){3}$'
 }
@@ -687,6 +717,9 @@ start_proxy() {
 
     log "Starting transparent proxy"
     rm -f "$PROXY_READY_FILE"
+    if [ -n "${ENCLAVE_NATIVE_AUTH_RUNTIME:-}" ]; then
+        su-exec "$PROXY_USER:$PROXY_USER" rm -f "$ENCLAVE_NATIVE_AUTH_RUNTIME/native-auth-ready.json"
+    fi
     su-exec "$PROXY_USER:$PROXY_USER" env ENCLAVE_GATEWAY_PROXY_READY_FILE="$PROXY_READY_FILE" enclave-gateway-proxy >>"$PROXY_LOG_FILE" 2>&1 &
     PROXY_PID="$!"
     wait_for_proxy_ready
@@ -903,6 +936,7 @@ main() {
     trap on_term TERM INT
 
     normalize_proxy_enabled
+    remap_native_proxy_identity || exit 1
     init_log_files
     read_gateway_mode
     if gateway_observes_only; then

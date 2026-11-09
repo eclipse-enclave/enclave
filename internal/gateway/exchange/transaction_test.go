@@ -202,6 +202,7 @@ func TestRefreshFailureClassificationAndLoginRecovery(t *testing.T) {
 		{"consumed", 400, `{"error":"invalid_grant"}`, true},
 		{"server", 503, `{"error":"temporarily_unavailable"}`, true},
 		{"pending", 200, `{"error":"authorization_pending"}`, false},
+		{"pending-with-token", 200, `{"error":"authorization_pending","access_token":"synthetic-new-unexpected"}`, true},
 		{"unknown-success", 200, `{"something":"else"}`, true},
 		{"malformed", 200, `not-json`, true},
 		{"duplicate", 200, `{"access_token":"one","access_token":"two"}`, true},
@@ -469,5 +470,31 @@ func TestNativeCommitPrecedesBindingCommitFailure(t *testing.T) {
 	})
 	if resp, _ := invoke(t, s, "refresh_token", refresh); resp.StatusCode != 503 {
 		t.Fatal("native-first interruption did not recover uncertain")
+	}
+}
+
+func TestReflectedMetadataNeverBecomesReplayCredentialStorage(t *testing.T) {
+	for _, field := range []string{"scope", "token_type"} {
+		t.Run(field, func(t *testing.T) {
+			s, refresh := fixture(t, true)
+			s.transport = roundTripFunc(func(*http.Request) (*http.Response, error) {
+				object := map[string]any{"access_token": newAccess, "refresh_token": newRefresh, "expires_in": 600, field: newRefresh}
+				return response(200, http.Header{}, mustJSON(object)), nil
+			})
+			if resp, _ := invoke(t, s, "refresh_token", refresh); resp.StatusCode != 502 {
+				t.Fatal("reflected metadata response not refused")
+			}
+			data, err := os.ReadFile(filepath.Join(s.dir, placeholderstore.BindingsFile))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(string(data), newRefresh) || strings.Contains(string(data), newAccess) {
+				t.Fatal("native grant was cached as replay metadata")
+			}
+			native, err := s.native()
+			if err != nil || native.Values["/claudeAiOauth/refreshToken"] != newRefresh {
+				t.Fatal("consumed refresh grant lost")
+			}
+		})
 	}
 }

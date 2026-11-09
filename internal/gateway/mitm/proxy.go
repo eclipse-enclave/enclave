@@ -31,6 +31,7 @@ import (
 	"golang.org/x/crypto/cryptobyte"
 
 	"enclave/internal/domainpattern"
+	"enclave/internal/gateway/exchange"
 	"enclave/internal/gateway/tlsstore"
 	"enclave/internal/model"
 	"enclave/internal/netcapture"
@@ -46,6 +47,7 @@ type Options struct {
 	AllowedDomains []string
 	DeniedDomains  []string
 	SecretRules    []model.SecretReleaseEntry
+	NativeAuth     *exchange.Store
 	AuditLogPath   string
 	// CaptureDir is the session directory full captures are written to; empty
 	// disables capturing.
@@ -114,6 +116,7 @@ func Run(ctx context.Context, opts Options) error {
 
 	proxy := newProxy(opts.AllowedDomains, opts.DeniedDomains, opts.SecretRules, opts.ForceHTTPSMITM, audit, opts.Session)
 	proxy.setCapabilities(capabilitiesFor(opts.NetworkMode))
+	proxy.nativeAuth = opts.NativeAuth
 	proxy.captures, err = netcapture.Open(netcapture.Options{
 		Dir:     opts.CaptureDir,
 		Session: opts.Session,
@@ -320,6 +323,7 @@ type proxy struct {
 	allowedDomains []string
 	deniedDomains  []string
 	secretRules    []model.SecretReleaseEntry
+	nativeAuth     *exchange.Store
 	forceHTTPSMITM bool
 	audit          *netlog.Appender
 	session        string
@@ -441,12 +445,42 @@ func (p *proxy) handler(scheme string) http.HandlerFunc {
 			http.Error(w, "Domain not in allowlist", http.StatusForbidden)
 			return
 		}
+		rules := p.releaseRules()
+		if p.nativeAuth != nil {
+			if resp, handled := p.nativeAuth.Intercept(req, scheme); handled {
+				defer func() { _ = resp.Body.Close() }()
+				copyHeaders(w.Header(), resp.Header)
+				w.Header().Set("Content-Length", strconv.FormatInt(resp.ContentLength, 10))
+				w.WriteHeader(resp.StatusCode)
+				n, _ := io.Copy(w, resp.Body)
+				event.Status = resp.StatusCode
+				event.ResponseSize = n
+				event.ContentType = "application/json"
+				event.Rule = "native-auth-exchange"
+				event.Verdict = netlog.VerdictPass
+				if resp.StatusCode >= 400 {
+					event.Verdict = netlog.VerdictDeny
+				}
+				p.logEvent(event)
+				return
+			}
+			nativeRules, err := p.nativeAuth.Releases(req.Context(), req.Header)
+			if err != nil {
+				event.Status = http.StatusForbidden
+				event.Verdict = netlog.VerdictDeny
+				event.Rule = "native-auth-release"
+				p.logEvent(event)
+				http.Error(w, "request denied", http.StatusForbidden)
+				return
+			}
+			rules = append(append([]model.SecretReleaseEntry(nil), rules...), nativeRules...)
+		}
 		// The capture snapshots the request before secrets are released into it,
 		// so it holds the placeholders the sandbox sent and never a real value.
 		// A denied request was not relayed and leaves no capture.
 		capture := p.captures.Begin(req, scheme)
 		if host != "" {
-			if err := rewriteHeaders(scheme, host, req.Header, p.releaseRules()); err != nil {
+			if err := rewriteHeaders(scheme, host, req.Header, rules); err != nil || (p.nativeAuth != nil && markedHeaders(req.Header)) {
 				event.Status = http.StatusForbidden
 				event.Verdict = netlog.VerdictDeny
 				event.Rule = "secret-injection"
@@ -880,7 +914,7 @@ func (s *httpsDispatchServer) serveConn(conn net.Conn) {
 		_ = conn.Close()
 		return
 	}
-	if shouldMITM(host, s.proxy.releaseRules(), s.proxy.forceHTTPSMITM) {
+	if shouldMITM(host, s.proxy.releaseRules(), s.proxy.forceHTTPSMITM) || (s.proxy.nativeAuth != nil && s.proxy.nativeAuth.RequiresMITM(host)) {
 		s.proxy.logEvent(newTCPAuditEvent(host, netlog.VerdictPass, "mitm-dispatch"))
 		tunnelToAddress(conn, preface, s.mitmAddr)
 		return
@@ -1405,4 +1439,18 @@ func clientIPFromAddr(remoteAddr string) string {
 		return strings.TrimSpace(host)
 	}
 	return addr
+}
+
+func markedHeaders(headers http.Header) bool {
+	for key, values := range headers {
+		if strings.Contains(strings.ToLower(key), strings.ToLower(model.SecretPlaceholderMarker)) {
+			return true
+		}
+		for _, value := range values {
+			if strings.Contains(value, model.SecretPlaceholderMarker) {
+				return true
+			}
+		}
+	}
+	return false
 }

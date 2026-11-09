@@ -103,5 +103,5 @@ func ClassifyNative(configDir, expectedAuthDir string, profile model.Profile, cu
 }
 
 func nativeRefusal(file string) error {
-	return fmt.Errorf("refusing protected native path %s: end the ordinary session and let auth reconciliation link it, or use enclave auth reset for a crash leftover", file)
+	return fmt.Errorf("refusing protected native path %s: end the ordinary session and let auth reconciliation link it, or use --reset-auth for a crash leftover", file)
 }

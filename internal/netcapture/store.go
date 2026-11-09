@@ -109,10 +109,6 @@ type Capture struct {
 	record   Record
 	request  *bodySink
 	response *bodySink
-	// requestDecoder and responseDecoder sit in front of the sinks when a body
-	// carries an encoding the store decodes; nil otherwise.
-	requestDecoder  *decodingSink
-	responseDecoder *decodingSink
 	// requestBody is the forwarded request body, if there was one.
 	requestBody *teeBody
 }
@@ -149,9 +145,6 @@ func (s *Store) Begin(req *http.Request, scheme string) *Capture {
 	}
 	capture.request = s.newBodySink(id + requestBodySuffix)
 	capture.response = s.newBodySink(id + responseBodySuffix)
-	if encoding := decodableEncoding(req.Header); encoding != "" {
-		capture.requestDecoder = &decodingSink{sink: capture.request, encoding: encoding}
-	}
 	return capture
 }
 
@@ -169,11 +162,7 @@ func (c *Capture) RequestBody(body io.ReadCloser) io.ReadCloser {
 	if c == nil || body == http.NoBody {
 		return body
 	}
-	var sink io.Writer = c.request
-	if c.requestDecoder != nil {
-		sink = c.requestDecoder
-	}
-	c.requestBody = &teeBody{ReadCloser: body, sink: sink}
+	c.requestBody = &teeBody{ReadCloser: body, sink: c.request}
 	return c.requestBody
 }
 
@@ -187,19 +176,21 @@ func (c *Capture) Response(resp *http.Response) {
 		Proto:   resp.Proto,
 		Headers: c.store.redactor.header(resp.Header),
 	}
-	if encoding := decodableEncoding(resp.Header); encoding != "" {
-		c.responseDecoder = &decodingSink{sink: c.response, encoding: encoding}
+	// The proxy asks for an unencoded body; one encoded anyway is relayed but
+	// not stored, so no secret it may hold reaches the disk unredacted.
+	for _, encoding := range resp.Header.Values("Content-Encoding") {
+		if !strings.EqualFold(strings.TrimSpace(encoding), "identity") {
+			c.record.Response.BodyOmitted = OmittedEncoding
+			break
+		}
 	}
 }
 
 // ResponseBody returns the writer the relayed response body is copied to, or
 // nil when there is no capture.
 func (c *Capture) ResponseBody() io.Writer {
-	if c == nil {
+	if c == nil || (c.record.Response != nil && c.record.Response.BodyOmitted != "") {
 		return nil
-	}
-	if c.responseDecoder != nil {
-		return c.responseDecoder
 	}
 	return c.response
 }
@@ -227,8 +218,8 @@ func (c *Capture) Finish(relayErr error) string {
 	if c.requestBody != nil && !c.requestBody.complete() {
 		c.request.markIncomplete()
 	}
-	c.record.Request.Body = closeBody(c.request, c.requestDecoder)
-	if body := closeBody(c.response, c.responseDecoder); c.record.Response != nil {
+	c.record.Request.Body = c.request.close()
+	if body := c.response.close(); c.record.Response != nil {
 		c.record.Response.Body = body
 	}
 	if relayErr != nil {
@@ -252,27 +243,6 @@ func (c *Capture) Finish(relayErr error) string {
 	}
 	s.finish(sessionCapture{id: c.id, bytes: bodies + int64(len(payload))}, bodies)
 	return c.id
-}
-
-// closeBody ends a body and describes it. A decoded body is stored decoded but
-// counted as it crossed the proxy, and is incomplete if it did not decode to
-// its end.
-func closeBody(sink *bodySink, decoder *decodingSink) *Body {
-	if decoder == nil {
-		return sink.close()
-	}
-	wire, failed := decoder.finish()
-	body := sink.close()
-	if wire == 0 {
-		return body
-	}
-	if body == nil {
-		body = &Body{}
-	}
-	body.Bytes = wire
-	body.DecodedFrom = decoder.encoding
-	body.Truncated = body.Truncated || failed
-	return body
 }
 
 func (s *Store) newBodySink(name string) *bodySink {
@@ -447,14 +417,6 @@ func (b *bodySink) close() *Body {
 		body.File = filepath.Base(b.path)
 	}
 	return body
-}
-
-// full reports whether the sink stores nothing more, so a decoder feeding it
-// can stop.
-func (b *bodySink) full() bool {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.truncated || b.failed || b.closed
 }
 
 // markIncomplete flags a message that did not cross the proxy whole.

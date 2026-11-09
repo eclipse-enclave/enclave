@@ -161,7 +161,7 @@ The network request flow, restricted and unrestricted, has separate
 | [`internal/tools/handler.go`](../internal/tools/handler.go), [`extensions/tools/<tool>/go/`](../extensions/tools/) | Handler hooks and per-tool registrations (ports, validation) |
 | [`internal/netlog/`](../internal/netlog/) | Audit log format (`Event`) and file handling; no Docker, policy, or CLI knowledge |
 | [`internal/netlogview/`](../internal/netlogview/) | Log queries and capture rendering (`network log --show-capture`), kept out of `netlog` so the sidecar does not ship it |
-| [`internal/netcapture/`](../internal/netcapture/) | Full capture format, body writer with gzip and deflate decoding, released-secret redaction, host directory setup, pruning, and lookup |
+| [`internal/netcapture/`](../internal/netcapture/) | Full capture format, body writer, released-secret redaction, host directory setup, pruning, and lookup |
 | [`internal/network/`](../internal/network/) | `network.jsonc` policy loading, merging, dnsmasq config generation |
 | [`internal/policy/effective_resolver.go`](../internal/policy/effective_resolver.go) | Effective policy for startup, `network status`, and apply |
 | [`internal/policy/session_inputs.go`](../internal/policy/session_inputs.go) | A session's policy contributions, shared by startup and the `network status`/`print`/`diff` preview |

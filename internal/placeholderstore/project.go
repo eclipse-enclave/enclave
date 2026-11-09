@@ -114,65 +114,47 @@ func Project(realDir, viewsDir, session string, profile model.Profile, configure
 }
 
 func projectFile(provider string, file model.AuthFileSecret, data []byte, bindings *Bindings, secrets map[string]model.SecretConfig, configured []model.SecretReleaseEntry) (map[string]any, []model.SecretReleaseEntry, []string, error) {
-	doc, credentialPointers, err := decodeNative(file.Codec, data)
+	doc, values, err := decodeAuthFile(file, data, projectedView)
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	declared := map[string]bool{}
-	for _, field := range file.Fields {
-		declared[field.Pointer] = true
-	}
-	for _, pointer := range credentialPointers {
-		if !declared[pointer] {
-			return nil, nil, nil, fmt.Errorf("credential field %s is not declared", pointer)
-		}
-	}
 	var rawValues []string
 	var releases []model.SecretReleaseEntry
-	for _, field := range file.Fields {
-		parts, err := model.AuthPointerSegments(field.Pointer)
+	for _, native := range values {
+		field, pointer, value := native.field, native.field.Pointer, native.value
+		var release model.SecretReleaseEntry
+		if field.Kind == "apiKey" {
+			for _, entry := range configured {
+				if entry.SecretID == field.Release {
+					release = entry
+					break
+				}
+			}
+			if release.Placeholder == "" {
+				return nil, nil, nil, fmt.Errorf("credential field %s requires configured secret %s", pointer, field.Release)
+			}
+		} else if strings.Contains(value, model.SecretPlaceholderMarker) {
+			return nil, nil, nil, fmt.Errorf("real native credential field %s contains a placeholder", pointer)
+		}
+		binding, err := bindings.field(provider, file.File, pointer, field.Kind, field.Placeholder, value, release.Placeholder)
 		if err != nil {
 			return nil, nil, nil, err
 		}
-		err = visitFields(doc, parts, "", func(pointer, value string, replace func(string)) error {
-			var release model.SecretReleaseEntry
-			if field.Kind == "apiKey" {
-				for _, entry := range configured {
-					if entry.SecretID == field.Release {
-						release = entry
-						break
-					}
+		native.replace(binding.Placeholder)
+		if !strings.Contains(value, model.SecretPlaceholderMarker) {
+			rawValues = append(rawValues, value)
+		}
+		if field.Release != "" {
+			if field.Kind != "apiKey" {
+				secret := secrets[field.Release]
+				if secret.Release == nil || secret.Release.HTTP == nil {
+					return nil, nil, nil, fmt.Errorf("credential field %s has no HTTP release", pointer)
 				}
-				if release.Placeholder == "" {
-					return fmt.Errorf("credential field %s requires configured secret %s", pointer, field.Release)
-				}
-			} else if strings.Contains(value, model.SecretPlaceholderMarker) {
-				return fmt.Errorf("real native credential field %s contains a placeholder", pointer)
+				rule := secret.Release.HTTP
+				release = model.SecretReleaseEntry{SecretID: field.Release, Value: value, Hosts: rule.Hosts, Header: rule.Header, Format: rule.Format}
 			}
-			binding, err := bindings.field(provider, file.File, pointer, field.Kind, field.Placeholder, value, release.Placeholder)
-			if err != nil {
-				return err
-			}
-			replace(binding.Placeholder)
-			if !strings.Contains(value, model.SecretPlaceholderMarker) {
-				rawValues = append(rawValues, value)
-			}
-			if field.Release != "" {
-				if field.Kind != "apiKey" {
-					secret := secrets[field.Release]
-					if secret.Release == nil || secret.Release.HTTP == nil {
-						return fmt.Errorf("credential field %s has no HTTP release", pointer)
-					}
-					rule := secret.Release.HTTP
-					release = model.SecretReleaseEntry{SecretID: field.Release, Value: value, Hosts: rule.Hosts, Header: rule.Header, Format: rule.Format}
-				}
-				release.Placeholder = binding.Placeholder
-				releases = append(releases, release)
-			}
-			return nil
-		})
-		if err != nil {
-			return nil, nil, nil, err
+			release.Placeholder = binding.Placeholder
+			releases = append(releases, release)
 		}
 	}
 	return doc, releases, rawValues, nil

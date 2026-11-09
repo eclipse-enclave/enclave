@@ -242,8 +242,10 @@ configured.
 
 The prototype reads only declared, bounded regular files and publishes private
 per-session views. `bindings.json` stores placeholder identities, not grants;
-native files remain canonical. Raw or foreign native config files are refused,
-never overwritten. Native-path operations are rechecked by the entrypoint;
+native files remain canonical. Unknown keys are stripped from projected views
+but stay in the canonical files. Native-path classification is strict: unknown
+keys in an original regular file are refused, since keeping it would retain
+those bytes. Raw or foreign native config files are refused, never overwritten. Native-path operations are rechecked by the entrypoint;
 ordinary reconciliation is not used for a protected view.
 
 ### Shared credential storage (`securestorageDirEnv`)

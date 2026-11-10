@@ -48,6 +48,66 @@
       "auth_files": [
         "agent/auth.json"
       ],
+      "auth_secrets": [
+        {
+          "file": "agent/auth.json",
+          "codec": "provider-map",
+          "fields": [
+            {
+              "pointer": "/openai/key",
+              "kind": "apiKey",
+              "release": "openai-api-key"
+            },
+            {
+              "pointer": "/anthropic/key",
+              "kind": "apiKey",
+              "release": "anthropic-api-key"
+            },
+            {
+              "pointer": "/google/key",
+              "kind": "apiKey",
+              "release": "gemini-api-key"
+            },
+            {
+              "pointer": "/mistral/key",
+              "kind": "apiKey",
+              "release": "mistral-api-key"
+            },
+            {
+              "pointer": "/openai-codex/access",
+              "kind": "access",
+              "release": "chatgpt-oauth",
+              "placeholder": {
+                "shape": "jwt",
+                "random": {
+                  "encoding": "",
+                  "length": 0
+                }
+              }
+            },
+            {
+              "pointer": "/openai-codex/refresh",
+              "kind": "refresh"
+            }
+          ]
+        }
+      ],
+      "token_endpoint": {
+        "host": "auth.openai.com",
+        "path": "/oauth/token",
+        "body": "either",
+        "grants": [
+          "authorization_code",
+          "refresh_token"
+        ],
+        "fields": {
+          "access": "access_token",
+          "expiresIn": "expires_in",
+          "id": "id_token",
+          "refresh": "refresh_token",
+          "scope": "scope"
+        }
+      },
       "auth_session": {
         "mode": "",
         "checks": [
@@ -166,6 +226,19 @@
           "length": 48
         }
       }
+    },
+    "chatgpt-oauth": {
+      "env_vars": null,
+      "release": {
+        "http": {
+          "hosts": [
+            "chatgpt.com"
+          ],
+          "header": "authorization",
+          "format": "Bearer %s"
+        }
+      },
+      "api_key": false
     },
     "gemini-api-key": {
       "env_vars": [

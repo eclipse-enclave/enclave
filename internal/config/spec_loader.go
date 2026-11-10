@@ -220,7 +220,7 @@ func loadSpecExtension(paths model.Paths, name string, specKind string) (model.E
 	if err := validateExtensionIdentity(ext, name, specKind, label); err != nil {
 		return model.Extension{}, err
 	}
-	if err := validateAndNormalizeExtension(&ext, label); err != nil {
+	if err := validateAndNormalizeExtension(&ext, label, buildProviders(doc)...); err != nil {
 		return model.Extension{}, err
 	}
 

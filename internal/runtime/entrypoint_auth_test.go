@@ -237,17 +237,24 @@ func assertSymlinkTarget(t *testing.T, path string, want string) {
 	}
 }
 
-func TestEntrypointCodexKeepsProtectedSiblingFile(t *testing.T) {
-	home, _, authDir := entrypointAuthDirs(t)
-	configDir := filepath.Join(home, ".codex")
-	authFile := filepath.Join(configDir, "auth.json")
-	const data = `{"tokens":{"access_token":"header.claims.ENCLAVE_SECRET_bound"}}`
-	writeFile(t, authFile, data)
-	digest := sha256.Sum256([]byte(data))
-	runEntrypointAuth(t, home, configDir, authDir, "TOOL=codex", model.EnvAuthFiles+"=auth.json", model.EnvNativeAuthOps+"=auth.json:keep:"+fmt.Sprintf("%x", digest))
-	assertFileContent(t, authFile, data)
-	info, err := os.Lstat(authFile)
-	if err != nil || !info.Mode().IsRegular() {
-		t.Fatal("protected sibling file was replaced")
+func TestEntrypointProtectedToolsKeepSiblingFile(t *testing.T) {
+	for _, tool := range []string{"codex", "opencode"} {
+		t.Run(tool, func(t *testing.T) {
+			home, _, authDir := entrypointAuthDirs(t)
+			configDir := filepath.Join(home, ".codex")
+			if tool == "opencode" {
+				configDir = filepath.Join(home, ".config", "opencode")
+			}
+			authFile := filepath.Join(configDir, "auth.json")
+			const data = `{"tokens":{"access_token":"header.claims.ENCLAVE_SECRET_bound"}}`
+			writeFile(t, authFile, data)
+			digest := sha256.Sum256([]byte(data))
+			runEntrypointAuth(t, home, configDir, authDir, "TOOL="+tool, model.EnvAuthFiles+"=auth.json", model.EnvNativeAuthOps+"=auth.json:keep:"+fmt.Sprintf("%x", digest))
+			assertFileContent(t, authFile, data)
+			info, err := os.Lstat(authFile)
+			if err != nil || !info.Mode().IsRegular() {
+				t.Fatal("protected sibling file was replaced")
+			}
+		})
 	}
 }

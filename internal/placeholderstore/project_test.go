@@ -360,3 +360,70 @@ func TestProjectStripsUnknownKeysWithoutChangingNativeFiles(t *testing.T) {
 		})
 	}
 }
+
+func TestProviderMapWildcardKeysAndEscaping(t *testing.T) {
+	file := model.AuthFileSecret{File: "auth.json", Codec: "provider-map", Fields: []model.AuthSecretField{{Pointer: "/*/key", Kind: "apiKey", Release: "api"}}}
+	profile := model.Profile{Providers: []model.ProviderConfig{{Name: "map", AuthSecrets: []model.AuthFileSecret{file}}}}
+	real := t.TempDir()
+	nativeFile(t, real, file.File, `{"https://models.invalid/~slot":{"type":"api","key":"synthetic-first"},"second":{"type":"api_key","key":"synthetic-second"}}`)
+	placeholder, err := model.NewSecretPlaceholder(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	configured := []model.SecretReleaseEntry{{SecretID: "api", Placeholder: placeholder, Value: "synthetic-configured"}}
+	view, err := Project(real, t.TempDir(), "wildcard", profile, configured)
+	if err != nil || len(view.Bindings.Bindings) != 2 {
+		t.Fatal("wildcard projection failed", err)
+	}
+	for _, binding := range view.Bindings.Bindings {
+		parts, err := model.AuthPointerSegments(binding.Pointer)
+		if err != nil || parts[0] != binding.Provider || parts[1] != "key" {
+			t.Fatal("concrete escaped binding lost its namespace")
+		}
+	}
+	data, err := os.ReadFile(filepath.Join(view.Dir, file.File))
+	if err != nil || strings.Contains(string(data), "synthetic-first") || strings.Contains(string(data), "synthetic-second") {
+		t.Fatal("wildcard leaf replacement leaked")
+	}
+	if ops, err := ClassifyNative(view.Dir, "/auth", profile, view.Bindings, nil, false); err != nil || len(ops) != 1 || ops[0].Verb != "keep" {
+		t.Fatal("wildcard ownership proof failed", err)
+	}
+	profile.Providers[0].AuthSecrets[0].Fields = append(file.Fields, model.AuthSecretField{Pointer: "/second/key", Kind: "apiKey", Release: "api"})
+	if _, err := Project(real, t.TempDir(), "overlap", profile, configured); err == nil {
+		t.Fatal("overlapping wildcard declarations were accepted")
+	}
+}
+
+func TestProviderMapErrorsDoNotEchoUntrustedKeys(t *testing.T) {
+	real := t.TempDir()
+	const raw = "synthetic-private-key"
+	nativeFile(t, real, "auth.json", `{"`+raw+`":{"type":"api","key":"value"}}`)
+	profile := model.Profile{Providers: []model.ProviderConfig{{AuthSecrets: []model.AuthFileSecret{{File: "auth.json", Codec: "provider-map", Fields: []model.AuthSecretField{{Pointer: "/known/key", Kind: "apiKey", Release: "api"}}}}}}}
+	if _, err := Project(real, t.TempDir(), "unknown", profile, nil); err == nil || strings.Contains(err.Error(), raw) {
+		t.Fatal("untrusted provider name echoed in error")
+	}
+}
+
+func TestMarkedNativeAPIKeyStillParticipatesInContainment(t *testing.T) {
+	real := t.TempDir()
+	const raw = "synthetic-native-keyENCLAVE_SECRET_tail"
+	doc := map[string]any{"claudeAiOauth": map[string]any{"accessToken": accessToken, "refreshToken": refreshToken, "subscriptionType": raw}}
+	data, _ := json.Marshal(doc)
+	nativeFile(t, real, ".credentials.json", string(data))
+	nativeFile(t, real, "config.json", `{"primaryApiKey":"`+raw+`"}`)
+	placeholder, err := model.NewSecretPlaceholder(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	configured := []model.SecretReleaseEntry{{SecretID: "api", Placeholder: placeholder, Value: "synthetic-configured-key"}}
+	if _, err := Project(real, t.TempDir(), "marked", claudeProfile(), configured); err == nil {
+		t.Fatal("an embedded marker hid a raw API key copied into allowed metadata")
+	}
+	forged := Bindings{Schema: 1, Bindings: []Binding{{Provider: "anthropic", File: "config.json", Pointer: "/primaryApiKey", Kind: "apiKey", Placeholder: raw}}}
+	if err := SaveBindings(real, forged); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Project(real, t.TempDir(), "forged", claudeProfile(), configured); err == nil {
+		t.Fatal("a forged marker binding hid a real native API value")
+	}
+}

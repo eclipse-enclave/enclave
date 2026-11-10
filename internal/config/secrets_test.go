@@ -202,3 +202,18 @@ func assertFileSecretSurvived(t *testing.T, secrets map[string]model.SecretConfi
 		t.Fatalf("Priority = %q, want %q", sc.Priority, model.SecretPriorityFileFirst)
 	}
 }
+
+func TestNativeOnlyHTTPReleaseNeedsDeclaredAccessField(t *testing.T) {
+	source := map[string]model.SecretConfig{"native": {Release: &model.SecretReleaseConfig{HTTP: &model.HTTPSecretReleaseConfig{Hosts: []string{"api.example.com"}, Header: "Authorization", Format: "Bearer %s"}}}}
+	provider := model.ProviderConfig{AuthSecrets: []model.AuthFileSecret{{Fields: []model.AuthSecretField{{Kind: "access", Release: "native"}}}}}
+	if _, err := validateAndNormalizeSecretConfigs(source); err == nil {
+		t.Fatal("unreferenced empty env source accepted")
+	}
+	if normalized, err := validateAndNormalizeSecretConfigs(source, provider); err != nil || len(normalized["native"].EnvVars) != 0 {
+		t.Fatal("native HTTP release needs no invented env source", err)
+	}
+	provider.AuthSecrets[0].Fields[0].Kind = "apiKey"
+	if _, err := validateAndNormalizeSecretConfigs(source, provider); err == nil {
+		t.Fatal("API key alias bypassed env credential requirement")
+	}
+}

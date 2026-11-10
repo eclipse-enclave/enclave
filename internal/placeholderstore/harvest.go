@@ -132,7 +132,7 @@ func readHarvestSource(dir string, files []harvestDocument, bindings Bindings, w
 			for _, value := range values {
 				bound := false
 				for _, binding := range bindings.Bindings {
-					if binding.Provider == file.provider && binding.File == file.file.File && binding.Pointer == value.field.Pointer && binding.Matches(value.value) {
+					if binding.Provider == bindingProvider(file.provider, file.file, value.field.Pointer) && binding.File == file.file.File && binding.Pointer == value.field.Pointer && binding.Matches(value.value) {
 						bound = true
 						break
 					}

@@ -193,7 +193,7 @@ func (s *Store) transact(parent context.Context, values map[string]string, media
 	if tokenType != "" && !nonSecret(tokenType) {
 		tokenType = ""
 	}
-	native.UpdateMetadata(s.file.Codec, scope, object[endpoint.Fields["expiresIn"]], login, s.now(), nonSecret)
+	native.UpdateMetadata(s.file.Codec, s.config.Provider.Name, scope, object[endpoint.Fields["expiresIn"]], login, s.now(), nonSecret)
 	encoded := mustJSON(native.Document)
 	for _, field := range s.file.Fields {
 		if field.Kind == "apiKey" || native.Values[field.Pointer] == "" {
@@ -261,7 +261,7 @@ func (s *Store) tokenReply(native placeholderstore.NativeFile, bindings placehol
 	if scope != "" {
 		result[endpoint.Fields["scope"]] = scope
 	}
-	nativeScope, expiry := native.ReplyMetadata(s.file.Codec)
+	nativeScope, expiry := native.ReplyMetadata(s.file.Codec, s.config.Provider.Name)
 	if nativeScope != "" {
 		result[endpoint.Fields["scope"]] = nativeScope
 	}

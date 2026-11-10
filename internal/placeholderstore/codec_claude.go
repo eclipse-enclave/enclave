@@ -12,7 +12,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"math"
+	"slices"
 	"strings"
 	"time"
 
@@ -39,40 +41,59 @@ func decodeAuthFile(file model.AuthFileSecret, data []byte, purpose nativePurpos
 	if err != nil {
 		return nil, nil, err
 	}
-	declared := map[string]bool{}
-	for _, field := range file.Fields {
-		declared[field.Pointer] = true
-	}
 	for _, pointer := range pointers {
-		if !declared[pointer] {
+		declared := false
+		for _, field := range file.Fields {
+			declared = declared || model.AuthPointerMatches(field.Pointer, pointer)
+		}
+		if !declared {
+			if file.Codec == "provider-map" {
+				return nil, nil, fmt.Errorf("provider auth contains undeclared credential fields")
+			}
 			return nil, nil, fmt.Errorf("credential field %s is not declared", pointer)
 		}
 	}
 	var values []nativeValue
+	seen := map[string]bool{}
 	for _, field := range file.Fields {
 		parts, err := model.AuthPointerSegments(field.Pointer)
 		if err != nil {
 			return nil, nil, err
 		}
-		node := doc
-		for i, key := range parts {
-			value, exists := node[key]
-			if !exists || value == nil || value == "" {
-				break
-			}
-			if i == len(parts)-1 {
-				text, ok := value.(string)
-				if !ok {
-					return nil, nil, fmt.Errorf("credential field %s must be a string", field.Pointer)
+		var walk func(map[string]any, int, string) error
+		walk = func(node map[string]any, at int, prefix string) error {
+			for _, key := range slices.Sorted(maps.Keys(node)) {
+				if parts[at] != "*" && parts[at] != key {
+					continue
 				}
-				values = append(values, nativeValue{field: field, value: text, replace: func(replacement string) { node[key] = replacement }})
-				break
+				value := node[key]
+				if value == nil || value == "" {
+					continue
+				}
+				pointer := prefix + "/" + model.EscapeAuthPointer(key)
+				if at == len(parts)-1 {
+					text, ok := value.(string)
+					if !ok || seen[pointer] {
+						return fmt.Errorf("invalid or ambiguous credential field %s", pointer)
+					}
+					seen[pointer] = true
+					concrete := field
+					concrete.Pointer = pointer
+					values = append(values, nativeValue{field: concrete, value: text, replace: func(replacement string) { node[key] = replacement }})
+				} else {
+					child, ok := value.(map[string]any)
+					if !ok {
+						return fmt.Errorf("credential pointer traverses a non-object")
+					}
+					if err := walk(child, at+1, pointer); err != nil {
+						return err
+					}
+				}
 			}
-			var ok bool
-			node, ok = value.(map[string]any)
-			if !ok {
-				return nil, nil, fmt.Errorf("credential pointer traverses a non-object")
-			}
+			return nil
+		}
+		if err := walk(doc, 0, ""); err != nil {
+			return nil, nil, err
 		}
 	}
 	return doc, values, nil
@@ -117,6 +138,31 @@ func decodeNative(codec string, data []byte, purpose nativePurpose) (map[string]
 			}
 		}
 		return doc, []string{"/OPENAI_API_KEY", "/tokens/access_token", "/tokens/refresh_token", "/tokens/id_token"}, nil
+	case "provider-map":
+		var pointers []string
+		for _, key := range slices.Sorted(maps.Keys(doc)) {
+			entry, ok := doc[key].(map[string]any)
+			if !ok {
+				return nil, nil, fmt.Errorf("invalid provider auth entry")
+			}
+			allowed := map[string]string{"type": "string", "key": "string"}
+			leaves := []string{"key"}
+			switch entry["type"] {
+			case "api", "api_key":
+			case "oauth":
+				allowed = map[string]string{"type": "string", "access": "string", "refresh": "string", "expires": "number", "accountId": "string"}
+				leaves = []string{"access", "refresh"}
+			default:
+				return nil, nil, fmt.Errorf("unsupported provider auth type")
+			}
+			if err := filterFields(entry, allowed, purpose); err != nil {
+				return nil, nil, err
+			}
+			for _, leaf := range leaves {
+				pointers = append(pointers, "/"+model.EscapeAuthPointer(key)+"/"+leaf)
+			}
+		}
+		return doc, pointers, nil
 	case "claude-config":
 		if err := filterFields(doc, map[string]string{"primaryApiKey": "string", "anthropicApiKey": "string", "allowTelemetry": "bool", "hasCompletedOnboarding": "bool", "lastOnboardingVersion": "string", "forceLoginMethod": "string", "oauthAccount": "object"}, purpose); err != nil {
 			return nil, nil, err
@@ -207,12 +253,31 @@ func uniqueJSONValue(decoder *json.Decoder, depth int) error {
 	return err
 }
 
-func (native *NativeFile) UpdateMetadata(codec, scope string, expires json.RawMessage, login bool, now time.Time, nonSecret func(string) bool) {
+func (native *NativeFile) UpdateMetadata(codec, provider, scope string, expires json.RawMessage, login bool, now time.Time, nonSecret func(string) bool) {
 	oauth, _ := native.Document["claudeAiOauth"].(map[string]any)
 	if scope != "" && nonSecret(scope) && codec == "claude-credentials" {
 		oauth["scopes"] = strings.Fields(scope)
 	}
-	if codec == "codex-auth" {
+	switch codec {
+	case "provider-map":
+		entry := native.Document[provider].(map[string]any)
+		if login {
+			entry["type"] = "oauth"
+			delete(entry, "key")
+			delete(native.Values, "/"+model.EscapeAuthPointer(provider)+"/key")
+		}
+		entry["expires"] = int64(0)
+		var seconds int64
+		if json.Unmarshal(expires, &seconds) == nil && seconds > 0 && seconds <= math.MaxInt64/int64(time.Second) {
+			entry["expires"] = now.Add(time.Duration(seconds) * time.Second).UnixMilli()
+		}
+		claims, _ := JWTClaims(native.Values["/"+model.EscapeAuthPointer(provider)+"/access"])
+		if auth, ok := claims["https://api.openai.com/auth"].(map[string]any); ok {
+			if account, ok := auth["chatgpt_account_id"].(string); ok && nonSecret(account) {
+				entry["accountId"] = account
+			}
+		}
+	case "codex-auth":
 		if login {
 			native.Document["auth_mode"], native.Document["OPENAI_API_KEY"] = "chatgpt", nil
 			delete(native.Values, "/OPENAI_API_KEY")
@@ -226,7 +291,7 @@ func (native *NativeFile) UpdateMetadata(codec, scope string, expires json.RawMe
 				}
 			}
 		}
-	} else {
+	case "claude-credentials":
 		delete(oauth, "expiresAt")
 		var seconds int64
 		if json.Unmarshal(expires, &seconds) == nil && seconds > 0 && seconds <= math.MaxInt64/int64(time.Second) {
@@ -236,7 +301,7 @@ func (native *NativeFile) UpdateMetadata(codec, scope string, expires json.RawMe
 	}
 }
 
-func (native NativeFile) ReplyMetadata(codec string) (scope string, expiry time.Time) {
+func (native NativeFile) ReplyMetadata(codec, provider string) (scope string, expiry time.Time) {
 	switch codec {
 	case "claude-credentials":
 		oauth, _ := native.Document["claudeAiOauth"].(map[string]any)
@@ -250,6 +315,12 @@ func (native NativeFile) ReplyMetadata(codec string) (scope string, expiry time.
 		if millis, err := number.Int64(); err == nil {
 			expiry = time.UnixMilli(millis)
 		}
+	case "provider-map":
+		entry, _ := native.Document[provider].(map[string]any)
+		number, _ := entry["expires"].(json.Number)
+		if millis, err := number.Int64(); err == nil {
+			expiry = time.UnixMilli(millis)
+		}
 	case "codex-auth":
 		claims, _ := JWTClaims(native.Values["/tokens/access_token"])
 		number, _ := claims["exp"].(json.Number)
@@ -260,4 +331,4 @@ func (native NativeFile) ReplyMetadata(codec string) (scope string, expiry time.
 	return
 }
 
-func HasClientMetadata(codec string) bool { return codec != "codex-auth" }
+func HasClientMetadata(codec string) bool { return codec != "codex-auth" && codec != "provider-map" }

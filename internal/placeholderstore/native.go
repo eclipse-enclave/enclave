@@ -93,7 +93,7 @@ func ClassifyNative(configDir, expectedAuthDir string, profile model.Profile, cu
 					}
 					bound := false
 					for _, binding := range current.Bindings {
-						if binding.Provider == provider.Name && binding.File == file.File && binding.Pointer == pointer && binding.Matches(value) {
+						if binding.Provider == bindingProvider(provider.Name, file, pointer) && binding.File == file.File && binding.Pointer == pointer && binding.Matches(value) {
 							bound = true
 							break
 						}

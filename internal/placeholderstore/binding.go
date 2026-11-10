@@ -245,3 +245,11 @@ func (b Binding) Render(value string) (string, error) {
 	parts := strings.Split(value, ".")
 	return parts[0] + "." + parts[1] + "." + b.Placeholder, nil
 }
+
+func bindingProvider(provider string, file model.AuthFileSecret, pointer string) string {
+	if file.Codec == "provider-map" {
+		parts, _ := model.AuthPointerSegments(pointer)
+		return parts[0]
+	}
+	return provider
+}

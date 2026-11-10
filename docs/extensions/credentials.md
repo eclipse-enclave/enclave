@@ -219,15 +219,15 @@ User-facing behavior per tool is in
 
 `providers[].authSecrets` and `tokenEndpoint` are reserved for the internal protected-auth
 implementation. They do not enable a protected session or change ordinary auth
-behavior. Claude and Codex enable them with `--protect-auth`; see
+behavior. Claude, Codex, Pi and OpenCode enable them with `--protect-auth`; see
 [protected native auth](../auth.md#protected-native-auth).
 
 | Field | Meaning |
 |-------|---------|
 | `authSecrets[].file` | Unique relative path; must appear in `authFiles` unless `checkOnly` |
 | `authSecrets[].checkOnly` | Inspect credential pointers in the config store; refuse raw values, leave metadata untouched, never project or reconcile the file |
-| `authSecrets[].codec` | Native format; projection currently implements `claude-credentials`, `claude-config` and `codex-auth` |
-| `authSecrets[].fields[].pointer` | Unescaped object-field pointer; fixed native fields are implemented |
+| `authSecrets[].codec` | Native format; projection currently implements `claude-credentials`, `claude-config`, `codex-auth` and `provider-map` |
+| `authSecrets[].fields[].pointer` | RFC 6901 object-field pointer; at most one `*` segment; arrays are not supported |
 | `fields[].kind` | `access`, `refresh`, `id`, or `apiKey` |
 | `fields[].release` | Existing `network.serviceAuth` id; required for access/API keys, forbidden for refresh/ID tokens |
 | `fields[].placeholder` | Opaque prefix/suffix/random shape, or `shape: jwt` for access/ID fields; API keys reuse their env placeholder |
@@ -238,10 +238,11 @@ marker within the declared random-body length and retain at least 128 random
 bits. Hex/alphanumeric shapes place the marker before their random body.
 JWT placeholders retain readable header/payload claims and use a bound signature;
 refreshes update the claims without invalidating older cached JWT placeholders.
-Wildcard/escaped pointers, arrays and other codecs are deferred until their tools
-are implemented. API-key fields use the configured env
+Provider-map slots use their concrete provider key as the binding namespace.
+Unknown provider credentials refuse rather than being copied. API-key fields use the configured env
 credential's placeholder and refuse a raw native key when no such credential is
-configured.
+configured. A native access field may reference an HTTP release source without
+an env alias; unrelated empty-env sources still refuse.
 
 The prototype reads only declared, bounded regular files and publishes private
 per-session views. `bindings.json` stores placeholder identities, not grants;

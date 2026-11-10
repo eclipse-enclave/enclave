@@ -435,11 +435,11 @@ func validateExtensionIdentity(ext model.Extension, name string, expectedType st
 	return nil
 }
 
-func validateAndNormalizeExtension(ext *model.Extension, manifestPath string) error {
+func validateAndNormalizeExtension(ext *model.Extension, manifestPath string, providers ...model.ProviderConfig) error {
 	if ext == nil {
 		return fmt.Errorf("%s: extension is nil", manifestPath)
 	}
-	normalizedSecrets, err := validateAndNormalizeSecretConfigs(ext.Secrets)
+	normalizedSecrets, err := validateAndNormalizeSecretConfigs(ext.Secrets, providers...)
 	if err != nil {
 		return fmt.Errorf("%s: %w", manifestPath, err)
 	}

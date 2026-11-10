@@ -157,8 +157,8 @@ User-facing model: [configuration.md](configuration.md); resolution flow:
 
 `protect_auth` is session-affecting: its boolean is recorded as provenance,
 while native credentials and placeholder bindings never enter option metadata.
-Claude and Codex currently provide the native declarations; keep the option
-help and protected-auth docs aligned with the supported codecs.
+Native declarations determine supported tools; keep the option help and
+protected-auth docs aligned with the supported codecs.
 
 ### Option kinds
 

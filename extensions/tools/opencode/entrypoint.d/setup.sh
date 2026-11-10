@@ -74,7 +74,7 @@ opencode_link_into_store "$state_dir" "$state_store_dir"
 
 auth_file="$config_dir/auth.json"
 shared_auth_file="${ENCLAVE_AUTH_DIR:-}/auth.json"
-if [ -n "${ENCLAVE_AUTH_DIR:-}" ]; then
+if [ -n "${ENCLAVE_AUTH_DIR:-}" ] && [ -z "${ENCLAVE_NATIVE_AUTH_OPS:-}" ]; then
     if [ -L "$auth_file" ] && [ "$(readlink "$auth_file")" != "$shared_auth_file" ]; then
         rm -f "$auth_file"
     fi

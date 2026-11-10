@@ -314,7 +314,7 @@ preserved. Bindings contain identifiers, never tokens or exchange history.
 On a confirmed protected end, current placeholder bindings authorize the whole
 private view; a regular native-path sibling needs its own matching placeholders.
 Only codec-allowlisted metadata is merged, with the sibling taking precedence.
-Tokens, expiry and scopes stay canonical. Codex auth files contain only
+Tokens, expiry and scopes stay canonical. Codex and provider-map auth files contain only
 gateway-owned state, so their views are not harvested. Unknown view keys are ignored;
 secret-bearing metadata and invalid or stale sources are skipped with a warning.
 The shared config path is never changed by harvest. Missing bindings after reset

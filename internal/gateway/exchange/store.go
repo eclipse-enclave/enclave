@@ -38,7 +38,7 @@ func New(config Config, dir, lockPath, session string, env []model.SecretRelease
 	}
 	var file model.AuthFileSecret
 	for _, candidate := range config.Provider.AuthSecrets {
-		if !candidate.CheckOnly && (candidate.Codec == "claude-credentials" || candidate.Codec == "codex-auth") {
+		if !candidate.CheckOnly && (candidate.Codec == "claude-credentials" || candidate.Codec == "codex-auth" || candidate.Codec == "provider-map") {
 			if file.File != "" {
 				return nil, fmt.Errorf("ambiguous native exchange file")
 			}
@@ -56,6 +56,17 @@ func New(config Config, dir, lockPath, session string, env []model.SecretRelease
 		expected := map[string]string{"access": "/claudeAiOauth/accessToken", "refresh": "/claudeAiOauth/refreshToken"}[field.Kind]
 		if file.Codec == "codex-auth" {
 			expected = map[string]string{"access": "/tokens/access_token", "refresh": "/tokens/refresh_token", "id": "/tokens/id_token", "apiKey": "/OPENAI_API_KEY"}[field.Kind] // #nosec G101 -- native JSON pointers, not credential values.
+		}
+		if file.Codec == "provider-map" {
+			if field.Kind == "apiKey" {
+				parts, _ := model.AuthPointerSegments(field.Pointer)
+				if len(parts) == 2 && parts[1] == "key" {
+					continue
+				}
+			}
+			if field.Kind == "access" || field.Kind == "refresh" {
+				expected = "/" + model.EscapeAuthPointer(config.Provider.Name) + "/" + field.Kind
+			}
 		}
 		if expected == "" || field.Pointer != expected {
 			return nil, fmt.Errorf("unsupported native exchange fields")

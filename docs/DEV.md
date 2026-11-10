@@ -116,6 +116,15 @@ Docker and with rootless Podman, check what they cannot:
 - Run `enclave network apply` while a WebSocket is open and confirm its capture
   is finished with its messages rather than lost.
 
+Protected-auth capture checks must combine `--protect-auth` with
+`--network-log=full`. With synthetic credentials and a local trusted provider,
+exercise all five supported tools, native token exchanges, first API release,
+rotation and later unmarked HTTP/WebSocket echoes. Check raw audit and capture
+files and the viewer; native token exchanges must have no capture. Verify the
+known stream/restart limits in
+[Secrets in captures](networking.md#secrets-in-captures) without treating them
+as closed.
+
 ## Code generation
 
 Generated files are checked in. After changing option definitions or tool

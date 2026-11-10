@@ -380,6 +380,20 @@ contains.
 
 ### Secrets in captures
 
+With protected native auth, the proxy learns the current native release
+values before snapshotting each ordinary API request. Learned values accumulate
+for the lifetime of that proxy, so later unmarked echoes of a previously
+released value are redacted too. Native token exchanges are intercepted before
+capture and are not stored. This is known-value replacement, not a general
+credential detector.
+
+Two limits remain: an HTTP body stream opened before a value was learned keeps
+its earlier redactor, and a proxy restart forgets learned native values until
+the next native API release. An echo during either gap can be stored as sent.
+WebSocket messages consult the current learned set as each message is stored,
+even on a connection opened earlier. Stopping capture does not remove values
+already stored.
+
 The proxy snapshots each request before it releases secrets into the headers,
 so the capture holds the placeholders the sandbox sent, never the released
 values. A released value that shows up anywhere else, such as an upstream

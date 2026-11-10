@@ -12,6 +12,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
+	"strings"
+	"time"
 
 	"enclave/internal/model"
 )
@@ -203,3 +206,58 @@ func uniqueJSONValue(decoder *json.Decoder, depth int) error {
 	}
 	return err
 }
+
+func (native *NativeFile) UpdateMetadata(codec, scope string, expires json.RawMessage, login bool, now time.Time, nonSecret func(string) bool) {
+	oauth, _ := native.Document["claudeAiOauth"].(map[string]any)
+	if scope != "" && nonSecret(scope) && codec == "claude-credentials" {
+		oauth["scopes"] = strings.Fields(scope)
+	}
+	if codec == "codex-auth" {
+		if login {
+			native.Document["auth_mode"], native.Document["OPENAI_API_KEY"] = "chatgpt", nil
+			delete(native.Values, "/OPENAI_API_KEY")
+		}
+		native.Document["last_refresh"] = now.UTC().Format(time.RFC3339)
+		for _, pointer := range []string{"/tokens/access_token", "/tokens/id_token"} {
+			claims, _ := JWTClaims(native.Values[pointer])
+			if auth, ok := claims["https://api.openai.com/auth"].(map[string]any); ok {
+				if account, ok := auth["chatgpt_account_id"].(string); ok && nonSecret(account) {
+					native.Document["tokens"].(map[string]any)["account_id"] = account
+				}
+			}
+		}
+	} else {
+		delete(oauth, "expiresAt")
+		var seconds int64
+		if json.Unmarshal(expires, &seconds) == nil && seconds > 0 && seconds <= math.MaxInt64/int64(time.Second) {
+			expiry := now.Add(time.Duration(seconds) * time.Second).UTC().Truncate(time.Millisecond)
+			oauth["expiresAt"] = expiry.UnixMilli()
+		}
+	}
+}
+
+func (native NativeFile) ReplyMetadata(codec string) (scope string, expiry time.Time) {
+	switch codec {
+	case "claude-credentials":
+		oauth, _ := native.Document["claudeAiOauth"].(map[string]any)
+		values, _ := oauth["scopes"].([]any)
+		var scopes []string
+		for _, value := range values {
+			scopes = append(scopes, value.(string))
+		}
+		scope = strings.Join(scopes, " ")
+		number, _ := oauth["expiresAt"].(json.Number)
+		if millis, err := number.Int64(); err == nil {
+			expiry = time.UnixMilli(millis)
+		}
+	case "codex-auth":
+		claims, _ := JWTClaims(native.Values["/tokens/access_token"])
+		number, _ := claims["exp"].(json.Number)
+		if seconds, err := number.Int64(); err == nil {
+			expiry = time.Unix(seconds, 0)
+		}
+	}
+	return
+}
+
+func HasClientMetadata(codec string) bool { return codec != "codex-auth" }

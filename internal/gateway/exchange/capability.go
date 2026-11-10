@@ -77,7 +77,7 @@ func Load(ctx context.Context, path, dir, lock, session string, env []model.Secr
 			return nil, "", fmt.Errorf("native auth file unavailable")
 		}
 		if file.File == store.file.File {
-			store.seenFingerprint = snapshot.Fingerprint
+			store.seenFingerprint.Store(snapshot.Fingerprint)
 		}
 	}
 	probe, err := os.CreateTemp(dir, ".native-probe-*")

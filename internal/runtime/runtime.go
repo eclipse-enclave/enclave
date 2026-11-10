@@ -234,6 +234,9 @@ func (r *Runtime) prepareExecution() (*ExecutionContext, error) {
 	if err := ValidateProtectedAuth(r.run, r.auth, r.build, r.profile); err != nil {
 		return nil, err
 	}
+	if err := r.resetNativeAuth(); err != nil {
+		return nil, fmt.Errorf("reset native auth: %w", err)
+	}
 	config.WriteProjectMarkers(r.host.Home, r.project.Hash, r.project.RealDir)
 	baseContainerName := r.baseContainerName()
 	var containerName string
@@ -428,6 +431,11 @@ func (r *Runtime) prepareVolumes(containerName string, baseContainerName string,
 	volumeSuffix := r.currentConfigVolumeSuffix(containerName, baseContainerName)
 	vm := newVolumeManager(r)
 	prep, stores := vm.BuildPrep(volumeSuffix)
+	if r.nativeAuthResetRequested() {
+		// Preflight already ensured and reset the canonical store. The legacy
+		// reset here clears only config copies, never a newly committed grant.
+		prep.Auth = nil
+	}
 	cleanup := r.ephemeralVolumeCleanup(stores)
 	state, err := r.backend.PrepareStores(context.Background(), prep)
 	if err != nil {

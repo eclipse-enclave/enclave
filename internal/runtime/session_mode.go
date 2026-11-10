@@ -40,9 +40,7 @@ func (r *Runtime) reserveSessionMode(name string) (*backend.SessionMode, error) 
 		discover = func(holders []hoststore.ModeHolder) error {
 			approved := make(map[string]string)
 			for _, holder := range holders {
-				if holder.Protected && (holder.State == "live" || holder.State == "finalizing") {
-					approved[holder.ID] = holder.Engine
-				}
+				approved[holder.ID] = holder.Engine
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()

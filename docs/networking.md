@@ -36,9 +36,9 @@ An unrestricted session still starts a gateway, which only observes. It
 installs no inbound or outbound filters, leaves IPv6 and Docker's DNS resolver
 untouched, and connects each redirected connection to the address the client
 dialled, so `/etc/hosts` entries, split DNS, and IP-pinned endpoints behave as
-without a gateway. It adds no headers to the requests it parses and sets no
-response-header timeout, and responses reach the client with their original
-encoding. Declared secrets are injected with their real values; the
+without a gateway. It adds no headers to the requests or responses it parses,
+sets no response-header timeout, and passes responses to the client with their
+original encoding. Declared secrets are injected with their real values; the
 gateway releases none.
 
 TCP ports 80 and 443 go through the proxy and are logged as in restricted
@@ -48,12 +48,15 @@ mode, with the rule `unrestricted`:
   connection, or an `http` event per request with `--network-log=requests`.
 - TLS without SNI and non-HTTP traffic on these ports, meaning anything that
   does not open with an HTTP/1 request line, are passed through and logged as
-  a `tcp` event without a domain.
+  a `tcp` event without a domain; so is a first line longer than 8 KiB.
 - Requests for an explicit proxy on port 80, such as the `CONNECT` sent for
   `HTTPS_PROXY=http://proxy:80` or an absolute-form `GET http://host/`, reach
   that proxy unchanged and are logged as a `tcp` event for the requested host.
-- An HTTP request sent to the gateway's proxy port itself has no destination
-  and gets `400` with the rule `invalid-host`.
+- A connection made straight to the gateway's proxy ports has no destination:
+  an HTTP request to 15080, or to an intercepted host on 15443, gets `400` with
+  the rule `invalid-host`; other TLS on 15443 is passed through to its SNI host
+  on port 443; anything else is closed and logged with the rule
+  `upstream-error`.
 - Everything else passes unlogged: other TCP ports (SSH included), UDP
   (including QUIC/HTTP3 and DNS), and IPv6 web traffic when the gateway cannot
   set up IPv6 NAT. There are no `dns` events, since the gateway does not

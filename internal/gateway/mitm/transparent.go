@@ -29,8 +29,10 @@ import (
 const sniffTimeout = 10 * time.Second
 
 // maxSniffedLineLength bounds how much of a connection the HTTP frontend
-// buffers to find the end of its first line.
-const maxSniffedLineLength = 4096
+// buffers to find the end of its first line. Common web servers reject longer
+// request lines (Apache 8190 bytes, nginx 8 KiB), and a longer first line is
+// passed through as another protocol.
+const maxSniffedLineLength = 8192
 
 // maxHTTPMethodLength is longer than any registered HTTP method.
 const maxHTTPMethodLength = 24
@@ -198,19 +200,20 @@ type requestLine struct {
 	domain string
 }
 
-// sniffRequestLine classifies the first line of the buffered stream. Only an
-// HTTP/1 request line counts as HTTP; the HTTP/2 prior-knowledge preface does
-// not, since the HTTP server cannot serve it. A line longer than the buffer
-// counts as HTTP if it opens with a method: other protocols rarely do, and
-// passing a request through would leave it unlogged.
+// sniffRequestLine classifies the first line of the buffered stream. Only a
+// complete HTTP/1 request line counts as HTTP; the HTTP/2 prior-knowledge
+// preface does not, since the HTTP server cannot serve it.
 func sniffRequestLine(reader *bufio.Reader) requestLine {
 	line, complete := peekFirstLine(reader)
+	if !complete {
+		return requestLine{}
+	}
 	method, rest, ok := bytes.Cut(line, []byte(" "))
 	if !ok || !isHTTPMethod(method) {
 		return requestLine{}
 	}
 	target, version, hasVersion := bytes.Cut(rest, []byte(" "))
-	if complete && (!hasVersion || !isHTTP1Version(version)) {
+	if !hasVersion || !isHTTP1Version(version) {
 		return requestLine{}
 	}
 	switch {

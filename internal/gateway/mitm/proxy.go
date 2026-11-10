@@ -481,6 +481,9 @@ func (p *proxy) forward(w http.ResponseWriter, req *http.Request, scheme string)
 		return relayUpgrade(w, outgoing, resp)
 	}
 	copyHeaders(w.Header(), resp.Header)
+	if p.caps.forwardUnchanged {
+		suppressServerAddedHeaders(w.Header())
+	}
 	w.WriteHeader(resp.StatusCode)
 	// Send the head before waiting for the body: an event stream can stay
 	// silent for a long time after it opens, and the client cannot see the
@@ -493,6 +496,17 @@ func (p *proxy) forward(w http.ResponseWriter, req *http.Request, scheme string)
 		ResponseBytes: responseBytes,
 		ContentType:   strings.TrimSpace(resp.Header.Get("Content-Type")),
 	}, nil
+}
+
+// suppressServerAddedHeaders stops the HTTP server from adding a Date or a
+// sniffed Content-Type the upstream response did not carry: a nil value marks
+// the header as present but writes nothing.
+func suppressServerAddedHeaders(header http.Header) {
+	for _, name := range []string{"Date", "Content-Type"} {
+		if _, ok := header[name]; !ok {
+			header[name] = nil
+		}
+	}
 }
 
 func addForwardingHeaders(outgoing *http.Request, remoteAddr string, scheme string) {

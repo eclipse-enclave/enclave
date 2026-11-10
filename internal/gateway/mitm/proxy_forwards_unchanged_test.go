@@ -151,6 +151,27 @@ func TestObservingProxyForwardsEncodedResponseUnchanged(t *testing.T) {
 	}
 }
 
+// An observing proxy adds no Date or sniffed Content-Type to a response
+// whose upstream sent neither.
+func TestObservingProxyAddsNoResponseHeaders(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header()["Date"] = nil
+		w.Header()["Content-Type"] = nil
+		_, _ = io.WriteString(w, "<html>hello</html>")
+	}))
+	defer upstream.Close()
+	p, _ := newUnrestrictedTestProxy(t)
+	p.originalDst = fixedOriginalDestination(t, upstream.Listener.Addr().String())
+
+	resp := exchangeRaw(t, dialPlain(t, serveHTTP(t, p)))
+
+	for _, name := range []string{"Date", "Content-Type"} {
+		if values, ok := resp.Header[name]; ok {
+			t.Errorf("response carries %s %q, which the upstream did not send", name, values)
+		}
+	}
+}
+
 // A slow response is still a response: an observing proxy waits for it as
 // long as a client without a gateway would.
 func TestObservingProxyHasNoResponseHeaderTimeout(t *testing.T) {

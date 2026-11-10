@@ -8,10 +8,12 @@
 package mitm
 
 import (
+	"context"
 	"crypto/tls"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"net/url"
 	"path/filepath"
 	"testing"
@@ -48,7 +50,12 @@ func TestUnrestrictedProxyForwardsAndLogsPlaintextHTTP(t *testing.T) {
 	}
 
 	p, logPath := newUnrestrictedTestProxy(t)
+	dst, err := netip.ParseAddrPort(upstreamURL.Host)
+	if err != nil {
+		t.Fatal(err)
+	}
 	req := httptest.NewRequest(http.MethodGet, upstream.URL+"/path?q=1", nil)
+	req = req.WithContext(context.WithValue(req.Context(), originalDstKey{}, dst))
 	req.Host = upstreamURL.Host
 	recorder := httptest.NewRecorder()
 

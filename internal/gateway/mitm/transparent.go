@@ -17,6 +17,7 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"net/url"
 	"sync"
 	"time"
 
@@ -26,6 +27,10 @@ import (
 // sniffTimeout bounds how long the HTTP frontend waits for a request line
 // before treating the connection as another protocol.
 const sniffTimeout = 10 * time.Second
+
+// maxSniffedLineLength bounds how much of a connection the HTTP frontend
+// buffers to find the end of its first line.
+const maxSniffedLineLength = 4096
 
 // maxHTTPMethodLength is longer than any registered HTTP method.
 const maxHTTPMethodLength = 24
@@ -152,12 +157,14 @@ func (l *sniffListener) Close() error {
 
 func (l *sniffListener) dispatch(conn net.Conn) {
 	dst := l.proxy.originalDestination(conn)
-	reader := bufio.NewReader(conn)
+	reader := bufio.NewReaderSize(conn, maxSniffedLineLength)
 	_ = conn.SetReadDeadline(time.Now().Add(sniffTimeout))
-	isHTTP := startsWithHTTPRequestLine(reader)
+	line := sniffRequestLine(reader)
 	_ = conn.SetReadDeadline(time.Time{})
 
-	if isHTTP {
+	// A request meant for an explicit proxy goes to that proxy as sent. Without
+	// a destination the HTTP server answers it with an error instead.
+	if line.kind == originFormRequest || (line.kind == proxyRequest && !dst.IsValid()) {
 		select {
 		case l.conns <- &sniffedConn{Conn: conn, reader: reader, dst: dst}:
 		case <-l.done:
@@ -171,28 +178,96 @@ func (l *sniffListener) dispatch(conn net.Conn) {
 		target = dst.String()
 	}
 	preface, _ := reader.Peek(reader.Buffered())
-	l.proxy.passThrough(conn, preface, "", 80, target)
+	l.proxy.passThrough(conn, preface, line.domain, 80, target)
 	_ = conn.Close()
 }
 
-// startsWithHTTPRequestLine reports whether the buffered stream opens with an
-// HTTP/1 method followed by a space. The HTTP/2 prior-knowledge preface
-// ("PRI * HTTP/2.0") does not count: the HTTP server cannot serve it.
-func startsWithHTTPRequestLine(reader *bufio.Reader) bool {
-	for n := 1; n <= maxHTTPMethodLength+1; n++ {
-		peeked, err := reader.Peek(n)
-		if err != nil {
-			return false
+type requestLineKind int
+
+const (
+	notHTTP requestLineKind = iota
+	originFormRequest
+	// proxyRequest is a CONNECT or absolute-form request, addressed to an
+	// explicit proxy.
+	proxyRequest
+)
+
+type requestLine struct {
+	kind requestLineKind
+	// domain is the host a proxyRequest asks for.
+	domain string
+}
+
+// sniffRequestLine classifies the first line of the buffered stream. Only an
+// HTTP/1 request line counts as HTTP; the HTTP/2 prior-knowledge preface does
+// not, since the HTTP server cannot serve it. A line longer than the buffer
+// counts as HTTP if it opens with a method: other protocols rarely do, and
+// passing a request through would leave it unlogged.
+func sniffRequestLine(reader *bufio.Reader) requestLine {
+	line, complete := peekFirstLine(reader)
+	method, rest, ok := bytes.Cut(line, []byte(" "))
+	if !ok || !isHTTPMethod(method) {
+		return requestLine{}
+	}
+	target, version, hasVersion := bytes.Cut(rest, []byte(" "))
+	if complete && (!hasVersion || !isHTTP1Version(version)) {
+		return requestLine{}
+	}
+	switch {
+	case string(method) == http.MethodConnect:
+		// A CONNECT target is a bare authority; the slashes make it parse as one.
+		return requestLine{kind: proxyRequest, domain: proxyTargetDomain("//" + string(target))}
+	case len(target) > 0 && target[0] != '/' && target[0] != '*':
+		return requestLine{kind: proxyRequest, domain: proxyTargetDomain(string(target))}
+	}
+	return requestLine{kind: originFormRequest}
+}
+
+// peekFirstLine returns the first line of the buffered stream without its line
+// ending, and whether it ended within the buffer. A stream that ends or stalls
+// first returns nothing.
+func peekFirstLine(reader *bufio.Reader) ([]byte, bool) {
+	for {
+		// Peek blocks until at least one byte more than before is buffered.
+		if _, err := reader.Peek(reader.Buffered() + 1); err != nil {
+			if errors.Is(err, bufio.ErrBufferFull) {
+				peeked, _ := reader.Peek(reader.Buffered())
+				return peeked, false
+			}
+			return nil, false
 		}
-		switch c := peeked[n-1]; {
-		case c == ' ':
-			method := string(peeked[:n-1])
-			return method != "" && method != "PRI"
-		case (c < 'A' || c > 'Z') && c != '-' && c != '_':
+		peeked, _ := reader.Peek(reader.Buffered())
+		if i := bytes.IndexByte(peeked, '\n'); i >= 0 {
+			return bytes.TrimSuffix(peeked[:i], []byte("\r")), true
+		}
+	}
+}
+
+func isHTTPMethod(method []byte) bool {
+	if len(method) == 0 || len(method) > maxHTTPMethodLength {
+		return false
+	}
+	for _, c := range method {
+		if (c < 'A' || c > 'Z') && c != '-' && c != '_' {
 			return false
 		}
 	}
-	return false
+	return true
+}
+
+func isHTTP1Version(version []byte) bool {
+	return len(version) == len("HTTP/1.1") && bytes.HasPrefix(version, []byte("HTTP/1.")) &&
+		version[len(version)-1] >= '0' && version[len(version)-1] <= '9'
+}
+
+// proxyTargetDomain is the host a proxy request target names, or empty when
+// it does not parse.
+func proxyTargetDomain(target string) string {
+	parsed, err := url.Parse(target)
+	if err != nil {
+		return ""
+	}
+	return normalizeHostValue(parsed.Hostname())
 }
 
 // sniffedConn replays the bytes read while sniffing and carries the

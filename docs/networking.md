@@ -44,8 +44,14 @@ mode, with the rule `unrestricted`:
 
 - Plaintext HTTP gets an `http` event per request; HTTPS gets a `tcp` event per
   connection, or an `http` event per request with `--network-log=requests`.
-- TLS without SNI and non-HTTP traffic on these ports are passed through and
-  logged as a `tcp` event without a domain.
+- TLS without SNI and non-HTTP traffic on these ports, meaning anything that
+  does not open with an HTTP/1 request line, are passed through and logged as
+  a `tcp` event without a domain.
+- Requests for an explicit proxy on port 80, such as the `CONNECT` sent for
+  `HTTPS_PROXY=http://proxy:80` or an absolute-form `GET http://host/`, reach
+  that proxy unchanged and are logged as a `tcp` event for the requested host.
+- An HTTP request sent to the gateway's proxy port itself has no destination
+  and gets `400` with the rule `invalid-host`.
 - Everything else passes unlogged: other TCP ports (SSH included), UDP
   (including QUIC/HTTP3 and DNS), and IPv6 web traffic when the gateway cannot
   set up IPv6 NAT. There are no `dns` events, since the gateway does not

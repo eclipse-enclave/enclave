@@ -290,7 +290,7 @@ func (p *proxy) handler(scheme string) http.HandlerFunc {
 				p.logEvent(mismatchEvent)
 			}
 		}
-		if host == "" && !originalDestinationFrom(req.Context()).IsValid() {
+		if !p.hasTarget(req, host) {
 			event.Status = http.StatusBadRequest
 			event.Verdict = netlog.VerdictDeny
 			event.Rule = "invalid-host"
@@ -332,6 +332,17 @@ func (p *proxy) handler(scheme string) http.HandlerFunc {
 		event.Rule = p.passRule()
 		p.logEvent(event)
 	}
+}
+
+// hasTarget reports whether the proxy knows where to send req. A proxy that
+// dials original destinations has none for a request that reached it
+// directly; its Host header may name the proxy itself, so dialling that would
+// loop.
+func (p *proxy) hasTarget(req *http.Request, host string) bool {
+	if originalDestinationFrom(req.Context()).IsValid() {
+		return true
+	}
+	return host != "" && !p.caps.dialOriginalDestination
 }
 
 type forwardResult struct {

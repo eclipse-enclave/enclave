@@ -85,10 +85,15 @@ func serveHTTP(t *testing.T, p *proxy) string {
 	if err != nil {
 		t.Fatal(err)
 	}
+	serveHTTPOn(t, p, listener)
+	return listener.Addr().String()
+}
+
+func serveHTTPOn(t *testing.T, p *proxy, listener net.Listener) {
+	t.Helper()
 	server := p.newHTTPServer()
 	go func() { _ = p.serveHTTP(server, listener) }()
 	t.Cleanup(func() { _ = server.Close() })
-	return listener.Addr().String()
 }
 
 func assertEcho(t *testing.T, conn net.Conn, payload []byte) {

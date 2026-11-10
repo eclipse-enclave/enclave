@@ -292,12 +292,17 @@ Protected Copilot generates the plaintext-storage preference only for saving
 placeholders. After a protected session, ordinary launches restore its configured
 value; an earlier in-tool consent does not override that value. Other settings
 edits are carried over. Leading `//` headers in native Copilot files are accepted;
-comments inside the JSON document are not.
+comments inside the JSON document are not. A managed settings carry-over
+parse failure refuses startup and names the file to fix or remove; see
+[Config-source overlay](runtime/stores.md#config-source-overlay).
 
 The option requires restricted networking. It refuses `--allow-all-network`,
 `--admin`, project auth scope, QEMU, devcontainers, custom base images and tools
-without supported native declarations. Feature auth stores are not mounted; declared env credentials
-such as `GH_TOKEN` continue through their existing release rules.
+without supported native declarations. Theia and Theia Next remain env-only;
+they have no protected native-auth implementation. Feature auth stores,
+including `github-cli`'s, are not mounted. Declared env credentials such as
+`GH_TOKEN` retain their existing release rules, so `gh` remains env-only.
+Git HTTPS Basic authentication is not rewritten, and SSH is not protected.
 
 Ordinary and protected sessions cannot share a config store concurrently. A
 refusal names its holder; different session-store suffixes, tools and projects
@@ -329,7 +334,10 @@ the reservation until removal confirms both the agent and its original gateway
 are gone; uncertain teardown keeps the private files for later cleanup.
 `--ephemeral` uses a fresh gateway-only identity and removes it at that point.
 
-Protection covers declared native fields, not arbitrary files, SSH or host access.
+Protection covers declared native fields, not arbitrary files, SSH or host
+access. Full captures redact known values learned through native API release,
+with the stream and proxy-restart limits in
+[Secrets in captures](networking.md#secrets-in-captures).
 Placeholder JWTs preserve readable claims for client compatibility; claims are
 not confidential. This mode does not add general API-response or WebSocket
 credential filtering.

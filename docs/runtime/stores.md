@@ -65,7 +65,21 @@ new patch or override edits win conflicts.
   upgrading from a version without snapshots, when earlier in-tool edits cannot
   be told apart from old generated values.
 - Merging can drop comments and formatting. A launch without an overlay
-  invalidates the store key's snapshot.
+  invalidates the store key's snapshot, except for the managed setting below.
+
+Protected Copilot generates its plaintext-storage preference before the
+snapshot. Its managed-settings path persists and syncs recovery metadata
+before changing the store, then atomically publishes and syncs the settings
+before the final snapshot. If the final snapshot fails, the earlier recovery
+metadata still distinguishes the managed value on retry. Ordinary restaging
+restores the configured preference, even over earlier in-tool consent, and
+keeps unrelated edits.
+
+First activation with only built-in settings updates the settings file without
+restaging other store contents. The baseline is retained across ordinary
+launches without a config overlay. A managed carry-over parse failure refuses
+startup with a settings path to fix or remove, instead of silently discarding
+edits. This exception does not change ordinary unmanaged overlay fallback.
 
 Source:
 [`internal/runtime/volume_manager.go`](../../internal/runtime/volume_manager.go)
@@ -306,8 +320,9 @@ stopped ephemeral containers, and per-session networks whose session is gone
 ## Native auth exchanges
 
 With `--protect-auth`, only the gateway mounts the canonical auth store. Workloads
-mount private views under `projects/<hash>/<tool>/auth-views/`. Claude and Codex exchanges take the canonical
-hoststore lock across reload, one bounded upstream dispatch and durable commit.
+mount private views under `projects/<hash>/<tool>/auth-views/`. All supported
+native exchanges take the canonical hoststore lock across reload, one bounded
+upstream dispatch and durable commit.
 Native tokens are written before stable placeholder bindings; UID/GID/mode are
 preserved. Bindings contain identifiers, never tokens or exchange history.
 

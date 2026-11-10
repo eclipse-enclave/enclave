@@ -117,7 +117,10 @@ so privileged services need their own.
 `--network-log=full` stores request and response headers, bodies, and
 WebSocket messages on the host. Captures replace known released values with
 placeholders, but prompts, file contents, and credentials without a release
-rule are stored as sent. See [Full capture](../networking.md#full-capture).
+rule are stored as sent. Native values are learned on API release, not loaded
+from all credential files at capture startup. Already-open HTTP body streams
+and echoes after a proxy restart before the next release can miss redaction.
+See [Full capture](../networking.md#full-capture).
 
 ## Secrets
 

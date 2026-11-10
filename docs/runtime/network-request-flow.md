@@ -61,6 +61,10 @@ sequenceDiagram
                 Proxy->>Proxy: Commit native tokens, then bindings; unlock
                 Proxy-->>Tool: Allowlisted reply with placeholders
             else Ordinary API request
+                Proxy->>Proxy: Releases(req): read current canonical values
+                opt network_log=full
+                    Proxy->>Cap: Learn current native release values
+                end
                 opt network_log=full
                     Proxy->>Proxy: Snapshot request with its placeholders
                 end
@@ -120,6 +124,11 @@ sequenceDiagram
    adds a `session` marker. What each mode records is in
    [Coverage and granularity](../networking.md#coverage-and-granularity).
 
+Declared native exchanges are intercepted before capture and are not stored.
+For ordinary API requests, the proxy reads native release rules, teaches their
+values to the capture redactor, snapshots the original placeholders, then
+rewrites headers and forwards. Refused requests produce no capture record.
+
 In `full` mode the proxy snapshots each relayed request before header release
 and stores it with the response under `logs/capture/<session>/`; its `http`
 event carries `capture_id`. WebSocket messages are also stored, with an open
@@ -130,7 +139,9 @@ record readable from the handshake. See [Full capture](../networking.md#full-cap
 - Real values of mapped credentials never appear in the tool container's
   environment. Release is header-based and covers only declared credentials
   with a release rule in the selected tool or enabled features. Opt-in protected
-  Claude additionally mediates its declared native credential fields.
+  native auth additionally mediates declared fields for Claude, Codex, Pi,
+  OpenCode and Copilot. Feature auth stores are not mounted; gh stays env-only.
+  Git HTTPS Basic authentication is not rewritten and SSH is not protected.
 - DNS, firewall and ipset, and proxy all check egress; reload and startup
   failures fail closed.
 - The log is tagged by session and rotated at session start, never truncated

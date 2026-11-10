@@ -226,9 +226,16 @@ func TestCopilotNativePathGuardKeepsEnvRelease(t *testing.T) {
 				status                              int
 			}{
 				{http.MethodGet, "https://api.github.com/copilot_internal/user", "Authorization", native, "", map[string]int{"copilot": 204, "opencode": 403}[tool]},
+				{http.MethodGet, "https://api.github.com/copilot_internal/managed_settings", "Authorization", native, "", map[string]int{"copilot": 204, "opencode": 403}[tool]},
+				{http.MethodGet, "https://api.github.com/copilot_internal/team_customizations", "Authorization", native, "", map[string]int{"copilot": 204, "opencode": 403}[tool]},
+				{http.MethodGet, "https://api.github.com/copilot_internal/managed_settings?client_id=github%2Fcli&client_version=1.0.109&copilot_runtime_version=1.0.109", "Authorization", native, "", map[string]int{"copilot": 204, "opencode": 403}[tool]},
+				{http.MethodPost, "https://api.github.com/copilot_internal/managed_settings", "Authorization", native, "", 403},
+				{http.MethodGet, "https://api.github.com/copilot_internal/team_customizations/", "Authorization", native, "", 403},
+				{http.MethodGet, "https://api.github.com/repos/github/copilot-cli/releases?per_page=100", "Authorization", native, "", 403},
+				{http.MethodGet, "https://api.github.com/copilot_internal/team_customizations?x=1", "Authorization", native, "", map[string]int{"copilot": 204, "opencode": 403}[tool]},
 				{http.MethodGet, "https://api.github.com/user", "Authorization", native, "", 403},
 				{http.MethodPost, "https://api.github.com/copilot_internal/v2/token", "Authorization", native, "", 403},
-				{http.MethodGet, "https://api.github.com/copilot_internal/user?x=1", "Authorization", native, "", 403},
+				{http.MethodGet, "https://api.github.com/copilot_internal/user?x=1", "Authorization", native, "", map[string]int{"copilot": 204, "opencode": 403}[tool]},
 				{http.MethodGet, "https://api.github.com/copilot_internal/user", "Authorization", native, "native-body", 403},
 				{http.MethodPost, "https://api.githubcopilot.com/chat/completions", "Authorization", native, "", 204},
 				{http.MethodPost, "https://api.githubcopilot.com/chat/completions", "X-Debug", native, "", 403},

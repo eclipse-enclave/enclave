@@ -8,19 +8,190 @@
 package runtime
 
 import (
+	"context"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/BurntSushi/toml"
 
 	"enclave/internal/backend"
+	backenddocker "enclave/internal/backend/docker"
+	"enclave/internal/backend/hoststore"
 	"enclave/internal/config"
 	"enclave/internal/model"
 )
+
+func TestCopilotConsentAcrossFullSettingsCarryover(t *testing.T) {
+	if _, err := exec.LookPath("jq"); err != nil {
+		t.Skip("Copilot setup needs jq")
+	}
+	paths := model.Paths{ToolsDir: filepath.Join("..", "..", "extensions", "tools")}
+	profile, err := config.LoadProfile(paths, "copilot")
+	if err != nil {
+		t.Fatal(err)
+	}
+	template, err := os.ReadFile(filepath.Join(paths.ToolsDir, "copilot", "templates", "settings.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	script, err := os.ReadFile(filepath.Join(paths.ToolsDir, "copilot", "entrypoint.d", "setup.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, configured := range []string{"template", "template-clean", "template-prior-consent", "false", "true", "absent", "change"} {
+		t.Run(configured, func(t *testing.T) {
+			t.Setenv("XDG_STATE_HOME", t.TempDir())
+			r := newTemplateOverrideRuntime(t.TempDir(), profile)
+			r.host.UID, r.host.GID = strconv.Itoa(os.Getuid()), strconv.Itoa(os.Getgid())
+			r.project.Hash, r.run.Persist = "abc123abc123", true
+			writeBuiltInToolTemplate(t, r, string(template))
+			var want any = false
+			if !strings.HasPrefix(configured, "template") {
+				input := `{"model":"auto"}`
+				want = nil
+				if configured == "change" {
+					input, want = `{"model":"auto","storeTokenPlaintext":false}`, false
+				} else if configured != "absent" {
+					input = `{"model":"auto","storeTokenPlaintext":` + configured + `}`
+					want = configured == "true"
+				}
+				writeRuntimeTestFile(t, filepath.Join(config.HostToolConfigDir(r.host.Home, "copilot"), "settings.json"), input)
+			}
+			b := backenddocker.New(backenddocker.Options{Host: r.host})
+			shellHome := t.TempDir()
+			for i, protected := range []bool{false, true, false, false, true, false} {
+				r.run.ProtectAuth = protected
+				if i == 5 && strings.HasPrefix(configured, "template") {
+					var next map[string]any
+					_ = json.Unmarshal(template, &next)
+					next["memory"] = true
+					data, _ := json.Marshal(next)
+					writeBuiltInToolTemplate(t, r, string(data))
+				}
+				if configured == "change" && (i == 2 || i == 5) {
+					want = i == 2
+					data, _ := json.Marshal(map[string]any{"model": "auto", "storeTokenPlaintext": want})
+					writeRuntimeTestFile(t, filepath.Join(config.HostToolConfigDir(r.host.Home, "copilot"), "settings.json"), string(data))
+				}
+				if err := r.prepareToolConfigSource(); err != nil {
+					t.Fatal(err)
+				}
+				prep, stores := newVolumeManager(r).BuildPrep("")
+				if _, err := b.PrepareStores(context.Background(), prep); err != nil {
+					t.Fatal(err)
+				}
+				store := hoststore.Dir(r.host.Home, stores.Config.Key, stores.Config.Kind)
+				settings := filepath.Join(store, "settings.json")
+				if _, err := os.Stat(settings); os.IsNotExist(err) {
+					// entrypoint.sh seeds the template only when settings are absent.
+					if err := os.WriteFile(settings, template, 0o600); err != nil {
+						t.Fatal(err)
+					}
+				}
+				if i == 0 {
+					if err := os.Symlink(store, filepath.Join(shellHome, ".copilot")); err != nil {
+						t.Fatal(err)
+					}
+				}
+				mode := ""
+				if protected {
+					mode = "config.json:create:"
+				}
+				cmd := exec.Command("bash", "-c", string(script))
+				cmd.Env = []string{"HOME=" + shellHome, "PATH=" + os.Getenv("PATH"), "ENCLAVE_YOLO=0", "ENCLAVE_NATIVE_AUTH_OPS=" + mode}
+				if out, err := cmd.CombinedOutput(); err != nil {
+					t.Fatalf("setup: %v: %s", err, out)
+				}
+				data, err := os.ReadFile(settings)
+				var got map[string]any
+				if err != nil || json.Unmarshal(data, &got) != nil {
+					t.Fatal("cannot read store settings", err)
+				}
+				expected := want
+				if protected {
+					expected = true
+				}
+				if got["storeTokenPlaintext"] != expected {
+					t.Errorf("launch %d protected=%v plaintext=%v want=%v", i, protected, got["storeTokenPlaintext"], expected)
+				}
+				if i > 0 && configured != "template-clean" && got["model"] != "tool-edit" {
+					t.Fatal("unrelated in-tool settings edit lost")
+				}
+				if strings.HasPrefix(configured, "template") {
+					unmanaged := filepath.Join(store, "unmanaged-state.txt")
+					if i == 0 {
+						writeRuntimeTestFile(t, unmanaged, "keep unrelated default-store state")
+					} else if data, err := os.ReadFile(unmanaged); err != nil || string(data) != "keep unrelated default-store state" {
+						t.Fatal("default-only settings activation deleted unrelated state", err)
+					}
+					if i == 5 && got["memory"] != true {
+						t.Fatal("later template update did not reach ordinary settings")
+					}
+				}
+				if i == 0 {
+					if configured != "template-clean" {
+						got["model"] = "tool-edit"
+					}
+					if configured == "template-prior-consent" {
+						got["storeTokenPlaintext"] = true
+					}
+					data, _ = json.Marshal(got)
+					if err := os.WriteFile(settings, append([]byte("// client settings header\n"), data...), 0o600); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestProtectedCopilotGeneratedSettingsValidation(t *testing.T) {
+	profile, err := config.LoadProfile(model.Paths{ToolsDir: filepath.Join("..", "..", "extensions", "tools")}, "copilot")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name, input string
+		wantError   bool
+	}{
+		{"JSON", `{"storeTokenPlaintext":false,"large":12345678901234567890}`, false},
+		{"JSONC", "// settings header\n{\"model\":\"auto\"}", false},
+		{"malformed", "{invalid", true},
+		{"array", "[]", true},
+		{"null", "null", true},
+		{"multiple documents", "{}\n{}", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := newTemplateOverrideRuntime(t.TempDir(), profile)
+			r.run.ProtectAuth = true
+			writeBuiltInToolTemplate(t, r, tc.input)
+			err := r.prepareToolConfigSource()
+			if (err != nil) != tc.wantError {
+				t.Fatalf("prepare error = %v, wantError = %v", err, tc.wantError)
+			}
+			source := filepath.Join(r.paths.ToolsDir, "copilot", "templates", "settings.json")
+			if data, err := os.ReadFile(source); err != nil || string(data) != tc.input {
+				t.Fatal("generated override changed the source template", err)
+			}
+			if !tc.wantError {
+				data, err := os.ReadFile(filepath.Join(r.configSourceDir, "settings.json"))
+				var got map[string]json.RawMessage
+				if err != nil || json.Unmarshal(data, &got) != nil || string(got["storeTokenPlaintext"]) != "true" {
+					t.Fatal("missing protected generated override", err)
+				}
+				if tc.name == "JSON" && string(got["large"]) != "12345678901234567890" {
+					t.Fatal("settings override changed an unrelated numeric value")
+				}
+			}
+		})
+	}
+}
 
 func TestAddToolSettingsTemplate(t *testing.T) {
 	t.Parallel()

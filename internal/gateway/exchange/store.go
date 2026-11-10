@@ -168,7 +168,7 @@ func (s *Store) releases(req *http.Request) ([]model.SecretReleaseEntry, error) 
 	if !MarkedHeaders(headers) {
 		return nil, nil
 	}
-	if s.provider.TokenEndpoint.Host == "github.com" && endpointHost(req) == "api.github.com" && !copilotUserRequest(req) {
+	if s.provider.TokenEndpoint.Host == "github.com" && endpointHost(req) == "api.github.com" && !copilotAPIRequest(req) {
 		return nil, nil
 	}
 	ctx, cancel := context.WithTimeout(req.Context(), s.timeout)

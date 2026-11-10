@@ -15,7 +15,6 @@ import (
 	"testing"
 	"time"
 
-	"enclave/internal/config"
 	"enclave/internal/model"
 	yaruntime "enclave/internal/runtime"
 )
@@ -517,49 +516,5 @@ func TestOverlayConfigDirPreservesSessionsBesideAuth(t *testing.T) {
 	}
 	if string(authBytes) != `{"token":"keep"}` {
 		t.Fatalf("unexpected preserved auth content: %s", string(authBytes))
-	}
-}
-
-func TestCopilotOrdinaryOverlayRestoresConfiguredPlaintextPreference(t *testing.T) {
-	requireJQ(t)
-	toolDir := filepath.Join("..", "..", "..", "extensions", "tools")
-	profile, err := config.LoadProfile(model.Paths{ToolsDir: toolDir}, "copilot")
-	if err != nil {
-		t.Fatal(err)
-	}
-	template, err := os.ReadFile(filepath.Join(toolDir, "copilot", "templates", "settings.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	source, home := t.TempDir(), t.TempDir()
-	target := filepath.Join(home, ".copilot")
-	if err := os.WriteFile(filepath.Join(source, "settings.json"), template, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	script, err := os.ReadFile(filepath.Join(toolDir, "copilot", "entrypoint.d", "setup.sh"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, mode := range []string{"config.json:create:", ""} {
-		if err := overlayConfigDir(target, source, yaruntime.ConfigSourcePreservePaths(profile)); err != nil {
-			t.Fatal(err)
-		}
-		cmd := exec.Command("bash", "-c", string(script))
-		cmd.Env = []string{"HOME=" + home, "PATH=" + os.Getenv("PATH"), "ENCLAVE_YOLO=0", "ENCLAVE_NATIVE_AUTH_OPS=" + mode}
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("Copilot setup: %v: %s", err, out)
-		}
-		data, err := os.ReadFile(filepath.Join(target, "settings.json"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		var settings map[string]any
-		if err := json.Unmarshal(data, &settings); err != nil || settings["storeTokenPlaintext"] != (mode != "") {
-			t.Fatal("protected plaintext preference persisted into ordinary launch", err)
-		}
-		original, err := os.ReadFile(filepath.Join(source, "settings.json"))
-		if err != nil || string(original) != string(template) {
-			t.Fatal("setup changed the configured source", err)
-		}
 	}
 }

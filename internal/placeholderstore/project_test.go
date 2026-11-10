@@ -512,7 +512,7 @@ func TestCopilotNativeAccountRefusals(t *testing.T) {
 	}
 }
 
-func TestCopilotNativeHeadersAreNotProjectedOrKept(t *testing.T) {
+func TestCopilotNativeHeaderParsingAndProjection(t *testing.T) {
 	file := model.AuthFileSecret{File: "config.json", Codec: "copilot-config", Fields: []model.AuthSecretField{{Pointer: "/authTokens/*/token", Kind: "access", Release: "native"}}}
 	profile := model.Profile{Providers: []model.ProviderConfig{{Name: "github", AuthSecrets: []model.AuthFileSecret{file}}}, Secrets: map[string]model.SecretConfig{"native": {Release: &model.SecretReleaseConfig{HTTP: &model.HTTPSecretReleaseConfig{Hosts: []string{"api.githubcopilot.com"}, Header: "Authorization", Format: "Bearer %s"}}}}}
 	const source = "// native header with synthetic-comment-value\n  // another header\r\n" + `{"authTokens":{"https://github.com:fixture:github":{"token":"synthetic-native-token"}}}`
@@ -531,7 +531,7 @@ func TestCopilotNativeHeadersAreNotProjectedOrKept(t *testing.T) {
 	}
 	configDir := t.TempDir()
 	nativeFile(t, configDir, file.File, "// untrusted header\n"+string(data))
-	if _, err := ClassifyNative(configDir, "/auth", profile, view.Bindings, nil, false); err == nil {
-		t.Fatal("unprojected comment bytes were kept in a regular native path")
+	if ops, err := ClassifyNative(configDir, "/auth", profile, view.Bindings, nil, false); err != nil || len(ops) != 1 || ops[0].Verb != "keep" {
+		t.Fatal("leading client header prevented strict native classification", err)
 	}
 }

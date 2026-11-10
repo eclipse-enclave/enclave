@@ -20,6 +20,7 @@ import (
 	"strings"
 
 	"github.com/BurntSushi/toml"
+	"github.com/tidwall/jsonc"
 
 	"enclave/internal/backend"
 	"enclave/internal/logx"
@@ -50,7 +51,13 @@ func OverlayConfigSettings(home string, key backend.StoreKey, storeDir string, s
 		return err
 	}
 	generated, generatedMode, generatedOK := readSettingsFile(generatedPath, "generated")
+	if len(spec.SettingsBase) > 0 && !generatedOK {
+		return fmt.Errorf("managed settings source is missing or unreadable")
+	}
 	base, _, baseOK := readSettingsFile(basePath, "snapshot")
+	if !baseOK && len(spec.SettingsBase) > 0 {
+		base, baseOK = spec.SettingsBase, true
+	}
 	var store []byte
 	var storeOK bool
 	if storePath != "" {
@@ -61,28 +68,36 @@ func OverlayConfigSettings(home string, key backend.StoreKey, storeDir string, s
 	if generatedOK && baseOK && storeOK {
 		merged, err = mergeSettingsFile(base, store, generated, filepath.Ext(spec.SettingsPath))
 		if err != nil {
+			if len(spec.SettingsBase) > 0 {
+				return fmt.Errorf("merge managed settings: %w", err)
+			}
 			logx.Warnf("Cannot carry in-tool settings edits for %s: %v; using generated settings", spec.SettingsPath, err)
 			merged = nil
 		}
+	}
+	if generatedOK && len(spec.SettingsBase) > 0 && merged == nil {
+		merged = generated
 	}
 	// Invalidate before touching the store. If a later step fails, the next
 	// launch has no base and cannot mistake generated state for a tool edit.
 	if err := removeSettingsBase(basePath); err != nil {
 		return err
 	}
-	if err := overlay(); err != nil {
-		return err
+	if len(spec.SettingsBase) == 0 {
+		if err := overlay(); err != nil {
+			return err
+		}
 	}
-	if merged != nil && !bytes.Equal(merged, generated) {
+	if merged != nil && (len(spec.SettingsBase) > 0 || !bytes.Equal(merged, generated)) {
 		storePath, err = settingsPath(storeDir, spec.SettingsPath)
 		if err != nil {
 			return err
 		}
 		info, statErr := os.Lstat(storePath)
-		if statErr != nil {
+		if statErr != nil && (len(spec.SettingsBase) == 0 || !errors.Is(statErr, os.ErrNotExist)) {
 			return fmt.Errorf("stat overlaid settings %s: %w", storePath, statErr)
 		}
-		if !info.Mode().IsRegular() {
+		if info != nil && !info.Mode().IsRegular() {
 			return fmt.Errorf("overlaid settings path %s is not a regular file", storePath)
 		}
 		if err := util.WriteFileAtomic(storePath, merged, generatedMode); err != nil {
@@ -155,7 +170,7 @@ func mergeSettingsFile(base []byte, store []byte, generated []byte, ext string) 
 		switch strings.ToLower(ext) {
 		case ".json":
 			var value any
-			decoder := json.NewDecoder(bytes.NewReader(data))
+			decoder := json.NewDecoder(bytes.NewReader(jsonc.ToJSON(data)))
 			decoder.UseNumber()
 			if err := decoder.Decode(&value); err != nil {
 				return nil, err

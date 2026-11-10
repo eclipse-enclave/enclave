@@ -278,13 +278,21 @@ Copilot CLI protects GitHub.com device logins. Other native providers, including
 GitHub Enterprise, refuse the protected start. Ordinary mode is unchanged.
 
 Native Copilot grants can reach `*.githubcopilot.com`; Copilot CLI also permits
-only `GET /copilot_internal/user` on `api.github.com`, without query or body.
-Other GitHub API paths and OAuth flows refuse native placeholders. Configured
+`GET` on the exact paths `/copilot_internal/user`,
+`/copilot_internal/managed_settings` and `/copilot_internal/team_customizations`
+on `api.github.com`, with query strings allowed but no body or trailers.
+Other GitHub API paths, including the optional Copilot CLI release check, and
+unsupported OAuth flows refuse native placeholders. Configured
 `GH_TOKEN` and `COPILOT_GITHUB_TOKEN` env releases retain their existing rules.
 Device polling preserves `authorization_pending`, `slow_down` and valid intervals.
 A Copilot CLI login fills its account key from that fixed user endpoint; if that
 lookup fails, start a fresh device login. Inconsistent native account aliases
 refuse rather than being repaired.
+Protected Copilot generates the plaintext-storage preference only for saving
+placeholders. After a protected session, ordinary launches restore its configured
+value; an earlier in-tool consent does not override that value. Other settings
+edits are carried over. Leading `//` headers in native Copilot files are accepted;
+comments inside the JSON document are not.
 
 The option requires restricted networking. It refuses `--allow-all-network`,
 `--admin`, project auth scope, QEMU, devcontainers, custom base images and tools

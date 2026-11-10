@@ -21,7 +21,6 @@ import (
 	"strings"
 	"time"
 
-	"enclave/internal/auth"
 	"enclave/internal/model"
 )
 
@@ -154,7 +153,7 @@ func (b *Bindings) Bind(provider, file, pointer, kind string, shape *model.Secre
 			}
 			shape = &copy
 		}
-		binding.Placeholder, err = auth.NewPlaceholderResolver().ResolvePlaceholder(pointer, shape)
+		binding.Placeholder, err = model.NewSecretPlaceholder(shape)
 	}
 	if err != nil {
 		return binding, err

@@ -18,7 +18,7 @@ func TestResolvePlaceholder(t *testing.T) {
 	for _, encoding := range []string{"", "hex", "base64url", "alphanumeric"} {
 		t.Run(encoding, func(t *testing.T) {
 			var shape *model.SecretPlaceholderConfig
-			prefix, suffix, alphabet, length := placeholderPrefix, "", "0123456789abcdef", 48
+			prefix, suffix, alphabet, length := model.SecretPlaceholderMarker, "", "0123456789abcdef", 48
 			if encoding != "" {
 				shape = &model.SecretPlaceholderConfig{Prefix: "vendor_", Suffix: "_end", Random: model.SecretPlaceholderRandom{Encoding: encoding, Length: 48}}
 				prefix, suffix = shape.Prefix, shape.Suffix

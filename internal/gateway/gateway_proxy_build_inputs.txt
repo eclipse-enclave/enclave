@@ -4,7 +4,6 @@ go.mod
 go.sum
 cmd/enclave-gateway-proxy
 internal/appassets
-internal/auth
 internal/config
 internal/domainpattern
 internal/gateway/bundle
@@ -21,4 +20,3 @@ internal/network
 internal/placeholderstore
 internal/secretfile
 internal/util
-internal/backend

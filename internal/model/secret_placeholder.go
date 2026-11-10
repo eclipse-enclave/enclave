@@ -7,7 +7,12 @@
 
 package model
 
-import "fmt"
+import (
+	"crypto/rand"
+	"encoding/hex"
+	"fmt"
+	"math/big"
+)
 
 const SecretPlaceholderMarker = "ENCLAVE_SECRET_" // #nosec G101 -- recognition marker, not a credential.
 
@@ -62,4 +67,29 @@ func ValidateSecretLiteral(literal string, subject string) error {
 		}
 	}
 	return nil
+}
+
+// NewSecretPlaceholder generates an independent opaque credential substitute.
+func NewSecretPlaceholder(shape *SecretPlaceholderConfig) (string, error) {
+	if shape != nil {
+		alphabet, err := shape.ValidatedAlphabet()
+		if err != nil {
+			return "", err
+		}
+		body := make([]byte, shape.Random.Length)
+		bound := big.NewInt(int64(len(alphabet)))
+		for i := range body {
+			n, err := rand.Int(rand.Reader, bound)
+			if err != nil {
+				return "", fmt.Errorf("generate placeholder entropy: %w", err)
+			}
+			body[i] = alphabet[n.Int64()]
+		}
+		return shape.Prefix + string(body) + shape.Suffix, nil
+	}
+	entropy := make([]byte, 24)
+	if _, err := rand.Read(entropy); err != nil {
+		return "", fmt.Errorf("generate placeholder entropy: %w", err)
+	}
+	return SecretPlaceholderMarker + hex.EncodeToString(entropy), nil
 }

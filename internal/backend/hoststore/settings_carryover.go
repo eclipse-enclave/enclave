@@ -55,7 +55,7 @@ func OverlayConfigSettings(home string, key backend.StoreKey, storeDir string, s
 		return fmt.Errorf("managed settings source is missing or unreadable")
 	}
 	base, _, baseOK := readSettingsFile(basePath, "snapshot")
-	if !baseOK && len(spec.SettingsBase) > 0 {
+	if !baseOK && spec.SettingsOnly {
 		base, baseOK = spec.SettingsBase, true
 	}
 	var store []byte
@@ -69,32 +69,50 @@ func OverlayConfigSettings(home string, key backend.StoreKey, storeDir string, s
 		merged, err = mergeSettingsFile(base, store, generated, filepath.Ext(spec.SettingsPath))
 		if err != nil {
 			if len(spec.SettingsBase) > 0 {
-				return fmt.Errorf("merge managed settings: %w", err)
+				return fmt.Errorf("fix or remove config-store settings %s: %w", storePath, err)
 			}
 			logx.Warnf("Cannot carry in-tool settings edits for %s: %v; using generated settings", spec.SettingsPath, err)
 			merged = nil
 		}
 	}
-	if generatedOK && len(spec.SettingsBase) > 0 && merged == nil {
+	if generatedOK && spec.SettingsOnly && merged == nil {
 		merged = generated
 	}
-	// Invalidate before touching the store. If a later step fails, the next
-	// launch has no base and cannot mistake generated state for a tool edit.
-	if err := removeSettingsBase(basePath); err != nil {
+	if len(spec.SettingsBase) > 0 {
+		// Keep the old baseline except runtime-owned overrides. Persist it before
+		// those overrides can reach the store, including during a failed overlay.
+		seed := base
+		if !baseOK {
+			seed = spec.SettingsBase
+		}
+		intent, err := mergeSettingsFile(spec.SettingsBase, seed, generated, filepath.Ext(spec.SettingsPath))
+		if err != nil {
+			return fmt.Errorf("prepare settings recovery: %w", err)
+		}
+		if err := os.MkdirAll(filepath.Dir(basePath), 0o700); err != nil {
+			return err
+		}
+		if err := util.WriteFileAtomic(basePath, intent, 0o600); err != nil {
+			return err
+		}
+		if err := util.SyncDir(filepath.Dir(basePath)); err != nil {
+			return err
+		}
+	} else if err := removeSettingsBase(basePath); err != nil {
 		return err
 	}
-	if len(spec.SettingsBase) == 0 {
+	if !spec.SettingsOnly {
 		if err := overlay(); err != nil {
 			return err
 		}
 	}
-	if merged != nil && (len(spec.SettingsBase) > 0 || !bytes.Equal(merged, generated)) {
+	if merged != nil && (spec.SettingsOnly || !bytes.Equal(merged, generated)) {
 		storePath, err = settingsPath(storeDir, spec.SettingsPath)
 		if err != nil {
 			return err
 		}
 		info, statErr := os.Lstat(storePath)
-		if statErr != nil && (len(spec.SettingsBase) == 0 || !errors.Is(statErr, os.ErrNotExist)) {
+		if statErr != nil && (!spec.SettingsOnly || !errors.Is(statErr, os.ErrNotExist)) {
 			return fmt.Errorf("stat overlaid settings %s: %w", storePath, statErr)
 		}
 		if info != nil && !info.Mode().IsRegular() {

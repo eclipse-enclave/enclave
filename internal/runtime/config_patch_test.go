@@ -151,6 +151,46 @@ func TestCopilotConsentAcrossFullSettingsCarryover(t *testing.T) {
 	}
 }
 
+func TestProtectedCopilotSnapshotFailureCannotPublishConsent(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("permission failure requires an unprivileged user")
+	}
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	profile, err := config.LoadProfile(model.Paths{ToolsDir: filepath.Join("..", "..", "extensions", "tools")}, "copilot")
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := newTemplateOverrideRuntime(t.TempDir(), profile)
+	r.host.UID, r.host.GID = strconv.Itoa(os.Getuid()), strconv.Itoa(os.Getgid())
+	r.project.Hash, r.run.Persist = "abc123abc123", true
+	writeBuiltInToolTemplate(t, r, `{"storeTokenPlaintext":false}`)
+	b := backenddocker.New(backenddocker.Options{Host: r.host})
+	prep, stores := newVolumeManager(r).BuildPrep("")
+	if _, err := b.PrepareStores(context.Background(), prep); err != nil {
+		t.Fatal(err)
+	}
+	settings := filepath.Join(hoststore.Dir(r.host.Home, stores.Config.Key, stores.Config.Kind), "settings.json")
+	const original = `{"storeTokenPlaintext":false,"model":"keep"}`
+	writeRuntimeTestFile(t, settings, original)
+	r.run.ProtectAuth = true
+	if err := r.prepareToolConfigSource(); err != nil {
+		t.Fatal(err)
+	}
+	base := config.HostStoreConfigBasePath(r.host.Home, "copilot", r.project.Hash, "default")
+	parent := filepath.Dir(filepath.Dir(base))
+	if err := os.Chmod(parent, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chmod(parent, 0o700) }()
+	prep, _ = newVolumeManager(r).BuildPrep("")
+	if _, err := b.PrepareStores(context.Background(), prep); err == nil {
+		t.Error("protected settings published without a durable recovery baseline")
+	}
+	if data, err := os.ReadFile(settings); err != nil || string(data) != original {
+		t.Fatal("failed snapshot changed the ordinary plaintext preference", err)
+	}
+}
+
 func TestProtectedCopilotGeneratedSettingsValidation(t *testing.T) {
 	profile, err := config.LoadProfile(model.Paths{ToolsDir: filepath.Join("..", "..", "extensions", "tools")}, "copilot")
 	if err != nil {

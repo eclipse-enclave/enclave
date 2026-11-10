@@ -48,6 +48,7 @@ func (r *Runtime) prepareToolConfigSource() error {
 		return nil
 	}
 	r.configSettingsBase = nil
+	r.configSettingsOnly = copilot && !regularSource
 
 	globalConfigDir := config.HostToolConfigDir(r.host.Home, r.profile.Name)
 	projectConfigDir := config.HostProjectConfigDir(r.host.Home, r.project.Hash, r.profile.Name)
@@ -72,9 +73,7 @@ func (r *Runtime) prepareToolConfigSource() error {
 		if err != nil {
 			return err
 		}
-		if !regularSource {
-			r.configSettingsBase = data
-		}
+		r.configSettingsBase = data
 		if !r.run.ProtectAuth {
 			return nil
 		}
@@ -82,11 +81,10 @@ func (r *Runtime) prepareToolConfigSource() error {
 		if err := json.Unmarshal(jsonc.ToJSON(data), &settings); err != nil || settings == nil {
 			return fmt.Errorf("protected Copilot settings must be a JSON object")
 		}
+		delete(settings, "storeTokenPlaintext")
+		r.configSettingsBase, _ = json.Marshal(settings)
 		settings["storeTokenPlaintext"] = json.RawMessage("true")
-		data, err = json.MarshalIndent(settings, "", "  ")
-		if err != nil {
-			return err
-		}
+		data, _ = json.MarshalIndent(settings, "", "  ")
 		return util.WriteFileAtomic(settingsPath, data, 0o600)
 	}); err != nil {
 		return fmt.Errorf("prepare config source for %s: %w", r.profile.Name, err)
@@ -175,7 +173,7 @@ func (r *Runtime) shouldMountToolConfigSource() bool {
 }
 
 func (r *Runtime) toolConfigSourceHandlesSkills() bool {
-	return r.configSourceDir != "" && len(r.configSettingsBase) == 0 && strings.TrimSpace(r.profile.SkillsDir) != ""
+	return r.configSourceDir != "" && !r.configSettingsOnly && strings.TrimSpace(r.profile.SkillsDir) != ""
 }
 
 func (r *Runtime) composeGeneratedConfigDir(targetDir string, globalConfigDir string, projectConfigDir string) error {

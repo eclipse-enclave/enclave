@@ -68,7 +68,7 @@ func fixture(t *testing.T, existing bool) (*Store, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s.seenFingerprint = native.Fingerprint
+	s.seenFingerprint.Store(native.Fingerprint)
 	for _, b := range view.Bindings.Bindings {
 		if b.Kind == "refresh" {
 			return s, b.Placeholder
@@ -146,7 +146,7 @@ func TestSiblingDedupDoesNotPreventExplicitEarlyRefresh(t *testing.T) {
 		t.Fatal(err)
 	}
 	sibling.now = first.now
-	sibling.seenFingerprint = first.seenFingerprint
+	sibling.seenFingerprint.Store(first.seenFingerprint.Load())
 	calls := 0
 	transport := roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		calls++
@@ -196,7 +196,7 @@ func TestConcurrentGatewaysDispatchOnlyOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	second.now = first.now
-	second.seenFingerprint = first.seenFingerprint
+	second.seenFingerprint.Store(first.seenFingerprint.Load())
 	var calls atomic.Int32
 	transport := roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		calls.Add(1)
@@ -552,4 +552,20 @@ func TestReflectedMetadataNeverBecomesReplayCredentialStorage(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestConcurrentRequestsShareOneGatewayFingerprint(t *testing.T) {
+	s, refresh := fixture(t, true)
+	s.transport = roundTripFunc(func(*http.Request) (*http.Response, error) { return tokenResponse(`,"expires_in":600`), nil })
+	var wg sync.WaitGroup
+	for range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if resp, _ := invoke(t, s, "refresh_token", refresh); resp.StatusCode != 200 {
+				t.Error("concurrent gateway request failed")
+			}
+		}()
+	}
+	wg.Wait()
 }

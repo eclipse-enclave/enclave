@@ -14,6 +14,7 @@ import (
 	"io/fs"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"enclave/internal/domainpattern"
@@ -30,7 +31,7 @@ type Store struct {
 	now                    func() time.Time
 	timeout                time.Duration
 	env                    []model.SecretReleaseEntry
-	seenFingerprint        string // protected by the canonical file lock
+	seenFingerprint        atomic.Value // stores only a fingerprint string
 }
 
 func New(config Config, dir, lockPath, session string, env []model.SecretReleaseEntry) (*Store, error) {

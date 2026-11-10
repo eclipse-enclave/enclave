@@ -8,9 +8,11 @@
 package gateway
 
 import (
+	"enclave/internal/model"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -285,5 +287,47 @@ func TestGatewayFirewallLockdownClosesInbound(t *testing.T) {
 				t.Fatalf("%s input verdict after lockdown = %s for %+v", engine, got, packet)
 			}
 		}
+	}
+}
+
+func TestProtectedProxyExemptionUsesItsDistinctPrimaryGroup(t *testing.T) {
+	for _, protected := range []bool{false, true} {
+		t.Run(strconv.FormatBool(protected), func(t *testing.T) {
+			nativeConfig := ""
+			expectedMatch, expectedID := "--uid-owner", "1000"
+			if protected {
+				nativeConfig = "/native-config"
+				expectedMatch, expectedID = "--gid-owner", "102"
+			}
+			calls, err := runGatewayFirewall(t, `id() {
+    case "$1:$2" in
+      -u:gateway) echo 1000 ;;
+      -g:gateway) echo 102 ;;
+      *) echo 53 ;;
+    esac
+  }
+  setup_firewall`, model.EnvNativeAuthConfig+"="+nativeConfig)
+			if err != nil {
+				t.Fatal(err)
+			}
+			exemptions := 0
+			for _, call := range calls {
+				args := call.args
+				if call.engine != "iptables" || len(args) < 2 || args[0] != "-t" || args[1] != "nat" || args[len(args)-1] != "RETURN" {
+					continue
+				}
+				for i, arg := range args {
+					if arg == "--uid-owner" || arg == "--gid-owner" {
+						if arg != expectedMatch || args[i+1] != expectedID {
+							t.Fatal("workload UID shares the proxy exemption")
+						}
+						exemptions++
+					}
+				}
+			}
+			if exemptions != 2 {
+				t.Fatal("missing distinct proxy exemptions for HTTP and HTTPS")
+			}
+		})
 	}
 }

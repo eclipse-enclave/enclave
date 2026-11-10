@@ -78,7 +78,7 @@ func TestNativeStartupMountsAndCapabilityGate(t *testing.T) {
 }
 
 func TestNativeIdentityRemapUsesContainerDatabasesOnly(t *testing.T) {
-	for _, identity := range []string{"1001:2002", "0:2002", "bad:2002", "1001:", "53:2002"} {
+	for _, identity := range []string{"1001:2002", "1001:3003", "0:2002", "bad:2002", "1001:", "53:2002", "1001:102", "1001:53"} {
 		t.Run(identity, func(t *testing.T) {
 			dir := t.TempDir()
 			passwd := filepath.Join(dir, "passwd")
@@ -87,7 +87,8 @@ func TestNativeIdentityRemapUsesContainerDatabasesOnly(t *testing.T) {
 			if err := os.WriteFile(passwd, []byte(initialPasswd), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			if err := os.WriteFile(group, []byte("root:x:0:\ngateway:x:102:\n"), 0o600); err != nil {
+			initialGroup := "root:x:0:\ndnsmasq:x:53:\ngateway:x:102:\nhost-existing:x:2002:other\n"
+			if err := os.WriteFile(group, []byte(initialGroup), 0o600); err != nil {
 				t.Fatal(err)
 			}
 			source := strings.ReplaceAll(strings.ReplaceAll(gatewayScriptFunctions(t), "/etc/passwd", passwd), "/etc/group", group)
@@ -99,31 +100,45 @@ func TestNativeIdentityRemapUsesContainerDatabasesOnly(t *testing.T) {
 			cmd := exec.Command("sh", "-c", `. "$1"
 id() {
  case "$1:$2" in
-  -u:dnsmasq) echo 53 ;;
+  -u:dnsmasq|-g:dnsmasq) echo 53 ;;
   -u:gateway) awk -F: '$1=="gateway" {print $3}' "$TEST_PASSWD" ;;
   -g:gateway) awk -F: '$1=="gateway" {print $4}' "$TEST_PASSWD" ;;
+  -G:gateway)
+    awk -F: '$1=="gateway" {printf "%s ", $4}' "$TEST_PASSWD"
+    awk -F: '("," $4 ",") ~ /,gateway,/ {printf "%s ", $3} END {print ""}' "$TEST_GROUP" ;;
+
  esac
 }
 chown() { echo unexpected-chown; exit 91; }
 chmod() { echo unexpected-chmod; exit 92; }
-remap_native_proxy_identity`, "native-remap-test", script)
-			cmd.Env = append(os.Environ(), model.EnvNativeAuthConfig+"=/native-config", model.EnvNativeAuthStore+"=/native", model.EnvNativeAuthLock+"=/lock", model.EnvNativeAuthRuntime+"=/runtime", model.EnvRuntimeUID+"="+ids[0], model.EnvRuntimeGID+"="+ids[1], "TEST_PASSWD="+passwd)
+remap_native_proxy_identity
+printf '%s\n' "$PROXY_EXEC_USER"`, "native-remap-test", script)
+			cmd.Env = append(os.Environ(), model.EnvNativeAuthConfig+"=/native-config", model.EnvNativeAuthStore+"=/native", model.EnvNativeAuthLock+"=/lock", model.EnvNativeAuthRuntime+"=/runtime", model.EnvRuntimeUID+"="+ids[0], model.EnvRuntimeGID+"="+ids[1], "TEST_PASSWD="+passwd, "TEST_GROUP="+group)
 			out, err := cmd.CombinedOutput()
 			data, readErr := os.ReadFile(passwd)
 			if readErr != nil {
 				t.Fatal(readErr)
 			}
-			if identity == "1001:2002" {
-				if err != nil || !strings.Contains(string(data), "gateway:x:1001:2002:") {
+			groups, groupErr := os.ReadFile(group)
+			if groupErr != nil {
+				t.Fatal(groupErr)
+			}
+			if strings.HasPrefix(identity, "1001:") && (ids[1] == "2002" || ids[1] == "3003") {
+				expected := "host-existing:x:2002:other,gateway"
+				if ids[1] == "3003" {
+					expected = "enclave-host:x:3003:gateway"
+				}
+				if err != nil || !strings.Contains(string(data), "gateway:x:1001:102:") || !strings.Contains(string(groups), expected) || strings.TrimSpace(string(out)) != "gateway" {
 					t.Fatalf("host identity not remapped: %s %v", out, err)
 				}
-			} else if err == nil || string(data) != initialPasswd {
+			} else if err == nil || string(data) != initialPasswd || string(groups) != initialGroup {
 				t.Fatal("invalid identity changed container databases")
 			}
 		})
 	}
 	// Ordinary gateways need no host identity and do not touch account databases.
-	out, err := runGatewayDNSMasq(t, "remap_native_proxy_identity", model.EnvNativeAuthConfig+"=")
+	out, err := runGatewayDNSMasq(t, `remap_native_proxy_identity
+[ "$PROXY_EXEC_USER" = gateway:gateway ]`, model.EnvNativeAuthConfig+"=")
 	if err != nil {
 		t.Fatalf("ordinary gateway changed: %s %v", out, err)
 	}

@@ -26,6 +26,7 @@ import (
 	"enclave/internal/gateway/exchange"
 	"enclave/internal/gateway/tlsstore"
 	"enclave/internal/model"
+	"enclave/internal/netcapture"
 	"enclave/internal/placeholderstore"
 )
 
@@ -291,5 +292,74 @@ func TestCopilotNativePathGuardKeepsEnvRelease(t *testing.T) {
 			default:
 			}
 		})
+	}
+}
+
+// The extra synthetic raw header distinguishes learning before Begin from
+// redacting only the upstream response; the unprefixed auth placeholder
+// distinguishes snapshotting before header rewriting from snapshotting after it.
+func TestNativeCaptureLearnsBeforeSnapshotAndSnapshotsBeforeRewrite(t *testing.T) {
+	native, canonical, ph := nativeProxy(t)
+	p, captureDir, logPath := captureProxy(t, []string{"api.anthropic.com"}, nil, netcapture.Options{})
+	p.nativeAuth = native.nativeAuth
+	upstream := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if req.URL.Path != "/unmarked" && req.Header.Get("Authorization") != "Bearer "+req.Header.Get("X-Synthetic-Raw") {
+			t.Error("upstream did not receive the current released credential")
+		}
+		w.Header().Set("X-Echo", "synthetic-access-first synthetic-access-second")
+		_, _ = io.WriteString(w, req.Header.Get("X-Synthetic-Raw"))
+	}))
+	defer upstream.Close()
+	p.transport = p.transport.Clone()
+	roots := x509.NewCertPool()
+	roots.AddCert(upstream.Certificate())
+	p.transport.TLSClientConfig = &tls.Config{RootCAs: roots, ServerName: upstream.Certificate().DNSNames[0], MinVersion: tls.VersionTLS12}
+	p.transport.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+		return (&net.Dialer{}).DialContext(ctx, network, strings.TrimPrefix(upstream.URL, "https://"))
+	}
+	for i, raw := range []string{"synthetic-access-first", "synthetic-access-second", "synthetic-access-first synthetic-access-second"} {
+		if i == 1 {
+			if err := placeholderstore.WriteNative(canonical, ".credentials.json", []byte(`{"claudeAiOauth":{"accessToken":"synthetic-access-second","refreshToken":"synthetic-refresh"}}`)); err != nil {
+				t.Fatal(err)
+			}
+		}
+		path := "/v1/messages"
+		if i == 2 {
+			path = "/unmarked"
+		}
+		req := httptest.NewRequest(http.MethodGet, "https://api.anthropic.com"+path, nil)
+		if i != 2 {
+			req.Header.Set("Authorization", ph["access"])
+		}
+		req.Header.Set("X-Synthetic-Raw", raw)
+		w := httptest.NewRecorder()
+		p.handler("https")(w, req)
+		if w.Code != http.StatusOK || w.Body.String() != raw {
+			t.Fatalf("relay %d: status %d, body %q", i, w.Code, w.Body.String())
+		}
+		events := readAuditEvents(t, logPath)
+		if len(events) != i+1 || events[i].CaptureID == "" {
+			t.Fatalf("missing capture for exchange %d: %+v", i, events)
+		}
+		recordPath := netcapture.RecordPath(captureDir, events[i].CaptureID)
+		record, err := netcapture.Load(recordPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := ph["access"]
+		if i == 2 {
+			want += " " + ph["access"]
+		} else if got := record.Request.Headers.Get("Authorization"); got != ph["access"] {
+			t.Fatalf("snapshot followed rewriting: authorization %q", got)
+		}
+		if got := record.Request.Headers.Get("X-Synthetic-Raw"); got != want {
+			t.Fatalf("snapshot preceded learning: header %q, want %q", got, want)
+		}
+		if got := readCapturedBody(t, recordPath, record.Response.Body); got != want {
+			t.Fatalf("captured response %q, want %q", got, want)
+		}
+		if got := record.Response.Headers.Get("X-Echo"); i > 0 && got != ph["access"]+" "+ph["access"] {
+			t.Fatalf("learned values were not retained: %q", got)
+		}
 	}
 }

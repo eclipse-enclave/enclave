@@ -276,7 +276,7 @@ func (d *socketDirection) bufferLimit() int {
 	if full {
 		return 0
 	}
-	return int(d.socket.store.maxBody) + d.socket.store.redactor.longest()
+	return int(d.socket.store.maxBody) + d.socket.store.redactor.Load().longest()
 }
 
 func (d *socketDirection) unmask(payload []byte) {
@@ -333,7 +333,7 @@ func (d *socketDirection) emit(pending *pendingMessage, cut bool) {
 	}
 	payload := pending.payload
 	cut = cut || pending.bytes > int64(len(payload))
-	payload = store.redactor.payload(payload, cut)
+	payload = store.redactor.Load().payload(payload, cut)
 	if int64(len(payload)) > store.maxBody {
 		payload, cut = payload[:store.maxBody], true
 	}

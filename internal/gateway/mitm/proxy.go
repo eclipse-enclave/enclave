@@ -167,6 +167,9 @@ type capabilities struct {
 	// releaseSecrets swaps placeholders for real values. An unrestricted
 	// session already holds the real values.
 	releaseSecrets bool
+	// forwardUnchanged sends requests and responses on as they were sent, so
+	// neither end can tell a proxy sat in between.
+	forwardUnchanged bool
 }
 
 func capabilitiesFor(networkMode string) capabilities {
@@ -175,33 +178,113 @@ func capabilitiesFor(networkMode string) capabilities {
 		enforceAllowlist:        restricted,
 		dialOriginalDestination: !restricted,
 		releaseSecrets:          restricted,
+		forwardUnchanged:        !restricted,
 	}
 }
 
-// setCapabilities configures the proxy for caps. Dialling the original
-// destination also applies to intercepted HTTPS requests, whose URL keeps the
-// requested name so the upstream certificate is checked against it.
+// setCapabilities configures the proxy for caps.
 func (p *proxy) setCapabilities(caps capabilities) {
 	p.caps = caps
-	if !caps.dialOriginalDestination {
-		return
+	if caps.forwardUnchanged {
+		for _, transport := range []*http.Transport{p.transport, p.upgradeTransport} {
+			// Left on, the transport asks for gzip on the client's behalf and
+			// decompresses the response, and turns a slow response into a 502.
+			transport.DisableCompression = true
+			transport.ResponseHeaderTimeout = 0
+		}
 	}
-	for _, transport := range []*http.Transport{p.transport, p.upgradeTransport} {
-		transport.DialContext = dialOriginalDestination
+	if caps.dialOriginalDestination {
+		// A custom dialer turns off the HTTP/2 the transport otherwise
+		// negotiates; the upgrade transport is pinned to HTTP/1.1 regardless.
+		p.transport.ForceAttemptHTTP2 = true
+		p.destinations = newDestinationTransports(p.transport, p.upgradeTransport)
 	}
-	// A custom dialer turns off the HTTP/2 the transport otherwise
-	// negotiates; the upgrade transport is pinned to HTTP/1.1 regardless.
-	p.transport.ForceAttemptHTTP2 = true
 }
 
-// dialOriginalDestination dials the original destination a request carries in
-// its context instead of addr. The transport pools connections by name, so a
-// request may reuse a connection dialled for another request to the same name.
-func dialOriginalDestination(ctx context.Context, network string, addr string) (net.Conn, error) {
-	if dst := originalDestinationFrom(ctx); dst.IsValid() {
-		addr = dst.String()
+// transportFor returns the transport for a request to dst, or for a request
+// whose target is in its URL when dst is invalid.
+func (p *proxy) transportFor(dst netip.AddrPort, upgrade bool) *http.Transport {
+	if dst.IsValid() && p.destinations != nil {
+		return p.destinations.get(dst, upgrade)
 	}
-	return (&net.Dialer{}).DialContext(ctx, network, addr)
+	if upgrade {
+		return p.upgradeTransport
+	}
+	return p.transport
+}
+
+// destinationTransports keeps a pair of transports per original destination.
+// A transport pools connections by the name in the URL, which intercepted HTTPS
+// keeps for certificate checks; one shared transport would send a request to
+// a connection dialled for another address of the same name.
+type destinationTransports struct {
+	template, upgradeTemplate *http.Transport
+	now                       func() time.Time
+
+	mu            sync.Mutex
+	byDestination map[netip.AddrPort]*destinationTransport
+	lastSweep     time.Time
+}
+
+type destinationTransport struct {
+	transport, upgradeTransport *http.Transport
+	lastUsed                    time.Time
+}
+
+func newDestinationTransports(template, upgradeTemplate *http.Transport) *destinationTransports {
+	return &destinationTransports{
+		template:        template,
+		upgradeTemplate: upgradeTemplate,
+		now:             time.Now,
+		byDestination:   map[netip.AddrPort]*destinationTransport{},
+	}
+}
+
+func (d *destinationTransports) get(dst netip.AddrPort, upgrade bool) *http.Transport {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	now := d.now()
+	d.releaseIdle(now)
+	entry, ok := d.byDestination[dst]
+	if !ok {
+		entry = &destinationTransport{
+			transport:        dialingOnly(d.template, dst),
+			upgradeTransport: dialingOnly(d.upgradeTemplate, dst),
+		}
+		d.byDestination[dst] = entry
+	}
+	entry.lastUsed = now
+	if upgrade {
+		return entry.upgradeTransport
+	}
+	return entry.transport
+}
+
+// releaseIdle drops the transports of destinations no request used for longer
+// than the idle timeout, after which their pooled connections are closed
+// anyway. Requests still in flight keep their transport until they end.
+func (d *destinationTransports) releaseIdle(now time.Time) {
+	idle := d.template.IdleConnTimeout
+	if now.Sub(d.lastSweep) < idle {
+		return
+	}
+	d.lastSweep = now
+	for dst, entry := range d.byDestination {
+		if now.Sub(entry.lastUsed) > idle {
+			entry.transport.CloseIdleConnections()
+			entry.upgradeTransport.CloseIdleConnections()
+			delete(d.byDestination, dst)
+		}
+	}
+}
+
+// dialingOnly returns a copy of template that dials dst for every request.
+func dialingOnly(template *http.Transport, dst netip.AddrPort) *http.Transport {
+	transport := template.Clone()
+	transport.DialContext = func(ctx context.Context, network string, _ string) (net.Conn, error) {
+		return (&net.Dialer{}).DialContext(ctx, network, dst.String())
+	}
+	return transport
 }
 
 // releaseRules are the secret release rules the proxy applies.
@@ -228,6 +311,9 @@ type proxy struct {
 	// Upgrade header, and transport switches to HTTP/1.1 by itself only for
 	// WebSocket, not for upgrades such as SPDY.
 	upgradeTransport *http.Transport
+	// destinations holds the transports of a proxy that dials original
+	// destinations; transport and upgradeTransport serve as their templates.
+	destinations *destinationTransports
 }
 
 func normalizeHostPatterns(patterns []string) []string {
@@ -377,18 +463,15 @@ func (p *proxy) forward(w http.ResponseWriter, req *http.Request, scheme string)
 	outgoing := req.Clone(req.Context())
 	outgoing.RequestURI = ""
 	outgoing.URL = &target
-	outgoing.Header.Set("X-Forwarded-Proto", scheme)
-	if clientIP := clientIPFromAddr(req.RemoteAddr); clientIP != "" {
-		if prior := strings.TrimSpace(outgoing.Header.Get("X-Forwarded-For")); prior != "" {
-			outgoing.Header.Set("X-Forwarded-For", prior+", "+clientIP)
-		} else {
-			outgoing.Header.Set("X-Forwarded-For", clientIP)
+	if p.caps.forwardUnchanged {
+		if _, ok := outgoing.Header["User-Agent"]; !ok {
+			// An empty value stops the transport from sending its own.
+			outgoing.Header["User-Agent"] = []string{""}
 		}
+	} else {
+		addForwardingHeaders(outgoing, req.RemoteAddr, scheme)
 	}
-	transport := p.transport
-	if outgoing.Header.Get("Upgrade") != "" {
-		transport = p.upgradeTransport
-	}
+	transport := p.transportFor(originalDestinationFrom(req.Context()), outgoing.Header.Get("Upgrade") != "")
 	resp, err := transport.RoundTrip(outgoing)
 	if err != nil {
 		return forwardResult{}, err
@@ -410,6 +493,17 @@ func (p *proxy) forward(w http.ResponseWriter, req *http.Request, scheme string)
 		ResponseBytes: responseBytes,
 		ContentType:   strings.TrimSpace(resp.Header.Get("Content-Type")),
 	}, nil
+}
+
+func addForwardingHeaders(outgoing *http.Request, remoteAddr string, scheme string) {
+	outgoing.Header.Set("X-Forwarded-Proto", scheme)
+	if clientIP := clientIPFromAddr(remoteAddr); clientIP != "" {
+		if prior := strings.TrimSpace(outgoing.Header.Get("X-Forwarded-For")); prior != "" {
+			outgoing.Header.Set("X-Forwarded-For", prior+", "+clientIP)
+		} else {
+			outgoing.Header.Set("X-Forwarded-For", clientIP)
+		}
+	}
 }
 
 // flushWriter passes each chunk to the client as soon as it arrives. Without

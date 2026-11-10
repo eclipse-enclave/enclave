@@ -36,7 +36,9 @@ An unrestricted session still starts a gateway, which only observes. It
 installs no inbound or outbound filters, leaves IPv6 and Docker's DNS resolver
 untouched, and connects each redirected connection to the address the client
 dialled, so `/etc/hosts` entries, split DNS, and IP-pinned endpoints behave as
-without a gateway. Declared secrets are injected with their real values; the
+without a gateway. It adds no headers to the requests it parses and sets no
+response-header timeout, and responses reach the client with their original
+encoding. Declared secrets are injected with their real values; the
 gateway releases none.
 
 TCP ports 80 and 443 go through the proxy and are logged as in restricted

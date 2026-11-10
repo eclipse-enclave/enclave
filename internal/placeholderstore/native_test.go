@@ -17,6 +17,56 @@ import (
 	"enclave/internal/model"
 )
 
+func TestCopilotRewrittenNativePathCanRelink(t *testing.T) {
+	file := model.AuthFileSecret{File: "config.json", Codec: "copilot-config", Fields: []model.AuthSecretField{{Pointer: "/authTokens/*/token", Kind: "access", Release: "native"}}}
+	profile := model.Profile{Providers: []model.ProviderConfig{{Name: "github", AuthSecrets: []model.AuthFileSecret{file}}}, Secrets: map[string]model.SecretConfig{"native": {Release: &model.SecretReleaseConfig{HTTP: &model.HTTPSecretReleaseConfig{Hosts: []string{"api.githubcopilot.com"}, Header: "Authorization", Format: "Bearer %s"}}}}}
+	real := t.TempDir()
+	nativeFile(t, real, file.File, `{"authTokens":{"https://github.com:fixture:github":{"token":"synthetic-native-token"}}}`)
+	view, err := Project(real, t.TempDir(), "rewrite", profile, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(view.Dir, file.File))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(data, &doc); err != nil {
+		t.Fatal(err)
+	}
+	doc["firstLaunchAt"], doc["trustedFolders"] = "2026-11-10T00:00:00Z", []string{"/workspace"}
+	doc["loggedInUsers"] = []any{map[string]any{"host": "https://github.com", "login": "fixture"}}
+	doc["lastLoggedInUser"] = map[string]any{"host": "https://github.com", "login": "fixture"}
+	updated, _ := json.Marshal(doc)
+	for _, tc := range []struct {
+		name, content, want string
+		idle                bool
+	}{
+		{"idle rewrite", string(updated), "link", true},
+		{"live rewrite", string(updated), "keep", false},
+		{"unknown metadata", strings.TrimSuffix(string(updated), "}") + `,"unknown":true}`, "", true},
+		{"unbound live token", strings.ReplaceAll(string(updated), view.Bindings.Bindings[0].Placeholder, "ENCLAVE_SECRET_unbound"), "", false},
+		{"raw token", strings.ReplaceAll(string(updated), view.Bindings.Bindings[0].Placeholder, "synthetic-native-token"), "", true},
+		{"idle client headers", "// client state\n// settings live separately\n" + string(updated), "link", true},
+		{"live client headers", "// client state\n// settings live separately\n" + string(updated), "keep", false},
+		{"marked header", "// " + view.Bindings.Bindings[0].Placeholder + "\n" + string(updated), "", false},
+		{"interior comment", strings.Replace(string(updated), "{", "{\n// inside document\n", 1), "", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			config := t.TempDir()
+			nativeFile(t, config, file.File, tc.content)
+			ops, err := ClassifyNative(config, "/auth", profile, view.Bindings, nil, tc.idle)
+			if tc.want == "" {
+				if err == nil {
+					t.Fatal("unsafe rewritten native file accepted")
+				}
+			} else if err != nil || len(ops) != 1 || ops[0].Verb != tc.want || ops[0].Digest == "" {
+				t.Fatalf("rewrite classification = %v, %v", ops, err)
+			}
+		})
+	}
+}
+
 func TestClassifyNativeOwnershipAndResetResidue(t *testing.T) {
 	profile := claudeProfile()
 	profile.Providers[0].AuthSecrets = profile.Providers[0].AuthSecrets[:1]

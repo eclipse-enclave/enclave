@@ -101,11 +101,14 @@ func decodeAuthFile(file model.AuthFileSecret, data []byte, purpose nativePurpos
 }
 
 func decodeNative(codec string, data []byte, purpose nativePurpose) (map[string]any, []string, error) {
-	if codec == "copilot-config" && (purpose == canonicalNative || purpose == projectedView) {
+	if codec == "copilot-config" {
 		data = bytes.TrimLeft(data, " \t\r\n")
 		for bytes.HasPrefix(data, []byte("//")) {
-			_, data, _ = bytes.Cut(data, []byte("\n"))
-			data = bytes.TrimLeft(data, " \t\r\n")
+			header, rest, _ := bytes.Cut(data, []byte("\n"))
+			if purpose == strictNative && bytes.Contains(header, []byte(model.SecretPlaceholderMarker)) {
+				return nil, nil, fmt.Errorf("credential marker in native header")
+			}
+			data = bytes.TrimLeft(rest, " \t\r\n")
 		}
 	}
 	decoder := json.NewDecoder(bytes.NewReader(data))
@@ -182,7 +185,7 @@ func decodeNative(codec string, data []byte, purpose nativePurpose) (map[string]
 		}
 		return doc, pointers, nil
 	case "copilot-config":
-		if err := filterFields(doc, map[string]string{"authTokens": "object", "loggedInUsers": "accounts", "lastLoggedInUser": "account", "storeTokenPlaintext": "bool"}, purpose); err != nil {
+		if err := filterFields(doc, map[string]string{"authTokens": "object", "loggedInUsers": "accounts", "lastLoggedInUser": "account", "storeTokenPlaintext": "bool", "firstLaunchAt": "string", "trustedFolders": "strings"}, purpose); err != nil {
 			return nil, nil, err
 		}
 		var pointers []string

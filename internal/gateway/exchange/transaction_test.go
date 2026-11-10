@@ -1155,7 +1155,7 @@ func TestCopilotNativeDeviceFlow(t *testing.T) {
 			if !committed {
 				t.Fatal("contained scope lost the valid consumed grant")
 			}
-			for _, target := range []string{"https://api.github.com/copilot_internal/user", "https://api.github.com/user", "https://api.github.com/copilot_internal/v2/token", "https://api.github.com/copilot_internal/user?extra=1", "https://api.github.com/copilot_internal/user/"} {
+			for _, target := range []string{"https://api.github.com/copilot_internal/user", "https://api.github.com/user", "https://api.github.com/copilot_internal/v2/token", "https://api.github.com/copilot_internal/user?extra=1", "https://api.github.com/copilot_internal/managed_settings?client_id=github%2Fcli", "https://api.github.com/copilot_internal/team_customizations", "https://api.github.com/copilot_internal/user/"} {
 				req := httptest.NewRequest(http.MethodGet, target, nil)
 				req.Header.Set("Authorization", "Bearer "+placeholder)
 				rules, err := router.Releases(req)
@@ -1166,7 +1166,8 @@ func TestCopilotNativeDeviceFlow(t *testing.T) {
 				for _, rule := range rules {
 					matched = matched || (rule.Placeholder == placeholder && rule.Value == currentGrant)
 				}
-				if matched != (target == "https://api.github.com/copilot_internal/user") {
+				allowed := req.URL.Path == "/copilot_internal/user" || req.URL.Path == "/copilot_internal/managed_settings" || req.URL.Path == "/copilot_internal/team_customizations"
+				if matched != allowed {
 					t.Fatal("native GitHub API path guard changed", target)
 				}
 			}

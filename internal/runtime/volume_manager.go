@@ -68,6 +68,7 @@ func (m volumeManager) BuildPrep(volumeSuffix string) (backend.StorePrep, storeS
 		prep.Config.Overlay = &backend.ConfigOverlaySpec{
 			SourceDir:     m.configSourceDir,
 			PreservePaths: m.configSourcePreservePaths(),
+			SettingsBase:  m.configSettingsBase,
 		}
 		if m.run.Persist {
 			settingsPath, err := m.settingsRelativePath()

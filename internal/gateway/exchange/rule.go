@@ -159,9 +159,9 @@ func response(status int, headers http.Header, data []byte) *http.Response {
 	return &http.Response{StatusCode: status, Header: headers, Body: io.NopCloser(bytes.NewReader(data)), ContentLength: int64(len(data))}
 }
 
-func copilotUserRequest(req *http.Request) bool {
+func copilotAPIRequest(req *http.Request) bool {
 	_, port, _ := net.SplitHostPort(cmp.Or(strings.TrimSpace(req.Host), req.URL.Host))
-	if req.Method != http.MethodGet || req.URL.Path != "/copilot_internal/user" || req.URL.RawPath != "" || req.URL.RawQuery != "" || req.URL.ForceQuery || req.ContentLength != 0 || len(req.Trailer) != 0 || (port != "" && port != "443") {
+	if req.Method != http.MethodGet || !slices.Contains([]string{"/copilot_internal/user", "/copilot_internal/managed_settings", "/copilot_internal/team_customizations"}, req.URL.Path) || req.URL.RawPath != "" || req.ContentLength != 0 || len(req.Trailer) != 0 || (port != "" && port != "443") {
 		return false
 	}
 	if req.Body != nil {

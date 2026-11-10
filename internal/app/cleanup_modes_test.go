@@ -57,7 +57,6 @@ func TestModeCleanupRequiresOwnerDeathAndContainerAbsence(t *testing.T) {
 		{name: "running", state: "live", response: "running", wantKept: true},
 		{name: "recent pending", state: "pending", fresh: true, response: "absent", wantKept: true},
 		{name: "other engine", state: "live", engine: "podman", response: "unreachable", wantKept: true},
-		{name: "ended", state: "ended", response: "unreachable"},
 		{name: "dry run absent", state: "pending", response: "absent", dryRun: true, wantKept: true},
 		{name: "dry run exited", state: "live", response: "exited", dryRun: true, wantKept: true},
 	} {

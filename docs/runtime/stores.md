@@ -298,9 +298,10 @@ stopped ephemeral containers, and per-session networks whose session is gone
 | [`internal/runtime/runtime.go`](../../internal/runtime/runtime.go) | Mount assembly (`addConfigMount`, `addAuthMount`, `addFeatureAuthMounts`), execution flow |
 | [`entrypoint.sh`](../../entrypoint.sh), [`runtime-assets/auth-reconcile.sh`](../../runtime-assets/auth-reconcile.sh) | In-container and helper-container symlink and reconcile logic |
 
-## Internal native-auth exchanges
+## Native auth exchanges
 
-This path is unavailable to workloads. Claude exchanges take the canonical
+With `--protect-auth`, only the gateway mounts the canonical auth store. Workloads
+mount private views under `projects/<hash>/<tool>/auth-views/`. Claude exchanges take the canonical
 hoststore lock across reload, one bounded upstream dispatch and durable commit.
 Native tokens are written before stable placeholder bindings; UID/GID/mode are
 preserved. Bindings contain identifiers, never tokens or exchange history.
@@ -316,4 +317,4 @@ The proxy uses the store owner UID, a distinct primary group for its NAT
 exemption and the host group as supplementary, without new capabilities or
 canonical ownership/mode changes. A fresh workload-inaccessible readiness directory binds
 startup to the session and the configuration actually loaded by the proxy.
-Missing or mismatched readiness refuses even an older image with `--no-rebuild`.
+Missing or mismatched readiness refuses even an older gateway image with `--no-rebuild`.

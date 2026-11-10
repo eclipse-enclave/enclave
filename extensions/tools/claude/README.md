@@ -73,3 +73,6 @@ left at the Claude Code defaults.
 | `templates/settings.json` | Default settings template |
 | `entrypoint.d/setup.sh` | Runtime setup (creates config dir, sets env vars) |
 | `go/` | Custom Go hooks |
+
+`--protect-auth` keeps declared native credentials in the gateway and mounts a
+placeholder view; see [protected native auth](../../../docs/auth.md#protected-native-auth).

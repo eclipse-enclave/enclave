@@ -251,8 +251,33 @@ Commit and tag signing are disabled in the container (see
 [Git](git.md#signing)), so signatures cannot tell an agent's pushes from yours.
 SSH on port 22 bypasses the gateway proxy and is not logged.
 
-## Protected native auth (unavailable)
+## Protected native auth
 
-`--protect-auth` is reserved, not an available option. Ordinary sessions still
-receive native auth files. The internal Claude implementation and remaining
-activation gates are described in [Persistent stores](runtime/stores.md#internal-native-auth-exchanges).
+`enclave --tool claude --protect-auth` mounts a private placeholder view instead
+of the native auth store. The gateway performs Claude's token exchanges and
+releases credentials only to their declared HTTPS hosts. Ordinary sessions
+retain their existing native-file behavior; protection is opt-in.
+
+The option requires restricted networking. It refuses `--allow-all-network`,
+`--admin`, project auth scope, QEMU, devcontainers, custom base images and tools
+other than Claude. Feature auth stores are not mounted; declared env credentials
+such as `GH_TOKEN` continue through their existing release rules.
+
+Ordinary and protected sessions cannot share a config store concurrently. A
+refusal names its holder; different session-store suffixes, tools and projects
+remain independent. An exited container may still have a host process finalizing
+credentials, so it does not immediately release the store. `enclave cleanup`
+reclaims stale holders only after proving the owner and container are gone, or
+finalizing an exited container. An unreachable engine keeps the reservation. Engines are inspected through the
+current endpoint: stop sessions on other `DOCKER_HOST`, `CONTAINER_HOST` or engine
+contexts before protected operations or holder cleanup. Context switches are not
+automatically tracked.
+
+Stop a project's running sessions before its first protected start after an
+upgrade: an older QEMU session cannot be detected. A native-path file containing
+raw credentials is refused rather than replaced; end the ordinary session and
+let reconciliation link it, or reset a crash leftover with `--reset-auth`.
+
+Protection covers declared native fields, not arbitrary files, SSH or host access.
+See [native auth exchanges](runtime/stores.md#native-auth-exchanges) for storage
+and refresh behavior.

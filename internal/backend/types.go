@@ -68,11 +68,24 @@ type Request struct {
 	// AuthSync declares the credential reconciliation to run after a foreground
 	// session exits. It must be carried on the request because foreground
 	// sessions are removed on exit, leaving nothing to inspect afterwards.
-	AuthSync *AuthSyncSpec
-	Mode     *SessionMode
+	AuthSync   *AuthSyncSpec
+	Mode       *SessionMode
+	NativeAuth *NativeAuthSpec
 
 	RuntimeUIDRemap bool
 	Detached        bool
+}
+
+// NativeAuthSpec carries a declaration and canonical-store identity, never a
+// snapshot of native credentials. Only the gateway mounts this store.
+type NativeAuthSpec struct {
+	Store  StoreRef
+	Config []byte
+}
+
+// ProtectedAuthAdmission checks running sessions that predate mode records.
+type ProtectedAuthAdmission interface {
+	CheckProtectedAuthAdmission(context.Context, StoreKey, map[string]string) error
 }
 
 // SessionMode identifies the reservation made before preparing any mounts.

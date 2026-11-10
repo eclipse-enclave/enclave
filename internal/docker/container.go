@@ -23,12 +23,17 @@ import (
 // (labels as maps, names as slices, a real creation timestamp) rather than the
 // lossy `docker ps` table format.
 func ContainerList(ctx context.Context, opts ListOptions) ([]Summary, error) {
+	return ContainerListForEngine(ctx, dockerBinary, opts)
+}
+
+// ContainerListForEngine reads another engine without mutating the process-wide CLI.
+func ContainerListForEngine(ctx context.Context, binary string, opts ListOptions) ([]Summary, error) {
 	args := []string{"ps", "--no-trunc", "--format", "{{.ID}}"}
 	if opts.All {
 		args = append(args, "--all")
 	}
 	args = append(args, opts.Filters.flags()...)
-	out, err := capture(ctx, args...)
+	out, err := captureEngine(ctx, binary, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -36,7 +41,7 @@ func ContainerList(ctx context.Context, opts ListOptions) ([]Summary, error) {
 	if len(ids) == 0 {
 		return nil, nil
 	}
-	inspected, err := inspectContainers(ctx, ids)
+	inspected, err := inspectContainersEngine(ctx, binary, ids)
 	if err != nil {
 		return nil, err
 	}
@@ -70,11 +75,15 @@ func ContainerInspect(ctx context.Context, containerID string) (InspectResponse,
 // inspectContainers batch-inspects containers, tolerating IDs that vanished
 // between listing and inspection (their objects are simply absent from stdout).
 func inspectContainers(ctx context.Context, ids []string) ([]InspectResponse, error) {
+	return inspectContainersEngine(ctx, dockerBinary, ids)
+}
+
+func inspectContainersEngine(ctx context.Context, binary string, ids []string) ([]InspectResponse, error) {
 	if len(ids) == 0 {
 		return nil, nil
 	}
 	args := append([]string{"container", "inspect", "--format", "{{json .}}"}, ids...)
-	out, err := capture(ctx, args...)
+	out, err := captureEngine(ctx, binary, args...)
 	results, decodeErr := decodeInspectResponses(out)
 	if decodeErr != nil {
 		return nil, decodeErr

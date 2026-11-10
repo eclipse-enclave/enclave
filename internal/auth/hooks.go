@@ -43,13 +43,14 @@ type Hooks interface {
 	FinalizeAuth(ctx Context, state model.AuthState) error
 }
 
-type noopHooks struct{}
+// NoopHooks leaves native file preparation to protected projection.
+type NoopHooks struct{}
 
-func (noopHooks) OnAuthReady(Context) (bool, error) { return false, nil }
-func (noopHooks) AfterEnvInjected(Context, map[string]string) error {
+func (NoopHooks) OnAuthReady(Context) (bool, error) { return false, nil }
+func (NoopHooks) AfterEnvInjected(Context, map[string]string) error {
 	return nil
 }
-func (noopHooks) FinalizeAuth(Context, model.AuthState) error { return nil }
+func (NoopHooks) FinalizeAuth(Context, model.AuthState) error { return nil }
 
 var (
 	hooksMu     sync.RWMutex
@@ -70,7 +71,7 @@ func HooksFor(profile model.Profile) Hooks {
 	hooks := hooksByTool[profile.Name]
 	hooksMu.RUnlock()
 	if hooks == nil {
-		return noopHooks{}
+		return NoopHooks{}
 	}
 	return hooks
 }

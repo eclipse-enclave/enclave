@@ -123,11 +123,16 @@ func WithLock(hostHome string, dir string, fn func() error) error {
 	if hostHome == "" || dir == "" {
 		return fn()
 	}
-	lockPath := config.HostLockPath(hostHome, "store-"+util.HashString(dir)+".lock")
+	lockPath := LockPath(hostHome, dir)
 	if lockPath == "" {
 		return fn()
 	}
 	return util.WithFileLock(lockPath, fn)
+}
+
+// LockPath also supplies the exact inode bind-mounted into a protected gateway.
+func LockPath(home, dir string) string {
+	return config.HostLockPath(home, "store-"+util.HashString(dir)+".lock")
 }
 
 // EnsureNoSymlinkChain rejects a target whose path from root traverses a

@@ -81,6 +81,7 @@ type ExecutionContext struct {
 	Secrets        []backend.SecretRelease
 	AuthSync       *backend.AuthSyncSpec
 	Mode           *backend.SessionMode
+	NativeAuth     *backend.NativeAuthSpec
 	Cleanup        func()
 	RunCtx         model.RunContext
 }
@@ -97,6 +98,7 @@ type preparedVolumes struct {
 	AuthState     model.AuthState
 	SecretMapping SecretMapping
 	AuthSync      *backend.AuthSyncSpec
+	NativeAuth    *backend.NativeAuthSpec
 	Cleanup       func()
 }
 
@@ -229,6 +231,9 @@ func (r *Runtime) sessionStartLockName() string {
 }
 
 func (r *Runtime) prepareExecution() (*ExecutionContext, error) {
+	if err := ValidateProtectedAuth(r.run, r.auth, r.build, r.profile); err != nil {
+		return nil, err
+	}
 	config.WriteProjectMarkers(r.host.Home, r.project.Hash, r.project.RealDir)
 	baseContainerName := r.baseContainerName()
 	var containerName string
@@ -277,7 +282,7 @@ func (r *Runtime) prepareExecution() (*ExecutionContext, error) {
 	}
 	r.logContainerStart(containerName, baseContainerName)
 	r.warnPostStartInteractive()
-	prepared, err := r.prepareVolumes(containerName, baseContainerName, mountArgs)
+	prepared, err := r.prepareVolumes(containerName, baseContainerName, mountArgs, mode)
 	if err != nil {
 		return nil, err
 	}
@@ -291,6 +296,9 @@ func (r *Runtime) prepareExecution() (*ExecutionContext, error) {
 	r.applyFeaturePorts()
 	runCtx.Run = r.run
 	if err := r.handler.ValidateRun(runCtx); err != nil {
+		if prepared.Cleanup != nil {
+			prepared.Cleanup()
+		}
 		return nil, err
 	}
 	networkResult, err := newNetworkManager(r).Prepare(containerName, prepared.AuthState, prepared.SecretMapping)
@@ -316,6 +324,7 @@ func (r *Runtime) prepareExecution() (*ExecutionContext, error) {
 		Secrets:        secretReleases(prepared.SecretMapping),
 		AuthSync:       prepared.AuthSync,
 		Mode:           mode,
+		NativeAuth:     prepared.NativeAuth,
 		Cleanup:        cleanup,
 		RunCtx:         runCtx,
 	}, nil
@@ -412,7 +421,7 @@ func (r *Runtime) prepareMounts() (*mountAccumulator, hostGitIdentity, error) {
 	return mountArgs, gitIdentity, nil
 }
 
-func (r *Runtime) prepareVolumes(containerName string, baseContainerName string, mountArgs *mountAccumulator) (preparedVolumes, error) {
+func (r *Runtime) prepareVolumes(containerName string, baseContainerName string, mountArgs *mountAccumulator, mode *backend.SessionMode) (preparedVolumes, error) {
 	if r.backend == nil {
 		return preparedVolumes{}, fmt.Errorf("runtime backend is not configured")
 	}
@@ -430,8 +439,10 @@ func (r *Runtime) prepareVolumes(containerName string, baseContainerName string,
 	stores.PersistedEnvAvailable = state.PersistedEnvAvailable
 
 	r.addConfigMount(mountArgs, stores.Config)
-	r.addAuthMount(mountArgs, stores.Auth)
-	r.addFeatureAuthMounts(mountArgs, stores.Features)
+	if !r.run.ProtectAuth {
+		r.addAuthMount(mountArgs, stores.Auth)
+		r.addFeatureAuthMounts(mountArgs, stores.Features)
+	}
 	r.addEnvStore(mountArgs, stores.Env)
 
 	authState, secretMapping, err := newAuthManager(r).Prepare(mountArgs.EnvPtr(), stores)
@@ -440,6 +451,19 @@ func (r *Runtime) prepareVolumes(containerName string, baseContainerName string,
 			cleanup()
 		}
 		return preparedVolumes{}, err
+	}
+
+	var nativeAuth *backend.NativeAuthSpec
+	if r.run.ProtectAuth {
+		var removeView func()
+		nativeAuth, removeView, err = r.prepareProtectedAuth(stores, mountArgs, &secretMapping, mode)
+		cleanup = mergeCleanup(cleanup, removeView)
+		if err != nil {
+			if cleanup != nil {
+				cleanup()
+			}
+			return preparedVolumes{}, err
+		}
 	}
 
 	r.logCredentials(authState)
@@ -459,6 +483,7 @@ func (r *Runtime) prepareVolumes(containerName string, baseContainerName string,
 		AuthState:     authState,
 		SecretMapping: secretMapping,
 		AuthSync:      vm.authSyncSpec(stores),
+		NativeAuth:    nativeAuth,
 		Cleanup:       cleanup,
 	}, nil
 }
@@ -865,6 +890,7 @@ func (r *Runtime) backendRequest(ctx *ExecutionContext, detached bool, interacti
 		Secrets:         append([]backend.SecretRelease(nil), ctx.Secrets...),
 		RuntimeUIDRemap: r.build.RuntimeUIDRemap,
 		Mode:            ctx.Mode,
+		NativeAuth:      ctx.NativeAuth,
 		Detached:        detached,
 	}
 	if !detached {
@@ -1441,6 +1467,12 @@ func (r *Runtime) addAuthMount(mounts *mountAccumulator, authStore *backend.Stor
 	}
 	authMountPath := r.containerHome + "/" + model.ContainerAuthDir
 	mounts.AddStore(backend.PersistentStore{Kind: authStore.Kind, Key: authStore.Key, ContainerPath: authMountPath})
+	r.addAuthEnv(mounts)
+	logx.Infof("%s shared auth mounted", util.TitleCase(r.profile.Name))
+}
+
+func (r *Runtime) addAuthEnv(mounts *mountAccumulator) {
+	authMountPath := r.containerHome + "/" + model.ContainerAuthDir
 	mounts.AddEnv(model.EnvAuthDir, authMountPath)
 	authFiles := r.profile.ProviderAuthFiles()
 	if len(authFiles) > 0 {
@@ -1455,7 +1487,6 @@ func (r *Runtime) addAuthMount(mounts *mountAccumulator, authStore *backend.Stor
 	if env := r.profile.ProviderSecurestorageDirEnv(); env != "" {
 		mounts.AddEnv(env, authMountPath)
 	}
-	logx.Infof("%s shared auth mounted", util.TitleCase(r.profile.Name))
 }
 
 func (r *Runtime) addFeatureAuthMounts(mounts *mountAccumulator, featureStores map[string]backend.StoreRef) {

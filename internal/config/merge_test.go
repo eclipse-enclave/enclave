@@ -32,6 +32,7 @@ func TestMergeDefaultsCoversAllFields(t *testing.T) {
 		HostConfigPaths:        []string{"default", "+commands/"},
 		Yolo:                   &trueVal,
 		Ephemeral:              &trueVal,
+		ProtectAuth:            &trueVal,
 		AuthScope:              "test-auth-scope",
 		AuthName:               "test-auth-name",
 		SecretsScope:           "test-secrets-scope",

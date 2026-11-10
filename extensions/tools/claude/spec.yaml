@@ -48,7 +48,6 @@ providers:
   - name: anthropic
     credentials: [anthropic-api-key, claude-code-oauth-token]
     authFiles: [config.json, .credentials.json]
-    # Reserved for the internal protected-auth implementation; no session flag yet.
     authSecrets:
       - file: .credentials.json
         codec: claude-credentials

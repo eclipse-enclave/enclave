@@ -54,6 +54,10 @@ func runExecutionCommand(input *CommandInput) int {
 	if err != nil {
 		return 1
 	}
+	if err := runtime.ValidateProtectedAuth(opts.RunOptions, opts.AuthOptions, opts.BuildOptions, profile); err != nil {
+		logx.Errorf("%v", err)
+		return 1
+	}
 	opts.HostConfigPaths = config.ResolveHostConfigPaths(profile, opts.HostConfigPaths)
 
 	sessionArgs, sessionMode, fallback, err := resolveSessionActionArgs(input.Action, profile)

@@ -259,6 +259,7 @@ packages or home files. See [Build cache](tools.md#build-cache).
 | `--no-api-key` | Disable API key injection |
 | `--pass-api-key` | Allow API key injection in `--ephemeral` mode |
 | `--pass-env <KEY1,KEY2>` | Forward host env vars into the container; can forward a key `--no-api-key` withholds. Repeatable, comma-separated list flag for `pass_env` |
+| `--protect-auth` | Replace native Claude credentials with a gateway-backed placeholder view; see [protected native auth](auth.md#protected-native-auth) |
 | `--auth-scope <scope>` | `shared` (default) or `project` |
 | `--auth-name <slug>` | Select a named per-tool shared auth store; ignored under `--auth-scope=project` |
 | `--secrets-scope <scope>` | `both` (default), `global`, or `project` |

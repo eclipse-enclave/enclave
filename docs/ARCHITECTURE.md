@@ -147,8 +147,8 @@ The network request flow, restricted and unrestricted, has separate
 | [`internal/mounts/mounts.go`](../internal/mounts/mounts.go) | Mount path validation, worktrees, port mapping |
 | [`internal/mounts/sensitive.go`](../internal/mounts/sensitive.go) | The sensitive-path rule ([mounts.md](mounts.md#sensitive-mounts)) |
 | [`internal/auth/auth.go`](../internal/auth/auth.go) | Layered secrets, auth file copies, Claude-specific config |
-| [`internal/placeholderstore/`](../internal/placeholderstore/) | Internal native credential projection, durable canonical IO, stable bindings and native-path classification; no protected workload startup yet |
-| [`internal/gateway/exchange/`](../internal/gateway/exchange/) | Internal Claude exchange transactions, read-through native release and loaded-config capability attestation; public activation remains unavailable |
+| [`internal/placeholderstore/`](../internal/placeholderstore/) | Native credential projection, durable canonical IO, stable bindings and native-path classification |
+| [`internal/gateway/exchange/`](../internal/gateway/exchange/) | Claude exchange transactions, read-through native release and loaded-config capability attestation |
 | [`internal/auth/secret_injection.go`](../internal/auth/secret_injection.go) | `PlaceholderResolver`: caches env placeholders; shared generation lives in `internal/model/secret_placeholder.go` |
 | [`internal/gateway/gateway.go`](../internal/gateway/gateway.go) | Sidecar container and network; keeps logs until explicit removal, removes by immutable ID |
 | [`internal/gateway/bundle/`](../internal/gateway/bundle/bundle.go) | Host-managed bundles (`dnsmasq.conf`, `domains.txt`, `meta.json`) for apply and reload |
@@ -358,8 +358,10 @@ internal secret configs with release rules
    to the declared hosts and denies inspected requests whose placeholders do
    not satisfy their rules.
 
-This covers env injection only; files written by auth hooks can still hold the
-real secret.
+Without `--protect-auth`, this covers env injection only; auth-hook files can
+hold the real secret. Protected Claude uses a private projected view and disables
+those hooks. The host-only all-holder ledger shares the config-store lock;
+projection additionally takes the native-auth lock, released before gateway readiness.
 
 ## Containers and stores
 

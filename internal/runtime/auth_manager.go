@@ -50,6 +50,9 @@ func newAuthManager(r *Runtime) authManager {
 
 func (m authManager) Prepare(env *[]string, stores storeSet) (model.AuthState, SecretMapping, error) {
 	hooks := auth.HooksFor(m.profile)
+	if m.run.ProtectAuth {
+		hooks = auth.NoopHooks{}
+	}
 	authStorage := stores.AuthStorage()
 	authCtx := auth.Context{
 		Host:        m.host,

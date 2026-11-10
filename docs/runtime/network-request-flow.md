@@ -51,24 +51,32 @@ sequenceDiagram
         alt SNI not in allowlist
             Proxy-->>Tool: Close connection
             Proxy->>Log: TCP deny (allowlist)
-        else Host requires MITM (release rule match or network_log requests or full)
+        else Host requires MITM (native auth, release rule or network_log requests or full)
             Proxy->>Log: TCP pass (mitm-dispatch)
             Proxy->>Proxy: Terminate TLS using local CA leaf cert
-            opt network_log=full
-                Proxy->>Proxy: Snapshot request with its placeholders
-            end
-            Proxy->>Proxy: rewriteHeaders()<br/>Validate and apply host/header release rules
-            alt Placeholder use violates release rule
-                Proxy-->>Tool: HTTP 403 Forbidden
-                Proxy->>Log: HTTP deny (secret-injection)
-            else Rewrite allowed
-                Proxy->>API: Forward HTTPS request
-                API-->>Proxy: Upstream response
-                Proxy-->>Tool: Return response
+            alt Declared native token exchange
+                Proxy->>Proxy: Lock canonical native store
+                Proxy->>API: Bounded exchange with current credentials
+                API-->>Proxy: Token response
+                Proxy->>Proxy: Commit native tokens, then bindings; unlock
+                Proxy-->>Tool: Allowlisted reply with placeholders
+            else Ordinary API request
                 opt network_log=full
-                    Proxy->>Cap: Tee bodies and WebSocket messages while relaying<br/>then write record
+                    Proxy->>Proxy: Snapshot request with its placeholders
                 end
-                Proxy->>Log: HTTP pass (allowlist, capture_id)
+                Proxy->>Proxy: rewriteHeaders()<br/>Validate and apply host/header release rules
+                alt Placeholder use violates release rule
+                    Proxy-->>Tool: HTTP 403 Forbidden
+                    Proxy->>Log: HTTP deny (secret-injection)
+                else Rewrite allowed
+                    Proxy->>API: Forward HTTPS request
+                    API-->>Proxy: Upstream response
+                    Proxy-->>Tool: Return response
+                    opt network_log=full
+                        Proxy->>Cap: Tee bodies and WebSocket messages while relaying<br/>then write record
+                    end
+                    Proxy->>Log: HTTP pass (allowlist, capture_id)
+                end
             end
         else Host allowlisted but no secret rule match
             Proxy->>API: TLS passthrough tunnel
@@ -121,8 +129,8 @@ record readable from the handshake. See [Full capture](../networking.md#full-cap
 
 - Real values of mapped credentials never appear in the tool container's
   environment. Release is header-based and covers only declared credentials
-  with a release rule in the selected tool or enabled features; mediating
-  file-based credentials is separate work.
+  with a release rule in the selected tool or enabled features. Opt-in protected
+  Claude additionally mediates its declared native credential fields.
 - DNS, firewall and ipset, and proxy all check egress; reload and startup
   failures fail closed.
 - The log is tagged by session and rotated at session start, never truncated
@@ -211,5 +219,5 @@ sequenceDiagram
 [`internal/gateway/mitm/proxy.go`](../../internal/gateway/mitm/proxy.go),
 [`gateway-entrypoint.sh`](../../gateway-entrypoint.sh)
 
-The unavailable internal native-auth path intercepts declared OAuth endpoints
-before ordinary forwarding; see [store transactions](stores.md#internal-native-auth-exchanges).
+The protected native-auth path intercepts declared OAuth endpoints
+before ordinary forwarding; see [store transactions](stores.md#native-auth-exchanges).

@@ -64,6 +64,12 @@ func optionCLIFlags() map[string][]CLIFlag {
 				sources.Ephemeral = model.SourceCLI
 			}),
 		},
+		"protect_auth": {
+			boolFlag("--protect-auth", "Protect native Claude credentials through the network gateway", func(opts *model.Options, sources *model.OptionSources, value bool) {
+				opts.ProtectAuth = value
+				sources.ProtectAuth = model.SourceCLI
+			}),
+		},
 		"auth_scope": {
 			valueFlag("--auth-scope", "Auth scope: shared|project", "--auth-scope requires a value (shared|project)", func(opts *model.Options, sources *model.OptionSources, value string) error {
 				if err := applyAuthScope(opts, value); err != nil {

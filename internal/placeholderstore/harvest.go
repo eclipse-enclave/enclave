@@ -53,7 +53,7 @@ func Harvest(realDir, viewDir, configDir string, profile model.Profile) error {
 	local, err := readHarvestSource(configDir, files, bindings, false)
 	warnings = errors.Join(warnings, err)
 	for _, file := range files {
-		// Codex has no client-owned auth metadata to merge back.
+		// Gateway-owned auth formats have no client metadata to merge back.
 		if !HasClientMetadata(file.file.Codec) {
 			continue
 		}

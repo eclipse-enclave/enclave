@@ -258,13 +258,23 @@ the shared auth store. A protected start refuses raw `primaryApiKey` or
 `anthropicApiKey` fields there; remove the stored credential or use ordinary mode.
 Project metadata stays in place, including across `--reset-auth`.
 
-`enclave --tool claude --protect-auth` (also Codex, Pi and OpenCode) mounts a private placeholder view instead
+`enclave --tool claude --protect-auth` (also Codex, Pi, OpenCode and Copilot) mounts a private placeholder view instead
 of the native auth store. The gateway performs the tool's token exchanges and
 releases credentials only to their declared HTTPS hosts. Ordinary sessions
 retain their existing native-file behavior; protection is opt-in.
-Pi and OpenCode currently protect ChatGPT logins and native API-key entries whose
-matching env credential is configured. Other native provider entries refuse the
-start; ordinary mode is unchanged.
+Pi and OpenCode protect ChatGPT logins and native API-key entries whose matching
+env credential is configured. OpenCode also protects GitHub Copilot logins;
+Copilot CLI protects GitHub.com device logins. Other native providers, including
+GitHub Enterprise, refuse the protected start. Ordinary mode is unchanged.
+
+Native Copilot grants can reach `*.githubcopilot.com`; Copilot CLI also permits
+only `GET /copilot_internal/user` on `api.github.com`, without query or body.
+Other GitHub API paths and OAuth flows refuse native placeholders. Configured
+`GH_TOKEN` and `COPILOT_GITHUB_TOKEN` env releases retain their existing rules.
+Device polling preserves `authorization_pending`, `slow_down` and valid intervals.
+A Copilot CLI login fills its account key from that fixed user endpoint; if that
+lookup fails, start a fresh device login. Inconsistent native account aliases
+refuse rather than being repaired.
 
 The option requires restricted networking. It refuses `--allow-all-network`,
 `--admin`, project auth scope, QEMU, devcontainers, custom base images and tools

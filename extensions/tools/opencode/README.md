@@ -64,9 +64,9 @@ The default settings template disables sharing and OpenTelemetry.
 
 ## Protected Native Auth
 
-`enclave --tool opencode --protect-auth` protects stored ChatGPT logins through
+`enclave --tool opencode --protect-auth` protects stored ChatGPT and GitHub Copilot logins through
 the gateway. The agent sees JWT claims with placeholder signatures, and login
 and refresh write real tokens only to the native store. Stored API keys require
-the matching configured env credential; other native provider entries refuse
+the matching configured env credential; other native providers, including GitHub Enterprise, refuse
 the protected start. Ordinary sessions are unchanged. See
 [protected native auth](../../../docs/auth.md#protected-native-auth).

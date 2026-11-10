@@ -90,3 +90,28 @@ func TestCodexNativeAuthDeclarations(t *testing.T) {
 		t.Fatal("Codex native declarations missing")
 	}
 }
+
+func TestSharedNativeFileHasOneDeclarationOwner(t *testing.T) {
+	doc, err := LoadSpec(realRepoPaths(t), "opencode", KindSandbox)
+	if err != nil {
+		t.Fatal(err)
+	}
+	github := 0
+	for i, provider := range doc.Providers {
+		if provider.Name == "github-copilot" {
+			github = i
+		}
+	}
+	if doc.Providers[github].TokenEndpoint == nil || len(doc.Providers[github].AuthSecrets) != 0 || len(doc.Providers[0].AuthSecrets) != 1 {
+		t.Fatal("shared file does not have one declaration owner")
+	}
+	owner := doc.Providers[0].AuthSecrets
+	doc.Providers[0], doc.Providers[github] = doc.Providers[github], doc.Providers[0]
+	if err := validateAuthSecrets(doc, "reordered"); err != nil {
+		t.Fatal("endpoint association depends on owner declaration order", err)
+	}
+	doc.Providers[0].AuthSecrets = owner
+	if err := validateAuthSecrets(doc, "duplicate-owner"); err == nil {
+		t.Fatal("duplicate shared-file owners accepted")
+	}
+}

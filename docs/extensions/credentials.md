@@ -219,14 +219,14 @@ User-facing behavior per tool is in
 
 `providers[].authSecrets` and `tokenEndpoint` are reserved for the internal protected-auth
 implementation. They do not enable a protected session or change ordinary auth
-behavior. Claude, Codex, Pi and OpenCode enable them with `--protect-auth`; see
+behavior. Claude, Codex, Pi, OpenCode and Copilot enable them with `--protect-auth`; see
 [protected native auth](../auth.md#protected-native-auth).
 
 | Field | Meaning |
 |-------|---------|
-| `authSecrets[].file` | Unique relative path; must appear in `authFiles` unless `checkOnly` |
+| `authSecrets[].file` | One declaration owner per relative path across the profile; must appear in its owner’s `authFiles` unless `checkOnly` |
 | `authSecrets[].checkOnly` | Inspect credential pointers in the config store; refuse raw values, leave metadata untouched, never project or reconcile the file |
-| `authSecrets[].codec` | Native format; projection currently implements `claude-credentials`, `claude-config`, `codex-auth` and `provider-map` |
+| `authSecrets[].codec` | Native format; projection currently implements `claude-credentials`, `claude-config`, `codex-auth`, `provider-map` and `copilot-config` |
 | `authSecrets[].fields[].pointer` | RFC 6901 object-field pointer; at most one `*` segment; arrays are not supported |
 | `fields[].kind` | `access`, `refresh`, `id`, or `apiKey` |
 | `fields[].release` | Existing `network.serviceAuth` id; required for access/API keys, forbidden for refresh/ID tokens |
@@ -244,7 +244,16 @@ credential's placeholder and refuse a raw native key when no such credential is
 configured. A native access field may reference an HTTP release source without
 an env alias; unrelated empty-env sources still refuse.
 
-The prototype reads only declared, bounded regular files and publishes private
+For a shared provider-map file, declare all its fields once. Each token endpoint
+uses the profile's single supported exchange file; the endpoint provider need not
+own that declaration. Duplicate owners or ambiguous native files refuse. The
+provider's concrete map key still namespaces bindings, independent of the file's
+owner. Copilot's equal access/refresh slots and legacy/current account keys share
+one opaque placeholder. Other credentials keep independent bindings. Copilot’s
+leading JSONC headers are read from canonical files and stripped from views;
+regular native paths containing comment bytes remain a strict refusal.
+
+The gateway reads only declared, bounded regular files and publishes private
 per-session views. `bindings.json` stores placeholder identities, not grants;
 native files remain canonical. Unknown keys are stripped from projected views
 but stay in the canonical files. Native-path classification is strict: unknown

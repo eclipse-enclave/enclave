@@ -105,6 +105,16 @@ func SaveBindings(dir string, bindings Bindings) error {
 	return WriteNative(dir, BindingsFile, data)
 }
 
+func credentialAlias(provider, pointer string) string {
+	if provider == "github-copilot" && (pointer == "/github-copilot/access" || pointer == "/github-copilot/refresh") {
+		return "/github-copilot"
+	}
+	if provider == "github" && strings.HasPrefix(pointer, "/authTokens/") {
+		return strings.TrimSuffix(strings.TrimSuffix(pointer, "/token"), ":github")
+	}
+	return pointer
+}
+
 // Bind returns the stable opaque placeholder for a declared credential field.
 func (b *Bindings) Bind(provider, file, pointer, kind string, shape *model.SecretPlaceholderConfig, apiPlaceholder string) (Binding, error) {
 	for _, binding := range b.Bindings {
@@ -116,13 +126,19 @@ func (b *Bindings) Bind(provider, file, pointer, kind string, shape *model.Secre
 		}
 	}
 	binding := Binding{Provider: provider, File: file, Pointer: pointer, Kind: kind}
+	for _, known := range b.Bindings {
+		if known.Provider == provider && known.File == file && credentialAlias(provider, known.Pointer) == credentialAlias(provider, pointer) {
+			binding.Placeholder = known.Placeholder
+			break
+		}
+	}
 	var err error
 	if kind == "apiKey" {
 		if !strings.Contains(apiPlaceholder, model.SecretPlaceholderMarker) {
 			return binding, fmt.Errorf("native API key requires a recognizable env placeholder")
 		}
 		binding.Placeholder = apiPlaceholder
-	} else {
+	} else if binding.Placeholder == "" {
 		if shape != nil && shape.Shape == "jwt" {
 			binding.Shape, shape = "jwt", nil
 		}

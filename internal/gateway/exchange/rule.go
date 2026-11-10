@@ -25,11 +25,10 @@ import (
 
 const maxBodyBytes = 64 << 10
 
-// Config is a declaration, not a snapshot of native credentials. Slice 2 only
-// implements Claude; other codecs arrive with their first exchange consumer.
+// Config declares mediated native providers, never a credential snapshot.
 type Config struct {
-	Provider model.ProviderConfig          `json:"provider"`
-	Secrets  map[string]model.SecretConfig `json:"secrets"`
+	Providers []model.ProviderConfig        `json:"providers"`
+	Secrets   map[string]model.SecretConfig `json:"secrets"`
 }
 
 func endpointHost(req *http.Request) string {
@@ -43,35 +42,41 @@ func endpointHost(req *http.Request) string {
 // Intercept owns both successful exchanges and refusals. No endpoint request
 // falls back to ordinary forwarding after a parser or store error.
 func (s *Store) Intercept(req *http.Request, scheme string) (*http.Response, bool) {
-	host := endpointHost(req)
-	endpoint := s.config.Provider.TokenEndpoint
-	canonicalPath := path.Clean("/" + req.URL.Path)
-	for _, denied := range endpoint.Deny {
-		if host == denied.Host && canonicalPath == denied.Path {
+	for _, s := range s.routes {
+		host := endpointHost(req)
+		endpoint := s.provider.TokenEndpoint
+		canonicalPath := path.Clean("/" + req.URL.Path)
+		if endpoint.Host == "github.com" && host == "github.com" && strings.HasPrefix(strings.ToLower(canonicalPath), "/login/oauth") && req.URL.Path != endpoint.Path {
 			return refusal(http.StatusForbidden), true
 		}
-	}
-	if host != endpoint.Host || canonicalPath != endpoint.Path {
-		return nil, false
-	}
-	_, port, portErr := net.SplitHostPort(req.Host)
-	if (portErr == nil && port != "443") || scheme != "https" || req.Method != http.MethodPost || req.URL.Path != endpoint.Path || req.URL.RawQuery != "" || req.URL.RawPath != "" {
-		return refusal(http.StatusForbidden), true
-	}
-	values, err := parseRequest(req, endpoint.Body)
-	if err != nil || !slices.Contains(endpoint.Grants, values["grant_type"]) {
-		return refusal(http.StatusForbidden), true
-	}
-	if values["grant_type"] == "authorization_code" && (values["code"] == "" || values["refresh_token"] != "") {
-		return refusal(http.StatusForbidden), true
-	}
-	for key, value := range values {
-		if strings.Contains(key, model.SecretPlaceholderMarker) || (strings.Contains(value, model.SecretPlaceholderMarker) && key != endpoint.Fields["refresh"]) {
+		for _, denied := range endpoint.Deny {
+			if host == denied.Host && canonicalPath == denied.Path {
+				return refusal(http.StatusForbidden), true
+			}
+		}
+		if host != endpoint.Host || canonicalPath != endpoint.Path {
+			continue
+		}
+		_, port, portErr := net.SplitHostPort(req.Host)
+		if (portErr == nil && port != "443") || scheme != "https" || req.Method != http.MethodPost || req.URL.Path != endpoint.Path || req.URL.RawQuery != "" || req.URL.RawPath != "" {
 			return refusal(http.StatusForbidden), true
 		}
+		values, err := parseRequest(req, endpoint.Body)
+		if err != nil || !slices.Contains(endpoint.Grants, values["grant_type"]) {
+			return refusal(http.StatusForbidden), true
+		}
+		if values["grant_type"] == "authorization_code" && (values["code"] == "" || values["refresh_token"] != "") {
+			return refusal(http.StatusForbidden), true
+		}
+		for key, value := range values {
+			if strings.Contains(key, model.SecretPlaceholderMarker) || (strings.Contains(value, model.SecretPlaceholderMarker) && key != endpoint.Fields["refresh"]) {
+				return refusal(http.StatusForbidden), true
+			}
+		}
+		media, _, _ := mime.ParseMediaType(req.Header.Get("Content-Type"))
+		return s.transact(req.Context(), values, media), true
 	}
-	media, _, _ := mime.ParseMediaType(req.Header.Get("Content-Type"))
-	return s.transact(req.Context(), values, media), true
+	return nil, false
 }
 
 func parseRequest(req *http.Request, body string) (map[string]string, error) {
@@ -154,4 +159,20 @@ func refusal(status int) *http.Response {
 func response(status int, headers http.Header, data []byte) *http.Response {
 	headers.Set("Content-Type", "application/json")
 	return &http.Response{StatusCode: status, Header: headers, Body: io.NopCloser(bytes.NewReader(data)), ContentLength: int64(len(data))}
+}
+
+func copilotUserRequest(req *http.Request) bool {
+	if req.Method != http.MethodGet || req.URL.Path != "/copilot_internal/user" || req.URL.RawPath != "" || req.URL.RawQuery != "" || req.URL.ForceQuery || req.ContentLength != 0 || len(req.Trailer) != 0 || (req.URL.Port() != "" && req.URL.Port() != "443") {
+		return false
+	}
+	if req.Body != nil {
+		var first [1]byte
+		n, err := req.Body.Read(first[:])
+		req.Body = struct {
+			io.Reader
+			io.Closer
+		}{io.MultiReader(bytes.NewReader(first[:n]), req.Body), req.Body}
+		return n == 0 && err == io.EOF && len(req.Trailer) == 0
+	}
+	return true
 }

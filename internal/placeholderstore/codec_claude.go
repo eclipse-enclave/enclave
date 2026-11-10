@@ -48,8 +48,8 @@ func decodeAuthFile(file model.AuthFileSecret, data []byte, purpose nativePurpos
 			declared = declared || model.AuthPointerMatches(field.Pointer, pointer)
 		}
 		if !declared {
-			if file.Codec == "provider-map" {
-				return nil, nil, fmt.Errorf("provider auth contains undeclared credential fields")
+			if file.Codec == "provider-map" || file.Codec == "copilot-config" {
+				return nil, nil, fmt.Errorf("native auth contains undeclared credential fields")
 			}
 			return nil, nil, fmt.Errorf("credential field %s is not declared", pointer)
 		}
@@ -101,6 +101,13 @@ func decodeAuthFile(file model.AuthFileSecret, data []byte, purpose nativePurpos
 }
 
 func decodeNative(codec string, data []byte, purpose nativePurpose) (map[string]any, []string, error) {
+	if codec == "copilot-config" && (purpose == canonicalNative || purpose == projectedView) {
+		data = bytes.TrimLeft(data, " \t\r\n")
+		for bytes.HasPrefix(data, []byte("//")) {
+			_, data, _ = bytes.Cut(data, []byte("\n"))
+			data = bytes.TrimLeft(data, " \t\r\n")
+		}
+	}
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	if err := uniqueJSONValue(decoder, 0); err != nil {
 		return nil, nil, fmt.Errorf("invalid native credential JSON")
@@ -164,9 +171,40 @@ func decodeNative(codec string, data []byte, purpose nativePurpose) (map[string]
 			if err := filterFields(entry, allowed, purpose); err != nil {
 				return nil, nil, err
 			}
+			access, _ := entry["access"].(string)
+			refresh, _ := entry["refresh"].(string)
+			if key == "github-copilot" && access != refresh {
+				return nil, nil, fmt.Errorf("copilot native access and refresh must hold the same grant")
+			}
 			for _, leaf := range leaves {
 				pointers = append(pointers, "/"+model.EscapeAuthPointer(key)+"/"+leaf)
 			}
+		}
+		return doc, pointers, nil
+	case "copilot-config":
+		if err := filterFields(doc, map[string]string{"authTokens": "object", "loggedInUsers": "accounts", "lastLoggedInUser": "account", "storeTokenPlaintext": "bool"}, purpose); err != nil {
+			return nil, nil, err
+		}
+		var pointers []string
+		tokens, _ := doc["authTokens"].(map[string]any)
+		aliases := map[string]string{}
+		for _, key := range slices.Sorted(maps.Keys(tokens)) {
+			entry, ok := tokens[key].(map[string]any)
+			if !ok {
+				return nil, nil, fmt.Errorf("invalid native Copilot token entry")
+			}
+			if err := filterFields(entry, map[string]string{"token": "string"}, purpose); err != nil {
+				return nil, nil, err
+			}
+			account := strings.TrimSuffix(key, ":github")
+			token, _ := entry["token"].(string)
+			if !strings.HasPrefix(account, "https://github.com:") || account == "https://github.com:" || strings.Contains(strings.TrimPrefix(account, "https://github.com:"), ":") || (aliases[account] != "" && token != "" && aliases[account] != token) {
+				return nil, nil, fmt.Errorf("unsupported or inconsistent Copilot native account")
+			}
+			if token != "" {
+				aliases[account] = token
+			}
+			pointers = append(pointers, "/authTokens/"+model.EscapeAuthPointer(key)+"/token")
 		}
 		return doc, pointers, nil
 	case "claude-config":
@@ -214,6 +252,18 @@ func filterFields(object map[string]any, allowed map[string]string, purpose nati
 			_, valid = value.(bool)
 		case "object":
 			_, valid = value.(map[string]any)
+		case "accounts", "account":
+			entries, ok := value.([]any)
+			if kind == "account" {
+				entries, ok = []any{value}, true
+			}
+			valid = ok
+			for _, entry := range entries {
+				account, ok := entry.(map[string]any)
+				if !ok || filterFields(account, map[string]string{"host": "string", "login": "string", "kind": "string"}, purpose) != nil {
+					valid = false
+				}
+			}
 		case "strings":
 			if values, ok := value.([]any); ok {
 				valid = true
@@ -337,4 +387,6 @@ func (native NativeFile) ReplyMetadata(codec, provider string) (scope string, ex
 	return
 }
 
-func HasClientMetadata(codec string) bool { return codec != "codex-auth" && codec != "provider-map" }
+func HasClientMetadata(codec string) bool {
+	return codec != "codex-auth" && codec != "provider-map" && codec != "copilot-config"
+}

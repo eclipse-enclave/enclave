@@ -26,7 +26,7 @@ func TestNativeStartupMountsAndCapabilityGate(t *testing.T) {
 	if err := os.Mkdir(store, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(config, []byte(`{"provider":{},"secrets":{}}`), 0o600); err != nil {
+	if err := os.WriteFile(config, []byte(`{"providers":[{}],"secrets":{}}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	cfg := &NativeAuthStart{ConfigFile: config, StoreDir: store, LockPath: filepath.Join(dir, "canonical.lock"), UID: 1000, GID: 1000}

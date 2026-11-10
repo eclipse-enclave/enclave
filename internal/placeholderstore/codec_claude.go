@@ -104,6 +104,16 @@ func decodeNative(codec string, data []byte, purpose nativePurpose) (map[string]
 			}
 		}
 		return doc, []string{"/claudeAiOauth/accessToken", "/claudeAiOauth/refreshToken"}, nil
+	case "codex-auth":
+		if err := filterFields(doc, map[string]string{"auth_mode": "string", "OPENAI_API_KEY": "string", "tokens": "object", "last_refresh": "string"}, purpose); err != nil {
+			return nil, nil, err
+		}
+		if tokens, ok := doc["tokens"].(map[string]any); ok {
+			if err := filterFields(tokens, map[string]string{"access_token": "string", "refresh_token": "string", "id_token": "string", "account_id": "string"}, purpose); err != nil {
+				return nil, nil, err
+			}
+		}
+		return doc, []string{"/OPENAI_API_KEY", "/tokens/access_token", "/tokens/refresh_token", "/tokens/id_token"}, nil
 	case "claude-config":
 		if err := filterFields(doc, map[string]string{"primaryApiKey": "string", "anthropicApiKey": "string", "allowTelemetry": "bool", "hasCompletedOnboarding": "bool", "lastOnboardingVersion": "string", "forceLoginMethod": "string", "oauthAccount": "object"}, purpose); err != nil {
 			return nil, nil, err

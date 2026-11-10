@@ -148,7 +148,7 @@ The network request flow, restricted and unrestricted, has separate
 | [`internal/mounts/sensitive.go`](../internal/mounts/sensitive.go) | The sensitive-path rule ([mounts.md](mounts.md#sensitive-mounts)) |
 | [`internal/auth/auth.go`](../internal/auth/auth.go) | Layered secrets, auth file copies, Claude-specific config |
 | [`internal/placeholderstore/`](../internal/placeholderstore/) | Native credential projection, durable canonical IO, stable bindings and native-path classification |
-| [`internal/gateway/exchange/`](../internal/gateway/exchange/) | Claude exchange transactions, read-through native release and loaded-config capability attestation |
+| [`internal/gateway/exchange/`](../internal/gateway/exchange/) | Claude/Codex exchange transactions, read-through native release and loaded-config capability attestation |
 | [`internal/auth/secret_injection.go`](../internal/auth/secret_injection.go) | `PlaceholderResolver`: caches env placeholders; shared generation lives in `internal/model/secret_placeholder.go` |
 | [`internal/gateway/gateway.go`](../internal/gateway/gateway.go) | Sidecar container and network; keeps logs until explicit removal, removes by immutable ID |
 | [`internal/gateway/bundle/`](../internal/gateway/bundle/bundle.go) | Host-managed bundles (`dnsmasq.conf`, `domains.txt`, `meta.json`) for apply and reload |

@@ -53,7 +53,7 @@ func TestProtectedAuthRefusesUnsupportedOptions(t *testing.T) {
 			b.BaseImage = "custom"
 		}},
 		{"other-tool", func(_ *model.RunOptions, _ *model.AuthOptions, _ *model.BuildOptions, p *model.Profile) {
-			p.Name = "codex"
+			p.Name = "unsupported"
 		}},
 		{"no-declaration", func(_ *model.RunOptions, _ *model.AuthOptions, _ *model.BuildOptions, p *model.Profile) {
 			p.Providers = nil
@@ -77,7 +77,14 @@ func TestProtectedAuthRefusesUnsupportedOptions(t *testing.T) {
 }
 
 func TestProtectedViewMountAndDynamicReleaseContract(t *testing.T) {
-	r := bearerTokenRuntime(t, "claude")
+	for _, tool := range []string{"claude", "codex"} {
+		t.Run(tool, func(t *testing.T) { testProtectedViewMount(t, tool) })
+	}
+}
+
+func testProtectedViewMount(t *testing.T, tool string) {
+	t.Helper()
+	r := bearerTokenRuntime(t, tool)
 	r.run.ProtectAuth, r.run.Persist = true, true
 	r.auth.AuthScope, r.containerHome = model.AuthScopeShared, model.ContainerHome
 	r.features = []model.Extension{{Name: "github-cli", ConfigDir: ".config/gh", AuthFiles: []string{"hosts.yml"}}}
@@ -101,6 +108,14 @@ func TestProtectedViewMountAndDynamicReleaseContract(t *testing.T) {
 	}
 	writeFile(t, filepath.Join(realDir, ".credentials.json"), `{"claudeAiOauth":{"accessToken":"native-access-synthetic","refreshToken":"native-refresh-synthetic","expiresAt":4102444800000}}`)
 	writeFile(t, filepath.Join(realDir, "config.json"), `{"primaryApiKey":"native-api-synthetic"}`)
+	apiID := "anthropic-api-key"
+	if tool == "codex" {
+		apiID = "openai-api-key"
+		writeFile(t, filepath.Join(realDir, "auth.json"), `{"auth_mode":"chatgpt","OPENAI_API_KEY":"native-api-synthetic","tokens":{"access_token":"e30.eyJleHAiOjQxMDI0NDQ4MDB9.c3ludGhldGlj","id_token":"e30.e30.c3ludGhldGlj","refresh_token":"native-refresh-synthetic"}}`)
+	}
+	if err := ValidateProtectedAuth(r.run, r.auth, r.build, r.profile); err != nil {
+		t.Fatal(err)
+	}
 	var firstAlias string
 	for _, id := range []string{"first", "second"} {
 		mode := &backend.SessionMode{ConfigStore: stores.Config.Key, HolderID: id}
@@ -112,8 +127,9 @@ func TestProtectedViewMountAndDynamicReleaseContract(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		mapping := SecretMapping{Entries: []model.SecretReleaseEntry{{SecretID: "anthropic-api-key", Placeholder: placeholder,
-			Value: "configured-api-synthetic-" + id, Hosts: []string{"api.anthropic.com"}, Header: "x-api-key"}}}
+		rule := r.profile.Secrets[apiID].Release.HTTP
+		mapping := SecretMapping{Entries: []model.SecretReleaseEntry{{SecretID: apiID, Placeholder: placeholder,
+			Value: "configured-api-synthetic-" + id, Hosts: rule.Hosts, Header: rule.Header, Format: rule.Format}}}
 		mounts := newMountAccumulator(nil, nil)
 		r.addConfigMount(mounts, stores.Config)
 		native, _, err := r.prepareProtectedAuth(stores, mounts, &mapping, mode)
@@ -124,7 +140,7 @@ func TestProtectedViewMountAndDynamicReleaseContract(t *testing.T) {
 		if len(mounts.mounts) != 1 || mounts.mounts[0].Source == realDir || len(mounts.stores) != 1 || mounts.stores[0].Kind != backend.StoreKindConfig {
 			t.Fatalf("canonical credentials reached workload mounts: %+v %+v", mounts.mounts, mounts.stores)
 		}
-		for _, file := range []string{".credentials.json", "config.json"} {
+		for _, file := range r.profile.ProviderAuthFiles() {
 			data, err := os.ReadFile(filepath.Join(mounts.mounts[0].Source, file))
 			if err != nil || bytes.Contains(data, []byte("native-")) || !bytes.Contains(data, []byte(model.SecretPlaceholderMarker)) {
 				t.Fatalf("unsafe view %s: %v", file, err)
@@ -142,7 +158,7 @@ func TestProtectedViewMountAndDynamicReleaseContract(t *testing.T) {
 			t.Fatal("stable native API alias did not track the current env release")
 		}
 		for _, entry := range mapping.Entries {
-			if entry.SecretID != "anthropic-api-key" {
+			if entry.SecretID != apiID {
 				t.Fatal("native OAuth snapshot entered static release rules")
 			}
 		}

@@ -38,7 +38,7 @@ func New(config Config, dir, lockPath, session string, env []model.SecretRelease
 	}
 	var file model.AuthFileSecret
 	for _, candidate := range config.Provider.AuthSecrets {
-		if !candidate.CheckOnly && candidate.Codec == "claude-credentials" {
+		if !candidate.CheckOnly && (candidate.Codec == "claude-credentials" || candidate.Codec == "codex-auth") {
 			if file.File != "" {
 				return nil, fmt.Errorf("ambiguous native exchange file")
 			}
@@ -46,15 +46,18 @@ func New(config Config, dir, lockPath, session string, env []model.SecretRelease
 		}
 	}
 	if file.File == "" {
-		return nil, fmt.Errorf("protected exchange currently requires Claude credentials")
+		return nil, fmt.Errorf("protected exchange requires a supported native codec")
 	}
 	if config.Provider.TokenEndpoint.Fields["refresh"] == "" {
 		return nil, fmt.Errorf("native exchange requires a refresh response field")
 	}
 	kinds := map[string]bool{}
 	for _, field := range file.Fields {
-		expected := "/claudeAiOauth/" + map[string]string{"access": "accessToken", "refresh": "refreshToken"}[field.Kind]
-		if (field.Kind != "access" && field.Kind != "refresh") || field.Pointer != expected {
+		expected := map[string]string{"access": "/claudeAiOauth/accessToken", "refresh": "/claudeAiOauth/refreshToken"}[field.Kind]
+		if file.Codec == "codex-auth" {
+			expected = map[string]string{"access": "/tokens/access_token", "refresh": "/tokens/refresh_token", "id": "/tokens/id_token", "apiKey": "/OPENAI_API_KEY"}[field.Kind] // #nosec G101 -- native JSON pointers, not credential values.
+		}
+		if expected == "" || field.Pointer != expected {
 			return nil, fmt.Errorf("unsupported Claude exchange fields")
 		}
 		kinds[field.Kind] = true
@@ -145,7 +148,20 @@ func (s *Store) Releases(ctx context.Context, headers http.Header) ([]model.Secr
 		h := secret.Release.HTTP
 		rule := model.SecretReleaseEntry{SecretID: field.Release, Value: value, Hosts: h.Hosts, Header: h.Header, Format: h.Format}
 		rule.Placeholder = b.Placeholder
-		rules = append(rules, rule)
+		if b.Shape == "jwt" {
+			for _, values := range headers {
+				for _, header := range values {
+					for _, candidate := range strings.Fields(header) {
+						if b.Matches(candidate) {
+							rule.Placeholder = candidate
+							rules = append(rules, rule)
+						}
+					}
+				}
+			}
+		} else {
+			rules = append(rules, rule)
+		}
 	}
 	return rules, nil
 }

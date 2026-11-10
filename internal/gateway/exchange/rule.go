@@ -15,6 +15,7 @@ import (
 	"mime"
 	"net"
 	"net/http"
+	"net/url"
 	"path"
 	"slices"
 	"strings"
@@ -57,7 +58,7 @@ func (s *Store) Intercept(req *http.Request, scheme string) (*http.Response, boo
 	if (portErr == nil && port != "443") || scheme != "https" || req.Method != http.MethodPost || req.URL.Path != endpoint.Path || req.URL.RawQuery != "" || req.URL.RawPath != "" {
 		return refusal(http.StatusForbidden), true
 	}
-	values, err := parseRequest(req)
+	values, err := parseRequest(req, endpoint.Body)
 	if err != nil || !slices.Contains(endpoint.Grants, values["grant_type"]) {
 		return refusal(http.StatusForbidden), true
 	}
@@ -69,12 +70,13 @@ func (s *Store) Intercept(req *http.Request, scheme string) (*http.Response, boo
 			return refusal(http.StatusForbidden), true
 		}
 	}
-	return s.transact(req.Context(), values), true
+	media, _, _ := mime.ParseMediaType(req.Header.Get("Content-Type"))
+	return s.transact(req.Context(), values, media), true
 }
 
-func parseRequest(req *http.Request) (map[string]string, error) {
+func parseRequest(req *http.Request, body string) (map[string]string, error) {
 	media, _, err := mime.ParseMediaType(req.Header.Get("Content-Type"))
-	if err != nil || media != "application/json" {
+	if err != nil || (media != "application/json" && media != "application/x-www-form-urlencoded") || (body == "json" && media != "application/json") || (body == "form" && media != "application/x-www-form-urlencoded") {
 		return nil, fmt.Errorf("exchange requires JSON")
 	}
 	if enc := req.Header.Get("Content-Encoding"); enc != "" && !strings.EqualFold(enc, "identity") {
@@ -83,6 +85,20 @@ func parseRequest(req *http.Request) (map[string]string, error) {
 	data, err := io.ReadAll(io.LimitReader(req.Body, maxBodyBytes+1))
 	if err != nil || len(data) > maxBodyBytes {
 		return nil, fmt.Errorf("invalid exchange body")
+	}
+	if media == "application/x-www-form-urlencoded" {
+		form, err := url.ParseQuery(string(data))
+		if err != nil {
+			return nil, err
+		}
+		values := map[string]string{}
+		for key, entries := range form {
+			if len(entries) != 1 {
+				return nil, fmt.Errorf("duplicate exchange field")
+			}
+			values[key] = entries[0]
+		}
+		return values, nil
 	}
 	object, err := objectJSON(data)
 	if err != nil {

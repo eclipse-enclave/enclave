@@ -53,7 +53,7 @@ func ClassifyNative(configDir, expectedAuthDir string, profile model.Profile, cu
 					return nil, nativeRefusal(file.File)
 				}
 				for _, native := range values {
-					if !strings.Contains(native.value, model.SecretPlaceholderMarker) {
+					if !model.MatchesSecretPlaceholder(native.value, profile.Secrets[native.field.Release].Placeholder) {
 						return nil, fmt.Errorf("refusing protected native path %s field %s: remove the stored credential or use ordinary mode", file.File, native.field.Pointer)
 					}
 				}

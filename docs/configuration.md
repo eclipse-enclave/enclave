@@ -115,7 +115,7 @@ See [Authentication and secrets](auth.md).
 | Key | Description |
 |-----|-------------|
 | `ephemeral` | No persistent auth/env stores |
-| `protect_auth` | Opt-in [native Claude credential protection](auth.md#protected-native-auth); default `false`, requires restricted networking |
+| `protect_auth` | Opt-in [native Claude/Codex credential protection](auth.md#protected-native-auth); default `false`, requires restricted networking |
 | `auth_scope` | `shared` (default) or `project` |
 | `auth_name` | Named per-tool shared auth identity; unset uses the default |
 | `secrets_scope` | `both` (default), `global`, or `project` |

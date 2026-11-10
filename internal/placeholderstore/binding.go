@@ -11,6 +11,7 @@ package placeholderstore
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -33,6 +34,7 @@ type Bindings struct {
 }
 
 type Binding struct {
+	Shape       string `json:"shape,omitempty"`
 	Provider    string `json:"provider"`
 	File        string `json:"file"`
 	Pointer     string `json:"pointer"`
@@ -41,6 +43,10 @@ type Binding struct {
 }
 
 func (b Binding) Matches(value string) bool {
+	if b.Shape == "jwt" {
+		parts := strings.Split(value, ".")
+		return len(parts) == 3 && parts[2] == b.Placeholder
+	}
 	return value == b.Placeholder && value != ""
 }
 
@@ -85,7 +91,7 @@ func LoadBindings(dir string) (Bindings, error) {
 		key := binding.Provider + "\x00" + binding.File + "\x00" + binding.Pointer
 		_, pointerErr := model.AuthPointerSegments(binding.Pointer)
 		value := binding.Placeholder
-		if binding.Provider == "" || !slices.Contains([]string{"access", "refresh", "id", "apiKey"}, binding.Kind) || !model.ValidAuthFilePath(binding.File) || pointerErr != nil || seen[key] || binding.Placeholder == "" || !strings.Contains(value, model.SecretPlaceholderMarker) {
+		if (binding.Shape != "" && binding.Shape != "jwt") || (binding.Shape == "jwt" && ((binding.Kind != "access" && binding.Kind != "id") || !model.MatchesSecretPlaceholder(binding.Placeholder, nil))) || binding.Provider == "" || !slices.Contains([]string{"access", "refresh", "id", "apiKey"}, binding.Kind) || !model.ValidAuthFilePath(binding.File) || pointerErr != nil || seen[key] || binding.Placeholder == "" || !strings.Contains(value, model.SecretPlaceholderMarker) {
 			return b, fmt.Errorf("invalid native credential binding")
 		}
 		seen[key] = true
@@ -103,7 +109,7 @@ func SaveBindings(dir string, bindings Bindings) error {
 func (b *Bindings) Bind(provider, file, pointer, kind string, shape *model.SecretPlaceholderConfig, apiPlaceholder string) (Binding, error) {
 	for _, binding := range b.Bindings {
 		if binding.Provider == provider && binding.File == file && binding.Pointer == pointer {
-			if binding.Kind != kind {
+			if binding.Kind != kind || (shape != nil && binding.Shape != shape.Shape) || (shape == nil && binding.Shape != "") {
 				return Binding{}, fmt.Errorf("native credential binding changed; reset the identity")
 			}
 			return binding, nil
@@ -117,6 +123,9 @@ func (b *Bindings) Bind(provider, file, pointer, kind string, shape *model.Secre
 		}
 		binding.Placeholder = apiPlaceholder
 	} else {
+		if shape != nil && shape.Shape == "jwt" {
+			binding.Shape, shape = "jwt", nil
+		}
 		if shape != nil {
 			copy := *shape
 			copy.Prefix += model.SecretPlaceholderMarker
@@ -201,4 +210,38 @@ func openStoreRoot(dir string) (*os.Root, error) {
 		return nil, fmt.Errorf("native store root changed")
 	}
 	return root, nil
+}
+
+// JWTClaims leaves validation of provider signatures to the upstream provider.
+func JWTClaims(value string) (map[string]any, error) {
+	parts := strings.Split(value, ".")
+	if len(parts) != 3 || parts[0] == "" || parts[2] == "" {
+		return nil, fmt.Errorf("invalid native JWT")
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return nil, fmt.Errorf("invalid native JWT claims")
+	}
+	decoder := json.NewDecoder(bytes.NewReader(payload))
+	decoder.UseNumber()
+	var claims map[string]any
+	if err := decoder.Decode(&claims); err != nil || claims == nil {
+		return nil, fmt.Errorf("invalid native JWT claims")
+	}
+	if _, err := decoder.Token(); err != io.EOF {
+		return nil, fmt.Errorf("trailing native JWT claims")
+	}
+	return claims, nil
+}
+
+// Render updates readable JWT claims while retaining the identity's bound signature.
+func (b Binding) Render(value string) (string, error) {
+	if b.Shape != "jwt" {
+		return b.Placeholder, nil
+	}
+	if _, err := JWTClaims(value); err != nil {
+		return "", err
+	}
+	parts := strings.Split(value, ".")
+	return parts[0] + "." + parts[1] + "." + b.Placeholder, nil
 }

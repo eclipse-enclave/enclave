@@ -304,6 +304,9 @@ func TestLoadBindingsRejectsAmbiguousMetadata(t *testing.T) {
 		`{"schema":1,"bindings":[]} {}`,
 		`{"schema":1,"bindings":[{"provider":"p","file":"a.json","pointer":"/access","kind":"unknown","placeholder":"ENCLAVE_SECRET_example"}]}`,
 		`{"schema":1,"bindings":[{"provider":"p","file":"a.json","pointer":"/access","kind":"access","placeholder":"not-a-placeholder"}]}`,
+		`{"schema":1,"bindings":[{"provider":"p","file":"a.json","pointer":"/access","kind":"access","shape":"unknown","placeholder":"ENCLAVE_SECRET_example"}]}`,
+		`{"schema":1,"bindings":[{"provider":"p","file":"a.json","pointer":"/access","kind":"refresh","shape":"jwt","placeholder":"ENCLAVE_SECRET_example"}]}`,
+		`{"schema":1,"bindings":[{"provider":"p","file":"a.json","pointer":"/access","kind":"access","shape":"jwt","placeholder":"prefix.ENCLAVE_SECRET_suffix"}]}`,
 	} {
 		real := t.TempDir()
 		nativeFile(t, real, BindingsFile, data)

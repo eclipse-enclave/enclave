@@ -9,11 +9,13 @@ package exchange
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -73,7 +75,7 @@ func fixture(t *testing.T, existing bool) (*Store, string) {
 	return nil, ""
 }
 
-func invoke(t *testing.T, s *Store, grant, refresh string) (*http.Response, map[string]any) {
+func invoke(t *testing.T, s *Store, grant, refresh string, form ...bool) (*http.Response, map[string]any) {
 	t.Helper()
 	values := map[string]string{"grant_type": grant}
 	if grant == "refresh_token" {
@@ -81,8 +83,17 @@ func invoke(t *testing.T, s *Store, grant, refresh string) (*http.Response, map[
 	} else {
 		values["code"] = "synthetic-one-use-code"
 	}
-	req := httptest.NewRequest(http.MethodPost, "https://platform.claude.com/v1/oauth/token", strings.NewReader(string(mustJSON(values))))
-	req.Header.Set("Content-Type", "application/json")
+	body, media := string(mustJSON(values)), "application/json"
+	if len(form) > 0 && form[0] {
+		fields := url.Values{}
+		for key, value := range values {
+			fields.Set(key, value)
+		}
+		body, media = fields.Encode(), "application/x-www-form-urlencoded"
+	}
+	endpoint := s.config.Provider.TokenEndpoint
+	req := httptest.NewRequest(http.MethodPost, "https://"+endpoint.Host+endpoint.Path, strings.NewReader(body))
+	req.Header.Set("Content-Type", media)
 	resp, handled := s.Intercept(req, "https")
 	if !handled {
 		t.Fatal("endpoint bypassed exchange")
@@ -548,4 +559,138 @@ func TestConcurrentRequestsSerializeNativeRotations(t *testing.T) {
 		}()
 	}
 	wg.Wait()
+}
+
+func syntheticJWT(exp int64, signature string) string {
+	payload := mustJSON(map[string]any{"exp": exp, "https://api.openai.com/auth": map[string]string{"chatgpt_account_id": "synthetic-account"}})
+	return "eyJhbGciOiJSUzI1NiJ9." + base64.RawURLEncoding.EncodeToString(payload) + "." + base64.RawURLEncoding.EncodeToString([]byte(signature))
+}
+
+func TestCodexLoginRefreshAndCachedJWTRelease(t *testing.T) {
+	config := testConfig()
+	config.Provider.Name = "openai-codex"
+	config.Provider.TokenEndpoint = &model.TokenEndpoint{Host: "auth.openai.com", Path: "/oauth/token", Body: "either", Grants: []string{"authorization_code", "refresh_token"}, Fields: map[string]string{"access": "access_token", "refresh": "refresh_token", "id": "id_token", "expiresIn": "expires_in", "scope": "scope"}}
+	config.Provider.AuthSecrets = []model.AuthFileSecret{{File: "auth.json", Codec: "codex-auth", Fields: []model.AuthSecretField{
+		{Pointer: "/OPENAI_API_KEY", Kind: "apiKey", Release: "api"},
+		{Pointer: "/tokens/access_token", Kind: "access", Release: "oauth", Placeholder: &model.SecretPlaceholderConfig{Shape: "jwt"}},
+		{Pointer: "/tokens/refresh_token", Kind: "refresh"},
+		{Pointer: "/tokens/id_token", Kind: "id", Placeholder: &model.SecretPlaceholderConfig{Shape: "jwt"}},
+	}}}
+	s, err := New(config, t.TempDir(), filepath.Join(t.TempDir(), "canonical.lock"), "codex", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 11, 10, 12, 0, 0, 0, time.UTC)
+	s.now = func() time.Time { return now }
+	var calls int
+	var currentAccess, currentID string
+	s.transport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		calls++
+		if req.GetBody != nil {
+			t.Fatal("exchange body can be replayed")
+		}
+		if calls == 1 && req.Header.Get("Content-Type") != "application/x-www-form-urlencoded" {
+			t.Fatal("form login was not preserved")
+		}
+		if calls > 1 {
+			var fields map[string]string
+			data, _ := io.ReadAll(req.Body)
+			if json.Unmarshal(data, &fields) != nil || fields["refresh_token"] != newRefresh {
+				t.Fatal("refresh did not use native grant")
+			}
+		}
+		currentAccess = syntheticJWT(now.Unix()+600+int64(calls), "access-signature")
+		currentID = syntheticJWT(now.Unix()+1200+int64(calls), "id-signature")
+		tokens := map[string]any{"access_token": currentAccess, "refresh_token": newRefresh, "id_token": currentID, "token_type": "Bearer", "scope": "openid profile"}
+		return response(200, http.Header{}, mustJSON(tokens)), nil
+	})
+	resp, first := invoke(t, s, "authorization_code", "", true)
+	if resp.StatusCode != 200 || first["expires_in"] != float64(601) {
+		t.Fatalf("form login failed: %v", first)
+	}
+	cached := first["access_token"].(string)
+	for _, kind := range []string{"access_token", "id_token"} {
+		claims, err := placeholderstore.JWTClaims(first[kind].(string))
+		if err != nil || claims["https://api.openai.com/auth"] == nil || !strings.Contains(first[kind].(string), model.SecretPlaceholderMarker) {
+			t.Fatal("JWT claims or signature missing")
+		}
+	}
+	resp, second := invoke(t, s, "refresh_token", first["refresh_token"].(string))
+	if resp.StatusCode != 200 || calls != 2 || second["access_token"] == cached {
+		t.Fatal("refresh did not update readable claims")
+	}
+	native, err := s.native()
+	if err != nil || native.Values["/tokens/access_token"] != currentAccess || native.Values["/tokens/id_token"] != currentID || native.Document["last_refresh"] != now.Format(time.RFC3339) || native.Document["tokens"].(map[string]any)["account_id"] != "synthetic-account" {
+		t.Fatal("native Codex layout not committed")
+	}
+	for _, token := range []string{cached, second["access_token"].(string)} {
+		rules, err := s.Releases(context.Background(), http.Header{"Authorization": []string{"Bearer " + token}})
+		if err != nil || len(rules) != 1 || rules[0].Placeholder != token || rules[0].Value != currentAccess {
+			t.Fatal("cached JWT signature did not release current access token")
+		}
+	}
+	if rules, err := s.Releases(context.Background(), http.Header{"Authorization": []string{"Bearer " + second["id_token"].(string)}}); err != nil || len(rules) != 0 {
+		t.Fatal("id token became an API release")
+	}
+	req := httptest.NewRequest("POST", "https://auth.openai.com/oauth/token", strings.NewReader(`{"grant_type":"urn:ietf:params:oauth:grant-type:token-exchange","subject_token":"`+second["id_token"].(string)+`"}`))
+	req.Header.Set("Content-Type", "application/json")
+	if denied, handled := s.Intercept(req, "https"); !handled || denied.StatusCode != 403 || calls != 2 {
+		t.Fatal("API-key token exchange escaped mediation")
+	}
+	profile := model.Profile{Providers: []model.ProviderConfig{config.Provider}, Secrets: config.Secrets}
+	view, err := placeholderstore.Project(s.dir, t.TempDir(), "fresh", profile, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(view.Dir, "auth.json"))
+	if err != nil || !strings.Contains(string(data), second["access_token"].(string)) || strings.Contains(string(data), currentAccess) || strings.Contains(string(data), currentID) {
+		t.Fatal("reprojection lost refreshed claims or leaked native tokens")
+	}
+	for _, replacement := range []string{cached, currentAccess, "e30.e30.ENCLAVE_SECRET_foreign"} {
+		configDir := t.TempDir()
+		candidate := strings.ReplaceAll(string(data), second["access_token"].(string), replacement)
+		if err := os.WriteFile(filepath.Join(configDir, "auth.json"), []byte(candidate), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		ops, err := placeholderstore.ClassifyNative(configDir, "/auth", profile, view.Bindings, nil, false)
+		if replacement == cached {
+			if err != nil || len(ops) != 1 || ops[0].Verb != "keep" {
+				t.Fatal("changed claims lost bound sibling ownership", err)
+			}
+		} else if err == nil {
+			t.Fatal("raw or foreign JWT was kept")
+		}
+	}
+	for _, errorReply := range []bool{false, true} {
+		s.transport = roundTripFunc(func(*http.Request) (*http.Response, error) {
+			calls++
+			if errorReply {
+				return response(400, http.Header{}, mustJSON(map[string]string{"error": "invalid_grant", "error_description": currentID})), nil
+			}
+			return response(200, http.Header{}, mustJSON(map[string]string{"access_token": currentAccess, "refresh_token": newRefresh, "id_token": currentID, "scope": currentID})), nil
+		})
+		if denied, _ := invoke(t, s, "refresh_token", first["refresh_token"].(string)); denied.StatusCode != 502 {
+			t.Fatal("reflected ID token escaped containment")
+		}
+	}
+	beforeReset := calls
+	if err := os.Remove(filepath.Join(s.dir, placeholderstore.BindingsFile)); err != nil {
+		t.Fatal(err)
+	}
+	if denied, _ := invoke(t, s, "refresh_token", first["refresh_token"].(string)); denied.StatusCode != 403 || calls != beforeReset {
+		t.Fatal("reset binding still dispatched")
+	}
+}
+
+func TestFormExchangeRejectsAmbiguousFields(t *testing.T) {
+	s, _ := fixture(t, false)
+	s.config.Provider.TokenEndpoint.Body = "either"
+	for _, body := range []string{"grant_type=authorization_code&code=one&code=two", "grant_type=authorization_code&code=%zz", "grant_type=authorization_code&code=ENCLAVE_SECRET_wrong"} {
+		req := httptest.NewRequest("POST", "https://platform.claude.com/v1/oauth/token", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded; charset=utf-8")
+		resp, handled := s.Intercept(req, "https")
+		if !handled || resp.StatusCode != 403 {
+			t.Fatal("ambiguous form forwarded")
+		}
+	}
 }

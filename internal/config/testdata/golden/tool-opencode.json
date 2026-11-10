@@ -49,6 +49,66 @@
       "auth_files": [
         "auth.json"
       ],
+      "auth_secrets": [
+        {
+          "file": "auth.json",
+          "codec": "provider-map",
+          "fields": [
+            {
+              "pointer": "/openai/key",
+              "kind": "apiKey",
+              "release": "openai-api-key"
+            },
+            {
+              "pointer": "/anthropic/key",
+              "kind": "apiKey",
+              "release": "anthropic-api-key"
+            },
+            {
+              "pointer": "/google/key",
+              "kind": "apiKey",
+              "release": "gemini-api-key"
+            },
+            {
+              "pointer": "/gemini/key",
+              "kind": "apiKey",
+              "release": "gemini-api-key"
+            },
+            {
+              "pointer": "/openai/access",
+              "kind": "access",
+              "release": "chatgpt-oauth",
+              "placeholder": {
+                "shape": "jwt",
+                "random": {
+                  "encoding": "",
+                  "length": 0
+                }
+              }
+            },
+            {
+              "pointer": "/openai/refresh",
+              "kind": "refresh"
+            }
+          ]
+        }
+      ],
+      "token_endpoint": {
+        "host": "auth.openai.com",
+        "path": "/oauth/token",
+        "body": "either",
+        "grants": [
+          "authorization_code",
+          "refresh_token"
+        ],
+        "fields": {
+          "access": "access_token",
+          "expiresIn": "expires_in",
+          "id": "id_token",
+          "refresh": "refresh_token",
+          "scope": "scope"
+        }
+      },
       "auth_session": {
         "mode": "",
         "checks": [
@@ -124,6 +184,19 @@
           "header": "x-api-key"
         }
       }
+    },
+    "chatgpt-oauth": {
+      "env_vars": null,
+      "release": {
+        "http": {
+          "hosts": [
+            "chatgpt.com"
+          ],
+          "header": "authorization",
+          "format": "Bearer %s"
+        }
+      },
+      "api_key": false
     },
     "gemini-api-key": {
       "env_vars": [

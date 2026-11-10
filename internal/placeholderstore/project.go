@@ -69,6 +69,23 @@ func Project(realDir, viewsDir, session string, profile model.Profile, configure
 			if file.CheckOnly {
 				continue
 			}
+			parts := strings.Split(file.File, "/")
+			for i := 1; i < len(parts); i++ {
+				parent := strings.Join(parts[:i], "/")
+				if err := root.Mkdir(parent, 0o700); err != nil && !errors.Is(err, fs.ErrExist) {
+					return View{}, err
+				}
+				info, err := nativePathInfo(root, parent)
+				if err != nil {
+					return View{}, err
+				}
+				if !info.IsDir() {
+					return View{}, fmt.Errorf("native auth parent %s is not a directory", parent)
+				}
+			}
+			if err := os.MkdirAll(filepath.Dir(filepath.Join(stage, filepath.FromSlash(file.File))), 0o700); err != nil {
+				return View{}, err
+			}
 			data, err := readRegular(root, file.File)
 			if errors.Is(err, fs.ErrNotExist) {
 				continue
@@ -136,7 +153,7 @@ func projectFile(provider string, file model.AuthFileSecret, data []byte, bindin
 		} else if strings.Contains(value, model.SecretPlaceholderMarker) {
 			return nil, nil, nil, fmt.Errorf("real native credential field %s contains a placeholder", pointer)
 		}
-		binding, err := bindings.Bind(provider, file.File, pointer, field.Kind, field.Placeholder, release.Placeholder)
+		binding, err := bindings.Bind(bindingProvider(provider, file, pointer), file.File, pointer, field.Kind, field.Placeholder, release.Placeholder)
 		if err != nil {
 			return nil, nil, nil, err
 		}
@@ -145,7 +162,7 @@ func projectFile(provider string, file model.AuthFileSecret, data []byte, bindin
 			return nil, nil, nil, err
 		}
 		native.replace(placeholder)
-		if !strings.Contains(value, model.SecretPlaceholderMarker) {
+		if field.Kind != "apiKey" || value != release.Placeholder {
 			rawValues = append(rawValues, value)
 		}
 		if field.Release != "" {

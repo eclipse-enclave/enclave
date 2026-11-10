@@ -10,6 +10,7 @@ package runtime
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -52,8 +53,8 @@ func TestProtectedAuthRefusesUnsupportedOptions(t *testing.T) {
 		{"base-image", func(_ *model.RunOptions, _ *model.AuthOptions, b *model.BuildOptions, _ *model.Profile) {
 			b.BaseImage = "custom"
 		}},
-		{"other-tool", func(_ *model.RunOptions, _ *model.AuthOptions, _ *model.BuildOptions, p *model.Profile) {
-			p.Name = "unsupported"
+		{"ambiguous-native-provider", func(_ *model.RunOptions, _ *model.AuthOptions, _ *model.BuildOptions, p *model.Profile) {
+			p.Providers = append(p.Providers, p.Providers[0])
 		}},
 		{"no-declaration", func(_ *model.RunOptions, _ *model.AuthOptions, _ *model.BuildOptions, p *model.Profile) {
 			p.Providers = nil
@@ -77,7 +78,7 @@ func TestProtectedAuthRefusesUnsupportedOptions(t *testing.T) {
 }
 
 func TestProtectedViewMountAndDynamicReleaseContract(t *testing.T) {
-	for _, tool := range []string{"claude", "codex"} {
+	for _, tool := range []string{"claude", "codex", "pi", "opencode"} {
 		t.Run(tool, func(t *testing.T) { testProtectedViewMount(t, tool) })
 	}
 }
@@ -112,6 +113,16 @@ func testProtectedViewMount(t *testing.T, tool string) {
 	if tool == "codex" {
 		apiID = "openai-api-key"
 		writeFile(t, filepath.Join(realDir, "auth.json"), `{"auth_mode":"chatgpt","OPENAI_API_KEY":"native-api-synthetic","tokens":{"access_token":"e30.eyJleHAiOjQxMDI0NDQ4MDB9.c3ludGhldGlj","id_token":"e30.e30.c3ludGhldGlj","refresh_token":"native-refresh-synthetic"}}`)
+	}
+	if tool == "pi" || tool == "opencode" {
+		provider := nativeAuthProvider(r.profile)
+		kind := "api"
+		if tool == "pi" {
+			kind = "api_key"
+		}
+		doc := map[string]any{provider.Name: map[string]any{"type": "oauth", "access": "e30.eyJleHAiOjQxMDI0NDQ4MDB9.c3ludGhldGlj", "refresh": "native-refresh-synthetic", "expires": int64(4102444800000)}, "anthropic": map[string]any{"type": kind, "key": "native-api-synthetic"}}
+		data, _ := json.Marshal(doc)
+		writeFile(t, filepath.Join(realDir, provider.AuthSecrets[0].File), string(data))
 	}
 	if err := ValidateProtectedAuth(r.run, r.auth, r.build, r.profile); err != nil {
 		t.Fatal(err)

@@ -25,7 +25,7 @@ func validateAuthSecrets(doc specDocument, specPath string) error {
 				return fmt.Errorf("%s: provider %s authSecrets file %q must name a unique authFiles entry unless checkOnly", specPath, provider.Name, file.File)
 			}
 			files[file.File] = true
-			if !slices.Contains([]string{"claude-credentials", "claude-config", "codex-auth"}, file.Codec) || len(file.Fields) == 0 {
+			if !slices.Contains([]string{"claude-credentials", "claude-config", "codex-auth", "provider-map"}, file.Codec) || len(file.Fields) == 0 {
 				return fmt.Errorf("%s: authSecrets %s requires a supported codec and fields", specPath, file.File)
 			}
 			pointers := map[string]bool{}

@@ -572,19 +572,27 @@ func syntheticJWT(exp int64, signature string, accounts ...string) string {
 	return "eyJhbGciOiJSUzI1NiJ9." + base64.RawURLEncoding.EncodeToString(payload) + "." + base64.RawURLEncoding.EncodeToString([]byte(signature))
 }
 
-func codexFixture(t *testing.T) (*Store, model.Profile) {
+func nativeFixture(t *testing.T, tool string) (*Store, model.Profile) {
 	t.Helper()
-	profile, err := config.LoadProfile(model.Paths{ToolsDir: filepath.Join("..", "..", "..", "extensions", "tools")}, "codex")
+	profile, err := config.LoadProfile(model.Paths{ToolsDir: filepath.Join("..", "..", "..", "extensions", "tools")}, tool)
 	if err != nil {
 		t.Fatal(err)
 	}
-	store, err := New(Config{Provider: profile.Providers[0], Secrets: profile.Secrets}, t.TempDir(), filepath.Join(t.TempDir(), "canonical.lock"), "codex", nil)
+	var provider model.ProviderConfig
+	for _, candidate := range profile.Providers {
+		if candidate.TokenEndpoint != nil {
+			provider = candidate
+		}
+	}
+	store, err := New(Config{Provider: provider, Secrets: profile.Secrets}, t.TempDir(), filepath.Join(t.TempDir(), "canonical.lock"), "codex", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	store.now = func() time.Time { return time.Date(2026, 11, 10, 12, 0, 0, 0, time.UTC) }
 	return store, profile
 }
+
+func codexFixture(t *testing.T) (*Store, model.Profile) { return nativeFixture(t, "codex") }
 
 func TestCodexLoginRefreshAndCachedJWTRelease(t *testing.T) {
 	s, profile := codexFixture(t)
@@ -840,6 +848,118 @@ func TestCodexReplyIgnoresForeignCodecMetadata(t *testing.T) {
 			native, err := s.native()
 			if err != nil || native.Document["claudeAiOauth"] == nil {
 				t.Fatal("unknown canonical metadata was deleted")
+			}
+		})
+	}
+}
+
+func TestProviderMapClientsShareProjectionAndExchange(t *testing.T) {
+	for _, tool := range []string{"pi", "opencode"} {
+		t.Run(tool, func(t *testing.T) {
+			s, profile := nativeFixture(t, tool)
+			empty, err := placeholderstore.Project(s.dir, t.TempDir(), "empty", profile, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if info, err := os.Stat(filepath.Dir(filepath.Join(empty.Dir, s.file.File))); err != nil || !info.IsDir() {
+				t.Fatal("fresh nested view parent missing")
+			}
+			apiType := "api"
+			if tool == "pi" {
+				apiType = "api_key"
+			}
+			placeholder, err := model.NewSecretPlaceholder(nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			api := model.SecretReleaseEntry{SecretID: "anthropic-api-key", Value: "synthetic-native-api", Placeholder: placeholder}
+			source := map[string]any{"anthropic": map[string]any{"type": apiType, "key": api.Value, "unknown": "strip-me"}}
+			if err := placeholderstore.WriteNative(s.dir, s.file.File, mustJSON(source)); err != nil {
+				t.Fatal(err)
+			}
+			calls := 0
+			current := ""
+			s.transport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+				calls++
+				if calls > 1 {
+					data, _ := io.ReadAll(req.Body)
+					fields, err := url.ParseQuery(string(data))
+					if err != nil || fields.Get("refresh_token") != newRefresh {
+						t.Fatal("map refresh did not use native grant")
+					}
+				}
+				current = syntheticJWT(s.now().Unix()+600+int64(calls), "signature")
+				return response(200, http.Header{}, mustJSON(map[string]any{"access_token": current, "refresh_token": newRefresh, "id_token": syntheticJWT(4102444800, "id-signature"), "expires_in": 600})), nil
+			})
+			resp, login := invoke(t, s, "authorization_code", "", true)
+			if resp.StatusCode != 200 || login["expires_in"] != float64(600) || login["id_token"] != nil {
+				t.Fatal("map login response does not fit native format")
+			}
+			native, err := s.native()
+			if err != nil {
+				t.Fatal(err)
+			}
+			entry := native.Document[s.config.Provider.Name].(map[string]any)
+			if entry["type"] != "oauth" || entry["accountId"] != "synthetic-account" || entry["expires"] != json.Number(fmt.Sprint(s.now().UnixMilli()+600000)) || native.Document["anthropic"].(map[string]any)["key"] != api.Value {
+				t.Fatal("map commit metadata or foreign API key changed")
+			}
+			view, err := placeholderstore.Project(s.dir, t.TempDir(), "live", profile, []model.SecretReleaseEntry{api})
+			if err != nil {
+				t.Fatal(err)
+			}
+			data, err := os.ReadFile(filepath.Join(view.Dir, s.file.File))
+			if err != nil || strings.Contains(string(data), api.Value) || strings.Contains(string(data), current) || strings.Contains(string(data), "strip-me") {
+				t.Fatal("unsafe map projection")
+			}
+			configDir := t.TempDir()
+			target := filepath.Join(configDir, s.file.File)
+			if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(target, data, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if ops, err := placeholderstore.ClassifyNative(configDir, "/auth", profile, view.Bindings, nil, false); err != nil || len(ops) != 1 || ops[0].Verb != "keep" {
+				t.Fatal("map binding namespace failed sibling ownership", err)
+			}
+			if next, _ := invoke(t, s, "refresh_token", login["refresh_token"].(string), true); next.StatusCode != 200 || calls != 2 {
+				t.Fatal("map refresh failed")
+			}
+			rules, err := s.Releases(t.Context(), http.Header{"Authorization": []string{"Bearer " + login["access_token"].(string)}})
+			if err != nil || len(rules) != 1 || rules[0].Value != current || len(rules[0].Hosts) != 1 || rules[0].Hosts[0] != "chatgpt.com" {
+				t.Fatal("cached map JWT did not release current grant at its declared host")
+			}
+			before, err := s.native()
+			if err != nil {
+				t.Fatal(err)
+			}
+			release, err := s.lock(t.Context())
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = placeholderstore.Harvest(s.dir, view.Dir, configDir, profile)
+			release()
+			if err != nil {
+				t.Fatal(err)
+			}
+			after, err := s.native()
+			if err != nil || after.Fingerprint != before.Fingerprint {
+				t.Fatal("stale map view changed canonical grant metadata")
+			}
+			reflectedID := syntheticJWT(4102444800, "unpersisted-id")
+			s.transport = roundTripFunc(func(*http.Request) (*http.Response, error) {
+				return response(200, http.Header{}, mustJSON(map[string]any{"access_token": current, "refresh_token": newRefresh, "id_token": reflectedID, "scope": reflectedID, "expires_in": 600})), nil
+			})
+			if denied, _ := invoke(t, s, "refresh_token", login["refresh_token"].(string), true); denied.StatusCode != 502 {
+				t.Fatal("an unpersisted ID token escaped map containment")
+			}
+			for _, foreign := range []map[string]any{{"unknown": map[string]string{"type": apiType, "key": "synthetic-unknown-key"}}, {"anthropic": map[string]string{"type": "oauth", "access": "synthetic-foreign-access", "refresh": "synthetic-foreign-refresh"}}} {
+				if err := placeholderstore.WriteNative(s.dir, s.file.File, mustJSON(foreign)); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := placeholderstore.Project(s.dir, t.TempDir(), "foreign", profile, []model.SecretReleaseEntry{api}); err == nil {
+					t.Fatal("undeclared foreign provider credentials accepted")
+				}
 			}
 		})
 	}

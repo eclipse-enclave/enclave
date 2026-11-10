@@ -44,22 +44,55 @@ type AuthEndpoint struct {
 	Path string `json:"path"`
 }
 
-// AuthPointerSegments parses the object-field pointers needed by Claude.
-// Wildcards, escaped names and array traversal are deferred with other codecs.
+// AuthPointerSegments decodes RFC 6901 object fields and at most one wildcard segment.
 func AuthPointerSegments(pointer string) ([]string, error) {
-	if !strings.HasPrefix(pointer, "/") || strings.ContainsAny(pointer, "~*\x00") {
-		return nil, fmt.Errorf("auth secret pointer must name unescaped object fields")
+	if !strings.HasPrefix(pointer, "/") || strings.ContainsRune(pointer, 0) {
+		return nil, fmt.Errorf("auth secret pointer must name object fields")
 	}
 	parts := strings.Split(pointer[1:], "/")
-	if len(parts) > 2 {
+	if len(parts) > 32 {
 		return nil, fmt.Errorf("unsupported auth secret pointer depth")
 	}
-	for _, part := range parts {
+	wildcards := 0
+	for i, part := range parts {
 		if part == "" {
 			return nil, fmt.Errorf("auth secret pointer field is empty")
 		}
+		for j := 0; j < len(part); j++ {
+			if part[j] == '~' {
+				if j+1 == len(part) || (part[j+1] != '0' && part[j+1] != '1') {
+					return nil, fmt.Errorf("invalid auth pointer escape")
+				}
+				j++
+			}
+		}
+		parts[i] = strings.ReplaceAll(strings.ReplaceAll(part, "~1", "/"), "~0", "~")
+		if part == "*" {
+			wildcards++
+		}
+	}
+	if wildcards > 1 {
+		return nil, fmt.Errorf("auth secret pointer permits one wildcard")
 	}
 	return parts, nil
+}
+
+func EscapeAuthPointer(key string) string {
+	return strings.ReplaceAll(strings.ReplaceAll(key, "~", "~0"), "/", "~1")
+}
+
+func AuthPointerMatches(pattern, pointer string) bool {
+	a, err := AuthPointerSegments(pattern)
+	b, other := AuthPointerSegments(pointer)
+	if err != nil || other != nil || len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != "*" && a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // ValidAuthFilePath also excludes delimiters used by the entrypoint's auth lists.

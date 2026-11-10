@@ -480,3 +480,14 @@ func TestWebSocketCaptureOmitsMessagesOfANegotiatedExtension(t *testing.T) {
 		t.Fatalf("messages stored: %v", matches)
 	}
 }
+
+func TestOpenWebSocketUsesNewlyLearnedSecrets(t *testing.T) {
+	store := openTestStore(t, Options{})
+	capture, client, server := beginSocket(t, store)
+	store.Learn([]Secret{{Value: "native-first", Placeholder: "ENCLAVE_SECRET_first"}})
+	feed(client, 1, clientText("native-first"))
+	store.Learn([]Secret{{Value: "native-rotated", Placeholder: "ENCLAVE_SECRET_rotated"}})
+	feed(server, 1, serverText("echo native-first native-rotated"))
+	_, messages := finishSocket(t, store, capture)
+	assertMessages(t, messages, "client text ENCLAVE_SECRET_first", "server text echo ENCLAVE_SECRET_first ENCLAVE_SECRET_rotated")
+}

@@ -30,6 +30,7 @@ type Store struct {
 	now                    func() time.Time
 	timeout                time.Duration
 	env                    []model.SecretReleaseEntry
+	seenFingerprint        string // protected by the canonical file lock
 }
 
 func New(config Config, dir, lockPath, session string, env []model.SecretReleaseEntry) (*Store, error) {
@@ -84,28 +85,6 @@ func (s *Store) lock(ctx context.Context) (func(), error) {
 	}
 }
 
-// load is called only under the canonical lock, including API releases. A
-// surviving intent cannot belong to an active exchange while we hold that lock.
-func (s *Store) load() (placeholderstore.Bindings, placeholderstore.ExchangeState, error) {
-	bindings, err := placeholderstore.LoadBindings(s.dir)
-	if err != nil {
-		return bindings, placeholderstore.ExchangeState{}, err
-	}
-	if bindings.Providers == nil {
-		bindings.Providers = map[string]placeholderstore.ExchangeState{}
-	}
-	state := bindings.Providers[s.config.Provider.Name]
-	if state.Inflight != nil {
-		state.Inflight = nil
-		state.Uncertain = true
-		bindings.Providers[s.config.Provider.Name] = state
-		if err := placeholderstore.SaveBindings(s.dir, bindings); err != nil {
-			return bindings, state, err
-		}
-	}
-	return bindings, state, nil
-}
-
 func (s *Store) native() (placeholderstore.NativeFile, error) {
 	native, err := placeholderstore.ReadNative(s.dir, s.file)
 	if errors.Is(err, fs.ErrNotExist) {
@@ -149,7 +128,7 @@ func (s *Store) Releases(ctx context.Context, headers http.Header) ([]model.Secr
 		return nil, err
 	}
 	defer release()
-	bindings, _, err := s.load()
+	bindings, err := placeholderstore.LoadBindings(s.dir)
 	if err != nil {
 		return nil, err
 	}

@@ -140,22 +140,3 @@ func TestConfigVolumeRelativeDirsSkipsRootLevelFiles(t *testing.T) {
 		t.Fatalf("configVolumeRelativeDirs() = %v, want no nested directories", got)
 	}
 }
-
-func TestResetAuthCarriesNativeBindingResetOnlyForDeclaredTools(t *testing.T) {
-	r := &Runtime{profile: model.Profile{Name: "claude", ConfigDir: ".claude", Providers: []model.ProviderConfig{{Name: "anthropic", AuthFiles: []string{".credentials.json"}, AuthSecrets: []model.AuthFileSecret{{File: ".credentials.json", Codec: "claude-credentials"}}}}}, run: model.RunOptions{Persist: true}, auth: model.AuthOptions{ResetAuth: true, AuthScope: "shared"}, project: model.Project{Hash: "abc123abc123"}}
-	prep, _ := newVolumeManager(r).BuildPrep("")
-	if !prep.ResetNativeBindings || prep.Auth == nil || len(prep.ResetAuthFiles) != 1 {
-		t.Fatal("native reset missing from canonical-store preparation")
-	}
-	r.auth.ResetAuth = false
-	prep, _ = newVolumeManager(r).BuildPrep("")
-	if prep.ResetNativeBindings {
-		t.Fatal("ordinary start reset binding state")
-	}
-	r.auth.ResetAuth = true
-	r.profile.Providers[0].AuthSecrets = nil
-	prep, _ = newVolumeManager(r).BuildPrep("")
-	if prep.ResetNativeBindings {
-		t.Fatal("undeclared tool reset unrelated state")
-	}
-}

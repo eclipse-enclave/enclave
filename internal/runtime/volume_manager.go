@@ -113,12 +113,6 @@ func (m volumeManager) BuildPrep(volumeSuffix string) (backend.StorePrep, storeS
 			logx.Warnf("Failed to reset %s auth files in store: %v", util.TitleCase(m.profile.Name), err)
 		} else {
 			prep.ResetAuthFiles = authFiles
-			for _, provider := range m.profile.Providers {
-				if len(provider.AuthSecrets) > 0 {
-					prep.ResetNativeBindings = true
-					break
-				}
-			}
 		}
 	}
 

@@ -253,11 +253,15 @@ func (d *socketDirection) readPayload(p []byte) []byte {
 		d.unmask(d.control[start:])
 	} else {
 		message := d.message
+		// Once bytes were discarded, preserve a contiguous prefix even if Learn
+		// increases the buffer limit while this message is still arriving.
+		if message.bytes == int64(len(message.payload)) {
+			keep := chunk[:min(len(chunk), max(0, d.bufferLimit()-len(message.payload)))]
+			start := len(message.payload)
+			message.payload = append(message.payload, keep...)
+			d.unmask(message.payload[start:])
+		}
 		message.bytes += int64(len(chunk))
-		keep := chunk[:min(len(chunk), max(0, d.bufferLimit()-len(message.payload)))]
-		start := len(message.payload)
-		message.payload = append(message.payload, keep...)
-		d.unmask(message.payload[start:])
 	}
 	d.offset += uint64(len(chunk))
 	if d.offset == d.frame.Length {

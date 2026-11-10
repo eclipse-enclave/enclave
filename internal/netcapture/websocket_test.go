@@ -491,3 +491,34 @@ func TestOpenWebSocketUsesNewlyLearnedSecrets(t *testing.T) {
 	_, messages := finishSocket(t, store, capture)
 	assertMessages(t, messages, "client text ENCLAVE_SECRET_first", "server text echo ENCLAVE_SECRET_first ENCLAVE_SECRET_rotated")
 }
+
+func TestWebSocketLearnDoesNotResumeDiscardedPayload(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		piece int
+		mask  *[4]byte
+	}{
+		{"server-chunk", 64, nil},
+		{"server-bytes", 1, nil},
+		{"client-chunk", 64, &clientMask},
+		{"client-bytes", 1, &clientMask},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := openTestStore(t, Options{MaxBodyBytes: 10})
+			capture, client, server := beginSocket(t, store)
+			writer, from := server, "server"
+			if tc.mask != nil {
+				writer, from = client, "client"
+			}
+			first := "aaaaaaNATIVE_SECRET"
+			feed(writer, tc.piece, wsFrame(0x01, []byte(first), tc.mask))
+			store.Learn([]Secret{{Value: "NATIVE_SECRET", Placeholder: "ENCLAVE_SECRET_test"}})
+			feed(writer, tc.piece, wsFrame(0x80, []byte("zzz"), tc.mask))
+			_, messages := finishSocket(t, store, capture)
+			assertMessages(t, messages, from+" text aaaaaa")
+			if !messages[0].Truncated || messages[0].Bytes != int64(len(first)+3) {
+				t.Fatalf("message counters: %+v", messages[0])
+			}
+		})
+	}
+}

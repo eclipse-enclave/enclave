@@ -10,7 +10,6 @@ package docker
 import (
 	"context"
 	"fmt"
-	"os/exec"
 	"strings"
 
 	"enclave/internal/backend"
@@ -23,16 +22,12 @@ func (b *Backend) CheckProtectedAuthAdmission(ctx context.Context, key backend.S
 	if storeKey == "" {
 		storeKey = "default"
 	}
-	for _, engine := range []string{backend.NameDocker, backend.NamePodman} {
-		binary, err := exec.LookPath(engine)
-		if err != nil {
-			continue
-		}
+	for _, engine := range dockercmd.DetectCLIs() {
 		filters := dockercmd.NewFilters()
 		filters.Add("status", "running")
 		filters.Add("label", model.LabelAgent+"="+key.Owner)
 		filters.Add("label", model.LabelHash+"="+key.ProjectHash)
-		containers, err := dockercmd.ContainerListForEngine(ctx, binary, dockercmd.ListOptions{Filters: filters})
+		containers, err := dockercmd.ContainerListForEngine(ctx, engine, dockercmd.ListOptions{Filters: filters})
 		if err != nil {
 			return fmt.Errorf("--protect-auth cannot check %s sessions: %w", engine, err)
 		}

@@ -48,15 +48,13 @@ func New(config Config, dir, lockPath, session string, env []model.SecretRelease
 	if file.File == "" {
 		return nil, fmt.Errorf("protected exchange currently requires Claude credentials")
 	}
-	endpoint := config.Provider.TokenEndpoint
-	host, hostErr := domainpattern.NormalizeHost(endpoint.Host)
-	if endpoint.Body != "json" || config.Provider.Name == "" || hostErr != nil || host != endpoint.Host || endpoint.Path == "" || !strings.HasPrefix(endpoint.Path, "/") || strings.ContainsAny(endpoint.Path, "?#") || endpoint.Fields["access"] == "" || endpoint.Fields["refresh"] == "" || endpoint.Fields["id"] != "" {
-		return nil, fmt.Errorf("unsupported Claude exchange declaration")
+	if config.Provider.TokenEndpoint.Fields["refresh"] == "" {
+		return nil, fmt.Errorf("native exchange requires a refresh response field")
 	}
 	kinds := map[string]bool{}
 	for _, field := range file.Fields {
 		expected := "/claudeAiOauth/" + map[string]string{"access": "accessToken", "refresh": "refreshToken"}[field.Kind]
-		if (field.Kind != "access" && field.Kind != "refresh") || field.Pointer != expected || kinds[field.Kind] {
+		if (field.Kind != "access" && field.Kind != "refresh") || field.Pointer != expected {
 			return nil, fmt.Errorf("unsupported Claude exchange fields")
 		}
 		kinds[field.Kind] = true

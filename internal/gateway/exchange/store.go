@@ -58,12 +58,12 @@ func New(config Config, dir, lockPath, session string, env []model.SecretRelease
 			expected = map[string]string{"access": "/tokens/access_token", "refresh": "/tokens/refresh_token", "id": "/tokens/id_token", "apiKey": "/OPENAI_API_KEY"}[field.Kind] // #nosec G101 -- native JSON pointers, not credential values.
 		}
 		if expected == "" || field.Pointer != expected {
-			return nil, fmt.Errorf("unsupported Claude exchange fields")
+			return nil, fmt.Errorf("unsupported native exchange fields")
 		}
 		kinds[field.Kind] = true
 	}
 	if !kinds["access"] || !kinds["refresh"] {
-		return nil, fmt.Errorf("missing Claude exchange field")
+		return nil, fmt.Errorf("missing native exchange field")
 	}
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.Proxy = nil

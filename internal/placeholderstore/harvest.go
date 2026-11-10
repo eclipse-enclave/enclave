@@ -54,7 +54,7 @@ func Harvest(realDir, viewDir, configDir string, profile model.Profile) error {
 	warnings = errors.Join(warnings, err)
 	for _, file := range files {
 		// Codex has no client-owned auth metadata to merge back.
-		if file.file.Codec == "codex-auth" {
+		if !HasClientMetadata(file.file.Codec) {
 			continue
 		}
 		native := file.document

@@ -77,7 +77,7 @@ func (s *Store) Intercept(req *http.Request, scheme string) (*http.Response, boo
 func parseRequest(req *http.Request, body string) (map[string]string, error) {
 	media, _, err := mime.ParseMediaType(req.Header.Get("Content-Type"))
 	if err != nil || (media != "application/json" && media != "application/x-www-form-urlencoded") || (body == "json" && media != "application/json") || (body == "form" && media != "application/x-www-form-urlencoded") {
-		return nil, fmt.Errorf("exchange requires JSON")
+		return nil, fmt.Errorf("exchange body media type is not declared")
 	}
 	if enc := req.Header.Get("Content-Encoding"); enc != "" && !strings.EqualFold(enc, "identity") {
 		return nil, fmt.Errorf("encoded exchange")

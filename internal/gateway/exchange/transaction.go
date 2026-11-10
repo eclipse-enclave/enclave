@@ -12,7 +12,6 @@ import (
 	"context"
 	"encoding/json"
 	"io"
-	"math"
 	"net/http"
 	"net/url"
 	"slices"
@@ -179,7 +178,6 @@ func (s *Store) transact(parent context.Context, values map[string]string, media
 			native.Values[field.Pointer] = value
 		}
 	}
-	oauth, _ := native.Document["claudeAiOauth"].(map[string]any)
 	tokenType := textField(object, "token_type")
 	unsafeMetadata := false
 	nonSecret := func(value string) bool {
@@ -192,36 +190,10 @@ func (s *Store) transact(parent context.Context, values map[string]string, media
 		return true
 	}
 	scope := textField(object, endpoint.Fields["scope"])
-	if scope != "" && nonSecret(scope) && s.file.Codec == "claude-credentials" {
-		oauth["scopes"] = strings.Fields(scope)
-	}
 	if tokenType != "" && !nonSecret(tokenType) {
 		tokenType = ""
 	}
-	if s.file.Codec == "codex-auth" {
-		if login {
-			native.Document["auth_mode"], native.Document["OPENAI_API_KEY"] = "chatgpt", nil
-			delete(native.Values, "/OPENAI_API_KEY")
-		}
-		native.Document["last_refresh"] = s.now().UTC().Format(time.RFC3339)
-		for _, pointer := range []string{"/tokens/access_token", "/tokens/id_token"} {
-			claims, _ := placeholderstore.JWTClaims(native.Values[pointer])
-			if auth, ok := claims["https://api.openai.com/auth"].(map[string]any); ok {
-				if account, ok := auth["chatgpt_account_id"].(string); ok && nonSecret(account) {
-					native.Document["tokens"].(map[string]any)["account_id"] = account
-				}
-			}
-		}
-	} else {
-		delete(oauth, "expiresAt")
-		if raw, ok := object[endpoint.Fields["expiresIn"]]; ok {
-			var seconds int64
-			if json.Unmarshal(raw, &seconds) == nil && seconds > 0 && seconds <= math.MaxInt64/int64(time.Second) {
-				expiry := s.now().Add(time.Duration(seconds) * time.Second).UTC().Truncate(time.Millisecond)
-				oauth["expiresAt"] = expiry.UnixMilli()
-			}
-		}
-	}
+	native.UpdateMetadata(s.file.Codec, scope, object[endpoint.Fields["expiresIn"]], login, s.now(), nonSecret)
 	encoded := mustJSON(native.Document)
 	for _, field := range s.file.Fields {
 		if field.Kind == "apiKey" || native.Values[field.Pointer] == "" {
@@ -265,28 +237,6 @@ func safeHeaders(headers http.Header) http.Header {
 	return result
 }
 
-func (s *Store) nativeExpiry(native placeholderstore.NativeFile) (time.Time, bool) {
-	if s.file.Codec == "codex-auth" {
-		claims, _ := placeholderstore.JWTClaims(native.Values["/tokens/access_token"])
-		number, ok := claims["exp"].(json.Number)
-		if !ok {
-			return time.Time{}, false
-		}
-		seconds, err := number.Int64()
-		return time.Unix(seconds, 0), err == nil
-	}
-	oauth, ok := native.Document["claudeAiOauth"].(map[string]any)
-	if !ok {
-		return time.Time{}, false
-	}
-	number, ok := oauth["expiresAt"].(json.Number)
-	if !ok {
-		return time.Time{}, false
-	}
-	millis, err := number.Int64()
-	return time.UnixMilli(millis), err == nil
-}
-
 func (s *Store) tokenReply(native placeholderstore.NativeFile, bindings placeholderstore.Bindings, credentials []string, headers http.Header, tokenType, scope string) *http.Response {
 	result := map[string]any{}
 	endpoint := s.config.Provider.TokenEndpoint
@@ -311,22 +261,12 @@ func (s *Store) tokenReply(native placeholderstore.NativeFile, bindings placehol
 	if scope != "" {
 		result[endpoint.Fields["scope"]] = scope
 	}
-	if oauth, ok := native.Document["claudeAiOauth"].(map[string]any); ok && s.file.Codec == "claude-credentials" {
-		if values, ok := oauth["scopes"].([]any); ok {
-			var scopes []string
-			for _, value := range values {
-				scopes = append(scopes, value.(string))
-			}
-			if len(scopes) > 0 {
-				result[endpoint.Fields["scope"]] = strings.Join(scopes, " ")
-			}
-		}
+	nativeScope, expiry := native.ReplyMetadata(s.file.Codec)
+	if nativeScope != "" {
+		result[endpoint.Fields["scope"]] = nativeScope
 	}
-	if expiry, ok := s.nativeExpiry(native); ok {
-		remaining := int64(expiry.Sub(s.now()) / time.Second)
-		if remaining > 0 {
-			result[endpoint.Fields["expiresIn"]] = remaining
-		}
+	if remaining := int64(expiry.Sub(s.now()) / time.Second); remaining > 0 {
+		result[endpoint.Fields["expiresIn"]] = remaining
 	}
 	encoded := mustJSON(result)
 	if !contained(encoded, headers, credentials) {

@@ -259,6 +259,25 @@ func TestCopilotNativePathGuardKeepsEnvRelease(t *testing.T) {
 					}
 				}
 			}
+			for _, origin := range []struct {
+				host, target string
+				originForm   bool
+			}{
+				{"", "https://api.github.com/user", false},
+				{"api.github.com:444", "https://api.github.com/copilot_internal/user", true},
+			} {
+				req := httptest.NewRequest(http.MethodGet, origin.target, nil)
+				req.Host = origin.host
+				if origin.originForm {
+					req.URL.Host, req.URL.Scheme = "", ""
+				}
+				req.Header.Set("Authorization", "Bearer "+native)
+				w := httptest.NewRecorder()
+				p.handler("https")(w, req)
+				if w.Code != 403 {
+					t.Error("native origin guard disagreed with forwarding authority", w.Code)
+				}
+			}
 			select {
 			case <-received:
 				t.Fatal("refused native request reached upstream")

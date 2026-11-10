@@ -359,9 +359,13 @@ internal secret configs with release rules
    not satisfy their rules.
 
 Without `--protect-auth`, this covers env injection only; auth-hook files can
-hold the real secret. Protected Claude uses a private projected view and disables
-those hooks. The host-only all-holder ledger shares the config-store lock;
-projection additionally takes the native-auth lock, released before gateway readiness.
+hold the real secret. Protected native auth uses a private projected view for
+Claude, Codex, Pi, OpenCode and Copilot and disables those hooks. Each native file
+has one declaration owner, including OpenCode's shared ChatGPT/Copilot file;
+gateway routes select their provider's fields from that declaration. The host-only
+all-holder ledger shares the config-store lock. Projection additionally takes the
+native-auth lock, released before gateway readiness; exchanges hold it across
+reload, upstream dispatch and native-before-bindings persistence.
 
 ## Containers and stores
 

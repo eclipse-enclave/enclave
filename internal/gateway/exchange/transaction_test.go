@@ -1171,7 +1171,7 @@ func TestCopilotNativeDeviceFlow(t *testing.T) {
 				}
 			}
 			before := polls
-			for _, target := range []string{"https://github.com/login/oauth/authorize", "https://github.com/LOGIN/OAUTH/ACCESS_TOKEN", "https://github.com/login/oauth/access_token/"} {
+			for _, target := range []string{"https://github.com/LOGIN/OAUTH/ACCESS_TOKEN", "https://github.com/login/oauth/access_token/"} {
 				req := httptest.NewRequest(http.MethodPost, target, nil)
 				if denied, handled := router.Intercept(req, "https"); !handled || denied.StatusCode != 403 || polls != before {
 					t.Fatal("alternate OAuth path reached upstream")

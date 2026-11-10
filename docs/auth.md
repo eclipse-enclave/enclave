@@ -258,10 +258,20 @@ the shared auth store. A protected start refuses raw `primaryApiKey` or
 `anthropicApiKey` fields there; remove the stored credential or use ordinary mode.
 Project metadata stays in place, including across `--reset-auth`.
 
-`enclave --tool claude --protect-auth` (also Codex, Pi, OpenCode and Copilot) mounts a private placeholder view instead
-of the native auth store. The gateway performs the tool's token exchanges and
+`enclave --tool claude --protect-auth` (also Codex, Pi, OpenCode and Copilot)
+mounts a private placeholder view instead of the native auth store.
+The gateway performs the tool's token exchanges and
 releases credentials only to their declared HTTPS hosts. Ordinary sessions
 retain their existing native-file behavior; protection is opt-in.
+
+| Tool | Declared native files, relative to its auth root | Protected credentials |
+|---|---|---|
+| Claude | `.credentials.json`, `config.json` | Claude OAuth and declared API keys |
+| Codex | `auth.json` | ChatGPT access/refresh/ID tokens and the declared OpenAI API key |
+| Pi | `agent/auth.json` | ChatGPT login and declared provider API keys |
+| OpenCode | `auth.json` | ChatGPT/Copilot logins and declared provider API keys |
+| Copilot | `config.json` | GitHub.com account tokens |
+
 Pi and OpenCode protect ChatGPT logins and native API-key entries whose matching
 env credential is configured. OpenCode also protects GitHub Copilot logins;
 Copilot CLI protects GitHub.com device logins. Other native providers, including
@@ -302,13 +312,18 @@ placeholder views are left alone; surviving gateways can no longer release the
 removed native OAuth credentials.
 A concurrently completed fresh login is not erased a second time during startup.
 
-At normal session end, allowlisted client metadata is merged without copying
-credentials, expiry or scopes back from the view. Stale, raw or secret-bearing
-sources are skipped. Only the session's own view is deleted. Protected stop keeps
+At normal session end, Claude's allowlisted client metadata is merged without
+copying credentials, expiry or scopes back from the view. Codex, Pi, OpenCode and
+Copilot auth metadata is gateway-owned and is not harvested from client views.
+Stale, raw or secret-bearing sources are skipped. Only the session's own view is
+deleted. Protected stop keeps
 the reservation until removal confirms both the agent and its original gateway
 are gone; uncertain teardown keeps the private files for later cleanup.
 `--ephemeral` uses a fresh gateway-only identity and removes it at that point.
 
 Protection covers declared native fields, not arbitrary files, SSH or host access.
+Placeholder JWTs preserve readable claims for client compatibility; claims are
+not confidential. This mode does not add general API-response or WebSocket
+credential filtering.
 See [native auth exchanges](runtime/stores.md#native-auth-exchanges) for storage
 and refresh behavior.

@@ -82,6 +82,23 @@
               "release": "anthropic-api-key"
             }
           ]
+        },
+        {
+          "checkOnly": true,
+          "file": ".claude.json",
+          "codec": "claude-config",
+          "fields": [
+            {
+              "pointer": "/primaryApiKey",
+              "kind": "apiKey",
+              "release": "anthropic-api-key"
+            },
+            {
+              "pointer": "/anthropicApiKey",
+              "kind": "apiKey",
+              "release": "anthropic-api-key"
+            }
+          ]
         }
       ],
       "token_endpoint": {

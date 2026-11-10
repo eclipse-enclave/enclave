@@ -15,9 +15,11 @@ import (
 
 // AuthFileSecret describes the credential fields in one native auth file.
 type AuthFileSecret struct {
-	File   string            `json:"file"`
-	Codec  string            `json:"codec"`
-	Fields []AuthSecretField `json:"fields"`
+	// CheckOnly inspects a config-store path without projecting or reconciling it.
+	CheckOnly bool              `json:"checkOnly,omitempty"`
+	File      string            `json:"file"`
+	Codec     string            `json:"codec"`
+	Fields    []AuthSecretField `json:"fields"`
 }
 
 type AuthSecretField struct {

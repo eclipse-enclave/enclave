@@ -219,13 +219,13 @@ User-facing behavior per tool is in
 
 `providers[].authSecrets` and `tokenEndpoint` are reserved for the internal protected-auth
 implementation. They do not enable a protected session or change ordinary auth
-behavior. No `--protect-auth` option is available. Claude exchange interception,
-canonical-store IO and the gateway capability gate are internal seams; workload
-activation still requires backend wiring and the mixed-mode session ledger.
+behavior. Claude enables them with `--protect-auth`; see
+[protected native auth](../auth.md#protected-native-auth).
 
 | Field | Meaning |
 |-------|---------|
-| `authSecrets[].file` | Unique relative path already listed in `authFiles` |
+| `authSecrets[].file` | Unique relative path; must appear in `authFiles` unless `checkOnly` |
+| `authSecrets[].checkOnly` | Inspect credential pointers in the config store; refuse raw values, leave metadata untouched, never project or reconcile the file |
 | `authSecrets[].codec` | Native format; projection currently implements `claude-credentials` and `claude-config` |
 | `authSecrets[].fields[].pointer` | Unescaped object-field pointer; only the Claude fields below are implemented |
 | `fields[].kind` | `access`, `refresh`, `id`, or `apiKey` |

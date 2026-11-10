@@ -22,6 +22,7 @@ const (
 	strictNative nativePurpose = iota
 	projectedView
 	canonicalNative
+	credentialCheck
 )
 
 type nativeValue struct {
@@ -107,6 +108,9 @@ func decodeNative(codec string, data []byte, purpose nativePurpose) (map[string]
 // Only known metadata leaves may reach a view. Kept native files must already
 // satisfy the allowlist; projection can discard extra keys.
 func filterFields(object map[string]any, allowed map[string]string, purpose nativePurpose) error {
+	if purpose == credentialCheck {
+		return nil
+	}
 	for key, value := range object {
 		kind, ok := allowed[key]
 		if !ok {

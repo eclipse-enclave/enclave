@@ -13,6 +13,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"enclave/internal/model"
 )
 
 func TestClassifyNativeOwnershipAndResetResidue(t *testing.T) {
@@ -139,5 +141,64 @@ func TestClassifyNativeRefusesAnInRootSymlinkedParent(t *testing.T) {
 	}
 	if _, err := ClassifyNative(config, "/home/agent/.enclave-auth", profile, view.Bindings, nil, false); err == nil {
 		t.Fatal("classifier followed a parent symlink that os.Root confines but does not reject")
+	}
+}
+
+func TestCheckOnlyNativeAlias(t *testing.T) {
+	profile := claudeProfile()
+	file := profile.Providers[0].AuthSecrets[1]
+	file.File, file.CheckOnly = ".claude.json", true
+	profile.Providers[0].AuthSecrets = []model.AuthFileSecret{file}
+	for _, tc := range []struct {
+		name, content, pointer string
+		link                   bool
+		refuse                 bool
+	}{
+		{name: "absent"},
+		{name: "global metadata", content: `{"projects":{"/project":{"hasTrustDialogAccepted":true}},"customApiKeyResponses":{"approved":["suffix"]},"oauthAccount":42}`},
+		{name: "placeholder residue", content: `{"primaryApiKey":"ENCLAVE_SECRET_leftover","projects":{}}`},
+		{name: "primary raw", content: `{"primaryApiKey":"synthetic-raw"}`, pointer: "/primaryApiKey", refuse: true},
+		{name: "alternate raw", content: `{"anthropicApiKey":"synthetic-raw"}`, pointer: "/anthropicApiKey", refuse: true},
+		{name: "wrong credential type", content: `{"primaryApiKey":{"value":"synthetic-raw"}}`, refuse: true},
+		{name: "malformed", content: `{`, refuse: true},
+		{name: "symlink", link: true, refuse: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			if tc.content != "" {
+				nativeFile(t, dir, file.File, tc.content)
+			}
+			if tc.link {
+				if err := os.Symlink("/home/agent/.enclave-auth/.claude.json", filepath.Join(dir, file.File)); err != nil {
+					t.Fatal(err)
+				}
+			}
+			ops, err := ClassifyNative(dir, "/home/agent/.enclave-auth", profile, Bindings{}, nil, true)
+			if (err != nil) != tc.refuse || len(ops) != 0 {
+				t.Fatalf("ops=%v err=%v", ops, err)
+			}
+			if tc.pointer != "" && (!strings.Contains(err.Error(), file.File) || !strings.Contains(err.Error(), tc.pointer)) {
+				t.Fatal(err)
+			}
+			if tc.content != "" {
+				data, e := os.ReadFile(filepath.Join(dir, file.File))
+				if e != nil || string(data) != tc.content {
+					t.Fatal("check changed alias")
+				}
+			}
+			// A check-only alias in the canonical store is not projected or bound.
+			if !tc.link {
+				view, e := Project(dir, t.TempDir(), "session", profile, nil)
+				if e != nil {
+					t.Fatal(e)
+				}
+				if len(view.Bindings.Bindings) != 0 {
+					t.Fatal("check-only alias created bindings")
+				}
+				if _, e := os.Lstat(filepath.Join(view.Dir, file.File)); !os.IsNotExist(e) {
+					t.Fatal("check-only alias was projected")
+				}
+			}
+		})
 	}
 }

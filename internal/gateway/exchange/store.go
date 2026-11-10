@@ -40,7 +40,7 @@ func New(config Config, dir, lockPath, session string, env []model.SecretRelease
 	}
 	var file model.AuthFileSecret
 	for _, candidate := range config.Provider.AuthSecrets {
-		if candidate.Codec == "claude-credentials" {
+		if !candidate.CheckOnly && candidate.Codec == "claude-credentials" {
 			if file.File != "" {
 				return nil, fmt.Errorf("ambiguous native exchange file")
 			}

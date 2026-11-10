@@ -40,6 +40,25 @@ func ClassifyNative(configDir, expectedAuthDir string, profile model.Profile, cu
 	var operations []NativeOperation
 	for _, provider := range profile.Providers {
 		for _, file := range provider.AuthSecrets {
+			if file.CheckOnly {
+				data, err := readRegular(root, file.File)
+				if errors.Is(err, fs.ErrNotExist) {
+					continue
+				}
+				if err != nil {
+					return nil, nativeRefusal(file.File)
+				}
+				_, values, err := decodeAuthFile(file, data, credentialCheck)
+				if err != nil {
+					return nil, nativeRefusal(file.File)
+				}
+				for _, native := range values {
+					if !strings.Contains(native.value, model.SecretPlaceholderMarker) {
+						return nil, fmt.Errorf("refusing protected native path %s field %s: remove the stored credential or use ordinary mode", file.File, native.field.Pointer)
+					}
+				}
+				continue
+			}
 			op := NativeOperation{File: file.File, Verb: "create"}
 			info, err := nativePathInfo(root, file.File)
 			if errors.Is(err, fs.ErrNotExist) {

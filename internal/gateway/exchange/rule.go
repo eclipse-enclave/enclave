@@ -15,7 +15,6 @@ import (
 	"mime"
 	"net"
 	"net/http"
-	"net/url"
 	"path"
 	"slices"
 	"strings"
@@ -58,7 +57,7 @@ func (s *Store) Intercept(req *http.Request, scheme string) (*http.Response, boo
 	if (portErr == nil && port != "443") || scheme != "https" || req.Method != http.MethodPost || req.URL.Path != endpoint.Path || req.URL.RawQuery != "" || req.URL.RawPath != "" {
 		return refusal(http.StatusForbidden), true
 	}
-	values, format, err := parseRequest(req, endpoint.Body)
+	values, err := parseRequest(req)
 	if err != nil || !slices.Contains(endpoint.Grants, values["grant_type"]) {
 		return refusal(http.StatusForbidden), true
 	}
@@ -70,57 +69,34 @@ func (s *Store) Intercept(req *http.Request, scheme string) (*http.Response, boo
 			return refusal(http.StatusForbidden), true
 		}
 	}
-	return s.transact(req.Context(), values, format), true
+	return s.transact(req.Context(), values), true
 }
 
-func parseRequest(req *http.Request, allowed string) (map[string]string, string, error) {
+func parseRequest(req *http.Request) (map[string]string, error) {
 	media, _, err := mime.ParseMediaType(req.Header.Get("Content-Type"))
-	if err != nil {
-		return nil, "", err
-	}
-	format := ""
-	switch media {
-	case "application/json":
-		format = "json"
-	case "application/x-www-form-urlencoded":
-		format = "form"
-	}
-	if format == "" || (allowed != "either" && allowed != format) {
-		return nil, "", fmt.Errorf("unsupported exchange body")
+	if err != nil || media != "application/json" {
+		return nil, fmt.Errorf("exchange requires JSON")
 	}
 	if enc := req.Header.Get("Content-Encoding"); enc != "" && !strings.EqualFold(enc, "identity") {
-		return nil, "", fmt.Errorf("encoded exchange")
+		return nil, fmt.Errorf("encoded exchange")
 	}
 	data, err := io.ReadAll(io.LimitReader(req.Body, maxBodyBytes+1))
 	if err != nil || len(data) > maxBodyBytes {
-		return nil, "", fmt.Errorf("invalid exchange body")
+		return nil, fmt.Errorf("invalid exchange body")
+	}
+	object, err := objectJSON(data)
+	if err != nil {
+		return nil, err
 	}
 	values := map[string]string{}
-	if format == "json" {
-		object, err := objectJSON(data)
-		if err != nil {
-			return nil, "", err
+	for key, raw := range object {
+		var value string
+		if err := json.Unmarshal(raw, &value); err != nil || bytes.Equal(raw, []byte("null")) {
+			return nil, fmt.Errorf("exchange fields must be strings")
 		}
-		for key, raw := range object {
-			var value string
-			if err := json.Unmarshal(raw, &value); err != nil || bytes.Equal(raw, []byte("null")) {
-				return nil, "", fmt.Errorf("exchange fields must be strings")
-			}
-			values[key] = value
-		}
-	} else {
-		form, err := url.ParseQuery(string(data))
-		if err != nil {
-			return nil, "", err
-		}
-		for key, list := range form {
-			if len(list) != 1 {
-				return nil, "", fmt.Errorf("duplicate exchange field")
-			}
-			values[key] = list[0]
-		}
+		values[key] = value
 	}
-	return values, format, nil
+	return values, nil
 }
 
 // Only top-level scalar fields are interpreted. Unknown response values are
@@ -154,18 +130,6 @@ func objectJSON(data []byte) (map[string]json.RawMessage, error) {
 		return nil, fmt.Errorf("trailing exchange data")
 	}
 	return object, nil
-}
-
-func encodeRequest(values map[string]string, format string) ([]byte, string) {
-	if format == "form" {
-		form := url.Values{}
-		for k, v := range values {
-			form.Set(k, v)
-		}
-		return []byte(form.Encode()), "application/x-www-form-urlencoded"
-	}
-	data, _ := json.Marshal(values)
-	return data, "application/json"
 }
 
 func refusal(status int) *http.Response {

@@ -94,11 +94,11 @@ func validateTokenEndpoint(endpoint model.TokenEndpoint) error {
 			return fmt.Errorf("requires exact normalized hosts and absolute paths")
 		}
 	}
-	if !slices.Contains([]string{"json", "form", "either"}, endpoint.Body) || len(endpoint.Grants) == 0 || endpoint.Fields["access"] == "" {
-		return fmt.Errorf("requires body json/form/either, grants, and fields.access")
+	if endpoint.Body != "json" || len(endpoint.Grants) == 0 || endpoint.Fields["access"] == "" {
+		return fmt.Errorf("requires body json, grants, and fields.access")
 	}
 	for name, value := range endpoint.Fields {
-		if !slices.Contains([]string{"access", "refresh", "id", "expiresIn", "scope"}, name) || value == "" {
+		if !slices.Contains([]string{"access", "refresh", "expiresIn", "scope"}, name) || value == "" {
 			return fmt.Errorf("invalid token field %q", name)
 		}
 	}

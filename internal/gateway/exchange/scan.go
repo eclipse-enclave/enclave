@@ -8,33 +8,10 @@
 package exchange
 
 import (
+	"enclave/internal/placeholderstore"
 	"encoding/json"
 	"net/http"
-	"strings"
 )
-
-func contains(value any, credential string) bool {
-	if credential == "" {
-		return false
-	}
-	switch v := value.(type) {
-	case string:
-		return strings.Contains(v, credential)
-	case map[string]any:
-		for key, child := range v {
-			if strings.Contains(key, credential) || contains(child, credential) {
-				return true
-			}
-		}
-	case []any:
-		for _, child := range v {
-			if contains(child, credential) {
-				return true
-			}
-		}
-	}
-	return false
-}
 
 func contained(data []byte, headers http.Header, credentials []string) bool {
 	var doc any
@@ -42,15 +19,15 @@ func contained(data []byte, headers http.Header, credentials []string) bool {
 		return false
 	}
 	for _, value := range credentials {
-		if contains(doc, value) {
+		if placeholderstore.ContainsCredential(doc, value) {
 			return false
 		}
 		for key, values := range headers {
-			if contains(key, value) {
+			if placeholderstore.ContainsCredential(key, value) {
 				return false
 			}
 			for _, header := range values {
-				if contains(header, value) {
+				if placeholderstore.ContainsCredential(header, value) {
 					return false
 				}
 			}

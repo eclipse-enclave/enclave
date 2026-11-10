@@ -52,7 +52,7 @@ func New(config Config, dir, lockPath, session string, env []model.SecretRelease
 	}
 	endpoint := config.Provider.TokenEndpoint
 	host, hostErr := domainpattern.NormalizeHost(endpoint.Host)
-	if config.Provider.Name == "" || hostErr != nil || host != endpoint.Host || endpoint.Path == "" || !strings.HasPrefix(endpoint.Path, "/") || strings.ContainsAny(endpoint.Path, "?#") || endpoint.Fields["access"] == "" || endpoint.Fields["refresh"] == "" || endpoint.Fields["id"] != "" {
+	if endpoint.Body != "json" || config.Provider.Name == "" || hostErr != nil || host != endpoint.Host || endpoint.Path == "" || !strings.HasPrefix(endpoint.Path, "/") || strings.ContainsAny(endpoint.Path, "?#") || endpoint.Fields["access"] == "" || endpoint.Fields["refresh"] == "" || endpoint.Fields["id"] != "" {
 		return nil, fmt.Errorf("unsupported Claude exchange declaration")
 	}
 	kinds := map[string]bool{}
@@ -108,18 +108,7 @@ func bindingFor(bindings placeholderstore.Bindings, provider, file string, field
 // Releases reads native values on each marked request. It never persists a
 // second grant database and never allows refresh or id fields into HTTP headers.
 func (s *Store) Releases(ctx context.Context, headers http.Header) ([]model.SecretReleaseEntry, error) {
-	marked := false
-	for key, values := range headers {
-		if strings.Contains(strings.ToLower(key), strings.ToLower(model.SecretPlaceholderMarker)) {
-			marked = true
-		}
-		for _, v := range values {
-			if strings.Contains(v, model.SecretPlaceholderMarker) {
-				marked = true
-			}
-		}
-	}
-	if !marked {
+	if !MarkedHeaders(headers) {
 		return nil, nil
 	}
 	ctx, cancel := context.WithTimeout(ctx, s.timeout)
@@ -134,48 +123,33 @@ func (s *Store) Releases(ctx context.Context, headers http.Header) ([]model.Secr
 		return nil, err
 	}
 	var rules []model.SecretReleaseEntry
-	for _, file := range s.config.Provider.AuthSecrets {
-		native, err := placeholderstore.ReadNative(s.dir, file)
-		if errors.Is(err, fs.ErrNotExist) {
+	native, err := placeholderstore.ReadNative(s.dir, s.file)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	for _, field := range s.file.Fields {
+		if field.Kind != "access" {
 			continue
 		}
-		if err != nil {
-			return nil, err
+		b, ok := bindingFor(bindings, s.config.Provider.Name, s.file.File, field)
+		if !ok {
+			continue
 		}
-		for _, field := range file.Fields {
-			if field.Kind != "access" && field.Kind != "apiKey" {
-				continue
-			}
-			b, ok := bindingFor(bindings, s.config.Provider.Name, file.File, field)
-			if !ok {
-				continue
-			}
-			value := native.Values[field.Pointer]
-			if value == "" || strings.Contains(value, model.SecretPlaceholderMarker) {
-				continue
-			}
-			var rule model.SecretReleaseEntry
-			if field.Kind == "apiKey" {
-				for _, env := range s.env {
-					if env.SecretID == field.Release {
-						rule = env
-						break
-					}
-				}
-				if rule.Value == "" || rule.Placeholder != b.Placeholder {
-					continue
-				}
-			} else {
-				secret := s.config.Secrets[field.Release]
-				if secret.Release == nil || secret.Release.HTTP == nil {
-					return nil, fmt.Errorf("missing native HTTP release")
-				}
-				h := secret.Release.HTTP
-				rule = model.SecretReleaseEntry{SecretID: field.Release, Value: value, Hosts: h.Hosts, Header: h.Header, Format: h.Format}
-			}
-			rule.Placeholder = b.Placeholder
-			rules = append(rules, rule)
+		value := native.Values[field.Pointer]
+		if value == "" || strings.Contains(value, model.SecretPlaceholderMarker) {
+			continue
 		}
+		secret := s.config.Secrets[field.Release]
+		if secret.Release == nil || secret.Release.HTTP == nil {
+			return nil, fmt.Errorf("missing native HTTP release")
+		}
+		h := secret.Release.HTTP
+		rule := model.SecretReleaseEntry{SecretID: field.Release, Value: value, Hosts: h.Hosts, Header: h.Header, Format: h.Format}
+		rule.Placeholder = b.Placeholder
+		rules = append(rules, rule)
 	}
 	return rules, nil
 }
@@ -198,6 +172,20 @@ func (s *Store) RequiresMITM(host string) bool {
 				if domainpattern.MatchNormalizedHost(host, pattern) {
 					return true
 				}
+			}
+		}
+	}
+	return false
+}
+
+func MarkedHeaders(headers http.Header) bool {
+	for key, values := range headers {
+		if strings.Contains(strings.ToLower(key), strings.ToLower(model.SecretPlaceholderMarker)) {
+			return true
+		}
+		for _, value := range values {
+			if strings.Contains(value, model.SecretPlaceholderMarker) {
+				return true
 			}
 		}
 	}

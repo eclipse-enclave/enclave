@@ -231,7 +231,7 @@ activation still requires backend wiring and the mixed-mode session ledger.
 | `fields[].kind` | `access`, `refresh`, `id`, or `apiKey` |
 | `fields[].release` | Existing `network.serviceAuth` id; required for access/API keys, forbidden for refresh/ID tokens |
 | `fields[].placeholder` | Opaque prefix/suffix/random shape; API keys reuse their env placeholder |
-| `tokenEndpoint` | Exact normalized `host`, absolute `path`, JSON/form body, allowed grants, response fields, and explicit deny host/path pairs |
+| `tokenEndpoint` | Exact normalized `host`, absolute `path`, JSON body, allowed grants, response fields, and explicit deny host/path pairs |
 
 Every file placeholder contains `ENCLAVE_SECRET_`. Base64url shapes include the
 marker within the declared random-body length and retain at least 128 random

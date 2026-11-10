@@ -11,6 +11,7 @@ package placeholderstore
 
 import (
 	"fmt"
+	"golang.org/x/sys/unix"
 	"os"
 	"syscall"
 )
@@ -32,4 +33,9 @@ func preserveOwner(file *os.File, before os.FileInfo) error {
 		return nil
 	}
 	return file.Chown(int(owner.Uid), int(owner.Gid))
+}
+
+// Root.Rename needs Go 1.25; the supported host floor is Go 1.24.
+func renameNative(parent *os.File, from, to string) error {
+	return unix.Renameat(int(parent.Fd()), from, int(parent.Fd()), to)
 }

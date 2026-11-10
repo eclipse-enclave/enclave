@@ -8,6 +8,7 @@
 package placeholderstore
 
 import (
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -61,7 +62,36 @@ func WriteNative(dir, name string, data []byte) error {
 		return err
 	}
 	defer func() { _ = root.Close() }()
-	before, err := nativePathInfo(root, name)
+	if !model.ValidAuthFilePath(name) {
+		return fmt.Errorf("invalid native credential path")
+	}
+	parentName := filepath.Dir(name)
+	parentInfo, err := root.Stat(".")
+	if parentName != "." {
+		parentInfo, err = nativePathInfo(root, parentName)
+	}
+	if err != nil {
+		return err
+	}
+	if !parentInfo.IsDir() || parentInfo.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("native credential parent is not a regular directory")
+	}
+	parent, err := root.OpenRoot(parentName)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = parent.Close() }()
+	parentDir, err := parent.Open(".")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = parentDir.Close() }()
+	anchored, err := parentDir.Stat()
+	if err != nil || !os.SameFile(parentInfo, anchored) {
+		return fmt.Errorf("native credential parent changed")
+	}
+	leaf := filepath.Base(name)
+	before, err := parent.Lstat(leaf)
 	mode := os.FileMode(0o600)
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return err
@@ -77,13 +107,12 @@ func WriteNative(dir, name string, data []byte) error {
 			return err
 		}
 	}
-	parent := filepath.Join(dir, filepath.Dir(name))
-	tmp, err := os.CreateTemp(parent, ".native-*")
+	temp := ".native-" + rand.Text()
+	tmp, err := parent.OpenFile(temp, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if err != nil {
 		return err
 	}
-	temp := tmp.Name()
-	defer func() { _ = tmp.Close(); _ = os.Remove(temp) }()
+	defer func() { _ = tmp.Close(); _ = parent.Remove(temp) }()
 	if err := preserveOwner(tmp, before); err != nil {
 		return err
 	}
@@ -99,15 +128,10 @@ func WriteNative(dir, name string, data []byte) error {
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	if err := os.Rename(temp, filepath.Join(dir, name)); err != nil {
+	if err := renameNative(parentDir, temp, leaf); err != nil {
 		return err
 	}
-	// Unlike the general-purpose helper, a failure to sync this directory is not
-	// tolerated: an exchange intent must be durable before upstream dispatch.
-	parentDir, err := root.Open(filepath.Dir(name))
-	if err != nil {
-		return err
-	}
-	defer func() { _ = parentDir.Close() }()
+	// The anchored directory is also the durability boundary. Do not swallow
+	// sync errors: callers must not treat an uncommitted rename as success.
 	return parentDir.Sync()
 }

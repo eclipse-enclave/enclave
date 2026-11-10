@@ -29,7 +29,7 @@ func TestClaudeAuthSecretsSpecProjection(t *testing.T) {
 		t.Fatal("native auth declarations lost in runtime profile")
 	}
 	summary := summarizeSpecDocument(doc)
-	if len(summary.Providers[0].AuthSecrets) != 2 || summary.Providers[0].TokenEndpoint == nil {
+	if len(summary.Providers[0].AuthSecrets) != 2 {
 		t.Fatal("native auth declarations lost in capability summary")
 	}
 }

@@ -22,7 +22,7 @@ import (
 	"enclave/internal/placeholderstore"
 )
 
-func (s *Store) transact(parent context.Context, values map[string]string, format string) *http.Response {
+func (s *Store) transact(parent context.Context, values map[string]string) *http.Response {
 	ctx, cancel := context.WithTimeout(parent, s.timeout)
 	defer cancel()
 	release, err := s.lock(ctx)
@@ -79,14 +79,14 @@ func (s *Store) transact(parent context.Context, values map[string]string, forma
 		}
 	}
 	fail := func() *http.Response { return refusal(http.StatusBadGateway) }
-	body, contentType := encodeRequest(values, format)
+	body := mustJSON(values)
 	endpoint := s.config.Provider.TokenEndpoint
 	outgoing, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://"+endpoint.Host+endpoint.Path, bytes.NewReader(body))
 	if err != nil {
 		return fail()
 	}
 	outgoing.GetBody = nil
-	outgoing.Header.Set("Content-Type", contentType)
+	outgoing.Header.Set("Content-Type", "application/json")
 	outgoing.Header.Set("Accept-Encoding", "identity")
 	upstream, err := s.transport.RoundTrip(outgoing)
 	if err != nil {
@@ -104,7 +104,7 @@ func (s *Store) transact(parent context.Context, values map[string]string, forma
 	}
 	headers := safeHeaders(upstream.Header)
 	hasTokens := false
-	for _, kind := range []string{"access", "refresh", "id"} {
+	for _, kind := range []string{"access", "refresh"} {
 		if key := endpoint.Fields[kind]; key != "" {
 			if _, ok := object[key]; ok {
 				hasTokens = true
@@ -135,7 +135,7 @@ func (s *Store) transact(parent context.Context, values map[string]string, forma
 	// Only declared credential fields are committed. A valid consumed grant is
 	// retained even when expiry is missing or malformed; it cannot deduplicate.
 	tokens := map[string]string{}
-	for _, kind := range []string{"access", "refresh", "id"} {
+	for _, kind := range []string{"access", "refresh"} {
 		key := endpoint.Fields[kind]
 		if key == "" {
 			continue
@@ -164,18 +164,15 @@ func (s *Store) transact(parent context.Context, values map[string]string, forma
 	}
 	for _, field := range s.file.Fields {
 		if value := tokens[field.Kind]; value != "" {
-			parts, _ := model.AuthPointerSegments(field.Pointer)
-			if len(parts) != 2 || parts[0] != "claudeAiOauth" {
-				return fail()
-			}
-			oauth[parts[1]] = value
+			oauth[strings.TrimPrefix(field.Pointer, "/claudeAiOauth/")] = value
+			native.Values[field.Pointer] = value
 		}
 	}
 	tokenType := textField(object, "token_type")
 	unsafeMetadata := false
 	nonSecret := func(value string) bool {
 		for _, credential := range credentials {
-			if contains(value, credential) {
+			if placeholderstore.ContainsCredential(value, credential) {
 				unsafeMetadata = true
 				return false
 			}
@@ -196,16 +193,16 @@ func (s *Store) transact(parent context.Context, values map[string]string, forma
 			oauth["expiresAt"] = expiry.UnixMilli()
 		}
 	}
-	encoded, err := json.Marshal(native.Document)
-	if err != nil {
-		return fail()
+	encoded := mustJSON(native.Document)
+	for _, field := range s.file.Fields {
+		if native.Values[field.Pointer] == "" {
+			continue
+		}
+		if _, err := bindings.Bind(s.config.Provider.Name, s.file.File, field.Pointer, field.Kind, field.Placeholder, ""); err != nil {
+			return fail()
+		}
 	}
-	projected, _, _, err := placeholderstore.ProjectFile(s.config.Provider.Name, s.file, encoded, &bindings, s.config.Secrets, s.env)
-	if err != nil {
-		return fail()
-	}
-	// Projection has not touched disk or bindings yet. Commit native first so
-	// a failed bindings write cannot lose a consumed grant.
+	// Commit native first so a failed bindings write cannot lose a consumed grant.
 	if placeholderstore.WriteNative(s.dir, s.file.File, encoded) != nil {
 		return fail()
 	}
@@ -216,7 +213,7 @@ func (s *Store) transact(parent context.Context, values map[string]string, forma
 	if placeholderstore.SaveBindings(s.dir, bindings) != nil {
 		return refusal(http.StatusBadGateway)
 	}
-	if unsafeMetadata || !contained(mustJSON(projected), headers, credentials) {
+	if unsafeMetadata {
 		return refusal(http.StatusBadGateway)
 	}
 	return s.tokenReply(native, bindings, credentials, headers, tokenType)

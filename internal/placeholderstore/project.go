@@ -73,7 +73,7 @@ func Project(realDir, viewsDir, session string, profile model.Profile, configure
 			if err != nil {
 				return View{}, fmt.Errorf("read native credentials %s: %w", file.File, err)
 			}
-			document, releases, values, err := ProjectFile(provider.Name, file, data, &bindings, profile.Secrets, configured)
+			document, releases, values, err := projectFile(provider.Name, file, data, &bindings, profile.Secrets, configured)
 			if err != nil {
 				return View{}, fmt.Errorf("project native credentials %s: %w", file.File, err)
 			}
@@ -86,7 +86,7 @@ func Project(realDir, viewsDir, session string, profile model.Profile, configure
 	// regardless of which file declared it or the declaration order.
 	for _, file := range files {
 		for _, credential := range credentials {
-			if containsCredential(file.document, credential) {
+			if ContainsCredential(file.document, credential) {
 				return View{}, fmt.Errorf("project native credentials %s: credential value remains outside its declared field", file.name)
 			}
 		}
@@ -113,9 +113,7 @@ func Project(realDir, viewsDir, session string, profile model.Profile, configure
 	return view, nil
 }
 
-// ProjectFile renders one native document without writing it or the bindings.
-// Callers check all known values across their complete output before publishing.
-func ProjectFile(provider string, file model.AuthFileSecret, data []byte, bindings *Bindings, secrets map[string]model.SecretConfig, configured []model.SecretReleaseEntry) (map[string]any, []model.SecretReleaseEntry, []string, error) {
+func projectFile(provider string, file model.AuthFileSecret, data []byte, bindings *Bindings, secrets map[string]model.SecretConfig, configured []model.SecretReleaseEntry) (map[string]any, []model.SecretReleaseEntry, []string, error) {
 	doc, values, err := decodeAuthFile(file, data, projectedView)
 	if err != nil {
 		return nil, nil, nil, err
@@ -162,19 +160,23 @@ func ProjectFile(provider string, file model.AuthFileSecret, data []byte, bindin
 	return doc, releases, rawValues, nil
 }
 
-func containsCredential(value any, credential string) bool {
+// ContainsCredential scans parsed JSON, including escaped strings and map keys.
+func ContainsCredential(value any, credential string) bool {
+	if credential == "" {
+		return false
+	}
 	switch node := value.(type) {
 	case string:
 		return strings.Contains(node, credential)
 	case map[string]any:
 		for key, child := range node {
-			if strings.Contains(key, credential) || containsCredential(child, credential) {
+			if strings.Contains(key, credential) || ContainsCredential(child, credential) {
 				return true
 			}
 		}
 	case []any:
 		for _, child := range node {
-			if containsCredential(child, credential) {
+			if ContainsCredential(child, credential) {
 				return true
 			}
 		}

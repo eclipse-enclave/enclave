@@ -8,7 +8,6 @@
 package exchange
 
 import (
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -25,7 +24,7 @@ func TestEndpointParserAndDenyCannotFallThrough(t *testing.T) {
 	cases := []struct{ name, url, scheme, method, content, body string }{
 		{"unknown-grant", "https://platform.claude.com/v1/oauth/token", "https", "POST", "application/json", `{"grant_type":"token-exchange"}`},
 		{"duplicate-json", "https://platform.claude.com/v1/oauth/token", "https", "POST", "application/json", `{"grant_type":"authorization_code","grant_type":"refresh_token"}`},
-		{"duplicate-form", "https://platform.claude.com/v1/oauth/token", "https", "POST", "application/x-www-form-urlencoded", "grant_type=authorization_code&code=one&code=two"},
+		{"form-not-supported", "https://platform.claude.com/v1/oauth/token", "https", "POST", "application/x-www-form-urlencoded", "grant_type=authorization_code&code=one&code=two"},
 		{"trailing", "https://platform.claude.com/v1/oauth/token", "https", "POST", "application/json", `{"grant_type":"authorization_code","code":"test"}{}`},
 		{"raw-refresh", "https://platform.claude.com/v1/oauth/token", "https", "POST", "application/json", `{"grant_type":"refresh_token","refresh_token":"synthetic-raw"}`},
 		{"foreign-placeholder", "https://platform.claude.com/v1/oauth/token", "https", "POST", "application/json", `{"grant_type":"refresh_token","refresh_token":"ENCLAVE_SECRET_foreign"}`},
@@ -54,16 +53,16 @@ func TestEndpointParserAndDenyCannotFallThrough(t *testing.T) {
 	if calls != 0 {
 		t.Fatal("refused exchange dispatched")
 	}
-	req := httptest.NewRequest("POST", "https://PLATFORM.CLAUDE.COM:443/v1/oauth/token", strings.NewReader("grant_type=authorization_code&code=synthetic-code&code_verifier=synthetic-verifier"))
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req := httptest.NewRequest("POST", "https://PLATFORM.CLAUDE.COM:443/v1/oauth/token", strings.NewReader(`{"grant_type":"authorization_code","code":"synthetic-code","code_verifier":"synthetic-verifier"}`))
+	req.Header.Set("Content-Type", "application/json")
 	resp, handled := s.Intercept(req, "https")
 	if !handled || resp.StatusCode != 200 || calls != 1 {
-		t.Fatal("form code exchange rejected")
+		t.Fatal("JSON code exchange rejected")
 	}
 	_ = resp.Body.Close()
 	req = httptest.NewRequest("GET", "https://api.anthropic.com/v1/messages", nil)
 	if _, handled := s.Intercept(req, "https"); handled {
 		t.Fatal("ordinary API request intercepted")
 	}
-	s.transport = roundTripFunc(func(*http.Request) (*http.Response, error) { return nil, errors.New("synthetic network error") })
+
 }

@@ -312,7 +312,8 @@ recovery fence. A lost provider reply may require a fresh login. Missing or
 malformed expiry retains consumed tokens without enabling deduplication.
 Only allowlisted, placeholder-bearing responses pass containment checks.
 
-The proxy runs as the store owner without new capabilities or canonical
-ownership/mode changes. A fresh workload-inaccessible readiness directory binds
+The proxy uses the store owner UID, a distinct primary group for its NAT
+exemption and the host group as supplementary, without new capabilities or
+canonical ownership/mode changes. A fresh workload-inaccessible readiness directory binds
 startup to the session and the configuration actually loaded by the proxy.
 Missing or mismatched readiness refuses even an older image with `--no-rebuild`.

@@ -137,3 +137,36 @@ func TestNativeProxyMITMAndReadinessAfterHandlerInstall(t *testing.T) {
 		t.Fatalf("native proxy not installed before readiness: %v", err)
 	}
 }
+
+func TestNativeAPIKeyAliasesUseExistingEnvRelease(t *testing.T) {
+	_, dir, _ := nativeProxy(t)
+	api := model.SecretReleaseEntry{SecretID: "api", Placeholder: "ENCLAVE_SECRET_synthetic_api", Value: "synthetic-env-api-key", Hosts: []string{"api.anthropic.com"}, Header: "X-Api-Key"}
+	provider := model.ProviderConfig{Name: "anthropic", AuthSecrets: []model.AuthFileSecret{
+		{File: ".credentials.json", Codec: "claude-credentials", Fields: []model.AuthSecretField{{Pointer: "/claudeAiOauth/accessToken", Kind: "access", Release: "oauth"}, {Pointer: "/claudeAiOauth/refreshToken", Kind: "refresh"}}},
+		{File: "config.json", Codec: "claude-config", Fields: []model.AuthSecretField{{Pointer: "/primaryApiKey", Kind: "apiKey", Release: "api"}, {Pointer: "/anthropicApiKey", Kind: "apiKey", Release: "api"}}},
+	}, TokenEndpoint: &model.TokenEndpoint{Host: "platform.claude.com", Path: "/v1/oauth/token", Body: "json", Grants: []string{"authorization_code", "refresh_token"}, Fields: map[string]string{"access": "access_token", "refresh": "refresh_token"}}}
+	secrets := map[string]model.SecretConfig{"oauth": {Release: &model.SecretReleaseConfig{HTTP: &model.HTTPSecretReleaseConfig{Hosts: []string{"api.anthropic.com"}, Header: "Authorization", Format: "Bearer %s"}}}}
+	if err := placeholderstore.WriteNative(dir, "config.json", []byte(`{"primaryApiKey":"synthetic-native-api-key"}`)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := placeholderstore.Project(dir, t.TempDir(), "api-alias", model.Profile{Providers: []model.ProviderConfig{provider}, Secrets: secrets}, []model.SecretReleaseEntry{api}); err != nil {
+		t.Fatal(err)
+	}
+	store, err := exchange.New(exchange.Config{Provider: provider, Secrets: secrets}, dir, filepath.Join(t.TempDir(), "api.lock"), "session", []model.SecretReleaseEntry{api})
+	if err != nil {
+		t.Fatal(err)
+	}
+	headers := http.Header{"X-Api-Key": []string{api.Placeholder}}
+	dynamic, err := store.Releases(context.Background(), headers)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rules := append([]model.SecretReleaseEntry{api}, dynamic...)
+	if err := rewriteHeaders("https", "api.anthropic.com", headers, rules); err != nil || headers.Get("X-Api-Key") != api.Value {
+		t.Fatal("API alias did not use existing env release")
+	}
+	wrong := http.Header{"X-Debug": []string{api.Placeholder}}
+	if rewriteHeaders("https", "api.anthropic.com", wrong, rules) == nil {
+		t.Fatal("API alias bypassed declared header")
+	}
+}

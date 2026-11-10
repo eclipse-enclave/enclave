@@ -480,7 +480,7 @@ func (p *proxy) handler(scheme string) http.HandlerFunc {
 		// A denied request was not relayed and leaves no capture.
 		capture := p.captures.Begin(req, scheme)
 		if host != "" {
-			if err := rewriteHeaders(scheme, host, req.Header, rules); err != nil || (p.nativeAuth != nil && markedHeaders(req.Header)) {
+			if err := rewriteHeaders(scheme, host, req.Header, rules); err != nil || (p.nativeAuth != nil && exchange.MarkedHeaders(req.Header)) {
 				event.Status = http.StatusForbidden
 				event.Verdict = netlog.VerdictDeny
 				event.Rule = "secret-injection"
@@ -1439,18 +1439,4 @@ func clientIPFromAddr(remoteAddr string) string {
 		return strings.TrimSpace(host)
 	}
 	return addr
-}
-
-func markedHeaders(headers http.Header) bool {
-	for key, values := range headers {
-		if strings.Contains(strings.ToLower(key), strings.ToLower(model.SecretPlaceholderMarker)) {
-			return true
-		}
-		for _, value := range values {
-			if strings.Contains(value, model.SecretPlaceholderMarker) {
-				return true
-			}
-		}
-	}
-	return false
 }

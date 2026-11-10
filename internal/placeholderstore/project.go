@@ -112,9 +112,6 @@ func Project(realDir, viewsDir, session string, profile model.Profile, configure
 		}
 		projected, _ := json.Marshal(file.document)
 		target := filepath.Join(stage, filepath.FromSlash(file.name))
-		if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
-			return View{}, err
-		}
 		if err := os.WriteFile(target, projected, 0o600); err != nil {
 			return View{}, err
 		}

@@ -94,7 +94,7 @@ type mountAccumulator struct {
 }
 
 type preparedVolumes struct {
-	NativeFinalize func() error
+	NativeFinalize func()
 	Stores         storeSet
 	AuthState      model.AuthState
 	SecretMapping  SecretMapping
@@ -318,9 +318,7 @@ func (r *Runtime) prepareExecution() (*ExecutionContext, error) {
 	cleanup := func() {
 		r.endSessionMode(mode, false, func() error {
 			if prepared.NativeFinalize != nil {
-				if err := prepared.NativeFinalize(); err != nil {
-					return err
-				}
+				prepared.NativeFinalize()
 			}
 			if prepared.Cleanup != nil {
 				prepared.Cleanup()
@@ -479,7 +477,7 @@ func (r *Runtime) prepareVolumes(containerName string, baseContainerName string,
 	}
 
 	var nativeAuth *backend.NativeAuthSpec
-	var nativeFinalize func() error
+	var nativeFinalize func()
 	if r.run.ProtectAuth {
 		nativeAuth, nativeFinalize, err = r.prepareProtectedAuth(stores, mountArgs, &secretMapping, mode)
 		if err != nil {

@@ -46,7 +46,7 @@ func TestProtectedNativeClaudeAliasCannotRemainRaw(t *testing.T) {
 	r.addConfigMount(mounts, stores.Config)
 	_, cleanup, err := r.prepareProtectedAuth(stores, mounts, &SecretMapping{}, mode)
 	if cleanup != nil {
-		defer func() { _ = cleanup() }()
+		defer cleanup()
 	}
 	if err == nil {
 		t.Fatal("protected preparation accepted a raw credential alias in its workload config mount")

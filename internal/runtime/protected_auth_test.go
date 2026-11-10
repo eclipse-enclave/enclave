@@ -218,9 +218,7 @@ func TestProtectedRuntimeAdmissionHoldsActualConfigStoreLock(t *testing.T) {
 	if err := hoststore.ReserveMode(r.host.Home, dir, hoststore.ModeHolder{ID: "sibling", Session: "sibling", Engine: "docker", Protected: true}, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := hoststore.AdvanceMode(r.host.Home, dir, "sibling", "live", "cid", true); err != nil {
-		t.Fatal(err)
-	}
+	// A created sibling may still be pending before its live publication.
 	called := false
 	r.backend = &admissionBackend{check: func(_ context.Context, key backend.StoreKey, approved map[string]string) error {
 		called = true

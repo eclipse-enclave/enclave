@@ -306,7 +306,7 @@ stopped ephemeral containers, and per-session networks whose session is gone
 ## Native auth exchanges
 
 With `--protect-auth`, only the gateway mounts the canonical auth store. Workloads
-mount private views under `projects/<hash>/<tool>/auth-views/`. Claude exchanges take the canonical
+mount private views under `projects/<hash>/<tool>/auth-views/`. Claude and Codex exchanges take the canonical
 hoststore lock across reload, one bounded upstream dispatch and durable commit.
 Native tokens are written before stable placeholder bindings; UID/GID/mode are
 preserved. Bindings contain identifiers, never tokens or exchange history.
@@ -314,7 +314,8 @@ preserved. Bindings contain identifiers, never tokens or exchange history.
 On a confirmed protected end, current placeholder bindings authorize the whole
 private view; a regular native-path sibling needs its own matching placeholders.
 Only codec-allowlisted metadata is merged, with the sibling taking precedence.
-Tokens, expiry and scopes stay canonical. Unknown view keys are ignored;
+Tokens, expiry and scopes stay canonical. Codex auth files contain only
+gateway-owned state, so their views are not harvested. Unknown view keys are ignored;
 secret-bearing metadata and invalid or stale sources are skipped with a warning.
 The shared config path is never changed by harvest. Missing bindings after reset
 prevent stale views from restoring state.
@@ -329,11 +330,10 @@ teardown retains the reservation and private files; a failed finalizer releases
 its synchronous PID claim so cleanup can retry. Stale-holder cleanup removes the
 orphan gateway first and discards its views without harvesting them.
 
-Each gateway remembers only the native fingerprint last returned to its client.
-An overlapping sibling refresh receives the newer unexpired native grant once;
-the next refresh dispatches normally. There is no replay horizon or persisted
-recovery fence. A lost provider reply may require a fresh login. Missing or
-malformed expiry retains consumed tokens without enabling deduplication.
+Every refresh dispatches with the current canonical refresh token under the lock,
+so sibling refreshes serialize and each rotates the current grant. There is no
+replay cache or persisted recovery fence. A lost provider reply may require a
+fresh login. Missing or malformed expiry does not discard consumed tokens.
 Only allowlisted, placeholder-bearing responses pass containment checks.
 
 The proxy uses the store owner UID, a distinct primary group for its NAT

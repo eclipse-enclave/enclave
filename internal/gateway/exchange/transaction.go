@@ -199,7 +199,10 @@ func (s *Store) transact(parent context.Context, values map[string]string, media
 		tokenType = ""
 	}
 	if s.file.Codec == "codex-auth" {
-		native.Document["auth_mode"], native.Document["OPENAI_API_KEY"] = "chatgpt", nil
+		if login {
+			native.Document["auth_mode"], native.Document["OPENAI_API_KEY"] = "chatgpt", nil
+			delete(native.Values, "/OPENAI_API_KEY")
+		}
 		native.Document["last_refresh"] = s.now().UTC().Format(time.RFC3339)
 		for _, pointer := range []string{"/tokens/access_token", "/tokens/id_token"} {
 			claims, _ := placeholderstore.JWTClaims(native.Values[pointer])
@@ -221,7 +224,7 @@ func (s *Store) transact(parent context.Context, values map[string]string, media
 	}
 	encoded := mustJSON(native.Document)
 	for _, field := range s.file.Fields {
-		if native.Values[field.Pointer] == "" {
+		if field.Kind == "apiKey" || native.Values[field.Pointer] == "" {
 			continue
 		}
 		if _, err := bindings.Bind(s.config.Provider.Name, s.file.File, field.Pointer, field.Kind, field.Placeholder, ""); err != nil {
@@ -308,7 +311,7 @@ func (s *Store) tokenReply(native placeholderstore.NativeFile, bindings placehol
 	if scope != "" {
 		result[endpoint.Fields["scope"]] = scope
 	}
-	if oauth, ok := native.Document["claudeAiOauth"].(map[string]any); ok {
+	if oauth, ok := native.Document["claudeAiOauth"].(map[string]any); ok && s.file.Codec == "claude-credentials" {
 		if values, ok := oauth["scopes"].([]any); ok {
 			var scopes []string
 			for _, value := range values {

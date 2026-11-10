@@ -12,6 +12,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -25,6 +26,7 @@ import (
 	"testing"
 	"time"
 
+	"enclave/internal/config"
 	"enclave/internal/model"
 	"enclave/internal/placeholderstore"
 	"enclave/internal/util"
@@ -561,25 +563,31 @@ func TestConcurrentRequestsSerializeNativeRotations(t *testing.T) {
 	wg.Wait()
 }
 
-func syntheticJWT(exp int64, signature string) string {
-	payload := mustJSON(map[string]any{"exp": exp, "https://api.openai.com/auth": map[string]string{"chatgpt_account_id": "synthetic-account"}})
+func syntheticJWT(exp int64, signature string, accounts ...string) string {
+	account := "synthetic-account"
+	if len(accounts) > 0 {
+		account = accounts[0]
+	}
+	payload := mustJSON(map[string]any{"exp": exp, "https://api.openai.com/auth": map[string]string{"chatgpt_account_id": account}})
 	return "eyJhbGciOiJSUzI1NiJ9." + base64.RawURLEncoding.EncodeToString(payload) + "." + base64.RawURLEncoding.EncodeToString([]byte(signature))
 }
 
-func TestCodexLoginRefreshAndCachedJWTRelease(t *testing.T) {
-	config := testConfig()
-	config.Provider.Name = "openai-codex"
-	config.Provider.TokenEndpoint = &model.TokenEndpoint{Host: "auth.openai.com", Path: "/oauth/token", Body: "either", Grants: []string{"authorization_code", "refresh_token"}, Fields: map[string]string{"access": "access_token", "refresh": "refresh_token", "id": "id_token", "expiresIn": "expires_in", "scope": "scope"}}
-	config.Provider.AuthSecrets = []model.AuthFileSecret{{File: "auth.json", Codec: "codex-auth", Fields: []model.AuthSecretField{
-		{Pointer: "/OPENAI_API_KEY", Kind: "apiKey", Release: "api"},
-		{Pointer: "/tokens/access_token", Kind: "access", Release: "oauth", Placeholder: &model.SecretPlaceholderConfig{Shape: "jwt"}},
-		{Pointer: "/tokens/refresh_token", Kind: "refresh"},
-		{Pointer: "/tokens/id_token", Kind: "id", Placeholder: &model.SecretPlaceholderConfig{Shape: "jwt"}},
-	}}}
-	s, err := New(config, t.TempDir(), filepath.Join(t.TempDir(), "canonical.lock"), "codex", nil)
+func codexFixture(t *testing.T) (*Store, model.Profile) {
+	t.Helper()
+	profile, err := config.LoadProfile(model.Paths{ToolsDir: filepath.Join("..", "..", "..", "extensions", "tools")}, "codex")
 	if err != nil {
 		t.Fatal(err)
 	}
+	store, err := New(Config{Provider: profile.Providers[0], Secrets: profile.Secrets}, t.TempDir(), filepath.Join(t.TempDir(), "canonical.lock"), "codex", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store.now = func() time.Time { return time.Date(2026, 11, 10, 12, 0, 0, 0, time.UTC) }
+	return store, profile
+}
+
+func TestCodexLoginRefreshAndCachedJWTRelease(t *testing.T) {
+	s, profile := codexFixture(t)
 	now := time.Date(2026, 11, 10, 12, 0, 0, 0, time.UTC)
 	s.now = func() time.Time { return now }
 	var calls int
@@ -615,6 +623,20 @@ func TestCodexLoginRefreshAndCachedJWTRelease(t *testing.T) {
 			t.Fatal("JWT claims or signature missing")
 		}
 	}
+	// A legacy native file may carry a configured API key alongside OAuth.
+	api := model.SecretReleaseEntry{SecretID: "openai-api-key", Value: "synthetic-preserved-api-key", Placeholder: "ENCLAVE_SECRET_0123456789abcdef0123456789abcdef0123456789abcdef"}
+	existing, err := s.native()
+	if err != nil {
+		t.Fatal(err)
+	}
+	existing.Document["OPENAI_API_KEY"] = api.Value
+	delete(existing.Document, "auth_mode")
+	if err := placeholderstore.WriteNative(s.dir, s.file.File, mustJSON(existing.Document)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := placeholderstore.Project(s.dir, t.TempDir(), "api-alias", profile, []model.SecretReleaseEntry{api}); err != nil {
+		t.Fatal("configured mixed identity not admitted", err)
+	}
 	resp, second := invoke(t, s, "refresh_token", first["refresh_token"].(string))
 	if resp.StatusCode != 200 || calls != 2 || second["access_token"] == cached {
 		t.Fatal("refresh did not update readable claims")
@@ -622,6 +644,9 @@ func TestCodexLoginRefreshAndCachedJWTRelease(t *testing.T) {
 	native, err := s.native()
 	if err != nil || native.Values["/tokens/access_token"] != currentAccess || native.Values["/tokens/id_token"] != currentID || native.Document["last_refresh"] != now.Format(time.RFC3339) || native.Document["tokens"].(map[string]any)["account_id"] != "synthetic-account" {
 		t.Fatal("native Codex layout not committed")
+	}
+	if native.Document["OPENAI_API_KEY"] != api.Value || native.Document["auth_mode"] != nil {
+		t.Fatal("refresh changed canonical API key or legacy auth mode")
 	}
 	for _, token := range []string{cached, second["access_token"].(string)} {
 		rules, err := s.Releases(context.Background(), http.Header{"Authorization": []string{"Bearer " + token}})
@@ -637,8 +662,7 @@ func TestCodexLoginRefreshAndCachedJWTRelease(t *testing.T) {
 	if denied, handled := s.Intercept(req, "https"); !handled || denied.StatusCode != 403 || calls != 2 {
 		t.Fatal("API-key token exchange escaped mediation")
 	}
-	profile := model.Profile{Providers: []model.ProviderConfig{config.Provider}, Secrets: config.Secrets}
-	view, err := placeholderstore.Project(s.dir, t.TempDir(), "fresh", profile, nil)
+	view, err := placeholderstore.Project(s.dir, t.TempDir(), "fresh", profile, []model.SecretReleaseEntry{api})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -692,5 +716,131 @@ func TestFormExchangeRejectsAmbiguousFields(t *testing.T) {
 		if !handled || resp.StatusCode != 403 {
 			t.Fatal("ambiguous form forwarded")
 		}
+	}
+}
+
+func TestCodexHarvestPreservesGatewayOwnedAuthState(t *testing.T) {
+	for _, apiMode := range []bool{false, true} {
+		t.Run(fmt.Sprint(apiMode), func(t *testing.T) {
+			s, profile := codexFixture(t)
+			old := map[string]any{"auth_mode": "chatgpt", "last_refresh": "2026-01-01T00:00:00Z", "tokens": map[string]any{"access_token": syntheticJWT(4102444800, "old-access", "old-account"), "id_token": syntheticJWT(4102444800, "old-id", "old-account"), "refresh_token": oldRefresh, "account_id": "old-account"}}
+			var configured []model.SecretReleaseEntry
+			if apiMode {
+				old = map[string]any{"auth_mode": "apikey", "OPENAI_API_KEY": "synthetic-native-key", "last_refresh": "2026-01-01T00:00:00Z"}
+				placeholder, err := model.NewSecretPlaceholder(nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				configured = []model.SecretReleaseEntry{{SecretID: "openai-api-key", Value: "synthetic-native-key", Placeholder: placeholder}}
+			}
+			if err := placeholderstore.WriteNative(s.dir, s.file.File, mustJSON(old)); err != nil {
+				t.Fatal(err)
+			}
+			view, err := placeholderstore.Project(s.dir, t.TempDir(), "older", profile, configured)
+			if err != nil {
+				t.Fatal(err)
+			}
+			s.transport = roundTripFunc(func(*http.Request) (*http.Response, error) {
+				return response(200, http.Header{}, mustJSON(map[string]string{"access_token": syntheticJWT(4102444800, "new-access"), "id_token": syntheticJWT(4102444800, "new-id"), "refresh_token": newRefresh})), nil
+			})
+			if resp, _ := invoke(t, s, "authorization_code", "", true); resp.StatusCode != 200 {
+				t.Fatal("login control failed")
+			}
+			before, err := s.native()
+			if err != nil {
+				t.Fatal(err)
+			}
+			release, err := s.lock(t.Context())
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = placeholderstore.Harvest(s.dir, view.Dir, t.TempDir(), profile)
+			release()
+			if err != nil {
+				t.Fatal(err)
+			}
+			after, err := s.native()
+			if err != nil || after.Fingerprint != before.Fingerprint {
+				t.Fatal("stale view changed canonical mode, account, refresh time or grant")
+			}
+		})
+	}
+}
+
+func TestCodexExternalAPIKeyDoesNotLoseConsumedGrant(t *testing.T) {
+	for _, grant := range []string{"authorization_code", "refresh_token"} {
+		t.Run(grant, func(t *testing.T) {
+			s, profile := codexFixture(t)
+			if grant == "refresh_token" {
+				doc := map[string]any{"tokens": map[string]string{"access_token": syntheticJWT(4102444800, "old-access"), "id_token": syntheticJWT(4102444800, "old-id"), "refresh_token": oldRefresh}}
+				if err := placeholderstore.WriteNative(s.dir, s.file.File, mustJSON(doc)); err != nil {
+					t.Fatal(err)
+				}
+			}
+			view, err := placeholderstore.Project(s.dir, t.TempDir(), "initial", profile, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			refresh := ""
+			for _, binding := range view.Bindings.Bindings {
+				if binding.Kind == "refresh" {
+					refresh = binding.Placeholder
+				}
+			}
+			external, err := s.native()
+			if err != nil {
+				t.Fatal(err)
+			}
+			external.Document["OPENAI_API_KEY"] = "synthetic-external-api"
+			if err := placeholderstore.WriteNative(s.dir, s.file.File, mustJSON(external.Document)); err != nil {
+				t.Fatal(err)
+			}
+			s.transport = roundTripFunc(func(*http.Request) (*http.Response, error) {
+				return response(200, http.Header{}, mustJSON(map[string]string{"access_token": syntheticJWT(4102444800, "new-access"), "id_token": syntheticJWT(4102444800, "new-id"), "refresh_token": newRefresh})), nil
+			})
+			resp, _ := invoke(t, s, grant, refresh, true)
+			native, err := s.native()
+			if err != nil || resp.StatusCode != 200 || native.Values["/tokens/refresh_token"] != newRefresh {
+				t.Fatal("unbound external API key lost a consumed grant")
+			}
+			if grant == "refresh_token" && native.Document["OPENAI_API_KEY"] != "synthetic-external-api" {
+				t.Fatal("refresh erased external API key")
+			}
+		})
+	}
+}
+
+func TestCodexReplyIgnoresForeignCodecMetadata(t *testing.T) {
+	for _, numeric := range []bool{false, true} {
+		t.Run(fmt.Sprint(numeric), func(t *testing.T) {
+			s, profile := codexFixture(t)
+			scopes := []any{"synthetic-foreign-native-credential"}
+			if numeric {
+				scopes = []any{123}
+			}
+			doc := map[string]any{"claudeAiOauth": map[string]any{"scopes": scopes}}
+			if err := placeholderstore.WriteNative(s.dir, s.file.File, mustJSON(doc)); err != nil {
+				t.Fatal(err)
+			}
+			view, err := placeholderstore.Project(s.dir, t.TempDir(), "initial", profile, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			data, err := os.ReadFile(filepath.Join(view.Dir, s.file.File))
+			if err != nil || strings.Contains(string(data), "claudeAiOauth") {
+				t.Fatal("foreign metadata reached projection")
+			}
+			s.transport = roundTripFunc(func(*http.Request) (*http.Response, error) {
+				return response(200, http.Header{}, mustJSON(map[string]string{"access_token": syntheticJWT(4102444800, "new-access"), "id_token": syntheticJWT(4102444800, "new-id"), "refresh_token": newRefresh})), nil
+			})
+			resp, reply := invoke(t, s, "authorization_code", "", true)
+			if resp.StatusCode != 200 || reply["scope"] != nil {
+				t.Fatal("foreign codec metadata entered token reply")
+			}
+			native, err := s.native()
+			if err != nil || native.Document["claudeAiOauth"] == nil {
+				t.Fatal("unknown canonical metadata was deleted")
+			}
+		})
 	}
 }

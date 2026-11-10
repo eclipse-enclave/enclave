@@ -43,7 +43,7 @@ func TestAstraPrunedEndedHolderDoesNotRegainFinalization(t *testing.T) {
 		}
 	}
 	be := New(Options{Host: model.Host{Home: home}})
-	_, reconcile, err := be.beginContainerModeFinalization(context.Background(), "old-session")
+	_, reconcile, _, err := be.beginContainerModeFinalization(context.Background(), "old-session")
 	if err != nil || reconcile {
 		t.Fatalf("ended control: reconcile=%t err=%v", reconcile, err)
 	}
@@ -52,7 +52,7 @@ func TestAstraPrunedEndedHolderDoesNotRegainFinalization(t *testing.T) {
 	if err := hoststore.ReserveMode(home, dir, hoststore.ModeHolder{ID: "new-holder", Session: "new-session", Engine: "docker", Protected: true}, nil); err != nil {
 		t.Fatal(err)
 	}
-	_, reconcile, err = be.beginContainerModeFinalization(context.Background(), "old-session")
+	_, reconcile, _, err = be.beginContainerModeFinalization(context.Background(), "old-session")
 	if err == nil && reconcile {
 		t.Fatal("pruning ended record let an old labeled container reconcile during the opposite reservation")
 	}

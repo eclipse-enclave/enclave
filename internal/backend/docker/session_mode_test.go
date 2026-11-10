@@ -56,7 +56,7 @@ func TestExternalFinalizerRespectsHostOwnership(t *testing.T) {
 					}
 				}
 				be := New(Options{Host: model.Host{Home: home}})
-				finish, reconcile, err := be.beginContainerModeFinalization(context.Background(), "holder")
+				finish, reconcile, _, err := be.beginContainerModeFinalization(context.Background(), "holder")
 				if owned && state == "finalizing" {
 					if err == nil {
 						t.Fatal("parallel finalizer was not refused")
@@ -73,7 +73,7 @@ func TestExternalFinalizerRespectsHostOwnership(t *testing.T) {
 				if wantReconcile {
 					// A second CLI must not perform a parallel finalizer or end
 					// the reservation while the first one is still writing.
-					_, secondSync, err := be.beginContainerModeFinalization(context.Background(), "holder")
+					_, secondSync, _, err := be.beginContainerModeFinalization(context.Background(), "holder")
 					if err == nil || secondSync {
 						t.Fatalf("parallel finalizer: sync=%t err=%v", secondSync, err)
 					}
@@ -84,12 +84,12 @@ func TestExternalFinalizerRespectsHostOwnership(t *testing.T) {
 					if err := hoststore.ReserveMode(home, dir, hoststore.ModeHolder{ID: "aborted-opposite", Session: "opposite", Protected: true}, nil); err == nil {
 						t.Fatal("aborting a finalizer ended its workload reservation")
 					}
-					replacement, sync, err := be.beginContainerModeFinalization(context.Background(), "holder")
+					replacement, sync, _, err := be.beginContainerModeFinalization(context.Background(), "holder")
 					if err != nil || !sync {
 						t.Fatalf("sequential takeover: sync=%t err=%v", sync, err)
 					}
 					finish.release()
-					if _, _, err := be.beginContainerModeFinalization(context.Background(), "holder"); err == nil {
+					if _, _, _, err := be.beginContainerModeFinalization(context.Background(), "holder"); err == nil {
 						t.Fatal("old release cleared a later active finalizer")
 					}
 					finish = replacement

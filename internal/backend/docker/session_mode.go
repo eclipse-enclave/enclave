@@ -31,6 +31,39 @@ func (b *Backend) finalizingRequestMode(req backend.Request, id string) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
+	if req.NativeAuth != nil {
+		own, running, err := b.InspectModeSession(ctx, req.Mode.HolderID, id)
+		if err != nil || own != nil && (running || !waitContainerGone(ctx, own.ID)) {
+			logx.Warnf("Session %s protected stores retained: agent removal could not be confirmed", req.Session.Name)
+			return
+		}
+		sidecar, err := b.modeGateway(ctx, req.Mode.HolderID, req.Session.Name, req.Session.ProjectHash)
+		if err != nil || sidecar != nil && !waitContainerGone(ctx, sidecar.ID) {
+			logx.Warnf("Session %s protected stores retained: gateway removal could not be confirmed", req.Session.Name)
+			return
+		}
+		dir, err := hoststore.ResolveDir(b.opts.Host.Home, req.Mode.ConfigStore, backend.StoreKindConfig)
+		if err == nil {
+			err = hoststore.WithModeHolders(b.opts.Host.Home, dir, func(holders *[]hoststore.ModeHolder) error {
+				for i := range *holders {
+					holder := &(*holders)[i]
+					if holder.ID != req.Mode.HolderID {
+						continue
+					}
+					if sidecar == nil && !holder.GatewayCorrelated {
+						return fmt.Errorf("gateway correlation policy is missing")
+					}
+					holder.State, holder.UpdatedAt = "finalizing", time.Now().UTC()
+					return nil
+				}
+				return fmt.Errorf("session mode holder is missing")
+			})
+		}
+		if err != nil {
+			logx.Warnf("Session %s protected stores retained: %v", req.Session.Name, err)
+		}
+		return
+	}
 	info, err := dockercmd.ContainerInspect(ctx, ref)
 	if dockercmd.IsNotFound(err) || err == nil && info.State != nil && !info.State.Running {
 		hoststore.AdvanceRequestMode(b.opts.Host.Home, req, "finalizing", id)
@@ -50,20 +83,22 @@ func (finish modeFinalizer) release() {
 // beginContainerModeFinalization pins the holder to the inspected container ID.
 // Stop/Remove cannot release a foreground owner's reservation: that process
 // may still run its deferred auth sync after the engine reports the exit.
-func (b *Backend) beginContainerModeFinalization(ctx context.Context, name string) (finish modeFinalizer, reconcile bool, err error) {
+func (b *Backend) beginContainerModeFinalization(ctx context.Context, name string) (finish modeFinalizer, reconcile bool, remove func() error, err error) {
 	noop := func(bool) error { return nil }
+	remove = func() error { return RemoveSessionContainer(ctx, name, false) }
 	info, err := dockercmd.ContainerInspect(ctx, name)
 	if dockercmd.IsNotFound(err) {
-		return noop, false, nil
+		return noop, false, remove, nil
 	}
 	if err != nil {
-		return nil, false, err
+		return nil, false, remove, err
 	}
 	dir := mountedSourceDir(info, containerEnvValue(info.Config, model.EnvToolConfigDir))
 	if dir == "" || info.Config == nil || info.Config.Labels[model.LabelModeHolder] == "" {
-		return noop, true, nil
+		return noop, true, remove, nil
 	}
 	var selected string
+	claimed := hoststore.ModeHolder{ID: info.Config.Labels[model.LabelModeHolder], Session: strings.TrimPrefix(info.Name, "/"), Tool: info.Config.Labels[model.LabelAgent], ProjectHash: info.Config.Labels[model.LabelHash], Protected: containerEnvValue(info.Config, model.EnvNativeAuthOps) != ""}
 	reconcile = false
 	err = hoststore.WithModeHolders(b.opts.Host.Home, dir, func(holders *[]hoststore.ModeHolder) error {
 		for i := range *holders {
@@ -72,6 +107,7 @@ func (b *Backend) beginContainerModeFinalization(ctx context.Context, name strin
 				holder.ContainerID != "" && holder.ContainerID != info.ID {
 				continue
 			}
+			claimed = *holder
 			if holder.State == "finalizing" && hoststore.ModeOwnerAlive(holder.OwnerPID) {
 				return fmt.Errorf("session %s auth is being finalized by process %d", holder.Session, holder.OwnerPID)
 			}
@@ -79,15 +115,20 @@ func (b *Backend) beginContainerModeFinalization(ctx context.Context, name strin
 				reconcile = false
 				return nil
 			}
-			reconcile = true
+			reconcile = !holder.Protected
 			holder.State, holder.UpdatedAt, holder.OwnerPID = "finalizing", time.Now().UTC(), os.Getpid()
 			selected = holder.ID
+			claimed = *holder
 			break
 		}
 		return nil
 	})
 	if err != nil {
-		return nil, false, fmt.Errorf("reserve auth finalization: %w", err)
+		return nil, false, remove, fmt.Errorf("reserve auth finalization: %w", err)
+	}
+	var nativeFinalize func() error
+	if claimed.Protected {
+		remove, nativeFinalize = b.protectedEnd(ctx, info, claimed)
 	}
 	return func(ended bool) error {
 		if selected == "" {
@@ -95,7 +136,7 @@ func (b *Backend) beginContainerModeFinalization(ctx context.Context, name strin
 		}
 		var err error
 		if ended {
-			err = hoststore.AdvanceMode(b.opts.Host.Home, dir, selected, "ended", "", false)
+			err = hoststore.EndMode(b.opts.Host.Home, dir, selected, nativeFinalize)
 		} else {
 			err = hoststore.WithModeHolders(b.opts.Host.Home, dir, func(holders *[]hoststore.ModeHolder) error {
 				for i := range *holders {
@@ -111,7 +152,7 @@ func (b *Backend) beginContainerModeFinalization(ctx context.Context, name strin
 			selected = ""
 		}
 		return err
-	}, reconcile, nil
+	}, reconcile, remove, nil
 }
 
 // InspectModeSession finds pending containers by the host reservation label,

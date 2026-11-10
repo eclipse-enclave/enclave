@@ -26,16 +26,18 @@ import (
 // ModeHolder lives outside the agent-writable config store. Container exit does
 // not release it: the owning host process may still be reconciling credentials.
 type ModeHolder struct {
-	ID          string    `json:"id"`
-	Session     string    `json:"session"`
-	Tool        string    `json:"tool"`
-	ProjectHash string    `json:"projectHash"`
-	Engine      string    `json:"engine"`
-	Protected   bool      `json:"protected"`
-	ContainerID string    `json:"containerId,omitempty"`
-	State       string    `json:"state"`
-	OwnerPID    int       `json:"ownerPid"`
-	UpdatedAt   time.Time `json:"updatedAt"`
+	ID                string    `json:"id"`
+	Session           string    `json:"session"`
+	Tool              string    `json:"tool"`
+	ProjectHash       string    `json:"projectHash"`
+	Engine            string    `json:"engine"`
+	GatewayCorrelated bool      `json:"gatewayCorrelated,omitempty"`
+	Ephemeral         bool      `json:"ephemeral,omitempty"`
+	Protected         bool      `json:"protected"`
+	ContainerID       string    `json:"containerId,omitempty"`
+	State             string    `json:"state"`
+	OwnerPID          int       `json:"ownerPid"`
+	UpdatedAt         time.Time `json:"updatedAt"`
 }
 
 // ModeRecord groups the holders of one physical config store.
@@ -202,4 +204,35 @@ func AdvanceRequestMode(home string, req backend.Request, state, id string) {
 	if err != nil {
 		logx.Warnf("Session auth-mode reservation retained: %v", err)
 	}
+}
+
+// EndMode keeps the reservation through the owner's final writes and teardown.
+// The finalizer may take the native-store lock, never another config-store lock.
+func EndMode(home, dir, id string, finalize func() error) error {
+	var finalErr error
+	err := WithModeHolders(home, dir, func(holders *[]ModeHolder) error {
+		for i, holder := range *holders {
+			if holder.ID != id {
+				continue
+			}
+			if holder.State != "finalizing" || holder.OwnerPID != os.Getpid() {
+				return fmt.Errorf("session %s has not confirmed exit for this finalizer", holder.Session)
+			}
+			if finalize != nil {
+				finalErr = finalize()
+			}
+			if finalErr == nil {
+				finalErr = removeModeFiles(home, dir, holder)
+			}
+			if finalErr != nil {
+				(*holders)[i].OwnerPID = 0
+				(*holders)[i].UpdatedAt = time.Now().UTC()
+				return nil
+			}
+			*holders = slices.Delete(*holders, i, i+1)
+			return nil
+		}
+		return fmt.Errorf("session mode holder is missing")
+	})
+	return errors.Join(err, finalErr)
 }

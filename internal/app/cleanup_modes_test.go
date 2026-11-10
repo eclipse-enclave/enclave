@@ -28,11 +28,16 @@ import (
 
 type modeCleanupBackend struct {
 	backend.Backend
-	remove func(context.Context, backend.SessionRef) error
+	remove        func(context.Context, backend.SessionRef) error
+	removeGateway func(context.Context, string, string, string) (bool, error)
 }
 
 func (b modeCleanupBackend) InspectModeSession(ctx context.Context, holderID, id string) (*backend.SessionRef, bool, error) {
 	return backenddocker.New(backenddocker.Options{}).InspectModeSession(ctx, holderID, id)
+}
+
+func (b modeCleanupBackend) RemoveModeGateway(ctx context.Context, id, session, hash string) (bool, error) {
+	return b.removeGateway(ctx, id, session, hash)
 }
 
 func (b modeCleanupBackend) Name() string { return "docker" }
@@ -171,5 +176,98 @@ func TestModeContainerQEMUDoesNotInferPendingAbsence(t *testing.T) {
 	ref, running, err := backendqemu.New(backendqemu.Options{}).InspectModeSession(context.Background(), "holder", strconv.Itoa(os.Getpid()))
 	if err != nil || ref == nil || !running {
 		t.Fatalf("live QEMU PID: ref=%+v running=%t err=%v", ref, running, err)
+	}
+}
+
+func TestAbsentProtectedCleanupRemovesOrphanGatewayBeforePrivateIdentity(t *testing.T) {
+	for _, tc := range []struct {
+		name                                     string
+		found, correlated, removeFails, wantKept bool
+	}{
+		{name: "one correlated", found: true, correlated: true},
+		{name: "one direct correlation", found: true},
+		{name: "zero correlated", correlated: true},
+		{name: "zero legacy", wantKept: true},
+		{name: "teardown error", found: true, correlated: true, removeFails: true, wantKept: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("XDG_STATE_HOME", t.TempDir())
+			home := t.TempDir()
+			key := backend.StoreKey{Owner: "claude", ProjectHash: "syntheticproject", Suffix: "nonce"}
+			dir, err := hoststore.ResolveDir(home, key, backend.StoreKindConfig)
+			if err != nil {
+				t.Fatal(err)
+			}
+			holder := hoststore.ModeHolder{ID: "holder-one", Session: "session", Tool: key.Owner, ProjectHash: key.ProjectHash, Protected: true, Ephemeral: true, GatewayCorrelated: tc.correlated, Engine: "docker"}
+			if err := hoststore.ReserveMode(home, dir, holder, nil); err != nil {
+				t.Fatal(err)
+			}
+			if err := hoststore.WithModeHolders(home, dir, func(holders *[]hoststore.ModeHolder) error {
+				(*holders)[0].UpdatedAt = time.Now().Add(-2 * modeStartTimeout)
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+			native := hoststore.Dir(home, backend.StoreKey{Owner: key.Owner, Suffix: "ephemeral-" + key.Suffix}, backend.StoreKindAuth)
+			views := filepath.Join(config.HostProjectToolDir(home, key.ProjectHash, key.Owner), "auth-views")
+			own, sibling := filepath.Join(views, holder.ID+"-published"), filepath.Join(views, "holder-two-published")
+			for _, path := range []string{native, own, sibling} {
+				if err := os.MkdirAll(path, 0700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			bin := t.TempDir()
+			if err := os.WriteFile(filepath.Join(bin, "docker"), []byte("#!/bin/sh\nif [ \"$1\" = ps ]; then exit 0; fi\necho 'No such container' >&2\nexit 1\n"), 0755); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+			removedGateway := false
+			be := modeCleanupBackend{remove: func(context.Context, backend.SessionRef) error {
+				t.Fatal("absent cleanup tried removing a possibly reused agent name")
+				return nil
+			}, removeGateway: func(_ context.Context, id, session, hash string) (bool, error) {
+				if id != holder.ID || session != holder.Session || hash != holder.ProjectHash {
+					t.Fatal("wrong orphan session")
+				}
+				for _, path := range []string{native, own} {
+					if _, err := os.Stat(path); err != nil {
+						t.Fatal("private state deleted before orphan gateway removal")
+					}
+				}
+				if err := hoststore.WithModeHolders(home, dir, func(holders *[]hoststore.ModeHolder) error {
+					if len(*holders) != 1 {
+						t.Fatal("holder released before orphan teardown")
+					}
+					return nil
+				}); err != nil {
+					t.Fatal(err)
+				}
+				if tc.removeFails {
+					return tc.found, fmt.Errorf("synthetic orphan removal failure")
+				}
+				removedGateway = tc.found
+				return tc.found, nil
+			}}
+			err = cleanupModeStore(home, dir, be, false)
+			if (err != nil) != tc.wantKept {
+				t.Fatal(err)
+			}
+			for _, path := range []string{native, own} {
+				_, err := os.Stat(path)
+				if (!tc.wantKept) != os.IsNotExist(err) {
+					t.Fatal("private state lifetime disagrees with orphan teardown")
+				}
+			}
+			if removedGateway != (tc.found && !tc.removeFails) {
+				t.Fatal("gateway removal result disagrees with evidence")
+			}
+			if _, err := os.Stat(sibling); err != nil {
+				t.Fatal("cleanup deleted sibling view")
+			}
+			records, err := hoststore.ModeRecords(home)
+			if err != nil || (len(records) > 0) != tc.wantKept {
+				t.Fatal("holder lifetime disagrees with teardown")
+			}
+		})
 	}
 }

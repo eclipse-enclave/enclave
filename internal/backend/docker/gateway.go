@@ -58,6 +58,9 @@ func (b *Backend) startGateway(ctx context.Context, req backend.Request, network
 	startConfig.NetworkMode = model.NetworkModeRestricted
 	startConfig.SecretReleaseFile = secretReleaseFile
 	if req.NativeAuth != nil {
+		if req.Mode != nil {
+			startConfig.ModeHolderID = req.Mode.HolderID
+		}
 		dir, err := b.storage.storeDir(req.NativeAuth.Store.Key, req.NativeAuth.Store.Kind)
 		uid, uidErr := strconv.Atoi(b.opts.Host.UID)
 		gid, gidErr := strconv.Atoi(b.opts.Host.GID)

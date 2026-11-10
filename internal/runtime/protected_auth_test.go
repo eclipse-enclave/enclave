@@ -116,11 +116,11 @@ func TestProtectedViewMountAndDynamicReleaseContract(t *testing.T) {
 			Value: "configured-api-synthetic-" + id, Hosts: []string{"api.anthropic.com"}, Header: "x-api-key"}}}
 		mounts := newMountAccumulator(nil, nil)
 		r.addConfigMount(mounts, stores.Config)
-		native, cleanup, err := r.prepareProtectedAuth(stores, mounts, &mapping, mode)
+		native, _, err := r.prepareProtectedAuth(stores, mounts, &mapping, mode)
 		if err != nil {
 			t.Fatal(err)
 		}
-		t.Cleanup(cleanup)
+		t.Cleanup(func() { _ = os.RemoveAll(mounts.mounts[0].Source) })
 		if len(mounts.mounts) != 1 || mounts.mounts[0].Source == realDir || len(mounts.stores) != 1 || mounts.stores[0].Kind != backend.StoreKindConfig {
 			t.Fatalf("canonical credentials reached workload mounts: %+v %+v", mounts.mounts, mounts.stores)
 		}
@@ -243,7 +243,7 @@ func TestProtectedRuntimeAdmissionHoldsActualConfigStoreLock(t *testing.T) {
 	if err != nil || !called {
 		t.Fatalf("admission called=%t err=%v", called, err)
 	}
-	r.endSessionMode(mode, true)
+	r.endSessionMode(mode, true, nil)
 	r.run.ProtectAuth = false
 	if _, err := r.reserveSessionMode("ordinary"); err == nil {
 		t.Fatal("ordinary runtime bypassed its protected sibling reservation")

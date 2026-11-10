@@ -112,6 +112,10 @@ func (b *Backend) finalizeManagedContainerAuth(ctx context.Context, containerNam
 		return nil
 	}
 
+	if containerEnvValue(info.Config, model.EnvNativeAuthOps) != "" {
+		return nil
+	}
+
 	tool := strings.TrimSpace(info.Config.Labels[model.LabelAgent])
 	configDest := containerEnvValue(info.Config, model.EnvToolConfigDir)
 	authDest := containerEnvValue(info.Config, model.EnvAuthDir)

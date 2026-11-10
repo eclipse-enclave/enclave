@@ -98,6 +98,7 @@ type SessionMode struct {
 // one whose credentials still need finalization. Engine errors are not absence.
 type SessionModeInspector interface {
 	InspectModeSession(context.Context, string, string) (*SessionRef, bool, error)
+	RemoveModeGateway(ctx context.Context, holderID, session, projectHash string) (bool, error)
 }
 
 type EnvVar struct {

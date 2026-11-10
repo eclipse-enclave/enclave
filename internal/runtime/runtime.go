@@ -94,12 +94,13 @@ type mountAccumulator struct {
 }
 
 type preparedVolumes struct {
-	Stores        storeSet
-	AuthState     model.AuthState
-	SecretMapping SecretMapping
-	AuthSync      *backend.AuthSyncSpec
-	NativeAuth    *backend.NativeAuthSpec
-	Cleanup       func()
+	NativeFinalize func() error
+	Stores         storeSet
+	AuthState      model.AuthState
+	SecretMapping  SecretMapping
+	AuthSync       *backend.AuthSyncSpec
+	NativeAuth     *backend.NativeAuthSpec
+	Cleanup        func()
 }
 
 type noopRuntimeHandler struct{}
@@ -267,7 +268,7 @@ func (r *Runtime) prepareExecution() (*ExecutionContext, error) {
 	preparedMode := false
 	defer func() {
 		if !preparedMode {
-			r.endSessionMode(mode, true)
+			r.endSessionMode(mode, true, nil)
 		}
 	}()
 
@@ -314,7 +315,22 @@ func (r *Runtime) prepareExecution() (*ExecutionContext, error) {
 	env := append([]string{}, mountArgs.Env()...)
 	env = append(env, networkResult.Env...)
 	env = append(env, projectEnv...)
-	cleanup := mergeCleanup(mergeCleanup(prepared.Cleanup, networkResult.Cleanup), func() { r.endSessionMode(mode, false) })
+	cleanup := func() {
+		r.endSessionMode(mode, false, func() error {
+			if prepared.NativeFinalize != nil {
+				if err := prepared.NativeFinalize(); err != nil {
+					return err
+				}
+			}
+			if prepared.Cleanup != nil {
+				prepared.Cleanup()
+			}
+			if networkResult.Cleanup != nil {
+				networkResult.Cleanup()
+			}
+			return nil
+		})
+	}
 	preparedMode = true
 	return &ExecutionContext{
 		ContainerName:  containerName,
@@ -463,10 +479,9 @@ func (r *Runtime) prepareVolumes(containerName string, baseContainerName string,
 	}
 
 	var nativeAuth *backend.NativeAuthSpec
+	var nativeFinalize func() error
 	if r.run.ProtectAuth {
-		var removeView func()
-		nativeAuth, removeView, err = r.prepareProtectedAuth(stores, mountArgs, &secretMapping, mode)
-		cleanup = mergeCleanup(cleanup, removeView)
+		nativeAuth, nativeFinalize, err = r.prepareProtectedAuth(stores, mountArgs, &secretMapping, mode)
 		if err != nil {
 			if cleanup != nil {
 				cleanup()
@@ -490,12 +505,13 @@ func (r *Runtime) prepareVolumes(containerName string, baseContainerName string,
 	}
 
 	return preparedVolumes{
-		Stores:        stores,
-		AuthState:     authState,
-		SecretMapping: secretMapping,
-		AuthSync:      vm.authSyncSpec(stores),
-		NativeAuth:    nativeAuth,
-		Cleanup:       cleanup,
+		NativeFinalize: nativeFinalize,
+		Stores:         stores,
+		AuthState:      authState,
+		SecretMapping:  secretMapping,
+		AuthSync:       vm.authSyncSpec(stores),
+		NativeAuth:     nativeAuth,
+		Cleanup:        cleanup,
 	}, nil
 }
 
@@ -605,19 +621,6 @@ func (r *Runtime) removeConfigStore(configStore backend.StoreRef) error {
 		return fmt.Errorf("backend storage unavailable")
 	}
 	return r.backend.Storage().Remove(context.Background(), configStore.Key, configStore.Kind)
-}
-
-func mergeCleanup(primary func(), secondary func()) func() {
-	if primary == nil {
-		return secondary
-	}
-	if secondary == nil {
-		return primary
-	}
-	return func() {
-		primary()
-		secondary()
-	}
 }
 
 func backendEnv(env []string) []backend.EnvVar {

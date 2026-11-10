@@ -156,7 +156,9 @@ func TestCheckOnlyNativeAlias(t *testing.T) {
 	}{
 		{name: "absent"},
 		{name: "global metadata", content: `{"projects":{"/project":{"hasTrustDialogAccepted":true}},"customApiKeyResponses":{"approved":["suffix"]},"oauthAccount":42}`},
-		{name: "placeholder residue", content: `{"primaryApiKey":"ENCLAVE_SECRET_leftover","projects":{}}`},
+		{name: "placeholder residue", content: `{"primaryApiKey":"ENCLAVE_SECRET_0123456789abcdef0123456789abcdef0123456789abcdef","projects":{}}`},
+		{name: "raw with marker appended", content: `{"primaryApiKey":"synthetic-rawENCLAVE_SECRET_"}`, pointer: "/primaryApiKey", refuse: true},
+		{name: "marker with raw tail", content: `{"primaryApiKey":"ENCLAVE_SECRET_synthetic-raw"}`, pointer: "/primaryApiKey", refuse: true},
 		{name: "primary raw", content: `{"primaryApiKey":"synthetic-raw"}`, pointer: "/primaryApiKey", refuse: true},
 		{name: "alternate raw", content: `{"anthropicApiKey":"synthetic-raw"}`, pointer: "/anthropicApiKey", refuse: true},
 		{name: "wrong credential type", content: `{"primaryApiKey":{"value":"synthetic-raw"}}`, refuse: true},
@@ -200,5 +202,31 @@ func TestCheckOnlyNativeAlias(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestCheckOnlyCustomEnvShapeRejectsForgedBinding(t *testing.T) {
+	profile := claudeProfile()
+	file := profile.Providers[0].AuthSecrets[1]
+	file.File, file.CheckOnly = ".claude.json", true
+	profile.Providers[0].AuthSecrets = []model.AuthFileSecret{file}
+	shape := &model.SecretPlaceholderConfig{Prefix: "vendor_ENCLAVE_SECRET_", Suffix: "_end", Random: model.SecretPlaceholderRandom{Encoding: "base64url", Length: 40}}
+	profile.Secrets["api"] = model.SecretConfig{Placeholder: shape}
+	value, err := model.NewSecretPlaceholder(shape)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, forged := range []bool{false, true} {
+		dir := t.TempDir()
+		nativeFile(t, dir, file.File, `{"primaryApiKey":"`+value+`"}`)
+		current := Bindings{}
+		if forged {
+			value = "synthetic-raw-keyENCLAVE_SECRET_"
+			nativeFile(t, dir, file.File, `{"primaryApiKey":"`+value+`"}`)
+			current.Bindings = []Binding{{Kind: "apiKey", Placeholder: value}}
+		}
+		if _, err := ClassifyNative(dir, "/auth", profile, current, nil, true); (err != nil) != forged {
+			t.Fatalf("configured shape / forged binding: %v", err)
+		}
 	}
 }

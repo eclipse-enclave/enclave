@@ -258,14 +258,14 @@ the shared auth store. A protected start refuses raw `primaryApiKey` or
 `anthropicApiKey` fields there; remove the stored credential or use ordinary mode.
 Project metadata stays in place, including across `--reset-auth`.
 
-`enclave --tool claude --protect-auth` mounts a private placeholder view instead
-of the native auth store. The gateway performs Claude's token exchanges and
+`enclave --tool claude --protect-auth` (also `--tool codex`) mounts a private placeholder view instead
+of the native auth store. The gateway performs the tool's token exchanges and
 releases credentials only to their declared HTTPS hosts. Ordinary sessions
 retain their existing native-file behavior; protection is opt-in.
 
 The option requires restricted networking. It refuses `--allow-all-network`,
 `--admin`, project auth scope, QEMU, devcontainers, custom base images and tools
-other than Claude. Feature auth stores are not mounted; declared env credentials
+other than Claude and Codex. Feature auth stores are not mounted; declared env credentials
 such as `GH_TOKEN` continue through their existing release rules.
 
 Ordinary and protected sessions cannot share a config store concurrently. A

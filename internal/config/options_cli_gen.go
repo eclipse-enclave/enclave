@@ -65,7 +65,7 @@ func optionCLIFlags() map[string][]CLIFlag {
 			}),
 		},
 		"protect_auth": {
-			boolFlag("--protect-auth", "Protect native Claude credentials through the network gateway", func(opts *model.Options, sources *model.OptionSources, value bool) {
+			boolFlag("--protect-auth", "Protect native Claude or Codex credentials through the network gateway", func(opts *model.Options, sources *model.OptionSources, value bool) {
 				opts.ProtectAuth = value
 				sources.ProtectAuth = model.SourceCLI
 			}),

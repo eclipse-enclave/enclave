@@ -25,7 +25,7 @@ func validateAuthSecrets(doc specDocument, specPath string) error {
 				return fmt.Errorf("%s: provider %s authSecrets file %q must name a unique authFiles entry unless checkOnly", specPath, provider.Name, file.File)
 			}
 			files[file.File] = true
-			if !slices.Contains([]string{"claude-credentials", "claude-config"}, file.Codec) || len(file.Fields) == 0 {
+			if !slices.Contains([]string{"claude-credentials", "claude-config", "codex-auth"}, file.Codec) || len(file.Fields) == 0 {
 				return fmt.Errorf("%s: authSecrets %s requires a supported codec and fields", specPath, file.File)
 			}
 			pointers := map[string]bool{}
@@ -77,6 +77,15 @@ func validateAuthSecretField(doc specDocument, field model.AuthSecretField) erro
 		}
 	}
 	if shape := field.Placeholder; shape != nil {
+		if shape.Shape == "jwt" {
+			if (field.Kind != "access" && field.Kind != "id") || shape.Prefix != "" || shape.Suffix != "" || shape.Random != (model.SecretPlaceholderRandom{}) {
+				return fmt.Errorf("jwt shape requires an access or id field and no random shape")
+			}
+			return nil
+		}
+		if shape.Shape != "" {
+			return fmt.Errorf("unsupported placeholder shape")
+		}
 		if _, err := shape.ValidatedAlphabet(); err != nil {
 			return err
 		}
@@ -94,11 +103,11 @@ func validateTokenEndpoint(endpoint model.TokenEndpoint) error {
 			return fmt.Errorf("requires exact normalized hosts and absolute paths")
 		}
 	}
-	if endpoint.Body != "json" || len(endpoint.Grants) == 0 || endpoint.Fields["access"] == "" {
-		return fmt.Errorf("requires body json, grants, and fields.access")
+	if !slices.Contains([]string{"json", "form", "either"}, endpoint.Body) || len(endpoint.Grants) == 0 || endpoint.Fields["access"] == "" {
+		return fmt.Errorf("requires body json, form or either, grants, and fields.access")
 	}
 	for name, value := range endpoint.Fields {
-		if !slices.Contains([]string{"access", "refresh", "expiresIn", "scope"}, name) || value == "" {
+		if !slices.Contains([]string{"access", "refresh", "id", "expiresIn", "scope"}, name) || value == "" {
 			return fmt.Errorf("invalid token field %q", name)
 		}
 	}

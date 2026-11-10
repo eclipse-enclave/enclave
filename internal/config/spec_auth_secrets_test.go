@@ -79,3 +79,14 @@ func TestAuthSecretsValidation(t *testing.T) {
 		})
 	}
 }
+
+func TestCodexNativeAuthDeclarations(t *testing.T) {
+	profile, err := LoadProfile(realRepoPaths(t), "codex")
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := profile.Providers[0]
+	if p.TokenEndpoint == nil || p.TokenEndpoint.Body != "either" || p.TokenEndpoint.Fields["id"] != "id_token" || len(p.AuthSecrets) != 1 || len(p.AuthSecrets[0].Fields) != 4 {
+		t.Fatal("Codex native declarations missing")
+	}
+}

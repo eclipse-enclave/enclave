@@ -21,7 +21,7 @@ API keys are injected under both aliases, so `OPENAI_API_KEY` alone authenticate
 `codex exec` without onboarding and takes precedence over a stored ChatGPT login
 there. The interactive TUI (verified with 0.162.1) uses stored auth instead:
 an empty store still requires onboarding, whose API-key entry prefills the
-placeholder. Accepting it works only for the current session. Startup removes
+placeholder. Accepting it works only for the current session. Ordinary startup removes
 regular local `auth.json` files containing `ENCLAVE_SECRET_` rather than reusing
 an old session key; shared auth files are not removed. For persistent TUI use,
 start with `--no-api-key` and sign in normally.
@@ -35,12 +35,19 @@ only to the declared OpenAI API hosts. See the
 Personal access tokens are released to `auth.openai.com` and `chatgpt.com`.
 Agent Identity JWTs in `CODEX_ACCESS_TOKEN` are rejected while gateway protection
 is active: their client-side signature verification cannot use placeholders.
-Stored ChatGPT logins are outside this env-only protection. See
+Stored ChatGPT logins are outside this env-only protection unless `--protect-auth`
+is selected. See
 [authentication](../../../docs/auth.md#env-only-bearer-tokens).
 
 ## Auth Files
 
 - `auth.json`
+
+`enclave --tool codex --protect-auth` keeps the real ChatGPT grant in the gateway.
+The tool reads a private native-format view; JWT claims remain readable and the
+signatures are placeholders. Login and refresh exchanges persist real tokens in
+the native store and return placeholders. Stored API keys require the matching
+configured `OPENAI_API_KEY`/`CODEX_API_KEY` secret. See [protected native auth](../../../docs/auth.md#protected-native-auth).
 
 ## Network Access
 

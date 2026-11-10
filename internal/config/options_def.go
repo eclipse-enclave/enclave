@@ -308,7 +308,7 @@ func OptionDefs() []OptionDef {
 			Name: "protect_auth", Group: OptionGroupRun, Kind: OptionKindBool,
 			AffectsSession: SessionAffected, OptionField: "ProtectAuth", SourceField: "ProtectAuth",
 			DefaultsField: "ProtectAuth", Apply: ApplyBoolPtr,
-			CLIFlags: []CLIFlagDef{{Name: "--protect-auth", Usage: "Protect native Claude credentials through the network gateway", ValueKind: CLIValueNone,
+			CLIFlags: []CLIFlagDef{{Name: "--protect-auth", Usage: "Protect native Claude or Codex credentials through the network gateway", ValueKind: CLIValueNone,
 				Action: CLIAction{Kind: CLIActionSetBool, OptionField: "ProtectAuth", SourceField: "ProtectAuth", BoolValue: true}}},
 		},
 		{

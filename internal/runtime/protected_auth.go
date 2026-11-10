@@ -29,8 +29,8 @@ func ValidateProtectedAuth(run model.RunOptions, auth model.AuthOptions, build m
 		return nil
 	}
 	switch {
-	case profile.Name != "claude" || len(profile.Providers) != 1 || profile.Providers[0].TokenEndpoint == nil || profile.ConfigDir == "" || len(profile.Providers[0].AuthSecrets) == 0:
-		return fmt.Errorf("--protect-auth currently requires Claude's native auth declarations")
+	case (profile.Name != "claude" && profile.Name != "codex") || len(profile.Providers) != 1 || profile.Providers[0].TokenEndpoint == nil || profile.ConfigDir == "" || len(profile.Providers[0].AuthSecrets) == 0:
+		return fmt.Errorf("--protect-auth requires supported native auth declarations")
 	case run.Admin:
 		return fmt.Errorf("--protect-auth is incompatible with --admin")
 	case run.AllowAllNetwork:

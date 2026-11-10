@@ -14,6 +14,7 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"net/url"
 	"slices"
 	"strings"
 	"time"
@@ -22,7 +23,7 @@ import (
 	"enclave/internal/placeholderstore"
 )
 
-func (s *Store) transact(parent context.Context, values map[string]string) *http.Response {
+func (s *Store) transact(parent context.Context, values map[string]string, media string) *http.Response {
 	ctx, cancel := context.WithTimeout(parent, s.timeout)
 	defer cancel()
 	release, err := s.lock(ctx)
@@ -78,13 +79,20 @@ func (s *Store) transact(parent context.Context, values map[string]string) *http
 	}
 	fail := func() *http.Response { return refusal(http.StatusBadGateway) }
 	body := mustJSON(values)
+	if media == "application/x-www-form-urlencoded" {
+		form := url.Values{}
+		for key, value := range values {
+			form.Set(key, value)
+		}
+		body = []byte(form.Encode())
+	}
 	endpoint := s.config.Provider.TokenEndpoint
 	outgoing, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://"+endpoint.Host+endpoint.Path, bytes.NewReader(body))
 	if err != nil {
 		return fail()
 	}
 	outgoing.GetBody = nil
-	outgoing.Header.Set("Content-Type", "application/json")
+	outgoing.Header.Set("Content-Type", media)
 	outgoing.Header.Set("Accept-Encoding", "identity")
 	upstream, err := s.transport.RoundTrip(outgoing)
 	if err != nil {
@@ -102,7 +110,7 @@ func (s *Store) transact(parent context.Context, values map[string]string) *http
 	}
 	headers := safeHeaders(upstream.Header)
 	hasTokens := false
-	for _, kind := range []string{"access", "refresh"} {
+	for _, kind := range []string{"access", "refresh", "id"} {
 		if key := endpoint.Fields[kind]; key != "" {
 			if _, ok := object[key]; ok {
 				hasTokens = true
@@ -133,7 +141,7 @@ func (s *Store) transact(parent context.Context, values map[string]string) *http
 	// Only declared credential fields are committed. A valid consumed grant is
 	// retained even when expiry is missing or malformed.
 	tokens := map[string]string{}
-	for _, kind := range []string{"access", "refresh"} {
+	for _, kind := range []string{"access", "refresh", "id"} {
 		key := endpoint.Fields[kind]
 		if key == "" {
 			continue
@@ -155,17 +163,23 @@ func (s *Store) transact(parent context.Context, values map[string]string) *http
 	if err != nil || current.Fingerprint != native.Fingerprint {
 		return fail()
 	}
-	oauth, ok := native.Document["claudeAiOauth"].(map[string]any)
-	if !ok {
-		oauth = map[string]any{}
-		native.Document["claudeAiOauth"] = oauth
-	}
 	for _, field := range s.file.Fields {
 		if value := tokens[field.Kind]; value != "" {
-			oauth[strings.TrimPrefix(field.Pointer, "/claudeAiOauth/")] = value
+			parts, _ := model.AuthPointerSegments(field.Pointer)
+			node := native.Document
+			for _, key := range parts[:len(parts)-1] {
+				child, ok := node[key].(map[string]any)
+				if !ok {
+					child = map[string]any{}
+					node[key] = child
+				}
+				node = child
+			}
+			node[parts[len(parts)-1]] = value
 			native.Values[field.Pointer] = value
 		}
 	}
+	oauth, _ := native.Document["claudeAiOauth"].(map[string]any)
 	tokenType := textField(object, "token_type")
 	unsafeMetadata := false
 	nonSecret := func(value string) bool {
@@ -177,18 +191,32 @@ func (s *Store) transact(parent context.Context, values map[string]string) *http
 		}
 		return true
 	}
-	if scope := textField(object, endpoint.Fields["scope"]); scope != "" && nonSecret(scope) {
+	scope := textField(object, endpoint.Fields["scope"])
+	if scope != "" && nonSecret(scope) && s.file.Codec == "claude-credentials" {
 		oauth["scopes"] = strings.Fields(scope)
 	}
 	if tokenType != "" && !nonSecret(tokenType) {
 		tokenType = ""
 	}
-	delete(oauth, "expiresAt")
-	if raw, ok := object[endpoint.Fields["expiresIn"]]; ok {
-		var seconds int64
-		if json.Unmarshal(raw, &seconds) == nil && seconds > 0 && seconds <= math.MaxInt64/int64(time.Second) {
-			expiry := s.now().Add(time.Duration(seconds) * time.Second).UTC().Truncate(time.Millisecond)
-			oauth["expiresAt"] = expiry.UnixMilli()
+	if s.file.Codec == "codex-auth" {
+		native.Document["auth_mode"], native.Document["OPENAI_API_KEY"] = "chatgpt", nil
+		native.Document["last_refresh"] = s.now().UTC().Format(time.RFC3339)
+		for _, pointer := range []string{"/tokens/access_token", "/tokens/id_token"} {
+			claims, _ := placeholderstore.JWTClaims(native.Values[pointer])
+			if auth, ok := claims["https://api.openai.com/auth"].(map[string]any); ok {
+				if account, ok := auth["chatgpt_account_id"].(string); ok && nonSecret(account) {
+					native.Document["tokens"].(map[string]any)["account_id"] = account
+				}
+			}
+		}
+	} else {
+		delete(oauth, "expiresAt")
+		if raw, ok := object[endpoint.Fields["expiresIn"]]; ok {
+			var seconds int64
+			if json.Unmarshal(raw, &seconds) == nil && seconds > 0 && seconds <= math.MaxInt64/int64(time.Second) {
+				expiry := s.now().Add(time.Duration(seconds) * time.Second).UTC().Truncate(time.Millisecond)
+				oauth["expiresAt"] = expiry.UnixMilli()
+			}
 		}
 	}
 	encoded := mustJSON(native.Document)
@@ -214,7 +242,7 @@ func (s *Store) transact(parent context.Context, values map[string]string) *http
 	if unsafeMetadata {
 		return refusal(http.StatusBadGateway)
 	}
-	return s.tokenReply(native, bindings, credentials, headers, tokenType)
+	return s.tokenReply(native, bindings, credentials, headers, tokenType, scope)
 }
 
 func textField(object map[string]json.RawMessage, key string) string {
@@ -234,7 +262,16 @@ func safeHeaders(headers http.Header) http.Header {
 	return result
 }
 
-func nativeExpiry(native placeholderstore.NativeFile) (time.Time, bool) {
+func (s *Store) nativeExpiry(native placeholderstore.NativeFile) (time.Time, bool) {
+	if s.file.Codec == "codex-auth" {
+		claims, _ := placeholderstore.JWTClaims(native.Values["/tokens/access_token"])
+		number, ok := claims["exp"].(json.Number)
+		if !ok {
+			return time.Time{}, false
+		}
+		seconds, err := number.Int64()
+		return time.Unix(seconds, 0), err == nil
+	}
 	oauth, ok := native.Document["claudeAiOauth"].(map[string]any)
 	if !ok {
 		return time.Time{}, false
@@ -247,7 +284,7 @@ func nativeExpiry(native placeholderstore.NativeFile) (time.Time, bool) {
 	return time.UnixMilli(millis), err == nil
 }
 
-func (s *Store) tokenReply(native placeholderstore.NativeFile, bindings placeholderstore.Bindings, credentials []string, headers http.Header, tokenType string) *http.Response {
+func (s *Store) tokenReply(native placeholderstore.NativeFile, bindings placeholderstore.Bindings, credentials []string, headers http.Header, tokenType, scope string) *http.Response {
 	result := map[string]any{}
 	endpoint := s.config.Provider.TokenEndpoint
 	for _, field := range s.file.Fields {
@@ -259,10 +296,17 @@ func (s *Store) tokenReply(native placeholderstore.NativeFile, bindings placehol
 		if !ok {
 			return refusal(http.StatusBadGateway)
 		}
-		result[key] = b.Placeholder
+		placeholder, err := b.Render(native.Values[field.Pointer])
+		if err != nil {
+			return refusal(http.StatusBadGateway)
+		}
+		result[key] = placeholder
 	}
 	if tokenType != "" {
 		result["token_type"] = tokenType
+	}
+	if scope != "" {
+		result[endpoint.Fields["scope"]] = scope
 	}
 	if oauth, ok := native.Document["claudeAiOauth"].(map[string]any); ok {
 		if values, ok := oauth["scopes"].([]any); ok {
@@ -275,7 +319,7 @@ func (s *Store) tokenReply(native placeholderstore.NativeFile, bindings placehol
 			}
 		}
 	}
-	if expiry, ok := nativeExpiry(native); ok {
+	if expiry, ok := s.nativeExpiry(native); ok {
 		remaining := int64(expiry.Sub(s.now()) / time.Second)
 		if remaining > 0 {
 			result[endpoint.Fields["expiresIn"]] = remaining

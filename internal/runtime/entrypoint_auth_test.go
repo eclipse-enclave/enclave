@@ -8,6 +8,8 @@
 package runtime
 
 import (
+	"crypto/sha256"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -232,5 +234,20 @@ func assertSymlinkTarget(t *testing.T, path string, want string) {
 	}
 	if got != want {
 		t.Fatalf("symlink %s -> %q, want %q", path, got, want)
+	}
+}
+
+func TestEntrypointCodexKeepsProtectedSiblingFile(t *testing.T) {
+	home, _, authDir := entrypointAuthDirs(t)
+	configDir := filepath.Join(home, ".codex")
+	authFile := filepath.Join(configDir, "auth.json")
+	const data = `{"tokens":{"access_token":"header.claims.ENCLAVE_SECRET_bound"}}`
+	writeFile(t, authFile, data)
+	digest := sha256.Sum256([]byte(data))
+	runEntrypointAuth(t, home, configDir, authDir, "TOOL=codex", model.EnvAuthFiles+"=auth.json", model.EnvNativeAuthOps+"=auth.json:keep:"+fmt.Sprintf("%x", digest))
+	assertFileContent(t, authFile, data)
+	info, err := os.Lstat(authFile)
+	if err != nil || !info.Mode().IsRegular() {
+		t.Fatal("protected sibling file was replaced")
 	}
 }

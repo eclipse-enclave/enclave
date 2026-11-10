@@ -140,7 +140,11 @@ func projectFile(provider string, file model.AuthFileSecret, data []byte, bindin
 		if err != nil {
 			return nil, nil, nil, err
 		}
-		native.replace(binding.Placeholder)
+		placeholder, err := binding.Render(value)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		native.replace(placeholder)
 		if !strings.Contains(value, model.SecretPlaceholderMarker) {
 			rawValues = append(rawValues, value)
 		}
@@ -153,7 +157,7 @@ func projectFile(provider string, file model.AuthFileSecret, data []byte, bindin
 				rule := secret.Release.HTTP
 				release = model.SecretReleaseEntry{SecretID: field.Release, Value: value, Hosts: rule.Hosts, Header: rule.Header, Format: rule.Format}
 			}
-			release.Placeholder = binding.Placeholder
+			release.Placeholder = placeholder
 			releases = append(releases, release)
 		}
 	}

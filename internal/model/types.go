@@ -35,6 +35,7 @@ type RunOptions struct {
 	ConfigDefaultYolo        *bool
 	Persist                  bool
 	Ephemeral                bool
+	ProtectAuth              bool
 	AllowAllNetwork          bool
 	DisableGateway           bool
 	Ports                    []string

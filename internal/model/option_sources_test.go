@@ -33,6 +33,7 @@ func TestMergeOptionSourcesCoversAllFields(t *testing.T) {
 			HostConfigPaths:          SourceCLI,
 			Yolo:                     SourceCLI,
 			Ephemeral:                SourceCLI,
+			ProtectAuth:              SourceCLI,
 			AllowAllNetwork:          SourceCLI,
 			DisableGateway:           SourceCLI,
 			NoCache:                  SourceCLI,

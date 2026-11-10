@@ -95,10 +95,7 @@ func LoadBindings(dir string) (Bindings, error) {
 
 // SaveBindings is called while the caller holds the real store's lock.
 func SaveBindings(dir string, bindings Bindings) error {
-	data, err := json.Marshal(bindings)
-	if err != nil {
-		return err
-	}
+	data, _ := json.Marshal(bindings)
 	return WriteNative(dir, BindingsFile, data)
 }
 

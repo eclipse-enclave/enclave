@@ -90,10 +90,7 @@ func Project(realDir, viewsDir, session string, profile model.Profile, configure
 				return View{}, fmt.Errorf("project native credentials %s: credential value remains outside its declared field", file.name)
 			}
 		}
-		projected, err := json.Marshal(file.document)
-		if err != nil {
-			return View{}, err
-		}
+		projected, _ := json.Marshal(file.document)
 		target := filepath.Join(stage, filepath.FromSlash(file.name))
 		if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
 			return View{}, err

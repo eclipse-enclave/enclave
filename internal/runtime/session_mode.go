@@ -8,8 +8,11 @@
 package runtime
 
 import (
+	"context"
 	"crypto/rand"
+	"fmt"
 	"os"
+	"time"
 
 	"enclave/internal/backend"
 	"enclave/internal/backend/hoststore"
@@ -27,8 +30,26 @@ func (r *Runtime) reserveSessionMode(name string) (*backend.SessionMode, error) 
 	}
 	mode := &backend.SessionMode{ConfigStore: key, HolderID: rand.Text()}
 	holder := hoststore.ModeHolder{ID: mode.HolderID, Session: name, Tool: r.profile.Name,
-		ProjectHash: r.project.Hash, Engine: r.backend.Name(), OwnerPID: os.Getpid()}
-	if err := hoststore.ReserveMode(r.host.Home, dir, holder, nil); err != nil {
+		ProjectHash: r.project.Hash, Engine: r.backend.Name(), OwnerPID: os.Getpid(), Protected: r.run.ProtectAuth}
+	var discover func([]hoststore.ModeHolder) error
+	if r.run.ProtectAuth {
+		checker, ok := r.backend.(backend.ProtectedAuthAdmission)
+		if !ok {
+			return nil, fmt.Errorf("backend %s cannot admit protected auth", r.backend.Name())
+		}
+		discover = func(holders []hoststore.ModeHolder) error {
+			approved := make(map[string]string)
+			for _, holder := range holders {
+				if holder.Protected && (holder.State == "live" || holder.State == "finalizing") {
+					approved[holder.ID] = holder.Engine
+				}
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			return checker.CheckProtectedAuthAdmission(ctx, key, approved)
+		}
+	}
+	if err := hoststore.ReserveMode(r.host.Home, dir, holder, discover); err != nil {
 		return nil, err
 	}
 	return mode, nil

@@ -155,6 +155,9 @@ User-facing model: [configuration.md](configuration.md); resolution flow:
 - `AffectsNetwork` when the option changes the session allowlist, so
   `network status|print|diff` accept its flags; a test fails otherwise.
 
+`protect_auth` is session-affecting: its boolean is recorded as provenance,
+while native credentials and placeholder bindings never enter option metadata.
+
 ### Option kinds
 
 | Kind | How to define it |

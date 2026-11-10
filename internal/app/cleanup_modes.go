@@ -10,7 +10,6 @@ package app
 import (
 	"context"
 	"fmt"
-	"slices"
 	"time"
 
 	"enclave/internal/backend"
@@ -65,11 +64,10 @@ func cleanupModeStore(home, dir string, be backend.Backend, dryRun bool) error {
 	err := hoststore.WithModeHolders(home, dir, func(holders *[]hoststore.ModeHolder) error {
 		kept := make([]hoststore.ModeHolder, 0, len(*holders))
 		for _, holder := range *holders {
-			remove := holder.State == "ended"
+			remove := false
 			if holder.Engine != be.Name() {
 				logx.Infof("Keeping auth-mode holder %s; use --backend %s to clean it", holder.Session, holder.Engine)
-				remove = false
-			} else if !remove && !hoststore.ModeOwnerAlive(holder.OwnerPID) && time.Since(holder.UpdatedAt) >= modeStartTimeout {
+			} else if !hoststore.ModeOwnerAlive(holder.OwnerPID) && time.Since(holder.UpdatedAt) >= modeStartTimeout {
 				inspector, ok := be.(backend.SessionModeInspector)
 				if !ok {
 					return fmt.Errorf("backend %s cannot inspect auth-mode holders", be.Name())
@@ -107,14 +105,6 @@ func cleanupModeStore(home, dir string, be backend.Backend, dryRun bool) error {
 		if err := be.Remove(ctx, ref); err != nil {
 			return err
 		}
-	}
-	if len(exited) > 0 && !dryRun {
-		return hoststore.WithModeHolders(home, dir, func(holders *[]hoststore.ModeHolder) error {
-			*holders = slices.DeleteFunc(*holders, func(holder hoststore.ModeHolder) bool {
-				return holder.Engine == be.Name() && holder.State == "ended"
-			})
-			return nil
-		})
 	}
 	return nil
 }

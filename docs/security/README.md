@@ -126,7 +126,9 @@ rule are stored as sent. See [Full capture](../networking.md#full-capture).
 - Credentials with an HTTP release rule appear as placeholders; the gateway
   releases the real value only in the configured header to matching HTTPS
   hosts ([API keys](../auth.md#api-keys)). Credential files and secrets without
-  a release rule can hold real values in the config or auth store.
+  a release rule can hold real values in the config or auth store. Opt-in
+  [protected native auth](../auth.md#protected-native-auth) projects declared
+  Claude credential fields and keeps their real store gateway-only.
 - A configured SSH key is available to every session of every project and
   tool, and SSH on port 22 bypasses the proxy, so pushes never appear in
   `network.log`. See [SSH keys](../auth.md#ssh-keys).

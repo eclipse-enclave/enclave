@@ -989,8 +989,7 @@ func StopContainer(container string) {
 	}
 }
 
-// NativeAuthStart is an internal startup seam. The public option remains
-// unavailable until the all-holder mixed-mode gate can protect the shared config.
+// NativeAuthStart mounts canonical credentials only into the protected gateway.
 type NativeAuthStart struct {
 	ConfigFile string
 	StoreDir   string

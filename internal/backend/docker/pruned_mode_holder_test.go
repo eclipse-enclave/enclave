@@ -47,10 +47,8 @@ func TestAstraPrunedEndedHolderDoesNotRegainFinalization(t *testing.T) {
 	if err != nil || reconcile {
 		t.Fatalf("ended control: reconcile=%t err=%v", reconcile, err)
 	}
-	// cleanupModeStore prunes ended records without removing their stopped containers.
-	if err := hoststore.WithModeHolders(home, dir, func(holders *[]hoststore.ModeHolder) error { *holders = nil; return nil }); err != nil {
-		t.Fatal(err)
-	}
+	// Ending deletes the record; an old labeled container must remain unable
+	// to finalize after an opposite-mode holder is admitted.
 	if err := hoststore.ReserveMode(home, dir, hoststore.ModeHolder{ID: "new-holder", Session: "new-session", Engine: "docker", Protected: true}, nil); err != nil {
 		t.Fatal(err)
 	}

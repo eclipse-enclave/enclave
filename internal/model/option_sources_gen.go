@@ -46,6 +46,7 @@ type RunOptionSources struct {
 	NoMemory                 OptionSource
 	Ports                    OptionSource
 	ProjectMount             OptionSource
+	ProtectAuth              OptionSource
 	SensitiveDirExceptions   OptionSource
 	SessionName              OptionSource
 	SessionTint              OptionSource
@@ -118,6 +119,7 @@ func DefaultOptionSources() OptionSources {
 			NoMemory:                 SourceDefault,
 			Ports:                    SourceDefault,
 			ProjectMount:             SourceDefault,
+			ProtectAuth:              SourceDefault,
 			SensitiveDirExceptions:   SourceDefault,
 			SessionName:              SourceDefault,
 			SessionTint:              SourceDefault,
@@ -284,6 +286,9 @@ func MergeOptionSources(base OptionSources, override OptionSources) OptionSource
 	}
 	if override.ProjectMount != SourceUnset {
 		base.ProjectMount = override.ProjectMount
+	}
+	if override.ProtectAuth != SourceUnset {
+		base.ProtectAuth = override.ProtectAuth
 	}
 	if override.ResetAuth != SourceUnset {
 		base.ResetAuth = override.ResetAuth

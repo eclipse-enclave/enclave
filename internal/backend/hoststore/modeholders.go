@@ -79,7 +79,7 @@ func ReserveMode(home, dir string, holder ModeHolder, discover func([]ModeHolder
 			if other.ID == holder.ID {
 				return fmt.Errorf("session mode holder already reserved")
 			}
-			if other.State != "ended" && other.Protected != holder.Protected {
+			if other.Protected != holder.Protected {
 				return fmt.Errorf("session %s holds this config store in the opposite auth mode (%s); end it first", other.Session, other.State)
 			}
 		}
@@ -94,8 +94,8 @@ func ReserveMode(home, dir string, holder ModeHolder, discover func([]ModeHolder
 	})
 }
 
-// AdvanceMode never infers completion from engine status. Only the session's
-// finalizer, or explicit stale-owner cleanup, may move finalizing to ended.
+// AdvanceMode never infers completion from engine status. Ending a finalized
+// holder deletes it; a labeled container cannot regain authority without it.
 func AdvanceMode(home, dir, id, state, containerID string, detached bool) error {
 	return WithModeHolders(home, dir, func(holders *[]ModeHolder) error {
 		for i := range *holders {
@@ -103,10 +103,13 @@ func AdvanceMode(home, dir, id, state, containerID string, detached bool) error 
 			if holder.ID != id {
 				continue
 			}
+			if state == "ended" && holder.State == "finalizing" {
+				*holders = slices.Delete(*holders, i, i+1)
+				return nil
+			}
 			allowed := holder.State == state ||
 				holder.State == "pending" && (state == "live" || state == "finalizing") ||
-				holder.State == "live" && state == "finalizing" ||
-				holder.State == "finalizing" && state == "ended"
+				holder.State == "live" && state == "finalizing"
 			if !validModeState(state) || !allowed {
 				return fmt.Errorf("invalid session mode transition %s -> %s", holder.State, state)
 			}
@@ -124,7 +127,7 @@ func AdvanceMode(home, dir, id, state, containerID string, detached bool) error 
 }
 
 func validModeState(state string) bool {
-	return state == "pending" || state == "live" || state == "finalizing" || state == "ended"
+	return state == "pending" || state == "live" || state == "finalizing"
 }
 
 // ModeOwnerAlive treats PID reuse and permission/inspection failures as alive.

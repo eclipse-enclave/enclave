@@ -62,6 +62,9 @@ func (m networkManager) Prepare(_ string, authState model.AuthState, _ SecretMap
 	}
 
 	if effectivePolicy.Mode == model.NetworkModeUnrestricted {
+		if m.run.ProtectAuth {
+			return NetworkResult{}, fmt.Errorf("--protect-auth requires restricted networking")
+		}
 		logx.Warnf("Network restrictions disabled - container has unrestricted internet access")
 		if m.run.NetworkLog == model.NetworkLogFull {
 			logx.Warnf("--network-log=full captures nothing: full capture requires restricted networking")

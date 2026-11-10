@@ -67,7 +67,7 @@ func (b *Backend) beginContainerModeFinalization(ctx context.Context, name strin
 			if holder.State == "finalizing" && hoststore.ModeOwnerAlive(holder.OwnerPID) {
 				return fmt.Errorf("session %s auth is being finalized by process %d", holder.Session, holder.OwnerPID)
 			}
-			if holder.State == "ended" || hoststore.ModeOwnerAlive(holder.OwnerPID) {
+			if hoststore.ModeOwnerAlive(holder.OwnerPID) {
 				reconcile = false
 				return nil
 			}

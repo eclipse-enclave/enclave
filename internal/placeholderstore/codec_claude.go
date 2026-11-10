@@ -31,9 +31,10 @@ const (
 )
 
 type nativeValue struct {
-	field   model.AuthSecretField
-	value   string
-	replace func(string)
+	field           model.AuthSecretField
+	declaredPointer string
+	value           string
+	replace         func(string)
 }
 
 func decodeAuthFile(file model.AuthFileSecret, data []byte, purpose nativePurpose) (map[string]any, []nativeValue, error) {
@@ -74,12 +75,12 @@ func decodeAuthFile(file model.AuthFileSecret, data []byte, purpose nativePurpos
 				if at == len(parts)-1 {
 					text, ok := value.(string)
 					if !ok || seen[pointer] {
-						return fmt.Errorf("invalid or ambiguous credential field %s", pointer)
+						return fmt.Errorf("invalid or ambiguous credential field %s", field.Pointer)
 					}
 					seen[pointer] = true
 					concrete := field
 					concrete.Pointer = pointer
-					values = append(values, nativeValue{field: concrete, value: text, replace: func(replacement string) { node[key] = replacement }})
+					values = append(values, nativeValue{field: concrete, declaredPointer: field.Pointer, value: text, replace: func(replacement string) { node[key] = replacement }})
 				} else {
 					child, ok := value.(map[string]any)
 					if !ok {

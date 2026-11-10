@@ -10,12 +10,14 @@ package claude
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io/fs"
 	"testing"
 
 	"enclave/internal/auth"
 	"enclave/internal/backend"
+	"enclave/internal/model"
 )
 
 // linkedStore refuses rels it treats as links, like the host store does for
@@ -77,6 +79,53 @@ func TestOnboardingMarkerToleratesLinkedConfigFile(t *testing.T) {
 				if marked == store.linked[rel] {
 					t.Fatalf("%s: marked=%t linked=%t", rel, marked, store.linked[rel])
 				}
+			}
+		})
+	}
+}
+
+func TestProtectedOnboardingPreservesGlobalState(t *testing.T) {
+	for _, tc := range []struct {
+		name, content string
+		wantErr       bool
+		unchanged     bool
+	}{
+		{name: "metadata", content: `{"projects":{"/project":{"hasTrustDialogAccepted":true}},"customApiKeyResponses":{"approved":["suffix"]},"numStartups":9007199254740993}`},
+		{name: "already marked", content: `{ "hasCompletedOnboarding":true, "projects":{} }`, unchanged: true},
+		{name: "malformed", content: `{"projects":`, wantErr: true, unchanged: true},
+		{name: "non-object", content: `[1,2]`, wantErr: true, unchanged: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := &linkedStore{files: map[string][]byte{".claude.json": []byte(tc.content)}}
+			ref := &backend.StoreRef{Kind: backend.StoreKindConfig}
+			err := ensureOnboardingComplete(auth.Context{Storage: store, Run: model.RunOptions{ProtectAuth: true}}, ref)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("error=%v", err)
+			}
+			got := store.files[".claude.json"]
+			if tc.unchanged {
+				if string(got) != tc.content {
+					t.Fatal("changed existing state")
+				}
+				return
+			}
+			var before, after map[string]json.RawMessage
+			if err := json.Unmarshal([]byte(tc.content), &before); err != nil {
+				t.Fatal(err)
+			}
+			if err := json.Unmarshal(got, &after); err != nil {
+				t.Fatal(err)
+			}
+			for key, value := range before {
+				if !bytes.Equal(value, after[key]) {
+					t.Fatalf("changed %s", key)
+				}
+			}
+			if string(after["hasCompletedOnboarding"]) != "true" {
+				t.Fatal("marker missing")
+			}
+			if _, exists := store.files["config.json"]; exists {
+				t.Fatal("touched projected native path")
 			}
 		})
 	}

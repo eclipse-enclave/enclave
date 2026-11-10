@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 
 	"enclave/internal/auth"
@@ -65,21 +66,34 @@ func writeClaudeConfig(ctx auth.Context, store *backend.StoreRef, payload map[st
 // but no host OAuth JSON exists to export settings from.
 func ensureOnboardingComplete(ctx auth.Context, store *backend.StoreRef) error {
 	files := claudeConfigFiles
+	payload := map[string]any{}
 	if ctx.Run.ProtectAuth {
 		// config.json is owned by native classification, including its digest.
 		files = []string{".claude.json"}
-	}
-	for _, rel := range files {
-		if storeFileContains(ctx, store, rel, onboardingMarker) {
-			return nil // Already has onboarding flag
+		existing, err := ctx.Storage.ReadFile(context.Background(), store.Key, store.Kind, files[0])
+		if err == nil {
+			decoder := json.NewDecoder(bytes.NewReader(existing))
+			decoder.UseNumber()
+			if err := decoder.Decode(&payload); err != nil || payload == nil {
+				return fmt.Errorf("protected onboarding config must be a JSON object")
+			}
+			if payload[onboardingMarker] == true {
+				return nil
+			}
+		} else if !errors.Is(err, fs.ErrNotExist) {
+			return err
+		}
+	} else {
+		for _, rel := range files {
+			if storeFileContains(ctx, store, rel, onboardingMarker) {
+				return nil
+			}
 		}
 	}
-
 	logx.Infof("Marking Claude onboarding complete (credentials found in auth store)")
-	data, err := json.Marshal(map[string]any{
-		"hasCompletedOnboarding": true,
-		"lastOnboardingVersion":  "999.999.999",
-	})
+	payload[onboardingMarker] = true
+	payload["lastOnboardingVersion"] = "999.999.999"
+	data, err := json.Marshal(payload)
 	if err != nil {
 		return err
 	}

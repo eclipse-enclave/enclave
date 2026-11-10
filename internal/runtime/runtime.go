@@ -80,6 +80,7 @@ type ExecutionContext struct {
 	Ports          []backend.PortMapping
 	Secrets        []backend.SecretRelease
 	AuthSync       *backend.AuthSyncSpec
+	Mode           *backend.SessionMode
 	Cleanup        func()
 	RunCtx         model.RunContext
 }
@@ -251,6 +252,16 @@ func (r *Runtime) prepareExecution() (*ExecutionContext, error) {
 	r.removeStaleGateway(containerName)
 	r.stopExitedSessionGateways()
 	r.setConfigVolumeSuffix(containerName, baseContainerName)
+	mode, err := r.reserveSessionMode(containerName)
+	if err != nil {
+		return nil, err
+	}
+	preparedMode := false
+	defer func() {
+		if !preparedMode {
+			r.endSessionMode(mode, true)
+		}
+	}()
 
 	r.resolveContainerUser()
 	r.ideBridgePorts = discoverIdeBridgePorts(r.host.Home)
@@ -292,7 +303,8 @@ func (r *Runtime) prepareExecution() (*ExecutionContext, error) {
 	env := append([]string{}, mountArgs.Env()...)
 	env = append(env, networkResult.Env...)
 	env = append(env, projectEnv...)
-	cleanup := mergeCleanup(prepared.Cleanup, networkResult.Cleanup)
+	cleanup := mergeCleanup(mergeCleanup(prepared.Cleanup, networkResult.Cleanup), func() { r.endSessionMode(mode, false) })
+	preparedMode = true
 	return &ExecutionContext{
 		ContainerName:  containerName,
 		Mounts:         mountArgs.Mounts(),
@@ -303,6 +315,7 @@ func (r *Runtime) prepareExecution() (*ExecutionContext, error) {
 		Ports:          networkResult.Ports,
 		Secrets:        secretReleases(prepared.SecretMapping),
 		AuthSync:       prepared.AuthSync,
+		Mode:           mode,
 		Cleanup:        cleanup,
 		RunCtx:         runCtx,
 	}, nil
@@ -851,6 +864,7 @@ func (r *Runtime) backendRequest(ctx *ExecutionContext, detached bool, interacti
 		Security:        backend.SecurityPosture{Admin: r.run.Admin},
 		Secrets:         append([]backend.SecretRelease(nil), ctx.Secrets...),
 		RuntimeUIDRemap: r.build.RuntimeUIDRemap,
+		Mode:            ctx.Mode,
 		Detached:        detached,
 	}
 	if !detached {

@@ -567,6 +567,7 @@ const (
 	// exec.go) still keys off LabelWorktree.
 	LabelProjectDir = AppName + ".project_dir"
 	LabelConfigKey  = AppName + ".config_key"
+	LabelModeHolder = AppName + ".auth_mode_holder"
 	LabelYolo       = AppName + ".yolo"
 	// LabelOptions stores a session's provenance, the session-affecting
 	// option values, as compact JSON. It is storage only; `ps --json` is the

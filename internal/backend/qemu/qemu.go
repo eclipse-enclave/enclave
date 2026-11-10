@@ -20,6 +20,7 @@ import (
 	"strings"
 
 	"enclave/internal/backend"
+	"enclave/internal/backend/hoststore"
 	"enclave/internal/logx"
 	"enclave/internal/model"
 )
@@ -62,6 +63,7 @@ func (b *Backend) Run(ctx context.Context, req backend.Request, attach backend.A
 	if req.AuthSync != nil {
 		defer b.runRequestAuthSync(req)
 	}
+	defer b.advanceRequestMode(req, "finalizing", "")
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -103,6 +105,7 @@ func (b *Backend) Run(ctx context.Context, req backend.Request, attach backend.A
 		}
 		return backend.ExitStatus{}, fmt.Errorf("qemu backend: start %s: %w", qemuBinary, err)
 	}
+	b.advanceRequestMode(req, "live", strconv.Itoa(cmd.Process.Pid))
 	if attach.OnStarted != nil {
 		attach.OnStarted()
 	}
@@ -127,7 +130,8 @@ func (b *Backend) Run(ctx context.Context, req backend.Request, attach backend.A
 	return backend.ExitStatus{Code: 1}, fmt.Errorf("qemu backend: guest exited without reporting an exit code")
 }
 
-func (b *Backend) Start(context.Context, backend.Request) (backend.SessionRef, error) {
+func (b *Backend) Start(_ context.Context, req backend.Request) (backend.SessionRef, error) {
+	b.advanceRequestMode(req, "finalizing", "")
 	return backend.SessionRef{}, fmt.Errorf("qemu backend: detached sessions are not supported")
 }
 
@@ -254,4 +258,17 @@ func readGuestExitCode(path string) (int, bool, error) {
 		return 0, false, fmt.Errorf("qemu backend: guest exit code %d is out of range", code)
 	}
 	return code, true, nil
+}
+
+func (b *Backend) advanceRequestMode(req backend.Request, state, id string) {
+	if req.Mode == nil {
+		return
+	}
+	dir, err := hoststore.ResolveDir(b.opts.Host.Home, req.Mode.ConfigStore, backend.StoreKindConfig)
+	if err == nil {
+		err = hoststore.AdvanceMode(b.opts.Host.Home, dir, req.Mode.HolderID, state, id, "", false)
+	}
+	if err != nil {
+		logx.Warnf("Session auth-mode reservation retained: %v", err)
+	}
 }

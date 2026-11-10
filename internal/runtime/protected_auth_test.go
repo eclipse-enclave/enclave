@@ -193,8 +193,13 @@ func TestProtectedPrepareSkipsNativeAuthHooks(t *testing.T) {
 		t.Fatalf("ordinary hook control: calls=%d err=%v", hooks.calls, err)
 	}
 	r.run.ProtectAuth = true
-	if _, _, err := newAuthManager(r).Prepare(&[]string{}, storeSet{}); err != nil || hooks.calls != 3 {
+	manager := newAuthManager(r)
+	if _, _, err := manager.Prepare(&[]string{}, storeSet{}); err != nil || hooks.calls != 3 {
 		t.Fatalf("protected hooks invoked: calls=%d err=%v", hooks.calls, err)
+	}
+	manager.ready()
+	if hooks.calls != 4 {
+		t.Fatal("deferred readiness did not run")
 	}
 }
 

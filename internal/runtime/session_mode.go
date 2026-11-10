@@ -30,7 +30,7 @@ func (r *Runtime) reserveSessionMode(name string) (*backend.SessionMode, error) 
 	}
 	mode := &backend.SessionMode{ConfigStore: key, HolderID: rand.Text()}
 	holder := hoststore.ModeHolder{ID: mode.HolderID, Session: name, Tool: r.profile.Name,
-		ProjectHash: r.project.Hash, Engine: r.backend.Name(), OwnerPID: os.Getpid(), Protected: r.run.ProtectAuth}
+		ProjectHash: r.project.Hash, Engine: r.backend.Name(), OwnerPID: os.Getpid(), Protected: r.run.ProtectAuth, Ephemeral: r.run.Ephemeral, GatewayCorrelated: r.run.ProtectAuth}
 	var discover func([]hoststore.ModeHolder) error
 	if r.run.ProtectAuth {
 		checker, ok := r.backend.(backend.ProtectedAuthAdmission)
@@ -53,7 +53,7 @@ func (r *Runtime) reserveSessionMode(name string) (*backend.SessionMode, error) 
 	return mode, nil
 }
 
-func (r *Runtime) endSessionMode(mode *backend.SessionMode, unstarted bool) {
+func (r *Runtime) endSessionMode(mode *backend.SessionMode, unstarted bool, finalize func() error) {
 	if mode == nil {
 		return
 	}
@@ -62,7 +62,7 @@ func (r *Runtime) endSessionMode(mode *backend.SessionMode, unstarted bool) {
 		err = hoststore.AdvanceMode(r.host.Home, dir, mode.HolderID, "finalizing", "", false)
 	}
 	if err == nil {
-		err = hoststore.AdvanceMode(r.host.Home, dir, mode.HolderID, "ended", "", false)
+		err = hoststore.EndMode(r.host.Home, dir, mode.HolderID, finalize)
 	}
 	if err != nil {
 		logx.Warnf("Session auth-mode reservation retained: %v", err)

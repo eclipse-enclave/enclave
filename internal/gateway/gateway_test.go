@@ -171,6 +171,7 @@ exit 2
 
 func TestGatewayLabelsHashWorkspaceIDBeforeProjectDir(t *testing.T) {
 	labels := gatewayLabels(StartConfig{
+		ModeHolderID:  "opaque-holder",
 		Profile:       model.Profile{Name: "codex"},
 		ContainerName: "enclave-codex-abc123abc123",
 		ProjectDir:    "/workspace/project",
@@ -178,6 +179,9 @@ func TestGatewayLabelsHashWorkspaceIDBeforeProjectDir(t *testing.T) {
 		ProjectHash:   "abc123abc123",
 	})
 
+	if labels[model.GatewayLabelModeHolder] != "opaque-holder" || labels[model.LabelModeHolder] != "" {
+		t.Fatal("gateway did not preserve its role-scoped holder correlation")
+	}
 	want := util.WorkspaceIdentityHash("/real/project", "/workspace/project")
 	if labels[model.GatewayLabelWorkspaceHash] != want {
 		t.Fatalf("workspace hash = %q, want %q", labels[model.GatewayLabelWorkspaceHash], want)

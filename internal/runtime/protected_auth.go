@@ -19,6 +19,7 @@ import (
 	"enclave/internal/backend/hoststore"
 	"enclave/internal/config"
 	"enclave/internal/gateway/exchange"
+	"enclave/internal/logx"
 	"enclave/internal/model"
 	"enclave/internal/placeholderstore"
 )
@@ -44,7 +45,7 @@ func ValidateProtectedAuth(run model.RunOptions, auth model.AuthOptions, build m
 	return nil
 }
 
-func (r *Runtime) prepareProtectedAuth(stores storeSet, mounts *mountAccumulator, mapping *SecretMapping, mode *backend.SessionMode) (*backend.NativeAuthSpec, func(), error) {
+func (r *Runtime) prepareProtectedAuth(stores storeSet, mounts *mountAccumulator, mapping *SecretMapping, mode *backend.SessionMode) (*backend.NativeAuthSpec, func() error, error) {
 	realDir, err := hoststore.ResolveDir(r.host.Home, stores.Auth.Key, stores.Auth.Kind)
 	if err != nil {
 		return nil, nil, err
@@ -96,10 +97,17 @@ func (r *Runtime) prepareProtectedAuth(stores storeSet, mounts *mountAccumulator
 	if err != nil {
 		return nil, nil, err
 	}
-	cleanup := func() { _ = os.RemoveAll(view.Dir) }
+	finalize := func() error {
+		if !r.run.Ephemeral {
+			if err := hoststore.WithLock(r.host.Home, realDir, func() error { return placeholderstore.Harvest(realDir, view.Dir, configDir, r.profile) }); err != nil {
+				logx.Warnf("Skipping protected auth metadata: %v", err)
+			}
+		}
+		return nil
+	}
 	data, err := json.Marshal(exchange.Config{Provider: r.profile.Providers[0], Secrets: r.profile.Secrets})
 	if err != nil {
-		return nil, cleanup, err
+		return nil, finalize, err
 	}
 	mounts.AddMount(backend.Mount{Type: backend.MountTypeBind, Source: view.Dir, ContainerPath: r.containerHome + "/" + model.ContainerAuthDir})
 	r.addAuthEnv(mounts)
@@ -125,7 +133,7 @@ func (r *Runtime) prepareProtectedAuth(stores storeSet, mounts *mountAccumulator
 			}
 		}
 	}
-	return &backend.NativeAuthSpec{Store: *stores.Auth, Config: data}, cleanup, nil
+	return &backend.NativeAuthSpec{Store: *stores.Auth, Config: data}, finalize, nil
 }
 
 func (r *Runtime) nativeAuthResetRequested() bool {

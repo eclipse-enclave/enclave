@@ -271,3 +271,8 @@ func (b *Backend) InspectModeSession(_ context.Context, holderID, id string) (*b
 	}
 	return nil, false, nil
 }
+
+// QEMU sessions do not create a gateway.
+func (b *Backend) RemoveModeGateway(context.Context, string, string, string) (bool, error) {
+	return false, nil
+}

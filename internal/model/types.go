@@ -736,6 +736,7 @@ const (
 	// GatewayLabelMode names the network mode of an unrestricted gateway. A
 	// gateway without it is restricted, including those started before it existed.
 	GatewayLabelMode             = AppName + ".gateway.mode"
+	GatewayLabelModeHolder       = AppName + ".gateway.auth_mode_holder"
 	SessionNetworkSuffix         = "-net"
 	NetworkLabelManaged          = AppName + ".network"
 	NetworkLabelContainer        = AppName + ".network.container"

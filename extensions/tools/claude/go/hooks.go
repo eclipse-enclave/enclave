@@ -93,10 +93,7 @@ func ensureOnboardingComplete(ctx auth.Context, store *backend.StoreRef) error {
 	logx.Infof("Marking Claude onboarding complete (credentials found in auth store)")
 	payload[onboardingMarker] = true
 	payload["lastOnboardingVersion"] = "999.999.999"
-	data, err := json.Marshal(payload)
-	if err != nil {
-		return err
-	}
+	data, _ := json.Marshal(payload)
 	// A protected session links config.json to its view, and the store refuses
 	// to write through links. One written file carries the marker.
 	var firstErr error

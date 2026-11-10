@@ -10,6 +10,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"os"
 	"time"
 
 	"enclave/internal/backend"
@@ -59,6 +60,7 @@ func cleanupModeHolders(run model.RunOptions, cleanup model.CleanupOptions, home
 
 func cleanupModeStore(home, dir string, be backend.Backend, dryRun bool) error {
 	var exited []backend.SessionRef
+	var absent []hoststore.ModeHolder
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	err := hoststore.WithModeHolders(home, dir, func(holders *[]hoststore.ModeHolder) error {
@@ -85,8 +87,12 @@ func cleanupModeStore(home, dir string, be backend.Backend, dryRun bool) error {
 				if dryRun {
 					logx.Infof("Would remove auth-mode holder: %s (%s)", holder.Session, holder.State)
 				} else {
-					logx.Infof("Removing auth-mode holder: %s (%s)", holder.Session, holder.State)
-					continue
+					if !holder.Protected {
+						logx.Infof("Removing auth-mode holder: %s (%s)", holder.Session, holder.State)
+						continue
+					}
+					logx.Infof("Finalizing absent auth-mode session: %s (%s)", holder.Session, holder.State)
+					absent = append(absent, holder)
 				}
 			}
 			kept = append(kept, holder)
@@ -96,6 +102,36 @@ func cleanupModeStore(home, dir string, be backend.Backend, dryRun bool) error {
 	})
 	if err != nil {
 		return err
+	}
+	for _, holder := range absent {
+		// Remove its orphan gateway before deleting a private identity it could use.
+		inspector := be.(backend.SessionModeInspector)
+		found, err := inspector.RemoveModeGateway(ctx, holder.ID, holder.Session, holder.ProjectHash)
+		if err != nil {
+			return err
+		}
+		if !found && !holder.GatewayCorrelated {
+			return fmt.Errorf("keeping uncorrelated protected holder %s", holder.Session)
+		}
+		if err := hoststore.WithModeHolders(home, dir, func(holders *[]hoststore.ModeHolder) error {
+			for i := range *holders {
+				current := &(*holders)[i]
+				if current.ID != holder.ID {
+					continue
+				}
+				if hoststore.ModeOwnerAlive(current.OwnerPID) {
+					return fmt.Errorf("session %s has an active auth finalizer", holder.Session)
+				}
+				current.State, current.OwnerPID, current.UpdatedAt = "finalizing", os.Getpid(), time.Now().UTC()
+				return nil
+			}
+			return fmt.Errorf("session mode holder is missing")
+		}); err != nil {
+			return err
+		}
+		if err := hoststore.EndMode(home, dir, holder.ID, nil); err != nil {
+			return err
+		}
 	}
 	for _, ref := range exited {
 		if dryRun {

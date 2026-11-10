@@ -330,7 +330,7 @@ func (b *Backend) Stop(ctx context.Context, ref backend.SessionRef, opts backend
 	reconcile := opts.Finalize
 	if opts.Finalize {
 		var err error
-		finishMode, reconcile, err = b.beginContainerModeFinalization(ctx, name)
+		finishMode, reconcile, _, err = b.beginContainerModeFinalization(ctx, name)
 		if err != nil {
 			return err
 		}
@@ -343,14 +343,15 @@ func (b *Backend) Stop(ctx context.Context, ref backend.SessionRef, opts backend
 		}
 	}
 	if stopErr == nil && finishMode != nil {
-		stopErr = finishMode(true)
+		// Protected holders end only after removal, not while stopped mounts remain.
+		stopErr = finishMode(reconcile)
 	}
 	return stopErr
 }
 
 func (b *Backend) Remove(ctx context.Context, ref backend.SessionRef) error {
 	name := sessionRefName(ref)
-	finishMode, reconcile, err := b.beginContainerModeFinalization(ctx, name)
+	finishMode, reconcile, remove, err := b.beginContainerModeFinalization(ctx, name)
 	if err != nil {
 		return fmt.Errorf("finalize auth before removing container %s: %w", name, err)
 	}
@@ -360,7 +361,7 @@ func (b *Backend) Remove(ctx context.Context, ref backend.SessionRef) error {
 			return fmt.Errorf("finalize auth before removing container %s: %w", name, err)
 		}
 	}
-	if err := RemoveSessionContainer(ctx, name, false); err != nil {
+	if err := remove(); err != nil {
 		return err
 	}
 	return finishMode(true)
@@ -368,12 +369,12 @@ func (b *Backend) Remove(ctx context.Context, ref backend.SessionRef) error {
 
 func (b *Backend) RemoveWithoutFinalize(ctx context.Context, ref backend.SessionRef) error {
 	name := sessionRefName(ref)
-	finishMode, _, err := b.beginContainerModeFinalization(ctx, name)
+	finishMode, _, remove, err := b.beginContainerModeFinalization(ctx, name)
 	if err != nil {
 		return err
 	}
 	defer finishMode.release()
-	if err := RemoveSessionContainer(ctx, name, false); err != nil {
+	if err := remove(); err != nil {
 		return err
 	}
 	return finishMode(true)

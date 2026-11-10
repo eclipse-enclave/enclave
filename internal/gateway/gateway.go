@@ -354,6 +354,7 @@ func ContainerName(containerName string) string {
 }
 
 type StartConfig struct {
+	ModeHolderID      string
 	Paths             model.Paths
 	Profile           model.Profile
 	AllowlistPath     string
@@ -940,6 +941,9 @@ func gatewayLabels(cfg StartConfig) map[string]string {
 		model.GatewayLabelManaged:   "true",
 		model.GatewayLabelAgent:     cfg.Profile.Name,
 		model.GatewayLabelContainer: cfg.ContainerName,
+	}
+	if cfg.ModeHolderID != "" {
+		labels[model.GatewayLabelModeHolder] = cfg.ModeHolderID
 	}
 	if cfg.ProjectHash != "" {
 		labels[model.GatewayLabelProjectHash] = cfg.ProjectHash

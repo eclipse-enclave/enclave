@@ -75,7 +75,7 @@ func OverlayConfigSettings(home string, key backend.StoreKey, storeDir string, s
 			merged = nil
 		}
 	}
-	if generatedOK && spec.SettingsOnly && merged == nil {
+	if generatedOK && len(spec.SettingsBase) > 0 && merged == nil {
 		merged = generated
 	}
 	if len(spec.SettingsBase) > 0 {
@@ -83,7 +83,7 @@ func OverlayConfigSettings(home string, key backend.StoreKey, storeDir string, s
 		// those overrides can reach the store, including during a failed overlay.
 		seed := base
 		if !baseOK {
-			seed = spec.SettingsBase
+			seed = []byte("{}")
 		}
 		intent, err := mergeSettingsFile(spec.SettingsBase, seed, generated, filepath.Ext(spec.SettingsPath))
 		if err != nil {
@@ -95,8 +95,10 @@ func OverlayConfigSettings(home string, key backend.StoreKey, storeDir string, s
 		if err := util.WriteFileAtomic(basePath, intent, 0o600); err != nil {
 			return err
 		}
-		if err := util.SyncDir(filepath.Dir(basePath)); err != nil {
-			return err
+		for _, dir := range []string{filepath.Dir(basePath), filepath.Dir(filepath.Dir(basePath))} {
+			if err := util.SyncDir(dir); err != nil {
+				return err
+			}
 		}
 	} else if err := removeSettingsBase(basePath); err != nil {
 		return err
@@ -106,7 +108,7 @@ func OverlayConfigSettings(home string, key backend.StoreKey, storeDir string, s
 			return err
 		}
 	}
-	if merged != nil && (spec.SettingsOnly || !bytes.Equal(merged, generated)) {
+	if merged != nil && (len(spec.SettingsBase) > 0 || !bytes.Equal(merged, generated)) {
 		storePath, err = settingsPath(storeDir, spec.SettingsPath)
 		if err != nil {
 			return err
@@ -120,6 +122,11 @@ func OverlayConfigSettings(home string, key backend.StoreKey, storeDir string, s
 		}
 		if err := util.WriteFileAtomic(storePath, merged, generatedMode); err != nil {
 			return fmt.Errorf("write merged settings %s: %w", storePath, err)
+		}
+		if len(spec.SettingsBase) > 0 {
+			if err := util.SyncDir(filepath.Dir(storePath)); err != nil {
+				return err
+			}
 		}
 	}
 	if !generatedOK {

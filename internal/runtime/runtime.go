@@ -225,7 +225,7 @@ func (r *Runtime) acquireSessionStartLock() (func(), error) {
 // explicit numeric names can collide with automatic allocation. Keep all
 // starts in that scope serialized until the container is running.
 func (r *Runtime) sessionStartLockName() string {
-	return "session-start-" + util.HashString(r.baseContainerName()) + ".lock"
+	return config.SessionStartLockName(r.profile.Name, r.project.Hash)
 }
 
 func (r *Runtime) prepareExecution() (*ExecutionContext, error) {

@@ -81,6 +81,12 @@ type SessionMode struct {
 	HolderID    string
 }
 
+// SessionModeInspector distinguishes an absent holder container from an exited
+// one whose credentials still need finalization. Engine errors are not absence.
+type SessionModeInspector interface {
+	InspectModeSession(context.Context, string, string) (*SessionRef, bool, error)
+}
+
 type EnvVar struct {
 	Name  string
 	Value string

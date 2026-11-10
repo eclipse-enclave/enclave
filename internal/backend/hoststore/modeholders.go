@@ -12,6 +12,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
+	"slices"
 	"syscall"
 	"time"
 
@@ -35,7 +37,8 @@ type ModeHolder struct {
 	UpdatedAt   time.Time `json:"updatedAt"`
 }
 
-type modeHolders struct {
+// ModeRecord groups the holders of one physical config store.
+type ModeRecord struct {
 	ConfigDir string       `json:"configDir"`
 	Holders   []ModeHolder `json:"holders"`
 }
@@ -45,29 +48,18 @@ type modeHolders struct {
 func WithModeHolders(home, dir string, fn func(*[]ModeHolder) error) error {
 	return WithLock(home, dir, func() error {
 		file := config.HostLockPath(home, "mode-"+util.HashString(dir)+".json")
-		record := modeHolders{ConfigDir: dir}
-		data, err := os.ReadFile(file) // #nosec G304 -- enclave-owned lock directory and hash-derived filename.
-		if err == nil {
-			if err := json.Unmarshal(data, &record); err != nil {
-				return fmt.Errorf("read session mode holders: %w", err)
-			}
-			if record.ConfigDir != dir {
-				return fmt.Errorf("session mode holder config store mismatch")
-			}
-			ids := make(map[string]bool)
-			for _, holder := range record.Holders {
-				if holder.ID == "" || holder.Session == "" || ids[holder.ID] || !validModeState(holder.State) {
-					return fmt.Errorf("invalid session mode holder")
-				}
-				ids[holder.ID] = true
-			}
-		} else if !errors.Is(err, os.ErrNotExist) {
+		record, err := readModeRecord(file, dir)
+		if err != nil {
 			return err
 		}
+		before := slices.Clone(record.Holders)
 		if err := fn(&record.Holders); err != nil {
 			return err
 		}
-		data, err = json.Marshal(record)
+		if slices.Equal(before, record.Holders) {
+			return nil
+		}
+		data, err := json.Marshal(record)
 		if err != nil {
 			return err
 		}
@@ -150,4 +142,50 @@ func ModeOwnerAlive(pid int) bool {
 	defer func() { _ = process.Release() }()
 	err = process.Signal(syscall.Signal(0))
 	return !errors.Is(err, syscall.ESRCH) && !errors.Is(err, os.ErrProcessDone)
+}
+
+// ModeRecords is a snapshot for cleanup enumeration. Mutations must reload the
+// record under WithModeHolders, not write this snapshot back.
+func ModeRecords(home string) ([]ModeRecord, error) {
+	files, err := filepath.Glob(config.HostLockPath(home, "mode-*.json"))
+	if err != nil {
+		return nil, err
+	}
+	var records []ModeRecord
+	for _, file := range files {
+		record, err := readModeRecord(file, "")
+		if err != nil {
+			return nil, err
+		}
+		if len(record.Holders) > 0 {
+			records = append(records, record)
+		}
+	}
+	return records, nil
+}
+
+func readModeRecord(file, dir string) (ModeRecord, error) {
+	record := ModeRecord{ConfigDir: dir}
+	data, err := os.ReadFile(file) // #nosec G304 -- enclave-owned lock directory and hash-derived filename.
+	if errors.Is(err, os.ErrNotExist) {
+		return record, nil
+	}
+	if err != nil {
+		return record, err
+	}
+	if err := json.Unmarshal(data, &record); err != nil {
+		return record, fmt.Errorf("read session mode holders: %w", err)
+	}
+	if record.ConfigDir == "" || dir != "" && record.ConfigDir != dir ||
+		filepath.Base(file) != "mode-"+util.HashString(record.ConfigDir)+".json" {
+		return record, fmt.Errorf("session mode holder config store mismatch")
+	}
+	ids := make(map[string]bool)
+	for _, holder := range record.Holders {
+		if holder.ID == "" || holder.Session == "" || holder.OwnerPID < 0 || ids[holder.ID] || !validModeState(holder.State) {
+			return record, fmt.Errorf("invalid session mode holder")
+		}
+		ids[holder.ID] = true
+	}
+	return record, nil
 }

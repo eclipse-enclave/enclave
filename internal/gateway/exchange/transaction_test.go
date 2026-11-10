@@ -28,6 +28,7 @@ import (
 
 	"enclave/internal/config"
 	"enclave/internal/model"
+	"enclave/internal/netcapture"
 	"enclave/internal/placeholderstore"
 	"enclave/internal/util"
 )
@@ -1185,6 +1186,104 @@ func TestCopilotNativeDeviceFlow(t *testing.T) {
 			req.Header.Set("Authorization", "Bearer "+placeholder)
 			if rules, err := router.Releases(req); err != nil || len(rules) != 0 {
 				t.Fatal("reset native alias still releases a grant", err)
+			}
+		})
+	}
+}
+
+func TestCommittedGrantLearnsBeforeFirstAPIRelease(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		existing    bool
+		fault       string
+		status      int
+		committed   bool
+		keepRefresh bool
+	}{
+		{"first-login", false, "", 200, true, false},
+		{"refresh", true, "", 200, true, false},
+		{"retained-refresh", true, "", 200, true, true},
+		{"refused-before-commit", true, "native", 502, false, false},
+		{"bindings-fail-after-commit", true, "bindings", 502, true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, refresh := fixture(t, tc.existing)
+			dir := t.TempDir()
+			captures, err := netcapture.Open(netcapture.Options{Dir: dir, Session: "commit-test"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			learned := map[string]string{}
+			s.ObserveCommits(func(value, placeholder string) {
+				native, err := s.native()
+				if err != nil || (native.Values["/claudeAiOauth/accessToken"] != value && native.Values["/claudeAiOauth/refreshToken"] != value) {
+					t.Fatal("capture learned a value before canonical commit")
+				}
+				learned[value] = placeholder
+				captures.Learn([]netcapture.Secret{{Value: value, Placeholder: placeholder}})
+			})
+			s.transport = roundTripFunc(func(*http.Request) (*http.Response, error) {
+				if tc.fault != "" {
+					file := s.file.File
+					if tc.fault == "bindings" {
+						file = placeholderstore.BindingsFile
+					}
+					path := filepath.Join(s.dir, file)
+					if err := os.Rename(path, path+".before"); err != nil {
+						t.Fatal(err)
+					}
+					if err := os.Mkdir(path, 0o700); err != nil {
+						t.Fatal(err)
+					}
+				}
+				if tc.keepRefresh {
+					return response(200, http.Header{}, []byte(`{"access_token":"`+newAccess+`","expires_in":600}`)), nil
+				}
+				return tokenResponse(`,"expires_in":600`), nil
+			})
+			grant := "authorization_code"
+			if tc.existing {
+				grant = "refresh_token"
+			}
+			resp, _ := invoke(t, s, grant, refresh)
+			if resp.StatusCode != tc.status {
+				t.Fatalf("status %d, want %d", resp.StatusCode, tc.status)
+			}
+			files, err := os.ReadDir(dir)
+			if err != nil || len(files) != 0 {
+				t.Fatal("native exchange created a capture")
+			}
+			rawRefresh := newRefresh
+			if tc.keepRefresh {
+				rawRefresh = oldRefresh
+			}
+			want := newAccess + " " + rawRefresh
+			if tc.committed {
+				if len(learned) != 2 || !strings.Contains(learned[newAccess], model.SecretPlaceholderMarker) || !strings.Contains(learned[rawRefresh], model.SecretPlaceholderMarker) {
+					t.Fatal("committed access/refresh mapping missing")
+				}
+				want = learned[newAccess] + " " + learned[rawRefresh]
+			} else if len(learned) != 0 {
+				t.Fatal("uncommitted grant was learned")
+			}
+			// No marked API request or Releases call intervenes before this echo.
+			capture := captures.Begin(httptest.NewRequest(http.MethodGet, "https://api.anthropic.com/echo", nil), "https")
+			capture.Response(&http.Response{StatusCode: 200, Proto: "HTTP/1.1", Header: http.Header{"X-Echo": {newAccess + " " + rawRefresh}}})
+			if _, err := io.WriteString(capture.ResponseBody(), newAccess+" "+rawRefresh); err != nil {
+				t.Fatal(err)
+			}
+			path := netcapture.RecordPath(dir, capture.Finish(nil))
+			record, err := netcapture.Load(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			bodyPath, ok := netcapture.BodyPath(path, record.Response.Body)
+			if !ok {
+				t.Fatal("missing echo body")
+			}
+			data, err := os.ReadFile(bodyPath)
+			if err != nil || string(data) != want || record.Response.Headers.Get("X-Echo") != want {
+				t.Fatal("unmarked echo did not follow the committed learning set")
 			}
 		})
 	}

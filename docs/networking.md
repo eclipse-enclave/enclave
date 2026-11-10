@@ -380,16 +380,20 @@ contains.
 
 ### Secrets in captures
 
-With protected native auth, the proxy learns the current native release
-values before snapshotting each ordinary API request. Learned values accumulate
-for the lifetime of that proxy, so later unmarked echoes of a previously
-released value are redacted too. Native token exchanges are intercepted before
-capture and are not stored. This is known-value replacement, not a general
-credential detector.
+With protected native auth, the proxy learns the committed access and refresh
+values when it writes a native grant, including a retained refresh value and
+any declared ID token. Learning follows the canonical write even if a later
+bindings write or reply fails. Ordinary marked API requests also teach their
+current release values before the request snapshot. Learned values accumulate
+for that proxy's lifetime, so later unmarked echoes are redacted, including a
+rotated value echoed before its first API use. Native token exchanges are
+intercepted before capture and are not stored. This is known-value replacement,
+not a general credential detector.
 
 Two limits remain: an HTTP body stream opened before a value was learned keeps
 its earlier redactor, and a proxy restart forgets learned native values until
-the next native API release. An echo during either gap can be stored as sent.
+the next local native exchange commit or API release. An echo during either
+gap can be stored as sent.
 WebSocket messages consult the current learned set as each message is stored,
 even on a connection opened earlier. Stopping capture does not remove values
 already stored.

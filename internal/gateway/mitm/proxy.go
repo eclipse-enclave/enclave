@@ -128,6 +128,11 @@ func Run(ctx context.Context, opts Options) error {
 		// down with it: a proxy that fails to start shuts the gateway.
 		log.Printf("full network capture disabled: %v", err)
 	}
+	if proxy.nativeAuth != nil {
+		proxy.nativeAuth.ObserveCommits(func(value, placeholder string) {
+			proxy.captures.Learn([]netcapture.Secret{{Value: value, Placeholder: placeholder}})
+		})
+	}
 	httpServer := proxy.newHTTPServer()
 	httpListener, err := listenLoopback(httpPort)
 	if err != nil {

@@ -240,6 +240,14 @@ func (s *Store) transact(parent context.Context, values map[string]string, media
 	if placeholderstore.WriteNative(s.dir, s.file.File, encoded) != nil {
 		return fail()
 	}
+	if s.onCommit != nil {
+		for _, field := range fields {
+			if value := native.Values[field.Pointer]; field.Kind != "apiKey" && value != "" {
+				b, _ := bindingFor(bindings, s.provider.Name, s.file.File, field)
+				s.onCommit(value, b.Placeholder)
+			}
+		}
+	}
 	native, err = placeholderstore.ReadNative(s.dir, s.file)
 	if err != nil {
 		return refusal(http.StatusBadGateway)

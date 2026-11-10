@@ -34,6 +34,7 @@ type Store struct {
 	now                    func() time.Time
 	timeout                time.Duration
 	env                    []model.SecretReleaseEntry
+	onCommit               func(value, placeholder string)
 }
 
 func New(config Config, dir, lockPath, session string, env []model.SecretReleaseEntry) (*Store, error) {
@@ -114,6 +115,13 @@ func newProvider(config Config, provider model.ProviderConfig, dir, lockPath, se
 	transport.Proxy = nil
 	transport.DisableCompression = true
 	return &Store{config: config, provider: provider, fields: fields, dir: dir, lockPath: lockPath, session: session, file: file, transport: transport, now: time.Now, timeout: 30 * time.Second, env: env}, nil
+}
+
+// ObserveCommits installs a capture observer before the gateway starts serving.
+func (s *Store) ObserveCommits(observer func(value, placeholder string)) {
+	for _, route := range s.routes {
+		route.onCommit = observer
+	}
 }
 
 func (s *Store) lock(ctx context.Context) (func(), error) {

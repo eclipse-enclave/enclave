@@ -335,7 +335,8 @@ are gone; uncertain teardown keeps the private files for later cleanup.
 `--ephemeral` uses a fresh gateway-only identity and removes it at that point.
 
 Protection covers declared native fields, not arbitrary files, SSH or host
-access. Full captures redact known values learned through native API release,
+access. Full captures redact known values learned through native exchange
+commits or API releases,
 with the stream and proxy-restart limits in
 [Secrets in captures](networking.md#secrets-in-captures).
 Placeholder JWTs preserve readable claims for client compatibility; claims are

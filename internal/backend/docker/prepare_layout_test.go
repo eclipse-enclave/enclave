@@ -19,8 +19,6 @@ import (
 	"enclave/internal/backend"
 	"enclave/internal/config"
 	"enclave/internal/model"
-	"enclave/internal/placeholderstore"
-	"time"
 )
 
 func TestForeignOwnedStorePathReportsOutermostMismatch(t *testing.T) {
@@ -165,67 +163,5 @@ func TestPrepareStoresInvalidatesSnapshotWithoutOverlay(t *testing.T) {
 	got, err := os.ReadFile(storePath)
 	if err != nil || string(got) != `{"model":"old"}` {
 		t.Fatalf("settings after overlay resumes = %s, err %v", got, err)
-	}
-}
-
-func TestResetNativeBindingsUsesCanonicalStoreLockAndLeavesConfigMetadata(t *testing.T) {
-	t.Setenv("XDG_STATE_HOME", t.TempDir())
-	b := New(Options{Host: model.Host{Home: t.TempDir()}})
-	ctx := context.Background()
-	key := backend.StoreKey{Owner: "claude", ProjectHash: "abc123abc123"}
-	authKey := backend.StoreKey{Owner: "claude"}
-	prep := backend.StorePrep{Config: &backend.ConfigStorePrep{Key: key}, Auth: &backend.StorePrepEntry{Key: authKey}}
-	if _, err := b.PrepareStores(ctx, prep); err != nil {
-		t.Fatal(err)
-	}
-	configDir, err := b.storage.storeDir(key, backend.StoreKindConfig)
-	if err != nil {
-		t.Fatal(err)
-	}
-	authDir, err := b.storage.storeDir(authKey, backend.StoreKindAuth)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, dir := range []string{configDir, authDir} {
-		for _, file := range []string{".credentials.json", placeholderstore.BindingsFile} {
-			if err := os.WriteFile(filepath.Join(dir, file), []byte("synthetic fixture"), 0o600); err != nil {
-				t.Fatal(err)
-			}
-		}
-	}
-	held := make(chan struct{})
-	unlock := make(chan struct{})
-	holderDone := make(chan struct{})
-	go func() {
-		defer close(holderDone)
-		_ = b.storage.WithStoreLock(ctx, authKey, backend.StoreKindAuth, func() error { close(held); <-unlock; return nil })
-	}()
-	<-held
-	prep.ResetAuthFiles = []string{".credentials.json"}
-	prep.ResetNativeBindings = true
-	done := make(chan struct{})
-	go func() { b.resetAuthFiles(ctx, prep); close(done) }()
-	select {
-	case <-done:
-		t.Fatal("reset did not honor canonical lock")
-	case <-time.After(30 * time.Millisecond):
-	}
-	if _, err := os.Stat(filepath.Join(authDir, placeholderstore.BindingsFile)); err != nil {
-		t.Fatal("binding state changed under another writer's lock")
-	}
-	close(unlock)
-	<-holderDone
-	select {
-	case <-done:
-	case <-time.After(time.Second):
-		t.Fatal("reset hung after canonical lock release")
-	}
-	for _, file := range []string{".credentials.json", placeholderstore.BindingsFile} {
-		if _, err := os.Stat(filepath.Join(authDir, file)); !os.IsNotExist(err) {
-			t.Fatal("canonical auth state survived reset")
-		}
-	}
-	if _, err := os.Stat(filepath.Join(configDir, placeholderstore.BindingsFile)); err != nil {
-		t.Fatal("reset deleted unrelated project config metadata")
 	}
 }

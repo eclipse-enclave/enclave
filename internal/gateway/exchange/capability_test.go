@@ -21,7 +21,7 @@ func TestCapabilityUsesLoadedConfigurationAndSession(t *testing.T) {
 		t.Fatal(err)
 	}
 	loaded, digest, err := Load(context.Background(), configPath, s.dir, s.lockPath, s.session, nil)
-	if err != nil || loaded == nil || digest == "" || loaded.seenFingerprint.Load() != s.seenFingerprint.Load() {
+	if err != nil || loaded == nil || digest == "" {
 		t.Fatal("valid native exchange could not load")
 	}
 	runtime := t.TempDir()

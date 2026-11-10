@@ -64,11 +64,6 @@ func fixture(t *testing.T, existing bool) (*Store, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	native, err := s.native()
-	if err != nil {
-		t.Fatal(err)
-	}
-	s.seenFingerprint.Store(native.Fingerprint)
 	for _, b := range view.Bindings.Bindings {
 		if b.Kind == "refresh" {
 			return s, b.Placeholder
@@ -139,14 +134,13 @@ func TestFirstLoginCreatesNativeGrantAndStableBindings(t *testing.T) {
 	}
 }
 
-func TestSiblingDedupDoesNotPreventExplicitEarlyRefresh(t *testing.T) {
+func TestSiblingRefreshUsesCurrentNativeGrant(t *testing.T) {
 	first, refresh := fixture(t, true)
 	sibling, err := New(first.config, first.dir, first.lockPath, "sibling", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	sibling.now = first.now
-	sibling.seenFingerprint.Store(first.seenFingerprint.Load())
 	calls := 0
 	transport := roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		calls++
@@ -164,44 +158,27 @@ func TestSiblingDedupDoesNotPreventExplicitEarlyRefresh(t *testing.T) {
 	later := first.now().Add(40 * time.Second)
 	sibling.now = func() time.Time { return later }
 	resp, object = invoke(t, sibling, "refresh_token", refresh)
-	if resp.StatusCode != 200 || calls != 1 || object["expires_in"] != float64(560) {
-		t.Fatal("sibling did not receive current native grant without a second rotation")
-	}
-	if resp, _ := invoke(t, sibling, "refresh_token", refresh); resp.StatusCode != 200 || calls != 2 {
-		t.Fatal("dedup became a pre-expiry replay horizon")
-	}
-	// Any external native change is observed once; the following refresh dispatches.
-	native, err := sibling.native()
-	if err != nil {
-		t.Fatal(err)
-	}
-	native.Document["externalMetadata"] = true
-	if err := placeholderstore.WriteNative(first.dir, first.file.File, mustJSON(native.Document)); err != nil {
-		t.Fatal(err)
-	}
-	if resp, _ := invoke(t, sibling, "refresh_token", refresh); resp.StatusCode != 200 || calls != 2 {
-		t.Fatal("external native generation not served")
-	}
-	expired := later.Add(601 * time.Second)
-	sibling.now = func() time.Time { return expired }
-	if resp, _ := invoke(t, sibling, "refresh_token", refresh); resp.StatusCode != 200 || calls != 3 {
-		t.Fatal("expired native grant deduplicated")
+	if resp.StatusCode != 200 || calls != 2 || object["expires_in"] != float64(600) {
+		t.Fatal("sibling did not refresh the current native grant")
 	}
 }
 
-func TestConcurrentGatewaysDispatchOnlyOnce(t *testing.T) {
+func TestConcurrentGatewaysRotateTheCurrentGrant(t *testing.T) {
 	first, refresh := fixture(t, true)
 	second, err := New(first.config, first.dir, first.lockPath, "second-gateway", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	second.now = first.now
-	second.seenFingerprint.Store(first.seenFingerprint.Load())
 	var calls atomic.Int32
 	transport := roundTripFunc(func(req *http.Request) (*http.Response, error) {
-		calls.Add(1)
+		call := calls.Add(1)
+		expected := oldRefresh
+		if call == 2 {
+			expected = newRefresh
+		}
 		data, _ := io.ReadAll(req.Body)
-		if !strings.Contains(string(data), oldRefresh) || strings.Contains(string(data), refresh) {
+		if !strings.Contains(string(data), expected) || strings.Contains(string(data), refresh) {
 			t.Error("refresh not substituted from authoritative store")
 		}
 		time.Sleep(35 * time.Millisecond)
@@ -221,8 +198,8 @@ func TestConcurrentGatewaysDispatchOnlyOnce(t *testing.T) {
 		}()
 	}
 	wg.Wait()
-	if calls.Load() != 1 {
-		t.Fatal("parallel gateways consumed the grant twice")
+	if calls.Load() != 2 {
+		t.Fatal("parallel gateways did not each rotate the current grant")
 	}
 }
 
@@ -519,9 +496,12 @@ func TestNativeCommitPrecedesBindingCommitFailure(t *testing.T) {
 	if err := os.Rename(savedBindings, bindingPath); err != nil {
 		t.Fatal(err)
 	}
-	s.transport = roundTripFunc(func(*http.Request) (*http.Response, error) {
-		t.Fatal("partially committed exchange redispatched")
-		return nil, errors.New("unexpected")
+	s.transport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		data, _ := io.ReadAll(req.Body)
+		if !strings.Contains(string(data), newRefresh) || strings.Contains(string(data), oldRefresh) {
+			t.Fatal("retry did not use the durably committed native grant")
+		}
+		return tokenResponse(`,"expires_in":600`), nil
 	})
 	if resp, _ := invoke(t, s, "refresh_token", refresh); resp.StatusCode != 200 {
 		t.Fatal("native-first interruption lost recoverable native grant")
@@ -554,7 +534,7 @@ func TestReflectedMetadataNeverBecomesReplayCredentialStorage(t *testing.T) {
 	}
 }
 
-func TestConcurrentRequestsShareOneGatewayFingerprint(t *testing.T) {
+func TestConcurrentRequestsSerializeNativeRotations(t *testing.T) {
 	s, refresh := fixture(t, true)
 	s.transport = roundTripFunc(func(*http.Request) (*http.Response, error) { return tokenResponse(`,"expires_in":600`), nil })
 	var wg sync.WaitGroup

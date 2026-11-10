@@ -964,3 +964,50 @@ func TestProviderMapClientsShareProjectionAndExchange(t *testing.T) {
 		})
 	}
 }
+
+func TestProviderMapInactiveCredentialsCannotHideInMetadata(t *testing.T) {
+	for _, inactive := range []string{"key", "access", "refresh"} {
+		t.Run(inactive, func(t *testing.T) {
+			s, profile := nativeFixture(t, "opencode")
+			const raw = "synthetic-inactive-native-credential"
+			entry := map[string]any{"type": "oauth", "access": syntheticJWT(4102444800, "fixture"), "refresh": oldRefresh}
+			if inactive != "key" {
+				entry = map[string]any{"type": "api", "key": "synthetic-native-api"}
+			}
+			entry[inactive], entry["accountId"] = raw, raw
+			profile.Providers[0].AuthSecrets = append(profile.Providers[0].AuthSecrets, model.AuthFileSecret{File: "config.json", Codec: "claude-config", Fields: []model.AuthSecretField{
+				{Pointer: "/primaryApiKey", Kind: "apiKey", Release: "openai-api-key"},
+				{Pointer: "/anthropicApiKey", Kind: "apiKey", Release: "openai-api-key"},
+			}})
+			if err := placeholderstore.WriteNative(s.dir, "config.json", mustJSON(map[string]any{"oauthAccount": map[string]string{"displayName": raw}})); err != nil {
+				t.Fatal(err)
+			}
+			if err := placeholderstore.WriteNative(s.dir, s.file.File, mustJSON(map[string]any{"openai": entry})); err != nil {
+				t.Fatal(err)
+			}
+			native, err := s.native()
+			if err != nil || native.Values["/openai/"+inactive] != raw {
+				t.Fatal("inactive field is not a declared known credential", err)
+			}
+			placeholder, err := model.NewSecretPlaceholder(nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			configured := []model.SecretReleaseEntry{{SecretID: "openai-api-key", Value: "synthetic-configured-api", Placeholder: placeholder}}
+			view, err := placeholderstore.Project(s.dir, t.TempDir(), "inactive", profile, configured)
+			if err == nil {
+				for _, file := range []string{s.file.File, "config.json"} {
+					data, err := os.ReadFile(filepath.Join(view.Dir, file))
+					if err != nil || strings.Contains(string(data), raw) {
+						t.Fatal("inactive declared credential escaped through type-filtered metadata", err)
+					}
+				}
+			} else if strings.Contains(err.Error(), raw) {
+				t.Fatal("refusal echoed the inactive credential")
+			}
+			if after, err := s.native(); err != nil || after.Fingerprint != native.Fingerprint {
+				t.Fatal("projection changed the canonical source", err)
+			}
+		})
+	}
+}

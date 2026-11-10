@@ -155,6 +155,11 @@ func decodeNative(codec string, data []byte, purpose nativePurpose) (map[string]
 			default:
 				return nil, nil, fmt.Errorf("unsupported provider auth type")
 			}
+			for _, leaf := range []string{"key", "access", "refresh"} {
+				if purpose == projectedView && !slices.Contains(leaves, leaf) && entry[leaf] != nil && entry[leaf] != "" {
+					return nil, nil, fmt.Errorf("provider auth mixes incompatible credential fields")
+				}
+			}
 			if err := filterFields(entry, allowed, purpose); err != nil {
 				return nil, nil, err
 			}

@@ -53,6 +53,10 @@ func Harvest(realDir, viewDir, configDir string, profile model.Profile) error {
 	local, err := readHarvestSource(configDir, files, bindings, false)
 	warnings = errors.Join(warnings, err)
 	for _, file := range files {
+		// Codex has no client-owned auth metadata to merge back.
+		if file.file.Codec == "codex-auth" {
+			continue
+		}
 		native := file.document
 		if native == nil {
 			native = map[string]any{}

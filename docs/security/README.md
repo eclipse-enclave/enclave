@@ -128,7 +128,9 @@ rule are stored as sent. See [Full capture](../networking.md#full-capture).
   hosts ([API keys](../auth.md#api-keys)). Credential files and secrets without
   a release rule can hold real values in the config or auth store. Opt-in
   [protected native auth](../auth.md#protected-native-auth) projects declared
-  Claude credential fields and keeps their real store gateway-only.
+  credential fields for Claude, Codex, Pi, OpenCode and Copilot, keeping their
+  real store gateway-only. It does not protect arbitrary credential files,
+  SSH access or readable claims in placeholder JWTs.
 - A configured SSH key is available to every session of every project and
   tool, and SSH on port 22 bypasses the proxy, so pushes never appear in
   `network.log`. See [SSH keys](../auth.md#ssh-keys).

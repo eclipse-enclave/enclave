@@ -66,3 +66,37 @@ func TestEndpointParserAndDenyCannotFallThrough(t *testing.T) {
 	}
 
 }
+
+func TestOAuthPathVariantsCannotFallThrough(t *testing.T) {
+	for _, endpoint := range []struct{ host, path string }{
+		{"platform.claude.com", "/v1/oauth/token"},
+		{"auth.openai.com", "/oauth/token"},
+		{"github.com", "/login/oauth/access_token"},
+	} {
+		t.Run(endpoint.host, func(t *testing.T) {
+			s, _ := fixture(t, false)
+			s.provider.TokenEndpoint.Host = endpoint.host
+			s.provider.TokenEndpoint.Path = endpoint.path
+			s.transport = roundTripFunc(func(*http.Request) (*http.Response, error) {
+				t.Fatal("alternate OAuth path dispatched")
+				return nil, nil
+			})
+			for _, path := range []string{strings.ToUpper(endpoint.path), endpoint.path + "/", endpoint.path + "_extra", "/other/../" + strings.TrimPrefix(endpoint.path, "/")} {
+				req := httptest.NewRequest(http.MethodPost, "https://"+endpoint.host+path, nil)
+				resp, handled := s.Intercept(req, "https")
+				if !handled || resp.StatusCode != http.StatusForbidden {
+					t.Errorf("path %q fell through", path)
+					continue
+				}
+				_ = resp.Body.Close()
+			}
+			ordinary := "/ordinary"
+			if endpoint.host == "github.com" {
+				ordinary = "/login/oauth/authorize"
+			}
+			if _, handled := s.Intercept(httptest.NewRequest(http.MethodGet, "https://"+endpoint.host+ordinary, nil), "https"); handled {
+				t.Fatal("unrelated path intercepted")
+			}
+		})
+	}
+}

@@ -47,15 +47,12 @@ func (s *Store) Intercept(req *http.Request, scheme string) (*http.Response, boo
 		host := endpointHost(req)
 		endpoint := s.provider.TokenEndpoint
 		canonicalPath := path.Clean("/" + req.URL.Path)
-		if endpoint.Host == "github.com" && host == "github.com" && strings.HasPrefix(strings.ToLower(canonicalPath), "/login/oauth") && req.URL.Path != endpoint.Path {
-			return refusal(http.StatusForbidden), true
-		}
 		for _, denied := range endpoint.Deny {
 			if host == denied.Host && canonicalPath == denied.Path {
 				return refusal(http.StatusForbidden), true
 			}
 		}
-		if host != endpoint.Host || canonicalPath != endpoint.Path {
+		if host != endpoint.Host || !strings.HasPrefix(strings.ToLower(canonicalPath), strings.ToLower(endpoint.Path)) {
 			continue
 		}
 		_, port, portErr := net.SplitHostPort(cmp.Or(strings.TrimSpace(req.Host), req.URL.Host))

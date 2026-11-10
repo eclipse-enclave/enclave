@@ -58,6 +58,7 @@ type Runtime struct {
 	sessionName           string // cached resolved session name
 	configSourceDir       string // host path to config-generated dir, set when config-source is active
 	configSettingsBase    []byte // default baseline when protected settings first activate an overlay
+	configSettingsOnly    bool
 	configVolSuffix       string // cached config-store suffix for the current execution
 	configVolReady        bool   // whether configVolSuffix has been initialized for this execution
 	policyResolved        bool

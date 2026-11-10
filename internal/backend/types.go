@@ -205,8 +205,9 @@ type ConfigOverlaySpec struct {
 	// SettingsPath is relative to the config store. The backend keeps the last
 	// generated settings file outside the tool-writable store for this key.
 	SettingsPath string
-	// SettingsBase limits the overlay to SettingsPath and seeds a missing snapshot.
+	// SettingsBase omits runtime-owned fields and seeds recovery intent.
 	SettingsBase []byte
+	SettingsOnly bool
 }
 
 type StorePrepEntry struct {

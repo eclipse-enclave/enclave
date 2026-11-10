@@ -69,6 +69,7 @@ func (m volumeManager) BuildPrep(volumeSuffix string) (backend.StorePrep, storeS
 			SourceDir:     m.configSourceDir,
 			PreservePaths: m.configSourcePreservePaths(),
 			SettingsBase:  m.configSettingsBase,
+			SettingsOnly:  m.configSettingsOnly,
 		}
 		if m.run.Persist {
 			settingsPath, err := m.settingsRelativePath()

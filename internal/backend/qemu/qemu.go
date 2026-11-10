@@ -272,3 +272,15 @@ func (b *Backend) advanceRequestMode(req backend.Request, state, id string) {
 		logx.Warnf("Session auth-mode reservation retained: %v", err)
 	}
 }
+
+// InspectModeSession cannot infer absence in the cmd.Start-to-PID-persist gap.
+func (b *Backend) InspectModeSession(_ context.Context, holderID, id string) (*backend.SessionRef, bool, error) {
+	pid, err := strconv.Atoi(id)
+	if err != nil || pid <= 0 {
+		return nil, false, fmt.Errorf("cannot prove pending QEMU guest absent; auth-mode holder %s retained", holderID)
+	}
+	if hoststore.ModeOwnerAlive(pid) {
+		return &backend.SessionRef{ID: id}, true, nil
+	}
+	return nil, false, nil
+}

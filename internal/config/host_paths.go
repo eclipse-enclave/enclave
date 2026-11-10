@@ -31,6 +31,12 @@ func HostLockPath(home string, name string) string {
 	return filepath.Join(HostLocksDir(home), name)
 }
 
+// SessionStartLockName is shared by session starts and stale-holder cleanup.
+func SessionStartLockName(tool, projectHash string) string {
+	base := model.AppName + "-" + tool + "-" + projectHash
+	return "session-start-" + util.HashString(base) + ".lock"
+}
+
 // HostImageBuildLockPath is the lock file that serializes builds of one
 // container image across enclave processes.
 func HostImageBuildLockPath(home string, image string) string {

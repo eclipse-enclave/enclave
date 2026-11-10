@@ -11,6 +11,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"enclave/internal/backend"
@@ -100,4 +101,32 @@ func (b *Backend) beginContainerModeFinalization(ctx context.Context, name strin
 		}
 		return hoststore.AdvanceMode(b.opts.Host.Home, dir, selected, "ended", "", "", false)
 	}, reconcile, nil
+}
+
+// InspectModeSession finds pending containers by the host reservation label,
+// even if the host died before saving the container ID or it was renamed.
+func (b *Backend) InspectModeSession(ctx context.Context, holderID, id string) (*backend.SessionRef, bool, error) {
+	if id == "" {
+		filters := dockercmd.NewFilters()
+		filters.Add("label", model.LabelModeHolder+"="+holderID)
+		containers, err := dockercmd.ContainerList(ctx, dockercmd.ListOptions{All: true, Filters: filters})
+		if err != nil || len(containers) == 0 {
+			return nil, false, err
+		}
+		if len(containers) != 1 {
+			return nil, false, fmt.Errorf("multiple containers claim this holder")
+		}
+		id = containers[0].ID
+	}
+	info, err := dockercmd.ContainerInspect(ctx, id)
+	if dockercmd.IsNotFound(err) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	if info.State == nil || info.Config == nil || info.Config.Labels[model.LabelModeHolder] != holderID {
+		return nil, false, fmt.Errorf("container does not match the auth-mode holder")
+	}
+	return &backend.SessionRef{ID: info.ID, Name: strings.TrimPrefix(info.Name, "/")}, info.State.Running, nil
 }

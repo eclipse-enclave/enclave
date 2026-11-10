@@ -145,3 +145,12 @@ with `error` set, `mode: null`, empty arrays (`tool: null` for startup
 failures), and exit code 1. Usage errors and warnings go to stderr only (exit
 1, empty stdout). Policy inputs:
 [Managing the network policy](networking.md#managing-the-network-policy).
+
+## Known consumers
+
+[HomeShell](https://github.com/eclipse-enclave/homeshell) runs each agent
+session through the `enclave` CLI. Besides the JSON contracts above, it relies
+on the lifecycle commands (`run --background`, `continue`, `attach`, `exec`,
+`stop`) and the session flags in the [CLI reference](cli-reference.md),
+including list-flag value syntax such as `--pass-env +NAME`. How it uses them:
+[HomeShell's Enclave provider](https://github.com/eclipse-enclave/homeshell/blob/main/docs/PROVIDERS.md#eclipse-enclave).

@@ -75,12 +75,9 @@ func Load(ctx context.Context, path, dir, lock, session string, env []model.Secr
 		if file.CheckOnly {
 			continue
 		}
-		snapshot, err := placeholderstore.ReadNative(dir, file)
+		_, err := placeholderstore.ReadNative(dir, file)
 		if err != nil && !isMissing(err) {
 			return nil, "", fmt.Errorf("native auth file unavailable")
-		}
-		if file.File == store.file.File {
-			store.seenFingerprint.Store(snapshot.Fingerprint)
 		}
 	}
 	probe, err := os.CreateTemp(dir, ".native-probe-*")

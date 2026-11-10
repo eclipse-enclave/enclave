@@ -76,11 +76,6 @@ func (s *Store) transact(parent context.Context, values map[string]string) *http
 			credentials = append(credentials, value)
 		}
 	}
-	if !login && native.Fingerprint != s.seenFingerprint.Load() {
-		if expiry, ok := nativeExpiry(native); ok && expiry.After(s.now()) {
-			return s.tokenReply(native, bindings, credentials, http.Header{}, "Bearer")
-		}
-	}
 	fail := func() *http.Response { return refusal(http.StatusBadGateway) }
 	body := mustJSON(values)
 	endpoint := s.config.Provider.TokenEndpoint
@@ -136,7 +131,7 @@ func (s *Store) transact(parent context.Context, values map[string]string) *http
 		return response(upstream.StatusCode, headers, encoded)
 	}
 	// Only declared credential fields are committed. A valid consumed grant is
-	// retained even when expiry is missing or malformed; it cannot deduplicate.
+	// retained even when expiry is missing or malformed.
 	tokens := map[string]string{}
 	for _, kind := range []string{"access", "refresh"} {
 		key := endpoint.Fields[kind]
@@ -290,6 +285,5 @@ func (s *Store) tokenReply(native placeholderstore.NativeFile, bindings placehol
 	if !contained(encoded, headers, credentials) {
 		return refusal(http.StatusBadGateway)
 	}
-	s.seenFingerprint.Store(native.Fingerprint)
 	return response(http.StatusOK, headers, encoded)
 }

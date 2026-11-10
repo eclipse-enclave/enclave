@@ -445,7 +445,8 @@ func (r *Runtime) prepareVolumes(containerName string, baseContainerName string,
 	}
 	r.addEnvStore(mountArgs, stores.Env)
 
-	authState, secretMapping, err := newAuthManager(r).Prepare(mountArgs.EnvPtr(), stores)
+	authManager := newAuthManager(r)
+	authState, secretMapping, err := authManager.Prepare(mountArgs.EnvPtr(), stores)
 	if err != nil {
 		if cleanup != nil {
 			cleanup()
@@ -464,6 +465,8 @@ func (r *Runtime) prepareVolumes(containerName string, baseContainerName string,
 			}
 			return preparedVolumes{}, err
 		}
+		// Only after the raw gate; readiness must leave classified native files alone.
+		authManager.ready()
 	}
 
 	r.logCredentials(authState)

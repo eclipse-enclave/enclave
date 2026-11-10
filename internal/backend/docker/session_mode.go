@@ -99,7 +99,6 @@ func (b *Backend) beginContainerModeFinalization(ctx context.Context, name strin
 	}
 	var selected string
 	claimed := hoststore.ModeHolder{ID: info.Config.Labels[model.LabelModeHolder], Session: strings.TrimPrefix(info.Name, "/"), Tool: info.Config.Labels[model.LabelAgent], ProjectHash: info.Config.Labels[model.LabelHash], Protected: containerEnvValue(info.Config, model.EnvNativeAuthOps) != ""}
-	reconcile = false
 	err = hoststore.WithModeHolders(b.opts.Host.Home, dir, func(holders *[]hoststore.ModeHolder) error {
 		for i := range *holders {
 			holder := &(*holders)[i]
@@ -112,13 +111,11 @@ func (b *Backend) beginContainerModeFinalization(ctx context.Context, name strin
 				return fmt.Errorf("session %s auth is being finalized by process %d", holder.Session, holder.OwnerPID)
 			}
 			if hoststore.ModeOwnerAlive(holder.OwnerPID) {
-				reconcile = false
 				return nil
 			}
 			reconcile = !holder.Protected
 			holder.State, holder.UpdatedAt, holder.OwnerPID = "finalizing", time.Now().UTC(), os.Getpid()
 			selected = holder.ID
-			claimed = *holder
 			break
 		}
 		return nil

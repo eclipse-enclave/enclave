@@ -28,6 +28,18 @@ import/export. See [Authentication & Secrets](../../../docs/auth.md).
 The gateway sends the declared token as a Bearer authorization header to
 `api.github.com` and `*.githubcopilot.com`.
 
+### Protected native auth
+
+`enclave --tool copilot --protect-auth` keeps GitHub.com device-login grants in
+the gateway's native store. The CLI sees stable `gho_` placeholders; the gateway
+fills native account keys and handles pending/slow-down polling. Grants release
+to Copilot services and only the fixed, bodyless user lookup on `api.github.com`.
+Protected setup enables `storeTokenPlaintext` for saving placeholders; ordinary
+launches reapply their configured settings. Other GitHub API paths and GitHub
+Enterprise native entries refuse. Configured
+env-token release rules and ordinary sessions are unchanged. See
+[protected native auth](../../../docs/auth.md#protected-native-auth).
+
 ### Recommended: fine-grained PAT via `COPILOT_GITHUB_TOKEN`
 
 Prefer `COPILOT_GITHUB_TOKEN` with a fine-grained personal access token that

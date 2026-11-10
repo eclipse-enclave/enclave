@@ -47,6 +47,38 @@
       "auth_files": [
         "config.json"
       ],
+      "auth_secrets": [
+        {
+          "file": "config.json",
+          "codec": "copilot-config",
+          "fields": [
+            {
+              "pointer": "/authTokens/*/token",
+              "kind": "access",
+              "release": "copilot-native",
+              "placeholder": {
+                "prefix": "gho_",
+                "random": {
+                  "encoding": "alphanumeric",
+                  "length": 36
+                }
+              }
+            }
+          ]
+        }
+      ],
+      "token_endpoint": {
+        "host": "github.com",
+        "path": "/login/oauth/access_token",
+        "body": "either",
+        "grants": [
+          "urn:ietf:params:oauth:grant-type:device_code"
+        ],
+        "fields": {
+          "access": "access_token",
+          "scope": "scope"
+        }
+      },
       "auth_session": {
         "mode": "any",
         "checks": [
@@ -80,6 +112,20 @@
           "length": 82
         }
       }
+    },
+    "copilot-native": {
+      "env_vars": null,
+      "release": {
+        "http": {
+          "hosts": [
+            "*.githubcopilot.com",
+            "api.github.com"
+          ],
+          "header": "authorization",
+          "format": "Bearer %s"
+        }
+      },
+      "api_key": false
     }
   },
   "host_config_dir": "",

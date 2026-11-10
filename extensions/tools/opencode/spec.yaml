@@ -58,6 +58,7 @@ sandbox:
 credentials:
   sources:
     chatgpt-oauth: { apiKey: false }
+    copilot-oauth: { apiKey: false }
     openai-api-key: { env: [OPENAI_API_KEY] }
     anthropic-api-key: { env: [ANTHROPIC_API_KEY] }
     gemini-api-key: { env: [GEMINI_API_KEY] }
@@ -70,6 +71,7 @@ network:
     "*.anthropic.com": anthropic-api-key
     generativelanguage.googleapis.com: gemini-api-key
   serviceAuth:
+    copilot-oauth: { headerName: Authorization, valueFormat: "Bearer %s", hosts: ["*.githubcopilot.com"] }
     chatgpt-oauth: { headerName: authorization, valueFormat: "Bearer %s", hosts: [chatgpt.com] }
     openai-api-key: { headerName: authorization, valueFormat: "Bearer %s" }
     anthropic-api-key: { headerName: x-api-key }
@@ -87,6 +89,8 @@ providers:
           - { pointer: /gemini/key, kind: apiKey, release: gemini-api-key }
           - { pointer: /openai/access, kind: access, release: chatgpt-oauth, placeholder: { shape: jwt } }
           - { pointer: /openai/refresh, kind: refresh }
+          - { pointer: /github-copilot/access, kind: access, release: copilot-oauth, placeholder: { prefix: gho_, random: { encoding: alphanumeric, length: 36 } } }
+          - { pointer: /github-copilot/refresh, kind: refresh, placeholder: { prefix: gho_, random: { encoding: alphanumeric, length: 36 } } }
     tokenEndpoint:
       host: auth.openai.com
       path: /oauth/token
@@ -104,6 +108,12 @@ providers:
   - name: gemini
     credentials: [gemini-api-key]
   - name: github-copilot
+    tokenEndpoint:
+      host: github.com
+      path: /login/oauth/access_token
+      body: either
+      grants: ["urn:ietf:params:oauth:grant-type:device_code"]
+      fields: { access: access_token, refresh: access_token, scope: scope }
     authFiles: [auth.json]
     authSession:
       checks:

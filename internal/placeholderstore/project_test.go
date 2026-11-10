@@ -484,3 +484,54 @@ func TestWildcardDiagnosticsUseDeclaredFields(t *testing.T) {
 		})
 	}
 }
+
+func TestCopilotNativeAccountRefusals(t *testing.T) {
+	file := model.AuthFileSecret{File: "config.json", Codec: "copilot-config", Fields: []model.AuthSecretField{{Pointer: "/authTokens/*/token", Kind: "access", Release: "native"}}}
+	profile := model.Profile{Providers: []model.ProviderConfig{{Name: "github", AuthSecrets: []model.AuthFileSecret{file}}}, Secrets: map[string]model.SecretConfig{"native": {Release: &model.SecretReleaseConfig{HTTP: &model.HTTPSecretReleaseConfig{Hosts: []string{"api.githubcopilot.com"}, Header: "Authorization", Format: "Bearer %s"}}}}}
+	for _, source := range []string{
+		`{"authTokens":{"https://enterprise.invalid:user":{"token":"synthetic-private-native"}}}`,
+		`{"authTokens":{"https://github.com:user":{"token":"synthetic-private-native"},"https://github.com:user:github":{"token":"different-native"}}}`,
+		`{"authTokens":{"https://github.com:user":{"token":"synthetic-private-native"}},"lastLoggedInUser":{"login":"synthetic-private-native"}}`,
+	} {
+		real := t.TempDir()
+		nativeFile(t, real, file.File, source)
+		if _, err := Project(real, t.TempDir(), "refuse", profile, nil); err == nil || strings.Contains(err.Error(), "synthetic-private-native") {
+			t.Fatal("unsupported, inconsistent or contaminated native account was accepted or disclosed", err)
+		}
+		data, err := os.ReadFile(filepath.Join(real, file.File))
+		if err != nil || string(data) != source {
+			t.Fatal("native source changed during refusal", err)
+		}
+	}
+	file.Fields[0].Pointer = "/authTokens/fixed/token"
+	profile.Providers[0].AuthSecrets[0] = file
+	real := t.TempDir()
+	nativeFile(t, real, file.File, `{"authTokens":{"https://github.com:synthetic-private-native":{"token":"synthetic-private-native"}}}`)
+	if _, err := Project(real, t.TempDir(), "undeclared", profile, nil); err == nil || strings.Contains(err.Error(), "synthetic-private-native") {
+		t.Fatal("undeclared concrete native account leaked in an error", err)
+	}
+}
+
+func TestCopilotNativeHeadersAreNotProjectedOrKept(t *testing.T) {
+	file := model.AuthFileSecret{File: "config.json", Codec: "copilot-config", Fields: []model.AuthSecretField{{Pointer: "/authTokens/*/token", Kind: "access", Release: "native"}}}
+	profile := model.Profile{Providers: []model.ProviderConfig{{Name: "github", AuthSecrets: []model.AuthFileSecret{file}}}, Secrets: map[string]model.SecretConfig{"native": {Release: &model.SecretReleaseConfig{HTTP: &model.HTTPSecretReleaseConfig{Hosts: []string{"api.githubcopilot.com"}, Header: "Authorization", Format: "Bearer %s"}}}}}
+	const source = "// native header with synthetic-comment-value\n  // another header\r\n" + `{"authTokens":{"https://github.com:fixture:github":{"token":"synthetic-native-token"}}}`
+	real := t.TempDir()
+	nativeFile(t, real, file.File, source)
+	view, err := Project(real, t.TempDir(), "headers", profile, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(view.Dir, file.File))
+	if err != nil || strings.Contains(string(data), "synthetic-comment-value") || strings.Contains(string(data), "synthetic-native-token") {
+		t.Fatal("native header or token reached the private view", err)
+	}
+	if original, err := os.ReadFile(filepath.Join(real, file.File)); err != nil || string(original) != source {
+		t.Fatal("projection rewrote the native JSONC source", err)
+	}
+	configDir := t.TempDir()
+	nativeFile(t, configDir, file.File, "// untrusted header\n"+string(data))
+	if _, err := ClassifyNative(configDir, "/auth", profile, view.Bindings, nil, false); err == nil {
+		t.Fatal("unprojected comment bytes were kept in a regular native path")
+	}
+}

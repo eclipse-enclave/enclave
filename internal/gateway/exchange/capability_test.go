@@ -57,10 +57,12 @@ func TestCapabilityUsesLoadedConfigurationAndSession(t *testing.T) {
 	if different == digest || CheckCapability(runtime, different, s.session) == nil {
 		t.Fatal("changed loaded config not detected")
 	}
-	if err := os.WriteFile(configPath, []byte(`{"provider":{}}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if _, _, err := Load(context.Background(), configPath, s.dir, s.lockPath, s.session, nil); err == nil {
-		t.Fatal("invalid declaration advertised a capability")
+	for _, invalid := range []string{`{"provider":{}}`, `{"providers":[{}]}`} {
+		if err := os.WriteFile(configPath, []byte(invalid), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := Load(context.Background(), configPath, s.dir, s.lockPath, s.session, nil); err == nil {
+			t.Fatal("invalid declaration advertised a capability")
+		}
 	}
 }

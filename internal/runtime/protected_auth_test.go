@@ -78,7 +78,7 @@ func TestProtectedAuthRefusesUnsupportedOptions(t *testing.T) {
 }
 
 func TestProtectedViewMountAndDynamicReleaseContract(t *testing.T) {
-	for _, tool := range []string{"claude", "codex", "pi", "opencode"} {
+	for _, tool := range []string{"claude", "codex", "pi", "opencode", "copilot"} {
 		t.Run(tool, func(t *testing.T) { testProtectedViewMount(t, tool) })
 	}
 }
@@ -114,8 +114,18 @@ func testProtectedViewMount(t *testing.T, tool string) {
 		apiID = "openai-api-key"
 		writeFile(t, filepath.Join(realDir, "auth.json"), `{"auth_mode":"chatgpt","OPENAI_API_KEY":"native-api-synthetic","tokens":{"access_token":"e30.eyJleHAiOjQxMDI0NDQ4MDB9.c3ludGhldGlj","id_token":"e30.e30.c3ludGhldGlj","refresh_token":"native-refresh-synthetic"}}`)
 	}
+	if tool == "copilot" {
+		apiID = "copilot-github-token"
+		writeFile(t, filepath.Join(realDir, "config.json"), `{"authTokens":{"https://github.com:fixture:github":{"token":"native-access-synthetic"}}}`)
+	}
 	if tool == "pi" || tool == "opencode" {
-		provider := nativeAuthProvider(r.profile)
+		var provider model.ProviderConfig
+		for _, candidate := range r.profile.Providers {
+			if candidate.TokenEndpoint != nil {
+				provider = candidate
+				break
+			}
+		}
 		kind := "api"
 		if tool == "pi" {
 			kind = "api_key"
@@ -160,7 +170,11 @@ func testProtectedViewMount(t *testing.T, tool string) {
 		if bytes.Contains(native.Config, []byte("native-access-synthetic")) {
 			t.Fatal("native snapshot entered gateway declaration")
 		}
-		if id == "first" {
+		if tool == "copilot" {
+			if len(mapping.Entries) != 1 {
+				t.Fatal("native OAuth grant entered static env release rules")
+			}
+		} else if id == "first" {
 			firstAlias = placeholder
 			if len(mapping.Entries) != 1 {
 				t.Fatal("initial API key alias duplicated the env rule")

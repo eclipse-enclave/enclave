@@ -464,7 +464,7 @@ func (p *proxy) handler(scheme string) http.HandlerFunc {
 				p.logEvent(event)
 				return
 			}
-			nativeRules, err := p.nativeAuth.Releases(req.Context(), req.Header)
+			nativeRules, err := p.nativeAuth.Releases(req)
 			if err != nil {
 				event.Status = http.StatusForbidden
 				event.Verdict = netlog.VerdictDeny

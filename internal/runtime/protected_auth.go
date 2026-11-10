@@ -24,28 +24,24 @@ import (
 	"enclave/internal/placeholderstore"
 )
 
-func nativeAuthProvider(profile model.Profile) *model.ProviderConfig {
-	var selected *model.ProviderConfig
-	for i := range profile.Providers {
-		provider := &profile.Providers[i]
-		if provider.TokenEndpoint == nil {
-			continue
-		}
-		if selected != nil {
-			return nil
-		}
-		selected = provider
-	}
-	return selected
-}
-
 func ValidateProtectedAuth(run model.RunOptions, auth model.AuthOptions, build model.BuildOptions, profile model.Profile) error {
 	if !run.ProtectAuth {
 		return nil
 	}
-	provider := nativeAuthProvider(profile)
+	supported := false
+	endpoints := map[string]bool{}
+	for _, provider := range profile.Providers {
+		if endpoint := provider.TokenEndpoint; endpoint != nil {
+			key := endpoint.Host + endpoint.Path
+			if endpoints[key] {
+				return fmt.Errorf("--protect-auth requires unambiguous native token endpoints")
+			}
+			endpoints[key] = true
+			supported = supported || len(provider.AuthSecrets) > 0
+		}
+	}
 	switch {
-	case provider == nil || profile.ConfigDir == "" || len(provider.AuthSecrets) == 0:
+	case !supported || profile.ConfigDir == "":
 		return fmt.Errorf("--protect-auth requires supported native auth declarations")
 	case run.Admin:
 		return fmt.Errorf("--protect-auth is incompatible with --admin")
@@ -120,7 +116,7 @@ func (r *Runtime) prepareProtectedAuth(stores storeSet, mounts *mountAccumulator
 			}
 		}
 	}
-	data, _ := json.Marshal(exchange.Config{Provider: *nativeAuthProvider(r.profile), Secrets: r.profile.Secrets})
+	data, _ := json.Marshal(exchange.Config{Providers: r.profile.Providers, Secrets: r.profile.Secrets})
 	mounts.AddMount(backend.Mount{Type: backend.MountTypeBind, Source: view.Dir, ContainerPath: r.containerHome + "/" + model.ContainerAuthDir})
 	r.addAuthEnv(mounts)
 	var verbs []string

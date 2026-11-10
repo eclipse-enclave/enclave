@@ -41,11 +41,11 @@ func (s *Store) transact(parent context.Context, values map[string]string, media
 	login := values["grant_type"] != "refresh_token"
 	if !login {
 		valid := false
-		for _, field := range s.file.Fields {
+		for _, field := range s.fields {
 			if field.Kind != "refresh" {
 				continue
 			}
-			b, ok := bindingFor(bindings, s.config.Provider.Name, s.file.File, field)
+			b, ok := bindingFor(bindings, s.provider.Name, s.file.File, field)
 			if ok && b.Matches(values["refresh_token"]) && native.Values[field.Pointer] != "" && !strings.Contains(native.Values[field.Pointer], model.SecretPlaceholderMarker) {
 				valid = true
 				values["refresh_token"] = native.Values[field.Pointer]
@@ -59,21 +59,23 @@ func (s *Store) transact(parent context.Context, values map[string]string, media
 	for _, entry := range s.env {
 		credentials = append(credentials, entry.Value)
 	}
-	for _, file := range s.config.Provider.AuthSecrets {
-		if file.CheckOnly {
-			continue
-		}
-		snapshot, err := placeholderstore.ReadNative(s.dir, file)
-		if err != nil {
-			if file.File == s.file.File && native.Fingerprint == "" {
+	for _, owner := range s.config.Providers {
+		for _, file := range owner.AuthSecrets {
+			if file.CheckOnly {
 				continue
 			}
-			if !isMissing(err) {
-				return refusal(http.StatusServiceUnavailable)
+			snapshot, err := placeholderstore.ReadNative(s.dir, file)
+			if err != nil {
+				if file.File == s.file.File && native.Fingerprint == "" {
+					continue
+				}
+				if !isMissing(err) {
+					return refusal(http.StatusServiceUnavailable)
+				}
 			}
-		}
-		for _, value := range snapshot.Values {
-			credentials = append(credentials, value)
+			for _, value := range snapshot.Values {
+				credentials = append(credentials, value)
+			}
 		}
 	}
 	fail := func() *http.Response { return refusal(http.StatusBadGateway) }
@@ -85,13 +87,14 @@ func (s *Store) transact(parent context.Context, values map[string]string, media
 		}
 		body = []byte(form.Encode())
 	}
-	endpoint := s.config.Provider.TokenEndpoint
+	endpoint := s.provider.TokenEndpoint
 	outgoing, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://"+endpoint.Host+endpoint.Path, bytes.NewReader(body))
 	if err != nil {
 		return fail()
 	}
 	outgoing.GetBody = nil
 	outgoing.Header.Set("Content-Type", media)
+	outgoing.Header.Set("Accept", "application/json")
 	outgoing.Header.Set("Accept-Encoding", "identity")
 	upstream, err := s.transport.RoundTrip(outgoing)
 	if err != nil {
@@ -122,10 +125,18 @@ func (s *Store) transact(parent context.Context, values map[string]string, media
 		return fail()
 	}
 	if upstream.StatusCode < 200 || upstream.StatusCode >= 300 || errorCode != "" {
-		if upstream.StatusCode >= 200 && upstream.StatusCode < 300 {
+		pending := endpoint.Host == "github.com" && slices.Contains([]string{"authorization_pending", "slow_down"}, errorCode)
+		if upstream.StatusCode >= 200 && upstream.StatusCode < 300 && !pending {
 			return fail()
 		}
-		result := map[string]string{}
+		result := map[string]any{}
+		if raw, present := object["interval"]; pending && present {
+			var seconds int64
+			if json.Unmarshal(raw, &seconds) != nil || seconds <= 0 || seconds > 3600 {
+				return fail()
+			}
+			result["interval"] = seconds
+		}
 		for _, key := range []string{"error", "error_description", "error_uri"} {
 			if v := textField(object, key); v != "" {
 				result[key] = v
@@ -158,11 +169,33 @@ func (s *Store) transact(parent context.Context, values map[string]string, media
 	if tokens["access"] == "" {
 		return fail()
 	}
+	fields := s.fields
+	if s.file.Codec == "copilot-config" {
+		login := s.copilotLogin(ctx, tokens["access"], credentials)
+		if login == "" {
+			return fail()
+		}
+		fields = nil
+		for _, suffix := range []string{"", ":github"} {
+			field := s.fields[0]
+			field.Pointer = "/authTokens/" + model.EscapeAuthPointer("https://github.com:"+login+suffix) + "/token"
+			fields = append(fields, field)
+		}
+		account := map[string]any{"host": "https://github.com", "login": login, "kind": "githubDotCom"}
+		users, _ := native.Document["loggedInUsers"].([]any)
+		if !slices.ContainsFunc(users, func(user any) bool {
+			entry, _ := user.(map[string]any)
+			return entry["host"] == account["host"] && entry["login"] == login
+		}) {
+			users = append(users, account)
+		}
+		native.Document["loggedInUsers"], native.Document["lastLoggedInUser"], native.Document["storeTokenPlaintext"] = users, account, true
+	}
 	current, err := s.native()
 	if err != nil || current.Fingerprint != native.Fingerprint {
 		return fail()
 	}
-	for _, field := range s.file.Fields {
+	for _, field := range fields {
 		if value := tokens[field.Kind]; value != "" {
 			parts, _ := model.AuthPointerSegments(field.Pointer)
 			node := native.Document
@@ -193,13 +226,13 @@ func (s *Store) transact(parent context.Context, values map[string]string, media
 	if tokenType != "" && !nonSecret(tokenType) {
 		tokenType = ""
 	}
-	native.UpdateMetadata(s.file.Codec, s.config.Provider.Name, scope, object[endpoint.Fields["expiresIn"]], login, s.now(), nonSecret)
+	native.UpdateMetadata(s.file.Codec, s.provider.Name, scope, object[endpoint.Fields["expiresIn"]], login, s.now(), nonSecret)
 	encoded := mustJSON(native.Document)
-	for _, field := range s.file.Fields {
+	for _, field := range fields {
 		if field.Kind == "apiKey" || native.Values[field.Pointer] == "" {
 			continue
 		}
-		if _, err := bindings.Bind(s.config.Provider.Name, s.file.File, field.Pointer, field.Kind, field.Placeholder, ""); err != nil {
+		if _, err := bindings.Bind(s.provider.Name, s.file.File, field.Pointer, field.Kind, field.Placeholder, ""); err != nil {
 			return fail()
 		}
 	}
@@ -217,7 +250,7 @@ func (s *Store) transact(parent context.Context, values map[string]string, media
 	if unsafeMetadata {
 		return refusal(http.StatusBadGateway)
 	}
-	return s.tokenReply(native, bindings, credentials, headers, tokenType, scope)
+	return s.tokenReply(native, bindings, credentials, headers, tokenType, scope, fields)
 }
 
 func textField(object map[string]json.RawMessage, key string) string {
@@ -237,15 +270,15 @@ func safeHeaders(headers http.Header) http.Header {
 	return result
 }
 
-func (s *Store) tokenReply(native placeholderstore.NativeFile, bindings placeholderstore.Bindings, credentials []string, headers http.Header, tokenType, scope string) *http.Response {
+func (s *Store) tokenReply(native placeholderstore.NativeFile, bindings placeholderstore.Bindings, credentials []string, headers http.Header, tokenType, scope string, fields []model.AuthSecretField) *http.Response {
 	result := map[string]any{}
-	endpoint := s.config.Provider.TokenEndpoint
-	for _, field := range s.file.Fields {
+	endpoint := s.provider.TokenEndpoint
+	for _, field := range fields {
 		key := endpoint.Fields[field.Kind]
 		if key == "" || native.Values[field.Pointer] == "" {
 			continue
 		}
-		b, ok := bindingFor(bindings, s.config.Provider.Name, s.file.File, field)
+		b, ok := bindingFor(bindings, s.provider.Name, s.file.File, field)
 		if !ok {
 			return refusal(http.StatusBadGateway)
 		}
@@ -261,7 +294,7 @@ func (s *Store) tokenReply(native placeholderstore.NativeFile, bindings placehol
 	if scope != "" {
 		result[endpoint.Fields["scope"]] = scope
 	}
-	nativeScope, expiry := native.ReplyMetadata(s.file.Codec, s.config.Provider.Name)
+	nativeScope, expiry := native.ReplyMetadata(s.file.Codec, s.provider.Name)
 	if nativeScope != "" {
 		result[endpoint.Fields["scope"]] = nativeScope
 	}
@@ -273,4 +306,27 @@ func (s *Store) tokenReply(native placeholderstore.NativeFile, bindings placehol
 		return refusal(http.StatusBadGateway)
 	}
 	return response(http.StatusOK, headers, encoded)
+}
+
+func (s *Store) copilotLogin(ctx context.Context, token string, credentials []string) string {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://api.github.com/copilot_internal/user", nil)
+	if err != nil {
+		return ""
+	}
+	req.Header = http.Header{"Authorization": {"Bearer " + token}, "Accept": {"application/json"}, "Accept-Encoding": {"identity"}, "User-Agent": {"enclave"}}
+	resp, err := s.transport.RoundTrip(req)
+	if err != nil {
+		return ""
+	}
+	defer func() { _ = resp.Body.Close() }()
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxBodyBytes+1))
+	if err != nil || len(data) > maxBodyBytes || resp.StatusCode != http.StatusOK || (resp.Header.Get("Content-Encoding") != "" && !strings.EqualFold(resp.Header.Get("Content-Encoding"), "identity")) {
+		return ""
+	}
+	object, err := objectJSON(data)
+	login := textField(object, "login")
+	if err != nil || login == "" || len(login) > 39 || strings.Trim(login, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-") != "" || strings.HasPrefix(login, "-") || strings.HasSuffix(login, "-") || strings.Contains(login, "--") || !contained(mustJSON(login), nil, credentials) {
+		return ""
+	}
+	return login
 }

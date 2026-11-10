@@ -11,6 +11,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -87,12 +88,14 @@ func TestNativeResetPrecedesRefusedAdmissionOnBothBackends(t *testing.T) {
 			endpoint := *provider.TokenEndpoint
 			endpoint.Host = "localhost"
 			provider.TokenEndpoint = &endpoint
-			store, err := exchange.New(exchange.Config{Provider: provider, Secrets: r.profile.Secrets}, real, hoststore.LockPath(r.host.Home, real), "survivor", nil)
+			store, err := exchange.New(exchange.Config{Providers: []model.ProviderConfig{provider}, Secrets: r.profile.Secrets}, real, hoststore.LockPath(r.host.Home, real), "survivor", nil)
 			if err != nil {
 				t.Fatal(err)
 			}
 			headers := http.Header{"Authorization": {"Bearer " + access}}
-			if releases, err := store.Releases(ctx, headers); err != nil || len(releases) != 1 {
+			releaseReq := httptest.NewRequest(http.MethodGet, "https://api.anthropic.com/", nil).WithContext(ctx)
+			releaseReq.Header = headers
+			if releases, err := store.Releases(releaseReq); err != nil || len(releases) != 1 {
 				t.Fatalf("release control: %d %v", len(releases), err)
 			}
 			residue := filepath.Join(configDir, ".credentials.json")
@@ -141,7 +144,7 @@ func TestNativeResetPrecedesRefusedAdmissionOnBothBackends(t *testing.T) {
 			if _, err := os.Stat(residue); err != nil || len(be.prepared) != 0 {
 				t.Fatal("refused start touched the survivor's project config")
 			}
-			if releases, err := store.Releases(ctx, headers); err != nil || len(releases) != 0 {
+			if releases, err := store.Releases(releaseReq); err != nil || len(releases) != 0 {
 				t.Fatalf("stale release after reset: %d %v", len(releases), err)
 			}
 			body, _ := json.Marshal(map[string]string{"grant_type": "refresh_token", "refresh_token": refresh})

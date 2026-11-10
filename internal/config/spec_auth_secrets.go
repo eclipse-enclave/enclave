@@ -18,14 +18,18 @@ import (
 )
 
 func validateAuthSecrets(doc specDocument, specPath string) error {
+	nativeDeclarations := 0
 	for _, provider := range doc.Providers {
-		files := map[string]bool{}
+		nativeDeclarations += len(provider.AuthSecrets)
+	}
+	files := map[string]bool{}
+	for _, provider := range doc.Providers {
 		for _, file := range provider.AuthSecrets {
 			if !model.ValidAuthFilePath(file.File) || (!file.CheckOnly && !slices.Contains(provider.AuthFiles, file.File)) || files[file.File] {
 				return fmt.Errorf("%s: provider %s authSecrets file %q must name a unique authFiles entry unless checkOnly", specPath, provider.Name, file.File)
 			}
 			files[file.File] = true
-			if !slices.Contains([]string{"claude-credentials", "claude-config", "codex-auth", "provider-map"}, file.Codec) || len(file.Fields) == 0 {
+			if !slices.Contains([]string{"claude-credentials", "claude-config", "codex-auth", "provider-map", "copilot-config"}, file.Codec) || len(file.Fields) == 0 {
 				return fmt.Errorf("%s: authSecrets %s requires a supported codec and fields", specPath, file.File)
 			}
 			pointers := map[string]bool{}
@@ -40,8 +44,8 @@ func validateAuthSecrets(doc specDocument, specPath string) error {
 			}
 		}
 		if provider.TokenEndpoint != nil {
-			if len(provider.AuthSecrets) == 0 {
-				return fmt.Errorf("%s: provider %s tokenEndpoint requires authSecrets", specPath, provider.Name)
+			if nativeDeclarations == 0 {
+				return fmt.Errorf("%s: provider %s tokenEndpoint requires native authSecrets declarations", specPath, provider.Name)
 			}
 			if err := validateTokenEndpoint(*provider.TokenEndpoint); err != nil {
 				return fmt.Errorf("%s: provider %s tokenEndpoint: %w", specPath, provider.Name, err)

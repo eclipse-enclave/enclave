@@ -71,13 +71,15 @@ func Load(ctx context.Context, path, dir, lock, session string, env []model.Secr
 	if _, err := placeholderstore.LoadBindings(dir); err != nil {
 		return nil, "", fmt.Errorf("native auth bindings unavailable")
 	}
-	for _, file := range config.Provider.AuthSecrets {
-		if file.CheckOnly {
-			continue
-		}
-		_, err := placeholderstore.ReadNative(dir, file)
-		if err != nil && !isMissing(err) {
-			return nil, "", fmt.Errorf("native auth file unavailable")
+	for _, provider := range config.Providers {
+		for _, file := range provider.AuthSecrets {
+			if file.CheckOnly {
+				continue
+			}
+			_, err := placeholderstore.ReadNative(dir, file)
+			if err != nil && !isMissing(err) {
+				return nil, "", fmt.Errorf("native auth file unavailable")
+			}
 		}
 	}
 	probe, err := os.CreateTemp(dir, ".native-probe-*")

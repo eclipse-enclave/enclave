@@ -38,10 +38,10 @@ const newAccess = "synthetic-rotated-access"
 const newRefresh = "synthetic-rotated-refresh"
 
 func testConfig() Config {
-	return Config{Provider: model.ProviderConfig{Name: "anthropic", AuthSecrets: []model.AuthFileSecret{{File: ".credentials.json", Codec: "claude-credentials", Fields: []model.AuthSecretField{
+	return Config{Providers: []model.ProviderConfig{{Name: "anthropic", AuthSecrets: []model.AuthFileSecret{{File: ".credentials.json", Codec: "claude-credentials", Fields: []model.AuthSecretField{
 		{Pointer: "/claudeAiOauth/accessToken", Kind: "access", Release: "oauth"},
 		{Pointer: "/claudeAiOauth/refreshToken", Kind: "refresh"},
-	}}}, TokenEndpoint: &model.TokenEndpoint{Host: "platform.claude.com", Path: "/v1/oauth/token", Body: "json", Grants: []string{"authorization_code", "refresh_token"}, Fields: map[string]string{"access": "access_token", "refresh": "refresh_token", "expiresIn": "expires_in", "scope": "scope"}, Deny: []model.AuthEndpoint{{Host: "api.anthropic.com", Path: "/api/oauth/claude_cli/create_api_key"}}}}, Secrets: map[string]model.SecretConfig{"oauth": {Release: &model.SecretReleaseConfig{HTTP: &model.HTTPSecretReleaseConfig{Hosts: []string{"api.anthropic.com"}, Header: "Authorization", Format: "Bearer %s"}}}}}
+	}}}, TokenEndpoint: &model.TokenEndpoint{Host: "platform.claude.com", Path: "/v1/oauth/token", Body: "json", Grants: []string{"authorization_code", "refresh_token"}, Fields: map[string]string{"access": "access_token", "refresh": "refresh_token", "expiresIn": "expires_in", "scope": "scope"}, Deny: []model.AuthEndpoint{{Host: "api.anthropic.com", Path: "/api/oauth/claude_cli/create_api_key"}}}}}, Secrets: map[string]model.SecretConfig{"oauth": {Release: &model.SecretReleaseConfig{HTTP: &model.HTTPSecretReleaseConfig{Hosts: []string{"api.anthropic.com"}, Header: "Authorization", Format: "Bearer %s"}}}}}
 }
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
@@ -64,7 +64,7 @@ func fixture(t *testing.T, existing bool) (*Store, string) {
 	if err := placeholderstore.WriteNative(dir, s.file.File, []byte(data)); err != nil {
 		t.Fatal(err)
 	}
-	view, err := placeholderstore.Project(dir, t.TempDir(), "initial", model.Profile{Providers: []model.ProviderConfig{s.config.Provider}, Secrets: s.config.Secrets}, nil)
+	view, err := placeholderstore.Project(dir, t.TempDir(), "initial", model.Profile{Providers: []model.ProviderConfig{s.provider}, Secrets: s.config.Secrets}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,7 +93,7 @@ func invoke(t *testing.T, s *Store, grant, refresh string, form ...bool) (*http.
 		}
 		body, media = fields.Encode(), "application/x-www-form-urlencoded"
 	}
-	endpoint := s.config.Provider.TokenEndpoint
+	endpoint := s.provider.TokenEndpoint
 	req := httptest.NewRequest(http.MethodPost, "https://"+endpoint.Host+endpoint.Path, strings.NewReader(body))
 	req.Header.Set("Content-Type", media)
 	resp, handled := s.Intercept(req, "https")
@@ -439,7 +439,7 @@ func TestReleaseReloadsNativeAndResetDeniesBindings(t *testing.T) {
 		}
 	}
 	headers := http.Header{"Authorization": []string{"Bearer " + access}}
-	rules, err := s.Releases(context.Background(), headers)
+	rules, err := s.Releases(&http.Request{Header: headers, URL: &url.URL{Scheme: "https", Host: "api.anthropic.com"}})
 	if err != nil || len(rules) != 1 || rules[0].Value != oldAccess {
 		t.Fatal("native access not released")
 	}
@@ -448,7 +448,7 @@ func TestReleaseReloadsNativeAndResetDeniesBindings(t *testing.T) {
 	if err := placeholderstore.WriteNative(s.dir, s.file.File, mustJSON(native.Document)); err != nil {
 		t.Fatal(err)
 	}
-	rules, err = s.Releases(context.Background(), headers)
+	rules, err = s.Releases(&http.Request{Header: headers, URL: &url.URL{Scheme: "https", Host: "api.anthropic.com"}})
 	if err != nil || len(rules) != 1 || rules[0].Value != newAccess {
 		t.Fatal("stale access snapshot")
 	}
@@ -460,7 +460,7 @@ func TestReleaseReloadsNativeAndResetDeniesBindings(t *testing.T) {
 	if err := os.Remove(filepath.Join(s.dir, placeholderstore.BindingsFile)); err != nil {
 		t.Fatal(err)
 	}
-	rules, err = s.Releases(context.Background(), headers)
+	rules, err = s.Releases(&http.Request{Header: headers, URL: &url.URL{Scheme: "https", Host: "api.anthropic.com"}})
 	if err != nil || len(rules) != 0 {
 		t.Fatal("reset placeholders still bound")
 	}
@@ -578,13 +578,7 @@ func nativeFixture(t *testing.T, tool string) (*Store, model.Profile) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var provider model.ProviderConfig
-	for _, candidate := range profile.Providers {
-		if candidate.TokenEndpoint != nil {
-			provider = candidate
-		}
-	}
-	store, err := New(Config{Provider: provider, Secrets: profile.Secrets}, t.TempDir(), filepath.Join(t.TempDir(), "canonical.lock"), "codex", nil)
+	store, err := New(Config{Providers: profile.Providers, Secrets: profile.Secrets}, t.TempDir(), filepath.Join(t.TempDir(), "canonical.lock"), "codex", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -657,12 +651,12 @@ func TestCodexLoginRefreshAndCachedJWTRelease(t *testing.T) {
 		t.Fatal("refresh changed canonical API key or legacy auth mode")
 	}
 	for _, token := range []string{cached, second["access_token"].(string)} {
-		rules, err := s.Releases(context.Background(), http.Header{"Authorization": []string{"Bearer " + token}})
+		rules, err := s.Releases(&http.Request{Header: http.Header{"Authorization": []string{"Bearer " + token}}, URL: &url.URL{Scheme: "https", Host: "chatgpt.com"}})
 		if err != nil || len(rules) != 1 || rules[0].Placeholder != token || rules[0].Value != currentAccess {
 			t.Fatal("cached JWT signature did not release current access token")
 		}
 	}
-	if rules, err := s.Releases(context.Background(), http.Header{"Authorization": []string{"Bearer " + second["id_token"].(string)}}); err != nil || len(rules) != 0 {
+	if rules, err := s.Releases(&http.Request{Header: http.Header{"Authorization": []string{"Bearer " + second["id_token"].(string)}}, URL: &url.URL{Scheme: "https", Host: "chatgpt.com"}}); err != nil || len(rules) != 0 {
 		t.Fatal("id token became an API release")
 	}
 	req := httptest.NewRequest("POST", "https://auth.openai.com/oauth/token", strings.NewReader(`{"grant_type":"urn:ietf:params:oauth:grant-type:token-exchange","subject_token":"`+second["id_token"].(string)+`"}`))
@@ -716,7 +710,7 @@ func TestCodexLoginRefreshAndCachedJWTRelease(t *testing.T) {
 
 func TestFormExchangeRejectsAmbiguousFields(t *testing.T) {
 	s, _ := fixture(t, false)
-	s.config.Provider.TokenEndpoint.Body = "either"
+	s.provider.TokenEndpoint.Body = "either"
 	for _, body := range []string{"grant_type=authorization_code&code=one&code=two", "grant_type=authorization_code&code=%zz", "grant_type=authorization_code&code=ENCLAVE_SECRET_wrong"} {
 		req := httptest.NewRequest("POST", "https://platform.claude.com/v1/oauth/token", strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded; charset=utf-8")
@@ -899,7 +893,7 @@ func TestProviderMapClientsShareProjectionAndExchange(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			entry := native.Document[s.config.Provider.Name].(map[string]any)
+			entry := native.Document[s.provider.Name].(map[string]any)
 			if entry["type"] != "oauth" || entry["accountId"] != "synthetic-account" || entry["expires"] != json.Number(fmt.Sprint(s.now().UnixMilli()+600000)) || native.Document["anthropic"].(map[string]any)["key"] != api.Value {
 				t.Fatal("map commit metadata or foreign API key changed")
 			}
@@ -925,7 +919,7 @@ func TestProviderMapClientsShareProjectionAndExchange(t *testing.T) {
 			if next, _ := invoke(t, s, "refresh_token", login["refresh_token"].(string), true); next.StatusCode != 200 || calls != 2 {
 				t.Fatal("map refresh failed")
 			}
-			rules, err := s.Releases(t.Context(), http.Header{"Authorization": []string{"Bearer " + login["access_token"].(string)}})
+			rules, err := s.Releases(&http.Request{Header: http.Header{"Authorization": []string{"Bearer " + login["access_token"].(string)}}, URL: &url.URL{Scheme: "https", Host: "chatgpt.com"}})
 			if err != nil || len(rules) != 1 || rules[0].Value != current || len(rules[0].Hosts) != 1 || rules[0].Hosts[0] != "chatgpt.com" {
 				t.Fatal("cached map JWT did not release current grant at its declared host")
 			}
@@ -1007,6 +1001,189 @@ func TestProviderMapInactiveCredentialsCannotHideInMetadata(t *testing.T) {
 			}
 			if after, err := s.native(); err != nil || after.Fingerprint != native.Fingerprint {
 				t.Fatal("projection changed the canonical source", err)
+			}
+		})
+	}
+}
+
+func devicePoll(t *testing.T, router *Store, form bool) (*http.Response, map[string]any) {
+	t.Helper()
+	values := map[string]string{"grant_type": "urn:ietf:params:oauth:grant-type:device_code", "device_code": "synthetic-device-code", "client_id": "synthetic-client"}
+	body, media := mustJSON(values), "application/json"
+	if form {
+		encoded := url.Values{}
+		for key, value := range values {
+			encoded.Set(key, value)
+		}
+		body, media = []byte(encoded.Encode()), "application/x-www-form-urlencoded"
+	}
+	req := httptest.NewRequest(http.MethodPost, "https://github.com/login/oauth/access_token", strings.NewReader(string(body)))
+	req.Header.Set("Content-Type", media)
+	resp, handled := router.Intercept(req, "https")
+	if !handled {
+		t.Fatal("device exchange escaped routing")
+	}
+	defer func() { _ = resp.Body.Close() }()
+	var result map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		t.Fatal(err)
+	}
+	return resp, result
+}
+
+func TestCopilotNativeDeviceFlow(t *testing.T) {
+	for _, tool := range []string{"copilot", "opencode"} {
+		t.Run(tool, func(t *testing.T) {
+			router, profile := nativeFixture(t, tool)
+			var s *Store
+			for _, route := range router.routes {
+				if route.provider.TokenEndpoint.Host == "github.com" {
+					s = route
+				}
+			}
+			if s == nil {
+				t.Fatal("missing declared GitHub route")
+			}
+			openai := map[string]any{"type": "oauth", "access": syntheticJWT(4102444800, "retained"), "refresh": "synthetic-openai-refresh", "expires": 0}
+			if tool == "opencode" {
+				if err := placeholderstore.WriteNative(s.dir, s.file.File, mustJSON(map[string]any{"openai": openai})); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if tool == "copilot" {
+				if err := placeholderstore.WriteNative(s.dir, s.file.File, []byte(`{"authTokens":{"https://github.com:older":{"token":"gho_synthetic-prior"}},"loggedInUsers":[{"host":"https://github.com","login":"older","kind":"githubDotCom"}]}`)); err != nil {
+					t.Fatal(err)
+				}
+			}
+			currentGrant := "gho_synthetic-current"
+			polls, users := 0, 0
+			reply := map[string]any{"error": "authorization_pending"}
+			transport := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+				if req.URL.Host == "api.github.com" {
+					users++
+					if req.URL.Path != "/copilot_internal/user" || req.Method != http.MethodGet || req.Header.Get("Authorization") != "Bearer "+currentGrant {
+						t.Fatal("unexpected account lookup")
+					}
+					return response(200, http.Header{}, []byte(`{"login":"fixture-user","unknown":"strip"}`)), nil
+				}
+				if req.URL.Host != "github.com" || req.URL.Path != "/login/oauth/access_token" || req.Header.Get("Accept") != "application/json" {
+					t.Fatal("unexpected external request")
+				}
+				polls++
+				return response(200, http.Header{}, mustJSON(reply)), nil
+			})
+			for _, route := range router.routes {
+				route.transport = transport
+			}
+			for _, errorCode := range []string{"authorization_pending", "slow_down"} {
+				reply = map[string]any{"error": errorCode, "interval": 7, "unknown": "strip"}
+				resp, result := devicePoll(t, router, false)
+				if resp.StatusCode != 200 || result["error"] != errorCode || result["interval"] != float64(7) || result["unknown"] != nil || users != 0 {
+					t.Fatal("device poll did not preserve the tokenless 200 error")
+				}
+			}
+			for _, interval := range []any{"bad", -1, 4000} {
+				reply = map[string]any{"error": "slow_down", "interval": interval}
+				if resp, _ := devicePoll(t, router, true); resp.StatusCode != 502 {
+					t.Fatal("invalid poll interval accepted")
+				}
+			}
+			reply = map[string]any{"access_token": "gho_synthetic-current", "token_type": "bearer", "scope": "read:user", "extra": "gho_synthetic-current"}
+			resp, result := devicePoll(t, router, true)
+			placeholder, _ := result["access_token"].(string)
+			if resp.StatusCode != 200 || !strings.HasPrefix(placeholder, "gho_") || !strings.Contains(placeholder, model.SecretPlaceholderMarker) || result["extra"] != nil || strings.Contains(string(mustJSON(result)), "gho_synthetic-current") {
+				t.Fatal("device success did not substitute its grant", result)
+			}
+			if users != map[string]int{"copilot": 1, "opencode": 0}[tool] {
+				t.Fatal("account lookup did not follow the native layout")
+			}
+			native, err := s.native()
+			if err != nil {
+				t.Fatal(err)
+			}
+			view, err := placeholderstore.Project(s.dir, t.TempDir(), "copilot", profile, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			data, err := os.ReadFile(filepath.Join(view.Dir, s.file.File))
+			if err != nil || strings.Contains(string(data), "gho_synthetic-current") {
+				t.Fatal("raw grant reached native view", err)
+			}
+			var doc map[string]any
+			if err := json.Unmarshal(data, &doc); err != nil {
+				t.Fatal(err)
+			}
+			if tool == "copilot" {
+				tokens := doc["authTokens"].(map[string]any)
+				for _, suffix := range []string{"", ":github"} {
+					if tokens["https://github.com:fixture-user"+suffix].(map[string]any)["token"] != placeholder {
+						t.Fatal("native account alias lost the stable placeholder")
+					}
+				}
+				if native.Document["storeTokenPlaintext"] != true || native.Document["lastLoggedInUser"].(map[string]any)["login"] != "fixture-user" {
+					t.Fatal("native account metadata incomplete")
+				}
+			} else {
+				entry := doc["github-copilot"].(map[string]any)
+				if entry["access"] != placeholder || entry["refresh"] != placeholder || entry["expires"] != float64(0) || string(mustJSON(native.Document["openai"])) != string(mustJSON(openai)) {
+					t.Fatal("OpenCode alias or other provider grant changed")
+				}
+			}
+			if ops, err := placeholderstore.ClassifyNative(view.Dir, "/auth", profile, view.Bindings, nil, false); err != nil || len(ops) != 1 {
+				t.Fatal("shared native file did not have exactly one operation", err)
+			}
+			if tool == "copilot" && len(native.Document["loggedInUsers"].([]any)) != 2 {
+				t.Fatal("login discarded the older native account")
+			}
+			reflected := "gho_synthetic-prior"
+			if tool == "opencode" {
+				reflected = "synthetic-openai-refresh"
+			}
+			currentGrant = "gho_synthetic-rotated"
+			reply = map[string]any{"access_token": currentGrant, "scope": reflected}
+			if denied, _ := devicePoll(t, router, false); denied.StatusCode != 502 {
+				t.Fatal("credential from another native slot escaped in scope")
+			}
+			current, err := s.native()
+			if err != nil {
+				t.Fatal(err)
+			}
+			committed := false
+			for _, value := range current.Values {
+				committed = committed || value == currentGrant
+			}
+			if !committed {
+				t.Fatal("contained scope lost the valid consumed grant")
+			}
+			for _, target := range []string{"https://api.github.com/copilot_internal/user", "https://api.github.com/user", "https://api.github.com/copilot_internal/v2/token", "https://api.github.com/copilot_internal/user?extra=1", "https://api.github.com/copilot_internal/user/"} {
+				req := httptest.NewRequest(http.MethodGet, target, nil)
+				req.Header.Set("Authorization", "Bearer "+placeholder)
+				rules, err := router.Releases(req)
+				if err != nil {
+					t.Fatal(err)
+				}
+				matched := false
+				for _, rule := range rules {
+					matched = matched || (rule.Placeholder == placeholder && rule.Value == currentGrant)
+				}
+				if matched != (target == "https://api.github.com/copilot_internal/user") {
+					t.Fatal("native GitHub API path guard changed", target)
+				}
+			}
+			before := polls
+			for _, target := range []string{"https://github.com/login/oauth/authorize", "https://github.com/LOGIN/OAUTH/ACCESS_TOKEN", "https://github.com/login/oauth/access_token/"} {
+				req := httptest.NewRequest(http.MethodPost, target, nil)
+				if denied, handled := router.Intercept(req, "https"); !handled || denied.StatusCode != 403 || polls != before {
+					t.Fatal("alternate OAuth path reached upstream")
+				}
+			}
+			if err := os.Remove(filepath.Join(s.dir, placeholderstore.BindingsFile)); err != nil {
+				t.Fatal(err)
+			}
+			req := httptest.NewRequest(http.MethodGet, "https://api.github.com/copilot_internal/user", nil)
+			req.Header.Set("Authorization", "Bearer "+placeholder)
+			if rules, err := router.Releases(req); err != nil || len(rules) != 0 {
+				t.Fatal("reset native alias still releases a grant", err)
 			}
 		})
 	}

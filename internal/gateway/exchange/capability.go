@@ -24,7 +24,7 @@ import (
 )
 
 const CapabilityFile = "native-auth-ready.json"
-const capabilityVersion = "native-auth-v1"
+const capabilityVersion = "native-auth-v2"
 
 type capability struct {
 	Version      string `json:"version"`
@@ -68,12 +68,16 @@ func Load(ctx context.Context, path, dir, lock, session string, env []model.Secr
 		return nil, "", fmt.Errorf("native auth lock unavailable")
 	}
 	defer release()
-	if _, _, err := store.load(); err != nil {
+	if _, err := placeholderstore.LoadBindings(dir); err != nil {
 		return nil, "", fmt.Errorf("native auth bindings unavailable")
 	}
 	for _, file := range config.Provider.AuthSecrets {
-		if _, err := placeholderstore.ReadNative(dir, file); err != nil && !isMissing(err) {
+		snapshot, err := placeholderstore.ReadNative(dir, file)
+		if err != nil && !isMissing(err) {
 			return nil, "", fmt.Errorf("native auth file unavailable")
+		}
+		if file.File == store.file.File {
+			store.seenFingerprint = snapshot.Fingerprint
 		}
 	}
 	probe, err := os.CreateTemp(dir, ".native-probe-*")

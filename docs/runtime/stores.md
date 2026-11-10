@@ -300,29 +300,19 @@ stopped ephemeral containers, and per-session networks whose session is gone
 
 ## Internal native-auth exchanges
 
-This path is not enabled for workloads. Claude's declared OAuth endpoint is
-intercepted before ordinary forwarding. Under the canonical hoststore lock, the
-gateway reloads native files and `bindings.json`, then durably records an exchange
-intent before dispatching once (30-second bound, no redirects or HTTP retries).
-It commits tokens by durable native-file rename before updating bindings.
-Existing UID, GID and mode are preserved. Bindings contain placeholders and
-non-secret generation, expiry and recovery metadata, never raw tokens.
+This path is unavailable to workloads. Claude exchanges take the canonical
+hoststore lock across reload, one bounded upstream dispatch and durable commit.
+Native tokens are written before stable placeholder bindings; UID/GID/mode are
+preserved. Bindings contain identifiers, never tokens or exchange history.
 
-Refresh replay reads current native values only when the exact native-file
-content matches the committed generation and its absolute expiry remains valid.
-Every content change invalidates replay. Missing or malformed `expires_in` does
-not discard a consumed grant: tokens are committed without expiry or replay.
-Only explicitly non-consuming OAuth 400 errors clear a failed refresh; ambiguous
-failures and orphan intents require a new login. The gateway scans its rebuilt,
-allowlisted response body and headers before returning any bytes.
+Each gateway remembers only the native fingerprint last returned to its client.
+An overlapping sibling refresh receives the newer unexpired native grant once;
+the next refresh dispatches normally. There is no replay horizon or persisted
+recovery fence. A lost provider reply may require a fresh login. Missing or
+malformed expiry retains consumed tokens without enabling deduplication.
+Only allowlisted, placeholder-bearing responses pass containment checks.
 
-API release reads current access values; refresh and ID fields are never API
-header credentials. `--reset-auth` also removes the canonical bindings under the
-store lock, invalidating surviving placeholders without refusing a live session.
-
-A native gateway runs its proxy as the host store owner, including under
-rootless Podman's existing `keep-id` mapping. It does not change canonical
-ownership/modes or add capabilities. A fresh, workload-inaccessible runtime
-directory holds readiness tied to the session and the configuration actually
-loaded by the proxy. Missing or mismatched readiness stops startup, including
-with an older gateway image and `--no-rebuild`.
+The proxy runs as the store owner without new capabilities or canonical
+ownership/mode changes. A fresh workload-inaccessible readiness directory binds
+startup to the session and the configuration actually loaded by the proxy.
+Missing or mismatched readiness refuses even an older image with `--no-rebuild`.

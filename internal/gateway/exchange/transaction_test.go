@@ -64,6 +64,11 @@ func fixture(t *testing.T, existing bool) (*Store, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	native, err := s.native()
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.seenFingerprint = native.Fingerprint
 	for _, b := range view.Bindings.Bindings {
 		if b.Kind == "refresh" {
 			return s, b.Placeholder
@@ -111,47 +116,76 @@ func tokenResponse(ttl string) *http.Response {
 	return resp
 }
 
-func TestLoginCommitReplayAndExternalWriterInvalidation(t *testing.T) {
+func TestFirstLoginCreatesNativeGrantAndStableBindings(t *testing.T) {
 	s, _ := fixture(t, false)
-	var calls int
-	s.transport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
-		calls++
-		bindings, err := placeholderstore.LoadBindings(s.dir)
-		if err != nil || bindings.Providers["anthropic"].Inflight == nil {
-			t.Fatal("dispatch preceded durable intent")
+	s.transport = roundTripFunc(func(*http.Request) (*http.Response, error) { return tokenResponse(`,"expires_in":600`), nil })
+	resp, object := invoke(t, s, "authorization_code", "")
+	if resp.StatusCode != 200 || object["extra"] != nil || resp.Header.Get("Set-Cookie") != "" || len(resp.Trailer) != 0 {
+		t.Fatal("first login response not sanitized")
+	}
+	for _, field := range []string{"access_token", "refresh_token"} {
+		value, ok := object[field].(string)
+		if !ok || !strings.Contains(value, model.SecretPlaceholderMarker) {
+			t.Fatal("first login did not return bound placeholders")
 		}
+	}
+	native, err := s.native()
+	if err != nil || native.Values["/claudeAiOauth/refreshToken"] != newRefresh {
+		t.Fatal("first consumed grant not committed")
+	}
+	bindings, err := placeholderstore.LoadBindings(s.dir)
+	if err != nil || len(bindings.Bindings) != 2 {
+		t.Fatal("first login bindings not committed after native")
+	}
+}
+
+func TestSiblingDedupDoesNotPreventExplicitEarlyRefresh(t *testing.T) {
+	first, refresh := fixture(t, true)
+	sibling, err := New(first.config, first.dir, first.lockPath, "sibling", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sibling.now = first.now
+	sibling.seenFingerprint = first.seenFingerprint
+	calls := 0
+	transport := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		calls++
 		if req.GetBody != nil || req.Header.Get("Accept-Encoding") != "identity" || req.URL.String() != "https://platform.claude.com/v1/oauth/token" {
-			t.Fatal("unbounded/replayable dispatch")
+			t.Fatal("replayable or wrong dispatch")
 		}
 		return tokenResponse(`,"expires_in":600`), nil
 	})
-	resp, object := invoke(t, s, "authorization_code", "")
+	first.transport = transport
+	sibling.transport = transport
+	resp, object := invoke(t, first, "refresh_token", refresh)
 	if resp.StatusCode != 200 || object["expires_in"] != float64(600) || object["extra"] != nil || resp.Header.Get("Set-Cookie") != "" || len(resp.Trailer) != 0 {
-		t.Fatal("login response not rebuilt from allowlist")
+		t.Fatal("token response not rebuilt from allowlist")
 	}
-	refresh := object["refresh_token"].(string)
-	native, err := s.native()
-	if err != nil || native.Values["/claudeAiOauth/refreshToken"] != newRefresh {
-		t.Fatal("rotated grant not committed")
+	later := first.now().Add(40 * time.Second)
+	sibling.now = func() time.Time { return later }
+	resp, object = invoke(t, sibling, "refresh_token", refresh)
+	if resp.StatusCode != 200 || calls != 1 || object["expires_in"] != float64(560) {
+		t.Fatal("sibling did not receive current native grant without a second rotation")
 	}
-	later := s.now().Add(40 * time.Second)
-	s.now = func() time.Time { return later }
-	resp, replayed := invoke(t, s, "refresh_token", refresh)
-	if resp.StatusCode != 200 || calls != 1 || replayed["expires_in"] != float64(560) || replayed["refresh_token"] != refresh {
-		t.Fatal("same-generation replay not authoritative")
+	if resp, _ := invoke(t, sibling, "refresh_token", refresh); resp.StatusCode != 200 || calls != 2 {
+		t.Fatal("dedup became a pre-expiry replay horizon")
 	}
-	// A native writer changes only metadata. The content-keyed replay still drops.
-	native.Document["externalMetadata"] = true
-	if err := placeholderstore.WriteNative(s.dir, s.file.File, mustJSON(native.Document)); err != nil {
+	// Any external native change is observed once; the following refresh dispatches.
+	native, err := sibling.native()
+	if err != nil {
 		t.Fatal(err)
 	}
-	if resp, _ := invoke(t, s, "refresh_token", refresh); resp.StatusCode != 200 || calls != 2 {
-		t.Fatal("external write failed to invalidate replay")
+	native.Document["externalMetadata"] = true
+	if err := placeholderstore.WriteNative(first.dir, first.file.File, mustJSON(native.Document)); err != nil {
+		t.Fatal(err)
 	}
-	now := later.Add(601 * time.Second)
-	s.now = func() time.Time { return now }
-	if resp, _ := invoke(t, s, "refresh_token", refresh); resp.StatusCode != 200 || calls != 3 {
-		t.Fatal("expired grant replayed")
+	if resp, _ := invoke(t, sibling, "refresh_token", refresh); resp.StatusCode != 200 || calls != 2 {
+		t.Fatal("external native generation not served")
+	}
+	expired := later.Add(601 * time.Second)
+	sibling.now = func() time.Time { return expired }
+	if resp, _ := invoke(t, sibling, "refresh_token", refresh); resp.StatusCode != 200 || calls != 3 {
+		t.Fatal("expired native grant deduplicated")
 	}
 }
 
@@ -162,6 +196,7 @@ func TestConcurrentGatewaysDispatchOnlyOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	second.now = first.now
+	second.seenFingerprint = first.seenFingerprint
 	var calls atomic.Int32
 	transport := roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		calls.Add(1)
@@ -191,21 +226,21 @@ func TestConcurrentGatewaysDispatchOnlyOnce(t *testing.T) {
 	}
 }
 
-func TestRefreshFailureClassificationAndLoginRecovery(t *testing.T) {
+func TestRefreshErrorsAreProjectedWithoutPersistentRecoveryState(t *testing.T) {
 	cases := []struct {
-		name      string
-		status    int
-		body      string
-		uncertain bool
+		name   string
+		status int
+		body   string
+		want   int
 	}{
-		{"nonconsuming", 400, `{"error":"invalid_request"}`, false},
-		{"consumed", 400, `{"error":"invalid_grant"}`, true},
-		{"server", 503, `{"error":"temporarily_unavailable"}`, true},
-		{"pending", 200, `{"error":"authorization_pending"}`, false},
-		{"pending-with-token", 200, `{"error":"authorization_pending","access_token":"synthetic-new-unexpected"}`, true},
-		{"unknown-success", 200, `{"something":"else"}`, true},
-		{"malformed", 200, `not-json`, true},
-		{"duplicate", 200, `{"access_token":"one","access_token":"two"}`, true},
+		{"invalid-request", 400, `{"error":"invalid_request"}`, 400},
+		{"invalid-grant", 400, `{"error":"invalid_grant"}`, 400},
+		{"server", 503, `{"error":"temporarily_unavailable"}`, 503},
+		{"pending-not-Claude", 200, `{"error":"authorization_pending"}`, 502},
+		{"pending-with-token", 200, `{"error":"authorization_pending","access_token":"synthetic-unexpected"}`, 502},
+		{"unknown-success", 200, `{"something":"else"}`, 502},
+		{"malformed", 200, `not-json`, 502},
+		{"duplicate", 200, `{"access_token":"one","access_token":"two"}`, 502},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -215,38 +250,22 @@ func TestRefreshFailureClassificationAndLoginRecovery(t *testing.T) {
 				calls++
 				return response(tc.status, http.Header{}, []byte(tc.body)), nil
 			})
+			if resp, _ := invoke(t, s, "refresh_token", refresh); resp.StatusCode != tc.want {
+				t.Fatal("wrong sanitized provider result")
+			}
+			native, err := s.native()
+			if err != nil || native.Values["/claudeAiOauth/refreshToken"] != oldRefresh {
+				t.Fatal("failed exchange overwrote grant")
+			}
 			invoke(t, s, "refresh_token", refresh)
-			b, err := placeholderstore.LoadBindings(s.dir)
-			if err != nil {
-				t.Fatal(err)
-			}
-			state := b.Providers["anthropic"]
-			if state.Uncertain != tc.uncertain || state.Inflight != nil {
-				t.Fatal("incorrect durable failure state")
-			}
-			native, _ := s.native()
-			if native.Values["/claudeAiOauth/refreshToken"] != oldRefresh {
-				t.Fatal("failure overwrote canonical grant")
-			}
-			if tc.uncertain {
-				resp, _ := invoke(t, s, "refresh_token", refresh)
-				if resp.StatusCode != 503 || calls != 1 {
-					t.Fatal("uncertain refresh dispatched again")
-				}
-			}
-			s.transport = roundTripFunc(func(*http.Request) (*http.Response, error) { return tokenResponse(`,"expires_in":600`), nil })
-			if resp, _ := invoke(t, s, "authorization_code", ""); resp.StatusCode != 200 {
-				t.Fatal("fresh login did not recover")
-			}
-			b, _ = placeholderstore.LoadBindings(s.dir)
-			if b.Providers["anthropic"].Uncertain {
-				t.Fatal("login left uncertainty")
+			if calls != 2 {
+				t.Fatal("provider error was replaced by a persistent gateway fence")
 			}
 		})
 	}
 }
 
-func TestInvalidExpiryCommitsWithoutReplay(t *testing.T) {
+func TestInvalidExpiryCommitsWithoutExpiry(t *testing.T) {
 	for _, ttl := range []string{"", `,"expires_in":null`, `,"expires_in":"600"`, `,"expires_in":0`, `,"expires_in":-1`, `,"expires_in":1.2`} {
 		t.Run(ttl, func(t *testing.T) {
 			s, refresh := fixture(t, true)
@@ -256,10 +275,9 @@ func TestInvalidExpiryCommitsWithoutReplay(t *testing.T) {
 			if resp.StatusCode != 200 || object["expires_in"] != nil || object["token_type"] != "Bearer" {
 				t.Fatal("invalid expiry lost tokens or leaked TTL")
 			}
-			b, _ := placeholderstore.LoadBindings(s.dir)
-			state := b.Providers["anthropic"]
 			native, _ := s.native()
-			if state.Replay != nil || state.ExpiresAt != nil || native.Values["/claudeAiOauth/refreshToken"] != newRefresh {
+			_, hasExpiry := native.Document["claudeAiOauth"].(map[string]any)["expiresAt"]
+			if hasExpiry || native.Values["/claudeAiOauth/refreshToken"] != newRefresh {
 				t.Fatal("invalid TTL cached or grant lost")
 			}
 			invoke(t, s, "refresh_token", refresh)
@@ -301,10 +319,7 @@ func TestContainmentEncodingAndTimeoutFailClosed(t *testing.T) {
 				if native.Values["/claudeAiOauth/refreshToken"] != oldRefresh {
 					t.Fatal("unparseable exchange wrote native grant")
 				}
-				b, _ := placeholderstore.LoadBindings(s.dir)
-				if !b.Providers["anthropic"].Uncertain {
-					t.Fatal("ambiguous exchange not uncertain")
-				}
+
 			}
 		})
 	}
@@ -342,43 +357,83 @@ func TestNoRedirectRetryOrExternalNativeOverwrite(t *testing.T) {
 	}
 }
 
-func TestDurableIntentSurvivesProcessDeath(t *testing.T) {
+func TestRefreshLockSurvivesRealProcessKill(t *testing.T) {
 	if dir := os.Getenv("ENCLAVE_EXCHANGE_CRASH_FIXTURE"); dir != "" {
 		s, err := New(testConfig(), dir, filepath.Join(dir, "test.lock"), "crashing-gateway", nil)
 		if err != nil {
 			os.Exit(71)
 		}
-		s.transport = roundTripFunc(func(*http.Request) (*http.Response, error) {
-			b, e := placeholderstore.LoadBindings(dir)
-			if e != nil || b.Providers["anthropic"].Inflight == nil {
-				os.Exit(72)
+		bindings, err := placeholderstore.LoadBindings(dir)
+		if err != nil {
+			os.Exit(72)
+		}
+		refresh := ""
+		for _, b := range bindings.Bindings {
+			if b.Kind == "refresh" {
+				refresh = b.Placeholder
 			}
-			os.Exit(73)
-			return nil, errors.New("unreachable")
+		}
+		s.transport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			if err := os.WriteFile(filepath.Join(dir, "dispatched"), nil, 0o600); err != nil {
+				os.Exit(73)
+			}
+			<-req.Context().Done()
+			return nil, req.Context().Err()
 		})
-		invoke(t, s, "authorization_code", "")
+		invoke(t, s, os.Getenv("ENCLAVE_EXCHANGE_CRASH_GRANT"), refresh)
 		os.Exit(74)
 	}
-	s, refresh := fixture(t, true)
-	cmd := exec.Command(os.Args[0], "-test.run=^TestDurableIntentSurvivesProcessDeath$") // #nosec G204 -- own test binary, fixture only.
-	cmd.Env = append(os.Environ(), "ENCLAVE_EXCHANGE_CRASH_FIXTURE="+s.dir)
-	err := cmd.Run()
-	var exit *exec.ExitError
-	if !errors.As(err, &exit) || exit.ExitCode() != 73 {
-		t.Fatalf("crash barrier not reached: %v", err)
-	}
-	// The fixture's canonical lock is shared with the killed gateway.
-	s.lockPath = filepath.Join(s.dir, "test.lock")
-	s.transport = roundTripFunc(func(*http.Request) (*http.Response, error) {
-		t.Fatal("recovered refresh dispatched")
-		return nil, errors.New("unexpected")
-	})
-	if resp, _ := invoke(t, s, "refresh_token", refresh); resp.StatusCode != 503 {
-		t.Fatal("orphan intent did not fail closed")
-	}
-	b, _ := placeholderstore.LoadBindings(s.dir)
-	if !b.Providers["anthropic"].Uncertain || b.Providers["anthropic"].Inflight != nil {
-		t.Fatal("orphan recovery not durable")
+	for _, grant := range []string{"refresh_token", "authorization_code"} {
+		t.Run(grant, func(t *testing.T) {
+			s, refresh := fixture(t, true)
+			s.lockPath = filepath.Join(s.dir, "test.lock")
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestRefreshLockSurvivesRealProcessKill$") // #nosec G204 -- own test binary, synthetic fixture only.
+			cmd.Env = append(os.Environ(), "ENCLAVE_EXCHANGE_CRASH_FIXTURE="+s.dir, "ENCLAVE_EXCHANGE_CRASH_GRANT="+grant)
+			if err := cmd.Start(); err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = cmd.Process.Kill(); _ = cmd.Wait() }()
+			for {
+				if _, err := os.Stat(filepath.Join(s.dir, "dispatched")); err == nil {
+					break
+				}
+				select {
+				case <-ctx.Done():
+					t.Fatal("child missed dispatch barrier")
+				case <-time.After(5 * time.Millisecond):
+				}
+			}
+			if release, ok, err := util.TryAcquireFileLock(s.lockPath); err != nil || ok {
+				if release != nil {
+					release()
+				}
+				t.Fatal("child did not hold canonical lock across dispatch")
+			}
+			if err := cmd.Process.Kill(); err != nil {
+				t.Fatal(err)
+			}
+			if err := cmd.Wait(); err == nil {
+				t.Fatal("child did not die at the dispatch barrier")
+			}
+			calls := 0
+			s.transport = roundTripFunc(func(*http.Request) (*http.Response, error) {
+				calls++
+				if grant == "refresh_token" {
+					return response(400, http.Header{}, []byte(`{"error":"invalid_grant"}`)), nil
+				}
+				return tokenResponse(`,"expires_in":600`), nil
+			})
+			resp, _ := invoke(t, s, "refresh_token", refresh)
+			want := 200
+			if grant == "refresh_token" {
+				want = 400
+			}
+			if resp.StatusCode != want || calls != 1 {
+				t.Fatal("killed gateway left a lock or poisoned an unchanged login grant")
+			}
+		})
 	}
 }
 
@@ -441,9 +496,9 @@ func TestCanonicalLockDeadlinePreventsDispatch(t *testing.T) {
 func TestNativeCommitPrecedesBindingCommitFailure(t *testing.T) {
 	s, refresh := fixture(t, true)
 	bindingPath := filepath.Join(s.dir, placeholderstore.BindingsFile)
-	savedIntent := filepath.Join(s.dir, "saved-intent")
+	savedBindings := filepath.Join(s.dir, "saved-bindings")
 	s.transport = roundTripFunc(func(*http.Request) (*http.Response, error) {
-		if err := os.Rename(bindingPath, savedIntent); err != nil {
+		if err := os.Rename(bindingPath, savedBindings); err != nil {
 			t.Fatal(err)
 		}
 		if err := os.Mkdir(bindingPath, 0o700); err != nil {
@@ -461,15 +516,15 @@ func TestNativeCommitPrecedesBindingCommitFailure(t *testing.T) {
 	if err := os.Remove(bindingPath); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Rename(savedIntent, bindingPath); err != nil {
+	if err := os.Rename(savedBindings, bindingPath); err != nil {
 		t.Fatal(err)
 	}
 	s.transport = roundTripFunc(func(*http.Request) (*http.Response, error) {
-		t.Fatal("partially committed exchange retried")
+		t.Fatal("partially committed exchange redispatched")
 		return nil, errors.New("unexpected")
 	})
-	if resp, _ := invoke(t, s, "refresh_token", refresh); resp.StatusCode != 503 {
-		t.Fatal("native-first interruption did not recover uncertain")
+	if resp, _ := invoke(t, s, "refresh_token", refresh); resp.StatusCode != 200 {
+		t.Fatal("native-first interruption lost recoverable native grant")
 	}
 }
 

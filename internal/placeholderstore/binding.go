@@ -19,7 +19,6 @@ import (
 	"os"
 	"slices"
 	"strings"
-	"time"
 
 	"enclave/internal/model"
 )
@@ -29,9 +28,8 @@ const maxFileBytes = 1 << 20
 
 // Bindings contains only placeholder identifiers, never real credential values.
 type Bindings struct {
-	Schema    int                      `json:"schema"`
-	Bindings  []Binding                `json:"bindings"`
-	Providers map[string]ExchangeState `json:"providers,omitempty"`
+	Schema   int       `json:"schema"`
+	Bindings []Binding `json:"bindings"`
 }
 
 type Binding struct {
@@ -40,29 +38,6 @@ type Binding struct {
 	Pointer     string `json:"pointer"`
 	Kind        string `json:"kind"`
 	Placeholder string `json:"placeholder,omitempty"`
-}
-
-// ExchangeState holds recovery and non-secret replay metadata. Tokens stay only
-// in the native file identified by Fingerprint.
-type ExchangeState struct {
-	Generation  uint64          `json:"generation"`
-	Fingerprint string          `json:"fingerprint,omitempty"`
-	ExpiresAt   *time.Time      `json:"expiresAt,omitempty"`
-	Replay      *ReplayFields   `json:"replay,omitempty"`
-	Inflight    *ExchangeIntent `json:"inflight,omitempty"`
-	Uncertain   bool            `json:"uncertain,omitempty"`
-}
-
-type ReplayFields struct {
-	Scope     *string `json:"scope,omitempty"`
-	TokenType *string `json:"tokenType,omitempty"`
-}
-
-type ExchangeIntent struct {
-	Generation uint64    `json:"generation"`
-	StartedAt  time.Time `json:"startedAt"`
-	Login      bool      `json:"login"`
-	Session    string    `json:"session"`
 }
 
 func (b Binding) Matches(value string) bool {

@@ -21,7 +21,7 @@ func TestCapabilityUsesLoadedConfigurationAndSession(t *testing.T) {
 		t.Fatal(err)
 	}
 	loaded, digest, err := Load(context.Background(), configPath, s.dir, s.lockPath, s.session, nil)
-	if err != nil || loaded == nil || digest == "" {
+	if err != nil || loaded == nil || digest == "" || loaded.seenFingerprint != s.seenFingerprint {
 		t.Fatal("valid native exchange could not load")
 	}
 	runtime := t.TempDir()
@@ -32,6 +32,16 @@ func TestCapabilityUsesLoadedConfigurationAndSession(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := CheckCapability(runtime, digest, s.session); err != nil {
+		t.Fatal(err)
+	}
+	legacy := mustJSON(capability{Version: "native-auth-v1", ConfigDigest: digest, Session: s.session})
+	if err := os.WriteFile(filepath.Join(runtime, CapabilityFile), legacy, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if CheckCapability(runtime, digest, s.session) == nil {
+		t.Fatal("old UID-bypass capability epoch accepted")
+	}
+	if err := WriteCapability(runtime, digest, s.session); err != nil {
 		t.Fatal(err)
 	}
 	if CheckCapability(runtime, digest, "different-session") == nil {

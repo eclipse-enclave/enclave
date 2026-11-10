@@ -21,21 +21,6 @@ import (
 	"enclave/internal/model"
 )
 
-func (b *Backend) advanceRequestMode(req backend.Request, state, id string) {
-	if req.Mode == nil {
-		return
-	}
-	dir, err := b.storage.storeDir(req.Mode.ConfigStore, backend.StoreKindConfig)
-	if err == nil {
-		err = hoststore.AdvanceMode(b.opts.Host.Home, dir, req.Mode.HolderID, state, id, "", req.Detached)
-	}
-	if err != nil {
-		// The pending/live record still excludes opposite-mode starts. Never
-		// clear it just because an update or an engine inspection failed.
-		logx.Warnf("Session auth-mode reservation retained: %v", err)
-	}
-}
-
 func (b *Backend) finalizingRequestMode(req backend.Request, id string) {
 	if req.Mode == nil {
 		return
@@ -48,7 +33,7 @@ func (b *Backend) finalizingRequestMode(req backend.Request, id string) {
 	defer cancel()
 	info, err := dockercmd.ContainerInspect(ctx, ref)
 	if dockercmd.IsNotFound(err) || err == nil && info.State != nil && !info.State.Running {
-		b.advanceRequestMode(req, "finalizing", id)
+		hoststore.AdvanceRequestMode(b.opts.Host.Home, req, "finalizing", id)
 	} else {
 		logx.Warnf("Session %s auth-mode reservation retained: container exit could not be confirmed", req.Session.Name)
 	}
@@ -71,7 +56,7 @@ func (b *Backend) beginContainerModeFinalization(ctx context.Context, name strin
 		return noop, true, nil
 	}
 	var selected string
-	reconcile = true
+	reconcile = false
 	err = hoststore.WithModeHolders(b.opts.Host.Home, dir, func(holders *[]hoststore.ModeHolder) error {
 		for i := range *holders {
 			holder := &(*holders)[i]
@@ -86,6 +71,7 @@ func (b *Backend) beginContainerModeFinalization(ctx context.Context, name strin
 				reconcile = false
 				return nil
 			}
+			reconcile = true
 			holder.State, holder.UpdatedAt, holder.OwnerPID = "finalizing", time.Now().UTC(), os.Getpid()
 			selected = holder.ID
 			break
@@ -99,7 +85,7 @@ func (b *Backend) beginContainerModeFinalization(ctx context.Context, name strin
 		if selected == "" {
 			return nil
 		}
-		return hoststore.AdvanceMode(b.opts.Host.Home, dir, selected, "ended", "", "", false)
+		return hoststore.AdvanceMode(b.opts.Host.Home, dir, selected, "ended", "", false)
 	}, reconcile, nil
 }
 

@@ -40,10 +40,10 @@ func (r *Runtime) endSessionMode(mode *backend.SessionMode, unstarted bool) {
 	}
 	dir, err := hoststore.ResolveDir(r.host.Home, mode.ConfigStore, backend.StoreKindConfig)
 	if err == nil && unstarted {
-		err = hoststore.AdvanceMode(r.host.Home, dir, mode.HolderID, "finalizing", "", "", false)
+		err = hoststore.AdvanceMode(r.host.Home, dir, mode.HolderID, "finalizing", "", false)
 	}
 	if err == nil {
-		err = hoststore.AdvanceMode(r.host.Home, dir, mode.HolderID, "ended", "", "", false)
+		err = hoststore.AdvanceMode(r.host.Home, dir, mode.HolderID, "ended", "", false)
 	}
 	if err != nil {
 		logx.Warnf("Session auth-mode reservation retained: %v", err)

@@ -31,7 +31,7 @@ func TestModeReservationMatrix(t *testing.T) {
 					if state == "pending" {
 						break
 					}
-					if err := AdvanceMode(home, dir, first.ID, next, "cid", "gid", false); err != nil {
+					if err := AdvanceMode(home, dir, first.ID, next, "cid", false); err != nil {
 						t.Fatal(err)
 					}
 					if state == next {
@@ -96,18 +96,18 @@ func TestModeTransitionsAndDetachedHandoff(t *testing.T) {
 	if err := ReserveMode(home, dir, holder, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := AdvanceMode(home, dir, holder.ID, "ended", "", "", false); err == nil {
+	if err := AdvanceMode(home, dir, holder.ID, "ended", "", false); err == nil {
 		t.Fatal("pending skipped finalization")
 	}
-	if err := AdvanceMode(home, dir, holder.ID, "live", "cid", "gid", true); err != nil {
+	if err := AdvanceMode(home, dir, holder.ID, "live", "cid", true); err != nil {
 		t.Fatal(err)
 	}
-	if err := AdvanceMode(home, dir, holder.ID, "ended", "", "", false); err == nil {
+	if err := AdvanceMode(home, dir, holder.ID, "ended", "", false); err == nil {
 		t.Fatal("live skipped finalization")
 	}
 	if err := WithModeHolders(home, dir, func(holders *[]ModeHolder) error {
 		got := (*holders)[0]
-		if got.OwnerPID != 0 || got.ContainerID != "cid" || got.GatewayID != "gid" {
+		if got.OwnerPID != 0 || got.ContainerID != "cid" {
 			t.Fatalf("detached handoff: %+v", got)
 		}
 		return nil
@@ -115,11 +115,11 @@ func TestModeTransitionsAndDetachedHandoff(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, state := range []string{"finalizing", "ended"} {
-		if err := AdvanceMode(home, dir, holder.ID, state, "", "", false); err != nil {
+		if err := AdvanceMode(home, dir, holder.ID, state, "", false); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if err := AdvanceMode(home, dir, holder.ID, "live", "", "", false); err == nil {
+	if err := AdvanceMode(home, dir, holder.ID, "live", "", false); err == nil {
 		t.Fatal("ended holder resurrected")
 	}
 	if !ModeOwnerAlive(os.Getpid()) || ModeOwnerAlive(0) {

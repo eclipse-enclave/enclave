@@ -39,11 +39,19 @@ func (b *Backend) finalizingRequestMode(req backend.Request, id string) {
 	}
 }
 
+type modeFinalizer func(ended bool) error
+
+func (finish modeFinalizer) release() {
+	if err := finish(false); err != nil {
+		logx.Warnf("Failed to relinquish auth finalization: %v", err)
+	}
+}
+
 // beginContainerModeFinalization pins the holder to the inspected container ID.
 // Stop/Remove cannot release a foreground owner's reservation: that process
 // may still run its deferred auth sync after the engine reports the exit.
-func (b *Backend) beginContainerModeFinalization(ctx context.Context, name string) (finish func() error, reconcile bool, err error) {
-	noop := func() error { return nil }
+func (b *Backend) beginContainerModeFinalization(ctx context.Context, name string) (finish modeFinalizer, reconcile bool, err error) {
+	noop := func(bool) error { return nil }
 	info, err := dockercmd.ContainerInspect(ctx, name)
 	if dockercmd.IsNotFound(err) {
 		return noop, false, nil
@@ -81,11 +89,28 @@ func (b *Backend) beginContainerModeFinalization(ctx context.Context, name strin
 	if err != nil {
 		return nil, false, fmt.Errorf("reserve auth finalization: %w", err)
 	}
-	return func() error {
+	return func(ended bool) error {
 		if selected == "" {
 			return nil
 		}
-		return hoststore.AdvanceMode(b.opts.Host.Home, dir, selected, "ended", "", false)
+		var err error
+		if ended {
+			err = hoststore.AdvanceMode(b.opts.Host.Home, dir, selected, "ended", "", false)
+		} else {
+			err = hoststore.WithModeHolders(b.opts.Host.Home, dir, func(holders *[]hoststore.ModeHolder) error {
+				for i := range *holders {
+					holder := &(*holders)[i]
+					if holder.ID == selected && holder.OwnerPID == os.Getpid() && holder.State == "finalizing" {
+						holder.OwnerPID, holder.UpdatedAt = 0, time.Now().UTC()
+					}
+				}
+				return nil
+			})
+		}
+		if err == nil {
+			selected = ""
+		}
+		return err
 	}, reconcile, nil
 }
 

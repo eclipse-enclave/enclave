@@ -326,7 +326,7 @@ func (b *Backend) Stop(ctx context.Context, ref backend.SessionRef, opts backend
 	if timeout > 0 {
 		timeoutPtr = &timeout
 	}
-	var finishMode func() error
+	var finishMode modeFinalizer
 	reconcile := opts.Finalize
 	if opts.Finalize {
 		var err error
@@ -334,6 +334,7 @@ func (b *Backend) Stop(ctx context.Context, ref backend.SessionRef, opts backend
 		if err != nil {
 			return err
 		}
+		defer finishMode.release()
 	}
 	stopErr := dockercmd.ContainerStop(ctx, name, timeoutPtr)
 	if reconcile {
@@ -342,7 +343,7 @@ func (b *Backend) Stop(ctx context.Context, ref backend.SessionRef, opts backend
 		}
 	}
 	if stopErr == nil && finishMode != nil {
-		stopErr = finishMode()
+		stopErr = finishMode(true)
 	}
 	return stopErr
 }
@@ -353,6 +354,7 @@ func (b *Backend) Remove(ctx context.Context, ref backend.SessionRef) error {
 	if err != nil {
 		return fmt.Errorf("finalize auth before removing container %s: %w", name, err)
 	}
+	defer finishMode.release()
 	if reconcile {
 		if err := b.finalizeManagedContainerAuth(ctx, name); err != nil {
 			return fmt.Errorf("finalize auth before removing container %s: %w", name, err)
@@ -361,7 +363,7 @@ func (b *Backend) Remove(ctx context.Context, ref backend.SessionRef) error {
 	if err := RemoveSessionContainer(ctx, name, false); err != nil {
 		return err
 	}
-	return finishMode()
+	return finishMode(true)
 }
 
 func (b *Backend) RemoveWithoutFinalize(ctx context.Context, ref backend.SessionRef) error {
@@ -370,10 +372,11 @@ func (b *Backend) RemoveWithoutFinalize(ctx context.Context, ref backend.Session
 	if err != nil {
 		return err
 	}
+	defer finishMode.release()
 	if err := RemoveSessionContainer(ctx, name, false); err != nil {
 		return err
 	}
-	return finishMode()
+	return finishMode(true)
 }
 
 // RemoveSessionContainer tears down the session, gateway, then network.

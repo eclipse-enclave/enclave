@@ -149,7 +149,7 @@ The network request flow, restricted and unrestricted, has separate
 | [`internal/auth/auth.go`](../internal/auth/auth.go) | Layered secrets, auth file copies, Claude-specific config |
 | [`internal/placeholderstore/`](../internal/placeholderstore/) | Internal native credential projection, durable canonical IO, stable bindings and native-path classification; no protected workload startup yet |
 | [`internal/gateway/exchange/`](../internal/gateway/exchange/) | Internal Claude exchange transactions, read-through native release and loaded-config capability attestation; public activation remains unavailable |
-| [`internal/auth/secret_injection.go`](../internal/auth/secret_injection.go) | `PlaceholderResolver`: random `ENCLAVE_SECRET_*` placeholders |
+| [`internal/auth/secret_injection.go`](../internal/auth/secret_injection.go) | `PlaceholderResolver`: caches env placeholders; shared generation lives in `internal/model/secret_placeholder.go` |
 | [`internal/gateway/gateway.go`](../internal/gateway/gateway.go) | Sidecar container and network; keeps logs until explicit removal, removes by immutable ID |
 | [`internal/gateway/bundle/`](../internal/gateway/bundle/bundle.go) | Host-managed bundles (`dnsmasq.conf`, `domains.txt`, `meta.json`) for apply and reload |
 | [`internal/gateway/mitm/`](../internal/gateway/mitm/) | TLS MITM, allowlist checks, placeholder rewriting; writes events through `internal/netlog` |

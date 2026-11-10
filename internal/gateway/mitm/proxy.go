@@ -473,6 +473,7 @@ func (p *proxy) handler(scheme string) http.HandlerFunc {
 				http.Error(w, "request denied", http.StatusForbidden)
 				return
 			}
+			p.captures.Learn(captureSecrets(nativeRules))
 			rules = append(append([]model.SecretReleaseEntry(nil), rules...), nativeRules...)
 		}
 		// The capture snapshots the request before secrets are released into it,

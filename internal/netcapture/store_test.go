@@ -312,3 +312,20 @@ func TestStoreBudgetBoundsBodiesInFlight(t *testing.T) {
 		t.Fatal("no body was marked truncated although the budget ran out")
 	}
 }
+
+func TestStoreRedactsSecretsLearnedAfterOpen(t *testing.T) {
+	dir := t.TempDir()
+	store := openTestStore(t, Options{Dir: dir})
+	before := captureExchange(t, store, "first", "native-rotated-value")
+	store.Learn([]Secret{{Value: "native-rotated-value", Placeholder: "ENCLAVE_SECRET_learned"}})
+	after := captureExchange(t, store, "unmarked later request", "echo native-rotated-value")
+	for id, want := range map[string]string{before: "native-rotated-value", after: "echo ENCLAVE_SECRET_learned"} {
+		record, err := Load(RecordPath(dir, id))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := readBody(t, RecordPath(dir, id), record.Response.Body); got != want {
+			t.Fatalf("response body = %q, want %q", got, want)
+		}
+	}
+}

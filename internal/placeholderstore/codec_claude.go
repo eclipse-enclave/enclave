@@ -51,11 +51,25 @@ func decodeAuthFile(file model.AuthFileSecret, data []byte, purpose nativePurpos
 		if err != nil {
 			return nil, nil, err
 		}
-		if err := visitFields(doc, parts, "", func(_ string, value string, replace func(string)) error {
-			values = append(values, nativeValue{field: field, value: value, replace: replace})
-			return nil
-		}); err != nil {
-			return nil, nil, err
+		node := doc
+		for i, key := range parts {
+			value, exists := node[key]
+			if !exists || value == nil || value == "" {
+				break
+			}
+			if i == len(parts)-1 {
+				text, ok := value.(string)
+				if !ok {
+					return nil, nil, fmt.Errorf("credential field %s must be a string", field.Pointer)
+				}
+				values = append(values, nativeValue{field: field, value: text, replace: func(replacement string) { node[key] = replacement }})
+				break
+			}
+			var ok bool
+			node, ok = value.(map[string]any)
+			if !ok {
+				return nil, nil, fmt.Errorf("credential pointer traverses a non-object")
+			}
 		}
 	}
 	return doc, values, nil

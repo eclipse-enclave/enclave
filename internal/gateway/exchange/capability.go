@@ -72,6 +72,9 @@ func Load(ctx context.Context, path, dir, lock, session string, env []model.Secr
 		return nil, "", fmt.Errorf("native auth bindings unavailable")
 	}
 	for _, file := range config.Provider.AuthSecrets {
+		if file.CheckOnly {
+			continue
+		}
 		snapshot, err := placeholderstore.ReadNative(dir, file)
 		if err != nil && !isMissing(err) {
 			return nil, "", fmt.Errorf("native auth file unavailable")

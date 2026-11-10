@@ -66,6 +66,9 @@ func Project(realDir, viewsDir, session string, profile model.Profile, configure
 	}
 	for _, provider := range profile.Providers {
 		for _, file := range provider.AuthSecrets {
+			if file.CheckOnly {
+				continue
+			}
 			data, err := readRegular(root, file.File)
 			if errors.Is(err, fs.ErrNotExist) {
 				continue

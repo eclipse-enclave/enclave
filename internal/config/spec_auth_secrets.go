@@ -21,8 +21,8 @@ func validateAuthSecrets(doc specDocument, specPath string) error {
 	for _, provider := range doc.Providers {
 		files := map[string]bool{}
 		for _, file := range provider.AuthSecrets {
-			if !model.ValidAuthFilePath(file.File) || !slices.Contains(provider.AuthFiles, file.File) || files[file.File] {
-				return fmt.Errorf("%s: provider %s authSecrets file %q must name a unique authFiles entry", specPath, provider.Name, file.File)
+			if !model.ValidAuthFilePath(file.File) || (!file.CheckOnly && !slices.Contains(provider.AuthFiles, file.File)) || files[file.File] {
+				return fmt.Errorf("%s: provider %s authSecrets file %q must name a unique authFiles entry unless checkOnly", specPath, provider.Name, file.File)
 			}
 			files[file.File] = true
 			if !slices.Contains([]string{"claude-credentials", "claude-config"}, file.Codec) || len(file.Fields) == 0 {

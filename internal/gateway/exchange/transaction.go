@@ -60,6 +60,9 @@ func (s *Store) transact(parent context.Context, values map[string]string) *http
 		credentials = append(credentials, entry.Value)
 	}
 	for _, file := range s.config.Provider.AuthSecrets {
+		if file.CheckOnly {
+			continue
+		}
 		snapshot, err := placeholderstore.ReadNative(s.dir, file)
 		if err != nil {
 			if file.File == s.file.File && native.Fingerprint == "" {

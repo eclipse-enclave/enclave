@@ -253,6 +253,8 @@ SSH on port 22 bypasses the gateway proxy and is not logged.
 
 ## Protected native auth
 
+Claude’s per-project `.claude.json` is checked but not projected or moved into the shared auth store. A protected start refuses raw `primaryApiKey` or `anthropicApiKey` fields there; remove the stored credential or use ordinary mode. Project metadata is left in place, including across `--reset-auth`.
+
 `enclave --tool claude --protect-auth` mounts a private placeholder view instead
 of the native auth store. The gateway performs Claude's token exchanges and
 releases credentials only to their declared HTTPS hosts. Ordinary sessions

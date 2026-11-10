@@ -25,11 +25,11 @@ func TestClaudeAuthSecretsSpecProjection(t *testing.T) {
 		t.Fatal(err)
 	}
 	provider := profile.Providers[0]
-	if len(provider.AuthSecrets) != 2 || provider.TokenEndpoint == nil || provider.TokenEndpoint.Host != "platform.claude.com" || len(provider.TokenEndpoint.Deny) != 3 {
+	if len(provider.AuthSecrets) != 3 || !provider.AuthSecrets[2].CheckOnly || len(provider.AuthFiles) != 2 || provider.TokenEndpoint == nil || provider.TokenEndpoint.Host != "platform.claude.com" || len(provider.TokenEndpoint.Deny) != 3 {
 		t.Fatal("native auth declarations lost in runtime profile")
 	}
 	summary := summarizeSpecDocument(doc)
-	if len(summary.Providers[0].AuthSecrets) != 2 {
+	if len(summary.Providers[0].AuthSecrets) != 3 {
 		t.Fatal("native auth declarations lost in capability summary")
 	}
 }

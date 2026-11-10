@@ -69,9 +69,16 @@ type Request struct {
 	// session exits. It must be carried on the request because foreground
 	// sessions are removed on exit, leaving nothing to inspect afterwards.
 	AuthSync *AuthSyncSpec
+	Mode     *SessionMode
 
 	RuntimeUIDRemap bool
 	Detached        bool
+}
+
+// SessionMode identifies the reservation made before preparing any mounts.
+type SessionMode struct {
+	ConfigStore StoreKey
+	HolderID    string
 }
 
 type EnvVar struct {

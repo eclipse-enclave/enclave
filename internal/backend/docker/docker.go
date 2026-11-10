@@ -108,6 +108,8 @@ func (b *Backend) Run(ctx context.Context, req backend.Request, attach backend.A
 			}
 		}()
 	}
+	var startedID string
+	defer func() { b.finalizingRequestMode(req, startedID) }()
 	spec, err := b.prepareRun(ctx, req)
 	if err != nil {
 		if ctx.Err() != nil {
@@ -126,6 +128,12 @@ func (b *Backend) Run(ctx context.Context, req backend.Request, attach backend.A
 	// Ctrl-C now reaches the tool through the TTY or the engine's signal
 	// proxying; cancelling ctx must not kill the attached child and strand a
 	// running session.
+	if req.Mode != nil {
+		spec.onStarted = func(id string) {
+			startedID = id
+			b.advanceRequestMode(req, "live", id)
+		}
+	}
 	return attachForeground(context.WithoutCancel(ctx), spec, attach)
 }
 
@@ -136,9 +144,16 @@ func attachForeground(ctx context.Context, spec runSpec, attach backend.AttachIO
 	if spec.cleanup != nil {
 		defer spec.cleanup()
 	}
-	var onStarted func(id string)
-	if attach.OnStarted != nil {
-		onStarted = func(string) { attach.OnStarted() }
+	var onStarted func(string)
+	if spec.onStarted != nil || attach.OnStarted != nil {
+		onStarted = func(id string) {
+			if spec.onStarted != nil {
+				spec.onStarted(id)
+			}
+			if attach.OnStarted != nil {
+				attach.OnStarted()
+			}
+		}
 	}
 	id, err := runForeground(ctx, spec.config, spec.hostConfig, spec.name, attach, onStarted)
 	if endOutlivingSession(ctx, spec.name, id) {
@@ -198,6 +213,12 @@ func waitContainerGone(ctx context.Context, id string) bool {
 }
 
 func (b *Backend) Start(ctx context.Context, req backend.Request) (backend.SessionRef, error) {
+	started := false
+	defer func() {
+		if !started {
+			b.finalizingRequestMode(req, "")
+		}
+	}()
 	spec, err := b.prepareRun(ctx, req)
 	if err != nil {
 		if ctx.Err() != nil {
@@ -220,6 +241,8 @@ func (b *Backend) Start(ctx context.Context, req backend.Request) (backend.Sessi
 		}
 		return backend.SessionRef{}, err
 	}
+	b.advanceRequestMode(req, "live", id)
+	started = true
 	return backend.SessionRef{Name: spec.name, ID: id}, nil
 }
 
@@ -302,25 +325,54 @@ func (b *Backend) Stop(ctx context.Context, ref backend.SessionRef, opts backend
 	if timeout > 0 {
 		timeoutPtr = &timeout
 	}
-	stopErr := dockercmd.ContainerStop(ctx, name, timeoutPtr)
+	var finishMode func() error
+	reconcile := opts.Finalize
 	if opts.Finalize {
+		var err error
+		finishMode, reconcile, err = b.beginContainerModeFinalization(ctx, name)
+		if err != nil {
+			return err
+		}
+	}
+	stopErr := dockercmd.ContainerStop(ctx, name, timeoutPtr)
+	if reconcile {
 		if err := b.finalizeManagedContainerAuth(ctx, name); err != nil && stopErr == nil {
 			stopErr = err
 		}
+	}
+	if stopErr == nil && finishMode != nil {
+		stopErr = finishMode()
 	}
 	return stopErr
 }
 
 func (b *Backend) Remove(ctx context.Context, ref backend.SessionRef) error {
 	name := sessionRefName(ref)
-	if err := b.finalizeManagedContainerAuth(ctx, name); err != nil {
+	finishMode, reconcile, err := b.beginContainerModeFinalization(ctx, name)
+	if err != nil {
 		return fmt.Errorf("finalize auth before removing container %s: %w", name, err)
 	}
-	return RemoveSessionContainer(ctx, name, false)
+	if reconcile {
+		if err := b.finalizeManagedContainerAuth(ctx, name); err != nil {
+			return fmt.Errorf("finalize auth before removing container %s: %w", name, err)
+		}
+	}
+	if err := RemoveSessionContainer(ctx, name, false); err != nil {
+		return err
+	}
+	return finishMode()
 }
 
 func (b *Backend) RemoveWithoutFinalize(ctx context.Context, ref backend.SessionRef) error {
-	return RemoveSessionContainer(ctx, sessionRefName(ref), false)
+	name := sessionRefName(ref)
+	finishMode, _, err := b.beginContainerModeFinalization(ctx, name)
+	if err != nil {
+		return err
+	}
+	if err := RemoveSessionContainer(ctx, name, false); err != nil {
+		return err
+	}
+	return finishMode()
 }
 
 // RemoveSessionContainer tears down the session, gateway, then network.
@@ -406,6 +458,7 @@ func (b *Backend) Logs(ctx context.Context, ref backend.SessionRef, opts backend
 }
 
 type runSpec struct {
+	onStarted  func(string)
 	config     *dockercmd.ContainerConfig
 	hostConfig *dockercmd.HostConfig
 	name       string
@@ -556,6 +609,9 @@ func labelsFromRequest(req backend.Request) map[string]string {
 	meta := req.Session
 	labels := map[string]string{
 		model.LabelConfigKey: "default",
+	}
+	if req.Mode != nil {
+		labels[model.LabelModeHolder] = req.Mode.HolderID
 	}
 	if meta.Tool != "" {
 		labels[model.LabelAgent] = meta.Tool

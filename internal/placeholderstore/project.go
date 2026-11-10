@@ -148,10 +148,10 @@ func projectFile(provider string, file model.AuthFileSecret, data []byte, bindin
 				}
 			}
 			if release.Placeholder == "" {
-				return nil, nil, nil, fmt.Errorf("credential field %s requires configured secret %s", pointer, field.Release)
+				return nil, nil, nil, fmt.Errorf("credential field %s requires configured secret %s", native.declaredPointer, field.Release)
 			}
 		} else if strings.Contains(value, model.SecretPlaceholderMarker) {
-			return nil, nil, nil, fmt.Errorf("real native credential field %s contains a placeholder", pointer)
+			return nil, nil, nil, fmt.Errorf("real native credential field %s contains a placeholder", native.declaredPointer)
 		}
 		binding, err := bindings.Bind(bindingProvider(provider, file, pointer), file.File, pointer, field.Kind, field.Placeholder, release.Placeholder)
 		if err != nil {
@@ -169,7 +169,7 @@ func projectFile(provider string, file model.AuthFileSecret, data []byte, bindin
 			if field.Kind != "apiKey" {
 				secret := secrets[field.Release]
 				if secret.Release == nil || secret.Release.HTTP == nil {
-					return nil, nil, nil, fmt.Errorf("credential field %s has no HTTP release", pointer)
+					return nil, nil, nil, fmt.Errorf("credential field %s has no HTTP release", native.declaredPointer)
 				}
 				rule := secret.Release.HTTP
 				release = model.SecretReleaseEntry{SecretID: field.Release, Value: value, Hosts: rule.Hosts, Header: rule.Header, Format: rule.Format}

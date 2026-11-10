@@ -427,3 +427,60 @@ func TestMarkedNativeAPIKeyStillParticipatesInContainment(t *testing.T) {
 		t.Fatal("a forged marker binding hid a real native API value")
 	}
 }
+
+func TestWildcardDiagnosticsUseDeclaredFields(t *testing.T) {
+	for _, mode := range []string{"configured-control", "missing-env", "marked-native", "missing-http-release"} {
+		t.Run(mode, func(t *testing.T) {
+			real := t.TempDir()
+			raw := "synthetic-native-map-key"
+			field := model.AuthSecretField{Pointer: "/*/key", Kind: "apiKey", Release: "api"}
+			entry := map[string]any{"type": "api", "key": raw}
+			fields := []model.AuthSecretField{field}
+			if mode == "marked-native" || mode == "missing-http-release" {
+				if mode == "marked-native" {
+					raw += model.SecretPlaceholderMarker
+				}
+				fields = []model.AuthSecretField{{Pointer: "/*/access", Kind: "access", Release: "oauth"}, {Pointer: "/*/refresh", Kind: "refresh"}}
+				entry = map[string]any{"type": "oauth", "access": raw}
+			}
+			file := model.AuthFileSecret{File: "auth.json", Codec: "provider-map", Fields: fields}
+			profile := model.Profile{Providers: []model.ProviderConfig{{Name: "map", AuthSecrets: []model.AuthFileSecret{file}}}}
+			data, _ := json.Marshal(map[string]any{raw: entry})
+			nativeFile(t, real, file.File, string(data))
+			var configured []model.SecretReleaseEntry
+			if mode == "configured-control" {
+				placeholder, err := model.NewSecretPlaceholder(nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				configured = []model.SecretReleaseEntry{{SecretID: "api", Placeholder: placeholder, Value: "synthetic-configured-api"}}
+			}
+			if _, err := Project(real, t.TempDir(), "diagnostic", profile, configured); err == nil || strings.Contains(err.Error(), raw) {
+				t.Fatal("wildcard error disclosed native data or accepted contaminated source", err)
+			}
+		})
+	}
+	for _, malformed := range []bool{false, true} {
+		t.Run(map[bool]string{false: "check-only", true: "invalid-check-only"}[malformed], func(t *testing.T) {
+			const raw = "aaa-synthetic-native-map-key"
+			entry := any(raw)
+			if malformed {
+				entry = 42
+			}
+			file := model.AuthFileSecret{CheckOnly: true, File: "config.json", Codec: "claude-config", Fields: []model.AuthSecretField{{Pointer: "/*", Kind: "apiKey", Release: "api"}}}
+			profile := model.Profile{Providers: []model.ProviderConfig{{Name: "map", AuthSecrets: []model.AuthFileSecret{file}}}}
+			real := t.TempDir()
+			data, _ := json.Marshal(map[string]any{raw: entry, "primaryApiKey": raw})
+			nativeFile(t, real, file.File, string(data))
+			var err error
+			if malformed {
+				_, _, err = decodeAuthFile(file, data, credentialCheck)
+			} else {
+				_, err = ClassifyNative(real, "/auth", profile, Bindings{}, nil, false)
+			}
+			if err == nil || strings.Contains(err.Error(), raw) || !strings.Contains(err.Error(), "/*") {
+				t.Fatal("check-only error did not identify only the declared field", err)
+			}
+		})
+	}
+}

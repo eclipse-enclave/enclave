@@ -249,6 +249,8 @@ Source:
 
 ## Lifecycle
 
+Ordinary sessions follow this flow; protected finalization is described below.
+
 ```mermaid
 sequenceDiagram
     autonumber
@@ -256,6 +258,9 @@ sequenceDiagram
     participant Ctr as Container
     participant Helper as Helper container
 
+    opt Shared native --reset-auth
+        Host->>Host: Clear selected native files and bindings under lock<br/>before mixed-mode admission
+    end
     Host->>Host: Prepare stores as the invoking user<br/>(config, new key if --ephemeral, env, shared auth, feature auth)<br/>and reset auth files if --reset-auth
     Host->>Host: Config-source overlay, if active<br/>(replace generated files, keep statePaths,<br/>carry settingsTarget edits forward)
     Host->>Host: Auth injection<br/>(read env store, resolve declared secrets and --pass-env,<br/>write env store)
@@ -274,8 +279,8 @@ sequenceDiagram
 |------|------------------|
 | `--auth-scope=shared` (default) | Shared auth store (identity per [`--auth-name`](../auth.md#named-auth-identities)) and feature auth stores; entrypoint symlinks; exit, `exec` exit, background stop, and GUI stop or remove finalize credentials to them, so one login serves all projects |
 | `--auth-scope=project` | No shared or feature stores; auth lives only in the project config store; `--auth-name` is ignored with a warning |
-| `--ephemeral` | Config store gets a unique key and is removed on exit; no env or auth stores |
-| `--reset-auth` | Deletes auth files from the shared and current config stores (shared scope) or the config store (project scope), plus the persisted env |
+| `--ephemeral` | Config store gets a unique key and is removed on exit; no env or shared auth stores. Protected mode uses a fresh gateway-only identity, removed after agent and gateway removal |
+| `--reset-auth` | Deletes auth files from the shared and current config stores (shared scope) or the config store (project scope), plus the persisted env. Shared native auth files and bindings are cleared before session admission |
 
 ## Cleanup
 
@@ -305,6 +310,24 @@ mount private views under `projects/<hash>/<tool>/auth-views/`. Claude exchanges
 hoststore lock across reload, one bounded upstream dispatch and durable commit.
 Native tokens are written before stable placeholder bindings; UID/GID/mode are
 preserved. Bindings contain identifiers, never tokens or exchange history.
+
+On a confirmed protected end, current placeholder bindings authorize the whole
+private view; a regular native-path sibling needs its own matching placeholders.
+Only codec-allowlisted metadata is merged, with the sibling taking precedence.
+Tokens, expiry and scopes stay canonical. Unknown view keys are ignored;
+secret-bearing metadata and invalid or stale sources are skipped with a warning.
+The shared config path is never changed by harvest. Missing bindings after reset
+prevent stale views from restoring state.
+
+Gateway ownership is correlated with its holder at creation, so a renamed agent
+or a reused session name cannot select another gateway.
+
+The finalizing holder remains through harvest and deletion of its own published
+and staging views. An ephemeral identity is deleted under its native lock only
+after agent and original gateway removal are confirmed. Failed or uncertain
+teardown retains the reservation and private files; a failed finalizer releases
+its synchronous PID claim so cleanup can retry. Stale-holder cleanup removes the
+orphan gateway first and discards its views without harvesting them.
 
 Each gateway remembers only the native fingerprint last returned to its client.
 An overlapping sibling refresh receives the newer unexpired native grant once;

@@ -253,7 +253,10 @@ SSH on port 22 bypasses the gateway proxy and is not logged.
 
 ## Protected native auth
 
-Claude’s per-project `.claude.json` is checked but not projected or moved into the shared auth store. A protected start refuses raw `primaryApiKey` or `anthropicApiKey` fields there; remove the stored credential or use ordinary mode. Project metadata is left in place, including across `--reset-auth`.
+Claude's per-project `.claude.json` is checked but not projected or moved into
+the shared auth store. A protected start refuses raw `primaryApiKey` or
+`anthropicApiKey` fields there; remove the stored credential or use ordinary mode.
+Project metadata stays in place, including across `--reset-auth`.
 
 `enclave --tool claude --protect-auth` mounts a private placeholder view instead
 of the native auth store. The gateway performs Claude's token exchanges and
@@ -279,6 +282,19 @@ Stop a project's running sessions before its first protected start after an
 upgrade: an older QEMU session cannot be detected. A native-path file containing
 raw credentials is refused rather than replaced; end the ordinary session and
 let reconciliation link it, or reset a crash leftover with `--reset-auth`.
+For shared native auth, `--reset-auth` clears the selected identity’s native files
+and placeholder bindings under its store lock before session admission, even if
+an opposite-mode holder then refuses the start. Other identities and projects’
+placeholder views are left alone; surviving gateways can no longer release the
+removed native OAuth credentials.
+A concurrently completed fresh login is not erased a second time during startup.
+
+At normal session end, allowlisted client metadata is merged without copying
+credentials, expiry or scopes back from the view. Stale, raw or secret-bearing
+sources are skipped. Only the session's own view is deleted. Protected stop keeps
+the reservation until removal confirms both the agent and its original gateway
+are gone; uncertain teardown keeps the private files for later cleanup.
+`--ephemeral` uses a fresh gateway-only identity and removes it at that point.
 
 Protection covers declared native fields, not arbitrary files, SSH or host access.
 See [native auth exchanges](runtime/stores.md#native-auth-exchanges) for storage

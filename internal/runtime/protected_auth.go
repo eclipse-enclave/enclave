@@ -8,6 +8,7 @@
 package runtime
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -125,4 +126,41 @@ func (r *Runtime) prepareProtectedAuth(stores storeSet, mounts *mountAccumulator
 		}
 	}
 	return &backend.NativeAuthSpec{Store: *stores.Auth, Config: data}, cleanup, nil
+}
+
+func (r *Runtime) nativeAuthResetRequested() bool {
+	if !r.auth.ResetAuth || !r.run.Persist || r.auth.AuthScope == model.AuthScopeProject {
+		return false
+	}
+	for _, provider := range r.profile.Providers {
+		if len(provider.AuthSecrets) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// Reset is independent of the following start: even a refused opposite-mode
+// start must invalidate the selected identity under the gateway's same lock.
+func (r *Runtime) resetNativeAuth() error {
+	if !r.nativeAuthResetRequested() {
+		return nil
+	}
+	if r.backend == nil || r.backend.Storage() == nil {
+		return fmt.Errorf("runtime backend is not configured")
+	}
+	storage := r.backend.Storage()
+	ctx := context.Background()
+	key := backend.StoreKey{Owner: r.profile.Name, Suffix: r.auth.AuthName}
+	if err := storage.Ensure(ctx, key, backend.StoreKindAuth, ""); err != nil {
+		return err
+	}
+	return r.withStoreLock(&backend.StoreRef{Key: key, Kind: backend.StoreKindAuth}, func() error {
+		for _, file := range append(r.profile.ProviderAuthFiles(), placeholderstore.BindingsFile) {
+			if err := storage.RemovePath(ctx, key, backend.StoreKindAuth, file); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }

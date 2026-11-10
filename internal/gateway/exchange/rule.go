@@ -9,6 +9,7 @@ package exchange
 
 import (
 	"bytes"
+	"cmp"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -32,7 +33,7 @@ type Config struct {
 }
 
 func endpointHost(req *http.Request) string {
-	host := req.Host
+	host := cmp.Or(strings.TrimSpace(req.Host), req.URL.Host)
 	if h, _, err := net.SplitHostPort(host); err == nil {
 		host = h
 	}
@@ -57,7 +58,7 @@ func (s *Store) Intercept(req *http.Request, scheme string) (*http.Response, boo
 		if host != endpoint.Host || canonicalPath != endpoint.Path {
 			continue
 		}
-		_, port, portErr := net.SplitHostPort(req.Host)
+		_, port, portErr := net.SplitHostPort(cmp.Or(strings.TrimSpace(req.Host), req.URL.Host))
 		if (portErr == nil && port != "443") || scheme != "https" || req.Method != http.MethodPost || req.URL.Path != endpoint.Path || req.URL.RawQuery != "" || req.URL.RawPath != "" {
 			return refusal(http.StatusForbidden), true
 		}
@@ -162,7 +163,8 @@ func response(status int, headers http.Header, data []byte) *http.Response {
 }
 
 func copilotUserRequest(req *http.Request) bool {
-	if req.Method != http.MethodGet || req.URL.Path != "/copilot_internal/user" || req.URL.RawPath != "" || req.URL.RawQuery != "" || req.URL.ForceQuery || req.ContentLength != 0 || len(req.Trailer) != 0 || (req.URL.Port() != "" && req.URL.Port() != "443") {
+	_, port, _ := net.SplitHostPort(cmp.Or(strings.TrimSpace(req.Host), req.URL.Host))
+	if req.Method != http.MethodGet || req.URL.Path != "/copilot_internal/user" || req.URL.RawPath != "" || req.URL.RawQuery != "" || req.URL.ForceQuery || req.ContentLength != 0 || len(req.Trailer) != 0 || (port != "" && port != "443") {
 		return false
 	}
 	if req.Body != nil {

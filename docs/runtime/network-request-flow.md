@@ -58,7 +58,11 @@ sequenceDiagram
                 Proxy->>Proxy: Lock canonical native store
                 Proxy->>API: Bounded exchange with current credentials
                 API-->>Proxy: Token response
-                Proxy->>Proxy: Commit native tokens, then bindings; unlock
+                Proxy->>Proxy: Commit native tokens
+                opt network_log=full
+                    Proxy->>Cap: Learn committed grant values
+                end
+                Proxy->>Proxy: Persist bindings; unlock
                 Proxy-->>Tool: Allowlisted reply with placeholders
             else Ordinary API request
                 Proxy->>Proxy: Releases(req): read current canonical values
@@ -125,6 +129,9 @@ sequenceDiagram
    [Coverage and granularity](../networking.md#coverage-and-granularity).
 
 Declared native exchanges are intercepted before capture and are not stored.
+After a canonical grant write, the proxy teaches its values to the capture
+redactor before publishing bindings or replying, including access/refresh
+values not yet used in an API request.
 For ordinary API requests, the proxy reads native release rules, teaches their
 values to the capture redactor, snapshots the original placeholders, then
 rewrites headers and forwards. Refused requests produce no capture record.

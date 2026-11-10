@@ -105,10 +105,7 @@ func (r *Runtime) prepareProtectedAuth(stores storeSet, mounts *mountAccumulator
 		}
 		return nil
 	}
-	data, err := json.Marshal(exchange.Config{Provider: r.profile.Providers[0], Secrets: r.profile.Secrets})
-	if err != nil {
-		return nil, finalize, err
-	}
+	data, _ := json.Marshal(exchange.Config{Provider: r.profile.Providers[0], Secrets: r.profile.Secrets})
 	mounts.AddMount(backend.Mount{Type: backend.MountTypeBind, Source: view.Dir, ContainerPath: r.containerHome + "/" + model.ContainerAuthDir})
 	r.addAuthEnv(mounts)
 	var verbs []string

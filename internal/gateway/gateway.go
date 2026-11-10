@@ -599,8 +599,12 @@ func Start(ctx context.Context, cfg StartConfig) (StartResult, error) {
 		return empty, err
 	}
 	nativeStarted = true
+	var tempFiles []string
+	if nativeRuntime != "" {
+		tempFiles = []string{filepath.Join(nativeRuntime, exchange.CapabilityFile), nativeRuntime}
+	}
 	return StartResult{
-		TempFiles:     nativeRuntimeFiles(nativeRuntime),
+		TempFiles:     tempFiles,
 		ContainerName: gatewayContainer,
 		ContainerID:   containerID,
 	}, nil
@@ -1038,11 +1042,4 @@ func checkNativeAuthStarted(runtime, digest, session, containerID string) error 
 		return err
 	}
 	return nil
-}
-
-func nativeRuntimeFiles(dir string) []string {
-	if dir == "" {
-		return nil
-	}
-	return []string{filepath.Join(dir, exchange.CapabilityFile), dir}
 }

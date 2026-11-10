@@ -18,6 +18,7 @@ PROXY_USER="gateway"
 # GatewayProxyHTTPPort and GatewayProxyHTTPSPort in internal/model.
 PROXY_HTTP_PORT="15080"
 PROXY_HTTPS_PORT="15443"
+PROXY_EXEC_USER="$PROXY_USER:$PROXY_USER"
 PROXY_ENABLED="${PROXY_ENABLED:-true}"
 NETWORK_LOG_FILE="${ENCLAVE_NETWORK_LOG_FILE:-}"
 GATEWAY_CONFIG_DIR="${ENCLAVE_GATEWAY_CONFIG_DIR:-/etc/enclave-gateway-config}"
@@ -73,12 +74,27 @@ remap_native_proxy_identity() {
         log "Protected proxy identity collides with the DNS user"
         return 1
     fi
-    awk -F: -v OFS=: -v uid="$native_uid" -v gid="$native_gid" '$1 == "gateway" { $3=uid; $4=gid } { print }' /etc/passwd > /etc/passwd.enclave-native
-    awk -F: -v OFS=: -v gid="$native_gid" '$1 == "gateway" { $3=gid } { print }' /etc/group > /etc/group.enclave-native
+    proxy_gid=$(id -g "$PROXY_USER")
+    if [ "$native_gid" -eq "$proxy_gid" ] || [ "$native_gid" -eq "$(id -g "$DNSMASQ_USER")" ]; then
+        log "Protected proxy group collides with the workload group"
+        return 1
+    fi
+    awk -F: -v OFS=: -v uid="$native_uid" '$1 == "gateway" { $3=uid } { print }' /etc/passwd > /etc/passwd.enclave-native
+    awk -F: -v OFS=: -v gid="$native_gid" '
+        $3 == gid { found=1; if (("," $4 ",") !~ /,gateway,/) $4=$4 ($4 == "" ? "" : ",") "gateway" }
+        { print }
+        END { if (!found) print "enclave-host", "x", gid, "gateway" }
+    ' /etc/group > /etc/group.enclave-native
     cat /etc/passwd.enclave-native > /etc/passwd
     cat /etc/group.enclave-native > /etc/group
     rm /etc/passwd.enclave-native /etc/group.enclave-native
-    [ "$(id -u "$PROXY_USER")" -eq "$native_uid" ] && [ "$(id -g "$PROXY_USER")" -eq "$native_gid" ]
+    # An explicit su-exec user:group discards supplementary memberships.
+    PROXY_EXEC_USER="$PROXY_USER"
+    [ "$(id -u "$PROXY_USER")" -eq "$native_uid" ] && [ "$(id -g "$PROXY_USER")" -eq "$proxy_gid" ] || return 1
+    case " $(id -G "$PROXY_USER") " in
+        *" $native_gid "*) return 0 ;;
+        *) log "Protected proxy is missing the host group"; return 1 ;;
+    esac
 }
 
 is_ipv4() {
@@ -525,14 +541,19 @@ EOF_RESOLVERS
         return 1
     fi
 
-    proxy_uid=$(id -u "$PROXY_USER")
+    proxy_owner_match="--uid-owner"
+    proxy_owner_id=$(id -u "$PROXY_USER")
+    if [ -n "${ENCLAVE_NATIVE_AUTH_CONFIG:-}" ]; then
+        proxy_owner_match="--gid-owner"
+        proxy_owner_id=$(id -g "$PROXY_USER")
+    fi
 
     iptables -A OUTPUT -p tcp --dport "$PROXY_HTTP_PORT" -m addrtype --dst-type LOCAL -j ACCEPT
     iptables -A OUTPUT -p tcp --dport "$PROXY_HTTPS_PORT" -m addrtype --dst-type LOCAL -j ACCEPT
 
     iptables -t nat -F OUTPUT || true
-    iptables -t nat -A OUTPUT -p tcp --dport 80 -m owner --uid-owner "$proxy_uid" -j RETURN
-    iptables -t nat -A OUTPUT -p tcp --dport 443 -m owner --uid-owner "$proxy_uid" -j RETURN
+    iptables -t nat -A OUTPUT -p tcp --dport 80 -m owner "$proxy_owner_match" "$proxy_owner_id" -j RETURN
+    iptables -t nat -A OUTPUT -p tcp --dport 443 -m owner "$proxy_owner_match" "$proxy_owner_id" -j RETURN
     iptables -t nat -A OUTPUT -p tcp --dport 80 -j REDIRECT --to-ports "$PROXY_HTTP_PORT"
     iptables -t nat -A OUTPUT -p tcp --dport 443 -j REDIRECT --to-ports "$PROXY_HTTPS_PORT"
 
@@ -718,9 +739,9 @@ start_proxy() {
     log "Starting transparent proxy"
     rm -f "$PROXY_READY_FILE"
     if [ -n "${ENCLAVE_NATIVE_AUTH_RUNTIME:-}" ]; then
-        su-exec "$PROXY_USER:$PROXY_USER" rm -f "$ENCLAVE_NATIVE_AUTH_RUNTIME/native-auth-ready.json"
+        su-exec "$PROXY_EXEC_USER" rm -f "$ENCLAVE_NATIVE_AUTH_RUNTIME/native-auth-ready.json"
     fi
-    su-exec "$PROXY_USER:$PROXY_USER" env ENCLAVE_GATEWAY_PROXY_READY_FILE="$PROXY_READY_FILE" enclave-gateway-proxy >>"$PROXY_LOG_FILE" 2>&1 &
+    su-exec "$PROXY_EXEC_USER" env ENCLAVE_GATEWAY_PROXY_READY_FILE="$PROXY_READY_FILE" enclave-gateway-proxy >>"$PROXY_LOG_FILE" 2>&1 &
     PROXY_PID="$!"
     wait_for_proxy_ready
 }
@@ -746,7 +767,7 @@ start_dns_audit() {
     log "Starting DNS audit translator"
     # Unprivileged like the other long-lived children: it only reads the dnsmasq
     # log and appends to the world-writable network log.
-    su-exec "$PROXY_USER:$PROXY_USER" enclave-gateway-proxy -dns-audit "$DNSMASQ_LOG_FILE" >>"$DNS_AUDIT_LOG_FILE" 2>&1 &
+    su-exec "$PROXY_EXEC_USER" enclave-gateway-proxy -dns-audit "$DNSMASQ_LOG_FILE" >>"$DNS_AUDIT_LOG_FILE" 2>&1 &
     DNS_AUDIT_PID="$!"
 }
 

@@ -119,10 +119,10 @@ func TestModeCleanupRequiresOwnerDeathAndContainerAbsence(t *testing.T) {
 					t.Fatal(err)
 				}
 				finalized = true
-				if err := hoststore.AdvanceMode(home, dir, holder.ID, "finalizing", "", "", false); err != nil {
+				if err := hoststore.AdvanceMode(home, dir, holder.ID, "finalizing", "", false); err != nil {
 					return err
 				}
-				return hoststore.AdvanceMode(home, dir, holder.ID, "ended", "", "", false)
+				return hoststore.AdvanceMode(home, dir, holder.ID, "ended", "", false)
 			}}
 			err = cleanupModeStore(home, dir, be, tc.dryRun)
 			if (err != nil) != tc.wantError || finalized != tc.wantFinalize {

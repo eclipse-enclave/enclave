@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"enclave/internal/backend"
+	"enclave/internal/backend/hoststore"
 	dockercmd "enclave/internal/docker"
 	"enclave/internal/gateway"
 	"enclave/internal/logx"
@@ -131,7 +132,7 @@ func (b *Backend) Run(ctx context.Context, req backend.Request, attach backend.A
 	if req.Mode != nil {
 		spec.onStarted = func(id string) {
 			startedID = id
-			b.advanceRequestMode(req, "live", id)
+			hoststore.AdvanceRequestMode(b.opts.Host.Home, req, "live", id)
 		}
 	}
 	return attachForeground(context.WithoutCancel(ctx), spec, attach)
@@ -241,7 +242,7 @@ func (b *Backend) Start(ctx context.Context, req backend.Request) (backend.Sessi
 		}
 		return backend.SessionRef{}, err
 	}
-	b.advanceRequestMode(req, "live", id)
+	hoststore.AdvanceRequestMode(b.opts.Host.Home, req, "live", id)
 	started = true
 	return backend.SessionRef{Name: spec.name, ID: id}, nil
 }

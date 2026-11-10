@@ -48,7 +48,7 @@ func TestExternalFinalizerRespectsHostOwnership(t *testing.T) {
 					t.Fatal(err)
 				}
 				for _, next := range []string{"live", "finalizing", "ended"} {
-					if err := hoststore.AdvanceMode(home, dir, holder.ID, next, "cid", "", false); err != nil {
+					if err := hoststore.AdvanceMode(home, dir, holder.ID, next, "cid", false); err != nil {
 						t.Fatal(err)
 					}
 					if next == state {

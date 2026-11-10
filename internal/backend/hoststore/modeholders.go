@@ -17,7 +17,9 @@ import (
 	"syscall"
 	"time"
 
+	"enclave/internal/backend"
 	"enclave/internal/config"
+	"enclave/internal/logx"
 	"enclave/internal/util"
 )
 
@@ -31,7 +33,6 @@ type ModeHolder struct {
 	Engine      string    `json:"engine"`
 	Protected   bool      `json:"protected"`
 	ContainerID string    `json:"containerId,omitempty"`
-	GatewayID   string    `json:"gatewayId,omitempty"`
 	State       string    `json:"state"`
 	OwnerPID    int       `json:"ownerPid"`
 	UpdatedAt   time.Time `json:"updatedAt"`
@@ -95,7 +96,7 @@ func ReserveMode(home, dir string, holder ModeHolder, discover func([]ModeHolder
 
 // AdvanceMode never infers completion from engine status. Only the session's
 // finalizer, or explicit stale-owner cleanup, may move finalizing to ended.
-func AdvanceMode(home, dir, id, state, containerID, gatewayID string, detached bool) error {
+func AdvanceMode(home, dir, id, state, containerID string, detached bool) error {
 	return WithModeHolders(home, dir, func(holders *[]ModeHolder) error {
 		for i := range *holders {
 			holder := &(*holders)[i]
@@ -112,9 +113,6 @@ func AdvanceMode(home, dir, id, state, containerID, gatewayID string, detached b
 			holder.State, holder.UpdatedAt = state, time.Now().UTC()
 			if containerID != "" {
 				holder.ContainerID = containerID
-			}
-			if gatewayID != "" {
-				holder.GatewayID = gatewayID
 			}
 			if detached && state == "live" {
 				holder.OwnerPID = 0
@@ -176,9 +174,8 @@ func readModeRecord(file, dir string) (ModeRecord, error) {
 	if err := json.Unmarshal(data, &record); err != nil {
 		return record, fmt.Errorf("read session mode holders: %w", err)
 	}
-	if record.ConfigDir == "" || dir != "" && record.ConfigDir != dir ||
-		filepath.Base(file) != "mode-"+util.HashString(record.ConfigDir)+".json" {
-		return record, fmt.Errorf("session mode holder config store mismatch")
+	if record.ConfigDir == "" {
+		return record, fmt.Errorf("invalid session mode config store")
 	}
 	ids := make(map[string]bool)
 	for _, holder := range record.Holders {
@@ -188,4 +185,18 @@ func readModeRecord(file, dir string) (ModeRecord, error) {
 		ids[holder.ID] = true
 	}
 	return record, nil
+}
+
+// AdvanceRequestMode applies the lifecycle intent shared by both backends.
+func AdvanceRequestMode(home string, req backend.Request, state, id string) {
+	if req.Mode == nil {
+		return
+	}
+	dir, err := ResolveDir(home, req.Mode.ConfigStore, backend.StoreKindConfig)
+	if err == nil {
+		err = AdvanceMode(home, dir, req.Mode.HolderID, state, id, req.Detached)
+	}
+	if err != nil {
+		logx.Warnf("Session auth-mode reservation retained: %v", err)
+	}
 }

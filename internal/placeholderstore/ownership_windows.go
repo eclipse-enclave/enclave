@@ -17,3 +17,7 @@ import (
 func preserveOwner(_ *os.File, _ os.FileInfo) error {
 	return fmt.Errorf("native credential writes require a Unix host")
 }
+
+func renameNative(_ *os.File, _, _ string) error {
+	return fmt.Errorf("native credential writes require a Unix host")
+}

@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"syscall"
 	"testing"
+	"time"
 )
 
 func TestNativeReadAndDurableUpdatePreserveCanonicalDataAndOwnership(t *testing.T) {
@@ -89,6 +90,46 @@ func TestNativeWriteRefusesLinksAndLeavesTheirTargetsUnchanged(t *testing.T) {
 		got, err := os.ReadFile(destination)
 		if err != nil || string(got) != "untouched" {
 			t.Fatal("native write changed a symlink target")
+		}
+	}
+}
+
+func TestNativeWriteStaysInsideRootDuringParentSwap(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	parent := filepath.Join(root, "nested")
+	moved := filepath.Join(root, "moved")
+	if err := os.Mkdir(parent, 0700); err != nil {
+		t.Fatal(err)
+	}
+	stop, done := make(chan struct{}), make(chan struct{})
+	go func() {
+		defer close(done)
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			if os.Rename(parent, moved) != nil {
+				return
+			}
+			if os.Symlink(outside, parent) != nil {
+				return
+			}
+			time.Sleep(2 * time.Millisecond)
+			_ = os.Remove(parent)
+			if os.Rename(moved, parent) != nil {
+				return
+			}
+			time.Sleep(200 * time.Microsecond)
+		}
+	}()
+	defer func() { close(stop); <-done }()
+	for until := time.Now().Add(5 * time.Second); time.Now().Before(until); {
+		err := WriteNative(root, "nested/credential.json", []byte(`{"synthetic":"private-native-value"}`))
+		if data, readErr := os.ReadFile(filepath.Join(outside, "credential.json")); readErr == nil {
+			t.Fatalf("native write escaped its opened root: output=%q writeErr=%v", data, err)
 		}
 	}
 }

@@ -80,8 +80,21 @@ func TestExternalFinalizerRespectsHostOwnership(t *testing.T) {
 					if err := hoststore.ReserveMode(home, dir, hoststore.ModeHolder{ID: "opposite", Session: "opposite", Protected: true}, nil); err == nil {
 						t.Fatal("parallel CLI released the active finalizer")
 					}
+					finish.release()
+					if err := hoststore.ReserveMode(home, dir, hoststore.ModeHolder{ID: "aborted-opposite", Session: "opposite", Protected: true}, nil); err == nil {
+						t.Fatal("aborting a finalizer ended its workload reservation")
+					}
+					replacement, sync, err := be.beginContainerModeFinalization(context.Background(), "holder")
+					if err != nil || !sync {
+						t.Fatalf("sequential takeover: sync=%t err=%v", sync, err)
+					}
+					finish.release()
+					if _, _, err := be.beginContainerModeFinalization(context.Background(), "holder"); err == nil {
+						t.Fatal("old release cleared a later active finalizer")
+					}
+					finish = replacement
 				}
-				if err := finish(); err != nil {
+				if err := finish(true); err != nil {
 					t.Fatal(err)
 				}
 				err = hoststore.ReserveMode(home, dir, hoststore.ModeHolder{ID: "after", Session: "after", Protected: true}, nil)

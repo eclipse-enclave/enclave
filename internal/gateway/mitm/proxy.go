@@ -387,8 +387,22 @@ func newUpstreamTransport() *http.Transport {
 // logEvent stamps the gateway session on every event, so a log shared by
 // concurrent sessions of the same project and tool can be split again.
 func (p *proxy) logEvent(event netlog.Event) {
+	event.Method = auditField(event.Method)
+	event.Domain = auditField(event.Domain)
+	event.Path = auditField(event.Path)
+	event.ContentType = auditField(event.ContentType)
 	event.Session = p.session
 	p.audit.Append(event)
+}
+
+// Four fields at sixfold JSON escaping stay below the reader's 1 MiB line limit.
+const maxAuditFieldBytes = 16 * 1024
+
+func auditField(value string) string {
+	if len(value) <= maxAuditFieldBytes {
+		return value
+	}
+	return value[:maxAuditFieldBytes] + "...[truncated]"
 }
 
 func (p *proxy) handler(scheme string) http.HandlerFunc {

@@ -299,10 +299,10 @@ the attached endpoint and the tool shares its network namespace; with
 `--disable-gateway` the tool is attached directly. In restricted mode DNS
 blocks unknown domains, the gateway admits inbound traffic only for loopback,
 replies, and published ports, and the proxy tunnels TLS and uses MITM only for
-secret-release hosts or under `network_log=requests` or `full`. In unrestricted mode the
-gateway only observes: it keeps Docker's resolver, installs no filters, and
-logs TCP 80/443. User-facing behavior is in [networking.md](networking.md); the
-request path, in both modes, is in
+secret-release hosts or under `network_log=requests` or `full`. In unrestricted
+mode the gateway only observes: it keeps Docker's resolver, installs no filters,
+and logs TCP 80/443. User-facing behavior is in [networking.md](networking.md);
+the request path, in both modes, is in
 [network-request-flow.md](runtime/network-request-flow.md).
 
 Sidecar lifecycle:

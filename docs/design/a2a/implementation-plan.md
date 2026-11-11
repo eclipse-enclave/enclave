@@ -1,8 +1,54 @@
 # A2A implementation plan (parallel edition)
 
-Companion to `proposal.html` (draft 6, revision 1). The proposal is the contract; this
+Companion to `proposal.html` (draft 6, revision 4). The proposal is the contract; this
 plan turns it into work packages that independent agents can execute in
 parallel from separate worktrees. Nothing here changes a proposal decision.
+
+## Status (2026-11-11)
+
+The plan below is executed. It is kept as the record of how the branch was
+built; the sections after this one are historical and were not rewritten.
+
+- **Done and on `a2a`:** Wave 0 (W0-A, W0-B), Wave 1 (P1-D, P1-P, P2, P3, A1,
+  A2, A5, A6, A8), Wave 2 (A3, A4, A7, A9, A10, A11, A12, A14), Wave 3 (A13,
+  A15, I1, I2) and the docs fan-out (D1 to D6 plus `configuration.md`).
+- **Packages added along the way** (reports under `reports/`): A5b (gateway
+  drop of hub-sourced traffic), F1 (protocol, hub and adapter fixes), F2
+  (packaging of hub and agent build inputs), F3 (backend credential and hub
+  call APIs), F4 (no A2A work in plain sessions), F5a and F5b (fixes for the
+  bugs I2 found, B1 to B6 and B8 to B11).
+- **Multi-harness extension** (G1, A9-codex, A9-copilot, A9-pi, P2-*, I3;
+  CR-MH-1 to CR-MH-4): Codex, Copilot and Pi drivers and orchestrator wiring.
+  OpenCode and Theia are excluded, see `reports/P2-opencode.md`.
+- **History:** the package branches and merges were squashed into a linear
+  series on `a2a`. Commit hashes quoted in the reports refer to the old
+  history, kept locally in the maintainer's checkout as `a2a-history-backup`.
+- **Decisions after the freeze** are in the change-request log at the end of
+  `interfaces.md`. It overrides older text in every document here.
+- **Gates on the tip:** `make build`, `make test`, `make lint` and
+  `make check-license-headers` pass. Run `make test` with `NO_COLOR` unset,
+  or three `internal/termtint` tests fail.
+
+Not done, in the order it should happen:
+
+1. Merge `main` into `a2a`. It conflicts in `internal/gateway/gateway.go`
+   and `scripts/check_versions_test.go`.
+2. Code review and security review of `a2a` against `main`. The branch was
+   reviewed through package reports and gates, not line by line.
+3. Live runs: `scripts/a2a-smoke.sh` on both engines (its reworked
+   degraded-departure step has never run) and `mixed_review` (last run
+   2026-11-05, see `reports/I3.md`). Both bill real model calls.
+4. Tests that need a VM: Podman `isolate=strict` (netavark 1.7 or later),
+   Docker `userns-remap` (`ENCLAVE_TEST_USERNS_REMAP=1`), SELinux enforcing,
+   the rpm package build.
+5. Known gaps: a frozen orchestrator is never detected (I2, B7); transcript
+   paths a harness reveals only mid-run can be lost on an adapter crash
+   (rest of CR-A9-2); Copilot and Pi have no model-backed group run yet.
+6. Landing: remove the experimental marker, list `a2a-peers`, `a2a-task`
+   and the `ps --json` `a2a` object in `AGENTS.md` as integration contracts
+   (CR-A13-5), write the PR `changelog` block (including the `a2a_*` keys
+   that now appear in `ps --json` `options` for every session), open the PR.
+   No tracking issue exists yet.
 
 ## How parallel work is organized
 

@@ -48,13 +48,14 @@
 <body>
 
 <h1>Agent-to-Agent communication for Enclave</h1>
-<p class="meta">Design proposal, draft 6, revision 3. November 2026. Branch <code>a2a</code>. Design contracts settled with Astra after four review rounds. <strong>Not yet called converged</strong>: the A2A spec pin includes a carrier check that can still force a design change, and prototypes P1 to P3 are evidence gates. <span class="status">contracts settled, gates open</span></p>
+<p class="meta">Design proposal, draft 6, revision 4 (as built). November 2026. Branch <code>a2a</code>. Design contracts settled with Astra after four review rounds. The spec pin, the carrier check and prototypes P1 to P3 are done and the design is implemented on the branch, behind an experimental marker. Where this text and the change-request log in <a href="interfaces.md">interfaces.md</a> disagree, the log wins. <span class="status">implemented, experimental</span></p>
 
-<div class="decision"><strong>Remaining gates.</strong>
+<div class="decision"><strong>Gates: closed and still open.</strong>
 <ol>
-  <li><strong>Spec pin and carrier check</strong> (design-change gate): pin one tagged A2A release and confirm it has a legal carrier for every custom representation in <a href="#carriers">section 4</a>. A missing carrier is a design change, not an implementation detail.</li>
-  <li><strong>P1, P2, P3</strong> (evidence gates): listed in <a href="#scope">section 23</a>. They validate the contracts; they do not reopen them unless they fail.</li>
-  <li><strong>Bounds</strong>: numerical measurement during the prototypes (<a href="#bounds">section 17</a>).</li>
+  <li><strong>Spec pin and carrier check</strong>: closed. A2A v1.0.1, every carrier legal (<a href="#carriers">section 4</a>, <a href="spec-pin.md">spec-pin.md</a>).</li>
+  <li><strong>P1, P2, P3</strong>: closed on Docker and on rootless Podman with <code>isolate=true</code>. Their corrections are folded in below and listed in <a href="#scope">section 23</a>. Evidence in <a href="prototypes.md">prototypes.md</a> and <code>reports/</code>.</li>
+  <li><strong>Bounds</strong>: measured and shipped as options (<a href="#bounds">section 17</a>).</li>
+  <li><strong>Still open before the experimental marker comes off</strong>: Podman <code>isolate=strict</code>, Docker <code>userns-remap</code>, SELinux and the rpm package have never run on real infrastructure; a frozen orchestrator is not detected. See <a href="#open">open items</a>.</li>
 </ol>
 </div>
 
@@ -128,7 +129,7 @@
 
 <h2 id="protocol">4. The A2A protocol, spec pin and carrier check</h2>
 <p>A2A (Agent2Agent, originally from Google, now a Linux Foundation project) is the open protocol for agents delegating work to agents.</p>
-<div class="decision"><strong>Gate:</strong> no Go type is written before one tagged A2A release is pinned here, with version and spec URL. We speak the <strong>JSON-RPC binding only</strong>. Every method name, the agent card path, the task state list and the message and artifact shapes below must be validated against the pinned document. The names here are from memory of the 0.3 binding and the spec has moved since. Pinned version: A2A v1.0.1 (wire version <code>1.0</code>), <a href="https://a2a-protocol.org/v1.0.1/specification/">spec</a> and <a href="https://github.com/a2aproject/A2A/blob/3303592588e388e62e0f69f701af531d2f4e3991/specification/a2a.proto">normative proto</a>; renames and shapes in <a href="spec-pin.md">spec-pin.md</a>.</div>
+<div class="decision"><strong>Gate:</strong> no Go type is written before one tagged A2A release is pinned here, with version and spec URL. We speak the <strong>JSON-RPC binding only</strong>. Every method name, the agent card path, the task state list and the message and artifact shapes below must be validated against the pinned document. The prose below keeps the short names of the drafts; the wire uses the 1.0 names (<code>SendMessage</code>, <code>SendStreamingMessage</code>, <code>GetTask</code>, <code>CancelTask</code>, <code>SubscribeToTask</code>, <code>TASK_STATE_*</code>). Pinned version: A2A v1.0.1 (wire version <code>1.0</code>), <a href="https://a2a-protocol.org/v1.0.1/specification/">spec</a> and <a href="https://github.com/a2aproject/A2A/blob/3303592588e388e62e0f69f701af531d2f4e3991/specification/a2a.proto">normative proto</a>; renames and shapes in <a href="spec-pin.md">spec-pin.md</a>.</div>
 <dl>
   <dt>Agent card</dt><dd>JSON document under <code>/.well-known/</code>: name, description, skills, service URL, capabilities and security schemes. Cards served by the hub carry hub-facing URLs only (<code>a2a.enclave:&lt;port&gt;/peers/&lt;name&gt;</code>).</dd>
   <dt>JSON-RPC 2.0 over HTTP</dt><dd>Send (request and response), stream (Server-Sent Events), get task, cancel task, resubscribe.</dd>
@@ -183,7 +184,7 @@ flowchart LR
   <li><strong>Group isolation by topology.</strong> Two groups are two hubs; tokens are per group and per member.</li>
   <li><strong>Static hub addresses</strong> survive a hub container restart, so gateway overlays stay valid.</li>
 </ul>
-<div class="note"><strong>Gate P1:</strong> a multi-homed container under rootless Podman with netavark <code>isolate=strict</code> and under Docker, with the evidence list in <a href="#scope">scope</a>. No fallback topology exists.</div>
+<div class="note"><strong>Gate P1, result:</strong> the topology holds on Docker and on rootless Podman with <code>isolate=true</code>. <code>isolate=strict</code> could not be measured (the test host has netavark 1.4.0). No fallback topology exists. Neither engine can attach a container that started without a network, so the hub is created on the first member's bridge and connected to the others afterwards; it still has no network of its own (CR-A6-1).</div>
 
 <h3>Conversation-set isolation</h3>
 <ul>
@@ -275,7 +276,7 @@ flowchart LR
 <div class="note">A later hardening step can remove the gateway INPUT rule by having the adapter open an outbound connection to the hub and multiplexing requests back over it. Not in v1.</div>
 
 <h2 id="adapter">9. In-container pieces</h2>
-<p>One Go binary with two modes, baked into the tool image like the other runtime assets.</p>
+<p>One Go binary, <code>enclave-a2a-agent</code>, with the modes <code>serve</code>, <code>mcp</code>, <code>ctl</code> (host signaling through engine exec) and <code>client</code> (CLI fallback). It is built only into the image variant of sessions started with <code>--peer-group</code>, which has its own hash and its own entrypoint wrapper; images of plain sessions are byte-identical to before.</p>
 
 <h3>Server adapter (worker side)</h3>
 <ul>
@@ -284,19 +285,21 @@ flowchart LR
   <li>Turns each message into a <strong>headless harness invocation</strong>. Each context ID maps to one harness session; follow-up turns use the harness's resume mechanism. Cheap in principle; confirmed by P2.</li>
   <li>Owns the persisted <strong>context table</strong> under a fixed subdirectory of the worker's config store on the host: contexts, bindings, harness session IDs, last activity, task records with state and termination, queued task IDs, tombstones, dedupe records, per-principal admission-stop flags, quarantine state. This is the durable record; the hub has none. The host reads it directly from the filesystem for <code>ps</code> and reconcile.</li>
   <li>Returns the worker's final assistant message only, never the event stream or tool calls. Streams task status and artifact events toward the hub for the UI and audit. Terminal results are retained in the table for later fetch.</li>
-  <li><strong>Tasks are serialized per worker.</strong> The harness runs in its own process group; the adapter confirms termination of every descendant before dequeuing the next task. Queue depth is advertised in the card.</li>
+  <li><strong>Tasks are serialized per worker.</strong> The harness runs in its own process group, but harness tools leave that group (Claude Code starts each Bash command in a new session), so the group is only the first SIGTERM target. The adapter is a child subreaper, SIGKILLs its whole descendant tree, and confirms termination only when that tree is empty. It sweeps the tree after successful runs too, before dequeuing the next task (CR-P2-1). Queue depth is advertised in the card.</li>
   <li><strong>Cancel</strong> leaves the worktree untouched. The orchestrator can ask in the next turn of the same context what state was left.</li>
   <li><strong>No <code>input-required</code>.</strong> A headless run answers and exits. A worker that needs a decision ends its turn with the question; the orchestrator answers with the next message in the same context.</li>
-  <li>The tool's <code>spec.yaml</code> declares the invocation: command template, resume argument, event format. Tools without it cannot run in serve mode and report that clearly.</li>
-  <li>A worker runs in <strong>serve mode</strong>: the adapter is the session's main process. <code>enclave attach</code> shows its log.</li>
+  <li>The tool's <code>spec.yaml</code> declares the invocation in a <code>sandbox.a2a</code> block: command, new-session and resume arguments, event format, version gate, card skills and orchestrator arguments. The event format selects a compiled-in driver. Shipped drivers: Claude Code, Codex, Copilot and Pi (CR-MH-1). Tools without the block cannot run in serve mode and report that clearly; OpenCode and Theia are in that group (see <a href="#scope">scope</a>).</li>
+  <li>Nobody can approve prompts in serve mode, so a worker needs the session's yolo setting and <code>--role worker</code> without it is rejected at start. The adapter adds the harness's bypass flag itself.</li>
+  <li>Harnesses write transcripts where they choose, not into the context table. Each driver reports its per-session paths, when it can before the process starts, and the cleanup inventory deletes those. A native database shared between contexts is never deleted per context; Codex, Copilot and Pi get private storage per context or turn instead (CR-P2-3, CR-MH-2, CR-MH-4).</li>
+  <li>A worker runs in <strong>serve mode</strong>: the adapter is the session's main process, in the foreground without a TTY, one terminal pane per worker; <code>--background</code> detaches it. Starting a worker as a shell is rejected.</li>
 </ul>
 
 <h3>Client (orchestrator side)</h3>
 <ul>
   <li>Exposed to the interactive agent as a stdio <strong>MCP server</strong> with tools <code>list_peers</code>, <code>send_task</code>, <code>get_task</code>, <code>cancel_task</code>.</li>
   <li>Holds the authenticated <strong>orchestrator liveness connection</strong> to the hub for as long as the client process runs.</li>
-  <li><strong><code>send_task</code> blocks</strong> up to a wait bound and returns the final message on a terminal state. When the bound elapses it returns a task handle with the <em>actual</em> current state: submitted with queue position, or working. The task continues; <code>get_task</code> retrieves it. A wait timeout is never a cancellation.</li>
-  <li><strong>Explicit retries only.</strong> Each send carries a client message ID. A send is a retry only when flagged as one; the client preserves the message ID and retry flag across its own reconnects. Unflagged sends are new tasks.</li>
+  <li><strong><code>send_task</code> blocks</strong> up to a wait bound and returns the final message on a terminal state. The MCP bound is 90 s, because interactive Claude Code moves any MCP call to the background after 120 s and the model then holds a Claude task ID instead of our handle (CR-P3-1). When the bound elapses it returns a task handle with the <em>actual</em> current state: submitted with queue position, or working. The task continues; <code>get_task</code> retrieves it. A wait timeout is never a cancellation.</li>
+  <li><strong>Explicit retries only.</strong> Each send carries a client message ID. A send is a retry only when flagged as one; the client preserves the message ID and retry flag across its own restarts in a durable send journal (message ID, peer, context, content hash, never the text), written before each send. <code>get_task</code> without a handle lists recent handles (CR-P3-2). Unflagged sends are new tasks.</li>
   <li><strong>No streaming tool.</strong> Expectation, confirmed by P3 for model-context visibility only: MCP progress notifications do not enter the model context in Claude Code, and a streamed tool result would put the worker's output into the orchestrator's context a second time. P3 makes no claims about billing, caching or token accounting.</li>
   <li>Wired into the harness by a baked MCP config file that the session launch passes to the harness for orchestrator sessions only (<code>sandbox.a2a.orchestratorArgs</code>); settings templates and patches apply to every session and cannot depend on the role. A plain CLI fallback for tools without MCP.</li>
 </ul>
@@ -353,14 +356,14 @@ sequenceDiagram
 <h2 id="departure">13. Liveness, departure, acknowledgments, quarantine</h2>
 <ul>
   <li><strong>Liveness source.</strong> Only the authenticated orchestrator-to-hub connection held by the client establishes orchestrator liveness. Worker connections prove nothing about the orchestrator. The host principal has no liveness.</li>
-  <li><strong>Prompt detection</strong> where a host process exists: a foreground orchestrator's enclave process observes container exit and initiates authoritative departure. Abrupt loss of that enclave process (for example <code>kill -9</code>) removes the observer and falls back to the bounded path.</li>
+  <li><strong>Prompt detection</strong> where a host process exists: a foreground orchestrator's enclave process observes container exit and initiates authoritative departure. Abrupt loss of that enclave process (for example <code>kill -9</code>) removes the observer and falls back to the bounded path. An orchestrator container found exited or killed at reconcile is an authoritative departure too.</li>
   <li><strong>Bounded detection</strong> otherwise (background orchestrators, lost observer): liveness connection absent past the reconnect window means <strong>suspected departure</strong>.</li>
   <li><strong>On suspected departure</strong>, each adapter persists an admission-stop flag for that principal, stops dequeuing for it, fails its queued tasks with reason orchestrator-lost, and lets running work continue only to its existing execution deadline. A later reconnect does not silently undo this: admission resumes only after a host reconcile confirms the orchestrator is alive and its generation unchanged.</li>
   <li><strong>Authoritative departure</strong> is a host-observed session stop or removal. The host revokes the inbound token by snapshot revision (proxy ack closes that principal's streams), then requires from <strong>every worker</strong> an acknowledgment carrying three facts: the admission-stop flag for that principal is persisted; queued work for that principal is discarded and recorded as failed with reason orchestrator-lost; running work for that principal is terminated, with the termination field set by the adapter.</li>
   <li><strong>Completion.</strong> The departure is reported complete only when every worker has acknowledged with termination confirmed. A worker that cannot be reached, or reports unconfirmed termination, yields a <strong>degraded</strong> result: the host records a durable reconciliation obligation in the group record, the worker is quarantined, and the departure is <strong>never reported as a successful cancellation</strong>. Reconcile retries the acknowledgments until all are confirmed.</li>
   <li><strong>Connectivity fallback.</strong> Supervisor and proxy acks prove access revocation only. The engine-level disconnect of the hub attachment cuts connectivity when revocation cannot commit; it satisfies none of the three worker facts.</li>
   <li><strong>Quarantine.</strong> A worker that cannot confirm termination accepts no new tasks, records the quarantine in its context table, is reported in <code>ps</code>, and is released only by a host reconcile that confirms no descendant survives. Revocation, admission stop and quarantine are durable in the worker's table and the group record; they survive hub restart and are never cleared by reconnection.</li>
-  <li>This is a stated v1 limit: an unattended background orchestrator's exit is seen within the reconnect window as a suspicion, and confirmed at the next host lifecycle command or <code>enclave a2a reconcile</code>.</li>
+  <li>This is a stated v1 limit: an unattended background orchestrator's exit is seen within the reconnect window as a suspicion, and confirmed at the next host lifecycle command or <code>enclave a2a reconcile</code>. A second, unresolved limit: a frozen (paused) orchestrator keeps its connection and is not detected at all (I2, B7).</li>
 </ul>
 
 <h2 id="failclosed">14. Fail-closed semantics</h2>
@@ -402,7 +405,7 @@ sequenceDiagram
 </ol>
 <ul>
   <li><strong>Teardown</strong> disconnects the hub before removing the session network; the foreign-endpoint rule is amended to recognize enclave-labeled hub endpoints as owned.</li>
-  <li><strong>Reconciliation</strong> runs on every session start, stop, <code>cleanup --ephemeral</code> and <code>enclave a2a reconcile</code>: hubs attached to bridges whose session is gone are disconnected; hubs with zero members are removed; stale attachments past the existing grace period are cleaned like stale networks; uncommitted snapshot revisions are re-published or rolled back; pending departure obligations are retried; quarantined workers are checked and released when no descendant survives; suspected departures are confirmed or cleared; pending cleanup inventory entries are retried.</li>
+  <li><strong>Reconciliation</strong> runs on every <code>--peer-group</code> start, on <code>cleanup --ephemeral</code>, <code>stop --peer-group</code> and every <code>enclave a2a</code> verb. A plain <code>run</code> does no A2A work, and a plain <code>stop</code> reconciles only the groups whose members it stopped. The group record stores the engine that runs the group; a group of another engine or daemon is skipped and reported, never torn down. Reconciliation does this: hubs attached to bridges whose session is gone are disconnected; hubs with zero members are removed; stale attachments past the existing grace period are cleaned like stale networks; uncommitted snapshot revisions are re-published or rolled back; pending departure obligations are retried; quarantined workers are checked and released when no descendant survives; suspected departures are confirmed or cleared; pending cleanup inventory entries are retried.</li>
   <li><strong>Hub lifetime:</strong> first member joins to last member's session container removed. A stopped background worker keeps its network and therefore keeps the hub alive.</li>
   <li><strong>Stopping the orchestrator</strong> is authoritative departure for its principal, leaves background workers up, and prints the member list with the stop command. <code>enclave stop --peer-group &lt;name&gt;</code> stops every member and the hub. No interactive prompt in the stop path.</li>
 </ul>
@@ -423,24 +426,26 @@ sequenceDiagram
 </ul>
 
 <h2 id="bounds">17. Bounds</h2>
-<p>Defaults are placeholders until the prototypes produce numbers. All are options following the usual definition mechanism.</p>
+<p>Shipped defaults, measured in the prototypes. All are options; only the context TTL has a flag, the others are config keys. Durations have minimums (see <code>docs/configuration.md</code>).</p>
 <table>
-<thead><tr><th>Bound</th><th>Placeholder default</th><th>Status</th></tr></thead>
+<thead><tr><th>Bound</th><th>Default</th><th>Config key</th></tr></thead>
 <tbody>
-<tr><td>Queue depth per worker</td><td>8</td><td><span class="open">open</span></td></tr>
-<tr><td>Task execution deadline</td><td>30 min</td><td><span class="open">open</span></td></tr>
-<tr><td>Blocking send wait (MCP and host)</td><td>10 min, then handle</td><td><span class="open">open, P3</span></td></tr>
-<tr><td>Request size (text parts)</td><td>1 MiB</td><td><span class="open">open</span></td></tr>
-<tr><td>Result size</td><td>256 KiB, truncated with marker</td><td><span class="open">open</span></td></tr>
-<tr><td>Retained terminal summaries per worker (hub cache)</td><td>100</td><td><span class="open">open</span></td></tr>
-<tr><td>Dedupe records, task records and tombstones per worker</td><td>1000 or 7 days, whichever first</td><td><span class="open">open</span></td></tr>
-<tr><td>Reconnect window (adapter to hub, and orchestrator liveness)</td><td>60 s</td><td><span class="open">open, P1/P2</span></td></tr>
-<tr><td>Snapshot commit ack timeout</td><td>10 s</td><td><span class="open">open, P1</span></td></tr>
-<tr><td>Worker departure acknowledgment timeout</td><td>30 s, then degraded</td><td><span class="open">open, P2</span></td></tr>
-<tr><td>Host invocation credential lifetime</td><td>15 min or invocation end</td><td><span class="open">open</span></td></tr>
-<tr><td><code>ps</code> record staleness bound</td><td>5 min, then unknown</td><td><span class="open">open</span></td></tr>
-<tr><td>Context idle TTL</td><td>24 h</td><td>decided</td></tr>
-<tr><td>Termination confirmation timeout before quarantine</td><td>10 s, then SIGKILL, then 10 s</td><td><span class="open">open, P2</span></td></tr>
+<tr><td>Queue depth per worker</td><td>8</td><td><code>a2a_queue_depth</code></td></tr>
+<tr><td>Task execution deadline</td><td>30 min</td><td><code>a2a_task_deadline</code></td></tr>
+<tr><td>Blocking send wait, orchestrator (MCP)</td><td>90 s, then handle</td><td><code>a2a_send_wait</code></td></tr>
+<tr><td>Blocking send wait, host (<code>enclave a2a send</code>)</td><td>10 min, then handle</td><td><code>a2a_host_send_wait</code></td></tr>
+<tr><td>Request size (text parts)</td><td>1 MiB</td><td><code>a2a_max_request_size</code></td></tr>
+<tr><td>Result size</td><td>256 KiB, truncated with marker</td><td><code>a2a_max_result_size</code></td></tr>
+<tr><td>Retained terminal summaries per worker (hub cache)</td><td>100</td><td><code>a2a_hub_retained_results</code></td></tr>
+<tr><td>Dedupe records, task records and tombstones per worker</td><td>1000 or 7 days, whichever first</td><td><code>a2a_record_limit</code>, <code>a2a_record_max_age</code></td></tr>
+<tr><td>Reconnect window (adapter to hub, and orchestrator liveness)</td><td>60 s</td><td><code>a2a_reconnect_window</code></td></tr>
+<tr><td>Snapshot commit ack timeout</td><td>5 s</td><td><code>a2a_commit_timeout</code></td></tr>
+<tr><td>Worker departure acknowledgment timeout</td><td>30 s, then degraded</td><td><code>a2a_departure_ack_timeout</code></td></tr>
+<tr><td>Host invocation credential lifetime</td><td>Operation bound plus 60 s, capped at 15 min</td><td><code>a2a_credential_lifetime</code></td></tr>
+<tr><td><code>ps</code> record staleness bound</td><td>5 min, then unknown</td><td><code>a2a_status_staleness</code></td></tr>
+<tr><td>Context idle TTL</td><td>24 h</td><td><code>a2a_context_ttl</code></td></tr>
+<tr><td>Termination confirmation timeout before quarantine</td><td>10 s, then SIGKILL, then 10 s</td><td><code>a2a_termination_timeout</code></td></tr>
+<tr><td>Adapter heartbeat</td><td>30 s</td><td>constant, no option</td></tr>
 </tbody>
 </table>
 
@@ -494,14 +499,15 @@ sequenceDiagram
 </table>
 <h3><code>ps --json</code> a2a object</h3>
 <p>Fields: <code>group</code>, <code>groupGeneration</code>, <code>role</code>, <code>generation</code>, <code>port</code>, <code>hub</code>, <code>snapshotRevision</code>, <code>quarantine</code>, <code>admissionStop</code>, <code>departure</code>. The last three are <strong>tri-state strings</strong> <code>yes</code>, <code>no</code>, <code>unknown</code>, each paired with a <code>…At</code> timestamp and a <code>…Source</code> of <code>worker-table</code> or <code>group-record</code>. The authoritative source is the worker's context table read directly from the host filesystem; the group record supplies host-confirmed departures and obligations. A record older than the staleness bound reads as <code>unknown</code>. Never <code>no</code> by default; absence of data is <code>unknown</code>.</p>
-<p>Tool extension <code>spec.yaml</code> gains an <code>a2a</code> block: headless command template, resume argument, event format. Agent card skills come from the tool spec only in v1.</p>
+<p>Tool extension <code>spec.yaml</code> gains a <code>sandbox.a2a</code> block: <code>command</code>, <code>newSessionArgs</code>, <code>resumeArgs</code>, <code>eventFormat</code>, <code>versionCommand</code>, <code>versions</code>, <code>skills</code>, <code>orchestratorArgs</code>. Agent card skills come from the tool spec only in v1.</p>
+<p>As built, <code>--peer-group</code> also requires <code>--name</code>, the host verbs take <code>--wait</code> and <code>--backend</code>, and <code>task retry</code> accepts a message ID. Exit codes, the JSON kinds <code>a2a-peers</code> and <code>a2a-task</code> and the full option list are in <code>docs/cli-reference.md</code> and <a href="interfaces.md">interfaces.md</a> sections 9 and 10.</p>
 
 <h2 id="cost">21. Token cost and when to use it</h2>
 <table>
 <thead><tr><th>Cost</th><th>Orchestrator</th><th>Worker</th></tr></thead>
 <tbody>
 <tr><td>Protocol framing</td><td>Zero, envelopes never reach a model</td><td>Zero</td></tr>
-<tr><td>MCP tool definitions</td><td>A few hundred tokens once per session</td><td>None</td></tr>
+<tr><td>MCP tool definitions</td><td>About 340 tokens for the four definitions; about 67 measured in Claude Code, which loads tool schemas lazily</td><td>None</td></tr>
 <tr><td>Provenance prefix</td><td>None</td><td>Roughly 20 to 30 tokens per message</td></tr>
 <tr><td>Task text and result</td><td>Once each, like a subagent prompt and report</td><td>Once each</td></tr>
 <tr><td>Fresh context</td><td>None</td><td>Full harness system prompt per context ID</td></tr>
@@ -514,11 +520,17 @@ sequenceDiagram
   <li><strong>Protocol layer:</strong> JSON-RPC 2.0, HTTP, SSE. Go standard library.</li>
   <li><strong>A2A Go SDK:</strong> not used. Hand-written subset validated against the pinned spec, in <code>internal/a2a</code>.</li>
   <li><strong>Hub image:</strong> gateway base image and build pipeline, including the supervisor pattern.</li>
-  <li><strong>In-container binary:</strong> a second Go entry point, built like the gateway binary and copied into the tool image.</li>
+  <li><strong>In-container binary:</strong> a second Go entry point, built like the gateway binary and copied into the peer-group image variant. It links <code>golang.org/x/sys</code> and <code>golang.org/x/term</code>, which the module already used, so that variant's build needs network access like the gateway proxy build.</li>
 </ul>
 
 <h2 id="scope">23. Scope: prototypes, v1 and later</h2>
 <h3>Prototypes (evidence gates)</h3>
+<p>All three ran. The lists below are the original evidence lists. Results that changed the design:</p>
+<ul>
+  <li><strong>P1.</strong> A conntrack flush stalls connections without closing them, so the supervisor aborts hub sockets to a removed member first (CR-P1D-1). A compromised supervisor reaches further than the gateways' INPUT rules, so member gateways drop hub-sourced traffic except to the adapter port (CR-P1D-2, <a href="#hub">section 6</a>). Hub egress to host and internet is <em>not</em> blocked below the hub. The hub sets <code>TCP_USER_TIMEOUT</code> to detect silent loss (CR-P1D-3) and sends gratuitous ARP after every restart and apply, because Podman gateways kept the stale MAC for up to 54 s (CR-P1P-1). <code>isolate=strict</code> was not measured.</li>
+  <li><strong>P2.</strong> Killing the process group does not stop harness tools; the subreaper mechanism in <a href="#adapter">section 9</a> replaces it (CR-P2-1). Unknown stream events are skipped, not errors (CR-P2-2). Transcripts cannot be redirected into the context table (CR-P2-3).</li>
+  <li><strong>P3.</strong> The 10 min send wait fails in interactive Claude Code; the MCP wait is 90 s (CR-P3-1). Retry identity needs a durable journal (CR-P3-2).</li>
+</ul>
 <ol>
   <li><strong>P1, topology, hub and gateway.</strong> On rootless Podman with strict isolation and on Docker: a multi-homed hub reaches each gateway's adapter port and nothing else; members cannot reach each other directly or via the hub except through hub-mediated A2A; existing published ports stay unreachable to peers; hub egress to the internet and host is blocked; IPv6 and link-local traffic is dropped; DNS record and NAT exemption work and survive a policy reload; the session-local overlay survives reload; <strong>snapshot swap is visible to supervisor and proxy on both engines, both ack the same revision, a mixed or corrupt snapshot is refused and the last committed revision retained with status reported</strong>; removal under active traffic kills existing connections (conntrack); an invalid update followed by engine disconnect cuts connectivity; hub container restart keeps static addresses and reloads <code>current</code>; token revocation by revision closes existing streams; join, leave, failed join with rollback, concurrent stop, crash and stale-attachment recovery behave as in <a href="#lifecycle">lifecycle</a>; unattended background orchestrator exit yields suspected departure within the window; verified supervisor and proxy capability and mount restrictions, including secrets file readability; <strong>hub INPUT rules block a non-isolated bystander under <code>isolate=true</code>, the full matrix holds under both isolate values, and a bystander reaching a member's published port under <code>isolate=true</code> is recorded as the known difference</strong> (CR-1).</li>
   <li><strong>P2, harness and adapter.</strong> Claude Code headless with resume by context; dedupe admission and cleanup inventory persisted before execution and a crash between them leaves a deletable entry and no orphan task; cancellation kills the process group and every descendant with confirmed termination; an escaped descendant yields quarantine; adapter restart with a surviving subprocess yields outcome unknown; hub epoch change ends running and queued old-epoch tasks; admission-stop, quarantine and departure obligations persist across adapter and hub restart; <strong>three-fact departure acknowledgments are produced, a missing ack yields degraded with a durable obligation, and reconcile completes it later</strong>; active and queued contexts never expire; teardown deletes from the inventory after members have disappeared and never touches another generation's store.</li>
@@ -527,9 +539,9 @@ sequenceDiagram
 <h3>v1</h3>
 <ol>
   <li>Hub per group: root supervisor and unprivileged proxy fed by the revisioned snapshot with manifest verification and status acks, name-based proxy with SSE passthrough and principal forwarding, delivery errors, orchestrator liveness, status-only audit, advisory cache, stateless restart with epoch.</li>
-  <li>Gateway: hub attachment with static address, session-local overlay file, scoped INPUT and OUTPUT rules, NAT exemption, DNS record, restricted mode and strict-Podman only.</li>
-  <li>Host lifecycle: group record, group generation and host principal, group lock, inventory-first join with rollback, revisioned leave with proxy, supervisor and worker acknowledgments and engine-disconnect fallback, teardown disconnect, reconciliation on start, stop, cleanup and on demand, invocation credentials.</li>
-  <li>Adapter in serve mode for <strong>Claude Code only</strong>, text parts only, persisted context table with principal and generation binding, worker-issued IDs, dedupe, tombstones, admission-stop and quarantine records, departure acknowledgments, serialized tasks in process groups, confirmed termination, adapter-authoritative outcomes, cancel without revert, no input-required, idle TTL with active exclusion.</li>
+  <li>Gateway: hub attachment with static address, session-local overlay file, scoped INPUT and OUTPUT rules, NAT exemption, DNS record, restricted mode only; Podman with any isolate option (CR-1).</li>
+  <li>Host lifecycle: group record, group generation and host principal, group lock, inventory-first join with rollback, revisioned leave with proxy, supervisor and worker acknowledgments and engine-disconnect fallback, teardown disconnect, reconciliation on peer-group start, member stop, cleanup and on demand, invocation credentials.</li>
+  <li>Adapter in serve mode for <strong>Claude Code, Codex, Copilot and Pi</strong> (originally Claude Code only; extended by CR-MH-1), each also as an MCP orchestrator, mixed freely in one group. Text parts only, persisted context table with principal and generation binding, worker-issued IDs, dedupe, tombstones, admission-stop and quarantine records, departure acknowledgments, serialized tasks, confirmed termination of the whole descendant tree, adapter-authoritative outcomes, cancel without revert, no input-required, idle TTL with active exclusion.</li>
   <li>MCP client with four tools, liveness connection, blocking send with handle, explicit retries, CLI fallback.</li>
   <li>Options and verbs from the CLI table, bounds as options, <code>ps --json</code> tri-state object.</li>
   <li>Shipped provenance skill.</li>
@@ -541,13 +553,23 @@ sequenceDiagram
   <li>Authenticated worker reconnect preserving tasks across hub epochs.</li>
   <li>Explicit context inheritance for a replacement orchestrator.</li>
   <li>Push notifications terminating at the hub.</li>
-  <li>Adapters for Codex, OpenCode, Pi.</li>
+  <li>OpenCode worker: blocked until its shared transcript database can be isolated or deleted per session (CR-MH-2, <code>reports/P2-opencode.md</code>). Theia: no headless worker protocol.</li>
+  <li>Detection of a frozen orchestrator (I2, B7).</li>
+  <li>Recording transcript paths a harness only reveals mid-run, so an adapter crash cannot lose them (rest of CR-A9-2).</li>
   <li>Several orchestrators per group; nested groups.</li>
   <li>Reverse-tunnel mode removing the INPUT rule.</li>
   <li>Parallel read-only tasks per worker; cancel with revert.</li>
   <li>Feature-contributed card skills; file and data parts.</li>
   <li>Host-side external peers over a published loopback port, under explicit opt-in.</li>
   <li>Outside A2A: scope the gateway's published-port INPUT rules to the engine's forwarding source, closing the <code>isolate=true</code> published-port exposure for every session.</li>
+</ul>
+
+<h3 id="open">Open before the experimental marker comes off</h3>
+<ul>
+  <li><strong>Never run on real infrastructure:</strong> Podman <code>isolate=strict</code> (needs netavark 1.7 or later), Docker <code>userns-remap</code> (test ready behind <code>ENCLAVE_TEST_USERNS_REMAP=1</code>), SELinux enforcing for the overlay mount, the rpm package build.</li>
+  <li><strong>Live coverage:</strong> the mixed Claude and Codex review passed on Docker and Podman with either as lead (<code>reports/I3.md</code>). Copilot and Pi are verified against local test providers only, not in a model-backed group. The reworked degraded-departure step of <code>scripts/a2a-smoke.sh</code> has not been run.</li>
+  <li><strong>Review:</strong> the branch was built by agents package by package and reviewed through reports and gates. No line-by-line code review or security review has been done.</li>
+  <li><strong>Landing:</strong> remove the experimental marker, list <code>a2a-peers</code>, <code>a2a-task</code> and the <code>ps --json</code> <code>a2a</code> object in <code>AGENTS.md</code> as integration contracts (CR-A13-5), and write the changelog block, including the <code>a2a_*</code> keys that now appear in <code>ps --json</code> <code>options</code> for every session.</li>
 </ul>
 
 <h2 id="decisions">24. Decision log</h2>
@@ -605,7 +627,15 @@ sequenceDiagram
 <tr><td>Provenance</td><td>From authenticated principal; metadata plus one fixed-format line and a shipped skill</td><td>The harness only sees text.</td></tr>
 <tr><td>Teardown with mixed members</td><td>Workers stay up; <code>stop --peer-group</code> for the bulk case</td><td>A warm worker is what the user paid for.</td></tr>
 <tr><td>Agent card skills</td><td>Tool spec only in v1</td><td>One source to validate first.</td></tr>
-<tr><td>Bounds</td><td>Placeholders until prototypes produce numbers</td><td>Numbers, not design.</td></tr>
+<tr><td>Bounds</td><td>Measured in P1 to P3 and shipped as config options; MCP and host send waits split</td><td>Numbers, not design. Claude Code backgrounds MCP calls after 120 s.</td></tr>
+<tr><td>Termination mechanism</td><td>Child subreaper and descendant-tree kill; process group is only the first signal target; sweep after success too</td><td>Harness tools leave the process group (P2).</td></tr>
+<tr><td>Hub blast radius</td><td>Member gateways drop hub traffic except to the adapter port; hub egress below the hub not blocked in v1</td><td>Measured in P1; chosen by the maintainer (CR-P1D-2).</td></tr>
+<tr><td>Worker self-integrity</td><td>Accepted and documented; no separate adapter uid</td><td>A worker is trusted about itself; isolation between members does not rest on its table (CR-W0B-3).</td></tr>
+<tr><td>Agent binary placement</td><td>Separate image variant for <code>--peer-group</code> sessions</td><td>Plain session images must not change or rebuild.</td></tr>
+<tr><td>Worker permissions</td><td>Worker requires yolo; rejected otherwise</td><td>Serve mode cannot answer prompts; no silent escalation.</td></tr>
+<tr><td>Plain sessions</td><td>No A2A work on plain <code>run</code>; plain <code>stop</code> reconciles only affected groups</td><td>Users who once used A2A must not pay reconcile latency.</td></tr>
+<tr><td>Engine binding</td><td>Group record stores engine name and root; other engines skip the group</td><td>A reconcile under the wrong engine tore down a live group (I2, B2).</td></tr>
+<tr><td>Harness scope</td><td>Claude Code, Codex, Copilot, Pi as workers and orchestrators; OpenCode and Theia excluded</td><td>Maintainer request after v1 (CR-MH-1); a shared native database cannot be cleaned per context (CR-MH-2).</td></tr>
 </tbody>
 </table>
 

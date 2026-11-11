@@ -135,7 +135,7 @@ func TestNativeProxyMITMAndReadinessAfterHandlerInstall(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	ready := false
-	err := Run(ctx, Options{HTTPAddr: "127.0.0.1:0", HTTPSAddr: "127.0.0.1:0", TLSStore: tlsstore.New(t.TempDir()), NativeAuth: p.nativeAuth, OnReady: func() { ready = true; cancel() }})
+	err := Run(ctx, Options{HTTPPort: freeLoopbackPort(t), HTTPSPort: freeLoopbackPort(t), TLSStore: tlsstore.New(t.TempDir()), NativeAuth: p.nativeAuth, OnReady: func() { ready = true; cancel() }})
 	if err != nil || !ready {
 		t.Fatalf("native proxy not installed before readiness: %v", err)
 	}

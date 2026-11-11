@@ -171,7 +171,7 @@ sequenceDiagram
     Tool->>NAT: Connect address:443
     NAT->>Proxy: Redirect to loopback :15443
     Proxy->>Proxy: Read original destination (SO_ORIGINAL_DST)<br/>and parse SNI from ClientHello
-    alt network_log=requests
+    alt network_log=requests or full (no captures)
         Proxy->>Proxy: Terminate TLS using local CA leaf cert
         Proxy->>Dst: Forward each request to the original destination
         Proxy->>Log: HTTP pass (unrestricted) per request

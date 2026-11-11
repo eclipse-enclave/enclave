@@ -46,6 +46,8 @@ mode, with the rule `unrestricted`:
 
 - Plaintext HTTP gets an `http` event per request; HTTPS gets a `tcp` event per
   connection, or an `http` event per request with `--network-log=requests`.
+  `--network-log=full` logs like `requests` here and warns that no captures
+  are stored; full capture requires restricted networking.
 - TLS without SNI and non-HTTP traffic on these ports, meaning anything that
   does not open with an HTTP/1 request line, are passed through and logged as
   a `tcp` event without a domain; so is a first line longer than 8 KiB.
@@ -335,7 +337,7 @@ at startup) and `NODE_EXTRA_CA_CERTS`. They are set on the container, so
 CA persists on the host; leaf certificates stay in each gateway container.
 Git needs its own variable because its TLS library ignores `SSL_CERT_FILE`.
 
-`--network-log=full` does the same and also stores headers and bodies; see
+`--network-log=full` does the same and, in restricted mode, also stores headers and bodies; see
 [Full capture](#full-capture).
 
 ### Rotation
@@ -486,8 +488,9 @@ proxy terminates:
 - SSH on port 22 bypasses the proxy and is never recorded.
 - Clients that pin certificates or use their own trust store fail in this mode
   instead of being captured.
-- With `--allow-all-network`, policy mode `unrestricted`, or the `qemu` backend
-  there is no gateway, so nothing is captured.
+- With `--allow-all-network` or policy mode `unrestricted`, `full` logs like
+  `requests` without storing captures. With `--disable-gateway` or the `qemu`
+  backend there is no gateway, so neither requests nor captures are recorded.
 
 ### Reading captures
 

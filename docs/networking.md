@@ -325,6 +325,10 @@ does not mean a quiet session:
 - Unrestricted sessions have further gaps; see
   [Unrestricted mode](#unrestricted-mode).
 
+The audit log keeps a 16 KiB prefix of unusually long methods, domains, paths,
+and content types, followed by `...[truncated]`. Forwarded requests and full-capture
+URLs are unchanged.
+
 ### Request-level logging
 
 `enclave --network-log=requests` routes all allowlisted HTTPS through the

@@ -775,3 +775,25 @@ func TestProxyCaptureOmitsRepeatedGzipEncodingWithoutClientAcceptEncoding(t *tes
 		t.Fatalf("omitted body files: %v", matches)
 	}
 }
+
+func TestAuditTruncationPreservesRelayedAndCapturedURL(t *testing.T) {
+	seen := make(chan string, 1)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		seen <- req.URL.RequestURI()
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer upstream.Close()
+	host, hostPort := upstreamHost(t, upstream)
+	p, dir, logPath := captureProxy(t, []string{host}, nil, netcapture.Options{})
+	path := "/" + strings.Repeat("x", 32*1024) + "?query=kept"
+	wantURL := "http://" + hostPort + path
+	req := httptest.NewRequest(http.MethodGet, wantURL, nil)
+	p.handler("http")(httptest.NewRecorder(), req)
+	event, record, _ := capturedEvent(t, logPath, dir)
+	if !strings.HasSuffix(event.Path, "...[truncated]") || req.URL.String() != wantURL || record.Request.URL != wantURL {
+		t.Fatal("audit truncation changed the request or captured URL")
+	}
+	if got := <-seen; got != path {
+		t.Fatal("audit truncation changed the relayed URL")
+	}
+}

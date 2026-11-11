@@ -9,8 +9,10 @@ package app
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
@@ -23,6 +25,7 @@ import (
 	"enclave/internal/config"
 	"enclave/internal/logx"
 	"enclave/internal/model"
+	"enclave/internal/netcapture"
 	"enclave/internal/netlog"
 	"enclave/internal/netlogview"
 	"enclave/internal/util"
@@ -32,7 +35,9 @@ import (
 // name them in messages, and which session to restrict events to.
 type networkLogScope struct {
 	paths []string
-	label string
+	// captureRoots are the full capture stores next to paths.
+	captureRoots []string
+	label        string
 	// session restricts events to one session. Concurrent sessions of the same
 	// project and tool share a log file, so scoping the file is not enough.
 	session string
@@ -59,6 +64,9 @@ func runNetworkLog(input *CommandInput) int {
 	if len(scope.paths) == 0 {
 		logx.Errorf("No network log found for %s", scope.label)
 		return 1
+	}
+	if id := strings.TrimSpace(view.ShowCapture); id != "" {
+		return showNetworkCapture(scope, id, view.JSON)
 	}
 	filter.Session = scope.session
 	logx.Debugf("Reading network log for %s (%d target(s))", scope.label, len(scope.paths))
@@ -168,9 +176,10 @@ func projectNetworkLogScope(input *CommandInput, home string, session string) (n
 		label = fmt.Sprintf("session %s in %s", session, label)
 	}
 	return networkLogScope{
-		paths:   []string{config.HostProjectNetworkLogPath(home, project.Hash, input.Options.Tool)},
-		label:   label,
-		session: session,
+		paths:        []string{config.HostProjectNetworkLogPath(home, project.Hash, input.Options.Tool)},
+		captureRoots: []string{config.HostProjectNetworkCaptureDir(home, project.Hash, input.Options.Tool)},
+		label:        label,
+		session:      session,
 	}, nil
 }
 
@@ -198,6 +207,7 @@ func runningGatewayScope(input *CommandInput, home string, sessionName string) (
 	}
 
 	scope.paths = networkLogPaths(home, gateways)
+	scope.captureRoots = networkCaptureRoots(home, gateways)
 	return scope, nil
 }
 
@@ -210,6 +220,16 @@ func networkLogPaths(home string, gateways []backend.GatewayInfo) []string {
 		paths = append(paths, config.HostProjectNetworkLogPath(home, gateway.ProjectHash, gateway.Tool))
 	}
 	return util.Dedupe(paths)
+}
+
+// networkCaptureRoots is the set of capture stores of the given gateways,
+// collapsed like networkLogPaths.
+func networkCaptureRoots(home string, gateways []backend.GatewayInfo) []string {
+	roots := make([]string, 0, len(gateways))
+	for _, gateway := range gateways {
+		roots = append(roots, config.HostProjectNetworkCaptureDir(home, gateway.ProjectHash, gateway.Tool))
+	}
+	return util.Dedupe(roots)
 }
 
 func sessionRecorded(events []netlog.Event, session string) bool {
@@ -432,4 +452,63 @@ func followNetworkLog(paths []string, offsets map[string]int64, filter netlogvie
 		return 1
 	}
 	return flushNetworkLog(out)
+}
+
+// showNetworkCapture prints one full capture. With --json the record is
+// emitted as stored, compacted onto one line; the bodies stay in their files.
+func showNetworkCapture(scope networkLogScope, id string, asJSON bool) int {
+	path, err := netcapture.Find(scope.captureRoots, scope.session, id)
+	if errors.Is(err, netcapture.ErrNotFound) {
+		logx.Errorf("No capture %s for %s; it was pruned, or its session did not run with --network-log=full", id, scope.label)
+		return 1
+	}
+	if err != nil {
+		logx.Errorf("%v", err)
+		return 1
+	}
+
+	out := bufio.NewWriter(os.Stdout)
+	if asJSON {
+		raw, err := netcapture.ReadRecord(path)
+		if err != nil {
+			logx.Errorf("Failed to read capture: %v", err)
+			return 1
+		}
+		var compact bytes.Buffer
+		if err := json.Compact(&compact, raw); err != nil {
+			logx.Errorf("Failed to read capture %s: %v", path, err)
+			return 1
+		}
+		compact.WriteByte('\n')
+		if _, err := out.Write(compact.Bytes()); err != nil {
+			logx.Errorf("Failed to write output: %v", err)
+			return 1
+		}
+		return flushNetworkLog(out)
+	}
+
+	record, err := netcapture.Load(path)
+	if err != nil {
+		logx.Errorf("Failed to read capture: %v", err)
+		return 1
+	}
+	view := netlogview.CaptureView{
+		Record:  record,
+		Path:    path,
+		Request: readCapturedBody(path, record.Request.Body),
+	}
+	if record.Response != nil {
+		view.Response = readCapturedBody(path, record.Response.Body)
+	}
+	render := netlogview.RenderOptions{Color: logx.ColorEnabledFor(os.Stdout)}
+	if err := netlogview.WriteCapture(out, view, render); err != nil {
+		logx.Errorf("Failed to write output: %v", err)
+		return 1
+	}
+	return flushNetworkLog(out)
+}
+
+func readCapturedBody(recordPath string, body *netcapture.Body) netlogview.CapturedBody {
+	path, data, err := netcapture.ReadBody(recordPath, body)
+	return netlogview.CapturedBody{Data: data, Path: path, Err: err}
 }

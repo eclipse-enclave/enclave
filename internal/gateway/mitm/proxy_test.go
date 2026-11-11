@@ -19,6 +19,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -28,6 +29,8 @@ import (
 	"testing"
 	"time"
 
+	"enclave/internal/app"
+	"enclave/internal/config"
 	"enclave/internal/domainpattern"
 	"enclave/internal/model"
 	"enclave/internal/netlog"
@@ -918,4 +921,116 @@ func readAuditEvents(t *testing.T, path string) []netlog.Event {
 		events = append(events, event)
 	}
 	return events
+}
+
+func TestOversizedHTTPAuditPathsRemainVisible(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	for _, name := range []string{"XDG_CONFIG_HOME", "XDG_STATE_HOME", "XDG_CACHE_HOME"} {
+		t.Setenv(name, t.TempDir())
+	}
+	root, err := filepath.Abs("../../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(model.EnvHome, root)
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	project, err := config.ResolveProjectFromDir(cwd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	logPath := config.HostProjectNetworkLogPath(home, project.Hash, "codex")
+	if err := os.MkdirAll(filepath.Dir(logPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for _, mode := range []string{model.NetworkModeRestricted, model.NetworkModeUnrestricted} {
+		t.Run(mode, func(t *testing.T) {
+			audit, err := netlog.NewAppender(logPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			p := newProxy(nil, nil, nil, false, audit, testSession)
+			p.setCapabilities(capabilitiesFor(mode))
+			req := httptest.NewRequest(http.MethodGet, "http://denied.example/"+strings.Repeat("<", 400*1024), nil)
+			wantVerdict, wantRule := netlog.VerdictDeny, netlog.RuleAllowlist
+			if mode == model.NetworkModeUnrestricted {
+				upstream := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }))
+				upstream.Config.MaxHeaderBytes = 4 * 1024 * 1024
+				upstream.Start()
+				defer upstream.Close()
+				dst := netip.MustParseAddrPort(upstream.Listener.Addr().String())
+				req = req.WithContext(context.WithValue(req.Context(), originalDstKey{}, dst))
+				wantVerdict, wantRule = netlog.VerdictPass, netlog.RuleUnrestricted
+			}
+			p.handler("http")(httptest.NewRecorder(), req)
+			_ = audit.Close()
+			raw, err := os.ReadFile(logPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			scanned, err := netlog.Scan(bytes.NewReader(raw))
+			if err != nil || scanned.Skipped != 0 || len(scanned.Events) != 1 || !strings.HasSuffix(scanned.Events[0].Path, "...[truncated]") {
+				t.Fatalf("scan error = %v, skipped = %d, events = %d", err, scanned.Skipped, len(scanned.Events))
+			}
+			if event := scanned.Events[0]; event.Verdict != wantVerdict || event.Rule != wantRule {
+				t.Fatalf("audit verdict/rule = %s/%s, want %s/%s", event.Verdict, event.Rule, wantVerdict, wantRule)
+			}
+			for _, asJSON := range []bool{false, true} {
+				out, err := os.CreateTemp(t.TempDir(), "network-log-output")
+				if err != nil {
+					t.Fatal(err)
+				}
+				args := []string{"--allow-root", "--tool", "codex", "network", "log"}
+				if asJSON {
+					args = append(args, "--json")
+				}
+				previous := os.Stdout
+				os.Stdout = out
+				code := app.Run(args)
+				os.Stdout = previous
+				_ = out.Close()
+				output, err := os.ReadFile(out.Name())
+				if err != nil || code != 0 || !bytes.Contains(output, []byte("...[truncated]")) {
+					t.Fatalf("network log (json=%v): code=%d, read error=%v", asJSON, code, err)
+				}
+				if asJSON {
+					var event netlog.Event
+					if err := json.Unmarshal(output, &event); err != nil || event.Path != scanned.Events[0].Path {
+						t.Fatalf("JSON event path changed: %v", err)
+					}
+				}
+			}
+			if err := os.Truncate(logPath, 0); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestHTTPAuditBoundsAllUntrustedFields(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "network.log")
+	audit, err := netlog.NewAppender(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := newProxy(nil, nil, nil, false, audit, testSession)
+	huge := strings.Repeat("\x00", 1024*1024)
+	p.logEvent(netlog.Event{Type: netlog.TypeHTTP, Verdict: netlog.VerdictDeny, Method: huge, Domain: huge, Path: huge, ContentType: huge})
+	_ = audit.Close()
+	raw, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := netlog.Scan(bytes.NewReader(raw))
+	if err != nil || result.Skipped != 0 || len(result.Events) != 1 {
+		t.Fatalf("scan error=%v, skipped=%d, events=%d", err, result.Skipped, len(result.Events))
+	}
+	for _, field := range []string{result.Events[0].Method, result.Events[0].Domain, result.Events[0].Path, result.Events[0].ContentType} {
+		if !strings.HasSuffix(field, "...[truncated]") {
+			t.Fatal("oversized audit field lacks truncation marker")
+		}
+	}
 }

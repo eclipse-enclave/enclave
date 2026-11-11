@@ -89,6 +89,24 @@ versions into `~/.local/bin` (bump them there). Inside Enclave, the
 `enclave-dev` feature from enclave-extensions installs the same versions
 (with `+golang-dev`).
 
+## Full network capture acceptance testing
+
+Unit tests drive the MITM proxy against in-process upstreams. On a host with
+Docker and with rootless Podman, check what they cannot:
+
+- Start a session with `--network-log=full`, make the agent call its model API,
+  and confirm `enclave network log --type http` rows end in `capture <id>` and
+  `enclave network log --show-capture <id>` shows both messages, with a streamed
+  response complete once the stream has ended.
+- Confirm the session directory under `logs/capture/` is readable and deletable
+  by the host user while the gateway's proxy writes it, and that
+  `enclave cleanup` removes it without `sudo` or `podman unshare`.
+- With a declared secret released by the gateway, confirm the captured request
+  headers carry the placeholder and `grep -r` over the capture directory finds
+  no real value.
+- Run `enclave network apply` during a session, which restarts the proxy, and
+  confirm capturing continues in the same directory.
+
 ## Code generation
 
 Generated files are checked in. After changing option definitions or tool

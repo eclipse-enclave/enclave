@@ -135,22 +135,33 @@ func TestGatewayEnvironmentCarriesNetworkMode(t *testing.T) {
 	}
 }
 
-// --network-log=requests reaches an observing gateway as it reaches a
-// restricted one; the gateway mounts the CA it decrypts with.
+// Full mode in unrestricted sessions logs requests without a capture store.
 func TestUnrestrictedGatewayReceivesRequestsLogMode(t *testing.T) {
-	b, home := lockinBackend(t)
-	b.opts.NetworkLogMode = model.NetworkLogRequests
-	logPath := lockinEngine(t, backend.NameDocker)
-	req := unrestrictedGatewayRequest(t)
+	for _, engine := range []string{backend.NameDocker, backend.NamePodman} {
+		for _, mode := range []string{model.NetworkLogRequests, model.NetworkLogFull} {
+			t.Run(engine+"/"+mode, func(t *testing.T) {
+				b, home := lockinBackend(t)
+				b.opts.NetworkLogMode = mode
+				logPath := lockinEngine(t, engine)
+				req := unrestrictedGatewayRequest(t)
 
-	if _, err := b.Start(context.Background(), req); err != nil {
-		t.Fatalf("Start() error = %v", err)
-	}
+				if _, err := b.Start(context.Background(), req); err != nil {
+					t.Fatalf("Start() error = %v", err)
+				}
 
-	gw := runInvocation(t, engineInvocations(t, logPath, home), req.Session.Name+model.GatewayContainerSuffix)
-	for _, want := range []string{"--env " + model.EnvNetworkLogMode + "=" + model.NetworkLogRequests, "target=/tls/ca.key"} {
-		if !strings.Contains(gw, want) {
-			t.Errorf("gateway invocation lacks %q:\n%s", want, gw)
+				gw := runInvocation(t, engineInvocations(t, logPath, home), req.Session.Name+model.GatewayContainerSuffix)
+				for _, want := range []string{"--env " + model.EnvNetworkLogMode + "=" + model.NetworkLogRequests, "target=/tls/ca.key"} {
+					if !strings.Contains(gw, want) {
+						t.Errorf("gateway invocation lacks %q:\n%s", want, gw)
+					}
+				}
+				if strings.Contains(gw, model.EnvNetworkCaptureDir) || strings.Contains(gw, "target=/var/log/enclave/capture") {
+					t.Errorf("unrestricted gateway received a capture store:\n%s", gw)
+				}
+				if dir := config.HostProjectNetworkCaptureDir(home, req.Session.ProjectHash, req.Session.Tool); util.PathExists(dir) {
+					t.Errorf("unrestricted session created capture directory %s", dir)
+				}
+			})
 		}
 	}
 }

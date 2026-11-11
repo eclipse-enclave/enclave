@@ -26,117 +26,6 @@ Extensions come from the built-in `extensions/` tree and
 `~/.config/enclave/extensions/`; see
 [Installing extensions](extensions/installing.md).
 
-## Linked worktrees
-
-Worktrees keep their own project layer and project memory by default. To opt
-a repository into the shared context, set this in the main checkout's project
-config. Existing and future worktrees of that repository then inherit:
-
-```json
-{"worktree_inheritance": true}
-```
-
-The same key in the global config opts in every repository, and in a
-worktree's own project config it decides for that worktree only.
-
-When enabled, verified linked worktrees use the main checkout's existing
-project layer, not an additional precedence layer.
-
-Override the setting for one invocation with:
-
-```bash
-enclave --worktree-inheritance=true
-enclave --worktree-inheritance=false network print
-```
-
-The default is `false`. Before selecting the project layer, Enclave resolves
-this setting from CLI, then checkout-local project config, then the verified
-anchor's project config, then global config. Only this key is read from the
-anchor at that point. An anchor's `false` therefore overrides a global `true`,
-and a worktree's own `false` keeps it local either way. The key is not
-supported in tool overrides.
-`config --json` reports the local file as `files.checkout` when the selected
-project file differs. Running sessions retain their selected source through the
-session pin. Metadata mount checks still apply. Saved settings and credentials
-are not rolled back or revoked when switching sources.
-
-The selected anchor supplies project defaults, network policy, gateway
-allowlists, tool settings and patches, skills, secrets, and Theia preferences.
-`enclave config` and `enclave info` show the effective source. If the worktree
-has ignored user overrides or secrets, startup warns with their paths and the
-inherited anchor. These files remain on disk; nothing is copied, merged, or
-migrated.
-
-Opting in trusts all verified worktrees with the anchor's project inputs and
-project memory. Their local config, secrets, and network policy are then
-ignored, including stricter local rules. Review the inherited policy before
-enabling this setting.
-
-The config anchor is the canonical main checkout, or the bare repository
-itself in layouts such as `<repo>/.bare` with sibling `main/` and feature
-checkouts. Enclave verifies both metadata pointers using filesystem reads,
-without running Git. Non-repositories, ordinary checkouts, and submodules use
-their own project layer. When inheriting, malformed or inconsistent worktree
-pointers fail startup instead of silently dropping inherited policy. For a
-worktree moved with plain `mv`, run `git worktree repair` from the main
-repository, passing the moved worktree path if needed, before retrying. There
-is no directory walk-up or sibling-config merge.
-
-Commands that do not start a session instead warn and use checkout-local
-configuration when pointers are broken or the anchor is unsupported, including
-`config`, extension management, and host user commands. The warning states
-that a session start would fail. They never infer a replacement anchor.
-`cleanup --all` reads global configuration only. Run, shell, continue/resume,
-session user commands, and `devcontainer generate` require a valid anchor when
-inheriting. The explicit opt-out selects local inputs without requiring an
-inheritance relationship; invalid external metadata mounts are still skipped.
-
-Existing runtime state stays checkout-local: config stores (including project
-scope auth), env caches, shell history, package caches, generated output,
-network bundles, and logs. Tool-global auth is unchanged. Existing store paths,
-session keys, continuation, and cleanup behavior are preserved; no stores are
-moved or reset.
-
-Project-scoped agent memory follows the anchor only when inheritance is
-enabled. Otherwise it stays checkout-local. Session-scoped memory always stays
-with its coordinating config store. See
-[Agent memory](runtime/stores.md#agent-memory) and the
-[security boundary](security/README.md#worktree-inheritance).
-
-The canonical config anchor and hash are pinned when a session starts.
-`attach`, host Theia, and live network operations use that source rather than
-following changed Git pointers. Missing or redirected pinned anchors are not
-replaced with another layer. Attaching remains possible without config-derived
-tint or host environment if an inherited source is unavailable. Non-YOLO Theia
-sessions need no preferences and do not require the source. Checkout-local pins
-use their recorded config paths even if the checkout was removed or renamed.
-Older sessions without a pin use their checkout-local layer; restart them to
-adopt inherited config.
-The pin fixes the source, not its contents: edits to that source still apply.
-
-### Unsupported anchors
-
-A linked worktree of a `--separate-git-dir` repository can have a verified
-relationship without an identifiable main-checkout anchor. Non-bare common
-directories outside the conventional `<main>/.git` layout, and non-bare layouts
-with `core.worktree`, cannot inherit. Enclave never follows `core.worktree` to
-read another project's configuration. The same applies when repository config
-cannot establish an anchor, including local `include` or `includeIf`
-directives, unsupported syntax, or config larger than the separate 1 MiB read
-limit. Inline comments and ordinary branch-tracking sections are supported. No
-includes are followed.
-
-With inheritance enabled, starting a session in such a worktree fails instead
-of silently using different settings. Set `worktree_inheritance` to `false` in
-that worktree's project config, or pass `--worktree-inheritance=false`, to use
-its checkout-local configuration. An opt-in in the project config of the
-common directory, or of its parent for a `<dir>/.git` layout, counts as
-enabled here even without a global setting. Verified Git metadata mounts still
-work, subject to the normal mount restrictions.
-
-The anchor is decided from the repository `config` file only, which sessions
-mount read-only. Writable paths such as `HEAD` and `refs` do not affect it.
-
 ## Host directories
 
 Paths in these docs use the Linux layout.
@@ -164,7 +53,9 @@ A tool override beats a top-level value in either file, so a global
 `tool_overrides.<tool>` value beats a project's top-level value; between the
 two files' overrides, the project's wins. Lists merge across layers (see
 [List options](#list-options)); string maps such as `host_env` merge per key.
-`enclave config --view source` shows where each value came from.
+`enclave config --view source` shows where each value came from. A linked
+worktree can inherit its project layer; see
+[Linked worktrees](#linked-worktrees).
 
 ### CLI-only options
 
@@ -392,6 +283,59 @@ only warn.
 Messages name the flag or key and file; `enclave features list` shows the
 names. `host_config_paths` resolution:
 [Host config passthrough](tool-config.md#host-config-passthrough).
+
+## Linked worktrees
+
+Worktrees keep their own project layer and project memory by default. To opt
+a repository into shared context, set this in the main checkout's project
+config. Existing and future worktrees of that repository then inherit:
+
+```json
+{"worktree_inheritance": true}
+```
+
+The same key in global config opts in every repository; in a worktree's own
+project config it decides for that worktree only. Override it for one
+invocation with `--worktree-inheritance=true|false`.
+
+The key is resolved before the project layer is loaded, highest first: CLI,
+checkout-local project config, the anchor's project config, global config,
+default `false`. Only this key is read from the anchor at that point, so an
+anchor's `false` beats a global `true`, and a worktree's own `false` keeps it
+local either way. It is not supported in tool overrides.
+
+When enabled, a verified linked worktree uses the anchor's project layer
+instead of its own; the two are not merged. That covers project defaults,
+network policy, gateway allowlists, tool settings and patches, skills,
+secrets, Theia preferences, and project-scoped agent memory. Local config,
+secrets, and network policy are ignored, including stricter rules, and startup
+warns with their paths. Nothing is copied or migrated. `enclave config` and
+`enclave info` show the effective source. Review the anchor's inputs before
+opting in; see the [security boundary](security/README.md#worktree-inheritance).
+
+Runtime state stays checkout-local: config stores (including project-scope
+auth), env caches, shell history, package caches, generated output, network
+bundles, logs, session-scoped memory, session names, and cleanup. See
+[Agent memory](runtime/stores.md#agent-memory).
+
+The anchor is the canonical main checkout, or the bare repository itself in
+layouts such as `<repo>/.bare` with sibling checkouts. Enclave verifies both
+metadata pointers with filesystem reads, without running Git or following
+config includes. Non-repositories, ordinary checkouts, and submodules use their
+own project layer.
+
+With inheritance enabled, session starts (`run`, `shell`, `continue`,
+`resume`, session user commands) and `devcontainer generate` fail when the
+pointers are broken or no supported anchor exists; other commands warn and use
+the checkout-local layer. After moving a worktree with plain `mv`, run
+`git worktree repair` from the main repository. Unsupported anchors include
+`--separate-git-dir` repositories outside the `<main>/.git` layout, non-bare
+`core.worktree` layouts, and repository config with `include`/`includeIf` or
+over 1 MiB. Set `worktree_inheritance` to `false` in such a worktree to use its
+own config.
+
+A session pins its config source at start; see
+[`ps --json`](integration.md#ps---json).
 
 ## Environment variables
 

@@ -39,9 +39,15 @@ var DefaultPreferences = map[string]any{
 	},
 }
 
-// LoadPreferencesForProject merges built-in, global, and project preferences
-// using the command's resolved or pinned config identity. Non-yolo sessions
-// receive none of these always-allow preferences.
+// LoadPreferencesForProject returns the preferences to pass on launch, or
+// nothing for non-yolo sessions. It merges three sources, highest wins:
+//
+//  1. built-in DefaultPreferences
+//  2. global:  ~/.config/enclave/tools/theia/preferences.json  (flat map)
+//  3. project: ~/.config/enclave/projects/<config hash>/config.json under {"theia":{"preferences":{...}}}
+//
+// The config hash is the command's resolved or pinned config source. Both roots
+// honor $XDG_CONFIG_HOME on Linux (ignored on macOS).
 func LoadPreferencesForProject(home string, project model.Project, yoloEnabled bool) (map[string]any, error) {
 	if !yoloEnabled {
 		return nil, nil

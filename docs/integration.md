@@ -35,14 +35,15 @@ An array with one object per container (`--all` adds stopped ones):
 | `configSource` | Optional `{dir, hash}` of the canonical project-layer source pinned at startup. Omitted for older sessions or invalid pins (see `configSourceError`). Older sessions use checkout-local settings, not newly inferred inheritance |
 | `configSourceError` | Optional error string when the recorded pin is malformed; `configSource` is then omitted. This is not a legacy session, and lifecycle config reads reject the invalid pin |
 
-`worktree_inheritance` defaults to `false` (checkout-local). Explicit opt-in
-selects a verified anchor `configSource` without changing the pin format.
-`options.worktree_inheritance` records the
-effective boolean; existing sessions retain their original source. This setting
-uses CLI > checkout-local project > global > default precedence before selecting
-the project layer. In `config --json`, its project-layer value comes from the
-checkout-local file, reported as the optional `files.checkout` entry when it
-differs from `files.project`. Other project options come from `files.project`.
+`configSource` is the project layer selected at startup, which differs from
+the checkout with [worktree inheritance](configuration.md#linked-worktrees).
+`attach`, host Theia, and live network operations use this pin instead of the
+checkout's current Git pointers. The pin fixes a path, not its contents: edits
+to that source still apply. A missing or redirected inherited source is never
+replaced; `attach` then proceeds without config-derived tint or host
+environment, and YOLO Theia sessions fail. Checkout-local pins keep working
+after the checkout is removed or renamed. `options.worktree_inheritance`
+records the effective setting.
 
 ### Session provenance
 

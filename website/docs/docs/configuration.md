@@ -64,15 +64,17 @@ Two things follow from the layout:
   by default. Inheriting the main checkout's project inputs and project memory
   is an explicit opt-in; session-scoped memory stays separate.
 
-To opt into the main or bare repository's project inputs and project memory,
-set this in global or checkout-local config:
+To let all worktrees of a repository, including future ones, use the main or
+bare repository's project inputs and project memory, set this in the main
+checkout's project config:
 
 ```json
 {"worktree_inheritance": true}
 ```
 
-Or pass `--worktree-inheritance=true` for one invocation. Review the anchor's
-inputs first: opting in ignores checkout-local overrides, including stricter
+Set it in global config to opt in every repository, or pass
+`--worktree-inheritance=true` for one invocation. Review the anchor's inputs
+first: opting in ignores checkout-local overrides, including stricter
 policies. See
 [Linked worktrees](https://github.com/eclipse-enclave/enclave/blob/main/docs/configuration.md#linked-worktrees)
 for precedence, session pins, fallback behavior, and cleanup.

@@ -456,6 +456,22 @@ func TestAnchorOptInSurvivesUnsupportedRepositoryConfig(t *testing.T) {
 	}
 }
 
+// An unreadable anchor config must not turn into a silent local fallback.
+func TestInvalidAnchorConfigWarnsOnLocalFallback(t *testing.T) {
+	home, main, linked, _ := projectConfigFixture(t, false)
+	globalPath, _ := config.GlobalConfigPath()
+	writeWorktreeInput(t, globalPath, `{}`)
+	anchorPath := config.HostProjectConfigJSONPath(home, main.Hash)
+	writeWorktreeInput(t, anchorPath, `{"worktree_inheritance":true,`)
+	_, _, resolved, warnings, err := loadDefaultsForAction(linked.Dir, cli.Result{Action: "run"})
+	if err != nil || resolved.ConfigSourceHash() != linked.Hash {
+		t.Fatalf("unexpected source: %+v %v", resolved, err)
+	}
+	if len(warnings) != 1 || warnings[0].Code != config.WarningInvalidConfigJSON || warnings[0].Path != anchorPath {
+		t.Fatalf("anchor parse error not reported: %+v", warnings)
+	}
+}
+
 // The main checkout's own setting only governs its worktrees.
 func TestAnchorSettingDoesNotAffectMainCheckout(t *testing.T) {
 	home, main, _, _ := projectConfigFixture(t, false)

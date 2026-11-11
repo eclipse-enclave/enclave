@@ -44,35 +44,38 @@ func resolveProjectConfig(project model.Project, metadata gitworktree.Result) (m
 // anchorWorktreeInheritance reads only the selector from the repository's
 // anchor. Without a supported anchor, a candidate that opted in still counts as
 // a request, so the start fails instead of silently using local inputs.
-func anchorWorktreeInheritance(home string, metadata gitworktree.Result) (*bool, error) {
+func anchorWorktreeInheritance(home string, metadata gitworktree.Result) (*bool, []config.Warning, error) {
 	switch metadata.Status {
 	case gitworktree.Verified:
-		value, _, err := config.LoadWorktreeInheritanceSelector(home, config.ProjectHashForPath(metadata.Anchor))
-		return value, err
+		return config.LoadWorktreeInheritanceSelector(home, config.ProjectHashForPath(metadata.Anchor))
 	case gitworktree.VerifiedUnanchored:
 		candidates := []string{metadata.CommonDir}
 		if filepath.Base(metadata.CommonDir) == ".git" {
 			candidates = append(candidates, filepath.Dir(metadata.CommonDir))
 		}
+		var warnings []config.Warning
 		for _, candidate := range candidates {
-			value, _, err := config.LoadWorktreeInheritanceSelector(home, config.ProjectHashForPath(candidate))
+			value, more, err := config.LoadWorktreeInheritanceSelector(home, config.ProjectHashForPath(candidate))
+			warnings = append(warnings, more...)
 			if err != nil {
-				return nil, err
+				return nil, warnings, err
 			}
 			if value != nil && *value {
-				return value, nil
+				return value, warnings, nil
 			}
 		}
+		return nil, warnings, nil
 	}
-	return nil, nil
+	return nil, nil, nil
 }
 
 // worktreeInheritanceSelection is the bootstrap decision made before a project
 // layer is loaded. projectValue is the deciding project-level setting, if any.
 type worktreeInheritanceSelection struct {
-	inherit       bool
-	projectValue  *bool
-	localWarnings []config.Warning
+	inherit        bool
+	projectValue   *bool
+	localWarnings  []config.Warning
+	anchorWarnings []config.Warning
 }
 
 // selectWorktreeInheritance applies CLI > checkout-local project > anchor
@@ -86,7 +89,7 @@ func selectWorktreeInheritance(home string, parsed cli.Result, global config.Def
 		return selection, err
 	}
 	if selection.projectValue == nil && !fromCLI {
-		if selection.projectValue, err = anchorWorktreeInheritance(home, metadata); err != nil {
+		if selection.projectValue, selection.anchorWarnings, err = anchorWorktreeInheritance(home, metadata); err != nil {
 			return selection, err
 		}
 	}
@@ -169,10 +172,12 @@ func loadDefaultsForAction(projectDir string, parsed cli.Result) (global, projec
 		}
 	}
 	inherited := resolved.ConfigSourceHash() != resolved.Hash
-	// The full local read reports the same parse/IO warnings as bootstrap.
-	// Keep bootstrap warnings only when that file is otherwise ignored.
+	// The full read of the selected layer repeats its bootstrap warnings, so
+	// keep only those of the file that is not loaded.
 	if inherited {
 		warnings = append(warnings, selection.localWarnings...)
+	} else {
+		warnings = append(warnings, selection.anchorWarnings...)
 	}
 	var more []config.Warning
 	project, more, err = config.LoadProjectDefaults(home, resolved)

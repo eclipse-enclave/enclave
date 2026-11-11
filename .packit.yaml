@@ -20,7 +20,15 @@ jobs:
       - fedora-all
   - job: copr_build
     trigger: pull_request
-    targets: [fedora-stable]
+    targets: [fedora-latest-stable]
+  - job: tests
+    trigger: pull_request
+    identifier: test_pull_request
+    fmf_path: tests
+    targets: [fedora-latest-stable]
+    notifications:
+      failure_comment:
+        message: "Tests failed on Testing Farm. Results: {packit_dashboard_url}"
   - job: copr_build
     trigger: release
     identifier: release

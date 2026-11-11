@@ -1,0 +1,2 @@
+summary: Smoke test that enclave reports its version
+test: enclave --version

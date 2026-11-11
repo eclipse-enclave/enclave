@@ -293,7 +293,7 @@ func (r *Runtime) prepareExecution() (*ExecutionContext, error) {
 		return nil, err
 	}
 	if envFileLoaded {
-		r.logEnvFileLoaded()
+		r.logEnvFileLoaded(projectEnv)
 	}
 	runCtx := r.prepareRunContext(prepared.AuthState)
 	r.applyPortHints(&runCtx)
@@ -1651,13 +1651,16 @@ func (r *Runtime) envFileValues() ([]string, bool) {
 	return nil, false
 }
 
-func (r *Runtime) logEnvFileLoaded() {
-	projectEnv := filepath.Join(r.project.Dir, ".env")
-	if keys, err := util.EnvKeysFromFile(projectEnv); err == nil && len(keys) > 0 {
-		logx.Warnf(".env file loaded into container (keys: %s)", strings.Join(keys, ", "))
-	} else {
-		logx.Warnf(".env file loaded into container")
+func (r *Runtime) logEnvFileLoaded(values []string) {
+	if len(values) == 0 {
+		return
 	}
+	keys := make([]string, 0, len(values))
+	for _, value := range values {
+		key, _, _ := strings.Cut(value, "=")
+		keys = append(keys, key)
+	}
+	logx.Warnf(".env file loaded into container (keys: %s)", strings.Join(keys, ", "))
 }
 
 func formatEnvContent(values map[string]string) string {

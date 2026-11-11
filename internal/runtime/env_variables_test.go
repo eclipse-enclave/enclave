@@ -10,6 +10,7 @@ package runtime
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"enclave/internal/model"
@@ -186,6 +187,25 @@ func TestProjectEnvCannotOverrideInternalEnvironment(t *testing.T) {
 			values, loaded := r.envFileValues()
 			if !loaded || len(values) != 1 || values[0] != "VISIBLE=kept" {
 				t.Fatalf("project environment overrides reserved %s: %v (loaded=%v)", key, values, loaded)
+			}
+			output, err := os.CreateTemp(t.TempDir(), "env-summary")
+			if err != nil {
+				t.Fatal(err)
+			}
+			previous := os.Stderr
+			os.Stderr = output
+			r.logEnvFileLoaded(nil)
+			os.Stderr = previous
+			if info, err := output.Stat(); err != nil || info.Size() != 0 {
+				t.Fatal("empty filtered environment produced a summary")
+			}
+			os.Stderr = output
+			r.logEnvFileLoaded(values)
+			os.Stderr = previous
+			_ = output.Close()
+			data, err := os.ReadFile(output.Name())
+			if err != nil || !strings.Contains(string(data), "keys: VISIBLE") || strings.Contains(string(data), key) || strings.Contains(string(data), "kept") {
+				t.Fatalf("summary must list only loaded keys, not ignored keys or values: %q (%v)", data, err)
 			}
 		})
 	}

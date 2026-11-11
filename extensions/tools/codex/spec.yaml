@@ -65,6 +65,20 @@ providers:
   - name: openai-codex
     credentials: [openai-api-key, codex-access-token]
     authFiles: [auth.json]
+    authSecrets:
+      - file: auth.json
+        codec: codex-auth
+        fields:
+          - { pointer: /OPENAI_API_KEY, kind: apiKey, release: openai-api-key }
+          - { pointer: /tokens/access_token, kind: access, release: codex-access-token, placeholder: { shape: jwt } }
+          - { pointer: /tokens/refresh_token, kind: refresh }
+          - { pointer: /tokens/id_token, kind: id, placeholder: { shape: jwt } }
+    tokenEndpoint:
+      host: auth.openai.com
+      path: /oauth/token
+      body: either
+      grants: [authorization_code, refresh_token]
+      fields: { access: access_token, refresh: refresh_token, id: id_token, expiresIn: expires_in, scope: scope }
     oauthPorts: [{ port: "1455" }]
     authSession:
       mode: any

@@ -65,7 +65,21 @@ new patch or override edits win conflicts.
   upgrading from a version without snapshots, when earlier in-tool edits cannot
   be told apart from old generated values.
 - Merging can drop comments and formatting. A launch without an overlay
-  invalidates the store key's snapshot.
+  invalidates the store key's snapshot, except for the managed setting below.
+
+Protected Copilot generates its plaintext-storage preference before the
+snapshot. Its managed-settings path persists and syncs recovery metadata
+before changing the store, then atomically publishes and syncs the settings
+before the final snapshot. If the final snapshot fails, the earlier recovery
+metadata still distinguishes the managed value on retry. Ordinary restaging
+restores the configured preference, even over earlier in-tool consent, and
+keeps unrelated edits.
+
+First activation with only built-in settings updates the settings file without
+restaging other store contents. The baseline is retained across ordinary
+launches without a config overlay. A managed carry-over parse failure refuses
+startup with a settings path to fix or remove, instead of silently discarding
+edits. This exception does not change ordinary unmanaged overlay fallback.
 
 Source:
 [`internal/runtime/volume_manager.go`](../../internal/runtime/volume_manager.go)
@@ -249,6 +263,8 @@ Source:
 
 ## Lifecycle
 
+Ordinary sessions follow this flow; protected finalization is described below.
+
 ```mermaid
 sequenceDiagram
     autonumber
@@ -256,6 +272,9 @@ sequenceDiagram
     participant Ctr as Container
     participant Helper as Helper container
 
+    opt Shared native --reset-auth
+        Host->>Host: Clear selected native files and bindings under lock<br/>before mixed-mode admission
+    end
     Host->>Host: Prepare stores as the invoking user<br/>(config, new key if --ephemeral, env, shared auth, feature auth)<br/>and reset auth files if --reset-auth
     Host->>Host: Config-source overlay, if active<br/>(replace generated files, keep statePaths,<br/>carry settingsTarget edits forward)
     Host->>Host: Auth injection<br/>(read env store, resolve declared secrets and --pass-env,<br/>write env store)
@@ -274,8 +293,8 @@ sequenceDiagram
 |------|------------------|
 | `--auth-scope=shared` (default) | Shared auth store (identity per [`--auth-name`](../auth.md#named-auth-identities)) and feature auth stores; entrypoint symlinks; exit, `exec` exit, background stop, and GUI stop or remove finalize credentials to them, so one login serves all projects |
 | `--auth-scope=project` | No shared or feature stores; auth lives only in the project config store; `--auth-name` is ignored with a warning |
-| `--ephemeral` | Config store gets a unique key and is removed on exit; no env or auth stores |
-| `--reset-auth` | Deletes auth files from the shared and current config stores (shared scope) or the config store (project scope), plus the persisted env |
+| `--ephemeral` | Config store gets a unique key and is removed on exit; no env or shared auth stores. Protected mode uses a fresh gateway-only identity, removed after agent and gateway removal |
+| `--reset-auth` | Deletes auth files from the shared and current config stores (shared scope) or the config store (project scope), plus the persisted env. Shared native auth files and bindings are cleared before session admission |
 
 ## Cleanup
 
@@ -297,3 +316,43 @@ stopped ephemeral containers, and per-session networks whose session is gone
 | [`internal/runtime/auth_manager.go`](../../internal/runtime/auth_manager.go) | Declared secret injection, env persistence, session checks |
 | [`internal/runtime/runtime.go`](../../internal/runtime/runtime.go) | Mount assembly (`addConfigMount`, `addAuthMount`, `addFeatureAuthMounts`), execution flow |
 | [`entrypoint.sh`](../../entrypoint.sh), [`runtime-assets/auth-reconcile.sh`](../../runtime-assets/auth-reconcile.sh) | In-container and helper-container symlink and reconcile logic |
+
+## Native auth exchanges
+
+With `--protect-auth`, only the gateway mounts the canonical auth store. Workloads
+mount private views under `projects/<hash>/<tool>/auth-views/`. All supported
+native exchanges take the canonical hoststore lock across reload, one bounded
+upstream dispatch and durable commit.
+Native tokens are written before stable placeholder bindings; UID/GID/mode are
+preserved. Bindings contain identifiers, never tokens or exchange history.
+
+On a confirmed protected end, current placeholder bindings authorize the whole
+private view; a regular native-path sibling needs its own matching placeholders.
+Only codec-allowlisted metadata is merged, with the sibling taking precedence.
+Tokens, expiry and scopes stay canonical. Codex and provider-map auth files contain only
+gateway-owned state, so their views are not harvested. Unknown view keys are ignored;
+secret-bearing metadata and invalid or stale sources are skipped with a warning.
+The shared config path is never changed by harvest. Missing bindings after reset
+prevent stale views from restoring state.
+
+Gateway ownership is correlated with its holder at creation, so a renamed agent
+or a reused session name cannot select another gateway.
+
+The finalizing holder remains through harvest and deletion of its own published
+and staging views. An ephemeral identity is deleted under its native lock only
+after agent and original gateway removal are confirmed. Failed or uncertain
+teardown retains the reservation and private files; a failed finalizer releases
+its synchronous PID claim so cleanup can retry. Stale-holder cleanup removes the
+orphan gateway first and discards its views without harvesting them.
+
+Every refresh dispatches with the current canonical refresh token under the lock,
+so sibling refreshes serialize and each rotates the current grant. There is no
+replay cache or persisted recovery fence. A lost provider reply may require a
+fresh login. Missing or malformed expiry does not discard consumed tokens.
+Only allowlisted, placeholder-bearing responses pass containment checks.
+
+The proxy uses the store owner UID, a distinct primary group for its NAT
+exemption and the host group as supplementary, without new capabilities or
+canonical ownership/mode changes. A fresh workload-inaccessible readiness directory binds
+startup to the session and the configuration actually loaded by the proxy.
+Missing or mismatched readiness refuses even an older gateway image with `--no-rebuild`.

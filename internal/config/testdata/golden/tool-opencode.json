@@ -49,6 +49,89 @@
       "auth_files": [
         "auth.json"
       ],
+      "auth_secrets": [
+        {
+          "file": "auth.json",
+          "codec": "provider-map",
+          "fields": [
+            {
+              "pointer": "/openai/key",
+              "kind": "apiKey",
+              "release": "openai-api-key"
+            },
+            {
+              "pointer": "/anthropic/key",
+              "kind": "apiKey",
+              "release": "anthropic-api-key"
+            },
+            {
+              "pointer": "/google/key",
+              "kind": "apiKey",
+              "release": "gemini-api-key"
+            },
+            {
+              "pointer": "/gemini/key",
+              "kind": "apiKey",
+              "release": "gemini-api-key"
+            },
+            {
+              "pointer": "/openai/access",
+              "kind": "access",
+              "release": "chatgpt-oauth",
+              "placeholder": {
+                "shape": "jwt",
+                "random": {
+                  "encoding": "",
+                  "length": 0
+                }
+              }
+            },
+            {
+              "pointer": "/openai/refresh",
+              "kind": "refresh"
+            },
+            {
+              "pointer": "/github-copilot/access",
+              "kind": "access",
+              "release": "copilot-oauth",
+              "placeholder": {
+                "prefix": "gho_",
+                "random": {
+                  "encoding": "alphanumeric",
+                  "length": 36
+                }
+              }
+            },
+            {
+              "pointer": "/github-copilot/refresh",
+              "kind": "refresh",
+              "placeholder": {
+                "prefix": "gho_",
+                "random": {
+                  "encoding": "alphanumeric",
+                  "length": 36
+                }
+              }
+            }
+          ]
+        }
+      ],
+      "token_endpoint": {
+        "host": "auth.openai.com",
+        "path": "/oauth/token",
+        "body": "either",
+        "grants": [
+          "authorization_code",
+          "refresh_token"
+        ],
+        "fields": {
+          "access": "access_token",
+          "expiresIn": "expires_in",
+          "id": "id_token",
+          "refresh": "refresh_token",
+          "scope": "scope"
+        }
+      },
       "auth_session": {
         "mode": "",
         "checks": [
@@ -82,6 +165,19 @@
       "auth_files": [
         "auth.json"
       ],
+      "token_endpoint": {
+        "host": "github.com",
+        "path": "/login/oauth/access_token",
+        "body": "either",
+        "grants": [
+          "urn:ietf:params:oauth:grant-type:device_code"
+        ],
+        "fields": {
+          "access": "access_token",
+          "refresh": "access_token",
+          "scope": "scope"
+        }
+      },
       "auth_session": {
         "mode": "",
         "checks": [
@@ -124,6 +220,32 @@
           "header": "x-api-key"
         }
       }
+    },
+    "chatgpt-oauth": {
+      "env_vars": null,
+      "release": {
+        "http": {
+          "hosts": [
+            "chatgpt.com"
+          ],
+          "header": "authorization",
+          "format": "Bearer %s"
+        }
+      },
+      "api_key": false
+    },
+    "copilot-oauth": {
+      "env_vars": null,
+      "release": {
+        "http": {
+          "hosts": [
+            "*.githubcopilot.com"
+          ],
+          "header": "authorization",
+          "format": "Bearer %s"
+        }
+      },
+      "api_key": false
     },
     "gemini-api-key": {
       "env_vars": [

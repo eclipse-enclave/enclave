@@ -177,12 +177,14 @@ type specCredentialFile struct {
 }
 
 type specProvider struct {
-	Name                string           `json:"name"`
-	Credentials         []string         `json:"credentials,omitempty"` // was credential_secrets
-	AuthFiles           []string         `json:"authFiles,omitempty"`
-	AuthSession         *specAuthSession `json:"authSession,omitempty"`
-	OAuthPorts          []specOAuthPort  `json:"oauthPorts,omitempty"`
-	SecurestorageDirEnv string           `json:"securestorageDirEnv,omitempty"`
+	Name                string                 `json:"name"`
+	Credentials         []string               `json:"credentials,omitempty"` // was credential_secrets
+	AuthFiles           []string               `json:"authFiles,omitempty"`
+	AuthSecrets         []model.AuthFileSecret `json:"authSecrets,omitempty"`
+	TokenEndpoint       *model.TokenEndpoint   `json:"tokenEndpoint,omitempty"`
+	AuthSession         *specAuthSession       `json:"authSession,omitempty"`
+	OAuthPorts          []specOAuthPort        `json:"oauthPorts,omitempty"`
+	SecurestorageDirEnv string                 `json:"securestorageDirEnv,omitempty"`
 }
 
 type specAuthSession struct {

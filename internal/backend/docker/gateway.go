@@ -16,10 +16,12 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
 	"enclave/internal/backend"
+	"enclave/internal/backend/hoststore"
 	"enclave/internal/config"
 	dockercmd "enclave/internal/docker"
 	"enclave/internal/gateway"
@@ -55,6 +57,25 @@ func (b *Backend) startGateway(ctx context.Context, req backend.Request, network
 	startConfig := b.gatewayStartConfig(req, networkName, gatewayConfigDir)
 	startConfig.NetworkMode = model.NetworkModeRestricted
 	startConfig.SecretReleaseFile = secretReleaseFile
+	if req.NativeAuth != nil {
+		if req.Mode != nil {
+			startConfig.ModeHolderID = req.Mode.HolderID
+		}
+		dir, err := b.storage.storeDir(req.NativeAuth.Store.Key, req.NativeAuth.Store.Kind)
+		uid, uidErr := strconv.Atoi(b.opts.Host.UID)
+		gid, gidErr := strconv.Atoi(b.opts.Host.GID)
+		if err != nil || uidErr != nil || gidErr != nil {
+			cleanupFiles([]string{secretReleaseFile})
+			return "", nil, fmt.Errorf("protected auth requires a native store and numeric host identity")
+		}
+		file, err := writeGatewayConfig("native-auth", req.NativeAuth.Config)
+		if err != nil {
+			cleanupFiles([]string{secretReleaseFile})
+			return "", nil, err
+		}
+		startConfig.NativeAuth = &gateway.NativeAuthStart{ConfigFile: file, StoreDir: dir,
+			LockPath: hoststore.LockPath(b.opts.Host.Home, dir), UID: uid, GID: gid}
+	}
 	return b.runGateway(ctx, startConfig, "failed to start DNS gateway")
 }
 
@@ -106,6 +127,9 @@ func (b *Backend) runGateway(ctx context.Context, startConfig gateway.StartConfi
 	var tempFiles []string
 	if startConfig.SecretReleaseFile != "" {
 		tempFiles = append(tempFiles, startConfig.SecretReleaseFile)
+	}
+	if startConfig.NativeAuth != nil {
+		tempFiles = append(tempFiles, startConfig.NativeAuth.ConfigFile)
 	}
 	result, err := gateway.Start(ctx, startConfig)
 	if err != nil {
@@ -347,23 +371,27 @@ func writeSecretReleaseConfig(secrets []backend.SecretRelease) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("marshal secret release entries: %w", err)
 	}
-	file, err := os.CreateTemp("", "enclave-secret-release-*.json")
+	return writeGatewayConfig("secret-release", data)
+}
+
+func writeGatewayConfig(name string, data []byte) (string, error) {
+	file, err := os.CreateTemp("", "enclave-"+name+"-*.json")
 	if err != nil {
-		return "", fmt.Errorf("create temp file for secret release config: %w", err)
+		return "", fmt.Errorf("create %s config: %w", name, err)
 	}
 	tmpPath := file.Name()
 	if _, err := file.Write(data); err != nil {
 		_ = file.Close()
 		_ = os.Remove(tmpPath) // #nosec G703 -- tmpPath is created by os.CreateTemp.
-		return "", fmt.Errorf("write secret release config: %w", err)
+		return "", fmt.Errorf("write %s config: %w", name, err)
 	}
 	if err := file.Close(); err != nil {
 		_ = os.Remove(tmpPath) // #nosec G703 -- tmpPath is created by os.CreateTemp.
-		return "", fmt.Errorf("close secret release config: %w", err)
+		return "", fmt.Errorf("close %s config: %w", name, err)
 	}
 	if err := os.Chmod(tmpPath, 0o600); err != nil { // #nosec G302 G703 -- tmpPath is created by os.CreateTemp.
 		_ = os.Remove(tmpPath) // #nosec G703 -- tmpPath is created by os.CreateTemp.
-		return "", fmt.Errorf("chmod secret release config: %w", err)
+		return "", fmt.Errorf("chmod %s config: %w", name, err)
 	}
 	return tmpPath, nil
 }

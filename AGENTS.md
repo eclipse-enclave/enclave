@@ -8,6 +8,9 @@ Read `README.md` before making user-facing changes.
 - Flow: CLI args → profile loading → image/bundle build check → store/auth/network setup → selected backend (`docker` by default, experimental `qemu` for a narrow path).
 - Key packages (all under `internal/`): `app` (orchestration), `runtime` (container execution, mounts, auth injection), `gateway` (network-isolation sidecar), `network` (policy loading and dnsmasq config generation), `config` (profile and path resolution), `model` (shared types).
 - Keep packages under `internal/` focused and avoid unnecessary coupling.
+- `internal/placeholderstore` contains the internal
+  native-auth seams. Do not enable protected workloads before provider exchange
+  interception and the gateway capability check are implemented.
 
 ## Collaboration
 

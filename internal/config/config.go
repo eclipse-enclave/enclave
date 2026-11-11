@@ -32,6 +32,7 @@ type Defaults struct {
 	SkillsValidation       string              `json:"skills_validation"`
 	HostConfigPaths        []string            `json:"host_config_paths"`
 	Yolo                   *bool               `json:"yolo"`
+	ProtectAuth            *bool               `json:"protect_auth"`
 	Ephemeral              *bool               `json:"ephemeral"`
 	AuthScope              string              `json:"auth_scope"`
 	AuthName               string              `json:"auth_name"`

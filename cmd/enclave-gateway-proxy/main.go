@@ -20,6 +20,7 @@ import (
 
 	"enclave/internal/gateway/bundle"
 	"enclave/internal/gateway/dnsaudit"
+	"enclave/internal/gateway/exchange"
 	"enclave/internal/gateway/mitm"
 	"enclave/internal/gateway/tlsstore"
 	"enclave/internal/model"
@@ -92,10 +93,20 @@ func main() {
 	if err != nil {
 		log.Fatalf("failed to load secret release rules: %v", err)
 	}
+	var nativeAuth *exchange.Store
+	var nativeDigest string
+	nativeConfig := strings.TrimSpace(os.Getenv(model.EnvNativeAuthConfig))
+	if nativeConfig != "" {
+		nativeAuth, nativeDigest, err = exchange.Load(ctx, nativeConfig, os.Getenv(model.EnvNativeAuthStore), os.Getenv(model.EnvNativeAuthLock), os.Getenv(model.EnvGatewaySession), rules)
+		if err != nil {
+			log.Fatalf("failed to load native auth exchange: %v", err)
+		}
+	}
 	opts := mitm.Options{
 		AllowedDomains: allowedDomains,
 		DeniedDomains:  deniedDomains,
 		SecretRules:    rules,
+		NativeAuth:     nativeAuth,
 		AuditLogPath:   strings.TrimSpace(os.Getenv(model.EnvNetworkLogFile)),
 		CaptureDir:     captureDir,
 		Session:        strings.TrimSpace(os.Getenv(model.EnvGatewaySession)),
@@ -104,8 +115,16 @@ func main() {
 		// The host runtime pre-provisions CA key material under tlsRoot.
 		TLSStore: tlsstore.New(tlsRoot),
 	}
-	if readyFile != "" {
+	if readyFile != "" || nativeAuth != nil {
 		opts.OnReady = func() {
+			if nativeAuth != nil {
+				if err := exchange.WriteCapability(os.Getenv(model.EnvNativeAuthRuntime), nativeDigest, os.Getenv(model.EnvGatewaySession)); err != nil {
+					log.Fatal("failed to attest native auth readiness")
+				}
+			}
+			if readyFile == "" {
+				return
+			}
 			if err := markProxyReady(readyFile); err != nil {
 				log.Printf("failed to write proxy ready file %q: %q", readyFile, err.Error()) // #nosec G706 -- quoted values cannot inject log lines.
 			}

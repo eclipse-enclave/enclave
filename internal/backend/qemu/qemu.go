@@ -20,6 +20,7 @@ import (
 	"strings"
 
 	"enclave/internal/backend"
+	"enclave/internal/backend/hoststore"
 	"enclave/internal/logx"
 	"enclave/internal/model"
 )
@@ -62,6 +63,7 @@ func (b *Backend) Run(ctx context.Context, req backend.Request, attach backend.A
 	if req.AuthSync != nil {
 		defer b.runRequestAuthSync(req)
 	}
+	defer hoststore.AdvanceRequestMode(b.opts.Host.Home, req, "finalizing", "")
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -103,6 +105,7 @@ func (b *Backend) Run(ctx context.Context, req backend.Request, attach backend.A
 		}
 		return backend.ExitStatus{}, fmt.Errorf("qemu backend: start %s: %w", qemuBinary, err)
 	}
+	hoststore.AdvanceRequestMode(b.opts.Host.Home, req, "live", strconv.Itoa(cmd.Process.Pid))
 	if attach.OnStarted != nil {
 		attach.OnStarted()
 	}
@@ -127,7 +130,8 @@ func (b *Backend) Run(ctx context.Context, req backend.Request, attach backend.A
 	return backend.ExitStatus{Code: 1}, fmt.Errorf("qemu backend: guest exited without reporting an exit code")
 }
 
-func (b *Backend) Start(context.Context, backend.Request) (backend.SessionRef, error) {
+func (b *Backend) Start(_ context.Context, req backend.Request) (backend.SessionRef, error) {
+	hoststore.AdvanceRequestMode(b.opts.Host.Home, req, "finalizing", "")
 	return backend.SessionRef{}, fmt.Errorf("qemu backend: detached sessions are not supported")
 }
 
@@ -254,4 +258,21 @@ func readGuestExitCode(path string) (int, bool, error) {
 		return 0, false, fmt.Errorf("qemu backend: guest exit code %d is out of range", code)
 	}
 	return code, true, nil
+}
+
+// InspectModeSession cannot infer absence in the cmd.Start-to-PID-persist gap.
+func (b *Backend) InspectModeSession(_ context.Context, holderID, id string) (*backend.SessionRef, bool, error) {
+	pid, err := strconv.Atoi(id)
+	if err != nil || pid <= 0 {
+		return nil, false, fmt.Errorf("cannot prove pending QEMU guest absent; auth-mode holder %s retained", holderID)
+	}
+	if hoststore.ModeOwnerAlive(pid) {
+		return &backend.SessionRef{ID: id}, true, nil
+	}
+	return nil, false, nil
+}
+
+// QEMU sessions do not create a gateway.
+func (b *Backend) RemoveModeGateway(context.Context, string, string, string) (bool, error) {
+	return false, nil
 }

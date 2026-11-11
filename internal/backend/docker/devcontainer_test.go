@@ -479,3 +479,36 @@ func captureStderr(t *testing.T, fn func()) string {
 	}
 	return string(data)
 }
+
+func TestDevcontainerEnvCannotOverrideInternalEnvironment(t *testing.T) {
+	dir := t.TempDir()
+	remap := model.EnvPrefix + "RUNTIME_UID_REMAP_DONE"
+	ops := model.EnvNativeAuthOps
+	path := filepath.Join(dir, "project.env")
+	if err := os.WriteFile(path, []byte(remap+"=project-value\n"+ops+"=project-value\nVISIBLE=kept\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{
+		{"--env", remap + "=project-value", "--env", ops + "=project-value", "--env", "VISIBLE=kept"},
+		{"-e", remap + "=project-value", "-e", ops + "=project-value", "-e", "VISIBLE=kept"},
+		{"--env=" + remap + "=project-value", "--env=" + ops + "=project-value", "--env=VISIBLE=kept"},
+		{"--env", remap, "--env", ops, "--env", "VISIBLE=kept"},
+		{"--env-file", path},
+		{"--env-file=" + path},
+	} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			trusted := []string{remap + "=0", ops + "=trusted-operations"}
+			config := &dockercmd.ContainerConfig{Env: append([]string{}, trusted...)}
+			b := newDevcontainerBackend(dir, args...)
+			warnings := captureStderr(t, func() { b.applyDevcontainerRunArgs(config, &dockercmd.HostConfig{}) })
+			if want := append(trusted, "VISIBLE=kept"); !reflect.DeepEqual(config.Env, want) {
+				t.Fatalf("environment = %v, want %v", config.Env, want)
+			}
+			for _, key := range []string{remap, ops} {
+				if !strings.Contains(warnings, key) || strings.Contains(warnings, "project-value") {
+					t.Fatalf("warning must name dropped key without its value: %q", warnings)
+				}
+			}
+		})
+	}
+}

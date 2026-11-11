@@ -253,11 +253,15 @@ func (d *socketDirection) readPayload(p []byte) []byte {
 		d.unmask(d.control[start:])
 	} else {
 		message := d.message
+		// Once bytes were discarded, preserve a contiguous prefix even if Learn
+		// increases the buffer limit while this message is still arriving.
+		if message.bytes == int64(len(message.payload)) {
+			keep := chunk[:min(len(chunk), max(0, d.bufferLimit()-len(message.payload)))]
+			start := len(message.payload)
+			message.payload = append(message.payload, keep...)
+			d.unmask(message.payload[start:])
+		}
 		message.bytes += int64(len(chunk))
-		keep := chunk[:min(len(chunk), max(0, d.bufferLimit()-len(message.payload)))]
-		start := len(message.payload)
-		message.payload = append(message.payload, keep...)
-		d.unmask(message.payload[start:])
 	}
 	d.offset += uint64(len(chunk))
 	if d.offset == d.frame.Length {
@@ -270,7 +274,7 @@ func (d *socketDirection) readPayload(p []byte) []byte {
 // leaves room for a secret value that straddles the cap, so that the value is
 // still found and none of it is stored.
 func (d *socketDirection) bufferLimit() int {
-	return int(d.socket.store.maxBody) + d.socket.store.redactor.longest()
+	return int(d.socket.store.maxBody) + d.socket.store.redactor.Load().longest()
 }
 
 func (d *socketDirection) unmask(payload []byte) {
@@ -327,7 +331,7 @@ func (d *socketDirection) emit(pending *pendingMessage, cut bool) {
 	}
 	payload := pending.payload
 	cut = cut || pending.bytes > int64(len(payload))
-	payload = store.redactor.payload(payload, cut)
+	payload = store.redactor.Load().payload(payload, cut)
 	if int64(len(payload)) > store.maxBody {
 		payload, cut = payload[:store.maxBody], true
 	}

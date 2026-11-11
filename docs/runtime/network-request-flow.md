@@ -51,24 +51,40 @@ sequenceDiagram
         alt SNI not in allowlist
             Proxy-->>Tool: Close connection
             Proxy->>Log: TCP deny (allowlist)
-        else Host requires MITM (release rule match or network_log requests or full)
+        else Host requires MITM (native auth, release rule or network_log requests or full)
             Proxy->>Log: TCP pass (mitm-dispatch)
             Proxy->>Proxy: Terminate TLS using local CA leaf cert
-            opt network_log=full
-                Proxy->>Proxy: Snapshot request with its placeholders
-            end
-            Proxy->>Proxy: rewriteHeaders()<br/>Validate and apply host/header release rules
-            alt Placeholder use violates release rule
-                Proxy-->>Tool: HTTP 403 Forbidden
-                Proxy->>Log: HTTP deny (secret-injection)
-            else Rewrite allowed
-                Proxy->>API: Forward HTTPS request
-                API-->>Proxy: Upstream response
-                Proxy-->>Tool: Return response
+            alt Declared native token exchange
+                Proxy->>Proxy: Lock canonical native store
+                Proxy->>API: Bounded exchange with current credentials
+                API-->>Proxy: Token response
+                Proxy->>Proxy: Commit native tokens
                 opt network_log=full
-                    Proxy->>Cap: Tee bodies and WebSocket messages while relaying<br/>then write record
+                    Proxy->>Cap: Learn committed grant values
                 end
-                Proxy->>Log: HTTP pass (allowlist, capture_id)
+                Proxy->>Proxy: Persist bindings; unlock
+                Proxy-->>Tool: Allowlisted reply with placeholders
+            else Ordinary API request
+                Proxy->>Proxy: Releases(req): read current canonical values
+                opt network_log=full
+                    Proxy->>Cap: Learn current native release values
+                end
+                opt network_log=full
+                    Proxy->>Proxy: Snapshot request with its placeholders
+                end
+                Proxy->>Proxy: rewriteHeaders()<br/>Validate and apply host/header release rules
+                alt Placeholder use violates release rule
+                    Proxy-->>Tool: HTTP 403 Forbidden
+                    Proxy->>Log: HTTP deny (secret-injection)
+                else Rewrite allowed
+                    Proxy->>API: Forward HTTPS request
+                    API-->>Proxy: Upstream response
+                    Proxy-->>Tool: Return response
+                    opt network_log=full
+                        Proxy->>Cap: Tee bodies and WebSocket messages while relaying<br/>then write record
+                    end
+                    Proxy->>Log: HTTP pass (allowlist, capture_id)
+                end
             end
         else Host allowlisted but no secret rule match
             Proxy->>API: TLS passthrough tunnel
@@ -112,6 +128,14 @@ sequenceDiagram
    adds a `session` marker. What each mode records is in
    [Coverage and granularity](../networking.md#coverage-and-granularity).
 
+Declared native exchanges are intercepted before capture and are not stored.
+After a canonical grant write, the proxy teaches its values to the capture
+redactor before publishing bindings or replying, including access/refresh
+values not yet used in an API request.
+For ordinary API requests, the proxy reads native release rules, teaches their
+values to the capture redactor, snapshots the original placeholders, then
+rewrites headers and forwards. Refused requests produce no capture record.
+
 In `full` mode the proxy snapshots each relayed request before header release
 and stores it with the response under `logs/capture/<session>/`; its `http`
 event carries `capture_id`. WebSocket messages are also stored, with an open
@@ -121,8 +145,10 @@ record readable from the handshake. See [Full capture](../networking.md#full-cap
 
 - Real values of mapped credentials never appear in the tool container's
   environment. Release is header-based and covers only declared credentials
-  with a release rule in the selected tool or enabled features; mediating
-  file-based credentials is separate work.
+  with a release rule in the selected tool or enabled features. Opt-in protected
+  native auth additionally mediates declared fields for Claude, Codex, Pi,
+  OpenCode and Copilot. Feature auth stores are not mounted; gh stays env-only.
+  Git HTTPS Basic authentication is not rewritten and SSH is not protected.
 - DNS, firewall and ipset, and proxy all check egress; reload and startup
   failures fail closed.
 - The log is tagged by session and rotated at session start, never truncated
@@ -210,3 +236,6 @@ sequenceDiagram
 [`internal/gateway/bundle/bundle.go`](../../internal/gateway/bundle/bundle.go),
 [`internal/gateway/mitm/proxy.go`](../../internal/gateway/mitm/proxy.go),
 [`gateway-entrypoint.sh`](../../gateway-entrypoint.sh)
+
+The protected native-auth path intercepts declared OAuth endpoints
+before ordinary forwarding; see [store transactions](stores.md#native-auth-exchanges).

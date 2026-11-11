@@ -68,6 +68,8 @@ func (m volumeManager) BuildPrep(volumeSuffix string) (backend.StorePrep, storeS
 		prep.Config.Overlay = &backend.ConfigOverlaySpec{
 			SourceDir:     m.configSourceDir,
 			PreservePaths: m.configSourcePreservePaths(),
+			SettingsBase:  m.configSettingsBase,
+			SettingsOnly:  m.configSettingsOnly,
 		}
 		if m.run.Persist {
 			settingsPath, err := m.settingsRelativePath()
@@ -81,6 +83,9 @@ func (m volumeManager) BuildPrep(volumeSuffix string) (backend.StorePrep, storeS
 	if m.shouldCreateSharedAuthVolume() {
 		// Suffix selects the named auth identity; an empty suffix selects default.
 		key := backend.StoreKey{Owner: m.profile.Name, Suffix: m.auth.AuthName}
+		if m.run.ProtectAuth && m.run.Ephemeral {
+			key.Suffix = "ephemeral-" + volumeSuffix
+		}
 		prep.Auth = &backend.StorePrepEntry{Key: key}
 		stores.Auth = &backend.StoreRef{Kind: backend.StoreKindAuth, Key: key}
 	}
@@ -123,7 +128,7 @@ func (m volumeManager) BuildPrep(volumeSuffix string) (backend.StorePrep, storeS
 // which auth files reconcile to the shared auth store and which feature
 // credentials copy to feature auth stores. Returns nil when nothing syncs.
 func (m volumeManager) authSyncSpec(stores storeSet) *backend.AuthSyncSpec {
-	if stores.Config == nil {
+	if stores.Config == nil || m.run.ProtectAuth {
 		return nil
 	}
 	spec := &backend.AuthSyncSpec{}
@@ -197,14 +202,11 @@ func (m volumeManager) shouldCreateSharedAuthVolume() bool {
 	if m.profile.ConfigDir == "" || len(m.authFiles) == 0 {
 		return false
 	}
-	if !m.run.Persist || m.auth.AuthScope != model.AuthScopeShared {
-		return false
-	}
-	return true
+	return m.run.ProtectAuth || m.run.Persist && m.auth.AuthScope == model.AuthScopeShared
 }
 
 func (m volumeManager) shouldCreateFeatureAuthVolume(ext model.Extension) bool {
-	if ext.ConfigDir == "" || len(ext.AuthFiles) == 0 {
+	if m.run.ProtectAuth || ext.ConfigDir == "" || len(ext.AuthFiles) == 0 {
 		return false
 	}
 	if !m.run.Persist || m.auth.AuthScope != model.AuthScopeShared {

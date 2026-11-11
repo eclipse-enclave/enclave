@@ -48,6 +48,7 @@ sandbox:
 
 credentials:
   sources:
+    copilot-native: { apiKey: false }
     copilot-github-token:
       env: [COPILOT_GITHUB_TOKEN]
       placeholder:
@@ -59,10 +60,22 @@ network:
     api.github.com: copilot-github-token
     "*.githubcopilot.com": copilot-github-token
   serviceAuth:
+    copilot-native: { headerName: Authorization, valueFormat: "Bearer %s", hosts: [api.github.com, "*.githubcopilot.com"] }
     copilot-github-token: { headerName: Authorization, valueFormat: "Bearer %s" }
 
 providers:
   - name: github
+    authSecrets:
+      - file: config.json
+        codec: copilot-config
+        fields:
+          - { pointer: /authTokens/*/token, kind: access, release: copilot-native, placeholder: { prefix: gho_, random: { encoding: alphanumeric, length: 36 } } }
+    tokenEndpoint:
+      host: github.com
+      path: /login/oauth/access_token
+      body: either
+      grants: ["urn:ietf:params:oauth:grant-type:device_code"]
+      fields: { access: access_token, scope: scope }
     credentials: [copilot-github-token]
     authFiles: [config.json]
     authSession:

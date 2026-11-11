@@ -250,3 +250,97 @@ Scope the key before registering it:
 Commit and tag signing are disabled in the container (see
 [Git](git.md#signing)), so signatures cannot tell an agent's pushes from yours.
 SSH on port 22 bypasses the gateway proxy and is not logged.
+
+## Protected native auth
+
+Claude's per-project `.claude.json` is checked but not projected or moved into
+the shared auth store. A protected start refuses raw `primaryApiKey` or
+`anthropicApiKey` fields there; remove the stored credential or use ordinary mode.
+Project metadata stays in place, including across `--reset-auth`.
+
+`enclave --tool claude --protect-auth` (also Codex, Pi, OpenCode and Copilot)
+mounts a private placeholder view instead of the native auth store.
+The gateway performs the tool's token exchanges and
+releases credentials only to their declared HTTPS hosts. Ordinary sessions
+retain their existing native-file behavior; protection is opt-in.
+
+| Tool | Declared native files, relative to its auth root | Protected credentials |
+|---|---|---|
+| Claude | `.credentials.json`, `config.json` | Claude OAuth and declared API keys |
+| Codex | `auth.json` | ChatGPT access/refresh/ID tokens and the declared OpenAI API key |
+| Pi | `agent/auth.json` | ChatGPT login and declared provider API keys |
+| OpenCode | `auth.json` | ChatGPT/Copilot logins and declared provider API keys |
+| Copilot | `config.json` | GitHub.com account tokens |
+
+Pi and OpenCode protect ChatGPT logins and native API-key entries whose matching
+env credential is configured. OpenCode also protects GitHub Copilot logins;
+Copilot CLI protects GitHub.com device logins. Other native providers, including
+GitHub Enterprise, refuse the protected start. Ordinary mode is unchanged.
+
+Native Copilot grants can reach `*.githubcopilot.com`; Copilot CLI also permits
+`GET` on the exact paths `/copilot_internal/user`,
+`/copilot_internal/managed_settings` and `/copilot_internal/team_customizations`
+on `api.github.com`, with query strings allowed but no body or trailers.
+Other GitHub API paths, including the optional Copilot CLI release check, and
+unsupported OAuth flows refuse native placeholders. Configured
+`GH_TOKEN` and `COPILOT_GITHUB_TOKEN` env releases retain their existing rules.
+Device polling preserves `authorization_pending`, `slow_down` and valid intervals.
+A Copilot CLI login fills its account key from that fixed user endpoint; if that
+lookup fails, start a fresh device login. Inconsistent native account aliases
+refuse rather than being repaired.
+Protected Copilot generates the plaintext-storage preference only for saving
+placeholders. After a protected session, ordinary launches restore its configured
+value; an earlier in-tool consent does not override that value. Other settings
+edits are carried over. Leading `//` headers in native Copilot files are accepted;
+comments inside the JSON document are not. A managed settings carry-over
+parse failure refuses startup and names the file to fix or remove; see
+[Config-source overlay](runtime/stores.md#config-source-overlay).
+
+The option requires restricted networking. It refuses `--allow-all-network`,
+`--admin`, project auth scope, QEMU, devcontainers, custom base images and tools
+without supported native declarations. Theia and Theia Next remain env-only;
+they have no protected native-auth implementation. Feature auth stores,
+including `github-cli`'s, are not mounted. Declared env credentials such as
+`GH_TOKEN` retain their existing release rules, so `gh` remains env-only.
+Git HTTPS Basic authentication is not rewritten, and SSH is not protected.
+
+Ordinary and protected sessions cannot share a config store concurrently. A
+refusal names its holder; different session-store suffixes, tools and projects
+remain independent. An exited container may still have a host process finalizing
+credentials, so it does not immediately release the store. `enclave cleanup`
+reclaims stale holders only after proving the owner and container are gone, or
+finalizing an exited container. An unreachable engine keeps the reservation. Engines are inspected through the
+current endpoint: stop sessions on other `DOCKER_HOST`, `CONTAINER_HOST` or engine
+contexts before protected operations or holder cleanup. Context switches are not
+automatically tracked.
+
+Stop a project's running sessions before its first protected start after an
+upgrade: an older QEMU session cannot be detected. A native-path file containing
+raw credentials is refused rather than replaced; end the ordinary session and
+let reconciliation link it, or reset a crash leftover with `--reset-auth`.
+For shared native auth, `--reset-auth` clears the selected identity’s native files
+and placeholder bindings under its store lock before session admission, even if
+an opposite-mode holder then refuses the start. Other identities and projects’
+placeholder views are left alone; surviving gateways can no longer release the
+removed native OAuth credentials.
+A concurrently completed fresh login is not erased a second time during startup.
+
+At normal session end, Claude's allowlisted client metadata is merged without
+copying credentials, expiry or scopes back from the view. Codex, Pi, OpenCode and
+Copilot auth metadata is gateway-owned and is not harvested from client views.
+Stale, raw or secret-bearing sources are skipped. Only the session's own view is
+deleted. Protected stop keeps
+the reservation until removal confirms both the agent and its original gateway
+are gone; uncertain teardown keeps the private files for later cleanup.
+`--ephemeral` uses a fresh gateway-only identity and removes it at that point.
+
+Protection covers declared native fields, not arbitrary files, SSH or host
+access. Full captures redact known values learned through native exchange
+commits or API releases,
+with the stream and proxy-restart limits in
+[Secrets in captures](networking.md#secrets-in-captures).
+Placeholder JWTs preserve readable claims for client compatibility; claims are
+not confidential. This mode does not add general API-response or WebSocket
+credential filtering.
+See [native auth exchanges](runtime/stores.md#native-auth-exchanges) for storage
+and refresh behavior.

@@ -24,7 +24,7 @@ var (
 	secretIDPattern   = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 )
 
-func validateAndNormalizeSecretConfigs(secrets map[string]model.SecretConfig) (map[string]model.SecretConfig, error) {
+func validateAndNormalizeSecretConfigs(secrets map[string]model.SecretConfig, providers ...model.ProviderConfig) (map[string]model.SecretConfig, error) {
 	if len(secrets) == 0 {
 		return nil, nil
 	}
@@ -51,6 +51,17 @@ func validateAndNormalizeSecretConfigs(secrets map[string]model.SecretConfig) (m
 		}
 
 		envVars, err := normalizeSecretEnvVars(rawID, cfg.EnvVars)
+		if len(cfg.EnvVars) == 0 && cfg.Release != nil && cfg.Release.HTTP != nil {
+			for _, provider := range providers {
+				for _, file := range provider.AuthSecrets {
+					for _, field := range file.Fields {
+						if field.Kind == "access" && field.Release == id {
+							err = nil
+						}
+					}
+				}
+			}
+		}
 		if err != nil {
 			return nil, err
 		}

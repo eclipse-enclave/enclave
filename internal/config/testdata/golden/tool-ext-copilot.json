@@ -27,6 +27,20 @@
           "length": 82
         }
       }
+    },
+    "copilot-native": {
+      "env_vars": null,
+      "release": {
+        "http": {
+          "hosts": [
+            "*.githubcopilot.com",
+            "api.github.com"
+          ],
+          "header": "authorization",
+          "format": "Bearer %s"
+        }
+      },
+      "api_key": false
     }
   }
 }

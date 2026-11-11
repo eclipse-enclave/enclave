@@ -51,6 +51,7 @@ func IsPodman() bool {
 // cliError wraps a failed `docker` invocation, retaining stderr and the exit
 // code so callers can classify failures (see IsNotFound and the run helpers).
 type cliError struct {
+	binary string
 	args   []string
 	code   int
 	stderr string
@@ -65,7 +66,11 @@ func (e *cliError) Error() string {
 	if msg == "" {
 		msg = "command failed"
 	}
-	return fmt.Sprintf("%s %s: %s", filepath.Base(dockerBinary), strings.Join(e.args, " "), msg)
+	binary := e.binary
+	if binary == "" {
+		binary = dockerBinary
+	}
+	return fmt.Sprintf("%s %s: %s", filepath.Base(binary), strings.Join(e.args, " "), msg)
 }
 
 func (e *cliError) Unwrap() error {
@@ -217,16 +222,21 @@ const dockerExitCodeUnableToStart = 125
 // failure it returns the stdout captured so far and a *cliError carrying stderr
 // and the exit code.
 func capture(ctx context.Context, args ...string) (string, error) {
+	return captureEngine(ctx, dockerBinary, args...)
+}
+
+func captureEngine(ctx context.Context, binary string, args ...string) (string, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	cmd := exec.CommandContext(ctx, dockerBinary, args...) // #nosec G204 -- args are fixed flags and caller-controlled values passed without a shell.
+	cmd := exec.CommandContext(ctx, binary, args...) // #nosec G204 -- args are fixed flags and caller-controlled values passed without a shell.
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
 		code, _ := commandExitCode(err)
 		return stdout.String(), &cliError{
+			binary: binary,
 			args:   args,
 			code:   code,
 			stderr: strings.TrimSpace(stderr.String()),

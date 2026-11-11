@@ -49,6 +49,9 @@ Treat an untrusted repository as executable input and review its devcontainer
 and environment files first:
 
 - The project `.env` is loaded into the container environment.
+  `ENCLAVE_*` keys are reserved: project `.env` and devcontainer
+  `--env`/`--env-file` values with that prefix are ignored with a warning naming
+  the key.
 - Devcontainer mode reads the project's `devcontainer.json`; filtered mounts,
   run arguments, and lifecycle commands still shape the container.
 - `commands.initFiles` and `files/workspace` of enabled extensions may write
@@ -117,7 +120,11 @@ so privileged services need their own.
 `--network-log=full` stores request and response headers, bodies, and
 WebSocket messages on the host. Captures replace known released values with
 placeholders, but prompts, file contents, and credentials without a release
-rule are stored as sent. See [Full capture](../networking.md#full-capture).
+rule are stored as sent. Native values are learned on local exchange commit
+or API release, not loaded from all credential files at capture startup.
+Already-open HTTP body streams and echoes after a proxy restart before the
+next local commit or release can miss redaction.
+See [Full capture](../networking.md#full-capture).
 
 ## Secrets
 
@@ -126,7 +133,11 @@ rule are stored as sent. See [Full capture](../networking.md#full-capture).
 - Credentials with an HTTP release rule appear as placeholders; the gateway
   releases the real value only in the configured header to matching HTTPS
   hosts ([API keys](../auth.md#api-keys)). Credential files and secrets without
-  a release rule can hold real values in the config or auth store.
+  a release rule can hold real values in the config or auth store. Opt-in
+  [protected native auth](../auth.md#protected-native-auth) projects declared
+  credential fields for Claude, Codex, Pi, OpenCode and Copilot, keeping their
+  real store gateway-only. It does not protect arbitrary credential files,
+  SSH access or readable claims in placeholder JWTs.
 - A configured SSH key is available to every session of every project and
   tool, and SSH on port 22 bypasses the proxy, so pushes never appear in
   `network.log`. See [SSH keys](../auth.md#ssh-keys).

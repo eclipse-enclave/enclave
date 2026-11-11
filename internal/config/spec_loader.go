@@ -49,6 +49,9 @@ func LoadSpec(paths model.Paths, name string, kind string) (specDocument, error)
 	if err := validateServiceAuthMappings(doc, specPath); err != nil {
 		return specDocument{}, err
 	}
+	if err := validateAuthSecrets(doc, specPath); err != nil {
+		return specDocument{}, err
+	}
 	if err := validateProxyManaged(doc, specPath); err != nil {
 		return specDocument{}, err
 	}
@@ -217,7 +220,7 @@ func loadSpecExtension(paths model.Paths, name string, specKind string) (model.E
 	if err := validateExtensionIdentity(ext, name, specKind, label); err != nil {
 		return model.Extension{}, err
 	}
-	if err := validateAndNormalizeExtension(&ext, label); err != nil {
+	if err := validateAndNormalizeExtension(&ext, label, buildProviders(doc)...); err != nil {
 		return model.Extension{}, err
 	}
 

@@ -8,6 +8,7 @@ internal/config
 internal/domainpattern
 internal/gateway/bundle
 internal/gateway/dnsaudit
+internal/gateway/exchange
 internal/gateway/mitm
 internal/gateway/tlsstore
 internal/gateway/wsframe
@@ -16,5 +17,6 @@ internal/model
 internal/netcapture
 internal/netlog
 internal/network
+internal/placeholderstore
 internal/secretfile
 internal/util

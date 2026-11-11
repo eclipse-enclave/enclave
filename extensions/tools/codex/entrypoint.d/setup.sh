@@ -12,7 +12,7 @@ mkdir -p "$HOME/.codex"
 # A TUI login can save the env placeholder even though it expires with the session.
 # Shared auth was relinked above when available; never remove its symlink target.
 _auth_file="$HOME/.codex/auth.json"
-if [ ! -L "$_auth_file" ] && [ -f "$_auth_file" ] && grep -qF 'ENCLAVE_SECRET_' "$_auth_file"; then
+if [ -z "${ENCLAVE_NATIVE_AUTH_OPS:-}" ] && [ ! -L "$_auth_file" ] && [ -f "$_auth_file" ] && grep -qF 'ENCLAVE_SECRET_' "$_auth_file"; then
     echo "Warning: Removing local Codex auth.json containing a stale gateway placeholder; sign in again." >&2
     rm -f "$_auth_file"
 fi

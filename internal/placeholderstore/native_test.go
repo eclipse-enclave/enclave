@@ -1,0 +1,282 @@
+// Copyright (C) 2026 EclipseSource GmbH and others.
+//
+// This program and the accompanying materials are made available under the
+// terms of the MIT License, which is available in the project root.
+//
+// SPDX-License-Identifier: MIT
+
+package placeholderstore
+
+import (
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"enclave/internal/model"
+)
+
+func TestCopilotRewrittenNativePathCanRelink(t *testing.T) {
+	file := model.AuthFileSecret{File: "config.json", Codec: "copilot-config", Fields: []model.AuthSecretField{{Pointer: "/authTokens/*/token", Kind: "access", Release: "native"}}}
+	profile := model.Profile{Providers: []model.ProviderConfig{{Name: "github", AuthSecrets: []model.AuthFileSecret{file}}}, Secrets: map[string]model.SecretConfig{"native": {Release: &model.SecretReleaseConfig{HTTP: &model.HTTPSecretReleaseConfig{Hosts: []string{"api.githubcopilot.com"}, Header: "Authorization", Format: "Bearer %s"}}}}}
+	real := t.TempDir()
+	nativeFile(t, real, file.File, `{"authTokens":{"https://github.com:fixture:github":{"token":"synthetic-native-token"}}}`)
+	view, err := Project(real, t.TempDir(), "rewrite", profile, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(view.Dir, file.File))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(data, &doc); err != nil {
+		t.Fatal(err)
+	}
+	doc["firstLaunchAt"], doc["trustedFolders"] = "2026-11-10T00:00:00Z", []string{"/workspace"}
+	doc["loggedInUsers"] = []any{map[string]any{"host": "https://github.com", "login": "fixture"}}
+	doc["lastLoggedInUser"] = map[string]any{"host": "https://github.com", "login": "fixture"}
+	updated, _ := json.Marshal(doc)
+	for _, tc := range []struct {
+		name, content, want string
+		idle                bool
+	}{
+		{"idle rewrite", string(updated), "link", true},
+		{"live rewrite", string(updated), "keep", false},
+		{"unknown metadata", strings.TrimSuffix(string(updated), "}") + `,"unknown":true}`, "", true},
+		{"unbound live token", strings.ReplaceAll(string(updated), view.Bindings.Bindings[0].Placeholder, "ENCLAVE_SECRET_unbound"), "", false},
+		{"raw token", strings.ReplaceAll(string(updated), view.Bindings.Bindings[0].Placeholder, "synthetic-native-token"), "", true},
+		{"idle client headers", "// client state\n// settings live separately\n" + string(updated), "link", true},
+		{"live client headers", "// client state\n// settings live separately\n" + string(updated), "keep", false},
+		{"marked header", "// " + view.Bindings.Bindings[0].Placeholder + "\n" + string(updated), "", false},
+		{"interior comment", strings.Replace(string(updated), "{", "{\n// inside document\n", 1), "", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			config := t.TempDir()
+			nativeFile(t, config, file.File, tc.content)
+			ops, err := ClassifyNative(config, "/auth", profile, view.Bindings, nil, tc.idle)
+			if tc.want == "" {
+				if err == nil {
+					t.Fatal("unsafe rewritten native file accepted")
+				}
+			} else if err != nil || len(ops) != 1 || ops[0].Verb != tc.want || ops[0].Digest == "" {
+				t.Fatalf("rewrite classification = %v, %v", ops, err)
+			}
+		})
+	}
+}
+
+func TestClassifyNativeOwnershipAndResetResidue(t *testing.T) {
+	profile := claudeProfile()
+	profile.Providers[0].AuthSecrets = profile.Providers[0].AuthSecrets[:1]
+	real, views := t.TempDir(), t.TempDir()
+	nativeFile(t, real, ".credentials.json", nativeOAuth(accessToken, refreshToken))
+	view, err := Project(real, views, "original", profile, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sanitized, err := os.ReadFile(filepath.Join(view.Dir, ".credentials.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name, content, link string
+		current, other      Bindings
+		idle                bool
+		want                string
+	}{
+		{name: "absent", current: view.Bindings, want: "create"},
+		{name: "expected link", link: "/home/agent/.enclave-auth/.credentials.json", current: view.Bindings, want: "keep"},
+		{name: "foreign link", link: "/home/agent/.elsewhere/.credentials.json", current: view.Bindings},
+		{name: "bound sibling", content: string(sanitized), current: view.Bindings, want: "keep"},
+		{name: "bound idle", content: string(sanitized), current: view.Bindings, idle: true, want: "link"},
+		{name: "raw equal real", content: nativeOAuth(accessToken, refreshToken), current: view.Bindings, idle: true},
+		{name: "raw real-shaped after reset", content: nativeOAuth("sk-ant-oat01-"+strings.Repeat("A", 86), "sk-ant-ort01-"+strings.Repeat("B", 86)), idle: true},
+		{name: "unbound residue idle", content: string(sanitized), idle: true, want: "link"},
+		{name: "unbound while live", content: string(sanitized)},
+		{name: "foreign-bound residue", content: string(sanitized), other: view.Bindings, idle: true},
+		{name: "undecodable", content: "not json", idle: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			if tc.content != "" {
+				nativeFile(t, dir, ".credentials.json", tc.content)
+			}
+			if tc.link != "" {
+				if err := os.Symlink(tc.link, filepath.Join(dir, ".credentials.json")); err != nil {
+					t.Fatal(err)
+				}
+			}
+			ops, err := ClassifyNative(dir, "/home/agent/.enclave-auth", profile, tc.current, []Bindings{tc.other}, tc.idle)
+			if tc.want == "" {
+				if err == nil {
+					t.Fatal("accepted foreign or raw native path")
+				}
+				return
+			}
+			if err != nil || len(ops) != 1 || ops[0].Verb != tc.want {
+				t.Fatalf("classification = %+v, %v; want %s", ops, err, tc.want)
+			}
+			if tc.content != "" {
+				data, err := os.ReadFile(filepath.Join(dir, ".credentials.json"))
+				if err != nil || string(data) != tc.content || ops[0].Digest == "" {
+					t.Fatal("classification changed native path or lost its fingerprint")
+				}
+			}
+		})
+	}
+}
+
+func TestClassifyNativeRefusesUnknownKeysInOriginalRegularFile(t *testing.T) {
+	real, views := t.TempDir(), t.TempDir()
+	profile := claudeProfile()
+	profile.Providers[0].AuthSecrets = profile.Providers[0].AuthSecrets[:1]
+	nativeFile(t, real, ".credentials.json", nativeOAuth(accessToken, refreshToken))
+	view, err := Project(real, views, "original", profile, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sanitized, err := os.ReadFile(filepath.Join(view.Dir, ".credentials.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, nested := range []bool{false, true} {
+		var doc map[string]any
+		if err := json.Unmarshal(sanitized, &doc); err != nil {
+			t.Fatal(err)
+		}
+		target := doc
+		if nested {
+			target = doc["claudeAiOauth"].(map[string]any)
+		}
+		target["unknownCredential"] = "synthetic-unknown-raw-looking-credential"
+		raw, err := json.Marshal(doc)
+		if err != nil {
+			t.Fatal(err)
+		}
+		config := t.TempDir()
+		nativeFile(t, config, ".credentials.json", string(raw))
+		if _, err := ClassifyNative(config, "/home/agent/.enclave-auth", profile, view.Bindings, nil, false); err == nil {
+			t.Fatal("classifier kept an unsanitized regular file after stripping unknown keys")
+		}
+		unchanged, err := os.ReadFile(filepath.Join(config, ".credentials.json"))
+		if err != nil || string(unchanged) != string(raw) {
+			t.Fatal("classification changed the original file")
+		}
+	}
+}
+
+func TestClassifyNativeRefusesAnInRootSymlinkedParent(t *testing.T) {
+	real, views, config := t.TempDir(), t.TempDir(), t.TempDir()
+	profile := claudeProfile()
+	profile.Providers[0].AuthSecrets = profile.Providers[0].AuthSecrets[:1]
+	nativeFile(t, real, ".credentials.json", nativeOAuth(accessToken, refreshToken))
+	view, err := Project(real, views, "original", profile, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sanitized, err := os.ReadFile(filepath.Join(view.Dir, ".credentials.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	nativeFile(t, config, "inside/.credentials.json", string(sanitized))
+	if err := os.Symlink("inside", filepath.Join(config, "parent")); err != nil {
+		t.Fatal(err)
+	}
+	nested := "parent/.credentials.json"
+	profile.Providers[0].AuthSecrets[0].File = nested
+	for i := range view.Bindings.Bindings {
+		view.Bindings.Bindings[i].File = nested
+	}
+	if _, err := ClassifyNative(config, "/home/agent/.enclave-auth", profile, view.Bindings, nil, false); err == nil {
+		t.Fatal("classifier followed a parent symlink that os.Root confines but does not reject")
+	}
+}
+
+func TestCheckOnlyNativeAlias(t *testing.T) {
+	profile := claudeProfile()
+	file := profile.Providers[0].AuthSecrets[1]
+	file.File, file.CheckOnly = ".claude.json", true
+	profile.Providers[0].AuthSecrets = []model.AuthFileSecret{file}
+	for _, tc := range []struct {
+		name, content, pointer string
+		link                   bool
+		refuse                 bool
+	}{
+		{name: "absent"},
+		{name: "global metadata", content: `{"projects":{"/project":{"hasTrustDialogAccepted":true}},"customApiKeyResponses":{"approved":["suffix"]},"oauthAccount":42}`},
+		{name: "placeholder residue", content: `{"primaryApiKey":"ENCLAVE_SECRET_0123456789abcdef0123456789abcdef0123456789abcdef","projects":{}}`},
+		{name: "raw with marker appended", content: `{"primaryApiKey":"synthetic-rawENCLAVE_SECRET_"}`, pointer: "/primaryApiKey", refuse: true},
+		{name: "marker with raw tail", content: `{"primaryApiKey":"ENCLAVE_SECRET_synthetic-raw"}`, pointer: "/primaryApiKey", refuse: true},
+		{name: "primary raw", content: `{"primaryApiKey":"synthetic-raw"}`, pointer: "/primaryApiKey", refuse: true},
+		{name: "alternate raw", content: `{"anthropicApiKey":"synthetic-raw"}`, pointer: "/anthropicApiKey", refuse: true},
+		{name: "wrong credential type", content: `{"primaryApiKey":{"value":"synthetic-raw"}}`, refuse: true},
+		{name: "malformed", content: `{`, refuse: true},
+		{name: "symlink", link: true, refuse: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			if tc.content != "" {
+				nativeFile(t, dir, file.File, tc.content)
+			}
+			if tc.link {
+				if err := os.Symlink("/home/agent/.enclave-auth/.claude.json", filepath.Join(dir, file.File)); err != nil {
+					t.Fatal(err)
+				}
+			}
+			ops, err := ClassifyNative(dir, "/home/agent/.enclave-auth", profile, Bindings{}, nil, true)
+			if (err != nil) != tc.refuse || len(ops) != 0 {
+				t.Fatalf("ops=%v err=%v", ops, err)
+			}
+			if tc.pointer != "" && (!strings.Contains(err.Error(), file.File) || !strings.Contains(err.Error(), tc.pointer)) {
+				t.Fatal(err)
+			}
+			if tc.content != "" {
+				data, e := os.ReadFile(filepath.Join(dir, file.File))
+				if e != nil || string(data) != tc.content {
+					t.Fatal("check changed alias")
+				}
+			}
+			// A check-only alias in the canonical store is not projected or bound.
+			if !tc.link {
+				view, e := Project(dir, t.TempDir(), "session", profile, nil)
+				if e != nil {
+					t.Fatal(e)
+				}
+				if len(view.Bindings.Bindings) != 0 {
+					t.Fatal("check-only alias created bindings")
+				}
+				if _, e := os.Lstat(filepath.Join(view.Dir, file.File)); !os.IsNotExist(e) {
+					t.Fatal("check-only alias was projected")
+				}
+			}
+		})
+	}
+}
+
+func TestCheckOnlyCustomEnvShapeRejectsForgedBinding(t *testing.T) {
+	profile := claudeProfile()
+	file := profile.Providers[0].AuthSecrets[1]
+	file.File, file.CheckOnly = ".claude.json", true
+	profile.Providers[0].AuthSecrets = []model.AuthFileSecret{file}
+	shape := &model.SecretPlaceholderConfig{Prefix: "vendor_ENCLAVE_SECRET_", Suffix: "_end", Random: model.SecretPlaceholderRandom{Encoding: "base64url", Length: 40}}
+	profile.Secrets["api"] = model.SecretConfig{Placeholder: shape}
+	value, err := model.NewSecretPlaceholder(shape)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, forged := range []bool{false, true} {
+		dir := t.TempDir()
+		nativeFile(t, dir, file.File, `{"primaryApiKey":"`+value+`"}`)
+		current := Bindings{}
+		if forged {
+			value = "synthetic-raw-keyENCLAVE_SECRET_"
+			nativeFile(t, dir, file.File, `{"primaryApiKey":"`+value+`"}`)
+			current.Bindings = []Binding{{Kind: "apiKey", Placeholder: value}}
+		}
+		if _, err := ClassifyNative(dir, "/auth", profile, current, nil, true); (err != nil) != forged {
+			t.Fatalf("configured shape / forged binding: %v", err)
+		}
+	}
+}

@@ -38,6 +38,7 @@ environment:
 
 credentials:
   sources:
+    chatgpt-oauth: { apiKey: false }
     openai-api-key: { env: [OPENAI_API_KEY] }
     anthropic-api-key: { env: [ANTHROPIC_API_KEY] }
     anthropic-oauth-token:
@@ -58,6 +59,7 @@ network:
     generativelanguage.googleapis.com: gemini-api-key
     api.mistral.ai: mistral-api-key
   serviceAuth:
+    chatgpt-oauth: { headerName: authorization, valueFormat: "Bearer %s", hosts: [chatgpt.com] }
     openai-api-key: { headerName: authorization, valueFormat: "Bearer %s" }
     anthropic-api-key: { headerName: x-api-key }
     anthropic-oauth-token: { headerName: authorization, valueFormat: "Bearer %s", hosts: [api.anthropic.com] }
@@ -72,6 +74,22 @@ providers:
       checks:
         - { file: agent/auth.json, type: json_pointer_non_null, pointer: /openai }
   - name: openai-codex
+    authSecrets:
+      - file: agent/auth.json
+        codec: provider-map
+        fields:
+          - { pointer: /openai/key, kind: apiKey, release: openai-api-key }
+          - { pointer: /anthropic/key, kind: apiKey, release: anthropic-api-key }
+          - { pointer: /google/key, kind: apiKey, release: gemini-api-key }
+          - { pointer: /mistral/key, kind: apiKey, release: mistral-api-key }
+          - { pointer: /openai-codex/access, kind: access, release: chatgpt-oauth, placeholder: { shape: jwt } }
+          - { pointer: /openai-codex/refresh, kind: refresh }
+    tokenEndpoint:
+      host: auth.openai.com
+      path: /oauth/token
+      body: either
+      grants: [authorization_code, refresh_token]
+      fields: { access: access_token, refresh: refresh_token, id: id_token, expiresIn: expires_in, scope: scope }
     authFiles: [agent/auth.json]
     authSession:
       checks:

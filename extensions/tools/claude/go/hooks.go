@@ -9,10 +9,12 @@ package claude
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 
 	"enclave/internal/auth"
@@ -63,17 +65,53 @@ func writeClaudeConfig(ctx auth.Context, store *backend.StoreRef, payload map[st
 // This is needed when credentials exist in the auth store (e.g., from in-container OAuth)
 // but no host OAuth JSON exists to export settings from.
 func ensureOnboardingComplete(ctx auth.Context, store *backend.StoreRef) error {
-	for _, rel := range claudeConfigFiles {
-		if storeFileContains(ctx, store, rel, onboardingMarker) {
-			return nil // Already has onboarding flag
+	files := claudeConfigFiles
+	payload := map[string]any{}
+	if ctx.Run.ProtectAuth {
+		// config.json is owned by native classification, including its digest.
+		files = []string{".claude.json"}
+		existing, err := ctx.Storage.ReadFile(context.Background(), store.Key, store.Kind, files[0])
+		if err == nil {
+			decoder := json.NewDecoder(bytes.NewReader(existing))
+			decoder.UseNumber()
+			if err := decoder.Decode(&payload); err != nil || payload == nil {
+				return fmt.Errorf("protected onboarding config must be a JSON object")
+			}
+			if payload[onboardingMarker] == true {
+				return nil
+			}
+		} else if !errors.Is(err, fs.ErrNotExist) {
+			return err
+		}
+	} else {
+		for _, rel := range files {
+			if storeFileContains(ctx, store, rel, onboardingMarker) {
+				return nil
+			}
 		}
 	}
-
 	logx.Infof("Marking Claude onboarding complete (credentials found in auth store)")
-	return writeClaudeConfig(ctx, store, map[string]any{
-		"hasCompletedOnboarding": true,
-		"lastOnboardingVersion":  "999.999.999",
-	})
+	payload[onboardingMarker] = true
+	payload["lastOnboardingVersion"] = "999.999.999"
+	data, _ := json.Marshal(payload)
+	// A protected session links config.json to its view, and the store refuses
+	// to write through links. One written file carries the marker.
+	var firstErr error
+	written := false
+	for _, rel := range files {
+		if err := ctx.Storage.WriteFile(context.Background(), store.Key, store.Kind, rel, data, 0o600); err != nil {
+			firstErr = cmp.Or(firstErr, err)
+			continue
+		}
+		written = true
+	}
+	if !written {
+		return firstErr
+	}
+	if owner := util.ChownSpec(ctx.Host.UID, ctx.Host.GID); owner != "" {
+		return ctx.Storage.Ensure(context.Background(), store.Key, store.Kind, owner)
+	}
+	return nil
 }
 
 func readOAuthAccount(hostHome string, profile model.Profile) any {

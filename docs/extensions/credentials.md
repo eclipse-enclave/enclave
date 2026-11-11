@@ -215,6 +215,52 @@ exists, Enclave forwards it to the container's loopback interface.
 User-facing behavior per tool is in
 [Authentication](../auth.md#oauth-callback-ports).
 
+### Native auth declarations (internal)
+
+`providers[].authSecrets` and `tokenEndpoint` are reserved for the internal protected-auth
+implementation. They do not enable a protected session or change ordinary auth
+behavior. Claude, Codex, Pi, OpenCode and Copilot enable them with `--protect-auth`; see
+[protected native auth](../auth.md#protected-native-auth).
+
+| Field | Meaning |
+|-------|---------|
+| `authSecrets[].file` | One declaration owner per relative path across the profile; must appear in its owner’s `authFiles` unless `checkOnly` |
+| `authSecrets[].checkOnly` | Inspect credential pointers in the config store; refuse raw values, leave metadata untouched, never project or reconcile the file |
+| `authSecrets[].codec` | Native format; projection currently implements `claude-credentials`, `claude-config`, `codex-auth`, `provider-map` and `copilot-config` |
+| `authSecrets[].fields[].pointer` | RFC 6901 object-field pointer; at most one `*` segment; arrays are not supported |
+| `fields[].kind` | `access`, `refresh`, `id`, or `apiKey` |
+| `fields[].release` | Existing `network.serviceAuth` id; required for access/API keys, forbidden for refresh/ID tokens |
+| `fields[].placeholder` | Opaque prefix/suffix/random shape, or `shape: jwt` for access/ID fields; API keys reuse their env placeholder |
+| `tokenEndpoint` | Exact normalized `host`, absolute `path`, `json`/`form`/`either` body, allowed grants, response fields, and explicit deny host/path pairs |
+
+Every file placeholder contains `ENCLAVE_SECRET_`. Base64url shapes include the
+marker within the declared random-body length and retain at least 128 random
+bits. Hex/alphanumeric shapes place the marker before their random body.
+JWT placeholders retain readable header/payload claims and use a bound signature;
+refreshes update the claims without invalidating older cached JWT placeholders.
+Provider-map slots use their concrete provider key as the binding namespace.
+Unknown provider credentials refuse rather than being copied. API-key fields use the configured env
+credential's placeholder and refuse a raw native key when no such credential is
+configured. A native access field may reference an HTTP release source without
+an env alias; unrelated empty-env sources still refuse.
+
+For a shared provider-map file, declare all its fields once. Each token endpoint
+uses the profile's single supported exchange file; the endpoint provider need not
+own that declaration. Duplicate owners or ambiguous native files refuse. The
+provider's concrete map key still namespaces bindings, independent of the file's
+owner. Copilot's equal access/refresh slots and legacy/current account keys share
+one opaque placeholder. Other credentials keep independent bindings. Copilot’s
+leading JSONC headers are read from canonical files and stripped from views;
+regular native paths containing comment bytes remain a strict refusal.
+
+The gateway reads only declared, bounded regular files and publishes private
+per-session views. `bindings.json` stores placeholder identities, not grants;
+native files remain canonical. Unknown keys are stripped from projected views
+but stay in the canonical files. Native-path classification is strict: unknown
+keys in an original regular file are refused, since keeping it would retain
+those bytes. Raw or foreign native config files are refused, never overwritten. Native-path operations are rechecked by the entrypoint;
+ordinary reconciliation is not used for a protected view.
+
 ### Shared credential storage (`securestorageDirEnv`)
 
 In the `shared` auth scope, Enclave points this env var at the shared auth

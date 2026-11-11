@@ -8,9 +8,11 @@
 package gateway
 
 import (
+	"enclave/internal/model"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -283,6 +285,108 @@ func TestGatewayFirewallLockdownClosesInbound(t *testing.T) {
 		} {
 			if got := inputVerdict(t, calls, engine, packet); got != "DROP" {
 				t.Fatalf("%s input verdict after lockdown = %s for %+v", engine, got, packet)
+			}
+		}
+	}
+}
+
+func TestProtectedProxyExemptionUsesItsDistinctPrimaryGroup(t *testing.T) {
+	for _, protected := range []bool{false, true} {
+		t.Run(strconv.FormatBool(protected), func(t *testing.T) {
+			nativeConfig := ""
+			expectedMatch, expectedID := "--uid-owner", "1000"
+			if protected {
+				nativeConfig = "/native-config"
+				expectedMatch, expectedID = "--gid-owner", "102"
+			}
+			calls, err := runGatewayFirewall(t, `id() {
+    case "$1:$2" in
+      -u:gateway) echo 1000 ;;
+      -g:gateway) echo 102 ;;
+      *) echo 53 ;;
+    esac
+  }
+  setup_firewall`, model.EnvNativeAuthConfig+"="+nativeConfig)
+			if err != nil {
+				t.Fatal(err)
+			}
+			exemptions := 0
+			for _, call := range calls {
+				args := call.args
+				if call.engine != "iptables" || len(args) < 2 || args[0] != "-t" || args[1] != "nat" || args[len(args)-1] != "RETURN" {
+					continue
+				}
+				for i, arg := range args {
+					if arg == "--uid-owner" || arg == "--gid-owner" {
+						if arg != expectedMatch || args[i+1] != expectedID {
+							t.Fatal("workload UID shares the proxy exemption")
+						}
+						exemptions++
+					}
+				}
+			}
+			if exemptions != 2 {
+				t.Fatal("missing distinct proxy exemptions for HTTP and HTTPS")
+			}
+		})
+	}
+}
+
+func TestRestrictedGatewayNATFailures(t *testing.T) {
+	const startupMocks = `
+normalize_proxy_enabled() { :; }
+remap_native_proxy_identity() { :; }
+init_log_files() { :; }
+ensure_local_resolver() { :; }
+render_and_validate_bundle() { :; }
+install_bundle() { :; }
+restore_bundle() { :; }
+read_bundle_generation() { echo test; }
+create_ipset() { :; }
+atomic_swap_ipset() { :; }
+setup_kernel_network() { :; }
+prepare_proxy_runtime_data() { :; }
+start_proxy() { :; }
+start_dnsmasq() { :; }
+start_dns_audit() { :; }
+monitor_loop() { :; }
+reload_children() { :; }
+log() { firewall_mock log "$@"; }
+DNSMASQ_CONF="$FW_LOG.absent"
+ACTIVE_DOMAINS_FILE="$FW_LOG.absent"
+`
+	for _, native := range []string{"", "synthetic-native-config"} {
+		owner := "--uid-owner"
+		if native != "" {
+			owner = "--gid-owner"
+		}
+		for _, phase := range []struct{ name, invocation, ready string }{
+			{"startup", "main", "Gateway ready"},
+			{"reload", "reload_gateway", "Reload completed (generation=test)"},
+		} {
+			for _, rule := range []string{
+				"", "-t nat -F OUTPUT",
+				"-t nat -A OUTPUT -p tcp --dport 80 -m owner " + owner + " 105 -j RETURN",
+				"-t nat -A OUTPUT -p tcp --dport 443 -m owner " + owner + " 105 -j RETURN",
+				"-t nat -A OUTPUT -p tcp --dport 80 -j REDIRECT --to-ports " + proxyHTTPPort,
+				"-t nat -A OUTPUT -p tcp --dport 443 -j REDIRECT --to-ports " + proxyHTTPSPort,
+			} {
+				t.Run(owner+"/"+phase.name+"/"+rule, func(t *testing.T) {
+					calls, err := runGatewayFirewall(t, startupMocks+phase.invocation,
+						"PROXY_ENABLED=true", model.EnvNativeAuthConfig+"="+native,
+						"FAIL_ENGINE=iptables", "FAIL_RULE="+rule)
+					if (err != nil) != (rule != "") {
+						t.Fatalf("gateway error = %v, failing rule = %q", err, rule)
+					}
+					reachedRule, ready := rule == "", false
+					for _, call := range calls {
+						reachedRule = reachedRule || (call.engine == "iptables" && strings.Join(call.args, " ") == rule)
+						ready = ready || (call.engine == "log" && strings.Join(call.args, " ") == phase.ready)
+					}
+					if !reachedRule || ready != (rule == "") {
+						t.Fatalf("reached rule = %v, reported ready = %v, failing rule = %q", reachedRule, ready, rule)
+					}
+				})
 			}
 		}
 	}

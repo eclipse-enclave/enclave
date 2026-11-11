@@ -43,6 +43,62 @@
       "auth_files": [
         "auth.json"
       ],
+      "auth_secrets": [
+        {
+          "file": "auth.json",
+          "codec": "codex-auth",
+          "fields": [
+            {
+              "pointer": "/OPENAI_API_KEY",
+              "kind": "apiKey",
+              "release": "openai-api-key"
+            },
+            {
+              "pointer": "/tokens/access_token",
+              "kind": "access",
+              "release": "codex-access-token",
+              "placeholder": {
+                "shape": "jwt",
+                "random": {
+                  "encoding": "",
+                  "length": 0
+                }
+              }
+            },
+            {
+              "pointer": "/tokens/refresh_token",
+              "kind": "refresh"
+            },
+            {
+              "pointer": "/tokens/id_token",
+              "kind": "id",
+              "placeholder": {
+                "shape": "jwt",
+                "random": {
+                  "encoding": "",
+                  "length": 0
+                }
+              }
+            }
+          ]
+        }
+      ],
+      "token_endpoint": {
+        "host": "auth.openai.com",
+        "path": "/oauth/token",
+        "body": "either",
+        "grants": [
+          "authorization_code",
+          "refresh_token"
+        ],
+        "fields": {
+          "access": "access_token",
+          "expiresIn": "expires_in",
+          "id": "id_token",
+          "refresh": "refresh_token",
+          "scope": "scope"
+        }
+      },
       "auth_session": {
         "mode": "any",
         "checks": [

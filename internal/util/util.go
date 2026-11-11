@@ -17,6 +17,9 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"enclave/internal/logx"
+	"enclave/internal/model"
 )
 
 func HashFile(path string) (hash string, err error) {
@@ -245,6 +248,20 @@ func ParseEnv(r io.Reader) (map[string]string, error) {
 	return env, nil
 }
 
+// FilterProjectEnv keeps project-supplied values out of Enclave's control namespace.
+func FilterProjectEnv(values []string) []string {
+	filtered := make([]string, 0, len(values))
+	for _, value := range values {
+		key, _, _ := strings.Cut(value, "=")
+		if strings.HasPrefix(key, model.EnvPrefix) {
+			logx.Warnf("Ignoring project environment variable %q: reserved for Enclave", key)
+			continue
+		}
+		filtered = append(filtered, value)
+	}
+	return filtered
+}
+
 func ParseEnvFile(path string) ([]string, error) {
 	// #nosec G304 -- path is provided by trusted local config/devcontainer callers.
 	file, err := os.Open(path)
@@ -261,24 +278,6 @@ func ParseEnvFile(path string) ([]string, error) {
 		out = append(out, pair.Key+"="+pair.Value)
 	}
 	return out, nil
-}
-
-func EnvKeysFromFile(path string) ([]string, error) {
-	// #nosec G304 -- path is provided by trusted internal callers for env parsing.
-	file, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = file.Close() }()
-	pairs, err := ParseEnvPairs(file)
-	if err != nil {
-		return nil, err
-	}
-	keys := make([]string, 0, len(pairs))
-	for _, pair := range pairs {
-		keys = append(keys, pair.Key)
-	}
-	return keys, nil
 }
 
 func RedactSecret(value string) string {

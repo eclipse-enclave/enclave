@@ -20,6 +20,87 @@ import (
 	"enclave/internal/backend"
 )
 
+func TestManagedSettingsIntentSurvivesInterruptedPublication(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("permission failure requires an unprivileged user")
+	}
+	for _, scenario := range []string{"existing", "first-before", "first-after"} {
+		t.Run(scenario, func(t *testing.T) {
+			root, source, store := t.TempDir(), t.TempDir(), t.TempDir()
+			key := backend.StoreKey{Owner: "copilot", ProjectHash: "abc123abc123"}
+			base, err := ConfigBasePath(root, key)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.MkdirAll(filepath.Dir(base), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			write := func(path, data string) {
+				t.Helper()
+				if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			read := func(path string) map[string]any {
+				t.Helper()
+				data, err := os.ReadFile(path)
+				var value map[string]any
+				if err != nil || json.Unmarshal(data, &value) != nil {
+					t.Fatal("cannot read settings", err)
+				}
+				return value
+			}
+			sourceFile, storeFile := filepath.Join(source, "settings.json"), filepath.Join(store, "settings.json")
+			if scenario == "existing" {
+				write(base, `{"storeTokenPlaintext":false,"model":"old"}`)
+			}
+			write(storeFile, `{"storeTokenPlaintext":false,"model":"tool"}`)
+			const protected = `{"storeTokenPlaintext":true,"model":"new"}`
+			write(sourceFile, protected)
+			spec := backend.ConfigOverlaySpec{SourceDir: source, SettingsPath: "settings.json", SettingsBase: []byte(`{"model":"new"}`)}
+			interrupted := errors.New("interrupted after settings publication")
+			if err := OverlayConfigSettings(root, key, store, spec, func() error {
+				intent := read(base)
+				_, hasModel := intent["model"]
+				if intent["storeTokenPlaintext"] != true || (scenario == "existing" && intent["model"] != "old") || (scenario != "existing" && hasModel) {
+					t.Fatal("forced consent was not recorded before publication, or old metadata baseline was lost")
+				}
+				if scenario != "first-before" {
+					write(storeFile, protected)
+				}
+				return interrupted
+			}); !errors.Is(err, interrupted) {
+				t.Fatalf("interruption error = %v", err)
+			}
+			const ordinary = `{"storeTokenPlaintext":false,"model":"new"}`
+			write(sourceFile, ordinary)
+			spec.SettingsBase = []byte(ordinary)
+			defer func() { _ = os.Chmod(filepath.Dir(base), 0o700) }()
+			if err := OverlayConfigSettings(root, key, store, spec, func() error {
+				if read(base)["storeTokenPlaintext"] != true {
+					t.Fatal("restoration intent cleared before ordinary false was published")
+				}
+				write(storeFile, ordinary)
+				return os.Chmod(filepath.Dir(base), 0o500)
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if read(storeFile)["storeTokenPlaintext"] != false || read(storeFile)["model"] != "new" || read(base)["storeTokenPlaintext"] != true {
+				t.Fatal("failed final snapshot did not retain a safe restoration intent")
+			}
+			if err := os.Chmod(filepath.Dir(base), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := OverlayConfigSettings(root, key, store, spec, func() error {
+				write(storeFile, ordinary)
+				return nil
+			}); err != nil || read(storeFile)["storeTokenPlaintext"] != false || read(base)["storeTokenPlaintext"] != false {
+				t.Fatal("fresh ordinary launch did not recover after snapshot failure", err)
+			}
+		})
+	}
+}
+
 func TestMergeSettingsFile(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

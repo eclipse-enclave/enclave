@@ -280,24 +280,6 @@ func ParseEnvFile(path string) ([]string, error) {
 	return out, nil
 }
 
-func EnvKeysFromFile(path string) ([]string, error) {
-	// #nosec G304 -- path is provided by trusted internal callers for env parsing.
-	file, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = file.Close() }()
-	pairs, err := ParseEnvPairs(file)
-	if err != nil {
-		return nil, err
-	}
-	keys := make([]string, 0, len(pairs))
-	for _, pair := range pairs {
-		keys = append(keys, pair.Key)
-	}
-	return keys, nil
-}
-
 func RedactSecret(value string) string {
 	if value == "" {
 		return "<empty>"

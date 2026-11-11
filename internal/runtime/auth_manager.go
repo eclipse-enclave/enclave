@@ -470,12 +470,7 @@ func (m authManager) shouldUseSecretReleases(activeSecrets []activeSecret) bool 
 	if !hasHTTPRelease {
 		return false
 	}
-	resolved, err := m.resolveEffectivePolicy()
-	if err != nil {
-		logx.Warnf("Failed to resolve effective network policy for secret release decision: %v", err)
-		return true
-	}
-	return resolved.Effective.Mode != model.NetworkModeUnrestricted
+	return m.networkRestricted()
 }
 
 func anyProviderSession(sessions map[string]bool) bool {

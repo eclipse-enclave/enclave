@@ -54,8 +54,9 @@ func TestAddGatewayCAMountSetsTrustEnvOnContainer(t *testing.T) {
 	}
 }
 
-func TestAddGatewayCAMountSkipsUnrestrictedNetwork(t *testing.T) {
+func TestAddGatewayCAMountSkipsDisabledGateway(t *testing.T) {
 	r := gatewayCATestRuntime(t, model.NetworkModeUnrestricted)
+	r.run.DisableGateway = true
 
 	mounts := newMountAccumulator(nil, nil)
 	if err := r.addGatewayCAMount(mounts); err != nil {
@@ -63,5 +64,22 @@ func TestAddGatewayCAMountSkipsUnrestrictedNetwork(t *testing.T) {
 	}
 	if len(mounts.Mounts()) != 0 || len(mounts.Env()) != 0 {
 		t.Fatalf("expected no gateway CA mount or env, got mounts %v env %v", mounts.Mounts(), mounts.Env())
+	}
+}
+
+// An unrestricted session with a gateway trusts the gateway CA, so
+// --network-log=requests can decrypt its HTTPS as in restricted mode.
+func TestAddGatewayCAMountTrustsObservingGateway(t *testing.T) {
+	r := gatewayCATestRuntime(t, model.NetworkModeUnrestricted)
+
+	mounts := newMountAccumulator(nil, nil)
+	if err := r.addGatewayCAMount(mounts); err != nil {
+		t.Fatalf("addGatewayCAMount: %v", err)
+	}
+	if _, ok := findMountByTarget(mounts.Mounts(), model.AgentGatewayCACertPath); !ok {
+		t.Fatalf("expected gateway CA mount at %s", model.AgentGatewayCACertPath)
+	}
+	if !slices.Contains(mounts.Env(), "NODE_EXTRA_CA_CERTS="+model.AgentGatewayCACertPath) {
+		t.Fatalf("container env does not trust the gateway CA: %v", mounts.Env())
 	}
 }

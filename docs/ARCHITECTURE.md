@@ -82,8 +82,8 @@ flowchart LR
     ToolImportsGen --> ToolImports["cmd/enclave/tool_imports.go"]
 ```
 
-The restricted network request flow has a separate
-[sequence diagram](runtime/network-request-flow.md).
+The network request flow, restricted and unrestricted, has separate
+[sequence diagrams](runtime/network-request-flow.md).
 
 ## Repository layout
 
@@ -197,7 +197,7 @@ extensions, hence the `//go:build !windows` on
 |------|---------|
 | [`Dockerfile`](../Dockerfile) | Runtime image: `tool-base` -> `feature-base` -> `standard` plus per-tool stages; contexts and hashes scoped to the selected tools and features |
 | [`Dockerfile.gateway`](../Dockerfile.gateway) | Gateway image (DNS, transparent proxy, MITM proxy) |
-| [`gateway-entrypoint.sh`](../gateway-entrypoint.sh) | Supervisor: validates bundles, runs dnsmasq and proxy, reloads on SIGHUP, fails closed |
+| [`gateway-entrypoint.sh`](../gateway-entrypoint.sh) | Supervisor: validates bundles, runs dnsmasq and proxy, reloads on SIGHUP, fails closed; when the container's `ENCLAVE_GATEWAY_NETWORK_MODE` is `unrestricted`, only the 80/443 redirect and proxy, no reloads, fail open when the proxy dies |
 | [`entrypoint.sh`](../entrypoint.sh) | Auth symlinks, settings seeding, telemetry defaults, direnv, gitconfig |
 | [`runtime-assets/gateway-allowlists/`](../runtime-assets/gateway-allowlists/) | Base DNS allowlists and fragments |
 | [`runtime-assets/build-scripts/`](../runtime-assets/build-scripts/) | Build composition: features, templates, agent tool helpers |
@@ -294,11 +294,14 @@ before the gateway, and exits 130
 ### Network isolation
 
 Every Docker session gets a dedicated, labeled bridge. The gateway sidecar is
-the attached endpoint and the tool shares its network namespace; unrestricted
-sessions attach the tool directly. DNS blocks unknown domains; the proxy
-tunnels TLS and uses MITM only for secret-release hosts or under
-`network_log=requests`. User-facing behavior is in
-[networking.md](networking.md); the request path is in
+the attached endpoint and the tool shares its network namespace; with
+`--disable-gateway` the tool is attached directly. In restricted mode DNS
+blocks unknown domains, the gateway admits inbound traffic only for loopback,
+replies, and published ports, and the proxy tunnels TLS and uses MITM only for
+secret-release hosts or under `network_log=requests`. In unrestricted mode the
+gateway only observes: it keeps Docker's resolver, installs no filters, and
+logs TCP 80/443. User-facing behavior is in [networking.md](networking.md); the
+request path, in both modes, is in
 [network-request-flow.md](runtime/network-request-flow.md).
 
 Sidecar lifecycle:
@@ -313,13 +316,17 @@ Sidecar lifecycle:
 
 Gateways and bridges carry labels (`enclave.gateway`, `enclave.agent`,
 `enclave.gateway.project_hash`, ownership labels) for discovery and lifecycle;
-consumers should use `enclave ps --json` instead. `network apply` writes a new
-bundle, sends SIGHUP, and polls logs for confirmation; the supervisor validates
-before swapping and fails closed.
+consumers should use `enclave ps --json` instead. Unrestricted gateways also
+carry `enclave.gateway.mode=unrestricted`; a gateway without it is restricted.
+`network apply` writes a new bundle, sends SIGHUP, and polls logs for
+confirmation; the supervisor validates before swapping and fails closed.
+Unrestricted gateways are skipped: a running gateway never changes mode.
 
 Audit events go through `netlog.Event` to `logs/network.log`: the MITM proxy
 writes `tcp` and `http` events, `dnsaudit` writes `dns` denials, and the host
-writes a `session` marker per gateway start. The host rotates at session start
+writes a `session` marker per gateway start. An unrestricted gateway writes the
+same `http` and `tcp` events, with rule `unrestricted`, for TCP 80/443 only,
+and no `dns` events. The host rotates at session start
 above `netlog.MaxLogBytes` by copy and truncate, so running sessions keep their
 bind-mounted file
 ([Reading the network log](networking.md#reading-the-network-log)).
@@ -343,10 +350,13 @@ real secret.
 
 ## Containers and stores
 
-The tool container is ephemeral (`--rm`); with network isolation the gateway
+The tool container is ephemeral (`--rm`); in restricted mode the gateway
 enforces Host/SNI ([Network isolation](#network-isolation)). Mount modes are in
 [mounts.md](mounts.md). Host policy resolution writes
-`projects/<hash>/<tool>/gateway-config/` for the gateway.
+`projects/<hash>/<tool>/gateway-config/` for restricted gateways only. The
+host sets a gateway's mode in its container environment
+(`ENCLAVE_GATEWAY_NETWORK_MODE`), never in a file; unrestricted gateways get no
+bundle.
 
 Git config protection runs after mount composition: read-only file overlays on
 existing repository config and includes at their exposed paths, writable parent
@@ -487,6 +497,15 @@ falls back to `strict` for empty or unknown values.
 - `internal/app/root_guard_test.go` and `cmd/enclave/main_test.go` (the only
   tests with the real embedded assets) catch writes by backdating directory
   mtimes under a temporary HOME.
+
+### Gateway opt-out
+
+`--disable-gateway` (config key `disable_gateway`) is valid only in
+unrestricted network mode and never implies it. `validateDisableGateway`
+(`internal/app/validation.go`) checks it for run actions after the qemu
+coercion, which implies it. The mode comes from `--allow-all-network` or,
+through `ValidationContext.PolicyNetworkMode` (`AppContext.PolicyNetworkMode`),
+from the global and project network policy files; a nil hook means restricted.
 
 ### Mount guard
 

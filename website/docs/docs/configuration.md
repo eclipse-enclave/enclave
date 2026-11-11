@@ -130,7 +130,8 @@ See [Bridging host ports](https://github.com/eclipse-enclave/enclave/blob/main/d
 | Key | Flag | What it does |
 | --- | --- | --- |
 | `allow_domains` | `--allow-domain <domain>` | Add domains to the gateway allowlist. Bare DNS names only, no scheme or path. |
-| `allow_all_network` | `--allow-all-network` | Turn network filtering off entirely for the session. |
+| `allow_all_network` | `--allow-all-network` | Turn network filtering off entirely for the session. The gateway still logs HTTP/HTTPS traffic. |
+| `disable_gateway` | `--disable-gateway` | Run an unrestricted session without the network gateway, so no network log is written. Fails in restricted mode. |
 | `network_log` | `--network-log requests` | Log request-level audit events instead of coarse pass/deny. |
 
 ### Auth and secrets

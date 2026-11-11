@@ -212,7 +212,10 @@ type FeatureAuthSync struct {
 }
 
 type NetworkPolicy struct {
-	Mode           NetworkMode
+	Mode NetworkMode
+	// Gateway reports whether a gateway sidecar runs alongside the session.
+	// It is independent of Mode, which only states the egress policy.
+	Gateway        bool
 	Egress         EgressPolicy
 	LoopbackPorts  []string
 	IdeBridgePorts []string
@@ -366,6 +369,13 @@ type GatewayInfo struct {
 	ProjectDir       string
 	WorkspaceID      string
 	SessionContainer string
+	// A running gateway never switches modes, so an unrestricted one never
+	// receives a policy.
+	NetworkMode NetworkMode
+}
+
+func (g GatewayInfo) Unrestricted() bool {
+	return g.NetworkMode == NetworkModeUnrestricted
 }
 
 func (g GatewayInfo) ShortID() string {
@@ -514,6 +524,9 @@ func (e *ExitError) Error() string {
 func Validate(req Request, caps Capabilities) error {
 	if req.Network.Mode == NetworkModeRestricted && !caps.RestrictedNetwork {
 		return fmt.Errorf("backend cannot enforce restricted networking; rerun with --allow-all-network to proceed unrestricted")
+	}
+	if req.Network.Mode == NetworkModeRestricted && !req.Network.Gateway {
+		return fmt.Errorf("restricted networking requires a gateway")
 	}
 	if req.Network.Mode == NetworkModeRestricted && !caps.SecretHTTPRelease {
 		for _, secret := range req.Secrets {

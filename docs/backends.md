@@ -111,7 +111,7 @@ Host AppArmor profiles can affect binaries inside rootless containers; see
 
 | Aspect | Behavior |
 |--------|----------|
-| Network | Implies `--allow-all-network` and prints a notice that network isolation is unavailable. `--allow-domain` and `allow_domains` from config are rejected |
+| Network | Implies `--allow-all-network` and `--disable-gateway` and prints a notice that network isolation is unavailable. `--allow-domain` and `allow_domains` from config are rejected |
 | Features | Implies `--slim`. `--features` is rejected; features selected in config, including unknown names, are dropped with a notice |
 | Not supported yet | Detached sessions, `exec`, `attach`, restricted egress, HTTP secret release, devcontainers, non-default feature stacks |
 | Listing | QEMU sessions are not listed by `enclave ps` |

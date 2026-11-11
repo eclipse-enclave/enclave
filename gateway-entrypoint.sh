@@ -14,6 +14,10 @@ ACTIVE_DOMAINS_FILE="/run/enclave-gateway/domains.txt"
 IPSET_NAME="enclave_allowed"
 DNSMASQ_USER="dnsmasq"
 PROXY_USER="gateway"
+# The proxy listens on these loopback ports; keep them in sync with
+# GatewayProxyHTTPPort and GatewayProxyHTTPSPort in internal/model.
+PROXY_HTTP_PORT="15080"
+PROXY_HTTPS_PORT="15443"
 PROXY_ENABLED="${PROXY_ENABLED:-true}"
 NETWORK_LOG_FILE="${ENCLAVE_NETWORK_LOG_FILE:-}"
 GATEWAY_CONFIG_DIR="${ENCLAVE_GATEWAY_CONFIG_DIR:-/etc/enclave-gateway-config}"
@@ -30,6 +34,10 @@ PROXY_PID=""
 DNS_AUDIT_PID=""
 DNS_AUDIT_RESTARTS="0"
 RELOAD_PENDING="0"
+# The session's network mode, from the container environment. Restricted
+# enforces the policy; unrestricted only observes. Anything unrecognised is
+# restricted.
+GATEWAY_MODE="restricted"
 
 UNIQUE_RESOLVERS=""
 
@@ -185,6 +193,22 @@ read_bundle_generation() {
     printf '%s\n' "$generation"
 }
 
+# read_gateway_mode takes the mode from the environment the host set when it
+# created the container, never from the bundle on the host, and passes the
+# normalised value on to the proxy.
+read_gateway_mode() {
+    case "${ENCLAVE_GATEWAY_NETWORK_MODE:-}" in
+        unrestricted) GATEWAY_MODE="unrestricted" ;;
+        *) GATEWAY_MODE="restricted" ;;
+    esac
+    ENCLAVE_GATEWAY_NETWORK_MODE="$GATEWAY_MODE"
+    export ENCLAVE_GATEWAY_NETWORK_MODE
+}
+
+gateway_observes_only() {
+    [ "$GATEWAY_MODE" = "unrestricted" ]
+}
+
 ensure_local_resolver() {
     if command -v enclave_ensure_local_resolver >/dev/null 2>&1; then
         enclave_ensure_local_resolver
@@ -266,10 +290,20 @@ atomic_swap_ipset() {
     return 0
 }
 
+# setup_loopback_forwarding makes listeners on 127.0.0.1 reachable through
+# published ports. Forwarded connections arriving over the bridge (Docker) pass
+# nat PREROUTING. With "local", connections generated inside the namespace to
+# the gateway's own address (rootless podman's port forwarder) are redirected
+# in nat OUTPUT as well.
+#
+# Callers run this before setup_kernel_network/enable_route_localnet, so the
+# DNAT-vs-socat choice depends on the namespace's initial route_localnet.
 setup_loopback_forwarding() {
     if [ -z "${ENCLAVE_LOOPBACK_PORTS:-}" ]; then
         return
     fi
+    redirect_local="false"
+    [ "${1:-}" = "local" ] && redirect_local="true"
 
     route_localnet="0"
     if command -v sysctl >/dev/null 2>&1; then
@@ -306,6 +340,28 @@ setup_loopback_forwarding() {
         return
     fi
 
+    local_ip=""
+    if [ "$redirect_local" = "true" ] && [ "$force_socat" = "false" ]; then
+        if command -v enclave_resolve_bind_ip >/dev/null 2>&1; then
+            local_ip=$(enclave_resolve_bind_ip || true)
+        fi
+        case "$local_ip" in
+            *[!0-9.]*|"") local_ip="" ;;
+        esac
+    fi
+
+    redirect_local_connections() {
+        port="$1"
+        if [ -z "$local_ip" ]; then
+            log "Unable to determine gateway IPv4 address; using socat fallback for local connections to port $port"
+            return 1
+        fi
+        if ! iptables -t nat -A OUTPUT -p tcp -d "$local_ip" --dport "$port" -j DNAT --to-destination 127.0.0.1:"$port" >/dev/null 2>&1; then
+            log "Failed to add local loopback redirect for port $port; using socat fallback"
+            return 1
+        fi
+    }
+
     while IFS= read -r port; do
         [ -z "$port" ] && continue
         if [ "$force_socat" = "true" ]; then
@@ -315,6 +371,9 @@ setup_loopback_forwarding() {
         if iptables -t nat -L PREROUTING >/dev/null 2>&1; then
             if iptables -t nat -A PREROUTING -p tcp --dport "$port" -j DNAT --to-destination 127.0.0.1:"$port" >/dev/null 2>&1; then
                 log "DNAT port $port to loopback listener"
+                if [ "$redirect_local" = "true" ] && ! redirect_local_connections "$port"; then
+                    start_loopback_proxy "$port"
+                fi
             else
                 log "Failed to add loopback redirect for port $port; using socat fallback"
                 start_loopback_proxy "$port"
@@ -438,26 +497,30 @@ EOF_RESOLVERS
 
     proxy_uid=$(id -u "$PROXY_USER")
 
-    iptables -A OUTPUT -p tcp --dport 8080 -m addrtype --dst-type LOCAL -j ACCEPT
-    iptables -A OUTPUT -p tcp --dport 8443 -m addrtype --dst-type LOCAL -j ACCEPT
+    iptables -A OUTPUT -p tcp --dport "$PROXY_HTTP_PORT" -m addrtype --dst-type LOCAL -j ACCEPT
+    iptables -A OUTPUT -p tcp --dport "$PROXY_HTTPS_PORT" -m addrtype --dst-type LOCAL -j ACCEPT
 
     iptables -t nat -F OUTPUT || true
     iptables -t nat -A OUTPUT -p tcp --dport 80 -m owner --uid-owner "$proxy_uid" -j RETURN
     iptables -t nat -A OUTPUT -p tcp --dport 443 -m owner --uid-owner "$proxy_uid" -j RETURN
-    iptables -t nat -A OUTPUT -p tcp --dport 80 -j REDIRECT --to-ports 8080
-    iptables -t nat -A OUTPUT -p tcp --dport 443 -j REDIRECT --to-ports 8443
+    iptables -t nat -A OUTPUT -p tcp --dport 80 -j REDIRECT --to-ports "$PROXY_HTTP_PORT"
+    iptables -t nat -A OUTPUT -p tcp --dport 443 -j REDIRECT --to-ports "$PROXY_HTTPS_PORT"
 
     log "Transparent proxy NAT rules configured"
     setup_ide_bridge
 }
 
-setup_kernel_network() {
+enable_route_localnet() {
     if [ -d /proc/sys/net/ipv4/conf/all ]; then
         sysctl -w net.ipv4.conf.all.route_localnet=1 >/dev/null 2>&1 || true
     fi
     if [ -d /proc/sys/net/ipv4/conf/eth0 ]; then
         sysctl -w net.ipv4.conf.eth0.route_localnet=1 >/dev/null 2>&1 || true
     fi
+}
+
+setup_kernel_network() {
+    enable_route_localnet
 
     if command -v sysctl >/dev/null 2>&1; then
         sysctl -w net.ipv6.conf.all.disable_ipv6=1 >/dev/null 2>&1 || true
@@ -470,6 +533,91 @@ setup_kernel_network() {
         ip6tables -A OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT || return 1
         ip6tables -A OUTPUT -o lo -j ACCEPT || return 1
     fi
+}
+
+# web_redirect adds (-A), deletes (-D) or checks (-C) the nat rule that sends
+# the session's TCP traffic on a web port to the proxy listening for it.
+web_redirect() {
+    firewall="$1"
+    action="$2"
+    port="$3"
+    case "$port" in
+        80) proxy_port="$PROXY_HTTP_PORT" ;;
+        443) proxy_port="$PROXY_HTTPS_PORT" ;;
+        *) return 1 ;;
+    esac
+    "$firewall" -t nat "$action" OUTPUT -p tcp --dport "$port" -j REDIRECT --to-ports "$proxy_port"
+}
+
+# redirect_web_traffic_to_proxy sends the session's TCP 80/443 through the
+# proxy so it can be logged. The proxy's own connections and connections to
+# local addresses keep their destination. Rules are only appended: flushing the
+# nat OUTPUT chain would drop Docker's embedded DNS rules the session relies on.
+redirect_web_traffic_to_proxy() {
+    firewall="$1"
+    proxy_uid="$2"
+    for port in 80 443; do
+        "$firewall" -t nat -A OUTPUT -p tcp --dport "$port" -m owner --uid-owner "$proxy_uid" -j RETURN || return 1
+        "$firewall" -t nat -A OUTPUT -p tcp --dport "$port" -m addrtype --dst-type LOCAL -j RETURN || return 1
+    done
+    web_redirect "$firewall" -A 80 || return 1
+    web_redirect "$firewall" -A 443 || return 1
+}
+
+# stop_redirecting_web_traffic removes the redirects to the proxy. A redirect
+# that was never installed, such as IPv6 NAT that never came up, is not an
+# error; one that is still in place afterwards is, because it points at a dead
+# proxy. The RETURN rules stay: without a redirect after them they do nothing.
+stop_redirecting_web_traffic() {
+    removed="true"
+    for firewall in iptables ip6tables; do
+        command -v "$firewall" >/dev/null 2>&1 || continue
+        for port in 80 443; do
+            web_redirect "$firewall" -D "$port" >/dev/null 2>&1 && continue
+            if web_redirect "$firewall" -C "$port" >/dev/null 2>&1; then
+                log "Failed to remove $firewall redirect for port $port"
+                removed="false"
+            fi
+        done
+    done
+    [ "$removed" = "true" ]
+}
+
+# fail_open_without_proxy keeps an unrestricted session online when its proxy
+# dies: the gateway stays up because the session shares its network namespace,
+# and web traffic goes direct instead of being logged.
+fail_open_without_proxy() {
+    log "Proxy exited unexpectedly; removing HTTP/HTTPS redirects (fail open, see $PROXY_LOG_FILE)"
+    if stop_redirecting_web_traffic; then
+        log "Gateway degraded: traffic on ports 80 and 443 is no longer logged"
+    else
+        log "Gateway degraded: some HTTP/HTTPS traffic still goes to the stopped proxy and will fail"
+    fi
+    PROXY_ENABLED="false"
+    PROXY_PID=""
+}
+
+# setup_observing_network prepares an unrestricted gateway: it forwards the
+# same ports as a restricted one and routes web traffic through the proxy, but
+# installs no filters, leaves IPv6 enabled and does not take over DNS.
+setup_observing_network() {
+    setup_loopback_forwarding local
+    enable_route_localnet
+
+    if [ "$PROXY_ENABLED" = "true" ]; then
+        if ! iptables -m owner -h >/dev/null 2>&1; then
+            log "Owner match unavailable; cannot safely enable proxy"
+            return 1
+        fi
+        proxy_uid=$(id -u "$PROXY_USER")
+        redirect_web_traffic_to_proxy iptables "$proxy_uid" || return 1
+        if command -v ip6tables >/dev/null 2>&1 && ! redirect_web_traffic_to_proxy ip6tables "$proxy_uid"; then
+            log "IPv6 NAT unavailable; IPv6 HTTP/HTTPS traffic is not logged"
+        fi
+        log "Transparent proxy NAT rules configured (observing only)"
+    fi
+
+    setup_ide_bridge
 }
 
 enforce_fail_closed_lockdown() {
@@ -661,7 +809,7 @@ shutdown_gateway() {
     trap - HUP TERM INT
     log "$reason"
 
-    if [ "$code" -ne 0 ]; then
+    if [ "$code" -ne 0 ] && ! gateway_observes_only; then
         enforce_fail_closed_lockdown
     fi
 
@@ -688,39 +836,66 @@ on_term() {
     shutdown_gateway 0 "Shutdown signal received"
 }
 
-monitor_loop() {
-    while :; do
-        if [ "$RELOAD_PENDING" = "1" ]; then
-            RELOAD_PENDING="0"
-            if ! reload_gateway; then
-                shutdown_gateway 1 "Reload failed; shutting down gateway (fail-closed)"
-            fi
+monitor_tick() {
+    if [ "$RELOAD_PENDING" = "1" ]; then
+        RELOAD_PENDING="0"
+        if gateway_observes_only; then
+            log "Reload ignored: an unrestricted gateway has no policy to apply"
+        elif ! reload_gateway; then
+            shutdown_gateway 1 "Reload failed; shutting down gateway (fail-closed)"
         fi
+    fi
 
-        if ! is_pid_running "$DNSMASQ_PID"; then
-            shutdown_gateway 1 "dnsmasq exited unexpectedly"
-        fi
+    if ! gateway_observes_only && ! is_pid_running "$DNSMASQ_PID"; then
+        shutdown_gateway 1 "dnsmasq exited unexpectedly"
+    fi
 
-        if [ "$PROXY_ENABLED" = "true" ] && ! is_pid_running "$PROXY_PID"; then
+    if [ "$PROXY_ENABLED" = "true" ] && ! is_pid_running "$PROXY_PID"; then
+        if gateway_observes_only; then
+            fail_open_without_proxy
+        else
             shutdown_gateway 1 "proxy exited unexpectedly"
         fi
+    fi
 
-        # Auditing is not an enforcement path, so a dead translator must not
-        # take egress down with it. Restart it a bounded number of times, then
-        # say plainly that DNS events are no longer recorded.
-        if [ -n "$DNS_AUDIT_PID" ] && ! is_pid_running "$DNS_AUDIT_PID"; then
-            if [ "$DNS_AUDIT_RESTARTS" -lt 3 ]; then
-                DNS_AUDIT_RESTARTS=$((DNS_AUDIT_RESTARTS + 1))
-                log "DNS audit translator exited; restarting (attempt $DNS_AUDIT_RESTARTS)"
-                start_dns_audit
-            else
-                log "DNS audit translator keeps exiting; DNS denials are no longer recorded (see $DNS_AUDIT_LOG_FILE)"
-                DNS_AUDIT_PID=""
-            fi
+    # Auditing is not an enforcement path, so a dead translator must not
+    # take egress down with it. Restart it a bounded number of times, then
+    # say plainly that DNS events are no longer recorded.
+    if [ -n "$DNS_AUDIT_PID" ] && ! is_pid_running "$DNS_AUDIT_PID"; then
+        if [ "$DNS_AUDIT_RESTARTS" -lt 3 ]; then
+            DNS_AUDIT_RESTARTS=$((DNS_AUDIT_RESTARTS + 1))
+            log "DNS audit translator exited; restarting (attempt $DNS_AUDIT_RESTARTS)"
+            start_dns_audit
+        else
+            log "DNS audit translator keeps exiting; DNS denials are no longer recorded (see $DNS_AUDIT_LOG_FILE)"
+            DNS_AUDIT_PID=""
         fi
+    fi
+}
 
+monitor_loop() {
+    while :; do
+        monitor_tick
         sleep 0.1
     done
+}
+
+# main_observing runs an unrestricted gateway: the proxy logs web traffic and
+# nothing else changes, so neither dnsmasq nor the DNS audit runs.
+main_observing() {
+    log "Network mode unrestricted: logging HTTP/HTTPS on ports 80 and 443 without filtering"
+    if ! setup_observing_network; then
+        exit 1
+    fi
+    if ! prepare_proxy_runtime_data; then
+        exit 1
+    fi
+    if ! start_proxy; then
+        exit 1
+    fi
+
+    log "Gateway ready"
+    monitor_loop
 }
 
 main() {
@@ -729,6 +904,11 @@ main() {
 
     normalize_proxy_enabled
     init_log_files
+    read_gateway_mode
+    if gateway_observes_only; then
+        main_observing
+        return
+    fi
     ensure_local_resolver
 
     tmp_dir=$(mktemp -d /tmp/enclave-gateway-init.XXXXXX)

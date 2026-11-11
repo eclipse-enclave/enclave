@@ -53,6 +53,10 @@ const RuleSessionStart = "start"
 // RuleAllowlist names the proxy's domain check, for both verdicts.
 const RuleAllowlist = "allowlist"
 
+// RuleUnrestricted names a proxy pass in an unrestricted session, where the
+// gateway only observes and no domain check runs.
+const RuleUnrestricted = "unrestricted"
+
 // RuleNXDomain marks a lookup answered by enclave's own DNS blackhole. An
 // upstream NXDOMAIN carries the "upstream-" prefix instead.
 const RuleNXDomain = "nxdomain"

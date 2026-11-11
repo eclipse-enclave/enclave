@@ -124,6 +124,12 @@ func optionCLIFlags() map[string][]CLIFlag {
 				sources.AllowAllNetwork = model.SourceCLI
 			}),
 		},
+		"disable_gateway": {
+			boolFlag("--disable-gateway", "Run without a network gateway (requires unrestricted network mode)", func(opts *model.Options, sources *model.OptionSources, value bool) {
+				opts.DisableGateway = value
+				sources.DisableGateway = model.SourceCLI
+			}),
+		},
 		"no_cache": {
 			boolFlag("--no-cache", "Disable package caches", func(opts *model.Options, sources *model.OptionSources, value bool) {
 				opts.NoCache = value

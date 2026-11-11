@@ -48,7 +48,7 @@ func resolveCurrentPolicyContext(input *CommandInput) (currentPolicyContext, err
 // resolveSessionPolicyContext resolves the policy a run with the same options
 // enforces. requireTool rejects a tool without a spec as a run rejects it.
 func resolveSessionPolicyContext(input *CommandInput, requireTool bool) (currentPolicyContext, error) {
-	opts, warnings, err := previewAsRun(input.Ctx.Paths, input.Options, input.Options.Sources)
+	opts, warnings, err := previewAsRun(input.Ctx, input.Options, input.Options.Sources)
 	if err != nil {
 		return currentPolicyContext{}, err
 	}
@@ -185,77 +185,79 @@ func runNetworkStatus(input *CommandInput) int {
 		return 0
 	}
 
+	var out strings.Builder
+	printGatewayRuntimeStates(&out, manager, policyCtx.policyResolverContext, targets)
+	fmt.Print(out.String())
+	return 0
+}
+
+// printGatewayRuntimeStates compares each restricted gateway's running bundle
+// with the persisted policy. Unrestricted gateways run no policy, so they are
+// reported as such rather than compared.
+func printGatewayRuntimeStates(out *strings.Builder, manager backend.GatewayManager, policyCtx policyResolverContext, targets []backend.GatewayInfo) {
 	type runtimeState struct {
 		target backend.GatewayInfo
-		status string
+		status gatewayRuntimeStatus
 		detail string
 	}
 	outcomes := make([]runtimeState, 0, len(targets))
-	inSync := 0
-	needsApply := 0
-	unknown := 0
+	counts := map[gatewayRuntimeStatus]int{}
 	for _, target := range targets {
-		expectedBundleDir := config.HostProjectGatewayConfigDir(policyCtx.Home, target.ProjectHash, target.Tool)
-		state := runtimeState{target: target, status: "IN-SYNC"}
-
-		if err := manager.VerifyGatewayConfigMount(context.Background(), target.ID, expectedBundleDir); err != nil {
-			state.status = "UNKNOWN"
-			state.detail = err.Error()
-			unknown++
-			outcomes = append(outcomes, state)
-			continue
-		}
-		targetProjectDir, err := resolveGatewayTargetProjectDir(policyCtx.Project, target)
-		if err != nil {
-			state.status = "UNKNOWN"
-			state.detail = err.Error()
-			unknown++
-			outcomes = append(outcomes, state)
-			continue
-		}
-
-		desiredHash, err := desiredGatewayBundleHash(policyCtx.Resolver, target, targetProjectDir)
-		if err != nil {
-			state.status = "STALE"
-			state.detail = fmt.Sprintf("cannot render desired bundle: %v", err)
-			needsApply++
-			outcomes = append(outcomes, state)
-			continue
-		}
-		runningHash, err := hashGatewayBundleDir(expectedBundleDir)
-		if err != nil {
-			state.status = "UNKNOWN"
-			state.detail = err.Error()
-			unknown++
-			outcomes = append(outcomes, state)
-			continue
-		}
-		if desiredHash != runningHash {
-			state.status = "STALE"
-			state.detail = "persisted policy differs from running gateway config"
-			needsApply++
-			outcomes = append(outcomes, state)
-			continue
-		}
-
-		inSync++
-		outcomes = append(outcomes, state)
+		status, detail := gatewayRuntimeState(manager, policyCtx, target)
+		counts[status]++
+		outcomes = append(outcomes, runtimeState{target: target, status: status, detail: detail})
 	}
 
-	fmt.Printf("  In sync:         %d\n", inSync)
-	fmt.Printf("  Needs apply:     %d\n", needsApply)
-	fmt.Printf("  Unknown:         %d\n", unknown)
-	fmt.Printf("\nRunning gateways:\n")
+	fmt.Fprintf(out, "  In sync:         %d\n", counts[gatewayStateInSync])
+	fmt.Fprintf(out, "  Needs apply:     %d\n", counts[gatewayStateStale])
+	fmt.Fprintf(out, "  Unknown:         %d\n", counts[gatewayStateUnknown])
+	if counts[gatewayStateUnrestricted] > 0 {
+		fmt.Fprintf(out, "  Unrestricted:    %d\n", counts[gatewayStateUnrestricted])
+	}
+	fmt.Fprintf(out, "\nRunning gateways:\n")
 	for _, outcome := range outcomes {
-		label := fmt.Sprintf("%s (%s, tool=%s, project=%s)", outcome.target.Name, outcome.target.ShortID(), outcome.target.Tool, outcome.target.ProjectHash)
+		label := gatewayTargetLabel(outcome.target)
 		if outcome.detail == "" {
-			fmt.Printf("  - %s %s\n", outcome.status, label)
+			fmt.Fprintf(out, "  - %s %s\n", outcome.status, label)
 		} else {
-			fmt.Printf("  - %s %s: %s\n", outcome.status, label, outcome.detail)
+			fmt.Fprintf(out, "  - %s %s: %s\n", outcome.status, label, outcome.detail)
 		}
 	}
+}
 
-	return 0
+type gatewayRuntimeStatus string
+
+const (
+	gatewayStateInSync       gatewayRuntimeStatus = "IN-SYNC"
+	gatewayStateStale        gatewayRuntimeStatus = "STALE"
+	gatewayStateUnknown      gatewayRuntimeStatus = "UNKNOWN"
+	gatewayStateUnrestricted gatewayRuntimeStatus = "UNRESTRICTED"
+)
+
+func gatewayRuntimeState(manager backend.GatewayManager, policyCtx policyResolverContext, target backend.GatewayInfo) (status gatewayRuntimeStatus, detail string) {
+	if target.Unrestricted() {
+		return gatewayStateUnrestricted, "logs traffic without a policy; restart the session to change its network mode"
+	}
+	expectedBundleDir := config.HostProjectGatewayConfigDir(policyCtx.Home, target.ProjectHash, target.Tool)
+	if err := manager.VerifyGatewayConfigMount(context.Background(), target.ID, expectedBundleDir); err != nil {
+		return gatewayStateUnknown, err.Error()
+	}
+	targetProjectDir, err := resolveGatewayTargetProjectDir(policyCtx.Project, target)
+	if err != nil {
+		return gatewayStateUnknown, err.Error()
+	}
+	desiredHash, err := desiredGatewayBundleHash(policyCtx.Resolver, target, targetProjectDir)
+	if err != nil {
+		return gatewayStateStale, fmt.Sprintf("cannot render desired bundle: %v", err)
+	}
+	runningHash, err := hashGatewayBundleDir(expectedBundleDir)
+	if err != nil {
+		return gatewayStateUnknown, err.Error()
+	}
+	if desiredHash != runningHash {
+		return gatewayStateStale, "persisted policy differs from running gateway config"
+	}
+	return gatewayStateInSync, ""
 }
 
 func runNetworkPrint(input *CommandInput) int {
@@ -332,46 +334,32 @@ func applyPolicyToGateways(input *CommandInput, scope gatewayTargetScope) int {
 		fmt.Printf("\nApply summary: 0 applied, 0 failed\n")
 		return 0
 	}
+	var out strings.Builder
+	code = applyPolicyToTargets(&out, manager, policyCtx, targets, scope)
+	fmt.Print(out.String())
+	return code
+}
 
+// applyPolicyToTargets writes the persisted policy into each restricted
+// gateway's bundle and reloads it. Unrestricted gateways are skipped: a running
+// gateway never switches modes, so they get no policy.
+func applyPolicyToTargets(out *strings.Builder, manager backend.GatewayManager, policyCtx policyResolverContext, targets []backend.GatewayInfo, scope gatewayTargetScope) int {
 	type applyOutcome struct {
-		target backend.GatewayInfo
-		err    error
+		target  backend.GatewayInfo
+		skipped bool
+		err     error
 	}
 	outcomes := make([]applyOutcome, 0, len(targets))
 	applied := 0
 	failed := 0
+	skipped := 0
 	for _, target := range targets {
-		expectedBundleDir := config.HostProjectGatewayConfigDir(policyCtx.Home, target.ProjectHash, target.Tool)
-		applyErr := manager.VerifyGatewayConfigMount(context.Background(), target.ID, expectedBundleDir)
-		targetProjectDir := ""
-		if applyErr == nil {
-			targetProjectDir, applyErr = resolveGatewayTargetProjectDir(policyCtx.Project, target)
+		if target.Unrestricted() {
+			skipped++
+			outcomes = append(outcomes, applyOutcome{target: target, skipped: true})
+			continue
 		}
-		generation := ""
-		if applyErr == nil {
-			resolved, err := policyCtx.Resolver.Resolve(policy.ResolveInput{
-				ProjectDir:  targetProjectDir,
-				ProjectHash: target.ProjectHash,
-				Tool:        target.Tool,
-			})
-			if err != nil {
-				applyErr = err
-			} else if resolved.Effective.Mode == model.NetworkModeUnrestricted {
-				applyErr = fmt.Errorf("live apply does not support unrestricted mode; restart the session to switch mode safely")
-			} else {
-				applyErr = bundle.WriteConfigBundle(bundle.BundleWriteConfig{
-					Dir:    expectedBundleDir,
-					Policy: resolved.Effective,
-					Tool:   target.Tool,
-				})
-			}
-		}
-		if applyErr == nil {
-			generation, applyErr = readGatewayBundleGeneration(expectedBundleDir)
-		}
-		if applyErr == nil {
-			applyErr = manager.ReloadGatewayNetwork(context.Background(), target.ID, generation)
-		}
+		applyErr := applyPolicyToTarget(manager, policyCtx, target)
 		if applyErr == nil {
 			applied++
 		} else {
@@ -380,30 +368,75 @@ func applyPolicyToGateways(input *CommandInput, scope gatewayTargetScope) int {
 		outcomes = append(outcomes, applyOutcome{target: target, err: applyErr})
 	}
 
-	fmt.Printf("\nTargets:\n")
+	fmt.Fprintf(out, "\nTargets:\n")
 	var failedTools []string
 	for _, outcome := range outcomes {
 		target := outcome.target
-		label := fmt.Sprintf("%s (%s, tool=%s, project=%s)", target.Name, target.ShortID(), target.Tool, target.ProjectHash)
-		if outcome.err == nil {
-			fmt.Printf("  - APPLIED %s\n", label)
-			continue
+		label := gatewayTargetLabel(target)
+		switch {
+		case outcome.skipped:
+			fmt.Fprintf(out, "  - SKIPPED %s: unrestricted session; restart it to change its network mode\n", label)
+		case outcome.err == nil:
+			fmt.Fprintf(out, "  - APPLIED %s\n", label)
+		default:
+			fmt.Fprintf(out, "  - FAILED  %s: %v\n", label, outcome.err)
+			failedTools = append(failedTools, target.Tool)
 		}
-		fmt.Printf("  - FAILED  %s: %v\n", label, outcome.err)
-		failedTools = append(failedTools, target.Tool)
 	}
 
-	fmt.Printf("\nApply summary: %d applied, %d failed\n", applied, failed)
+	if skipped > 0 {
+		fmt.Fprintf(out, "\nApply summary: %d applied, %d failed, %d skipped (unrestricted)\n", applied, failed, skipped)
+	} else {
+		fmt.Fprintf(out, "\nApply summary: %d applied, %d failed\n", applied, failed)
+	}
 	if failed > 0 {
 		retry := retryApplyCommands(scope, failedTools)
 		if len(retry) == 0 {
-			fmt.Printf("Some gateways were not updated; restart affected sessions.\n")
+			fmt.Fprintf(out, "Some gateways were not updated; restart affected sessions.\n")
 		} else {
-			fmt.Printf("Some gateways were not updated; restart affected sessions or run %s after fixing errors.\n", strings.Join(retry, " and "))
+			fmt.Fprintf(out, "Some gateways were not updated; restart affected sessions or run %s after fixing errors.\n", strings.Join(retry, " and "))
 		}
 		return 1
 	}
 	return 0
+}
+
+func applyPolicyToTarget(manager backend.GatewayManager, policyCtx policyResolverContext, target backend.GatewayInfo) error {
+	expectedBundleDir := config.HostProjectGatewayConfigDir(policyCtx.Home, target.ProjectHash, target.Tool)
+	if err := manager.VerifyGatewayConfigMount(context.Background(), target.ID, expectedBundleDir); err != nil {
+		return err
+	}
+	targetProjectDir, err := resolveGatewayTargetProjectDir(policyCtx.Project, target)
+	if err != nil {
+		return err
+	}
+	resolved, err := policyCtx.Resolver.Resolve(policy.ResolveInput{
+		ProjectDir:  targetProjectDir,
+		ProjectHash: target.ProjectHash,
+		Tool:        target.Tool,
+	})
+	if err != nil {
+		return err
+	}
+	if resolved.Effective.Mode == model.NetworkModeUnrestricted {
+		return fmt.Errorf("live apply does not support unrestricted mode; restart the session to switch mode safely")
+	}
+	if err := bundle.WriteConfigBundle(bundle.BundleWriteConfig{
+		Dir:    expectedBundleDir,
+		Policy: resolved.Effective,
+		Tool:   target.Tool,
+	}); err != nil {
+		return err
+	}
+	generation, err := readGatewayBundleGeneration(expectedBundleDir)
+	if err != nil {
+		return err
+	}
+	return manager.ReloadGatewayNetwork(context.Background(), target.ID, generation)
+}
+
+func gatewayTargetLabel(target backend.GatewayInfo) string {
+	return fmt.Sprintf("%s (%s, tool=%s, project=%s)", target.Name, target.ShortID(), target.Tool, target.ProjectHash)
 }
 
 // retryApplyCommands names the apply runs that reach exactly the failed

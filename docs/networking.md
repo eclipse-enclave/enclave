@@ -5,8 +5,15 @@ forward ports in both directions, and read the network audit log.
 
 ## How it works
 
-By default, every session runs behind a gateway sidecar with dnsmasq and a
-transparent proxy. DNS resolves only allowlisted domains, and the proxy checks
+Two settings shape a session's network:
+
+- The network mode is the egress policy: `restricted` (the default) allows
+  only allowlisted domains, `unrestricted` allows everything.
+- The gateway is the sidecar container (dnsmasq and a transparent proxy) whose
+  network namespace the session shares. It writes the network log in both
+  modes and enforces the policy in restricted mode.
+
+In restricted mode, DNS resolves only allowlisted domains, and the proxy checks
 the HTTP `Host` header or TLS SNI against the same allowlist. Pass and deny
 decisions are logged to
 `~/.local/state/enclave/projects/<project-hash>/<tool>/logs/network.log`
@@ -17,10 +24,74 @@ and [Security boundaries](security/README.md#network-boundary) for the limits.
 | Mode | Selected by | Effect |
 |------|-------------|--------|
 | Restricted | Default | Gateway enforces the allowlist |
-| Unrestricted | `--allow-all-network`, `allow_all_network` config key, or `enclave network set-mode unrestricted --global` | No gateway; all outbound traffic allowed |
+| Unrestricted | `--allow-all-network`, `allow_all_network` config key, or `enclave network set-mode unrestricted --global` | All outbound traffic allowed; the gateway only logs ([Unrestricted mode](#unrestricted-mode)) |
 
-The experimental `qemu` backend always runs unrestricted: selecting it implies
-`--allow-all-network` with a notice, and `--allow-domain` is rejected.
+## Unrestricted mode
+
+```bash
+enclave --allow-all-network
+```
+
+An unrestricted session still starts a gateway, which only observes. It
+installs no inbound or outbound filters, leaves IPv6 and Docker's DNS resolver
+untouched, and connects each redirected connection to the address the client
+dialled, so `/etc/hosts` entries, split DNS, and IP-pinned endpoints behave as
+without a gateway. It adds no headers to the requests or responses it parses,
+sets no response-header timeout, and passes responses to the client with their
+original encoding. Declared secrets are injected with their real values; the
+gateway releases none.
+
+TCP ports 80 and 443 go through the proxy and are logged as in restricted
+mode, with the rule `unrestricted`:
+
+- Plaintext HTTP gets an `http` event per request; HTTPS gets a `tcp` event per
+  connection, or an `http` event per request with `--network-log=requests`.
+- TLS without SNI and non-HTTP traffic on these ports, meaning anything that
+  does not open with an HTTP/1 request line, are passed through and logged as
+  a `tcp` event without a domain; so is a first line longer than 8 KiB.
+- Requests for an explicit proxy on port 80, such as the `CONNECT` sent for
+  `HTTPS_PROXY=http://proxy:80` or an absolute-form `GET http://host/`, reach
+  that proxy unchanged and are logged as a `tcp` event for the requested host.
+- A connection made straight to the gateway's proxy ports has no destination:
+  an HTTP request to 15080, or to an intercepted host on 15443, gets `400` with
+  the rule `invalid-host`; other TLS on 15443 is passed through to its SNI host
+  on port 443; anything else is closed and logged with the rule
+  `upstream-error`.
+- Everything else passes unlogged: other TCP ports (SSH included), UDP
+  (including QUIC/HTTP3 and DNS), and IPv6 web traffic when the gateway cannot
+  set up IPv6 NAT. There are no `dns` events, since the gateway does not
+  resolve names. A quiet unrestricted log is not a quiet session.
+
+Costs:
+
+- The gateway image is built on first use, and every session start waits for
+  the gateway.
+- If the gateway cannot start, the session does not start; the error suggests
+  `--disable-gateway`. With `--no-rebuild` and no gateway image, the session
+  fails the same way.
+- If the proxy inside the gateway dies, the gateway removes its redirects and
+  traffic flows unlogged. If the gateway container stops, the session loses
+  network access, because it shares the gateway's network namespace.
+- The gateway's proxy listens on loopback ports 15080 and 15443 in the
+  namespace the session shares, so a server inside the session cannot use those
+  ports, and the session refuses to start if `-p` publishes one of them as a
+  container port. Use another container port, or `--disable-gateway`.
+  Restricted sessions have the same limit. The proxy listens only on loopback,
+  so publishing another container port never reaches it.
+
+To run without a gateway, and without a network log:
+
+```bash
+enclave --allow-all-network --disable-gateway   # Config key: "disable_gateway": true
+```
+
+This is the unrestricted session of earlier releases: the tool container is
+attached to the session network directly. `--disable-gateway` requires
+unrestricted mode and never implies it; in restricted mode the run fails.
+
+The experimental `qemu` backend has no restricted egress and no gateway, so it
+always runs unrestricted: selecting it implies `--allow-all-network` and
+`--disable-gateway` with a notice, and `--allow-domain` is rejected.
 
 ## Adding custom domains
 
@@ -41,7 +112,8 @@ enclave --allow-domain api.deepseek.com,api.example.com
   wildcards.
 - A domain blocked by a deny rule stays blocked; session start reports it
   separately.
-- It has no effect with `--allow-all-network`, because no gateway runs.
+- It has no effect with `--allow-all-network`: unrestricted mode has no
+  allowlist to extend, whether or not a gateway runs.
 
 A project policy at `~/.config/enclave/projects/<hash>/network.jsonc` can set
 `"inherit_global_policy": false` to ignore the domain entries of
@@ -102,8 +174,13 @@ Changes are global only; `--project` scope is planned. `add-domain`,
 current project, for every tool (so they take no `--tool`). `--no-apply` only
 persists; `--all-running` targets every running gateway on the host.
 `enclave network apply` (optionally `--tool` or `--all-running`) pushes the
-persisted policy on demand. Unrestricted mode is never applied live: running
-restricted sessions must be restarted.
+persisted policy on demand.
+
+A running gateway keeps the network mode its session started with, so
+`set-mode` reaches a running session only after a restart, in both directions.
+`apply` reports gateways of unrestricted sessions as `SKIPPED` and never writes
+a policy into them; `status` shows them as `UNRESTRICTED` instead of in sync or
+stale.
 
 ## Port direction: `-p` vs `--bridge-port`
 
@@ -118,6 +195,9 @@ restricted sessions must be restarted.
 collisions between sessions. The assigned port is printed at start and listed
 under `ports` in `enclave ps --json`. Auto-assigned ports are Docker-only; the
 `qemu` backend rejects port `0`. Without a host IP, ports bind `127.0.0.1`.
+Container ports 15080 and 15443 are taken by the gateway proxy in every
+session with a gateway, and publishing them is an error; see
+[Unrestricted mode](#unrestricted-mode).
 
 ## Bridging host ports
 
@@ -125,8 +205,9 @@ under `ports` in `enclave ps --json`. Auto-assigned ports are Docker-only; the
 enclave --bridge-port 9800,9801    # Or repeat the flag; config key: "bridge_ports": ["9800"]
 ```
 
-Restricted sessions use DNAT in the gateway, with a userspace proxy as
-fallback; unrestricted sessions run the proxy in the tool container. The
+Sessions with a gateway, restricted or unrestricted, use DNAT in the gateway,
+with a userspace proxy as fallback; sessions started with `--disable-gateway`
+run the proxy in the tool container. The
 automatic IDE bridge works the same way, discovers VS Code extension ports from
 `~/.claude/ide/*.lock`, and is merged and deduplicated with explicit ports.
 
@@ -238,6 +319,8 @@ does not mean a quiet session:
   uninspected, even with `--network-log=requests`.
 - Only ports 80 and 443 go through the proxy. Other ports, such as SSH on 22,
   reach allowlisted IPs directly and are never recorded.
+- Unrestricted sessions have further gaps; see
+  [Unrestricted mode](#unrestricted-mode).
 
 ### Request-level logging
 
@@ -261,9 +344,9 @@ the cap per project and tool. Concurrent starts serialize on
 
 ## Per-session Docker networks
 
-Each session gets its own labeled bridge network, in both modes. Restricted
-sessions attach the gateway and the tool shares its namespace; unrestricted
-sessions attach the tool container. Inspect it with:
+Each session gets its own labeled bridge network, in both modes. The gateway
+is attached and the tool shares its namespace; sessions started with
+`--disable-gateway` attach the tool container. Inspect it with:
 
 ```bash
 enclave ps --json
@@ -273,7 +356,7 @@ enclave ps --json
 - Restricted gateways drop unsolicited inbound IPv4 and IPv6 traffic. Only
   loopback, established or related replies, and published ports (including
   OAuth callbacks) get in; DNS and proxy listeners stay unexposed. Unrestricted
-  sessions have no inbound filter.
+  sessions have no inbound filter, with or without a gateway.
 - Docker 29 and newer allocate a small dynamic IPv4 prefix per session. Older
   daemons use the stock address pools, which can limit concurrent networks; if
   they run out, upgrade or set `default-address-pools`.

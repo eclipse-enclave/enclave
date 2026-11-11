@@ -368,6 +368,7 @@ func TestStripGlobalOnlyKeysKeepsEverythingElse(t *testing.T) {
 		Tool:             "codex",
 		Yolo:             boolPtr(true),
 		AllowAllNetwork:  boolPtr(true),
+		DisableGateway:   boolPtr(true),
 		AllowDomains:     []string{"proj.example.com"},
 		PassEnv:          []string{"GH_TOKEN"},
 		BridgePorts:      []string{"5432"},
@@ -562,4 +563,29 @@ func containsSubstring(items []Warning, needle string) bool {
 		}
 	}
 	return false
+}
+
+func TestDisableGatewayDefaultsFromEveryConfigLayer(t *testing.T) {
+	cases := []struct {
+		name    string
+		global  Defaults
+		project Defaults
+		want    model.OptionSource
+	}{
+		{name: "global", global: Defaults{DisableGateway: boolPtr(true)}, want: model.SourceGlobal},
+		{name: "global tool override", global: Defaults{ToolOverrides: map[string]Defaults{"codex": {DisableGateway: boolPtr(true)}}}, want: model.SourceToolOverride},
+		{name: "project", project: Defaults{DisableGateway: boolPtr(true)}, want: model.SourceProject},
+		{name: "project tool override", project: Defaults{ToolOverrides: map[string]Defaults{"codex": {DisableGateway: boolPtr(true)}}}, want: model.SourceToolOverride},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			opts, _, _ := ResolveOptionsForTool(DefaultOptions(), model.DefaultOptionSources(), tc.global, tc.project, "codex")
+			if !opts.DisableGateway || opts.Sources.DisableGateway != tc.want {
+				t.Fatalf("DisableGateway = %v from %v, want true from %v", opts.DisableGateway, opts.Sources.DisableGateway, tc.want)
+			}
+			if opts.AllowAllNetwork {
+				t.Fatal("disable_gateway must not imply allow_all_network")
+			}
+		})
+	}
 }

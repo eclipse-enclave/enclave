@@ -24,6 +24,10 @@ type ValidationContext struct {
 	// WarnUnknownFeatures keeps unknown feature names from failing
 	// validation, for previews that report them with featureSelectionWarnings.
 	WarnUnknownFeatures bool
+	// PolicyNetworkMode returns the network mode the policy files set. It is
+	// called only to validate a disabled gateway without --allow-all-network;
+	// nil means the default restricted mode.
+	PolicyNetworkMode func() (string, error)
 }
 
 func ValidateOptions(opts model.Options, sources model.OptionSources, ctx ValidationContext) (model.Options, model.OptionSources, []string, error) {
@@ -93,6 +97,11 @@ func ValidateOptions(opts model.Options, sources model.OptionSources, ctx Valida
 			return opts, sources, warnings, err
 		}
 		warnings = append(warnings, qemuWarnings...)
+	}
+	if isRunAction(ctx.Action) {
+		if err := validateDisableGateway(opts, sources, ctx); err != nil {
+			return opts, sources, warnings, err
+		}
 	}
 	// Validate --auth-name here (not only in the CLI apply path) so a value set
 	// via config.json is checked too. Under project scope the flag has no
@@ -166,17 +175,40 @@ func ValidateOptions(opts model.Options, sources model.OptionSources, ctx Valida
 	return opts, sources, warnings, nil
 }
 
+// validateDisableGateway rejects a disabled gateway unless the effective
+// network mode is unrestricted, so the option never widens network access.
+func validateDisableGateway(opts model.Options, sources model.OptionSources, ctx ValidationContext) error {
+	if !opts.DisableGateway || opts.AllowAllNetwork {
+		return nil
+	}
+	mode := model.NetworkModeRestricted
+	if ctx.PolicyNetworkMode != nil {
+		var err error
+		if mode, err = ctx.PolicyNetworkMode(); err != nil {
+			return fmt.Errorf("resolve network mode for disable_gateway: %w", err)
+		}
+	}
+	if mode == model.NetworkModeUnrestricted {
+		return nil
+	}
+	name := "disable_gateway"
+	if sources.DisableGateway == model.SourceCLI {
+		name = "--disable-gateway"
+	}
+	return fmt.Errorf("%s requires unrestricted network mode; add --allow-all-network or set the network policy mode to unrestricted", name)
+}
+
 // validateAsRun validates opts the way a run would. The auto backend is left
 // unresolved by read-only commands, so the docker default is validated.
-func validateAsRun(paths model.Paths, opts model.Options, sources model.OptionSources) (model.Options, []string, error) {
-	return validateRunOptions(opts, sources, ValidationContext{Paths: paths, Action: "run"})
+func validateAsRun(appCtx *AppContext, opts model.Options, sources model.OptionSources) (model.Options, []string, error) {
+	return validateRunOptions(opts, sources, ValidationContext{Paths: appCtx.Paths, Action: "run", PolicyNetworkMode: appCtx.PolicyNetworkMode})
 }
 
 // previewAsRun is validateAsRun for commands that only show what a run would
 // get, such as network print: unknown feature names do not fail, so the caller
 // can report them with featureSelectionWarnings and still show the rest.
-func previewAsRun(paths model.Paths, opts model.Options, sources model.OptionSources) (model.Options, []string, error) {
-	return validateRunOptions(opts, sources, ValidationContext{Paths: paths, Action: "run", WarnUnknownFeatures: true})
+func previewAsRun(appCtx *AppContext, opts model.Options, sources model.OptionSources) (model.Options, []string, error) {
+	return validateRunOptions(opts, sources, ValidationContext{Paths: appCtx.Paths, Action: "run", WarnUnknownFeatures: true, PolicyNetworkMode: appCtx.PolicyNetworkMode})
 }
 
 func validateRunOptions(opts model.Options, sources model.OptionSources, ctx ValidationContext) (model.Options, []string, error) {
@@ -189,8 +221,8 @@ func validateRunOptions(opts model.Options, sources model.OptionSources, ctx Val
 
 // optionsAsRun returns the options a run would use: the validated options with
 // the configured backend when validation passes, otherwise the normalized ones.
-func optionsAsRun(paths model.Paths, opts model.Options, sources model.OptionSources) (model.Options, []string, error) {
-	validated, warnings, err := validateAsRun(paths, opts, sources)
+func optionsAsRun(appCtx *AppContext, opts model.Options, sources model.OptionSources) (model.Options, []string, error) {
+	validated, warnings, err := validateAsRun(appCtx, opts, sources)
 	if err != nil {
 		normalized, _ := normalizeOptions(opts)
 		return normalized, warnings, err
@@ -203,9 +235,10 @@ func optionsAsRun(paths model.Paths, opts model.Options, sources model.OptionSou
 // backend can actually do, so the user doesn't have to pass flags whose only
 // supported value is dictated by the backend. It has no network gateway
 // (Capabilities.RestrictedNetwork is false) and builds tool-only bundles, so
-// --allow-all-network and --slim are implied rather than required. Requests the
-// backend genuinely cannot satisfy — an allowlist or real features — stay
-// errors. A notice is emitted each run so the absent isolation is never silent.
+// --allow-all-network, --disable-gateway, and --slim are implied rather than
+// required. Requests the backend genuinely cannot satisfy — an allowlist or
+// real features — stay errors. A notice is emitted each run so the absent
+// isolation is never silent.
 func coerceQEMURunOptions(opts model.Options, sources model.OptionSources, paths model.Paths) (model.Options, []string, error) {
 	// An allowlist means "restrict egress", which the qemu backend cannot do;
 	// silently allowing everything would be a security downgrade, so error even
@@ -236,10 +269,11 @@ func coerceQEMURunOptions(opts model.Options, sources model.OptionSources, paths
 	dropped := qemuDroppedFeatures(opts.Features, paths)
 
 	opts.AllowAllNetwork = true
+	opts.DisableGateway = true
 	opts.Slim = true
 	opts.Features = []string{}
 
-	warnings := []string{"qemu backend: network isolation is unavailable (all outbound network allowed)"}
+	warnings := []string{"qemu backend: network isolation is unavailable, implying --allow-all-network --disable-gateway (all outbound network allowed, no network log)"}
 	if len(dropped) > 0 {
 		warnings = append(warnings, fmt.Sprintf("qemu backend: tool-only bundle, not installing features: %s", strings.Join(dropped, ", ")))
 	} else {

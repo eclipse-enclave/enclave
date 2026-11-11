@@ -1,7 +1,7 @@
 # Network request flow
 
-How a restricted session handles an outbound request
-([Networking](../networking.md)).
+How a restricted session handles an outbound request, and how the observing
+gateway of an unrestricted session logs it ([Networking](../networking.md)).
 
 ## Diagram
 
@@ -27,10 +27,10 @@ sequenceDiagram
     end
 
     Note over Host,API: Session startup
-    Host->>Entry: Start gateway with config bundle<br/>(dnsmasq.conf, domains.txt, meta.json)
+    Host->>Entry: Start gateway with ENCLAVE_GATEWAY_NETWORK_MODE=restricted<br/>and config bundle (dnsmasq.conf, domains.txt, meta.json)
     Host->>Entry: Mount optional secret mapping JSON<br/>and TLS root (ca.crt/ca.key)
     Entry->>DNS: Start with rendered allowlist config
-    Entry->>FW: INPUT DROP + loopback, reply and published-port exceptions<br/>OUTPUT DROP + local DNS allow<br/>NAT redirect 80/443 to 8080/8443
+    Entry->>FW: INPUT DROP + loopback, reply and published-port exceptions<br/>OUTPUT DROP + local DNS allow<br/>NAT redirect 80/443 to the proxy on 127.0.0.1:15080/15443
     Entry->>Proxy: Start transparent proxy
     Entry->>Audit: Start DNS audit translator on the dnsmasq log
     Host->>Log: Rotate above the size cap<br/>and append session start marker
@@ -41,7 +41,7 @@ sequenceDiagram
         DNS->>FW: Add resolved IP to enclave_allowed (ipset)
         DNS-->>Tool: Return A/AAAA answer
         Tool->>FW: Connect api.example.com:443
-        FW->>Proxy: Redirect tcp/443 to :8443
+        FW->>Proxy: Redirect tcp/443 to 127.0.0.1:15443
         Proxy->>Proxy: Parse SNI from ClientHello
         alt SNI not in allowlist
             Proxy-->>Tool: Close connection
@@ -112,7 +112,80 @@ sequenceDiagram
 - The log is tagged by session and rotated at session start, never truncated
   mid-session. Logged paths omit the query string, so query-parameter
   credentials cannot leak into it. It records decisions, not traffic volume.
-- Unrestricted mode bypasses the gateway and disables credential release.
+- In unrestricted mode the gateway only observes ports 80 and 443 and
+  credential release is disabled; see [Unrestricted mode](#unrestricted-mode).
+  With `--disable-gateway` there is no gateway.
+- `--network-log=requests` enables request-level MITM logging in both modes.
+
+## Unrestricted mode
+
+An unrestricted session starts the same gateway image with
+`ENCLAVE_GATEWAY_NETWORK_MODE=unrestricted` in its container environment and
+the `enclave.gateway.mode=unrestricted` label, and without a config bundle.
+The gateway takes its mode only from that environment, so no file on the host
+can change it. It observes but never enforces. Sessions started with
+`--disable-gateway` have no gateway and no network log.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    box Host
+        participant Host as Host runtime<br/>(internal/runtime)
+    end
+    box Agent Container
+        participant Tool as Tool process<br/>(agent CLI)
+    end
+    box Gateway Container
+        participant Entry as gateway-entrypoint.sh
+        participant NAT as iptables / ip6tables nat
+        participant Proxy as enclave-gateway-proxy
+        participant Log as network.log<br/>(JSONL)
+    end
+    box External
+        participant Dst as Original destination
+    end
+
+    Note over Host,Dst: Session startup
+    Host->>Entry: Start gateway with ENCLAVE_GATEWAY_NETWORK_MODE=unrestricted<br/>and TLS root (no bundle, no secret mapping)
+    Entry->>NAT: Redirect tcp/80 and tcp/443 to loopback 15080/15443 (IPv4 and IPv6)<br/>no INPUT/OUTPUT filters, no dnsmasq
+    Entry->>Proxy: Start transparent proxy (all hosts allowed)
+    Host->>Log: Rotate above the size cap<br/>and append session start marker
+
+    Note over Tool,Dst: HTTPS request
+    Tool->>Tool: Resolve via Docker's resolver
+    Tool->>NAT: Connect address:443
+    NAT->>Proxy: Redirect to loopback :15443
+    Proxy->>Proxy: Read original destination (SO_ORIGINAL_DST)<br/>and parse SNI from ClientHello
+    alt network_log=requests
+        Proxy->>Proxy: Terminate TLS using local CA leaf cert
+        Proxy->>Dst: Forward each request to the original destination
+        Proxy->>Log: HTTP pass (unrestricted) per request
+    else coarse, or no SNI / not TLS
+        Proxy->>Dst: Passthrough tunnel to the original destination
+        Proxy->>Log: TCP pass (unrestricted)
+    end
+
+    Note over Tool,Dst: Other TCP ports and UDP bypass the proxy and are not logged.
+    Note over Entry,NAT: If the proxy dies, the entrypoint removes the redirects (fail open).
+```
+
+- Nothing is denied: no inbound or outbound filters, IPv6 left as is, DNS
+  stays with Docker's resolver, and the proxy dials the destination from the
+  kernel's NAT record instead of re-resolving SNI or `Host`.
+- Plaintext HTTP on port 80 gets an `http` event per request; non-HTTP bytes
+  on port 80 and TLS without SNI on port 443 are tunnelled with a `tcp` event.
+- No credential release: declared credentials are injected into the session
+  with real values, as without a gateway.
+- Proxy death removes the redirects and the gateway keeps running, so traffic
+  continues unlogged; the gateway container stopping takes the session
+  offline.
+- OAuth callback ports (`oauthPorts`) reach a listener on `127.0.0.1` through
+  a DNAT in `nat PREROUTING` and, for connections to the gateway's own IPv4
+  address generated inside the namespace (rootless podman's port forwarder),
+  in `nat OUTPUT`. If either rule cannot be added, a socat proxy on the
+  container address takes over.
+- `enclave network apply` skips these gateways; `enclave network status` shows
+  them as `UNRESTRICTED`. A mode change needs a session restart.
 
 ## Related implementation
 

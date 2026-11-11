@@ -62,19 +62,13 @@ func (r EffectiveResolver) Resolve(input ResolveInput) (ResolveResult, error) {
 		return empty, fmt.Errorf("project hash is required")
 	}
 
-	globalPolicyPath := network.GlobalPolicyPath(r.home)
-	globalPolicy, err := network.LoadPolicy(globalPolicyPath)
-	if err != nil {
-		return empty, fmt.Errorf("load global policy %s: %w", globalPolicyPath, err)
-	}
-
-	projectPolicy := network.Policy{}
+	policyProjectHash := ""
 	if projectDir != "" {
-		projectPolicyPath := network.ProjectPolicyPath(r.home, projectHash)
-		projectPolicy, err = network.LoadPolicy(projectPolicyPath)
-		if err != nil {
-			return empty, fmt.Errorf("load project policy %s: %w", projectPolicyPath, err)
-		}
+		policyProjectHash = projectHash
+	}
+	globalPolicy, projectPolicy, err := loadPolicies(r.home, policyProjectHash)
+	if err != nil {
+		return empty, err
 	}
 
 	allowlistPath := network.ResolveToolAllowlist(r.paths, tool)
@@ -101,6 +95,36 @@ func (r EffectiveResolver) Resolve(input ResolveInput) (ResolveResult, error) {
 		ProjectPolicy: projectPolicy,
 		Effective:     effective,
 	}, nil
+}
+
+// NetworkMode returns the network mode the global and project policy files
+// set, before --allow-all-network applies. An empty projectHash ignores the
+// project policy, as Resolve does for a session outside a project.
+func NetworkMode(home string, projectHash string) (string, error) {
+	globalPolicy, projectPolicy, err := loadPolicies(home, projectHash)
+	if err != nil {
+		return "", err
+	}
+	return network.Merge(network.MergeConfig{GlobalPolicy: globalPolicy, ProjectPolicy: projectPolicy}).Mode, nil
+}
+
+// loadPolicies loads the global policy and, when projectHash is set, the
+// project policy.
+func loadPolicies(home string, projectHash string) (globalPolicy network.Policy, projectPolicy network.Policy, err error) {
+	globalPath := network.GlobalPolicyPath(home)
+	globalPolicy, err = network.LoadPolicy(globalPath)
+	if err != nil {
+		return network.Policy{}, network.Policy{}, fmt.Errorf("load global policy %s: %w", globalPath, err)
+	}
+	if projectHash == "" {
+		return globalPolicy, network.Policy{}, nil
+	}
+	projectPath := network.ProjectPolicyPath(home, projectHash)
+	projectPolicy, err = network.LoadPolicy(projectPath)
+	if err != nil {
+		return network.Policy{}, network.Policy{}, fmt.Errorf("load project policy %s: %w", projectPath, err)
+	}
+	return globalPolicy, projectPolicy, nil
 }
 
 // loadSpecSession returns session inputs carrying only the tool's spec. A

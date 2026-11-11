@@ -129,7 +129,8 @@ See [Networking](networking.md).
 
 | Key | Description |
 |-----|-------------|
-| `allow_all_network` | Disable network restrictions |
+| `allow_all_network` | Disable network restrictions; a gateway still logs HTTP/HTTPS unless `disable_gateway` is set |
+| `disable_gateway` | Run without a network gateway, so no network log is written; requires unrestricted network mode, otherwise the run fails |
 | `allow_domains` | Extra allowlisted domains (bare DNS names; ignored with `allow_all_network`) |
 | `network_log` | `coarse` (default) or `requests`; see [Coverage and granularity](networking.md#coverage-and-granularity) |
 | `ports` | Publish container ports to the host |

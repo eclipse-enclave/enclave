@@ -56,13 +56,20 @@ func main() {
 	}
 	readyFile := strings.TrimSpace(os.Getenv(model.EnvGatewayProxyReadyFile))
 
-	allowedDomains, err := bundle.ReadAllowedDomains(filepath.Join(configDir, filepath.Base(model.GatewayConfigDomainsPath)))
-	if err != nil {
-		log.Fatalf("failed to load gateway allowed domains: %v", err)
-	}
-	deniedDomains, err := bundle.ReadDeniedDomains(filepath.Join(configDir, filepath.Base(model.GatewayConfigDeniedPath)))
-	if err != nil {
-		log.Fatalf("failed to load gateway denied domains: %v", err)
+	// The entrypoint passes on the mode the host set on the container. An
+	// unrestricted gateway has no policy files: it has nothing to enforce.
+	networkMode := strings.TrimSpace(os.Getenv(model.EnvGatewayNetworkMode))
+	var allowedDomains, deniedDomains []string
+	if networkMode != model.NetworkModeUnrestricted {
+		var err error
+		allowedDomains, err = bundle.ReadAllowedDomains(filepath.Join(configDir, filepath.Base(model.GatewayConfigDomainsPath)))
+		if err != nil {
+			log.Fatalf("failed to load gateway allowed domains: %v", err)
+		}
+		deniedDomains, err = bundle.ReadDeniedDomains(filepath.Join(configDir, filepath.Base(model.GatewayConfigDeniedPath)))
+		if err != nil {
+			log.Fatalf("failed to load gateway denied domains: %v", err)
+		}
 	}
 	networkLogMode := strings.TrimSpace(strings.ToLower(os.Getenv(model.EnvNetworkLogMode)))
 	if networkLogMode == "" {
@@ -79,13 +86,12 @@ func main() {
 		log.Fatalf("failed to load secret release rules: %v", err)
 	}
 	opts := mitm.Options{
-		HTTPAddr:       ":8080",
-		HTTPSAddr:      ":8443",
 		AllowedDomains: allowedDomains,
 		DeniedDomains:  deniedDomains,
 		SecretRules:    rules,
 		AuditLogPath:   strings.TrimSpace(os.Getenv(model.EnvNetworkLogFile)),
 		Session:        strings.TrimSpace(os.Getenv(model.EnvGatewaySession)),
+		NetworkMode:    networkMode,
 		ForceHTTPSMITM: networkLogMode == model.NetworkLogRequests,
 		// The host runtime pre-provisions CA key material under tlsRoot.
 		TLSStore: tlsstore.New(tlsRoot),

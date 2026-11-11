@@ -9,6 +9,7 @@ package runtime
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"enclave/internal/backend"
@@ -54,9 +55,17 @@ func (m networkManager) Prepare(_ string, authState model.AuthState, _ SecretMap
 		return NetworkResult{}, fmt.Errorf("failed to resolve effective network policy: %w", err)
 	}
 	effectivePolicy := resolved.Effective
+	if m.gatewayRuns() {
+		if err := rejectGatewayProxyPorts(ports); err != nil {
+			return NetworkResult{}, err
+		}
+	}
 
 	if effectivePolicy.Mode == model.NetworkModeUnrestricted {
 		logx.Warnf("Network restrictions disabled - container has unrestricted internet access")
+		if m.gatewayRuns() {
+			return m.observedUnrestrictedNetwork(resolved.AllowlistPath, loopbackPorts, ports), nil
+		}
 		var env []string
 		if len(loopbackPorts) > 0 {
 			env = append(env, model.EnvLoopbackPorts+"="+strings.Join(loopbackPorts, ","))
@@ -100,7 +109,8 @@ func (m networkManager) Prepare(_ string, authState model.AuthState, _ SecretMap
 
 	return NetworkResult{
 		Network: backend.NetworkPolicy{
-			Mode: backend.NetworkModeRestricted,
+			Mode:    backend.NetworkModeRestricted,
+			Gateway: m.gatewayRuns(),
 			Egress: backend.EgressPolicy{
 				AllowedDomains: allowedDomains,
 				DeniedDomains:  deniedDomains,
@@ -113,6 +123,46 @@ func (m networkManager) Prepare(_ string, authState model.AuthState, _ SecretMap
 		Env:   env,
 		Ports: ports,
 	}, nil
+}
+
+// observedUnrestrictedNetwork is an unrestricted session with a gateway that
+// only observes. As in restricted mode, the gateway owns the session's ports
+// and bridges, so the session gets no forwarding env of its own; unlike it,
+// the session gets no DNS-gateway signal and keeps Docker's resolver.
+func (m networkManager) observedUnrestrictedNetwork(allowlistPath string, loopbackPorts []string, ports []backend.PortMapping) NetworkResult {
+	logx.Infof("Network log records HTTP/HTTPS traffic on ports 80 and 443 (pass --disable-gateway to run without a gateway)")
+	if m.run.NetworkLog == model.NetworkLogRequests {
+		logx.Infof("Request-level network logging enabled; forcing HTTPS MITM for all hosts")
+	}
+	return NetworkResult{
+		Network: backend.NetworkPolicy{
+			Mode:    backend.NetworkModeUnrestricted,
+			Gateway: true,
+			// The gateway image is shared by both modes and built from the
+			// allowlist, so both must build it from the same one.
+			Egress:         backend.EgressPolicy{AllowlistPath: allowlistPath},
+			LoopbackPorts:  append([]string(nil), loopbackPorts...),
+			IdeBridgePorts: append([]string(nil), m.ideBridgePorts...),
+		},
+		Ports: ports,
+	}
+}
+
+// rejectGatewayProxyPorts refuses to publish a container port the gateway's
+// proxy listens on: the session shares the gateway's namespace, so nothing in
+// the session could serve it.
+func rejectGatewayProxyPorts(ports []backend.PortMapping) error {
+	for _, port := range ports {
+		// Compare numbers: "015080" publishes the same port as "15080".
+		containerPort, err := strconv.Atoi(port.ContainerPort)
+		if err != nil {
+			continue
+		}
+		if containerPort == model.GatewayProxyHTTPPort || containerPort == model.GatewayProxyHTTPSPort {
+			return fmt.Errorf("container port %s is reserved for the network gateway's proxy; publish another container port (or, with --allow-all-network, add --disable-gateway)", port.ContainerPort)
+		}
+	}
+	return nil
 }
 
 func policyDomainSourcePaths(home string, projectDir string, projectHash string, tool string, globalPolicy network.Policy, projectPolicy network.Policy) []string {

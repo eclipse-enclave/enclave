@@ -187,6 +187,16 @@ func OptionSpecs() []OptionSpec {
 			},
 		},
 		{
+			Name:  "disable_gateway",
+			Group: OptionGroupRun,
+			ApplyDefaultsWithSource: func(opts *model.Options, defaults Defaults, source model.OptionSource, sources *model.OptionSources) {
+				if canOverride(sources.DisableGateway, source) && defaults.DisableGateway != nil {
+					opts.DisableGateway = *defaults.DisableGateway
+					sources.DisableGateway = source
+				}
+			},
+		},
+		{
 			Name:  "no_cache",
 			Group: OptionGroupRun,
 			ApplyDefaultsWithSource: func(opts *model.Options, defaults Defaults, source model.OptionSource, sources *model.OptionSources) {

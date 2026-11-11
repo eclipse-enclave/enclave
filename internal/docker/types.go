@@ -96,7 +96,11 @@ type HostConfig struct {
 	// UserNS is the user namespace mode passed as `--userns`; rootless podman
 	// uses "keep-id" so the container user keeps the host user's UID/GID on
 	// bind mounts.
-	UserNS      string
+	UserNS string
+	// UTSMode is the UTS namespace mode passed as `--uts`; podman sessions use
+	// "container:<gateway>" to share the hostname, which Docker shares with
+	// the network namespace.
+	UTSMode     string
 	SecurityOpt []string
 	Tmpfs       map[string]string
 	CapAdd      []string

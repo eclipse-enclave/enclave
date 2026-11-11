@@ -98,8 +98,8 @@ container name for a later `enclave theia <container>`.
 | `enclave network diff` | Show changes from built-in defaults |
 | `enclave network add-domain <domain> --global` | Allow a domain |
 | `enclave network remove-domain <domain> --global` | Remove a domain |
-| `enclave network set-mode restricted\|unrestricted --global` | Set network mode |
-| `enclave network apply` | Apply policy to running gateways |
+| `enclave network set-mode restricted\|unrestricted --global` | Set network mode; running sessions keep their mode until restarted |
+| `enclave network apply` | Apply policy to running gateways; gateways of unrestricted sessions are skipped |
 | `enclave network log` | Show gateway network audit events |
 
 `status`, `print`, and `diff` accept `--tool`, `--features`, `--slim`,
@@ -267,9 +267,10 @@ See [Authentication and secrets](auth.md).
 
 | Flag | Description |
 |------|-------------|
-| `--allow-all-network` | Disable network restrictions |
+| `--allow-all-network` | Disable network restrictions. A gateway still logs HTTP/HTTPS on ports 80 and 443 unless `--disable-gateway` is set; see [Unrestricted mode](networking.md#unrestricted-mode) |
+| `--disable-gateway` | Run without a network gateway, so no network log is written. Requires unrestricted network mode (`--allow-all-network`, `allow_all_network`, or policy mode `unrestricted`) and never implies it |
 | `--allow-domain <domain>` | Allow a domain for this run only, without persisting it. Repeatable, comma-separated list flag for `allow_domains` |
-| `--network-log <coarse\|requests>` | Audit mode. `coarse` (default): one pass/deny event per TLS connection, plus per-request events for plaintext HTTP and hosts already MITMed for secret release. `requests`: MITM all allowlisted HTTPS hosts and log every request. See [Coverage and granularity](networking.md#coverage-and-granularity) |
+| `--network-log <coarse\|requests>` | Audit mode. `coarse` (default): one pass/deny event per TLS connection, plus per-request events for plaintext HTTP and hosts already MITMed for secret release. `requests`: MITM all allowlisted HTTPS hosts (every host in unrestricted mode) and log every request. See [Coverage and granularity](networking.md#coverage-and-granularity) |
 
 ### Persistence
 

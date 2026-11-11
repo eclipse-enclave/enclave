@@ -16,6 +16,7 @@ pass_api_key | default="false"/true global=""/false project=""/false toolOverrid
 secrets_scope | default=""/true global=""/false project=""/false toolOverride=""/false cli=""/false | source=0 effective=""
 pass_env | default=""/false global=""/false project="[FOO,BAR]"/true toolOverride=""/false cli="[FOO,BAR]"/true | source=5 effective="[FOO,BAR]"
 allow_all_network | default="false"/true global=""/false project=""/false toolOverride=""/false cli=""/false | source=0 effective="false"
+disable_gateway | default="false"/true global=""/false project=""/false toolOverride=""/false cli=""/false | source=0 effective="false"
 no_cache | default="false"/true global="true"/true project=""/false toolOverride=""/false cli=""/false | source=2 effective="true"
 session_tint | default=""/false global=""/false project=""/false toolOverride=""/false cli=""/false | source=0 effective=""
 host_env | default=""/false global=""/false project=""/false toolOverride=""/false cli=""/false | source=0 effective=""

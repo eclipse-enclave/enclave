@@ -18,6 +18,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"os"
 	"slices"
@@ -36,8 +37,10 @@ import (
 )
 
 type Options struct {
-	HTTPAddr       string
-	HTTPSAddr      string
+	// HTTPPort and HTTPSPort are the loopback ports the proxy listens on; zero
+	// selects the gateway's ports.
+	HTTPPort       int
+	HTTPSPort      int
 	AllowedDomains []string
 	DeniedDomains  []string
 	SecretRules    []model.SecretReleaseEntry
@@ -45,13 +48,20 @@ type Options struct {
 	// Session names the gateway that produced an event. Sessions of the same
 	// project and tool share one log file, so without it concurrent sessions
 	// cannot be told apart.
-	Session        string
+	Session string
+	// NetworkMode is the session's network mode; the proxy derives what it
+	// enforces from it. Anything but unrestricted counts as restricted.
+	NetworkMode    string
 	ForceHTTPSMITM bool
 	TLSStore       *tlsstore.Store
 	OnReady        func()
 }
 
 const serverShutdownTimeout = 1 * time.Second
+
+// ruleUpstreamError marks a passed connection or request the proxy could not
+// deliver.
+const ruleUpstreamError = "upstream-error"
 
 const maxTLSRecordsBeforeClientHelloLength = 16
 
@@ -82,13 +92,13 @@ func Run(ctx context.Context, opts Options) error {
 	if opts.TLSStore == nil {
 		return fmt.Errorf("TLS store is required")
 	}
-	httpAddr := strings.TrimSpace(opts.HTTPAddr)
-	if httpAddr == "" {
-		httpAddr = ":8080"
+	httpPort := opts.HTTPPort
+	if httpPort == 0 {
+		httpPort = model.GatewayProxyHTTPPort
 	}
-	httpsAddr := strings.TrimSpace(opts.HTTPSAddr)
-	if httpsAddr == "" {
-		httpsAddr = ":8443"
+	httpsPort := opts.HTTPSPort
+	if httpsPort == 0 {
+		httpsPort = model.GatewayProxyHTTPSPort
 	}
 
 	audit, err := netlog.NewAppender(opts.AuditLogPath)
@@ -98,20 +108,17 @@ func Run(ctx context.Context, opts Options) error {
 	defer func() { _ = audit.Close() }()
 
 	proxy := newProxy(opts.AllowedDomains, opts.DeniedDomains, opts.SecretRules, opts.ForceHTTPSMITM, audit, opts.Session)
-	httpServer := &http.Server{
-		Addr:              httpAddr,
-		Handler:           proxy.handler("http"),
-		ReadHeaderTimeout: 10 * time.Second,
-	}
-	httpListener, err := net.Listen("tcp", httpAddr)
+	proxy.setCapabilities(capabilitiesFor(opts.NetworkMode))
+	httpServer := proxy.newHTTPServer()
+	httpListener, err := listenLoopback(httpPort)
 	if err != nil {
-		return fmt.Errorf("listen HTTP proxy on %s: %w", httpAddr, err)
+		return fmt.Errorf("listen HTTP proxy on port %d: %w", httpPort, err)
 	}
 
-	httpsListener, err := net.Listen("tcp", httpsAddr)
+	httpsListener, err := listenLoopback(httpsPort)
 	if err != nil {
 		_ = httpListener.Close()
-		return fmt.Errorf("listen HTTPS proxy on %s: %w", httpsAddr, err)
+		return fmt.Errorf("listen HTTPS proxy on port %d: %w", httpsPort, err)
 	}
 	httpsServer, err := newHTTPSDispatchServer(proxy, opts.TLSStore, httpsListener)
 	if err != nil {
@@ -122,7 +129,7 @@ func Run(ctx context.Context, opts Options) error {
 
 	errCh := make(chan error, 2)
 	go func() {
-		if err := httpServer.Serve(httpListener); err != nil && !errors.Is(err, http.ErrServerClosed) && !errors.Is(err, net.ErrClosed) {
+		if err := proxy.serveHTTP(httpServer, httpListener); err != nil && !errors.Is(err, http.ErrServerClosed) && !errors.Is(err, net.ErrClosed) {
 			errCh <- fmt.Errorf("serve HTTP proxy: %w", err)
 		}
 	}()
@@ -149,19 +156,164 @@ func Run(ctx context.Context, opts Options) error {
 	}
 }
 
+// capabilities are what the proxy does beyond logging. They are derived from
+// the session's network mode: restricted enforces, unrestricted only observes.
+type capabilities struct {
+	enforceAllowlist bool
+	// dialOriginalDestination sends each connection to the address the client
+	// dialled instead of re-resolving its SNI or Host, and tunnels traffic the
+	// proxy cannot parse there unchanged.
+	dialOriginalDestination bool
+	// releaseSecrets swaps placeholders for real values. An unrestricted
+	// session already holds the real values.
+	releaseSecrets bool
+	// forwardUnchanged sends requests and responses on as they were sent, so
+	// neither end can tell a proxy sat in between.
+	forwardUnchanged bool
+}
+
+func capabilitiesFor(networkMode string) capabilities {
+	restricted := networkMode != model.NetworkModeUnrestricted
+	return capabilities{
+		enforceAllowlist:        restricted,
+		dialOriginalDestination: !restricted,
+		releaseSecrets:          restricted,
+		forwardUnchanged:        !restricted,
+	}
+}
+
+// setCapabilities configures the proxy for caps.
+func (p *proxy) setCapabilities(caps capabilities) {
+	p.caps = caps
+	if caps.forwardUnchanged {
+		for _, transport := range []*http.Transport{p.transport, p.upgradeTransport} {
+			// Left on, the transport asks for gzip on the client's behalf and
+			// decompresses the response, and turns a slow response into a 502.
+			transport.DisableCompression = true
+			transport.ResponseHeaderTimeout = 0
+		}
+	}
+	if caps.dialOriginalDestination {
+		// A custom dialer turns off the HTTP/2 the transport otherwise
+		// negotiates; the upgrade transport is pinned to HTTP/1.1 regardless.
+		p.transport.ForceAttemptHTTP2 = true
+		p.destinations = newDestinationTransports(p.transport, p.upgradeTransport)
+	}
+}
+
+// transportFor returns the transport for a request to dst, or for a request
+// whose target is in its URL when dst is invalid.
+func (p *proxy) transportFor(dst netip.AddrPort, upgrade bool) *http.Transport {
+	if dst.IsValid() && p.destinations != nil {
+		return p.destinations.get(dst, upgrade)
+	}
+	if upgrade {
+		return p.upgradeTransport
+	}
+	return p.transport
+}
+
+// destinationTransports keeps a pair of transports per original destination.
+// A transport pools connections by the name in the URL, which intercepted HTTPS
+// keeps for certificate checks; one shared transport would send a request to
+// a connection dialled for another address of the same name.
+type destinationTransports struct {
+	template, upgradeTemplate *http.Transport
+	now                       func() time.Time
+
+	mu            sync.Mutex
+	byDestination map[netip.AddrPort]*destinationTransport
+	lastSweep     time.Time
+}
+
+type destinationTransport struct {
+	transport, upgradeTransport *http.Transport
+	lastUsed                    time.Time
+}
+
+func newDestinationTransports(template, upgradeTemplate *http.Transport) *destinationTransports {
+	return &destinationTransports{
+		template:        template,
+		upgradeTemplate: upgradeTemplate,
+		now:             time.Now,
+		byDestination:   map[netip.AddrPort]*destinationTransport{},
+	}
+}
+
+func (d *destinationTransports) get(dst netip.AddrPort, upgrade bool) *http.Transport {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	now := d.now()
+	d.releaseIdle(now)
+	entry, ok := d.byDestination[dst]
+	if !ok {
+		entry = &destinationTransport{
+			transport:        dialingOnly(d.template, dst),
+			upgradeTransport: dialingOnly(d.upgradeTemplate, dst),
+		}
+		d.byDestination[dst] = entry
+	}
+	entry.lastUsed = now
+	if upgrade {
+		return entry.upgradeTransport
+	}
+	return entry.transport
+}
+
+// releaseIdle drops the transports of destinations no request used for longer
+// than the idle timeout, after which their pooled connections are closed
+// anyway. Requests still in flight keep their transport until they end.
+func (d *destinationTransports) releaseIdle(now time.Time) {
+	idle := d.template.IdleConnTimeout
+	if now.Sub(d.lastSweep) < idle {
+		return
+	}
+	d.lastSweep = now
+	for dst, entry := range d.byDestination {
+		if now.Sub(entry.lastUsed) > idle {
+			entry.transport.CloseIdleConnections()
+			entry.upgradeTransport.CloseIdleConnections()
+			delete(d.byDestination, dst)
+		}
+	}
+}
+
+// dialingOnly returns a copy of template that dials dst for every request.
+func dialingOnly(template *http.Transport, dst netip.AddrPort) *http.Transport {
+	transport := template.Clone()
+	transport.DialContext = func(ctx context.Context, network string, _ string) (net.Conn, error) {
+		return (&net.Dialer{}).DialContext(ctx, network, dst.String())
+	}
+	return transport
+}
+
+// releaseRules are the secret release rules the proxy applies.
+func (p *proxy) releaseRules() []model.SecretReleaseEntry {
+	if !p.caps.releaseSecrets {
+		return nil
+	}
+	return p.secretRules
+}
+
 type proxy struct {
+	caps           capabilities
 	allowedDomains []string
 	deniedDomains  []string
 	secretRules    []model.SecretReleaseEntry
 	forceHTTPSMITM bool
 	audit          *netlog.Appender
 	session        string
-	transport      *http.Transport
+	// originalDst reports where the client sent a redirected connection.
+	originalDst func(net.Conn) (netip.AddrPort, error)
+	transport   *http.Transport
 	// upgradeTransport speaks only HTTP/1.1 and carries every request with an
 	// Upgrade header, whether or not Connection names it: HTTP/2 refuses any
 	// Upgrade header, and transport switches to HTTP/1.1 by itself only for
 	// WebSocket, not for upgrades such as SPDY.
 	upgradeTransport *http.Transport
+	// destinations holds the transports of a proxy that dials original
+	// destinations; transport and upgradeTransport serve as their templates.
+	destinations *destinationTransports
 }
 
 func normalizeHostPatterns(patterns []string) []string {
@@ -181,12 +333,14 @@ func newProxy(allowedDomains []string, deniedDomains []string, secretRules []mod
 	upgradeTransport.Protocols = new(http.Protocols)
 	upgradeTransport.Protocols.SetHTTP1(true)
 	return &proxy{
+		caps:             capabilitiesFor(model.NetworkModeRestricted),
 		allowedDomains:   normalizeHostPatterns(allowedDomains),
 		deniedDomains:    normalizeHostPatterns(deniedDomains),
 		secretRules:      secretRules,
 		forceHTTPSMITM:   forceHTTPSMITM,
 		audit:            audit,
 		session:          session,
+		originalDst:      kernelOriginalDestination,
 		transport:        newUpstreamTransport(),
 		upgradeTransport: upgradeTransport,
 	}
@@ -222,7 +376,7 @@ func (p *proxy) handler(scheme string) http.HandlerFunc {
 				p.logEvent(mismatchEvent)
 			}
 		}
-		if host == "" {
+		if !p.hasTarget(req, host) {
 			event.Status = http.StatusBadRequest
 			event.Verdict = netlog.VerdictDeny
 			event.Rule = "invalid-host"
@@ -238,19 +392,21 @@ func (p *proxy) handler(scheme string) http.HandlerFunc {
 			http.Error(w, "Domain not in allowlist", http.StatusForbidden)
 			return
 		}
-		if err := rewriteHeaders(scheme, host, req.Header, p.secretRules); err != nil {
-			event.Status = http.StatusForbidden
-			event.Verdict = netlog.VerdictDeny
-			event.Rule = "secret-injection"
-			p.logEvent(event)
-			http.Error(w, "request denied", http.StatusForbidden)
-			return
+		if host != "" {
+			if err := rewriteHeaders(scheme, host, req.Header, p.releaseRules()); err != nil {
+				event.Status = http.StatusForbidden
+				event.Verdict = netlog.VerdictDeny
+				event.Rule = "secret-injection"
+				p.logEvent(event)
+				http.Error(w, "request denied", http.StatusForbidden)
+				return
+			}
 		}
 		result, err := p.forward(w, req, scheme)
 		if err != nil {
 			event.Status = http.StatusBadGateway
 			event.Verdict = netlog.VerdictPass
-			event.Rule = "upstream-error"
+			event.Rule = ruleUpstreamError
 			p.logEvent(event)
 			http.Error(w, "Upstream request failed", http.StatusBadGateway)
 			return
@@ -259,9 +415,20 @@ func (p *proxy) handler(scheme string) http.HandlerFunc {
 		event.ResponseSize = result.ResponseBytes
 		event.ContentType = result.ContentType
 		event.Verdict = netlog.VerdictPass
-		event.Rule = netlog.RuleAllowlist
+		event.Rule = p.passRule()
 		p.logEvent(event)
 	}
+}
+
+// hasTarget reports whether the proxy knows where to send req. A proxy that
+// dials original destinations has none for a request that reached it
+// directly; its Host header may name the proxy itself, so dialling that would
+// loop.
+func (p *proxy) hasTarget(req *http.Request, host string) bool {
+	if originalDestinationFrom(req.Context()).IsValid() {
+		return true
+	}
+	return host != "" && !p.caps.dialOriginalDestination
 }
 
 type forwardResult struct {
@@ -278,6 +445,11 @@ func (p *proxy) forward(w http.ResponseWriter, req *http.Request, scheme string)
 		host = normalizedRequestHost(req)
 	}
 	target.Host = host
+	if dst := originalDestinationFrom(req.Context()); dst.IsValid() && (scheme == "http" || strings.TrimSpace(target.Host) == "") {
+		// Keep the Host header and only redirect the dial. HTTPS keeps the
+		// name in the URL for certificate checks; the transport dials dst.
+		target.Host = dst.String()
+	}
 	if strings.TrimSpace(target.Host) == "" {
 		return forwardResult{}, fmt.Errorf("missing request host")
 	}
@@ -291,18 +463,15 @@ func (p *proxy) forward(w http.ResponseWriter, req *http.Request, scheme string)
 	outgoing := req.Clone(req.Context())
 	outgoing.RequestURI = ""
 	outgoing.URL = &target
-	outgoing.Header.Set("X-Forwarded-Proto", scheme)
-	if clientIP := clientIPFromAddr(req.RemoteAddr); clientIP != "" {
-		if prior := strings.TrimSpace(outgoing.Header.Get("X-Forwarded-For")); prior != "" {
-			outgoing.Header.Set("X-Forwarded-For", prior+", "+clientIP)
-		} else {
-			outgoing.Header.Set("X-Forwarded-For", clientIP)
+	if p.caps.forwardUnchanged {
+		if _, ok := outgoing.Header["User-Agent"]; !ok {
+			// An empty value stops the transport from sending its own.
+			outgoing.Header["User-Agent"] = []string{""}
 		}
+	} else {
+		addForwardingHeaders(outgoing, req.RemoteAddr, scheme)
 	}
-	transport := p.transport
-	if outgoing.Header.Get("Upgrade") != "" {
-		transport = p.upgradeTransport
-	}
+	transport := p.transportFor(originalDestinationFrom(req.Context()), outgoing.Header.Get("Upgrade") != "")
 	resp, err := transport.RoundTrip(outgoing)
 	if err != nil {
 		return forwardResult{}, err
@@ -312,6 +481,9 @@ func (p *proxy) forward(w http.ResponseWriter, req *http.Request, scheme string)
 		return relayUpgrade(w, outgoing, resp)
 	}
 	copyHeaders(w.Header(), resp.Header)
+	if p.caps.forwardUnchanged {
+		suppressServerAddedHeaders(w.Header())
+	}
 	w.WriteHeader(resp.StatusCode)
 	// Send the head before waiting for the body: an event stream can stay
 	// silent for a long time after it opens, and the client cannot see the
@@ -324,6 +496,28 @@ func (p *proxy) forward(w http.ResponseWriter, req *http.Request, scheme string)
 		ResponseBytes: responseBytes,
 		ContentType:   strings.TrimSpace(resp.Header.Get("Content-Type")),
 	}, nil
+}
+
+// suppressServerAddedHeaders stops the HTTP server from adding a Date or a
+// sniffed Content-Type the upstream response did not carry: a nil value marks
+// the header as present but writes nothing.
+func suppressServerAddedHeaders(header http.Header) {
+	for _, name := range []string{"Date", "Content-Type"} {
+		if _, ok := header[name]; !ok {
+			header[name] = nil
+		}
+	}
+}
+
+func addForwardingHeaders(outgoing *http.Request, remoteAddr string, scheme string) {
+	outgoing.Header.Set("X-Forwarded-Proto", scheme)
+	if clientIP := clientIPFromAddr(remoteAddr); clientIP != "" {
+		if prior := strings.TrimSpace(outgoing.Header.Get("X-Forwarded-For")); prior != "" {
+			outgoing.Header.Set("X-Forwarded-For", prior+", "+clientIP)
+		} else {
+			outgoing.Header.Set("X-Forwarded-For", clientIP)
+		}
+	}
 }
 
 // flushWriter passes each chunk to the client as soon as it arrives. Without
@@ -404,9 +598,13 @@ func upgradeType(h http.Header) string {
 type httpsDispatchServer struct {
 	listener     net.Listener
 	mitmListener net.Listener
-	proxy        *proxy
-	mitmServer   *http.Server
-	mitmAddr     string
+	// handoff passes intercepted connections of a proxy that dials original
+	// destinations to the MITM server in process, so each keeps its
+	// destination; a loopback tunnel would lose it.
+	handoff    *handoffListener
+	proxy      *proxy
+	mitmServer *http.Server
+	mitmAddr   string
 
 	mu      sync.Mutex
 	conns   map[net.Conn]struct{}
@@ -421,10 +619,12 @@ func newHTTPSDispatchServer(proxy *proxy, store *tlsstore.Store, listener net.Li
 	server := &httpsDispatchServer{
 		listener:     listener,
 		mitmListener: mitmListener,
+		handoff:      newHandoffListener(mitmListener.Addr()),
 		proxy:        proxy,
 		mitmServer: &http.Server{
 			Handler:           proxy.handler("https"),
 			ReadHeaderTimeout: 10 * time.Second,
+			ConnContext:       originalDestinationConnContext,
 			TLSConfig: &tls.Config{
 				MinVersion: tls.VersionTLS12,
 				GetCertificate: func(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
@@ -442,13 +642,17 @@ func newHTTPSDispatchServer(proxy *proxy, store *tlsstore.Store, listener net.Li
 }
 
 func (s *httpsDispatchServer) Serve() error {
-	errCh := make(chan error, 1)
-	go func() {
-		if err := s.mitmServer.ServeTLS(s.mitmListener, "", ""); err != nil && !errors.Is(err, http.ErrServerClosed) && !errors.Is(err, net.ErrClosed) {
+	errCh := make(chan error, 2)
+	serveMITM := func(listener net.Listener) {
+		if err := s.mitmServer.ServeTLS(listener, "", ""); err != nil && !errors.Is(err, http.ErrServerClosed) && !errors.Is(err, net.ErrClosed) {
 			errCh <- err
 			_ = s.listener.Close()
 		}
-	}()
+	}
+	go serveMITM(s.mitmListener)
+	if s.proxy.caps.dialOriginalDestination {
+		go serveMITM(s.handoff)
+	}
 
 	for {
 		conn, err := s.listener.Accept()
@@ -480,6 +684,7 @@ func (s *httpsDispatchServer) Shutdown(ctx context.Context) error {
 	go func() {
 		_ = s.listener.Close()
 		_ = s.mitmListener.Close()
+		_ = s.handoff.Close()
 		_ = s.mitmServer.Shutdown(ctx)
 		close(done)
 	}()
@@ -495,6 +700,10 @@ func (s *httpsDispatchServer) Shutdown(ctx context.Context) error {
 func (s *httpsDispatchServer) serveConn(conn net.Conn) {
 	defer s.untrackConn(conn)
 
+	if s.proxy.caps.dialOriginalDestination {
+		s.serveTransparentConn(conn)
+		return
+	}
 	host, preface, err := readClientHello(conn)
 	if err != nil {
 		s.proxy.logEvent(newTCPAuditEvent("", netlog.VerdictDeny, "tls-clienthello"))
@@ -506,13 +715,51 @@ func (s *httpsDispatchServer) serveConn(conn net.Conn) {
 		_ = conn.Close()
 		return
 	}
-	if shouldMITM(host, s.proxy.secretRules, s.proxy.forceHTTPSMITM) {
+	if shouldMITM(host, s.proxy.releaseRules(), s.proxy.forceHTTPSMITM) {
 		s.proxy.logEvent(newTCPAuditEvent(host, netlog.VerdictPass, "mitm-dispatch"))
 		tunnelToAddress(conn, preface, s.mitmAddr)
 		return
 	}
-	s.proxy.logEvent(newTCPAuditEvent(host, netlog.VerdictPass, netlog.RuleAllowlist))
+	s.proxy.logEvent(newTCPAuditEvent(host, netlog.VerdictPass, s.proxy.passRule()))
 	tunnelTLS(conn, preface, host)
+}
+
+// serveTransparentConn is serveConn for a proxy that only observes: every
+// connection reaches the address the client dialled, including those without
+// SNI and those that are not TLS at all.
+func (s *httpsDispatchServer) serveTransparentConn(conn net.Conn) {
+	dst := s.proxy.originalDestination(conn)
+	recorded := &recordingConn{Conn: conn}
+	host, preface, err := readClientHello(recorded)
+	if err != nil {
+		host, preface = "", recorded.read.Bytes()
+	}
+	if host != "" && shouldMITM(host, s.proxy.releaseRules(), s.proxy.forceHTTPSMITM) {
+		s.proxy.logEvent(newTCPAuditEvent(host, netlog.VerdictPass, "mitm-dispatch"))
+		s.intercept(conn, preface, dst)
+		return
+	}
+	target := ""
+	switch {
+	case dst.IsValid():
+		target = dst.String()
+	case host != "":
+		target = net.JoinHostPort(host, "443")
+	}
+	s.proxy.passThrough(conn, preface, host, 443, target)
+}
+
+// recordingConn keeps every byte read through it, so traffic the proxy failed
+// to parse can still be forwarded in full.
+type recordingConn struct {
+	net.Conn
+	read bytes.Buffer
+}
+
+func (c *recordingConn) Read(p []byte) (int, error) {
+	n, err := c.Conn.Read(p)
+	c.read.Write(p[:n])
+	return n, err
 }
 
 func (s *httpsDispatchServer) trackConn(conn net.Conn) {
@@ -851,10 +1098,20 @@ func hostAllowed(host string, patterns []string) bool {
 // denied host more specific than an allowed parent (deny tracking.example.com,
 // allow example.com) would otherwise pass here — the deny check closes that.
 func (p *proxy) hostPermitted(host string) bool {
+	if !p.caps.enforceAllowlist {
+		return true
+	}
 	if hostAllowed(host, p.deniedDomains) {
 		return false
 	}
 	return hostAllowed(host, p.allowedDomains)
+}
+
+func (p *proxy) passRule() string {
+	if !p.caps.enforceAllowlist {
+		return netlog.RuleUnrestricted
+	}
+	return netlog.RuleAllowlist
 }
 
 func newHTTPAuditEvent(req *http.Request, host string, scheme string) netlog.Event {

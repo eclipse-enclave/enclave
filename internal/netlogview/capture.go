@@ -24,13 +24,15 @@ import (
 	"enclave/internal/util"
 )
 
-// CaptureView is a capture record together with the body files it refers to.
+// CaptureView is a capture record together with the body and message files it
+// refers to.
 type CaptureView struct {
 	Record netcapture.Record
 	// Path is the record file.
 	Path     string
 	Request  CapturedBody
 	Response CapturedBody
+	Messages CapturedMessages
 }
 
 // CapturedBody is a stored body as read from its file.
@@ -43,9 +45,19 @@ type CapturedBody struct {
 	Err error
 }
 
-// WriteCapture renders a capture as the two HTTP messages it holds. Headers and
-// bodies come from the sandbox and from upstream servers, so everything is made
-// display safe: a body cannot drive the terminal of whoever reads it.
+// CapturedMessages are the stored messages of a WebSocket as read from their
+// file.
+type CapturedMessages struct {
+	List []netcapture.Message
+	// Path is the messages file; empty when nothing was stored.
+	Path string
+	Err  error
+}
+
+// WriteCapture renders a capture as the two HTTP messages it holds, followed by
+// the messages of a WebSocket. Headers, bodies and messages come from the
+// sandbox and from upstream servers, so everything is made display safe: a
+// payload cannot drive the terminal of whoever reads it.
 func WriteCapture(out io.StringWriter, view CaptureView, opts RenderOptions) error {
 	record := view.Record
 	var text strings.Builder
@@ -57,7 +69,11 @@ func WriteCapture(out io.StringWriter, view CaptureView, opts RenderOptions) err
 	if at, err := time.Parse(netlog.TimeFormat, record.Timestamp); err == nil {
 		text.WriteString("  " + opts.colorize(at.In(opts.location()).Format("2006-01-02 15:04:05"), logx.ColorDim))
 	}
-	text.WriteString("  " + opts.colorize((time.Duration(record.DurationMS)*time.Millisecond).String(), logx.ColorDim))
+	if record.WebSocket != nil && record.WebSocket.Open {
+		text.WriteString("  " + opts.colorize("open", logx.ColorDim))
+	} else {
+		text.WriteString("  " + opts.colorize((time.Duration(record.DurationMS)*time.Millisecond).String(), logx.ColorDim))
+	}
 	text.WriteString("\n" + opts.colorize(displaySafe(view.Path), logx.ColorDim) + "\n\n")
 
 	request := record.Request
@@ -87,12 +103,15 @@ func WriteCapture(out io.StringWriter, view CaptureView, opts RenderOptions) err
 		}
 		text.WriteString("\n" + opts.colorize(strings.TrimRight(statusLine, " "), statusColor) + "\n")
 		writeHeaders(&text, response.Headers)
-		if response.Status == http.StatusSwitchingProtocols {
+		if response.Status == http.StatusSwitchingProtocols && record.WebSocket == nil {
 			text.WriteString("\n" + opts.colorize("(the upgraded connection is not captured)", logx.ColorDim) + "\n")
 		}
 		writeBody(&text, "response", response.Body, view.Response, response.Headers, opts)
 		if response.BodyOmitted != "" {
 			text.WriteString(opts.colorize("(response body not stored: "+displaySafe(response.BodyOmitted)+")", logx.ColorDim) + "\n")
+		}
+		if record.WebSocket != nil {
+			writeMessages(&text, record.WebSocket, view.Messages, opts)
 		}
 	} else if record.Error == "" {
 		text.WriteString("\n" + opts.colorize("(no response recorded)", logx.ColorDim) + "\n")
@@ -149,6 +168,70 @@ func writeBody(text *strings.Builder, label string, body *netcapture.Body, store
 	text.WriteString(opts.colorize("("+note+")", logx.ColorDim) + "\n")
 }
 
+// writeMessages prints a note on a WebSocket's messages file, then each
+// message: > for what the client sent, < for what the server sent.
+func writeMessages(text *strings.Builder, socket *netcapture.WebSocket, stored CapturedMessages, opts RenderOptions) {
+	if socket.MessagesOmitted != "" {
+		text.WriteString("\n" + opts.colorize("(WebSocket messages not stored: "+displaySafe(socket.MessagesOmitted)+")", logx.ColorDim) + "\n")
+		return
+	}
+	note := "WebSocket"
+	if socket.Open {
+		note += fmt.Sprintf(" still open, %d messages so far", len(stored.List))
+	} else {
+		note += fmt.Sprintf(", %d messages", socket.Messages)
+		if socket.StoredMessages != socket.Messages {
+			note += fmt.Sprintf(", %d stored", socket.StoredMessages)
+		}
+	}
+	if socket.Truncated {
+		note += ", truncated"
+	}
+	switch {
+	case stored.Err != nil:
+		note += ", not shown: " + displaySafe(stored.Err.Error())
+	case stored.Path != "":
+		note += ": " + displaySafe(stored.Path)
+	}
+	text.WriteString("\n" + opts.colorize("("+note+")", logx.ColorDim) + "\n")
+	if socket.Error != "" {
+		text.WriteString(opts.colorize("(frames no longer followed: "+displaySafe(socket.Error)+")", logx.ColorYellow) + "\n")
+	}
+	for _, message := range stored.List {
+		writeMessage(text, message, opts)
+	}
+}
+
+func writeMessage(text *strings.Builder, message netcapture.Message, opts RenderOptions) {
+	marker, color := "<", logx.ColorGreen
+	if message.From == netcapture.FromClient {
+		marker, color = ">", logx.ColorCyan
+	}
+	head := marker + " " + displaySafe(message.From)
+	if at, err := time.Parse(netlog.TimeFormat, message.Timestamp); err == nil {
+		head += " " + at.In(opts.location()).Format("15:04:05.000")
+	}
+	head += " " + displaySafe(message.Type)
+	if message.Code != 0 {
+		head += fmt.Sprintf(" %d", message.Code)
+	}
+	size := util.FormatBytes(message.StoredBytes)
+	if message.Truncated {
+		size += " of " + util.FormatBytes(message.Bytes) + ", truncated"
+	}
+	if len(message.Base64) > 0 {
+		size += ", binary"
+	}
+	text.WriteString("\n" + opts.colorize(head, color) + " " + opts.colorize("("+size+")", logx.ColorDim) + "\n")
+	if message.Text != "" {
+		content := displaySafeText(message.Text)
+		text.WriteString(content)
+		if !strings.HasSuffix(content, "\n") {
+			text.WriteString("\n")
+		}
+	}
+}
+
 // displayBody returns the body as terminal text, or a note saying why it is
 // not shown. A body cut short may end inside a character; that partial
 // character is dropped rather than making the whole body binary.
@@ -159,26 +242,12 @@ func displayBody(data []byte, encoding string, truncated bool) (string, string) 
 		return "", displaySafe(encoding) + "-encoded, not shown"
 	}
 	if truncated {
-		data = trimPartialRune(data)
+		data = netcapture.TrimPartialRune(data)
 	}
 	if !isText(data) {
 		return "", "binary"
 	}
 	return displaySafeText(string(data)), ""
-}
-
-// trimPartialRune drops an incomplete UTF-8 sequence at the end of data.
-func trimPartialRune(data []byte) []byte {
-	for back := 1; back <= utf8.UTFMax && back <= len(data); back++ {
-		start := len(data) - back
-		if utf8.RuneStart(data[start]) {
-			if !utf8.FullRune(data[start:]) {
-				return data[:start]
-			}
-			break
-		}
-	}
-	return data
 }
 
 func isText(data []byte) bool {

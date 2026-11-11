@@ -318,8 +318,9 @@ does not mean a quiet session:
   the credential was resolved. A tool logged in with OAuth instead of an API key
   therefore gets no request-level events for its API host.
 - An upgraded connection (WebSocket, SPDY for `kubectl exec`) is one `http`
-  event with status `101`, logged when it closes; its traffic is relayed
-  uninspected, even with `--network-log=requests`.
+  event with status `101`, logged when it closes or the proxy stops. Its
+  traffic gets no separate events, even with `--network-log=requests`; `full`
+  stores WebSocket messages in its capture.
 - Only ports 80 and 443 go through the proxy. Other ports, such as SSH on 22,
   reach allowlisted IPs directly and are never recorded.
 - Unrestricted sessions have further gaps; see
@@ -341,8 +342,8 @@ at startup) and `NODE_EXTRA_CA_CERTS`. They are set on the container, so
 CA persists on the host; leaf certificates stay in each gateway container.
 Git needs its own variable because its TLS library ignores `SSL_CERT_FILE`.
 
-`--network-log=full` does the same and, in restricted mode, also stores headers and bodies; see
-[Full capture](#full-capture).
+`--network-log=full` does the same and, in restricted mode, also stores headers,
+bodies, and WebSocket messages; see [Full capture](#full-capture).
 
 ### Rotation
 
@@ -357,10 +358,11 @@ the cap per project and tool. Concurrent starts serialize on
 
 `--network-log=full` (`"network_log": "full"`) keeps everything `requests` mode
 does and also stores the request line, headers and body of every request the
-MITM proxy relays, together with the response status, headers and body. It is
-off unless selected, and meant for debugging a tool's API traffic or checking
-what an agent sent out. While it captures, the proxy asks upstreams for
-uncompressed responses, so captured traffic uses more bandwidth.
+MITM proxy relays, together with the response status, headers and body, and
+the messages of WebSocket connections. It is off unless selected, and meant for
+debugging a tool's API traffic or checking what an agent sent out. While it
+captures, the proxy asks upstreams for uncompressed responses and offers no
+WebSocket compression, so captured traffic uses more bandwidth.
 
 ```bash
 enclave --network-log=full
@@ -400,19 +402,28 @@ Captures live next to the network log, one directory per session:
   <id>.json             request line, headers, response head, body metadata
   <id>.request.body     request body as sent upstream
   <id>.response.body    response body as relayed to the client
+  <id>.messages.jsonl   WebSocket messages, one JSON object per line
+  <id>.open.json        record of a WebSocket that is still open
 ```
 
 The `http` event of a captured request carries the ID in `capture_id`, so its
 record is `capture/<session>/<capture_id>.json` with `<session>` from the
 event's `session` field. Requests the gateway denies were not relayed and have
 no capture. The record and the event are written when the exchange ends, so a
-stream that is still open has neither yet. The `capture` directory is private
-to your user. The session directories below it are world-writable, because the
-gateway's proxy runs as a different UID, and rely on that parent for
-protection. The capture files belong to that UID: under rootful Docker `ls -l`
-shows whichever host account has the same UID (for example `messagebus`), and
-under rootless Podman a subordinate UID. You can read and delete them, but not
-modify them.
+stream that is still open has neither yet. A WebSocket is visible earlier:
+once its handshake is relayed, `<id>.open.json` holds the record so far and
+`<id>.messages.jsonl` grows as messages cross, so `tail -f` follows the
+conversation; list `*.open.json` to find the IDs of open WebSockets. When the
+connection closes, `<id>.json` replaces the open record and the `http` event is
+logged. When the proxy stops, for example because `enclave network apply`
+restarts it, it closes its WebSockets first so that they are recorded; the
+files of one cut off by a crash are removed as leftovers. The `capture`
+directory is private to your user. The session directories below it are
+world-writable, because the gateway's proxy runs as a different UID, and rely
+on that parent for protection. The capture files belong to that UID: under
+rootful Docker `ls -l` shows whichever host account has the same UID (for
+example `messagebus`), and under rootless Podman a subordinate UID. You can
+read and delete them, but not modify them.
 
 The record (`schemaVersion: "1"`, `kind: "network-capture"`) looks like this:
 
@@ -454,26 +465,79 @@ The record (`schemaVersion: "1"`, `kind: "network-capture"`) looks like this:
   whose `Content-Encoding` is anything but `identity` has no `body`, and its
   `bodyOmitted` is `unexpected content encoding`.
 - When the request could not be relayed, `error` says why and `response` may be
-  absent. An upgraded connection (status `101`) records the handshake only.
+  absent.
+- A WebSocket has a `websocket` object, described below. Other upgraded
+  connections (status `101`) record the handshake only.
 - Fields are only added, never renamed or removed.
+
+#### WebSocket messages
+
+The record of a connection upgraded to WebSocket describes its messages file:
+
+```json
+"websocket": {
+  "file": "3f9a0c1d2e4b5a69.messages.jsonl",
+  "messages": 42,
+  "storedMessages": 42,
+  "bytes": 498380,
+  "storedBytes": 498112
+}
+```
+
+- `messages` counts the messages both sides sent and `storedMessages` those in
+  `file`. `bytes` counts what crossed the proxy after the handshake, and
+  `storedBytes` is the size of `file`. `truncated: true` marks a WebSocket not
+  stored whole. `error` says why the frames of one side could no longer be
+  followed; its later messages are not captured. A frame with a reserved bit
+  set, which only an extension the proxy did not offer could set, is such a
+  case.
+- The proxy offers upstreams no WebSocket extension. When a handshake response
+  accepts one anyway, such as `permessage-deflate`, the messages are relayed
+  unchanged but not stored. The handshake remains visible while open, with
+  `messagesOmitted: "unexpected WebSocket extension"` and no messages file;
+  its counters stay zero.
+- In `<id>.open.json`, `open` is `true` and the counts are not filled in yet.
+
+Each line of the messages file is one message:
+
+```json
+{"ts":"2026-10-21T10:11:13.204518Z","from":"client","type":"text","bytes":2304,"storedBytes":2304,"text":"{\"type\":\"response.create\", ...}"}
+```
+
+- `from` is `client` or `server`; `type` is `text`, `binary`, `close`, `ping`
+  or `pong`. A fragmented message is stored once, reassembled; control frames
+  sent between its fragments come before it.
+- `ts` is when the message's last byte was relayed. Each side's messages are in
+  the order that side sent them. Between the two sides, lines follow the order
+  they were stored in, which can lag the relay, so sort by `ts` for the order
+  across both.
+- The payload is in `text` for text messages and close reasons that are valid
+  UTF-8, and in `base64` otherwise. A close also carries its status `code`.
+- `bytes` counts the payload as relayed and `storedBytes` the payload stored.
+  `truncated: true` marks a payload cut at the size
+  cap or by the end of the connection.
 
 ### Size limits and retention
 
-- Each body is stored up to 8 MiB and marked `truncated` beyond that; the
-  client still receives all of it.
-- Streamed responses such as server-sent events are written to the capture as
-  they are relayed. Each chunk reaches the client before it is written to the
-  capture, but the next chunk is read only afterwards, so a slow disk slows the
-  stream down.
+- Each body and each WebSocket message is stored up to 8 MiB and marked
+  `truncated` beyond that; the other side still receives all of it.
+- The messages file of a WebSocket stops growing at 128 MiB. Further messages
+  are counted but not stored, and the WebSocket is marked `truncated`, so a
+  long-lived connection keeps its start.
+- Streamed responses such as server-sent events, and WebSocket messages, are
+  written to the capture as they are relayed. Each chunk reaches the other side
+  before it is written to the capture, but the next chunk is read only
+  afterwards, so a slow disk slows the stream down.
 - A session directory keeps its most recent captures within 512 MiB, deleting
-  the oldest to make room. Bodies count against that budget as they are
-  written, so when captures still in flight fill it on their own, the rest of
-  their bodies is not stored and they are marked `truncated`.
+  the oldest to make room. Bodies and messages count against that budget as
+  they are written, so when captures still in flight, open WebSockets included,
+  fill it on their own, the rest of their bodies and messages is not stored and
+  they are marked `truncated`.
 - At session start the store of the project and tool is pruned to 1 GiB,
   oldest captures first, across all sessions. Directories are left in place, so
-  a running session keeps writing. Body files that a gateway stopped in the
-  middle of a capture left without a record are removed once nothing has
-  written to them for a day.
+  a running session keeps writing. Files that a gateway stopped in the middle
+  of a capture left without a record are removed once nothing has written to
+  them for a day.
 - `enclave cleanup` removes the capture store of the project and tool unless
   `--keep history` is given, and `enclave cleanup --all` removes every store.
   To drop captures without a cleanup, delete files in a session directory;
@@ -483,12 +547,11 @@ The record (`schemaVersion: "1"`, `kind: "network-capture"`) looks like this:
 ### What full capture cannot see
 
 Full capture covers the same traffic as `requests` mode, the HTTP requests the
-proxy terminates:
+proxy terminates, and the WebSocket connections among them:
 
-- Traffic inside an upgraded connection (WebSocket, SPDY) is relayed but not
-  captured; only the handshake is. A tool that runs its model conversation over
-  a WebSocket is therefore only partly covered: its prompts and tool output do
-  not appear in the capture.
+- Traffic inside other upgraded connections (SPDY for `kubectl exec`, h2c) is
+  relayed but not captured; only the handshake is. WebSocket over HTTP/2
+  (RFC 8441) is not captured either.
 - SSH on port 22 bypasses the proxy and is never recorded.
 - Clients that pin certificates or use their own trust store fail in this mode
   instead of being captured.
@@ -502,12 +565,17 @@ proxy terminates:
 as HTTP messages, each followed by the size and location of its body file. It
 takes the scope flags of `network log` (`--tool`, `--session`, `--all-running`)
 and cannot be combined with `--follow`, `--summary`, `--since`, `--verdict`,
-`--domain` or `--type`. Control characters in headers and bodies are replaced,
-so a capture cannot drive the terminal. The gateway can write into its session
+`--domain` or `--type`. For a WebSocket it then lists the messages, `>` for
+what the client sent and `<` for what the server sent, after a note with their
+count and the messages file; one still open is shown from its open record with
+the messages so far. Control characters in headers, bodies and messages are
+replaced, so a capture cannot drive the terminal. The gateway can write into its session
 directory, so only regular files are read from there: a symlink, which could
 point at any file you can read, is refused. `--json` emits the record file on one
-line; read the bodies from their files. The files can also be read directly,
-for example with `jq . <id>.json`. HAR export is not supported.
+line; read the bodies and messages from their files. The files can also be read
+directly, for example with `jq . <id>.json`, or
+`jq -r 'select(.from == "client") | .text' <id>.messages.jsonl` for what an
+agent sent over a WebSocket. HAR export is not supported.
 
 ## Per-session Docker networks
 

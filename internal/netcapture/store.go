@@ -31,20 +31,23 @@ type Options struct {
 	Session string
 	// Secrets are redacted from everything the store writes.
 	Secrets []Secret
-	// MaxBodyBytes and MaxBytes default to MaxBodyBytes and MaxSessionBytes.
-	MaxBodyBytes int64
-	MaxBytes     int64
+	// MaxBodyBytes, MaxSocketBytes and MaxBytes default to MaxBodyBytes,
+	// MaxSocketBytes and MaxSessionBytes.
+	MaxBodyBytes   int64
+	MaxSocketBytes int64
+	MaxBytes       int64
 }
 
 // Store writes the captures of one gateway session. Write errors never reach
 // the caller: capturing must not break the request path, so a capture that
 // cannot be written is simply missing, and its event carries no capture_id.
 type Store struct {
-	dir      string
-	session  string
-	redactor *redactor
-	maxBody  int64
-	maxBytes int64
+	dir       string
+	session   string
+	redactor  *redactor
+	maxBody   int64
+	maxSocket int64
+	maxBytes  int64
 
 	mu sync.Mutex
 	// used is what the directory holds: finished captures plus the bodies of the
@@ -60,8 +63,8 @@ type Store struct {
 //
 // Captures already in the directory, left by an earlier run of the session or
 // by the proxy before a policy reload restarted it, count against the session
-// budget. Body files without a record belong to a capture that never finished
-// and are removed: only this process writes the directory.
+// budget. Files without a record belong to a capture that never finished and
+// are removed: only this process writes the directory.
 func Open(opts Options) (*Store, error) {
 	dir := strings.TrimSpace(opts.Dir)
 	if dir == "" {
@@ -75,14 +78,18 @@ func Open(opts Options) (*Store, error) {
 		return nil, fmt.Errorf("capture path is not a directory: %s", dir)
 	}
 	s := &Store{
-		dir:      dir,
-		session:  opts.Session,
-		redactor: newRedactor(opts.Secrets),
-		maxBody:  opts.MaxBodyBytes,
-		maxBytes: opts.MaxBytes,
+		dir:       dir,
+		session:   opts.Session,
+		redactor:  newRedactor(opts.Secrets),
+		maxBody:   opts.MaxBodyBytes,
+		maxSocket: opts.MaxSocketBytes,
+		maxBytes:  opts.MaxBytes,
 	}
 	if s.maxBody <= 0 {
 		s.maxBody = MaxBodyBytes
+	}
+	if s.maxSocket <= 0 {
+		s.maxSocket = MaxSocketBytes
 	}
 	if s.maxBytes <= 0 {
 		s.maxBytes = MaxSessionBytes
@@ -111,6 +118,11 @@ type Capture struct {
 	response *bodySink
 	// requestBody is the forwarded request body, if there was one.
 	requestBody *teeBody
+	// socket follows the messages of a connection switched to WebSocket.
+	socket *socketCapture
+	// openRecord is the size of the record written while that connection is
+	// open, if it was written.
+	openRecord int64
 }
 
 // Begin snapshots a request the proxy is about to relay. It must run before
@@ -206,6 +218,38 @@ func (c *Capture) ResponseBody() io.Writer {
 	return c.response
 }
 
+// WebSocket starts capturing the messages of a connection that resp switched
+// to WebSocket, once the switch has reached the client. It writes the record
+// of the open connection, so the capture can be read before the connection
+// closes, and returns the writers that take what each side sends, which must
+// see the bytes in the order they are relayed. Both are nil when the
+// connection is not captured.
+func (c *Capture) WebSocket(resp *http.Response) (fromClient io.Writer, fromServer io.Writer) {
+	if c == nil || c.record.WebSocket != nil || resp == nil || resp.StatusCode != http.StatusSwitchingProtocols ||
+		!strings.EqualFold(strings.TrimSpace(resp.Header.Get("Upgrade")), "websocket") {
+		return nil, nil
+	}
+	s := c.store
+	if len(resp.Header.Values("Sec-WebSocket-Extensions")) != 0 {
+		c.record.WebSocket = &WebSocket{Open: true, MessagesOmitted: OmittedExtension}
+	} else {
+		c.socket = s.newSocket(c.id)
+		if c.socket == nil {
+			return nil, nil
+		}
+		c.record.WebSocket = &WebSocket{File: filepath.Base(c.socket.path), Open: true}
+	}
+	c.record.DurationMS = time.Since(c.started).Milliseconds()
+	if size, err := writeRecord(OpenRecordPath(s.dir, c.id), c.record); err == nil {
+		c.openRecord = size
+		s.count(size)
+	}
+	if c.socket == nil {
+		return nil, nil
+	}
+	return c.socket.client, c.socket.server
+}
+
 // ResponseEnded reports how relaying the response body ended; an error marks
 // the captured body as incomplete.
 func (c *Capture) ResponseEnded(err error) {
@@ -236,24 +280,45 @@ func (c *Capture) Finish(relayErr error) string {
 	if relayErr != nil {
 		c.record.Error = s.redactor.string(relayErr.Error())
 	}
-	bodies := c.request.stored + c.response.stored
+	if c.socket != nil {
+		c.record.WebSocket = c.socket.finish()
+	}
+	if c.record.WebSocket != nil {
+		c.record.WebSocket.Open = false
+	}
+	stored := c.request.stored + c.response.stored + c.socket.storedBytes()
 
-	payload, err := json.MarshalIndent(c.record, "", "  ")
-	if err == nil {
-		payload = append(payload, '\n')
-		// The record lands as one rename so a reader never sees it partial. It
-		// skips the fsync because Finish runs on the relay path and a capture
-		// lost in a crash is acceptable.
-		err = util.WriteFileAtomicNoSync(RecordPath(s.dir, c.id), payload, 0o644)
+	size, err := writeRecord(RecordPath(s.dir, c.id), c.record)
+	// The open record goes after the final one is written, so that a reader
+	// finds one of them throughout.
+	if c.openRecord > 0 {
+		_ = os.Remove(OpenRecordPath(s.dir, c.id))
+		s.release(c.openRecord)
 	}
 	if err != nil {
 		c.request.remove()
 		c.response.remove()
-		s.release(bodies)
+		c.socket.remove()
+		s.release(stored)
 		return ""
 	}
-	s.finish(sessionCapture{id: c.id, bytes: bodies + int64(len(payload))}, bodies)
+	s.finish(sessionCapture{id: c.id, bytes: stored + size}, stored)
 	return c.id
+}
+
+// writeRecord stores a record and returns its size. The record lands as one
+// rename so a reader never sees it partial. It skips the fsync because records
+// are written on the relay path and a capture lost in a crash is acceptable.
+func writeRecord(path string, record Record) (int64, error) {
+	payload, err := json.MarshalIndent(record, "", "  ")
+	if err != nil {
+		return 0, err
+	}
+	payload = append(payload, '\n')
+	if err := util.WriteFileAtomicNoSync(path, payload, 0o644); err != nil {
+		return 0, err
+	}
+	return int64(len(payload)), nil
 }
 
 func (s *Store) newBodySink(name string) *bodySink {
@@ -279,6 +344,13 @@ func (s *Store) reserve(n int64) int64 {
 func (s *Store) release(bytes int64) {
 	s.mu.Lock()
 	s.used -= bytes
+	s.mu.Unlock()
+}
+
+// count books bytes written regardless of the budget, as records are.
+func (s *Store) count(bytes int64) {
+	s.mu.Lock()
+	s.used += bytes
 	s.mu.Unlock()
 }
 
@@ -481,8 +553,10 @@ type sessionCapture struct {
 }
 
 // scanSessionDir lists the finished captures of a session directory, oldest
-// first. It also deletes leftovers for which abandoned reports true: body files
-// without a record and staging files, judged by when they were last written.
+// first. It also deletes leftovers for which abandoned reports true: files of a
+// capture without its record and staging files, judged by when they were last
+// written. The open record of a WebSocket does not count as a record: its
+// capture is still in flight.
 // The directory's own writer passes a predicate that is always true, since
 // nothing else writes there; anyone else must spare recent leftovers, which
 // belong to captures still in flight.
@@ -494,7 +568,7 @@ func scanSessionDir(dir string, abandoned func(modified time.Time) bool) ([]sess
 	type files struct {
 		record bool
 		// modified is the record's time for a finished capture, and the latest
-		// body write otherwise.
+		// write to its other files otherwise.
 		modified time.Time
 		bytes    int64
 		bodies   []string

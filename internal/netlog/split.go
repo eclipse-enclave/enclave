@@ -9,8 +9,7 @@ package netlog
 
 import "bytes"
 
-// maxLineBytes bounds a single log line. Paths are the only unbounded field and
-// a URL path cannot reach this size in practice.
+// maxLineBytes bounds a single log line, including malformed or older events.
 const maxLineBytes = 1024 * 1024
 
 // readChunkBytes is how much is read from a log at a time.

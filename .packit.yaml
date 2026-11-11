@@ -28,7 +28,7 @@ jobs:
     targets: [fedora-latest-stable]
     notifications:
       failure_comment:
-        message: "Tests failed on Testing Farm. Results: {external_dashboard_url}"
+        message: "Tests failed on Testing Farm. Results: {{packit_dashboard_url}}"
   - job: copr_build
     trigger: release
     identifier: release

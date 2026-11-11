@@ -1587,7 +1587,7 @@ func (r *Runtime) envFileValues() ([]string, bool) {
 			logx.Warnf("Failed to read .env file: %v", err)
 			return nil, false
 		}
-		return values, true
+		return util.FilterProjectEnv(values), true
 	}
 	return nil, false
 }

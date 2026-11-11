@@ -551,11 +551,11 @@ EOF_RESOLVERS
     iptables -A OUTPUT -p tcp --dport "$PROXY_HTTP_PORT" -m addrtype --dst-type LOCAL -j ACCEPT
     iptables -A OUTPUT -p tcp --dport "$PROXY_HTTPS_PORT" -m addrtype --dst-type LOCAL -j ACCEPT
 
-    iptables -t nat -F OUTPUT || true
-    iptables -t nat -A OUTPUT -p tcp --dport 80 -m owner "$proxy_owner_match" "$proxy_owner_id" -j RETURN
-    iptables -t nat -A OUTPUT -p tcp --dport 443 -m owner "$proxy_owner_match" "$proxy_owner_id" -j RETURN
-    iptables -t nat -A OUTPUT -p tcp --dport 80 -j REDIRECT --to-ports "$PROXY_HTTP_PORT"
-    iptables -t nat -A OUTPUT -p tcp --dport 443 -j REDIRECT --to-ports "$PROXY_HTTPS_PORT"
+    iptables -t nat -F OUTPUT || return 1
+    iptables -t nat -A OUTPUT -p tcp --dport 80 -m owner "$proxy_owner_match" "$proxy_owner_id" -j RETURN || return 1
+    iptables -t nat -A OUTPUT -p tcp --dport 443 -m owner "$proxy_owner_match" "$proxy_owner_id" -j RETURN || return 1
+    iptables -t nat -A OUTPUT -p tcp --dport 80 -j REDIRECT --to-ports "$PROXY_HTTP_PORT" || return 1
+    iptables -t nat -A OUTPUT -p tcp --dport 443 -j REDIRECT --to-ports "$PROXY_HTTPS_PORT" || return 1
 
     log "Transparent proxy NAT rules configured"
     setup_ide_bridge

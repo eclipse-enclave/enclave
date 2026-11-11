@@ -17,6 +17,9 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"enclave/internal/logx"
+	"enclave/internal/model"
 )
 
 func HashFile(path string) (hash string, err error) {
@@ -243,6 +246,20 @@ func ParseEnv(r io.Reader) (map[string]string, error) {
 		env[pair.Key] = pair.Value
 	}
 	return env, nil
+}
+
+// FilterProjectEnv keeps project-supplied values out of Enclave's control namespace.
+func FilterProjectEnv(values []string) []string {
+	filtered := make([]string, 0, len(values))
+	for _, value := range values {
+		key, _, _ := strings.Cut(value, "=")
+		if strings.HasPrefix(key, model.EnvPrefix) {
+			logx.Warnf("Ignoring project environment variable %q: reserved for Enclave", key)
+			continue
+		}
+		filtered = append(filtered, value)
+	}
+	return filtered
 }
 
 func ParseEnvFile(path string) ([]string, error) {

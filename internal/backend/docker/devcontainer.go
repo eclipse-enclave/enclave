@@ -86,7 +86,7 @@ func (b *Backend) applyDevcontainerValueArg(arg string, args []string, i *int, s
 var devcontainerRunArgHandlers = []devcontainerRunArgHandler{
 	{long: "--env", short: "-e", apply: func(_ *Backend, arg, value string, config *dockercmd.ContainerConfig, _ *dockercmd.HostConfig) {
 		if requireRunArgValue(arg, value) {
-			config.Env = append(config.Env, value)
+			config.Env = append(config.Env, util.FilterProjectEnv([]string{value})...)
 		}
 	}},
 	{long: "--env-file", apply: func(_ *Backend, arg, value string, config *dockercmd.ContainerConfig, _ *dockercmd.HostConfig) {
@@ -96,7 +96,7 @@ var devcontainerRunArgHandlers = []devcontainerRunArgHandler{
 		if envValues, err := util.ParseEnvFile(value); err != nil {
 			logx.Warnf("Failed to read devcontainer env file %s: %v", value, err)
 		} else {
-			config.Env = append(config.Env, envValues...)
+			config.Env = append(config.Env, util.FilterProjectEnv(envValues)...)
 		}
 	}},
 	{long: "--volume", short: "-v", apply: func(b *Backend, arg, value string, _ *dockercmd.ContainerConfig, hostConfig *dockercmd.HostConfig) {

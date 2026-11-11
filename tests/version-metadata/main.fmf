@@ -1,0 +1,12 @@
+summary: Version, commit and date are set in the built binary
+test: |
+    set -e
+    out=$(enclave --version)
+    echo "$out"
+    case "$out" in
+        *0.0.0*|*unknown*)
+            echo "unexpected version metadata: $out" >&2
+            exit 1
+            ;;
+    esac
+    echo "$out" | grep -Eq '^enclave: [^ ]+ \([^ ,]+, [^ )]+\)$'

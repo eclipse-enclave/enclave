@@ -286,23 +286,27 @@ stopped ephemeral containers, and per-session networks whose session is gone
 
 ## Host-side store I/O
 
-Store reads, writes, seeds, removals, overlays, settings carry-over, and the
-feature auth copy run on both backends through an opened store directory.
+Store reads, writes, seeds, removals, overlays, settings carry-over, config
+layout directories, and the feature auth copy run on both backends through an
+opened store directory.
 Paths stay relative to that directory, a symlinked final component is never
 followed, and regular-file reads open without blocking and reject special
 nodes. A session can change its store while the host works on it, but a link
 it places there does not move host reads or writes outside the store.
 
-- Tree copies (seeds, overlays) keep symlinks as links. An existing
-  destination link stops a Docker seed; QEMU removes it and seeds in its place.
+- Tree copies (seeds, overlays) keep symlinks as links. A Docker seed follows
+  a link at the host path it is given, so `enclave auth import` copies a
+  linked host auth file; QEMU keeps that link too. An existing destination
+  link stops a Docker seed; QEMU removes it and seeds in its place.
 - An overlay copies the current store and the generated config into a private
   temporary directory before it clears the store, and keeps the store
   directory itself, so existing bind mounts stay valid. If writing the new
   contents fails, the error names the retained backup; restore from it before
   deleting it. The overlay is recoverable, not atomic: other live sessions can
   see intermediate contents.
-- A store entry the copy cannot handle (such as a FIFO or device) stops the
-  overlay before the store is changed.
+- A FIFO, socket, or device file in a preserved path stops the overlay before
+  the store is changed. Elsewhere in the store it is dropped with the rest of
+  the old contents.
 
 ## Source files
 

@@ -75,6 +75,11 @@ func (r *Files) WriteFile(name string, data []byte, mode fs.FileMode) error {
 			_ = f.Close()
 			return err
 		}
+		// The create mode is subject to the umask; set the exact mode.
+		if err := f.Chmod(mode.Perm()); err != nil {
+			_ = f.Close()
+			return err
+		}
 		if err := f.Sync(); err != nil {
 			_ = f.Close()
 			return err

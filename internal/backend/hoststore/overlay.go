@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 
@@ -54,7 +55,10 @@ func Overlay(targetDir, sourceDir string, preserve []string) (result error) {
 	if err := work.Mkdir("candidate", 0o700); err != nil {
 		return err
 	}
-	if err := Copy(target, ".", work, "backup", 0); err != nil {
+	// Special nodes outside the preserve patterns are dropped with the rest of
+	// the old contents, so the backup leaves them out instead of failing.
+	notPreserved := func(name string) bool { return !matchesPreserved(name, preserve) }
+	if err := copyNode(target, ".", work, "backup", 0, notPreserved); err != nil {
 		return err
 	}
 	if err := Copy(source, ".", work, "candidate", 0); err != nil {
@@ -108,8 +112,8 @@ func Overlay(targetDir, sourceDir string, preserve []string) (result error) {
 		if name == "." || !entry.IsDir() {
 			return nil
 		}
-		for _, path := range preserved {
-			if strings.HasPrefix(path, name+"/") {
+		for _, kept := range preserved {
+			if strings.HasPrefix(kept, name+"/") {
 				info, err := original.Lstat(name)
 				if err != nil {
 					return err
@@ -146,4 +150,17 @@ func Overlay(targetDir, sourceDir string, preserve []string) (result error) {
 		}
 	}
 	return Copy(work, "candidate", target, ".", 0)
+}
+
+// matchesPreserved reports whether name or one of its parent directories
+// matches a preserve pattern.
+func matchesPreserved(name string, preserve []string) bool {
+	for current := filepath.ToSlash(name); current != "." && current != "/"; current = path.Dir(current) {
+		for _, pattern := range preserve {
+			if config.HostConfigPathMatches(current, pattern) {
+				return true
+			}
+		}
+	}
+	return false
 }

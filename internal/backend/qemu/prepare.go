@@ -11,6 +11,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"enclave/internal/backend"
@@ -90,7 +91,26 @@ func (b *Backend) createStoreDir(key backend.StoreKey, kind backend.StoreKind, r
 	if err != nil {
 		return err
 	}
-	return ensureCopyDir(target, 0o700)
+	root, err := hoststore.OpenStore(b.opts.Host.Home, key, kind, false)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = root.Close() }()
+	name, err := filepath.Rel(root.Name(), target)
+	if err != nil {
+		return err
+	}
+	// A link or file in place of the directory is replaced, not followed.
+	info, err := root.Lstat(name)
+	switch {
+	case err == nil && (info.Mode()&os.ModeSymlink != 0 || !info.IsDir()):
+		if err := root.RemoveAll(name); err != nil {
+			return err
+		}
+	case err != nil && !os.IsNotExist(err):
+		return err
+	}
+	return root.MkdirAll(name, 0o700)
 }
 
 func (b *Backend) resetAuthFiles(ctx context.Context, prep backend.StorePrep) {

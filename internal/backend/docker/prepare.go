@@ -128,6 +128,12 @@ func (b *Backend) prepareConfigStoreLayout(dir string, prep backend.ConfigStoreP
 	if dir == "" || len(prep.LayoutDirs) == 0 {
 		return
 	}
+	root, err := hoststore.OpenStore(b.opts.Host.Home, prep.Key, backend.StoreKindConfig, true)
+	if err != nil {
+		logx.Warnf("Failed to prepare %s config store layout: %v", util.TitleCase(prep.Key.Owner), err)
+		return
+	}
+	defer func() { _ = root.Close() }()
 	reported := map[string]struct{}{}
 	for _, layoutDir := range prep.LayoutDirs {
 		target, err := storeFilePath(dir, layoutDir, true)
@@ -135,7 +141,11 @@ func (b *Backend) prepareConfigStoreLayout(dir string, prep backend.ConfigStoreP
 			logx.Debugf("Skipping invalid config layout dir %q: %v", layoutDir, err)
 			continue
 		}
-		if err := os.MkdirAll(target, 0o700); err != nil {
+		rel, err := filepath.Rel(dir, target)
+		if err == nil {
+			err = root.MkdirAll(rel, 0o700)
+		}
+		if err != nil {
 			logx.Warnf("Failed to prepare %s config store layout: %v", util.TitleCase(prep.Key.Owner), err)
 			continue
 		}

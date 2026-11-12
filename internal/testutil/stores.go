@@ -18,7 +18,7 @@ import (
 	"enclave/internal/backend/hoststore"
 )
 
-const storeSwapRounds = 300
+const storeSwapRounds = 1000
 
 // ExerciseStoreDuringSwaps runs reads, writes, seeds, and removals through
 // session while a concurrent writer keeps replacing the store directory
@@ -76,5 +76,40 @@ func ExerciseStoreDuringSwaps(t *testing.T, home string, session, other backend.
 		_ = session.RemovePath(ctx, key, kind, "agent/stale")
 	}
 	wg.Wait()
+	AssertTreeUnchanged(t, outside, before)
+}
+
+// ExerciseLayoutDuringSwaps calls prepare, which creates "agent/projects" in
+// storeDir, while a concurrent writer keeps replacing "agent" with a link to
+// an outside directory. It fails the test if anything outside the store
+// changes.
+func ExerciseLayoutDuringSwaps(t *testing.T, storeDir string, prepare func()) {
+	t.Helper()
+	agent, saved := filepath.Join(storeDir, "agent"), filepath.Join(storeDir, "saved")
+	if err := os.MkdirAll(agent, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	outside := t.TempDir()
+	before := PinTree(t, outside)
+	stop, done := make(chan struct{}), make(chan struct{})
+	go func() {
+		defer close(done)
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			_ = os.Rename(agent, saved)
+			_ = os.Symlink(outside, agent)
+			_ = os.Remove(agent)
+			_ = os.Rename(saved, agent)
+		}
+	}()
+	for range storeSwapRounds {
+		prepare()
+	}
+	close(stop)
+	<-done
 	AssertTreeUnchanged(t, outside, before)
 }

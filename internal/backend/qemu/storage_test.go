@@ -585,3 +585,16 @@ func TestStoreManagerKeepsIOInStoreDuringConcurrentSwaps(t *testing.T) {
 	host := model.Host{Home: t.TempDir()}
 	testutil.ExerciseStoreDuringSwaps(t, host.Home, newStoreManager(host), newStoreManager(host))
 }
+
+func TestCreateStoreDirKeepsLayoutInStoreDuringConcurrentSwaps(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	be := New(Options{Host: model.Host{Home: t.TempDir()}})
+	key := backend.StoreKey{Owner: "tool", ProjectHash: "abc123def456"}
+	root, err := be.storage.MountSource(key, backend.StoreKindConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	testutil.ExerciseLayoutDuringSwaps(t, root, func() {
+		_ = be.createStoreDir(key, backend.StoreKindConfig, "agent/projects")
+	})
+}

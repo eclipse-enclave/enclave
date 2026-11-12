@@ -145,11 +145,17 @@ func (s *StoreManager) Seed(_ context.Context, key backend.StoreKey, kind backen
 		if err != nil {
 			return err
 		}
-		source, err := hoststore.OpenFiles(filepath.Dir(item.HostPath))
+		// The seed source is the user's own host path: a link there is
+		// followed, as before. Links inside a seeded directory stay links.
+		hostPath, err := filepath.EvalSymlinks(item.HostPath)
 		if err != nil {
 			return err
 		}
-		err = hoststore.Copy(source, filepath.Base(item.HostPath), root, name, item.Mode)
+		source, err := hoststore.OpenFiles(filepath.Dir(hostPath))
+		if err != nil {
+			return err
+		}
+		err = hoststore.Copy(source, filepath.Base(hostPath), root, name, item.Mode)
 		_ = source.Close()
 		if err != nil {
 			return err

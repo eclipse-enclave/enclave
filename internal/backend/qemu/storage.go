@@ -288,39 +288,6 @@ func cleanStoreRel(rel string) (string, error) {
 	return cleaned, nil
 }
 
-func ensureCopyDir(dst string, mode fs.FileMode) error {
-	if mode == 0 {
-		mode = 0o700
-	}
-	info, err := os.Lstat(dst)
-	if err == nil {
-		if info.Mode()&os.ModeSymlink == 0 && info.IsDir() {
-			return nil
-		}
-		if err := os.RemoveAll(dst); err != nil {
-			return err
-		}
-	} else if !os.IsNotExist(err) {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(dst), 0o700); err != nil {
-		return err
-	}
-	if err := os.Mkdir(dst, mode.Perm()); err != nil {
-		if !os.IsExist(err) {
-			return err
-		}
-		info, statErr := os.Lstat(dst)
-		if statErr != nil {
-			return statErr
-		}
-		if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
-			return fmt.Errorf("copy destination %s exists and is not a directory", dst)
-		}
-	}
-	return nil
-}
-
 func removeCopyDestination(dst string) error {
 	if _, err := os.Lstat(dst); err != nil {
 		if os.IsNotExist(err) {

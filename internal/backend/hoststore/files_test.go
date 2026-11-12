@@ -49,6 +49,12 @@ func TestRootedOperationsRejectPathSwap(t *testing.T) {
 	if err := root.RemoveAll("agent/auth"); err == nil {
 		t.Fatal("removal followed swapped parent")
 	}
+	if err := root.MkdirAll("agent/projects", 0o700); err == nil {
+		t.Fatal("directory creation followed swapped parent")
+	}
+	if _, err := os.Lstat(filepath.Join(outside, "projects")); !os.IsNotExist(err) {
+		t.Fatalf("outside directory created: %v", err)
+	}
 	data, err := os.ReadFile(sentinel)
 	if err != nil || string(data) != "outside-secret" {
 		t.Fatalf("sentinel changed: %q, %v", data, err)

@@ -10,6 +10,7 @@
 package hoststore
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -31,5 +32,82 @@ func TestRootedReadsRejectFIFOWithoutOpeningItBlocking(t *testing.T) {
 	}
 	if _, err := root.ReadDir("fifo"); err == nil {
 		t.Fatal("FIFO accepted as directory")
+	}
+}
+
+func TestWriteFileSetsExactModeUnderUmask(t *testing.T) {
+	previous := unix.Umask(0o077)
+	defer unix.Umask(previous)
+	root, err := OpenFiles(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = root.Close() }()
+	if err := root.WriteFile("settings.json", []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	info, err := root.Lstat("settings.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o644 {
+		t.Fatalf("mode = %v, want 0644", info.Mode().Perm())
+	}
+}
+
+func makeSpecialNodes(t *testing.T, dir string) []string {
+	t.Helper()
+	names := []string{"ipc.fifo"}
+	if err := unix.Mkfifo(filepath.Join(dir, "ipc.fifo"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := unix.Mknod(filepath.Join(dir, "ipc.sock"), unix.S_IFSOCK|0o600, 0); err == nil {
+		names = append(names, "ipc.sock")
+	}
+	return names
+}
+
+func TestOverlayDropsSpecialNodesOutsidePreservedPaths(t *testing.T) {
+	target, source := t.TempDir(), t.TempDir()
+	if err := os.WriteFile(filepath.Join(target, "auth.json"), []byte("credentials"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(source, "settings.json"), []byte("generated"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	special := makeSpecialNodes(t, target)
+
+	if err := Overlay(target, source, []string{"auth.json"}); err != nil {
+		t.Fatalf("special node outside preserved paths blocked the overlay: %v", err)
+	}
+	for _, name := range special {
+		if _, err := os.Lstat(filepath.Join(target, name)); !os.IsNotExist(err) {
+			t.Fatalf("%s survived the overlay: %v", name, err)
+		}
+	}
+	for name, want := range map[string]string{"auth.json": "credentials", "settings.json": "generated"} {
+		if data, err := os.ReadFile(filepath.Join(target, name)); err != nil || string(data) != want {
+			t.Fatalf("%s = %q, %v; want %q", name, data, err, want)
+		}
+	}
+}
+
+func TestOverlayRejectsSpecialNodeInPreservedPath(t *testing.T) {
+	target, source := t.TempDir(), t.TempDir()
+	if err := os.MkdirAll(filepath.Join(target, "state"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(target, "auth.json"), []byte("credentials"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := unix.Mkfifo(filepath.Join(target, "state", "ipc.fifo"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := Overlay(target, source, []string{"state/"}); err == nil {
+		t.Fatal("expected a FIFO in a preserved path to stop the overlay")
+	}
+	if data, err := os.ReadFile(filepath.Join(target, "auth.json")); err != nil || string(data) != "credentials" {
+		t.Fatalf("original changed: %q, %v", data, err)
 	}
 }

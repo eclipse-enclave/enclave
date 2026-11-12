@@ -64,8 +64,7 @@ enclave auth export --tool <tool>   # Copy store files back to the host
 `--tool` is required. `--auth-scope` and `--auth-name` select the store as for
 a session (`--auth-name` has no effect with project scope). Declared env
 secrets and the env store are not touched. Do not run the host tool on the same
-credentials while importing or while a container uses them. A host auth file
-that is a symlink is imported as the same symlink, not as a copy of its target.
+credentials while importing or while a container uses them.
 
 ### Claude and concurrent sessions
 

@@ -18,6 +18,7 @@ import (
 	"enclave/internal/config"
 	"enclave/internal/model"
 	yaruntime "enclave/internal/runtime"
+	"enclave/internal/testutil"
 )
 
 func TestStoreManagerReadWriteRemove(t *testing.T) {
@@ -577,4 +578,10 @@ func TestPrepareStoresLayoutDirReplacesSymlink(t *testing.T) {
 	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
 		t.Fatalf("layout path = mode %v, want real directory", info.Mode())
 	}
+}
+
+func TestStoreManagerKeepsIOInStoreDuringConcurrentSwaps(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	host := model.Host{Home: t.TempDir()}
+	testutil.ExerciseStoreDuringSwaps(t, host.Home, newStoreManager(host), newStoreManager(host))
 }

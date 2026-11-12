@@ -74,7 +74,16 @@ func (s *StoreManager) ReadFile(_ context.Context, key backend.StoreKey, kind ba
 	if err != nil {
 		return nil, err
 	}
-	return os.ReadFile(target) // #nosec G304 -- target is validated by storeFilePath against traversal.
+	root, err := hoststore.OpenStore(s.host.Home, key, kind, false)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = root.Close() }()
+	name, err := filepath.Rel(dir, target)
+	if err != nil {
+		return nil, err
+	}
+	return root.ReadFile(name)
 }
 
 func (s *StoreManager) WriteFile(ctx context.Context, key backend.StoreKey, kind backend.StoreKind, rel string, data []byte, mode fs.FileMode) error {
@@ -99,10 +108,16 @@ func (s *StoreManager) writeFile(_ context.Context, key backend.StoreKey, kind b
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
-		return fmt.Errorf("create store dir: %w", err)
+	root, err := hoststore.OpenStore(s.host.Home, key, kind, true)
+	if err != nil {
+		return err
 	}
-	return atomicWriteFile(target, data, mode)
+	defer func() { _ = root.Close() }()
+	name, err := filepath.Rel(dir, target)
+	if err != nil {
+		return err
+	}
+	return root.WriteFile(name, data, mode)
 }
 
 func (s *StoreManager) Seed(_ context.Context, key backend.StoreKey, kind backend.StoreKind, items []backend.SeedItem) error {
@@ -113,6 +128,11 @@ func (s *StoreManager) Seed(_ context.Context, key backend.StoreKey, kind backen
 	if err != nil {
 		return err
 	}
+	root, err := hoststore.OpenStore(s.host.Home, key, kind, true)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = root.Close() }()
 	for _, item := range items {
 		if strings.TrimSpace(item.HostPath) == "" || strings.TrimSpace(item.StoreRel) == "" {
 			continue
@@ -121,7 +141,17 @@ func (s *StoreManager) Seed(_ context.Context, key backend.StoreKey, kind backen
 		if err != nil {
 			return err
 		}
-		if err := seedStorePath(item.HostPath, target, item.Mode); err != nil {
+		name, err := filepath.Rel(dir, target)
+		if err != nil {
+			return err
+		}
+		source, err := hoststore.OpenFiles(filepath.Dir(item.HostPath))
+		if err != nil {
+			return err
+		}
+		err = hoststore.Copy(source, filepath.Base(item.HostPath), root, name, item.Mode)
+		_ = source.Close()
+		if err != nil {
 			return err
 		}
 	}
@@ -133,14 +163,26 @@ func (s *StoreManager) RemovePath(_ context.Context, key backend.StoreKey, kind 
 	if err != nil {
 		return err
 	}
-	// RemovePath must be able to delete a planted symlink itself (os.RemoveAll
-	// unlinks the symlink rather than following it), so leaf symlinks are
-	// allowed here while parent-directory symlinks remain rejected.
+	// RemovePath must be able to delete a planted symlink itself (the rooted
+	// RemoveAll unlinks the symlink rather than following it), so leaf symlinks
+	// are allowed here while parent-directory symlinks remain rejected.
 	target, err := storeFilePath(dir, rel, false)
 	if err != nil {
 		return err
 	}
-	return os.RemoveAll(target)
+	root, err := hoststore.OpenStore(s.host.Home, key, kind, false)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	defer func() { _ = root.Close() }()
+	name, err := filepath.Rel(dir, target)
+	if err != nil {
+		return err
+	}
+	return root.RemoveAll(name)
 }
 
 func (s *StoreManager) Remove(_ context.Context, key backend.StoreKey, kind backend.StoreKind) error {
@@ -153,125 +195,6 @@ func (s *StoreManager) Remove(_ context.Context, key backend.StoreKey, kind back
 
 func (s *StoreManager) storeDir(key backend.StoreKey, kind backend.StoreKind) (string, error) {
 	return hoststore.ResolveDir(s.host.Home, key, kind)
-}
-
-// atomicWriteFile writes data to target via a temp file in the same directory
-// followed by an atomic rename.
-func atomicWriteFile(target string, data []byte, mode fs.FileMode) error {
-	tmp, err := os.CreateTemp(filepath.Dir(target), ".enclave-store-*")
-	if err != nil {
-		return fmt.Errorf("create temp store file: %w", err)
-	}
-	tmpPath := tmp.Name()
-	cleanup := func() { _ = os.Remove(tmpPath) } // #nosec G703 -- tmpPath is created by os.CreateTemp.
-	if _, err := tmp.Write(data); err != nil {
-		_ = tmp.Close()
-		cleanup()
-		return fmt.Errorf("write temp store file: %w", err)
-	}
-	if err := tmp.Close(); err != nil {
-		cleanup()
-		return fmt.Errorf("close temp store file: %w", err)
-	}
-	if err := os.Chmod(tmpPath, mode.Perm()); err != nil { // #nosec G703 -- tmpPath is created by os.CreateTemp in the validated store dir.
-		cleanup()
-		return fmt.Errorf("chmod temp store file: %w", err)
-	}
-	if err := os.Rename(tmpPath, target); err != nil { // #nosec G703 -- target is validated against traversal/symlinks by storeFilePath; tmpPath is a sibling temp file.
-		cleanup()
-		return fmt.Errorf("move store file into place: %w", err)
-	}
-	return nil
-}
-
-// seedStorePath copies src (file or directory tree) into target, applying mode
-// recursively when it is non-zero. The copy is symlink-safe: it refuses to
-// create or write through any destination component that already exists as a
-// symlink, so a planted symlink anywhere in the destination tree cannot
-// redirect a seed outside the store.
-func seedStorePath(src string, target string, mode fs.FileMode) error {
-	if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
-		return fmt.Errorf("create store dir: %w", err)
-	}
-	if err := copyTreeNoFollow(src, target); err != nil {
-		return fmt.Errorf("seed store path %q: %w", target, err)
-	}
-	if mode != 0 {
-		if err := chmodTree(target, mode.Perm()); err != nil {
-			return fmt.Errorf("apply seed mode: %w", err)
-		}
-	}
-	return nil
-}
-
-// copyTreeNoFollow recursively copies src into dst, verifying that each
-// destination node is not a pre-existing symlink before creating a directory or
-// writing a file at that path. Source symlinks are dereferenced (via os.Stat)
-// as before; only destination symlinks are the escape risk and are rejected.
-// Permissions and modification times are carried over, matching the qemu
-// backend's seed copy.
-func copyTreeNoFollow(src string, dst string) error {
-	if err := rejectExistingSymlink(dst); err != nil {
-		return err
-	}
-	info, err := os.Stat(src)
-	if err != nil {
-		return err
-	}
-	if info.IsDir() {
-		if err := os.MkdirAll(dst, info.Mode().Perm()); err != nil {
-			return err
-		}
-		entries, err := os.ReadDir(src)
-		if err != nil {
-			return err
-		}
-		for _, entry := range entries {
-			if err := copyTreeNoFollow(filepath.Join(src, entry.Name()), filepath.Join(dst, entry.Name())); err != nil {
-				return err
-			}
-		}
-		// After the children, so populating dst does not bump its time again.
-		return os.Chtimes(dst, info.ModTime(), info.ModTime())
-	}
-	data, err := os.ReadFile(src) // #nosec G304 -- src is a caller-provided seed source path.
-	if err != nil {
-		return err
-	}
-	if err := os.WriteFile(dst, data, info.Mode().Perm()); err != nil { // #nosec G703 -- dst is validated against destination symlinks before copying.
-		return err
-	}
-	return os.Chtimes(dst, info.ModTime(), info.ModTime())
-}
-
-// rejectExistingSymlink returns an error when p already exists and is a
-// symlink. A nonexistent path is fine.
-func rejectExistingSymlink(p string) error {
-	info, err := os.Lstat(p)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil
-		}
-		return err
-	}
-	if info.Mode()&os.ModeSymlink != 0 {
-		return fmt.Errorf("refusing to seed through symlinked store path %q", p)
-	}
-	return nil
-}
-
-// chmodTree recursively chmods root, skipping symlink entries to avoid
-// changing permissions on targets outside the store.
-func chmodTree(root string, mode fs.FileMode) error {
-	return filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.Type()&fs.ModeSymlink != 0 {
-			return nil
-		}
-		return os.Chmod(p, mode) // #nosec G122 -- destination is a runtime-managed store and symlink entries are skipped.
-	})
 }
 
 // storeFilePath validates a store-relative path against traversal and joins it

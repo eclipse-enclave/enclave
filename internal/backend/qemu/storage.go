@@ -57,21 +57,23 @@ func (s *StoreManager) ReadFile(_ context.Context, key backend.StoreKey, kind ba
 	if err != nil {
 		return nil, err
 	}
-	// storeRelPath rejected symlinked parents; refuse a symlinked final
-	// component too, so a guest-planted link cannot redirect the read to a host
-	// file outside the store.
-	info, err := os.Lstat(target)
+	root, err := hoststore.OpenStore(s.host.Home, key, kind, false)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = root.Close() }()
+	name, err := filepath.Rel(root.Name(), target)
+	if err != nil {
+		return nil, err
+	}
+	info, err := root.Lstat(name)
 	if err != nil {
 		return nil, err
 	}
 	if info.Mode()&os.ModeSymlink != 0 {
 		return nil, fmt.Errorf("refusing to read symlinked store path %q", rel)
 	}
-	data, err := os.ReadFile(target) // #nosec G304 -- path validated no-follow under the store root.
-	if err != nil {
-		return nil, err
-	}
-	return data, nil
+	return root.ReadFile(name)
 }
 
 func (s *StoreManager) WriteFile(ctx context.Context, key backend.StoreKey, kind backend.StoreKind, rel string, data []byte, mode fs.FileMode) error {
@@ -95,32 +97,16 @@ func (s *StoreManager) writeFile(ctx context.Context, key backend.StoreKey, kind
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
-		return fmt.Errorf("create store file parent: %w", err)
-	}
-	tmp, err := os.CreateTemp(filepath.Dir(target), ".tmp-*")
+	root, err := hoststore.OpenStore(s.host.Home, key, kind, true)
 	if err != nil {
-		return fmt.Errorf("create temp store file: %w", err)
+		return err
 	}
-	tmpPath := tmp.Name()
-	if _, err := tmp.Write(data); err != nil {
-		_ = tmp.Close()
-		_ = os.Remove(tmpPath) // #nosec G703 -- tmpPath comes from os.CreateTemp in the validated store directory.
-		return fmt.Errorf("write temp store file: %w", err)
+	defer func() { _ = root.Close() }()
+	name, err := filepath.Rel(root.Name(), target)
+	if err != nil {
+		return err
 	}
-	if err := tmp.Close(); err != nil {
-		_ = os.Remove(tmpPath) // #nosec G703 -- tmpPath comes from os.CreateTemp in the validated store directory.
-		return fmt.Errorf("close temp store file: %w", err)
-	}
-	if err := os.Chmod(tmpPath, mode.Perm()); err != nil { // #nosec G703 -- tmpPath comes from os.CreateTemp in the validated store directory.
-		_ = os.Remove(tmpPath) // #nosec G703 -- tmpPath comes from os.CreateTemp in the validated store directory.
-		return fmt.Errorf("chmod temp store file: %w", err)
-	}
-	if err := os.Rename(tmpPath, target); err != nil { // #nosec G703 -- target is constrained to the resolved store root.
-		_ = os.Remove(tmpPath) // #nosec G703 -- tmpPath comes from os.CreateTemp in the validated store directory.
-		return fmt.Errorf("replace store file: %w", err)
-	}
-	return nil
+	return root.WriteFile(name, data, mode)
 }
 
 func (s *StoreManager) Seed(ctx context.Context, key backend.StoreKey, kind backend.StoreKind, items []backend.SeedItem) error {
@@ -130,6 +116,11 @@ func (s *StoreManager) Seed(ctx context.Context, key backend.StoreKey, kind back
 	if err := s.Ensure(ctx, key, kind, ""); err != nil {
 		return err
 	}
+	root, err := hoststore.OpenStore(s.host.Home, key, kind, true)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = root.Close() }()
 	for _, item := range items {
 		if strings.TrimSpace(item.HostPath) == "" || strings.TrimSpace(item.StoreRel) == "" {
 			continue
@@ -138,7 +129,24 @@ func (s *StoreManager) Seed(ctx context.Context, key backend.StoreKey, kind back
 		if err != nil {
 			return err
 		}
-		if err := copyPath(item.HostPath, dst, item.Mode); err != nil {
+		name, err := filepath.Rel(root.Name(), dst)
+		if err != nil {
+			return err
+		}
+		// Replace an existing destination link through the opened root, as
+		// before, without following it.
+		if info, err := root.Lstat(name); err == nil && info.Mode()&os.ModeSymlink != 0 {
+			if err := root.Remove(name); err != nil {
+				return err
+			}
+		}
+		source, err := hoststore.OpenFiles(filepath.Dir(item.HostPath))
+		if err != nil {
+			return err
+		}
+		err = hoststore.Copy(source, filepath.Base(item.HostPath), root, name, item.Mode)
+		_ = source.Close()
+		if err != nil {
 			return err
 		}
 	}
@@ -150,7 +158,19 @@ func (s *StoreManager) RemovePath(_ context.Context, key backend.StoreKey, kind 
 	if err != nil {
 		return err
 	}
-	return os.RemoveAll(target)
+	root, err := hoststore.OpenStore(s.host.Home, key, kind, false)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	defer func() { _ = root.Close() }()
+	name, err := filepath.Rel(root.Name(), target)
+	if err != nil {
+		return err
+	}
+	return root.RemoveAll(name)
 }
 
 func (s *StoreManager) Remove(_ context.Context, key backend.StoreKey, kind backend.StoreKind) error {
@@ -221,8 +241,8 @@ func (s *StoreManager) storeRelPath(key backend.StoreKey, kind backend.StoreKind
 // "agent/auth.json" pointing at a host directory) must not redirect host-side
 // reads, writes, copies, or removals outside the store. Missing trailing
 // components are allowed (nothing to follow yet). cleanedRel must already be
-// cleanStoreRel-validated. Safe without TOCTOU because the guest is powered off
-// during all host-side store access.
+// cleanStoreRel-validated. This is an early policy check: another backend can
+// write the store concurrently, so store I/O itself goes through opened roots.
 func verifyStoreParentsNoFollow(root string, cleanedRel string) error {
 	parts := strings.Split(cleanedRel, "/")
 	current := root
@@ -266,58 +286,6 @@ func cleanStoreRel(rel string) (string, error) {
 		return "", fmt.Errorf("invalid store path %q", rel)
 	}
 	return cleaned, nil
-}
-
-// copyPath copies src into dst WITHOUT following symlinks. Store contents are
-// guest-writable over 9p, so dereferencing a guest-planted symlink here would
-// read arbitrary host-readable files and copy their contents back into the
-// store (and thus into the next guest). Symlinks are recreated as links, which
-// also preserves legitimate store links (e.g. .credentials.json -> shared auth).
-// Directories recurse; regular files are copied by content.
-func copyPath(src string, dst string, mode fs.FileMode) error {
-	info, err := os.Lstat(src)
-	if err != nil {
-		return err
-	}
-	switch {
-	case info.Mode()&os.ModeSymlink != 0:
-		return recreateSymlink(src, dst)
-	case info.IsDir():
-		if err := ensureCopyDir(dst, 0o700); err != nil {
-			return err
-		}
-		entries, err := os.ReadDir(src)
-		if err != nil {
-			return err
-		}
-		for _, entry := range entries {
-			if err := copyPath(filepath.Join(src, entry.Name()), filepath.Join(dst, entry.Name()), mode); err != nil {
-				return err
-			}
-		}
-		return os.Chtimes(dst, info.ModTime(), info.ModTime())
-	default:
-		if err := copyFile(src, dst, firstNonZeroMode(mode, info.Mode().Perm())); err != nil {
-			return err
-		}
-		return os.Chtimes(dst, info.ModTime(), info.ModTime())
-	}
-}
-
-// recreateSymlink copies the symlink node itself (its target string), never the
-// content the link points at.
-func recreateSymlink(src string, dst string) error {
-	target, err := os.Readlink(src)
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(dst), 0o700); err != nil {
-		return err
-	}
-	if err := removeCopyDestination(dst); err != nil {
-		return err
-	}
-	return os.Symlink(target, dst)
 }
 
 func ensureCopyDir(dst string, mode fs.FileMode) error {
@@ -390,11 +358,4 @@ func copyFile(src string, dst string, mode fs.FileMode) error {
 		return err
 	}
 	return os.Chmod(dst, mode.Perm())
-}
-
-func firstNonZeroMode(primary fs.FileMode, fallback fs.FileMode) fs.FileMode {
-	if primary != 0 {
-		return primary.Perm()
-	}
-	return fallback.Perm()
 }

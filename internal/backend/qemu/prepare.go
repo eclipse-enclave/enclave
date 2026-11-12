@@ -11,8 +11,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
-	"sort"
 	"strings"
 
 	"enclave/internal/backend"
@@ -130,124 +128,9 @@ func (b *Backend) overlayConfigStore(prep backend.ConfigStorePrep) error {
 }
 
 func (b *Backend) overlayConfigStoreContents(root string, overlay backend.ConfigOverlaySpec, owner string) error {
-	preserveDir, err := os.MkdirTemp("", "enclave-qemu-preserve-*")
-	if err != nil {
-		return fmt.Errorf("create config preserve dir: %w", err)
-	}
-	defer func() { _ = os.RemoveAll(preserveDir) }()
-
-	matches, err := qemuPreserveMatches(root, overlay.PreservePaths)
-	if err != nil {
-		return fmt.Errorf("resolve config preserve paths: %w", err)
-	}
-	preserved := make([]string, 0, len(matches))
-	for _, cleaned := range matches {
-		src := filepath.Join(root, filepath.FromSlash(cleaned))
-		dst := filepath.Join(preserveDir, filepath.FromSlash(cleaned))
-		if err := copyPath(src, dst, 0); err != nil {
-			return fmt.Errorf("preserve config path %s: %w", cleaned, err)
-		}
-		preserved = append(preserved, cleaned)
-	}
-
-	entries, err := os.ReadDir(root)
-	if err != nil {
-		return fmt.Errorf("read config store: %w", err)
-	}
-	for _, entry := range entries {
-		if err := os.RemoveAll(filepath.Join(root, entry.Name())); err != nil {
-			return fmt.Errorf("clear config store: %w", err)
-		}
-	}
-	if err := util.CopyTree(overlay.SourceDir, root, copyFile); err != nil {
-		return fmt.Errorf("populate config store from source: %w", err)
-	}
-	for _, cleaned := range preserved {
-		src := filepath.Join(preserveDir, filepath.FromSlash(cleaned))
-		dst := filepath.Join(root, filepath.FromSlash(cleaned))
-		if err := copyPath(src, dst, 0); err != nil {
-			return fmt.Errorf("restore config path %s: %w", cleaned, err)
-		}
+	if err := hoststore.Overlay(root, overlay.SourceDir, overlay.PreservePaths); err != nil {
+		return err
 	}
 	logx.Infof("%s config store populated from generated source", util.TitleCase(owner))
 	return nil
-}
-
-// qemuPreserveMatches resolves the overlay preserve policy against the current
-// store contents, mirroring the Docker overlay matcher: entries may be exact
-// paths, directories (trailing "/"), or globs (containing "*?["). It returns
-// the existing store-relative paths to preserve. Lookups use Lstat and WalkDir
-// (both no-follow), so guest symlinks are matched but never dereferenced.
-func qemuPreserveMatches(root string, preservePaths []string) ([]string, error) {
-	var dirs, exacts, globs []string
-	for _, raw := range preservePaths {
-		value := strings.TrimSpace(strings.ReplaceAll(raw, "\\", "/"))
-		if value == "" {
-			continue
-		}
-		isDir := strings.HasSuffix(value, "/")
-		isGlob := strings.ContainsAny(value, "*?[")
-		cleaned, err := cleanStoreRel(strings.TrimSuffix(value, "/"))
-		if err != nil {
-			continue
-		}
-		switch {
-		case isGlob:
-			globs = append(globs, cleaned)
-		case isDir:
-			dirs = append(dirs, cleaned)
-		default:
-			exacts = append(exacts, cleaned)
-		}
-	}
-
-	matched := make(map[string]struct{})
-	for _, rel := range append(append([]string{}, exacts...), dirs...) {
-		// Reject a guest-planted symlink on any parent component before Lstat,
-		// which would otherwise follow it (e.g. "agent" -> host dir in
-		// "agent/auth.json"). The glob walk below is already no-follow.
-		if err := verifyStoreParentsNoFollow(root, rel); err != nil {
-			continue
-		}
-		if _, err := os.Lstat(filepath.Join(root, filepath.FromSlash(rel))); err == nil {
-			matched[rel] = struct{}{}
-		}
-	}
-	if len(globs) > 0 {
-		walkErr := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
-			if err != nil {
-				return err
-			}
-			if path == root {
-				return nil
-			}
-			rel, err := filepath.Rel(root, path)
-			if err != nil {
-				return err
-			}
-			rel = filepath.ToSlash(rel)
-			for _, g := range globs {
-				if matchGlob(g, rel) || matchGlob(g, d.Name()) {
-					matched[rel] = struct{}{}
-					break
-				}
-			}
-			return nil
-		})
-		if walkErr != nil {
-			return nil, walkErr
-		}
-	}
-
-	out := make([]string, 0, len(matched))
-	for rel := range matched {
-		out = append(out, rel)
-	}
-	sort.Strings(out)
-	return out, nil
-}
-
-func matchGlob(pattern string, name string) bool {
-	ok, err := filepath.Match(pattern, name)
-	return err == nil && ok
 }

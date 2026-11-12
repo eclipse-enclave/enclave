@@ -18,6 +18,7 @@ import (
 	"enclave/internal/backend"
 	"enclave/internal/config"
 	"enclave/internal/model"
+	"enclave/internal/testutil"
 	"enclave/internal/util"
 )
 
@@ -435,4 +436,10 @@ func containsArg(args []string, want string) bool {
 		}
 	}
 	return false
+}
+
+func TestStoreManagerKeepsIOInStoreDuringConcurrentSwaps(t *testing.T) {
+	session := newFSStore(t)
+	other := StoreManager{host: session.host}
+	testutil.ExerciseStoreDuringSwaps(t, session.host.Home, &session, &other)
 }

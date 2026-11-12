@@ -322,16 +322,26 @@ func (b *Backend) syncFeatureAuthStore(ctx context.Context, configDir string, sy
 		if err := os.MkdirAll(authDir, 0o700); err != nil {
 			return err
 		}
+		source, err := hoststore.OpenFiles(configDir)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = source.Close() }()
+		target, err := hoststore.OpenFiles(authDir)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = target.Close() }()
 		for _, authFile := range validated {
-			src, err := storeFilePath(configDir, path.Join(sync.ConfigDir, authFile), true)
-			if err != nil {
+			src := path.Join(sync.ConfigDir, authFile)
+			// Early policy checks; the copy below stays on the opened roots.
+			if _, err := storeFilePath(configDir, src, true); err != nil {
 				return err
 			}
-			dst, err := storeFilePath(authDir, authFile, true)
-			if err != nil {
+			if _, err := storeFilePath(authDir, authFile, true); err != nil {
 				return err
 			}
-			if err := copyFeatureAuthFileIfMissing(src, dst, placeholders...); err != nil {
+			if err := copyRootedFeatureAuthFileIfMissing(source, src, target, authFile, placeholders...); err != nil {
 				return err
 			}
 		}
@@ -339,39 +349,44 @@ func (b *Backend) syncFeatureAuthStore(ctx context.Context, configDir string, sy
 	})
 }
 
-// copyFeatureAuthFileIfMissing copies src to dst only when src is a non-empty
-// regular file and dst is absent or empty, preserving the additive feature-auth
-// semantics (never overwrite an existing credential).
-func copyFeatureAuthFileIfMissing(src string, dst string, placeholders ...string) error {
-	si, err := os.Stat(src)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		return err
-	}
-	if !si.Mode().IsRegular() || si.Size() == 0 {
+// beforeFeatureAuthSourceRead runs between the source Lstat and the source
+// read. Tests use it to change the stores while a copy is in progress.
+var beforeFeatureAuthSourceRead = func() {}
+
+// copyRootedFeatureAuthFileIfMissing copies src to dst only when src is a
+// non-empty regular file and dst is absent or empty, preserving the additive
+// feature-auth semantics (never overwrite an existing credential). Every read
+// and write goes through the opened source and target roots without following
+// a symlinked final component, and a placeholder-bearing source is rejected
+// before the destination is touched.
+func copyRootedFeatureAuthFileIfMissing(source *hoststore.Files, src string, target *hoststore.Files, dst string, placeholders ...string) error {
+	info, err := source.Lstat(src)
+	if os.IsNotExist(err) {
 		return nil
 	}
-	data, err := os.ReadFile(src) // #nosec G304 -- src is validated within the config store by storeFilePath.
+	if err != nil {
+		return err
+	}
+	if !info.Mode().IsRegular() || info.Size() == 0 {
+		return nil
+	}
+	beforeFeatureAuthSourceRead()
+	data, err := source.ReadFile(src)
 	if err != nil {
 		return err
 	}
 	if backend.ContainsSecretPlaceholder(data, placeholders) {
-		logx.Warnf("Not syncing auth file %s: contains a gateway placeholder.", src)
+		logx.Warnf("Not syncing auth file %s: contains a gateway placeholder.", filepath.Join(source.Name(), src))
 		return nil
 	}
-	if di, err := os.Stat(dst); err == nil {
-		if di.Size() > 0 {
-			return nil
-		}
-	} else if !os.IsNotExist(err) {
+	existing, err := target.ReadFile(dst)
+	if err == nil && len(existing) > 0 {
+		return nil
+	}
+	if err != nil && !os.IsNotExist(err) {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(dst), 0o700); err != nil {
-		return err
-	}
-	return os.WriteFile(dst, data, 0o600) // #nosec G703 -- dst is validated within the auth store by storeFilePath.
+	return target.WriteFile(dst, data, 0o600)
 }
 
 // parseFeatureAuthMap parses the feature-auth env map written by the runtime:

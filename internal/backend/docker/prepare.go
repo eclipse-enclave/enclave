@@ -149,7 +149,7 @@ func (b *Backend) prepareConfigStoreLayout(dir string, prep backend.ConfigStoreP
 			logx.Warnf("Failed to prepare %s config store layout: %v", util.TitleCase(prep.Key.Owner), err)
 			continue
 		}
-		foreign := foreignOwnedStorePath(dir, target, b.opts.Host.UID)
+		foreign := foreignOwnedStorePath(root, rel, b.opts.Host.UID)
 		if foreign == "" {
 			continue
 		}
@@ -162,19 +162,24 @@ func (b *Backend) prepareConfigStoreLayout(dir string, prep backend.ConfigStoreP
 	}
 }
 
-// foreignOwnedStorePath returns the outermost path component strictly below
-// root on the way to target that is not owned by uid, or "" when every
-// component is (or ownership cannot be determined).
-func foreignOwnedStorePath(root string, target string, uid string) string {
-	rel, err := filepath.Rel(root, target)
-	if err != nil || rel == "." || strings.HasPrefix(rel, "..") {
+// foreignOwnedStorePath returns the outermost component of rel, as a host
+// path below the opened store, that is not owned by uid, or "" when every
+// component is (or ownership cannot be determined). Components are read with
+// Lstat through the store root; a component that is a symlink or not a
+// directory ends the scan without a report.
+func foreignOwnedStorePath(root *hoststore.Files, rel string, uid string) string {
+	if rel == "." || !filepath.IsLocal(rel) {
 		return ""
 	}
-	current := root
+	current := ""
 	for _, component := range strings.Split(rel, string(filepath.Separator)) {
 		current = filepath.Join(current, component)
-		if !util.PathOwnedBy(current, uid) {
-			return current
+		info, err := root.Lstat(current)
+		if err != nil || !info.IsDir() {
+			return ""
+		}
+		if !util.FileInfoOwnedBy(info, uid) {
+			return filepath.Join(root.Name(), current)
 		}
 	}
 	return ""

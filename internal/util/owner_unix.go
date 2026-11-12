@@ -20,11 +20,16 @@ import (
 // a platform without POSIX ownership) so callers only act on a definite
 // mismatch.
 func PathOwnedBy(path string, uid string) bool {
-	want, err := strconv.ParseUint(uid, 10, 32)
+	info, err := os.Stat(path)
 	if err != nil {
 		return true
 	}
-	info, err := os.Stat(path)
+	return FileInfoOwnedBy(info, uid)
+}
+
+// FileInfoOwnedBy is PathOwnedBy for a FileInfo the caller already has.
+func FileInfoOwnedBy(info os.FileInfo, uid string) bool {
+	want, err := strconv.ParseUint(uid, 10, 32)
 	if err != nil {
 		return true
 	}

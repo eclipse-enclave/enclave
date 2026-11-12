@@ -9,8 +9,15 @@
 
 package util
 
+import "os"
+
 // PathOwnedBy always reports true on Windows, where POSIX ownership does not
 // apply.
 func PathOwnedBy(string, string) bool {
+	return true
+}
+
+// FileInfoOwnedBy always reports true on Windows, like PathOwnedBy.
+func FileInfoOwnedBy(os.FileInfo, string) bool {
 	return true
 }

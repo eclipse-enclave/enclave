@@ -205,7 +205,7 @@ See [List options](configuration.md#list-options).
 | `--backend <backend>` | `auto` (default), `docker`, `podman`, or experimental `qemu`. Management commands that use an engine accept it for one invocation. See [Backends](backends.md) |
 | `--name <name>` | Named persistent session |
 | `--background` | Detached background session |
-| `-p <port>` | Publish a container port to the host (container → host, e.g. `-p 3002`). Host port `0` (`-p 0:3000`) lets Docker pick a free port; read it back with `enclave ps --json`. Repeatable, comma-separated list flag for `ports`; `+port` also replaces a configured entry for the same host port |
+| `-p <port>` | Publish a container port to the host (container → host, e.g. `-p 3002`). Host port `0` (`-p 0:3000`) lets Docker or Podman pick a free port; read it back with `enclave ps --json`. Repeatable, comma-separated list flag for `ports`; `+port` also replaces a configured entry for the same host port |
 | `--bridge-port <port>` | Forward a host port into the container (host → container). Repeatable, comma-separated list flag for `bridge_ports` |
 | `--add-dir <path>` | Mount an additional host directory. Repeatable, one path per flag (commas are part of the path); adds to `add_dirs` |
 | `--add-readonly-dir <path>` | Mount an additional host directory read-only. Repeatable, one path per flag; adds to `add_readonly_dirs` |

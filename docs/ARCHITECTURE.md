@@ -467,6 +467,12 @@ Rules for options that need care when changed; the general checklist is in
   bind mounts and avoiding a network namespace owned by a foreign user
   namespace, which fails under runc.
 
+### Port publishing
+
+Keep `"0"` as the internal auto-assigned host-port sentinel. Only
+`internal/docker/cli.go` renders it as an empty host port in `--publish` flags,
+which both Docker and Podman accept. QEMU rejects it.
+
 ### Skills validation
 
 `--skills-validation strict|agent` (default `strict`; global, project, and tool

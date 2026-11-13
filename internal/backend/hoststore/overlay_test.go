@@ -121,3 +121,28 @@ func TestOverlayPublicationFailureRetainsRecoveryCopy(t *testing.T) {
 		t.Fatalf("backup lost: %q %v", data, readErr)
 	}
 }
+
+func TestOverlayMergesPreservedDirectoryWithGeneratedFiles(t *testing.T) {
+	target, source := t.TempDir(), t.TempDir()
+	for dir, files := range map[string]map[string]string{
+		target: {"session.md": "session", "both.md": "session edit"},
+		source: {"shipped.md": "generated", "both.md": "generated"},
+	} {
+		if err := os.MkdirAll(filepath.Join(dir, "prompt-templates"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		for name, data := range files {
+			if err := os.WriteFile(filepath.Join(dir, "prompt-templates", name), []byte(data), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if err := Overlay(target, source, []string{"prompt-templates/"}); err != nil {
+		t.Fatal(err)
+	}
+	for name, want := range map[string]string{"session.md": "session", "shipped.md": "generated", "both.md": "session edit"} {
+		if data, err := os.ReadFile(filepath.Join(target, "prompt-templates", name)); err != nil || string(data) != want {
+			t.Fatalf("%s = %q, %v; want %q", name, data, err, want)
+		}
+	}
+}

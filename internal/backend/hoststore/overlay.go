@@ -8,6 +8,7 @@
 package hoststore
 
 import (
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -84,14 +85,10 @@ func Overlay(targetDir, sourceDir string, preserve []string) (result error) {
 				continue
 			}
 			dest := filepath.Join("candidate", name)
-			// Preserved state takes precedence over generated state, including type changes.
-			if err := work.RemoveAll(dest); err != nil {
-				return err
-			}
 			if err := work.MkdirAll(filepath.Dir(dest), 0o700); err != nil {
 				return err
 			}
-			if err := Copy(original, name, work, dest, 0); err != nil {
+			if err := mergeNode(original, name, work, dest); err != nil {
 				return err
 			}
 			preserved = append(preserved, name)
@@ -151,6 +148,42 @@ func Overlay(targetDir, sourceDir string, preserve []string) (result error) {
 		}
 	}
 	return Copy(work, "candidate", target, ".", 0)
+}
+
+// mergeNode copies preserved state over generated state. Directories present
+// on both sides are merged, so generated files next to session files survive;
+// any other node, or a type conflict, is replaced by the preserved one.
+func mergeNode(src *Files, from string, dst *Files, to string) error {
+	info, err := src.Lstat(from)
+	if err != nil {
+		return err
+	}
+	existing, err := dst.Lstat(to)
+	if errors.Is(err, fs.ErrNotExist) {
+		return Copy(src, from, dst, to, 0)
+	}
+	if err != nil {
+		return err
+	}
+	if !info.IsDir() || !existing.IsDir() {
+		if err := dst.RemoveAll(to); err != nil {
+			return err
+		}
+		return Copy(src, from, dst, to, 0)
+	}
+	entries, err := src.ReadDir(from)
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		if err := mergeNode(src, filepath.Join(from, entry.Name()), dst, filepath.Join(to, entry.Name())); err != nil {
+			return err
+		}
+	}
+	if err := dst.Chmod(to, info.Mode().Perm()); err != nil {
+		return err
+	}
+	return dst.Chtimes(to, info.ModTime())
 }
 
 // matchesPreserved reports whether name or one of its parent directories

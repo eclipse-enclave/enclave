@@ -122,6 +122,7 @@ func registerCompletions(rootCmd *cobra.Command) error {
 	completers := map[string]flagCompletionFunc{
 		"tool":          toolCompleter,
 		"features":      featuresCompleter,
+		"filters":       installedExtensionCompleter(model.KindFilter),
 		"auth-scope":    staticValuesCompleter(model.AuthScopeShared, model.AuthScopeProject),
 		"secrets-scope": staticValuesCompleter(model.SecretsScopeProject, model.SecretsScopeGlobal, model.SecretsScopeBoth),
 		"progress":      staticValuesCompleter(model.BuildProgressQuiet, model.BuildProgressCompact, model.BuildProgressVerbose),
@@ -169,6 +170,17 @@ func registerCompletions(rootCmd *cobra.Command) error {
 		if cmd := findSubCommand(rootCmd, kind.DirName(), "add"); cmd != nil {
 			if err := cmd.RegisterFlagCompletionFunc("name", completer); err != nil {
 				return err
+			}
+		}
+	}
+	filterCompleter := installedExtensionCompleter(model.KindFilter)
+	for _, sub := range []string{"show", "login", "grants", "logout"} {
+		if cmd := findSubCommand(rootCmd, model.KindFilter.DirName(), sub); cmd != nil {
+			cmd.ValidArgsFunction = func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+				if len(args) > 0 {
+					return nil, cobra.ShellCompDirectiveNoFileComp
+				}
+				return filterCompleter(cmd, args, toComplete)
 			}
 		}
 	}

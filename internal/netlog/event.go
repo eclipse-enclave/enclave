@@ -16,6 +16,10 @@ import "time"
 // Event is one line of the network audit log. Field names and their JSON tags
 // are a consumer-facing contract (`enclave network log --json` emits them
 // verbatim); keep them stable.
+//
+// Filter, Op, Capability, and Reason are set on requests to a host a request
+// filter governs: the filter, the matched operation and its capability, and
+// the reason code of a denial.
 type Event struct {
 	Timestamp    string `json:"ts"`
 	Type         string `json:"type"`
@@ -29,6 +33,10 @@ type Event struct {
 	ContentType  string `json:"content_type,omitempty"`
 	Verdict      string `json:"verdict"`
 	Rule         string `json:"rule,omitempty"`
+	Filter       string `json:"filter,omitempty"`
+	Op           string `json:"op,omitempty"`
+	Capability   string `json:"capability,omitempty"`
+	Reason       string `json:"reason,omitempty"`
 	Session      string `json:"session,omitempty"`
 	// CaptureID names the full capture of an http event under
 	// --network-log=full: logs/capture/<session>/<capture_id>.json.
@@ -59,6 +67,10 @@ const RuleAllowlist = "allowlist"
 // RuleUnrestricted names a proxy pass in an unrestricted session, where the
 // gateway only observes and no domain check runs.
 const RuleUnrestricted = "unrestricted"
+
+// RuleFilter marks a request to a host a request filter governs, for both
+// verdicts.
+const RuleFilter = "filter"
 
 // RuleNXDomain marks a lookup answered by enclave's own DNS blackhole. An
 // upstream NXDOMAIN carries the "upstream-" prefix instead.

@@ -14,7 +14,9 @@ import (
 	"strings"
 
 	"enclave/internal/config"
+	"enclave/internal/filterhost"
 	"enclave/internal/logx"
+	"enclave/internal/model"
 	"enclave/internal/usercmd"
 )
 
@@ -62,8 +64,14 @@ func removeOne(env Env, req Request, entry Managed) (ActionResult, error) {
 
 	target := filepath.Join(env.kindDir(req.Kind), entry.Name)
 	env.section(entry.Name, req.Kind.Label())
+	// Logout revokes grants only while the filter's spec is installed.
+	grantsLeft := req.Kind == model.KindFilter && filterHasGrants(env.Home, entry.Name)
 	if req.Interactive {
-		confirmed, err := env.confirm(fmt.Sprintf("%sRemove %s?", bodyIndent, target))
+		question := fmt.Sprintf("%sRemove %s?", bodyIndent, target)
+		if grantsLeft {
+			question = fmt.Sprintf("%s%s has stored grants. Revoke them first with: %s\n%s", bodyIndent, entry.Name, logoutAllCommand(entry.Name), question)
+		}
+		confirmed, err := env.confirm(question)
 		if err != nil {
 			return ActionResult{}, err
 		}
@@ -90,6 +98,25 @@ func removeOne(env Env, req Request, entry Managed) (ActionResult, error) {
 	}
 	// Host state may belong to a reinstall.
 	env.note("host config and state were left untouched")
-	return ActionResult{Name: entry.Name, Action: ActionRemoved, Path: target,
-		HostCommands: entry.HostCommands}, nil
+	result := ActionResult{Name: entry.Name, Action: ActionRemoved, Path: target, HostCommands: entry.HostCommands}
+	if grantsLeft {
+		warning := "grants left unrevoked, delete them with: " + logoutAllCommand(entry.Name)
+		env.note("%s", warning)
+		result.Warnings = append(result.Warnings, warning)
+	}
+	return result, nil
+}
+
+func logoutAllCommand(filterName string) string {
+	return fmt.Sprintf("%s filters logout %s --all", model.AppName, filterName)
+}
+
+// filterHasGrants reports whether the filter has grant files left on the
+// host. Unreadable ones count, since logout deletes them too.
+func filterHasGrants(home string, name string) bool {
+	if strings.TrimSpace(home) == "" {
+		return false
+	}
+	grants, problems, err := filterhost.NewStore(home, name).Grants()
+	return err == nil && len(grants)+len(problems) > 0
 }

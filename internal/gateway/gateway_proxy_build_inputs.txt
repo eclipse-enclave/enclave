@@ -6,6 +6,7 @@ cmd/enclave-gateway-proxy
 internal/appassets
 internal/config
 internal/domainpattern
+internal/filter
 internal/gateway/bundle
 internal/gateway/dnsaudit
 internal/gateway/mitm

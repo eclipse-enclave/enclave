@@ -10,6 +10,7 @@ package docker
 import (
 	"context"
 	"reflect"
+	"slices"
 	"testing"
 	"time"
 
@@ -92,6 +93,29 @@ func TestParseGatewayTargetsIncludesProjectDirLabel(t *testing.T) {
 	}
 	if targets[0].ProjectDir != "/work/project" {
 		t.Fatalf("expected project dir label to be captured, got %q", targets[0].ProjectDir)
+	}
+}
+
+func TestParseGatewayTargetsReadsFilterLabels(t *testing.T) {
+	containers := []dockercmd.Summary{
+		{ID: "aaaaaaaaaaaaaaaa", Names: []string{"/filtered"}, Labels: map[string]string{
+			model.GatewayLabelAgent:         "codex",
+			model.GatewayLabelFilters:       "gws,tok",
+			model.GatewayLabelFilterHosts:   "*.example.com, gmail.googleapis.com,",
+			model.GatewayLabelFilterConfine: "googleapis.com",
+		}},
+		{ID: "bbbbbbbbbbbbbbbb", Names: []string{"/plain"}, Labels: map[string]string{model.GatewayLabelAgent: "codex"}},
+	}
+	targets := gatewayInfosFromSummaries(containers)
+	if len(targets) != 2 {
+		t.Fatalf("targets = %+v", targets)
+	}
+	filtered, plain := targets[0], targets[1]
+	if !slices.Equal(filtered.Filters, []string{"gws", "tok"}) || !slices.Equal(filtered.FilterHosts, []string{"*.example.com", "gmail.googleapis.com"}) || !slices.Equal(filtered.FilterConfine, []string{"googleapis.com"}) {
+		t.Fatalf("filtered gateway = %+v", filtered)
+	}
+	if plain.Filters != nil || plain.FilterHosts != nil || plain.FilterConfine != nil {
+		t.Fatalf("plain gateway = %+v", plain)
 	}
 }
 

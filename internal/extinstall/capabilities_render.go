@@ -31,6 +31,7 @@ func (c capabilities) render(w io.Writer, style Style, source string) {
 		hostCommands += fmt.Sprintf(" (added as `%s <name>`, run on your host outside the sandbox with your user's privileges)", model.AppName)
 	}
 	row("host commands", hostCommands)
+	c.Filter.renderRows(row)
 
 	install := ""
 	switch {

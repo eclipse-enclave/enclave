@@ -1,7 +1,7 @@
 # Extension JSON output
 
 Integration contracts (`schemaVersion: "1"`) of
-`enclave tools|features|commands list --json` and of the
+`enclave tools|features|commands|filters list --json` and of the
 `add`/`update`/`remove` result envelope; commands are in
 [Installing extensions](installing.md).
 
@@ -58,12 +58,12 @@ One entry per extension, built-in or installed.
 
 | Field | Meaning |
 |-------|---------|
-| `kind` | `tool`, `feature`, or `command`. `command` was added after the first release, so consumers that switch on `kind` should tolerate unknown values. |
+| `kind` | `tool`, `feature`, `command`, or `filter`. `command` and `filter` were added after the first release, so consumers that switch on `kind` should tolerate unknown values. |
 | `source` | `builtin`, `user`, or `override` (a user directory shadowing a built-in of the same name) |
 | `managed`, `origin` | Installed by Enclave, and its [provenance](installing.md#provenance) without `installedBy` and `treeHash`, plus `locallyModified` (the files differ from the recorded tree hash) |
 | `originError` | Replaces `origin` when the sidecar exists but could not be read; `managed` is then `false` |
 | `hostCommands` | Host commands the extension ships; see [Auditing host commands](installing.md#auditing-host-commands) |
-| `enabled` | Always `true` for tools (selected per run) and command extensions (nothing to enable); for features see below |
+| `enabled` | Always `true` for tools (selected per run) and command extensions (nothing to enable). For features see below. For filters, whether the effective `filters` option of a run with the same options selects it: the config layers, `tool_overrides.<tool>.filters` for the `--tool` or configured tool, and `--filters` |
 
 ### Feature-only fields
 
@@ -82,6 +82,21 @@ whether a run would enable it: `--slim` and `backend: qemu` enable none,
 (an unknown `--tool` has none). If a run would reject the options, stderr gets
 a warning, `enabled` reflects the options without run-time coercion, and the
 exit code is 0.
+
+### Filter-only fields
+
+| Field | Meaning |
+|-------|---------|
+| `selection` | The `filters` directives, their layer, and the tool, shaped like the feature `selection`. `directives: null` means no layer selects filters, so none is enabled |
+| `governedHosts` | The hosts the filter governs, as declared, wildcards kept |
+| `confinedDomains` | The [confined domains](filter-spec.md#confine), absent when none |
+| `credentialType` | `oauth2` or `static` |
+| `credentialEndpoints` | `oauth2` only: `authUrl`, `tokenUrl`, and `revokeUrl` when declared. The token endpoint receives the refresh token and client secret |
+| `credentialSources` | `static` only: the host `env` vars, the `file` (`path`, `parser`), and `priority` (`env-first` or `file-first`) the credential is read from |
+| `defaultPreset` | The preset a bare `--filters <name>` selects |
+| `presets` | Shipped and user preset names, sorted ([Request filters](../filters.md#write-a-user-preset)) |
+
+A filter whose spec does not load is skipped with a warning on stderr.
 
 ## `add`, `update`, `remove` result envelope
 

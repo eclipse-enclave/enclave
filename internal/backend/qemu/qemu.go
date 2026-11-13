@@ -59,6 +59,11 @@ func (b *Backend) Capabilities() backend.Capabilities {
 func (b *Backend) Storage() backend.StoreManager { return b.storage }
 
 func (b *Backend) Run(ctx context.Context, req backend.Request, attach backend.AttachIO) (backend.ExitStatus, error) {
+	// The guest has no gateway, so a filter would be dropped silently. This
+	// holds whatever Capabilities and Validate say.
+	if len(req.Filters) > 0 {
+		return backend.ExitStatus{}, fmt.Errorf("qemu backend: %w", backend.ErrRequestFiltersUnsupported)
+	}
 	if req.AuthSync != nil {
 		defer b.runRequestAuthSync(req)
 	}
@@ -127,7 +132,10 @@ func (b *Backend) Run(ctx context.Context, req backend.Request, attach backend.A
 	return backend.ExitStatus{Code: 1}, fmt.Errorf("qemu backend: guest exited without reporting an exit code")
 }
 
-func (b *Backend) Start(context.Context, backend.Request) (backend.SessionRef, error) {
+func (b *Backend) Start(_ context.Context, req backend.Request) (backend.SessionRef, error) {
+	if len(req.Filters) > 0 {
+		return backend.SessionRef{}, fmt.Errorf("qemu backend: %w", backend.ErrRequestFiltersUnsupported)
+	}
 	return backend.SessionRef{}, fmt.Errorf("qemu backend: detached sessions are not supported")
 }
 

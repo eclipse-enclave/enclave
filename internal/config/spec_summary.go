@@ -145,7 +145,25 @@ func SummarizeSpecDir(dir string) (SpecSummary, error) {
 		return SpecSummary{}, fmt.Errorf("no %s in %s: %w", SpecFilename, dir, os.ErrNotExist)
 	}
 
-	doc, err := parseUntrustedSpecDocument(specPath)
+	data, err := readUntrustedSpec(specPath)
+	if err != nil {
+		return SpecSummary{}, err
+	}
+	meta, isFilter, err := peekFilterSpec(data, specPath)
+	if err != nil {
+		return SpecSummary{}, err
+	}
+	if isFilter {
+		// A filter's spec has its own schema, which the installer reads
+		// through package filter/spec.
+		return SpecSummary{
+			Kind:        KindFilter,
+			Name:        strings.TrimSpace(meta.Name),
+			DisplayName: strings.TrimSpace(meta.DisplayName),
+			Description: strings.TrimSpace(meta.Description),
+		}, nil
+	}
+	doc, err := decodeSpecDocument(data, specPath)
 	if err != nil {
 		return SpecSummary{}, err
 	}

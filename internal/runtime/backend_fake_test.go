@@ -27,12 +27,14 @@ type fakeBackend struct {
 	prepared       []backend.StorePrep
 	prepareState   backend.StoreState
 	configKeyInUse func(meta backend.SessionMeta, key string) (bool, error)
+	// noRequestFilters drops the RequestFilters capability.
+	noRequestFilters bool
 }
 
 func (f *fakeBackend) Name() string                { return "fake" }
 func (f *fakeBackend) Check(context.Context) error { return nil }
 func (f *fakeBackend) Capabilities() backend.Capabilities {
-	return backend.Capabilities{RestrictedNetwork: true, SecretHTTPRelease: true}
+	return backend.Capabilities{RestrictedNetwork: true, SecretHTTPRelease: true, RequestFilters: !f.noRequestFilters}
 }
 func (f *fakeBackend) Storage() backend.StoreManager { return f.storage }
 func (f *fakeBackend) PrepareStores(_ context.Context, prep backend.StorePrep) (backend.StoreState, error) {

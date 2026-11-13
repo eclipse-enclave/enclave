@@ -12,6 +12,7 @@ Reference documentation for Eclipse Enclave. For a guided introduction, see the
 | Run named, background, or parallel sessions; clean up stored data | [persistence.md](persistence.md) |
 | Log in, pass secrets or API keys, use SSH keys | [auth.md](auth.md) |
 | Allow domains, read the network log, reach host services | [networking.md](networking.md) |
+| Let the agent use a third-party API under a preset, with the credential kept in the gateway | [filters.md](filters.md) |
 | Set config keys, understand precedence, use environment variables | [configuration.md](configuration.md) |
 | Override tool settings, patch tool config, add skills | [tool-config.md](tool-config.md) |
 | Choose a tool, base image, or devcontainer; control rebuilds | [tools.md](tools.md) |
@@ -26,19 +27,22 @@ Reference documentation for Eclipse Enclave. For a guided introduction, see the
 
 | I want to … | Read |
 |-------------|------|
-| Understand tools, features, and command extensions | [extensions/README.md](extensions/README.md) |
+| Understand tools, features, command extensions, and request filters | [extensions/README.md](extensions/README.md) |
 | Install extensions from a Git repository | [extensions/installing.md](extensions/installing.md) |
 | Add a tool | [extensions/adding-a-tool.md](extensions/adding-a-tool.md) |
 | Add a feature | [extensions/adding-a-feature.md](extensions/adding-a-feature.md) |
+| Write a request filter | [extensions/adding-a-filter.md](extensions/adding-a-filter.md) |
 | Look up a `spec.yaml` field | [extensions/spec-reference.md](extensions/spec-reference.md) |
+| Look up a filter `spec.yaml` or preset field | [extensions/filter-spec.md](extensions/filter-spec.md) |
 | Declare credentials, service auth, or providers | [extensions/credentials.md](extensions/credentials.md) |
-| Parse `tools\|features\|commands` JSON output | [extensions/json-output.md](extensions/json-output.md) |
+| Parse `tools\|features\|commands\|filters` JSON output | [extensions/json-output.md](extensions/json-output.md) |
 
 ## Security
 
 | Page | Covers |
 |------|--------|
 | [security/README.md](security/README.md) | Security boundaries and residual risks |
+| [security/request-filters.md](security/request-filters.md) | Request filters: threat model, guarantees, residual risks |
 | [security/host-hardening.md](security/host-hardening.md) | Rootful Docker host hardening |
 | [security/rootless.md](security/rootless.md) | Rootless engines: Podman supported, rootless Docker not |
 
@@ -57,4 +61,6 @@ Reference documentation for Eclipse Enclave. For a guided introduction, see the
 Diagrams are Mermaid blocks embedded in
 [ARCHITECTURE.md](ARCHITECTURE.md#diagrams) (Docker runtime and stores, Go
 code generation) and
-[runtime/network-request-flow.md](runtime/network-request-flow.md#diagram).
+[runtime/network-request-flow.md](runtime/network-request-flow.md#diagram),
+and the request filter path in
+[security/request-filters.md](security/request-filters.md#request-path).

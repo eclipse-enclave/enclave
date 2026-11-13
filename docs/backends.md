@@ -113,7 +113,7 @@ Host AppArmor profiles can affect binaries inside rootless containers; see
 |--------|----------|
 | Network | Implies `--allow-all-network` and `--disable-gateway` and prints a notice that network isolation is unavailable. `--allow-domain` and `allow_domains` from config are rejected |
 | Features | Implies `--slim`. `--features` is rejected; features selected in config, including unknown names, are dropped with a notice |
-| Not supported yet | Detached sessions, `exec`, `attach`, restricted egress, HTTP secret release, devcontainers, non-default feature stacks |
+| Not supported yet | Detached sessions, `exec`, `attach`, restricted egress, HTTP secret release, [request filters](filters.md) (selecting one fails the start), devcontainers, non-default feature stacks |
 | Listing | QEMU sessions are not listed by `enclave ps` |
 | Host ports | A host port of `0` (`-p 0:3000`) is rejected |
 | Stores | The same per-tool and per-project host stores as Docker sessions, so auth, tool config, and persisted env carry over when switching between `docker` and `qemu` |

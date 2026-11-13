@@ -12,9 +12,11 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
+	"enclave/internal/domainpattern"
 	"enclave/internal/model"
 	"enclave/internal/util"
 )
@@ -22,6 +24,9 @@ import (
 const (
 	DefaultResolver = "8.8.8.8"
 	DNSMasqIPSet    = "enclave_allowed"
+	// DNSMasqGovernedIPSet holds the addresses of names request filters
+	// govern, also listed in DNSMasqIPSet.
+	DNSMasqGovernedIPSet = "enclave_governed"
 )
 
 // ExtractDomainsFromContent extracts domains from dnsmasq server= lines.
@@ -109,6 +114,14 @@ func DomainToIPSetLine(domain string) string {
 	return "ipset=/" + strings.ToLower(domain) + "/" + DNSMasqIPSet
 }
 
+// DomainToGovernedIPSetLine converts a governed domain to a dnsmasq ipset=
+// directive that adds its addresses to both sets. dnsmasq applies only the
+// longest matching ipset= domain, so every allowlisted domain equal to or
+// below a governed one needs this line instead of DomainToIPSetLine.
+func DomainToGovernedIPSetLine(domain string) string {
+	return "ipset=/" + strings.ToLower(domain) + "/" + DNSMasqIPSet + "," + DNSMasqGovernedIPSet
+}
+
 // DomainToBlackholeLine converts a domain to a dnsmasq address= directive with
 // no address, which resolves the domain (and its subdomains) to 0.0.0.0. It is
 // more specific than a parent's server= line, so dnsmasq's longest-match rule
@@ -157,14 +170,16 @@ func EffectiveDeniedDomains(policy EffectivePolicy) ([]string, error) {
 }
 
 // EffectiveRenderDomainsForTool returns the canonical (allow, denied) domain
-// lists a gateway renders for tool. Deny wins unconditionally: an allow entry
-// that equals a denied domain OR is a subdomain of one is removed from the
-// allow set. The subdomain filter matters because dnsmasq resolves by longest
+// lists a gateway renders for tool. Deny wins over allow: an allow entry that
+// equals a denied domain OR is a subdomain of one is removed from the allow
+// set. The subdomain filter matters because dnsmasq resolves by longest
 // match — an allow line server=/api.tracker.example/ would otherwise out-rank
 // the parent's address=/tracker.example/ blackhole and quietly re-open the
 // denied domain. A deny that is MORE specific than an allow (allow
 // example.com, deny telemetry.example.com) needs no filtering: its own
-// address= line already out-ranks the broader allow.
+// address= line already out-ranks the broader allow. Domains a request filter
+// governs get no exception. Allow entries a filter confines are removed too,
+// see DomainBlocked.
 func EffectiveRenderDomainsForTool(policy EffectivePolicy, tool string) (allow []string, denied []string, err error) {
 	allow, err = EffectiveDomainsForTool(policy, tool)
 	if err != nil {
@@ -174,22 +189,49 @@ func EffectiveRenderDomainsForTool(policy EffectivePolicy, tool string) (allow [
 	if err != nil {
 		return nil, nil, err
 	}
-	if len(denied) == 0 {
+	confined, governed, err := effectiveFilterDomains(policy)
+	if err != nil {
+		return nil, nil, err
+	}
+	if len(denied) == 0 && len(confined) == 0 {
 		return allow, denied, nil
 	}
 	filtered := make([]string, 0, len(allow))
 	for _, d := range allow {
-		if !DomainDeniedBy(d, denied) {
+		if !DomainBlocked(d, denied, confined, governed) {
 			filtered = append(filtered, d)
 		}
 	}
 	return filtered, denied, nil
 }
 
+// effectiveFilterDomains returns the canonical domains request filters
+// confine and govern.
+func effectiveFilterDomains(policy EffectivePolicy) (confined []string, governed []string, err error) {
+	if confined, err = canonicalDedupSorted(policy.ConfinedDomains); err != nil {
+		return nil, nil, err
+	}
+	if governed, err = canonicalDedupSorted(policy.GovernedDomains); err != nil {
+		return nil, nil, err
+	}
+	return confined, governed, nil
+}
+
+// DomainBlocked reports whether a deny rule covers domain, or a request filter
+// confines it and no filter governs it.
+func DomainBlocked(domain string, denied []string, confined []string, governed []string) bool {
+	return DomainDeniedBy(domain, denied) || domainpattern.Confined(domain, confined, governed)
+}
+
 // DomainDeniedBy reports whether domain equals any denied entry or is a
 // subdomain of one ("deny rules take precedence over allow rules").
 func DomainDeniedBy(domain string, denied []string) bool {
-	for _, d := range denied {
+	return domainWithin(domain, denied)
+}
+
+// domainWithin reports whether domain equals one of parents or is below one.
+func domainWithin(domain string, parents []string) bool {
+	for _, d := range parents {
 		if domain == d || strings.HasSuffix(domain, "."+d) {
 			return true
 		}
@@ -210,9 +252,13 @@ func CanonicalPolicyDomain(value string) (string, error) {
 }
 
 // RenderDNSMasqConfig renders the dnsmasq bundle format used by live gateways.
-// denied domains are blackholed with address= lines after the allow block; an
-// empty denied list yields output byte-identical to the allow-only rendering.
-func RenderDNSMasqConfig(domains []string, denied []string, resolver string) string {
+// denied and confined domains are blackholed with address= lines after the
+// allow block; empty lists yield output byte-identical to the allow-only
+// rendering. Governed names below a confined domain resolve, since their
+// server= lines are more specific. Domains equal to or below a governed
+// domain also feed the governed ipset, and so does each governed domain that
+// is not denied.
+func RenderDNSMasqConfig(domains []string, denied []string, confined []string, governed []string, resolver string) string {
 	if resolver == "" {
 		resolver = DefaultResolver
 	}
@@ -234,20 +280,45 @@ func RenderDNSMasqConfig(domains []string, denied []string, resolver string) str
 		b.WriteString("\n")
 	}
 
+	listed := make(map[string]bool, len(domains))
 	for _, domain := range domains {
-		b.WriteString(DomainToIPSetLine(domain))
+		listed[domain] = true
+		if domainWithin(domain, governed) {
+			b.WriteString(DomainToGovernedIPSetLine(domain))
+		} else {
+			b.WriteString(DomainToIPSetLine(domain))
+		}
+		b.WriteString("\n")
+	}
+	for _, domain := range governed {
+		if listed[domain] || DomainDeniedBy(domain, denied) {
+			continue
+		}
+		listed[domain] = true
+		b.WriteString(DomainToGovernedIPSetLine(domain))
 		b.WriteString("\n")
 	}
 
-	if len(denied) > 0 {
+	blackholed := blackholedDomains(denied, confined)
+	if len(blackholed) > 0 {
 		b.WriteString("\n")
-		for _, domain := range denied {
+		for _, domain := range blackholed {
 			b.WriteString(DomainToBlackholeLine(domain))
 			b.WriteString("\n")
 		}
 	}
 
 	return b.String()
+}
+
+// blackholedDomains is the sorted union of denied and confined domains.
+func blackholedDomains(denied []string, confined []string) []string {
+	if len(confined) == 0 {
+		return denied
+	}
+	all := append(append([]string(nil), denied...), confined...)
+	sort.Strings(all)
+	return slices.Compact(all)
 }
 
 func RenderDnsmasqConfigForTool(ep EffectivePolicy, tool string, resolver string) (string, error) {
@@ -258,7 +329,11 @@ func RenderDnsmasqConfigForTool(ep EffectivePolicy, tool string, resolver string
 	if err != nil {
 		return "", err
 	}
-	return RenderDNSMasqConfig(domains, denied, resolver), nil
+	confined, governed, err := effectiveFilterDomains(ep)
+	if err != nil {
+		return "", err
+	}
+	return RenderDNSMasqConfig(domains, denied, confined, governed, resolver), nil
 }
 
 func RenderDnsmasqConfigPreviewForTool(ep EffectivePolicy, tool string, resolver string) (string, error) {

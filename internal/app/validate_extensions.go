@@ -9,6 +9,7 @@ package app
 
 import (
 	"enclave/internal/config"
+	"enclave/internal/filterhost"
 	"enclave/internal/logx"
 )
 
@@ -18,6 +19,13 @@ func runValidateExtensions(ctx *AppContext) int {
 		logx.Errorf("%v", err)
 		return 1
 	}
+	filters, err := filterhost.ValidateInstalled(ctx.Paths)
+	if err != nil {
+		logx.Errorf("%v", err)
+		return 1
+	}
+	validation.Warnings = append(validation.Warnings, filters.Warnings...)
+	validation.Errors = append(validation.Errors, filters.Errors...)
 	for _, warning := range validation.Warnings {
 		logx.Warnf(warning)
 	}

@@ -15,6 +15,7 @@ import (
 	"strings"
 
 	"enclave/internal/config"
+	"enclave/internal/filterhost"
 	"enclave/internal/logx"
 	"enclave/internal/model"
 )
@@ -274,6 +275,7 @@ const (
 	configWarningToolUnresolved      = "tool_unresolved"
 	configWarningToolUnavailable     = "tool_unavailable"
 	configWarningProjectUnavailable  = "project_unavailable"
+	configWarningFiltersUnavailable  = "filters_unavailable"
 )
 
 type configJSONDocument struct {
@@ -413,9 +415,31 @@ func buildConfigEnvelope(input *CommandInput, opts model.Options, profile *model
 			directives := config.OptionDirectives(def, raw)
 			option.Directives = &directives
 		}
+		if def.Apply == config.ApplySliceMergeFilter {
+			labels, err := resolvedFilterLabels(input.Ctx, values.Filters)
+			if err != nil {
+				addWarning(configWarningFiltersUnavailable, def.Name, fmt.Sprintf("Cannot resolve the filters selection: %v", err))
+			} else {
+				option.Value = labels
+			}
+		}
 		envelope.Options[def.Name] = option
 	}
 	return envelope
+}
+
+// resolvedFilterLabels is the filters selection with each filter's preset
+// resolved, as a session records it.
+func resolvedFilterLabels(appCtx *AppContext, entries []string) ([]string, error) {
+	home := ""
+	if host, err := appCtx.Host(); err == nil {
+		home = host.Home
+	}
+	filters, err := filterhost.ResolvePreview(appCtx.Paths, home, entries)
+	if err != nil {
+		return nil, err
+	}
+	return filterhost.Labels(filters), nil
 }
 
 func configOptionLayers(def config.OptionDef, input *CommandInput) map[string]any {

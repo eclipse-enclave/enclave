@@ -27,13 +27,14 @@ const extensionSchemaVersion = "1"
 type extensionListEnvelope struct {
 	SchemaVersion string `json:"schemaVersion"`
 	Kind          string `json:"kind"`
-	// Selection is set for features only. Additive to the v1 contract.
+	// Selection is set for features and filters. Additive to the v1 contract.
 	Selection  *extensionListSelection `json:"selection,omitempty"`
 	Extensions []extensionListJSONExt  `json:"extensions"`
 }
 
-// extensionListSelection describes the feature selection that produced each
-// entry's enabled flag. Directives is null when no layer configures features.
+// extensionListSelection describes the feature or filter selection that
+// produced each entry's enabled flag. Directives is null when no layer
+// configures it.
 type extensionListSelection struct {
 	Directives []string `json:"directives"`
 	Source     string   `json:"source"`
@@ -67,6 +68,31 @@ type extensionListJSONExt struct {
 	AllowedDomains []string            `json:"allowedDomains,omitempty"`
 	DeniedDomains  []string            `json:"deniedDomains,omitempty"`
 	ReleaseHosts   []string            `json:"releaseHosts,omitempty"`
+	// The remaining fields are set for filters only. Additive to the v1
+	// contract.
+	GovernedHosts       []string                   `json:"governedHosts,omitempty"`
+	ConfinedDomains     []string                   `json:"confinedDomains,omitempty"`
+	CredentialType      string                     `json:"credentialType,omitempty"`
+	CredentialEndpoints *filterCredentialEndpoints `json:"credentialEndpoints,omitempty"`
+	CredentialSources   *filterCredentialSources   `json:"credentialSources,omitempty"`
+	DefaultPreset       string                     `json:"defaultPreset,omitempty"`
+	Presets             []string                   `json:"presets,omitempty"`
+}
+
+// filterCredentialEndpoints are the OAuth endpoints of an oauth2 filter. The
+// token endpoint receives the refresh token and the client secret.
+type filterCredentialEndpoints struct {
+	AuthURL   string `json:"authUrl"`
+	TokenURL  string `json:"tokenUrl"`
+	RevokeURL string `json:"revokeUrl,omitempty"`
+}
+
+// filterCredentialSources are where the host value of a static filter
+// credential is read.
+type filterCredentialSources struct {
+	Env      []string                `json:"env,omitempty"`
+	File     *model.SecretFileSource `json:"file,omitempty"`
+	Priority string                  `json:"priority"`
 }
 
 // extensionListPort mirrors model.PortConfig with camelCase keys.

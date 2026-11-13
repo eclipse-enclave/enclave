@@ -10,7 +10,8 @@ contracts over human-readable output, container labels, or Docker inspection.
 | `enclave network print --json` | Envelope, `schemaVersion: "1"`, `kind: "network-policy"` | [`network print --json`](#network-print---json) |
 | `enclave network log --json` | Raw JSONL event stream, or one aggregate object with `--summary` | [Reading the network log](networking.md#reading-the-network-log) |
 | `enclave version --json` | Object with version, commit, and date | [Inspect commands](cli-reference.md#inspect) |
-| `enclave tools\|features\|commands list --json`, and `add`/`update`/`remove --json` | `schemaVersion: "1"` | [Extension JSON output](extensions/json-output.md) |
+| `enclave tools\|features\|commands\|filters list --json`, and `add`/`update`/`remove --json` | `schemaVersion: "1"` | [Extension JSON output](extensions/json-output.md) |
+| `$ENCLAVE_FILTER_SUMMARY_DIR/<name>.json` inside a session | `schemaVersion: "1"`, `kind: "filter-summary"` | [Policy summary](filters.md#policy-summary) |
 
 Background-run output, lifecycle commands, and container naming
 (`enclave-<tool>-<project-hash>`, plus `-<session>` for other sessions; see
@@ -39,6 +40,8 @@ An array with one object per container (`--all` adds stopped ones):
 typed like `options.<name>.value` of [`config --json`](#config---json).
 
 - `features` is the sorted enabled set; `pass_env` holds names, never values.
+- `filters` holds the active request filters as `name:preset`, with the
+  default preset resolved, and `[]` without filters.
 - `backend` and `image_name` are the configured values (e.g. `auto`), not the
   detected engine or derived tag.
 - Host-side and one-shot options (e.g. `progress`, `verbose`, `reset_auth`,
@@ -72,13 +75,17 @@ Each `options.<name>` entry has:
 | `value` | The typed value a run with the same options uses, normalized and validated (lowercased domains, conflict resolution, qemu coercion); only normalized if validation fails. Lists are always arrays, maps always objects |
 | `source` | The layer that last set the raw option: `default`, `global`, `project`, `tool_override`, or `cli` |
 | `layers` | The raw value each of `global`, `project`, `tool_override`, and `cli` sets, after ignored keys are dropped and before normalization. Absent layers do not set the option. List entries keep their `+`/`-` prefixes as written; `tool_override` shows the two files' overrides combined |
-| `directives` | `features` and `host_config_paths` only: the raw selection, `null` when unset and `[]` for none |
+| `directives` | `features`, `host_config_paths`, and `filters` only: the raw selection, `null` when unset and `[]` for none |
 
 - `features` is the sorted set a run enables (after `slim`, devcontainer mode,
   and directives, without unknown names), or `null` with a
   `features_unavailable` warning (`valid` may stay `true`).
 - `host_config_paths` and `yolo` are resolved against the tool (`null`
   without one); `yolo` adds `resolvedBy` (`cli`, `config`, or `tool`).
+- `filters` is the selection as `name:preset` with each default preset
+  resolved, as a session records it. If a filter or preset cannot be
+  resolved, it keeps the entries as selected and a `filters_unavailable`
+  warning explains why. Grants and the backend are not checked.
 - `backend` keeps the configured value, including `auto`.
 
 Warning codes:
@@ -87,6 +94,7 @@ Warning codes:
 |------|---------|
 | `invalid_config_json`, `config_path_is_directory`, `unsupported_scope`, `invalid_tool_override`, `invalid_value`, `suspicious_value`, `project_guardrail` | Config loading; `layer` is `global`, `project`, or `tool_override:<tool>` |
 | `unknown_feature`, `features_unavailable` | Feature resolution |
+| `filters_unavailable` | A selected request filter or preset cannot be resolved |
 | `tool_unresolved` | No tool selected |
 | `tool_unavailable` | Tool profile cannot be loaded; also makes `valid` false |
 | `project_unavailable` | Project cannot be resolved |
@@ -123,27 +131,31 @@ The allowlist a run with the same options would enforce:
   "tool": "claude",
   "project": { "dir": "/home/you/src/app", "hash": "e9671acd2448" },
   "mode": "restricted",
-  "domains": ["anthropic.com", "api.anthropic.com", "github.com"],
+  "domains": ["anthropic.com", "api.anthropic.com", "github.com", "gmail.googleapis.com", "www.googleapis.com"],
   "denied": ["telemetry.example.com"],
   "notes": ["Hosts selected at session start through serviceAuth.hostsFromCredential are not listed."],
+  "filters": [
+    { "name": "gws", "preset": "readonly", "hosts": ["www.googleapis.com", "gmail.googleapis.com"], "confine": ["googleapis.com"] }
+  ],
   "error": ""
 }
 ```
 
 | Field | Content |
 |-------|---------|
-| `domains` | The allow set the gateway renders, canonical and sorted, without entries equal to or under a denied domain |
+| `domains` | The allow set the gateway renders, canonical and sorted, without entries equal to or under a denied domain, or under a confined domain unless a filter governs them |
 | `denied` | The blackholed domains, sorted |
-| `mode` | `restricted` or `unrestricted`; in unrestricted mode `domains`, `denied`, and `notes` are empty |
+| `mode` | `restricted` or `unrestricted`; in unrestricted mode `domains`, `denied`, `notes`, and `filters` are empty |
+| `filters` | The selected [request filters](filters.md) with their resolved preset, governed hosts as declared, wildcards kept, and [confined domains](extensions/filter-spec.md#confine). Their hosts are part of `domains` unless a deny rule covers them. The confined domains are blackholed too, apart from governed names |
 | `project` | `null` when the project cannot be resolved |
 
 Arrays are never `null`. Fields are only added, never renamed or removed.
 
 If the policy cannot be resolved (no or unknown tool, options a run would
-reject, a malformed spec, policy, or defaults file), stdout has one envelope
-with `error` set, `mode: null`, empty arrays (`tool: null` for startup
-failures), and exit code 1. Usage errors and warnings go to stderr only (exit
-1, empty stdout). Policy inputs:
+reject, an unknown filter or preset, a malformed spec, policy, or defaults
+file), stdout has one envelope with `error` set, `mode: null`, empty arrays
+(`tool: null` for startup failures), and exit code 1. Usage errors and
+warnings go to stderr only (exit 1, empty stdout). Policy inputs:
 [Managing the network policy](networking.md#managing-the-network-policy).
 
 ## Known consumers

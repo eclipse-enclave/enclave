@@ -22,6 +22,9 @@ func TestExtensionKindMappings(t *testing.T) {
 	if KindCommand.SpecKind() != ExtensionKindCommand || KindCommand.DirName() != "commands" || KindCommand.Label() != "command" {
 		t.Fatal("command kind mappings wrong")
 	}
+	if KindFilter.SpecKind() != ExtensionKindFilter || KindFilter.DirName() != "filters" || KindFilter.Label() != "filter" {
+		t.Fatal("filter kind mappings wrong")
+	}
 	for _, kind := range ExtensionKinds {
 		if back, ok := ExtensionKindFor(kind.SpecKind()); !ok || back != kind {
 			t.Fatalf("ExtensionKindFor(%q) = %q, %v", kind.SpecKind(), back, ok)

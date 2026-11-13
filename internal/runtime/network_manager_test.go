@@ -14,6 +14,9 @@ import (
 	"testing"
 
 	"enclave/internal/config"
+	"enclave/internal/filter"
+	"enclave/internal/filter/spec"
+	"enclave/internal/filterhost"
 	"enclave/internal/model"
 	"enclave/internal/network"
 	"enclave/internal/policy"
@@ -148,9 +151,68 @@ func TestPolicyDomainSourcePaths(t *testing.T) {
 	})
 }
 
+func TestBlockedFilterHostsNamesDenyRulesAndCapabilities(t *testing.T) {
+	gws := &filter.Policy{
+		Capabilities: map[string]filter.Capability{
+			"mail.read":  {Enabled: true},
+			"files.edit": {Enabled: true},
+			"docs.read":  {Enabled: true},
+		},
+		Routes: []filter.Route{
+			{Op: "get", Capability: "mail.read", Hosts: []string{"gmail.googleapis.com"}},
+			{Op: "edit", Capability: "files.edit", Hosts: []string{"*.example.com"}},
+			{Op: "read", Capability: "docs.read", Hosts: []string{"docs.example.org"}},
+		},
+	}
+	filters := []filterhost.SessionFilter{
+		{Filter: &spec.Filter{Name: "gws"}, Policy: gws},
+		{Filter: &spec.Filter{Name: "unresolved"}},
+	}
+	// googleapis.com blocks a name below it, a.example.com part of
+	// *.example.com, and x.docs.example.org none of docs.example.org.
+	denied := []string{"a.example.com", "googleapis.com", "x.docs.example.org"}
+
+	got := blockedFilterHosts(filters, denied)
+	want := []blockedFilterHost{
+		{filter: "gws", host: "*.example.com", denied: []string{"a.example.com"}, capabilities: []string{"files.edit"}},
+		{filter: "gws", host: "gmail.googleapis.com", denied: []string{"googleapis.com"}, capabilities: []string{"mail.read"}},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("blockedFilterHosts = %+v, want %+v", got, want)
+	}
+	if line := got[1].String(); line != "Filter gws: deny rule googleapis.com covers gmail.googleapis.com, used by mail.read" {
+		t.Fatalf("String() = %q", line)
+	}
+	multi := blockedFilterHost{filter: "gws", host: "a.b.example.com", denied: []string{"b.example.com", "example.com"}, capabilities: []string{"files.edit", "files.read"}}
+	if line := multi.String(); line != "Filter gws: deny rules b.example.com, example.com cover a.b.example.com, used by files.edit, files.read" {
+		t.Fatalf("String() = %q", line)
+	}
+	if got := blockedFilterHosts(filters, nil); got != nil {
+		t.Fatalf("blockedFilterHosts without deny rules = %+v", got)
+	}
+}
+
 func TestPartitionAdHocDomainsSeparatesDenied(t *testing.T) {
-	kept, denied := partitionAdHocDomains([]string{"ok.example.com", "Blocked.example.com", "api.tracker.example"}, []string{"blocked.example.com", "tracker.example"})
-	if !reflect.DeepEqual(kept, []string{"ok.example.com"}) || !reflect.DeepEqual(denied, []string{"Blocked.example.com", "api.tracker.example"}) {
+	blocked := func(domain string) bool {
+		return network.DomainBlocked(domain, []string{"blocked.example.com"}, []string{"tracker.example"}, []string{"api.tracker.example"})
+	}
+	kept, denied := partitionAdHocDomains([]string{"ok.example.com", "Blocked.example.com", "api.tracker.example", "www.tracker.example"}, blocked)
+	if !reflect.DeepEqual(kept, []string{"ok.example.com", "api.tracker.example"}) || !reflect.DeepEqual(denied, []string{"Blocked.example.com", "www.tracker.example"}) {
 		t.Fatalf("kept = %v, denied = %v", kept, denied)
+	}
+}
+
+func TestConfinedDomainLinesNameAllowlistedDomainsAFilterBlocks(t *testing.T) {
+	filters := []filterhost.SessionFilter{
+		{Filter: &spec.Filter{Name: "gws", Confine: []string{"googleapis.com"}}},
+		{Filter: &spec.Filter{Name: "other"}},
+	}
+	listed := []string{"api.github.com", "generativelanguage.googleapis.com", "gmail.googleapis.com", "googleapis.com", "storage.googleapis.com"}
+	allowed := []string{"api.github.com", "gmail.googleapis.com"}
+	denied := []string{"storage.googleapis.com"}
+	got := confinedDomainLines(filters, listed, allowed, denied)
+	want := []string{"Filter gws confines googleapis.com, blocking allowlisted generativelanguage.googleapis.com, googleapis.com"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("confinedDomainLines = %q, want %q", got, want)
 	}
 }

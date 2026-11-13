@@ -363,6 +363,15 @@ func optionCLIFlags() map[string][]CLIFlag {
 				return nil
 			}),
 		},
+		"filters": {
+			valueFlag("--filters", "Request filters as name or name:preset, comma-separated (+name adds, -name removes, none selects nothing)", "--filters requires a value", func(opts *model.Options, sources *model.OptionSources, value string) error {
+				if err := applyFilters(opts, value); err != nil {
+					return err
+				}
+				sources.Filters = model.SourceCLI
+				return nil
+			}),
+		},
 		"bridge_ports": {
 			valueFlag("--bridge-port", "Bridge host port into container (repeatable, comma-separated)", "--bridge-port requires a port number", func(opts *model.Options, sources *model.OptionSources, value string) error {
 				if err := applyBridgePort(opts, value); err != nil {

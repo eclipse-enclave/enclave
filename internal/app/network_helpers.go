@@ -115,11 +115,7 @@ func desiredGatewayBundleHash(resolver policy.EffectiveResolver, target backend.
 	if strings.TrimSpace(target.ProjectHash) == "" {
 		return "", fmt.Errorf("missing project hash label on gateway %s", target.ShortID())
 	}
-	resolved, err := resolver.Resolve(policy.ResolveInput{
-		ProjectDir:  targetProjectDir,
-		ProjectHash: target.ProjectHash,
-		Tool:        target.Tool,
-	})
+	resolved, err := resolver.Resolve(gatewayResolveInput(target, targetProjectDir))
 	if err != nil {
 		return "", err
 	}
@@ -128,6 +124,19 @@ func desiredGatewayBundleHash(resolver policy.EffectiveResolver, target backend.
 		Policy: resolved.Effective,
 		Tool:   target.Tool,
 	})
+}
+
+// gatewayResolveInput resolves the policy of a running gateway: the tool's
+// spec, the policy files, and the hosts its request filters govern and the
+// domains they confine, which the gateway labels record as it was started.
+func gatewayResolveInput(target backend.GatewayInfo, targetProjectDir string) policy.ResolveInput {
+	return policy.ResolveInput{
+		ProjectDir:    targetProjectDir,
+		ProjectHash:   target.ProjectHash,
+		Tool:          target.Tool,
+		FilterHosts:   target.FilterHosts,
+		FilterConfine: target.FilterConfine,
+	}
 }
 
 func hashGatewayBundleDir(dir string) (string, error) {

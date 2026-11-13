@@ -64,6 +64,7 @@ func TestMergeDefaultsCoversAllFields(t *testing.T) {
 		ProjectMount:           model.ProjectMountReadonly,
 		WorktreeMetadata:       model.WorktreeMetadataReadonly,
 		AllowDomains:           []string{"api.test.com"},
+		Filters:                []string{"gws:readonly"},
 		BridgePorts:            []string{"9800"},
 	}
 

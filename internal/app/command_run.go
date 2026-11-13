@@ -77,6 +77,14 @@ func runExecutionCommand(input *CommandInput) int {
 
 	yoloEnabled := resolveYoloEnabled(profile, opts)
 
+	// Filters fail fast: before the engine check and long before a build.
+	features, provenance := sessionFeaturesAndProvenance(input, opts, profile)
+	filters, err := prepareSessionFilters(input, opts, project, profile, features.enabled, provenance)
+	if err != nil {
+		logx.Errorf("%v", err)
+		return 1
+	}
+
 	if executionRequiresDocker(input.Action, opts) {
 		if code := requireDocker(); code != 0 {
 			return code
@@ -112,7 +120,6 @@ func runExecutionCommand(input *CommandInput) int {
 	if resolvedBuildConfig.Devcontainer != nil {
 		devcontainerConfig = &resolvedBuildConfig.Devcontainer.RuntimeConfig
 	}
-	features, provenance := sessionFeaturesAndProvenance(input, opts, profile)
 	runner := runtime.New(model.RuntimeConfig{
 		Paths:                 input.Ctx.Paths,
 		Host:                  host,
@@ -143,6 +150,7 @@ func runExecutionCommand(input *CommandInput) int {
 		return 1
 	}
 	runner.SetBackend(be)
+	runner.SetFilters(filters)
 	var execTarget runtime.ExecTarget
 	if input.Action == "exec" {
 		execTarget, err = execSessionTarget(context.Background(), be, opts, project)

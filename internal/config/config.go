@@ -65,6 +65,7 @@ type Defaults struct {
 	ProjectMount           string              `json:"project_mount"`
 	WorktreeMetadata       string              `json:"worktree_metadata"`
 	AllowDomains           []string            `json:"allow_domains"`
+	Filters                []string            `json:"filters"`
 	BridgePorts            []string            `json:"bridge_ports"`
 
 	// path is the file the values were read from, so list entries can name it.

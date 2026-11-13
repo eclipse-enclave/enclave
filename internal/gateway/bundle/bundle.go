@@ -134,7 +134,10 @@ func renderBundleFiles(policy network.EffectivePolicy, tool string) (renderedBun
 		return empty, err
 	}
 	resolver := network.FirstIPv4Resolver(policy.Resolvers)
-	dnsmasq := network.RenderDNSMasqConfig(domains, denied, resolver)
+	dnsmasq, err := network.RenderDnsmasqConfigForTool(policy, tool, resolver)
+	if err != nil {
+		return empty, err
+	}
 	domainsTxt := joinLines(domains)
 	deniedTxt := joinLines(denied)
 

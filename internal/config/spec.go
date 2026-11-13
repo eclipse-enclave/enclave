@@ -16,6 +16,7 @@ const (
 	KindSandbox      = model.ExtensionKindSandbox
 	KindMixin        = model.ExtensionKindMixin
 	KindCommand      = model.ExtensionKindCommand
+	KindFilter       = model.ExtensionKindFilter
 	SpecFilename     = "spec.yaml"
 	SpecFilenameJSON = "spec.json"
 	// SpecSchemaVersion is the only schemaVersion this loader accepts. Bump it

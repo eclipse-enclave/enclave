@@ -37,7 +37,9 @@ Paths in these docs use the Linux layout.
 | Cache | `~/.cache/enclave/` (`$XDG_CACHE_HOME`) | `~/Library/Caches/org.eclipse.enclave/` |
 
 `XDG_*` overrides are ignored on macOS. Contents:
-[Data on the host](persistence.md#data-on-the-host).
+[Data on the host](persistence.md#data-on-the-host). Request filter presets and
+grants live under the config and state roots
+([Host files](filters.md#host-files)).
 
 ## Precedence
 
@@ -133,6 +135,7 @@ See [Networking](networking.md).
 | `disable_gateway` | Run without a network gateway, so no network log is written; requires unrestricted network mode, otherwise the run fails |
 | `allow_domains` | Extra allowlisted domains (bare DNS names; ignored with `allow_all_network`) |
 | `network_log` | `coarse` (default), `requests`, or `full` (`requests` plus stored headers, bodies, and WebSocket messages in restricted mode; sensitive, see [Full capture](networking.md#full-capture)); see [Coverage and granularity](networking.md#coverage-and-granularity) |
+| `filters` | Request filters as `name` or `name:preset`, none by default. See [Selections](#selections) and [Request filters](filters.md) |
 | `ports` | Publish container ports to the host; `0:3000` assigns a free host port on Docker and Podman (see [port direction](networking.md#port-direction--p-vs---bridge-port)) |
 | `bridge_ports` | Forward host ports into the container |
 
@@ -249,7 +252,7 @@ adds; `-dir` removes and `none` makes the other paths replace.
 
 ### Selections
 
-`features` and `host_config_paths`:
+`features`, `host_config_paths`, and `filters`:
 
 ```json
 // Global config:
@@ -270,6 +273,10 @@ adds; `-dir` removes and `none` makes the other paths replace.
   `["-node-dev"]` drops a default feature, `["+gitlab-cli"]` adds an opt-in
   one. In devcontainer mode that set is empty.
 - `--features none` (in config `[]`) selects nothing and takes no other values.
+- `filters` entries are keyed by filter name: `+gws:send-any` replaces a
+  `gws:readonly` from a lower layer, and `-gws` removes gws whatever its
+  preset. No filter is selected by default, and names resolve at session
+  start ([Selection](filters.md#selection)).
 
 Feature names must match an installed extension. An unknown name, including
 `+name`, fails before building, even with `--no-rebuild`. Unknown `-name`

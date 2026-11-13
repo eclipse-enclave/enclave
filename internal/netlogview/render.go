@@ -221,8 +221,13 @@ func humanDomain(event netlog.Event) string {
 // denied or carried no payload, and the transferred size otherwise. The proxy
 // names its domain check "allowlist" for both verdicts, which on a denied row
 // reads as if the request was allowed; DNS blackhole denials get the same
-// label so one blocked domain reads the same on every row.
+// label so one blocked domain reads the same on every row. A request filter
+// decision names the filter and operation instead of the rule, and a denial
+// adds its reason.
 func humanDetail(event netlog.Event) string {
+	if event.Filter != "" {
+		return filterDetail(event)
+	}
 	if strings.EqualFold(event.Verdict, netlog.VerdictDeny) {
 		if event.Rule == netlog.RuleAllowlist || event.Rule == netlog.RuleNXDomain {
 			return "blocked by policy"
@@ -236,6 +241,32 @@ func humanDetail(event netlog.Event) string {
 		return util.FormatBytes(event.RequestSize)
 	}
 	return event.Rule
+}
+
+// filterDetail renders a request filter decision as "<filter>:<op>", followed
+// by the reason of a denial or the transferred size of a pass.
+func filterDetail(event netlog.Event) string {
+	label := event.Filter
+	if event.Op != "" {
+		label += ":" + event.Op
+	}
+	if strings.EqualFold(event.Verdict, netlog.VerdictDeny) {
+		if event.Reason != "" {
+			return label + " " + event.Reason
+		}
+		return label
+	}
+	size := event.ResponseSize
+	if size <= 0 {
+		size = event.RequestSize
+	}
+	switch {
+	case event.Rule != "" && event.Rule != netlog.RuleFilter:
+		return label + " " + event.Rule
+	case size > 0:
+		return label + " " + util.FormatBytes(size)
+	}
+	return label
 }
 
 // RenderSummary renders a per-domain aggregate.
@@ -294,6 +325,9 @@ func displaySafeEvent(event netlog.Event) netlog.Event {
 	event.Path = displaySafe(event.Path)
 	event.Rule = displaySafe(event.Rule)
 	event.CaptureID = displaySafe(event.CaptureID)
+	event.Filter = displaySafe(event.Filter)
+	event.Op = displaySafe(event.Op)
+	event.Reason = displaySafe(event.Reason)
 	return event
 }
 

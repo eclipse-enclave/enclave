@@ -441,6 +441,10 @@ func OptionSpecs() []OptionSpec {
 			Group: OptionGroupRun,
 		},
 		{
+			Name:  "filters",
+			Group: OptionGroupRun,
+		},
+		{
 			Name:  "bridge_ports",
 			Group: OptionGroupRun,
 		},

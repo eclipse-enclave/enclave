@@ -1,0 +1,6 @@
+description: Read, and send mail only to eclipsesource.com.
+extends: readonly
+allow:
+  mail.send: { recipients: ["@eclipsesource.com"] }
+quotas:
+  mail.sent: 20

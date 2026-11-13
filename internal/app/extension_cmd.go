@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"enclave/internal/config"
+	"enclave/internal/filterhost"
 	"enclave/internal/logx"
 )
 
@@ -69,6 +70,21 @@ func runExtensionList(ctx *AppContext) int {
 		fmt.Println("  (none)")
 	} else {
 		for _, ext := range commands {
+			printExtensionLine(ext.Name, config.SourceUser, strings.TrimSpace(ext.Description))
+		}
+	}
+
+	filters, err := filterhost.List(ctx.Paths, warnStderr)
+	if err != nil {
+		logx.Errorf("list filters: %v", err)
+		return 1
+	}
+	fmt.Println("")
+	fmt.Println("FILTER EXTENSIONS")
+	if len(filters) == 0 {
+		fmt.Println("  (none)")
+	} else {
+		for _, ext := range filters {
 			printExtensionLine(ext.Name, config.SourceUser, strings.TrimSpace(ext.Description))
 		}
 	}

@@ -30,6 +30,18 @@ type networkPolicyEnvelope struct {
 	Denied        []string              `json:"denied"`
 	Notes         []string              `json:"notes"`
 	Error         string                `json:"error"`
+	// Filters lists the selected request filters, the hosts they govern,
+	// which are part of Domains unless denied, and the domains they confine.
+	// Additive to the v1 contract.
+	Filters []networkPolicyFilter `json:"filters"`
+}
+
+// networkPolicyFilter is one selected request filter.
+type networkPolicyFilter struct {
+	Name    string   `json:"name"`
+	Preset  string   `json:"preset"`
+	Hosts   []string `json:"hosts"`
+	Confine []string `json:"confine"`
 }
 
 type networkPolicyProject struct {
@@ -54,6 +66,9 @@ func writeNetworkPolicyJSON(w io.Writer, input *CommandInput) int {
 			return writeNetworkPolicyEnvelope(w, networkPolicyEnvelope{Tool: &policyCtx.Tool}, input.Ctx.Project, err)
 		}
 		envelope.Notes = []string{networkPolicyNoteHostsFromCredential}
+		for _, sf := range policyCtx.Filters {
+			envelope.Filters = append(envelope.Filters, networkPolicyFilter{Name: sf.Filter.Name, Preset: sf.Preset.Name, Hosts: sf.Hosts(), Confine: append([]string{}, sf.Confine()...)})
+		}
 	}
 	envelope.Mode = &mode
 	return writeNetworkPolicyEnvelope(w, envelope, input.Ctx.Project, nil)
@@ -70,6 +85,7 @@ func writeNetworkPolicyEnvelope(w io.Writer, envelope networkPolicyEnvelope, res
 	envelope.Domains = append([]string{}, envelope.Domains...)
 	envelope.Denied = append([]string{}, envelope.Denied...)
 	envelope.Notes = append([]string{}, envelope.Notes...)
+	envelope.Filters = append([]networkPolicyFilter{}, envelope.Filters...)
 	code := 0
 	if policyErr != nil {
 		envelope.Error = policyErr.Error()

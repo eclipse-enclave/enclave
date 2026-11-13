@@ -1,13 +1,15 @@
 # Extensions
 
-Extensions add agents, development tools, and host commands to Enclave.
+Extensions add agents, development tools, host commands, and request filters
+to Enclave.
 
 | Page | For |
 |------|-----|
 | [Installing extensions](installing.md) | Installing, updating, and removing extensions from git |
 | [Spec reference](spec-reference.md) | Every `spec.yaml` field and sibling file |
 | [Credentials and providers](credentials.md) | Secrets, gateway header injection, placeholders, auth detection |
-| [Adding a tool](adding-a-tool.md), [Adding a feature](adding-a-feature.md) | Step-by-step guides |
+| [Adding a tool](adding-a-tool.md), [Adding a feature](adding-a-feature.md), [Adding a filter](adding-a-filter.md) | Step-by-step guides |
+| [Filter spec reference](filter-spec.md) | Every field of a request filter's `spec.yaml` and presets |
 | [Custom commands](../commands.md) | Host and session commands, including extension-shipped ones |
 | [JSON output](json-output.md) | `list --json` and the `add`/`update`/`remove` result envelope |
 | [DEV.md](../DEV.md#testing-extensions) | Testing the extension system itself |
@@ -19,6 +21,7 @@ Extensions add agents, development tools, and host commands to Enclave.
 | Tool | `sandbox` | A runnable AI coding agent (Claude, Codex, OpenCode, ...) | `extensions/tools/<name>/` |
 | Feature | `mixin` | Development tools added to the tool image (GitHub CLI, Python tools, ...) | `extensions/features/<name>/` |
 | Command | `command` | Host commands only, no container side | None; user root only |
+| Filter | `filter` | Data the gateway enforces on requests to an API, holding its credential | None, user root only |
 
 ## Built-in features
 
@@ -93,17 +96,18 @@ Only `spec.yaml` is the manifest; the other entries are sibling files (see
 `aptPackages`, `failOnInstallError`, and `commands.install` from `spec.yaml`
 (or `spec.json`) with `yq`.
 
-## Tools and features compared
+## Kinds compared
 
-| Aspect | Tool (`kind: sandbox`) | Feature (`kind: mixin`) |
-|--------|------------------------|-------------------------|
-| `sandbox` block | Required | Not used |
-| `gateway-allowlist.conf` | Ships one; falls back to `base.conf` | Not used; declares domains in `network` |
-| Startup scripts | `entrypoint.d/`, only for this tool | `feature-entrypoint.d/`, for every tool |
-| Selection | `--tool` or `tool`; one image per tool | `features` or `--features`; rebuilds on the next run |
-| `needsRoot`, `aptPackages` | Not used | Install user; apt packages |
-| Declared `ports` | Published for every session of the tool | Published when the feature is enabled |
-| `credentials`, `network` | Yes | Yes |
+| Aspect | Tool (`kind: sandbox`) | Feature (`kind: mixin`) | Filter (`kind: filter`) |
+|--------|------------------------|-------------------------|-------------------------|
+| Schema | [Spec reference](spec-reference.md) | [Spec reference](spec-reference.md) | [Filter spec reference](filter-spec.md) |
+| `sandbox` block | Required | Not used | Not used |
+| `gateway-allowlist.conf` | Ships one; falls back to `base.conf` | Not used; declares domains in `network` | Not used. Governed `hosts` join the allowlist |
+| Startup scripts | `entrypoint.d/`, only for this tool | `feature-entrypoint.d/`, for every tool | None, data only |
+| Selection | `--tool` or `tool`; one image per tool | `features` or `--features`; rebuilds on the next run | `filters` or `--filters` with a preset, never rebuilds |
+| `needsRoot`, `aptPackages` | Not used | Install user; apt packages | Not used |
+| Declared `ports` | Published for every session of the tool | Published when the feature is enabled | Not used |
+| `credentials`, `network` | Yes | Yes | Own `credential` and `hosts` |
 
 ## Host commands
 
@@ -147,6 +151,33 @@ description: Token usage across persisted sessions
   means available.
 - They are never built in. `kind: command` is Enclave's own; sbx kits have no
   host commands.
+
+## Request filters
+
+A request filter (`kind: filter`) lets the agent use a third-party API through
+the gateway, which holds the credential and forwards only what the selected
+preset allows ([Request filters](../filters.md)).
+
+```
+gws/
+├── spec.yaml               # Hosts, credential, capabilities, routes
+├── README.md
+├── SECURITY.md
+├── presets/readonly.yaml   # Shipped presets
+└── commands/host/...       # Optional host commands
+```
+
+- A filter is data only. Nothing in it runs at install, build, or start, and
+  other entries such as `install.sh`, `files/`, or `skills/` are reported as
+  ignored
+  ([Data-only filters](../security/request-filters.md#data-only-filters)).
+- Manage filters with `enclave filters list|add|update|remove`
+  ([Installing extensions](installing.md)). They install into
+  `~/.config/enclave/extensions/filters/<name>/` and never reach the build
+  context or image hash.
+- Field reference: [Filter spec reference](filter-spec.md). Guide:
+  [Adding a filter](adding-a-filter.md).
+- They are never built in. `kind: filter` is Enclave's own.
 
 ## How it works
 

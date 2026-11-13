@@ -151,6 +151,13 @@ These env credentials use gateway placeholders under restricted networking:
   targets are never removed. A shared store that already holds a placeholder
   needs a new login or `--reset-auth`.
 
+## Third-party API credentials
+
+To let the agent call an API such as Google Workspace without ever seeing its
+credential, install a request filter and log in on the host with
+`enclave filters login`. The gateway holds the grant and forwards only the
+operations the selected preset allows. See [Request filters](filters.md).
+
 ## Secrets files
 
 Layered `.env` files supply values for declared env secrets and `--pass-env`.
@@ -186,7 +193,8 @@ the highest layer wins, and its value is injected into every alias and written
 back to the env store, so rotating one alias is enough and a stale stored value
 is replaced after one run. Two aliases with different values in the winning
 layer fail the run, naming the layer; disagreement in a lower layer is only
-logged.
+logged. Static [request filter](filters.md) credentials resolve their aliases
+the same way, without writing back.
 
 ## Host environment variables
 

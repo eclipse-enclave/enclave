@@ -44,6 +44,10 @@ func (b *Backend) startGateway(ctx context.Context, req backend.Request, network
 		DeniedDomains: append([]string(nil), req.Network.Egress.DeniedDomains...),
 		Resolvers:     append([]string(nil), req.Network.Egress.Resolvers...),
 	}
+	for _, bundle := range req.Filters {
+		policy.GovernedDomains = append(policy.GovernedDomains, network.NormalizeSpecDomains(bundle.Hosts)...)
+		policy.ConfinedDomains = append(policy.ConfinedDomains, bundle.Confine...)
+	}
 	if err := bundle.WriteConfigBundle(bundle.BundleWriteConfig{Dir: gatewayConfigDir, Policy: policy, Tool: req.Session.Tool}); err != nil {
 		return "", nil, fmt.Errorf("failed to write gateway config bundle: %w", err)
 	}
@@ -52,16 +56,30 @@ func (b *Backend) startGateway(ctx context.Context, req backend.Request, network
 	if err != nil {
 		return "", nil, err
 	}
+	filterDir, err := writeFilterBundles(req.Filters)
+	if err != nil {
+		cleanupFiles([]string{secretReleaseFile})
+		return "", nil, err
+	}
 	startConfig := b.gatewayStartConfig(req, networkName, gatewayConfigDir)
 	startConfig.NetworkMode = model.NetworkModeRestricted
 	startConfig.SecretReleaseFile = secretReleaseFile
+	startConfig.FilterDir = filterDir
+	for _, bundle := range req.Filters {
+		startConfig.FilterNames = append(startConfig.FilterNames, bundle.Name)
+		startConfig.FilterHosts = append(startConfig.FilterHosts, bundle.Hosts...)
+		startConfig.FilterConfine = append(startConfig.FilterConfine, bundle.Confine...)
+	}
 	return b.runGateway(ctx, startConfig, "failed to start DNS gateway")
 }
 
 // startObservingGateway starts the gateway of an unrestricted session. It
-// enforces nothing, so it gets no config bundle and no secret releases: the
-// session holds the real values.
+// enforces nothing, so it gets no config bundle, no secret releases, and no
+// request filters: the session holds the real values.
 func (b *Backend) startObservingGateway(ctx context.Context, req backend.Request, networkName string) (string, func(), error) {
+	if len(req.Filters) > 0 {
+		return "", nil, fmt.Errorf("request filters need a restricted gateway, an unrestricted session cannot enforce them")
+	}
 	startConfig := b.gatewayStartConfig(req, networkName, "")
 	startConfig.NetworkMode = model.NetworkModeUnrestricted
 	startConfig.Hostname = req.Hostname
@@ -110,8 +128,13 @@ func (b *Backend) runGateway(ctx context.Context, startConfig gateway.StartConfi
 	result, err := gateway.Start(ctx, startConfig)
 	if err != nil {
 		cleanupFiles(tempFiles)
+		cleanupDir(startConfig.FilterDir)
 		return "", nil, fmt.Errorf("%s: %w", errPrefix, err)
 	}
+	// A ready gateway has copied the request filters into its private data
+	// dir. Their credentials leave the host temp dir now rather than when the
+	// session ends, which a detached session never reports here.
+	cleanupDir(startConfig.FilterDir)
 	tempFiles = append(tempFiles, result.TempFiles...)
 	cleanup := func() {
 		gatewayRef := result.ContainerID
@@ -366,6 +389,15 @@ func writeSecretReleaseConfig(secrets []backend.SecretRelease) (string, error) {
 		return "", fmt.Errorf("chmod secret release config: %w", err)
 	}
 	return tmpPath, nil
+}
+
+// cleanupDir removes a temp directory this process created, such as the
+// request filter directory.
+func cleanupDir(path string) {
+	if strings.TrimSpace(path) == "" {
+		return
+	}
+	_ = os.RemoveAll(filepath.Clean(path)) // #nosec G304 G703 -- path is a temp directory created by this process.
 }
 
 func cleanupFiles(paths []string) {

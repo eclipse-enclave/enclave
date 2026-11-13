@@ -116,8 +116,8 @@ rebuilds only on a changed upstream fingerprint. A normal run never forces an
 update. Tools without the hook refresh on `enclave update`, `--rebuild`, or any
 other rebuild.
 
-`enclave tools|features|commands update` refresh extension sources, not
-images.
+`enclave tools|features|commands|filters update` refresh extension sources,
+not images.
 
 ## Build cache
 

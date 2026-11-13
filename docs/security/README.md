@@ -61,12 +61,15 @@ HTTP/TLS proxy) that enforces the domain allowlist by DNS and Host/SNI; see the
 [network request flow](../runtime/network-request-flow.md). Limits:
 
 - An allowed IP is reachable on any port; ports other than 80 and 443 skip the
-  proxy and the log. Broad CDN allowlists widen the tunneling surface.
+  proxy and the log. Broad CDN allowlists widen the tunneling surface. The
+  addresses of hosts a [request filter](request-filters.md) governs are the
+  exception: only the proxy reaches them, on TCP 80 and 443.
 - The gateway is privileged (`NET_ADMIN`, `NET_RAW`) and shares the tool's
   network namespace, so a gateway vulnerability can weaken policy.
 - The allowlist is destination policy, not content policy: paths, methods,
   bodies, responses, and a service's own proxy or relay features are not
-  constrained. Treat every allowlisted service as part of the trust boundary.
+  constrained, except on hosts a [request filter](request-filters.md)
+  governs. Treat every allowlisted service as part of the trust boundary.
 - The network log records decisions, not all traffic: in `coarse` mode a reused
   TLS connection is one event, successful DNS lookups are not logged, and
   request detail exists only for plaintext HTTP and MITM'd hosts
@@ -130,3 +133,6 @@ rule are stored as sent. See [Full capture](../networking.md#full-capture).
 - A configured SSH key is available to every session of every project and
   tool, and SSH on port 22 bypasses the proxy, so pushes never appear in
   `network.log`. See [SSH keys](../auth.md#ssh-keys).
+- Request filter credentials stay on the host and in the gateway. The
+  container gets a placeholder that the gateway honors only on requests the
+  selected preset allows. See [Request filters](request-filters.md).

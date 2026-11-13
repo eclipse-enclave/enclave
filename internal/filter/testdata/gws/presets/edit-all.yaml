@@ -1,0 +1,8 @@
+description: Edit, upload, and trash anywhere.
+extends: readonly
+allow:
+  files.edit: { resources: "*" }
+  files.create: { parents: "*" }
+  files.delete: { resources: "*" }
+  labels.modify: true
+deny: [files.read]

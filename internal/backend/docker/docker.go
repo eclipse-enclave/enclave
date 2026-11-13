@@ -85,7 +85,7 @@ func (b *Backend) Check(ctx context.Context) error {
 }
 
 func (b *Backend) Capabilities() backend.Capabilities {
-	return backend.Capabilities{RestrictedNetwork: true, SecretHTTPRelease: true}
+	return backend.Capabilities{RestrictedNetwork: true, SecretHTTPRelease: true, RequestFilters: true}
 }
 
 func (b *Backend) Storage() backend.StoreManager { return b.storage }
@@ -414,6 +414,9 @@ type runSpec struct {
 
 func (b *Backend) prepareRun(ctx context.Context, req backend.Request) (runSpec, error) {
 	if err := backend.Validate(req, b.Capabilities()); err != nil {
+		return runSpec{}, err
+	}
+	if err := checkFilterEnforcement(req); err != nil {
 		return runSpec{}, err
 	}
 	dockerSystemInfo, err := dockerInfo(ctx)

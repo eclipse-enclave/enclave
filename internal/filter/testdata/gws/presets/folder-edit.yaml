@@ -1,0 +1,9 @@
+description: Read everything, edit and upload only inside one folder.
+extends: readonly
+allow:
+  files.edit: { resources: { ids: ["DOC1"], within: ["FOLDER1"] } }
+  files.create: { parents: { within: ["FOLDER1"] } }
+  files.delete: { resources: { within: ["FOLDER1"] } }
+  labels.modify: { labels: ["STARRED", "IMPORTANT"] }
+quotas:
+  files.written: 50

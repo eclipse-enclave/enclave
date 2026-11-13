@@ -9,6 +9,11 @@ All stores are host directories under `~/.local/state/enclave/` (honoring
 `$XDG_STATE_HOME`), bind-mounted into the container; there are no Docker
 volumes.
 
+Request filter grants are not stores. They live under
+`~/.local/state/enclave/filters/`, are never mounted, and reach only the
+gateway, as a copy made at session start
+([Credential lifecycle](../security/request-filters.md#credential-lifecycle)).
+
 ## Store types
 
 | Type | Host path | Scope | Purpose |
@@ -156,6 +161,9 @@ backend's store manager:
 3. Afterwards, write current values back under a store lock (atomic temp file
    and rename, mode `0600`).
 
+Static [request filter](../filters.md) credentials read it too, before the
+build and without writing back, unless `--ephemeral` or `--reset-auth` is set.
+
 It holds real values; credentials with an HTTP release rule
 (`network.serviceAuth`) reach the container only as placeholders. Withheld API
 keys are skipped before resolution and never stored.
@@ -166,7 +174,9 @@ Source:
 [`internal/backend/docker/prepare.go`](../../internal/backend/docker/prepare.go)
 (mechanics),
 [`internal/runtime/auth_manager.go`](../../internal/runtime/auth_manager.go)
-`readPersistedEnv`, `persistEnvToStore`
+`readPersistedEnv`, `persistEnvToStore`,
+[`internal/app/session_filters.go`](../../internal/app/session_filters.go)
+`sessionSecretSources`
 
 ## Shared auth store
 

@@ -39,6 +39,8 @@ type CommandInput struct {
 	NetworkLogView model.NetworkLogView
 	// NetworkPrintJSON selects the JSON envelope of `enclave network print`.
 	NetworkPrintJSON bool
+	// FilterRequest is the parsed request of a filter verb, or nil.
+	FilterRequest *cli.FilterRequest
 	// UserCommandMount, when set, exposes the host session command tree read-only
 	// inside the container. Populated only for `enclave <name>` session
 	// commands dispatched through the run pipeline.
@@ -73,6 +75,10 @@ func dispatchCommand(input *CommandInput) int {
 		return runFeatures(input.Ctx, input.ExtRequest, input.Options, input.Sources)
 	case "commands":
 		return runCommandExtensions(input.Ctx, input.ExtRequest)
+	case "filters":
+		return runFilterExtensions(input)
+	case cli.ActionFiltersShow, cli.ActionFiltersLogin, cli.ActionFiltersGrants, cli.ActionFiltersLogout:
+		return runFilterCommand(input)
 	case "extension-list":
 		return runExtensionList(input.Ctx)
 	case cli.ActionExtensionManage:

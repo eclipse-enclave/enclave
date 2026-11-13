@@ -10,7 +10,9 @@ microVM ([backends.md](backends.md)). Build and test commands are in
 
 1. Parse CLI arguments, load host configuration, and resolve the tool profile.
    Standalone release binaries check for updates at most daily
-   ([Updating](install.md#updating), [Self-update](#self-update)).
+   ([Updating](install.md#updating), [Self-update](#self-update)). Selected
+   request filters resolve here and fail the run before any build
+   ([Request filters](#request-filters)).
 2. Discover repository assets (Dockerfiles, runtime assets, profiles).
 3. Ensure the runtime image is current, rebuilding if needed:
    - Rebuild detection hashes the rendered Dockerfile and entrypoint plus build
@@ -22,7 +24,8 @@ microVM ([backends.md](backends.md)). Build and test commands are in
      build. Per-tool stages scope cache invalidation to the updated tool.
    - `--no-rebuild` / `ENCLAVE_NO_REBUILD=1` skips probes and all image builds
      ([Suppressing rebuilds](tools.md#suppressing-rebuilds)).
-4. Prepare mounts, persistent stores, auth, and network isolation.
+4. Prepare mounts, persistent stores, auth, network isolation, and request
+   filter bundles.
 5. Run the tool or shell inside an ephemeral container.
 
 ## Diagrams
@@ -36,6 +39,7 @@ flowchart LR
         CacheDir["~/.cache/enclave/&lt;tool&gt;/&lt;hash&gt;"]
         HistoryDir["~/.local/state/enclave/projects/&lt;hash&gt;/&lt;tool&gt;/history"]
         SSHDir["~/.cache/enclave/ssh"]
+        FilterState["~/.local/state/enclave/filters/&lt;filter&gt;<br/>OAuth client and grants, never mounted"]
     end
 
     subgraph Stores["Persistent stores (host dirs under ~/.local/state/enclave)"]
@@ -43,6 +47,7 @@ flowchart LR
         EnvStore["projects/&lt;hash&gt;/&lt;tool&gt;/env<br/>persisted env secrets, not mounted into the tool container"]
         SharedAuthStore["tools/&lt;tool&gt;/auth<br/>shared tool auth store, only with --auth-scope=shared"]
         FeatureAuthStore["features/&lt;feature&gt;/auth<br/>shared feature auth store, only with --auth-scope=shared"]
+        FilterSummaries["projects/&lt;hash&gt;/&lt;tool&gt;/filter-summaries/&lt;key&gt;<br/>request filter policy summaries"]
     end
 
     subgraph Docker
@@ -59,6 +64,8 @@ flowchart LR
     EnvStore -.->|"host-side read/write env file"| Tool
     SharedAuthStore -->|"bind mount (~/.enclave-auth)"| Tool
     FeatureAuthStore -->|"bind mount (~/.enclave-feature-auth/&lt;feature&gt;)"| Tool
+    FilterSummaries -->|"read-only bind mount (/opt/enclave/filters)"| Tool
+    FilterState -.->|"policy and credential bundle<br/>(private temp dir, read-only mount,<br/>deleted on the host once the gateway is ready)"| Gateway
     Gateway --> DnsNet
     Tool -.->|"shares network namespace<br/>resolver/proxy"| Gateway
 ```
@@ -124,7 +131,9 @@ The network request flow, restricted and unrestricted, has separate
 | [`tools.go`](../internal/app/tools.go) | Lists tool profiles |
 | [`network_cmd.go`](../internal/app/network_cmd.go), [`network_log_cmd.go`](../internal/app/network_log_cmd.go) | `enclave network` subcommands and `network log` |
 | [`internal/cli/network_command.go`](../internal/cli/network_command.go) | Cobra tree for `network` |
-| [`internal/extinstall/`](../internal/extinstall/) | `enclave tools|features|commands add|update|remove` |
+| [`internal/extinstall/`](../internal/extinstall/) | `enclave tools|features|commands|filters add|update|remove` |
+| [`session_filters.go`](../internal/app/session_filters.go) | Resolves the `filters` selection at session start: enforceability, grants, collisions, provenance |
+| [`filters_cmd.go`](../internal/app/filters_cmd.go), [`filter_extensions.go`](../internal/app/filter_extensions.go), [`internal/cli/filters_command.go`](../internal/cli/filters_command.go) | `enclave filters` listing and `show`, `login`, `grants`, `logout` |
 
 ### Configuration and profiles
 
@@ -142,19 +151,33 @@ The network request flow, restricted and unrestricted, has separate
 | [`internal/runtime/runtime.go`](../internal/runtime/runtime.go) | Coordinates mounts, stores, auth, network, and execution through the backend |
 | [`internal/runtime/`](../internal/runtime/) `auth_manager.go`, `volume_manager.go`, `network_manager.go`, `command_builder.go` | Focused runtime concerns |
 | [`internal/runtime/secret_mapping.go`](../internal/runtime/secret_mapping.go) | `SecretMapping`: placeholder release rules passed to the gateway |
+| [`internal/runtime/secret_sources.go`](../internal/runtime/secret_sources.go) | `ReadSecretSources`: the secrets files and env store, under its lock, that a session's credentials and static filter credentials resolve from |
 | [`internal/backend/`](../internal/backend/) | Backend-neutral session contract; [`docker/`](../internal/backend/docker/) (also Podman) and [`qemu/`](../internal/backend/qemu/) implement it |
 | [`internal/docker/`](../internal/docker/) | Wraps the Docker or Podman CLI |
 | [`internal/mounts/mounts.go`](../internal/mounts/mounts.go) | Mount path validation, worktrees, port mapping |
 | [`internal/mounts/sensitive.go`](../internal/mounts/sensitive.go) | The sensitive-path rule ([mounts.md](mounts.md#sensitive-mounts)) |
 | [`internal/auth/auth.go`](../internal/auth/auth.go) | Layered secrets, auth file copies, Claude-specific config |
 | [`internal/auth/secret_injection.go`](../internal/auth/secret_injection.go) | `PlaceholderResolver`: random `ENCLAVE_SECRET_*` placeholders |
-| [`internal/auth/secret_sources.go`](../internal/auth/secret_sources.go) | `SecretSources`: env alias and file resolution of declared credentials |
+| [`internal/auth/secret_sources.go`](../internal/auth/secret_sources.go) | `SecretSources`: env alias and file resolution of declared credentials, shared by the runtime and static request filter credentials |
 | [`internal/gateway/gateway.go`](../internal/gateway/gateway.go) | Sidecar container and network; keeps logs until explicit removal, removes by immutable ID |
 | [`internal/gateway/bundle/`](../internal/gateway/bundle/bundle.go) | Host-managed bundles (`dnsmasq.conf`, `domains.txt`, `meta.json`) for apply and reload |
 | [`internal/gateway/mitm/`](../internal/gateway/mitm/) | TLS MITM, allowlist checks and in-place reloads, placeholder rewriting; writes events through `internal/netlog` |
 | [`internal/gateway/dnsaudit/`](../internal/gateway/dnsaudit/) | Turns dnsmasq denials into `dns` events; own process (`enclave-gateway-proxy -dns-audit <log>`), so it works without the proxy |
 | [`internal/gateway/wsframe/`](../internal/gateway/wsframe/) | Shared RFC 6455 frame parser; unmasks payloads without taking part in the connection |
 | [`internal/gateway/tlsstore/`](../internal/gateway/tlsstore/) | CA and container-private leaf cache; only the CA reaches the host |
+
+### Request filter packages
+
+| Path | Purpose |
+|------|---------|
+| [`internal/filter/`](../internal/filter/) | Compiled `Policy`, `Credential` payload, and container `Summary`, plus the policy language shared by `spec` and `engine`: path templates, JSON paths, bind steps, constraint values |
+| [`internal/filter/spec/`](../internal/filter/spec/) | Loads and validates filter specs and presets with case-sensitive keys, resolves presets and scopes, selects grants, compiles a policy |
+| [`internal/filter/engine/`](../internal/filter/engine/) | Evaluates requests and responses: routes, binds, constraints, resolvers, quota ledger, deny rendering |
+| [`internal/filter/token/`](../internal/filter/token/) | Static and OAuth2 refresh-token sources for the gateway, and the token exchange the host's login and import share |
+| [`internal/filterhost/`](../internal/filterhost/) | Host side: loading, grants, login, import, revoke, `show`, session resolution, collision checks |
+| [`internal/runtime/filters.go`](../internal/runtime/filters.go) | Summary mount, container env, and bundles for the backend request |
+| [`internal/extinstall/filter_capabilities.go`](../internal/extinstall/filter_capabilities.go) | Capability summary and update diff rows for filters |
+| `internal/gateway/mitm/filters.go`, `internal/backend/docker/filters.go` | Gateway side: loading bundles from `ENCLAVE_FILTER_DIR` into engines, and writing the bundle directory the gateway mounts |
 
 ### Tools, network policy, and devcontainers
 
@@ -189,6 +212,7 @@ extensions, hence the `//go:build !windows` on
 |------|---------|
 | [`internal/model/types.go`](../internal/model/types.go) | Core types and constants |
 | [`internal/util/util.go`](../internal/util/util.go) | Hashing, path checks, string helpers |
+| [`internal/util/read_file.go`](../internal/util/read_file.go) | Size-limited reads of regular files, optionally refusing symlinks |
 | [`internal/envflag/`](../internal/envflag/) | On/off env switches; stdlib only, since the launcher imports it |
 | [`internal/logx/logx.go`](../internal/logx/logx.go) | Logging with color and debug level |
 | [`internal/testutil/`](../internal/testutil/) | Shared test helpers, such as HOME write snapshots |
@@ -200,7 +224,7 @@ extensions, hence the `//go:build !windows` on
 |------|---------|
 | [`Dockerfile`](../Dockerfile) | Runtime image: `tool-base` -> `feature-base` -> `standard` plus per-tool stages; contexts and hashes scoped to the selected tools and features |
 | [`Dockerfile.gateway`](../Dockerfile.gateway) | Gateway image (DNS, transparent proxy, MITM proxy) |
-| [`gateway-entrypoint.sh`](../gateway-entrypoint.sh) | Supervisor: validates bundles, copies secret releases into the proxy's private data directory (a tmpfs), runs dnsmasq and proxy, reloads on SIGHUP, fails closed; when the container's `ENCLAVE_GATEWAY_NETWORK_MODE` is `unrestricted`, only the 80/443 redirect and proxy, no reloads, fail open when the proxy dies |
+| [`gateway-entrypoint.sh`](../gateway-entrypoint.sh) | Supervisor: validates bundles, copies request filter bundles and secret releases into the proxy's private data directory (a tmpfs), runs dnsmasq and proxy, reloads on SIGHUP, fails closed; when the container's `ENCLAVE_GATEWAY_NETWORK_MODE` is `unrestricted`, only the 80/443 redirect and proxy, no reloads, fail open when the proxy dies |
 | [`entrypoint.sh`](../entrypoint.sh) | Auth symlinks, settings seeding, telemetry defaults, direnv, gitconfig |
 | [`runtime-assets/gateway-allowlists/`](../runtime-assets/gateway-allowlists/) | Base DNS allowlists and fragments |
 | [`runtime-assets/build-scripts/`](../runtime-assets/build-scripts/) | Build composition: features, templates, agent tool helpers |
@@ -301,10 +325,10 @@ the attached endpoint and the tool shares its network namespace; with
 `--disable-gateway` the tool is attached directly. In restricted mode DNS
 blocks unknown domains, the gateway admits inbound traffic only for loopback,
 replies, and published ports, and the proxy tunnels TLS and uses MITM only for
-secret-release hosts or under `network_log=requests` or `full`. In unrestricted
-mode the gateway only observes: it keeps Docker's resolver, installs no filters,
-and logs TCP 80/443. User-facing behavior is in [networking.md](networking.md);
-the request path, in both modes, is in
+secret-release hosts, request filter hosts, or under `network_log=requests` or
+`full`. In unrestricted mode the gateway only observes: it keeps Docker's
+resolver, installs no filters, and logs TCP 80/443. User-facing behavior is in
+[networking.md](networking.md); the request path, in both modes, is in
 [network-request-flow.md](runtime/network-request-flow.md).
 
 Sidecar lifecycle:
@@ -321,10 +345,13 @@ Gateways and bridges carry labels (`enclave.gateway`, `enclave.agent`,
 `enclave.gateway.project_hash`, ownership labels) for discovery and lifecycle;
 consumers should use `enclave ps --json` instead. Unrestricted gateways also
 carry `enclave.gateway.mode=unrestricted`; a gateway without it is restricted.
+A gateway with request filters carries `enclave.gateway.filters` and
+`enclave.gateway.filter_hosts`, and `enclave.gateway.filter_confine` when they
+confine domains.
 `network apply` writes a new bundle, sends SIGHUP, and polls logs for
 confirmation; the supervisor validates before swapping and fails closed. It
 then signals the proxy to reload the allowlist in place rather than restarting
-it, so the proxy keeps its in-memory state.
+it, so request filter quotas survive.
 Unrestricted gateways are skipped: a running gateway never changes mode.
 
 Audit events go through `netlog.Event` to `logs/network.log`: the MITM proxy
@@ -362,6 +389,39 @@ internal secret configs with release rules
 This covers env injection only; files written by auth hooks can still hold the
 real secret.
 
+### Request filters
+
+Filters (`kind: filter`) are data the gateway enforces
+([filters.md](filters.md), [security concept](security/request-filters.md)):
+
+1. Option validation in `internal/app` refuses filters without the
+   backend's `RequestFilters` capability, the gateway, or restricted mode,
+   and in sessions where the tool can run as root. `prepareSessionFilters`
+   parses the `filters` selection. `filterhost.Resolve` loads each filter and
+   preset, selects a grant or resolves the static credential through
+   `runtime.ReadSecretSources`, generates a placeholder, and compiles a
+   `filter.Policy`. Release host and env var collisions fail the start.
+2. The runtime adds the governed hosts to the session allowlist
+   (`policy.SessionNetworkInputs.FilterHosts`), mounts the summaries
+   read-only at `/opt/enclave/filters`, sets the placeholder env vars, and
+   passes one `backend.FilterBundle` (policy and credential JSON) per filter
+   on the backend request.
+3. The Docker backend writes the bundles into a private temporary directory
+   that the gateway mounts read-only at `/etc/enclave/filters`
+   (`ENCLAVE_FILTER_DIR`). The entrypoint copies them into the proxy's data
+   directory, and the host deletes its copy once the gateway is ready. The
+   gateway carries the filter names, governed hosts, and confined domains as
+   the labels `enclave.gateway.filters`, `enclave.gateway.filter_hosts`, and
+   `enclave.gateway.filter_confine`, which `network apply` and `status` add
+   back to the policy of that gateway.
+4. `enclave-gateway-proxy` builds one `engine.Engine` per filter, terminates
+   TLS for every name equal to or below a governed host, and calls the engine
+   after the allowlist check, in place of release rules.
+
+`internal/filter`, `engine`, and `token` are linked into the gateway proxy.
+`spec` and `filterhost` are host-only, and `internal/config` must not import
+`filter/spec`, since the proxy links `config`.
+
 ## Containers and stores
 
 The tool container is ephemeral (`--rm`); in restricted mode the gateway
@@ -390,6 +450,7 @@ there:
 | `~/.cache/enclave/<tool>/<hash>/` | `npm/`, `pip/`, `go/` (`GOMODCACHE`), `go-build/`, `cargo/`, `pnpm/`, `uv/`, `yarn/`, `bun/`, `nvm/` (nvm Node versions), and one `<name>/` per [extension cache](extensions/spec-reference.md#project-caches-caches) |
 | `~/.local/state/enclave/projects/<hash>/<tool>/home-config/` | `npmrc`, `yarnrc`, `yarnrc.yml`, `bunfig.toml`, `node_repl_history`, linked as the matching dotfiles in `~` |
 | `~/.local/state/enclave/projects/<hash>/<tool>/config-generated/<key>/` | Generated config source (below) |
+| `~/.local/state/enclave/filters/<filter>/`, `~/.local/state/enclave/projects/<hash>/<tool>/filter-summaries/<key>/` | Request filter grants and policy summaries ([Host files](filters.md#host-files)) |
 | `${XDG_CACHE_HOME:-~/.cache}/enclave/microvm/<tool>/<hash>/` | QEMU bundles, unless `--image-name` names one |
 | `~/.local/state/enclave/locks/` | Cross-process locks: store, skills-mount, extension-install, self-update, and the two below |
 
@@ -414,6 +475,7 @@ numeric names can still overlap automatic allocation.
 |--------|-------|
 | A tool | [adding-a-tool.md](extensions/adding-a-tool.md) |
 | A feature | [adding-a-feature.md](extensions/adding-a-feature.md) |
+| A request filter | [adding-a-filter.md](extensions/adding-a-filter.md) |
 | DNS rules | [`runtime-assets/gateway-allowlists/`](../runtime-assets/gateway-allowlists/), or host overrides ([networking.md](networking.md#overriding-the-main-allowlist)) |
 | Templates | `extensions/tools/<tool>/templates/` |
 | User config, patches, skills | [tool-config.md](tool-config.md) |

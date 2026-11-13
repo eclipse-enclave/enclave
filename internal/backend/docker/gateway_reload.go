@@ -63,6 +63,9 @@ func gatewayInfosFromSummaries(containers []dockercmd.Summary) []backend.Gateway
 			WorkspaceID:      c.Labels[model.GatewayLabelWorkspaceHash],
 			SessionContainer: c.Labels[model.GatewayLabelContainer],
 			NetworkMode:      gatewayNetworkMode(c.Labels),
+			Filters:          splitLabelList(c.Labels[model.GatewayLabelFilters]),
+			FilterHosts:      splitLabelList(c.Labels[model.GatewayLabelFilterHosts]),
+			FilterConfine:    splitLabelList(c.Labels[model.GatewayLabelFilterConfine]),
 		})
 	}
 
@@ -80,6 +83,17 @@ func gatewayInfosFromSummaries(containers []dockercmd.Summary) []backend.Gateway
 	})
 
 	return gateways
+}
+
+// splitLabelList reads a comma-separated list label.
+func splitLabelList(value string) []string {
+	var out []string
+	for _, item := range strings.Split(value, ",") {
+		if item = strings.TrimSpace(item); item != "" {
+			out = append(out, item)
+		}
+	}
+	return out
 }
 
 // gatewayNetworkMode reads the mode label, which only unrestricted gateways

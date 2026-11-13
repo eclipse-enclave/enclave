@@ -788,7 +788,10 @@ func capabilityFieldCases() map[string]capabilityFieldCase {
 		"HostCommands": {func(c *capabilities) { c.HostCommands = []string{"vnc-viewer"} },
 			"vnc-viewer", "adds host command vnc-viewer"},
 		"IgnoredGoDir": {func(c *capabilities) { c.IgnoredGoDir = true }, "go/ handlers", "adds ignored go/ handlers"},
-		"Files":        {func(c *capabilities) { c.Files = 3 }, "3 files", "staged content changes"},
+		// TestFilterCapabilitiesParticipateInRenderAndDiff covers each field.
+		"Filter": {func(c *capabilities) { c.Filter = &filterCapabilities{Hosts: []string{"api.example.com"}} },
+			"api.example.com", "adds governed host api.example.com"},
+		"Files": {func(c *capabilities) { c.Files = 3 }, "3 files", "staged content changes"},
 		// Bytes only renders alongside Files>0 (the "content" row is guarded
 		// by c.Files > 0), so its setter also sets Files; the field under test
 		// is still Bytes (the markers below are Bytes' own value, not Files').

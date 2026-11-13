@@ -243,3 +243,25 @@ func TestRenderHumanRowNamesTheCapture(t *testing.T) {
 		t.Fatalf("row =\n%q\nwant\n%q", row, want)
 	}
 }
+
+func TestRenderHumanFormNamesFilterDecisions(t *testing.T) {
+	events := []netlog.Event{
+		{Timestamp: "2026-08-13T12:04:31.000Z", Type: netlog.TypeHTTP, Method: "GET", Domain: "gmail.googleapis.com", Path: "/gmail/v1/users/me/messages/M1", Status: 200, ResponseSize: 2048, Verdict: netlog.VerdictPass, Rule: netlog.RuleFilter, Filter: "gws", Op: "gmail.messages.get", Capability: "mail.read"},
+		{Timestamp: "2026-08-13T12:04:32.000Z", Type: netlog.TypeHTTP, Method: "POST", Domain: "gmail.googleapis.com", Path: "/gmail/v1/users/me/messages/send", Status: 403, Verdict: netlog.VerdictDeny, Rule: netlog.RuleFilter, Filter: "gws", Op: "gmail.messages.send", Capability: "mail.send", Reason: "capability"},
+		{Timestamp: "2026-08-13T12:04:33.000Z", Type: netlog.TypeHTTP, Method: "GET", Domain: "api.example.com", Path: "/", Status: 403, Verdict: netlog.VerdictDeny, Rule: netlog.RuleFilter, Filter: "gws", Reason: "placeholder"},
+		{Timestamp: "2026-08-13T12:04:34.000Z", Type: netlog.TypeHTTP, Method: "GET", Domain: "gmail.googleapis.com", Path: "/x", Status: 502, Verdict: netlog.VerdictPass, Rule: "upstream-error", Filter: "gws", Op: "gmail.messages.get"},
+		{Timestamp: "2026-08-13T12:04:35.000Z", Type: netlog.TypeHTTP, Method: "GET", Domain: "gmail.googleapis.com", Path: "/x", Status: 403, Verdict: netlog.VerdictDeny, Rule: netlog.RuleFilter, Filter: "gws\x1b[31m", Op: "op", Reason: "quota\x07"},
+	}
+	lines := strings.Split(strings.TrimRight(renderEvents(events, humanOptions()), "\n"), "\n")
+	for i, want := range []string{
+		"gws:gmail.messages.get 2.0 KB",
+		"gws:gmail.messages.send capability",
+		"gws placeholder",
+		"gws:gmail.messages.get upstream-error",
+		"gws?[31m:op quota?",
+	} {
+		if !strings.HasSuffix(lines[i], want) {
+			t.Errorf("row %d should end with %q, got %q", i, want, lines[i])
+		}
+	}
+}

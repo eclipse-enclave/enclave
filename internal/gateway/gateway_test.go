@@ -184,6 +184,40 @@ func TestGatewayLabelsHashWorkspaceIDBeforeProjectDir(t *testing.T) {
 	}
 }
 
+// A gateway with request filters is labelled with them and the hosts they
+// govern, so a later policy apply keeps those hosts. Without the filter
+// directory there is nothing to label.
+func TestGatewayLabelsRecordRequestFilters(t *testing.T) {
+	cfg := StartConfig{
+		Profile:     model.Profile{Name: "codex"},
+		FilterDir:   "/tmp/enclave-filters-1",
+		FilterNames: []string{"tok", "gws"},
+		FilterHosts: []string{"www.googleapis.com", "*.example.com", "gmail.googleapis.com", "www.googleapis.com"},
+	}
+	labels := gatewayLabels(cfg)
+	if labels[model.GatewayLabelFilters] != "gws,tok" || labels[model.GatewayLabelFilterHosts] != "*.example.com,gmail.googleapis.com,www.googleapis.com" {
+		t.Fatalf("filter labels = %q, %q", labels[model.GatewayLabelFilters], labels[model.GatewayLabelFilterHosts])
+	}
+	if _, ok := labels[model.GatewayLabelFilterConfine]; ok {
+		t.Fatalf("filters without confined domains are labelled with some: %v", labels)
+	}
+	cfg.FilterConfine = []string{"googleapis.com", "example.org", "googleapis.com"}
+	if got := gatewayLabels(cfg)[model.GatewayLabelFilterConfine]; got != "example.org,googleapis.com" {
+		t.Fatalf("confine label = %q", got)
+	}
+	cfg.FilterDir = ""
+	labels = gatewayLabels(cfg)
+	if _, ok := labels[model.GatewayLabelFilters]; ok {
+		t.Fatalf("a gateway without a filter directory is labelled with filters: %v", labels)
+	}
+	if _, ok := labels[model.GatewayLabelFilterHosts]; ok {
+		t.Fatalf("a gateway without a filter directory is labelled with filter hosts: %v", labels)
+	}
+	if _, ok := labels[model.GatewayLabelFilterConfine]; ok {
+		t.Fatalf("a gateway without a filter directory is labelled with confined domains: %v", labels)
+	}
+}
+
 func TestCalculateAllowlistHashIgnoresEscapingInclude(t *testing.T) {
 	root := t.TempDir()
 	allowlistsDir := filepath.Join(root, "allowlists")

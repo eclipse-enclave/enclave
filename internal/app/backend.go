@@ -66,6 +66,16 @@ func selectBackend(opts model.Options, dockerOpts backenddocker.Options) (backen
 	}
 }
 
+// backendCapabilities are the capabilities of the backend opts select. The
+// backend is only constructed, so this is safe before anything is built.
+func backendCapabilities(opts model.Options) (backend.Capabilities, error) {
+	be, err := selectBackend(opts, backenddocker.Options{})
+	if err != nil {
+		return backend.Capabilities{}, err
+	}
+	return be.Capabilities(), nil
+}
+
 func validateBackendName(name string) error {
 	switch name {
 	case backend.NameDocker, backend.NamePodman, backend.NameQEMU:

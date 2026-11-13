@@ -9,9 +9,9 @@ package config
 
 import (
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"sigs.k8s.io/yaml"
 
@@ -106,35 +106,38 @@ func parseSpecDocument(specPath string) (specDocument, error) {
 	return decodeSpecDocument(data, specPath)
 }
 
-// parseUntrustedSpecDocument is parseSpecDocument for a document that has not
-// been through the installer's symlink and size rules yet: the installer
-// classifies the candidates of a fetched repository before it copies anything,
-// and a spec committed there as a symlink would otherwise hand the parser a
-// FIFO, a device, or a file from the host.
-func parseUntrustedSpecDocument(specPath string) (specDocument, error) {
-	info, err := os.Lstat(specPath)
-	if err != nil {
-		return specDocument{}, err
-	}
-	if !info.Mode().IsRegular() {
-		return specDocument{}, fmt.Errorf("%s is not a regular file", specPath)
-	}
-	// #nosec G304 -- specPath names a spec file inside a directory the caller
-	// has contained, and was just confirmed to be a regular file.
-	file, err := os.Open(specPath)
-	if err != nil {
-		return specDocument{}, err
-	}
-	defer func() { _ = file.Close() }()
+// readUntrustedSpec reads a spec document that has not been through the
+// installer's symlink and size rules yet: the installer classifies the
+// candidates of a fetched repository before it copies anything, and a spec
+// committed there as a symlink would otherwise hand the parser a FIFO, a
+// device, or a file from the host.
+func readUntrustedSpec(specPath string) ([]byte, error) {
+	return util.ReadRegularFileNoFollow(specPath, maxSpecBytes)
+}
 
-	data, err := io.ReadAll(io.LimitReader(file, maxSpecBytes+1))
-	if err != nil {
-		return specDocument{}, err
+// specMetadata is the part of a spec document every kind shares. A filter's
+// spec has its own schema, which package filter/spec owns, so the summary
+// reads only this much of it.
+type specMetadata struct {
+	SchemaVersion string `json:"schemaVersion"`
+	Kind          string `json:"kind"`
+	Name          string `json:"name"`
+	DisplayName   string `json:"displayName,omitempty"`
+	Description   string `json:"description,omitempty"`
+}
+
+// peekFilterSpec reports the metadata of a filter spec document, and false
+// for a document of any other kind or one that does not parse, which the
+// strict decoder then reports.
+func peekFilterSpec(data []byte, specPath string) (specMetadata, bool, error) {
+	var meta specMetadata
+	if err := yaml.Unmarshal(data, &meta); err != nil || strings.TrimSpace(meta.Kind) != KindFilter {
+		return specMetadata{}, false, nil
 	}
-	if len(data) > maxSpecBytes {
-		return specDocument{}, fmt.Errorf("%s is larger than %d bytes", specPath, maxSpecBytes)
+	if meta.SchemaVersion != SpecSchemaVersion {
+		return specMetadata{}, true, fmt.Errorf("%s schemaVersion must be %q (got %q)", specPath, SpecSchemaVersion, meta.SchemaVersion)
 	}
-	return decodeSpecDocument(data, specPath)
+	return meta, true, nil
 }
 
 func decodeSpecDocument(data []byte, specPath string) (specDocument, error) {

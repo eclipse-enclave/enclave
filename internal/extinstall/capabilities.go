@@ -53,6 +53,8 @@ type capabilities struct {
 	IgnoredGoDir         bool
 	Files                int
 	Bytes                int64
+	// Filter is set for request filters only.
+	Filter *filterCapabilities
 }
 
 // addedHostCommands are the HostCommands that become verbs.
@@ -124,7 +126,7 @@ func inspect(dir string, kind model.ExtensionKind) (capabilities, error) {
 	}
 	domains := append([]string{}, summary.AllowedDomains...)
 	var allowlistDomains, allowlistDirectives []string
-	if kind != model.KindCommand {
+	if kind.ReachesImage() {
 		allowlistDomains, allowlistDirectives, err = parseAllowlistFile(filepath.Join(dir, model.AllowlistFilename))
 		if err != nil {
 			return capabilities{}, err
@@ -137,7 +139,15 @@ func inspect(dir string, kind model.ExtensionKind) (capabilities, error) {
 		return capabilities{}, err
 	}
 
+	var filterCaps *filterCapabilities
+	if kind == model.KindFilter {
+		if filterCaps, err = inspectFilter(dir, summary.Name); err != nil {
+			return capabilities{}, err
+		}
+	}
+
 	return capabilities{
+		Filter:              filterCaps,
 		Spec:                summary,
 		InstallScript:       tree.InstallScript,
 		UpdateProbe:         tree.UpdateProbe && config.UpdateProbeApplies(kind.SpecKind()),
@@ -169,8 +179,9 @@ type extensionTree struct {
 }
 
 // scanExtensionTree answers every filesystem-derived capability in one walk of
-// dir. The provenance sidecar counts towards nothing. A command extension only
-// counts its content: none of the runtime files it might carry is ever read.
+// dir. The provenance sidecar counts towards nothing. A command extension or a
+// filter only counts its content: none of the runtime files it might carry is
+// ever read.
 func scanExtensionTree(dir string, kind model.ExtensionKind) (extensionTree, error) {
 	var (
 		skillsPrefix    = model.SkillsDirName + "/"
@@ -182,7 +193,7 @@ func scanExtensionTree(dir string, kind model.ExtensionKind) (extensionTree, err
 
 	err := walkExtensionEntries(dir, func(rel string, _ string, entry fs.DirEntry) error {
 		if entry.IsDir() {
-			if kind == model.KindCommand {
+			if !kind.ReachesImage() {
 				return nil
 			}
 			if rel == model.ExtensionGoDir {
@@ -202,7 +213,7 @@ func scanExtensionTree(dir string, kind model.ExtensionKind) (extensionTree, err
 		}
 		tree.Files++
 		tree.Bytes += info.Size()
-		if kind == model.KindCommand {
+		if !kind.ReachesImage() {
 			return nil
 		}
 

@@ -102,9 +102,10 @@ Good to know:
 | Agents | Six built-in tools, more as extensions; per-tool images and automatic updates | [Tools and images](docs/tools.md) |
 | Network | Allowlist-based egress through a gateway, audit log, host port bridging | [Networking](docs/networking.md) |
 | Auth | OAuth logins saved per tool, layered secrets files, credentials kept out of the container | [Authentication](docs/auth.md) |
+| Request filters | Let the agent use a third-party API under a preset while the gateway holds the credential | [Request filters](docs/filters.md) |
 | Sessions | Named and background sessions, persistent history, caches, and agent memory | [Sessions and persistence](docs/persistence.md) |
 | Configuration | Global and per-project config, tool config overrides, skills, and patches | [Configuration](docs/configuration.md), [Tool config](docs/tool-config.md) |
-| Extensions | Install tools, features, and commands from Git, or write your own | [Extensions](docs/extensions/README.md) |
+| Extensions | Install tools, features, commands, and request filters from Git, or write your own | [Extensions](docs/extensions/README.md) |
 | Custom commands | Your own `enclave <name>` verbs, run on the host or in a session | [Commands](docs/commands.md) |
 | Backends | Docker, Podman, and an experimental QEMU microVM backend | [Backends](docs/backends.md) |
 | Security | What the sandbox protects against and what it does not | [Security](docs/security/README.md) |

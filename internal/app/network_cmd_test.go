@@ -123,6 +123,7 @@ func TestNetworkPrintJSONEnvelope(t *testing.T) {
 		"denied":        []any{"telemetry.svc.example.com"},
 		"notes":         []any{networkPolicyNoteHostsFromCredential},
 		"error":         "",
+		"filters":       []any{},
 	}
 	if code != 0 || !reflect.DeepEqual(doc, want) {
 		t.Fatalf("network print --json = %d\n%s\nwant %#v", code, out, want)
@@ -216,6 +217,7 @@ func TestNetworkPrintJSONWithoutTool(t *testing.T) {
 		"denied":        []any{},
 		"notes":         []any{},
 		"error":         errText,
+		"filters":       []any{},
 	}
 	if code != 1 || !strings.HasPrefix(errText, "no tool configured") || !reflect.DeepEqual(doc, want) {
 		t.Fatalf("network print --json without a tool = %d\n%s\nwant %#v", code, out, want)

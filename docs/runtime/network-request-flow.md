@@ -29,9 +29,9 @@ sequenceDiagram
 
     Note over Host,API: Session startup
     Host->>Entry: Start gateway with ENCLAVE_GATEWAY_NETWORK_MODE=restricted<br/>and config bundle (dnsmasq.conf, domains.txt, meta.json)
-    Host->>Entry: Mount optional secret mapping JSON<br/>and TLS root (ca.crt/ca.key)
+    Host->>Entry: Mount optional secret mapping JSON,<br/>request filter bundle, and TLS root (ca.crt/ca.key)
     Entry->>DNS: Start with rendered allowlist config
-    Entry->>FW: INPUT DROP + loopback, reply and published-port exceptions<br/>OUTPUT DROP + local DNS allow<br/>NAT redirect 80/443 to the proxy on 127.0.0.1:15080/15443
+    Entry->>FW: INPUT DROP + loopback, reply and published-port exceptions<br/>OUTPUT DROP + local DNS allow<br/>NAT redirect 80/443 to the proxy on 127.0.0.1:15080/15443<br/>With filters: reject enclave_governed except proxy TCP 80/443
     Entry->>Proxy: Start transparent proxy
     Entry->>Audit: Start DNS audit translator on the dnsmasq log
     Host->>Log: Rotate above the size cap<br/>and append session start marker
@@ -43,7 +43,7 @@ sequenceDiagram
     Note over Host,API: HTTPS request
     Tool->>DNS: Resolve api.example.com
     alt Domain in allowlist
-        DNS->>FW: Add resolved IP to enclave_allowed (ipset)
+        DNS->>FW: Add resolved IP to enclave_allowed (ipset),<br/>and to enclave_governed for filter hosts
         DNS-->>Tool: Return A/AAAA answer
         Tool->>FW: Connect api.example.com:443
         FW->>Proxy: Redirect tcp/443 to 127.0.0.1:15443
@@ -51,13 +51,13 @@ sequenceDiagram
         alt SNI not in allowlist
             Proxy-->>Tool: Close connection
             Proxy->>Log: TCP deny (allowlist)
-        else Host requires MITM (release rule match or network_log requests or full)
+        else Host requires MITM (release rule match, filter host, or network_log requests or full)
             Proxy->>Log: TCP pass (mitm-dispatch)
             Proxy->>Proxy: Terminate TLS using local CA leaf cert
             opt network_log=full
                 Proxy->>Proxy: Snapshot request with its placeholders
             end
-            Proxy->>Proxy: rewriteHeaders()<br/>Validate and apply host/header release rules
+            Proxy->>Proxy: rewriteHeaders()<br/>Validate and apply host/header release rules<br/>(on filter hosts the filter engine decides instead)
             alt Placeholder use violates release rule
                 Proxy-->>Tool: HTTP 403 Forbidden
                 Proxy->>Log: HTTP deny (secret-injection)
@@ -97,14 +97,20 @@ sequenceDiagram
    fail. Traffic to ports 80 and 443 goes to the proxy, which re-checks the
    allowlist against the `Host` header or SNI and connects upstream only to
    ipset addresses. Other ports reach ipset addresses directly, without the
-   proxy or a log event.
+   proxy or a log event. Names a request filter governs also populate the
+   `enclave_governed` ipset: only the proxy reaches those addresses, on TCP 80
+   and 443, and everything else to them is rejected. Other names below a
+   domain a filter confines are blackholed, and the proxy denies them.
 4. It terminates TLS for hosts with a credential HTTP release rule
-   (`network.serviceAuth`), and for all allowlisted HTTPS with
-   `network_log=requests` or `full`.
+   (`network.serviceAuth`), for every name equal to or below a host a request
+   filter governs, and for all allowlisted HTTPS with `network_log=requests` or
+   `full`.
 5. In inspected requests, a registered placeholder is replaced only in the
    rule's header, on HTTPS to its declared hosts; other placeholder-bearing
    headers get HTTP 403. Upgraded connections (WebSocket) get this on the
-   handshake and are then relayed unchanged.
+   handshake and are then relayed unchanged. On a host a request filter
+   governs, the filter engine decides and injects instead
+   ([Request path](../security/request-filters.md#request-path)).
 6. Events go to `~/.local/state/enclave/projects/<hash>/<tool>/logs/network.log`
    (JSONL, read with `enclave network log`): the proxy writes `tcp` and `http`
    events, `enclave-gateway-proxy -dns-audit` translates dnsmasq's log into
@@ -112,10 +118,10 @@ sequenceDiagram
    adds a `session` marker. What each mode records is in
    [Coverage and granularity](../networking.md#coverage-and-granularity).
 
-In `full` mode the proxy snapshots each relayed request before header release
-and stores it with the response under `logs/capture/<session>/`; its `http`
-event carries `capture_id`. WebSocket messages are also stored, with an open
-record readable from the handshake. See
+In `full` mode the proxy snapshots each relayed request before header release or
+filter token injection and stores it with the response under
+`logs/capture/<session>/`; its `http` event carries `capture_id`. WebSocket
+messages are also stored, with an open record readable from the handshake. See
 [Full capture](../networking.md#full-capture).
 
 ## Properties and limits
@@ -125,7 +131,10 @@ record readable from the handshake. See
   with a release rule in the selected tool or enabled features; mediating
   file-based credentials is separate work.
 - DNS, firewall and ipset, and proxy all check egress; reload and startup
-  failures fail closed.
+  failures fail closed. A reload restarts dnsmasq and has the running proxy
+  swap its allowlist on `SIGHUP`, so request filter quotas survive. It
+  rebuilds the firewall under a drop policy and installs the proxy redirects
+  and the governed rejects before any rule accepts an allowlisted address.
 - The log is tagged by session and rotated at session start, never truncated
   mid-session. Logged paths omit the query string, so query-parameter
   credentials cannot leak into it. It records decisions, not traffic volume.

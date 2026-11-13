@@ -8,6 +8,7 @@
 package backend
 
 import (
+	"errors"
 	"slices"
 	"testing"
 )
@@ -61,6 +62,28 @@ func TestValidateAllowsDockerCapabilities(t *testing.T) {
 	caps := Capabilities{RestrictedNetwork: true, SecretHTTPRelease: true}
 	if err := Validate(req, caps); err != nil {
 		t.Fatalf("Validate() error = %v", err)
+	}
+}
+
+// Only a backend with the RequestFilters capability may receive filters, in
+// any network mode.
+func TestValidateRefusesRequestFiltersWithoutCapability(t *testing.T) {
+	network := NetworkPolicy{Mode: NetworkModeRestricted, Gateway: true}
+	filters := []FilterBundle{{Name: "gws", Policy: []byte("{}"), Credential: []byte("{}")}}
+	caps := Capabilities{RestrictedNetwork: true, SecretHTTPRelease: true}
+	for _, mode := range []NetworkMode{NetworkModeRestricted, NetworkModeUnrestricted} {
+		network.Mode = mode
+		if err := Validate(Request{Network: network, Filters: filters}, caps); !errors.Is(err, ErrRequestFiltersUnsupported) {
+			t.Fatalf("Validate(%s) without the capability = %v", mode, err)
+		}
+	}
+	network.Mode = NetworkModeRestricted
+	caps.RequestFilters = true
+	if err := Validate(Request{Network: network, Filters: filters}, caps); err != nil {
+		t.Fatalf("Validate with the capability = %v", err)
+	}
+	if err := Validate(Request{Network: network}, Capabilities{RestrictedNetwork: true}); err != nil {
+		t.Fatalf("Validate without filters = %v", err)
 	}
 }
 

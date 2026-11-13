@@ -37,6 +37,7 @@ type RunOptionSources struct {
 	BridgePorts              OptionSource
 	DisableGateway           OptionSource
 	Ephemeral                OptionSource
+	Filters                  OptionSource
 	HostConfig               OptionSource
 	HostConfigPaths          OptionSource
 	HostEnv                  OptionSource
@@ -109,6 +110,7 @@ func DefaultOptionSources() OptionSources {
 			BridgePorts:              SourceDefault,
 			DisableGateway:           SourceDefault,
 			Ephemeral:                SourceDefault,
+			Filters:                  SourceDefault,
 			HostConfig:               SourceDefault,
 			HostConfigPaths:          SourceDefault,
 			HostEnv:                  SourceDefault,
@@ -233,6 +235,9 @@ func MergeOptionSources(base OptionSources, override OptionSources) OptionSource
 	}
 	if override.Features != SourceUnset {
 		base.Features = override.Features
+	}
+	if override.Filters != SourceUnset {
+		base.Filters = override.Filters
 	}
 	if override.ForceBaseImage != SourceUnset {
 		base.ForceBaseImage = override.ForceBaseImage

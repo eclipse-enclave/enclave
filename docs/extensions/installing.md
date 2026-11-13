@@ -1,7 +1,8 @@
 # Installing extensions from git
 
-`enclave tools|features|commands` install, update, and remove extensions from
-git repositories into `~/.config/enclave/extensions/`. The official repository,
+`enclave tools|features|commands|filters` install, update, and remove
+extensions from git repositories into `~/.config/enclave/extensions/`. The
+official repository,
 [enclave-extensions](https://github.com/eclipse-enclave/enclave-extensions),
 holds the tools and features that are not built in:
 
@@ -14,10 +15,10 @@ enclave features add eclipse-enclave/enclave-extensions --name <feature>
 
 | Command | Description |
 |---------|-------------|
-| `enclave tools\|features\|commands list` | List extensions (built-in and installed), with source and provenance |
-| `enclave tools\|features\|commands add <source>` | Install an extension from a git repository |
-| `enclave tools\|features\|commands update [<name\|source>...]` | Refresh installed extensions from their recorded source |
-| `enclave tools\|features\|commands remove <name>...` | Remove installed extensions |
+| `enclave tools\|features\|commands\|filters list` | List extensions (built-in and installed), with source and provenance |
+| `enclave tools\|features\|commands\|filters add <source>` | Install an extension from a git repository |
+| `enclave tools\|features\|commands\|filters update [<name\|source>...]` | Refresh installed extensions from their recorded source |
+| `enclave tools\|features\|commands\|filters remove <name>...` | Remove installed extensions |
 
 | Flag | Verbs | Effect |
 |------|-------|--------|
@@ -32,10 +33,14 @@ enclave features add eclipse-enclave/enclave-extensions --name <feature>
 
 `features list` also accepts `--tool`, `--features`, and `--slim` and reports
 which features a run with them would enable. `tools list` accepts `--tool` to
-mark the selected tool.
+mark the selected tool, and `filters list` accepts `--tool` and `--filters`
+to mark the selected filters.
 
 - With no subcommand, each is an alias for `list`. `enclave commands` manages
-  [command extensions](README.md#command-extensions).
+  [command extensions](README.md#command-extensions), and `enclave filters`
+  [request filters](README.md#request-filters), which have more verbs
+  ([Filters](../cli-reference.md#filters)). A fresh filter install prints the
+  `login` and `--filters` commands to use it.
 - `update` here refreshes sources on the host. The unrelated top-level
   `enclave update` rebuilds images. A changed extension changes its content
   hash, which rebuilds the image on the next run.
@@ -60,9 +65,10 @@ mark the selected tool.
 ## Discovery
 
 The verb fixes the kind (`tools`: `sandbox`, `features`: `mixin`, `commands`:
-`command`). Without a subpath, the repository is scanned up to 8 directories
-deep for specs whose `kind` matches and whose `name` matches the directory;
-mismatches and unresolvable names are reported as skips. A root-level spec has
+`command`, `filters`: `filter`). Without a subpath, the repository is scanned
+up to 8 directories deep for specs whose `kind` matches and whose `name`
+matches the directory; mismatches and unresolvable names are reported as
+skips. A root-level spec has
 no directory to match, but its `name` must not contain a path separator or
 `..`.
 
@@ -83,7 +89,8 @@ results within it.
 ## Trust
 
 An installed extension is unreviewed code that runs at container build and
-start time.
+start time. A filter runs no code, but decides where its credential goes
+([Data-only filters](../security/request-filters.md#data-only-filters)).
 
 > [!WARNING]
 > [Host commands](../commands.md#commands-from-extensions) are the only
@@ -121,6 +128,9 @@ The summary also lists environment variables, proxy-managed aliases,
 providers, credential files, `gateway-allowlist.conf` directives, apt packages,
 `files/home/**`, feature `configDir` and `authFiles`, whether the extension
 shadows a built-in, an ignored `go/` directory, and the content size.
+
+A filter has its own summary and update warnings
+([Install-time review](../security/request-filters.md#install-time-review)).
 
 An update shows a diff against the installed version, so new capabilities are
 visible before you accept, and a gained host command repeats the warning. The
@@ -237,7 +247,8 @@ the user extension root.
   reactivates the built-in, and the output says so.
 - An extension Enclave did not install (no readable sidecar) needs `--force`.
 - Host state (patches, persistent stores, auth) is kept for a reinstall; the
-  output names it.
+  output names it. For a filter that includes its grants, OAuth client, and
+  user presets, and the output names `enclave filters logout <name> --all`.
 - Host commands go with the directory; nothing was copied into
   `~/.config/enclave/commands/`.
 

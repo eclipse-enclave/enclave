@@ -25,8 +25,8 @@ Names resolve in this order, first match wins:
 
 1. Built-in verbs.
 2. Your `commands/host/`, then `commands/session/`.
-3. Command extensions, then tools, then features, alphabetically within each
-   kind.
+3. Command extensions, then tools, then features, then filters,
+   alphabetically within each kind.
 
 Installing an extension never takes a name you already use. To turn off a
 single verb, list it in `disabled_commands` in the global config (see
@@ -72,7 +72,8 @@ again.
 
 > [!WARNING]
 > Extension host commands run on the host, outside the sandbox, with your
-> privileges. Everything else an extension ships stays inside the container.
+> privileges. Everything else an extension ships stays inside the container,
+> or for a request filter, in the gateway.
 
 `add` and `update` list them in the first row of the capability summary, and
 `list` shows them per extension; see

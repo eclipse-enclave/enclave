@@ -153,7 +153,8 @@ enclave network apply                               # Apply policy to running ga
 
 `status`, `print`, and `diff` show the policy a run with the same options would
 enforce: tool allowlist and spec domains, features' allowed and denied domains,
-credential release hosts, `allow_domains`, and `allow_all_network`. They accept
+credential release hosts, [request filter hosts](#request-filter-hosts),
+`allow_domains`, and `allow_all_network`. They accept
 the run flags that shape it ([CLI reference](cli-reference.md#network)), for
 example `enclave network print --features +github-cli --allow-domain api.example.com`.
 `print --json` emits a versioned envelope; see
@@ -183,6 +184,40 @@ A running gateway keeps the network mode its session started with, so
 `apply` reports gateways of unrestricted sessions as `SKIPPED` and never writes
 a policy into them; `status` shows them as `UNRESTRICTED` instead of in sync or
 stale.
+
+## Request filter hosts
+
+A [request filter](filters.md) selected with `--filters` or the `filters` key
+adds the hosts it governs to the session allowlist
+([Hosts](extensions/filter-spec.md#hosts)). The gateway terminates TLS for
+all governed names whatever `network_log` says and evaluates every request
+against the filter, so each request is an `http` event.
+
+- The firewall puts the addresses governed names resolve to into a second
+  ipset that only the proxy may reach, on TCP 80 and 443. The session's web
+  traffic gets there through the proxy. Everything else to those addresses,
+  such as HTTP/3 over UDP 443 or another port, is rejected, also when an
+  allowlisted host that no filter governs shares the address. IPv6 egress is
+  closed in restricted mode anyway.
+- Deny rules block governed names like any other name: a feature that denies
+  `googleapis.com` blocks a filter's `gmail.googleapis.com`. Session start
+  warns about each host the active preset uses that a deny rule covers, with
+  the capabilities that will fail.
+- A filter's [confined domains](extensions/filter-spec.md#confine) are
+  blackholed, apart from the names a filter governs. With the gws filter,
+  which confines `googleapis.com`, `gmail.googleapis.com` resolves and
+  `storage.googleapis.com` does not, also when a tool allowlist lists
+  `googleapis.com`. The proxy checks the same.
+- `status`, `print`, and `diff` take `--filters` and list each filter's hosts
+  and confined domains. `print --json` reports them in
+  [`filters`](integration.md#network-print---json).
+- `apply`, and `add-domain`, `remove-domain`, or `set-mode` applied to running
+  gateways, keep the hosts each gateway's filters govern and the domains they
+  confine. The gateway records both when it starts, so later filter updates
+  do not change them.
+- `set-mode unrestricted` fails without saving while a session in its scope
+  runs filters, since filters need restricted mode. With `--no-apply` it only
+  changes the mode of new sessions, which then cannot select filters.
 
 ## Port direction: `-p` vs `--bridge-port`
 
@@ -297,6 +332,16 @@ the rule column; JSON keeps the raw rule. Color follows `NO_COLOR` and
 | `dns` | DNS audit translator | One per denied or failed lookup. `rule`: `nxdomain` (blocked by policy), or `upstream-servfail`, `upstream-refused`, `upstream-nxdomain` |
 | `session` | Host, at gateway start | Boundary marker. Not an audit event: excluded from `--summary`, never matched by `--verdict`, `--domain`, or `--type` |
 
+Requests to a host a request filter governs carry rule `filter` and the
+fields `filter`, `op` (the matched operation), `capability`, and on denials
+`reason` ([Deny reasons](filters.md#deny-reasons)). The rule is
+`secret-injection` instead for a release placeholder and `upstream-error` when
+the upstream fails. The text view shows `<filter>:<op>` and the reason in the
+rule column. A request the gateway inspects that carries a filter's
+placeholder in a header or the URL to another host is denied with rule
+`filter` and reason `placeholder`
+([Placeholder scope](security/request-filters.md#placeholder-scope)).
+
 A blocked lookup usually logs two `dns` events (A and AAAA). `NODATA` answers
 are not recorded, because dnsmasq returns `NODATA-IPv6` for every allowlisted
 host without an IPv6 record.
@@ -314,9 +359,10 @@ does not mean a quiet session:
   connections (`git fetch`, CLI calls, reconnecting pollers) log each time and
   dominate the log.
 - `http` events for HTTPS need TLS termination. In `coarse` mode that happens
-  only for hosts of a declared credential's HTTP release rule, and only when
-  the credential was resolved. A tool logged in with OAuth instead of an API key
-  therefore gets no request-level events for its API host.
+  only for hosts of a declared credential's HTTP release rule, when the
+  credential was resolved, and for names a request filter governs. A tool
+  logged in with OAuth instead of an API key therefore gets no request-level
+  events for its API host.
 - An upgraded connection (WebSocket, SPDY for `kubectl exec`) is one `http`
   event with status `101`, logged when it closes or the proxy stops. Its
   traffic gets no separate events, even with `--network-log=requests`; `full`
@@ -380,18 +426,18 @@ contains.
 
 ### Secrets in captures
 
-The proxy snapshots each request before it releases secrets into the headers,
-so the capture holds the placeholders the sandbox sent, never the released
-values. A released value that shows up anywhere else, such as an upstream
-echoing the credential in a response header or body, is replaced by its
-placeholder before it is written. The replacement matches the value's literal
-bytes, so a response body has to arrive unencoded: the proxy asks for that, and
-when an upstream compresses a response anyway, the capture keeps its headers
-but not its body (`bodyOmitted`), and the client receives it unchanged. The
-replacement also misses a value that is URL-encoded, escaped in JSON, or in
-base64. A request body the client compressed is forwarded unchanged but not
-stored either. Credentials without an HTTP release rule are ordinary request
-content and are stored as sent.
+The proxy snapshots each request before it releases secrets into the headers or
+a request filter injects its token, so the capture holds the placeholders the
+sandbox sent, never the real values. A released value that shows up anywhere
+else, such as an upstream echoing the credential in a response header or body,
+is replaced by its placeholder before it is written. The replacement matches the
+value's literal bytes, so a response body has to arrive unencoded: the proxy
+asks for that, and when an upstream compresses a response anyway, the capture
+keeps its headers but not its body (`bodyOmitted`), and the client receives it
+unchanged. The replacement also misses a value that is URL-encoded, escaped in
+JSON, or in base64. A request body the client compressed is forwarded unchanged
+but not stored either. Credentials without an HTTP release rule are ordinary
+request content and are stored as sent.
 
 ### Capture store
 

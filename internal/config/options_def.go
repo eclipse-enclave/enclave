@@ -47,6 +47,9 @@ const (
 	// The selection kinds replace with a bare list and amend with +/- entries.
 	ApplySliceMergeFeature ApplyKind = "slice_merge_feature"
 	ApplySliceMergeHost    ApplyKind = "slice_merge_host"
+	// ApplySliceMergeFilter is the selection kind for name:preset entries,
+	// where every entry for one filter names the same item.
+	ApplySliceMergeFilter ApplyKind = "slice_merge_filter"
 )
 
 type CLIActionKind string
@@ -1302,6 +1305,30 @@ func OptionDefs() []OptionDef {
 						Kind:        CLIActionCall,
 						Call:        "applyAllowDomain",
 						SourceField: "AllowDomains",
+					},
+				},
+			},
+		},
+		{
+			Name:           "filters",
+			Group:          OptionGroupRun,
+			Kind:           OptionKindStringSlice,
+			AffectsSession: SessionAffected,
+			AffectsNetwork: true,
+			OptionField:    "Filters",
+			SourceField:    "Filters",
+			DefaultsField:  "Filters",
+			Apply:          ApplySliceMergeFilter,
+			CLIFlags: []CLIFlagDef{
+				{
+					Name:                "--filters",
+					Usage:               "Request filters as name or name:preset, comma-separated (+name adds, -name removes, none selects nothing)",
+					ValueKind:           CLIValueRequired,
+					MissingValueMessage: "--filters requires a value",
+					Action: CLIAction{
+						Kind:        CLIActionCall,
+						Call:        "applyFilters",
+						SourceField: "Filters",
 					},
 				},
 			},

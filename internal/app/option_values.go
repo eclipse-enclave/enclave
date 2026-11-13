@@ -9,6 +9,7 @@ package app
 
 import (
 	"enclave/internal/config"
+	"enclave/internal/filterhost"
 	"enclave/internal/logx"
 	"enclave/internal/model"
 )
@@ -27,6 +28,8 @@ func typedOptionValue(def config.OptionDef, values model.Options, profile *model
 		return resolveYolo(*profile, values)
 	case def.Apply == config.ApplySliceMergeFeature:
 		return features, ""
+	case def.Apply == config.ApplySliceMergeFilter:
+		return selectedFilterLabels(values.Filters), ""
 	case def.Apply == config.ApplySliceMergeHost:
 		if profile == nil {
 			return nil, ""
@@ -66,4 +69,19 @@ func sessionProvenance(opts model.Options, profile model.Profile, selection feat
 		}
 	}
 	return options
+}
+
+// selectedFilterLabels is the filters selection as name or name:preset
+// entries, directives applied. A filter without a preset uses its default
+// one, which only loading the filter can name.
+func selectedFilterLabels(entries []string) []string {
+	selections, err := filterhost.ParseSelection(entries)
+	if err != nil {
+		return append([]string{}, entries...)
+	}
+	labels := make([]string, 0, len(selections))
+	for _, sel := range selections {
+		labels = append(labels, sel.String())
+	}
+	return labels
 }

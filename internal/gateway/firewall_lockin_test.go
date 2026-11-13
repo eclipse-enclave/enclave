@@ -46,6 +46,7 @@ func TestLockinRestrictedGatewayFirewall(t *testing.T) {
 		env        []string
 	}{
 		{"startup-proxy", "setup_firewall && setup_kernel_network", []string{"PROXY_ENABLED=true"}},
+		{"startup-filters", "setup_firewall && setup_kernel_network", []string{"PROXY_ENABLED=true", "ENCLAVE_FILTER_DIR=/etc/enclave-filters"}},
 		{"startup-no-proxy", "setup_firewall && setup_kernel_network", []string{"PROXY_ENABLED=false"}},
 		{"lockdown", "enforce_fail_closed_lockdown", nil},
 	} {

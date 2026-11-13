@@ -37,6 +37,9 @@ func (r *Runtime) Exec(target ExecTarget) error {
 	if err := r.ensureRunning(containerName); err != nil {
 		return err
 	}
+	if err := r.checkAdminExec(containerName); err != nil {
+		return err
+	}
 
 	cmdArgs := r.run.CmdArgs
 	if len(cmdArgs) == 0 {

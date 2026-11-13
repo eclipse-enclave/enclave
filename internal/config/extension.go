@@ -47,14 +47,16 @@ func ValidateExtensionName(name string) error {
 
 // ExtensionRoots returns the built-in and user extension roots holding
 // extensions of kind. The user root is empty when no host config root could be
-// resolved, and the built-in root is empty for command extensions, which never
-// ship built in.
+// resolved, and the built-in root is empty for command extensions and filters,
+// which never ship built in.
 func ExtensionRoots(paths model.Paths, kind model.ExtensionKind) (builtinRoot string, userRoot string) {
 	switch kind {
 	case model.KindTool:
 		return paths.ToolsDir, paths.UserToolsDir
 	case model.KindCommand:
 		return "", paths.UserCommandExtensionsDir
+	case model.KindFilter:
+		return "", paths.UserFilterExtensionsDir
 	default:
 		return paths.FeaturesDir, paths.UserFeaturesDir
 	}
@@ -68,6 +70,8 @@ func withUserExtensionRoot(paths model.Paths, kind model.ExtensionKind, root str
 		paths.UserToolsDir = root
 	case model.KindCommand:
 		paths.UserCommandExtensionsDir = root
+	case model.KindFilter:
+		paths.UserFilterExtensionsDir = root
 	default:
 		paths.UserFeaturesDir = root
 	}
@@ -212,7 +216,12 @@ func SourceLabel(builtinDir string, userDir string) string {
 
 // LoadExtension loads an extension of kind from its spec.yaml/spec.json
 // document. It returns os.ErrNotExist (via LoadSpec) if no spec is present.
+//
+// Filters have their own schema: package filterhost loads them.
 func LoadExtension(paths model.Paths, kind model.ExtensionKind, name string) (model.Extension, error) {
+	if kind == model.KindFilter {
+		return model.Extension{}, fmt.Errorf("filter %q: filters are loaded by package filterhost", name)
+	}
 	return loadSpecExtension(paths, name, kind.SpecKind())
 }
 

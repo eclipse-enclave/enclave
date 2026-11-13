@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"enclave/internal/model"
+	"enclave/internal/testutil"
 )
 
 // hostCommandRel is where an extension's host verbs live inside its directory.
@@ -109,5 +110,35 @@ func TestMergedExtensionFilesExcludesBuiltinHostCommands(t *testing.T) {
 		if strings.Contains(file.RelativePath, "/"+model.CommandsDirName+"/") {
 			t.Fatalf("host command leaked into the build context: %s", file.RelativePath)
 		}
+	}
+}
+
+// A filter is data the gateway enforces, so installing or editing one must
+// leave the build context and the image hash alone.
+func TestFilterExtensionsStayOutOfTheImage(t *testing.T) {
+	paths := sidecarFixturePaths(t)
+	selection := runtimeImageSelection{Tools: []string{}, Features: []string{"foo"}}
+	before, err := hashMergedExtensionFiles(paths, selection)
+	if err != nil {
+		t.Fatalf("hash before: %v", err)
+	}
+
+	testutil.InstallGWSFilter(t, filepath.Join(paths.UserExtensionsDir, model.KindFilter.DirName()))
+
+	files, err := mergedExtensionFiles(paths, selection)
+	if err != nil {
+		t.Fatalf("mergedExtensionFiles: %v", err)
+	}
+	for _, file := range files {
+		if strings.Contains(file.RelativePath, "/"+model.KindFilter.DirName()+"/") {
+			t.Fatalf("filter leaked into the build context: %s", file.RelativePath)
+		}
+	}
+	after, err := hashMergedExtensionFiles(paths, selection)
+	if err != nil {
+		t.Fatalf("hash after: %v", err)
+	}
+	if before != after {
+		t.Fatalf("image hash changed when a filter was installed: %s -> %s", before, after)
 	}
 }

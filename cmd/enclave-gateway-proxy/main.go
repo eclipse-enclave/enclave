@@ -18,6 +18,7 @@ import (
 	"strings"
 	"syscall"
 
+	"enclave/internal/filter/engine"
 	"enclave/internal/gateway/bundle"
 	"enclave/internal/gateway/dnsaudit"
 	"enclave/internal/gateway/mitm"
@@ -94,10 +95,15 @@ func main() {
 	if err != nil {
 		log.Fatalf("failed to load secret release rules: %v", err)
 	}
+	filters, err := loadFilters(strings.TrimSpace(os.Getenv(model.EnvFilterDir)), restricted)
+	if err != nil {
+		log.Fatal(err)
+	}
 	opts := mitm.Options{
 		AllowedDomains: allowlist.Allowed,
 		DeniedDomains:  allowlist.Denied,
 		SecretRules:    rules,
+		Filters:        filters,
 		AuditLogPath:   strings.TrimSpace(os.Getenv(model.EnvNetworkLogFile)),
 		CaptureDir:     captureDir,
 		Session:        strings.TrimSpace(os.Getenv(model.EnvGatewaySession)),
@@ -139,8 +145,8 @@ func readAllowlist(configDir string) (mitm.Allowlist, error) {
 
 // reloadOnHangup hands the proxy a fresh allowlist on every SIGHUP. The
 // entrypoint sends it after installing a new config bundle, instead of
-// restarting the proxy, so the proxy's in-memory state survives the reload.
-// An unreadable allowlist ends the process, which takes the gateway down.
+// restarting the proxy, so request filter quotas survive the reload. An
+// unreadable allowlist ends the process, which takes the gateway down.
 func reloadOnHangup(ctx context.Context, hangups <-chan os.Signal, configDir string, reloads chan<- mitm.Allowlist) {
 	for {
 		select {
@@ -159,6 +165,26 @@ func reloadOnHangup(ctx context.Context, hangups <-chan os.Signal, configDir str
 			return
 		}
 	}
+}
+
+// loadFilters loads the request filters the host handed over in dir. Only a
+// restricted gateway enforces them, and any error must stop the gateway: it
+// never runs without a filter the session selected.
+func loadFilters(dir string, restricted bool) (*engine.Set, error) {
+	if dir == "" {
+		return nil, nil
+	}
+	if !restricted {
+		return nil, fmt.Errorf("request filters need a restricted gateway")
+	}
+	filters, err := mitm.LoadFilters(dir, mitm.NewFilterClient())
+	if err != nil {
+		return nil, fmt.Errorf("failed to load request filters: %w", err)
+	}
+	for _, e := range filters.Engines() {
+		log.Printf("request filter %q active: preset %q", e.Filter(), e.Preset()) // #nosec G706 -- quoted values cannot inject log lines.
+	}
+	return filters, nil
 }
 
 func markProxyReady(path string) error {

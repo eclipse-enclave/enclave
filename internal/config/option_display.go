@@ -197,7 +197,7 @@ func OptionTypedEffectiveValue(def OptionDef, opts model.Options) any {
 // HasDirectives reports whether the option is configured as a directive list
 // that a run resolves rather than uses as is.
 func (def OptionDef) HasDirectives() bool {
-	return def.Apply == ApplySliceMergeFeature || def.Apply == ApplySliceMergeHost
+	return def.Apply == ApplySliceMergeFeature || def.Apply == ApplySliceMergeHost || def.Apply == ApplySliceMergeFilter
 }
 
 // OptionDirectives returns the directives configured for an option with

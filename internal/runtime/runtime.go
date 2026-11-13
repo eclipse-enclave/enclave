@@ -21,6 +21,7 @@ import (
 	"enclave/internal/backend"
 	"enclave/internal/config"
 	"enclave/internal/devcontainer"
+	"enclave/internal/filterhost"
 	"enclave/internal/gateway/tlsstore"
 	"enclave/internal/logx"
 	"enclave/internal/model"
@@ -67,7 +68,9 @@ type Runtime struct {
 	// Populated during auth setup, before the effective policy is resolved and
 	// cached, so the replacement host reaches the allow set too.
 	releaseHostOverrides map[string][]string
-	backend              backend.Backend
+	// filters are the session's request filters, see SetFilters.
+	filters []filterhost.SessionFilter
+	backend backend.Backend
 }
 
 type ExecutionContext struct {
@@ -79,6 +82,7 @@ type ExecutionContext struct {
 	Network        backend.NetworkPolicy
 	Ports          []backend.PortMapping
 	Secrets        []backend.SecretRelease
+	Filters        []backend.FilterBundle
 	AuthSync       *backend.AuthSyncSpec
 	Cleanup        func()
 	RunCtx         model.RunContext
@@ -251,6 +255,9 @@ func (r *Runtime) prepareExecution() (*ExecutionContext, error) {
 	r.removeStaleGateway(containerName)
 	r.stopExitedSessionGateways()
 	r.setConfigVolumeSuffix(containerName, baseContainerName)
+	if err := r.checkFilterEnforcement(); err != nil {
+		return nil, err
+	}
 
 	r.resolveContainerUser()
 	r.ideBridgePorts = discoverIdeBridgePorts(r.host.Home)
@@ -282,6 +289,13 @@ func (r *Runtime) prepareExecution() (*ExecutionContext, error) {
 	if err := r.handler.ValidateRun(runCtx); err != nil {
 		return nil, err
 	}
+	filterBundles, err := r.prepareFilterBundles(prepared.SecretMapping)
+	if err != nil {
+		if prepared.Cleanup != nil {
+			prepared.Cleanup()
+		}
+		return nil, err
+	}
 	networkResult, err := newNetworkManager(r).Prepare(containerName, prepared.AuthState, prepared.SecretMapping)
 	if err != nil {
 		if prepared.Cleanup != nil {
@@ -292,6 +306,7 @@ func (r *Runtime) prepareExecution() (*ExecutionContext, error) {
 	env := append([]string{}, mountArgs.Env()...)
 	env = append(env, networkResult.Env...)
 	env = append(env, projectEnv...)
+	env = r.withFilterEnv(env, projectEnv)
 	cleanup := mergeCleanup(prepared.Cleanup, networkResult.Cleanup)
 	return &ExecutionContext{
 		ContainerName:  containerName,
@@ -302,6 +317,7 @@ func (r *Runtime) prepareExecution() (*ExecutionContext, error) {
 		Network:        networkResult.Network,
 		Ports:          networkResult.Ports,
 		Secrets:        secretReleases(prepared.SecretMapping),
+		Filters:        filterBundles,
 		AuthSync:       prepared.AuthSync,
 		Cleanup:        cleanup,
 		RunCtx:         runCtx,
@@ -392,6 +408,9 @@ func (r *Runtime) prepareMounts() (*mountAccumulator, hostGitIdentity, error) {
 		}
 	}
 	r.addIdeBridgeMount(mountArgs)
+	if err := r.addFilterSummaryMount(mountArgs); err != nil {
+		return nil, hostGitIdentity{}, err
+	}
 	r.addDevcontainerEnv(mountArgs)
 	if err := r.protectGitConfigFiles(mountArgs); err != nil {
 		return nil, hostGitIdentity{}, err
@@ -407,14 +426,12 @@ func (r *Runtime) prepareVolumes(containerName string, baseContainerName string,
 	vm := newVolumeManager(r)
 	prep, stores := vm.BuildPrep(volumeSuffix)
 	cleanup := r.ephemeralVolumeCleanup(stores)
-	state, err := r.backend.PrepareStores(context.Background(), prep)
-	if err != nil {
+	if _, err := r.backend.PrepareStores(context.Background(), prep); err != nil {
 		if cleanup != nil {
 			cleanup()
 		}
 		return preparedVolumes{}, err
 	}
-	stores.PersistedEnvAvailable = state.PersistedEnvAvailable
 
 	r.addConfigMount(mountArgs, stores.Config)
 	r.addAuthMount(mountArgs, stores.Auth)
@@ -850,6 +867,7 @@ func (r *Runtime) backendRequest(ctx *ExecutionContext, detached bool, interacti
 		Ports:           append([]backend.PortMapping(nil), ctx.Ports...),
 		Security:        backend.SecurityPosture{Admin: r.run.Admin},
 		Secrets:         append([]backend.SecretRelease(nil), ctx.Secrets...),
+		Filters:         append([]backend.FilterBundle(nil), ctx.Filters...),
 		RuntimeUIDRemap: r.build.RuntimeUIDRemap,
 		Detached:        detached,
 	}
@@ -1051,6 +1069,8 @@ func (r *Runtime) specProxyManaged() []string {
 func (r *Runtime) sessionNetworkInputs() policy.SessionNetworkInputs {
 	inputs := policy.NewSessionNetworkInputs(r.profile, r.features, r.run)
 	inputs.ReleaseHostOverrides = r.releaseHostOverrides
+	inputs.FilterHosts = r.filterHosts()
+	inputs.FilterConfine = r.filterConfine()
 	return inputs
 }
 

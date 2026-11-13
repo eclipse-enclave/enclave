@@ -25,8 +25,8 @@ type ValidationContext struct {
 	// validation, for previews that report them with featureSelectionWarnings.
 	WarnUnknownFeatures bool
 	// PolicyNetworkMode returns the network mode the policy files set. It is
-	// called only to validate a disabled gateway without --allow-all-network;
-	// nil means the default restricted mode.
+	// called only to validate a disabled gateway without --allow-all-network
+	// and a run with request filters. Nil means the default restricted mode.
 	PolicyNetworkMode func() (string, error)
 }
 
@@ -90,6 +90,17 @@ func ValidateOptions(opts model.Options, sources model.OptionSources, ctx Valida
 		return opts, sources, warnings, normErr
 	}
 	opts.BuildOptions = normalizedBuildOptions
+	// Before the qemu coercion and the gateway checks, so that filters that
+	// cannot be enforced are named first and in one error.
+	if isRunAction(ctx.Action) && filtersSelected(opts) {
+		capabilities := func() (backend.Capabilities, error) { return backendCapabilities(opts) }
+		if err := checkFilterRunOptions(opts, sources, capabilities, ctx.PolicyNetworkMode); err != nil {
+			return opts, sources, warnings, err
+		}
+	}
+	if isRunAction(ctx.Action) {
+		warnings = append(warnings, filterRemovalWarnings(ctx.Paths, opts)...)
+	}
 	if opts.Backend == backend.NameQEMU && isRunAction(ctx.Action) {
 		var qemuWarnings []string
 		opts, qemuWarnings, err = coerceQEMURunOptions(opts, sources, ctx.Paths)

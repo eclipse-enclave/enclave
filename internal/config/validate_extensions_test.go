@@ -341,6 +341,7 @@ func testValidationPaths(root string) model.Paths {
 		UserToolsDir:             filepath.Join(root, ".enclave", "extensions", "tools"),
 		UserFeaturesDir:          filepath.Join(root, ".enclave", "extensions", "features"),
 		UserCommandExtensionsDir: filepath.Join(root, ".enclave", "extensions", "commands"),
+		UserFilterExtensionsDir:  filepath.Join(root, ".enclave", "extensions", "filters"),
 		AllowlistsDir:            filepath.Join(root, "runtime-assets", "gateway-allowlists"),
 		ExtensionsDir:            filepath.Join(root, "extensions"),
 		UserExtensionsDir:        filepath.Join(root, ".enclave", "extensions"),

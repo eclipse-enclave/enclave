@@ -49,6 +49,7 @@ func TestMergeOptionSourcesCoversAllFields(t *testing.T) {
 			ProjectMount:             SourceCLI,
 			WorktreeMetadata:         SourceCLI,
 			AllowDomains:             SourceCLI,
+			Filters:                  SourceCLI,
 			BridgePorts:              SourceCLI,
 			SessionName:              SourceCLI,
 			SessionTint:              SourceCLI,

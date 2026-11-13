@@ -5,7 +5,7 @@
 //
 // SPDX-License-Identifier: MIT
 
-// Package extinstall installs enclave tool and feature extensions from git
+// Package extinstall installs enclave extensions of every kind from git
 // repositories into the user-global extension root.
 package extinstall
 
@@ -21,6 +21,8 @@ import (
 	"time"
 
 	"enclave/internal/config"
+	"enclave/internal/filter"
+	"enclave/internal/filterhost"
 	"enclave/internal/logx"
 	"enclave/internal/model"
 	"enclave/internal/usercmd"
@@ -325,6 +327,9 @@ func applyPlan(env Env, req Request, plan installPlan, stage *staging) (ActionRe
 		plan.Before.ShadowedHostCommands = usercmd.Shadowed(env.Home, plan.Before.HostCommands)
 	}
 	warnings = append(warnings, caps.shadowedHostCommandWarnings()...)
+	if plan.Before != nil {
+		warnings = append(warnings, filterUpdateWarnings(plan.Before.Filter, caps.Filter)...)
+	}
 	if req.Kind == model.KindFeature && caps.onlyHostCommands() {
 		warnings = append(warnings, fmt.Sprintf(
 			"this feature ships nothing but host commands; publish it with `kind: %s` and install it with `%s %s add`",
@@ -406,7 +411,7 @@ func applyPlan(env Env, req Request, plan installPlan, stage *staging) (ActionRe
 	}
 
 	env.outcome(markOK, logx.ColorGreen, "%s at %s", plan.Action, installedPath)
-	printPostInstallHints(env, req.Kind, plan.Name, caps, contentChanged)
+	printPostInstallHints(env, req.Kind, plan.Name, caps, contentChanged, plan.Action == ActionInstalled)
 	return ActionResult{Name: plan.Name, Action: plan.Action, Commit: plan.Commit, Path: installedPath,
 		HostCommands: caps.HostCommands, Warnings: warnings}, nil
 }
@@ -452,7 +457,7 @@ func changesReachImage(changes []changedFile) bool {
 // provenance sidecar, so re-pinning to a new commit that carries identical
 // content rebuilds nothing and must not say otherwise. Only a run that uses the
 // extension rebuilds, so the note names that run.
-func printPostInstallHints(env Env, kind model.ExtensionKind, name string, caps capabilities, contentChanged bool) {
+func printPostInstallHints(env Env, kind model.ExtensionKind, name string, caps capabilities, contentChanged bool, fresh bool) {
 	switch kind {
 	case model.KindTool:
 		if contentChanged {
@@ -465,6 +470,16 @@ func printPostInstallHints(env Env, kind model.ExtensionKind, name string, caps 
 		if caps.Spec.DefaultEnabled != nil && !*caps.Spec.DefaultEnabled {
 			env.note("enable it with: %s --features +%s", model.AppName, name)
 		}
+	case model.KindFilter:
+		// A filter changes no image. A fresh install still needs a grant and a
+		// selection.
+		if !fresh {
+			return
+		}
+		if caps.Filter != nil && caps.Filter.CredentialType == filter.CredentialOAuth2 {
+			env.note("log in with: %s filters login %s", model.AppName, name)
+		}
+		env.note("select it with: %s --filters %s", model.AppName, name)
 	}
 }
 
@@ -473,6 +488,11 @@ func printPostInstallHints(env Env, kind model.ExtensionKind, name string, caps 
 // installed. Errors abort: --force overrides collisions, never validity.
 func validateStaged(env Env, stage *staging, name string) ([]string, error) {
 	result := config.ValidateExtensionDir(stage.extDir(name), stage.kind, env.Paths)
+	if stage.kind == model.KindFilter && len(result.Errors) == 0 {
+		content := filterhost.ValidateDir(name, stage.extDir(name))
+		result.Warnings = append(result.Warnings, content.Warnings...)
+		result.Errors = append(result.Errors, content.Errors...)
+	}
 	if len(result.Errors) > 0 {
 		return result.Warnings, fmt.Errorf("%s", strings.Join(result.Errors, "; "))
 	}

@@ -8,7 +8,6 @@
 package runtime
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -62,7 +61,15 @@ func (m authManager) Prepare(env *[]string, stores storeSet) (model.AuthState, S
 		ConfigStore: stores.Config,
 		AuthStorage: authStorage,
 	}
-	persistedEnv := m.readPersistedEnv(stores)
+	sources := ReadSecretSources(SecretSourcesRequest{
+		Home:        m.host.Home,
+		ProjectHash: m.project.Hash,
+		Tool:        m.profile.Name,
+		Run:         m.run,
+		Auth:        m.auth,
+		Storage:     m.storage(),
+	})
+	persistedEnv, secretsLayers := sources.Persisted, sources.Layers
 
 	providerSessions := m.checkProviderSessions(authStorage)
 	authCtx.StorageHasSession = anyProviderSession(providerSessions)
@@ -71,12 +78,6 @@ func (m authManager) Prepare(env *[]string, stores storeSet) (model.AuthState, S
 		return err
 	}); err != nil {
 		logx.Warnf("Auth ready hook failed: %v", err)
-	}
-
-	secretsLayers, err := auth.ResolveSecretsLayers(m.host.Home, m.project.Hash, m.profile.Name, m.auth.SecretsScope)
-	if err != nil {
-		logx.Warnf("Failed to read layered secrets: %v", err)
-		secretsLayers = nil
 	}
 
 	activeSecrets, err := m.activeSecrets()
@@ -113,21 +114,6 @@ func (m authManager) Prepare(env *[]string, stores storeSet) (model.AuthState, S
 	}
 
 	return authState, injection.SecretMapping, nil
-}
-
-func (m authManager) readPersistedEnv(stores storeSet) map[string]string {
-	persistedEnv := map[string]string{}
-	if stores.PersistedEnvAvailable && stores.Env != nil {
-		if err := m.withStoreLock(stores.Env, func() error {
-			if env, ok := m.readEnvStore(); ok {
-				persistedEnv = env
-			}
-			return nil
-		}); err != nil {
-			logx.Warnf("Failed to read persisted env store: %v", err)
-		}
-	}
-	return persistedEnv
 }
 
 func (m authManager) checkProviderSessions(authStorage *backend.StoreRef) map[string]bool {
@@ -362,7 +348,7 @@ func (m authManager) persistEnvToStore(stores storeSet, persistedEnv map[string]
 
 // envStoreKey identifies the persisted-env store for this tool + project.
 func (m authManager) envStoreKey() backend.StoreKey {
-	return envStoreKey(m.profile.Name, m.project.Hash)
+	return EnvStoreKey(m.profile.Name, m.project.Hash)
 }
 
 func (m authManager) storage() backend.StoreManager {
@@ -378,15 +364,7 @@ func (m authManager) readEnvStore() (map[string]string, bool) {
 	if store == nil {
 		return nil, false
 	}
-	data, err := store.ReadFile(context.Background(), m.envStoreKey(), backend.StoreKindEnv, "env")
-	if err != nil {
-		return nil, false
-	}
-	env, err := util.ParseEnv(bytes.NewReader(data))
-	if err != nil {
-		return nil, false
-	}
-	return env, true
+	return readEnvStoreFile(store, m.envStoreKey())
 }
 
 // writeEnvStore writes the "env" file and restores agent ownership of the store

@@ -26,8 +26,6 @@ type storeSet struct {
 	Auth     *backend.StoreRef
 	Env      *backend.StoreRef
 	Features map[string]backend.StoreRef
-
-	PersistedEnvAvailable bool
 }
 
 // AuthStorage is the store where session credentials live: the shared auth
@@ -218,10 +216,11 @@ func (m volumeManager) shouldCreateEnvVolume() bool {
 }
 
 func (m volumeManager) envStoreKey() backend.StoreKey {
-	return envStoreKey(m.profile.Name, m.project.Hash)
+	return EnvStoreKey(m.profile.Name, m.project.Hash)
 }
 
-func envStoreKey(owner string, projectHash string) backend.StoreKey {
+// EnvStoreKey identifies the env store of a tool in a project.
+func EnvStoreKey(owner string, projectHash string) backend.StoreKey {
 	return backend.StoreKey{Owner: owner, ProjectHash: projectHash}
 }
 

@@ -15,6 +15,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -372,7 +373,16 @@ type StartConfig struct {
 	WorkspaceID       string
 	ProjectHash       string
 	SecretReleaseFile string
-	TLSRootDir        string
+	// FilterDir holds the policy and credential files of the session's request
+	// filters. Only a restricted gateway may receive it.
+	FilterDir string
+	// FilterNames, FilterHosts, and FilterConfine label the gateway with its
+	// request filters, the host patterns they govern, and the domains they
+	// confine.
+	FilterNames   []string
+	FilterHosts   []string
+	FilterConfine []string
+	TLSRootDir    string
 	// NetworkMode is the session's network mode. The gateway reads it from its
 	// environment; anything but unrestricted counts as restricted. Only
 	// unrestricted is labelled.
@@ -500,6 +510,9 @@ func Start(ctx context.Context, cfg StartConfig) (StartResult, error) {
 	if cfg.SecretReleaseFile != "" {
 		mounts = appendReadOnlyMount(mounts, cfg.SecretReleaseFile, model.GatewaySecretReleasePath)
 	}
+	if cfg.FilterDir != "" {
+		mounts = appendReadOnlyMount(mounts, cfg.FilterDir, model.GatewayFilterDir)
+	}
 	mounts = appendTLSCAMounts(mounts, cfg.TLSRootDir)
 
 	env := []string{model.EnvGatewayNetworkMode + "=" + gatewayNetworkMode(cfg)}
@@ -527,6 +540,9 @@ func Start(ctx context.Context, cfg StartConfig) (StartResult, error) {
 	}
 	if cfg.SecretReleaseFile != "" {
 		env = append(env, model.EnvSecretReleaseFile+"="+model.GatewaySecretReleasePath)
+	}
+	if cfg.FilterDir != "" {
+		env = append(env, model.EnvFilterDir+"="+model.GatewayFilterDir)
 	}
 	if cfg.TLSRootDir != "" {
 		env = append(env, model.EnvGatewayTLSRoot+"="+model.GatewayTLSRootPath)
@@ -639,9 +655,10 @@ func prepareNetworkCapture(cfg StartConfig) (string, error) {
 }
 
 // gatewayTmpfs keeps the proxy's private data on tmpfs, so the copies of
-// secret releases and the TLS CA key the entrypoint makes there never land on
-// a container layer. Docker and Podman, rootless included, mount it owned by
-// the container's root, which hands it to the proxy user.
+// request filter credentials, secret releases, and the TLS CA key the
+// entrypoint makes there never land on a container layer. Docker and Podman,
+// rootless included, mount it owned by the container's root, which hands it
+// to the proxy user.
 func gatewayTmpfs() map[string]string {
 	return map[string]string{model.GatewayProxyDataDir: "rw,nosuid,nodev,noexec,mode=0755,size=64m"}
 }
@@ -836,6 +853,9 @@ func validateStartConfig(cfg StartConfig) error {
 	default:
 		return fmt.Errorf("invalid network log mode: %s", cfg.NetworkLogMode)
 	}
+	if cfg.FilterDir != "" && gatewayNetworkMode(cfg) == model.NetworkModeUnrestricted {
+		return fmt.Errorf("request filters need a restricted gateway")
+	}
 
 	if cfg.NetworkLogPath != "" {
 		info, err := os.Stat(cfg.NetworkLogPath)
@@ -944,7 +964,22 @@ func gatewayLabels(cfg StartConfig) map[string]string {
 	if workspaceID != "" {
 		labels[model.GatewayLabelWorkspaceHash] = workspaceID
 	}
+	if cfg.FilterDir != "" && len(cfg.FilterNames) > 0 {
+		labels[model.GatewayLabelFilters] = joinLabelList(cfg.FilterNames)
+		labels[model.GatewayLabelFilterHosts] = joinLabelList(cfg.FilterHosts)
+		if len(cfg.FilterConfine) > 0 {
+			labels[model.GatewayLabelFilterConfine] = joinLabelList(cfg.FilterConfine)
+		}
+	}
 	return labels
+}
+
+// joinLabelList joins sorted, distinct values for a list label. Filter names
+// and host patterns never contain a comma.
+func joinLabelList(values []string) string {
+	sorted := slices.Clone(values)
+	slices.Sort(sorted)
+	return strings.Join(slices.Compact(sorted), ",")
 }
 
 func ensureExistingGatewayImageWith(profile model.Profile, exists func(context.Context, string) (bool, error)) error {

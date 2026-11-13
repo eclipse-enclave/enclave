@@ -95,6 +95,7 @@ Per-project data is stored on the host and reused across sessions:
 | Config/env/auth stores | Host directories under `~/.local/state/enclave/` (bind-mounted; no Docker volumes) |
 | Network log and captures | `~/.local/state/enclave/projects/<project-hash>/<tool>/logs/` (`network.log`; `capture/<session>/` with [full capture](networking.md#full-capture)) |
 | Embedded runtime assets | `~/.cache/enclave/assets/<content-hash>/` |
+| Request filter grants, OAuth clients, user presets, policy summaries | `~/.local/state/enclave/filters/<filter>/`, `~/.config/enclave/filters/<filter>/presets/`, and `filter-summaries/` per project and tool ([Host files](filters.md#host-files)) |
 
 macOS paths: [Host directories](configuration.md#host-directories). Store
 lifecycle: [Persistent stores](runtime/stores.md); memory rules:
@@ -148,3 +149,6 @@ session store that holds memory; the other kinds do not apply there. See
 
 Under Podman, `--build-cache` reports nothing to reclaim; see
 [Backends](backends.md#podman).
+
+No cleanup removes request filter grants. Delete them with
+`enclave filters logout` ([Manage grants](filters.md#manage-grants)).

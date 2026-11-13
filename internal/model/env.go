@@ -41,6 +41,7 @@ const (
 	EnvYolo                     = EnvPrefix + "YOLO"
 	EnvSecretPlaceholders       = EnvPrefix + "SECRET_PLACEHOLDERS"
 	EnvSecretReleaseFile        = EnvPrefix + "SECRET_RELEASE_FILE"
+	EnvFilterDir                = EnvPrefix + "FILTER_DIR"
 	EnvGatewayTLSRoot           = EnvPrefix + "GATEWAY_TLS_ROOT"
 	EnvGatewayProxyReadyFile    = EnvPrefix + "GATEWAY_PROXY_READY_FILE"
 	EnvGatewaySession           = EnvPrefix + "GATEWAY_SESSION"
@@ -53,4 +54,10 @@ const (
 	EnvConfigDir                = EnvPrefix + "CONFIG_DIR"
 	EnvGitName                  = EnvPrefix + "GIT_NAME"
 	EnvGitEmail                 = EnvPrefix + "GIT_EMAIL"
+	// EnvActiveFilters lists the session's request filters as name:preset,
+	// comma-separated.
+	EnvActiveFilters = EnvPrefix + "ACTIVE_FILTERS"
+	// EnvFilterSummaryDir names the read-only directory holding one policy
+	// summary per active filter, <name>.json.
+	EnvFilterSummaryDir = EnvPrefix + "FILTER_SUMMARY_DIR"
 )

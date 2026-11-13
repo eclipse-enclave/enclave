@@ -5,8 +5,8 @@ Read `README.md` before making user-facing changes.
 ## Architecture
 
 - See `docs/ARCHITECTURE.md` for the architecture, repository layout, and container assets.
-- Flow: CLI args → profile loading → image/bundle build check → store/auth/network setup → selected backend (`docker` by default, experimental `qemu` for a narrow path).
-- Key packages (all under `internal/`): `app` (orchestration), `runtime` (container execution, mounts, auth injection), `gateway` (network-isolation sidecar), `network` (policy loading and dnsmasq config generation), `config` (profile and path resolution), `model` (shared types).
+- Flow: CLI args → profile loading → request filter resolution → image/bundle build check → store/auth/network setup → selected backend (`docker` by default, experimental `qemu` for a narrow path).
+- Key packages (all under `internal/`): `app` (orchestration), `runtime` (container execution, mounts, auth injection), `gateway` (network-isolation sidecar), `network` (policy loading and dnsmasq config generation), `config` (profile and path resolution), `model` (shared types), `filter` (request filter policy language and the subpackages `spec`, `engine`, and `token`, all but `spec` linked into the gateway proxy), `filterhost` (filter loading, grants, login, and session resolution on the host).
 - Keep packages under `internal/` focused and avoid unnecessary coupling.
 
 ## Collaboration
@@ -18,7 +18,7 @@ Read `README.md` before making user-facing changes.
 
 ## External Integrations
 
-- Treat CLI JSON schemas, background-run output, lifecycle commands, and container naming as integration contracts for external consumers; coordinate breaking changes. This includes `enclave tools|features|commands list --json` and the shared `add`/`update`/`remove` result envelope (both `schemaVersion: "1"`; see `docs/extensions/json-output.md`), `enclave config --json` (`schemaVersion: "1"`, `kind: "config"`), `enclave network print --json` (`schemaVersion: "1"`, `kind: "network-policy"`), and `enclave network log --show-capture <id> --json` (`schemaVersion: "1"`, `kind: "network-capture"`) together with its WebSocket messages file (see `docs/networking.md`). Other JSON contracts are documented in `docs/integration.md`.
+- Treat CLI JSON schemas, background-run output, lifecycle commands, and container naming as integration contracts for external consumers; coordinate breaking changes. This includes `enclave tools|features|commands|filters list --json` and the shared `add`/`update`/`remove` result envelope (both `schemaVersion: "1"`; see `docs/extensions/json-output.md`), `enclave config --json` (`schemaVersion: "1"`, `kind: "config"`), `enclave network print --json` (`schemaVersion: "1"`, `kind: "network-policy"`), and `enclave network log --show-capture <id> --json` (`schemaVersion: "1"`, `kind: "network-capture"`) together with its WebSocket messages file (see `docs/networking.md`). Other JSON contracts are documented in `docs/integration.md`.
 - Session provenance (`options` in `enclave ps --json`) is contract; the `enclave.options` label that stores it is not. Recorded options follow `AffectsSession` in `internal/config/options_def.go` and must never carry secret values.
 - Prefer structured CLI output over Docker labels or human-readable output for integration contracts.
 - HomeShell (`eclipse-enclave/homeshell`) is a known consumer; `docs/integration.md#known-consumers` says what it relies on.
@@ -78,12 +78,13 @@ When reviewing, a missing `CHANGELOG.md` entry is not a finding. These are: an e
 - Update `docs/ARCHITECTURE.md`, this file, and relevant extension docs when profile, template, patch, or runtime-asset organization changes.
 - Update `docs/cli-reference.md`, `docs/configuration.md`, and `docs/DEV.md` when CLI flags or option definitions change.
 - Update the documentation index in `extensions/tools/*/skills/enclave-help/SKILL.md` when docs pages are added, renamed, or removed.
+- Update `docs/security/request-filters.md` when request filter enforcement, parsing, or credential handling changes. Its guarantees I1 to I12 must stay true.
 
 ## Extensions
 
-- Start with `docs/extensions/README.md` (architecture), `docs/extensions/spec-reference.md` (`spec.yaml` fields), and `docs/extensions/adding-a-tool.md` / `adding-a-feature.md` (step-by-step guides). Every tool or feature extension must include a `README.md`.
+- Start with `docs/extensions/README.md` (architecture), `docs/extensions/spec-reference.md` (`spec.yaml` fields), `docs/extensions/filter-spec.md` (filter `spec.yaml` and preset fields), and `docs/extensions/adding-a-tool.md` / `adding-a-feature.md` / `adding-a-filter.md` (step-by-step guides). Every extension must include a `README.md`.
 - Core ships six tools (Claude Code, Codex, Copilot, Theia with `theia-next`, OpenCode, Pi). New tools go to `eclipse-enclave/enclave-extensions`; see `CONTRIBUTING.md`.
-- Kinds: tools (`kind: sandbox`, `extensions/tools/<tool>/`), features (`kind: mixin`, `extensions/features/<feature>/`), and command extensions (`kind: command`, user root only, host commands only). Tool settings templates live under `extensions/tools/<tool>/templates/` and are baked into the image.
+- Kinds: tools (`kind: sandbox`, `extensions/tools/<tool>/`), features (`kind: mixin`, `extensions/features/<feature>/`), command extensions (`kind: command`, user root only, host commands only), and request filters (`kind: filter`, user root only, data only: the gateway enforces them and holds their credential, see `docs/filters.md` and `docs/security/request-filters.md`). Tool settings templates live under `extensions/tools/<tool>/templates/` and are baked into the image.
 - Memory scope, disable arguments, and preserved runtime state are declared with `sandbox.memoryScope`, `sandbox.noMemoryArgs`, and `sandbox.statePaths`; see [Agent Memory](docs/runtime/stores.md#agent-memory).
 - User-side overrides, patches, and skills (paths and precedence) are documented in `docs/tool-config.md`.
 - Provenance (`.enclave-source.json`) and `commands/` in an installed extension are excluded from the build context and image hash. See `docs/extensions/installing.md`.

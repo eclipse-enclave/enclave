@@ -12,6 +12,9 @@ DNSMASQ_BIN="/usr/local/libexec/enclave/dnsmasq"
 DNSMASQ_CONF="/etc/dnsmasq.d/enclave.conf"
 ACTIVE_DOMAINS_FILE="/run/enclave-gateway/domains.txt"
 IPSET_NAME="enclave_allowed"
+# Addresses of the names request filters govern. dnsmasq adds them next to
+# IPSET_NAME, and only the proxy may reach them, on TCP 80 and 443.
+GOVERNED_IPSET_NAME="enclave_governed"
 DNSMASQ_USER="dnsmasq"
 PROXY_USER="gateway"
 # The proxy listens on these loopback ports; keep them in sync with
@@ -269,13 +272,25 @@ restore_bundle() {
     fi
 }
 
+# filters_active reports whether the session selected request filters.
+filters_active() {
+    [ -n "${ENCLAVE_FILTER_DIR:-}" ]
+}
+
 create_ipset() {
     ipset create "$IPSET_NAME" hash:net -exist
     ipset flush "$IPSET_NAME"
+    if filters_active; then
+        ipset create "$GOVERNED_IPSET_NAME" hash:net -exist
+        ipset flush "$GOVERNED_IPSET_NAME"
+    fi
 }
 
-atomic_swap_ipset() {
-    tmp_set="${IPSET_NAME}_reload"
+# swap_empty_ipset replaces the named set with an empty one, so the reloaded
+# dnsmasq repopulates it from fresh answers only.
+swap_empty_ipset() {
+    set_name="$1"
+    tmp_set="${set_name}_reload"
     ipset destroy "$tmp_set" >/dev/null 2>&1 || true
 
     if ! ipset create "$tmp_set" hash:net; then
@@ -283,13 +298,21 @@ atomic_swap_ipset() {
         return 1
     fi
 
-    if ! ipset swap "$tmp_set" "$IPSET_NAME"; then
-        log "failed to swap ipset $tmp_set -> $IPSET_NAME"
+    if ! ipset swap "$tmp_set" "$set_name"; then
+        log "failed to swap ipset $tmp_set -> $set_name"
         ipset destroy "$tmp_set" >/dev/null 2>&1 || true
         return 1
     fi
 
     ipset destroy "$tmp_set" >/dev/null 2>&1 || true
+    return 0
+}
+
+atomic_swap_ipset() {
+    swap_empty_ipset "$IPSET_NAME" || return 1
+    if filters_active; then
+        swap_empty_ipset "$GOVERNED_IPSET_NAME" || return 1
+    fi
     return 0
 }
 
@@ -455,8 +478,9 @@ EOF_PUBLISHED
 
 # setup_firewall installs the restricted egress policy. It runs at startup and
 # on every reload, so the order is what keeps a reload safe: OUTPUT drops all
-# new connections from the flush until the end, and the proxy redirects come
-# back before any rule accepts allowlisted addresses.
+# new connections from the flush until the end, the proxy redirects come back
+# before any rule accepts allowlisted addresses, and governed addresses are
+# rejected before the allowlist accepts them.
 setup_firewall() {
     setup_input_firewall iptables || return 1
     iptables -P OUTPUT DROP || return 1
@@ -491,6 +515,10 @@ $UNIQUE_RESOLVERS
 EOF_RESOLVERS
 
     if [ "$PROXY_ENABLED" != "true" ]; then
+        if filters_active; then
+            log "Request filters need the proxy, aborting"
+            return 1
+        fi
         iptables -A OUTPUT -m set --match-set "$IPSET_NAME" dst -j ACCEPT
         setup_ide_bridge
         return
@@ -512,10 +540,30 @@ EOF_RESOLVERS
     iptables -A OUTPUT -p tcp --dport "$PROXY_HTTP_PORT" -m addrtype --dst-type LOCAL -j ACCEPT
     iptables -A OUTPUT -p tcp --dport "$PROXY_HTTPS_PORT" -m addrtype --dst-type LOCAL -j ACCEPT
 
+    if filters_active; then
+        reject_ungoverned_egress "$proxy_uid" || return 1
+    fi
     iptables -A OUTPUT -m set --match-set "$IPSET_NAME" dst -j ACCEPT
 
     log "Transparent proxy NAT rules configured"
     setup_ide_bridge
+}
+
+# reject_ungoverned_egress closes every path to a governed address but the
+# proxy's own TCP 80 and 443 connections. The session's web traffic reaches
+# the proxy through the redirects, so this rejects what would bypass the
+# filter: other ports, UDP such as HTTP/3, and anything not redirected.
+reject_ungoverned_egress() {
+    proxy_uid="$1"
+    for port in 80 443; do
+        iptables -A OUTPUT -p tcp --dport "$port" -m set --match-set "$GOVERNED_IPSET_NAME" dst \
+            -m owner --uid-owner "$proxy_uid" -j ACCEPT || return 1
+    done
+    if iptables -A OUTPUT -m set --match-set "$GOVERNED_IPSET_NAME" dst -j REJECT; then
+        return 0
+    fi
+    log "REJECT target unavailable, dropping traffic to governed addresses instead"
+    iptables -A OUTPUT -m set --match-set "$GOVERNED_IPSET_NAME" dst -j DROP
 }
 
 enable_route_localnet() {
@@ -656,6 +704,10 @@ prepare_proxy_runtime_data() {
     proxy_data="$PROXY_DATA_DIR"
     mkdir -p "$proxy_data"
 
+    if ! prepare_proxy_filters "$proxy_data"; then
+        return 1
+    fi
+
     secret_release_file="${ENCLAVE_SECRET_RELEASE_FILE:-${ENCLAVE_SECRET_INJECTION_FILE:-}}"
     if [ -n "$secret_release_file" ]; then
         if [ ! -f "$secret_release_file" ]; then
@@ -685,6 +737,67 @@ prepare_proxy_runtime_data() {
     fi
 
     export ENCLAVE_GATEWAY_CONFIG_DIR=/run/enclave-gateway
+    return 0
+}
+
+# prepare_proxy_filters copies the request filters the host mounted into the
+# proxy's private data dir: owned by the proxy user, files 0600. They hold real
+# credentials. A filter dir that is set but unusable fails the start, so the
+# gateway never runs without a filter the session selected.
+prepare_proxy_filters() {
+    proxy_data="$1"
+    filter_src="${ENCLAVE_FILTER_DIR:-}"
+    if [ -z "$filter_src" ]; then
+        return 0
+    fi
+    if [ "$PROXY_ENABLED" != "true" ]; then
+        log "Request filters need the proxy, aborting"
+        return 1
+    fi
+    if [ ! -d "$filter_src" ] || [ -L "$filter_src" ]; then
+        log "Request filter directory missing: $filter_src"
+        return 1
+    fi
+    filter_dst="$proxy_data/filters"
+    rm -rf "$filter_dst"
+    if ! mkdir -m 700 "$filter_dst"; then
+        log "Cannot create $filter_dst"
+        return 1
+    fi
+    filter_count=0
+    for filter_file in "$filter_src"/* "$filter_src"/.[!.]* "$filter_src"/..?*; do
+        if [ ! -e "$filter_file" ] && [ ! -L "$filter_file" ]; then
+            continue
+        fi
+        filter_name=$(basename "$filter_file")
+        case "$filter_name" in
+            *.policy.json|*.credential.json) ;;
+            *)
+                log "Unexpected entry in request filter directory: $filter_name"
+                return 1
+                ;;
+        esac
+        if [ ! -f "$filter_file" ] || [ -L "$filter_file" ]; then
+            log "Request filter file is not a regular file: $filter_name"
+            return 1
+        fi
+        if ! cp "$filter_file" "$filter_dst/$filter_name" || ! chmod 600 "$filter_dst/$filter_name"; then
+            log "Cannot copy request filter file $filter_name"
+            return 1
+        fi
+        filter_count=$((filter_count + 1))
+    done
+    if [ "$filter_count" -eq 0 ]; then
+        log "Request filter directory is empty: $filter_src"
+        return 1
+    fi
+    if ! chown -R "$PROXY_USER:$PROXY_USER" "$filter_dst"; then
+        log "Cannot hand request filters to $PROXY_USER"
+        return 1
+    fi
+    ENCLAVE_FILTER_DIR="$filter_dst"
+    export ENCLAVE_FILTER_DIR
+    log "Loaded $filter_count request filter files"
     return 0
 }
 
@@ -749,7 +862,7 @@ reload_children() {
 
 # reload_proxy has the running proxy read the installed allowlist again in
 # place. It also closes the connections it holds, as a restart would, but
-# keeps its memory.
+# keeps its memory: request filter quotas must last the whole session.
 reload_proxy() {
     if ! is_pid_running "$PROXY_PID"; then
         log "Cannot reload: proxy process is not running"

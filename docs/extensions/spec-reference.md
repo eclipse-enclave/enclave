@@ -61,7 +61,8 @@ Sections: [tool fields](#tool-fields-sandbox),
 
 A `kind: command` spec accepts only `schemaVersion`, `kind`, `name`,
 `displayName`, and `description`; see
-[Command extensions](README.md#command-extensions).
+[Command extensions](README.md#command-extensions). A `kind: filter` spec has
+its own schema, described in the [filter spec reference](filter-spec.md).
 
 ## Tool files
 
@@ -421,8 +422,8 @@ project and installs happen at build time:
 | `commands.install` | Features only; woven into the build; an `install.sh` sidecar wins |
 
 Enclave-native additions with no sbx counterpart include `providers`, `ports`,
-`caches`, `serviceAuth.<id>.hosts`, `credentials.sources.<id>.apiKey`, and
-`kind: command`.
+`caches`, `serviceAuth.<id>.hosts`, `credentials.sources.<id>.apiKey`,
+`kind: command`, and `kind: filter`.
 
 ## Examples
 

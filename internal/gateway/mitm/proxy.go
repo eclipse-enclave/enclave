@@ -32,6 +32,7 @@ import (
 	"golang.org/x/crypto/cryptobyte"
 
 	"enclave/internal/domainpattern"
+	"enclave/internal/filter/engine"
 	"enclave/internal/gateway/tlsstore"
 	"enclave/internal/model"
 	"enclave/internal/netcapture"
@@ -60,10 +61,13 @@ type Options struct {
 	NetworkMode    string
 	ForceHTTPSMITM bool
 	TLSStore       *tlsstore.Store
+	// Filters are the active request filters. Only a restricted proxy accepts
+	// them.
+	Filters *engine.Set
 	// Reloads delivers a new allowlist, for example after the gateway reloaded
 	// its config bundle. The proxy swaps it in, closes the connections it holds
 	// so none outlives a domain the new list drops, and calls OnReady again.
-	// Everything else stays in memory.
+	// Everything else, request filter quotas included, stays in memory.
 	Reloads <-chan Allowlist
 	OnReady func()
 }
@@ -147,6 +151,12 @@ func Run(ctx context.Context, opts Options) error {
 		// down with it: a proxy that fails to start shuts the gateway.
 		log.Printf("full network capture disabled: %v", err)
 	}
+	if !opts.Filters.Empty() {
+		if !proxy.caps.enforceAllowlist {
+			return fmt.Errorf("request filters need a restricted gateway")
+		}
+		proxy.filters = opts.Filters
+	}
 	httpServer := proxy.newHTTPServer()
 	listener, err := listenLoopback(httpPort)
 	if err != nil {
@@ -218,7 +228,7 @@ func Run(ctx context.Context, opts Options) error {
 
 // reload swaps in a new allowlist and closes the client connections and idle
 // upstream connections the proxy holds, as a restart would, so no connection
-// outlives a domain the new list drops. Everything else stays in memory.
+// outlives a domain the new list drops. Request filter state stays.
 func (p *proxy) reload(list Allowlist, httpConns *connSet, httpsServer *httpsDispatchServer) {
 	p.allowlist.Store(newHostLists(list.Allowed, list.Denied))
 	httpConns.closeAll()
@@ -370,6 +380,7 @@ type proxy struct {
 	caps           capabilities
 	allowlist      atomic.Pointer[hostLists]
 	secretRules    []model.SecretReleaseEntry
+	filters        *engine.Set
 	forceHTTPSMITM bool
 	audit          *netlog.Appender
 	session        string
@@ -491,18 +502,41 @@ func (p *proxy) handler(scheme string) http.HandlerFunc {
 			http.Error(w, "Domain not in allowlist", http.StatusForbidden)
 			return
 		}
-		// The capture snapshots the request before secrets are released into it,
-		// so it holds the placeholders the sandbox sent and never a real value.
-		// A denied request was not relayed and leaves no capture.
+		// The capture snapshots the request before a secret or a filter's
+		// credential is released into it, so it holds the placeholders the
+		// sandbox sent and never a real value. A denied request was not relayed
+		// and leaves no capture.
 		capture := p.captures.Begin(req, scheme)
-		if host != "" {
-			if err := rewriteHeaders(scheme, host, req.Header, p.releaseRules()); err != nil {
-				event.Status = http.StatusForbidden
-				event.Verdict = netlog.VerdictDeny
-				event.Rule = "secret-injection"
-				p.logEvent(event)
-				http.Error(w, "request denied", http.StatusForbidden)
+		var decision *engine.Decision
+		if governing := p.filters.For(host, normalizedTLSHost(req)); governing != nil {
+			// The filter alone decides on a governed host: release rules
+			// never inject here, and their placeholders are refused.
+			event.Rule = netlog.RuleFilter
+			event.Filter = governing.Filter()
+			if releasePlaceholderPresent(req.Header, p.releaseRules()) {
+				p.denySecretInjection(w, event)
 				return
+			}
+			decision = governing.Evaluate(req.Context(), scheme, req)
+			event.Op, event.Capability = decision.Op, decision.Capability
+			if decision.Denial != nil {
+				p.denyByFilter(w, event, decision.Denial)
+				return
+			}
+			// Releases the quota of a request that never got an upstream
+			// status. After Finish with that status it does nothing.
+			defer decision.Finish(0)
+		} else {
+			if denial := p.filters.CheckUngoverned(req); denial != nil {
+				event.Filter = denial.Filter
+				p.denyByFilter(w, event, denial)
+				return
+			}
+			if host != "" {
+				if err := rewriteHeaders(scheme, host, req.Header, p.releaseRules()); err != nil {
+					p.denySecretInjection(w, event)
+					return
+				}
 			}
 		}
 		if capture != nil {
@@ -514,7 +548,7 @@ func (p *proxy) handler(scheme string) http.HandlerFunc {
 			req.Header.Set("Accept-Encoding", "identity")
 			req.Header.Del("Sec-WebSocket-Extensions")
 		}
-		result, err := p.forward(w, req, scheme, capture)
+		result, err := p.forward(w, req, scheme, decision, capture)
 		if err != nil {
 			event.Status = http.StatusBadGateway
 			event.Verdict = netlog.VerdictPass
@@ -524,14 +558,61 @@ func (p *proxy) handler(scheme string) http.HandlerFunc {
 			http.Error(w, "Upstream request failed", http.StatusBadGateway)
 			return
 		}
+		if result.Denial != nil {
+			event.CaptureID = capture.Finish(fmt.Errorf("response withheld: %s", result.Denial.Message))
+			p.logDenial(event, result.Denial)
+			return
+		}
 		event.CaptureID = capture.Finish(nil)
 		event.Status = result.StatusCode
 		event.ResponseSize = result.ResponseBytes
 		event.ContentType = result.ContentType
 		event.Verdict = netlog.VerdictPass
-		event.Rule = p.passRule()
+		if decision == nil {
+			event.Rule = p.passRule()
+		}
 		p.logEvent(event)
 	}
+}
+
+func (p *proxy) denySecretInjection(w http.ResponseWriter, event netlog.Event) {
+	event.Status = http.StatusForbidden
+	event.Verdict = netlog.VerdictDeny
+	event.Rule = "secret-injection"
+	p.logEvent(event)
+	http.Error(w, "request denied", http.StatusForbidden)
+}
+
+// denyByFilter sends a request filter's deny response and logs it.
+func (p *proxy) denyByFilter(w http.ResponseWriter, event netlog.Event, denial *engine.Denial) {
+	denial.Write(w)
+	p.logDenial(event, denial)
+}
+
+func (p *proxy) logDenial(event netlog.Event, denial *engine.Denial) {
+	event.Status = denial.Code
+	event.Verdict = netlog.VerdictDeny
+	event.Rule = netlog.RuleFilter
+	event.Reason = denial.Reason
+	p.logEvent(event)
+}
+
+// releasePlaceholderPresent reports whether a header name or value carries
+// the placeholder of a secret release rule.
+func releasePlaceholderPresent(headers http.Header, rules []model.SecretReleaseEntry) bool {
+	for name, values := range headers {
+		for _, rule := range rules {
+			if strings.Contains(strings.ToLower(name), strings.ToLower(rule.Placeholder)) {
+				return true
+			}
+			for _, value := range values {
+				if strings.Contains(value, rule.Placeholder) {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 // hasTarget reports whether the proxy knows where to send req. A proxy that
@@ -549,9 +630,15 @@ type forwardResult struct {
 	StatusCode    int
 	ResponseBytes int64
 	ContentType   string
+	// Denial is set when a request filter withheld the response and sent
+	// this denial instead.
+	Denial *engine.Denial
 }
 
-func (p *proxy) forward(w http.ResponseWriter, req *http.Request, scheme string, capture *netcapture.Capture) (forwardResult, error) {
+// forward sends req upstream and relays the response. With a filter decision
+// it reports the upstream status to it and, when the decision inspects the
+// response, buffers and checks the response before any of it is relayed.
+func (p *proxy) forward(w http.ResponseWriter, req *http.Request, scheme string, decision *engine.Decision, capture *netcapture.Capture) (forwardResult, error) {
 	target := *req.URL
 	target.Scheme = scheme
 	host := req.Host
@@ -592,6 +679,15 @@ func (p *proxy) forward(w http.ResponseWriter, req *http.Request, scheme string,
 		return forwardResult{}, err
 	}
 	defer func() { _ = resp.Body.Close() }()
+	if decision != nil {
+		if decision.InspectsResponse() {
+			if denial := decision.InspectResponse(resp); denial != nil {
+				denial.Write(w)
+				return forwardResult{StatusCode: denial.Code, Denial: denial}, nil
+			}
+		}
+		decision.Finish(resp.StatusCode)
+	}
 	capture.Response(resp)
 	if resp.StatusCode == http.StatusSwitchingProtocols {
 		return p.relayUpgrade(w, outgoing, resp, capture)
@@ -940,7 +1036,7 @@ func (s *httpsDispatchServer) serveConn(conn net.Conn) {
 		_ = conn.Close()
 		return
 	}
-	if shouldMITM(host, s.proxy.releaseRules(), s.proxy.forceHTTPSMITM) {
+	if s.proxy.intercepts(host) {
 		s.proxy.logEvent(newTCPAuditEvent(host, netlog.VerdictPass, "mitm-dispatch"))
 		tunnelToAddress(conn, preface, s.mitmAddr)
 		return
@@ -959,7 +1055,7 @@ func (s *httpsDispatchServer) serveTransparentConn(conn net.Conn) {
 	if err != nil {
 		host, preface = "", recorded.read.Bytes()
 	}
-	if host != "" && shouldMITM(host, s.proxy.releaseRules(), s.proxy.forceHTTPSMITM) {
+	if host != "" && s.proxy.intercepts(host) {
 		s.proxy.logEvent(newTCPAuditEvent(host, netlog.VerdictPass, "mitm-dispatch"))
 		s.intercept(conn, preface, dst)
 		return
@@ -1040,6 +1136,13 @@ func releaseHostMatch(host string, rule model.SecretReleaseEntry) bool {
 
 func shouldMITM(host string, rules []model.SecretReleaseEntry, forceHTTPSMITM bool) bool {
 	return forceHTTPSMITM || requiresMITM(host, rules)
+}
+
+// intercepts reports whether the proxy terminates TLS for host. A host a
+// request filter governs is always terminated, whatever the log mode, so no
+// request to it passes unchecked.
+func (p *proxy) intercepts(host string) bool {
+	return shouldMITM(host, p.releaseRules(), p.forceHTTPSMITM) || p.filters.For(host, "") != nil
 }
 
 func tunnelTLS(downstream net.Conn, preface []byte, host string) {
@@ -1322,15 +1425,22 @@ func hostAllowed(host string, patterns []string) bool {
 // dnsmasq blocks denied apex domains, but the proxy suffix-matches, so a
 // denied host more specific than an allowed parent (deny tracking.example.com,
 // allow example.com) would otherwise pass here — the deny check closes that.
+// Hosts a request filter governs get no exception. Names below a domain a
+// filter confines pass only when a filter governs them, as dnsmasq resolves
+// only those.
 func (p *proxy) hostPermitted(host string) bool {
 	if !p.caps.enforceAllowlist {
 		return true
 	}
-	lists := p.allowlist.Load()
-	if hostAllowed(host, lists.denied) {
+	value, err := domainpattern.NormalizeHost(host)
+	if err != nil {
 		return false
 	}
-	return hostAllowed(host, lists.allowed)
+	lists := p.allowlist.Load()
+	if hostAllowed(value, lists.denied) || p.filters.Confined(value) {
+		return false
+	}
+	return hostAllowed(value, lists.allowed)
 }
 
 func (p *proxy) passRule() string {

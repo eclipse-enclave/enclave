@@ -276,6 +276,42 @@ func HostSecretsGlobalFile(home string, tool string) string {
 	return filepath.Join(HostSecretsDir(home), "global", tool+".env")
 }
 
+// HostFiltersConfigDir holds the user's request filter settings, such as
+// presets, keyed by filter name.
+func HostFiltersConfigDir(home string) string {
+	return filepath.Join(hostConfigRoot(home), "filters")
+}
+
+// HostFilterPresetsDir holds the user presets of one filter. They shadow the
+// presets the filter ships.
+func HostFilterPresetsDir(home string, filter string) string {
+	return filepath.Join(HostFiltersConfigDir(home), filter, "presets")
+}
+
+// HostFiltersStateDir holds request filter credentials: OAuth client
+// configuration and grants. Nothing under it is ever mounted into a container.
+func HostFiltersStateDir(home string) string {
+	return filepath.Join(hostStateRoot(home), "filters")
+}
+
+func HostFilterStateDir(home string, filter string) string {
+	return filepath.Join(HostFiltersStateDir(home), filter)
+}
+
+func HostFilterClientPath(home string, filter string) string {
+	return filepath.Join(HostFilterStateDir(home, filter), "client.json")
+}
+
+func HostFilterGrantsDir(home string, filter string) string {
+	return filepath.Join(HostFilterStateDir(home, filter), "grants")
+}
+
+// HostProjectFilterSummaryDir holds the read-only policy summaries one session
+// of a tool exposes to its container.
+func HostProjectFilterSummaryDir(home string, projectHash string, tool string, key string) string {
+	return filepath.Join(HostProjectToolDir(home, projectHash, tool), "filter-summaries", key)
+}
+
 // HostTheiaLogsDir holds per-container Theia IDE launch logs. Logs are
 // state per the XDG spec (persistent, machine-specific, not user-edited).
 func HostTheiaLogsDir(home string) string {

@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 
 	"enclave/internal/config"
@@ -33,6 +34,11 @@ type ResolveInput struct {
 	// nil to load only the tool's spec, as for a running gateway whose session
 	// options are unknown.
 	Session *SessionNetworkInputs
+	// FilterHosts are the hosts the request filters of a running gateway
+	// govern and FilterConfine the domains they confine. They join the
+	// session inputs, so a policy apply keeps them.
+	FilterHosts   []string
+	FilterConfine []string
 }
 
 type ResolveResult struct {
@@ -81,6 +87,12 @@ func (r EffectiveResolver) Resolve(input ResolveInput) (ResolveResult, error) {
 			return empty, err
 		}
 		session = &loaded
+	}
+	if len(input.FilterHosts) > 0 || len(input.FilterConfine) > 0 {
+		withFilters := *session
+		withFilters.FilterHosts = append(slices.Clone(session.FilterHosts), input.FilterHosts...)
+		withFilters.FilterConfine = append(slices.Clone(session.FilterConfine), input.FilterConfine...)
+		session = &withFilters
 	}
 
 	effective := session.Merge(network.MergeConfig{

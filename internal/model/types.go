@@ -47,6 +47,7 @@ type RunOptions struct {
 	ProjectMount             string
 	WorktreeMetadata         string
 	AllowDomains             []string
+	Filters                  []string
 	BridgePorts              []string
 	Shell                    bool
 	Admin                    bool
@@ -491,8 +492,11 @@ type Paths struct {
 	// UserCommandExtensionsDir holds command extensions. There are no built-in
 	// ones, so it has no counterpart under ExtensionsDir.
 	UserCommandExtensionsDir string // ~/.config/enclave/extensions/commands/
-	AllowlistsDir            string // For gateway allowlist fragments (shared across extensions)
-	BuildScriptsDir          string // Docker weaving scripts copied into image during build
+	// UserFilterExtensionsDir holds request filters. There are no built-in
+	// ones either.
+	UserFilterExtensionsDir string // ~/.config/enclave/extensions/filters/
+	AllowlistsDir           string // For gateway allowlist fragments (shared across extensions)
+	BuildScriptsDir         string // Docker weaving scripts copied into image during build
 }
 
 type Project struct {
@@ -543,10 +547,13 @@ const (
 	// UserCommandsContainerDir is the fixed, home-layout-neutral path where the
 	// host session command tree is mounted read-only inside the container.
 	UserCommandsContainerDir = "/opt/" + AppName + "/commands"
-	ImageName                = AppName + ":latest"
-	AlpineImage              = "alpine@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a"
-	HashLength               = 12
-	DetachKeysDefault        = `ctrl-\`
+	// FilterSummaryContainerDir holds the read-only, non-secret policy
+	// summaries of the session's request filters.
+	FilterSummaryContainerDir = "/opt/" + AppName + "/filters"
+	ImageName                 = AppName + ":latest"
+	AlpineImage               = "alpine@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a"
+	HashLength                = 12
+	DetachKeysDefault         = `ctrl-\`
 )
 
 const (
@@ -654,13 +661,15 @@ const (
 )
 
 // Extension kind discriminator values, matching the public spec.yaml
-// `kind: sandbox|mixin|command` tokens. These are the canonical (and only
-// accepted) values for Extension.Type. sandbox and mixin come from the sbx kit
-// format; command is enclave-native, since sbx has no host commands.
+// `kind: sandbox|mixin|command|filter` tokens. These are the canonical (and
+// only accepted) values for Extension.Type. sandbox and mixin come from the sbx
+// kit format. command and filter are enclave-native: sbx has neither host
+// commands nor request filters.
 const (
 	ExtensionKindSandbox = "sandbox"
 	ExtensionKindMixin   = "mixin"
 	ExtensionKindCommand = "command"
+	ExtensionKindFilter  = "filter"
 )
 
 const (
@@ -731,7 +740,15 @@ const (
 	GatewayLabelContainer     = AppName + ".gateway.container"
 	// GatewayLabelMode names the network mode of an unrestricted gateway. A
 	// gateway without it is restricted, including those started before it existed.
-	GatewayLabelMode             = AppName + ".gateway.mode"
+	GatewayLabelMode = AppName + ".gateway.mode"
+	// GatewayLabelFilters lists the request filters a gateway enforces,
+	// GatewayLabelFilterHosts the host patterns they govern, and
+	// GatewayLabelFilterConfine the domains they confine, comma-separated.
+	// Network policy applies read them to keep those hosts allowlisted and
+	// the confined domains blackholed.
+	GatewayLabelFilters          = AppName + ".gateway.filters"
+	GatewayLabelFilterHosts      = AppName + ".gateway.filter_hosts"
+	GatewayLabelFilterConfine    = AppName + ".gateway.filter_confine"
 	SessionNetworkSuffix         = "-net"
 	NetworkLabelManaged          = AppName + ".network"
 	NetworkLabelContainer        = AppName + ".network.container"
@@ -747,8 +764,9 @@ const (
 	GatewayConfigDeniedPath      = GatewayConfigDir + "/denied.txt"
 	GatewayConfigMetaPath        = GatewayConfigDir + "/meta.json"
 	GatewaySecretReleasePath     = "/etc/enclave/secret-releases.json" // #nosec G101 -- configuration file path, not a credential.
+	GatewayFilterDir             = "/etc/enclave/filters"
 	// GatewayProxyDataDir is the proxy's private data directory, where the
-	// entrypoint copies the TLS CA and secret releases.
+	// entrypoint copies the TLS CA, secret releases, and request filters.
 	GatewayProxyDataDir    = "/var/lib/enclave/proxy"
 	GatewayTLSRootPath     = "/tls"
 	GatewayTLSCACertPath   = GatewayTLSRootPath + "/ca.crt"

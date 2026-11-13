@@ -315,3 +315,40 @@ func preparePolicyTestTool(t *testing.T) (string, string) {
 	}
 	return toolsDir, allowlistsDir
 }
+
+// The filter hosts of a running gateway join the policy whether or not the
+// session inputs are known, and never change the given inputs.
+func TestEffectiveResolverAddsFilterHosts(t *testing.T) {
+	home := t.TempDir()
+	toolsDir, allowlistsDir := preparePolicyTestTool(t)
+	resolver := NewEffectiveResolver(model.Paths{ToolsDir: toolsDir, AllowlistsDir: allowlistsDir}, home)
+
+	session := &SessionNetworkInputs{FilterHosts: []string{"own.example.com"}}
+	for name, input := range map[string]ResolveInput{
+		"spec only":    {Tool: "codex", FilterHosts: []string{"gmail.googleapis.com", "*.workspace.example.com"}},
+		"with session": {Tool: "codex", Session: session, FilterHosts: []string{"gmail.googleapis.com", "*.workspace.example.com"}},
+	} {
+		result, err := resolver.Resolve(input)
+		if err != nil {
+			t.Fatalf("%s: resolve: %v", name, err)
+		}
+		for _, want := range []string{"gmail.googleapis.com", "workspace.example.com"} {
+			if !slices.Contains(result.Effective.Domains, want) {
+				t.Errorf("%s: domains %v lack %s", name, result.Effective.Domains, want)
+			}
+			if !slices.Contains(result.Effective.GovernedDomains, want) {
+				t.Errorf("%s: governed domains %v lack %s", name, result.Effective.GovernedDomains, want)
+			}
+		}
+	}
+	result, err := resolver.Resolve(ResolveInput{Tool: "codex", Session: session, FilterHosts: []string{"gmail.googleapis.com"}, FilterConfine: []string{"googleapis.com"}})
+	if err != nil {
+		t.Fatalf("resolve with confine: %v", err)
+	}
+	if !slices.Equal(result.Effective.ConfinedDomains, []string{"googleapis.com"}) {
+		t.Fatalf("confined domains = %v", result.Effective.ConfinedDomains)
+	}
+	if len(session.FilterHosts) != 1 || len(session.FilterConfine) != 0 {
+		t.Fatalf("Resolve changed the session inputs: %v", session.FilterHosts)
+	}
+}

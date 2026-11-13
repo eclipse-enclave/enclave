@@ -35,7 +35,7 @@ func (l listLayer) origin() model.EntryOrigin {
 
 func isListApply(kind ApplyKind) bool {
 	switch kind {
-	case ApplyListExtras, ApplySliceMergeFeature, ApplySliceMergeHost:
+	case ApplyListExtras, ApplySliceMergeFeature, ApplySliceMergeHost, ApplySliceMergeFilter:
 		return true
 	default:
 		return false
@@ -91,7 +91,7 @@ func mergeListInto(opts *model.Options, def OptionDef, incoming []string, layer 
 
 	merged, problems := mergeListLayer(def, base, incoming, layer)
 	opts.ListProblems = append(opts.ListProblems, problems...)
-	if def.Apply == ApplySliceMergeFeature {
+	if def.Apply == ApplySliceMergeFeature || def.Apply == ApplySliceMergeFilter {
 		opts.DroppedRemovals = trackDroppedRemovals(opts.DroppedRemovals, def.Name, base, incoming, merged, layer)
 	}
 	if merged == nil {
@@ -164,6 +164,8 @@ func mergeListLayer(def OptionDef, base []listEntry, incoming []string, layer li
 		return mergeSelection(base, incoming, layer, featureSelection), nil
 	case ApplySliceMergeHost:
 		return mergeSelection(base, incoming, layer, hostConfigSelection), nil
+	case ApplySliceMergeFilter:
+		return mergeSelection(base, incoming, layer, filterSelection), nil
 	default:
 		return base, nil
 	}
@@ -189,6 +191,8 @@ func mergeListValues(def OptionDef, base []string, incoming []string) []string {
 	switch def.Apply {
 	case ApplySliceMergeHost:
 		rules = hostConfigSelection
+	case ApplySliceMergeFilter:
+		rules = filterSelection
 	}
 	entries := make([]listEntry, 0, len(base))
 	for _, value := range base {
@@ -525,6 +529,16 @@ type selectionRules struct {
 var featureSelection = selectionRules{
 	keywords: []string{model.SelectionDefault, model.FeatureSelectionAll},
 	key:      func(name string) string { return name },
+}
+
+// filterSelection keys entries by filter name, so gws:send replaces
+// gws:readonly and -gws removes either.
+var filterSelection = selectionRules{
+	keywords: []string{listNone},
+	key: func(name string) string {
+		filterName, _, _ := strings.Cut(name, ":")
+		return filterName
+	},
 }
 
 var hostConfigSelection = selectionRules{

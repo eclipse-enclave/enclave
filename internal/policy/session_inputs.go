@@ -28,6 +28,11 @@ type SessionNetworkInputs struct {
 	// ReleaseHostOverrides maps a secret id to hosts selected at session start
 	// through serviceAuth.hostsFromCredential.
 	ReleaseHostOverrides map[string][]string
+	// FilterHosts are the hosts the session's request filters govern. They
+	// must resolve, or the filter could never forward a request.
+	FilterHosts []string
+	// FilterConfine are the domains the session's request filters confine.
+	FilterConfine []string
 }
 
 // NewSessionNetworkInputs returns the network inputs of a session started with
@@ -43,8 +48,9 @@ func NewSessionNetworkInputs(profile model.Profile, features []model.Extension, 
 
 // SpecDomains unions network.allowedDomains/deniedDomains across the tool spec
 // and the enabled features, plus every declared HTTP release host
-// (serviceDomains/serviceAuth): a host the proxy injects credentials for must
-// be resolvable, or the release rule is dead weight.
+// (serviceDomains/serviceAuth) and every host a selected request filter
+// governs: a host the proxy injects credentials for must be resolvable, or the
+// release rule is dead weight.
 func (in SessionNetworkInputs) SpecDomains() (allowed []string, denied []string) {
 	allowed = append([]string(nil), in.Profile.AllowedDomains...)
 	denied = append([]string(nil), in.Profile.DeniedDomains...)
@@ -54,6 +60,7 @@ func (in SessionNetworkInputs) SpecDomains() (allowed []string, denied []string)
 		denied = append(denied, feature.DeniedDomains...)
 		allowed = append(allowed, in.releaseHosts(feature.Secrets)...)
 	}
+	allowed = append(allowed, in.FilterHosts...)
 	return allowed, denied
 }
 
@@ -73,6 +80,8 @@ func (in SessionNetworkInputs) Merge(cfg network.MergeConfig) network.EffectiveP
 			effective.Domains = append(effective.Domains, key)
 		}
 	}
+	effective.GovernedDomains = network.NormalizeSpecDomains(in.FilterHosts)
+	effective.ConfinedDomains = network.NormalizeSpecDomains(in.FilterConfine)
 	if in.AllowAllNetwork {
 		effective.Mode = model.NetworkModeUnrestricted
 		effective.ModeSource = "allow-all-network"

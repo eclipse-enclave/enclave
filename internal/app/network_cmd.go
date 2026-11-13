@@ -11,12 +11,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"slices"
 	"strings"
 
 	"enclave/internal/backend"
 	"enclave/internal/config"
+	"enclave/internal/filterhost"
 	"enclave/internal/gateway/bundle"
 	"enclave/internal/logx"
 	"enclave/internal/model"
@@ -37,6 +39,8 @@ type currentPolicyContext struct {
 	policyResolverContext
 	Tool     string
 	Resolved policy.ResolveResult
+	// Filters are the request filters the previewed run selects.
+	Filters []filterhost.SessionFilter
 }
 
 // resolveCurrentPolicyContext resolves the policy from the tool spec and the
@@ -67,7 +71,39 @@ func resolveSessionPolicyContext(input *CommandInput, requireTool bool) (current
 		logx.Warnf("%s", warning.Message)
 	}
 	session := policy.NewSessionNetworkInputs(profile, selection.enabled, opts.RunOptions)
-	return resolvePolicyContext(input, opts.Tool, &session)
+	filters, err := previewSessionFilters(input, opts)
+	if err != nil {
+		return currentPolicyContext{}, err
+	}
+	for _, sf := range filters {
+		session.FilterHosts = append(session.FilterHosts, sf.Hosts()...)
+		session.FilterConfine = append(session.FilterConfine, sf.Confine()...)
+	}
+	policyCtx, err := resolvePolicyContext(input, opts.Tool, &session)
+	policyCtx.Filters = filters
+	return policyCtx, err
+}
+
+// previewSessionFilters resolves the filters a run with these options selects,
+// without reading credentials.
+func previewSessionFilters(input *CommandInput, opts model.Options) ([]filterhost.SessionFilter, error) {
+	home := ""
+	if host, err := input.Ctx.Host(); err == nil {
+		home = host.Home
+	}
+	return filterhost.ResolvePreview(input.Ctx.Paths, home, opts.Filters)
+}
+
+// writeFilterHosts lists the hosts each selected filter governs and the
+// domains it confines.
+func writeFilterHosts(w io.Writer, prefix string, filters []filterhost.SessionFilter) {
+	for _, sf := range filters {
+		line := prefix + "filter " + sf.Label() + ": " + strings.Join(sf.Hosts(), ", ")
+		if confine := sf.Confine(); len(confine) > 0 {
+			line += " (confines " + strings.Join(confine, ", ") + ")"
+		}
+		_, _ = fmt.Fprintln(w, line)
+	}
 }
 
 func unknownToolError(paths model.Paths, tool string) error {
@@ -137,6 +173,11 @@ func runNetworkStatus(input *CommandInput) int {
 		toolDomainCount += len(domains)
 	}
 	fmt.Printf("  Tool domains:   %d\n", toolDomainCount)
+
+	if len(policyCtx.Filters) > 0 {
+		fmt.Printf("\nFilter hosts (always inspected by the gateway):\n")
+		writeFilterHosts(os.Stdout, "  - ", policyCtx.Filters)
+	}
 
 	if len(ep.Sources) > 0 {
 		fmt.Printf("\nSources:\n")
@@ -279,6 +320,10 @@ func runNetworkPrint(input *CommandInput) int {
 		logx.Errorf("Failed to render dnsmasq config: %v", err)
 		return 1
 	}
+	if len(policyCtx.Filters) > 0 && ep.Mode != model.NetworkModeUnrestricted {
+		fmt.Println("# Request filter hosts, always inspected by the gateway:")
+		writeFilterHosts(os.Stdout, "#   ", policyCtx.Filters)
+	}
 	fmt.Print(out)
 	return 0
 }
@@ -299,6 +344,10 @@ func runNetworkDiff(input *CommandInput) int {
 
 	diff := network.Diff(ep, builtInDomains, policyCtx.Tool)
 	fmt.Print(network.FormatDiff(diff))
+	if len(policyCtx.Filters) > 0 {
+		fmt.Printf("\nFilter hosts added:\n")
+		writeFilterHosts(os.Stdout, "  + ", policyCtx.Filters)
+	}
 	return 0
 }
 
@@ -410,15 +459,14 @@ func applyPolicyToTarget(manager backend.GatewayManager, policyCtx policyResolve
 	if err != nil {
 		return err
 	}
-	resolved, err := policyCtx.Resolver.Resolve(policy.ResolveInput{
-		ProjectDir:  targetProjectDir,
-		ProjectHash: target.ProjectHash,
-		Tool:        target.Tool,
-	})
+	resolved, err := policyCtx.Resolver.Resolve(gatewayResolveInput(target, targetProjectDir))
 	if err != nil {
 		return err
 	}
 	if resolved.Effective.Mode == model.NetworkModeUnrestricted {
+		if len(target.Filters) > 0 {
+			return filterModeError(target)
+		}
 		return fmt.Errorf("live apply does not support unrestricted mode; restart the session to switch mode safely")
 	}
 	if err := bundle.WriteConfigBundle(bundle.BundleWriteConfig{
@@ -516,6 +564,11 @@ func runNetworkSetMode(input *CommandInput) int {
 		return 1
 	}
 	mode := input.Options.CmdArgs[0]
+	if strings.TrimSpace(mode) == model.NetworkModeUnrestricted && !input.Options.NoApply {
+		if code := refuseUnrestrictedForFilteredGateways(input); code != 0 {
+			return code
+		}
+	}
 	return mutateGlobalPolicy(input, func(p *network.Policy) (bool, string, error) {
 		if strings.TrimSpace(p.Mode) == strings.TrimSpace(mode) {
 			return false, fmt.Sprintf("Persistence: unchanged (mode already %s in %%s)", mode), nil
@@ -523,6 +576,55 @@ func runNetworkSetMode(input *CommandInput) int {
 		p.Mode = mode
 		return true, "Persistence: saved to %s", nil
 	})
+}
+
+// refuseUnrestrictedForFilteredGateways fails set-mode unrestricted, before
+// anything is saved, when the apply would reach a session that runs request
+// filters: filters need restricted mode, and the apply could not reload it.
+func refuseUnrestrictedForFilteredGateways(input *CommandInput) int {
+	if checkDocker() != nil {
+		// No engine, no running session. The apply reports it.
+		return 0
+	}
+	manager, code := gatewayManagerForInput(input)
+	if code != 0 {
+		return code
+	}
+	targets, _, err := discoverGatewayTargets(input, manager, mutationGatewayScope(input.Options.AllRunning))
+	if err != nil {
+		logx.Errorf("Failed to discover gateway targets: %v", err)
+		return 1
+	}
+	if err := checkNoFilteredGateways(targets); err != nil {
+		logx.Errorf("%v", err)
+		return 1
+	}
+	return 0
+}
+
+// checkNoFilteredGateways fails for the first restricted gateway that
+// enforces request filters.
+func checkNoFilteredGateways(targets []backend.GatewayInfo) error {
+	for _, target := range targets {
+		if !target.Unrestricted() && len(target.Filters) > 0 {
+			return fmt.Errorf("%v. Stop that session first, or pass --no-apply to change the mode for new sessions only", filterModeError(target))
+		}
+	}
+	return nil
+}
+
+// filterModeError explains why a gateway with request filters cannot switch
+// to unrestricted mode.
+func filterModeError(target backend.GatewayInfo) error {
+	return fmt.Errorf("session %s runs request filters %s, which need restricted mode", sessionLabel(target), strings.Join(target.Filters, ", "))
+}
+
+// sessionLabel names the session a gateway belongs to.
+func sessionLabel(target backend.GatewayInfo) string {
+	if target.SessionContainer != "" {
+		return target.SessionContainer
+	}
+	return target.Name
 }
 
 func mutateGlobalPolicy(input *CommandInput, mutate func(*network.Policy) (changed bool, msg string, err error)) int {

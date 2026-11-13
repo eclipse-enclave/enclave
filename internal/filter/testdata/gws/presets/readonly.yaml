@@ -1,0 +1,6 @@
+description: Read mail and Drive files.
+allow:
+  mail.read: {}
+  files.read: true
+quotas:
+  mail.read: 200

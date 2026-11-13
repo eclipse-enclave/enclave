@@ -28,8 +28,15 @@ type EffectivePolicy struct {
 	// allow would otherwise resolve them (deny wins via most-specific match).
 	// They are kept out of Domains and never resolve to a real IP.
 	DeniedDomains []string
-	Resolvers     []string
-	Sources       []PolicySource
+	// GovernedDomains are the domains request filters govern, each with every
+	// name below it. Their addresses also go to DNSMasqGovernedIPSet, which
+	// the gateway lets only its proxy reach.
+	GovernedDomains []string
+	// ConfinedDomains are domains request filters confine: names equal to or
+	// below them that no filter governs are blackholed.
+	ConfinedDomains []string
+	Resolvers       []string
+	Sources         []PolicySource
 }
 
 // PolicySource identifies a policy file that contributed to the effective policy.

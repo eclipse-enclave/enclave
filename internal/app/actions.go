@@ -26,6 +26,7 @@ var backendFreeActions = map[string]bool{
 	"devcontainer-generate":   true,
 	"extension-list":          true,
 	"features":                true,
+	"filters":                 true,
 	"network-diff":            true,
 	"network-print":           true,
 	"review-target":           true,
@@ -33,6 +34,10 @@ var backendFreeActions = map[string]bool{
 	"tools":                   true,
 	"validate-extensions":     true,
 	cli.ActionExtensionManage: true,
+	cli.ActionFiltersShow:     true,
+	cli.ActionFiltersLogin:    true,
+	cli.ActionFiltersGrants:   true,
+	cli.ActionFiltersLogout:   true,
 }
 
 func actionUsesBackend(action string) bool {
@@ -50,6 +55,7 @@ var toolFreeActions = map[string]bool{
 	"config":                  true,
 	"extension-list":          true,
 	"features":                true,
+	"filters":                 true,
 	"network-add-domain":      true,
 	"network-remove-domain":   true,
 	"network-set-mode":        true,
@@ -61,6 +67,10 @@ var toolFreeActions = map[string]bool{
 	"tools":                   true,
 	"validate-extensions":     true,
 	cli.ActionExtensionManage: true,
+	cli.ActionFiltersShow:     true,
+	cli.ActionFiltersLogin:    true,
+	cli.ActionFiltersGrants:   true,
+	cli.ActionFiltersLogout:   true,
 }
 
 // actionNeedsTool reports whether an invocation commits to a concrete tool: it

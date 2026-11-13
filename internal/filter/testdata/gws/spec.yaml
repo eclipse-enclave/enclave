@@ -1,0 +1,209 @@
+schemaVersion: "1"
+kind: filter
+name: gws
+displayName: Google Workspace (test fixture)
+description: Test fixture modeled on the gws filter
+defaultPreset: readonly
+jsonKeys: protobuf
+
+hosts:
+  - gmail.googleapis.com
+  - www.googleapis.com
+  - docs.googleapis.com
+  - oauth2.googleapis.com
+confine: [googleapis.com]
+
+credential:
+  oauth2:
+    authUrl: https://accounts.google.com/o/oauth2/auth
+    tokenUrl: https://oauth2.googleapis.com/token
+    revokeUrl: https://oauth2.googleapis.com/revoke
+    authParams: { access_type: offline, prompt: consent }
+    scopePrefix: "https://www.googleapis.com/auth/"
+    scopeImplies:
+      drive: [drive.readonly, drive.metadata.readonly, drive.file]
+      drive.readonly: [drive.metadata.readonly]
+      gmail.modify: [gmail.readonly, gmail.send]
+    clientHelp: Create a Desktop OAuth client, see the filter README.
+  inject:
+    header: authorization
+    format: "Bearer %s"
+  env: [GOOGLE_WORKSPACE_CLI_TOKEN]
+  placeholder:
+    prefix: "ENCLAVE_SECRET_"
+    random: { encoding: hex, length: 48 }
+  denyHeaders: [x-goog-api-key, cookie]
+  denyParams: [access_token, key, oauth_token]
+
+resolvers:
+  driveParents:
+    url: "https://www.googleapis.com/drive/v3/files/{id}?fields=parents&supportsAllDrives=true"
+    extract: "$.parents[*]"
+    recursive: true
+    maxDepth: 8
+    scopes: [drive.metadata.readonly]
+
+counters:
+  mail.read: { description: Messages whose content was read, unit: messages }
+  mail.sent: { description: Messages sent, unit: messages }
+  files.written: { description: Drive uploads and document edits, unit: requests }
+
+capabilities:
+  discovery:
+    description: API discovery documents
+    public: true
+  mail.read:
+    description: Read message bodies
+    scopes: [gmail.readonly]
+  mail.send:
+    description: Send mail
+    scopes: [gmail.send]
+    constraints:
+      recipients: { kind: email, var: recipients }
+  labels.modify:
+    description: Add labels to messages
+    scopes: [gmail.modify]
+    constraints:
+      labels: { kind: value, var: labels, default: "*" }
+  files.read:
+    description: Read file content
+    scopes: [drive.readonly]
+    constraints:
+      resources: { kind: resource, var: fileId, resolver: driveParents, default: "*" }
+  files.edit:
+    description: Edit existing files and documents
+    scopes: [drive]
+    constraints:
+      resources: { kind: resource, var: fileId, resolver: driveParents }
+  files.create:
+    description: Upload new files
+    scopes: [drive.file]
+    constraints:
+      parents: { kind: resource, var: parents, resolver: driveParents }
+  files.delete:
+    description: Trash files
+    scopes: [drive]
+    constraints:
+      resources: { kind: resource, var: fileId, resolver: driveParents }
+
+routes:
+  - op: drive.permissions
+    action: deny
+    reason: sharing changes are never allowed
+    method: [GET, POST, PATCH, DELETE]
+    host: www.googleapis.com
+    path: /drive/v3/files/{fileId}/permissions/**
+
+  - op: drive.permissions.create
+    action: deny
+    method: POST
+    host: www.googleapis.com
+    path: /drive/v3/files/{fileId}/permissions
+
+  - op: discovery.get
+    capability: discovery
+    method: GET
+    host: www.googleapis.com
+    path: /discovery/v1/apis/{api}/{version}/rest
+
+  - op: gmail.messages.get
+    capability: mail.read
+    method: GET
+    host: gmail.googleapis.com
+    path: /gmail/v1/users/me/messages/{id}
+    query:
+      format: [full, raw, ~]
+    count:
+      - { counter: mail.read, key: id }
+
+  - op: gmail.threads.get
+    capability: mail.read
+    method: GET
+    host: gmail.googleapis.com
+    path: /gmail/v1/users/me/threads/{id}
+    query: { format: [full, ~] }
+    bind:
+      messageIds: [ {response: {}}, {json: "$.messages[*].id"} ]
+    count:
+      - { counter: mail.read, key: messageIds }
+
+  - op: gmail.messages.send
+    capability: mail.send
+    method: POST
+    host: gmail.googleapis.com
+    path: /gmail/v1/users/me/messages/send
+    bind:
+      recipients: [ {body: {}}, {json: "$.raw"}, {base64url: {}}, {rfc822: recipients} ]
+    count:
+      - { counter: mail.sent }
+
+  # gws sends mail as multipart/related: JSON metadata, then the message.
+  - op: gmail.messages.send-upload
+    capability: mail.send
+    method: POST
+    host: gmail.googleapis.com
+    path: /upload/gmail/v1/users/me/messages/send
+    query: { uploadType: [multipart] }
+    multipartParts: 2
+    json: { "$.raw": [~], "$.payload": [~] }
+    bind:
+      recipients: [ {body: {}}, {multipart: {index: 1}}, {rfc822: recipients} ]
+    count:
+      - { counter: mail.sent }
+
+  - op: gmail.messages.modify
+    capability: labels.modify
+    method: POST
+    host: gmail.googleapis.com
+    path: /gmail/v1/users/me/messages/{id}/modify
+    bind:
+      labels: [ {body: {}}, {json: "$.addLabelIds[*]"} ]
+
+  - op: drive.files.trash
+    capability: files.delete
+    method: PATCH
+    host: www.googleapis.com
+    path: /drive/v3/files/{fileId}
+    json: { "$.trashed": [true] }
+
+  - op: drive.files.update
+    capability: files.edit
+    method: PATCH
+    host: www.googleapis.com
+    path: /drive/v3/files/{fileId}
+    query: { addParents: ~, removeParents: ~ }
+    json: { "$.trashed": [false, ~] }
+    count:
+      - { counter: files.written }
+
+  - op: drive.files.download
+    capability: files.read
+    method: GET
+    host: www.googleapis.com
+    path: /drive/v3/files/{fileId}
+    query: { alt: [media] }
+
+  - op: drive.files.upload
+    capability: files.create
+    method: POST
+    host: www.googleapis.com
+    path: /upload/drive/v3/files
+    query: { uploadType: [multipart] }
+    multipartParts: 2
+    maxBodyBytes: 1048576
+    bind:
+      parents: [ {body: {}}, {multipart: {index: 0}}, {json: "$.parents[*]"} ]
+    count:
+      - { counter: files.written }
+
+  - op: docs.documents.batchUpdate
+    capability: files.edit
+    method: POST
+    host: docs.googleapis.com
+    path: /v1/documents/{fileId}:batchUpdate
+    count:
+      - { counter: files.written }
+
+deny:
+  contentType: "application/json; charset=UTF-8"
+  body: '{"error":{"code":{{code}},"message":{{message}},"status":{{status}},"errors":[{"reason":"enclaveFilter","message":{{message}}}]}}'

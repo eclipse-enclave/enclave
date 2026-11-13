@@ -163,7 +163,7 @@ User-facing model: [configuration.md](configuration.md); resolution flow:
 | Config-only (for example `host_config_paths`) | Omit `CLIFlags` |
 | Host-wide only | Add the key to `stripGlobalOnlyKeys` in `internal/config/config.go`; project config can otherwise set every config-backed option |
 | Opt-in no config file may grant (like `--allow-sensitive-mounts`) | No config key at all |
-| List | `ApplyListExtras` or a selection kind; a key function in `listEntryKey` and, if entries have a format, a validator in `listEntryValidators` (`internal/config/list_entries.go`); the flag uses `appendListFlag` |
+| List | `ApplyListExtras` or a selection kind (`ApplySliceMergeFeature`, `ApplySliceMergeHost`, or `ApplySliceMergeFilter`, which keys `name:preset` entries by name); a key function in `listEntryKey` and, if entries have a format, a validator in `listEntryValidators` (`internal/config/list_entries.go`); the flag uses `appendListFlag` |
 | String map (`OptionKindStringMap`, `ApplyStringMap`) | [String map options](ARCHITECTURE.md#string-map-options) |
 
 `ENCLAVE_NO_REBUILD=1`, the terminal-scoped form of `--no-rebuild`, is applied
@@ -237,6 +237,24 @@ make build
 ./bin/enclave --tool claude --help   # Should fail: spec.yaml not found
 mv /tmp/spec.yaml extensions/tools/claude/
 ```
+
+### Request filters
+
+No filter ships in core, so filter changes are tested against fixtures and
+installed copies:
+
+```bash
+go test ./internal/filter/... ./internal/filterhost/...   # Engine, spec, host side
+./bin/enclave filters add ./my-filters --name example     # Install from a local path
+./bin/enclave filters show example --preset readonly      # Merged preset, scopes, grant
+./bin/enclave --filters example:readonly                  # Start a filtered session
+./bin/enclave network log --verdict deny                  # Decisions, with op and reason
+```
+
+`internal/filter/testdata/gws/` is a fixture modeled on the gws filter.
+`internal/filter` and its `engine` and `token` packages are linked into the
+gateway proxy, so a change there rebuilds the gateway image
+([Request filters](ARCHITECTURE.md#request-filters)).
 
 ### Direct Docker builds
 
@@ -390,7 +408,8 @@ invoked from `Dockerfile`.
 
 ## Extensions
 
-Every tool or feature extension must include a `README.md` in its directory.
+Every extension, filters included, must include a `README.md` in its
+directory.
 See [extensions/README.md](extensions/README.md) for the extension architecture
 and [Testing extensions](#testing-extensions) for manual checks.
 

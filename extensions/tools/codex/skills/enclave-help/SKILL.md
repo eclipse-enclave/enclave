@@ -31,15 +31,16 @@ attempting in-container file edits.
 | `docs/mounts.md` | Project mount, extra directories, sensitive mounts |
 | `docs/networking.md` | Network isolation, gateway, network log, port bridging |
 | `docs/auth.md` | Authentication, secrets, API keys, SSH keys |
+| `docs/filters.md` | Request filters: install, log in, presets, denials |
 | `docs/tools.md` | Supported agent tools, images, devcontainers, updates |
 | `docs/backends.md` | Docker, Podman, and QEMU backends |
 | `docs/commands.md` | Custom host and session commands |
 | `docs/integration.md` | JSON output contracts for scripts |
 | `docs/windows.md` | Windows (WSL2) launcher |
 | `docs/ARCHITECTURE.md` | Detailed architecture with diagrams |
-| `docs/extensions/` | Extension system (installing, adding tools and features, spec reference) |
+| `docs/extensions/` | Extension system (installing, adding tools, features, and filters, spec references) |
 | `docs/runtime/` | Runtime internals (stores, network request flow) |
-| `docs/security/` | Security model and host hardening |
+| `docs/security/` | Security model, request filter security concept, host hardening |
 | `extensions/tools/<tool>/README.md` | Per-tool documentation |
 | `extensions/features/<feature>/README.md` | Per-feature documentation |
 

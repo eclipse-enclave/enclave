@@ -124,3 +124,28 @@ func TestMatchNormalizedHost(t *testing.T) {
 		})
 	}
 }
+
+func TestConfined(t *testing.T) {
+	confined := []string{"googleapis.com"}
+	governed := []string{"gmail.googleapis.com", "www.googleapis.com"}
+	tests := []struct {
+		host string
+		want bool
+	}{
+		{"googleapis.com", true},
+		{"storage.googleapis.com", true},
+		{"gmail.googleapis.com", false},
+		{"upload.gmail.googleapis.com", false},
+		{"www.googleapis.com", false},
+		{"googleapis.com.example", false},
+		{"example.com", false},
+	}
+	for _, tt := range tests {
+		if got := Confined(tt.host, confined, governed); got != tt.want {
+			t.Errorf("Confined(%q) = %v, want %v", tt.host, got, tt.want)
+		}
+	}
+	if Confined("storage.googleapis.com", nil, governed) {
+		t.Fatal("a host is confined without confined domains")
+	}
+}

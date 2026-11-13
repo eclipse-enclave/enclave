@@ -367,6 +367,64 @@ func applyFeatures(opts *model.Options, value string) error {
 	return nil
 }
 
+// applyFilters adds --filters entries: name or name:preset, each optionally
+// prefixed with + or -, or none alone.
+func applyFilters(opts *model.Options, value string) error {
+	if strings.TrimSpace(value) == "" {
+		return errors.New("--filters requires a value")
+	}
+	errNoneCombined := errors.New("--filters value 'none' cannot be combined with other filters")
+	priorNone := opts.Filters != nil && len(opts.Filters) == 0
+	priorFilters := len(opts.Filters) > 0
+	sawNone := false
+	var added int
+	var err error
+	opts.Filters, added, err = appendCSVUnique(opts.Filters, value, func(entry string) (string, bool, error) {
+		if strings.EqualFold(entry, listNone) {
+			sawNone = true
+			return "", false, nil
+		}
+		if err := ValidateFilterEntry(entry); err != nil {
+			return "", false, fmt.Errorf("invalid --filters value %q: %w", entry, err)
+		}
+		return entry, true, nil
+	})
+	if err != nil {
+		return err
+	}
+	if sawNone {
+		if added > 0 || priorFilters {
+			return errNoneCombined
+		}
+		opts.Filters = []string{}
+		return nil
+	}
+	if added == 0 {
+		return errors.New("--filters requires at least one filter")
+	}
+	if priorNone {
+		return errNoneCombined
+	}
+	return nil
+}
+
+// ValidateFilterEntry checks one filters entry: name or name:preset, with an
+// optional + or - prefix. Package filterhost resolves the names.
+func ValidateFilterEntry(entry string) error {
+	value := strings.TrimSpace(entry)
+	if strings.HasPrefix(value, "+") || strings.HasPrefix(value, "-") {
+		value = strings.TrimSpace(value[1:])
+	}
+	name, preset, hasPreset := strings.Cut(value, ":")
+	if !extensionNamePattern.MatchString(name) {
+		return fmt.Errorf("filter name %s", ExtensionNameCharset)
+	}
+	if hasPreset && !extensionNamePattern.MatchString(preset) {
+		return fmt.Errorf("preset name %s", ExtensionNameCharset)
+	}
+	return nil
+}
+
 func applyProgress(opts *model.Options, value string) error {
 	normalized := strings.TrimSpace(strings.ToLower(value))
 	switch normalized {

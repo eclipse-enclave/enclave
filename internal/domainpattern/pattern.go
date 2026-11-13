@@ -114,6 +114,22 @@ func MatchNormalizedHost(host string, pattern string) bool {
 	return strings.HasSuffix(host, "."+pattern)
 }
 
+// Confined reports whether a normalized host is equal to or below a confined
+// domain and not equal to or below a governed one. Both lists hold plain
+// normalized domains.
+func Confined(host string, confined []string, governed []string) bool {
+	return matchesAny(host, confined) && !matchesAny(host, governed)
+}
+
+func matchesAny(host string, domains []string) bool {
+	for _, domain := range domains {
+		if MatchNormalizedHost(host, domain) {
+			return true
+		}
+	}
+	return false
+}
+
 func validateHost(host string) error {
 	if strings.TrimSpace(host) == "" {
 		return fmt.Errorf("host is required")

@@ -53,6 +53,7 @@ disambiguate a name; when the session has exited, it stops the gateway.
 | `enclave tools` | List available tool profiles (`list\|add\|remove\|update` manage installed tool extensions; see [Extensions](#extensions)) |
 | `enclave features` | List available feature extensions (`list\|add\|remove\|update` manage installed feature extensions) |
 | `enclave commands` | List installed command extensions (`list\|add\|remove\|update` manage them) |
+| `enclave filters` | List installed request filters (`list\|add\|remove\|update` manage them, more verbs in [Filters](#filters)) |
 | `enclave completion <shell>` | Generate shell completion |
 
 `info` takes the build flags, `--tool`, `--backend`, and `--auth-name` to
@@ -64,18 +65,39 @@ unavailable values read `unknown`.
 
 ### Extensions
 
-`enclave tools|features|commands` without a verb means `list`; every verb
-exists for all three. See [Installing extensions](extensions/installing.md).
+`enclave tools|features|commands|filters` without a verb means `list`, and
+every verb exists for all four. See
+[Installing extensions](extensions/installing.md).
 
 | Command | Flags |
 |---------|-------|
-| `list` | `--json` (machine-readable output). `features` (bare or `list`) also takes `--slim`, `--features`, and `--tool`, so `enabled` matches a run with those options, including `tool_overrides.<tool>.features`. `tools` takes `--tool` to mark the selected tool |
+| `list` | `--json` (machine-readable output). `features` (bare or `list`) also takes `--slim`, `--features`, and `--tool`, so `enabled` matches a run with those options, including `tool_overrides.<tool>.features`. `tools` takes `--tool` to mark the selected tool, and `filters` takes `--filters` and `--tool`, so `enabled` matches the effective `filters` selection of a run, including `tool_overrides.<tool>.filters` |
 | `add <source>` | `--path <dir>`, `--ref <ref>`, `--name <name>` (repeatable), `--all`, `--yes`/`-y`, `--force`, `--dry-run`, `--json` (requires `--yes`) |
 | `update [<name\|source>...]` | `--ref <ref>` (single extension only), `--yes`/`-y`, `--force`, `--dry-run`, `--json` (requires `--yes`) |
 | `remove <name>...` | `--yes`/`-y`, `--force`, `--json` (requires `--yes`) |
 
 These `update` verbs refresh extension sources; top-level `enclave update`
 rebuilds images.
+
+### Filters
+
+Request filters have four more verbs. Behavior: [Request filters](filters.md).
+
+| Command | Description |
+|---------|-------------|
+| `enclave filters show <name>` | Hosts, confined domains, credential, capabilities, counters, and presets. `--preset <p>` adds the merged preset, its required scopes, and the grant a session would use |
+| `enclave filters login <name>` | Authorize an OAuth filter in the browser and store the grant on the host |
+| `enclave filters grants <name>` | List stored grants: ID, source (`login` or `import`), creation time, scopes |
+| `enclave filters logout <name>` | Delete grants and revoke them: `--grant <id>`, `--all`, or without either the only one. `--no-revoke` skips revoking. [Which grants are revoked](filters.md#manage-grants) |
+
+| `login` flag | Effect |
+|--------------|--------|
+| `--preset <p>` | Request the scopes this preset needs (default: the filter's default preset) |
+| `--scopes <a,b>` | Request exactly these scopes, short or full names. Not with `--preset` |
+| `--client-secret <file>` | Store this OAuth client JSON (`installed`, `web`, or flat) for the filter |
+| `--grant <id>` | Grant ID (default: the preset name, or `custom-<hash>` for `--scopes`) |
+| `--no-browser` | Print the authorization URL without opening a browser |
+| `--import <file>` | Store an `authorized_user` JSON instead of logging in. Not with `--client-secret` or `--no-browser` |
 
 ### IDE
 
@@ -98,12 +120,13 @@ container name for a later `enclave theia <container>`.
 | `enclave network diff` | Show changes from built-in defaults |
 | `enclave network add-domain <domain> --global` | Allow a domain |
 | `enclave network remove-domain <domain> --global` | Remove a domain |
-| `enclave network set-mode restricted\|unrestricted --global` | Set network mode; running sessions keep their mode until restarted |
-| `enclave network apply` | Apply policy to running gateways; gateways of unrestricted sessions are skipped |
+| `enclave network set-mode restricted\|unrestricted --global` | Set network mode; running sessions keep their mode until restarted. `unrestricted` fails while a session in scope runs [request filters](filters.md) |
+| `enclave network apply` | Apply policy to running gateways; gateways of unrestricted sessions are skipped, and filter hosts stay allowlisted |
 | `enclave network log` | Show gateway network audit events |
 
 `status`, `print`, and `diff` accept `--tool`, `--features`, `--slim`,
-`--allow-domain`, and `--allow-all-network` (`status` also `--backend`).
+`--allow-domain`, `--allow-all-network`, and `--filters` (`status` also
+`--backend`).
 Mutations are global-only; `--project` is planned.
 
 | Apply flag | Accepted by | Effect |
@@ -272,7 +295,8 @@ See [Authentication and secrets](auth.md).
 | `--allow-all-network` | Disable network restrictions. A gateway still logs HTTP/HTTPS on ports 80 and 443 unless `--disable-gateway` is set; see [Unrestricted mode](networking.md#unrestricted-mode) |
 | `--disable-gateway` | Run without a network gateway, so no network log is written. Requires unrestricted network mode (`--allow-all-network`, `allow_all_network`, or policy mode `unrestricted`) and never implies it |
 | `--allow-domain <domain>` | Allow a domain for this run only, without persisting it. Repeatable, comma-separated list flag for `allow_domains` |
-| `--network-log <coarse\|requests\|full>` | Audit mode. `coarse` (default): one pass/deny event per TLS connection, plus per-request events for plaintext HTTP and secret-release hosts. `requests`: MITM all allowlisted HTTPS hosts (every host in unrestricted mode) and log every request. `full`: also store headers, bodies, and WebSocket messages in restricted mode (sensitive; see [Full capture](networking.md#full-capture)). See [Coverage and granularity](networking.md#coverage-and-granularity) |
+| `--filters <list\|none>` | Request filters as `name` or `name:preset`, comma-separated. A bare list replaces the configured selection, `+name` adds or replaces that filter's entry, `-name` removes it, `none` selects nothing. See [Request filters](filters.md#selection) |
+| `--network-log <coarse\|requests\|full>` | Audit mode. `coarse` (default): one pass/deny event per TLS connection, plus per-request events for plaintext HTTP, secret-release hosts, and request filter hosts. `requests`: MITM all allowlisted HTTPS hosts (every host in unrestricted mode) and log every request. `full`: also store headers, bodies, and WebSocket messages in restricted mode (sensitive; see [Full capture](networking.md#full-capture)). See [Coverage and granularity](networking.md#coverage-and-granularity) |
 
 ### Persistence
 
@@ -327,3 +351,4 @@ saves the answer as `"tool"` in `~/.config/enclave/config.json`.
 | `self-update` and release channels | [Updating](install.md#updating) |
 | `ENCLAVE_NO_REBUILD` | [Suppressing rebuilds](tools.md#suppressing-rebuilds) |
 | JSON output of `ps`, `config`, `network` | [Integration](integration.md) |
+| Request filters, grants, and presets | [Request filters](filters.md) |

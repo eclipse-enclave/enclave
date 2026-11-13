@@ -1085,3 +1085,33 @@ func TestHTTPAuditBoundsAllUntrustedFields(t *testing.T) {
 		}
 	}
 }
+
+// A deny rule for a parent blocks the hosts a filter governs below it, as
+// dnsmasq blackholes them.
+func TestProxyDeniesGovernedHostUnderADeniedParent(t *testing.T) {
+	h := newFilterHarness(t, "readonly")
+	h.proxy.allowlist.Store(newHostLists([]string{gmailHost, googleAPIHost, "api.github.com"}, []string{"googleapis.com"}))
+	if h.proxy.hostPermitted(gmailHost) || h.proxy.hostPermitted(googleAPIHost) {
+		t.Fatal("governed hosts under a denied parent passed")
+	}
+	if !h.proxy.hostPermitted("api.github.com") {
+		t.Fatal("an allowlisted host outside the denied parent was denied")
+	}
+}
+
+// A filter's confine denies the names below a domain that no filter governs,
+// also when a broader allow entry or a shared address would admit them.
+func TestProxyDeniesConfinedHostsNoFilterGoverns(t *testing.T) {
+	h := newFilterHarness(t, "readonly")
+	h.proxy.allowlist.Store(newHostLists([]string{"googleapis.com", "api.github.com"}, nil))
+	for _, host := range []string{gmailHost, googleAPIHost, "Upload.GMAIL.googleapis.com", "api.github.com"} {
+		if !h.proxy.hostPermitted(host) {
+			t.Errorf("%s was denied", host)
+		}
+	}
+	for _, host := range []string{"googleapis.com", "storage.googleapis.com", "generativelanguage.googleapis.com"} {
+		if h.proxy.hostPermitted(host) {
+			t.Errorf("confined host %s passed", host)
+		}
+	}
+}

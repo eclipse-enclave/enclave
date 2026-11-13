@@ -64,6 +64,9 @@ type Request struct {
 
 	Security SecurityPosture
 	Secrets  []SecretRelease
+	// Filters are the request filters selected for the session. Only a
+	// restricted gateway may receive them.
+	Filters []FilterBundle
 
 	// AuthSync declares the credential reconciliation to run after a foreground
 	// session exits. It must be carried on the request because foreground
@@ -233,6 +236,21 @@ type EgressPolicy struct {
 	AllowlistPath string
 }
 
+// FilterBundle hands one request filter to the gateway. Policy is the compiled
+// policy JSON (filter.Policy) and holds no secrets. Credential is the
+// credential payload JSON (filter.Credential) with the real credential
+// material: it must only ever reach the gateway, never the tool container.
+type FilterBundle struct {
+	Name       string
+	Policy     []byte
+	Credential []byte
+	// Hosts are the host patterns the policy governs and Confine the domains
+	// it confines. They are not secret and label the gateway, so a later
+	// policy apply keeps them.
+	Hosts   []string
+	Confine []string
+}
+
 type SecretRelease struct {
 	SecretID    string
 	Placeholder string
@@ -372,6 +390,12 @@ type GatewayInfo struct {
 	// A running gateway never switches modes, so an unrestricted one never
 	// receives a policy.
 	NetworkMode NetworkMode
+	// Filters are the request filters the gateway enforces, FilterHosts the
+	// host patterns they govern, and FilterConfine the domains they confine,
+	// as the gateway was started with them.
+	Filters       []string
+	FilterHosts   []string
+	FilterConfine []string
 }
 
 func (g GatewayInfo) Unrestricted() bool {
@@ -466,7 +490,14 @@ type LogOptions struct {
 type Capabilities struct {
 	RestrictedNetwork bool
 	SecretHTTPRelease bool
+	// RequestFilters is set by a backend whose restricted gateway enforces
+	// Request.Filters. A backend without it must refuse them.
+	RequestFilters bool
 }
+
+// ErrRequestFiltersUnsupported is the error of a backend that cannot enforce
+// request filters.
+var ErrRequestFiltersUnsupported = errors.New("backend cannot enforce request filters (use the docker or podman backend)")
 
 type StoreManager interface {
 	Ensure(ctx context.Context, key StoreKey, kind StoreKind, owner string) error
@@ -522,6 +553,9 @@ func (e *ExitError) Error() string {
 }
 
 func Validate(req Request, caps Capabilities) error {
+	if len(req.Filters) > 0 && !caps.RequestFilters {
+		return ErrRequestFiltersUnsupported
+	}
 	if req.Network.Mode == NetworkModeRestricted && !caps.RestrictedNetwork {
 		return fmt.Errorf("backend cannot enforce restricted networking; rerun with --allow-all-network to proceed unrestricted")
 	}

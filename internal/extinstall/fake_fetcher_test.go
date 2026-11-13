@@ -102,6 +102,7 @@ func testEnv(t *testing.T, fetcher Fetcher, stdin string) (Env, *bytesBuffer) {
 		UserToolsDir:             filepath.Join(root, "home", ".config", "enclave", "extensions", "tools"),
 		UserFeaturesDir:          filepath.Join(root, "home", ".config", "enclave", "extensions", "features"),
 		UserCommandExtensionsDir: filepath.Join(root, "home", ".config", "enclave", "extensions", "commands"),
+		UserFilterExtensionsDir:  filepath.Join(root, "home", ".config", "enclave", "extensions", "filters"),
 	}
 	for _, dir := range []string{paths.ToolsDir, paths.FeaturesDir, paths.UserToolsDir, paths.UserFeaturesDir} {
 		if err := os.MkdirAll(dir, 0o750); err != nil {

@@ -49,6 +49,9 @@ func ValidateExtensions(paths model.Paths) (ExtensionValidation, error) {
 	if err := validateUserExtensions(paths, model.KindCommand, &result); err != nil {
 		return result, err
 	}
+	if err := validateUserExtensions(paths, model.KindFilter, &result); err != nil {
+		return result, err
+	}
 
 	return result, nil
 }
@@ -141,6 +144,15 @@ func validateUserExtension(paths model.Paths, kind model.ExtensionKind, name str
 	builtinDir, _ := ResolveExtensionDirs(paths, kind, name)
 	hasBuiltin := builtinDir != ""
 
+	if kind == model.KindFilter {
+		// A filter's content, its spec, presets, and ignored runtime files,
+		// is validated by package filterhost, which config cannot import.
+		validateCommandsDir(kind, name, userDir, result)
+		if !hasOwnSpecFile(userDir) {
+			result.Errors = append(result.Errors, fmt.Sprintf("filter %q: missing %s", name, SpecFilename))
+		}
+		return
+	}
 	if util.IsDir(filepath.Join(userDir, model.ExtensionGoDir)) {
 		result.Warnings = append(result.Warnings, fmt.Sprintf("%s %q: user go/ handlers are ignored (requires recompilation)", kind.Label(), name))
 	}

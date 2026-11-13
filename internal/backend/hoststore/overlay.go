@@ -55,8 +55,9 @@ func Overlay(targetDir, sourceDir string, preserve []string) (result error) {
 	if err := work.Mkdir("candidate", 0o700); err != nil {
 		return err
 	}
-	// Special nodes outside the preserve patterns are dropped with the rest of
-	// the old contents, so the backup leaves them out instead of failing.
+	// Special nodes and unreadable files outside the preserve patterns are
+	// dropped with the rest of the old contents, so the backup leaves them out
+	// instead of failing.
 	notPreserved := func(name string) bool { return !matchesPreserved(name, preserve) }
 	if err := copyNode(target, ".", work, "backup", 0, notPreserved); err != nil {
 		return err

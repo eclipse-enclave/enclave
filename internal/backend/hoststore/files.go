@@ -101,9 +101,10 @@ func Copy(src *Files, from string, dst *Files, to string, mode fs.FileMode) erro
 	return copyNode(src, from, dst, to, mode, nil)
 }
 
-// copyNode is Copy, except that a special node (FIFO, socket, device) for
-// whose source path skipSpecial reports true is left out instead of failing.
-func copyNode(src *Files, from string, dst *Files, to string, mode fs.FileMode, skipSpecial func(string) bool) error {
+// copyNode is Copy, except that a special node (FIFO, socket, device) or a
+// regular file the caller may not read is left out instead of failing when
+// droppable reports true for its source path.
+func copyNode(src *Files, from string, dst *Files, to string, mode fs.FileMode, droppable func(string) bool) error {
 	if info, err := dst.Lstat(to); err == nil && info.Mode()&os.ModeSymlink != 0 {
 		return fmt.Errorf("refusing symlinked copy destination %s", to)
 	}
@@ -127,18 +128,21 @@ func copyNode(src *Files, from string, dst *Files, to string, mode fs.FileMode, 
 			return err
 		}
 		for _, entry := range entries {
-			if err := copyNode(src, filepath.Join(from, entry.Name()), dst, filepath.Join(to, entry.Name()), mode, skipSpecial); err != nil {
+			if err := copyNode(src, filepath.Join(from, entry.Name()), dst, filepath.Join(to, entry.Name()), mode, droppable); err != nil {
 				return err
 			}
 		}
 	default:
 		if !info.Mode().IsRegular() {
-			if skipSpecial != nil && skipSpecial(from) {
+			if droppable != nil && droppable(from) {
 				return nil
 			}
 			return fmt.Errorf("unsupported store node %s", from)
 		}
 		data, err := src.ReadFile(from)
+		if errors.Is(err, fs.ErrPermission) && droppable != nil && droppable(from) {
+			return nil
+		}
 		if err != nil {
 			return err
 		}

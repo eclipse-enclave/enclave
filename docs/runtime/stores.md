@@ -304,9 +304,10 @@ it places there does not move host reads or writes outside the store.
   contents fails, the error names the retained backup; restore from it before
   deleting it. The overlay is recoverable, not atomic: other live sessions can
   see intermediate contents.
-- A FIFO, socket, or device file in a preserved path stops the overlay before
-  the store is changed. Elsewhere in the store it is dropped with the rest of
-  the old contents.
+- A FIFO, socket, or device file, or a file the host user cannot read, in a
+  preserved path stops the overlay before the store is changed. Elsewhere in
+  the store it is dropped with the rest of the old contents and is not in the
+  backup.
 
 ## Source files
 

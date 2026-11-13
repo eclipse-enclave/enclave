@@ -12,6 +12,7 @@ package hoststore
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"golang.org/x/sys/unix"
@@ -109,5 +110,72 @@ func TestOverlayRejectsSpecialNodeInPreservedPath(t *testing.T) {
 	}
 	if data, err := os.ReadFile(filepath.Join(target, "auth.json")); err != nil || string(data) != "credentials" {
 		t.Fatalf("original changed: %q, %v", data, err)
+	}
+}
+
+func TestOverlayDropsUnreadableFileOutsidePreservedPaths(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("permission failure requires an unprivileged user")
+	}
+	target, source := t.TempDir(), t.TempDir()
+	if err := os.MkdirAll(filepath.Join(target, "projects"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(target, "projects", "history"), []byte("resume"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(target, "stale.json"), []byte("old"), 0o000); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(source, "settings.json"), []byte("generated"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := Overlay(target, source, []string{"projects/"}); err != nil {
+		t.Fatalf("unreadable file outside preserved paths blocked the overlay: %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(target, "stale.json")); !os.IsNotExist(err) {
+		t.Fatalf("stale.json survived the overlay: %v", err)
+	}
+	for name, want := range map[string]string{"projects/history": "resume", "settings.json": "generated"} {
+		if data, err := os.ReadFile(filepath.Join(target, name)); err != nil || string(data) != want {
+			t.Fatalf("%s = %q, %v; want %q", name, data, err, want)
+		}
+	}
+}
+
+func TestOverlayRejectsUnreadableFileInPreservedPath(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("permission failure requires an unprivileged user")
+	}
+	target, source := t.TempDir(), t.TempDir()
+	if err := os.MkdirAll(filepath.Join(target, "projects"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(target, "projects", "history"), []byte("resume"), 0o000); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(target, "auth.json"), []byte("credentials"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(source, "settings.json"), []byte("generated"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	err := Overlay(target, source, []string{"projects/"})
+	if err == nil {
+		t.Fatal("expected an unreadable file in a preserved path to stop the overlay")
+	}
+	if strings.Contains(err.Error(), "recoverable") {
+		t.Fatalf("overlay failed after it changed the store: %v", err)
+	}
+	if data, err := os.ReadFile(filepath.Join(target, "auth.json")); err != nil || string(data) != "credentials" {
+		t.Fatalf("original changed: %q, %v", data, err)
+	}
+	if info, err := os.Lstat(filepath.Join(target, "projects", "history")); err != nil || info.Mode().Perm() != 0 {
+		t.Fatalf("preserved file changed: %v, %v", info, err)
+	}
+	if _, err := os.Lstat(filepath.Join(target, "settings.json")); !os.IsNotExist(err) {
+		t.Fatalf("generated config published: %v", err)
 	}
 }

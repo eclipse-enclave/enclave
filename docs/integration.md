@@ -32,6 +32,18 @@ An array with one object per container (`--all` adds stopped ones):
 | `ports` | Array of `{containerPort, hostPort, hostIP, protocol}` bindings; a host port requested as `0` shows the assigned port |
 | `network` | `{name, subnet}` of the per-session bridge under Docker and podman; `null` for other backends and sessions started by earlier releases |
 | `options` | Session provenance; see below |
+| `configSource` | Optional `{dir, hash}` of the canonical project-layer source pinned at startup. Omitted for older sessions or invalid pins (see `configSourceError`). Older sessions use checkout-local settings, not newly inferred inheritance |
+| `configSourceError` | Optional error string when the recorded pin is malformed; `configSource` is then omitted. This is not a legacy session, and lifecycle config reads reject the invalid pin |
+
+`configSource` is the project layer selected at startup, which differs from
+the checkout with [worktree inheritance](configuration.md#linked-worktrees).
+`attach`, host Theia, and live network operations use this pin instead of the
+checkout's current Git pointers. The pin fixes a path, not its contents: edits
+to that source still apply. A missing or redirected inherited source is never
+replaced; `attach` then proceeds without config-derived tint or host
+environment, and YOLO Theia sessions fail. Checkout-local pins keep working
+after the checkout is removed or renamed. `options.worktree_inheritance`
+records the effective setting.
 
 ### Session provenance
 
@@ -47,7 +59,10 @@ typed like `options.<name>.value` of [`config --json`](#config---json).
 - `options` is omitted when unknown: older sessions, unresolvable features, or
   unreadable provenance. qemu sessions are not listed.
 
-The `enclave.options` label that stores it is not a contract.
+The `enclave.options` label that stores it is not a contract. Likewise,
+`configSource` in `ps --json` is the supported interface for the pinned source,
+not the engine label used to store it. The pin fixes the source, not its file
+contents; malformed or unavailable pins do not trigger another source lookup.
 
 ## `config --json`
 
@@ -59,6 +74,7 @@ options and kinds may appear within a schema version; skip unknown `kind`s.
 | `schemaVersion`, `kind`, `view` | `"1"`, `"config"`, and the selected view |
 | `tool` | `{name, source}`; `name` is `null` when no tool is selected |
 | `project` | `{dir, realDir, hash, name}` of the current project, or `null` (with a `project_unavailable` warning) when it cannot be resolved |
+| `configSource` | `{dir, hash}` of the effective canonical config anchor, or `null` when unavailable; `project` remains the current checkout's state identity |
 | `files` | `global` and `project` config files as `{path, status}`, status `present`, `missing`, or `unavailable` |
 | `options` | One entry per option (see below) |
 | `warnings` | Array of `{code, option, layer, path, message}`; `option`, `layer`, and `path` are omitted when not applicable |
@@ -80,12 +96,18 @@ Each `options.<name>` entry has:
 - `host_config_paths` and `yolo` are resolved against the tool (`null`
   without one); `yolo` adds `resolvedBy` (`cli`, `config`, or `tool`).
 - `backend` keeps the configured value, including `auto`.
+- With worktree inheritance, `files.project` and project option layers describe
+  the selected anchor's file, without changing `project` or schema version `1`.
+  `network print --json` also keeps the current checkout's project identity.
 
 Warning codes:
 
 | Code | Meaning |
 |------|---------|
 | `invalid_config_json`, `config_path_is_directory`, `unsupported_scope`, `invalid_tool_override`, `invalid_value`, `suspicious_value`, `project_guardrail` | Config loading; `layer` is `global`, `project`, or `tool_override:<tool>` |
+| `config_anchor_unavailable` | Linked-worktree relationship verified, but no supported main-checkout anchor; a non-starting command uses checkout-local configuration with a warning. Inheriting starts fail instead |
+| `invalid_worktree_metadata` | Verification failed; a non-starting command uses checkout-local configuration with a warning. Inheriting starts fail instead |
+| `worktree_overrides_ignored` | Checkout-local overrides or secrets exist but are ignored because the main checkout's project layer is inherited |
 | `unknown_feature`, `features_unavailable` | Feature resolution |
 | `tool_unresolved` | No tool selected |
 | `tool_unavailable` | Tool profile cannot be loaded; also makes `valid` false |

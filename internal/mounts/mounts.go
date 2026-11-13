@@ -10,20 +10,16 @@ package mounts
 import (
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"enclave/internal/backend"
+	"enclave/internal/gitworktree"
 	"enclave/internal/logx"
 	"enclave/internal/model"
 	"enclave/internal/util"
 )
-
-const maxWorktreeMetadataBytes = 4 * 1024
-
-var errSymlinkFile = errors.New("symlink file")
 
 // ResolveExtraDir resolves an additional directory, as given on the command
 // line or in config, to the symlink-resolved path it would be mounted from. It
@@ -275,39 +271,18 @@ func ProtectFiles(existing []backend.Mount, paths []string) ([]backend.Mount, er
 // AddWorktree mounts the gitdir and commondir a linked worktree's .git file
 // points to. A verified external worktree's paths must not be sensitive.
 func AddWorktree(mounts *[]backend.Mount, project model.Project, validatedDirs *[]string, readOnly bool, sensitive SensitivePaths) {
-	gitFile := filepath.Join(project.Dir, ".git")
-	data, err := readRegularFileInDir(project.Dir, ".git")
-	if errors.Is(err, errSymlinkFile) {
-		logx.Warnf("Ignoring .git symlink: %s", gitFile)
-		return
+	metadata := gitworktree.Resolve(project.Dir)
+	if metadata.Status == gitworktree.Invalid {
+		logx.Warnf("Ignoring invalid .git metadata at %s: %s", filepath.Join(project.Dir, ".git"), metadata.Reason)
 	}
-	if err != nil {
-		return
-	}
-
-	lines := strings.Split(string(data), "\n")
-	if len(lines) == 0 {
-		return
-	}
-	line := strings.TrimSpace(lines[0])
-	if !strings.HasPrefix(line, "gitdir:") {
-		return
-	}
-
-	gitdirPath := strings.TrimSpace(strings.TrimPrefix(line, "gitdir:"))
+	// Mount verification is independent of the inheritance setting.
+	gitdirPath, commondirPath := metadata.GitDir, metadata.CommonDir
 	if gitdirPath == "" {
 		return
 	}
-	if !filepath.IsAbs(gitdirPath) {
-		gitdirPath = filepath.Join(project.Dir, gitdirPath)
-	}
-	gitdirPath, err = filepath.EvalSymlinks(gitdirPath)
-	if err != nil {
-		return
-	}
-
-	commondirPath, hasCommondir := resolveWorktreeCommondir(gitdirPath)
-	allowExternal := hasCommondir && isVerifiedExternalWorktree(project, gitdirPath, commondirPath)
+	hasCommondir := commondirPath != ""
+	allowExternal := metadata.Relationship() && !util.PathWithin(project.RealDir, gitdirPath) &&
+		!util.IsSystemDir(gitdirPath) && !util.IsSystemDir(commondirPath)
 
 	if realPath, ok := validateWorktreeMountPath(gitdirPath, validatedDirs, project.RealDir, "gitdir", allowExternal, sensitive); ok {
 		*mounts = append(*mounts, backend.Mount{
@@ -332,120 +307,6 @@ func AddWorktree(mounts *[]backend.Mount, project model.Project, validatedDirs *
 		})
 		logx.Infof("Mounted worktree commondir: %s", realPath)
 	}
-}
-
-func resolveWorktreeCommondir(gitdirPath string) (string, bool) {
-	commondirData, err := readRegularFileInDir(gitdirPath, "commondir")
-	if err != nil {
-		return "", false
-	}
-	commondirPath := strings.TrimSpace(string(commondirData))
-	if commondirPath == "" {
-		return "", false
-	}
-	if !filepath.IsAbs(commondirPath) {
-		commondirPath = filepath.Join(gitdirPath, commondirPath)
-	}
-	commondirPath, err = filepath.EvalSymlinks(commondirPath)
-	if err != nil {
-		return "", false
-	}
-	return commondirPath, true
-}
-
-func isVerifiedExternalWorktree(project model.Project, gitdirPath string, commondirPath string) bool {
-	if util.PathWithin(project.RealDir, gitdirPath) {
-		return false
-	}
-	if util.IsSystemDir(gitdirPath) || util.IsSystemDir(commondirPath) {
-		return false
-	}
-	if !util.PathStrictlyWithin(filepath.Join(commondirPath, "worktrees"), gitdirPath) {
-		return false
-	}
-
-	backPointerPath, err := readWorktreeBackPointer(gitdirPath)
-	if err != nil {
-		return false
-	}
-	projectGitFile, err := resolveExistingPath(projectGitFilePath(project))
-	if err != nil {
-		return false
-	}
-	return backPointerPath == projectGitFile
-}
-
-func projectGitFilePath(project model.Project) string {
-	projectDir := strings.TrimSpace(project.RealDir)
-	if projectDir == "" {
-		projectDir = project.Dir
-	}
-	return filepath.Join(projectDir, ".git")
-}
-
-func readWorktreeBackPointer(gitdirPath string) (string, error) {
-	backPointerData, err := readRegularFileInDir(gitdirPath, "gitdir")
-	if err != nil {
-		return "", err
-	}
-	backPointerPath := strings.TrimSpace(string(backPointerData))
-	if backPointerPath == "" {
-		return "", fmt.Errorf("empty gitdir back pointer")
-	}
-	if !filepath.IsAbs(backPointerPath) {
-		backPointerPath = filepath.Join(gitdirPath, backPointerPath)
-	}
-	return resolveExistingPath(backPointerPath)
-}
-
-func readRegularFileInDir(dir string, name string) ([]byte, error) {
-	root, err := os.OpenRoot(dir)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = root.Close() }()
-
-	info, err := root.Lstat(name)
-	if err != nil {
-		return nil, err
-	}
-	if info.Mode()&os.ModeSymlink != 0 {
-		return nil, errSymlinkFile
-	}
-	if !info.Mode().IsRegular() {
-		return nil, fmt.Errorf("not a regular file: %s", name)
-	}
-
-	file, err := root.Open(name)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = file.Close() }()
-
-	openedInfo, err := file.Stat()
-	if err != nil {
-		return nil, err
-	}
-	if !os.SameFile(info, openedInfo) {
-		return nil, fmt.Errorf("file changed while opening: %s", name)
-	}
-
-	data, err := io.ReadAll(io.LimitReader(file, maxWorktreeMetadataBytes+1))
-	if err != nil {
-		return nil, err
-	}
-	if len(data) > maxWorktreeMetadataBytes {
-		return nil, fmt.Errorf("metadata file too large: %s", name)
-	}
-	return data, nil
-}
-
-func resolveExistingPath(path string) (string, error) {
-	absPath, err := filepath.Abs(path)
-	if err != nil {
-		return "", err
-	}
-	return filepath.EvalSymlinks(absPath)
 }
 
 // validateWorktreeMountPath enforces the policy for paths derived from a

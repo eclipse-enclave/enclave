@@ -53,7 +53,9 @@ A tool override beats a top-level value in either file, so a global
 `tool_overrides.<tool>` value beats a project's top-level value; between the
 two files' overrides, the project's wins. Lists merge across layers (see
 [List options](#list-options)); string maps such as `host_env` merge per key.
-`enclave config --view source` shows where each value came from.
+`enclave config --view source` shows where each value came from. A linked
+worktree can inherit its project layer; see
+[Linked worktrees](#linked-worktrees).
 
 ### CLI-only options
 
@@ -81,7 +83,8 @@ sensitive data:
 }
 ```
 
-Every key except `tool` and the global-only ones can also be set under
+Every key except `tool`, `worktree_inheritance`, and the global-only ones can
+also be set under
 `tool_overrides.<tool>`. An override that sets `tool` or a nested
 `tool_overrides` is ignored as a whole with a warning.
 
@@ -144,6 +147,7 @@ See [Networking](networking.md).
 | `no_memory` | Disable agent memory; see [Agent memory](runtime/stores.md#agent-memory) |
 | `project_mount` | `writable` (default) or `readonly`; see [Mounts](mounts.md) |
 | `worktree_metadata` | `follow` (default), `readonly`, or `none` |
+| `worktree_inheritance` | `false` (default) keeps the project layer and project memory checkout-local; `true` opts into the verified anchor before normal option loading. In a main checkout's project config it applies to that repository's worktrees |
 | `add_dirs`, `add_readonly_dirs` | Additional directories to mount (read-write or read-only) |
 | `sensitive_dir_exceptions` | Sensitive paths allowed to be mounted; mounts nothing |
 | `base_image` | Base image override; see [Tools and images](tools.md) |
@@ -279,6 +283,59 @@ only warn.
 Messages name the flag or key and file; `enclave features list` shows the
 names. `host_config_paths` resolution:
 [Host config passthrough](tool-config.md#host-config-passthrough).
+
+## Linked worktrees
+
+Worktrees keep their own project layer and project memory by default. To opt
+a repository into shared context, set this in the main checkout's project
+config. Existing and future worktrees of that repository then inherit:
+
+```json
+{"worktree_inheritance": true}
+```
+
+The same key in global config opts in every repository; in a worktree's own
+project config it decides for that worktree only. Override it for one
+invocation with `--worktree-inheritance=true|false`.
+
+The key is resolved before the project layer is loaded, highest first: CLI,
+checkout-local project config, the anchor's project config, global config,
+default `false`. Only this key is read from the anchor at that point, so an
+anchor's `false` beats a global `true`, and a worktree's own `false` keeps it
+local either way. It is not supported in tool overrides.
+
+When enabled, a verified linked worktree uses the anchor's project layer
+instead of its own; the two are not merged. That covers project defaults,
+network policy, gateway allowlists, tool settings and patches, skills,
+secrets, Theia preferences, and project-scoped agent memory. Local config,
+secrets, and network policy are ignored, including stricter rules, and startup
+warns with their paths. Nothing is copied or migrated. `enclave config` and
+`enclave info` show the effective source. Review the anchor's inputs before
+opting in; see the [security boundary](security/README.md#worktree-inheritance).
+
+Runtime state stays checkout-local: config stores (including project-scope
+auth), env caches, shell history, package caches, generated output, network
+bundles, logs, session-scoped memory, session names, and cleanup. See
+[Agent memory](runtime/stores.md#agent-memory).
+
+The anchor is the canonical main checkout, or the bare repository itself in
+layouts such as `<repo>/.bare` with sibling checkouts. Enclave verifies both
+metadata pointers with filesystem reads, without running Git or following
+config includes. Non-repositories, ordinary checkouts, and submodules use their
+own project layer.
+
+With inheritance enabled, session starts (`run`, `shell`, `continue`,
+`resume`, session user commands) and `devcontainer generate` fail when the
+pointers are broken or no supported anchor exists; other commands warn and use
+the checkout-local layer. After moving a worktree with plain `mv`, run
+`git worktree repair` from the main repository. Unsupported anchors include
+`--separate-git-dir` repositories outside the `<main>/.git` layout, non-bare
+`core.worktree` layouts, and repository config with `include`/`includeIf` or
+over 1 MiB. Set `worktree_inheritance` to `false` in such a worktree to use its
+own config.
+
+A session pins its config source at start; see
+[`ps --json`](integration.md#ps---json).
 
 ## Environment variables
 

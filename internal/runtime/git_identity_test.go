@@ -114,6 +114,16 @@ func TestProtectGitConfigFiles(t *testing.T) {
 			if acc.Mounts()[0].ReadOnly {
 				t.Fatal("project must remain writable")
 			}
+			registryTarget := filepath.Join(main, ".git", "worktrees", "new-subagent")
+			owner := -1
+			for i, mount := range acc.Mounts() {
+				if (registryTarget == mount.ContainerPath || strings.HasPrefix(registryTarget, mount.ContainerPath+string(filepath.Separator))) && (owner < 0 || len(mount.ContainerPath) > len(acc.Mounts()[owner].ContainerPath)) {
+					owner = i
+				}
+			}
+			if owner < 0 || acc.Mounts()[owner].ReadOnly {
+				t.Fatal("default mode must permit subagent worktree creation")
+			}
 			if linked {
 				withoutMetadata := newMountAccumulator([]backend.Mount{bindMount(project, project, false)}, nil)
 				if err := r.protectGitConfigFiles(withoutMetadata); err != nil {
@@ -279,6 +289,9 @@ if printf 'modified' > .gitconfig; then exit 1; fi
 printf 'content' > tracked.txt
 git add tracked.txt
 git -c user.name=Tester -c user.email=test@example.org commit -q -m test
+git worktree add -q --detach "$project/subagent" HEAD
+git -C "$project/subagent" -c user.name=Tester -c user.email=test@example.org commit -q --allow-empty -m subagent
+git worktree remove "$project/subagent"
 `, "git-config-test", project}
 	// Match the parent-first ordering used by both backends.
 	mounts = append([]backend.Mount(nil), mounts...)

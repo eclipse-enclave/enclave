@@ -196,7 +196,7 @@ func checkSensitiveMounts(project model.Project, additional []additionalDir, exc
 		}
 		hint = "To mount " + exemptableMounts + " anyway, pass them with --add-sensitive-dir or --add-readonly-sensitive-dir\n" +
 			"(this works for the project directory too), or list them in sensitive_dir_exceptions in\n" +
-			formatSource(model.SourceGlobal, project.Dir) + ".\n"
+			formatSource(model.SourceGlobal, "") + ".\n"
 	}
 	return fmt.Errorf("refusing to mount sensitive host paths:\n  %s\n%s"+
 		"Pass --allow-sensitive-mounts or set %s=1 to mount all sensitive paths anyway",

@@ -56,7 +56,9 @@ When a patch, override, or host config passthrough is active, Enclave rebuilds
 the store from generated config on each launch. In-tool edits to
 `sandbox.settingsTarget` are carried forward by diffing the store file against
 a snapshot of the previous generated file and merging them into the new one;
-new patch or override edits win conflicts.
+new patch or override edits win conflicts. With inherited worktree config,
+these edits and their baselines stay in the worktree's own store; they are not
+synchronized back to the config anchor.
 
 - Snapshots live in `config-store-baselines/<key>`, outside the mounted store,
   with the same scope as their store, and are cleaned up with it.
@@ -89,7 +91,8 @@ Session scope keeps memory next to the config-store database that coordinates
 its writers, favoring writer isolation over shared learned context. A named
 session reuses its memory; a new name or a concurrent-session suffix gets a
 separate store (an ad-hoc concurrent store may never be reused and stays until
-cleanup). A linked worktree, being its own project, has its own memory.
+cleanup). For project-memory source selection in worktrees, see
+[Linked worktrees](../configuration.md#linked-worktrees).
 
 Turning on `memoryScope` for a tool that already ran migrates nothing: old
 memory in the config store is hidden by the new mount until removed by hand or
@@ -104,6 +107,12 @@ started manually from a shell, keep their native behavior and write memory into
 the config store, which persists unless the session is ephemeral.
 
 ### Memory cleanup
+
+Cleanup always targets the current checkout's state hash, never its inherited
+config hash. Cleaning a linked worktree leaves inherited project memory and the
+anchor's state untouched. Cleaning the anchor can remove shared project memory
+unless `--keep memory` applies; whole-tree `--all` cleanup keeps its existing
+semantics below.
 
 | Command | Project scope | Session scope |
 |---------|---------------|---------------|

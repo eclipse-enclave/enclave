@@ -70,7 +70,7 @@ func (s *StoreManager) ReadFile(_ context.Context, key backend.StoreKey, kind ba
 	if err != nil {
 		return nil, err
 	}
-	target, err := storeFilePath(dir, rel, true)
+	name, err := storeName(dir, rel, true)
 	if err != nil {
 		return nil, err
 	}
@@ -79,10 +79,6 @@ func (s *StoreManager) ReadFile(_ context.Context, key backend.StoreKey, kind ba
 		return nil, err
 	}
 	defer func() { _ = root.Close() }()
-	name, err := filepath.Rel(dir, target)
-	if err != nil {
-		return nil, err
-	}
 	return root.ReadFile(name)
 }
 
@@ -104,7 +100,7 @@ func (s *StoreManager) writeFile(_ context.Context, key backend.StoreKey, kind b
 	if err != nil {
 		return err
 	}
-	target, err := storeFilePath(dir, rel, true)
+	name, err := storeName(dir, rel, true)
 	if err != nil {
 		return err
 	}
@@ -113,10 +109,6 @@ func (s *StoreManager) writeFile(_ context.Context, key backend.StoreKey, kind b
 		return err
 	}
 	defer func() { _ = root.Close() }()
-	name, err := filepath.Rel(dir, target)
-	if err != nil {
-		return err
-	}
 	return root.WriteFile(name, data, mode)
 }
 
@@ -137,11 +129,7 @@ func (s *StoreManager) Seed(_ context.Context, key backend.StoreKey, kind backen
 		if strings.TrimSpace(item.HostPath) == "" || strings.TrimSpace(item.StoreRel) == "" {
 			continue
 		}
-		target, err := storeFilePath(dir, item.StoreRel, true)
-		if err != nil {
-			return err
-		}
-		name, err := filepath.Rel(dir, target)
+		name, err := storeName(dir, item.StoreRel, true)
 		if err != nil {
 			return err
 		}
@@ -172,7 +160,7 @@ func (s *StoreManager) RemovePath(_ context.Context, key backend.StoreKey, kind 
 	// RemovePath must be able to delete a planted symlink itself (the rooted
 	// RemoveAll unlinks the symlink rather than following it), so leaf symlinks
 	// are allowed here while parent-directory symlinks remain rejected.
-	target, err := storeFilePath(dir, rel, false)
+	name, err := storeName(dir, rel, false)
 	if err != nil {
 		return err
 	}
@@ -184,10 +172,6 @@ func (s *StoreManager) RemovePath(_ context.Context, key backend.StoreKey, kind 
 		return err
 	}
 	defer func() { _ = root.Close() }()
-	name, err := filepath.Rel(dir, target)
-	if err != nil {
-		return err
-	}
 	return root.RemoveAll(name)
 }
 
@@ -203,11 +187,12 @@ func (s *StoreManager) storeDir(key backend.StoreKey, kind backend.StoreKind) (s
 	return hoststore.ResolveDir(s.host.Home, key, kind)
 }
 
-// storeFilePath validates a store-relative path against traversal and joins it
-// onto the store directory. It rejects any parent component that is a symlink;
+// storeName validates a store-relative path against traversal and returns it
+// cleaned, relative to the store directory dir. It rejects any parent component
+// that is a symlink;
 // when rejectLeafSymlink is set it also rejects a symlinked leaf, so operations
 // that follow the final component (read, write, seed) cannot escape the store.
-func storeFilePath(dir string, rel string, rejectLeafSymlink bool) (string, error) {
+func storeName(dir string, rel string, rejectLeafSymlink bool) (string, error) {
 	value := strings.TrimSpace(strings.ReplaceAll(rel, "\\", "/"))
 	if value == "" {
 		return "", fmt.Errorf("store path is empty")
@@ -225,7 +210,7 @@ func storeFilePath(dir string, rel string, rejectLeafSymlink bool) (string, erro
 			return "", err
 		}
 	}
-	return target, nil
+	return filepath.Rel(dir, target)
 }
 
 // ensureNotSymlink rejects target when it already exists as a symlink, so

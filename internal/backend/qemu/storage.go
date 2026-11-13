@@ -53,7 +53,7 @@ func (s *StoreManager) Ensure(_ context.Context, key backend.StoreKey, kind back
 }
 
 func (s *StoreManager) ReadFile(_ context.Context, key backend.StoreKey, kind backend.StoreKind, rel string) ([]byte, error) {
-	target, err := s.storeRelPath(key, kind, rel)
+	name, err := s.storeName(key, kind, rel)
 	if err != nil {
 		return nil, err
 	}
@@ -62,10 +62,6 @@ func (s *StoreManager) ReadFile(_ context.Context, key backend.StoreKey, kind ba
 		return nil, err
 	}
 	defer func() { _ = root.Close() }()
-	name, err := filepath.Rel(root.Name(), target)
-	if err != nil {
-		return nil, err
-	}
 	info, err := root.Lstat(name)
 	if err != nil {
 		return nil, err
@@ -93,7 +89,7 @@ func (s *StoreManager) writeFile(ctx context.Context, key backend.StoreKey, kind
 	if err := s.Ensure(ctx, key, kind, ""); err != nil {
 		return err
 	}
-	target, err := s.storeRelPath(key, kind, rel)
+	name, err := s.storeName(key, kind, rel)
 	if err != nil {
 		return err
 	}
@@ -102,10 +98,6 @@ func (s *StoreManager) writeFile(ctx context.Context, key backend.StoreKey, kind
 		return err
 	}
 	defer func() { _ = root.Close() }()
-	name, err := filepath.Rel(root.Name(), target)
-	if err != nil {
-		return err
-	}
 	return root.WriteFile(name, data, mode)
 }
 
@@ -125,11 +117,7 @@ func (s *StoreManager) Seed(ctx context.Context, key backend.StoreKey, kind back
 		if strings.TrimSpace(item.HostPath) == "" || strings.TrimSpace(item.StoreRel) == "" {
 			continue
 		}
-		dst, err := s.storeRelPath(key, kind, item.StoreRel)
-		if err != nil {
-			return err
-		}
-		name, err := filepath.Rel(root.Name(), dst)
+		name, err := s.storeName(key, kind, item.StoreRel)
 		if err != nil {
 			return err
 		}
@@ -154,7 +142,7 @@ func (s *StoreManager) Seed(ctx context.Context, key backend.StoreKey, kind back
 }
 
 func (s *StoreManager) RemovePath(_ context.Context, key backend.StoreKey, kind backend.StoreKind, rel string) error {
-	target, err := s.storeRelPath(key, kind, rel)
+	name, err := s.storeName(key, kind, rel)
 	if err != nil {
 		return err
 	}
@@ -166,10 +154,6 @@ func (s *StoreManager) RemovePath(_ context.Context, key backend.StoreKey, kind 
 		return err
 	}
 	defer func() { _ = root.Close() }()
-	name, err := filepath.Rel(root.Name(), target)
-	if err != nil {
-		return err
-	}
 	return root.RemoveAll(name)
 }
 
@@ -216,7 +200,9 @@ func (s *StoreManager) storePath(key backend.StoreKey, kind backend.StoreKind) (
 	return hoststore.ResolveDir(s.host.Home, key, kind)
 }
 
-func (s *StoreManager) storeRelPath(key backend.StoreKey, kind backend.StoreKind, rel string) (string, error) {
+// storeName validates a store-relative path and returns it cleaned, relative
+// to the store directory.
+func (s *StoreManager) storeName(key backend.StoreKey, kind backend.StoreKind, rel string) (string, error) {
 	root, err := s.storePath(key, kind)
 	if err != nil {
 		return "", err
@@ -232,7 +218,7 @@ func (s *StoreManager) storeRelPath(key backend.StoreKey, kind backend.StoreKind
 	if err := verifyStoreParentsNoFollow(root, cleaned); err != nil {
 		return "", err
 	}
-	return target, nil
+	return filepath.Rel(root, target)
 }
 
 // verifyStoreParentsNoFollow ensures no existing parent directory component of

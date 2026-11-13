@@ -335,10 +335,10 @@ func (b *Backend) syncFeatureAuthStore(ctx context.Context, configDir string, sy
 		for _, authFile := range validated {
 			src := path.Join(sync.ConfigDir, authFile)
 			// Early policy checks; the copy below stays on the opened roots.
-			if _, err := storeFilePath(configDir, src, true); err != nil {
+			if _, err := storeName(configDir, src, true); err != nil {
 				return err
 			}
-			if _, err := storeFilePath(authDir, authFile, true); err != nil {
+			if _, err := storeName(authDir, authFile, true); err != nil {
 				return err
 			}
 			if err := copyRootedFeatureAuthFileIfMissing(source, src, target, authFile, placeholders...); err != nil {

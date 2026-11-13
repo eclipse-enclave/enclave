@@ -11,7 +11,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"enclave/internal/backend"
@@ -87,7 +86,7 @@ func (b *Backend) createStoreDir(key backend.StoreKey, kind backend.StoreKind, r
 	if _, err := b.storage.MountSource(key, kind); err != nil {
 		return err
 	}
-	target, err := b.storage.storeRelPath(key, kind, rel)
+	name, err := b.storage.storeName(key, kind, rel)
 	if err != nil {
 		return err
 	}
@@ -96,10 +95,6 @@ func (b *Backend) createStoreDir(key backend.StoreKey, kind backend.StoreKind, r
 		return err
 	}
 	defer func() { _ = root.Close() }()
-	name, err := filepath.Rel(root.Name(), target)
-	if err != nil {
-		return err
-	}
 	// A link or file in place of the directory is replaced, not followed.
 	info, err := root.Lstat(name)
 	switch {

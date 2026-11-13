@@ -80,10 +80,6 @@ func (r *Files) WriteFile(name string, data []byte, mode fs.FileMode) error {
 			_ = f.Close()
 			return err
 		}
-		if err := f.Sync(); err != nil {
-			_ = f.Close()
-			return err
-		}
 		if err := f.Close(); err != nil {
 			return err
 		}

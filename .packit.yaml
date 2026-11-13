@@ -1,0 +1,65 @@
+# See the documentation for more information:
+# https://packit.dev/docs/configuration/
+
+specfile_path: packaging/rpm/enclave.spec
+
+# name in upstream package repository or registry (e.g. in PyPI)
+upstream_package_name: enclave
+# downstream (Fedora) RPM package name
+downstream_package_name: enclave
+
+srpm_build_deps:
+  - golang
+
+jobs:
+  - job: copr_build
+    trigger: commit
+    identifier: main
+    branch: main$
+    targets:
+      - fedora-all
+  - job: copr_build
+    trigger: pull_request
+    targets: [fedora-latest-stable]
+  - job: tests
+    trigger: pull_request
+    identifier: test_pull_request
+    fmf_path: tests
+    targets: [fedora-latest-stable]
+    notifications:
+      failure_comment:
+        message: "Tests failed on Testing Farm. Results: {{packit_dashboard_url}}"
+  - job: copr_build
+    trigger: release
+    identifier: release
+    owner: filippor
+    project: tests
+    targets:
+      - fedora-all
+
+notifications:
+  pull_request:
+    successful_build: true
+
+actions:
+  post-upstream-clone:
+    - go mod vendor -modcacherw
+    - |
+      bash -euo pipefail -c '
+        printf "commit=%s\ndate=%s\n" \
+          "$(git rev-parse --short=8 HEAD)" \
+          "$(TZ=UTC git show -s --format=%cd --date=format-local:%Y%m%d HEAD)" \
+          > build-info
+      '
+  get-current-version:
+    - ./scripts/version.sh --package
+  create-archive:
+     - |
+      bash -euo pipefail -c '
+        name="enclave-${PACKIT_PROJECT_VERSION:?}"
+        git archive --prefix="$name/" -o "$name.tar" HEAD
+        tar --append --file="$name.tar" \
+          --transform="s,^,$name/," vendor build-info
+        gzip -f "$name.tar"
+        printf "%s\n" "$name.tar.gz"
+      '

@@ -45,16 +45,16 @@ func OverlayConfigSettings(home string, key backend.StoreKey, storeDir string, s
 		logx.Warnf("Cannot carry in-tool settings edits for %s: %v; using generated settings", spec.SettingsPath, err)
 		storePath = ""
 	}
-	generatedPath, err := settingsPath(spec.SourceDir, spec.SettingsPath)
+	_, err = settingsPath(spec.SourceDir, spec.SettingsPath)
 	if err != nil {
 		return err
 	}
-	generated, generatedMode, generatedOK := readSettingsFile(generatedPath, "generated")
-	base, _, baseOK := readSettingsFile(basePath, "snapshot")
+	generated, generatedMode, generatedOK := readSettingsFile(spec.SourceDir, spec.SettingsPath, "generated")
+	base, _, baseOK := readSettingsFile(filepath.Dir(basePath), filepath.Base(basePath), "snapshot")
 	var store []byte
 	var storeOK bool
 	if storePath != "" {
-		store, _, storeOK = readSettingsFile(storePath, "store")
+		store, _, storeOK = readSettingsFile(storeDir, spec.SettingsPath, "store")
 	}
 
 	var merged []byte
@@ -78,14 +78,19 @@ func OverlayConfigSettings(home string, key backend.StoreKey, storeDir string, s
 		if err != nil {
 			return err
 		}
-		info, statErr := os.Lstat(storePath)
+		root, openErr := OpenFiles(storeDir)
+		if openErr != nil {
+			return openErr
+		}
+		defer func() { _ = root.Close() }()
+		info, statErr := root.Lstat(spec.SettingsPath)
 		if statErr != nil {
 			return fmt.Errorf("stat overlaid settings %s: %w", storePath, statErr)
 		}
 		if !info.Mode().IsRegular() {
 			return fmt.Errorf("overlaid settings path %s is not a regular file", storePath)
 		}
-		if err := util.WriteFileAtomic(storePath, merged, generatedMode); err != nil {
+		if err := root.WriteFile(spec.SettingsPath, merged, generatedMode); err != nil {
 			return fmt.Errorf("write merged settings %s: %w", storePath, err)
 		}
 	}
@@ -133,18 +138,27 @@ func settingsPath(root string, relative string) (string, error) {
 	return path, nil
 }
 
-func readSettingsFile(path string, label string) ([]byte, os.FileMode, bool) {
-	info, err := os.Lstat(path)
+func readSettingsFile(dir, relative, label string) ([]byte, os.FileMode, bool) {
+	root, err := OpenFiles(dir)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, 0, false
+	}
+	if err != nil {
+		logx.Warnf("Cannot open %s settings root: %v", label, err)
+		return nil, 0, false
+	}
+	defer func() { _ = root.Close() }()
+	info, err := root.Lstat(relative)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, 0, false
 	}
 	if err != nil || !info.Mode().IsRegular() {
-		logx.Warnf("Cannot carry in-tool settings edits: %s settings file %s is not a readable regular file", label, path)
+		logx.Warnf("Cannot carry in-tool settings edits: %s settings file %s is not a readable regular file", label, relative)
 		return nil, 0, false
 	}
-	data, err := os.ReadFile(path) // #nosec G304 -- path is a validated settings path in a managed store or generated tree.
+	data, err := root.ReadFile(relative)
 	if err != nil {
-		logx.Warnf("Cannot read %s settings file %s: %v", label, path, err)
+		logx.Warnf("Cannot read %s settings file %s: %v", label, relative, err)
 		return nil, 0, false
 	}
 	return data, info.Mode().Perm(), true

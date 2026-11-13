@@ -9,15 +9,19 @@ package docker
 
 import (
 	"context"
+	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"enclave/internal/backend"
+	"enclave/internal/backend/hoststore"
 	"enclave/internal/config"
 	"enclave/internal/model"
+	"enclave/internal/testutil"
 	"enclave/internal/util"
 )
 
@@ -435,4 +439,141 @@ func containsArg(args []string, want string) bool {
 		}
 	}
 	return false
+}
+
+func TestStoreManagerKeepsIOInStoreDuringConcurrentSwaps(t *testing.T) {
+	session := newFSStore(t)
+	other := StoreManager{host: session.host}
+	testutil.ExerciseStoreDuringSwaps(t, session.host.Home, &session, &other)
+}
+
+func TestStoreManagerSeedFollowsSymlinkedHostPath(t *testing.T) {
+	store := newFSStore(t)
+	key := backend.StoreKey{Owner: "claude", ProjectHash: "abc123abc123"}
+	hostDir := t.TempDir()
+	real := filepath.Join(hostDir, "dotfiles", "credentials.json")
+	if err := os.MkdirAll(filepath.Dir(real), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(real, []byte(`{"token":"host"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(hostDir, ".credentials.json")
+	if err := os.Symlink(real, link); err != nil {
+		t.Fatal(err)
+	}
+	tree := filepath.Join(hostDir, "tree")
+	if err := os.Mkdir(tree, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(real, filepath.Join(tree, "nested.json")); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := store.Seed(context.Background(), key, backend.StoreKindAuth, []backend.SeedItem{
+		{HostPath: link, StoreRel: ".credentials.json"},
+		{HostPath: tree, StoreRel: "tree"},
+	}); err != nil {
+		t.Fatalf("Seed() error = %v", err)
+	}
+
+	authDir := config.HostStoreAuthDir(store.host.Home, key.Owner, "")
+	seeded := filepath.Join(authDir, ".credentials.json")
+	info, err := os.Lstat(seeded)
+	if err != nil || !info.Mode().IsRegular() {
+		t.Fatalf("seeded credentials = %v, %v; want a regular file", info, err)
+	}
+	if data, err := os.ReadFile(seeded); err != nil || string(data) != `{"token":"host"}` {
+		t.Fatalf("seeded credentials = %q, %v", data, err)
+	}
+	nested := filepath.Join(authDir, "tree", "nested.json")
+	if info, err := os.Lstat(nested); err != nil || !info.Mode().IsRegular() {
+		t.Fatalf("link inside a seeded directory = %v, %v; want a regular file", info, err)
+	}
+	if data, err := os.ReadFile(nested); err != nil || string(data) != `{"token":"host"}` {
+		t.Fatalf("seeded nested credentials = %q, %v", data, err)
+	}
+}
+
+func TestStoreManagerSeedFollowsLinkedDirectoryInsideHostTree(t *testing.T) {
+	store := newFSStore(t)
+	key := backend.StoreKey{Owner: "claude", ProjectHash: "abc123abc123"}
+	hostDir := t.TempDir()
+	stowed := filepath.Join(hostDir, "dotfiles", "skills")
+	if err := os.MkdirAll(stowed, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(stowed, "SKILL.md"), []byte("skill"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tree := filepath.Join(hostDir, "tree")
+	if err := os.Mkdir(tree, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(stowed, filepath.Join(tree, "skills")); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := store.Seed(context.Background(), key, backend.StoreKindAuth, []backend.SeedItem{
+		{HostPath: tree, StoreRel: "tree"},
+	}); err != nil {
+		t.Fatalf("Seed() error = %v", err)
+	}
+
+	seeded := filepath.Join(config.HostStoreAuthDir(store.host.Home, key.Owner, ""), "tree", "skills")
+	if info, err := os.Lstat(seeded); err != nil || !info.IsDir() {
+		t.Fatalf("linked directory inside a seeded tree = %v, %v; want a directory", info, err)
+	}
+	if data, err := os.ReadFile(filepath.Join(seeded, "SKILL.md")); err != nil || string(data) != "skill" {
+		t.Fatalf("seeded skill = %q, %v", data, err)
+	}
+}
+
+func TestStoreManagerSeedStopsOnLinkCycleAndSpecialFile(t *testing.T) {
+	store := newFSStore(t)
+	key := backend.StoreKey{Owner: "claude", ProjectHash: "abc123abc123"}
+	cycle := filepath.Join(t.TempDir(), "tree")
+	if err := os.Mkdir(cycle, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(cycle, filepath.Join(cycle, "loop")); err != nil {
+		t.Fatal(err)
+	}
+	special := filepath.Join(t.TempDir(), "tree")
+	if err := os.Mkdir(special, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	listener, err := net.Listen("unix", filepath.Join(special, "agent.sock"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = listener.Close() }()
+	if err := os.Symlink(filepath.Join(special, "agent.sock"), filepath.Join(special, "linked.sock")); err != nil {
+		t.Fatal(err)
+	}
+
+	for name, tc := range map[string]struct{ src, want string }{
+		"cycle":   {cycle, "symlink cycle"},
+		"special": {special, "unsupported seed source"},
+	} {
+		err := store.Seed(context.Background(), key, backend.StoreKindAuth, []backend.SeedItem{
+			{HostPath: tc.src, StoreRel: name},
+		})
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Fatalf("Seed() of %s source = %v; want an error containing %q", name, err, tc.want)
+		}
+	}
+}
+
+func TestPrepareConfigStoreLayoutKeepsDirsInStoreDuringConcurrentSwaps(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	home := t.TempDir()
+	b := New(Options{Host: model.Host{Home: home, UID: strconv.Itoa(os.Getuid()), GID: strconv.Itoa(os.Getgid())}})
+	key := backend.StoreKey{Owner: "claude", ProjectHash: "abc123abc123"}
+	dir, err := hoststore.ResolveDir(home, key, backend.StoreKindConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prep := backend.ConfigStorePrep{Key: key, LayoutDirs: []string{"agent/projects"}}
+	testutil.ExerciseLayoutDuringSwaps(t, dir, func() { b.prepareConfigStoreLayout(dir, prep) })
 }

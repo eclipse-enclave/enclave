@@ -147,12 +147,20 @@ func Overlay(targetDir, sourceDir string, preserve []string) (result error) {
 	if err := work.Chmod("candidate", info.Mode().Perm()); err != nil {
 		return err
 	}
-	// Without read access only an empty directory can be removed. Find out
-	// before anything else in the store changes.
+	// Without read access only an empty directory can be removed, and only
+	// trying tells. If one is not empty, the ones already removed are put back,
+	// so the overlay still fails before the store changes.
+	removed := map[string]fs.FileInfo{}
 	for _, name := range unreadableDirs {
-		if err := target.Remove(name); err != nil {
-			return fmt.Errorf("cannot clear unreadable config store directory: %w", err)
+		info, err := target.Lstat(name)
+		if err != nil {
+			return errors.Join(err, restoreDirs(target, removed))
 		}
+		if err := target.Remove(name); err != nil {
+			err = fmt.Errorf("cannot clear unreadable config store directory: %w", err)
+			return errors.Join(err, restoreDirs(target, removed))
+		}
+		removed[name] = info
 	}
 	publishing = true
 	entries, err := target.ReadDir(".")
@@ -201,6 +209,25 @@ func mergeNode(src *Files, from string, dst *Files, to string) error {
 		return err
 	}
 	return dst.Chtimes(to, info.ModTime())
+}
+
+// restoreDirs recreates removed empty directories with their mode and
+// modification time. Ownership cannot be restored for another user's.
+func restoreDirs(target *Files, removed map[string]fs.FileInfo) error {
+	var errs []error
+	for name, info := range removed {
+		err := target.Mkdir(name, 0o700)
+		if err == nil {
+			err = target.Chmod(name, info.Mode().Perm())
+		}
+		if err == nil {
+			err = target.Chtimes(name, info.ModTime())
+		}
+		if err != nil {
+			errs = append(errs, fmt.Errorf("could not restore removed directory %s: %w", name, err))
+		}
+	}
+	return errors.Join(errs...)
 }
 
 // mayHoldPreserved reports whether a preserve pattern can match dir or

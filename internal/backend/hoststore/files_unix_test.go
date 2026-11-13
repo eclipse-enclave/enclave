@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"golang.org/x/sys/unix"
 )
@@ -264,5 +265,55 @@ func TestOverlayRejectsUnreadableDirectoryItCannotDrop(t *testing.T) {
 				t.Fatalf("generated config published: %v", err)
 			}
 		})
+	}
+}
+
+func TestOverlayRestoresRemovedUnreadableDirectoriesWhenALaterOneBlocks(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("permission failure requires an unprivileged user")
+	}
+	target, source := t.TempDir(), t.TempDir()
+	// The empty directories are created first, so directory order on common
+	// filesystems tries at least one of them before the full one.
+	empty := []string{"a", "c", "e", "g"}
+	all := append(append([]string{}, empty...), "full")
+	for _, dir := range all {
+		if err := os.Mkdir(filepath.Join(target, dir), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(target, "full", "blob"), []byte("state"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	stamp := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	for _, dir := range all {
+		unreadable := filepath.Join(target, dir)
+		if err := os.Chtimes(unreadable, stamp, stamp); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chmod(unreadable, 0o000); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = os.Chmod(unreadable, 0o700) })
+	}
+	if err := os.WriteFile(filepath.Join(source, "settings.json"), []byte("generated"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	err := Overlay(target, source, nil)
+	if err == nil || !strings.Contains(err.Error(), "cannot clear unreadable") {
+		t.Fatalf("Overlay() = %v; want the full unreadable directory to stop it", err)
+	}
+	if strings.Contains(err.Error(), "recoverable") || strings.Contains(err.Error(), "could not restore") {
+		t.Fatalf("overlay did not leave the store as it was: %v", err)
+	}
+	for _, dir := range all {
+		info, err := os.Lstat(filepath.Join(target, dir))
+		if err != nil || !info.IsDir() || info.Mode().Perm() != 0 || !info.ModTime().Equal(stamp) {
+			t.Fatalf("%s not as before the overlay: %v, %v", dir, info, err)
+		}
+	}
+	if _, err := os.Lstat(filepath.Join(target, "settings.json")); !os.IsNotExist(err) {
+		t.Fatalf("generated config published: %v", err)
 	}
 }

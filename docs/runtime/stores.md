@@ -312,8 +312,9 @@ it places there does not move host reads or writes outside the store.
   backup.
 - A directory the host user cannot read is removed the same way when it is
   empty and no preserve pattern can match it or anything below it. Otherwise
-  it stops the overlay before the rest of the store is changed; make it
-  readable or remove it.
+  it stops the overlay before the store is changed; make it readable or remove
+  it. Only removing a directory shows whether it is empty, so empty ones
+  removed before that are recreated with their mode and modification time.
 
 ## Source files
 

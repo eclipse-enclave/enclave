@@ -21,6 +21,7 @@ sequenceDiagram
         participant Proxy as enclave-gateway-proxy
         participant Audit as enclave-gateway-proxy<br/>-dns-audit
         participant Log as network.log<br/>(JSONL)
+        participant Cap as Capture store<br/>(network_log=full)
     end
     box External
         participant API as Upstream API
@@ -35,6 +36,10 @@ sequenceDiagram
     Entry->>Audit: Start DNS audit translator on the dnsmasq log
     Host->>Log: Rotate above the size cap<br/>and append session start marker
 
+    opt network_log=full
+        Host->>Cap: Create session directory and prune store
+    end
+
     Note over Host,API: HTTPS request
     Tool->>DNS: Resolve api.example.com
     alt Domain in allowlist
@@ -46,9 +51,12 @@ sequenceDiagram
         alt SNI not in allowlist
             Proxy-->>Tool: Close connection
             Proxy->>Log: TCP deny (allowlist)
-        else Host requires MITM (release rule match or network_log=requests)
+        else Host requires MITM (release rule match or network_log requests or full)
             Proxy->>Log: TCP pass (mitm-dispatch)
             Proxy->>Proxy: Terminate TLS using local CA leaf cert
+            opt network_log=full
+                Proxy->>Proxy: Snapshot request with its placeholders
+            end
             Proxy->>Proxy: rewriteHeaders()<br/>Validate and apply host/header release rules
             alt Placeholder use violates release rule
                 Proxy-->>Tool: HTTP 403 Forbidden
@@ -57,7 +65,10 @@ sequenceDiagram
                 Proxy->>API: Forward HTTPS request
                 API-->>Proxy: Upstream response
                 Proxy-->>Tool: Return response
-                Proxy->>Log: HTTP pass (allowlist)
+                opt network_log=full
+                    Proxy->>Cap: Tee bodies while relaying<br/>then write record
+                end
+                Proxy->>Log: HTTP pass (allowlist, capture_id)
             end
         else Host allowlisted but no secret rule match
             Proxy->>API: TLS passthrough tunnel
@@ -89,7 +100,7 @@ sequenceDiagram
    proxy or a log event.
 4. It terminates TLS for hosts with a credential HTTP release rule
    (`network.serviceAuth`), and for all allowlisted HTTPS with
-   `network_log=requests`.
+   `network_log=requests` or `full`.
 5. In inspected requests, a registered placeholder is replaced only in the
    rule's header, on HTTPS to its declared hosts; other placeholder-bearing
    headers get HTTP 403. Upgraded connections (WebSocket) get this on the
@@ -100,6 +111,10 @@ sequenceDiagram
    `dns` events (so DNS denials are logged even without the proxy), and the host
    adds a `session` marker. What each mode records is in
    [Coverage and granularity](../networking.md#coverage-and-granularity).
+
+In `full` mode the proxy snapshots each relayed request before header release
+and stores it with the response under `logs/capture/<session>/`; its `http`
+event carries `capture_id`. See [Full capture](../networking.md#full-capture).
 
 ## Properties and limits
 
@@ -156,7 +171,7 @@ sequenceDiagram
     Tool->>NAT: Connect address:443
     NAT->>Proxy: Redirect to loopback :15443
     Proxy->>Proxy: Read original destination (SO_ORIGINAL_DST)<br/>and parse SNI from ClientHello
-    alt network_log=requests
+    alt network_log=requests or full (no captures)
         Proxy->>Proxy: Terminate TLS using local CA leaf cert
         Proxy->>Dst: Forward each request to the original destination
         Proxy->>Log: HTTP pass (unrestricted) per request

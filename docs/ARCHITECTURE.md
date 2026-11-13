@@ -160,7 +160,8 @@ The network request flow, restricted and unrestricted, has separate
 |------|---------|
 | [`internal/tools/handler.go`](../internal/tools/handler.go), [`extensions/tools/<tool>/go/`](../extensions/tools/) | Handler hooks and per-tool registrations (ports, validation) |
 | [`internal/netlog/`](../internal/netlog/) | Audit log format (`Event`) and file handling; no Docker, policy, or CLI knowledge |
-| [`internal/netlogview/`](../internal/netlogview/) | Log queries (filter, aggregate, render), kept out of `netlog` so the sidecar does not ship it |
+| [`internal/netlogview/`](../internal/netlogview/) | Log queries and capture rendering (`network log --show-capture`), kept out of `netlog` so the sidecar does not ship it |
+| [`internal/netcapture/`](../internal/netcapture/) | Full capture format, body writer, released-secret redaction, host directory setup, pruning, and lookup |
 | [`internal/network/`](../internal/network/) | `network.jsonc` policy loading, merging, dnsmasq config generation |
 | [`internal/policy/effective_resolver.go`](../internal/policy/effective_resolver.go) | Effective policy for startup, `network status`, and apply |
 | [`internal/policy/session_inputs.go`](../internal/policy/session_inputs.go) | A session's policy contributions, shared by startup and the `network status`/`print`/`diff` preview |
@@ -298,10 +299,10 @@ the attached endpoint and the tool shares its network namespace; with
 `--disable-gateway` the tool is attached directly. In restricted mode DNS
 blocks unknown domains, the gateway admits inbound traffic only for loopback,
 replies, and published ports, and the proxy tunnels TLS and uses MITM only for
-secret-release hosts or under `network_log=requests`. In unrestricted mode the
-gateway only observes: it keeps Docker's resolver, installs no filters, and
-logs TCP 80/443. User-facing behavior is in [networking.md](networking.md); the
-request path, in both modes, is in
+secret-release hosts or under `network_log=requests` or `full`. In unrestricted
+mode the gateway only observes: it keeps Docker's resolver, installs no filters,
+and logs TCP 80/443. User-facing behavior is in [networking.md](networking.md);
+the request path, in both modes, is in
 [network-request-flow.md](runtime/network-request-flow.md).
 
 Sidecar lifecycle:
@@ -330,6 +331,14 @@ and no `dns` events. The host rotates at session start
 above `netlog.MaxLogBytes` by copy and truncate, so running sessions keep their
 bind-mounted file
 ([Reading the network log](networking.md#reading-the-network-log)).
+
+`network_log=full` snapshots relayed requests before secret release and tees
+bodies into `logs/capture/<session>/`. The `http` event names the record
+through `capture_id`. Bodies are capped at 8 MiB, a session at 512 MiB, and
+the project/tool store is pruned to 1 GiB at startup. Cleanup removes captures
+unless `--keep history`. An unavailable capture store disables capture, not
+the proxy. See [Full capture](networking.md#full-capture) for the format and
+limits.
 
 ### Declared credentials and HTTP release
 

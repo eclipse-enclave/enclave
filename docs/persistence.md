@@ -93,6 +93,7 @@ Per-project data is stored on the host and reused across sessions:
 | Shell history | `~/.local/state/enclave/projects/<project-hash>/<tool>/history/` |
 | Agent memory | `~/.local/state/enclave/projects/<project-hash>/<tool>/memory/` (Claude); `memory/<key>/` (Codex, matching the config-store key) |
 | Config/env/auth stores | Host directories under `~/.local/state/enclave/` (bind-mounted; no Docker volumes) |
+| Network log and captures | `~/.local/state/enclave/projects/<project-hash>/<tool>/logs/` (`network.log`; `capture/<session>/` with [full capture](networking.md#full-capture)) |
 | Embedded runtime assets | `~/.cache/enclave/assets/<content-hash>/` |
 
 macOS paths: [Host directories](configuration.md#host-directories). Store
@@ -125,7 +126,7 @@ enclave cleanup --all
 
 | Option | Effect |
 |--------|--------|
-| (none) | Remove package caches, shell history, the config and env stores, generated config and skills, and agent memory of the current tool and project |
+| (none) | Remove package caches, shell history, the config and env stores, generated config and skills, agent memory, and full network captures of the current tool and project |
 | `--all` | Remove stores and caches for all projects and tools, including shared auth stores |
 | `--ephemeral` | Stop the gateways of exited background sessions; remove owned, stopped gateway orphans with no session and an exit at least one minute old; remove stopped containers together with their per-session networks; remove stale per-session networks of the same tool and project (no container, no endpoints, older than an hour); remove ephemeral session stores |
 | `--keep <kinds>` | Preserve the listed kinds (comma-separated or repeated `--keep`); see below |
@@ -135,7 +136,7 @@ enclave cleanup --all
 | `--keep` kind | Preserves |
 |---------------|-----------|
 | `cache` | Package caches |
-| `history` | Shell history and the session stores: config store (including conversation history), env store, generated config, and generated skills |
+| `history` | Shell history, full network captures, and the session stores: config store (including conversation history), env store, generated config, and generated skills |
 | `memory` | Per-project agent memory (removed by default; no selective effect with `--all`) |
 | `auth` | Shared auth stores (only relevant with `--all`) |
 

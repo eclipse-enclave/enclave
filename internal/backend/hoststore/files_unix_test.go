@@ -179,3 +179,90 @@ func TestOverlayRejectsUnreadableFileInPreservedPath(t *testing.T) {
 		t.Fatalf("generated config published: %v", err)
 	}
 }
+
+func TestOverlayDropsEmptyUnreadableDirectoryOutsidePreservedPaths(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("permission failure requires an unprivileged user")
+	}
+	target, source := t.TempDir(), t.TempDir()
+	for _, dir := range []string{"cache", "agent/tmp"} {
+		if err := os.MkdirAll(filepath.Join(target, dir), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(target, "agent", "history"), []byte("resume"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, dir := range []string{"cache", "agent/tmp"} {
+		if err := os.Chmod(filepath.Join(target, dir), 0o000); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := Overlay(target, source, []string{"agent/history"}); err != nil {
+		t.Fatalf("empty unreadable directory outside preserved paths blocked the overlay: %v", err)
+	}
+	for _, dir := range []string{"cache", "agent/tmp"} {
+		if _, err := os.Lstat(filepath.Join(target, dir)); !os.IsNotExist(err) {
+			t.Fatalf("%s survived the overlay: %v", dir, err)
+		}
+	}
+	if data, err := os.ReadFile(filepath.Join(target, "agent", "history")); err != nil || string(data) != "resume" {
+		t.Fatalf("preserved history = %q, %v", data, err)
+	}
+}
+
+func TestOverlayRejectsUnreadableDirectoryItCannotDrop(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("permission failure requires an unprivileged user")
+	}
+	for name, tc := range map[string]struct {
+		dir, file, want string
+		preserve        []string
+	}{
+		"not empty":           {dir: "cache", file: "cache/blob", want: "cannot clear unreadable", preserve: []string{"auth.json"}},
+		"holds preserved":     {dir: "agent", file: "agent/history", want: "permission denied", preserve: []string{"agent/history"}},
+		"inside preserved":    {dir: "projects/x", want: "permission denied", preserve: []string{"projects/"}},
+		"may hold glob match": {dir: "cache", want: "permission denied", preserve: []string{"*.jsonl"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			target, source := t.TempDir(), t.TempDir()
+			if err := os.MkdirAll(filepath.Join(target, tc.dir), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if tc.file != "" {
+				if err := os.WriteFile(filepath.Join(target, tc.file), []byte("state"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := os.WriteFile(filepath.Join(target, "auth.json"), []byte("credentials"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(source, "settings.json"), []byte("generated"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			unreadable := filepath.Join(target, tc.dir)
+			if err := os.Chmod(unreadable, 0o000); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = os.Chmod(unreadable, 0o700) })
+
+			err := Overlay(target, source, tc.preserve)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("Overlay() = %v; want an error containing %q", err, tc.want)
+			}
+			if strings.Contains(err.Error(), "recoverable") {
+				t.Fatalf("overlay failed after it changed the store: %v", err)
+			}
+			if info, err := os.Lstat(unreadable); err != nil || !info.IsDir() || info.Mode().Perm() != 0 {
+				t.Fatalf("unreadable directory changed: %v, %v", info, err)
+			}
+			if data, err := os.ReadFile(filepath.Join(target, "auth.json")); err != nil || string(data) != "credentials" {
+				t.Fatalf("original changed: %q, %v", data, err)
+			}
+			if _, err := os.Lstat(filepath.Join(target, "settings.json")); !os.IsNotExist(err) {
+				t.Fatalf("generated config published: %v", err)
+			}
+		})
+	}
+}

@@ -310,6 +310,10 @@ it places there does not move host reads or writes outside the store.
   preserved path stops the overlay before the store is changed. Elsewhere in
   the store it is dropped with the rest of the old contents and is not in the
   backup.
+- A directory the host user cannot read is removed the same way when it is
+  empty and no preserve pattern can match it or anything below it. Otherwise
+  it stops the overlay before the rest of the store is changed; make it
+  readable or remove it.
 
 ## Source files
 

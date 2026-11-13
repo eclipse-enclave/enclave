@@ -56,11 +56,21 @@ func Overlay(targetDir, sourceDir string, preserve []string) (result error) {
 	if err := work.Mkdir("candidate", 0o700); err != nil {
 		return err
 	}
-	// Special nodes and unreadable files outside the preserve patterns are
-	// dropped with the rest of the old contents, so the backup leaves them out
-	// instead of failing.
-	notPreserved := func(name string) bool { return !matchesPreserved(name, preserve) }
-	if err := copyNode(target, ".", work, "backup", 0, notPreserved); err != nil {
+	// Special nodes, unreadable files, and unreadable directories outside the
+	// preserve patterns are dropped with the rest of the old contents, so the
+	// backup leaves them out instead of failing.
+	var unreadableDirs []string
+	droppable := func(name string, dir bool) bool {
+		if !dir {
+			return !matchesPreserved(name, preserve)
+		}
+		if mayHoldPreserved(name, preserve) {
+			return false
+		}
+		unreadableDirs = append(unreadableDirs, name)
+		return true
+	}
+	if err := copyNode(target, ".", work, "backup", 0, droppable); err != nil {
 		return err
 	}
 	if err := Copy(source, ".", work, "candidate", 0); err != nil {
@@ -137,6 +147,13 @@ func Overlay(targetDir, sourceDir string, preserve []string) (result error) {
 	if err := work.Chmod("candidate", info.Mode().Perm()); err != nil {
 		return err
 	}
+	// Without read access only an empty directory can be removed. Find out
+	// before anything else in the store changes.
+	for _, name := range unreadableDirs {
+		if err := target.Remove(name); err != nil {
+			return fmt.Errorf("cannot clear unreadable config store directory: %w", err)
+		}
+	}
 	publishing = true
 	entries, err := target.ReadDir(".")
 	if err != nil {
@@ -184,6 +201,21 @@ func mergeNode(src *Files, from string, dst *Files, to string) error {
 		return err
 	}
 	return dst.Chtimes(to, info.ModTime())
+}
+
+// mayHoldPreserved reports whether a preserve pattern can match dir or
+// anything below it. Glob patterns also match base names at any depth.
+func mayHoldPreserved(dir string, preserve []string) bool {
+	if matchesPreserved(dir, preserve) {
+		return true
+	}
+	prefix := filepath.ToSlash(dir) + "/"
+	for _, pattern := range preserve {
+		if strings.ContainsAny(pattern, "*?[") || strings.HasPrefix(pattern, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 // matchesPreserved reports whether name or one of its parent directories

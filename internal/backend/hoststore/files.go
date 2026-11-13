@@ -101,10 +101,10 @@ func Copy(src *Files, from string, dst *Files, to string, mode fs.FileMode) erro
 	return copyNode(src, from, dst, to, mode, nil)
 }
 
-// copyNode is Copy, except that a special node (FIFO, socket, device) or a
-// regular file the caller may not read is left out instead of failing when
-// droppable reports true for its source path.
-func copyNode(src *Files, from string, dst *Files, to string, mode fs.FileMode, droppable func(string) bool) error {
+// copyNode is Copy, except that a special node (FIFO, socket, device), a
+// regular file, or a directory the caller may not read is left out instead of
+// failing when droppable reports true for its source path.
+func copyNode(src *Files, from string, dst *Files, to string, mode fs.FileMode, droppable func(name string, dir bool) bool) error {
 	if info, err := dst.Lstat(to); err == nil && info.Mode()&os.ModeSymlink != 0 {
 		return fmt.Errorf("refusing symlinked copy destination %s", to)
 	}
@@ -120,11 +120,14 @@ func copyNode(src *Files, from string, dst *Files, to string, mode fs.FileMode, 
 		}
 		return dst.Symlink(link, to)
 	case info.IsDir():
-		if err := dst.MkdirAll(to, info.Mode().Perm()); err != nil {
+		entries, err := src.ReadDir(from)
+		if errors.Is(err, fs.ErrPermission) && droppable != nil && droppable(from, true) {
+			return nil
+		}
+		if err != nil {
 			return err
 		}
-		entries, err := src.ReadDir(from)
-		if err != nil {
+		if err := dst.MkdirAll(to, info.Mode().Perm()); err != nil {
 			return err
 		}
 		for _, entry := range entries {
@@ -134,13 +137,13 @@ func copyNode(src *Files, from string, dst *Files, to string, mode fs.FileMode, 
 		}
 	default:
 		if !info.Mode().IsRegular() {
-			if droppable != nil && droppable(from) {
+			if droppable != nil && droppable(from, false) {
 				return nil
 			}
 			return fmt.Errorf("unsupported store node %s", from)
 		}
 		data, err := src.ReadFile(from)
-		if errors.Is(err, fs.ErrPermission) && droppable != nil && droppable(from) {
+		if errors.Is(err, fs.ErrPermission) && droppable != nil && droppable(from, false) {
 			return nil
 		}
 		if err != nil {

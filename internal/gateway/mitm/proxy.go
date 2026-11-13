@@ -26,6 +26,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/crypto/cryptobyte"
@@ -59,7 +60,28 @@ type Options struct {
 	NetworkMode    string
 	ForceHTTPSMITM bool
 	TLSStore       *tlsstore.Store
-	OnReady        func()
+	// Reloads delivers a new allowlist, for example after the gateway reloaded
+	// its config bundle. The proxy swaps it in, closes the connections it holds
+	// so none outlives a domain the new list drops, and calls OnReady again.
+	// Everything else stays in memory.
+	Reloads <-chan Allowlist
+	OnReady func()
+}
+
+// Allowlist is the domain policy of a restricted proxy.
+type Allowlist struct {
+	Allowed []string
+	Denied  []string
+}
+
+// hostLists is an Allowlist with normalized patterns.
+type hostLists struct {
+	allowed []string
+	denied  []string
+}
+
+func newHostLists(allowed []string, denied []string) *hostLists {
+	return &hostLists{allowed: normalizeHostPatterns(allowed), denied: normalizeHostPatterns(denied)}
 }
 
 const serverShutdownTimeout = 1 * time.Second
@@ -126,9 +148,16 @@ func Run(ctx context.Context, opts Options) error {
 		log.Printf("full network capture disabled: %v", err)
 	}
 	httpServer := proxy.newHTTPServer()
-	httpListener, err := listenLoopback(httpPort)
+	listener, err := listenLoopback(httpPort)
 	if err != nil {
 		return fmt.Errorf("listen HTTP proxy on port %d: %w", httpPort, err)
+	}
+	httpConns := newConnSet()
+	httpListener := listener
+	if proxy.caps.enforceAllowlist {
+		// Only a restricted proxy reloads. An observing one must keep the
+		// raw socket, which it reads the original destination from.
+		httpListener = httpConns.track(listener)
 	}
 
 	httpsListener, err := listenLoopback(httpsPort)
@@ -158,22 +187,44 @@ func Run(ctx context.Context, opts Options) error {
 		opts.OnReady()
 	}
 
-	select {
-	case <-ctx.Done():
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), serverShutdownTimeout)
-		defer cancel()
-		// Closing the upgraded connections first lets their exchanges be logged
-		// and captured while the servers shut down.
-		proxy.exchanges.closeUpgraded()
-		_ = httpServer.Shutdown(shutdownCtx)
-		_ = httpsServer.Shutdown(shutdownCtx)
-		proxy.exchanges.wait(shutdownCtx)
-		return nil
-	case err := <-errCh:
-		_ = httpServer.Close()
-		_ = httpsServer.Shutdown(context.Background())
-		return err
+	for {
+		select {
+		case <-ctx.Done():
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), serverShutdownTimeout)
+			// Closing the upgraded connections first lets their exchanges be
+			// logged and captured while the servers shut down.
+			proxy.exchanges.closeUpgraded()
+			_ = httpServer.Shutdown(shutdownCtx)
+			_ = httpsServer.Shutdown(shutdownCtx)
+			proxy.exchanges.wait(shutdownCtx)
+			cancel()
+			return nil
+		case err := <-errCh:
+			_ = httpServer.Close()
+			_ = httpsServer.Shutdown(context.Background())
+			return err
+		case list, ok := <-opts.Reloads:
+			if !ok {
+				opts.Reloads = nil
+				continue
+			}
+			proxy.reload(list, httpConns, httpsServer)
+			if opts.OnReady != nil {
+				opts.OnReady()
+			}
+		}
 	}
+}
+
+// reload swaps in a new allowlist and closes the client connections and idle
+// upstream connections the proxy holds, as a restart would, so no connection
+// outlives a domain the new list drops. Everything else stays in memory.
+func (p *proxy) reload(list Allowlist, httpConns *connSet, httpsServer *httpsDispatchServer) {
+	p.allowlist.Store(newHostLists(list.Allowed, list.Denied))
+	httpConns.closeAll()
+	httpsServer.closeConns()
+	p.transport.CloseIdleConnections()
+	p.upgradeTransport.CloseIdleConnections()
 }
 
 // capabilities are what the proxy does beyond logging. They are derived from
@@ -317,8 +368,7 @@ func (p *proxy) releaseRules() []model.SecretReleaseEntry {
 
 type proxy struct {
 	caps           capabilities
-	allowedDomains []string
-	deniedDomains  []string
+	allowlist      atomic.Pointer[hostLists]
 	secretRules    []model.SecretReleaseEntry
 	forceHTTPSMITM bool
 	audit          *netlog.Appender
@@ -355,10 +405,8 @@ func newProxy(allowedDomains []string, deniedDomains []string, secretRules []mod
 	upgradeTransport := newUpstreamTransport()
 	upgradeTransport.Protocols = new(http.Protocols)
 	upgradeTransport.Protocols.SetHTTP1(true)
-	return &proxy{
+	p := &proxy{
 		caps:             capabilitiesFor(model.NetworkModeRestricted),
-		allowedDomains:   normalizeHostPatterns(allowedDomains),
-		deniedDomains:    normalizeHostPatterns(deniedDomains),
 		secretRules:      secretRules,
 		forceHTTPSMITM:   forceHTTPSMITM,
 		audit:            audit,
@@ -367,6 +415,8 @@ func newProxy(allowedDomains []string, deniedDomains []string, secretRules []mod
 		transport:        newUpstreamTransport(),
 		upgradeTransport: upgradeTransport,
 	}
+	p.allowlist.Store(newHostLists(allowedDomains, deniedDomains))
+	return p
 }
 
 // captureSecrets lists the values the gateway releases, so that the capture can
@@ -837,6 +887,16 @@ func (s *httpsDispatchServer) Serve() error {
 	}
 }
 
+// closeConns closes every client connection being served, which also ends
+// the intercepted ones relayed to the MITM server, and keeps serving.
+func (s *httpsDispatchServer) closeConns() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for conn := range s.conns {
+		_ = conn.Close()
+	}
+}
+
 func (s *httpsDispatchServer) Shutdown(ctx context.Context) error {
 	s.mu.Lock()
 	s.closing = true
@@ -1266,10 +1326,11 @@ func (p *proxy) hostPermitted(host string) bool {
 	if !p.caps.enforceAllowlist {
 		return true
 	}
-	if hostAllowed(host, p.deniedDomains) {
+	lists := p.allowlist.Load()
+	if hostAllowed(host, lists.denied) {
 		return false
 	}
-	return hostAllowed(host, p.allowedDomains)
+	return hostAllowed(host, lists.allowed)
 }
 
 func (p *proxy) passRule() string {

@@ -148,9 +148,10 @@ The network request flow, restricted and unrestricted, has separate
 | [`internal/mounts/sensitive.go`](../internal/mounts/sensitive.go) | The sensitive-path rule ([mounts.md](mounts.md#sensitive-mounts)) |
 | [`internal/auth/auth.go`](../internal/auth/auth.go) | Layered secrets, auth file copies, Claude-specific config |
 | [`internal/auth/secret_injection.go`](../internal/auth/secret_injection.go) | `PlaceholderResolver`: random `ENCLAVE_SECRET_*` placeholders |
+| [`internal/auth/secret_sources.go`](../internal/auth/secret_sources.go) | `SecretSources`: env alias and file resolution of declared credentials |
 | [`internal/gateway/gateway.go`](../internal/gateway/gateway.go) | Sidecar container and network; keeps logs until explicit removal, removes by immutable ID |
 | [`internal/gateway/bundle/`](../internal/gateway/bundle/bundle.go) | Host-managed bundles (`dnsmasq.conf`, `domains.txt`, `meta.json`) for apply and reload |
-| [`internal/gateway/mitm/`](../internal/gateway/mitm/) | TLS MITM, allowlist checks, placeholder rewriting; writes events through `internal/netlog` |
+| [`internal/gateway/mitm/`](../internal/gateway/mitm/) | TLS MITM, allowlist checks and in-place reloads, placeholder rewriting; writes events through `internal/netlog` |
 | [`internal/gateway/dnsaudit/`](../internal/gateway/dnsaudit/) | Turns dnsmasq denials into `dns` events; own process (`enclave-gateway-proxy -dns-audit <log>`), so it works without the proxy |
 | [`internal/gateway/wsframe/`](../internal/gateway/wsframe/) | Shared RFC 6455 frame parser; unmasks payloads without taking part in the connection |
 | [`internal/gateway/tlsstore/`](../internal/gateway/tlsstore/) | CA and container-private leaf cache; only the CA reaches the host |
@@ -199,7 +200,7 @@ extensions, hence the `//go:build !windows` on
 |------|---------|
 | [`Dockerfile`](../Dockerfile) | Runtime image: `tool-base` -> `feature-base` -> `standard` plus per-tool stages; contexts and hashes scoped to the selected tools and features |
 | [`Dockerfile.gateway`](../Dockerfile.gateway) | Gateway image (DNS, transparent proxy, MITM proxy) |
-| [`gateway-entrypoint.sh`](../gateway-entrypoint.sh) | Supervisor: validates bundles, runs dnsmasq and proxy, reloads on SIGHUP, fails closed; when the container's `ENCLAVE_GATEWAY_NETWORK_MODE` is `unrestricted`, only the 80/443 redirect and proxy, no reloads, fail open when the proxy dies |
+| [`gateway-entrypoint.sh`](../gateway-entrypoint.sh) | Supervisor: validates bundles, copies secret releases into the proxy's private data directory (a tmpfs), runs dnsmasq and proxy, reloads on SIGHUP, fails closed; when the container's `ENCLAVE_GATEWAY_NETWORK_MODE` is `unrestricted`, only the 80/443 redirect and proxy, no reloads, fail open when the proxy dies |
 | [`entrypoint.sh`](../entrypoint.sh) | Auth symlinks, settings seeding, telemetry defaults, direnv, gitconfig |
 | [`runtime-assets/gateway-allowlists/`](../runtime-assets/gateway-allowlists/) | Base DNS allowlists and fragments |
 | [`runtime-assets/build-scripts/`](../runtime-assets/build-scripts/) | Build composition: features, templates, agent tool helpers |
@@ -321,7 +322,9 @@ Gateways and bridges carry labels (`enclave.gateway`, `enclave.agent`,
 consumers should use `enclave ps --json` instead. Unrestricted gateways also
 carry `enclave.gateway.mode=unrestricted`; a gateway without it is restricted.
 `network apply` writes a new bundle, sends SIGHUP, and polls logs for
-confirmation; the supervisor validates before swapping and fails closed.
+confirmation; the supervisor validates before swapping and fails closed. It
+then signals the proxy to reload the allowlist in place rather than restarting
+it, so the proxy keeps its in-memory state.
 Unrestricted gateways are skipped: a running gateway never changes mode.
 
 Audit events go through `netlog.Event` to `logs/network.log`: the MITM proxy

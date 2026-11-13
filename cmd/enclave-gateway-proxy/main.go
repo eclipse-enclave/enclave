@@ -46,6 +46,11 @@ func main() {
 		return
 	}
 
+	// Registered before the proxy reports ready, so the entrypoint's reload
+	// signal can never hit the default action, which would end the process.
+	hangups := make(chan os.Signal, 1)
+	signal.Notify(hangups, syscall.SIGHUP)
+
 	tlsRoot := strings.TrimSpace(os.Getenv(model.EnvGatewayTLSRoot))
 	if tlsRoot == "" {
 		tlsRoot = model.GatewayTLSRootPath
@@ -59,16 +64,13 @@ func main() {
 	// The entrypoint passes on the mode the host set on the container. An
 	// unrestricted gateway has no policy files: it has nothing to enforce.
 	networkMode := strings.TrimSpace(os.Getenv(model.EnvGatewayNetworkMode))
-	var allowedDomains, deniedDomains []string
-	if networkMode != model.NetworkModeUnrestricted {
+	restricted := networkMode != model.NetworkModeUnrestricted
+	var allowlist mitm.Allowlist
+	if restricted {
 		var err error
-		allowedDomains, err = bundle.ReadAllowedDomains(filepath.Join(configDir, filepath.Base(model.GatewayConfigDomainsPath)))
+		allowlist, err = readAllowlist(configDir)
 		if err != nil {
-			log.Fatalf("failed to load gateway allowed domains: %v", err)
-		}
-		deniedDomains, err = bundle.ReadDeniedDomains(filepath.Join(configDir, filepath.Base(model.GatewayConfigDeniedPath)))
-		if err != nil {
-			log.Fatalf("failed to load gateway denied domains: %v", err)
+			log.Fatal(err)
 		}
 	}
 	networkLogMode := strings.TrimSpace(strings.ToLower(os.Getenv(model.EnvNetworkLogMode)))
@@ -93,8 +95,8 @@ func main() {
 		log.Fatalf("failed to load secret release rules: %v", err)
 	}
 	opts := mitm.Options{
-		AllowedDomains: allowedDomains,
-		DeniedDomains:  deniedDomains,
+		AllowedDomains: allowlist.Allowed,
+		DeniedDomains:  allowlist.Denied,
 		SecretRules:    rules,
 		AuditLogPath:   strings.TrimSpace(os.Getenv(model.EnvNetworkLogFile)),
 		CaptureDir:     captureDir,
@@ -111,8 +113,51 @@ func main() {
 			}
 		}
 	}
+	if restricted {
+		reloads := make(chan mitm.Allowlist)
+		opts.Reloads = reloads
+		go reloadOnHangup(ctx, hangups, configDir, reloads)
+	}
 	if err := mitm.Run(ctx, opts); err != nil {
 		log.Fatalf("gateway proxy failed: %v", err)
+	}
+}
+
+// readAllowlist reads the allowlist the entrypoint installed from the config
+// bundle.
+func readAllowlist(configDir string) (mitm.Allowlist, error) {
+	allowed, err := bundle.ReadAllowedDomains(filepath.Join(configDir, filepath.Base(model.GatewayConfigDomainsPath)))
+	if err != nil {
+		return mitm.Allowlist{}, fmt.Errorf("failed to load gateway allowed domains: %w", err)
+	}
+	denied, err := bundle.ReadDeniedDomains(filepath.Join(configDir, filepath.Base(model.GatewayConfigDeniedPath)))
+	if err != nil {
+		return mitm.Allowlist{}, fmt.Errorf("failed to load gateway denied domains: %w", err)
+	}
+	return mitm.Allowlist{Allowed: allowed, Denied: denied}, nil
+}
+
+// reloadOnHangup hands the proxy a fresh allowlist on every SIGHUP. The
+// entrypoint sends it after installing a new config bundle, instead of
+// restarting the proxy, so the proxy's in-memory state survives the reload.
+// An unreadable allowlist ends the process, which takes the gateway down.
+func reloadOnHangup(ctx context.Context, hangups <-chan os.Signal, configDir string, reloads chan<- mitm.Allowlist) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-hangups:
+		}
+		allowlist, err := readAllowlist(configDir)
+		if err != nil {
+			log.Fatalf("reload: %v", err)
+		}
+		select {
+		case reloads <- allowlist:
+			log.Printf("reloaded the allowlist (%d allowed, %d denied)", len(allowlist.Allowed), len(allowlist.Denied))
+		case <-ctx.Done():
+			return
+		}
 	}
 }
 

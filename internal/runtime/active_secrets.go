@@ -10,7 +10,6 @@ package runtime
 import (
 	"fmt"
 	"maps"
-	"os"
 	"slices"
 	"sort"
 	"strings"
@@ -19,7 +18,6 @@ import (
 	"enclave/internal/domainpattern"
 	"enclave/internal/logx"
 	"enclave/internal/model"
-	"enclave/internal/secretfile"
 	"enclave/internal/util"
 )
 
@@ -105,92 +103,22 @@ func (r *Runtime) activeSecrets() ([]activeSecret, error) {
 	return secrets, nil
 }
 
+// secretRef is the declared credential of a secret.
+func (s activeSecret) secretRef() auth.SecretRef {
+	return auth.SecretRef{ID: s.ID, EnvVars: s.EnvVars, File: s.File, Priority: s.Priority}
+}
+
+// resolveActiveSecretValue resolves a secret through auth.SecretSources, the
+// sources filters resolve their static credentials from as well.
 func resolveActiveSecretValue(secret activeSecret, hostHome string, secretsLayers []auth.SecretsLayer, persistedEnv map[string]string) (string, string, bool, error) {
-	// priority orders the env aliases against the file source. file-first
-	// consults the file before the env aliases; env-first (the default) does
-	// the reverse. A malformed file parser fails loudly regardless of order.
-	if secret.Priority == model.SecretPriorityFileFirst {
-		value, source, found, err := resolveFileSecretValue(secret, hostHome)
-		if err != nil {
-			return "", "", false, err
-		}
-		if found {
-			return value, source, true, nil
-		}
-		return resolveEnvAliasValue(secret, secretsLayers, persistedEnv)
-	}
-
-	value, source, found, err := resolveEnvAliasValue(secret, secretsLayers, persistedEnv)
-	if err != nil {
-		return "", "", false, err
-	}
-	if found {
-		return value, source, true, nil
-	}
-	return resolveFileSecretValue(secret, hostHome)
+	sources := auth.SecretSources{Home: hostHome, Layers: secretsLayers, Persisted: persistedEnv}
+	return sources.Resolve(secret.secretRef())
 }
 
-// aliasValue is one env alias resolved from one layer. rank orders the layers,
-// lowest first: host env, then the secrets files from the highest layer down,
-// then the persisted env store.
-type aliasValue struct {
-	envVar string
-	value  string
-	source string
-	layer  string
-	rank   int
-}
-
-// resolveEnvAliasValue resolves a secret through its env-var aliases, walking
-// the host environment, then the layered secrets files (highest layer first),
-// then the persisted env store. The highest layer wins; only aliases resolved
-// from the same layer must agree. Drift between layers is logged and heals
-// through the persisted write-back.
+// resolveEnvAliasValue resolves a secret through its env aliases alone.
 func resolveEnvAliasValue(secret activeSecret, secretsLayers []auth.SecretsLayer, persistedEnv map[string]string) (string, string, bool, error) {
-	values := make([]aliasValue, 0, len(secret.EnvVars))
-	for _, envVar := range secret.EnvVars {
-		if resolved, ok := resolveAlias(envVar, secretsLayers, persistedEnv); ok {
-			values = append(values, resolved)
-		}
-	}
-
-	if len(values) == 0 {
-		return "", "", false, nil
-	}
-
-	chosen := values[0]
-	for _, value := range values[1:] {
-		if value.rank < chosen.rank {
-			chosen = value
-		}
-	}
-
-	for _, value := range values {
-		if value.value == chosen.value {
-			continue
-		}
-		if value.rank == chosen.rank {
-			return "", "", false, fmt.Errorf("secret %q has conflicting values across env aliases (%s vs %s, both set in %s)", secret.ID, chosen.envVar, value.envVar, chosen.layer)
-		}
-		logx.Warnf("Secret %s: using %s from %s; %s in %s holds a different value and is ignored.", secret.ID, chosen.envVar, chosen.layer, value.envVar, value.layer)
-	}
-
-	return chosen.value, chosen.source, true, nil
-}
-
-func resolveAlias(envVar string, secretsLayers []auth.SecretsLayer, persistedEnv map[string]string) (aliasValue, bool) {
-	if value := os.Getenv(envVar); value != "" {
-		return aliasValue{envVar: envVar, value: value, source: "env", layer: "the host environment", rank: 0}, true
-	}
-	for i := len(secretsLayers) - 1; i >= 0; i-- {
-		if value := secretsLayers[i].Values[envVar]; value != "" {
-			return aliasValue{envVar: envVar, value: value, source: "secrets", layer: secretsLayers[i].Path, rank: len(secretsLayers) - i}, true
-		}
-	}
-	if value := persistedEnv[envVar]; value != "" {
-		return aliasValue{envVar: envVar, value: value, source: "persisted", layer: "the host-side env store", rank: len(secretsLayers) + 1}, true
-	}
-	return aliasValue{}, false
+	sources := auth.SecretSources{Layers: secretsLayers, Persisted: persistedEnv}
+	return sources.ResolveAliases(secret.secretRef())
 }
 
 // hostCredentialRefs maps a host-selector credential id to the secret ids whose
@@ -285,21 +213,4 @@ func normalizeReleaseHost(secretID string, value string) string {
 		return ""
 	}
 	return host
-}
-
-// resolveFileSecretValue reads the secret's file source, if any. A missing file
-// (or an empty resolved value) reports found=false so the caller can fall back
-// to the env aliases; a malformed parser or file content fails loudly.
-func resolveFileSecretValue(secret activeSecret, hostHome string) (string, string, bool, error) {
-	if secret.File == nil || secret.File.Path == "" {
-		return "", "", false, nil
-	}
-	value, found, err := secretfile.ResolveFileSecret(hostHome, secret.File.Path, secret.File.Parser)
-	if err != nil {
-		return "", "", false, fmt.Errorf("secret %q file source: %w", secret.ID, err)
-	}
-	if !found || value == "" {
-		return "", "", false, nil
-	}
-	return value, "file", true, nil
 }

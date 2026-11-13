@@ -27,7 +27,10 @@ GATEWAY_CONFIG_META="$GATEWAY_CONFIG_DIR/meta.json"
 DNSMASQ_LOG_FILE=""
 PROXY_LOG_FILE="/var/log/enclave/proxy.log"
 DNS_AUDIT_LOG_FILE="/var/log/enclave/dns-audit.log"
-PROXY_READY_FILE="/var/lib/enclave/proxy/proxy.ready"
+# The host mounts a tmpfs here (GatewayProxyDataDir in internal/model), so the
+# copies of credentials below never reach a container layer.
+PROXY_DATA_DIR="/var/lib/enclave/proxy"
+PROXY_READY_FILE="$PROXY_DATA_DIR/proxy.ready"
 
 DNSMASQ_PID=""
 PROXY_PID=""
@@ -450,6 +453,10 @@ $published_ports
 EOF_PUBLISHED
 }
 
+# setup_firewall installs the restricted egress policy. It runs at startup and
+# on every reload, so the order is what keeps a reload safe: OUTPUT drops all
+# new connections from the flush until the end, and the proxy redirects come
+# back before any rule accepts allowlisted addresses.
 setup_firewall() {
     setup_input_firewall iptables || return 1
     iptables -P OUTPUT DROP || return 1
@@ -483,9 +490,8 @@ setup_firewall() {
 $UNIQUE_RESOLVERS
 EOF_RESOLVERS
 
-    iptables -A OUTPUT -m set --match-set "$IPSET_NAME" dst -j ACCEPT
-
     if [ "$PROXY_ENABLED" != "true" ]; then
+        iptables -A OUTPUT -m set --match-set "$IPSET_NAME" dst -j ACCEPT
         setup_ide_bridge
         return
     fi
@@ -497,14 +503,16 @@ EOF_RESOLVERS
 
     proxy_uid=$(id -u "$PROXY_USER")
 
+    iptables -t nat -F OUTPUT || return 1
+    iptables -t nat -A OUTPUT -p tcp --dport 80 -m owner --uid-owner "$proxy_uid" -j RETURN || return 1
+    iptables -t nat -A OUTPUT -p tcp --dport 443 -m owner --uid-owner "$proxy_uid" -j RETURN || return 1
+    iptables -t nat -A OUTPUT -p tcp --dport 80 -j REDIRECT --to-ports "$PROXY_HTTP_PORT" || return 1
+    iptables -t nat -A OUTPUT -p tcp --dport 443 -j REDIRECT --to-ports "$PROXY_HTTPS_PORT" || return 1
+
     iptables -A OUTPUT -p tcp --dport "$PROXY_HTTP_PORT" -m addrtype --dst-type LOCAL -j ACCEPT
     iptables -A OUTPUT -p tcp --dport "$PROXY_HTTPS_PORT" -m addrtype --dst-type LOCAL -j ACCEPT
 
-    iptables -t nat -F OUTPUT || true
-    iptables -t nat -A OUTPUT -p tcp --dport 80 -m owner --uid-owner "$proxy_uid" -j RETURN
-    iptables -t nat -A OUTPUT -p tcp --dport 443 -m owner --uid-owner "$proxy_uid" -j RETURN
-    iptables -t nat -A OUTPUT -p tcp --dport 80 -j REDIRECT --to-ports "$PROXY_HTTP_PORT"
-    iptables -t nat -A OUTPUT -p tcp --dport 443 -j REDIRECT --to-ports "$PROXY_HTTPS_PORT"
+    iptables -A OUTPUT -m set --match-set "$IPSET_NAME" dst -j ACCEPT
 
     log "Transparent proxy NAT rules configured"
     setup_ide_bridge
@@ -645,7 +653,7 @@ prepare_proxy_runtime_data() {
         return 1
     fi
 
-    proxy_data="/var/lib/enclave/proxy"
+    proxy_data="$PROXY_DATA_DIR"
     mkdir -p "$proxy_data"
 
     secret_release_file="${ENCLAVE_SECRET_RELEASE_FILE:-${ENCLAVE_SECRET_INJECTION_FILE:-}}"
@@ -733,13 +741,26 @@ reload_children() {
     fi
 
     if [ "$PROXY_ENABLED" = "true" ]; then
-        if is_pid_running "$PROXY_PID"; then
-            stop_child_pid "$PROXY_PID" "proxy"
-        fi
-        start_proxy || return 1
+        reload_proxy || return 1
     fi
 
     return 0
+}
+
+# reload_proxy has the running proxy read the installed allowlist again in
+# place. It also closes the connections it holds, as a restart would, but
+# keeps its memory.
+reload_proxy() {
+    if ! is_pid_running "$PROXY_PID"; then
+        log "Cannot reload: proxy process is not running"
+        return 1
+    fi
+    rm -f "$PROXY_READY_FILE"
+    if ! kill -HUP "$PROXY_PID"; then
+        log "Cannot signal the proxy to reload"
+        return 1
+    fi
+    wait_for_proxy_ready
 }
 
 reload_gateway() {

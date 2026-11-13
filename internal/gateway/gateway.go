@@ -557,6 +557,7 @@ func Start(ctx context.Context, cfg StartConfig) (StartResult, error) {
 		NetworkMode:  docker.NetworkMode(cfg.NetworkName),
 		CapAdd:       []string{"NET_ADMIN", "NET_RAW"},
 		Sysctls:      sysctls,
+		Tmpfs:        gatewayTmpfs(),
 		Binds:        binds,
 		Mounts:       remainingMounts,
 		PortBindings: cfg.PortBindings,
@@ -635,6 +636,14 @@ func prepareNetworkCapture(cfg StartConfig) (string, error) {
 		logx.Debugf("Pruned %d network capture(s) from %s", removed, cfg.NetworkCaptureDir)
 	}
 	return dir, nil
+}
+
+// gatewayTmpfs keeps the proxy's private data on tmpfs, so the copies of
+// secret releases and the TLS CA key the entrypoint makes there never land on
+// a container layer. Docker and Podman, rootless included, mount it owned by
+// the container's root, which hands it to the proxy user.
+func gatewayTmpfs() map[string]string {
+	return map[string]string{model.GatewayProxyDataDir: "rw,nosuid,nodev,noexec,mode=0755,size=64m"}
 }
 
 // gatewayUserNS puts the gateway into the same keep-id user namespace the

@@ -70,6 +70,8 @@ NET_ADMIN
 NET_RAW
 --sysctl
 net.ipv4.conf.all.route_localnet=1
+--tmpfs
+/var/lib/enclave/proxy:rw,nosuid,nodev,noexec,mode=0755,size=64m
 enclave-gateway-codex:latest
 ---
 logs

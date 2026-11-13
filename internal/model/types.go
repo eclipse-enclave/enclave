@@ -747,10 +747,13 @@ const (
 	GatewayConfigDeniedPath      = GatewayConfigDir + "/denied.txt"
 	GatewayConfigMetaPath        = GatewayConfigDir + "/meta.json"
 	GatewaySecretReleasePath     = "/etc/enclave/secret-releases.json" // #nosec G101 -- configuration file path, not a credential.
-	GatewayTLSRootPath           = "/tls"
-	GatewayTLSCACertPath         = GatewayTLSRootPath + "/ca.crt"
-	GatewayTLSCAKeyPath          = GatewayTLSRootPath + "/ca.key"
-	AgentGatewayCACertPath       = "/usr/local/share/ca-certificates/enclave-gateway.crt"
+	// GatewayProxyDataDir is the proxy's private data directory, where the
+	// entrypoint copies the TLS CA and secret releases.
+	GatewayProxyDataDir    = "/var/lib/enclave/proxy"
+	GatewayTLSRootPath     = "/tls"
+	GatewayTLSCACertPath   = GatewayTLSRootPath + "/ca.crt"
+	GatewayTLSCAKeyPath    = GatewayTLSRootPath + "/ca.key"
+	AgentGatewayCACertPath = "/usr/local/share/ca-certificates/enclave-gateway.crt"
 	// AgentGatewayCABundlePath is the system bundle plus the gateway CA, written
 	// by the entrypoint at a fixed path so the container-level SSL_CERT_FILE can
 	// name it for processes started with `docker exec`.

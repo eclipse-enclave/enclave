@@ -294,10 +294,12 @@ followed, and regular-file reads open without blocking and reject special
 nodes. A session can change its store while the host works on it, but a link
 it places there does not move host reads or writes outside the store.
 
-- Tree copies (seeds, overlays) keep symlinks as links. A Docker seed follows
-  a link at the host path it is given, so `enclave auth import` copies a
-  linked host auth file; QEMU keeps that link too. An existing destination
-  link stops a Docker seed; QEMU removes it and seeds in its place.
+- Overlays keep symlinks as links. A Docker seed (`enclave auth import`)
+  follows links in the host source, at the given path and inside a seeded
+  directory, and stops on a link cycle or a special file; a QEMU seed keeps
+  them as links. On the store side no link is followed: an existing
+  destination link stops a Docker seed; QEMU removes it and seeds in its
+  place.
 - An overlay copies the current store and the generated config into a private
   temporary directory before it clears the store, and keeps the store
   directory itself, so existing bind mounts stay valid. If writing the new

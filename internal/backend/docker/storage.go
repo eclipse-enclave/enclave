@@ -133,23 +133,63 @@ func (s *StoreManager) Seed(_ context.Context, key backend.StoreKey, kind backen
 		if err != nil {
 			return err
 		}
-		// The seed source is the user's own host path: a link there is
-		// followed, as before. Links inside a seeded directory stay links.
-		hostPath, err := filepath.EvalSymlinks(item.HostPath)
-		if err != nil {
-			return err
-		}
-		source, err := hoststore.OpenFiles(filepath.Dir(hostPath))
-		if err != nil {
-			return err
-		}
-		err = hoststore.Copy(source, filepath.Base(hostPath), root, name, item.Mode)
-		_ = source.Close()
-		if err != nil {
-			return err
+		if err := seedNode(item.HostPath, root, name, item.Mode, nil); err != nil {
+			return fmt.Errorf("seed store path %q: %w", item.StoreRel, err)
 		}
 	}
 	return nil
+}
+
+// seedNode copies the host path src to name in the store. The source is the
+// user's own host tree, not the store, so links in it are followed, as before;
+// on the store side no existing link is followed. ancestors holds the source
+// directories being copied, to stop on a link cycle.
+func seedNode(src string, dst *hoststore.Files, name string, mode fs.FileMode, ancestors []os.FileInfo) error {
+	if existing, err := dst.Lstat(name); err == nil && existing.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("refusing to seed through symlinked store path %q", name)
+	}
+	info, err := os.Stat(src)
+	if err != nil {
+		return err
+	}
+	switch {
+	case info.IsDir():
+		for _, ancestor := range ancestors {
+			if os.SameFile(ancestor, info) {
+				return fmt.Errorf("symlink cycle at %s", src)
+			}
+		}
+		if err := dst.MkdirAll(name, info.Mode().Perm()); err != nil {
+			return err
+		}
+		entries, err := os.ReadDir(src)
+		if err != nil {
+			return err
+		}
+		for _, entry := range entries {
+			if err := seedNode(filepath.Join(src, entry.Name()), dst, filepath.Join(name, entry.Name()), mode, append(ancestors, info)); err != nil {
+				return err
+			}
+		}
+		if err := dst.Chmod(name, info.Mode().Perm()); err != nil {
+			return err
+		}
+	case info.Mode().IsRegular():
+		data, err := os.ReadFile(src) // #nosec G304 -- src is the caller's host seed source.
+		if err != nil {
+			return err
+		}
+		fileMode := mode
+		if fileMode == 0 {
+			fileMode = info.Mode().Perm()
+		}
+		if err := dst.WriteFile(name, data, fileMode); err != nil {
+			return err
+		}
+	default:
+		return fmt.Errorf("unsupported seed source %s", src)
+	}
+	return dst.Chtimes(name, info.ModTime())
 }
 
 func (s *StoreManager) RemovePath(_ context.Context, key backend.StoreKey, kind backend.StoreKind, rel string) error {

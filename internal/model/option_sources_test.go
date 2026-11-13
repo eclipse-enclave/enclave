@@ -38,6 +38,7 @@ func TestMergeOptionSourcesCoversAllFields(t *testing.T) {
 			NoCache:                  SourceCLI,
 			NoHistory:                SourceCLI,
 			NoMemory:                 SourceCLI,
+			ImageInbox:               SourceCLI,
 			NetworkLog:               SourceCLI,
 			Ports:                    SourceCLI,
 			AddDirs:                  SourceCLI,

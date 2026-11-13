@@ -377,6 +377,9 @@ func (r *Runtime) prepareMounts() (*mountAccumulator, hostGitIdentity, error) {
 		return nil, hostGitIdentity{}, err
 	}
 	r.addSSHMount(mountArgs)
+	if err := r.addImageInboxMount(mountArgs); err != nil {
+		return nil, hostGitIdentity{}, err
+	}
 	if err := r.addCacheMounts(mountArgs); err != nil {
 		return nil, hostGitIdentity{}, err
 	}
@@ -1130,6 +1133,23 @@ func (r *Runtime) addSSHMount(mounts *mountAccumulator) {
 		return
 	}
 	logx.Warnf("SSH not configured. Run '%s ssh-init' to enable SSH operations.", model.AppName)
+}
+
+// addImageInboxMount mounts the project's image inbox read-only. The container
+// can only read host images the user imported on the host; it has no way to
+// add any itself.
+func (r *Runtime) addImageInboxMount(mounts *mountAccumulator) error {
+	if !r.run.ImageInbox {
+		return nil
+	}
+	inboxDir, err := config.EnsureHostImageInboxDir(r.host.Home, r.project.Hash)
+	if err != nil {
+		return fmt.Errorf("create image inbox: %w", err)
+	}
+	mounts.AddMount(disposableDirMount(inboxDir, model.ContainerImageInboxDir, true))
+	mounts.AddEnv(model.EnvImageInbox, model.ContainerImageInboxDir)
+	logx.Infof("Image inbox mounted read-only at %s", model.ContainerImageInboxDir)
+	return nil
 }
 
 // addUserCommandMount exposes the host session command tree read-only inside

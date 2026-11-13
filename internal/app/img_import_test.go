@@ -1,0 +1,231 @@
+// Copyright (C) 2026 EclipseSource GmbH and others.
+//
+// This program and the accompanying materials are made available under the
+// terms of the MIT License, which is available in the project root.
+//
+// SPDX-License-Identifier: MIT
+
+package app
+
+import (
+	"bytes"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strings"
+	"testing"
+	"time"
+
+	"enclave/internal/backend"
+	"enclave/internal/config"
+	"enclave/internal/model"
+)
+
+var (
+	pngMagic  = []byte{0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x01}
+	jpegMagic = []byte{0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10}
+)
+
+func TestSniffImageType(t *testing.T) {
+	tests := []struct {
+		name     string
+		data     []byte
+		wantMIME string
+		wantExt  string
+		wantOK   bool
+	}{
+		{"png", pngMagic, "image/png", "png", true},
+		{"jpeg", jpegMagic, "image/jpeg", "jpg", true},
+		{"gif", []byte("GIF89a"), "", "", false},
+		{"empty", nil, "", "", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mime, ext, ok := sniffImageType(tt.data)
+			if mime != tt.wantMIME || ext != tt.wantExt || ok != tt.wantOK {
+				t.Fatalf("sniffImageType = (%q,%q,%v), want (%q,%q,%v)", mime, ext, ok, tt.wantMIME, tt.wantExt, tt.wantOK)
+			}
+		})
+	}
+}
+
+func TestValidateImage(t *testing.T) {
+	tests := []struct {
+		name       string
+		data       []byte
+		advertised string
+		maxBytes   int64
+		wantExt    string
+		wantErr    bool
+	}{
+		{"png ok", pngMagic, "image/png", 1024, "png", false},
+		{"jpeg alias ok", jpegMagic, "image/jpg", 1024, "jpg", false},
+		{"no advertised ok", pngMagic, "", 1024, "png", false},
+		{"mime mismatch", pngMagic, "image/jpeg", 1024, "", true},
+		{"too large", pngMagic, "image/png", 4, "", true},
+		{"not image", []byte("hello world"), "", 1024, "", true},
+		{"empty", nil, "", 1024, "", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ext, err := validateImage(tt.data, tt.advertised, tt.maxBytes)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("expected error, got ext=%q", ext)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if ext != tt.wantExt {
+				t.Fatalf("ext = %q, want %q", ext, tt.wantExt)
+			}
+		})
+	}
+}
+
+func TestAdvertisedMIMEForPath(t *testing.T) {
+	tests := map[string]string{
+		"shot.png":      "image/png",
+		"shot.PNG":      "image/png",
+		"photo.jpg":     "image/jpeg",
+		"photo.jpeg":    "image/jpeg",
+		"anim.gif":      "",
+		"no-extension":  "",
+		"dir.png/blob":  "",
+		"archive.tar.x": "",
+	}
+	for path, want := range tests {
+		if got := advertisedMIMEForPath(path); got != want {
+			t.Errorf("advertisedMIMEForPath(%q) = %q, want %q", path, got, want)
+		}
+	}
+}
+
+func TestReadHostImageCapsInput(t *testing.T) {
+	data, err := readHostImage(bytes.NewReader(pngMagic), int64(len(pngMagic)))
+	if err != nil || !bytes.Equal(data, pngMagic) {
+		t.Fatalf("readHostImage at the cap = (%v, %v)", data, err)
+	}
+	if _, err := readHostImage(bytes.NewReader(pngMagic), int64(len(pngMagic))-1); err == nil {
+		t.Fatal("expected an error for input over the cap")
+	}
+}
+
+func TestInboxFilename(t *testing.T) {
+	ts := time.Date(2026, 7, 6, 14, 57, 21, 0, time.UTC)
+	got := inboxFilename(ts, []byte{0xAB, 0xCD, 0xEF, 0x01}, "png")
+	want := "20260706T145721Z-abcdef01.png"
+	if got != want {
+		t.Fatalf("inboxFilename = %q, want %q", got, want)
+	}
+}
+
+func TestWriteHostImageWritesToProjectInbox(t *testing.T) {
+	home := t.TempDir()
+	containerPath, err := writeHostImage(home, "projA", jpegMagic, "jpg")
+	if err != nil {
+		t.Fatalf("writeHostImage: %v", err)
+	}
+	if !regexp.MustCompile(`^/mnt/host-images/\d{8}T\d{6}Z-[0-9a-f]{8}\.jpg$`).MatchString(containerPath) {
+		t.Fatalf("container path = %q", containerPath)
+	}
+	inbox := config.HostImageInboxDir(home, "projA")
+	final := filepath.Join(inbox, filepath.Base(containerPath))
+	info, err := os.Stat(final)
+	if err != nil {
+		t.Fatalf("stat: %v", err)
+	}
+	if perm := info.Mode().Perm(); perm != 0o600 {
+		t.Fatalf("mode = %o, want 600", perm)
+	}
+	if got, _ := os.ReadFile(final); !bytes.Equal(got, jpegMagic) {
+		t.Fatal("content mismatch")
+	}
+	if dirInfo, err := os.Stat(inbox); err != nil || dirInfo.Mode().Perm() != 0o700 {
+		t.Fatalf("inbox dir = %v, %v; want mode 700", dirInfo, err)
+	}
+	entries, _ := os.ReadDir(inbox)
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 file (no temp leftovers), got %d", len(entries))
+	}
+	if _, err := os.Stat(config.HostImageInboxDir(home, "projB")); !os.IsNotExist(err) {
+		t.Fatalf("another project's inbox was touched: %v", err)
+	}
+}
+
+func inboxSession(name, hash, dir string, inbox bool) backend.Session {
+	s := backend.Session{
+		Ref:         backend.SessionRef{Name: name},
+		ProjectHash: hash,
+		Worktree:    dir,
+		ProjectDir:  dir,
+		Status:      "running",
+	}
+	if inbox {
+		s.Provenance = map[string]any{"image_inbox": true}
+	} else {
+		s.Provenance = map[string]any{"image_inbox": false}
+	}
+	return s
+}
+
+func TestResolveInboxProject(t *testing.T) {
+	a := inboxSession("enclave-claude-a", "hashA", "/src/a", true)
+	a2 := inboxSession("enclave-codex-a", "hashA", "/src/a", true)
+	b := inboxSession("enclave-claude-b", "hashB", "/src/b", true)
+	cPlain := inboxSession("enclave-claude-c", "hashC", "/src/c", false)
+	legacy := backend.Session{Ref: backend.SessionRef{Name: "enclave-old"}, ProjectHash: "hashD"}
+
+	tests := []struct {
+		name     string
+		sessions []backend.Session
+		cwd      model.Project
+		want     string
+		errHas   []string
+	}{
+		{"cwd project wins", []backend.Session{a, b}, model.Project{Hash: "hashB"}, "hashB", nil},
+		{"single inbox project from elsewhere", []backend.Session{a, a2, cPlain}, model.Project{Hash: "hashC"}, "hashA", nil},
+		{"single inbox project without cwd project", []backend.Session{a, legacy}, model.Project{}, "hashA", nil},
+		{"ambiguous lists candidates", []backend.Session{a, b}, model.Project{Hash: "hashC"}, "", []string{"enclave-claude-a", "enclave-claude-b", "/src/a", "/src/b"}},
+		{"no inbox session", []backend.Session{cPlain, legacy}, model.Project{Hash: "hashC"}, "", []string{"--image-inbox"}},
+		{"nothing running", nil, model.Project{}, "", []string{"--image-inbox"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := resolveInboxProject(tt.sessions, tt.cwd)
+			if tt.errHas != nil {
+				if err == nil {
+					t.Fatalf("expected error, got %q", got)
+				}
+				for _, s := range tt.errHas {
+					if !strings.Contains(err.Error(), s) {
+						t.Errorf("error %q does not mention %q", err, s)
+					}
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != tt.want {
+				t.Fatalf("project = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// img import finds inbox-enabled sessions by this key in their recorded
+// options, so the option must keep its name and stay session-affecting.
+func TestImageInboxOptionIsRecordedOnSessions(t *testing.T) {
+	for _, def := range config.OptionDefs() {
+		if def.Name == imageInboxOption {
+			if def.AffectsSession != config.SessionAffected || def.Kind != config.OptionKindBool {
+				t.Fatalf("%s must be a session-affecting bool, got %v/%v", imageInboxOption, def.AffectsSession, def.Kind)
+			}
+			return
+		}
+	}
+	t.Fatalf("no option named %q", imageInboxOption)
+}

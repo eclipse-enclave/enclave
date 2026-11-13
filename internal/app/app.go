@@ -168,6 +168,10 @@ func Run(args []string) int {
 		return runAttach(parsed.Options, projectDir)
 	}
 
+	if parsed.Action == cli.ActionImgImport {
+		return runImgImport(parsed.Options, projectDir)
+	}
+
 	if parsed.Action == "review-target" {
 		return runReviewTarget(projectDir, parsed.ReviewTarget)
 	}

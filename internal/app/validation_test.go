@@ -931,6 +931,27 @@ func TestValidateOptionsQEMURejectsBackground(t *testing.T) {
 	}
 }
 
+func TestValidateOptionsQEMURejectsImageInbox(t *testing.T) {
+	for _, tc := range []struct {
+		source model.OptionSource
+		hint   string
+	}{
+		{model.SourceCLI, "remove --image-inbox"},
+		{model.SourceGlobal, "remove image_inbox from config"},
+	} {
+		opts := model.Options{
+			RunOptions:   model.RunOptions{Backend: "qemu", Tool: "codex", ImageInbox: true},
+			BuildOptions: model.BuildOptions{ImageName: "test"},
+		}
+		sources := model.DefaultOptionSources()
+		sources.ImageInbox = tc.source
+		_, _, _, err := ValidateOptions(opts, sources, ValidationContext{Action: "run"})
+		if err == nil || !strings.Contains(err.Error(), "image inbox") || !strings.Contains(err.Error(), tc.hint) {
+			t.Fatalf("source %v: expected image inbox rejection with %q, got %v", tc.source, tc.hint, err)
+		}
+	}
+}
+
 func TestValidateOptionsQEMUImpliesAllowAllNetworkAndSlim(t *testing.T) {
 	// No --slim, no --allow-all-network: the qemu backend implies both rather
 	// than erroring, and warns that network isolation is unavailable.

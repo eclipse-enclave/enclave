@@ -8,6 +8,7 @@
 package config
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -49,6 +50,26 @@ func AcquireImageBuildLock(home string, image string) (release func(), err error
 
 func HostBuildDir(home string) string {
 	return filepath.Join(hostCacheRoot(home), "build")
+}
+
+// HostImageInboxDir is a project's image inbox: host images imported for the
+// project, mounted read-only into its inbox-enabled sessions. Inboxes are
+// per project so that one project's agent never sees another's host images.
+func HostImageInboxDir(home string, projectHash string) string {
+	return filepath.Join(hostCacheRoot(home), "inbox", projectHash)
+}
+
+// EnsureHostImageInboxDir creates a project's image inbox readable only by
+// the user, tightening the mode of an existing one.
+func EnsureHostImageInboxDir(home string, projectHash string) (string, error) {
+	dir := HostImageInboxDir(home, projectHash)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", err
+	}
+	if err := os.Chmod(dir, 0o700); err != nil { // #nosec G302 -- a directory needs the execute bit; 0700 is owner-only.
+		return "", err
+	}
+	return dir, nil
 }
 
 func HostSSHDir(home string) string {

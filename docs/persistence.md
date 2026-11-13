@@ -94,6 +94,7 @@ Per-project data is stored on the host and reused across sessions:
 | Agent memory | `~/.local/state/enclave/projects/<project-hash>/<tool>/memory/` (Claude); `memory/<key>/` (Codex, matching the config-store key) |
 | Config/env/auth stores | Host directories under `~/.local/state/enclave/` (bind-mounted; no Docker volumes) |
 | Embedded runtime assets | `~/.cache/enclave/assets/<content-hash>/` |
+| Image inbox | `~/.cache/enclave/inbox/<project-hash>/` (mode 0700; host images from [`img import`](cli-reference.md#host-images)) |
 
 macOS paths: [Host directories](configuration.md#host-directories). Store
 lifecycle: [Persistent stores](runtime/stores.md); memory rules:
@@ -103,6 +104,8 @@ The cache root is disposable; deleting it only costs performance. Package
 caches are recreated empty (Docker Desktop for macOS can briefly report a
 recreated one as missing), asset entries are re-extracted on the next run and
 pruned after 30 days unused, and no required runtime file is mounted from it.
+Deleting it also drops imported host images, which a running session then no
+longer sees.
 
 ### Disabling persistence
 

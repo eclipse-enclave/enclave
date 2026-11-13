@@ -142,6 +142,20 @@ in scope, so not `--all-running`. See
 | `enclave auth export --tool <tool>` | Copy auth store files back to the host |
 | `enclave ssh-init` | Initialize isolated SSH keys at `~/.cache/enclave/ssh/`. Not recommended: the key lets the agent push to your Git provider. See [SSH keys](auth.md#ssh-keys) |
 
+### Host images
+
+| Command | Description |
+|---------|-------------|
+| `enclave img import --file <path>` | Import a PNG or JPEG into the image inbox of a running session's project and print its container path |
+| `enclave img import -` | The same, reading the host image from stdin |
+
+The project's sessions started with `--image-inbox` see the host image
+read-only under `/mnt/host-images`. The target is the working directory's
+project if it has a running inbox-enabled session, else the only project that
+has one; anything else is an error. Input must be a PNG or JPEG of at most
+10 MiB whose content matches a `.png`, `.jpg`, or `.jpeg` file extension. `img
+import` takes `--backend` for one invocation.
+
 ### Devcontainer
 
 | Command | Description |
@@ -212,6 +226,7 @@ See [List options](configuration.md#list-options).
 | `--add-sensitive-dir <path>` | `--add-dir <path>` plus a sensitive-dir exception for `<path>` for this run (repeatable, CLI-only). See [Sensitive mounts](mounts.md#sensitive-mounts) |
 | `--add-readonly-sensitive-dir <path>` | `--add-readonly-dir <path>` plus a sensitive-dir exception for `<path>` for this run (repeatable, CLI-only) |
 | `--allow-sensitive-mounts` | Mount the project or additional directories even when they expose sensitive host data (CLI-only). See [Mounting all sensitive paths](mounts.md#mounting-all-sensitive-paths) |
+| `--image-inbox` | Mount the project's image inbox read-only at `/mnt/host-images` and set `ENCLAVE_IMAGE_INBOX`; see [Host images](#host-images). Docker and Podman only |
 | `--project-mount <writable\|readonly>` | Mount the project/worktree read-write (default) or read-only |
 | `--worktree-metadata <follow\|readonly\|none>` | Linked-worktree git metadata mounts: follow the project mount (default), force read-only, or skip |
 | `--yolo` | Enable YOLO mode explicitly |

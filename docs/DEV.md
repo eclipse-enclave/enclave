@@ -234,6 +234,21 @@ docker build --progress=plain . 2>&1 | \
   grep -E "(Installing feature|Feature .+: added)"
 ```
 
+## Testing the image inbox
+
+Manual check with the working-copy binary and two projects, `a` and `b`:
+
+```bash
+(cd a && ../bin/enclave --image-inbox)      # terminal 1
+(cd b && ../bin/enclave --image-inbox)      # terminal 2
+cd a && ../bin/enclave img import --file shot.png  # prints the container path
+```
+
+In the session of `a`, `ls -l "$ENCLAVE_IMAGE_INBOX"` lists the host image
+read-only; in the session of `b` the inbox is empty. `enclave ps --json` shows
+`"image_inbox": true` under `options`, and `--backend qemu --image-inbox`
+fails before building.
+
 ## Windows launcher
 
 On Windows, `cmd/enclave` builds `main_windows.go`, which forwards to the Linux

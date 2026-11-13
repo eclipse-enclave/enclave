@@ -45,6 +45,7 @@ type Defaults struct {
 	NoCache                *bool               `json:"no_cache"`
 	NoHistory              *bool               `json:"no_history"`
 	NoMemory               *bool               `json:"no_memory"`
+	ImageInbox             *bool               `json:"image_inbox"`
 	SessionTint            string              `json:"session_tint"`
 	HostEnv                map[string]string   `json:"host_env"`
 	Timezone               string              `json:"timezone"`

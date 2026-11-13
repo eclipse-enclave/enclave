@@ -52,7 +52,7 @@ func TestBackendFlagOnEngineCommands(t *testing.T) {
 	commands := [][]string{
 		{"ps"}, {"stop"}, {"attach"}, {"exec"},
 		{"update"}, {"theia"}, {"theia-next"}, {"cleanup"}, {"info"},
-		{"auth", "import"}, {"auth", "export"},
+		{"auth", "import"}, {"auth", "export"}, {"img", "import", "-"},
 		{"network", "status"}, {"network", "log"}, {"network", "apply"},
 		{"network", "add-domain", "example.com", "--global"},
 		{"network", "remove-domain", "example.com", "--global"},
@@ -1925,5 +1925,46 @@ func TestParseFeaturesNoneCannotCombineInEitherOrder(t *testing.T) {
 		if _, err := Parse(append([]string{"run"}, args...), config.DefaultOptions()); err == nil {
 			t.Errorf("Parse(%v) succeeded, want an error", args)
 		}
+	}
+}
+
+func TestImgImportSources(t *testing.T) {
+	for _, tc := range []struct {
+		args      []string
+		wantFile  string
+		wantStdin bool
+		wantErr   bool
+	}{
+		{args: []string{"img", "import", "--file", "shot.png"}, wantFile: "shot.png"},
+		{args: []string{"img", "import", "-"}, wantStdin: true},
+		{args: []string{"img", "import"}, wantErr: true},
+		{args: []string{"img", "import", "--file", "shot.png", "-"}, wantErr: true},
+		{args: []string{"img", "import", "shot.png"}, wantErr: true},
+	} {
+		t.Run(strings.Join(tc.args, " "), func(t *testing.T) {
+			res, err := Parse(tc.args, config.DefaultOptions())
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("expected error, got %+v", res.Options.ImgOptions)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if res.Action != ActionImgImport || res.Options.ImgFile != tc.wantFile || res.Options.ImgStdin != tc.wantStdin {
+				t.Fatalf("action/file/stdin = %q/%q/%v", res.Action, res.Options.ImgFile, res.Options.ImgStdin)
+			}
+		})
+	}
+}
+
+func TestImageInboxFlagOnRun(t *testing.T) {
+	res, err := Parse([]string{"run", "--image-inbox"}, config.DefaultOptions())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.Options.ImageInbox || res.Sources.ImageInbox != model.SourceCLI {
+		t.Fatalf("image inbox/source = %v/%v", res.Options.ImageInbox, res.Sources.ImageInbox)
 	}
 }

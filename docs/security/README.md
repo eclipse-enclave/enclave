@@ -33,6 +33,11 @@ not a hardened container-escape boundary.
   `ENCLAVE_ALLOW_SENSITIVE_MOUNTS=1` can, never config. Devcontainer and
   `.git`-pointer mounts stay blocked. Rules:
   [Sensitive mounts](../mounts.md#sensitive-mounts).
+- `--image-inbox` mounts the project's image inbox read-only. Only host
+  images the user imports with `enclave img import` land there: PNG or JPEG,
+  content-sniffed, at most 10 MiB, mode 0600. Inboxes are per project, so an
+  agent never sees another project's host images. Metadata such as EXIF is
+  not stripped.
 - Per-project Enclave config lives outside the worktree, keyed by project
   hash, so neither the repository nor a session can write it. It may set any
   option except the [global-only](../configuration.md#global-only) ones, so it

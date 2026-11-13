@@ -311,10 +311,11 @@ it places there does not move host reads or writes outside the store.
   the store it is dropped with the rest of the old contents and is not in the
   backup.
 - A directory the host user cannot read is removed the same way when it is
-  empty and no preserve pattern can match it or anything below it. Otherwise
-  it stops the overlay before the store is changed; make it readable or remove
-  it. Only removing a directory shows whether it is empty, so empty ones
-  removed before that are recreated with their mode and modification time.
+  empty and outside the preserve patterns. In a preserved path, or when it is
+  not empty, it stops the overlay before the store is changed; make it
+  readable or remove it. Only removing a directory shows whether it is empty,
+  so empty ones removed before that are recreated with their mode and
+  modification time.
 
 ## Source files
 

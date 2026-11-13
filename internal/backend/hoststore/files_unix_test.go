@@ -186,7 +186,11 @@ func TestOverlayDropsEmptyUnreadableDirectoryOutsidePreservedPaths(t *testing.T)
 		t.Skip("permission failure requires an unprivileged user")
 	}
 	target, source := t.TempDir(), t.TempDir()
-	for _, dir := range []string{"cache", "agent/tmp"} {
+	// "agent" is an ancestor of a preserve pattern, and "*.history" can match
+	// below any directory, as in the built-in preserve lists. Empty, neither
+	// holds preserved state.
+	unreadable := []string{"cache", "agent/tmp", "plugins/agent"}
+	for _, dir := range unreadable {
 		if err := os.MkdirAll(filepath.Join(target, dir), 0o700); err != nil {
 			t.Fatal(err)
 		}
@@ -194,16 +198,16 @@ func TestOverlayDropsEmptyUnreadableDirectoryOutsidePreservedPaths(t *testing.T)
 	if err := os.WriteFile(filepath.Join(target, "agent", "history"), []byte("resume"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	for _, dir := range []string{"cache", "agent/tmp"} {
+	for _, dir := range unreadable {
 		if err := os.Chmod(filepath.Join(target, dir), 0o000); err != nil {
 			t.Fatal(err)
 		}
 	}
 
-	if err := Overlay(target, source, []string{"agent/history"}); err != nil {
+	if err := Overlay(target, source, []string{"agent/history", "plugins/agent/history", "*.history"}); err != nil {
 		t.Fatalf("empty unreadable directory outside preserved paths blocked the overlay: %v", err)
 	}
-	for _, dir := range []string{"cache", "agent/tmp"} {
+	for _, dir := range unreadable {
 		if _, err := os.Lstat(filepath.Join(target, dir)); !os.IsNotExist(err) {
 			t.Fatalf("%s survived the overlay: %v", dir, err)
 		}
@@ -221,10 +225,10 @@ func TestOverlayRejectsUnreadableDirectoryItCannotDrop(t *testing.T) {
 		dir, file, want string
 		preserve        []string
 	}{
-		"not empty":           {dir: "cache", file: "cache/blob", want: "cannot clear unreadable", preserve: []string{"auth.json"}},
-		"holds preserved":     {dir: "agent", file: "agent/history", want: "permission denied", preserve: []string{"agent/history"}},
-		"inside preserved":    {dir: "projects/x", want: "permission denied", preserve: []string{"projects/"}},
-		"may hold glob match": {dir: "cache", want: "permission denied", preserve: []string{"*.jsonl"}},
+		"not empty":        {dir: "cache", file: "cache/blob", want: "cannot clear unreadable", preserve: []string{"auth.json", "*.history"}},
+		"holds preserved":  {dir: "agent", file: "agent/history", want: "cannot clear unreadable", preserve: []string{"agent/history"}},
+		"inside preserved": {dir: "projects/x", want: "permission denied", preserve: []string{"projects/"}},
+		"matches glob":     {dir: "x.history", want: "permission denied", preserve: []string{"*.history"}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			target, source := t.TempDir(), t.TempDir()

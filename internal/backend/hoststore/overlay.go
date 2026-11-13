@@ -58,16 +58,16 @@ func Overlay(targetDir, sourceDir string, preserve []string) (result error) {
 	}
 	// Special nodes, unreadable files, and unreadable directories outside the
 	// preserve patterns are dropped with the rest of the old contents, so the
-	// backup leaves them out instead of failing.
+	// backup leaves them out instead of failing. An unreadable directory is
+	// only dropped once rmdir proves it empty, so it holds no preserved state.
 	var unreadableDirs []string
 	droppable := func(name string, dir bool) bool {
-		if !dir {
-			return !matchesPreserved(name, preserve)
-		}
-		if mayHoldPreserved(name, preserve) {
+		if matchesPreserved(name, preserve) {
 			return false
 		}
-		unreadableDirs = append(unreadableDirs, name)
+		if dir {
+			unreadableDirs = append(unreadableDirs, name)
+		}
 		return true
 	}
 	if err := copyNode(target, ".", work, "backup", 0, droppable); err != nil {
@@ -228,21 +228,6 @@ func restoreDirs(target *Files, removed map[string]fs.FileInfo) error {
 		}
 	}
 	return errors.Join(errs...)
-}
-
-// mayHoldPreserved reports whether a preserve pattern can match dir or
-// anything below it. Glob patterns also match base names at any depth.
-func mayHoldPreserved(dir string, preserve []string) bool {
-	if matchesPreserved(dir, preserve) {
-		return true
-	}
-	prefix := filepath.ToSlash(dir) + "/"
-	for _, pattern := range preserve {
-		if strings.ContainsAny(pattern, "*?[") || strings.HasPrefix(pattern, prefix) {
-			return true
-		}
-	}
-	return false
 }
 
 // matchesPreserved reports whether name or one of its parent directories

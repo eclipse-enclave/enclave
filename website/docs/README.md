@@ -32,6 +32,23 @@ workflow can override this via its `docs_base_url` input, e.g.
 `/enclave-website/docs/` to verify a deployment on the raw
 `eclipse-enclave.github.io/enclave-website/` URL.
 
+## Pull request previews
+
+*Build website preview* builds a PR that changes `website/**` or the workflow
+itself, then calls *Deploy website preview* in the same run, which publishes
+it under
+`eclipse-enclave.github.io/enclave-website-previews/pr-previews/pr-<number>/`
+and comments the link. *Remove website preview* deletes it when the PR closes.
+Build and Remove trigger on `pull_request_target`, which the Actions event
+policy must allow.
+
+`pull_request_target` ignores the fork PR approval setting. A preview builds
+on its own for a PR from this repository, or when the PR's author triggered
+the event and has write access. For any other PR, someone with write access
+reviews it and adds the `preview` label, which builds the head at that moment
+once; remove and add it again for later pushes. A preview is published only if
+the PR is still open at the built commit.
+
 ## Linking out of the docs app
 
 The docs are a single-page app that only owns the routes under its base path.

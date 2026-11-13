@@ -5,16 +5,19 @@
 #
 # SPDX-License-Identifier: MIT
 
+# SECURITY: pull_request_target, so this file comes from the default branch
+# and the event names the PR. PR code runs only in build-preview, without
+# secrets; only the called deploy workflow gets DEPLOY_TOKEN.
+
 name: Build website preview
 
 on:
-  pull_request:
-    types: [opened, synchronize, reopened]
+  pull_request_target:
+    types: [opened, synchronize, reopened, labeled]
     paths:
       - "website/**"
       - ".github/workflows/website-preview-build.yml"
 
-# No secrets needed - this runs untrusted PR code safely.
 permissions:
   contents: read
 
@@ -23,30 +26,75 @@ defaults:
     shell: bash
 
 jobs:
-  build-preview:
+  # pull_request_target ignores the fork PR approval setting, so this job
+  # decides whether PR code may run (see website/docs/README.md).
+  authorize-preview:
+    if: github.event.action != 'labeled' || github.event.label.name == 'preview'
     runs-on: ubuntu-latest
+    outputs:
+      approved: ${{ steps.check.outputs.approved }}
     steps:
+      - name: Check who may build this PR
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          ACTION: ${{ github.event.action }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          SENDER: ${{ github.event.sender.login }}
+          AUTHOR: ${{ github.event.pull_request.user.login }}
+        run: |
+          if [ "$ACTION" != labeled ] && [ "$HEAD_REPO" = "$REPO" ]; then
+            echo "approved=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ "$ACTION" != labeled ] && [ "$SENDER" != "$AUTHOR" ]; then
+            echo "::notice::$SENDER triggered this event for $AUTHOR's PR: a preview needs the preview label from someone with write access"
+            exit 0
+          fi
+          # Maintain counts as write, triage as read.
+          permission=$(gh api "repos/$REPO/collaborators/$SENDER/permission" --jq .permission)
+          if [ "$permission" = admin ] || [ "$permission" = write ]; then
+            echo "approved=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::$SENDER has $permission access: a preview of this PR needs the preview label from someone with write access"
+          fi
+
+  build-preview:
+    needs: authorize-preview
+    if: needs.authorize-preview.outputs.approved == 'true'
+    runs-on: ubuntu-latest
+    # PR code runs here: no cache access, not even the default read-only one.
+    cache-mode: none
+    steps:
+      # Fork heads are fetchable here by SHA, even after the fork is deleted.
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
       - name: Use Node.js 22.x
         uses: actions/setup-node@6044e13b5dc448c55e2357c09f80417699197238 # v6.2.0
         with:
           node-version: "22.x"
+          # A package.json from the PR must not turn caching on.
+          package-manager-cache: false
       - name: Build site
         env:
           DOCS_BASE_URL: /enclave-website-previews/pr-previews/pr-${{ github.event.number }}/docs/
         run: ./website/build.sh
-      - name: Save PR metadata
-        run: |
-          mkdir -p ./pr-metadata
-          echo "${{ github.event.number }}" > ./pr-metadata/pr-number
       - name: Upload site artifact
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: site
           path: ./public
-      - name: Upload PR metadata
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
-        with:
-          name: pr-metadata
-          path: ./pr-metadata
+
+  # Called from this commit, with this run's event and only these grants.
+  deploy-preview:
+    needs: build-preview
+    permissions:
+      contents: read
+      pull-requests: write
+    uses: ./.github/workflows/website-preview-deploy.yml
+    secrets:
+      DEPLOY_TOKEN: ${{ secrets.DEPLOY_TOKEN }}

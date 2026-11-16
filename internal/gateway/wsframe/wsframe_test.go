@@ -11,7 +11,6 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
-	"io"
 	"testing"
 )
 
@@ -46,7 +45,7 @@ func TestParseDecodesEveryLengthForm(t *testing.T) {
 		"64-bit":            {header(0x80, 70000, nil), Header{Fin: true, Opcode: OpContinuation, Length: 70000}},
 		"masked":            {header(0x81, 3, &key), Header{Fin: true, Opcode: OpText, Masked: true, Mask: key, Length: 3}},
 		"masked 64-bit":     {header(0x82, 1<<40, &key), Header{Fin: true, Opcode: OpBinary, Masked: true, Mask: key, Length: 1 << 40}},
-		"compressed":        {header(0xc1, 10, nil), Header{Fin: true, Rsv: RSV1, Opcode: OpText, Length: 10}},
+		"compressed":        {header(0xc1, 10, nil), Header{Fin: true, Rsv: 0x4, Opcode: OpText, Length: 10}},
 		"all reserved bits": {header(0xf2, 0, nil), Header{Fin: true, Rsv: 0x7, Opcode: OpBinary}},
 		"close":             {header(0x88, 125, nil), Header{Fin: true, Opcode: OpClose, Length: 125}},
 	} {
@@ -83,31 +82,6 @@ func TestParseRejectsWhatRFC6455Forbids(t *testing.T) {
 	// waiting for the rest of the header.
 	if _, _, err := Parse([]byte{0x83, 126}); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("Parse() of a partial header with a reserved opcode = %v, want ErrInvalid", err)
-	}
-}
-
-func TestReadHeaderReturnsTheBytesRead(t *testing.T) {
-	key := [4]byte{9, 8, 7, 6}
-	raw := header(0x82, 300, &key)
-	stream := bytes.NewReader(append(append([]byte{}, raw...), 0xaa))
-	got, read, err := ReadHeader(stream)
-	if err != nil || !bytes.Equal(read, raw) || got.Length != 300 || got.Mask != key {
-		t.Fatalf("ReadHeader() = %+v, %x, %v", got, read, err)
-	}
-	if rest, _ := io.ReadAll(stream); !bytes.Equal(rest, []byte{0xaa}) {
-		t.Fatalf("ReadHeader() read past the header: %x left", rest)
-	}
-
-	if _, _, err := ReadHeader(bytes.NewReader(nil)); !errors.Is(err, io.EOF) {
-		t.Fatalf("ReadHeader() between frames = %v, want io.EOF", err)
-	}
-	for cut := 1; cut < len(raw); cut++ {
-		if _, _, err := ReadHeader(bytes.NewReader(raw[:cut])); !errors.Is(err, io.ErrUnexpectedEOF) {
-			t.Fatalf("ReadHeader() of a header cut at %d = %v, want io.ErrUnexpectedEOF", cut, err)
-		}
-	}
-	if _, _, err := ReadHeader(bytes.NewReader(header(0x83, 0, nil))); !errors.Is(err, ErrInvalid) {
-		t.Fatalf("ReadHeader() of a reserved opcode = %v, want ErrInvalid", err)
 	}
 }
 

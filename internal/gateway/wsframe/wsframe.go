@@ -15,7 +15,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"io"
 )
 
 // Opcode is the frame type.
@@ -35,10 +34,6 @@ const (
 func (o Opcode) IsControl() bool {
 	return o&0x8 != 0
 }
-
-// RSV1 is the reserved bit permessage-deflate uses to mark a compressed
-// message, as it appears in Header.Rsv.
-const RSV1 = 0x4
 
 // MaxHeaderLen is the longest a frame header can be: two bytes, a 64-bit
 // length and a masking key.
@@ -119,28 +114,6 @@ func headerLen(b1 byte) int {
 		n += 4
 	}
 	return n
-}
-
-// ReadHeader reads one header from r and returns it together with its bytes
-// as read, for callers that relay frames unchanged.
-func ReadHeader(r io.Reader) (Header, []byte, error) {
-	raw := make([]byte, 2, MaxHeaderLen)
-	if _, err := io.ReadFull(r, raw); err != nil {
-		return Header{}, nil, err
-	}
-	if _, _, err := Parse(raw); err != nil && !errors.Is(err, ErrShort) {
-		return Header{}, raw, err
-	}
-	raw = raw[:headerLen(raw[1])]
-	if _, err := io.ReadFull(r, raw[2:]); err != nil {
-		// EOF here is inside a header, not between frames.
-		if errors.Is(err, io.EOF) {
-			err = io.ErrUnexpectedEOF
-		}
-		return Header{}, raw, err
-	}
-	h, _, err := Parse(raw)
-	return h, raw, err
 }
 
 // Unmask applies the masking key to payload in place. offset is the position

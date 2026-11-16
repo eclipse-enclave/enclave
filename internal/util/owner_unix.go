@@ -15,16 +15,11 @@ import (
 	"syscall"
 )
 
-// PathOwnedBy reports whether path is owned by the numeric uid. It returns
-// true when ownership cannot be determined (unparseable uid, stat failure, or
-// a platform without POSIX ownership) so callers only act on a definite
-// mismatch.
-func PathOwnedBy(path string, uid string) bool {
+// FileInfoOwnedBy reports whether info is owned by the numeric uid. It returns
+// true when ownership cannot be determined (unparseable uid or a FileInfo
+// without POSIX ownership) so callers only act on a definite mismatch.
+func FileInfoOwnedBy(info os.FileInfo, uid string) bool {
 	want, err := strconv.ParseUint(uid, 10, 32)
-	if err != nil {
-		return true
-	}
-	info, err := os.Stat(path)
 	if err != nil {
 		return true
 	}

@@ -17,6 +17,7 @@ import (
 	"testing"
 
 	"enclave/internal/backend"
+	"enclave/internal/backend/hoststore"
 	"enclave/internal/config"
 	"enclave/internal/model"
 )
@@ -24,24 +25,59 @@ import (
 func TestForeignOwnedStorePathReportsOutermostMismatch(t *testing.T) {
 	t.Parallel()
 
-	root := t.TempDir()
-	target := filepath.Join(root, "shared", "skills")
-	if err := os.MkdirAll(target, 0o700); err != nil {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "shared", "skills"), 0o700); err != nil {
 		t.Fatal(err)
 	}
+	root, err := hoststore.OpenFiles(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = root.Close() }()
 	me := strconv.Itoa(os.Getuid())
 	other := strconv.Itoa(os.Getuid() + 1)
+	rel := filepath.Join("shared", "skills")
 
-	if got := foreignOwnedStorePath(root, target, me); got != "" {
+	if got := foreignOwnedStorePath(root, rel, me); got != "" {
 		t.Fatalf("foreignOwnedStorePath() = %q, want no mismatch for the invoking user", got)
 	}
 	// Every component is owned by the current user, so a foreign uid must flag
 	// the outermost one below the store root rather than the leaf.
-	if got, want := foreignOwnedStorePath(root, target, other), filepath.Join(root, "shared"); got != want {
+	if got, want := foreignOwnedStorePath(root, rel, other), filepath.Join(dir, "shared"); got != want {
 		t.Fatalf("foreignOwnedStorePath() = %q, want %q", got, want)
 	}
-	if got := foreignOwnedStorePath(root, root, other); got != "" {
-		t.Fatalf("foreignOwnedStorePath(root, root) = %q, want empty", got)
+	if got := foreignOwnedStorePath(root, ".", other); got != "" {
+		t.Fatalf("foreignOwnedStorePath(root, \".\") = %q, want empty", got)
+	}
+}
+
+// A component replaced by a link or a file after the layout directory was
+// created ends the scan, so no host path outside the store is read or named.
+func TestForeignOwnedStorePathStopsAtSymlinkedComponent(t *testing.T) {
+	t.Parallel()
+
+	dir, outside := t.TempDir(), t.TempDir()
+	if err := os.Mkdir(filepath.Join(outside, "skills"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(dir, "agent")); err != nil {
+		t.Fatal(err)
+	}
+	root, err := hoststore.OpenFiles(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = root.Close() }()
+	other := strconv.Itoa(os.Getuid() + 1)
+
+	if got := foreignOwnedStorePath(root, filepath.Join("agent", "skills"), other); got != "" {
+		t.Fatalf("foreignOwnedStorePath() = %q, want empty for a symlinked component", got)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "file"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := foreignOwnedStorePath(root, "file", other); got != "" {
+		t.Fatalf("foreignOwnedStorePath() = %q, want empty for a non-directory component", got)
 	}
 }
 

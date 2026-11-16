@@ -284,12 +284,46 @@ User-facing options are in [Sessions and persistence](../persistence.md).
 stopped ephemeral containers, and per-session networks whose session is gone
 ([Networking](../networking.md#per-session-docker-networks)).
 
+## Host-side store I/O
+
+Store reads, writes, seeds, removals, overlays, settings carry-over, config
+layout directories, and the feature auth copy run on both backends through an
+opened store directory.
+Paths stay relative to that directory, a symlinked final component is never
+followed, and regular-file reads open without blocking and reject special
+nodes. A session can change its store while the host works on it, but a link
+it places there does not move host reads or writes outside the store.
+
+- Overlays keep symlinks as links. A Docker seed (`enclave auth import`)
+  follows links in the host source, at the given path and inside a seeded
+  directory, and stops on a link cycle or a special file; a QEMU seed keeps
+  them as links. On the store side no link is followed: an existing
+  destination link stops a Docker seed; QEMU removes it and seeds in its
+  place.
+- An overlay copies the current store and the generated config into a private
+  temporary directory before it clears the store, and keeps the store
+  directory itself, so existing bind mounts stay valid. If writing the new
+  contents fails, the error names the retained backup; restore from it before
+  deleting it. The overlay is recoverable, not atomic: other live sessions can
+  see intermediate contents.
+- A FIFO, socket, or device file, or a file the host user cannot read, in a
+  preserved path stops the overlay before the store is changed. Elsewhere in
+  the store it is dropped with the rest of the old contents and is not in the
+  backup.
+- A directory the host user cannot read is removed the same way when it is
+  empty and outside the preserve patterns. In a preserved path, or when it is
+  not empty, it stops the overlay before the store is changed; make it
+  readable or remove it. Only removing a directory shows whether it is empty,
+  so empty ones removed before that are recreated with their mode and
+  modification time.
+
 ## Source files
 
 | File | Role |
 |------|------|
 | [`internal/config/host_paths.go`](../../internal/config/host_paths.go) | Store path helpers (`HostStoreConfigDir`, `HostStoreEnvDir`, `HostStoreAuthDir`, `HostStoreFeatureAuthDir`) |
 | [`internal/backend/hoststore/hoststore.go`](../../internal/backend/hoststore/hoststore.go) | Store identity to directory mapping and cross-process lock, shared by Docker and QEMU (stores are backend-independent) |
+| [`internal/backend/hoststore/files.go`](../../internal/backend/hoststore/files.go), [`overlay.go`](../../internal/backend/hoststore/overlay.go) | Store I/O through opened directories, tree copy, recoverable config overlay |
 | [`internal/backend/docker/storage.go`](../../internal/backend/docker/storage.go) | Store manager: create, read and write, seed, remove, locking, path-traversal validation |
 | [`internal/runtime/volume_manager.go`](../../internal/runtime/volume_manager.go) | Store intent: which stores exist, reset flags, sync spec |
 | [`internal/backend/docker/prepare.go`](../../internal/backend/docker/prepare.go), [`authsync.go`](../../internal/backend/docker/authsync.go) | Preparation, auth reset, overlay, post-exit sync, stop and remove finalization |

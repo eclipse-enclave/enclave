@@ -58,7 +58,10 @@ const AbandonedAfter = 24 * time.Hour
 // directory it bind-mounted, which must therefore survive even when emptied.
 // Body files without a record are removed once unwritten for AbandonedAfter,
 // and are not counted until then, because they may belong to a capture still
-// in flight. The second return is the number of captures removed.
+// in flight. Files of a WebSocket with an open record are kept however old:
+// its messages file stops growing at a limit, so their age says nothing, and
+// the session's own proxy removes them when it starts again. The second return
+// is the number of captures removed.
 func PruneStore(root string, maxBytes int64) (int, error) {
 	entries, err := os.ReadDir(root)
 	if err != nil {
@@ -74,7 +77,7 @@ func PruneStore(root string, maxBytes int64) (int, error) {
 	var captures []located
 	var total int64
 	cutoff := time.Now().Add(-AbandonedAfter)
-	abandoned := func(modified time.Time) bool { return modified.Before(cutoff) }
+	abandoned := func(modified time.Time, open bool) bool { return !open && modified.Before(cutoff) }
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue

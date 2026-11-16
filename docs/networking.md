@@ -417,13 +417,13 @@ conversation; list `*.open.json` to find the IDs of open WebSockets. When the
 connection closes, `<id>.json` replaces the open record and the `http` event is
 logged. When the proxy stops, for example because `enclave network apply`
 restarts it, it closes its WebSockets first so that they are recorded; the
-files of one cut off by a crash are removed as leftovers. The `capture`
-directory is private to your user. The session directories below it are
-world-writable, because the gateway's proxy runs as a different UID, and rely
-on that parent for protection. The capture files belong to that UID: under
-rootful Docker `ls -l` shows whichever host account has the same UID (for
-example `messagebus`), and under rootless Podman a subordinate UID. You can
-read and delete them, but not modify them.
+files of one cut off by a crash are removed when a session of the same name
+starts. The `capture` directory is private to your user. The session
+directories below it are world-writable, because the gateway's proxy runs as a
+different UID, and rely on that parent for protection. The capture files
+belong to that UID: under rootful Docker `ls -l` shows whichever host account
+has the same UID (for example `messagebus`), and under rootless Podman a
+subordinate UID. You can read and delete them, but not modify them.
 
 The record (`schemaVersion: "1"`, `kind: "network-capture"`) looks like this:
 
@@ -537,7 +537,7 @@ Each line of the messages file is one message:
   oldest captures first, across all sessions. Directories are left in place, so
   a running session keeps writing. Files that a gateway stopped in the middle
   of a capture left without a record are removed once nothing has written to
-  them for a day.
+  them for a day. An open WebSocket's files are kept however old they are.
 - `enclave cleanup` removes the capture store of the project and tool unless
   `--keep history` is given, and `enclave cleanup --all` removes every store.
   To drop captures without a cleanup, delete files in a session directory;

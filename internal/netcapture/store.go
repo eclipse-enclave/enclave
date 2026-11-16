@@ -95,7 +95,7 @@ func Open(opts Options) (*Store, error) {
 		s.maxBytes = MaxSessionBytes
 	}
 
-	s.finished, err = scanSessionDir(dir, func(time.Time) bool { return true })
+	s.finished, err = scanSessionDir(dir, func(time.Time, bool) bool { return true })
 	if err != nil {
 		return nil, err
 	}
@@ -555,18 +555,19 @@ type sessionCapture struct {
 // scanSessionDir lists the finished captures of a session directory, oldest
 // first. It also deletes leftovers for which abandoned reports true: files of a
 // capture without its record and staging files, judged by when they were last
-// written. The open record of a WebSocket does not count as a record: its
-// capture is still in flight.
+// written and whether they belong to a WebSocket with an open record. That open
+// record does not count as a record: its capture is still in flight.
 // The directory's own writer passes a predicate that is always true, since
-// nothing else writes there; anyone else must spare recent leftovers, which
-// belong to captures still in flight.
-func scanSessionDir(dir string, abandoned func(modified time.Time) bool) ([]sessionCapture, error) {
+// nothing else writes there; anyone else must spare recent leftovers and open
+// WebSockets, which belong to captures still in flight.
+func scanSessionDir(dir string, abandoned func(modified time.Time, open bool) bool) ([]sessionCapture, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil, err
 	}
 	type files struct {
 		record bool
+		open   bool
 		// modified is the record's time for a finished capture, and the latest
 		// write to its other files otherwise.
 		modified time.Time
@@ -584,7 +585,7 @@ func scanSessionDir(dir string, abandoned func(modified time.Time) bool) ([]sess
 			continue
 		}
 		if strings.HasPrefix(name, ".") {
-			if abandoned(info.ModTime()) {
+			if abandoned(info.ModTime(), false) {
 				_ = os.Remove(filepath.Join(dir, name))
 			}
 			continue
@@ -604,6 +605,7 @@ func scanSessionDir(dir string, abandoned func(modified time.Time) bool) ([]sess
 			group.record = true
 			group.modified = info.ModTime()
 		default:
+			group.open = group.open || suffix == openRecordSuffix
 			group.bodies = append(group.bodies, name)
 			if !group.record && info.ModTime().After(group.modified) {
 				group.modified = info.ModTime()
@@ -612,7 +614,7 @@ func scanSessionDir(dir string, abandoned func(modified time.Time) bool) ([]sess
 	}
 
 	for id, group := range byID {
-		if !group.record && abandoned(group.modified) {
+		if !group.record && abandoned(group.modified, group.open) {
 			for _, name := range group.bodies {
 				_ = os.Remove(filepath.Join(dir, name))
 			}

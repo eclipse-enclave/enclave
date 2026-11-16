@@ -181,8 +181,13 @@ func TestPruneStoreSparesSocketsStillOpen(t *testing.T) {
 	writeCapture(t, dir, "00000000000000dd", 1000, time.Now().Add(-time.Hour))
 	id := "00000000000000ee"
 	open := []string{OpenRecordPath(dir, id), filepath.Join(dir, id+messagesSuffix)}
+	// A socket past its message limit writes nothing, however long it stays open.
+	old := time.Now().Add(-AbandonedAfter - time.Hour)
 	for _, path := range open {
 		if err := os.WriteFile(path, []byte(strings.Repeat("x", 5000)), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chtimes(path, old, old); err != nil {
 			t.Fatal(err)
 		}
 	}

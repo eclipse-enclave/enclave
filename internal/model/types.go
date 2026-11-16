@@ -46,6 +46,7 @@ type RunOptions struct {
 	AllowSensitiveMounts     bool
 	ProjectMount             string
 	WorktreeMetadata         string
+	WorktreeInheritance      bool
 	AllowDomains             []string
 	BridgePorts              []string
 	Shell                    bool
@@ -494,10 +495,30 @@ type Paths struct {
 }
 
 type Project struct {
-	Dir     string
-	RealDir string
-	Hash    string
-	Name    string
+	Dir        string
+	RealDir    string
+	Hash       string
+	Name       string
+	ConfigHash string
+	ConfigDir  string
+}
+
+// ConfigSourceHash also supports state-only Project values supplied by callers.
+func (p Project) ConfigSourceHash() string {
+	if p.ConfigHash != "" {
+		return p.ConfigHash
+	}
+	return p.Hash
+}
+
+func (p Project) ConfigSourceDir() string {
+	if p.ConfigDir != "" {
+		return p.ConfigDir
+	}
+	if p.RealDir != "" {
+		return p.RealDir
+	}
+	return p.Dir
 }
 
 type Host struct {
@@ -568,6 +589,8 @@ const (
 	// option values, as compact JSON. It is storage only; `ps --json` is the
 	// contract.
 	LabelOptions = AppName + ".options"
+	// LabelConfigSource pins the session's canonical config anchor and hash.
+	LabelConfigSource = AppName + ".config_source"
 )
 
 const (

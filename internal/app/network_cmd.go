@@ -102,6 +102,7 @@ func resolvePolicyContext(input *CommandInput, tool string, session *policy.Sess
 	resolved, err := resolverCtx.Resolver.Resolve(policy.ResolveInput{
 		ProjectDir:  input.Ctx.ProjectDir,
 		ProjectHash: resolverCtx.Project.Hash,
+		ConfigHash:  resolverCtx.Project.ConfigSourceHash(),
 		Tool:        tool,
 		Session:     session,
 	})
@@ -150,7 +151,7 @@ func runNetworkStatus(input *CommandInput) int {
 	}
 
 	globalPolicyPath := network.GlobalPolicyPath(policyCtx.Home)
-	projectPolicyPath := network.ProjectPolicyPath(policyCtx.Home, policyCtx.Project.Hash)
+	projectPolicyPath := network.ProjectPolicyPath(policyCtx.Home, policyCtx.Project.ConfigSourceHash())
 	fmt.Printf("\nPolicy files:\n")
 	if util.PathExists(globalPolicyPath) {
 		fmt.Printf("  Global:  %s\n", globalPolicyPath)
@@ -194,7 +195,7 @@ func runNetworkStatus(input *CommandInput) int {
 // printGatewayRuntimeStates compares each restricted gateway's running bundle
 // with the persisted policy. Unrestricted gateways run no policy, so they are
 // reported as such rather than compared.
-func printGatewayRuntimeStates(out *strings.Builder, manager backend.GatewayManager, policyCtx policyResolverContext, targets []backend.GatewayInfo) {
+func printGatewayRuntimeStates(out *strings.Builder, manager gatewayPolicyManager, policyCtx policyResolverContext, targets []backend.GatewayInfo) {
 	type runtimeState struct {
 		target backend.GatewayInfo
 		status gatewayRuntimeStatus
@@ -234,7 +235,7 @@ const (
 	gatewayStateUnrestricted gatewayRuntimeStatus = "UNRESTRICTED"
 )
 
-func gatewayRuntimeState(manager backend.GatewayManager, policyCtx policyResolverContext, target backend.GatewayInfo) (status gatewayRuntimeStatus, detail string) {
+func gatewayRuntimeState(manager gatewayPolicyManager, policyCtx policyResolverContext, target backend.GatewayInfo) (status gatewayRuntimeStatus, detail string) {
 	if target.Unrestricted() {
 		return gatewayStateUnrestricted, "logs traffic without a policy; restart the session to change its network mode"
 	}
@@ -246,7 +247,11 @@ func gatewayRuntimeState(manager backend.GatewayManager, policyCtx policyResolve
 	if err != nil {
 		return gatewayStateUnknown, err.Error()
 	}
-	desiredHash, err := desiredGatewayBundleHash(policyCtx.Resolver, target, targetProjectDir)
+	configHash, err := gatewayConfigHash(manager, target, targetProjectDir)
+	if err != nil {
+		return gatewayStateUnknown, err.Error()
+	}
+	desiredHash, err := desiredGatewayBundleHash(policyCtx.Resolver, target, targetProjectDir, configHash)
 	if err != nil {
 		return gatewayStateStale, fmt.Sprintf("cannot render desired bundle: %v", err)
 	}
@@ -343,7 +348,7 @@ func applyPolicyToGateways(input *CommandInput, scope gatewayTargetScope) int {
 // applyPolicyToTargets writes the persisted policy into each restricted
 // gateway's bundle and reloads it. Unrestricted gateways are skipped: a running
 // gateway never switches modes, so they get no policy.
-func applyPolicyToTargets(out *strings.Builder, manager backend.GatewayManager, policyCtx policyResolverContext, targets []backend.GatewayInfo, scope gatewayTargetScope) int {
+func applyPolicyToTargets(out *strings.Builder, manager gatewayPolicyManager, policyCtx policyResolverContext, targets []backend.GatewayInfo, scope gatewayTargetScope) int {
 	type applyOutcome struct {
 		target  backend.GatewayInfo
 		skipped bool
@@ -401,7 +406,7 @@ func applyPolicyToTargets(out *strings.Builder, manager backend.GatewayManager, 
 	return 0
 }
 
-func applyPolicyToTarget(manager backend.GatewayManager, policyCtx policyResolverContext, target backend.GatewayInfo) error {
+func applyPolicyToTarget(manager gatewayPolicyManager, policyCtx policyResolverContext, target backend.GatewayInfo) error {
 	expectedBundleDir := config.HostProjectGatewayConfigDir(policyCtx.Home, target.ProjectHash, target.Tool)
 	if err := manager.VerifyGatewayConfigMount(context.Background(), target.ID, expectedBundleDir); err != nil {
 		return err
@@ -410,7 +415,12 @@ func applyPolicyToTarget(manager backend.GatewayManager, policyCtx policyResolve
 	if err != nil {
 		return err
 	}
+	configHash, err := gatewayConfigHash(manager, target, targetProjectDir)
+	if err != nil {
+		return err
+	}
 	resolved, err := policyCtx.Resolver.Resolve(policy.ResolveInput{
+		ConfigHash:  configHash,
 		ProjectDir:  targetProjectDir,
 		ProjectHash: target.ProjectHash,
 		Tool:        target.Tool,

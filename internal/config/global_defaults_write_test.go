@@ -51,12 +51,12 @@ func TestWriteGlobalDefaultCreatesAndMergesConfig(t *testing.T) {
 	if string(doc["tool"]) != `"codex"` || len(doc["tool_overrides"]) == 0 {
 		t.Fatalf("other keys were not preserved: %s", data)
 	}
-	global, _, warnings, err := LoadDefaults(t.TempDir())
+	global, warnings, err := LoadGlobalDefaults()
 	if err != nil || len(warnings) != 0 {
-		t.Fatalf("LoadDefaults after write: err=%v warnings=%v", err, warnings)
+		t.Fatalf("LoadGlobalDefaults after write: err=%v warnings=%v", err, warnings)
 	}
 	if global.Backend != "podman" {
-		t.Fatalf("LoadDefaults backend = %q, want podman", global.Backend)
+		t.Fatalf("LoadGlobalDefaults backend = %q, want podman", global.Backend)
 	}
 }
 

@@ -64,5 +64,5 @@ func (c *AppContext) PolicyNetworkMode() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return policy.NetworkMode(host.Home, project.Hash)
+	return policy.NetworkMode(host.Home, project.ConfigSourceHash())
 }

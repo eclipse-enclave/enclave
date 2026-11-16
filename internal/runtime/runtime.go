@@ -229,6 +229,9 @@ func (r *Runtime) sessionStartLockName() string {
 
 func (r *Runtime) prepareExecution() (*ExecutionContext, error) {
 	config.WriteProjectMarkers(r.host.Home, r.project.Hash, r.project.RealDir)
+	if r.project.ConfigSourceHash() != r.project.Hash {
+		config.WriteProjectMarkers(r.host.Home, r.project.ConfigSourceHash(), r.project.ConfigSourceDir())
+	}
 	baseContainerName := r.baseContainerName()
 	var containerName string
 	if r.run.Background || r.run.SessionName != "" {
@@ -837,6 +840,7 @@ func (r *Runtime) backendRequest(ctx *ExecutionContext, detached bool, interacti
 			Background:   detached,
 			Yolo:         r.yoloEnabled,
 			Provenance:   r.provenance,
+			ConfigSource: &backend.ConfigSource{Dir: r.project.ConfigSourceDir(), Hash: r.project.ConfigSourceHash()},
 		},
 		Image:           r.build.ImageName,
 		Argv:            newCommandBuilder(r).Build(),
@@ -1162,7 +1166,7 @@ func (r *Runtime) addMemoryMounts(mounts *mountAccumulator) {
 	if r.profile.MemoryDir == "" {
 		return
 	}
-	memDir := config.HostProjectMemoryDir(r.host.Home, r.project.Hash, r.profile.Name)
+	memDir := config.HostProjectMemoryDir(r.host.Home, r.project.ConfigSourceHash(), r.profile.Name)
 	if r.profile.MemoryScope == model.MemoryScopeSession {
 		memDir = config.HostProjectMemorySessionDir(r.host.Home, r.project.Hash, r.profile.Name, r.sessionGeneratedKey())
 	}
@@ -1549,6 +1553,7 @@ func (r *Runtime) resolveEffectivePolicy() (policy.ResolveResult, error) {
 	resolved, err := resolver.Resolve(policy.ResolveInput{
 		ProjectDir:  r.project.Dir,
 		ProjectHash: r.project.Hash,
+		ConfigHash:  r.project.ConfigSourceHash(),
 		Tool:        tool,
 		Session:     &session,
 	})

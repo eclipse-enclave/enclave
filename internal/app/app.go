@@ -86,7 +86,7 @@ func Run(args []string) int {
 		return reportStartupError(parsed, "", err)
 	}
 
-	globalDefaults, projectDefaults, configWarnings, err := config.LoadDefaults(projectDir)
+	globalDefaults, projectDefaults, resolvedProject, configWarnings, err := loadDefaultsForAction(projectDir, parsed)
 	if err != nil {
 		return reportStartupError(parsed, projectDir, err)
 	}
@@ -185,6 +185,7 @@ func Run(args []string) int {
 		return code
 	}
 	ctx := NewAppContext(paths, projectDir)
+	ctx.project, ctx.projectResolved = resolvedProject, true
 
 	command := CommandInput{
 		Ctx:               ctx,

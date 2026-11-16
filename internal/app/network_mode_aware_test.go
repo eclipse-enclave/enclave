@@ -41,6 +41,10 @@ func (f *fakeGatewayManager) ReloadGatewayNetwork(_ context.Context, id string, 
 	return nil
 }
 
+func (f *fakeGatewayManager) Inspect(context.Context, backend.SessionRef) (*backend.Session, error) {
+	return nil, nil
+}
+
 type modeAwareFixture struct {
 	resolverCtx  policyResolverContext
 	restricted   backend.GatewayInfo

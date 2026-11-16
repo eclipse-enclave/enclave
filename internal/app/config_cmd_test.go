@@ -554,7 +554,11 @@ func TestConfigJSONKeepsLegacyFields(t *testing.T) {
 	normalized, _ := normalizeOptions(opts)
 	rows := buildConfigRows(normalized, config.DefaultOptions(), global, config.Defaults{}, config.Defaults{}, false, []string{})
 	globalPath, globalErr := config.GlobalConfigPath()
-	paths, status := configJSONPaths(globalPath, config.ProjectConfigJSONPath(input.Ctx.ProjectDir), false, false, globalErr)
+	project, err := input.Ctx.Project()
+	if err != nil {
+		t.Fatal(err)
+	}
+	paths, status := configJSONPaths(globalPath, config.ResolvedProjectConfigJSONPath(project), false, false, globalErr)
 	legacy, err := json.Marshal(legacyConfigJSON(rows, input.ConfigView, paths, status))
 	if err != nil {
 		t.Fatal(err)

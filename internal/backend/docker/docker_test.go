@@ -78,6 +78,40 @@ func TestPrepareRunProtectsGitConfigFromRunArgAliases(t *testing.T) {
 	}
 }
 
+func TestPrepareRunKeepsWorktreeCreationWritable(t *testing.T) {
+	project, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry := filepath.Join(project, ".git", "worktrees", "current")
+	if err := os.MkdirAll(entry, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	pointer := filepath.Join(entry, "gitdir")
+	if err := os.WriteFile(pointer, []byte("pointer"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	b := newDevcontainerBackend(project, "--volume", project+":/alias")
+	spec, err := b.prepareRun(context.Background(), backend.Request{Image: "test", Session: prepareRunSession(t), Network: backend.NetworkPolicy{Mode: backend.NetworkModeUnrestricted}, ProtectedFiles: []string{pointer}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		path     string
+		readonly bool
+	}{{"/alias/.git/worktrees/new-entry", false}, {"/alias/.git/worktrees/current/gitdir", true}} {
+		owner := -1
+		for i, mount := range spec.hostConfig.Mounts {
+			if util.PathWithin(mount.Target, tc.path) && (owner < 0 || len(mount.Target) > len(spec.hostConfig.Mounts[owner].Target)) {
+				owner = i
+			}
+		}
+		if owner < 0 || spec.hostConfig.Mounts[owner].ReadOnly != tc.readonly {
+			t.Fatalf("wrong mount mode for %s: %+v", tc.path, spec.hostConfig.Mounts)
+		}
+	}
+}
+
 func TestPrepareRunDoesNotProtectUnrelatedReadOnlyFileAliases(t *testing.T) {
 	project := t.TempDir()
 	path := filepath.Join(project, "preferences")
@@ -256,6 +290,27 @@ func TestSessionFromSummaryProjectDir(t *testing.T) {
 			t.Fatalf("expected ProjectDir fallback %q, got %q", "/legacy/project", session.ProjectDir)
 		}
 	})
+}
+
+func TestConfigSourceLabelsRoundTrip(t *testing.T) {
+	source := &backend.ConfigSource{Dir: "/repo/main", Hash: "abc123abc123"}
+	labels := labelsFromRequest(backend.Request{Session: backend.SessionMeta{Tool: "claude", ConfigSource: source}})
+	session, ok := sessionFromSummary(dockercmd.Summary{Names: []string{"/enclave-claude-abc123abc123"}, Labels: labels})
+	if !ok || session.ConfigSource == nil || *session.ConfigSource != *source {
+		t.Fatalf("pin did not roundtrip: %+v", session)
+	}
+	for _, malformed := range []string{"{broken", "null", `{}`, `{"dir":"/other"}`} {
+		labels[model.LabelConfigSource] = malformed
+		session, _ = sessionFromSummary(dockercmd.Summary{Names: []string{"/enclave-claude-abc123abc123"}, Labels: labels})
+		if session.ConfigSource == nil {
+			t.Fatalf("malformed pin %q became legacy fallback", malformed)
+		}
+	}
+	delete(labels, model.LabelConfigSource)
+	session, _ = sessionFromSummary(dockercmd.Summary{Names: []string{"/enclave-claude-abc123abc123"}, Labels: labels})
+	if session.ConfigSource != nil {
+		t.Fatal("legacy session has a fabricated source")
+	}
 }
 
 func TestProvenanceLabelsRoundTrip(t *testing.T) {

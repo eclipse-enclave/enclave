@@ -63,6 +63,7 @@ func TestMergeDefaultsCoversAllFields(t *testing.T) {
 		SensitiveDirExceptions: []string{"/test-exempt"},
 		ProjectMount:           model.ProjectMountReadonly,
 		WorktreeMetadata:       model.WorktreeMetadataReadonly,
+		WorktreeInheritance:    &trueVal,
 		AllowDomains:           []string{"api.test.com"},
 		BridgePorts:            []string{"9800"},
 	}

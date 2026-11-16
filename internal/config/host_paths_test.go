@@ -15,6 +15,31 @@ import (
 	"enclave/internal/model"
 )
 
+func TestResolvedProjectConfigJSONPath(t *testing.T) {
+	unsetXDGEnv(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	for _, tc := range []struct {
+		name    string
+		project model.Project
+		hash    string
+	}{
+		{"unresolved", model.Project{}, ""},
+		{"checkout", model.Project{Hash: "checkout"}, "checkout"},
+		{"anchor", model.Project{Hash: "checkout", ConfigHash: "anchor"}, "anchor"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			want := ""
+			if tc.hash != "" {
+				want = HostProjectConfigJSONPath(home, tc.hash)
+			}
+			if got := ResolvedProjectConfigJSONPath(tc.project); got != want {
+				t.Fatalf("got %q, want %q", got, want)
+			}
+		})
+	}
+}
+
 func TestHostPaths(t *testing.T) {
 	unsetXDGEnv(t)
 

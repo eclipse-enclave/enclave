@@ -7,12 +7,25 @@
 
 package app
 
-import "enclave/internal/cli"
+import (
+	"enclave/internal/cli"
+	"enclave/internal/usercmd"
+)
 
 const actionContinue = "continue"
 
 func isRunAction(action string) bool {
 	return action == "run" || action == "shell" || action == actionContinue || action == "resume"
+}
+
+// actionRequiresConfigSource is the fail-closed boundary for worktree
+// inheritance: session starts and generated devcontainer files must not be
+// built from a fallback layer. Unknown or malformed user commands are included.
+func actionRequiresConfigSource(parsed cli.Result) bool {
+	if isRunAction(parsed.Action) || parsed.Action == "devcontainer-generate" {
+		return true
+	}
+	return parsed.Action == "user-command" && (parsed.UserCommand == nil || parsed.UserCommand.Target != usercmd.TargetHost)
 }
 
 // backendFreeActions never touch a container engine, so the "auto" backend is

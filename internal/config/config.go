@@ -64,6 +64,7 @@ type Defaults struct {
 	SensitiveDirExceptions []string            `json:"sensitive_dir_exceptions"`
 	ProjectMount           string              `json:"project_mount"`
 	WorktreeMetadata       string              `json:"worktree_metadata"`
+	WorktreeInheritance    *bool               `json:"worktree_inheritance"`
 	AllowDomains           []string            `json:"allow_domains"`
 	BridgePorts            []string            `json:"bridge_ports"`
 
@@ -74,38 +75,45 @@ type Defaults struct {
 // LoadGlobalDefaults reads only the global config, for commands that must not
 // depend on the current project.
 func LoadGlobalDefaults() (Defaults, []Warning, error) {
-	globalPath, err := GlobalConfigPath()
+	home, err := ResolveHostHome()
 	if err != nil {
 		return Defaults{}, nil, err
 	}
-	return readDefaults(globalPath)
+	return LoadGlobalDefaultsFromHome(home)
 }
 
-func LoadDefaults(projectDir string) (global Defaults, project Defaults, warnings []Warning, err error) {
-	globalDefaults, globalWarns, err := LoadGlobalDefaults()
-	if err != nil {
-		return Defaults{}, Defaults{}, nil, err
-	}
-	warnings = append(warnings, withFileLayer(globalWarns, warningLayerGlobal)...)
+// LoadGlobalDefaultsFromHome avoids resolving home again in bootstrap readers.
+func LoadGlobalDefaultsFromHome(home string) (Defaults, []Warning, error) {
+	defaults, warnings, err := readDefaults(filepath.Join(hostConfigRoot(home), configFilename))
+	return defaults, withFileLayer(warnings, warningLayerGlobal), err
+}
 
-	home, err := ResolveHostHome()
+// LoadDefaultsFromProject reads an explicitly resolved project layer. Callers
+// select the config identity before invoking this loader.
+func LoadDefaultsFromProject(home string, resolved model.Project) (global, project Defaults, warnings []Warning, err error) {
+	global, warnings, err = LoadGlobalDefaultsFromHome(home)
 	if err != nil {
-		return Defaults{}, Defaults{}, nil, err
+		return
 	}
-	proj, err := ResolveProjectFromDir(projectDir)
-	if err != nil {
-		return Defaults{}, Defaults{}, nil, err
-	}
+	var more []Warning
+	project, more, err = LoadProjectDefaults(home, resolved)
+	warnings = append(warnings, more...)
+	return
+}
 
-	projectPath := HostProjectConfigJSONPath(home, proj.Hash)
+// LoadProjectDefaults reads the already-selected project layer.
+func LoadProjectDefaults(home string, proj model.Project) (Defaults, []Warning, error) {
+	projectPath := HostProjectConfigJSONPath(home, proj.ConfigSourceHash())
 	projectDefaults, projectWarns, err := readDefaults(projectPath)
 	if err != nil {
-		return Defaults{}, Defaults{}, nil, err
+		return Defaults{}, nil, err
 	}
-	warnings = append(warnings, withFileLayer(projectWarns, warningLayerProject)...)
+	if proj.ConfigSourceHash() != proj.Hash {
+		projectDefaults.WorktreeInheritance = nil
+	}
+	warnings := withFileLayer(projectWarns, warningLayerProject)
 	warnings = append(warnings, withFileLayer(stripGlobalOnlyKeys(projectPath, &projectDefaults), warningLayerProject)...)
-
-	return globalDefaults, projectDefaults, warnings, nil
+	return projectDefaults, warnings, nil
 }
 
 func applyScalarDefaults(opts model.Options, defaults Defaults, source model.OptionSource, sources *model.OptionSources) model.Options {
@@ -131,6 +139,7 @@ func ResolveToolOverrideDefaults(global Defaults, project Defaults, tool string)
 	if ok {
 		// Per-tool overrides must not carry nested overrides.
 		override.ToolOverrides = nil
+		override.WorktreeInheritance = nil
 	}
 	return override, ok
 }
@@ -224,27 +233,35 @@ func canOverride(current model.OptionSource, incoming model.OptionSource) bool {
 	}
 }
 
-func readDefaults(path string) (Defaults, []Warning, error) {
+func readConfigBytes(path string) ([]byte, []Warning, error) {
 	if path == "" {
-		return Defaults{}, nil, nil
+		return nil, nil, nil
 	}
 	info, err := os.Stat(path)
+	if os.IsNotExist(err) {
+		return nil, nil, nil
+	}
 	if err != nil {
-		if os.IsNotExist(err) {
-			return Defaults{}, nil, nil
-		}
-		return Defaults{}, nil, err
+		return nil, nil, err
 	}
 	if info.IsDir() {
-		return Defaults{}, []Warning{newWarning(WarningConfigPathIsDirectory, "", "", path, "Config path is a directory: %s", path)}, nil
+		return nil, []Warning{newWarning(WarningConfigPathIsDirectory, "", "", path, "Config path is a directory: %s", path)}, nil
 	}
-	// #nosec G304 -- path is an explicit config file path resolved by application config logic.
+	// #nosec G304 -- path is an explicit config file resolved by application logic.
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return Defaults{}, nil, err
+		return nil, nil, err
 	}
 	if len(strings.TrimSpace(string(data))) == 0 {
-		return Defaults{}, nil, nil
+		return nil, nil, nil
+	}
+	return data, nil, nil
+}
+
+func readDefaults(path string) (Defaults, []Warning, error) {
+	data, warnings, err := readConfigBytes(path)
+	if err != nil || len(data) == 0 {
+		return Defaults{}, warnings, err
 	}
 	var defaults Defaults
 	if err := json.Unmarshal(data, &defaults); err != nil {
@@ -259,7 +276,7 @@ func readDefaults(path string) (Defaults, []Warning, error) {
 		return Defaults{}, nil, err
 	}
 
-	warnings := validateTopLevelDefaults(path, doc, &defaults)
+	warnings = validateTopLevelDefaults(path, doc, &defaults)
 	warnings = append(warnings, validateToolOverrides(path, doc, &defaults)...)
 	warnings = append(warnings, validateSessionTint(path, &defaults)...)
 	warnings = append(warnings, validateHostEnv(path, &defaults)...)
@@ -419,6 +436,10 @@ func validateToolOverrides(path string, doc map[string]json.RawMessage, defaults
 			continue
 		}
 		if parsed, ok := defaults.ToolOverrides[toolName]; ok {
+			if _, present := entry["worktree_inheritance"]; present {
+				parsed.WorktreeInheritance = nil
+				warnings = append(warnings, newWarning(WarningInvalidToolOverride, "worktree_inheritance", toolName, path, "Ignoring tool_overrides.%s.worktree_inheritance in %s: inheritance is selected before tool overrides", toolName, path))
+			}
 			if _, hasAutoUpdate := entry["auto_update"]; hasAutoUpdate {
 				parsed.AutoUpdate = nil
 				warnings = append(warnings, newWarning(WarningInvalidToolOverride, "auto_update", toolName, path, "Ignoring tool_overrides.%s.auto_update in %s: binary updates are configured globally", toolName, path))

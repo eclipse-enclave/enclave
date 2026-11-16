@@ -140,6 +140,23 @@ func OptionDefs() []OptionDef {
 			Apply:          ApplyStringSlice,
 		},
 		{
+			Name:           "worktree_inheritance",
+			Group:          OptionGroupGlobal,
+			Kind:           OptionKindBool,
+			AffectsSession: SessionAffected,
+			AffectsNetwork: true,
+			OptionField:    "WorktreeInheritance",
+			SourceField:    "WorktreeInheritance",
+			DefaultsField:  "WorktreeInheritance",
+			Apply:          ApplyBoolPtr,
+			CLIFlags: []CLIFlagDef{{
+				Name:      "--worktree-inheritance",
+				Usage:     "Opt into inheriting project inputs and project memory from the verified worktree anchor (default: false, or the main checkout's setting)",
+				ValueKind: CLIValueNone,
+				Action:    CLIAction{Kind: CLIActionSetBool, OptionField: "WorktreeInheritance", SourceField: "WorktreeInheritance", BoolValue: true},
+			}},
+		},
+		{
 			Name:           "tool",
 			Group:          OptionGroupRun,
 			Kind:           OptionKindString,

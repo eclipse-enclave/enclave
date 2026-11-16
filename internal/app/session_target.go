@@ -10,6 +10,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -319,6 +320,30 @@ func sessionTargetTool(opts model.Options) string {
 		return strings.TrimSpace(opts.Tool)
 	}
 	return ""
+}
+
+// sessionConfigProject uses the source pinned at startup. Legacy sessions have
+// no trustworthy inherited source, so they retain checkout-local config.
+func sessionConfigProject(session backend.Session) (model.Project, error) {
+	if source := session.ConfigSource; source != nil && source.Dir == session.ProjectDir && source.Hash == session.ProjectHash {
+		if err := validatePinnedConfigSource(source.Dir, source.Hash); err != nil {
+			return model.Project{}, err
+		}
+		// Checkout-local settings are keyed by the recorded path, even if the
+		// checkout was removed or replaced after the session started.
+		return model.Project{Dir: source.Dir, RealDir: source.Dir, Hash: source.Hash, Name: filepath.Base(source.Dir)}, nil
+	}
+	project, err := config.ResolveProjectFromDir(session.ProjectDir)
+	if err != nil {
+		return model.Project{}, err
+	}
+	if session.ConfigSource == nil {
+		return project, nil
+	}
+	if session.ProjectHash != "" && session.ProjectHash != project.Hash {
+		return model.Project{}, fmt.Errorf("session project path/hash mismatch; restart the session")
+	}
+	return resolvePinnedProjectConfig(project, session.ConfigSource.Dir, session.ConfigSource.Hash)
 }
 
 // sessionTargetProject resolves the project for scoping. Resolution failures

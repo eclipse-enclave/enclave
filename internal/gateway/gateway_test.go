@@ -10,6 +10,7 @@ package gateway
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -166,6 +167,40 @@ exit 2
 	}
 	if !result.Exists || !result.Owned || !result.Removed || removed != "gateway-id" {
 		t.Fatalf("unexpected reconciliation: result=%+v removed=%q", result, removed)
+	}
+}
+
+func TestGatewayAllowlistMountUsesConfigAnchor(t *testing.T) {
+	for _, own := range []bool{false, true} {
+		t.Run(fmt.Sprint(own), func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, "config"))
+			anchor := filepath.Join(config.HostProjectGatewayAllowlistsDir(home, "anchor"), "codex.conf")
+			paths := []string{anchor, filepath.Join(config.HostGatewayAllowlistsDir(home), "codex.conf")}
+			if own {
+				paths = append(paths, filepath.Join(config.HostProjectGatewayAllowlistsDir(home, "checkout"), "codex.conf"))
+			}
+			for _, path := range paths {
+				if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(path, []byte("address=/allowed.example/#\n"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			mounts := gatewayMounts(StartConfig{Home: home, Profile: model.Profile{Name: "codex"}, ProjectHash: "checkout", ConfigHash: "anchor"})
+			if len(mounts) != 1 || mounts[0].Source != anchor || mounts[0].Target != model.GatewayAllowlistOverridePath || !mounts[0].ReadOnly {
+				t.Fatalf("wrong allowlist mount: %+v", mounts)
+			}
+		})
+	}
+}
+
+func TestGatewayDoesNotMountBuiltInAllowlistFromCache(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, "config"))
+	if mounts := gatewayMounts(StartConfig{Home: home, Profile: model.Profile{Name: "codex"}, AllowlistPath: "/cache/built-in.conf"}); len(mounts) != 0 {
+		t.Fatalf("built-in assets unexpectedly mounted: %+v", mounts)
 	}
 }
 

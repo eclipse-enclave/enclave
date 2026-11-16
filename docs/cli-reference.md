@@ -214,6 +214,7 @@ See [List options](configuration.md#list-options).
 | `--allow-sensitive-mounts` | Mount the project or additional directories even when they expose sensitive host data (CLI-only). See [Mounting all sensitive paths](mounts.md#mounting-all-sensitive-paths) |
 | `--project-mount <writable\|readonly>` | Mount the project/worktree read-write (default) or read-only |
 | `--worktree-metadata <follow\|readonly\|none>` | Linked-worktree git metadata mounts: follow the project mount (default), force read-only, or skip |
+| `--worktree-inheritance[=true\|false]` | Opt into the verified anchor's project layer and project memory; default `false` keeps them checkout-local unless the main checkout's project config opts the repository in. Also configured with `worktree_inheritance`; accepted by every command |
 | `--yolo` | Enable YOLO mode explicitly |
 | `--no-yolo` | Disable YOLO mode (agents will prompt for confirmation) |
 | `--host-config <none\|passthrough>` | Reuse reviewed paths from the host tool config; see [Host config passthrough](tool-config.md#host-config-passthrough) |

@@ -59,7 +59,8 @@ func runConfig(input *CommandInput) int {
 	rows := buildConfigRows(rowOpts, input.BaseOptions, input.GlobalDefaults, input.ProjectDefaults, input.ToolDefaults, input.HasToolDefaults, hostConfigDefaults)
 	rows = withRawCLILists(rows, input.CLIOptions, opts.Sources)
 	globalPath, globalErr := config.GlobalConfigPath()
-	projectPath := config.ProjectConfigJSONPath(input.Ctx.ProjectDir)
+	resolvedProject, _ := input.Ctx.Project()
+	projectPath := config.ResolvedProjectConfigJSONPath(resolvedProject)
 	globalExists := false
 	projectExists := false
 	if globalErr == nil && strings.TrimSpace(globalPath) != "" {
@@ -97,6 +98,9 @@ func runConfig(input *CommandInput) int {
 		fmt.Printf("Project Config: %s\n", projectPath)
 	} else {
 		fmt.Printf("Project Config: %s (missing)\n", projectPath)
+	}
+	if resolvedProject.ConfigSourceHash() != resolvedProject.Hash {
+		fmt.Printf("Project Directory: %s\nConfig Anchor: %s (%s)\n", resolvedProject.Dir, resolvedProject.ConfigSourceDir(), resolvedProject.ConfigSourceHash())
 	}
 	fmt.Println()
 	fmt.Printf("Config sources (highest wins): cli > tool_override > project > global > default\n\n")
@@ -287,6 +291,7 @@ type configJSONEnvelope struct {
 	View          string                      `json:"view"`
 	Tool          configJSONTool              `json:"tool"`
 	Project       *configJSONProject          `json:"project"`
+	ConfigSource  *configJSONSource           `json:"configSource"`
 	Files         map[string]configJSONFile   `json:"files"`
 	Options       map[string]configJSONOption `json:"options"`
 	Warnings      []configJSONWarning         `json:"warnings"`
@@ -304,6 +309,11 @@ type configJSONProject struct {
 	RealDir string `json:"realDir"`
 	Hash    string `json:"hash"`
 	Name    string `json:"name"`
+}
+
+type configJSONSource struct {
+	Dir  string `json:"dir"`
+	Hash string `json:"hash"`
 }
 
 type configJSONFile struct {
@@ -351,6 +361,21 @@ func buildConfigEnvelope(input *CommandInput, opts model.Options, profile *model
 	}
 	if project, err := input.Ctx.Project(); err == nil {
 		envelope.Project = &configJSONProject{Dir: project.Dir, RealDir: project.RealDir, Hash: project.Hash, Name: project.Name}
+		envelope.ConfigSource = &configJSONSource{Dir: project.ConfigSourceDir(), Hash: project.ConfigSourceHash()}
+		if project.ConfigSourceHash() != project.Hash {
+			path := config.ResolvedProjectConfigJSONPath(model.Project{Hash: project.Hash})
+			status := "unavailable"
+			if path != "" {
+				status = "missing"
+				if _, err := os.Stat(path); err == nil {
+					status = "present"
+				}
+			}
+			if envelope.Files == nil {
+				envelope.Files = map[string]configJSONFile{}
+			}
+			envelope.Files["checkout"] = configJSONFile{Path: path, Status: status}
+		}
 	} else {
 		addWarning(configWarningProjectUnavailable, "", fmt.Sprintf("Cannot resolve the project: %v", err))
 	}

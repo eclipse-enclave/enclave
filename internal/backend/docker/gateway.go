@@ -70,6 +70,10 @@ func (b *Backend) startObservingGateway(ctx context.Context, req backend.Request
 
 func (b *Backend) gatewayStartConfig(req backend.Request, networkName string, gatewayConfigDir string) gateway.StartConfig {
 	workspaceID := workspaceIDFromSession(req.Session, b.opts.ProjectDir)
+	configHash := req.Session.ProjectHash
+	if req.Session.ConfigSource != nil {
+		configHash = req.Session.ConfigSource.Hash
+	}
 	return gateway.StartConfig{
 		Paths:            b.opts.Paths,
 		Profile:          model.Profile{Name: req.Session.Tool},
@@ -89,6 +93,7 @@ func (b *Backend) gatewayStartConfig(req backend.Request, networkName string, ga
 		ProjectDir:       req.Session.Worktree,
 		WorkspaceID:      workspaceID,
 		ProjectHash:      req.Session.ProjectHash,
+		ConfigHash:       configHash,
 		TLSRootDir:       config.HostTLSDir(b.opts.Host.Home),
 	}
 }

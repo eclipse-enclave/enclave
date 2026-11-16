@@ -11,13 +11,16 @@ import "fmt"
 
 // Warning codes are stable identifiers for machine consumers.
 const (
-	WarningInvalidConfigJSON     = "invalid_config_json"
-	WarningConfigPathIsDirectory = "config_path_is_directory"
-	WarningUnsupportedScope      = "unsupported_scope"
-	WarningInvalidToolOverride   = "invalid_tool_override"
-	WarningInvalidValue          = "invalid_value"
-	WarningSuspiciousValue       = "suspicious_value"
-	WarningProjectGuardrail      = "project_guardrail"
+	WarningInvalidConfigJSON        = "invalid_config_json"
+	WarningConfigPathIsDirectory    = "config_path_is_directory"
+	WarningUnsupportedScope         = "unsupported_scope"
+	WarningInvalidToolOverride      = "invalid_tool_override"
+	WarningInvalidValue             = "invalid_value"
+	WarningSuspiciousValue          = "suspicious_value"
+	WarningProjectGuardrail         = "project_guardrail"
+	WarningConfigAnchorUnavailable  = "config_anchor_unavailable"
+	WarningInvalidWorktreeMetadata  = "invalid_worktree_metadata"
+	WarningWorktreeOverridesIgnored = "worktree_overrides_ignored"
 )
 
 const (

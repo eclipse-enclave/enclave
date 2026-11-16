@@ -96,7 +96,7 @@ func (m networkManager) Prepare(_ string, authState model.AuthState, _ SecretMap
 
 	env := []string{model.EnvDNSGateway + "=1"}
 	logx.Infof("Network restricted to allowlisted domains via DNS gateway")
-	policySourcePaths := policyDomainSourcePaths(m.host.Home, m.project.Dir, m.project.Hash, m.profile.Name, resolved.GlobalPolicy, resolved.ProjectPolicy)
+	policySourcePaths := policyDomainSourcePaths(m.host.Home, m.project.Dir, m.project.ConfigSourceHash(), m.profile.Name, resolved.GlobalPolicy, resolved.ProjectPolicy)
 	switch len(policySourcePaths) {
 	case 1:
 		logx.Infof("Merged policy domains from %s included", policySourcePaths[0])

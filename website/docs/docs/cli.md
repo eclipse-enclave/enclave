@@ -62,9 +62,11 @@ cd ../myproject-agent
 enclave
 ```
 
-Each worktree has its own working directory and branch, so agents in different
-worktrees never touch each other's changes. When you are done, review the branch
-and clean up with `git worktree remove ../myproject-agent`.
+Each worktree has its own working directory, branch, sessions, and runtime
+stores. Pass `--worktree-inheritance=true` to opt into the main checkout's
+project configuration, secrets, and project-scoped agent memory;
+see [Configuration](configuration.md#find-your-config-files). When you are done,
+review the branch and clean up with `git worktree remove ../myproject-agent`.
 
 ## Pick a specific agent
 

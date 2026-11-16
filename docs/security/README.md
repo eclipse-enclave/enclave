@@ -43,6 +43,43 @@ not a hardened container-escape boundary.
   `--project-mount readonly` when metadata must not change; see
   [Git](../git.md).
 
+## Worktree inheritance
+
+Opting into [worktree inheritance](../configuration.md#linked-worktrees)
+trusts the verified repository family with the anchor's project inputs and
+project memory. Hostile branches receive that authority too. Sensitive-path
+and metadata-mount restrictions remain independent.
+
+Verification proves a consistent filesystem relationship, not a trusted
+checkout or proof that Git created it. A copied `.git` pointer alone is
+insufficient: both ends must agree. Registry entries remain writable so agents
+can create worktrees. Equivalent manual writes are indistinguishable from
+`git worktree add`; forging membership in an unrelated repository requires
+access to that repository's metadata.
+
+A requested inheritance never degrades silently for a recognized linked
+worktree: broken pointers and unsupported anchors fail the start. The anchor
+is derived from pointer files and the repository `config`, all read-only in
+sessions of that repository, not from writable paths such as `HEAD`.
+
+Filesystem verification is not atomic. Source pins fix a path, not a
+repository instance or its contents, and there is no persistent repository
+registration: a checkout whose `.git` was removed is indistinguishable from a
+non-repository on the next launch. A session that mounts a worktree as a
+subdirectory or additional directory does not protect its pointers. Do not
+treat automatic source selection as mandatory policy propagation to arbitrary
+agent-created directories.
+
+Shared project memory is writable input that one worktree can poison for
+another, and concurrent sessions write it without coordination. Inherited
+credentials can remain in checkout-local env stores or native auth caches
+after removal from their source. Clear saved credentials with `--reset-auth`,
+stop running sessions, and revoke provider tokens when access must be
+withdrawn.
+
+Inheritance does not protect host Git operations from writable metadata or
+hooks.
+
 ## Project-controlled execution
 
 Treat an untrusted repository as executable input and review its devcontainer

@@ -49,6 +49,16 @@ func OptionSpecs() []OptionSpec {
 			},
 		},
 		{
+			Name:  "worktree_inheritance",
+			Group: OptionGroupGlobal,
+			ApplyDefaultsWithSource: func(opts *model.Options, defaults Defaults, source model.OptionSource, sources *model.OptionSources) {
+				if canOverride(sources.WorktreeInheritance, source) && defaults.WorktreeInheritance != nil {
+					opts.WorktreeInheritance = *defaults.WorktreeInheritance
+					sources.WorktreeInheritance = source
+				}
+			},
+		},
+		{
 			Name:  "tool",
 			Group: OptionGroupRun,
 			ApplyDefaultsWithSource: func(opts *model.Options, defaults Defaults, source model.OptionSource, sources *model.OptionSources) {

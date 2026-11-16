@@ -25,7 +25,7 @@ func (r *Runtime) prepareToolConfigSource() error {
 	if strings.TrimSpace(r.profile.ConfigDir) == "" {
 		patchDirs := []string{
 			config.HostToolPatchesDir(r.host.Home, r.profile.Name),
-			config.HostProjectToolPatchesDir(r.host.Home, r.project.Hash, r.profile.Name),
+			config.HostProjectToolPatchesDir(r.host.Home, r.project.ConfigSourceHash(), r.profile.Name),
 		}
 		for _, patchDir := range patchDirs {
 			if hasConfigPatchFiles(patchDir) {
@@ -39,7 +39,7 @@ func (r *Runtime) prepareToolConfigSource() error {
 	}
 
 	globalConfigDir := config.HostToolConfigDir(r.host.Home, r.profile.Name)
-	projectConfigDir := config.HostProjectConfigDir(r.host.Home, r.project.Hash, r.profile.Name)
+	projectConfigDir := config.HostProjectConfigDir(r.host.Home, r.project.ConfigSourceHash(), r.profile.Name)
 	projectToolDir := config.HostProjectToolDir(r.host.Home, r.project.Hash, r.profile.Name)
 	generatedConfigDir := r.generatedConfigSourceDir()
 	for _, dir := range []string{globalConfigDir, projectConfigDir, generatedConfigDir} {
@@ -127,13 +127,13 @@ func (r *Runtime) shouldMountToolConfigSource() bool {
 	if util.DirHasFiles(config.HostToolConfigDir(r.host.Home, r.profile.Name)) {
 		return true
 	}
-	if util.DirHasFiles(config.HostProjectConfigDir(r.host.Home, r.project.Hash, r.profile.Name)) {
+	if util.DirHasFiles(config.HostProjectConfigDir(r.host.Home, r.project.ConfigSourceHash(), r.profile.Name)) {
 		return true
 	}
 	if hasConfigPatchFiles(config.HostToolPatchesDir(r.host.Home, r.profile.Name)) {
 		return true
 	}
-	return hasConfigPatchFiles(config.HostProjectToolPatchesDir(r.host.Home, r.project.Hash, r.profile.Name))
+	return hasConfigPatchFiles(config.HostProjectToolPatchesDir(r.host.Home, r.project.ConfigSourceHash(), r.profile.Name))
 }
 
 func (r *Runtime) toolConfigSourceHandlesSkills() bool {
@@ -254,7 +254,7 @@ func (r *Runtime) applyConfigOverrideScope(targetDir string, sourceDir string, p
 	patchDir := config.HostToolPatchesDir(r.host.Home, r.profile.Name)
 	if projectScope {
 		scope = "project"
-		patchDir = config.HostProjectToolPatchesDir(r.host.Home, r.project.Hash, r.profile.Name)
+		patchDir = config.HostProjectToolPatchesDir(r.host.Home, r.project.ConfigSourceHash(), r.profile.Name)
 	}
 
 	patches, err := findConfigPatches(patchDir)
@@ -358,7 +358,7 @@ func (r *Runtime) applySharedSkillsLayer(targetDir string, projectScope bool) er
 
 	sourceDir := config.HostSkillsDir(r.host.Home)
 	if projectScope {
-		sourceDir = config.HostProjectSkillsDir(r.host.Home, r.project.Hash)
+		sourceDir = config.HostProjectSkillsDir(r.host.Home, r.project.ConfigSourceHash())
 	}
 	if !util.PathExists(sourceDir) {
 		return nil

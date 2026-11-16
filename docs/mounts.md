@@ -43,6 +43,17 @@ metadata the agent can edit files and run `git log`/`diff`/`status`, but every
 Git write, including `git add`, fails; commit on the host. For a `.git`
 directory inside the project, only the project mode applies.
 
+A verified linked worktree can mount its gitdir and common directory even when
+separate Git metadata prevents identifying an inheritance anchor. In that case,
+[project configuration stays checkout-local](configuration.md#linked-worktrees)
+and startup warns. Sensitive-path restrictions and metadata mount modes still
+apply.
+
+Default mode leaves the registry writable so agents can use `git worktree add`
+for subagents. Existing config and pointer files stay protected; operations
+that remove or move entries protected at startup can fail. See
+[Git config protection](git.md#config-protection).
+
 ## Sensitive mounts
 
 Session-starting commands (`run`, `shell`, `continue`, `resume`,

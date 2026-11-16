@@ -133,6 +133,8 @@ The network request flow, restricted and unrestricted, has separate
 | [`extensions/tools/`](../extensions/tools/) | Per-tool `spec.yaml`, templates, allowlists, install and `check-update.sh` scripts |
 | [`internal/config/paths.go`](../internal/config/paths.go) | Resolves the app root (`ENCLAVE_HOME`, adjacent tree, or embedded store) |
 | [`internal/config/profile.go`](../internal/config/profile.go) | Loads and lists tool profiles |
+| [`internal/gitworktree/`](../internal/gitworktree/) | Dependency-neutral filesystem verification of linked-worktree relationships and config anchors |
+| [`internal/app/project_config.go`](../internal/app/project_config.go) | Selects and pins config identity before loading defaults; kept out of `config` so the gateway proxy does not depend on Git metadata resolution |
 | [`internal/domainpattern/pattern.go`](../internal/domainpattern/pattern.go) | Strict domain patterns for secret release hosts |
 
 ### Runtime execution
@@ -408,15 +410,22 @@ numeric names can still overlap automatic allocation.
 
 `app.Run(args)` resolves options in this order:
 
-1. `config.LoadDefaults(projectDir)` reads `~/.config/enclave/config.json`
-   (global) and `<config-root>/projects/<hash>/config.json` (project),
-   dropping the global-only keys `auto_update`, `update_channel`, and
-   `disabled_commands` from the project file.
-2. `cli.Parse(args, baseOpts)` matches commands and flags through the
-   generated `CLIFlagIndex()` registry and returns
-   `Result{Options, Action, HelpShown, Sources, ConfigView}`.
-3. `model.MergeOptionSources(baseSources, cliSources)` merges source tracking;
-   the CLI wins where set.
+1. `cli.Parse(args, baseOpts)` matches commands and flags through the
+   generated `CLIFlagIndex()` registry and returns options and source markers.
+2. `app.loadDefaultsForAction` resolves `worktree_inheritance` before source
+   selection: CLI > checkout-local project > anchor project > global >
+   default (`false`). Only that key is read from the local and anchor files
+   initially, the latter after `internal/gitworktree` verified the anchor.
+   Tool overrides cannot set it.
+   Opted-in verified worktrees use the anchor's project layer; other directories
+   and submodules use their own. Invalid relationships and verified but
+   unsupported anchors block starts before reading project config;
+   non-starting commands warn and fall back locally. Repository config
+   reads are bounded, and no includes are followed.
+3. `config.LoadDefaultsFromProject` loads global defaults and project defaults
+   from `<config-root>/projects/<ConfigHash>/config.json`, dropping global-only
+   keys, including inside tool overrides. The command
+   context retains the resolved project.
 4. `config.ResolveOptionsForTool(cliOpts, cliSources, global, project)`
    applies the layers:
    - CLI lists are held back so config lists fold under them.
@@ -435,6 +444,29 @@ numeric names can still overlap automatic allocation.
    ([Tool selection](#tool-selection)), then step 4 runs again for it.
 8. Each field of the final `Options` records its source: CLI, ToolOverride,
    Project, Global, or Default.
+
+`Project.Dir`, `RealDir`, `Hash`, and `Name` always identify the current
+checkout; `Hash` is derived solely from its canonical path. `ConfigDir` and
+`ConfigHash` identify the selected config anchor. User inputs and project
+memory use config identity; stores, baselines, generated files, session labels,
+lifecycle lookup, and gateway bundles use state identity. Markers record each
+hash's actual anchor. Config selection never implicitly enables metadata
+mounts. Session metadata records the canonical config anchor and hash. Docker
+round-trips this pin through `Session.ConfigSource`; attach, Theia, and gateway
+apply use it without re-resolving Git metadata. Legacy sessions without a pin
+use checkout-local config. See
+[Linked worktrees](configuration.md#linked-worktrees).
+
+```mermaid
+flowchart LR
+    CLI[CLI and sources] --> State[Canonical checkout identity]
+    State --> Verify[Filesystem relationship verification]
+    Verify --> Config[Selected config identity]
+    Config --> Global[Global defaults]
+    Global --> Defaults[Project defaults and full layering]
+    State --> Runtime[Checkout-local runtime state]
+    Defaults --> Runtime
+```
 
 Precedence and the global-only keys are in
 [configuration.md](configuration.md#precedence).

@@ -25,9 +25,25 @@ import (
 	"enclave/internal/util"
 )
 
+type gatewayBackend interface {
+	backend.Backend
+	backend.GatewayManager
+}
+
+type sessionInspector interface {
+	Inspect(ctx context.Context, ref backend.SessionRef) (*backend.Session, error)
+}
+
+// gatewayPolicyManager adds the session lookup that finds a gateway's pinned
+// config source.
+type gatewayPolicyManager interface {
+	backend.GatewayManager
+	sessionInspector
+}
+
 // gatewayManagerForInput selects the backend and returns its gateway-reload
 // surface. The second return is a non-zero exit code on failure.
-func gatewayManagerForInput(input *CommandInput) (backend.GatewayManager, int) {
+func gatewayManagerForInput(input *CommandInput) (gatewayBackend, int) {
 	host, err := resolveHost()
 	if err != nil {
 		logx.Warnf("Failed to resolve host for backend selection: %v", err)
@@ -37,7 +53,7 @@ func gatewayManagerForInput(input *CommandInput) (backend.GatewayManager, int) {
 		logx.Errorf("%v", err)
 		return nil, 1
 	}
-	manager, ok := be.(backend.GatewayManager)
+	manager, ok := be.(gatewayBackend)
 	if !ok {
 		logx.Errorf("backend %s does not support network gateway management", be.Name())
 		return nil, 1
@@ -108,7 +124,36 @@ func discoverGatewayTargets(input *CommandInput, manager backend.GatewayManager,
 	return targets, scopeLabel, nil
 }
 
-func desiredGatewayBundleHash(resolver policy.EffectiveResolver, target backend.GatewayInfo, targetProjectDir string) (string, error) {
+// gatewayConfigHash uses the owning session's pinned source, never the
+// checkout's current metadata. Unpinned legacy gateways keep their own layer.
+func gatewayConfigHash(be sessionInspector, target backend.GatewayInfo, dir string) (string, error) {
+	if target.SessionContainer == "" {
+		return target.ProjectHash, nil
+	}
+	session, err := be.Inspect(context.Background(), backend.SessionRef{Name: target.SessionContainer})
+	if err != nil {
+		return "", err
+	}
+	if session == nil {
+		return "", fmt.Errorf("gateway session %s is unavailable", target.SessionContainer)
+	}
+	if session.ConfigSource == nil {
+		return target.ProjectHash, nil
+	}
+	if session.ProjectHash != target.ProjectHash || session.Tool != target.Tool {
+		return "", fmt.Errorf("gateway/session ownership mismatch")
+	}
+	if session.ProjectDir != dir {
+		return "", fmt.Errorf("gateway/session project path mismatch")
+	}
+	project, err := sessionConfigProject(*session)
+	if err != nil {
+		return "", err
+	}
+	return project.ConfigSourceHash(), nil
+}
+
+func desiredGatewayBundleHash(resolver policy.EffectiveResolver, target backend.GatewayInfo, targetProjectDir string, configHash string) (string, error) {
 	if strings.TrimSpace(target.Tool) == "" {
 		return "", fmt.Errorf("missing tool label on gateway %s", target.ShortID())
 	}
@@ -116,6 +161,7 @@ func desiredGatewayBundleHash(resolver policy.EffectiveResolver, target backend.
 		return "", fmt.Errorf("missing project hash label on gateway %s", target.ShortID())
 	}
 	resolved, err := resolver.Resolve(policy.ResolveInput{
+		ConfigHash:  configHash,
 		ProjectDir:  targetProjectDir,
 		ProjectHash: target.ProjectHash,
 		Tool:        target.Tool,

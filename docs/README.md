@@ -12,7 +12,7 @@ Reference documentation for Eclipse Enclave. For a guided introduction, see the
 | Run named, background, or parallel sessions; clean up stored data | [persistence.md](persistence.md) |
 | Log in, pass secrets or API keys, use SSH keys | [auth.md](auth.md) |
 | Allow domains, read the network log, reach host services | [networking.md](networking.md) |
-| Set config keys, understand precedence, use environment variables | [configuration.md](configuration.md) |
+| Set config keys, understand worktree inheritance and precedence, use environment variables | [configuration.md](configuration.md) |
 | Override tool settings, patch tool config, add skills | [tool-config.md](tool-config.md) |
 | Choose a tool, base image, or devcontainer; control rebuilds | [tools.md](tools.md) |
 | Mount extra directories or sensitive paths | [mounts.md](mounts.md) |

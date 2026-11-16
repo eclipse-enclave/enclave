@@ -63,6 +63,9 @@ func (m networkManager) Prepare(_ string, authState model.AuthState, _ SecretMap
 
 	if effectivePolicy.Mode == model.NetworkModeUnrestricted {
 		logx.Warnf("Network restrictions disabled - container has unrestricted internet access")
+		if m.run.NetworkLog == model.NetworkLogFull {
+			logx.Warnf("--network-log=full captures nothing: full capture requires restricted networking")
+		}
 		if m.gatewayRuns() {
 			return m.observedUnrestrictedNetwork(resolved.AllowlistPath, loopbackPorts, ports), nil
 		}
@@ -103,8 +106,11 @@ func (m networkManager) Prepare(_ string, authState model.AuthState, _ SecretMap
 	case 2:
 		logx.Infof("Merged policy domains from %s and %s included", policySourcePaths[0], policySourcePaths[1])
 	}
-	if m.run.NetworkLog == model.NetworkLogRequests {
+	switch m.run.NetworkLog {
+	case model.NetworkLogRequests:
 		logx.Infof("Request-level network logging enabled; forcing HTTPS MITM for allowlisted hosts")
+	case model.NetworkLogFull:
+		logx.Warnf("Full network capture enabled: headers and bodies of allowlisted HTTP(S) requests are stored in %s", config.HostProjectNetworkCaptureDir(m.host.Home, m.project.Hash, m.profile.Name))
 	}
 
 	return NetworkResult{
@@ -131,7 +137,7 @@ func (m networkManager) Prepare(_ string, authState model.AuthState, _ SecretMap
 // the session gets no DNS-gateway signal and keeps Docker's resolver.
 func (m networkManager) observedUnrestrictedNetwork(allowlistPath string, loopbackPorts []string, ports []backend.PortMapping) NetworkResult {
 	logx.Infof("Network log records HTTP/HTTPS traffic on ports 80 and 443 (pass --disable-gateway to run without a gateway)")
-	if m.run.NetworkLog == model.NetworkLogRequests {
+	if m.run.NetworkLog == model.NetworkLogRequests || m.run.NetworkLog == model.NetworkLogFull {
 		logx.Infof("Request-level network logging enabled; forcing HTTPS MITM for all hosts")
 	}
 	return NetworkResult{

@@ -26,9 +26,17 @@ func networkLogCommand(res *Result) *cobra.Command {
 		Long: `Show the network audit events the gateway records.
 
 Without --session or --all-running the log of the current project and tool is
-read, including sessions that have already exited.`,
+read, including sessions that have already exited.
+
+--show-capture prints one exchange recorded under --network-log=full, named by
+the capture ID its http event carries.`,
 		Args: cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
+			if strings.TrimSpace(view.ShowCapture) != "" {
+				if view.Follow || view.Summary || view.Since != "" || view.Verdict != "" || view.Domain != "" || view.Type != "" {
+					return fmt.Errorf("--show-capture cannot be combined with --follow, --summary, --since, --verdict, --domain or --type")
+				}
+			}
 			if view.Follow && view.Summary {
 				return fmt.Errorf("--follow and --summary are mutually exclusive")
 			}
@@ -46,13 +54,14 @@ read, including sessions that have already exited.`,
 
 	cmd.Flags().BoolVarP(&view.Follow, "follow", "f", false, "Stream new events as they arrive")
 	cmd.Flags().BoolVar(&view.Summary, "summary", false, "Show a per-domain aggregate instead of rows")
-	cmd.Flags().BoolVar(&view.JSON, "json", false, "Emit JSON: the raw JSONL event stream, or one object with --summary")
+	cmd.Flags().BoolVar(&view.JSON, "json", false, "Emit JSON: the raw JSONL event stream, one object with --summary, or the capture record with --show-capture")
 	cmd.Flags().StringVar(&view.Since, "since", "", "Only events since a duration (10m), an RFC3339 timestamp, or \"session\"")
 	cmd.Flags().StringVar(&view.Verdict, "verdict", "", "Filter by verdict: pass|deny")
 	cmd.Flags().StringVar(&view.Domain, "domain", "", "Filter by domain pattern (example.com or *.example.com)")
 	cmd.Flags().StringVar(&view.Type, "type", "", "Filter by event type: dns|http|tcp")
 	cmd.Flags().StringVar(&view.Session, "session", "", "Read one session's log, named by its container")
 	cmd.Flags().BoolVar(&allRunning, "all-running", false, "Read the logs of all running gateways on the host")
+	cmd.Flags().StringVar(&view.ShowCapture, "show-capture", "", "Show the full capture with this ID (--network-log=full)")
 	addOptionFlagsByName(cmd.Flags(), &res.Options, &res.Sources, "backend", "tool")
 	return cmd
 }

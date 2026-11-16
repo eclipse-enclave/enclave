@@ -70,7 +70,7 @@ HTTP/TLS proxy) that enforces the domain allowlist by DNS and Host/SNI; see the
 - The network log records decisions, not all traffic: in `coarse` mode a reused
   TLS connection is one event, successful DNS lookups are not logged, and
   request detail exists only for plaintext HTTP and MITM'd hosts
-  (`--network-log=requests` closes the HTTPS gap). A missing event proves
+  (`--network-log=requests` or `full` closes the HTTPS gap). A missing event proves
   nothing; see [Coverage and granularity](../networking.md#coverage-and-granularity).
 - In unrestricted mode only TCP 80 and 443 are logged at all; see
   [Unrestricted mode](../networking.md#unrestricted-mode).
@@ -113,6 +113,11 @@ so privileged services need their own.
 > [disabling Docker's firewall integration can expose bridge-container ports](https://docs.docker.com/engine/network/packet-filtering-firewalls/#prevent-docker-from-manipulating-firewall-rules).
 > Enclave shows the relevant `docker info` warnings; see
 > [host hardening](host-hardening.md).
+
+`--network-log=full` stores request and response headers and bodies on the
+host. Captures replace known released values with placeholders, but prompts,
+file contents, and credentials without a release rule are stored as sent. See
+[Full capture](../networking.md#full-capture).
 
 ## Secrets
 

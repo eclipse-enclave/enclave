@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 
+	"enclave/internal/netcapture"
 	"enclave/internal/netlog"
 )
 
@@ -96,5 +97,43 @@ func TestPrepareNetworkLogKeepsHistoryBelowTheCap(t *testing.T) {
 	}
 	if _, err := os.Stat(netlog.RotatedPath(path)); !os.IsNotExist(err) {
 		t.Fatal("rotated a log that was below the cap")
+	}
+}
+
+func TestPrepareNetworkCaptureCreatesSessionDirAndPrunesStore(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "logs", "capture")
+	// A capture of an earlier session, larger than the whole store budget.
+	earlier := filepath.Join(root, "enclave-demo-claude-1")
+	if err := os.MkdirAll(earlier, 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	const id = "0123456789abcdef"
+	if err := os.WriteFile(netcapture.RecordPath(earlier, id), []byte(`{}`), 0o600); err != nil {
+		t.Fatalf("write record: %v", err)
+	}
+	body := filepath.Join(earlier, id+".response.body")
+	if err := os.WriteFile(body, nil, 0o600); err != nil {
+		t.Fatalf("write body: %v", err)
+	}
+	if err := os.Truncate(body, netcapture.MaxStoreBytes+1); err != nil {
+		t.Fatalf("grow body: %v", err)
+	}
+
+	cfg := StartConfig{ContainerName: "enclave-demo-claude-2", NetworkCaptureDir: root}
+	dir, err := prepareNetworkCapture(cfg)
+	if err != nil {
+		t.Fatalf("prepareNetworkCapture() error = %v", err)
+	}
+	if dir != filepath.Join(root, cfg.ContainerName) {
+		t.Fatalf("capture dir = %s", dir)
+	}
+	if info, err := os.Stat(dir); err != nil || !info.IsDir() {
+		t.Fatalf("session capture dir missing: %v", err)
+	}
+	if _, err := os.Stat(netcapture.RecordPath(earlier, id)); !os.IsNotExist(err) {
+		t.Fatalf("capture over the store budget survived: %v", err)
+	}
+	if _, err := os.Stat(earlier); err != nil {
+		t.Fatalf("pruning removed a session directory: %v", err)
 	}
 }

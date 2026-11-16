@@ -189,6 +189,10 @@ func renderHumanRow(event netlog.Event, opts RenderOptions) string {
 	line.WriteString(opts.colorize(padLeft(status, widthStatus), statusColor))
 	line.WriteString("  ")
 	line.WriteString(humanDetail(event))
+	if event.CaptureID != "" {
+		line.WriteString("  ")
+		line.WriteString(opts.colorize("capture "+event.CaptureID, logx.ColorDim))
+	}
 	return strings.TrimRight(line.String(), " ")
 }
 
@@ -289,6 +293,7 @@ func displaySafeEvent(event netlog.Event) netlog.Event {
 	event.Domain = displaySafe(event.Domain)
 	event.Path = displaySafe(event.Path)
 	event.Rule = displaySafe(event.Rule)
+	event.CaptureID = displaySafe(event.CaptureID)
 	return event
 }
 

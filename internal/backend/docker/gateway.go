@@ -70,26 +70,35 @@ func (b *Backend) startObservingGateway(ctx context.Context, req backend.Request
 
 func (b *Backend) gatewayStartConfig(req backend.Request, networkName string, gatewayConfigDir string) gateway.StartConfig {
 	workspaceID := workspaceIDFromSession(req.Session, b.opts.ProjectDir)
+	networkLogMode := b.opts.NetworkLogMode
+	if req.Network.Mode == backend.NetworkModeUnrestricted && networkLogMode == model.NetworkLogFull {
+		networkLogMode = model.NetworkLogRequests
+	}
+	captureRoot := ""
+	if networkLogMode == model.NetworkLogFull {
+		captureRoot = config.HostProjectNetworkCaptureDir(b.opts.Host.Home, req.Session.ProjectHash, req.Session.Tool)
+	}
 	return gateway.StartConfig{
-		Paths:            b.opts.Paths,
-		Profile:          model.Profile{Name: req.Session.Tool},
-		AllowlistPath:    req.Network.Egress.AllowlistPath,
-		ContainerName:    req.Session.Name,
-		ForceRebuild:     b.opts.ForceRebuild,
-		NoRebuild:        b.opts.NoRebuild,
-		NetworkLogMode:   b.opts.NetworkLogMode,
-		NetworkLogPath:   config.HostProjectNetworkLogPath(b.opts.Host.Home, req.Session.ProjectHash, req.Session.Tool),
-		GatewayConfigDir: gatewayConfigDir,
-		NetworkName:      networkName,
-		PortBindings:     portMap(req.Ports),
-		ExposedPorts:     portSet(req.Ports),
-		LoopbackPorts:    append([]string(nil), req.Network.LoopbackPorts...),
-		IdeBridgePorts:   append([]string(nil), req.Network.IdeBridgePorts...),
-		Home:             b.opts.Host.Home,
-		ProjectDir:       req.Session.Worktree,
-		WorkspaceID:      workspaceID,
-		ProjectHash:      req.Session.ProjectHash,
-		TLSRootDir:       config.HostTLSDir(b.opts.Host.Home),
+		Paths:             b.opts.Paths,
+		Profile:           model.Profile{Name: req.Session.Tool},
+		AllowlistPath:     req.Network.Egress.AllowlistPath,
+		ContainerName:     req.Session.Name,
+		ForceRebuild:      b.opts.ForceRebuild,
+		NoRebuild:         b.opts.NoRebuild,
+		NetworkLogMode:    networkLogMode,
+		NetworkLogPath:    config.HostProjectNetworkLogPath(b.opts.Host.Home, req.Session.ProjectHash, req.Session.Tool),
+		NetworkCaptureDir: captureRoot,
+		GatewayConfigDir:  gatewayConfigDir,
+		NetworkName:       networkName,
+		PortBindings:      portMap(req.Ports),
+		ExposedPorts:      portSet(req.Ports),
+		LoopbackPorts:     append([]string(nil), req.Network.LoopbackPorts...),
+		IdeBridgePorts:    append([]string(nil), req.Network.IdeBridgePorts...),
+		Home:              b.opts.Host.Home,
+		ProjectDir:        req.Session.Worktree,
+		WorkspaceID:       workspaceID,
+		ProjectHash:       req.Session.ProjectHash,
+		TLSRootDir:        config.HostTLSDir(b.opts.Host.Home),
 	}
 }
 

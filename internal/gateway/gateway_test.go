@@ -371,6 +371,18 @@ func TestValidateStartConfig(t *testing.T) {
 		t.Fatal("expected invalid network log mode to fail validation")
 	}
 
+	if err := validateStartConfig(StartConfig{
+		NetworkLogMode:    model.NetworkLogFull,
+		NetworkCaptureDir: filepath.Join(t.TempDir(), "capture"),
+		NetworkName:       "session-net",
+	}); err != nil {
+		t.Fatalf("validateStartConfig() with full capture error = %v", err)
+	}
+	err = validateStartConfig(StartConfig{NetworkLogMode: model.NetworkLogFull, NetworkName: "session-net"})
+	if err == nil || !strings.Contains(err.Error(), "capture directory") {
+		t.Fatalf("expected full mode without a capture root to fail validation, got %v", err)
+	}
+
 	err = validateStartConfig(StartConfig{})
 	if err == nil || !strings.Contains(err.Error(), "network name") {
 		t.Fatalf("expected missing network name error, got %v", err)

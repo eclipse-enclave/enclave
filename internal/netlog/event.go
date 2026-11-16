@@ -30,6 +30,9 @@ type Event struct {
 	Verdict      string `json:"verdict"`
 	Rule         string `json:"rule,omitempty"`
 	Session      string `json:"session,omitempty"`
+	// CaptureID names the full capture of an http event under
+	// --network-log=full: logs/capture/<session>/<capture_id>.json.
+	CaptureID string `json:"capture_id,omitempty"`
 }
 
 // Event types.

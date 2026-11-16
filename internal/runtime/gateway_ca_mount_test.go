@@ -46,6 +46,7 @@ func TestAddGatewayCAMountSetsTrustEnvOnContainer(t *testing.T) {
 		model.EnvGatewayCABundlePath + "=" + model.AgentGatewayCABundlePath,
 		"SSL_CERT_FILE=" + model.AgentGatewayCABundlePath,
 		"REQUESTS_CA_BUNDLE=" + model.AgentGatewayCABundlePath,
+		"GIT_SSL_CAINFO=" + model.AgentGatewayCABundlePath,
 		"NODE_EXTRA_CA_CERTS=" + model.AgentGatewayCACertPath,
 	} {
 		if !slices.Contains(mounts.Env(), want) {

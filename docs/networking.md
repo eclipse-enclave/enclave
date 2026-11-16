@@ -514,8 +514,8 @@ Each line of the messages file is one message:
 - The payload is in `text` for text messages and close reasons that are valid
   UTF-8, and in `base64` otherwise. A close also carries its status `code`.
 - `bytes` counts the payload as relayed and `storedBytes` the payload stored.
-  `truncated: true` marks a payload cut at the size
-  cap or by the end of the connection.
+  `truncated: true` marks a payload cut at the size cap or by the end of the
+  connection.
 
 ### Size limits and retention
 
@@ -569,11 +569,11 @@ and cannot be combined with `--follow`, `--summary`, `--since`, `--verdict`,
 what the client sent and `<` for what the server sent, after a note with their
 count and the messages file; one still open is shown from its open record with
 the messages so far. Control characters in headers, bodies and messages are
-replaced, so a capture cannot drive the terminal. The gateway can write into its session
-directory, so only regular files are read from there: a symlink, which could
-point at any file you can read, is refused. `--json` emits the record file on one
-line; read the bodies and messages from their files. The files can also be read
-directly, for example with `jq . <id>.json`, or
+replaced, so a capture cannot drive the terminal. The gateway can write into its
+session directory, so only regular files are read from there: a symlink, which
+could point at any file you can read, is refused. `--json` emits the record file
+on one line; read the bodies and messages from their files. The files can also
+be read directly, for example with `jq . <id>.json`, or
 `jq -r 'select(.from == "client") | .text' <id>.messages.jsonl` for what an
 agent sent over a WebSocket. HAR export is not supported.
 

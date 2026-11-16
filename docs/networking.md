@@ -508,9 +508,9 @@ Each line of the messages file is one message:
   or `pong`. A fragmented message is stored once, reassembled; control frames
   sent between its fragments come before it.
 - `ts` is when the message's last byte was relayed. Each side's messages are in
-  the order that side sent them. Between the two sides, lines follow the order
-  they were stored in, which can lag the relay, so sort by `ts` for the order
-  across both.
+  the order that side sent them. Across the two sides, line order and `ts` are
+  approximate: a reply can be stored and stamped a moment before the message
+  it answers.
 - The payload is in `text` for text messages and close reasons that are valid
   UTF-8, and in `base64` otherwise. A close also carries its status `code`.
 - `bytes` counts the payload as relayed and `storedBytes` the payload stored.

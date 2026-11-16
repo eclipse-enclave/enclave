@@ -118,8 +118,8 @@ type WebSocket struct {
 
 // Message is one line of a WebSocket messages file. Timestamp is when the
 // message's last byte was relayed. Lines keep the order in which each side sent
-// its messages; between the two sides they follow the order of storing, which
-// may lag the relay, so Timestamp is the order across both. Bytes counts the
+// its messages. Across the two sides, line order and Timestamp are approximate:
+// each side stamps and stores a message after relaying it. Bytes counts the
 // payload as relayed; StoredBytes the payload stored, after truncation and
 // redaction. The payload is in Text for text
 // messages and close reasons that are valid UTF-8, and in Base64 otherwise.

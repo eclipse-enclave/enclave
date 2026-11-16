@@ -18,6 +18,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"syscall"
 
 	"github.com/BurntSushi/toml"
 	"github.com/tidwall/jsonc"
@@ -129,7 +130,7 @@ func OverlayConfigSettings(home string, key backend.StoreKey, storeDir string, s
 			return fmt.Errorf("write merged settings %s: %w", storePath, err)
 		}
 		if len(spec.SettingsBase) > 0 {
-			if err := util.SyncDir(filepath.Dir(storePath)); err != nil {
+			if err := syncStoreDir(root, filepath.Dir(spec.SettingsPath)); err != nil {
 				return err
 			}
 		}
@@ -143,6 +144,19 @@ func OverlayConfigSettings(home string, key backend.StoreKey, storeDir string, s
 	}
 	if snapshotErr != nil {
 		logx.Warnf("Cannot save settings snapshot %s: %v; in-tool edits may be lost on the next launch", basePath, snapshotErr)
+	}
+	return nil
+}
+
+// syncStoreDir is util.SyncDir for a directory inside an opened store.
+func syncStoreDir(root *Files, name string) error {
+	dir, err := root.Open(name)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = dir.Close() }()
+	if err := dir.Sync(); err != nil && !errors.Is(err, syscall.EINVAL) {
+		return err
 	}
 	return nil
 }

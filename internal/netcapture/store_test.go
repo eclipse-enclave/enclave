@@ -318,6 +318,11 @@ func TestStoreRedactsSecretsLearnedAfterOpen(t *testing.T) {
 	store := openTestStore(t, Options{Dir: dir})
 	before := captureExchange(t, store, "first", "native-rotated-value")
 	store.Learn([]Secret{{Value: "native-rotated-value", Placeholder: "ENCLAVE_SECRET_learned"}})
+	learned := store.redactor.Load()
+	store.Learn([]Secret{{Value: "native-rotated-value", Placeholder: "ENCLAVE_SECRET_learned"}})
+	if store.redactor.Load() != learned {
+		t.Fatal("learning a known secret rebuilt the redactor")
+	}
 	after := captureExchange(t, store, "unmarked later request", "echo native-rotated-value")
 	for id, want := range map[string]string{before: "native-rotated-value", after: "echo ENCLAVE_SECRET_learned"} {
 		record, err := Load(RecordPath(dir, id))

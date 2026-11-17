@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -646,7 +647,11 @@ func (s *Store) Learn(secrets []Secret) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if current := s.redactor.Load(); current != nil {
+	current := s.redactor.Load()
+	if !slices.ContainsFunc(secrets, current.isNew) {
+		return
+	}
+	if current != nil {
 		secrets = append(secrets, current.secrets...)
 	}
 	s.redactor.Store(newRedactor(secrets))

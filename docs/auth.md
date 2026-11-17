@@ -284,21 +284,21 @@ GitHub Enterprise, refuse the protected start. Ordinary mode is unchanged.
 Native Copilot grants can reach `*.githubcopilot.com`; Copilot CLI also permits
 `GET` on the exact paths `/copilot_internal/user`,
 `/copilot_internal/managed_settings` and `/copilot_internal/team_customizations`
-on `api.github.com`, with query strings allowed but no body or trailers.
-Other GitHub API paths, including the optional Copilot CLI release check, and
-unsupported OAuth flows refuse native placeholders. Configured
-`GH_TOKEN` and `COPILOT_GITHUB_TOKEN` env releases retain their existing rules.
-Device polling preserves `authorization_pending`, `slow_down` and valid intervals.
-A Copilot CLI login fills its account key from that fixed user endpoint; if that
-lookup fails, start a fresh device login. Inconsistent native account aliases
-refuse rather than being repaired.
-Protected Copilot generates the plaintext-storage preference only for saving
-placeholders. After a protected session, ordinary launches restore its configured
-value; an earlier in-tool consent does not override that value. Other settings
-edits are carried over. Leading `//` headers in native Copilot files are accepted;
-comments inside the JSON document are not. A managed settings carry-over
-parse failure refuses startup and names the file to fix or remove; see
-[Config-source overlay](runtime/stores.md#config-source-overlay).
+on `api.github.com`, with query strings allowed but no body or trailers. Other
+GitHub API paths, including the optional Copilot CLI release check, and
+unsupported OAuth flows refuse native placeholders. Configured `GH_TOKEN` and
+`COPILOT_GITHUB_TOKEN` env releases retain their existing rules. Device polling
+preserves `authorization_pending`, `slow_down` and valid intervals. A Copilot
+CLI login fills its account key from that fixed user endpoint; if that lookup
+fails, start a fresh device login. Inconsistent native account aliases refuse
+rather than being repaired. Protected Copilot generates the plaintext-storage
+preference only for saving placeholders. After a protected session, ordinary
+launches restore its configured value; an earlier in-tool consent does not
+override that value. Other settings edits are carried over. Leading `//` headers
+in native Copilot files are accepted; comments inside the JSON document are not.
+A managed settings carry-over parse failure refuses startup and names the file
+to fix or remove; see [Config-source
+overlay](runtime/stores.md#config-source-overlay).
 
 The option requires restricted networking. It refuses `--allow-all-network`,
 `--admin`, project auth scope, QEMU, devcontainers, custom base images and tools
@@ -313,30 +313,30 @@ refusal names its holder; different session-store suffixes, tools and projects
 remain independent. An exited container may still have a host process finalizing
 credentials, so it does not immediately release the store. `enclave cleanup`
 reclaims stale holders only after proving the owner and container are gone, or
-finalizing an exited container. An unreachable engine keeps the reservation. Engines are inspected through the
-current endpoint: stop sessions on other `DOCKER_HOST`, `CONTAINER_HOST` or engine
-contexts before protected operations or holder cleanup. Context switches are not
-automatically tracked.
+finalizing an exited container. An unreachable engine keeps the reservation.
+Engines are inspected through the current endpoint: stop sessions on other
+`DOCKER_HOST`, `CONTAINER_HOST` or engine contexts before protected operations
+or holder cleanup. Context switches are not automatically tracked.
 
 Stop a project's running sessions before its first protected start after an
 upgrade: an older QEMU session cannot be detected. A native-path file containing
 raw credentials is refused rather than replaced; end the ordinary session and
-let reconciliation link it, or reset a crash leftover with `--reset-auth`.
-For shared native auth, `--reset-auth` clears the selected identity’s native files
+let reconciliation link it, or reset a crash leftover with `--reset-auth`. For
+shared native auth, `--reset-auth` clears the selected identity’s native files
 and placeholder bindings under its store lock before session admission, even if
 an opposite-mode holder then refuses the start. Other identities and projects’
 placeholder views are left alone; surviving gateways can no longer release the
-removed native OAuth credentials.
-A concurrently completed fresh login is not erased a second time during startup.
+removed native OAuth credentials. A concurrently completed fresh login is not
+erased a second time during startup.
 
 At normal session end, Claude's allowlisted client metadata is merged without
-copying credentials, expiry or scopes back from the view. Codex, Pi, OpenCode and
-Copilot auth metadata is gateway-owned and is not harvested from client views.
-Stale, raw or secret-bearing sources are skipped. Only the session's own view is
-deleted. Protected stop keeps
-the reservation until removal confirms both the agent and its original gateway
-are gone; uncertain teardown keeps the private files for later cleanup.
-`--ephemeral` uses a fresh gateway-only identity and removes it at that point.
+copying credentials, expiry or scopes back from the view. Codex, Pi, OpenCode
+and Copilot auth metadata is gateway-owned and is not harvested from client
+views. Stale, raw or secret-bearing sources are skipped. Only the session's own
+view is deleted. Protected stop keeps the reservation until removal confirms
+both the agent and its original gateway are gone; uncertain teardown keeps the
+private files for later cleanup. `--ephemeral` uses a fresh gateway-only
+identity and removes it at that point.
 
 Protection covers declared native fields, not arbitrary files, SSH or host
 access. Full captures redact known values learned through native exchange

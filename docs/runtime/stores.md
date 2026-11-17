@@ -353,21 +353,21 @@ it places there does not move host reads or writes outside the store.
 
 ## Native auth exchanges
 
-With `--protect-auth`, only the gateway mounts the canonical auth store. Workloads
-mount private views under `projects/<hash>/<tool>/auth-views/`. All supported
-native exchanges take the canonical hoststore lock across reload, one bounded
-upstream dispatch and durable commit.
-Native tokens are written before stable placeholder bindings; UID/GID/mode are
-preserved. Bindings contain identifiers, never tokens or exchange history.
+With `--protect-auth`, only the gateway mounts the canonical auth store.
+Workloads mount private views under `projects/<hash>/<tool>/auth-views/`. All
+supported native exchanges take the canonical hoststore lock across reload, one
+bounded upstream dispatch and durable commit. Native tokens are written before
+stable placeholder bindings; UID/GID/mode are preserved. Bindings contain
+identifiers, never tokens or exchange history.
 
 On a confirmed protected end, current placeholder bindings authorize the whole
 private view; a regular native-path sibling needs its own matching placeholders.
 Only codec-allowlisted metadata is merged, with the sibling taking precedence.
-Tokens, expiry and scopes stay canonical. Codex and provider-map auth files contain only
-gateway-owned state, so their views are not harvested. Unknown view keys are ignored;
-secret-bearing metadata and invalid or stale sources are skipped with a warning.
-The shared config path is never changed by harvest. Missing bindings after reset
-prevent stale views from restoring state.
+Tokens, expiry and scopes stay canonical. Codex and provider-map auth files
+contain only gateway-owned state, so their views are not harvested. Unknown view
+keys are ignored; secret-bearing metadata and invalid or stale sources are
+skipped with a warning. The shared config path is never changed by harvest.
+Missing bindings after reset prevent stale views from restoring state.
 
 Gateway ownership is correlated with its holder at creation, so a renamed agent
 or a reused session name cannot select another gateway.
@@ -379,14 +379,15 @@ teardown retains the reservation and private files; a failed finalizer releases
 its synchronous PID claim so cleanup can retry. Stale-holder cleanup removes the
 orphan gateway first and discards its views without harvesting them.
 
-Every refresh dispatches with the current canonical refresh token under the lock,
-so sibling refreshes serialize and each rotates the current grant. There is no
-replay cache or persisted recovery fence. A lost provider reply may require a
-fresh login. Missing or malformed expiry does not discard consumed tokens.
-Only allowlisted, placeholder-bearing responses pass containment checks.
+Every refresh dispatches with the current canonical refresh token under the
+lock, so sibling refreshes serialize and each rotates the current grant. There
+is no replay cache or persisted recovery fence. A lost provider reply may
+require a fresh login. Missing or malformed expiry does not discard consumed
+tokens. Only allowlisted, placeholder-bearing responses pass containment checks.
 
 The proxy uses the store owner UID, a distinct primary group for its NAT
 exemption and the host group as supplementary, without new capabilities or
-canonical ownership/mode changes. A fresh workload-inaccessible readiness directory binds
-startup to the session and the configuration actually loaded by the proxy.
-Missing or mismatched readiness refuses even an older gateway image with `--no-rebuild`.
+canonical ownership/mode changes. A fresh workload-inaccessible readiness
+directory binds startup to the session and the configuration actually loaded by
+the proxy. Missing or mismatched readiness refuses even an older gateway image
+with `--no-rebuild`.

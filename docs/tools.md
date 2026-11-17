@@ -66,7 +66,7 @@ or `devcontainer.json` in the project root.
 | `devcontainer.json` field | Handling |
 |---------------------------|----------|
 | `workspaceFolder`, `workspaceMount`, `containerEnv`, `mounts`, `postCreateCommand`, `postStartCommand` | Applied (best effort) |
-| `runArgs` | Applied (best effort). A `--security-opt` survives only if it keeps the default confinement (`no-new-privileges`, `label=type:container_t`, podman's `mask=`); others, including custom seccomp profiles and SELinux types, are dropped with a warning |
+| `runArgs` | Applied (best effort). A `--security-opt` survives only if it keeps the default confinement (`no-new-privileges`, `label=type:container_t`, podman's `mask=`); others, including custom seccomp profiles and SELinux types, are dropped with a warning. `--env`, `-e`, and `--env-file` values for `PROJECT_DIR`, `TOOL`, and `ENCLAVE_*` keys are dropped with a warning naming the key |
 | `remoteUser` | Honored for shell-only sessions; agent containers use the internal user unless `--use-remote-user` is set |
 | `dockerComposeFile`, `features`, `remoteEnv`, `updateRemoteUserUID` | Ignored with a warning |
 | `initializeCommand`, `onCreateCommand` | Ignored silently |

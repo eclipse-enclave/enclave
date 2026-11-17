@@ -503,8 +503,8 @@ EOF_RESOLVERS
     iptables -t nat -F OUTPUT || return 1
     iptables -t nat -A OUTPUT -p tcp --dport 80 -m owner --uid-owner "$proxy_uid" -j RETURN || return 1
     iptables -t nat -A OUTPUT -p tcp --dport 443 -m owner --uid-owner "$proxy_uid" -j RETURN || return 1
-    iptables -t nat -A OUTPUT -p tcp --dport 80 -j REDIRECT --to-ports "$PROXY_HTTP_PORT" || return 1
-    iptables -t nat -A OUTPUT -p tcp --dport 443 -j REDIRECT --to-ports "$PROXY_HTTPS_PORT" || return 1
+    web_redirect iptables -A 80 || return 1
+    web_redirect iptables -A 443 || return 1
 
     log "Transparent proxy NAT rules configured"
     setup_ide_bridge

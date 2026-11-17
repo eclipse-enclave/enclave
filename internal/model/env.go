@@ -7,6 +7,8 @@
 
 package model
 
+import "strings"
+
 const (
 	EnvPrefix = "ENCLAVE_"
 
@@ -54,3 +56,9 @@ const (
 	EnvGitName                  = EnvPrefix + "GIT_NAME"
 	EnvGitEmail                 = EnvPrefix + "GIT_EMAIL"
 )
+
+// IsReservedEnvKey reports whether key is set by Enclave and must not be
+// overridden by project or extension environment values.
+func IsReservedEnvKey(key string) bool {
+	return key == "PROJECT_DIR" || key == "TOOL" || strings.HasPrefix(key, EnvPrefix)
+}

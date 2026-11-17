@@ -1028,7 +1028,7 @@ func (r *Runtime) specEnvVariables() []string {
 			logx.Warnf("Ignoring invalid environment.variables key %q (must match %s)", key, validEnvKeyPattern.String())
 			continue
 		}
-		if key == "PROJECT_DIR" || key == "TOOL" || strings.HasPrefix(key, model.EnvPrefix) {
+		if model.IsReservedEnvKey(key) {
 			logx.Warnf("Ignoring environment.variables key %q: reserved for enclave internals", key)
 			continue
 		}
@@ -1251,7 +1251,7 @@ func (r *Runtime) addDevcontainerEnv(mounts *mountAccumulator) {
 	}
 	if len(r.devcontainer.ContainerEnv) > 0 {
 		for key, value := range r.devcontainer.ContainerEnv {
-			if key == "" || key == "PROJECT_DIR" || key == "TOOL" || strings.HasPrefix(key, model.EnvPrefix) {
+			if key == "" || model.IsReservedEnvKey(key) {
 				continue
 			}
 			mounts.AddEnv(key, value)

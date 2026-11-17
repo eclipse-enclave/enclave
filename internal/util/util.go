@@ -248,12 +248,12 @@ func ParseEnv(r io.Reader) (map[string]string, error) {
 	return env, nil
 }
 
-// FilterProjectEnv keeps project-supplied values out of Enclave's control namespace.
+// FilterProjectEnv drops project-supplied values for keys Enclave reserves.
 func FilterProjectEnv(values []string) []string {
 	filtered := make([]string, 0, len(values))
 	for _, value := range values {
 		key, _, _ := strings.Cut(value, "=")
-		if strings.HasPrefix(key, model.EnvPrefix) {
+		if model.IsReservedEnvKey(key) {
 			logx.Warnf("Ignoring project environment variable %q: reserved for Enclave", key)
 			continue
 		}

@@ -8,6 +8,7 @@
 package runtime
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -184,29 +185,44 @@ func TestProjectEnvCannotOverrideInternalEnvironment(t *testing.T) {
 				t.Fatal(err)
 			}
 			r := &Runtime{project: model.Project{Dir: dir}}
-			values := r.envFileValues()
+			var values []string
+			warnings := captureStderr(t, func() { values = r.envFileValues() })
 			if len(values) != 1 || values[0] != "VISIBLE=kept" {
 				t.Fatalf("project environment overrides reserved %s: %v", key, values)
 			}
-			output, err := os.CreateTemp(t.TempDir(), "env-summary")
-			if err != nil {
-				t.Fatal(err)
+			if !strings.Contains(warnings, "Ignoring project environment variable \""+key+"\"") || strings.Contains(warnings, "project-value") {
+				t.Fatalf("warning must name dropped key without its value: %q", warnings)
 			}
-			previous := os.Stderr
-			os.Stderr = output
-			r.logEnvFileLoaded(nil)
-			os.Stderr = previous
-			if info, err := output.Stat(); err != nil || info.Size() != 0 {
-				t.Fatal("empty filtered environment produced a summary")
+			if summary := captureStderr(t, func() { r.logEnvFileLoaded(nil) }); summary != "" {
+				t.Fatalf("empty filtered environment produced a summary: %q", summary)
 			}
-			os.Stderr = output
-			r.logEnvFileLoaded(values)
-			os.Stderr = previous
-			_ = output.Close()
-			data, err := os.ReadFile(output.Name())
-			if err != nil || !strings.Contains(string(data), "keys: VISIBLE") || strings.Contains(string(data), key) || strings.Contains(string(data), "kept") {
-				t.Fatalf("summary must list only loaded keys, not ignored keys or values: %q (%v)", data, err)
+			summary := captureStderr(t, func() { r.logEnvFileLoaded(values) })
+			if !strings.Contains(summary, "keys: VISIBLE") || strings.Contains(summary, key) || strings.Contains(summary, "kept") {
+				t.Fatalf("summary must list only loaded keys, not ignored keys or values: %q", summary)
 			}
 		})
 	}
+}
+
+func captureStderr(t *testing.T, fn func()) string {
+	t.Helper()
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("create pipe: %v", err)
+	}
+	original := os.Stderr
+	os.Stderr = writer
+	defer func() { os.Stderr = original }()
+
+	fn()
+
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close writer: %v", err)
+	}
+	data, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatalf("read stderr: %v", err)
+	}
+	_ = reader.Close()
+	return string(data)
 }

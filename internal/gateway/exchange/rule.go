@@ -48,7 +48,7 @@ func (s *Store) Intercept(req *http.Request, scheme string) (*http.Response, boo
 		endpoint := s.provider.TokenEndpoint
 		canonicalPath := path.Clean("/" + req.URL.Path)
 		for _, denied := range endpoint.Deny {
-			if host == denied.Host && canonicalPath == denied.Path {
+			if host == denied.Host && strings.EqualFold(canonicalPath, denied.Path) {
 				return refusal(http.StatusForbidden), true
 			}
 		}

@@ -37,6 +37,7 @@ func TestEndpointParserAndDenyCannotFallThrough(t *testing.T) {
 		{"method", "https://platform.claude.com/v1/oauth/token", "https", "GET", "application/json", `{}`},
 		{"denied", "https://api.anthropic.com/api/oauth/claude_cli/create_api_key", "https", "POST", "application/json", `{}`},
 		{"encoded-deny", "https://api.anthropic.com/api/oauth/claude_cli/%63reate_api_key", "https", "POST", "application/json", `{}`},
+		{"case-deny", "https://api.anthropic.com/API/OAuth/claude_cli/Create_API_Key", "https", "POST", "application/json", `{}`},
 		{"large", "https://platform.claude.com/v1/oauth/token", "https", "POST", "application/json", strings.Repeat(" ", maxBodyBytes+1)},
 	}
 	for _, tc := range cases {

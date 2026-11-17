@@ -25,7 +25,6 @@ import (
 	"enclave/internal/gateway/exchange"
 	"enclave/internal/model"
 	"enclave/internal/placeholderstore"
-	"enclave/internal/testutil"
 )
 
 type resetBackend struct {
@@ -105,7 +104,7 @@ func TestNativeResetPrecedesRefusedAdmissionOnBothBackends(t *testing.T) {
 				t.Fatal(err)
 			}
 			writeFile(t, residue, string(data))
-			if err := hoststore.ReserveMode(r.host.Home, configDir, hoststore.ModeHolder{ID: "survivor", Session: "survivor", Protected: true, Engine: "docker", OwnerPID: os.Getpid()}, nil); err != nil {
+			if err := hoststore.ReserveMode(r.host.Home, configDir, hoststore.ModeHolder{ID: "survivor", Session: "survivor", Protected: true, Engine: "docker", OwnerPID: os.Getpid(), Tool: configKey.Owner, ProjectHash: configKey.ProjectHash}, nil); err != nil {
 				t.Fatal(err)
 			}
 			held, unlock, holderDone := make(chan struct{}), make(chan struct{}), make(chan struct{})
@@ -162,7 +161,9 @@ func TestNativeResetPrecedesRefusedAdmissionOnBothBackends(t *testing.T) {
 			if err := hoststore.AdvanceMode(r.host.Home, configDir, "survivor", "finalizing", "", false); err != nil {
 				t.Fatal(err)
 			}
-			testutil.EndModeHolder(t, r.host.Home, configDir, "survivor")
+			if err := hoststore.EndMode(r.host.Home, configDir, "survivor", nil); err != nil {
+				t.Fatal(err)
+			}
 			writeFile(t, filepath.Join(real, ".credentials.json"), `{"claudeAiOauth":{"accessToken":"new-access-synthetic"}}`)
 			prepared, err := r.prepareVolumes(r.baseContainerName(), r.baseContainerName(), newMountAccumulator(nil, nil), nil)
 			if prepared.Cleanup != nil {

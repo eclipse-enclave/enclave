@@ -23,7 +23,6 @@ import (
 	backendqemu "enclave/internal/backend/qemu"
 	"enclave/internal/config"
 	"enclave/internal/model"
-	"enclave/internal/testutil"
 	"enclave/internal/util"
 )
 
@@ -119,6 +118,7 @@ func TestModeCleanupRequiresOwnerDeathAndContainerAbsence(t *testing.T) {
 					if len(*holders) != 1 || (*holders)[0].State != hoststore.ModeState(tc.state) {
 						t.Fatal("engine exit promoted the record before finalization")
 					}
+					(*holders)[0].OwnerPID = os.Getpid()
 					return nil
 				}); err != nil {
 					t.Fatal(err)
@@ -127,8 +127,7 @@ func TestModeCleanupRequiresOwnerDeathAndContainerAbsence(t *testing.T) {
 				if err := hoststore.AdvanceMode(home, dir, holder.ID, "finalizing", "", false); err != nil {
 					return err
 				}
-				testutil.EndModeHolder(t, home, dir, holder.ID)
-				return nil
+				return hoststore.EndMode(home, dir, holder.ID, nil)
 			}}
 			err = cleanupModeStore(home, dir, be, tc.dryRun)
 			if (err != nil) != tc.wantError || finalized != tc.wantFinalize {

@@ -9,11 +9,9 @@ package hoststore
 
 import (
 	"errors"
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -23,29 +21,14 @@ import (
 	"enclave/internal/config"
 )
 
-// endFinalizing mirrors testutil.EndModeHolder, which this package cannot
-// import.
-func endFinalizing(t *testing.T, home, dir, id string) {
-	t.Helper()
-	err := WithModeHolders(home, dir, func(holders *[]ModeHolder) error {
-		before := len(*holders)
-		*holders = slices.DeleteFunc(*holders, func(holder ModeHolder) bool { return holder.ID == id && holder.State == "finalizing" })
-		if len(*holders) == before {
-			return fmt.Errorf("no finalizing session mode holder %s", id)
-		}
-		return nil
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-}
-
 func TestModeReservationMatrix(t *testing.T) {
 	for _, protected := range []bool{false, true} {
 		for _, state := range []string{"pending", "live", "finalizing", "ended"} {
 			for _, sameMode := range []bool{false, true} {
-				home, dir := t.TempDir(), filepath.Join(t.TempDir(), "config")
-				first := ModeHolder{ID: "first", Session: "holder", Protected: protected}
+				home := t.TempDir()
+				key := backend.StoreKey{Owner: "claude", ProjectHash: "matrix"}
+				dir := Dir(home, key, backend.StoreKindConfig)
+				first := ModeHolder{ID: "first", Session: "holder", Protected: protected, OwnerPID: os.Getpid(), Tool: key.Owner, ProjectHash: key.ProjectHash}
 				if err := ReserveMode(home, dir, first, nil); err != nil {
 					t.Fatal(err)
 				}
@@ -54,7 +37,9 @@ func TestModeReservationMatrix(t *testing.T) {
 						break
 					}
 					if next == "ended" {
-						endFinalizing(t, home, dir, first.ID)
+						if err := EndMode(home, dir, first.ID, nil); err != nil {
+							t.Fatal(err)
+						}
 					} else if err := AdvanceMode(home, dir, first.ID, ModeState(next), "cid", false); err != nil {
 						t.Fatal(err)
 					}
@@ -134,6 +119,7 @@ func TestModeTransitionsAndDetachedHandoff(t *testing.T) {
 		if got.OwnerPID != 0 || got.ContainerID != "cid" {
 			t.Fatalf("detached handoff: %+v", got)
 		}
+		(*holders)[0].OwnerPID = os.Getpid()
 		return nil
 	}); err != nil {
 		t.Fatal(err)
@@ -141,7 +127,9 @@ func TestModeTransitionsAndDetachedHandoff(t *testing.T) {
 	if err := AdvanceMode(home, dir, holder.ID, "finalizing", "", false); err != nil {
 		t.Fatal(err)
 	}
-	endFinalizing(t, home, dir, holder.ID)
+	if err := EndMode(home, dir, holder.ID, nil); err != nil {
+		t.Fatal(err)
+	}
 	if err := AdvanceMode(home, dir, holder.ID, "live", "", false); err == nil {
 		t.Fatal("ended holder resurrected")
 	}

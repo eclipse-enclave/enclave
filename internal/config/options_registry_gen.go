@@ -69,6 +69,16 @@ func OptionSpecs() []OptionSpec {
 			},
 		},
 		{
+			Name:  "runtime",
+			Group: OptionGroupRun,
+			ApplyDefaultsWithSource: func(opts *model.Options, defaults Defaults, source model.OptionSource, sources *model.OptionSources) {
+				if canOverride(sources.Runtime, source) && strings.TrimSpace(defaults.Runtime) != "" {
+					opts.Runtime = strings.TrimSpace(defaults.Runtime)
+					sources.Runtime = source
+				}
+			},
+		},
+		{
 			Name:  "host_config",
 			Group: OptionGroupRun,
 			ApplyDefaultsWithSource: func(opts *model.Options, defaults Defaults, source model.OptionSource, sources *model.OptionSources) {

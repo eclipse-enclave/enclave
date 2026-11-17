@@ -64,6 +64,14 @@ func lockinBackend(t *testing.T) (*Backend, string) {
 	if util.IsSELinuxEnforcing() {
 		t.Skip("lock-in snapshots are recorded without SELinux relabeling")
 	}
+	home := lockinHome(t)
+	return New(lockinOptions(home)), home
+}
+
+// lockinHome prepares a host home with the gateway TLS CA a session start
+// mounts.
+func lockinHome(t *testing.T) string {
+	t.Helper()
 	// The backend writes the secret release file (real secret values) to the
 	// temp dir; keep it inside the test's own directory so it never outlives it.
 	t.Setenv("TMPDIR", t.TempDir())
@@ -77,12 +85,16 @@ func lockinBackend(t *testing.T) (*Backend, string) {
 			t.Fatal(err)
 		}
 	}
-	return New(Options{
+	return home
+}
+
+func lockinOptions(home string) Options {
+	return Options{
 		Host:           model.Host{Home: home, UID: "1000", GID: "1000"},
 		NoRebuild:      true,
 		NetworkLogMode: model.NetworkLogCoarse,
 		ProjectDir:     "/work/project",
-	}), home
+	}
 }
 
 func lockinRequest(meta backend.SessionMeta) backend.Request {
@@ -208,6 +220,38 @@ func lockinCalls(t *testing.T, logPath string, home string) string {
 	out = lockinSinceArg.ReplaceAllString(out, "--since\n<since>")
 	out = lockinUserNSWarmup.ReplaceAllString(out, "<userns-warmup>")
 	return lockinSecretRelease.ReplaceAllString(out, "<secret-release-file>")
+}
+
+// lockinContainerCalls returns the recorded run and create invocations keyed
+// by the container name each one sets.
+func lockinContainerCalls(t *testing.T, logPath string) map[string][]string {
+	t.Helper()
+	data, err := os.ReadFile(logPath) // #nosec G304 -- path is the test's own call log.
+	if err != nil {
+		t.Fatalf("read engine call log: %v", err)
+	}
+	calls := map[string][]string{}
+	for _, block := range strings.Split(string(data), "---\n") {
+		args := strings.Split(strings.TrimSuffix(block, "\n"), "\n")
+		if args[0] != "run" && args[0] != "create" {
+			continue
+		}
+		if i := slices.Index(args, "--name"); i >= 0 && i+1 < len(args) {
+			calls[args[i+1]] = args
+		}
+	}
+	return calls
+}
+
+// lockinHasArgPair reports whether a recorded invocation passes flag followed
+// by value.
+func lockinHasArgPair(args []string, flag, value string) bool {
+	for i := 0; i+1 < len(args); i++ {
+		if args[i] == flag && args[i+1] == value {
+			return true
+		}
+	}
+	return false
 }
 
 func lockinSecretReleaseFile(t *testing.T, logPath string) string {

@@ -384,6 +384,36 @@ func TestConfigJSONInvalidOptionsStillEmitEnvelope(t *testing.T) {
 	}
 }
 
+// config --json leaves the auto backend unresolved, so a configured runtime
+// must not make it report the options as invalid; an unknown runtime does.
+func TestConfigJSONRuntimeValidity(t *testing.T) {
+	for _, tc := range []struct {
+		runtime   string
+		wantValid bool
+		wantError string
+	}{
+		{runtime: model.RuntimeRunsc, wantValid: true, wantError: ""},
+		{runtime: "kata", wantValid: false, wantError: "--runtime must be runsc"},
+	} {
+		t.Run(tc.runtime, func(t *testing.T) {
+			opts := config.DefaultOptions()
+			opts.Runtime = tc.runtime
+
+			doc := runConfigJSON(t, configTestInput(t, testPathsWithFeatures(t), opts, nil))
+
+			if doc["valid"] != tc.wantValid || doc["error"] != tc.wantError {
+				t.Fatalf("valid/error = %#v/%#v, want %v/%q", doc["valid"], doc["error"], tc.wantValid, tc.wantError)
+			}
+			if value := configJSONOptionField(t, doc, "backend")["value"]; value != backend.NameAuto {
+				t.Fatalf("options.backend.value = %#v, want auto", value)
+			}
+			if value := configJSONOptionField(t, doc, "runtime")["value"]; value != tc.runtime {
+				t.Fatalf("options.runtime.value = %#v, want %q", value, tc.runtime)
+			}
+		})
+	}
+}
+
 func TestConfigJSONYoloResolution(t *testing.T) {
 	off := false
 	opts := config.DefaultOptions()

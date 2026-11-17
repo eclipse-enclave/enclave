@@ -107,6 +107,24 @@ Docker and with rootless Podman, check what they cannot:
 - Run `enclave network apply` during a session, which restarts the proxy, and
   confirm capturing continues in the same directory.
 
+## gVisor acceptance testing
+
+Unit tests check the arguments Enclave passes for `--runtime runsc` against a
+fake engine. On a host with rootless Podman and
+[runsc installed](backends.md#gvisor-runsc), `scripts/smoke-gvisor.sh` runs
+real sessions:
+
+- The session runs on gVisor's kernel, and the same egress probes give the
+  same results as under Podman's default runtime.
+- Background sessions work with `ps --json`, `exec`, and `stop`.
+- `--admin` sessions get their limited `sudo`; other sessions do not.
+- Unrestricted sessions keep their hostname with and without a gateway.
+- Project files stay owned by the host user.
+
+Pass step names to run only those steps, and set `TOOL` to test another
+tool's image. Attaching to a background session needs a terminal, so check
+`enclave attach` and its `Ctrl-\` detach by hand.
+
 ## Code generation
 
 Generated files are checked in. After changing option definitions or tool

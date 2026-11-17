@@ -41,6 +41,9 @@ type Options struct {
 	DevcontainerRunArgs []string
 	ProjectDir          string
 	ProjectMount        string
+	// Runtime is the OCI runtime for session containers (model.RuntimeRunsc);
+	// empty keeps the engine default. Helpers and the gateway never use it.
+	Runtime string
 }
 
 type Backend struct {
@@ -434,6 +437,12 @@ func (b *Backend) prepareRun(ctx context.Context, req backend.Request) (runSpec,
 			return runSpec{}, err
 		}
 	}
+	selinuxEnforcing := util.IsSELinuxEnforcing()
+	applyOCIRuntime(spec.hostConfig, b.opts.Runtime, ociRuntimeContext{
+		Rootless:         dockerSystemInfo.Rootless(),
+		SELinuxEnforcing: selinuxEnforcing,
+		Admin:            req.Security.Admin,
+	})
 	if err := b.prepareImageUserNamespace(ctx, req.Image); err != nil {
 		return runSpec{}, err
 	}
@@ -448,9 +457,14 @@ func (b *Backend) prepareRun(ctx context.Context, req backend.Request) (runSpec,
 			return runSpec{}, err
 		}
 		joinGatewayNamespaces(spec.hostConfig, gatewayName, req.Hostname != "")
-		// The hostname went to the gateway; a container joining another's
-		// network namespace cannot set one.
-		spec.config.Hostname = ""
+		// The hostname went to the gateway, whose UTS namespace the session
+		// shares: Docker shares it along with the network namespace and
+		// rejects --hostname there, and podman sessions join it. A session
+		// under another OCI runtime keeps its own UTS namespace and sets the
+		// hostname there.
+		if spec.hostConfig.Runtime == "" {
+			spec.config.Hostname = ""
+		}
 		spec.cleanup = func() {
 			cleanup()
 			cleanupSessionNetwork(sessionNetwork)
@@ -466,8 +480,51 @@ func (b *Backend) prepareRun(ctx context.Context, req backend.Request) (runSpec,
 			cleanupSessionNetwork(sessionNetwork)
 		}
 	}
-	applySELinuxMounts(spec.hostConfig, util.IsSELinuxEnforcing())
+	applySELinuxMounts(spec.hostConfig, selinuxEnforcing)
 	return spec, nil
+}
+
+// ociRuntimeContext is the host and session state the runtime flags depend on.
+type ociRuntimeContext struct {
+	Rootless         bool
+	SELinuxEnforcing bool
+	// Admin marks a session without no-new-privileges, whose sudo relies on
+	// setuid binaries.
+	Admin bool
+}
+
+// applyOCIRuntime runs the session container under the selected OCI runtime
+// with the flags Enclave depends on. Only the session uses it: the gateway and
+// helper containers need the engine default.
+//
+// runsc (gVisor) gets:
+//   - network=host, so the Sentry's sockets are host-kernel sockets in the
+//     namespace the session joins and the gateway's firewall and proxy
+//     redirects apply to them. gVisor's own netstack would take over that
+//     namespace's interfaces, cutting off the gateway and bypassing its rules.
+//   - ignore-cgroups under rootless podman, where runsc cannot drive the
+//     systemd cgroup manager. Sessions set no resource limits.
+//   - allow-suid in admin sessions: runsc ignores setuid bits by default, which
+//     breaks their sudo. Other sessions run with no-new-privileges, under which
+//     setuid bits have no effect either way.
+//   - label=disable while SELinux is enforcing: runsc rejects a spec with a
+//     process label, and the Sentry's seccomp sandbox confines the session
+//     instead.
+func applyOCIRuntime(hostConfig *dockercmd.HostConfig, runtime string, rc ociRuntimeContext) {
+	switch runtime {
+	case model.RuntimeRunsc:
+		hostConfig.Runtime = runtime
+		hostConfig.RuntimeFlags = append(hostConfig.RuntimeFlags, "network=host")
+		if rc.Rootless {
+			hostConfig.RuntimeFlags = append(hostConfig.RuntimeFlags, "ignore-cgroups")
+		}
+		if rc.Admin {
+			hostConfig.RuntimeFlags = append(hostConfig.RuntimeFlags, "allow-suid")
+		}
+		if rc.SELinuxEnforcing {
+			hostConfig.SecurityOpt = append(hostConfig.SecurityOpt, "label=disable")
+		}
+	}
 }
 
 func (b *Backend) dockerConfig(req backend.Request) runSpec {
@@ -531,8 +588,16 @@ func (b *Backend) dockerConfig(req backend.Request) runSpec {
 // UTS namespace along with the network namespace (and rejects --uts
 // container:); podman does not, so there the session joins it explicitly to
 // keep the hostname.
+//
+// A session under another OCI runtime joins only the network namespace: runsc
+// cannot join a foreign user or UTS namespace. It keeps its own keep-id user
+// namespace, where its Sentry provides /sys itself, and sets its hostname in
+// its own UTS namespace.
 func joinGatewayNamespaces(hostConfig *dockercmd.HostConfig, gatewayName string, shareHostname bool) {
 	hostConfig.NetworkMode = dockercmd.NetworkMode("container:" + gatewayName)
+	if hostConfig.Runtime != "" {
+		return
+	}
 	if hostConfig.UserNS != "" {
 		hostConfig.UserNS = "container:" + gatewayName
 	}
@@ -904,11 +969,8 @@ func (b *Backend) ConfigStoreKeyInUse(ctx context.Context, meta backend.SessionM
 }
 
 func warnInsecureDockerConfig(info dockercmd.SystemInfo) {
-	rootMapsToHost := true
+	rootMapsToHost := !info.Rootless()
 	for _, option := range info.SecurityOptions {
-		if strings.Contains(option, "name=rootless") {
-			rootMapsToHost = false
-		}
 		if strings.Contains(option, "name=userns") {
 			rootMapsToHost = false
 		}

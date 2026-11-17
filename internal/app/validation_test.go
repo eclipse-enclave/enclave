@@ -813,6 +813,90 @@ func TestValidateRunOptions_RuntimeUIDRemapConflictsWithDevcontainerRemoteUserSh
 	}
 }
 
+func TestValidateOptionsRuntimeValues(t *testing.T) {
+	for _, tc := range []struct {
+		value   string
+		wantErr bool
+	}{
+		{value: ""},
+		{value: model.RuntimeRunsc},
+		{value: "crun", wantErr: true},
+		{value: "kata", wantErr: true},
+	} {
+		t.Run(tc.value, func(t *testing.T) {
+			opts := model.Options{
+				RunOptions:   model.RunOptions{Backend: "podman", Runtime: tc.value},
+				BuildOptions: model.BuildOptions{ImageName: "enclave:latest"},
+			}
+			_, _, _, err := ValidateOptions(opts, model.DefaultOptionSources(), ValidationContext{Action: "run"})
+			if tc.wantErr {
+				if err == nil || err.Error() != "--runtime must be runsc" {
+					t.Fatalf("expected runtime value error, got %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("ValidateOptions returned error: %v", err)
+			}
+		})
+	}
+}
+
+// A runtime must never be dropped silently: every engine but podman, including
+// the auto backend once it resolves to docker, fails the run.
+func TestValidateRunOptionsRuntimeRequiresPodman(t *testing.T) {
+	paths := testPathsWithFeatures(t)
+	paths.AppRoot = t.TempDir()
+	project := model.Project{Dir: paths.AppRoot, RealDir: paths.AppRoot, Hash: "abc123def456", Name: "project"}
+	for _, tc := range []struct {
+		name    string
+		backend string
+		clis    []string
+		action  string
+		source  model.OptionSource
+		wantErr string
+	}{
+		{name: "podman", backend: "podman"},
+		{name: "auto resolved to podman", backend: "auto", clis: []string{"podman"}},
+		{name: "docker", backend: "docker", wantErr: "--runtime runsc requires the podman backend; the selected backend is docker"},
+		{name: "auto resolved to docker", backend: "auto", clis: []string{"docker"}, wantErr: "--runtime runsc requires the podman backend; the selected backend is docker"},
+		{name: "configured runtime with auto resolved to docker", backend: "auto", clis: []string{"docker"}, source: model.SourceGlobal, wantErr: "runtime runsc requires the podman backend; the selected backend is docker"},
+		{name: "qemu", backend: "qemu", wantErr: "--runtime runsc requires the podman backend; the selected backend is qemu"},
+		{name: "docker outside runs", backend: "docker", action: "exec"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stubBackendResolution(t, tc.clis, false)
+			opts := config.DefaultOptions()
+			opts.Tool = "claude"
+			opts.Backend = tc.backend
+			opts.Runtime = model.RuntimeRunsc
+			opts.Sources = model.DefaultOptionSources()
+			opts.Sources.Runtime = model.SourceCLI
+			if tc.source != model.SourceUnset {
+				opts.Sources.Runtime = tc.source
+			}
+			action := tc.action
+			if action == "" {
+				action = "run"
+			}
+			if _, err := resolveActionBackend(action, &opts, false); err != nil {
+				t.Fatalf("resolveActionBackend: %v", err)
+			}
+
+			_, _, _, _, err := ValidateRunOptions(opts, opts.Sources, ValidationContext{Paths: paths, Action: action}, project)
+			if tc.wantErr != "" {
+				if err == nil || err.Error() != tc.wantErr {
+					t.Fatalf("ValidateRunOptions error = %v, want %q", err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("ValidateRunOptions returned error: %v", err)
+			}
+		})
+	}
+}
+
 // resolveAllowDomains resolves allow_domains from global config the way a run does.
 func resolveAllowDomains(domains ...string) model.Options {
 	base := config.DefaultOptions()

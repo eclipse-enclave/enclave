@@ -51,7 +51,7 @@ gateway, detached sessions, `exec`/`attach`, and persistent stores all work.
 |-----------|-----------|
 | Gateway sidecar | Runs as root inside a `--userns=keep-id` user namespace |
 | Auth-reconcile containers | `--userns=keep-id` |
-| Session container | Joins the gateway's user namespace (`--userns=container:<gateway>`) alongside its network namespace |
+| Session container | Joins the gateway's user namespace (`--userns=container:<gateway>`) alongside its network namespace; under [gVisor](#gvisor-runsc), keeps its own `--userns=keep-id` namespace |
 
 Bind-mounted stores therefore keep the host UID/GID under rootless podman. The
 session shares the gateway's user namespace because a separate keep-id
@@ -96,6 +96,63 @@ podman 6 / netavark 2 bridges are isolated only on request.
 - Each network gets a `/24` from podman's pool (no Docker pool limit). Ports
   bind `127.0.0.1` as under Docker.
 - An exited session's stopped gateway stays until the session is removed.
+
+### gVisor (runsc)
+
+`--runtime runsc` (config key `runtime`) runs the session container under
+[gVisor](https://gvisor.dev/): its Sentry handles the session's system calls,
+so a kernel exploit has to break gVisor first. The gateway, helper containers,
+and image builds keep podman's default runtime.
+
+```bash
+enclave --backend podman --runtime runsc
+```
+
+Install a release as `/usr/local/bin/runsc`, where podman finds it without
+configuration. Releases are a tarball whose `gvisor-bin/` directory must stay
+next to `runsc`:
+
+```bash
+URL=https://storage.googleapis.com/gvisor/releases/release/latest/$(uname -m)
+curl -fsSLO "$URL/gvisor.tar.zstd" -O "$URL/gvisor.tar.zstd.sha512"
+sha512sum -c gvisor.tar.zstd.sha512
+sudo tar --zstd -xf gvisor.tar.zstd -C /usr/local/bin runsc gvisor-bin
+```
+
+gVisor's [install guide](https://gvisor.dev/docs/user_guide/install/) also
+covers its apt repository. For another location, register it in
+`containers.conf` under `[engine.runtimes]`, as `runsc = ["/path/to/runsc"]`.
+
+Only the `podman` backend supports a runtime; with `docker` or `qemu`,
+including `auto` resolving to docker, the run fails instead of ignoring it.
+Enclave adds the arguments runsc needs to the session container:
+
+| Argument | When | Why |
+|----------|------|-----|
+| `--runtime-flag network=host` | Always | The Sentry uses host-kernel sockets in the gateway's network namespace, so the gateway's firewall, DNS, and proxy redirects apply unchanged. gVisor's own network stack would take over that namespace's interfaces and bypass the gateway |
+| `--runtime-flag ignore-cgroups` | Rootless | runsc cannot drive the systemd cgroup manager rootless (`Interactive authentication required`) |
+| `--runtime-flag allow-suid` | `--admin` sessions | runsc ignores setuid bits by default, which breaks `sudo`; other sessions run with `no-new-privileges` |
+| `--security-opt label=disable` | SELinux enforcing | runsc rejects SELinux process labels |
+
+runsc cannot join another container's user or UTS namespace, so the session
+shares only the gateway's network namespace and sets its hostname itself.
+
+Trade-offs:
+
+- Network system calls reach the host kernel through the Sentry rather than
+  gVisor's own network stack.
+- Under enforcing SELinux, the session container runs without an SELinux
+  label; gVisor's seccomp-confined Sentry is the confinement layer instead.
+- Rootless sessions have no cgroup; Enclave sets no resource limits anyway.
+- The terminal is a host file descriptor: `tty` and `ttyname()` report no
+  terminal, while TTY checks, resizing, and `/dev/tty` work.
+- Wrappers registered as `runsc` must keep these flags; one that changes the
+  network mode bypasses the gateway.
+- File-metadata and process-heavy work, such as creating many files or
+  starting many short processes, runs up to about six times slower;
+  network-bound and CPU-bound work runs close to the default runtime.
+
+Tested with runsc `release-20261109.0` on rootless Podman 5.8.9.
 
 ### Details
 

@@ -51,6 +51,37 @@ func TestBuildRunArgsPassesUTSNamespaceMode(t *testing.T) {
 	}
 }
 
+func TestBuildRunArgsPassesOCIRuntimeAndFlags(t *testing.T) {
+	args := buildRunArgs(&ContainerConfig{Image: "example:test", Cmd: []string{"bash"}}, &HostConfig{
+		Runtime:      "runsc",
+		RuntimeFlags: []string{"network=host", "ignore-cgroups"},
+	}, "session", runMode{})
+	want := []string{"run", "--name", "session", "--runtime", "runsc", "--runtime-flag", "network=host", "--runtime-flag", "ignore-cgroups", "example:test", "bash"}
+	if !slices.Equal(args, want) {
+		t.Fatalf("buildRunArgs() = %v, want %v", args, want)
+	}
+
+	plain := buildRunArgs(&ContainerConfig{Image: "example:test"}, &HostConfig{RuntimeFlags: []string{"network=host"}}, "", runMode{Create: true})
+	if slices.Contains(plain, "--runtime") || slices.Contains(plain, "--runtime-flag") {
+		t.Fatalf("an empty Runtime must emit no runtime flags, got %v", plain)
+	}
+}
+
+func TestSystemInfoRootless(t *testing.T) {
+	for _, tc := range []struct {
+		options []string
+		want    bool
+	}{
+		{nil, false},
+		{[]string{"name=seccomp,profile=builtin"}, false},
+		{[]string{"name=seccomp,profile=builtin", "name=rootless"}, true},
+	} {
+		if got := (SystemInfo{SecurityOptions: tc.options}).Rootless(); got != tc.want {
+			t.Errorf("Rootless() for %v = %v, want %v", tc.options, got, tc.want)
+		}
+	}
+}
+
 func TestDecodePodmanInfoMapsRootlessAndGraphRoot(t *testing.T) {
 	info, err := decodePodmanInfo([]byte(`{"host":{"security":{"rootless":true}},"store":{"graphRoot":"/home/u/.local/share/containers/storage"}}`))
 	if err != nil {

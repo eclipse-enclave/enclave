@@ -39,6 +39,7 @@ func dockerBackendOptions(host model.Host, paths model.Paths, build model.BuildO
 		NoRebuild:           build.NoRebuild,
 		NetworkLogMode:      run.NetworkLog,
 		ProjectMount:        run.ProjectMount,
+		Runtime:             run.Runtime,
 	}
 }
 

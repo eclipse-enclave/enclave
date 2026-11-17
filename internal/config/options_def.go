@@ -191,6 +191,30 @@ func OptionDefs() []OptionDef {
 			},
 		},
 		{
+			Name:           "runtime",
+			Group:          OptionGroupRun,
+			Kind:           OptionKindString,
+			AffectsSession: SessionAffected,
+			OptionField:    "Runtime",
+			SourceField:    "Runtime",
+			DefaultsField:  "Runtime",
+			Apply:          ApplyString,
+			TrimOnApply:    true,
+			CLIFlags: []CLIFlagDef{
+				{
+					Name:                "--runtime",
+					Usage:               "OCI runtime for the session container: runsc (gVisor; podman backend only; default: the engine's runtime)",
+					ValueKind:           CLIValueRequired,
+					MissingValueMessage: "--runtime requires a value (runsc)",
+					Action: CLIAction{
+						Kind:        CLIActionSetString,
+						OptionField: "Runtime",
+						SourceField: "Runtime",
+					},
+				},
+			},
+		},
+		{
 			Name:           "host_config",
 			Group:          OptionGroupRun,
 			Kind:           OptionKindString,

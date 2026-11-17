@@ -19,6 +19,7 @@ import (
 	"enclave/internal/backend/hoststore"
 	dockercmd "enclave/internal/docker"
 	"enclave/internal/model"
+	"enclave/internal/testutil"
 	"enclave/internal/util"
 )
 
@@ -49,7 +50,9 @@ func TestExternalFinalizerRespectsHostOwnership(t *testing.T) {
 					t.Fatal(err)
 				}
 				for _, next := range []string{"live", "finalizing", "ended"} {
-					if err := hoststore.AdvanceMode(home, dir, holder.ID, next, "cid", false); err != nil {
+					if next == "ended" {
+						testutil.EndModeHolder(t, home, dir, holder.ID)
+					} else if err := hoststore.AdvanceMode(home, dir, holder.ID, next, "cid", false); err != nil {
 						t.Fatal(err)
 					}
 					if next == state {
@@ -208,11 +211,10 @@ func TestPrunedEndedHolderCannotRegainFinalization(t *testing.T) {
 	if err := hoststore.ReserveMode(home, dir, holder, nil); err != nil {
 		t.Fatal(err)
 	}
-	for _, state := range []string{"finalizing", "ended"} {
-		if err := hoststore.AdvanceMode(home, dir, holder.ID, state, "old-cid", false); err != nil {
-			t.Fatal(err)
-		}
+	if err := hoststore.AdvanceMode(home, dir, holder.ID, "finalizing", "old-cid", false); err != nil {
+		t.Fatal(err)
 	}
+	testutil.EndModeHolder(t, home, dir, holder.ID)
 	be := New(Options{Host: model.Host{Home: home}})
 	_, reconcile, _, err := be.beginContainerModeFinalization(context.Background(), "old-session")
 	if err != nil || reconcile {

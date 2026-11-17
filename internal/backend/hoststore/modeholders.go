@@ -96,18 +96,14 @@ func ReserveMode(home, dir string, holder ModeHolder, discover func([]ModeHolder
 	})
 }
 
-// AdvanceMode never infers completion from engine status. Ending a finalized
-// holder deletes it; a labeled container cannot regain authority without it.
+// AdvanceMode never infers completion from engine status and never deletes a
+// holder. A labeled container cannot regain authority once its holder is gone.
 func AdvanceMode(home, dir, id, state, containerID string, detached bool) error {
 	return WithModeHolders(home, dir, func(holders *[]ModeHolder) error {
 		for i := range *holders {
 			holder := &(*holders)[i]
 			if holder.ID != id {
 				continue
-			}
-			if state == "ended" && holder.State == "finalizing" {
-				*holders = slices.Delete(*holders, i, i+1)
-				return nil
 			}
 			allowed := holder.State == state ||
 				holder.State == "pending" && (state == "live" || state == "finalizing") ||

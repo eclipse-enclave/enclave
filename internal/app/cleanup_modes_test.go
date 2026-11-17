@@ -23,6 +23,7 @@ import (
 	backendqemu "enclave/internal/backend/qemu"
 	"enclave/internal/config"
 	"enclave/internal/model"
+	"enclave/internal/testutil"
 	"enclave/internal/util"
 )
 
@@ -126,7 +127,8 @@ func TestModeCleanupRequiresOwnerDeathAndContainerAbsence(t *testing.T) {
 				if err := hoststore.AdvanceMode(home, dir, holder.ID, "finalizing", "", false); err != nil {
 					return err
 				}
-				return hoststore.AdvanceMode(home, dir, holder.ID, "ended", "", false)
+				testutil.EndModeHolder(t, home, dir, holder.ID)
+				return nil
 			}}
 			err = cleanupModeStore(home, dir, be, tc.dryRun)
 			if (err != nil) != tc.wantError || finalized != tc.wantFinalize {

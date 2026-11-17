@@ -9,9 +9,11 @@ package hoststore
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -20,6 +22,23 @@ import (
 	"enclave/internal/backend"
 	"enclave/internal/config"
 )
+
+// endFinalizing mirrors testutil.EndModeHolder, which this package cannot
+// import.
+func endFinalizing(t *testing.T, home, dir, id string) {
+	t.Helper()
+	err := WithModeHolders(home, dir, func(holders *[]ModeHolder) error {
+		before := len(*holders)
+		*holders = slices.DeleteFunc(*holders, func(holder ModeHolder) bool { return holder.ID == id && holder.State == "finalizing" })
+		if len(*holders) == before {
+			return fmt.Errorf("no finalizing session mode holder %s", id)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
 
 func TestModeReservationMatrix(t *testing.T) {
 	for _, protected := range []bool{false, true} {
@@ -34,7 +53,9 @@ func TestModeReservationMatrix(t *testing.T) {
 					if state == "pending" {
 						break
 					}
-					if err := AdvanceMode(home, dir, first.ID, next, "cid", false); err != nil {
+					if next == "ended" {
+						endFinalizing(t, home, dir, first.ID)
+					} else if err := AdvanceMode(home, dir, first.ID, next, "cid", false); err != nil {
 						t.Fatal(err)
 					}
 					if state == next {
@@ -99,13 +120,13 @@ func TestModeTransitionsAndDetachedHandoff(t *testing.T) {
 	if err := ReserveMode(home, dir, holder, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := AdvanceMode(home, dir, holder.ID, "ended", "", false); err == nil {
+	if err := EndMode(home, dir, holder.ID, nil); err == nil {
 		t.Fatal("pending skipped finalization")
 	}
 	if err := AdvanceMode(home, dir, holder.ID, "live", "cid", true); err != nil {
 		t.Fatal(err)
 	}
-	if err := AdvanceMode(home, dir, holder.ID, "ended", "", false); err == nil {
+	if err := EndMode(home, dir, holder.ID, nil); err == nil {
 		t.Fatal("live skipped finalization")
 	}
 	if err := WithModeHolders(home, dir, func(holders *[]ModeHolder) error {
@@ -117,11 +138,10 @@ func TestModeTransitionsAndDetachedHandoff(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	for _, state := range []string{"finalizing", "ended"} {
-		if err := AdvanceMode(home, dir, holder.ID, state, "", false); err != nil {
-			t.Fatal(err)
-		}
+	if err := AdvanceMode(home, dir, holder.ID, "finalizing", "", false); err != nil {
+		t.Fatal(err)
 	}
+	endFinalizing(t, home, dir, holder.ID)
 	if err := AdvanceMode(home, dir, holder.ID, "live", "", false); err == nil {
 		t.Fatal("ended holder resurrected")
 	}

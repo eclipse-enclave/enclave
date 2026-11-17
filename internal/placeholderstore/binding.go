@@ -88,15 +88,39 @@ func LoadBindings(dir string) (Bindings, error) {
 	}
 	seen := map[string]bool{}
 	for _, binding := range b.Bindings {
+		if err := validateBinding(binding); err != nil {
+			return b, fmt.Errorf("invalid native credential binding: %w", err)
+		}
 		key := binding.Provider + "\x00" + binding.File + "\x00" + binding.Pointer
-		_, pointerErr := model.AuthPointerSegments(binding.Pointer)
-		value := binding.Placeholder
-		if (binding.Shape != "" && binding.Shape != "jwt") || (binding.Shape == "jwt" && ((binding.Kind != "access" && binding.Kind != "id") || !model.MatchesSecretPlaceholder(binding.Placeholder, nil))) || binding.Provider == "" || !slices.Contains([]string{"access", "refresh", "id", "apiKey"}, binding.Kind) || !model.ValidAuthFilePath(binding.File) || pointerErr != nil || seen[key] || binding.Placeholder == "" || !strings.Contains(value, model.SecretPlaceholderMarker) {
-			return b, fmt.Errorf("invalid native credential binding")
+		if seen[key] {
+			return b, fmt.Errorf("invalid native credential binding: duplicate %s %s", binding.File, binding.Pointer)
 		}
 		seen[key] = true
 	}
 	return b, nil
+}
+
+func validateBinding(binding Binding) error {
+	switch {
+	case binding.Provider == "":
+		return fmt.Errorf("missing provider")
+	case !slices.Contains([]string{"access", "refresh", "id", "apiKey"}, binding.Kind):
+		return fmt.Errorf("unknown kind %q", binding.Kind)
+	case !model.ValidAuthFilePath(binding.File):
+		return fmt.Errorf("invalid file path")
+	case binding.Shape != "" && binding.Shape != "jwt":
+		return fmt.Errorf("unknown shape %q", binding.Shape)
+	case binding.Shape == "jwt" && binding.Kind != "access" && binding.Kind != "id":
+		return fmt.Errorf("jwt shape on a %s field", binding.Kind)
+	case !strings.Contains(binding.Placeholder, model.SecretPlaceholderMarker):
+		return fmt.Errorf("placeholder lacks the marker")
+	case binding.Shape == "jwt" && !model.MatchesSecretPlaceholder(binding.Placeholder, nil):
+		return fmt.Errorf("invalid jwt placeholder")
+	}
+	if _, err := model.AuthPointerSegments(binding.Pointer); err != nil {
+		return fmt.Errorf("invalid pointer: %w", err)
+	}
+	return nil
 }
 
 // SaveBindings is called while the caller holds the real store's lock.

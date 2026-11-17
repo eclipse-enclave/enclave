@@ -58,7 +58,10 @@ const AbandonedAfter = 24 * time.Hour
 // directory it bind-mounted, which must therefore survive even when emptied.
 // Body files without a record are removed once unwritten for AbandonedAfter,
 // and are not counted until then, because they may belong to a capture still
-// in flight. The second return is the number of captures removed.
+// in flight. Files of a WebSocket with an open record are kept however old:
+// its messages file stops growing at a limit, so their age says nothing, and
+// the session's own proxy removes them when it starts again. The second return
+// is the number of captures removed.
 func PruneStore(root string, maxBytes int64) (int, error) {
 	entries, err := os.ReadDir(root)
 	if err != nil {
@@ -74,7 +77,7 @@ func PruneStore(root string, maxBytes int64) (int, error) {
 	var captures []located
 	var total int64
 	cutoff := time.Now().Add(-AbandonedAfter)
-	abandoned := func(modified time.Time) bool { return modified.Before(cutoff) }
+	abandoned := func(modified time.Time, open bool) bool { return !open && modified.Before(cutoff) }
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue
@@ -107,9 +110,9 @@ func PruneStore(root string, maxBytes int64) (int, error) {
 // ErrNotFound reports a capture ID that no session directory in scope holds.
 var ErrNotFound = errors.New("capture not found")
 
-// Find returns the record path of a capture. Without a session every session
-// directory under the roots is searched, which is unambiguous in practice
-// because IDs are random.
+// Find returns the record path of a capture, which for a WebSocket still open
+// is its open record. Without a session every session directory under the
+// roots is searched, which is unambiguous in practice because IDs are random.
 func Find(roots []string, session string, id string) (string, error) {
 	if !ValidID(id) {
 		return "", fmt.Errorf("invalid capture ID %q: expected 16 hex digits", id)
@@ -124,9 +127,12 @@ func Find(roots []string, session string, id string) (string, error) {
 			sessions = sessionDirs(root)
 		}
 		for _, name := range sessions {
-			path := RecordPath(filepath.Join(root, name), id)
-			if info, err := os.Lstat(path); err == nil && info.Mode().IsRegular() {
-				matches = append(matches, path)
+			dir := filepath.Join(root, name)
+			for _, path := range []string{RecordPath(dir, id), OpenRecordPath(dir, id)} {
+				if info, err := os.Lstat(path); err == nil && info.Mode().IsRegular() {
+					matches = append(matches, path)
+					break
+				}
 			}
 		}
 	}

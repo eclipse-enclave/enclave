@@ -589,6 +589,57 @@ func TestProxyRelaysProtocolUpgradeToHTTP2Upstream(t *testing.T) {
 	assertEchoUpgradeRelayed(t, proxyServer, upstreamHost)
 }
 
+// The servers' Shutdown leaves upgraded connections alone, so the proxy closes
+// them itself and waits for their events to be written before it exits.
+func TestProxyLogsUpgradedConnectionsOpenWhenItStops(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(echoUpgradeHandler))
+	defer upstream.Close()
+	upstreamHost := strings.TrimPrefix(upstream.URL, "http://")
+	host, _, err := net.SplitHostPort(upstreamHost)
+	if err != nil {
+		t.Fatalf("SplitHostPort(%q) error = %v", upstreamHost, err)
+	}
+	logPath := filepath.Join(t.TempDir(), "network.log")
+	audit, err := netlog.NewAppender(logPath)
+	if err != nil {
+		t.Fatalf("netlog.NewAppender() error = %v", err)
+	}
+	defer func() { _ = audit.Close() }()
+	p := newProxy([]string{host}, nil, nil, false, audit, testSession)
+	proxyServer := httptest.NewServer(p.handler("http"))
+	defer proxyServer.Close()
+
+	conn, err := net.Dial("tcp", strings.TrimPrefix(proxyServer.URL, "http://"))
+	if err != nil {
+		t.Fatalf("dial proxy: %v", err)
+	}
+	defer func() { _ = conn.Close() }()
+	_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
+	if _, err := io.WriteString(conn, "GET /stream HTTP/1.1\r\nHost: "+upstreamHost+"\r\nConnection: Upgrade\r\nUpgrade: echo\r\n\r\n"); err != nil {
+		t.Fatalf("write upgrade request: %v", err)
+	}
+	reader := bufio.NewReader(conn)
+	if resp, err := http.ReadResponse(reader, nil); err != nil || resp.StatusCode != http.StatusSwitchingProtocols {
+		t.Fatalf("upgrade response = %v, %v", resp, err)
+	}
+	if events := readAuditEvents(t, logPath); len(events) != 0 {
+		t.Fatalf("events logged while the connection is open: %+v", events)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	p.exchanges.closeUpgraded()
+	p.exchanges.wait(ctx)
+
+	events := readAuditEvents(t, logPath)
+	if len(events) != 1 || events[0].Status != http.StatusSwitchingProtocols {
+		t.Fatalf("events after stopping = %+v, want the 101 of the open connection", events)
+	}
+	if _, err := reader.ReadByte(); err == nil {
+		t.Fatal("the client connection is still open after stopping")
+	}
+}
+
 func TestProxyRejectsUnrequestedProtocolSwitch(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		conn, rw, err := http.NewResponseController(w).Hijack()

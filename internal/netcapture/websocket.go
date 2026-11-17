@@ -266,10 +266,16 @@ func (d *socketDirection) readPayload(p []byte) []byte {
 	return p[len(chunk):]
 }
 
-// bufferLimit is how much of a message payload is held. Beyond the size cap it
-// leaves room for a secret value that straddles the cap, so that the value is
-// still found and none of it is stored.
+// bufferLimit is how much of a message payload is held, nothing once the socket
+// is full. Beyond the size cap it leaves room for a secret value that straddles
+// the cap, so that the value is still found and none of it is stored.
 func (d *socketDirection) bufferLimit() int {
+	d.socket.mu.Lock()
+	full := d.socket.full
+	d.socket.mu.Unlock()
+	if full {
+		return 0
+	}
 	return int(d.socket.store.maxBody) + d.socket.store.redactor.longest()
 }
 

@@ -245,9 +245,13 @@ func TestWebSocketCaptureStopsStoringAtTheSocketBudget(t *testing.T) {
 	for range 20 {
 		feed(client, 64, clientText(strings.Repeat("x", 50)))
 	}
+	feed(client, 64, clientText(strings.Repeat("y", 1000))[:500])
+	if held := len(capture.socket.client.message.payload); held != 0 {
+		t.Fatalf("a full socket holds %d bytes of a message", held)
+	}
 	record, messages := finishSocket(t, store, capture)
 	socket := record.WebSocket
-	if socket.Messages != 20 || socket.StoredMessages != int64(len(messages)) || len(messages) == 0 || len(messages) >= 20 {
+	if socket.Messages != 21 || socket.StoredMessages != int64(len(messages)) || len(messages) == 0 || len(messages) >= 20 {
 		t.Fatalf("record websocket = %+v with %d messages stored", socket, len(messages))
 	}
 	if !socket.Truncated || socket.StoredBytes > 400 {

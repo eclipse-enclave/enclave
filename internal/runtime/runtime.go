@@ -259,7 +259,7 @@ func (r *Runtime) prepareExecution() (*ExecutionContext, error) {
 	if err != nil {
 		return nil, err
 	}
-	projectEnv, envFileLoaded := r.envFileValues()
+	projectEnv := r.envFileValues()
 	sessionEnv := append(append([]string{}, mountArgs.Env()...), projectEnv...)
 	if err := validateGitIdentity(gitIdentity, sessionEnv); err != nil {
 		return nil, err
@@ -270,9 +270,7 @@ func (r *Runtime) prepareExecution() (*ExecutionContext, error) {
 	if err != nil {
 		return nil, err
 	}
-	if envFileLoaded {
-		r.logEnvFileLoaded(projectEnv)
-	}
+	r.logEnvFileLoaded(projectEnv)
 	runCtx := r.prepareRunContext(prepared.AuthState)
 	r.applyPortHints(&runCtx)
 	r.applyDevcontainerPorts()
@@ -1579,17 +1577,17 @@ func (r *Runtime) addToolSettingsTemplate(mounts *mountAccumulator) {
 	}
 }
 
-func (r *Runtime) envFileValues() ([]string, bool) {
+func (r *Runtime) envFileValues() []string {
 	projectEnv := filepath.Join(r.project.Dir, ".env")
-	if util.PathExists(projectEnv) {
-		values, err := util.ParseEnvFile(projectEnv)
-		if err != nil {
-			logx.Warnf("Failed to read .env file: %v", err)
-			return nil, false
-		}
-		return util.FilterProjectEnv(values), true
+	if !util.PathExists(projectEnv) {
+		return nil
 	}
-	return nil, false
+	values, err := util.ParseEnvFile(projectEnv)
+	if err != nil {
+		logx.Warnf("Failed to read .env file: %v", err)
+		return nil
+	}
+	return util.FilterProjectEnv(values)
 }
 
 func (r *Runtime) logEnvFileLoaded(values []string) {

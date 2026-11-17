@@ -184,9 +184,9 @@ func TestProjectEnvCannotOverrideInternalEnvironment(t *testing.T) {
 				t.Fatal(err)
 			}
 			r := &Runtime{project: model.Project{Dir: dir}}
-			values, loaded := r.envFileValues()
-			if !loaded || len(values) != 1 || values[0] != "VISIBLE=kept" {
-				t.Fatalf("project environment overrides reserved %s: %v (loaded=%v)", key, values, loaded)
+			values := r.envFileValues()
+			if len(values) != 1 || values[0] != "VISIBLE=kept" {
+				t.Fatalf("project environment overrides reserved %s: %v", key, values)
 			}
 			output, err := os.CreateTemp(t.TempDir(), "env-summary")
 			if err != nil {

@@ -648,7 +648,9 @@ func (s *Store) Learn(secrets []Secret) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	current := s.redactor.Load()
-	if !slices.ContainsFunc(secrets, current.isNew) {
+	if !slices.ContainsFunc(secrets, func(secret Secret) bool {
+		return secret.Value != "" && (current == nil || !slices.Contains(current.secrets, secret))
+	}) {
 		return
 	}
 	if current != nil {

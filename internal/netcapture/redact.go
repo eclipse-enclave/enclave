@@ -10,7 +10,6 @@ package netcapture
 import (
 	"bytes"
 	"net/http"
-	"slices"
 	"sort"
 )
 
@@ -28,11 +27,6 @@ type Secret struct {
 // or a value the sandbox obtained some other way.
 type redactor struct {
 	secrets []Secret
-}
-
-// isNew reports whether learning secret would change the redactor.
-func (r *redactor) isNew(secret Secret) bool {
-	return secret.Value != "" && (r == nil || !slices.Contains(r.secrets, secret))
 }
 
 func newRedactor(secrets []Secret) *redactor {

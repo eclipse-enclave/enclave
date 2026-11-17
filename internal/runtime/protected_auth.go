@@ -85,7 +85,7 @@ func (r *Runtime) prepareProtectedAuth(stores storeSet, mounts *mountAccumulator
 			}
 			for _, identity := range identities {
 				dir := filepath.Join(config.HostStoreAuthTreeDir(r.host.Home, r.profile.Name), identity.Name())
-				if dir == realDir {
+				if dir == realDir || identity.Type().IsRegular() {
 					continue
 				}
 				if !identity.IsDir() {

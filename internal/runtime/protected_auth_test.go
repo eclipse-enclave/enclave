@@ -136,6 +136,8 @@ func testProtectedViewMount(t *testing.T, tool string) {
 		data, _ := json.Marshal(doc)
 		writeFile(t, filepath.Join(realDir, provider.AuthSecrets[0].File), string(data))
 	}
+	authTree := config.HostStoreAuthTreeDir(r.host.Home, r.profile.Name)
+	writeFile(t, filepath.Join(authTree, ".DS_Store"), "")
 	if err := ValidateProtectedAuth(r.run, r.auth, r.build, r.profile); err != nil {
 		t.Fatal(err)
 	}
@@ -208,6 +210,13 @@ func testProtectedViewMount(t *testing.T, tool string) {
 		if envValue(mounts.env, model.EnvNativeAuthOps) == "" || !strings.Contains(envValue(mounts.env, model.EnvAuthDir), model.ContainerAuthDir) {
 			t.Fatal("entrypoint classification/view metadata missing")
 		}
+	}
+	if err := os.Symlink(realDir, filepath.Join(authTree, "linked")); err != nil {
+		t.Fatal(err)
+	}
+	mode := &backend.SessionMode{ConfigStore: stores.Config.Key, HolderID: "second"}
+	if _, _, err := r.prepareProtectedAuth(stores, newMountAccumulator(nil, nil), &SecretMapping{}, mode); err == nil || !strings.Contains(err.Error(), "cannot inspect native auth identity linked") {
+		t.Fatalf("symlinked auth identity accepted: %v", err)
 	}
 	r.run.Ephemeral, r.run.Persist = true, false
 	_, ephemeral := newVolumeManager(r).BuildPrep("unique")

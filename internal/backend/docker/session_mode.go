@@ -53,7 +53,7 @@ func (b *Backend) finalizingRequestMode(req backend.Request, id string) {
 					if sidecar == nil && !holder.GatewayCorrelated {
 						return fmt.Errorf("gateway correlation policy is missing")
 					}
-					holder.State, holder.UpdatedAt = "finalizing", time.Now().UTC()
+					holder.State, holder.UpdatedAt = hoststore.ModeFinalizing, time.Now().UTC()
 					return nil
 				}
 				return fmt.Errorf("session mode holder is missing")
@@ -66,7 +66,7 @@ func (b *Backend) finalizingRequestMode(req backend.Request, id string) {
 	}
 	info, err := dockercmd.ContainerInspect(ctx, ref)
 	if dockercmd.IsNotFound(err) || err == nil && info.State != nil && !info.State.Running {
-		hoststore.AdvanceRequestMode(b.opts.Host.Home, req, "finalizing", id)
+		hoststore.AdvanceRequestMode(b.opts.Host.Home, req, hoststore.ModeFinalizing, id)
 	} else {
 		logx.Warnf("Session %s auth-mode reservation retained: container exit could not be confirmed", req.Session.Name)
 	}
@@ -107,14 +107,14 @@ func (b *Backend) beginContainerModeFinalization(ctx context.Context, name strin
 				continue
 			}
 			claimed = *holder
-			if holder.State == "finalizing" && hoststore.ModeOwnerAlive(holder.OwnerPID) {
+			if holder.State == hoststore.ModeFinalizing && hoststore.ModeOwnerAlive(holder.OwnerPID) {
 				return fmt.Errorf("session %s auth is being finalized by process %d", holder.Session, holder.OwnerPID)
 			}
 			if hoststore.ModeOwnerAlive(holder.OwnerPID) {
 				return nil
 			}
 			reconcile = !holder.Protected
-			holder.State, holder.UpdatedAt, holder.OwnerPID = "finalizing", time.Now().UTC(), os.Getpid()
+			holder.State, holder.UpdatedAt, holder.OwnerPID = hoststore.ModeFinalizing, time.Now().UTC(), os.Getpid()
 			selected = holder.ID
 			break
 		}
@@ -138,7 +138,7 @@ func (b *Backend) beginContainerModeFinalization(ctx context.Context, name strin
 			err = hoststore.WithModeHolders(b.opts.Host.Home, dir, func(holders *[]hoststore.ModeHolder) error {
 				for i := range *holders {
 					holder := &(*holders)[i]
-					if holder.ID == selected && holder.OwnerPID == os.Getpid() && holder.State == "finalizing" {
+					if holder.ID == selected && holder.OwnerPID == os.Getpid() && holder.State == hoststore.ModeFinalizing {
 						holder.OwnerPID, holder.UpdatedAt = 0, time.Now().UTC()
 					}
 				}

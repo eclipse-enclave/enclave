@@ -22,7 +22,7 @@ func EndModeHolder(t *testing.T, home, dir, id string) {
 	err := hoststore.WithModeHolders(home, dir, func(holders *[]hoststore.ModeHolder) error {
 		before := len(*holders)
 		*holders = slices.DeleteFunc(*holders, func(holder hoststore.ModeHolder) bool {
-			return holder.ID == id && holder.State == "finalizing"
+			return holder.ID == id && holder.State == hoststore.ModeFinalizing
 		})
 		if len(*holders) == before {
 			return fmt.Errorf("no finalizing session mode holder %s", id)

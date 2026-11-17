@@ -52,7 +52,7 @@ func TestExternalFinalizerRespectsHostOwnership(t *testing.T) {
 				for _, next := range []string{"live", "finalizing", "ended"} {
 					if next == "ended" {
 						testutil.EndModeHolder(t, home, dir, holder.ID)
-					} else if err := hoststore.AdvanceMode(home, dir, holder.ID, next, "cid", false); err != nil {
+					} else if err := hoststore.AdvanceMode(home, dir, holder.ID, hoststore.ModeState(next), "cid", false); err != nil {
 						t.Fatal(err)
 					}
 					if next == state {

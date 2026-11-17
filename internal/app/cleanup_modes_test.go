@@ -78,7 +78,7 @@ func TestModeCleanupRequiresOwnerDeathAndContainerAbsence(t *testing.T) {
 			}
 			if err := hoststore.WithModeHolders(home, dir, func(holders *[]hoststore.ModeHolder) error {
 				h := &(*holders)[0]
-				h.State, h.ContainerID = tc.state, "cid"
+				h.State, h.ContainerID = hoststore.ModeState(tc.state), "cid"
 				h.UpdatedAt = time.Now().Add(-2 * modeStartTimeout)
 				if tc.owned {
 					h.OwnerPID = os.Getpid()
@@ -116,7 +116,7 @@ func TestModeCleanupRequiresOwnerDeathAndContainerAbsence(t *testing.T) {
 				}
 				// This also proves Remove is outside the config-store lock.
 				if err := hoststore.WithModeHolders(home, dir, func(holders *[]hoststore.ModeHolder) error {
-					if len(*holders) != 1 || (*holders)[0].State != tc.state {
+					if len(*holders) != 1 || (*holders)[0].State != hoststore.ModeState(tc.state) {
 						t.Fatal("engine exit promoted the record before finalization")
 					}
 					return nil

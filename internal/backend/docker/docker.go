@@ -132,7 +132,7 @@ func (b *Backend) Run(ctx context.Context, req backend.Request, attach backend.A
 	if req.Mode != nil {
 		spec.onStarted = func(id string) {
 			startedID = id
-			hoststore.AdvanceRequestMode(b.opts.Host.Home, req, "live", id)
+			hoststore.AdvanceRequestMode(b.opts.Host.Home, req, hoststore.ModeLive, id)
 		}
 	}
 	return attachForeground(context.WithoutCancel(ctx), spec, attach)
@@ -242,7 +242,7 @@ func (b *Backend) Start(ctx context.Context, req backend.Request) (backend.Sessi
 		}
 		return backend.SessionRef{}, err
 	}
-	hoststore.AdvanceRequestMode(b.opts.Host.Home, req, "live", id)
+	hoststore.AdvanceRequestMode(b.opts.Host.Home, req, hoststore.ModeLive, id)
 	started = true
 	return backend.SessionRef{Name: spec.name, ID: id}, nil
 }

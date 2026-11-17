@@ -55,7 +55,7 @@ func TestModeReservationMatrix(t *testing.T) {
 					}
 					if next == "ended" {
 						endFinalizing(t, home, dir, first.ID)
-					} else if err := AdvanceMode(home, dir, first.ID, next, "cid", false); err != nil {
+					} else if err := AdvanceMode(home, dir, first.ID, ModeState(next), "cid", false); err != nil {
 						t.Fatal(err)
 					}
 					if state == next {

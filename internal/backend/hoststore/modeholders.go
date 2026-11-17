@@ -35,10 +35,19 @@ type ModeHolder struct {
 	Ephemeral         bool      `json:"ephemeral,omitempty"`
 	Protected         bool      `json:"protected"`
 	ContainerID       string    `json:"containerId,omitempty"`
-	State             string    `json:"state"`
+	State             ModeState `json:"state"`
 	OwnerPID          int       `json:"ownerPid"`
 	UpdatedAt         time.Time `json:"updatedAt"`
 }
+
+// ModeState is a holder's lifecycle state. Ending deletes the holder.
+type ModeState string
+
+const (
+	ModePending    ModeState = "pending"
+	ModeLive       ModeState = "live"
+	ModeFinalizing ModeState = "finalizing"
+)
 
 // ModeRecord groups the holders of one physical config store.
 type ModeRecord struct {
@@ -90,7 +99,7 @@ func ReserveMode(home, dir string, holder ModeHolder, discover func([]ModeHolder
 				return err
 			}
 		}
-		holder.State, holder.UpdatedAt = "pending", time.Now().UTC()
+		holder.State, holder.UpdatedAt = ModePending, time.Now().UTC()
 		*holders = append(*holders, holder)
 		return nil
 	})
@@ -98,7 +107,7 @@ func ReserveMode(home, dir string, holder ModeHolder, discover func([]ModeHolder
 
 // AdvanceMode never infers completion from engine status and never deletes a
 // holder. A labeled container cannot regain authority once its holder is gone.
-func AdvanceMode(home, dir, id, state, containerID string, detached bool) error {
+func AdvanceMode(home, dir, id string, state ModeState, containerID string, detached bool) error {
 	return WithModeHolders(home, dir, func(holders *[]ModeHolder) error {
 		for i := range *holders {
 			holder := &(*holders)[i]
@@ -106,8 +115,8 @@ func AdvanceMode(home, dir, id, state, containerID string, detached bool) error 
 				continue
 			}
 			allowed := holder.State == state ||
-				holder.State == "pending" && (state == "live" || state == "finalizing") ||
-				holder.State == "live" && state == "finalizing"
+				holder.State == ModePending && (state == ModeLive || state == ModeFinalizing) ||
+				holder.State == ModeLive && state == ModeFinalizing
 			if !validModeState(state) || !allowed {
 				return fmt.Errorf("invalid session mode transition %s -> %s", holder.State, state)
 			}
@@ -115,7 +124,7 @@ func AdvanceMode(home, dir, id, state, containerID string, detached bool) error 
 			if containerID != "" {
 				holder.ContainerID = containerID
 			}
-			if detached && state == "live" {
+			if detached && state == ModeLive {
 				holder.OwnerPID = 0
 			}
 			return nil
@@ -124,8 +133,8 @@ func AdvanceMode(home, dir, id, state, containerID string, detached bool) error 
 	})
 }
 
-func validModeState(state string) bool {
-	return state == "pending" || state == "live" || state == "finalizing"
+func validModeState(state ModeState) bool {
+	return state == ModePending || state == ModeLive || state == ModeFinalizing
 }
 
 // ModeOwnerAlive treats PID reuse and permission/inspection failures as alive.
@@ -189,7 +198,7 @@ func readModeRecord(file, dir string) (ModeRecord, error) {
 }
 
 // AdvanceRequestMode applies the lifecycle intent shared by both backends.
-func AdvanceRequestMode(home string, req backend.Request, state, id string) {
+func AdvanceRequestMode(home string, req backend.Request, state ModeState, id string) {
 	if req.Mode == nil {
 		return
 	}
@@ -211,7 +220,7 @@ func EndMode(home, dir, id string, finalize func() error) error {
 			if holder.ID != id {
 				continue
 			}
-			if holder.State != "finalizing" || holder.OwnerPID != os.Getpid() {
+			if holder.State != ModeFinalizing || holder.OwnerPID != os.Getpid() {
 				return fmt.Errorf("session %s has not confirmed exit for this finalizer", holder.Session)
 			}
 			if finalize != nil {

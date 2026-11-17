@@ -122,7 +122,7 @@ func cleanupModeStore(home, dir string, be backend.Backend, dryRun bool) error {
 				if hoststore.ModeOwnerAlive(current.OwnerPID) {
 					return fmt.Errorf("session %s has an active auth finalizer", holder.Session)
 				}
-				current.State, current.OwnerPID, current.UpdatedAt = "finalizing", os.Getpid(), time.Now().UTC()
+				current.State, current.OwnerPID, current.UpdatedAt = hoststore.ModeFinalizing, os.Getpid(), time.Now().UTC()
 				return nil
 			}
 			return fmt.Errorf("session mode holder is missing")

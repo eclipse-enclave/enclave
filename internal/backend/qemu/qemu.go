@@ -63,7 +63,7 @@ func (b *Backend) Run(ctx context.Context, req backend.Request, attach backend.A
 	if req.AuthSync != nil {
 		defer b.runRequestAuthSync(req)
 	}
-	defer hoststore.AdvanceRequestMode(b.opts.Host.Home, req, "finalizing", "")
+	defer hoststore.AdvanceRequestMode(b.opts.Host.Home, req, hoststore.ModeFinalizing, "")
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -105,7 +105,7 @@ func (b *Backend) Run(ctx context.Context, req backend.Request, attach backend.A
 		}
 		return backend.ExitStatus{}, fmt.Errorf("qemu backend: start %s: %w", qemuBinary, err)
 	}
-	hoststore.AdvanceRequestMode(b.opts.Host.Home, req, "live", strconv.Itoa(cmd.Process.Pid))
+	hoststore.AdvanceRequestMode(b.opts.Host.Home, req, hoststore.ModeLive, strconv.Itoa(cmd.Process.Pid))
 	if attach.OnStarted != nil {
 		attach.OnStarted()
 	}
@@ -131,7 +131,7 @@ func (b *Backend) Run(ctx context.Context, req backend.Request, attach backend.A
 }
 
 func (b *Backend) Start(_ context.Context, req backend.Request) (backend.SessionRef, error) {
-	hoststore.AdvanceRequestMode(b.opts.Host.Home, req, "finalizing", "")
+	hoststore.AdvanceRequestMode(b.opts.Host.Home, req, hoststore.ModeFinalizing, "")
 	return backend.SessionRef{}, fmt.Errorf("qemu backend: detached sessions are not supported")
 }
 

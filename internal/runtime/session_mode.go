@@ -59,7 +59,7 @@ func (r *Runtime) endSessionMode(mode *backend.SessionMode, unstarted bool, fina
 	}
 	dir, err := hoststore.ResolveDir(r.host.Home, mode.ConfigStore, backend.StoreKindConfig)
 	if err == nil && unstarted {
-		err = hoststore.AdvanceMode(r.host.Home, dir, mode.HolderID, "finalizing", "", false)
+		err = hoststore.AdvanceMode(r.host.Home, dir, mode.HolderID, hoststore.ModeFinalizing, "", false)
 	}
 	if err == nil {
 		err = hoststore.EndMode(r.host.Home, dir, mode.HolderID, finalize)

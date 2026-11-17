@@ -215,12 +215,15 @@ exists, Enclave forwards it to the container's loopback interface.
 User-facing behavior per tool is in
 [Authentication](../auth.md#oauth-callback-ports).
 
-### Native auth declarations (internal)
+### Native auth declarations
 
-`providers[].authSecrets` and `tokenEndpoint` are reserved for the internal protected-auth
-implementation. They do not enable a protected session or change ordinary auth
-behavior. Claude, Codex, Pi, OpenCode and Copilot enable them with `--protect-auth`; see
-[protected native auth](../auth.md#protected-native-auth).
+`providers[].authSecrets` and `tokenEndpoint` tell `--protect-auth` which
+native credential fields to replace with placeholders and which token exchange
+the gateway performs; see
+[protected native auth](../auth.md#protected-native-auth). They do not change
+ordinary sessions. Each file must use one of the codecs below, which fix its
+format and credential fields, so a third-party tool can declare them only if it
+stores credentials in one of those formats.
 
 | Field | Meaning |
 |-------|---------|

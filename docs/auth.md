@@ -253,16 +253,12 @@ SSH on port 22 bypasses the gateway proxy and is not logged.
 
 ## Protected native auth
 
-Claude's per-project `.claude.json` is checked but not projected or moved into
-the shared auth store. A protected start refuses raw `primaryApiKey` or
-`anthropicApiKey` fields there; remove the stored credential or use ordinary mode.
-Project metadata stays in place, including across `--reset-auth`.
-
 `enclave --tool claude --protect-auth` (also Codex, Pi, OpenCode and Copilot)
-mounts a private placeholder view instead of the native auth store.
-The gateway performs the tool's token exchanges and
-releases credentials only to their declared HTTPS hosts. Ordinary sessions
-retain their existing native-file behavior; protection is opt-in.
+keeps the tool's native OAuth tokens and declared API keys out of the sandbox.
+The tool sees a private view of its auth files with placeholders in place of
+the credentials. The gateway performs the tool's token exchanges and releases
+credentials only to their declared HTTPS hosts. Ordinary sessions retain their
+existing native-file behavior; protection is opt-in.
 
 | Tool | Declared native files, relative to its auth root | Protected credentials |
 |---|---|---|
@@ -271,6 +267,14 @@ retain their existing native-file behavior; protection is opt-in.
 | Pi | `agent/auth.json` | ChatGPT login and declared provider API keys |
 | OpenCode | `auth.json` | ChatGPT/Copilot logins and declared provider API keys |
 | Copilot | `config.json` | GitHub.com account tokens |
+
+Claude's per-project `.claude.json` is checked but not projected or moved into
+the shared auth store. A protected start refuses raw `primaryApiKey` or
+`anthropicApiKey` fields there; remove the stored credential or use ordinary
+mode. Project metadata stays in place, including across `--reset-auth`.
+MCP servers that use OAuth need a new login in each protected Claude session:
+Claude stores those logins next to its own, and protection neither carries an
+existing one into the session nor keeps one made there.
 
 Pi and OpenCode protect ChatGPT logins and native API-key entries whose matching
 env credential is configured. OpenCode also protects GitHub Copilot logins;

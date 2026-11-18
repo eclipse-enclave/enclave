@@ -16,7 +16,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 
 	"enclave/internal/backend"
@@ -422,23 +421,7 @@ func segmentPadding(offset int64) int {
 }
 
 func formatHostfwd(port backend.PortMapping) (string, error) {
-	protocol := strings.ToLower(strings.TrimSpace(port.Protocol))
-	if protocol != "" && protocol != "tcp" {
-		return "", fmt.Errorf("qemu backend: only tcp port forwarding is supported")
-	}
-	hostPort, err := strconv.Atoi(strings.TrimSpace(port.HostPort))
-	if err != nil || hostPort < 1 || hostPort > 65535 {
-		return "", fmt.Errorf("qemu backend: invalid host port %q", port.HostPort)
-	}
-	containerPort, err := strconv.Atoi(strings.TrimSpace(port.ContainerPort))
-	if err != nil || containerPort < 1 || containerPort > 65535 {
-		return "", fmt.Errorf("qemu backend: invalid guest port %q", port.ContainerPort)
-	}
-	hostIP := strings.TrimSpace(port.HostIP)
-	if hostIP == "" {
-		hostIP = "127.0.0.1"
-	}
-	return fmt.Sprintf("tcp:%s:%d-:%d", hostIP, hostPort, containerPort), nil
+	return vmhost.FormatHostfwd(backend.NameQEMU, port)
 }
 
 func qemuName(req backend.Request) string {

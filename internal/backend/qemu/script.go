@@ -15,6 +15,7 @@ import (
 	"strings"
 
 	"enclave/internal/backend"
+	"enclave/internal/backend/vmhost"
 	"enclave/internal/model"
 	"enclave/internal/util"
 )
@@ -161,10 +162,7 @@ func qemuKernelAppend() string {
 }
 
 func rejectQEMUOptionComma(label string, value string) error {
-	if strings.Contains(value, ",") {
-		return fmt.Errorf("qemu backend: %s %q contains a comma, which is not supported in QEMU option values", label, value)
-	}
-	return nil
+	return vmhost.RejectOptionComma(backend.NameQEMU, label, value)
 }
 
 func (b *Backend) renderRunScript(req backend.Request, mounts []runtimeMount, files []runtimeFileMount, console consoleSize) (string, error) {

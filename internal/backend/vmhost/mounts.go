@@ -157,10 +157,10 @@ func (p MountPlanner) FileMounts(stageRoot string, guestFilesPath string, mounts
 		}
 		sourcePath := filepath.Join(entryRoot, "source")
 		resultPath := filepath.Join(entryRoot, "result")
-		if err := copyFile(mount.Source, sourcePath, info.Mode().Perm()); err != nil {
+		if err := CopyFile(mount.Source, sourcePath, info.Mode().Perm()); err != nil {
 			return nil, fmt.Errorf("%s backend: stage file mount source: %w", p.Backend, err)
 		}
-		if err := copyFile(mount.Source, resultPath, info.Mode().Perm()); err != nil {
+		if err := CopyFile(mount.Source, resultPath, info.Mode().Perm()); err != nil {
 			return nil, fmt.Errorf("%s backend: stage file mount result: %w", p.Backend, err)
 		}
 		guestEntry := filepath.Join(guestFilesPath, fmt.Sprintf("%02d", len(prepared)))
@@ -231,7 +231,8 @@ func removeCopyDestination(dst string) error {
 	return os.RemoveAll(dst)
 }
 
-func copyFile(src string, dst string, mode fs.FileMode) error {
+// CopyFile replaces dst with a copy of src.
+func CopyFile(src string, dst string, mode fs.FileMode) error {
 	if mode == 0 {
 		mode = 0o600
 	}

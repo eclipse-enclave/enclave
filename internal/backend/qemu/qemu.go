@@ -20,6 +20,7 @@ import (
 	"strings"
 
 	"enclave/internal/backend"
+	"enclave/internal/backend/vmhost"
 	"enclave/internal/logx"
 	"enclave/internal/model"
 )
@@ -33,11 +34,15 @@ type Options struct {
 
 type Backend struct {
 	opts    Options
-	storage *StoreManager
+	storage *vmhost.StoreManager
 }
 
 func New(opts Options) *Backend {
 	return &Backend{opts: opts, storage: newStoreManager(opts.Host)}
+}
+
+func newStoreManager(host model.Host) *vmhost.StoreManager {
+	return vmhost.NewStoreManager(host, backend.NameQEMU)
 }
 
 func (b *Backend) Name() string { return backend.NameQEMU }
@@ -58,9 +63,25 @@ func (b *Backend) Capabilities() backend.Capabilities {
 
 func (b *Backend) Storage() backend.StoreManager { return b.storage }
 
+func (b *Backend) PrepareStores(ctx context.Context, prep backend.StorePrep) (backend.StoreState, error) {
+	return b.storage.PrepareStores(ctx, prep)
+}
+
+func (b *Backend) createStoreDir(key backend.StoreKey, kind backend.StoreKind, rel string) error {
+	return b.storage.CreateStoreDir(key, kind, rel)
+}
+
+func (b *Backend) syncSharedAuth(ctx context.Context, configKey backend.StoreKey, authKey backend.StoreKey, files []string, placeholders ...string) error {
+	return b.storage.SyncSharedAuth(ctx, configKey, authKey, files, placeholders...)
+}
+
+func (b *Backend) syncFeatureAuth(ctx context.Context, configKey backend.StoreKey, sync backend.FeatureAuthSync, placeholders ...string) error {
+	return b.storage.SyncFeatureAuth(ctx, configKey, sync, placeholders...)
+}
+
 func (b *Backend) Run(ctx context.Context, req backend.Request, attach backend.AttachIO) (backend.ExitStatus, error) {
 	if req.AuthSync != nil {
-		defer b.runRequestAuthSync(req)
+		defer b.storage.SyncRequestAuth(req)
 	}
 	if ctx == nil {
 		ctx = context.Background()

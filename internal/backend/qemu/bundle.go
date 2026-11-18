@@ -13,15 +13,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
 
 	"enclave/internal/backend"
+	"enclave/internal/backend/vmhost"
 	"enclave/internal/model"
 )
 
@@ -95,23 +94,10 @@ type guestRuntime struct {
 	FileMounts       []runtimeFileMount
 }
 
-type runtimeMount struct {
-	ID        string
-	Tag       string
-	Source    string
-	Target    string
-	ReadOnly  bool
-	CacheMmap bool
-}
-
-type runtimeFileMount struct {
-	Source      string
-	Target      string
-	GuestSource string
-	GuestResult string
-	ResultPath  string
-	ReadOnly    bool
-}
+type (
+	runtimeMount     = vmhost.DirMount
+	runtimeFileMount = vmhost.FileMount
+)
 
 func resolveBundle(image string) (bundle, error) {
 	if strings.TrimSpace(image) == "" {
@@ -278,7 +264,8 @@ func (b *Backend) prepareGuestRuntime(bundle bundle, req backend.Request, consol
 	// Before anything inspects the sources: prepareFileMounts stats every bind
 	// source and rejects a missing one, so a later creation pass would never run
 	// for the case CreateSourceDir exists for.
-	if err := createDisposableMountSources(req.Mounts); err != nil {
+	planner := b.mountPlanner()
+	if err := planner.CreateDisposableSources(req.Mounts); err != nil {
 		return guestRuntime{}, err
 	}
 	tempDir, err := os.MkdirTemp("", "enclave-qemu-*")
@@ -293,10 +280,14 @@ func (b *Backend) prepareGuestRuntime(bundle bundle, req backend.Request, consol
 		cleanupOnErr()
 		return guestRuntime{}, fmt.Errorf("qemu backend: create control directory: %w", err)
 	}
-	fileMounts, fileStageSource, err := prepareFileMounts(tempDir, req.Mounts)
+	fileStageSource := filepath.Join(tempDir, "files")
+	fileMounts, err := planner.FileMounts(fileStageSource, guestFilesPath, req.Mounts)
 	if err != nil {
 		cleanupOnErr()
 		return guestRuntime{}, err
+	}
+	if len(fileMounts) == 0 {
+		fileStageSource = ""
 	}
 	mounts, err := b.buildRuntimeMounts(req, controlDir, fileStageSource)
 	if err != nil {
@@ -337,145 +328,26 @@ func (b *Backend) prepareGuestRuntime(bundle bundle, req backend.Request, consol
 	}, nil
 }
 
-// createDisposableMountSources honors the backend.Mount.CreateSourceDir
-// contract: a disposable source that no longer exists is recreated as an empty
-// directory instead of failing the session. Non-bind mounts have no host
-// directory to create.
-func createDisposableMountSources(mounts []backend.Mount) error {
-	for _, mount := range mounts {
-		if !mount.CreateSourceDir {
-			continue
-		}
-		if mount.Type != "" && mount.Type != backend.MountTypeBind {
-			continue
-		}
-		if err := os.MkdirAll(mount.Source, 0o700); err != nil {
-			return fmt.Errorf("qemu backend: create disposable mount source %q: %w", mount.Source, err)
-		}
+func (b *Backend) mountPlanner() vmhost.MountPlanner {
+	return vmhost.MountPlanner{
+		Backend:  backend.NameQEMU,
+		Stores:   b.storage,
+		Reserved: []string{guestControlPath, guestFilesPath},
 	}
-	return nil
 }
 
 func (b *Backend) buildRuntimeMounts(req backend.Request, controlDir string, fileStageSource string) ([]runtimeMount, error) {
-	mounts := make([]runtimeMount, 0, len(req.Mounts)+len(req.Stores)+2)
-	idx := 0
-	for _, mount := range req.Mounts {
-		if mount.Type != "" && mount.Type != backend.MountTypeBind {
-			return nil, fmt.Errorf("qemu backend: unsupported mount type %q", mount.Type)
-		}
-		info, err := os.Stat(mount.Source)
-		if err != nil {
-			return nil, fmt.Errorf("qemu backend: inspect mount source %q: %w", mount.Source, err)
-		}
-		if !info.IsDir() {
-			continue
-		}
-		if err := validateGuestPath(mount.ContainerPath, "mount target"); err != nil {
-			return nil, err
-		}
-		mounts = append(mounts, runtimeMount{
-			ID:       fmt.Sprintf("mount-%d", idx),
-			Tag:      fmt.Sprintf("enclave-mount-%d", idx),
-			Source:   filepath.Clean(mount.Source),
-			Target:   filepath.Clean(mount.ContainerPath),
-			ReadOnly: mount.ReadOnly,
-		})
-		idx++
-	}
-	for _, store := range req.Stores {
-		if strings.TrimSpace(store.ContainerPath) == "" {
-			continue
-		}
-		if err := validateGuestPath(store.ContainerPath, "store target"); err != nil {
-			return nil, err
-		}
-		source, err := b.storage.MountSource(store.Key, store.Kind)
-		if err != nil {
-			return nil, err
-		}
-		mounts = append(mounts, runtimeMount{
-			ID:        fmt.Sprintf("store-%d", idx),
-			Tag:       fmt.Sprintf("enclave-store-%d", idx),
-			Source:    source,
-			Target:    filepath.Clean(store.ContainerPath),
-			ReadOnly:  store.ReadOnly,
-			CacheMmap: store.CacheMmap,
-		})
-		idx++
+	mounts, err := b.mountPlanner().DirMounts(req)
+	if err != nil {
+		return nil, err
 	}
 	if fileStageSource != "" {
 		mounts = append(mounts, runtimeMount{ID: "files", Tag: "enclave-files", Source: fileStageSource, Target: guestFilesPath})
 	}
 	mounts = append(mounts, runtimeMount{ID: "control", Tag: "enclave-control", Source: controlDir, Target: guestControlPath})
 	// Parent mounts must precede children, including late-added config anchors.
-	sort.SliceStable(mounts, func(i, j int) bool {
-		return strings.Count(mounts[i].Target, "/") < strings.Count(mounts[j].Target, "/")
-	})
+	vmhost.SortParentsFirst(mounts)
 	return mounts, nil
-}
-
-func prepareFileMounts(tempDir string, mounts []backend.Mount) ([]runtimeFileMount, string, error) {
-	root := filepath.Join(tempDir, "files")
-	var prepared []runtimeFileMount
-	for _, mount := range mounts {
-		if mount.Type != "" && mount.Type != backend.MountTypeBind {
-			continue
-		}
-		info, err := os.Stat(mount.Source)
-		if err != nil {
-			return nil, "", fmt.Errorf("qemu backend: inspect file mount source %q: %w", mount.Source, err)
-		}
-		if info.IsDir() {
-			continue
-		}
-		if !info.Mode().IsRegular() {
-			return nil, "", fmt.Errorf("qemu backend: mount source %q must be a directory or regular file", mount.Source)
-		}
-		if err := validateGuestPath(mount.ContainerPath, "file mount target"); err != nil {
-			return nil, "", err
-		}
-		entryRoot := filepath.Join(root, fmt.Sprintf("%02d", len(prepared)))
-		if err := os.MkdirAll(entryRoot, 0o700); err != nil {
-			return nil, "", fmt.Errorf("qemu backend: create file mount staging entry: %w", err)
-		}
-		sourcePath := filepath.Join(entryRoot, "source")
-		resultPath := filepath.Join(entryRoot, "result")
-		if err := copyFile(mount.Source, sourcePath, info.Mode().Perm()); err != nil {
-			return nil, "", fmt.Errorf("qemu backend: stage file mount source: %w", err)
-		}
-		if err := copyFile(mount.Source, resultPath, info.Mode().Perm()); err != nil {
-			return nil, "", fmt.Errorf("qemu backend: stage file mount result: %w", err)
-		}
-		guestEntry := filepath.Join(guestFilesPath, fmt.Sprintf("%02d", len(prepared)))
-		prepared = append(prepared, runtimeFileMount{
-			Source:      mount.Source,
-			Target:      filepath.Clean(mount.ContainerPath),
-			GuestSource: filepath.Join(guestEntry, "source"),
-			GuestResult: filepath.Join(guestEntry, "result"),
-			ResultPath:  resultPath,
-			ReadOnly:    mount.ReadOnly,
-		})
-	}
-	if len(prepared) == 0 {
-		return nil, "", nil
-	}
-	return prepared, root, nil
-}
-
-func validateGuestPath(path string, label string) error {
-	if strings.TrimSpace(path) == "" {
-		return fmt.Errorf("qemu backend: %s is empty", label)
-	}
-	cleaned := filepath.Clean(path)
-	if !filepath.IsAbs(cleaned) || cleaned == string(filepath.Separator) {
-		return fmt.Errorf("qemu backend: %s %q must be an absolute non-root path", label, path)
-	}
-	for _, reserved := range []string{guestControlPath, guestFilesPath} {
-		if cleaned == reserved || strings.HasPrefix(cleaned, reserved+string(filepath.Separator)) {
-			return fmt.Errorf("qemu backend: %s %q overlaps reserved guest path %s", label, path, reserved)
-		}
-	}
-	return nil
 }
 
 func createCPIOArchive(sourceDir string, output string) error {
@@ -549,33 +421,6 @@ func segmentPadding(offset int64) int {
 	return initramfsSegmentAlignment - int(remainder)
 }
 
-func persistFileMounts(files []runtimeFileMount) []error {
-	var errs []error
-	for _, file := range files {
-		if file.ReadOnly {
-			continue
-		}
-		data, err := os.ReadFile(file.ResultPath) // #nosec G304 -- result path is generated under the runtime directory.
-		if err != nil {
-			errs = append(errs, fmt.Errorf("persist file mount %s: %w", file.Target, err))
-			continue
-		}
-		info, statErr := os.Stat(file.Source)
-		mode := fsMode(info, statErr)
-		if err := os.WriteFile(file.Source, data, mode); err != nil { // #nosec G306 G304 G703 -- source was supplied as a validated mount source.
-			errs = append(errs, fmt.Errorf("persist file mount %s: %w", file.Target, err))
-		}
-	}
-	return errs
-}
-
-func fsMode(info os.FileInfo, err error) os.FileMode {
-	if err == nil {
-		return info.Mode().Perm()
-	}
-	return 0o600
-}
-
 func formatHostfwd(port backend.PortMapping) (string, error) {
 	protocol := strings.ToLower(strings.TrimSpace(port.Protocol))
 	if protocol != "" && protocol != "tcp" {
@@ -608,43 +453,4 @@ func qemuName(req backend.Request) string {
 		}
 	}
 	return strings.Join(compact, "-")
-}
-
-func removeCopyDestination(dst string) error {
-	if _, err := os.Lstat(dst); err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		return err
-	}
-	return os.RemoveAll(dst)
-}
-
-func copyFile(src string, dst string, mode fs.FileMode) error {
-	if mode == 0 {
-		mode = 0o600
-	}
-	in, err := os.Open(src) // #nosec G304 -- caller validates source.
-	if err != nil {
-		return err
-	}
-	defer func() { _ = in.Close() }()
-	if err := os.MkdirAll(filepath.Dir(dst), 0o700); err != nil {
-		return err
-	}
-	if err := removeCopyDestination(dst); err != nil {
-		return err
-	}
-	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_EXCL, mode.Perm()) // #nosec G304 -- dst is constrained by caller.
-	if err != nil {
-		return err
-	}
-	if _, err := io.Copy(out, in); err != nil {
-		_ = out.Close()
-		return err
-	}
-	if err := out.Close(); err != nil {
-		return err
-	}
-	return os.Chmod(dst, mode.Perm())
 }

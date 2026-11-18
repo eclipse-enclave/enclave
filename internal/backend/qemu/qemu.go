@@ -102,7 +102,7 @@ func (b *Backend) Run(ctx context.Context, req backend.Request, attach backend.A
 	}
 	defer func() { _ = os.RemoveAll(runtime.TempDir) }()
 	defer func() {
-		for _, err := range persistFileMounts(runtime.FileMounts) {
+		for _, err := range vmhost.PersistFileMounts(runtime.FileMounts) {
 			_, _ = fmt.Fprintf(stderrOrDefault(attach.Err), "%v\n", err)
 		}
 	}()

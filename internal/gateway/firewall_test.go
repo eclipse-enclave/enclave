@@ -328,12 +328,26 @@ ACTIVE_DOMAINS_FILE="$FW_LOG.absent"
 					t.Fatalf("gateway error = %v, failing rule = %q", err, rule)
 				}
 				reachedRule, ready := rule == "", false
+				natFailureLogs := 0
 				for _, call := range calls {
-					reachedRule = reachedRule || (call.engine == "iptables" && strings.Join(call.args, " ") == rule)
-					ready = ready || (call.engine == "log" && strings.Join(call.args, " ") == phase.ready)
+					args := strings.Join(call.args, " ")
+					reachedRule = reachedRule || (call.engine == "iptables" && args == rule)
+					if call.engine == "log" {
+						ready = ready || args == phase.ready
+						if args == "Cannot configure transparent proxy NAT rules" {
+							natFailureLogs++
+						}
+					}
 				}
 				if !reachedRule || ready != (rule == "") {
 					t.Fatalf("reached rule = %v, reported ready = %v, failing rule = %q", reachedRule, ready, rule)
+				}
+				wantFailureLogs := 0
+				if rule != "" {
+					wantFailureLogs = 1
+				}
+				if natFailureLogs != wantFailureLogs {
+					t.Errorf("NAT failure log count = %d, want %d, failing rule = %q", natFailureLogs, wantFailureLogs, rule)
 				}
 			})
 		}

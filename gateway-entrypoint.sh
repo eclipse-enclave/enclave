@@ -500,11 +500,16 @@ EOF_RESOLVERS
     iptables -A OUTPUT -p tcp --dport "$PROXY_HTTP_PORT" -m addrtype --dst-type LOCAL -j ACCEPT
     iptables -A OUTPUT -p tcp --dport "$PROXY_HTTPS_PORT" -m addrtype --dst-type LOCAL -j ACCEPT
 
-    iptables -t nat -F OUTPUT || return 1
-    iptables -t nat -A OUTPUT -p tcp --dport 80 -m owner --uid-owner "$proxy_uid" -j RETURN || return 1
-    iptables -t nat -A OUTPUT -p tcp --dport 443 -m owner --uid-owner "$proxy_uid" -j RETURN || return 1
-    web_redirect iptables -A 80 || return 1
-    web_redirect iptables -A 443 || return 1
+    if ! {
+        iptables -t nat -F OUTPUT &&
+        iptables -t nat -A OUTPUT -p tcp --dport 80 -m owner --uid-owner "$proxy_uid" -j RETURN &&
+        iptables -t nat -A OUTPUT -p tcp --dport 443 -m owner --uid-owner "$proxy_uid" -j RETURN &&
+        web_redirect iptables -A 80 &&
+        web_redirect iptables -A 443
+    }; then
+        log "Cannot configure transparent proxy NAT rules"
+        return 1
+    fi
 
     log "Transparent proxy NAT rules configured"
     setup_ide_bridge

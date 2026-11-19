@@ -48,7 +48,7 @@ func validateAndNormalizeProfile(profile *model.Profile) error {
 	if profile == nil {
 		return fmt.Errorf("profile is nil")
 	}
-	normalizedSecrets, err := validateAndNormalizeSecretConfigs(profile.Secrets)
+	normalizedSecrets, err := validateAndNormalizeSecretConfigs(profile.Secrets, profile.Providers...)
 	if err != nil {
 		return err
 	}

@@ -64,6 +64,7 @@ type SpecCredentialSource struct {
 type SpecProviderSummary struct {
 	Name                string
 	AuthFiles           []string
+	AuthSecrets         []model.AuthFileSecret
 	AuthSession         bool
 	AuthSessionMode     string
 	OAuthPorts          []string
@@ -232,6 +233,7 @@ func summarizeSpecDocument(doc specDocument) SpecSummary {
 		ps := SpecProviderSummary{
 			Name:                strings.TrimSpace(p.Name),
 			AuthFiles:           append([]string(nil), p.AuthFiles...),
+			AuthSecrets:         p.AuthSecrets,
 			SecurestorageDirEnv: p.SecurestorageDirEnv,
 		}
 		if p.AuthSession != nil {

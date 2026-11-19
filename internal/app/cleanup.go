@@ -122,6 +122,10 @@ func runCleanup(run model.RunOptions, cleanup model.CleanupOptions) int {
 	// reaches for when the extension tree is broken or gone.
 	paths, pathsErr := config.ResolvePaths()
 	scopes := newMemoryScopeResolver(paths, pathsErr)
+	if err := cleanupModeHolders(run, cleanup, home, project, paths); err != nil {
+		logx.Errorf("Failed to clean session auth-mode holders: %v", err)
+		return 1
+	}
 
 	if cleanup.CleanupEphemeral {
 		containerNames, containersErr := resolveEphemeralContainers(run, cleanup, project)

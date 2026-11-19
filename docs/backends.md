@@ -107,6 +107,9 @@ Host AppArmor profiles can affect binaries inside rootless containers; see
 
 ## QEMU (experimental)
 
+If the host dies before recording a QEMU guest's PID, `enclave cleanup` retains its
+pending auth-mode holder for manual recovery: it cannot prove that guest has stopped.
+
 `--backend qemu` runs a foreground session in a minimal Alpine microVM bundle.
 
 | Aspect | Behavior |

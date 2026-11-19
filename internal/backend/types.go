@@ -68,10 +68,37 @@ type Request struct {
 	// AuthSync declares the credential reconciliation to run after a foreground
 	// session exits. It must be carried on the request because foreground
 	// sessions are removed on exit, leaving nothing to inspect afterwards.
-	AuthSync *AuthSyncSpec
+	AuthSync   *AuthSyncSpec
+	Mode       *SessionMode
+	NativeAuth *NativeAuthSpec
 
 	RuntimeUIDRemap bool
 	Detached        bool
+}
+
+// NativeAuthSpec carries a declaration and canonical-store identity, never a
+// snapshot of native credentials. Only the gateway mounts this store.
+type NativeAuthSpec struct {
+	Store  StoreRef
+	Config []byte
+}
+
+// ProtectedAuthAdmission checks running sessions that predate mode records.
+type ProtectedAuthAdmission interface {
+	CheckProtectedAuthAdmission(context.Context, StoreKey, map[string]string) error
+}
+
+// SessionMode identifies the reservation made before preparing any mounts.
+type SessionMode struct {
+	ConfigStore StoreKey
+	HolderID    string
+}
+
+// SessionModeInspector distinguishes an absent holder container from an exited
+// one whose credentials still need finalization. Engine errors are not absence.
+type SessionModeInspector interface {
+	InspectModeSession(context.Context, string, string) (*SessionRef, bool, error)
+	RemoveModeGateway(ctx context.Context, holderID, session, projectHash string) (bool, error)
 }
 
 type EnvVar struct {
@@ -178,6 +205,9 @@ type ConfigOverlaySpec struct {
 	// SettingsPath is relative to the config store. The backend keeps the last
 	// generated settings file outside the tool-writable store for this key.
 	SettingsPath string
+	// SettingsBase omits runtime-owned fields and seeds recovery intent.
+	SettingsBase []byte
+	SettingsOnly bool
 }
 
 type StorePrepEntry struct {

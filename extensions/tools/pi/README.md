@@ -72,3 +72,12 @@ it.
 | `gateway-allowlist.conf` | DNS allowlist for network isolation |
 | `templates/settings.json` | Default settings template |
 | `entrypoint.d/setup.sh` | Runtime setup (creates config dir) |
+
+## Protected Native Auth
+
+`enclave --tool pi --protect-auth` protects stored ChatGPT logins through
+the gateway. The agent sees JWT claims with placeholder signatures, and login
+and refresh write real tokens only to the native store. Stored API keys require
+the matching configured env credential; other native provider entries refuse
+the protected start. Ordinary sessions are unchanged. See
+[protected native auth](../../../docs/auth.md#protected-native-auth).

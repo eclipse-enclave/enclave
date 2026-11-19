@@ -15,9 +15,11 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"enclave/internal/netlog"
@@ -44,7 +46,7 @@ type Options struct {
 type Store struct {
 	dir       string
 	session   string
-	redactor  *redactor
+	redactor  atomic.Pointer[redactor]
 	maxBody   int64
 	maxSocket int64
 	maxBytes  int64
@@ -80,11 +82,11 @@ func Open(opts Options) (*Store, error) {
 	s := &Store{
 		dir:       dir,
 		session:   opts.Session,
-		redactor:  newRedactor(opts.Secrets),
 		maxBody:   opts.MaxBodyBytes,
 		maxSocket: opts.MaxSocketBytes,
 		maxBytes:  opts.MaxBytes,
 	}
+	s.redactor.Store(newRedactor(opts.Secrets))
 	if s.maxBody <= 0 {
 		s.maxBody = MaxBodyBytes
 	}
@@ -149,9 +151,9 @@ func (s *Store) Begin(req *http.Request, scheme string) *Capture {
 			Timestamp:     started.UTC().Format(netlog.TimeFormat),
 			Request: Request{
 				Method:  req.Method,
-				URL:     s.redactor.string(requestURL(req, scheme)),
+				URL:     s.redactor.Load().string(requestURL(req, scheme)),
 				Proto:   req.Proto,
-				Headers: s.redactor.header(req.Header),
+				Headers: s.redactor.Load().header(req.Header),
 			},
 		},
 	}
@@ -189,7 +191,7 @@ func (c *Capture) Response(resp *http.Response) {
 	c.record.Response = &Response{
 		Status:  resp.StatusCode,
 		Proto:   resp.Proto,
-		Headers: c.store.redactor.header(resp.Header),
+		Headers: c.store.redactor.Load().header(resp.Header),
 	}
 	// The proxy asks for an unencoded body; one encoded anyway is relayed but
 	// not stored, so no secret it may hold reaches the disk unredacted.
@@ -278,7 +280,7 @@ func (c *Capture) Finish(relayErr error) string {
 		c.record.Response.Body = body
 	}
 	if relayErr != nil {
-		c.record.Error = s.redactor.string(relayErr.Error())
+		c.record.Error = s.redactor.Load().string(relayErr.Error())
 	}
 	if c.socket != nil {
 		c.record.WebSocket = c.socket.finish()
@@ -322,7 +324,7 @@ func writeRecord(path string, record Record) (int64, error) {
 }
 
 func (s *Store) newBodySink(name string) *bodySink {
-	return &bodySink{owner: s, path: filepath.Join(s.dir, name), redact: s.redactor.stream()}
+	return &bodySink{owner: s, path: filepath.Join(s.dir, name), redact: s.redactor.Load().stream()}
 }
 
 // reserve books room in the session budget for up to n body bytes and returns
@@ -635,4 +637,24 @@ func scanSessionDir(dir string, abandoned func(modified time.Time, open bool) bo
 		return captures[i].id < captures[j].id
 	})
 	return captures, nil
+}
+
+// Learn adds secrets released after Open, such as native credentials the
+// gateway reads per request, for future snapshots, streams and messages.
+func (s *Store) Learn(secrets []Secret) {
+	if s == nil || len(secrets) == 0 {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	current := s.redactor.Load()
+	if !slices.ContainsFunc(secrets, func(secret Secret) bool {
+		return secret.Value != "" && (current == nil || !slices.Contains(current.secrets, secret))
+	}) {
+		return
+	}
+	if current != nil {
+		secrets = append(secrets, current.secrets...)
+	}
+	s.redactor.Store(newRedactor(secrets))
 }

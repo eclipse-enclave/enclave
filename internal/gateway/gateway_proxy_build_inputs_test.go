@@ -66,6 +66,9 @@ func TestGatewayProxyBuildInputsCoverInternalDeps(t *testing.T) {
 		if !strings.HasPrefix(pkg, modulePrefix+"internal/") {
 			continue
 		}
+		if pkg == "enclave/internal/auth" || strings.HasPrefix(pkg, "enclave/internal/backend") {
+			t.Fatalf("gateway proxy crosses the auth/backend boundary: %s", pkg)
+		}
 		relDir := strings.TrimPrefix(pkg, modulePrefix) // e.g. internal/secretfile
 		if !coveredByBuildInput(relDir) {
 			t.Fatalf("gateway proxy depends on %s but no gateway_proxy_build_inputs.txt entry stages it; add %q", pkg, relDir)

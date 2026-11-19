@@ -7,12 +7,19 @@
 
 package model
 
-import "fmt"
+import (
+	"crypto/rand"
+	"encoding/hex"
+	"fmt"
+	"math/big"
+	"strings"
+)
 
 const SecretPlaceholderMarker = "ENCLAVE_SECRET_" // #nosec G101 -- recognition marker, not a credential.
 
 // SecretPlaceholderConfig describes a synthetic credential, independent of its secret.
 type SecretPlaceholderConfig struct {
+	Shape  string                  `json:"shape,omitempty"`
 	Prefix string                  `json:"prefix,omitempty"`
 	Suffix string                  `json:"suffix,omitempty"`
 	Random SecretPlaceholderRandom `json:"random"`
@@ -26,6 +33,9 @@ type SecretPlaceholderRandom struct {
 // ValidatedAlphabet returns the generation alphabet after validating the shape. Lengths
 // are character counts; each supported minimum provides at least 128 random bits.
 func (c SecretPlaceholderConfig) ValidatedAlphabet() (string, error) {
+	if c.Shape != "" {
+		return "", fmt.Errorf("JWT shapes are only supported for native access and id fields")
+	}
 	var alphabet string
 	var minimum int
 	switch c.Random.Encoding {
@@ -62,4 +72,46 @@ func ValidateSecretLiteral(literal string, subject string) error {
 		}
 	}
 	return nil
+}
+
+// NewSecretPlaceholder generates an independent opaque credential substitute.
+func NewSecretPlaceholder(shape *SecretPlaceholderConfig) (string, error) {
+	if shape != nil {
+		alphabet, err := shape.ValidatedAlphabet()
+		if err != nil {
+			return "", err
+		}
+		body := make([]byte, shape.Random.Length)
+		bound := big.NewInt(int64(len(alphabet)))
+		for i := range body {
+			n, err := rand.Int(rand.Reader, bound)
+			if err != nil {
+				return "", fmt.Errorf("generate placeholder entropy: %w", err)
+			}
+			body[i] = alphabet[n.Int64()]
+		}
+		return shape.Prefix + string(body) + shape.Suffix, nil
+	}
+	entropy := make([]byte, 24)
+	if _, err := rand.Read(entropy); err != nil {
+		return "", fmt.Errorf("generate placeholder entropy: %w", err)
+	}
+	return SecretPlaceholderMarker + hex.EncodeToString(entropy), nil
+}
+
+// MatchesSecretPlaceholder recognizes the full env shape, never an embedded marker.
+func MatchesSecretPlaceholder(value string, shape *SecretPlaceholderConfig) bool {
+	if shape == nil {
+		shape = &SecretPlaceholderConfig{Prefix: SecretPlaceholderMarker, Random: SecretPlaceholderRandom{Encoding: "hex", Length: 48}}
+	}
+	alphabet, err := shape.ValidatedAlphabet()
+	if err != nil || !strings.Contains(value, SecretPlaceholderMarker) || len(value) != len(shape.Prefix)+shape.Random.Length+len(shape.Suffix) || !strings.HasPrefix(value, shape.Prefix) || !strings.HasSuffix(value, shape.Suffix) {
+		return false
+	}
+	for _, character := range value[len(shape.Prefix) : len(value)-len(shape.Suffix)] {
+		if !strings.ContainsRune(alphabet, character) {
+			return false
+		}
+	}
+	return true
 }

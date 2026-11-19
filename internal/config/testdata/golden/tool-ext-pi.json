@@ -42,6 +42,19 @@
         }
       }
     },
+    "chatgpt-oauth": {
+      "env_vars": null,
+      "release": {
+        "http": {
+          "hosts": [
+            "chatgpt.com"
+          ],
+          "header": "authorization",
+          "format": "Bearer %s"
+        }
+      },
+      "api_key": false
+    },
     "gemini-api-key": {
       "env_vars": [
         "GEMINI_API_KEY"

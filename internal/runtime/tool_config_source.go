@@ -8,12 +8,15 @@
 package runtime
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path"
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/tidwall/jsonc"
 
 	"enclave/internal/config"
 	"enclave/internal/logx"
@@ -34,9 +37,18 @@ func (r *Runtime) prepareToolConfigSource() error {
 		}
 		return nil
 	}
-	if !r.shouldMountToolConfigSource() {
+	regularSource, copilot := r.shouldMountToolConfigSource(), false
+	for _, provider := range r.profile.Providers {
+		for _, file := range provider.AuthSecrets {
+			copilot = copilot || file.Codec == "copilot-config"
+		}
+	}
+	basePath := config.HostStoreConfigBasePath(r.host.Home, r.profile.Name, r.project.Hash, r.sessionGeneratedKey())
+	if !regularSource && (!copilot || (!r.run.ProtectAuth && !util.PathExists(basePath))) {
 		return nil
 	}
+	r.configSettingsBase = nil
+	r.configSettingsOnly = copilot && !regularSource
 
 	globalConfigDir := config.HostToolConfigDir(r.host.Home, r.profile.Name)
 	projectConfigDir := config.HostProjectConfigDir(r.host.Home, r.project.Hash, r.profile.Name)
@@ -49,7 +61,31 @@ func (r *Runtime) prepareToolConfigSource() error {
 	}
 
 	if err := r.withToolDataLock(projectToolDir, "config-source", func() error {
-		return r.composeGeneratedConfigDir(generatedConfigDir, globalConfigDir, projectConfigDir)
+		if err := r.composeGeneratedConfigDir(generatedConfigDir, globalConfigDir, projectConfigDir); err != nil || !copilot {
+			return err
+		}
+		rel, err := r.settingsRelativePath()
+		if err != nil {
+			return err
+		}
+		settingsPath := filepath.Join(generatedConfigDir, rel)
+		data, err := os.ReadFile(settingsPath) // #nosec G304 -- generated settings path is inside the managed config source.
+		if err != nil {
+			return err
+		}
+		r.configSettingsBase = data
+		if !r.run.ProtectAuth {
+			return nil
+		}
+		var settings map[string]json.RawMessage
+		if err := json.Unmarshal(jsonc.ToJSON(data), &settings); err != nil || settings == nil {
+			return fmt.Errorf("protected Copilot settings must be a JSON object")
+		}
+		delete(settings, "storeTokenPlaintext")
+		r.configSettingsBase, _ = json.Marshal(settings)
+		settings["storeTokenPlaintext"] = json.RawMessage("true")
+		data, _ = json.MarshalIndent(settings, "", "  ")
+		return util.WriteFileAtomic(settingsPath, data, 0o600)
 	}); err != nil {
 		return fmt.Errorf("prepare config source for %s: %w", r.profile.Name, err)
 	}
@@ -137,7 +173,7 @@ func (r *Runtime) shouldMountToolConfigSource() bool {
 }
 
 func (r *Runtime) toolConfigSourceHandlesSkills() bool {
-	return r.configSourceDir != "" && strings.TrimSpace(r.profile.SkillsDir) != ""
+	return r.configSourceDir != "" && !r.configSettingsOnly && strings.TrimSpace(r.profile.SkillsDir) != ""
 }
 
 func (r *Runtime) composeGeneratedConfigDir(targetDir string, globalConfigDir string, projectConfigDir string) error {

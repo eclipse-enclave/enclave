@@ -35,6 +35,7 @@ type RunOptions struct {
 	ConfigDefaultYolo        *bool
 	Persist                  bool
 	Ephemeral                bool
+	ProtectAuth              bool
 	AllowAllNetwork          bool
 	DisableGateway           bool
 	Ports                    []string
@@ -379,6 +380,8 @@ type ProviderConfig struct {
 	Name              string             `json:"name"`
 	CredentialSecrets []string           `json:"credential_secrets,omitempty"`
 	AuthFiles         []string           `json:"auth_files,omitempty"`
+	AuthSecrets       []AuthFileSecret   `json:"auth_secrets,omitempty"`
+	TokenEndpoint     *TokenEndpoint     `json:"token_endpoint,omitempty"`
 	AuthSession       *AuthSessionConfig `json:"auth_session,omitempty"`
 	OAuthPorts        []OAuthPortConfig  `json:"oauth_ports,omitempty"`
 	// SecurestorageDirEnv, when set, names an environment variable the tool
@@ -565,6 +568,7 @@ const (
 	// exec.go) still keys off LabelWorktree.
 	LabelProjectDir = AppName + ".project_dir"
 	LabelConfigKey  = AppName + ".config_key"
+	LabelModeHolder = AppName + ".auth_mode_holder"
 	LabelYolo       = AppName + ".yolo"
 	// LabelOptions stores a session's provenance, the session-affecting
 	// option values, as compact JSON. It is storage only; `ps --json` is the
@@ -732,6 +736,7 @@ const (
 	// GatewayLabelMode names the network mode of an unrestricted gateway. A
 	// gateway without it is restricted, including those started before it existed.
 	GatewayLabelMode             = AppName + ".gateway.mode"
+	GatewayLabelModeHolder       = AppName + ".gateway.auth_mode_holder"
 	SessionNetworkSuffix         = "-net"
 	NetworkLabelManaged          = AppName + ".network"
 	NetworkLabelContainer        = AppName + ".network.container"
@@ -747,6 +752,10 @@ const (
 	GatewayConfigDeniedPath      = GatewayConfigDir + "/denied.txt"
 	GatewayConfigMetaPath        = GatewayConfigDir + "/meta.json"
 	GatewaySecretReleasePath     = "/etc/enclave/secret-releases.json" // #nosec G101 -- configuration file path, not a credential.
+	GatewayNativeAuthConfigPath  = "/etc/enclave/native-auth.json"
+	GatewayNativeAuthStorePath   = "/native-auth"
+	GatewayNativeAuthLockPath    = "/native-auth.lock"
+	GatewayNativeAuthRuntimePath = "/run/enclave-native-auth"
 	GatewayTLSRootPath           = "/tls"
 	GatewayTLSCACertPath         = GatewayTLSRootPath + "/ca.crt"
 	GatewayTLSCAKeyPath          = GatewayTLSRootPath + "/ca.key"

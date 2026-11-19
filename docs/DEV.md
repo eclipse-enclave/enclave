@@ -116,6 +116,16 @@ Docker and with rootless Podman, check what they cannot:
 - Run `enclave network apply` while a WebSocket is open and confirm its capture
   is finished with its messages rather than lost.
 
+Protected-auth capture checks must combine `--protect-auth` with
+`--network-log=full`. With synthetic credentials and a local trusted provider,
+exercise all five supported tools, native token exchanges, first API release,
+rotation before first API use, access/refresh echoes and later unmarked
+HTTP/WebSocket echoes. Check raw audit and capture
+files and the viewer; native token exchanges must have no capture. Verify the
+known stream/restart limits in
+[Secrets in captures](networking.md#secrets-in-captures) without treating them
+as closed.
+
 ## Code generation
 
 Generated files are checked in. After changing option definitions or tool
@@ -154,6 +164,11 @@ User-facing model: [configuration.md](configuration.md); resolution flow:
   host-side, UX, or one-shot options.
 - `AffectsNetwork` when the option changes the session allowlist, so
   `network status|print|diff` accept its flags; a test fails otherwise.
+
+`protect_auth` is session-affecting: its boolean is recorded as provenance,
+while native credentials and placeholder bindings never enter option metadata.
+Native declarations determine supported tools; keep the option help and
+protected-auth docs aligned with the supported codecs.
 
 ### Option kinds
 

@@ -178,3 +178,52 @@ enclave_sync_shared_auth() {
         fi
     done
 }
+
+
+# Execute only the host's classification, never the ordinary copy/relink path.
+# The caller holds the config lock; link is issued only after proving no holders.
+enclave_apply_native_auth() {
+    native_config=$1
+    native_auth=$2
+    native_file=$3
+    native_verb=$4
+    native_digest=$5
+    case "$native_file" in
+        ''|/*|.|..|./*|../*|*/./*|*/../*|*/.|*/..|*//*|*:*|*,*|*'|'*) return 1 ;;
+    esac
+    native_path="$native_config/$native_file"
+    native_target="$native_auth/$native_file"
+    native_parent=$(dirname "$native_path")
+    native_check=$native_parent
+    while [ "$native_check" != / ] && [ "$native_check" != . ]; do
+        [ ! -L "$native_check" ] || return 1
+        native_check=$(dirname "$native_check")
+    done
+    case "$native_verb" in
+        keep)
+            if [ -L "$native_path" ]; then
+                [ -z "$native_digest" ] && [ "$(readlink "$native_path")" = "$native_target" ]
+                return $?
+            fi
+            ;;
+        link) ;;
+        create)
+            [ ! -e "$native_path" ] && [ ! -L "$native_path" ] || return 1
+            mkdir -p "$native_parent" || return 1
+            # No force: a file appearing since classification must win.
+            ln -sT "$native_target" "$native_path"
+            return $?
+            ;;
+        *) return 1 ;;
+    esac
+    [ -f "$native_path" ] && [ ! -L "$native_path" ] && [ -n "$native_digest" ] || return 1
+    native_actual=$(sha256sum "$native_path") || return 1
+    [ "${native_actual%% *}" = "$native_digest" ] || return 1
+    [ "$native_verb" = link ] || return 0
+    native_tmp="${native_path}.enclave-link.$$"
+    ln -sT "$native_target" "$native_tmp" || return 1
+    if ! mv -T "$native_tmp" "$native_path"; then
+        rm -f "$native_tmp"
+        return 1
+    fi
+}

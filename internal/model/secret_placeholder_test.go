@@ -41,3 +41,17 @@ func TestSecretPlaceholderValidation(t *testing.T) {
 		}
 	}
 }
+
+func TestFullEnvPlaceholderShape(t *testing.T) {
+	for _, shape := range []*SecretPlaceholderConfig{nil, {Prefix: "vendor_ENCLAVE_SECRET_", Suffix: "_end", Random: SecretPlaceholderRandom{Encoding: "base64url", Length: 40}}} {
+		value, err := NewSecretPlaceholder(shape)
+		if err != nil || !MatchesSecretPlaceholder(value, shape) {
+			t.Fatal("valid env placeholder rejected")
+		}
+		for _, altered := range []string{"raw" + value, value + "raw", value[:len(value)-1], "ENCLAVE_SECRET_raw"} {
+			if MatchesSecretPlaceholder(altered, shape) {
+				t.Fatal("partial marker accepted as a complete placeholder")
+			}
+		}
+	}
+}

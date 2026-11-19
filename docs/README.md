@@ -50,7 +50,7 @@ Reference documentation for Eclipse Enclave. For a guided introduction, see the
 | [DEV.md](DEV.md) | Full build, test, packaging, and code-generation guide |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Architecture, repository layout, option resolution, diagrams |
 | [RELEASING.md](RELEASING.md) | Release process and release acceptance testing |
-| [runtime/stores.md](runtime/stores.md) | Persistent store lifecycle and auth reconciliation |
+| [runtime/stores.md](runtime/stores.md) | Persistent store lifecycle and auth reconciliation; native-auth projection and exchange are mapped in [ARCHITECTURE.md](ARCHITECTURE.md#runtime-execution) |
 | [runtime/network-request-flow.md](runtime/network-request-flow.md) | Restricted-mode request flow |
 | [DEPENDENCIES.md](DEPENDENCIES.md) | Direct Go module dependencies; the [Dash inventory](../DEPENDENCIES) covers license checks |
 

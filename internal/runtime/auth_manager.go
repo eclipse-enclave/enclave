@@ -23,6 +23,7 @@ import (
 
 type authManager struct {
 	*Runtime
+	ready func()
 }
 
 type placeholderResolver interface {
@@ -44,12 +45,15 @@ type apiKeyInjectionResult struct {
 	SuppressedEnvVars map[string]string
 }
 
-func newAuthManager(r *Runtime) authManager {
-	return authManager{Runtime: r}
+func newAuthManager(r *Runtime) *authManager {
+	return &authManager{Runtime: r}
 }
 
-func (m authManager) Prepare(env *[]string, stores storeSet) (model.AuthState, SecretMapping, error) {
+func (m *authManager) Prepare(env *[]string, stores storeSet) (model.AuthState, SecretMapping, error) {
 	hooks := auth.HooksFor(m.profile)
+	if m.run.ProtectAuth {
+		hooks = auth.NoopHooks{}
+	}
 	authStorage := stores.AuthStorage()
 	authCtx := auth.Context{
 		Host:        m.host,
@@ -66,11 +70,16 @@ func (m authManager) Prepare(env *[]string, stores storeSet) (model.AuthState, S
 
 	providerSessions := m.checkProviderSessions(authStorage)
 	authCtx.StorageHasSession = anyProviderSession(providerSessions)
-	if err := m.withStoreLock(stores.Config, func() error {
-		_, err := hooks.OnAuthReady(authCtx)
-		return err
-	}); err != nil {
-		logx.Warnf("Auth ready hook failed: %v", err)
+	m.ready = func() {
+		if err := m.withStoreLock(stores.Config, func() error {
+			_, err := auth.HooksFor(m.profile).OnAuthReady(authCtx)
+			return err
+		}); err != nil {
+			logx.Warnf("Auth ready hook failed: %v", err)
+		}
+	}
+	if !m.run.ProtectAuth {
+		m.ready()
 	}
 
 	secretsLayers, err := auth.ResolveSecretsLayers(m.host.Home, m.project.Hash, m.profile.Name, m.auth.SecretsScope)

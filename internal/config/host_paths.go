@@ -59,6 +59,12 @@ func HostImageInboxDir(home string, projectHash string) string {
 	return filepath.Join(HostImageInboxRootDir(home), projectHash)
 }
 
+// HostImageInboxLockPath is the lock file that serializes removing image
+// inboxes against starting the sessions that mount them.
+func HostImageInboxLockPath(home string) string {
+	return HostLockPath(home, "image-inbox.lock")
+}
+
 // HostImageInboxRootDir holds every project's image inbox, one directory per
 // project hash.
 func HostImageInboxRootDir(home string) string {

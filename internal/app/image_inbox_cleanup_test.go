@@ -13,9 +13,11 @@ import (
 	"os"
 	"reflect"
 	"testing"
+	"time"
 
 	"enclave/internal/backend"
 	"enclave/internal/config"
+	"enclave/internal/util"
 )
 
 func TestOrphanedImageInboxes(t *testing.T) {
@@ -184,7 +186,9 @@ func TestSweepImageInboxesRemovesOrphans(t *testing.T) {
 	makeInboxes(t, home, "hashA", "hashB", "hashC")
 	be := &inboxListingBackend{name: backend.NamePodman, sessions: []backend.Session{inboxSession("a", "hashA", "/src/a", true)}}
 
-	sweepImageInboxes(context.Background(), be, home, "hashC")
+	if err := sweepImageInboxes(context.Background(), be, home, "hashC"); err != nil {
+		t.Fatal(err)
+	}
 
 	if !inboxExists(home, "hashA") || !inboxExists(home, "hashC") {
 		t.Fatal("removed an inbox in use")
@@ -279,5 +283,34 @@ func TestRunHoldingImageInbox(t *testing.T) {
 				t.Fatalf("inbox kept = %v, want %v", got, tt.wantKept)
 			}
 		})
+	}
+}
+
+func TestSweepImageInboxesWaitsForTheInboxLock(t *testing.T) {
+	home := t.TempDir()
+	makeInboxes(t, home, "starting")
+	release, err := util.AcquireFileLock(config.HostImageInboxLockPath(home), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	be := &inboxListingBackend{name: backend.NameDocker}
+
+	done := make(chan error, 1)
+	go func() { done <- sweepImageInboxes(context.Background(), be, home, "") }()
+	select {
+	case err := <-done:
+		t.Fatalf("sweep ran while a session start held the inbox lock: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	if !inboxExists(home, "starting") {
+		t.Fatal("inbox removed while a session start held the inbox lock")
+	}
+
+	release()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if inboxExists(home, "starting") {
+		t.Fatal("orphaned inbox kept after the lock was released")
 	}
 }

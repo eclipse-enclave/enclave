@@ -16,6 +16,7 @@ import (
 	"enclave/internal/backend"
 	"enclave/internal/config"
 	"enclave/internal/logx"
+	"enclave/internal/util"
 )
 
 const imageInboxKind = "image inbox"
@@ -90,28 +91,41 @@ func backendRunsImageInboxes(be backend.Backend) bool {
 }
 
 // sweepImageInboxes removes the image inboxes no inbox-enabled session holds.
-// It is best-effort: the sweep runs alongside other commands, which must not
-// fail because of it, and a later sweep retries.
-func sweepImageInboxes(ctx context.Context, be backend.Backend, home string, keep string) {
+// It holds the image inbox lock, which a starting session holds from creating
+// its inbox until its container exists, so that a starting session counts.
+func sweepImageInboxes(ctx context.Context, be backend.Backend, home string, keep string) error {
+	release, err := util.AcquireFileLock(config.HostImageInboxLockPath(home), nil)
+	if err != nil {
+		return fmt.Errorf("acquire image inbox lock: %w", err)
+	}
+	defer release()
 	dirs, err := planImageInboxSweep(ctx, be, home, keep)
 	if err != nil {
-		logx.Debugf("image inbox sweep skipped: %v", err)
-		return
+		return err
 	}
 	for _, dir := range dirs {
 		logx.Debugf("Removing image inbox without a running session: %s", dir.Path)
 	}
 	cleanupDirs(dirs)
+	return nil
+}
+
+// sweepImageInboxesQuietly sweeps alongside another command, which must not
+// fail because of it; a later sweep retries.
+func sweepImageInboxesQuietly(ctx context.Context, be backend.Backend, home string, keep string) {
+	if err := sweepImageInboxes(ctx, be, home, keep); err != nil {
+		logx.Debugf("image inbox sweep skipped: %v", err)
+	}
 }
 
 // runHoldingImageInbox runs an inbox-enabled session. Starting one sweeps the
 // inboxes of other projects; a foreground session that ends sweeps again, which
 // removes its own project's inbox if it was the last session holding it.
 func runHoldingImageInbox(ctx context.Context, be backend.Backend, home string, projectHash string, foreground bool, run func() int) int {
-	sweepImageInboxes(ctx, be, home, projectHash)
+	sweepImageInboxesQuietly(ctx, be, home, projectHash)
 	code := run()
 	if foreground {
-		sweepImageInboxes(ctx, be, home, "")
+		sweepImageInboxesQuietly(ctx, be, home, "")
 	}
 	return code
 }

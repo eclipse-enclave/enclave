@@ -49,7 +49,7 @@ func runStop(opts model.Options, projectDir string) int {
 // image inbox of every project left without an inbox-enabled session.
 func stopSessionsAndSweepInboxes(ctx context.Context, be backend.Backend, opts model.Options, projectDir string, home string) int {
 	code := stopSessions(ctx, be, opts, projectDir)
-	sweepImageInboxes(ctx, be, home, "")
+	sweepImageInboxesQuietly(ctx, be, home, "")
 	return code
 }
 

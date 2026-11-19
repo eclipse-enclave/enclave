@@ -68,6 +68,10 @@ type Runtime struct {
 	// cached, so the replacement host reaches the allow set too.
 	releaseHostOverrides map[string][]string
 	backend              backend.Backend
+	// releaseImageInboxLock releases the image inbox lock that an
+	// inbox-enabled start holds from creating the inbox until its container
+	// exists; nil while not held.
+	releaseImageInboxLock func()
 }
 
 type ExecutionContext struct {
@@ -217,7 +221,12 @@ func (r *Runtime) acquireSessionStartLock() (func(), error) {
 	if err != nil {
 		return nil, fmt.Errorf("acquire session start lock: %w", err)
 	}
-	return release, nil
+	return func() {
+		if r.releaseImageInboxLock != nil {
+			r.releaseImageInboxLock()
+		}
+		release()
+	}, nil
 }
 
 // Named sessions also share the project/tool gateway config bundle, and
@@ -1142,6 +1151,15 @@ func (r *Runtime) addImageInboxMount(mounts *mountAccumulator) error {
 	if !r.run.ImageInbox {
 		return nil
 	}
+	// Held until the session start lock is released, once the container
+	// exists: a sweep in between would see no session holding the inbox.
+	release, err := util.AcquireFileLock(config.HostImageInboxLockPath(r.host.Home), func() {
+		logx.Infof("Waiting for another enclave command to finish removing image inboxes.")
+	})
+	if err != nil {
+		return fmt.Errorf("acquire image inbox lock: %w", err)
+	}
+	r.releaseImageInboxLock = release
 	inboxDir, err := config.EnsureHostImageInboxDir(r.host.Home, r.project.Hash)
 	if err != nil {
 		return fmt.Errorf("create image inbox: %w", err)

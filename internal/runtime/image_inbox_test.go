@@ -13,6 +13,7 @@ import (
 
 	"enclave/internal/config"
 	"enclave/internal/model"
+	"enclave/internal/util"
 )
 
 func TestImageInboxMountIsProjectScopedAndReadOnly(t *testing.T) {
@@ -72,4 +73,33 @@ func TestImageInboxMountIsOptIn(t *testing.T) {
 	if _, err := os.Stat(config.HostImageInboxDir(home, "projhash")); !os.IsNotExist(err) {
 		t.Fatalf("inbox dir created without --image-inbox: %v", err)
 	}
+}
+
+// A sweep in another enclave process must not remove the inbox between its
+// creation and the container that mounts it appearing, so the inbox lock is
+// held until the session start lock is released.
+func TestImageInboxLockIsHeldUntilTheSessionStarts(t *testing.T) {
+	t.Parallel()
+
+	home := t.TempDir()
+	r := newCacheMountRuntime(home)
+	r.run.ImageInbox = true
+	releaseStart, err := r.acquireSessionStartLock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := r.addImageInboxMount(newMountAccumulator(nil, nil)); err != nil {
+		t.Fatalf("addImageInboxMount: %v", err)
+	}
+
+	lockPath := config.HostImageInboxLockPath(home)
+	if _, ok, err := util.TryAcquireFileLock(lockPath); ok || err != nil {
+		t.Fatalf("inbox lock free (%v, %v) while the session is starting", ok, err)
+	}
+	releaseStart()
+	release, ok, err := util.TryAcquireFileLock(lockPath)
+	if !ok || err != nil {
+		t.Fatalf("inbox lock still held (%v, %v) after the session started", ok, err)
+	}
+	release()
 }

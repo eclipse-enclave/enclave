@@ -36,8 +36,14 @@ func TestBaseMountsIncludesSpecEnvVariables(t *testing.T) {
 		},
 	}
 
-	_, env := r.baseMounts()
+	var env []string
+	warnings := captureStderr(t, func() { _, env = r.baseMounts() })
 
+	for _, key := range []string{"PROJECT_DIR", "TOOL", model.EnvPrefix + "X"} {
+		if !strings.Contains(warnings, "Ignoring environment.variables key \""+key+"\": reserved for Enclave") {
+			t.Fatalf("expected reserved-key warning for %s, got %q", key, warnings)
+		}
+	}
 	if !envSliceContainsKV(env, "LOG_LEVEL", "info") {
 		t.Fatalf("expected LOG_LEVEL=info in base env, got %v", env)
 	}
@@ -190,7 +196,7 @@ func TestProjectEnvCannotOverrideInternalEnvironment(t *testing.T) {
 			if len(values) != 1 || values[0] != "VISIBLE=kept" {
 				t.Fatalf("project environment overrides reserved %s: %v", key, values)
 			}
-			if !strings.Contains(warnings, "Ignoring project environment variable \""+key+"\"") || strings.Contains(warnings, "project-value") {
+			if !strings.Contains(warnings, "Ignoring project .env key \""+key+"\": reserved for Enclave") || strings.Contains(warnings, "project-value") {
 				t.Fatalf("warning must name dropped key without its value: %q", warnings)
 			}
 			if summary := captureStderr(t, func() { r.logEnvFileLoaded(nil) }); summary != "" {

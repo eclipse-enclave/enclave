@@ -50,7 +50,8 @@ and environment files first:
 
 - The project `.env` is loaded into the container environment, except the
   reserved `PROJECT_DIR`, `HOST_PROJECT_DIR`, `TOOL`, and `ENCLAVE_*` keys,
-  which are ignored with a warning naming the key.
+  which are ignored with a warning naming the key and its source. Devcontainer
+  `containerEnv` and `runArgs` environment values follow the same rule.
 - Devcontainer mode reads the project's `devcontainer.json`; filtered mounts,
   [run arguments](../tools.md#devcontainer-support), and lifecycle commands
   still shape the container.

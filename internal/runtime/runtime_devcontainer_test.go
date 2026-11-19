@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"enclave/internal/backend"
@@ -26,13 +27,22 @@ func TestAddDevcontainerEnvOmitsRemoteUserInAgentMode(t *testing.T) {
 			ContainerEnv: map[string]string{
 				"NODE_ENV":            "development",
 				"PROJECT_DIR":         "/skip",
+				"HOST_PROJECT_DIR":    "/skip",
 				model.EnvPrefix + "X": "skip",
 			},
 		},
 	}
 
 	mounts := newMountAccumulator(nil, nil)
-	r.addDevcontainerEnv(mounts)
+	warnings := captureStderr(t, func() { r.addDevcontainerEnv(mounts) })
+	for _, key := range []string{"PROJECT_DIR", "HOST_PROJECT_DIR", model.EnvPrefix + "X"} {
+		if !strings.Contains(warnings, "Ignoring devcontainer containerEnv key \""+key+"\": reserved for Enclave") {
+			t.Fatalf("expected reserved-key warning for %s, got %q", key, warnings)
+		}
+	}
+	if strings.Contains(warnings, "skip") {
+		t.Fatalf("warning must not include dropped values: %q", warnings)
+	}
 
 	if !envSliceContainsKV(mounts.Env(), model.EnvDevcontainer, "1") {
 		t.Fatalf("expected %s to be set", model.EnvDevcontainer)
@@ -49,8 +59,10 @@ func TestAddDevcontainerEnvOmitsRemoteUserInAgentMode(t *testing.T) {
 	if !envSliceContainsKV(mounts.Env(), "NODE_ENV", "development") {
 		t.Fatalf("expected containerEnv key to be included")
 	}
-	if envSliceHasKey(mounts.Env(), "PROJECT_DIR") {
-		t.Fatalf("did not expect PROJECT_DIR override from containerEnv")
+	for _, key := range []string{"PROJECT_DIR", "HOST_PROJECT_DIR"} {
+		if envSliceHasKey(mounts.Env(), key) {
+			t.Fatalf("did not expect %s override from containerEnv", key)
+		}
 	}
 	if envSliceHasKey(mounts.Env(), model.EnvPrefix+"X") {
 		t.Fatalf("did not expect %s-prefixed key override from containerEnv", model.EnvPrefix)

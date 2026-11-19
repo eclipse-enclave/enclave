@@ -1027,7 +1027,7 @@ func (r *Runtime) specEnvVariables() []string {
 			continue
 		}
 		if model.IsReservedEnvKey(key) {
-			logx.Warnf("Ignoring environment.variables key %q: reserved for enclave internals", key)
+			warnReservedEnvKeys("environment.variables", []string{key})
 			continue
 		}
 		env = append(env, key+"="+merged[key])
@@ -1249,7 +1249,11 @@ func (r *Runtime) addDevcontainerEnv(mounts *mountAccumulator) {
 	}
 	if len(r.devcontainer.ContainerEnv) > 0 {
 		for key, value := range r.devcontainer.ContainerEnv {
-			if key == "" || model.IsReservedEnvKey(key) {
+			if key == "" {
+				continue
+			}
+			if model.IsReservedEnvKey(key) {
+				warnReservedEnvKeys("devcontainer containerEnv", []string{key})
 				continue
 			}
 			mounts.AddEnv(key, value)
@@ -1587,7 +1591,15 @@ func (r *Runtime) envFileValues() []string {
 		logx.Warnf("Failed to read .env file: %v", err)
 		return nil
 	}
-	return util.FilterProjectEnv(values)
+	kept, dropped := model.FilterReservedEnv(values)
+	warnReservedEnvKeys("project .env", dropped)
+	return kept
+}
+
+func warnReservedEnvKeys(source string, keys []string) {
+	for _, key := range keys {
+		logx.Warnf("Ignoring %s key %q: reserved for Enclave", source, key)
+	}
 }
 
 func (r *Runtime) logEnvFileLoaded(values []string) {

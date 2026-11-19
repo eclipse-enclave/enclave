@@ -1993,3 +1993,20 @@ func TestImageInboxFlagOnRun(t *testing.T) {
 		t.Fatalf("image inbox/source = %v/%v", res.Options.ImageInbox, res.Sources.ImageInbox)
 	}
 }
+
+// An invalid import still reports as one, so that it can notify the desktop.
+func TestImgImportInvalidArgumentsKeepTheAction(t *testing.T) {
+	for _, args := range [][]string{
+		{"img", "import", "--screenshot", "-"},
+		{"img", "import", "shot.png"},
+		{"img", "import", "--session", " "},
+	} {
+		res, err := Parse(args, config.DefaultOptions())
+		if err == nil {
+			t.Fatalf("Parse(%q) accepted", args)
+		}
+		if res.Action != ActionImgImport {
+			t.Errorf("Parse(%q) Action = %q, want %q", args, res.Action, ActionImgImport)
+		}
+	}
+}

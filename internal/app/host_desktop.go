@@ -54,6 +54,15 @@ var (
 	toolGrim    = desktopTool{"grim", "grim", "take screenshots"}
 	toolSlurp   = desktopTool{"slurp", "slurp", "select a screen region"}
 	toolMaim    = desktopTool{"maim", "maim", "take screenshots"}
+	// toolNotifySend is optional: without it there are no notifications.
+	toolNotifySend = desktopTool{"notify-send", "libnotify-bin", "show notifications"}
+)
+
+type notifyUrgency string
+
+const (
+	notifyNormal   notifyUrgency = "normal"
+	notifyCritical notifyUrgency = "critical"
 )
 
 // hostDesktop is img import's seam to the host's display server and its
@@ -265,6 +274,21 @@ func (d hostDesktop) copyText(ctx context.Context, text string) error {
 	return d.runWithStdin(ctx, text, toolXclip.name, "-selection", "clipboard", "-in")
 }
 
+// notify shows a desktop notification. Without notify-send it does nothing.
+func (d hostDesktop) notify(ctx context.Context, urgency notifyUrgency, summary string, body string) error {
+	if _, err := d.lookPath(toolNotifySend.name); err != nil {
+		return nil
+	}
+	return d.runWithStdin(ctx, "", toolNotifySend.name,
+		"--app-name="+model.AppName, "--urgency="+string(urgency), "--", summary, escapeNotificationMarkup(body))
+}
+
+// escapeNotificationMarkup keeps a body such as "--session <target>" intact on
+// notification servers that render body markup.
+func escapeNotificationMarkup(body string) string {
+	return strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;").Replace(body)
+}
+
 // isEmptyClipboard recognizes how wl-paste ("No selection", "Nothing is
 // copied") and xclip ("target TARGETS not available") report a clipboard
 // nobody owns.
@@ -336,9 +360,9 @@ func runToolOutput(ctx context.Context, maxBytes int64, name string, args ...str
 	return data, nil
 }
 
-// runToolInput runs a clipboard-write tool with stdin.
+// runToolInput runs a tool with stdin and without capturing its output.
 func runToolInput(ctx context.Context, stdin string, name string, args ...string) error {
-	cmd := exec.CommandContext(ctx, name, args...) // #nosec G204 -- name and args are fixed literals (wl-copy, xclip).
+	cmd := exec.CommandContext(ctx, name, args...) // #nosec G204 -- name is a fixed tool (wl-copy, xclip, notify-send); notify-send's text arguments follow "--" and run without a shell.
 	cmd.Stdin = strings.NewReader(stdin)
 	// No pipe-backed stdout/stderr: wl-copy and xclip fork a child that keeps
 	// serving the selection, and an inherited pipe would make Wait block until

@@ -46,28 +46,41 @@ type inboxTarget struct {
 	projectLabel string
 }
 
+// notifyTimeout bounds showing a desktop notification.
+const notifyTimeout = 5 * time.Second
+
 func runImgImport(opts model.Options, projectDir string) int {
-	img := opts.ImgOptions
 	desktop := systemDesktop()
+	containerPath, target, err := importHostImage(opts, projectDir, desktop)
+	if err != nil {
+		reportImportFailure(desktop, err)
+		return 1
+	}
+	reportImport(opts.ImgOptions, desktop, containerPath, target.projectLabel)
+	return 0
+}
+
+// importHostImage captures, validates, and stores a host image in the target
+// project's image inbox and returns the path its sessions see it at.
+func importHostImage(opts model.Options, projectDir string, desktop hostDesktop) (string, *inboxTarget, error) {
+	img := opts.ImgOptions
 
 	// A screenshot is interactive: find out whether it can be taken and
 	// where it goes before the user selects a region.
 	var target *inboxTarget
 	if img.ImgScreenshot {
 		if err := desktop.checkScreenshot(); err != nil {
-			logx.Errorf("%v", err)
-			return 1
+			return "", nil, err
 		}
-		var code int
-		if target, code = resolveImportTarget(opts, projectDir); code != 0 {
-			return code
+		var err error
+		if target, err = resolveImportTarget(opts, projectDir); err != nil {
+			return "", nil, err
 		}
 	}
 
 	data, advertised, err := acquireHostImage(img, desktop)
 	if err != nil {
-		logx.Errorf("%v", err)
-		return 1
+		return "", nil, err
 	}
 	// Validated before any engine call: bad input is reported as such even
 	// where no engine or session is available.
@@ -76,70 +89,91 @@ func runImgImport(opts model.Options, projectDir string) int {
 		if img.ImgFile != "" {
 			err = fmt.Errorf("%s: %w", img.ImgFile, err)
 		}
-		logx.Errorf("%v", err)
-		return 1
+		return "", nil, err
 	}
 
 	if target == nil {
-		var code int
-		if target, code = resolveImportTarget(opts, projectDir); code != 0 {
-			return code
+		if target, err = resolveImportTarget(opts, projectDir); err != nil {
+			return "", nil, err
 		}
 	}
 
 	home, err := config.ResolveHostHome()
 	if err != nil {
-		logx.Errorf("Failed to resolve home directory: %v", err)
-		return 1
+		return "", nil, fmt.Errorf("failed to resolve home directory: %w", err)
 	}
 	containerPath, err := writeHostImage(home, target.projectHash, data, ext)
 	if err != nil {
-		logx.Errorf("%v", err)
-		return 1
+		return "", nil, err
 	}
-	reportImport(img, desktop, containerPath, target.projectLabel)
-	return 0
+	return containerPath, target, nil
 }
 
 // reportImport prints the bare container path on stdout, so that
 // `P=$(enclave img import ...)` captures exactly the path; every status line
-// goes to stderr.
+// goes to stderr. The desktop notification follows the clipboard copy so that
+// it can report a failed one.
 func reportImport(img model.ImgOptions, desktop hostDesktop, containerPath string, projectLabel string) {
 	fmt.Println(containerPath)
-	logx.SuccessNoticef("Imported host image for %s", projectLabel)
-	if !copiesPathToClipboard(img) {
-		return
+	imported := "Imported host image for " + projectLabel
+	logx.SuccessNoticef("%s", imported)
+	body := containerPath
+	if copiesPathToClipboard(img) {
+		if err := copyPathToClipboard(desktop, containerPath); err != nil {
+			logx.Warnf("Could not copy the container path to the clipboard: %v", err)
+			body += "\nNot copied to the clipboard: " + err.Error()
+		} else {
+			logx.Noticef("Container path copied to the clipboard; paste it into the session")
+		}
 	}
+	notifyImport(desktop, notifyNormal, imported, body)
+}
+
+func copyPathToClipboard(desktop hostDesktop, containerPath string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), clipboardCopyTimeout)
 	defer cancel()
-	if err := desktop.copyText(ctx, containerPath); err != nil {
-		logx.Warnf("Could not copy the container path to the clipboard: %v", err)
+	return desktop.copyText(ctx, containerPath)
+}
+
+// reportImportFailure reports the error on stderr and as a desktop
+// notification. A selection the user cancelled needs no notification.
+func reportImportFailure(desktop hostDesktop, err error) {
+	logx.Errorf("%v", err)
+	if errors.Is(err, errSelectionCancelled) {
 		return
 	}
-	logx.Noticef("Container path copied to the clipboard; paste it into the session")
+	notifyImport(desktop, notifyCritical, "Host image import failed", err.Error())
+}
+
+// notifyImport shows a desktop notification, so that an import run from a
+// hotkey, with no terminal, has visible output. It is best-effort: stdout and
+// stderr remain the canonical output.
+func notifyImport(desktop hostDesktop, urgency notifyUrgency, summary string, body string) {
+	ctx, cancel := context.WithTimeout(context.Background(), notifyTimeout)
+	defer cancel()
+	if err := desktop.notify(ctx, urgency, summary, body); err != nil {
+		logx.Debugf("desktop notification: %v", err)
+	}
 }
 
 // resolveImportTarget finds the project whose image inbox receives the import.
-func resolveImportTarget(opts model.Options, projectDir string) (*inboxTarget, int) {
-	if code := requireDocker(); code != 0 {
-		return nil, code
+func resolveImportTarget(opts model.Options, projectDir string) (*inboxTarget, error) {
+	if err := checkDocker(); err != nil {
+		return nil, err
 	}
 	be, err := newListingBackend(opts)
 	if err != nil {
-		logx.Errorf("%v", err)
-		return nil, 1
+		return nil, err
 	}
 	sessions, err := be.List(context.Background(), backend.SessionFilter{RunningOnly: true})
 	if err != nil {
-		logx.Errorf("list sessions: %v", err)
-		return nil, 1
+		return nil, fmt.Errorf("list sessions: %w", err)
 	}
 	projectHash, err := resolveInboxProject(sessions, sessionTargetProject(projectDir), opts.ImgSession)
 	if err != nil {
-		logx.Errorf("%v", err)
-		return nil, 1
+		return nil, err
 	}
-	return &inboxTarget{projectHash: projectHash, projectLabel: inboxProjectLabel(sessions, projectHash)}, 0
+	return &inboxTarget{projectHash: projectHash, projectLabel: inboxProjectLabel(sessions, projectHash)}, nil
 }
 
 // copiesPathToClipboard reports whether the container path replaces the

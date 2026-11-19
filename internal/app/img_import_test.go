@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -330,5 +331,84 @@ func TestReportImportWarnsWhenTheClipboardCopyFails(t *testing.T) {
 	}
 	if strings.Contains(stderr, "copied to the clipboard;") {
 		t.Errorf("stderr = %q, want no clipboard success notice", stderr)
+	}
+}
+
+func TestReportImportNotifiesWithTheTargetProject(t *testing.T) {
+	t.Setenv("NO_COLOR", "1")
+	const containerPath = model.ContainerImageInboxDir + "/20260101T000000Z-0123abcd.png"
+	f := waylandDesktop()
+	f.installed["notify-send"] = true
+	captureOutput(t, func() {
+		reportImport(model.ImgOptions{ImgNoClipboard: true}, f.desktop(), containerPath, "/work/project")
+	})
+	want := "notify-send --app-name=enclave --urgency=normal -- Imported host image for /work/project " + containerPath
+	if !slices.Contains(f.ran, want) {
+		t.Errorf("ran = %q, want %q", f.ran, want)
+	}
+}
+
+func TestReportImportFailureNotifiesWithTheError(t *testing.T) {
+	t.Setenv("NO_COLOR", "1")
+	f := waylandDesktop()
+	f.installed["notify-send"] = true
+	err := errors.New("several projects have a running session with an image inbox:\n  /a: one\n  /b: two")
+	stdout, stderr := captureOutput(t, func() {
+		reportImportFailure(f.desktop(), err)
+	})
+	if stdout != "" {
+		t.Errorf("stdout = %q, want nothing", stdout)
+	}
+	if !strings.Contains(stderr, err.Error()) {
+		t.Errorf("stderr = %q, want the error", stderr)
+	}
+	want := []string{"notify-send --app-name=enclave --urgency=critical -- Host image import failed " + err.Error()}
+	if !reflect.DeepEqual(f.ran, want) {
+		t.Errorf("ran = %q, want %q", f.ran, want)
+	}
+}
+
+func TestReportImportFailureWithoutNotifySend(t *testing.T) {
+	t.Setenv("NO_COLOR", "1")
+	f := waylandDesktop()
+	_, stderr := captureOutput(t, func() {
+		reportImportFailure(f.desktop(), errors.New("no image data received"))
+	})
+	if !strings.Contains(stderr, "no image data received") {
+		t.Errorf("stderr = %q, want the error", stderr)
+	}
+	if len(f.ran) != 0 {
+		t.Errorf("ran = %q, want nothing", f.ran)
+	}
+}
+
+func TestReportImportFailureDoesNotNotifyACancelledSelection(t *testing.T) {
+	t.Setenv("NO_COLOR", "1")
+	f := waylandDesktop()
+	f.installed["notify-send"] = true
+	captureOutput(t, func() {
+		reportImportFailure(f.desktop(), errSelectionCancelled)
+	})
+	if len(f.ran) != 0 {
+		t.Errorf("ran = %q, want nothing", f.ran)
+	}
+}
+
+func TestReportImportNotifiesAfterTheClipboardCopy(t *testing.T) {
+	t.Setenv("NO_COLOR", "1")
+	const containerPath = model.ContainerImageInboxDir + "/20260101T000000Z-0123abcd.png"
+	f := waylandDesktop()
+	f.installed["notify-send"] = true
+	f.failures["wl-copy"] = errors.New("compositor gone")
+	captureOutput(t, func() {
+		reportImport(model.ImgOptions{}, f.desktop(), containerPath, "/work/project")
+	})
+	want := []string{
+		"wl-copy",
+		"notify-send --app-name=enclave --urgency=normal -- Imported host image for /work/project " +
+			containerPath + "\nNot copied to the clipboard: compositor gone",
+	}
+	if !reflect.DeepEqual(f.ran, want) {
+		t.Errorf("ran = %q, want %q", f.ran, want)
 	}
 }

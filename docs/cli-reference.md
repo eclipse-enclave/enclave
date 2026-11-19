@@ -177,6 +177,13 @@ image on the clipboard, so the next paste into the session hands the agent
 the path. `--no-clipboard` leaves the clipboard alone; `--file` and `-` never
 touch it. `img import` takes `--backend` for one invocation.
 
+When `notify-send` is installed, `img import` also shows a desktop
+notification, so an import bound to a hotkey has visible output. On success
+it names the target project's directory and says if the clipboard copy
+failed; on failure it carries the error message, including the candidate
+list. Unknown flags and a cancelled screen selection show none. Without
+`notify-send` there is no notification and no error.
+
 Clipboard and screenshot import need Linux with one of:
 
 | Display server | Clipboard | Screenshot |

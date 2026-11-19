@@ -256,7 +256,8 @@ fails before building.
 
 Outside both projects, `img import --file shot.png` fails and lists `a` and
 `b`; `--session <name>` with a session name or container name from
-`enclave ps` picks one.
+`enclave ps` picks one. With `notify-send` installed, each of these imports
+also shows a desktop notification naming the project or the error.
 
 ## Windows launcher
 

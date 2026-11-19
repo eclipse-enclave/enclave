@@ -12,6 +12,7 @@ import (
 	"context"
 	"errors"
 	"os/exec"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -336,5 +337,39 @@ func TestCheckScreenshotRunsNothing(t *testing.T) {
 	}
 	if err := waylandDesktop().desktop().checkScreenshot(); err != nil {
 		t.Fatalf("checkScreenshot with tools = %v", err)
+	}
+}
+
+func TestNotifySendsDesktopNotification(t *testing.T) {
+	f := waylandDesktop()
+	f.installed["notify-send"] = true
+	if err := f.desktop().notify(context.Background(), notifyNormal, "Imported host image", "for /work/project"); err != nil {
+		t.Fatalf("notify: %v", err)
+	}
+	want := []string{"notify-send --app-name=enclave --urgency=normal -- Imported host image for /work/project"}
+	if !reflect.DeepEqual(f.ran, want) {
+		t.Errorf("ran = %q, want %q", f.ran, want)
+	}
+}
+
+func TestNotifyEscapesBodyMarkup(t *testing.T) {
+	f := waylandDesktop()
+	f.installed["notify-send"] = true
+	if err := f.desktop().notify(context.Background(), notifyCritical, "Host image import failed", "pass --session <target> & retry"); err != nil {
+		t.Fatalf("notify: %v", err)
+	}
+	want := []string{"notify-send --app-name=enclave --urgency=critical -- Host image import failed pass --session &lt;target&gt; &amp; retry"}
+	if !reflect.DeepEqual(f.ran, want) {
+		t.Errorf("ran = %q, want %q", f.ran, want)
+	}
+}
+
+func TestNotifyWithoutNotifySendDoesNothing(t *testing.T) {
+	f := waylandDesktop()
+	if err := f.desktop().notify(context.Background(), notifyNormal, "Imported host image", "for /work/project"); err != nil {
+		t.Errorf("notify without notify-send = %v, want nil", err)
+	}
+	if len(f.ran) != 0 {
+		t.Errorf("ran = %q, want nothing", f.ran)
 	}
 }

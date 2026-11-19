@@ -51,6 +51,9 @@ running inbox-enabled session; the only project that has one. Anything else
 is an error.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Set before validation, so that an invalid import is still reported
+			// as one, including as a desktop notification.
+			res.Action = ActionImgImport
 			if len(args) == 1 {
 				if args[0] != "-" {
 					return fmt.Errorf("unexpected argument %q; pass --screenshot, --file <path>, or - to read from stdin", args[0])
@@ -72,7 +75,6 @@ is an error.`,
 					return fmt.Errorf("empty --session; pass a session or container name from `%s ps`", model.AppName)
 				}
 			}
-			res.Action = ActionImgImport
 			return nil
 		},
 	}

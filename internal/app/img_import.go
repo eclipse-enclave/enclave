@@ -128,7 +128,7 @@ func resolveImportTarget(opts model.Options, projectDir string) (*inboxTarget, i
 		logx.Errorf("list sessions: %v", err)
 		return nil, 1
 	}
-	projectHash, err := resolveInboxProject(sessions, sessionTargetProject(projectDir))
+	projectHash, err := resolveInboxProject(sessions, sessionTargetProject(projectDir), opts.ImgSession)
 	if err != nil {
 		logx.Errorf("%v", err)
 		return nil, 1
@@ -210,17 +210,25 @@ func advertisedMIMEForPath(path string) string {
 	}
 }
 
-// resolveInboxProject picks the project an import goes to: the working
-// directory's project if it has a running inbox-enabled session, else the only
-// project that has one. Anything else is an error; a wrong guess would show a
-// host image to another project's agent.
-func resolveInboxProject(sessions []backend.Session, cwd model.Project) (string, error) {
+// resolveInboxProject picks the project an import goes to; the first match
+// wins:
+//
+//  1. requested, resolved like the session argument of `attach`;
+//  2. the working directory's project, if it has a running inbox-enabled
+//     session;
+//  3. the only project with running inbox-enabled sessions.
+//
+// Anything else is an error: a wrong guess would show a host image to another
+// project's agent.
+func resolveInboxProject(running []backend.Session, cwd model.Project, requested string) (string, error) {
+	if requested != "" {
+		return resolveRequestedInboxSession(running, cwd, requested)
+	}
 	byProject := map[string][]backend.Session{}
-	for _, session := range sessions {
-		if !sessionHasImageInbox(session) || strings.TrimSpace(session.ProjectHash) == "" {
-			continue
+	for _, session := range running {
+		if sessionHasImageInbox(session) && strings.TrimSpace(session.ProjectHash) != "" {
+			byProject[session.ProjectHash] = append(byProject[session.ProjectHash], session)
 		}
-		byProject[session.ProjectHash] = append(byProject[session.ProjectHash], session)
 	}
 	if hash := strings.TrimSpace(cwd.Hash); hash != "" && len(byProject[hash]) > 0 {
 		return hash, nil
@@ -237,14 +245,40 @@ func resolveInboxProject(sessions []backend.Session, cwd model.Project) (string,
 	for _, projectSessions := range byProject {
 		names := make([]string, 0, len(projectSessions))
 		for _, session := range projectSessions {
-			names = append(names, session.Ref.Name)
+			names = append(names, inboxCandidateName(session))
 		}
 		sort.Strings(names)
 		candidates = append(candidates, fmt.Sprintf("%s: %s", projectSessions[0].ProjectDir, strings.Join(names, ", ")))
 	}
 	sort.Strings(candidates)
-	return "", fmt.Errorf("several projects have a running session with an image inbox; run the import from one of these project directories:\n  %s",
+	return "", fmt.Errorf("several projects have a running session with an image inbox; pass --session <target> or run the import from one of these project directories:\n  %s",
 		strings.Join(candidates, "\n  "))
+}
+
+// resolveRequestedInboxSession resolves --session among all running sessions,
+// exactly as `attach` would, and only then requires an image inbox. Resolving
+// among inbox-enabled sessions alone would let a session name that `attach`
+// finds in the working directory's project silently pick another project's
+// session of the same name.
+func resolveRequestedInboxSession(running []backend.Session, cwd model.Project, requested string) (string, error) {
+	session, err := resolveNamedSession(running, requested, sessionTargetQuery{Project: cwd})
+	if err != nil {
+		return "", err
+	}
+	if !sessionHasImageInbox(session) || strings.TrimSpace(session.ProjectHash) == "" {
+		return "", fmt.Errorf("session %q (%s) has no image inbox; restart it with `%s run --image-inbox`",
+			requested, session.Ref.Name, model.AppName)
+	}
+	return session.ProjectHash, nil
+}
+
+// inboxCandidateName shows a session by its session name where it has one,
+// with the container name that --session also accepts.
+func inboxCandidateName(session backend.Session) string {
+	if name := strings.TrimSpace(session.Name); name != "" {
+		return fmt.Sprintf("%s (%s)", name, session.Ref.Name)
+	}
+	return session.Ref.Name
 }
 
 func sessionHasImageInbox(session backend.Session) bool {

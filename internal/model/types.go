@@ -133,14 +133,17 @@ type UpdateOptions struct {
 	UpdateTools []string
 }
 
-// ImgOptions carries the source of `img import`: the host clipboard (the
-// default), a screenshot, a file, or stdin.
+// ImgOptions carries the source of `img import` (the host clipboard by
+// default, a screenshot, a file, or stdin) and its explicit target.
 type ImgOptions struct {
 	ImgFile       string
 	ImgStdin      bool
 	ImgScreenshot bool
 	// ImgNoClipboard keeps the container path off the host clipboard.
 	ImgNoClipboard bool
+	// ImgSession names the session whose project receives the import; empty
+	// leaves the choice to the working directory or the only candidate.
+	ImgSession string
 }
 
 type Options struct {

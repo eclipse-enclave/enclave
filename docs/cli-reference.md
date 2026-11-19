@@ -150,13 +150,25 @@ in scope, so not `--all-running`. See
 | `enclave img import --screenshot` | The same, for a screen region you select |
 | `enclave img import --file <path>` | The same, reading a PNG or JPEG file |
 | `enclave img import -` | The same, reading the host image from stdin |
+| `enclave img import --session <target>` | Import into the project of a named session, e.g. from a desktop hotkey |
 
 The project's sessions started with `--image-inbox` see the host image
-read-only under `/mnt/host-images`. The target is the working directory's
-project if it has a running inbox-enabled session, else the only project that
-has one; anything else is an error. Input must be a PNG or JPEG of at most
+read-only under `/mnt/host-images`. Input must be a PNG or JPEG of at most
 10 MiB whose content matches the type the clipboard advertises or the `.png`,
 `.jpg`, or `.jpeg` file extension. The source options are mutually exclusive.
+
+Only running inbox-enabled sessions receive imports. The first match wins:
+
+1. `--session <target>`: a session name, container name, or container ID
+   prefix, resolved as for `attach`, so session names in the working
+   directory's project win.
+2. The working directory's project.
+3. The only project with such sessions; several sessions of one project are
+   fine.
+
+Anything else is an error that lists the candidate projects and their
+sessions. A `--session` naming a session without an image inbox is an error
+too; it never falls through to the other rules.
 
 After a clipboard or screenshot import, the container path replaces the host
 image on the clipboard, so the next paste into the session hands the agent

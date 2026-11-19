@@ -254,6 +254,10 @@ read-only; in the session of `b` the inbox is empty. `enclave ps --json` shows
 `"image_inbox": true` under `options`, and `--backend qemu --image-inbox`
 fails before building.
 
+Outside both projects, `img import --file shot.png` fails and lists `a` and
+`b`; `--session <name>` with a session name or container name from
+`enclave ps` picks one.
+
 ## Windows launcher
 
 On Windows, `cmd/enclave` builds `main_windows.go`, which forwards to the Linux

@@ -173,28 +173,48 @@ func inboxSession(name, hash, dir string, inbox bool) backend.Session {
 
 func TestResolveInboxProject(t *testing.T) {
 	a := inboxSession("enclave-claude-a", "hashA", "/src/a", true)
+	a.Name = "review"
+	a.Ref.ID = "aaaaaaaa1111"
 	a2 := inboxSession("enclave-codex-a", "hashA", "/src/a", true)
 	b := inboxSession("enclave-claude-b", "hashB", "/src/b", true)
+	b.Name = "review"
+	b.Ref.ID = "bbbbbbbb2222"
 	cPlain := inboxSession("enclave-claude-c", "hashC", "/src/c", false)
+	cPlain.Name = "plain"
+	cPlain.Ref.ID = "cccccccc3333"
+	cReview := cPlain
+	cReview.Name = "review"
 	legacy := backend.Session{Ref: backend.SessionRef{Name: "enclave-old"}, ProjectHash: "hashD"}
 
 	tests := []struct {
-		name     string
-		sessions []backend.Session
-		cwd      model.Project
-		want     string
-		errHas   []string
+		name      string
+		sessions  []backend.Session
+		cwd       model.Project
+		requested string
+		want      string
+		errHas    []string
 	}{
-		{"cwd project wins", []backend.Session{a, b}, model.Project{Hash: "hashB"}, "hashB", nil},
-		{"single inbox project from elsewhere", []backend.Session{a, a2, cPlain}, model.Project{Hash: "hashC"}, "hashA", nil},
-		{"single inbox project without cwd project", []backend.Session{a, legacy}, model.Project{}, "hashA", nil},
-		{"ambiguous lists candidates", []backend.Session{a, b}, model.Project{Hash: "hashC"}, "", []string{"enclave-claude-a", "enclave-claude-b", "/src/a", "/src/b"}},
-		{"no inbox session", []backend.Session{cPlain, legacy}, model.Project{Hash: "hashC"}, "", []string{"--image-inbox"}},
-		{"nothing running", nil, model.Project{}, "", []string{"--image-inbox"}},
+		{"session by container name", []backend.Session{a, b}, model.Project{}, "enclave-claude-b", "hashB", nil},
+		{"session by ID prefix", []backend.Session{a, b}, model.Project{}, "bbbbbbbb", "hashB", nil},
+		{"session name prefers cwd project", []backend.Session{a, b}, model.Project{Hash: "hashB"}, "review", "hashB", nil},
+		{"session name outside cwd project", []backend.Session{b, cPlain}, model.Project{Hash: "hashC"}, "review", "hashB", nil},
+		{"cwd session name without inbox is not skipped", []backend.Session{b, cReview}, model.Project{Hash: "hashC"}, "review", "", []string{"no image inbox"}},
+		{"session name in two other projects is ambiguous", []backend.Session{a, b}, model.Project{Hash: "hashC"}, "review", "", []string{"enclave-claude-a", "enclave-claude-b"}},
+		{"session without inbox", []backend.Session{a, cPlain}, model.Project{}, "plain", "", []string{`"plain"`, "no image inbox", "--image-inbox"}},
+		{"session without inbox by container name", []backend.Session{a, cPlain}, model.Project{}, "enclave-claude-c", "", []string{"no image inbox"}},
+		{"unknown session", []backend.Session{a}, model.Project{}, "nope", "", []string{`"nope"`}},
+		{"session beats cwd project", []backend.Session{a, b}, model.Project{Hash: "hashA"}, "enclave-claude-b", "hashB", nil},
+		{"cwd project wins", []backend.Session{a, b}, model.Project{Hash: "hashB"}, "", "hashB", nil},
+		{"two sessions of one project", []backend.Session{a, a2}, model.Project{Hash: "hashC"}, "", "hashA", nil},
+		{"single inbox project from elsewhere", []backend.Session{a, a2, cPlain}, model.Project{Hash: "hashC"}, "", "hashA", nil},
+		{"single inbox project without cwd project", []backend.Session{a, legacy}, model.Project{}, "", "hashA", nil},
+		{"ambiguous lists candidates", []backend.Session{a, a2, b}, model.Project{Hash: "hashC"}, "", "", []string{"enclave-codex-a, review (enclave-claude-a)", "review (enclave-claude-b)", "/src/a", "/src/b", "--session"}},
+		{"no inbox session", []backend.Session{cPlain, legacy}, model.Project{Hash: "hashC"}, "", "", []string{"no running session has an image inbox", "--image-inbox"}},
+		{"nothing running", nil, model.Project{}, "", "", []string{"no running session has an image inbox"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := resolveInboxProject(tt.sessions, tt.cwd)
+			got, err := resolveInboxProject(tt.sessions, tt.cwd, tt.requested)
 			if tt.errHas != nil {
 				if err == nil {
 					t.Fatalf("expected error, got %q", got)

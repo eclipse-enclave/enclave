@@ -1969,6 +1969,21 @@ func TestImgImportSources(t *testing.T) {
 	}
 }
 
+func TestImgImportSession(t *testing.T) {
+	res, err := Parse([]string{"img", "import", "--file", "shot.png", "--session", "review"}, config.DefaultOptions())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Options.ImgSession != "review" {
+		t.Fatalf("ImgSession = %q, want review", res.Options.ImgSession)
+	}
+	// A blank value, e.g. from an unset variable in a hotkey binding, must not
+	// fall back to guessing the target.
+	if _, err := Parse([]string{"img", "import", "--session", " "}, config.DefaultOptions()); err == nil {
+		t.Fatal("blank --session accepted")
+	}
+}
+
 func TestImageInboxFlagOnRun(t *testing.T) {
 	res, err := Parse([]string{"run", "--image-inbox"}, config.DefaultOptions())
 	if err != nil {

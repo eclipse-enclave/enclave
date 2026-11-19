@@ -19,6 +19,17 @@ import (
 	"enclave/internal/logx"
 )
 
+// SyncAuth runs the post-session credential reconciliation on the shared host
+// stores. Other backends that keep stores on the host layout reuse it.
+func (b *Backend) SyncAuth(req backend.Request) {
+	b.runRequestAuthSync(req)
+}
+
+// StoreMountSource returns the host directory that backs a persistent store.
+func (b *Backend) StoreMountSource(key backend.StoreKey, kind backend.StoreKind) (string, error) {
+	return b.storage.MountSource(key, kind)
+}
+
 func (b *Backend) runRequestAuthSync(req backend.Request) {
 	if req.AuthSync == nil {
 		return

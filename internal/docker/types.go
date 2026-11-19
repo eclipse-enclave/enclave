@@ -252,12 +252,16 @@ type MountPoint struct {
 
 // ImageInspectResponse is the subset of `docker image inspect` output we consume.
 type ImageInspectResponse struct {
+	ID     string       `json:"Id"`
 	Config *ImageConfig `json:"Config"`
 }
 
 // ImageConfig holds image-level configuration from `docker image inspect`.
 type ImageConfig struct {
-	Labels map[string]string `json:"Labels"`
+	Labels     map[string]string `json:"Labels"`
+	User       string            `json:"User"`
+	Entrypoint []string          `json:"Entrypoint"`
+	Cmd        []string          `json:"Cmd"`
 }
 
 // SystemInfo is the subset of `docker info` output we consume.

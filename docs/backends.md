@@ -1,18 +1,19 @@
 # Backends
 
 Which container engine or VM runs a session, how Enclave picks it, and what
-differs between Docker, Podman, and the experimental QEMU backend.
+differs between Docker, Podman, and the experimental QEMU and sbx backends.
 
 | Backend | Status | Notes |
 |---------|--------|-------|
 | `docker` | Default | Rootful Docker with buildx. Rootless Docker is not supported; see [Rootless container engines](security/rootless.md) and [Host hardening](security/host-hardening.md) |
 | `podman` | Supported | Podman's Docker-compatible CLI; rootless is the tested configuration |
 | `qemu` | Experimental | Foreground sessions in an x86-64 Alpine microVM, without network restrictions |
+| `sbx` | Experimental | Foreground sessions, each in its own Docker Sandboxes microVM; egress follows the sbx network policy |
 
 ## Choosing a backend
 
-`backend` (key or `--backend`) is `auto` (default), `docker`, `podman`, or
-`qemu`. Any explicit value disables detection.
+`backend` (key or `--backend`) is `auto` (default), `docker`, `podman`,
+`qemu`, or `sbx`. Any explicit value disables detection.
 
 ### Detection
 
@@ -167,3 +168,25 @@ experiments:
 | `ENCLAVE_QEMU_CPU` | `max` | CPU model passed to `-cpu` |
 | `ENCLAVE_QEMU_TRANSPORT` | `pci` | Virtio transport for devices; `mmio` selects virtio-mmio |
 | `ENCLAVE_QEMU_KERNEL_APPEND_EXTRA` | unset | Appended to the guest kernel command line after `console=ttyS0` |
+
+## sbx (experimental)
+
+`--backend sbx` runs each foreground session in its own
+[Docker Sandboxes](https://docs.docker.com/ai/sandboxes/) sandbox, so every
+session gets its own microVM. It needs the `sbx` CLI, signed in with
+`sbx login`, and Docker, which still builds the session images.
+
+| Aspect | Behavior |
+|--------|----------|
+| Images | Built with Docker as usual, then exported and loaded into the sbx image store (`sbx template load`). An unchanged image is loaded once; the first run after each rebuild copies the whole image |
+| Sessions | One sandbox per session, created from a generated kit for the session image, named like the Docker container, and removed when the session ends. The session runs through `sbx exec` with the request's user, working directory, and environment (passed in an env file) |
+| Network | Implies `--allow-all-network` and `--disable-gateway`. The sbx network policy (`sbx policy ls`) filters egress instead of Enclave's gateway. `--allow-domain` and `allow_domains` are rejected, and there is no Enclave network log |
+| Mounts | The writable project directory is the primary sbx workspace; other directories and read-only files are extra workspaces. Writable single-file mounts are copied in before the session and back afterwards |
+| Stores | The same host stores as the other backends |
+| Not supported yet | Detached sessions, `exec`, `attach`, devcontainers, a read-only project mount, Enclave allowlists, HTTP secret release |
+| Listing | `enclave ps --backend sbx` lists sandboxes named like Enclave sessions |
+
+After an interrupted or failed create, inspect any sandbox with the requested
+name using `sbx inspect <name>`. Enclave leaves it in place because it may
+belong to another session. Remove it with `sbx rm <name>` only after confirming
+it is an abandoned sandbox from your run.

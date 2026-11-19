@@ -601,11 +601,11 @@ func runtimeUIDRemapEnvEntries(env []string) []string {
 			continue
 		}
 		switch key {
-		case model.EnvRuntimeUID, model.EnvRuntimeGID, "HOME", "USER":
+		case "HOME", "USER":
 			values[key] = value
 		}
 	}
-	keys := []string{model.EnvRuntimeUID, model.EnvRuntimeGID, "HOME", "USER"}
+	keys := []string{"HOME", "USER"}
 	out := make([]string, 0, len(keys))
 	for _, key := range keys {
 		if value, ok := values[key]; ok {

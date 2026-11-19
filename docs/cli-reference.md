@@ -152,49 +152,10 @@ in scope, so not `--all-running`. See
 | `enclave img import -` | The same, reading the host image from stdin |
 | `enclave img import --session <target>` | Import into the project of a named session, e.g. from a desktop hotkey |
 
-The project's sessions started with `--image-inbox` see the host image
-read-only under `/mnt/host-images`. Input must be a PNG or JPEG of at most
-10 MiB whose content matches the type the clipboard advertises or the `.png`,
-`.jpg`, or `.jpeg` file extension. The source options are mutually exclusive.
-Stdout carries only the container path, so `P=$(enclave img import ...)`
-captures it; status messages go to stderr.
-
-The inbox is removed when the project's last inbox-enabled session ends; see
-[Image inbox lifetime](persistence.md#image-inbox-lifetime).
-
-Only running inbox-enabled sessions receive imports. The first match wins:
-
-1. `--session <target>`: a session name, container name, or container ID
-   prefix, resolved as for `attach`, so session names in the working
-   directory's project win.
-2. The working directory's project.
-3. The only project with such sessions; several sessions of one project are
-   fine.
-
-Anything else is an error that lists the candidate projects and their
-sessions. A `--session` naming a session without an image inbox is an error
-too; it never falls through to the other rules.
-
-After a clipboard or screenshot import, the container path replaces the host
-image on the clipboard, so the next paste into the session hands the agent
-the path. `--no-clipboard` leaves the clipboard alone; `--file` and `-` never
-touch it. `img import` takes `--backend` for one invocation.
-
-When `notify-send` is installed, `img import` also shows a desktop
-notification, so an import bound to a hotkey has visible output. On success
-it names the target project's directory and says if the clipboard copy
-failed; on failure it carries the error message, including the candidate
-list. Unknown flags and a cancelled screen selection show none. Without
-`notify-send` there is no notification and no error.
-
-Clipboard and screenshot import need Linux with one of:
-
-| Display server | Clipboard | Screenshot |
-|----------------|-----------|------------|
-| Wayland (`WAYLAND_DISPLAY`) | `wl-clipboard` | `grim`, `slurp` |
-| X11 (`DISPLAY`) | `xclip` | `maim` |
-
-On macOS and WSL, use `--file` or `-`.
+Sources are mutually exclusive; `--no-clipboard` keeps the container path
+off the clipboard, and `--backend` applies to one invocation. Targeting,
+validation, requirements, hotkeys, and lifetime:
+[Image inbox](image-inbox.md).
 
 ### Devcontainer
 
@@ -266,7 +227,7 @@ See [List options](configuration.md#list-options).
 | `--add-sensitive-dir <path>` | `--add-dir <path>` plus a sensitive-dir exception for `<path>` for this run (repeatable, CLI-only). See [Sensitive mounts](mounts.md#sensitive-mounts) |
 | `--add-readonly-sensitive-dir <path>` | `--add-readonly-dir <path>` plus a sensitive-dir exception for `<path>` for this run (repeatable, CLI-only) |
 | `--allow-sensitive-mounts` | Mount the project or additional directories even when they expose sensitive host data (CLI-only). See [Mounting all sensitive paths](mounts.md#mounting-all-sensitive-paths) |
-| `--image-inbox` | Mount the project's image inbox read-only at `/mnt/host-images` and set `ENCLAVE_IMAGE_INBOX`; see [Host images](#host-images). Docker and Podman only |
+| `--image-inbox` | Mount the project's image inbox read-only at `/mnt/host-images` and set `ENCLAVE_IMAGE_INBOX`; see [Image inbox](image-inbox.md). Docker and Podman only |
 | `--project-mount <writable\|readonly>` | Mount the project/worktree read-write (default) or read-only |
 | `--worktree-metadata <follow\|readonly\|none>` | Linked-worktree git metadata mounts: follow the project mount (default), force read-only, or skip |
 | `--yolo` | Enable YOLO mode explicitly |

@@ -105,6 +105,7 @@ Good to know:
 | Sessions | Named and background sessions, persistent history, caches, and agent memory | [Sessions and persistence](docs/persistence.md) |
 | Configuration | Global and per-project config, tool config overrides, skills, and patches | [Configuration](docs/configuration.md), [Tool config](docs/tool-config.md) |
 | Extensions | Install tools, features, and commands from Git, or write your own | [Extensions](docs/extensions/README.md) |
+| Host images | Hand a screenshot or clipboard image to the agent, read-only and per project | [Image inbox](docs/image-inbox.md) |
 | Custom commands | Your own `enclave <name>` verbs, run on the host or in a session | [Commands](docs/commands.md) |
 | Backends | Docker, Podman, and an experimental QEMU microVM backend | [Backends](docs/backends.md) |
 | Security | What the sandbox protects against and what it does not | [Security](docs/security/README.md) |

@@ -263,7 +263,11 @@ Exiting the session of `a` leaves only `b`'s inbox in
 `~/.cache/enclave/inbox/`. To check the lazy sweep, start `a` with
 `--background --image-inbox`, import, and stop its container with
 `docker stop` rather than `enclave stop`; `enclave cleanup --dry-run` then
-lists the inbox. Triggers: [Image inbox lifetime](persistence.md#image-inbox-lifetime).
+lists the inbox. Triggers: [Lifetime](image-inbox.md#lifetime-and-targeting).
+
+`scripts/smoke-image-inbox.sh` covers the same flow against real containers
+with a faked clipboard, screenshot, and `notify-send`; it needs Docker (or
+`ENGINE=podman`) and starts and stops only its own sessions.
 
 ## Windows launcher
 

@@ -29,6 +29,7 @@ attempting in-container file edits.
 | `docs/persistence.md` | Sessions, background mode, stored data, cleanup |
 | `docs/git.md` | Git identity, config protection, commit signing |
 | `docs/mounts.md` | Project mount, extra directories, sensitive mounts |
+| `docs/image-inbox.md` | Image inbox: import host screenshots and clipboard images, hotkeys |
 | `docs/networking.md` | Network isolation, gateway, network log, port bridging |
 | `docs/auth.md` | Authentication, secrets, API keys, SSH keys |
 | `docs/tools.md` | Supported agent tools, images, devcontainers, updates |

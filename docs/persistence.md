@@ -94,7 +94,7 @@ Per-project data is stored on the host and reused across sessions:
 | Agent memory | `~/.local/state/enclave/projects/<project-hash>/<tool>/memory/` (Claude); `memory/<key>/` (Codex, matching the config-store key) |
 | Config/env/auth stores | Host directories under `~/.local/state/enclave/` (bind-mounted; no Docker volumes) |
 | Embedded runtime assets | `~/.cache/enclave/assets/<content-hash>/` |
-| Image inbox | `~/.cache/enclave/inbox/<project-hash>/` (mode 0700; host images from [`img import`](cli-reference.md#host-images); see [Image inbox lifetime](#image-inbox-lifetime)) |
+| Image inbox | `~/.cache/enclave/inbox/<project-hash>/` (mode 0700; see [Image inbox](image-inbox.md#lifetime-and-targeting)) |
 
 macOS paths: [Host directories](configuration.md#host-directories). Store
 lifecycle: [Persistent stores](runtime/stores.md); memory rules:
@@ -106,20 +106,6 @@ recreated one as missing), asset entries are re-extracted on the next run and
 pruned after 30 days unused, and no required runtime file is mounted from it.
 Deleting it also drops imported host images, which a running session then no
 longer sees.
-
-### Image inbox lifetime
-
-A project's image inbox is removed when the project's last inbox-enabled
-session ends, at the latest on the next Enclave command that touches inboxes.
-A stopped container that has not been removed no longer counts. There is no
-expiry time and no size cap.
-
-Ending a foreground session and `enclave stop` remove the inbox right away.
-A background session that ends on its own is noticed by the next
-`img import`, the next start of an inbox-enabled session, or
-`enclave cleanup`. Each of these removes every project's inbox that no
-inbox-enabled session holds. Sessions of another container engine (Docker
-versus Podman) are not seen, so use one engine for inbox-enabled sessions.
 
 ### Disabling persistence
 
@@ -164,8 +150,9 @@ session store that holds memory; the other kinds do not apply there. See
 
 Every cleanup, whatever its scope and `--keep` flags, also removes the image
 inbox of every project without an inbox-enabled session; see
-[Image inbox lifetime](#image-inbox-lifetime). `--all` without `--keep cache`
-removes the whole cache root, including inboxes that running sessions use.
+[Image inbox](image-inbox.md#lifetime-and-targeting). `--all` without
+`--keep cache` removes the whole cache root, including inboxes that running
+sessions use.
 
 Under Podman, `--build-cache` reports nothing to reclaim; see
 [Backends](backends.md#podman).

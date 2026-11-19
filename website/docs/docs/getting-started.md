@@ -169,6 +169,14 @@ with the latest agent CLI, and agent CLIs inside a session refresh on their own
 schedule; neither replaces the Enclave binary on your host.
 :::
 
+## Optional: install HomeShell
+
+To start, watch, and answer sessions from a web UI or desktop window instead of
+the terminal, install [HomeShell](/#homeshell) (preview) next. Follow the
+[HomeShell install instructions](https://github.com/eclipse-enclave/homeshell#install).
+HomeShell runs sessions through the `enclave` on your `PATH`, and sessions you
+start in a terminal show up in it too.
+
 ## Start your first session
 
 From inside a git repository, launch your coding agent in an isolated container:
@@ -240,6 +248,3 @@ enclave ps
 See the [CLI Commands](/cli) reference for the full set of commands you can run,
 and [Configuration](/configuration) to pick a default agent, mount extra
 directories, or widen the network allowlist per project.
-
-To start and watch sessions from a graphical UI instead of the terminal, try
-[HomeShell](/#homeshell).

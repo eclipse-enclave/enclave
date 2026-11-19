@@ -339,11 +339,16 @@ USER root
 COPY runtime-assets/auth-reconcile.sh /usr/local/share/enclave/auth-reconcile.sh
 COPY runtime-assets/net.sh /usr/local/share/enclave/net.sh
 COPY runtime-assets/kit-init.sh /usr/local/share/enclave/kit-init.sh
+# Image inbox native paste: xclip/wl-paste shims, inert without ENCLAVE_IMAGE_INBOX.
+COPY runtime-assets/clipboard-shim.sh /usr/local/share/enclave/clipboard-shim.sh
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod a+rx /usr/local/bin/entrypoint.sh \
         /usr/local/share/enclave/auth-reconcile.sh \
-        /usr/local/share/enclave/net.sh && \
-    chmod a+r /usr/local/share/enclave/kit-init.sh
+        /usr/local/share/enclave/net.sh \
+        /usr/local/share/enclave/clipboard-shim.sh && \
+    chmod a+r /usr/local/share/enclave/kit-init.sh && \
+    ln -sf /usr/local/share/enclave/clipboard-shim.sh /usr/local/bin/xclip && \
+    ln -sf /usr/local/share/enclave/clipboard-shim.sh /usr/local/bin/wl-paste
 USER ${USERNAME}
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 CMD ["/bin/bash"]

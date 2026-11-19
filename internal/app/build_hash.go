@@ -104,6 +104,7 @@ func runtimeImageStaticFiles(paths model.Paths) ([]mergedExtensionFile, error) {
 		".dockerignore",
 		filepath.ToSlash(filepath.Join("runtime-assets", "build-scripts")),
 		filepath.ToSlash(filepath.Join("runtime-assets", "auth-reconcile.sh")),
+		filepath.ToSlash(filepath.Join("runtime-assets", "clipboard-shim.sh")),
 		filepath.ToSlash(filepath.Join("runtime-assets", "net.sh")),
 		filepath.ToSlash(filepath.Join("runtime-assets", "kit-init.sh")),
 		"docs",

@@ -8,9 +8,10 @@
 
 # Live smoke test for the image inbox (--image-inbox, `enclave img import`):
 # clipboard, screenshot, file, and stdin import; the read-only mount; isolation
-# between two projects; targeting; and inbox removal when a project's last
-# inbox-enabled session ends. Linux only. Requires a Docker daemon (or podman,
-# with ENGINE=podman); builds the claude tool image on first use.
+# between two projects; the native paste shims; targeting; and inbox removal
+# when a project's last inbox-enabled session ends. Linux only. Requires a
+# Docker daemon (or podman, with ENGINE=podman); builds the claude tool image
+# on first use.
 #
 # Fake wl-paste, wl-copy, slurp, grim, and notify-send on PATH stand in for
 # the desktop, so it needs no display and leaves the real clipboard alone.
@@ -176,6 +177,19 @@ done
 in_container "$C2" "test -e '$CONTAINER_INBOX/$IMG1'" && fail "project2 sees project1's host image"
 in_container "$C1" "test -e '$CONTAINER_INBOX/$IMG2'" && fail "project1 sees project2's host image"
 pass "each project sees only its own host images"
+
+echo "=== native paste shims ==="
+out=$(img_import "$P1" --file "$FIXTURE") || fail "file import failed: $(cat "$FAKE/stderr")"
+[ "$(in_container "$C1" 'xclip -selection clipboard -o -t TARGETS')" = image/png ] \
+  || fail "xclip shim does not list the fresh host image"
+"$ENGINE" exec "$C1" xclip -selection clipboard -o -t image/png | cmp -s - "$FIXTURE" \
+  || fail "xclip shim does not serve the fresh host image"
+"$ENGINE" exec "$C1" wl-paste --type image/png | cmp -s - "$FIXTURE" \
+  || fail "wl-paste shim does not serve the fresh host image"
+in_container "$C1" 'xclip -selection clipboard -o' >/dev/null && fail "xclip shim answered a text request"
+in_container "$C1" 'env -u ENCLAVE_IMAGE_INBOX xclip -selection clipboard -o -t TARGETS' >/dev/null \
+  && fail "xclip shim answered without ENCLAVE_IMAGE_INBOX"
+pass "xclip and wl-paste shims serve the fresh host image and refuse text"
 
 echo "=== targeting outside a project ==="
 : > "$NOTIFY_LOG"

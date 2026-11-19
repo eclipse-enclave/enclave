@@ -205,6 +205,7 @@ extensions, hence the `//go:build !windows` on
 | [`runtime-assets/build-scripts/`](../runtime-assets/build-scripts/) | Build composition: features, templates, agent tool helpers |
 | [`runtime-assets/auth-reconcile.sh`](../runtime-assets/auth-reconcile.sh) | Shared auth reconciliation; skips placeholder files, and recognizes custom placeholders via `ENCLAVE_SECRET_PLACEHOLDERS` without real secrets |
 | [`runtime-assets/net.sh`](../runtime-assets/net.sh) | Resolver, host gateway resolution, loopback proxy |
+| [`runtime-assets/clipboard-shim.sh`](../runtime-assets/clipboard-shim.sh) | `xclip` and `wl-paste` shims that serve a fresh image inbox host image for native paste |
 | [`runtime-assets/microvm/alpine/`](../runtime-assets/microvm/alpine/) | QEMU bundle init and builder |
 | [`extensions/tools/<tool>/templates/`](../extensions/tools/) | Settings templates baked into the image |
 | [`docs/`](../docs/) | In the build context for agent help under `/usr/share/doc/enclave/`; [`docs/assets/`](../docs/assets/) is excluded in [`.dockerignore`](../.dockerignore) so logo changes cause no rebuild |

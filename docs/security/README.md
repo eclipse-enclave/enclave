@@ -61,6 +61,11 @@ these rules:
   10 MiB, written with mode 0600 into a 0700 directory.
 - Inboxes are per project, and `img import` refuses to guess a target, so an
   agent never sees another project's host images.
+- Native paste adds no access. The `xclip` and `wl-paste` in the container
+  are Enclave shims that read only the read-only inbox, and only its newest
+  host image shortly after import; see
+  [Native paste shims](../image-inbox.md#native-paste-shims). The container
+  still has no clipboard.
 
 Residual risks:
 

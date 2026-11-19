@@ -33,7 +33,9 @@ enclave img import --screenshot  # a screen region you select
 It prints the container path, such as
 `/mnt/host-images/20261119T104512Z-3f9c2a1e.png`, and puts that path on the host
 clipboard. Paste it into the session with your terminal's paste shortcut
-(usually `Ctrl+Shift+V`) and the agent reads the file.
+(usually `Ctrl+Shift+V`) and the agent reads the file. In Claude Code,
+OpenCode, and Pi you can paste the image itself instead; see
+[Paste natively](#paste-natively).
 
 Files and pipes work on every platform and leave the clipboard alone:
 
@@ -41,6 +43,24 @@ Files and pipes work on every platform and leave the clipboard alone:
 enclave img import --file shot.png
 enclave img import - < shot.jpg
 ```
+
+### Paste natively
+
+Within 60 seconds of an import, press the agent's image-paste key, `Ctrl+V`
+by default, and the agent attaches the host image directly:
+
+| Tool | Native paste |
+|------|--------------|
+| Claude Code, Pi | PNG and JPEG |
+| OpenCode | PNG only; paste the path of a JPEG |
+| Codex, Copilot | No; paste the path |
+| Theia | Not needed: its AI chat reads the host clipboard |
+
+Each press within the window attaches the same host image again. The key
+must reach the agent: most Linux terminals paste on `Ctrl+Shift+V` and pass
+`Ctrl+V` through, but some terminals, such as Windows Terminal and Theia's
+terminal, take `Ctrl+V` for their own paste. Text paste keeps working through
+the terminal as before.
 
 ### Bind a hotkey
 
@@ -141,6 +161,18 @@ Clipboard and screenshot import need Linux with one of:
 
 A missing tool is named in the error. On macOS and WSL, use `--file` or `-`.
 `notify-send` is optional.
+
+### Native paste shims
+
+The image provides `xclip` and `wl-paste` as Enclave shims in
+`/usr/local/bin`. They answer image reads and type listings for the
+clipboard selection with the newest host image in `ENCLAVE_IMAGE_INBOX`,
+only its real type (`image/png` or `image/jpeg`), and only if it was imported
+at most 60 seconds ago. Everything else, including text requests, sessions
+without an inbox, and older host images, exits 1 with no output, which the
+agents treat as "no image". When `DISPLAY` (for `xclip`) or `WAYLAND_DISPLAY`
+(for `wl-paste`) is set and a real binary is installed later on `PATH`, the
+shim runs that binary instead. Enclave sets neither variable.
 
 ### Host path
 

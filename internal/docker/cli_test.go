@@ -197,6 +197,35 @@ func TestMountFlagsSourceCreatingBinds(t *testing.T) {
 	}
 }
 
+func TestPortBindingFlags(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		port    Port
+		binding PortBinding
+		want    string
+	}{
+		{"auto without host IP", "3000/tcp", PortBinding{HostPort: "0"}, ":3000/tcp"},
+		{"auto IPv4 loopback", "3000/tcp", PortBinding{HostIP: "127.0.0.1", HostPort: "0"}, "127.0.0.1::3000/tcp"},
+		{"auto IPv4 wildcard", "3000/tcp", PortBinding{HostIP: "0.0.0.0", HostPort: "0"}, "0.0.0.0::3000/tcp"},
+		{"auto IPv6 loopback", "3000/tcp", PortBinding{HostIP: "[::1]", HostPort: "0"}, "[::1]::3000/tcp"},
+		{"fixed without host IP", "3000/tcp", PortBinding{HostPort: "8080"}, "8080:3000/tcp"},
+		{"fixed IPv4", "3000/tcp", PortBinding{HostIP: "127.0.0.1", HostPort: "8080"}, "127.0.0.1:8080:3000/tcp"},
+		{"fixed IPv6", "3000/tcp", PortBinding{HostIP: "[::1]", HostPort: "8080"}, "[::1]:8080:3000/tcp"},
+		{"auto UDP", "3000/udp", PortBinding{HostIP: "127.0.0.1", HostPort: "0"}, "127.0.0.1::3000/udp"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			bindings := PortMap{tc.port: {tc.binding}}
+			want := []string{"--publish", tc.want}
+			if got := portBindingFlags(bindings); !reflect.DeepEqual(got, want) {
+				t.Fatalf("portBindingFlags() = %v, want %v", got, want)
+			}
+			if bindings[tc.port][0] != tc.binding {
+				t.Fatalf("portBindingFlags mutated binding: got %+v, want %+v", bindings[tc.port][0], tc.binding)
+			}
+		})
+	}
+}
+
 func TestUnsupportedIsolateValueRejectsUnrelatedErrors(t *testing.T) {
 	for _, message := range []string{
 		"Error: unsupported bridge network option isolate",

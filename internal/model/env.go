@@ -60,5 +60,9 @@ const (
 // IsReservedEnvKey reports whether key is set by Enclave and must not be
 // overridden by project or extension environment values.
 func IsReservedEnvKey(key string) bool {
-	return key == "PROJECT_DIR" || key == "TOOL" || strings.HasPrefix(key, EnvPrefix)
+	switch key {
+	case "PROJECT_DIR", "HOST_PROJECT_DIR", "TOOL":
+		return true
+	}
+	return strings.HasPrefix(key, EnvPrefix)
 }

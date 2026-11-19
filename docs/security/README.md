@@ -49,8 +49,8 @@ Treat an untrusted repository as executable input and review its devcontainer
 and environment files first:
 
 - The project `.env` is loaded into the container environment, except the
-  reserved `PROJECT_DIR`, `TOOL`, and `ENCLAVE_*` keys, which are ignored with
-  a warning naming the key.
+  reserved `PROJECT_DIR`, `HOST_PROJECT_DIR`, `TOOL`, and `ENCLAVE_*` keys,
+  which are ignored with a warning naming the key.
 - Devcontainer mode reads the project's `devcontainer.json`; filtered mounts,
   [run arguments](../tools.md#devcontainer-support), and lifecycle commands
   still shape the container.

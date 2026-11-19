@@ -178,7 +178,7 @@ func containsString(list []string, want string) bool {
 }
 
 func TestProjectEnvCannotOverrideInternalEnvironment(t *testing.T) {
-	for _, key := range []string{model.EnvPrefix + "RUNTIME_UID_REMAP_DONE", model.EnvAllowRoot, "PROJECT_DIR", "TOOL"} {
+	for _, key := range []string{model.EnvPrefix + "RUNTIME_UID_REMAP_DONE", model.EnvAllowRoot, "PROJECT_DIR", "HOST_PROJECT_DIR", "TOOL"} {
 		t.Run(key, func(t *testing.T) {
 			dir := t.TempDir()
 			if err := os.WriteFile(filepath.Join(dir, ".env"), []byte(key+"=project-value\nVISIBLE=kept\n"), 0o600); err != nil {

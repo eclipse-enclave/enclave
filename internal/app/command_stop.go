@@ -39,7 +39,18 @@ func runStop(opts model.Options, projectDir string) int {
 		return 1
 	}
 
-	return stopSessions(context.Background(), be, opts, projectDir)
+	if hostErr != nil {
+		return stopSessions(context.Background(), be, opts, projectDir)
+	}
+	return stopSessionsAndSweepInboxes(context.Background(), be, opts, projectDir, host.Home)
+}
+
+// stopSessionsAndSweepInboxes stops the selected sessions, then removes the
+// image inbox of every project left without an inbox-enabled session.
+func stopSessionsAndSweepInboxes(ctx context.Context, be backend.Backend, opts model.Options, projectDir string, home string) int {
+	code := stopSessions(ctx, be, opts, projectDir)
+	sweepImageInboxes(ctx, be, home, "")
+	return code
 }
 
 // stopSessions removes the containers a `stop` invocation selects: the single

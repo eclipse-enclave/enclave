@@ -56,7 +56,13 @@ func HostBuildDir(home string) string {
 // project, mounted read-only into its inbox-enabled sessions. Inboxes are
 // per project so that one project's agent never sees another's host images.
 func HostImageInboxDir(home string, projectHash string) string {
-	return filepath.Join(hostCacheRoot(home), "inbox", projectHash)
+	return filepath.Join(HostImageInboxRootDir(home), projectHash)
+}
+
+// HostImageInboxRootDir holds every project's image inbox, one directory per
+// project hash.
+func HostImageInboxRootDir(home string) string {
+	return filepath.Join(hostCacheRoot(home), "inbox")
 }
 
 // EnsureHostImageInboxDir creates a project's image inbox readable only by

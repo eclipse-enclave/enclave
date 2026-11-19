@@ -155,7 +155,11 @@ func runExecutionCommand(input *CommandInput) int {
 		logx.Errorf("%v", err)
 		return 1
 	}
-	return dispatchRunner(input, runner, execTarget)
+	dispatch := func() int { return dispatchRunner(input, runner, execTarget) }
+	if isRunAction(input.Action) && opts.ImageInbox {
+		return runHoldingImageInbox(context.Background(), be, host.Home, project.Hash, !input.Options.Background, dispatch)
+	}
+	return dispatch()
 }
 
 // resolveAdditionalMounts validates the directories to mount besides the

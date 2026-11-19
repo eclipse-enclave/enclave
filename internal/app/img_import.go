@@ -169,6 +169,9 @@ func resolveImportTarget(opts model.Options, projectDir string) (*inboxTarget, e
 	if err != nil {
 		return nil, fmt.Errorf("list sessions: %w", err)
 	}
+	if home, err := config.ResolveHostHome(); err == nil {
+		sweepImageInboxes(context.Background(), be, home, "")
+	}
 	projectHash, err := resolveInboxProject(sessions, sessionTargetProject(projectDir), opts.ImgSession)
 	if err != nil {
 		return nil, err

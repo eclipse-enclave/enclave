@@ -152,7 +152,7 @@ func Run(args []string) int {
 	}
 
 	if parsed.Action == "cleanup" {
-		return runCleanup(parsed.Options.RunOptions, parsed.Options.CleanupOptions)
+		return runCleanup(parsed.Options)
 	}
 
 	if parsed.Action == "ps" {

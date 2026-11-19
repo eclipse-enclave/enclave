@@ -259,6 +259,12 @@ Outside both projects, `img import --file shot.png` fails and lists `a` and
 `enclave ps` picks one. With `notify-send` installed, each of these imports
 also shows a desktop notification naming the project or the error.
 
+Exiting the session of `a` leaves only `b`'s inbox in
+`~/.cache/enclave/inbox/`. To check the lazy sweep, start `a` with
+`--background --image-inbox`, import, and stop its container with
+`docker stop` rather than `enclave stop`; `enclave cleanup --dry-run` then
+lists the inbox. Triggers: [Image inbox lifetime](persistence.md#image-inbox-lifetime).
+
 ## Windows launcher
 
 On Windows, `cmd/enclave` builds `main_windows.go`, which forwards to the Linux

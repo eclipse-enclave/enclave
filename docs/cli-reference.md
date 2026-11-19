@@ -159,6 +159,9 @@ read-only under `/mnt/host-images`. Input must be a PNG or JPEG of at most
 Stdout carries only the container path, so `P=$(enclave img import ...)`
 captures it; status messages go to stderr.
 
+The inbox is removed when the project's last inbox-enabled session ends; see
+[Image inbox lifetime](persistence.md#image-inbox-lifetime).
+
 Only running inbox-enabled sessions receive imports. The first match wins:
 
 1. `--session <target>`: a session name, container name, or container ID

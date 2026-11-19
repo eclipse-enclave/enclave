@@ -229,3 +229,22 @@ func TestImageInboxOptionIsRecordedOnSessions(t *testing.T) {
 	}
 	t.Fatalf("no option named %q", imageInboxOption)
 }
+
+func TestCopiesPathToClipboard(t *testing.T) {
+	tests := []struct {
+		img  model.ImgOptions
+		want bool
+	}{
+		{model.ImgOptions{}, true},
+		{model.ImgOptions{ImgScreenshot: true}, true},
+		{model.ImgOptions{ImgNoClipboard: true}, false},
+		{model.ImgOptions{ImgScreenshot: true, ImgNoClipboard: true}, false},
+		{model.ImgOptions{ImgFile: "shot.png"}, false},
+		{model.ImgOptions{ImgStdin: true}, false},
+	}
+	for _, tt := range tests {
+		if got := copiesPathToClipboard(tt.img); got != tt.want {
+			t.Errorf("copiesPathToClipboard(%+v) = %v, want %v", tt.img, got, tt.want)
+		}
+	}
+}

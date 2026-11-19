@@ -1930,15 +1930,23 @@ func TestParseFeaturesNoneCannotCombineInEitherOrder(t *testing.T) {
 
 func TestImgImportSources(t *testing.T) {
 	for _, tc := range []struct {
-		args      []string
-		wantFile  string
-		wantStdin bool
-		wantErr   bool
+		args            []string
+		wantFile        string
+		wantStdin       bool
+		wantScreenshot  bool
+		wantNoClipboard bool
+		wantErr         bool
 	}{
 		{args: []string{"img", "import", "--file", "shot.png"}, wantFile: "shot.png"},
 		{args: []string{"img", "import", "-"}, wantStdin: true},
-		{args: []string{"img", "import"}, wantErr: true},
+		{args: []string{"img", "import"}},
+		{args: []string{"img", "import", "--screenshot"}, wantScreenshot: true},
+		{args: []string{"img", "import", "--no-clipboard"}, wantNoClipboard: true},
+		{args: []string{"img", "import", "--screenshot", "--no-clipboard"}, wantScreenshot: true, wantNoClipboard: true},
 		{args: []string{"img", "import", "--file", "shot.png", "-"}, wantErr: true},
+		{args: []string{"img", "import", "--screenshot", "--file", "shot.png"}, wantErr: true},
+		{args: []string{"img", "import", "--screenshot", "-"}, wantErr: true},
+		{args: []string{"img", "import", "--no-copy"}, wantErr: true},
 		{args: []string{"img", "import", "shot.png"}, wantErr: true},
 	} {
 		t.Run(strings.Join(tc.args, " "), func(t *testing.T) {
@@ -1952,8 +1960,10 @@ func TestImgImportSources(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if res.Action != ActionImgImport || res.Options.ImgFile != tc.wantFile || res.Options.ImgStdin != tc.wantStdin {
-				t.Fatalf("action/file/stdin = %q/%q/%v", res.Action, res.Options.ImgFile, res.Options.ImgStdin)
+			img := res.Options.ImgOptions
+			if res.Action != ActionImgImport || img.ImgFile != tc.wantFile || img.ImgStdin != tc.wantStdin ||
+				img.ImgScreenshot != tc.wantScreenshot || img.ImgNoClipboard != tc.wantNoClipboard {
+				t.Fatalf("action %q, options %+v", res.Action, img)
 			}
 		})
 	}

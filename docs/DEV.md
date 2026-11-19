@@ -244,6 +244,11 @@ Manual check with the working-copy binary and two projects, `a` and `b`:
 cd a && ../bin/enclave img import --file shot.png  # prints the container path
 ```
 
+With an image on the host clipboard, `../bin/enclave img import` imports it
+and puts the container path on the clipboard; `img import --screenshot`
+does the same for a selected region. Check both under Wayland and X11 (for
+example an Xorg session, or `env -u WAYLAND_DISPLAY` under XWayland).
+
 In the session of `a`, `ls -l "$ENCLAVE_IMAGE_INBOX"` lists the host image
 read-only; in the session of `b` the inbox is empty. `enclave ps --json` shows
 `"image_inbox": true` under `options`, and `--backend qemu --image-inbox`

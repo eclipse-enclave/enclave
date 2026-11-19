@@ -29,11 +29,17 @@ func imgCommand(res *Result) *cobra.Command {
 
 func imgImportCommand(res *Result) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "import (--file <path> | -)",
+		Use:   "import [--screenshot | --file <path> | -]",
 		Short: "Import a PNG or JPEG into the image inbox of a running session's project",
 		Long: `Import a PNG or JPEG host image into a project's image inbox, where the
 project's sessions started with --image-inbox see it read-only under
 /mnt/host-images. The container path is printed on stdout.
+
+Without a source flag the image on the host clipboard is imported;
+--screenshot captures a selected screen region instead. Both need Linux with
+Wayland (wl-clipboard; grim and slurp) or X11 (xclip; maim). For these two
+sources the container path is also copied to the host clipboard unless
+--no-clipboard is given.
 
 The target is the working directory's project if it has a running
 inbox-enabled session, otherwise the only project that has one.`,
@@ -41,21 +47,26 @@ inbox-enabled session, otherwise the only project that has one.`,
 		RunE: func(_ *cobra.Command, args []string) error {
 			if len(args) == 1 {
 				if args[0] != "-" {
-					return fmt.Errorf("unexpected argument %q; pass --file <path>, or - to read from stdin", args[0])
+					return fmt.Errorf("unexpected argument %q; pass --screenshot, --file <path>, or - to read from stdin", args[0])
 				}
 				res.Options.ImgStdin = true
 			}
-			if res.Options.ImgStdin && res.Options.ImgFile != "" {
-				return errors.New("--file and - are mutually exclusive")
+			sources := 0
+			for _, set := range []bool{res.Options.ImgScreenshot, res.Options.ImgFile != "", res.Options.ImgStdin} {
+				if set {
+					sources++
+				}
 			}
-			if !res.Options.ImgStdin && res.Options.ImgFile == "" {
-				return errors.New("no image source; pass --file <path>, or - to read from stdin")
+			if sources > 1 {
+				return errors.New("--screenshot, --file, and - are mutually exclusive")
 			}
 			res.Action = ActionImgImport
 			return nil
 		},
 	}
+	cmd.Flags().BoolVar(&res.Options.ImgScreenshot, "screenshot", false, "Capture a selected screen region instead of reading the clipboard")
 	cmd.Flags().StringVar(&res.Options.ImgFile, "file", "", "Read the host image from a PNG or JPEG file")
+	cmd.Flags().BoolVar(&res.Options.ImgNoClipboard, "no-clipboard", false, "Do not copy the container path to the host clipboard")
 	addOptionFlagsByName(cmd.Flags(), &res.Options, &res.Sources, "backend")
 	return cmd
 }

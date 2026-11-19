@@ -146,15 +146,31 @@ in scope, so not `--all-running`. See
 
 | Command | Description |
 |---------|-------------|
-| `enclave img import --file <path>` | Import a PNG or JPEG into the image inbox of a running session's project and print its container path |
+| `enclave img import` | Import the PNG or JPEG on the host clipboard into the image inbox of a running session's project and print its container path |
+| `enclave img import --screenshot` | The same, for a screen region you select |
+| `enclave img import --file <path>` | The same, reading a PNG or JPEG file |
 | `enclave img import -` | The same, reading the host image from stdin |
 
 The project's sessions started with `--image-inbox` see the host image
 read-only under `/mnt/host-images`. The target is the working directory's
 project if it has a running inbox-enabled session, else the only project that
 has one; anything else is an error. Input must be a PNG or JPEG of at most
-10 MiB whose content matches a `.png`, `.jpg`, or `.jpeg` file extension. `img
-import` takes `--backend` for one invocation.
+10 MiB whose content matches the type the clipboard advertises or the `.png`,
+`.jpg`, or `.jpeg` file extension. The source options are mutually exclusive.
+
+After a clipboard or screenshot import, the container path replaces the host
+image on the clipboard, so the next paste into the session hands the agent
+the path. `--no-clipboard` leaves the clipboard alone; `--file` and `-` never
+touch it. `img import` takes `--backend` for one invocation.
+
+Clipboard and screenshot import need Linux with one of:
+
+| Display server | Clipboard | Screenshot |
+|----------------|-----------|------------|
+| Wayland (`WAYLAND_DISPLAY`) | `wl-clipboard` | `grim`, `slurp` |
+| X11 (`DISPLAY`) | `xclip` | `maim` |
+
+On macOS and WSL, use `--file` or `-`.
 
 ### Devcontainer
 

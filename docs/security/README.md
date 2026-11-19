@@ -35,7 +35,8 @@ not a hardened container-escape boundary.
   [Sensitive mounts](../mounts.md#sensitive-mounts).
 - `--image-inbox` mounts the project's image inbox read-only. Only host
   images the user imports with `enclave img import` land there: PNG or JPEG,
-  content-sniffed, at most 10 MiB, mode 0600. Inboxes are per project, so an
+  content-sniffed against the type the clipboard or file extension
+  advertises, at most 10 MiB, mode 0600. Inboxes are per project, so an
   agent never sees another project's host images. Metadata such as EXIF is
   not stripped.
 - Per-project Enclave config lives outside the worktree, keyed by project

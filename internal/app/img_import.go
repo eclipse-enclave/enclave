@@ -32,8 +32,39 @@ import (
 // inbox-enabled.
 const imageInboxOption = "image_inbox"
 
+// clipboardCaptureTimeout bounds a clipboard read, which is not interactive.
+const clipboardCaptureTimeout = 60 * time.Second
+
+// screenshotCaptureTimeout bounds a region selection the user never finishes.
+const screenshotCaptureTimeout = 10 * time.Minute
+
+// clipboardCopyTimeout bounds handing the container path to the clipboard.
+const clipboardCopyTimeout = 10 * time.Second
+
+type inboxTarget struct {
+	projectHash  string
+	projectLabel string
+}
+
 func runImgImport(opts model.Options, projectDir string) int {
-	data, advertised, err := readImportSource(opts.ImgOptions)
+	img := opts.ImgOptions
+	desktop := systemDesktop()
+
+	// A screenshot is interactive: find out whether it can be taken and
+	// where it goes before the user selects a region.
+	var target *inboxTarget
+	if img.ImgScreenshot {
+		if err := desktop.checkScreenshot(); err != nil {
+			logx.Errorf("%v", err)
+			return 1
+		}
+		var code int
+		if target, code = resolveImportTarget(opts, projectDir); code != 0 {
+			return code
+		}
+	}
+
+	data, advertised, err := acquireHostImage(img, desktop)
 	if err != nil {
 		logx.Errorf("%v", err)
 		return 1
@@ -42,30 +73,18 @@ func runImgImport(opts model.Options, projectDir string) int {
 	// where no engine or session is available.
 	ext, err := validateImage(data, advertised, model.ImageInboxMaxBytes)
 	if err != nil {
-		if opts.ImgFile != "" {
-			err = fmt.Errorf("%s: %w", opts.ImgFile, err)
+		if img.ImgFile != "" {
+			err = fmt.Errorf("%s: %w", img.ImgFile, err)
 		}
 		logx.Errorf("%v", err)
 		return 1
 	}
 
-	if code := requireDocker(); code != 0 {
-		return code
-	}
-	be, err := newListingBackend(opts)
-	if err != nil {
-		logx.Errorf("%v", err)
-		return 1
-	}
-	sessions, err := be.List(context.Background(), backend.SessionFilter{RunningOnly: true})
-	if err != nil {
-		logx.Errorf("list sessions: %v", err)
-		return 1
-	}
-	projectHash, err := resolveInboxProject(sessions, sessionTargetProject(projectDir))
-	if err != nil {
-		logx.Errorf("%v", err)
-		return 1
+	if target == nil {
+		var code int
+		if target, code = resolveImportTarget(opts, projectDir); code != 0 {
+			return code
+		}
 	}
 
 	home, err := config.ResolveHostHome()
@@ -73,7 +92,7 @@ func runImgImport(opts model.Options, projectDir string) int {
 		logx.Errorf("Failed to resolve home directory: %v", err)
 		return 1
 	}
-	containerPath, err := writeHostImage(home, projectHash, data, ext)
+	containerPath, err := writeHostImage(home, target.projectHash, data, ext)
 	if err != nil {
 		logx.Errorf("%v", err)
 		return 1
@@ -81,8 +100,64 @@ func runImgImport(opts model.Options, projectDir string) int {
 	// The bare container path on stdout is the result; the status line goes
 	// to stderr with the other log output.
 	fmt.Println(containerPath)
-	logx.Successf("Imported host image for %s", inboxProjectLabel(sessions, projectHash))
+	logx.Successf("Imported host image for %s", target.projectLabel)
+	if copiesPathToClipboard(img) {
+		ctx, cancel := context.WithTimeout(context.Background(), clipboardCopyTimeout)
+		defer cancel()
+		if err := desktop.copyText(ctx, containerPath); err != nil {
+			logx.Warnf("Could not copy the container path to the clipboard: %v", err)
+		} else {
+			logx.Infof("Container path copied to the clipboard; paste it into the session")
+		}
+	}
 	return 0
+}
+
+// resolveImportTarget finds the project whose image inbox receives the import.
+func resolveImportTarget(opts model.Options, projectDir string) (*inboxTarget, int) {
+	if code := requireDocker(); code != 0 {
+		return nil, code
+	}
+	be, err := newListingBackend(opts)
+	if err != nil {
+		logx.Errorf("%v", err)
+		return nil, 1
+	}
+	sessions, err := be.List(context.Background(), backend.SessionFilter{RunningOnly: true})
+	if err != nil {
+		logx.Errorf("list sessions: %v", err)
+		return nil, 1
+	}
+	projectHash, err := resolveInboxProject(sessions, sessionTargetProject(projectDir))
+	if err != nil {
+		logx.Errorf("%v", err)
+		return nil, 1
+	}
+	return &inboxTarget{projectHash: projectHash, projectLabel: inboxProjectLabel(sessions, projectHash)}, 0
+}
+
+// copiesPathToClipboard reports whether the container path replaces the
+// captured host image on the clipboard, so the next paste in the session
+// hands the agent the path. A file or stdin import leaves the clipboard alone.
+func copiesPathToClipboard(img model.ImgOptions) bool {
+	return !img.ImgNoClipboard && img.ImgFile == "" && !img.ImgStdin
+}
+
+// acquireHostImage reads the host image from the selected source and returns
+// it with the type the source advertises, if any.
+func acquireHostImage(img model.ImgOptions, desktop hostDesktop) ([]byte, string, error) {
+	switch {
+	case img.ImgScreenshot:
+		ctx, cancel := context.WithTimeout(context.Background(), screenshotCaptureTimeout)
+		defer cancel()
+		return desktop.captureScreenshot(ctx)
+	case img.ImgFile != "" || img.ImgStdin:
+		return readImportSource(img)
+	default:
+		ctx, cancel := context.WithTimeout(context.Background(), clipboardCaptureTimeout)
+		defer cancel()
+		return desktop.captureClipboard(ctx)
+	}
 }
 
 // readImportSource reads the host image from --file or stdin and returns it

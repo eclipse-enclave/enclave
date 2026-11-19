@@ -9,8 +9,10 @@ package app
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"strings"
 	"testing"
@@ -266,5 +268,67 @@ func TestCopiesPathToClipboard(t *testing.T) {
 		if got := copiesPathToClipboard(tt.img); got != tt.want {
 			t.Errorf("copiesPathToClipboard(%+v) = %v, want %v", tt.img, got, tt.want)
 		}
+	}
+}
+
+func TestReportImportPrintsOnlyThePathOnStdout(t *testing.T) {
+	const containerPath = model.ContainerImageInboxDir + "/20260101T000000Z-0123abcd.png"
+	const imported = "ok: Imported host image for /work/project"
+	const copiedNotice = "info: Container path copied to the clipboard"
+	tests := []struct {
+		name       string
+		img        model.ImgOptions
+		wantCopied bool
+	}{
+		{"file", model.ImgOptions{ImgFile: "shot.png"}, false},
+		{"stdin", model.ImgOptions{ImgStdin: true}, false},
+		{"clipboard", model.ImgOptions{}, true},
+		{"clipboard without copy", model.ImgOptions{ImgNoClipboard: true}, false},
+		{"screenshot", model.ImgOptions{ImgScreenshot: true}, true},
+		{"screenshot without copy", model.ImgOptions{ImgScreenshot: true, ImgNoClipboard: true}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("NO_COLOR", "1")
+			f := waylandDesktop()
+			stdout, stderr := captureOutput(t, func() {
+				reportImport(tt.img, f.desktop(), containerPath, "/work/project")
+			})
+			if stdout != containerPath+"\n" {
+				t.Errorf("stdout = %q, want only the container path", stdout)
+			}
+			if !strings.Contains(stderr, imported) {
+				t.Errorf("stderr = %q, want it to contain %q", stderr, imported)
+			}
+			if got := strings.Contains(stderr, copiedNotice); got != tt.wantCopied {
+				t.Errorf("stderr = %q, clipboard notice present = %v, want %v", stderr, got, tt.wantCopied)
+			}
+			wantClipboard := map[string]string(nil)
+			if tt.wantCopied {
+				wantClipboard = map[string]string{"wl-copy": containerPath}
+			}
+			if !reflect.DeepEqual(f.copied, wantClipboard) {
+				t.Errorf("clipboard writes = %v, want %v", f.copied, wantClipboard)
+			}
+		})
+	}
+}
+
+func TestReportImportWarnsWhenTheClipboardCopyFails(t *testing.T) {
+	t.Setenv("NO_COLOR", "1")
+	const containerPath = model.ContainerImageInboxDir + "/20260101T000000Z-0123abcd.png"
+	f := waylandDesktop()
+	f.failures["wl-copy"] = errors.New("compositor gone")
+	stdout, stderr := captureOutput(t, func() {
+		reportImport(model.ImgOptions{}, f.desktop(), containerPath, "/work/project")
+	})
+	if stdout != containerPath+"\n" {
+		t.Errorf("stdout = %q, want only the container path", stdout)
+	}
+	if !strings.Contains(stderr, "warn: Could not copy the container path to the clipboard: compositor gone") {
+		t.Errorf("stderr = %q, want the clipboard warning", stderr)
+	}
+	if strings.Contains(stderr, "copied to the clipboard;") {
+		t.Errorf("stderr = %q, want no clipboard success notice", stderr)
 	}
 }

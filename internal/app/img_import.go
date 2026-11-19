@@ -97,20 +97,26 @@ func runImgImport(opts model.Options, projectDir string) int {
 		logx.Errorf("%v", err)
 		return 1
 	}
-	// The bare container path on stdout is the result; the status line goes
-	// to stderr with the other log output.
-	fmt.Println(containerPath)
-	logx.Successf("Imported host image for %s", target.projectLabel)
-	if copiesPathToClipboard(img) {
-		ctx, cancel := context.WithTimeout(context.Background(), clipboardCopyTimeout)
-		defer cancel()
-		if err := desktop.copyText(ctx, containerPath); err != nil {
-			logx.Warnf("Could not copy the container path to the clipboard: %v", err)
-		} else {
-			logx.Infof("Container path copied to the clipboard; paste it into the session")
-		}
-	}
+	reportImport(img, desktop, containerPath, target.projectLabel)
 	return 0
+}
+
+// reportImport prints the bare container path on stdout, so that
+// `P=$(enclave img import ...)` captures exactly the path; every status line
+// goes to stderr.
+func reportImport(img model.ImgOptions, desktop hostDesktop, containerPath string, projectLabel string) {
+	fmt.Println(containerPath)
+	logx.SuccessNoticef("Imported host image for %s", projectLabel)
+	if !copiesPathToClipboard(img) {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), clipboardCopyTimeout)
+	defer cancel()
+	if err := desktop.copyText(ctx, containerPath); err != nil {
+		logx.Warnf("Could not copy the container path to the clipboard: %v", err)
+		return
+	}
+	logx.Noticef("Container path copied to the clipboard; paste it into the session")
 }
 
 // resolveImportTarget finds the project whose image inbox receives the import.

@@ -156,6 +156,8 @@ The project's sessions started with `--image-inbox` see the host image
 read-only under `/mnt/host-images`. Input must be a PNG or JPEG of at most
 10 MiB whose content matches the type the clipboard advertises or the `.png`,
 `.jpg`, or `.jpeg` file extension. The source options are mutually exclusive.
+Stdout carries only the container path, so `P=$(enclave img import ...)`
+captures it; status messages go to stderr.
 
 Only running inbox-enabled sessions receive imports. The first match wins:
 

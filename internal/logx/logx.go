@@ -67,6 +67,11 @@ func Successf(format string, args ...any) {
 	logf(os.Stdout, "ok", ColorGreen, format, args...)
 }
 
+// SuccessNoticef is Successf on stderr, the success counterpart of Noticef.
+func SuccessNoticef(format string, args ...any) {
+	logf(os.Stderr, "ok", ColorGreen, format, args...)
+}
+
 func Errorf(format string, args ...any) {
 	logf(os.Stderr, "error", ColorRed, format, args...)
 }

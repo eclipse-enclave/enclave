@@ -1,0 +1,42 @@
+# Copyright (C) 2026 EclipseSource GmbH and others.
+#
+# This program and the accompanying materials are made available under the
+# terms of the MIT License, which is available in the project root.
+#
+# SPDX-License-Identifier: MIT
+
+summary: Verify the installed enclave package
+require:
+    - enclave
+    - podman
+test: |
+    set -e
+    test_root=$(mktemp -d)
+    trap 'rm -rf "$test_root"' EXIT
+    mkdir -p "$test_root/home" "$test_root/config" "$test_root/state" \
+        "$test_root/cache" "$test_root/data"
+    export HOME="$test_root/home"
+    export XDG_CONFIG_HOME="$test_root/config"
+    export XDG_STATE_HOME="$test_root/state"
+    export XDG_CACHE_HOME="$test_root/cache"
+    export XDG_DATA_HOME="$test_root/data"
+
+    rpm --query enclave
+    podman --version
+
+    if [ "$(id -u)" -eq 0 ]; then
+        if output=$(env -u ENCLAVE_ALLOW_ROOT enclave tools 2>&1); then
+            echo "enclave ran as root without --allow-root" >&2
+            exit 1
+        fi
+        case "$output" in
+            *"refusing to run as root"*) ;;
+            *)
+                printf 'unexpected failure as root:\n%s\n' "$output" >&2
+                exit 1
+                ;;
+        esac
+        enclave --allow-root tools >/dev/null
+    else
+        enclave tools >/dev/null
+    fi

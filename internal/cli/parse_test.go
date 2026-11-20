@@ -485,6 +485,49 @@ func TestParseBuildCacheAndIdentityFlags(t *testing.T) {
 	}
 }
 
+func TestParseRuntimeFlag(t *testing.T) {
+	for _, args := range [][]string{
+		{"--runtime", "runsc"},
+		{"--runtime=runsc"},
+		{"shell", "--runtime", "runsc"},
+		{"continue", "--runtime=runsc"},
+		{"resume", "--runtime", "runsc"},
+		{"devcontainer", "run", "--runtime", "runsc"},
+		{"devcontainer", "shell", "--runtime=runsc"},
+		{"--runtime", "runsc", "--runtime-uid-remap"},
+	} {
+		res, err := Parse(args, config.DefaultOptions())
+		if err != nil {
+			t.Fatalf("Parse(%v): %v", args, err)
+		}
+		if res.Options.Runtime != model.RuntimeRunsc || res.Sources.Runtime != model.SourceCLI {
+			t.Fatalf("Parse(%v) runtime/source = %q/%v", args, res.Options.Runtime, res.Sources.Runtime)
+		}
+		if wantRemap := slices.Contains(args, "--runtime-uid-remap"); res.Options.RuntimeUIDRemap != wantRemap {
+			t.Fatalf("Parse(%v) runtime uid remap = %v, want %v", args, res.Options.RuntimeUIDRemap, wantRemap)
+		}
+	}
+
+	res, err := Parse([]string{"--runtime=runsc"}, config.DefaultOptions())
+	if err != nil {
+		t.Fatal(err)
+	}
+	opts, _, _ := config.ResolveOptionsForTool(res.Options, res.Sources, config.Defaults{}, config.Defaults{Runtime: "kata"}, "")
+	if opts.Runtime != model.RuntimeRunsc {
+		t.Fatalf("config overrode the CLI runtime: %q", opts.Runtime)
+	}
+	opts, _, _ = config.ResolveOptionsForTool(config.DefaultOptions(), model.OptionSources{}, config.Defaults{Runtime: " runsc "}, config.Defaults{}, "")
+	if opts.Runtime != model.RuntimeRunsc || opts.Sources.Runtime != model.SourceGlobal {
+		t.Fatalf("configured runtime/source = %q/%v", opts.Runtime, opts.Sources.Runtime)
+	}
+
+	for _, args := range [][]string{{"--runtime"}, {"exec", "--runtime", "runsc"}, {"ps", "--runtime", "runsc"}} {
+		if _, err := Parse(args, config.DefaultOptions()); err == nil {
+			t.Errorf("expected Parse(%v) to fail", args)
+		}
+	}
+}
+
 func TestParseRejectsRemovedBuildFlags(t *testing.T) {
 	defaults := config.DefaultOptions()
 	for _, flag := range []string{"--image-mode", "--no-agents", "--agent-tools", "--update-agents", "--update-agent", "--build-backend"} {

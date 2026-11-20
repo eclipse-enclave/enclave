@@ -99,6 +99,7 @@ Every key except `tool` and the global-only ones can also be set under
 |-----|-------------|
 | `tool` | Default tool; unset means the first interactive session asks once and saves it ([Tool selection](cli-reference.md#tool-selection)) |
 | `backend` | `auto` (default), `docker`, `podman`, or experimental `qemu`; see [Backends](backends.md) |
+| `runtime` | `runsc` runs the session container under gVisor (podman only); unset uses the engine's default runtime. See [gVisor](backends.md#gvisor-runsc) |
 | `yolo` | YOLO mode (default `true`). Only consulted when the tool profile leaves `yoloEnabled` unset; every bundled CLI agent sets it, so use `--yolo`/`--no-yolo` |
 | `host_config` | `none` (default) or `passthrough`; see [Host config passthrough](tool-config.md#host-config-passthrough) |
 | `tool_overrides.<tool>.host_config_paths` | Passthrough path directives (`default`, `+path`, `-path`, or a list) |

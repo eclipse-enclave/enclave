@@ -100,12 +100,17 @@ type HostConfig struct {
 	// UTSMode is the UTS namespace mode passed as `--uts`; podman sessions use
 	// "container:<gateway>" to share the hostname, which Docker shares with
 	// the network namespace.
-	UTSMode     string
-	SecurityOpt []string
-	Tmpfs       map[string]string
-	CapAdd      []string
-	CapDrop     []string
-	Sysctls     map[string]string
+	UTSMode string
+	// Runtime is the OCI runtime passed as `--runtime`; empty keeps the
+	// engine default. RuntimeFlags go with it as `--runtime-flag`, which
+	// podman passes to that runtime as global options.
+	Runtime      string
+	RuntimeFlags []string
+	SecurityOpt  []string
+	Tmpfs        map[string]string
+	CapAdd       []string
+	CapDrop      []string
+	Sysctls      map[string]string
 }
 
 // NetworkMode is the container network mode (for example "" for the default
@@ -273,6 +278,16 @@ type SystemInfo struct {
 	// leaves them empty, so callers must gate on IsPodman.
 	NetworkBackend        string `json:"-"`
 	NetworkBackendVersion string `json:"-"`
+}
+
+// Rootless reports whether the engine runs rootless.
+func (info SystemInfo) Rootless() bool {
+	for _, option := range info.SecurityOptions {
+		if strings.Contains(option, "name=rootless") {
+			return true
+		}
+	}
+	return false
 }
 
 type FirewallInfo struct{}

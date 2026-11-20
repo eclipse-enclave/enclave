@@ -25,6 +25,7 @@ type Defaults struct {
 	Tool                   string              `json:"tool"`
 	ToolOverrides          map[string]Defaults `json:"tool_overrides"`
 	Backend                string              `json:"backend"`
+	Runtime                string              `json:"runtime"`
 	AutoUpdate             *bool               `json:"auto_update"`
 	UpdateChannel          string              `json:"update_channel"`
 	DisabledCommands       []string            `json:"disabled_commands"`

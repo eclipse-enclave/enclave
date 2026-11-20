@@ -28,6 +28,13 @@ func optionCLIFlags() map[string][]CLIFlag {
 				return nil
 			}),
 		},
+		"runtime": {
+			valueFlag("--runtime", "OCI runtime for the session container: runsc (gVisor; podman backend only; default: the engine's runtime)", "--runtime requires a value (runsc)", func(opts *model.Options, sources *model.OptionSources, value string) error {
+				opts.Runtime = value
+				sources.Runtime = model.SourceCLI
+				return nil
+			}),
+		},
 		"host_config": {
 			valueFlag("--host-config", "Host config reuse: none|passthrough", "--host-config requires a value (none|passthrough)", func(opts *model.Options, sources *model.OptionSources, value string) error {
 				if err := applyHostConfig(opts, value); err != nil {

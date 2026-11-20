@@ -25,6 +25,7 @@ var UpdateChannels = []string{UpdateChannelStable, UpdateChannelRolling}
 type RunOptions struct {
 	Tool                     string
 	Backend                  string
+	Runtime                  string
 	AutoUpdate               bool
 	UpdateChannel            string
 	DisabledCommands         []string
@@ -595,6 +596,9 @@ const (
 	HostConfigNone        = "none"
 	HostConfigPassthrough = "passthrough"
 )
+
+// RuntimeRunsc selects gVisor's runsc as the session container's OCI runtime.
+const RuntimeRunsc = "runsc"
 
 const (
 	SkillsValidationStrict = "strict"

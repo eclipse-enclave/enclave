@@ -28,6 +28,7 @@ func TestMergeOptionSourcesCoversAllFields(t *testing.T) {
 		RunOptionSources: RunOptionSources{
 			Tool:                     SourceCLI,
 			Backend:                  SourceCLI,
+			Runtime:                  SourceCLI,
 			HostConfig:               SourceCLI,
 			SkillsValidation:         SourceCLI,
 			HostConfigPaths:          SourceCLI,

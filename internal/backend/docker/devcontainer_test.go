@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 
@@ -478,4 +479,25 @@ func captureStderr(t *testing.T, fn func()) string {
 		t.Fatalf("close reader: %v", err)
 	}
 	return string(data)
+}
+
+// A repository's devcontainer must not choose or reconfigure the session's OCI
+// runtime: runsc's network=host is what keeps the gateway's rules in force.
+func TestApplyDevcontainerRunArgsIgnoresRuntime(t *testing.T) {
+	for _, runArgs := range [][]string{
+		{"--runtime", "runc"},
+		{"--runtime=runc"},
+		{"--runtime-flag", "network=sandbox"},
+		{"--runtime-flag=network=sandbox"},
+	} {
+		b := newDevcontainerBackend(t.TempDir(), runArgs...)
+		hostConfig := &dockercmd.HostConfig{}
+		applyOCIRuntime(hostConfig, model.RuntimeRunsc, ociRuntimeContext{})
+		captureStderr(t, func() {
+			b.applyDevcontainerRunArgs(&dockercmd.ContainerConfig{}, hostConfig)
+		})
+		if hostConfig.Runtime != model.RuntimeRunsc || !slices.Equal(hostConfig.RuntimeFlags, []string{"network=host"}) {
+			t.Fatalf("runArgs %v changed the runtime to %q %v", runArgs, hostConfig.Runtime, hostConfig.RuntimeFlags)
+		}
+	}
 }

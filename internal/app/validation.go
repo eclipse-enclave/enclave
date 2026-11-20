@@ -130,6 +130,11 @@ func ValidateOptions(opts model.Options, sources model.OptionSources, ctx Valida
 	default:
 		return opts, sources, warnings, fmt.Errorf("--host-config must be %s or %s", model.HostConfigNone, model.HostConfigPassthrough)
 	}
+	switch opts.Runtime {
+	case "", model.RuntimeRunsc:
+	default:
+		return opts, sources, warnings, fmt.Errorf("--runtime must be %s", model.RuntimeRunsc)
+	}
 	switch opts.NetworkLog {
 	case model.NetworkLogCoarse, model.NetworkLogRequests, model.NetworkLogFull:
 	default:
@@ -372,6 +377,9 @@ func ValidateRunOptions(opts model.Options, sources model.OptionSources, ctx Val
 	if !isRunAction(ctx.Action) {
 		return opts, sources, warnings, nil, nil
 	}
+	if err := validateOCIRuntimeBackend(opts.RunOptions, sources); err != nil {
+		return opts, sources, warnings, nil, err
+	}
 	buildConfig, err := resolveBuildConfig(opts.BuildOptions, opts.Tool, project, ctx.Paths.AppRoot)
 	if err != nil {
 		return opts, sources, warnings, nil, err
@@ -381,6 +389,22 @@ func ValidateRunOptions(opts model.Options, sources model.OptionSources, ctx Val
 	}
 	opts.ImageName = buildConfig.ImageName
 	return opts, sources, warnings, &buildConfig, nil
+}
+
+// validateOCIRuntimeBackend rejects a session OCI runtime on any engine but
+// podman rather than ignoring it, so asking for a stronger sandbox never
+// silently yields the default one. It runs for sessions only, once "auto" has
+// resolved: commands that leave the backend unresolved must not report a
+// configured runtime as invalid.
+func validateOCIRuntimeBackend(run model.RunOptions, sources model.OptionSources) error {
+	if run.Runtime == "" || run.Backend == backend.NamePodman {
+		return nil
+	}
+	name := "runtime"
+	if sources.Runtime == model.SourceCLI {
+		name = "--runtime"
+	}
+	return fmt.Errorf("%s %s requires the %s backend; the selected backend is %s", name, run.Runtime, backend.NamePodman, run.Backend)
 }
 
 func validateRuntimeUIDRemapDevcontainer(opts model.Options, buildCfg buildConfig) error {

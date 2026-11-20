@@ -8,6 +8,7 @@ not a hardened container-escape boundary.
 |--------|--------|
 | Rootful Docker | Default; apply [host hardening](host-hardening.md) where the workflow allows |
 | Rootless Podman | Supported with `--backend podman` ([rootless engines](rootless.md)) |
+| Rootless Podman with gVisor | Optional `--runtime runsc`: the session's system calls go to gVisor's Sentry rather than the host kernel ([gVisor](../backends.md#gvisor-runsc)) |
 | Rootless Docker | Not supported ([why](rootless.md)) |
 | QEMU | Experimental, no restricted egress ([below](#network-boundary)) |
 

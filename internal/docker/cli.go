@@ -315,6 +315,12 @@ func buildRunArgs(config *ContainerConfig, hostConfig *HostConfig, name string, 
 		if hostConfig.UTSMode != "" {
 			args = append(args, "--uts", hostConfig.UTSMode)
 		}
+		if hostConfig.Runtime != "" {
+			args = append(args, "--runtime", hostConfig.Runtime)
+			for _, flag := range hostConfig.RuntimeFlags {
+				args = append(args, "--runtime-flag", flag)
+			}
+		}
 		if !hostConfig.NetworkMode.IsEmpty() {
 			args = append(args, "--network", string(hostConfig.NetworkMode))
 		}

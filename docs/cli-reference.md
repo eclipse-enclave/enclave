@@ -205,6 +205,7 @@ See [List options](configuration.md#list-options).
 |------|-------------|
 | `--tool <tool>` | Tool profile for this run (`enclave tools` lists them); see [Tool selection](#tool-selection) |
 | `--backend <backend>` | `auto` (default), `docker`, `podman`, or experimental `qemu`. Management commands that use an engine accept it for one invocation. See [Backends](backends.md) |
+| `--runtime <runsc>` | Run the session container under gVisor; requires the `podman` backend. See [gVisor](backends.md#gvisor-runsc) |
 | `--name <name>` | Named persistent session |
 | `--background` | Detached background session |
 | `-p <port>` | Publish a container port to the host (container → host, e.g. `-p 3002`). Host port `0` (`-p 0:3000`) lets Docker or Podman pick a free port; read it back with `enclave ps --json`. Repeatable, comma-separated list flag for `ports`; `+port` also replaces a configured entry for the same host port |

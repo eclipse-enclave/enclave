@@ -306,6 +306,15 @@ and logs TCP 80/443. User-facing behavior is in [networking.md](networking.md);
 the request path, in both modes, is in
 [network-request-flow.md](runtime/network-request-flow.md).
 
+The gateway's firewall trusts sockets by owner (`--uid-owner` in
+`gateway-entrypoint.sh`): only the dnsmasq user reaches the upstream resolver,
+and only the proxy user skips the 80/443 redirect. Never exempt the gateway's
+root. Under rootless podman, container root in the gateway and in a
+`--runtime runsc` session maps to the same host UID, and gVisor's Sentry owns
+every socket of a runsc session as that UID, so the exemption would let those
+sessions bypass the gateway. For the same reason, a rule cannot tell users
+inside a runsc session apart by UID.
+
 Sidecar lifecycle:
 
 | Situation | Handling |
@@ -477,6 +486,13 @@ Rules for options that need care when changed; the general checklist is in
   joins the gateway's user and network namespaces, keeping host UID/GID on
   bind mounts and avoiding a network namespace owned by a foreign user
   namespace, which fails under runc.
+- `--runtime runsc` reaches only the session container: `applyOCIRuntime` in
+  `internal/backend/docker` adds the runsc flags, and `joinGatewayNamespaces`
+  then joins only the gateway's network namespace, because runsc cannot join
+  a foreign user or UTS namespace. `app.validateOCIRuntimeBackend` rejects a
+  runtime on any other backend once `auto` has resolved. The gateway's owner
+  matches must not exempt container root; see
+  [Network isolation](#network-isolation).
 
 ### Port publishing
 

@@ -15,9 +15,20 @@ jobs:
   - job: copr_build
     trigger: commit
     identifier: main
-    branch: main$
+    branch: main
+    owner: filippor
+    project: enclave
     targets:
       - fedora-all
+  - job: tests
+    trigger: commit
+    identifier: test_main
+    branch: main
+    fmf_path: tests
+    targets: [fedora-latest-stable]
+    notifications:
+      failure_comment:
+        message: "Tests failed on Testing Farm. Results: {{packit_dashboard_url}}"
   - job: copr_build
     trigger: pull_request
     targets: [fedora-latest-stable]
@@ -33,7 +44,7 @@ jobs:
     trigger: release
     identifier: release
     owner: filippor
-    project: tests
+    project: enclave
     targets:
       - fedora-all
 

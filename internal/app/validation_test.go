@@ -900,6 +900,7 @@ func TestValidateOptionsDevcontainerBackends(t *testing.T) {
 		{backend: "docker"},
 		{backend: "podman"},
 		{backend: "qemu", wantErr: true},
+		{backend: "sbx", wantErr: true},
 	} {
 		t.Run(tc.backend, func(t *testing.T) {
 			opts := model.Options{
@@ -928,6 +929,36 @@ func TestValidateOptionsQEMURejectsBackground(t *testing.T) {
 	_, _, _, err := ValidateOptions(opts, model.DefaultOptionSources(), ValidationContext{Action: "run"})
 	if err == nil || !strings.Contains(err.Error(), "--background") {
 		t.Fatalf("expected detached-session rejection, got %v", err)
+	}
+}
+
+func TestValidateOptionsSBXRunsForegroundWithoutGateway(t *testing.T) {
+	opts := model.Options{
+		RunOptions:   model.RunOptions{Backend: "sbx", Tool: "claude"},
+		BuildOptions: model.BuildOptions{ImageName: "test"},
+	}
+	got, _, warnings, err := ValidateOptions(opts, model.DefaultOptionSources(), ValidationContext{Action: "run"})
+	if err != nil {
+		t.Fatalf("expected sbx options to be coerced, got error: %v", err)
+	}
+	if !got.AllowAllNetwork || !got.DisableGateway {
+		t.Errorf("expected sbx to imply --allow-all-network --disable-gateway, got %+v", got.RunOptions)
+	}
+	if got.Slim {
+		t.Error("sbx runs the regular image; --slim must not be implied")
+	}
+	if !strings.Contains(strings.Join(warnings, "\n"), "sbx network policy") {
+		t.Errorf("expected a notice naming the sbx network policy, got warnings: %v", warnings)
+	}
+
+	opts.Background = true
+	if _, _, _, err := ValidateOptions(opts, model.DefaultOptionSources(), ValidationContext{Action: "run"}); err == nil || !strings.Contains(err.Error(), "--background") {
+		t.Fatalf("expected detached-session rejection, got %v", err)
+	}
+	opts.Background = false
+	opts.AllowDomains = []string{"example.com"}
+	if _, _, _, err := ValidateOptions(opts, model.DefaultOptionSources(), ValidationContext{Action: "run"}); err == nil || !strings.Contains(err.Error(), "allowlists") {
+		t.Fatalf("expected allowlist rejection, got %v", err)
 	}
 }
 

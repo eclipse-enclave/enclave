@@ -8,8 +8,10 @@
 package app
 
 import (
+	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -18,6 +20,7 @@ import (
 	"enclave/internal/backend"
 	backenddocker "enclave/internal/backend/docker"
 	backendqemu "enclave/internal/backend/qemu"
+	backendsbx "enclave/internal/backend/sbx"
 	"enclave/internal/cli"
 	"enclave/internal/config"
 	"enclave/internal/docker"
@@ -46,6 +49,40 @@ func qemuBackendOptions(host model.Host, paths model.Paths) backendqemu.Options 
 	return backendqemu.Options{Host: host, Paths: paths}
 }
 
+func sbxBackendOptions(host model.Host, paths model.Paths) backendsbx.Options {
+	stateDir := ""
+	if host.Home != "" {
+		stateDir = filepath.Join(config.HostCacheDir(host.Home), "sbx")
+	}
+	return backendsbx.Options{Host: host, Paths: paths, StateDir: stateDir, Images: hostEngineImages{}}
+}
+
+// hostEngineImages hands images built by the host engine to the sbx backend,
+// keeping engine access at the app level.
+type hostEngineImages struct{}
+
+func (hostEngineImages) Inspect(ctx context.Context, ref string) (backendsbx.ImageConfig, error) {
+	resp, err := docker.ImageInspect(ctx, ref)
+	if err != nil {
+		return backendsbx.ImageConfig{}, err
+	}
+	img := backendsbx.ImageConfig{ID: resp.ID}
+	if resp.Config != nil {
+		img.User = resp.Config.User
+		img.Entrypoint = resp.Config.Entrypoint
+		img.Cmd = resp.Config.Cmd
+	}
+	return img, nil
+}
+
+func (hostEngineImages) Save(ctx context.Context, ref string, path string) error {
+	cmd := exec.CommandContext(ctx, docker.Binary(), "save", "--output", path, ref) // #nosec G204 -- ref is the resolved runtime image name.
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("%s save %s: %s", docker.Binary(), ref, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
 // newListingBackend builds a backend for read-only commands (ps/status/theia)
 // that only enumerate existing sessions and therefore need no resolved host or
 // paths.
@@ -61,6 +98,8 @@ func selectBackend(opts model.Options, dockerOpts backenddocker.Options) (backen
 		return backenddocker.New(dockerOpts), nil
 	case backend.NameQEMU:
 		return backendqemu.New(qemuBackendOptions(dockerOpts.Host, dockerOpts.Paths)), nil
+	case backend.NameSBX:
+		return backendsbx.New(sbxBackendOptions(dockerOpts.Host, dockerOpts.Paths)), nil
 	default:
 		return nil, validateBackendName(name)
 	}
@@ -68,10 +107,10 @@ func selectBackend(opts model.Options, dockerOpts backenddocker.Options) (backen
 
 func validateBackendName(name string) error {
 	switch name {
-	case backend.NameDocker, backend.NamePodman, backend.NameQEMU:
+	case backend.NameDocker, backend.NamePodman, backend.NameQEMU, backend.NameSBX:
 		return nil
 	default:
-		return fmt.Errorf("unsupported backend %q (available: %s, %s, %s)", name, backend.NameDocker, backend.NamePodman, backend.NameQEMU)
+		return fmt.Errorf("unsupported backend %q (available: %s, %s, %s, %s)", name, backend.NameDocker, backend.NamePodman, backend.NameQEMU, backend.NameSBX)
 	}
 }
 

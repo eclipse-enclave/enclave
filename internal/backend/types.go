@@ -25,6 +25,7 @@ const (
 	NameDocker = "docker"
 	NamePodman = "podman"
 	NameQEMU   = "qemu"
+	NameSBX    = "sbx"
 )
 
 type NetworkMode string

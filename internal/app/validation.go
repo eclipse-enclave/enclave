@@ -256,6 +256,13 @@ func coerceQEMURunOptions(opts model.Options, sources model.OptionSources, paths
 	if opts.Background {
 		return opts, nil, fmt.Errorf("qemu backend runs foreground sessions only and cannot start detached; remove --background")
 	}
+	if opts.ImageInbox {
+		hint := "remove --image-inbox"
+		if sources.ImageInbox != model.SourceCLI {
+			hint = "remove image_inbox from config"
+		}
+		return opts, nil, fmt.Errorf("qemu backend does not support the image inbox; %s or use the docker or podman backend", hint)
+	}
 	// Features requested on THIS command line cannot be honored by a tool-only
 	// bundle, so fail loudly. Features coming from config are dropped with a
 	// notice below, so `--backend qemu` still runs.

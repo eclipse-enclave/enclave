@@ -85,7 +85,13 @@ func resolveSessionTarget(ctx context.Context, be backend.Backend, q sessionTarg
 	if requested == "" {
 		return autoSelectSession(sessions, q)
 	}
+	return resolveNamedSession(sessions, requested, q)
+}
 
+// resolveNamedSession resolves an explicit, non-blank session argument among
+// the given candidates: a container name verbatim, then a session name, then a
+// container ID prefix.
+func resolveNamedSession(sessions []backend.Session, requested string, q sessionTargetQuery) (backend.Session, error) {
 	for _, session := range sessions {
 		if session.Ref.Name == requested {
 			return session, nil

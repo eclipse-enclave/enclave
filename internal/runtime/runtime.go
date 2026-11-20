@@ -68,6 +68,10 @@ type Runtime struct {
 	// cached, so the replacement host reaches the allow set too.
 	releaseHostOverrides map[string][]string
 	backend              backend.Backend
+	// releaseImageInboxLock releases the image inbox lock that an
+	// inbox-enabled start holds from creating the inbox until its container
+	// exists; nil while not held.
+	releaseImageInboxLock func()
 }
 
 type ExecutionContext struct {
@@ -217,7 +221,12 @@ func (r *Runtime) acquireSessionStartLock() (func(), error) {
 	if err != nil {
 		return nil, fmt.Errorf("acquire session start lock: %w", err)
 	}
-	return release, nil
+	return func() {
+		if r.releaseImageInboxLock != nil {
+			r.releaseImageInboxLock()
+		}
+		release()
+	}, nil
 }
 
 // Named sessions also share the project/tool gateway config bundle, and
@@ -377,6 +386,9 @@ func (r *Runtime) prepareMounts() (*mountAccumulator, hostGitIdentity, error) {
 		return nil, hostGitIdentity{}, err
 	}
 	r.addSSHMount(mountArgs)
+	if err := r.addImageInboxMount(mountArgs); err != nil {
+		return nil, hostGitIdentity{}, err
+	}
 	if err := r.addCacheMounts(mountArgs); err != nil {
 		return nil, hostGitIdentity{}, err
 	}
@@ -1130,6 +1142,32 @@ func (r *Runtime) addSSHMount(mounts *mountAccumulator) {
 		return
 	}
 	logx.Warnf("SSH not configured. Run '%s ssh-init' to enable SSH operations.", model.AppName)
+}
+
+// addImageInboxMount mounts the project's image inbox read-only. The container
+// can only read host images the user imported on the host; it has no way to
+// add any itself.
+func (r *Runtime) addImageInboxMount(mounts *mountAccumulator) error {
+	if !r.run.ImageInbox {
+		return nil
+	}
+	// Held until the session start lock is released, once the container
+	// exists: a sweep in between would see no session holding the inbox.
+	release, err := util.AcquireFileLock(config.HostImageInboxLockPath(r.host.Home), func() {
+		logx.Infof("Waiting for another enclave command to finish removing image inboxes.")
+	})
+	if err != nil {
+		return fmt.Errorf("acquire image inbox lock: %w", err)
+	}
+	r.releaseImageInboxLock = release
+	inboxDir, err := config.EnsureHostImageInboxDir(r.host.Home, r.project.Hash)
+	if err != nil {
+		return fmt.Errorf("create image inbox: %w", err)
+	}
+	mounts.AddMount(disposableDirMount(inboxDir, model.ContainerImageInboxDir, true))
+	mounts.AddEnv(model.EnvImageInbox, model.ContainerImageInboxDir)
+	logx.Infof("Image inbox mounted read-only at %s", model.ContainerImageInboxDir)
+	return nil
 }
 
 // addUserCommandMount exposes the host session command tree read-only inside

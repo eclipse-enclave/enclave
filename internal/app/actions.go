@@ -50,6 +50,7 @@ var toolFreeActions = map[string]bool{
 	"config":                  true,
 	"extension-list":          true,
 	"features":                true,
+	cli.ActionImgImport:       true,
 	"network-add-domain":      true,
 	"network-remove-domain":   true,
 	"network-set-mode":        true,

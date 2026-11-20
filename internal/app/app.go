@@ -38,8 +38,7 @@ func Run(args []string) int {
 		if parsed.Action == cli.ActionExtensionManage && parsed.ExtRequest != nil {
 			return reportExtensionResults(*parsed.ExtRequest, nil, err)
 		}
-		logx.Errorf("%v", err)
-		return 1
+		return reportStartupError(parsed, "", err)
 	}
 	for _, warning := range parsed.Warnings {
 		logx.Warnf(warning)
@@ -153,7 +152,7 @@ func Run(args []string) int {
 	}
 
 	if parsed.Action == "cleanup" {
-		return runCleanup(parsed.Options.RunOptions, parsed.Options.CleanupOptions)
+		return runCleanup(parsed.Options)
 	}
 
 	if parsed.Action == "ps" {
@@ -166,6 +165,10 @@ func Run(args []string) int {
 
 	if parsed.Action == "attach" {
 		return runAttach(parsed.Options, projectDir)
+	}
+
+	if parsed.Action == cli.ActionImgImport {
+		return runImgImport(parsed.Options, projectDir)
 	}
 
 	if parsed.Action == "review-target" {
@@ -246,6 +249,10 @@ func reportStartupError(parsed cli.Result, projectDir string, err error) int {
 	if parsed.NetworkPrintJSON {
 		resolveProject := func() (model.Project, error) { return config.ResolveProjectFromDir(projectDir) }
 		return writeNetworkPolicyEnvelope(os.Stdout, networkPolicyEnvelope{}, resolveProject, err)
+	}
+	if parsed.Action == cli.ActionImgImport {
+		reportImportFailure(systemDesktop(), err)
+		return 1
 	}
 	logx.Errorf("%v", err)
 	return 1

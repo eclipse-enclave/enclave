@@ -142,6 +142,7 @@ See [Networking](networking.md).
 |-----|-------------|
 | `no_cache`, `no_history` | Disable package caches or shell history |
 | `no_memory` | Disable agent memory; see [Agent memory](runtime/stores.md#agent-memory) |
+| `image_inbox` | Mount the project's image inbox read-only at `/mnt/host-images`; see [Image inbox](image-inbox.md) |
 | `project_mount` | `writable` (default) or `readonly`; see [Mounts](mounts.md) |
 | `worktree_metadata` | `follow` (default), `readonly`, or `none` |
 | `add_dirs`, `add_readonly_dirs` | Additional directories to mount (read-write or read-only) |

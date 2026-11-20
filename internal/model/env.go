@@ -47,6 +47,7 @@ const (
 	EnvGatewayNetworkMode       = EnvPrefix + "GATEWAY_NETWORK_MODE"
 	EnvGatewayCACertPath        = EnvPrefix + "GATEWAY_CA_CERT_PATH"
 	EnvGatewayCABundlePath      = EnvPrefix + "GATEWAY_CA_BUNDLE_PATH"
+	EnvImageInbox               = EnvPrefix + "IMAGE_INBOX"
 	EnvBin                      = EnvPrefix + "BIN"
 	EnvProjectRoot              = EnvPrefix + "PROJECT_ROOT"
 	EnvProjectMount             = EnvPrefix + "PROJECT_MOUNT"

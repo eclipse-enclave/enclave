@@ -52,7 +52,7 @@ func TestBackendFlagOnEngineCommands(t *testing.T) {
 	commands := [][]string{
 		{"ps"}, {"stop"}, {"attach"}, {"exec"},
 		{"update"}, {"theia"}, {"theia-next"}, {"cleanup"}, {"info"},
-		{"auth", "import"}, {"auth", "export"},
+		{"auth", "import"}, {"auth", "export"}, {"img", "import", "-"},
 		{"network", "status"}, {"network", "log"}, {"network", "apply"},
 		{"network", "add-domain", "example.com", "--global"},
 		{"network", "remove-domain", "example.com", "--global"},
@@ -1928,6 +1928,89 @@ func TestParseFeaturesNoneCannotCombineInEitherOrder(t *testing.T) {
 	} {
 		if _, err := Parse(append([]string{"run"}, args...), config.DefaultOptions()); err == nil {
 			t.Errorf("Parse(%v) succeeded, want an error", args)
+		}
+	}
+}
+
+func TestImgImportSources(t *testing.T) {
+	for _, tc := range []struct {
+		args            []string
+		wantFile        string
+		wantStdin       bool
+		wantScreenshot  bool
+		wantNoClipboard bool
+		wantErr         bool
+	}{
+		{args: []string{"img", "import", "--file", "shot.png"}, wantFile: "shot.png"},
+		{args: []string{"img", "import", "-"}, wantStdin: true},
+		{args: []string{"img", "import"}},
+		{args: []string{"img", "import", "--screenshot"}, wantScreenshot: true},
+		{args: []string{"img", "import", "--no-clipboard"}, wantNoClipboard: true},
+		{args: []string{"img", "import", "--screenshot", "--no-clipboard"}, wantScreenshot: true, wantNoClipboard: true},
+		{args: []string{"img", "import", "--file", "shot.png", "-"}, wantErr: true},
+		{args: []string{"img", "import", "--screenshot", "--file", "shot.png"}, wantErr: true},
+		{args: []string{"img", "import", "--screenshot", "-"}, wantErr: true},
+		{args: []string{"img", "import", "--no-copy"}, wantErr: true},
+		{args: []string{"img", "import", "shot.png"}, wantErr: true},
+	} {
+		t.Run(strings.Join(tc.args, " "), func(t *testing.T) {
+			res, err := Parse(tc.args, config.DefaultOptions())
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("expected error, got %+v", res.Options.ImgOptions)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			img := res.Options.ImgOptions
+			if res.Action != ActionImgImport || img.ImgFile != tc.wantFile || img.ImgStdin != tc.wantStdin ||
+				img.ImgScreenshot != tc.wantScreenshot || img.ImgNoClipboard != tc.wantNoClipboard {
+				t.Fatalf("action %q, options %+v", res.Action, img)
+			}
+		})
+	}
+}
+
+func TestImgImportSession(t *testing.T) {
+	res, err := Parse([]string{"img", "import", "--file", "shot.png", "--session", "review"}, config.DefaultOptions())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Options.ImgSession != "review" {
+		t.Fatalf("ImgSession = %q, want review", res.Options.ImgSession)
+	}
+	// A blank value, e.g. from an unset variable in a hotkey binding, must not
+	// fall back to guessing the target.
+	if _, err := Parse([]string{"img", "import", "--session", " "}, config.DefaultOptions()); err == nil {
+		t.Fatal("blank --session accepted")
+	}
+}
+
+func TestImageInboxFlagOnRun(t *testing.T) {
+	res, err := Parse([]string{"run", "--image-inbox"}, config.DefaultOptions())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.Options.ImageInbox || res.Sources.ImageInbox != model.SourceCLI {
+		t.Fatalf("image inbox/source = %v/%v", res.Options.ImageInbox, res.Sources.ImageInbox)
+	}
+}
+
+// An invalid import still reports as one, so that it can notify the desktop.
+func TestImgImportInvalidArgumentsKeepTheAction(t *testing.T) {
+	for _, args := range [][]string{
+		{"img", "import", "--screenshot", "-"},
+		{"img", "import", "shot.png"},
+		{"img", "import", "--session", " "},
+	} {
+		res, err := Parse(args, config.DefaultOptions())
+		if err == nil {
+			t.Fatalf("Parse(%q) accepted", args)
+		}
+		if res.Action != ActionImgImport {
+			t.Errorf("Parse(%q) Action = %q, want %q", args, res.Action, ActionImgImport)
 		}
 	}
 }

@@ -224,7 +224,7 @@ Honored for tools and features.
 
 | Field | Behavior |
 |-------|----------|
-| `environment.variables` | Env vars injected into the container. Enabled features contribute first; the tool spec wins on key conflicts. Keys must be valid POSIX names. Reserved names (`PROJECT_DIR`, `TOOL`, anything prefixed `ENCLAVE_`) are skipped with a warning. |
+| `environment.variables` | Env vars injected into the container. Enabled features contribute first; the tool spec wins on key conflicts. Keys must be valid POSIX names. Reserved names (`PROJECT_DIR`, `HOST_PROJECT_DIR`, `TOOL`, anything prefixed `ENCLAVE_`) are skipped with a warning. |
 | `environment.proxyManaged` | Credential env aliases that receive the gateway placeholder instead of the raw value. Each entry must match a declared `credentials.sources.<id>.env` alias; a typo is a load error. Entries are unioned across the tool spec and all enabled features. See [Placeholders](credentials.md#placeholders). |
 
 ## Network (`network`)

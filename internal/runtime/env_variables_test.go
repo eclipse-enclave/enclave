@@ -8,6 +8,10 @@
 package runtime
 
 import (
+	"io"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"enclave/internal/model"
@@ -32,8 +36,14 @@ func TestBaseMountsIncludesSpecEnvVariables(t *testing.T) {
 		},
 	}
 
-	_, env := r.baseMounts()
+	var env []string
+	warnings := captureStderr(t, func() { _, env = r.baseMounts() })
 
+	for _, key := range []string{"PROJECT_DIR", "TOOL", model.EnvPrefix + "X"} {
+		if !strings.Contains(warnings, "Ignoring environment.variables key \""+key+"\": reserved for Enclave") {
+			t.Fatalf("expected reserved-key warning for %s, got %q", key, warnings)
+		}
+	}
 	if !envSliceContainsKV(env, "LOG_LEVEL", "info") {
 		t.Fatalf("expected LOG_LEVEL=info in base env, got %v", env)
 	}
@@ -171,4 +181,54 @@ func containsString(list []string, want string) bool {
 		}
 	}
 	return false
+}
+
+func TestProjectEnvCannotOverrideInternalEnvironment(t *testing.T) {
+	for _, key := range []string{model.EnvPrefix + "RUNTIME_UID_REMAP_DONE", model.EnvAllowRoot, "PROJECT_DIR", "HOST_PROJECT_DIR", "TOOL"} {
+		t.Run(key, func(t *testing.T) {
+			dir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(dir, ".env"), []byte(key+"=project-value\nVISIBLE=kept\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			r := &Runtime{project: model.Project{Dir: dir}}
+			var values []string
+			warnings := captureStderr(t, func() { values = r.envFileValues() })
+			if len(values) != 1 || values[0] != "VISIBLE=kept" {
+				t.Fatalf("project environment overrides reserved %s: %v", key, values)
+			}
+			if !strings.Contains(warnings, "Ignoring project .env key \""+key+"\": reserved for Enclave") || strings.Contains(warnings, "project-value") {
+				t.Fatalf("warning must name dropped key without its value: %q", warnings)
+			}
+			if summary := captureStderr(t, func() { r.logEnvFileLoaded(nil) }); summary != "" {
+				t.Fatalf("empty filtered environment produced a summary: %q", summary)
+			}
+			summary := captureStderr(t, func() { r.logEnvFileLoaded(values) })
+			if !strings.Contains(summary, "keys: VISIBLE") || strings.Contains(summary, key) || strings.Contains(summary, "kept") {
+				t.Fatalf("summary must list only loaded keys, not ignored keys or values: %q", summary)
+			}
+		})
+	}
+}
+
+func captureStderr(t *testing.T, fn func()) string {
+	t.Helper()
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("create pipe: %v", err)
+	}
+	original := os.Stderr
+	os.Stderr = writer
+	defer func() { os.Stderr = original }()
+
+	fn()
+
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close writer: %v", err)
+	}
+	data, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatalf("read stderr: %v", err)
+	}
+	_ = reader.Close()
+	return string(data)
 }

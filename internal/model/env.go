@@ -7,6 +7,8 @@
 
 package model
 
+import "strings"
+
 const (
 	EnvPrefix = "ENCLAVE_"
 
@@ -54,3 +56,28 @@ const (
 	EnvGitName                  = EnvPrefix + "GIT_NAME"
 	EnvGitEmail                 = EnvPrefix + "GIT_EMAIL"
 )
+
+// IsReservedEnvKey reports whether key is set by Enclave and must not be
+// overridden by project or extension environment values.
+func IsReservedEnvKey(key string) bool {
+	switch key {
+	case "PROJECT_DIR", "HOST_PROJECT_DIR", "TOOL":
+		return true
+	}
+	return strings.HasPrefix(key, EnvPrefix)
+}
+
+// FilterReservedEnv splits KEY=VALUE entries into those Enclave may pass on
+// and the keys it must drop because IsReservedEnvKey reserves them.
+func FilterReservedEnv(values []string) (kept []string, dropped []string) {
+	kept = make([]string, 0, len(values))
+	for _, value := range values {
+		key, _, _ := strings.Cut(value, "=")
+		if IsReservedEnvKey(key) {
+			dropped = append(dropped, key)
+			continue
+		}
+		kept = append(kept, value)
+	}
+	return kept, dropped
+}

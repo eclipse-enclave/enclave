@@ -48,9 +48,13 @@ not a hardened container-escape boundary.
 Treat an untrusted repository as executable input and review its devcontainer
 and environment files first:
 
-- The project `.env` is loaded into the container environment.
+- The project `.env` is loaded into the container environment, except the
+  reserved `PROJECT_DIR`, `HOST_PROJECT_DIR`, `TOOL`, and `ENCLAVE_*` keys,
+  which are ignored with a warning naming the key and its source. Devcontainer
+  `containerEnv` and `runArgs` environment values follow the same rule.
 - Devcontainer mode reads the project's `devcontainer.json`; filtered mounts,
-  run arguments, and lifecycle commands still shape the container.
+  [run arguments](../tools.md#devcontainer-support), and lifecycle commands
+  still shape the container.
 - `commands.initFiles` and `files/workspace` of enabled extensions may write
   into the project under their documented overwrite rules.
 

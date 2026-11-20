@@ -1,0 +1,25 @@
+#!/bin/bash
+# Copyright (C) 2026 EclipseSource GmbH and others.
+#
+# This program and the accompanying materials are made available under the
+# terms of the MIT License, which is available in the project root.
+#
+# SPDX-License-Identifier: MIT
+
+# The one piece of the host protocol a base image carries: mount the control
+# export and run the boot script the host put there. Everything else comes
+# with each boot, so a disk made by an older enclave keeps working.
+
+set -u
+
+# The host exports the directory read-only through virtiofs where its
+# virtiofsd can refuse writes, and through 9p where it cannot.
+modprobe virtiofs 2>/dev/null || true
+modprobe 9pnet_virtio 2>/dev/null || true
+mkdir -p /run/enclave/in
+if ! mount -t virtiofs -o ro,nosuid,nodev enclave-in /run/enclave/in 2>/dev/null &&
+    ! mount -t 9p -o trans=virtio,version=9p2000.L,msize=1048576,ro,nosuid,nodev enclave-in /run/enclave/in; then
+    echo "enclave-vm-bootstrap: no control export; this boot is not an enclave session" >&2
+    exit 0
+fi
+exec /bin/bash /run/enclave/in/boot

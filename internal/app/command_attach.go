@@ -19,7 +19,7 @@ import (
 )
 
 func runAttach(opts model.Options, projectDir string) int {
-	if code := requireDocker(); code != 0 {
+	if code := requireSessionEngine(opts); code != 0 {
 		return code
 	}
 

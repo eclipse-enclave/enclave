@@ -50,7 +50,7 @@ func ValidateOptions(opts model.Options, sources model.OptionSources, ctx Valida
 	if err := validateBackendName(opts.Backend); err != nil {
 		return opts, sources, warnings, err
 	}
-	if opts.Devcontainer && opts.Backend == backend.NameQEMU {
+	if opts.Devcontainer && isVMBackendName(opts.Backend) {
 		return opts, sources, warnings, fmt.Errorf("devcontainer mode requires --backend %s or %s", backend.NameDocker, backend.NamePodman)
 	}
 	normalizedBuildOptions, featureWarnings, normErr := normalizeConfiguredBuildOptions(ctx.Paths, opts, sources.Features)
@@ -67,8 +67,8 @@ func ValidateOptions(opts model.Options, sources model.OptionSources, ctx Valida
 		switch {
 		case opts.Slim:
 			ignoredBy = "--slim"
-		case opts.Backend == backend.NameQEMU && isRunAction(ctx.Action):
-			ignoredBy = "--backend qemu"
+		case isVMBackendName(opts.Backend) && isRunAction(ctx.Action):
+			ignoredBy = "--backend " + opts.Backend
 		}
 		if ignoredBy != "" {
 			var fromCLI unknownFeatureGroups
@@ -90,13 +90,13 @@ func ValidateOptions(opts model.Options, sources model.OptionSources, ctx Valida
 		return opts, sources, warnings, normErr
 	}
 	opts.BuildOptions = normalizedBuildOptions
-	if opts.Backend == backend.NameQEMU && isRunAction(ctx.Action) {
-		var qemuWarnings []string
-		opts, qemuWarnings, err = coerceQEMURunOptions(opts, sources, ctx.Paths)
+	if isVMBackendName(opts.Backend) && isRunAction(ctx.Action) {
+		var vmWarnings []string
+		opts, vmWarnings, err = coerceVMRunOptions(opts, sources, ctx.Paths)
 		if err != nil {
 			return opts, sources, warnings, err
 		}
-		warnings = append(warnings, qemuWarnings...)
+		warnings = append(warnings, vmWarnings...)
 	}
 	if isRunAction(ctx.Action) {
 		if err := validateDisableGateway(opts, sources, ctx); err != nil {
@@ -231,16 +231,17 @@ func optionsAsRun(appCtx *AppContext, opts model.Options, sources model.OptionSo
 	return validated, warnings, nil
 }
 
-// coerceQEMURunOptions aligns run options with what the experimental qemu
-// backend can actually do, so the user doesn't have to pass flags whose only
-// supported value is dictated by the backend. It has no network gateway
-// (Capabilities.RestrictedNetwork is false) and builds tool-only bundles, so
+// coerceVMRunOptions aligns run options with what the experimental qemu and vm
+// backends can actually do, so the user doesn't have to pass flags whose only
+// supported value is dictated by the backend. They have no network gateway
+// (Capabilities.RestrictedNetwork is false) and build tool-only images, so
 // --allow-all-network, --disable-gateway, and --slim are implied rather than
 // required. Requests the backend genuinely cannot satisfy — an allowlist or
 // real features — stay errors. A notice is emitted each run so the absent
 // isolation is never silent.
-func coerceQEMURunOptions(opts model.Options, sources model.OptionSources, paths model.Paths) (model.Options, []string, error) {
-	// An allowlist means "restrict egress", which the qemu backend cannot do;
+func coerceVMRunOptions(opts model.Options, sources model.OptionSources, paths model.Paths) (model.Options, []string, error) {
+	name := opts.Backend
+	// An allowlist means "restrict egress", which a VM backend cannot do;
 	// silently allowing everything would be a security downgrade, so error even
 	// when the allowlist came from config.
 	if len(opts.AllowDomains) > 0 {
@@ -248,19 +249,19 @@ func coerceQEMURunOptions(opts model.Options, sources model.OptionSources, paths
 		if sources.AllowDomains != model.SourceCLI {
 			hint = "remove allow_domains from config"
 		}
-		return opts, nil, fmt.Errorf("qemu backend has no network gateway and cannot restrict network access; %s", hint)
+		return opts, nil, fmt.Errorf("%s backend has no network gateway and cannot restrict network access; %s", name, hint)
 	}
-	// Detached sessions are rejected by the backend only in Start(), which runs
-	// after the (potentially minutes-long) bundle build; fail fast here instead.
+	// qemu rejects detached sessions only in Start(), which runs after the
+	// (potentially minutes-long) bundle build; fail fast here instead.
 	// --background is CLI-only, so there is no config-sourced value to soft-drop.
-	if opts.Background {
-		return opts, nil, fmt.Errorf("qemu backend runs foreground sessions only and cannot start detached; remove --background")
+	if opts.Background && name == backend.NameQEMU {
+		return opts, nil, fmt.Errorf("%s backend runs foreground sessions only and cannot start detached; remove --background", name)
 	}
 	// Features requested on THIS command line cannot be honored by a tool-only
 	// bundle, so fail loudly. Features coming from config are dropped with a
 	// notice below, so `--backend qemu` still runs.
 	if sources.Features == model.SourceCLI && len(opts.Features) > 0 {
-		return opts, nil, fmt.Errorf("qemu backend builds tool-only bundles and cannot install features (%s); pass --features none to run without them", strings.Join(opts.Features, ", "))
+		return opts, nil, fmt.Errorf("%s backend builds tool-only %ss and cannot install features (%s); pass --features none to run without them", name, vmImageNoun(name), strings.Join(opts.Features, ", "))
 	}
 
 	// What a docker run would install for these options (config selections plus
@@ -273,13 +274,22 @@ func coerceQEMURunOptions(opts model.Options, sources model.OptionSources, paths
 	opts.Slim = true
 	opts.Features = []string{}
 
-	warnings := []string{"qemu backend: network isolation is unavailable, implying --allow-all-network --disable-gateway (all outbound network allowed, no network log)"}
+	warnings := []string{name + " backend: network isolation is unavailable, implying --allow-all-network --disable-gateway (all outbound network allowed, no network log)"}
 	if len(dropped) > 0 {
-		warnings = append(warnings, fmt.Sprintf("qemu backend: tool-only bundle, not installing features: %s", strings.Join(dropped, ", ")))
+		warnings = append(warnings, fmt.Sprintf("%s backend: tool-only %s, not installing features: %s", name, vmImageNoun(name), strings.Join(dropped, ", ")))
 	} else {
-		warnings = append(warnings, "qemu backend: tool-only bundle (no features)")
+		warnings = append(warnings, fmt.Sprintf("%s backend: tool-only %s (no features)", name, vmImageNoun(name)))
 	}
 	return opts, warnings, nil
+}
+
+// vmImageNoun is what a VM backend calls its image in messages: qemu boots a
+// bundle, vm a base image.
+func vmImageNoun(name string) string {
+	if name == backend.NameQEMU {
+		return "bundle"
+	}
+	return "base image"
 }
 
 // qemuDroppedFeatures returns the feature names a tool-only qemu bundle skips:

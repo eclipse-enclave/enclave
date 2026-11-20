@@ -3,7 +3,7 @@
 How Enclave's code is organized and how a session comes together. The Go code
 lives in small packages under `internal/` behind a thin CLI entrypoint in
 `cmd/`. Sessions run in Docker or Podman containers, or in an experimental QEMU
-microVM ([backends.md](backends.md)). Build and test commands are in
+microVM or full VM ([backends.md](backends.md)). Build and test commands are in
 [DEV.md](DEV.md).
 
 ## High-level flow
@@ -142,7 +142,7 @@ The network request flow, restricted and unrestricted, has separate
 | [`internal/runtime/runtime.go`](../internal/runtime/runtime.go) | Coordinates mounts, stores, auth, network, and execution through the backend |
 | [`internal/runtime/`](../internal/runtime/) `auth_manager.go`, `volume_manager.go`, `network_manager.go`, `command_builder.go` | Focused runtime concerns |
 | [`internal/runtime/secret_mapping.go`](../internal/runtime/secret_mapping.go) | `SecretMapping`: placeholder release rules passed to the gateway |
-| [`internal/backend/`](../internal/backend/) | Backend-neutral session contract; [`docker/`](../internal/backend/docker/) (also Podman) and [`qemu/`](../internal/backend/qemu/) implement it |
+| [`internal/backend/`](../internal/backend/) | Backend-neutral session contract; [`docker/`](../internal/backend/docker/) (also Podman), [`qemu/`](../internal/backend/qemu/), and [`vm/`](../internal/backend/vm/) implement it; [`vmhost/`](../internal/backend/vmhost/) holds the host-side store, auth-sync, and mount planning code the two VM backends share |
 | [`internal/docker/`](../internal/docker/) | Wraps the Docker or Podman CLI |
 | [`internal/mounts/mounts.go`](../internal/mounts/mounts.go) | Mount path validation, worktrees, port mapping |
 | [`internal/mounts/sensitive.go`](../internal/mounts/sensitive.go) | The sensitive-path rule ([mounts.md](mounts.md#sensitive-mounts)) |
@@ -206,6 +206,7 @@ extensions, hence the `//go:build !windows` on
 | [`runtime-assets/auth-reconcile.sh`](../runtime-assets/auth-reconcile.sh) | Shared auth reconciliation; skips placeholder files, and recognizes custom placeholders via `ENCLAVE_SECRET_PLACEHOLDERS` without real secrets |
 | [`runtime-assets/net.sh`](../runtime-assets/net.sh) | Resolver, host gateway resolution, loopback proxy |
 | [`runtime-assets/microvm/alpine/`](../runtime-assets/microvm/alpine/) | QEMU bundle init and builder |
+| [`runtime-assets/vm/`](../runtime-assets/vm/) | VM backend guest scripts: `base/` provisions a base image, `session/` is sent to the guest on every boot |
 | [`extensions/tools/<tool>/templates/`](../extensions/tools/) | Settings templates baked into the image |
 | [`docs/`](../docs/) | In the build context for agent help under `/usr/share/doc/enclave/`; [`docs/assets/`](../docs/assets/) is excluded in [`.dockerignore`](../.dockerignore) so logo changes cause no rebuild |
 
@@ -256,6 +257,10 @@ QEMU runs foreground, slim, unrestricted sessions in an Alpine microVM. All
 backends realize stores from the shared host layout
 (`internal/backend/hoststore`), so auth, config, and env state are shared
 between containers and microVMs; QEMU mounts them over 9p.
+The `vm` backend runs slim, unrestricted sessions in an Ubuntu guest on a
+persistent qcow2 disk, mounts stores and the project over virtiofs, and starts
+the tool over SSH. Its sessions are files, not containers: a record per
+session says how to reach the VM and what finalization it still owes.
 
 ### User-defined and extension commands
 
@@ -388,6 +393,11 @@ there:
 | `~/.local/state/enclave/projects/<hash>/<tool>/home-config/` | `npmrc`, `yarnrc`, `yarnrc.yml`, `bunfig.toml`, `node_repl_history`, linked as the matching dotfiles in `~` |
 | `~/.local/state/enclave/projects/<hash>/<tool>/config-generated/<key>/` | Generated config source (below) |
 | `${XDG_CACHE_HOME:-~/.cache}/enclave/microvm/<tool>/<hash>/` | QEMU bundles, unless `--image-name` names one |
+| `~/.local/state/enclave/vm/images/`, `~/.local/state/enclave/vm/bases/<tool>/<hash>/` | The `vm` backend's verified cloud image and base images. State, not cache: project disks are overlays on a base |
+| `~/.local/state/enclave/projects/<hash>/<tool>/vm/` | The `vm` backend's disk of one project and tool, its metadata, and the lock a running VM holds |
+| `~/.local/state/enclave/vm/sessions/<id>.json` | The `vm` backend's session records, one per session instance; they hold no environment and no secret |
+| `~/.local/state/enclave/vm/kept/<session>-<id>/` | Guest versions of file mounts that the `vm` backend could not write back to the host file |
+| `~/.local/state/enclave/vm/run/<id>/` | Sockets, SSH identity, and control exports of a detached `vm` session. A foreground session keeps them in `$XDG_RUNTIME_DIR`, which a logout removes; a detached VM outlives the logout. Where either path is too long for a unix socket address, the sockets alone are in a private directory under the system temp directory |
 | `~/.local/state/enclave/locks/` | Cross-process locks: store, skills-mount, extension-install, self-update, and the two below |
 
 The generated config source is rebuilt at startup from built-in settings and

@@ -32,19 +32,54 @@ func (r *Files) ReadDir(name string) ([]os.DirEntry, error) {
 }
 
 func (r *Files) ReadFile(name string) ([]byte, error) {
-	f, err := r.OpenFile(name, os.O_RDONLY|unix.O_NOFOLLOW|unix.O_NONBLOCK, 0)
+	f, _, err := r.openRegular(name)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = f.Close() }()
-	info, err := f.Stat()
+	return io.ReadAll(f)
+}
+
+// ReadFileLimit is ReadFile for a file whose writer is not trusted to keep it
+// small: it fails on more than limit bytes instead of reading them.
+func (r *Files) ReadFileLimit(name string, limit int64) ([]byte, error) {
+	f, info, err := r.openRegular(name)
 	if err != nil {
 		return nil, err
 	}
-	if !info.Mode().IsRegular() {
-		return nil, fmt.Errorf("not a regular store file: %s", name)
+	defer func() { _ = f.Close() }()
+	if info.Size() > limit {
+		return nil, fmt.Errorf("store file %s exceeds %d bytes", name, limit)
 	}
-	return io.ReadAll(f)
+	// The size was a moment ago; the read itself is what is bounded.
+	data, err := io.ReadAll(io.LimitReader(f, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > limit {
+		return nil, fmt.Errorf("store file %s exceeds %d bytes", name, limit)
+	}
+	return data, nil
+}
+
+// openRegular opens name without following a link in its last component or
+// blocking on a FIFO, and checks the opened file itself: a look before the
+// open would say nothing about what a concurrent writer put there since.
+func (r *Files) openRegular(name string) (*os.File, os.FileInfo, error) {
+	f, err := r.OpenFile(name, os.O_RDONLY|unix.O_NOFOLLOW|unix.O_NONBLOCK, 0)
+	if err != nil {
+		return nil, nil, err
+	}
+	info, err := f.Stat()
+	if err != nil {
+		_ = f.Close()
+		return nil, nil, err
+	}
+	if !info.Mode().IsRegular() {
+		_ = f.Close()
+		return nil, nil, fmt.Errorf("not a regular store file: %s", name)
+	}
+	return f, info, nil
 }
 
 func (r *Files) withParent(name string, fn func(int, string) error) error {

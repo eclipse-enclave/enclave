@@ -1,0 +1,157 @@
+#!/bin/bash
+# Copyright (C) 2026 EclipseSource GmbH and others.
+#
+# This program and the accompanying materials are made available under the
+# terms of the MIT License, which is available in the project root.
+#
+# SPDX-License-Identifier: MIT
+
+# Prepares a vm session in the guest. The host writes this script into the
+# control export for every boot; the base image's enclave-vm-bootstrap runs it
+# as root. It mounts every export the host listed and then reports "ready",
+# which the host waits for before it connects. A mount that fails ends the
+# boot with "failed: ...", so the tool never starts on an empty directory in
+# place of a missing mount.
+
+set -u
+
+in=/run/enclave/in
+out=/run/enclave/out
+
+agent_uid=$(id -u agent)
+agent_gid=$(id -g agent)
+
+# virtiofsd runs as the host user and cannot create files for anyone else:
+# what is created inside an export has to be created as the tool user.
+as_agent() {
+    setpriv --reuid "$agent_uid" --regid "$agent_gid" --init-groups -- "$@"
+}
+
+report() {
+    printf '%s\n' "$1" | as_agent tee "$out/boot" >/dev/null
+}
+
+fail() {
+    echo "enclave vm boot: $1" >&2
+    if mountpoint -q "$out"; then
+        report "failed: $1"
+    fi
+    exit 1
+}
+
+# Creates a mount point and the directories above it that are missing. Each
+# new one belongs to the tool user, as the host path it mirrors does: a tool
+# can refuse to work below a directory that someone else owns. Directories
+# that exist are left as they are. Inside an export only the tool user can
+# create anything.
+#
+# No part of the path may be a symbolic link. The guest's disk outlives a
+# session, and a link left on it would take the mount, and the directories
+# made for it, somewhere else. On failure dir_problem says why.
+ensure_dir() {
+    local rest=${1#/} dir="" part
+    dir_problem=""
+    if [ "$rest" = "$1" ]; then
+        dir_problem="not an absolute path"
+        return 1
+    fi
+    while [ -n "$rest" ]; do
+        part=${rest%%/*}
+        if [ "$part" = "$rest" ]; then
+            rest=""
+        else
+            rest=${rest#*/}
+        fi
+        case "$part" in
+            "") continue ;;
+            . | ..)
+                dir_problem="the path is not normalized"
+                return 1
+                ;;
+        esac
+        dir="$dir/$part"
+        if [ -L "$dir" ]; then
+            dir_problem="$dir is a symbolic link"
+            return 1
+        fi
+        [ -d "$dir" ] && continue
+        if mkdir "$dir" 2>/dev/null; then
+            if ! chown -h "$agent_uid:$agent_gid" "$dir"; then
+                # Not left behind: the next boot would take it for a
+                # directory the guest had before, and accept its owner.
+                rmdir "$dir" 2>/dev/null
+                dir_problem="cannot give $dir to the tool user"
+                return 1
+            fi
+        elif ! as_agent mkdir "$dir" 2>/dev/null; then
+            dir_problem="cannot create $dir"
+            return 1
+        fi
+    done
+}
+
+mkdir -p "$out"
+mount -t virtiofs -o nosuid,nodev enclave-out "$out" || {
+    echo "enclave vm boot: cannot mount the control output export" >&2
+    exit 1
+}
+
+install -m 0600 "$in/ssh_host_ed25519_key" /etc/ssh/ssh_host_ed25519_key || fail "cannot install the ssh host key"
+install -m 0644 "$in/ssh_host_ed25519_key.pub" /etc/ssh/ssh_host_ed25519_key.pub || fail "cannot install the ssh host key"
+install -m 0644 "$in/authorized_keys" /run/enclave/authorized_keys || fail "cannot install the session key"
+
+guest_hostname=$(cat "$in/hostname" 2>/dev/null || true)
+if [ -n "$guest_hostname" ] && hostname "$guest_hostname"; then
+    # sudo warns and waits on a hostname that does not resolve.
+    grep -qxF "127.0.1.1 $guest_hostname" /etc/hosts || echo "127.0.1.1 $guest_hostname" >> /etc/hosts
+fi
+
+# A list that cannot be read must not look like an empty one.
+[ -r "$in/mounts.tsv" ] || fail "the host sent no mount list"
+[ -r "$in/files.tsv" ] || fail "the host sent no file mount list"
+
+while IFS=$'\t' read -r transport tag mode cache target; do
+    [ -n "$tag" ] || continue
+    ensure_dir "$target" || fail "cannot create the mount point $target: $dir_problem"
+    case "$transport" in
+        virtiofs)
+            fstype=virtiofs
+            opts="$mode,nosuid,nodev"
+            ;;
+        9p)
+            modprobe 9pnet_virtio 2>/dev/null || true
+            fstype=9p
+            opts="trans=virtio,version=9p2000.L,msize=1048576,nosuid,nodev,$mode"
+            if [ "$cache" = mmap ]; then
+                opts="$opts,cache=mmap"
+            fi
+            ;;
+        *)
+            fail "unknown share transport $transport for $target"
+            ;;
+    esac
+    mount -t "$fstype" -o "$opts" "$tag" "$target" || fail "cannot mount $target ($fstype)"
+done < "$in/mounts.tsv"
+
+# A single file cannot be exported, so the host staged a copy of each in the
+# output export. The copy is bound over its target: what the tool writes goes
+# to the export, not to this disk, where a later session without the mount
+# would still find it, and a file the guest already has at the target is back
+# when the session ends.
+while IFS=$'\t' read -r mode staged target; do
+    [ -n "$target" ] || continue
+    ensure_dir "$(dirname "$target")" || fail "cannot create the directory of $target: $dir_problem"
+    if [ -L "$target" ]; then
+        fail "file mount target $target is a symbolic link"
+    fi
+    if [ -d "$target" ]; then
+        fail "file mount target $target is a directory"
+    fi
+    [ -e "$target" ] || touch "$target" 2>/dev/null || as_agent touch "$target" || fail "cannot create $target"
+    mount --bind "$staged" "$target" || fail "cannot mount the file $target"
+    if [ "$mode" = ro ] && ! mount -o remount,bind,ro "$target"; then
+        fail "cannot make the file $target read-only"
+    fi
+done < "$in/files.tsv"
+
+report ready

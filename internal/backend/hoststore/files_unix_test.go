@@ -321,3 +321,35 @@ func TestOverlayRestoresRemovedUnreadableDirectoriesWhenALaterOneBlocks(t *testi
 		t.Fatalf("generated config published: %v", err)
 	}
 }
+
+func TestReadFileLimitBoundsWhatAnotherPartyWrote(t *testing.T) {
+	dir := t.TempDir()
+	outside := filepath.Join(t.TempDir(), "outside")
+	for path, content := range map[string]string{filepath.Join(dir, "status"): "ready\n", outside: "elsewhere"} {
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Symlink(outside, filepath.Join(dir, "link")); err != nil {
+		t.Fatal(err)
+	}
+	if err := unix.Mkfifo(filepath.Join(dir, "fifo"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	root, err := OpenFiles(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = root.Close() }()
+	if got, err := root.ReadFileLimit("status", 6); err != nil || string(got) != "ready\n" {
+		t.Fatalf("file at the limit: %q, %v", got, err)
+	}
+	if _, err := root.ReadFileLimit("status", 5); err == nil || !strings.Contains(err.Error(), "exceeds 5 bytes") {
+		t.Fatalf("file over the limit: %v", err)
+	}
+	for _, name := range []string{"link", "fifo", "."} {
+		if got, err := root.ReadFileLimit(name, 64); err == nil {
+			t.Fatalf("%s was read as a regular file: %q", name, got)
+		}
+	}
+}

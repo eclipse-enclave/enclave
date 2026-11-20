@@ -95,6 +95,7 @@ Per-project data is stored on the host and reused across sessions:
 | Config/env/auth stores | Host directories under `~/.local/state/enclave/` (bind-mounted; no Docker volumes) |
 | Network log and captures | `~/.local/state/enclave/projects/<project-hash>/<tool>/logs/` (`network.log`; `capture/<session>/` with [full capture](networking.md#full-capture)) |
 | Embedded runtime assets | `~/.cache/enclave/assets/<content-hash>/` |
+| VM disk (`vm` backend) | `~/.local/state/enclave/projects/<project-hash>/<tool>/vm/`, on a base image under `~/.local/state/enclave/vm/`; see [Base image and disk](backends.md#base-image-and-disk) |
 
 macOS paths: [Host directories](configuration.md#host-directories). Store
 lifecycle: [Persistent stores](runtime/stores.md); memory rules:

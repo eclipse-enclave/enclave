@@ -91,9 +91,10 @@ This is the unrestricted session of earlier releases: the tool container is
 attached to the session network directly. `--disable-gateway` requires
 unrestricted mode and never implies it; in restricted mode the run fails.
 
-The experimental `qemu` backend has no restricted egress and no gateway, so it
-always runs unrestricted: selecting it implies `--allow-all-network` and
-`--disable-gateway` with a notice, and `--allow-domain` is rejected.
+The experimental `qemu` and `vm` backends have no restricted egress and no
+gateway, so they always run unrestricted: selecting one implies
+`--allow-all-network` and `--disable-gateway` with a notice, and
+`--allow-domain` is rejected.
 
 ## Adding custom domains
 

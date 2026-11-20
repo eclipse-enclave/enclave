@@ -228,6 +228,14 @@ func (r *Runtime) sessionStartLockName() string {
 }
 
 func (r *Runtime) prepareExecution() (*ExecutionContext, error) {
+	if admitter, ok := r.backend.(backend.SessionAdmitter); ok {
+		// First of all: what follows resets auth files and overlays the
+		// config store, which a running session of this project may be using.
+		meta := backend.SessionMeta{Tool: r.profile.Name, ProjectHash: r.project.Hash}
+		if err := admitter.AdmitSession(context.Background(), meta); err != nil {
+			return nil, err
+		}
+	}
 	config.WriteProjectMarkers(r.host.Home, r.project.Hash, r.project.RealDir)
 	baseContainerName := r.baseContainerName()
 	var containerName string
@@ -853,11 +861,10 @@ func (r *Runtime) backendRequest(ctx *ExecutionContext, detached bool, interacti
 		RuntimeUIDRemap: r.build.RuntimeUIDRemap,
 		Detached:        detached,
 	}
-	if !detached {
-		// Post-run sync only applies to foreground sessions; detached sessions
-		// reconcile via Stop/Remove finalize while the container still exists.
-		req.AuthSync = ctx.AuthSync
-	}
+	// A foreground session is reconciled when it ends. A detached one is
+	// reconciled by Stop or Remove; an engine can read what that needs off the
+	// stopped container, a backend without one has to record it at start.
+	req.AuthSync = ctx.AuthSync
 	// A restricted session's hostname is the gateway's own. An unrestricted
 	// session keeps its hostname; when it joins a gateway's network namespace,
 	// the backend sets it on the gateway.

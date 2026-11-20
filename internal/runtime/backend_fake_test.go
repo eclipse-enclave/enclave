@@ -27,6 +27,7 @@ type fakeBackend struct {
 	prepared       []backend.StorePrep
 	prepareState   backend.StoreState
 	configKeyInUse func(meta backend.SessionMeta, key string) (bool, error)
+	admit          func(meta backend.SessionMeta) error
 }
 
 func (f *fakeBackend) Name() string                { return "fake" }
@@ -68,4 +69,11 @@ func (f *fakeBackend) ConfigStoreKeyInUse(_ context.Context, meta backend.Sessio
 		return false, nil
 	}
 	return f.configKeyInUse(meta, key)
+}
+
+func (f *fakeBackend) AdmitSession(_ context.Context, meta backend.SessionMeta) error {
+	if f.admit == nil {
+		return nil
+	}
+	return f.admit(meta)
 }

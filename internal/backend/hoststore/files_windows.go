@@ -22,6 +22,7 @@ var errNativeStore = errors.New("native Windows stores are unsupported; run encl
 
 func (r *Files) ReadDir(string) ([]os.DirEntry, error)       { return nil, errNativeStore }
 func (r *Files) ReadFile(string) ([]byte, error)             { return nil, errNativeStore }
+func (r *Files) ReadFileLimit(string, int64) ([]byte, error) { return nil, errNativeStore }
 func (r *Files) WriteFile(string, []byte, fs.FileMode) error { return errNativeStore }
 func (r *Files) Readlink(string) (string, error)             { return "", errNativeStore }
 func (r *Files) Symlink(string, string) error                { return errNativeStore }

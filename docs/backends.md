@@ -1,18 +1,19 @@
 # Backends
 
 Which container engine or VM runs a session, how Enclave picks it, and what
-differs between Docker, Podman, and the experimental QEMU backend.
+differs between Docker, Podman, and the experimental QEMU and VM backends.
 
 | Backend | Status | Notes |
 |---------|--------|-------|
 | `docker` | Default | Rootful Docker with buildx. Rootless Docker is not supported; see [Rootless container engines](security/rootless.md) and [Host hardening](security/host-hardening.md) |
 | `podman` | Supported | Podman's Docker-compatible CLI; rootless is the tested configuration |
 | `qemu` | Experimental | Foreground sessions in an x86-64 Alpine microVM, without network restrictions |
+| `vm` | Experimental | Foreground and detached sessions in an x86-64 Ubuntu VM with a persistent disk per project and tool, without network restrictions |
 
 ## Choosing a backend
 
-`backend` (key or `--backend`) is `auto` (default), `docker`, `podman`, or
-`qemu`. Any explicit value disables detection.
+`backend` (key or `--backend`) is `auto` (default), `docker`, `podman`,
+`qemu`, or `vm`. Any explicit value disables detection.
 
 ### Detection
 
@@ -167,3 +168,127 @@ experiments:
 | `ENCLAVE_QEMU_CPU` | `max` | CPU model passed to `-cpu` |
 | `ENCLAVE_QEMU_TRANSPORT` | `pci` | Virtio transport for devices; `mmio` selects virtio-mmio |
 | `ENCLAVE_QEMU_KERNEL_APPEND_EXTRA` | unset | Appended to the guest kernel command line after `console=ttyS0` |
+
+## VM (experimental)
+
+`--backend vm` runs a session in a full QEMU/KVM virtual machine: an Ubuntu
+26.04 guest whose disk persists per project and tool. The project is mounted
+at its host path, and the guest shuts down when the tool exits.
+
+```bash
+enclave run --backend vm                 # foreground
+enclave run --backend vm --background    # detached; prints the session name
+enclave ps --backend vm
+enclave attach --backend vm <name>
+enclave stop --backend vm <name>
+```
+
+| Aspect | Behavior |
+|--------|----------|
+| Network | As for QEMU: implies `--allow-all-network` and `--disable-gateway` with a notice; `--allow-domain` and `allow_domains` from config are rejected |
+| Features | As for QEMU: implies `--slim`; `--features` is rejected and features selected in config are dropped with a notice |
+| Not supported yet | `exec`, restricted egress, HTTP secret release, devcontainers, `--base-image` |
+| Listing | `enclave ps --backend vm` lists VM sessions with status `running` or `exited`; it needs no container engine |
+| Disk | One disk per project and tool, kept between sessions. A second session of the same project and tool is refused while the first VM runs, also if the enclave process that started it is gone |
+| Stores | The same per-tool and per-project host stores as Docker sessions; credentials are synced to the store when the session ends |
+| Host ports | A host port of `0` is rejected. Without a host IP, ports bind `127.0.0.1` |
+| Signals | SIGINT, SIGTERM, or SIGHUP to the enclave process ends the session and shuts the guest down. Enclave still writes back file mounts and syncs credentials |
+
+### Detached VM sessions
+
+A detached session's tool runs on a terminal of its own in the guest (`dtach`),
+and the VM keeps running after `enclave run` returns.
+
+- `attach` joins that terminal. The detach key is one `ctrl-<key>`
+  (`ctrl-\` by default); key sequences such as `ctrl-p,ctrl-q` are rejected.
+  A session started in the foreground cannot be attached from another
+  terminal.
+- `stop` shuts the guest down, writes back file mounts, and syncs
+  credentials. The guest gets at least 30 seconds to shut down before the VM
+  is ended, whatever timeout the command uses for containers. `stop` also
+  stops a foreground session of another terminal, which then finalizes
+  itself.
+- `stop` exits non-zero if the VM could not be stopped or the session could
+  not be finalized. The session then stays listed, and `stop` can be run
+  again.
+- A tool that exits ends its VM. The session stays listed as `exited` under
+  `ps --all` until it is stopped or its name is started again, and the next
+  session of the project finalizes it first.
+- A project and tool have one disk, so one VM session at a time, whatever the
+  session names. A second `run` is refused before it changes any store.
+
+### VM host requirements
+
+The backend needs an x86-64 Linux host with KVM: `/dev/kvm` must be accessible
+to the user, and there is no emulation fallback. It uses these host tools and
+never Docker:
+
+- `qemu-system-x86_64` and `qemu-img`
+- `virtiofsd`, on `PATH` or in `/usr/libexec`, `/usr/lib`, or `/usr/lib/qemu`
+- `ssh` and `ssh-keygen`
+- `cloud-localds`, `genisoimage`, or `xorriso`, only to build a base image
+
+### Base image and disk
+
+The first run for a tool downloads a pinned Ubuntu cloud image, checks its
+SHA-256, boots it once, and lets the guest install the tool. This takes several
+minutes and needs internet access from the guest. The result is a base image
+under `~/.local/state/enclave/vm/bases/<tool>/<hash>/`.
+
+Each project and tool gets a qcow2 disk in
+`~/.local/state/enclave/projects/<project-hash>/<tool>/vm/`. It is an overlay
+on the base it was created on and keeps what the guest changes outside the
+mounts, such as installed packages and files in the guest home.
+
+- A base is never rebuilt in place, because the disks created on it depend on
+  its content. `--rebuild` is ignored with a warning.
+- Changed inputs (the pinned cloud image, image build inputs, provisioning
+  scripts, host UID or GID, disk size) produce a new base for new disks. A
+  project with a disk stays on that disk's base, with a notice, and needs no
+  other base: it also restarts under `--no-rebuild`.
+- Automatic tool updates do not reach an existing disk. The tool has the
+  version installed in the base unless it updates itself in the guest.
+- To start over, remove the project's `vm` directory while no session uses it.
+  `enclave cleanup --all` refuses to run while a VM session uses a disk it
+  would remove.
+- `--image-name <dir>` uses a prebuilt base directory.
+
+### VM mounts
+
+Each directory mount and store is a virtiofs export served by its own
+unprivileged `virtiofsd`. The guest's tool user has the host UID and GID.
+
+- Read-only directories, among them the one that carries the guest's session
+  scripts and keys, are enforced on the host: by `virtiofsd --readonly` where
+  the installed version has it, otherwise through 9p with `readonly=on`.
+- A file mount is a staged copy bound over its target, so its content never
+  lands on the guest's disk. A writable one is written back when the session
+  ends, unless the host file was edited or replaced in the meantime. Enclave
+  then leaves the host file alone, keeps the guest's version under
+  `~/.local/state/enclave/vm/kept/<session>-<id>/`, and reports it as an
+  error.
+- If the guest's version can be neither written back nor kept, the session
+  stays as it is. `enclave stop --backend vm <name>` retries, and the project
+  cannot start another VM session until that has succeeded.
+- Directories the guest lacks above a mount point are created for the tool
+  user. Existing guest directories keep their owner. A symbolic link in the
+  guest anywhere on the path of a mount point fails the session start.
+- A mount the guest cannot establish fails the session start.
+
+### Session terminal
+
+The tool runs on an SSH connection to a port forwarded on `127.0.0.1`, with a
+client key and a guest host key generated for the session. The user's SSH
+configuration, keys, and agent are not used. The command and its environment
+reach the guest in files of a private runtime directory, removed once the tool
+has started.
+
+### VM tuning variables
+
+| Variable | Default | Effect |
+|----------|---------|--------|
+| `ENCLAVE_VM_MEMORY_MIB` | `4096` | Guest memory in MiB |
+| `ENCLAVE_VM_CPUS` | Host CPUs, at most `4` | Guest CPUs |
+| `ENCLAVE_VM_DISK_SIZE` | `40G` | Virtual size of a new base image and the disks created on it |
+| `ENCLAVE_VM_BOOT_TIMEOUT` | `180` | Seconds to wait for the guest to report its mounts |
+| `ENCLAVE_VM_VIRTIOFSD` | unset | Path of the `virtiofsd` binary |

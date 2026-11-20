@@ -100,7 +100,7 @@ func runExecutionCommand(input *CommandInput) int {
 		}
 	}
 
-	resolvedBuildConfig, code := ensureRuntimeImage(input, opts, buildCfg, host, profile)
+	resolvedBuildConfig, code := ensureRuntimeImage(input, opts, buildCfg, host, profile, project)
 	if code != 0 {
 		return code
 	}
@@ -151,9 +151,12 @@ func runExecutionCommand(input *CommandInput) int {
 			return 1
 		}
 	}
-	if err := checkToolInstalled(opts.ImageName, opts.Tool, opts.Shell, opts.Admin); err != nil {
-		logx.Errorf("%v", err)
-		return 1
+	// A vm image is a directory on the host, not something Docker can run.
+	if !isVMBackend(opts) {
+		if err := checkToolInstalled(opts.ImageName, opts.Tool, opts.Shell, opts.Admin); err != nil {
+			logx.Errorf("%v", err)
+			return 1
+		}
 	}
 	return dispatchRunner(input, runner, execTarget)
 }
@@ -240,7 +243,12 @@ func autoBackgroundForIDE(action string, opts model.Options, profile model.Profi
 }
 
 func executionRequiresDocker(action string, opts model.Options) bool {
-	if strings.TrimSpace(opts.Backend) != backend.NameQEMU {
+	switch strings.TrimSpace(opts.Backend) {
+	case backend.NameQEMU:
+	case backend.NameVM:
+		// The base image is provisioned inside the guest; nothing uses Docker.
+		return false
+	default:
 		return true
 	}
 	if isRunAction(action) {
@@ -309,7 +317,7 @@ func runErrorExitCode(err error) int {
 	return 1
 }
 
-func ensureRuntimeImage(input *CommandInput, opts model.Options, buildCfg *buildConfig, host model.Host, profile model.Profile) (buildConfig, int) {
+func ensureRuntimeImage(input *CommandInput, opts model.Options, buildCfg *buildConfig, host model.Host, profile model.Profile, project model.Project) (buildConfig, int) {
 	if !isRunAction(input.Action) {
 		return buildConfig{}, 0
 	}
@@ -321,6 +329,9 @@ func ensureRuntimeImage(input *CommandInput, opts model.Options, buildCfg *build
 	resolved.HashSuffix = appendEffectiveBuildIdentityHashSuffix(resolved.HashSuffix, host, opts.BuildOptions)
 	if isQEMUBackend(opts) {
 		return ensureQEMUBundle(input, opts, resolved, host, profile)
+	}
+	if isVMBackend(opts) {
+		return ensureVMBase(input, opts, resolved, host, project)
 	}
 	logx.Infof("Using image: %s", opts.ImageName)
 	if opts.ForceRebuild {

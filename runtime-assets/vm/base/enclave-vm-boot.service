@@ -1,0 +1,21 @@
+# Copyright (C) 2026 EclipseSource GmbH and others.
+#
+# This program and the accompanying materials are made available under the
+# terms of the MIT License, which is available in the project root.
+#
+# SPDX-License-Identifier: MIT
+
+[Unit]
+Description=Enclave vm session bootstrap
+After=local-fs.target
+Before=ssh.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/enclave-vm-bootstrap
+StandardOutput=journal+console
+StandardError=journal+console
+
+[Install]
+WantedBy=multi-user.target

@@ -80,7 +80,7 @@ func TestResolveBackendWithBothEnginesNonInteractiveUsesDocker(t *testing.T) {
 
 func TestResolveBackendLeavesExplicitChoiceAlone(t *testing.T) {
 	stubBackendResolution(t, []string{backend.NameDocker, backend.NamePodman}, true)
-	for _, name := range []string{backend.NameDocker, backend.NamePodman, backend.NameQEMU} {
+	for _, name := range []string{backend.NameDocker, backend.NamePodman, backend.NameQEMU, backend.NameVM} {
 		opts := model.Options{RunOptions: model.RunOptions{Backend: name}}
 		resolveBackend(&opts, true)
 		if opts.Backend != name {

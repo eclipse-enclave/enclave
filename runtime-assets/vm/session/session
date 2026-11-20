@@ -1,0 +1,108 @@
+#!/bin/bash
+# Copyright (C) 2026 EclipseSource GmbH and others.
+#
+# This program and the accompanying materials are made available under the
+# terms of the MIT License, which is available in the project root.
+#
+# SPDX-License-Identifier: MIT
+
+# Runs the tool of a vm session. The host starts this script over ssh as
+# root, after the boot script reported "ready": on the session's terminal for
+# a foreground session, with "detached" for a detached one, and with "attach"
+# to join a detached session's terminal.
+# What to run comes from the launch payload in the control export, never from
+# the ssh command line. When the tool ends, the script reports the exit code
+# and powers the guest off: the VM lives as long as its tool.
+
+set -u
+
+in=/run/enclave/in
+out=/run/enclave/out
+payload="$in/payload"
+terminal=/run/enclave/session.sock
+
+# A detached session runs this script again under dtach, which gives the tool
+# a terminal that outlives the ssh connection and passes it through raw. An
+# attach joins that terminal; its detach key leaves the tool running.
+case "${1:-}" in
+    detached)
+        exec dtach -n "$terminal" -r winch /bin/bash "$0"
+        ;;
+    attach)
+        exec dtach -a "$terminal" -r winch -e "${2:-^\\}"
+        ;;
+esac
+
+agent_uid=$(id -u agent)
+agent_gid=$(id -g agent)
+
+as_agent() {
+    setpriv --reuid "$agent_uid" --regid "$agent_gid" --init-groups -- "$@"
+}
+
+mapfile -d '' -t argv < "$payload/argv"
+mapfile -d '' -t env_entries < "$payload/env"
+mapfile -t loopback_ports < "$payload/loopback-ports"
+workdir=$(cat "$payload/workdir")
+user=$(cat "$payload/user")
+
+# From here on the host may delete the payload.
+as_agent touch "$out/started"
+
+code=1
+finish() {
+    trap - EXIT HUP TERM
+    printf '%s\n' "$code" | as_agent tee "$out/exit-code" >/dev/null
+    sync
+    systemctl poweroff --no-block
+    exit "$code"
+}
+trap finish EXIT
+trap 'code=129; exit' HUP
+trap 'code=143; exit' TERM
+
+# A port a tool opens on the guest's loopback is published by the host on
+# the guest's interface. Redirect it to loopback.
+redirect_loopback_ports() {
+    local iface port
+    iface=$(ip -o -4 route show default | awk '{print $5; exit}')
+    [ -n "$iface" ] || return 1
+    sysctl -qw net.ipv4.conf.all.route_localnet=1 "net.ipv4.conf.$iface.route_localnet=1" || return 1
+    for port in "$@"; do
+        case "$port" in ("" | *[!0-9]*) continue ;; esac
+        iptables -t nat -A PREROUTING -i "$iface" -p tcp --dport "$port" -j DNAT --to-destination "127.0.0.1:$port" || return 1
+    done
+}
+if [ "${#loopback_ports[@]}" -gt 0 ] && [ -n "${loopback_ports[0]}" ]; then
+    redirect_loopback_ports "${loopback_ports[@]}" ||
+        echo "enclave vm session: loopback port forwarding is unavailable" >&2
+fi
+
+if [ "${#argv[@]}" -eq 0 ]; then
+    echo "enclave vm session: the launch payload has no command" >&2
+    exit
+fi
+
+if [ "$user" = root ]; then
+    home=/root
+    drop=()
+else
+    user=agent
+    home=/home/agent
+    drop=(setpriv --reuid "$agent_uid" --regid "$agent_gid" --init-groups --)
+fi
+
+if [ -n "$workdir" ] && ! cd "$workdir"; then
+    echo "enclave vm session: cannot enter $workdir" >&2
+    exit
+fi
+
+# The request's environment comes last and wins over these defaults.
+"${drop[@]}" env -i \
+    PATH="$home/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
+    HOME="$home" USER="$user" LOGNAME="$user" SHELL=/bin/bash \
+    LANG=en_US.UTF-8 LANGUAGE=en_US:en LC_ALL=en_US.UTF-8 \
+    "${env_entries[@]}" \
+    "${argv[@]}"
+code=$?
+exit

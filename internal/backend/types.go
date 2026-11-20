@@ -25,6 +25,7 @@ const (
 	NameDocker = "docker"
 	NamePodman = "podman"
 	NameQEMU   = "qemu"
+	NameVM     = "vm"
 )
 
 type NetworkMode string
@@ -358,6 +359,23 @@ type ExitedSessionGatewayStopper interface {
 // key, so callers must pass the stable key they would fall back to.
 type ConfigStoreConflictChecker interface {
 	ConfigStoreKeyInUse(ctx context.Context, meta SessionMeta, key string) (bool, error)
+}
+
+// SessionEnder is implemented by backends for which stopping, finalizing and
+// removing a session have to be one operation. A caller that would stop a
+// session and then remove it by name calls EndSession instead: between two
+// calls by name, the name can pass to a new session, and a removal can run
+// ahead of a finalization that someone else still owes.
+type SessionEnder interface {
+	EndSession(ctx context.Context, ref SessionRef, opts StopOptions) error
+}
+
+// SessionAdmitter is implemented by backends on which a project and tool can
+// run only one session at a time. The runtime asks under the session-start
+// lock, before it prepares mounts, stores or auth, so that a refused session
+// has changed nothing a running one uses.
+type SessionAdmitter interface {
+	AdmitSession(ctx context.Context, meta SessionMeta) error
 }
 
 // GatewayInfo is the neutral view of one running network-enforcement gateway.

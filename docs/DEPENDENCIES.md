@@ -32,6 +32,7 @@ These are not Go module dependencies, but Enclave needs them on the host:
 |------|---------|
 | `docker` or `podman` CLI, with a reachable engine | Container backends. Enclave shells out to the CLI rather than linking the Docker Engine SDK |
 | `qemu-system-x86_64`, `cpio` | The experimental `qemu` backend |
+| `qemu-system-x86_64`, `qemu-img`, `virtiofsd`, `ssh`, `ssh-keygen`, and `cloud-localds`, `genisoimage`, or `xorriso` | The experimental `vm` backend |
 
 The `qemu` backend's current Alpine bundle builder also uses Docker as a
 packaging helper. Prebuilt bundles can run without Docker using

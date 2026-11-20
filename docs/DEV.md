@@ -12,7 +12,9 @@ Go 1.24 or newer, Make, and `make build|install|test|lint`. In addition:
 - Releases and most CI jobs build with the `toolchain` in `go.mod`, which `go`
   downloads when the local Go is older. One CI job uses the exact `go`
   directive version with `GOTOOLCHAIN=local`.
-- A running Docker or Podman engine, for runtime testing.
+- A running Docker or Podman engine, for runtime testing. The experimental
+  `vm` backend needs a KVM host instead; see
+  [VM host requirements](backends.md#vm-host-requirements).
 - Linux or macOS. Native Windows is unsupported; use WSL2.
 - `golangci-lint`, `gosec`, and `shellcheck` for `make lint`
   ([Before you commit](#before-you-commit)).

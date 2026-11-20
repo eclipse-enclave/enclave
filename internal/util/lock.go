@@ -49,6 +49,21 @@ func TryAcquireFileLock(path string) (release func(), ok bool, err error) {
 	return lockReleaser(file), true, nil
 }
 
+// TryLockFile is TryAcquireFileLock for a lock that outlives the caller: it
+// returns the locked file, to be inherited by a child process. The lock is
+// held until every process holding the file has closed it, so the caller
+// closes its copy and never unlocks.
+func TryLockFile(path string) (file *os.File, ok bool, err error) {
+	file, locked, err := openAndTryLock(path)
+	if err != nil || !locked {
+		if file != nil {
+			_ = file.Close()
+		}
+		return nil, false, err
+	}
+	return file, true, nil
+}
+
 func openAndTryLock(path string) (*os.File, bool, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, false, err

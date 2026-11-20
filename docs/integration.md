@@ -25,7 +25,7 @@ An array with one object per container (`--all` adds stopped ones):
 | `name`, `tool`, `projectHash` | Container name, tool profile, project hash |
 | `projectDir` | Absolute, resolved project path |
 | `worktree` | Directory (project or linked worktree) the session was started from |
-| `status` | Container status as reported by the engine |
+| `status` | Container status as reported by the engine; `running` or `exited` for the `vm` backend |
 | `createdAt` | RFC 3339, empty if unknown |
 | `sessionName` | The `--name` session name or the auto-assigned `1`, `2`, … |
 | `background` | Whether the session runs detached |

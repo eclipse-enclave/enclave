@@ -17,7 +17,7 @@ Reference documentation for Eclipse Enclave. For a guided introduction, see the
 | Choose a tool, base image, or devcontainer; control rebuilds | [tools.md](tools.md) |
 | Mount extra directories or sensitive paths | [mounts.md](mounts.md) |
 | Understand Git identity and config protection in the sandbox | [git.md](git.md) |
-| Use Podman or the experimental QEMU backend | [backends.md](backends.md) |
+| Use Podman or the experimental QEMU or VM backend | [backends.md](backends.md) |
 | Add my own `enclave <name>` commands | [commands.md](commands.md) |
 | Script Enclave with JSON output | [integration.md](integration.md) |
 | Run Enclave from Windows | [windows.md](windows.md) |

@@ -465,33 +465,43 @@ func hashMergedExtensionFiles(paths model.Paths, selection runtimeImageSelection
 	return hashRuntimeInputFiles(files)
 }
 
-func needsRebuildForSelection(paths model.Paths, buildCfg buildConfig, selection runtimeImageSelection) (bool, string, error) {
+// runtimeImageCombinedHash is the structural hash of a runtime image's build
+// inputs. It reads files only and never asks a container engine.
+func runtimeImageCombinedHash(paths model.Paths, buildCfg buildConfig, selection runtimeImageSelection) (string, error) {
 	// Use empty stamps for hash computation - structure only, not update timestamps.
 	// Actual stamps are embedded during buildImage for per-tool cache invalidation.
 	featureInstalls, err := resolveFeatureInstalls(paths, selection.Features, false)
 	if err != nil {
-		return false, "", err
+		return "", err
 	}
 	dockerfileContent, err := renderEngineDockerfile(paths.Dockerfile, selection.Tools, featureInstalls, nil, nil)
 	if err != nil {
-		return false, "", err
+		return "", err
 	}
 	dockerfileHash := util.HashString(dockerfileContent)
 	entrypointHash, err := util.HashFile(paths.Entrypoint)
 	if err != nil {
-		return false, "", err
+		return "", err
 	}
 	extensionsHash, err := hashMergedExtensionFiles(paths, selection)
 	if err != nil {
-		return false, "", err
+		return "", err
 	}
 	staticHash, err := hashRuntimeImageStaticFiles(paths)
 	if err != nil {
-		return false, "", err
+		return "", err
 	}
 	combinedHash := dockerfileHash + "-" + entrypointHash + "-" + extensionsHash + "-" + staticHash
 	if buildCfg.HashSuffix != "" {
 		combinedHash += "-" + buildCfg.HashSuffix
+	}
+	return combinedHash, nil
+}
+
+func needsRebuildForSelection(paths model.Paths, buildCfg buildConfig, selection runtimeImageSelection) (bool, string, error) {
+	combinedHash, err := runtimeImageCombinedHash(paths, buildCfg, selection)
+	if err != nil {
+		return false, "", err
 	}
 
 	inspect, err := docker.ImageInspect(context.Background(), buildCfg.ImageName)

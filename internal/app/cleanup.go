@@ -19,6 +19,7 @@ import (
 	"time"
 
 	backenddocker "enclave/internal/backend/docker"
+	backendvm "enclave/internal/backend/vm"
 	"enclave/internal/config"
 	"enclave/internal/docker"
 	"enclave/internal/logx"
@@ -168,7 +169,16 @@ func runCleanup(run model.RunOptions, cleanup model.CleanupOptions) int {
 		return 0
 	}
 
-	cleanupDirs(dirPaths)
+	// A cleanup removes the disk of a vm session whichever backend it was
+	// invoked for, so it never runs under a live one.
+	removed := make([]string, 0, len(dirPaths))
+	for _, dir := range dirPaths {
+		removed = append(removed, dir.Path)
+	}
+	if err := backendvm.RemoveUnlessDiskInUse(home, removed, func() { cleanupDirs(dirPaths) }); err != nil {
+		logx.Errorf("%v", err)
+		return 1
+	}
 	cleanupBuildCache(cleanup)
 
 	logx.Successf("Cleanup complete")

@@ -21,7 +21,7 @@ import (
 func TestStopContainerFinalizesThenForceRemovesOnFinalizeError(t *testing.T) {
 	be := &stopTestBackend{stopErr: errors.New("finalize failed")}
 
-	stopContainer(be, "managed")
+	stopContainer(be, backend.SessionRef{Name: "managed", ID: "0123456789ab"})
 
 	if !be.stopCalled {
 		t.Fatal("Stop was not called")

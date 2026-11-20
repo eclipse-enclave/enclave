@@ -52,15 +52,21 @@ func hashRuntimeInputFiles(files []mergedExtensionFile) (string, error) {
 // key, editing the builder or init would leave stamped bundles marked current
 // and never rebuilt.
 func qemuBundleAssetHash(appRoot string) (string, error) {
+	return runtimeAssetDirHash(appRoot, "microvm")
+}
+
+// runtimeAssetDirHash is the content hash of one directory under
+// runtime-assets. A missing directory hashes as the empty set.
+func runtimeAssetDirHash(appRoot string, rel string) (string, error) {
 	if strings.TrimSpace(appRoot) == "" {
-		return "", fmt.Errorf("qemu bundle asset hash: empty app root")
+		return "", fmt.Errorf("runtime asset hash: empty app root")
 	}
-	root := filepath.Join(appRoot, "runtime-assets", "microvm")
+	root := filepath.Join(appRoot, "runtime-assets", filepath.FromSlash(rel))
 	var files []mergedExtensionFile
 	err := filepath.WalkDir(root, func(path string, d os.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			if os.IsNotExist(walkErr) {
-				return nil // no microVM assets: hash the empty set deterministically
+				return nil
 			}
 			return walkErr
 		}
@@ -86,7 +92,7 @@ func qemuBundleAssetHash(appRoot string) (string, error) {
 		return nil
 	})
 	if err != nil {
-		return "", fmt.Errorf("hash qemu bundle assets: %w", err)
+		return "", fmt.Errorf("hash runtime assets %s: %w", rel, err)
 	}
 	sort.Slice(files, func(i, j int) bool {
 		return files[i].RelativePath < files[j].RelativePath

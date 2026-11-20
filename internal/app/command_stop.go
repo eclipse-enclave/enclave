@@ -18,7 +18,7 @@ import (
 )
 
 func runStop(opts model.Options, projectDir string) int {
-	if code := requireDocker(); code != 0 {
+	if code := requireSessionEngine(opts); code != 0 {
 		return code
 	}
 
@@ -61,7 +61,9 @@ func stopSessions(ctx context.Context, be backend.Backend, opts model.Options, p
 			logx.Errorf("%v", err)
 			return 1
 		}
-		stopContainer(be, session.Ref.Name)
+		if !stopContainer(be, session.Ref) {
+			return 1
+		}
 		return 0
 	}
 
@@ -85,15 +87,33 @@ func stopSessions(ctx context.Context, be backend.Backend, opts model.Options, p
 		return 0
 	}
 
+	code := 0
 	for _, session := range sessions {
-		stopContainer(be, session.Ref.Name)
+		if !stopContainer(be, session.Ref) {
+			code = 1
+		}
 	}
-	return 0
+	return code
 }
 
-func stopContainer(be backend.Backend, name string) {
+// stopContainer stops, finalizes and removes one session. It reports failure
+// only for a backend that ends a session in one operation: there an error
+// means the session still runs or still owes its finalization, and `stop`
+// must not exit as if it were done. For the container engines a failure stays
+// the warning it has always been.
+func stopContainer(be backend.Backend, selected backend.SessionRef) bool {
 	timeout := 10 * time.Second
+	name := selected.Name
 	logx.Infof("Stopping container: %s", name)
+	if ender, ok := be.(backend.SessionEnder); ok {
+		// The whole reference, ID included: the session that was selected,
+		// not whichever one has its name by the time this runs.
+		if err := ender.EndSession(context.Background(), selected, backend.StopOptions{Finalize: true, Timeout: timeout}); err != nil {
+			logx.Errorf("Failed to stop/finalize container %s: %v", name, err)
+			return false
+		}
+		return true
+	}
 	ref := backend.SessionRef{Name: name}
 	if err := be.Stop(context.Background(), ref, backend.StopOptions{Finalize: true, Timeout: timeout}); err != nil {
 		logx.Warnf("Failed to stop/finalize container %s: %v", name, err)
@@ -102,9 +122,10 @@ func stopContainer(be backend.Backend, name string) {
 		if err := remover.RemoveWithoutFinalize(context.Background(), ref); err != nil {
 			logx.Warnf("Failed to remove container %s: %v", name, err)
 		}
-		return
+		return true
 	}
 	if err := be.Remove(context.Background(), ref); err != nil {
 		logx.Warnf("Failed to remove container %s: %v", name, err)
 	}
+	return true
 }

@@ -98,7 +98,7 @@ Every key except `tool` and the global-only ones can also be set under
 | Key | Description |
 |-----|-------------|
 | `tool` | Default tool; unset means the first interactive session asks once and saves it ([Tool selection](cli-reference.md#tool-selection)) |
-| `backend` | `auto` (default), `docker`, `podman`, or experimental `qemu`; see [Backends](backends.md) |
+| `backend` | `auto` (default), `docker`, `podman`, or experimental `qemu` or `vm`; see [Backends](backends.md) |
 | `yolo` | YOLO mode (default `true`). Only consulted when the tool profile leaves `yoloEnabled` unset; every bundled CLI agent sets it, so use `--yolo`/`--no-yolo` |
 | `host_config` | `none` (default) or `passthrough`; see [Host config passthrough](tool-config.md#host-config-passthrough) |
 | `tool_overrides.<tool>.host_config_paths` | Passthrough path directives (`default`, `+path`, `-path`, or a list) |
@@ -287,6 +287,7 @@ names. `host_config_paths` resolution:
 | `ENCLAVE_HOME` | Point asset discovery at a specific repo checkout |
 | `ENCLAVE_LOG_LEVEL` | `info` (default) or `debug` |
 | `ENCLAVE_QEMU_CPU`, `ENCLAVE_QEMU_TRANSPORT`, `ENCLAVE_QEMU_KERNEL_APPEND_EXTRA` | QEMU backend tuning; see [Backends](backends.md#tuning-variables) |
+| `ENCLAVE_VM_MEMORY_MIB`, `ENCLAVE_VM_CPUS`, `ENCLAVE_VM_DISK_SIZE`, `ENCLAVE_VM_BOOT_TIMEOUT`, `ENCLAVE_VM_VIRTIOFSD` | VM backend tuning; see [Backends](backends.md#vm-tuning-variables) |
 | `ENCLAVE_AGENT_UPDATE_INTERVAL_HOURS` | Hours after a tool's last automatic update before `check-update.sh` may probe again (`0` = always) |
 | `ENCLAVE_NO_REBUILD` | `1` suppresses session image/bundle builds and update probes; see [Suppressing rebuilds](tools.md#suppressing-rebuilds) |
 | `ENCLAVE_DEVCONTAINER_REWRITE_VARS` | Extra env var names (comma-separated) for devcontainer home-path normalization |

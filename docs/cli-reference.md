@@ -204,7 +204,7 @@ See [List options](configuration.md#list-options).
 | Flag | Description |
 |------|-------------|
 | `--tool <tool>` | Tool profile for this run (`enclave tools` lists them); see [Tool selection](#tool-selection) |
-| `--backend <backend>` | `auto` (default), `docker`, `podman`, or experimental `qemu`. Management commands that use an engine accept it for one invocation. See [Backends](backends.md) |
+| `--backend <backend>` | `auto` (default), `docker`, `podman`, or experimental `qemu` or `vm`. Management commands that use an engine accept it for one invocation. See [Backends](backends.md) |
 | `--name <name>` | Named persistent session |
 | `--background` | Detached background session |
 | `-p <port>` | Publish a container port to the host (container → host, e.g. `-p 3002`). Host port `0` (`-p 0:3000`) lets Docker pick a free port; read it back with `enclave ps --json`. Repeatable, comma-separated list flag for `ports`; `+port` also replaces a configured entry for the same host port |
@@ -321,7 +321,7 @@ saves the answer as `"tool"` in `~/.config/enclave/config.json`.
 |-------|-----|
 | Running as root, `--allow-root` | [Installation](install.md#running-as-root) |
 | Sensitive mounts and exceptions | [Mounts](mounts.md#sensitive-mounts) |
-| Backend detection, Podman, QEMU | [Backends](backends.md) |
+| Backend detection, Podman, QEMU, VM | [Backends](backends.md) |
 | Session names, signals, detach | [Sessions](persistence.md#sessions) |
 | User-defined `enclave <name>` commands | [Commands](commands.md) |
 | `self-update` and release channels | [Updating](install.md#updating) |

@@ -18,6 +18,7 @@ import (
 	"enclave/internal/backend"
 	backenddocker "enclave/internal/backend/docker"
 	backendqemu "enclave/internal/backend/qemu"
+	backendvm "enclave/internal/backend/vm"
 	"enclave/internal/cli"
 	"enclave/internal/config"
 	"enclave/internal/docker"
@@ -46,6 +47,24 @@ func qemuBackendOptions(host model.Host, paths model.Paths) backendqemu.Options 
 	return backendqemu.Options{Host: host, Paths: paths}
 }
 
+// requireSessionEngine checks what a session-management command needs before
+// it can ask its backend. The vm backend finds its sessions in files and VMs,
+// so it needs no container engine.
+func requireSessionEngine(opts model.Options) int {
+	if strings.TrimSpace(opts.Backend) == backend.NameVM {
+		return 0
+	}
+	return requireDocker()
+}
+
+// isVMBackendName reports the backends that run a session in a virtual
+// machine. They share what a VM cannot do yet: no gateway, so no network
+// restrictions, and a tool-only image without features or devcontainers.
+func isVMBackendName(name string) bool {
+	name = strings.TrimSpace(name)
+	return name == backend.NameQEMU || name == backend.NameVM
+}
+
 // newListingBackend builds a backend for read-only commands (ps/status/theia)
 // that only enumerate existing sessions and therefore need no resolved host or
 // paths.
@@ -61,6 +80,8 @@ func selectBackend(opts model.Options, dockerOpts backenddocker.Options) (backen
 		return backenddocker.New(dockerOpts), nil
 	case backend.NameQEMU:
 		return backendqemu.New(qemuBackendOptions(dockerOpts.Host, dockerOpts.Paths)), nil
+	case backend.NameVM:
+		return backendvm.New(backendvm.Options{Host: dockerOpts.Host, Paths: dockerOpts.Paths}), nil
 	default:
 		return nil, validateBackendName(name)
 	}
@@ -68,10 +89,10 @@ func selectBackend(opts model.Options, dockerOpts backenddocker.Options) (backen
 
 func validateBackendName(name string) error {
 	switch name {
-	case backend.NameDocker, backend.NamePodman, backend.NameQEMU:
+	case backend.NameDocker, backend.NamePodman, backend.NameQEMU, backend.NameVM:
 		return nil
 	default:
-		return fmt.Errorf("unsupported backend %q (available: %s, %s, %s)", name, backend.NameDocker, backend.NamePodman, backend.NameQEMU)
+		return fmt.Errorf("unsupported backend %q (available: %s, %s, %s, %s)", name, backend.NameDocker, backend.NamePodman, backend.NameQEMU, backend.NameVM)
 	}
 }
 

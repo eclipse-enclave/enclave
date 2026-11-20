@@ -78,9 +78,12 @@ type psJSONNetwork struct {
 }
 
 func runPS(opts model.Options) int {
-	if err := psCheckDocker(); err != nil {
-		logx.Errorf(err.Error())
-		return 1
+	// The vm backend lists its sessions without a container engine.
+	if strings.TrimSpace(opts.Backend) != backend.NameVM {
+		if err := psCheckDocker(); err != nil {
+			logx.Errorf(err.Error())
+			return 1
+		}
 	}
 
 	sessions, err := psSessionList(context.Background(), opts)

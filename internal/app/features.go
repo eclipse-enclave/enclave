@@ -12,7 +12,6 @@ import (
 	"os"
 	"strings"
 
-	"enclave/internal/backend"
 	"enclave/internal/config"
 	"enclave/internal/extinstall"
 	"enclave/internal/logx"
@@ -66,8 +65,8 @@ func runFeatures(ctx *AppContext, req *extinstall.Request, opts model.Options, s
 		switch {
 		case enabled[feature.Name]:
 			fmt.Printf("✓ %s%s\n", feature.Name, suffix)
-		case validated && run.Backend == backend.NameQEMU:
-			fmt.Printf("✗ %s%s (disabled by qemu backend%s)\n", feature.Name, suffix, fromSource(sources.Backend, ctx.ProjectDir))
+		case validated && isVMBackendName(run.Backend):
+			fmt.Printf("✗ %s%s (disabled by %s backend%s)\n", feature.Name, suffix, run.Backend, fromSource(sources.Backend, ctx.ProjectDir))
 		case run.Slim:
 			fmt.Printf("✗ %s%s (disabled by --slim%s)\n", feature.Name, suffix, fromSource(sources.Slim, ctx.ProjectDir))
 		case featuresDisabled(run.BuildOptions):

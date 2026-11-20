@@ -145,6 +145,18 @@ func HostProjectToolDir(home string, projectHash string, tool string) string {
 	return filepath.Join(HostProjectDir(home, projectHash), tool)
 }
 
+// HostVMDir holds the vm backend's cloud images and prewarmed bases. Project
+// disks are qcow2 overlays on those bases, so they are state, not cache.
+func HostVMDir(home string) string {
+	return filepath.Join(hostStateRoot(home), "vm")
+}
+
+// HostProjectVMDir holds the vm backend's persistent disk of one project and
+// tool.
+func HostProjectVMDir(home string, projectHash string, tool string) string {
+	return filepath.Join(HostProjectToolDir(home, projectHash, tool), "vm")
+}
+
 func HostProjectHistoryDir(home string, projectHash string, tool string) string {
 	return filepath.Join(HostProjectToolDir(home, projectHash, tool), "history")
 }

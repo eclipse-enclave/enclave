@@ -128,30 +128,30 @@ func runInfo(ctx *AppContext, opts model.Options) int {
 	if projectStateDir != "" {
 		fmt.Printf("Project State Dir: %s\n", projectStateDir)
 	}
-	printFileStatus("Global Secrets File", globalSecretsFile)
-	printFileStatus("Global Tool Secrets File", globalSecretsToolFile)
-	printFileStatus("Project Secrets File", projectSecretsFile)
+	fmt.Printf("Secrets Files (later layers override earlier ones):\n")
+	fmt.Printf("  Global: %s\n", secretsFileDisplay(globalSecretsFile))
+	fmt.Printf("  Global Tool: %s\n", secretsFileDisplay(globalSecretsToolFile))
+	fmt.Printf("  Project: %s\n", secretsFileDisplay(projectSecretsFile))
 
 	return 0
 }
 
-// printFileStatus prints a labeled file path and whether the file exists. An
-// empty path means the home directory could not be resolved.
-func printFileStatus(label string, path string) {
+// secretsFileDisplay renders a secrets file path with its status, falling back
+// to a marker when the home directory could not be resolved.
+func secretsFileDisplay(path string) string {
 	if path == "" {
-		fmt.Printf("%s: unavailable\n", label)
-		return
+		return "unavailable"
 	}
 	info, err := os.Stat(path)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
-		fmt.Printf("%s: %s (missing)\n", label, path)
+		return path + " (missing)"
 	case err != nil:
-		fmt.Printf("%s: %s (unreadable: %v)\n", label, path, err)
+		return fmt.Sprintf("%s (unreadable: %v)", path, err)
 	case info.IsDir():
-		fmt.Printf("%s: %s (not a file)\n", label, path)
+		return path + " (not a file)"
 	default:
-		fmt.Printf("%s: %s\n", label, path)
+		return path
 	}
 }
 

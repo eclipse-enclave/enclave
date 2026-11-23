@@ -8,7 +8,9 @@
 package app
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"strings"
 
@@ -41,11 +43,14 @@ func runInfo(ctx *AppContext, opts model.Options) int {
 		}
 	}
 
-	var projectOverridesDir, projectStateDir string
+	var projectOverridesDir, projectStateDir, globalSecretsFile, globalSecretsToolFile, projectSecretsFile string
 	var configStoreDir, envStoreDir, authStoreDir string
 	if home, homeErr := config.ResolveHostHome(); homeErr == nil {
 		projectOverridesDir = config.HostProjectOverridesDir(home, project.Hash)
 		projectStateDir = config.HostProjectDir(home, project.Hash)
+		globalSecretsFile = config.HostSecretsGlobalSharedFile(home)
+		globalSecretsToolFile = config.HostSecretsGlobalFile(home, opts.Tool)
+		projectSecretsFile = config.HostSecretsProjectFile(home, project.Hash, opts.Tool)
 		configStoreDir = hoststore.Dir(home, backend.StoreKey{Owner: opts.Tool, ProjectHash: project.Hash}, backend.StoreKindConfig)
 		envStoreDir = hoststore.Dir(home, backend.StoreKey{Owner: opts.Tool, ProjectHash: project.Hash}, backend.StoreKindEnv)
 		authStoreDir = hoststore.Dir(home, backend.StoreKey{Owner: opts.Tool, Suffix: authName}, backend.StoreKindAuth)
@@ -123,8 +128,31 @@ func runInfo(ctx *AppContext, opts model.Options) int {
 	if projectStateDir != "" {
 		fmt.Printf("Project State Dir: %s\n", projectStateDir)
 	}
+	printFileStatus("Global Secrets File", globalSecretsFile)
+	printFileStatus("Global Tool Secrets File", globalSecretsToolFile)
+	printFileStatus("Project Secrets File", projectSecretsFile)
 
 	return 0
+}
+
+// printFileStatus prints a labeled file path and whether the file exists. An
+// empty path means the home directory could not be resolved.
+func printFileStatus(label string, path string) {
+	if path == "" {
+		fmt.Printf("%s: unavailable\n", label)
+		return
+	}
+	info, err := os.Stat(path)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		fmt.Printf("%s: %s (missing)\n", label, path)
+	case err != nil:
+		fmt.Printf("%s: %s (unreadable: %v)\n", label, path, err)
+	case info.IsDir():
+		fmt.Printf("%s: %s (not a file)\n", label, path)
+	default:
+		fmt.Printf("%s: %s\n", label, path)
+	}
 }
 
 // storeDirDisplay renders a resolved store directory, falling back to a marker

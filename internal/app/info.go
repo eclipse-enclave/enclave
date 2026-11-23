@@ -128,7 +128,7 @@ func runInfo(ctx *AppContext, opts model.Options) int {
 	if projectStateDir != "" {
 		fmt.Printf("Project State Dir: %s\n", projectStateDir)
 	}
-	fmt.Printf("Secrets Files (later layers override earlier ones):\n")
+	fmt.Printf("Secrets Files:\n")
 	fmt.Printf("  Global: %s\n", secretsFileDisplay(globalSecretsFile))
 	fmt.Printf("  Global Tool: %s\n", secretsFileDisplay(globalSecretsToolFile))
 	fmt.Printf("  Project: %s\n", secretsFileDisplay(projectSecretsFile))

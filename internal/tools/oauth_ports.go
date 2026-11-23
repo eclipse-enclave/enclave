@@ -77,7 +77,7 @@ func OAuthPortValidateRun(ctx model.RunContext) error {
 				}
 				return fmt.Errorf("%s oauth requires host port %s to be mapped (use -p %s)", provider.Name, port, port)
 			}
-			if err := ensureHostPortAvailable(port, provider.Name); err != nil {
+			if err := ensureHostPortAvailable(publishedHostIP(ctx.Run.Ports, port), port, provider.Name); err != nil {
 				return err
 			}
 		}
@@ -125,9 +125,27 @@ func hasPortMapping(ports []string, hostPort string, containerPort string) bool 
 	return false
 }
 
-func ensureHostPortAvailable(port string, providerName string) error {
-	// #nosec G102 -- Availability probe only; closed immediately without accepting connections.
-	listener, err := net.Listen("tcp", "0.0.0.0:"+port)
+// publishedHostIP returns the host address of the exact port:port mapping,
+// which defaults to loopback like every publish spec without a host IP.
+func publishedHostIP(ports []string, port string) string {
+	for _, spec := range ports {
+		hostIP, hostPort, containerPort, ok := util.ParsePortSpec(spec)
+		if !ok || hostPort != port || containerPort != port {
+			continue
+		}
+		if hostIP = strings.Trim(hostIP, "[]"); hostIP != "" {
+			return hostIP
+		}
+		break
+	}
+	return "127.0.0.1"
+}
+
+// ensureHostPortAvailable probes the address the port is published on. A
+// wildcard probe is not enough: on macOS it succeeds while another socket
+// holds the port on 127.0.0.1, as a port published by another session does.
+func ensureHostPortAvailable(hostIP string, port string, providerName string) error {
+	listener, err := net.Listen("tcp", net.JoinHostPort(hostIP, port))
 	if err != nil {
 		return fmt.Errorf("host port %s is already in use; %s oauth requires it", port, providerName)
 	}

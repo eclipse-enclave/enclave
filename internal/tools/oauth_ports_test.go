@@ -8,6 +8,9 @@
 package tools
 
 import (
+	"net"
+	"strconv"
+	"strings"
 	"testing"
 
 	"enclave/internal/model"
@@ -92,6 +95,59 @@ func TestOAuthPortValidateRunRequireMappingOverride(t *testing.T) {
 
 	if err := OAuthPortValidateRun(ctx); err != nil {
 		t.Fatalf("expected no error, got %v", err)
+	}
+}
+
+func TestOAuthPortValidateRunDetectsPortHeldOnLoopback(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = listener.Close() }()
+	port := strconv.Itoa(listener.Addr().(*net.TCPAddr).Port)
+
+	for _, spec := range []string{port, "127.0.0.1:" + port + ":" + port} {
+		t.Run(spec, func(t *testing.T) {
+			ctx := model.RunContext{
+				Profile: model.Profile{
+					Providers: []model.ProviderConfig{
+						{
+							Name:       "openai-codex",
+							OAuthPorts: []model.OAuthPortConfig{{Port: port}},
+						},
+					},
+				},
+				AuthState: model.AuthState{
+					Providers: map[string]model.ProviderAuthState{
+						"openai-codex": {},
+					},
+				},
+				Run: model.RunOptions{Ports: []string{spec}},
+			}
+
+			err := OAuthPortValidateRun(ctx)
+			if err == nil || !strings.Contains(err.Error(), "already in use") {
+				t.Fatalf("expected port-in-use error, got %v", err)
+			}
+		})
+	}
+}
+
+func TestPublishedHostIP(t *testing.T) {
+	tests := []struct {
+		ports []string
+		want  string
+	}{
+		{ports: []string{"1455"}, want: "127.0.0.1"},
+		{ports: []string{"1455:1455"}, want: "127.0.0.1"},
+		{ports: []string{"0.0.0.0:1455:1455"}, want: "0.0.0.0"},
+		{ports: []string{"[::1]:1455:1455"}, want: "::1"},
+		{ports: []string{"0.0.0.0:8080:1455", "1455"}, want: "127.0.0.1"},
+	}
+	for _, tt := range tests {
+		if got := publishedHostIP(tt.ports, "1455"); got != tt.want {
+			t.Errorf("publishedHostIP(%v) = %q, want %q", tt.ports, got, tt.want)
+		}
 	}
 }
 

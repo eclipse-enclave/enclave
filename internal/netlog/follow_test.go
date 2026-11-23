@@ -103,6 +103,32 @@ func TestFollowerEmitsAppendedEvents(t *testing.T) {
 	}
 }
 
+func TestFollowerReadsWhatArrivedBeforeCancellation(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "network.log")
+	appendLine(t, path, "first.example")
+
+	// The interval outlasts the test, so only the first poll and the one on
+	// cancellation can read anything.
+	follower := NewFollower([]string{path}, FollowOptions{Interval: time.Hour, FromStart: true})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	sink := &collector{}
+	done := make(chan error, 1)
+	go func() {
+		done <- follower.Run(ctx, sink.emit)
+	}()
+	sink.waitFor(t, 1)
+
+	appendLine(t, path, "last.example")
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatalf("Follower.Run() error = %v", err)
+	}
+	if got := sink.domains(); len(got) != 2 || got[1] != "last.example" {
+		t.Fatalf("events = %v, want the event appended before cancellation", got)
+	}
+}
+
 func TestFollowerSkipsHistoryByDefault(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "network.log")
 	appendLine(t, path, "before.example")

@@ -818,16 +818,18 @@ shutdown_gateway() {
         enforce_fail_closed_lockdown
     fi
 
+    # dnsmasq stops before the DNS audit translator, so the translator's last
+    # read sees every query dnsmasq logged.
+    if is_pid_running "$DNSMASQ_PID"; then
+        stop_child_pid "$DNSMASQ_PID" "dnsmasq"
+    fi
+
     if is_pid_running "$DNS_AUDIT_PID"; then
         stop_child_pid "$DNS_AUDIT_PID" "dns-audit"
     fi
 
     if is_pid_running "$PROXY_PID"; then
         stop_child_pid "$PROXY_PID" "proxy"
-    fi
-
-    if is_pid_running "$DNSMASQ_PID"; then
-        stop_child_pid "$DNSMASQ_PID" "dnsmasq"
     fi
 
     exit "$code"

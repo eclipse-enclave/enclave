@@ -73,7 +73,8 @@ func NewFollower(paths []string, opts FollowOptions) *Follower {
 }
 
 // Run polls until the context is cancelled, calling emit for every new event.
-// A cancelled context is a normal stop and returns nil.
+// A cancelled context is a normal stop: Run reads once more, so nothing
+// appended since the last poll is lost, and returns nil unless that read fails.
 func (f *Follower) Run(ctx context.Context, emit func(Event)) error {
 	return f.RunLines(ctx, func(line []byte) {
 		event, ok := ParseLine(line)
@@ -101,7 +102,9 @@ func (f *Follower) RunLines(ctx context.Context, emit func(line []byte)) error {
 	for {
 		select {
 		case <-ctx.Done():
-			return nil
+			// The gateway stops the DNS translator right after a session ends,
+			// often within one interval of the session's last lookup.
+			return f.poll(emit)
 		case <-ticker.C:
 			if err := f.poll(emit); err != nil {
 				return err

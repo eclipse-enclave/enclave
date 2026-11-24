@@ -258,6 +258,22 @@ func TestSessionFromSummaryProjectDir(t *testing.T) {
 	})
 }
 
+func TestImageInboxLabelRoundTrip(t *testing.T) {
+	for _, inbox := range []bool{true, false} {
+		labels := labelsFromRequest(backend.Request{Session: backend.SessionMeta{Tool: "claude", ImageInbox: inbox}})
+		session, ok := sessionFromSummary(dockercmd.Summary{Names: []string{"/enclave-claude-abc123abc123"}, Labels: labels})
+		if !ok {
+			t.Fatal("expected managed session")
+		}
+		if session.ImageInbox != inbox {
+			t.Fatalf("ImageInbox = %v after round trip, want %v", session.ImageInbox, inbox)
+		}
+		if session.Provenance != nil {
+			t.Fatalf("the inbox label must not depend on recorded options, got %v", session.Provenance)
+		}
+	}
+}
+
 func TestProvenanceLabelsRoundTrip(t *testing.T) {
 	recorded := map[string]any{"pass_env": []string{"GITHUB_TOKEN"}, "yolo": true, "backend": "auto"}
 	labelsFor := func(options map[string]any) map[string]string {

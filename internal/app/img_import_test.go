@@ -166,11 +166,7 @@ func inboxSession(name, hash, dir string, inbox bool) backend.Session {
 		ProjectDir:  dir,
 		Status:      "running",
 	}
-	if inbox {
-		s.Provenance = map[string]any{"image_inbox": true}
-	} else {
-		s.Provenance = map[string]any{"image_inbox": false}
-	}
+	s.ImageInbox = inbox
 	return s
 }
 
@@ -188,6 +184,8 @@ func TestResolveInboxProject(t *testing.T) {
 	cReview := cPlain
 	cReview.Name = "review"
 	legacy := backend.Session{Ref: backend.SessionRef{Name: "enclave-old"}, ProjectHash: "hashD"}
+	optionsOnly := inboxSession("enclave-claude-e", "hashE", "/src/e", false)
+	optionsOnly.Provenance = map[string]any{imageInboxOption: true}
 
 	tests := []struct {
 		name      string
@@ -214,6 +212,8 @@ func TestResolveInboxProject(t *testing.T) {
 		{"ambiguous lists candidates", []backend.Session{a, a2, b}, model.Project{Hash: "hashC"}, "", "", []string{"enclave-codex-a, review (enclave-claude-a)", "review (enclave-claude-b)", "/src/a", "/src/b", "--session"}},
 		{"no inbox session", []backend.Session{cPlain, legacy}, model.Project{Hash: "hashC"}, "", "", []string{"no running session has an image inbox", "--image-inbox"}},
 		{"nothing running", nil, model.Project{}, "", "", []string{"no running session has an image inbox"}},
+		{"recorded options alone do not mark an inbox", []backend.Session{optionsOnly}, model.Project{Hash: "hashE"}, "", "", []string{"no running session has an image inbox"}},
+		{"label marks an inbox without recorded options", []backend.Session{a}, model.Project{Hash: "hashA"}, "", "hashA", nil},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -239,7 +239,9 @@ func TestResolveInboxProject(t *testing.T) {
 	}
 }
 
-// img import finds inbox-enabled sessions by this key in their recorded
+const imageInboxOption = "image_inbox"
+
+// `ps --json` reports inbox-enabled sessions under this key in their recorded
 // options, so the option must keep its name and stay session-affecting.
 func TestImageInboxOptionIsRecordedOnSessions(t *testing.T) {
 	for _, def := range config.OptionDefs() {

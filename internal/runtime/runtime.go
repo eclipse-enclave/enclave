@@ -848,6 +848,7 @@ func (r *Runtime) backendRequest(ctx *ExecutionContext, detached bool, interacti
 			DisplayName:  r.sessionDisplayName(ctx.ContainerName, detached),
 			Background:   detached,
 			Yolo:         r.yoloEnabled,
+			ImageInbox:   r.run.ImageInbox,
 			Provenance:   r.provenance,
 		},
 		Image:           r.build.ImageName,

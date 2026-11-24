@@ -28,10 +28,6 @@ import (
 	"enclave/internal/util"
 )
 
-// imageInboxOption is the recorded session option that marks a session as
-// inbox-enabled.
-const imageInboxOption = "image_inbox"
-
 // clipboardCaptureTimeout bounds a clipboard read, which is not interactive.
 const clipboardCaptureTimeout = 60 * time.Second
 
@@ -325,8 +321,7 @@ func inboxCandidateName(session backend.Session) string {
 }
 
 func sessionHasImageInbox(session backend.Session) bool {
-	enabled, _ := session.Provenance[imageInboxOption].(bool)
-	return enabled
+	return session.ImageInbox
 }
 
 func inboxProjectLabel(sessions []backend.Session, projectHash string) string {

@@ -580,6 +580,9 @@ func labelsFromRequest(req backend.Request) map[string]string {
 	if meta.Yolo {
 		labels[model.LabelYolo] = "1"
 	}
+	if meta.ImageInbox {
+		labels[model.LabelImageInbox] = "1"
+	}
 	if configKey := configKeyFromStores(req.Stores); configKey != "" {
 		labels[model.LabelConfigKey] = configKey
 	}
@@ -709,6 +712,7 @@ func sessionFromSummary(c dockercmd.Summary) (backend.Session, bool) {
 		Background:  strings.EqualFold(labels[model.LabelBackground], "true"),
 		Ports:       sessionPortMappings(c.Ports),
 		Yolo:        strings.TrimSpace(labels[model.LabelYolo]) == "1",
+		ImageInbox:  strings.TrimSpace(labels[model.LabelImageInbox]) == "1",
 		Provenance:  provenance,
 	}, true
 }

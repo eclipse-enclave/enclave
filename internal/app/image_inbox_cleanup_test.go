@@ -53,6 +53,18 @@ func TestOrphanedImageInboxes(t *testing.T) {
 			want: nil,
 		},
 		{
+			name:     "the label keeps the inbox without recorded options",
+			inboxes:  []string{"hashA"},
+			sessions: []backend.Session{{ProjectHash: "hashA", Status: "running", ImageInbox: true}},
+			want:     nil,
+		},
+		{
+			name:     "recorded options alone do not keep the inbox",
+			inboxes:  []string{"hashA"},
+			sessions: []backend.Session{{ProjectHash: "hashA", Status: "running", Provenance: map[string]any{"image_inbox": true}}},
+			want:     []string{"hashA"},
+		},
+		{
 			name:     "a session without an inbox does not keep it",
 			inboxes:  []string{"hashA"},
 			sessions: []backend.Session{inboxSession("a", "hashA", "/src/a", false)},

@@ -19,7 +19,10 @@ iptables -A OUTPUT -p tcp --dport 53 -d 1.1.1.1 -m owner --uid-owner 105 -j ACCE
 iptables -A OUTPUT -m set --match-set enclave_allowed dst -j ACCEPT
 iptables -A OUTPUT -p tcp --dport 15080 -m addrtype --dst-type LOCAL -j ACCEPT
 iptables -A OUTPUT -p tcp --dport 15443 -m addrtype --dst-type LOCAL -j ACCEPT
-iptables -t nat -F OUTPUT
+iptables -t nat -D OUTPUT -p tcp --dport 80 -m owner --uid-owner 105 -j RETURN
+iptables -t nat -D OUTPUT -p tcp --dport 80 -j REDIRECT --to-ports 15080
+iptables -t nat -D OUTPUT -p tcp --dport 443 -m owner --uid-owner 105 -j RETURN
+iptables -t nat -D OUTPUT -p tcp --dport 443 -j REDIRECT --to-ports 15443
 iptables -t nat -A OUTPUT -p tcp --dport 80 -m owner --uid-owner 105 -j RETURN
 iptables -t nat -A OUTPUT -p tcp --dport 443 -m owner --uid-owner 105 -j RETURN
 iptables -t nat -A OUTPUT -p tcp --dport 80 -j REDIRECT --to-ports 15080

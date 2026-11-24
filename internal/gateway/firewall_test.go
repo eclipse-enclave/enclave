@@ -269,6 +269,36 @@ func TestGatewayFirewallRejectsInvalidPublishedPorts(t *testing.T) {
 	}
 }
 
+func TestGatewayFirewallKeepsDockerDNSRules(t *testing.T) {
+	calls, err := runGatewayFirewall(t, "setup_firewall; setup_firewall", "PROXY_ENABLED=true")
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string]bool{}
+	for _, call := range calls {
+		args := strings.Join(call.args, " ")
+		if args == "-t nat -F OUTPUT" {
+			t.Fatal("flushed nat OUTPUT; this drops Docker's embedded DNS rules")
+		}
+		seen[args] = true
+	}
+	// A reload must remove the rules it added itself instead of flushing the
+	// chain, which would also take Docker's embedded DNS rule with it.
+	for _, rule := range []string{
+		"-t nat -A OUTPUT -p tcp --dport 80 -m owner --uid-owner 105 -j RETURN",
+		"-t nat -A OUTPUT -p tcp --dport 443 -m owner --uid-owner 105 -j RETURN",
+		"-t nat -A OUTPUT -p tcp --dport 80 -j REDIRECT --to-ports " + proxyHTTPPort,
+		"-t nat -A OUTPUT -p tcp --dport 443 -j REDIRECT --to-ports " + proxyHTTPSPort,
+	} {
+		if !seen[rule] {
+			t.Fatalf("missing rule %q", rule)
+		}
+		if !seen[strings.Replace(rule, "-A", "-D", 1)] {
+			t.Fatalf("setup does not delete %q before adding it again", rule)
+		}
+	}
+}
+
 func TestGatewayFirewallLockdownClosesInbound(t *testing.T) {
 	calls, err := runGatewayFirewall(t, "setup_firewall; setup_kernel_network; enforce_fail_closed_lockdown",
 		"ENCLAVE_GATEWAY_PUBLISHED_PORTS=3000/tcp")
@@ -315,7 +345,7 @@ ACTIVE_DOMAINS_FILE="$FW_LOG.absent"
 		{"reload", "reload_gateway", "Reload completed (generation=test)"},
 	} {
 		for _, rule := range []string{
-			"", "-t nat -F OUTPUT",
+			"",
 			"-t nat -A OUTPUT -p tcp --dport 80 -m owner --uid-owner 105 -j RETURN",
 			"-t nat -A OUTPUT -p tcp --dport 443 -m owner --uid-owner 105 -j RETURN",
 			"-t nat -A OUTPUT -p tcp --dport 80 -j REDIRECT --to-ports " + proxyHTTPPort,

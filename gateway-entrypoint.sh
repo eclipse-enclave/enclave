@@ -501,7 +501,7 @@ EOF_RESOLVERS
     iptables -A OUTPUT -p tcp --dport "$PROXY_HTTPS_PORT" -m addrtype --dst-type LOCAL -j ACCEPT
 
     if ! {
-        iptables -t nat -F OUTPUT &&
+        clear_proxy_nat_rules iptables "$proxy_uid" &&
         iptables -t nat -A OUTPUT -p tcp --dport 80 -m owner --uid-owner "$proxy_uid" -j RETURN &&
         iptables -t nat -A OUTPUT -p tcp --dport 443 -m owner --uid-owner "$proxy_uid" -j RETURN &&
         web_redirect iptables -A 80 &&
@@ -552,6 +552,19 @@ web_redirect() {
         *) return 1 ;;
     esac
     "$firewall" -t nat "$action" OUTPUT -p tcp --dport "$port" -j REDIRECT --to-ports "$proxy_port"
+}
+
+# clear_proxy_nat_rules removes the rules this script added for the proxy.
+# Flushing nat OUTPUT would also drop Docker's embedded DNS rules, which a
+# gateway forwarding to 127.0.0.11 depends on. Deleting each rule once keeps a
+# reload from growing the chain.
+clear_proxy_nat_rules() {
+    firewall="$1"
+    owner_uid="$2"
+    for port in 80 443; do
+        "$firewall" -t nat -D OUTPUT -p tcp --dport "$port" -m owner --uid-owner "$owner_uid" -j RETURN 2>/dev/null || true
+        web_redirect "$firewall" -D "$port" 2>/dev/null || true
+    done
 }
 
 # redirect_web_traffic_to_proxy sends the session's TCP 80/443 through the

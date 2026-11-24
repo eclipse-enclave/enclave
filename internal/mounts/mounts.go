@@ -498,7 +498,7 @@ func ResolvePorts(ports []string) []backend.PortMapping {
 			continue
 		}
 		if hostIP == "" {
-			hostIP = "127.0.0.1"
+			hostIP = util.DefaultPortHostIP
 		}
 		mappings = append(mappings, backend.PortMapping{HostIP: hostIP, HostPort: hostPort, ContainerPort: containerPort, Protocol: "tcp"})
 	}

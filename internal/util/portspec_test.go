@@ -66,6 +66,20 @@ func TestSplitPortHostIP(t *testing.T) {
 	}
 }
 
+func TestNormalizePortHostIP(t *testing.T) {
+	cases := map[string]string{
+		"":          "127.0.0.1",
+		"0.0.0.0":   "0.0.0.0",
+		"127.0.0.1": "127.0.0.1",
+		"[::1]":     "::1",
+	}
+	for in, want := range cases {
+		if got := NormalizePortHostIP(in); got != want {
+			t.Errorf("NormalizePortHostIP(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 func TestSplitPortMapping(t *testing.T) {
 	cases := []struct {
 		in         string

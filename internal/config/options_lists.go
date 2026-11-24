@@ -482,13 +482,9 @@ func parsePortBinding(value string) (portBinding, bool) {
 	if !ok {
 		return portBinding{}, false
 	}
-	ip = strings.Trim(ip, "[]")
-	if ip == "" {
-		ip = "127.0.0.1"
-	}
 	host, _ := strconv.Atoi(hostPort)
 	container, _ := strconv.Atoi(containerPort)
-	return portBinding{ip: ip, hostPort: strconv.Itoa(host), containerPort: strconv.Itoa(container)}, true
+	return portBinding{ip: util.NormalizePortHostIP(ip), hostPort: strconv.Itoa(host), containerPort: strconv.Itoa(container)}, true
 }
 
 func portSpecHostPort(value string) string {

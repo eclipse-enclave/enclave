@@ -22,6 +22,7 @@ NAT_OUTPUT_CHAIN="ENCLAVE_OUTPUT"
 NAT_PREROUTING_CHAIN="ENCLAVE_PREROUTING"
 NAT_POSTROUTING_CHAIN="ENCLAVE_POSTROUTING"
 NAT_READY="false"
+DOCKER_DNS_IP="127.0.0.11"
 PROXY_ENABLED="${PROXY_ENABLED:-true}"
 NETWORK_LOG_FILE="${ENCLAVE_NETWORK_LOG_FILE:-}"
 GATEWAY_CONFIG_DIR="${ENCLAVE_GATEWAY_CONFIG_DIR:-/etc/enclave-gateway-config}"
@@ -467,6 +468,11 @@ setup_firewall() {
     dns_uid=$(id -u "$DNSMASQ_USER")
 
     iptables -A OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT || return 1
+    # Docker's embedded DNS answers on loopback and resolves any name; only
+    # dnsmasq may use it, or the session could bypass the allowlist.
+    if [ "$owner_supported" = "true" ]; then
+        iptables -A OUTPUT -d "$DOCKER_DNS_IP" -m owner ! --uid-owner "$dns_uid" -j DROP || return 1
+    fi
     iptables -A OUTPUT -o lo -j ACCEPT || return 1
 
     iptables -A OUTPUT -p udp --dport 53 -d 127.0.0.1 -j ACCEPT

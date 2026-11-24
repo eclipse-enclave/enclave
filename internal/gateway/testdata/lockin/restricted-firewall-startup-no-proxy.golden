@@ -9,6 +9,7 @@ iptables -P OUTPUT DROP
 iptables -F OUTPUT
 iptables -m owner -h
 iptables -A OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
+iptables -A OUTPUT -d 127.0.0.11 -m owner ! --uid-owner 105 -j DROP
 iptables -A OUTPUT -o lo -j ACCEPT
 iptables -A OUTPUT -p udp --dport 53 -d 127.0.0.1 -j ACCEPT
 iptables -A OUTPUT -p tcp --dport 53 -d 127.0.0.1 -j ACCEPT

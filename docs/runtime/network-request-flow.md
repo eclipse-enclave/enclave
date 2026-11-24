@@ -129,7 +129,8 @@ record readable from the handshake. See
 - The gateway keeps its NAT rules in its own chains (`ENCLAVE_OUTPUT`,
   `ENCLAVE_PREROUTING`, `ENCLAVE_POSTROUTING`), jumped to from the built-in
   ones. A reload empties only these, so Docker's embedded DNS rules in
-  `nat OUTPUT` stay in place.
+  `nat OUTPUT` stay in place. Only `dnsmasq` may reach Docker's embedded DNS
+  on `127.0.0.11`; the session's queries go through the allowlist.
 - The log is tagged by session and rotated at session start, never truncated
   mid-session. Logged paths omit the query string, so query-parameter
   credentials cannot leak into it. It records decisions, not traffic volume.

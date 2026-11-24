@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -341,6 +342,19 @@ func TestGatewayFirewallReloadReplacesItsNATRules(t *testing.T) {
 		if _, ok := appends[want]; !ok {
 			t.Errorf("missing rule %q", want)
 		}
+	}
+}
+
+func TestGatewayFirewallKeepsDockerDNSForDnsmasqOnly(t *testing.T) {
+	calls, err := runGatewayFirewall(t, "setup_firewall", "PROXY_ENABLED=true")
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := callLines(calls)
+	drop := slices.Index(lines, "iptables -A OUTPUT -d 127.0.0.11 -m owner ! --uid-owner 105 -j DROP")
+	loopback := slices.Index(lines, "iptables -A OUTPUT -o lo -j ACCEPT")
+	if drop < 0 || loopback < 0 || drop > loopback {
+		t.Fatalf("Docker DNS drop at %d, loopback accept at %d: %q", drop, loopback, lines)
 	}
 }
 

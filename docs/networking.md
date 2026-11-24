@@ -125,7 +125,7 @@ extension-domain precedence are unchanged.
 
 ## Upstream resolver
 
-The gateway forwards allowlisted lookups to one public resolver, `8.8.8.8` by
+The gateway forwards allowlisted lookups to one upstream resolver, `8.8.8.8` by
 default. Set `advanced.resolvers` in `~/.config/enclave/network.jsonc` to
 replace it; only the first IPv4 entry is used, and a global entry takes
 precedence over a project one:

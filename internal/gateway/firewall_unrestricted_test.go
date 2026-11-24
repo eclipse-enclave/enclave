@@ -54,8 +54,8 @@ func TestUnrestrictedGatewayFirewall(t *testing.T) {
 	}
 	for _, engine := range []string{"iptables", "ip6tables"} {
 		for _, want := range []string{
-			"-t nat -A OUTPUT -p tcp --dport 80 -j REDIRECT --to-ports " + proxyHTTPPort,
-			"-t nat -A OUTPUT -p tcp --dport 443 -j REDIRECT --to-ports " + proxyHTTPSPort,
+			"-t nat -A ENCLAVE_OUTPUT -p tcp --dport 80 -j REDIRECT --to-ports " + proxyHTTPPort,
+			"-t nat -A ENCLAVE_OUTPUT -p tcp --dport 443 -j REDIRECT --to-ports " + proxyHTTPSPort,
 		} {
 			if !strings.Contains(out.String(), engine+" "+want+"\n") {
 				t.Errorf("missing %s %s", engine, want)
@@ -71,7 +71,7 @@ func TestUnrestrictedGatewayFirewallToleratesMissingIPv6NAT(t *testing.T) {
 	_, err := runGatewayFirewall(t, lockinFirewallMocks+"setup_observing_network",
 		"PROXY_ENABLED=true",
 		"FAIL_ENGINE=ip6tables",
-		"FAIL_RULE=-t nat -A OUTPUT -p tcp --dport 80 -m owner --uid-owner 105 -j RETURN",
+		"FAIL_RULE=-t nat -A ENCLAVE_OUTPUT -p tcp --dport 80 -m owner --uid-owner 105 -j RETURN",
 	)
 	if err != nil {
 		t.Fatalf("observing gateway failed without IPv6 NAT: %v", err)
@@ -82,7 +82,7 @@ func TestUnrestrictedGatewayFirewallIPv4ErrorsPropagate(t *testing.T) {
 	_, err := runGatewayFirewall(t, lockinFirewallMocks+"setup_observing_network",
 		"PROXY_ENABLED=true",
 		"FAIL_ENGINE=iptables",
-		"FAIL_RULE=-t nat -A OUTPUT -p tcp --dport 443 -j REDIRECT --to-ports "+proxyHTTPSPort,
+		"FAIL_RULE=-t nat -A ENCLAVE_OUTPUT -p tcp --dport 443 -j REDIRECT --to-ports "+proxyHTTPSPort,
 	)
 	if err == nil {
 		t.Fatal("observing gateway ignored a failed IPv4 redirect")
@@ -108,7 +108,7 @@ const deadProxy = `true & PROXY_PID=$!; wait "$PROXY_PID"; `
 const missingIPv4HTTPRedirect = `iptables() {
     firewall_mock iptables "$@"
     case "$*" in
-        "-t nat -D OUTPUT -p tcp --dport 80 "*|"-t nat -C OUTPUT -p tcp --dport 80 "*) return 1 ;;
+        "-t nat -D ENCLAVE_OUTPUT -p tcp --dport 80 "*|"-t nat -C ENCLAVE_OUTPUT -p tcp --dport 80 "*) return 1 ;;
     esac
 }
 `
@@ -147,10 +147,10 @@ firewall_mock marker alive`,
 		t.Fatalf("observing gateway exited after proxy death: %v", err)
 	}
 	assertCalls(t, calls, []string{
-		"iptables -t nat -D OUTPUT -p tcp --dport 80 -j REDIRECT --to-ports " + proxyHTTPPort,
-		"iptables -t nat -D OUTPUT -p tcp --dport 443 -j REDIRECT --to-ports " + proxyHTTPSPort,
-		"ip6tables -t nat -D OUTPUT -p tcp --dport 80 -j REDIRECT --to-ports " + proxyHTTPPort,
-		"ip6tables -t nat -D OUTPUT -p tcp --dport 443 -j REDIRECT --to-ports " + proxyHTTPSPort,
+		"iptables -t nat -D ENCLAVE_OUTPUT -p tcp --dport 80 -j REDIRECT --to-ports " + proxyHTTPPort,
+		"iptables -t nat -D ENCLAVE_OUTPUT -p tcp --dport 443 -j REDIRECT --to-ports " + proxyHTTPSPort,
+		"ip6tables -t nat -D ENCLAVE_OUTPUT -p tcp --dport 80 -j REDIRECT --to-ports " + proxyHTTPPort,
+		"ip6tables -t nat -D ENCLAVE_OUTPUT -p tcp --dport 443 -j REDIRECT --to-ports " + proxyHTTPSPort,
 		"marker second-tick",
 		"marker alive",
 	})
@@ -179,11 +179,11 @@ func TestUnrestrictedGatewayFailOpenToleratesMissingRedirect(t *testing.T) {
 	}
 	lines := callLines(calls)
 	assertCalls(t, calls[:len(calls)-1], []string{
-		"iptables -t nat -D OUTPUT -p tcp --dport 80 -j REDIRECT --to-ports " + proxyHTTPPort,
-		"iptables -t nat -C OUTPUT -p tcp --dport 80 -j REDIRECT --to-ports " + proxyHTTPPort,
-		"iptables -t nat -D OUTPUT -p tcp --dport 443 -j REDIRECT --to-ports " + proxyHTTPSPort,
-		"ip6tables -t nat -D OUTPUT -p tcp --dport 80 -j REDIRECT --to-ports " + proxyHTTPPort,
-		"ip6tables -t nat -D OUTPUT -p tcp --dport 443 -j REDIRECT --to-ports " + proxyHTTPSPort,
+		"iptables -t nat -D ENCLAVE_OUTPUT -p tcp --dport 80 -j REDIRECT --to-ports " + proxyHTTPPort,
+		"iptables -t nat -C ENCLAVE_OUTPUT -p tcp --dport 80 -j REDIRECT --to-ports " + proxyHTTPPort,
+		"iptables -t nat -D ENCLAVE_OUTPUT -p tcp --dport 443 -j REDIRECT --to-ports " + proxyHTTPSPort,
+		"ip6tables -t nat -D ENCLAVE_OUTPUT -p tcp --dport 80 -j REDIRECT --to-ports " + proxyHTTPPort,
+		"ip6tables -t nat -D ENCLAVE_OUTPUT -p tcp --dport 443 -j REDIRECT --to-ports " + proxyHTTPSPort,
 	})
 	if out := lines[len(lines)-1]; !strings.Contains(out, "no longer logged") || strings.Contains(out, "Failed") {
 		t.Fatalf("missing redirect reported as a failure: %q", out)
@@ -196,7 +196,7 @@ func TestUnrestrictedGatewayFailOpenReportsStuckRedirect(t *testing.T) {
 	calls, err := runGatewayFirewall(t, deadProxy+`GATEWAY_MODE=unrestricted; firewall_mock log "$(monitor_tick | tr '\n' ' ')"`,
 		"PROXY_ENABLED=true",
 		"FAIL_ENGINE=ip6tables",
-		"FAIL_RULE=-t nat -D OUTPUT -p tcp --dport 443 -j REDIRECT --to-ports "+proxyHTTPSPort,
+		"FAIL_RULE=-t nat -D ENCLAVE_OUTPUT -p tcp --dport 443 -j REDIRECT --to-ports "+proxyHTTPSPort,
 	)
 	if err != nil {
 		t.Fatalf("observing gateway exited when a redirect could not be removed: %v", err)
@@ -235,7 +235,7 @@ func loopbackDNAT(chain, match, port string) string {
 
 func hasLocalLoopbackDNAT(lines []string) bool {
 	return slices.ContainsFunc(lines, func(l string) bool {
-		return strings.Contains(l, "-A OUTPUT") && strings.Contains(l, "DNAT --to-destination 127.0.0.1")
+		return strings.Contains(l, "-A ENCLAVE_OUTPUT") && strings.Contains(l, "DNAT --to-destination 127.0.0.1")
 	})
 }
 
@@ -262,8 +262,8 @@ func TestUnrestrictedGatewayRedirectsLocalConnectionsToLoopbackListener(t *testi
 	lines := callLines(calls)
 	for _, port := range []string{"1455", "1456"} {
 		for _, want := range []string{
-			loopbackDNAT("PREROUTING", "", port),
-			loopbackDNAT("OUTPUT", "-d 10.88.0.5 ", port),
+			loopbackDNAT("ENCLAVE_PREROUTING", "", port),
+			loopbackDNAT("ENCLAVE_OUTPUT", "-d 10.88.0.5 ", port),
 		} {
 			if !slices.Contains(lines, want) {
 				t.Errorf("missing %q in %q", want, lines)
@@ -282,7 +282,7 @@ func TestUnrestrictedGatewayFallsBackToSocatWithoutLocalRedirect(t *testing.T) {
 		socat          int
 		triedLocalDNAT bool
 	}{
-		{"rule fails", []string{"FAIL_ENGINE=iptables", "FAIL_RULE=" + strings.TrimPrefix(loopbackDNAT("OUTPUT", "-d 10.88.0.5 ", "1455"), "iptables ")}, 1, true},
+		{"rule fails", []string{"FAIL_ENGINE=iptables", "FAIL_RULE=" + strings.TrimPrefix(loopbackDNAT("ENCLAVE_OUTPUT", "-d 10.88.0.5 ", "1455"), "iptables ")}, 1, true},
 		// The socat fallback resolves the same address, so it is disabled too.
 		{"no address", []string{"BIND_IP="}, 0, false},
 		{"IPv6 address", []string{"BIND_IP=fd00::5"}, 1, false},
@@ -295,7 +295,7 @@ func TestUnrestrictedGatewayFallsBackToSocatWithoutLocalRedirect(t *testing.T) {
 				t.Fatal(err)
 			}
 			lines := callLines(calls)
-			if !slices.Contains(lines, loopbackDNAT("PREROUTING", "", "1455")) {
+			if !slices.Contains(lines, loopbackDNAT("ENCLAVE_PREROUTING", "", "1455")) {
 				t.Errorf("PREROUTING redirect dropped: %q", lines)
 			}
 			if socatCalls := countSocat(lines); socatCalls != tc.socat {

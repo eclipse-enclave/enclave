@@ -269,32 +269,77 @@ func TestGatewayFirewallRejectsInvalidPublishedPorts(t *testing.T) {
 	}
 }
 
-func TestGatewayFirewallKeepsDockerDNSRules(t *testing.T) {
-	calls, err := runGatewayFirewall(t, "setup_firewall; setup_firewall", "PROXY_ENABLED=true")
+// natChainMocks make "-t nat -N" fail for a chain that already exists and
+// "-t nat -C <builtin> -j <chain>" succeed once it does, as iptables does on a
+// reload.
+const natChainMocks = `
+iptables() {
+    firewall_mock iptables "$@" || return 1
+    case "$*" in
+        "-t nat -N "*)
+            case " ${NAT_CHAINS-} " in *" $4 "*) return 1 ;; esac
+            NAT_CHAINS="${NAT_CHAINS-} $4" ;;
+        "-t nat -C "*" -j ENCLAVE_"*)
+            case " ${NAT_CHAINS-} " in *" $6 "*) return 0 ;; esac
+            return 1 ;;
+    esac
+}
+`
+
+// TestGatewayFirewallReloadReplacesItsNATRules checks that a reload empties
+// enclave's own nat chains instead of the built-in ones, which also hold
+// Docker's embedded DNS rules, and installs each of its rules exactly once.
+func TestGatewayFirewallReloadReplacesItsNATRules(t *testing.T) {
+	calls, err := runGatewayFirewall(t, lockinFirewallMocks+natChainMocks+"setup_firewall && setup_firewall",
+		"PROXY_ENABLED=true", "ENCLAVE_LOOPBACK_PORTS=1455", "ENCLAVE_IDE_BRIDGE_PORTS=9800")
 	if err != nil {
 		t.Fatal(err)
 	}
-	seen := map[string]bool{}
-	for _, call := range calls {
+	flushedAt := map[string]int{}
+	appends := map[string][]int{}
+	for i, call := range calls {
 		args := strings.Join(call.args, " ")
-		if args == "-t nat -F OUTPUT" {
-			t.Fatal("flushed nat OUTPUT; this drops Docker's embedded DNS rules")
+		if call.engine != "iptables" || !strings.HasPrefix(args, "-t nat ") {
+			continue
 		}
-		seen[args] = true
+		fields := call.args[2:]
+		switch fields[0] {
+		case "-F":
+			if !strings.HasPrefix(fields[1], "ENCLAVE_") {
+				t.Fatalf("flushed built-in chain: %q", args)
+			}
+			flushedAt[fields[1]] = i
+		case "-A":
+			appends[args] = append(appends[args], i)
+		}
 	}
-	// A reload must remove the rules it added itself instead of flushing the
-	// chain, which would also take Docker's embedded DNS rule with it.
-	for _, rule := range []string{
-		"-t nat -A OUTPUT -p tcp --dport 80 -m owner --uid-owner 105 -j RETURN",
-		"-t nat -A OUTPUT -p tcp --dport 443 -m owner --uid-owner 105 -j RETURN",
-		"-t nat -A OUTPUT -p tcp --dport 80 -j REDIRECT --to-ports " + proxyHTTPPort,
-		"-t nat -A OUTPUT -p tcp --dport 443 -j REDIRECT --to-ports " + proxyHTTPSPort,
-	} {
-		if !seen[rule] {
-			t.Fatalf("missing rule %q", rule)
+	for _, builtin := range []string{"OUTPUT", "PREROUTING", "POSTROUTING"} {
+		jump := "-t nat -A " + builtin + " -j ENCLAVE_" + builtin
+		if got := len(appends[jump]); got != 1 {
+			t.Errorf("%q added %d times, want once", jump, got)
 		}
-		if !seen[strings.Replace(rule, "-A", "-D", 1)] {
-			t.Fatalf("setup does not delete %q before adding it again", rule)
+		delete(appends, jump)
+	}
+	if len(appends) == 0 {
+		t.Fatal("no enclave nat rules installed")
+	}
+	for rule, at := range appends {
+		chain := strings.Fields(rule)[3]
+		flush, ok := flushedAt[chain]
+		if !ok {
+			t.Fatalf("reload did not flush %s", chain)
+		}
+		if len(at) != 2 || at[0] > flush || at[1] < flush {
+			t.Errorf("%q not added once per setup around the flush of %s: %v (flush at %d)", rule, chain, at, flush)
+		}
+	}
+	for _, want := range []string{
+		"-t nat -A ENCLAVE_PREROUTING -p tcp --dport 1455 -j DNAT --to-destination 127.0.0.1:1455",
+		"-t nat -A ENCLAVE_OUTPUT -p tcp -d 127.0.0.1 --dport 9800 -j DNAT --to-destination 172.17.0.1:9800",
+		"-t nat -A ENCLAVE_POSTROUTING -p tcp -d 172.17.0.1 --dport 9800 -j MASQUERADE",
+	} {
+		if _, ok := appends[want]; !ok {
+			t.Errorf("missing rule %q", want)
 		}
 	}
 }
@@ -346,10 +391,11 @@ ACTIVE_DOMAINS_FILE="$FW_LOG.absent"
 	} {
 		for _, rule := range []string{
 			"",
-			"-t nat -A OUTPUT -p tcp --dport 80 -m owner --uid-owner 105 -j RETURN",
-			"-t nat -A OUTPUT -p tcp --dport 443 -m owner --uid-owner 105 -j RETURN",
-			"-t nat -A OUTPUT -p tcp --dport 80 -j REDIRECT --to-ports " + proxyHTTPPort,
-			"-t nat -A OUTPUT -p tcp --dport 443 -j REDIRECT --to-ports " + proxyHTTPSPort,
+			"-t nat -A OUTPUT -j ENCLAVE_OUTPUT",
+			"-t nat -A ENCLAVE_OUTPUT -p tcp --dport 80 -m owner --uid-owner 105 -j RETURN",
+			"-t nat -A ENCLAVE_OUTPUT -p tcp --dport 443 -m owner --uid-owner 105 -j RETURN",
+			"-t nat -A ENCLAVE_OUTPUT -p tcp --dport 80 -j REDIRECT --to-ports " + proxyHTTPPort,
+			"-t nat -A ENCLAVE_OUTPUT -p tcp --dport 443 -j REDIRECT --to-ports " + proxyHTTPSPort,
 		} {
 			t.Run(phase.name+"/"+rule, func(t *testing.T) {
 				calls, err := runGatewayFirewall(t, startupMocks+phase.invocation,

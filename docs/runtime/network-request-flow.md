@@ -126,6 +126,10 @@ record readable from the handshake. See
   file-based credentials is separate work.
 - DNS, firewall and ipset, and proxy all check egress; reload and startup
   failures fail closed.
+- The gateway keeps its NAT rules in its own chains (`ENCLAVE_OUTPUT`,
+  `ENCLAVE_PREROUTING`, `ENCLAVE_POSTROUTING`), jumped to from the built-in
+  ones. A reload empties only these, so Docker's embedded DNS rules in
+  `nat OUTPUT` stay in place.
 - The log is tagged by session and rotated at session start, never truncated
   mid-session. Logged paths omit the query string, so query-parameter
   credentials cannot leak into it. It records decisions, not traffic volume.

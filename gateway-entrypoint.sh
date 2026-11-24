@@ -18,6 +18,10 @@ PROXY_USER="gateway"
 # GatewayProxyHTTPPort and GatewayProxyHTTPSPort in internal/model.
 PROXY_HTTP_PORT="15080"
 PROXY_HTTPS_PORT="15443"
+NAT_OUTPUT_CHAIN="ENCLAVE_OUTPUT"
+NAT_PREROUTING_CHAIN="ENCLAVE_PREROUTING"
+NAT_POSTROUTING_CHAIN="ENCLAVE_POSTROUTING"
+NAT_READY="false"
 PROXY_ENABLED="${PROXY_ENABLED:-true}"
 NETWORK_LOG_FILE="${ENCLAVE_NETWORK_LOG_FILE:-}"
 GATEWAY_CONFIG_DIR="${ENCLAVE_GATEWAY_CONFIG_DIR:-/etc/enclave-gateway-config}"
@@ -356,7 +360,7 @@ setup_loopback_forwarding() {
             log "Unable to determine gateway IPv4 address; using socat fallback for local connections to port $port"
             return 1
         fi
-        if ! iptables -t nat -A OUTPUT -p tcp -d "$local_ip" --dport "$port" -j DNAT --to-destination 127.0.0.1:"$port" >/dev/null 2>&1; then
+        if ! iptables -t nat -A "$NAT_OUTPUT_CHAIN" -p tcp -d "$local_ip" --dport "$port" -j DNAT --to-destination 127.0.0.1:"$port" >/dev/null 2>&1; then
             log "Failed to add local loopback redirect for port $port; using socat fallback"
             return 1
         fi
@@ -368,8 +372,8 @@ setup_loopback_forwarding() {
             start_loopback_proxy "$port"
             continue
         fi
-        if iptables -t nat -L PREROUTING >/dev/null 2>&1; then
-            if iptables -t nat -A PREROUTING -p tcp --dport "$port" -j DNAT --to-destination 127.0.0.1:"$port" >/dev/null 2>&1; then
+        if [ "$NAT_READY" = "true" ]; then
+            if iptables -t nat -A "$NAT_PREROUTING_CHAIN" -p tcp --dport "$port" -j DNAT --to-destination 127.0.0.1:"$port" >/dev/null 2>&1; then
                 log "DNAT port $port to loopback listener"
                 if [ "$redirect_local" = "true" ] && ! redirect_local_connections "$port"; then
                     start_loopback_proxy "$port"
@@ -379,7 +383,7 @@ setup_loopback_forwarding() {
                 start_loopback_proxy "$port"
             fi
         else
-            log "NAT PREROUTING unavailable; using socat fallback for port $port"
+            log "NAT unavailable; using socat fallback for port $port"
             start_loopback_proxy "$port"
         fi
     done <<EOF_LOOPBACK
@@ -406,9 +410,9 @@ setup_ide_bridge() {
     ide_ports=$(printf '%s' "$ENCLAVE_IDE_BRIDGE_PORTS" | tr ',' '\n')
     while IFS= read -r port; do
         [ -z "$port" ] && continue
-        if iptables -t nat -A OUTPUT -p tcp -d 127.0.0.1 --dport "$port" \
+        if iptables -t nat -A "$NAT_OUTPUT_CHAIN" -p tcp -d 127.0.0.1 --dport "$port" \
             -j DNAT --to-destination "${ide_host_ip}:${port}" 2>/dev/null && \
-            iptables -t nat -A POSTROUTING -p tcp -d "$ide_host_ip" --dport "$port" \
+            iptables -t nat -A "$NAT_POSTROUTING_CHAIN" -p tcp -d "$ide_host_ip" --dport "$port" \
             -j MASQUERADE 2>/dev/null && \
             iptables -A OUTPUT -p tcp -d "$ide_host_ip" --dport "$port" -j ACCEPT; then
             log "IDE bridge: port $port -> ${ide_host_ip}:${port}"
@@ -455,21 +459,22 @@ setup_firewall() {
     iptables -P OUTPUT DROP || return 1
     iptables -F OUTPUT || return 1
 
+    owner_supported="true"
+    if ! iptables -m owner -h >/dev/null 2>&1; then
+        owner_supported="false"
+        log "Owner match unavailable; DNS egress will be less restricted"
+    fi
+    dns_uid=$(id -u "$DNSMASQ_USER")
+
     iptables -A OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT || return 1
     iptables -A OUTPUT -o lo -j ACCEPT || return 1
 
     iptables -A OUTPUT -p udp --dport 53 -d 127.0.0.1 -j ACCEPT
     iptables -A OUTPUT -p tcp --dport 53 -d 127.0.0.1 -j ACCEPT
 
+    reset_nat_chains || true
     setup_loopback_forwarding
 
-    owner_supported="true"
-    if ! iptables -m owner -h >/dev/null 2>&1; then
-        owner_supported="false"
-        log "Owner match unavailable; DNS egress will be less restricted"
-    fi
-
-    dns_uid=$(id -u "$DNSMASQ_USER")
     while IFS= read -r resolver; do
         [ -z "$resolver" ] && continue
         if [ "$owner_supported" = "true" ]; then
@@ -483,13 +488,17 @@ setup_firewall() {
 $UNIQUE_RESOLVERS
 EOF_RESOLVERS
 
-    iptables -A OUTPUT -m set --match-set "$IPSET_NAME" dst -j ACCEPT
-
-    if [ "$PROXY_ENABLED" != "true" ]; then
-        setup_ide_bridge
-        return
+    # The redirects go in before allowlisted destinations are accepted, so web
+    # traffic never leaves directly while a reload rebuilds them.
+    if [ "$PROXY_ENABLED" = "true" ]; then
+        setup_proxy_redirects || return 1
     fi
 
+    iptables -A OUTPUT -m set --match-set "$IPSET_NAME" dst -j ACCEPT
+    setup_ide_bridge
+}
+
+setup_proxy_redirects() {
     if [ "$owner_supported" != "true" ]; then
         log "Owner match unavailable; cannot safely enable proxy"
         return 1
@@ -501,9 +510,9 @@ EOF_RESOLVERS
     iptables -A OUTPUT -p tcp --dport "$PROXY_HTTPS_PORT" -m addrtype --dst-type LOCAL -j ACCEPT
 
     if ! {
-        clear_proxy_nat_rules iptables "$proxy_uid" &&
-        iptables -t nat -A OUTPUT -p tcp --dport 80 -m owner --uid-owner "$proxy_uid" -j RETURN &&
-        iptables -t nat -A OUTPUT -p tcp --dport 443 -m owner --uid-owner "$proxy_uid" -j RETURN &&
+        [ "$NAT_READY" = "true" ] &&
+        iptables -t nat -A "$NAT_OUTPUT_CHAIN" -p tcp --dport 80 -m owner --uid-owner "$proxy_uid" -j RETURN &&
+        iptables -t nat -A "$NAT_OUTPUT_CHAIN" -p tcp --dport 443 -m owner --uid-owner "$proxy_uid" -j RETURN &&
         web_redirect iptables -A 80 &&
         web_redirect iptables -A 443
     }; then
@@ -512,7 +521,6 @@ EOF_RESOLVERS
     fi
 
     log "Transparent proxy NAT rules configured"
-    setup_ide_bridge
 }
 
 enable_route_localnet() {
@@ -551,32 +559,48 @@ web_redirect() {
         443) proxy_port="$PROXY_HTTPS_PORT" ;;
         *) return 1 ;;
     esac
-    "$firewall" -t nat "$action" OUTPUT -p tcp --dport "$port" -j REDIRECT --to-ports "$proxy_port"
+    "$firewall" -t nat "$action" "$NAT_OUTPUT_CHAIN" -p tcp --dport "$port" -j REDIRECT --to-ports "$proxy_port"
 }
 
-# clear_proxy_nat_rules removes the rules this script added for the proxy.
-# Flushing nat OUTPUT would also drop Docker's embedded DNS rules, which a
-# gateway forwarding to 127.0.0.11 depends on. Deleting each rule once keeps a
-# reload from growing the chain.
-clear_proxy_nat_rules() {
+# reset_nat_chains creates the IPv4 nat chains that hold this script's rules,
+# or empties them on a reload, and jumps to each from its built-in chain once.
+# Flushing the built-in chains instead would drop Docker's embedded DNS rules,
+# which a gateway forwarding to 127.0.0.11 depends on.
+# NAT_READY records whether the IPv4 chains are usable.
+reset_nat_chains() {
+    if reset_nat_chain iptables OUTPUT "$NAT_OUTPUT_CHAIN" &&
+        reset_nat_chain iptables PREROUTING "$NAT_PREROUTING_CHAIN" &&
+        reset_nat_chain iptables POSTROUTING "$NAT_POSTROUTING_CHAIN"; then
+        NAT_READY="true"
+        return 0
+    fi
+    NAT_READY="false"
+    log "NAT table unavailable"
+    return 1
+}
+
+reset_nat_chain() {
     firewall="$1"
-    owner_uid="$2"
-    for port in 80 443; do
-        "$firewall" -t nat -D OUTPUT -p tcp --dport "$port" -m owner --uid-owner "$owner_uid" -j RETURN 2>/dev/null || true
-        web_redirect "$firewall" -D "$port" 2>/dev/null || true
-    done
+    builtin="$2"
+    own="$3"
+    if "$firewall" -t nat -N "$own" 2>/dev/null; then
+        "$firewall" -t nat -A "$builtin" -j "$own"
+        return
+    fi
+    "$firewall" -t nat -F "$own" || return 1
+    "$firewall" -t nat -C "$builtin" -j "$own" 2>/dev/null ||
+        "$firewall" -t nat -A "$builtin" -j "$own"
 }
 
 # redirect_web_traffic_to_proxy sends the session's TCP 80/443 through the
 # proxy so it can be logged. The proxy's own connections and connections to
-# local addresses keep their destination. Rules are only appended: flushing the
-# nat OUTPUT chain would drop Docker's embedded DNS rules the session relies on.
+# local addresses keep their destination.
 redirect_web_traffic_to_proxy() {
     firewall="$1"
     proxy_uid="$2"
     for port in 80 443; do
-        "$firewall" -t nat -A OUTPUT -p tcp --dport "$port" -m owner --uid-owner "$proxy_uid" -j RETURN || return 1
-        "$firewall" -t nat -A OUTPUT -p tcp --dport "$port" -m addrtype --dst-type LOCAL -j RETURN || return 1
+        "$firewall" -t nat -A "$NAT_OUTPUT_CHAIN" -p tcp --dport "$port" -m owner --uid-owner "$proxy_uid" -j RETURN || return 1
+        "$firewall" -t nat -A "$NAT_OUTPUT_CHAIN" -p tcp --dport "$port" -m addrtype --dst-type LOCAL -j RETURN || return 1
     done
     web_redirect "$firewall" -A 80 || return 1
     web_redirect "$firewall" -A 443 || return 1
@@ -619,6 +643,7 @@ fail_open_without_proxy() {
 # same ports as a restricted one and routes web traffic through the proxy, but
 # installs no filters, leaves IPv6 enabled and does not take over DNS.
 setup_observing_network() {
+    reset_nat_chains || true
     setup_loopback_forwarding local
     enable_route_localnet
 
@@ -629,7 +654,10 @@ setup_observing_network() {
         fi
         proxy_uid=$(id -u "$PROXY_USER")
         redirect_web_traffic_to_proxy iptables "$proxy_uid" || return 1
-        if command -v ip6tables >/dev/null 2>&1 && ! redirect_web_traffic_to_proxy ip6tables "$proxy_uid"; then
+        if command -v ip6tables >/dev/null 2>&1 && ! {
+            reset_nat_chain ip6tables OUTPUT "$NAT_OUTPUT_CHAIN" &&
+                redirect_web_traffic_to_proxy ip6tables "$proxy_uid"
+        }; then
             log "IPv6 NAT unavailable; IPv6 HTTP/HTTPS traffic is not logged"
         fi
         log "Transparent proxy NAT rules configured (observing only)"

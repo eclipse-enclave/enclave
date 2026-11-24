@@ -346,7 +346,7 @@ func TestRunHoldingImageInbox(t *testing.T) {
 func TestSweepImageInboxesWaitsForTheInboxLock(t *testing.T) {
 	home := t.TempDir()
 	makeInboxes(t, home, backend.NameDocker, "starting")
-	release, err := util.AcquireFileLock(config.HostImageInboxLockPath(home), nil)
+	release, err := util.AcquireSharedFileLock(config.HostImageInboxLockPath(home), nil)
 	if err != nil {
 		t.Fatal(err)
 	}

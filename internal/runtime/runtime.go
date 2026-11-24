@@ -1157,7 +1157,8 @@ func (r *Runtime) addImageInboxMount(mounts *mountAccumulator) error {
 	}
 	// Held until the session start lock is released, once the container
 	// exists: a sweep in between would see no session holding the inbox.
-	release, err := util.AcquireFileLock(config.HostImageInboxLockPath(r.host.Home), func() {
+	// Shared, because only sweeps need to wait for a start, not other starts.
+	release, err := util.AcquireSharedFileLock(config.HostImageInboxLockPath(r.host.Home), func() {
 		logx.Infof("Waiting for another enclave command to finish removing image inboxes.")
 	})
 	if err != nil {

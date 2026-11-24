@@ -117,10 +117,13 @@ func strayImageInboxEntries(home string) []cleanupDir {
 }
 
 // sweepImageInboxes removes the image inboxes no inbox-enabled session holds.
-// It holds the image inbox lock, which a starting session holds from creating
-// its inbox until its container exists, so that a starting session counts.
+// It holds the image inbox lock exclusively. A starting session holds it shared
+// from creating its inbox until its container exists, so the sweep waits for
+// every start in progress and then sees its session.
 func sweepImageInboxes(ctx context.Context, be backend.Backend, home string, keep string) error {
-	release, err := util.AcquireFileLock(config.HostImageInboxLockPath(home), nil)
+	release, err := util.AcquireFileLock(config.HostImageInboxLockPath(home), func() {
+		logx.Infof("Waiting for an enclave session to finish starting before removing image inboxes.")
+	})
 	if err != nil {
 		return fmt.Errorf("acquire image inbox lock: %w", err)
 	}

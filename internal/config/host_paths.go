@@ -63,7 +63,8 @@ func HostImageInboxDir(home string, engine string, projectHash string) string {
 }
 
 // HostImageInboxLockPath is the lock file that serializes removing image
-// inboxes against starting the sessions that mount them.
+// inboxes against starting the sessions that mount them. Starts hold it
+// shared, so they run in parallel; sweeps hold it exclusively.
 func HostImageInboxLockPath(home string) string {
 	return HostLockPath(home, "image-inbox.lock")
 }

@@ -10,6 +10,7 @@ package runtime
 import (
 	"os"
 	"testing"
+	"time"
 
 	"enclave/internal/backend"
 	"enclave/internal/config"
@@ -115,3 +116,34 @@ type engineBackend struct {
 }
 
 func (b *engineBackend) Name() string { return b.name }
+
+// Inbox-enabled starts only exclude sweeps, so starts in unrelated projects
+// do not wait for each other.
+func TestImageInboxStartsShareTheInboxLock(t *testing.T) {
+	t.Parallel()
+
+	home := t.TempDir()
+	first := newCacheMountRuntime(home)
+	first.run.ImageInbox = true
+	first.backend = &engineBackend{name: backend.NameDocker}
+	if err := first.addImageInboxMount(newMountAccumulator(nil, nil)); err != nil {
+		t.Fatalf("first addImageInboxMount: %v", err)
+	}
+	defer first.releaseImageInboxLock()
+
+	second := newCacheMountRuntime(home)
+	second.project.Hash = "otherhash"
+	second.run.ImageInbox = true
+	second.backend = &engineBackend{name: backend.NameDocker}
+	done := make(chan error, 1)
+	go func() { done <- second.addImageInboxMount(newMountAccumulator(nil, nil)) }()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("second addImageInboxMount: %v", err)
+		}
+		second.releaseImageInboxLock()
+	case <-time.After(time.Second):
+		t.Fatal("an inbox-enabled start waited for another start")
+	}
+}

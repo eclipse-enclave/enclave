@@ -11,6 +11,7 @@ import (
 	"os"
 	"testing"
 
+	"enclave/internal/backend"
 	"enclave/internal/config"
 	"enclave/internal/model"
 	"enclave/internal/util"
@@ -22,13 +23,14 @@ func TestImageInboxMountIsProjectScopedAndReadOnly(t *testing.T) {
 	home := t.TempDir()
 	r := newCacheMountRuntime(home)
 	r.run.ImageInbox = true
+	r.backend = &engineBackend{name: backend.NamePodman}
 
 	acc := newMountAccumulator(nil, nil)
 	if err := r.addImageInboxMount(acc); err != nil {
 		t.Fatalf("addImageInboxMount: %v", err)
 	}
 
-	want := config.HostImageInboxDir(home, "projhash")
+	want := config.HostImageInboxDir(home, backend.NamePodman, "projhash")
 	var found bool
 	for _, m := range acc.Mounts() {
 		if m.ContainerPath != model.ContainerImageInboxDir {
@@ -70,7 +72,7 @@ func TestImageInboxMountIsOptIn(t *testing.T) {
 	if len(acc.Mounts()) != 0 || len(acc.Env()) != 0 {
 		t.Fatalf("mounts/env added without --image-inbox: %v %v", acc.Mounts(), acc.Env())
 	}
-	if _, err := os.Stat(config.HostImageInboxDir(home, "projhash")); !os.IsNotExist(err) {
+	if _, err := os.Stat(config.HostImageInboxDir(home, backend.NameDocker, "projhash")); !os.IsNotExist(err) {
 		t.Fatalf("inbox dir created without --image-inbox: %v", err)
 	}
 }
@@ -84,6 +86,7 @@ func TestImageInboxLockIsHeldUntilTheSessionStarts(t *testing.T) {
 	home := t.TempDir()
 	r := newCacheMountRuntime(home)
 	r.run.ImageInbox = true
+	r.backend = &engineBackend{name: backend.NameDocker}
 	releaseStart, err := r.acquireSessionStartLock()
 	if err != nil {
 		t.Fatal(err)
@@ -103,3 +106,12 @@ func TestImageInboxLockIsHeldUntilTheSessionStarts(t *testing.T) {
 	}
 	release()
 }
+
+// engineBackend is a fakeBackend that runs on a container engine, which
+// decides where its sessions' image inboxes live.
+type engineBackend struct {
+	fakeBackend
+	name string
+}
+
+func (b *engineBackend) Name() string { return b.name }

@@ -32,7 +32,7 @@ P1=$SMOKE_ROOT/project1
 P2=$SMOKE_ROOT/project2
 S1=imgsmoke1-$$
 S2=imgsmoke2-$$
-INBOX_ROOT=${XDG_CACHE_HOME:-$HOME/.cache}/enclave/inbox
+INBOX_ROOT=${XDG_CACHE_HOME:-$HOME/.cache}/enclave/inbox/$ENGINE
 CONTAINER_INBOX=/mnt/host-images
 
 pass() { echo "PASS: $*"; }

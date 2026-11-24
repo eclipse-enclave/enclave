@@ -176,8 +176,9 @@ shim runs that binary instead. Enclave sets neither variable.
 
 ### Host path
 
-Each project's inbox is `~/.cache/enclave/inbox/<project-hash>/`, mode 0700,
-under the [cache root](configuration.md#host-directories).
+Each project's inbox is `~/.cache/enclave/inbox/<engine>/<project-hash>/`,
+mode 0700, under the [cache root](configuration.md#host-directories).
+`<engine>` is `docker` or `podman`.
 
 ## Lifetime and targeting
 
@@ -190,8 +191,11 @@ Ending a foreground session and `enclave stop` remove the inbox right away. A
 background session that ends on its own is noticed by the next `img import`,
 the next start of an inbox-enabled session, or `enclave cleanup`. Each of
 these removes every project's inbox that no inbox-enabled session holds.
-Sessions of another container engine (Docker versus Podman) are not seen, so
-use one engine for inbox-enabled sessions.
+
+Inboxes are kept per container engine. Docker and Podman sessions of the same
+project get separate inboxes, `img import` writes to the inbox of the
+configured backend (`--backend`), and each of the commands above only removes
+inboxes of its own engine, whose sessions it can see.
 
 Why it works this way:
 

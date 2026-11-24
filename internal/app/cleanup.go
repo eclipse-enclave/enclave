@@ -190,20 +190,22 @@ func removesWholeCache(cleanup model.CleanupOptions) bool {
 	return cleanup.CleanupAll && !cleanup.CleanupKeepCache
 }
 
-// planOrphanedImageInboxCleanup returns every project's image inbox that no
-// inbox-enabled session holds, for a dry run. Every cleanup removes them,
+// planOrphanedImageInboxCleanup returns every project's image inbox on the
+// configured engine that no inbox-enabled session holds, and stray entries
+// under the inbox root, for a dry run. Every cleanup removes them,
 // whatever its scope and --keep flags: an orphaned inbox has no session left
 // to use it.
 func planOrphanedImageInboxCleanup(opts model.Options, home string) []cleanupDir {
+	stray := strayImageInboxEntries(home)
 	be, err := newListingBackend(opts)
 	if err == nil {
 		var dirs []cleanupDir
 		if dirs, err = planImageInboxSweep(context.Background(), be, home, ""); err == nil {
-			return dirs
+			return append(dirs, stray...)
 		}
 	}
 	logx.Warnf("Skipping image inbox cleanup: %v", err)
-	return nil
+	return stray
 }
 
 // cleanupOrphanedImageInboxes removes what planOrphanedImageInboxCleanup
@@ -213,6 +215,7 @@ func cleanupOrphanedImageInboxes(opts model.Options, home string) {
 	if err == nil {
 		err = sweepImageInboxes(context.Background(), be, home, "")
 	}
+	cleanupDirs(strayImageInboxEntries(home))
 	if err != nil {
 		logx.Warnf("Skipping image inbox cleanup: %v", err)
 	}

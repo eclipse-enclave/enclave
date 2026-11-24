@@ -52,11 +52,14 @@ func HostBuildDir(home string) string {
 	return filepath.Join(hostCacheRoot(home), "build")
 }
 
-// HostImageInboxDir is a project's image inbox: host images imported for the
-// project, mounted read-only into its inbox-enabled sessions. Inboxes are
-// per project so that one project's agent never sees another's host images.
-func HostImageInboxDir(home string, projectHash string) string {
-	return filepath.Join(HostImageInboxRootDir(home), projectHash)
+// HostImageInboxDir is a project's image inbox on one container engine: host
+// images imported for the project, mounted read-only into its inbox-enabled
+// sessions on that engine. Inboxes are per project so that one project's agent
+// never sees another's host images, and per engine so that a sweep, which
+// only sees its own engine's sessions, never removes an inbox another engine's
+// session mounts. engine is a backend name such as "docker" or "podman".
+func HostImageInboxDir(home string, engine string, projectHash string) string {
+	return filepath.Join(HostImageInboxEngineDir(home, engine), projectHash)
 }
 
 // HostImageInboxLockPath is the lock file that serializes removing image
@@ -65,16 +68,22 @@ func HostImageInboxLockPath(home string) string {
 	return HostLockPath(home, "image-inbox.lock")
 }
 
-// HostImageInboxRootDir holds every project's image inbox, one directory per
-// project hash.
+// HostImageInboxRootDir holds every engine's image inboxes, one directory per
+// engine.
 func HostImageInboxRootDir(home string) string {
 	return filepath.Join(hostCacheRoot(home), "inbox")
 }
 
-// EnsureHostImageInboxDir creates a project's image inbox readable only by
-// the user, tightening the mode of an existing one.
-func EnsureHostImageInboxDir(home string, projectHash string) (string, error) {
-	dir := HostImageInboxDir(home, projectHash)
+// HostImageInboxEngineDir holds one container engine's image inboxes, one
+// directory per project hash.
+func HostImageInboxEngineDir(home string, engine string) string {
+	return filepath.Join(HostImageInboxRootDir(home), engine)
+}
+
+// EnsureHostImageInboxDir creates a project's image inbox on an engine,
+// readable only by the user, tightening the mode of an existing one.
+func EnsureHostImageInboxDir(home string, engine string, projectHash string) (string, error) {
+	dir := HostImageInboxDir(home, engine, projectHash)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", err
 	}

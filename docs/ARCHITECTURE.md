@@ -36,7 +36,7 @@ flowchart LR
         CacheDir["~/.cache/enclave/&lt;tool&gt;/&lt;hash&gt;"]
         HistoryDir["~/.local/state/enclave/projects/&lt;hash&gt;/&lt;tool&gt;/history"]
         SSHDir["~/.cache/enclave/ssh"]
-        InboxDir["~/.cache/enclave/inbox/&lt;hash&gt;<br/>only with --image-inbox"]
+        InboxDir["~/.cache/enclave/inbox/&lt;engine&gt;/&lt;hash&gt;<br/>only with --image-inbox"]
     end
 
     subgraph Stores["Persistent stores (host dirs under ~/.local/state/enclave)"]

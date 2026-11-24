@@ -11,6 +11,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
 	"time"
@@ -124,23 +125,23 @@ func (b *inboxListingBackend) List(_ context.Context, filter backend.SessionFilt
 	return b.sessions, b.err
 }
 
-func makeInboxes(t *testing.T, home string, hashes ...string) {
+func makeInboxes(t *testing.T, home string, engine string, hashes ...string) {
 	t.Helper()
 	for _, hash := range hashes {
-		if _, err := config.EnsureHostImageInboxDir(home, hash); err != nil {
+		if _, err := config.EnsureHostImageInboxDir(home, engine, hash); err != nil {
 			t.Fatal(err)
 		}
 	}
 }
 
-func inboxExists(home string, hash string) bool {
-	_, err := os.Stat(config.HostImageInboxDir(home, hash))
+func inboxExists(home string, engine string, hash string) bool {
+	_, err := os.Stat(config.HostImageInboxDir(home, engine, hash))
 	return err == nil
 }
 
 func TestPlanImageInboxSweepListsAllSessions(t *testing.T) {
 	home := t.TempDir()
-	makeInboxes(t, home, "hashA", "hashB")
+	makeInboxes(t, home, backend.NameDocker, "hashA", "hashB")
 	be := &inboxListingBackend{name: backend.NameDocker, sessions: []backend.Session{inboxSession("a", "hashA", "/src/a", true)}}
 
 	dirs, err := planImageInboxSweep(context.Background(), be, home, "")
@@ -150,7 +151,7 @@ func TestPlanImageInboxSweepListsAllSessions(t *testing.T) {
 	if !be.filter.All {
 		t.Fatalf("sweep must see created and stopped sessions, listed with %+v", be.filter)
 	}
-	want := []cleanupDir{{Kind: imageInboxKind, Path: config.HostImageInboxDir(home, "hashB")}}
+	want := []cleanupDir{{Kind: imageInboxKind, Path: config.HostImageInboxDir(home, backend.NameDocker, "hashB")}}
 	if !reflect.DeepEqual(dirs, want) {
 		t.Fatalf("planImageInboxSweep() = %v, want %v", dirs, want)
 	}
@@ -170,7 +171,7 @@ func TestPlanImageInboxSweepSkipsListingWithoutInboxes(t *testing.T) {
 
 func TestPlanImageInboxSweepKeepsEverythingWhenListingFails(t *testing.T) {
 	home := t.TempDir()
-	makeInboxes(t, home, "hashA")
+	makeInboxes(t, home, backend.NameDocker, "hashA")
 	be := &inboxListingBackend{name: backend.NameDocker, err: errors.New("engine down")}
 
 	dirs, err := planImageInboxSweep(context.Background(), be, home, "")
@@ -181,7 +182,7 @@ func TestPlanImageInboxSweepKeepsEverythingWhenListingFails(t *testing.T) {
 
 func TestPlanImageInboxSweepIgnoresBackendsWithoutInboxes(t *testing.T) {
 	home := t.TempDir()
-	makeInboxes(t, home, "hashA")
+	makeInboxes(t, home, backend.NameDocker, "hashA")
 	be := &inboxListingBackend{name: backend.NameQEMU}
 
 	dirs, err := planImageInboxSweep(context.Background(), be, home, "")
@@ -193,19 +194,63 @@ func TestPlanImageInboxSweepIgnoresBackendsWithoutInboxes(t *testing.T) {
 	}
 }
 
+func TestSweepImageInboxesStaysInItsEngine(t *testing.T) {
+	for _, engines := range [][2]string{{backend.NamePodman, backend.NameDocker}, {backend.NameDocker, backend.NamePodman}} {
+		sweeping, other := engines[0], engines[1]
+		t.Run(sweeping, func(t *testing.T) {
+			home := t.TempDir()
+			makeInboxes(t, home, sweeping, "hashA")
+			makeInboxes(t, home, other, "hashA", "hashB")
+			be := &inboxListingBackend{name: sweeping}
+
+			if err := sweepImageInboxes(context.Background(), be, home, ""); err != nil {
+				t.Fatal(err)
+			}
+
+			if inboxExists(home, sweeping, "hashA") {
+				t.Fatalf("%s sweep kept its own orphaned inbox", sweeping)
+			}
+			if !inboxExists(home, other, "hashA") || !inboxExists(home, other, "hashB") {
+				t.Fatalf("%s sweep removed a %s inbox it cannot see the sessions of", sweeping, other)
+			}
+		})
+	}
+}
+
+func TestStrayImageInboxEntries(t *testing.T) {
+	home := t.TempDir()
+	makeInboxes(t, home, backend.NameDocker, "hashA")
+	makeInboxes(t, home, backend.NamePodman, "hashB")
+	root := config.HostImageInboxRootDir(home)
+	if err := os.Mkdir(filepath.Join(root, "flatHash"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "stray-file"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	want := []cleanupDir{
+		{Kind: imageInboxKind, Path: filepath.Join(root, "flatHash")},
+		{Kind: imageInboxKind, Path: filepath.Join(root, "stray-file")},
+	}
+	if got := strayImageInboxEntries(home); !reflect.DeepEqual(got, want) {
+		t.Fatalf("strayImageInboxEntries() = %v, want %v", got, want)
+	}
+}
+
 func TestSweepImageInboxesRemovesOrphans(t *testing.T) {
 	home := t.TempDir()
-	makeInboxes(t, home, "hashA", "hashB", "hashC")
+	makeInboxes(t, home, backend.NamePodman, "hashA", "hashB", "hashC")
 	be := &inboxListingBackend{name: backend.NamePodman, sessions: []backend.Session{inboxSession("a", "hashA", "/src/a", true)}}
 
 	if err := sweepImageInboxes(context.Background(), be, home, "hashC"); err != nil {
 		t.Fatal(err)
 	}
 
-	if !inboxExists(home, "hashA") || !inboxExists(home, "hashC") {
+	if !inboxExists(home, backend.NamePodman, "hashA") || !inboxExists(home, backend.NamePodman, "hashC") {
 		t.Fatal("removed an inbox in use")
 	}
-	if inboxExists(home, "hashB") {
+	if inboxExists(home, backend.NamePodman, "hashB") {
 		t.Fatal("kept an orphaned inbox")
 	}
 }
@@ -238,20 +283,20 @@ func TestStopRemovesTheInboxOfTheLastInboxEnabledSession(t *testing.T) {
 	second := inboxSession("enclave-claude-"+project.Hash+"-2", project.Hash, projectDir, true)
 	second.Name = "2"
 	home := t.TempDir()
-	makeInboxes(t, home, project.Hash)
+	makeInboxes(t, home, backend.NameDocker, project.Hash)
 	be := &sessionLifecycleBackend{inboxListingBackend{name: backend.NameDocker, sessions: []backend.Session{first, second}}}
 
 	if code := stopSessionsAndSweepInboxes(context.Background(), be, stopOptionsWithArg("1"), projectDir, home); code != 0 {
 		t.Fatalf("stop exited %d", code)
 	}
-	if !inboxExists(home, project.Hash) {
+	if !inboxExists(home, backend.NameDocker, project.Hash) {
 		t.Fatal("stopping one of two sessions removed the inbox")
 	}
 
 	if code := stopSessionsAndSweepInboxes(context.Background(), be, stopOptionsWithArg("2"), projectDir, home); code != 0 {
 		t.Fatalf("stop exited %d", code)
 	}
-	if inboxExists(home, project.Hash) {
+	if inboxExists(home, backend.NameDocker, project.Hash) {
 		t.Fatal("stopping the last inbox-enabled session kept the inbox")
 	}
 }
@@ -275,14 +320,14 @@ func TestRunHoldingImageInbox(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			home := t.TempDir()
-			makeInboxes(t, home, "hashA", "orphan")
+			makeInboxes(t, home, backend.NameDocker, "hashA", "orphan")
 			be := &inboxListingBackend{name: backend.NameDocker, sessions: tt.others}
 
 			code := runHoldingImageInbox(context.Background(), be, home, "hashA", tt.foreground, func() int {
-				if inboxExists(home, "orphan") {
+				if inboxExists(home, backend.NameDocker, "orphan") {
 					t.Error("another project's orphaned inbox survived the session start")
 				}
-				if !inboxExists(home, "hashA") {
+				if !inboxExists(home, backend.NameDocker, "hashA") {
 					t.Error("the starting session's inbox was removed")
 				}
 				return 7
@@ -291,7 +336,7 @@ func TestRunHoldingImageInbox(t *testing.T) {
 			if code != 7 {
 				t.Fatalf("exit code %d, want the session's 7", code)
 			}
-			if got := inboxExists(home, "hashA"); got != tt.wantKept {
+			if got := inboxExists(home, backend.NameDocker, "hashA"); got != tt.wantKept {
 				t.Fatalf("inbox kept = %v, want %v", got, tt.wantKept)
 			}
 		})
@@ -300,7 +345,7 @@ func TestRunHoldingImageInbox(t *testing.T) {
 
 func TestSweepImageInboxesWaitsForTheInboxLock(t *testing.T) {
 	home := t.TempDir()
-	makeInboxes(t, home, "starting")
+	makeInboxes(t, home, backend.NameDocker, "starting")
 	release, err := util.AcquireFileLock(config.HostImageInboxLockPath(home), nil)
 	if err != nil {
 		t.Fatal(err)
@@ -314,7 +359,7 @@ func TestSweepImageInboxesWaitsForTheInboxLock(t *testing.T) {
 		t.Fatalf("sweep ran while a session start held the inbox lock: %v", err)
 	case <-time.After(100 * time.Millisecond):
 	}
-	if !inboxExists(home, "starting") {
+	if !inboxExists(home, backend.NameDocker, "starting") {
 		t.Fatal("inbox removed while a session start held the inbox lock")
 	}
 
@@ -322,7 +367,7 @@ func TestSweepImageInboxesWaitsForTheInboxLock(t *testing.T) {
 	if err := <-done; err != nil {
 		t.Fatal(err)
 	}
-	if inboxExists(home, "starting") {
+	if inboxExists(home, backend.NameDocker, "starting") {
 		t.Fatal("orphaned inbox kept after the lock was released")
 	}
 }

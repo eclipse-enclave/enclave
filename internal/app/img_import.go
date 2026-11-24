@@ -38,6 +38,9 @@ const screenshotCaptureTimeout = 10 * time.Minute
 const clipboardCopyTimeout = 10 * time.Second
 
 type inboxTarget struct {
+	// engine is the container engine of the backend the target session was
+	// found through; its sessions mount that engine's inboxes.
+	engine       string
 	projectHash  string
 	projectLabel string
 }
@@ -98,7 +101,7 @@ func importHostImage(opts model.Options, projectDir string, desktop hostDesktop)
 	if err != nil {
 		return "", nil, fmt.Errorf("failed to resolve home directory: %w", err)
 	}
-	containerPath, err := writeHostImage(home, target.projectHash, data, ext)
+	containerPath, err := writeHostImage(home, target.engine, target.projectHash, data, ext)
 	if err != nil {
 		return "", nil, err
 	}
@@ -172,7 +175,7 @@ func resolveImportTarget(opts model.Options, projectDir string) (*inboxTarget, e
 	if err != nil {
 		return nil, err
 	}
-	return &inboxTarget{projectHash: projectHash, projectLabel: inboxProjectLabel(sessions, projectHash)}, nil
+	return &inboxTarget{engine: be.Name(), projectHash: projectHash, projectLabel: inboxProjectLabel(sessions, projectHash)}, nil
 }
 
 // copiesPathToClipboard reports whether the container path replaces the
@@ -334,14 +337,14 @@ func inboxProjectLabel(sessions []backend.Session, projectHash string) string {
 }
 
 // writeHostImage atomically writes a validated host image into the project's
-// image inbox under a fresh random name, readable only by the user. It returns
-// the path the project's sessions see it at.
-func writeHostImage(home string, projectHash string, data []byte, ext string) (string, error) {
+// image inbox on engine under a fresh random name, readable only by the user.
+// It returns the path the project's sessions see it at.
+func writeHostImage(home string, engine string, projectHash string, data []byte, ext string) (string, error) {
 	name, err := newInboxFilename(ext)
 	if err != nil {
 		return "", fmt.Errorf("generate host image name: %w", err)
 	}
-	inboxDir, err := config.EnsureHostImageInboxDir(home, projectHash)
+	inboxDir, err := config.EnsureHostImageInboxDir(home, engine, projectHash)
 	if err != nil {
 		return "", fmt.Errorf("create image inbox: %w", err)
 	}

@@ -127,14 +127,14 @@ func TestInboxFilename(t *testing.T) {
 
 func TestWriteHostImageWritesToProjectInbox(t *testing.T) {
 	home := t.TempDir()
-	containerPath, err := writeHostImage(home, "projA", jpegMagic, "jpg")
+	containerPath, err := writeHostImage(home, backend.NamePodman, "projA", jpegMagic, "jpg")
 	if err != nil {
 		t.Fatalf("writeHostImage: %v", err)
 	}
 	if !regexp.MustCompile(`^/mnt/host-images/\d{8}T\d{6}Z-[0-9a-f]{8}\.jpg$`).MatchString(containerPath) {
 		t.Fatalf("container path = %q", containerPath)
 	}
-	inbox := config.HostImageInboxDir(home, "projA")
+	inbox := config.HostImageInboxDir(home, backend.NamePodman, "projA")
 	final := filepath.Join(inbox, filepath.Base(containerPath))
 	info, err := os.Stat(final)
 	if err != nil {
@@ -153,8 +153,11 @@ func TestWriteHostImageWritesToProjectInbox(t *testing.T) {
 	if len(entries) != 1 {
 		t.Fatalf("expected 1 file (no temp leftovers), got %d", len(entries))
 	}
-	if _, err := os.Stat(config.HostImageInboxDir(home, "projB")); !os.IsNotExist(err) {
+	if _, err := os.Stat(config.HostImageInboxDir(home, backend.NamePodman, "projB")); !os.IsNotExist(err) {
 		t.Fatalf("another project's inbox was touched: %v", err)
+	}
+	if _, err := os.Stat(config.HostImageInboxDir(home, backend.NameDocker, "projA")); !os.IsNotExist(err) {
+		t.Fatalf("another engine's inbox was touched: %v", err)
 	}
 }
 

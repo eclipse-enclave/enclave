@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 
+	"enclave/internal/backend"
 	"enclave/internal/config"
 	"enclave/internal/model"
 )
@@ -118,6 +119,7 @@ func TestOnlyDisposableMountsCreateSources(t *testing.T) {
 	r := newCacheMountRuntime(home)
 	r.profile.MemoryDir = ".claude/memory"
 	r.run.ImageInbox = true
+	r.backend = &engineBackend{name: backend.NameDocker}
 
 	acc := newMountAccumulator(nil, nil)
 	r.addMemoryMounts(acc)

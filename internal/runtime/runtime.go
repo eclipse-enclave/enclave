@@ -1145,12 +1145,15 @@ func (r *Runtime) addSSHMount(mounts *mountAccumulator) {
 	logx.Warnf("SSH not configured. Run '%s ssh-init' to enable SSH operations.", model.AppName)
 }
 
-// addImageInboxMount mounts the project's image inbox read-only. The container
-// can only read host images the user imported on the host; it has no way to
-// add any itself.
+// addImageInboxMount mounts the project's image inbox on the session's
+// container engine read-only. The container can only read host images the
+// user imported on the host; it has no way to add any itself.
 func (r *Runtime) addImageInboxMount(mounts *mountAccumulator) error {
 	if !r.run.ImageInbox {
 		return nil
+	}
+	if r.backend == nil {
+		return fmt.Errorf("image inbox: no container backend selected")
 	}
 	// Held until the session start lock is released, once the container
 	// exists: a sweep in between would see no session holding the inbox.
@@ -1161,7 +1164,7 @@ func (r *Runtime) addImageInboxMount(mounts *mountAccumulator) error {
 		return fmt.Errorf("acquire image inbox lock: %w", err)
 	}
 	r.releaseImageInboxLock = release
-	inboxDir, err := config.EnsureHostImageInboxDir(r.host.Home, r.project.Hash)
+	inboxDir, err := config.EnsureHostImageInboxDir(r.host.Home, r.backend.Name(), r.project.Hash)
 	if err != nil {
 		return fmt.Errorf("create image inbox: %w", err)
 	}

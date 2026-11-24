@@ -94,7 +94,7 @@ Per-project data is stored on the host and reused across sessions:
 | Agent memory | `~/.local/state/enclave/projects/<project-hash>/<tool>/memory/` (Claude); `memory/<key>/` (Codex, matching the config-store key) |
 | Config/env/auth stores | Host directories under `~/.local/state/enclave/` (bind-mounted; no Docker volumes) |
 | Embedded runtime assets | `~/.cache/enclave/assets/<content-hash>/` |
-| Image inbox | `~/.cache/enclave/inbox/<project-hash>/` (mode 0700; see [Image inbox](image-inbox.md#lifetime-and-targeting)) |
+| Image inbox | `~/.cache/enclave/inbox/<engine>/<project-hash>/` (mode 0700; see [Image inbox](image-inbox.md#lifetime-and-targeting)) |
 
 macOS paths: [Host directories](configuration.md#host-directories). Store
 lifecycle: [Persistent stores](runtime/stores.md); memory rules:

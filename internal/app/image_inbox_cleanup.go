@@ -10,6 +10,8 @@ package app
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -58,15 +60,16 @@ func sessionHasEnded(session backend.Session) bool {
 	}
 }
 
-// planImageInboxSweep returns the image inboxes no inbox-enabled session holds
-// any more. Only the Docker and Podman backends run inbox-enabled sessions, so
-// another backend's listing cannot decide anything and plans nothing. When the
+// planImageInboxSweep returns the image inboxes of the backend's engine that no
+// inbox-enabled session holds any more. It never judges another engine's
+// inboxes, whose sessions it cannot list. Only the Docker and Podman backends
+// run inbox-enabled sessions, so another backend plans nothing. When the
 // sessions cannot be listed, nothing is removable and the error is returned.
 func planImageInboxSweep(ctx context.Context, be backend.Backend, home string, keep string) ([]cleanupDir, error) {
 	if !backendRunsImageInboxes(be) {
 		return nil, nil
 	}
-	inboxes := listSubdirs(config.HostImageInboxRootDir(home))
+	inboxes := listSubdirs(config.HostImageInboxEngineDir(home, be.Name()))
 	if len(inboxes) == 0 {
 		return nil, nil
 	}
@@ -76,18 +79,41 @@ func planImageInboxSweep(ctx context.Context, be backend.Backend, home string, k
 	}
 	var dirs []cleanupDir
 	for _, hash := range orphanedImageInboxes(inboxes, sessions, keep) {
-		dirs = append(dirs, cleanupDir{Kind: imageInboxKind, Path: config.HostImageInboxDir(home, hash)})
+		dirs = append(dirs, cleanupDir{Kind: imageInboxKind, Path: config.HostImageInboxDir(home, be.Name(), hash)})
 	}
 	return dirs, nil
 }
 
 func backendRunsImageInboxes(be backend.Backend) bool {
-	switch be.Name() {
+	return isImageInboxEngine(be.Name())
+}
+
+func isImageInboxEngine(name string) bool {
+	switch name {
 	case backend.NameDocker, backend.NamePodman:
 		return true
 	default:
 		return false
 	}
+}
+
+// strayImageInboxEntries returns the entries under the image inbox root that
+// are not an engine's inbox directory, such as inboxes from before inboxes
+// were kept per engine. No session mounts them.
+func strayImageInboxEntries(home string) []cleanupDir {
+	root := config.HostImageInboxRootDir(home)
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return nil
+	}
+	var dirs []cleanupDir
+	for _, entry := range entries {
+		if entry.IsDir() && isImageInboxEngine(entry.Name()) {
+			continue
+		}
+		dirs = append(dirs, cleanupDir{Kind: imageInboxKind, Path: filepath.Join(root, entry.Name())})
+	}
+	return dirs
 }
 
 // sweepImageInboxes removes the image inboxes no inbox-enabled session holds.

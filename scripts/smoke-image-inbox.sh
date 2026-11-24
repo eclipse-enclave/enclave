@@ -189,7 +189,13 @@ out=$(img_import "$P1" --file "$FIXTURE") || fail "file import failed: $(cat "$F
 in_container "$C1" 'xclip -selection clipboard -o' >/dev/null && fail "xclip shim answered a text request"
 in_container "$C1" 'env -u ENCLAVE_IMAGE_INBOX xclip -selection clipboard -o -t TARGETS' >/dev/null \
   && fail "xclip shim answered without ENCLAVE_IMAGE_INBOX"
+copy=$(in_container "$C1" '{ head -c 2000000 /dev/zero; echo "writer=$?" >&2; } | xclip -selection clipboard; echo "shim=$?"' 2>&1)
+case "$copy" in
+  *writer=0*shim=1* | *shim=1*writer=0*) ;;
+  *) fail "xclip shim copy mode broke the writer's pipe: $copy" ;;
+esac
 pass "xclip and wl-paste shims serve the fresh host image and refuse text"
+pass "xclip shim drains a copy before refusing it"
 
 echo "=== targeting outside a project ==="
 : > "$NOTIFY_LOG"

@@ -60,7 +60,13 @@ case "$name" in
             esac
             shift
         done
-        "$out" && "$clipboard" || exit 1
+        # Copy mode: read what the caller pipes in before refusing, so its
+        # write does not fail with EPIPE.
+        if ! "$out"; then
+            [ -t 0 ] || cat >/dev/null
+            exit 1
+        fi
+        "$clipboard" || exit 1
         if [ "$target" = TARGETS ]; then
             list=true
             target=

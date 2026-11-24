@@ -170,9 +170,12 @@ clipboard selection with the newest host image in `ENCLAVE_IMAGE_INBOX`,
 only its real type (`image/png` or `image/jpeg`), and only if it was imported
 at most 60 seconds ago. Everything else, including text requests, sessions
 without an inbox, and older host images, exits 1 with no output, which the
-agents treat as "no image". When `DISPLAY` (for `xclip`) or `WAYLAND_DISPLAY`
-(for `wl-paste`) is set and a real binary is installed later on `PATH`, the
-shim runs that binary instead. Enclave sets neither variable.
+agents treat as "no image". In copy mode, `xclip` reads all of its input
+before exiting 1, so an agent that pipes copied text into it and also copies
+through the terminal (OSC 52) keeps copying as before. When `DISPLAY` (for
+`xclip`) or `WAYLAND_DISPLAY` (for `wl-paste`) is set and a real binary is
+installed later on `PATH`, the shim runs that binary instead. Enclave sets
+neither variable.
 
 ### Host path
 

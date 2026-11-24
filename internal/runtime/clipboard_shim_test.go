@@ -195,6 +195,34 @@ func TestClipboardShimRefusesTextAndOtherModes(t *testing.T) {
 	e.expectNoImage("wl-paste", "--type")
 }
 
+// Copy helpers such as OpenCode's pipe the copied text into
+// `xclip -selection clipboard` without handling a write error, so the shim
+// must read all of stdin before refusing; exiting first breaks the pipe.
+func TestClipboardShimDrainsStdinInXclipCopyMode(t *testing.T) {
+	e := newShimEnv(t)
+	cmd := exec.Command("sh", filepath.Join(e.bin, "xclip"), "-selection", "clipboard")
+	cmd.Env = []string{"PATH=" + e.bin + string(os.PathListSeparator) + os.Getenv("PATH"), "ENCLAVE_IMAGE_INBOX=" + e.inbox}
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	// Larger than a pipe buffer, so the write only completes if the shim reads.
+	_, writeErr := stdin.Write(bytes.Repeat([]byte("x"), 1<<20))
+	closeErr := stdin.Close()
+	err = cmd.Wait()
+
+	if writeErr != nil || closeErr != nil {
+		t.Fatalf("writing the copied text failed: %v, %v", writeErr, closeErr)
+	}
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) || exitErr.ExitCode() != 1 {
+		t.Fatalf("copy mode exited with %v, want exit status 1", err)
+	}
+}
+
 func TestClipboardShimDelegatesToRealToolWithDisplay(t *testing.T) {
 	e := newShimEnv(t)
 	e.stage("20261119T100000Z-aabbccdd.png", shimPNG, 0)

@@ -675,7 +675,7 @@ func (r *Runtime) logPortForwardings(bindings []backend.PortMapping) {
 			continue
 		}
 		if hostIP == "" {
-			hostIP = "127.0.0.1"
+			hostIP = util.DefaultPortHostIP
 		}
 		if hostPort == "0" {
 			if binding := boundPortMapping(bindings, containerPort); binding != nil {

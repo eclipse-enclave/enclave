@@ -100,3 +100,48 @@ func TestBuildWithDockerCLIOmitsProgressWhenBuildkitDisabled(t *testing.T) {
 		t.Fatalf("did not expect --progress with DOCKER_BUILDKIT=0, got:\n%s", data)
 	}
 }
+
+func fakeDockerBinary(t *testing.T, script string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "docker")
+	if err := os.WriteFile(path, []byte("#!/bin/sh\n"+script), 0o700); err != nil { // #nosec G306 -- test helper script must be executable.
+		t.Fatal(err)
+	}
+	previous := dockerBinary
+	dockerBinary = path
+	t.Cleanup(func() { dockerBinary = previous })
+	return path
+}
+
+func TestImageSaveRunsDockerSaveWithOutputPath(t *testing.T) {
+	dir := t.TempDir()
+	argsFile := filepath.Join(dir, "args")
+	fakeDockerBinary(t, `printf '%s\n' "$@" > '`+argsFile+`'`)
+
+	target := filepath.Join(dir, "image.tar")
+	if err := ImageSave(context.Background(), "enclave-claude:latest", target); err != nil {
+		t.Fatalf("ImageSave: %v", err)
+	}
+	got, err := os.ReadFile(argsFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "save\n--output\n" + target + "\nenclave-claude:latest\n"
+	if string(got) != want {
+		t.Fatalf("docker args:\ngot  %q\nwant %q", got, want)
+	}
+}
+
+func TestImageSaveReportsStderrOnFailure(t *testing.T) {
+	fakeDockerBinary(t, `echo 'Error response from daemon: no space left on device' >&2; exit 1`)
+
+	err := ImageSave(context.Background(), "enclave-claude:latest", filepath.Join(t.TempDir(), "image.tar"))
+	if err == nil {
+		t.Fatal("ImageSave succeeded, want an error")
+	}
+	for _, want := range []string{"save", "enclave-claude:latest", "no space left on device"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("err = %q, want it to contain %q", err, want)
+		}
+	}
+}

@@ -11,7 +11,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -76,11 +75,7 @@ func (hostEngineImages) Inspect(ctx context.Context, ref string) (backendsbx.Ima
 }
 
 func (hostEngineImages) Save(ctx context.Context, ref string, path string) error {
-	cmd := exec.CommandContext(ctx, docker.Binary(), "save", "--output", path, ref) // #nosec G204 -- ref is the resolved runtime image name.
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("%s save %s: %s", docker.Binary(), ref, strings.TrimSpace(string(out)))
-	}
-	return nil
+	return docker.ImageSave(ctx, ref, path)
 }
 
 // newListingBackend builds a backend for read-only commands (ps/status/theia)

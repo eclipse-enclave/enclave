@@ -33,6 +33,21 @@ An array with one object per container (`--all` adds stopped ones):
 | `network` | `{name, subnet}` of the per-session bridge under Docker and podman; `null` for other backends and sessions started by earlier releases |
 | `options` | Session provenance; see below |
 
+### sbx sessions
+
+`enclave ps --backend sbx` lists sandboxes named like Enclave sessions. The
+sandboxes carry no Enclave labels, so only `name`, `tool`, `projectHash`,
+`status`, `createdAt`, and `sessionName` are filled, parsed from the sandbox
+name and the sbx listing. The other fields are empty:
+
+- `projectDir` and `worktree` are `""`.
+- `ports` is `[]` and `network` is `null`.
+- `background` is `false`, since sbx sessions are foreground only.
+- `options` is omitted.
+
+Consumers that group sessions by project directory or worktree must fall back
+to `projectHash` for these sessions.
+
 ### Session provenance
 
 `options` holds the session-shaping options as validated for the run, keyed and

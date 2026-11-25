@@ -50,6 +50,48 @@ func TestUpdateSkipsWhenCommitUnchanged(t *testing.T) {
 	}
 }
 
+func TestUpdateRecordsNewRefAtSameCommit(t *testing.T) {
+	fetcher := newFakeFetcher(t, "a1b2c3d4", fooRepoFiles())
+	env, _ := testEnv(t, fetcher, "")
+	installFoo(t, env)
+
+	// A new branch at the commit already installed from main.
+	fetcher.repo.ref = "same-as-main"
+	req := updateRequest("foo")
+	req.Ref = "same-as-main"
+	if _, err := Update(context.Background(), env, req); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	origin, err := readOrigin(filepath.Join(env.kindDir(model.KindFeature), "foo"))
+	if err != nil || origin == nil {
+		t.Fatalf("readOrigin = %+v, %v", origin, err)
+	}
+	if origin.Ref != "same-as-main" || origin.RefType != RefTypeBranch || origin.Commit != "a1b2c3d4" {
+		t.Fatalf("origin ref = %q (%s) at %s, want same-as-main (branch) at a1b2c3d4",
+			origin.Ref, origin.RefType, origin.Commit)
+	}
+}
+
+func TestUpdateSkipsWhenRequestedRefIsRecorded(t *testing.T) {
+	fetcher := newFakeFetcher(t, "a1b2c3d4", fooRepoFiles())
+	env, _ := testEnv(t, fetcher, "")
+	installFoo(t, env)
+
+	opensBefore := fetcher.opens
+	req := updateRequest("foo")
+	req.Ref = "main"
+	results, err := Update(context.Background(), env, req)
+	if err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	if len(results) != 1 || results[0].Action != ActionUnchanged {
+		t.Fatalf("results = %s", fmtResults(results))
+	}
+	if fetcher.opens != opensBefore {
+		t.Fatalf("Update fetched the repository for the ref it already tracks (opens %d -> %d)", opensBefore, fetcher.opens)
+	}
+}
+
 func TestUpdateAppliesNewCommit(t *testing.T) {
 	fetcher := newFakeFetcher(t, "a1b2c3d4", fooRepoFiles())
 	env, _ := testEnv(t, fetcher, "")

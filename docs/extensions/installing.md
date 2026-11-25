@@ -206,7 +206,7 @@ For each target:
 | Pin | What `update` does |
 |-----|--------------------|
 | Commit, no `--ref` or `--force` | Nothing to check, no network call. Local edits still block with an error asking for `--force`. |
-| Branch or tag | One `git ls-remote` resolves the ref. If it matches the recorded commit and there are no local edits, prints "up to date" and stops. |
+| Branch or tag | One `git ls-remote` resolves the ref. If it matches the recorded commit, `--ref` names no other ref, and there are no local edits, prints "up to date" and stops. |
 | Otherwise | Fetches, stages, and validates like `add`; shows the changed files (capped with a count) and the capability diff; swaps after confirmation, or immediately with `--yes`. |
 
 Targets that share a remote and a ref, such as several extensions from one kit

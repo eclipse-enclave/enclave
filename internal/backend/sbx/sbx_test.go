@@ -179,7 +179,7 @@ func TestRunKeepsSandboxItDidNotCreate(t *testing.T) {
 	b.writeImageStamps(map[string]string{"enclave-claude:latest": "sha256:host1"})
 
 	_, err := b.Run(context.Background(), testRequest(t), backend.AttachIO{OnStarted: func() { t.Fatal("OnStarted after a failed create") }})
-	if err == nil || !strings.Contains(err.Error(), "sbx rm enclave-claude-abc-1") {
+	if err == nil || !strings.Contains(err.Error(), "sbx ls") || !strings.Contains(err.Error(), "enclave-claude-abc-1") {
 		t.Fatalf("err = %v, want a hint naming the sandbox", err)
 	}
 	for _, c := range cli.calls {

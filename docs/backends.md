@@ -186,7 +186,7 @@ session gets its own microVM. It needs the `sbx` CLI, signed in with
 | Not supported yet | Detached sessions, `exec`, `attach`, devcontainers, a read-only project mount, Enclave allowlists, HTTP secret release |
 | Listing | `enclave ps --backend sbx` lists sandboxes named like Enclave sessions |
 
-After an interrupted or failed create, inspect any sandbox with the requested
-name using `sbx inspect <name>`. Enclave leaves it in place because it may
-belong to another session. Remove it with `sbx rm <name>` only after confirming
-it is an abandoned sandbox from your run.
+After an interrupted or failed create, look for a sandbox with the requested
+name in `sbx ls`. Enclave leaves it in place because it may belong to another
+session. Remove it with `sbx rm <name>` only after confirming it is an
+abandoned sandbox from your run.

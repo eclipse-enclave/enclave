@@ -155,10 +155,10 @@ func (b *Backend) Run(ctx context.Context, req backend.Request, attach backend.A
 		// A failed create does not establish ownership of the sandbox name.
 		if ctx.Err() != nil {
 			interrupted = true
-			logx.Warnf("Sandbox creation interrupted; check `sbx inspect %s` and remove it with `sbx rm %s` only if it belongs to this session.", plan.Name, plan.Name)
+			logx.Warnf("Sandbox creation interrupted; check `sbx ls` and remove %s with `sbx rm %s` only if it belongs to this session.", plan.Name, plan.Name)
 			return backend.ExitStatus{}, backend.ErrInterrupted
 		}
-		return backend.ExitStatus{}, fmt.Errorf("%w (an existing sandbox of that name is removed with `sbx rm %s`)", err, plan.Name)
+		return backend.ExitStatus{}, fmt.Errorf("%w (if a sandbox named %s already exists, check `sbx ls` first; it may belong to another session)", err, plan.Name)
 	}
 	defer b.removeSandbox(plan.Name)
 

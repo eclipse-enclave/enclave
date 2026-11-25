@@ -16,6 +16,7 @@ import (
 	"enclave/internal/devcontainer"
 	dockercmd "enclave/internal/docker"
 	"enclave/internal/logx"
+	"enclave/internal/model"
 	"enclave/internal/mounts"
 	"enclave/internal/util"
 )
@@ -86,7 +87,7 @@ func (b *Backend) applyDevcontainerValueArg(arg string, args []string, i *int, s
 var devcontainerRunArgHandlers = []devcontainerRunArgHandler{
 	{long: "--env", short: "-e", apply: func(_ *Backend, arg, value string, config *dockercmd.ContainerConfig, _ *dockercmd.HostConfig) {
 		if requireRunArgValue(arg, value) {
-			config.Env = append(config.Env, value)
+			config.Env = append(config.Env, filterDevcontainerEnv("--env", []string{value})...)
 		}
 	}},
 	{long: "--env-file", apply: func(_ *Backend, arg, value string, config *dockercmd.ContainerConfig, _ *dockercmd.HostConfig) {
@@ -96,7 +97,7 @@ var devcontainerRunArgHandlers = []devcontainerRunArgHandler{
 		if envValues, err := util.ParseEnvFile(value); err != nil {
 			logx.Warnf("Failed to read devcontainer env file %s: %v", value, err)
 		} else {
-			config.Env = append(config.Env, envValues...)
+			config.Env = append(config.Env, filterDevcontainerEnv("--env-file", envValues)...)
 		}
 	}},
 	{long: "--volume", short: "-v", apply: func(b *Backend, arg, value string, _ *dockercmd.ContainerConfig, hostConfig *dockercmd.HostConfig) {
@@ -309,4 +310,12 @@ func isAllowedSecurityOpt(norm string) bool {
 	}
 	// podman's mask hides additional paths.
 	return strings.HasPrefix(norm, "mask=")
+}
+
+func filterDevcontainerEnv(flag string, values []string) []string {
+	kept, dropped := model.FilterReservedEnv(values)
+	for _, key := range dropped {
+		logx.Warnf("Ignoring devcontainer runArgs %s key %q: reserved for Enclave", flag, key)
+	}
+	return kept
 }

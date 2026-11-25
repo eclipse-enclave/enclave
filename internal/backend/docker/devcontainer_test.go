@@ -479,3 +479,43 @@ func captureStderr(t *testing.T, fn func()) string {
 	}
 	return string(data)
 }
+
+func TestDevcontainerEnvCannotOverrideInternalEnvironment(t *testing.T) {
+	dir := t.TempDir()
+	remap := model.EnvPrefix + "RUNTIME_UID_REMAP_DONE"
+	allowRoot := model.EnvAllowRoot
+	hostProjectDir := "HOST_PROJECT_DIR"
+	path := filepath.Join(dir, "project.env")
+	if err := os.WriteFile(path, []byte(remap+"=project-value\n"+allowRoot+"=project-value\n"+hostProjectDir+"=project-value\nVISIBLE=kept\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		flag string
+		args []string
+	}{
+		{"--env", []string{"--env", remap + "=project-value", "--env", allowRoot + "=project-value", "--env", hostProjectDir + "=project-value", "--env", "VISIBLE=kept"}},
+		{"--env", []string{"-e", remap + "=project-value", "-e", allowRoot + "=project-value", "-e", hostProjectDir + "=project-value", "-e", "VISIBLE=kept"}},
+		{"--env", []string{"--env=" + remap + "=project-value", "--env=" + allowRoot + "=project-value", "--env=" + hostProjectDir + "=project-value", "--env=VISIBLE=kept"}},
+		{"--env", []string{"--env", remap, "--env", allowRoot, "--env", hostProjectDir, "--env", "VISIBLE=kept"}},
+		{"--env-file", []string{"--env-file", path}},
+		{"--env-file", []string{"--env-file=" + path}},
+	} {
+		t.Run(strings.Join(tc.args, " "), func(t *testing.T) {
+			trusted := []string{remap + "=0", allowRoot + "=0", hostProjectDir + "=/host/project"}
+			config := &dockercmd.ContainerConfig{Env: append([]string{}, trusted...)}
+			b := newDevcontainerBackend(dir, tc.args...)
+			warnings := captureStderr(t, func() { b.applyDevcontainerRunArgs(config, &dockercmd.HostConfig{}) })
+			if want := append(trusted, "VISIBLE=kept"); !reflect.DeepEqual(config.Env, want) {
+				t.Fatalf("environment = %v, want %v", config.Env, want)
+			}
+			if strings.Contains(warnings, "project-value") {
+				t.Fatalf("warning must not include dropped values: %q", warnings)
+			}
+			for _, key := range []string{remap, allowRoot, hostProjectDir} {
+				if want := "Ignoring devcontainer runArgs " + tc.flag + " key \"" + key + "\": reserved for Enclave"; !strings.Contains(warnings, want) {
+					t.Fatalf("warnings = %q, want %q", warnings, want)
+				}
+			}
+		})
+	}
+}

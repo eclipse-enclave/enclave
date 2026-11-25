@@ -25,8 +25,8 @@ import "strings"
 // published-port bindings. "0" is only accepted in the host-port position: a
 // bare "0" or a "0" container port stays invalid.
 //
-// hostIP is empty when the spec omits it; callers decide the default (the run
-// path defaults to loopback). ok is false for malformed specs.
+// hostIP is empty when the spec omits it; NormalizePortHostIP applies the
+// default. ok is false for malformed specs.
 func ParsePortSpec(value string) (hostIP, hostPort, containerPort string, ok bool) {
 	value = strings.TrimSpace(value)
 	if value == "" {
@@ -44,6 +44,18 @@ func ParsePortSpec(value string) (hostIP, hostPort, containerPort string, ok boo
 		return "", "", "", false
 	}
 	return ip, parts[0], parts[1], true
+}
+
+// DefaultPortHostIP is the host address that a publish spec without one binds.
+const DefaultPortHostIP = "127.0.0.1"
+
+// NormalizePortHostIP returns the address that a host IP from ParsePortSpec
+// binds: the IP without IPv6 brackets, or DefaultPortHostIP when it is empty.
+func NormalizePortHostIP(hostIP string) string {
+	if hostIP = strings.Trim(hostIP, "[]"); hostIP != "" {
+		return hostIP
+	}
+	return DefaultPortHostIP
 }
 
 // isHostPort reports whether s is valid in the host-port position of a publish

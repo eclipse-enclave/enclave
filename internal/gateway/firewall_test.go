@@ -287,3 +287,69 @@ func TestGatewayFirewallLockdownClosesInbound(t *testing.T) {
 		}
 	}
 }
+
+func TestRestrictedGatewayNATFailures(t *testing.T) {
+	const startupMocks = `
+normalize_proxy_enabled() { :; }
+init_log_files() { :; }
+ensure_local_resolver() { :; }
+render_and_validate_bundle() { :; }
+install_bundle() { :; }
+restore_bundle() { :; }
+read_bundle_generation() { echo test; }
+create_ipset() { :; }
+atomic_swap_ipset() { :; }
+setup_kernel_network() { :; }
+prepare_proxy_runtime_data() { :; }
+start_proxy() { :; }
+start_dnsmasq() { :; }
+start_dns_audit() { :; }
+monitor_loop() { :; }
+reload_children() { :; }
+log() { firewall_mock log "$@"; }
+DNSMASQ_CONF="$FW_LOG.absent"
+ACTIVE_DOMAINS_FILE="$FW_LOG.absent"
+`
+	for _, phase := range []struct{ name, invocation, ready string }{
+		{"startup", "main", "Gateway ready"},
+		{"reload", "reload_gateway", "Reload completed (generation=test)"},
+	} {
+		for _, rule := range []string{
+			"", "-t nat -F OUTPUT",
+			"-t nat -A OUTPUT -p tcp --dport 80 -m owner --uid-owner 105 -j RETURN",
+			"-t nat -A OUTPUT -p tcp --dport 443 -m owner --uid-owner 105 -j RETURN",
+			"-t nat -A OUTPUT -p tcp --dport 80 -j REDIRECT --to-ports " + proxyHTTPPort,
+			"-t nat -A OUTPUT -p tcp --dport 443 -j REDIRECT --to-ports " + proxyHTTPSPort,
+		} {
+			t.Run(phase.name+"/"+rule, func(t *testing.T) {
+				calls, err := runGatewayFirewall(t, startupMocks+phase.invocation,
+					"PROXY_ENABLED=true", "FAIL_ENGINE=iptables", "FAIL_RULE="+rule)
+				if (err != nil) != (rule != "") {
+					t.Fatalf("gateway error = %v, failing rule = %q", err, rule)
+				}
+				reachedRule, ready := rule == "", false
+				natFailureLogs := 0
+				for _, call := range calls {
+					args := strings.Join(call.args, " ")
+					reachedRule = reachedRule || (call.engine == "iptables" && args == rule)
+					if call.engine == "log" {
+						ready = ready || args == phase.ready
+						if args == "Cannot configure transparent proxy NAT rules" {
+							natFailureLogs++
+						}
+					}
+				}
+				if !reachedRule || ready != (rule == "") {
+					t.Fatalf("reached rule = %v, reported ready = %v, failing rule = %q", reachedRule, ready, rule)
+				}
+				wantFailureLogs := 0
+				if rule != "" {
+					wantFailureLogs = 1
+				}
+				if natFailureLogs != wantFailureLogs {
+					t.Errorf("NAT failure log count = %d, want %d, failing rule = %q", natFailureLogs, wantFailureLogs, rule)
+				}
+			})
+		}
+	}
+}

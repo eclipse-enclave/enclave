@@ -259,7 +259,7 @@ func (r *Runtime) prepareExecution() (*ExecutionContext, error) {
 	if err != nil {
 		return nil, err
 	}
-	projectEnv, envFileLoaded := r.envFileValues()
+	projectEnv := r.envFileValues()
 	sessionEnv := append(append([]string{}, mountArgs.Env()...), projectEnv...)
 	if err := validateGitIdentity(gitIdentity, sessionEnv); err != nil {
 		return nil, err
@@ -270,9 +270,7 @@ func (r *Runtime) prepareExecution() (*ExecutionContext, error) {
 	if err != nil {
 		return nil, err
 	}
-	if envFileLoaded {
-		r.logEnvFileLoaded()
-	}
+	r.logEnvFileLoaded(projectEnv)
 	runCtx := r.prepareRunContext(prepared.AuthState)
 	r.applyPortHints(&runCtx)
 	r.applyDevcontainerPorts()
@@ -677,7 +675,7 @@ func (r *Runtime) logPortForwardings(bindings []backend.PortMapping) {
 			continue
 		}
 		if hostIP == "" {
-			hostIP = "127.0.0.1"
+			hostIP = util.DefaultPortHostIP
 		}
 		if hostPort == "0" {
 			if binding := boundPortMapping(bindings, containerPort); binding != nil {
@@ -1028,8 +1026,8 @@ func (r *Runtime) specEnvVariables() []string {
 			logx.Warnf("Ignoring invalid environment.variables key %q (must match %s)", key, validEnvKeyPattern.String())
 			continue
 		}
-		if key == "PROJECT_DIR" || key == "TOOL" || strings.HasPrefix(key, model.EnvPrefix) {
-			logx.Warnf("Ignoring environment.variables key %q: reserved for enclave internals", key)
+		if model.IsReservedEnvKey(key) {
+			warnReservedEnvKeys("environment.variables", []string{key})
 			continue
 		}
 		env = append(env, key+"="+merged[key])
@@ -1251,7 +1249,11 @@ func (r *Runtime) addDevcontainerEnv(mounts *mountAccumulator) {
 	}
 	if len(r.devcontainer.ContainerEnv) > 0 {
 		for key, value := range r.devcontainer.ContainerEnv {
-			if key == "" || key == "PROJECT_DIR" || key == "TOOL" || strings.HasPrefix(key, model.EnvPrefix) {
+			if key == "" {
+				continue
+			}
+			if model.IsReservedEnvKey(key) {
+				warnReservedEnvKeys("devcontainer containerEnv", []string{key})
 				continue
 			}
 			mounts.AddEnv(key, value)
@@ -1579,26 +1581,37 @@ func (r *Runtime) addToolSettingsTemplate(mounts *mountAccumulator) {
 	}
 }
 
-func (r *Runtime) envFileValues() ([]string, bool) {
+func (r *Runtime) envFileValues() []string {
 	projectEnv := filepath.Join(r.project.Dir, ".env")
-	if util.PathExists(projectEnv) {
-		values, err := util.ParseEnvFile(projectEnv)
-		if err != nil {
-			logx.Warnf("Failed to read .env file: %v", err)
-			return nil, false
-		}
-		return values, true
+	if !util.PathExists(projectEnv) {
+		return nil
 	}
-	return nil, false
+	values, err := util.ParseEnvFile(projectEnv)
+	if err != nil {
+		logx.Warnf("Failed to read .env file: %v", err)
+		return nil
+	}
+	kept, dropped := model.FilterReservedEnv(values)
+	warnReservedEnvKeys("project .env", dropped)
+	return kept
 }
 
-func (r *Runtime) logEnvFileLoaded() {
-	projectEnv := filepath.Join(r.project.Dir, ".env")
-	if keys, err := util.EnvKeysFromFile(projectEnv); err == nil && len(keys) > 0 {
-		logx.Warnf(".env file loaded into container (keys: %s)", strings.Join(keys, ", "))
-	} else {
-		logx.Warnf(".env file loaded into container")
+func warnReservedEnvKeys(source string, keys []string) {
+	for _, key := range keys {
+		logx.Warnf("Ignoring %s key %q: reserved for Enclave", source, key)
 	}
+}
+
+func (r *Runtime) logEnvFileLoaded(values []string) {
+	if len(values) == 0 {
+		return
+	}
+	keys := make([]string, 0, len(values))
+	for _, value := range values {
+		key, _, _ := strings.Cut(value, "=")
+		keys = append(keys, key)
+	}
+	logx.Warnf(".env file loaded into container (keys: %s)", strings.Join(keys, ", "))
 }
 
 func formatEnvContent(values map[string]string) string {

@@ -133,7 +133,7 @@ See [Networking](networking.md).
 | `disable_gateway` | Run without a network gateway, so no network log is written; requires unrestricted network mode, otherwise the run fails |
 | `allow_domains` | Extra allowlisted domains (bare DNS names; ignored with `allow_all_network`) |
 | `network_log` | `coarse` (default), `requests`, or `full` (`requests` plus stored headers, bodies, and WebSocket messages in restricted mode; sensitive, see [Full capture](networking.md#full-capture)); see [Coverage and granularity](networking.md#coverage-and-granularity) |
-| `ports` | Publish container ports to the host |
+| `ports` | Publish container ports to the host; `0:3000` assigns a free host port on Docker and Podman (see [port direction](networking.md#port-direction--p-vs---bridge-port)) |
 | `bridge_ports` | Forward host ports into the container |
 
 ### Persistence, mounts, image

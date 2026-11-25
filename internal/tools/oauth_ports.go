@@ -8,9 +8,11 @@
 package tools
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"strings"
+	"syscall"
 
 	"enclave/internal/model"
 	"enclave/internal/util"
@@ -77,7 +79,7 @@ func OAuthPortValidateRun(ctx model.RunContext) error {
 				}
 				return fmt.Errorf("%s oauth requires host port %s to be mapped (use -p %s)", provider.Name, port, port)
 			}
-			if err := ensureHostPortAvailable(port, provider.Name); err != nil {
+			if err := ensureHostPortAvailable(publishedHostIP(ctx.Run.Ports, port), port, provider.Name); err != nil {
 				return err
 			}
 		}
@@ -125,12 +127,36 @@ func hasPortMapping(ports []string, hostPort string, containerPort string) bool 
 	return false
 }
 
-func ensureHostPortAvailable(port string, providerName string) error {
-	// #nosec G102 -- Availability probe only; closed immediately without accepting connections.
-	listener, err := net.Listen("tcp", "0.0.0.0:"+port)
-	if err != nil {
-		return fmt.Errorf("host port %s is already in use; %s oauth requires it", port, providerName)
+// publishedHostIP returns the host address of the exact port:port mapping.
+func publishedHostIP(ports []string, port string) string {
+	for _, spec := range ports {
+		hostIP, hostPort, containerPort, ok := util.ParsePortSpec(spec)
+		if ok && hostPort == port && containerPort == port {
+			return util.NormalizePortHostIP(hostIP)
+		}
 	}
-	_ = listener.Close()
+	return util.DefaultPortHostIP
+}
+
+// ensureHostPortAvailable probes the port on the address it is published on
+// and on one overlapping address. On macOS a probe fails only while the port
+// is held on the probed address itself, so a loopback probe misses a holder
+// on the wildcard, and a wildcard probe misses one on loopback, where
+// sessions publish by default.
+func ensureHostPortAvailable(hostIP string, port string, providerName string) error {
+	overlapping := "0.0.0.0"
+	if net.ParseIP(hostIP).IsUnspecified() {
+		overlapping = util.DefaultPortHostIP
+	}
+	for _, ip := range []string{hostIP, overlapping} {
+		listener, err := net.Listen("tcp", net.JoinHostPort(ip, port))
+		if errors.Is(err, syscall.EADDRINUSE) {
+			return fmt.Errorf("host port %s is already in use on %s; %s oauth requires it", port, ip, providerName)
+		}
+		if err != nil {
+			return fmt.Errorf("%s oauth requires host port %s on %s: %w", providerName, port, hostIP, err)
+		}
+		_ = listener.Close()
+	}
 	return nil
 }

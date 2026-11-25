@@ -209,8 +209,8 @@ exists, Enclave forwards it to the container's loopback interface.
 | Field | Default | Meaning |
 |-------|---------|---------|
 | `port` | required | Callback port, as a string |
-| `autoHintWhenNoSession` | `true` | Map the port automatically while the provider has no session |
-| `requireMappingWhenNoCredentials` | `true` | With no session and no env credential, fail startup unless the port is mapped exactly and free on the host |
+| `autoHintWhenNoSession` | `true` | Map the port automatically while the provider has no session. The mapping is skipped, with a message, while the port is in use on the host |
+| `requireMappingWhenNoCredentials` | `true` | With no session and no env credential, fail startup unless the port is mapped exactly and free on the host. A skipped automatic mapping does not fail startup |
 
 User-facing behavior per tool is in
 [Authentication](../auth.md#oauth-callback-ports).

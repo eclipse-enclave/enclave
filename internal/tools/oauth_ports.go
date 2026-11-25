@@ -8,11 +8,9 @@
 package tools
 
 import (
-	"errors"
 	"fmt"
-	"net"
+	"slices"
 	"strings"
-	"syscall"
 
 	"enclave/internal/model"
 	"enclave/internal/util"
@@ -50,7 +48,10 @@ func OAuthPortHints(ctx model.RunContext) []string {
 	return ordered
 }
 
-// OAuthPortValidateRun enforces exact port mappings when OAuth is required for a provider.
+// OAuthPortValidateRun enforces exact port mappings when OAuth is required for
+// a provider. A hinted port that was left unmapped because it is in use on the
+// host passes: only one session at a time can publish it, and the others must
+// still start.
 func OAuthPortValidateRun(ctx model.RunContext) error {
 	for _, provider := range ctx.Profile.Providers {
 		if provider.Name == "" {
@@ -74,6 +75,9 @@ func OAuthPortValidateRun(ctx model.RunContext) error {
 			}
 			hasHost, hasContainer, hasExact := util.PortMappingState(ctx.Run.Ports, port)
 			if !hasExact {
+				if slices.Contains(ctx.SkippedPortHints, port) {
+					continue
+				}
 				if hasHost || hasContainer {
 					return fmt.Errorf("%s oauth requires host port %s mapped to container port %s (use -p %s or -p %s:%s)", provider.Name, port, port, port, port, port)
 				}
@@ -138,25 +142,13 @@ func publishedHostIP(ports []string, port string) string {
 	return util.DefaultPortHostIP
 }
 
-// ensureHostPortAvailable probes the port on the address it is published on
-// and on one overlapping address. On macOS a probe fails only while the port
-// is held on the probed address itself, so a loopback probe misses a holder
-// on the wildcard, and a wildcard probe misses one on loopback, where
-// sessions publish by default.
 func ensureHostPortAvailable(hostIP string, port string, providerName string) error {
-	overlapping := "0.0.0.0"
-	if net.ParseIP(hostIP).IsUnspecified() {
-		overlapping = util.DefaultPortHostIP
+	holder, err := util.HostPortHolder(hostIP, port)
+	if err != nil {
+		return fmt.Errorf("%s oauth requires host port %s on %s: %w", providerName, port, hostIP, err)
 	}
-	for _, ip := range []string{hostIP, overlapping} {
-		listener, err := net.Listen("tcp", net.JoinHostPort(ip, port))
-		if errors.Is(err, syscall.EADDRINUSE) {
-			return fmt.Errorf("host port %s is already in use on %s; %s oauth requires it", port, ip, providerName)
-		}
-		if err != nil {
-			return fmt.Errorf("%s oauth requires host port %s on %s: %w", providerName, port, hostIP, err)
-		}
-		_ = listener.Close()
+	if holder != "" {
+		return fmt.Errorf("host port %s is already in use on %s; %s oauth requires it", port, holder, providerName)
 	}
 	return nil
 }

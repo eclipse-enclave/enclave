@@ -67,7 +67,10 @@ type Runtime struct {
 	// Populated during auth setup, before the effective policy is resolved and
 	// cached, so the replacement host reaches the allow set too.
 	releaseHostOverrides map[string][]string
-	backend              backend.Backend
+	// releasePortHintLock is set while the session holds the port hint lock
+	// for a port it auto-mapped; see acquirePortHintLock.
+	releasePortHintLock func()
+	backend             backend.Backend
 }
 
 type ExecutionContext struct {
@@ -209,15 +212,25 @@ func (r *Runtime) Execute() error {
 	return r.runContainer(runCtx, ctx, releaseStartLock)
 }
 
+// acquireSessionStartLock returns a function that releases the session-start
+// lock and the port hint lock, which prepareExecution takes when the session
+// auto-maps a port.
 func (r *Runtime) acquireSessionStartLock() (func(), error) {
 	lockPath := config.HostLockPath(r.host.Home, r.sessionStartLockName())
-	release, err := util.AcquireFileLock(lockPath, func() {
-		logx.Infof("Waiting for another enclave session to finish starting.")
-	})
+	release, err := util.AcquireFileLock(lockPath, logWaitingForSessionStart)
 	if err != nil {
 		return nil, fmt.Errorf("acquire session start lock: %w", err)
 	}
-	return release, nil
+	return func() {
+		if r.releasePortHintLock != nil {
+			r.releasePortHintLock()
+		}
+		release()
+	}, nil
+}
+
+func logWaitingForSessionStart() {
+	logx.Infof("Waiting for another enclave session to finish starting.")
 }
 
 // Named sessions also share the project/tool gateway config bundle, and
@@ -611,11 +624,62 @@ func (r *Runtime) addUniquePort(port string, message string, args ...any) {
 	logx.Infof(message, args...)
 }
 
+// applyPortHints maps the ports the tool hints at, which are OAuth callback
+// ports. A hint is best effort: only one session at a time can publish a host
+// port, so a session starts without the mapping while the port is in use.
 func (r *Runtime) applyPortHints(runCtx *model.RunContext) {
+	var release func()
+	mapped := false
 	for _, port := range r.handler.PortHints(*runCtx) {
-		r.addUniquePort(port, "Auto-mapped port %s for %s", port, util.TitleCase(r.profile.Name))
+		if hasHost, hasContainer, _ := util.PortMappingState(r.run.Ports, port); hasHost || hasContainer {
+			continue
+		}
+		if release == nil {
+			release = r.acquirePortHintLock()
+		}
+		holder, err := util.HostPortHolder(util.DefaultPortHostIP, port)
+		if err != nil {
+			logx.Debugf("Failed to probe host port %s: %v", port, err)
+		}
+		if holder != "" {
+			r.logSkippedPortHint(port, holder, runCtx.AuthState)
+			runCtx.SkippedPortHints = append(runCtx.SkippedPortHints, port)
+			continue
+		}
+		r.run.Ports = append(r.run.Ports, port)
+		logx.Infof("Auto-mapped port %s for %s", port, util.TitleCase(r.profile.Name))
+		mapped = true
+	}
+	if mapped {
+		r.releasePortHintLock = release
+	} else if release != nil {
+		release()
 	}
 	runCtx.Run = r.run
+}
+
+// acquirePortHintLock takes the lock that a session holds from finding a
+// hinted port free until its container runs and publishes the port. Sessions
+// that start at the same time would otherwise all find the port free, and all
+// but one would fail in the container engine. The lock is an optimization of
+// a best-effort mapping, so a failure to take it does not stop the start.
+func (r *Runtime) acquirePortHintLock() func() {
+	release, err := util.AcquireFileLock(config.HostLockPath(r.host.Home, "port-hints.lock"), logWaitingForSessionStart)
+	if err != nil {
+		logx.Debugf("Failed to acquire the port hint lock: %v", err)
+		return func() {}
+	}
+	return release
+}
+
+// logSkippedPortHint warns only when the tool has no credential at all, which
+// is when the user most likely wants the login that the port is for.
+func (r *Runtime) logSkippedPortHint(port string, holder string, state model.AuthState) {
+	logf := logx.Infof
+	if !state.HasAnySession() && !state.HasAnyEnvCredential() {
+		logf = logx.Warnf
+	}
+	logf("Port %s is in use on %s and was not mapped for %s; a browser login that calls back to it cannot complete in this session", port, holder, util.TitleCase(r.profile.Name))
 }
 
 func (r *Runtime) applyDevcontainerPorts() {

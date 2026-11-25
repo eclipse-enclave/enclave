@@ -193,6 +193,9 @@ type RunContext struct {
 	AuthState  AuthState
 	Build      BuildOptions
 	RunSources RunOptionSources
+	// SkippedPortHints lists the ports from PortHints that were left unmapped
+	// because the host port is in use.
+	SkippedPortHints []string
 }
 
 // NetworkLogView holds the flags of `enclave network log`. Scope flags that

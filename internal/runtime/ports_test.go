@@ -9,12 +9,16 @@ package runtime
 
 import (
 	"io"
+	"net"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 
 	"enclave/internal/backend"
+	"enclave/internal/config"
 	"enclave/internal/model"
+	"enclave/internal/util"
 )
 
 func captureStdout(t *testing.T, fn func()) string {
@@ -53,6 +57,147 @@ func portListHas(ports []string, want string) bool {
 		}
 	}
 	return false
+}
+
+type portHintHandler struct {
+	noopRuntimeHandler
+	ports []string
+}
+
+func (h portHintHandler) PortHints(model.RunContext) []string { return h.ports }
+
+func portHintRuntime(t *testing.T, ports ...string) *Runtime {
+	t.Helper()
+	return &Runtime{
+		host:    model.Host{Home: t.TempDir()},
+		profile: model.Profile{Name: "pi"},
+		handler: portHintHandler{ports: ports},
+	}
+}
+
+// heldLoopbackPort listens on a free loopback port until the test ends.
+func heldLoopbackPort(t *testing.T) string {
+	t.Helper()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = listener.Close() })
+	return strconv.Itoa(listener.Addr().(*net.TCPAddr).Port)
+}
+
+func freeLoopbackPort(t *testing.T) string {
+	t.Helper()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := strconv.Itoa(listener.Addr().(*net.TCPAddr).Port)
+	if err := listener.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return port
+}
+
+func portHintLockIsFree(t *testing.T, r *Runtime) bool {
+	t.Helper()
+	release, ok, err := util.TryAcquireFileLock(config.HostLockPath(r.host.Home, "port-hints.lock"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok {
+		release()
+	}
+	return ok
+}
+
+func TestApplyPortHintsMapsFreePortUntilStarted(t *testing.T) {
+	port := freeLoopbackPort(t)
+	r := portHintRuntime(t, port)
+	releaseStartLock, err := r.acquireSessionStartLock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer releaseStartLock()
+
+	var runCtx model.RunContext
+	out := captureStdout(t, func() { r.applyPortHints(&runCtx) })
+
+	if !portListHas(r.run.Ports, port) || !portListHas(runCtx.Run.Ports, port) {
+		t.Fatalf("expected the free port %s to be mapped, got %v and %v", port, r.run.Ports, runCtx.Run.Ports)
+	}
+	if len(runCtx.SkippedPortHints) != 0 {
+		t.Fatalf("expected no skipped hint, got %v", runCtx.SkippedPortHints)
+	}
+	if !strings.Contains(out, "Auto-mapped port "+port+" for Pi") {
+		t.Fatalf("expected the auto-mapping to be announced, got %q", out)
+	}
+	if portHintLockIsFree(t, r) {
+		t.Fatal("expected the port hint lock to be held until the session has started")
+	}
+	releaseStartLock()
+	if !portHintLockIsFree(t, r) {
+		t.Fatal("expected the session start to release the port hint lock")
+	}
+}
+
+func TestApplyPortHintsSkipsPortInUse(t *testing.T) {
+	tests := []struct {
+		name  string
+		state model.ProviderAuthState
+		warns bool
+	}{
+		{name: "no credential", warns: true},
+		{name: "env credential", state: model.ProviderAuthState{HasEnvCredential: true}},
+		{name: "session", state: model.ProviderAuthState{HasSession: true}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			port := heldLoopbackPort(t)
+			r := portHintRuntime(t, port)
+			runCtx := model.RunContext{AuthState: model.AuthState{
+				Providers: map[string]model.ProviderAuthState{"anthropic": tt.state, "openai-codex": {}},
+			}}
+
+			var stdout string
+			stderr := captureStderr(t, func() {
+				stdout = captureStdout(t, func() { r.applyPortHints(&runCtx) })
+			})
+
+			if len(r.run.Ports) != 0 || len(runCtx.Run.Ports) != 0 {
+				t.Fatalf("expected the port in use to stay unmapped, got %v and %v", r.run.Ports, runCtx.Run.Ports)
+			}
+			if !portListHas(runCtx.SkippedPortHints, port) {
+				t.Fatalf("expected %s to be recorded as skipped, got %v", port, runCtx.SkippedPortHints)
+			}
+			message := "Port " + port + " is in use on 127.0.0.1 and was not mapped for Pi"
+			warned, informed := strings.Contains(stderr, message), strings.Contains(stdout, message)
+			if warned != tt.warns || informed == tt.warns {
+				t.Fatalf("expected warning=%v, got stderr %q and stdout %q", tt.warns, stderr, stdout)
+			}
+			if !portHintLockIsFree(t, r) {
+				t.Fatal("expected a session that maps no port to release the port hint lock at once")
+			}
+		})
+	}
+}
+
+func TestApplyPortHintsLeavesUserMappingsAlone(t *testing.T) {
+	port := heldLoopbackPort(t)
+	for _, spec := range []string{port, port + ":3000", "3000:" + port} {
+		r := portHintRuntime(t, port)
+		r.run.Ports = []string{spec}
+		var runCtx model.RunContext
+
+		r.applyPortHints(&runCtx)
+
+		if len(r.run.Ports) != 1 || r.run.Ports[0] != spec {
+			t.Errorf("expected the user mapping %s to stay as it is, got %v", spec, r.run.Ports)
+		}
+		if len(runCtx.SkippedPortHints) != 0 {
+			t.Errorf("expected no skipped hint beside the user mapping %s, got %v", spec, runCtx.SkippedPortHints)
+		}
+	}
 }
 
 func TestApplyProfilePortsInjectsPublishedPorts(t *testing.T) {

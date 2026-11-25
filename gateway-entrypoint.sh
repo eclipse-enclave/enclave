@@ -296,10 +296,10 @@ atomic_swap_ipset() {
 }
 
 # setup_loopback_forwarding makes listeners on 127.0.0.1 reachable through
-# published ports. Forwarded connections arriving over the bridge (Docker) pass
-# nat PREROUTING. With "local", connections generated inside the namespace to
-# the gateway's own address (rootless podman's port forwarder) are redirected
-# in nat OUTPUT as well.
+# published ports. Forwarded connections arriving over the bridge (Docker) are
+# redirected in ENCLAVE_PREROUTING. With "local", connections generated inside
+# the namespace to the gateway's own address (rootless podman's port forwarder)
+# are redirected in ENCLAVE_OUTPUT as well.
 #
 # Callers run this before setup_kernel_network/enable_route_localnet, so the
 # DNAT-vs-socat choice depends on the namespace's initial route_localnet.
@@ -463,7 +463,7 @@ setup_firewall() {
     owner_supported="true"
     if ! iptables -m owner -h >/dev/null 2>&1; then
         owner_supported="false"
-        log "Owner match unavailable; DNS egress will be less restricted"
+        log "Owner match unavailable; the session can query upstream resolvers and Docker's embedded DNS directly, bypassing the allowlist"
     fi
     dns_uid=$(id -u "$DNSMASQ_USER")
 

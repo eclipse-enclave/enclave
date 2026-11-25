@@ -346,12 +346,22 @@ func TestGatewayFirewallReloadReplacesItsNATRules(t *testing.T) {
 }
 
 func TestGatewayFirewallKeepsDockerDNSForDnsmasqOnly(t *testing.T) {
-	calls, err := runGatewayFirewall(t, "setup_firewall", "PROXY_ENABLED=true")
+	// Distinct uids per user, so exempting the proxy instead of dnsmasq fails.
+	const distinctUIDs = `
+id() {
+    case "$2" in
+        dnsmasq) printf '100\n' ;;
+        gateway) printf '101\n' ;;
+        *) return 1 ;;
+    esac
+}
+`
+	calls, err := runGatewayFirewall(t, distinctUIDs+"setup_firewall", "PROXY_ENABLED=true")
 	if err != nil {
 		t.Fatal(err)
 	}
 	lines := callLines(calls)
-	drop := slices.Index(lines, "iptables -A OUTPUT -d 127.0.0.11 -m owner ! --uid-owner 105 -j DROP")
+	drop := slices.Index(lines, "iptables -A OUTPUT -d 127.0.0.11 -m owner ! --uid-owner 100 -j DROP")
 	loopback := slices.Index(lines, "iptables -A OUTPUT -o lo -j ACCEPT")
 	if drop < 0 || loopback < 0 || drop > loopback {
 		t.Fatalf("Docker DNS drop at %d, loopback accept at %d: %q", drop, loopback, lines)

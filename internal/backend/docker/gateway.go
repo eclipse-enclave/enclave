@@ -251,7 +251,7 @@ func removeStoppedGatewayOrphans(ctx context.Context, ownerPrefix string, dryRun
 			continue
 		}
 		owner := candidate.Labels[model.GatewayLabelContainer]
-		_, hash, _, managed := dockercmd.ParseManagedName(owner)
+		_, hash, _, managed := model.ParseManagedName(owner)
 		if !managed || !strings.HasPrefix(owner, ownerPrefix) || candidate.ID == "" ||
 			hash != candidate.Labels[model.GatewayLabelProjectHash] ||
 			dockercmd.PrimaryContainerName(candidate) != gateway.ContainerName(owner) {

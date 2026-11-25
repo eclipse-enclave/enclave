@@ -263,7 +263,7 @@ func (b *Backend) List(ctx context.Context, filter backend.SessionFilter) ([]bac
 }
 
 func sessionFromEntry(entry sandboxEntry) (backend.Session, bool) {
-	tool, hash, tail, ok := parseManagedName(entry.Name)
+	tool, hash, tail, ok := model.ParseManagedName(entry.Name)
 	if !ok {
 		return backend.Session{}, false
 	}
@@ -278,22 +278,6 @@ func sessionFromEntry(entry sandboxEntry) (backend.Session, bool) {
 		session.CreatedAt = *entry.CreatedAt
 	}
 	return session, true
-}
-
-// parseManagedName splits enclave-<tool>-<hash>-<session>; the tool name may
-// itself contain hyphens, so the last hash-shaped segment separates them.
-func parseManagedName(name string) (tool string, hash string, tail string, ok bool) {
-	rest, found := strings.CutPrefix(name, model.AppName+"-")
-	if !found {
-		return "", "", "", false
-	}
-	parts := strings.Split(rest, "-")
-	for i := len(parts) - 1; i > 0; i-- {
-		if model.IsHashSegment(parts[i]) {
-			return strings.Join(parts[:i], "-"), parts[i], strings.Join(parts[i+1:], "-"), true
-		}
-	}
-	return "", "", "", false
 }
 
 func matchesFilter(session backend.Session, filter backend.SessionFilter) bool {

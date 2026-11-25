@@ -355,7 +355,7 @@ func captureSessionProjectHash(ctx context.Context, name string) string {
 	if !dockercmd.IsNotFound(err) {
 		return ""
 	}
-	_, hash, _, _ := dockercmd.ParseManagedName(name)
+	_, hash, _, _ := model.ParseManagedName(name)
 	return hash
 }
 
@@ -571,7 +571,7 @@ func labelsFromRequest(req backend.Request) map[string]string {
 	}
 	if meta.DisplayName != "" {
 		labels[model.LabelSession] = meta.DisplayName
-	} else if _, _, session, ok := dockercmd.ParseManagedName(meta.Name); ok && session != "" {
+	} else if _, _, session, ok := model.ParseManagedName(meta.Name); ok && session != "" {
 		labels[model.LabelSession] = session
 	}
 	if meta.Background {
@@ -659,7 +659,7 @@ func sessionFromSummary(c dockercmd.Summary) (backend.Session, bool) {
 	if isGatewaySummary(c, name) {
 		return backend.Session{}, false
 	}
-	parsedTool, parsedHash, parsedSession, parsedOK := dockercmd.ParseManagedName(name)
+	parsedTool, parsedHash, parsedSession, parsedOK := model.ParseManagedName(name)
 	labels := c.Labels
 	tool := strings.TrimSpace(labels[model.LabelAgent])
 	projectHash := strings.TrimSpace(labels[model.LabelHash])

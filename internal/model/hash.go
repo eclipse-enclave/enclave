@@ -15,7 +15,7 @@ func ShortHash(hash string) string {
 }
 
 // IsHashSegment reports whether value matches the project-hash shape
-// (HashLength lowercase-hex chars) that docker.ParseManagedName treats as the
+// (HashLength lowercase-hex chars) that ParseManagedName treats as the
 // hash segment of a managed container or volume name.
 func IsHashSegment(value string) bool {
 	if len(value) != HashLength {

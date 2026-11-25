@@ -170,6 +170,26 @@ func TestRunReloadsImageMissingFromSbx(t *testing.T) {
 	}
 }
 
+func TestRunRejectsOverlongNameBeforeExportingTheImage(t *testing.T) {
+	cli := &fakeRunner{outputs: map[string]string{"template ls --json": loadedTemplates}}
+	images := &fakeImages{img: ImageConfig{ID: "sha256:host1", Cmd: []string{"bash"}}}
+	b := newTestBackend(t, cli, images)
+
+	req := testRequest(t)
+	req.Session.Name = "enclave-claude-abc-" + strings.Repeat("x", 64)
+	if _, err := b.Run(context.Background(), req, backend.AttachIO{}); err == nil {
+		t.Fatal("Run accepted a session name over the sandbox name limit")
+	}
+	if len(images.saved) != 0 {
+		t.Fatalf("image exported %d times before the name was rejected", len(images.saved))
+	}
+	for _, c := range cli.calls {
+		if c.args[0] == "create" {
+			t.Fatal("created a sandbox for a rejected name")
+		}
+	}
+}
+
 func TestRunKeepsSandboxItDidNotCreate(t *testing.T) {
 	cli := &fakeRunner{
 		outputs: map[string]string{"template ls --json": loadedTemplates},

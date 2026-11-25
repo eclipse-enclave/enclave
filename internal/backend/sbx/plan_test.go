@@ -214,7 +214,7 @@ func TestSandboxNameKeepsManagedNamesAndSanitizesOthers(t *testing.T) {
 		"enclave-claude-0123abcd-2": "enclave-claude-0123abcd-2",
 		"my_session":                "my-session",
 		"-a.-b-.c":                  "a.b.c",
-		strings.Repeat("x", 80):     strings.Repeat("x", 63),
+		strings.Repeat("x", 63):     strings.Repeat("x", 63),
 	} {
 		got, err := sandboxName(in)
 		if err != nil || got != want {
@@ -223,6 +223,17 @@ func TestSandboxNameKeepsManagedNamesAndSanitizesOthers(t *testing.T) {
 	}
 	if _, err := sandboxName("_"); err == nil {
 		t.Error("unmappable name accepted")
+	}
+}
+
+func TestSandboxNameRejectsNamesOverTheLimitInsteadOfTruncating(t *testing.T) {
+	name := strings.Repeat("x", 64)
+	got, err := sandboxName(name)
+	if err == nil {
+		t.Fatalf("sandboxName(%d chars) = %q, want an error", len(name), got)
+	}
+	if !strings.Contains(err.Error(), "63") {
+		t.Errorf("err = %v, want the limit named", err)
 	}
 }
 

@@ -117,10 +117,15 @@ func buildPlan(in planInput) (sessionPlan, error) {
 	}, nil
 }
 
+const maxSandboxNameLength = 63
+
 // sandboxName maps an Enclave container name onto SBX's name rules: 2-63
 // letters, digits, hyphens or periods, each dot-separated part starting and
 // ending with a letter or digit. Enclave's managed names already comply, so
 // the mapping is the identity for them and listing can match names directly.
+// Names over the limit are rejected rather than truncated: a shortened name
+// would no longer match the session name that stop and ps look up, and two
+// long names could collide.
 func sandboxName(name string) (string, error) {
 	var b strings.Builder
 	for _, r := range strings.TrimSpace(name) {
@@ -132,8 +137,8 @@ func sandboxName(name string) (string, error) {
 		}
 	}
 	out := b.String()
-	if len(out) > 63 {
-		out = out[:63]
+	if len(out) > maxSandboxNameLength {
+		return "", fmt.Errorf("sbx backend: session name %q is %d characters, over the %d-character sandbox name limit; use a shorter --name or tool name", name, len(out), maxSandboxNameLength)
 	}
 	parts := strings.Split(out, ".")
 	kept := parts[:0]

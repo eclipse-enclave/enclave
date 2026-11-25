@@ -105,6 +105,9 @@ func (b *Backend) Run(ctx context.Context, req backend.Request, attach backend.A
 	if err := backend.Validate(req, b.Capabilities()); err != nil {
 		return backend.ExitStatus{}, err
 	}
+	if _, err := sandboxName(req.Session.Name); err != nil {
+		return backend.ExitStatus{}, err
+	}
 	if err := b.Check(ctx); err != nil {
 		return backend.ExitStatus{}, err
 	}

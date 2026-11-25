@@ -179,7 +179,7 @@ session gets its own microVM. It needs the `sbx` CLI, signed in with
 | Aspect | Behavior |
 |--------|----------|
 | Images | Built with Docker as usual, then exported and loaded into the sbx image store (`sbx template load`). An unchanged image is loaded once; the first run after each rebuild copies the whole image |
-| Sessions | One sandbox per session, created from a generated kit for the session image, named like the Docker container, and removed when the session ends. The session runs through `sbx exec` with the request's user, working directory, and environment (passed in an env file) |
+| Sessions | One sandbox per session, created from a generated kit for the session image, named like the Docker container (names over 63 characters are rejected), and removed when the session ends. The session runs through `sbx exec` with the request's user, working directory, and environment (passed in an env file) |
 | Network | Implies `--allow-all-network` and `--disable-gateway`. The sbx network policy (`sbx policy ls`) filters egress instead of Enclave's gateway. `--allow-domain` and `allow_domains` are rejected, and there is no Enclave network log |
 | Mounts | The writable project directory is the primary sbx workspace; other directories and read-only files are extra workspaces. Writable single-file mounts are copied in before the session and back afterwards |
 | Stores | The same host stores as the other backends |

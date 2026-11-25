@@ -117,12 +117,13 @@ func strayImageInboxEntries(home string) []cleanupDir {
 }
 
 // sweepImageInboxes removes the image inboxes no inbox-enabled session holds.
-// It holds the image inbox lock exclusively. A starting session holds it shared
+// It runs alongside `img import` and `run --background`, whose stdout is
+// parsed, so it reports on stderr only. It holds the image inbox lock exclusively. A starting session holds it shared
 // from creating its inbox until its container exists, so the sweep waits for
 // every start in progress and then sees its session.
 func sweepImageInboxes(ctx context.Context, be backend.Backend, home string, keep string) error {
 	release, err := util.AcquireFileLock(config.HostImageInboxLockPath(home), func() {
-		logx.Infof("Waiting for an enclave session to finish starting before removing image inboxes.")
+		logx.Noticef("Waiting for an enclave session to finish starting before removing image inboxes.")
 	})
 	if err != nil {
 		return fmt.Errorf("acquire image inbox lock: %w", err)
@@ -133,7 +134,7 @@ func sweepImageInboxes(ctx context.Context, be backend.Backend, home string, kee
 		return err
 	}
 	for _, dir := range dirs {
-		logx.Debugf("Removing image inbox without a running session: %s", dir.Path)
+		logx.DebugNoticef("Removing image inbox without a running session: %s", dir.Path)
 	}
 	cleanupDirs(dirs)
 	return nil
@@ -143,7 +144,7 @@ func sweepImageInboxes(ctx context.Context, be backend.Backend, home string, kee
 // fail because of it; a later sweep retries.
 func sweepImageInboxesQuietly(ctx context.Context, be backend.Backend, home string, keep string) {
 	if err := sweepImageInboxes(ctx, be, home, keep); err != nil {
-		logx.Debugf("image inbox sweep skipped: %v", err)
+		logx.DebugNoticef("image inbox sweep skipped: %v", err)
 	}
 }
 

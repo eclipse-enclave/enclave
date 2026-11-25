@@ -153,8 +153,9 @@ in scope, so not `--all-running`. See
 | `enclave img import --session <target>` | Import into the project of a named session, e.g. from a desktop hotkey |
 
 Sources are mutually exclusive; `--no-clipboard` keeps the container path
-off the clipboard, and `--backend` applies to one invocation. Targeting,
-validation, requirements, hotkeys, and lifetime:
+off the clipboard, `--json` prints the result as
+[JSON](integration.md#img-import---json), and `--backend` applies to one
+invocation. Targeting, validation, requirements, hotkeys, and lifetime:
 [Image inbox](image-inbox.md).
 
 ### Devcontainer

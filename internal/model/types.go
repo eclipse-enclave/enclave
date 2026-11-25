@@ -144,6 +144,8 @@ type ImgOptions struct {
 	// ImgSession names the session whose project receives the import; empty
 	// leaves the choice to the working directory or the only candidate.
 	ImgSession string
+	// ImgJSON prints a successful import as a JSON envelope.
+	ImgJSON bool
 }
 
 type Options struct {

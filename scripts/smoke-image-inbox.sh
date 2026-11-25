@@ -199,14 +199,18 @@ pass "xclip shim drains a copy before refusing it"
 
 echo "=== targeting outside a project ==="
 : > "$NOTIFY_LOG"
-img_import "$SMOKE_ROOT" --file "$FAKE/shot.png" >/dev/null && fail "ambiguous import was accepted"
-grep -q "$S1" "$FAKE/stderr" && grep -q "$S2" "$FAKE/stderr" \
-  || fail "ambiguity error does not list both sessions: $(cat "$FAKE/stderr")"
+img_import "$SMOKE_ROOT" --no-clipboard >/dev/null && fail "ambiguous clipboard import was accepted"
 grep -q "Host image import failed" "$NOTIFY_LOG" || fail "no failure notification"
+: > "$NOTIFY_LOG"
+out=$(img_import "$SMOKE_ROOT" --file "$FAKE/shot.png") && fail "ambiguous import was accepted"
+[ -z "$out" ] || fail "failed import wrote to stdout: $out"
+grep -q "^error: " "$FAKE/stderr" && grep -q "$S1" "$FAKE/stderr" && grep -q "$S2" "$FAKE/stderr" \
+  || fail "ambiguity error does not list both sessions: $(cat "$FAKE/stderr")"
+[ ! -s "$NOTIFY_LOG" ] || fail "a --file import notified the desktop: $(cat "$NOTIFY_LOG")"
 out=$(img_import "$SMOKE_ROOT" --file "$FAKE/shot.png" --session "$S2") \
   || fail "--session import failed: $(cat "$FAKE/stderr")"
 in_container "$C2" "test -f '$out'" || fail "--session import not visible in project2"
-pass "ambiguous import refused; --session picks the project"
+pass "ambiguous import refused, notified for the clipboard only; --session picks the project"
 
 echo "=== cleanup ==="
 "$CLI_BIN" stop "$C1" >/dev/null 2>&1 || fail "enclave stop $C1 failed"

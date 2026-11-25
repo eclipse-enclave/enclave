@@ -40,22 +40,45 @@ const clipboardCopyTimeout = 10 * time.Second
 type inboxTarget struct {
 	// engine is the container engine of the backend the target session was
 	// found through; its sessions mount that engine's inboxes.
-	engine       string
-	projectHash  string
-	projectLabel string
+	engine      string
+	projectHash string
+	// projectDir is empty for sessions that did not record it.
+	projectDir string
+	// session is the session --session named; nil without --session.
+	session *backend.Session
+}
+
+// projectLabel names the target project for people.
+func (t inboxTarget) projectLabel() string {
+	if t.projectDir != "" {
+		return t.projectDir
+	}
+	return t.projectHash
 }
 
 // notifyTimeout bounds showing a desktop notification.
 const notifyTimeout = 5 * time.Second
 
+// Seams for tests of the whole command.
+var (
+	imgImportDesktop     = systemDesktop
+	imgImportCheckDocker = checkDocker
+	imgImportBackend     = newListingBackend
+)
+
+// runImgImport runs `img import`. Its stdout carries only the result, which
+// Run ensures by reserving stdout before it dispatches here.
 func runImgImport(opts model.Options, projectDir string) int {
-	desktop := systemDesktop()
+	desktop := imgImportDesktop()
 	containerPath, target, err := importHostImage(opts, projectDir, desktop)
 	if err != nil {
-		reportImportFailure(desktop, err)
+		reportImportFailure(opts.ImgOptions, desktop, err)
 		return 1
 	}
-	reportImport(opts.ImgOptions, desktop, containerPath, target.projectLabel)
+	if err := reportImport(opts.ImgOptions, desktop, containerPath, *target); err != nil {
+		logx.Errorf("write import result: %v", err)
+		return 1
+	}
 	return 0
 }
 
@@ -108,13 +131,56 @@ func importHostImage(opts model.Options, projectDir string, desktop hostDesktop)
 	return containerPath, target, nil
 }
 
-// reportImport prints the bare container path on stdout, so that
-// `P=$(enclave img import ...)` captures exactly the path; every status line
-// goes to stderr. The desktop notification follows the clipboard copy so that
-// it can report a failed one.
-func reportImport(img model.ImgOptions, desktop hostDesktop, containerPath string, projectLabel string) {
-	fmt.Println(containerPath)
-	imported := "Imported host image for " + projectLabel
+// imageImportSchemaVersion versions the `img import --json` envelope, an
+// integration contract: add fields, never rename or remove them.
+const imageImportSchemaVersion = "1"
+
+type imageImportEnvelope struct {
+	SchemaVersion string              `json:"schemaVersion"`
+	Kind          string              `json:"kind"`
+	Path          string              `json:"path"`
+	Project       imageImportProject  `json:"project"`
+	Session       *imageImportSession `json:"session"`
+}
+
+type imageImportProject struct {
+	Dir  string `json:"dir"`
+	Hash string `json:"hash"`
+}
+
+// imageImportSession names the session --session resolved to, with the field
+// names of `ps --json`.
+type imageImportSession struct {
+	Name        string `json:"name"`
+	SessionName string `json:"sessionName"`
+}
+
+func newImageImportEnvelope(containerPath string, target inboxTarget) imageImportEnvelope {
+	envelope := imageImportEnvelope{
+		SchemaVersion: imageImportSchemaVersion,
+		Kind:          "image-import",
+		Path:          containerPath,
+		Project:       imageImportProject{Dir: target.projectDir, Hash: target.projectHash},
+	}
+	if target.session != nil {
+		envelope.Session = &imageImportSession{Name: target.session.Ref.Name, SessionName: target.session.Name}
+	}
+	return envelope
+}
+
+// reportImport prints the bare container path, or with --json the result
+// envelope, on stdout, so that `P=$(enclave img import ...)` captures exactly
+// the path; every status line goes to stderr. The desktop notification
+// follows the clipboard copy so that it can report a failed one.
+func reportImport(img model.ImgOptions, desktop hostDesktop, containerPath string, target inboxTarget) error {
+	if img.ImgJSON {
+		if err := encodeIndentedJSON(os.Stdout, newImageImportEnvelope(containerPath, target)); err != nil {
+			return err
+		}
+	} else {
+		fmt.Println(containerPath)
+	}
+	imported := "Imported host image for " + target.projectLabel()
 	logx.SuccessNoticef("%s", imported)
 	body := containerPath
 	if copiesPathToClipboard(img) {
@@ -125,7 +191,10 @@ func reportImport(img model.ImgOptions, desktop hostDesktop, containerPath strin
 			logx.Noticef("Container path copied to the clipboard; paste it into the session")
 		}
 	}
-	notifyImport(desktop, notifyNormal, imported, body)
+	if notifiesDesktop(img) {
+		notifyImport(desktop, notifyNormal, imported, body)
+	}
+	return nil
 }
 
 func copyPathToClipboard(desktop hostDesktop, containerPath string) error {
@@ -134,11 +203,12 @@ func copyPathToClipboard(desktop hostDesktop, containerPath string) error {
 	return desktop.copyText(ctx, containerPath)
 }
 
-// reportImportFailure reports the error on stderr and as a desktop
-// notification. A selection the user cancelled needs no notification.
-func reportImportFailure(desktop hostDesktop, err error) {
+// reportImportFailure reports the error on stderr and, where the source
+// notifies, as a desktop notification. A selection the user cancelled needs no
+// notification.
+func reportImportFailure(img model.ImgOptions, desktop hostDesktop, err error) {
 	logx.Errorf("%v", err)
-	if errors.Is(err, errSelectionCancelled) {
+	if !notifiesDesktop(img) || errors.Is(err, errSelectionCancelled) {
 		return
 	}
 	notifyImport(desktop, notifyCritical, "Host image import failed", err.Error())
@@ -155,12 +225,21 @@ func notifyImport(desktop hostDesktop, urgency notifyUrgency, summary string, bo
 	}
 }
 
+// notifiesDesktop reports whether an import shows desktop notifications.
+// Clipboard and screenshot imports often run from a hotkey, with no terminal
+// to show their output. A file or stdin import has a caller that reads stdout
+// and stderr, such as a script or another program, and a notification would
+// only duplicate them.
+func notifiesDesktop(img model.ImgOptions) bool {
+	return img.ImgFile == "" && !img.ImgStdin
+}
+
 // resolveImportTarget finds the project whose image inbox receives the import.
 func resolveImportTarget(opts model.Options, projectDir string) (*inboxTarget, error) {
-	if err := checkDocker(); err != nil {
+	if err := imgImportCheckDocker(); err != nil {
 		return nil, err
 	}
-	be, err := newListingBackend(opts)
+	be, err := imgImportBackend(opts)
 	if err != nil {
 		return nil, err
 	}
@@ -171,11 +250,11 @@ func resolveImportTarget(opts model.Options, projectDir string) (*inboxTarget, e
 	if home, err := config.ResolveHostHome(); err == nil {
 		sweepImageInboxesQuietly(context.Background(), be, home, "")
 	}
-	projectHash, err := resolveInboxProject(sessions, sessionTargetProject(projectDir), opts.ImgSession)
+	projectHash, named, err := resolveInboxProject(sessions, sessionTargetProject(projectDir), opts.ImgSession)
 	if err != nil {
 		return nil, err
 	}
-	return &inboxTarget{engine: be.Name(), projectHash: projectHash, projectLabel: inboxProjectLabel(sessions, projectHash)}, nil
+	return &inboxTarget{engine: be.Name(), projectHash: projectHash, projectDir: inboxProjectDir(sessions, projectHash), session: named}, nil
 }
 
 // copiesPathToClipboard reports whether the container path replaces the
@@ -261,10 +340,14 @@ func advertisedMIMEForPath(path string) string {
 //  3. the only project with running inbox-enabled sessions.
 //
 // Anything else is an error: a wrong guess would show a host image to another
-// project's agent.
-func resolveInboxProject(running []backend.Session, cwd model.Project, requested string) (string, error) {
+// project's agent. It also returns the requested session, if any.
+func resolveInboxProject(running []backend.Session, cwd model.Project, requested string) (string, *backend.Session, error) {
 	if requested != "" {
-		return resolveRequestedInboxSession(running, cwd, requested)
+		session, err := resolveRequestedInboxSession(running, cwd, requested)
+		if err != nil {
+			return "", nil, err
+		}
+		return session.ProjectHash, &session, nil
 	}
 	byProject := map[string][]backend.Session{}
 	for _, session := range running {
@@ -273,14 +356,14 @@ func resolveInboxProject(running []backend.Session, cwd model.Project, requested
 		}
 	}
 	if hash := strings.TrimSpace(cwd.Hash); hash != "" && len(byProject[hash]) > 0 {
-		return hash, nil
+		return hash, nil, nil
 	}
 	switch len(byProject) {
 	case 0:
-		return "", fmt.Errorf("no running session has an image inbox; start one with `%s run --image-inbox`", model.AppName)
+		return "", nil, fmt.Errorf("no running session has an image inbox; start one with `%s run --image-inbox`", model.AppName)
 	case 1:
 		for hash := range byProject {
-			return hash, nil
+			return hash, nil, nil
 		}
 	}
 	candidates := make([]string, 0, len(byProject))
@@ -293,7 +376,7 @@ func resolveInboxProject(running []backend.Session, cwd model.Project, requested
 		candidates = append(candidates, fmt.Sprintf("%s: %s", projectSessions[0].ProjectDir, strings.Join(names, ", ")))
 	}
 	sort.Strings(candidates)
-	return "", fmt.Errorf("several projects have a running session with an image inbox; pass --session <target> or run the import from one of these project directories:\n  %s",
+	return "", nil, fmt.Errorf("several projects have a running session with an image inbox; pass --session <target> or run the import from one of these project directories:\n  %s",
 		strings.Join(candidates, "\n  "))
 }
 
@@ -302,16 +385,16 @@ func resolveInboxProject(running []backend.Session, cwd model.Project, requested
 // among inbox-enabled sessions alone would let a session name that `attach`
 // finds in the working directory's project silently pick another project's
 // session of the same name.
-func resolveRequestedInboxSession(running []backend.Session, cwd model.Project, requested string) (string, error) {
+func resolveRequestedInboxSession(running []backend.Session, cwd model.Project, requested string) (backend.Session, error) {
 	session, err := resolveNamedSession(running, requested, sessionTargetQuery{Project: cwd})
 	if err != nil {
-		return "", err
+		return backend.Session{}, err
 	}
 	if !sessionHasImageInbox(session) || strings.TrimSpace(session.ProjectHash) == "" {
-		return "", fmt.Errorf("session %q (%s) has no image inbox; restart it with `%s run --image-inbox`",
+		return backend.Session{}, fmt.Errorf("session %q (%s) has no image inbox; restart it with `%s run --image-inbox`",
 			requested, session.Ref.Name, model.AppName)
 	}
-	return session.ProjectHash, nil
+	return session, nil
 }
 
 // inboxCandidateName shows a session by its session name where it has one,
@@ -327,13 +410,15 @@ func sessionHasImageInbox(session backend.Session) bool {
 	return session.ImageInbox
 }
 
-func inboxProjectLabel(sessions []backend.Session, projectHash string) string {
+// inboxProjectDir returns the project directory a session of the project
+// recorded, or "" if none did.
+func inboxProjectDir(sessions []backend.Session, projectHash string) string {
 	for _, session := range sessions {
 		if session.ProjectHash == projectHash && session.ProjectDir != "" {
 			return session.ProjectDir
 		}
 	}
-	return projectHash
+	return ""
 }
 
 // writeHostImage atomically writes a validated host image into the project's

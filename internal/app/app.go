@@ -33,6 +33,10 @@ func Run(args []string) int {
 	// independent of build stamps.
 	baseOpts.UpdateChannel = buildinfo.Channel()
 	parsed, err := cli.Parse(args, baseOpts, userCmds...)
+	if parsed.Action == cli.ActionImgImport {
+		// Its stdout carries only the import result.
+		defer logx.ReserveStdout()()
+	}
 	if err != nil {
 		// Under --json a rejected request still owes stdout one result envelope.
 		if parsed.Action == cli.ActionExtensionManage && parsed.ExtRequest != nil {
@@ -251,7 +255,7 @@ func reportStartupError(parsed cli.Result, projectDir string, err error) int {
 		return writeNetworkPolicyEnvelope(os.Stdout, networkPolicyEnvelope{}, resolveProject, err)
 	}
 	if parsed.Action == cli.ActionImgImport {
-		reportImportFailure(systemDesktop(), err)
+		reportImportFailure(parsed.Options.ImgOptions, imgImportDesktop(), err)
 		return 1
 	}
 	logx.Errorf("%v", err)

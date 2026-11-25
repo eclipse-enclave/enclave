@@ -82,3 +82,30 @@ func TestSuccessNoticefWritesToStderr(t *testing.T) {
 		t.Errorf("stderr = %q, want %q", stderr, "ok: done 1\n")
 	}
 }
+
+func TestReserveStdoutSendsEveryMessageToStderr(t *testing.T) {
+	t.Setenv("NO_COLOR", "1")
+	SetLevel("debug")
+	t.Cleanup(func() { SetLevel("info") })
+	restore := ReserveStdout()
+	var stderr string
+	stdout := captureStdout(t, func() {
+		stderr = captureStderr(t, func() {
+			Infof("info line")
+			Successf("ok line")
+			Debugf("debug line")
+		})
+	})
+	restore()
+	if stdout != "" {
+		t.Fatalf("stdout = %q, want nothing while reserved", stdout)
+	}
+	for _, want := range []string{"info line", "ok line", "debug line"} {
+		if !strings.Contains(stderr, want) {
+			t.Errorf("stderr = %q, want %q", stderr, want)
+		}
+	}
+	if out := captureStdout(t, func() { Infof("after") }); !strings.Contains(out, "after") {
+		t.Fatalf("stdout after restore = %q, want the message back on stdout", out)
+	}
+}

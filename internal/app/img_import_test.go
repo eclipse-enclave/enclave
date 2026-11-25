@@ -220,7 +220,7 @@ func TestResolveInboxProject(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := resolveInboxProject(tt.sessions, tt.cwd, tt.requested)
+			got, named, err := resolveInboxProject(tt.sessions, tt.cwd, tt.requested)
 			if tt.errHas != nil {
 				if err == nil {
 					t.Fatalf("expected error, got %q", got)
@@ -237,6 +237,9 @@ func TestResolveInboxProject(t *testing.T) {
 			}
 			if got != tt.want {
 				t.Fatalf("project = %q, want %q", got, tt.want)
+			}
+			if (named != nil) != (tt.requested != "") || (named != nil && named.ProjectHash != got) {
+				t.Fatalf("named session = %+v, want the requested session of the project", named)
 			}
 		})
 	}
@@ -277,6 +280,8 @@ func TestCopiesPathToClipboard(t *testing.T) {
 	}
 }
 
+var workProject = inboxTarget{engine: backend.NameDocker, projectHash: "hashW", projectDir: "/work/project"}
+
 func TestReportImportPrintsOnlyThePathOnStdout(t *testing.T) {
 	const containerPath = model.ContainerImageInboxDir + "/20260101T000000Z-0123abcd.png"
 	const imported = "ok: Imported host image for /work/project"
@@ -298,7 +303,9 @@ func TestReportImportPrintsOnlyThePathOnStdout(t *testing.T) {
 			t.Setenv("NO_COLOR", "1")
 			f := waylandDesktop()
 			stdout, stderr := captureOutput(t, func() {
-				reportImport(tt.img, f.desktop(), containerPath, "/work/project")
+				if err := reportImport(tt.img, f.desktop(), containerPath, workProject); err != nil {
+					t.Fatal(err)
+				}
 			})
 			if stdout != containerPath+"\n" {
 				t.Errorf("stdout = %q, want only the container path", stdout)
@@ -326,7 +333,9 @@ func TestReportImportWarnsWhenTheClipboardCopyFails(t *testing.T) {
 	f := waylandDesktop()
 	f.failures["wl-copy"] = errors.New("compositor gone")
 	stdout, stderr := captureOutput(t, func() {
-		reportImport(model.ImgOptions{}, f.desktop(), containerPath, "/work/project")
+		if err := reportImport(model.ImgOptions{}, f.desktop(), containerPath, workProject); err != nil {
+			t.Fatal(err)
+		}
 	})
 	if stdout != containerPath+"\n" {
 		t.Errorf("stdout = %q, want only the container path", stdout)
@@ -345,7 +354,9 @@ func TestReportImportNotifiesWithTheTargetProject(t *testing.T) {
 	f := waylandDesktop()
 	f.installed["notify-send"] = true
 	captureOutput(t, func() {
-		reportImport(model.ImgOptions{ImgNoClipboard: true}, f.desktop(), containerPath, "/work/project")
+		if err := reportImport(model.ImgOptions{ImgNoClipboard: true}, f.desktop(), containerPath, workProject); err != nil {
+			t.Fatal(err)
+		}
 	})
 	want := "notify-send --app-name=enclave --urgency=normal -- Imported host image for /work/project " + containerPath
 	if !slices.Contains(f.ran, want) {
@@ -359,7 +370,7 @@ func TestReportImportFailureNotifiesWithTheError(t *testing.T) {
 	f.installed["notify-send"] = true
 	err := errors.New("several projects have a running session with an image inbox:\n  /a: one\n  /b: two")
 	stdout, stderr := captureOutput(t, func() {
-		reportImportFailure(f.desktop(), err)
+		reportImportFailure(model.ImgOptions{}, f.desktop(), err)
 	})
 	if stdout != "" {
 		t.Errorf("stdout = %q, want nothing", stdout)
@@ -377,7 +388,7 @@ func TestReportImportFailureWithoutNotifySend(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 	f := waylandDesktop()
 	_, stderr := captureOutput(t, func() {
-		reportImportFailure(f.desktop(), errors.New("no image data received"))
+		reportImportFailure(model.ImgOptions{}, f.desktop(), errors.New("no image data received"))
 	})
 	if !strings.Contains(stderr, "no image data received") {
 		t.Errorf("stderr = %q, want the error", stderr)
@@ -392,7 +403,7 @@ func TestReportImportFailureDoesNotNotifyACancelledSelection(t *testing.T) {
 	f := waylandDesktop()
 	f.installed["notify-send"] = true
 	captureOutput(t, func() {
-		reportImportFailure(f.desktop(), errSelectionCancelled)
+		reportImportFailure(model.ImgOptions{}, f.desktop(), errSelectionCancelled)
 	})
 	if len(f.ran) != 0 {
 		t.Errorf("ran = %q, want nothing", f.ran)
@@ -406,7 +417,9 @@ func TestReportImportNotifiesAfterTheClipboardCopy(t *testing.T) {
 	f.installed["notify-send"] = true
 	f.failures["wl-copy"] = errors.New("compositor gone")
 	captureOutput(t, func() {
-		reportImport(model.ImgOptions{}, f.desktop(), containerPath, "/work/project")
+		if err := reportImport(model.ImgOptions{}, f.desktop(), containerPath, workProject); err != nil {
+			t.Fatal(err)
+		}
 	})
 	want := []string{
 		"wl-copy",

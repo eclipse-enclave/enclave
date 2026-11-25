@@ -41,6 +41,25 @@ func SetLevel(value string) {
 // isRawTTY is a variable so tests can stub the terminal state.
 var isRawTTY = writerIsRawTTY
 
+// stdoutReserved sends every message to stderr; see ReserveStdout.
+var stdoutReserved bool
+
+// ReserveStdout sends every message to stderr from now on, for a command whose
+// stdout is data only. It returns a function that restores the default.
+func ReserveStdout() (restore func()) {
+	previous := stdoutReserved
+	stdoutReserved = true
+	return func() { stdoutReserved = previous }
+}
+
+// stdout is where Infof, Successf, and Debugf write.
+func stdout() io.Writer {
+	if stdoutReserved {
+		return os.Stderr
+	}
+	return os.Stdout
+}
+
 func logf(w io.Writer, label string, color Color, format string, args ...any) {
 	prefix, ending := "", "\n"
 	if isRawTTY(w) {
@@ -50,7 +69,7 @@ func logf(w io.Writer, label string, color Color, format string, args ...any) {
 }
 
 func Infof(format string, args ...any) {
-	logf(os.Stdout, "info", ColorCyan, format, args...)
+	logf(stdout(), "info", ColorCyan, format, args...)
 }
 
 // Noticef is Infof on stderr, for messages incidental to a command whose
@@ -64,7 +83,7 @@ func Warnf(format string, args ...any) {
 }
 
 func Successf(format string, args ...any) {
-	logf(os.Stdout, "ok", ColorGreen, format, args...)
+	logf(stdout(), "ok", ColorGreen, format, args...)
 }
 
 // SuccessNoticef is Successf on stderr, the success counterpart of Noticef.
@@ -80,7 +99,7 @@ func Debugf(format string, args ...any) {
 	if level < Debug {
 		return
 	}
-	logf(os.Stdout, "debug", ColorDim, format, args...)
+	logf(stdout(), "debug", ColorDim, format, args...)
 }
 
 // DebugNoticef is Debugf on stderr, the debug-level counterpart of Noticef.

@@ -45,6 +45,7 @@ type stagedFile struct {
 
 type sessionPlan struct {
 	Name        string
+	StageDir    string
 	KitSpec     []byte
 	CreateArgs  []string
 	ExecArgs    []string
@@ -109,6 +110,7 @@ func buildPlan(in planInput) (sessionPlan, error) {
 
 	return sessionPlan{
 		Name:        name,
+		StageDir:    in.StageDir,
 		KitSpec:     kit,
 		CreateArgs:  create,
 		ExecArgs:    execArgs,

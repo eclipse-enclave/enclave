@@ -251,6 +251,95 @@ func TestRunInterruptedCreateCleanup(t *testing.T) {
 	}
 }
 
+// The staging directory is writable by the guest, so copy-out must not follow
+// links the session plants there.
+func TestRunDoesNotFollowGuestPlantedLinksOnCopyOut(t *testing.T) {
+	for name, plant := range map[string]func(t *testing.T, stageDir string, secret string, outside string){
+		"file replaced by a link to a host file": func(t *testing.T, stageDir, secret, _ string) {
+			staged := filepath.Join(stageDir, "00", "npmrc")
+			mustRemove(t, staged)
+			mustSymlink(t, secret, staged)
+		},
+		"entry directory replaced by a link to a host directory": func(t *testing.T, stageDir, _, outside string) {
+			if err := os.WriteFile(filepath.Join(outside, "npmrc"), []byte("HOST-SECRET\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			mustRemoveAll(t, filepath.Join(stageDir, "00"))
+			mustSymlink(t, outside, filepath.Join(stageDir, "00"))
+		},
+		"entry directory replaced by a link inside the staging directory": func(t *testing.T, stageDir, _, _ string) {
+			if err := os.MkdirAll(filepath.Join(stageDir, "other"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(stageDir, "other", "npmrc"), []byte("HOST-SECRET\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			mustRemoveAll(t, filepath.Join(stageDir, "00"))
+			mustSymlink(t, "other", filepath.Join(stageDir, "00"))
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			req := testRequest(t)
+			npmrc := filepath.Join(t.TempDir(), "npmrc")
+			if err := os.WriteFile(npmrc, []byte("before\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			secret := filepath.Join(t.TempDir(), "id_ed25519")
+			if err := os.WriteFile(secret, []byte("HOST-SECRET\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			outside := t.TempDir()
+			req.Mounts = append(req.Mounts, backend.Mount{Type: backend.MountTypeBind, Source: npmrc, ContainerPath: "/home/agent/.npmrc"})
+
+			var hostStageDir string
+			cli := &fakeRunner{outputs: map[string]string{"template ls --json": loadedTemplates}}
+			cli.runHook = func(args []string) {
+				switch {
+				case args[0] == "create":
+					for _, arg := range args {
+						if strings.HasSuffix(arg, ":"+guestFileStageDir) {
+							hostStageDir = strings.TrimSuffix(arg, ":"+guestFileStageDir)
+						}
+					}
+				case args[0] == "exec" && strings.Contains(strings.Join(args, " "), copyOutScript):
+					plant(t, hostStageDir, secret, outside)
+				}
+			}
+			b := newTestBackend(t, cli, &fakeImages{img: ImageConfig{ID: "sha256:host1", Cmd: []string{"bash"}}})
+			b.writeImageStamps(map[string]string{"enclave-claude:latest": "sha256:host1"})
+
+			if _, err := b.Run(context.Background(), req, backend.AttachIO{}); err != nil {
+				t.Fatalf("Run: %v", err)
+			}
+			data, err := os.ReadFile(npmrc)
+			if err != nil || string(data) != "before\n" {
+				t.Fatalf("host file = %q, %v; want it unchanged", data, err)
+			}
+		})
+	}
+}
+
+func mustRemove(t *testing.T, path string) {
+	t.Helper()
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func mustRemoveAll(t *testing.T, path string) {
+	t.Helper()
+	if err := os.RemoveAll(path); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func mustSymlink(t *testing.T, target string, link string) {
+	t.Helper()
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestRunRejectsDetachedSessions(t *testing.T) {
 	b := newTestBackend(t, &fakeRunner{}, &fakeImages{})
 	req := testRequest(t)

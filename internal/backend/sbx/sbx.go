@@ -28,6 +28,7 @@ import (
 
 	"enclave/internal/backend"
 	"enclave/internal/backend/hostlayout"
+	"enclave/internal/backend/hoststore"
 	"enclave/internal/logx"
 	"enclave/internal/model"
 )
@@ -197,6 +198,9 @@ func (b *Backend) Run(ctx context.Context, req backend.Request, attach backend.A
 
 // persistStagedFiles copies writable file mounts back to their host sources:
 // target to staging copy inside the sandbox, then staging copy to source.
+//
+// The staging directory is a workspace the guest can write, so the host reads
+// it only through a handle rooted there that refuses symlinks.
 func (b *Backend) persistStagedFiles(plan sessionPlan, progress io.Writer) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
@@ -204,8 +208,14 @@ func (b *Backend) persistStagedFiles(plan sessionPlan, progress io.Writer) {
 		logx.Warnf("sbx backend: could not copy file mounts out of the sandbox; host copies are unchanged: %v", err)
 		return
 	}
+	staging, err := hoststore.OpenFiles(plan.StageDir)
+	if err != nil {
+		logx.Warnf("sbx backend: could not open the file staging directory; host copies are unchanged: %v", err)
+		return
+	}
+	defer func() { _ = staging.Close() }()
 	for _, file := range plan.StagedFiles {
-		data, err := os.ReadFile(file.HostStaged) // #nosec G304 -- staged path is generated under the session directory.
+		data, err := readStagedFile(staging, plan.StageDir, file.HostStaged)
 		if err != nil {
 			logx.Warnf("sbx backend: persist file mount %s: %v", file.Target, err)
 			continue
@@ -218,6 +228,23 @@ func (b *Backend) persistStagedFiles(plan sessionPlan, progress io.Writer) {
 			logx.Warnf("sbx backend: persist file mount %s: %v", file.Target, err)
 		}
 	}
+}
+
+// readStagedFile reads one staged copy without following guest-planted
+// links: the entry directory must be a real directory, and the file is opened
+// with O_NOFOLLOW and must be regular. Paths that leave the staging root are
+// rejected by the root itself.
+func readStagedFile(staging *hoststore.Files, stageDir string, hostStaged string) ([]byte, error) {
+	rel, err := filepath.Rel(stageDir, hostStaged)
+	if err != nil || !filepath.IsLocal(rel) {
+		return nil, fmt.Errorf("staged file %q is outside the staging directory", hostStaged)
+	}
+	if info, err := staging.Lstat(filepath.Dir(rel)); err != nil {
+		return nil, err
+	} else if !info.IsDir() {
+		return nil, fmt.Errorf("refusing staged path %q: its directory is not a plain directory", rel)
+	}
+	return staging.ReadFile(rel)
 }
 
 func (b *Backend) removeSandbox(name string) {

@@ -143,6 +143,7 @@ The network request flow, restricted and unrestricted, has separate
 | [`internal/runtime/`](../internal/runtime/) `auth_manager.go`, `volume_manager.go`, `network_manager.go`, `command_builder.go` | Focused runtime concerns |
 | [`internal/runtime/secret_mapping.go`](../internal/runtime/secret_mapping.go) | `SecretMapping`: placeholder release rules passed to the gateway |
 | [`internal/backend/`](../internal/backend/) | Backend-neutral session contract; [`docker/`](../internal/backend/docker/) (also Podman), [`qemu/`](../internal/backend/qemu/) and [`sbx/`](../internal/backend/sbx/) implement it |
+| [`internal/backend/hostlayout/`](../internal/backend/hostlayout/) | Store preparation, mount sources, and auth sync on the host layout, shared by the `qemu` and `sbx` backends; built on [`hoststore/`](../internal/backend/hoststore/) |
 | [`internal/docker/`](../internal/docker/) | Wraps the Docker or Podman CLI |
 | [`internal/mounts/mounts.go`](../internal/mounts/mounts.go) | Mount path validation, worktrees, port mapping |
 | [`internal/mounts/sensitive.go`](../internal/mounts/sensitive.go) | The sensitive-path rule ([mounts.md](mounts.md#sensitive-mounts)) |

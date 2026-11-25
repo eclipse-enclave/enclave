@@ -5,7 +5,7 @@
 //
 // SPDX-License-Identifier: MIT
 
-package qemu
+package hostlayout
 
 import (
 	"context"
@@ -20,7 +20,7 @@ func TestAuthSyncSkipsPlaceholderFiles(t *testing.T) {
 	for _, feature := range []bool{false, true} {
 		for _, existing := range []bool{false, true} {
 			t.Run(testAuthSyncName(feature, existing), func(t *testing.T) {
-				b := New(Options{Host: model.Host{Home: t.TempDir()}})
+				b := New(model.Host{Home: t.TempDir()})
 				ctx := context.Background()
 				configKey := backend.StoreKey{Owner: "tool", ProjectHash: "project"}
 				authKey := backend.StoreKey{Owner: "tool"}

@@ -18,7 +18,7 @@ import (
 	"testing"
 
 	"enclave/internal/backend"
-	"enclave/internal/backend/qemu"
+	"enclave/internal/backend/hostlayout"
 	"enclave/internal/model"
 )
 
@@ -89,7 +89,7 @@ func newTestBackend(t *testing.T, cli *fakeRunner, images *fakeImages) *Backend 
 		opts:   Options{Host: host, StateDir: filepath.Join(home, "sbx-state")},
 		cli:    cli,
 		images: images,
-		stores: qemu.New(qemu.Options{Host: host}),
+		layout: hostlayout.New(host),
 	}
 }
 

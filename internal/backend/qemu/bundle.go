@@ -388,7 +388,7 @@ func (b *Backend) buildRuntimeMounts(req backend.Request, controlDir string, fil
 		if err := validateGuestPath(store.ContainerPath, "store target"); err != nil {
 			return nil, err
 		}
-		source, err := b.storage.MountSource(store.Key, store.Kind)
+		source, err := b.layout.MountSource(store.Key, store.Kind)
 		if err != nil {
 			return nil, err
 		}

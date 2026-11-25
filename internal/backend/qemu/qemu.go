@@ -20,6 +20,7 @@ import (
 	"strings"
 
 	"enclave/internal/backend"
+	"enclave/internal/backend/hostlayout"
 	"enclave/internal/logx"
 	"enclave/internal/model"
 )
@@ -32,12 +33,12 @@ type Options struct {
 }
 
 type Backend struct {
-	opts    Options
-	storage *StoreManager
+	opts   Options
+	layout *hostlayout.Layout
 }
 
 func New(opts Options) *Backend {
-	return &Backend{opts: opts, storage: newStoreManager(opts.Host)}
+	return &Backend{opts: opts, layout: hostlayout.New(opts.Host)}
 }
 
 func (b *Backend) Name() string { return backend.NameQEMU }
@@ -56,11 +57,15 @@ func (b *Backend) Capabilities() backend.Capabilities {
 	return backend.Capabilities{RestrictedNetwork: false, SecretHTTPRelease: false}
 }
 
-func (b *Backend) Storage() backend.StoreManager { return b.storage }
+func (b *Backend) Storage() backend.StoreManager { return b.layout.Storage() }
+
+func (b *Backend) PrepareStores(ctx context.Context, prep backend.StorePrep) (backend.StoreState, error) {
+	return b.layout.PrepareStores(ctx, prep)
+}
 
 func (b *Backend) Run(ctx context.Context, req backend.Request, attach backend.AttachIO) (backend.ExitStatus, error) {
 	if req.AuthSync != nil {
-		defer b.runRequestAuthSync(req)
+		defer b.layout.SyncAuth(req)
 	}
 	if ctx == nil {
 		ctx = context.Background()

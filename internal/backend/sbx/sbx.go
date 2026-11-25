@@ -27,7 +27,7 @@ import (
 	"golang.org/x/term"
 
 	"enclave/internal/backend"
-	"enclave/internal/backend/qemu"
+	"enclave/internal/backend/hostlayout"
 	"enclave/internal/logx"
 	"enclave/internal/model"
 )
@@ -48,9 +48,8 @@ type Backend struct {
 	opts   Options
 	cli    runner
 	images ImageSource
-	// stores realizes persistent stores on the shared host layout; the qemu
-	// backend's implementation is host-only and engine-free.
-	stores *qemu.Backend
+	// layout realizes persistent stores on the shared host layout.
+	layout *hostlayout.Layout
 }
 
 func New(opts Options) *Backend {
@@ -58,7 +57,7 @@ func New(opts Options) *Backend {
 		opts:   opts,
 		cli:    cliRunner{binary: defaultBinary},
 		images: opts.Images,
-		stores: qemu.New(qemu.Options{Host: opts.Host, Paths: opts.Paths}),
+		layout: hostlayout.New(opts.Host),
 	}
 }
 
@@ -81,10 +80,10 @@ func (b *Backend) Capabilities() backend.Capabilities {
 	return backend.Capabilities{RestrictedNetwork: false, SecretHTTPRelease: false}
 }
 
-func (b *Backend) Storage() backend.StoreManager { return b.stores.Storage() }
+func (b *Backend) Storage() backend.StoreManager { return b.layout.Storage() }
 
 func (b *Backend) PrepareStores(ctx context.Context, prep backend.StorePrep) (backend.StoreState, error) {
-	return b.stores.PrepareStores(ctx, prep)
+	return b.layout.PrepareStores(ctx, prep)
 }
 
 func (b *Backend) Run(ctx context.Context, req backend.Request, attach backend.AttachIO) (backend.ExitStatus, error) {
@@ -95,7 +94,7 @@ func (b *Backend) Run(ctx context.Context, req backend.Request, attach backend.A
 	if req.AuthSync != nil {
 		defer func() {
 			if !interrupted {
-				b.stores.SyncAuth(req)
+				b.layout.SyncAuth(req)
 			}
 		}()
 	}
@@ -137,7 +136,7 @@ func (b *Backend) Run(ctx context.Context, req backend.Request, attach backend.A
 	plan, err := buildPlan(planInput{
 		Request:     req,
 		Image:       img,
-		StoreSource: b.stores.StoreMountSource,
+		StoreSource: b.layout.MountSource,
 		KitDir:      kitDir,
 		EnvFilePath: envFilePath,
 		StageDir:    stageDir,

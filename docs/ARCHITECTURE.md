@@ -388,7 +388,7 @@ there:
 | `~/.local/state/enclave/projects/<hash>/<tool>/home-config/` | `npmrc`, `yarnrc`, `yarnrc.yml`, `bunfig.toml`, `node_repl_history`, linked as the matching dotfiles in `~` |
 | `~/.local/state/enclave/projects/<hash>/<tool>/config-generated/<key>/` | Generated config source (below) |
 | `${XDG_CACHE_HOME:-~/.cache}/enclave/microvm/<tool>/<hash>/` | QEMU bundles, unless `--image-name` names one |
-| `~/.local/state/enclave/locks/` | Cross-process locks: store, skills-mount, extension-install, self-update, and the two below |
+| `~/.local/state/enclave/locks/` | Cross-process locks: store, skills-mount, extension-install, self-update, and the three below |
 
 The generated config source is rebuilt at startup from built-in settings and
 templates, allow-listed host config (`--host-config=passthrough` plus
@@ -400,10 +400,13 @@ symlinks and tool setup ([tool-config.md](tool-config.md)).
 |------|--------|
 | `image-build-<hash>.lock` | Serializes builds of one image; a waiter prints `Waiting for another enclave process to finish building <image>.` and skips the build if the other process completed it |
 | `session-start-<hash>.lock` | Serializes startup per tool and project (unnamed, `--background`, and `--name`) until the container runs; waiters print `Waiting for another enclave session to finish starting.` |
+| `port-hint-<hash>.lock` | Serializes the automatic mapping of one [OAuth callback port](auth.md#oauth-callback-ports) across all projects and tools: a session holds it from finding the port free until its container runs, so sessions that start together do not all map the port; waiters print the session-start message |
 
 The session-start lock coordinates container names, config-store allocation,
 duplicate-name checks, and writes to the shared gateway bundle. Explicit
-numeric names can still overlap automatic allocation.
+numeric names can still overlap automatic allocation. A port-hint lock is
+taken after the session-start lock and released together with it. A session
+that finds the port in use releases it at once.
 
 ## Extension points
 

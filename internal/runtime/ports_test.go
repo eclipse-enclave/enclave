@@ -99,9 +99,9 @@ func freeLoopbackPort(t *testing.T) string {
 	return port
 }
 
-func portHintLockIsFree(t *testing.T, r *Runtime) bool {
+func portHintLockIsFree(t *testing.T, r *Runtime, port string) bool {
 	t.Helper()
-	release, ok, err := util.TryAcquireFileLock(config.HostLockPath(r.host.Home, "port-hints.lock"))
+	release, ok, err := util.TryAcquireFileLock(config.HostPortHintLockPath(r.host.Home, port))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -132,11 +132,11 @@ func TestApplyPortHintsMapsFreePortUntilStarted(t *testing.T) {
 	if !strings.Contains(out, "Auto-mapped port "+port+" for Pi") {
 		t.Fatalf("expected the auto-mapping to be announced, got %q", out)
 	}
-	if portHintLockIsFree(t, r) {
+	if portHintLockIsFree(t, r, port) {
 		t.Fatal("expected the port hint lock to be held until the session has started")
 	}
 	releaseStartLock()
-	if !portHintLockIsFree(t, r) {
+	if !portHintLockIsFree(t, r, port) {
 		t.Fatal("expected the session start to release the port hint lock")
 	}
 }
@@ -175,10 +175,45 @@ func TestApplyPortHintsSkipsPortInUse(t *testing.T) {
 			if warned != tt.warns || informed == tt.warns {
 				t.Fatalf("expected warning=%v, got stderr %q and stdout %q", tt.warns, stderr, stdout)
 			}
-			if !portHintLockIsFree(t, r) {
+			if !portHintLockIsFree(t, r, port) {
 				t.Fatal("expected a session that maps no port to release the port hint lock at once")
 			}
 		})
+	}
+}
+
+func TestApplyPortHintsLocksOnlyTheMappedPort(t *testing.T) {
+	free, held := freeLoopbackPort(t), heldLoopbackPort(t)
+	r := portHintRuntime(t, held, free, held)
+	releaseStartLock, err := r.acquireSessionStartLock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer releaseStartLock()
+
+	runCtx := model.RunContext{AuthState: model.AuthState{
+		Providers: map[string]model.ProviderAuthState{"openai-codex": {HasEnvCredential: true}},
+	}}
+	out := captureStdout(t, func() { r.applyPortHints(&runCtx) })
+
+	if len(r.run.Ports) != 1 || r.run.Ports[0] != free {
+		t.Fatalf("expected only the free port %s to be mapped, got %v", free, r.run.Ports)
+	}
+	if len(runCtx.SkippedPortHints) != 1 || runCtx.SkippedPortHints[0] != held {
+		t.Fatalf("expected the port in use %s to be skipped once, got %v", held, runCtx.SkippedPortHints)
+	}
+	if count := strings.Count(out, "Port "+held+" is in use"); count != 1 {
+		t.Fatalf("expected one message for the port in use, got %d in %q", count, out)
+	}
+	if portHintLockIsFree(t, r, free) {
+		t.Fatal("expected the lock of the mapped port to be held until the session has started")
+	}
+	if !portHintLockIsFree(t, r, held) {
+		t.Fatal("expected the lock of the port in use to be released at once")
+	}
+	releaseStartLock()
+	if !portHintLockIsFree(t, r, free) {
+		t.Fatal("expected the session start to release the lock of the mapped port")
 	}
 }
 

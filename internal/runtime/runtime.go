@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -67,10 +68,10 @@ type Runtime struct {
 	// Populated during auth setup, before the effective policy is resolved and
 	// cached, so the replacement host reaches the allow set too.
 	releaseHostOverrides map[string][]string
-	// releasePortHintLock is set while the session holds the port hint lock
-	// for a port it auto-mapped; see acquirePortHintLock.
-	releasePortHintLock func()
-	backend             backend.Backend
+	// releasePortHintLocks holds the release of the port hint lock for each
+	// port the session auto-mapped; see acquirePortHintLock.
+	releasePortHintLocks []func()
+	backend              backend.Backend
 }
 
 type ExecutionContext struct {
@@ -213,8 +214,8 @@ func (r *Runtime) Execute() error {
 }
 
 // acquireSessionStartLock returns a function that releases the session-start
-// lock and the port hint lock, which prepareExecution takes when the session
-// auto-maps a port.
+// lock and the port hint locks, which prepareExecution takes for the ports the
+// session auto-maps.
 func (r *Runtime) acquireSessionStartLock() (func(), error) {
 	lockPath := config.HostLockPath(r.host.Home, r.sessionStartLockName())
 	release, err := util.AcquireFileLock(lockPath, logWaitingForSessionStart)
@@ -222,8 +223,8 @@ func (r *Runtime) acquireSessionStartLock() (func(), error) {
 		return nil, fmt.Errorf("acquire session start lock: %w", err)
 	}
 	return func() {
-		if r.releasePortHintLock != nil {
-			r.releasePortHintLock()
+		for _, releasePortHintLock := range r.releasePortHintLocks {
+			releasePortHintLock()
 		}
 		release()
 	}, nil
@@ -628,32 +629,28 @@ func (r *Runtime) addUniquePort(port string, message string, args ...any) {
 // ports. A hint is best effort: only one session at a time can publish a host
 // port, so a session starts without the mapping while the port is in use.
 func (r *Runtime) applyPortHints(runCtx *model.RunContext) {
-	var release func()
-	mapped := false
-	for _, port := range r.handler.PortHints(*runCtx) {
+	// Every session takes the locks of several hinted ports in the same
+	// order, so two sessions cannot wait for each other.
+	hints := slices.Clone(r.handler.PortHints(*runCtx))
+	slices.Sort(hints)
+	for _, port := range slices.Compact(hints) {
 		if hasHost, hasContainer, _ := util.PortMappingState(r.run.Ports, port); hasHost || hasContainer {
 			continue
 		}
-		if release == nil {
-			release = r.acquirePortHintLock()
-		}
+		release := r.acquirePortHintLock(port)
 		holder, err := util.HostPortHolder(util.DefaultPortHostIP, port)
 		if err != nil {
 			logx.Debugf("Failed to probe host port %s: %v", port, err)
 		}
 		if holder != "" {
+			release()
 			r.logSkippedPortHint(port, holder, runCtx.AuthState)
 			runCtx.SkippedPortHints = append(runCtx.SkippedPortHints, port)
 			continue
 		}
+		r.releasePortHintLocks = append(r.releasePortHintLocks, release)
 		r.run.Ports = append(r.run.Ports, port)
 		logx.Infof("Auto-mapped port %s for %s", port, util.TitleCase(r.profile.Name))
-		mapped = true
-	}
-	if mapped {
-		r.releasePortHintLock = release
-	} else if release != nil {
-		release()
 	}
 	runCtx.Run = r.run
 }
@@ -661,12 +658,13 @@ func (r *Runtime) applyPortHints(runCtx *model.RunContext) {
 // acquirePortHintLock takes the lock that a session holds from finding a
 // hinted port free until its container runs and publishes the port. Sessions
 // that start at the same time would otherwise all find the port free, and all
-// but one would fail in the container engine. The lock is an optimization of
-// a best-effort mapping, so a failure to take it does not stop the start.
-func (r *Runtime) acquirePortHintLock() func() {
-	release, err := util.AcquireFileLock(config.HostLockPath(r.host.Home, "port-hints.lock"), logWaitingForSessionStart)
+// but one would fail in the container engine. The lock is per port and shared
+// by all projects and tools. It is an optimization of a best-effort mapping,
+// so a failure to take it does not stop the start.
+func (r *Runtime) acquirePortHintLock(port string) func() {
+	release, err := util.AcquireFileLock(config.HostPortHintLockPath(r.host.Home, port), logWaitingForSessionStart)
 	if err != nil {
-		logx.Debugf("Failed to acquire the port hint lock: %v", err)
+		logx.Debugf("Failed to acquire the port hint lock for %s: %v", port, err)
 		return func() {}
 	}
 	return release

@@ -13,6 +13,7 @@ website.
 | Container engine | Rootful Docker with the buildx plugin (the image build needs BuildKit), or Podman (rootless works). Rootless Docker is not supported |
 | Git | 2.26 or newer, with a configured author and committer identity; see [Git](git.md) |
 | QEMU (optional) | `qemu-system-x86_64` and `cpio` for the experimental `qemu` backend, practical only on x86-64 Linux with KVM; see [Backends](backends.md#host-requirements) |
+| sbx (optional) | The `sbx` CLI, signed in with `sbx login`, plus Docker for image builds, for the experimental `sbx` backend; see [Backends](backends.md#sbx-experimental) |
 | Build from source | Make and Go; see [CONTRIBUTING.md](../CONTRIBUTING.md#building-from-source) |
 
 With both Docker and Podman installed, Enclave asks once which one to use; see

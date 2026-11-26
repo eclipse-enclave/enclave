@@ -475,6 +475,80 @@ func TestBuildImageCommitsAgentUpdateStampsOnSuccess(t *testing.T) {
 	}
 }
 
+func TestFeatureInstallStrictBuildArgAndHash(t *testing.T) {
+	var captured docker.BuildRequest
+	stubBuildTestHooks(t,
+		func(_ context.Context, req docker.BuildRequest, _ io.Writer) error {
+			captured = req
+			return nil
+		},
+		func(context.Context, string) (bool, error) {
+			return false, nil
+		},
+		func(context.Context, string) (docker.PruneReport, error) {
+			return docker.PruneReport{}, nil
+		},
+	)
+	stubDockerImageInspect(t, func(context.Context, string) (docker.ImageInspectResponse, error) {
+		return docker.ImageInspectResponse{}, errors.New("no such image")
+	})
+
+	paths := sidecarFixturePaths(t)
+	paths.Entrypoint = filepath.Join(paths.AppRoot, "entrypoint.sh")
+	writeAppFile(t, paths.Entrypoint, "", 0o644)
+	host := model.Host{Home: t.TempDir(), UID: "1000", GID: "1000"}
+
+	// build runs one build with strict mode set to value and returns the image
+	// hash and the strict build arg it passed, if any.
+	build := func(t *testing.T, opts model.BuildOptions, value string) (string, string, bool) {
+		t.Helper()
+		t.Setenv(model.EnvFeatureInstallStrict, value)
+		cfg, err := resolveBuildConfig(opts, "codex", model.Project{}, paths.AppRoot)
+		if err != nil {
+			t.Fatal(err)
+		}
+		selection, err := resolveRuntimeImageSelection(paths, opts, "codex")
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, hash, err := needsRebuildForSelection(paths, cfg, selection)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := buildImage(context.Background(), paths, host, hash, cfg, opts, "codex", agentUpdatePlan{}); err != nil {
+			t.Fatal(err)
+		}
+		arg, present := captured.BuildArgs[model.EnvFeatureInstallStrict]
+		return hash, arg, present
+	}
+
+	withFeature := model.BuildOptions{ImageName: "enclave:test", ImageNameSet: true, Features: []string{"foo"}}
+	offHash, _, present := build(t, withFeature, "")
+	if present {
+		t.Fatal("strict build arg passed with strict mode unset")
+	}
+	for _, value := range []string{"0", "false"} {
+		hash, _, present := build(t, withFeature, value)
+		if present || hash != offHash {
+			t.Errorf("%s=%q: strict build arg present %t, hash changed %t", model.EnvFeatureInstallStrict, value, present, hash != offHash)
+		}
+	}
+	for _, value := range []string{"1", "true"} {
+		hash, arg, present := build(t, withFeature, value)
+		if !present || arg != "1" || hash == offHash {
+			t.Errorf("%s=%q: strict build arg %q (present %t), hash changed %t", model.EnvFeatureInstallStrict, value, arg, present, hash != offHash)
+		}
+	}
+
+	// No feature means no installer runs, so strict mode must not force a rebuild.
+	noFeatures := model.BuildOptions{ImageName: "enclave:test", ImageNameSet: true, Features: []string{}}
+	slimOff, _, _ := build(t, noFeatures, "")
+	slimOn, _, present := build(t, noFeatures, "1")
+	if present || slimOn != slimOff {
+		t.Errorf("strict mode without features: build arg present %t, hash changed %t", present, slimOn != slimOff)
+	}
+}
+
 func TestBuildImageUsesExplicitBuildIdentityAndBuildxCache(t *testing.T) {
 	var captured docker.BuildRequest
 	stubBuildTestHooks(t,
@@ -1226,6 +1300,15 @@ func stubBuildTestHooks(
 		dockerBuildImage = origBuild
 		dockerImageExists = origExists
 		dockerImagePrune = origPrune
+	})
+}
+
+func stubDockerImageInspect(t *testing.T, fn func(context.Context, string) (docker.ImageInspectResponse, error)) {
+	t.Helper()
+	orig := dockerImageInspect
+	dockerImageInspect = fn
+	t.Cleanup(func() {
+		dockerImageInspect = orig
 	})
 }
 

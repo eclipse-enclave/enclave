@@ -364,9 +364,15 @@ another feature.
 
 | Setting | Effect |
 |---------|--------|
-| Default | A feature's `install.sh` failure is a warning; the build continues |
-| `ENCLAVE_FEATURE_INSTALL_STRICT=1` | Every feature install failure is fatal. Read by the build scripts; neither the CLI nor the Dockerfile sets it. |
+| Default | Failures in `install.sh` or `commands.install` warn and the build continues |
+| `ENCLAVE_FEATURE_INSTALL_STRICT=1` | Failures in any feature's `install.sh` or `commands.install` abort the build |
 | `failOnInstallError: true` | This feature's install failure is fatal even without strict mode |
+
+Set `ENCLAVE_FEATURE_INSTALL_STRICT=1` in the host environment when running
+Enclave. When the image includes features, changing strict mode changes the
+image hash, so Enclave will not reuse an image built in warn-only mode for a
+strict build. For a direct Docker build, pass
+`--build-arg ENCLAVE_FEATURE_INSTALL_STRICT=1`.
 
 ### Selection
 

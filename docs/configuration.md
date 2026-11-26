@@ -289,6 +289,7 @@ names. `host_config_paths` resolution:
 | `ENCLAVE_QEMU_CPU`, `ENCLAVE_QEMU_TRANSPORT`, `ENCLAVE_QEMU_KERNEL_APPEND_EXTRA` | QEMU backend tuning; see [Backends](backends.md#tuning-variables) |
 | `ENCLAVE_AGENT_UPDATE_INTERVAL_HOURS` | Hours after a tool's last automatic update before `check-update.sh` may probe again (`0` = always) |
 | `ENCLAVE_NO_REBUILD` | `1` suppresses session image/bundle builds and update probes; see [Suppressing rebuilds](tools.md#suppressing-rebuilds) |
+| `ENCLAVE_FEATURE_INSTALL_STRICT` | `1` makes any feature install failure abort the image build; see [Install failures](extensions/spec-reference.md#install-failures) |
 | `ENCLAVE_DEVCONTAINER_REWRITE_VARS` | Extra env var names (comma-separated) for devcontainer home-path normalization |
 | `ENCLAVE_ALLOW_ROOT` | `1` = `--allow-root` |
 | `ENCLAVE_ALLOW_SENSITIVE_MOUNTS` | `1` = `--allow-sensitive-mounts` |

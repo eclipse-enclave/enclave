@@ -13,6 +13,8 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"enclave/internal/model"
 )
 
 func TestGenerateFeatureInstallBlockScopesPerFeature(t *testing.T) {
@@ -243,14 +245,19 @@ func TestRealDockerfileFeatureArgsKeepFeatureLayersCached(t *testing.T) {
 	if stageStart == -1 || blockEnd < stageStart {
 		t.Fatalf("feature-base stage or feature block end not found (stage at %d, end at %d)", stageStart, blockEnd)
 	}
-	stableArgs := map[string]bool{"USER_ID": true, "GROUP_ID": true, "USERNAME": true}
-	for _, line := range strings.Split(got[stageStart:blockEnd], "\n") {
+	featureArgs := got[stageStart:blockEnd]
+	// Without a default, existing feature layers stay cached until strict mode is set.
+	if !strings.Contains(featureArgs, "\nARG "+model.EnvFeatureInstallStrict+"\n") {
+		t.Fatal("strict install build arg must have no default and be in scope for feature installers")
+	}
+	allowedBeforeBlock := map[string]bool{"USER_ID": true, "GROUP_ID": true, "USERNAME": true, model.EnvFeatureInstallStrict: true}
+	for _, line := range strings.Split(featureArgs, "\n") {
 		fields := strings.Fields(line)
 		if len(fields) < 2 || !strings.EqualFold(fields[0], "ARG") {
 			continue
 		}
 		for _, field := range fields[1:] {
-			if name, _, _ := strings.Cut(field, "="); !stableArgs[name] {
+			if name, _, _ := strings.Cut(field, "="); !allowedBeforeBlock[name] {
 				t.Errorf("feature-base declares %q before the feature install block; declare it after %s", line, featureInstallMarkerEnd)
 			}
 		}

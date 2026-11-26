@@ -52,6 +52,10 @@ func HostBuildDir(home string) string {
 }
 
 func HostSSHDir(home string) string {
+	return filepath.Join(hostConfigRoot(home), "ssh")
+}
+
+func HostLegacySSHDir(home string) string {
 	return filepath.Join(hostCacheRoot(home), "ssh")
 }
 

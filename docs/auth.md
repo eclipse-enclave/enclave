@@ -228,10 +228,10 @@ ship the zone database.
 
 For sessions that must push without you, run `enclave ssh-init`:
 
-- Keys are stored in `~/.cache/enclave/ssh/` on Linux
-  (`$XDG_CACHE_HOME/enclave/ssh/` when set) and
-  `~/Library/Caches/org.eclipse.enclave/ssh/` on macOS. You can replace them
-  there.
+- Keys are stored in `~/.config/enclave/ssh/` on Linux
+  (`$XDG_CONFIG_HOME/enclave/ssh/` when set) and
+  `~/Library/Application Support/org.eclipse.enclave/config/ssh/` on macOS. You
+  can replace them there. No `enclave cleanup` option removes them.
 - The directory is mounted read-only into every session of every project and
   tool, with no per-session opt-out. Read-only stops edits to the key files, not
   force pushes or branch deletion at the Git provider.
@@ -250,3 +250,31 @@ Scope the key before registering it:
 Commit and tag signing are disabled in the container (see
 [Git](git.md#signing)), so signatures cannot tell an agent's pushes from yours.
 SSH on port 22 bypasses the gateway proxy and is not logged.
+
+### Moving keys from the old location
+
+Earlier versions kept the keys under the cache root (`~/.cache/enclave/ssh/`,
+`~/Library/Caches/org.eclipse.enclave/ssh/` on macOS), where
+`enclave cleanup --all` deleted them. Starting a session, running
+`enclave ssh-init`, or running `enclave cleanup --all` without `--keep cache`
+moves that directory to the config root if the new one does not exist yet or is
+empty. If the move fails, the command stops before anything is deleted.
+
+- The move is a rename. If it fails, for example because the cache and config
+  roots are on different filesystems, move the directory yourself.
+- If the old path is a symbolic link to a directory, Enclave creates a link
+  to that directory at the new location and removes the old link. It does not
+  touch the directory. `cleanup --all` stops with an error if it would remove
+  that directory, for example one inside the cache; pass `--keep cache`, or
+  move the keys out first.
+- If both directories exist and the new one has content, Enclave uses it and
+  leaves the old one alone, except that it removes an empty old directory.
+  `cleanup --all` stops with an error while the old directory has content,
+  also with `--dry-run`, because removing the cache would delete it. Compare
+  the two and remove the old directory, or pass `--keep cache`.
+- If the old path is a file, or a link that does not lead to a directory or
+  whose target contains the new location, Enclave does not move it, and sessions
+  and `cleanup --all` stop with an error until the new directory exists. Move
+  the keys yourself, or run `enclave ssh-init` to create a new directory and
+  key.
+- Scripts that read or write keys at the old path must use the new one.

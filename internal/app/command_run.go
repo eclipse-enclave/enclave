@@ -89,12 +89,17 @@ func runExecutionCommand(input *CommandInput) int {
 		return 1
 	}
 
-	// exec enters an existing container, so it mounts nothing and a configured
-	// directory that no longer exists must not block it.
+	// exec enters an existing container, so it mounts nothing: neither a
+	// configured directory that no longer exists nor the SSH directory
+	// migration may block it.
 	var validatedDirs, validatedReadonlyDirs []string
 	if isRunAction(input.Action) {
 		validatedDirs, validatedReadonlyDirs, err = resolveAdditionalMounts(opts, project, host.Home)
 		if err != nil {
+			logx.Errorf("%v", err)
+			return 1
+		}
+		if err := prepareSSHDirectory(host.Home); err != nil {
 			logx.Errorf("%v", err)
 			return 1
 		}

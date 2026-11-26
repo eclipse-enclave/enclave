@@ -17,10 +17,12 @@ import (
 	"enclave/internal/util"
 )
 
+const ideBridgeDir = ".claude/ide"
+
 // discoverIdeBridgePorts scans ~/.claude/ide/ for *.lock files and extracts
 // port numbers from the filenames. Each lock file is named <port>.lock.
 func discoverIdeBridgePorts(hostHome string) []string {
-	ideDir := filepath.Join(hostHome, ".claude", "ide")
+	ideDir := filepath.Join(hostHome, ideBridgeDir)
 	entries, err := os.ReadDir(ideDir)
 	if err != nil {
 		return nil
@@ -68,9 +70,9 @@ func (r *Runtime) addIdeBridgeMount(mounts *mountAccumulator) {
 	if len(r.ideBridgePorts) == 0 {
 		return
 	}
-	hostIdeDir := filepath.Join(r.host.Home, ".claude", "ide")
+	hostIdeDir := filepath.Join(r.host.Home, ideBridgeDir)
 	if util.PathExists(hostIdeDir) {
-		containerIdeDir := filepath.Join(r.containerHome, ".claude", "ide")
+		containerIdeDir := filepath.Join(r.containerHome, ideBridgeDir)
 		mounts.AddMount(bindMount(hostIdeDir, containerIdeDir, true))
 	}
 	mounts.AddEnv(model.EnvIdeBridgePorts, strings.Join(r.ideBridgePorts, ","))

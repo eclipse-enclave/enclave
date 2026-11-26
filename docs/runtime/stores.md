@@ -36,9 +36,10 @@ tokens between runs.
   container exits; `default` is untouched.
 - Layout: before start, and again after a config overlay (which may replace the
   store contents), Enclave creates the parents of the settings target and auth
-  files and the `skillsDir` and `memoryDir` mount targets as the host user. It
-  does not change existing ownership, but warns with a `chown` command when a
-  component belongs to another user.
+  files and the `skillsDir` and `memoryDir` mount targets as the host user. For
+  Claude it also creates `.claude/ide`, the IDE bridge mount target, even when
+  the bridge is inactive. It does not change existing ownership, but warns with
+  a `chown` command when a component belongs to another user.
 
 `sandbox.statePaths` declares config-relative runtime state that survives
 config-source overlays and stays out of host config passthrough:

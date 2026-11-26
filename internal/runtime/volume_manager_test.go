@@ -112,7 +112,7 @@ func TestConfigVolumeRelativeDirsMatchesClaudeProfile(t *testing.T) {
 	}
 
 	got := m.configVolumeRelativeDirs()
-	want := []string{"memory", "skills"}
+	want := []string{"ide", "memory", "skills"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("configVolumeRelativeDirs() = %v, want %v", got, want)
 	}

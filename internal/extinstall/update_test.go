@@ -72,6 +72,27 @@ func TestUpdateRecordsNewRefAtSameCommit(t *testing.T) {
 	}
 }
 
+func TestUpdateRecordsNewRefTypeAtSameCommit(t *testing.T) {
+	fetcher := newFakeFetcher(t, "a1b2c3d4", fooRepoFiles())
+	env, _ := testEnv(t, fetcher, "")
+	installFoo(t, env)
+
+	// main is now a tag at the installed commit instead of a branch.
+	fetcher.repo.refType = RefTypeTag
+	req := updateRequest("foo")
+	req.Ref = "main"
+	if _, err := Update(context.Background(), env, req); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	origin, err := readOrigin(filepath.Join(env.kindDir(model.KindFeature), "foo"))
+	if err != nil || origin == nil {
+		t.Fatalf("readOrigin = %+v, %v", origin, err)
+	}
+	if origin.Ref != "main" || origin.RefType != RefTypeTag {
+		t.Fatalf("origin ref = %q (%s), want main (tag)", origin.Ref, origin.RefType)
+	}
+}
+
 func TestUpdateSkipsWhenRequestedRefIsRecorded(t *testing.T) {
 	fetcher := newFakeFetcher(t, "a1b2c3d4", fooRepoFiles())
 	env, _ := testEnv(t, fetcher, "")

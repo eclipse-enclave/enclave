@@ -178,7 +178,7 @@ func updateOne(ctx context.Context, env Env, req Request, stage *staging, fetche
 	if err != nil {
 		return ActionResult{}, err
 	}
-	refChanged := req.Ref != "" && req.Ref != origin.Ref
+	refChanged := req.Ref != "" && (resolved.Ref != origin.Ref || resolved.RefType != origin.RefType)
 	if resolved.Commit == origin.Commit && !refChanged && !modified && !req.Force {
 		env.unchanged(entry.Name, "up to date at %s", ShortCommit(origin.Commit))
 		return ActionResult{Name: entry.Name, Action: ActionUnchanged, Commit: origin.Commit, Path: installed,

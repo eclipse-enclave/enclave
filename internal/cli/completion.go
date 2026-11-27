@@ -20,6 +20,7 @@ import (
 	"enclave/internal/config"
 	"enclave/internal/model"
 	"enclave/internal/netlog"
+	"enclave/internal/network"
 )
 
 const shellCompletionLicenseHeader = `# Copyright (C) 2026 EclipseSource GmbH and others.
@@ -149,6 +150,18 @@ func registerCompletions(rootCmd *cobra.Command) error {
 	if setModeCmd != nil {
 		setModeCmd.ValidArgsFunction = func(_ *cobra.Command, _ []string, _ string) ([]string, cobra.ShellCompDirective) {
 			return []string{model.NetworkModeRestricted, model.NetworkModeUnrestricted}, cobra.ShellCompDirectiveNoFileComp
+		}
+	}
+
+	if setResolverCmd := findSubCommand(rootCmd, "network", "set-resolver"); setResolverCmd != nil {
+		setResolverCmd.ValidArgsFunction = func(_ *cobra.Command, args []string, _ string) ([]string, cobra.ShellCompDirective) {
+			if len(args) > 0 {
+				return nil, cobra.ShellCompDirectiveNoFileComp
+			}
+			return []string{
+				"127.0.0.11\tDocker's embedded DNS",
+				network.DefaultResolver + "\tDefault resolver",
+			}, cobra.ShellCompDirectiveNoFileComp
 		}
 	}
 

@@ -126,18 +126,32 @@ extension-domain precedence are unchanged.
 ## Upstream resolver
 
 The gateway forwards allowlisted lookups to one upstream resolver, `8.8.8.8` by
-default. Set `advanced.resolvers` in `~/.config/enclave/network.jsonc` to
-replace it; only the first IPv4 entry is used, and a global entry takes
-precedence over a project one:
+default. Replace it in the global policy:
+
+```bash
+enclave network set-resolver 1.1.1.1 --global
+enclave network set-resolver 127.0.0.11 --global  # Docker's embedded DNS
+enclave network reset-resolver --global           # Remove the global resolver
+```
+
+Both commands apply the change to running gateways of the current project
+like the other [mutations](#managing-the-network-policy).
+
+`127.0.0.11` selects Docker's embedded DNS, which forwards to the resolver the
+Docker daemon uses. That keeps internal or VPN names resolvable, but makes the
+session's DNS depend on the daemon's configuration.
+
+The commands write `advanced.resolvers` in `~/.config/enclave/network.jsonc`.
+A project policy can set the same key by hand; only the first IPv4 entry is
+used, and a global entry takes precedence over a project one:
 
 ```jsonc
 { "advanced": { "resolvers": ["1.1.1.1"] } }
 ```
 
-`127.0.0.11` selects Docker's embedded DNS, which forwards to the resolver the
-Docker daemon uses. That keeps internal or VPN names resolvable, but makes the
-session's DNS depend on the daemon's configuration. Apply the change to
-running sessions with `enclave network apply`, or restart them.
+`set-resolver` rejects addresses that cannot answer queries (`0.0.0.0`,
+broadcast, multicast). After `reset-resolver`, a project resolver applies if
+one is set; otherwise `8.8.8.8` does.
 
 ## Overriding the main allowlist
 
@@ -164,6 +178,7 @@ enclave network diff                                # Changes from built-in defa
 enclave network add-domain example.com --global     # Allow a domain
 enclave network remove-domain example.com --global  # Remove a domain
 enclave network set-mode unrestricted --global      # Or: restricted
+enclave network set-resolver 1.1.1.1 --global       # Upstream DNS resolver
 enclave network apply                               # Apply policy to running gateways
 ```
 
@@ -188,9 +203,10 @@ example `enclave network print --features +github-cli --allow-domain api.example
   policy files only, not the options a session recorded.
 
 Changes are global only; `--project` scope is planned. `add-domain`,
-`remove-domain`, and `set-mode` apply the result to running gateways of the
-current project, for every tool (so they take no `--tool`). `--no-apply` only
-persists; `--all-running` targets every running gateway on the host.
+`remove-domain`, `set-mode`, `set-resolver`, and `reset-resolver` apply the
+result to running gateways of the current project, for every tool (so they
+take no `--tool`). `--no-apply` only persists; `--all-running` targets every
+running gateway on the host.
 `enclave network apply` (optionally `--tool` or `--all-running`) pushes the
 persisted policy on demand.
 

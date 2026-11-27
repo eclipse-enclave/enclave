@@ -99,6 +99,8 @@ container name for a later `enclave theia <container>`.
 | `enclave network add-domain <domain> --global` | Allow a domain |
 | `enclave network remove-domain <domain> --global` | Remove a domain |
 | `enclave network set-mode restricted\|unrestricted --global` | Set network mode; running sessions keep their mode until restarted |
+| `enclave network set-resolver <ipv4> --global` | Set the upstream DNS resolver (`127.0.0.11` = Docker's embedded DNS) |
+| `enclave network reset-resolver --global` | Remove the global DNS resolver; a project resolver or the default `8.8.8.8` applies |
 | `enclave network apply` | Apply policy to running gateways; gateways of unrestricted sessions are skipped |
 | `enclave network log` | Show gateway network audit events |
 
@@ -108,7 +110,7 @@ Mutations are global-only; `--project` is planned.
 
 | Apply flag | Accepted by | Effect |
 |------------|-------------|--------|
-| `--no-apply` | `add-domain`, `remove-domain`, `set-mode` | Persist only; do not touch running gateways |
+| `--no-apply` | `add-domain`, `remove-domain`, `set-mode`, `set-resolver`, `reset-resolver` | Persist only; do not touch running gateways |
 | `--all-running` | mutations, `apply` | Target every running gateway on the host |
 | `--tool <tool>` | `apply` | Target that tool's gateway (mutations do not accept it) |
 
@@ -304,7 +306,7 @@ saves the answer as `"tool"` in `~/.config/enclave/config.json`.
 | Commands | Behavior when no tool is configured |
 |----------|-------------------------------------|
 | Start a session or build its image: `run`, `shell`, `continue`, `resume`, `exec`, and `update` without explicit tool arguments | Ask, or fail |
-| Scope policy, stores, or containers by tool: `info`, `auth import`, `auth export`, `network …` except `add-domain`, `remove-domain`, and `set-mode`, `cleanup` without `--all`, `stop` without a session argument | Ask, or fail |
+| Scope policy, stores, or containers by tool: `info`, `auth import`, `auth export`, `network …` except `add-domain`, `remove-domain`, `set-mode`, `set-resolver`, and `reset-resolver`, `cleanup` without `--all`, `stop` without a session argument | Ask, or fail |
 | Never read the default tool: `ps`, `attach`, `tools`, `features`, `config`, `review-target`, `theia`, … | Neither ask nor fail; `--tool` is at most an explicit filter |
 
 - It asks only when stdin, stdout, and stderr are terminals and neither

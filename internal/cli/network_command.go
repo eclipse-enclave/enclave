@@ -14,6 +14,7 @@ import (
 
 	"enclave/internal/config"
 	"enclave/internal/model"
+	"enclave/internal/network"
 )
 
 func networkCommand(res *Result) *cobra.Command {
@@ -32,6 +33,8 @@ func networkCommand(res *Result) *cobra.Command {
 		networkAddDomainCommand(res),
 		networkRemoveDomainCommand(res),
 		networkSetModeCommand(res),
+		networkSetResolverCommand(res),
+		networkResetResolverCommand(res),
 	)
 
 	return cmd
@@ -168,6 +171,30 @@ func networkSetModeCommand(res *Result) *cobra.Command {
 			}
 			return nil
 		},
+	)
+}
+
+func networkSetResolverCommand(res *Result) *cobra.Command {
+	return networkScopedMutationCommand(
+		"set-resolver <ipv4>",
+		"Set the upstream DNS resolver (127.0.0.11 = Docker's embedded DNS)",
+		"network-set-resolver",
+		1,
+		res,
+		func(args []string) error {
+			_, err := network.NormalizeResolver(args[0])
+			return err
+		},
+	)
+}
+
+func networkResetResolverCommand(res *Result) *cobra.Command {
+	return networkMutationCommand(
+		"reset-resolver",
+		fmt.Sprintf("Remove the global DNS resolver; a project resolver or the default (%s) applies", network.DefaultResolver),
+		"network-reset-resolver",
+		0,
+		res,
 	)
 }
 

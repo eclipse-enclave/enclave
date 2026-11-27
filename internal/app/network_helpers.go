@@ -59,8 +59,8 @@ const (
 	gatewayScopeAllRunning
 )
 
-// mutationGatewayScope covers every tool of the current project: add-domain,
-// remove-domain, and set-mode edit the global policy, which no tool filters.
+// mutationGatewayScope covers every tool of the current project: the network
+// mutations edit the global policy, which no tool filters.
 func mutationGatewayScope(allRunning bool) gatewayTargetScope {
 	if allRunning {
 		return gatewayScopeAllRunning

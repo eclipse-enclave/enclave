@@ -126,6 +126,12 @@ record readable from the handshake. See
   file-based credentials is separate work.
 - DNS, firewall and ipset, and proxy all check egress; reload and startup
   failures fail closed.
+- The gateway keeps its NAT rules in its own chains (`ENCLAVE_OUTPUT`,
+  `ENCLAVE_PREROUTING`, `ENCLAVE_POSTROUTING`), jumped to from the built-in
+  ones. A reload empties only these, so Docker's embedded DNS rules in
+  `nat OUTPUT` stay in place. When the owner match is available, only
+  `dnsmasq` may reach Docker's embedded DNS on `127.0.0.11`, so the session's
+  queries go through the allowlist.
 - The log is tagged by session and rotated at session start, never truncated
   mid-session. Logged paths omit the query string, so query-parameter
   credentials cannot leak into it. It records decisions, not traffic volume.
@@ -197,10 +203,10 @@ sequenceDiagram
   continues unlogged; the gateway container stopping takes the session
   offline.
 - OAuth callback ports (`oauthPorts`) reach a listener on `127.0.0.1` through
-  a DNAT in `nat PREROUTING` and, for connections to the gateway's own IPv4
-  address generated inside the namespace (rootless podman's port forwarder),
-  in `nat OUTPUT`. If either rule cannot be added, a socat proxy on the
-  container address takes over.
+  a DNAT in `ENCLAVE_PREROUTING` and, for connections to the gateway's own
+  IPv4 address generated inside the namespace (rootless podman's port
+  forwarder), in `ENCLAVE_OUTPUT`. If either rule cannot be added, a socat
+  proxy on the container address takes over.
 - `enclave network apply` skips these gateways; `enclave network status` shows
   them as `UNRESTRICTED`. A mode change needs a session restart.
 

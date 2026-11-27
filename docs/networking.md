@@ -123,6 +123,22 @@ A project policy at `~/.config/enclave/projects/<hash>/network.jsonc` can set
 entries still apply; mode, resolver, built-in tool allowlist, and
 extension-domain precedence are unchanged.
 
+## Upstream resolver
+
+The gateway forwards allowlisted lookups to one upstream resolver, `8.8.8.8` by
+default. Set `advanced.resolvers` in `~/.config/enclave/network.jsonc` to
+replace it; only the first IPv4 entry is used, and a global entry takes
+precedence over a project one:
+
+```jsonc
+{ "advanced": { "resolvers": ["1.1.1.1"] } }
+```
+
+`127.0.0.11` selects Docker's embedded DNS, which forwards to the resolver the
+Docker daemon uses. That keeps internal or VPN names resolvable, but makes the
+session's DNS depend on the daemon's configuration. Apply the change to
+running sessions with `enclave network apply`, or restart them.
+
 ## Overriding the main allowlist
 
 These files replace the built-in allowlist without rebuilding the image; the

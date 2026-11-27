@@ -85,8 +85,9 @@ func Merge(cfg MergeConfig) EffectivePolicy {
 	return ep
 }
 
-// resolveModeAndFlags applies mode, inherit-tool-allowlist, and resolver
-// precedence (project > global > default) onto ep.
+// resolveModeAndFlags applies mode and inherit-tool-allowlist precedence
+// (project > global > default) onto ep and collects resolvers global first, so
+// a global resolver wins.
 func (ep *EffectivePolicy) resolveModeAndFlags(cfg MergeConfig) {
 	// Resolve mode: project > global > default
 	if mode := normalizeMode(cfg.GlobalPolicy.Mode); mode != "" {

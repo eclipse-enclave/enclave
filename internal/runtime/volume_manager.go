@@ -168,13 +168,10 @@ func (m volumeManager) configVolumeRelativeDirs() []string {
 	if settingsPath, err := m.settingsRelativePath(); err == nil {
 		addDirForFile(settingsPath)
 	}
-	// The skills directory (when the config source does not handle skills) and
-	// the memory directory are bind-mount targets inside the config store.
-	// Creating them here keeps them, and every parent they need, owned by the
-	// host user: left to the container runtime, a mount point and its missing
-	// parents are created as root, and a tool that writes siblings of those
-	// directories can no longer do so.
-	for _, mountDir := range []string{m.profile.SkillsDir, m.profile.MemoryDir} {
+	// Pre-create nested bind-mount targets so the container runtime doesn't
+	// create them or their parents as root. Include the IDE bridge target
+	// even when inactive so existing ownership problems are still reported.
+	for _, mountDir := range []string{m.profile.SkillsDir, m.profile.MemoryDir, ideBridgeDir} {
 		if mountPath, err := m.relativePathWithinConfig(mountDir); err == nil {
 			addDir(mountPath)
 		}

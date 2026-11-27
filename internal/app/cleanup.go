@@ -94,7 +94,8 @@ func memoryScopeAffectsPlan(cleanup model.CleanupOptions) bool {
 	return !cleanup.CleanupAll && (cleanup.CleanupKeepHist || cleanup.CleanupKeepMemory)
 }
 
-func runCleanup(run model.RunOptions, cleanup model.CleanupOptions) int {
+func runCleanup(opts model.Options) int {
+	run, cleanup := opts.RunOptions, opts.CleanupOptions
 	home, err := config.ResolveHostHome()
 	if err != nil {
 		logx.Errorf("Failed to resolve home directory: %v", err)
@@ -134,6 +135,7 @@ func runCleanup(run model.RunOptions, cleanup model.CleanupOptions) int {
 		if cleanup.CleanupDryRun {
 			gatewayNames := stopExitedSessionGateways(run, cleanup, project, true)
 			networkNames := pruneStaleSessionNetworks(run, cleanup, project, true)
+			storeDirs = append(storeDirs, planOrphanedImageInboxCleanup(opts, home)...)
 			printEphemeralCleanupPlan(gatewayNames, containerNames, networkNames, storeDirs)
 			cleanupBuildCache(cleanup)
 			return 0
@@ -143,6 +145,7 @@ func runCleanup(run model.RunOptions, cleanup model.CleanupOptions) int {
 		cleanupContainers(containerNames)
 		pruneStaleSessionNetworks(run, cleanup, project, false)
 		cleanupDirs(storeDirs)
+		cleanupOrphanedImageInboxes(opts, home)
 		cleanupBuildCache(cleanup)
 		logx.Successf("Cleanup complete")
 		return 0
@@ -163,16 +166,59 @@ func runCleanup(run model.RunOptions, cleanup model.CleanupOptions) int {
 	dirPaths := cleanupDirsForRemoval(run, cleanup, home, project, memoryScope)
 
 	if cleanup.CleanupDryRun {
+		if !removesWholeCache(cleanup) {
+			dirPaths = append(dirPaths, planOrphanedImageInboxCleanup(opts, home)...)
+		}
 		printCleanupPlan(dirPaths)
 		cleanupBuildCache(cleanup)
 		return 0
 	}
 
 	cleanupDirs(dirPaths)
+	if !removesWholeCache(cleanup) {
+		cleanupOrphanedImageInboxes(opts, home)
+	}
 	cleanupBuildCache(cleanup)
 
 	logx.Successf("Cleanup complete")
 	return 0
+}
+
+// removesWholeCache reports whether a cleanup removes the cache root, image
+// inboxes included.
+func removesWholeCache(cleanup model.CleanupOptions) bool {
+	return cleanup.CleanupAll && !cleanup.CleanupKeepCache
+}
+
+// planOrphanedImageInboxCleanup returns every project's image inbox on the
+// configured engine that no inbox-enabled session holds, and stray entries
+// under the inbox root, for a dry run. Every cleanup removes them,
+// whatever its scope and --keep flags: an orphaned inbox has no session left
+// to use it.
+func planOrphanedImageInboxCleanup(opts model.Options, home string) []cleanupDir {
+	stray := strayImageInboxEntries(home)
+	be, err := newListingBackend(opts)
+	if err == nil {
+		var dirs []cleanupDir
+		if dirs, err = planImageInboxSweep(context.Background(), be, home, ""); err == nil {
+			return append(dirs, stray...)
+		}
+	}
+	logx.Warnf("Skipping image inbox cleanup: %v", err)
+	return stray
+}
+
+// cleanupOrphanedImageInboxes removes what planOrphanedImageInboxCleanup
+// plans, under the image inbox lock.
+func cleanupOrphanedImageInboxes(opts model.Options, home string) {
+	be, err := newListingBackend(opts)
+	if err == nil {
+		err = sweepImageInboxes(context.Background(), be, home, "")
+	}
+	cleanupDirs(strayImageInboxEntries(home))
+	if err != nil {
+		logx.Warnf("Skipping image inbox cleanup: %v", err)
+	}
 }
 
 func resolveEphemeralContainers(run model.RunOptions, cleanup model.CleanupOptions, project model.Project) ([]string, error) {

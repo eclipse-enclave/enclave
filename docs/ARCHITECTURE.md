@@ -36,6 +36,7 @@ flowchart LR
         CacheDir["~/.cache/enclave/&lt;tool&gt;/&lt;hash&gt;"]
         HistoryDir["~/.local/state/enclave/projects/&lt;hash&gt;/&lt;tool&gt;/history"]
         SSHDir["~/.cache/enclave/ssh"]
+        InboxDir["~/.cache/enclave/inbox/&lt;engine&gt;/&lt;hash&gt;<br/>only with --image-inbox"]
     end
 
     subgraph Stores["Persistent stores (host dirs under ~/.local/state/enclave)"]
@@ -55,6 +56,7 @@ flowchart LR
     CacheDir -->|"bind mount"| Tool
     HistoryDir -->|"bind mount"| Tool
     SSHDir -->|"bind mount"| Tool
+    InboxDir -->|"read-only bind mount (/mnt/host-images)"| Tool
     ConfigStore -->|"bind mount"| Tool
     EnvStore -.->|"host-side read/write env file"| Tool
     SharedAuthStore -->|"bind mount (~/.enclave-auth)"| Tool
@@ -205,6 +207,7 @@ extensions, hence the `//go:build !windows` on
 | [`runtime-assets/build-scripts/`](../runtime-assets/build-scripts/) | Build composition: features, templates, agent tool helpers |
 | [`runtime-assets/auth-reconcile.sh`](../runtime-assets/auth-reconcile.sh) | Shared auth reconciliation; skips placeholder files, and recognizes custom placeholders via `ENCLAVE_SECRET_PLACEHOLDERS` without real secrets |
 | [`runtime-assets/net.sh`](../runtime-assets/net.sh) | Resolver, host gateway resolution, loopback proxy |
+| [`runtime-assets/clipboard-shim.sh`](../runtime-assets/clipboard-shim.sh) | `xclip` and `wl-paste` shims that serve a fresh image inbox host image for native paste |
 | [`runtime-assets/microvm/alpine/`](../runtime-assets/microvm/alpine/) | QEMU bundle init and builder |
 | [`extensions/tools/<tool>/templates/`](../extensions/tools/) | Settings templates baked into the image |
 | [`docs/`](../docs/) | In the build context for agent help under `/usr/share/doc/enclave/`; [`docs/assets/`](../docs/assets/) is excluded in [`.dockerignore`](../.dockerignore) so logo changes cause no rebuild |

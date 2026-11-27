@@ -44,6 +44,7 @@ func TestMergeDefaultsCoversAllFields(t *testing.T) {
 		NoCache:                &trueVal,
 		NoHistory:              &trueVal,
 		NoMemory:               &trueVal,
+		ImageInbox:             &trueVal,
 		SessionTint:            "#2a0f12",
 		HostEnv:                map[string]string{"TEST_HOST_ENV": "1"},
 		Timezone:               "UTC",

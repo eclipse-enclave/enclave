@@ -17,10 +17,21 @@ import (
 // release function. onWait is called when another process currently holds the
 // lock, immediately before blocking for it.
 func AcquireFileLock(path string, onWait func()) (release func(), err error) {
+	return acquireFileLock(path, onWait, false)
+}
+
+// AcquireSharedFileLock takes a shared lock on path, which other shared
+// holders may hold at the same time and an exclusive holder (AcquireFileLock)
+// excludes. onWait, if not nil, is called once before blocking.
+func AcquireSharedFileLock(path string, onWait func()) (release func(), err error) {
+	return acquireFileLock(path, onWait, true)
+}
+
+func acquireFileLock(path string, onWait func(), shared bool) (release func(), err error) {
 	if path == "" {
 		return func() {}, nil
 	}
-	file, locked, err := openAndTryLock(path)
+	file, locked, err := openAndTryLock(path, shared)
 	if err != nil {
 		return nil, err
 	}
@@ -28,7 +39,7 @@ func AcquireFileLock(path string, onWait func()) (release func(), err error) {
 		if onWait != nil {
 			onWait()
 		}
-		if err := lockFile(file); err != nil {
+		if err := lockFile(file, shared); err != nil {
 			_ = file.Close()
 			return nil, err
 		}
@@ -39,7 +50,7 @@ func AcquireFileLock(path string, onWait func()) (release func(), err error) {
 // TryAcquireFileLock is AcquireFileLock without waiting: ok is false, and
 // release nil, when another process holds the lock.
 func TryAcquireFileLock(path string) (release func(), ok bool, err error) {
-	file, locked, err := openAndTryLock(path)
+	file, locked, err := openAndTryLock(path, false)
 	if err != nil || !locked {
 		if file != nil {
 			_ = file.Close()
@@ -49,7 +60,7 @@ func TryAcquireFileLock(path string) (release func(), ok bool, err error) {
 	return lockReleaser(file), true, nil
 }
 
-func openAndTryLock(path string) (*os.File, bool, error) {
+func openAndTryLock(path string, shared bool) (*os.File, bool, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, false, err
 	}
@@ -58,7 +69,7 @@ func openAndTryLock(path string) (*os.File, bool, error) {
 	if err != nil {
 		return nil, false, err
 	}
-	locked, err := tryLockFile(file)
+	locked, err := tryLockFile(file, shared)
 	if err != nil {
 		_ = file.Close()
 		return nil, false, err

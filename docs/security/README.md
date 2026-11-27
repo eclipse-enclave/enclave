@@ -43,6 +43,40 @@ not a hardened container-escape boundary.
   `--project-mount readonly` when metadata must not change; see
   [Git](../git.md).
 
+## Host images
+
+The [image inbox](../image-inbox.md) hands host images to an agent under
+these rules:
+
+- Nothing display-shaped enters the container: no X11 or Wayland socket, no
+  session D-Bus, no portal, no clipboard. Sessions without `--image-inbox`
+  get no inbox mount at all.
+- Only an explicit `enclave img import` adds a host image. There is no
+  clipboard watching, and the container has no channel to trigger an
+  import.
+- The inbox is mounted read-only, so the agent cannot write, delete, or
+  request host images.
+- Content is validated on the host: PNG or JPEG only, content-sniffed
+  against the type the clipboard or file extension advertises, at most
+  10 MiB, written with mode 0600 into a 0700 directory.
+- Inboxes are per project, and `img import` refuses to guess a target, so an
+  agent never sees another project's host images.
+- Native paste adds no access. The `xclip` and `wl-paste` in the container
+  are Enclave shims that read only the read-only inbox, and only its newest
+  host image shortly after import; see
+  [Native paste shims](../image-inbox.md#native-paste-shims). The container
+  still has no clipboard.
+
+Residual risks:
+
+- Metadata such as EXIF, including GPS coordinates from a phone photo, is not
+  stripped. Strip it before importing when that matters.
+- Every inbox-enabled session of the project reads every host image imported
+  for the project while the inbox exists, not only the one whose path you
+  pasted.
+- A screenshot shows the agent whatever was on screen, including secrets in
+  other windows.
+
 ## Project-controlled execution
 
 Treat an untrusted repository as executable input and review its devcontainer

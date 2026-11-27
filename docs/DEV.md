@@ -261,6 +261,41 @@ docker build --progress=plain . 2>&1 | \
   grep -E "(Installing feature|Feature .+: added)"
 ```
 
+## Testing the image inbox
+
+Manual check with the working-copy binary and two projects, `a` and `b`:
+
+```bash
+(cd a && ../bin/enclave --image-inbox)      # terminal 1
+(cd b && ../bin/enclave --image-inbox)      # terminal 2
+cd a && ../bin/enclave img import --file shot.png  # prints the container path
+```
+
+With an image on the host clipboard, `../bin/enclave img import` imports it
+and puts the container path on the clipboard; `img import --screenshot`
+does the same for a selected region. Check both under Wayland and X11 (for
+example an Xorg session, or `env -u WAYLAND_DISPLAY` under XWayland).
+
+In the session of `a`, `ls -l "$ENCLAVE_IMAGE_INBOX"` lists the host image
+read-only; in the session of `b` the inbox is empty. `enclave ps --json` shows
+`"image_inbox": true` under `options`, and `--backend qemu --image-inbox`
+fails before building.
+
+Outside both projects, `img import --file shot.png` fails and lists `a` and
+`b`; `--session <name>` with a session name or container name from
+`enclave ps` picks one. With `notify-send` installed, each of these imports
+also shows a desktop notification naming the project or the error.
+
+Exiting the session of `a` leaves only `b`'s inbox in
+`~/.cache/enclave/inbox/`. To check the lazy sweep, start `a` with
+`--background --image-inbox`, import, and stop its container with
+`docker stop` rather than `enclave stop`; `enclave cleanup --dry-run` then
+lists the inbox. Triggers: [Lifetime](image-inbox.md#lifetime-and-targeting).
+
+`scripts/smoke-image-inbox.sh` covers the same flow against real containers
+with a faked clipboard, screenshot, and `notify-send`; it needs Docker (or
+`ENGINE=podman`) and starts and stops only its own sessions.
+
 ## Windows launcher
 
 On Windows, `cmd/enclave` builds `main_windows.go`, which forwards to the Linux

@@ -88,6 +88,7 @@ type SessionMeta struct {
 	DisplayName  string
 	Background   bool
 	Yolo         bool
+	ImageInbox   bool
 	// Provenance holds the typed values of the session-affecting options the
 	// session was started with. Nil means unknown, e.g. for sessions started
 	// by an older enclave.
@@ -443,8 +444,12 @@ type Session struct {
 	Ports      []PortMapping
 	// Network is the Docker-owned per-session bridge, when one is present.
 	// Other backends and legacy/stopped sessions may not have one.
-	Network    *SessionNetwork
-	Yolo       bool
+	Network *SessionNetwork
+	Yolo    bool
+	// ImageInbox comes from its own label, not from Provenance, which is
+	// missing when the options could not be recorded although the inbox is
+	// mounted.
+	ImageInbox bool
 	Provenance map[string]any
 }
 

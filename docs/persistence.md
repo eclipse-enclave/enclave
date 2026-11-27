@@ -95,6 +95,7 @@ Per-project data is stored on the host and reused across sessions:
 | Config/env/auth stores | Host directories under `~/.local/state/enclave/` (bind-mounted; no Docker volumes) |
 | Network log and captures | `~/.local/state/enclave/projects/<project-hash>/<tool>/logs/` (`network.log`; `capture/<session>/` with [full capture](networking.md#full-capture)) |
 | Embedded runtime assets | `~/.cache/enclave/assets/<content-hash>/` |
+| Image inbox | `~/.cache/enclave/inbox/<engine>/<project-hash>/` (mode 0700; see [Image inbox](image-inbox.md#lifetime-and-targeting)) |
 
 macOS paths: [Host directories](configuration.md#host-directories). Store
 lifecycle: [Persistent stores](runtime/stores.md); memory rules:
@@ -104,6 +105,8 @@ The cache root is disposable; deleting it only costs performance. Package
 caches are recreated empty (Docker Desktop for macOS can briefly report a
 recreated one as missing), asset entries are re-extracted on the next run and
 pruned after 30 days unused, and no required runtime file is mounted from it.
+Deleting it also drops imported host images, which a running session then no
+longer sees.
 
 ### Disabling persistence
 
@@ -145,6 +148,12 @@ unit: `--keep memory` also preserves the config store and `--keep history`
 also preserves memory. With `--ephemeral`, `--keep memory` preserves each
 session store that holds memory; the other kinds do not apply there. See
 [Agent memory](runtime/stores.md#agent-memory).
+
+Every cleanup, whatever its scope and `--keep` flags, also removes the image
+inbox of every project without an inbox-enabled session; see
+[Image inbox](image-inbox.md#lifetime-and-targeting). `--all` without
+`--keep cache` removes the whole cache root, including inboxes that running
+sessions use.
 
 Under Podman, `--build-cache` reports nothing to reclaim; see
 [Backends](backends.md#podman).

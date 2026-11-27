@@ -16,9 +16,9 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-func tryLockFile(file *os.File) (bool, error) {
+func tryLockFile(file *os.File, shared bool) (bool, error) {
 	var overlapped windows.Overlapped
-	err := windows.LockFileEx(windows.Handle(file.Fd()), windows.LOCKFILE_EXCLUSIVE_LOCK|windows.LOCKFILE_FAIL_IMMEDIATELY, 0, 1, 0, &overlapped)
+	err := windows.LockFileEx(windows.Handle(file.Fd()), lockFileFlags(shared)|windows.LOCKFILE_FAIL_IMMEDIATELY, 0, 1, 0, &overlapped)
 	if err == nil {
 		return true, nil
 	}
@@ -28,9 +28,16 @@ func tryLockFile(file *os.File) (bool, error) {
 	return false, err
 }
 
-func lockFile(file *os.File) error {
+func lockFile(file *os.File, shared bool) error {
 	var overlapped windows.Overlapped
-	return windows.LockFileEx(windows.Handle(file.Fd()), windows.LOCKFILE_EXCLUSIVE_LOCK, 0, 1, 0, &overlapped)
+	return windows.LockFileEx(windows.Handle(file.Fd()), lockFileFlags(shared), 0, 1, 0, &overlapped)
+}
+
+func lockFileFlags(shared bool) uint32 {
+	if shared {
+		return 0
+	}
+	return windows.LOCKFILE_EXCLUSIVE_LOCK
 }
 
 func unlockFile(file *os.File) error {

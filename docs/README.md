@@ -16,6 +16,7 @@ Reference documentation for Eclipse Enclave. For a guided introduction, see the
 | Override tool settings, patch tool config, add skills | [tool-config.md](tool-config.md) |
 | Choose a tool, base image, or devcontainer; control rebuilds | [tools.md](tools.md) |
 | Mount extra directories or sensitive paths | [mounts.md](mounts.md) |
+| Hand a screenshot or clipboard image to an agent | [image-inbox.md](image-inbox.md) |
 | Understand Git identity and config protection in the sandbox | [git.md](git.md) |
 | Use Podman or the experimental QEMU backend | [backends.md](backends.md) |
 | Add my own `enclave <name>` commands | [commands.md](commands.md) |

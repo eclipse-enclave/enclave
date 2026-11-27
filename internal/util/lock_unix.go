@@ -15,9 +15,9 @@ import (
 	"syscall"
 )
 
-func tryLockFile(file *os.File) (bool, error) {
+func tryLockFile(file *os.File, shared bool) (bool, error) {
 	// #nosec G115 -- file descriptor from os.File.Fd() fits in int on supported Unix platforms.
-	err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
+	err := syscall.Flock(int(file.Fd()), flockMode(shared)|syscall.LOCK_NB)
 	if err == nil {
 		return true, nil
 	}
@@ -27,9 +27,16 @@ func tryLockFile(file *os.File) (bool, error) {
 	return false, err
 }
 
-func lockFile(file *os.File) error {
+func lockFile(file *os.File, shared bool) error {
 	// #nosec G115 -- file descriptor from os.File.Fd() fits in int on supported Unix platforms.
-	return syscall.Flock(int(file.Fd()), syscall.LOCK_EX)
+	return syscall.Flock(int(file.Fd()), flockMode(shared))
+}
+
+func flockMode(shared bool) int {
+	if shared {
+		return syscall.LOCK_SH
+	}
+	return syscall.LOCK_EX
 }
 
 func unlockFile(file *os.File) error {

@@ -8,6 +8,7 @@ contracts over human-readable output, container labels, or Docker inspection.
 | `enclave ps --json` | JSON array of sessions | [`ps --json`](#ps---json) |
 | `enclave config --json` | Envelope, `schemaVersion: "1"`, `kind: "config"` | [`config --json`](#config---json) |
 | `enclave network print --json` | Envelope, `schemaVersion: "1"`, `kind: "network-policy"` | [`network print --json`](#network-print---json) |
+| `enclave img import --json` | Envelope, `schemaVersion: "1"`, `kind: "image-import"` | [`img import --json`](#img-import---json) |
 | `enclave network log --json` | Raw JSONL event stream, or one aggregate object with `--summary` | [Reading the network log](networking.md#reading-the-network-log) |
 | `enclave version --json` | Object with version, commit, and date | [Inspect commands](cli-reference.md#inspect) |
 | `enclave tools\|features\|commands list --json`, and `add`/`update`/`remove --json` | `schemaVersion: "1"` | [Extension JSON output](extensions/json-output.md) |
@@ -145,6 +146,32 @@ with `error` set, `mode: null`, empty arrays (`tool: null` for startup
 failures), and exit code 1. Usage errors and warnings go to stderr only (exit
 1, empty stdout). Policy inputs:
 [Managing the network policy](networking.md#managing-the-network-policy).
+
+## `img import --json`
+
+The result of an import into a project's
+[image inbox](image-inbox.md):
+
+```json
+{
+  "schemaVersion": "1",
+  "kind": "image-import",
+  "path": "/mnt/host-images/20261119T104512Z-3f9c2a1e.png",
+  "project": { "dir": "/home/you/src/app", "hash": "e9671acd2448" },
+  "session": { "name": "enclave-claude-e9671acd2448", "sessionName": "1" }
+}
+```
+
+| Field | Content |
+|-------|---------|
+| `path` | Where the project's inbox-enabled sessions see the host image |
+| `project` | The target project; `dir` is empty for sessions that did not record it |
+| `session` | The session `--session` resolved to, named as in [`ps --json`](#ps---json); `null` without `--session` |
+
+Fields are only added, never renamed or removed. Unlike `network print
+--json`, a failure prints no envelope: it exits 1 with nothing on stdout and
+an `error: ` line on stderr, as without `--json`. Without `--json`, stdout is
+the bare path.
 
 ## Known consumers
 

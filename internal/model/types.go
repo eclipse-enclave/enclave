@@ -56,6 +56,7 @@ type RunOptions struct {
 	CmdArgs                  []string
 	NoHistory                bool
 	NoMemory                 bool
+	ImageInbox               bool
 	NoCache                  bool
 	NetworkLog               string
 	Verbose                  bool
@@ -132,6 +133,21 @@ type UpdateOptions struct {
 	UpdateTools []string
 }
 
+// ImgOptions carries the source of `img import` (the host clipboard by
+// default, a screenshot, a file, or stdin) and its explicit target.
+type ImgOptions struct {
+	ImgFile       string
+	ImgStdin      bool
+	ImgScreenshot bool
+	// ImgNoClipboard keeps the container path off the host clipboard.
+	ImgNoClipboard bool
+	// ImgSession names the session whose project receives the import; empty
+	// leaves the choice to the working directory or the only candidate.
+	ImgSession string
+	// ImgJSON prints a successful import as a JSON envelope.
+	ImgJSON bool
+}
+
 type Options struct {
 	RunOptions
 	AuthOptions
@@ -139,6 +155,7 @@ type Options struct {
 	CleanupOptions
 	UpdateOptions
 	PSOptions
+	ImgOptions
 	Sources OptionSources
 	// Origins, ListProblems, and DroppedRemovals are filled by option
 	// resolution; never part of provenance.
@@ -543,10 +560,16 @@ const (
 	// UserCommandsContainerDir is the fixed, home-layout-neutral path where the
 	// host session command tree is mounted read-only inside the container.
 	UserCommandsContainerDir = "/opt/" + AppName + "/commands"
-	ImageName                = AppName + ":latest"
-	AlpineImage              = "alpine@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a"
-	HashLength               = 12
-	DetachKeysDefault        = `ctrl-\`
+	// ContainerImageInboxDir is where an inbox-enabled session sees its
+	// project's image inbox, read-only.
+	ContainerImageInboxDir = "/mnt/host-images"
+	// ImageInboxMaxBytes caps an imported host image at 10 MiB: enough for real
+	// screenshots, small enough to reject payloads that are clearly not one.
+	ImageInboxMaxBytes = 10 << 20
+	ImageName          = AppName + ":latest"
+	AlpineImage        = "alpine@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a"
+	HashLength         = 12
+	DetachKeysDefault  = `ctrl-\`
 )
 
 const (
@@ -566,6 +589,10 @@ const (
 	LabelProjectDir = AppName + ".project_dir"
 	LabelConfigKey  = AppName + ".config_key"
 	LabelYolo       = AppName + ".yolo"
+	// LabelImageInbox marks a session that mounts its project's image inbox.
+	// Inbox sweeps and `img import` rely on it, so unlike LabelOptions it must
+	// be present whenever the inbox is mounted.
+	LabelImageInbox = AppName + ".image_inbox"
 	// LabelOptions stores a session's provenance, the session-affecting
 	// option values, as compact JSON. It is storage only; `ps --json` is the
 	// contract.

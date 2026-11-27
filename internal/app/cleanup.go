@@ -131,6 +131,10 @@ func runCleanup(run model.RunOptions, cleanup model.CleanupOptions) int {
 		}
 		// Ephemeral config stores are host directories keyed by a session suffix.
 		storeDirs := resolveEphemeralStoreDirs(run, cleanup, home, project, scopes)
+		if err := validateSSHCleanupDirs(storeDirs, home); err != nil {
+			logx.Errorf("%v", err)
+			return 1
+		}
 		if cleanup.CleanupDryRun {
 			gatewayNames := stopExitedSessionGateways(run, cleanup, project, true)
 			networkNames := pruneStaleSessionNetworks(run, cleanup, project, true)
@@ -161,6 +165,16 @@ func runCleanup(run model.RunOptions, cleanup model.CleanupOptions) int {
 		memoryScope = model.MemoryScopeProject
 	}
 	dirPaths := cleanupDirsForRemoval(run, cleanup, home, project, memoryScope)
+	if err := validateSSHCleanupDirs(dirPaths, home); err != nil {
+		logx.Errorf("%v", err)
+		return 1
+	}
+	if cleanupRemovesLegacySSHDir(dirPaths, home) {
+		if err := prepareSSHForCleanup(home, cleanup.CleanupDryRun); err != nil {
+			logx.Errorf("%v", err)
+			return 1
+		}
+	}
 
 	if cleanup.CleanupDryRun {
 		printCleanupPlan(dirPaths)
@@ -173,6 +187,100 @@ func runCleanup(run model.RunOptions, cleanup model.CleanupOptions) int {
 
 	logx.Successf("Cleanup complete")
 	return 0
+}
+
+// validateSSHCleanupDirs refuses a cleanup plan in which a target contains the
+// SSH directory or lies inside it, compared both as given and with symlinks
+// resolved. The directory a legacy symbolic link leads to is protected the same
+// way: it holds the keys, whether or not the link has been moved yet.
+func validateSSHCleanupDirs(dirs []cleanupDir, home string) error {
+	sshDir := config.HostSSHDir(home)
+	realSSHDir, err := util.RealPath(sshDir)
+	if err != nil {
+		return fmt.Errorf("resolve SSH directory %s: %w", sshDir, err)
+	}
+	protected := []string{realSSHDir}
+	legacy := config.HostLegacySSHDir(home)
+	if info, err := os.Lstat(legacy); err == nil && info.Mode()&os.ModeSymlink != 0 {
+		if linkTarget, err := filepath.EvalSymlinks(legacy); err == nil {
+			protected = append(protected, linkTarget)
+		}
+	}
+	for _, dir := range dirs {
+		realTarget, err := util.RealPath(dir.Path)
+		if err != nil {
+			return fmt.Errorf("resolve cleanup target %s: %w", dir.Path, err)
+		}
+		overlapped := sshDir
+		if !pathsOverlap(dir.Path, sshDir) {
+			overlapped = ""
+			for _, path := range protected {
+				if pathsOverlap(realTarget, path) {
+					overlapped = path
+					break
+				}
+			}
+		}
+		if overlapped != "" {
+			hint := ""
+			if dir.Kind == cacheKind {
+				hint = "; pass --keep cache to clean up everything else"
+			}
+			return fmt.Errorf("refusing cleanup because target %s overlaps SSH directory %s%s", dir.Path, overlapped, hint)
+		}
+	}
+	return nil
+}
+
+func pathsOverlap(first string, second string) bool {
+	return util.PathWithin(first, second) || util.PathWithin(second, first)
+}
+
+// cleanupRemovesLegacySSHDir reports whether a cleanup target contains the
+// legacy cache-root SSH directory, which is relocated before it is removed.
+func cleanupRemovesLegacySSHDir(dirs []cleanupDir, home string) bool {
+	legacy := config.HostLegacySSHDir(home)
+	for _, dir := range dirs {
+		if util.PathWithin(dir.Path, legacy) {
+			return true
+		}
+	}
+	return false
+}
+
+// prepareSSHForCleanup runs before a cleanup that removes the legacy SSH
+// directory. It moves that directory to the current location, or with dryRun
+// reports the move, and refuses the cleanup when the legacy directory holds
+// files that the current one would not get.
+func prepareSSHForCleanup(home string, dryRun bool) error {
+	current := config.HostSSHDir(home)
+	legacy := config.HostLegacySSHDir(home)
+	resolve := migrateLegacySSHDir
+	if dryRun {
+		resolve = inspectSSHMigration
+	}
+	state, err := resolve(home)
+	if err != nil {
+		return err
+	}
+	switch state {
+	case sshMigrationPending:
+		logx.Infof("Would relocate legacy SSH directory from %s to %s before cleanup.", legacy, current)
+	case sshMigrationCompleted:
+		logx.Infof("Relocated SSH directory from %s to %s before cleanup.", legacy, current)
+	case sshMigrationConflict:
+		legacyInfo, err := os.Lstat(legacy)
+		if err != nil {
+			return fmt.Errorf("inspect legacy SSH path %s: %w", legacy, err)
+		}
+		// In this state a legacy directory has content: an empty one is
+		// sshMigrationEmptyLegacy.
+		if legacyInfo.IsDir() {
+			return fmt.Errorf("refusing cleanup because it would remove legacy SSH directory %s while %s is in use; compare the two, then remove %s, or pass --keep cache", legacy, current, legacy)
+		}
+		logx.Warnf("Cleanup removes legacy SSH path %s with the cache; %s remains in use.", legacy, current)
+	}
+	return nil
 }
 
 func resolveEphemeralContainers(run model.RunOptions, cleanup model.CleanupOptions, project model.Project) ([]string, error) {

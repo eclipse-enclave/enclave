@@ -24,7 +24,14 @@ func TestHostPaths(t *testing.T) {
 
 	configRoot := hostConfigRoot(home)
 	stateRoot := hostStateRoot(home)
+	cacheRoot := hostCacheRoot(home)
 
+	if got, want := HostSSHDir(home), filepath.Join(configRoot, "ssh"); got != want {
+		t.Fatalf("HostSSHDir() = %q, want %q", got, want)
+	}
+	if got, want := HostLegacySSHDir(home), filepath.Join(cacheRoot, "ssh"); got != want {
+		t.Fatalf("HostLegacySSHDir() = %q, want %q", got, want)
+	}
 	if got, want := HostSkillsDir(home), filepath.Join(configRoot, "skills"); got != want {
 		t.Fatalf("HostSkillsDir() = %q, want %q", got, want)
 	}

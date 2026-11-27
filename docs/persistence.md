@@ -95,6 +95,7 @@ Per-project data is stored on the host and reused across sessions:
 | Config/env/auth stores | Host directories under `~/.local/state/enclave/` (bind-mounted; no Docker volumes) |
 | Network log and captures | `~/.local/state/enclave/projects/<project-hash>/<tool>/logs/` (`network.log`; `capture/<session>/` with [full capture](networking.md#full-capture)) |
 | Embedded runtime assets | `~/.cache/enclave/assets/<content-hash>/` |
+| SSH keys | `~/.config/enclave/ssh/` (mounted read-only; see [SSH keys](auth.md#ssh-keys)) |
 
 macOS paths: [Host directories](configuration.md#host-directories). Store
 lifecycle: [Persistent stores](runtime/stores.md); memory rules:
@@ -145,6 +146,8 @@ unit: `--keep memory` also preserves the config store and `--keep history`
 also preserves memory. With `--ephemeral`, `--keep memory` preserves each
 session store that holds memory; the other kinds do not apply there. See
 [Agent memory](runtime/stores.md#agent-memory).
+
+No cleanup option removes the [SSH keys](auth.md#ssh-keys).
 
 Under Podman, `--build-cache` reports nothing to reclaim; see
 [Backends](backends.md#podman).

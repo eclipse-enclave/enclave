@@ -35,7 +35,7 @@ flowchart LR
         ProjectDir["Project dir"]
         CacheDir["~/.cache/enclave/&lt;tool&gt;/&lt;hash&gt;"]
         HistoryDir["~/.local/state/enclave/projects/&lt;hash&gt;/&lt;tool&gt;/history"]
-        SSHDir["~/.cache/enclave/ssh"]
+        SSHDir["~/.config/enclave/ssh"]
     end
 
     subgraph Stores["Persistent stores (host dirs under ~/.local/state/enclave)"]
@@ -120,7 +120,7 @@ The network request flow, restricted and unrestricted, has separate
 | [`build.go`](../internal/app/build.go) | Rebuild detection, agent update planning, stamp commits |
 | [`self_update.go`](../internal/app/self_update.go), [`internal/selfupdate/`](../internal/selfupdate/) | Update policy; channel resolution and checksum-verified atomic install ([Self-update](#self-update)) |
 | [`cleanup.go`](../internal/app/cleanup.go) | `enclave cleanup` |
-| [`ssh.go`](../internal/app/ssh.go) | `enclave ssh-init` |
+| [`ssh.go`](../internal/app/ssh.go) | `enclave ssh-init`; moves a legacy cache-root SSH directory to the config root |
 | [`tools.go`](../internal/app/tools.go) | Lists tool profiles |
 | [`network_cmd.go`](../internal/app/network_cmd.go), [`network_log_cmd.go`](../internal/app/network_log_cmd.go) | `enclave network` subcommands and `network log` |
 | [`internal/cli/network_command.go`](../internal/cli/network_command.go) | Cobra tree for `network` |

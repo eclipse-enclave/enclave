@@ -142,7 +142,7 @@ and `--json`; see [Full capture](networking.md#full-capture). See
 |---------|-------------|
 | `enclave auth import --tool <tool>` | Copy host auth files into the auth store |
 | `enclave auth export --tool <tool>` | Copy auth store files back to the host |
-| `enclave ssh-init` | Initialize isolated SSH keys at `~/.cache/enclave/ssh/`. Not recommended: the key lets the agent push to your Git provider. See [SSH keys](auth.md#ssh-keys) |
+| `enclave ssh-init` | Initialize isolated SSH keys at `~/.config/enclave/ssh/`. Not recommended: the key lets the agent push to your Git provider. See [SSH keys](auth.md#ssh-keys) |
 
 ### Devcontainer
 

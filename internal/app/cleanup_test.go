@@ -17,6 +17,7 @@ import (
 
 	"enclave/internal/config"
 	"enclave/internal/model"
+	"enclave/internal/util"
 )
 
 func TestResolveCleanupDirs(t *testing.T) {
@@ -75,6 +76,262 @@ func TestCleanupDirsNeverTargetConfigRoot(t *testing.T) {
 
 	check("per-project", cleanupDirsForRemoval(run, model.CleanupOptions{}, home, project, model.MemoryScopeProject))
 	check("all", cleanupDirsForRemoval(run, model.CleanupOptions{CleanupAll: true}, home, project, model.MemoryScopeProject))
+}
+
+func TestCleanupDirsNeverContainSSHDirectory(t *testing.T) {
+	t.Parallel()
+
+	home := "/tmp/test-home"
+	project := model.Project{Hash: "projhash"}
+	run := model.RunOptions{Tool: "codex"}
+	sshDir := config.HostSSHDir(home)
+
+	for _, dir := range cleanupDirsForRemoval(run, model.CleanupOptions{CleanupAll: true}, home, project, model.MemoryScopeProject) {
+		if util.PathWithin(dir.Path, sshDir) {
+			t.Fatalf("cleanup target %q contains SSH directory %q", dir.Path, sshDir)
+		}
+	}
+}
+
+func TestValidateSSHCleanupDirsRejectsOverlap(t *testing.T) {
+	t.Parallel()
+
+	home := "/tmp/test-home"
+	sshDir := config.HostSSHDir(home)
+	for _, target := range []string{filepath.Dir(sshDir), sshDir, filepath.Join(sshDir, "nested")} {
+		err := validateSSHCleanupDirs([]cleanupDir{{Kind: "test", Path: target}}, home)
+		if err == nil {
+			t.Fatalf("validateSSHCleanupDirs() accepted overlapping target %q", target)
+		}
+	}
+	if err := validateSSHCleanupDirs([]cleanupDir{{Kind: "test", Path: config.HostCacheDir(home)}}, home); err != nil {
+		t.Fatalf("validateSSHCleanupDirs() rejected cache root: %v", err)
+	}
+	err := validateSSHCleanupDirs([]cleanupDir{{Kind: cacheKind, Path: filepath.Dir(sshDir)}}, home)
+	if err == nil || !strings.Contains(err.Error(), "--keep cache") {
+		t.Fatalf("validateSSHCleanupDirs() error for an overlapping cache = %v, want a --keep cache hint", err)
+	}
+}
+
+func TestValidateSSHCleanupDirsResolvesConfigSymlink(t *testing.T) {
+	base := t.TempDir()
+	home := filepath.Join(base, "home")
+	cacheBase := filepath.Join(base, "cache")
+	configLink := filepath.Join(base, "config-link")
+	if err := os.MkdirAll(filepath.Join(cacheBase, "enclave", "ssh"), 0o700); err != nil {
+		t.Fatalf("create cache tree: %v", err)
+	}
+	if err := os.Symlink(cacheBase, configLink); err != nil {
+		t.Fatalf("create config symlink: %v", err)
+	}
+	t.Setenv("XDG_CACHE_HOME", cacheBase)
+	t.Setenv("XDG_CONFIG_HOME", configLink)
+
+	target := config.HostCacheDir(home)
+	if err := validateSSHCleanupDirs([]cleanupDir{{Kind: "cache", Path: target}}, home); err == nil {
+		t.Fatalf("validateSSHCleanupDirs() accepted real-path overlap between %q and %q", target, config.HostSSHDir(home))
+	}
+}
+
+func TestCleanupRemovesLegacySSHDirFollowsPlan(t *testing.T) {
+	t.Parallel()
+
+	home := "/tmp/test-home"
+	project := model.Project{Hash: "projhash"}
+	run := model.RunOptions{Tool: "codex"}
+	for _, tc := range []struct {
+		name    string
+		cleanup model.CleanupOptions
+		want    bool
+	}{
+		{name: "all", cleanup: model.CleanupOptions{CleanupAll: true}, want: true},
+		{name: "all keep cache", cleanup: model.CleanupOptions{CleanupAll: true, CleanupKeepCache: true}, want: false},
+		{name: "per-project", cleanup: model.CleanupOptions{}, want: false},
+	} {
+		dirs := cleanupDirsForRemoval(run, tc.cleanup, home, project, model.MemoryScopeProject)
+		if got := cleanupRemovesLegacySSHDir(dirs, home); got != tc.want {
+			t.Errorf("%s: cleanupRemovesLegacySSHDir() = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
+func TestCleanupAllPreservesMigratedSSHDirectory(t *testing.T) {
+	home := t.TempDir()
+	legacy := config.HostLegacySSHDir(home)
+	current := config.HostSSHDir(home)
+	writeTestSSHDirectory(t, legacy, "old-key")
+
+	if err := prepareSSHForCleanup(home, false); err != nil {
+		t.Fatalf("prepareSSHForCleanup() error = %v", err)
+	}
+	cleanupDirs(cleanupDirsForRemoval(model.RunOptions{Tool: "codex"}, model.CleanupOptions{CleanupAll: true}, home, model.Project{}, model.MemoryScopeProject))
+
+	assertSSHPathMissing(t, legacy)
+	assertFileContent(t, filepath.Join(current, "id_ed25519"), "old-key")
+}
+
+func TestCleanupAllAbortsWhenLegacySSHMigrationFails(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	legacy := config.HostLegacySSHDir(home)
+	if err := os.MkdirAll(filepath.Dir(legacy), 0o700); err != nil {
+		t.Fatalf("create legacy SSH parent: %v", err)
+	}
+	if err := os.WriteFile(legacy, []byte("legacy-file"), 0o600); err != nil {
+		t.Fatalf("create unsupported legacy SSH file: %v", err)
+	}
+
+	if code := runCleanup(model.RunOptions{Tool: "codex"}, model.CleanupOptions{CleanupAll: true}); code != 1 {
+		t.Fatalf("runCleanup() exit code = %d, want 1", code)
+	}
+	assertFileContent(t, legacy, "legacy-file")
+	assertSSHPathMissing(t, config.HostSSHDir(home))
+}
+
+func TestCleanupAllMovesLegacySSHSymlink(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	legacy := config.HostLegacySSHDir(home)
+	current := config.HostSSHDir(home)
+	legacyTarget := filepath.Join(home, "legacy-target")
+	writeTestSSHDirectory(t, legacyTarget, "linked-old-key")
+	if err := os.MkdirAll(filepath.Dir(legacy), 0o700); err != nil {
+		t.Fatalf("create legacy SSH parent: %v", err)
+	}
+	if err := os.Symlink(legacyTarget, legacy); err != nil {
+		t.Fatalf("create legacy SSH symlink: %v", err)
+	}
+
+	if code := runCleanup(model.RunOptions{Tool: "codex"}, model.CleanupOptions{CleanupAll: true}); code != 0 {
+		t.Fatalf("runCleanup() exit code = %d, want 0", code)
+	}
+	assertSSHPathMissing(t, legacy)
+	assertSymlink(t, current)
+	assertFileContent(t, filepath.Join(current, "id_ed25519"), "linked-old-key")
+}
+
+func TestCleanupAllRefusesToRemoveLegacySSHSymlinkTarget(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		target     func(home string) string
+		currentKey string
+	}{
+		{name: "cache", target: func(home string) string { return filepath.Join(config.HostCacheDir(home), "key-target") }},
+		{name: "history", target: func(home string) string { return filepath.Join(config.HostProjectsDir(home), "demo", "key-target") }},
+		{name: "cache beside a current directory", target: func(home string) string { return filepath.Join(config.HostCacheDir(home), "key-target") }, currentKey: "new-key"},
+	} {
+		for _, dryRun := range []bool{true, false} {
+			home := t.TempDir()
+			t.Setenv("HOME", home)
+			legacy := config.HostLegacySSHDir(home)
+			current := config.HostSSHDir(home)
+			keys := tc.target(home)
+			writeTestSSHDirectory(t, keys, "linked-key")
+			if err := os.MkdirAll(filepath.Dir(legacy), 0o700); err != nil {
+				t.Fatalf("create legacy SSH parent: %v", err)
+			}
+			if err := os.Symlink(keys, legacy); err != nil {
+				t.Fatalf("create legacy SSH symlink: %v", err)
+			}
+			if tc.currentKey != "" {
+				writeTestSSHDirectory(t, current, tc.currentKey)
+			}
+
+			cleanup := model.CleanupOptions{CleanupAll: true, CleanupDryRun: dryRun}
+			if code := runCleanup(model.RunOptions{Tool: "codex"}, cleanup); code != 1 {
+				t.Fatalf("%s, dryRun=%v: runCleanup() exit code = %d, want 1", tc.name, dryRun, code)
+			}
+			// Nothing moved and nothing was removed.
+			assertSymlink(t, legacy)
+			assertFileContent(t, filepath.Join(keys, "id_ed25519"), "linked-key")
+			if tc.currentKey == "" {
+				assertSSHPathMissing(t, current)
+			}
+		}
+	}
+}
+
+func TestCleanupAllUsesCurrentSSHDirectoryWhenLegacyIsSymlink(t *testing.T) {
+	home := t.TempDir()
+	legacy := config.HostLegacySSHDir(home)
+	current := config.HostSSHDir(home)
+	legacyTarget := filepath.Join(home, "legacy-target")
+	writeTestSSHDirectory(t, legacyTarget, "linked-old-key")
+	if err := os.MkdirAll(filepath.Dir(legacy), 0o700); err != nil {
+		t.Fatalf("create legacy SSH parent: %v", err)
+	}
+	if err := os.Symlink(legacyTarget, legacy); err != nil {
+		t.Fatalf("create legacy SSH symlink: %v", err)
+	}
+	writeTestSSHDirectory(t, current, "new-key")
+
+	if err := prepareSSHForCleanup(home, false); err != nil {
+		t.Fatalf("prepareSSHForCleanup() error = %v", err)
+	}
+	cleanupDirs(cleanupDirsForRemoval(model.RunOptions{Tool: "codex"}, model.CleanupOptions{CleanupAll: true}, home, model.Project{}, model.MemoryScopeProject))
+
+	assertSSHPathMissing(t, legacy)
+	assertFileContent(t, filepath.Join(current, "id_ed25519"), "new-key")
+	assertFileContent(t, filepath.Join(legacyTarget, "id_ed25519"), "linked-old-key")
+}
+
+func TestCleanupAllRefusesToRemoveLegacySSHKeysWhenBothExist(t *testing.T) {
+	for _, dryRun := range []bool{true, false} {
+		home := t.TempDir()
+		t.Setenv("HOME", home)
+		legacy := config.HostLegacySSHDir(home)
+		current := config.HostSSHDir(home)
+		writeTestSSHDirectory(t, legacy, "old-key")
+		writeTestSSHDirectory(t, current, "new-key")
+
+		cleanup := model.CleanupOptions{CleanupAll: true, CleanupDryRun: dryRun}
+		if code := runCleanup(model.RunOptions{Tool: "codex"}, cleanup); code != 1 {
+			t.Fatalf("dryRun=%v: runCleanup() exit code = %d, want 1", dryRun, code)
+		}
+		assertFileContent(t, filepath.Join(legacy, "id_ed25519"), "old-key")
+		assertFileContent(t, filepath.Join(current, "id_ed25519"), "new-key")
+
+		cleanup.CleanupKeepCache = true
+		if code := runCleanup(model.RunOptions{Tool: "codex"}, cleanup); code != 0 {
+			t.Fatalf("dryRun=%v: runCleanup() with --keep cache exit code = %d, want 0", dryRun, code)
+		}
+		assertFileContent(t, filepath.Join(legacy, "id_ed25519"), "old-key")
+	}
+}
+
+func TestCleanupAllRemovesEmptyLegacySSHDirectoryWhenBothExist(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	legacy := config.HostLegacySSHDir(home)
+	current := config.HostSSHDir(home)
+	if err := os.MkdirAll(legacy, 0o700); err != nil {
+		t.Fatalf("create empty legacy SSH directory: %v", err)
+	}
+	writeTestSSHDirectory(t, current, "new-key")
+
+	if code := runCleanup(model.RunOptions{Tool: "codex"}, model.CleanupOptions{CleanupAll: true}); code != 0 {
+		t.Fatalf("runCleanup() exit code = %d, want 0", code)
+	}
+	assertSSHPathMissing(t, legacy)
+	assertFileContent(t, filepath.Join(current, "id_ed25519"), "new-key")
+}
+
+func TestCleanupAllMovesLegacySSHKeysIntoEmptyCurrentDirectory(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	legacy := config.HostLegacySSHDir(home)
+	current := config.HostSSHDir(home)
+	writeTestSSHDirectory(t, legacy, "old-key")
+	if err := os.MkdirAll(current, 0o755); err != nil {
+		t.Fatalf("create empty current SSH directory: %v", err)
+	}
+
+	if code := runCleanup(model.RunOptions{Tool: "codex"}, model.CleanupOptions{CleanupAll: true}); code != 0 {
+		t.Fatalf("runCleanup() exit code = %d, want 0", code)
+	}
+	assertSSHPathMissing(t, legacy)
+	assertFileContent(t, filepath.Join(current, "id_ed25519"), "old-key")
+	assertMode(t, current, 0o700)
 }
 
 func TestFilterDirsDropsMemory(t *testing.T) {

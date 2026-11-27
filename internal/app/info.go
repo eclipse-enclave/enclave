@@ -8,7 +8,9 @@
 package app
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"strings"
 
@@ -41,11 +43,14 @@ func runInfo(ctx *AppContext, opts model.Options) int {
 		}
 	}
 
-	var projectOverridesDir, projectStateDir string
+	var projectOverridesDir, projectStateDir, globalSecretsFile, globalSecretsToolFile, projectSecretsFile string
 	var configStoreDir, envStoreDir, authStoreDir string
 	if home, homeErr := config.ResolveHostHome(); homeErr == nil {
 		projectOverridesDir = config.HostProjectOverridesDir(home, project.Hash)
 		projectStateDir = config.HostProjectDir(home, project.Hash)
+		globalSecretsFile = config.HostSecretsGlobalSharedFile(home)
+		globalSecretsToolFile = config.HostSecretsGlobalFile(home, opts.Tool)
+		projectSecretsFile = config.HostSecretsProjectFile(home, project.Hash, opts.Tool)
 		configStoreDir = hoststore.Dir(home, backend.StoreKey{Owner: opts.Tool, ProjectHash: project.Hash}, backend.StoreKindConfig)
 		envStoreDir = hoststore.Dir(home, backend.StoreKey{Owner: opts.Tool, ProjectHash: project.Hash}, backend.StoreKindEnv)
 		authStoreDir = hoststore.Dir(home, backend.StoreKey{Owner: opts.Tool, Suffix: authName}, backend.StoreKindAuth)
@@ -123,8 +128,31 @@ func runInfo(ctx *AppContext, opts model.Options) int {
 	if projectStateDir != "" {
 		fmt.Printf("Project State Dir: %s\n", projectStateDir)
 	}
+	fmt.Printf("Secrets Files:\n")
+	fmt.Printf("  Global: %s\n", secretsFileDisplay(globalSecretsFile))
+	fmt.Printf("  Global Tool: %s\n", secretsFileDisplay(globalSecretsToolFile))
+	fmt.Printf("  Project: %s\n", secretsFileDisplay(projectSecretsFile))
 
 	return 0
+}
+
+// secretsFileDisplay renders a secrets file path with its status, falling back
+// to a marker when the home directory could not be resolved.
+func secretsFileDisplay(path string) string {
+	if path == "" {
+		return "unavailable"
+	}
+	info, err := os.Stat(path)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		return path + " (missing)"
+	case err != nil:
+		return fmt.Sprintf("%s (unreadable: %v)", path, err)
+	case info.IsDir():
+		return path + " (not a file)"
+	default:
+		return path
+	}
 }
 
 // storeDirDisplay renders a resolved store directory, falling back to a marker

@@ -179,9 +179,9 @@ func OptionDefs() []OptionDef {
 			CLIFlags: []CLIFlagDef{
 				{
 					Name:                "--backend",
-					Usage:               "Isolation backend: auto|docker|podman|qemu (default: auto, detects docker or podman)",
+					Usage:               "Isolation backend: auto|docker|podman|qemu|sbx (default: auto, detects docker or podman)",
 					ValueKind:           CLIValueRequired,
-					MissingValueMessage: "--backend requires a value (auto|docker|podman|qemu)",
+					MissingValueMessage: "--backend requires a value (auto|docker|podman|qemu|sbx)",
 					Action: CLIAction{
 						Kind:        CLIActionSetString,
 						OptionField: "Backend",

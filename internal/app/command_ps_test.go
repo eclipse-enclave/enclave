@@ -15,12 +15,11 @@ import (
 	"time"
 
 	"enclave/internal/backend"
-	"enclave/internal/docker"
 	"enclave/internal/model"
 )
 
 func TestParseManagedContainerNameSupportsHyphenatedTools(t *testing.T) {
-	tool, hash, session, ok := docker.ParseManagedName("enclave-open-code-abc123abc123-feature-1")
+	tool, hash, session, ok := model.ParseManagedName("enclave-open-code-abc123abc123-feature-1")
 	if !ok {
 		t.Fatal("expected managed container name to parse")
 	}

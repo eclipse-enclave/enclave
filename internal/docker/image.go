@@ -71,6 +71,12 @@ func ImagePull(ctx context.Context, imageRef string) error {
 	return err
 }
 
+// ImageSave writes a local image to a tar archive at path.
+func ImageSave(ctx context.Context, imageRef string, path string) error {
+	_, err := capture(ctx, "save", "--output", path, imageRef)
+	return err
+}
+
 // ImageExists reports whether an image is present locally.
 func ImageExists(ctx context.Context, imageRef string) (bool, error) {
 	if imageRef == "" {

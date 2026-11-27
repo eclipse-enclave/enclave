@@ -106,7 +106,7 @@ Good to know:
 | Configuration | Global and per-project config, tool config overrides, skills, and patches | [Configuration](docs/configuration.md), [Tool config](docs/tool-config.md) |
 | Extensions | Install tools, features, and commands from Git, or write your own | [Extensions](docs/extensions/README.md) |
 | Custom commands | Your own `enclave <name>` verbs, run on the host or in a session | [Commands](docs/commands.md) |
-| Backends | Docker, Podman, and an experimental QEMU microVM backend | [Backends](docs/backends.md) |
+| Backends | Docker, Podman, and experimental QEMU and Docker Sandboxes (sbx) microVM backends | [Backends](docs/backends.md) |
 | Security | What the sandbox protects against and what it does not | [Security](docs/security/README.md) |
 | Graphical frontend | Web UI and desktop app to start, watch, and answer sessions | [HomeShell](https://github.com/eclipse-enclave/homeshell) (preview) |
 

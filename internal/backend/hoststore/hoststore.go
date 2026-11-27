@@ -8,9 +8,9 @@
 // Package hoststore maps neutral persistent-store identities (backend.StoreKey
 // plus backend.StoreKind) to the host directories that back them, and provides
 // the cross-process lock shared by every store consumer. All isolation
-// backends (Docker bind mounts, QEMU 9p shares) realize stores from this
-// single layout, so auth, env, and config state stay shared between containers
-// and microVMs.
+// backends (Docker bind mounts, QEMU 9p shares, sbx workspaces) realize stores
+// from this single layout, so auth, env, and config state stay shared between
+// containers and microVMs.
 package hoststore
 
 import (

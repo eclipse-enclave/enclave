@@ -5,12 +5,11 @@
 //
 // SPDX-License-Identifier: MIT
 
-package qemu
+package hostlayout
 
 import (
 	"context"
 	"fmt"
-	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -23,10 +22,10 @@ import (
 )
 
 // StoreManager realizes persistent stores on the shared hoststore layout, so a
-// qemu session reads and writes the exact same auth/config/env directories as
-// a Docker session for the same tool and project. Host-side IO stays hardened
-// against guest-planted symlinks because store trees are guest-writable via
-// 9p.
+// session on any host-layout backend reads and writes the exact same
+// auth/config/env directories as a Docker session for the same tool and
+// project. Host-side IO stays hardened against guest-planted symlinks because
+// store trees are guest-writable from inside the session.
 type StoreManager struct {
 	host model.Host
 }
@@ -36,11 +35,10 @@ func newStoreManager(host model.Host) *StoreManager {
 }
 
 // Ensure creates the backing directory. Like the Docker backend, owner is a
-// no-op: qemu runs as the invoking user and the guest agent runs with
-// Host.UID/GID over 9p (security_model=none), so store content is already
-// correctly owned. Chowning the shared tree would also fail on foreign-owned
-// entries other backends leave behind (e.g. root-owned Docker bind-mount
-// point directories inside the config store).
+// no-op: host-layout backends run as the invoking user, so store content is
+// already correctly owned. Chowning the shared tree would also fail on
+// foreign-owned entries other backends leave behind (e.g. root-owned Docker
+// bind-mount point directories inside the config store).
 func (s *StoreManager) Ensure(_ context.Context, key backend.StoreKey, kind backend.StoreKind, _ string) error {
 	root, err := s.storePath(key, kind)
 	if err != nil {
@@ -181,7 +179,7 @@ func (s *StoreManager) StoreExists(_ context.Context, key backend.StoreKey, kind
 }
 
 // WithStoreLock serializes cross-process access to one store. The lock file
-// is derived from the shared store directory, so qemu sessions, Docker
+// is derived from the shared store directory, so host-layout sessions, Docker
 // sessions, and Docker-private store mechanics all contend on the same lock.
 func (s *StoreManager) WithStoreLock(_ context.Context, key backend.StoreKey, kind backend.StoreKind, fn func() error) error {
 	if fn == nil {
@@ -272,43 +270,4 @@ func cleanStoreRel(rel string) (string, error) {
 		return "", fmt.Errorf("invalid store path %q", rel)
 	}
 	return cleaned, nil
-}
-
-func removeCopyDestination(dst string) error {
-	if _, err := os.Lstat(dst); err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		return err
-	}
-	return os.RemoveAll(dst)
-}
-
-func copyFile(src string, dst string, mode fs.FileMode) error {
-	if mode == 0 {
-		mode = 0o600
-	}
-	in, err := os.Open(src) // #nosec G304 -- caller validates source.
-	if err != nil {
-		return err
-	}
-	defer func() { _ = in.Close() }()
-	if err := os.MkdirAll(filepath.Dir(dst), 0o700); err != nil {
-		return err
-	}
-	if err := removeCopyDestination(dst); err != nil {
-		return err
-	}
-	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_EXCL, mode.Perm()) // #nosec G304 -- dst is constrained by caller.
-	if err != nil {
-		return err
-	}
-	if _, err := io.Copy(out, in); err != nil {
-		_ = out.Close()
-		return err
-	}
-	if err := out.Close(); err != nil {
-		return err
-	}
-	return os.Chmod(dst, mode.Perm())
 }

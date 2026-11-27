@@ -50,7 +50,7 @@ func ValidateOptions(opts model.Options, sources model.OptionSources, ctx Valida
 	if err := validateBackendName(opts.Backend); err != nil {
 		return opts, sources, warnings, err
 	}
-	if opts.Devcontainer && opts.Backend == backend.NameQEMU {
+	if opts.Devcontainer && (opts.Backend == backend.NameQEMU || opts.Backend == backend.NameSBX) {
 		return opts, sources, warnings, fmt.Errorf("devcontainer mode requires --backend %s or %s", backend.NameDocker, backend.NamePodman)
 	}
 	normalizedBuildOptions, featureWarnings, normErr := normalizeConfiguredBuildOptions(ctx.Paths, opts, sources.Features)
@@ -97,6 +97,14 @@ func ValidateOptions(opts model.Options, sources model.OptionSources, ctx Valida
 			return opts, sources, warnings, err
 		}
 		warnings = append(warnings, qemuWarnings...)
+	}
+	if opts.Backend == backend.NameSBX && isRunAction(ctx.Action) {
+		var sbxWarnings []string
+		opts, sbxWarnings, err = coerceSBXRunOptions(opts, sources)
+		if err != nil {
+			return opts, sources, warnings, err
+		}
+		warnings = append(warnings, sbxWarnings...)
 	}
 	if isRunAction(ctx.Action) {
 		if err := validateDisableGateway(opts, sources, ctx); err != nil {
@@ -280,6 +288,25 @@ func coerceQEMURunOptions(opts model.Options, sources model.OptionSources, paths
 		warnings = append(warnings, "qemu backend: tool-only bundle (no features)")
 	}
 	return opts, warnings, nil
+}
+
+// coerceSBXRunOptions fits a run to what the sbx backend supports so far:
+// foreground sessions without Enclave's gateway. Egress is still filtered, by
+// the sbx network policy that applies to every sandbox.
+func coerceSBXRunOptions(opts model.Options, sources model.OptionSources) (model.Options, []string, error) {
+	if len(opts.AllowDomains) > 0 {
+		hint := "remove --allow-domain"
+		if sources.AllowDomains != model.SourceCLI {
+			hint = "remove allow_domains from config"
+		}
+		return opts, nil, fmt.Errorf("sbx backend does not apply Enclave allowlists yet; manage egress with `sbx policy` and %s", hint)
+	}
+	if opts.Background {
+		return opts, nil, fmt.Errorf("sbx backend runs foreground sessions only and cannot start detached; remove --background")
+	}
+	opts.AllowAllNetwork = true
+	opts.DisableGateway = true
+	return opts, []string{"sbx backend: Enclave's network gateway is not used (implying --allow-all-network --disable-gateway); the sbx network policy (`sbx policy ls`) governs egress and there is no Enclave network log"}, nil
 }
 
 // qemuDroppedFeatures returns the feature names a tool-only qemu bundle skips:

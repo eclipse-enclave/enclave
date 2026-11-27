@@ -98,7 +98,7 @@ Every key except `tool` and the global-only ones can also be set under
 | Key | Description |
 |-----|-------------|
 | `tool` | Default tool; unset means the first interactive session asks once and saves it ([Tool selection](cli-reference.md#tool-selection)) |
-| `backend` | `auto` (default), `docker`, `podman`, or experimental `qemu`; see [Backends](backends.md) |
+| `backend` | `auto` (default), `docker`, `podman`, or experimental `qemu` or `sbx`; see [Backends](backends.md) |
 | `yolo` | YOLO mode (default `true`). Only consulted when the tool profile leaves `yoloEnabled` unset; every bundled CLI agent sets it, so use `--yolo`/`--no-yolo` |
 | `host_config` | `none` (default) or `passthrough`; see [Host config passthrough](tool-config.md#host-config-passthrough) |
 | `tool_overrides.<tool>.host_config_paths` | Passthrough path directives (`default`, `+path`, `-path`, or a list) |

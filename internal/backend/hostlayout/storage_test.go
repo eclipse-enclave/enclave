@@ -5,7 +5,7 @@
 //
 // SPDX-License-Identifier: MIT
 
-package qemu
+package hostlayout
 
 import (
 	"context"
@@ -71,7 +71,7 @@ func TestMountSourceResolvesSharedStoreDirs(t *testing.T) {
 func TestPrepareStoresCarriesToolSettingsAcrossThreeOverlays(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	home := t.TempDir()
-	be := New(Options{Host: model.Host{Home: home}})
+	be := New(model.Host{Home: home})
 	key := backend.StoreKey{Owner: "pi", ProjectHash: "abc123abc123"}
 	sourceDir := t.TempDir()
 	settingsRel := filepath.Join("agent", "settings.json")
@@ -119,7 +119,7 @@ func TestPrepareStoresCarriesToolSettingsAcrossThreeOverlays(t *testing.T) {
 func TestPrepareStoresInvalidatesSnapshotWithoutOverlay(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	home := t.TempDir()
-	be := New(Options{Host: model.Host{Home: home}})
+	be := New(model.Host{Home: home})
 	key := backend.StoreKey{Owner: "pi", ProjectHash: "abc123abc123"}
 	sourceDir := t.TempDir()
 	sourcePath := filepath.Join(sourceDir, "settings.json")
@@ -213,7 +213,7 @@ func TestEnsureToleratesForeignOwnedStoreEntries(t *testing.T) {
 }
 
 func TestPrepareStoresConfigOverlayPreservesAuthFiles(t *testing.T) {
-	be := New(Options{Host: model.Host{Home: t.TempDir()}})
+	be := New(model.Host{Home: t.TempDir()})
 	key := backend.StoreKey{Owner: "tool", ProjectHash: "abc123def456"}
 	ctx := context.Background()
 
@@ -251,7 +251,7 @@ func TestPrepareStoresConfigOverlayPreservesAuthFiles(t *testing.T) {
 }
 
 func TestPrepareStoresConfigOverlayPreservesModificationTimes(t *testing.T) {
-	be := New(Options{Host: model.Host{Home: t.TempDir()}})
+	be := New(model.Host{Home: t.TempDir()})
 	key := backend.StoreKey{Owner: "claude", ProjectHash: "abc123def456"}
 	ctx := context.Background()
 
@@ -329,7 +329,7 @@ func TestPrepareStoresConfigOverlayPreservesModificationTimes(t *testing.T) {
 }
 
 func TestPrepareStoresConfigOverlayDoesNotFollowSymlinks(t *testing.T) {
-	be := New(Options{Host: model.Host{Home: t.TempDir()}})
+	be := New(model.Host{Home: t.TempDir()})
 	key := backend.StoreKey{Owner: "tool", ProjectHash: "abc123def456"}
 	ctx := context.Background()
 
@@ -373,7 +373,7 @@ func TestPrepareStoresConfigOverlayDoesNotFollowSymlinks(t *testing.T) {
 }
 
 func TestPrepareStoresConfigOverlayPreservesGlobPaths(t *testing.T) {
-	be := New(Options{Host: model.Host{Home: t.TempDir()}})
+	be := New(model.Host{Home: t.TempDir()})
 	key := backend.StoreKey{Owner: "tool", ProjectHash: "abc123def456"}
 	ctx := context.Background()
 
@@ -403,7 +403,7 @@ func TestPrepareStoresConfigOverlayPreservesGlobPaths(t *testing.T) {
 }
 
 func TestStoreReadFileRejectsSymlinkedParent(t *testing.T) {
-	be := New(Options{Host: model.Host{Home: t.TempDir()}})
+	be := New(model.Host{Home: t.TempDir()})
 	key := backend.StoreKey{Owner: "tool", ProjectHash: "abc123def456"}
 	ctx := context.Background()
 
@@ -425,7 +425,7 @@ func TestStoreReadFileRejectsSymlinkedParent(t *testing.T) {
 }
 
 func TestPrepareStoresConfigOverlayRejectsSymlinkedParent(t *testing.T) {
-	be := New(Options{Host: model.Host{Home: t.TempDir()}})
+	be := New(model.Host{Home: t.TempDir()})
 	key := backend.StoreKey{Owner: "tool", ProjectHash: "abc123def456"}
 	ctx := context.Background()
 
@@ -556,7 +556,7 @@ func TestStoreSeedReplacesDestinationSymlinkedDirectory(t *testing.T) {
 }
 
 func TestPrepareStoresLayoutDirReplacesSymlink(t *testing.T) {
-	be := New(Options{Host: model.Host{Home: t.TempDir()}})
+	be := New(model.Host{Home: t.TempDir()})
 	key := backend.StoreKey{Owner: "tool", ProjectHash: "abc123def456"}
 	ctx := context.Background()
 
@@ -588,7 +588,7 @@ func TestStoreManagerKeepsIOInStoreDuringConcurrentSwaps(t *testing.T) {
 
 func TestCreateStoreDirKeepsLayoutInStoreDuringConcurrentSwaps(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
-	be := New(Options{Host: model.Host{Home: t.TempDir()}})
+	be := New(model.Host{Home: t.TempDir()})
 	key := backend.StoreKey{Owner: "tool", ProjectHash: "abc123def456"}
 	root, err := be.storage.MountSource(key, backend.StoreKindConfig)
 	if err != nil {

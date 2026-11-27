@@ -97,6 +97,10 @@ func dispatchCommand(input *CommandInput) int {
 		return runNetworkRemoveDomain(input)
 	case "network-set-mode":
 		return runNetworkSetMode(input)
+	case "network-set-resolver":
+		return runNetworkSetResolver(input)
+	case "network-reset-resolver":
+		return runNetworkResetResolver(input)
 	case "exec", "run", "shell", actionContinue, "resume":
 		return runExecutionCommand(input)
 	default:

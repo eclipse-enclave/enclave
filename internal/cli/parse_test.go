@@ -1162,6 +1162,40 @@ func TestParseNetworkSetModeGlobal(t *testing.T) {
 	}
 }
 
+func TestParseNetworkSetResolver(t *testing.T) {
+	defaults := config.DefaultOptions()
+	res, err := Parse([]string{"network", "set-resolver", "1.1.1.1", "--global"}, defaults)
+	if err != nil {
+		t.Fatalf("parse failed: %v", err)
+	}
+	if res.Action != "network-set-resolver" {
+		t.Fatalf("expected action network-set-resolver, got %s", res.Action)
+	}
+	if len(res.Options.CmdArgs) != 1 || res.Options.CmdArgs[0] != "1.1.1.1" {
+		t.Fatalf("expected cmd args [1.1.1.1], got %v", res.Options.CmdArgs)
+	}
+}
+
+func TestParseNetworkSetResolverRejectsNonIPv4(t *testing.T) {
+	defaults := config.DefaultOptions()
+	for _, arg := range []string{"dns.example.com", "2606:4700:4700::1111", "1.1.1.1:53", "0.0.0.0"} {
+		if _, err := Parse([]string{"network", "set-resolver", arg, "--global"}, defaults); err == nil {
+			t.Fatalf("expected error for resolver %q", arg)
+		}
+	}
+}
+
+func TestParseNetworkResetResolver(t *testing.T) {
+	defaults := config.DefaultOptions()
+	res, err := Parse([]string{"network", "reset-resolver", "--global", "--no-apply"}, defaults)
+	if err != nil {
+		t.Fatalf("parse failed: %v", err)
+	}
+	if res.Action != "network-reset-resolver" || !res.Options.NoApply {
+		t.Fatalf("expected network-reset-resolver with --no-apply, got %s (noApply=%v)", res.Action, res.Options.NoApply)
+	}
+}
+
 func TestParseNetworkSetModeInvalid(t *testing.T) {
 	defaults := config.DefaultOptions()
 	_, err := Parse([]string{"network", "set-mode", "invalid", "--global"}, defaults)

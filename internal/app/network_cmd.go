@@ -525,6 +525,65 @@ func runNetworkSetMode(input *CommandInput) int {
 	})
 }
 
+func runNetworkSetResolver(input *CommandInput) int {
+	if len(input.Options.CmdArgs) < 1 {
+		logx.Errorf("resolver argument required")
+		return 1
+	}
+	resolver, err := network.NormalizeResolver(input.Options.CmdArgs[0])
+	if err != nil {
+		logx.Errorf("%v", err)
+		return 1
+	}
+	return mutateGlobalPolicy(input, func(p *network.Policy) (bool, string, error) {
+		if len(p.Advanced.Resolvers) == 1 && strings.TrimSpace(p.Advanced.Resolvers[0]) == resolver {
+			return false, fmt.Sprintf("Persistence: unchanged (resolver already %s in %%s)", resolver), nil
+		}
+		p.Advanced.Resolvers = []string{resolver}
+		return true, "Persistence: saved to %s", nil
+	})
+}
+
+func runNetworkResetResolver(input *CommandInput) int {
+	fallback, err := resolverWithoutGlobalPolicy(input)
+	if err != nil {
+		logx.Errorf("%v", err)
+		return 1
+	}
+	return mutateGlobalPolicy(input, func(p *network.Policy) (bool, string, error) {
+		if len(p.Advanced.Resolvers) == 0 {
+			return false, fmt.Sprintf("Persistence: unchanged (no resolver set in %%s; %s)", fallback), nil
+		}
+		p.Advanced.Resolvers = nil
+		return true, fmt.Sprintf("Persistence: saved to %%s (%s)", fallback), nil
+	})
+}
+
+// resolverWithoutGlobalPolicy describes the resolver the current project uses
+// once the global policy sets none: the project policy's, or the default.
+func resolverWithoutGlobalPolicy(input *CommandInput) (string, error) {
+	home, err := config.ResolveHostHome()
+	if err != nil {
+		return "", fmt.Errorf("resolve home: %w", err)
+	}
+	project, err := input.Ctx.Project()
+	if err != nil {
+		return "", fmt.Errorf("resolve project: %w", err)
+	}
+	path := network.ProjectPolicyPath(home, project.Hash)
+	if path == "" {
+		return fmt.Sprintf("default %s applies", network.DefaultResolver), nil
+	}
+	projectPolicy, err := network.LoadPolicy(path)
+	if err != nil {
+		return "", fmt.Errorf("load project policy %s: %w", path, err)
+	}
+	if resolver := network.FirstIPv4Resolver(projectPolicy.Advanced.Resolvers); resolver != network.DefaultResolver {
+		return fmt.Sprintf("project policy %s still sets %s", path, resolver), nil
+	}
+	return fmt.Sprintf("default %s applies", network.DefaultResolver), nil
+}
+
 func mutateGlobalPolicy(input *CommandInput, mutate func(*network.Policy) (changed bool, msg string, err error)) int {
 	home, err := config.ResolveHostHome()
 	if err != nil {

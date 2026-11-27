@@ -199,6 +199,10 @@ RUN /opt/enclave/build-scripts/install-agent-helper-bins.sh
 
 FROM tool-base AS feature-base
 
+# Declared before the feature installs so toggling strict mode re-runs them.
+# No default: an unset ARG keeps existing layers cached; the scripts default to 0.
+ARG ENCLAVE_FEATURE_INSTALL_STRICT
+
 ARG USER_ID=1000
 ARG GROUP_ID=1000
 ARG USERNAME=agent

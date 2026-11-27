@@ -19,6 +19,7 @@ const (
 	EnvColor                    = EnvPrefix + "COLOR"
 	EnvAgentUpdateIntervalHours = EnvPrefix + "AGENT_UPDATE_INTERVAL_HOURS"
 	EnvNoRebuild                = EnvPrefix + "NO_REBUILD"
+	EnvFeatureInstallStrict     = EnvPrefix + "FEATURE_INSTALL_STRICT"
 	EnvRuntimeUID               = EnvPrefix + "RUNTIME_UID"
 	EnvRuntimeGID               = EnvPrefix + "RUNTIME_GID"
 	EnvLoopbackPorts            = EnvPrefix + "LOOPBACK_PORTS"

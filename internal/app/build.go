@@ -90,6 +90,7 @@ var (
 	dockerBuildImage       = docker.Build
 	dockerImageExists      = docker.ImageExists
 	dockerImagePrune       = docker.ImagePrune
+	dockerImageInspect     = docker.ImageInspect
 	dockerFindImageByLabel = docker.FindImageByLabel
 	dockerTagImage         = docker.Tag
 )
@@ -494,7 +495,11 @@ func needsRebuildForSelection(paths model.Paths, buildCfg buildConfig, selection
 		combinedHash += "-" + buildCfg.HashSuffix
 	}
 
-	inspect, err := docker.ImageInspect(context.Background(), buildCfg.ImageName)
+	if featureInstallStrict(buildCfg, selection) {
+		combinedHash += "-feature-install-strict"
+	}
+
+	inspect, err := dockerImageInspect(context.Background(), buildCfg.ImageName)
 	if err != nil {
 		return true, combinedHash, nil
 	}
@@ -507,6 +512,13 @@ func needsRebuildForSelection(paths model.Paths, buildCfg buildConfig, selection
 	}
 
 	return false, combinedHash, nil
+}
+
+// featureInstallStrict reports whether the build runs feature installers in
+// strict mode. Without selected features no installer runs, so strict mode
+// must not change the image hash or build args.
+func featureInstallStrict(buildCfg buildConfig, selection runtimeImageSelection) bool {
+	return buildCfg.FeatureInstallStrict && len(selection.Features) > 0
 }
 
 func resolveRuntimeImageBuildPlan(paths model.Paths, buildCfg buildConfig, opts model.BuildOptions, tool string, home string, forceAll bool, now time.Time, probe toolFingerprintProbe) (runtimeImageBuildPlan, error) {
@@ -600,6 +612,9 @@ func buildImage(ctx context.Context, paths model.Paths, host model.Host, combine
 		"USERNAME":    username,
 		"AGENT_TOOLS": agentTools,
 		"FEATURES":    features,
+	}
+	if featureInstallStrict(buildCfg, selection) {
+		buildArgs[model.EnvFeatureInstallStrict] = "1"
 	}
 	if docker.BuildkitEnabled() {
 		buildArgs["BUILDKIT_INLINE_CACHE"] = "1"

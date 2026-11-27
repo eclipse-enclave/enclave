@@ -9,9 +9,11 @@ package app
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
 	"enclave/internal/devcontainer"
+	"enclave/internal/envflag"
 	"enclave/internal/model"
 	"enclave/internal/util"
 )
@@ -23,11 +25,12 @@ const (
 )
 
 type buildConfig struct {
-	BaseImage    string
-	Devcontainer *devcontainer.Spec
-	HashSuffix   string
-	ImageName    string
-	Target       string
+	BaseImage            string
+	Devcontainer         *devcontainer.Spec
+	FeatureInstallStrict bool
+	HashSuffix           string
+	ImageName            string
+	Target               string
 }
 
 func resolveBuildConfig(opts model.BuildOptions, tool string, project model.Project, appRoot string) (buildConfig, error) {
@@ -36,6 +39,7 @@ func resolveBuildConfig(opts model.BuildOptions, tool string, project model.Proj
 		return buildConfig{}, fmt.Errorf("--image-name requires a non-empty value")
 	}
 
+	strict := envflag.Truthy(os.LookupEnv(model.EnvFeatureInstallStrict))
 	target := resolveBuildTarget(opts)
 	hashSuffix := "target-" + target + "-" + buildArgsHashSuffix(opts, tool)
 
@@ -56,11 +60,12 @@ func resolveBuildConfig(opts model.BuildOptions, tool string, project model.Proj
 			imageName = derivePerToolImageName(tool, "devcontainer", spec.Hash, target)
 		}
 		return buildConfig{
-			BaseImage:    spec.BaseImage,
-			Devcontainer: &spec,
-			HashSuffix:   hashSuffix + "-devcontainer-" + spec.Hash,
-			ImageName:    imageName,
-			Target:       target,
+			BaseImage:            spec.BaseImage,
+			Devcontainer:         &spec,
+			FeatureInstallStrict: strict,
+			HashSuffix:           hashSuffix + "-devcontainer-" + spec.Hash,
+			ImageName:            imageName,
+			Target:               target,
 		}, nil
 	}
 
@@ -70,10 +75,11 @@ func resolveBuildConfig(opts model.BuildOptions, tool string, project model.Proj
 			imageName = derivePerToolImageName(tool, "base", util.HashString(baseImage), target)
 		}
 		return buildConfig{
-			BaseImage:  baseImage,
-			HashSuffix: hashSuffix + "-base-" + util.HashString(baseImage),
-			ImageName:  imageName,
-			Target:     target,
+			BaseImage:            baseImage,
+			FeatureInstallStrict: strict,
+			HashSuffix:           hashSuffix + "-base-" + util.HashString(baseImage),
+			ImageName:            imageName,
+			Target:               target,
 		}, nil
 	}
 	if !opts.ImageNameSet {
@@ -86,7 +92,7 @@ func resolveBuildConfig(opts model.BuildOptions, tool string, project model.Proj
 			imageName = fmt.Sprintf("%s-%s:%s", model.AppName, tool, targetToTagName(target))
 		}
 	}
-	return buildConfig{ImageName: imageName, Target: target, HashSuffix: hashSuffix}, nil
+	return buildConfig{FeatureInstallStrict: strict, HashSuffix: hashSuffix, ImageName: imageName, Target: target}, nil
 }
 
 // resolveBuildTarget returns the Docker target stage name.

@@ -1,0 +1,69 @@
+summary: Smoke test plan for the enclave CLI
+discover:
+    how: fmf
+    test:
+        - package-installed
+        - backend-lifecycle
+prepare:
+    how: shell
+    order: 90
+    script: |
+        set -eu
+        if [ "$(id -u)" -ne 0 ]; then
+            mkdir -p "$TMT_PLAN_DATA/podman-data"
+            exit 0
+        fi
+
+        test_root=$(mktemp -d /var/tmp/enclave-tmt.XXXXXX)
+        test_user="enclavetmt${test_root##*.}"
+        created=0
+        cleanup_setup() {
+            if [ "$created" -eq 1 ]; then
+                loginctl disable-linger "$test_user" || true
+                systemctl stop "user@$(id -u "$test_user").service" || true
+                userdel "$test_user" || true
+            fi
+            rm -rf "$test_root"
+        }
+        trap cleanup_setup EXIT
+        useradd -M -d "$test_root" -s /bin/bash "$test_user"
+        created=1
+        mkdir "$test_root/podman-data"
+        chown -R "$test_user" "$test_root"
+        chmod 711 "$test_root"
+        install -m 755 backend-lifecycle/smoke-backend-lifecycle.sh "$test_root/smoke-backend-lifecycle.sh"
+        loginctl enable-linger "$test_user"
+        systemctl start "user@$(id -u "$test_user").service"
+        printf '%s\n' "$test_root" > "$TMT_PLAN_DATA/enclave-tmt-root"
+        trap - EXIT
+execute:
+    how: tmt
+finish:
+    how: shell
+    script: |
+        set -eu
+        if [ "$(id -u)" -ne 0 ] || [ ! -f "$TMT_PLAN_DATA/enclave-tmt-root" ]; then
+            exit 0
+        fi
+        test_root=$(cat "$TMT_PLAN_DATA/enclave-tmt-root")
+        case "$test_root" in
+            /var/tmp/enclave-tmt.??????) ;;
+            *) echo "unexpected test root: $test_root" >&2; exit 1 ;;
+        esac
+        test_user="enclavetmt${test_root##*.}"
+        test_uid=$(id -u "$test_user")
+        runuser -u "$test_user" -- env -u ENCLAVE_ALLOW_ROOT \
+            HOME="$test_root" XDG_DATA_HOME="$test_root/podman-data" \
+            XDG_RUNTIME_DIR="/run/user/$test_uid" \
+            DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$test_uid/bus" \
+            podman system reset --force || true
+        runuser -u "$test_user" -- env -u ENCLAVE_ALLOW_ROOT \
+            HOME="$test_root" XDG_DATA_HOME="$test_root/podman-data" \
+            XDG_RUNTIME_DIR="/run/user/$test_uid" \
+            DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$test_uid/bus" \
+            podman system migrate || true
+        loginctl disable-linger "$test_user" || true
+        systemctl stop "user@$test_uid.service" || true
+        userdel "$test_user"
+        rm -rf "$test_root"
+        rm -f "$TMT_PLAN_DATA/enclave-tmt-root"

@@ -477,6 +477,14 @@ type StoreManager interface {
 	Remove(ctx context.Context, key StoreKey, kind StoreKind) error
 }
 
+// StoreSymlinkError reports a refused leaf link without following its target.
+// Path is relative to the store.
+type StoreSymlinkError struct{ Path, Target string }
+
+func (e *StoreSymlinkError) Error() string {
+	return fmt.Sprintf("refusing symlinked store file %q", e.Path)
+}
+
 // StoreLocker serializes cross-process access to one store. Callers wrap
 // read-modify-write sequences of StoreManager operations; single operations do
 // not need it.

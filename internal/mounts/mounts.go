@@ -23,8 +23,6 @@ import (
 
 const maxWorktreeMetadataBytes = 4 * 1024
 
-var errSymlinkFile = errors.New("symlink file")
-
 // ResolveExtraDir resolves an additional directory, as given on the command
 // line or in config, to the symlink-resolved path it would be mounted from. It
 // refuses directories that must never be mounted.
@@ -277,7 +275,7 @@ func ProtectFiles(existing []backend.Mount, paths []string) ([]backend.Mount, er
 func AddWorktree(mounts *[]backend.Mount, project model.Project, validatedDirs *[]string, readOnly bool, sensitive SensitivePaths) {
 	gitFile := filepath.Join(project.Dir, ".git")
 	data, err := readRegularFileInDir(project.Dir, ".git")
-	if errors.Is(err, errSymlinkFile) {
+	if errors.Is(err, util.ErrSymlinkFile) {
 		logx.Warnf("Ignoring .git symlink: %s", gitFile)
 		return
 	}
@@ -399,36 +397,11 @@ func readWorktreeBackPointer(gitdirPath string) (string, error) {
 }
 
 func readRegularFileInDir(dir string, name string) ([]byte, error) {
-	root, err := os.OpenRoot(dir)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = root.Close() }()
-
-	info, err := root.Lstat(name)
-	if err != nil {
-		return nil, err
-	}
-	if info.Mode()&os.ModeSymlink != 0 {
-		return nil, errSymlinkFile
-	}
-	if !info.Mode().IsRegular() {
-		return nil, fmt.Errorf("not a regular file: %s", name)
-	}
-
-	file, err := root.Open(name)
+	file, err := util.OpenRegularFileInDir(dir, name)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = file.Close() }()
-
-	openedInfo, err := file.Stat()
-	if err != nil {
-		return nil, err
-	}
-	if !os.SameFile(info, openedInfo) {
-		return nil, fmt.Errorf("file changed while opening: %s", name)
-	}
 
 	data, err := io.ReadAll(io.LimitReader(file, maxWorktreeMetadataBytes+1))
 	if err != nil {

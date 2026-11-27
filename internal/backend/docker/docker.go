@@ -434,6 +434,14 @@ func (b *Backend) prepareRun(ctx context.Context, req backend.Request) (runSpec,
 			return runSpec{}, err
 		}
 	}
+	// Mounts are final here. Refuse one the engine arguments cannot represent
+	// before the session network or gateway is created.
+	if err := applySELinuxMounts(spec.hostConfig, util.IsSELinuxEnforcing()); err != nil {
+		return runSpec{}, err
+	}
+	if err := dockercmd.CheckMounts(spec.hostConfig.Mounts); err != nil {
+		return runSpec{}, err
+	}
 	if err := b.prepareImageUserNamespace(ctx, req.Image); err != nil {
 		return runSpec{}, err
 	}
@@ -466,7 +474,6 @@ func (b *Backend) prepareRun(ctx context.Context, req backend.Request) (runSpec,
 			cleanupSessionNetwork(sessionNetwork)
 		}
 	}
-	applySELinuxMounts(spec.hostConfig, util.IsSELinuxEnforcing())
 	return spec, nil
 }
 
@@ -829,10 +836,14 @@ func applyContainerHardening(hostConfig *dockercmd.HostConfig) {
 	hostConfig.Tmpfs["/etc/sudoers.d"] = "rw,mode=755"
 }
 
-func applySELinuxMounts(hostConfig *dockercmd.HostConfig, selinuxEnforcing bool) {
-	binds, remainingMounts := dockercmd.SplitMountsForSELinuxWith(hostConfig.Mounts, selinuxEnforcing)
+func applySELinuxMounts(hostConfig *dockercmd.HostConfig, selinuxEnforcing bool) error {
+	binds, remainingMounts, err := dockercmd.SplitMountsForSELinuxWith(hostConfig.Mounts, selinuxEnforcing)
+	if err != nil {
+		return err
+	}
 	hostConfig.Binds = append(hostConfig.Binds, binds...)
 	hostConfig.Mounts = remainingMounts
+	return nil
 }
 
 func portSet(ports []backend.PortMapping) dockercmd.PortSet {

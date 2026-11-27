@@ -252,7 +252,7 @@ type runMode struct {
 
 // buildRunArgs translates a ContainerConfig/HostConfig pair into the argument
 // list for `docker run`. Flags come first, then the image, then the command.
-func buildRunArgs(config *ContainerConfig, hostConfig *HostConfig, name string, mode runMode) []string {
+func buildRunArgs(config *ContainerConfig, hostConfig *HostConfig, name string, mode runMode) ([]string, error) {
 	args := []string{"run"}
 	if mode.Create {
 		args[0] = "create"
@@ -321,7 +321,11 @@ func buildRunArgs(config *ContainerConfig, hostConfig *HostConfig, name string, 
 		for _, bind := range hostConfig.Binds {
 			args = append(args, "--volume", bind)
 		}
-		args = append(args, mountFlags(hostConfig.Mounts)...)
+		mountArgs, err := mountFlags(hostConfig.Mounts)
+		if err != nil {
+			return nil, err
+		}
+		args = append(args, mountArgs...)
 		args = append(args, portBindingFlags(hostConfig.PortBindings)...)
 		for _, host := range hostConfig.ExtraHosts {
 			args = append(args, "--add-host", host)
@@ -342,7 +346,7 @@ func buildRunArgs(config *ContainerConfig, hostConfig *HostConfig, name string, 
 	if config != nil && config.Image != "" {
 		args = append(args, config.Image)
 	}
-	return append(args, cmd...)
+	return append(args, cmd...), nil
 }
 
 // mountFlags renders Mounts as `--mount type=...,source=...,target=...` args.
@@ -355,16 +359,26 @@ func buildRunArgs(config *ContainerConfig, hostConfig *HostConfig, name string, 
 // recreated host directory lags behind the host ("bind source path does not
 // exist" under /host_mnt), so disposable cache directories must not depend on
 // daemon-side existence.
-func mountFlags(mounts []Mount) []string {
+func mountFlags(mounts []Mount) ([]string, error) {
 	out := make([]string, 0, len(mounts)*2)
 	for _, m := range mounts {
 		if m.Type == MountTypeBind && m.CreateSourceDir {
-			spec := m.Source + ":" + m.Target
+			spec, err := volumeBindSpec(m)
+			if err != nil {
+				return nil, err
+			}
 			if m.ReadOnly {
 				spec += ":ro"
 			}
 			out = append(out, "--volume", spec)
 			continue
+		}
+		// The engine parses this argument as CSV, even though no shell is
+		// involved. Refuse delimiters rather than let it select another source.
+		for _, field := range []string{m.Source, m.Target} {
+			if strings.ContainsAny(field, ",\"\r\n") {
+				return nil, fmt.Errorf("mount path %q contains a comma, a double quote or a line break; --mount cannot represent it", field)
+			}
 		}
 		var spec strings.Builder
 		fmt.Fprintf(&spec, "type=%s", m.Type)
@@ -379,7 +393,25 @@ func mountFlags(mounts []Mount) []string {
 		}
 		out = append(out, "--mount", spec.String())
 	}
-	return out
+	return out, nil
+}
+
+// CheckMounts reports the error that rendering mounts as run arguments would
+// return, so a caller can refuse them before it creates anything else.
+func CheckMounts(mounts []Mount) error {
+	_, err := mountFlags(mounts)
+	return err
+}
+
+// volumeBindSpec renders a bind mount as the src:dst of a --volume argument,
+// without options. That syntax has no encoding for a colon inside a path.
+func volumeBindSpec(m Mount) (string, error) {
+	for _, field := range []string{m.Source, m.Target} {
+		if strings.Contains(field, ":") {
+			return "", fmt.Errorf("mount path %q contains ':'; --volume cannot represent it", field)
+		}
+	}
+	return m.Source + ":" + m.Target, nil
 }
 
 // portBindingFlags renders PortBindings as `--publish` args, sorted for stable

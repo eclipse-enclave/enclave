@@ -134,7 +134,10 @@ func TestIsCLIUnavailable(t *testing.T) {
 }
 
 func TestBuildRunArgsDetachedInteractive(t *testing.T) {
-	got := buildRunArgs(&ContainerConfig{Image: "image"}, nil, "managed", runMode{Detach: true, Interactive: true, TTY: true})
+	got, err := buildRunArgs(&ContainerConfig{Image: "image"}, nil, "managed", runMode{Detach: true, Interactive: true, TTY: true})
+	if err != nil {
+		t.Fatal(err)
+	}
 	wantPrefix := []string{"run", "--detach", "--interactive", "--tty", "--name", "managed", "image"}
 	if !reflect.DeepEqual(got, wantPrefix) {
 		t.Fatalf("buildRunArgs() = %v, want %v", got, wantPrefix)
@@ -155,7 +158,10 @@ func TestBuildRunArgsSetsDetachKeysForAttachedTerminals(t *testing.T) {
 		{"no terminal", runMode{Interactive: true, DetachKeys: keys}, false},
 		{"create", runMode{Create: true, Interactive: true, TTY: true, DetachKeys: keys}, false},
 	} {
-		args := buildRunArgs(&ContainerConfig{Image: "image"}, nil, "session", tc.mode)
+		args, err := buildRunArgs(&ContainerConfig{Image: "image"}, nil, "session", tc.mode)
+		if err != nil {
+			t.Fatal(err)
+		}
 		i := slices.Index(args, "--detach-keys")
 		if got := i >= 0; got != tc.want {
 			t.Errorf("%s: --detach-keys in %v = %v, want %v", tc.name, args, got, tc.want)
@@ -167,7 +173,10 @@ func TestBuildRunArgsSetsDetachKeysForAttachedTerminals(t *testing.T) {
 }
 
 func TestBuildRunArgsCreateMode(t *testing.T) {
-	got := buildRunArgs(&ContainerConfig{Image: "image", Entrypoint: []string{"true"}}, &HostConfig{UserNS: "keep-id"}, "warmup", runMode{Create: true})
+	got, err := buildRunArgs(&ContainerConfig{Image: "image", Entrypoint: []string{"true"}}, &HostConfig{UserNS: "keep-id"}, "warmup", runMode{Create: true})
+	if err != nil {
+		t.Fatal(err)
+	}
 	want := []string{"create", "--name", "warmup", "--entrypoint", "true", "--userns", "keep-id", "image"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("buildRunArgs() = %v, want %v", got, want)
@@ -178,13 +187,16 @@ func TestBuildRunArgsCreateMode(t *testing.T) {
 // source-creating `--volume` form, while every other mount keeps the strict
 // `--mount` form so a missing required source stays an error.
 func TestMountFlagsSourceCreatingBinds(t *testing.T) {
-	got := mountFlags([]Mount{
+	got, err := mountFlags([]Mount{
 		{Type: MountTypeBind, Source: "/host/project", Target: "/work"},
 		{Type: MountTypeBind, Source: "/host/secret.json", Target: "/auth.json", ReadOnly: true},
 		{Type: MountTypeBind, Source: "/host/cache/npm", Target: "/home/agent/.npm", CreateSourceDir: true},
 		{Type: MountTypeBind, Source: "/host/cache/readonly", Target: "/mnt/readonly", ReadOnly: true, CreateSourceDir: true},
 		{Type: MountTypeVolume, Source: "vol", Target: "/data", CreateSourceDir: true},
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	want := []string{
 		"--mount", "type=bind,source=/host/project,target=/work",
 		"--mount", "type=bind,source=/host/secret.json,target=/auth.json,readonly",

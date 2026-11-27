@@ -246,7 +246,7 @@ func storeName(dir string, rel string, rejectLeafSymlink bool) (string, error) {
 		return "", err
 	}
 	if rejectLeafSymlink {
-		if err := ensureNotSymlink(target); err != nil {
+		if err := ensureNotSymlink(target, cleaned); err != nil {
 			return "", err
 		}
 	}
@@ -256,7 +256,7 @@ func storeName(dir string, rel string, rejectLeafSymlink bool) (string, error) {
 // ensureNotSymlink rejects target when it already exists as a symlink, so
 // host-side reads/writes/seeds cannot be redirected outside the store root
 // through a planted leaf symlink. A nonexistent target is fine.
-func ensureNotSymlink(target string) error {
+func ensureNotSymlink(target string, rel string) error {
 	info, err := os.Lstat(target)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -265,7 +265,11 @@ func ensureNotSymlink(target string) error {
 		return err
 	}
 	if info.Mode()&os.ModeSymlink != 0 {
-		return fmt.Errorf("refusing to operate through symlinked store path %q", target)
+		link, err := os.Readlink(target)
+		if err != nil {
+			return err
+		}
+		return &backend.StoreSymlinkError{Path: rel, Target: link}
 	}
 	return nil
 }

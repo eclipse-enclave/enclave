@@ -252,7 +252,12 @@ func ParseEnvFile(path string) ([]string, error) {
 		return nil, err
 	}
 	defer func() { _ = file.Close() }()
-	pairs, err := ParseEnvPairs(file)
+	return ParseEnvAssignments(file)
+}
+
+// ParseEnvAssignments is ParseEnvPairs with each pair as KEY=VALUE.
+func ParseEnvAssignments(r io.Reader) ([]string, error) {
+	pairs, err := ParseEnvPairs(r)
 	if err != nil {
 		return nil, err
 	}

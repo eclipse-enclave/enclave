@@ -30,23 +30,37 @@ func TestIsPodmanMatchesBinaryBaseName(t *testing.T) {
 }
 
 func TestBuildRunArgsPassesUserNamespaceMode(t *testing.T) {
-	args := buildRunArgs(&ContainerConfig{Image: "example:test"}, &HostConfig{UserNS: "keep-id"}, "", runMode{})
+	args, err := buildRunArgs(&ContainerConfig{Image: "example:test"}, &HostConfig{UserNS: "keep-id"}, "", runMode{})
+	if err != nil {
+		t.Fatal(err)
+	}
 	idx := slices.Index(args, "--userns")
 	if idx < 0 || idx+1 >= len(args) || args[idx+1] != "keep-id" {
 		t.Fatalf("expected --userns keep-id in %v", args)
 	}
-	if slices.Contains(buildRunArgs(&ContainerConfig{Image: "example:test"}, &HostConfig{}, "", runMode{}), "--userns") {
+	emptyArgs, err := buildRunArgs(&ContainerConfig{Image: "example:test"}, &HostConfig{}, "", runMode{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if slices.Contains(emptyArgs, "--userns") {
 		t.Fatal("empty UserNS must not emit --userns")
 	}
 }
 
 func TestBuildRunArgsPassesUTSNamespaceMode(t *testing.T) {
-	args := buildRunArgs(&ContainerConfig{Image: "example:test"}, &HostConfig{UTSMode: "container:gw"}, "", runMode{})
+	args, err := buildRunArgs(&ContainerConfig{Image: "example:test"}, &HostConfig{UTSMode: "container:gw"}, "", runMode{})
+	if err != nil {
+		t.Fatal(err)
+	}
 	idx := slices.Index(args, "--uts")
 	if idx < 0 || idx+1 >= len(args) || args[idx+1] != "container:gw" {
 		t.Fatalf("expected --uts container:gw in %v", args)
 	}
-	if slices.Contains(buildRunArgs(&ContainerConfig{Image: "example:test"}, &HostConfig{}, "", runMode{}), "--uts") {
+	emptyArgs, err := buildRunArgs(&ContainerConfig{Image: "example:test"}, &HostConfig{}, "", runMode{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if slices.Contains(emptyArgs, "--uts") {
 		t.Fatal("empty UTSMode must not emit --uts")
 	}
 }

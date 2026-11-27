@@ -13,6 +13,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -359,6 +360,43 @@ func TestPrepareRunSkipsDevcontainerRunArgsForDetachedRequests(t *testing.T) {
 	}
 	if got := spec.config.Hostname; got == "devhost" {
 		t.Fatalf("detached run should not apply devcontainer hostname, got %q", got)
+	}
+}
+
+func TestPrepareRunRefusesMountBeforeCreatingNetworkOrGateway(t *testing.T) {
+	// A comma and a colon together are refused whether binds are rendered
+	// as --mount or, with SELinux enforcing, as --volume.
+	for name, mount := range map[string]backend.Mount{
+		"bind":                 {Type: backend.MountTypeBind, Source: "/host/a,b:c", ContainerPath: "/workspace"},
+		"source-creating bind": {Type: backend.MountTypeBind, Source: "/host/cache:dir", ContainerPath: "/cache", CreateSourceDir: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			logPath := installFakeDocker(t)
+			// Gateway state belongs under a temporary home, never in the
+			// source tree, should the gateway ever be reached.
+			home := t.TempDir()
+			t.Setenv("XDG_STATE_HOME", home)
+			req := backend.Request{
+				Session: backend.SessionMeta{
+					Tool:        "codex",
+					ProjectHash: "abc123abc123",
+					Name:        "enclave-codex-abc123abc123-main",
+				},
+				Image:   "enclave-test:latest",
+				Network: backend.NetworkPolicy{Mode: backend.NetworkModeRestricted, Gateway: true},
+				Mounts:  []backend.Mount{mount},
+			}
+			_, err := New(Options{Host: model.Host{Home: home}}).prepareRun(context.Background(), req)
+			if err == nil || !strings.Contains(err.Error(), strconv.Quote(mount.Source)) {
+				t.Fatalf("prepareRun() error = %v, want one naming %q", err, mount.Source)
+			}
+			args := readFakeDockerArgs(t, logPath)
+			for _, verb := range []string{"create", "run"} {
+				if containsArg(args, verb) {
+					t.Fatalf("engine was asked to %s before the mount was refused: %v", verb, args)
+				}
+			}
+		})
 	}
 }
 

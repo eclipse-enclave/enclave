@@ -9,6 +9,7 @@ package runtime
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -1582,18 +1583,38 @@ func (r *Runtime) addToolSettingsTemplate(mounts *mountAccumulator) {
 }
 
 func (r *Runtime) envFileValues() []string {
-	projectEnv := filepath.Join(r.project.Dir, ".env")
-	if !util.PathExists(projectEnv) {
+	file, err := util.OpenRegularFileInDir(r.project.Dir, ".env")
+	if errors.Is(err, os.ErrNotExist) {
 		return nil
 	}
-	values, err := util.ParseEnvFile(projectEnv)
+	if err != nil {
+		logx.Warnf("Ignoring project .env: %v", err)
+		return nil
+	}
+	defer func() { _ = file.Close() }()
+	values, err := util.ParseEnvAssignments(file)
 	if err != nil {
 		logx.Warnf("Failed to read .env file: %v", err)
 		return nil
 	}
-	kept, dropped := model.FilterReservedEnv(values)
+	kept, dropped := model.FilterReservedEnv(values, proxyOrTLSTrustEnvKey)
 	warnReservedEnvKeys("project .env", dropped)
 	return kept
+}
+
+// proxyOrTLSTrustEnvKey reports whether key, in upper or lower case, names a
+// proxy setting or a TLS trust path. The project .env is repository content
+// and does not choose the session's proxy or the certificates it trusts,
+// whether or not the gateway runs: the user passes these from the host
+// environment or a secrets file.
+func proxyOrTLSTrustEnvKey(key string) bool {
+	switch strings.ToUpper(key) {
+	case "HTTP_PROXY", "HTTPS_PROXY", "FTP_PROXY", "ALL_PROXY", "NO_PROXY",
+		"SSL_CERT_FILE", "SSL_CERT_DIR", "REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE",
+		"NODE_EXTRA_CA_CERTS", "GIT_SSL_CAINFO":
+		return true
+	}
+	return false
 }
 
 func warnReservedEnvKeys(source string, keys []string) {

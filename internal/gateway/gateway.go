@@ -549,7 +549,10 @@ func Start(ctx context.Context, cfg StartConfig) (StartResult, error) {
 			"net.ipv4.conf.all.route_localnet": "1",
 		}
 	}
-	binds, remainingMounts := docker.SplitMountsForSELinux(mounts)
+	binds, remainingMounts, err := docker.SplitMountsForSELinux(mounts)
+	if err != nil {
+		return empty, err
+	}
 	hostConfig := &docker.HostConfig{
 		// Keep even an immediately exited gateway until its startup logs are read.
 		// Failed starts and StopContainer remove it explicitly by ID.

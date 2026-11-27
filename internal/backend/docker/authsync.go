@@ -177,7 +177,10 @@ func (b *Backend) syncSharedAuthStores(ctx context.Context, helperImage string, 
 	}
 
 	cmd := sharedAuthSyncCommand(b.reconcileScript, tool, validated, b.chownSpec(), "/config", "/auth", placeholders...)
-	hostConfig := sharedAuthSyncHostConfig(configDir, authDir, util.IsSELinuxEnforcing())
+	hostConfig, err := sharedAuthSyncHostConfig(configDir, authDir, util.IsSELinuxEnforcing())
+	if err != nil {
+		return err
+	}
 	applyHostUserNamespace(hostConfig)
 
 	return hoststore.WithLock(b.opts.Host.Home, authDir, func() error {
@@ -230,7 +233,7 @@ func (b *Backend) authSyncHelperUser() string {
 // command. Bind mounts are relabeled the same way session-container mounts are
 // when SELinux is enforcing; without the relabel the helper cannot read the
 // stores ("Permission denied").
-func sharedAuthSyncHostConfig(configDir string, authDir string, selinuxEnforcing bool) *dockercmd.HostConfig {
+func sharedAuthSyncHostConfig(configDir string, authDir string, selinuxEnforcing bool) (*dockercmd.HostConfig, error) {
 	hostConfig := &dockercmd.HostConfig{
 		AutoRemove: true,
 		Mounts: []dockercmd.Mount{
@@ -247,8 +250,10 @@ func sharedAuthSyncHostConfig(configDir string, authDir string, selinuxEnforcing
 			},
 		},
 	}
-	applySELinuxMounts(hostConfig, selinuxEnforcing)
-	return hostConfig
+	if err := applySELinuxMounts(hostConfig, selinuxEnforcing); err != nil {
+		return nil, err
+	}
+	return hostConfig, nil
 }
 
 // sharedAuthSyncCommand assembles the helper container's shell command: the

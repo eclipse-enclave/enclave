@@ -40,3 +40,14 @@ func TestFilterReservedEnv(t *testing.T) {
 		t.Errorf("dropped = %v, want %v", dropped, want)
 	}
 }
+
+func TestFilterReservedEnvAlsoReserved(t *testing.T) {
+	lower := func(key string) bool { return key == "extra" }
+	kept, dropped := FilterReservedEnv([]string{"extra=1", "TOOL=x", "EXTRA=kept"}, lower)
+	if want := []string{"EXTRA=kept"}; !reflect.DeepEqual(kept, want) {
+		t.Errorf("kept = %v, want %v", kept, want)
+	}
+	if want := []string{"extra", "TOOL"}; !reflect.DeepEqual(dropped, want) {
+		t.Errorf("dropped = %v, want %v", dropped, want)
+	}
+}

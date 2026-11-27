@@ -1142,7 +1142,10 @@ func probeToolUpdateFingerprint(paths model.Paths, buildCfg buildConfig, tool st
 		Target:   containerToolDir,
 		ReadOnly: true,
 	}}
-	binds, remaining := docker.SplitMountsForSELinux(mounts)
+	binds, remaining, err := docker.SplitMountsForSELinux(mounts)
+	if err != nil {
+		return "", false, err
+	}
 	output, err := docker.RunCapture(context.Background(), &docker.ContainerConfig{
 		Image:      buildCfg.ImageName,
 		User:       model.ContainerUser,

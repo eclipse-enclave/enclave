@@ -136,6 +136,25 @@ func TestOAuthPortValidateRunDetectsPortInUse(t *testing.T) {
 	}
 }
 
+func TestOAuthPortValidateRunAcceptsSkippedHint(t *testing.T) {
+	ctx := oauthPortRunContext("1455", "")
+	ctx.Run.Ports = nil
+	if err := OAuthPortValidateRun(ctx); err == nil || !strings.Contains(err.Error(), "to be mapped") {
+		t.Fatalf("expected an error for the missing mapping, got %v", err)
+	}
+
+	ctx.SkippedPortHints = []string{"1455"}
+	if err := OAuthPortValidateRun(ctx); err != nil {
+		t.Fatalf("expected a hint skipped for a port in use to pass, got %v", err)
+	}
+
+	ctx.Run.Ports = []string{"1455:3000"}
+	ctx.SkippedPortHints = nil
+	if err := OAuthPortValidateRun(ctx); err == nil || !strings.Contains(err.Error(), "mapped to container port") {
+		t.Fatalf("expected an error for the conflicting user mapping, got %v", err)
+	}
+}
+
 func TestOAuthPortValidateRunReportsUnusableAddress(t *testing.T) {
 	// 192.0.2.1 is reserved for documentation, so no host has it.
 	err := OAuthPortValidateRun(oauthPortRunContext("1455", "192.0.2.1:1455:1455"))

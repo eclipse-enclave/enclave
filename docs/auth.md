@@ -84,6 +84,15 @@ isolated credentials without this coordination.
 | Pi (ChatGPT/Codex OAuth) | port 1455 | Automatic when `auth.json` has no `openai-codex` entry; add `-p 1455` to log in again |
 | Pi (Anthropic OAuth) | port 53692 | Not automatic; add `-p 53692` |
 
+Only one session at a time can publish a host port, so an automatic mapping is
+best effort. While the port is in use, by another session or by any other
+program, a session starts without the mapping and names the port in a message.
+A browser login that calls back to the port cannot complete in that session:
+stop the session that holds the port (`enclave ps --json` lists the ports of
+each session) and start again, or use a login of the tool that needs no
+callback port, such as a device code login. A port mapped with `-p` is never
+skipped; the session fails to start while that port is in use.
+
 For OpenCode, log in from the CLI rather than `/connect` in the TUI, select
 `ChatGPT Pro/Plus (browser)`, and open the printed URL in the host browser:
 

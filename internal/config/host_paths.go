@@ -47,6 +47,14 @@ func AcquireImageBuildLock(home string, image string) (release func(), err error
 	})
 }
 
+// HostPortHintLockPath is the lock file that serializes the automatic mapping
+// of one host port across enclave sessions of all projects and tools. The
+// port is taken from an extension's spec as it is, so the name carries its
+// hash.
+func HostPortHintLockPath(home string, port string) string {
+	return HostLockPath(home, "port-hint-"+util.HashString(port)+".lock")
+}
+
 func HostBuildDir(home string) string {
 	return filepath.Join(hostCacheRoot(home), "build")
 }

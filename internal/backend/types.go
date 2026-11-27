@@ -124,6 +124,11 @@ type StoreKey struct {
 	Suffix      string
 }
 
+// EnvStoreKey identifies the persisted-env store of one tool in one project.
+func EnvStoreKey(tool string, projectHash string) StoreKey {
+	return StoreKey{Owner: tool, ProjectHash: projectHash}
+}
+
 type PersistentStore struct {
 	Kind          StoreKind
 	Key           StoreKey

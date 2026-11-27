@@ -41,6 +41,7 @@ var BuiltinNames = []string{
 	"resume",
 	"review-target",
 	"run",
+	"secrets",
 	"self-update",
 	"shell",
 	"ssh-init",

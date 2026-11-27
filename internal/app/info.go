@@ -47,7 +47,7 @@ func runInfo(ctx *AppContext, opts model.Options) int {
 		projectOverridesDir = config.HostProjectOverridesDir(home, project.Hash)
 		projectStateDir = config.HostProjectDir(home, project.Hash)
 		configStoreDir = hoststore.Dir(home, backend.StoreKey{Owner: opts.Tool, ProjectHash: project.Hash}, backend.StoreKindConfig)
-		envStoreDir = hoststore.Dir(home, backend.StoreKey{Owner: opts.Tool, ProjectHash: project.Hash}, backend.StoreKindEnv)
+		envStoreDir = hoststore.Dir(home, backend.EnvStoreKey(opts.Tool, project.Hash), backend.StoreKindEnv)
 		authStoreDir = hoststore.Dir(home, backend.StoreKey{Owner: opts.Tool, Suffix: authName}, backend.StoreKindAuth)
 	}
 

@@ -362,7 +362,7 @@ func (m authManager) persistEnvToStore(stores storeSet, persistedEnv map[string]
 
 // envStoreKey identifies the persisted-env store for this tool + project.
 func (m authManager) envStoreKey() backend.StoreKey {
-	return envStoreKey(m.profile.Name, m.project.Hash)
+	return backend.EnvStoreKey(m.profile.Name, m.project.Hash)
 }
 
 func (m authManager) storage() backend.StoreManager {

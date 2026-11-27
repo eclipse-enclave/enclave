@@ -97,15 +97,31 @@ func LoadDefaults(projectDir string) (global Defaults, project Defaults, warning
 		return Defaults{}, Defaults{}, nil, err
 	}
 
-	projectPath := HostProjectConfigJSONPath(home, proj.Hash)
-	projectDefaults, projectWarns, err := readDefaults(projectPath)
+	projectDefaults, projectWarns, err := loadProjectDefaults(home, proj.Hash)
 	if err != nil {
 		return Defaults{}, Defaults{}, nil, err
 	}
-	warnings = append(warnings, withFileLayer(projectWarns, warningLayerProject)...)
-	warnings = append(warnings, withFileLayer(stripGlobalOnlyKeys(projectPath, &projectDefaults), warningLayerProject)...)
+	warnings = append(warnings, projectWarns...)
 
 	return globalDefaults, projectDefaults, warnings, nil
+}
+
+// LoadProjectDefaults reads the config of the project with hash, as
+// LoadDefaults does for the current project. A missing file yields no
+// defaults.
+func LoadProjectDefaults(home string, projectHash string) (Defaults, error) {
+	defaults, _, err := loadProjectDefaults(home, projectHash)
+	return defaults, err
+}
+
+func loadProjectDefaults(home string, projectHash string) (Defaults, []Warning, error) {
+	path := HostProjectConfigJSONPath(home, projectHash)
+	defaults, warnings, err := readDefaults(path)
+	if err != nil {
+		return Defaults{}, nil, err
+	}
+	warnings = append(warnings, stripGlobalOnlyKeys(path, &defaults)...)
+	return defaults, withFileLayer(warnings, warningLayerProject), nil
 }
 
 func applyScalarDefaults(opts model.Options, defaults Defaults, source model.OptionSource, sources *model.OptionSources) model.Options {

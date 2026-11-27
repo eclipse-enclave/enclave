@@ -24,6 +24,26 @@ func LoadProfile(paths model.Paths, name string) (model.Profile, error) {
 	return loadSpecProfile(paths, name)
 }
 
+// LoadAllProfiles loads every tool profile. A tool whose spec fails to load is
+// left out of profiles and reported in failed, so one broken extension does
+// not hide the others; names lists every tool, loaded or not.
+func LoadAllProfiles(paths model.Paths) (profiles []model.Profile, names []string, failed map[string]error, err error) {
+	names, err = ListProfiles(paths)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	failed = map[string]error{}
+	for _, name := range names {
+		profile, err := LoadProfile(paths, name)
+		if err != nil {
+			failed[name] = err
+			continue
+		}
+		profiles = append(profiles, profile)
+	}
+	return profiles, names, failed, nil
+}
+
 func ListProfiles(paths model.Paths) ([]string, error) {
 	// ListTools already returns only tool extensions that have a
 	// spec.yaml/spec.json, and every sandbox spec synthesizes a profile via

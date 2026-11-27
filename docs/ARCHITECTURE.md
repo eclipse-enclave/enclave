@@ -122,6 +122,7 @@ The network request flow, restricted and unrestricted, has separate
 | [`cleanup.go`](../internal/app/cleanup.go) | `enclave cleanup` |
 | [`ssh.go`](../internal/app/ssh.go) | `enclave ssh-init`; moves a legacy cache-root SSH directory to the config root |
 | [`tools.go`](../internal/app/tools.go) | Lists tool profiles |
+| [`secrets_cmd.go`](../internal/app/secrets_cmd.go), [`internal/apikeys/`](../internal/apikeys/) | `enclave secrets`; groups the API keys tools declare by service ([Managing API keys](auth.md#managing-api-keys)) |
 | [`network_cmd.go`](../internal/app/network_cmd.go), [`network_log_cmd.go`](../internal/app/network_log_cmd.go) | `enclave network` subcommands and `network log` |
 | [`internal/cli/network_command.go`](../internal/cli/network_command.go) | Cobra tree for `network` |
 | [`internal/extinstall/`](../internal/extinstall/) | `enclave tools|features|commands add|update|remove` |
@@ -147,6 +148,8 @@ The network request flow, restricted and unrestricted, has separate
 | [`internal/mounts/mounts.go`](../internal/mounts/mounts.go) | Mount path validation, worktrees, port mapping |
 | [`internal/mounts/sensitive.go`](../internal/mounts/sensitive.go) | The sensitive-path rule ([mounts.md](mounts.md#sensitive-mounts)) |
 | [`internal/auth/auth.go`](../internal/auth/auth.go) | Layered secrets, auth file copies, Claude-specific config |
+| [`internal/auth/secret_resolve.go`](../internal/auth/secret_resolve.go) | `ResolveSecret`: picks a declared secret's value and source; shared by sessions and `secrets list` |
+| [`internal/auth/envfile.go`](../internal/auth/envfile.go) | Locked, atomic edits of secrets files for `enclave secrets` |
 | [`internal/auth/secret_injection.go`](../internal/auth/secret_injection.go) | `PlaceholderResolver`: random `ENCLAVE_SECRET_*` placeholders |
 | [`internal/gateway/gateway.go`](../internal/gateway/gateway.go) | Sidecar container and network; keeps logs until explicit removal, removes by immutable ID |
 | [`internal/gateway/bundle/`](../internal/gateway/bundle/bundle.go) | Host-managed bundles (`dnsmasq.conf`, `domains.txt`, `meta.json`) for apply and reload |

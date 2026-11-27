@@ -151,6 +151,71 @@ These env credentials use gateway placeholders under restricted networking:
   targets are never removed. A shared store that already holds a placeholder
   needs a new login or `--reset-auth`.
 
+## Managing API keys
+
+`enclave secrets` writes the [secrets files](#secrets-files) for you, keyed by
+the service the key unlocks. A key reaches every tool that declares it, and
+only those:
+
+```bash
+enclave secrets set anthropic                 # Every tool that uses Anthropic
+enclave secrets set anthropic --tool claude   # Only Claude
+enclave secrets set openai --project          # Every tool, this project only
+op read op://dev/anthropic | enclave secrets set anthropic   # From stdin
+enclave secrets list                          # Masked, with the source per tool
+enclave secrets unset anthropic --project
+```
+
+| Flags | File (layer) |
+|-------|--------------|
+| none | `global.env` (1) |
+| `--tool <tool>` | `global/<tool>.env` (2) |
+| `--project` | `projects/<hash>.env` (3) |
+| `--tool <tool> --project` | `projects/<hash>/<tool>.env` (4) |
+
+| Key | Variable | Tools |
+|-----|----------|-------|
+| `anthropic` | `ANTHROPIC_API_KEY` | Claude, OpenCode, Pi, Theia, Theia Next |
+| `openai` | `OPENAI_API_KEY` (Codex also reads `CODEX_API_KEY`) | Codex, OpenCode, Pi, Theia, Theia Next |
+| `gemini` | `GEMINI_API_KEY` | OpenCode, Pi, Theia, Theia Next |
+| `mistral` | `MISTRAL_API_KEY` | Pi |
+| `copilot-github` (or `copilot`) | `COPILOT_GITHUB_TOKEN` | Copilot |
+
+- `set` prompts without echo, or reads the key from stdin, so it never appears
+  on the command line or in shell history. It drops the key's other aliases
+  from the file it writes, and a shared file also gets the variable of any tool
+  that does not read the main one. `set` and `unset` leave alone, with a
+  warning, any variable another declared credential also uses, and refuse to
+  edit a shared file while a tool extension fails to load.
+- A symlinked secrets file is edited at its target; emptying it leaves the
+  target in place so the link keeps working.
+- `set` warns when something keeps a tool from using the new value: a different
+  value from your shell (which wins over every secrets file), a higher layer,
+  or a file source read first; the tool's `secrets_scope`; or a prefix that
+  gateway protection would reject under restricted networking (see
+  [Env-only bearer tokens](#env-only-bearer-tokens)). Checks use the options
+  each tool's sessions would run with; `--secrets-scope` overrides the scope.
+- `unset` also removes saved copies of the removed value from the
+  [env store](#api-keys) of each affected tool in every project (only the
+  current one with `--project`), so they do not keep reaching the agent. It
+  skips projects whose own secrets files, read with that project's settings,
+  still hold that value. Saved copies
+  of other values, for example from your shell, stay; `--reset-auth` clears
+  those. It then names the tools that still get the key elsewhere.
+- `list [key] [--tool <tool>]` resolves each key the way a session in this
+  project would and shows the source: `shell`, `project/<tool>`, `project`,
+  `global/<tool>`, `global`, `saved` (the env store), `file <path>` for a
+  declared file source, or `error` when aliases disagree in one layer, which
+  fails the session too. NOTE flags a key a session would still not use:
+  withheld by `no_api_key` or by `ephemeral` without `pass_api_key`, or refused
+  by gateway protection. A broken extension makes `list` exit 1 only when it
+  lists every key of every tool.
+- A key also matches by provider name, credential id, vendor, or variable, so
+  `google`, `copilot`, or `ANTHROPIC_API_KEY` work too. A vendor shared by
+  several keys is rejected as ambiguous.
+- Only API keys are managed. OAuth tokens such as `CLAUDE_CODE_OAUTH_TOKEN`
+  come from a login or go into a secrets file directly.
+
 ## Secrets files
 
 Layered `.env` files supply values for declared env secrets and `--pass-env`.
@@ -160,28 +225,33 @@ They are never copied into the container as files.
 |-------|------|-------|
 | 1 | `~/.local/state/enclave/secrets/global.env` | All agents, all projects |
 | 2 | `~/.local/state/enclave/secrets/global/<tool>.env` | One agent, all projects |
-| 3 | `~/.local/state/enclave/secrets/projects/<hash>/<tool>.env` | One agent, one project |
+| 3 | `~/.local/state/enclave/secrets/projects/<hash>.env` | All agents, one project |
+| 4 | `~/.local/state/enclave/secrets/projects/<hash>/<tool>.env` | One agent, one project |
 
 Later layers override earlier ones. The format is standard `.env` (`KEY=VALUE`,
-`#` comments, optional `export`, single or double quotes). A value in
-`global.env` is enough as long as an active extension declares the secret.
+`#` comments, optional `export`, single or double quotes). A session takes only
+the secrets its tool and enabled features declare, so a key in a shared layer
+does not reach other tools.
 
-`--secrets-scope` selects the per-tool layers: `both` (default, 1–3),
-`global` (1–2), or `project` (1 and 3). Layer 1 is always read.
+`--secrets-scope` selects the layers: `both` (default, 1–4), `global` (1–2), or
+`project` (1, 3, and 4). Layer 1 is always read.
+
+`enclave secrets` manages these files for API keys; see
+[Managing API keys](#managing-api-keys). Edit them directly for other secrets:
 
 ```bash
-# All runs of the tool can use this credential
-echo 'ANTHROPIC_API_KEY=sk-ant-readonly...' > ~/.local/state/enclave/secrets/global.env
+# Every tool that declares GH_TOKEN, in every project
+echo 'GH_TOKEN=github_pat_...' >> ~/.local/state/enclave/secrets/global.env
 
-# This project overrides it for one repository
-echo 'ANTHROPIC_API_KEY=sk-ant-project...' > ~/.local/state/enclave/secrets/projects/<hash>/claude.env
+# Overrides it for one tool in one repository
+echo 'GH_TOKEN=github_pat_...' > ~/.local/state/enclave/secrets/projects/<hash>/claude.env
 ```
 
 ### Env aliases
 
 A declared secret can list several aliases for one credential, such as
 `GH_TOKEN` and `GITHUB_TOKEN`. Each alias is looked up on its own: host
-environment, then secrets layers 3 to 1, then the env store. The alias found in
+environment, then secrets layers 4 to 1, then the env store. The alias found in
 the highest layer wins, and its value is injected into every alias and written
 back to the env store, so rotating one alias is enough and a stale stored value
 is replaced after one run. Two aliases with different values in the winning

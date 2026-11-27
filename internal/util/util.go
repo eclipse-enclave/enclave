@@ -211,26 +211,33 @@ func ParseEnvPairs(r io.Reader) ([]EnvPair, error) {
 	}
 	pairs := []EnvPair{}
 	for _, line := range strings.Split(string(data), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
+		if pair, ok := ParseEnvLine(line); ok {
+			pairs = append(pairs, pair)
 		}
-		if strings.HasPrefix(line, "export ") {
-			line = strings.TrimSpace(strings.TrimPrefix(line, "export "))
-		}
-		key, value, ok := strings.Cut(line, "=")
-		if !ok {
-			continue
-		}
-		key = strings.TrimSpace(key)
-		if key == "" {
-			continue
-		}
-		value = strings.TrimSpace(value)
-		value = strings.Trim(value, "\"'")
-		pairs = append(pairs, EnvPair{Key: key, Value: value})
 	}
 	return pairs, nil
+}
+
+// ParseEnvLine parses one .env line. It reports false for blank lines,
+// comments, and lines that assign no key.
+func ParseEnvLine(line string) (EnvPair, bool) {
+	line = strings.TrimSpace(line)
+	if line == "" || strings.HasPrefix(line, "#") {
+		return EnvPair{}, false
+	}
+	if strings.HasPrefix(line, "export ") {
+		line = strings.TrimSpace(strings.TrimPrefix(line, "export "))
+	}
+	key, value, ok := strings.Cut(line, "=")
+	if !ok {
+		return EnvPair{}, false
+	}
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return EnvPair{}, false
+	}
+	value = strings.Trim(strings.TrimSpace(value), "\"'")
+	return EnvPair{Key: key, Value: value}, true
 }
 
 func ParseEnv(r io.Reader) (map[string]string, error) {
